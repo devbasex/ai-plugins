@@ -1,0 +1,10 @@
+{
+  "name": "mcp-serena",
+  "version": "1.0.0",
+  "description": "Serena MCP server for semantic code intelligence (symbol search, reference search, refactoring)",
+  "author": {
+    "name": "takemi-ohama",
+    "url": "https://github.com/takemi-ohama"
+  },
+  "keywords": ["mcp", "serena", "lsp", "symbol-search", "refactoring", "code-intelligence"]
+}

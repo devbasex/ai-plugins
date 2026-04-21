@@ -1,0 +1,44 @@
+{
+  "name": "ndf",
+  "version": "3.1.0",
+  "description": "Integrated plugin with specialized agents, workflow skills, and Codex MCP. Serena MCP is now a separate plugin (mcp-serena).",
+  "author": {
+    "name": "takemi-ohama",
+    "url": "https://github.com/takemi-ohama"
+  },
+  "keywords": ["mcp", "codex", "workflow", "slack", "notifications", "agents", "skills", "director", "orchestrator"],
+  "agents": [
+    "./agents/director.md",
+    "./agents/data-analyst.md",
+    "./agents/corder.md",
+    "./agents/researcher.md",
+    "./agents/scanner.md",
+    "./agents/qa.md"
+  ],
+  "skills": [
+    "./skills/pr",
+    "./skills/pr-tests",
+    "./skills/fix",
+    "./skills/review",
+    "./skills/merged",
+    "./skills/clean",
+    "./skills/cleanup",
+    "./skills/ndf-policies",
+    "./skills/data-analyst-sql-optimization",
+    "./skills/data-analyst-export",
+    "./skills/corder-code-templates",
+    "./skills/corder-test-generation",
+    "./skills/researcher-report-templates",
+    "./skills/scanner-pdf-analysis",
+    "./skills/scanner-excel-extraction",
+    "./skills/qa-security-scan",
+    "./skills/markdown-writing",
+    "./skills/python-execution",
+    "./skills/docker-container-access",
+    "./skills/skill-development",
+    "./skills/deepwiki-transfer",
+    "./skills/knowledge-reorg",
+    "./skills/git-gh-operations",
+    "./skills/google-auth"
+  ]
+}

@@ -1,0 +1,8 @@
+#!/bin/bash
+CLAUDE_CODE_USE_BEDROCK=1 \
+AWS_REGION=us-west-2 \
+ANTHROPIC_MODEL=us.anthropic.claude-sonnet-4-5-20250929-v1:0 \
+ANTHROPIC_SMALL_FAST_MODEL=us.anthropic.claude-haiku-4-5-20251001-v1:0 \
+claude --dangerously-skip-permissions #--resume
+
+

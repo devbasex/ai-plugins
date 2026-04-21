@@ -1,0 +1,39 @@
+# Environment variables
+.env
+.env.local
+
+# Credentials
+*.pem
+*.key
+credentials.json
+service-account-key.json
+dbhub.toml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Temporary files
+*.tmp
+*.bak
+
+# Plugin-generated context files
+# (none currently)
+
+# Serena MCP runtime data
+${SERENA_HOME}/
+.serena/logs/
+.serena/cache/

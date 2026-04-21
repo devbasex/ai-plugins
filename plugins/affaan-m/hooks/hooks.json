@@ -1,0 +1,66 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/context-monitor.js\"",
+            "description": "コンテキスト使用率を監視し、60%を超えたら警告を表示"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/detect-package-manager.js\"",
+            "description": "プロジェクトのパッケージマネージャーを自動検出（npm/pnpm/yarn/bun）"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/auto-format.js\"",
+            "description": "コード編集後に自動フォーマット（Prettier/ESLint）を実行"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/detect-console-log.js\"",
+            "description": "console.log や debugger の使用を検出して警告"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/typescript-check.js\"",
+            "description": "TypeScript型チェックを自動実行"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/secret-scan.js\"",
+            "description": "ファイル変更後にシークレット混入をチェック"
+          }
+        ]
+      }
+    ]
+  }
+}

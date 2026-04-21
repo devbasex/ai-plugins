@@ -1,0 +1,30 @@
+{
+  "description": "NDF Plugin hooks: CLAUDE.ndf.md detection and notifications",
+  "hooks": {
+    "SessionStart": [
+      {
+        "description": "Detect deprecated CLAUDE.ndf.md and warn user",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ -f \"${workspaceFolder}/CLAUDE.ndf.md\" ] || [ -f \"$HOME/.claude/CLAUDE.ndf.md\" ]; then echo '[NDF] CLAUDE.ndf.md が検出されました。廃止済みです。/ndf:cleanup を実行して削除してください。'; fi",
+            "description": "Warn about deprecated CLAUDE.ndf.md",
+            "continueOnError": true,
+            "suppressOutput": false
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/slack-notify.js session_end",
+            "description": "Send Slack notification when Claude Code exits"
+          }
+        ]
+      }
+    ]
+  }
+}

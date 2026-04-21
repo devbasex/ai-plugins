@@ -1,0 +1,10 @@
+{
+  "name": "mcp-notion",
+  "version": "1.0.0",
+  "description": "Notion MCP server for note management and knowledge base operations",
+  "author": {
+    "name": "takemi-ohama",
+    "url": "https://github.com/takemi-ohama"
+  },
+  "keywords": ["mcp", "notion", "notes", "knowledge-base", "documentation"]
+}
