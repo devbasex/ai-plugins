@@ -230,10 +230,19 @@ def _pid_cmdline_matches(pid: int, expected: str) -> Optional[bool]:
 def _scan_patterns(
     path: pathlib.Path, patterns: list[re.Pattern[str]]
 ) -> Optional[str]:
-    """err.log を末尾 200KB だけ読み、`patterns` の最初のヒット行を返す。
+    """err.log を末尾 200KB だけ読み、`patterns` の最初の **non-benign** ヒット行を返す。
 
-    BENIGN フィルタは前後 40 文字の文脈で適用し、誤検知 (markdown 引用 / diff body /
-    gemini の config validation 警告) を除外する。
+    BENIGN フィルタは **マッチ行そのもの** に対して適用し、誤検知 (markdown 引用 /
+    diff body / gemini の config validation 警告) を除外する。
+
+    重要 1: `pat.search()` ではなく `pat.finditer()` を使い、benign で除外された場合も
+    後続の一致を継続して走査する。これにより benign な先行ヒットの後ろにある本物の
+    エラーを見逃さない。
+
+    重要 2: benign 判定は「マッチ行」だけを対象にする。以前は前後 40 文字の文脈窓を
+    使っていたが、それだと benign 行が直前にあるだけで後続の本物エラーを誤って benign
+    扱いしてしまった (例: `Error in: mcpServers.serena\\n...\\nTraceback ...` で
+    Traceback が誤抑制された)。
     """
     if not path.exists():
         return None
@@ -247,18 +256,17 @@ def _scan_patterns(
         return None
 
     for pat in patterns:
-        m = pat.search(data)
-        if not m:
-            continue
-        start = max(0, m.start() - 40)
-        end = min(len(data), m.end() + 40)
-        context = data[start:end]
-        if any(b.search(context) for b in EARLY_ERROR_BENIGN):
-            continue
-        line_start = data.rfind("\n", 0, m.start()) + 1
-        line_end = data.find("\n", m.end())
-        line_end = line_end if line_end != -1 else len(data)
-        return data[line_start:line_end].strip()
+        for m in pat.finditer(data):
+            line_start = data.rfind("\n", 0, m.start()) + 1
+            line_end = data.find("\n", m.end())
+            line_end = line_end if line_end != -1 else len(data)
+            line = data[line_start:line_end]
+            # benign パターンはマッチ行そのものに当てる。markdown 引用や
+            # `Error in: mcpServers.X` のような行単位パターンは「その行」だけを
+            # 評価すれば判定可能で、文脈窓を広げると誤判定の原因になる。
+            if any(b.search(line) for b in EARLY_ERROR_BENIGN):
+                continue
+            return line.strip()
     return None
 
 

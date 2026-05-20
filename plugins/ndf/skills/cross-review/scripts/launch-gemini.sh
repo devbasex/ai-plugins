@@ -106,6 +106,20 @@ cd "$WORKTREE"
 # 削除した settings.json を起動時のみ差し込み、gemini が読み終わったら復元する。
 SETTINGS=$WORKTREE/.gemini/settings.json
 SETTINGS_BACKUP=
+
+# trap で EXIT / INT / TERM / HUP のいずれでも必ず settings.json を復元する。
+# sleep 2 中や復元前に Ctrl-C / SIGTERM / シェル終了で止まっても、sanitize 済み
+# settings.json が worktree に残らないようにするため。冪等に書いてあるので
+# 多重実行されても安全。
+restore_settings() {
+  # SETTINGS_BACKUP が未設定 or バックアップ不在なら何もしない
+  if [ -n "${SETTINGS_BACKUP:-}" ] && [ -f "$SETTINGS_BACKUP" ]; then
+    mv -f "$SETTINGS_BACKUP" "$SETTINGS" 2>/dev/null || true
+    SETTINGS_BACKUP=
+  fi
+}
+trap restore_settings EXIT INT TERM HUP
+
 if [ -f "$SETTINGS" ] && command -v jq >/dev/null 2>&1; then
   SETTINGS_BACKUP=$TMP_DIR/gemini-review-pr$STATE_PR-settings-backup.json
   cp "$SETTINGS" "$SETTINGS_BACKUP"
@@ -130,9 +144,10 @@ disown
 
 # gemini は起動時に 1 度 settings.json を読む。読み込み完了を待ってから元の
 # ファイルを復元する (worktree を dirty なままにしないため)。
+# sleep 中に signal が来ても trap restore_settings が必ず復元するため安全。
 if [ -n "$SETTINGS_BACKUP" ] && [ -f "$SETTINGS_BACKUP" ]; then
   sleep 2
-  mv "$SETTINGS_BACKUP" "$SETTINGS"
+  restore_settings
 fi
 
 echo "🚀 gemini launched (pid=$GEMINI_PID)" >&2
