@@ -97,11 +97,42 @@ $EXISTING_INLINE
 EOF
 
 cd "$WORKTREE"
+
+# gemini-cli 最新版は mcpServers エントリの `disabled` キーを Unrecognized 扱いし、
+# 起動時に `Error in: mcpServers.<name>` 警告を err.log に出す。文字列としては
+# `Error: ...` ではなく `Error in: ...` だが、monitor.py 旧版が誤検知して
+# プロセスを kill する原因になっていた (REPORT01 参照)。
+# launcher 側でも sanitize して警告自体を抑制する: `disabled` キーを再帰的に
+# 削除した settings.json を起動時のみ差し込み、gemini が読み終わったら復元する。
+SETTINGS=$WORKTREE/.gemini/settings.json
+SETTINGS_BACKUP=
+if [ -f "$SETTINGS" ] && command -v jq >/dev/null 2>&1; then
+  SETTINGS_BACKUP=$TMP_DIR/gemini-review-pr$STATE_PR-settings-backup.json
+  cp "$SETTINGS" "$SETTINGS_BACKUP"
+  SANITIZED=$TMP_DIR/gemini-review-pr$STATE_PR-settings-sanitized.json
+  if jq 'walk(if type == "object" then del(.disabled) else . end)' "$SETTINGS_BACKUP" > "$SANITIZED" 2>/dev/null; then
+    cp "$SANITIZED" "$SETTINGS"
+  else
+    # jq が失敗したら sanitize を諦め、バックアップも破棄して元のまま起動
+    rm -f "$SETTINGS_BACKUP"
+    SETTINGS_BACKUP=
+  fi
+fi
+
 # ⚠ --skip-trust と GEMINI_CLI_TRUST_WORKSPACE=true は両方必須
 GEMINI_CLI_TRUST_WORKSPACE=true nohup gemini --yolo --skip-trust --output-format text \
   -p "$(cat "$PROMPT")" \
   > $TMP_DIR/gemini-review-pr$STATE_PR-stdout.log \
   2> $TMP_DIR/gemini-review-pr$STATE_PR-err.log &
-echo $! > $TMP_DIR/gemini-review-pr$STATE_PR.pid
+GEMINI_PID=$!
+echo $GEMINI_PID > $TMP_DIR/gemini-review-pr$STATE_PR.pid
 disown
-echo "🚀 gemini launched (pid=$(cat $TMP_DIR/gemini-review-pr$STATE_PR.pid))" >&2
+
+# gemini は起動時に 1 度 settings.json を読む。読み込み完了を待ってから元の
+# ファイルを復元する (worktree を dirty なままにしないため)。
+if [ -n "$SETTINGS_BACKUP" ] && [ -f "$SETTINGS_BACKUP" ]; then
+  sleep 2
+  mv "$SETTINGS_BACKUP" "$SETTINGS"
+fi
+
+echo "🚀 gemini launched (pid=$GEMINI_PID)" >&2
