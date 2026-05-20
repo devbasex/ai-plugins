@@ -157,4 +157,4 @@ MIT License
 ## サポート
 
 問題が発生した場合は、GitHubリポジトリでissueを作成してください：
-https://github.com/takemi-ohama/ai-plugins/issues
+https://github.com/devbasex/ai-plugins/issues

@@ -9,7 +9,7 @@
 - **名前**: ndf
 - **現在バージョン**: 4.4.0
 - **種類**: 統合プラグイン（Skills + Agents + Hooks / v4.0.0 で Codex MCP 廃止）
-- **リポジトリ**: https://github.com/takemi-ohama/ai-plugins
+- **リポジトリ**: https://github.com/devbasex/ai-plugins
 
 > **Note (v3.0.0)**: Serena MCPは`mcp-serena`プラグインに分離。memory系スキルは廃止。CLAUDE.ndf.md注入は廃止。
 
