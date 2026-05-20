@@ -1,14 +1,7 @@
 ---
 name: python-execution
-description: |
-  Python実行環境を自動判定し、適切なコマンドでPythonコードを実行します。uv、venv、システムPythonを自動検出。
-
-  このSkillは以下を提供します:
-  - プロジェクト環境の自動検出（uv/venv/システムPython）
-  - 実行コマンドの自動選択
-  - uv環境のセットアップガイド
-
-  Triggers: "python", "uv", "スクリプト", "python環境"
+description: "Python 実行環境を自動判定し、適切なコマンドで Python コードを実行する。uv / venv / システム Python を自動検出し、uv 環境のセットアップガイドも含む。"
+when_to_use: "Python スクリプトを実行 / セットアップするとき。Triggers: 'python', 'uv', 'スクリプト', 'python環境'"
 allowed-tools:
   - Read
   - Bash

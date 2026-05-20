@@ -1,5 +1,6 @@
 ---
 name: director
+model: opus
 description: |
   Claude Code機能を活用したタスク統括・設計立案の指揮者エージェント。
   **Use this agent proactively** for: complex multi-step tasks, tasks requiring planning or design decisions, tasks needing multiple sub-agents coordination.
@@ -136,7 +137,7 @@ TodoWrite([{content: "タスク内容", status: "in_progress", activeForm: "進�
 1. ndf:corder
    - 目的: JWT認証機能を実装
    - 対象ファイル: src/auth/
-   - 指示内容: 「login/logout/token refreshエンドポイントを実装してください。セキュリティベストプラクティスに従い、Codexでレビューを実施してください。」
+   - 指示内容: 「login/logout/token refreshエンドポイントを実装してください。セキュリティベストプラクティスに従い、Codex CLI（`/ndf:codex` skill）でレビューを実施してください。」
 
 2. ndf:qa
    - 目的: セキュリティレビュー

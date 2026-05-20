@@ -4,7 +4,7 @@
 
 **Claude Codeプラグインマーケットプレイス**の開発プロジェクトです。チーム全体でClaude Codeの導入を加速するための事前設定されたプラグインを提供します。
 
-**リポジトリ**: https://github.com/devbasex/ai-plugins
+**リポジトリ**: https://github.com/takemi-ohama/ai-plugins
 
 ## ポリシー
 
@@ -62,12 +62,12 @@ ai-plugins/
 
 ## NDFプラグインについて
 
-**NDFプラグイン**は、このマーケットプレイスの主要プラグインです：
-- コアMCPサーバー（Codex CLI等）
-- スラッシュコマンド（PR作成、レビュー、修正対応、マージ、クリーンアップ等）
-- 6個の専門サブエージェント（director、data-analyst、corder、researcher、scanner、qa）
-- 23個のSkills（SQL最適化、データエクスポート、コードテンプレート、テスト生成等）
-- 自動Slack通知
+**NDFプラグイン**は、このマーケットプレイスの主要プラグインです（v4.7.0）：
+- 8個の専門サブエージェント（director、data-analyst、corder、researcher、qa、debugger、devops-engineer、code-reviewer）
+- 39個のSkills（PR/コードレビューワークフロー、AIクロスレビュー (codex/gemini)、原則・ガイドライン、issue→multi-PR ワークフロー戦略、SQL最適化、データエクスポート、skill利用統計、Codex CLI連携、Playwrightシナリオテスト、Google Drive/Chat連携 等）
+- SessionStartフック（transcript保持期間自動管理 `cleanupPeriodDays >= 90`）
+- Stopフック（AI要約生成 + 自動Slack通知）
+- 外部AI委譲は `/ndf:codex` skill と `corder` エージェント経由で Codex CLI を呼び出し（v4.0.0 で Codex MCP サーバは廃止）
 
 詳細は `plugins/ndf/README.md` および `docs/ndf-plugin-reference.md` を参照。
 

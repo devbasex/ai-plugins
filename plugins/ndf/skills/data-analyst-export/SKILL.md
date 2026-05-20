@@ -1,15 +1,7 @@
 ---
 name: data-analyst-export
-description: |
-  Export query results to various formats (CSV, JSON, Excel, Markdown tables) with proper formatting and headers. Use when saving analysis results to files.
-
-  This skill provides data export utilities for multiple formats:
-  - CSV: Comma-separated with headers, customizable delimiters
-  - JSON: Structured data with pretty-print option
-  - Excel: Multiple sheets, cell formatting
-  - Markdown: Tables for documentation
-
-  Triggers: "export data", "save results", "output CSV", "output JSON", "output Excel", "データ出力", "結果保存", "エクスポート"
+description: "Export query results to various formats (CSV, JSON, Excel, Markdown tables) with proper formatting and headers. CSV (custom delimiters), JSON (pretty-print), Excel (multi-sheet/formatting), Markdown tables for docs."
+when_to_use: "Use when saving analysis results to files. Triggers: 'export data', 'save results', 'output CSV', 'output JSON', 'output Excel', 'データ出力', '結果保存', 'エクスポート'"
 allowed-tools:
   - Write
   - Bash

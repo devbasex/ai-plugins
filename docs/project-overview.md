@@ -7,9 +7,9 @@ Claude Codeプラグインマーケットプレイス（内部用）として、
 ## リポジトリ情報
 
 - **リポジトリ名**: ai-plugins
-- **オーナー**: devbasex
+- **オーナー**: takemi-ohama
 - **ライセンス**: MIT
-- **URL**: https://github.com/devbasex/ai-plugins
+- **URL**: https://github.com/takemi-ohama/ai-plugins
 
 ## 配布コンポーネント
 
@@ -39,7 +39,7 @@ ai-plugins/
 
 ### マーケットプレイスの追加
 ```bash
-/plugin marketplace add https://github.com/devbasex/ai-plugins
+/plugin marketplace add https://github.com/takemi-ohama/ai-plugins
 ```
 
 ### プラグインのインストール

@@ -1,14 +1,15 @@
 {
-  "description": "NDF Plugin hooks: CLAUDE.ndf.md detection and notifications",
+  "description": "NDF Plugin hooks: transcript retention guard and Slack notifications",
   "hooks": {
     "SessionStart": [
       {
-        "description": "Detect deprecated CLAUDE.ndf.md and warn user",
+        "matcher": "startup",
+        "description": "Ensure ~/.claude/settings.json cleanupPeriodDays >= 90 (guarded by 7-day timestamp flag)",
         "hooks": [
           {
             "type": "command",
-            "command": "if [ -f \"${workspaceFolder}/CLAUDE.ndf.md\" ] || [ -f \"$HOME/.claude/CLAUDE.ndf.md\" ]; then echo '[NDF] CLAUDE.ndf.md が検出されました。廃止済みです。/ndf:cleanup を実行して削除してください。'; fi",
-            "description": "Warn about deprecated CLAUDE.ndf.md",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/ensure-retention.sh",
+            "description": "NDF: ensure transcript retention >= 90 days",
             "continueOnError": true,
             "suppressOutput": false
           }

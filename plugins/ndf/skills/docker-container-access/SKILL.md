@@ -1,15 +1,7 @@
 ---
 name: docker-container-access
-description: |
-  Dockerコンテナへのアクセス方法を判定し、適切な接続コマンドを提供します。DinD/DooD環境の自動検出とトラブルシューティング。
-
-  このSkillは以下を提供します:
-  - DinD/DooD環境の判定方法
-  - 環境に応じた接続方法の選択
-  - bind mountの注意点と代替手段
-  - curlやPlaywright MCPでの接続例
-
-  Triggers: "docker access", "container connect", "localhost not working", "DinD", "DooD", "Docker接続", "コンテナアクセス", "curl container"
+description: "Docker コンテナへのアクセス方法を判定し、適切な接続コマンドを提供する。DinD/DooD 環境の自動検出、bind mount の注意点と代替手段、curl / Playwright MCP での接続例を扱う。"
+when_to_use: "Docker / コンテナへのアクセス・localhost 接続不可・DinD/DooD 環境判定が必要なとき。Triggers: 'docker access', 'container connect', 'localhost not working', 'DinD', 'DooD', 'Docker接続', 'コンテナアクセス', 'curl container'"
 allowed-tools:
   - Read
   - Bash

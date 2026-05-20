@@ -6,9 +6,9 @@ Claude Code開発環境を**オールインワン**で強化する統合プラ�
 
 このプラグイン1つで、以下の**すべて**の機能を利用できます：
 
-1. **コアMCP**: 2個のMCPサーバー（Serena、Codex CLI）
-2. **Skills**: 23個（ワークフロー9個 + モデル起動型14個）
-3. **専門エージェント**: 6つの特化型AIエージェント（**director指揮者**、データ分析、コーディング、調査、ファイル読み取り、品質管理）
+1. **コアMCP**: なし (v4.0.0 で Codex MCP 廃止 / Serena MCP は `mcp-serena` プラグインに分離)
+2. **Skills**: 39個（PR/コードレビュー系ワークフロー13個 + 原則・ガイドライン8個 (issue→multi-PR 戦略含む) + データ分析/品質/環境系13個 + skill-stats + Playwright シナリオテスト + Google Drive/Chat 連携 + AI クロスレビュー (cross-review / gemini)）
+3. **専門エージェント**: 8つの特化型AIエージェント（director、data-analyst、corder、researcher、qa、debugger、devops-engineer、code-reviewer）
 4. **自動フック**: Slack通知
 
 > **Note (v2.7.0)**: commandsとskillsが統合されました。全ワークフロー（`/ndf:pr`等）はskillsとして実装されています。追加のMCP（BigQuery、Chrome DevTools、AWS Docs、DBHub、Notion）は個別プラグインとしてインストール可能です。
@@ -18,9 +18,9 @@ Claude Code開発環境を**オールインワン**で強化する統合プラ�
 ### 前提条件
 
 - Claude Code がインストール済み
-- Python 3.10以上（Serena MCP用）
+- Python 3.10以上（Serena MCP `mcp-serena` プラグイン用、別途インストール）
 - `uvx` がインストール済み（`pip install uv`）
-- Codex CLI（Codex CLI MCP用）- オプション
+- Codex CLI（`/ndf:codex` skill で外部AI委譲を使う場合、オプション）: `npm install -g @openai/codex`
 
 ### 公式プラグインのインストール（推奨）
 
@@ -57,7 +57,7 @@ GitHub、Context7 MCPは公式プラグインとして提供されています�
 
 ```bash
 # Claude Codeで実行
-/plugin marketplace add https://github.com/devbasex/ai-plugins
+/plugin marketplace add https://github.com/takemi-ohama/ai-plugins
 ```
 
 ### ステップ2: プラグインのインストール
@@ -82,10 +82,9 @@ SLACK_CHANNEL_ID=
 SLACK_USER_MENTION=  # 例: <@U0123456789>
 
 # 注意:
-# - Serena MCPは常時有効化推奨（セマンティックコード操作）
-# - Serena MCPはGOOGLE_API_KEY、ANTHROPIC_API_KEYは不要です（自動検出）
-# - Codex CLI MCPはインストール必要: https://github.com/openai/codex/releases
-#   インストール後、'codex login'を実行
+# - Serena MCP は別プラグイン `mcp-serena` として提供 (常時有効化推奨、GOOGLE_API_KEY/ANTHROPIC_API_KEY不要)
+# - Codex CLI は `/ndf:codex` skill から使う場合のみ必要: `npm install -g @openai/codex` → `codex login`
+#   (v4.0.0 で Codex MCP サーバは廃止。skill 経由の CLI 直接実行に一本化)
 # - GitHub MCP、Context7 MCPは公式プラグインを使用してください
 # - 追加のMCP（BigQuery、Notion、AWS Docs、DBHub、Chrome DevTools）は
 #   個別プラグインとしてインストール可能です（下記参照）
@@ -240,15 +239,14 @@ Claude Codeが自動的に適切なMCPツールを選択・利用します。
 
 > **v2.7.0**: commandsとskillsが統合されました。ワークフロー（`/ndf:*`）もモデル起動型機能もすべてskillsとして実装されています。
 
-### 1. MCP統合 (2つのコアMCP)
+### 1. MCP統合
 
-このプラグインは2つのコアMCPサーバーを統合しています。各MCPの詳細な使用方法やベストプラクティスは、エージェント向けガイド `plugins/ndf/CLAUDE.md` を参照してください。
+このプラグイン自体は v4.0.0 で **コアMCP サーバを同梱しなくなりました**。関連MCPは個別プラグインとしてインストールしてください。
 
-> **Note (v2.6.0)**: NDFプラグインはコアMCP（Serena、Codex）のみを含みます。その他のMCPは個別プラグインとして提供されています。
+> **Note (v4.0.0 BREAKING)**: Codex MCP サーバは削除。Codex CLI は `/ndf:codex` skill から直接呼び出す方式に一本化。Serena MCP は別プラグイン `mcp-serena` へ分離済み。
 
-**コアMCP（2つ）:**
-- ✅ **Serena MCP** - セマンティックコード操作、メモリー管理
-- ✅ **Codex CLI MCP** - コードレビュー、ファイル読み取り
+**外部AI委譲（MCP 非使用）:**
+- 🔧 **Codex CLI** - `/ndf:codex` skill または `corder` エージェント経由で `codex exec` をバックグラウンド実行
 
 **個別プラグインとして提供（5つ）:**
 - 📦 **Chrome DevTools MCP** (`mcp-chrome-devtools`) - Web調査、パフォーマンステスト
@@ -291,16 +289,14 @@ Claude Codeが自動的に適切なMCPツールを選択・利用します。
 - コンテキスト使用量を最適化するため、使わないMCPはインストールしないことを推奨します
 - 各プラグインの詳細な設定方法は、個別のREADMEを参照してください
 
-### 2. 専門エージェント (6種類)
-
-**重要**: このプラグインには`CLAUDE.ndf.md`が含まれており、メインエージェント（Claude）に対してサブエージェントの積極的な活用を促す指示が記載されています。
+### 2. 専門エージェント (8種類)
 
 **サブエージェントの活用方針:**
 - **複雑なタスクは`director`に委譲** - directorがMain Agentに報告し、Main Agentが他のエージェントを起動
 - **単純なタスクは専門エージェントに直接委譲**
 - **directorはMain Agentに報告する** - メモリエラー防止のため直接呼び出しは行わない
 
-詳細は `plugins/ndf/CLAUDE.ndf.md` を参照してください。
+詳細はメインセッションに自動注入される `ndf-policies` skill および `plugins/ndf/AGENTS.md` を参照してください。
 
 #### `director` エージェント（指揮者）
 **専門領域:** タスク統括・設計立案・エージェント調整
@@ -349,7 +345,7 @@ Claude Codeが自動的に適切なMCPツールを選択・利用します。
 **専門領域:** 高品質コード生成
 
 **使用MCPツール:**
-- Codex CLI MCP（コードレビュー）
+- Codex CLI (`/ndf:codex` skill または `corder` エージェント経由、MCP非使用)（コードレビュー）
 
 > **Note (v2.0.0)**: Serena MCP、Context7 MCPは公式プラグインに移行しました。これらは引き続きcorderエージェントで使用可能ですが、別途インストールが必要です。
 
@@ -369,7 +365,7 @@ Claude Codeが自動的に適切なMCPツールを選択・利用します。
 **専門領域:** 情報収集と分析
 
 **使用MCPツール:**
-- Codex CLI MCP（コードベース分析）
+- Codex CLI (`/ndf:codex` skill または `corder` エージェント経由、MCP非使用)（コードベース分析）
 - AWS Documentation MCP（AWS公式ドキュメント）
 - Chrome DevTools MCP（Webスクレイピング）
 
@@ -389,7 +385,7 @@ Claude Codeが自動的に適切なMCPツールを選択・利用します。
 **専門領域:** ファイル読み取りとOCR
 
 **使用MCPツール:**
-- Codex CLI MCP（ファイル読み取り）
+- Codex CLI (`/ndf:codex` skill または `corder` エージェント経由、MCP非使用)（ファイル読み取り）
 
 **機能:**
 - PDFドキュメントのテキスト抽出
@@ -407,7 +403,7 @@ Claude Codeが自動的に適切なMCPツールを選択・利用します。
 **専門領域:** 品質管理とテスト
 
 **使用MCPツール:**
-- Codex CLI MCP（コードレビュー、セキュリティチェック）
+- Codex CLI (`/ndf:codex` skill または `corder` エージェント経由、MCP非使用)（コードレビュー、セキュリティチェック）
 - Serena MCP（コードベース分析）
 - Chrome DevTools MCP（パフォーマンステスト）
 - Claude Code MCP（プラグイン品質検証）
@@ -427,68 +423,67 @@ Claude Codeが自動的に適切なMCPツールを選択・利用します。
 @qa プラグインがClaude Code仕様に準拠しているか確認してください
 ```
 
-### 3. ワークフロースキル（9個）
+### 3. PR/コードレビューワークフロースキル（13個）
 
 開発の各段階で使用するスキル群です。`/ndf:*` のスラッシュコマンドで呼び出します。
 
+#### commit / push / PR作成
 | スキル | 用途 | 引数 |
 |--------|------|------|
-| `/ndf:serena` | Serena MCPで開発記憶を記録 | - |
-| `/ndf:pr` | commit, push, PR作成を一括実行 | `[base-branch]` |
+| `/ndf:pr` | commit, push, PR作成/既存PR説明更新を一括実行 | `[--draft] [base-branch] or [msg]` |
 | `/ndf:pr-tests` | PRのTest Planを自動実行 | `[PR番号]` |
-| `/ndf:review` | PRをレビューしApprove/Request Changes判定 | `[PR番号]` |
+| `/ndf:cherry-pick-pr` | 環境ブランチへのcherry-pick PR作成 | `<base-branch>` |
+| `/ndf:deploy` | 環境ブランチへのデプロイPR作成（ブランチ全体をmain経由で） | `<env-branch>` |
+| `/ndf:sync-main` | 最新mainを現在のブランチに取り込み | - |
+
+#### レビュー/修正
+| スキル | 用途 | 引数 |
+|--------|------|------|
+| `/ndf:review` | PR単位レビュー（Approve/Request Changes判定） | `[PR番号]` |
+| `/ndf:review-branch` | ローカル差分レビュー（PR前、mainとの比較） | `[focus-area]` |
+| `/ndf:review-pr-comments` | PRコメント分類・優先度判定（READ-ONLY） | `[PR番号]` |
 | `/ndf:fix` | PRレビューコメントの修正対応 | `[PR番号]` |
+| `/ndf:resolve-pr-comments` | 対応済みコメント返信＋スレッドResolve | `[PR番号]` |
+| `/ndf:browser-test` | ブラウザで動作確認（Playwright/Chrome DevTools MCP必要） | `[url]` |
+
+#### マージ後クリーンアップ
+| スキル | 用途 | 引数 |
+|--------|------|------|
 | `/ndf:merged` | PRマージ後のローカルブランチクリーンアップ | `[PR番号]` |
 | `/ndf:clean` | マージ済みブランチの一括削除 | - |
-| `/ndf:mem-review` | 中期memoryのコミット数ベース自動レビュー | `[--threshold N]` |
-| `/ndf:mem-capture` | タスク終了時の知見をSerena memoryに保存 | `[--project NAME] [--type TYPE]` |
 
-<details>
-<summary><strong>mem-review / mem-capture の詳細</strong></summary>
+### 4. 原則・ガイドライン系スキル（7個）
 
-**`/ndf:mem-review`** - 中期Serena memoryをコミット数ベースでレビュー
+モデル起動型のガイドラインスキル。該当する文脈で自動参照される。
 
-`.serena/memories/` の中期memory（`review_after_commits`付き）をチェックし、延長・長期化・更新・アーカイブ・削除の選択肢を提示します。
+| スキル名 | 概要 |
+|---------|------|
+| `ndf-policies` | プラグイン基本ポリシー（常時注入） |
+| `branch-fix-strategy` | 複数ブランチへの修正適用戦略（cherry-pick） |
+| `implementation-plan` | `issues/`配下の実装プラン管理 |
+| `investigation-rules` | 調査レポートのエビデンス主義 |
+| `problem-solving` | 根本原因分析・上流修正・多層防御 |
+| `logging-guidelines` | ログ運用ガイドライン（言語非依存） |
+| `markdown-writing` | Markdown文書作成（mermaid/plantUML） |
 
-```bash
-/ndf:mem-review                    # レビュー対象をチェック
-/ndf:mem-review --threshold 10     # 閾値を指定
-```
+### 5. データ分析・品質・環境系スキル（13個）
 
-**`/ndf:mem-capture`** - タスク終了時の知見をSerena memoryに保存
-
-判断・前提・制約をMemoryに保存。手順や実装詳細は保存しません。
-
-```bash
-/ndf:mem-capture --project myproject --type decision
-/ndf:mem-capture --project global --type principle --long
-/ndf:mem-capture --append .serena/memories/existing-memory.md
-```
-
-**推奨レビュー設定:** low→10コミット、medium→20コミット、high→30コミット
-
-</details>
-
-### 4. モデル起動型スキル（14個）
-
-Claudeが自律的に判断して起動するスキルです。自然言語リクエストに応じて自動的に活用されます。
+Claudeが自律的に判断して起動するスキル群。
 
 | カテゴリ | スキル名 | 概要 |
 |---------|---------|------|
 | Data Analyst | `data-analyst-sql-optimization` | SQL最適化パターン（N+1、INDEX、JOIN） |
 | | `data-analyst-export` | CSV/JSON/Excel/Markdownエクスポート |
-| Corder | `corder-code-templates` | REST API、React、DB、認証のテンプレート |
-| | `corder-test-generation` | ユニット/統合テスト自動生成（AAA） |
-| Researcher | `researcher-report-templates` | 調査レポートテンプレート |
-| Scanner | `scanner-pdf-analysis` | PDF解析・テーブル抽出 |
-| | `scanner-excel-extraction` | Excelデータ抽出・変換 |
 | QA | `qa-security-scan` | OWASP Top 10セキュリティスキャン |
-| Docs | `markdown-writing` | Markdown文書作成（mermaid/plantUML） |
-| Memory | `memory-handling` | Serena memory読み書きルール |
-| | `serena-memory-strategy` | Serena memoryの分類・メタデータ・レビュー戦略 |
-| Common | `python-execution` | Python実行環境の自動判定 |
+| Dev環境 | `python-execution` | Python実行環境の自動判定 |
 | | `docker-container-access` | Dockerコンテナアクセス判定 |
-| | `skill-development` | Skill開発ベストプラクティス |
+| | `git-gh-operations` | git/gh操作の共通パターン |
+| | `google-auth` | Google API OAuth2認証 |
+| | `codex` | Codex CLI直接実行（corderエージェントとの使い分け） |
+| 知識管理 | `deepwiki-transfer` | DeepWikiからの知識転送 |
+| | `knowledge-reorg` | 知識再編成 |
+| 公式連携 | `mcp-builder` | MCPサーバー作成ガイド（Anthropic公式、Apache-2.0） |
+| | `official-skills-autoloader` | Anthropic公式Skillの自動ロード |
 
 ### 5. 自動フック
 
@@ -528,14 +523,12 @@ Claude Codeの起動時と終了時に自動的に以下が実行されます：
 SERENA_HOME=.serena
 
 # ============================================
-# Codex CLI MCP - コードレビュー
+# Codex CLI - /ndf:codex skill 経由で使用 (v4.0.0でMCPサーバは廃止)
 # ============================================
-# すべてオプション - ローカルインストール推奨
+# すべてオプション。npm install -g @openai/codex → codex login で利用可
 # CODEX_HOME=/path/to/codex/home
 # OPENAI_API_KEY=your-openai-api-key
 # OPENAI_BASE_URL=https://api.openai.com/v1
-# AZURE_OPENAI_API_KEY=your-azure-openai-key
-# MISTRAL_API_KEY=your-mistral-api-key
 
 # ============================================
 # Slack通知 - 自動フック
@@ -593,19 +586,20 @@ DSN=mysql://user:password@host:3306/database
 - GOOGLE_API_KEY、ANTHROPIC_API_KEYは不要です（自動検出）
 - Claude CodeのAPI設定を自動的に継承します
 
-#### 2. Codex CLI MCP（コアMCP）
+#### 2. Codex CLI（`/ndf:codex` skill 経由、v4.0.0 でMCPサーバは廃止）
 
 | 環境変数 | 必須/オプション | デフォルト値 | 説明 |
 |---------|--------------|------------|------|
 | CODEX_HOME | オプション | `~/.codex` | Codex CLIのホームディレクトリ |
-| OPENAI_API_KEY | オプション | - | OpenAI APIキー |
+| OPENAI_API_KEY | オプション | - | OpenAI APIキー (`codex login` 済みなら不要) |
 | OPENAI_BASE_URL | オプション | `https://api.openai.com/v1` | OpenAI APIのベースURL |
-| AZURE_OPENAI_API_KEY | オプション | - | Azure OpenAI APIキー |
-| MISTRAL_API_KEY | オプション | - | Mistral AIのAPIキー |
 
-**注意:** Codex CLI MCPを使用するには、Codex CLIを事前にインストールし、`codex login`を実行してください。
+**注意:** `/ndf:codex` skill や `corder` エージェントを使う場合、事前に Codex CLI をインストールし、`codex login` を実行してください。
 
-インストール: https://github.com/openai/codex/releases
+```bash
+npm install -g @openai/codex
+codex login
+```
 
 ---
 
@@ -723,7 +717,7 @@ NDFプラグインと併用することで、以下の機能が追加されま�
 
 問題が発生した場合：
 1. 上記のトラブルシューティングセクションを確認
-2. GitHubリポジトリでイシューを作成: https://github.com/devbasex/ai-plugins/issues
+2. GitHubリポジトリでイシューを作成: https://github.com/takemi-ohama/ai-plugins/issues
 
 ## ライセンス
 
