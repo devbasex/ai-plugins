@@ -1,15 +1,7 @@
 ---
 name: git-gh-operations
-description: |
-  git/gh コマンド実行時の共通エラーパターンと正しい操作方法を提供します。
-  CWD問題、パス指定、GitHub API操作の注意点を網羅。
-
-  このSkillは以下を提供します:
-  - git操作時のパス解決ルール
-  - gh CLI / GitHub API の正しい使い方
-  - 過去のエラー事例と対策
-
-  Triggers: "git add", "git commit", "git push", "gh pr", "gh api", "GitHub操作", "gitエラー", "fatal:", "pathspec"
+description: "git / gh コマンド実行時の共通エラーパターンと正しい操作方法。CWD 問題、パス解決ルール、gh CLI / GitHub API の正しい使い方、過去のエラー事例と対策を扱う。"
+when_to_use: "git / gh コマンドでエラーが出た or 操作方法に迷うとき。Triggers: 'git add', 'git commit', 'git push', 'gh pr', 'gh api', 'GitHub操作', 'gitエラー', 'fatal:', 'pathspec'"
 allowed-tools:
   - Bash
   - Read
@@ -158,10 +150,17 @@ gh pr checks PR --repo OWNER/REPO 2>&1 || true
 
 # OK: 失敗のみフィルタ
 gh pr checks PR --repo OWNER/REPO 2>&1 | grep -i fail || true
-
-# OK: --watch で完了まで待つ場合も同様
-gh pr checks PR --repo OWNER/REPO --watch 2>&1 || true
 ```
+
+#### 重要: CIの完了を待ってはいけない
+
+- `--watch` や完了までのポーリングは **禁止**。現在のステータスを一度スナップショットするだけでよい。
+- チェックが `in_progress` / `queued` / `pending` の場合は **完了を待たず次のステップへ進む**。
+- 対応対象は **コード修正で直せるfailのみ**。以下のような「ステータス確認系」チェックは無視する:
+  - `check_pr_requirements` 等、PR要件・メタ情報のみ検証するもの
+  - Lint/テストに非依存なラベル/タイトル/説明チェック
+  - 外部サービス起因で自己修復するトランジェントなfail（再実行で直るもの）
+- 対応する: ビルド失敗・テスト失敗・型エラー・lint違反など、**リポジトリ内コードの修正で解消可能なもの**。
 
 ```bash
 # 失敗ジョブのログ（エラー行のみ抽出）

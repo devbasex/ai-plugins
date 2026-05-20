@@ -1,8 +1,9 @@
 [project]
 name = "google-auth-skill"
-version = "0.1.0"
-description = "Google OAuth2認証スクリプトの依存関係"
+version = "0.2.0"
+description = "Google API 共通 OAuth2 認証モジュールの依存関係"
 requires-python = ">=3.9"
 dependencies = [
+    "google-auth>=2.0.0",
     "google-auth-oauthlib>=1.0.0",
 ]

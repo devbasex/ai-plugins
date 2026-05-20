@@ -1,0 +1,31 @@
+"""利用者プロジェクトの ``tests/conftest.py`` 雛形。
+
+playwright-scenario-test (playwright_kit) を pytest-playwright 上で使うための
+共通設定。plugin (``playwright_kit.pytest_plugin``) は entry-point 経由で
+auto-load されるため、import や ``pytest_plugins`` 宣言は不要。
+
+利用者は本ファイルをプロジェクトの ``conftest.py`` にコピーし、必要に応じて
+fixture を追加する。
+"""
+
+from __future__ import annotations
+
+import pytest
+
+# pytest-playwright の標準 fixture (browser_context_args / page) は plugin 経由で
+# 読み込まれる。playwright_kit 側 fixture (pwk_config / pwk_role_<id> /
+# pwk_evidence / pwk_accessibility_scan / pwk_web_vitals_measure) も同様。
+
+# 例: 全 test で headless=False にしたい場合は ``--headed`` を pytest に渡すか、
+# ``browser_type_launch_args`` を override する:
+#
+# @pytest.fixture(scope="session")
+# def browser_type_launch_args(browser_type_launch_args):
+#     return {**browser_type_launch_args, "headless": False, "slow_mo": 200}
+
+
+# プロジェクト固有の fixture をここに追加する。例:
+#
+# @pytest.fixture
+# def admin_dashboard_url(pwk_config):
+#     return f"{pwk_config.base_url}/admin/dashboard"

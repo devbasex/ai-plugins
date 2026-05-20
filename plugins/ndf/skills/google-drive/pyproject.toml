@@ -1,0 +1,10 @@
+[project]
+name = "google-drive-skill"
+version = "0.1.0"
+description = "Google Drive / Google Docs API アクセスの依存関係 (ndf:google-auth と組み合わせて使用)"
+requires-python = ">=3.9"
+dependencies = [
+    "google-api-python-client>=2.0.0",
+    "google-auth>=2.0.0",
+    "google-auth-oauthlib>=1.0.0",
+]

@@ -142,7 +142,7 @@ def main():
     parser.add_argument(
         "--repo",
         required=True,
-        help="対象リポジトリ（owner/repo形式、例: owner/repo）",
+        help="対象リポジトリ（owner/repo形式、例: volareinc/carmo-system-console）",
     )
     parser.add_argument(
         "--output",

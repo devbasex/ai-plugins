@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+
+# pytest 実行時に生成される NDF report 出力 (run-id 別)
+reports/
+.pytest_cache/
+
+# uv lock は共有可
+!uv.lock

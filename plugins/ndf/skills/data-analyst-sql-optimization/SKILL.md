@@ -1,15 +1,7 @@
 ---
 name: data-analyst-sql-optimization
-description: |
-  Apply SQL optimization patterns including index usage, query rewriting, JOIN optimization, and window functions. Use when improving query performance or analyzing slow queries.
-
-  This skill provides comprehensive SQL optimization patterns:
-  - N+1 query elimination
-  - Index optimization strategies
-  - JOIN vs subquery performance
-  - Window functions for complex aggregations
-
-  Triggers: "optimize SQL", "slow query", "improve performance", "SQL最適化", "クエリ改善", "パフォーマンス向上"
+description: "Apply SQL optimization patterns: index usage, query rewriting, JOIN/subquery optimization, window functions, N+1 elimination."
+when_to_use: "Use when improving query performance or analyzing slow queries. Triggers: 'optimize SQL', 'slow query', 'improve performance', 'SQL最適化', 'クエリ改善', 'パフォーマンス向上'"
 ---
 
 # Data Analyst SQL Optimization Skill

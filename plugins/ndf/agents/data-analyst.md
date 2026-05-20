@@ -1,5 +1,6 @@
 ---
 name: data-analyst
+model: sonnet
 description: |
   BigQueryとDBHubを活用したデータ分析とSQL操作の専門エージェント。
   **Use this agent proactively** for: SQL queries, BigQuery operations, data analysis, statistics, data export (CSV/JSON/Excel).

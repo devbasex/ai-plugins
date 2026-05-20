@@ -90,19 +90,30 @@
 2. **1週間以内**: Medium（悪用の可能性あり）
 3. **次回リリース**: Low/Info（改善推奨）
 
-## Codex CLI MCP統合
+## Codex CLI 連携
 
-```javascript
-// Codex でセキュリティスキャン実行
-const result = await codex({
-  prompt: `
-    以下のコードをセキュリティスキャンしてください:
-    - OWASP Top 10 の脆弱性
-    - 認証・認可の問題
-    - 機密情報の露出
+詳細な独立レビューが必要な場合は `corder` エージェントに委譲するか、`/ndf:codex` skill の手順で `codex exec` を直接起動する。例:
 
-    ${codeContent}
-  `,
-  'approval-policy': 'on-request'
-});
+```bash
+# プロンプト書き出し
+cat > /tmp/sec-scan-prompt.md <<'EOF'
+あなたはセキュリティレビュアーです。以下の観点で対象ファイルを精査してください:
+- OWASP Top 10 の脆弱性
+- 認証・認可の問題
+- 機密情報の露出
+
+## 対象ファイル（絶対パス）
+/workspace/src/...
+
+## 出力形式
+Markdown 標準出力。行番号と該当コードスニペットを明記。
+EOF
+
+# バックグラウンド起動
+codex exec --dangerously-bypass-approvals-and-sandbox -C "$PWD" \
+  < /tmp/sec-scan-prompt.md \
+  > /tmp/sec-scan-output.md \
+  2> /tmp/sec-scan-err.log &
 ```
+
+詳細は `/ndf:codex` skill を参照。

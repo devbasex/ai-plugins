@@ -1,47 +1,87 @@
 # AI Plugins
 
-Claude Codeプラグイン、プロジェクトスキル、MCP（Model Context Protocol）設定を共有するための内部マーケットプレイスです。
+Claude CodeプラグインおよびKiro CLI向けのスキル・MCP設定を共有するための内部マーケットプレイスです。
 
 ## 概要
 
-このマーケットプレイスは、チーム全体でClaude Codeの導入を加速するための事前設定されたプラグインを提供します。
+このマーケットプレイスは、チーム全体でAI開発ツール（Claude Code / Kiro CLI）の導入を加速するための事前設定されたプラグインを提供します。
 
-**NDFプラグイン**は、以下の機能を**オールインワン**で提供する統合プラグインです：
+**NDFプラグイン v4.0.0** は、以下の機能を**オールインワン**で提供する統合プラグインです：
 
-- **2つのコアMCPサーバー**: Serena、Codex CLI
-- **9つの開発ワークフローコマンド**: `/ndf:pr`, `/ndf:pr-tests`, `/ndf:fix`, `/ndf:review`, `/ndf:merged`, `/ndf:clean`, `/ndf:serena`, `/ndf:mem-review`, `/ndf:mem-capture`
-- **6つの専門エージェント**: **director指揮者**、データ分析、コーディング、調査、ファイル読み取り、品質管理
-- **13個のSkills**: SQL最適化、データエクスポート、コードテンプレート、テスト生成、Python実行、Docker判定、Skill開発、調査レポート、PDF解析、Excel抽出、セキュリティスキャン、Markdown文書作成、記憶戦略
-- **自動フック**: Claude Code終了時にAI要約生成とSlack通知
-
-> **Note (v2.6.0)**: 追加のMCP（BigQuery、Chrome DevTools、AWS Docs、DBHub、Notion）は個別プラグインとしてインストール可能です。GitHub MCP、Context7 MCPは公式プラグインから利用できます。
+- **33個のSkills**:
+  - PR/レビューワークフロー (pr, pr-tests, fix, review, review-branch, review-pr-comments, resolve-pr-comments, cherry-pick-pr, deploy, sync-main, merged, clean, browser-test)
+  - 原則・ガイドライン (ndf-policies, branch-fix-strategy, implementation-plan, investigation-rules, problem-solving, logging-guidelines, markdown-writing)
+  - データ分析・品質 (data-analyst-sql-optimization, data-analyst-export, qa-security-scan)
+  - 外部連携・環境 (codex, git-gh-operations, google-auth, python-execution, docker-container-access, deepwiki-transfer, knowledge-reorg, mcp-builder, official-skills-autoloader)
+  - 運用 (skill-stats)
+- **8つの専門エージェント**: director, data-analyst, corder, researcher, qa, debugger, devops-engineer, code-reviewer
+- **自動フック**: SessionStart (transcript保持期間を最低90日に保つ) + Stop (AI要約生成+Slack通知)
+- **外部AI委譲**: `/ndf:codex` skill + `corder` エージェント経由で Codex CLI をバックグラウンド実行 (v4.0.0 で Codex MCP サーバは廃止)
+- **Kiro CLI対応**: インストーラーによるワンコマンドセットアップ
 
 ## 利用方法
 
-### 1. マーケットプレイスの追加
+### Claude Code
 
-Claude Codeでマーケットプレイスを追加します：
+#### 1. マーケットプレイスの追加
 
 ```bash
-/plugin marketplace add https://github.com/devbasex/ai-plugins
+/plugin marketplace add https://github.com/takemi-ohama/ai-plugins
 ```
 
-### 2. プラグインのインストール
-
-利用したいプラグインをインストールします：
+#### 2. プラグインのインストール
 
 ```bash
 # NDFプラグイン（オールインワン統合プラグイン）
 /plugin install ndf@ai-plugins
 ```
 
-このプラグイン1つで、MCP統合、開発ワークフロー、専門エージェント、自動フックのすべてが利用可能です。
+### Kiro CLI
+
+#### 1. リポジトリをクローン
+
+```bash
+git clone https://github.com/takemi-ohama/ai-plugins.git
+cd ai-plugins
+```
+
+#### 2. インストーラーを実行
+
+```bash
+# 基本（Skills + agentSpawnフックのみ）
+bash scripts/install-kiro.sh
+
+# Slack通知も有効化
+bash scripts/install-kiro.sh --with-slack
+
+# 全部入り（Slack + Codex CLI 連携）
+bash scripts/install-kiro.sh --with-slack --with-codex
+```
+
+インストーラーは `plugin.json` からskills一覧を読み取り、`.kiro/agents/default.json` を自動生成します。
+
+#### 3. Slack通知の設定（オプション）
+
+`.env` に以下を設定：
+```
+SLACK_CHANNEL_ID=C0123456789
+SLACK_BOT_TOKEN=xoxb-...
+SLACK_USER_MENTION=<@U0123456789>
+```
+
+#### 4. 起動
+
+```bash
+kiro-cli chat
+```
+
+詳細は [KIRO.md](./KIRO.md) を参照。
 
 ### 利用可能なプラグイン
 
 | プラグイン名 | バージョン | 説明 | 詳細 |
 |------------|----------|------|------|
-| **ndf** | 2.6.0 | Claude Code開発環境を**オールインワン**で強化する統合プラグイン。2つのコアMCPサーバー（Serena、Codex CLI）、9つの開発ワークフローコマンド、6つの専門エージェント（**director指揮者**、データ分析、コーディング、調査、ファイル読み取り、品質管理）、13個のSkills、Stopフック（AI要約生成とSlack通知）を提供。追加のMCPは個別プラグインとしてインストール可能。 | [README](./plugins/ndf/README.md) |
+| **ndf** | 4.0.0 | Claude Code / Kiro CLI開発環境を**オールインワン**で強化する統合プラグイン。8個の専門エージェント（director、data-analyst、corder、researcher、qa、debugger、devops-engineer、code-reviewer）、33個のSkills（PR/レビューワークフロー、原則・ガイドライン、データ分析、品質、Codex CLI連携、skill利用統計など）、SessionStartフック（transcript保持期間自動管理）、Stopフック（AI要約生成+Slack通知）を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:codex` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [README](./plugins/ndf/README.md) |
 
 ## 開発ガイドライン
 
@@ -235,7 +275,8 @@ git push
 
 #### プロジェクト内ドキュメント
 
-- [CLAUDE.md](./CLAUDE.md) - AIエージェント向けガイドライン
+- [CLAUDE.md](./CLAUDE.md) - AIエージェント向けガイドライン（Claude Code）
+- [KIRO.md](./KIRO.md) - AIエージェント向けガイドライン（Kiro CLI）
 - [LICENSE](./LICENSE) - MITライセンス
 
 ## コントリビューション

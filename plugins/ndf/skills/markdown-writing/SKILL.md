@@ -1,14 +1,7 @@
 ---
 name: markdown-writing
-description: |
-  Markdown文書作成時の重要なルールを提供します。図表はmermaid/plantUMLを使用（ASCII ART禁止）、300行超の文書は順序prefix付きで分割。
-
-  重要ルール:
-  - 図表: mermaid/plantUML使用（ASCII ARTは禁止、ツリー構造のみ例外）
-  - 文書長: 概ね300行以内、超える場合は分割
-  - 分割時: ディレクトリ作成+順序prefix（01-, 02-, ...）
-
-  Triggers: "Markdown作成", "ドキュメント作成", "文書作成", "図を描く", "mermaid", "create document", "write docs"
+description: "Markdown 文書作成時の重要なルール。図表は mermaid/plantUML を使用 (ASCII ART 禁止、ツリー構造のみ例外)、概ね 300 行以内、超える場合は順序 prefix (01-, 02-, ...) 付きで分割する。"
+when_to_use: "Markdown 文書 / 図表を作成 / 編集するとき。Triggers: 'Markdown作成', 'ドキュメント作成', '文書作成', '図を描く', 'mermaid', 'create document', 'write docs'"
 allowed-tools:
   - Read
   - Write

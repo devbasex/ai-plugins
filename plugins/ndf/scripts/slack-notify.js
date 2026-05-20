@@ -632,7 +632,8 @@ async function readHookInput() {
 
   const result = {
     transcriptPath: parsed?.transcript_path ?? null,
-    stopHookActive: parsed?.stop_hook_active === true
+    stopHookActive: parsed?.stop_hook_active === true,
+    assistantResponse: parsed?.assistant_response ?? null
   };
   debugLog('Extracted hook input values:', result);
 
@@ -689,11 +690,12 @@ async function main() {
       getRepositoryName()
     ]);
 
-    const { transcriptPath, stopHookActive } = hookInput;
+    const { transcriptPath, stopHookActive, assistantResponse } = hookInput;
 
     debugLog('Hook input received:', {
       transcriptPath,
       stopHookActive,
+      assistantResponse: assistantResponse ? assistantResponse.substring(0, 100) : null,
       hasTranscriptPath: !!transcriptPath
     });
 
@@ -708,7 +710,19 @@ async function main() {
     debugLog('Repository name:', repoName);
 
     const summaryStartTime = Date.now();
-    const summary = transcriptPath ? await generateSummary(transcriptPath) : null;
+    let summary = null;
+    if (assistantResponse) {
+      // Kiro CLI: assistant_responseから直接要約生成
+      const context = assistantResponse.length > CONFIG.MAX_CONTEXT_LENGTH
+        ? assistantResponse.substring(0, CONFIG.MAX_CONTEXT_LENGTH)
+        : assistantResponse;
+      const prompt = createSummarizationPrompt(`【アシスタントの応答】\n${context}`);
+      const output = await callClaudeCLI(prompt);
+      summary = cleanSummaryResponse(output);
+    } else if (transcriptPath) {
+      // Claude Code: transcript_pathから要約生成
+      summary = await generateSummary(transcriptPath);
+    }
     const summaryDuration = Date.now() - summaryStartTime;
     debugLog('Final summary:', summary, '| Generation time:', summaryDuration, 'ms');
 
