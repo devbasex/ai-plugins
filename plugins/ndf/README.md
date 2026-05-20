@@ -57,7 +57,7 @@ GitHub、Context7 MCPは公式プラグインとして提供されています�
 
 ```bash
 # Claude Codeで実行
-/plugin marketplace add https://github.com/takemi-ohama/ai-plugins
+/plugin marketplace add https://github.com/devbasex/ai-plugins
 ```
 
 ### ステップ2: プラグインのインストール
@@ -717,7 +717,7 @@ NDFプラグインと併用することで、以下の機能が追加されま�
 
 問題が発生した場合：
 1. 上記のトラブルシューティングセクションを確認
-2. GitHubリポジトリでイシューを作成: https://github.com/takemi-ohama/ai-plugins/issues
+2. GitHubリポジトリでイシューを作成: https://github.com/devbasex/ai-plugins/issues
 
 ## ライセンス
 

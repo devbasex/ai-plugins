@@ -307,4 +307,4 @@ MIT License
 
 ## サポート
 
-Issue報告: https://github.com/takemi-ohama/ai-plugins/issues
+Issue報告: https://github.com/devbasex/ai-plugins/issues

@@ -4,7 +4,7 @@
 
 **Claude Codeプラグインマーケットプレイス**の開発プロジェクトです。チーム全体でClaude Codeの導入を加速するための事前設定されたプラグインを提供します。
 
-**リポジトリ**: https://github.com/takemi-ohama/ai-plugins
+**リポジトリ**: https://github.com/devbasex/ai-plugins
 
 ## ポリシー
 

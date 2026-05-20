@@ -26,7 +26,7 @@ Claude CodeプラグインおよびKiro CLI向けのスキル・MCP設定を共�
 #### 1. マーケットプレイスの追加
 
 ```bash
-/plugin marketplace add https://github.com/takemi-ohama/ai-plugins
+/plugin marketplace add https://github.com/devbasex/ai-plugins
 ```
 
 #### 2. プラグインのインストール
@@ -41,7 +41,7 @@ Claude CodeプラグインおよびKiro CLI向けのスキル・MCP設定を共�
 #### 1. リポジトリをクローン
 
 ```bash
-git clone https://github.com/takemi-ohama/ai-plugins.git
+git clone https://github.com/devbasex/ai-plugins.git
 cd ai-plugins
 ```
 
