@@ -269,6 +269,23 @@ pint / larastan / test / build などは **中断** を原則とする。
 - ❌ **`pgrep -fa <prompt>` で完了判定** — gemini は long prompt が引数に乗り検知失敗。pidfile 必須
 - ❌ **sentinel 単独で完了判定** — codex がクラッシュすると永遠に出ない。`monitor.py` の多軸判定 (pidfile / sentinel / 早期エラー / stall / hard timeout / result.json) を使うこと
 - ❌ **タイムアウトなしで wait** — ハング検知不能。`monitor.py` の hard timeout (30 分既定) + stall timeout (10 分既定) を必ず効かせる
+- ❌ **EARLY_ERROR の曖昧パターンで kill する** — 行頭の生 `Error:` / `Traceback` は codex がレビュー対象 diff の test コード片を echo するケースで誤検知する。明確な致命 (auth / quota / sandbox / HTTP 401-403-429 / gemini の YOLO 降格) **のみ** kill 対象とし、曖昧パターンは警告ログに留める。誤検知が再発する場合は `--no-early-error` / `MONITOR_NO_EARLY_ERROR=1` で検知自体を無効化する (sentinel / result.json / timeout で十分判定可能)
+
+## monitor.py が誤って kill する場合の手順
+
+`monitor.py` が EARLY_ERROR で codex / gemini を即時 kill してしまい、`result.json` が
+生成されないケースは以下で切り分け・回避できる:
+
+1. **err.log の冒頭を確認**: 検知パターン (`fatal_err` の `early error (fatal) in err.log: ...`) が
+   本当に致命なのか、それとも diff body の echo / config validation 警告なのかを判別
+2. **gemini の `Error in: mcpServers.<name>` 警告**: `.gemini/settings.json` に `disabled: false`
+   等の非互換キーがあると毎回出る。`launch-gemini.sh` の sanitize ロジック (v4.7.2+) で
+   自動退避するため、最新版にアップデートすれば解消する
+3. **誤検知が継続する場合**: `monitor.py --no-early-error` (もしくは `MONITOR_NO_EARLY_ERROR=1`
+   環境変数) で EARLY_ERROR 検知自体を無効化し、hard timeout / stall / sentinel / result.json
+   のみで判定するモードに切り替える
+4. **新しい致命パターンを観測した場合**: `EARLY_ERROR_FATAL` に追記する (PR で plugin に反映)。
+   曖昧パターンは `EARLY_ERROR_WARN` 側に置き、kill 対象にはしない
 - ❌ **fix サブエージェントが Resolve をスキップ** — reply だけでは未対応扱い。Resolve まで実行
 - ❌ **review body に identifier prefix を付け忘れる** — GitHub UI 上で誰のレビューか不明になる
 

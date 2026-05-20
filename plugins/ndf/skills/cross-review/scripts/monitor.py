@@ -14,17 +14,21 @@ pidfile stale / result.json 不在) を構造化して扱う。
      - 可能なら `/proc/<pid>/cmdline` で codex/gemini であることを再確認 (PID 再利用対策)
   2. **sentinel** (codex のみ): err.log に `^tokens used$` 出現
   3. **early-error pattern**: err.log に既知の致命的キーワードが出たら即中断
+     - **FATAL** (auth/quota/sandbox 等の明確な致命): 検知時に kill
+     - **WARN** (生の `Error:` / `Traceback` 等の曖昧パターン): 警告ログのみ、kill せず通常判定を継続
+     - `--no-early-error` / `MONITOR_NO_EARLY_ERROR=1` で検知自体を無効化可
   4. **result.json**: プロセス終了後に `/tmp/<agent>-review-pr<PR>-result.json` が
      生成されていなければ失敗扱い
   5. **hard timeout**: 既定 7 分。`--timeout` または `MONITOR_TIMEOUT` で上書き可
   6. **stall timeout**: err.log + stdout.log の合計サイズが既定 3 分変化しなければ
      STALLED として中断 (`--stall-timeout` または `MONITOR_STALL` で上書き可)
-  7. **失敗時 kill**: TIMEOUT / STALLED / EARLY_ERROR / PIDFILE_BAD で返るとき、
-     対象プロセスを SIGTERM (3 秒後に SIGKILL) で停止する
+  7. **失敗時 kill**: TIMEOUT / STALLED / EARLY_ERROR (FATAL のみ) / PIDFILE_BAD で
+     返るとき、対象プロセスを SIGTERM (3 秒後に SIGKILL) で停止する
 
 Usage:
   monitor.py <PR> <target>          target ∈ {codex, gemini, both}
   monitor.py <PR> both --timeout 1200 --stall-timeout 600
+  monitor.py <PR> both --no-early-error    # EARLY_ERROR 検知を完全無効化
 
 Exit codes (target=both は最悪値を返す):
   0  OK            プロセス正常終了 + result.json 確認
@@ -58,27 +62,45 @@ from typing import Optional
 DEFAULT_TIMEOUT = int(os.environ.get("MONITOR_TIMEOUT", "420"))    # 7 min
 DEFAULT_STALL = int(os.environ.get("MONITOR_STALL", "180"))       # 3 min no progress
 DEFAULT_POLL = int(os.environ.get("MONITOR_POLL", "15"))          # 15 sec
+# `MONITOR_NO_EARLY_ERROR=1` で EARLY_ERROR 検知を無効化 (escape hatch)
+DEFAULT_NO_EARLY_ERROR = os.environ.get("MONITOR_NO_EARLY_ERROR", "").lower() in {
+    "1", "true", "yes", "on",
+}
 
-# err.log の行頭に近い形で出る致命的パターン（substring 検索ではない）。
-# `^` (行頭) を必須として、diff のコード本文 / doc の引用 / インラインコメント本文に
-# 同じキーワードが出ても誤検知しないようにする。
-EARLY_ERROR_PATTERNS = [
-    # 行頭または `: ` の直後など、典型的な error 出力フォーマット
-    re.compile(r"^(?:Error|FATAL|fatal|panic|PANIC|Traceback)[: ]", re.MULTILINE),
+# err.log の行頭に近い形で出る **明確な致命** パターン (kill 対象)。
+# auth / quota / sandbox / HTTP 401-403-429 / gemini の YOLO 降格など、
+# プロセスが続行しても result を生成できないと判明しているケースだけを入れる。
+EARLY_ERROR_FATAL = [
     # HTTP エラーステータス行 (`HTTP/1.1 401 Unauthorized` 等)
     re.compile(r"^HTTP/\d\S* (?:401|403|429) ", re.MULTILINE),
     # gemini 固有: untrusted directory で YOLO が降格される
     re.compile(r'^Approval mode overridden to "default"', re.MULTILINE),
-    # 認証 / クオータ系（行頭限定）
+    # 認証 / 権限系（行頭限定）
     re.compile(r"^(?:Authentication failed|Permission denied)", re.MULTILINE),
+    # quota / rate limit
     re.compile(r"^.*\b(?:quota exceeded|rate limit exceeded)\b", re.MULTILINE | re.IGNORECASE),
+    # API key 系
     re.compile(r"^.*\bAPI key (?:not found|missing|invalid)", re.MULTILINE | re.IGNORECASE),
-    # codex 固有: sandbox エラー（行頭 + 末尾近辺）
+    # codex 固有: sandbox エラー
     re.compile(r"^.*\bsandbox error\b", re.MULTILINE | re.IGNORECASE),
 ]
 
-# 文脈に含まれていたら benign（doc 引用 / コードレビューコメント等）と見なし誤検知扱い
+# 行頭の生 `Error:` / `Traceback` 系は **kill しない警告のみ** に降格。
+# - gemini-cli の `Error in: mcpServers.<name>` 警告 (起動時の config 検証)
+# - codex がレビュー対象 diff の test コード片を echo して `Traceback` が混入するケース
+# など、続行可能な誤検知が頻発するため。プロセスは sentinel / result.json / timeout
+# で別途判定する。
+EARLY_ERROR_WARN = [
+    re.compile(r"^(?:Error|FATAL|fatal|panic|PANIC|Traceback)[: ]", re.MULTILINE),
+]
+
+# 文脈に含まれていたら benign（doc 引用 / コードレビューコメント等）と見なし誤検知扱い。
+# FATAL / WARN 双方のスキャンに適用される。
 EARLY_ERROR_BENIGN = [
+    # gemini-cli の config validation 警告 (`Error in: mcpServers.<name>` / `Error in: ...`):
+    # 設定の Unrecognized キーを通知するだけで、gemini 本体は起動継続する。
+    re.compile(r"^Error in: mcpServers\.", re.MULTILINE),
+    re.compile(r"^Error in: \S+\s*$", re.MULTILINE),
     # diff のコンテキスト行 (` `, `+`, `-` で始まり、その後 markdown 表記が来る)
     re.compile(r"^[ +-].*[\|`]", re.MULTILINE),
     # markdown のリスト / 引用
@@ -205,11 +227,26 @@ def _pid_cmdline_matches(pid: int, expected: str) -> Optional[bool]:
         return None
 
 
-def _scan_early_errors(path: pathlib.Path) -> Optional[str]:
+def _scan_patterns(
+    path: pathlib.Path, patterns: list[re.Pattern[str]]
+) -> Optional[str]:
+    """err.log を末尾 200KB だけ読み、`patterns` の最初の **non-benign** ヒット行を返す。
+
+    BENIGN フィルタは **マッチ行そのもの** に対して適用し、誤検知 (markdown 引用 /
+    diff body / gemini の config validation 警告) を除外する。
+
+    重要 1: `pat.search()` ではなく `pat.finditer()` を使い、benign で除外された場合も
+    後続の一致を継続して走査する。これにより benign な先行ヒットの後ろにある本物の
+    エラーを見逃さない。
+
+    重要 2: benign 判定は「マッチ行」だけを対象にする。以前は前後 40 文字の文脈窓を
+    使っていたが、それだと benign 行が直前にあるだけで後続の本物エラーを誤って benign
+    扱いしてしまった (例: `Error in: mcpServers.serena\\n...\\nTraceback ...` で
+    Traceback が誤抑制された)。
+    """
     if not path.exists():
         return None
     try:
-        # 末尾 200KB のみ読む（巨大化対策）
         sz = path.stat().st_size
         with path.open("rb") as f:
             if sz > 200 * 1024:
@@ -218,22 +255,27 @@ def _scan_early_errors(path: pathlib.Path) -> Optional[str]:
     except OSError:
         return None
 
-    for pat in EARLY_ERROR_PATTERNS:
-        m = pat.search(data)
-        if not m:
-            continue
-        # 直前後 80 文字を見て benign パターンと重なってないか確認
-        start = max(0, m.start() - 40)
-        end = min(len(data), m.end() + 40)
-        context = data[start:end]
-        if any(b.search(context) for b in EARLY_ERROR_BENIGN):
-            continue
-        # 周辺 1 行を返す
-        line_start = data.rfind("\n", 0, m.start()) + 1
-        line_end = data.find("\n", m.end())
-        line_end = line_end if line_end != -1 else len(data)
-        return data[line_start:line_end].strip()
+    for pat in patterns:
+        for m in pat.finditer(data):
+            line_start = data.rfind("\n", 0, m.start()) + 1
+            line_end = data.find("\n", m.end())
+            line_end = line_end if line_end != -1 else len(data)
+            line = data[line_start:line_end]
+            # benign パターンはマッチ行そのものに当てる。markdown 引用や
+            # `Error in: mcpServers.X` のような行単位パターンは「その行」だけを
+            # 評価すれば判定可能で、文脈窓を広げると誤判定の原因になる。
+            if any(b.search(line) for b in EARLY_ERROR_BENIGN):
+                continue
+            return line.strip()
     return None
+
+
+def _scan_early_fatal(path: pathlib.Path) -> Optional[str]:
+    return _scan_patterns(path, EARLY_ERROR_FATAL)
+
+
+def _scan_early_warn(path: pathlib.Path) -> Optional[str]:
+    return _scan_patterns(path, EARLY_ERROR_WARN)
 
 
 def _scan_codex_sentinel(path: pathlib.Path) -> bool:
@@ -258,9 +300,14 @@ def monitor_agent(
     stall_timeout: int,
     poll: int,
     require_result: bool,
+    no_early_error: bool = False,
     log_prefix: str = "",
 ) -> AgentStatus:
-    """1 agent を監視する。"""
+    """1 agent を監視する。
+
+    `no_early_error=True` のとき、EARLY_ERROR 検知 (FATAL/WARN とも) を完全に無効化し、
+    hard timeout / stall / sentinel / result.json のみで判定する。
+    """
     paths = AgentPaths.for_(agent, pr)
     status = AgentStatus(agent=agent)
     started = time.monotonic()
@@ -288,6 +335,7 @@ def monitor_agent(
     last_err_size = paths.err_log.stat().st_size if paths.err_log.exists() else 0
     last_progress = time.monotonic()
     cmdline_validated = False
+    warned_early_error = False
 
     while True:
         elapsed = time.monotonic() - started
@@ -344,15 +392,29 @@ def monitor_agent(
             return status
 
         # 3. early error
-        err = _scan_early_errors(paths.err_log)
-        if err:
-            if alive:
-                _kill_pid(pid)
-            status.status = "EARLY_ERROR"
-            status.exit_code = 4
-            status.detail = f"early error in err.log: {err[:200]}"
-            _emit_log(log_prefix, agent, status)
-            return status
+        # 明確な致命 (FATAL) のみ kill する。曖昧パターン (生 Error: / Traceback) は
+        # WARN として警告ログのみ。codex がレビュー対象 diff の test コード片を
+        # echo するケースや gemini の config validation 警告で誤 kill されるのを防ぐ。
+        if not no_early_error:
+            fatal_err = _scan_early_fatal(paths.err_log)
+            if fatal_err:
+                if alive:
+                    _kill_pid(pid)
+                status.status = "EARLY_ERROR"
+                status.exit_code = 4
+                status.detail = f"early error (fatal) in err.log: {fatal_err[:200]}"
+                _emit_log(log_prefix, agent, status)
+                return status
+
+            if not warned_early_error:
+                warn_err = _scan_early_warn(paths.err_log)
+                if warn_err:
+                    print(
+                        f"{log_prefix}⚠️  {agent} early-error WARN "
+                        f"(non-fatal, not killing): {warn_err[:200]}",
+                        file=sys.stderr, flush=True,
+                    )
+                    warned_early_error = True
 
         if not alive:
             # プロセス終了 — result.json を確認
@@ -432,6 +494,11 @@ def main() -> None:
                    help=f"poll interval in seconds (default: {DEFAULT_POLL})")
     p.add_argument("--no-require-result", action="store_true",
                    help="プロセス終了後に result.json が無くても OK 扱い")
+    p.add_argument("--no-early-error", action="store_true",
+                   default=DEFAULT_NO_EARLY_ERROR,
+                   help="EARLY_ERROR 検知を無効化 "
+                        "(hard timeout / stall / sentinel / result.json のみで判定) "
+                        f"[env: MONITOR_NO_EARLY_ERROR; default: {DEFAULT_NO_EARLY_ERROR}]")
     args = p.parse_args()
 
     agents = ["codex", "gemini"] if args.target == "both" else [args.target]
@@ -444,6 +511,7 @@ def main() -> None:
             agent=agent, pr=args.pr,
             timeout=args.timeout, stall_timeout=args.stall_timeout,
             poll=args.poll, require_result=require_result,
+            no_early_error=args.no_early_error,
             log_prefix=f"[{agent}] ",
         )
 
