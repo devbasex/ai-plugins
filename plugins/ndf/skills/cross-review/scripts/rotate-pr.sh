@@ -1,58 +1,186 @@
 #!/usr/bin/env bash
-# PR rotation — squash + 新ブランチ + 新 PR.
+# PR rotation — light モード (default) / squash モード
 #
-# Usage: rotate-pr.sh <STATE_PR>
+# Usage:
+#   rotate-pr.sh prepare <STATE_PR>
+#       旧 PR の title/body/isDraft + git log $BASE..HEAD + git diff --stat を
+#       $TMP_DIR/rotate-pr<STATE_PR>-prepare.json に dump する。
+#       light モードでは メインセッションの Agent が prepare.json を読み、
+#       現状の差分・実装を反映した新 title/body を生成して
+#       $TMP_DIR/rotate-pr<STATE_PR>-newtext.json に書き出すこと。
+#
+#   rotate-pr.sh execute <STATE_PR> --mode light|squash
+#       light  : 同ブランチで旧 PR を close → 同 head/base で新 PR を作成。
+#                title/body は newtext.json から流す。元 PR の isDraft をコピー。
+#                PR title に内部用語 (rotated/round/cross-review) は付与しない。
+#       squash : 既存挙動。squash 統合した新ブランチ (-rHHMMSS suffix) + 新 PR。
+#                title 末尾に "(rotated)"、body は automated text。
+#       いずれも stdout に NEW_PR= / NEW_PR_URL= / NEW_BRANCH= を出力。
+#
+#   rotate-pr.sh <STATE_PR>   (deprecated)
+#       旧 1 引数形式。`execute --mode squash` 相当として動くが、stderr に
+#       deprecation warning を出す。新規呼び出しは prepare → execute 形式へ移行。
 #
 # 引数 STATE_PR は state.json の key (= 最初に init した PR 番号)。
 # 閉じる「現在の PR」は state.json の `current_pr` を読む。
-#
-# 既存ブランチを squash した新ブランチを作り、旧 PR (=current_pr) を close、新 PR を作成する。
-# 新 PR 番号を stdout に "NEW_PR=<番号>" / "NEW_PR_URL=<url>" 形式で出力。
-#
 # state.json の current_pr / pr_history 更新は `state.py set-current-pr` で別途行う。
 
 set -euo pipefail
-
-STATE_PR=${1:?STATE_PR required}
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=_tmpdir.sh
 . "$SCRIPT_DIR/_tmpdir.sh"
 TMP_DIR=$(tmpdir)
 
-STATE=$TMP_DIR/cross-review-pr$STATE_PR-state.json
-[ -s "$STATE" ] || { echo "state.json not found: $STATE" >&2; exit 1; }
+usage() {
+  cat >&2 <<'USAGE'
+Usage:
+  rotate-pr.sh prepare <STATE_PR>
+  rotate-pr.sh execute <STATE_PR> --mode light|squash
+  rotate-pr.sh <STATE_PR>                        (deprecated, = execute --mode squash)
+USAGE
+}
 
-WORKTREE=$(jq -r '.worktree_path' "$STATE")
-OLD_PR=$(jq -r '.current_pr' "$STATE")
-ROUND_IN_PR=$(jq --argjson p "$OLD_PR" '[.rounds[] | select(.pr == $p)] | length' "$STATE")
+# state.json から共通情報を読み出して shell 変数にセットする。
+# 呼び出し後: STATE_FILE / WORKTREE / OLD_PR / ROUND_IN_PR が使える。
+load_state() {
+  local state_pr=$1
+  STATE_FILE=$TMP_DIR/cross-review-pr$state_pr-state.json
+  [ -s "$STATE_FILE" ] || { echo "state.json not found: $STATE_FILE" >&2; exit 1; }
+  WORKTREE=$(jq -r '.worktree_path' "$STATE_FILE")
+  OLD_PR=$(jq -r '.current_pr' "$STATE_FILE")
+  ROUND_IN_PR=$(jq --argjson p "$OLD_PR" '[.rounds[] | select(.pr == $p)] | length' "$STATE_FILE")
+}
 
-cd "$WORKTREE"
+cmd_prepare() {
+  local state_pr=${1:?STATE_PR required}
+  load_state "$state_pr"
 
-BRANCH=$(git branch --show-current)
-BASE=$(gh pr view "$OLD_PR" --json baseRefName -q .baseRefName)
-TITLE=$(gh pr view "$OLD_PR" --json title -q .title)
-NEW_BRANCH="${BRANCH}-r$(date +%H%M%S)"
+  cd "$WORKTREE"
 
-echo "🔄 PR #$OLD_PR rotation: $BRANCH → $NEW_BRANCH (base=$BASE)" >&2
+  local pr_json
+  pr_json=$(gh pr view "$OLD_PR" \
+    --json number,url,title,body,headRefName,baseRefName,isDraft)
+  local head_branch base_branch
+  head_branch=$(jq -r '.headRefName' <<<"$pr_json")
+  base_branch=$(jq -r '.baseRefName' <<<"$pr_json")
 
-# 1. 既存ブランチを squash して新ブランチに
-git checkout -b "$NEW_BRANCH"
-git reset --soft "origin/$BASE"
-git commit -m "$(cat <<EOF
-$TITLE
+  # base が origin にあることを保証 (git log/diff のため)
+  git fetch --quiet origin "$base_branch" || true
+
+  local range="origin/$base_branch..HEAD"
+  local git_log git_diff_stat
+  git_log=$(git log --pretty=format:'%h %s' "$range" 2>/dev/null || echo "")
+  git_diff_stat=$(git diff --stat "$range" 2>/dev/null || echo "")
+
+  local out=$TMP_DIR/rotate-pr$state_pr-prepare.json
+  jq -n \
+    --argjson state_pr "$state_pr" \
+    --argjson pr "$pr_json" \
+    --argjson round_in_pr "$ROUND_IN_PR" \
+    --arg     worktree "$WORKTREE" \
+    --arg     git_log "$git_log" \
+    --arg     git_diff_stat "$git_diff_stat" \
+    '{
+      state_pr:      $state_pr,
+      old_pr:        $pr.number,
+      old_pr_url:    $pr.url,
+      worktree_path: $worktree,
+      head_branch:   $pr.headRefName,
+      base_branch:   $pr.baseRefName,
+      is_draft:      $pr.isDraft,
+      round_in_pr:   $round_in_pr,
+      old_title:     $pr.title,
+      old_body:      ($pr.body // ""),
+      git_log:       $git_log,
+      git_diff_stat: $git_diff_stat
+    }' > "$out"
+
+  echo "✅ prepare.json 書き出し: $out" >&2
+  echo "PREPARE_JSON=$out"
+  echo "OLD_PR=$OLD_PR"
+  echo "HEAD_BRANCH=$(jq -r '.headRefName' <<<"$pr_json")"
+  echo "BASE_BRANCH=$(jq -r '.baseRefName' <<<"$pr_json")"
+  echo "IS_DRAFT=$(jq -r '.isDraft' <<<"$pr_json")"
+}
+
+# light モード本体: 同ブランチで旧 PR を close → 同 head/base で新 PR 作成。
+execute_light() {
+  local state_pr=$1
+  load_state "$state_pr"
+
+  local prep=$TMP_DIR/rotate-pr$state_pr-prepare.json
+  local newtext=$TMP_DIR/rotate-pr$state_pr-newtext.json
+  [ -s "$prep" ]    || { echo "prepare.json not found: $prep — `rotate-pr.sh prepare $state_pr` を先に実行" >&2; exit 1; }
+  [ -s "$newtext" ] || { echo "newtext.json not found: $newtext — Agent (general-purpose) で title/body を生成して書き出してください" >&2; exit 1; }
+
+  local head_branch base_branch is_draft new_title new_body
+  head_branch=$(jq -r '.head_branch' "$prep")
+  base_branch=$(jq -r '.base_branch' "$prep")
+  is_draft=$(jq -r '.is_draft' "$prep")
+  new_title=$(jq -r '.title' "$newtext")
+  new_body=$(jq -r '.body'  "$newtext")
+
+  [ -n "$new_title" ] && [ "$new_title" != "null" ] || { echo "newtext.json に .title がない" >&2; exit 1; }
+  [ -n "$new_body"  ] && [ "$new_body"  != "null" ] || { echo "newtext.json に .body がない"  >&2; exit 1; }
+
+  cd "$WORKTREE"
+
+  echo "🔄 PR #$OLD_PR rotation (light): 同ブランチ $head_branch で巻き直し (base=$base_branch)" >&2
+
+  # 1. 旧 PR を close (コメント残し)
+  gh pr comment "$OLD_PR" --body "ℹ️ レビューコメント履歴整理のため本 PR を一度 close し、同じブランチ \`$head_branch\` で新 PR を作り直します。ブランチの内容・base は変えません。"
+  gh pr close "$OLD_PR"
+
+  # 2. 新 PR を同 head/base で作成 (Draft 状態は元 PR から継承)
+  local create_args=(--base "$base_branch" --head "$head_branch" --title "$new_title" --body "$new_body")
+  if [ "$is_draft" = "true" ]; then
+    create_args+=(--draft)
+  fi
+  local new_pr_url
+  new_pr_url=$(gh pr create "${create_args[@]}")
+  local new_pr
+  new_pr=$(echo "$new_pr_url" | grep -oE '/pull/[0-9]+' | grep -oE '[0-9]+')
+
+  echo "✅ 新 PR #$new_pr: $new_pr_url" >&2
+  echo "NEW_PR=$new_pr"
+  echo "NEW_PR_URL=$new_pr_url"
+  echo "NEW_BRANCH=$head_branch"
+}
+
+# squash モード本体: 既存挙動を完全維持。
+execute_squash() {
+  local state_pr=$1
+  load_state "$state_pr"
+
+  cd "$WORKTREE"
+
+  local branch base title new_branch
+  branch=$(git branch --show-current)
+  base=$(gh pr view "$OLD_PR" --json baseRefName -q .baseRefName)
+  title=$(gh pr view "$OLD_PR" --json title -q .title)
+  new_branch="${branch}-r$(date +%H%M%S)"
+
+  echo "🔄 PR #$OLD_PR rotation (squash): $branch → $new_branch (base=$base)" >&2
+
+  # 1. 既存ブランチを squash して新ブランチに
+  git checkout -b "$new_branch"
+  git reset --soft "origin/$base"
+  git commit -m "$(cat <<EOF
+$title
 
 (cross-review rotation: PR #$OLD_PR を squash 統合)
 EOF
 )"
-git push -u origin "$NEW_BRANCH"
+  git push -u origin "$new_branch"
 
-# 2. 旧 PR を close（コメント残し）
-gh pr comment "$OLD_PR" --body "🔄 cross-review ループ進行中のため、本 PR を close し新規 PR に巻き直します。 round_in_pr=$ROUND_IN_PR で長尺化を回避。"
-gh pr close "$OLD_PR"
+  # 2. 旧 PR を close (コメント残し)
+  gh pr comment "$OLD_PR" --body "🔄 cross-review ループ進行中のため、本 PR を close し新規 PR に巻き直します。 round_in_pr=$ROUND_IN_PR で長尺化を回避。"
+  gh pr close "$OLD_PR"
 
-# 3. 新 PR 作成
-NEW_PR_URL=$(gh pr create --base "$BASE" --title "$TITLE (rotated)" --body "$(cat <<EOF
+  # 3. 新 PR 作成
+  local new_pr_url
+  new_pr_url=$(gh pr create --base "$base" --title "$title (rotated)" --body "$(cat <<EOF
 ## Summary
 旧 PR #$OLD_PR をベースに、cross-review クロスレビューループの継続。
 旧 PR は round_in_pr=$ROUND_IN_PR で巻き直しのため close 済み。
@@ -62,9 +190,74 @@ NEW_PR_URL=$(gh pr create --base "$BASE" --title "$TITLE (rotated)" --body "$(ca
 EOF
 )")
 
-NEW_PR=$(echo "$NEW_PR_URL" | grep -oE '/pull/[0-9]+' | grep -oE '[0-9]+')
+  local new_pr
+  new_pr=$(echo "$new_pr_url" | grep -oE '/pull/[0-9]+' | grep -oE '[0-9]+')
 
-echo "✅ 新 PR #$NEW_PR: $NEW_PR_URL" >&2
-echo "NEW_PR=$NEW_PR"
-echo "NEW_PR_URL=$NEW_PR_URL"
-echo "NEW_BRANCH=$NEW_BRANCH"
+  echo "✅ 新 PR #$new_pr: $new_pr_url" >&2
+  echo "NEW_PR=$new_pr"
+  echo "NEW_PR_URL=$new_pr_url"
+  echo "NEW_BRANCH=$new_branch"
+}
+
+cmd_execute() {
+  local state_pr=${1:?STATE_PR required}
+  shift
+  local mode=""
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --mode)
+        mode=${2:?--mode requires light|squash}
+        shift 2
+        ;;
+      --mode=*)
+        mode=${1#--mode=}
+        shift
+        ;;
+      *)
+        echo "unknown arg: $1" >&2
+        usage
+        exit 2
+        ;;
+    esac
+  done
+  case $mode in
+    light)  execute_light  "$state_pr" ;;
+    squash) execute_squash "$state_pr" ;;
+    "")     echo "--mode is required (light|squash)" >&2; usage; exit 2 ;;
+    *)      echo "invalid --mode: $mode (light|squash)" >&2; exit 2 ;;
+  esac
+}
+
+# ---- entrypoint ----
+
+if [ $# -eq 0 ]; then
+  usage
+  exit 2
+fi
+
+case $1 in
+  prepare)
+    shift
+    cmd_prepare "$@"
+    ;;
+  execute)
+    shift
+    cmd_execute "$@"
+    ;;
+  -h|--help)
+    usage
+    ;;
+  *)
+    # 旧形式: rotate-pr.sh <STATE_PR>  → squash 相当
+    if [ $# -eq 1 ] && [[ $1 =~ ^[0-9]+$ ]]; then
+      echo "⚠ DEPRECATED: rotate-pr.sh <STATE_PR> 形式は廃止予定です。新形式に移行してください:" >&2
+      echo "    rotate-pr.sh prepare $1" >&2
+      echo "    rotate-pr.sh execute $1 --mode light|squash" >&2
+      echo "  (本実行は --mode squash 相当で継続します)" >&2
+      execute_squash "$1"
+    else
+      usage
+      exit 2
+    fi
+    ;;
+esac

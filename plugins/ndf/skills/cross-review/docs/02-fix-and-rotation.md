@@ -7,7 +7,9 @@
 | (Agent) | Step 5 — 修正サブエージェント起動（メインからの責務） |
 | `scripts/state.py merge-fix` | Step 5 後段 — fix 戻り値マージ + CI 分類 |
 | `scripts/state.py should-rotate` | Step 6 — rotate 要否判定 |
-| `scripts/rotate-pr.sh` | Step 6 — PR rotation 実行 |
+| `scripts/rotate-pr.sh prepare` | Step 6a — 旧 PR の素材を `rotate-pr<STATE_PR>-prepare.json` に dump |
+| (Agent) | Step 6b — light モードのみ。新 PR の title/body を再生成して `rotate-pr<STATE_PR>-newtext.json` に書き出し |
+| `scripts/rotate-pr.sh execute` | Step 6c — 旧 PR close + 新 PR 作成 (light は同ブランチ / squash は新ブランチ) |
 | `scripts/state.py set-current-pr` | Step 6 — rotation 後の state 更新 |
 | `scripts/state.py report` | Step 8 — deferred nit + ラウンドサマリ |
 
@@ -164,11 +166,24 @@ fi
 **例**: `check_pr_requirements`（Assignees 未設定）はループ継続、
 `laravel/pint` や `phpstan` の失敗は即中断してユーザ判断。
 
-## Step 6: PR ローテーション判定
+## Step 6: PR ローテーション (prepare → Agent → execute の 3 段)
+
+`rotate-pr.sh` は **light モード (default) と squash モード (opt-in)** を持つ。
+両者ともメインからは `prepare → (light のみ Agent) → execute` の 3 段で呼ぶ。
 
 ```bash
 if "$SCRIPTS/state.py" should-rotate "$STATE_PR"; then
-  eval "$("$SCRIPTS/rotate-pr.sh" "$STATE_PR")"   # NEW_PR / NEW_PR_URL / NEW_BRANCH を取り込む
+  # Step 6a: 旧 PR の素材 dump (title / body / isDraft / git log / git diff --stat)
+  eval "$("$SCRIPTS/rotate-pr.sh" prepare "$STATE_PR")"
+
+  # Step 6b: light モードのみ。Agent(subagent_type="general-purpose") で
+  # 現状の差分・実装を反映した新 title/body を生成し、
+  # $TMP_DIR/rotate-pr<STATE_PR>-newtext.json に書き出させる。
+  # (squash モードでは Step 6b は不要)
+
+  # Step 6c: 実行 (NEW_PR / NEW_PR_URL / NEW_BRANCH を取り込む)
+  eval "$("$SCRIPTS/rotate-pr.sh" execute "$STATE_PR" --mode "$ROTATE_MODE")"
+
   "$SCRIPTS/state.py" set-current-pr "$STATE_PR" "$NEW_PR"
   # NOTE: STATE_PR は **絶対に変えない**。次ループの scripts も $STATE_PR で呼ぶ。
 fi
@@ -177,15 +192,102 @@ fi
 `should-rotate` は `round_in_pr >= rotate_after && total_rounds < max_rounds` で
 exit 0 を返す（rotate 要）。それ以外は exit 2（keep）。
 
-`rotate-pr.sh` が内部で行う処理:
+### Step 6a: `rotate-pr.sh prepare <STATE_PR>`
 
-1. state.json から `current_pr` (= 旧 PR) と `worktree_path` を読む
-2. 既存ブランチを **squash 統合** した新ブランチ作成
-3. 旧 PR に「ローテーションのため close」コメント + close
-4. 新 PR 作成（タイトル末尾に `(rotated)` 付与）
-5. 新 PR 番号 / URL / ブランチ名を stdout に KEY=VALUE で吐く
+state.json から旧 PR / worktree を解決し、以下の素材を 1 つの JSON に dump する:
 
-`state.py set-current-pr` が `state.json` の `current_pr` / `pr_history` を更新。
+```json
+{
+  "state_pr": 217,
+  "old_pr": 217,
+  "old_pr_url": "https://github.com/.../pull/217",
+  "worktree_path": "/work/worktrees/pr217",
+  "head_branch": "feature/...",
+  "base_branch": "release/...",
+  "is_draft": true,
+  "round_in_pr": 5,
+  "old_title": "...",
+  "old_body": "...",
+  "git_log": "abc1234 メッセージ\n...",
+  "git_diff_stat": " path/to/file | 12 +-\n ..."
+}
+```
+
+ファイル: `$TMP_DIR/rotate-pr<STATE_PR>-prepare.json`。
+stdout にも `OLD_PR=` / `HEAD_BRANCH=` / `BASE_BRANCH=` / `IS_DRAFT=` / `PREPARE_JSON=` を出すので
+`eval` で取り込める。
+
+### Step 6b: Agent (general-purpose) で新 title/body を生成 (light モードのみ)
+
+メインセッションから以下のように Agent を起動する。プロンプトは
+**書いて良いこと / 禁止事項** を必ず明示する:
+
+```python
+Agent(
+    subagent_type="general-purpose",
+    description=f"Generate light-rotation PR text for PR #{OLD_PR}",
+    prompt=f"""
+PR rotation の light モードで作成する新 PR の title / body を生成してください。
+
+## 素材
+- prepare.json: $TMP_DIR/rotate-pr{STATE_PR}-prepare.json
+  - 元 PR の title / body / git log $BASE..HEAD / git diff --stat
+- 必要なら worktree 内のファイルを直接読んで実装内容を確認してよい
+  (worktree: {WORKTREE_PATH})
+
+## 出力ファイル
+$TMP_DIR/rotate-pr{STATE_PR}-newtext.json に JSON で書き出してください:
+
+```json
+{{
+  "title": "新 PR の title (元 PR の title をそのままコピーしない。現状の実装を反映)",
+  "body":  "新 PR の body (Markdown)。以下のセクションを含む:\\n## 何のために\\n## 何を\\n## Test plan"
+}}
+```
+
+## 書いて **良い** こと
+- 何のために (背景・動機) — 元 PR の背景セクションは再利用可
+- 何を (変更内容) — 現在のブランチの実態を git log / git diff から反映
+- Test plan — 元 PR から継承可
+
+## 書いて **はいけない** こと (内部用語の漏洩防止)
+- 「round N で〜」「cross-review で〜」「レビュー指摘で〜」
+- 「(rotated)」のような automated suffix
+- 「fix された問題」の列挙 / レビューサイクルの存在自体への言及
+- 「旧 PR」「巻き直し」等の rotation 内部用語
+
+PR を読む人は cross-review の存在を意識しないため、最終 PR を初めて見る読者向けに
+書く。元 title / body をそのままコピーするのは **禁止** (現状の実装を反映)。
+""",
+)
+```
+
+> ⚠ `rotate-pr.sh` 内部から `claude` / `codex` / `gemini` CLI を直接呼んで生成
+> させてはならない (環境依存・コスト管理外)。**メイン側の Agent tool で行う**。
+
+### Step 6c: `rotate-pr.sh execute <STATE_PR> --mode light|squash`
+
+`--mode` で実際の rotation を実行する:
+
+| mode | 振る舞い |
+|---|---|
+| `light` (default) | prepare.json と newtext.json を読み、**同ブランチ・同 base** で旧 PR を close → 新 PR を作成。`is_draft=true` なら新 PR も Draft で作る。title/body は newtext から流す |
+| `squash` (opt-in) | 既存挙動。`<branch>-rHHMMSS` の新ブランチを作って `git reset --soft origin/$BASE` で squash 統合 → 旧 PR close → 新 PR (`(rotated)` suffix + automated body) |
+
+stdout には両モードとも以下を KEY=VALUE で出す:
+
+- `NEW_PR=<number>`
+- `NEW_PR_URL=<url>`
+- `NEW_BRANCH=<branch>`  (light モードでは元ブランチと同じ)
+
+`state.py set-current-pr` が `state.json` の `current_pr` / `pr_history` を更新する。
+state.json の **キーは元 PR 番号 (STATE_PR) のまま** なので、light/squash どちらでも
+後続スクリプトへの第 1 引数は `$STATE_PR` を渡し続ければよい。
+
+### 後方互換: 旧 1 引数形式
+
+`rotate-pr.sh <STATE_PR>` (引数 1 つ) は `execute --mode squash` 相当として動くが、
+stderr に deprecation warning を出す。新規呼び出しは必ず prepare → execute 形式へ移行。
 
 > ⚠ **重要**: state.json のファイル名は **最初に init した PR 番号** がキー
 > (`$STATE_PR`)。rotation 後も全 scripts の **第 1 引数には常に `$STATE_PR`** を渡す。

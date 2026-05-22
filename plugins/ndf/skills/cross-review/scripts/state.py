@@ -460,7 +460,13 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
 
 
 def cmd_should_rotate(args: argparse.Namespace) -> None:
-    """Step 6 — PR ローテーション要否。Exit 0=rotate, 2=keep."""
+    """Step 6 — PR ローテーション要否。Exit 0=rotate, 2=keep.
+
+    判定は ``round_in_pr >= rotate_after && total < max_rounds`` のみで、
+    rotate-pr.sh の ``--mode light|squash`` どちらでも同じ条件を使う。
+    state.json の key は ``STATE_PR`` (最初に init した PR 番号) で固定なので、
+    light モードで head_branch が変わらない場合でも整合する。
+    """
     pr = args.pr
     st = _load(pr)
     current_pr = st["current_pr"]
@@ -477,7 +483,13 @@ def cmd_should_rotate(args: argparse.Namespace) -> None:
 
 
 def cmd_set_current_pr(args: argparse.Namespace) -> None:
-    """PR ローテーション完了後の state 更新。"""
+    """PR ローテーション完了後の state 更新。
+
+    rotate-pr.sh の light / squash どちらでも、新 PR 番号を受け取って
+    ``current_pr`` を切り替え、``pr_history`` に新 PR エントリを追加する。
+    state.json のファイル名は ``STATE_PR`` (= ``args.pr``) ベースで不変なので、
+    light モードで head_branch が変わらないケースでも問題なく追跡できる。
+    """
     pr = args.pr  # 旧 PR (state file の key)
     new_pr = args.new_pr
     st = _load(pr)
