@@ -94,7 +94,7 @@ cd "$WORKTREE"
 
 1. 既存 state.json があり `final == null` なら再開
 2. 自分の PR 判定（`gh api user` と `gh pr view --json author` を比較）
-3. worktree 作成（`/work/worktrees/pr<PR>`）
+3. worktree 作成（`<worktree-base>/pr<PR>`。`<worktree-base>` は `NDF_WORKTREE_BASE` env > `/work/worktrees` > `$HOME/work/worktrees` の優先順で解決。実 path は state.json の `worktree_path` を参照）
 4. 既存コメントスナップショット → `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt`
 5. state.json 書き出し
 
@@ -163,7 +163,7 @@ fi
 launcher が生成するプロンプトに以下を強制している:
 
 - **headRefOid (commit_id) を明示**: AI が自前で取得すると baseRefOid を誤って入れる事故が多発
-- **作業 worktree の絶対パス**: 「ファイル読み取りは必ず `/work/worktrees/pr<PR>/` 配下の絶対パスを使う」
+- **作業 worktree の絶対パス**: 「ファイル読み取りは必ず worktree 配下の絶対パスを使う」（実 path は state.json の `worktree_path` を参照。`<worktree-base>` は `NDF_WORKTREE_BASE` env > `/work/worktrees` > `$HOME/work/worktrees` の優先順で解決）
 - **event ダウングレード警告**: `event_downgrade=true` のときは payload の `event` を `COMMENT` に
 - **既存コメント差分**: `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt` を読んで重複指摘禁止
 - **review body 先頭 prefix**:

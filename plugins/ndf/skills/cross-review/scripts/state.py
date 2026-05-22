@@ -36,6 +36,27 @@ from typing import Any
 
 # ---------------- helpers ----------------
 
+def _default_worktree_base() -> pathlib.Path:
+    """worktree の親ディレクトリを環境に応じて解決する。
+
+    優先順位:
+      1. 環境変数 NDF_WORKTREE_BASE (明示オーバーライド)
+      2. /work/worktrees (Linux コンテナ環境互換、書き込み可能ならそれを使う)
+      3. $HOME/work/worktrees (macOS / WSL 等のフォールバック)
+    """
+    env = os.environ.get("NDF_WORKTREE_BASE")
+    if env:
+        return pathlib.Path(env)
+    legacy = pathlib.Path("/work/worktrees")
+    try:
+        legacy.mkdir(parents=True, exist_ok=True)
+        # mkdir 成功 = 書き込み可能 → 既存環境互換でこちらを使う
+        return legacy
+    except OSError:
+        pass
+    return pathlib.Path.home() / "work" / "worktrees"
+
+
 def _tmp_dir(workspace: str | None = None) -> pathlib.Path:
     """cross-review 用 tmp ディレクトリを決定する。
 
@@ -119,7 +140,7 @@ def cmd_init(args: argparse.Namespace) -> None:
     # os.getcwd() の basename (= 親リポジトリ名) を採用していたため、
     # launch-gemini.sh で `cd $WORKTREE` した後の gemini が
     # `~/.gemini/tmp/<repo>` への write をブロックして hard timeout していた。
-    worktree = args.worktree or f"/work/worktrees/pr{pr}"
+    worktree = args.worktree or str(_default_worktree_base() / f"pr{pr}")
     tmp_dir = _tmp_dir(worktree)
     state_file = tmp_dir / f"cross-review-pr{pr}-state.json"
 
@@ -250,19 +271,33 @@ def cmd_read_result(args: argparse.Namespace) -> None:
         die(f"{agent}: result 未生成 ({rfile})")
 
     r = json.loads(rfile.read_text())
+
+    # 別名フィールドへのフォールバック (gemini が `intent` / `comment_count` を使う変則 JSON を
+    # 書き出す既知のケースに対応する。仕様としては `event` / `comments_count` が正)
+    intent = r.get("event") or r.get("intent")
+    posted_as = r.get("posted_as") or intent
+    comments = r.get("comments_count")
+    if comments is None:
+        comments = r.get("comment_count")
+
+    if intent is None:
+        die(
+            f"{agent}: result.json に event / intent フィールドが無い ({rfile})。"
+            " launcher prompt のスキーマ違反の可能性。"
+        )
+
     st = _load(pr)
     if not st.get("rounds"):
         die(f"{agent}: state.rounds が空。`state.py start-round` を先に呼んでください")
     st["rounds"][-1][agent] = {
-        "intent": r.get("event"),
-        "posted_as": r.get("posted_as", r.get("event")),
-        "comments": r.get("comments_count"),
+        "intent": intent,
+        "posted_as": posted_as,
+        "comments": comments,
         "review_url": r.get("review_url"),
         "by_severity": r.get("by_severity", {}),
     }
     _save(pr, st)
-    info(f"✅ {agent}: intent={r.get('event')} posted_as={r.get('posted_as', r.get('event'))} "
-         f"comments={r.get('comments_count')}")
+    info(f"✅ {agent}: intent={intent} posted_as={posted_as} comments={comments}")
 
 
 def cmd_judge(args: argparse.Namespace) -> None:

@@ -1,5 +1,58 @@
 # NDF Plugin CHANGELOG
 
+### v4.7.3 (cross-review: macOS 対応 worktree base + result.json スキーマ堅牢化)
+
+`/ndf:cross-review` を非 Linux コンテナ環境 (macOS / WSL 等) でも素直に動かせるよう、
+worktree のデフォルトパス解決を環境適応型に変更。あわせて gemini が変則スキーマで
+result.json を書き出すケースで intent が silent に None マージされて judge が空回り
+する不具合を恒久対応する PATCH リリース。
+
+- **worktree デフォルトパスの環境適応** (`skills/cross-review/scripts/state.py`):
+  - `state.py init` が以下の優先順で worktree 親ディレクトリを解決:
+    1. `NDF_WORKTREE_BASE` 環境変数 (明示オーバーライド)
+    2. `/work/worktrees` (Linux コンテナ環境互換。書込可ならこちらを使用)
+    3. `$HOME/work/worktrees` (macOS / WSL 等のフォールバック)
+  - 既存の Linux コンテナ環境では `/work/worktrees` が引き続き使われ挙動不変。
+  - SKILL.md / docs から `/work/worktrees/pr<PR>` のハードコードを除去し、
+    `<worktree-base>/pr<PR>` 表記に統一 (state.json サンプル中の解決例 1 箇所のみ残存)。
+- **gemini result.json スキーマの明示化** (`skills/cross-review/scripts/launch-gemini.sh`):
+  - 「フォーマットは launch-codex.sh と同じ」という曖昧指示を、codex と同一の
+    フィールド列挙ブロック (`event` / `posted_as` / `comments_count` / `review_url` /
+    `by_severity`) に置き換え。`intent` / `comment_count` 等の別名を使わないことを明記。
+- **`state.py read-result` の堅牢化**:
+  - 仕様 (`event` / `comments_count`) を優先しつつ、別名 (`intent` / `comment_count`)
+    も拾えるようフォールバックを追加。
+  - `event` / `intent` いずれも欠落している場合は `die()` (exit 1) で fail する。
+    旧挙動 (silent な `intent=None` マージで judge が空回り) は **破壊的に修正**。
+- **monitor.py EARLY_ERROR 誤検知の修正** (`skills/cross-review/scripts/monitor.py`):
+  - SKILL.md / `docs/01-state-and-review.md` の Markdown 表セル内で FATAL キーワード
+    (`「quota exceeded」`「sandbox error」等) を列挙しており、codex がレビュー時に
+    それを echo すると err.log 上で `_scan_early_fatal()` が誤発火してプロセスを
+    kill していた。以下 2 段の防御で恒久対応:
+    1. `EARLY_ERROR_BENIGN` に Markdown 表セル行 (`^\|`) を追加。
+    2. マッチ位置が backtick / 日本語「」で引用されている場合に benign 扱いする
+       `_match_is_quoted()` ヘルパを追加し、`_scan_patterns()` から呼ぶ。
+  - FATAL パターンから `^.*` プレフィックスを外し、`m.start()` をキーワード位置に
+    合わせて引用判定が機能するように修正。
+- **pytest 追加** (`skills/cross-review/tests/`):
+  - `test_state_read_result.py` — 正規/変則/欠落スキーマ 4 ケース。
+  - `test_default_worktree_base.py` — env / legacy / fallback の 3 ケース。
+  - `test_monitor_early_error.py` — Markdown 表 / backtick / 日本語クォート引用の
+    benign 判定と、本物 fatal が依然検知される回帰テスト 7 ケース。
+  - ローカル実行: `uv run --with pytest pytest plugins/ndf/skills/cross-review/tests`。
+- **関連 issue / plan**:
+  - `issues/i17.md` (再現報告) / `issues/PLAN20_cross-review-worktree-and-result-schema-fix.md` (実装プラン)。
+
+#### 既存ユーザへの影響
+
+- `/work/worktrees` が書ける環境 (大半の Linux コンテナ環境): **挙動不変**。
+- macOS / WSL 等で `/work` が書けない環境: `--worktree` 引数なしでも
+  `$HOME/work/worktrees/pr<PR>` に自動フォールバックして init が成功する。
+- gemini が変則スキーマ (`intent` / `comment_count`) で result.json を書く現象を
+  観測していたユーザ: フォールバックで自動的に取り込まれるようになる。
+- `result.json` から `event` / `intent` が両方欠落しているケースは exit 1 で
+  早期 fail する (旧: judge 段階まで silent に None が伝播)。
+
 ### v4.7.0 (fix / cross-review: 修正ポリシー刷新 + CI 完了待ち廃止)
 
 `/ndf:fix` と `/ndf:cross-review` の修正方針を見直し、PR の最終的なコード品質を
