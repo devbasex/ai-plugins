@@ -24,9 +24,21 @@ result.json を書き出すケースで intent が silent に None マージさ�
     も拾えるようフォールバックを追加。
   - `event` / `intent` いずれも欠落している場合は `die()` (exit 1) で fail する。
     旧挙動 (silent な `intent=None` マージで judge が空回り) は **破壊的に修正**。
+- **monitor.py EARLY_ERROR 誤検知の修正** (`skills/cross-review/scripts/monitor.py`):
+  - SKILL.md / `docs/01-state-and-review.md` の Markdown 表セル内で FATAL キーワード
+    (`「quota exceeded」`「sandbox error」等) を列挙しており、codex がレビュー時に
+    それを echo すると err.log 上で `_scan_early_fatal()` が誤発火してプロセスを
+    kill していた。以下 2 段の防御で恒久対応:
+    1. `EARLY_ERROR_BENIGN` に Markdown 表セル行 (`^\|`) を追加。
+    2. マッチ位置が backtick / 日本語「」で引用されている場合に benign 扱いする
+       `_match_is_quoted()` ヘルパを追加し、`_scan_patterns()` から呼ぶ。
+  - FATAL パターンから `^.*` プレフィックスを外し、`m.start()` をキーワード位置に
+    合わせて引用判定が機能するように修正。
 - **pytest 追加** (`skills/cross-review/tests/`):
   - `test_state_read_result.py` — 正規/変則/欠落スキーマ 4 ケース。
   - `test_default_worktree_base.py` — env / legacy / fallback の 3 ケース。
+  - `test_monitor_early_error.py` — Markdown 表 / backtick / 日本語クォート引用の
+    benign 判定と、本物 fatal が依然検知される回帰テスト 7 ケース。
   - ローカル実行: `uv run --with pytest pytest plugins/ndf/skills/cross-review/tests`。
 - **関連 issue / plan**:
   - `issues/i17.md` (再現報告) / `issues/PLAN20_cross-review-worktree-and-result-schema-fix.md` (実装プラン)。

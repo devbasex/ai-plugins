@@ -298,6 +298,9 @@ def cmd_read_result(args: argparse.Namespace) -> None:
 - [ ] plugin version が `4.7.3` に上がり、CHANGELOG / 開発履歴に v4.7.3 の節がある
 - [ ] SKILL.md / docs から `/work/worktrees/pr<PR>` のハードコードが取り除かれている
       (state.json サンプル中の解決例 1 箇所のみ許容)
+- [ ] `monitor.py` の EARLY_ERROR 検知が SKILL.md / docs 中の Markdown 表セルや
+      backtick / 「」 引用内のキーワードを誤検知しない (cross-review 自己レビュー時の
+      誤 kill を解消)
 
 ## 参考
 
