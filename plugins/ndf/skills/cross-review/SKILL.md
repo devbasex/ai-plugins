@@ -206,8 +206,18 @@ while :; do
     #   $TMP_DIR/rotate-pr<STATE_PR>-newtext.json に書き出させる。
     #   詳細プロンプトは docs/02-fix-and-rotation.md Step 6b 参照。
     #   squash モードでは Step 6b 不要。
-    if [ "$ROTATE_MODE" = "light" ]; then
-      :  # Agent(...) 呼び出しはメインセッション側 (Bash からは呼べない)
+    #
+    #   ⚠ Bash からは Agent ツールを呼べないため、ここはメインセッション側で
+    #   Agent(...) を実行し、戻ってきてから Step 6c に進む構造になる。
+    #   下記 if 内の exit はガード: newtext.json が無い状態で誤って Step 6c を
+    #   走らせると rotate-pr.sh execute --mode light が必ず失敗するため、
+    #   先にメインの Agent 呼び出しを完了してから再開させる。
+    NEWTEXT_JSON="$TMP_DIR/rotate-pr$STATE_PR-newtext.json"
+    if [ "$ROTATE_MODE" = "light" ] && [ ! -s "$NEWTEXT_JSON" ]; then
+      echo "⏸  light モード: メインセッションで Agent(general-purpose) を起動し" >&2
+      echo "    $NEWTEXT_JSON を生成してからこのループを再開してください" >&2
+      echo "    (docs/02-fix-and-rotation.md Step 6b 参照)" >&2
+      exit 10
     fi
 
     # Step 6c: 実行。NEW_PR / NEW_PR_URL / NEW_BRANCH を eval で取り込む。
