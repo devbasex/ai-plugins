@@ -139,9 +139,11 @@ execute_light() {
 
   # 1. 作業ディレクトリに未 push のコミットがある可能性に備え、close 前に push する。
   #    push しないと新 PR に最新コミットが反映されないケースがあるため必須 (gemini 指摘)。
-  #    --force / --no-verify は禁止。
-  echo "🔼 git push origin $head_branch (未 push commit が無ければ no-op)" >&2
-  git push origin "$head_branch"
+  #    state.py init は worktree を detached HEAD で作るため、ブランチ名のみで push すると
+  #    detached HEAD 上の修正コミットが push されない。HEAD:<branch> 形式で現在の HEAD を
+  #    明示する (codex 指摘)。--force / --no-verify は禁止。
+  echo "🔼 git push origin HEAD:$head_branch (未 push commit が無ければ no-op)" >&2
+  git push origin HEAD:"$head_branch"
 
   # 2. 旧 PR を close (コメント残し)
   gh pr comment "$OLD_PR" --body "ℹ️ レビューコメント履歴整理のため本 PR を一度 close し、同じブランチ \`$head_branch\` で新 PR を作り直します。ブランチの内容・base は変えません。"
