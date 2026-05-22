@@ -66,7 +66,12 @@ cmd_prepare() {
   base_branch=$(jq -r '.baseRefName' <<<"$pr_json")
 
   # base が origin にあることを保証 (git log/diff のため)
-  git fetch --quiet origin "$base_branch" || true
+  if ! git fetch --quiet origin "$base_branch"; then
+    echo "⚠ git fetch origin $base_branch に失敗しました。ローカル参照のみで継続します。" >&2
+  fi
+  if ! git rev-parse --verify --quiet "origin/$base_branch" >/dev/null; then
+    echo "⚠ origin/$base_branch が見つかりません。git_log / git_diff_stat は空になります。" >&2
+  fi
 
   local range="origin/$base_branch..HEAD"
   local git_log git_diff_stat
@@ -111,7 +116,7 @@ execute_light() {
 
   local prep=$TMP_DIR/rotate-pr$state_pr-prepare.json
   local newtext=$TMP_DIR/rotate-pr$state_pr-newtext.json
-  [ -s "$prep" ]    || { echo "prepare.json not found: $prep — `rotate-pr.sh prepare $state_pr` を先に実行" >&2; exit 1; }
+  [ -s "$prep" ]    || { echo "prepare.json not found: $prep — 先に rotate-pr.sh prepare $state_pr を実行してください" >&2; exit 1; }
   [ -s "$newtext" ] || { echo "newtext.json not found: $newtext — Agent (general-purpose) で title/body を生成して書き出してください" >&2; exit 1; }
 
   local head_branch base_branch is_draft new_title new_body
@@ -132,6 +137,16 @@ execute_light() {
   gh pr comment "$OLD_PR" --body "ℹ️ レビューコメント履歴整理のため本 PR を一度 close し、同じブランチ \`$head_branch\` で新 PR を作り直します。ブランチの内容・base は変えません。"
   gh pr close "$OLD_PR"
 
+  # close 後に create が失敗した場合は旧 PR を reopen して rotation の途中停止を回避する
+  reopen_old_pr_on_failure() {
+    local exit_code=$?
+    if [ "$exit_code" -ne 0 ]; then
+      echo "⚠ 新 PR 作成に失敗 (exit=$exit_code) — 旧 PR #$OLD_PR を reopen します" >&2
+      gh pr reopen "$OLD_PR" >&2 || echo "⚠ 旧 PR #$OLD_PR の reopen にも失敗しました。手動で確認してください。" >&2
+    fi
+  }
+  trap reopen_old_pr_on_failure EXIT
+
   # 2. 新 PR を同 head/base で作成 (Draft 状態は元 PR から継承)
   local create_args=(--base "$base_branch" --head "$head_branch" --title "$new_title" --body "$new_body")
   if [ "$is_draft" = "true" ]; then
@@ -139,8 +154,12 @@ execute_light() {
   fi
   local new_pr_url
   new_pr_url=$(gh pr create "${create_args[@]}")
+  # PR 番号は --json number で頑健に取得 (URL 文字列の grep は壊れやすい)
   local new_pr
-  new_pr=$(echo "$new_pr_url" | grep -oE '/pull/[0-9]+' | grep -oE '[0-9]+')
+  new_pr=$(gh pr view "$new_pr_url" --json number -q .number)
+
+  # ここまで来れば create 成功なので trap は解除する
+  trap - EXIT
 
   echo "✅ 新 PR #$new_pr: $new_pr_url" >&2
   echo "NEW_PR=$new_pr"
@@ -190,8 +209,9 @@ EOF
 EOF
 )")
 
+  # PR 番号は --json number -q .number で頑健に取得
   local new_pr
-  new_pr=$(echo "$new_pr_url" | grep -oE '/pull/[0-9]+' | grep -oE '[0-9]+')
+  new_pr=$(gh pr view "$new_pr_url" --json number -q .number)
 
   echo "✅ 新 PR #$new_pr: $new_pr_url" >&2
   echo "NEW_PR=$new_pr"
