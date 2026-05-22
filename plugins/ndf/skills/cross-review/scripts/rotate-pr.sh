@@ -228,9 +228,22 @@ EOF
   gh pr comment "$OLD_PR" --body "🔄 cross-review ループ進行中のため、本 PR を close し新規 PR に巻き直します。 round_in_pr=$ROUND_IN_PR で長尺化を回避。"
   gh pr close "$OLD_PR"
 
+  # close 後に create が失敗した場合は旧 PR を reopen して rotation の途中停止を回避する
+  # (execute_light と同じパターン, gemini round 5 指摘)
+  reopen_old_pr_on_failure() {
+    local exit_code=$?
+    if [ "$exit_code" -ne 0 ]; then
+      echo "⚠ 新 PR 作成に失敗 (exit=$exit_code) — 旧 PR #$OLD_PR を reopen します" >&2
+      gh pr reopen "$OLD_PR" >&2 || echo "⚠ 旧 PR #$OLD_PR の reopen にも失敗しました。手動で確認してください。" >&2
+    fi
+  }
+  trap reopen_old_pr_on_failure EXIT
+
   # 3. 新 PR 作成
-  local new_pr_url
-  new_pr_url=$(gh pr create --base "$base" --title "$title (rotated)" --body "$(cat <<EOF
+  #    body は --body-file - 経由で stdin から渡し、argv 長制限を回避する
+  #    (execute_light と統一, gemini round 5 指摘)
+  local new_body
+  new_body=$(cat <<EOF
 ## Summary
 旧 PR #$OLD_PR をベースに、cross-review クロスレビューループの継続。
 旧 PR は round_in_pr=$ROUND_IN_PR で巻き直しのため close 済み。
@@ -238,11 +251,16 @@ EOF
 
 <!-- I want to review in Japanese. -->
 EOF
-)")
+)
+  local new_pr_url
+  new_pr_url=$(printf '%s' "$new_body" | gh pr create --base "$base" --title "$title (rotated)" --body-file -)
 
   # PR 番号は --json number -q .number で頑健に取得
   local new_pr
   new_pr=$(gh pr view "$new_pr_url" --json number -q .number)
+
+  # ここまで来れば create 成功なので trap は解除する
+  trap - EXIT
 
   echo "✅ 新 PR #$new_pr: $new_pr_url" >&2
   # eval される契約。new_branch / URL に shell メタ文字が混ざっても安全なよう %q で escape
