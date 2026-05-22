@@ -87,8 +87,22 @@ $EXISTING_INLINE
 - 設計レベル・PR 横断の **修正提案のみ** 書く
 - 書くことが無ければ prefix 行 + 1 行サマリだけで良い (褒め言葉や評価文は不要)
 
-- 投稿後、サマリを **$TMP_DIR/gemini-review-pr$STATE_PR-result.json** に書く（フォーマットは launch-codex.sh と同じ）
+- 投稿後、サマリを **$TMP_DIR/gemini-review-pr$STATE_PR-result.json** に
+  **必ず以下のキーで** 書く:
+  \`\`\`json
+  {
+    "event": "APPROVE",
+    "posted_as": "COMMENT",
+    "comments_count": 3,
+    "review_url": "https://github.com/.../pull/$PR#pullrequestreview-...",
+    "by_severity": {"critical": 0, "major": 0, "minor": 0, "nit": 0}
+  }
+  \`\`\`
+  - \`intent\` / \`comment_count\` 等の別名は使わないこと
+  - \`event\` の値は \`APPROVE\` / \`REQUEST_CHANGES\` / \`COMMENT\` のいずれか
+  - \`event_downgrade=true\` のとき \`posted_as\` は \`COMMENT\` にダウングレード可
 - payload は **$TMP_DIR/gemini-review-pr$STATE_PR-round$ROUND-payload.json** に保存
+  （振動検知用、\`{ "comments": [{path, line, body, severity}, ...] }\` 形式）
 
 ## 守るべきこと
 - **リポジトリ編集禁止**。gh api での投稿のみ許可

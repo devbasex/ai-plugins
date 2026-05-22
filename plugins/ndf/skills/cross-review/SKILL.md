@@ -75,9 +75,20 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 | # | 対策 | スクリプト側で何をするか |
 |---|---|---|
 | 1 | 自分の PR 判定（422 回避） | `gh api user` と `gh pr view --json author` を比較し `is_own_pr` / `event_downgrade` を state.json に書く |
-| 2 | worktree 分離 | `git worktree add /work/worktrees/pr<PR> <head>` を冪等実行 |
+| 2 | worktree 分離 | `git worktree add <worktree-base>/pr<PR> <head>` を冪等実行（`<worktree-base>` は `NDF_WORKTREE_BASE` env > `/work/worktrees` > `$HOME/work/worktrees` の優先順で解決） |
 | 3 | gemini trusted directory | `launch-gemini.sh` が `GEMINI_CLI_TRUST_WORKSPACE=true` + `--skip-trust` を必ず併用。さらに **tmp dir は `~/.gemini/tmp/<workspace>/`** を採用し、gemini の workspace 制約 (workspace 外の `read_file` / `write_file` がブロックされる) を回避 |
 | 4 | 既存コメント差分 | `gh api .../comments --paginate` を `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt` に保存し、gemini プロンプトには **内容をインライン埋め込み**、codex プロンプトには path を渡す |
+
+### `<worktree-base>` の解決順
+
+`state.py init` は worktree の親ディレクトリを以下の優先順で解決する:
+
+1. `NDF_WORKTREE_BASE` 環境変数（明示オーバーライド）
+2. `/work/worktrees`（Linux コンテナ環境互換。書き込み可能ならこちらを使用）
+3. `$HOME/work/worktrees`（macOS / WSL 等のフォールバック）
+
+解決した実パスは `state.json` の `worktree_path` に書かれるため、後続スクリプトや
+サブエージェント prompt は state.json から読めば追従できる。
 
 ### intent / posted_as の両保持（最重要）
 
@@ -98,7 +109,7 @@ GitHub は **自分の PR には `REQUEST_CHANGES` でレビューを投稿で�
 
 ```mermaid
 flowchart TD
-    Start([事前確認 / loop 開始前に 1 回だけ]):::phase --> Init["worktree 作成 + state.json 初期化<br/>・自分の PR 判定 → event downgrade 設定<br/>・/work/worktrees/pr&lt;PR&gt; を用意<br/>・既存コメントスナップショット保存"]
+    Start([事前確認 / loop 開始前に 1 回だけ]):::phase --> Init["worktree 作成 + state.json 初期化<br/>・自分の PR 判定 → event downgrade 設定<br/>・&lt;worktree-base&gt;/pr&lt;PR&gt; を用意<br/>・既存コメントスナップショット保存"]
     Init --> Round["Round N start<br/>current_pr = PR#"]:::phase
 
     Round -.並列バックグラウンド.-> Codex["/ndf:review &lt;PR&gt; codex<br/>(AI が gh api で直接投稿)<br/>body 先頭: cross-review / round N / codex / intent<br/>→ result.json (intent + posted_as)"]
