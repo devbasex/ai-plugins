@@ -9,7 +9,7 @@
 #       現状の差分・実装を反映した新 title/body を生成して
 #       $TMP_DIR/rotate-pr<STATE_PR>-newtext.json に書き出すこと。
 #
-#   rotate-pr.sh execute <STATE_PR> --mode light|squash
+#   rotate-pr.sh execute <STATE_PR> [--mode light|squash]   (default: light)
 #       light  : 同ブランチで旧 PR を close → 同 head/base で新 PR を作成。
 #                title/body は newtext.json から流す。元 PR の isDraft をコピー。
 #                PR title に内部用語 (rotated/round/cross-review) は付与しない。
@@ -36,7 +36,7 @@ usage() {
   cat >&2 <<'USAGE'
 Usage:
   rotate-pr.sh prepare <STATE_PR>
-  rotate-pr.sh execute <STATE_PR> --mode light|squash
+  rotate-pr.sh execute <STATE_PR> [--mode light|squash]   (default: light)
   rotate-pr.sh <STATE_PR>                        (deprecated, = execute --mode squash)
 USAGE
 }
@@ -189,7 +189,24 @@ execute_squash() {
   cd "$WORKTREE"
 
   local branch base title new_branch
+  # state.py init は worktree を `git worktree add --detach origin/<head>` で作るため、
+  # `git branch --show-current` は空文字を返す。空のまま new_branch を生成すると
+  # `-rHHMMSS` だけのブランチ名になってしまうので、フォールバック順を以下に固定する:
+  #   1. git branch --show-current (通常 worktree なら使える)
+  #   2. prepare.json の head_branch (prepare 済みなら最も信頼できる)
+  #   3. gh pr view --json headRefName (prepare 未実行でも復元可能)
+  # (codex round 4 指摘)
   branch=$(git branch --show-current)
+  if [ -z "$branch" ]; then
+    local prep=$TMP_DIR/rotate-pr$state_pr-prepare.json
+    if [ -s "$prep" ]; then
+      branch=$(jq -r '.head_branch // empty' "$prep")
+    fi
+  fi
+  if [ -z "$branch" ]; then
+    branch=$(gh pr view "$OLD_PR" --json headRefName -q .headRefName)
+  fi
+  [ -n "$branch" ] || { echo "head branch を復元できませんでした (detached worktree かつ prepare.json / gh pr view から取得失敗)" >&2; exit 1; }
   base=$(gh pr view "$OLD_PR" --json baseRefName -q .baseRefName)
   title=$(gh pr view "$OLD_PR" --json title -q .title)
   new_branch="${branch}-r$(date +%H%M%S)"
@@ -237,7 +254,9 @@ EOF
 cmd_execute() {
   local state_pr=${1:?STATE_PR required}
   shift
-  local mode=""
+  # --mode 未指定時は light を default (SKILL.md / 02-fix-and-rotation.md / スクリプト
+  # 冒頭コメントの「light モード (default)」表記に CLI 契約を揃える, codex round 4 指摘)
+  local mode="light"
   while [ $# -gt 0 ]; do
     case $1 in
       --mode)
@@ -258,7 +277,6 @@ cmd_execute() {
   case $mode in
     light)  execute_light  "$state_pr" ;;
     squash) execute_squash "$state_pr" ;;
-    "")     echo "--mode is required (light|squash)" >&2; usage; exit 2 ;;
     *)      echo "invalid --mode: $mode (light|squash)" >&2; exit 2 ;;
   esac
 }
