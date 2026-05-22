@@ -201,22 +201,27 @@ while :; do
     # Step 6a: 旧 PR の素材 (title/body/isDraft + git log/diff stat) を dump
     eval "$("$SCRIPTS/rotate-pr.sh" prepare "$STATE_PR")"
 
-    # Step 6b: light モードのみ。メインが Agent(subagent_type="general-purpose") を
-    #   起動して prepare.json を読ませ、現状の差分・実装を反映した title/body を
+    # Step 6b: light モードのみ。**メインセッション側で Agent(subagent_type="general-purpose") を起動して**
+    #   prepare.json を読ませ、現状の差分・実装を反映した title/body を
     #   $TMP_DIR/rotate-pr<STATE_PR>-newtext.json に書き出させる。
     #   詳細プロンプトは docs/02-fix-and-rotation.md Step 6b 参照。
     #   squash モードでは Step 6b 不要。
     #
-    #   ⚠ Bash からは Agent ツールを呼べないため、ここはメインセッション側で
-    #   Agent(...) を実行し、戻ってきてから Step 6c に進む構造になる。
-    #   下記 if 内の exit はガード: newtext.json が無い状態で誤って Step 6c を
-    #   走らせると rotate-pr.sh execute --mode light が必ず失敗するため、
-    #   先にメインの Agent 呼び出しを完了してから再開させる。
+    #   ⚠ Bash 単体では Agent ツールを呼べない。下記のフローは「メイン会話セッション側で」
+    #   実行される前提なので、bash の while ループそのものは pseudo-code として読み、
+    #   実際には以下の 3 段階を **メインが順に駆動する** こと:
+    #     (1) bash 側で `rotate-pr.sh prepare $STATE_PR` を実行 (これは普通の bash)
+    #     (2) メインが Agent(...) を起動して newtext.json を書かせる (bash の外)
+    #     (3) bash 側で `rotate-pr.sh execute $STATE_PR --mode light` を実行
+    #   下記の if exit 10 は **誤ってメイン介在なしで Step 6c に進むことを防ぐガード** であり、
+    #   exit 10 を観測したらメインは Step 6b の Agent を起動し、newtext.json が
+    #   生成されてから **同じ STATE_PR で Step 6c (execute) を直接呼び直す**。
+    #   state.json は完全に再開可能 (prepare.json はそのまま再利用される)。
     NEWTEXT_JSON="$TMP_DIR/rotate-pr$STATE_PR-newtext.json"
     if [ "$ROTATE_MODE" = "light" ] && [ ! -s "$NEWTEXT_JSON" ]; then
       echo "⏸  light モード: メインセッションで Agent(general-purpose) を起動し" >&2
-      echo "    $NEWTEXT_JSON を生成してからこのループを再開してください" >&2
-      echo "    (docs/02-fix-and-rotation.md Step 6b 参照)" >&2
+      echo "    $NEWTEXT_JSON を生成してから rotate-pr.sh execute $STATE_PR --mode light を実行してください" >&2
+      echo "    (docs/02-fix-and-rotation.md Step 6b 参照 / 再開プロトコルは下記 '## 再開プロトコル')" >&2
       exit 10
     fi
 
@@ -236,6 +241,30 @@ done
 
 - Step 0〜4 — [docs/01-state-and-review.md](docs/01-state-and-review.md)
 - Step 5〜8 — [docs/02-fix-and-rotation.md](docs/02-fix-and-rotation.md)
+
+## light モード rotation の再開プロトコル (exit 10 を観測した時)
+
+bash ループは Agent tool を呼べないため、light モードでは Step 6b の介入が必須。
+メインセッションはループ全体を 1 回の bash で完結させず、以下のように駆動する:
+
+1. **通常のループ実行** — Step 0〜6a まで bash で進めると、newtext.json が未生成の
+   ため `exit 10` で停止する。state.json には prepare.json までの状態が
+   永続化されているので **そのまま再開可能**。
+2. **Step 6b (Agent 起動)** — メインが Agent(subagent_type=`general-purpose`) を
+   起動し、prepare.json を読ませて `$TMP_DIR/rotate-pr$STATE_PR-newtext.json` を
+   書き出させる (プロンプトテンプレートは docs/02-fix-and-rotation.md Step 6b)。
+3. **Step 6c (execute) を直接呼ぶ** — メインが bash で以下を実行:
+
+    ```bash
+    eval "$("$SCRIPTS/rotate-pr.sh" execute "$STATE_PR" --mode light)"
+    "$SCRIPTS/state.py" set-current-pr "$STATE_PR" "$NEW_PR"
+    ```
+
+4. **ループ再開** — Step 7 (次ラウンド) からループ全体を再開する。`STATE_PR` は
+   不変なので、`start-round` 以降は通常通り進む。
+
+> ⚠ exit 10 はエラーではなく **メイン介入待ちの一時停止シグナル**。final ステータスには
+> 反映しない (中断扱いではない)。次回 round カウントにも影響しない。
 
 ## レビュー出力の制約
 

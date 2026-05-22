@@ -102,11 +102,14 @@ cmd_prepare() {
     }' > "$out"
 
   echo "✅ prepare.json 書き出し: $out" >&2
-  echo "PREPARE_JSON=$out"
-  echo "OLD_PR=$OLD_PR"
-  echo "HEAD_BRANCH=$(jq -r '.headRefName' <<<"$pr_json")"
-  echo "BASE_BRANCH=$(jq -r '.baseRefName' <<<"$pr_json")"
-  echo "IS_DRAFT=$(jq -r '.isDraft' <<<"$pr_json")"
+  # 呼び出し側 (SKILL.md / docs) は eval で stdout を取り込む契約。
+  # PR の head/base 由来の値は shell メタ文字を含み得るため必ず printf '%q' で
+  # シェルエスケープしてから出力する (例: ブランチ名に "; rm -rf / 等が来ても安全)。
+  printf 'PREPARE_JSON=%q\n' "$out"
+  printf 'OLD_PR=%q\n'      "$OLD_PR"
+  printf 'HEAD_BRANCH=%q\n' "$head_branch"
+  printf 'BASE_BRANCH=%q\n' "$base_branch"
+  printf 'IS_DRAFT=%q\n'    "$(jq -r '.isDraft' <<<"$pr_json")"
 }
 
 # light モード本体: 同ブランチで旧 PR を close → 同 head/base で新 PR 作成。
@@ -127,13 +130,20 @@ execute_light() {
   new_body=$(jq -r '.body'  "$newtext")
 
   [ -n "$new_title" ] && [ "$new_title" != "null" ] || { echo "newtext.json に .title がない" >&2; exit 1; }
-  [ -n "$new_body"  ] && [ "$new_body"  != "null" ] || { echo "newtext.json に .body がない"  >&2; exit 1; }
+  # body は空文字列を許容 (GitHub は空 body を許容)。null のみ拒否。
+  [ "$new_body" != "null" ] || { echo "newtext.json に .body がない (null)"  >&2; exit 1; }
 
   cd "$WORKTREE"
 
   echo "🔄 PR #$OLD_PR rotation (light): 同ブランチ $head_branch で巻き直し (base=$base_branch)" >&2
 
-  # 1. 旧 PR を close (コメント残し)
+  # 1. 作業ディレクトリに未 push のコミットがある可能性に備え、close 前に push する。
+  #    push しないと新 PR に最新コミットが反映されないケースがあるため必須 (gemini 指摘)。
+  #    --force / --no-verify は禁止。
+  echo "🔼 git push origin $head_branch (未 push commit が無ければ no-op)" >&2
+  git push origin "$head_branch"
+
+  # 2. 旧 PR を close (コメント残し)
   gh pr comment "$OLD_PR" --body "ℹ️ レビューコメント履歴整理のため本 PR を一度 close し、同じブランチ \`$head_branch\` で新 PR を作り直します。ブランチの内容・base は変えません。"
   gh pr close "$OLD_PR"
 
@@ -147,13 +157,14 @@ execute_light() {
   }
   trap reopen_old_pr_on_failure EXIT
 
-  # 2. 新 PR を同 head/base で作成 (Draft 状態は元 PR から継承)
-  local create_args=(--base "$base_branch" --head "$head_branch" --title "$new_title" --body "$new_body")
+  # 3. 新 PR を同 head/base で作成 (Draft 状態は元 PR から継承)。
+  #    body は --body-file - 経由で stdin から渡し、argv 長制限を回避する (gemini 指摘)。
+  local create_args=(--base "$base_branch" --head "$head_branch" --title "$new_title" --body-file -)
   if [ "$is_draft" = "true" ]; then
     create_args+=(--draft)
   fi
   local new_pr_url
-  new_pr_url=$(gh pr create "${create_args[@]}")
+  new_pr_url=$(printf '%s' "$new_body" | gh pr create "${create_args[@]}")
   # PR 番号は --json number で頑健に取得 (URL 文字列の grep は壊れやすい)
   local new_pr
   new_pr=$(gh pr view "$new_pr_url" --json number -q .number)
@@ -162,9 +173,10 @@ execute_light() {
   trap - EXIT
 
   echo "✅ 新 PR #$new_pr: $new_pr_url" >&2
-  echo "NEW_PR=$new_pr"
-  echo "NEW_PR_URL=$new_pr_url"
-  echo "NEW_BRANCH=$head_branch"
+  # eval される契約。head_branch / URL に shell メタ文字が混ざっても安全なよう %q で escape
+  printf 'NEW_PR=%q\n'      "$new_pr"
+  printf 'NEW_PR_URL=%q\n'  "$new_pr_url"
+  printf 'NEW_BRANCH=%q\n'  "$head_branch"
 }
 
 # squash モード本体: 既存挙動を完全維持。
@@ -214,9 +226,10 @@ EOF
   new_pr=$(gh pr view "$new_pr_url" --json number -q .number)
 
   echo "✅ 新 PR #$new_pr: $new_pr_url" >&2
-  echo "NEW_PR=$new_pr"
-  echo "NEW_PR_URL=$new_pr_url"
-  echo "NEW_BRANCH=$new_branch"
+  # eval される契約。new_branch / URL に shell メタ文字が混ざっても安全なよう %q で escape
+  printf 'NEW_PR=%q\n'      "$new_pr"
+  printf 'NEW_PR_URL=%q\n'  "$new_pr_url"
+  printf 'NEW_BRANCH=%q\n'  "$new_branch"
 }
 
 cmd_execute() {

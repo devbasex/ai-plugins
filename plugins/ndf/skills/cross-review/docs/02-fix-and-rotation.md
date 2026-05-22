@@ -220,9 +220,10 @@ stdout にも `OLD_PR=` / `HEAD_BRANCH=` / `BASE_BRANCH=` / `IS_DRAFT=` / `PREPA
 ### Step 6b: Agent (general-purpose) で新 title/body を生成 (light モードのみ)
 
 メインセッションから以下のように Agent を起動する。プロンプトは
-**書いて良いこと / 禁止事項** を必ず明示する:
+**書いて良いこと / 禁止事項** を必ず明示する
+(外側の prompt フェンスは内側に ```json を含むため 4 連バッククォートで囲む):
 
-```python
+````python
 Agent(
     subagent_type="general-purpose",
     description=f"Generate light-rotation PR text for PR #{OLD_PR}",
@@ -260,7 +261,7 @@ PR を読む人は cross-review の存在を意識しないため、最終 PR �
 書く。元 title / body をそのままコピーするのは **禁止** (現状の実装を反映)。
 """,
 )
-```
+````
 
 > ⚠ `rotate-pr.sh` 内部から `claude` / `codex` / `gemini` CLI を直接呼んで生成
 > させてはならない (環境依存・コスト管理外)。**メイン側の Agent tool で行う**。
