@@ -120,3 +120,41 @@ def test_empty_result_file_dies(patched_tmp_dir, state_mod):
     with pytest.raises(SystemExit) as e:
         state_mod.cmd_read_result(_make_args(rfile))
     assert e.value.code == 1
+
+
+# ---------------- PLAN21 round 5: non-dict / 不正 JSON 防御 ----------------
+
+
+def test_non_dict_result_json_dies(patched_tmp_dir, state_mod, capsys):
+    """result.json が list 等の非 dict なら die(code=3)。
+
+    gemini round 4 指摘: `r.get(...)` で AttributeError になる前に明示的に止める。
+    """
+    tmp_dir = patched_tmp_dir
+    _seed_state(tmp_dir)
+    rfile = tmp_dir / "result.json"
+    # JSON valid だが dict ではない
+    rfile.write_text(json.dumps([{"event": "APPROVE"}]))
+
+    with pytest.raises(SystemExit) as e:
+        state_mod.cmd_read_result(_make_args(rfile))
+    assert e.value.code == 3
+    captured = capsys.readouterr()
+    assert "dict ではない" in captured.err
+    # state は更新されていない
+    st = _read_state(tmp_dir)
+    assert AGENT not in st["rounds"][-1]
+
+
+def test_invalid_json_result_file_dies(patched_tmp_dir, state_mod, capsys):
+    """JSON parse 不能なら die(code=3)。"""
+    tmp_dir = patched_tmp_dir
+    _seed_state(tmp_dir)
+    rfile = tmp_dir / "result.json"
+    rfile.write_text("{ this is not valid json")
+
+    with pytest.raises(SystemExit) as e:
+        state_mod.cmd_read_result(_make_args(rfile))
+    assert e.value.code == 3
+    captured = capsys.readouterr()
+    assert "parse" in captured.err.lower() or "parse" in captured.err

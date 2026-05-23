@@ -98,6 +98,116 @@ def _now() -> str:
     return _dt.datetime.now(_dt.timezone.utc).astimezone().isoformat(timespec="seconds")
 
 
+def _round_started_unixtime(round_entry: dict[str, Any]) -> float | None:
+    """``round.started_at`` (ISO 8601) を UNIX time (秒) に変換する。
+
+    fix 戻り値ファイルの mtime と比較して、round 開始前に書かれた古い
+    ファイルを fallback から除外するために使う。
+    パース失敗時は None を返し、呼び出し側で「検証スキップ」を選ばせる。
+    """
+    started = round_entry.get("started_at")
+    if not started:
+        return None
+    try:
+        return _dt.datetime.fromisoformat(started).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_fresh_fix_result(
+    path: pathlib.Path,
+    pr: int,
+    round_started_ts: float | None,
+    is_canonical: bool = False,
+) -> tuple[bool, dict[str, Any] | None]:
+    """fallback 候補の fix 戻り値ファイルを採用してよいか判定する。
+
+    検証項目:
+      1. ファイル mtime が `round_started_ts` 以降であること
+         (round 開始前に作られた = 古い実行 / 別リポジトリの同番号 PR の残骸)
+      2. JSON 内に `pr` フィールドがある場合は対象 PR と一致すること
+         (`pr` フィールドが無い場合は 1 のみで判定)
+
+    Returns:
+      ``(is_fresh, parsed_payload)`` のタプル。``is_fresh=True`` の場合のみ
+      ``parsed_payload`` (dict) が返る。呼び出し側はこれを使って再パースを省略できる。
+
+    挙動:
+      - 古い候補・`pr` 不一致は警告を stderr に出して ``(False, None)`` を返し、
+        呼び出し側で次の候補へ進む。
+      - `is_canonical=True` (= ``$TMP_DIR/fix-pr<PR>-result.json`` 正規パス) で
+        **読み取り失敗 (OSError / JSONDecodeError)** が発生した場合のみ
+        即時 ``die(code=3)`` する (codex round 2 指摘: 正規パスが壊れているのに
+        後続候補へ流れて別 PR の戻り値を誤マージする事故を防ぐ)。
+        正規パスでも `pr` 不一致 / stale mtime は fallback 継続対象とする。
+    """
+    # 1. mtime チェック
+    if round_started_ts is not None:
+        try:
+            mtime = path.stat().st_mtime
+        except OSError as exc:
+            info(f"⚠ fallback 候補 stat 失敗 ({path}): {exc} — skip")
+            return False, None
+        if mtime < round_started_ts:
+            info(
+                f"⚠ fallback 候補が round 開始前の古いファイル ({path}, "
+                f"mtime={_dt.datetime.fromtimestamp(mtime).isoformat(timespec='seconds')} "
+                f"< round_started={_dt.datetime.fromtimestamp(round_started_ts).isoformat(timespec='seconds')}) "
+                "— skip"
+            )
+            return False, None
+
+    # 2. JSON 内 `pr` フィールドの一致 (任意)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        if is_canonical:
+            die(
+                f"正規パスの fix 戻り値ファイルの読み取りに失敗 ({path}): {exc}。"
+                " 後続 fallback への流れ込みを防ぐため即時中断。",
+                code=3,
+            )
+        info(f"⚠ fallback 候補 JSON 解析失敗 ({path}): {exc} — skip")
+        return False, None
+    # gemini round 3 指摘: `json.loads` は dict 以外 (list 等) も返す。
+    # 後続の `payload.get(...)` や cmd_merge_fix 側の `.get()` でクラッシュしないよう、
+    # dict でない場合は warn を出して fallback 不採用 ((False, None)) として扱う。
+    #
+    # codex round 4 指摘: ただし `is_canonical=True` (= 正規パス) で非 dict が返った
+    # 場合は parse 失敗と同じく即時 die(code=3) する。skip で後続 `/tmp/` fallback に
+    # 流れると、壊れた正規出力を無視して別実行の戻り値を誤マージする経路が残るため。
+    if not isinstance(payload, dict):
+        if is_canonical:
+            die(
+                f"正規パスの fix 戻り値ファイルが dict ではない "
+                f"({path}, type={type(payload).__name__})。"
+                " 後続 fallback への流れ込みを防ぐため即時中断。",
+                code=3,
+            )
+        info(
+            f"⚠ fallback 候補 JSON が dict ではない ({path}, type={type(payload).__name__}) "
+            "— skip"
+        )
+        return False, None
+    file_pr = payload.get("pr")
+    if file_pr is not None:
+        try:
+            file_pr_int = int(file_pr)
+        except (TypeError, ValueError):
+            info(
+                f"⚠ fallback 候補の pr フィールドが数値として解釈できない "
+                f"({path}, file_pr={file_pr!r}) — skip"
+            )
+            return False, None
+        if file_pr_int != int(pr):
+            info(
+                f"⚠ fallback 候補の pr 不一致 ({path}, file_pr={file_pr} != pr={pr}) "
+                "— 別 PR の戻り値の可能性。skip"
+            )
+            return False, None
+    return True, payload
+
+
 def _load(pr: int) -> dict[str, Any]:
     p = _state_path(pr)
     if not p.exists():
@@ -270,7 +380,20 @@ def cmd_read_result(args: argparse.Namespace) -> None:
     if not rfile.exists() or rfile.stat().st_size == 0:
         die(f"{agent}: result 未生成 ({rfile})")
 
-    r = json.loads(rfile.read_text())
+    try:
+        r = json.loads(rfile.read_text())
+    except json.JSONDecodeError as exc:
+        die(f"{agent}: result.json の parse に失敗 ({rfile}): {exc}", code=3)
+
+    # gemini round 4 指摘: result.json は本来 dict だが、launcher の出力バグや
+    # 別実行の残骸で list / str が入り込むと `r.get(...)` で AttributeError になる。
+    # 不正な review result はバグなので即時 die(code=3) で停止させる。
+    if not isinstance(r, dict):
+        die(
+            f"{agent}: result.json が dict ではない "
+            f"({rfile}, type={type(r).__name__})。review launcher の出力形式不正。",
+            code=3,
+        )
 
     # 別名フィールドへのフォールバック (gemini が `intent` / `comment_count` を使う変則 JSON を
     # 書き出す既知のケースに対応する。仕様としては `event` / `comments_count` が正)
@@ -370,7 +493,25 @@ def cmd_check_oscillation(args: argparse.Namespace) -> None:
                 payload = json.loads(p.read_text())
             except json.JSONDecodeError:
                 continue
+            # gemini round 4 指摘: payload は本来 dict (comments: [...]) だが、
+            # launcher のバグで list / str が入り込むと `payload.get(...)` で
+            # AttributeError になる。不正な review payload はバグなので
+            # 即時 die(code=3) で停止させる。
+            if not isinstance(payload, dict):
+                die(
+                    f"{agent}: payload.json が dict ではない "
+                    f"({p}, type={type(payload).__name__})。"
+                    " review launcher の出力形式不正。",
+                    code=3,
+                )
             for c in payload.get("comments", []):
+                if not isinstance(c, dict):
+                    # comments エントリが dict でない場合も同様に致命扱い
+                    die(
+                        f"{agent}: payload.comments のエントリが dict ではない "
+                        f"({p}, type={type(c).__name__})。",
+                        code=3,
+                    )
                 path = c.get("path")
                 line = c.get("line") or c.get("start_line")
                 if path and line is not None:
@@ -400,19 +541,97 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     Exit code: 0=continue, 3=ci-code-fail (final=error)
     """
     pr = args.pr
-    ffile = pathlib.Path(args.file or _tmp_dir() / f"fix-pr{pr}-result.json")
-    if not ffile.exists() or ffile.stat().st_size == 0:
-        die("fix サブエージェントが戻り値ファイルを生成しなかった", code=3)
 
-    fix = json.loads(ffile.read_text())
+    # state を先に読み、fallback 検証用の round 開始時刻を取得する
+    # (round 開始前の古いファイルや、別リポジトリの同番号 PR の戻り値を
+    # 誤マージするのを防ぐ)。
     st = _load(pr)
     if not st.get("rounds"):
         die("state.rounds が空。`state.py start-round` を先に呼んでください", code=3)
+    round_started_ts = _round_started_unixtime(st["rounds"][-1])
+
+    # 戻り値ファイルの探索順:
+    #   1. --file 明示 (ユーザー指定なので mtime/pr 検証はスキップ)
+    #   2. $TMP_DIR/fix-pr<PR>-result.json (正規; _tmp_dir() 解決先)
+    #   3. /tmp/fix-pr<PR>-result.json (旧プロンプトで /tmp を指定したサブエージェント救済)
+    # 2, 3 は PR 番号だけで命名されているため、別 round / 別リポジトリの
+    # 古い結果を拾わないよう mtime と (あれば) JSON 内の `pr` で検証する。
+    explicit = pathlib.Path(args.file) if args.file else None
+    canonical_path = _tmp_dir() / f"fix-pr{pr}-result.json"
+    legacy_tmp_path = pathlib.Path(f"/tmp/fix-pr{pr}-result.json")
+    # (path, is_canonical) のタプル: 正規パス (canonical) の parse 失敗は die(code=3) する
+    fallback_candidates: list[tuple[pathlib.Path, bool]] = [
+        (canonical_path, True),
+        (legacy_tmp_path, False),
+    ]
+
+    ffile: pathlib.Path | None = None
+    fix: dict[str, Any] | None = None
+    if explicit is not None:
+        # codex round 4 指摘: `--file` 明示時は fallback 探索に進まず即時失敗させる。
+        # ユーザーが特定ファイルを指定しているのに、それが存在しない / 空 / JSON 不正
+        # だった場合、無言で fallback に流れて別実行の戻り値を誤マージすると事故になる。
+        if not explicit.exists():
+            die(
+                f"--file で指定されたパスが存在しません: {explicit}",
+                code=3,
+            )
+        if explicit.stat().st_size == 0:
+            die(
+                f"--file で指定されたファイルが空です: {explicit}",
+                code=3,
+            )
+        try:
+            fix = json.loads(explicit.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            die(
+                f"--file 指定の fix 戻り値ファイルの読み取り / parse に失敗 "
+                f"({explicit}): {exc}",
+                code=3,
+            )
+        # gemini round 3 指摘: `--file` で `list` 等の non-dict JSON が渡されると
+        # 後続の `fix.get(...)` でクラッシュする。即時 die(code=3) で中断。
+        if not isinstance(fix, dict):
+            die(
+                f"--file 指定の fix 戻り値ファイルが dict ではない "
+                f"({explicit}, type={type(fix).__name__})。"
+                " fix サブエージェント出力の形式不正。",
+                code=3,
+            )
+        ffile = explicit
+        # 明示指定は stale 検証スキップ
+    else:
+        for c, is_canonical in fallback_candidates:
+            if not (c.exists() and c.stat().st_size > 0):
+                continue
+            is_fresh, parsed = _is_fresh_fix_result(c, pr, round_started_ts, is_canonical=is_canonical)
+            if not is_fresh:
+                continue
+            ffile = c
+            fix = parsed  # 既にパース済みのデータを再利用 (gemini round 2 指摘の性能改善)
+            break
+
+    if ffile is None or fix is None:
+        checked = ([str(explicit)] if explicit else []) + [str(c) for c, _ in fallback_candidates]
+        die(
+            "fix サブエージェントが戻り値ファイルを生成しなかった "
+            f"(checked: {checked})",
+            code=3,
+        )
+
+    # key 名 fallback (サブエージェントが別名で書いた場合の救済)。
+    # 正規は fix_commit / fixed_count、別名は commit_sha / fixed のみ受理する。
+    fix_commit = fix.get("fix_commit") or fix.get("commit_sha")
+    fixed_count = fix.get("fixed_count")
+    if fixed_count is None:
+        fixed_count = fix.get("fixed", 0)
+
+    # `st` は冒頭の fallback 検証で既に load 済み。
     round_no = st["rounds"][-1]["round"]
 
     st["rounds"][-1]["fix"] = {
-        "commit": fix.get("fix_commit"),
-        "fixed": fix.get("fixed_count", 0),
+        "commit": fix_commit,
+        "fixed": fixed_count,
         "deferred": len(fix.get("deferred", []) or []),
         "rejected": len(fix.get("rejected", []) or []),
         "resolved_threads": len(fix.get("resolved_threads", []) or []),
@@ -428,7 +647,7 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
 
     # CI 分類
     if (fix.get("ci_status") or "").upper() != "FAILURE":
-        info(f"✅ fix マージ完了 (commit={fix.get('fix_commit')} fixed={fix.get('fixed_count', 0)})")
+        info(f"✅ fix マージ完了 (commit={fix_commit} fixed={fixed_count})")
         return
 
     code_patterns = ("pint", "larastan", "phpstan", "test", "lint", "type",
