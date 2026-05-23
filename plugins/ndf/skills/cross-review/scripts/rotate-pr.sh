@@ -197,13 +197,19 @@ execute_squash() {
 
   cd "$WORKTREE"
 
-  local branch base title new_branch
+  local branch base title new_branch pr_meta
+  # PR メタ情報は 1 度の gh pr view で head/base/title を一括取得する
+  # (複数回呼び出しによるネットワーク遅延と API 負荷を削減, gemini round 7 指摘)
+  pr_meta=$(gh pr view "$OLD_PR" --json headRefName,baseRefName,title)
+  base=$(printf '%s' "$pr_meta" | jq -r '.baseRefName')
+  title=$(printf '%s' "$pr_meta" | jq -r '.title')
+
   # state.py init は worktree を `git worktree add --detach origin/<head>` で作るため、
   # `git branch --show-current` は空文字を返す。空のまま new_branch を生成すると
   # `-rHHMMSS` だけのブランチ名になってしまうので、フォールバック順を以下に固定する:
   #   1. git branch --show-current (通常 worktree なら使える)
   #   2. prepare.json の head_branch (prepare 済みなら最も信頼できる)
-  #   3. gh pr view --json headRefName (prepare 未実行でも復元可能)
+  #   3. pr_meta.headRefName (prepare 未実行でも復元可能)
   # (codex round 4 指摘)
   branch=$(git branch --show-current)
   if [ -z "$branch" ]; then
@@ -213,11 +219,9 @@ execute_squash() {
     fi
   fi
   if [ -z "$branch" ]; then
-    branch=$(gh pr view "$OLD_PR" --json headRefName -q .headRefName)
+    branch=$(printf '%s' "$pr_meta" | jq -r '.headRefName')
   fi
   [ -n "$branch" ] || { echo "head branch を復元できませんでした (detached worktree かつ prepare.json / gh pr view から取得失敗)" >&2; exit 1; }
-  base=$(gh pr view "$OLD_PR" --json baseRefName -q .baseRefName)
-  title=$(gh pr view "$OLD_PR" --json title -q .title)
   new_branch="${branch}-r$(date +%H%M%S)"
 
   echo "🔄 PR #$OLD_PR rotation (squash): $branch → $new_branch (base=$base)" >&2
@@ -225,12 +229,12 @@ execute_squash() {
   # 1. 既存ブランチを squash して新ブランチに
   git checkout -b "$new_branch"
   git reset --soft "origin/$base"
-  git commit -m "$(cat <<EOF
-$title
-
-(cross-review rotation: PR #$OLD_PR を squash 統合)
-EOF
-)"
+  # commit message は -m を複数指定で分割して渡す。$(cat <<EOF ... $title ... EOF) 形式は
+  # PR title に $(...) や `...` が含まれる場合にコマンド置換として実行される脆弱性がある
+  # ため使わない (gemini round 7 指摘)。
+  git commit \
+    -m "$title" \
+    -m "(cross-review rotation: PR #$OLD_PR を squash 統合)"
   git push -u origin "$new_branch"
 
   # 2. 旧 PR を close (コメント残し)
