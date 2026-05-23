@@ -1,5 +1,56 @@
 # NDF Plugin CHANGELOG
 
+### v4.7.4 (cross-review: gemini stall 既定の per-agent 化 + fix 戻り値マージの堅牢化)
+
+`/ndf:cross-review` を実走させた際に、cross-review ループ自体は完走するが
+メインセッション側で手動補正が必要だった運用不整合の残り 2 件を恒久対応する
+PATCH リリース。
+
+- **monitor.py: per-agent stall timeout 既定の導入** (`skills/cross-review/scripts/monitor.py`):
+  - 従来は `MONITOR_STALL=180s` の単一既定値だったため、err.log にほぼ進捗を出さない
+    gemini を 1 度目に毎回 STALLED 扱いで kill していた (孤児プロセスも残存)。
+  - 既定を agent 別ビルトインに変更: **codex=180s (変更なし) / gemini=480s**。
+  - 解決順: CLI `--stall-timeout` (明示優先) > env `MONITOR_STALL_<AGENT>` (per-agent) >
+    env `MONITOR_STALL` (両 agent 共通、後方互換) > agent 別ビルトイン。
+  - `--stall-timeout` の argparse default を `int` → `None` に変更し、未指定時のみ
+    per-agent 解決を行う。
+- **state.py merge-fix: fix 戻り値ファイルの探索 fallback と key 別名対応**
+  (`skills/cross-review/scripts/state.py`):
+  - サブエージェントが `/tmp/fix-pr<PR>-result.json` に書き、`merge-fix` は
+    `$TMP_DIR` (= `~/.gemini/tmp/<workspace>/`) のみ参照する不整合で
+    exit 3 (ci-code-fail 扱い) になる事象を解消。探索順を **(1) `--file` 明示
+    → (2) `$TMP_DIR/` → (3) `/tmp/`** の 3 段に変更。
+  - 全候補不在時の die メッセージに探索 path 一覧を含め、原因切り分け可能にした。
+  - サブエージェントが `commit_sha` / `fixed` 別名キーで書き出した場合も
+    `fix_commit` / `fixed_count` と同等に受理する key alias を追加 (silent な
+    `fixed=0` 記録の救済)。
+- **SKILL.md / docs のパス記述統一**:
+  - `SKILL.md` 内の `/tmp/fix-pr<#>-result.json` ハードコード 3 箇所を
+    `$TMP_DIR/fix-pr<#>-result.json` に統一。
+  - 「すべて `/tmp/` に置き」の汎用記述も `$TMP_DIR/` (= `_tmp_dir()` 解決先) に修正。
+  - `docs/02-fix-and-rotation.md` に `$TMP_DIR` の解決順
+    (env `CROSS_REVIEW_TMP_DIR` > `~/.gemini/tmp/<workspace>/` > `/tmp/`) を 1 行明示。
+  - `docs/01-state-and-review.md` の monitor 説明表に per-agent stall 既定の
+    解決順を追記。
+- **pytest 追加** (`skills/cross-review/tests/`):
+  - `test_monitor_stall_default.py` — codex/gemini ビルトイン + env 上書き 6 ケース。
+  - `test_state_merge_fix.py` — 正規 / `/tmp/` fallback / key 別名 / 全候補不在 /
+    `--file` 明示の 5 ケース。
+- **関連 issue / plan**:
+  - `issues/i18-issue-gemini.md` (再現報告) /
+    `issues/PLAN21_cross-review-gemini-stall-and-fix-merge.md` (実装プラン)。
+
+#### 既存ユーザへの影響
+
+- `--stall-timeout` を CLI で明示しているユーザ: **挙動不変**。
+- `MONITOR_STALL` env を指定しているユーザ: **挙動不変** (両 agent に同じ値が適用)。
+- 何も指定していないユーザ: gemini 側の既定 stall timeout が 180s → 480s に
+  **緩和**される (kill されにくくなる方向のため非破壊)。
+- 正規パス (`$TMP_DIR/fix-pr<PR>-result.json`) + 正規 key (`fix_commit` /
+  `fixed_count`) で書き出していたユーザ: **挙動不変**。
+- 旧プロンプトで `/tmp/` ハードコードや別名 key を使っていたユーザ: **silent fail
+  していたケースが拾われるようになる** (修復方向の変更)。
+
 ### v4.7.3 (cross-review: macOS 対応 worktree base + result.json スキーマ堅牢化)
 
 `/ndf:cross-review` を非 Linux コンテナ環境 (macOS / WSL 等) でも素直に動かせるよう、

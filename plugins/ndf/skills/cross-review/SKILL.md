@@ -126,7 +126,7 @@ flowchart TD
     Gemini --> Decide
 
     Decide -->|両方 APPROVE / SKIP| Approved([final = approved]):::ok
-    Decide -->|一方でも REQUEST_CHANGES| Fix["Agent (general-purpose)<br/>/ndf:fix &lt;PR&gt; --defer-nit を worktree 内で実行<br/>・critical/major/minor 修正 + push<br/>・reply + resolveReviewThread<br/>・deferred/rejected は reply のみ<br/>→ /tmp/fix-pr&lt;#&gt;-result.json"]
+    Decide -->|一方でも REQUEST_CHANGES| Fix["Agent (general-purpose)<br/>/ndf:fix &lt;PR&gt; --defer-nit を worktree 内で実行<br/>・critical/major/minor 修正 + push<br/>・reply + resolveReviewThread<br/>・deferred/rejected は reply のみ<br/>→ $TMP_DIR/fix-pr&lt;#&gt;-result.json"]
 
     Fix --> Check{収束チェック}
     Check -->|max-rounds 到達| MaxR([final = max_rounds]):::stop
@@ -190,7 +190,7 @@ while :; do
   # Step 4: 振動検知 (4=oscillation)
   "$SCRIPTS/state.py" check-oscillation "$STATE_PR" || [ $? -eq 2 ] || exit 4
 
-  # Step 5: 修正サブエージェント起動 (Agent tool) → /tmp/fix-pr<STATE_PR>-result.json
+  # Step 5: 修正サブエージェント起動 (Agent tool) → $TMP_DIR/fix-pr<STATE_PR>-result.json
   #   - メインで Agent(subagent_type=general-purpose, ...) を呼ぶ。docs/02 参照
   #   - tmp パスは launcher / monitor.py と同じく **STATE_PR ベース** で統一
   # Step 5 後段: fix 戻り値マージ + CI 分類 (3=code-fail で中断)
@@ -319,7 +319,7 @@ body に書くのは **設計レベル・PR 横断の修正提案** のみ。
 ## CI failure の分類（誤中断防止）
 
 「CI 失敗 → 即 `final=error`」は乱暴。`scripts/state.py merge-fix` が
-fix 戻り値ファイル (`/tmp/fix-pr<PR>-result.json`) を受け取った際に
+fix 戻り値ファイル (`$TMP_DIR/fix-pr<PR>-result.json`) を受け取った際に
 `ci_failed_checks` を以下で分類する:
 
 | 分類 | パターン | 振る舞い |
@@ -371,7 +371,8 @@ pint / larastan / test / build などは **中断** を原則とする。
 ## メイン context 節約の工夫
 
 1. **大きいファイルはメイン context に載せない**: payload / err.log / diff は
-   すべて `/tmp/` に置き、メインは state.json と result.json だけ読む
+   すべて `$TMP_DIR/` (= `state.py _tmp_dir()` の解決先) に置き、メインは
+   state.json と result.json だけ読む
 2. **サブエージェント分離**: 修正は別 context window で実行
 3. **PR ローテーション**: 1 PR あたりの会話履歴を抑える
 4. **AI 直接投稿**: 中間ペイロードがメインを通らない

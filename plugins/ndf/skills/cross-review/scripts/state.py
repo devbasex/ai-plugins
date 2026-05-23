@@ -400,19 +400,46 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     Exit code: 0=continue, 3=ci-code-fail (final=error)
     """
     pr = args.pr
-    ffile = pathlib.Path(args.file or _tmp_dir() / f"fix-pr{pr}-result.json")
-    if not ffile.exists() or ffile.stat().st_size == 0:
-        die("fix サブエージェントが戻り値ファイルを生成しなかった", code=3)
+
+    # 戻り値ファイルの探索順:
+    #   1. --file 明示
+    #   2. $TMP_DIR/fix-pr<PR>-result.json (正規; _tmp_dir() 解決先)
+    #   3. /tmp/fix-pr<PR>-result.json (旧プロンプトで /tmp を指定したサブエージェント救済)
+    candidates: list[pathlib.Path] = []
+    if args.file:
+        candidates.append(pathlib.Path(args.file))
+    candidates.append(_tmp_dir() / f"fix-pr{pr}-result.json")
+    candidates.append(pathlib.Path(f"/tmp/fix-pr{pr}-result.json"))
+
+    ffile: pathlib.Path | None = None
+    for c in candidates:
+        if c.exists() and c.stat().st_size > 0:
+            ffile = c
+            break
+    if ffile is None:
+        die(
+            "fix サブエージェントが戻り値ファイルを生成しなかった "
+            f"(checked: {[str(c) for c in candidates]})",
+            code=3,
+        )
 
     fix = json.loads(ffile.read_text())
+
+    # key 名 fallback (サブエージェントが別名で書いた場合の救済)。
+    # 正規は fix_commit / fixed_count、別名は commit_sha / fixed のみ受理する。
+    fix_commit = fix.get("fix_commit") or fix.get("commit_sha")
+    fixed_count = fix.get("fixed_count")
+    if fixed_count is None:
+        fixed_count = fix.get("fixed", 0)
+
     st = _load(pr)
     if not st.get("rounds"):
         die("state.rounds が空。`state.py start-round` を先に呼んでください", code=3)
     round_no = st["rounds"][-1]["round"]
 
     st["rounds"][-1]["fix"] = {
-        "commit": fix.get("fix_commit"),
-        "fixed": fix.get("fixed_count", 0),
+        "commit": fix_commit,
+        "fixed": fixed_count,
         "deferred": len(fix.get("deferred", []) or []),
         "rejected": len(fix.get("rejected", []) or []),
         "resolved_threads": len(fix.get("resolved_threads", []) or []),
@@ -428,7 +455,7 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
 
     # CI 分類
     if (fix.get("ci_status") or "").upper() != "FAILURE":
-        info(f"✅ fix マージ完了 (commit={fix.get('fix_commit')} fixed={fix.get('fixed_count', 0)})")
+        info(f"✅ fix マージ完了 (commit={fix_commit} fixed={fixed_count})")
         return
 
     code_patterns = ("pint", "larastan", "phpstan", "test", "lint", "type",

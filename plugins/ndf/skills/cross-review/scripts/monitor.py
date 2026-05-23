@@ -20,8 +20,10 @@ pidfile stale / result.json 不在) を構造化して扱う。
   4. **result.json**: プロセス終了後に `/tmp/<agent>-review-pr<PR>-result.json` が
      生成されていなければ失敗扱い
   5. **hard timeout**: 既定 7 分。`--timeout` または `MONITOR_TIMEOUT` で上書き可
-  6. **stall timeout**: err.log + stdout.log の合計サイズが既定 3 分変化しなければ
-     STALLED として中断 (`--stall-timeout` または `MONITOR_STALL` で上書き可)
+  6. **stall timeout**: err.log + stdout.log の合計サイズが一定時間変化しなければ
+     STALLED として中断。既定は agent 別 (codex=180s, gemini=480s。gemini は err.log
+     にほぼ進捗を出さないため大きめ)。`--stall-timeout` で CLI 明示、
+     `MONITOR_STALL_<AGENT>` env で per-agent 上書き、`MONITOR_STALL` env で共通上書き可
   7. **失敗時 kill**: TIMEOUT / STALLED / EARLY_ERROR (FATAL のみ) / PIDFILE_BAD で
      返るとき、対象プロセスを SIGTERM (3 秒後に SIGKILL) で停止する
 
@@ -60,7 +62,15 @@ from typing import Optional
 # ---------- 設定 ----------
 
 DEFAULT_TIMEOUT = int(os.environ.get("MONITOR_TIMEOUT", "420"))    # 7 min
+# 既定 stall timeout (後方互換のため env MONITOR_STALL は残す)。
+# 両 agent 共通のデフォルトとして引き続き受け付ける。
 DEFAULT_STALL = int(os.environ.get("MONITOR_STALL", "180"))       # 3 min no progress
+# per-agent 上書き: gemini は err.log がほぼ無音なため大きめに取る。
+# 解決順は `_agent_stall_default()` 参照。
+DEFAULT_STALL_AGENT_BUILTIN = {
+    "codex": 180,    # 推論ログを逐次出すので 3 min で十分
+    "gemini": 480,   # err.log が静かなため 8 min まで許容
+}
 DEFAULT_POLL = int(os.environ.get("MONITOR_POLL", "15"))          # 15 sec
 # `MONITOR_NO_EARLY_ERROR=1` で EARLY_ERROR 検知を無効化 (escape hatch)
 DEFAULT_NO_EARLY_ERROR = os.environ.get("MONITOR_NO_EARLY_ERROR", "").lower() in {
@@ -132,6 +142,23 @@ def _match_is_quoted(line: str, match_start: int, match_end: int) -> bool:
     return False
 
 CODEX_SENTINEL = re.compile(r"^tokens used$", re.MULTILINE)
+
+
+def _agent_stall_default(agent: str) -> int:
+    """agent ごとの既定 stall timeout を解決する。
+
+    解決順:
+      1. env `MONITOR_STALL_<AGENT>` (per-agent 明示)
+      2. env `MONITOR_STALL` (両 agent 共通)
+      3. `DEFAULT_STALL_AGENT_BUILTIN[agent]` (codex=180, gemini=480)
+      4. `DEFAULT_STALL` (フォールバック)
+    """
+    env_key = f"MONITOR_STALL_{agent.upper()}"
+    if env_key in os.environ:
+        return int(os.environ[env_key])
+    if "MONITOR_STALL" in os.environ:
+        return DEFAULT_STALL
+    return DEFAULT_STALL_AGENT_BUILTIN.get(agent, DEFAULT_STALL)
 
 
 def _tmp_dir() -> pathlib.Path:
@@ -513,8 +540,10 @@ def main() -> None:
     p.add_argument("target", choices=["codex", "gemini", "both"])
     p.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT,
                    help=f"hard timeout in seconds (default: {DEFAULT_TIMEOUT})")
-    p.add_argument("--stall-timeout", type=int, default=DEFAULT_STALL,
-                   help=f"stall timeout (err.log no progress) in seconds (default: {DEFAULT_STALL})")
+    p.add_argument("--stall-timeout", type=int, default=None,
+                   help="stall timeout (err.log no progress) in seconds. "
+                        "未指定時は agent 別既定 (codex=180, gemini=480) または "
+                        "env MONITOR_STALL_<AGENT> / MONITOR_STALL を参照")
     p.add_argument("--poll", type=int, default=DEFAULT_POLL,
                    help=f"poll interval in seconds (default: {DEFAULT_POLL})")
     p.add_argument("--no-require-result", action="store_true",
@@ -532,9 +561,11 @@ def main() -> None:
     results: dict[str, AgentStatus] = {}
 
     def run(agent: str) -> None:
+        stall = args.stall_timeout if args.stall_timeout is not None \
+            else _agent_stall_default(agent)
         results[agent] = monitor_agent(
             agent=agent, pr=args.pr,
-            timeout=args.timeout, stall_timeout=args.stall_timeout,
+            timeout=args.timeout, stall_timeout=stall,
             poll=args.poll, require_result=require_result,
             no_early_error=args.no_early_error,
             log_prefix=f"[{agent}] ",
