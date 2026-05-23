@@ -98,6 +98,69 @@ def _now() -> str:
     return _dt.datetime.now(_dt.timezone.utc).astimezone().isoformat(timespec="seconds")
 
 
+def _round_started_unixtime(round_entry: dict[str, Any]) -> float | None:
+    """``round.started_at`` (ISO 8601) を UNIX time (秒) に変換する。
+
+    fix 戻り値ファイルの mtime と比較して、round 開始前に書かれた古い
+    ファイルを fallback から除外するために使う。
+    パース失敗時は None を返し、呼び出し側で「検証スキップ」を選ばせる。
+    """
+    started = round_entry.get("started_at")
+    if not started:
+        return None
+    try:
+        return _dt.datetime.fromisoformat(started).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_fresh_fix_result(
+    path: pathlib.Path,
+    pr: int,
+    round_started_ts: float | None,
+) -> bool:
+    """fallback 候補の fix 戻り値ファイルを採用してよいか判定する。
+
+    検証項目:
+      1. ファイル mtime が `round_started_ts` 以降であること
+         (round 開始前に作られた = 古い実行 / 別リポジトリの同番号 PR の残骸)
+      2. JSON 内に `pr` フィールドがある場合は対象 PR と一致すること
+         (`pr` フィールドが無い場合は 1 のみで判定)
+
+    古い候補は警告を stderr に出して False を返す (呼び出し側で skip)。
+    """
+    # 1. mtime チェック
+    if round_started_ts is not None:
+        try:
+            mtime = path.stat().st_mtime
+        except OSError as exc:
+            info(f"⚠ fallback 候補 stat 失敗 ({path}): {exc} — skip")
+            return False
+        if mtime < round_started_ts:
+            info(
+                f"⚠ fallback 候補が round 開始前の古いファイル ({path}, "
+                f"mtime={_dt.datetime.fromtimestamp(mtime).isoformat(timespec='seconds')} "
+                f"< round_started={_dt.datetime.fromtimestamp(round_started_ts).isoformat(timespec='seconds')}) "
+                "— skip"
+            )
+            return False
+
+    # 2. JSON 内 `pr` フィールドの一致 (任意)
+    try:
+        payload = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        info(f"⚠ fallback 候補 JSON 解析失敗 ({path}): {exc} — skip")
+        return False
+    file_pr = payload.get("pr") if isinstance(payload, dict) else None
+    if file_pr is not None and int(file_pr) != int(pr):
+        info(
+            f"⚠ fallback 候補の pr 不一致 ({path}, file_pr={file_pr} != pr={pr}) "
+            "— 別 PR の戻り値の可能性。skip"
+        )
+        return False
+    return True
+
+
 def _load(pr: int) -> dict[str, Any]:
     p = _state_path(pr)
     if not p.exists():
@@ -401,25 +464,44 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     """
     pr = args.pr
 
+    # state を先に読み、fallback 検証用の round 開始時刻を取得する
+    # (round 開始前の古いファイルや、別リポジトリの同番号 PR の戻り値を
+    # 誤マージするのを防ぐ)。
+    st = _load(pr)
+    if not st.get("rounds"):
+        die("state.rounds が空。`state.py start-round` を先に呼んでください", code=3)
+    round_started_ts = _round_started_unixtime(st["rounds"][-1])
+
     # 戻り値ファイルの探索順:
-    #   1. --file 明示
+    #   1. --file 明示 (ユーザー指定なので mtime/pr 検証はスキップ)
     #   2. $TMP_DIR/fix-pr<PR>-result.json (正規; _tmp_dir() 解決先)
     #   3. /tmp/fix-pr<PR>-result.json (旧プロンプトで /tmp を指定したサブエージェント救済)
-    candidates: list[pathlib.Path] = []
-    if args.file:
-        candidates.append(pathlib.Path(args.file))
-    candidates.append(_tmp_dir() / f"fix-pr{pr}-result.json")
-    candidates.append(pathlib.Path(f"/tmp/fix-pr{pr}-result.json"))
+    # 2, 3 は PR 番号だけで命名されているため、別 round / 別リポジトリの
+    # 古い結果を拾わないよう mtime と (あれば) JSON 内の `pr` で検証する。
+    explicit = pathlib.Path(args.file) if args.file else None
+    fallback_candidates: list[pathlib.Path] = [
+        _tmp_dir() / f"fix-pr{pr}-result.json",
+        pathlib.Path(f"/tmp/fix-pr{pr}-result.json"),
+    ]
 
     ffile: pathlib.Path | None = None
-    for c in candidates:
-        if c.exists() and c.stat().st_size > 0:
+    if explicit is not None:
+        if explicit.exists() and explicit.stat().st_size > 0:
+            ffile = explicit
+    if ffile is None:
+        for c in fallback_candidates:
+            if not (c.exists() and c.stat().st_size > 0):
+                continue
+            if not _is_fresh_fix_result(c, pr, round_started_ts):
+                continue
             ffile = c
             break
+
     if ffile is None:
+        checked = ([str(explicit)] if explicit else []) + [str(c) for c in fallback_candidates]
         die(
             "fix サブエージェントが戻り値ファイルを生成しなかった "
-            f"(checked: {[str(c) for c in candidates]})",
+            f"(checked: {checked})",
             code=3,
         )
 
@@ -432,9 +514,7 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     if fixed_count is None:
         fixed_count = fix.get("fixed", 0)
 
-    st = _load(pr)
-    if not st.get("rounds"):
-        die("state.rounds が空。`state.py start-round` を先に呼んでください", code=3)
+    # `st` は冒頭の fallback 検証で既に load 済み。
     round_no = st["rounds"][-1]["round"]
 
     st["rounds"][-1]["fix"] = {
