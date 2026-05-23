@@ -118,7 +118,8 @@ def _is_fresh_fix_result(
     path: pathlib.Path,
     pr: int,
     round_started_ts: float | None,
-) -> bool:
+    is_canonical: bool = False,
+) -> tuple[bool, dict[str, Any] | None]:
     """fallback 候補の fix 戻り値ファイルを採用してよいか判定する。
 
     検証項目:
@@ -127,7 +128,18 @@ def _is_fresh_fix_result(
       2. JSON 内に `pr` フィールドがある場合は対象 PR と一致すること
          (`pr` フィールドが無い場合は 1 のみで判定)
 
-    古い候補は警告を stderr に出して False を返す (呼び出し側で skip)。
+    Returns:
+      ``(is_fresh, parsed_payload)`` のタプル。``is_fresh=True`` の場合のみ
+      ``parsed_payload`` (dict) が返る。呼び出し側はこれを使って再パースを省略できる。
+
+    挙動:
+      - 古い候補・`pr` 不一致は警告を stderr に出して ``(False, None)`` を返し、
+        呼び出し側で次の候補へ進む。
+      - `is_canonical=True` (= ``$TMP_DIR/fix-pr<PR>-result.json`` 正規パス) で
+        **読み取り失敗 (OSError / JSONDecodeError)** が発生した場合のみ
+        即時 ``die(code=3)`` する (codex round 2 指摘: 正規パスが壊れているのに
+        後続候補へ流れて別 PR の戻り値を誤マージする事故を防ぐ)。
+        正規パスでも `pr` 不一致 / stale mtime は fallback 継続対象とする。
     """
     # 1. mtime チェック
     if round_started_ts is not None:
@@ -135,7 +147,7 @@ def _is_fresh_fix_result(
             mtime = path.stat().st_mtime
         except OSError as exc:
             info(f"⚠ fallback 候補 stat 失敗 ({path}): {exc} — skip")
-            return False
+            return False, None
         if mtime < round_started_ts:
             info(
                 f"⚠ fallback 候補が round 開始前の古いファイル ({path}, "
@@ -143,22 +155,37 @@ def _is_fresh_fix_result(
                 f"< round_started={_dt.datetime.fromtimestamp(round_started_ts).isoformat(timespec='seconds')}) "
                 "— skip"
             )
-            return False
+            return False, None
 
     # 2. JSON 内 `pr` フィールドの一致 (任意)
     try:
-        payload = json.loads(path.read_text())
+        payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
+        if is_canonical:
+            die(
+                f"正規パスの fix 戻り値ファイルの読み取りに失敗 ({path}): {exc}。"
+                " 後続 fallback への流れ込みを防ぐため即時中断。",
+                code=3,
+            )
         info(f"⚠ fallback 候補 JSON 解析失敗 ({path}): {exc} — skip")
-        return False
+        return False, None
     file_pr = payload.get("pr") if isinstance(payload, dict) else None
-    if file_pr is not None and int(file_pr) != int(pr):
-        info(
-            f"⚠ fallback 候補の pr 不一致 ({path}, file_pr={file_pr} != pr={pr}) "
-            "— 別 PR の戻り値の可能性。skip"
-        )
-        return False
-    return True
+    if file_pr is not None:
+        try:
+            file_pr_int = int(file_pr)
+        except (TypeError, ValueError):
+            info(
+                f"⚠ fallback 候補の pr フィールドが数値として解釈できない "
+                f"({path}, file_pr={file_pr!r}) — skip"
+            )
+            return False, None
+        if file_pr_int != int(pr):
+            info(
+                f"⚠ fallback 候補の pr 不一致 ({path}, file_pr={file_pr} != pr={pr}) "
+                "— 別 PR の戻り値の可能性。skip"
+            )
+            return False, None
+    return True, payload
 
 
 def _load(pr: int) -> dict[str, Any]:
@@ -479,33 +506,39 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     # 2, 3 は PR 番号だけで命名されているため、別 round / 別リポジトリの
     # 古い結果を拾わないよう mtime と (あれば) JSON 内の `pr` で検証する。
     explicit = pathlib.Path(args.file) if args.file else None
-    fallback_candidates: list[pathlib.Path] = [
-        _tmp_dir() / f"fix-pr{pr}-result.json",
-        pathlib.Path(f"/tmp/fix-pr{pr}-result.json"),
+    canonical_path = _tmp_dir() / f"fix-pr{pr}-result.json"
+    legacy_tmp_path = pathlib.Path(f"/tmp/fix-pr{pr}-result.json")
+    # (path, is_canonical) のタプル: 正規パス (canonical) の parse 失敗は die(code=3) する
+    fallback_candidates: list[tuple[pathlib.Path, bool]] = [
+        (canonical_path, True),
+        (legacy_tmp_path, False),
     ]
 
     ffile: pathlib.Path | None = None
+    fix: dict[str, Any] | None = None
     if explicit is not None:
         if explicit.exists() and explicit.stat().st_size > 0:
             ffile = explicit
+            # 明示指定は stale 検証スキップ、ここで読み込む
+            fix = json.loads(explicit.read_text(encoding="utf-8"))
     if ffile is None:
-        for c in fallback_candidates:
+        for c, is_canonical in fallback_candidates:
             if not (c.exists() and c.stat().st_size > 0):
                 continue
-            if not _is_fresh_fix_result(c, pr, round_started_ts):
+            is_fresh, parsed = _is_fresh_fix_result(c, pr, round_started_ts, is_canonical=is_canonical)
+            if not is_fresh:
                 continue
             ffile = c
+            fix = parsed  # 既にパース済みのデータを再利用 (gemini round 2 指摘の性能改善)
             break
 
-    if ffile is None:
-        checked = ([str(explicit)] if explicit else []) + [str(c) for c in fallback_candidates]
+    if ffile is None or fix is None:
+        checked = ([str(explicit)] if explicit else []) + [str(c) for c, _ in fallback_candidates]
         die(
             "fix サブエージェントが戻り値ファイルを生成しなかった "
             f"(checked: {checked})",
             code=3,
         )
-
-    fix = json.loads(ffile.read_text())
 
     # key 名 fallback (サブエージェントが別名で書いた場合の救済)。
     # 正規は fix_commit / fixed_count、別名は commit_sha / fixed のみ受理する。

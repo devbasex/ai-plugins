@@ -9,6 +9,9 @@
      - mtime が round 開始前 → skip
      - JSON 内 `pr` 不一致 → skip
      - 明示 `--file` は stale 検証スキップ
+  6. (PLAN21 round 3) 正規パス JSON parse 失敗 → 即時 die(code=3)
+  7. (PLAN21 round 3) `pr` フィールドが数値として解釈できない → skip
+  8. (PLAN21 round 3) `_is_fresh_fix_result` 戻り値のタプル化追従
 """
 from __future__ import annotations
 
@@ -284,3 +287,107 @@ def test_explicit_file_bypasses_stale_check(patched_tmp_dir, state_mod, tmp_path
 
     st = _read_state(tmp_dir)
     assert st["rounds"][-1]["fix"]["commit"] == "explicit_stale_ok"
+
+
+# ---------------- PLAN21 round 3: 正規パス parse 失敗 / pr 型不正 / 戻り値タプル化 ----------------
+
+
+def test_canonical_path_json_parse_failure_dies_immediately(
+    patched_tmp_dir, state_mod, capsys
+):
+    """正規パス ($TMP_DIR/fix-prN-result.json) の JSON parse 失敗は即時 die(code=3)。
+
+    codex round 2 指摘: 壊れた正規パスをスキップして /tmp/ fallback に流れると
+    別 PR の戻り値を誤マージする事故が起こるため、正規パスの parse 失敗は致命扱い。
+    """
+    tmp_dir = patched_tmp_dir
+    # round 開始を十分過去にして mtime チェックでは弾かれないようにする
+    past = _dt.datetime(2000, 1, 1, tzinfo=_dt.timezone.utc)
+    _seed_state_with_started_at(tmp_dir, past.isoformat(timespec="seconds"))
+
+    # 正規パスに壊れた JSON を置く (size>0 だが parse 不能)
+    canonical = tmp_dir / f"fix-pr{PR}-result.json"
+    canonical.write_text("{ this is not valid json")
+
+    # /tmp/ 側には別 PR を装う偽の正規 JSON を置く (これに流れ込んだら事故)
+    legacy = pathlib.Path(f"/tmp/fix-pr{PR}-result.json")
+    legacy.write_text(json.dumps(_canonical_fix()))
+    try:
+        with pytest.raises(SystemExit) as e:
+            state_mod.cmd_merge_fix(_make_args())
+        assert e.value.code == 3
+        captured = capsys.readouterr()
+        # 正規パスの読み取り失敗である旨が stderr に出る
+        assert "正規パス" in captured.err
+        # /tmp 側の fix がマージされていないこと (= state.rounds[-1].fix が無い)
+        st = _read_state(tmp_dir)
+        assert "fix" not in st["rounds"][-1]
+    finally:
+        legacy.unlink(missing_ok=True)
+
+
+def test_fallback_pr_field_non_numeric_is_skipped(patched_tmp_dir, state_mod, capsys):
+    """fallback ファイルの `pr` フィールドが int 変換不能なら skip (ValueError 防止)。
+
+    gemini round 2 指摘: `int(file_pr)` で ValueError が裸で上がるとプロセスごと落ちる。
+    """
+    tmp_dir = patched_tmp_dir
+    past = _dt.datetime(2000, 1, 1, tzinfo=_dt.timezone.utc)
+    _seed_state_with_started_at(tmp_dir, past.isoformat(timespec="seconds"))
+
+    # 正規パスに `pr` が int 化できない値の JSON を置く
+    canonical = tmp_dir / f"fix-pr{PR}-result.json"
+    bad = _canonical_fix()
+    bad["pr"] = "not-a-number"
+    canonical.write_text(json.dumps(bad))
+
+    with pytest.raises(SystemExit) as e:
+        state_mod.cmd_merge_fix(_make_args())
+    # /tmp/ 側にも候補が無いので最終的には "戻り値ファイル無し" で die(3)
+    assert e.value.code == 3
+    captured = capsys.readouterr()
+    # 数値として解釈できない旨が stderr に出る
+    assert "数値として解釈できない" in captured.err
+    # state にマージされていないこと
+    st = _read_state(tmp_dir)
+    assert "fix" not in st["rounds"][-1]
+
+
+def test_is_fresh_fix_result_returns_tuple_with_parsed_payload(
+    patched_tmp_dir, state_mod
+):
+    """`_is_fresh_fix_result` は (is_fresh, parsed_payload) を返す。
+
+    gemini round 2 指摘の性能改善: cmd_merge_fix 側で再パースしないよう、
+    fresh な場合は parse 済み dict を返す。
+    """
+    tmp_dir = patched_tmp_dir
+    past_dt = _dt.datetime.now(_dt.timezone.utc).astimezone() - _dt.timedelta(hours=1)
+    past_ts = past_dt.timestamp()
+
+    fix = _canonical_fix()
+    fix["fix_commit"] = "tuple_return_ok"
+    p = tmp_dir / f"fix-pr{PR}-result.json"
+    p.write_text(json.dumps(fix))
+
+    is_fresh, parsed = state_mod._is_fresh_fix_result(p, PR, past_ts, is_canonical=True)
+    assert is_fresh is True
+    assert isinstance(parsed, dict)
+    assert parsed["fix_commit"] == "tuple_return_ok"
+
+
+def test_is_fresh_fix_result_returns_none_when_stale(patched_tmp_dir, state_mod):
+    """stale な場合は (False, None) を返す。"""
+    tmp_dir = patched_tmp_dir
+    now_dt = _dt.datetime.now(_dt.timezone.utc).astimezone()
+
+    p = tmp_dir / f"fix-pr{PR}-result.json"
+    p.write_text(json.dumps(_canonical_fix()))
+    stale_ts = now_dt.timestamp() - 3600
+    os.utime(p, (stale_ts, stale_ts))
+
+    is_fresh, parsed = state_mod._is_fresh_fix_result(
+        p, PR, now_dt.timestamp(), is_canonical=False
+    )
+    assert is_fresh is False
+    assert parsed is None
