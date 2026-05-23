@@ -197,32 +197,53 @@ execute_squash() {
 
   cd "$WORKTREE"
 
-  local branch base title new_branch pr_meta
-  # PR メタ情報は 1 度の gh pr view で head/base/title を一括取得する
-  # (複数回呼び出しによるネットワーク遅延と API 負荷を削減, gemini round 7 指摘)
-  pr_meta=$(gh pr view "$OLD_PR" --json headRefName,baseRefName,title)
-  base=$(printf '%s' "$pr_meta" | jq -r '.baseRefName')
-  title=$(printf '%s' "$pr_meta" | jq -r '.title')
+  local branch base title new_branch pr_meta prep
+  prep=$TMP_DIR/rotate-pr$state_pr-prepare.json
+
+  # PR メタ情報 (base / title / head) は、まず prepare.json があればそこから読み出し、
+  # 無い場合のみ gh pr view にフォールバックする (execute_light と同じ方針で
+  # 不要な API 呼び出しを排除, gemini round 8 指摘)。
+  if [ -s "$prep" ]; then
+    base=$(jq -r '.base_branch // empty' "$prep")
+    title=$(jq -r '.old_title // empty'  "$prep")
+  fi
+  if [ -z "${base:-}" ] || [ -z "${title:-}" ]; then
+    pr_meta=$(gh pr view "$OLD_PR" --json headRefName,baseRefName,title)
+    [ -n "${base:-}" ]  || base=$(printf '%s'  "$pr_meta" | jq -r '.baseRefName')
+    [ -n "${title:-}" ] || title=$(printf '%s' "$pr_meta" | jq -r '.title')
+  fi
 
   # state.py init は worktree を `git worktree add --detach origin/<head>` で作るため、
   # `git branch --show-current` は空文字を返す。空のまま new_branch を生成すると
   # `-rHHMMSS` だけのブランチ名になってしまうので、フォールバック順を以下に固定する:
   #   1. git branch --show-current (通常 worktree なら使える)
   #   2. prepare.json の head_branch (prepare 済みなら最も信頼できる)
-  #   3. pr_meta.headRefName (prepare 未実行でも復元可能)
+  #   3. gh pr view --json headRefName (prepare 未実行でも復元可能)
   # (codex round 4 指摘)
   branch=$(git branch --show-current)
-  if [ -z "$branch" ]; then
-    local prep=$TMP_DIR/rotate-pr$state_pr-prepare.json
-    if [ -s "$prep" ]; then
-      branch=$(jq -r '.head_branch // empty' "$prep")
-    fi
+  if [ -z "$branch" ] && [ -s "$prep" ]; then
+    branch=$(jq -r '.head_branch // empty' "$prep")
   fi
   if [ -z "$branch" ]; then
+    pr_meta=${pr_meta:-$(gh pr view "$OLD_PR" --json headRefName,baseRefName,title)}
     branch=$(printf '%s' "$pr_meta" | jq -r '.headRefName')
   fi
   [ -n "$branch" ] || { echo "head branch を復元できませんでした (detached worktree かつ prepare.json / gh pr view から取得失敗)" >&2; exit 1; }
   new_branch="${branch}-r$(date +%H%M%S)"
+
+  # 既に title 末尾に "(rotated)" / "(rotated2)" 等が付いている場合は除去してから
+  # "(rotated)" を 1 つだけ付与し、ローテーションのたびに suffix が重複しないようにする
+  # (gemini round 8 指摘)。
+  # 例:
+  #   "Fix foo"                       → "Fix foo (rotated)"
+  #   "Fix foo (rotated)"             → "Fix foo (rotated)"
+  #   "Fix foo (rotated2)"            → "Fix foo (rotated)"
+  #   "Fix foo (rotated)(rotated)"    → "Fix foo (rotated)"
+  local title_stripped=$title
+  while [[ $title_stripped =~ [[:space:]]*\(rotated[0-9]*\)$ ]]; do
+    title_stripped=${title_stripped%"${BASH_REMATCH[0]}"}
+  done
+  local new_title="$title_stripped (rotated)"
 
   echo "🔄 PR #$OLD_PR rotation (squash): $branch → $new_branch (base=$base)" >&2
 
@@ -259,7 +280,7 @@ execute_squash() {
 EOF
 )
   local new_pr_url
-  new_pr_url=$(printf '%s' "$new_body" | gh pr create --base "$base" --title "$title (rotated)" --body-file -)
+  new_pr_url=$(printf '%s' "$new_body" | gh pr create --base "$base" --title "$new_title" --body-file -)
 
   # gh pr create 成功直後に trap を解除し、後続の URL parse / echo 等が失敗しても
   # 新旧 PR が重複して開く事態を避ける (gemini round 6 指摘)。
