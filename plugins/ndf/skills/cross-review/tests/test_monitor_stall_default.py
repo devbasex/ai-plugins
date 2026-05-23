@@ -41,15 +41,17 @@ def test_per_agent_env_overrides_builtin(monkeypatch, monitor_mod):
 def test_shared_env_applies_to_both(monkeypatch, monitor_mod):
     """env `MONITOR_STALL` 共通指定は両 agent に同じ値が適用される (旧挙動互換)。
 
-    `DEFAULT_STALL` モジュール定数は import 時に env を読むため固定だが、
-    `_agent_stall_default()` は呼び出し時に env を見るので monkeypatch が効く。
+    codex round 3 指摘: `_agent_stall_default()` は呼び出し時に env を再評価する
+    (import 時固定の `DEFAULT_STALL` ではなく `int(os.environ["MONITOR_STALL"])` を返す)。
+    本テストは monkeypatch で `MONITOR_STALL=240` に書き換え、両 agent が 240 を
+    返すことを確認する (= 共通 env が実際に反映されることの検証)。
     """
     monkeypatch.delenv("MONITOR_STALL_CODEX", raising=False)
     monkeypatch.delenv("MONITOR_STALL_GEMINI", raising=False)
     monkeypatch.setenv("MONITOR_STALL", "240")
     # 共通 env が両 agent に効く (per-agent 上書きなしの場合)
-    assert monitor_mod._agent_stall_default("codex") == monitor_mod.DEFAULT_STALL
-    assert monitor_mod._agent_stall_default("gemini") == monitor_mod.DEFAULT_STALL
+    assert monitor_mod._agent_stall_default("codex") == 240
+    assert monitor_mod._agent_stall_default("gemini") == 240
 
 
 def test_per_agent_env_takes_precedence_over_shared(monkeypatch, monitor_mod):
@@ -58,8 +60,8 @@ def test_per_agent_env_takes_precedence_over_shared(monkeypatch, monitor_mod):
     monkeypatch.setenv("MONITOR_STALL_GEMINI", "777")
     monkeypatch.delenv("MONITOR_STALL_CODEX", raising=False)
     assert monitor_mod._agent_stall_default("gemini") == 777
-    # codex 側は per-agent env が無いので 共通 env (= DEFAULT_STALL) にフォールバック
-    assert monitor_mod._agent_stall_default("codex") == monitor_mod.DEFAULT_STALL
+    # codex 側は per-agent env が無いので 共通 env (= 240) にフォールバック
+    assert monitor_mod._agent_stall_default("codex") == 240
 
 
 def test_unknown_agent_falls_back_to_default_stall(monkeypatch, monitor_mod):

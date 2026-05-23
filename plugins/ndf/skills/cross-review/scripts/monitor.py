@@ -152,12 +152,16 @@ def _agent_stall_default(agent: str) -> int:
       2. env `MONITOR_STALL` (両 agent 共通)
       3. `DEFAULT_STALL_AGENT_BUILTIN[agent]` (codex=180, gemini=480)
       4. `DEFAULT_STALL` (フォールバック)
+
+    Note (codex round 3 指摘): 2 は **呼び出し時** に `os.environ["MONITOR_STALL"]`
+    を再評価する。`DEFAULT_STALL` モジュール定数は import 時に env を読むため
+    プロセス起動後の env 変更に追随できず、テストの monkeypatch も効かない。
     """
     env_key = f"MONITOR_STALL_{agent.upper()}"
     if env_key in os.environ:
         return int(os.environ[env_key])
     if "MONITOR_STALL" in os.environ:
-        return DEFAULT_STALL
+        return int(os.environ["MONITOR_STALL"])
     return DEFAULT_STALL_AGENT_BUILTIN.get(agent, DEFAULT_STALL)
 
 

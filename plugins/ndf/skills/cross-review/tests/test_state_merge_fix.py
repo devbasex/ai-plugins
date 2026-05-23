@@ -391,3 +391,78 @@ def test_is_fresh_fix_result_returns_none_when_stale(patched_tmp_dir, state_mod)
     )
     assert is_fresh is False
     assert parsed is None
+
+
+# ---------------- PLAN21 round 4: non-dict JSON 防御 ----------------
+
+
+def test_is_fresh_fix_result_non_dict_json_is_skipped(patched_tmp_dir, state_mod, capsys):
+    """`_is_fresh_fix_result` は dict 以外 (list 等) の JSON を読んだら (False, None) を返す。
+
+    gemini round 3 指摘: `json.loads` は list / int / str も返しうるため、
+    `payload.get(...)` 呼び出し前に `isinstance(payload, dict)` で防御する必要がある。
+    """
+    tmp_dir = patched_tmp_dir
+    # round 開始は十分過去にして mtime チェックを通す
+    past_dt = _dt.datetime.now(_dt.timezone.utc).astimezone() - _dt.timedelta(hours=1)
+    past_ts = past_dt.timestamp()
+
+    p = tmp_dir / f"fix-pr{PR}-result.json"
+    # JSON として valid だが dict ではない (list)
+    p.write_text(json.dumps([{"fix_commit": "should_be_ignored"}]))
+
+    is_fresh, parsed = state_mod._is_fresh_fix_result(
+        p, PR, past_ts, is_canonical=False
+    )
+    assert is_fresh is False
+    assert parsed is None
+    captured = capsys.readouterr()
+    # dict ではない旨が stderr に出る
+    assert "dict ではない" in captured.err
+
+
+def test_is_fresh_fix_result_non_dict_json_canonical_also_skipped(
+    patched_tmp_dir, state_mod, capsys
+):
+    """正規パス (is_canonical=True) でも非 dict JSON は die せず skip (False, None)。
+
+    JSON 自体は parse 成功しているので「読み取り失敗による誤マージ事故」とは別系統。
+    呼び出し側 (cmd_merge_fix) で「全候補なし」として最終的に die(code=3) に至る。
+    """
+    tmp_dir = patched_tmp_dir
+    past_dt = _dt.datetime.now(_dt.timezone.utc).astimezone() - _dt.timedelta(hours=1)
+    past_ts = past_dt.timestamp()
+
+    p = tmp_dir / f"fix-pr{PR}-result.json"
+    p.write_text(json.dumps(["not", "a", "dict"]))
+
+    is_fresh, parsed = state_mod._is_fresh_fix_result(
+        p, PR, past_ts, is_canonical=True
+    )
+    assert is_fresh is False
+    assert parsed is None
+    captured = capsys.readouterr()
+    assert "dict ではない" in captured.err
+
+
+def test_explicit_file_non_dict_json_dies(patched_tmp_dir, state_mod, capsys, tmp_path):
+    """`--file` 明示時に non-dict JSON が渡されたら die(code=3) で即時中断。
+
+    gemini round 3 指摘: list 等が渡されると後続 `fix.get(...)` でクラッシュするため、
+    明示指定の場合も dict 検証を行ってから fix に代入する。
+    """
+    tmp_dir = patched_tmp_dir
+    _seed_state(tmp_dir)
+
+    explicit_path = tmp_path / "bad-explicit.json"
+    # JSON として valid だが dict ではない (list)
+    explicit_path.write_text(json.dumps([_canonical_fix()]))
+
+    with pytest.raises(SystemExit) as e:
+        state_mod.cmd_merge_fix(_make_args(explicit_path))
+    assert e.value.code == 3
+    captured = capsys.readouterr()
+    assert "dict ではない" in captured.err
+    # state は更新されていない
+    st = _read_state(tmp_dir)
+    assert "fix" not in st["rounds"][-1]

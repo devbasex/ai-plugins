@@ -169,7 +169,16 @@ def _is_fresh_fix_result(
             )
         info(f"⚠ fallback 候補 JSON 解析失敗 ({path}): {exc} — skip")
         return False, None
-    file_pr = payload.get("pr") if isinstance(payload, dict) else None
+    # gemini round 3 指摘: `json.loads` は dict 以外 (list 等) も返す。
+    # 後続の `payload.get(...)` や cmd_merge_fix 側の `.get()` でクラッシュしないよう、
+    # dict でない場合は warn を出して fallback 不採用 ((False, None)) として扱う。
+    if not isinstance(payload, dict):
+        info(
+            f"⚠ fallback 候補 JSON が dict ではない ({path}, type={type(payload).__name__}) "
+            "— skip"
+        )
+        return False, None
+    file_pr = payload.get("pr")
     if file_pr is not None:
         try:
             file_pr_int = int(file_pr)
@@ -521,6 +530,15 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
             ffile = explicit
             # 明示指定は stale 検証スキップ、ここで読み込む
             fix = json.loads(explicit.read_text(encoding="utf-8"))
+            # gemini round 3 指摘: `--file` で `list` 等の non-dict JSON が渡されると
+            # 後続の `fix.get(...)` でクラッシュする。即時 die(code=3) で中断。
+            if not isinstance(fix, dict):
+                die(
+                    f"--file 指定の fix 戻り値ファイルが dict ではない "
+                    f"({explicit}, type={type(fix).__name__})。"
+                    " fix サブエージェント出力の形式不正。",
+                    code=3,
+                )
     if ffile is None:
         for c, is_canonical in fallback_candidates:
             if not (c.exists() and c.stat().st_size > 0):
