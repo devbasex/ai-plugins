@@ -194,25 +194,9 @@ def _agent_stall_default(agent: str) -> int:
     builtin = DEFAULT_STALL_AGENT_BUILTIN.get(agent, DEFAULT_STALL)
     env_key = f"MONITOR_STALL_{agent.upper()}"
     if env_key in os.environ:
-        raw = os.environ[env_key]
-        try:
-            return int(raw)
-        except (ValueError, TypeError):
-            print(
-                f"⚠ env {env_key}={raw!r} が int に変換できません — builtin {builtin} を使用",
-                file=sys.stderr, flush=True,
-            )
-            return builtin
+        return _safe_int_env(env_key, builtin)
     if "MONITOR_STALL" in os.environ:
-        raw = os.environ["MONITOR_STALL"]
-        try:
-            return int(raw)
-        except (ValueError, TypeError):
-            print(
-                f"⚠ env MONITOR_STALL={raw!r} が int に変換できません — builtin {builtin} を使用",
-                file=sys.stderr, flush=True,
-            )
-            return builtin
+        return _safe_int_env("MONITOR_STALL", builtin)
     return builtin
 
 
