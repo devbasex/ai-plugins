@@ -1,7 +1,7 @@
 ---
 name: cross-review
 description: "PR を codex / gemini 両方にレビューさせ、両方 APPROVE まで /ndf:review → /ndf:fix を自動ループ。サブエージェント分離・PR ローテーション・nit 集約でメイン context 消費を最小化"
-argument-hint: "[PR番号] [--max-rounds N] [--rotate-after K] [--only codex|gemini]"
+argument-hint: "[PR番号] [--max-rounds N] [--rotate-after K] [--rotate-mode light|squash] [--only codex|gemini]"
 disable-model-invocation: true
 allowed-tools:
   - Bash
@@ -40,7 +40,7 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 | 修正 | **必ずサブエージェント (`general-purpose`) で実行**。メイン context に diff は載せない |
 | ユーザ問い合わせ | 自動判断を最大化（`critical`/`major`/`minor` は自動修正、`nit` は最後にまとめて 1 回だけ問い合わせ） |
 | 状態の永続化 | `/tmp/cross-review-pr<番号>-state.json` に集約。中断・再開可能 |
-| 長尺PR対策 | **`--rotate-after` ラウンドで PR をローテーション**（squash + 新ブランチ + 新 PR） |
+| 長尺PR対策 | **`--rotate-after` ラウンドで PR をローテーション**（default=light: 同ブランチで PR 巻き直し / squash: 新ブランチ + squash 統合） |
 | 振動検知 | 同じ指摘が 2 round で 50%以上重複したら中断 |
 
 ## 引数
@@ -50,6 +50,7 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 | `[PR番号]` | 対象 PR（省略時は直前 PR / 現在ブランチ） | — |
 | `--max-rounds N` | 全体最大ラウンド数（PR ローテーションを含む通算） | `6` |
 | `--rotate-after K` | この round 数で未収束なら PR ローテーション | `5` |
+| `--rotate-mode light\|squash` | ローテーション方式。`light`: 同ブランチで旧 PR を close → 新 PR (title/body は現状の差分・実装から再生成)。`squash`: 既存挙動 (squash 統合 + 新ブランチ + `(rotated)` suffix) | `light` |
 | `--only codex` / `--only gemini` | 片方だけで回す（デバッグ用） | 両方 |
 
 例:
@@ -57,8 +58,14 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 ```
 /ndf:cross-review 123
 /ndf:cross-review 123 --max-rounds 4 --rotate-after 2
+/ndf:cross-review 123 --rotate-mode squash   # 既存挙動が欲しい場合のみ
 /ndf:cross-review 123 --only codex
 ```
+
+### `--rotate-mode` の選び方
+
+- **`light` (default)**: PR を読む人 (将来のレビュアー / 後続 PR を作る人) が cross-review の存在を意識せずに済む。release branch 戦略・TODO 参照・コミット単位レビューを破壊しない。**通常はこちらを使う**
+- **`squash`**: 巨大 PR を 1 commit に潰したい / `(rotated)` suffix で rotation 履歴を PR title に残したい場合のみ。release branch 戦略を使う運用とは併用しない
 
 ## 前提
 
@@ -126,7 +133,7 @@ flowchart TD
     Check -->|振動検知 50% 重複| Osc([final = oscillation]):::stop
     Check -->|CI failure code-related| Err([final = error]):::stop
     Check -->|"CI failure meta-only (Assignees 等)"| Round
-    Check -->|round_in_pr >= rotate-after| Rotate["PR rotation<br/>squash + 新ブランチ + 新 PR"]
+    Check -->|round_in_pr >= rotate-after| Rotate["PR rotation<br/>light (default): 同ブランチで巻き直し<br/>squash (opt-in): 新ブランチ + squash 統合<br/>light は Agent が title/body 再生成"]
     Check -->|それ以外| Round
     Rotate --> Round
 
@@ -151,6 +158,10 @@ SCRIPTS="$CLAUDE_PLUGIN_ROOT/skills/cross-review/scripts"
 # rotation 後も state.json のパスは変わらないため、scripts/ への引数には常に
 # STATE_PR を渡す。「現在レビュー中の PR」は state.json の current_pr を内部参照する。
 STATE_PR=$INITIAL_PR
+
+# ROTATE_MODE は引数 --rotate-mode (default=light) から取得。light なら Step 6b で
+# Agent (general-purpose) を起動して新 PR の title/body を生成する。
+ROTATE_MODE=${ROTATE_MODE:-light}
 
 # Step 0: state 初期化 / 再開
 eval "$("$SCRIPTS/state.py" init "$STATE_PR" \
@@ -187,7 +198,36 @@ while :; do
 
   # Step 6: PR ローテーション判定 (0=rotate/2=keep)。state.json の current_pr を内部更新。
   if "$SCRIPTS/state.py" should-rotate "$STATE_PR"; then
-    eval "$("$SCRIPTS/rotate-pr.sh" "$STATE_PR")"   # NEW_PR を eval で取り込む
+    # Step 6a: 旧 PR の素材 (title/body/isDraft + git log/diff stat) を dump
+    eval "$("$SCRIPTS/rotate-pr.sh" prepare "$STATE_PR")"
+
+    # Step 6b: light モードのみ。**メインセッション側で Agent(subagent_type="general-purpose") を起動して**
+    #   prepare.json を読ませ、現状の差分・実装を反映した title/body を
+    #   $TMP_DIR/rotate-pr<STATE_PR>-newtext.json に書き出させる。
+    #   詳細プロンプトは docs/02-fix-and-rotation.md Step 6b 参照。
+    #   squash モードでは Step 6b 不要。
+    #
+    #   ⚠ Bash 単体では Agent ツールを呼べない。下記のフローは「メイン会話セッション側で」
+    #   実行される前提なので、bash の while ループそのものは pseudo-code として読み、
+    #   実際には以下の 3 段階を **メインが順に駆動する** こと:
+    #     (1) bash 側で `rotate-pr.sh prepare $STATE_PR` を実行 (これは普通の bash)
+    #     (2) メインが Agent(...) を起動して newtext.json を書かせる (bash の外)
+    #     (3) bash 側で `rotate-pr.sh execute $STATE_PR --mode light` を実行
+    #   下記の if exit 10 は **誤ってメイン介在なしで Step 6c に進むことを防ぐガード** であり、
+    #   exit 10 を観測したらメインは Step 6b の Agent を起動し、newtext.json が
+    #   生成されてから **同じ STATE_PR で Step 6c (execute) を直接呼び直す**。
+    #   state.json は完全に再開可能 (prepare.json はそのまま再利用される)。
+    NEWTEXT_JSON="$TMP_DIR/rotate-pr$STATE_PR-newtext.json"
+    if [ "$ROTATE_MODE" = "light" ] && [ ! -s "$NEWTEXT_JSON" ]; then
+      echo "⏸  light モード: メインセッションで Agent(general-purpose) を起動し" >&2
+      echo "    $NEWTEXT_JSON を生成してから rotate-pr.sh execute $STATE_PR --mode light を実行してください" >&2
+      echo "    (docs/02-fix-and-rotation.md Step 6b 参照 / 再開プロトコルは下記 '## 再開プロトコル')" >&2
+      exit 10
+    fi
+
+    # Step 6c: 実行。NEW_PR / NEW_PR_URL / NEW_BRANCH を eval で取り込む。
+    eval "$("$SCRIPTS/rotate-pr.sh" execute "$STATE_PR" --mode "$ROTATE_MODE")"
+
     "$SCRIPTS/state.py" set-current-pr "$STATE_PR" "$NEW_PR"
     # NOTE: STATE_PR は変えない。次ループの scripts も $STATE_PR を渡す。
   fi
@@ -201,6 +241,30 @@ done
 
 - Step 0〜4 — [docs/01-state-and-review.md](docs/01-state-and-review.md)
 - Step 5〜8 — [docs/02-fix-and-rotation.md](docs/02-fix-and-rotation.md)
+
+## light モード rotation の再開プロトコル (exit 10 を観測した時)
+
+bash ループは Agent tool を呼べないため、light モードでは Step 6b の介入が必須。
+メインセッションはループ全体を 1 回の bash で完結させず、以下のように駆動する:
+
+1. **通常のループ実行** — Step 0〜6a まで bash で進めると、newtext.json が未生成の
+   ため `exit 10` で停止する。state.json には prepare.json までの状態が
+   永続化されているので **そのまま再開可能**。
+2. **Step 6b (Agent 起動)** — メインが Agent(subagent_type=`general-purpose`) を
+   起動し、prepare.json を読ませて `$TMP_DIR/rotate-pr$STATE_PR-newtext.json` を
+   書き出させる (プロンプトテンプレートは docs/02-fix-and-rotation.md Step 6b)。
+3. **Step 6c (execute) を直接呼ぶ** — メインが bash で以下を実行:
+
+    ```bash
+    eval "$("$SCRIPTS/rotate-pr.sh" execute "$STATE_PR" --mode light)"
+    "$SCRIPTS/state.py" set-current-pr "$STATE_PR" "$NEW_PR"
+    ```
+
+4. **ループ再開** — Step 7 (次ラウンド) からループ全体を再開する。`STATE_PR` は
+   不変なので、`start-round` 以降は通常通り進む。
+
+> ⚠ exit 10 はエラーではなく **メイン介入待ちの一時停止シグナル**。final ステータスには
+> 反映しない (中断扱いではない)。次回 round カウントにも影響しない。
 
 ## レビュー出力の制約
 
@@ -274,6 +338,10 @@ pint / larastan / test / build などは **中断** を原則とする。
 - ❌ **nit を都度ユーザに問う** — 必ずバッチ集約して最後に 1 回
 - ❌ **`max-rounds` なしで回す** — 無限ループの温床
 - ❌ **PR ローテーションを忘れる** — 100+ コメントの巨大 PR になる
+- ❌ **light モードで Agent (general-purpose) 呼び出しを省略する** — newtext.json が無いと `rotate-pr.sh execute --mode light` はエラーで止まる。prepare → Agent → execute の 3 段は不可分
+- ❌ **light モードで新 PR の title/body に内部用語を漏らす** — 「round N」「rotated」「cross-review」「レビュー指摘で〜」等は禁止 (Agent プロンプトで明示禁止)
+- ❌ **newtext.json に旧 PR の title/body をそのままコピーする** — 「現状の差分・実装を反映」が必須。古い説明が残ると後続 PR / 将来のレビュアーが混乱
+- ❌ **`rotate-pr.sh` 内から `claude` CLI を呼んで title/body を生成する** — 環境依存・コスト管理外。Agent tool でメイン側から呼ぶ
 - ❌ **CI 失敗を一律で中断** — コード関連／メタチェックを分類（上記参照）
 - ❌ **自分の PR に `REQUEST_CHANGES` で投稿** — 必ず 422。事前判定 + COMMENT ダウングレード
 - ❌ **`gemini --yolo` だけで起動** — trusted directory で YOLO 無効化。`--skip-trust` 併用
