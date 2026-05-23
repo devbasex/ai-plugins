@@ -41,6 +41,19 @@ Usage:
 USAGE
 }
 
+# close 後に新 PR create が失敗した場合の rollback hook (light/squash 共通)。
+# OLD_PR はグローバル (load_state で set される) を参照する。
+# 両モードから `trap reopen_old_pr_on_failure ERR` で登録し、create 成功直後に
+# `trap - ERR` で解除する (gemini round 6 指摘: 関数定義の重複排除 + EXIT ではなく
+# ERR で hook して PR 作成後の処理失敗による誤発火を避ける)。
+reopen_old_pr_on_failure() {
+  local exit_code=$?
+  echo "⚠ 新 PR 作成系処理に失敗 (exit=$exit_code) — 旧 PR #${OLD_PR:-?} を reopen します" >&2
+  if [ -n "${OLD_PR:-}" ]; then
+    gh pr reopen "$OLD_PR" >&2 || echo "⚠ 旧 PR #$OLD_PR の reopen にも失敗しました。手動で確認してください。" >&2
+  fi
+}
+
 # state.json から共通情報を読み出して shell 変数にセットする。
 # 呼び出し後: STATE_FILE / WORKTREE / OLD_PR / ROUND_IN_PR が使える。
 load_state() {
@@ -150,14 +163,8 @@ execute_light() {
   gh pr close "$OLD_PR"
 
   # close 後に create が失敗した場合は旧 PR を reopen して rotation の途中停止を回避する
-  reopen_old_pr_on_failure() {
-    local exit_code=$?
-    if [ "$exit_code" -ne 0 ]; then
-      echo "⚠ 新 PR 作成に失敗 (exit=$exit_code) — 旧 PR #$OLD_PR を reopen します" >&2
-      gh pr reopen "$OLD_PR" >&2 || echo "⚠ 旧 PR #$OLD_PR の reopen にも失敗しました。手動で確認してください。" >&2
-    fi
-  }
-  trap reopen_old_pr_on_failure EXIT
+  # (関数定義は file 冒頭で共通化, gemini round 6 指摘)
+  trap reopen_old_pr_on_failure ERR
 
   # 3. 新 PR を同 head/base で作成 (Draft 状態は元 PR から継承)。
   #    body は --body-file - 経由で stdin から渡し、argv 長制限を回避する (gemini 指摘)。
@@ -167,12 +174,14 @@ execute_light() {
   fi
   local new_pr_url
   new_pr_url=$(printf '%s' "$new_body" | gh pr create "${create_args[@]}")
-  # PR 番号は --json number で頑健に取得 (URL 文字列の grep は壊れやすい)
-  local new_pr
-  new_pr=$(gh pr view "$new_pr_url" --json number -q .number)
 
-  # ここまで来れば create 成功なので trap は解除する
-  trap - EXIT
+  # gh pr create 成功直後に trap を解除し、後続の URL parse / echo 等が失敗しても
+  # 新旧 PR が重複して開く事態を避ける (gemini round 6 指摘)。
+  trap - ERR
+
+  # PR 番号は create 出力 URL の末尾セグメントから抽出 (gh pr view 追加呼び出しを削減,
+  # gemini round 6 指摘)。URL 形式: https://github.com/<owner>/<repo>/pull/<number>
+  local new_pr=${new_pr_url##*/}
 
   echo "✅ 新 PR #$new_pr: $new_pr_url" >&2
   # eval される契約。head_branch / URL に shell メタ文字が混ざっても安全なよう %q で escape
@@ -229,15 +238,8 @@ EOF
   gh pr close "$OLD_PR"
 
   # close 後に create が失敗した場合は旧 PR を reopen して rotation の途中停止を回避する
-  # (execute_light と同じパターン, gemini round 5 指摘)
-  reopen_old_pr_on_failure() {
-    local exit_code=$?
-    if [ "$exit_code" -ne 0 ]; then
-      echo "⚠ 新 PR 作成に失敗 (exit=$exit_code) — 旧 PR #$OLD_PR を reopen します" >&2
-      gh pr reopen "$OLD_PR" >&2 || echo "⚠ 旧 PR #$OLD_PR の reopen にも失敗しました。手動で確認してください。" >&2
-    fi
-  }
-  trap reopen_old_pr_on_failure EXIT
+  # (関数定義は file 冒頭で共通化, gemini round 6 指摘)
+  trap reopen_old_pr_on_failure ERR
 
   # 3. 新 PR 作成
   #    body は --body-file - 経由で stdin から渡し、argv 長制限を回避する
@@ -255,12 +257,13 @@ EOF
   local new_pr_url
   new_pr_url=$(printf '%s' "$new_body" | gh pr create --base "$base" --title "$title (rotated)" --body-file -)
 
-  # PR 番号は --json number -q .number で頑健に取得
-  local new_pr
-  new_pr=$(gh pr view "$new_pr_url" --json number -q .number)
+  # gh pr create 成功直後に trap を解除し、後続の URL parse / echo 等が失敗しても
+  # 新旧 PR が重複して開く事態を避ける (gemini round 6 指摘)。
+  trap - ERR
 
-  # ここまで来れば create 成功なので trap は解除する
-  trap - EXIT
+  # PR 番号は create 出力 URL の末尾セグメントから抽出 (gh pr view 追加呼び出しを削減,
+  # gemini round 6 指摘)。URL 形式: https://github.com/<owner>/<repo>/pull/<number>
+  local new_pr=${new_pr_url##*/}
 
   echo "✅ 新 PR #$new_pr: $new_pr_url" >&2
   # eval される契約。new_branch / URL に shell メタ文字が混ざっても安全なよう %q で escape
