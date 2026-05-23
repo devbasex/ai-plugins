@@ -61,17 +61,23 @@ from typing import Optional
 
 # ---------- 設定 ----------
 
-DEFAULT_TIMEOUT = int(os.environ.get("MONITOR_TIMEOUT", "420"))    # 7 min
+# 既定値は import 時に **固定数値** で保持する。env (`MONITOR_TIMEOUT` /
+# `MONITOR_STALL` / `MONITOR_POLL`) の解釈は **呼び出し時** に try/except
+# 付きで行い、非数値 env でも import / 監視プロセスがクラッシュしないようにする。
+# (codex round 5 指摘: import 時の `int(os.environ.get(...))` は
+#  `MONITOR_STALL=abc` のような誤設定で `_agent_stall_default()` に到達する前に
+#  ValueError で落ちてしまうため)
+DEFAULT_TIMEOUT = 420    # 7 min — `--timeout` / env `MONITOR_TIMEOUT` で上書き可
 # 既定 stall timeout (後方互換のため env MONITOR_STALL は残す)。
-# 両 agent 共通のデフォルトとして引き続き受け付ける。
-DEFAULT_STALL = int(os.environ.get("MONITOR_STALL", "180"))       # 3 min no progress
+# 両 agent 共通のデフォルトとして引き続き受け付ける (解釈は `_agent_stall_default()` 内)。
+DEFAULT_STALL = 180       # 3 min no progress
 # per-agent 上書き: gemini は err.log がほぼ無音なため大きめに取る。
 # 解決順は `_agent_stall_default()` 参照。
 DEFAULT_STALL_AGENT_BUILTIN = {
     "codex": 180,    # 推論ログを逐次出すので 3 min で十分
     "gemini": 480,   # err.log が静かなため 8 min まで許容
 }
-DEFAULT_POLL = int(os.environ.get("MONITOR_POLL", "15"))          # 15 sec
+DEFAULT_POLL = 15          # 15 sec — env `MONITOR_POLL` で上書き可
 # `MONITOR_NO_EARLY_ERROR=1` で EARLY_ERROR 検知を無効化 (escape hatch)
 DEFAULT_NO_EARLY_ERROR = os.environ.get("MONITOR_NO_EARLY_ERROR", "").lower() in {
     "1", "true", "yes", "on",
@@ -142,6 +148,29 @@ def _match_is_quoted(line: str, match_start: int, match_end: int) -> bool:
     return False
 
 CODEX_SENTINEL = re.compile(r"^tokens used$", re.MULTILINE)
+
+
+def _safe_int_env(name: str, fallback: int) -> int:
+    """env を safe に int parse する。
+
+    非数値時は warn を stderr に出して fallback 値を返す。
+    `_agent_stall_default()` と同じく、env 設定ミスでプロセスを落とさないため。
+
+    Note (codex round 5 指摘): `MONITOR_STALL` 等の env を import 時 / 呼び出し時に
+    生の `int(...)` で読むと、非数値設定で監視プロセスが起動できなくなる。
+    `DEFAULT_TIMEOUT` / `DEFAULT_POLL` も同じ問題を持つため、共通ヘルパに集約。
+    """
+    if name not in os.environ:
+        return fallback
+    raw = os.environ[name]
+    try:
+        return int(raw)
+    except (ValueError, TypeError):
+        print(
+            f"⚠ env {name}={raw!r} が int に変換できません — {fallback} を使用",
+            file=sys.stderr, flush=True,
+        )
+        return fallback
 
 
 def _agent_stall_default(agent: str) -> int:
@@ -564,14 +593,18 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("pr", type=int)
     p.add_argument("target", choices=["codex", "gemini", "both"])
-    p.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT,
-                   help=f"hard timeout in seconds (default: {DEFAULT_TIMEOUT})")
+    # env (MONITOR_TIMEOUT / MONITOR_POLL) は呼び出し時に safe parse で読む。
+    # 非数値設定でも fixed default (`DEFAULT_TIMEOUT` / `DEFAULT_POLL`) に戻す。
+    timeout_default = _safe_int_env("MONITOR_TIMEOUT", DEFAULT_TIMEOUT)
+    poll_default = _safe_int_env("MONITOR_POLL", DEFAULT_POLL)
+    p.add_argument("--timeout", type=int, default=timeout_default,
+                   help=f"hard timeout in seconds (default: {timeout_default})")
     p.add_argument("--stall-timeout", type=int, default=None,
                    help="stall timeout (err.log no progress) in seconds. "
                         "未指定時は agent 別既定 (codex=180, gemini=480) または "
                         "env MONITOR_STALL_<AGENT> / MONITOR_STALL を参照")
-    p.add_argument("--poll", type=int, default=DEFAULT_POLL,
-                   help=f"poll interval in seconds (default: {DEFAULT_POLL})")
+    p.add_argument("--poll", type=int, default=poll_default,
+                   help=f"poll interval in seconds (default: {poll_default})")
     p.add_argument("--no-require-result", action="store_true",
                    help="プロセス終了後に result.json が無くても OK 扱い")
     p.add_argument("--no-early-error", action="store_true",
