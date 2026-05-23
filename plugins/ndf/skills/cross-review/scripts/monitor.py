@@ -156,13 +156,35 @@ def _agent_stall_default(agent: str) -> int:
     Note (codex round 3 指摘): 2 は **呼び出し時** に `os.environ["MONITOR_STALL"]`
     を再評価する。`DEFAULT_STALL` モジュール定数は import 時に env を読むため
     プロセス起動後の env 変更に追随できず、テストの monkeypatch も効かない。
+
+    Note (gemini round 4 指摘): env が非数値だった場合 (`int(...)` で
+    `ValueError` / `TypeError` が裸で上がる) は warn を出して
+    `DEFAULT_STALL_AGENT_BUILTIN` / `DEFAULT_STALL` にフォールバックする。
+    監視プロセスを env 設定ミスでクラッシュさせない。
     """
+    builtin = DEFAULT_STALL_AGENT_BUILTIN.get(agent, DEFAULT_STALL)
     env_key = f"MONITOR_STALL_{agent.upper()}"
     if env_key in os.environ:
-        return int(os.environ[env_key])
+        raw = os.environ[env_key]
+        try:
+            return int(raw)
+        except (ValueError, TypeError):
+            print(
+                f"⚠ env {env_key}={raw!r} が int に変換できません — builtin {builtin} を使用",
+                file=sys.stderr, flush=True,
+            )
+            return builtin
     if "MONITOR_STALL" in os.environ:
-        return int(os.environ["MONITOR_STALL"])
-    return DEFAULT_STALL_AGENT_BUILTIN.get(agent, DEFAULT_STALL)
+        raw = os.environ["MONITOR_STALL"]
+        try:
+            return int(raw)
+        except (ValueError, TypeError):
+            print(
+                f"⚠ env MONITOR_STALL={raw!r} が int に変換できません — builtin {builtin} を使用",
+                file=sys.stderr, flush=True,
+            )
+            return builtin
+    return builtin
 
 
 def _tmp_dir() -> pathlib.Path:

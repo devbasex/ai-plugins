@@ -421,13 +421,13 @@ def test_is_fresh_fix_result_non_dict_json_is_skipped(patched_tmp_dir, state_mod
     assert "dict ではない" in captured.err
 
 
-def test_is_fresh_fix_result_non_dict_json_canonical_also_skipped(
+def test_is_fresh_fix_result_non_dict_json_canonical_dies_round5(
     patched_tmp_dir, state_mod, capsys
 ):
-    """正規パス (is_canonical=True) でも非 dict JSON は die せず skip (False, None)。
+    """PLAN21 round 5 で挙動変更: 正規パス (is_canonical=True) で非 dict なら die(code=3)。
 
-    JSON 自体は parse 成功しているので「読み取り失敗による誤マージ事故」とは別系統。
-    呼び出し側 (cmd_merge_fix) で「全候補なし」として最終的に die(code=3) に至る。
+    旧 round 4 では skip (False, None) だったが、codex round 4 指摘により
+    `/tmp/` fallback への流れ込みを防ぐため parse 失敗と同様に即時中断する。
     """
     tmp_dir = patched_tmp_dir
     past_dt = _dt.datetime.now(_dt.timezone.utc).astimezone() - _dt.timedelta(hours=1)
@@ -436,13 +436,12 @@ def test_is_fresh_fix_result_non_dict_json_canonical_also_skipped(
     p = tmp_dir / f"fix-pr{PR}-result.json"
     p.write_text(json.dumps(["not", "a", "dict"]))
 
-    is_fresh, parsed = state_mod._is_fresh_fix_result(
-        p, PR, past_ts, is_canonical=True
-    )
-    assert is_fresh is False
-    assert parsed is None
+    with pytest.raises(SystemExit) as e:
+        state_mod._is_fresh_fix_result(p, PR, past_ts, is_canonical=True)
+    assert e.value.code == 3
     captured = capsys.readouterr()
     assert "dict ではない" in captured.err
+    assert "正規パス" in captured.err
 
 
 def test_explicit_file_non_dict_json_dies(patched_tmp_dir, state_mod, capsys, tmp_path):
@@ -464,5 +463,103 @@ def test_explicit_file_non_dict_json_dies(patched_tmp_dir, state_mod, capsys, tm
     captured = capsys.readouterr()
     assert "dict ではない" in captured.err
     # state は更新されていない
+    st = _read_state(tmp_dir)
+    assert "fix" not in st["rounds"][-1]
+
+
+# ---------------- PLAN21 round 5: 正規パス non-dict 即時 die / --file 厳格化 ----------------
+
+
+def test_canonical_path_non_dict_json_dies_immediately(
+    patched_tmp_dir, state_mod, capsys
+):
+    """正規パス ($TMP_DIR/fix-prN-result.json) の JSON が dict 以外なら即時 die(code=3)。
+
+    codex round 4 指摘: parse 失敗と同様、非 dict も「壊れた正規出力」として扱う。
+    skip で /tmp/ fallback に流れると別実行の戻り値を誤マージする経路が残るため、
+    list / str / int 等が返ったら fallback には進まず即時中断する。
+    """
+    tmp_dir = patched_tmp_dir
+    past = _dt.datetime(2000, 1, 1, tzinfo=_dt.timezone.utc)
+    _seed_state_with_started_at(tmp_dir, past.isoformat(timespec="seconds"))
+
+    # 正規パスに list (非 dict) を置く
+    canonical = tmp_dir / f"fix-pr{PR}-result.json"
+    canonical.write_text(json.dumps([{"fix_commit": "should_not_be_read"}]))
+
+    # /tmp/ 側には別 PR を装う正規 JSON を置く (これに流れ込んだら事故)
+    legacy = pathlib.Path(f"/tmp/fix-pr{PR}-result.json")
+    legacy.write_text(json.dumps(_canonical_fix()))
+    try:
+        with pytest.raises(SystemExit) as e:
+            state_mod.cmd_merge_fix(_make_args())
+        assert e.value.code == 3
+        captured = capsys.readouterr()
+        # 正規パスで非 dict であった旨が stderr に出る
+        assert "正規パス" in captured.err
+        assert "dict ではない" in captured.err
+        # /tmp 側の fix がマージされていないこと
+        st = _read_state(tmp_dir)
+        assert "fix" not in st["rounds"][-1]
+    finally:
+        legacy.unlink(missing_ok=True)
+
+
+def test_explicit_file_nonexistent_dies(patched_tmp_dir, state_mod, capsys, tmp_path):
+    """`--file` 指定パスが存在しなければ fallback に進まず die(code=3)。
+
+    codex round 4 指摘: ユーザー明示指定なのに無言で fallback に流れて
+    別実行の戻り値を誤マージするのを防ぐ。
+    """
+    tmp_dir = patched_tmp_dir
+    _seed_state(tmp_dir)
+    # 正規パスにも置いて、fallback に流れたら事故と判別できるようにする
+    (tmp_dir / f"fix-pr{PR}-result.json").write_text(json.dumps(_canonical_fix()))
+
+    nonexistent = tmp_path / "does-not-exist.json"
+    assert not nonexistent.exists()
+
+    with pytest.raises(SystemExit) as e:
+        state_mod.cmd_merge_fix(_make_args(nonexistent))
+    assert e.value.code == 3
+    captured = capsys.readouterr()
+    assert "存在しません" in captured.err
+    # fallback が読まれていない (state にマージされていない)
+    st = _read_state(tmp_dir)
+    assert "fix" not in st["rounds"][-1]
+
+
+def test_explicit_file_empty_dies(patched_tmp_dir, state_mod, capsys, tmp_path):
+    """`--file` 指定パスが空ファイルなら fallback に進まず die(code=3)。"""
+    tmp_dir = patched_tmp_dir
+    _seed_state(tmp_dir)
+    (tmp_dir / f"fix-pr{PR}-result.json").write_text(json.dumps(_canonical_fix()))
+
+    empty = tmp_path / "empty.json"
+    empty.write_text("")
+
+    with pytest.raises(SystemExit) as e:
+        state_mod.cmd_merge_fix(_make_args(empty))
+    assert e.value.code == 3
+    captured = capsys.readouterr()
+    assert "空です" in captured.err
+    st = _read_state(tmp_dir)
+    assert "fix" not in st["rounds"][-1]
+
+
+def test_explicit_file_invalid_json_dies(patched_tmp_dir, state_mod, capsys, tmp_path):
+    """`--file` 指定パスが JSON 不正なら fallback に進まず die(code=3)。"""
+    tmp_dir = patched_tmp_dir
+    _seed_state(tmp_dir)
+    (tmp_dir / f"fix-pr{PR}-result.json").write_text(json.dumps(_canonical_fix()))
+
+    bad = tmp_path / "bad.json"
+    bad.write_text("{ this is not valid json")
+
+    with pytest.raises(SystemExit) as e:
+        state_mod.cmd_merge_fix(_make_args(bad))
+    assert e.value.code == 3
+    captured = capsys.readouterr()
+    assert "parse に失敗" in captured.err or "読み取り" in captured.err
     st = _read_state(tmp_dir)
     assert "fix" not in st["rounds"][-1]

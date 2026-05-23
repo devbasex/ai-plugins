@@ -172,7 +172,18 @@ def _is_fresh_fix_result(
     # gemini round 3 指摘: `json.loads` は dict 以外 (list 等) も返す。
     # 後続の `payload.get(...)` や cmd_merge_fix 側の `.get()` でクラッシュしないよう、
     # dict でない場合は warn を出して fallback 不採用 ((False, None)) として扱う。
+    #
+    # codex round 4 指摘: ただし `is_canonical=True` (= 正規パス) で非 dict が返った
+    # 場合は parse 失敗と同じく即時 die(code=3) する。skip で後続 `/tmp/` fallback に
+    # 流れると、壊れた正規出力を無視して別実行の戻り値を誤マージする経路が残るため。
     if not isinstance(payload, dict):
+        if is_canonical:
+            die(
+                f"正規パスの fix 戻り値ファイルが dict ではない "
+                f"({path}, type={type(payload).__name__})。"
+                " 後続 fallback への流れ込みを防ぐため即時中断。",
+                code=3,
+            )
         info(
             f"⚠ fallback 候補 JSON が dict ではない ({path}, type={type(payload).__name__}) "
             "— skip"
@@ -369,7 +380,20 @@ def cmd_read_result(args: argparse.Namespace) -> None:
     if not rfile.exists() or rfile.stat().st_size == 0:
         die(f"{agent}: result 未生成 ({rfile})")
 
-    r = json.loads(rfile.read_text())
+    try:
+        r = json.loads(rfile.read_text())
+    except json.JSONDecodeError as exc:
+        die(f"{agent}: result.json の parse に失敗 ({rfile}): {exc}", code=3)
+
+    # gemini round 4 指摘: result.json は本来 dict だが、launcher の出力バグや
+    # 別実行の残骸で list / str が入り込むと `r.get(...)` で AttributeError になる。
+    # 不正な review result はバグなので即時 die(code=3) で停止させる。
+    if not isinstance(r, dict):
+        die(
+            f"{agent}: result.json が dict ではない "
+            f"({rfile}, type={type(r).__name__})。review launcher の出力形式不正。",
+            code=3,
+        )
 
     # 別名フィールドへのフォールバック (gemini が `intent` / `comment_count` を使う変則 JSON を
     # 書き出す既知のケースに対応する。仕様としては `event` / `comments_count` が正)
@@ -469,7 +493,25 @@ def cmd_check_oscillation(args: argparse.Namespace) -> None:
                 payload = json.loads(p.read_text())
             except json.JSONDecodeError:
                 continue
+            # gemini round 4 指摘: payload は本来 dict (comments: [...]) だが、
+            # launcher のバグで list / str が入り込むと `payload.get(...)` で
+            # AttributeError になる。不正な review payload はバグなので
+            # 即時 die(code=3) で停止させる。
+            if not isinstance(payload, dict):
+                die(
+                    f"{agent}: payload.json が dict ではない "
+                    f"({p}, type={type(payload).__name__})。"
+                    " review launcher の出力形式不正。",
+                    code=3,
+                )
             for c in payload.get("comments", []):
+                if not isinstance(c, dict):
+                    # comments エントリが dict でない場合も同様に致命扱い
+                    die(
+                        f"{agent}: payload.comments のエントリが dict ではない "
+                        f"({p}, type={type(c).__name__})。",
+                        code=3,
+                    )
                 path = c.get("path")
                 line = c.get("line") or c.get("start_line")
                 if path and line is not None:
@@ -526,20 +568,39 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     ffile: pathlib.Path | None = None
     fix: dict[str, Any] | None = None
     if explicit is not None:
-        if explicit.exists() and explicit.stat().st_size > 0:
-            ffile = explicit
-            # 明示指定は stale 検証スキップ、ここで読み込む
+        # codex round 4 指摘: `--file` 明示時は fallback 探索に進まず即時失敗させる。
+        # ユーザーが特定ファイルを指定しているのに、それが存在しない / 空 / JSON 不正
+        # だった場合、無言で fallback に流れて別実行の戻り値を誤マージすると事故になる。
+        if not explicit.exists():
+            die(
+                f"--file で指定されたパスが存在しません: {explicit}",
+                code=3,
+            )
+        if explicit.stat().st_size == 0:
+            die(
+                f"--file で指定されたファイルが空です: {explicit}",
+                code=3,
+            )
+        try:
             fix = json.loads(explicit.read_text(encoding="utf-8"))
-            # gemini round 3 指摘: `--file` で `list` 等の non-dict JSON が渡されると
-            # 後続の `fix.get(...)` でクラッシュする。即時 die(code=3) で中断。
-            if not isinstance(fix, dict):
-                die(
-                    f"--file 指定の fix 戻り値ファイルが dict ではない "
-                    f"({explicit}, type={type(fix).__name__})。"
-                    " fix サブエージェント出力の形式不正。",
-                    code=3,
-                )
-    if ffile is None:
+        except (OSError, json.JSONDecodeError) as exc:
+            die(
+                f"--file 指定の fix 戻り値ファイルの読み取り / parse に失敗 "
+                f"({explicit}): {exc}",
+                code=3,
+            )
+        # gemini round 3 指摘: `--file` で `list` 等の non-dict JSON が渡されると
+        # 後続の `fix.get(...)` でクラッシュする。即時 die(code=3) で中断。
+        if not isinstance(fix, dict):
+            die(
+                f"--file 指定の fix 戻り値ファイルが dict ではない "
+                f"({explicit}, type={type(fix).__name__})。"
+                " fix サブエージェント出力の形式不正。",
+                code=3,
+            )
+        ffile = explicit
+        # 明示指定は stale 検証スキップ
+    else:
         for c, is_canonical in fallback_candidates:
             if not (c.exists() and c.stat().st_size > 0):
                 continue

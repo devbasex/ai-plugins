@@ -69,3 +69,51 @@ def test_unknown_agent_falls_back_to_default_stall(monkeypatch, monitor_mod):
     monkeypatch.delenv("MONITOR_STALL", raising=False)
     monkeypatch.delenv("MONITOR_STALL_UNKNOWN", raising=False)
     assert monitor_mod._agent_stall_default("unknown") == monitor_mod.DEFAULT_STALL
+
+
+# ---------------- PLAN21 round 5: env が非数値だった場合のフォールバック ----------------
+
+
+def test_shared_env_non_numeric_falls_back_to_builtin(monkeypatch, monitor_mod, capsys):
+    """env `MONITOR_STALL` が非数値なら builtin にフォールバック (ValueError で落ちない)。
+
+    gemini round 4 指摘: `int(os.environ[...])` は非数値で ValueError を出す。
+    監視プロセスを env 設定ミスでクラッシュさせないため、try/except で builtin に戻す。
+    """
+    monkeypatch.delenv("MONITOR_STALL_CODEX", raising=False)
+    monkeypatch.delenv("MONITOR_STALL_GEMINI", raising=False)
+    monkeypatch.setenv("MONITOR_STALL", "abc")
+    # codex / gemini とも builtin 既定 (180 / 480) に戻る
+    assert monitor_mod._agent_stall_default("codex") == 180
+    assert monitor_mod._agent_stall_default("gemini") == 480
+    captured = capsys.readouterr()
+    # 警告メッセージが stderr に出る
+    assert "MONITOR_STALL" in captured.err
+    assert "int に変換できません" in captured.err
+
+
+def test_per_agent_env_non_numeric_falls_back_to_builtin(
+    monkeypatch, monitor_mod, capsys
+):
+    """env `MONITOR_STALL_<AGENT>` が非数値なら builtin にフォールバック。"""
+    monkeypatch.delenv("MONITOR_STALL", raising=False)
+    monkeypatch.setenv("MONITOR_STALL_GEMINI", "not-a-number")
+    monkeypatch.delenv("MONITOR_STALL_CODEX", raising=False)
+    # gemini は builtin (480) にフォールバック
+    assert monitor_mod._agent_stall_default("gemini") == 480
+    # codex は env 未設定なので builtin (180)
+    assert monitor_mod._agent_stall_default("codex") == 180
+    captured = capsys.readouterr()
+    assert "MONITOR_STALL_GEMINI" in captured.err
+    assert "int に変換できません" in captured.err
+
+
+def test_per_agent_env_non_numeric_does_not_affect_other_agent(
+    monkeypatch, monitor_mod
+):
+    """non-numeric な per-agent env は対象 agent だけに影響する。"""
+    monkeypatch.delenv("MONITOR_STALL", raising=False)
+    monkeypatch.setenv("MONITOR_STALL_GEMINI", "xxx")
+    monkeypatch.setenv("MONITOR_STALL_CODEX", "200")  # codex 側は正常
+    assert monitor_mod._agent_stall_default("codex") == 200
+    assert monitor_mod._agent_stall_default("gemini") == 480
