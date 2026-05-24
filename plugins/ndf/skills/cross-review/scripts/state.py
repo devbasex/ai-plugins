@@ -63,16 +63,15 @@ def _tmp_dir(workspace: str | None = None) -> pathlib.Path:
     優先順位:
       1. 環境変数 `CROSS_REVIEW_TMP_DIR` (明示)
       2. `<workspace>/.cross_review/` (worktree 内。gemini の workspace 制約を根本回避)
-      3. `/tmp/` (フォールバック)
 
     `workspace` 未指定なら `os.getcwd()` を使う。
     """
     env = os.environ.get("CROSS_REVIEW_TMP_DIR")
     if env:
-        d = pathlib.Path(env)
+        d = pathlib.Path(env).resolve()
         d.mkdir(parents=True, exist_ok=True)
         return d
-    ws = pathlib.Path(workspace or os.getcwd())
+    ws = pathlib.Path(workspace or os.getcwd()).resolve()
     d = ws / ".cross_review"
     d.mkdir(parents=True, exist_ok=True)
     return d

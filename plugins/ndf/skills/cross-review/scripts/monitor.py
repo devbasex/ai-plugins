@@ -17,7 +17,7 @@ pidfile stale / result.json 不在) を構造化して扱う。
      - **FATAL** (auth/quota/sandbox 等の明確な致命): 検知時に kill
      - **WARN** (生の `Error:` / `Traceback` 等の曖昧パターン): 警告ログのみ、kill せず通常判定を継続
      - `--no-early-error` / `MONITOR_NO_EARLY_ERROR=1` で検知自体を無効化可
-  4. **result.json**: プロセス終了後に `/tmp/<agent>-review-pr<PR>-result.json` が
+  4. **result.json**: プロセス終了後に `<worktree>/.cross_review/<agent>-review-pr<PR>-result.json` が
      生成されていなければ失敗扱い
   5. **hard timeout**: 既定 7 分。`--timeout` または `MONITOR_TIMEOUT` で上書き可
   6. **stall timeout**: err.log + stdout.log の合計サイズが一定時間変化しなければ
@@ -205,15 +205,27 @@ def _tmp_dir() -> pathlib.Path:
 
     state.py の `_tmp_dir()` と同じロジック。優先:
       1. `CROSS_REVIEW_TMP_DIR` env
-      2. `<cwd>/.cross_review/` (worktree 内。gemini の workspace 制約を根本回避)
-      3. `/tmp/` (フォールバック)
+      2. `<worktree-root>/.cross_review/` (worktree 内。gemini の workspace 制約を根本回避)
+
+    worktree root は `git rev-parse --show-toplevel` で取得する。
+    サブディレクトリから起動した場合でも一貫したパスを返す。
     """
     env = os.environ.get("CROSS_REVIEW_TMP_DIR")
     if env:
-        d = pathlib.Path(env)
+        d = pathlib.Path(env).resolve()
         d.mkdir(parents=True, exist_ok=True)
         return d
-    d = pathlib.Path.cwd() / ".cross_review"
+    # git worktree root を取得。サブディレクトリから起動しても一貫したパスにする。
+    import subprocess as _sp
+    r = _sp.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True, text=True,
+    )
+    if r.returncode == 0 and r.stdout.strip():
+        root = pathlib.Path(r.stdout.strip()).resolve()
+    else:
+        root = pathlib.Path.cwd().resolve()
+    d = root / ".cross_review"
     d.mkdir(parents=True, exist_ok=True)
     return d
 

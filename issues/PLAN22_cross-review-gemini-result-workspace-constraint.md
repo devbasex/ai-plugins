@@ -69,7 +69,7 @@ if gemini_root.is_dir() and base_name:
     d = gemini_root / base_name
 
 # After
-ws = pathlib.Path(workspace or os.getcwd())
+ws = pathlib.Path(workspace or os.getcwd()).resolve()
 d = ws / ".cross_review"
 ```
 
@@ -90,16 +90,16 @@ if [ -d "$gemini_root" ] && [ -n "$base" ]; then
     echo "$gemini_root/$base"
 
 # After
-root="$(git rev-parse --show-toplevel 2>/dev/null)" || root="$PWD"
-mkdir -p "$root/.cross_review"
-echo "$root/.cross_review"
+_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+mkdir -p "$_root/.cross_review"
+echo "$_root/.cross_review"
 ```
 
 ### 変更 3: `monitor.py _tmp_dir()` — fallback を整合
 
 **ファイル**: `plugins/ndf/skills/cross-review/scripts/monitor.py` L203-220
 
-同様に fallback を `Path.cwd() / ".cross_review"` に変更。
+同様に fallback を `git rev-parse --show-toplevel` ベースの `<worktree-root>/.cross_review/` に変更。
 
 ### 変更 4: `.gitignore` — `.cross_review/` 除外
 
