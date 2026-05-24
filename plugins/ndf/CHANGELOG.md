@@ -1,5 +1,30 @@
 # NDF Plugin CHANGELOG
 
+### v4.7.5 (cross-review: TMP_DIR を worktree 内 .cross_review/ に統一)
+
+レビュースクリプトが一時ファイルを書き出す先を、従来の `~/.gemini/tmp/` や `/tmp/`
+から **worktree 内 `.cross_review/`** に統一する PATCH リリース。
+
+- **_tmpdir.sh: `_tmp_dir()` の解決先を `.cross_review/` に変更**
+  (`skills/cross-review/scripts/_tmpdir.sh`):
+  - workspace 未指定時に `git rev-parse --show-toplevel` でフォールバックし、
+    worktree ルート直下の `.cross_review/` を使用。
+  - worktree 外のゴミファイル散乱と、環境依存のパス不整合を解消。
+- **launch-codex.sh / launch-gemini.sh: TMP_DIR パス統一**:
+  - 各ランチャーが `.cross_review/` を前提とするよう修正。
+- **monitor.py / state.py: パス参照の整合**:
+  - `$TMP_DIR` 解決先の変更に伴い、ファイル探索パスを `.cross_review/` 体系に統一。
+- **SKILL.md / docs: ドキュメントのパス記述統一**:
+  - `SKILL.md`、`docs/02-fix-and-rotation.md`、`skills/merged/SKILL.md` 内の
+    旧パス記述を `.cross_review` 体系に修正。
+- **.gitignore: `.cross_review/` を追加**。
+
+#### 既存ユーザへの影響
+
+- `CROSS_REVIEW_TMP_DIR` env を明示しているユーザ: **挙動不変**。
+- 未指定ユーザ: 一時ファイルの書き出し先が `~/.gemini/tmp/` → worktree 内
+  `.cross_review/` に変更。worktree 内に閉じるため管理が容易になる。
+
 ### v4.7.4 (cross-review: gemini stall 既定の per-agent 化 + fix 戻り値マージの堅牢化)
 
 `/ndf:cross-review` を実走させた際に、cross-review ループ自体は完走するが
