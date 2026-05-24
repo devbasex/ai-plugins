@@ -205,7 +205,7 @@ def _tmp_dir() -> pathlib.Path:
 
     state.py の `_tmp_dir()` と同じロジック。優先:
       1. `CROSS_REVIEW_TMP_DIR` env
-      2. `~/.gemini/tmp/<cwd-basename>/` (`~/.gemini/tmp/` が存在するとき)
+      2. `<cwd>/.cross_review/` (worktree 内。gemini の workspace 制約を根本回避)
       3. `/tmp/` (フォールバック)
     """
     env = os.environ.get("CROSS_REVIEW_TMP_DIR")
@@ -213,13 +213,9 @@ def _tmp_dir() -> pathlib.Path:
         d = pathlib.Path(env)
         d.mkdir(parents=True, exist_ok=True)
         return d
-    base_name = pathlib.Path(os.getcwd()).name
-    gemini_root = pathlib.Path.home() / ".gemini" / "tmp"
-    if gemini_root.is_dir() and base_name:
-        d = gemini_root / base_name
-        d.mkdir(parents=True, exist_ok=True)
-        return d
-    return pathlib.Path("/tmp")
+    d = pathlib.Path.cwd() / ".cross_review"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
 
 # ---------- データ型 ----------

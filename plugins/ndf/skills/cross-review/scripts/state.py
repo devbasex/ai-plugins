@@ -5,7 +5,7 @@
 # ///
 """cross-review state.json 操作 CLI。
 
-`/tmp/cross-review-pr<PR>-state.json` の初期化 / 読み書きと、
+`<worktree>/.cross_review/cross-review-pr<PR>-state.json` の初期化 / 読み書きと、
 ループ判定（round 開始 / 収束 / 振動 / PR ローテーション要否 / fix 結果マージ /
 deferred nit レポート）を 1 つの CLI に集約する。
 
@@ -62,24 +62,20 @@ def _tmp_dir(workspace: str | None = None) -> pathlib.Path:
 
     優先順位:
       1. 環境変数 `CROSS_REVIEW_TMP_DIR` (明示)
-      2. `~/.gemini/tmp/<workspace-basename>/` (gemini workspace 制約を回避するため、
-         `~/.gemini/tmp/` が存在するなら自動使用)
+      2. `<workspace>/.cross_review/` (worktree 内。gemini の workspace 制約を根本回避)
       3. `/tmp/` (フォールバック)
 
-    `workspace` 未指定なら `os.getcwd()` の basename を使う。
+    `workspace` 未指定なら `os.getcwd()` を使う。
     """
     env = os.environ.get("CROSS_REVIEW_TMP_DIR")
     if env:
         d = pathlib.Path(env)
         d.mkdir(parents=True, exist_ok=True)
         return d
-    base_name = pathlib.Path(workspace or os.getcwd()).name
-    gemini_root = pathlib.Path.home() / ".gemini" / "tmp"
-    if gemini_root.is_dir() and base_name:
-        d = gemini_root / base_name
-        d.mkdir(parents=True, exist_ok=True)
-        return d
-    return pathlib.Path("/tmp")
+    ws = pathlib.Path(workspace or os.getcwd())
+    d = ws / ".cross_review"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
 
 def _state_path(pr: int) -> pathlib.Path:
@@ -244,12 +240,7 @@ def cmd_init(args: argparse.Namespace) -> None:
     """Step 0 — state 初期化 or 既存 state 引き継ぎ + プリチェック。"""
     pr = args.pr
     # worktree path を先に解決してから tmp_dir を決定する。
-    # gemini の workspace 制約 (~/.gemini/tmp/<workspace_basename>) と
-    # 一致させるため、worktree basename ベースで tmp_dir を計算する必要がある。
-    # 旧実装は _tmp_dir(args.worktree) を args.worktree=None のまま呼び、
-    # os.getcwd() の basename (= 親リポジトリ名) を採用していたため、
-    # launch-gemini.sh で `cd $WORKTREE` した後の gemini が
-    # `~/.gemini/tmp/<repo>` への write をブロックして hard timeout していた。
+    # tmp_dir は <worktree>/.cross_review/ に配置し、gemini の workspace 制約を根本回避。
     worktree = args.worktree or str(_default_worktree_base() / f"pr{pr}")
     tmp_dir = _tmp_dir(worktree)
     state_file = tmp_dir / f"cross-review-pr{pr}-state.json"

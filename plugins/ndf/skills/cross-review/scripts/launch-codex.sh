@@ -8,8 +8,10 @@
 # gh コマンドに使う「現在のレビュー対象 PR」は state.json の `current_pr` を読む。
 #
 # tmp ディレクトリは `_tmpdir.sh` の `tmpdir()` 関数で決定:
-#   CROSS_REVIEW_TMP_DIR env → ~/.gemini/tmp/<workspace>/ → /tmp/
-# gemini の workspace 制約を回避するため、`~/.gemini/tmp/...` を優先採用する。
+#   CROSS_REVIEW_TMP_DIR env → $PWD/.cross_review/
+# worktree 内に配置することで gemini の workspace 制約を根本回避。
+# codex は --dangerously-bypass-approvals-and-sandbox を維持
+# (-s workspace-write は bwrap 非対応環境で失敗するため)。
 #
 # 状態ファイル: $TMP_DIR/codex-review-pr<STATE_PR>-{result,err,stdout,pid}.json
 # (パスは STATE_PR ベースで固定 — monitor.py / state.py と一致させる。)
