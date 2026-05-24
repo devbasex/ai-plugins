@@ -100,10 +100,10 @@ PR: <PR番号>
    - 新しい指摘/失敗があれば手順3に戻る
 6. コミット・プッシュ
 7. PRにSummaryコメントを追加（対応した件数 + deferred 件数を明記）
-8. 対応したコードコメントに個別に返信
+8. 対応したインラインコメントに個別に返信
 9. **deferred スレッドには `[deferred / nit]` のラベル付き返信** を投稿（resolve はしない）
 10. reviewerに再レビューを依頼
-11. 対応完了したコードコメントを「Resolve Conversation」にする（`resolveReviewThread` mutation）
+11. 対応完了したインラインコメントを「Resolve Conversation」にする（`resolveReviewThread` mutation）
     - resolve した thread_id / comment_id / path / line を `resolved_threads[]` に記録
     - `deferred` / `rejected` の thread は Resolve しない（次ラウンドで再評価するため）
 12. **戻り値ファイルを書き出す**: `/tmp/fix-pr<番号>-result.json` （後述「戻り値フォーマット」参照）
