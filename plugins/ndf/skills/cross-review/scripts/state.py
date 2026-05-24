@@ -57,6 +57,20 @@ def _default_worktree_base() -> pathlib.Path:
     return pathlib.Path.home() / "work" / "worktrees"
 
 
+def _git_toplevel() -> str | None:
+    """git worktree root を取得する。失敗時は None を返す。"""
+    try:
+        r = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True,
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            return r.stdout.strip()
+    except OSError:
+        pass
+    return None
+
+
 def _tmp_dir(workspace: str | None = None) -> pathlib.Path:
     """cross-review 用 tmp ディレクトリを決定する。
 
@@ -64,14 +78,16 @@ def _tmp_dir(workspace: str | None = None) -> pathlib.Path:
       1. 環境変数 `CROSS_REVIEW_TMP_DIR` (明示)
       2. `<workspace>/.cross_review/` (worktree 内。gemini の workspace 制約を根本回避)
 
-    `workspace` 未指定なら `os.getcwd()` を使う。
+    `workspace` 未指定なら `git rev-parse --show-toplevel` で worktree root を
+    取得する。サブディレクトリから実行してもパス不一致が発生しない。
+    git コマンドが失敗した場合のみ `os.getcwd()` にフォールバックする。
     """
     env = os.environ.get("CROSS_REVIEW_TMP_DIR")
     if env:
         d = pathlib.Path(env).resolve()
         d.mkdir(parents=True, exist_ok=True)
         return d
-    ws = pathlib.Path(workspace or os.getcwd()).resolve()
+    ws = pathlib.Path(workspace or _git_toplevel() or os.getcwd()).resolve()
     d = ws / ".cross_review"
     d.mkdir(parents=True, exist_ok=True)
     return d
