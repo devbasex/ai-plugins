@@ -16,6 +16,9 @@ tmpdir() {
     echo "$CROSS_REVIEW_TMP_DIR"
     return
   fi
-  mkdir -p "$PWD/.cross_review"
-  echo "$PWD/.cross_review"
+  # サブディレクトリから呼ばれた場合でも worktree root を正しく特定する
+  local root
+  root="$(git rev-parse --show-toplevel 2>/dev/null)" || root="$PWD"
+  mkdir -p "$root/.cross_review"
+  echo "$root/.cross_review"
 }

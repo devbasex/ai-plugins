@@ -70,7 +70,7 @@ if gemini_root.is_dir() and base_name:
 
 # After
 ws = pathlib.Path(workspace or os.getcwd())
-d = ws / ".gemini" / "tmp"
+d = ws / ".cross_review"
 ```
 
 `workspace` が指定されていれば `<workspace>/.cross_review/`、なければ `<cwd>/.cross_review/` を返す。
@@ -90,15 +90,16 @@ if [ -d "$gemini_root" ] && [ -n "$base" ]; then
     echo "$gemini_root/$base"
 
 # After
-mkdir -p "$PWD/.gemini/tmp"
-echo "$PWD/.gemini/tmp"
+root="$(git rev-parse --show-toplevel 2>/dev/null)" || root="$PWD"
+mkdir -p "$root/.cross_review"
+echo "$root/.cross_review"
 ```
 
 ### 変更 3: `monitor.py _tmp_dir()` — fallback を整合
 
 **ファイル**: `plugins/ndf/skills/cross-review/scripts/monitor.py` L203-220
 
-同様に fallback を `Path.cwd() / ".gemini" / "tmp"` に変更。
+同様に fallback を `Path.cwd() / ".cross_review"` に変更。
 
 ### 変更 4: `.gitignore` — `.cross_review/` 除外
 
@@ -109,7 +110,7 @@ echo "$PWD/.gemini/tmp"
 .cross_review/
 ```
 
-`.gemini/` 自体は gemini CLI の設定 (settings.json) に使うため、`tmp/` サブディレクトリのみ除外。
+cross-review の一時ファイルディレクトリを除外。
 
 ### 変更 5: SKILL.md — ドキュメント整合
 
