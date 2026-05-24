@@ -5,7 +5,7 @@
 # ///
 """cross-review state.json 操作 CLI。
 
-`/tmp/cross-review-pr<PR>-state.json` の初期化 / 読み書きと、
+`<worktree>/.cross_review/cross-review-pr<PR>-state.json` の初期化 / 読み書きと、
 ループ判定（round 開始 / 収束 / 振動 / PR ローテーション要否 / fix 結果マージ /
 deferred nit レポート）を 1 つの CLI に集約する。
 
@@ -57,29 +57,40 @@ def _default_worktree_base() -> pathlib.Path:
     return pathlib.Path.home() / "work" / "worktrees"
 
 
+def _git_toplevel() -> str | None:
+    """git worktree root を取得する。失敗時は None を返す。"""
+    try:
+        r = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True,
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            return r.stdout.strip()
+    except OSError:
+        pass
+    return None
+
+
 def _tmp_dir(workspace: str | None = None) -> pathlib.Path:
     """cross-review 用 tmp ディレクトリを決定する。
 
     優先順位:
       1. 環境変数 `CROSS_REVIEW_TMP_DIR` (明示)
-      2. `~/.gemini/tmp/<workspace-basename>/` (gemini workspace 制約を回避するため、
-         `~/.gemini/tmp/` が存在するなら自動使用)
-      3. `/tmp/` (フォールバック)
+      2. `<workspace>/.cross_review/` (worktree 内。gemini の workspace 制約を根本回避)
 
-    `workspace` 未指定なら `os.getcwd()` の basename を使う。
+    `workspace` 未指定なら `git rev-parse --show-toplevel` で worktree root を
+    取得する。サブディレクトリから実行してもパス不一致が発生しない。
+    git コマンドが失敗した場合のみ `os.getcwd()` にフォールバックする。
     """
     env = os.environ.get("CROSS_REVIEW_TMP_DIR")
     if env:
-        d = pathlib.Path(env)
+        d = pathlib.Path(env).resolve()
         d.mkdir(parents=True, exist_ok=True)
         return d
-    base_name = pathlib.Path(workspace or os.getcwd()).name
-    gemini_root = pathlib.Path.home() / ".gemini" / "tmp"
-    if gemini_root.is_dir() and base_name:
-        d = gemini_root / base_name
-        d.mkdir(parents=True, exist_ok=True)
-        return d
-    return pathlib.Path("/tmp")
+    ws = pathlib.Path(workspace or _git_toplevel() or os.getcwd()).resolve()
+    d = ws / ".cross_review"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
 
 def _state_path(pr: int) -> pathlib.Path:
@@ -244,20 +255,19 @@ def cmd_init(args: argparse.Namespace) -> None:
     """Step 0 — state 初期化 or 既存 state 引き継ぎ + プリチェック。"""
     pr = args.pr
     # worktree path を先に解決してから tmp_dir を決定する。
-    # gemini の workspace 制約 (~/.gemini/tmp/<workspace_basename>) と
-    # 一致させるため、worktree basename ベースで tmp_dir を計算する必要がある。
-    # 旧実装は _tmp_dir(args.worktree) を args.worktree=None のまま呼び、
-    # os.getcwd() の basename (= 親リポジトリ名) を採用していたため、
-    # launch-gemini.sh で `cd $WORKTREE` した後の gemini が
-    # `~/.gemini/tmp/<repo>` への write をブロックして hard timeout していた。
+    # tmp_dir は <worktree>/.cross_review/ に配置し、gemini の workspace 制約を根本回避。
     worktree = args.worktree or str(_default_worktree_base() / f"pr{pr}")
-    tmp_dir = _tmp_dir(worktree)
-    state_file = tmp_dir / f"cross-review-pr{pr}-state.json"
 
-    # 再開
-    if state_file.exists():
-        st = json.loads(state_file.read_text())
+    # worktree 存在チェック用: _tmp_dir() は mkdir するため、先に呼ぶと
+    # worktree ディレクトリが副作用で作成され exists() が常に true になる。
+    # そのため _tmp_dir() 呼び出しは worktree 作成/確認の後に行う。
+
+    # 再開チェック: state ファイルの存在確認は _tmp_dir() を使わず直接パスを組む
+    resume_state_file = pathlib.Path(worktree) / ".cross_review" / f"cross-review-pr{pr}-state.json"
+    if resume_state_file.exists():
+        st = json.loads(resume_state_file.read_text())
         if st.get("final") is None:
+            tmp_dir = _tmp_dir(worktree)
             wt = st.get("worktree_path") or ""
             info(f"↻ 前回中断 state から再開（round={len(st.get('rounds', []))}）")
             print(f"PR={st['current_pr']}")
@@ -274,7 +284,7 @@ def cmd_init(args: argparse.Namespace) -> None:
     if is_own:
         info(f"⚠ 自分の PR (author={me}) — REQUEST_CHANGES → COMMENT 強制ダウングレード")
 
-    # worktree 分離
+    # worktree 分離 — _tmp_dir() より先に worktree を作成/確認する
     head_branch = _sh(["gh", "pr", "view", str(pr), "--json", "headRefName", "--jq", ".headRefName"])
     base_branch = _sh(["gh", "pr", "view", str(pr), "--json", "baseRefName", "--jq", ".baseRefName"])
     if not pathlib.Path(worktree).exists():
@@ -288,6 +298,10 @@ def cmd_init(args: argparse.Namespace) -> None:
         info(f"✅ worktree 作成 (detached @ origin/{head_branch}): {worktree}")
     else:
         info(f"↻ 既存 worktree 流用: {worktree}")
+
+    # worktree 作成/確認後に _tmp_dir() を呼ぶ (ここで .cross_review/ が作られる)
+    tmp_dir = _tmp_dir(worktree)
+    state_file = tmp_dir / f"cross-review-pr{pr}-state.json"
 
     # 既存コメントスナップショット（重複指摘防止）。
     # NOTE: `gh api --paginate` は REST のページごとに **JSON 配列が連続して** stdout に出る

@@ -42,6 +42,9 @@ __pycache__/
 # Plugin-generated context files
 # (none currently)
 
+# cross-review worktree tmp
+.cross_review/
+
 # Serena MCP runtime data
 ${SERENA_HOME}/
 .serena/logs/

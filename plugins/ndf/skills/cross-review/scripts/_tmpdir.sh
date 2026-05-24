@@ -7,8 +7,7 @@
 #
 # 優先順位:
 #   1. 環境変数 CROSS_REVIEW_TMP_DIR (明示)
-#   2. ~/.gemini/tmp/<cwd-basename>/ (gemini の workspace 制約を回避する公式 path)
-#   3. /tmp/ (フォールバック)
+#   2. <worktree-root>/.cross_review/ (worktree 内。gemini の workspace 制約を根本回避)
 
 tmpdir() {
   if [ -n "${CROSS_REVIEW_TMP_DIR:-}" ]; then
@@ -16,13 +15,9 @@ tmpdir() {
     echo "$CROSS_REVIEW_TMP_DIR"
     return
   fi
-  local base
-  base=$(basename "$PWD")
-  local gemini_root="$HOME/.gemini/tmp"
-  if [ -d "$gemini_root" ] && [ -n "$base" ]; then
-    mkdir -p "$gemini_root/$base"
-    echo "$gemini_root/$base"
-    return
-  fi
-  echo "/tmp"
+  # サブディレクトリから呼ばれた場合でも worktree root を正しく特定する
+  local root
+  root="$(git rev-parse --show-toplevel 2>/dev/null)" || root="$PWD"
+  mkdir -p "$root/.cross_review"
+  echo "$root/.cross_review"
 }

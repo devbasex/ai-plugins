@@ -39,7 +39,7 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 | レビュー投稿 | **AI 自身が `gh api` で PR に直接投稿**。メインはペイロードを保持しない |
 | 修正 | **必ずサブエージェント (`general-purpose`) で実行**。メイン context に diff は載せない |
 | ユーザ問い合わせ | 自動判断を最大化（`critical`/`major`/`minor` は自動修正、`nit` は最後にまとめて 1 回だけ問い合わせ） |
-| 状態の永続化 | `/tmp/cross-review-pr<番号>-state.json` に集約。中断・再開可能 |
+| 状態の永続化 | `<worktree>/.cross_review/cross-review-pr<番号>-state.json` に集約。中断・再開可能 |
 | 長尺PR対策 | **`--rotate-after` ラウンドで PR をローテーション**（default=light: 同ブランチで PR 巻き直し / squash: 新ブランチ + squash 統合） |
 | 振動検知 | 同じ指摘が 2 round で 50%以上重複したら中断 |
 
@@ -83,7 +83,7 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 |---|---|---|
 | 1 | 自分の PR 判定（422 回避） | `gh api user` と `gh pr view --json author` を比較し `is_own_pr` / `event_downgrade` を state.json に書く |
 | 2 | worktree 分離 | `git worktree add <worktree-base>/pr<PR> <head>` を冪等実行（`<worktree-base>` は `NDF_WORKTREE_BASE` env > `/work/worktrees` > `$HOME/work/worktrees` の優先順で解決） |
-| 3 | gemini trusted directory | `launch-gemini.sh` が `GEMINI_CLI_TRUST_WORKSPACE=true` + `--skip-trust` を必ず併用。さらに **tmp dir は `~/.gemini/tmp/<workspace>/`** を採用し、gemini の workspace 制約 (workspace 外の `read_file` / `write_file` がブロックされる) を回避 |
+| 3 | gemini trusted directory | `launch-gemini.sh` が `GEMINI_CLI_TRUST_WORKSPACE=true` + `--skip-trust` を必ず併用。**tmp dir は `<worktree>/.cross_review/`** を採用し、gemini の workspace 制約 (workspace 外の `write_file` がブロックされる) を根本回避 |
 | 4 | 既存コメント差分 | `gh api .../comments --paginate` を `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt` に保存し、gemini プロンプトには **内容をインライン埋め込み**、codex プロンプトには path を渡す |
 
 ### `<worktree-base>` の解決順
