@@ -39,7 +39,7 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 | レビュー投稿 | **AI 自身が `gh api` で PR に直接投稿**。メインはペイロードを保持しない |
 | 修正 | **必ずサブエージェント (`general-purpose`) で実行**。メイン context に diff は載せない |
 | ユーザ問い合わせ | 自動判断を最大化（`critical`/`major`/`minor` は自動修正、`nit` は最後にまとめて 1 回だけ問い合わせ） |
-| 状態の永続化 | `/tmp/cross-review-pr<番号>-state.json` に集約。中断・再開可能 |
+| 状態の永続化 | `<worktree>/.cross_review/cross-review-pr<番号>-state.json` に集約。中断・再開可能 |
 | 長尺PR対策 | **`--rotate-after` ラウンドで PR をローテーション**（default=light: 同ブランチで PR 巻き直し / squash: 新ブランチ + squash 統合） |
 | 振動検知 | 同じ指摘が 2 round で 50%以上重複したら中断 |
 

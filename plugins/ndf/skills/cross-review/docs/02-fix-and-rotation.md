@@ -26,8 +26,8 @@
 4. nit / 判断が割れる minor は **修正せず deferred 記録**（reply は `[deferred / nit]` ラベル付き、Resolve しない）
 5. **PR レベルの Summary コメントを `gh pr comment` で投稿**（対応件数 / 重要度別 / deferred 件数 / rejected 件数 / commit SHA を含む）
 6. 戻り値ファイル `$TMP_DIR/fix-pr<PR>-result.json` を必ず書き出す
-   （`$TMP_DIR` は env `CROSS_REVIEW_TMP_DIR` > `~/.gemini/tmp/<workspace>/` > `/tmp/` の順で解決。
-   詳細は `scripts/state.py _tmp_dir()` 参照。`/tmp/` 直書きでも `state.py merge-fix` は fallback で拾う）
+   （`$TMP_DIR` は env `CROSS_REVIEW_TMP_DIR` > `<worktree>/.cross_review/` の順で解決。
+   詳細は `scripts/state.py _tmp_dir()` 参照。`/tmp/` 直書きでも `state.py merge-fix` は legacy fallback で拾う）
 
 > ⚠ inline thread への reply + Resolve **だけでは不十分**。PR ページの
 > conversation タブに表示される **PR レベルコメント** がレビュアーへの

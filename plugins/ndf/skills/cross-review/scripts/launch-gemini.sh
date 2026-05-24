@@ -34,7 +34,7 @@ SHA=$(gh pr view "$PR" --json headRefOid -q .headRefOid)
 
 PROMPT=$TMP_DIR/gemini-review-pr$STATE_PR-prompt.md
 # 既存コメントは **プロンプトにインライン埋め込み** する。
-# tmp dir は `~/.gemini/tmp/<workspace>/` を使うようになったが、念のため
+# tmp dir は `<worktree>/.cross_review/` を使うが、念のため
 # プロンプト埋め込み方式も維持 (gemini が read_file を呼ばずに済むので確実)。
 EXISTING_FILE=$TMP_DIR/cross-review-pr$STATE_PR-existing-comments.txt
 if [ -s "$EXISTING_FILE" ]; then

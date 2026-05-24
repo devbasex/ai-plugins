@@ -7,8 +7,7 @@
 #
 # 優先順位:
 #   1. 環境変数 CROSS_REVIEW_TMP_DIR (明示)
-#   2. $PWD/.cross_review/ (worktree 内。gemini の workspace 制約を根本回避)
-#   3. /tmp/ (フォールバック)
+#   2. <worktree-root>/.cross_review/ (worktree 内。gemini の workspace 制約を根本回避)
 
 tmpdir() {
   if [ -n "${CROSS_REVIEW_TMP_DIR:-}" ]; then
