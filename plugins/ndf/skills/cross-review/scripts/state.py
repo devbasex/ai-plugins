@@ -51,9 +51,10 @@ def _default_worktree_base() -> pathlib.Path:
     try:
         legacy.mkdir(parents=True, exist_ok=True)
         if not os.access(legacy, os.W_OK):
-            die(f"worktree ベースディレクトリに書き込み権限がありません: {legacy}")
-        # mkdir 成功 + 書き込み可能 → 既存環境互換でこちらを使う
-        return legacy
+            info(f"⚠ worktree ベースディレクトリに書き込み権限がありません: {legacy} — フォールバック")
+        else:
+            # mkdir 成功 + 書き込み可能 → 既存環境互換でこちらを使う
+            return legacy
     except OSError:
         pass
     return pathlib.Path.home() / "work" / "worktrees"
@@ -305,11 +306,13 @@ def cmd_init(args: argparse.Namespace) -> None:
             info(f"⚠ git fetch origin {head_branch} 失敗 (フォーク PR の可能性) — gh pr checkout でフォールバック")
             _sh(["git", "worktree", "add", "--detach", worktree, "HEAD"])
             # worktree 内で gh pr checkout を実行して正しいコミットに切り替え
-            subprocess.run(
+            checkout_result = subprocess.run(
                 ["gh", "pr", "checkout", str(pr), "--detach"],
                 capture_output=True, text=True,
                 cwd=worktree,
             )
+            if checkout_result.returncode != 0:
+                die(f"gh pr checkout --detach #{pr} 失敗: {checkout_result.stderr.strip()}")
             info(f"✅ worktree 作成 (gh pr checkout --detach #{pr}): {worktree}")
     else:
         info(f"↻ 既存 worktree 流用: {worktree}")

@@ -5,6 +5,11 @@
 # 全ソース取得失敗時は非 0 で終了する（0件取得と取得失敗を区別）。
 set -uo pipefail
 
+if [[ $# -lt 2 ]] || [[ -z "${1:-}" ]] || [[ -z "${2:-}" ]]; then
+  echo "ERROR: 引数が不足しています。Usage: $0 <owner/repo> <pr_number>" >&2
+  exit 1
+fi
+
 REPO="$1"
 PR="$2"
 
@@ -14,6 +19,7 @@ FAIL_COUNT=0
 # 本文全体を保持する。改行は \n エスケープして 1 行に収める。
 if ! gh api "repos/${REPO}/pulls/${PR}/comments" --paginate --jq \
   '.[] | "\(.path // "?"):\(.line // .original_line // "?") [\(.user.login)] \(.body // "" | gsub("\n"; "\\n"))"'; then
+  echo "WARNING: インラインコメントの取得に失敗しました (repos/${REPO}/pulls/${PR}/comments)" >&2
   (( FAIL_COUNT += 1 )) || true
 fi
 
@@ -21,6 +27,7 @@ fi
 # 本文全体を保持する。改行は \n エスケープして 1 行に収める。
 if ! gh api "repos/${REPO}/pulls/${PR}/reviews" --paginate --jq \
   '.[] | select(.body != null and .body != "") | "[REVIEW-BODY] [\(.user.login)] state=\(.state) \(.body | gsub("\n"; "\\n"))"'; then
+  echo "WARNING: レビュー body の取得に失敗しました (repos/${REPO}/pulls/${PR}/reviews)" >&2
   (( FAIL_COUNT += 1 )) || true
 fi
 
@@ -28,6 +35,7 @@ fi
 # 本文全体を保持する。改行は \n エスケープして 1 行に収める。
 if ! gh api "repos/${REPO}/issues/${PR}/comments" --paginate --jq \
   '.[] | "[PR-COMMENT] [\(.user.login)] \(.body // "" | gsub("\n"; "\\n"))"'; then
+  echo "WARNING: PR レベルコメントの取得に失敗しました (repos/${REPO}/issues/${PR}/comments)" >&2
   (( FAIL_COUNT += 1 )) || true
 fi
 
