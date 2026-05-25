@@ -316,8 +316,7 @@ def cmd_init(args: argparse.Namespace) -> None:
     if r.returncode == 0:
         existing_path.write_text(r.stdout)
     else:
-        info(f"⚠ 既存コメント取得失敗: {r.stderr.strip()[:200]}")
-        existing_path.write_text("")
+        die(f"既存コメント取得失敗 (重複検出無効のため中断): {r.stderr.strip()[:200]}")
 
     state = {
         "started_at": _now(),
