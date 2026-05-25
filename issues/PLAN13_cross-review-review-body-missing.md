@@ -60,19 +60,31 @@ REPO="$1"
 PR="$2"
 
 # 1. インラインコメント (diff の特定行に紐づく)
-gh api "repos/${REPO}/pulls/${PR}/comments" --paginate --jq \
-  '.[] | "\(.path // "?"):\(.line // .original_line // "?") [\(.user.login)] \(.body // "" | split("\n")[0])"' \
-  || true
+# 本文全体を保持。改行は \n エスケープして 1 行に収める。
+if ! gh api "repos/${REPO}/pulls/${PR}/comments" --paginate --jq \
+  '.[] | "\(.path // "?"):\(.line // .original_line // "?") [\(.user.login)] \(.body // "" | gsub("\n"; "\\n"))"'; then
+  (( FAIL_COUNT += 1 )) || true
+fi
 
 # 2. レビュー body (CHANGES_REQUESTED / COMMENTED 等の総評)
-gh api "repos/${REPO}/pulls/${PR}/reviews" --paginate --jq \
-  '.[] | select(.body != null and .body != "") | "[REVIEW-BODY] [\(.user.login)] state=\(.state) \(.body | split("\n")[0])"' \
-  || true
+# 本文全体を保持。改行は \n エスケープして 1 行に収める。
+if ! gh api "repos/${REPO}/pulls/${PR}/reviews" --paginate --jq \
+  '.[] | select(.body != null and .body != "") | "[REVIEW-BODY] [\(.user.login)] state=\(.state) \(.body | gsub("\n"; "\\n"))"'; then
+  (( FAIL_COUNT += 1 )) || true
+fi
 
 # 3. PR レベルコメント (Conversation タブの通常コメント)
-gh api "repos/${REPO}/issues/${PR}/comments" --paginate --jq \
-  '.[] | "[PR-COMMENT] [\(.user.login)] \(.body // "" | split("\n")[0])"' \
-  || true
+# 本文全体を保持。改行は \n エスケープして 1 行に収める。
+if ! gh api "repos/${REPO}/issues/${PR}/comments" --paginate --jq \
+  '.[] | "[PR-COMMENT] [\(.user.login)] \(.body // "" | gsub("\n"; "\\n"))"'; then
+  (( FAIL_COUNT += 1 )) || true
+fi
+
+# 全ソース失敗時のみ非 0 で終了（認証切れ等の検出）
+if (( FAIL_COUNT >= 3 )); then
+  echo "ERROR: 全 3 ソースの取得に失敗しました" >&2
+  exit 1
+fi
 ```
 
 出力フォーマット:

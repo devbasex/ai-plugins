@@ -50,7 +50,9 @@ def _default_worktree_base() -> pathlib.Path:
     legacy = pathlib.Path("/work/worktrees")
     try:
         legacy.mkdir(parents=True, exist_ok=True)
-        # mkdir 成功 = 書き込み可能 → 既存環境互換でこちらを使う
+        if not os.access(legacy, os.W_OK):
+            die(f"worktree ベースディレクトリに書き込み権限がありません: {legacy}")
+        # mkdir 成功 + 書き込み可能 → 既存環境互換でこちらを使う
         return legacy
     except OSError:
         pass
@@ -223,13 +225,13 @@ def _load(pr: int) -> dict[str, Any]:
     p = _state_path(pr)
     if not p.exists():
         die(f"state.json not found: {p}")
-    return json.loads(p.read_text())
+    return json.loads(p.read_text(encoding="utf-8"))
 
 
 def _save(pr: int, state: dict[str, Any]) -> None:
     p = _state_path(pr)
     tmp = p.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(state, indent=2, ensure_ascii=False))
+    tmp.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
     tmp.replace(p)
 
 
@@ -256,7 +258,7 @@ def cmd_init(args: argparse.Namespace) -> None:
     pr = args.pr
     # worktree path を先に解決してから tmp_dir を決定する。
     # tmp_dir は <worktree>/.cross_review/ に配置し、gemini の workspace 制約を根本回避。
-    worktree = args.worktree or str(_default_worktree_base() / f"pr{pr}")
+    worktree = str(pathlib.Path(args.worktree).resolve()) if args.worktree else str(_default_worktree_base() / f"pr{pr}")
 
     # worktree 存在チェック用: _tmp_dir() は mkdir するため、先に呼ぶと
     # worktree ディレクトリが副作用で作成され exists() が常に true になる。
@@ -265,14 +267,14 @@ def cmd_init(args: argparse.Namespace) -> None:
     # 再開チェック: state ファイルの存在確認は _tmp_dir() を使わず直接パスを組む
     resume_state_file = pathlib.Path(worktree) / ".cross_review" / f"cross-review-pr{pr}-state.json"
     if resume_state_file.exists():
-        st = json.loads(resume_state_file.read_text())
+        st = json.loads(resume_state_file.read_text(encoding="utf-8"))
         if st.get("final") is None:
             tmp_dir = _tmp_dir(worktree)
             wt = st.get("worktree_path") or ""
             info(f"↻ 前回中断 state から再開（round={len(st.get('rounds', []))}）")
-            print(f"PR={st['current_pr']}")
-            print(f"WORKTREE={wt}")
-            print(f"TMP_DIR={tmp_dir}")
+            print(f'PR={st["current_pr"]}')
+            print(f'WORKTREE="{wt}"')
+            print(f'TMP_DIR="{tmp_dir}"')
             print(f"RESUMED=1")
             return
 
@@ -288,14 +290,27 @@ def cmd_init(args: argparse.Namespace) -> None:
     head_branch = _sh(["gh", "pr", "view", str(pr), "--json", "headRefName", "--jq", ".headRefName"])
     base_branch = _sh(["gh", "pr", "view", str(pr), "--json", "baseRefName", "--jq", ".baseRefName"])
     if not pathlib.Path(worktree).exists():
-        _sh(["git", "fetch", "origin", head_branch])
-        # head branch が既に別の worktree (例: 現在の作業ディレクトリ) で checkout されている
-        # 場合、`git worktree add <path> <branch>` は
-        # `fatal: '<branch>' is already used by worktree at '<other>'`
-        # で落ちる。これを避けるため、`origin/<head_branch>` を **detached** で展開する。
-        # cross-review はファイル参照しかしないので detached HEAD で全く問題ない。
-        _sh(["git", "worktree", "add", "--detach", worktree, f"origin/{head_branch}"])
-        info(f"✅ worktree 作成 (detached @ origin/{head_branch}): {worktree}")
+        # フォーク PR の場合 origin に head_branch がないことがある。
+        # fetch 失敗時は gh pr checkout --detach でフォールバックする。
+        fetch_result = subprocess.run(
+            ["git", "fetch", "origin", head_branch],
+            capture_output=True, text=True,
+        )
+        if fetch_result.returncode == 0:
+            # head branch が既に別の worktree で checkout されている場合を避けるため
+            # detached で展開する。cross-review はファイル参照しかしないので問題ない。
+            _sh(["git", "worktree", "add", "--detach", worktree, f"origin/{head_branch}"])
+            info(f"✅ worktree 作成 (detached @ origin/{head_branch}): {worktree}")
+        else:
+            info(f"⚠ git fetch origin {head_branch} 失敗 (フォーク PR の可能性) — gh pr checkout でフォールバック")
+            _sh(["git", "worktree", "add", "--detach", worktree, "HEAD"])
+            # worktree 内で gh pr checkout を実行して正しいコミットに切り替え
+            subprocess.run(
+                ["gh", "pr", "checkout", str(pr), "--detach"],
+                capture_output=True, text=True,
+                cwd=worktree,
+            )
+            info(f"✅ worktree 作成 (gh pr checkout --detach #{pr}): {worktree}")
     else:
         info(f"↻ 既存 worktree 流用: {worktree}")
 
@@ -314,7 +329,7 @@ def cmd_init(args: argparse.Namespace) -> None:
     )
     existing_path = tmp_dir / f"cross-review-pr{pr}-existing-comments.txt"
     if r.returncode == 0:
-        existing_path.write_text(r.stdout)
+        existing_path.write_text(r.stdout, encoding="utf-8")
     else:
         die(f"既存コメント取得失敗 (重複検出無効のため中断): {r.stderr.strip()[:200]}")
 
@@ -337,14 +352,14 @@ def cmd_init(args: argparse.Namespace) -> None:
         "deferred_nits": [],
         "final": None,
     }
-    state_file.write_text(json.dumps(state, indent=2, ensure_ascii=False))
+    state_file.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
     info(f"✅ state 初期化: {state_file}")
     print(f"PR={pr}")
-    print(f"WORKTREE={worktree}")
-    print(f"TMP_DIR={tmp_dir}")
-    print(f"REPO={repo}")
-    print(f"HEAD_BRANCH={head_branch}")
-    print(f"BASE_BRANCH={base_branch}")
+    print(f'WORKTREE="{worktree}"')
+    print(f'TMP_DIR="{tmp_dir}"')
+    print(f'REPO="{repo}"')
+    print(f'HEAD_BRANCH="{head_branch}"')
+    print(f'BASE_BRANCH="{base_branch}"')
     print(f"IS_OWN_PR={'1' if is_own else '0'}")
     print(f"EVENT_DOWNGRADE={'1' if event_downgrade else '0'}")
     print("RESUMED=0")
@@ -390,7 +405,7 @@ def cmd_read_result(args: argparse.Namespace) -> None:
         die(f"{agent}: result 未生成 ({rfile})")
 
     try:
-        r = json.loads(rfile.read_text())
+        r = json.loads(rfile.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         die(f"{agent}: result.json の parse に失敗 ({rfile}): {exc}", code=3)
 
@@ -499,7 +514,7 @@ def cmd_check_oscillation(args: argparse.Namespace) -> None:
             if not p.exists():
                 continue
             try:
-                payload = json.loads(p.read_text())
+                payload = json.loads(p.read_text(encoding="utf-8"))
             except json.JSONDecodeError:
                 continue
             # gemini round 4 指摘: payload は本来 dict (comments: [...]) だが、
