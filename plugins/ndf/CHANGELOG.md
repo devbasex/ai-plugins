@@ -1,5 +1,24 @@
 # NDF Plugin CHANGELOG
 
+### v4.7.6 (fix/review-pr-comments: PRコメント取得を3ソース対応に拡張)
+
+PRレビューコメント取得が review body / PR レベルコメントを含む3ソースに対応。
+cross-review の state.py も堅牢性改善。
+
+- **fetch-pr-comments.sh: 3ソース対応の新規スクリプト追加**
+  (`skills/fix/scripts/fetch-pr-comments.sh`):
+  - review comments / review body / PR-level comments の3ソースから取得。
+  - `gh api` の `-q` フラグ誤用を修正し raw JSON → `jq -r` パイプに統一。
+  - 取得失敗時に `die()` で中断するエラーハンドリング追加。
+- **state.py: 再開検知・パス解決の堅牢化**
+  (`skills/cross-review/scripts/state.py`):
+  - `cmd_init` の再開検知で `CROSS_REVIEW_TMP_DIR` 環境変数を考慮。
+  - `_state_path()` が `_tmp_dir()` を直接使用するよう修正（読み込み元と参照先の乖離防止）。
+  - `_resolve_tmp_dir` から mkdir 副作用を除去（`p.exists()` チェックに変更）。
+  - `st.get()` の None フォールバックを `or ""` で安全化。
+- **fix/SKILL.md, review-pr-comments/SKILL.md: 3ソース対応の説明更新**。
+- **cross-review SKILL.md, docs: パス記述の微修正**。
+
 ### v4.7.5 (cross-review: TMP_DIR を worktree 内 .cross_review/ に統一)
 
 レビュースクリプトが一時ファイルを書き出す先を、従来の `~/.gemini/tmp/` や `/tmp/`
