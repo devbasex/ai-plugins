@@ -24,6 +24,10 @@ HTSM / ISTQB / FEW HICCUPPS に基づいて E2E テストシナリオを計画�
 [D] 必須テスト技法を確定       → docs/03-test-techniques.md § 11
       ▼
 [E] pytest テストを書く        → templates/test_<role>.py.template を起点に
+      ▼
+[F] スクリプト作成へ → /ndf:playwright-script-creation
+      テスト計画が確定したら、テストスクリプトの作成に進む。
+      テスト計画が完了するまでスクリプト作成には進まない。
 ```
 
 ## page role 一覧
@@ -88,5 +92,6 @@ python scripts/record_scenario.py <URL>
 
 ## 関連 Skill
 
-- `/ndf:playwright-evidence` — テスト実行 + エビデンス収集
+- `/ndf:playwright-script-creation` — テストスクリプト作成 (次のフェーズ)
+- `/ndf:playwright-execution` — テスト実行 + エビデンス収集
 - `/ndf:playwright-scenario-test` — 全機能を統括したフルワークフロー
