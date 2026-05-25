@@ -85,13 +85,13 @@ fi
 # --- 3) pytest 実行 ------------------------------------------------
 cd "$RUNTIME_DIR"
 
-# --pwk-no-video が引数に含まれていなければ --video=on をデフォルト追加。
-# pytest_plugin.py 側でもデフォルト注入するが、run.sh 経由の場合は
-# 明示的に渡すことで --video の優先度を確保する。
+# --pwk-no-video / --pwk-no-evidence / --video=* が引数に含まれていなければ
+# --video=on をデフォルト追加。pytest_plugin.py 側でもデフォルト注入するが、
+# run.sh 経由の場合は明示的に渡すことで --video の優先度を確保する。
 VIDEO_FLAG="--video=on"
 for arg in "$@"; do
   case "$arg" in
-    --pwk-no-video|--pwk-no-evidence) VIDEO_FLAG="" ;;
+    --pwk-no-video|--pwk-no-evidence|--video=*) VIDEO_FLAG="" ;;
   esac
 done
 

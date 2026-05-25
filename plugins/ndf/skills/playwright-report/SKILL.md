@@ -1,7 +1,7 @@
 ---
 name: playwright-report
-description: "Playwright テスト結果の Markdown レポート自動生成 + Google Drive 共有。テスト結果サマリ・エビデンスリンク・失敗詳細を report.md にまとめる。"
-when_to_use: "テストレポートの生成 / テスト結果の共有 / Google Drive へのエビデンスアップロードが必要なとき。Triggers: 'テストレポート', 'report.md', 'テスト結果', 'テスト報告書', 'Drive 共有', 'Drive アップロード', 'エビデンス共有'"
+description: "Playwright テスト結果の Markdown レポート自動生成。テスト結果サマリ・エビデンスリンク・失敗詳細を report.md にまとめる。"
+when_to_use: "テストレポートの生成 / テスト結果の共有が必要なとき。Triggers: 'テストレポート', 'report.md', 'テスト結果', 'テスト報告書', 'レポート生成', 'テスト結果まとめ'"
 allowed-tools:
   - Read
   - Bash(uv *)
@@ -11,7 +11,7 @@ allowed-tools:
 
 # Playwright Report (レポート生成)
 
-テスト実行後に **Markdown レポート** を自動生成し、Google Drive で共有する。
+テスト実行後に **Markdown レポート** を自動生成する。
 
 ## 自動生成
 

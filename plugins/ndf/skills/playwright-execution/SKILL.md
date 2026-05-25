@@ -1,3 +1,4 @@
+---
 name: playwright-execution
 description: "Playwright E2E テストの実行 + エビデンス収集 (video/trace/screenshot/HAR) + overlay (赤丸カーソル+字幕) + 品質計測 (axe-core/Web Vitals/body_check) を統合した実行フェーズスキル。動画はデフォルト ON。"
 when_to_use: "E2E テストの実行 / エビデンス収集 / 動画エビデンス / accessibility チェック / Core Web Vitals 計測が必要なとき。テストスクリプト作成済みであることが前提。Triggers: 'E2E テスト実行', 'テスト実行', '動画エビデンス', 'エビデンス収集', 'テスト証跡', 'a11y テスト', 'accessibility テスト', 'axe-core', 'WCAG', 'Core Web Vitals', 'Web Vitals', 'LCP', 'CLS', 'body_check', 'overlay', '字幕', 'カーソル'"

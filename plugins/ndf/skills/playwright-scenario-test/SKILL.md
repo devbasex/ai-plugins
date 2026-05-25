@@ -53,7 +53,7 @@ Web アプリの E2E シナリオを **理論ベース** で計画し、**再現
 
 ## クイックスタート
 
-1. プロジェクト初期化: `./scripts/init_project.sh /path/to/your-app`
+1. プロジェクト初期化: `/ndf:playwright-kit-ops` で `./scripts/init_project.sh /path/to/your-app` を実行
 2. 設定編集: `scenario-test/scenario.config.yaml`
 3. テストスクリプト作成: `scenario-test/tests/test_*.py` (→ `/ndf:playwright-script-creation`)
 4. テスト実行 (動画デフォルト ON): `./scenario-test/run.sh`
