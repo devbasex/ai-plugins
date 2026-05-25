@@ -29,6 +29,7 @@ import datetime as _dt
 import json
 import os
 import pathlib
+import shlex
 import subprocess
 import sys
 from typing import Any
@@ -274,8 +275,8 @@ def cmd_init(args: argparse.Namespace) -> None:
             wt = st.get("worktree_path") or ""
             info(f"↻ 前回中断 state から再開（round={len(st.get('rounds', []))}）")
             print(f'PR={st["current_pr"]}')
-            print(f'WORKTREE="{wt}"')
-            print(f'TMP_DIR="{tmp_dir}"')
+            print(f'WORKTREE={shlex.quote(str(wt))}')
+            print(f'TMP_DIR={shlex.quote(str(tmp_dir))}')
             print(f"RESUMED=1")
             return
 
@@ -358,11 +359,11 @@ def cmd_init(args: argparse.Namespace) -> None:
     state_file.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
     info(f"✅ state 初期化: {state_file}")
     print(f"PR={pr}")
-    print(f'WORKTREE="{worktree}"')
-    print(f'TMP_DIR="{tmp_dir}"')
-    print(f'REPO="{repo}"')
-    print(f'HEAD_BRANCH="{head_branch}"')
-    print(f'BASE_BRANCH="{base_branch}"')
+    print(f'WORKTREE={shlex.quote(str(worktree))}')
+    print(f'TMP_DIR={shlex.quote(str(tmp_dir))}')
+    print(f'REPO={shlex.quote(str(repo))}')
+    print(f'HEAD_BRANCH={shlex.quote(str(head_branch))}')
+    print(f'BASE_BRANCH={shlex.quote(str(base_branch))}')
     print(f"IS_OWN_PR={'1' if is_own else '0'}")
     print(f"EVENT_DOWNGRADE={'1' if event_downgrade else '0'}")
     print("RESUMED=0")
