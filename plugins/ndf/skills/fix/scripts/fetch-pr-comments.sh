@@ -11,8 +11,9 @@ PR="$2"
 FAIL_COUNT=0
 
 # 1. インラインコメント (diff の特定行に紐づく)
+# 本文全体を保持する。改行は \n エスケープして 1 行に収める。
 if ! gh api "repos/${REPO}/pulls/${PR}/comments" --paginate --jq \
-  '.[] | "\(.path // "?"):\(.line // .original_line // "?") [\(.user.login)] \(.body // "" | split("\n")[0])"'; then
+  '.[] | "\(.path // "?"):\(.line // .original_line // "?") [\(.user.login)] \(.body // "" | gsub("\n"; "\\n"))"'; then
   (( FAIL_COUNT += 1 )) || true
 fi
 
@@ -24,8 +25,9 @@ if ! gh api "repos/${REPO}/pulls/${PR}/reviews" --paginate --jq \
 fi
 
 # 3. PR レベルコメント (Conversation タブの通常コメント)
+# 本文全体を保持する。改行は \n エスケープして 1 行に収める。
 if ! gh api "repos/${REPO}/issues/${PR}/comments" --paginate --jq \
-  '.[] | "[PR-COMMENT] [\(.user.login)] \(.body // "" | split("\n")[0])"'; then
+  '.[] | "[PR-COMMENT] [\(.user.login)] \(.body // "" | gsub("\n"; "\\n"))"'; then
   (( FAIL_COUNT += 1 )) || true
 fi
 
