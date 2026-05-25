@@ -177,10 +177,18 @@ review指摘とCIエラーは**同じPRで一緒に修正**する:
 
 ## ghコマンド例
 
+### PR コメント一括取得 (3 ソース)
+
+```bash
+# インラインコメント / レビュー body / PR レベルコメントを一括取得
+FETCH_SCRIPT="$CLAUDE_PLUGIN_ROOT/skills/fix/scripts/fetch-pr-comments.sh"
+"$FETCH_SCRIPT" <owner/repo> <pr_number>
+```
+
 ### コメントへの返信
 
 ```bash
-# PRのレビューコメント一覧を取得
+# PRのレビューコメント一覧を取得 (インラインコメントのみ)
 gh api repos/{owner}/{repo}/pulls/{pr_number}/comments
 
 # 特定のコメントに返信（in_reply_to にコメントIDを指定）

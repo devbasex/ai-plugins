@@ -95,7 +95,7 @@ cd "$WORKTREE"
 1. 既存 state.json があり `final == null` なら再開
 2. 自分の PR 判定（`gh api user` と `gh pr view --json author` を比較）
 3. worktree 作成（`<worktree-base>/pr<PR>`。`<worktree-base>` は `NDF_WORKTREE_BASE` env > `/work/worktrees` > `$HOME/work/worktrees` の優先順で解決。実 path は state.json の `worktree_path` を参照）
-4. 既存コメントスナップショット → `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt`
+4. 既存コメントスナップショット (`fix/scripts/fetch-pr-comments.sh` で 3 ソース一括取得) → `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt`
 5. state.json 書き出し
 
 **重要**: 以降の全ステップで `cd $WORKTREE` を強制。

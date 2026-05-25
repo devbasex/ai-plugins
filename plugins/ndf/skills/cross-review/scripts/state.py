@@ -29,6 +29,7 @@ import datetime as _dt
 import json
 import os
 import pathlib
+import shlex
 import subprocess
 import sys
 from typing import Any
@@ -50,8 +51,11 @@ def _default_worktree_base() -> pathlib.Path:
     legacy = pathlib.Path("/work/worktrees")
     try:
         legacy.mkdir(parents=True, exist_ok=True)
-        # mkdir 成功 = 書き込み可能 → 既存環境互換でこちらを使う
-        return legacy
+        if not os.access(legacy, os.W_OK):
+            info(f"⚠ worktree ベースディレクトリに書き込み権限がありません: {legacy} — フォールバック")
+        else:
+            # mkdir 成功 + 書き込み可能 → 既存環境互換でこちらを使う
+            return legacy
     except OSError:
         pass
     return pathlib.Path.home() / "work" / "worktrees"
@@ -93,16 +97,43 @@ def _tmp_dir(workspace: str | None = None) -> pathlib.Path:
     return d
 
 
+def _resolve_tmp_dir(pr: int | None = None) -> pathlib.Path:
+    """state.json に保存された tmp_dir を優先し、_tmp_dir() をフォールバックとする。
+
+    init 時に確定した tmp_dir を再利用することで、CWD や環境変数の変化による
+    パス不一致リスクを回避する。
+
+    注意: この関数は成果物パスの解決にのみ使用する。state ファイル自体のパス解決
+    には _tmp_dir() を直接使うこと（循環参照を防ぐため）。
+    副作用: フォールバック時に _tmp_dir() を呼ぶため、ディレクトリ作成 (mkdir) が
+    発生する可能性がある。
+    """
+    if pr is not None:
+        # state.json から tmp_dir を読み出す (存在する場合)
+        candidate = _tmp_dir() / f"cross-review-pr{pr}-state.json"
+        if candidate.exists():
+            try:
+                st = json.loads(candidate.read_text(encoding="utf-8"))
+                saved = st.get("tmp_dir")
+                if saved:
+                    p = pathlib.Path(saved)
+                    if p.exists():
+                        return p
+            except (OSError, json.JSONDecodeError):
+                pass
+    return _tmp_dir()
+
+
 def _state_path(pr: int) -> pathlib.Path:
     return _tmp_dir() / f"cross-review-pr{pr}-state.json"
 
 
 def _payload_path(agent: str, pr: int, round_: int) -> pathlib.Path:
-    return _tmp_dir() / f"{agent}-review-pr{pr}-round{round_}-payload.json"
+    return _resolve_tmp_dir(pr) / f"{agent}-review-pr{pr}-round{round_}-payload.json"
 
 
 def _existing_comments_path(pr: int) -> pathlib.Path:
-    return _tmp_dir() / f"cross-review-pr{pr}-existing-comments.txt"
+    return _resolve_tmp_dir(pr) / f"cross-review-pr{pr}-existing-comments.txt"
 
 
 def _now() -> str:
@@ -223,13 +254,13 @@ def _load(pr: int) -> dict[str, Any]:
     p = _state_path(pr)
     if not p.exists():
         die(f"state.json not found: {p}")
-    return json.loads(p.read_text())
+    return json.loads(p.read_text(encoding="utf-8"))
 
 
 def _save(pr: int, state: dict[str, Any]) -> None:
     p = _state_path(pr)
     tmp = p.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(state, indent=2, ensure_ascii=False))
+    tmp.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
     tmp.replace(p)
 
 
@@ -256,23 +287,35 @@ def cmd_init(args: argparse.Namespace) -> None:
     pr = args.pr
     # worktree path を先に解決してから tmp_dir を決定する。
     # tmp_dir は <worktree>/.cross_review/ に配置し、gemini の workspace 制約を根本回避。
-    worktree = args.worktree or str(_default_worktree_base() / f"pr{pr}")
+    worktree = str(pathlib.Path(args.worktree).resolve()) if args.worktree else str(_default_worktree_base() / f"pr{pr}")
 
     # worktree 存在チェック用: _tmp_dir() は mkdir するため、先に呼ぶと
     # worktree ディレクトリが副作用で作成され exists() が常に true になる。
     # そのため _tmp_dir() 呼び出しは worktree 作成/確認の後に行う。
 
-    # 再開チェック: state ファイルの存在確認は _tmp_dir() を使わず直接パスを組む
-    resume_state_file = pathlib.Path(worktree) / ".cross_review" / f"cross-review-pr{pr}-state.json"
+    # 再開チェック: CROSS_REVIEW_TMP_DIR が設定されている場合はそちらを優先し、
+    # 未設定なら <worktree>/.cross_review/ を直接パスとして組む。
+    # _tmp_dir() は mkdir 副作用があるため使用せず、パス解決のみ行う。
+    env_tmp = os.environ.get("CROSS_REVIEW_TMP_DIR")
+    if env_tmp:
+        resume_dir = pathlib.Path(env_tmp).resolve()
+    else:
+        resume_dir = pathlib.Path(worktree) / ".cross_review"
+    resume_state_file = resume_dir / f"cross-review-pr{pr}-state.json"
     if resume_state_file.exists():
-        st = json.loads(resume_state_file.read_text())
+        st = json.loads(resume_state_file.read_text(encoding="utf-8"))
         if st.get("final") is None:
             tmp_dir = _tmp_dir(worktree)
             wt = st.get("worktree_path") or ""
             info(f"↻ 前回中断 state から再開（round={len(st.get('rounds', []))}）")
-            print(f"PR={st['current_pr']}")
-            print(f"WORKTREE={wt}")
-            print(f"TMP_DIR={tmp_dir}")
+            print(f'PR={st["current_pr"]}')
+            print(f'WORKTREE={shlex.quote(str(wt))}')
+            print(f'TMP_DIR={shlex.quote(str(tmp_dir))}')
+            print(f'REPO={shlex.quote(str(st.get("repo") or ""))}')
+            print(f'HEAD_BRANCH={shlex.quote(str(st.get("head_branch") or ""))}')
+            print(f'BASE_BRANCH={shlex.quote(str(st.get("base_branch") or ""))}')
+            print(f"IS_OWN_PR={'1' if st.get('is_own_pr') else '0'}")
+            print(f"EVENT_DOWNGRADE={'1' if st.get('event_downgrade') else '0'}")
             print(f"RESUMED=1")
             return
 
@@ -288,14 +331,29 @@ def cmd_init(args: argparse.Namespace) -> None:
     head_branch = _sh(["gh", "pr", "view", str(pr), "--json", "headRefName", "--jq", ".headRefName"])
     base_branch = _sh(["gh", "pr", "view", str(pr), "--json", "baseRefName", "--jq", ".baseRefName"])
     if not pathlib.Path(worktree).exists():
-        _sh(["git", "fetch", "origin", head_branch])
-        # head branch が既に別の worktree (例: 現在の作業ディレクトリ) で checkout されている
-        # 場合、`git worktree add <path> <branch>` は
-        # `fatal: '<branch>' is already used by worktree at '<other>'`
-        # で落ちる。これを避けるため、`origin/<head_branch>` を **detached** で展開する。
-        # cross-review はファイル参照しかしないので detached HEAD で全く問題ない。
-        _sh(["git", "worktree", "add", "--detach", worktree, f"origin/{head_branch}"])
-        info(f"✅ worktree 作成 (detached @ origin/{head_branch}): {worktree}")
+        # フォーク PR の場合 origin に head_branch がないことがある。
+        # fetch 失敗時は gh pr checkout --detach でフォールバックする。
+        fetch_result = subprocess.run(
+            ["git", "fetch", "origin", head_branch],
+            capture_output=True, text=True,
+        )
+        if fetch_result.returncode == 0:
+            # head branch が既に別の worktree で checkout されている場合を避けるため
+            # detached で展開する。cross-review はファイル参照しかしないので問題ない。
+            _sh(["git", "worktree", "add", "--detach", worktree, f"origin/{head_branch}"])
+            info(f"✅ worktree 作成 (detached @ origin/{head_branch}): {worktree}")
+        else:
+            info(f"⚠ git fetch origin {head_branch} 失敗 (フォーク PR の可能性) — gh pr checkout でフォールバック")
+            _sh(["git", "worktree", "add", "--detach", worktree, "HEAD"])
+            # worktree 内で gh pr checkout を実行して正しいコミットに切り替え
+            checkout_result = subprocess.run(
+                ["gh", "pr", "checkout", str(pr), "--detach"],
+                capture_output=True, text=True,
+                cwd=worktree,
+            )
+            if checkout_result.returncode != 0:
+                die(f"gh pr checkout --detach #{pr} 失敗: {checkout_result.stderr.strip()}")
+            info(f"✅ worktree 作成 (gh pr checkout --detach #{pr}): {worktree}")
     else:
         info(f"↻ 既存 worktree 流用: {worktree}")
 
@@ -304,24 +362,19 @@ def cmd_init(args: argparse.Namespace) -> None:
     state_file = tmp_dir / f"cross-review-pr{pr}-state.json"
 
     # 既存コメントスナップショット（重複指摘防止）。
-    # NOTE: `gh api --paginate` は REST のページごとに **JSON 配列が連続して** stdout に出る
-    # ため、`json.loads(r.stdout)` は複数ページで JSONDecodeError になり、コメントが空に
-    # 落ちる。`--jq '.[] | ...'` で gh CLI 側に整形させ、行単位で素直に書き出す。
+    # 3 ソース (インラインコメント / レビュー body / PR レベルコメント) を
+    # fix skill の共有スクリプトで一括取得する。
     repo = _sh(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
-    jq_filter = (
-        r'.[] | "\(.path // "?"):\(.line // .original_line // "?") '
-        r'[\(.user.login)] \(.body // "" | split("\n")[0])"'
-    )
+    fetch_script = pathlib.Path(__file__).resolve().parent.parent.parent / "fix" / "scripts" / "fetch-pr-comments.sh"
     r = subprocess.run(
-        ["gh", "api", f"repos/{repo}/pulls/{pr}/comments", "--paginate", "--jq", jq_filter],
+        [str(fetch_script), repo, str(pr)],
         capture_output=True, text=True,
     )
     existing_path = tmp_dir / f"cross-review-pr{pr}-existing-comments.txt"
     if r.returncode == 0:
-        existing_path.write_text(r.stdout)
+        existing_path.write_text(r.stdout, encoding="utf-8")
     else:
-        info(f"⚠ 既存コメント取得失敗: {r.stderr.strip()[:200]}")
-        existing_path.write_text("")
+        die(f"既存コメント取得失敗 (重複検出無効のため中断): {r.stderr.strip()[:200]}")
 
     state = {
         "started_at": _now(),
@@ -342,14 +395,14 @@ def cmd_init(args: argparse.Namespace) -> None:
         "deferred_nits": [],
         "final": None,
     }
-    state_file.write_text(json.dumps(state, indent=2, ensure_ascii=False))
+    state_file.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
     info(f"✅ state 初期化: {state_file}")
     print(f"PR={pr}")
-    print(f"WORKTREE={worktree}")
-    print(f"TMP_DIR={tmp_dir}")
-    print(f"REPO={repo}")
-    print(f"HEAD_BRANCH={head_branch}")
-    print(f"BASE_BRANCH={base_branch}")
+    print(f'WORKTREE={shlex.quote(str(worktree))}')
+    print(f'TMP_DIR={shlex.quote(str(tmp_dir))}')
+    print(f'REPO={shlex.quote(str(repo))}')
+    print(f'HEAD_BRANCH={shlex.quote(str(head_branch))}')
+    print(f'BASE_BRANCH={shlex.quote(str(base_branch))}')
     print(f"IS_OWN_PR={'1' if is_own else '0'}")
     print(f"EVENT_DOWNGRADE={'1' if event_downgrade else '0'}")
     print("RESUMED=0")
@@ -390,12 +443,12 @@ def cmd_read_result(args: argparse.Namespace) -> None:
     """Step 2.5 — codex/gemini の result.json を state にマージ。"""
     agent = args.agent
     pr = args.pr
-    rfile = pathlib.Path(args.file or _tmp_dir() / f"{agent}-review-pr{pr}-result.json")
+    rfile = pathlib.Path(args.file or _resolve_tmp_dir(pr) / f"{agent}-review-pr{pr}-result.json")
     if not rfile.exists() or rfile.stat().st_size == 0:
         die(f"{agent}: result 未生成 ({rfile})")
 
     try:
-        r = json.loads(rfile.read_text())
+        r = json.loads(rfile.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         die(f"{agent}: result.json の parse に失敗 ({rfile}): {exc}", code=3)
 
@@ -504,7 +557,7 @@ def cmd_check_oscillation(args: argparse.Namespace) -> None:
             if not p.exists():
                 continue
             try:
-                payload = json.loads(p.read_text())
+                payload = json.loads(p.read_text(encoding="utf-8"))
             except json.JSONDecodeError:
                 continue
             # gemini round 4 指摘: payload は本来 dict (comments: [...]) だが、
@@ -571,7 +624,7 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     # 2, 3 は PR 番号だけで命名されているため、別 round / 別リポジトリの
     # 古い結果を拾わないよう mtime と (あれば) JSON 内の `pr` で検証する。
     explicit = pathlib.Path(args.file) if args.file else None
-    canonical_path = _tmp_dir() / f"fix-pr{pr}-result.json"
+    canonical_path = _resolve_tmp_dir(pr) / f"fix-pr{pr}-result.json"
     legacy_tmp_path = pathlib.Path(f"/tmp/fix-pr{pr}-result.json")
     # (path, is_canonical) のタプル: 正規パス (canonical) の parse 失敗は die(code=3) する
     fallback_candidates: list[tuple[pathlib.Path, bool]] = [

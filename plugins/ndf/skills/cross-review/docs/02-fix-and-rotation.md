@@ -73,7 +73,7 @@ worktree 外を触ると競合します。
 
 ## 必須実行手順（順序厳守）
 
-1. PR コメント取得: `gh api "repos/{OWNER_REPO}/pulls/{PR}/comments" --paginate`
+1. PR コメント取得 (3 ソース): `fix/scripts/fetch-pr-comments.sh {OWNER_REPO} {PR}` でインラインコメント / レビュー body / PR レベルコメントを一括取得
 2. 重要度を独自再判定（AI agent のラベルは参考値）
 3. CI 状態スナップショット: `gh pr checks {PR} --json name,state` （**完了待ちはしない**、PENDING は無視して FAILURE のみ修正対象に取り込む）
 4. critical/major + 該当 minor/nit の修正コミット（worktree 内のみ）

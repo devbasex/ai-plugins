@@ -42,11 +42,19 @@ CURRENT_BRANCH=$(git branch --show-current)
 PR_NUMBER="${ARGUMENTS:-$(gh pr view --json number --jq .number)}"
 ```
 
-### 2. PRコメント取得
+### 2. PRコメント取得 (3 ソース)
+
+fix skill の共有スクリプトで インラインコメント / レビュー body / PR レベルコメントを一括取得:
 
 ```bash
-gh pr view "$PR_NUMBER" --json comments,reviewDecision
-gh api "repos/:owner/:repo/pulls/$PR_NUMBER/comments"
+FETCH_SCRIPT="$CLAUDE_PLUGIN_ROOT/skills/fix/scripts/fetch-pr-comments.sh"
+"$FETCH_SCRIPT" "$(gh repo view --json nameWithOwner -q .nameWithOwner)" "$PR_NUMBER"
+```
+
+補助情報 (reviewDecision 等):
+
+```bash
+gh pr view "$PR_NUMBER" --json reviewDecision
 ```
 
 GitHub MCP を使う場合は `mcp__github__get_pull_request_comments` を利用。
