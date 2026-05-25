@@ -1,47 +1,43 @@
-# PLAN23: playwright-scenario-test を 6 機能 skill + 統括 skill に分割
+# PLAN23: playwright-scenario-test を 5 機能 skill + 統括 skill に再構成
 
 **Issue**: https://github.com/devbasex/ai-plugins/issues/17
-**Status**: 実装済み (未コミット)
+**Status**: 実装済み
 
 ## Context
 
-`playwright-scenario-test` は 73 ファイル / 760KB の大型 skill。SKILL.md (315行, ~5,000 tokens) が skill 発動時にコンテキストに全量ロードされ、エージェントのコンテキストを圧迫していた。
+`playwright-scenario-test` は 73 ファイル / 760KB の大型 skill。初回は 6 skill + orchestrator に分割したが、以下の大原則に基づいて 5 skill + orchestrator に再構成した。
+
+### 大原則
+
+1. 再現可能なテストスクリプトを実装してからテストを実施する
+2. テストスクリプトは ndf plugin 非依存でプロジェクトフォルダに設置する
+3. テスト実行はエビデンス動画を常に取得する (オプションでスキップ可能)
 
 ## 実施内容
 
-機能を 6 つの独立 skill に分割し、`playwright-scenario-test` を統括オーケストレータに改修。
-
-### 新規 6 skill
+### 5 skill + orchestrator 構成
 
 | # | Skill 名 | 責務 |
 |---|---|---|
-| 1 | `playwright-test-planning` | テスト計画 (HTSM/ISTQB/FEW HICCUPPS、page role、チェックリスト) |
-| 2 | `playwright-evidence` | エビデンス収集 (video/trace/screenshot/HAR) |
-| 3 | `playwright-overlay` | 動画装飾 (赤丸カーソル + 字幕) |
-| 4 | `playwright-quality` | 品質計測 (accessibility/Web Vitals/body_check) |
-| 5 | `playwright-report` | Markdown レポート + Drive 共有 |
-| 6 | `playwright-kit-ops` | スクリプト実行 (init_project/スキャン/アップロード) |
+| 1 | `playwright-test-planning` | テスト計画 (HTSM/ISTQB/FEW HICCUPPS) |
+| 2 | `playwright-script-creation` | テストスクリプト作成 (テンプレート→実装→レビュー) |
+| 3 | `playwright-execution` | テスト実行 + エビデンス収集 (video/trace/overlay/quality 統合) |
+| 4 | `playwright-report` | レポート生成 |
+| 5 | `playwright-kit-ops` | ツール群 (init_project/スキャン/アップロード) |
 
-### 統括 skill (既存改修)
+### 廃止 skill
 
-`playwright-scenario-test` → トリガーを絞り、冒頭に 6 skill への案内テーブルを追加。
+- `playwright-evidence` → `playwright-execution` に統合
+- `playwright-overlay` → `playwright-execution` に統合
+- `playwright-quality` → `playwright-execution` に統合
 
-### スクリプト移動
+### コード変更
 
-`playwright-scenario-test/scripts/` → `playwright-kit-ops/scripts/` に全スクリプトを移動。
-`init_project.sh` は `SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"` で自身の親ディレクトリ (`playwright-kit-ops/`) を解決するため、移動先でそのまま動作する。
+- `pytest_plugin.py`: `--pwk-no-video` オプション追加、動画デフォルト ON
+- `run.sh`: `--video=on` フォールバック追加
+- `conftest.py.template`: テストスクリプト存在チェック追加
+- `plugin.json`: v4.8.0 → v4.9.0 (45 → 44 skills)
 
-### plugin.json
+## 設計書
 
-- skills 配列に 6 skill を追加 (計 45 skills)
-- version: 4.7.5 → 4.8.0
-
-## 変更ファイル一覧
-
-- 新規 6 ファイル: `skills/playwright-{test-planning,evidence,overlay,quality,report,kit-ops}/SKILL.md`
-- 移動 11 ファイル: `scripts/*.py`, `scripts/init_project.{sh,bat}` → `playwright-kit-ops/scripts/`
-- 修正 2 ファイル: `playwright-scenario-test/SKILL.md`, `.claude-plugin/plugin.json`
-
-## 将来の対応 (別 issue)
-
-- `playwright_kit` Python パッケージの内部サブディレクトリ化
+`docs/superpowers/specs/2026-05-25-playwright-skill-restructure-design.md`
