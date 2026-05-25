@@ -304,16 +304,12 @@ def cmd_init(args: argparse.Namespace) -> None:
     state_file = tmp_dir / f"cross-review-pr{pr}-state.json"
 
     # 既存コメントスナップショット（重複指摘防止）。
-    # NOTE: `gh api --paginate` は REST のページごとに **JSON 配列が連続して** stdout に出る
-    # ため、`json.loads(r.stdout)` は複数ページで JSONDecodeError になり、コメントが空に
-    # 落ちる。`--jq '.[] | ...'` で gh CLI 側に整形させ、行単位で素直に書き出す。
+    # 3 ソース (インラインコメント / レビュー body / PR レベルコメント) を
+    # fix skill の共有スクリプトで一括取得する。
     repo = _sh(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
-    jq_filter = (
-        r'.[] | "\(.path // "?"):\(.line // .original_line // "?") '
-        r'[\(.user.login)] \(.body // "" | split("\n")[0])"'
-    )
+    fetch_script = Path(__file__).resolve().parent.parent.parent / "fix" / "scripts" / "fetch-pr-comments.sh"
     r = subprocess.run(
-        ["gh", "api", f"repos/{repo}/pulls/{pr}/comments", "--paginate", "--jq", jq_filter],
+        [str(fetch_script), repo, str(pr)],
         capture_output=True, text=True,
     )
     existing_path = tmp_dir / f"cross-review-pr{pr}-existing-comments.txt"
