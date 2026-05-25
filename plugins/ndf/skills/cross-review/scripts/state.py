@@ -102,6 +102,10 @@ def _resolve_tmp_dir(pr: int | None = None) -> pathlib.Path:
 
     init 時に確定した tmp_dir を再利用することで、CWD や環境変数の変化による
     パス不一致リスクを回避する。
+
+    注意: この関数は成果物パスの解決にのみ使用する。state ファイル自体のパス解決
+    には _tmp_dir() を直接使うこと（循環参照を防ぐため）。
+    ディレクトリ作成の副作用は持たない — 必要に応じて利用側で mkdir すること。
     """
     if pr is not None:
         # state.json から tmp_dir を読み出す (存在する場合)
@@ -112,15 +116,15 @@ def _resolve_tmp_dir(pr: int | None = None) -> pathlib.Path:
                 saved = st.get("tmp_dir")
                 if saved:
                     p = pathlib.Path(saved)
-                    p.mkdir(parents=True, exist_ok=True)
-                    return p
+                    if p.exists():
+                        return p
             except (OSError, json.JSONDecodeError):
                 pass
     return _tmp_dir()
 
 
 def _state_path(pr: int) -> pathlib.Path:
-    return _resolve_tmp_dir(pr) / f"cross-review-pr{pr}-state.json"
+    return _tmp_dir() / f"cross-review-pr{pr}-state.json"
 
 
 def _payload_path(agent: str, pr: int, round_: int) -> pathlib.Path:
@@ -299,9 +303,9 @@ def cmd_init(args: argparse.Namespace) -> None:
             print(f'PR={st["current_pr"]}')
             print(f'WORKTREE={shlex.quote(str(wt))}')
             print(f'TMP_DIR={shlex.quote(str(tmp_dir))}')
-            print(f'REPO={shlex.quote(str(st.get("repo", "")))}')
-            print(f'HEAD_BRANCH={shlex.quote(str(st.get("head_branch", "")))}')
-            print(f'BASE_BRANCH={shlex.quote(str(st.get("base_branch", "")))}')
+            print(f'REPO={shlex.quote(str(st.get("repo") or ""))}')
+            print(f'HEAD_BRANCH={shlex.quote(str(st.get("head_branch") or ""))}')
+            print(f'BASE_BRANCH={shlex.quote(str(st.get("base_branch") or ""))}')
             print(f"IS_OWN_PR={'1' if st.get('is_own_pr') else '0'}")
             print(f"EVENT_DOWNGRADE={'1' if st.get('event_downgrade') else '0'}")
             print(f"RESUMED=1")
