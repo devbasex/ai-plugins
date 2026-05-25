@@ -307,7 +307,7 @@ def cmd_init(args: argparse.Namespace) -> None:
     # 3 ソース (インラインコメント / レビュー body / PR レベルコメント) を
     # fix skill の共有スクリプトで一括取得する。
     repo = _sh(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
-    fetch_script = Path(__file__).resolve().parent.parent.parent / "fix" / "scripts" / "fetch-pr-comments.sh"
+    fetch_script = pathlib.Path(__file__).resolve().parent.parent.parent / "fix" / "scripts" / "fetch-pr-comments.sh"
     r = subprocess.run(
         [str(fetch_script), repo, str(pr)],
         capture_output=True, text=True,
