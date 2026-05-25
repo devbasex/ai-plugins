@@ -8,7 +8,7 @@
 ## 必須テスト観点
 
 ### LP1: ヒーロー領域レンダリング `[Claims / Claims]`
-- LCP < 2.5s (`scripts/check_cwv.py --metric lcp`)
+- LCP < 2.5s (`playwright-kit-ops/scripts/check_cwv.py --metric lcp`)
 - ヒーロー画像/動画の poster が空白でない
 - WebP / AVIF fallback が動作
 
@@ -59,7 +59,7 @@
 
 ### LP10: スクロール時の CLS `[Claims / Image]`
 - 画像 / iframe / web font の遅延差し替えで layout shift しない (`width/height` 属性 + aspect-ratio CSS)
-- CLS < 0.1 (`scripts/check_cwv.py --metric cls`)
+- CLS < 0.1 (`playwright-kit-ops/scripts/check_cwv.py --metric cls`)
 
 ### LP11: 内部 anchor link `[Functional / Product]`
 - `#section1` の click で smooth scroll

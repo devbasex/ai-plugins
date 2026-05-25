@@ -1,7 +1,7 @@
 ---
 name: playwright-scenario-test
-description: "pytest-playwright 上の Web シナリオ E2E テスト実施フレームワーク。HTSM / ISTQB / FEW HICCUPPS に基づき page role 別の checklist + 必須技法マッピングを内蔵し、accessibility (axe-core) / Core Web Vitals 自動計測 + Playwright trace / HAR / 動画 / Markdown レポート + Google Drive 共有を pytest fixture / hook として提供する。v0.5.0 で利用者プロジェクトに all-in-one ディレクトリを埋め込む Skill 非依存構成へ移行。"
-when_to_use: "E2E テスト計画立案 / 不具合エビデンス収集 / 動画レポート / Google Drive 共有が必要なとき。LP / 一覧 / 詳細 / 編集 / 申込フォーム / 検索 / ダッシュボード / 認証 / カート / チェックアウト / モーダル / ウィザード / 設定 / エラーページ など page role 別の理論ベースチェックを行う。Triggers: 'E2E テスト', 'シナリオテスト', '動画エビデンス', 'Playwright', 'pytest-playwright', 'リリース前確認', '回帰テスト', 'a11y テスト', 'accessibility テスト', 'Core Web Vitals', 'Web Vitals', 'page role', 'pwk_role', 'pwk_evidence'"
+description: "pytest-playwright ベースのフル E2E テストフレームワーク統括。テスト計画・エビデンス収集・動画装飾・品質計測・レポート生成の 5 機能を組み合わせた包括的なテストワークフローを提供する。個別機能のみ必要な場合は各専門 skill を直接参照。"
+when_to_use: "フル E2E テストワークフロー (計画→実行→エビデンス→品質→レポート) を一貫して行うとき / pytest-playwright 拡張 fixture (pwk_*) の全体像を把握したいとき / init_project.sh でプロジェクトをセットアップするとき。Triggers: 'pytest-playwright', 'pwk_role', 'pwk_evidence', 'init_project', 'シナリオテスト一式', 'フル E2E'"
 allowed-tools:
   - Read
   - Bash(uv *)
@@ -13,6 +13,21 @@ allowed-tools:
 # Playwright シナリオテスト Skill (v0.5.0)
 
 Web アプリの E2E シナリオを **理論ベース** で計画し、**pytest-playwright** 上で実行、**動画 + Markdown レポート + accessibility / web vitals** を自動収集する一式の Skill。
+
+## 機能別 Skill
+
+個別機能のみ必要な場合は、以下の専門 skill を直接参照:
+
+| Skill | 機能 |
+|---|---|
+| `/ndf:playwright-test-planning` | テスト計画 (HTSM / page role / チェックリスト) |
+| `/ndf:playwright-evidence` | エビデンス収集 (video / trace / screenshot) |
+| `/ndf:playwright-overlay` | 動画装飾 (字幕 + カーソル) |
+| `/ndf:playwright-quality` | 品質計測 (accessibility / Web Vitals / body_check) |
+| `/ndf:playwright-report` | レポート生成 + Drive 共有 |
+| `/ndf:playwright-kit-ops` | スクリプト実行 (init_project / スキャン / アップロード) |
+
+以下は全機能を組み合わせたフルワークフローの案内。
 
 **v0.5.0 の方針**: 本 Skill は「テストを書き始めるためのスキャフォルダ」であり、`scripts/init_project.sh` で利用者プロジェクトに **all-in-one ディレクトリ** を埋め込んだ後は、Skill ディレクトリの存在に依存せず単独で動作する (CI / 別マシン / Skill 非導入のメンバー環境でも完結)。
 
@@ -55,11 +70,8 @@ playwright-scenario-test/   ← Skill 自体 (この Skill ディレクトリ)
 │   ├── video.py            ← webm → mp4 変換
 │   └── config.py           ← scenario.config.yaml ローダ
 ├── docs/                   ← テスト方法論 (HTSM / ISTQB / FEW HICCUPPS)
-├── scripts/
-│   ├── init_project.sh     ← all-in-one 初期化 (rsync ベース)
-│   ├── init_project.bat    ← 同 Windows 版 (xcopy ベース)
-│   ├── classify_page_role.py / run_a11y_scan.py / check_cwv.py / record_scenario.py
-│   └── upload_evidence.py / gdrive_upload_dir.py / build_gdoc_with_drive_links.py
+├── (scripts/ は playwright-kit-ops/ skill に移動)
+│   └── → /ndf:playwright-kit-ops を参照
 └── templates/              ← 利用者プロジェクト用雛形
     ├── pyproject.toml.runtime  — runtime 用 pyproject (dev 用 deps を排除)
     ├── runtime-gitignore       — .venv / __pycache__ / reports/
@@ -226,7 +238,7 @@ pytest 標準と組み合わせて使える:
 ```
 [A] 対象 URL を渡される
        │
-[B] page role を判定                       scripts/classify_page_role.py --url <URL>
+[B] page role を判定                       playwright-kit-ops/scripts/classify_page_role.py --url <URL>
        ▼
 [C] 該当 checklist を開く                   docs/checklists/checklist-{role}.md
        │     全項目を「適用」or「不適用 (理由付き)」で判定
@@ -250,11 +262,7 @@ pytest 標準と組み合わせて使える:
 
 | Script | 用途 |
 |---|---|
-| `scripts/classify_page_role.py --url <URL>` | a11y tree + URL pattern + role 集計から page role 推定 |
-| `scripts/record_scenario.py <URL>` | Playwright codegen を起動し操作を Python コードで取得 |
-| `scripts/run_a11y_scan.py --url <URL>` | axe-core 単発スキャン |
-| `scripts/check_cwv.py --url <URL>` | Web Vitals (LCP/CLS/TTFB) 単発計測 |
-| `scripts/upload_evidence.py <file> --kind trace --public` | Drive アップロード + Playwright Trace Viewer URL 生成 |
+| → `/ndf:playwright-kit-ops` | スクリプト群は playwright-kit-ops skill に移動。詳細はそちらを参照 |
 
 ## docs/ 配下 (理論ベース知識)
 

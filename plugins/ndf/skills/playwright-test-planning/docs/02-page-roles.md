@@ -166,7 +166,7 @@
 
 ## 識別の自動化
 
-`scripts/classify_page_role.py` は次のヒューリスティックで role を推定する:
+`playwright-kit-ops/scripts/classify_page_role.py` は次のヒューリスティックで role を推定する:
 
 ```
 入力: target_url, [既ログイン storage_state]

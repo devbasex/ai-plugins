@@ -94,7 +94,7 @@ addopts = "--tracing retain-on-failure --video retain-on-failure --screenshot on
 
 ### trace.zip の閲覧 URL 化
 
-`scripts/upload_evidence.py --kind trace --public` が trace.zip を Google Drive に
+`playwright-kit-ops/scripts/upload_evidence.py --kind trace --public` が trace.zip を Google Drive に
 アップロードし、`https://trace.playwright.dev/?trace=<URL>` 形式の閲覧 URL を
 生成する (HAR / video の Drive アップロードも同スクリプトで可能、`--kind har/video`)。
 bug report に必ずこの URL を貼る (zip 単体だと開発者の手元で展開が必要)。

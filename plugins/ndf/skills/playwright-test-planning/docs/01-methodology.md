@@ -105,7 +105,7 @@ James Bach の **Heuristic Test Strategy Model** (v6.3) は、テスト戦略を
        │ Playwright: page.accessibility.snapshot() or page.evaluate(getRoleSummary)
        ▼
 [2] page role を判定 → docs/02-page-roles.md の識別ヒューリスティック
-       │ scripts/classify_page_role.py が補助 (DOM の role 集計)
+       │ playwright-kit-ops/scripts/classify_page_role.py が補助 (DOM の role 集計)
        ▼
 [3] 該当 checklist を開く → docs/checklists/checklist-{role}.md
        │ 全項目を「適用」または「不適用 (理由付き)」と判定

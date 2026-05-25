@@ -1,7 +1,7 @@
 {
   "name": "ndf",
-  "version": "4.7.5",
-  "description": "Integrated plugin with 8 specialized agents (model-tiered: opus/sonnet/haiku), 39 skills including official mcp-builder, on-demand loader for Anthropic official skills, generic workflow/principle skills, skill usage statistics, pytest-playwright based scenario E2E testing (v0.5.0: BREAKING — package renamed scenario_test → playwright_kit, fixtures/CLI ndf_*/--ndf-* → pwk_*/--pwk-*, all-in-one runtime layout enabling Skill-independent operation via init_project.sh + run.sh, accessibility/web vitals autouse, overlay (formerly HUD), report.md, Drive integration, body_check autouse enabled by default to detect server-rendered PHP/SSR errors leaked into HTML), Google Drive/Chat integration, and Codex CLI integration via /ndf:codex skill. Transcript retention is automatically kept at >= 90 days. BREAKING (v4.0.0): Codex MCP server is removed (use /ndf:codex skill); legacy CLAUDE.ndf.md detection hook and /ndf:cleanup skill are removed (obsolete since v3.0.0). Serena MCP is a separate plugin (mcp-serena).",
+  "version": "4.8.0",
+  "description": "Integrated plugin with 8 specialized agents (model-tiered: opus/sonnet/haiku), 45 skills including official mcp-builder, on-demand loader for Anthropic official skills, generic workflow/principle skills, skill usage statistics, pytest-playwright E2E testing split into 6 focused skills (test-planning, evidence, overlay, quality, report, kit-ops) + orchestrator, Google Drive/Chat integration, and Codex CLI integration via /ndf:codex skill. Transcript retention is automatically kept at >= 90 days. Serena MCP is a separate plugin (mcp-serena).",
   "author": {
     "name": "takemi-ohama",
     "url": "https://github.com/takemi-ohama"
@@ -61,6 +61,12 @@
     "./skills/browser-test",
     "./skills/codex",
     "./skills/skill-stats",
+    "./skills/playwright-test-planning",
+    "./skills/playwright-evidence",
+    "./skills/playwright-overlay",
+    "./skills/playwright-quality",
+    "./skills/playwright-report",
+    "./skills/playwright-kit-ops",
     "./skills/playwright-scenario-test",
     "./skills/google-drive",
     "./skills/google-chat",
