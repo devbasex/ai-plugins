@@ -42,35 +42,8 @@ report:
   phase_labels: {}
 ```
 
-## Google Drive アップロード
-
-### テスト実行時に自動アップロード
-
-```bash
-./scenario-test/run.sh --pwk-drive-folder=<FOLDER_ID>
-```
-
-`--pwk-drive-folder` を指定すると、テスト終了後に report.md + エビデンスファイルが Drive にアップロードされる。
-
-### 手動アップロード
-
-```bash
-# エビデンスファイルを Drive にアップロード
-python playwright-kit-ops/scripts/upload_evidence.py <file> --kind trace
-
-# ディレクトリごとアップロード
-python playwright-kit-ops/scripts/gdrive_upload_dir.py reports/<run-id>/ --folder-id <FOLDER_ID>
-
-# report.md を Google Doc として変換・アップロード
-python playwright-kit-ops/scripts/upload_md_as_gdoc.py reports/<run-id>/report.md
-
-# Google Doc にエビデンスの Drive リンクを埋め込み
-python playwright-kit-ops/scripts/build_gdoc_with_drive_links.py <doc-id> reports/<run-id>/
-```
-
 ## 関連 Skill
 
-- `/ndf:playwright-evidence` — 基本エビデンス収集
-- `/ndf:playwright-quality` — レポートに含まれる品質計測
-- `/ndf:google-drive` — Google Drive 操作全般
+- `/ndf:playwright-execution` — テスト実行 + エビデンス収集
+- `/ndf:playwright-kit-ops` — エビデンスアップロードツール (Drive 連携が必要な場合)
 - `/ndf:playwright-scenario-test` — 全機能を統括したフルワークフロー
