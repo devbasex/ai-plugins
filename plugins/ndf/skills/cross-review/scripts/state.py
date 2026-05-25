@@ -97,16 +97,38 @@ def _tmp_dir(workspace: str | None = None) -> pathlib.Path:
     return d
 
 
+def _resolve_tmp_dir(pr: int | None = None) -> pathlib.Path:
+    """state.json に保存された tmp_dir を優先し、_tmp_dir() をフォールバックとする。
+
+    init 時に確定した tmp_dir を再利用することで、CWD や環境変数の変化による
+    パス不一致リスクを回避する。
+    """
+    if pr is not None:
+        # state.json から tmp_dir を読み出す (存在する場合)
+        candidate = _tmp_dir() / f"cross-review-pr{pr}-state.json"
+        if candidate.exists():
+            try:
+                st = json.loads(candidate.read_text(encoding="utf-8"))
+                saved = st.get("tmp_dir")
+                if saved:
+                    p = pathlib.Path(saved)
+                    p.mkdir(parents=True, exist_ok=True)
+                    return p
+            except (OSError, json.JSONDecodeError):
+                pass
+    return _tmp_dir()
+
+
 def _state_path(pr: int) -> pathlib.Path:
-    return _tmp_dir() / f"cross-review-pr{pr}-state.json"
+    return _resolve_tmp_dir(pr) / f"cross-review-pr{pr}-state.json"
 
 
 def _payload_path(agent: str, pr: int, round_: int) -> pathlib.Path:
-    return _tmp_dir() / f"{agent}-review-pr{pr}-round{round_}-payload.json"
+    return _resolve_tmp_dir(pr) / f"{agent}-review-pr{pr}-round{round_}-payload.json"
 
 
 def _existing_comments_path(pr: int) -> pathlib.Path:
-    return _tmp_dir() / f"cross-review-pr{pr}-existing-comments.txt"
+    return _resolve_tmp_dir(pr) / f"cross-review-pr{pr}-existing-comments.txt"
 
 
 def _now() -> str:
@@ -277,6 +299,11 @@ def cmd_init(args: argparse.Namespace) -> None:
             print(f'PR={st["current_pr"]}')
             print(f'WORKTREE={shlex.quote(str(wt))}')
             print(f'TMP_DIR={shlex.quote(str(tmp_dir))}')
+            print(f'REPO={shlex.quote(str(st.get("repo", "")))}')
+            print(f'HEAD_BRANCH={shlex.quote(str(st.get("head_branch", "")))}')
+            print(f'BASE_BRANCH={shlex.quote(str(st.get("base_branch", "")))}')
+            print(f"IS_OWN_PR={'1' if st.get('is_own_pr') else '0'}")
+            print(f"EVENT_DOWNGRADE={'1' if st.get('event_downgrade') else '0'}")
             print(f"RESUMED=1")
             return
 
@@ -404,7 +431,7 @@ def cmd_read_result(args: argparse.Namespace) -> None:
     """Step 2.5 — codex/gemini の result.json を state にマージ。"""
     agent = args.agent
     pr = args.pr
-    rfile = pathlib.Path(args.file or _tmp_dir() / f"{agent}-review-pr{pr}-result.json")
+    rfile = pathlib.Path(args.file or _resolve_tmp_dir(pr) / f"{agent}-review-pr{pr}-result.json")
     if not rfile.exists() or rfile.stat().st_size == 0:
         die(f"{agent}: result 未生成 ({rfile})")
 
@@ -585,7 +612,7 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     # 2, 3 は PR 番号だけで命名されているため、別 round / 別リポジトリの
     # 古い結果を拾わないよう mtime と (あれば) JSON 内の `pr` で検証する。
     explicit = pathlib.Path(args.file) if args.file else None
-    canonical_path = _tmp_dir() / f"fix-pr{pr}-result.json"
+    canonical_path = _resolve_tmp_dir(pr) / f"fix-pr{pr}-result.json"
     legacy_tmp_path = pathlib.Path(f"/tmp/fix-pr{pr}-result.json")
     # (path, is_canonical) のタプル: 正規パス (canonical) の parse 失敗は die(code=3) する
     fallback_candidates: list[tuple[pathlib.Path, bool]] = [

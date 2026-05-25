@@ -17,24 +17,25 @@ FAIL_COUNT=0
 
 # 1. インラインコメント (diff の特定行に紐づく)
 # 本文全体を保持する。改行は \n エスケープして 1 行に収める。
-if ! gh api "repos/${REPO}/pulls/${PR}/comments" --paginate --jq \
-  '.[] | "\(.path // "?"):\(.line // .original_line // "?") [\(.user.login)] \(.body // "" | gsub("\n"; "\\n") | gsub("```"; "` ` `"))"'; then
+# gh api --jq は内部で jq -r 相当だが、環境差を吸収するため明示的に jq -r へパイプする。
+if ! gh api "repos/${REPO}/pulls/${PR}/comments" --paginate -q \
+  | jq -r '.[] | "\(.path // "?"):\(.line // .original_line // "?") [\(.user.login)] \(.body // "" | gsub("\n"; "\\n") | gsub("```"; "` ` `"))"'; then
   echo "WARNING: インラインコメントの取得に失敗しました (repos/${REPO}/pulls/${PR}/comments)" >&2
   (( FAIL_COUNT += 1 )) || true
 fi
 
 # 2. レビュー body (CHANGES_REQUESTED / COMMENTED 等の総評)
 # 本文全体を保持する。改行は \n エスケープして 1 行に収める。
-if ! gh api "repos/${REPO}/pulls/${PR}/reviews" --paginate --jq \
-  '.[] | select(.body != null and .body != "") | "[REVIEW-BODY] [\(.user.login)] state=\(.state) \(.body | gsub("\n"; "\\n") | gsub("```"; "` ` `"))"'; then
+if ! gh api "repos/${REPO}/pulls/${PR}/reviews" --paginate -q \
+  | jq -r '.[] | select(.body != null and .body != "") | "[REVIEW-BODY] [\(.user.login)] state=\(.state) \(.body | gsub("\n"; "\\n") | gsub("```"; "` ` `"))"'; then
   echo "WARNING: レビュー body の取得に失敗しました (repos/${REPO}/pulls/${PR}/reviews)" >&2
   (( FAIL_COUNT += 1 )) || true
 fi
 
 # 3. PR レベルコメント (Conversation タブの通常コメント)
 # 本文全体を保持する。改行は \n エスケープして 1 行に収める。
-if ! gh api "repos/${REPO}/issues/${PR}/comments" --paginate --jq \
-  '.[] | "[PR-COMMENT] [\(.user.login)] \(.body // "" | gsub("\n"; "\\n") | gsub("```"; "` ` `"))"'; then
+if ! gh api "repos/${REPO}/issues/${PR}/comments" --paginate -q \
+  | jq -r '.[] | "[PR-COMMENT] [\(.user.login)] \(.body // "" | gsub("\n"; "\\n") | gsub("```"; "` ` `"))"'; then
   echo "WARNING: PR レベルコメントの取得に失敗しました (repos/${REPO}/issues/${PR}/comments)" >&2
   (( FAIL_COUNT += 1 )) || true
 fi
