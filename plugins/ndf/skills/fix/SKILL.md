@@ -181,8 +181,8 @@ review指摘とCIエラーは**同じPRで一緒に修正**する:
 
 ```bash
 # インラインコメント / レビュー body / PR レベルコメントを一括取得
-PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-"$PLUGIN_DIR/skills/fix/scripts/fetch-pr-comments.sh" <owner/repo> <pr_number>
+FETCH_SCRIPT="$CLAUDE_PLUGIN_ROOT/skills/fix/scripts/fetch-pr-comments.sh"
+"$FETCH_SCRIPT" <owner/repo> <pr_number>
 ```
 
 ### コメントへの返信
