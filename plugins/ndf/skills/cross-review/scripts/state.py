@@ -105,7 +105,8 @@ def _resolve_tmp_dir(pr: int | None = None) -> pathlib.Path:
 
     注意: この関数は成果物パスの解決にのみ使用する。state ファイル自体のパス解決
     には _tmp_dir() を直接使うこと（循環参照を防ぐため）。
-    ディレクトリ作成の副作用は持たない — 必要に応じて利用側で mkdir すること。
+    副作用: フォールバック時に _tmp_dir() を呼ぶため、ディレクトリ作成 (mkdir) が
+    発生する可能性がある。
     """
     if pr is not None:
         # state.json から tmp_dir を読み出す (存在する場合)
@@ -292,8 +293,15 @@ def cmd_init(args: argparse.Namespace) -> None:
     # worktree ディレクトリが副作用で作成され exists() が常に true になる。
     # そのため _tmp_dir() 呼び出しは worktree 作成/確認の後に行う。
 
-    # 再開チェック: state ファイルの存在確認は _tmp_dir() を使わず直接パスを組む
-    resume_state_file = pathlib.Path(worktree) / ".cross_review" / f"cross-review-pr{pr}-state.json"
+    # 再開チェック: CROSS_REVIEW_TMP_DIR が設定されている場合はそちらを優先し、
+    # 未設定なら <worktree>/.cross_review/ を直接パスとして組む。
+    # _tmp_dir() は mkdir 副作用があるため使用せず、パス解決のみ行う。
+    env_tmp = os.environ.get("CROSS_REVIEW_TMP_DIR")
+    if env_tmp:
+        resume_dir = pathlib.Path(env_tmp).resolve()
+    else:
+        resume_dir = pathlib.Path(worktree) / ".cross_review"
+    resume_state_file = resume_dir / f"cross-review-pr{pr}-state.json"
     if resume_state_file.exists():
         st = json.loads(resume_state_file.read_text(encoding="utf-8"))
         if st.get("final") is None:
