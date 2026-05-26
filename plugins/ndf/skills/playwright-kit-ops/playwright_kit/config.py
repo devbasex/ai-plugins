@@ -63,7 +63,7 @@ class BrowserConfig:
     @classmethod
     def from_raw(cls, raw: dict[str, Any]) -> "BrowserConfig":
         base = cls()
-        mode_raw = str(raw.get("mode", base.mode)).lower()
+        mode_raw = str(raw.get("mode") or base.mode).lower()
         if mode_raw not in BROWSER_MODES:
             raise ValueError(
                 f"browser.mode は {BROWSER_MODES} のいずれかを指定してください "

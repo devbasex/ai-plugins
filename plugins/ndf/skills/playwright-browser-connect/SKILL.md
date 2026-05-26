@@ -98,6 +98,8 @@ Step 1 のコマンドにフラグを追加:
 
 > **Note**: `--remote-allow-origins=*` は Chrome 106+ で利用可能。セキュリティ上、信頼できるネットワーク内での利用に限定すること。
 
+> **Important**: Chrome はデフォルトで `127.0.0.1` にバインドするため、`--remote-allow-origins=*` だけでは WSL2/Docker から接続できない場合がある。対処方法は「ネットワーク別接続ガイド」セクションを参照。
+
 **Step 3: WSL2 .wslconfig (NAT mode 確認)**
 
 ```ini
@@ -255,6 +257,71 @@ CDP 接続テストを手動確認する場合:
 # エンドポイントの疎通確認
 curl -s http://host-gateway:9222/json/version | python3 -m json.tool
 ```
+
+## ネットワーク別接続ガイド
+
+Chrome はデフォルトで `127.0.0.1` (ループバック) にバインドするため、同一ホストからしか CDP エンドポイントにアクセスできない。Docker コンテナや WSL2 からリモート接続する場合は、以下のいずれかの方法でネットワーク到達性を確保する必要がある。
+
+### 方法 1: `--remote-debugging-address=0.0.0.0` (推奨)
+
+Chrome 起動時に全インターフェースでリッスンさせる。最もシンプルな方法。
+
+```bash
+# Linux / macOS
+google-chrome \
+  --remote-debugging-port=9222 \
+  --remote-debugging-address=0.0.0.0 \
+  --remote-allow-origins=*
+```
+
+```powershell
+# Windows PowerShell
+& "C:\Program Files\Google\Chrome\Application\chrome.exe" `
+  --remote-debugging-port=9222 `
+  --remote-debugging-address=0.0.0.0 `
+  --remote-allow-origins=*
+```
+
+> **Security**: `0.0.0.0` はすべてのネットワークインターフェースに公開するため、信頼できるネットワーク内でのみ使用すること。ファイアウォールでポート 9222 へのアクセスを制限することを推奨。
+
+### 方法 2: socat によるポートフォワード (Linux)
+
+Chrome を `127.0.0.1` バインドのまま維持し、socat でリモートからのアクセスを中継する。
+
+```bash
+# Chrome は通常どおり起動 (127.0.0.1 バインド)
+google-chrome --remote-debugging-port=9222 --remote-allow-origins=*
+
+# 別ターミナルで socat を起動
+socat TCP-LISTEN:9222,bind=0.0.0.0,reuseaddr,fork TCP:127.0.0.1:9222
+```
+
+### 方法 3: netsh portproxy (Windows → WSL2)
+
+Windows ホストの Chrome を WSL2 からアクセスする場合、Windows 側でポートフォワードを設定する。
+
+```powershell
+# 管理者権限の PowerShell で実行
+netsh interface portproxy add v4tov4 `
+  listenaddress=0.0.0.0 listenport=9222 `
+  connectaddress=127.0.0.1 connectport=9222
+
+# 確認
+netsh interface portproxy show all
+
+# 削除する場合
+netsh interface portproxy delete v4tov4 listenaddress=0.0.0.0 listenport=9222
+```
+
+### 接続先の早見表
+
+| 実行環境 | Chrome の場所 | 推奨方法 | CDP エンドポイント |
+|---|---|---|---|
+| ローカル (同一ホスト) | 同一ホスト | 設定不要 | `http://localhost:9222` |
+| Docker → ホスト (macOS) | macOS ホスト | 方法 1 | `http://host.docker.internal:9222` |
+| Docker → ホスト (Linux) | Linux ホスト | 方法 1 or 2 | `http://host.docker.internal:9222` or `http://172.17.0.1:9222` |
+| Docker (WSL2) → Windows | Windows ホスト | 方法 1 or 3 | `http://host-gateway:9222` |
+| WSL2 → Windows | Windows ホスト | 方法 1 or 3 | `http://$(cat /etc/resolv.conf \| grep nameserver \| awk '{print $2}'):9222` |
 
 ## トラブルシュート
 
