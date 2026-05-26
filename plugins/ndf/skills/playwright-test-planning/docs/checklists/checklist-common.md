@@ -9,7 +9,7 @@
 
 | # | 観点 | 技法 | oracle | 検査方法 |
 |---|------|------|--------|---------|
-| C1.1 | axe-core 違反 0 件 | Automatic Checking | Statutes (WCAG) | `scripts/run_a11y_scan.py {url}` (axe-playwright-python). タグ `wcag2a`, `wcag2aa`, `wcag21aa`, `wcag22aa` |
+| C1.1 | axe-core 違反 0 件 | Automatic Checking | Statutes (WCAG) | `playwright-kit-ops/scripts/run_a11y_scan.py {url}` (axe-playwright-python). タグ `wcag2a`, `wcag2aa`, `wcag21aa`, `wcag22aa` |
 | C1.2 | キーボードのみで全主要操作可能 | User Testing | Statutes (WCAG 2.1.1) | Tab で操作要素を順に踏破。手順 YAML で記録 |
 | C1.3 | フォーカス可視性 | User Testing | Statutes (WCAG 2.4.7, 2.4.11 New 2.2) | フォーカス時の outline / 背景色変化を確認 |
 | C1.4 | 見出し階層 (h1 単一 / h2 → h3 順) | Automatic | Statutes (WCAG 1.3.1) | `page.locator("h1").count() == 1` + axe `heading-order` |
@@ -26,8 +26,8 @@ LCP / INP / CLS は **field metric** だが、本 Skill では Lab 計測で代�
 
 | # | 観点 | 技法 | oracle | 検査方法 / 閾値 |
 |---|------|------|--------|----------------|
-| C2.1 | LCP ≤ 2.5s | Claims | Claims (web.dev) | `scripts/check_cwv.py --metric lcp` |
-| C2.2 | CLS ≤ 0.1 | Automatic | Claims | `scripts/check_cwv.py --metric cls` |
+| C2.1 | LCP ≤ 2.5s | Claims | Claims (web.dev) | `playwright-kit-ops/scripts/check_cwv.py --metric lcp` |
+| C2.2 | CLS ≤ 0.1 | Automatic | Claims | `playwright-kit-ops/scripts/check_cwv.py --metric cls` |
 | C2.3 | INP ≤ 200ms | User Testing | Claims | INP は field 主体。Lab で `pointer-down → next paint` を計測 |
 | C2.4 | TTFB (server response) ≤ 800ms | Automatic | Performance | `page.expect_response` の経過時間 |
 

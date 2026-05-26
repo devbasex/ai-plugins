@@ -29,3 +29,14 @@ import pytest
 # @pytest.fixture
 # def admin_dashboard_url(pwk_config):
 #     return f"{pwk_config.base_url}/admin/dashboard"
+
+
+def pytest_collection_modifyitems(session, config, items):
+    if not items:
+        import warnings
+
+        warnings.warn(
+            "[pwk] tests/ にテストスクリプトが見つかりません。"
+            "テストスクリプトを作成してから実行してください。",
+            stacklevel=1,
+        )

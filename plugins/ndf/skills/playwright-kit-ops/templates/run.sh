@@ -33,6 +33,7 @@ scenario-test ランタイムランチャ
   --pwk-config <path>          scenario.config.yaml のパス (env PWK_CONFIG でも可)
   --pwk-out-dir <path>         成果物出力先 (default: ./reports/<run-id>/)
   --pwk-no-evidence            HAR / trace / 動画 を OFF
+  --pwk-no-video               動画収集を OFF (デフォルトは全テストで動画 ON)
   --pwk-har-mode {minimal,full,none}
                                HAR 録画モード (default: minimal)
   --pwk-overlay                動画に赤丸カーソル + 字幕 (旧名 HUD) を焼き込む
@@ -83,6 +84,18 @@ fi
 
 # --- 3) pytest 実行 ------------------------------------------------
 cd "$RUNTIME_DIR"
+
+# --pwk-no-video / --pwk-no-evidence / --video=* が引数に含まれていなければ
+# --video=on をデフォルト追加。pytest_plugin.py 側でもデフォルト注入するが、
+# run.sh 経由の場合は明示的に渡すことで --video の優先度を確保する。
+VIDEO_FLAG="--video=on"
+for arg in "$@"; do
+  case "$arg" in
+    --pwk-no-video|--pwk-no-evidence|--video|--video=*) VIDEO_FLAG="" ;;
+  esac
+done
+
 exec uv run pytest \
   --pwk-config="${PWK_CONFIG:-./scenario.config.yaml}" \
+  $VIDEO_FLAG \
   "$@"

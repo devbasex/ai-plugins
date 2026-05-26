@@ -75,6 +75,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         ),
     )
     group.addoption(
+        "--pwk-no-video",
+        action="store_true",
+        default=False,
+        help="動画収集を明示的に OFF にする (デフォルトは全テストで動画 ON)",
+    )
+    group.addoption(
         "--pwk-overlay",
         action="store_true",
         default=False,
@@ -135,6 +141,28 @@ def pytest_configure(config: pytest.Config) -> None:
                     setattr(plugin_self, name, fn)
         # session 中で再利用するためにキャッシュする。
         config._pwk_config = cfg  # type: ignore[attr-defined]
+
+    # 動画デフォルト ON (大原則: エビデンス動画を常に取得)
+    # ユーザーが --video を CLI で明示指定した場合はそちらを優先する。
+    # --pwk-no-video 指定時は video='off' に設定する。
+    # --pwk-no-evidence 指定時も video='off' に設定する (全エビデンス OFF)。
+    # pytest-playwright の --video デフォルト値は 'off' であるため、
+    # getoption() の返り値では明示指定の有無を判別できない。
+    # invocation_params.args を走査して明示指定を検出する。
+    try:
+        cli_args = list(config.invocation_params.args)
+        video_explicitly_set = any(
+            a == "--video" or a.startswith("--video=") for a in cli_args
+        )
+        no_video = config.getoption("pwk_no_video", default=False)
+        no_evidence = config.getoption("pwk_no_evidence", default=False)
+        if not video_explicitly_set:
+            if no_video or no_evidence:
+                config.option.video = "off"
+            else:
+                config.option.video = "on"
+    except (ValueError, AttributeError):
+        pass
 
 
 # ---------------------------------------------------------------------------

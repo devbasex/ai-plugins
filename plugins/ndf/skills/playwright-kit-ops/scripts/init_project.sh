@@ -129,7 +129,7 @@ echo "[init] [1/4] playwright_kit / scripts / uv.lock をコピー"
 # rsync -n でも failed to read directory で abort するため)。
 if [[ $DRY_RUN -eq 1 ]]; then
   echo "    rsync $SKILL_DIR/playwright_kit -> $RUNTIME_DIR/playwright_kit"
-  echo "    rsync $SKILL_DIR/scripts        -> $RUNTIME_DIR/scripts"
+  echo "    rsync $SKILL_DIR/scripts          -> $RUNTIME_DIR/scripts"
   echo "    cp    $SKILL_DIR/uv.lock        -> $RUNTIME_DIR/uv.lock"
 else
   RSYNC_OPTS=(-a
@@ -137,7 +137,7 @@ else
     --exclude='reports' --exclude='*.egg-info'
   )
   rsync "${RSYNC_OPTS[@]}" "$SKILL_DIR/playwright_kit" "$RUNTIME_DIR/"
-  rsync "${RSYNC_OPTS[@]}" "$SKILL_DIR/scripts"        "$RUNTIME_DIR/"
+  rsync "${RSYNC_OPTS[@]}" "$SKILL_DIR/scripts"          "$RUNTIME_DIR/"
   cp "$SKILL_DIR/uv.lock" "$RUNTIME_DIR/uv.lock"
 fi
 

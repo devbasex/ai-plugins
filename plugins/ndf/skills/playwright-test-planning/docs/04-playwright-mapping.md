@@ -121,7 +121,7 @@ playwright codegen --save-storage=auth.json example.com
 playwright codegen --load-storage=auth.json example.com
 ```
 
-本 Skill では `scripts/record_scenario.py` がラッパーを提供し、codegen の Python 出力をそのまま pytest テスト関数として利用する。
+本 Skill では `playwright-kit-ops/scripts/record_scenario.py` がラッパーを提供し、codegen の Python 出力をそのまま pytest テスト関数として利用する。
 **「経験で書く」を「録画→生成→pytest テスト」に置換** する。
 
 ### Trace Viewer
@@ -137,7 +137,7 @@ playwright show-trace test-results/<test>/trace.zip
 https://trace.playwright.dev/?trace=<URL>
 ```
 
-bug report に **trace.zip の playwright.dev リンク** を必ず付与する (`scripts/upload_evidence.py --kind trace --public`)。
+bug report に **trace.zip の playwright.dev リンク** を必ず付与する (`playwright-kit-ops/scripts/upload_evidence.py --kind trace --public`)。
 
 ### page.pause()
 
@@ -186,7 +186,7 @@ def measure_lcp(page):
     })""")
 ```
 
-`scripts/check_cwv.py` が LCP/INP/CLS を一括計測.
+`playwright-kit-ops/scripts/check_cwv.py` が LCP/INP/CLS を一括計測.
 
 ### モバイル / メディア
 

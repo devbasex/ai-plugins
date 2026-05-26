@@ -33,7 +33,7 @@ AI/人間どちらが計画書を書く場合も、まず該当 page role のチ
 ```
 1. 対象 URL を見て page_role を判定
    → docs/02-page-roles.md の識別ヒューリスティックを使用
-   → スクリプト: scripts/classify_page_role.py
+   → スクリプト: playwright-kit-ops/scripts/classify_page_role.py
 
 2. 該当 role の checklist を開く
    → docs/checklists/checklist-{role}.md を全項目走査
