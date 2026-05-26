@@ -1,5 +1,31 @@
 # NDF Plugin CHANGELOG
 
+### v4.10.0 (playwright-browser-connect / playwright-evidence-drive Skill 追加)
+
+`/ndf:playwright-browser-connect` と `/ndf:playwright-evidence-drive` を新規 Skill
+として追加。CDP リモートブラウザ接続と Google Drive エビデンスアーカイブを
+playwright-scenario-test エコシステムから独立した専門 Skill に分離。
+
+- **新規 Skill `playwright-browser-connect`**:
+  - `scenario.config.yaml` の `browser.mode: cdp-remote` で既存 Chrome に
+    CDP (Chrome DevTools Protocol) 接続するワークフローを提供
+  - `conftest.py.template` に browser fixture を追加 (mode 切り替え)
+  - `config.py` に `BrowserConfig` dataclass を追加
+- **新規 Skill `playwright-evidence-drive`**:
+  - テスト実行後のエビデンス (video/trace/screenshot/HAR) を Google Drive に
+    自動アーカイブする手順を提供
+  - 認証は `ndf:google-auth` に委譲
+- **conftest.py.template の改善** (PR #19 クロスレビュー対応):
+  - `browser_type_launch_args` を browser fixture の依存に追加し、
+    `--headed` / `slow_mo` / `channel` 等が local モードで反映されるよう修正
+  - CDP 接続時に Chromium 以外のブラウザが選択された場合の fail-fast チェックを追加
+  - 変数名 `b` → `browser` に改名 (可読性向上)
+- **config.py の修正** (PR #19 クロスレビュー対応):
+  - `BrowserConfig.cdp_endpoint` の既定値を `ws://localhost:9222` →
+    `http://localhost:9222` に変更 (Playwright の `connect_over_cdp()` は
+    HTTP endpoint から `/json/version` 経由で WebSocket URL を自動解決する)
+- Skills: 44個 → **46個**
+
 ### v4.7.6 (fix/review-pr-comments: PRコメント取得を3ソース対応に拡張)
 
 PRレビューコメント取得が review body / PR レベルコメントを含む3ソースに対応。

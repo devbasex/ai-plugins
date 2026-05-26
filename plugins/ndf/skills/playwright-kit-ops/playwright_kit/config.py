@@ -58,7 +58,7 @@ BROWSER_MODES: tuple[BrowserMode, ...] = ("local", "cdp-remote")
 @dataclass
 class BrowserConfig:
     mode: BrowserMode = "local"
-    cdp_endpoint: str = "ws://localhost:9222"
+    cdp_endpoint: str = "http://localhost:9222"
 
     @classmethod
     def from_raw(cls, raw: dict[str, Any]) -> "BrowserConfig":
@@ -72,7 +72,7 @@ class BrowserConfig:
         mode: BrowserMode = mode_raw  # type: ignore[assignment]
         return cls(
             mode=mode,
-            cdp_endpoint=str(raw.get("cdp_endpoint", base.cdp_endpoint)),
+            cdp_endpoint=str(raw.get("cdp_endpoint") or base.cdp_endpoint),
         )
 
 

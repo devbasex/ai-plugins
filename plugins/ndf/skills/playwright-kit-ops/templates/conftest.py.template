@@ -39,6 +39,10 @@ def browser(
     pwk_config,
 ) -> Browser:
     browser_cfg = pwk_config.browser
+    # slow_mo: browser_type_launch_args が優先、なければ config の slow_mo_ms
+    _slow_mo = browser_type_launch_args.get(
+        "slow_mo", pwk_config.playwright.slow_mo_ms or None
+    )
     if browser_cfg.mode == "cdp-remote":
         if browser_type.name != "chromium":
             pytest.fail(
@@ -47,13 +51,15 @@ def browser(
             )
         browser = browser_type.connect_over_cdp(
             browser_cfg.cdp_endpoint,
-            slow_mo=browser_type_launch_args.get("slow_mo"),
+            slow_mo=_slow_mo,
         )
         yield browser
         browser.close()
     else:
         launch_args = {**browser_type_launch_args}
         launch_args.setdefault("headless", pwk_config.playwright.headless)
+        if _slow_mo is not None:
+            launch_args.setdefault("slow_mo", _slow_mo)
         browser = browser_type.launch(**launch_args)
         yield browser
         browser.close()

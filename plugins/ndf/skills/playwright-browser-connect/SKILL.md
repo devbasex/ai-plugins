@@ -50,12 +50,12 @@ WSL2 上の Docker コンテナから Windows 側の Chrome GUI を CDP 経由�
 
 ```
 Docker container (playwright)
-  ↓ http://host-gateway:9223
+  ↓ http://host-gateway:9222
 WSL2 host
-  ↓ portproxy or Node proxy
+  ↓ NAT bridge
 Windows host
   ↓ localhost:9222
-Chrome (--remote-debugging-port=9222)
+Chrome (--remote-debugging-port=9222 --remote-allow-origins=*)
 ```
 
 #### セットアップ手順
@@ -66,6 +66,7 @@ Chrome (--remote-debugging-port=9222)
 # Windows PowerShell
 & "C:\Program Files\Google\Chrome\Application\chrome.exe" `
   --remote-debugging-port=9222 `
+  --remote-allow-origins=* `
   --user-data-dir="C:\tmp\chrome-debug"
 ```
 
@@ -74,33 +75,28 @@ Chrome (--remote-debugging-port=9222)
 ```powershell
 # 全 Chrome プロセスを閉じてから
 & "C:\Program Files\Google\Chrome\Application\chrome.exe" `
-  --remote-debugging-port=9222
+  --remote-debugging-port=9222 `
+  --remote-allow-origins=*
 ```
 
-**Step 2: Node.js Proxy (9223 → 9222) を設置**
+**Step 2: `--remote-allow-origins=*` で Host ヘッダ検証を無効化**
 
-Chrome CDP の WebSocket は `Host` ヘッダ検証があるため、直接ポートフォワードでは接続できない。
-Node.js proxy で `Host` を書き換える。
+Chrome CDP の WebSocket は Host ヘッダ検証があるため、リモートからの接続がデフォルトで拒否される。
+Chrome 起動時に `--remote-allow-origins=*` フラグを付けることで、任意の Origin からの接続を許可できる。
 
-```javascript
-// proxy.js (Windows 側に配置)
-const net = require("net");
-const server = net.createServer((client) => {
-  const chrome = net.connect(9222, "127.0.0.1", () => {
-    client.pipe(chrome);
-    chrome.pipe(client);
-  });
-  chrome.on("error", () => client.destroy());
-  client.on("error", () => chrome.destroy());
-});
-server.listen(9223, "0.0.0.0", () => {
-  console.log("CDP proxy listening on 0.0.0.0:9223 → 127.0.0.1:9222");
-});
-```
+Step 1 のコマンドにフラグを追加:
 
 ```powershell
-node proxy.js
+# Windows PowerShell
+& "C:\Program Files\Google\Chrome\Application\chrome.exe" `
+  --remote-debugging-port=9222 `
+  --remote-allow-origins=* `
+  --user-data-dir="C:\tmp\chrome-debug"
 ```
+
+これにより proxy を設置する必要がなくなり、Docker コンテナから直接 CDP エンドポイントに接続できる。
+
+> **Note**: `--remote-allow-origins=*` は Chrome 106+ で利用可能。セキュリティ上、信頼できるネットワーク内での利用に限定すること。
 
 **Step 3: WSL2 .wslconfig (NAT mode 確認)**
 
@@ -125,13 +121,13 @@ services:
 ```yaml
 browser:
   mode: cdp-remote
-  cdp_endpoint: ${CDP_ENDPOINT:-http://host-gateway:9223}
+  cdp_endpoint: ${CDP_ENDPOINT:-http://host-gateway:9222}
 ```
 
 環境変数で指定する場合:
 
 ```bash
-export CDP_ENDPOINT="http://host-gateway:9223"
+export CDP_ENDPOINT="http://host-gateway:9222"
 ```
 
 ### パターン 3: macOS ホスト Chrome (Docker → CDP)
@@ -145,7 +141,7 @@ Docker container (playwright)
   ↓ http://host.docker.internal:9222
 macOS host
   ↓ localhost:9222
-Chrome (--remote-debugging-port=9222)
+Chrome (--remote-debugging-port=9222 --remote-allow-origins=*)
 ```
 
 #### セットアップ手順
@@ -155,6 +151,7 @@ Chrome (--remote-debugging-port=9222)
 ```bash
 /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
   --remote-debugging-port=9222 \
+  --remote-allow-origins=* \
   --user-data-dir="$HOME/tmp/chrome-debug"
 ```
 
@@ -163,12 +160,14 @@ Chrome (--remote-debugging-port=9222)
 ```bash
 # 全 Chrome プロセスを終了してから
 /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
-  --remote-debugging-port=9222
+  --remote-debugging-port=9222 \
+  --remote-allow-origins=*
 ```
 
 **Step 2: scenario.config.yaml**
 
-macOS Docker Desktop は `host.docker.internal` を標準サポートしているため proxy 不要。
+macOS Docker Desktop は `host.docker.internal` を標準サポートしており、
+`--remote-allow-origins=*` で Host ヘッダ検証を無効化しているため proxy 不要。
 
 ```yaml
 browser:
@@ -199,6 +198,10 @@ def browser(
     - cdp-remote: chromium.connect_over_cdp(endpoint)
     """
     browser_cfg = pwk_config.browser
+    # slow_mo: browser_type_launch_args が優先、なければ config の slow_mo_ms
+    _slow_mo = browser_type_launch_args.get(
+        "slow_mo", pwk_config.playwright.slow_mo_ms or None
+    )
     if browser_cfg.mode == "cdp-remote":
         if browser_type.name != "chromium":
             pytest.fail(
@@ -207,13 +210,15 @@ def browser(
             )
         browser = browser_type.connect_over_cdp(
             browser_cfg.cdp_endpoint,
-            slow_mo=browser_type_launch_args.get("slow_mo"),
+            slow_mo=_slow_mo,
         )
         yield browser
         browser.close()
     else:
         launch_args = {**browser_type_launch_args}
         launch_args.setdefault("headless", pwk_config.playwright.headless)
+        if _slow_mo is not None:
+            launch_args.setdefault("slow_mo", _slow_mo)
         browser = browser_type.launch(**launch_args)
         yield browser
         browser.close()
@@ -248,7 +253,7 @@ CDP 接続テストを手動確認する場合:
 
 ```bash
 # エンドポイントの疎通確認
-curl -s http://host-gateway:9223/json/version | python3 -m json.tool
+curl -s http://host-gateway:9222/json/version | python3 -m json.tool
 ```
 
 ## トラブルシュート
@@ -258,7 +263,7 @@ curl -s http://host-gateway:9223/json/version | python3 -m json.tool
 | 症状 | 原因 | 対策 |
 |---|---|---|
 | `connect_over_cdp` で接続拒否 | Chrome が起動していない / ポートが違う | `curl http://<endpoint>/json/version` で確認 |
-| WebSocket handshake 失敗 | Host ヘッダ不一致 | Node proxy 経由に変更 |
+| WebSocket handshake 失敗 | Host ヘッダ不一致 | Chrome 起動時に `--remote-allow-origins=*` を付与 |
 | ページ操作が異常に遅い | VPN / DNS 解決の遅延 | `extra_hosts` で IP 直指定 |
 
 ### Windows (WSL2) 固有
@@ -267,7 +272,7 @@ curl -s http://host-gateway:9223/json/version | python3 -m json.tool
 |---|---|---|
 | `host-gateway` 解決不能 | Docker Compose の `extra_hosts` 未設定 | `extra_hosts: ["host-gateway:host-gateway"]` を追加 |
 | IPv6 でバインドされる | WSL2 が IPv6 優先 | proxy.js で `0.0.0.0` を明示 |
-| `netsh portproxy` で接続ループ | portproxy の自己参照 | Node proxy に切り替え |
+| `netsh portproxy` で接続ループ | portproxy の自己参照 | `--remote-allow-origins=*` を使い proxy を廃止 |
 | mirrored mode で動かない | mirrored は localhost 共有だが CDP の WS 接続でポート競合 | NAT mode に戻す |
 
 ### macOS 固有
