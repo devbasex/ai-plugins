@@ -28,7 +28,7 @@ browser:
   mode: local
 
   # cdp-remote 時のみ有効
-  cdp_endpoint: ${CDP_ENDPOINT:-ws://localhost:9222}
+  cdp_endpoint: ${CDP_ENDPOINT:-http://localhost:9222}
 ```
 
 ## パターン別セットアップ
@@ -50,7 +50,7 @@ WSL2 上の Docker コンテナから Windows 側の Chrome GUI を CDP 経由�
 
 ```
 Docker container (playwright)
-  ↓ ws://host-gateway:9223
+  ↓ http://host-gateway:9223
 WSL2 host
   ↓ portproxy or Node proxy
 Windows host
@@ -125,13 +125,13 @@ services:
 ```yaml
 browser:
   mode: cdp-remote
-  cdp_endpoint: ${CDP_ENDPOINT:-ws://host-gateway:9223}
+  cdp_endpoint: ${CDP_ENDPOINT:-http://host-gateway:9223}
 ```
 
 環境変数で指定する場合:
 
 ```bash
-export CDP_ENDPOINT="ws://host-gateway:9223"
+export CDP_ENDPOINT="http://host-gateway:9223"
 ```
 
 ### パターン 3: macOS ホスト Chrome (Docker → CDP)
@@ -142,7 +142,7 @@ macOS 上の Docker コンテナから macOS 側の Chrome GUI を CDP 経由で
 
 ```
 Docker container (playwright)
-  ↓ ws://host.docker.internal:9222
+  ↓ http://host.docker.internal:9222
 macOS host
   ↓ localhost:9222
 Chrome (--remote-debugging-port=9222)
@@ -173,7 +173,7 @@ macOS Docker Desktop は `host.docker.internal` を標準サポートしてい�
 ```yaml
 browser:
   mode: cdp-remote
-  cdp_endpoint: ${CDP_ENDPOINT:-ws://host.docker.internal:9222}
+  cdp_endpoint: ${CDP_ENDPOINT:-http://host.docker.internal:9222}
 ```
 
 ## conftest.py への統合
@@ -188,7 +188,11 @@ import pytest
 from playwright.sync_api import Browser, BrowserType
 
 @pytest.fixture(scope="session")
-def browser(browser_type: BrowserType, pwk_config) -> Browser:
+def browser(
+    browser_type: BrowserType,
+    browser_type_launch_args: dict,
+    pwk_config,
+) -> Browser:
     """browser.mode に応じてブラウザ接続を切り替える。
 
     - local: pytest-playwright デフォルト (chromium.launch())
@@ -196,16 +200,43 @@ def browser(browser_type: BrowserType, pwk_config) -> Browser:
     """
     browser_cfg = pwk_config.browser
     if browser_cfg.mode == "cdp-remote":
-        browser = browser_type.connect_over_cdp(browser_cfg.cdp_endpoint)
+        if browser_type.name != "chromium":
+            pytest.fail(
+                f"cdp-remote モードは Chromium 専用です (現在: {browser_type.name})。"
+                "--browser chromium を指定するか、browser.mode を local に変更してください。"
+            )
+        browser = browser_type.connect_over_cdp(
+            browser_cfg.cdp_endpoint,
+            slow_mo=browser_type_launch_args.get("slow_mo"),
+        )
         yield browser
         browser.close()
     else:
-        # local mode: pytest-playwright デフォルトに委譲
-        # (この fixture を定義しないのと同等)
-        browser = browser_type.launch()
+        launch_args = {**browser_type_launch_args}
+        launch_args.setdefault("headless", pwk_config.playwright.headless)
+        browser = browser_type.launch(**launch_args)
         yield browser
         browser.close()
 ```
+
+### CDP モードでの既存セッション再利用
+
+CDP 接続先のブラウザが持つ既存コンテキスト (ログイン済み Session 等) を再利用するには、
+`browser.contexts[0]` を使用する。テンプレートの `conftest.py` には `_cdp_default_context`
+fixture が用意されている。
+
+```python
+@pytest.fixture(scope="session")
+def _cdp_default_context(browser, pwk_config):
+    """CDP モードで既存ブラウザの最初のコンテキストを返す。"""
+    if pwk_config.browser.mode == "cdp-remote" and browser.contexts:
+        return browser.contexts[0]
+    return None
+```
+
+`browser.new_context()` は新規コンテキストを作成するため、既存のログイン Session は引き継がれない。
+既存 Session を再利用したい場合は `_cdp_default_context` fixture を注入して
+`context.new_page()` でページを取得すること。
 
 ## run.sh での利用
 

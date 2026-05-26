@@ -21,9 +21,9 @@
 browser:
   mode: local
   # cdp-remote 時のみ有効。環境変数で切り替え推奨:
-  #   Windows (WSL2 Docker): export CDP_ENDPOINT=ws://host-gateway:9223
-  #   macOS (Docker Desktop): export CDP_ENDPOINT=ws://host.docker.internal:9222
-  # cdp_endpoint: ${CDP_ENDPOINT:-ws://localhost:9222}
+  #   Windows (WSL2 Docker): export CDP_ENDPOINT=http://host-gateway:9223
+  #   macOS (Docker Desktop): export CDP_ENDPOINT=http://host.docker.internal:9222
+  # cdp_endpoint: ${CDP_ENDPOINT:-http://localhost:9222}
 
 # --- 接続先 ----------------------------------------------------------
 target:

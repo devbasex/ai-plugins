@@ -55,19 +55,20 @@ allowed-tools:
 cd scenario-test
 uv run python scripts/upload_evidence.py reports/<run-id>/test_login/trace.zip \
   --kind trace \
-  --parent <FOLDER_ID>
+  --parent-folder-id <FOLDER_ID>
 ```
 
 オプション:
 - `--kind {trace|har|video|any}` — ファイル種別 (拡張子から自動判定も可)
-- `--parent <FOLDER_ID>` — Drive 上のアップロード先フォルダ ID
+- `--parent-folder-id <FOLDER_ID>` — Drive 上のアップロード先フォルダ ID
 - `--public` — anyone/read 権限を付与 (trace viewer URL 生成に必要)
 
 ### ディレクトリ一括アップロード
 
 ```bash
-uv run python scripts/gdrive_upload_dir.py reports/<run-id>/ \
-  --folder-id <FOLDER_ID>
+uv run python scripts/gdrive_upload_dir.py \
+  --local reports/<run-id>/ \
+  --parent <FOLDER_ID>
 ```
 
 ディレクトリ構造を保ったまま Drive にミラーする。
@@ -89,12 +90,13 @@ Markdown を Google Docs 形式に変換してアップロード。
 
 ```bash
 uv run python scripts/build_gdoc_with_drive_links.py \
-  <DRIVE_FOLDER_ID> \
-  reports/<run-id>/ \
-  --parent <OUTPUT_FOLDER_ID>
+  --md reports/<run-id>/report.md \
+  --folder <DRIVE_FOLDER_ID> \
+  --run-id <run-id> \
+  --name "E2E テスト報告書 2026-05-26"
 ```
 
-1. Drive 上の `<run-id>` フォルダからファイル一覧を取得
+1. Drive 上の `<DRIVE_FOLDER_ID>` 配下の `<run-id>` フォルダからファイル一覧を取得
 2. `report.md` 内の相対パスリンク (`./TC-XX/trace.zip`) を Drive URL に書き換え
 3. 書き換え済み Markdown を Google Docs としてアップロード
 
@@ -110,10 +112,10 @@ uv run python scripts/build_gdoc_with_drive_links.py \
   reports/<run-id>/report.md で結果確認
       ↓
 [Drive 一括アップロード]
-  uv run python scripts/gdrive_upload_dir.py reports/<run-id>/ --folder-id <ID>
+  uv run python scripts/gdrive_upload_dir.py --local reports/<run-id>/ --parent <ID>
       ↓
 [Docs 変換 + リンク埋め込み]
-  uv run python scripts/build_gdoc_with_drive_links.py <ID> reports/<run-id>/
+  uv run python scripts/build_gdoc_with_drive_links.py --md reports/<run-id>/report.md --folder <ID> --run-id <run-id> --name "報告書"
       ↓
 [共有]
   Docs URL をチーム (Slack / Google Chat) に共有
@@ -148,7 +150,7 @@ E2E テスト証跡/                              ← 共有ドライブ or チ�
 
 ```bash
 uv run python scripts/upload_evidence.py reports/.../trace.zip \
-  --kind trace --public --parent <FOLDER_ID>
+  --kind trace --public --parent-folder-id <FOLDER_ID>
 ```
 
 出力例:

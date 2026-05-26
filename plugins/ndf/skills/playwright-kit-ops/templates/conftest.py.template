@@ -33,16 +33,46 @@ from playwright.sync_api import Browser, BrowserType
 
 
 @pytest.fixture(scope="session")
-def browser(browser_type: BrowserType, pwk_config) -> Browser:
+def browser(
+    browser_type: BrowserType,
+    browser_type_launch_args: dict,
+    pwk_config,
+) -> Browser:
     browser_cfg = pwk_config.browser
     if browser_cfg.mode == "cdp-remote":
-        b = browser_type.connect_over_cdp(browser_cfg.cdp_endpoint)
-        yield b
-        b.close()
+        if browser_type.name != "chromium":
+            pytest.fail(
+                f"cdp-remote モードは Chromium 専用です (現在: {browser_type.name})。"
+                "--browser chromium を指定するか、browser.mode を local に変更してください。"
+            )
+        browser = browser_type.connect_over_cdp(
+            browser_cfg.cdp_endpoint,
+            slow_mo=browser_type_launch_args.get("slow_mo"),
+        )
+        yield browser
+        browser.close()
     else:
-        b = browser_type.launch(headless=pwk_config.playwright.headless)
-        yield b
-        b.close()
+        launch_args = {**browser_type_launch_args}
+        launch_args.setdefault("headless", pwk_config.playwright.headless)
+        browser = browser_type.launch(**launch_args)
+        yield browser
+        browser.close()
+
+
+@pytest.fixture(scope="session")
+def _cdp_default_context(browser, pwk_config):
+    """CDP モードで既存ブラウザの最初のコンテキスト (ログイン済み Session) を返す。
+
+    CDP 接続先の Chrome が持つ既存 context (browser.contexts[0]) を再利用する。
+    local モードでは None を返す。
+
+    使い方:
+        テスト側で既存セッションを使いたい場合は _cdp_default_context を注入し、
+        context.new_page() でページを取得する。
+    """
+    if pwk_config.browser.mode == "cdp-remote" and browser.contexts:
+        return browser.contexts[0]
+    return None
 
 
 # プロジェクト固有の fixture をここに追加する。例:
