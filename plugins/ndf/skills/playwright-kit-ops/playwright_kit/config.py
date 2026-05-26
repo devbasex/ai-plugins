@@ -49,6 +49,33 @@ def _expand_env(value: Any) -> Any:
     return value
 
 
+# --- ブラウザ接続 ---------------------------------------------------
+
+BrowserMode = Literal["local", "cdp-remote"]
+BROWSER_MODES: tuple[BrowserMode, ...] = ("local", "cdp-remote")
+
+
+@dataclass
+class BrowserConfig:
+    mode: BrowserMode = "local"
+    cdp_endpoint: str = "ws://localhost:9222"
+
+    @classmethod
+    def from_raw(cls, raw: dict[str, Any]) -> "BrowserConfig":
+        base = cls()
+        mode_raw = str(raw.get("mode", base.mode)).lower()
+        if mode_raw not in BROWSER_MODES:
+            raise ValueError(
+                f"browser.mode は {BROWSER_MODES} のいずれかを指定してください "
+                f"(指定値: {mode_raw!r})"
+            )
+        mode: BrowserMode = mode_raw  # type: ignore[assignment]
+        return cls(
+            mode=mode,
+            cdp_endpoint=str(raw.get("cdp_endpoint", base.cdp_endpoint)),
+        )
+
+
 # --- 接続/認証 -------------------------------------------------------
 
 @dataclass
@@ -260,6 +287,7 @@ class Config:
     runner: RunnerConfig
     report: ReportConfig
     config_path: Path  # 設定ファイルの絶対パス（testcases_dir の解決基点）
+    browser: BrowserConfig = field(default_factory=BrowserConfig)
     # docs/checklists/checklist-common.md C8/C9 の境界曖昧さに対応する「除外」設定。
     # console.error / pageerror の本文がいずれかの正規表現にマッチした場合は
     # 集計から除外し FAIL を抑制する。3rd party の既知 warning などを許容するための
@@ -323,6 +351,7 @@ class Config:
             runner=RunnerConfig.from_raw(raw.get("runner") or {}),
             report=_report_from_raw(raw.get("report") or {}),
             config_path=config_path,
+            browser=BrowserConfig.from_raw(raw.get("browser") or {}),
             tolerated_console_errors=list(raw.get("tolerated_console_errors") or []),
             tolerated_page_errors=list(raw.get("tolerated_page_errors") or []),
             accessibility=_accessibility_from_raw(raw.get("accessibility") or {}),

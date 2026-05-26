@@ -11,6 +11,7 @@ fixture を追加する。
 from __future__ import annotations
 
 import pytest
+from playwright.sync_api import Browser, BrowserType
 
 # pytest-playwright の標準 fixture (browser_context_args / page) は plugin 経由で
 # 読み込まれる。playwright_kit 側 fixture (pwk_config / pwk_role_<id> /
@@ -22,6 +23,26 @@ import pytest
 # @pytest.fixture(scope="session")
 # def browser_type_launch_args(browser_type_launch_args):
 #     return {**browser_type_launch_args, "headless": False, "slow_mo": 200}
+
+
+# --- ブラウザ接続 fixture ------------------------------------------------
+# scenario.config.yaml の browser.mode に応じてブラウザ接続を切り替える。
+# - local: pytest-playwright デフォルト (chromium.launch())
+# - cdp-remote: connect_over_cdp() で既存 Chrome に CDP 接続
+#   → /ndf:playwright-browser-connect 参照
+
+
+@pytest.fixture(scope="session")
+def browser(browser_type: BrowserType, pwk_config) -> Browser:
+    browser_cfg = pwk_config.browser
+    if browser_cfg.mode == "cdp-remote":
+        b = browser_type.connect_over_cdp(browser_cfg.cdp_endpoint)
+        yield b
+        b.close()
+    else:
+        b = browser_type.launch(headless=pwk_config.playwright.headless)
+        yield b
+        b.close()
 
 
 # プロジェクト固有の fixture をここに追加する。例:

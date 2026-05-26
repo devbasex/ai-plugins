@@ -96,4 +96,6 @@ reports/<run-id>/
 - `/ndf:playwright-script-creation` — テストスクリプト作成 (実行の前段)
 - `/ndf:playwright-report` — Markdown レポート生成
 - `/ndf:playwright-kit-ops` — スクリプト実行 (init_project / スキャン)
+- `/ndf:playwright-browser-connect` — ブラウザ接続構成 (local / CDP remote)
+- `/ndf:playwright-evidence-drive` — エビデンス Google Drive 保管
 - `/ndf:playwright-scenario-test` — 全機能統括

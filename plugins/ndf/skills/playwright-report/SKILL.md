@@ -42,8 +42,14 @@ report:
   phase_labels: {}
 ```
 
+## Google Drive での共有
+
+レポート + エビデンスを Drive にアップロードしてチーム共有する場合は
+`/ndf:playwright-evidence-drive` を参照。
+
 ## 関連 Skill
 
 - `/ndf:playwright-execution` — テスト実行 + エビデンス収集
-- `/ndf:playwright-kit-ops` — エビデンスアップロードツール (Drive 連携が必要な場合)
+- `/ndf:playwright-evidence-drive` — エビデンス Google Drive 保管・共有
+- `/ndf:playwright-kit-ops` — エビデンスアップロードツール (スクリプト群)
 - `/ndf:playwright-scenario-test` — 全機能を統括したフルワークフロー

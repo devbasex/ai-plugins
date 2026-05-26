@@ -12,6 +12,19 @@
 #   .env ファイルや shell export で環境変数を設定して使用します。
 #   例: export ADMIN_PASSWORD=secret  または  direnv / .env ファイルを活用
 
+# --- ブラウザ接続設定 --------------------------------------------------
+# local: playwright install chromium でインストールしたローカルブラウザ (デフォルト)
+# cdp-remote: Chrome DevTools Protocol 経由でリモートブラウザに接続
+#   → Windows / macOS のホスト Chrome を GUI 付きで操作可能
+#   → ログイン済み Session (Google, AWS, Slack 等) をそのまま再利用
+#   → 詳細は /ndf:playwright-browser-connect を参照
+browser:
+  mode: local
+  # cdp-remote 時のみ有効。環境変数で切り替え推奨:
+  #   Windows (WSL2 Docker): export CDP_ENDPOINT=ws://host-gateway:9223
+  #   macOS (Docker Desktop): export CDP_ENDPOINT=ws://host.docker.internal:9222
+  # cdp_endpoint: ${CDP_ENDPOINT:-ws://localhost:9222}
+
 # --- 接続先 ----------------------------------------------------------
 target:
   base_url: https://example.com
