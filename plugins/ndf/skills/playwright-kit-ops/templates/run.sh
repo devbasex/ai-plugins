@@ -91,7 +91,7 @@ cd "$RUNTIME_DIR"
 VIDEO_FLAG="--video=on"
 for arg in "$@"; do
   case "$arg" in
-    --pwk-no-video|--pwk-no-evidence|--video=*) VIDEO_FLAG="" ;;
+    --pwk-no-video|--pwk-no-evidence|--video|--video=*) VIDEO_FLAG="" ;;
   esac
 done
 
