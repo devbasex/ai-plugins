@@ -57,6 +57,12 @@ BROWSER_MODES: tuple[BrowserMode, ...] = ("local", "cdp-remote")
 
 @dataclass
 class BrowserConfig:
+    """ブラウザ接続設定。
+
+    cdp_endpoint が空文字列や空白のみの場合はデフォルト値
+    ``http://localhost:9222`` にフォールバックする。
+    """
+
     mode: BrowserMode = "local"
     cdp_endpoint: str = "http://localhost:9222"
 
@@ -70,9 +76,14 @@ class BrowserConfig:
                 f"(指定値: {mode_raw!r})"
             )
         mode: BrowserMode = mode_raw  # type: ignore[assignment]
+        # cdp_endpoint: 空文字列・空白のみの場合はデフォルト値にフォールバック
+        cdp_raw = raw.get("cdp_endpoint")
+        cdp_endpoint = str(cdp_raw).strip() if cdp_raw else ""
+        if not cdp_endpoint:
+            cdp_endpoint = base.cdp_endpoint
         return cls(
             mode=mode,
-            cdp_endpoint=str(raw.get("cdp_endpoint") or base.cdp_endpoint),
+            cdp_endpoint=cdp_endpoint,
         )
 
 

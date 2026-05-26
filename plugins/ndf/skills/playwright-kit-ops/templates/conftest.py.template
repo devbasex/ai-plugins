@@ -54,6 +54,8 @@ def browser(
             slow_mo=_slow_mo,
         )
         yield browser
+        # CDP 接続の場合、close() は接続を切断 (disconnect) するだけで、
+        # リモートブラウザ自体は終了しない。次回のテスト実行でも同じ Chrome を再利用できる。
         browser.close()
     else:
         launch_args = {**browser_type_launch_args}
@@ -71,14 +73,40 @@ def _cdp_default_context(browser, pwk_config):
 
     CDP 接続先の Chrome が持つ既存 context (browser.contexts[0]) を再利用する。
     local モードでは None を返す。
-
-    使い方:
-        テスト側で既存セッションを使いたい場合は _cdp_default_context を注入し、
-        context.new_page() でページを取得する。
     """
     if pwk_config.browser.mode == "cdp-remote" and browser.contexts:
         return browser.contexts[0]
     return None
+
+
+@pytest.fixture(scope="session")
+def context(browser, pwk_config, _cdp_default_context):
+    """pytest-playwright の context fixture をオーバーライド。
+
+    cdp-remote モードでは既存コンテキスト (ログイン済み Session) を返し、
+    local モードでは新規コンテキストを作成する (pytest-playwright 既定動作)。
+    """
+    if pwk_config.browser.mode == "cdp-remote" and _cdp_default_context is not None:
+        yield _cdp_default_context
+    else:
+        ctx = browser.new_context()
+        yield ctx
+        ctx.close()
+
+
+@pytest.fixture(scope="session")
+def page(context, pwk_config):
+    """pytest-playwright の page fixture をオーバーライド。
+
+    cdp-remote モードでは既存コンテキストの最初のページを返し (なければ新規作成)、
+    local モードでは新規ページを作成する (pytest-playwright 既定動作)。
+    """
+    if pwk_config.browser.mode == "cdp-remote" and context.pages:
+        yield context.pages[0]
+    else:
+        pg = context.new_page()
+        yield pg
+        pg.close()
 
 
 # プロジェクト固有の fixture をここに追加する。例:

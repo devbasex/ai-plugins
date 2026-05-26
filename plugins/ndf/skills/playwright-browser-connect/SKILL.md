@@ -50,9 +50,9 @@ WSL2 上の Docker コンテナから Windows 側の Chrome GUI を CDP 経由�
 
 ```
 Docker container (playwright)
-  ↓ http://host-gateway:9222
-WSL2 host
-  ↓ NAT bridge
+  ↓ http://host.docker.internal:9222
+Docker Desktop (WSL2 backend)
+  ↓ host.docker.internal → Windows host IP
 Windows host
   ↓ localhost:9222
 Chrome (--remote-debugging-port=9222 --remote-allow-origins=*)
@@ -108,29 +108,27 @@ Step 1 のコマンドにフラグを追加:
 networkingMode=NAT
 ```
 
-**Step 4: Docker Compose で host-gateway を設定**
+**Step 4: scenario.config.yaml**
 
-```yaml
-# docker-compose.yml
-services:
-  app:
-    extra_hosts:
-      - "host-gateway:host-gateway"
-```
-
-**Step 5: scenario.config.yaml**
+Docker Desktop (WSL2 backend) は `host.docker.internal` を標準サポートしている。
 
 ```yaml
 browser:
   mode: cdp-remote
-  cdp_endpoint: ${CDP_ENDPOINT:-http://host-gateway:9222}
+  cdp_endpoint: ${CDP_ENDPOINT:-http://host.docker.internal:9222}
 ```
 
 環境変数で指定する場合:
 
 ```bash
-export CDP_ENDPOINT="http://host-gateway:9222"
+export CDP_ENDPOINT="http://host.docker.internal:9222"
 ```
+
+> **Note (Docker Desktop を使わず WSL2 から直接実行する場合)**: `host.docker.internal` は Docker Desktop 固有の DNS 名のため利用できない。代わりに Windows ホストの IP アドレスを直接指定する:
+> ```bash
+> # WSL2 から Windows ホスト IP を取得
+> export CDP_ENDPOINT="http://$(cat /etc/resolv.conf | grep nameserver | awk '{print $2}'):9222"
+> ```
 
 ### パターン 3: macOS ホスト Chrome (Docker → CDP)
 
@@ -215,6 +213,8 @@ def browser(
             slow_mo=_slow_mo,
         )
         yield browser
+        # CDP 接続の場合、close() は接続を切断 (disconnect) するだけで、
+        # リモートブラウザ自体は終了しない。
         browser.close()
     else:
         launch_args = {**browser_type_launch_args}
@@ -228,22 +228,35 @@ def browser(
 
 ### CDP モードでの既存セッション再利用
 
-CDP 接続先のブラウザが持つ既存コンテキスト (ログイン済み Session 等) を再利用するには、
-`browser.contexts[0]` を使用する。テンプレートの `conftest.py` には `_cdp_default_context`
-fixture が用意されている。
+`cdp-remote` モードでは、テンプレートの `conftest.py` が `context` / `page` fixture を
+自動的にオーバーライドし、CDP 接続先の既存コンテキスト (ログイン済み Session) を返す。
+標準のテストコードは何も変更せずに既存セッションを利用できる。
 
 ```python
 @pytest.fixture(scope="session")
-def _cdp_default_context(browser, pwk_config):
-    """CDP モードで既存ブラウザの最初のコンテキストを返す。"""
-    if pwk_config.browser.mode == "cdp-remote" and browser.contexts:
-        return browser.contexts[0]
-    return None
+def context(browser, pwk_config, _cdp_default_context):
+    """cdp-remote: 既存コンテキスト / local: 新規コンテキスト"""
+    if pwk_config.browser.mode == "cdp-remote" and _cdp_default_context is not None:
+        yield _cdp_default_context
+    else:
+        ctx = browser.new_context()
+        yield ctx
+        ctx.close()
+
+@pytest.fixture(scope="session")
+def page(context, pwk_config):
+    """cdp-remote: 既存ページ / local: 新規ページ"""
+    if pwk_config.browser.mode == "cdp-remote" and context.pages:
+        yield context.pages[0]
+    else:
+        pg = context.new_page()
+        yield pg
+        pg.close()
 ```
 
 `browser.new_context()` は新規コンテキストを作成するため、既存のログイン Session は引き継がれない。
-既存 Session を再利用したい場合は `_cdp_default_context` fixture を注入して
-`context.new_page()` でページを取得すること。
+`cdp-remote` モードでは `context` fixture が自動的に `browser.contexts[0]` を返すため、
+テスト側で特別な対応は不要。
 
 ## run.sh での利用
 
@@ -255,7 +268,7 @@ CDP 接続テストを手動確認する場合:
 
 ```bash
 # エンドポイントの疎通確認
-curl -s http://host-gateway:9222/json/version | python3 -m json.tool
+curl -s http://host.docker.internal:9222/json/version | python3 -m json.tool
 ```
 
 ## ネットワーク別接続ガイド
@@ -320,7 +333,7 @@ netsh interface portproxy delete v4tov4 listenaddress=0.0.0.0 listenport=9222
 | ローカル (同一ホスト) | 同一ホスト | 設定不要 | `http://localhost:9222` |
 | Docker → ホスト (macOS) | macOS ホスト | 方法 1 | `http://host.docker.internal:9222` |
 | Docker → ホスト (Linux) | Linux ホスト | 方法 1 or 2 | `http://host.docker.internal:9222` or `http://172.17.0.1:9222` |
-| Docker (WSL2) → Windows | Windows ホスト | 方法 1 or 3 | `http://host-gateway:9222` |
+| Docker (WSL2) → Windows | Windows ホスト | 方法 1 or 3 | `http://host.docker.internal:9222` |
 | WSL2 → Windows | Windows ホスト | 方法 1 or 3 | `http://$(cat /etc/resolv.conf \| grep nameserver \| awk '{print $2}'):9222` |
 
 ## トラブルシュート
@@ -337,7 +350,7 @@ netsh interface portproxy delete v4tov4 listenaddress=0.0.0.0 listenport=9222
 
 | 症状 | 原因 | 対策 |
 |---|---|---|
-| `host-gateway` 解決不能 | Docker Compose の `extra_hosts` 未設定 | `extra_hosts: ["host-gateway:host-gateway"]` を追加 |
+| `host.docker.internal` 解決不能 | Docker Desktop 未使用 or 古いバージョン | Docker Desktop を使用するか、WSL2 直接の場合は Windows ホスト IP を直接指定 |
 | IPv6 でバインドされる | WSL2 が IPv6 優先 | proxy.js で `0.0.0.0` を明示 |
 | `netsh portproxy` で接続ループ | portproxy の自己参照 | `--remote-allow-origins=*` を使い proxy を廃止 |
 | mirrored mode で動かない | mirrored は localhost 共有だが CDP の WS 接続でポート競合 | NAT mode に戻す |
