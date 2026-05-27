@@ -1,0 +1,459 @@
+diff --git a/issues/PLAN24_monitor-gemini-result-age-fallback.md b/issues/PLAN24_monitor-gemini-result-age-fallback.md
+new file mode 100644
+index 0000000..51d3ac9
+--- /dev/null
++++ b/issues/PLAN24_monitor-gemini-result-age-fallback.md
+@@ -0,0 +1,53 @@
++# PLAN24: monitor.py — gemini result.json 存在 + 経過時間による早期 OK 判定
++
++- 起票日: 2026-05-27
++- 対象 plugin: `ndf` v4.9.0
++- 対象 skill: `ndf:cross-review`
++- 関連 issue: [GitHub #21](https://github.com/devbasex/ai-plugins/issues/21)
++- 関連 plan (先行): PLAN21 (per-agent stall timeout, PR #6 merge 済み)
++
++## 背景・課題
++
++gemini がレビュー完了し result.json を書き込み済みなのに、プロセスがハング
++（MCP サーバー切断待ち等）して exit しないため、`monitor.py` が hard timeout
++(420s) まで待たされて TIMEOUT 扱いになる。
++
++codex には sentinel (`tokens used` in err.log) + result.json で「プロセスが
++生きたまま完了」を検知する機構がある (`monitor.py:452-467`)。gemini にはこの
++機構がなく、result.json が書かれた後もプロセスがハングすると、sentinel なし・
++プロセス alive のまま hard timeout に到達する。
++
++## 再現確認
++
++簡単なプロンプトで gemini CLI を `nohup ... & disown` で起動した結果:
++- gemini は回答を stdout に書き込み完了
++- しかしプロセスは **ゾンビ状態** (`Z <defunct>`) になった
++- `kill -0` はゾンビに対しても成功 → `_pid_alive()` が True を返し続ける
++- 根本原因: Docker コンテナの PID 1 が `tail -f /dev/null` (proper init でない)
++
++## 修正内容
++
++### 1. ゾンビ検出 (`_pid_alive()`)
++`/proc/<pid>/status` の `State:` 行を読み、`Z` (zombie) なら False を返す。
++これにより既存の `not alive → result.json チェック → OK` パスで正しくハンドリング。
++
++### 2. result.json + age fallback
++プロセスが truly alive (ゾンビではないが Node.js event loop stuck 等) の場合のため、
++result.json の mtime が 30 秒以上前なら完了とみなし kill → OK。
++
++### 3. `_kill_pid()` のゾンビ対応
++ゾンビプロセスにはシグナルを送れないためスキップ。
++
++### 4. Docker `--init` の推奨
++ドキュメントにゾンビ蓄積防止策として Docker `--init` フラグの使用を推奨。
++
++## 変更ファイル
++
++1. `plugins/ndf/skills/cross-review/scripts/monitor.py` — ゾンビ検出 + fallback
++2. `plugins/ndf/skills/cross-review/tests/test_monitor_zombie.py` — ゾンビ検出テスト
++3. `plugins/ndf/skills/cross-review/tests/test_monitor_result_age.py` — fallback テスト
++4. `plugins/ndf/skills/cross-review/docs/01-state-and-review.md` — ドキュメント追記
++
++## PR 構成
++
++単一 PR: `fix/PLAN24-monitor-gemini-result-age-fallback` → `main`
+diff --git a/plugins/ndf/skills/cross-review/docs/01-state-and-review.md b/plugins/ndf/skills/cross-review/docs/01-state-and-review.md
+index 0d70272..cf60242 100644
+--- a/plugins/ndf/skills/cross-review/docs/01-state-and-review.md
++++ b/plugins/ndf/skills/cross-review/docs/01-state-and-review.md
+@@ -146,6 +146,7 @@ fi
+ | stall timeout | err.log + stdout.log の合計サイズが一定時間変化しなければ STALLED で中断。既定は **agent 別** (codex=**180s** / gemini=**480s**)。gemini は err.log がほぼ無音のため大きめに取る。codex 側既定は不変。上書き方法: CLI `--stall-timeout` (明示優先) > env `MONITOR_STALL_<AGENT>` (per-agent) > env `MONITOR_STALL` (両 agent 共通) > agent 別ビルトイン |
+ | hard timeout | 既定 **7 分**。`--timeout` or `MONITOR_TIMEOUT` env で上書き |
+ | result.json 存在 | プロセス終了後、result.json が無ければ NO_RESULT (exit 3) |
++| **result.json + age fallback** | sentinel を持たない agent (gemini) 向け。プロセスが alive のまま result.json の mtime が **30 秒以上前**なら完了とみなし kill → OK。gemini が MCP 切断待ち等でハングするケースに対応 (codex は sentinel チェックが先に発火するため影響なし) |
+ | **失敗時 kill** | TIMEOUT / STALLED / EARLY_ERROR / PIDFILE_BAD で返るときは対象プロセスに SIGTERM → 3 秒後 SIGKILL。残存プロセスが後から `gh api` 投稿や result.json 書き込みを行うのを防ぐ |
+ 
+ > ⚠ **罠**: `nohup ... &` でラッパーシェルは即終了し、ハーネスから
+@@ -157,6 +158,11 @@ fi
+ >
+ > ⚠ **sentinel 単独で完了判定しない**: codex がクラッシュすると `tokens used` が
+ > 永遠に出ない。`monitor.py` は sentinel と pidfile/result.json/err.log を併用する。
++>
++> ⚠ **Docker 環境ではゾンビプロセスに注意**: `nohup ... & disown` で起動した
++> プロセスは、終了後にゾンビ化する (PID 1 が proper init でない場合)。
++> `monitor.py` は `/proc/<pid>/status` でゾンビを検出して dead 扱いする。
++> **推奨: Docker 実行時に `--init` フラグを付ける** (tini が PID 1 になりゾンビを reap する)。
+ 
+ ### 2.2 AI への入出力契約（両 launcher 共通）
+ 
+diff --git a/plugins/ndf/skills/cross-review/scripts/monitor.py b/plugins/ndf/skills/cross-review/scripts/monitor.py
+index 8a1be70..c1551f4 100755
+--- a/plugins/ndf/skills/cross-review/scripts/monitor.py
++++ b/plugins/ndf/skills/cross-review/scripts/monitor.py
+@@ -24,7 +24,9 @@ pidfile stale / result.json 不在) を構造化して扱う。
+      STALLED として中断。既定は agent 別 (codex=180s, gemini=480s。gemini は err.log
+      にほぼ進捗を出さないため大きめ)。`--stall-timeout` で CLI 明示、
+      `MONITOR_STALL_<AGENT>` env で per-agent 上書き、`MONITOR_STALL` env で共通上書き可
+-  7. **失敗時 kill**: TIMEOUT / STALLED / EARLY_ERROR (FATAL のみ) / PIDFILE_BAD で
++  7. **result.json + age fallback**: sentinel を持たない agent (gemini) 向け。
++     result.json の mtime が 30 秒以上前なら完了とみなし kill → OK
++  8. **失敗時 kill**: TIMEOUT / STALLED / EARLY_ERROR (FATAL のみ) / PIDFILE_BAD で
+      返るとき、対象プロセスを SIGTERM (3 秒後に SIGKILL) で停止する
+ 
+ Usage:
+@@ -78,6 +80,9 @@ DEFAULT_STALL_AGENT_BUILTIN = {
+     "gemini": 480,   # err.log が静かなため 8 min まで許容
+ }
+ DEFAULT_POLL = 15          # 15 sec — env `MONITOR_POLL` で上書き可
++# result.json が書き込まれた後もプロセスがハングするケース (gemini で観測) の
++# fallback: mtime から RESULT_AGE_GRACE 秒以上経過していれば完了とみなす。
++RESULT_AGE_GRACE = 30
+ # `MONITOR_NO_EARLY_ERROR=1` で EARLY_ERROR 検知を無効化 (escape hatch)
+ DEFAULT_NO_EARLY_ERROR = os.environ.get("MONITOR_NO_EARLY_ERROR", "").lower() in {
+     "1", "true", "yes", "on",
+@@ -277,14 +282,38 @@ def _read_pidfile(p: pathlib.Path) -> Optional[int]:
+ 
+ 
+ def _pid_alive(pid: int) -> bool:
+-    """`kill -0` 相当。0 シグナルを送って例外で判定。"""
++    """`kill -0` + ゾンビ検出。
++
++    `os.kill(pid, 0)` はゾンビプロセスに対しても成功する (PID エントリが
++    残っているため)。Docker without `--init` 環境では orphan プロセスが
++    ゾンビ化して永久に残るため、`/proc/<pid>/status` で State: Z を検出する。
++    """
+     try:
+         os.kill(pid, 0)
+-        return True
+     except (ProcessLookupError, PermissionError):
+         return False
+     except OSError:
+         return False
++    try:
++        status_text = pathlib.Path(f"/proc/{pid}/status").read_text()
++        for line in status_text.splitlines():
++            if line.startswith("State:"):
++                return "Z" not in line
++    except (FileNotFoundError, PermissionError, OSError):
++        pass
++    return True
++
++
++def _is_zombie(pid: int) -> bool:
++    """PID がゾンビかどうか。_pid_alive() とは独立に呼べるユーティリティ。"""
++    try:
++        status_text = pathlib.Path(f"/proc/{pid}/status").read_text()
++        for line in status_text.splitlines():
++            if line.startswith("State:"):
++                return "Z" in line
++    except (FileNotFoundError, PermissionError, OSError):
++        pass
++    return False
+ 
+ 
+ def _kill_pid(pid: int, sigterm_grace: float = 3.0) -> None:
+@@ -293,9 +322,12 @@ def _kill_pid(pid: int, sigterm_grace: float = 3.0) -> None:
+     TIMEOUT / STALLED / EARLY_ERROR で監視を打ち切るとき、対象プロセスが残ったまま
+     だと後から `gh api` 投稿や result.json 書き込みを実行してメインフローと
+     競合する。失敗扱いで返るときは必ず停止させる。
++    ゾンビプロセスにはシグナルを送れないためスキップする。
+     """
+     if pid <= 0:
+         return
++    if _is_zombie(pid):
++        return
+     try:
+         os.kill(pid, signal.SIGTERM)
+     except OSError:
+@@ -466,6 +498,29 @@ def monitor_agent(
+             _emit_log(log_prefix, agent, status)
+             return status
+ 
++        # result.json が書かれた後もプロセスがハングするケース (gemini で観測:
++        # MCP サーバー切断待ち等で exit しない)。sentinel 機構を持たない agent 向け
++        # の fallback: result.json の mtime が RESULT_AGE_GRACE 秒以上前であれば
++        # 完了とみなし、プロセスを kill → OK。
++        if (
++            alive
++            and not status.sentinel_seen
++            and paths.result.exists()
++            and paths.result.stat().st_size > 0
++        ):
++            result_age = time.time() - paths.result.stat().st_mtime
++            if result_age >= RESULT_AGE_GRACE:
++                _kill_pid(pid)
++                status.result_exists = True
++                status.status = "OK"
++                status.exit_code = 0
++                status.detail = (
++                    f"result.json exists for {result_age:.0f}s without process exit; "
++                    f"killed lingering pid {pid}"
++                )
++                _emit_log(log_prefix, agent, status)
++                return status
++
+         if alive and not cmdline_validated:
+             # cmdline 検証は alive 確認後に 1 回だけ。生きていない瞬間に proc/<pid> を読むと
+             # ファイル不在で None 扱いになり判定不能のため。
+diff --git a/plugins/ndf/skills/cross-review/tests/test_monitor_result_age.py b/plugins/ndf/skills/cross-review/tests/test_monitor_result_age.py
+new file mode 100644
+index 0000000..6e92b70
+--- /dev/null
++++ b/plugins/ndf/skills/cross-review/tests/test_monitor_result_age.py
+@@ -0,0 +1,164 @@
++"""monitor.py の result.json + age fallback (RESULT_AGE_GRACE) テスト。
++
++gemini がレビュー完了後にプロセスがハングするケースで、result.json の
++mtime が RESULT_AGE_GRACE 秒以上前なら OK 判定する fallback の検証。
++"""
++from __future__ import annotations
++
++import json
++import os
++import pathlib
++import time
++from unittest import mock
++
++
++def test_result_age_grace_constant(monitor_mod):
++    assert hasattr(monitor_mod, "RESULT_AGE_GRACE")
++    assert monitor_mod.RESULT_AGE_GRACE == 30
++
++
++def test_gemini_result_age_fallback_triggers_ok(monitor_mod, tmp_path):
++    """result.json が RESULT_AGE_GRACE 秒以上前に書かれていれば OK で返る。"""
++    pr = 999
++    agent = "gemini"
++    base = tmp_path / f"{agent}-review-pr{pr}"
++
++    pidfile = pathlib.Path(f"{base}.pid")
++    err_log = pathlib.Path(f"{base}-err.log")
++    stdout_log = pathlib.Path(f"{base}-stdout.log")
++    result = pathlib.Path(f"{base}-result.json")
++
++    pidfile.write_text("12345")
++    err_log.write_text("YOLO mode is enabled.\n")
++    stdout_log.write_text("")
++    result.write_text(json.dumps({"event": "APPROVE", "comments_count": 0}))
++    # mtime を 60 秒前に設定
++    old_mtime = time.time() - 60
++    os.utime(result, (old_mtime, old_mtime))
++
++    kill_called = []
++    poll_count = [0]
++
++    def fake_pid_alive(pid):
++        return True
++
++    def fake_kill_pid(pid, sigterm_grace=3.0):
++        kill_called.append(pid)
++
++    def fake_sleep(s):
++        poll_count[0] += 1
++        if poll_count[0] > 5:
++            raise RuntimeError("too many polls — fallback should have triggered")
++
++    with (
++        mock.patch.object(monitor_mod, "_tmp_dir", return_value=tmp_path),
++        mock.patch.object(monitor_mod, "_pid_alive", side_effect=fake_pid_alive),
++        mock.patch.object(monitor_mod, "_kill_pid", side_effect=fake_kill_pid),
++        mock.patch.object(monitor_mod, "_pid_cmdline_matches", return_value=None),
++        mock.patch("time.sleep", side_effect=fake_sleep),
++    ):
++        st = monitor_mod.monitor_agent(
++            agent=agent, pr=pr,
++            timeout=420, stall_timeout=480, poll=15,
++            require_result=True, no_early_error=True,
++        )
++
++    assert st.status == "OK"
++    assert st.exit_code == 0
++    assert st.result_exists is True
++    assert "result.json exists for" in st.detail
++    assert 12345 in kill_called
++
++
++def test_gemini_result_age_too_young_continues(monitor_mod, tmp_path):
++    """result.json が書かれたばかり (age < RESULT_AGE_GRACE) なら fallback しない。"""
++    pr = 998
++    agent = "gemini"
++    base = tmp_path / f"{agent}-review-pr{pr}"
++
++    pidfile = pathlib.Path(f"{base}.pid")
++    err_log = pathlib.Path(f"{base}-err.log")
++    stdout_log = pathlib.Path(f"{base}-stdout.log")
++    result = pathlib.Path(f"{base}-result.json")
++
++    pidfile.write_text("12346")
++    err_log.write_text("YOLO mode is enabled.\n")
++    stdout_log.write_text("")
++    result.write_text(json.dumps({"event": "APPROVE", "comments_count": 0}))
++    # mtime を 5 秒前に設定 (RESULT_AGE_GRACE=30 未満)
++    recent_mtime = time.time() - 5
++    os.utime(result, (recent_mtime, recent_mtime))
++
++    poll_count = [0]
++
++    def fake_pid_alive(pid):
++        if poll_count[0] >= 2:
++            return False
++        return True
++
++    def fake_sleep(s):
++        poll_count[0] += 1
++
++    with (
++        mock.patch.object(monitor_mod, "_tmp_dir", return_value=tmp_path),
++        mock.patch.object(monitor_mod, "_pid_alive", side_effect=fake_pid_alive),
++        mock.patch.object(monitor_mod, "_kill_pid"),
++        mock.patch.object(monitor_mod, "_pid_cmdline_matches", return_value=None),
++        mock.patch("time.sleep", side_effect=fake_sleep),
++    ):
++        st = monitor_mod.monitor_agent(
++            agent=agent, pr=pr,
++            timeout=420, stall_timeout=480, poll=15,
++            require_result=True, no_early_error=True,
++        )
++
++    # result.json は young なので fallback せず、プロセス終了後の通常 OK になる
++    assert st.status == "OK"
++    assert st.exit_code == 0
++    assert "process exited" in st.detail
++
++
++def test_codex_sentinel_takes_priority(monitor_mod, tmp_path):
++    """codex は sentinel + result.json が先に発火し、age fallback は通らない。"""
++    pr = 997
++    agent = "codex"
++    base = tmp_path / f"{agent}-review-pr{pr}"
++
++    pidfile = pathlib.Path(f"{base}.pid")
++    err_log = pathlib.Path(f"{base}-err.log")
++    stdout_log = pathlib.Path(f"{base}-stdout.log")
++    result = pathlib.Path(f"{base}-result.json")
++
++    pidfile.write_text("12347")
++    err_log.write_text("some output\ntokens used\n")
++    stdout_log.write_text("")
++    result.write_text(json.dumps({"event": "APPROVE", "comments_count": 0}))
++    old_mtime = time.time() - 60
++    os.utime(result, (old_mtime, old_mtime))
++
++    kill_called = []
++
++    def fake_pid_alive(pid):
++        return True
++
++    def fake_kill_pid(pid, sigterm_grace=3.0):
++        kill_called.append(pid)
++
++    with (
++        mock.patch.object(monitor_mod, "_tmp_dir", return_value=tmp_path),
++        mock.patch.object(monitor_mod, "_pid_alive", side_effect=fake_pid_alive),
++        mock.patch.object(monitor_mod, "_kill_pid", side_effect=fake_kill_pid),
++        mock.patch.object(monitor_mod, "_pid_cmdline_matches", return_value=None),
++        mock.patch("time.sleep"),
++    ):
++        st = monitor_mod.monitor_agent(
++            agent=agent, pr=pr,
++            timeout=420, stall_timeout=180, poll=15,
++            require_result=True, no_early_error=True,
++        )
++
++    assert st.status == "OK"
++    assert st.exit_code == 0
++    # codex sentinel チェックによる OK
++    assert "codex sentinel" in st.detail
++    assert 12347 in kill_called
+diff --git a/plugins/ndf/skills/cross-review/tests/test_monitor_zombie.py b/plugins/ndf/skills/cross-review/tests/test_monitor_zombie.py
+new file mode 100644
+index 0000000..c15d2f4
+--- /dev/null
++++ b/plugins/ndf/skills/cross-review/tests/test_monitor_zombie.py
+@@ -0,0 +1,91 @@
++"""monitor.py のゾンビプロセス検出テスト。
++
++Docker without --init 環境では、nohup/disown で起動したプロセスが終了後に
++ゾンビ化する。`_pid_alive()` が /proc/<pid>/status の State: Z を検出して
++False を返すことを検証する。
++"""
++from __future__ import annotations
++
++import pathlib
++from unittest import mock
++
++
++def test_pid_alive_returns_false_for_zombie(monitor_mod):
++    """State: Z のプロセスに対して _pid_alive() が False を返す。"""
++    proc_status = "Name:\tbash\nState:\tZ (zombie)\nTgid:\t12345\nPid:\t12345\n"
++
++    with (
++        mock.patch("os.kill", return_value=None),
++        mock.patch.object(
++            pathlib.Path, "read_text", return_value=proc_status
++        ),
++    ):
++        assert monitor_mod._pid_alive(12345) is False
++
++
++def test_pid_alive_returns_true_for_running(monitor_mod):
++    """State: S (sleeping) のプロセスに対して True を返す。"""
++    proc_status = "Name:\tgemini\nState:\tS (sleeping)\nTgid:\t12345\nPid:\t12345\n"
++
++    with (
++        mock.patch("os.kill", return_value=None),
++        mock.patch.object(
++            pathlib.Path, "read_text", return_value=proc_status
++        ),
++    ):
++        assert monitor_mod._pid_alive(12345) is True
++
++
++def test_pid_alive_returns_true_for_running_state_r(monitor_mod):
++    """State: R (running) のプロセスに対して True を返す。"""
++    proc_status = "Name:\tgemini\nState:\tR (running)\nTgid:\t12345\nPid:\t12345\n"
++
++    with (
++        mock.patch("os.kill", return_value=None),
++        mock.patch.object(
++            pathlib.Path, "read_text", return_value=proc_status
++        ),
++    ):
++        assert monitor_mod._pid_alive(12345) is True
++
++
++def test_pid_alive_returns_false_for_dead_process(monitor_mod):
++    """kill -0 が ProcessLookupError を返すプロセスに対して False。"""
++    with mock.patch("os.kill", side_effect=ProcessLookupError):
++        assert monitor_mod._pid_alive(99999) is False
++
++
++def test_pid_alive_proc_unreadable_falls_back_to_alive(monitor_mod):
++    """/proc/<pid>/status が読めない場合 (non-Linux) は kill -0 の結果のみで True。"""
++    with (
++        mock.patch("os.kill", return_value=None),
++        mock.patch.object(
++            pathlib.Path, "read_text", side_effect=FileNotFoundError
++        ),
++    ):
++        assert monitor_mod._pid_alive(12345) is True
++
++
++def test_is_zombie_helper(monitor_mod):
++    """_is_zombie() ヘルパーの動作確認。"""
++    zombie_status = "Name:\tbash\nState:\tZ (zombie)\nTgid:\t1\nPid:\t1\n"
++    alive_status = "Name:\tgemini\nState:\tS (sleeping)\nTgid:\t1\nPid:\t1\n"
++
++    with mock.patch.object(pathlib.Path, "read_text", return_value=zombie_status):
++        assert monitor_mod._is_zombie(1) is True
++
++    with mock.patch.object(pathlib.Path, "read_text", return_value=alive_status):
++        assert monitor_mod._is_zombie(1) is False
++
++    with mock.patch.object(pathlib.Path, "read_text", side_effect=FileNotFoundError):
++        assert monitor_mod._is_zombie(1) is False
++
++
++def test_kill_pid_skips_zombie(monitor_mod):
++    """ゾンビプロセスに対して _kill_pid() はシグナルを送らない。"""
++    with (
++        mock.patch.object(monitor_mod, "_is_zombie", return_value=True),
++        mock.patch("os.kill") as mock_kill,
++    ):
++        monitor_mod._kill_pid(12345)
++        mock_kill.assert_not_called()

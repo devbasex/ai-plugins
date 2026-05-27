@@ -463,6 +463,7 @@ def monitor_agent(
     # 再利用されている可能性があり、ここで PIDFILE_BAD を返すと「完了している（result.json は出ている）」
     # ケースを誤って失敗にしてしまう。alive=True と確認した瞬間のみ cmdline 一致を検証する。
 
+    started_wall = time.time()
     last_err_size = paths.err_log.stat().st_size if paths.err_log.exists() else 0
     last_progress = time.monotonic()
     cmdline_validated = False
@@ -498,26 +499,32 @@ def monitor_agent(
             _emit_log(log_prefix, agent, status)
             return status
 
-        # result.json が書かれた後もプロセスがハングするケース (gemini で観測:
-        # MCP サーバー切断待ち等で exit しない)。sentinel 機構を持たない agent 向け
+        # result.json が書かれた後もプロセスがハング��るケース (gemini で観測:
+        # MCP サーバー切断待ち等��� exit しない)。sentinel 機構を持たない agent 向け
         # の fallback: result.json の mtime が RESULT_AGE_GRACE 秒以上前であれば
         # 完了とみなし、プロセスを kill → OK。
+        # 安全条件:
+        #   - cmdline_validated: PID 再利用でない (または検証不能環境) ことを確認済み
+        #   - mtime >= started_wall: 前 round の stale result.json を拾わない
         if (
             alive
             and not status.sentinel_seen
+            and cmdline_validated
             and paths.result.exists()
             and paths.result.stat().st_size > 0
         ):
-            result_age = time.time() - paths.result.stat().st_mtime
-            if result_age >= RESULT_AGE_GRACE:
-                _kill_pid(pid)
-                status.result_exists = True
-                status.status = "OK"
-                status.exit_code = 0
-                status.detail = (
-                    f"result.json exists for {result_age:.0f}s without process exit; "
-                    f"killed lingering pid {pid}"
-                )
+            result_mtime = paths.result.stat().st_mtime
+            if result_mtime >= started_wall:
+                result_age = time.time() - result_mtime
+                if result_age >= RESULT_AGE_GRACE:
+                    _kill_pid(pid)
+                    status.result_exists = True
+                    status.status = "OK"
+                    status.exit_code = 0
+                    status.detail = (
+                        f"result.json exists for {result_age:.0f}s without process exit; "
+                        f"killed lingering pid {pid}"
+                    )
                 _emit_log(log_prefix, agent, status)
                 return status
 
