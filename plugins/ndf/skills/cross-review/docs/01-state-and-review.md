@@ -146,6 +146,7 @@ fi
 | stall timeout | err.log + stdout.log の合計サイズが一定時間変化しなければ STALLED で中断。既定は **agent 別** (codex=**180s** / gemini=**480s**)。gemini は err.log がほぼ無音のため大きめに取る。codex 側既定は不変。上書き方法: CLI `--stall-timeout` (明示優先) > env `MONITOR_STALL_<AGENT>` (per-agent) > env `MONITOR_STALL` (両 agent 共通) > agent 別ビルトイン |
 | hard timeout | 既定 **7 分**。`--timeout` or `MONITOR_TIMEOUT` env で上書き |
 | result.json 存在 | プロセス終了後、result.json が無ければ NO_RESULT (exit 3) |
+| **result.json + age fallback** | sentinel を持たない agent (gemini) 向け。プロセスが alive のまま result.json の mtime が **30 秒以上前**なら完了とみなし kill → OK。gemini が MCP 切断待ち等でハングするケースに対応 (codex は sentinel チェックが先に発火するため影響なし) |
 | **失敗時 kill** | TIMEOUT / STALLED / EARLY_ERROR / PIDFILE_BAD で返るときは対象プロセスに SIGTERM → 3 秒後 SIGKILL。残存プロセスが後から `gh api` 投稿や result.json 書き込みを行うのを防ぐ |
 
 > ⚠ **罠**: `nohup ... &` でラッパーシェルは即終了し、ハーネスから
@@ -157,6 +158,11 @@ fi
 >
 > ⚠ **sentinel 単独で完了判定しない**: codex がクラッシュすると `tokens used` が
 > 永遠に出ない。`monitor.py` は sentinel と pidfile/result.json/err.log を併用する。
+>
+> ⚠ **Docker 環境ではゾンビプロセスに注意**: `nohup ... & disown` で起動した
+> プロセスは、終了後にゾンビ化する (PID 1 が proper init でない場合)。
+> `monitor.py` は `/proc/<pid>/status` でゾンビを検出して dead 扱いする。
+> **推奨: Docker 実行時に `--init` フラグを付ける** (tini が PID 1 になりゾンビを reap する)。
 
 ### 2.2 AI への入出力契約（両 launcher 共通）
 

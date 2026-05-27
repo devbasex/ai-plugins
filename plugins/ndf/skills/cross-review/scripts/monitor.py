@@ -24,7 +24,9 @@ pidfile stale / result.json 不在) を構造化して扱う。
      STALLED として中断。既定は agent 別 (codex=180s, gemini=480s。gemini は err.log
      にほぼ進捗を出さないため大きめ)。`--stall-timeout` で CLI 明示、
      `MONITOR_STALL_<AGENT>` env で per-agent 上書き、`MONITOR_STALL` env で共通上書き可
-  7. **失敗時 kill**: TIMEOUT / STALLED / EARLY_ERROR (FATAL のみ) / PIDFILE_BAD で
+  7. **result.json + age fallback**: sentinel を持たない agent (gemini) 向け。
+     result.json の mtime が 30 秒以上前なら完了とみなし kill → OK
+  8. **失敗時 kill**: TIMEOUT / STALLED / EARLY_ERROR (FATAL のみ) / PIDFILE_BAD で
      返るとき、対象プロセスを SIGTERM (3 秒後に SIGKILL) で停止する
 
 Usage:
@@ -78,6 +80,9 @@ DEFAULT_STALL_AGENT_BUILTIN = {
     "gemini": 480,   # err.log が静かなため 8 min まで許容
 }
 DEFAULT_POLL = 15          # 15 sec — env `MONITOR_POLL` で上書き可
+# result.json が書き込まれた後もプロセスがハングするケース (gemini で観測) の
+# fallback: mtime から RESULT_AGE_GRACE 秒以上経過していれば完了とみなす。
+RESULT_AGE_GRACE = 30
 # `MONITOR_NO_EARLY_ERROR=1` で EARLY_ERROR 検知を無効化 (escape hatch)
 DEFAULT_NO_EARLY_ERROR = os.environ.get("MONITOR_NO_EARLY_ERROR", "").lower() in {
     "1", "true", "yes", "on",
@@ -277,14 +282,38 @@ def _read_pidfile(p: pathlib.Path) -> Optional[int]:
 
 
 def _pid_alive(pid: int) -> bool:
-    """`kill -0` 相当。0 シグナルを送って例外で判定。"""
+    """`kill -0` + ゾンビ検出。
+
+    `os.kill(pid, 0)` はゾンビプロセスに対しても成功する (PID エントリが
+    残っているため)。Docker without `--init` 環境では orphan プロセスが
+    ゾンビ化して永久に残るため、`/proc/<pid>/status` で State: Z を検出する。
+    """
     try:
         os.kill(pid, 0)
-        return True
     except (ProcessLookupError, PermissionError):
         return False
     except OSError:
         return False
+    try:
+        status_text = pathlib.Path(f"/proc/{pid}/status").read_text()
+        for line in status_text.splitlines():
+            if line.startswith("State:"):
+                return "Z" not in line
+    except (FileNotFoundError, PermissionError, OSError):
+        pass
+    return True
+
+
+def _is_zombie(pid: int) -> bool:
+    """PID がゾンビかどうか。_pid_alive() とは独立に呼べるユーティリティ。"""
+    try:
+        status_text = pathlib.Path(f"/proc/{pid}/status").read_text()
+        for line in status_text.splitlines():
+            if line.startswith("State:"):
+                return "Z" in line
+    except (FileNotFoundError, PermissionError, OSError):
+        pass
+    return False
 
 
 def _kill_pid(pid: int, sigterm_grace: float = 3.0) -> None:
@@ -293,8 +322,11 @@ def _kill_pid(pid: int, sigterm_grace: float = 3.0) -> None:
     TIMEOUT / STALLED / EARLY_ERROR で監視を打ち切るとき、対象プロセスが残ったまま
     だと後から `gh api` 投稿や result.json 書き込みを実行してメインフローと
     競合する。失敗扱いで返るときは必ず停止させる。
+    ゾンビプロセスにはシグナルを送れないためスキップする。
     """
     if pid <= 0:
+        return
+    if _is_zombie(pid):
         return
     try:
         os.kill(pid, signal.SIGTERM)
@@ -465,6 +497,29 @@ def monitor_agent(
             )
             _emit_log(log_prefix, agent, status)
             return status
+
+        # result.json が書かれた後もプロセスがハングするケース (gemini で観測:
+        # MCP サーバー切断待ち等で exit しない)。sentinel 機構を持たない agent 向け
+        # の fallback: result.json の mtime が RESULT_AGE_GRACE 秒以上前であれば
+        # 完了とみなし、プロセスを kill → OK。
+        if (
+            alive
+            and not status.sentinel_seen
+            and paths.result.exists()
+            and paths.result.stat().st_size > 0
+        ):
+            result_age = time.time() - paths.result.stat().st_mtime
+            if result_age >= RESULT_AGE_GRACE:
+                _kill_pid(pid)
+                status.result_exists = True
+                status.status = "OK"
+                status.exit_code = 0
+                status.detail = (
+                    f"result.json exists for {result_age:.0f}s without process exit; "
+                    f"killed lingering pid {pid}"
+                )
+                _emit_log(log_prefix, agent, status)
+                return status
 
         if alive and not cmdline_validated:
             # cmdline 検証は alive 確認後に 1 回だけ。生きていない瞬間に proc/<pid> を読むと
