@@ -525,8 +525,8 @@ def monitor_agent(
                         f"result.json exists for {result_age:.0f}s without process exit; "
                         f"killed lingering pid {pid}"
                     )
-                _emit_log(log_prefix, agent, status)
-                return status
+                    _emit_log(log_prefix, agent, status)
+                    return status
 
         if alive and not cmdline_validated:
             # cmdline 検証は alive 確認後に 1 回だけ。生きていない瞬間に proc/<pid> を読むと

@@ -130,6 +130,65 @@ def test_gemini_result_age_too_young_continues(monitor_mod, tmp_path):
     assert "process exited" in st.detail
 
 
+def test_fresh_but_young_result_continues_monitoring(monitor_mod, tmp_path):
+    """started_wall 後に書かれたが age < RESULT_AGE_GRACE なら fallback せず監視継続。"""
+    pr = 994
+    agent = "gemini"
+    base = tmp_path / f"{agent}-review-pr{pr}"
+
+    pidfile = pathlib.Path(f"{base}.pid")
+    err_log = pathlib.Path(f"{base}-err.log")
+    stdout_log = pathlib.Path(f"{base}-stdout.log")
+    result = pathlib.Path(f"{base}-result.json")
+
+    pidfile.write_text("12350")
+    err_log.write_text("YOLO mode is enabled.\n")
+    stdout_log.write_text("")
+    result.write_text(json.dumps({"event": "APPROVE", "comments_count": 0}))
+
+    # time.time() side_effect:
+    #   call 1 (started_wall): base_time
+    #   call 2+ (age check): base_time + 10 → age = 5s < 30s
+    base_time = time.time()
+    result_mtime = base_time + 5
+    os.utime(result, (result_mtime, result_mtime))
+
+    time_call_count = [0]
+    def fake_time():
+        time_call_count[0] += 1
+        if time_call_count[0] == 1:
+            return base_time
+        return base_time + 10  # age = 10 - 5 = 5s < 30s
+
+    poll_count = [0]
+
+    def fake_pid_alive(pid):
+        if poll_count[0] >= 2:
+            return False
+        return True
+
+    def fake_sleep(s):
+        poll_count[0] += 1
+
+    with (
+        mock.patch.object(monitor_mod, "_tmp_dir", return_value=tmp_path),
+        mock.patch.object(monitor_mod, "_pid_alive", side_effect=fake_pid_alive),
+        mock.patch.object(monitor_mod, "_kill_pid"),
+        mock.patch.object(monitor_mod, "_pid_cmdline_matches", return_value=True),
+        mock.patch("time.sleep", side_effect=fake_sleep),
+        mock.patch("time.time", side_effect=fake_time),
+    ):
+        st = monitor_mod.monitor_agent(
+            agent=agent, pr=pr,
+            timeout=420, stall_timeout=480, poll=15,
+            require_result=True, no_early_error=True,
+        )
+
+    # age < 30s なので fallback せず、プロセス終了後の通常 OK
+    assert st.status == "OK"
+    assert "process exited" in st.detail
+
+
 def test_codex_sentinel_takes_priority(monitor_mod, tmp_path):
     """codex は sentinel + result.json が先に発火し、age fallback は通らない。"""
     pr = 997
