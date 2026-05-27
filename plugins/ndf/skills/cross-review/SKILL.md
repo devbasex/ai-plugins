@@ -17,6 +17,11 @@ allowed-tools:
 PR を **codex / gemini 両方** にレビューさせ、両者が `APPROVE` を返すまで
 `/ndf:review` と `/ndf:fix` を自動で回す。
 
+/goalの引数として呼ばれた場合は、codex / gemini が`APPROVE` になるまで/cross-reviewを繰り返す。
+  * codex / geminiのいずれかが不具合などで実行できなくなった場合は異常終了とする
+   * /goalで呼ばれた場合はPR ローテーションは実施しなくてよい。
+   * 振動検知した場合はAIが判断して正しい状態を決める。
+
 詳細手順は `docs/` 配下に、主要コマンドは `scripts/` 配下に分割している:
 
 - [docs/01-state-and-review.md](docs/01-state-and-review.md) — Step 0〜4 (state init / round / 並列レビュー / 判定 / 振動検知)
