@@ -7,7 +7,7 @@ Claude Code開発環境を**オールインワン**で強化する統合プラ�
 このプラグイン1つで、以下の**すべて**の機能を利用できます：
 
 1. **コアMCP**: なし (v4.0.0 で Codex MCP 廃止 / Serena MCP は `mcp-serena` プラグインに分離)
-2. **Skills**: 39個（PR/コードレビュー系ワークフロー13個 + 原則・ガイドライン8個 (issue→multi-PR 戦略含む) + データ分析/品質/環境系13個 + skill-stats + Playwright シナリオテスト + Google Drive/Chat 連携 + AI クロスレビュー (cross-review / gemini)）
+2. **Skills**: 40個（PR/コードレビュー系ワークフロー13個 + 原則・ガイドライン9個 (issue→multi-PR 戦略・MLモデル構造標準含む) + データ分析/品質/環境系13個 + skill-stats + Playwright シナリオテスト + Google Drive/Chat 連携 + AI クロスレビュー (cross-review / gemini)）
 3. **専門エージェント**: 8つの特化型AIエージェント（director、data-analyst、corder、researcher、qa、debugger、devops-engineer、code-reviewer）
 4. **自動フック**: Slack通知
 
@@ -452,7 +452,7 @@ Claude Codeが自動的に適切なMCPツールを選択・利用します。
 | `/ndf:merged` | PRマージ後のローカルブランチクリーンアップ | `[PR番号]` |
 | `/ndf:clean` | マージ済みブランチの一括削除 | - |
 
-### 4. 原則・ガイドライン系スキル（7個）
+### 4. 原則・ガイドライン系スキル（8個）
 
 モデル起動型のガイドラインスキル。該当する文脈で自動参照される。
 
@@ -465,6 +465,7 @@ Claude Codeが自動的に適切なMCPツールを選択・利用します。
 | `problem-solving` | 根本原因分析・上流修正・多層防御 |
 | `logging-guidelines` | ログ運用ガイドライン（言語非依存） |
 | `markdown-writing` | Markdown文書作成（mermaid/plantUML） |
+| `ml-model-structure` | MLモデル構築・推論API開発の標準ディレクトリ構造（版内feature SSoT / train↔serve契約） |
 
 ### 5. データ分析・品質・環境系スキル（13個）
 

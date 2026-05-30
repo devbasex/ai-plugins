@@ -1,7 +1,7 @@
 {
   "name": "ndf",
-  "version": "4.9.0",
-  "description": "Integrated plugin with 8 specialized agents (model-tiered: opus/sonnet/haiku), 44 skills including official mcp-builder, on-demand loader for Anthropic official skills, generic workflow/principle skills, skill usage statistics, pytest-playwright E2E testing split into 5 focused skills (test-planning, script-creation, execution, report, kit-ops) + orchestrator with video-by-default evidence, Google Drive/Chat integration, and Codex CLI integration via /ndf:codex skill. Transcript retention is automatically kept at >= 90 days. Serena MCP is a separate plugin (mcp-serena).",
+  "version": "4.10.0",
+  "description": "Integrated plugin with 8 specialized agents (model-tiered: opus/sonnet/haiku), 45 skills including official mcp-builder, on-demand loader for Anthropic official skills, generic workflow/principle skills, ML model structure standard (ml-model-structure), skill usage statistics, pytest-playwright E2E testing split into 5 focused skills (test-planning, script-creation, execution, report, kit-ops) + orchestrator with video-by-default evidence, Google Drive/Chat integration, and Codex CLI integration via /ndf:codex skill. Transcript retention is automatically kept at >= 90 days. Serena MCP is a separate plugin (mcp-serena).",
   "author": {
     "name": "takemi-ohama",
     "url": "https://github.com/takemi-ohama"
@@ -71,6 +71,7 @@
     "./skills/google-chat",
     "./skills/gemini",
     "./skills/cross-review",
-    "./skills/issue-plan-strategy"
+    "./skills/issue-plan-strategy",
+    "./skills/ml-model-structure"
   ]
 }

@@ -18,7 +18,7 @@ plugins/ndf/
 │   ├── ensure-retention.sh  # cleanupPeriodDays >= 90 を保つ
 │   └── slack-notify.js      # Slack通知スクリプト
 ├── agents/                  # 専門エージェント（8個）
-├── skills/                  # Skills（36個）
+├── skills/                  # Skills（45個）
 ├── CLAUDE.md                # プラグイン開発者向けガイド
 └── README.md                # 利用者向けドキュメント
 ```
@@ -74,6 +74,7 @@ NDF プラグイン本体はコア MCP サーバを**同梱しない**（v4.0.0 
 | `problem-solving` | 根本原因分析・多層防御 |
 | `logging-guidelines` | ログ運用 (言語非依存) |
 | `markdown-writing` | Markdown 文書の体裁 |
+| `ml-model-structure` | ML モデル構築・推論API の標準ディレクトリ構造 (版内 feature SSoT / train↔serve 契約) |
 
 ### 4. 補助 Skills
 
