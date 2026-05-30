@@ -74,6 +74,7 @@ NDF プラグイン本体はコア MCP サーバを**同梱しない**（v4.0.0 
 | `problem-solving` | 根本原因分析・多層防御 |
 | `logging-guidelines` | ログ運用 (言語非依存) |
 | `markdown-writing` | Markdown 文書の体裁 |
+| `issue-plan-strategy` | issue→plan 作成・multi-PR 実行のワークフロー戦略 |
 | `ml-model-structure` | ML モデル構築・推論API の標準ディレクトリ構造 (版内 feature SSoT / train↔serve 契約) |
 
 ### 4. 補助 Skills
@@ -92,6 +93,16 @@ NDF プラグイン本体はコア MCP サーバを**同梱しない**（v4.0.0 
 | `knowledge-reorg` | 知識再編成 |
 | `mcp-builder` | MCP サーバ作成（Anthropic 公式） |
 | `official-skills-autoloader` | Anthropic 公式 Skill の自動ロード |
+| `playwright-test-planning` | E2E テスト計画立案 (HTSM/ISTQB) |
+| `playwright-script-creation` | E2E テストスクリプト作成 |
+| `playwright-execution` | E2E 実行+エビデンス収集 (動画/a11y/CWV) |
+| `playwright-report` | E2E テスト結果の Markdown レポート |
+| `playwright-kit-ops` | playwright_kit スクリプト操作 |
+| `playwright-scenario-test` | フル E2E ワークフロー統括 |
+| `google-drive` | Google Drive/Docs 操作 |
+| `google-chat` | Google Chat メッセージ取得 |
+| `cross-review` | codex/gemini 両方でレビュー自動ループ |
+| `gemini` | gemini CLI 直接実行 |
 
 ### 5. 専門エージェント（8個、モデル階層化）
 

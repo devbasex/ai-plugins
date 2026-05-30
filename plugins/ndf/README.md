@@ -7,7 +7,7 @@ Claude Code開発環境を**オールインワン**で強化する統合プラ�
 このプラグイン1つで、以下の**すべて**の機能を利用できます：
 
 1. **コアMCP**: なし (v4.0.0 で Codex MCP 廃止 / Serena MCP は `mcp-serena` プラグインに分離)
-2. **Skills**: 40個（PR/コードレビュー系ワークフロー13個 + 原則・ガイドライン9個 (issue→multi-PR 戦略・MLモデル構造標準含む) + データ分析/品質/環境系13個 + skill-stats + Playwright シナリオテスト + Google Drive/Chat 連携 + AI クロスレビュー (cross-review / gemini)）
+2. **Skills**: 45個（PR/コードレビュー系ワークフロー13個 + 原則・ガイドライン9個 (issue→multi-PR 戦略・MLモデル構造標準含む) + データ分析/品質/環境系12個 + Playwright E2E 6個 + Google Drive/Chat 連携2個 + AI クロスレビュー2個 (cross-review / gemini) + skill-stats 1個）
 3. **専門エージェント**: 8つの特化型AIエージェント（director、data-analyst、corder、researcher、qa、debugger、devops-engineer、code-reviewer）
 4. **自動フック**: Slack通知
 
@@ -452,7 +452,7 @@ Claude Codeが自動的に適切なMCPツールを選択・利用します。
 | `/ndf:merged` | PRマージ後のローカルブランチクリーンアップ | `[PR番号]` |
 | `/ndf:clean` | マージ済みブランチの一括削除 | - |
 
-### 4. 原則・ガイドライン系スキル（8個）
+### 4. 原則・ガイドライン系スキル（9個）
 
 モデル起動型のガイドラインスキル。該当する文脈で自動参照される。
 
@@ -465,9 +465,10 @@ Claude Codeが自動的に適切なMCPツールを選択・利用します。
 | `problem-solving` | 根本原因分析・上流修正・多層防御 |
 | `logging-guidelines` | ログ運用ガイドライン（言語非依存） |
 | `markdown-writing` | Markdown文書作成（mermaid/plantUML） |
+| `issue-plan-strategy` | issue→plan作成・multi-PR実行のワークフロー戦略 |
 | `ml-model-structure` | MLモデル構築・推論API開発の標準ディレクトリ構造（版内feature SSoT / train↔serve契約） |
 
-### 5. データ分析・品質・環境系スキル（13個）
+### 5. データ分析・品質・環境系スキル（12個）
 
 Claudeが自律的に判断して起動するスキル群。
 
@@ -486,7 +487,42 @@ Claudeが自律的に判断して起動するスキル群。
 | 公式連携 | `mcp-builder` | MCPサーバー作成ガイド（Anthropic公式、Apache-2.0） |
 | | `official-skills-autoloader` | Anthropic公式Skillの自動ロード |
 
-### 5. 自動フック
+### 6. E2Eテスト（Playwright）系スキル（6個）
+
+pytest-playwright ベースの E2E テストワークフロー。
+
+| スキル名 | 概要 |
+|---------|------|
+| `playwright-test-planning` | HTSM/ISTQB に基づくテスト計画立案・page role 分類 |
+| `playwright-script-creation` | 再現可能なテストスクリプト作成 |
+| `playwright-execution` | テスト実行＋エビデンス収集（動画/trace/a11y/CWV） |
+| `playwright-report` | テスト結果の Markdown レポート生成 |
+| `playwright-kit-ops` | playwright_kit スクリプト操作（init/分類/スキャン） |
+| `playwright-scenario-test` | フル E2E ワークフロー統括（計画→作成→実行→レポート） |
+
+### 7. 外部サービス連携系スキル（2個）
+
+| スキル名 | 概要 |
+|---------|------|
+| `google-drive` | Google Drive/Docs のエクスポート・アップロード（公開共有リンク付与） |
+| `google-chat` | Google Chat スペースのメッセージ取得・スペース一覧 |
+
+### 8. AIクロスレビュー系スキル（2個）
+
+外部 AI に第二意見レビュー/調査を委譲する。
+
+| スキル名 | 概要 |
+|---------|------|
+| `cross-review` | PR を codex/gemini 両方でレビューし APPROVE まで自動ループ |
+| `gemini` | gemini CLI 直接実行（コード生成/レビュー/調査） |
+
+### 9. 運用系スキル（1個）
+
+| スキル名 | 概要 |
+|---------|------|
+| `skill-stats` | Skill 利用統計の集計（呼び出し数/ヒット率） |
+
+### 10. 自動フック
 
 Claude Codeの起動時と終了時に自動的に以下が実行されます：
 
