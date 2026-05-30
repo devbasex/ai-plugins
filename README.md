@@ -6,7 +6,7 @@ Claude CodeプラグインおよびKiro CLI向けのスキル・MCP設定を共�
 
 このマーケットプレイスは、チーム全体でAI開発ツール（Claude Code / Kiro CLI）の導入を加速するための事前設定されたプラグインを提供します。
 
-**NDFプラグイン v4.0.0** は、以下の機能を**オールインワン**で提供する統合プラグインです：
+**NDFプラグイン v4.10.0** は、以下の機能を**オールインワン**で提供する統合プラグインです：
 
 - **45個のSkills**:
   - PR/レビューワークフロー (13): pr, pr-tests, fix, review, review-branch, review-pr-comments, resolve-pr-comments, cherry-pick-pr, deploy, sync-main, merged, clean, browser-test
