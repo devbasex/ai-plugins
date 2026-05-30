@@ -1,5 +1,18 @@
 # NDF Plugin CHANGELOG
 
+### v4.10.0 (feature/add-ml-model-structure-skill: ml-model-structure skill 追加)
+
+機械学習モデル構築・推論API開発の標準ディレクトリ構造を提供する新規 skill を追加。
+skill 数を 45 個に更新し、関連ドキュメントのバージョン・skill 数表記を整合。
+
+- **新規 skill `ml-model-structure` 追加**
+  (`skills/ml-model-structure/`):
+  - 機械学習モデルの版ごと自己完結構造 + 版内 feature SSoT + 推論コンテナ規約。
+  - `references/inference-and-contract.md` に train↔serve 契約・推論コンテナ規約を分離。
+- **plugin.json: version 4.9.0 → 4.10.0、skills 配列に `ml-model-structure` を追加**、
+  description を 45 skills に更新。
+- **marketplace.json / README / AGENTS.md / ndf-plugin-reference: skill 数・version 表記を整合**。
+
 ### v4.7.6 (fix/review-pr-comments: PRコメント取得を3ソース対応に拡張)
 
 PRレビューコメント取得が review body / PR レベルコメントを含む3ソースに対応。
