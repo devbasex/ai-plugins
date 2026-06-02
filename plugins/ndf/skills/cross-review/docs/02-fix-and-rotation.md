@@ -303,9 +303,59 @@ stderr に deprecation warning を出す。新規呼び出しは必ず prepare �
 
 Step 1 に戻る。
 
-## Step 8: 終了処理 — deferred nit のバッチ問い合わせ
+## Step 7.5: 最終スイープ（必須）— 取りこぼし防止
 
-ループ終了時（`final` 確定後）、ラウンドサマリと残 deferred nit を表示:
+**目的**: ループを抜けた時点で PR 上に **未解決 (open) のレビュースレッドを 1 件も残さない**。
+
+### なぜ必要か
+
+ループ内の修正フェーズ (Step 5) は「一方でも REQUEST_CHANGES」のラウンドでしか走らない。
+そのため以下が取りこぼされる:
+
+- **最終 APPROVE ラウンドのインラインコメント**: skill のレビュー方針上、`minor` 以下しか
+  無ければ `APPROVE` で良い。つまり **APPROVE でも minor/nit のインラインコメントが
+  投稿されている**ことがあり、両者 APPROVE でループを抜けるとこれらが未対応のまま残る。
+- **ループ中に deferred 記録した nit**: `state.deferred_nits` に積まれたまま reply のみで
+  Resolve されていないスレッド。
+
+これらを放置すると、PR レビュー画面に「Unresolved」スレッドが残り、人間のレビュアーや
+後続作業者が「未対応の指摘がある」と誤認する。
+
+### 実行（メインが Agent を駆動）
+
+ループを抜けたら（`final` がどの値でも）、**メインが `Agent(subagent_type="general-purpose")`
+を起動**し、`/ndf:fix <current_pr>` を再実行させる。bash 単体では Agent を呼べないため、
+while ループ脱出後にメインが以下のプロンプトでサブエージェントを起動する。
+
+> **対象 PR**: `<current_pr>`（state.json の `current_pr`。rotation していれば最新 PR）
+> **worktree**: state.json の `worktree_path`
+>
+> PR の **全 open review thread**（インライン / レビュー body / PR レベルコメント）を
+> `gh api` で洗い出し、cross-review の codex/gemini が残したものを中心に **すべて解消**せよ:
+> 1. 修正可能な `minor`/`nit` → コード修正 + push（同ブランチ、main へは push しない）し、
+>    reply + GraphQL `resolveReviewThread` で Resolve。
+> 2. 修正しない（好み・判断保留）`nit` → 「[deferred / nit] 対応見送り: <理由>」を日本語で
+>    reply した上で **Resolve まで実行**（スレッドを open のまま残さない）。
+> 3. bot 誤指摘 → 却下理由を reply して Resolve。
+> 修正で push した場合は `claude plugin validate` を通すこと。
+> 完了後、`$TMP_DIR/sweep-pr<PR>-result.json` に
+> `{"resolved": N, "fixed_in_sweep": M, "commit": "<SHA|null>", "remaining_open": K,
+>   "items": ["<1行要約>", ...]}` を書き出し、最終メッセージで内訳を日本語報告せよ。
+> **`remaining_open` は 0 を目標**とし、0 にできない場合は理由を明記すること。
+
+> ⚠ 最終スイープは「修正の追加」ではなく **後始末**。新しい設計変更や大きな
+> リファクタは行わない（行う必要があれば deferred として report に残す）。
+> push が走った場合でも、それに対する再レビューはループ終了後のため行わない
+> （次回 cross-review か通常レビューに委ねる）。
+
+### 再開性
+
+sweep 中にメインが落ちても、`sweep-pr<PR>-result.json` が無ければ Step 7.5 から
+再実行すれば良い（Resolve は冪等。既 Resolve スレッドは skip される）。
+
+## Step 8: 終了処理 — ラウンドサマリ + 残 deferred の参考列挙
+
+最終スイープ (Step 7.5) 完了後、ラウンドサマリを表示:
 
 ```bash
 "$SCRIPTS/state.py" report "$STATE_PR"
@@ -318,5 +368,11 @@ Step 1 に戻る。
 - ラウンドサマリ表
 - 残 deferred nit 一覧
 
-UI 上は **AskUserQuestion で 1 回だけ** 「nit 一括対応する / しない /
-個別選択」を選ばせるのが望ましい。
+メインは `report` の出力に **Step 7.5 の sweep 結果**（`sweep-pr<PR>-result.json` の
+`resolved` / `fixed_in_sweep` / `remaining_open`）を折り込んで最終報告する。
+
+> **方針変更（v4.11.0）**: 従来は deferred nit を「AskUserQuestion で 1 回問い合わせ」て
+> いたが、未解決スレッドを残さない方針に変更。**Step 7.5 で nit も含め全 open thread を
+> Resolve する**ため、Step 8 のユーザ問い合わせは原則不要。deferred nit は「対応見送りの
+> 記録」として report に **参考列挙**するに留める（再対応が要るものがあればユーザが
+> その場で指示できる）。`remaining_open > 0` の場合のみ、残った理由を添えて報告する。

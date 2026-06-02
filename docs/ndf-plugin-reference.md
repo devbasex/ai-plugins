@@ -4,7 +4,7 @@
 
 NDF プラグインは、Claude Code / Kiro CLI 向けのオールインワン開発支援プラグイン。エージェント、Skills、フックを統合して提供する。
 
-**現行バージョン**: **v4.7.0** — `/ndf:fix` の修正ポリシー刷新（minor/nit のうち performance/readability/duplication は積極修正、+30 行超は要問い合わせ）、CI 完了待ち廃止、PR範囲外 flaky テストも修正対象。`/ndf:cross-review` 内のサブエージェントプロンプトも同期。重要度ラベルは AI agent の付与を鵜呑みにせず独自再判定。完了報告には PR URL 必須。詳細は [CHANGELOG.md](../plugins/ndf/CHANGELOG.md)。`/ndf:codex` skill + `corder` エージェント経由の Codex CLI 直接実行に一本化、Serena MCP は別プラグイン `mcp-serena` に分離済み、Playwright シナリオ E2E、Google Drive / Chat 連携 skill を提供。
+**現行バージョン**: **v4.11.0** — `/ndf:cross-review` の堅牢性改善。monitor.py の EARLY_ERROR 誤検知を解消（テスト用文字列リテラル / grep 形式ソース引用行を benign 自動判定）し、ループ終了時の最終スイープ（残 open review thread を全 Resolve）を必須化。直前の **v4.10.0** で `ml-model-structure` skill（MLモデル構築・推論API開発の標準ディレクトリ構造: 版内feature SSoT / train↔serve契約）を追加。`/ndf:fix` の修正ポリシー刷新（minor/nit のうち performance/readability/duplication は積極修正、+30 行超は要問い合わせ）、CI 完了待ち廃止、PR範囲外 flaky テストも修正対象。`/ndf:cross-review` 内のサブエージェントプロンプトも同期。重要度ラベルは AI agent の付与を鵜呑みにせず独自再判定。完了報告には PR URL 必須。詳細は [CHANGELOG.md](../plugins/ndf/CHANGELOG.md)。`/ndf:codex` skill + `corder` エージェント経由の Codex CLI 直接実行に一本化、Serena MCP は別プラグイン `mcp-serena` に分離済み、Playwright シナリオ E2E、Google Drive / Chat 連携 skill を提供。
 
 ## ディレクトリ構造
 
@@ -18,7 +18,7 @@ plugins/ndf/
 │   ├── ensure-retention.sh  # cleanupPeriodDays >= 90 を保つ
 │   └── slack-notify.js      # Slack通知スクリプト
 ├── agents/                  # 専門エージェント（8個）
-├── skills/                  # Skills（36個）
+├── skills/                  # Skills（45個）
 ├── CLAUDE.md                # プラグイン開発者向けガイド
 └── README.md                # 利用者向けドキュメント
 ```
@@ -74,6 +74,8 @@ NDF プラグイン本体はコア MCP サーバを**同梱しない**（v4.0.0 
 | `problem-solving` | 根本原因分析・多層防御 |
 | `logging-guidelines` | ログ運用 (言語非依存) |
 | `markdown-writing` | Markdown 文書の体裁 |
+| `issue-plan-strategy` | issue→plan 作成・multi-PR 実行のワークフロー戦略 |
+| `ml-model-structure` | ML モデル構築・推論API の標準ディレクトリ構造 (版内 feature SSoT / train↔serve 契約) |
 
 ### 4. 補助 Skills
 
@@ -91,6 +93,16 @@ NDF プラグイン本体はコア MCP サーバを**同梱しない**（v4.0.0 
 | `knowledge-reorg` | 知識再編成 |
 | `mcp-builder` | MCP サーバ作成（Anthropic 公式） |
 | `official-skills-autoloader` | Anthropic 公式 Skill の自動ロード |
+| `playwright-test-planning` | E2E テスト計画立案 (HTSM/ISTQB) |
+| `playwright-script-creation` | E2E テストスクリプト作成 |
+| `playwright-execution` | E2E 実行+エビデンス収集 (動画/a11y/CWV) |
+| `playwright-report` | E2E テスト結果の Markdown レポート |
+| `playwright-kit-ops` | playwright_kit スクリプト操作 |
+| `playwright-scenario-test` | フル E2E ワークフロー統括 |
+| `google-drive` | Google Drive/Docs 操作 |
+| `google-chat` | Google Chat メッセージ取得 |
+| `cross-review` | codex/gemini 両方でレビュー自動ループ |
+| `gemini` | gemini CLI 直接実行 |
 
 ### 5. 専門エージェント（8個、モデル階層化）
 
@@ -175,3 +187,5 @@ claude -p --settings '{"disableAllHooks": true, "disableAllPlugins": true}' --ou
 | v3.7.0 | transcript 保持期間自動管理 hook、`/ndf:skill-stats` skill |
 | **v4.0.0 (BREAKING)** | **Codex MCP 廃止 → CLI 直接実行一本化**、レガシー CLAUDE.ndf.md 救済機構削除、skill-stats にプロジェクト別/日付範囲フィルタ追加 |
 | **v4.1.0** | `playwright-scenario-test` / `google-drive` / `google-chat` skill 追加、`google-auth` v0.2.0 (永続トークン `~/.config/gcloud/google_token.json` + `get_credentials()` API + 手動 copy-paste フロー) |
+| **v4.10.0** | `ml-model-structure` skill 追加 (MLモデル構築・推論API開発の標準ディレクトリ構造、版内 feature SSoT / train↔serve 契約) |
+| **v4.11.0** | `/ndf:cross-review` 堅牢性改善: monitor.py EARLY_ERROR 誤検知解消 (文字列リテラル / grep ソース引用行を benign 判定) + ループ終了時の最終スイープ (残 open thread 全 Resolve) 必須化 |

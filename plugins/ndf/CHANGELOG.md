@@ -1,5 +1,40 @@
 # NDF Plugin CHANGELOG
 
+### v4.11.0 (fix/cross-review-early-error-and-final-sweep: cross-review 堅牢性改善)
+
+`/ndf:cross-review` の 2 つの運用課題を修正。
+
+- **monitor.py の EARLY_ERROR 誤検知を解消**
+  (`skills/cross-review/scripts/monitor.py`):
+  - `_match_is_quoted()` を拡張し、backtick / 「」 に加え **ダブル/シングルクォート
+    文字列リテラル** (`"quota exceeded: ..."`) も benign 判定。
+  - `EARLY_ERROR_BENIGN` に **grep/ripgrep 形式のソース引用行** (`path/file.py:22:    <code>`)
+    パターンを追加。
+  - codex がレビュー中に tests/*.py のテスト用文字列 (`"quota exceeded"` 等) を echo
+    しても誤 kill しなくなった（PR #23 round 2 で実際に発生した事例の回帰防止テスト追加）。
+- **ループ終了時の最終スイープ (Step 7.5) を必須化**
+  (`skills/cross-review/SKILL.md` / `docs/02-fix-and-rotation.md`):
+  - approved / max_rounds / oscillation / error いずれの終了経路でも `/ndf:fix` を再実行し、
+    残った open review thread（最終 APPROVE ラウンドの minor/nit インラインコメント含む）を
+    **すべて Resolve** してから終了する。deferred nit も reply + resolveReviewThread で解消。
+  - 従来の「deferred nit を最後にユーザ問い合わせ」を「最終スイープで全 thread Resolve +
+    report に参考列挙」へ変更。
+- **plugin.json: version 4.10.0 → 4.11.0**。marketplace.json / README / AGENTS.md /
+  ndf-plugin-reference の version 表記を整合（skill 数 45 は不変）。
+
+### v4.10.0 (feature/add-ml-model-structure-skill: ml-model-structure skill 追加)
+
+機械学習モデル構築・推論API開発の標準ディレクトリ構造を提供する新規 skill を追加。
+skill 数を 45 個に更新し、関連ドキュメントのバージョン・skill 数表記を整合。
+
+- **新規 skill `ml-model-structure` 追加**
+  (`skills/ml-model-structure/`):
+  - 機械学習モデルの版ごと自己完結構造 + 版内 feature SSoT + 推論コンテナ規約。
+  - `references/inference-and-contract.md` に train↔serve 契約・推論コンテナ規約を分離。
+- **plugin.json: version 4.9.0 → 4.10.0、skills 配列に `ml-model-structure` を追加**、
+  description を 45 skills に更新。
+- **marketplace.json / README / AGENTS.md / ndf-plugin-reference: skill 数・version 表記を整合**。
+
 ### v4.7.6 (fix/review-pr-comments: PRコメント取得を3ソース対応に拡張)
 
 PRレビューコメント取得が review body / PR レベルコメントを含む3ソースに対応。

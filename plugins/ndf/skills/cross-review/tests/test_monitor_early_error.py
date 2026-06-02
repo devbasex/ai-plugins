@@ -4,8 +4,10 @@
 - Markdown 表セル (`| ... | quota exceeded ... |`)
 - backtick で囲まれた quote (`` `quota exceeded` ``)
 - 日本語クォートで囲まれた quote (`「quota exceeded」`)
-codex がレビュー対象の doc を echo した際に上記が err.log に書かれることで、
-従来の monitor.py は無関係なドキュメント記述を fatal とみなしてプロセスを kill していた。
+- ダブル/シングルクォートで囲まれた **文字列リテラル** (`"quota exceeded: ..."`)
+- grep / ripgrep 形式の **ソース引用行** (`path/to/file.py:22:    "quota exceeded..."`)
+codex がレビュー対象の doc / テストコードを echo した際に上記が err.log に書かれることで、
+従来の monitor.py は無関係なドキュメント・コード記述を fatal とみなしてプロセスを kill していた。
 """
 from __future__ import annotations
 
@@ -63,6 +65,49 @@ def test_real_sandbox_error_still_detected(tmp_path, monitor_mod):
     """素の `sandbox error` は依然として fatal 扱い。"""
     log = _write(tmp_path / "err.log", "Internal sandbox error: cannot start\n")
     assert monitor_mod._scan_early_fatal(log) is not None
+
+
+def test_grep_style_source_citation_is_benign(tmp_path, monitor_mod):
+    """codex がレビュー対象のテストコードを grep 形式 (`path.py:22:    code`) で
+    echo した行は fatal 扱いしない。
+
+    回帰: 本 skill 自身の tests/test_monitor_early_error.py を cross-review した際、
+    `quota exceeded` を含むテスト用文字列リテラル行が echo され、誤って
+    EARLY_ERROR で codex が kill された (PR #23 round 2 で実際に発生)。
+    """
+    log = _write(
+        tmp_path / "err.log",
+        '/work/worktrees/pr23/plugins/ndf/skills/cross-review/tests/'
+        'test_monitor_early_error.py:22:    log = _write(tmp_path / "err.log", '
+        '"quota exceeded: please upgrade\\n")\n',
+    )
+    assert monitor_mod._scan_early_fatal(log) is None
+
+
+def test_double_quoted_string_literal_is_benign(tmp_path, monitor_mod):
+    """ダブルクォート文字列リテラル内のキーワードは benign（コード片の echo）。"""
+    log = _write(
+        tmp_path / "err.log",
+        '    raise RuntimeError("quota exceeded: please upgrade")\n',
+    )
+    assert monitor_mod._scan_early_fatal(log) is None
+
+
+def test_single_quoted_string_literal_is_benign(tmp_path, monitor_mod):
+    """シングルクォート文字列リテラル内のキーワードも benign。"""
+    log = _write(
+        tmp_path / "err.log",
+        "    msg = 'sandbox error occurred in test fixture'\n",
+    )
+    assert monitor_mod._scan_early_fatal(log) is None
+
+
+def test_match_is_quoted_double_quote(monitor_mod):
+    """`_match_is_quoted()` がダブルクォート文字列リテラルを検出する。"""
+    line = 'raise RuntimeError("quota exceeded: please upgrade")'
+    start = line.index("quota")
+    end = start + len("quota exceeded")
+    assert monitor_mod._match_is_quoted(line, start, end)
 
 
 def test_match_is_quoted_helper(monitor_mod):

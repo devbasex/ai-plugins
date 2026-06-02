@@ -6,14 +6,16 @@ Claude CodeプラグインおよびKiro CLI向けのスキル・MCP設定を共�
 
 このマーケットプレイスは、チーム全体でAI開発ツール（Claude Code / Kiro CLI）の導入を加速するための事前設定されたプラグインを提供します。
 
-**NDFプラグイン v4.0.0** は、以下の機能を**オールインワン**で提供する統合プラグインです：
+**NDFプラグイン v4.11.0** は、以下の機能を**オールインワン**で提供する統合プラグインです：
 
-- **33個のSkills**:
-  - PR/レビューワークフロー (pr, pr-tests, fix, review, review-branch, review-pr-comments, resolve-pr-comments, cherry-pick-pr, deploy, sync-main, merged, clean, browser-test)
-  - 原則・ガイドライン (ndf-policies, branch-fix-strategy, implementation-plan, investigation-rules, problem-solving, logging-guidelines, markdown-writing)
-  - データ分析・品質 (data-analyst-sql-optimization, data-analyst-export, qa-security-scan)
-  - 外部連携・環境 (codex, git-gh-operations, google-auth, python-execution, docker-container-access, deepwiki-transfer, knowledge-reorg, mcp-builder, official-skills-autoloader)
-  - 運用 (skill-stats)
+- **45個のSkills**:
+  - PR/レビューワークフロー (13): pr, pr-tests, fix, review, review-branch, review-pr-comments, resolve-pr-comments, cherry-pick-pr, deploy, sync-main, merged, clean, browser-test
+  - 原則・ガイドライン (9): ndf-policies, branch-fix-strategy, implementation-plan, investigation-rules, problem-solving, logging-guidelines, markdown-writing, issue-plan-strategy, ml-model-structure
+  - データ分析・品質・環境 (12): data-analyst-sql-optimization, data-analyst-export, qa-security-scan, python-execution, docker-container-access, git-gh-operations, google-auth, codex, deepwiki-transfer, knowledge-reorg, mcp-builder, official-skills-autoloader
+  - E2Eテスト/Playwright (6): playwright-test-planning, playwright-script-creation, playwright-execution, playwright-report, playwright-kit-ops, playwright-scenario-test
+  - 外部サービス連携 (2): google-drive, google-chat
+  - AIクロスレビュー (2): cross-review, gemini
+  - 運用 (1): skill-stats
 - **8つの専門エージェント**: director, data-analyst, corder, researcher, qa, debugger, devops-engineer, code-reviewer
 - **自動フック**: SessionStart (transcript保持期間を最低90日に保つ) + Stop (AI要約生成+Slack通知)
 - **外部AI委譲**: `/ndf:codex` skill + `corder` エージェント経由で Codex CLI をバックグラウンド実行 (v4.0.0 で Codex MCP サーバは廃止)
@@ -81,7 +83,7 @@ kiro-cli chat
 
 | プラグイン名 | バージョン | 説明 | 詳細 |
 |------------|----------|------|------|
-| **ndf** | 4.0.0 | Claude Code / Kiro CLI開発環境を**オールインワン**で強化する統合プラグイン。8個の専門エージェント（director、data-analyst、corder、researcher、qa、debugger、devops-engineer、code-reviewer）、33個のSkills（PR/レビューワークフロー、原則・ガイドライン、データ分析、品質、Codex CLI連携、skill利用統計など）、SessionStartフック（transcript保持期間自動管理）、Stopフック（AI要約生成+Slack通知）を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:codex` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [README](./plugins/ndf/README.md) |
+| **ndf** | 4.11.0 | Claude Code / Kiro CLI開発環境を**オールインワン**で強化する統合プラグイン。8個の専門エージェント（director、data-analyst、corder、researcher、qa、debugger、devops-engineer、code-reviewer）、45個のSkills（PR/レビューワークフロー、原則・ガイドライン、MLモデル構造標準、データ分析、品質、Playwright E2E、Google連携、AIクロスレビュー、Codex CLI連携、skill利用統計など）、SessionStartフック（transcript保持期間自動管理）、Stopフック（AI要約生成+Slack通知）を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:codex` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [README](./plugins/ndf/README.md) |
 
 ## 開発ガイドライン
 
