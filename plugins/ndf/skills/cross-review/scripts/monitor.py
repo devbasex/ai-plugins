@@ -160,10 +160,34 @@ def _match_is_quoted(line: str, match_start: int, match_end: int) -> bool:
     if before.rfind("「") > before.rfind("」") and "」" in after:
         return True
     # コード文字列リテラル (ダブル / シングルクォート)。
+    # エスケープされたクォート (`\"` / `\'`) はリテラルを開閉しないため
+    # パリティ計算から除外する。これを数えると、文字列内にエスケープ
+    # クォートを含む行で「引用内/外」の判定がずれ、本物のエラー行を
+    # 誤って benign 扱い (= FATAL 見逃し) する恐れがある。
     for q in ('"', "'"):
-        if before.count(q) % 2 == 1 and q in after:
+        if _unescaped_count(before, q) % 2 == 1 and q in after:
             return True
     return False
+
+
+def _unescaped_count(text: str, quote: str) -> int:
+    """`quote` のうちバックスラッシュでエスケープされていない出現数を数える。
+
+    直前の連続バックスラッシュ数が奇数なら、そのクォートはエスケープ
+    されている (リテラルを開閉しない) ものとして除外する。
+    """
+    count = 0
+    for i, ch in enumerate(text):
+        if ch != quote:
+            continue
+        backslashes = 0
+        j = i - 1
+        while j >= 0 and text[j] == "\\":
+            backslashes += 1
+            j -= 1
+        if backslashes % 2 == 0:
+            count += 1
+    return count
 
 CODEX_SENTINEL = re.compile(r"^tokens used$", re.MULTILINE)
 
