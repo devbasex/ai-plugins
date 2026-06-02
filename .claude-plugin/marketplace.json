@@ -8,7 +8,7 @@
     {
       "name": "ndf",
       "source": "./plugins/ndf",
-      "description": "All-in-one plugin (v4.10.0): 8 specialized agents, 45 skills (PR/review workflows, principles, ML model structure standard, data analysis, Codex CLI integration, skill usage stats), SessionStart hook (transcript retention >= 90 days), Stop hook (AI-summarized Slack notifications). Codex CLI is invoked via /ndf:codex skill or corder agent (MCP server removed in v4.0.0)."
+      "description": "All-in-one plugin (v4.11.0): 8 specialized agents, 45 skills (PR/review workflows, principles, ML model structure standard, data analysis, Codex CLI integration, skill usage stats), SessionStart hook (transcript retention >= 90 days), Stop hook (AI-summarized Slack notifications). Codex CLI is invoked via /ndf:codex skill or corder agent (MCP server removed in v4.0.0)."
     },
     {
       "name": "affaan-m",
