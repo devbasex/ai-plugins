@@ -130,19 +130,28 @@ EARLY_ERROR_BENIGN = [
     # markdown の表セル行 (`| ... | ...` 形式)。SKILL.md / docs/*.md が
     # 検知パターンを表で列挙しており、それを codex が echo すると誤検知する。
     re.compile(r"^\|", re.MULTILINE),
+    # grep / ripgrep 形式のソース引用行 (`path/to/file.ext:42:    <code>`)。
+    # codex がレビュー対象のテストコード片を grep 形式で echo すると、
+    # その文字列リテラル内の FATAL キーワードを誤検知する (PR #23 round 2 で発生)。
+    re.compile(r"^\S+\.[A-Za-z0-9]+:\d+:", re.MULTILINE),
     # warning は致命ではない
     re.compile(r"^warning: ", re.IGNORECASE | re.MULTILINE),
 ]
 
 
 def _match_is_quoted(line: str, match_start: int, match_end: int) -> bool:
-    """マッチ位置がドキュメント引用 (backtick / 日本語「」) に囲まれているか判定。
+    """マッチ位置がドキュメント引用 / コード文字列リテラルに囲まれているか判定。
 
     - backtick: マッチ開始までの `` ` `` カウントが奇数 かつ マッチ終了以降に `` ` `` がある
     - 日本語クォート: マッチ開始までに直近の `「` が `」` よりも後 かつ マッチ終了以降に `」` がある
+    - ダブル/シングルクォート文字列リテラル: マッチ開始までの `"` (or `'`) カウントが
+      奇数 かつ マッチ終了以降に同じクォートがある (= リテラルの内側)
 
     Why: SKILL.md / docs/*.md 内で FATAL キーワードを `「quota exceeded」` のように
-    引用列挙しており、codex がそれを echo する。引用形は本物のエラーではない。
+    引用列挙しており、codex がそれを echo する。さらに tests/*.py の
+    `"quota exceeded: please upgrade"` のような **テスト用文字列リテラル** を
+    codex がレビュー中に echo するケース (PR #23 round 2 で実際に発生) もある。
+    いずれも引用形であり本物のエラーではないため benign 扱いする。
     """
     before = line[:match_start]
     after = line[match_end:]
@@ -150,6 +159,10 @@ def _match_is_quoted(line: str, match_start: int, match_end: int) -> bool:
         return True
     if before.rfind("「") > before.rfind("」") and "」" in after:
         return True
+    # コード文字列リテラル (ダブル / シングルクォート)。
+    for q in ('"', "'"):
+        if before.count(q) % 2 == 1 and q in after:
+            return True
     return False
 
 CODEX_SENTINEL = re.compile(r"^tokens used$", re.MULTILINE)
