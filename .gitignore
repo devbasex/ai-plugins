@@ -49,3 +49,4 @@ __pycache__/
 ${SERENA_HOME}/
 .serena/logs/
 .serena/cache/
+.cross_review_pr22_diff.patch

@@ -17,6 +17,11 @@ allowed-tools:
 PR を **codex / gemini 両方** にレビューさせ、両者が `APPROVE` を返すまで
 `/ndf:review` と `/ndf:fix` を自動で回す。
 
+/goalの引数として呼ばれた場合は、codex / gemini が`APPROVE` になるまで/cross-reviewを繰り返す。
+  * codex / geminiのいずれかが不具合などで実行できなくなった場合は異常終了とする
+   * /goalで呼ばれた場合はPR ローテーションは実施しなくてよい。
+   * 振動検知した場合はAIが判断して正しい状態を決める。
+
 詳細手順は `docs/` 配下に、主要コマンドは `scripts/` 配下に分割している:
 
 - [docs/01-state-and-review.md](docs/01-state-and-review.md) — Step 0〜4 (state init / round / 並列レビュー / 判定 / 振動検知)
@@ -38,7 +43,8 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 |---|---|
 | レビュー投稿 | **AI 自身が `gh api` で PR に直接投稿**。メインはペイロードを保持しない |
 | 修正 | **必ずサブエージェント (`general-purpose`) で実行**。メイン context に diff は載せない |
-| ユーザ問い合わせ | 自動判断を最大化（`critical`/`major`/`minor` は自動修正、`nit` は最後にまとめて 1 回だけ問い合わせ） |
+| ユーザ問い合わせ | 自動判断を最大化（`critical`/`major`/`minor` は自動修正、ループ中の `nit` は deferred） |
+| 取りこぼし防止 | **ループ終了時（approved / max_rounds / oscillation / error いずれも）に最終スイープを必須実行**。`/ndf:fix` を再実行し、残った open review thread（最終 APPROVE ラウンドの minor/nit インラインコメント含む）を **全て解消**。修正可能なものは修正 + push、判断保留 nit も reply + resolveReviewThread して **open thread 0 で終了** |
 | 状態の永続化 | `<worktree>/.cross_review/cross-review-pr<番号>-state.json` に集約。中断・再開可能 |
 | 長尺PR対策 | **`--rotate-after` ラウンドで PR をローテーション**（default=light: 同ブランチで PR 巻き直し / squash: 新ブランチ + squash 統合） |
 | 振動検知 | 同じ指摘が 2 round で 50%以上重複したら中断 |
@@ -137,10 +143,11 @@ flowchart TD
     Check -->|それ以外| Round
     Rotate --> Round
 
-    Approved --> Nit[最後に 1 回<br/>deferred nit 一覧をユーザに問い合わせ]
-    MaxR --> Nit
-    Osc --> Nit
-    Err --> Nit
+    Approved --> Sweep["最終スイープ (必須)<br/>Agent (general-purpose)<br/>/ndf:fix &lt;PR&gt; を再実行<br/>・残 open review thread を全て確認<br/>・修正可能な minor/nit は修正 + push<br/>・判断保留 nit も reply + resolveReviewThread<br/>→ open thread 0 で終了"]
+    MaxR --> Sweep
+    Osc --> Sweep
+    Err --> Sweep
+    Sweep --> Report[ラウンドサマリ報告<br/>+ 残 deferred nit を参考として列挙]
 
     classDef phase fill:#eef,stroke:#557
     classDef ok fill:#dfd,stroke:#383
@@ -233,6 +240,16 @@ while :; do
   fi
 done
 
+# Step 7.5: 最終スイープ (必須) — どの終了経路 (approved / max_rounds / oscillation /
+#   error) でも、ループを抜けた直後に **メインが Agent(general-purpose) を起動** し、
+#   /ndf:fix $STATE_PR を再実行して残った open review thread を全て解消する。
+#   ⚠ bash 単体では Agent ツールを呼べないため、while ループを抜けたらメインが
+#   Step 7.5 の Agent を駆動し、$TMP_DIR/sweep-pr$STATE_PR-result.json を生成させる
+#   (プロンプトテンプレートは docs/02-fix-and-rotation.md Step 7.5)。
+#   最終 APPROVE ラウンドで投稿された minor/nit インラインコメントはループ内 fix を
+#   経由しないため、ここで拾わないと PR 上に未解決スレッドが残る。
+#   sweep 結果 (sweep-pr$STATE_PR-result.json) はメインが Step 8 の報告に折り込む。
+
 # Step 8: 終了処理 (deferred nit + ラウンドサマリ)
 "$SCRIPTS/state.py" report "$STATE_PR"
 ```
@@ -240,7 +257,7 @@ done
 各ステップの内容と契約（state.json / result.json スキーマ等）の詳細は:
 
 - Step 0〜4 — [docs/01-state-and-review.md](docs/01-state-and-review.md)
-- Step 5〜8 — [docs/02-fix-and-rotation.md](docs/02-fix-and-rotation.md)
+- Step 5〜8 (最終スイープ Step 7.5 含む) — [docs/02-fix-and-rotation.md](docs/02-fix-and-rotation.md)
 
 ## light モード rotation の再開プロトコル (exit 10 を観測した時)
 
@@ -335,7 +352,10 @@ pint / larastan / test / build などは **中断** を原則とする。
 
 - ❌ **修正をメインセッション内で行う** — context が一気に膨れる。必ずサブエージェント
 - ❌ **AI に Markdown だけ返させる** — メインがパース・投稿する設計は禁物。AI 直接投稿
-- ❌ **nit を都度ユーザに問う** — 必ずバッチ集約して最後に 1 回
+- ❌ **nit を都度ユーザに問う** — ループ中は deferred 記録のみ。最終スイープ (Step 7.5) で Resolve
+- ❌ **未解決スレッドを残したまま終了する** — approved/max_rounds 等いずれの終了経路でも
+  Step 7.5 の最終スイープを必ず実行し、open review thread 0 で終える。特に **最終 APPROVE
+  ラウンドの minor/nit インラインコメント**はループ内 fix を通らないため取りこぼしやすい
 - ❌ **`max-rounds` なしで回す** — 無限ループの温床
 - ❌ **PR ローテーションを忘れる** — 100+ コメントの巨大 PR になる
 - ❌ **light モードで Agent (general-purpose) 呼び出しを省略する** — newtext.json が無いと `rotate-pr.sh execute --mode light` はエラーで止まる。prepare → Agent → execute の 3 段は不可分
@@ -357,6 +377,11 @@ pint / larastan / test / build などは **中断** を原則とする。
 
 1. **err.log の冒頭を確認**: 検知パターン (`fatal_err` の `early error (fatal) in err.log: ...`) が
    本当に致命なのか、それとも diff body の echo / config validation 警告なのかを判別
+   - **v4.11.0 で benign 自動判定を強化**: `_match_is_quoted()` が backtick / 「」 に加え
+     **ダブル/シングルクォート文字列リテラル** (`"quota exceeded: ..."`) を、`EARLY_ERROR_BENIGN`
+     が **grep 形式のソース引用行** (`path/to/file.py:22:    <code>`) を自動で benign 扱いする。
+     codex が tests/*.py 等のテスト用文字列 (`"quota exceeded"`, `"sandbox error"`) を
+     レビュー中に echo しても誤 kill しなくなった（旧版で PR #23 round 2 に発生した事例）
 2. **gemini の `Error in: mcpServers.<name>` 警告**: `.gemini/settings.json` に `disabled: false`
    等の非互換キーがあると毎回出る。`launch-gemini.sh` の sanitize ロジック (v4.7.2+) で
    自動退避するため、最新版にアップデートすれば解消する
@@ -393,7 +418,10 @@ pint / larastan / test / build などは **中断** を原則とする。
   | 2 | #123 | REQ (2) | APP | def456 (2 fixed) | ✅ |
   | 3 | #145 | APP | APP | — | — |
 
-- **残 deferred nit リスト**（ユーザ判断要）
+- **最終スイープ結果** (Step 7.5): `sweep-pr<PR>-result.json` の `resolved` /
+  `fixed_in_sweep` / `remaining_open`。**`remaining_open` は 0 が正常**（残 open
+  thread あり = 取りこぼし）。0 にできなかった場合は理由を明記
+- **残 deferred nit リスト**（Step 7.5 で Resolve 済み。再対応が要るものがあれば参考列挙）
 - **rejected 件数**（bot 誤指摘で却下したもの）
 - **最終 PR URL**
 

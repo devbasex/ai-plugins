@@ -24,7 +24,9 @@ pidfile stale / result.json 不在) を構造化して扱う。
      STALLED として中断。既定は agent 別 (codex=180s, gemini=480s。gemini は err.log
      にほぼ進捗を出さないため大きめ)。`--stall-timeout` で CLI 明示、
      `MONITOR_STALL_<AGENT>` env で per-agent 上書き、`MONITOR_STALL` env で共通上書き可
-  7. **失敗時 kill**: TIMEOUT / STALLED / EARLY_ERROR (FATAL のみ) / PIDFILE_BAD で
+  7. **result.json + age fallback**: sentinel を持たない agent (gemini) 向け。
+     result.json の mtime が 30 秒以上前なら完了とみなし kill → OK
+  8. **失敗時 kill**: TIMEOUT / STALLED / EARLY_ERROR (FATAL のみ) / PIDFILE_BAD で
      返るとき、対象プロセスを SIGTERM (3 秒後に SIGKILL) で停止する
 
 Usage:
@@ -78,6 +80,9 @@ DEFAULT_STALL_AGENT_BUILTIN = {
     "gemini": 480,   # err.log が静かなため 8 min まで許容
 }
 DEFAULT_POLL = 15          # 15 sec — env `MONITOR_POLL` で上書き可
+# result.json が書き込まれた後もプロセスがハングするケース (gemini で観測) の
+# fallback: mtime から RESULT_AGE_GRACE 秒以上経過していれば完了とみなす。
+RESULT_AGE_GRACE = 30
 # `MONITOR_NO_EARLY_ERROR=1` で EARLY_ERROR 検知を無効化 (escape hatch)
 DEFAULT_NO_EARLY_ERROR = os.environ.get("MONITOR_NO_EARLY_ERROR", "").lower() in {
     "1", "true", "yes", "on",
@@ -125,19 +130,28 @@ EARLY_ERROR_BENIGN = [
     # markdown の表セル行 (`| ... | ...` 形式)。SKILL.md / docs/*.md が
     # 検知パターンを表で列挙しており、それを codex が echo すると誤検知する。
     re.compile(r"^\|", re.MULTILINE),
+    # grep / ripgrep 形式のソース引用行 (`path/to/file.ext:42:    <code>`)。
+    # codex がレビュー対象のテストコード片を grep 形式で echo すると、
+    # その文字列リテラル内の FATAL キーワードを誤検知する (PR #23 round 2 で発生)。
+    re.compile(r"^\S+\.[A-Za-z0-9]+:\d+:", re.MULTILINE),
     # warning は致命ではない
     re.compile(r"^warning: ", re.IGNORECASE | re.MULTILINE),
 ]
 
 
 def _match_is_quoted(line: str, match_start: int, match_end: int) -> bool:
-    """マッチ位置がドキュメント引用 (backtick / 日本語「」) に囲まれているか判定。
+    """マッチ位置がドキュメント引用 / コード文字列リテラルに囲まれているか判定。
 
     - backtick: マッチ開始までの `` ` `` カウントが奇数 かつ マッチ終了以降に `` ` `` がある
     - 日本語クォート: マッチ開始までに直近の `「` が `」` よりも後 かつ マッチ終了以降に `」` がある
+    - ダブル/シングルクォート文字列リテラル: マッチ開始までの `"` (or `'`) カウントが
+      奇数 かつ マッチ終了以降に同じクォートがある (= リテラルの内側)
 
     Why: SKILL.md / docs/*.md 内で FATAL キーワードを `「quota exceeded」` のように
-    引用列挙しており、codex がそれを echo する。引用形は本物のエラーではない。
+    引用列挙しており、codex がそれを echo する。さらに tests/*.py の
+    `"quota exceeded: please upgrade"` のような **テスト用文字列リテラル** を
+    codex がレビュー中に echo するケース (PR #23 round 2 で実際に発生) もある。
+    いずれも引用形であり本物のエラーではないため benign 扱いする。
     """
     before = line[:match_start]
     after = line[match_end:]
@@ -145,7 +159,35 @@ def _match_is_quoted(line: str, match_start: int, match_end: int) -> bool:
         return True
     if before.rfind("「") > before.rfind("」") and "」" in after:
         return True
+    # コード文字列リテラル (ダブル / シングルクォート)。
+    # エスケープされたクォート (`\"` / `\'`) はリテラルを開閉しないため
+    # パリティ計算から除外する。これを数えると、文字列内にエスケープ
+    # クォートを含む行で「引用内/外」の判定がずれ、本物のエラー行を
+    # 誤って benign 扱い (= FATAL 見逃し) する恐れがある。
+    for q in ('"', "'"):
+        if _unescaped_count(before, q) % 2 == 1 and q in after:
+            return True
     return False
+
+
+def _unescaped_count(text: str, quote: str) -> int:
+    """`quote` のうちバックスラッシュでエスケープされていない出現数を数える。
+
+    直前の連続バックスラッシュ数が奇数なら、そのクォートはエスケープ
+    されている (リテラルを開閉しない) ものとして除外する。
+    """
+    count = 0
+    for i, ch in enumerate(text):
+        if ch != quote:
+            continue
+        backslashes = 0
+        j = i - 1
+        while j >= 0 and text[j] == "\\":
+            backslashes += 1
+            j -= 1
+        if backslashes % 2 == 0:
+            count += 1
+    return count
 
 CODEX_SENTINEL = re.compile(r"^tokens used$", re.MULTILINE)
 
@@ -277,14 +319,38 @@ def _read_pidfile(p: pathlib.Path) -> Optional[int]:
 
 
 def _pid_alive(pid: int) -> bool:
-    """`kill -0` 相当。0 シグナルを送って例外で判定。"""
+    """`kill -0` + ゾンビ検出。
+
+    `os.kill(pid, 0)` はゾンビプロセスに対しても成功する (PID エントリが
+    残っているため)。Docker without `--init` 環境では orphan プロセスが
+    ゾンビ化して永久に残るため、`/proc/<pid>/status` で State: Z を検出する。
+    """
     try:
         os.kill(pid, 0)
-        return True
     except (ProcessLookupError, PermissionError):
         return False
     except OSError:
         return False
+    try:
+        status_text = pathlib.Path(f"/proc/{pid}/status").read_text()
+        for line in status_text.splitlines():
+            if line.startswith("State:"):
+                return "Z" not in line
+    except (FileNotFoundError, PermissionError, OSError):
+        pass
+    return True
+
+
+def _is_zombie(pid: int) -> bool:
+    """PID がゾンビかどうか。_pid_alive() とは独立に呼べるユーティリティ。"""
+    try:
+        status_text = pathlib.Path(f"/proc/{pid}/status").read_text()
+        for line in status_text.splitlines():
+            if line.startswith("State:"):
+                return "Z" in line
+    except (FileNotFoundError, PermissionError, OSError):
+        pass
+    return False
 
 
 def _kill_pid(pid: int, sigterm_grace: float = 3.0) -> None:
@@ -293,8 +359,11 @@ def _kill_pid(pid: int, sigterm_grace: float = 3.0) -> None:
     TIMEOUT / STALLED / EARLY_ERROR で監視を打ち切るとき、対象プロセスが残ったまま
     だと後から `gh api` 投稿や result.json 書き込みを実行してメインフローと
     競合する。失敗扱いで返るときは必ず停止させる。
+    ゾンビプロセスにはシグナルを送れないためスキップする。
     """
     if pid <= 0:
+        return
+    if _is_zombie(pid):
         return
     try:
         os.kill(pid, signal.SIGTERM)
@@ -431,6 +500,7 @@ def monitor_agent(
     # 再利用されている可能性があり、ここで PIDFILE_BAD を返すと「完了している（result.json は出ている）」
     # ケースを誤って失敗にしてしまう。alive=True と確認した瞬間のみ cmdline 一致を検証する。
 
+    started_wall = time.time()
     last_err_size = paths.err_log.stat().st_size if paths.err_log.exists() else 0
     last_progress = time.monotonic()
     cmdline_validated = False
@@ -465,6 +535,35 @@ def monitor_agent(
             )
             _emit_log(log_prefix, agent, status)
             return status
+
+        # result.json が書かれた後もプロセスがハング��るケース (gemini で観測:
+        # MCP サーバー切断待ち等��� exit しない)。sentinel 機構を持たない agent 向け
+        # の fallback: result.json の mtime が RESULT_AGE_GRACE 秒以上前であれば
+        # 完了とみなし、プロセスを kill → OK。
+        # 安全条件:
+        #   - cmdline_validated: PID 再利用でない (または検証不能環境) ことを確認済み
+        #   - mtime >= started_wall: 前 round の stale result.json を拾わない
+        if (
+            alive
+            and not status.sentinel_seen
+            and cmdline_validated
+            and paths.result.exists()
+            and paths.result.stat().st_size > 0
+        ):
+            result_mtime = paths.result.stat().st_mtime
+            if result_mtime >= started_wall:
+                result_age = time.time() - result_mtime
+                if result_age >= RESULT_AGE_GRACE:
+                    _kill_pid(pid)
+                    status.result_exists = True
+                    status.status = "OK"
+                    status.exit_code = 0
+                    status.detail = (
+                        f"result.json exists for {result_age:.0f}s without process exit; "
+                        f"killed lingering pid {pid}"
+                    )
+                    _emit_log(log_prefix, agent, status)
+                    return status
 
         if alive and not cmdline_validated:
             # cmdline 検証は alive 確認後に 1 回だけ。生きていない瞬間に proc/<pid> を読むと
