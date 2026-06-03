@@ -13,7 +13,7 @@
 #       light  : 同ブランチで旧 PR を close → 同 head/base で新 PR を作成。
 #                title/body は newtext.json から流す。元 PR の isDraft をコピー。
 #                PR title に内部用語 (rotated/round/cross-review) は付与しない。
-#       squash : 既存挙動。squash 統合した新ブランチ (-rHHMMSS suffix) + 新 PR。
+#       squash : squash 統合した新ブランチ (-rHHMMSS suffix) + 新 PR。
 #                title 末尾に "(rotated)"、body は automated text。
 #       いずれも stdout に NEW_PR= / NEW_PR_URL= / NEW_BRANCH= を出力。
 #
@@ -190,7 +190,7 @@ execute_light() {
   printf 'NEW_BRANCH=%q\n'  "$head_branch"
 }
 
-# squash モード本体: 既存挙動を完全維持。
+# squash モード本体。
 execute_squash() {
   local state_pr=$1
   load_state "$state_pr"

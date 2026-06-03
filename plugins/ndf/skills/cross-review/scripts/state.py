@@ -845,8 +845,8 @@ def main() -> None:
 
     sp = sub.add_parser("init", help="Step 0 — state 初期化 or 再開")
     sp.add_argument("pr", type=int)
-    sp.add_argument("--max-rounds", type=int, default=6)
-    sp.add_argument("--rotate-after", type=int, default=5)
+    sp.add_argument("--max-rounds", type=int, default=12)
+    sp.add_argument("--rotate-after", type=int, default=8)
     sp.add_argument("--only", choices=["codex", "gemini"], default=None)
     sp.add_argument("--worktree", default=None)
     sp.set_defaults(func=cmd_init)
