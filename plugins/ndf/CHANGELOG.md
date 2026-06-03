@@ -1,5 +1,22 @@
 # NDF Plugin CHANGELOG
 
+### v4.12.1 (cross-review デフォルト値調整・説明文整理)
+
+`/ndf:cross-review` のローテーション/打ち切り関連デフォルトを長尺 PR 向けに緩和し、
+`--rotate-mode` の説明文を整理。
+
+- **デフォルト値変更** (`skills/cross-review/scripts/state.py`):
+  - `--max-rounds` の既定値を `6 → 12` に変更
+  - `--rotate-after` の既定値を `5 → 8` に変更
+  - 長尺・指摘の多い PR で max_rounds 打ち切りや早期ローテーションに
+    到達しにくくし、収束まで回しきれるようにする狙い
+- **`--rotate-mode squash` 説明文の整理**:
+  - SKILL.md / docs / scripts から「既存挙動」の文言を全削除
+  - 反映: `SKILL.md` / `docs/01-state-and-review.md` (サンプル state.json) /
+    `docs/02-fix-and-rotation.md` / `scripts/rotate-pr.sh`
+- **plugin.json: version 4.12.0 → 4.12.1**。marketplace.json / README / AGENTS.md /
+  ndf-plugin-reference の version 表記を整合。
+
 ### v4.12.0 (playwright-browser-connect / playwright-evidence-drive Skill 追加)
 
 `/ndf:playwright-browser-connect` と `/ndf:playwright-evidence-drive` を新規 Skill
