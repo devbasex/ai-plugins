@@ -29,6 +29,8 @@ Web アプリの E2E シナリオを **理論ベース** で計画し、**再現
 | 3 | `/ndf:playwright-execution` | テスト実行 + エビデンス収集 (video/trace/overlay/quality) |
 | 4 | `/ndf:playwright-report` | レポート生成 (Markdown) |
 | -- | `/ndf:playwright-kit-ops` | ツール群 (init_project / スキャン / アップロード) |
+| -- | `/ndf:playwright-browser-connect` | ブラウザ接続 (local / CDP remote) |
+| -- | `/ndf:playwright-evidence-drive` | エビデンス Google Drive 保管・共有 |
 
 ## 標準ワークフロー
 

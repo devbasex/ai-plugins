@@ -54,9 +54,9 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 | 引数 | 意味 | 既定 |
 |---|---|---|
 | `[PR番号]` | 対象 PR（省略時は直前 PR / 現在ブランチ） | — |
-| `--max-rounds N` | 全体最大ラウンド数（PR ローテーションを含む通算） | `6` |
-| `--rotate-after K` | この round 数で未収束なら PR ローテーション | `5` |
-| `--rotate-mode light\|squash` | ローテーション方式。`light`: 同ブランチで旧 PR を close → 新 PR (title/body は現状の差分・実装から再生成)。`squash`: 既存挙動 (squash 統合 + 新ブランチ + `(rotated)` suffix) | `light` |
+| `--max-rounds N` | 全体最大ラウンド数（PR ローテーションを含む通算） | `12` |
+| `--rotate-after K` | この round 数で未収束なら PR ローテーション | `8` |
+| `--rotate-mode light\|squash` | ローテーション方式。`light`: 同ブランチで旧 PR を close → 新 PR (title/body は現状の差分・実装から再生成)。`squash`: squash 統合 + 新ブランチ + `(rotated)` suffix | `light` |
 | `--only codex` / `--only gemini` | 片方だけで回す（デバッグ用） | 両方 |
 
 例:
@@ -64,7 +64,7 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 ```
 /ndf:cross-review 123
 /ndf:cross-review 123 --max-rounds 4 --rotate-after 2
-/ndf:cross-review 123 --rotate-mode squash   # 既存挙動が欲しい場合のみ
+/ndf:cross-review 123 --rotate-mode squash
 /ndf:cross-review 123 --only codex
 ```
 

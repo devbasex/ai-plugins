@@ -26,8 +26,8 @@
 ```json
 {
   "started_at": "2026-05-12T...",
-  "max_rounds": 6,
-  "rotate_after": 5,
+  "max_rounds": 12,
+  "rotate_after": 8,
   "only": null,
   "current_pr": 123,
   "worktree_path": "/work/worktrees/pr123",

@@ -7,7 +7,7 @@ Claude Code開発環境を**オールインワン**で強化する統合プラ�
 このプラグイン1つで、以下の**すべて**の機能を利用できます：
 
 1. **コアMCP**: なし (v4.0.0 で Codex MCP 廃止 / Serena MCP は `mcp-serena` プラグインに分離)
-2. **Skills**: 45個（PR/コードレビュー系ワークフロー13個 + 原則・ガイドライン9個 (issue→multi-PR 戦略・MLモデル構造標準含む) + データ分析/品質/環境系12個 + Playwright E2E 6個 + Google Drive/Chat 連携2個 + AI クロスレビュー2個 (cross-review / gemini) + skill-stats 1個）
+2. **Skills**: 47個（PR/コードレビュー系ワークフロー13個 + 原則・ガイドライン9個 (issue→multi-PR 戦略・MLモデル構造標準含む) + データ分析/品質/環境系12個 + Playwright E2E 8個 (CDPリモート接続・Google Driveエビデンス保管含む) + Google Drive/Chat 連携2個 + AI クロスレビュー2個 (cross-review / gemini) + skill-stats 1個）
 3. **専門エージェント**: 8つの特化型AIエージェント（director、data-analyst、corder、researcher、qa、debugger、devops-engineer、code-reviewer）
 4. **自動フック**: Slack通知
 
@@ -761,7 +761,7 @@ NDFプラグインと併用することで、以下の機能が追加されま�
 
 | プラグイン | 役割 |
 |-----------|------|
-| **NDFプラグイン** | MCP統合、スキル（45個）、専門エージェント |
+| **NDFプラグイン** | MCP統合、スキル（47個）、専門エージェント |
 | **affaan-mプラグイン** | コンテキスト管理、品質保証、TDDワークフロー |
 
 詳細は[affaan-mプラグインREADME](../affaan-m/README.md)を参照してください。

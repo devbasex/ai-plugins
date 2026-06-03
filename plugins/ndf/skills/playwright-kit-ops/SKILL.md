@@ -104,5 +104,6 @@ playwright_kit Python パッケージ本体・templates・tests はこの skill 
 - `/ndf:playwright-test-planning` — テスト計画 (方法論 + チェックリスト)
 - `/ndf:playwright-script-creation` — テストスクリプト作成
 - `/ndf:playwright-execution` — テスト実行 + エビデンス収集 (video/trace/overlay/quality)
+- `/ndf:playwright-browser-connect` — ブラウザ接続構成 (local / CDP remote)
 - `/ndf:playwright-report` — レポート生成
 - `/ndf:playwright-scenario-test` — 全機能統括

@@ -275,7 +275,7 @@ PR を読む人は cross-review の存在を意識しないため、最終 PR �
 | mode | 振る舞い |
 |---|---|
 | `light` (default) | prepare.json と newtext.json を読み、**同ブランチ・同 base** で旧 PR を close → 新 PR を作成。`is_draft=true` なら新 PR も Draft で作る。title/body は newtext から流す |
-| `squash` (opt-in) | 既存挙動。`<branch>-rHHMMSS` の新ブランチを作って `git reset --soft origin/$BASE` で squash 統合 → 旧 PR close → 新 PR (`(rotated)` suffix + automated body) |
+| `squash` (opt-in) | `<branch>-rHHMMSS` の新ブランチを作って `git reset --soft origin/$BASE` で squash 統合 → 旧 PR close → 新 PR (`(rotated)` suffix + automated body) |
 
 stdout には両モードとも以下を KEY=VALUE で出す:
 

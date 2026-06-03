@@ -4,7 +4,7 @@
 
 NDF プラグインは、Claude Code / Kiro CLI 向けのオールインワン開発支援プラグイン。エージェント、Skills、フックを統合して提供する。
 
-**現行バージョン**: **v4.11.0** — `/ndf:cross-review` の堅牢性改善。monitor.py の EARLY_ERROR 誤検知を解消（テスト用文字列リテラル / grep 形式ソース引用行を benign 自動判定）し、ループ終了時の最終スイープ（残 open review thread を全 Resolve）を必須化。直前の **v4.10.0** で `ml-model-structure` skill（MLモデル構築・推論API開発の標準ディレクトリ構造: 版内feature SSoT / train↔serve契約）を追加。`/ndf:fix` の修正ポリシー刷新（minor/nit のうち performance/readability/duplication は積極修正、+30 行超は要問い合わせ）、CI 完了待ち廃止、PR範囲外 flaky テストも修正対象。`/ndf:cross-review` 内のサブエージェントプロンプトも同期。重要度ラベルは AI agent の付与を鵜呑みにせず独自再判定。完了報告には PR URL 必須。詳細は [CHANGELOG.md](../plugins/ndf/CHANGELOG.md)。`/ndf:codex` skill + `corder` エージェント経由の Codex CLI 直接実行に一本化、Serena MCP は別プラグイン `mcp-serena` に分離済み、Playwright シナリオ E2E、Google Drive / Chat 連携 skill を提供。
+**現行バージョン**: **v4.12.0** — Playwright E2E に `/ndf:playwright-browser-connect`（CDP リモートブラウザ接続）と `/ndf:playwright-evidence-drive`（Google Drive エビデンスアーカイブ）の 2 skill を追加（45→47個）。直前の **v4.11.0** で `/ndf:cross-review` の堅牢性改善（monitor.py の EARLY_ERROR 誤検知を解消: テスト用文字列リテラル / grep 形式ソース引用行を benign 自動判定し、ループ終了時の最終スイープで残 open review thread を全 Resolve）を実施。**v4.10.0** で `ml-model-structure` skill（MLモデル構築・推論API開発の標準ディレクトリ構造: 版内feature SSoT / train↔serve契約）を追加。`/ndf:fix` の修正ポリシー刷新（minor/nit のうち performance/readability/duplication は積極修正、+30 行超は要問い合わせ）、CI 完了待ち廃止、PR範囲外 flaky テストも修正対象。`/ndf:cross-review` 内のサブエージェントプロンプトも同期。重要度ラベルは AI agent の付与を鵜呑みにせず独自再判定。完了報告には PR URL 必須。詳細は [CHANGELOG.md](../plugins/ndf/CHANGELOG.md)。`/ndf:codex` skill + `corder` エージェント経由の Codex CLI 直接実行に一本化、Serena MCP は別プラグイン `mcp-serena` に分離済み、Playwright シナリオ E2E、Google Drive / Chat 連携 skill を提供。
 
 ## ディレクトリ構造
 
@@ -18,7 +18,7 @@ plugins/ndf/
 │   ├── ensure-retention.sh  # cleanupPeriodDays >= 90 を保つ
 │   └── slack-notify.js      # Slack通知スクリプト
 ├── agents/                  # 専門エージェント（8個）
-├── skills/                  # Skills（45個）
+├── skills/                  # Skills（47個）
 ├── CLAUDE.md                # プラグイン開発者向けガイド
 └── README.md                # 利用者向けドキュメント
 ```
@@ -189,3 +189,5 @@ claude -p --settings '{"disableAllHooks": true, "disableAllPlugins": true}' --ou
 | **v4.1.0** | `playwright-scenario-test` / `google-drive` / `google-chat` skill 追加、`google-auth` v0.2.0 (永続トークン `~/.config/gcloud/google_token.json` + `get_credentials()` API + 手動 copy-paste フロー) |
 | **v4.10.0** | `ml-model-structure` skill 追加 (MLモデル構築・推論API開発の標準ディレクトリ構造、版内 feature SSoT / train↔serve 契約) |
 | **v4.11.0** | `/ndf:cross-review` 堅牢性改善: monitor.py EARLY_ERROR 誤検知解消 (文字列リテラル / grep ソース引用行を benign 判定) + ループ終了時の最終スイープ (残 open thread 全 Resolve) 必須化 |
+| **v4.12.0** | Playwright E2E に `playwright-browser-connect` (CDP リモートブラウザ接続) / `playwright-evidence-drive` (Google Drive エビデンスアーカイブ) の 2 skill 追加 (45→47個) |
+| **v4.12.1** | `/ndf:cross-review` デフォルト調整: `--max-rounds` 6→12 / `--rotate-after` 5→8、`--rotate-mode squash` 説明から「既存挙動」表記を削除 |

@@ -1,5 +1,50 @@
 # NDF Plugin CHANGELOG
 
+### v4.12.1 (cross-review デフォルト値調整・説明文整理)
+
+`/ndf:cross-review` のローテーション/打ち切り関連デフォルトを長尺 PR 向けに緩和し、
+`--rotate-mode` の説明文を整理。
+
+- **デフォルト値変更** (`skills/cross-review/scripts/state.py`):
+  - `--max-rounds` の既定値を `6 → 12` に変更
+  - `--rotate-after` の既定値を `5 → 8` に変更
+  - 長尺・指摘の多い PR で max_rounds 打ち切りや早期ローテーションに
+    到達しにくくし、収束まで回しきれるようにする狙い
+- **`--rotate-mode squash` 説明文の整理**:
+  - SKILL.md / docs / scripts から「既存挙動」の文言を全削除
+  - 反映: `SKILL.md` / `docs/01-state-and-review.md` (サンプル state.json) /
+    `docs/02-fix-and-rotation.md` / `scripts/rotate-pr.sh`
+- **plugin.json: version 4.12.0 → 4.12.1**。marketplace.json / README / AGENTS.md /
+  ndf-plugin-reference の version 表記を整合。
+
+### v4.12.0 (playwright-browser-connect / playwright-evidence-drive Skill 追加)
+
+`/ndf:playwright-browser-connect` と `/ndf:playwright-evidence-drive` を新規 Skill
+として追加。CDP リモートブラウザ接続と Google Drive エビデンスアーカイブを
+playwright-scenario-test エコシステムから独立した専門 Skill に分離。
+
+- **新規 Skill `playwright-browser-connect`**:
+  - `scenario.config.yaml` の `browser.mode: cdp-remote` で既存 Chrome に
+    CDP (Chrome DevTools Protocol) 接続するワークフローを提供
+  - `conftest.py.template` に browser fixture を追加 (mode 切り替え)
+  - `config.py` に `BrowserConfig` dataclass を追加
+- **新規 Skill `playwright-evidence-drive`**:
+  - テスト実行後のエビデンス (video/trace/screenshot/HAR) を Google Drive に
+    自動アーカイブする手順を提供
+  - 認証は `ndf:google-auth` に委譲
+- **conftest.py.template の改善** (PR #19 クロスレビュー対応):
+  - `browser_type_launch_args` を browser fixture の依存に追加し、
+    `--headed` / `slow_mo` / `channel` 等が local モードで反映されるよう修正
+  - CDP 接続時に Chromium 以外のブラウザが選択された場合の fail-fast チェックを追加
+  - 変数名 `b` → `browser` に改名 (可読性向上)
+- **config.py の修正** (PR #19 クロスレビュー対応):
+  - `BrowserConfig.cdp_endpoint` の既定値を `ws://localhost:9222` →
+    `http://localhost:9222` に変更 (Playwright の `connect_over_cdp()` は
+    HTTP endpoint から `/json/version` 経由で WebSocket URL を自動解決する)
+- **plugin.json: version 4.11.0 → 4.12.0**。marketplace.json / README / AGENTS.md /
+  ndf-plugin-reference の version 表記を整合。
+- Skills: 45個 → **47個** (main の ml-model-structure 追加分とマージ)
+
 ### v4.11.0 (fix/cross-review-early-error-and-final-sweep: cross-review 堅牢性改善)
 
 `/ndf:cross-review` の 2 つの運用課題を修正。
