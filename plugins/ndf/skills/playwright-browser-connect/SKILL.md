@@ -1,7 +1,7 @@
 ---
 name: playwright-browser-connect
 description: "Playwright E2E テストのブラウザ接続先を構成する。ローカル Chromium / Windows リモート Chrome (CDP) / macOS リモート Chrome (CDP) の 3 パターンをサポートし、scenario.config.yaml の browser: セクションで宣言的に切り替える。"
-when_to_use: "E2E テストのブラウザ接続先を設定・変更するとき / remote Chrome に CDP で接続したいとき / WSL2 Docker から Windows Chrome を操作したいとき / macOS ホストの Chrome を使いたいとき。Triggers: 'ブラウザ接続', 'remote chrome', 'CDP接続', 'connectOverCDP', 'リモートブラウザ', 'Windows Chrome', 'macOS Chrome', 'browser connect', 'cdp endpoint', 'remote debugging'"
+when_to_use: "E2E テストのブラウザ接続先を設定・変更するとき / remote Chrome に CDP で接続したいとき / WSL2 Docker から Windows Chrome を操作したいとき / macOS ホストの Chrome を使いたいとき。Triggers: 'ブラウザ接続', 'remote chrome', 'CDP接続', 'connectOverCDP', 'リモートブラウザ', 'Windows Chrome', 'macOS Chrome', 'mac Chrome', 'browser connect', 'cdp endpoint', 'remote debugging', 'コンテナからホスト Chrome 起動', 'host.docker.internal'"
 allowed-tools:
   - Read
   - Bash
@@ -146,34 +146,136 @@ Chrome (--remote-debugging-port=9222 --remote-allow-origins=*)
 
 #### セットアップ手順
 
-**Step 1: macOS Chrome をリモートデバッグモードで起動**
+**Step 1: macOS Chrome をリモートデバッグモードで起動 (ホスト側で実行)**
+
+実績のある起動コマンド:
 
 ```bash
-/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
   --remote-debugging-port=9222 \
+  --user-data-dir=/tmp/chrome-debug \
   --remote-allow-origins=* \
-  --user-data-dir="$HOME/tmp/chrome-debug"
+  --disable-features=DialMediaRouteProvider
 ```
 
-既存プロファイルのログイン済み Session を使う場合:
+各フラグの意味:
+
+| フラグ | 役割 |
+|---|---|
+| `--remote-debugging-port=9222` | CDP エンドポイントを 9222 で公開 |
+| `--user-data-dir=/tmp/chrome-debug` | 専用プロファイルで起動 (既存の通常 Chrome と共存可能)。任意のパスでよい |
+| `--remote-allow-origins=*` | CDP WebSocket の Host ヘッダ検証を無効化し、リモート (コンテナ) からの接続を許可 (Chrome 106+) |
+| `--disable-features=DialMediaRouteProvider` | DIAL (Cast) のメディアルート探索を無効化。CDP ログのノイズと不要なネットワーク探索を抑制 |
+
+既存プロファイルのログイン済み Session をそのまま使う場合は、全 Chrome プロセスを終了してから
+`--user-data-dir` を外して起動する (デフォルトプロファイルを使用):
 
 ```bash
 # 全 Chrome プロセスを終了してから
-/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
   --remote-debugging-port=9222 \
-  --remote-allow-origins=*
+  --remote-allow-origins=* \
+  --disable-features=DialMediaRouteProvider
 ```
 
 **Step 2: scenario.config.yaml**
 
 macOS Docker Desktop は `host.docker.internal` を標準サポートしており、
-`--remote-allow-origins=*` で Host ヘッダ検証を無効化しているため proxy 不要。
+`--remote-allow-origins=*` で Host ヘッダ検証を無効化しているため、WSL2 と異なり **proxy 不要**。
 
 ```yaml
 browser:
   mode: cdp-remote
   cdp_endpoint: ${CDP_ENDPOINT:-http://host.docker.internal:9222}
 ```
+
+**Step 3 (任意): コンテナからホスト Chrome を起動する**
+
+毎回ホスト側で手動起動するのを避けたい場合は、コンテナから SSH 経由でホストの Chrome を起動できる。
+詳細は後述の「コンテナからホスト Chrome を起動する (SSH 経由)」セクションを参照。
+
+## コンテナからホスト Chrome を起動する (SSH 経由)
+
+### なぜ直接は起動できないのか
+
+Docker コンテナはホストとプロセス空間が分離されているため、**コンテナ内のプロセスがホスト上に直接プロセスを生成することはできない**。
+特に macOS / Windows の Docker Desktop はコンテナを LinuxKit VM 内で実行するため、`nsenter` やホスト PID namespace を使う Linux 系の回避策も VM 止まりで macOS ホストには届かない。
+
+したがって「コンテナからホストの Chrome を起動する」には、**ホスト側に起動を受け付ける口** が必要になる。最も導入が容易でスクリプト化しやすいのは **SSH** (macOS の「リモートログイン」= sshd) を使う方法。
+コンテナは `host.docker.internal` でホストに到達できるため、SSH でホストにログインして起動コマンドを実行する。
+
+```
+Docker container ──ssh──▶ host.docker.internal:22 (macOS sshd)
+                                 └─▶ Google Chrome --remote-debugging-port=9222 ... (バックグラウンド起動)
+Docker container ──CDP──▶ host.docker.internal:9222 (起動後に接続)
+```
+
+### ホスト側の準備 (一度だけ)
+
+1. **リモートログインを有効化**: システム設定 > 一般 > 共有 > 「リモートログイン」を ON
+   （CLI: `sudo systemsetup -setremotelogin on`）
+2. **SSH 鍵を登録** (パスワードレス実行のため): コンテナ側の公開鍵をホストの `~/.ssh/authorized_keys` に追加
+3. ログインユーザーは **コンソールにログイン中の本人** であること。
+   macOS では GUI アプリ (Chrome) は WindowServer に接続するため、コンソールセッションの所有者として起動する必要がある。
+
+### スクリプト
+
+`scripts/start-host-chrome.sh` をコンテナ内から実行する。
+冪等で、既に CDP が起動済みなら何もしない。
+
+```bash
+# コンテナ内
+HOST_SSH_USER=<macのユーザー名> \
+  ./scripts/start-host-chrome.sh
+```
+
+主な環境変数:
+
+| 変数 | デフォルト | 説明 |
+|---|---|---|
+| `HOST_SSH_USER` | (必須) | ホスト (mac) のログインユーザー名 |
+| `HOST_SSH_HOST` | `host.docker.internal` | SSH 接続先ホスト |
+| `CDP_PORT` | `9222` | リモートデバッグポート |
+| `CHROME_USER_DATA_DIR` | `/tmp/chrome-debug` | 起動プロファイル。空にするとデフォルトプロファイル (ログイン済み Session) を使用 |
+| `CHROME_BIN` | `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome` | Chrome バイナリパス |
+| `MANUAL_WAIT` | `120` | 手動フォールバック時の起動待ち秒。`0` で待たず即終了 |
+
+スクリプトの動作:
+
+1. `http://host.docker.internal:9222/json/version` に疎通すれば **起動済み** とみなし即終了
+2. 未起動なら SSH (`BatchMode=yes`) でホストに接続し、Chrome をバックグラウンド (`nohup ... &`) で起動
+3. CDP エンドポイントが応答するまで最大 30 秒ポーリングして待機
+
+#### SSH が使えない場合のフォールバック
+
+以下のいずれかに該当すると、スクリプトは **自動で手動フォールバックに切り替わる**:
+
+- `HOST_SSH_USER` が未設定
+- コンテナに `ssh` クライアントが無い
+- SSH 接続/実行に失敗 (鍵未登録・リモートログイン無効・到達不可など。`BatchMode=yes` によりパスワード待ちで固まらず即失敗)
+
+フォールバック時は、**ホスト側で実行すべき起動コマンドをそのまま画面に出力** し、
+`MANUAL_WAIT` 秒 (既定 120s) のあいだ CDP の起動をポーリングして待機する。
+利用者はその間にホストのターミナルへコマンドを貼り付けて実行すればよく、
+起動が検知されればスクリプトは成功終了する。
+
+```text
+──────────────────────────────────────────────────────────────
+⚠ SSH 自動起動を利用できません (SSH 接続/実行に失敗)。
+  ホスト (mac) 側のターミナルで以下を実行してください:
+
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9222 --user-data-dir='/tmp/chrome-debug' --remote-allow-origins=* --disable-features=DialMediaRouteProvider
+
+──────────────────────────────────────────────────────────────
+→ ホストでの起動を待機中 (最大 120s, Ctrl-C で中断)...
+```
+
+CI など人手が介在しない環境では `MANUAL_WAIT=0` を指定すれば、案内を出して即座に非ゼロ終了する。
+
+> **Note (SSH を使わない代替手段)**: ホスト側に常駐ランチャ (launchd エージェントや FIFO 監視スクリプト、簡易 HTTP エンドポイント等) を置き、コンテナからネットワーク経由でトリガする方法もある。
+> ただし SSH 方式が最も追加実装が少なく確実。X11 forwarding (XQuartz + socat) は「コンテナ内 GUI をホスト画面に表示する」用途であり、本件 (ホストの既存 Chrome を起動する) には不要。
+
+> **Note (Linux ホストの場合)**: ホストで sshd が動いていれば同じスクリプトが使える。`CHROME_BIN=google-chrome`、`HOST_SSH_HOST` をホスト IP (`172.17.0.1` 等) に設定する。GUI セッションへの接続には `DISPLAY` 等の追加考慮が必要。
 
 ## conftest.py への統合
 
@@ -361,6 +463,8 @@ netsh interface portproxy delete v4tov4 listenaddress=0.0.0.0 listenport=9222
 |---|---|---|
 | `host.docker.internal` 解決不能 | Docker Desktop が古い / Linux Docker | `--add-host=host.docker.internal:host-gateway` を指定 |
 | ファイアウォールでブロック | macOS のアプリファイアウォール | システム設定 > ネットワーク > ファイアウォール で Chrome を許可 |
+| SSH 起動で Chrome が表示されない / WindowServer エラー | コンソール非ログインユーザーで SSH した | コンソールにログイン中の本人ユーザーで SSH する (`start-host-chrome.sh` 参照) |
+| `start-host-chrome.sh` が SSH で認証失敗 | リモートログイン未有効 / 鍵未登録 | `sudo systemsetup -setremotelogin on` と `authorized_keys` 登録を確認 |
 
 ## CDP 接続のメリット
 
