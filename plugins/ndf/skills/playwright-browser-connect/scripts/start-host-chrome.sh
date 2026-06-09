@@ -110,13 +110,16 @@ manual_fallback() {
   fi
 
   echo "→ ホストでの起動を待機中 (最大 ${MANUAL_WAIT}s, Ctrl-C で中断)..." >&2
-  # seq に依存せず bash 組み込みの算術 for ループを使う (最小コンテナ対応)
-  for ((i = 0; i < MANUAL_WAIT; i++)); do
+  # seq 外部依存も bash 専用 for ((...)) も避け、POSIX 互換 while で待機する
+  # (最小コンテナ / /bin/sh しかない環境でも動作)
+  i=0
+  while [ "$i" -lt "$MANUAL_WAIT" ]; do
     if cdp_up; then
       echo "✓ Chrome 起動を検知しました: http://${CDP_HOST}:${CDP_PORT}"
       exit 0
     fi
     sleep 1
+    i=$((i + 1))
   done
   echo "✗ 待機タイムアウト。手動起動後に再実行してください。" >&2
   exit 1
@@ -153,13 +156,16 @@ fi
 
 # 5) CDP が応答するまで待機
 echo "→ CDP エンドポイントの起動を待機中 (最大 ${STARTUP_TIMEOUT}s)..."
-# seq に依存せず bash 組み込みの算術 for ループを使う (最小コンテナ対応)
-for ((i = 0; i < STARTUP_TIMEOUT; i++)); do
+# seq 外部依存も bash 専用 for ((...)) も避け、POSIX 互換 while で待機する
+# (最小コンテナ / /bin/sh しかない環境でも動作)
+i=0
+while [ "$i" -lt "$STARTUP_TIMEOUT" ]; do
   if cdp_up; then
     echo "✓ Chrome 起動完了: http://${CDP_HOST}:${CDP_PORT}"
     exit 0
   fi
   sleep 1
+  i=$((i + 1))
 done
 
 echo "✗ 起動タイムアウト。ホストの /tmp/chrome-debug.log を確認してください。" >&2
