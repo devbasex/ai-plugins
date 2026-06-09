@@ -602,11 +602,13 @@ def test_count_normalizes_int_list_tuple_none_bool(state_mod, value, expected):
 
 
 def test_merge_fix_int_counts_do_not_crash_and_persist(patched_tmp_dir, state_mod):
-    """`resolved_threads` / `deferred` / `rejected` が int でも TypeError を出さず件数(int)が保存される。
+    """`resolved_threads` / `deferred` / `rejected` が int でも TypeError を出さず件数が保存される。
 
     PLAN25 の本丸: fix サブエージェントが list の代わりに int(件数) を書いても
-    `len(int)` で落ちず、state.json に件数がそのまま保存されること。
-    また `deferred` が int でも deferred ループでクラッシュしないこと。
+    `len(int)` で落ちず完走すること。
+    resolved_threads / rejected は _count() で int がそのまま件数として保存される。
+    deferred は codex round3 対応で「展開される dict 要素数」を保存する仕様に変更したため、
+    int (展開不能) の場合は展開件数 0 と一致して 0 が保存される。
     """
     tmp_dir = patched_tmp_dir
     _seed_state(tmp_dir)
@@ -623,9 +625,10 @@ def test_merge_fix_int_counts_do_not_crash_and_persist(patched_tmp_dir, state_mo
     st = _read_state(tmp_dir)
     merged = st["rounds"][-1]["fix"]
     assert merged["resolved_threads"] == 4
-    assert merged["deferred"] == 2
+    # deferred は int だと展開不能なので、保存件数 = 展開件数 = 0 で一致する
+    assert merged["deferred"] == 0
     assert merged["rejected"] == 1
-    # deferred が int の場合は deferred ループをスキップするので deferred_nits は空のまま
+    # deferred が int の場合は deferred_nits は空のまま (保存件数 0 と整合)
     assert st["deferred_nits"] == []
 
 
@@ -691,8 +694,9 @@ def test_merge_fix_deferred_non_dict_elements_are_skipped(patched_tmp_dir, state
 
     st = _read_state(tmp_dir)
     merged = st["rounds"][-1]["fix"]
-    # 件数は list 全体の len() (非 dict も含む)
-    assert merged["deferred"] == 5
+    # codex round3 指摘 (major): 保存件数は「実際に deferred_nits へ展開される
+    # dict 要素数」と一致させる。非 dict 要素は除外されるので 2 になる。
+    assert merged["deferred"] == 2
     # deferred_nits には dict 要素のみが展開される
     assert len(st["deferred_nits"]) == 2
     summaries = {n["summary"] for n in st["deferred_nits"]}
@@ -700,3 +704,40 @@ def test_merge_fix_deferred_non_dict_elements_are_skipped(patched_tmp_dir, state
     for n in st["deferred_nits"]:
         assert n["pr"] == PR
         assert n["round"] == 1
+
+
+# ---------- PLAN25 round3 (codex): 保存件数 == deferred_nits 展開件数 ----------
+
+
+def test_merge_fix_deferred_count_matches_expanded_nits(patched_tmp_dir, state_mod):
+    """codex round3 指摘 (major / 正確性): mixed list の `deferred` を渡したとき、
+    `rounds[].fix["deferred"]` の保存件数が deferred_nits に実際に展開された
+    dict 要素数と一致することを検証する回帰テスト。
+
+    round2 の dict ガードは「展開件数 < 保存件数」という食い違いを生んでいた
+    (保存は list 全体の長さ、展開は dict のみ)。本テストで両者の一致を固定する。
+    """
+    tmp_dir = patched_tmp_dir
+    _seed_state(tmp_dir)
+    fix = _canonical_fix()
+    # dict 3 件 + 非 dict 4 件 の mixed list
+    fix["deferred"] = [
+        {"comment_id": 1, "summary": "nit-a"},
+        "str-element",
+        None,
+        {"comment_id": 2, "summary": "nit-b"},
+        123,
+        ["nested", "list"],
+        {"comment_id": 3, "summary": "nit-c"},
+    ]
+    (tmp_dir / f"fix-pr{PR}-result.json").write_text(json.dumps(fix))
+
+    state_mod.cmd_merge_fix(_make_args())
+
+    st = _read_state(tmp_dir)
+    merged = st["rounds"][-1]["fix"]
+    expanded = [n for n in st["deferred_nits"] if n.get("round") == 1]
+    # 保存件数 == 実展開件数 == dict 要素数 (3)
+    assert merged["deferred"] == len(expanded) == 3
+    summaries = {n["summary"] for n in expanded}
+    assert summaries == {"nit-a", "nit-b", "nit-c"}

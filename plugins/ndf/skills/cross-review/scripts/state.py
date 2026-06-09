@@ -717,10 +717,24 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     # `st` は冒頭の fallback 検証で既に load 済み。
     round_no = st["rounds"][-1]["round"]
 
+    # deferred は list が正だが、LLM がスキーマを無視して文字列リスト
+    # (例: ["nit: ..."]) や int(件数) を返すケースがある。後段の deferred_nits
+    # 展開ループでは dict 以外をスキップするため、保存件数 (rounds[].fix.deferred)
+    # も「実際に展開される dict 要素数」と一致させる必要がある。そのため fix dict
+    # を組み立てる前に dict 要素のみへ正規化し、その件数を保存する。
+    _deferred_raw = fix.get("deferred")
+    _deferred_nits = (
+        [d for d in _deferred_raw if isinstance(d, dict)]
+        if isinstance(_deferred_raw, list)
+        else []
+    )
+
     st["rounds"][-1]["fix"] = {
         "commit": fix_commit,
         "fixed": fixed_count,
-        "deferred": _count(fix.get("deferred")),
+        # deferred だけは正規化後リストの件数を保存し deferred_nits 展開件数と一致させる。
+        # resolved_threads / rejected は件数しか保存せず後段ループが無いため _count() で可。
+        "deferred": len(_deferred_nits),
         "rejected": _count(fix.get("rejected")),
         "resolved_threads": _count(fix.get("resolved_threads")),
         "ci": fix.get("ci_status"),
@@ -729,15 +743,8 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         "by_severity": fix.get("by_severity", {}),
     }
     st["rounds"][-1]["ended_at"] = _now()
-    # deferred は list が正だが int(件数) が混入しうるため list のときだけ走査する。
-    _deferred = fix.get("deferred")
-    if isinstance(_deferred, list):
-        for d in _deferred:
-            # LLM がスキーマを無視して文字列リスト (例: ["nit: ..."]) を
-            # 返すと {**d} で TypeError になるため dict 以外はスキップする。
-            if not isinstance(d, dict):
-                continue
-            st["deferred_nits"].append({**d, "pr": pr, "round": round_no})
+    for d in _deferred_nits:
+        st["deferred_nits"].append({**d, "pr": pr, "round": round_no})
     _save(pr, st)
 
     # CI 分類
