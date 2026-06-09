@@ -206,7 +206,7 @@ Docker コンテナはホストとプロセス空間が分離されているた�
 
 ```
 Docker container ──ssh──▶ host.docker.internal:22 (macOS sshd)
-                                 └─▶ Google Chrome --remote-debugging-port=9222 ... (バックグラウンド起動)
+                                 └─▶ Google Chrome --remote-debugging-port=9222 --remote-debugging-address=0.0.0.0 ... (バックグラウンド起動)
 Docker container ──CDP──▶ host.docker.internal:9222 (起動後に接続)
 ```
 
@@ -264,7 +264,7 @@ HOST_SSH_USER=<macのユーザー名> \
 ⚠ SSH 自動起動を利用できません (SSH 接続/実行に失敗)。
   ホスト (mac) 側のターミナルで以下を実行してください:
 
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9222 --user-data-dir='/tmp/chrome-debug' --remote-allow-origins=* --disable-features=DialMediaRouteProvider
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9222 --remote-debugging-address=0.0.0.0 --user-data-dir='/tmp/chrome-debug' --remote-allow-origins=* --disable-features=DialMediaRouteProvider
 
 ──────────────────────────────────────────────────────────────
 → ホストでの起動を待機中 (最大 120s, Ctrl-C で中断)...

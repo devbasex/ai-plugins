@@ -46,8 +46,19 @@ CHROME_BIN="${CHROME_BIN:-/Applications/Google Chrome.app/Contents/MacOS/Google 
 STARTUP_TIMEOUT="${STARTUP_TIMEOUT:-30}"
 MANUAL_WAIT="${MANUAL_WAIT:-120}"
 
+# curl は冪等チェック・起動待機・手動フォールバックの全経路で CDP 疎通確認に
+# 使う必須コマンド。無いと終了コード 127 で常に未起動扱いとなり、起動成功時でも
+# タイムアウトしてしまうため、ここでフェイルファストする。
+if ! command -v curl >/dev/null 2>&1; then
+  echo "✗ curl が見つかりません。CDP 疎通確認に必須です。" >&2
+  echo "  コンテナに curl をインストールしてから再実行してください" >&2
+  echo "  (例: apt-get install -y curl / apk add curl)。" >&2
+  exit 1
+fi
+
 cdp_up() {
-  curl -sf "http://${CDP_HOST}:${CDP_PORT}/json/version" >/dev/null 2>&1
+  # --max-time でネットワークハング時も待機ループ周期が壊れないようにする
+  curl -sf --max-time 2 "http://${CDP_HOST}:${CDP_PORT}/json/version" >/dev/null 2>&1
 }
 
 # --user-data-dir は空文字なら付与しない (デフォルトプロファイル使用)
@@ -57,8 +68,11 @@ if [ -n "${CHROME_USER_DATA_DIR}" ]; then
 fi
 
 # ホスト側で実行する Chrome 起動コマンド (人間がコピペできる体裁)
+#   --remote-debugging-address=0.0.0.0 を付与しないと Chrome は loopback
+#   (127.0.0.1) のみ listen し、コンテナから host.docker.internal:9222 へ
+#   到達できないため必須。
 host_launch_cmd() {
-  printf '"%s" --remote-debugging-port=%s %s --remote-allow-origins=* --disable-features=DialMediaRouteProvider' \
+  printf '"%s" --remote-debugging-port=%s --remote-debugging-address=0.0.0.0 %s --remote-allow-origins=* --disable-features=DialMediaRouteProvider' \
     "${CHROME_BIN}" "${CDP_PORT}" "${userdata_arg}"
 }
 
