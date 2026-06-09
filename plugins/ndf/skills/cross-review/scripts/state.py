@@ -602,6 +602,31 @@ def cmd_check_oscillation(args: argparse.Namespace) -> None:
     sys.exit(2)
 
 
+def _count(v: Any) -> int:
+    """int(件数) でも list でも None でも件数(int)に正規化する。
+
+    fix 結果スキーマ上 deferred/rejected/resolved_threads は list が正だが、
+    fix サブエージェントが int(件数) を書いてしまうケースがあり、その場合に
+    len() が `TypeError: object of type 'int' has no len()` で落ちるのを防ぐ。
+    """
+    if isinstance(v, bool):
+        # bool は int のサブクラスだが件数として扱わない
+        return 0
+    if isinstance(v, int):
+        return v
+    if isinstance(v, dict):
+        # LLM が単一要素を list ではなく dict 単体で返すケースを 1 件として扱う。
+        return 1
+    if isinstance(v, (list, tuple)):
+        return len(v)
+    if isinstance(v, str) and v.strip().isdigit():
+        # LLM が件数を数値文字列 (例: "3" や " 3 ") で返すケースを許容する。
+        # strip 後 isdigit() なので前後空白を許し、負号・小数点は引き続き弾く
+        # (件数は非負整数なので十分)。
+        return int(v.strip())
+    return 0
+
+
 def cmd_merge_fix(args: argparse.Namespace) -> None:
     """Step 5 後段 — fix サブエージェント戻り値を state にマージ + CI 分類。
 
@@ -696,19 +721,43 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     # `st` は冒頭の fallback 検証で既に load 済み。
     round_no = st["rounds"][-1]["round"]
 
+    # deferred は list が正だが、LLM がスキーマを無視して文字列リスト
+    # (例: ["nit: ..."]) や単一 dict、int(件数) を返すケースがある。後段の
+    # deferred_nits 展開ループは dict 以外をスキップするため、まず dict 要素のみへ
+    # 正規化する (単一 dict は 1 件として包む)。
+    _deferred_raw = fix.get("deferred")
+    if isinstance(_deferred_raw, list):
+        _deferred_nits = [d for d in _deferred_raw if isinstance(d, dict)]
+    elif isinstance(_deferred_raw, dict):  # 単一 dict フォールバック (gemini #3)
+        _deferred_nits = [_deferred_raw]
+    else:
+        _deferred_nits = []
+
+    # 保存件数の単一整合ルール:
+    #   - 構造化データ (list / dict) は per-item を保持できるので、展開件数
+    #     (len(_deferred_nits)) を保存し deferred_nits の件数と一致させる。
+    #   - int / 数値文字列は per-item データを失った「劣化表現」なので、件数を
+    #     失わないよう _count() の値を保存する (展開はできないので nits は空)。
+    if isinstance(_deferred_raw, (list, dict)):
+        _deferred_count = len(_deferred_nits)
+    else:
+        _deferred_count = _count(_deferred_raw)
+
     st["rounds"][-1]["fix"] = {
         "commit": fix_commit,
         "fixed": fixed_count,
-        "deferred": len(fix.get("deferred", []) or []),
-        "rejected": len(fix.get("rejected", []) or []),
-        "resolved_threads": len(fix.get("resolved_threads", []) or []),
+        # deferred は上記の単一整合ルールで算出した件数を保存する。
+        # resolved_threads / rejected は件数しか保存せず後段ループが無いため _count() で可。
+        "deferred": _deferred_count,
+        "rejected": _count(fix.get("rejected")),
+        "resolved_threads": _count(fix.get("resolved_threads")),
         "ci": fix.get("ci_status"),
         "ci_failed_checks": fix.get("ci_failed_checks", []) or [],
         "ci_note": fix.get("ci_note"),
         "by_severity": fix.get("by_severity", {}),
     }
     st["rounds"][-1]["ended_at"] = _now()
-    for d in (fix.get("deferred") or []):
+    for d in _deferred_nits:
         st["deferred_nits"].append({**d, "pr": pr, "round": round_no})
     _save(pr, st)
 
