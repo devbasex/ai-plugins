@@ -616,6 +616,10 @@ def _count(v: Any) -> int:
         return v
     if isinstance(v, (list, tuple)):
         return len(v)
+    if isinstance(v, str) and v.isdigit():
+        # LLM が件数を数値文字列 (例: "3") で返すケースを許容する。
+        # isdigit() は負号・空白・小数点を弾くが、件数は非負整数なので十分。
+        return int(v)
     return 0
 
 
@@ -729,6 +733,10 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     _deferred = fix.get("deferred")
     if isinstance(_deferred, list):
         for d in _deferred:
+            # LLM がスキーマを無視して文字列リスト (例: ["nit: ..."]) を
+            # 返すと {**d} で TypeError になるため dict 以外はスキップする。
+            if not isinstance(d, dict):
+                continue
             st["deferred_nits"].append({**d, "pr": pr, "round": round_no})
     _save(pr, st)
 

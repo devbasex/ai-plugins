@@ -580,13 +580,23 @@ def test_explicit_file_invalid_json_dies(patched_tmp_dir, state_mod, capsys, tmp
         (False, 0),  # bool は int サブクラスだが件数扱いしない
         (True, 0),  # bool=True も 0
         ("xyz", 0),  # 想定外の型 (str) は 0
+        # PLAN25 round2 (gemini 指摘): LLM が件数を数値文字列で返すケースを許容
+        ("3", 3),  # 数値文字列 → int
+        ("0", 0),  # "0" も 0
+        ("12", 12),  # 複数桁
+        ("abc", 0),  # 数値でない文字列は 0
+        ("", 0),  # 空文字は isdigit()=False → 0
+        ("-1", 0),  # 負号付きは isdigit()=False → 0 (件数は非負)
+        (" 3 ", 0),  # 空白付きは isdigit()=False → 0
+        ("1.5", 0),  # 小数点付きは isdigit()=False → 0
     ],
 )
 def test_count_normalizes_int_list_tuple_none_bool(state_mod, value, expected):
-    """`_count()` が int / list / tuple / None / bool / 想定外型を件数(int)に正規化する。
+    """`_count()` が int / list / tuple / None / bool / 数値文字列 / 想定外型を件数(int)に正規化する。
 
     codex review 指摘 (PLAN25): `_count()` の挙動がテストで固定されておらず、
     同じ TypeError 経路 (`len(int)`) が再発しても検知できない。
+    PLAN25 round2 (gemini 指摘): 数値文字列 ("3" 等) も件数として許容する。
     """
     assert state_mod._count(value) == expected
 
@@ -647,6 +657,46 @@ def test_merge_fix_list_deferred_expands_nits(patched_tmp_dir, state_mod):
     assert len(st["deferred_nits"]) == 2
     summaries = {n["summary"] for n in st["deferred_nits"]}
     assert summaries == {"nit-1", "nit-2"}
+    for n in st["deferred_nits"]:
+        assert n["pr"] == PR
+        assert n["round"] == 1
+
+
+# ---------------- PLAN25 round2 (gemini): deferred 非 dict 要素ガード ----------------
+
+
+def test_merge_fix_deferred_non_dict_elements_are_skipped(patched_tmp_dir, state_mod):
+    """`deferred` に dict 以外の要素 (文字列等) が混じってもクラッシュせず、dict のみ展開される。
+
+    gemini round2 指摘 (major): LLM がスキーマを無視して `deferred` に
+    文字列のリスト (例: ["nit: ..."]) を返すと `{**d}` で
+    `TypeError: 'str' object is not a mapping` が発生する。
+    ループ内の `isinstance(d, dict)` ガードで非 dict 要素をスキップすること。
+    """
+    tmp_dir = patched_tmp_dir
+    _seed_state(tmp_dir)
+    fix = _canonical_fix()
+    # dict / 文字列 / None / int が混在した deferred (LLM 出力揺らぎ)
+    fix["deferred"] = [
+        {"comment_id": 1, "summary": "nit-dict"},
+        "nit: please fix this string element",
+        None,
+        42,
+        {"comment_id": 2, "summary": "nit-dict-2"},
+    ]
+    (tmp_dir / f"fix-pr{PR}-result.json").write_text(json.dumps(fix))
+
+    # TypeError を出さずに完走すること
+    state_mod.cmd_merge_fix(_make_args())
+
+    st = _read_state(tmp_dir)
+    merged = st["rounds"][-1]["fix"]
+    # 件数は list 全体の len() (非 dict も含む)
+    assert merged["deferred"] == 5
+    # deferred_nits には dict 要素のみが展開される
+    assert len(st["deferred_nits"]) == 2
+    summaries = {n["summary"] for n in st["deferred_nits"]}
+    assert summaries == {"nit-dict", "nit-dict-2"}
     for n in st["deferred_nits"]:
         assert n["pr"] == PR
         assert n["round"] == 1
