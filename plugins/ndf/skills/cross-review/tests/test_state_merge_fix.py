@@ -563,3 +563,90 @@ def test_explicit_file_invalid_json_dies(patched_tmp_dir, state_mod, capsys, tmp
     assert "parse に失敗" in captured.err or "読み取り" in captured.err
     st = _read_state(tmp_dir)
     assert "fix" not in st["rounds"][-1]
+
+
+# ---------------- PLAN25: _count() 正規化 / int 混入時の堅牢化 ----------------
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        (3, 3),  # int(件数) はそのまま件数として扱う
+        (0, 0),  # int の 0
+        ([{"a": 1}, {"b": 2}], 2),  # list は len()
+        ([], 0),  # 空 list
+        ((1, 2, 3), 3),  # tuple も len()
+        (None, 0),  # None は 0
+        (False, 0),  # bool は int サブクラスだが件数扱いしない
+        (True, 0),  # bool=True も 0
+        ("xyz", 0),  # 想定外の型 (str) は 0
+    ],
+)
+def test_count_normalizes_int_list_tuple_none_bool(state_mod, value, expected):
+    """`_count()` が int / list / tuple / None / bool / 想定外型を件数(int)に正規化する。
+
+    codex review 指摘 (PLAN25): `_count()` の挙動がテストで固定されておらず、
+    同じ TypeError 経路 (`len(int)`) が再発しても検知できない。
+    """
+    assert state_mod._count(value) == expected
+
+
+def test_merge_fix_int_counts_do_not_crash_and_persist(patched_tmp_dir, state_mod):
+    """`resolved_threads` / `deferred` / `rejected` が int でも TypeError を出さず件数(int)が保存される。
+
+    PLAN25 の本丸: fix サブエージェントが list の代わりに int(件数) を書いても
+    `len(int)` で落ちず、state.json に件数がそのまま保存されること。
+    また `deferred` が int でも deferred ループでクラッシュしないこと。
+    """
+    tmp_dir = patched_tmp_dir
+    _seed_state(tmp_dir)
+    fix = _canonical_fix()
+    # list ではなく int(件数) を書く (再発防止対象のケース)
+    fix["resolved_threads"] = 4
+    fix["deferred"] = 2
+    fix["rejected"] = 1
+    (tmp_dir / f"fix-pr{PR}-result.json").write_text(json.dumps(fix))
+
+    # TypeError を出さずに完走すること
+    state_mod.cmd_merge_fix(_make_args())
+
+    st = _read_state(tmp_dir)
+    merged = st["rounds"][-1]["fix"]
+    assert merged["resolved_threads"] == 4
+    assert merged["deferred"] == 2
+    assert merged["rejected"] == 1
+    # deferred が int の場合は deferred ループをスキップするので deferred_nits は空のまま
+    assert st["deferred_nits"] == []
+
+
+def test_merge_fix_list_deferred_expands_nits(patched_tmp_dir, state_mod):
+    """`deferred` が list の場合は従来どおり件数が保存され deferred_nits が展開される。
+
+    int 対応で list の既存挙動 (件数集計 + deferred_nits 展開) が壊れていないことの regression guard。
+    """
+    tmp_dir = patched_tmp_dir
+    _seed_state(tmp_dir)
+    fix = _canonical_fix()
+    fix["resolved_threads"] = [{"thread_id": "T1"}, {"thread_id": "T2"}]
+    fix["deferred"] = [
+        {"comment_id": 1, "summary": "nit-1"},
+        {"comment_id": 2, "summary": "nit-2"},
+    ]
+    fix["rejected"] = [{"comment_id": 3, "summary": "rej-1"}]
+    (tmp_dir / f"fix-pr{PR}-result.json").write_text(json.dumps(fix))
+
+    state_mod.cmd_merge_fix(_make_args())
+
+    st = _read_state(tmp_dir)
+    merged = st["rounds"][-1]["fix"]
+    # list は len() で件数化
+    assert merged["resolved_threads"] == 2
+    assert merged["deferred"] == 2
+    assert merged["rejected"] == 1
+    # deferred_nits が展開され、pr / round が付与される
+    assert len(st["deferred_nits"]) == 2
+    summaries = {n["summary"] for n in st["deferred_nits"]}
+    assert summaries == {"nit-1", "nit-2"}
+    for n in st["deferred_nits"]:
+        assert n["pr"] == PR
+        assert n["round"] == 1
