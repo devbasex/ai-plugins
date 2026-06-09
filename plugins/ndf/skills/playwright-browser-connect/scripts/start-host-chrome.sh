@@ -94,7 +94,8 @@ manual_fallback() {
   fi
 
   echo "→ ホストでの起動を待機中 (最大 ${MANUAL_WAIT}s, Ctrl-C で中断)..." >&2
-  for _ in $(seq 1 "${MANUAL_WAIT}"); do
+  # seq に依存せず bash 組み込みの算術 for ループを使う (最小コンテナ対応)
+  for ((i = 0; i < MANUAL_WAIT; i++)); do
     if cdp_up; then
       echo "✓ Chrome 起動を検知しました: http://${CDP_HOST}:${CDP_PORT}"
       exit 0
@@ -123,7 +124,8 @@ fi
 
 # 4) SSH でホストに接続し、Chrome をバックグラウンド起動
 echo "→ ${HOST_SSH_USER}@${HOST_SSH_HOST} で Chrome を起動します..."
-remote_cmd="nohup $(host_launch_cmd) >/tmp/chrome-debug.log 2>&1 &"
+# </dev/null で stdin を切り離し、SSH 非対話セッションのハングを防ぐ
+remote_cmd="nohup $(host_launch_cmd) </dev/null >/tmp/chrome-debug.log 2>&1 &"
 if ! ssh -o StrictHostKeyChecking=accept-new \
          -o BatchMode=yes \
          -o ConnectTimeout=10 \
@@ -135,7 +137,8 @@ fi
 
 # 5) CDP が応答するまで待機
 echo "→ CDP エンドポイントの起動を待機中 (最大 ${STARTUP_TIMEOUT}s)..."
-for _ in $(seq 1 "${STARTUP_TIMEOUT}"); do
+# seq に依存せず bash 組み込みの算術 for ループを使う (最小コンテナ対応)
+for ((i = 0; i < STARTUP_TIMEOUT; i++)); do
   if cdp_up; then
     echo "✓ Chrome 起動完了: http://${CDP_HOST}:${CDP_PORT}"
     exit 0

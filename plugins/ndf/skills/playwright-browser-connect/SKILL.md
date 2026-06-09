@@ -167,6 +167,8 @@ Chrome (--remote-debugging-port=9222 --remote-allow-origins=*)
 | `--remote-allow-origins=*` | CDP WebSocket の Host ヘッダ検証を無効化し、リモート (コンテナ) からの接続を許可 (Chrome 106+) |
 | `--disable-features=DialMediaRouteProvider` | DIAL (Cast) のメディアルート探索を無効化。CDP ログのノイズと不要なネットワーク探索を抑制 |
 
+> **Note**: 上記は macOS Docker Desktop で動作実績のあるコマンド。macOS Docker Desktop は `host.docker.internal` がホストの loopback (127.0.0.1) バインドのサービスに到達できるため、`--remote-debugging-address=0.0.0.0` は不要 (全ネットワークインターフェース公開によるセキュリティ低下も避けられる)。Linux / WSL2 ホストで loopback バインドが問題になる場合は後述の「ネットワーク別接続ガイド」(方法 1: `0.0.0.0` / 方法 2: socat / 方法 3: netsh portproxy) を参照。
+
 既存プロファイルのログイン済み Session をそのまま使う場合は、全 Chrome プロセスを終了してから
 `--user-data-dir` を外して起動する (デフォルトプロファイルを使用):
 
