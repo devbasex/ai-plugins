@@ -586,17 +586,25 @@ def test_explicit_file_invalid_json_dies(patched_tmp_dir, state_mod, capsys, tmp
         ("12", 12),  # 複数桁
         ("abc", 0),  # 数値でない文字列は 0
         ("", 0),  # 空文字は isdigit()=False → 0
-        ("-1", 0),  # 負号付きは isdigit()=False → 0 (件数は非負)
-        (" 3 ", 0),  # 空白付きは isdigit()=False → 0
+        ("-1", 0),  # 負号付きは strip 後も isdigit()=False → 0 (件数は非負)
         ("1.5", 0),  # 小数点付きは isdigit()=False → 0
+        # PLAN25 round4 (gemini 指摘): 単一 dict を 1 件として扱う
+        ({"thread_id": "x"}, 1),  # 単一 dict → 1
+        ({}, 1),  # 空 dict も 1 件 (構造化データ 1 要素扱い)
+        # PLAN25 round4 (gemini 指摘): 数値文字列の前後空白を許容 (strip)
+        (" 3 ", 3),  # 前後空白付き数値文字列 → strip して int
+        ("  12", 12),  # 先頭空白のみ
+        ("7  ", 7),  # 末尾空白のみ
+        ("  ", 0),  # 空白のみは strip 後空文字 → 0
     ],
 )
 def test_count_normalizes_int_list_tuple_none_bool(state_mod, value, expected):
-    """`_count()` が int / list / tuple / None / bool / 数値文字列 / 想定外型を件数(int)に正規化する。
+    """`_count()` が int / dict / list / tuple / None / bool / 数値文字列 / 想定外型を件数(int)に正規化する。
 
     codex review 指摘 (PLAN25): `_count()` の挙動がテストで固定されておらず、
     同じ TypeError 経路 (`len(int)`) が再発しても検知できない。
     PLAN25 round2 (gemini 指摘): 数値文字列 ("3" 等) も件数として許容する。
+    PLAN25 round4 (gemini 指摘): 単一 dict は 1 件、数値文字列は前後空白を strip して許容。
     """
     assert state_mod._count(value) == expected
 
@@ -607,8 +615,8 @@ def test_merge_fix_int_counts_do_not_crash_and_persist(patched_tmp_dir, state_mo
     PLAN25 の本丸: fix サブエージェントが list の代わりに int(件数) を書いても
     `len(int)` で落ちず完走すること。
     resolved_threads / rejected は _count() で int がそのまま件数として保存される。
-    deferred は codex round3 対応で「展開される dict 要素数」を保存する仕様に変更したため、
-    int (展開不能) の場合は展開件数 0 と一致して 0 が保存される。
+    PLAN25 round4 (統一ルール): deferred が int (per-item を失った劣化表現) のときは
+    件数を失わないよう _count() の値を保存する。展開はできないので deferred_nits は空。
     """
     tmp_dir = patched_tmp_dir
     _seed_state(tmp_dir)
@@ -625,11 +633,36 @@ def test_merge_fix_int_counts_do_not_crash_and_persist(patched_tmp_dir, state_mo
     st = _read_state(tmp_dir)
     merged = st["rounds"][-1]["fix"]
     assert merged["resolved_threads"] == 4
-    # deferred は int だと展開不能なので、保存件数 = 展開件数 = 0 で一致する
-    assert merged["deferred"] == 0
+    # 統一ルール: int は劣化表現なので _count() の件数 (2) を保存する
+    assert merged["deferred"] == 2
     assert merged["rejected"] == 1
-    # deferred が int の場合は deferred_nits は空のまま (保存件数 0 と整合)
+    # int は展開できないため deferred_nits は空のまま (per-item データは復元不能)
     assert st["deferred_nits"] == []
+
+
+def test_merge_fix_deferred_single_dict_is_wrapped(patched_tmp_dir, state_mod):
+    """`deferred` が単一 dict のとき 1 件として扱い、deferred_nits に 1 件展開される。
+
+    PLAN25 round4 (gemini #3): LLM が単一要素を list ではなく dict 単体で返した
+    場合のフォールバック。保存件数 == 展開件数 == 1 を固定する。
+    """
+    tmp_dir = patched_tmp_dir
+    _seed_state(tmp_dir)
+    fix = _canonical_fix()
+    # list ではなく単一 dict を書く (LLM 出力揺らぎ)
+    fix["deferred"] = {"comment_id": 7, "summary": "single-nit"}
+    (tmp_dir / f"fix-pr{PR}-result.json").write_text(json.dumps(fix))
+
+    state_mod.cmd_merge_fix(_make_args())
+
+    st = _read_state(tmp_dir)
+    merged = st["rounds"][-1]["fix"]
+    # 構造化データ (dict) なので展開件数 (1) を保存
+    assert merged["deferred"] == 1
+    assert len(st["deferred_nits"]) == 1
+    assert st["deferred_nits"][0]["summary"] == "single-nit"
+    assert st["deferred_nits"][0]["pr"] == PR
+    assert st["deferred_nits"][0]["round"] == 1
 
 
 def test_merge_fix_list_deferred_expands_nits(patched_tmp_dir, state_mod):
