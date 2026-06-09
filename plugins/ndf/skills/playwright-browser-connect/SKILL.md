@@ -167,7 +167,7 @@ Chrome (--remote-debugging-port=9222 --remote-allow-origins=*)
 | `--remote-allow-origins=*` | CDP WebSocket の Host ヘッダ検証を無効化し、リモート (コンテナ) からの接続を許可 (Chrome 106+) |
 | `--disable-features=DialMediaRouteProvider` | DIAL (Cast) のメディアルート探索を無効化。CDP ログのノイズと不要なネットワーク探索を抑制 |
 
-> **Note**: 上記は macOS Docker Desktop で動作実績のあるコマンド。macOS Docker Desktop は `host.docker.internal` がホストの loopback (127.0.0.1) バインドのサービスに到達できるため、`--remote-debugging-address=0.0.0.0` は不要 (全ネットワークインターフェース公開によるセキュリティ低下も避けられる)。Linux / WSL2 ホストで loopback バインドが問題になる場合は後述の「ネットワーク別接続ガイド」(方法 1: `0.0.0.0` / 方法 2: socat / 方法 3: netsh portproxy) を参照。
+> **Note**: 上記は macOS Docker Desktop で動作実績のあるコマンド。macOS Docker Desktop は `host.docker.internal` がホストの loopback (127.0.0.1) バインドのサービスに到達できるため、`--remote-debugging-address=0.0.0.0` は不要 (全ネットワークインターフェース公開によるセキュリティ低下も避けられる)。Linux / WSL2 ホストで loopback バインドが問題になる場合は `--remote-debugging-address=0.0.0.0` を付与する (`start-host-chrome.sh` では `CDP_BIND_ADDRESS=0.0.0.0` を指定)。詳細は後述の「ネットワーク別接続ガイド」(方法 1: `0.0.0.0` / 方法 2: socat / 方法 3: netsh portproxy) を参照。
 
 既存プロファイルのログイン済み Session をそのまま使う場合は、全 Chrome プロセスを終了してから
 `--user-data-dir` を外して起動する (デフォルトプロファイルを使用):
@@ -208,7 +208,7 @@ Docker コンテナはホストとプロセス空間が分離されているた�
 
 ```
 Docker container ──ssh──▶ host.docker.internal:22 (macOS sshd)
-                                 └─▶ Google Chrome --remote-debugging-port=9222 --remote-debugging-address=0.0.0.0 ... (バックグラウンド起動)
+                                 └─▶ Google Chrome --remote-debugging-port=9222 ... (バックグラウンド起動)
 Docker container ──CDP──▶ host.docker.internal:9222 (起動後に接続)
 ```
 
@@ -238,6 +238,7 @@ HOST_SSH_USER=<macのユーザー名> \
 | `HOST_SSH_USER` | (必須) | ホスト (mac) のログインユーザー名 |
 | `HOST_SSH_HOST` | `host.docker.internal` | SSH 接続先ホスト |
 | `CDP_PORT` | `9222` | リモートデバッグポート |
+| `CDP_BIND_ADDRESS` | (空=loopback) | Chrome の listen address。空なら付与せず Chrome 既定の loopback bind (macOS Docker Desktop はこれで動作・実証済み)。Linux/WSL2 等で loopback bind だとコンテナから到達できない場合のみ `0.0.0.0` 等を指定 (全インターフェース公開のためセキュリティ注意) |
 | `CHROME_USER_DATA_DIR` | `/tmp/chrome-debug` | 起動プロファイル。空にするとデフォルトプロファイル (ログイン済み Session) を使用 |
 | `CHROME_BIN` | `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome` | Chrome バイナリパス |
 | `MANUAL_WAIT` | `120` | 手動フォールバック時の起動待ち秒。`0` で待たず即終了 |
@@ -266,7 +267,7 @@ HOST_SSH_USER=<macのユーザー名> \
 ⚠ SSH 自動起動を利用できません (SSH 接続/実行に失敗)。
   ホスト (mac) 側のターミナルで以下を実行してください:
 
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9222 --remote-debugging-address=0.0.0.0 --user-data-dir='/tmp/chrome-debug' --remote-allow-origins=* --disable-features=DialMediaRouteProvider
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9222 --user-data-dir='/tmp/chrome-debug' --remote-allow-origins=* --disable-features=DialMediaRouteProvider
 
 ──────────────────────────────────────────────────────────────
 → ホストでの起動を待機中 (最大 120s, Ctrl-C で中断)...

@@ -29,6 +29,12 @@
 #   HOST_SSH_HOST         SSH 接続先 (default: host.docker.internal)
 #   CDP_HOST              CDP 疎通確認先ホスト (default: HOST_SSH_HOST)
 #   CDP_PORT              リモートデバッグポート (default: 9222)
+#   CDP_BIND_ADDRESS      Chrome の listen address。空 (default) なら付与せず
+#                         Chrome 既定の loopback bind (macOS Docker Desktop は
+#                         host.docker.internal がホスト loopback に到達するため
+#                         これで動作する)。Linux/WSL2 等で loopback bind だと
+#                         コンテナから到達できない場合のみ 0.0.0.0 等を指定する。
+#                         0.0.0.0 は全インターフェース公開のためセキュリティ注意。
 #   CHROME_USER_DATA_DIR  起動プロファイル (default: /tmp/chrome-debug)
 #                         空にするとデフォルトプロファイル (ログイン済み Session) を使用
 #   CHROME_BIN            Chrome バイナリパス
@@ -41,6 +47,7 @@ HOST_SSH_USER="${HOST_SSH_USER:-}"
 HOST_SSH_HOST="${HOST_SSH_HOST:-host.docker.internal}"
 CDP_HOST="${CDP_HOST:-$HOST_SSH_HOST}"
 CDP_PORT="${CDP_PORT:-9222}"
+CDP_BIND_ADDRESS="${CDP_BIND_ADDRESS:-}"
 CHROME_USER_DATA_DIR="${CHROME_USER_DATA_DIR-/tmp/chrome-debug}"
 CHROME_BIN="${CHROME_BIN:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
 STARTUP_TIMEOUT="${STARTUP_TIMEOUT:-30}"
@@ -67,13 +74,22 @@ if [ -n "${CHROME_USER_DATA_DIR}" ]; then
   userdata_arg="--user-data-dir='${CHROME_USER_DATA_DIR}'"
 fi
 
+# --remote-debugging-address は CDP_BIND_ADDRESS が空なら付与しない。
+#   既定 (空) では Chrome は loopback (127.0.0.1) のみ listen する。macOS
+#   Docker Desktop は host.docker.internal がホストの loopback に到達するため
+#   これで動作する (ユーザー実証済み・0.0.0.0 不要)。
+#   Linux/WSL2 等で loopback bind だとコンテナから到達できない場合のみ
+#   CDP_BIND_ADDRESS=0.0.0.0 等を指定する。0.0.0.0 は CDP を全インターフェース
+#   へ公開し、CDP は認証なしでブラウザ操作できるためセキュリティに注意すること。
+bind_arg=""
+if [ -n "${CDP_BIND_ADDRESS}" ]; then
+  bind_arg="--remote-debugging-address=${CDP_BIND_ADDRESS} "
+fi
+
 # ホスト側で実行する Chrome 起動コマンド (人間がコピペできる体裁)
-#   --remote-debugging-address=0.0.0.0 を付与しないと Chrome は loopback
-#   (127.0.0.1) のみ listen し、コンテナから host.docker.internal:9222 へ
-#   到達できないため必須。
 host_launch_cmd() {
-  printf '"%s" --remote-debugging-port=%s --remote-debugging-address=0.0.0.0 %s --remote-allow-origins=* --disable-features=DialMediaRouteProvider' \
-    "${CHROME_BIN}" "${CDP_PORT}" "${userdata_arg}"
+  printf '"%s" --remote-debugging-port=%s %s%s --remote-allow-origins=* --disable-features=DialMediaRouteProvider' \
+    "${CHROME_BIN}" "${CDP_PORT}" "${bind_arg}" "${userdata_arg}"
 }
 
 # 手動フォールバック: ホストで実行するコマンドを案内し、起動を待機する
