@@ -72,7 +72,11 @@
 - `is_own_pr` / `event_downgrade` — 自分の PR の場合 `REQUEST_CHANGES → COMMENT` 強制ダウングレード
 - `rounds[].codex.intent` — AI の本来判定。**ループ判定はこれを見る**
 - `rounds[].codex.posted_as` — GitHub に実際に送った event。`is_own_pr=true` なら `COMMENT` になる
-- `rounds[].fix.resolved_threads` — fix サブエージェントが `resolveReviewThread` で resolve した件数
+- `rounds[].fix.resolved_threads` — `resolveReviewThread` で resolve した**件数(int)**。
+  ここ (state.json 側) は int だが、fix サブエージェントが返す戻り値ファイル
+  (`fix-pr<PR>-result.json`) 側の `resolved_threads` は **list**（`docs/02` の戻り値スキーマ参照）。
+  `state.py merge-fix` が fix結果の list を `len()` して state.json に int で保存する。
+  混同して fix結果側に int を書くと過去 `merge-fix` が落ちていたため、現在は int/list 両受理
 - `rounds[].fix.ci_note` — コード無関係の CI 失敗時に「Assignees 未設定」等の理由を残す
 
 ## Step 0: 準備 + 既存 state 引き継ぎ

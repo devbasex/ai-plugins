@@ -142,6 +142,12 @@ worktree 外を触ると競合します。
   ]
 }}
 ```
+
+> **重要**: `resolved_threads` / `deferred` / `rejected` は必ず **list（配列）** で返すこと。
+> **件数(int) を書かないこと**（例: `"resolved_threads": 3` は誤り。`[]` 形式で返す）。
+> `state.py merge-fix` がこの list を `len()` して state.json には件数(int)で保存する。
+> int を書くと過去 `merge-fix` が `TypeError` で落ちていた（現在は後方互換で int も受理するが、
+> 正は list）。対応した thread が無い場合は空配列 `[]` を返す。
 """,
 )
 ```

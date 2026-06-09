@@ -602,6 +602,23 @@ def cmd_check_oscillation(args: argparse.Namespace) -> None:
     sys.exit(2)
 
 
+def _count(v: Any) -> int:
+    """int(件数) でも list でも None でも件数(int)に正規化する。
+
+    fix 結果スキーマ上 deferred/rejected/resolved_threads は list が正だが、
+    fix サブエージェントが int(件数) を書いてしまうケースがあり、その場合に
+    len() が `TypeError: object of type 'int' has no len()` で落ちるのを防ぐ。
+    """
+    if isinstance(v, bool):
+        # bool は int のサブクラスだが件数として扱わない
+        return 0
+    if isinstance(v, int):
+        return v
+    if isinstance(v, (list, tuple)):
+        return len(v)
+    return 0
+
+
 def cmd_merge_fix(args: argparse.Namespace) -> None:
     """Step 5 後段 — fix サブエージェント戻り値を state にマージ + CI 分類。
 
@@ -699,17 +716,20 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     st["rounds"][-1]["fix"] = {
         "commit": fix_commit,
         "fixed": fixed_count,
-        "deferred": len(fix.get("deferred", []) or []),
-        "rejected": len(fix.get("rejected", []) or []),
-        "resolved_threads": len(fix.get("resolved_threads", []) or []),
+        "deferred": _count(fix.get("deferred")),
+        "rejected": _count(fix.get("rejected")),
+        "resolved_threads": _count(fix.get("resolved_threads")),
         "ci": fix.get("ci_status"),
         "ci_failed_checks": fix.get("ci_failed_checks", []) or [],
         "ci_note": fix.get("ci_note"),
         "by_severity": fix.get("by_severity", {}),
     }
     st["rounds"][-1]["ended_at"] = _now()
-    for d in (fix.get("deferred") or []):
-        st["deferred_nits"].append({**d, "pr": pr, "round": round_no})
+    # deferred は list が正だが int(件数) が混入しうるため list のときだけ走査する。
+    _deferred = fix.get("deferred")
+    if isinstance(_deferred, list):
+        for d in _deferred:
+            st["deferred_nits"].append({**d, "pr": pr, "round": round_no})
     _save(pr, st)
 
     # CI 分類
