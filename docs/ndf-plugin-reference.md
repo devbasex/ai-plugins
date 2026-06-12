@@ -4,7 +4,7 @@
 
 NDF プラグインは、Claude Code / Kiro CLI 向けのオールインワン開発支援プラグイン。エージェント、Skills、フックを統合して提供する。
 
-**現行バージョン**: **v4.12.0** — Playwright E2E に `/ndf:playwright-browser-connect`（CDP リモートブラウザ接続）と `/ndf:playwright-evidence-drive`（Google Drive エビデンスアーカイブ）の 2 skill を追加（45→47個）。直前の **v4.11.0** で `/ndf:cross-review` の堅牢性改善（monitor.py の EARLY_ERROR 誤検知を解消: テスト用文字列リテラル / grep 形式ソース引用行を benign 自動判定し、ループ終了時の最終スイープで残 open review thread を全 Resolve）を実施。**v4.10.0** で `ml-model-structure` skill（MLモデル構築・推論API開発の標準ディレクトリ構造: 版内feature SSoT / train↔serve契約）を追加。`/ndf:fix` の修正ポリシー刷新（minor/nit のうち performance/readability/duplication は積極修正、+30 行超は要問い合わせ）、CI 完了待ち廃止、PR範囲外 flaky テストも修正対象。`/ndf:cross-review` 内のサブエージェントプロンプトも同期。重要度ラベルは AI agent の付与を鵜呑みにせず独自再判定。完了報告には PR URL 必須。詳細は [CHANGELOG.md](../plugins/ndf/CHANGELOG.md)。`/ndf:codex` skill + `corder` エージェント経由の Codex CLI 直接実行に一本化、Serena MCP は別プラグイン `mcp-serena` に分離済み、Playwright シナリオ E2E、Google Drive / Chat 連携 skill を提供。
+**現行バージョン**: **v4.14.0** — `statusline` skill とデフォルト statusline 設定 hook を追加（47→48個）。statusLine 未設定時のみ NDF 標準 statusline（コンテナ名/ホスト名 + project_dir + コンテキスト使用率）を自動設定し、`/ndf:statusline set|restore|status` で切り替え・復元できる。**v4.13.0** で `issue-plan-strategy` の release PR body を self-contained 必須化。**v4.12.0** で Playwright E2E に `/ndf:playwright-browser-connect`（CDP リモートブラウザ接続）と `/ndf:playwright-evidence-drive`（Google Drive エビデンスアーカイブ）の 2 skill を追加（45→47個）。直前の **v4.11.0** で `/ndf:cross-review` の堅牢性改善（monitor.py の EARLY_ERROR 誤検知を解消: テスト用文字列リテラル / grep 形式ソース引用行を benign 自動判定し、ループ終了時の最終スイープで残 open review thread を全 Resolve）を実施。**v4.10.0** で `ml-model-structure` skill（MLモデル構築・推論API開発の標準ディレクトリ構造: 版内feature SSoT / train↔serve契約）を追加。`/ndf:fix` の修正ポリシー刷新（minor/nit のうち performance/readability/duplication は積極修正、+30 行超は要問い合わせ）、CI 完了待ち廃止、PR範囲外 flaky テストも修正対象。`/ndf:cross-review` 内のサブエージェントプロンプトも同期。重要度ラベルは AI agent の付与を鵜呑みにせず独自再判定。完了報告には PR URL 必須。詳細は [CHANGELOG.md](../plugins/ndf/CHANGELOG.md)。`/ndf:codex` skill + `corder` エージェント経由の Codex CLI 直接実行に一本化、Serena MCP は別プラグイン `mcp-serena` に分離済み、Playwright シナリオ E2E、Google Drive / Chat 連携 skill を提供。
 
 ## ディレクトリ構造
 
@@ -13,12 +13,14 @@ plugins/ndf/
 ├── .claude-plugin/
 │   └── plugin.json          # プラグインメタデータ
 ├── hooks/
-│   └── hooks.json           # SessionStart (保持期間管理) / Stop (Slack通知)
+│   └── hooks.json           # SessionStart (保持期間管理/デフォルトstatusline) / Stop (Slack通知)
 ├── scripts/
 │   ├── ensure-retention.sh  # cleanupPeriodDays >= 90 を保つ
+│   ├── statusline.sh        # NDF標準statusline本体
+│   ├── statusline-switch.sh # statusline の導入・切替・復元 (ensure/set/restore/status)
 │   └── slack-notify.js      # Slack通知スクリプト
 ├── agents/                  # 専門エージェント（8個）
-├── skills/                  # Skills（47個）
+├── skills/                  # Skills（48個）
 ├── CLAUDE.md                # プラグイン開発者向けガイド
 └── README.md                # 利用者向けドキュメント
 ```
@@ -60,6 +62,7 @@ NDF プラグイン本体はコア MCP サーバを**同梱しない**（v4.0.0 
 | `/ndf:clean` | マージ済みブランチ一括削除 |
 | `/ndf:browser-test` | Playwright/Chrome DevTools での動作確認 |
 | `/ndf:skill-stats` | Skill 利用統計の集計（期間/プロジェクト別） |
+| `/ndf:statusline` | NDF標準statuslineの切り替え・復元・状態確認 (`set`/`restore`/`status`) |
 
 ### 3. 原則・ガイドライン Skills（モデル起動型）
 
@@ -122,6 +125,7 @@ NDF プラグイン本体はコア MCP サーバを**同梱しない**（v4.0.0 
 | イベント | 用途 |
 |---|---|
 | `SessionStart` (matcher: `startup`) | `~/.claude/settings.json` の `cleanupPeriodDays` を最低 90 日に保つ (7日タイムスタンプガード + flock でアトミック更新) |
+| `SessionStart` (matcher: `startup`) | `statusLine` 未設定時のみ NDF 標準 statusline を設定 (既存設定優先、NDF 版利用中はスクリプト更新のみ追従) |
 | `Stop` | AI 要約を生成して Slack に通知 (`SLACK_BOT_TOKEN` 設定時のみ) |
 
 ## 環境変数
@@ -166,6 +170,15 @@ claude -p --settings '{"disableAllHooks": true, "disableAllPlugins": true}' --ou
 - 書き込みは `flock` で排他ロックし、並列セッションでの lost update を防止 (flock 不在環境は atomic rename に依存)
 - Claude Code の公開 API には「プラグインインストール時」hook が存在しないため、`SessionStart + startup` matcher が実用上の最適解
 
+### デフォルト statusline の実装（v4.14.0）
+
+`SessionStart` hook で `statusline-switch.sh ensure` を実行する：
+
+- プラグイン同梱の `statusline.sh` を `~/.claude/ndf-statusline.sh` にコピー（差分時のみ。プラグイン更新に追従させるため、settings からはプラグインキャッシュパスではなく固定パスを参照）
+- `statusLine` が未設定の場合のみ `bash ~/.claude/ndf-statusline.sh` を設定。既存設定があれば何もしない（既存優先）
+- `/ndf:statusline set` は既存設定を `~/.claude/.ndf-statusline-backup.json` にバックアップしてから切り替え、`restore` で復元（バックアップ無しなら `statusLine` キーを削除）
+- 書き込みは `flock` + atomic rename（保持期間管理と同パターン）
+
 ### Codex の扱い（v4.0.0）
 
 - Codex MCP サーバは廃止
@@ -192,3 +205,4 @@ claude -p --settings '{"disableAllHooks": true, "disableAllPlugins": true}' --ou
 | **v4.12.0** | Playwright E2E に `playwright-browser-connect` (CDP リモートブラウザ接続) / `playwright-evidence-drive` (Google Drive エビデンスアーカイブ) の 2 skill 追加 (45→47個) |
 | **v4.12.1** | `/ndf:cross-review` デフォルト調整: `--max-rounds` 6→12 / `--rotate-after` 5→8、`--rotate-mode squash` 説明から「既存挙動」表記を削除 |
 | **v4.13.0** | `issue-plan-strategy`: release PR body の self-contained 必須化 (レビュアー視点の原則明文化、子 PR チェックリストを `<details>` に格下げ、Ready 前の body 最終化ステップ追加) |
+| **v4.14.0** | `statusline` skill + デフォルト statusline 設定 hook 追加 (47→48個)。statusLine 未設定時のみ NDF 標準 statusline を自動設定、`/ndf:statusline set\|restore\|status` で切替・復元 |

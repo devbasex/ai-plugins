@@ -1,5 +1,25 @@
 # NDF Plugin CHANGELOG
 
+### v4.14.0 (statusline skill + デフォルト statusline 設定 hook 追加)
+
+コンテナ名 (非コンテナ環境ではホスト名) + project_dir + コンテキスト使用率を表示する
+NDF 標準 statusline をプラグインに同梱し、インストールするだけでデフォルトになるようにした。
+
+- **`statusline` skill 追加** (`/ndf:statusline`、47→48個):
+  - `status` (デフォルト): 現在の statusLine 設定とバックアップの有無を表示
+  - `set`: 既存設定を `~/.claude/.ndf-statusline-backup.json` にバックアップして
+    NDF 標準 statusline に切り替え
+  - `restore`: バックアップから復元 (バックアップ無しなら statusLine キーを削除)
+- **SessionStart hook 追加** (`scripts/statusline-switch.sh ensure`):
+  - `statusLine` が**未設定の場合のみ** NDF 標準 statusline を設定。
+    既に設定されている場合はそちらを優先し、何も変更しない
+  - プラグイン同梱の `scripts/statusline.sh` を `~/.claude/ndf-statusline.sh` に
+    差分時のみコピーし、プラグイン更新へ自動追従
+    (settings からはプラグインキャッシュパスでなく固定パスを参照)
+  - 書き込みは flock + atomic rename (ensure-retention.sh と同パターン)
+- **plugin.json: version 4.13.0 → 4.14.0**。marketplace.json / README / AGENTS.md /
+  ndf-plugin-reference の version 表記を整合。
+
 ### v4.13.0 (issue-plan-strategy: release PR body の self-contained 必須化)
 
 release ブランチ戦略において、release PR の body が「個別 PR リンクの列挙 + plan 参照」

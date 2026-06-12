@@ -1,15 +1,22 @@
 {
-  "description": "NDF Plugin hooks: transcript retention guard and Slack notifications",
+  "description": "NDF Plugin hooks: transcript retention guard, default statusline, and Slack notifications",
   "hooks": {
     "SessionStart": [
       {
         "matcher": "startup",
-        "description": "Ensure ~/.claude/settings.json cleanupPeriodDays >= 90 (guarded by 7-day timestamp flag)",
+        "description": "Ensure ~/.claude/settings.json cleanupPeriodDays >= 90 (guarded by 7-day timestamp flag) and set default statusline when none is configured",
         "hooks": [
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/ensure-retention.sh",
             "description": "NDF: ensure transcript retention >= 90 days",
+            "continueOnError": true,
+            "suppressOutput": false
+          },
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/statusline-switch.sh ensure",
+            "description": "NDF: set default statusline when none is configured",
             "continueOnError": true,
             "suppressOutput": false
           }
