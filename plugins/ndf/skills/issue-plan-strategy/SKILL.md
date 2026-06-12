@@ -67,7 +67,7 @@ issue 取得 ─┤                                                    │
             │  Step 6: 個別 PR ごとに /ndf:review or /ndf:cross-review
             │           → /ndf:fix → merge into release           │
             │  Step 7: release ブランチで結合テスト相当のレビュー │
-            │  Step 8: release → default を Ready & merge          │
+            │  Step 8: release PR body 最終化 → Ready & merge      │
             └─────────────────────────────────────────────────────┘
 ```
 
@@ -123,6 +123,14 @@ git checkout -b release/<PLAN-ID> origin/<default-branch>
 git push -u origin release/<PLAN-ID>
 ```
 
+### レビュアー視点の原則 (release PR body の大前提)
+
+個別 PR はセルフレビュー (`/ndf:cross-review` 等) で merge される。**人間のレビュアーが見るのは release PR だけ**であり、個別 PR の存在をレビュアーに意識させてはならない。したがって:
+
+- release PR の body は **self-contained 必須**: 「何のために」(背景・解決したい課題) と「何を」(release ブランチ全体としての変更内容) を、**個別 PR を一切参照せずに**理解できる粒度で書く
+- 個別 PR リンクの列挙を body の本文にしない。開発中の進捗管理に使う場合は `<details>` 折りたたみ内の補足情報に格下げする
+- `/ndf:cross-review` の light rotation と同じ原則を適用する: 現状の差分・実装を反映し、内部用語 (PLAN-ID 運用、round、rotated 等) をレビュアー向け本文に漏らさない
+
 ### release → default の Draft PR を先行作成
 
 ```bash
@@ -133,22 +141,28 @@ gh pr create \
   --title "release: <PLAN-ID> <概要>" \
   --body "$(cat <<'EOF'
 ## Summary
+- (背景) なぜこの変更が必要か / 解決したい課題
+- (変更内容) release ブランチ全体として何をするか
 - plan: issues/<PLAN-ID>_xxx.md
-- 複数 PR を統合する release ブランチ
-- 個別 PR が全て merge され次第 Ready for review にする
 
-## 個別 PR
+## Test plan (結合観点のみ)
+- [ ] 個別 PR では検出できない結合テスト項目
+
+<details>
+<summary>開発用: 個別 PR 進捗 (レビュー対象外)</summary>
+
 - [ ] #<TBD> PR1: ...
 - [ ] #<TBD> PR2: ...
 - [ ] #<TBD> PR3: ...
 
-## Test plan (結合観点のみ)
-- [ ] 個別 PR では検出できない結合テスト項目
+</details>
 
 <!-- I want to review in Japanese. -->
 EOF
 )"
 ```
+
+Draft 作成時点では実装が進んでいないため body は plan ベースの暫定でよいが、Ready for review 前に **実装の最終形を反映した body へ最終化**する (Step 8 参照)。
 
 release PR を **先に作る理由**: PR 番号が確定し、個別 PR の説明から参照できるため。
 
@@ -188,7 +202,7 @@ EOF
 )"
 ```
 
-完了後 release PR の本文を `gh pr edit` で更新し、個別 PR 番号を `[ ]` に埋める。
+完了後 release PR の本文を `gh pr edit` で更新し、`<details>` 内の開発用チェックリストに個別 PR 番号を埋める (body 本文には書かない)。
 
 ## Step 5: git worktree で並行開発
 
@@ -235,7 +249,27 @@ release ブランチへの merge が一通り進んだ段階で:
 - ここで個別 PR 範囲のバグが見つかった場合は、**release PR にコメントせず**、該当の個別 PR (既に merge 済みなら新しい修正 PR を release 配下に作成) 側に指摘を書き込み、修正ループを回す
 - release PR には integration 観点の指摘のみ残す
 
-## Step 8: release → default の merge
+## Step 8: release PR body の最終化と release → default の merge
+
+### body の最終化 (Ready for review の前に必須)
+
+個別 PR が全て merge されたら、**Draft 解除の前に** release PR の body を実装の最終形を反映した self-contained な内容へ更新する:
+
+```bash
+# release ブランチ全体の差分を確認して body を書き直す
+git fetch origin
+git diff origin/<default-branch>...origin/release/<PLAN-ID> --stat
+gh pr edit <release-pr-number> --title "..." --body "..."
+```
+
+最終化のチェック観点 (Step 3 のレビュアー視点の原則を満たすこと):
+
+- [ ] 「何のために」「何を」が個別 PR や plan ファイルを辿らずに理解できる
+- [ ] 実装中の方針変更・スコープ増減が body に反映されている
+- [ ] 個別 PR への参照が本文に残っていない (`<details>` 内の開発用情報は残してよい)
+- [ ] 内部用語 (round、rotated 等) が漏れていない
+
+### Draft 解除と merge
 
 release PR が APPROVE されたら:
 
@@ -286,6 +320,8 @@ git checkout release/<PLAN-ID>
 | 個別 PR の base を default にする | release で統合する意味が失われ、partial merge が default を汚染する |
 | 個別 PR Draft 作成を実装後に回す | PR 番号が未確定でクロス参照や CI 待機の段取りが組めない |
 | release PR で個別 PR 範囲の指摘を解決しようとする | 該当 PR が既に閉じている場合、コミット意図がずれる |
+| release PR の body を個別 PR リンクの列挙だけにする | レビュアーは release PR 単体で変更を把握できず、個別 PR や plan を辿ることになる。body は self-contained 必須 (Step 3 / Step 8) |
+| body 最終化せずに Ready for review にする | Draft 作成時の plan ベースの暫定 body のままだと実装の最終形と乖離する |
 | 検証ブランチを feature/release に merge する | `feature → main` PR への汚染 (詳細: `/ndf:branch-fix-strategy`) |
 
 ## 関連 skill
