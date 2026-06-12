@@ -8,7 +8,7 @@
     {
       "name": "ndf",
       "source": "./plugins/ndf",
-      "description": "All-in-one plugin (v4.13.0): 8 specialized agents (model-tiered), 47 skills including pytest-playwright E2E testing (7 focused skills: test-planning, script-creation, execution, report, kit-ops, browser-connect, evidence-drive), CDP remote browser support, Google Drive evidence archival, ML model structure standard, PR/review workflows, principles, data analysis, Codex/Gemini CLI integration, skill usage stats. SessionStart hook (transcript retention >= 90 days), Stop hook (AI-summarized Slack notifications)."
+      "description": "All-in-one plugin (v4.14.0): 8 specialized agents (model-tiered), 48 skills including pytest-playwright E2E testing (7 focused skills: test-planning, script-creation, execution, report, kit-ops, browser-connect, evidence-drive), CDP remote browser support, Google Drive evidence archival, ML model structure standard, PR/review workflows, principles, data analysis, Codex/Gemini CLI integration, skill usage stats, statusline switcher (/ndf:statusline). SessionStart hook (transcript retention >= 90 days, default statusline when none is configured), Stop hook (AI-summarized Slack notifications)."
     },
     {
       "name": "affaan-m",

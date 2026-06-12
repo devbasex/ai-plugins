@@ -7,9 +7,9 @@ Claude Code開発環境を**オールインワン**で強化する統合プラ�
 このプラグイン1つで、以下の**すべて**の機能を利用できます：
 
 1. **コアMCP**: なし (v4.0.0 で Codex MCP 廃止 / Serena MCP は `mcp-serena` プラグインに分離)
-2. **Skills**: 47個（PR/コードレビュー系ワークフロー13個 + 原則・ガイドライン9個 (issue→multi-PR 戦略・MLモデル構造標準含む) + データ分析/品質/環境系12個 + Playwright E2E 8個 (CDPリモート接続・Google Driveエビデンス保管含む) + Google Drive/Chat 連携2個 + AI クロスレビュー2個 (cross-review / gemini) + skill-stats 1個）
+2. **Skills**: 48個（PR/コードレビュー系ワークフロー13個 + 原則・ガイドライン9個 (issue→multi-PR 戦略・MLモデル構造標準含む) + データ分析/品質/環境系12個 + Playwright E2E 8個 (CDPリモート接続・Google Driveエビデンス保管含む) + Google Drive/Chat 連携2個 + AI クロスレビュー2個 (cross-review / gemini) + 運用系2個 (skill-stats / statusline)）
 3. **専門エージェント**: 8つの特化型AIエージェント（director、data-analyst、corder、researcher、qa、debugger、devops-engineer、code-reviewer）
-4. **自動フック**: Slack通知
+4. **自動フック**: Slack通知、デフォルトstatusline設定（未設定時のみ）
 
 > **Note (v2.7.0)**: commandsとskillsが統合されました。全ワークフロー（`/ndf:pr`等）はskillsとして実装されています。追加のMCP（BigQuery、Chrome DevTools、AWS Docs、DBHub、Notion）は個別プラグインとしてインストール可能です。
 
@@ -540,15 +540,25 @@ pytest-playwright ベースの E2E テストワークフロー。
 | `cross-review` | PR を codex/gemini 両方でレビューし APPROVE まで自動ループ |
 | `gemini` | gemini CLI 直接実行（コード生成/レビュー/調査） |
 
-### 9. 運用系スキル（1個）
+### 9. 運用系スキル（2個）
 
 | スキル名 | 概要 |
 |---------|------|
 | `skill-stats` | Skill 利用統計の集計（呼び出し数/ヒット率） |
+| `statusline` | NDF標準statusline（コンテナ名/ホスト名 + project_dir + コンテキスト使用率）の切り替え・復元・状態確認 |
 
 ### 10. 自動フック
 
 Claude Codeの起動時と終了時に自動的に以下が実行されます：
+
+#### SessionStart: デフォルトstatusline設定
+
+セッション開始時に `~/.claude/settings.json` を検査し、`statusLine` が**未設定の場合のみ**
+NDF標準statusline（コンテナ名/ホスト名 + project_dir + コンテキスト使用率）を設定します。
+
+- 既にstatuslineが設定されている場合はそちらを優先し、何も変更しません
+- `/ndf:statusline set` / `/ndf:statusline restore` でいつでも切り替え・復元できます（既存設定は自動バックアップ）
+- NDF標準statusline利用中は、プラグイン更新時にスクリプト（`~/.claude/ndf-statusline.sh`）が自動で追従します
 
 #### Stop: Slack通知
 
@@ -761,7 +771,7 @@ NDFプラグインと併用することで、以下の機能が追加されま�
 
 | プラグイン | 役割 |
 |-----------|------|
-| **NDFプラグイン** | MCP統合、スキル（47個）、専門エージェント |
+| **NDFプラグイン** | MCP統合、スキル（48個）、専門エージェント |
 | **affaan-mプラグイン** | コンテキスト管理、品質保証、TDDワークフロー |
 
 詳細は[affaan-mプラグインREADME](../affaan-m/README.md)を参照してください。
