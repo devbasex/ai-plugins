@@ -1,5 +1,24 @@
 # NDF Plugin CHANGELOG
 
+### v4.13.0 (issue-plan-strategy: release PR body の self-contained 必須化)
+
+release ブランチ戦略において、release PR の body が「個別 PR リンクの列挙 + plan 参照」
+だけになり、人間のレビュアーが PR 単体で変更を把握できない問題に対応 (issue #28)。
+
+- **レビュアー視点の原則を明文化** (`skills/issue-plan-strategy/SKILL.md` Step 3):
+  - 個別 PR はセルフレビューで merge される。人間のレビュアーが見るのは release PR
+    だけであり、個別 PR の存在をレビュアーに意識させない
+- **release PR body テンプレートを self-contained 化**:
+  - 「何のために (背景)」「何を (release 全体の変更内容)」を本文の中心に変更
+  - 個別 PR チェックリストは `<details>` 折りたたみ内の開発用補足情報に格下げ
+- **body 最終化ステップを Step 8 に追加**:
+  - 個別 PR 全 merge 後・Draft 解除前に、実装の最終形を反映した body へ更新する
+    工程とチェック観点を明記 (cross-review light rotation と同等の原則を適用)
+- **アンチパターン 2 件追加**: 「body を個別 PR リンクの列挙だけにする」
+  「body 最終化せずに Ready for review にする」
+- **plugin.json: version 4.12.1 → 4.13.0**。marketplace.json / README / AGENTS.md /
+  ndf-plugin-reference の version 表記を整合。
+
 ### v4.12.1 (cross-review デフォルト値調整・説明文整理)
 
 `/ndf:cross-review` のローテーション/打ち切り関連デフォルトを長尺 PR 向けに緩和し、

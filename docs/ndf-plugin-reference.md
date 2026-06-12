@@ -191,3 +191,4 @@ claude -p --settings '{"disableAllHooks": true, "disableAllPlugins": true}' --ou
 | **v4.11.0** | `/ndf:cross-review` 堅牢性改善: monitor.py EARLY_ERROR 誤検知解消 (文字列リテラル / grep ソース引用行を benign 判定) + ループ終了時の最終スイープ (残 open thread 全 Resolve) 必須化 |
 | **v4.12.0** | Playwright E2E に `playwright-browser-connect` (CDP リモートブラウザ接続) / `playwright-evidence-drive` (Google Drive エビデンスアーカイブ) の 2 skill 追加 (45→47個) |
 | **v4.12.1** | `/ndf:cross-review` デフォルト調整: `--max-rounds` 6→12 / `--rotate-after` 5→8、`--rotate-mode squash` 説明から「既存挙動」表記を削除 |
+| **v4.13.0** | `issue-plan-strategy`: release PR body の self-contained 必須化 (レビュアー視点の原則明文化、子 PR チェックリストを `<details>` に格下げ、Ready 前の body 最終化ステップ追加) |
