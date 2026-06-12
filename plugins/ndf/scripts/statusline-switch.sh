@@ -19,9 +19,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC="$SCRIPT_DIR/statusline.sh"
 NDF_COMMAND="bash ~/.claude/ndf-statusline.sh"
 
-# jq 必須
+# jq 必須 (ensure は SessionStart hook から毎回呼ばれるためノイズ防止で黙ってスキップ)
 if ! command -v jq >/dev/null 2>&1; then
-  echo "[ndf:statusline] jq が見つからないため処理をスキップしました" >&2
+  if [ "$CMD" != "ensure" ]; then
+    echo "[ndf:statusline] jq が見つからないため処理をスキップしました" >&2
+  fi
   exit 0
 fi
 

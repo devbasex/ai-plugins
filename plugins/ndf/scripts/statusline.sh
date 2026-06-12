@@ -34,11 +34,12 @@ fi
 dir="$container_name"
 
 # claude root のパスを取得（project_dir を優先し、なければ current_dir を使用）
-claude_root=$(echo "$input" | jq -r '.workspace.project_dir // .workspace.current_dir // empty')
+# jq 不在や無効な JSON 入力時に stderr が statusLine 描画に漏れないよう 2>/dev/null で抑制
+claude_root=$(echo "$input" | jq -r '.workspace.project_dir // .workspace.current_dir // empty' 2>/dev/null)
 
-total_input=$(echo "$input" | jq -r '.context_window.total_input_tokens // empty')
-ctx_size=$(echo "$input" | jq -r '.context_window.context_window_size // empty')
-used_pct=$(echo "$input" | jq -r '.context_window.used_percentage // empty')
+total_input=$(echo "$input" | jq -r '.context_window.total_input_tokens // empty' 2>/dev/null)
+ctx_size=$(echo "$input" | jq -r '.context_window.context_window_size // empty' 2>/dev/null)
+used_pct=$(echo "$input" | jq -r '.context_window.used_percentage // empty' 2>/dev/null)
 
 ctx_info=""
 if [ -n "$total_input" ] && [ -n "$ctx_size" ] && [ -n "$used_pct" ]; then
