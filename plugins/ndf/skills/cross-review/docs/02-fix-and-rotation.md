@@ -209,7 +209,7 @@ state.json から旧 PR / worktree を解決し、以下の素材を 1 つの JS
   "state_pr": 217,
   "old_pr": 217,
   "old_pr_url": "https://github.com/.../pull/217",
-  "worktree_path": "/work/worktrees/pr217",
+  "worktree_path": "/tmp/ndf-worktrees/owner--name/pr217",
   "head_branch": "feature/...",
   "base_branch": "release/...",
   "is_draft": true,

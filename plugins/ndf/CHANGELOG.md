@@ -1,5 +1,26 @@
 # NDF Plugin CHANGELOG
 
+### v4.15.0 (cross-review: worktree を非永続領域 + リポジトリ別パスに変更)
+
+cross-review の worktree 生成先 `/work/worktrees/pr<N>` が共有の永続 volume 上にあり、
+(1) 別リポジトリの同一 PR 番号と衝突する (2) 明示削除しないと残り続ける
+(3) volume スペースを消費する、という問題に対応。実際に別プロジェクトの残骸
+worktree を流用して git 操作が壊れる事故が発生した。
+
+- **デフォルト生成先を `<システム tmpdir>/ndf-worktrees` に変更** (`state.py`):
+  - 解決順: `NDF_WORKTREE_BASE` env > `tempfile.gettempdir()/ndf-worktrees`
+  - 非永続領域のためコンテナ再作成で自動消滅し、明示削除も不要
+  - 旧 `/work/worktrees` / `$HOME/work/worktrees` フォールバックは廃止
+- **パスにリポジトリ slug を含める**: `<base>/<owner>--<repo>/pr<N>` 形式とし、
+  他リポジトリの同一 PR 番号と衝突しないようにした
+- **残骸 worktree の流用ガード追加**: パスが存在しても `git worktree list` に
+  登録されていなければ `.stale-<timestamp>` に退避して作り直す
+  (`_is_registered_worktree()` / `_create_worktree()` に分離)
+- **テスト更新**: `test_default_worktree_base.py` を新解決順 + repo slug +
+  残骸ガードのテストに刷新 (102 passed)
+- **plugin.json: version 4.14.0 → 4.15.0**。marketplace.json / AGENTS.md /
+  ndf-plugin-reference の version 表記を整合。
+
 ### v4.14.0 (statusline skill + デフォルト statusline 設定 hook 追加)
 
 コンテナ名 (非コンテナ環境ではホスト名) + project_dir + コンテキスト使用率を表示する

@@ -1,9 +1,11 @@
-"""state.py `_default_worktree_base()` の解決順テスト。
+"""state.py `_default_worktree_base()` / `_repo_slug()` の解決テスト。
 
 優先順位:
   1. 環境変数 NDF_WORKTREE_BASE
-  2. /work/worktrees (書込可能)
-  3. $HOME/work/worktrees (フォールバック)
+  2. <システム tmpdir>/ndf-worktrees (非永続領域)
+
+worktree path は `<base>/<owner>--<name>/pr<N>` 形式で、他リポジトリの
+同一 PR 番号と衝突しない。
 """
 from __future__ import annotations
 
@@ -16,29 +18,24 @@ def test_env_override_takes_precedence(monkeypatch, tmp_path, state_mod):
     assert state_mod._default_worktree_base() == explicit
 
 
-def test_fallback_to_home_when_legacy_unwritable(monkeypatch, tmp_path, state_mod):
-    """`/work/worktrees` への mkdir が失敗する環境では $HOME/work/worktrees を返す。
-
-    `Path.mkdir` を patch して `/work/worktrees` を書込不可な状態をエミュレートする。
-    """
+def test_default_is_tmpdir_ndf_worktrees(monkeypatch, tmp_path, state_mod):
+    """既定では永続 volume ではなくシステム tmpdir 配下を使う。"""
     monkeypatch.delenv("NDF_WORKTREE_BASE", raising=False)
-    fake_home = tmp_path / "home"
-    fake_home.mkdir()
-    monkeypatch.setenv("HOME", str(fake_home))
-    # Path.home() は HOME env を再評価しないため明示的に差し替える
+    monkeypatch.setattr(state_mod.tempfile, "gettempdir", lambda: str(tmp_path))
+    assert state_mod._default_worktree_base() == tmp_path / "ndf-worktrees"
+
+
+def test_repo_slug_is_path_safe(state_mod):
+    assert state_mod._repo_slug("devbasex/ai-plugins") == "devbasex--ai-plugins"
+
+
+def test_is_registered_worktree_rejects_foreign_dir(monkeypatch, tmp_path, state_mod):
+    """`git worktree list` に載っていないパスは流用しない (別リポジトリの残骸対策)。"""
+    registered = tmp_path / "registered"
+    foreign = tmp_path / "foreign"
     monkeypatch.setattr(
-        state_mod.pathlib.Path, "home",
-        classmethod(lambda cls: cls(str(fake_home))),
+        state_mod, "_sh",
+        lambda cmd, check=True: f"worktree {registered}\nHEAD abc\n",
     )
-
-    orig_mkdir = state_mod.pathlib.Path.mkdir
-
-    def fake_mkdir(self, *args, **kwargs):
-        if str(self) == "/work/worktrees":
-            raise OSError("read-only file system")
-        return orig_mkdir(self, *args, **kwargs)
-
-    monkeypatch.setattr(state_mod.pathlib.Path, "mkdir", fake_mkdir)
-
-    result = state_mod._default_worktree_base()
-    assert result == pathlib.Path(str(fake_home)) / "work" / "worktrees"
+    assert state_mod._is_registered_worktree(str(registered)) is True
+    assert state_mod._is_registered_worktree(str(foreign)) is False
