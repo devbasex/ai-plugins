@@ -52,7 +52,9 @@ def _default_worktree_base() -> pathlib.Path:
     """
     env = os.environ.get("NDF_WORKTREE_BASE")
     if env:
-        return pathlib.Path(env)
+        # 相対パスのまま state.json に保存されると後続のパス比較が壊れるため、
+        # 常に絶対パスへ解決して返す。
+        return pathlib.Path(env).resolve()
     return pathlib.Path(tempfile.gettempdir()) / "ndf-worktrees"
 
 
@@ -96,6 +98,13 @@ def _create_worktree(worktree: str, pr: int, head_branch: str) -> None:
             cwd=worktree,
         )
         if checkout_result.returncode != 0:
+            # HEAD (親コミット) 指向のまま残すと、次回実行時に
+            # _is_registered_worktree() を通過して不正流用されるため、
+            # die() の前に作成済み worktree をロールバックする。
+            subprocess.run(
+                ["git", "worktree", "remove", "--force", worktree],
+                capture_output=True, text=True,
+            )
             die(f"gh pr checkout --detach #{pr} 失敗: {checkout_result.stderr.strip()}")
         info(f"✅ worktree 作成 (gh pr checkout --detach #{pr}): {worktree}")
 
