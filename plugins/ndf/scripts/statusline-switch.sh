@@ -57,8 +57,10 @@ current_script_path() {
   local cmd path
   cmd="$(current_command)"
   [ -z "$cmd" ] && return 0
-  # 末尾の *.sh トークンを実行対象スクリプトとみなす
-  path="$(printf '%s\n' "$cmd" | grep -oE '[^[:space:]]+\.sh' | tail -n1 || true)"
+  # 末尾の *.sh トークンを実行対象スクリプトとみなす。
+  # grep -o は GNU 拡張のため、POSIX 準拠かつ BusyBox でも動く sed で抽出する。
+  # NDF が配置するコマンドは "bash ~/.claude/<name>.sh" 形式 (パスにスペースを含まない) を想定。
+  path="$(printf '%s\n' "$cmd" | sed -n 's/.*[[:space:]]\([^[:space:]]*\.sh\).*/\1/p; s/^\([^[:space:]]*\.sh\)$/\1/p' | tail -n1)"
   [ -z "$path" ] && return 0
   case "$path" in
     "~/"*) path="$HOME/${path#\~/}" ;;
@@ -73,14 +75,14 @@ is_ndf_managed_copy() {
   local path="$1"
   [ -f "$path" ] || return 1
   # ① マーカーがあれば NDF 管理コピー確定 (今後配置される全コピーが該当)
-  if grep -q 'ndf-statusline: managed' "$path" 2>/dev/null; then
+  if grep -Fq 'ndf-statusline: managed' "$path" 2>/dev/null; then
     return 0
   fi
   # ② レガシー救済: マーカー導入前の既知の旧コピー名で、かつ NDF statusline 特有の
   #    ロジック (ctx ラベル + コンテナ名取得) を両方含む場合のみ移行対象とする
   case "$(basename "$path")" in
     statusline-command.sh)
-      if grep -q '\[ctx:' "$path" 2>/dev/null && grep -q 'container_name' "$path" 2>/dev/null; then
+      if grep -Fq '[ctx:' "$path" 2>/dev/null && grep -Fq 'container_name' "$path" 2>/dev/null; then
         return 0
       fi
       ;;

@@ -10,9 +10,11 @@
   `deploy_script` が配置する `~/.claude/ndf-statusline.sh` にも自動的に入る
 - **`statusline-switch.sh`**: `cmd_ensure` に移行分岐を追加
   - `current_script_path`: `statusLine.command` から実行スクリプトのパスを抽出
+    (GNU 拡張の `grep -o` を避け、BusyBox でも動く `sed` で抽出)
   - `is_ndf_managed_copy`: ① マーカーがあれば NDF 管理コピー確定、
     ② レガシー救済として既知名 `statusline-command.sh` かつ NDF 特有ロジック
     (`[ctx:` + `container_name`) を両方含む場合のみ対象
+    (マーカー/特徴の検出は `grep -F` の固定文字列検索で正規表現メタ文字を回避)
   - `migrate_to_ndf_statusline`: 既存設定を `~/.claude/.ndf-statusline-backup.json`
     に退避し、正規パス参照へ移行。以後は `deploy_script` の更新ルートに乗る
   - マーカーも特徴も持たないユーザー独自 statusline は誤検出ガードで一切上書きしない
