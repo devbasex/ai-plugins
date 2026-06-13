@@ -60,7 +60,8 @@ current_script_path() {
   # 末尾の *.sh トークンを実行対象スクリプトとみなす。
   # grep -o は GNU 拡張のため、POSIX 準拠かつ BusyBox でも動く sed で抽出する。
   # NDF が配置するコマンドは "bash ~/.claude/<name>.sh" 形式 (パスにスペースを含まない) を想定。
-  path="$(printf '%s\n' "$cmd" | sed -n 's/.*[[:space:]]\([^[:space:]]*\.sh\).*/\1/p; s/^\([^[:space:]]*\.sh\)$/\1/p' | tail -n1)"
+  # 1つ目の置換がマッチしたら t で分岐して二重出力を防ぐ (tail -n1 のパイプを削減)。
+  path="$(printf '%s\n' "$cmd" | sed -n 's/.*[[:space:]]\([^[:space:]]*\.sh\).*/\1/p; t; s/^\([^[:space:]]*\.sh\)$/\1/p')"
   [ -z "$path" ] && return 0
   case "$path" in
     "~/"*) path="$HOME/${path#\~/}" ;;
