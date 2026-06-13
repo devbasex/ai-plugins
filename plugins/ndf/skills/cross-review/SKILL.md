@@ -88,7 +88,7 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 | # | 対策 | スクリプト側で何をするか |
 |---|---|---|
 | 1 | 自分の PR 判定（422 回避） | `gh api user` と `gh pr view --json author` を比較し `is_own_pr` / `event_downgrade` を state.json に書く |
-| 2 | worktree 分離 | `git worktree add <worktree-base>/pr<PR> <head>` を冪等実行（`<worktree-base>` は `NDF_WORKTREE_BASE` env > `/work/worktrees` > `$HOME/work/worktrees` の優先順で解決） |
+| 2 | worktree 分離 | `git worktree add <worktree-base>/<owner>--<repo>/pr<PR> <head>` を冪等実行（`<worktree-base>` は `NDF_WORKTREE_BASE` env > `<システム tmpdir>/ndf-worktrees` の優先順で解決）。パスが存在しても現リポジトリの登録済み worktree でなければ `.stale-<ts>` に退避して作り直す |
 | 3 | gemini trusted directory | `launch-gemini.sh` が `GEMINI_CLI_TRUST_WORKSPACE=true` + `--skip-trust` を必ず併用。**tmp dir は `<worktree>/.cross_review/`** を採用し、gemini の workspace 制約 (workspace 外の `write_file` がブロックされる) を根本回避 |
 | 4 | 既存コメント差分 | `fix/scripts/fetch-pr-comments.sh` で 3 ソース (インラインコメント / レビュー body / PR レベルコメント) を一括取得し `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt` に保存。gemini プロンプトには **内容をインライン埋め込み**、codex プロンプトには path を渡す |
 
@@ -97,8 +97,14 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 `state.py init` は worktree の親ディレクトリを以下の優先順で解決する:
 
 1. `NDF_WORKTREE_BASE` 環境変数（明示オーバーライド）
-2. `/work/worktrees`（Linux コンテナ環境互換。書き込み可能ならこちらを使用）
-3. `$HOME/work/worktrees`（macOS / WSL 等のフォールバック）
+2. `<システム tmpdir>/ndf-worktrees`（Python `tempfile.gettempdir()`。非永続領域のため
+   コンテナ再作成で自動消滅し、共有 volume を消費しない）
+
+worktree の実パスは `<base>/<owner>--<repo>/pr<PR>` 形式で、リポジトリ slug を含める
+ことで**他リポジトリの同一 PR 番号と衝突しない**。永続 volume（旧 `/work/worktrees`）を
+使っていた頃は別プロジェクトの残骸 worktree を誤って流用する事故があったため、
+パスが存在しても `git worktree list` に登録されていなければ `.stale-<timestamp>` に
+退避して作り直すガードも入っている。
 
 解決した実パスは `state.json` の `worktree_path` に書かれるため、後続スクリプトや
 サブエージェント prompt は state.json から読めば追従できる。

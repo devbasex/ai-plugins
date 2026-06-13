@@ -32,33 +32,88 @@ import pathlib
 import shlex
 import subprocess
 import sys
+import tempfile
+import time
 from typing import Any
 
 
 # ---------------- helpers ----------------
 
 def _default_worktree_base() -> pathlib.Path:
-    """worktree の親ディレクトリを環境に応じて解決する。
+    """worktree の親ディレクトリを解決する。
 
     優先順位:
       1. 環境変数 NDF_WORKTREE_BASE (明示オーバーライド)
-      2. /work/worktrees (Linux コンテナ環境互換、書き込み可能ならそれを使う)
-      3. $HOME/work/worktrees (macOS / WSL 等のフォールバック)
+      2. <システム tmpdir>/ndf-worktrees (非永続領域。コンテナ再作成で自動消滅)
+
+    かつての /work/worktrees ($HOME/work/worktrees) は共有の永続 volume 上にあり、
+    別リポジトリの pr<N> と衝突する・明示削除が必要・volume を消費する問題が
+    あったため廃止した。
     """
     env = os.environ.get("NDF_WORKTREE_BASE")
     if env:
-        return pathlib.Path(env)
-    legacy = pathlib.Path("/work/worktrees")
-    try:
-        legacy.mkdir(parents=True, exist_ok=True)
-        if not os.access(legacy, os.W_OK):
-            info(f"⚠ worktree ベースディレクトリに書き込み権限がありません: {legacy} — フォールバック")
-        else:
-            # mkdir 成功 + 書き込み可能 → 既存環境互換でこちらを使う
-            return legacy
-    except OSError:
-        pass
-    return pathlib.Path.home() / "work" / "worktrees"
+        # 相対パスのまま state.json に保存されると後続のパス比較が壊れるため、
+        # 常に絶対パスへ解決して返す。
+        return pathlib.Path(env).resolve()
+    return pathlib.Path(tempfile.gettempdir()) / "ndf-worktrees"
+
+
+def _repo_slug(repo: str) -> str:
+    """`owner/name` を path-safe なディレクトリ名 `owner--name` に変換する。"""
+    return repo.replace("/", "--")
+
+
+def _is_registered_worktree(path: str) -> bool:
+    """path が現リポジトリに登録済みの worktree かどうか。
+
+    パスが存在しても別リポジトリの残骸や git 管理外ディレクトリの可能性があり、
+    流用すると git 操作が壊れるため、流用前に必ずこれで検証する。
+    """
+    out = _sh(["git", "worktree", "list", "--porcelain"], check=False)
+    target = str(pathlib.Path(path).resolve())
+    return any(line == f"worktree {target}" for line in out.splitlines())
+
+
+def _create_worktree(worktree: str, pr: int, head_branch: str) -> None:
+    """origin/<head> から detached worktree を作成する (フォーク PR はフォールバック)。"""
+    pathlib.Path(worktree).parent.mkdir(parents=True, exist_ok=True)
+    # worktree を /tmp 等の非永続領域に置くと、実体だけ消えて親リポジトリの
+    # 登録 (prunable) が残ることがある。その状態で `git worktree add` すると
+    # 「パス登録済み」として失敗するため、追加前に prune で掃除しておく。
+    subprocess.run(
+        ["git", "worktree", "prune"],
+        capture_output=True, text=True,
+    )
+    # フォーク PR の場合 origin に head_branch がないことがある。
+    # fetch 失敗時は gh pr checkout --detach でフォールバックする。
+    fetch_result = subprocess.run(
+        ["git", "fetch", "origin", head_branch],
+        capture_output=True, text=True,
+    )
+    if fetch_result.returncode == 0:
+        # head branch が既に別の worktree で checkout されている場合を避けるため
+        # detached で展開する。cross-review はファイル参照しかしないので問題ない。
+        _sh(["git", "worktree", "add", "--detach", worktree, f"origin/{head_branch}"])
+        info(f"✅ worktree 作成 (detached @ origin/{head_branch}): {worktree}")
+    else:
+        info(f"⚠ git fetch origin {head_branch} 失敗 (フォーク PR の可能性) — gh pr checkout でフォールバック")
+        _sh(["git", "worktree", "add", "--detach", worktree, "HEAD"])
+        # worktree 内で gh pr checkout を実行して正しいコミットに切り替え
+        checkout_result = subprocess.run(
+            ["gh", "pr", "checkout", str(pr), "--detach"],
+            capture_output=True, text=True,
+            cwd=worktree,
+        )
+        if checkout_result.returncode != 0:
+            # HEAD (親コミット) 指向のまま残すと、次回実行時に
+            # _is_registered_worktree() を通過して不正流用されるため、
+            # die() の前に作成済み worktree をロールバックする。
+            subprocess.run(
+                ["git", "worktree", "remove", "--force", worktree],
+                capture_output=True, text=True,
+            )
+            die(f"gh pr checkout --detach #{pr} 失敗: {checkout_result.stderr.strip()}")
+        info(f"✅ worktree 作成 (gh pr checkout --detach #{pr}): {worktree}")
 
 
 def _git_toplevel() -> str | None:
@@ -287,7 +342,10 @@ def cmd_init(args: argparse.Namespace) -> None:
     pr = args.pr
     # worktree path を先に解決してから tmp_dir を決定する。
     # tmp_dir は <worktree>/.cross_review/ に配置し、gemini の workspace 制約を根本回避。
-    worktree = str(pathlib.Path(args.worktree).resolve()) if args.worktree else str(_default_worktree_base() / f"pr{pr}")
+    # path には repo slug を含め、他リポジトリの同一 PR 番号と衝突しないようにする。
+    repo = _sh(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
+    worktree = str(pathlib.Path(args.worktree).resolve()) if args.worktree else str(
+        _default_worktree_base() / _repo_slug(repo) / f"pr{pr}")
 
     # worktree 存在チェック用: _tmp_dir() は mkdir するため、先に呼ぶと
     # worktree ディレクトリが副作用で作成され exists() が常に true になる。
@@ -331,31 +389,16 @@ def cmd_init(args: argparse.Namespace) -> None:
     head_branch = _sh(["gh", "pr", "view", str(pr), "--json", "headRefName", "--jq", ".headRefName"])
     base_branch = _sh(["gh", "pr", "view", str(pr), "--json", "baseRefName", "--jq", ".baseRefName"])
     if not pathlib.Path(worktree).exists():
-        # フォーク PR の場合 origin に head_branch がないことがある。
-        # fetch 失敗時は gh pr checkout --detach でフォールバックする。
-        fetch_result = subprocess.run(
-            ["git", "fetch", "origin", head_branch],
-            capture_output=True, text=True,
-        )
-        if fetch_result.returncode == 0:
-            # head branch が既に別の worktree で checkout されている場合を避けるため
-            # detached で展開する。cross-review はファイル参照しかしないので問題ない。
-            _sh(["git", "worktree", "add", "--detach", worktree, f"origin/{head_branch}"])
-            info(f"✅ worktree 作成 (detached @ origin/{head_branch}): {worktree}")
-        else:
-            info(f"⚠ git fetch origin {head_branch} 失敗 (フォーク PR の可能性) — gh pr checkout でフォールバック")
-            _sh(["git", "worktree", "add", "--detach", worktree, "HEAD"])
-            # worktree 内で gh pr checkout を実行して正しいコミットに切り替え
-            checkout_result = subprocess.run(
-                ["gh", "pr", "checkout", str(pr), "--detach"],
-                capture_output=True, text=True,
-                cwd=worktree,
-            )
-            if checkout_result.returncode != 0:
-                die(f"gh pr checkout --detach #{pr} 失敗: {checkout_result.stderr.strip()}")
-            info(f"✅ worktree 作成 (gh pr checkout --detach #{pr}): {worktree}")
-    else:
+        _create_worktree(worktree, pr, head_branch)
+    elif _is_registered_worktree(worktree):
         info(f"↻ 既存 worktree 流用: {worktree}")
+    else:
+        # パスは存在するが現リポジトリの worktree ではない (別リポジトリの残骸等)。
+        # 流用すると git 操作が壊れるため退避して作り直す。
+        stale = f"{worktree}.stale-{time.strftime('%Y%m%d%H%M%S')}"
+        pathlib.Path(worktree).rename(stale)
+        info(f"⚠ 現リポジトリの worktree でないため退避: {stale}")
+        _create_worktree(worktree, pr, head_branch)
 
     # worktree 作成/確認後に _tmp_dir() を呼ぶ (ここで .cross_review/ が作られる)
     tmp_dir = _tmp_dir(worktree)
@@ -364,7 +407,6 @@ def cmd_init(args: argparse.Namespace) -> None:
     # 既存コメントスナップショット（重複指摘防止）。
     # 3 ソース (インラインコメント / レビュー body / PR レベルコメント) を
     # fix skill の共有スクリプトで一括取得する。
-    repo = _sh(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
     fetch_script = pathlib.Path(__file__).resolve().parent.parent.parent / "fix" / "scripts" / "fetch-pr-comments.sh"
     r = subprocess.run(
         [str(fetch_script), repo, str(pr)],

@@ -30,7 +30,7 @@
   "rotate_after": 8,
   "only": null,
   "current_pr": 123,
-  "worktree_path": "/work/worktrees/pr123",
+  "worktree_path": "/tmp/ndf-worktrees/owner--name/pr123",
   "repo": "owner/name",
   "head_branch": "feature/foo",
   "base_branch": "main",
@@ -98,7 +98,7 @@ cd "$WORKTREE"
 
 1. 既存 state.json があり `final == null` なら再開
 2. 自分の PR 判定（`gh api user` と `gh pr view --json author` を比較）
-3. worktree 作成（`<worktree-base>/pr<PR>`。`<worktree-base>` は `NDF_WORKTREE_BASE` env > `/work/worktrees` > `$HOME/work/worktrees` の優先順で解決。実 path は state.json の `worktree_path` を参照）
+3. worktree 作成（`<worktree-base>/<owner>--<repo>/pr<PR>`。`<worktree-base>` は `NDF_WORKTREE_BASE` env > `<システム tmpdir>/ndf-worktrees` の優先順で解決。既存パスが現リポジトリの登録済み worktree でなければ `.stale-<ts>` に退避して作り直す。実 path は state.json の `worktree_path` を参照）
 4. 既存コメントスナップショット (`fix/scripts/fetch-pr-comments.sh` で 3 ソース一括取得) → `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt`
 5. state.json 書き出し
 
@@ -173,7 +173,7 @@ fi
 launcher が生成するプロンプトに以下を強制している:
 
 - **headRefOid (commit_id) を明示**: AI が自前で取得すると baseRefOid を誤って入れる事故が多発
-- **作業 worktree の絶対パス**: 「ファイル読み取りは必ず worktree 配下の絶対パスを使う」（実 path は state.json の `worktree_path` を参照。`<worktree-base>` は `NDF_WORKTREE_BASE` env > `/work/worktrees` > `$HOME/work/worktrees` の優先順で解決）
+- **作業 worktree の絶対パス**: 「ファイル読み取りは必ず worktree 配下の絶対パスを使う」（実 path は state.json の `worktree_path` を参照。`<worktree-base>` は `NDF_WORKTREE_BASE` env > `<システム tmpdir>/ndf-worktrees` の優先順で解決）
 - **event ダウングレード警告**: `event_downgrade=true` のときは payload の `event` を `COMMENT` に
 - **既存コメント差分**: `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt` を読んで重複指摘禁止
 - **review body 先頭 prefix**:
