@@ -1,6 +1,6 @@
 #!/bin/bash
 # NDF plugin 標準 statusline:
-#   <コンテナ名 or ホスト名> <project_dir> [ctx: 使用トークン / 全体 (使用率%)]
+#   <コンテナ名 or ホスト名> <project_dir> [<モデル名>: 使用トークン / 全体 (使用率%)]
 input=$(cat)
 
 # コンテナ名を取得する。コンテナでなければホスト名にフォールバック
@@ -41,11 +41,15 @@ total_input=$(echo "$input" | jq -r '.context_window.total_input_tokens // empty
 ctx_size=$(echo "$input" | jq -r '.context_window.context_window_size // empty' 2>/dev/null)
 used_pct=$(echo "$input" | jq -r '.context_window.used_percentage // empty' 2>/dev/null)
 
+# モデル表示名を取得（ラベルとして使用）。取れなければ "ctx" にフォールバック
+model_name=$(echo "$input" | jq -r '.model.display_name // .model.id // empty' 2>/dev/null)
+ctx_label="${model_name:-ctx}"
+
 ctx_info=""
 if [ -n "$total_input" ] && [ -n "$ctx_size" ] && [ -n "$used_pct" ]; then
   total_input_k=$(awk "BEGIN { printf \"%.1f\", $total_input / 1000 }")
   ctx_size_k=$(awk "BEGIN { printf \"%.0f\", $ctx_size / 1000 }")
-  ctx_info=$(printf " \033[0;36m[ctx: %sk / %sk tokens (%.0f%%)]" "$total_input_k" "$ctx_size_k" "$used_pct")
+  ctx_info=$(printf " \033[0;36m[%s: %sk / %sk tokens (%.0f%%)]" "$ctx_label" "$total_input_k" "$ctx_size_k" "$used_pct")
 fi
 
 if [ -n "$claude_root" ]; then
