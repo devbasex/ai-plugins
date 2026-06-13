@@ -1,5 +1,18 @@
 # NDF Plugin CHANGELOG
 
+### v4.16.0 (statusline: 固定 `ctx:` ラベルを利用モデル名に置換)
+
+statusline の `[ctx: ...]` 部分の固定ラベル `ctx:` が常時同じ文字で表示スペースの
+無駄になっていたため、利用中モデルの表示名に置き換えた。
+
+- **`statusline.sh`**: `model.display_name` (なければ `model.id`) を取得し、
+  角括弧内のラベルに使用。`[Opus 4.8: 44.6k / 1000k tokens (4%)]` のように表示
+  - モデル名が取得できない場合は従来どおり `ctx` にフォールバック
+  - トークン情報 (`context_window`) が無い場合の非表示挙動は従来どおり
+- **`statusline` skill SKILL.md**: 表示例をモデル名ラベルに更新
+- **plugin.json: version 4.15.0 → 4.16.0**。marketplace.json / AGENTS.md /
+  ndf-plugin-reference の version 表記を整合。
+
 ### v4.15.0 (cross-review: worktree を非永続領域 + リポジトリ別パスに変更)
 
 cross-review の worktree 生成先 `/work/worktrees/pr<N>` が共有の永続 volume 上にあり、
