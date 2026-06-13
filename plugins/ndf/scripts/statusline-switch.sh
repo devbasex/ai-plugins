@@ -51,6 +51,46 @@ is_ndf_statusline() {
   esac
 }
 
+# current_command から実行スクリプトのパスを抽出し、先頭の ~ を $HOME に展開する。
+# 例: "bash ~/.claude/statusline-command.sh" -> "/home/user/.claude/statusline-command.sh"
+current_script_path() {
+  local cmd path
+  cmd="$(current_command)"
+  [ -z "$cmd" ] && return 0
+  # 末尾の *.sh トークンを実行対象スクリプトとみなす。
+  # grep -o は GNU 拡張のため、POSIX 準拠かつ BusyBox でも動く sed で抽出する。
+  # NDF が配置するコマンドは "bash ~/.claude/<name>.sh" 形式 (パスにスペースを含まない) を想定。
+  # 1つ目の置換がマッチしたら t で分岐して二重出力を防ぐ (tail -n1 のパイプを削減)。
+  path="$(printf '%s\n' "$cmd" | sed -n 's/.*[[:space:]]\([^[:space:]]*\.sh\).*/\1/p; t; s/^\([^[:space:]]*\.sh\)$/\1/p')"
+  [ -z "$path" ] && return 0
+  case "$path" in
+    "~/"*) path="$HOME/${path#\~/}" ;;
+    "~")   path="$HOME" ;;
+  esac
+  printf '%s\n' "$path"
+}
+
+# 指定スクリプトが NDF 由来 (マーカー付き、または既知のレガシーコピー) か判定する。
+# ユーザー独自の statusline を誤って上書きしないため、判定は厳格に行う。
+is_ndf_managed_copy() {
+  local path="$1"
+  [ -f "$path" ] || return 1
+  # ① マーカーがあれば NDF 管理コピー確定 (今後配置される全コピーが該当)
+  if grep -Fq 'ndf-statusline: managed' "$path" 2>/dev/null; then
+    return 0
+  fi
+  # ② レガシー救済: マーカー導入前の既知の旧コピー名で、かつ NDF statusline 特有の
+  #    ロジック (ctx ラベル + コンテナ名取得) を両方含む場合のみ移行対象とする
+  case "$(basename "$path")" in
+    statusline-command.sh)
+      if grep -Fq '[ctx:' "$path" 2>/dev/null && grep -Fq 'container_name' "$path" 2>/dev/null; then
+        return 0
+      fi
+      ;;
+  esac
+  return 1
+}
+
 # settings.json を atomic に書き換える。引数: jq フィルタ
 update_settings() {
   local tmp
@@ -68,10 +108,35 @@ set_ndf_statusline() {
     '.statusLine = {type: "command", command: $cmd}'
 }
 
+# NDF 由来の旧 statusline を検出した際に、既存設定をバックアップした上で
+# 正規パス (~/.claude/ndf-statusline.sh) 参照へ移行する。
+migrate_to_ndf_statusline() {
+  local existing
+  existing=$(jq -c '.statusLine // empty' "$SETTINGS" 2>/dev/null || true)
+  if [ -n "$existing" ] && [ ! -f "$BACKUP" ]; then
+    printf '%s\n' "$existing" > "$BACKUP"
+  fi
+  set_ndf_statusline
+  echo "[ndf:statusline] NDF 由来の旧 statusline を検出したため正規パス (~/.claude/ndf-statusline.sh) へ移行しました (旧設定は $BACKUP に退避)"
+}
+
 cmd_ensure() {
   deploy_script
-  # 既に statusLine が設定されていればそちらを優先 (何もしない)
+  # 既に statusLine が設定されている場合
   if [ -n "$(jq -r '.statusLine // empty' "$SETTINGS" 2>/dev/null)" ]; then
+    # 正規パスを指していれば deploy_script で本体が追従済み (何もしない)
+    if is_ndf_statusline; then
+      return 0
+    fi
+    # NDF が過去に配置したコピー (マーカー付き or レガシー statusline-command.sh) を
+    # 指している場合のみ、正規パス参照へ移行してバージョンアップ追従を回復する
+    local cur_path
+    cur_path="$(current_script_path)"
+    if [ -n "$cur_path" ] && is_ndf_managed_copy "$cur_path"; then
+      migrate_to_ndf_statusline
+      return 0
+    fi
+    # それ以外はユーザー独自設定として尊重し、何もしない
     return 0
   fi
   set_ndf_statusline
