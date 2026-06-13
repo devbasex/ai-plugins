@@ -77,6 +77,13 @@ def _is_registered_worktree(path: str) -> bool:
 def _create_worktree(worktree: str, pr: int, head_branch: str) -> None:
     """origin/<head> から detached worktree を作成する (フォーク PR はフォールバック)。"""
     pathlib.Path(worktree).parent.mkdir(parents=True, exist_ok=True)
+    # worktree を /tmp 等の非永続領域に置くと、実体だけ消えて親リポジトリの
+    # 登録 (prunable) が残ることがある。その状態で `git worktree add` すると
+    # 「パス登録済み」として失敗するため、追加前に prune で掃除しておく。
+    subprocess.run(
+        ["git", "worktree", "prune"],
+        capture_output=True, text=True,
+    )
     # フォーク PR の場合 origin に head_branch がないことがある。
     # fetch 失敗時は gh pr checkout --detach でフォールバックする。
     fetch_result = subprocess.run(
