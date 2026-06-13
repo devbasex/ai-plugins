@@ -1,5 +1,26 @@
 # NDF Plugin CHANGELOG
 
+### v4.16.1 (statusline: NDF 由来の旧コピーをバージョンアップ追従させる)
+
+`settings.json` の `statusLine` が NDF の過去配置コピー (マーカー付き /
+レガシー `statusline-command.sh`) を指している場合、SessionStart hook が
+それを検出できずスクリプト更新が届かない問題を修正した。
+
+- **`statusline.sh`**: 先頭に識別マーカー `# ndf-statusline: managed` を追加。
+  `deploy_script` が配置する `~/.claude/ndf-statusline.sh` にも自動的に入る
+- **`statusline-switch.sh`**: `cmd_ensure` に移行分岐を追加
+  - `current_script_path`: `statusLine.command` から実行スクリプトのパスを抽出
+  - `is_ndf_managed_copy`: ① マーカーがあれば NDF 管理コピー確定、
+    ② レガシー救済として既知名 `statusline-command.sh` かつ NDF 特有ロジック
+    (`[ctx:` + `container_name`) を両方含む場合のみ対象
+  - `migrate_to_ndf_statusline`: 既存設定を `~/.claude/.ndf-statusline-backup.json`
+    に退避し、正規パス参照へ移行。以後は `deploy_script` の更新ルートに乗る
+  - マーカーも特徴も持たないユーザー独自 statusline は誤検出ガードで一切上書きしない
+- **`skills/statusline/tests/`**: 新設。移行/尊重/誤検出ガードの 6 シナリオを
+  pytest で検証 (`uv run --with pytest python -m pytest`)
+- **plugin.json: version 4.16.0 → 4.16.1**。marketplace.json / AGENTS.md /
+  ndf-plugin-reference の version 表記を整合
+
 ### v4.16.0 (statusline: 固定 `ctx:` ラベルを利用モデル名に置換)
 
 statusline の `[ctx: ...]` 部分の固定ラベル `ctx:` が常時同じ文字で表示スペースの

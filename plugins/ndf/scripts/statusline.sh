@@ -1,4 +1,5 @@
 #!/bin/bash
+# ndf-statusline: managed (do not edit; auto-updated by ndf:statusline)
 # NDF plugin 標準 statusline:
 #   <コンテナ名 or ホスト名> <project_dir> [<モデル名>: 使用トークン / 全体 (使用率%)]
 input=$(cat)

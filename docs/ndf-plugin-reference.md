@@ -208,3 +208,4 @@ claude -p --settings '{"disableAllHooks": true, "disableAllPlugins": true}' --ou
 | **v4.14.0** | `statusline` skill + デフォルト statusline 設定 hook 追加 (47→48個)。statusLine 未設定時のみ NDF 標準 statusline を自動設定、`/ndf:statusline set\|restore\|status` で切替・復元 |
 | **v4.15.0** | cross-review: worktree 生成先を `<システム tmpdir>/ndf-worktrees/<owner>--<repo>/pr<N>` に変更 (非永続化 + リポジトリ別分離)。未登録パスの残骸は `.stale-<ts>` に退避して作り直すガード追加 |
 | **v4.16.0** | statusline: `[ctx:` の固定ラベルを利用モデル表示名 (例 `Opus 4.8`) に置換。モデル名が取れない場合は `ctx` にフォールバック |
+| **v4.16.1** | statusline: NDF 由来の旧コピー (マーカー付き / レガシー `statusline-command.sh`) を `settings.json` が指す場合、SessionStart で正規パス (`~/.claude/ndf-statusline.sh`) へ自動移行しバージョンアップ追従を回復。ユーザー独自 statusline は誤検出ガードで保護。`skills/statusline/tests/` 新設 |
