@@ -1,6 +1,6 @@
 ---
 name: pr
-description: "commit, push, PR作成(または既存PR説明更新)を一括実行するワークフローコマンド。--draft指定でドラフトPR、base非mainの場合はcherry-pick-prに誘導する。"
+description: "commit/push/PR作成またはPR説明更新を行う。"
 argument-hint: "[--draft] [base-branch] or [commit-message]"
 disable-model-invocation: true
 allowed-tools:

@@ -1,6 +1,6 @@
 ---
 name: ml-model-structure
-description: "機械学習モデルの構築・再学習・推論API(SageMaker等)開発における標準ディレクトリ構造と実装方法。版ごとに自己完結する構造 (vN/) + 版内 feature SSoT (features.py) + 推論コンテナ規約で、train/serve skew を版内で防ぎ champion/challenger の並行運用に備える。新しいモデルを作る・再学習する・推論コンテナを書く・モデルをバージョン管理するときは、フラットに連番スクリプトを置く前に必ず本スキルを参照すること。"
+description: "MLモデル開発の標準ディレクトリ構造を適用する。"
 when_to_use: "機械学習モデルの新規構築・再学習・推論API/コンテナ開発・モデルのバージョン管理/並行運用を行うとき。analysis/ 配下に学習スクリプトや推論コードを配置する設計判断が必要なとき。Triggers: 'モデル構築', 'モデル再学習', 'モデルのバージョン管理', '推論コンテナ', '推論API', 'SageMaker', 'feature SSoT', 'train/serve skew', 'analysis ディレクトリ', 'champion challenger', '並行運用'"
 allowed-tools:
   - Read

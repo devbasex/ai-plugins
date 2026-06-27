@@ -1,6 +1,6 @@
 ---
 name: sync-main
-description: "最新のデフォルトブランチ(main/master)を現在のブランチに取り込むワークフロー。feature branchをmainに追従させる際に使用。"
+description: "現在ブランチに最新main/masterを取り込む。"
 disable-model-invocation: true
 allowed-tools:
   - Bash

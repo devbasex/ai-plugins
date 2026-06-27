@@ -1,6 +1,6 @@
 ---
 name: statusline
-description: "NDF標準statusline（コンテナ名/ホスト名 + project_dir + コンテキスト使用率）への切り替え・復元・状態確認を行う"
+description: "NDF標準statuslineを切替・復元・確認する。"
 when_to_use: "statuslineを切り替え/復元/確認したいとき。Triggers: 'statusline', 'ステータスライン', 'statusline 切り替え', 'statusline 戻す'"
 disable-model-invocation: true
 allowed-tools:

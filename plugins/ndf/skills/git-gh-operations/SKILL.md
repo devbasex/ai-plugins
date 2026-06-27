@@ -1,6 +1,6 @@
 ---
 name: git-gh-operations
-description: "git / gh コマンド実行時の共通エラーパターンと正しい操作方法。CWD 問題、パス解決ルール、gh CLI / GitHub API の正しい使い方、過去のエラー事例と対策を扱う。"
+description: "git/ghコマンドのエラー対処と操作手順。"
 when_to_use: "git / gh コマンドでエラーが出た or 操作方法に迷うとき。Triggers: 'git add', 'git commit', 'git push', 'gh pr', 'gh api', 'GitHub操作', 'gitエラー', 'fatal:', 'pathspec'"
 allowed-tools:
   - Bash

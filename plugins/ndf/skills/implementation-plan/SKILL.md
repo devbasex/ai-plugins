@@ -1,6 +1,6 @@
 ---
 name: implementation-plan
-description: "実装プランファイル作成・更新の手順。実装開始時およびPR作成時にissues/配下の実装プランの有無を確認し、なければ会話履歴・git log・git diffから生成する。複数ファイル変更・新規機能追加・DBマイグレーション伴う変更が対象。"
+description: "実装プランファイルを作成・更新する。"
 when_to_use: "実装開始時 / PR作成時に実装プランの作成・更新が必要なとき。複数ファイル変更・新機能追加・DBマイグレーションを含む変更で自動参照。Triggers: '実装プラン', '実装を開始', 'PR作成', 'implementation plan', 'plan first', '設計書を作成', 'issues/に追加'"
 ---
 

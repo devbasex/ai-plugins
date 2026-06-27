@@ -1,6 +1,6 @@
 ---
 name: branch-fix-strategy
-description: "修正を複数ブランチに適用する際のブランチ戦略。featureブランチへの先行commitとcherry-pickによる短命branchへの適用手順。環境別branch（qa/staging/epsilon等）への修正適用時に参照する。"
+description: "複数ブランチへ同じ修正を適用する戦略。"
 when_to_use: "同じ修正を複数ブランチ (qa/staging/release等) に適用する必要があるとき。Triggers: 'cherry-pick', '環境ブランチに修正適用', 'qaに反映', 'stagingに反映', 'release branchへ', 'multi-branch fix', 'apply to qa/staging'"
 ---
 

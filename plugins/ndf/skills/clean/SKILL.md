@@ -1,6 +1,6 @@
 ---
 name: clean
-description: "mainマージ済みブランチをローカル/リモート一括削除する"
+description: "mainマージ済みブランチを削除する。"
 disable-model-invocation: true
 allowed-tools:
   - Bash

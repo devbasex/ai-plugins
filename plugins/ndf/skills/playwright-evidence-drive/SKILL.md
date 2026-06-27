@@ -1,6 +1,6 @@
 ---
 name: playwright-evidence-drive
-description: "Playwright E2E テスト後のエビデンス一式 (動画/trace/HAR/report.md) を Google Drive に保管し、共有リンクを生成する。自動アップロード (--pwk-drive-folder) と手動アップロード (scripts) の両方をサポート。report.md → Google Docs 変換 + Drive リンク埋め込みも対応。"
+description: "Playwright証跡をGoogle Driveへ保管する。"
 when_to_use: "テストエビデンスを Google Drive に保管・共有したいとき / テスト結果を Google Docs としてチームに配布したいとき / Drive 上のエビデンスリンクを report に埋め込みたいとき。Triggers: 'Drive にアップロード', 'Drive 共有', 'エビデンス保管', 'evidence drive', 'pwk-drive-folder', 'テスト結果共有', 'Google Drive エビデンス', 'trace アップロード', '動画アップロード', 'report を Docs に', 'エビデンス配布'"
 allowed-tools:
   - Read

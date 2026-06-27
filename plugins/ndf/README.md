@@ -1,6 +1,6 @@
 # NDF Plugin
 
-Claude Code開発環境を**オールインワン**で強化する統合プラグインです。
+Claude Code / Codex開発環境を**オールインワン**で強化する統合プラグインです。
 
 ## 概要
 
@@ -66,6 +66,26 @@ GitHub、Context7 MCPは公式プラグインとして提供されています�
 # Claude Codeで実行
 /plugin install ndf@ai-plugins
 ```
+
+### Codexでのインストール
+
+```bash
+codex plugin marketplace add https://github.com/devbasex/ai-plugins
+codex plugin add ndf@ai-plugins
+```
+
+Codex版ではSkillsに加えて、Codex向けSlack終了通知hookを同梱します。通知は明示的に `NDF_CODEX_SLACK_NOTIFY=true` を設定した場合のみ送信されます。Claude Code向けのstatusline設定、transcript保持期間設定、Claude CLIによるSlack要約通知hookはCodexでは自動有効化しません。
+
+Codex向けSlack通知を使う場合は、Claude Code向けSlack通知と同じ環境変数を使います。プロジェクトの `.env` などに以下を設定してください。
+
+```bash
+NDF_CODEX_SLACK_NOTIFY=true
+SLACK_BOT_TOKEN=xoxb-...
+SLACK_CHANNEL_ID=C0123456789
+SLACK_USER_MENTION=<@U0123456789>  # オプション
+```
+
+Codexのhookは初回実行前に `/hooks` で信頼設定が必要です。
 
 ### ステップ3: .envファイルの作成
 

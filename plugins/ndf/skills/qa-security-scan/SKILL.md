@@ -1,6 +1,6 @@
 ---
 name: qa-security-scan
-description: "Security scanning templates and checklists for OWASP Top 10, authentication, authorization, data protection. Includes remediation, auth/authz testing, data protection verification, security report generation."
+description: "OWASP観点でセキュリティ検証する。"
 when_to_use: "Use when conducting security testing or vulnerability assessment. Triggers: 'security scan', 'vulnerability check', 'OWASP', 'security test', 'セキュリティスキャン', '脆弱性チェック', 'セキュリティテスト'"
 ---
 

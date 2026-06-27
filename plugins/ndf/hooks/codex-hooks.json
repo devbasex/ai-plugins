@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${PLUGIN_ROOT}/scripts/codex-slack-notify.js",
+            "timeout": 15,
+            "statusMessage": "Sending Codex completion notification"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,6 +1,6 @@
 ---
 name: deploy
-description: "現在のfeatureブランチを環境ブランチ(qa/staging等)へデプロイPRを作成する。featureブランチ全体をorigin/main取り込み済みのdeployブランチ経由でPRする。cherry-pick-prと異なり、部分選択でなくブランチ全体を適用する用途。"
+description: "featureブランチ全体を環境ブランチへPRする。"
 argument-hint: "<env-branch> (例: qa/staging, release/v2)"
 disable-model-invocation: true
 allowed-tools:

@@ -1,6 +1,6 @@
 ---
 name: docker-container-access
-description: "Docker コンテナへのアクセス方法を判定し、適切な接続コマンドを提供する。DinD/DooD 環境の自動検出、bind mount の注意点と代替手段、curl / Playwright MCP での接続例を扱う。"
+description: "Dockerコンテナへの接続方法を判定する。"
 when_to_use: "Docker / コンテナへのアクセス・localhost 接続不可・DinD/DooD 環境判定が必要なとき。Triggers: 'docker access', 'container connect', 'localhost not working', 'DinD', 'DooD', 'Docker接続', 'コンテナアクセス', 'curl container'"
 allowed-tools:
   - Read

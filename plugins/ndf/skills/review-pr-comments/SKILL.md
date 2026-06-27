@@ -1,6 +1,6 @@
 ---
 name: review-pr-comments
-description: "既存PRの全コメントを確認し、対応可否を判定する(READ-ONLY)。修正は一切行わず、重大/改善推奨/軽微/参考/別PR対応に分類する。/ndf:fixで修正する前の優先度判定用。"
+description: "既存PRコメントを読み優先度分類する。"
 when_to_use: "既存PRのレビューコメントを分類・優先度判定したいとき (修正前)。Triggers: 'PRコメントを確認', 'PRコメントを分類', 'コメント対応の優先度', 'PR comments review', 'classify PR comments', 'PRレビュー結果を見て'"
 argument-hint: "[PR番号]"
 allowed-tools:

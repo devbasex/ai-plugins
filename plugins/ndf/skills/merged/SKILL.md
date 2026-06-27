@@ -1,6 +1,6 @@
 ---
 name: merged
-description: "PRマージ後のクリーンアップを実行する（main更新、ブランチ削除）"
+description: "PRマージ後のmain更新とブランチ削除を行う。"
 argument-hint: "[PR番号]"
 disable-model-invocation: true
 allowed-tools:

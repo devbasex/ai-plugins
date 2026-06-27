@@ -1,6 +1,6 @@
 ---
 name: google-auth
-description: "Google API (Sheets, Drive, Apps Script, Chat, Calendar 等) の OAuth2 認証ヘルパ。単一トークンファイルで複数 API のスコープを一元管理し、CLI / Python ライブラリ両方として使える。"
+description: "Google APIのOAuth2認証を支援する。"
 when_to_use: "Google API の OAuth2 認証が必要なときに自動参照。Triggers: 'Google認証', 'OAuth', 'google_token', 'spreadsheets', 'Google API', 'client_secret'"
 allowed-tools:
   - Read

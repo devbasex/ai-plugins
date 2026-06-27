@@ -1,6 +1,6 @@
 ---
 name: problem-solving
-description: "データ不整合・バグ・障害の問題解決ガイドライン。根本原因分析の手順、上流修正優先の原則、ハルシネーション防止チェック、データとコードの整合性検証、多層防御の考え方を扱う。"
+description: "不整合・バグ・障害の根本原因を解く。"
 when_to_use: "データ不整合 / バグ / 障害対応時に自動参照。「つじつま合わせ」を避けて上流で直す判断が必要なとき。Triggers: 'バグ修正', 'データ不整合', '障害対応', '根本原因', 'root cause analysis', 'data inconsistency', 'incident', '上流で直す', 'patch vs fix'"
 ---
 

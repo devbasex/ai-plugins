@@ -1,6 +1,6 @@
 ---
 name: playwright-report
-description: "Playwright テスト結果の Markdown レポート自動生成。テスト結果サマリ・エビデンスリンク・失敗詳細を report.md にまとめる。"
+description: "Playwrightテスト結果レポートを生成する。"
 when_to_use: "テストレポートの生成 / テスト結果の共有が必要なとき。Triggers: 'テストレポート', 'report.md', 'テスト結果', 'テスト報告書', 'レポート生成', 'テスト結果まとめ'"
 allowed-tools:
   - Read

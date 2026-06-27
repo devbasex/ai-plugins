@@ -1,6 +1,6 @@
 ---
 name: codex
-description: "codex CLI (OpenAI Codex) を直接実行してコード生成・レビュー・調査を外部AIに委譲する手順。`codex exec` をバックグラウンド実行する。サンドボックス制約の回避、stdin/stderr経路、バックグラウンド待機パターンを扱う。"
+description: "Codex CLIへコード生成・レビュー・調査を委譲する。"
 when_to_use: "外部 AI へコード生成 / レビュー / 調査を委譲したいとき。Triggers: 'codexで調査', 'codexレビュー', '第二意見レビュー', 'codex exec', 'external AI review'"
 ---
 

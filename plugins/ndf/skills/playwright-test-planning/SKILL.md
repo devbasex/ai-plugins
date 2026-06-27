@@ -1,6 +1,6 @@
 ---
 name: playwright-test-planning
-description: "HTSM / ISTQB / FEW HICCUPPS に基づく E2E テスト計画立案。page role 分類 + role 別チェックリストでテスト項目を網羅的に洗い出す。"
+description: "E2Eテスト計画とpage role分類を行う。"
 when_to_use: "E2E テストの計画立案 / page role 分類 / テスト技法の選定 / チェックリスト活用が必要なとき。Triggers: 'テスト計画', 'テスト計画立案', 'page role', 'HTSM', 'ISTQB', 'FEW HICCUPPS', 'チェックリスト', 'テスト技法', 'テスト設計'"
 allowed-tools:
   - Read

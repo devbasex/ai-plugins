@@ -1,6 +1,6 @@
 ---
 name: google-drive
-description: "Google Drive / Google Docs API でファイルのエクスポート・ダウンロード・アップロード (公開共有リンク付与) を行う。認証は ndf:google-auth に委譲。"
+description: "Google Drive/Docs APIでファイル操作する。"
 when_to_use: "Google Drive / Docs のファイル操作が必要なとき。Triggers: 'Google Drive', 'Google Docs', 'drive.file', 'ファイルエクスポート', 'ダウンロード', 'アップロード', '公開共有リンク'"
 allowed-tools:
   - Read

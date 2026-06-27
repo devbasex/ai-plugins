@@ -2,7 +2,7 @@
 
 ## プロジェクトの目的
 
-Claude Codeプラグインマーケットプレイス（内部用）として、チーム全体でClaude Codeの導入を加速するための事前設定されたプラグインを提供する。
+Claude Code / Codex プラグインマーケットプレイス（内部用）として、チーム全体でAI開発ツールの導入を加速するための事前設定されたプラグインを提供する。
 
 ## リポジトリ情報
 
@@ -22,8 +22,11 @@ Claude Codeプラグインマーケットプレイス（内部用）として、
 
 ```
 ai-plugins/
+├── .agents/
+│   └── plugins/
+│       └── marketplace.json      # Codexマーケットプレイスメタデータ
 ├── .claude-plugin/
-│   └── marketplace.json          # マーケットプレイスメタデータ
+│   └── marketplace.json          # Claude Codeマーケットプレイスメタデータ
 ├── plugins/
 │   ├── ndf/                      # NDFプラグイン（メイン）
 │   ├── mcp-serena/               # Serena MCPプラグイン
@@ -37,12 +40,18 @@ ai-plugins/
 
 ## インストール方法
 
-### マーケットプレイスの追加
+### Codex
+```bash
+codex plugin marketplace add https://github.com/devbasex/ai-plugins
+codex plugin add ndf@ai-plugins
+```
+
+### Claude Code: マーケットプレイスの追加
 ```bash
 /plugin marketplace add https://github.com/devbasex/ai-plugins
 ```
 
-### プラグインのインストール
+### Claude Code: プラグインのインストール
 ```bash
 /plugin install ndf@ai-plugins
 ```

@@ -1,6 +1,6 @@
 ---
 name: browser-test
-description: "ブラウザで動作確認を実行する。Playwright MCP または Chrome DevTools MCP を利用可能な場合に自動化。Webアプリの機能検証・回帰確認用。"
+description: "ブラウザでWebアプリの動作確認を行う。"
 argument-hint: "[url]"
 disable-model-invocation: true
 allowed-tools:

@@ -1,6 +1,6 @@
 ---
 name: pr-tests
-description: "PRのTest Planを自動実行し、結果をPRコメントに反映する"
+description: "PRのTest Planを実行し結果をコメントする。"
 argument-hint: "[PR番号]"
 disable-model-invocation: true
 allowed-tools:

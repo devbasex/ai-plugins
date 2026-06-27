@@ -1,6 +1,6 @@
 ---
 name: cross-review
-description: "PR を codex / gemini 両方にレビューさせ、両方 APPROVE まで /ndf:review → /ndf:fix を自動ループ。サブエージェント分離・PR ローテーション・nit 集約でメイン context 消費を最小化"
+description: "Codex/GeminiのPRクロスレビューを自動ループする。"
 argument-hint: "[PR番号] [--max-rounds N] [--rotate-after K] [--rotate-mode light|squash] [--only codex|gemini]"
 disable-model-invocation: true
 allowed-tools:

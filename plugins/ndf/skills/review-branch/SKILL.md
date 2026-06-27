@@ -1,6 +1,6 @@
 ---
 name: review-branch
-description: "現在のブランチの実装をmainとの差分でレビューする。PR作成前のセルフレビュー用途。コード品質・セキュリティ・パフォーマンス・テストの観点でフィードバックを返す。修正は行わずレビュー結果のみ報告 (READ-ONLY)。"
+description: "現在ブランチをmainとの差分でレビューする。"
 when_to_use: "PR作成前にローカルブランチの実装をセルフレビューしたいとき。Triggers: 'ブランチをレビュー', 'PR前にレビュー', 'セルフレビュー', 'review my branch', 'review before PR', 'self review', 'pre-PR review'"
 argument-hint: "[focus-area] (例: security, performance, tests)"
 allowed-tools:

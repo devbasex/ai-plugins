@@ -1,6 +1,6 @@
 ---
 name: cherry-pick-pr
-description: "featureブランチのコミットを別ベースブランチ(qa/staging/release等)へcherry-pick PR する。main汚染を避けるための短命ブランチ経由PR作成ワークフロー。"
+description: "featureコミットを環境ブランチへcherry-pick PRする。"
 argument-hint: "<base-branch> (例: qa/staging, release/v2)"
 disable-model-invocation: true
 allowed-tools:

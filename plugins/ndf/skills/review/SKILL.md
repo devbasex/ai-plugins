@@ -1,6 +1,6 @@
 ---
 name: review
-description: "PRを専門家としてレビューし、Approve/Request Changesを判定する。第二引数で外部AI（codex / gemini）への委譲も可能"
+description: "PRをレビューしApprove/Request Changesを判定する。"
 argument-hint: "[PR番号] [AIエージェント(codex|gemini)]"
 disable-model-invocation: true
 allowed-tools:

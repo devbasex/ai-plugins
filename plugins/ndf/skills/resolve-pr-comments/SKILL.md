@@ -1,6 +1,6 @@
 ---
 name: resolve-pr-comments
-description: "対応済みPRコメントに返信し、スレッドをresolvedにする。/ndf:fixで修正完了後のクロージング作業。修正は行わず、コメント返信とresolve操作のみ実行する。"
+description: "対応済みPRコメントへ返信しresolveする。"
 argument-hint: "[PR番号]"
 disable-model-invocation: true
 allowed-tools:

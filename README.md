@@ -1,14 +1,14 @@
 # AI Plugins
 
-Claude CodeプラグインおよびKiro CLI向けのスキル・MCP設定を共有するための内部マーケットプレイスです。
+Claude Code / Codex / Kiro CLI向けのスキル・MCP設定を共有するための内部マーケットプレイスです。
 
 ## 概要
 
-このマーケットプレイスは、チーム全体でAI開発ツール（Claude Code / Kiro CLI）の導入を加速するための事前設定されたプラグインを提供します。
+このマーケットプレイスは、チーム全体でAI開発ツール（Claude Code / Codex / Kiro CLI）の導入を加速するための事前設定されたプラグインを提供します。
 
-**NDFプラグイン v4.13.0** は、以下の機能を**オールインワン**で提供する統合プラグインです：
+**NDFプラグイン v4.16.1** は、以下の機能を**オールインワン**で提供する統合プラグインです：
 
-- **47個のSkills**:
+- **48個のSkills**:
   - PR/レビューワークフロー (13): pr, pr-tests, fix, review, review-branch, review-pr-comments, resolve-pr-comments, cherry-pick-pr, deploy, sync-main, merged, clean, browser-test
   - 原則・ガイドライン (9): ndf-policies, branch-fix-strategy, implementation-plan, investigation-rules, problem-solving, logging-guidelines, markdown-writing, issue-plan-strategy, ml-model-structure
   - データ分析・品質・環境 (12): data-analyst-sql-optimization, data-analyst-export, qa-security-scan, python-execution, docker-container-access, git-gh-operations, google-auth, codex, deepwiki-transfer, knowledge-reorg, mcp-builder, official-skills-autoloader
@@ -36,6 +36,20 @@ Claude CodeプラグインおよびKiro CLI向けのスキル・MCP設定を共�
 ```bash
 # NDFプラグイン（オールインワン統合プラグイン）
 /plugin install ndf@ai-plugins
+```
+
+### Codex
+
+```bash
+codex plugin marketplace add https://github.com/devbasex/ai-plugins
+codex plugin add ndf@ai-plugins
+```
+
+ローカルで検証する場合:
+
+```bash
+codex plugin marketplace add ./local/path/to/ai-plugins
+codex plugin add ndf@ai-plugins
 ```
 
 ### Kiro CLI
@@ -83,7 +97,7 @@ kiro-cli chat
 
 | プラグイン名 | バージョン | 説明 | 詳細 |
 |------------|----------|------|------|
-| **ndf** | 4.13.0 | Claude Code / Kiro CLI開発環境を**オールインワン**で強化する統合プラグイン。8個の専門エージェント（director、data-analyst、corder、researcher、qa、debugger、devops-engineer、code-reviewer）、47個のSkills（PR/レビューワークフロー、原則・ガイドライン、MLモデル構造標準、データ分析、品質、Playwright E2E（CDPリモート接続・Google Driveエビデンス保管含む）、Google連携、AIクロスレビュー、Codex CLI連携、skill利用統計など）、SessionStartフック（transcript保持期間自動管理）、Stopフック（AI要約生成+Slack通知）を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:codex` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [README](./plugins/ndf/README.md) |
+| **ndf** | 4.16.1 | Claude Code / Codex / Kiro CLI開発環境を**オールインワン**で強化する統合プラグイン。8個の専門エージェント（director、data-analyst、corder、researcher、qa、debugger、devops-engineer、code-reviewer）、48個のSkills（PR/レビューワークフロー、原則・ガイドライン、MLモデル構造標準、データ分析、品質、Playwright E2E（CDPリモート接続・Google Driveエビデンス保管含む）、Google連携、AIクロスレビュー、Codex CLI連携、skill利用統計など）、SessionStartフック（transcript保持期間自動管理）、Stopフック（AI要約生成+Slack通知）を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:codex` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [README](./plugins/ndf/README.md) |
 
 ## 開発ガイドライン
 
@@ -93,12 +107,17 @@ kiro-cli chat
 
 ```
 ai-plugins/
+├── .agents/
+│   └── plugins/
+│       └── marketplace.json      # Codexマーケットプレイスメタデータ
 ├── .claude-plugin/
-│   └── marketplace.json          # マーケットプレイスメタデータ
+│   └── marketplace.json          # Claude Codeマーケットプレイスメタデータ
 ├── plugins/
 │   └── {plugin-name}/
+│       ├── .codex-plugin/
+│       │   └── plugin.json       # Codexプラグインメタデータ
 │       ├── .claude-plugin/
-│       │   └── plugin.json       # プラグインメタデータ（必須）
+│       │   └── plugin.json       # Claude Codeプラグインメタデータ
 │       ├── commands/             # スラッシュコマンド (*.md)
 │       ├── agents/               # サブエージェント (*.md)
 │       └── skills/               # プロジェクトスキル

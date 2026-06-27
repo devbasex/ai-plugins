@@ -1,6 +1,6 @@
 ---
 name: knowledge-reorg
-description: "AGENTS.mdとSkillsを「AI Agent Knowledge Architecture Policy」に基づいて整理・再構成する"
+description: "AGENTS.mdとSkillsを知識ポリシーで再構成する。"
 argument-hint: "[--target AGENTS.md|skills|docs|all] [--dry-run] [--migrate-memory]"
 disable-model-invocation: true
 allowed-tools:
