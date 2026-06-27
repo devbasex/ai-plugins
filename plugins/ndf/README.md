@@ -4,10 +4,10 @@ Claude Code / Codex開発環境を**オールインワン**で強化する統合
 
 ## 概要
 
-このプラグイン1つで、以下の**すべて**の機能を利用できます：
+このプラグイン1つで、以下の機能を利用できます：
 
 1. **コアMCP**: なし (v4.0.0 で Codex MCP 廃止 / Serena MCP は `mcp-serena` プラグインに分離)
-2. **Skills**: 48個（PR/コードレビュー系ワークフロー13個 + 原則・ガイドライン9個 (issue→multi-PR 戦略・MLモデル構造標準含む) + データ分析/品質/環境系12個 + Playwright E2E 8個 (CDPリモート接続・Google Driveエビデンス保管含む) + Google Drive/Chat 連携2個 + AI クロスレビュー2個 (cross-review / gemini) + 運用系2個 (skill-stats / statusline)）
+2. **Skills**: Claude Code/Kiro向け core 26個、Codex向け core 27個を公開。元の48個は `skills/` に保持し、ランタイム別の除外候補は `skills-optional/README.md` で管理。
 3. **専門エージェント**: 8つの特化型AIエージェント（director、data-analyst、corder、researcher、qa、debugger、devops-engineer、code-reviewer）
 4. **自動フック**: Slack通知、デフォルトstatusline設定（未設定時のみ）
 
@@ -75,6 +75,8 @@ codex plugin add ndf@ai-plugins
 ```
 
 Codex版ではSkillsに加えて、Codex向けSlack終了通知hookを同梱します。通知は明示的に `NDF_CODEX_SLACK_NOTIFY=true` を設定した場合のみ送信されます。Claude Code向けのstatusline設定、transcript保持期間設定、Claude CLIによるSlack要約通知hookはCodexでは自動有効化しません。
+
+Claude Code/Kiro版で初期表示するSkillsは、PR運用・レビュー・調査・実装計画・browser smoke test・statusline・Codex CLI委譲などの core 26個に絞っています。Codex版は、Codex自体からの再委譲・Claude専用statusline・Claude transcript統計を外し、代わりに最小Playwright 4個を含めた core 27個にしています。Google連携、DeepWiki転送、MLモデル構造、AIクロスレビュー、高度なPlaywright連携などは通常利用時のskills context budgetを圧迫しないよう初期公開から外し、`skills-optional/README.md` に整理しています。
 
 Codex向けSlack通知を使う場合は、Claude Code向けSlack通知と同じ環境変数を使います。プロジェクトの `.env` などに以下を設定してください。
 
@@ -791,7 +793,7 @@ NDFプラグインと併用することで、以下の機能が追加されま�
 
 | プラグイン | 役割 |
 |-----------|------|
-| **NDFプラグイン** | MCP統合、スキル（48個）、専門エージェント |
+| **NDFプラグイン** | MCP統合、公開スキル（Claude/Kiro core 26個、Codex core 27個）、専門エージェント |
 | **affaan-mプラグイン** | コンテキスト管理、品質保証、TDDワークフロー |
 
 詳細は[affaan-mプラグインREADME](../affaan-m/README.md)を参照してください。

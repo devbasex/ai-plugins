@@ -29,6 +29,10 @@ ai-plugins/
 │   └── marketplace.json          # Claude Codeマーケットプレイスメタデータ
 ├── plugins/
 │   ├── ndf/                      # NDFプラグイン（メイン）
+│   │   ├── skills/               # 全Skill実体
+│   │   ├── skills-claude/        # Claude Code/Kiro向け公開Skill
+│   │   ├── skills-codex/         # Codex向け公開Skill
+│   │   └── skills-optional/      # ランタイム別除外候補リスト
 │   ├── mcp-serena/               # Serena MCPプラグイン
 │   └── {plugin-name}/            # その他のプラグイン
 ├── docs/                         # リポジトリ知識

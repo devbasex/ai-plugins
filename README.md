@@ -8,7 +8,8 @@ Claude Code / Codex / Kiro CLI向けのスキル・MCP設定を共有するた�
 
 **NDFプラグイン v4.16.1** は、以下の機能を**オールインワン**で提供する統合プラグインです：
 
-- **48個のSkills**:
+- **公開Skills**: Claude Code/Kiro向け core 26個、Codex向け core 27個に分離。`skills-optional/` にランタイム別の除外候補を整理。
+- **元Skills（48個）**:
   - PR/レビューワークフロー (13): pr, pr-tests, fix, review, review-branch, review-pr-comments, resolve-pr-comments, cherry-pick-pr, deploy, sync-main, merged, clean, browser-test
   - 原則・ガイドライン (9): ndf-policies, branch-fix-strategy, implementation-plan, investigation-rules, problem-solving, logging-guidelines, markdown-writing, issue-plan-strategy, ml-model-structure
   - データ分析・品質・環境 (12): data-analyst-sql-optimization, data-analyst-export, qa-security-scan, python-execution, docker-container-access, git-gh-operations, google-auth, codex, deepwiki-transfer, knowledge-reorg, mcp-builder, official-skills-autoloader
@@ -97,7 +98,7 @@ kiro-cli chat
 
 | プラグイン名 | バージョン | 説明 | 詳細 |
 |------------|----------|------|------|
-| **ndf** | 4.16.1 | Claude Code / Codex / Kiro CLI開発環境を**オールインワン**で強化する統合プラグイン。8個の専門エージェント（director、data-analyst、corder、researcher、qa、debugger、devops-engineer、code-reviewer）、48個のSkills（PR/レビューワークフロー、原則・ガイドライン、MLモデル構造標準、データ分析、品質、Playwright E2E（CDPリモート接続・Google Driveエビデンス保管含む）、Google連携、AIクロスレビュー、Codex CLI連携、skill利用統計など）、SessionStartフック（transcript保持期間自動管理）、Stopフック（AI要約生成+Slack通知）を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:codex` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [README](./plugins/ndf/README.md) |
+| **ndf** | 4.16.1 | Claude Code / Codex / Kiro CLI開発環境を**オールインワン**で強化する統合プラグイン。8個の専門エージェント（director、data-analyst、corder、researcher、qa、debugger、devops-engineer、code-reviewer）、公開Skills（Claude Code/Kiro向け core 26個、Codex向け core 27個）、SessionStartフック（transcript保持期間自動管理）、Stopフック（AI要約生成+Slack通知）を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:codex` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [README](./plugins/ndf/README.md) |
 
 ## 開発ガイドライン
 
@@ -118,9 +119,11 @@ ai-plugins/
 │       │   └── plugin.json       # Codexプラグインメタデータ
 │       ├── .claude-plugin/
 │       │   └── plugin.json       # Claude Codeプラグインメタデータ
-│       ├── commands/             # スラッシュコマンド (*.md)
 │       ├── agents/               # サブエージェント (*.md)
-│       └── skills/               # プロジェクトスキル
+│       ├── skills/               # 全Skillの実体
+│       ├── skills-claude/        # Claude Code/Kiro向け公開Skill
+│       ├── skills-codex/         # Codex向け公開Skill
+│       └── skills-optional/      # ランタイム別除外候補リスト
 │           └── {skill-name}/
 │               └── SKILL.md      # エントリポイント（必須）
 ├── README.md

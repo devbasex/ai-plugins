@@ -23,7 +23,7 @@ for arg in "$@"; do
       echo ""
       echo "Options:"
       echo "  --with-slack   stopフックにSlack通知を追加"
-      echo "  --with-codex   Codex CLI MCPサーバーを追加"
+      echo "  --with-codex   Codex CLI連携の環境変数を追加"
       echo "  -h, --help     このヘルプを表示"
       exit 0
       ;;
@@ -52,11 +52,11 @@ while IFS= read -r skill_path; do
     continue
   fi
 
-  # Relative symlink from .kiro/skills/ to plugins/ndf/skills/
+  # Relative symlink from .kiro/skills/ to the manifest-selected skill set.
   ln -sfn "../../plugins/ndf/$skill_path" "$SKILLS_DIR/$skill_name"
   echo "  linked: $skill_name"
   SKILL_COUNT=$((SKILL_COUNT + 1))
-done < <(grep -oP '"\.\/skills\/[^"]+' "$PLUGIN_JSON" | sed 's/"//g')
+done < <(grep -oP '"\.\/skills[^"]+' "$PLUGIN_JSON" | sed 's/"//g')
 
 # --- Step 2: Create prompts in .kiro/prompts/ for workflow skills ---
 PROMPTS_DIR="$KIRO_DIR/prompts"
@@ -85,7 +85,7 @@ done
 mkdir -p "$KIRO_DIR/agents"
 
 if [ "$WITH_SLACK" = true ]; then echo "Slack通知: 有効"; else echo "Slack通知: 無効 (--with-slack で有効化)"; fi
-if [ "$WITH_CODEX" = true ]; then echo "Codex MCP: 有効"; else echo "Codex MCP: 無効 (--with-codex で有効化)"; fi
+if [ "$WITH_CODEX" = true ]; then echo "Codex CLI連携: 有効"; else echo "Codex CLI連携: 無効 (--with-codex で有効化)"; fi
 
 # Backup existing config
 if [ -f "$AGENT_FILE" ]; then
