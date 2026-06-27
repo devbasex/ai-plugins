@@ -1,6 +1,6 @@
 ---
 name: playwright-scenario-test
-description: "pytest-playwrightのフルE2Eワークフローを統括する。"
+description: "Orchestrate full pytest-playwright scenario testing."
 when_to_use: "フル E2E テストワークフロー (計画→スクリプト→実行→レポート) を一貫して行うとき / pytest-playwright 拡張 fixture (pwk_*) の全体像を把握したいとき / init_project.sh でプロジェクトをセットアップするとき。Triggers: 'pytest-playwright', 'pwk_role', 'pwk_evidence', 'init_project', 'シナリオテスト一式', 'フル E2E'"
 allowed-tools:
   - Read

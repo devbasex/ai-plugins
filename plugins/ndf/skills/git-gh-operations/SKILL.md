@@ -1,6 +1,6 @@
 ---
 name: git-gh-operations
-description: "git/ghコマンドのエラー対処と操作手順。"
+description: "Resolve git and GitHub CLI operation errors."
 when_to_use: "git / gh コマンドでエラーが出た or 操作方法に迷うとき。Triggers: 'git add', 'git commit', 'git push', 'gh pr', 'gh api', 'GitHub操作', 'gitエラー', 'fatal:', 'pathspec'"
 allowed-tools:
   - Bash

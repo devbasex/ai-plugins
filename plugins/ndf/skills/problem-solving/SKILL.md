@@ -1,6 +1,6 @@
 ---
 name: problem-solving
-description: "不整合・バグ・障害の根本原因を解く。"
+description: "Solve bugs, incidents, and data inconsistencies at root cause."
 when_to_use: "データ不整合 / バグ / 障害対応時に自動参照。「つじつま合わせ」を避けて上流で直す判断が必要なとき。Triggers: 'バグ修正', 'データ不整合', '障害対応', '根本原因', 'root cause analysis', 'data inconsistency', 'incident', '上流で直す', 'patch vs fix'"
 ---
 

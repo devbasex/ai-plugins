@@ -1,6 +1,6 @@
 ---
 name: playwright-script-creation
-description: "再現可能なE2Eテストスクリプトを作成する。"
+description: "Create reproducible Playwright E2E test scripts."
 when_to_use: "E2E テストスクリプトの作成 / テストコードの実装 / テストテンプレートからのスクリプト生成が必要なとき。Triggers: 'テストスクリプト作成', 'テストコード作成', 'テスト実装', 'テストを書く', 'シナリオ作成', 'codegen', 'テンプレートからテスト', 'playwright codegen'"
 allowed-tools:
   - Read

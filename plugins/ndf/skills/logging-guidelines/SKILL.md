@@ -1,6 +1,6 @@
 ---
 name: logging-guidelines
-description: "ログ追加・修正時の設計ガイドライン。"
+description: "Design safe and useful application logging."
 when_to_use: "コードにログを追加・修正・整理するとき。Triggers: 'ログ追加', 'log追加', 'logger', 'logging', 'ログレベル', 'log level', 'デバッグログ', 'エラーログ', 'logger.info', 'logger.error', 'print文をログに'"
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: playwright-kit-ops
-description: "playwright_kitの初期化・実行・証跡操作を行う。"
+description: "Operate playwright_kit setup, scans, and evidence tools."
 when_to_use: "playwright_kit のスクリプトを実行するとき / E2E テストプロジェクトの初期化 / page role 自動分類 / 単発 a11y・CWV スキャン / Google Drive エビデンスアップロードが必要なとき。Triggers: 'init_project', 'プロジェクト初期化', 'classify_page_role', 'run_a11y_scan', 'check_cwv', 'upload_evidence', 'record_scenario', 'playwright_kit 実行'"
 allowed-tools:
   - Read

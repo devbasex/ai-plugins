@@ -1,6 +1,6 @@
 ---
 name: official-skills-autoloader
-description: "公式Skillsを必要時に自動準備して使う。"
+description: "Install and use official document Skills on demand."
 when_to_use: "Use when user requests Word/Excel/PowerPoint/PDF creation/editing, frontend design, webapp testing, or other tasks handled by Anthropic's official skills collection. Triggers: 'Word作成', 'Excel出力', 'スライド生成', 'PDF作成', '.docx', '.pptx', '.xlsx', '.pdf', 'create docx', 'generate excel', 'make slides', 'create pdf'."
 allowed-tools:
   - Bash

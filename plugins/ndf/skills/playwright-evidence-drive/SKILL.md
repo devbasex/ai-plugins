@@ -1,6 +1,6 @@
 ---
 name: playwright-evidence-drive
-description: "Playwright証跡をGoogle Driveへ保管する。"
+description: "Upload Playwright evidence to Google Drive."
 when_to_use: "テストエビデンスを Google Drive に保管・共有したいとき / テスト結果を Google Docs としてチームに配布したいとき / Drive 上のエビデンスリンクを report に埋め込みたいとき。Triggers: 'Drive にアップロード', 'Drive 共有', 'エビデンス保管', 'evidence drive', 'pwk-drive-folder', 'テスト結果共有', 'Google Drive エビデンス', 'trace アップロード', '動画アップロード', 'report を Docs に', 'エビデンス配布'"
 allowed-tools:
   - Read

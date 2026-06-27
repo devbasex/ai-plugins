@@ -1,6 +1,6 @@
 ---
 name: branch-fix-strategy
-description: "複数ブランチへ同じ修正を適用する戦略。"
+description: "Plan multi-branch fixes and cherry-picks."
 when_to_use: "同じ修正を複数ブランチ (qa/staging/release等) に適用する必要があるとき。Triggers: 'cherry-pick', '環境ブランチに修正適用', 'qaに反映', 'stagingに反映', 'release branchへ', 'multi-branch fix', 'apply to qa/staging'"
 ---
 

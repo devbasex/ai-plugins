@@ -1,6 +1,6 @@
 ---
 name: cross-review
-description: "Codex/GeminiのPRクロスレビューを自動ループする。"
+description: "Run iterative Codex and Gemini PR reviews."
 argument-hint: "[PR番号] [--max-rounds N] [--rotate-after K] [--rotate-mode light|squash] [--only codex|gemini]"
 disable-model-invocation: true
 allowed-tools:

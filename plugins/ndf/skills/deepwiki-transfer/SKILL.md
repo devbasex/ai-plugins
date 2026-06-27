@@ -1,6 +1,6 @@
 ---
 name: deepwiki-transfer
-description: "DeepWiki内容をMarkdownへ転載する。"
+description: "Transfer DeepWiki content into Markdown docs."
 when_to_use: "DeepWiki から Markdown としてコンテンツを取得・転載したいとき。Triggers: 'deepwiki transfer', 'deepwiki転載', 'wiki転載', 'リポジトリドキュメント取得', 'DeepWikiからMarkdown', 'transfer wiki contents'"
 disable-model-invocation: true
 allowed-tools:

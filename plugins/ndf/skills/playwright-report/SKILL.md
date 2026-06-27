@@ -1,6 +1,6 @@
 ---
 name: playwright-report
-description: "Playwrightテスト結果レポートを生成する。"
+description: "Generate Playwright test result reports."
 when_to_use: "テストレポートの生成 / テスト結果の共有が必要なとき。Triggers: 'テストレポート', 'report.md', 'テスト結果', 'テスト報告書', 'レポート生成', 'テスト結果まとめ'"
 allowed-tools:
   - Read

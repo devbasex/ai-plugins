@@ -1,6 +1,6 @@
 ---
 name: review
-description: "PRをレビューしApprove/Request Changesを判定する。"
+description: "Review PRs and post approve or changes verdicts."
 argument-hint: "[PR番号] [AIエージェント(codex|gemini)]"
 disable-model-invocation: true
 allowed-tools:

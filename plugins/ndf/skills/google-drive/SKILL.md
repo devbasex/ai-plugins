@@ -1,6 +1,6 @@
 ---
 name: google-drive
-description: "Google Drive/Docs APIでファイル操作する。"
+description: "Export, download, upload, and share Google Drive files."
 when_to_use: "Google Drive / Docs のファイル操作が必要なとき。Triggers: 'Google Drive', 'Google Docs', 'drive.file', 'ファイルエクスポート', 'ダウンロード', 'アップロード', '公開共有リンク'"
 allowed-tools:
   - Read

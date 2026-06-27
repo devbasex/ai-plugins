@@ -1,6 +1,6 @@
 ---
 name: issue-plan-strategy
-description: "issueからplan作成・実装運用まで扱う。"
+description: "Turn issues into plans and implementation workflows."
 when_to_use: "issue → plan 作成 / 既存 plan の実装 (実行) を依頼されたとき。複数 PR に分割される設計や、release branch + 個別 PR + worktree 運用が必要なときに参照する。Triggers: 'issueのplanを作って', 'PLANxxの設計', '設計書を起こして', 'このplanを実装して', 'PLANxxを実装', 'planを実行', 'release branch 作って実装開始', 'multi-PR で進めて'"
 argument-hint: "[issue-path-or-url] (例: issues/i16.md, https://github.com/org/repo/issues/123)"
 allowed-tools:

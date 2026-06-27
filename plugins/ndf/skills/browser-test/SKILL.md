@@ -1,6 +1,6 @@
 ---
 name: browser-test
-description: "ブラウザでWebアプリの動作確認を行う。"
+description: "Run browser smoke tests for web apps."
 argument-hint: "[url]"
 disable-model-invocation: true
 allowed-tools:

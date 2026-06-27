@@ -1,6 +1,6 @@
 ---
 name: pr
-description: "commit/push/PR作成またはPR説明更新を行う。"
+description: "Commit, push, and create or update PRs."
 argument-hint: "[--draft] [base-branch] or [commit-message]"
 disable-model-invocation: true
 allowed-tools:

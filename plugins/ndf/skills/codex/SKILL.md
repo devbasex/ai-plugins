@@ -1,6 +1,6 @@
 ---
 name: codex
-description: "Codex CLIへコード生成・レビュー・調査を委譲する。"
+description: "Delegate coding, review, or research to Codex CLI."
 when_to_use: "外部 AI へコード生成 / レビュー / 調査を委譲したいとき。Triggers: 'codexで調査', 'codexレビュー', '第二意見レビュー', 'codex exec', 'external AI review'"
 ---
 

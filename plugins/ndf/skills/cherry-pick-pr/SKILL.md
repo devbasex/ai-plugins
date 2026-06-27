@@ -1,6 +1,6 @@
 ---
 name: cherry-pick-pr
-description: "featureコミットを環境ブランチへcherry-pick PRする。"
+description: "Create cherry-pick PRs for environment branches."
 argument-hint: "<base-branch> (例: qa/staging, release/v2)"
 disable-model-invocation: true
 allowed-tools:

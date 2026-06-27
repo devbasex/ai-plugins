@@ -1,6 +1,6 @@
 ---
 name: clean
-description: "mainマージ済みブランチを削除する。"
+description: "Delete local and remote merged branches."
 disable-model-invocation: true
 allowed-tools:
   - Bash

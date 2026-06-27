@@ -1,6 +1,6 @@
 ---
 name: sync-main
-description: "現在ブランチに最新main/masterを取り込む。"
+description: "Sync the current branch with main or master."
 disable-model-invocation: true
 allowed-tools:
   - Bash

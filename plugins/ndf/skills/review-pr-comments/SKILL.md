@@ -1,6 +1,6 @@
 ---
 name: review-pr-comments
-description: "既存PRコメントを読み優先度分類する。"
+description: "Classify existing PR comments before fixing."
 when_to_use: "既存PRのレビューコメントを分類・優先度判定したいとき (修正前)。Triggers: 'PRコメントを確認', 'PRコメントを分類', 'コメント対応の優先度', 'PR comments review', 'classify PR comments', 'PRレビュー結果を見て'"
 argument-hint: "[PR番号]"
 allowed-tools:

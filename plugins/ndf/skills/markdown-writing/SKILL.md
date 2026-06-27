@@ -1,6 +1,6 @@
 ---
 name: markdown-writing
-description: "Markdown文書と図表を書くためのルール。"
+description: "Write Markdown docs, diagrams, and split files."
 when_to_use: "Markdown 文書 / 図表を作成 / 編集するとき。Triggers: 'Markdown作成', 'ドキュメント作成', '文書作成', '図を描く', 'mermaid', 'create document', 'write docs'"
 allowed-tools:
   - Read

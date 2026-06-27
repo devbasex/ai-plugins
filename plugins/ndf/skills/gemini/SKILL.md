@@ -1,6 +1,6 @@
 ---
 name: gemini
-description: "Gemini CLIへコード生成・レビュー・調査を委譲する。"
+description: "Delegate coding, review, or research to Gemini CLI."
 when_to_use: "外部 AI （Gemini）へコード生成 / レビュー / 調査を委譲したいとき。Triggers: 'geminiで調査', 'geminiレビュー', '第二意見レビュー (Gemini)', 'gemini exec', 'external AI review (Gemini)'"
 ---
 

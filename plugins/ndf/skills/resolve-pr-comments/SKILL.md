@@ -1,6 +1,6 @@
 ---
 name: resolve-pr-comments
-description: "対応済みPRコメントへ返信しresolveする。"
+description: "Reply to and resolve fixed PR comments."
 argument-hint: "[PR番号]"
 disable-model-invocation: true
 allowed-tools:

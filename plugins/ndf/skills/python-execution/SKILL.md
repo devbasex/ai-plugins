@@ -1,6 +1,6 @@
 ---
 name: python-execution
-description: "Python実行環境を判定して適切に実行する。"
+description: "Detect and run the right Python environment."
 when_to_use: "Python スクリプトを実行 / セットアップするとき。Triggers: 'python', 'uv', 'スクリプト', 'python環境'"
 allowed-tools:
   - Read

@@ -1,6 +1,6 @@
 ---
 name: google-auth
-description: "Google APIのOAuth2認証を支援する。"
+description: "Set up OAuth for Google APIs."
 when_to_use: "Google API の OAuth2 認証が必要なときに自動参照。Triggers: 'Google認証', 'OAuth', 'google_token', 'spreadsheets', 'Google API', 'client_secret'"
 allowed-tools:
   - Read

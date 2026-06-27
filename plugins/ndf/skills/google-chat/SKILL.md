@@ -1,6 +1,6 @@
 ---
 name: google-chat
-description: "Google Chat APIでスペースやメッセージを取得する。"
+description: "Read Google Chat spaces and messages."
 when_to_use: "Google Chat スペースのメッセージ取得・スペース一覧が必要なとき。Triggers: 'Google Chat', 'chat.spaces', 'chat.messages', 'Chatスペース', 'メッセージ取得', 'チャット履歴'"
 allowed-tools:
   - Read

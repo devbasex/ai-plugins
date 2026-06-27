@@ -1,6 +1,6 @@
 ---
 name: data-analyst-export
-description: "分析結果をCSV/JSON/Excel/Markdownへ出力する。"
+description: "Export analysis results to CSV, JSON, Excel, or Markdown."
 when_to_use: "Use when saving analysis results to files. Triggers: 'export data', 'save results', 'output CSV', 'output JSON', 'output Excel', 'データ出力', '結果保存', 'エクスポート'"
 allowed-tools:
   - Write

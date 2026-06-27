@@ -1,6 +1,6 @@
 ---
 name: mcp-builder
-description: "MCPサーバーを設計・実装する。"
+description: "Build high-quality MCP servers."
 license: Complete terms in LICENSE.txt
 ---
 

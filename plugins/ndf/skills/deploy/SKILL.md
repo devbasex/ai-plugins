@@ -1,6 +1,6 @@
 ---
 name: deploy
-description: "featureブランチ全体を環境ブランチへPRする。"
+description: "Create deploy PRs from feature to environment branches."
 argument-hint: "<env-branch> (例: qa/staging, release/v2)"
 disable-model-invocation: true
 allowed-tools:

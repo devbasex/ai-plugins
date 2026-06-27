@@ -1,6 +1,6 @@
 ---
 name: ndf-policies
-description: "NDFプラグインの基本ポリシー。"
+description: "Apply core NDF project policies."
 user-invocable: false
 ---
 
