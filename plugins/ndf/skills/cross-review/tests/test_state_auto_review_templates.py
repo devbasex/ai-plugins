@@ -166,6 +166,38 @@ def test_env_files_are_config_and_author_is_not_auth_security(state_mod):
     assert "auth_security" in state_mod._classify_changed_files(authorizer_file)
 
 
+def test_tokenizer_async_jobcard_and_tflite_do_not_trigger_categories(state_mod):
+    tokenizer_file = state_mod._parse_pr_files_payload(
+        '{"files":[{"path":"src/tokenizer.py","changeType":"MODIFIED"}]}'
+    )
+    token_file = state_mod._parse_pr_files_payload(
+        '{"files":[{"path":"app/auth/token.py","changeType":"MODIFIED"}]}'
+    )
+    async_helper = state_mod._parse_pr_files_payload(
+        '{"files":[{"path":"utils/async_helpers.ts","changeType":"MODIFIED"}]}'
+    )
+    job_card = state_mod._parse_pr_files_payload(
+        '{"files":[{"path":"components/JobCard.tsx","changeType":"MODIFIED"}]}'
+    )
+    worker_file = state_mod._parse_pr_files_payload(
+        '{"files":[{"path":"src/worker/queue.ts","changeType":"MODIFIED"}]}'
+    )
+    tflite_file = state_mod._parse_pr_files_payload(
+        '{"files":[{"path":"models/config.tflite","changeType":"MODIFIED"}]}'
+    )
+    terraform_file = state_mod._parse_pr_files_payload(
+        '{"files":[{"path":"terraform/main.tf","changeType":"MODIFIED"}]}'
+    )
+
+    assert "auth_security" not in state_mod._classify_changed_files(tokenizer_file)
+    assert "auth_security" in state_mod._classify_changed_files(token_file)
+    assert "performance" not in state_mod._classify_changed_files(async_helper)
+    assert "performance" not in state_mod._classify_changed_files(job_card)
+    assert "performance" in state_mod._classify_changed_files(worker_file)
+    assert "infra" not in state_mod._classify_changed_files(tflite_file)
+    assert "infra" in state_mod._classify_changed_files(terraform_file)
+
+
 def test_combined_review_instructions_puts_auto_before_manual(state_mod):
     assert state_mod._combined_review_instructions("auto", "manual") == "auto\n\nmanual"
     assert state_mod._combined_review_instructions("auto", "") == "auto"

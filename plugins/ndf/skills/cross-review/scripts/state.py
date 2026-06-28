@@ -84,17 +84,17 @@ API_CONTRACT_MARKERS = (
 )
 AUTH_SECURITY_TOKEN_MARKERS = (
     "auth", "authn", "authz", "permission", "policy", "role", "oauth", "jwt",
-    "session", "csrf", "cors",
+    "session", "csrf", "cors", "token",
 )
 AUTH_SECURITY_SUBSTRING_MARKERS = (
     "authentication", "authorization", "authenticat", "authoriz",
-    "token", "secret", "password", "credential",
+    "secret", "password", "credential",
 )
 FRONTEND_EXTENSIONS = {
     ".css", ".scss", ".sass", ".less", ".html", ".jsx", ".tsx", ".vue", ".svelte",
 }
 PERFORMANCE_MARKERS = (
-    "cache", "queue", "job", "worker", "async", "concurrent", "parallel",
+    "cache", "queue", "job", "worker", "concurrent", "parallel",
     "batch", "stream", "pagination", "performance",
 )
 GENERATED_MARKERS = (
@@ -106,8 +106,9 @@ I18N_MARKERS = (
 I18N_EXTENSIONS = {".po", ".pot"}
 INFRA_MARKERS = (
     "/terraform/", "/helm/", "/k8s/", "/kubernetes/", "/docker/",
-    "dockerfile", "docker-compose", ".tf", ".tfvars",
+    "dockerfile", "docker-compose",
 )
+INFRA_EXTENSIONS = {".tf", ".tfvars"}
 
 
 COMMON_REVIEW_TEMPLATE = """## 自動追加レビュー観点: 共通
@@ -449,6 +450,15 @@ def _contains_any(text: str, needles: tuple[str, ...]) -> bool:
     return any(n in text for n in needles)
 
 
+def _path_tokens(path: str) -> set[str]:
+    _, normalized, _, _ = _path_info(path)
+    return {
+        token
+        for token in normalized.replace(".", "/").replace("-", "/").replace("_", "/").split("/")
+        if token
+    }
+
+
 def _is_doc_path(path: str) -> bool:
     lower, normalized, name, ext = _path_info(path)
     stem = pathlib.PurePosixPath(lower).stem
@@ -503,12 +513,8 @@ def _is_api_contract_path(path: str) -> bool:
 
 
 def _is_auth_security_path(path: str) -> bool:
-    lower, normalized, name, _ = _path_info(path)
-    tokens = {
-        token
-        for token in normalized.replace(".", "/").replace("-", "/").replace("_", "/").split("/")
-        if token
-    }
+    lower, _, _, _ = _path_info(path)
+    tokens = _path_tokens(path)
     return (
         bool(tokens.intersection(AUTH_SECURITY_TOKEN_MARKERS))
         or any(marker in lower for marker in AUTH_SECURITY_SUBSTRING_MARKERS)
@@ -521,8 +527,7 @@ def _is_frontend_path(path: str) -> bool:
 
 
 def _is_performance_path(path: str) -> bool:
-    lower, _, _, _ = _path_info(path)
-    return any(marker in lower for marker in PERFORMANCE_MARKERS)
+    return bool(_path_tokens(path).intersection(PERFORMANCE_MARKERS))
 
 
 def _is_generated_path(path: str) -> bool:
@@ -539,8 +544,13 @@ def _is_i18n_path(path: str) -> bool:
 
 
 def _is_infra_path(path: str) -> bool:
-    lower, normalized, _, _ = _path_info(path)
-    return _contains_any(normalized, INFRA_MARKERS) or any(marker in lower for marker in INFRA_MARKERS)
+    lower, normalized, name, ext = _path_info(path)
+    return (
+        _contains_any(normalized, INFRA_MARKERS)
+        or name in {"dockerfile", "docker-compose.yml", "docker-compose.yaml"}
+        or ext in INFRA_EXTENSIONS
+        or lower.endswith(".tfvars.json")
+    )
 
 
 PATH_CATEGORY_RULES = (
