@@ -14,3 +14,10 @@ def test_tail_last_nonempty_line_handles_missing_file(tmp_path, monitor_mod):
 
 def test_safe_size_handles_missing_file(tmp_path, monitor_mod):
     assert monitor_mod._safe_size(tmp_path / "missing.log") == 0
+
+
+def test_tail_last_nonempty_line_drops_partial_first_line(tmp_path, monitor_mod):
+    log = tmp_path / "gemini-review-pr1-progress.log"
+    log.write_text("partial line without beginning\npost: submit review\n", encoding="utf-8")
+
+    assert monitor_mod._tail_last_nonempty_line(log, limit=28) == "post: submit review"

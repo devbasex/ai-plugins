@@ -175,9 +175,9 @@ fi
 
 # ⚠ --skip-trust と GEMINI_CLI_TRUST_WORKSPACE=true は両方必須
 GEMINI_CLI_TRUST_WORKSPACE=true nohup gemini --yolo --skip-trust --output-format text \
-  -p "$(cat "$PROMPT")" \
+  -p "" \
   > $TMP_DIR/gemini-review-pr$STATE_PR-stdout.log \
-  2> $TMP_DIR/gemini-review-pr$STATE_PR-err.log &
+  2> $TMP_DIR/gemini-review-pr$STATE_PR-err.log < "$PROMPT" &
 GEMINI_PID=$!
 echo $GEMINI_PID > $TMP_DIR/gemini-review-pr$STATE_PR.pid
 disown

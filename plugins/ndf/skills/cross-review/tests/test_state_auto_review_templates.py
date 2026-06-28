@@ -23,6 +23,20 @@ def test_parse_pr_files_payload_normalizes_gh_files_json(state_mod):
     ]
 
 
+def test_parse_pr_files_api_lines_normalizes_paginated_api_output(state_mod):
+    entries = state_mod._parse_pr_files_api_lines(
+        "modified\tsrc/app.py\t\n"
+        "renamed\tdocs/new.md\tdocs/old.md\n"
+        "removed\tsrc/old.py\t\n"
+    )
+
+    assert entries == [
+        {"status": "M", "paths": ["src/app.py"]},
+        {"status": "R", "paths": ["docs/old.md", "docs/new.md"]},
+        {"status": "D", "paths": ["src/old.py"]},
+    ]
+
+
 def test_docs_only_pr_adds_docs_template(state_mod):
     entries = state_mod._parse_pr_files_payload(
         '{"files":[{"path":"docs/plan.md","changeType":"MODIFIED"},{"path":"README.md","changeType":"ADDED"}]}'

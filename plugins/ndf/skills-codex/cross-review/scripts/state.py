@@ -374,15 +374,60 @@ def _parse_pr_files_payload(output: str) -> list[dict[str, Any]]:
     return entries
 
 
-def _fetch_changed_files(pr: int) -> list[dict[str, Any]]:
+def _parse_pr_files_api_lines(output: str) -> list[dict[str, Any]]:
+    """GitHub API の PR files を TSV(JSON jq) 出力から分類用構造に変換する。"""
+    status_map = {
+        "added": "A",
+        "modified": "M",
+        "removed": "D",
+        "renamed": "R",
+        "copied": "C",
+        "changed": "M",
+    }
+    entries: list[dict[str, Any]] = []
+    for raw in output.splitlines():
+        if not raw.strip():
+            continue
+        cols = raw.split("\t")
+        status_raw = cols[0].strip().lower() if cols else "modified"
+        path = cols[1].strip() if len(cols) > 1 else ""
+        previous = cols[2].strip() if len(cols) > 2 else ""
+        if not path:
+            continue
+        paths = []
+        if previous and previous != path:
+            paths.append(previous)
+        paths.append(path)
+        entries.append({"status": status_map.get(status_raw, status_raw[:1].upper() or "M"), "paths": paths})
+    return entries
+
+
+def _fetch_changed_files(pr: int, repo: str) -> list[dict[str, Any]]:
     r = subprocess.run(
+        [
+            "gh", "api", f"repos/{repo}/pulls/{pr}/files",
+            "--paginate",
+            "--jq", '.[] | [.status, .filename, (.previous_filename // "")] | @tsv',
+        ],
+        capture_output=True, text=True,
+    )
+    if r.returncode == 0:
+        entries = _parse_pr_files_api_lines(r.stdout)
+        if entries:
+            return entries
+        info("⚠ PR files API の結果が空、または解析できません。gh pr view fallback を試行")
+
+    else:
+        info(f"⚠ PR files API 取得に失敗。gh pr view fallback を試行: {r.stderr.strip()[:200]}")
+
+    fallback = subprocess.run(
         ["gh", "pr", "view", str(pr), "--json", "files"],
         capture_output=True, text=True,
     )
-    if r.returncode != 0:
-        info(f"⚠ PR 変更ファイル一覧の取得に失敗。自動レビュー観点は共通のみ: {r.stderr.strip()[:200]}")
+    if fallback.returncode != 0:
+        info(f"⚠ PR 変更ファイル一覧の取得に失敗。自動レビュー観点は共通のみ: {fallback.stderr.strip()[:200]}")
         return []
-    entries = _parse_pr_files_payload(r.stdout)
+    entries = _parse_pr_files_payload(fallback.stdout)
     if not entries:
         info("⚠ PR 変更ファイル一覧が空、または解析できません。自動レビュー観点は共通のみ")
     return entries
@@ -742,7 +787,7 @@ def cmd_init(args: argparse.Namespace) -> None:
         if st.get("final") is None:
             state_changed = False
             if "auto_review_instructions" not in st:
-                changed_files = _fetch_changed_files(pr)
+                changed_files = _fetch_changed_files(pr, st.get("repo") or repo)
                 categories = _classify_changed_files(changed_files)
                 st["changed_files"] = changed_files
                 st["auto_review_categories"] = categories
@@ -793,7 +838,7 @@ def cmd_init(args: argparse.Namespace) -> None:
     # worktree 分離 — _tmp_dir() より先に worktree を作成/確認する
     head_branch = _sh(["gh", "pr", "view", str(pr), "--json", "headRefName", "--jq", ".headRefName"])
     base_branch = _sh(["gh", "pr", "view", str(pr), "--json", "baseRefName", "--jq", ".baseRefName"])
-    changed_files = _fetch_changed_files(pr)
+    changed_files = _fetch_changed_files(pr, repo)
     auto_review_categories = _classify_changed_files(changed_files)
     auto_review = _auto_review_instructions(auto_review_categories)
     review_instructions = _combined_review_instructions(auto_review, manual_extra_review)

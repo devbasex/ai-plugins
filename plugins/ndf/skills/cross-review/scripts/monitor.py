@@ -492,6 +492,8 @@ def _tail_last_nonempty_line(path: pathlib.Path, limit: int = 4096) -> str:
             data = f.read().decode("utf-8", errors="replace")
     except OSError:
         return ""
+    if sz > limit and "\n" in data:
+        data = data.split("\n", 1)[1]
     for line in reversed(data.splitlines()):
         stripped = line.strip()
         if stripped:

@@ -11,7 +11,7 @@
   `state.py init` に `--focus` と `--extra-instructions-file` を追加し、
   codex / gemini 両 launcher が同じ追加観点をプロンプトへ差し込めるようにした。
 - **`cross-review` / 自動レビュー観点テンプレート**:
-  `gh pr view --json files` の変更ファイルから PR 種別を分類し、ドキュメントのみ、
+  GitHub API の `pulls/<PR>/files --paginate` の変更ファイルから PR 種別を分類し、ドキュメントのみ、
   コード、DB migration、テスト、依存関係、CI/設定、API 契約、認証/認可、frontend、
   性能、削除/リネーム、生成物/i18n/infra の該当テンプレートを自動で追加するようにした。
 - **`monitor.py`**: stall 判定対象を err.log + stdout.log + progress.log に拡張。
