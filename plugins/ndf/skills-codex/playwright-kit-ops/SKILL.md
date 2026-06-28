@@ -59,6 +59,16 @@ cd /path/to/your-app
 ./scenario-test/run.sh --pwk-drive-folder=<ID>    # Drive 自動アップロード
 ```
 
+Drive 連携は optional dependency として扱う。Codex 公開セットには `google-auth`
+skill を同梱しないため、Drive 系コマンドや `--pwk-drive-folder` を使う場合は
+`GOOGLE_AUTH_SCRIPTS` を `google-auth/scripts` の実パスへ設定する。
+
+```bash
+export GOOGLE_AUTH_SCRIPTS=/path/to/plugins/ndf/skills/google-auth/scripts
+cd scenario-test
+uv sync --extra drive
+```
+
 ## テスト計画ツール
 
 ```bash

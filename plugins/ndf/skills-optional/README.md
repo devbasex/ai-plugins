@@ -20,7 +20,6 @@ Add a skill back to `skills-claude/` or `skills-codex/` only when it is actively
 - `official-skills-autoloader`
 - `playwright-browser-connect`
 - `playwright-evidence-drive`
-- `playwright-kit-ops`
 - `playwright-scenario-test`
 - `qa-security-scan`
 - `skill-stats`
@@ -40,4 +39,5 @@ These minimal Playwright skills are exposed in Codex but kept optional for Claud
 - `playwright-test-planning`
 - `playwright-script-creation`
 - `playwright-execution`
+- `playwright-kit-ops`
 - `playwright-report`

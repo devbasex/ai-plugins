@@ -36,11 +36,11 @@ if "%~1"=="--dry-run" (
 if "%~1"=="-h" goto :show_help
 if "%~1"=="--help" goto :show_help
 if "%~1:~0,1%"=="-" (
-  echo [init] unknown option: %~1
+  echo [init] unknown option
   exit /b 1
 )
 if not "%PROJECT_ROOT%"=="" (
-  echo [init] PROJECT_ROOT は 1 つだけ指定してください ^(既: %PROJECT_ROOT%, 追加: %~1^)
+  echo [init] PROJECT_ROOT は 1 つだけ指定してください
   exit /b 1
 )
 set "PROJECT_ROOT=%~1"
@@ -57,8 +57,9 @@ if "%PROJECT_ROOT%"=="" (
   exit /b 1
 )
 
-rem --runtime-dir のサニタイズ。
-rem POSIX 側 (init_project.sh) と同じ whitelist `^[A-Za-z0-9._-]+$` で検証する。
+rem 入力値のサニタイズ。
+rem PROJECT_ROOT は Windows path として許容しつつ cmd メタ文字を拒否する。
+rem --runtime-dir は POSIX 側 (init_project.sh) と同じ whitelist `^[A-Za-z0-9._-]+$` で検証する。
 rem
 rem 注意: cmd.exe の即時展開 (%VAR%) は cmd メタ文字 (`&`, `|`, `<`, `>` 等) を
 rem 命令区切りとして解釈してしまうため、`echo %RUNTIME_DIR_NAME% | findstr ...` 形式は
@@ -66,6 +67,15 @@ rem command injection の余地がある。値を環境変数として PowerShel
 rem PowerShell の正規表現で検証することで shell parsing を完全に回避する。
 rem (delayed expansion `!VAR!` も内部値が `&` 等を含むと安全性に依存があるため、
 rem 検証は外部プロセスの env 経由が最も堅牢)
+set "_PWK_VALIDATE=%PROJECT_ROOT%"
+powershell -NoProfile -Command "if ($env:_PWK_VALIDATE -match '[&|<>^()!%%]') { exit 1 }"
+if errorlevel 1 (
+  set "_PWK_VALIDATE="
+  echo [init] PROJECT_ROOT に cmd メタ文字 ^(& ^| ^< ^> ^^ ^( ^) ^! %%%%^) は使用できません。
+  exit /b 1
+)
+set "_PWK_VALIDATE="
+
 if "!RUNTIME_DIR_NAME!"=="." (
   echo [init] --runtime-dir に '.' は指定できません
   exit /b 1
@@ -89,13 +99,13 @@ for %%i in ("%~dp0..") do set "SKILL_DIR=%%~fi"
 rem ランタイム配置先
 set "RUNTIME_DIR=%PROJECT_ROOT%\%RUNTIME_DIR_NAME%"
 
-echo [init] Skill ディレクトリ : %SKILL_DIR%
-echo [init] プロジェクトルート : %PROJECT_ROOT%
-echo [init] ランタイム配置先   : %RUNTIME_DIR%
+echo [init] Skill ディレクトリ : "%SKILL_DIR%"
+echo [init] プロジェクトルート : "%PROJECT_ROOT%"
+echo [init] ランタイム配置先   : "%RUNTIME_DIR%"
 if "%DRY_RUN%"=="1" echo [init] (dry-run モード)
 
 if not exist "%PROJECT_ROOT%" (
-  echo [init] PROJECT_ROOT が存在しません: %PROJECT_ROOT%
+  echo [init] PROJECT_ROOT が存在しません: "%PROJECT_ROOT%"
   exit /b 1
 )
 
@@ -110,9 +120,9 @@ if "%DRY_RUN%"=="0" (
   xcopy /E /I /Y /Q "%SKILL_DIR%\scripts"        "%RUNTIME_DIR%\scripts" >nul
   copy /Y "%SKILL_DIR%\uv.lock" "%RUNTIME_DIR%\uv.lock" >nul
 ) else (
-  echo     xcopy %SKILL_DIR%\playwright_kit -^> %RUNTIME_DIR%\playwright_kit
-  echo     xcopy %SKILL_DIR%\scripts        -^> %RUNTIME_DIR%\scripts
-  echo     copy  %SKILL_DIR%\uv.lock        -^> %RUNTIME_DIR%\uv.lock
+  echo     xcopy "%SKILL_DIR%\playwright_kit" -^> "%RUNTIME_DIR%\playwright_kit"
+  echo     xcopy "%SKILL_DIR%\scripts"        -^> "%RUNTIME_DIR%\scripts"
+  echo     copy  "%SKILL_DIR%\uv.lock"        -^> "%RUNTIME_DIR%\uv.lock"
 )
 
 rem ---------- 2) runtime テンプレート (上書き) ----------
@@ -162,12 +172,12 @@ if errorlevel 1 (
 
 echo.
 echo [done] 初期化完了。次回以降は以下のコマンドで実行できます:
-echo        cd %RUNTIME_DIR% ^&^& run.bat
+echo        cd "%RUNTIME_DIR%" ^&^& run.bat
 exit /b 0
 
 :copy_overwrite
 if "%DRY_RUN%"=="1" (
-  echo     cp ^(overwrite^): %~1 -^> %~2
+  echo     cp ^(overwrite^): "%~1" -^> "%~2"
   exit /b 0
 )
 copy /Y "%~1" "%~2" >nul
@@ -175,11 +185,11 @@ exit /b 0
 
 :copy_if_absent
 if exist "%~2" (
-  echo     skip ^(exists^): %~2
+  echo     skip ^(exists^): "%~2"
   exit /b 0
 )
 if "%DRY_RUN%"=="1" (
-  echo     cp ^(new^): %~1 -^> %~2
+  echo     cp ^(new^): "%~1" -^> "%~2"
   exit /b 0
 )
 copy /Y "%~1" "%~2" >nul

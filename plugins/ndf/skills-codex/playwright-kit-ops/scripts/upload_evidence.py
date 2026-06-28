@@ -24,22 +24,34 @@ from pathlib import Path
 from urllib.parse import quote
 
 
-# google-auth スキルの sibling-skill discovery
-_CANDIDATES = (
-    os.environ.get("GOOGLE_AUTH_SCRIPTS"),
-    os.path.expanduser("~/.claude/skills/google-auth/scripts"),
-    str(Path(__file__).resolve().parent.parent.parent / "google-auth" / "scripts"),
+_HERE = Path(__file__).resolve()
+_CANDIDATES: tuple[Path, ...] = tuple(
+    Path(p).expanduser()
+    for p in (
+        os.environ.get("GOOGLE_AUTH_SCRIPTS"),
+        "~/.claude/skills/google-auth/scripts",
+        "~/.codex/skills/google-auth/scripts",
+        str(_HERE.parent.parent.parent / "google-auth" / "scripts"),
+    )
+    if p
 )
 
 
 def _ensure_google_auth_on_path() -> None:
     for p in _CANDIDATES:
-        if p and os.path.isdir(p):
-            if p not in sys.path:
-                sys.path.insert(0, p)
+        if p.is_dir():
+            path = str(p)
+            if path not in sys.path:
+                sys.path.insert(0, path)
             return
+    searched = "\n  - ".join(str(p) for p in _CANDIDATES)
     raise RuntimeError(
-        "google-auth スキルが見つかりません。GOOGLE_AUTH_SCRIPTS env で明示してください。"
+        "Google Drive 連携には optional skill `google-auth` が必要です。\n"
+        "Codex 公開セットには同梱していないため、Drive 系コマンドを使う前に "
+        "`GOOGLE_AUTH_SCRIPTS` を google-auth/scripts へ設定してください。\n"
+        "例: export GOOGLE_AUTH_SCRIPTS=/path/to/plugins/ndf/skills/google-auth/scripts\n"
+        "検索した候補:\n  - "
+        f"{searched}"
     )
 
 
