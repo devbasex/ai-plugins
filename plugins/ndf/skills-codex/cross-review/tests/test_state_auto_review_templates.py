@@ -12,6 +12,26 @@ def test_parse_name_status_handles_rename(state_mod):
     ]
 
 
+def test_parse_pr_files_payload_normalizes_gh_files_json(state_mod):
+    entries = state_mod._parse_pr_files_payload(
+        """
+        {
+          "files": [
+            {"path": "src/app.py", "changeType": "MODIFIED"},
+            {"path": "docs/new.md", "previousPath": "docs/old.md", "changeType": "RENAMED"},
+            {"path": "src/old.py", "changeType": "DELETED"}
+          ]
+        }
+        """
+    )
+
+    assert entries == [
+        {"status": "M", "paths": ["src/app.py"]},
+        {"status": "R", "paths": ["docs/old.md", "docs/new.md"]},
+        {"status": "D", "paths": ["src/old.py"]},
+    ]
+
+
 def test_docs_only_pr_adds_docs_template(state_mod):
     entries = state_mod._parse_name_status("M\tdocs/plan.md\nA\tREADME.md\n")
 

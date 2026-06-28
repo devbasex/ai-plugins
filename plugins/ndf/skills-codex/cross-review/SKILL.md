@@ -74,7 +74,7 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 
 ### 自動レビュー観点テンプレート
 
-`state.py init` は `gh pr diff --name-status` で変更ファイルを分類し、
+`state.py init` は `gh pr view --json files` で変更ファイルを分類し、
 codex / gemini 両 launcher に同じ追加観点を渡す。`--focus` /
 `--extra-instructions-file` は、この自動テンプレートの後ろに上乗せされる。
 

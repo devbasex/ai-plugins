@@ -356,15 +356,54 @@ def _parse_name_status(output: str) -> list[dict[str, Any]]:
     return entries
 
 
+def _parse_pr_files_payload(output: str) -> list[dict[str, Any]]:
+    """`gh pr view --json files` の JSON を name-status 風に正規化する。"""
+    try:
+        payload = json.loads(output)
+    except json.JSONDecodeError:
+        return []
+    files = payload.get("files") if isinstance(payload, dict) else None
+    if not isinstance(files, list):
+        return []
+
+    status_map = {
+        "ADDED": "A",
+        "MODIFIED": "M",
+        "DELETED": "D",
+        "RENAMED": "R",
+        "COPIED": "C",
+        "CHANGED": "M",
+    }
+    entries: list[dict[str, Any]] = []
+    for f in files:
+        if not isinstance(f, dict):
+            continue
+        path = f.get("path")
+        if not isinstance(path, str) or not path:
+            continue
+        change_type = str(f.get("changeType") or "MODIFIED").upper()
+        status = status_map.get(change_type, change_type[:1] or "M")
+        paths = []
+        previous = f.get("previousPath") or f.get("previous_filename")
+        if isinstance(previous, str) and previous and previous != path:
+            paths.append(previous)
+        paths.append(path)
+        entries.append({"status": status, "paths": paths})
+    return entries
+
+
 def _fetch_changed_files(pr: int) -> list[dict[str, Any]]:
     r = subprocess.run(
-        ["gh", "pr", "diff", str(pr), "--name-status"],
+        ["gh", "pr", "view", str(pr), "--json", "files"],
         capture_output=True, text=True,
     )
     if r.returncode != 0:
         info(f"⚠ PR 変更ファイル一覧の取得に失敗。自動レビュー観点は共通のみ: {r.stderr.strip()[:200]}")
         return []
-    return _parse_name_status(r.stdout)
+    entries = _parse_pr_files_payload(r.stdout)
+    if not entries:
+        info("⚠ PR 変更ファイル一覧が空、または解析できません。自動レビュー観点は共通のみ")
+    return entries
 
 
 def _path_info(path: str) -> tuple[str, str, str, str]:
