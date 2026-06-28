@@ -1,6 +1,6 @@
 ---
 name: skill-stats
-description: "Claude Code の transcript を集計して Skill 利用統計を算出する。呼び出し数、関連話題出現数、ヒット率を出力。特定 skill の利用傾向分析や新規 skill 候補の発見に使う。"
+description: "Analyze Skill usage from Claude Code transcripts."
 when_to_use: "Skill 利用統計 / hit rate を算出したいとき。Triggers: 'skill stats', 'skill統計', 'skill利用分析', 'skill usage', 'skill hit rate'"
 allowed-tools:
   - Bash

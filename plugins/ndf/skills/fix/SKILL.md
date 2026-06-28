@@ -1,6 +1,6 @@
 ---
 name: fix
-description: "PRのレビューコメントを確認し、優先度に応じてコード修正を実行する。サブエージェント (general-purpose) 起動にも対応。--defer-nit / --severity-min で対応範囲を制御。"
+description: "Fix actionable PR review comments."
 when_to_use: "PRレビューコメント (codex/gemini/人間) の指摘を実際にコード修正で対応したいとき。review-pr-comments で分類した後の修正フェーズに使う。Triggers: 'PRコメント対応', 'PRレビュー修正', 'PR fix', 'review feedback fix', 'コメントに対応して修正'"
 argument-hint: "[PR番号] [--defer-nit] [--severity-min critical|major|minor]"
 allowed-tools:
@@ -181,7 +181,7 @@ review指摘とCIエラーは**同じPRで一緒に修正**する:
 
 ```bash
 # インラインコメント / レビュー body / PR レベルコメントを一括取得
-FETCH_SCRIPT="$CLAUDE_PLUGIN_ROOT/skills/fix/scripts/fetch-pr-comments.sh"
+FETCH_SCRIPT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/skills/fix/scripts/fetch-pr-comments.sh"
 "$FETCH_SCRIPT" <owner/repo> <pr_number>
 ```
 

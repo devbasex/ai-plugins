@@ -1,6 +1,6 @@
 ---
 name: deepwiki-transfer
-description: "DeepWiki (Devin MCP) のドキュメント内容を対象リポジトリの Markdown ファイルとして転載する。セクション構成維持・番号付きファイル分割・GFM 準拠補正・日本語翻訳 (オプション) まで自動処理。"
+description: "Transfer DeepWiki content into Markdown docs."
 when_to_use: "DeepWiki から Markdown としてコンテンツを取得・転載したいとき。Triggers: 'deepwiki transfer', 'deepwiki転載', 'wiki転載', 'リポジトリドキュメント取得', 'DeepWikiからMarkdown', 'transfer wiki contents'"
 disable-model-invocation: true
 allowed-tools:

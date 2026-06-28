@@ -1,5 +1,4 @@
 {
-  "description": "NDF Plugin hooks: transcript retention guard, default statusline, and Slack notifications",
   "hooks": {
     "SessionStart": [
       {
@@ -8,14 +7,14 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/ensure-retention.sh",
+            "command": "bash ${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/ensure-retention.sh",
             "description": "NDF: ensure transcript retention >= 90 days",
             "continueOnError": true,
             "suppressOutput": false
           },
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/statusline-switch.sh ensure",
+            "command": "bash ${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/statusline-switch.sh ensure",
             "description": "NDF: set default statusline when none is configured",
             "continueOnError": true,
             "suppressOutput": false
@@ -28,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/slack-notify.js session_end",
+            "command": "node ${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/slack-notify.js session_end",
             "description": "Send Slack notification when Claude Code exits"
           }
         ]

@@ -1,6 +1,6 @@
 ---
 name: playwright-browser-connect
-description: "Playwright E2E テストのブラウザ接続先を構成する。ローカル Chromium / Windows リモート Chrome (CDP) / macOS リモート Chrome (CDP) の 3 パターンをサポートし、scenario.config.yaml の browser: セクションで宣言的に切り替える。"
+description: "Configure Playwright browser and CDP connections."
 when_to_use: "E2E テストのブラウザ接続先を設定・変更するとき / remote Chrome に CDP で接続したいとき / WSL2 Docker から Windows Chrome を操作したいとき / macOS ホストの Chrome を使いたいとき。Triggers: 'ブラウザ接続', 'remote chrome', 'CDP接続', 'connectOverCDP', 'リモートブラウザ', 'Windows Chrome', 'macOS Chrome', 'mac Chrome', 'browser connect', 'cdp endpoint', 'remote debugging', 'コンテナからホスト Chrome 起動', 'host.docker.internal'"
 allowed-tools:
   - Read

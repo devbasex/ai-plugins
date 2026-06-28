@@ -1,6 +1,6 @@
 ---
 name: gemini
-description: "gemini CLI (Google Gemini) を直接実行してコード生成・レビュー・調査を外部AIに委譲する手順。`gemini -p` を非対話モードで実行し、stdout で最終結果を回収する。"
+description: "Delegate coding, review, or research to Gemini CLI."
 when_to_use: "外部 AI （Gemini）へコード生成 / レビュー / 調査を委譲したいとき。Triggers: 'geminiで調査', 'geminiレビュー', '第二意見レビュー (Gemini)', 'gemini exec', 'external AI review (Gemini)'"
 ---
 

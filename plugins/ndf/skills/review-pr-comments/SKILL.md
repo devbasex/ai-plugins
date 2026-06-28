@@ -1,6 +1,6 @@
 ---
 name: review-pr-comments
-description: "既存PRの全コメントを確認し、対応可否を判定する(READ-ONLY)。修正は一切行わず、重大/改善推奨/軽微/参考/別PR対応に分類する。/ndf:fixで修正する前の優先度判定用。"
+description: "Classify existing PR comments before fixing."
 when_to_use: "既存PRのレビューコメントを分類・優先度判定したいとき (修正前)。Triggers: 'PRコメントを確認', 'PRコメントを分類', 'コメント対応の優先度', 'PR comments review', 'classify PR comments', 'PRレビュー結果を見て'"
 argument-hint: "[PR番号]"
 allowed-tools:
@@ -47,7 +47,7 @@ PR_NUMBER="${ARGUMENTS:-$(gh pr view --json number --jq .number)}"
 fix skill の共有スクリプトで インラインコメント / レビュー body / PR レベルコメントを一括取得:
 
 ```bash
-FETCH_SCRIPT="$CLAUDE_PLUGIN_ROOT/skills/fix/scripts/fetch-pr-comments.sh"
+FETCH_SCRIPT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/skills/fix/scripts/fetch-pr-comments.sh"
 "$FETCH_SCRIPT" "$(gh repo view --json nameWithOwner -q .nameWithOwner)" "$PR_NUMBER"
 ```
 

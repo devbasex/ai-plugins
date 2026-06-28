@@ -1,6 +1,6 @@
 ---
 name: cross-review
-description: "PR を codex / gemini 両方にレビューさせ、両方 APPROVE まで /ndf:review → /ndf:fix を自動ループ。サブエージェント分離・PR ローテーション・nit 集約でメイン context 消費を最小化"
+description: "Run iterative Codex and Gemini PR reviews."
 argument-hint: "[PR番号] [--max-rounds N] [--rotate-after K] [--rotate-mode light|squash] [--only codex|gemini]"
 disable-model-invocation: true
 allowed-tools:
@@ -165,7 +165,8 @@ flowchart TD
 各ステップの詳細は `docs/` 参照。メインは以下のテンプレートで scripts/ を呼ぶだけ:
 
 ```bash
-SCRIPTS="$CLAUDE_PLUGIN_ROOT/skills/cross-review/scripts"
+PLUGIN_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}"
+SCRIPTS="$PLUGIN_ROOT/skills/cross-review/scripts"
 
 # STATE_PR は state.json のキー (= 最初に init した PR 番号)。
 # rotation 後も state.json のパスは変わらないため、scripts/ への引数には常に

@@ -23,7 +23,7 @@ for arg in "$@"; do
       echo ""
       echo "Options:"
       echo "  --with-slack   stopフックにSlack通知を追加"
-      echo "  --with-codex   Codex CLI MCPサーバーを追加"
+      echo "  --with-codex   Codex CLI直接実行用プロンプトを追加"
       echo "  -h, --help     このヘルプを表示"
       exit 0
       ;;
@@ -52,7 +52,7 @@ while IFS= read -r skill_path; do
     continue
   fi
 
-  # Relative symlink from .kiro/skills/ to plugins/ndf/skills/
+  # Relative symlink from .kiro/skills/ to the manifest-selected skill set.
   ln -sfn "../../plugins/ndf/$skill_path" "$SKILLS_DIR/$skill_name"
   echo "  linked: $skill_name"
   SKILL_COUNT=$((SKILL_COUNT + 1))
@@ -72,6 +72,10 @@ declare -A PROMPT_DESCS=(
   [clean]="mainマージ済みブランチをローカル/リモート一括削除してください。"
 )
 
+if [ "$WITH_CODEX" = true ]; then
+  PROMPT_DESCS[codex]="Codex CLIにコード生成・レビュー・調査を委譲してください。"
+fi
+
 for name in "${!PROMPT_DESCS[@]}"; do
   cat > "$PROMPTS_DIR/$name.md" << PROMPT_EOF
 ${PROMPT_DESCS[$name]}
@@ -85,7 +89,7 @@ done
 mkdir -p "$KIRO_DIR/agents"
 
 if [ "$WITH_SLACK" = true ]; then echo "Slack通知: 有効"; else echo "Slack通知: 無効 (--with-slack で有効化)"; fi
-if [ "$WITH_CODEX" = true ]; then echo "Codex MCP: 有効"; else echo "Codex MCP: 無効 (--with-codex で有効化)"; fi
+if [ "$WITH_CODEX" = true ]; then echo "Codex CLI連携: 有効"; else echo "Codex CLI連携: 無効 (--with-codex で有効化)"; fi
 
 # Backup existing config
 if [ -f "$AGENT_FILE" ]; then
@@ -111,8 +115,6 @@ config = {
 }
 if sys.argv[1] == 'true':
     config['hooks']['stop'] = [{'command': 'node plugins/ndf/scripts/slack-notify.js session_end', 'timeout_ms': 70000}]
-if sys.argv[2] == 'true':
-    config['mcpServers'] = {'codex': {'command': 'codex', 'args': ['mcp-server'], 'env': {}}}
 json.dump(config, open(sys.argv[3], 'w'), indent=2, ensure_ascii=False)
 " "$WITH_SLACK" "$WITH_CODEX" "$AGENT_FILE"
 

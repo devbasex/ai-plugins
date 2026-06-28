@@ -1,6 +1,6 @@
 ---
 name: statusline
-description: "NDF標準statusline（コンテナ名/ホスト名 + project_dir + コンテキスト使用率）への切り替え・復元・状態確認を行う"
+description: "Switch, restore, or inspect the NDF statusline."
 when_to_use: "statuslineを切り替え/復元/確認したいとき。Triggers: 'statusline', 'ステータスライン', 'statusline 切り替え', 'statusline 戻す'"
 disable-model-invocation: true
 allowed-tools:
@@ -27,14 +27,16 @@ NDF 標準 statusline (コンテナ名/ホスト名 + project_dir + コンテキ
 引数に応じて以下のコマンドを実行する:
 
 ```bash
+PLUGIN_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}"
+
 # 状態確認 (引数なし or status)
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/statusline-switch.sh status
+bash "${PLUGIN_ROOT}/scripts/statusline-switch.sh" status
 
 # NDF 標準 statusline に切り替え (既存設定は自動バックアップ)
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/statusline-switch.sh set
+bash "${PLUGIN_ROOT}/scripts/statusline-switch.sh" set
 
 # 元の設定に復元 (バックアップが無ければ statusLine 設定を削除)
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/statusline-switch.sh restore
+bash "${PLUGIN_ROOT}/scripts/statusline-switch.sh" restore
 ```
 
 実行後、スクリプトの出力をそのままユーザーに報告する。

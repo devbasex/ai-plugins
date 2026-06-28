@@ -1,6 +1,6 @@
 ---
 name: data-analyst-sql-optimization
-description: "Apply SQL optimization patterns: index usage, query rewriting, JOIN/subquery optimization, window functions, N+1 elimination."
+description: "Optimize SQL queries and slow database workloads."
 when_to_use: "Use when improving query performance or analyzing slow queries. Triggers: 'optimize SQL', 'slow query', 'improve performance', 'SQL最適化', 'クエリ改善', 'パフォーマンス向上'"
 ---
 

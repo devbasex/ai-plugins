@@ -7,7 +7,7 @@
 ## プラグイン情報
 
 - **名前**: ndf
-- **現在バージョン**: 4.4.0
+- **現在バージョン**: 4.17.0
 - **種類**: 統合プラグイン（Skills + Agents + Hooks / v4.0.0 で Codex MCP 廃止）
 - **リポジトリ**: https://github.com/devbasex/ai-plugins
 
@@ -25,9 +25,11 @@
 plugins/ndf/
 ├── .claude-plugin/
 │   └── plugin.json              # プラグインメタデータ
-├── .mcp.json                    # MCPサーバー定義（Codex CLI）
+├── .codex-plugin/
+│   └── plugin.json              # Codexプラグインメタデータ
 ├── hooks/
-│   └── hooks.json               # プロジェクトフック定義
+│   ├── hooks.json               # Claude Codeプロジェクトフック定義
+│   └── codex-hooks.json         # Codex hook定義
 ├── scripts/
 │   └── slack-notify.js          # Slack通知スクリプト
 ├── agents/                      # サブエージェント（8個、モデル階層化）
@@ -39,48 +41,9 @@ plugins/ndf/
 │   ├── debugger.md              # sonnet: 根本原因分析
 │   ├── devops-engineer.md       # sonnet: Docker/CI/K8s
 │   └── code-reviewer.md         # sonnet: diff/PRレビュー
-├── skills/                      # スキル（39個）
-│   # PRワークフロー系
-│   ├── pr/                      # commit+push+PR作成/更新
-│   ├── pr-tests/                # Test Plan自動実行
-│   ├── fix/                     # PRコメント修正対応
-│   ├── review/                  # PR単位レビュー（Approve/RC判定）
-│   ├── review-branch/           # ローカル差分レビュー（PR前）
-│   ├── review-pr-comments/      # PRコメント分類（READ-ONLY）
-│   ├── resolve-pr-comments/     # 対応済みコメント返信+Resolve
-│   ├── cherry-pick-pr/          # 環境ブランチへのcherry-pick PR
-│   ├── deploy/                  # 環境ブランチへのデプロイPR
-│   ├── sync-main/               # main取り込み
-│   ├── merged/                  # マージ後クリーンアップ
-│   ├── clean/                   # マージ済みブランチ一括削除
-│   # 原則・ガイドライン系
-│   ├── ndf-policies/            # ポリシー常時注入
-│   ├── branch-fix-strategy/     # ブランチ修正適用戦略
-│   ├── issue-plan-strategy/     # issue→plan→multi-PR ワークフロー (release branch + draft PR + worktree)
-│   ├── implementation-plan/     # 実装プラン管理(issues/)
-│   ├── investigation-rules/     # 調査時のエビデンス主義
-│   ├── problem-solving/         # 根本原因分析・多層防御
-│   ├── logging-guidelines/      # ログ運用ガイドライン(言語非依存)
-│   # データ分析・品質
-│   ├── data-analyst-sql-optimization/
-│   ├── data-analyst-export/
-│   ├── qa-security-scan/
-│   # ドキュメント・環境
-│   ├── markdown-writing/
-│   ├── python-execution/
-│   ├── docker-container-access/
-│   ├── deepwiki-transfer/
-│   ├── knowledge-reorg/
-│   ├── git-gh-operations/
-│   ├── google-auth/
-│   ├── browser-test/            # ブラウザ動作確認(Playwright/Chrome DevTools)
-│   ├── codex/                   # Codex CLI直接実行（MCP版との使い分け）
-│   ├── playwright-scenario-test/ # Playwright+curl Web シナリオE2E並列ランナー
-│   ├── google-drive/            # Google Drive エクスポート/DL/UP（google-auth依存）
-│   ├── google-chat/             # Google Chat メッセージ取得（google-auth依存）
-│   # Anthropic公式連携
-│   ├── mcp-builder/             # Anthropic公式（Apache-2.0）
-│   └── official-skills-autoloader/  # 公式Skill自動ロード
+├── skills/                      # 全Skill実体（48個、Claude Code/Kiroはmanifest配列で公開対象を指定）
+├── skills-codex/                # Codex向け公開Skill（core 28個、marketplace cache向け実ディレクトリ）
+├── skills-optional/             # ランタイム別除外候補リスト
 ├── AGENTS.md                    # このファイル（開発者向け）
 └── README.md                    # プラグイン説明書
 ```
@@ -90,9 +53,11 @@ plugins/ndf/
 ### 新しいスキルの追加
 
 1. `skills/{skill-name}/SKILL.md` を作成（YAMLフロントマター必須）
-2. `plugin.json` の `skills` 配列に `"./skills/{skill-name}"` を追加
-3. `plugin.json` のバージョンをMINOR上げ
-4. テスト・コミット
+2. Claude Code/Kiroで初期公開する場合は `.claude-plugin/plugin.json` の `skills` 配列に `"./skills/{skill-name}"` を追加
+3. Codexで初期公開する場合は `skills-codex/{skill-name}` に実ディレクトリとしてコピーする（`.codex-plugin/plugin.json` は `./skills-codex/` ディレクトリを参照）
+4. 低頻度・保守用に留める場合は `skills-optional/README.md` の候補リストへ追加
+5. plugin.json のバージョンをMINOR上げ
+6. テスト・コミット
 
 ### 新しいサブエージェントの追加
 
@@ -100,19 +65,12 @@ plugins/ndf/
 2. `plugin.json` の `agents` 配列に追加
 3. バージョンMINOR上げ → テスト・コミット
 
-### MCPサーバーの追加・更新
-
-1. `.mcp.json` の `mcpServers` に追加
-2. README.mdに説明追加
-3. バージョン更新 → テスト・コミット
-
 ## 検証チェックリスト
 
 - [ ] plugin.jsonが有効なJSON
 - [ ] バージョン番号が適切にインクリメント
 - [ ] すべてのスキル/エージェントファイルが存在
 - [ ] YAMLフロントマターが正しい
-- [ ] .mcp.jsonが有効なJSON
 - [ ] README.md が最新
 
 ## トラブルシューティング
@@ -121,7 +79,6 @@ plugins/ndf/
 |------|------|
 | エージェントが認識されない | plugin.jsonのagents配列、ファイルパス、YAMLフロントマターを確認 |
 | スキルが表示されない | plugin.jsonのskills配列、SKILL.mdのフロントマターを確認、`/plugin reload ndf` |
-| MCPサーバーが起動しない | .mcp.jsonの構文、コマンドパス、環境変数を確認 |
 | フックが動作しない | hooks.jsonの構文、スクリプト実行権限を確認 |
 
 ## 開発履歴
