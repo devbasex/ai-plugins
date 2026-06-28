@@ -1,5 +1,16 @@
 # NDF Plugin CHANGELOG
 
+### v4.17.2 (Codex Slack通知: メンション付き投稿の削除を修正)
+
+Codex Stop hook の Slack 通知で、メンション付きメッセージ削除ロジックが
+動いていなかった問題を修正した。
+
+- **`scripts/codex-slack-notify.js`**: Claude 版と同様に
+  `chat.postMessage` の戻り値 `ts` を保持し、メンション付き投稿後に
+  メンションなし投稿を送信してから `chat.delete` でメンション付き投稿を削除
+- **plugin.json: version 4.17.1 → 4.17.2**。marketplace.json / README /
+  AGENTS.md / ndf-plugin-reference の version 表記を整合
+
 ### v4.17.1 (Codex/Claude: cross-review 公開漏れ修正)
 
 NDF の主要 PR ワークフローである `cross-review` が、Claude Code/Kiro の
