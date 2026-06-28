@@ -4,7 +4,7 @@
 
 NDF プラグインは、Claude Code / Codex / Kiro CLI 向けのオールインワン開発支援プラグイン。エージェント、Skills、フックを統合して提供する。
 
-**現行バージョン**: **v4.17.0** — Codex plugin 対応として Claude Code / Kiro と Codex の公開 Skill セットを分離し、Codex では `skills-codex/` の core 27 個のみを公開する。Skill 実体は `skills/` に集約し、Codex 向け公開ディレクトリは symlink で二重管理を避ける。**v4.16.1** で statusline: NDF 由来の旧コピー（マーカー付き / レガシー `statusline-command.sh`）を `settings.json` が指す場合、SessionStart で正規パス（`~/.claude/ndf-statusline.sh`）へ自動移行しバージョンアップ追従を回復（ユーザー独自 statusline は誤検出ガードで保護）。**v4.16.0** で statusline の `[ctx:` 固定ラベルを利用モデル表示名（例 `Opus 4.8`）に置換（取得不可時は `ctx` にフォールバック）。**v4.15.0** で cross-review の worktree 生成先を非永続領域 `<システム tmpdir>/ndf-worktrees/<owner>--<repo>/pr<N>` に変更（永続 volume 消費・他リポジトリの PR 番号衝突・残骸流用事故を解消。`NDF_WORKTREE_BASE` env で明示オーバーライド可）。**v4.14.0** で `statusline` skill とデフォルト statusline 設定 hook を追加（47→48個）。statusLine 未設定時のみ NDF 標準 statusline（コンテナ名/ホスト名 + project_dir + コンテキスト使用率）を自動設定し、`/ndf:statusline set|restore|status` で切り替え・復元できる。**v4.13.0** で `issue-plan-strategy` の release PR body を self-contained 必須化。**v4.12.0** で Playwright E2E に `/ndf:playwright-browser-connect`（CDP リモートブラウザ接続）と `/ndf:playwright-evidence-drive`（Google Drive エビデンスアーカイブ）の 2 skill を追加（45→47個）。直前の **v4.11.0** で `/ndf:cross-review` の堅牢性改善（monitor.py の EARLY_ERROR 誤検知を解消: テスト用文字列リテラル / grep 形式ソース引用行を benign 自動判定し、ループ終了時の最終スイープで残 open review thread を全 Resolve）を実施。**v4.10.0** で `ml-model-structure` skill（MLモデル構築・推論API開発の標準ディレクトリ構造: 版内feature SSoT / train↔serve契約）を追加。`/ndf:fix` の修正ポリシー刷新（minor/nit のうち performance/readability/duplication は積極修正、+30 行超は要問い合わせ）、CI 完了待ち廃止、PR範囲外 flaky テストも修正対象。`/ndf:cross-review` 内のサブエージェントプロンプトも同期。重要度ラベルは AI agent の付与を鵜呑みにせず独自再判定。完了報告には PR URL 必須。詳細は [CHANGELOG.md](../plugins/ndf/CHANGELOG.md)。`/ndf:codex` skill + `corder` エージェント経由の Codex CLI 直接実行に一本化、Serena MCP は別プラグイン `mcp-serena` に分離済み、Playwright シナリオ E2E、Google Drive / Chat 連携 skill を提供。
+**現行バージョン**: **v4.17.0** — Codex plugin 対応として Claude Code / Kiro と Codex の公開 Skill セットを分離し、Codex では `skills-codex/` の core 27 個のみを公開する。Skill 実体は `skills/` に集約し、Claude Code / Kiro は manifest 配列指定で公開対象を制御する。Codex 向け公開ディレクトリは marketplace cache で欠落しないよう実ディレクトリとして同梱する。**v4.16.1** で statusline: NDF 由来の旧コピー（マーカー付き / レガシー `statusline-command.sh`）を `settings.json` が指す場合、SessionStart で正規パス（`~/.claude/ndf-statusline.sh`）へ自動移行しバージョンアップ追従を回復（ユーザー独自 statusline は誤検出ガードで保護）。**v4.16.0** で statusline の `[ctx:` 固定ラベルを利用モデル表示名（例 `Opus 4.8`）に置換（取得不可時は `ctx` にフォールバック）。**v4.15.0** で cross-review の worktree 生成先を非永続領域 `<システム tmpdir>/ndf-worktrees/<owner>--<repo>/pr<N>` に変更（永続 volume 消費・他リポジトリの PR 番号衝突・残骸流用事故を解消。`NDF_WORKTREE_BASE` env で明示オーバーライド可）。**v4.14.0** で `statusline` skill とデフォルト statusline 設定 hook を追加（47→48個）。statusLine 未設定時のみ NDF 標準 statusline（コンテナ名/ホスト名 + project_dir + コンテキスト使用率）を自動設定し、`/ndf:statusline set|restore|status` で切り替え・復元できる。**v4.13.0** で `issue-plan-strategy` の release PR body を self-contained 必須化。**v4.12.0** で Playwright E2E に `/ndf:playwright-browser-connect`（CDP リモートブラウザ接続）と `/ndf:playwright-evidence-drive`（Google Drive エビデンスアーカイブ）の 2 skill を追加（45→47個）。直前の **v4.11.0** で `/ndf:cross-review` の堅牢性改善（monitor.py の EARLY_ERROR 誤検知を解消: テスト用文字列リテラル / grep 形式ソース引用行を benign 自動判定し、ループ終了時の最終スイープで残 open review thread を全 Resolve）を実施。**v4.10.0** で `ml-model-structure` skill（MLモデル構築・推論API開発の標準ディレクトリ構造: 版内feature SSoT / train↔serve契約）を追加。`/ndf:fix` の修正ポリシー刷新（minor/nit のうち performance/readability/duplication は積極修正、+30 行超は要問い合わせ）、CI 完了待ち廃止、PR範囲外 flaky テストも修正対象。`/ndf:cross-review` 内のサブエージェントプロンプトも同期。重要度ラベルは AI agent の付与を鵜呑みにせず独自再判定。完了報告には PR URL 必須。詳細は [CHANGELOG.md](../plugins/ndf/CHANGELOG.md)。`/ndf:codex` skill + `corder` エージェント経由の Codex CLI 直接実行に一本化、Serena MCP は別プラグイン `mcp-serena` に分離済み、Playwright シナリオ E2E、Google Drive / Chat 連携 skill を提供。
 
 ## ディレクトリ構造
 
@@ -20,9 +20,8 @@ plugins/ndf/
 │   ├── statusline-switch.sh # statusline の導入・切替・復元 (ensure/set/restore/status)
 │   └── slack-notify.js      # Slack通知スクリプト
 ├── agents/                  # 専門エージェント（8個）
-├── skills/                  # 全Skill実体（48個）
-├── skills-claude/           # Claude Code/Kiro向け公開Skill（core 26個）
-├── skills-codex/            # Codex向け公開Skill（core 27個）
+├── skills/                  # 全Skill実体（48個。Claude Code/Kiroはmanifest配列で公開対象を指定）
+├── skills-codex/            # Codex向け公開Skill（core 27個。marketplace cache対応の実ディレクトリ）
 ├── skills-optional/         # ランタイム別除外候補リスト
 ├── CLAUDE.md                # プラグイン開発者向けガイド
 └── README.md                # 利用者向けドキュメント
@@ -212,4 +211,4 @@ claude -p --settings '{"disableAllHooks": true, "disableAllPlugins": true}' --ou
 | **v4.15.0** | cross-review: worktree 生成先を `<システム tmpdir>/ndf-worktrees/<owner>--<repo>/pr<N>` に変更 (非永続化 + リポジトリ別分離)。未登録パスの残骸は `.stale-<ts>` に退避して作り直すガード追加 |
 | **v4.16.0** | statusline: `[ctx:` の固定ラベルを利用モデル表示名 (例 `Opus 4.8`) に置換。モデル名が取れない場合は `ctx` にフォールバック |
 | **v4.16.1** | statusline: NDF 由来の旧コピー (マーカー付き / レガシー `statusline-command.sh`) を `settings.json` が指す場合、SessionStart で正規パス (`~/.claude/ndf-statusline.sh`) へ自動移行しバージョンアップ追従を回復。ユーザー独自 statusline は誤検出ガードで保護。`skills/statusline/tests/` 新設 |
-| **v4.17.0** | Codex plugin 対応: Claude Code / Kiro と Codex の公開 Skill セットを分離。Codex は `skills-codex/` の core 27 個を公開し、実体は `skills/` に集約して symlink で二重管理を回避 |
+| **v4.17.0** | Codex plugin 対応: Claude Code / Kiro と Codex の公開 Skill セットを分離。Claude Code / Kiro は manifest 配列指定、Codex は marketplace cache 対応の `skills-codex/` 実ディレクトリで core 27 個を公開 |

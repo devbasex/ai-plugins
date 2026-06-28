@@ -120,9 +120,8 @@ ai-plugins/
 │       ├── .claude-plugin/
 │       │   └── plugin.json       # Claude Codeプラグインメタデータ
 │       ├── agents/               # サブエージェント (*.md)
-│       ├── skills/               # 全Skillの実体
-│       ├── skills-claude/        # Claude Code/Kiro向け公開Skill
-│       ├── skills-codex/         # Codex向け公開Skill
+│       ├── skills/               # 全Skillの実体（Claude Code/Kiroはmanifest配列で公開対象を指定）
+│       ├── skills-codex/         # Codex向け公開Skill（marketplace cache対応の実ディレクトリ）
 │       └── skills-optional/      # ランタイム別除外候補リスト
 │           └── {skill-name}/
 │               └── SKILL.md      # エントリポイント（必須）
