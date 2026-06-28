@@ -311,7 +311,10 @@ async function main() {
     await sleep(CONFIG.DELETE_DELAY_MS);
 
     const cleanResult = await postSlack(formatMessage(repo, session, false));
-    if (!cleanResult) log('failed to send clean message');
+    if (!cleanResult) {
+      log('failed to send clean message');
+      return;
+    }
 
     const deleteResult = await deleteSlack(mentionResult.ts);
     if (!deleteResult) log('failed to delete mention message');
