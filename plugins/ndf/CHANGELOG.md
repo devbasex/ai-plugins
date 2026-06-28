@@ -1,6 +1,6 @@
 # NDF Plugin CHANGELOG
 
-### Unreleased
+### v4.18.0 (cross-review: 監視性とレビュー観点テンプレート強化)
 
 - **`cross-review` / Gemini 監視性改善**:
   `launch-gemini.sh` が Gemini に短い進捗マーカー
@@ -15,6 +15,8 @@
   コード、DB migration、テスト、依存関係、CI/設定、API 契約、認証/認可、frontend、
   性能、削除/リネーム、生成物/i18n/infra の該当テンプレートを自動で追加するようにした。
 - **`monitor.py`**: stall 判定対象を err.log + stdout.log + progress.log に拡張。
+- **plugin.json: version 4.17.3 → 4.18.0**。marketplace.json / README /
+  AGENTS.md / ndf-plugin-reference の version 表記を整合。
 
 ### v4.17.3 (Stop hook: Slack通知失敗時の終了コードを安定化)
 
