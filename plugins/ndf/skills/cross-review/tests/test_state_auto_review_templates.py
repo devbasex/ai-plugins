@@ -148,10 +148,22 @@ def test_env_files_are_config_and_author_is_not_auth_security(state_mod):
     auth_file = state_mod._parse_pr_files_payload(
         '{"files":[{"path":"app/auth/session.py","changeType":"MODIFIED"}]}'
     )
+    authz_file = state_mod._parse_pr_files_payload(
+        '{"files":[{"path":"app/security/authz.py","changeType":"MODIFIED"}]}'
+    )
+    authentication_file = state_mod._parse_pr_files_payload(
+        '{"files":[{"path":"app/security/authentication.py","changeType":"MODIFIED"}]}'
+    )
+    authorizer_file = state_mod._parse_pr_files_payload(
+        '{"files":[{"path":"app/security/authorizer.ts","changeType":"MODIFIED"}]}'
+    )
 
     assert "config_ci" in state_mod._classify_changed_files(env_file)
     assert "auth_security" not in state_mod._classify_changed_files(author_file)
     assert "auth_security" in state_mod._classify_changed_files(auth_file)
+    assert "auth_security" in state_mod._classify_changed_files(authz_file)
+    assert "auth_security" in state_mod._classify_changed_files(authentication_file)
+    assert "auth_security" in state_mod._classify_changed_files(authorizer_file)
 
 
 def test_combined_review_instructions_puts_auto_before_manual(state_mod):

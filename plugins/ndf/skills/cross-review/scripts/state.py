@@ -83,9 +83,11 @@ API_CONTRACT_MARKERS = (
     "/proto/", "/graphql/", "/schemas/",
 )
 AUTH_SECURITY_TOKEN_MARKERS = (
-    "auth", "permission", "policy", "role", "oauth", "jwt", "session", "csrf", "cors",
+    "auth", "authn", "authz", "permission", "policy", "role", "oauth", "jwt",
+    "session", "csrf", "cors",
 )
 AUTH_SECURITY_SUBSTRING_MARKERS = (
+    "authentication", "authorization", "authenticat", "authoriz",
     "token", "secret", "password", "credential",
 )
 FRONTEND_EXTENSIONS = {
@@ -510,7 +512,6 @@ def _is_auth_security_path(path: str) -> bool:
     return (
         bool(tokens.intersection(AUTH_SECURITY_TOKEN_MARKERS))
         or any(marker in lower for marker in AUTH_SECURITY_SUBSTRING_MARKERS)
-        or name in {"authn", "authz"}
     )
 
 
