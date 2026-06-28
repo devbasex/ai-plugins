@@ -29,6 +29,19 @@ skills/     → 実行可能なワークフロー
 
 詳細は `issues/memory_replaning.md` を参照。
 
+## NDF v4.18.0 / cross-review
+
+`/ndf:cross-review` は codex / gemini の両方に PR レビューを委譲し、両者が `APPROVE` するまで修正ループを回す。v4.18.0 では Gemini の progress log を heartbeat に表示するため、無言に見える時間でも `scan` / `analyze` / `post` / `done` などの作業段階を確認できる。
+
+追加レビュー観点は以下のどちらかで渡す:
+
+```bash
+/ndf:cross-review 123 --focus "ドキュメントとコードの整合性を重点的に確認"
+/ndf:cross-review 123 --extra-instructions-file /tmp/review-focus.md
+```
+
+PR の変更ファイルから docs only / code / DB migration / test / dependency / CI設定 / API契約 / 認証認可 / frontend / performance / deletion / generated / i18n / infra を自動分類し、該当するレビュー観点テンプレートも codex / gemini 両方に渡す。
+
 ## 検証
 
 ```bash
