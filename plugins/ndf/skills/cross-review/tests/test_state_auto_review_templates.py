@@ -3,15 +3,6 @@
 from __future__ import annotations
 
 
-def test_parse_name_status_handles_rename(state_mod):
-    entries = state_mod._parse_name_status("R100\told.md\tdocs/new.md\nM\tREADME.md\n")
-
-    assert entries == [
-        {"status": "R100", "paths": ["old.md", "docs/new.md"]},
-        {"status": "M", "paths": ["README.md"]},
-    ]
-
-
 def test_parse_pr_files_payload_normalizes_gh_files_json(state_mod):
     entries = state_mod._parse_pr_files_payload(
         """
@@ -33,7 +24,9 @@ def test_parse_pr_files_payload_normalizes_gh_files_json(state_mod):
 
 
 def test_docs_only_pr_adds_docs_template(state_mod):
-    entries = state_mod._parse_name_status("M\tdocs/plan.md\nA\tREADME.md\n")
+    entries = state_mod._parse_pr_files_payload(
+        '{"files":[{"path":"docs/plan.md","changeType":"MODIFIED"},{"path":"README.md","changeType":"ADDED"}]}'
+    )
 
     categories = state_mod._classify_changed_files(entries)
 
@@ -44,9 +37,13 @@ def test_docs_only_pr_adds_docs_template(state_mod):
 
 
 def test_code_pr_detects_code_test_and_frontend(state_mod):
-    entries = state_mod._parse_name_status(
-        "M\tsrc/components/UserCard.tsx\n"
-        "A\ttests/UserCard.test.tsx\n"
+    entries = state_mod._parse_pr_files_payload(
+        """
+        {"files":[
+          {"path":"src/components/UserCard.tsx","changeType":"MODIFIED"},
+          {"path":"tests/UserCard.test.tsx","changeType":"ADDED"}
+        ]}
+        """
     )
 
     categories = state_mod._classify_changed_files(entries)
@@ -57,7 +54,9 @@ def test_code_pr_detects_code_test_and_frontend(state_mod):
 
 
 def test_db_migration_detects_schema_concerns(state_mod):
-    entries = state_mod._parse_name_status("A\tdatabase/migrations/20260101_create_users.sql\n")
+    entries = state_mod._parse_pr_files_payload(
+        '{"files":[{"path":"database/migrations/20260101_create_users.sql","changeType":"ADDED"}]}'
+    )
 
     categories = state_mod._classify_changed_files(entries)
 
@@ -66,13 +65,17 @@ def test_db_migration_detects_schema_concerns(state_mod):
 
 
 def test_dependency_ci_api_security_performance_i18n_infra_are_detected(state_mod):
-    entries = state_mod._parse_name_status(
-        "M\tpackage-lock.json\n"
-        "M\t.github/workflows/test.yml\n"
-        "M\tapp/api/auth/token_controller.py\n"
-        "M\tsrc/cache/worker.go\n"
-        "M\tlocales/ja.json\n"
-        "M\tterraform/main.tf\n"
+    entries = state_mod._parse_pr_files_payload(
+        """
+        {"files":[
+          {"path":"package-lock.json","changeType":"MODIFIED"},
+          {"path":".github/workflows/test.yml","changeType":"MODIFIED"},
+          {"path":"app/api/auth/token_controller.py","changeType":"MODIFIED"},
+          {"path":"src/cache/worker.go","changeType":"MODIFIED"},
+          {"path":"locales/ja.json","changeType":"MODIFIED"},
+          {"path":"terraform/main.tf","changeType":"MODIFIED"}
+        ]}
+        """
     )
 
     categories = state_mod._classify_changed_files(entries)
@@ -87,7 +90,14 @@ def test_dependency_ci_api_security_performance_i18n_infra_are_detected(state_mo
 
 
 def test_deletion_and_rename_are_detected(state_mod):
-    entries = state_mod._parse_name_status("D\tsrc/old.py\nR100\tsrc/a.py\tsrc/b.py\n")
+    entries = state_mod._parse_pr_files_payload(
+        """
+        {"files":[
+          {"path":"src/old.py","changeType":"DELETED"},
+          {"path":"src/b.py","previousPath":"src/a.py","changeType":"RENAMED"}
+        ]}
+        """
+    )
 
     categories = state_mod._classify_changed_files(entries)
 

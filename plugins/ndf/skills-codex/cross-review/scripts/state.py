@@ -338,26 +338,8 @@ def _now() -> str:
     return _dt.datetime.now(_dt.timezone.utc).astimezone().isoformat(timespec="seconds")
 
 
-def _parse_name_status(output: str) -> list[dict[str, Any]]:
-    """`gh pr diff --name-status` 形式を扱いやすい構造に変換する。"""
-    entries: list[dict[str, Any]] = []
-    for raw in output.splitlines():
-        line = raw.strip()
-        if not line:
-            continue
-        cols = line.split("\t")
-        status = cols[0]
-        if status.startswith("R") or status.startswith("C"):
-            paths = [c for c in cols[1:] if c]
-        else:
-            paths = [cols[1]] if len(cols) > 1 else []
-        if paths:
-            entries.append({"status": status, "paths": paths})
-    return entries
-
-
 def _parse_pr_files_payload(output: str) -> list[dict[str, Any]]:
-    """`gh pr view --json files` の JSON を name-status 風に正規化する。"""
+    """`gh pr view --json files` の JSON を分類用の最小構造に正規化する。"""
     try:
         payload = json.loads(output)
     except json.JSONDecodeError:
