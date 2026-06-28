@@ -8,8 +8,9 @@ Claude Code / Kiro と Codex で公開する Skill セットを分離し、Codex
 - **`.codex-plugin/plugin.json`**: Codex 向け manifest を追加し、`skills-codex/`
   を Codex の公開 Skill ディレクトリとして指定
 - **`.claude-plugin/plugin.json`**: Claude Code / Kiro 向け公開 Skill を core 26 個に整理
-- **`skills-codex/`**: Codex 向け core 27 個を marketplace cache で欠落しない
+- **`skills-codex/`**: Codex 向け core 28 個を marketplace cache で欠落しない
   実ディレクトリとして同梱
+  (`playwright-kit-ops` を含め、Playwright 系 skill から参照するスクリプト群も同梱)
 - **`skills-optional/README.md`**: ランタイム別の除外候補を整理
 - **`scripts/install-kiro.sh`**: manifest-selected skill set を読むように更新し、
   Codex CLI 連携表示を MCP 前提から CLI 直接実行前提へ修正
