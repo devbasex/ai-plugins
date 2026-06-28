@@ -175,6 +175,7 @@ function readSessionSummary(hookInput) {
   const candidates = explicitPath ? [{ path: explicitPath }] : findSessionFiles();
   const cwd = hookInput.cwd || process.cwd();
   const sessionId = hookInput.session_id || hookInput.thread_id || process.env.CODEX_SESSION_ID || '';
+  const lastAssistantSummary = summarizeText(textFromContent(hookInput.last_assistant_message));
 
   for (const candidate of candidates) {
     if (!candidate.path || !fs.existsSync(candidate.path)) continue;
@@ -196,14 +197,14 @@ function readSessionSummary(hookInput) {
 
     return {
       sessionId: meta.session_id || sessionId,
-      summary: summarizeText(textFromItem(final)) || summarizeText(textFromItem(user)),
+      summary: lastAssistantSummary || summarizeText(textFromItem(final)) || summarizeText(textFromItem(user)),
       model: meta.model || meta.model_slug || '',
       tokenInfo: tokenEvent?.payload?.info || null,
       file: candidate.path,
     };
   }
 
-  return { sessionId, summary: null, model: '', tokenInfo: null, file: null };
+  return { sessionId, summary: lastAssistantSummary, model: '', tokenInfo: null, file: null };
 }
 
 function formatTokenInfo(info) {

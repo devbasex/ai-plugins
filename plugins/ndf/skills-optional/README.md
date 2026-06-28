@@ -2,7 +2,7 @@
 
 These skills remain in `../skills/` but are not exposed by default in at least one target runtime.
 
-Add a skill back to `skills-claude/` or `skills-codex/` only when it is actively needed by that runtime.
+Add a skill implementation under `../skills/`, then expose it in `.claude-plugin/plugin.json` or `skills-codex/` only when it is actively needed by that runtime.
 
 ## Optional Skills
 
