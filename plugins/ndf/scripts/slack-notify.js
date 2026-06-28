@@ -733,7 +733,7 @@ async function main() {
     const mentionResult = await sendSlackMessage(channelId, token, mentionMessage);
     if (!mentionResult) {
       debugLog('FAILED to send mention message');
-      process.exit(1);
+      return;
     }
     debugLog('Mention message sent | ts:', mentionResult.ts, '| Duration:', Date.now() - mentionSendTime, 'ms');
 
@@ -773,5 +773,5 @@ async function main() {
 main().catch((error) => {
   debugLog('Fatal error:', error.message, error.stack);
   releaseLock();
-  process.exit(1);
+  process.exit(0);
 });
