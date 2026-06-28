@@ -1,5 +1,19 @@
 # NDF Plugin CHANGELOG
 
+### v4.17.3 (Stop hook: Slack通知失敗時の終了コードを安定化)
+
+Codex 環境で Claude 用 Slack 通知 hook が混入した場合や、Slack API /
+ネットワークが一時失敗した場合に、Stop hook 全体が `code 1` で失敗表示に
+なる問題を修正した。
+
+- **`hooks/codex-hooks.json`**: Codex 用通知スクリプトを `sh -c` 経由で起動し、
+  `PLUGIN_ROOT` がない環境では no-op、通知処理の失敗も Stop hook 失敗にしない
+- **`hooks/hooks.json`**: Claude 用 Stop hook に `continueOnError` を追加
+- **`scripts/slack-notify.js`**: Slack 通知失敗・致命例外時も終了通知 hook としては
+  `exit 0` を返し、作業完了フローを阻害しない
+- **plugin.json: version 4.17.2 → 4.17.3**。marketplace.json / README /
+  AGENTS.md / ndf-plugin-reference の version 表記を整合
+
 ### v4.17.2 (Codex Slack通知: メンション付き投稿の削除を修正)
 
 Codex Stop hook の Slack 通知で、メンション付きメッセージ削除ロジックが

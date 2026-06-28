@@ -27,8 +27,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/slack-notify.js session_end",
-            "description": "Send Slack notification when Claude Code exits"
+            "command": "sh -c 'ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; if [ -n \"$ROOT\" ]; then node \"$ROOT/scripts/slack-notify.js\" session_end; fi; exit 0'",
+            "description": "Send Slack notification when Claude Code exits",
+            "continueOnError": true
           }
         ]
       }

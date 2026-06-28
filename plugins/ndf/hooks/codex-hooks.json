@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${PLUGIN_ROOT}/scripts/codex-slack-notify.js",
+            "command": "sh -c 'if [ -n \"$PLUGIN_ROOT\" ]; then node \"$PLUGIN_ROOT/scripts/codex-slack-notify.js\"; fi; exit 0'",
             "timeout": 15,
             "statusMessage": "Sending Codex completion notification"
           }
