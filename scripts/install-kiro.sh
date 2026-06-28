@@ -23,7 +23,7 @@ for arg in "$@"; do
       echo ""
       echo "Options:"
       echo "  --with-slack   stopフックにSlack通知を追加"
-      echo "  --with-codex   Codex CLI連携の環境変数を追加"
+      echo "  --with-codex   Codex CLI直接実行用プロンプトを追加"
       echo "  -h, --help     このヘルプを表示"
       exit 0
       ;;
@@ -56,7 +56,7 @@ while IFS= read -r skill_path; do
   ln -sfn "../../plugins/ndf/$skill_path" "$SKILLS_DIR/$skill_name"
   echo "  linked: $skill_name"
   SKILL_COUNT=$((SKILL_COUNT + 1))
-done < <(grep -oP '"\.\/skills[^"]+' "$PLUGIN_JSON" | sed 's/"//g')
+done < <(grep -oP '"\.\/skills\/[^"]+' "$PLUGIN_JSON" | sed 's/"//g')
 
 # --- Step 2: Create prompts in .kiro/prompts/ for workflow skills ---
 PROMPTS_DIR="$KIRO_DIR/prompts"
@@ -71,6 +71,10 @@ declare -A PROMPT_DESCS=(
   [merged]="PRマージ後のクリーンアップを実行してください（main更新、ブランチ削除）。"
   [clean]="mainマージ済みブランチをローカル/リモート一括削除してください。"
 )
+
+if [ "$WITH_CODEX" = true ]; then
+  PROMPT_DESCS[codex]="Codex CLIにコード生成・レビュー・調査を委譲してください。"
+fi
 
 for name in "${!PROMPT_DESCS[@]}"; do
   cat > "$PROMPTS_DIR/$name.md" << PROMPT_EOF
@@ -111,8 +115,6 @@ config = {
 }
 if sys.argv[1] == 'true':
     config['hooks']['stop'] = [{'command': 'node plugins/ndf/scripts/slack-notify.js session_end', 'timeout_ms': 70000}]
-if sys.argv[2] == 'true':
-    config['mcpServers'] = {'codex': {'command': 'codex', 'args': ['mcp-server'], 'env': {}}}
 json.dump(config, open(sys.argv[3], 'w'), indent=2, ensure_ascii=False)
 " "$WITH_SLACK" "$WITH_CODEX" "$AGENT_FILE"
 
