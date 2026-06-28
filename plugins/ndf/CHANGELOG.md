@@ -1,5 +1,21 @@
 # NDF Plugin CHANGELOG
 
+### v4.17.0 (Codex plugin 対応: ランタイム別 Skill 公開構成)
+
+Claude Code / Kiro と Codex で公開する Skill セットを分離し、Codex plugin から
+不要な Claude Code 専用 Skill を読み込まない構成にした。
+
+- **`.codex-plugin/plugin.json`**: Codex 向け manifest を追加し、`skills-codex/`
+  を Codex の公開 Skill ディレクトリとして指定
+- **`.claude-plugin/plugin.json`**: Claude Code / Kiro 向け公開 Skill を core 26 個に整理
+- **`skills-codex/`**: Codex 向け core 27 個を `skills/` への symlink として公開し、
+  Skill 実体の二重管理を避ける構成に変更
+- **`skills-optional/README.md`**: ランタイム別の除外候補を整理
+- **`scripts/install-kiro.sh`**: manifest-selected skill set を読むように更新し、
+  Codex CLI 連携表示を MCP 前提から CLI 直接実行前提へ修正
+- **plugin.json: version 4.16.1 → 4.17.0**。marketplace.json / README / AGENTS.md /
+  ndf-plugin-reference の version 表記を整合
+
 ### v4.16.1 (statusline: NDF 由来の旧コピーをバージョンアップ追従させる)
 
 `settings.json` の `statusLine` が NDF の過去配置コピー (マーカー付き /
