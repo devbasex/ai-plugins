@@ -7,7 +7,7 @@
 ## プラグイン情報
 
 - **名前**: ndf
-- **現在バージョン**: 4.17.0
+- **現在バージョン**: 4.17.1
 - **種類**: 統合プラグイン（Skills + Agents + Hooks / v4.0.0 で Codex MCP 廃止）
 - **リポジトリ**: https://github.com/devbasex/ai-plugins
 
@@ -42,7 +42,7 @@ plugins/ndf/
 │   ├── devops-engineer.md       # sonnet: Docker/CI/K8s
 │   └── code-reviewer.md         # sonnet: diff/PRレビュー
 ├── skills/                      # 全Skill実体（48個、Claude Code/Kiroはmanifest配列で公開対象を指定）
-├── skills-codex/                # Codex向け公開Skill（core 28個、marketplace cache向け実ディレクトリ）
+├── skills-codex/                # Codex向け公開Skill（core 29個、marketplace cache向け実ディレクトリ）
 ├── skills-optional/             # ランタイム別除外候補リスト
 ├── AGENTS.md                    # このファイル（開発者向け）
 └── README.md                    # プラグイン説明書
