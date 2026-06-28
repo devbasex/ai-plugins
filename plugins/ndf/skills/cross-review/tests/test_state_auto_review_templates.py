@@ -118,6 +118,26 @@ def test_deletion_and_rename_are_detected(state_mod):
     assert "deletion_rename" in categories
 
 
+def test_index_entrypoint_does_not_trigger_performance(state_mod):
+    entries = state_mod._parse_pr_files_payload(
+        '{"files":[{"path":"src/index.ts","changeType":"MODIFIED"}]}'
+    )
+
+    assert "performance" not in state_mod._classify_changed_files(entries)
+
+
+def test_i18n_extension_detection_does_not_match_po_substrings(state_mod):
+    false_positive = state_mod._parse_pr_files_payload(
+        '{"files":[{"path":"src/import.polyfill.js","changeType":"MODIFIED"}]}'
+    )
+    real_po = state_mod._parse_pr_files_payload(
+        '{"files":[{"path":"locales/messages.po","changeType":"MODIFIED"}]}'
+    )
+
+    assert "i18n" not in state_mod._classify_changed_files(false_positive)
+    assert "i18n" in state_mod._classify_changed_files(real_po)
+
+
 def test_combined_review_instructions_puts_auto_before_manual(state_mod):
     assert state_mod._combined_review_instructions("auto", "manual") == "auto\n\nmanual"
     assert state_mod._combined_review_instructions("auto", "") == "auto"

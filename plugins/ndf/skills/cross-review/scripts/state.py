@@ -91,14 +91,15 @@ FRONTEND_EXTENSIONS = {
 }
 PERFORMANCE_MARKERS = (
     "cache", "queue", "job", "worker", "async", "concurrent", "parallel",
-    "batch", "stream", "index", "pagination", "performance",
+    "batch", "stream", "pagination", "performance",
 )
 GENERATED_MARKERS = (
     "/dist/", "/build/", "/generated/", "/vendor/", "/node_modules/",
 )
 I18N_MARKERS = (
-    "/locales/", "/locale/", "/i18n/", "/translations/", ".po", ".pot",
+    "/locales/", "/locale/", "/i18n/", "/translations/",
 )
+I18N_EXTENSIONS = {".po", ".pot"}
 INFRA_MARKERS = (
     "/terraform/", "/helm/", "/k8s/", "/kubernetes/", "/docker/",
     "dockerfile", "docker-compose", ".tf", ".tfvars",
@@ -520,8 +521,8 @@ def _is_generated_path(path: str) -> bool:
 
 
 def _is_i18n_path(path: str) -> bool:
-    lower, normalized, _, _ = _path_info(path)
-    return _contains_any(normalized, I18N_MARKERS) or any(m in lower for m in I18N_MARKERS)
+    _, normalized, _, ext = _path_info(path)
+    return _contains_any(normalized, I18N_MARKERS) or ext in I18N_EXTENSIONS
 
 
 def _is_infra_path(path: str) -> bool:
