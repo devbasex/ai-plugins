@@ -6,7 +6,6 @@ Add a skill implementation under `../skills/`, then expose it in `.claude-plugin
 
 ## Optional Skills
 
-- `cross-review`
 - `data-analyst-export`
 - `data-analyst-sql-optimization`
 - `deepwiki-transfer`

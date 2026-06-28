@@ -1,5 +1,16 @@
 # NDF Plugin CHANGELOG
 
+### v4.17.1 (Codex/Claude: cross-review 公開漏れ修正)
+
+NDF の主要 PR ワークフローである `cross-review` が、Claude Code/Kiro の
+manifest と Codex の `skills-codex/` 公開セットから漏れていた問題を修正した。
+
+- **`.claude-plugin/plugin.json`**: `./skills/cross-review` を公開 Skill に追加
+- **`skills-codex/cross-review/`**: marketplace cache で欠落しないよう実ディレクトリとして同梱
+- **`skills-optional/README.md`**: `cross-review` を optional から除外
+- **plugin.json: version 4.17.0 → 4.17.1**。marketplace.json / README / AGENTS.md /
+  ndf-plugin-reference の version 表記と公開 Skill 数を整合
+
 ### v4.17.0 (Codex plugin 対応: ランタイム別 Skill 公開構成)
 
 Claude Code / Kiro と Codex で公開する Skill セットを分離し、Codex plugin から

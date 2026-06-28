@@ -1,6 +1,6 @@
 {
   "name": "ndf",
-  "version": "4.17.0",
+  "version": "4.17.1",
   "description": "NDF workflows for PRs, reviews, testing, data analysis, Google integrations, and external AI delegation.",
   "skills": "./skills-codex/",
   "hooks": "./hooks/codex-hooks.json"
