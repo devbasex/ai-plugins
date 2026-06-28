@@ -21,6 +21,7 @@ const CONFIG = {
   MAX_TEXT: 180,
   LOCK_TIMEOUT_MS: 30000,
   COOLDOWN_MS: 5000,
+  DELETE_DELAY_MS: 500,
   FALLBACK_SUMMARY: 'Codexの作業が完了しました',
   LOG_DIR: path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'log'),
 };
@@ -215,8 +216,8 @@ function formatTokenInfo(info) {
   return `tokens: ${usage.total_tokens}/${window} (${pct}%)`;
 }
 
-function formatMessage(repo, session) {
-  const mention = process.env.SLACK_USER_MENTION ? `${process.env.SLACK_USER_MENTION} ` : '';
+function formatMessage(repo, session, includeMention = false) {
+  const mention = includeMention && process.env.SLACK_USER_MENTION ? `${process.env.SLACK_USER_MENTION} ` : '';
   const parts = [
     `${mention}[${repo.name}] Codex: ${session.summary || CONFIG.FALLBACK_SUMMARY}`,
     repo.branch ? `branch: ${repo.branch}` : '',
@@ -228,17 +229,16 @@ function formatMessage(repo, session) {
   return parts.join('\n');
 }
 
-function postSlack(text) {
+function slackApiRequest(apiPath, data) {
   const token = process.env.SLACK_BOT_TOKEN;
-  const channel = process.env.SLACK_CHANNEL_ID;
-  if (!token || !channel) return Promise.resolve(false);
+  if (!token) return Promise.resolve(null);
 
   return new Promise((resolve) => {
-    const body = JSON.stringify({ channel, text });
+    const body = JSON.stringify(data);
     const req = https.request({
       hostname: 'slack.com',
       port: 443,
-      path: '/api/chat.postMessage',
+      path: apiPath,
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -250,17 +250,33 @@ function postSlack(text) {
       res.on('data', (chunk) => { response += chunk; });
       res.on('end', () => {
         const json = safeJsonParse(response);
-        log('slack ok:', json?.ok, 'error:', json?.error || '');
-        resolve(json?.ok === true);
+        log('slack api:', apiPath, 'ok:', json?.ok, 'error:', json?.error || '');
+        resolve(json?.ok === true ? json : null);
       });
     });
     req.on('error', (error) => {
       log('slack error:', error.message);
-      resolve(false);
+      resolve(null);
     });
     req.write(body);
     req.end();
   });
+}
+
+function postSlack(text) {
+  const channel = process.env.SLACK_CHANNEL_ID;
+  if (!channel) return Promise.resolve(null);
+  return slackApiRequest('/api/chat.postMessage', { channel, text });
+}
+
+function deleteSlack(ts) {
+  const channel = process.env.SLACK_CHANNEL_ID;
+  if (!channel || !ts) return Promise.resolve(null);
+  return slackApiRequest('/api/chat.delete', { channel, ts });
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function main() {
@@ -281,8 +297,24 @@ async function main() {
     const hookInput = await readStdinJson();
     const repo = repoInfo();
     const session = readSessionSummary(hookInput);
-    const text = formatMessage(repo, session);
-    await postSlack(text);
+    if (!process.env.SLACK_USER_MENTION) {
+      await postSlack(formatMessage(repo, session, false));
+      return;
+    }
+
+    const mentionResult = await postSlack(formatMessage(repo, session, true));
+    if (!mentionResult) {
+      log('failed to send mention message');
+      return;
+    }
+
+    await sleep(CONFIG.DELETE_DELAY_MS);
+
+    const cleanResult = await postSlack(formatMessage(repo, session, false));
+    if (!cleanResult) log('failed to send clean message');
+
+    const deleteResult = await deleteSlack(mentionResult.ts);
+    if (!deleteResult) log('failed to delete mention message');
   } finally {
     releaseLock();
   }

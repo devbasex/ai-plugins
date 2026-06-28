@@ -6,7 +6,7 @@ Claude Code / Codex / Kiro CLI向けのスキル・MCP設定を共有するた�
 
 このマーケットプレイスは、チーム全体でAI開発ツール（Claude Code / Codex / Kiro CLI）の導入を加速するための事前設定されたプラグインを提供します。
 
-**NDFプラグイン v4.17.1** は、以下の機能を**オールインワン**で提供する統合プラグインです：
+**NDFプラグイン v4.17.2** は、以下の機能を**オールインワン**で提供する統合プラグインです：
 
 - **公開Skills**: Claude Code/Kiro向け core 27個、Codex向け core 29個に分離。`skills-optional/` にランタイム別の除外候補を整理。
 - **元Skills（48個）**:
@@ -98,7 +98,7 @@ kiro-cli chat
 
 | プラグイン名 | バージョン | 説明 | 詳細 |
 |------------|----------|------|------|
-| **ndf** | 4.17.1 | Claude Code / Codex / Kiro CLI開発環境を**オールインワン**で強化する統合プラグイン。8個の専門エージェント（director、data-analyst、corder、researcher、qa、debugger、devops-engineer、code-reviewer）、公開Skills（Claude Code/Kiro向け core 27個、Codex向け core 29個）、SessionStartフック（transcript保持期間自動管理）、Stopフック（AI要約生成+Slack通知）を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:codex` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [README](./plugins/ndf/README.md) |
+| **ndf** | 4.17.2 | Claude Code / Codex / Kiro CLI開発環境を**オールインワン**で強化する統合プラグイン。8個の専門エージェント（director、data-analyst、corder、researcher、qa、debugger、devops-engineer、code-reviewer）、公開Skills（Claude Code/Kiro向け core 27個、Codex向け core 29個）、SessionStartフック（transcript保持期間自動管理）、Stopフック（AI要約生成+Slack通知）を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:codex` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [README](./plugins/ndf/README.md) |
 
 ## 開発ガイドライン
 
