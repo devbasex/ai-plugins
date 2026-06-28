@@ -82,9 +82,11 @@ API_CONTRACT_MARKERS = (
     "/api/", "/routes/", "/controllers/", "/openapi", "/swagger",
     "/proto/", "/graphql/", "/schemas/",
 )
-AUTH_SECURITY_MARKERS = (
-    "auth", "permission", "policy", "role", "token", "secret", "password",
-    "credential", "oauth", "jwt", "session", "csrf", "cors",
+AUTH_SECURITY_TOKEN_MARKERS = (
+    "auth", "permission", "policy", "role", "oauth", "jwt", "session", "csrf", "cors",
+)
+AUTH_SECURITY_SUBSTRING_MARKERS = (
+    "token", "secret", "password", "credential",
 )
 FRONTEND_EXTENSIONS = {
     ".css", ".scss", ".sass", ".less", ".html", ".jsx", ".tsx", ".vue", ".svelte",
@@ -486,6 +488,7 @@ def _is_config_ci_path(path: str) -> bool:
     lower, normalized, name, ext = _path_info(path)
     return (
         _contains_any(normalized, CI_CONFIG_MARKERS)
+        or name.startswith(".env")
         or name in {"dockerfile", "makefile", ".editorconfig"}
         or lower.startswith(".github/")
         or (ext in CONFIG_EXTENSIONS and ("/config/" in normalized or "/configs/" in normalized))
@@ -498,8 +501,17 @@ def _is_api_contract_path(path: str) -> bool:
 
 
 def _is_auth_security_path(path: str) -> bool:
-    lower, _, _, _ = _path_info(path)
-    return any(marker in lower for marker in AUTH_SECURITY_MARKERS)
+    lower, normalized, name, _ = _path_info(path)
+    tokens = {
+        token
+        for token in normalized.replace(".", "/").replace("-", "/").replace("_", "/").split("/")
+        if token
+    }
+    return (
+        bool(tokens.intersection(AUTH_SECURITY_TOKEN_MARKERS))
+        or any(marker in lower for marker in AUTH_SECURITY_SUBSTRING_MARKERS)
+        or name in {"authn", "authz"}
+    )
 
 
 def _is_frontend_path(path: str) -> bool:

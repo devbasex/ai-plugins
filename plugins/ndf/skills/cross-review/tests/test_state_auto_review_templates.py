@@ -138,6 +138,22 @@ def test_i18n_extension_detection_does_not_match_po_substrings(state_mod):
     assert "i18n" in state_mod._classify_changed_files(real_po)
 
 
+def test_env_files_are_config_and_author_is_not_auth_security(state_mod):
+    env_file = state_mod._parse_pr_files_payload(
+        '{"files":[{"path":".env.example","changeType":"MODIFIED"}]}'
+    )
+    author_file = state_mod._parse_pr_files_payload(
+        '{"files":[{"path":"src/components/AuthorCard.tsx","changeType":"MODIFIED"}]}'
+    )
+    auth_file = state_mod._parse_pr_files_payload(
+        '{"files":[{"path":"app/auth/session.py","changeType":"MODIFIED"}]}'
+    )
+
+    assert "config_ci" in state_mod._classify_changed_files(env_file)
+    assert "auth_security" not in state_mod._classify_changed_files(author_file)
+    assert "auth_security" in state_mod._classify_changed_files(auth_file)
+
+
 def test_combined_review_instructions_puts_auto_before_manual(state_mod):
     assert state_mod._combined_review_instructions("auto", "manual") == "auto\n\nmanual"
     assert state_mod._combined_review_instructions("auto", "") == "auto"
