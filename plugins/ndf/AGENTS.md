@@ -7,7 +7,7 @@
 ## プラグイン情報
 
 - **名前**: ndf
-- **現在バージョン**: 4.16.1
+- **現在バージョン**: 4.17.0
 - **種類**: 統合プラグイン（Skills + Agents + Hooks / v4.0.0 で Codex MCP 廃止）
 - **リポジトリ**: https://github.com/devbasex/ai-plugins
 
@@ -41,9 +41,8 @@ plugins/ndf/
 │   ├── debugger.md              # sonnet: 根本原因分析
 │   ├── devops-engineer.md       # sonnet: Docker/CI/K8s
 │   └── code-reviewer.md         # sonnet: diff/PRレビュー
-├── skills/                      # 全Skill実体（48個）
-├── skills-claude/               # Claude Code/Kiro向け公開Skill（core 26個）
-├── skills-codex/                # Codex向け公開Skill（core 27個）
+├── skills/                      # 全Skill実体（48個、Claude Code/Kiroはmanifest配列で公開対象を指定）
+├── skills-codex/                # Codex向け公開Skill（core 27個、marketplace cache向け実ディレクトリ）
 ├── skills-optional/             # ランタイム別除外候補リスト
 ├── AGENTS.md                    # このファイル（開発者向け）
 └── README.md                    # プラグイン説明書
@@ -54,8 +53,8 @@ plugins/ndf/
 ### 新しいスキルの追加
 
 1. `skills/{skill-name}/SKILL.md` を作成（YAMLフロントマター必須）
-2. Claude Code/Kiroで初期公開する場合は `skills-claude/{skill-name}` にコピーし、`.claude-plugin/plugin.json` の `skills` 配列に `"./skills-claude/{skill-name}"` を追加
-3. Codexで初期公開する場合は `skills-codex/{skill-name}` にコピーする（`.codex-plugin/plugin.json` は `./skills-codex/` ディレクトリを参照）
+2. Claude Code/Kiroで初期公開する場合は `.claude-plugin/plugin.json` の `skills` 配列に `"./skills/{skill-name}"` を追加
+3. Codexで初期公開する場合は `skills-codex/{skill-name}` に実ディレクトリとしてコピーする（`.codex-plugin/plugin.json` は `./skills-codex/` ディレクトリを参照）
 4. 低頻度・保守用に留める場合は `skills-optional/README.md` の候補リストへ追加
 5. plugin.json のバージョンをMINOR上げ
 6. テスト・コミット

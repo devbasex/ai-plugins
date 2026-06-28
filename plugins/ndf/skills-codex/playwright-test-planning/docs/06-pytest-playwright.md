@@ -157,7 +157,9 @@ v0.5.0 から、利用者プロジェクトに `init_project.sh` で埋め込ん
 
 ```bash
 # 1) 初期化 (Skill ディレクトリ内で 1 度だけ)
-cd .claude/plugins/ndf/skills/playwright-kit-ops
+# Claude Code/Kiro: <claude-plugin-root>/skills/playwright-kit-ops
+# Codex: <codex-plugin-root>/skills-codex/playwright-kit-ops
+cd <ndf-plugin-skill-dir>/playwright-kit-ops
 ./scripts/init_project.sh /path/to/your-app
 # → /path/to/your-app/scenario-test/ 一式が作成される
 #   (--runtime-dir e2e で配置先名カスタマイズ可)
