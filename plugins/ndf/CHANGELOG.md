@@ -1,5 +1,21 @@
 # NDF Plugin CHANGELOG
 
+### Unreleased
+
+- **`cross-review` / Gemini 監視性改善**:
+  `launch-gemini.sh` が Gemini に短い進捗マーカー
+  (`gemini-review-pr<PR>-progress.log`) の出力を要求し、`monitor.py` が
+  heartbeat に stdout / stderr / progress log サイズ、無更新秒数、最新フェーズを表示するようにした。
+  内部推論ではなく `scan` / `analyze` / `post` / `done` などの作業段階だけを出す。
+- **`cross-review` / 追加レビュー観点**:
+  `state.py init` に `--focus` と `--extra-instructions-file` を追加し、
+  codex / gemini 両 launcher が同じ追加観点をプロンプトへ差し込めるようにした。
+- **`cross-review` / 自動レビュー観点テンプレート**:
+  `gh pr diff --name-status` の変更ファイルから PR 種別を分類し、ドキュメントのみ、
+  コード、DB migration、テスト、依存関係、CI/設定、API 契約、認証/認可、frontend、
+  性能、削除/リネーム、生成物/i18n/infra の該当テンプレートを自動で追加するようにした。
+- **`monitor.py`**: stall 判定対象を err.log + stdout.log + progress.log に拡張。
+
 ### v4.17.3 (Stop hook: Slack通知失敗時の終了コードを安定化)
 
 Codex 環境で Claude 用 Slack 通知 hook が混入した場合や、Slack API /

@@ -39,6 +39,149 @@ from typing import Any
 
 # ---------------- helpers ----------------
 
+DOC_EXTENSIONS = {
+    ".md", ".mdx", ".rst", ".txt", ".adoc", ".asciidoc",
+}
+DOC_FILENAMES = {
+    "readme", "license", "changelog", "contributing", "codeowners",
+}
+CODE_EXTENSIONS = {
+    ".c", ".cc", ".cpp", ".cs", ".css", ".dart", ".ex", ".exs", ".go", ".h",
+    ".hpp", ".html", ".java", ".js", ".jsx", ".kt", ".kts", ".php", ".py",
+    ".rb", ".rs", ".scala", ".scss", ".sh", ".sql", ".swift", ".ts", ".tsx",
+    ".vue", ".yaml", ".yml",
+}
+MIGRATION_PATH_MARKERS = (
+    "/migrations/", "/migration/", "/db/migrate/", "/database/migrations/",
+    "/alembic/versions/", "/prisma/migrations/",
+)
+MIGRATION_NAME_MARKERS = (
+    "migration", "migrate", "schema.sql", "schema.prisma",
+)
+TEST_PATH_MARKERS = (
+    "/test/", "/tests/", "/spec/", "/specs/", "__tests__/",
+)
+TEST_NAME_MARKERS = (
+    ".test.", ".spec.", "_test.", "_spec.", "test_", "spec_",
+)
+DEPENDENCY_FILENAMES = {
+    "package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock",
+    "composer.json", "composer.lock", "gemfile", "gemfile.lock",
+    "go.mod", "go.sum", "requirements.txt", "requirements-dev.txt",
+    "pyproject.toml", "poetry.lock", "uv.lock", "cargo.toml", "cargo.lock",
+    "pom.xml", "build.gradle", "build.gradle.kts",
+}
+CI_CONFIG_MARKERS = (
+    "/.github/workflows/", "/.gitlab-ci", "/.circleci/", "/.buildkite/",
+    "/.kiro/", "/.claude/", "/.codex/",
+)
+CONFIG_EXTENSIONS = {
+    ".json", ".toml", ".yaml", ".yml", ".ini", ".env", ".example",
+}
+API_CONTRACT_MARKERS = (
+    "/api/", "/routes/", "/controllers/", "/openapi", "/swagger",
+    "/proto/", "/graphql/", "/schemas/",
+)
+AUTH_SECURITY_MARKERS = (
+    "auth", "permission", "policy", "role", "token", "secret", "password",
+    "credential", "oauth", "jwt", "session", "csrf", "cors",
+)
+FRONTEND_EXTENSIONS = {
+    ".css", ".scss", ".sass", ".less", ".html", ".jsx", ".tsx", ".vue", ".svelte",
+}
+PERFORMANCE_MARKERS = (
+    "cache", "queue", "job", "worker", "async", "concurrent", "parallel",
+    "batch", "stream", "index", "pagination", "performance",
+)
+GENERATED_MARKERS = (
+    "/dist/", "/build/", "/generated/", "/vendor/", "/node_modules/",
+)
+I18N_MARKERS = (
+    "/locales/", "/locale/", "/i18n/", "/translations/", ".po", ".pot",
+)
+INFRA_MARKERS = (
+    "/terraform/", "/helm/", "/k8s/", "/kubernetes/", "/docker/",
+    "dockerfile", "docker-compose", ".tf", ".tfvars",
+)
+
+
+COMMON_REVIEW_TEMPLATE = """## 自動追加レビュー観点: 共通
+- PR の目的と変更範囲が一貫しているか。余分な変更、未説明の仕様変更、将来の保守を難しくする設計がないか。
+- 変更が既存仕様・既存コメント・既存コードの前提と矛盾しないか。重複指摘は避け、根拠がある修正アクションだけを指摘する。
+- テスト、検証手順、エラーハンドリング、ロールバック容易性が変更リスクに見合っているか。"""
+
+DOCS_ONLY_REVIEW_TEMPLATE = """## 自動追加レビュー観点: ドキュメントのみ PR
+- ドキュメントの主張・企画・手順が妥当で、読者の意思決定や作業を誤らせないか。
+- コード、設定、コマンド、既存 README / docs / CHANGELOG との整合性が取れているか。古い名称、存在しないパス、実装と違う説明がないか。
+- ドキュメント間で用語、前提、バージョン、責務分担が矛盾していないか。
+- 追加・更新された説明が必要十分で、曖昧な表現や未検証の断定がないか。"""
+
+CODE_REVIEW_TEMPLATE = """## 自動追加レビュー観点: コード変更 PR
+- 設計、正確性、可読性、保守性、単純さを確認する。不要に複雑な分岐、責務の混在、過剰な抽象化がないか。
+- 冗長・重複コード、既存ヘルパや標準 API で置き換えられる処理、言語・フレームワークらしくない実装がないか。
+- 関数・クラス・ファイルのサイズと責務が適切か。長すぎる関数、肥大化したファイル、名前と実態がずれた単位がないか。
+- セキュリティ観点として、入力検証、出力エンコード、認可、秘密情報、ログ、例外、外部コマンド、SQL/HTML/パス操作の扱いを確認する。
+- テストの有無と質、境界値、失敗系、後方互換性、性能・並行性・リソース解放のリスクを確認する。"""
+
+DB_MIGRATION_REVIEW_TEMPLATE = """## 自動追加レビュー観点: DB migration / schema 変更
+- データ設計としてテーブル、カラム、型、NULL 可否、default、制約、外部キー、unique/index がドメイン要件に合っているか。
+- 型の粒度が妥当か。文字列で持つべきでない値、過剰に広い型、精度不足、timezone、JSON の濫用がないか。
+- 既存データへの影響、backfill、ロック時間、index 作成、ロールバック、アプリケーションの段階的デプロイ順序に問題がないか。
+- migration とモデル、クエリ、ドキュメント、テストデータの整合性が取れているか。"""
+
+TEST_REVIEW_TEMPLATE = """## 自動追加レビュー観点: テスト変更
+- テストが実装詳細ではなくユーザー影響・仕様・境界値・失敗系を検証しているか。
+- flaky になりやすい時間、乱数、順序、外部サービス、並行実行、共有状態への依存がないか。
+- テスト名、fixture、期待値が読みやすく、失敗時に原因を特定しやすいか。"""
+
+DEPENDENCY_REVIEW_TEMPLATE = """## 自動追加レビュー観点: 依存関係変更
+- 追加・更新された依存の必要性、ライセンス、メンテナンス状況、既存依存との重複を確認する。
+- lockfile と manifest の整合性、間接依存の大きな変化、ビルド/実行環境への影響を確認する。
+- 依存更新がセキュリティ、互換性、バンドルサイズ、起動時間に与える影響を確認する。"""
+
+CONFIG_CI_REVIEW_TEMPLATE = """## 自動追加レビュー観点: CI / 設定変更
+- CI 条件、権限、secret 参照、cache key、artifact、並列実行、失敗時の検知性が妥当か。
+- 設定変更がローカル・CI・本番で食い違わないか。環境変数の既定値と `.env.example` 相当の説明が揃っているか。
+- 自動化が過剰な権限や予期せぬ副作用を持たないか。"""
+
+API_CONTRACT_REVIEW_TEMPLATE = """## 自動追加レビュー観点: API / 契約変更
+- 入出力スキーマ、HTTP status、エラー形式、互換性、バージョニング、既存クライアントへの影響を確認する。
+- バリデーション、認可、ページング、冪等性、レート制限、監査ログが要件に合っているか。
+- API ドキュメント、型定義、テスト、実装の整合性が取れているか。"""
+
+AUTH_SECURITY_REVIEW_TEMPLATE = """## 自動追加レビュー観点: 認証・認可・機密情報
+- 認証、認可、ロール、所有者チェック、テナント境界が欠落または過剰許可になっていないか。
+- token、password、secret、PII がログ、例外、レスポンス、コミット差分に漏れていないか。
+- CSRF/CORS/session/JWT/OAuth などの設定が安全で、失効・更新・リプレイ対策が妥当か。"""
+
+FRONTEND_REVIEW_TEMPLATE = """## 自動追加レビュー観点: フロントエンド / UX
+- UI 状態、loading/error/empty、キーボード操作、アクセシビリティ、レスポンシブ表示が破綻しないか。
+- コンポーネント責務、重複 UI、状態管理、不要な再レンダリング、バンドルサイズへの影響を確認する。
+- 表示文言、フォーム validation、ユーザー操作後のフィードバックが仕様と一致しているか。"""
+
+PERFORMANCE_REVIEW_TEMPLATE = """## 自動追加レビュー観点: 性能・並行性
+- N+1、不要な全件取得、過剰な同期 I/O、メモリ保持、ロック、競合、リトライ嵐がないか。
+- cache、batch、pagination、stream、queue/worker の使い方が正しく、失敗時の再実行や重複実行に耐えるか。
+- 計測・ログ・アラートが問題発生時の切り分けに足りるか。"""
+
+DELETION_RENAME_REVIEW_TEMPLATE = """## 自動追加レビュー観点: 削除・リネーム
+- 削除・リネーム対象への参照がコード、設定、CI、ドキュメント、テスト、外部連携に残っていないか。
+- 後方互換性、migration、deprecation、利用者への移行手順が必要ないか。
+- 同名別ファイルや大文字小文字差による環境依存の問題がないか。"""
+
+GENERATED_REVIEW_TEMPLATE = """## 自動追加レビュー観点: 生成物・ロックファイル
+- 生成物が本当にコミット対象か。生成元との差分、再生成手順、不要なノイズが混入していないか。
+- lockfile の差分が意図した依存変更に対応しているか。手編集や不整合がないか。"""
+
+I18N_REVIEW_TEMPLATE = """## 自動追加レビュー観点: i18n / 文言
+- 翻訳キー、fallback、変数展開、複数形、日付・数値・通貨・タイムゾーン表記が妥当か。
+- 原文と翻訳、UI 表示幅、アクセシビリティラベル、ドキュメント文言の整合性を確認する。"""
+
+INFRA_REVIEW_TEMPLATE = """## 自動追加レビュー観点: インフラ / デプロイ
+- 環境差分、権限、secret、ネットワーク公開範囲、永続化、バックアップ、スケール、ロールバック容易性を確認する。
+- IaC / manifest / Dockerfile の設定が最小権限・再現可能・運用監視しやすい形になっているか。
+- 既存環境への破壊的変更、手動作業、順序依存、ダウンタイムのリスクが説明されているか。"""
+
 def _default_worktree_base() -> pathlib.Path:
     """worktree の親ディレクトリを解決する。
 
@@ -195,6 +338,218 @@ def _now() -> str:
     return _dt.datetime.now(_dt.timezone.utc).astimezone().isoformat(timespec="seconds")
 
 
+def _parse_name_status(output: str) -> list[dict[str, Any]]:
+    """`gh pr diff --name-status` 形式を扱いやすい構造に変換する。"""
+    entries: list[dict[str, Any]] = []
+    for raw in output.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        cols = line.split("\t")
+        status = cols[0]
+        if status.startswith("R") or status.startswith("C"):
+            paths = [c for c in cols[1:] if c]
+        else:
+            paths = [cols[1]] if len(cols) > 1 else []
+        if paths:
+            entries.append({"status": status, "paths": paths})
+    return entries
+
+
+def _fetch_changed_files(pr: int) -> list[dict[str, Any]]:
+    r = subprocess.run(
+        ["gh", "pr", "diff", str(pr), "--name-status"],
+        capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        info(f"⚠ PR 変更ファイル一覧の取得に失敗。自動レビュー観点は共通のみ: {r.stderr.strip()[:200]}")
+        return []
+    return _parse_name_status(r.stdout)
+
+
+def _path_info(path: str) -> tuple[str, str, str, str]:
+    p = pathlib.PurePosixPath(path.replace("\\", "/"))
+    lower = str(p).lower()
+    normalized = "/" + lower.lstrip("./")
+    return lower, normalized, p.name.lower(), pathlib.PurePosixPath(lower).suffix
+
+
+def _contains_any(text: str, needles: tuple[str, ...]) -> bool:
+    return any(n in text for n in needles)
+
+
+def _is_doc_path(path: str) -> bool:
+    lower, normalized, name, ext = _path_info(path)
+    stem = pathlib.PurePosixPath(lower).stem
+    return (
+        ext in DOC_EXTENSIONS
+        or stem in DOC_FILENAMES
+        or normalized.startswith("/docs/")
+        or "/docs/" in normalized
+        or normalized.startswith("/documentation/")
+        or "/documentation/" in normalized
+    )
+
+
+def _is_code_path(path: str) -> bool:
+    _, _, _, ext = _path_info(path)
+    return ext in CODE_EXTENSIONS
+
+
+def _is_migration_path(path: str) -> bool:
+    lower, normalized, name, ext = _path_info(path)
+    return (
+        ext == ".sql"
+        or _contains_any(normalized, MIGRATION_PATH_MARKERS)
+        or any(marker in name or marker in lower for marker in MIGRATION_NAME_MARKERS)
+    )
+
+
+def _is_test_path(path: str) -> bool:
+    lower, normalized, name, _ = _path_info(path)
+    return _contains_any(normalized, TEST_PATH_MARKERS) or any(m in name or m in lower for m in TEST_NAME_MARKERS)
+
+
+def _is_dependency_path(path: str) -> bool:
+    _, _, name, _ = _path_info(path)
+    return name in DEPENDENCY_FILENAMES
+
+
+def _is_config_ci_path(path: str) -> bool:
+    lower, normalized, name, ext = _path_info(path)
+    return (
+        _contains_any(normalized, CI_CONFIG_MARKERS)
+        or name in {"dockerfile", "makefile", ".editorconfig"}
+        or lower.startswith(".github/")
+        or (ext in CONFIG_EXTENSIONS and ("/config/" in normalized or "/configs/" in normalized))
+    )
+
+
+def _is_api_contract_path(path: str) -> bool:
+    lower, normalized, _, _ = _path_info(path)
+    return _contains_any(normalized, API_CONTRACT_MARKERS) or "openapi" in lower or "swagger" in lower
+
+
+def _is_auth_security_path(path: str) -> bool:
+    lower, _, _, _ = _path_info(path)
+    return any(marker in lower for marker in AUTH_SECURITY_MARKERS)
+
+
+def _is_frontend_path(path: str) -> bool:
+    _, normalized, _, ext = _path_info(path)
+    return ext in FRONTEND_EXTENSIONS or "/components/" in normalized or "/pages/" in normalized
+
+
+def _is_performance_path(path: str) -> bool:
+    lower, _, _, _ = _path_info(path)
+    return any(marker in lower for marker in PERFORMANCE_MARKERS)
+
+
+def _is_generated_path(path: str) -> bool:
+    _, normalized, name, _ = _path_info(path)
+    return _contains_any(normalized, GENERATED_MARKERS) or name in {
+        "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "composer.lock",
+        "gemfile.lock", "go.sum", "poetry.lock", "uv.lock", "cargo.lock",
+    }
+
+
+def _is_i18n_path(path: str) -> bool:
+    lower, normalized, _, _ = _path_info(path)
+    return _contains_any(normalized, I18N_MARKERS) or any(m in lower for m in I18N_MARKERS)
+
+
+def _is_infra_path(path: str) -> bool:
+    lower, normalized, _, _ = _path_info(path)
+    return _contains_any(normalized, INFRA_MARKERS) or any(marker in lower for marker in INFRA_MARKERS)
+
+
+PATH_CATEGORY_RULES = (
+    ("code", _is_code_path),
+    ("db_migration", _is_migration_path),
+    ("test", _is_test_path),
+    ("dependency", _is_dependency_path),
+    ("config_ci", _is_config_ci_path),
+    ("api_contract", _is_api_contract_path),
+    ("auth_security", _is_auth_security_path),
+    ("frontend", _is_frontend_path),
+    ("performance", _is_performance_path),
+    ("generated", _is_generated_path),
+    ("i18n", _is_i18n_path),
+    ("infra", _is_infra_path),
+)
+
+
+def _classify_changed_files(entries: list[dict[str, Any]]) -> list[str]:
+    paths = [p for entry in entries for p in entry.get("paths", []) if isinstance(p, str)]
+    categories: list[str] = ["common"]
+    if not paths:
+        return categories
+
+    if paths and all(_is_doc_path(p) for p in paths):
+        categories.append("docs_only")
+
+    categories.extend(
+        category
+        for category, predicate in PATH_CATEGORY_RULES
+        if any(predicate(path) for path in paths)
+    )
+    if any(str(entry.get("status", "")).startswith(("D", "R")) for entry in entries):
+        categories.append("deletion_rename")
+
+    # rename の旧パスだけで検知したカテゴリが混ざるのは有用だが、docs_only は
+    # 旧パス/新パス両方が docs であるときだけ採用するため上で all(paths) にしている。
+    return list(dict.fromkeys(categories))
+
+
+def _auto_review_instructions(categories: list[str]) -> str:
+    templates = {
+        "common": COMMON_REVIEW_TEMPLATE,
+        "docs_only": DOCS_ONLY_REVIEW_TEMPLATE,
+        "code": CODE_REVIEW_TEMPLATE,
+        "db_migration": DB_MIGRATION_REVIEW_TEMPLATE,
+        "test": TEST_REVIEW_TEMPLATE,
+        "dependency": DEPENDENCY_REVIEW_TEMPLATE,
+        "config_ci": CONFIG_CI_REVIEW_TEMPLATE,
+        "api_contract": API_CONTRACT_REVIEW_TEMPLATE,
+        "auth_security": AUTH_SECURITY_REVIEW_TEMPLATE,
+        "frontend": FRONTEND_REVIEW_TEMPLATE,
+        "performance": PERFORMANCE_REVIEW_TEMPLATE,
+        "deletion_rename": DELETION_RENAME_REVIEW_TEMPLATE,
+        "generated": GENERATED_REVIEW_TEMPLATE,
+        "i18n": I18N_REVIEW_TEMPLATE,
+        "infra": INFRA_REVIEW_TEMPLATE,
+    }
+    return "\n\n".join(templates[c] for c in categories if c in templates)
+
+
+def _combined_review_instructions(auto: str, manual: str) -> str:
+    return "\n\n".join(part for part in (auto.strip(), manual.strip()) if part)
+
+
+def _extra_review_instructions(args: argparse.Namespace) -> str:
+    """cross-review launcher に渡す追加レビュー観点を組み立てる。
+
+    `--focus` は短い観点を直接渡す用途、`--extra-instructions-file` は長めの
+    チェックリストを渡す用途。両方指定された場合は順に連結する。
+    """
+    parts: list[str] = []
+    focus = getattr(args, "focus", None)
+    if focus and str(focus).strip():
+        parts.append(str(focus).strip())
+
+    extra_file = getattr(args, "extra_instructions_file", None)
+    if extra_file:
+        path = pathlib.Path(extra_file)
+        try:
+            text = path.read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            die(f"追加レビュー観点ファイルを読めません: {path} ({exc})")
+        if text:
+            parts.append(text)
+
+    return "\n\n".join(parts)
+
+
 def _round_started_unixtime(round_entry: dict[str, Any]) -> float | None:
     """``round.started_at`` (ISO 8601) を UNIX time (秒) に変換する。
 
@@ -340,6 +695,7 @@ def info(msg: str) -> None:
 def cmd_init(args: argparse.Namespace) -> None:
     """Step 0 — state 初期化 or 既存 state 引き継ぎ + プリチェック。"""
     pr = args.pr
+    manual_extra_review = _extra_review_instructions(args)
     # worktree path を先に解決してから tmp_dir を決定する。
     # tmp_dir は <worktree>/.cross_review/ に配置し、gemini の workspace 制約を根本回避。
     # path には repo slug を含め、他リポジトリの同一 PR 番号と衝突しないようにする。
@@ -363,6 +719,33 @@ def cmd_init(args: argparse.Namespace) -> None:
     if resume_state_file.exists():
         st = json.loads(resume_state_file.read_text(encoding="utf-8"))
         if st.get("final") is None:
+            state_changed = False
+            if "auto_review_instructions" not in st:
+                changed_files = _fetch_changed_files(pr)
+                categories = _classify_changed_files(changed_files)
+                st["changed_files"] = changed_files
+                st["auto_review_categories"] = categories
+                st["auto_review_instructions"] = _auto_review_instructions(categories)
+                state_changed = True
+            if manual_extra_review:
+                st["manual_extra_review_instructions"] = manual_extra_review
+                # 後方互換: 旧 key も manual 指示として保持する。
+                st["extra_review_instructions"] = manual_extra_review
+                state_changed = True
+            manual = st.get("manual_extra_review_instructions") or st.get("extra_review_instructions") or ""
+            combined = _combined_review_instructions(
+                st.get("auto_review_instructions") or "",
+                manual,
+            )
+            if st.get("review_instructions") != combined:
+                st["review_instructions"] = combined
+                state_changed = True
+            if state_changed:
+                resume_state_file.write_text(
+                    json.dumps(st, indent=2, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+                info("↻ 追加レビュー観点を state に反映して再開")
             tmp_dir = _tmp_dir(worktree)
             wt = st.get("worktree_path") or ""
             info(f"↻ 前回中断 state から再開（round={len(st.get('rounds', []))}）")
@@ -374,6 +757,7 @@ def cmd_init(args: argparse.Namespace) -> None:
             print(f'BASE_BRANCH={shlex.quote(str(st.get("base_branch") or ""))}')
             print(f"IS_OWN_PR={'1' if st.get('is_own_pr') else '0'}")
             print(f"EVENT_DOWNGRADE={'1' if st.get('event_downgrade') else '0'}")
+            print(f"HAS_EXTRA_REVIEW_INSTRUCTIONS={'1' if st.get('review_instructions') else '0'}")
             print(f"RESUMED=1")
             return
 
@@ -388,6 +772,10 @@ def cmd_init(args: argparse.Namespace) -> None:
     # worktree 分離 — _tmp_dir() より先に worktree を作成/確認する
     head_branch = _sh(["gh", "pr", "view", str(pr), "--json", "headRefName", "--jq", ".headRefName"])
     base_branch = _sh(["gh", "pr", "view", str(pr), "--json", "baseRefName", "--jq", ".baseRefName"])
+    changed_files = _fetch_changed_files(pr)
+    auto_review_categories = _classify_changed_files(changed_files)
+    auto_review = _auto_review_instructions(auto_review_categories)
+    review_instructions = _combined_review_instructions(auto_review, manual_extra_review)
     if not pathlib.Path(worktree).exists():
         _create_worktree(worktree, pr, head_branch)
     elif _is_registered_worktree(worktree):
@@ -432,6 +820,13 @@ def cmd_init(args: argparse.Namespace) -> None:
         "pr_author": author,
         "is_own_pr": is_own,
         "event_downgrade": event_downgrade,
+        "changed_files": changed_files,
+        "auto_review_categories": auto_review_categories,
+        "auto_review_instructions": auto_review,
+        "manual_extra_review_instructions": manual_extra_review,
+        # 後方互換: 旧 key は manual 指示を保持する。
+        "extra_review_instructions": manual_extra_review,
+        "review_instructions": review_instructions,
         "pr_history": [{"pr": pr, "opened_at": _now(), "closed_at": None, "rounds": 0}],
         "rounds": [],
         "deferred_nits": [],
@@ -447,6 +842,7 @@ def cmd_init(args: argparse.Namespace) -> None:
     print(f'BASE_BRANCH={shlex.quote(str(base_branch))}')
     print(f"IS_OWN_PR={'1' if is_own else '0'}")
     print(f"EVENT_DOWNGRADE={'1' if event_downgrade else '0'}")
+    print(f"HAS_EXTRA_REVIEW_INSTRUCTIONS={'1' if review_instructions else '0'}")
     print("RESUMED=0")
 
 
@@ -940,6 +1336,16 @@ def main() -> None:
     sp.add_argument("--rotate-after", type=int, default=8)
     sp.add_argument("--only", choices=["codex", "gemini"], default=None)
     sp.add_argument("--worktree", default=None)
+    sp.add_argument(
+        "--focus",
+        default=None,
+        help="追加レビュー観点。例: ドキュメントとコードの整合性を重点的に確認",
+    )
+    sp.add_argument(
+        "--extra-instructions-file",
+        default=None,
+        help="追加レビュー観点を記載した UTF-8 テキストファイル",
+    )
     sp.set_defaults(func=cmd_init)
 
     sp = sub.add_parser("start-round", help="Step 1 — round 開始判定")

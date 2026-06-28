@@ -27,6 +27,7 @@ STATE=$TMP_DIR/cross-review-pr$STATE_PR-state.json
 WORKTREE=$(jq -r '.worktree_path' "$STATE")
 REPO=$(jq -r '.repo' "$STATE")
 EVENT_DOWNGRADE=$(jq -r '.event_downgrade // false' "$STATE")
+EXTRA_REVIEW_INSTRUCTIONS=$(jq -r '.review_instructions // .extra_review_instructions // ""' "$STATE")
 # PR (=current_pr) は gh コマンドのレビュー対象 PR 番号として使う。
 # tmp パス側は STATE_PR で固定 (monitor.py / state.py との読み書き整合のため)。
 PR=$(jq -r '.current_pr' "$STATE")
@@ -41,6 +42,20 @@ if [ -s "$EXISTING_FILE" ]; then
   EXISTING_INLINE=$(cat "$EXISTING_FILE")
 else
   EXISTING_INLINE="(なし)"
+fi
+EXTRA_REVIEW_BLOCK=
+if [ -n "$EXTRA_REVIEW_INSTRUCTIONS" ]; then
+  EXTRA_REVIEW_BLOCK=$(cat <<EXTRA_EOF
+
+## 追加レビュー観点
+以下の観点を通常レビューに追加して重点的に確認してください。
+ただし、根拠がある修正アクションだけを指摘し、重複指摘や好みの nit は避けてください。
+
+\`\`\`
+$EXTRA_REVIEW_INSTRUCTIONS
+\`\`\`
+EXTRA_EOF
+)
 fi
 
 cat > "$PROMPT" <<EOF
@@ -63,6 +78,7 @@ workspace 外を読まなくて済むよう、以下にインライン展開す�
 \`\`\`
 $EXISTING_INLINE
 \`\`\`
+$EXTRA_REVIEW_BLOCK
 
 ## 出力契約
 - review body の **先頭行** に必ず以下を入れる:
@@ -86,6 +102,16 @@ $EXISTING_INLINE
 ### body (総評) の書き方
 - 設計レベル・PR 横断の **修正提案のみ** 書く
 - 書くことが無ければ prefix 行 + 1 行サマリだけで良い (褒め言葉や評価文は不要)
+
+### 進捗マーカー（監視用）
+- 無言ハングと区別できるよう、作業フェーズが進むたびに
+  **$TMP_DIR/gemini-review-pr$STATE_PR-progress.log** へ短い 1 行を追記すること
+- 内部の推論や長い説明は書かず、以下のようなフェーズ名 + 対象だけを書く:
+  - \`start: review PR #$PR round $ROUND\`
+  - \`scan: diff and existing comments\`
+  - \`analyze: candidate findings\`
+  - \`post: submit review\`
+  - \`done: result.json written\`
 
 - 投稿後、サマリを **$TMP_DIR/gemini-review-pr$STATE_PR-result.json** に
   **必ず以下のキーで** 書く:

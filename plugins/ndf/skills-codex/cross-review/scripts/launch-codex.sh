@@ -32,6 +32,7 @@ STATE=$TMP_DIR/cross-review-pr$STATE_PR-state.json
 WORKTREE=$(jq -r '.worktree_path' "$STATE")
 REPO=$(jq -r '.repo' "$STATE")
 EVENT_DOWNGRADE=$(jq -r '.event_downgrade // false' "$STATE")
+EXTRA_REVIEW_INSTRUCTIONS=$(jq -r '.review_instructions // .extra_review_instructions // ""' "$STATE")
 # PR (=current_pr) は gh コマンドのレビュー対象 PR 番号として使う。
 # tmp パス側は STATE_PR で固定 (monitor.py / state.py が同じ STATE_PR 起点で
 # 読みに来るため、ここを揃えないと PR rotation 後に読み書きパスが食い違う)。
@@ -40,6 +41,20 @@ SHA=$(gh pr view "$PR" --json headRefOid -q .headRefOid)
 
 PROMPT=$TMP_DIR/codex-review-pr$STATE_PR-prompt.md
 EXISTING=$TMP_DIR/cross-review-pr$STATE_PR-existing-comments.txt
+EXTRA_REVIEW_BLOCK=
+if [ -n "$EXTRA_REVIEW_INSTRUCTIONS" ]; then
+  EXTRA_REVIEW_BLOCK=$(cat <<EXTRA_EOF
+
+## 追加レビュー観点
+以下の観点を通常レビューに追加して重点的に確認してください。
+ただし、根拠がある修正アクションだけを指摘し、重複指摘や好みの nit は避けてください。
+
+\`\`\`
+$EXTRA_REVIEW_INSTRUCTIONS
+\`\`\`
+EXTRA_EOF
+)
+fi
 
 cat > "$PROMPT" <<EOF
 # /ndf:review 実行 (cross-review codex / round $ROUND)
@@ -55,6 +70,7 @@ PR #$PR を **codex の観点でレビューし、gh api で直接 PR に投稿*
   - true の場合: payload の \`event\` は \`COMMENT\` にすること。
     ただし body 先頭 prefix の \`<event>\` には **本来の intent** を書く。
 - 既存コメントスナップショット: $EXISTING （重複指摘禁止）
+$EXTRA_REVIEW_BLOCK
 
 ## 出力契約
 - review body の **先頭行** に必ず以下を入れる（fence 不要、Markdown 見出しとして）:
