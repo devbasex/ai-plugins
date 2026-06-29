@@ -24,9 +24,11 @@ pidfile stale / result.json 不在) を構造化して扱う。
      STALLED として中断。既定は agent 別 (codex=180s, gemini=480s。gemini は err.log
      にほぼ進捗を出さないため大きめ)。`--stall-timeout` で CLI 明示、
      `MONITOR_STALL_<AGENT>` env で per-agent 上書き、`MONITOR_STALL` env で共通上書き可
-  7. **result.json + age fallback**: sentinel を持たない agent (gemini) 向け。
+  7. **progress.log heartbeat**: agent が任意で書く短いフェーズマーカーを stderr に表示。
+     Gemini の stdout/stderr が静かな時間でも、内部推論ではなく監視用の作業段階を確認できる
+  8. **result.json + age fallback**: sentinel を持たない agent (gemini) 向け。
      result.json の mtime が 30 秒以上前なら完了とみなし kill → OK
-  8. **失敗時 kill**: TIMEOUT / STALLED / EARLY_ERROR (FATAL のみ) / PIDFILE_BAD で
+  9. **失敗時 kill**: TIMEOUT / STALLED / EARLY_ERROR (FATAL のみ) / PIDFILE_BAD で
      返るとき、対象プロセスを SIGTERM (3 秒後に SIGKILL) で停止する
 
 Usage:
@@ -281,6 +283,7 @@ class AgentPaths:
     pidfile: pathlib.Path
     err_log: pathlib.Path
     stdout_log: pathlib.Path
+    progress_log: pathlib.Path
     result: pathlib.Path
 
     @classmethod
@@ -291,6 +294,7 @@ class AgentPaths:
             pidfile=pathlib.Path(f"{base}.pid"),
             err_log=pathlib.Path(f"{base}-err.log"),
             stdout_log=pathlib.Path(f"{base}-stdout.log"),
+            progress_log=pathlib.Path(f"{base}-progress.log"),
             result=pathlib.Path(f"{base}-result.json"),
         )
 
@@ -304,6 +308,10 @@ class AgentStatus:
     elapsed: float = 0.0
     detail: str = ""
     err_log_size: int = 0
+    stdout_log_size: int = 0
+    progress_log_size: int = 0
+    progress_tail: str = ""
+    idle_seconds: float = 0.0
     result_exists: bool = False
     sentinel_seen: bool = False
 
@@ -461,6 +469,38 @@ def _scan_codex_sentinel(path: pathlib.Path) -> bool:
     return bool(CODEX_SENTINEL.search(tail))
 
 
+def _safe_size(path: pathlib.Path) -> int:
+    try:
+        return path.stat().st_size if path.exists() else 0
+    except OSError:
+        return 0
+
+
+def _tail_last_nonempty_line(path: pathlib.Path, limit: int = 4096) -> str:
+    """監視用 progress.log の末尾 1 行を安全に読む。
+
+    Gemini に書かせるのは短いフェーズマーカーだけなので、末尾数 KB で十分。
+    壊れた UTF-8 や読み取り競合があっても monitor 自体は落とさない。
+    """
+    if not path.exists():
+        return ""
+    try:
+        sz = path.stat().st_size
+        with path.open("rb") as f:
+            if sz > limit:
+                f.seek(sz - limit)
+            data = f.read().decode("utf-8", errors="replace")
+    except OSError:
+        return ""
+    if sz > limit and "\n" in data:
+        data = data.split("\n", 1)[1]
+    for line in reversed(data.splitlines()):
+        stripped = line.strip()
+        if stripped:
+            return stripped[:200]
+    return ""
+
+
 def monitor_agent(
     agent: str,
     pr: int,
@@ -501,7 +541,11 @@ def monitor_agent(
     # ケースを誤って失敗にしてしまう。alive=True と確認した瞬間のみ cmdline 一致を検証する。
 
     started_wall = time.time()
-    last_err_size = paths.err_log.stat().st_size if paths.err_log.exists() else 0
+    last_progress_size = (
+        _safe_size(paths.err_log)
+        + _safe_size(paths.stdout_log)
+        + _safe_size(paths.progress_log)
+    )
     last_progress = time.monotonic()
     cmdline_validated = False
     warned_early_error = False
@@ -631,38 +675,46 @@ def monitor_agent(
             _emit_log(log_prefix, agent, status)
             return status
 
-        # 4. stall detection (err.log と stdout.log の **両方** をモニタ。
-        # gemini は stdout 側だけ進捗が出るケースがあるため、片方でも更新があれば
-        # progress として扱う)
-        progress_size = 0
-        for p in (paths.err_log, paths.stdout_log):
-            if p.exists():
-                progress_size += p.stat().st_size
-        status.err_log_size = progress_size
-        if progress_size != last_err_size:
-            last_err_size = progress_size
+        # 4. stall detection (err.log / stdout.log / progress.log をモニタ。
+        # gemini は stdout 側だけ進捗が出るケースがあり、progress.log には
+        # launcher が要求した短いフェーズマーカーが出るため、いずれかが
+        # 更新されれば progress として扱う)
+        status.err_log_size = _safe_size(paths.err_log)
+        status.stdout_log_size = _safe_size(paths.stdout_log)
+        status.progress_log_size = _safe_size(paths.progress_log)
+        status.progress_tail = _tail_last_nonempty_line(paths.progress_log)
+        progress_size = (
+            status.err_log_size + status.stdout_log_size + status.progress_log_size
+        )
+        if progress_size != last_progress_size:
+            last_progress_size = progress_size
             last_progress = time.monotonic()
-        if (time.monotonic() - last_progress) >= stall_timeout:
+        status.idle_seconds = time.monotonic() - last_progress
+        if status.idle_seconds >= stall_timeout:
             if alive:
                 _kill_pid(pid)
             status.status = "STALLED"
             status.exit_code = 5
             status.detail = (
                 f"no log progress for {stall_timeout}s "
-                f"(pid {pid}, last size {last_err_size}B)"
+                f"(pid {pid}, last size {last_progress_size}B)"
             )
             _emit_log(log_prefix, agent, status)
             return status
 
         # poll 中の進捗ログ
-        _emit_progress(log_prefix, agent, status, last_err_size)
+        _emit_progress(log_prefix, agent, status)
         time.sleep(poll)
 
 
-def _emit_progress(prefix: str, agent: str, st: AgentStatus, log_size: int) -> None:
+def _emit_progress(prefix: str, agent: str, st: AgentStatus) -> None:
+    progress = f" progress={st.progress_tail!r}" if st.progress_tail else ""
     print(
         f"{prefix}⏳ {agent} elapsed={st.elapsed:.0f}s pid={st.pid} "
-        f"err_log={log_size}B sentinel={'Y' if st.sentinel_seen else '-'}",
+        f"idle={st.idle_seconds:.0f}s "
+        f"err={st.err_log_size}B stdout={st.stdout_log_size}B "
+        f"progress_log={st.progress_log_size}B "
+        f"sentinel={'Y' if st.sentinel_seen else '-'}{progress}",
         file=sys.stderr, flush=True,
     )
 
@@ -738,6 +790,10 @@ def main() -> None:
             "elapsed": round(st.elapsed, 1),
             "detail": st.detail,
             "err_log_size": st.err_log_size,
+            "stdout_log_size": st.stdout_log_size,
+            "progress_log_size": st.progress_log_size,
+            "progress_tail": st.progress_tail,
+            "idle_seconds": round(st.idle_seconds, 1),
             "result_exists": st.result_exists,
             "sentinel_seen": st.sentinel_seen,
         }, ensure_ascii=False))

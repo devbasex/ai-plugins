@@ -559,8 +559,28 @@ pytest-playwright ベースの E2E テストワークフロー。
 
 | スキル名 | 概要 |
 |---------|------|
-| `cross-review` | PR を codex/gemini 両方でレビューし APPROVE まで自動ループ |
+| `cross-review` | PR を codex/gemini 両方でレビューし APPROVE まで自動ループ。Gemini 進捗 heartbeat、追加レビュー観点、自動レビュー観点テンプレートに対応 |
 | `gemini` | gemini CLI 直接実行（コード生成/レビュー/調査） |
+
+`cross-review` の代表的な呼び出し例:
+
+```bash
+/ndf:cross-review 123
+/ndf:cross-review 123 --focus "ドキュメントとコードの整合性を重点的に確認"
+/ndf:cross-review 123 --extra-instructions-file /tmp/review-focus.md
+```
+
+v4.18.0 以降、`cross-review` は PR の変更ファイルを GitHub API で全件取得し、
+docs only / code / DB migration / test / dependency / CI設定 / API契約 / 認証認可 /
+frontend / performance / deletion / generated / i18n / infra を自動分類する。
+分類結果に応じて、ドキュメント妥当性、コード品質、DB設計、型、セキュリティ、
+可読性、重複、言語らしさ、関数/ファイルサイズ、設定差分などの観点を codex /
+gemini 両方のプロンプトに追加する。`--focus` と `--extra-instructions-file` は、
+この自動テンプレートの後ろに上乗せされる。
+
+Gemini 実行中は `progress.log` の短い進捗マーカーを `monitor.py` が heartbeat に
+表示する。内部推論は出さず、`scan` / `analyze` / `post` / `done` などの作業段階、
+無更新秒数、stdout/stderr/progress log サイズを確認できる。
 
 ### 9. 運用系スキル（2個）
 

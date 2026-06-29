@@ -1,7 +1,7 @@
 ---
 name: cross-review
 description: "Run iterative Codex and Gemini PR reviews."
-argument-hint: "[PR番号] [--max-rounds N] [--rotate-after K] [--rotate-mode light|squash] [--only codex|gemini]"
+argument-hint: "[PR番号] [--max-rounds N] [--rotate-after K] [--rotate-mode light|squash] [--only codex|gemini] [--focus TEXT] [--extra-instructions-file PATH]"
 disable-model-invocation: true
 allowed-tools:
   - Bash
@@ -58,6 +58,8 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 | `--rotate-after K` | この round 数で未収束なら PR ローテーション | `8` |
 | `--rotate-mode light\|squash` | ローテーション方式。`light`: 同ブランチで旧 PR を close → 新 PR (title/body は現状の差分・実装から再生成)。`squash`: squash 統合 + 新ブランチ + `(rotated)` suffix | `light` |
 | `--only codex` / `--only gemini` | 片方だけで回す（デバッグ用） | 両方 |
+| `--focus TEXT` | 自動レビュー観点に上乗せして codex / gemini 両方に渡す追加観点。短い重点チェック向け | なし |
+| `--extra-instructions-file PATH` | 自動レビュー観点に上乗せして codex / gemini 両方に渡す追加観点を UTF-8 テキストファイルから読む。長いチェックリスト向け | なし |
 
 例:
 
@@ -66,7 +68,33 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 /ndf:cross-review 123 --max-rounds 4 --rotate-after 2
 /ndf:cross-review 123 --rotate-mode squash
 /ndf:cross-review 123 --only codex
+/ndf:cross-review 123 --focus "ドキュメントとコードの整合性を重点的に確認"
+/ndf:cross-review 123 --extra-instructions-file /tmp/review-focus.md
 ```
+
+### 自動レビュー観点テンプレート
+
+`state.py init` は GitHub API の `pulls/<PR>/files --paginate` で変更ファイルを全件取得して分類し、
+codex / gemini 両 launcher に同じ追加観点を渡す。`--focus` /
+`--extra-instructions-file` は、この自動テンプレートの後ろに上乗せされる。
+
+自動カテゴリ:
+
+- `common`: PR 全体の目的、変更範囲、保守性、テスト、ロールバック容易性
+- `docs_only`: ドキュメントのみ PR。企画・説明の妥当性、コード/設定/コマンド/他 docs との整合性
+- `code`: 設計、正確性、可読性、冗長・重複、言語らしさ、セキュリティ、関数/ファイルの責務とサイズ
+- `db_migration`: データ設計、型、NULL/default/制約/index、既存データ、backfill、ロールバック
+- `test`: テストの仕様性、境界値、失敗系、flaky リスク
+- `dependency`: 依存追加/更新、lockfile、ライセンス、互換性、セキュリティ
+- `config_ci`: CI/設定、権限、secret、cache、環境差分
+- `api_contract`: API 契約、互換性、schema、status、エラー形式、認可
+- `auth_security`: 認証/認可、secret/PII、CSRF/CORS/session/JWT/OAuth
+- `frontend`: UI 状態、アクセシビリティ、レスポンシブ、状態管理、表示文言
+- `performance`: N+1、I/O、メモリ、ロック、cache、queue、冪等性
+- `deletion_rename`: 削除/リネーム参照漏れ、後方互換、移行手順
+- `generated`: 生成物、lockfile、再生成手順、差分ノイズ
+- `i18n`: 翻訳キー、fallback、変数展開、表示幅、文言整合
+- `infra`: IaC / Docker / Kubernetes 等の権限、secret、公開範囲、ロールバック
 
 ### `--rotate-mode` の選び方
 
@@ -180,7 +208,9 @@ ROTATE_MODE=${ROTATE_MODE:-light}
 # Step 0: state 初期化 / 再開
 eval "$("$SCRIPTS/state.py" init "$STATE_PR" \
           --max-rounds "$MAX_ROUNDS" --rotate-after "$ROTATE_AFTER" \
-          ${ONLY:+--only "$ONLY"})"
+          ${ONLY:+--only "$ONLY"} \
+          ${FOCUS:+--focus "$FOCUS"} \
+          ${EXTRA_INSTRUCTIONS_FILE:+--extra-instructions-file "$EXTRA_INSTRUCTIONS_FILE"})"
 # eval で TMP_DIR がセットされる。後続スクリプトに env として伝播させる。
 export CROSS_REVIEW_TMP_DIR="$TMP_DIR"
 cd "$WORKTREE"

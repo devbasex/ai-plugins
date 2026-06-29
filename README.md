@@ -6,7 +6,7 @@ Claude Code / Codex / Kiro CLI向けのスキル・MCP設定を共有するた�
 
 このマーケットプレイスは、チーム全体でAI開発ツール（Claude Code / Codex / Kiro CLI）の導入を加速するための事前設定されたプラグインを提供します。
 
-**NDFプラグイン v4.17.3** は、以下の機能を**オールインワン**で提供する統合プラグインです：
+**NDFプラグイン v4.18.0** は、以下の機能を**オールインワン**で提供する統合プラグインです：
 
 - **公開Skills**: Claude Code/Kiro向け core 27個、Codex向け core 29個に分離。`skills-optional/` にランタイム別の除外候補を整理。
 - **元Skills（48個）**:
@@ -20,6 +20,7 @@ Claude Code / Codex / Kiro CLI向けのスキル・MCP設定を共有するた�
 - **8つの専門エージェント**: director, data-analyst, corder, researcher, qa, debugger, devops-engineer, code-reviewer
 - **自動フック**: SessionStart (transcript保持期間を最低90日に保つ) + Stop (AI要約生成+Slack通知)
 - **外部AI委譲**: `/ndf:codex` skill + `corder` エージェント経由で Codex CLI をバックグラウンド実行 (v4.0.0 で Codex MCP サーバは廃止)
+- **AIクロスレビュー強化**: `/ndf:cross-review` は codex/gemini 両方に PR レビューを委譲し、Gemini の進捗 heartbeat、`--focus` / `--extra-instructions-file`、PR 種別別の自動レビュー観点テンプレートに対応
 - **Kiro CLI対応**: インストーラーによるワンコマンドセットアップ
 
 ## 利用方法
@@ -98,7 +99,14 @@ kiro-cli chat
 
 | プラグイン名 | バージョン | 説明 | 詳細 |
 |------------|----------|------|------|
-| **ndf** | 4.17.3 | Claude Code / Codex / Kiro CLI開発環境を**オールインワン**で強化する統合プラグイン。8個の専門エージェント（director、data-analyst、corder、researcher、qa、debugger、devops-engineer、code-reviewer）、公開Skills（Claude Code/Kiro向け core 27個、Codex向け core 29個）、SessionStartフック（transcript保持期間自動管理）、Stopフック（AI要約生成+Slack通知）を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:codex` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [README](./plugins/ndf/README.md) |
+| **ndf** | 4.18.0 | Claude Code / Codex / Kiro CLI開発環境を**オールインワン**で強化する統合プラグイン。8個の専門エージェント（director、data-analyst、corder、researcher、qa、debugger、devops-engineer、code-reviewer）、公開Skills（Claude Code/Kiro向け core 27個、Codex向け core 29個）、SessionStartフック（transcript保持期間自動管理）、Stopフック（AI要約生成+Slack通知）を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:codex` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [README](./plugins/ndf/README.md) |
+
+### NDF v4.18.0 の主な変更
+
+- `/ndf:cross-review` の Gemini レビュー実行中に progress log を出力し、heartbeat で最新フェーズ・無更新秒数・stdout/stderr/progress log サイズを確認できます。
+- `/ndf:cross-review <PR> --focus "ドキュメントとコードの整合性を重点的に確認"` のように、codex / gemini 両方へ同じ追加レビュー観点を渡せます。
+- 長い観点は `/ndf:cross-review <PR> --extra-instructions-file /path/to/review-focus.md` で UTF-8 テキストファイルから渡せます。
+- PR の変更ファイルから docs only / code / DB migration / test / dependency / CI設定 / API契約 / 認証認可 / frontend / performance / deletion / generated / i18n / infra を分類し、該当するレビュー観点テンプレートを自動追加します。
 
 ## 開発ガイドライン
 
