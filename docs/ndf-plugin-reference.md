@@ -4,7 +4,7 @@
 
 NDF プラグインは、Claude Code / Codex / Kiro CLI 向けのオールインワン開発支援プラグイン。エージェント、Skills、フックを統合して提供する。
 
-**現行バージョン**: **v4.18.0** — `cross-review` で Gemini の進捗ログを heartbeat に表示し、`--focus` / `--extra-instructions-file` と PR 種別別の自動レビュー観点テンプレートを追加した。**v4.17.3** で Codex / Claude の Slack 終了通知 hook が、Slack API やネットワークの一時失敗で Stop hook 全体を `code 1` にしないよう修正した。**v4.17.2** で Codex Stop hook の Slack 通知を Claude 版と同様に「メンション付き投稿 → メンションなし投稿 → メンション付き投稿削除」にした。**v4.17.1** で `cross-review` の公開漏れを修正し、Claude Code / Kiro の manifest と Codex の `skills-codex/` で利用できるようにした。Codex plugin 対応として Claude Code / Kiro と Codex の公開 Skill セットを分離し、Codex では `skills-codex/` の core 29 個のみを公開する。Skill 実体は `skills/` に集約し、Claude Code / Kiro は manifest 配列指定で公開対象を制御する。Codex 向け公開ディレクトリは marketplace cache で欠落しないよう実ディレクトリとして同梱する。**v4.16.1** で statusline: NDF 由来の旧コピー（マーカー付き / レガシー `statusline-command.sh`）を `settings.json` が指す場合、SessionStart で正規パス（`~/.claude/ndf-statusline.sh`）へ自動移行しバージョンアップ追従を回復（ユーザー独自 statusline は誤検出ガードで保護）。**v4.16.0** で statusline の `[ctx:` 固定ラベルを利用モデル表示名（例 `Opus 4.8`）に置換（取得不可時は `ctx` にフォールバック）。**v4.15.0** で cross-review の worktree 生成先を非永続領域 `<システム tmpdir>/ndf-worktrees/<owner>--<repo>/pr<N>` に変更（永続 volume 消費・他リポジトリの PR 番号衝突・残骸流用事故を解消。`NDF_WORKTREE_BASE` env で明示オーバーライド可）。**v4.14.0** で `statusline` skill とデフォルト statusline 設定 hook を追加（47→48個）。statusLine 未設定時のみ NDF 標準 statusline（コンテナ名/ホスト名 + project_dir + コンテキスト使用率）を自動設定し、`/ndf:statusline set|restore|status` で切り替え・復元できる。**v4.13.0** で `issue-plan-strategy` の release PR body を self-contained 必須化。**v4.12.0** で Playwright E2E に `/ndf:playwright-browser-connect`（CDP リモートブラウザ接続）と `/ndf:playwright-evidence-drive`（Google Drive エビデンスアーカイブ）の 2 skill を追加（45→47個）。直前の **v4.11.0** で `/ndf:cross-review` の堅牢性改善（monitor.py の EARLY_ERROR 誤検知を解消: テスト用文字列リテラル / grep 形式ソース引用行を benign 自動判定し、ループ終了時の最終スイープで残 open review thread を全 Resolve）を実施。**v4.10.0** で `ml-model-structure` skill（MLモデル構築・推論API開発の標準ディレクトリ構造: 版内feature SSoT / train↔serve契約）を追加。`/ndf:fix` の修正ポリシー刷新（minor/nit のうち performance/readability/duplication は積極修正、+30 行超は要問い合わせ）、CI 完了待ち廃止、PR範囲外 flaky テストも修正対象。`/ndf:cross-review` 内のサブエージェントプロンプトも同期。重要度ラベルは AI agent の付与を鵜呑みにせず独自再判定。完了報告には PR URL 必須。詳細は [CHANGELOG.md](../plugins/ndf/CHANGELOG.md)。`/ndf:codex` skill + `corder` エージェント経由の Codex CLI 直接実行に一本化、Serena MCP は別プラグイン `mcp-serena` に分離済み、Playwright シナリオ E2E、Google Drive / Chat 連携 skill を提供。
+**現行バージョン**: **v4.19.0** — `plan-to-spec` skill を追加し、実装完了後の plan を `docs/` 配下の確定仕様書へ移動・リライト・レビューする標準フローと完了報告テンプレートを定義した。**v4.18.0** で `cross-review` は Gemini の進捗ログを heartbeat に表示し、`--focus` / `--extra-instructions-file` と PR 種別別の自動レビュー観点テンプレートを追加した。Codex plugin 対応として Claude Code / Kiro と Codex の公開 Skill セットを分離し、Codex では `skills-codex/` の core 30 個のみを公開する。Skill 実体は `skills/` に集約し、Claude Code / Kiro は manifest 配列指定で公開対象を制御する。Codex 向け公開ディレクトリは marketplace cache で欠落しないよう実ディレクトリとして同梱する。詳細は [CHANGELOG.md](../plugins/ndf/CHANGELOG.md)。`/ndf:codex` skill + `corder` エージェント経由の Codex CLI 直接実行に一本化、Serena MCP は別プラグイン `mcp-serena` に分離済み、Playwright シナリオ E2E、Google Drive / Chat 連携 skill を提供。
 
 ## ディレクトリ構造
 
@@ -20,8 +20,8 @@ plugins/ndf/
 │   ├── statusline-switch.sh # statusline の導入・切替・復元 (ensure/set/restore/status)
 │   └── slack-notify.js      # Slack通知スクリプト
 ├── agents/                  # 専門エージェント（8個）
-├── skills/                  # 全Skill実体（48個。Claude Code/Kiroはmanifest配列で公開対象を指定）
-├── skills-codex/            # Codex向け公開Skill（core 29個。marketplace cache対応の実ディレクトリ）
+├── skills/                  # 全Skill実体（49個。Claude Code/Kiroはmanifest配列で公開対象を指定）
+├── skills-codex/            # Codex向け公開Skill（core 30個。marketplace cache対応の実ディレクトリ）
 ├── skills-optional/         # ランタイム別除外候補リスト
 ├── CLAUDE.md                # プラグイン開発者向けガイド
 └── README.md                # 利用者向けドキュメント
@@ -75,6 +75,7 @@ NDF プラグイン本体はコア MCP サーバを**同梱しない**（v4.0.0 
 | `ndf-policies` | プラグイン共通ポリシー（常時注入） |
 | `branch-fix-strategy` | 複数ブランチ適用戦略 (cherry-pick) |
 | `implementation-plan` | `issues/` 配下の実装プラン管理 |
+| `plan-to-spec` | 実装完了後の plan を確定仕様書へ移動・リライト・レビュー |
 | `investigation-rules` | 調査時のエビデンス主義 |
 | `problem-solving` | 根本原因分析・多層防御 |
 | `logging-guidelines` | ログ運用 (言語非依存) |
@@ -216,3 +217,4 @@ claude -p --settings '{"disableAllHooks": true, "disableAllPlugins": true}' --ou
 | **v4.17.2** | Codex Stop hook の Slack 通知を Claude 版に合わせ、メンション付き投稿後にメンションなし投稿を残してメンション付き投稿を削除 |
 | **v4.17.3** | Slack 終了通知 hook の失敗時終了コードを安定化し、Stop hook 全体を `code 1` にしないよう修正 |
 | **v4.18.0** | `cross-review`: Gemini 進捗ログの heartbeat 表示、`--focus` / `--extra-instructions-file`、PR 種別別の自動レビュー観点テンプレートを追加 |
+| **v4.19.0** | `plan-to-spec` skill を追加。実装完了後の plan を確定仕様書へ移動・リライト・レビューする標準フローと完了報告テンプレートを定義 |

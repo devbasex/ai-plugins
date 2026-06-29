@@ -1,6 +1,6 @@
 {
   "name": "ndf",
-  "version": "4.18.0",
+  "version": "4.19.0",
   "description": "Integrated plugin with 8 specialized agents and a focused core skill set for PR/review workflows, implementation planning, debugging principles, statusline, browser smoke testing, and Codex CLI delegation. Additional niche skills remain under skills-optional for maintainers. Transcript retention is automatically kept at >= 90 days. Default statusline is set when none is configured.",
   "author": {
     "name": "takemi-ohama",
@@ -54,6 +54,7 @@
     "./skills/browser-test",
     "./skills/codex",
     "./skills/statusline",
-    "./skills/issue-plan-strategy"
+    "./skills/issue-plan-strategy",
+    "./skills/plan-to-spec"
   ]
 }
