@@ -56,6 +56,7 @@ ai-plugins/
 | [docs/project-overview.md](docs/project-overview.md) | プロジェクト概要・インストール方法 |
 | [docs/plugin-development-guide.md](docs/plugin-development-guide.md) | プラグイン開発ガイド（構造、plugin.json、バージョン管理、検証） |
 | [docs/ndf-plugin-reference.md](docs/ndf-plugin-reference.md) | NDFプラグイン詳細リファレンス |
+| [docs/specifications/](docs/specifications/) | 完了済みplan/issue由来の確定仕様 |
 | [docs/claude-code-skills-survey.md](docs/claude-code-skills-survey.md) | Claude Code Skills調査レポート |
 | [docs/development-history/](docs/development-history/) | 開発履歴と知見 |
 | [plugins/ndf/README.md](plugins/ndf/README.md) | NDFプラグインドキュメント |
