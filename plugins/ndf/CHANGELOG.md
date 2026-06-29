@@ -1,5 +1,20 @@
 # NDF Plugin CHANGELOG
 
+### v4.19.0 (plan-to-spec: plan の確定仕様書化フローを追加)
+
+- **`plan-to-spec` skill 追加**:
+  実装完了後の plan を `docs/` 配下などの確定仕様書置き場へ移動し、
+  開発履歴・TODO・PR 分割などを削除した as-is 仕様書としてリライトする
+  標準フローを定義した。
+- **仕様書レビュー手順**:
+  他仕様書との体裁統一、コードとの一致確認、authorize された用語への統一、
+  リンク再調査を必須観点として明文化した。
+- **完了報告テンプレート**:
+  元 plan、確定仕様書、実施内容、レビュー結果、検証、補足を共通形式で
+  報告するテンプレートを追加した。
+- **plugin.json: version 4.18.0 → 4.19.0**。marketplace.json / README /
+  AGENTS.md / ndf-plugin-reference の version 表記と公開 Skill 数を整合。
+
 ### v4.18.0 (cross-review: 監視性とレビュー観点テンプレート強化)
 
 - **`cross-review` / Gemini 監視性改善**:

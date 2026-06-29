@@ -1,28 +1,30 @@
 # NDF Plugin
 
-Claude Code / Codex開発環境を**オールインワン**で強化する統合プラグインです。
+Claude Code / Codex / Kiro CLI 開発環境を**オールインワン**で強化する統合プラグインです。
 
 ## 概要
 
 このプラグイン1つで、以下の機能を利用できます：
 
 1. **コアMCP**: なし (v4.0.0 で Codex MCP 廃止 / Serena MCP は `mcp-serena` プラグインに分離)
-2. **Skills**: Claude Code/Kiro向け core 27個、Codex向け core 29個を公開。元の48個は `skills/` に保持し、ランタイム別の除外候補は `skills-optional/README.md` で管理。
+2. **Skills**: Claude Code/Kiro向け core 28個、Codex向け core 30個を公開。元の49個は `skills/` に保持し、ランタイム別の除外候補は `skills-optional/README.md` で管理。
 3. **専門エージェント**: 8つの特化型AIエージェント（director、data-analyst、corder、researcher、qa、debugger、devops-engineer、code-reviewer）
 4. **自動フック**: Slack通知、デフォルトstatusline設定（未設定時のみ）
-
-> **Note (v2.7.0)**: commandsとskillsが統合されました。全ワークフロー（`/ndf:pr`等）はskillsとして実装されています。追加のMCP（BigQuery、Chrome DevTools、AWS Docs、DBHub、Notion）は個別プラグインとしてインストール可能です。
 
 ## インストール
 
 ### 前提条件
 
-- Claude Code がインストール済み
-- Python 3.10以上（Serena MCP `mcp-serena` プラグイン用、別途インストール）
-- `uvx` がインストール済み（`pip install uv`）
-- Codex CLI（`/ndf:codex` skill で外部AI委譲を使う場合、オプション）: `npm install -g @openai/codex`
+- 利用するランタイムのいずれか:
+  - Claude Code
+  - Codex CLI
+  - Kiro CLI
+- Slack通知を使う場合: Node.js（同梱 hook が `node` で通知スクリプトを実行）
+- `/ndf:codex` skill または `corder` エージェントから外部AI委譲を使う場合: Codex CLI（`npm install -g @openai/codex` → `codex login`）
 
-### 公式プラグインのインストール（推奨）
+NDF本体は v4.0.0 以降、MCPサーバーを同梱しません。Serena、BigQuery、Chrome DevTools、AWS Docs、DBHub、Notion などの MCP は必要に応じて個別プラグインとしてインストールしてください。Python / `uvx` などは、それらの個別 MCP プラグインを使う場合の要件です。
+
+### 公式プラグインのインストール（Claude Code / 任意）
 
 GitHub、Context7 MCPは公式プラグインとして提供されています：
 
@@ -32,9 +34,9 @@ GitHub、Context7 MCPは公式プラグインとして提供されています�
 /plugin install context7@anthropics/claude-plugins-official
 ```
 
-### 追加MCPプラグインのインストール（オプション）
+### 追加MCPプラグインのインストール（Claude Code / オプション）
 
-用途に応じて個別のMCPプラグインをインストールできます：
+用途に応じて個別のMCPプラグインをインストールできます。以下は Claude Code の例です。先に `ai-plugins` marketplace を追加してください。
 
 ```bash
 # ブラウザ自動化とテスト
@@ -53,14 +55,16 @@ GitHub、Context7 MCPは公式プラグインとして提供されています�
 /plugin install mcp-notion@ai-plugins
 ```
 
-### ステップ1: マーケットプレイスの追加
+### Claude Codeでのインストール
+
+#### ステップ1: マーケットプレイスの追加
 
 ```bash
 # Claude Codeで実行
 /plugin marketplace add https://github.com/devbasex/ai-plugins
 ```
 
-### ステップ2: プラグインのインストール
+#### ステップ2: プラグインのインストール
 
 ```bash
 # Claude Codeで実行
@@ -76,7 +80,7 @@ codex plugin add ndf@ai-plugins
 
 Codex版ではSkillsに加えて、Codex向けSlack終了通知hookを同梱します。通知は明示的に `NDF_CODEX_SLACK_NOTIFY=true` を設定した場合のみ送信されます。Claude Code向けのstatusline設定、transcript保持期間設定、Claude CLIによるSlack要約通知hookはCodexでは自動有効化しません。
 
-Claude Code/Kiro版で初期表示するSkillsは、PR運用・レビュー・調査・実装計画・browser smoke test・statusline・Codex CLI委譲・cross-reviewなどの core 27個に絞っています。Codex版は、Codex自体からの単発再委譲・Claude専用statusline・Claude transcript統計を外し、PR cross-review と Playwrightの計画・作成・実行・レポート・ツール操作の5個を含めた core 29個にしています。Google連携、DeepWiki転送、MLモデル構造、高度なPlaywright連携などは通常利用時のskills context budgetを圧迫しないよう初期公開から外し、`skills-optional/README.md` に整理しています。
+Claude Code/Kiro版で初期表示するSkillsは、PR運用・レビュー・調査・実装計画・仕様書化・browser smoke test・statusline・Codex CLI委譲・cross-reviewなどの core 28個に絞っています。Codex版は、Codex自体からの単発再委譲・Claude専用statusline・Claude transcript統計を外し、PR cross-review と Playwrightの計画・作成・実行・レポート・ツール操作、仕様書化を含めた core 30個にしています。Google連携、DeepWiki転送、MLモデル構造、高度なPlaywright連携などは通常利用時のskills context budgetを圧迫しないよう初期公開から外し、`skills-optional/README.md` に整理しています。
 
 Codex向けSlack通知を使う場合は、Claude Code向けSlack通知と同じ環境変数を使います。プロジェクトの `.env` などに以下を設定してください。
 
@@ -89,23 +93,42 @@ SLACK_USER_MENTION=<@U0123456789>  # オプション
 
 Codexのhookは初回実行前に `/hooks` で信頼設定が必要です。
 
-### ステップ3: .envファイルの作成
+### Kiro CLIでのインストール
 
-プロジェクトルートに `.env` ファイルを作成し、必要な認証情報を設定します。
+Kiro CLI では、リポジトリ付属のインストーラーで `.kiro/skills/` と `.kiro/agents/default.json` を生成します。
 
 ```bash
-# Serena MCP (セマンティックコード操作 - 推奨)
-SERENA_HOME=.serena
+# 基本（manifest-selected skills + agentSpawn hook）
+bash scripts/install-kiro.sh
 
+# Slack通知も有効化
+bash scripts/install-kiro.sh --with-slack
+
+# Codex CLI連携プロンプトも追加
+bash scripts/install-kiro.sh --with-codex
+```
+
+インストール後、Kiro CLI を起動します。
+
+```bash
+kiro-cli chat
+```
+
+### .envファイルの作成（Slack通知・外部連携を使う場合）
+
+Slack通知や個別MCPプラグインを使う場合は、プロジェクトルートに `.env` ファイルを作成し、必要な認証情報を設定します。NDF本体の基本 skill だけを使う場合、`.env` は必須ではありません。
+
+```bash
 # Slack通知 (オプション)
 # Slack Appセットアップ手順は下記の詳細設定を参照
 SLACK_BOT_TOKEN=
 SLACK_CHANNEL_ID=
 SLACK_USER_MENTION=  # 例: <@U0123456789>
+# NDF_CODEX_SLACK_NOTIFY=true  # Codex版でSlack通知を有効化する場合のみ
 
 # 注意:
-# - Serena MCP は別プラグイン `mcp-serena` として提供 (常時有効化推奨、GOOGLE_API_KEY/ANTHROPIC_API_KEY不要)
-# - Codex CLI は `/ndf:codex` skill から使う場合のみ必要: `npm install -g @openai/codex` → `codex login`
+# - Serena MCP は別プラグイン `mcp-serena` として提供
+# - Codex CLI 連携は `/ndf:codex` skill から使う場合のみ必要: `npm install -g @openai/codex` → `codex login`
 #   (v4.0.0 で Codex MCP サーバは廃止。skill 経由の CLI 直接実行に一本化)
 # - GitHub MCP、Context7 MCPは公式プラグインを使用してください
 # - 追加のMCP（BigQuery、Notion、AWS Docs、DBHub、Chrome DevTools）は
@@ -235,21 +258,21 @@ SLACK_USER_MENTION="<@U0123456789>"  # オプション
 
 </details>
 
-### ステップ4: Claude Codeを再起動
+### ランタイムを再起動
 
-`.env` ファイルに値を入力したら、Claude Codeを再起動してMCPサーバーとフックをロードします。
+`.env` ファイルに値を入力したら、利用中のランタイムを再起動してフックと環境変数を読み込みます。個別MCPプラグインを追加した場合は、そのランタイム側でも MCP 設定を再読み込みしてください。
 
 ## 利用方法
 
-セットアップが完了したら、Claude Codeで自然言語でリクエストするだけです：
+セットアップが完了したら、利用中のランタイムで自然言語またはスラッシュコマンドからリクエストできます：
 
 ```
 このリポジトリのオープンなPRを確認して
 ```
 
-Claude Codeが自動的に適切なMCPツールを選択・利用します。
+利用可能な skill、hook、個別MCPプラグインはランタイムとインストール内容によって異なります。
 
-また、ワークフロースキルをスラッシュコマンドで呼び出せます：
+Claude Code / Codex では、ワークフロースキルをスラッシュコマンドで呼び出せます：
 
 ```
 /ndf:pr
@@ -257,9 +280,9 @@ Claude Codeが自動的に適切なMCPツールを選択・利用します。
 /ndf:merged
 ```
 
-## 機能詳細
+Kiro CLI では `scripts/install-kiro.sh` が `.kiro/prompts/` に作成したプロンプト、または自然言語から同じ skill 手順を参照します。
 
-> **v2.7.0**: commandsとskillsが統合されました。ワークフロー（`/ndf:*`）もモデル起動型機能もすべてskillsとして実装されています。
+## 機能詳細
 
 ### 1. MCP統合
 
@@ -285,7 +308,7 @@ Claude Codeが自動的に適切なMCPツールを選択・利用します。
 
 #### 追加MCPのインストール方法
 
-必要に応じて個別のMCPプラグインをインストールできます：
+必要に応じて個別のMCPプラグインをインストールできます。以下は Claude Code の例です。先に `ai-plugins` marketplace を追加してください。
 
 ```bash
 # ブラウザ自動化とテスト
@@ -304,7 +327,7 @@ Claude Codeが自動的に適切なMCPツールを選択・利用します。
 /plugin install mcp-notion@ai-plugins
 ```
 
-各プラグインのインストール後、対応する環境変数を`.env`に設定してClaude Codeを再起動してください。
+各プラグインのインストール後、対応する環境変数を `.env` に設定して利用中のランタイムを再起動してください。
 
 **注意事項:**
 - 各MCPプラグインは独立しているため、必要なものだけをインストールできます
@@ -369,7 +392,7 @@ Claude Codeが自動的に適切なMCPツールを選択・利用します。
 **使用MCPツール:**
 - Codex CLI (`/ndf:codex` skill または `corder` エージェント経由、MCP非使用)（コードレビュー）
 
-> **Note (v2.0.0)**: Serena MCP、Context7 MCPは公式プラグインに移行しました。これらは引き続きcorderエージェントで使用可能ですが、別途インストールが必要です。
+> **Note**: Serena MCP、Context7 MCPはNDF本体に同梱されません。必要な場合は `mcp-serena` または公式プラグインを別途インストールしてください。
 
 **機能:**
 - クリーンで読みやすいコードの作成
@@ -408,9 +431,9 @@ Claude Codeが自動的に適切なMCPツールを選択・利用します。
 
 **使用MCPツール:**
 - Codex CLI (`/ndf:codex` skill または `corder` エージェント経由、MCP非使用)（コードレビュー、セキュリティチェック）
-- Serena MCP（コードベース分析）
-- Chrome DevTools MCP（パフォーマンステスト）
-- Claude Code MCP（プラグイン品質検証）
+- Serena MCP（コードベース分析、別途 `mcp-serena` プラグインが必要）
+- Chrome DevTools MCP（パフォーマンステスト、別途 `mcp-chrome-devtools` プラグインが必要）
+- Claude Code / Codex / Kiro のプラグイン検証コマンド
 
 **機能:**
 - コード品質レビューとリファクタリング提案
@@ -418,13 +441,13 @@ Claude Codeが自動的に適切なMCPツールを選択・利用します。
 - パフォーマンステスト（Core Web Vitals評価）
 - テストカバレッジとエッジケース検証
 - ドキュメント品質チェック
-- Claude Codeプラグイン仕様準拠確認
+- プラグイン仕様準拠確認
 
 **使用例:**
 ```
 @qa このコードの品質とセキュリティをレビューしてください
 @qa Webアプリケーションのパフォーマンスを測定してください
-@qa プラグインがClaude Code仕様に準拠しているか確認してください
+@qa プラグイン仕様に準拠しているか確認してください
 ```
 
 #### `debugger` エージェント
@@ -498,7 +521,7 @@ Claude Codeが自動的に適切なMCPツールを選択・利用します。
 | `/ndf:merged` | PRマージ後のローカルブランチクリーンアップ | `[PR番号]` |
 | `/ndf:clean` | マージ済みブランチの一括削除 | - |
 
-### 4. 原則・ガイドライン系スキル（9個）
+### 4. 原則・ガイドライン系スキル（10個）
 
 モデル起動型のガイドラインスキル。該当する文脈で自動参照される。
 
@@ -507,6 +530,7 @@ Claude Codeが自動的に適切なMCPツールを選択・利用します。
 | `ndf-policies` | プラグイン基本ポリシー（常時注入） |
 | `branch-fix-strategy` | 複数ブランチへの修正適用戦略（cherry-pick） |
 | `implementation-plan` | `issues/`配下の実装プラン管理 |
+| `plan-to-spec` | 実装完了後のplanを確定仕様書へ移動・リライト・レビュー |
 | `investigation-rules` | 調査レポートのエビデンス主義 |
 | `problem-solving` | 根本原因分析・上流修正・多層防御 |
 | `logging-guidelines` | ログ運用ガイドライン（言語非依存） |
@@ -591,9 +615,15 @@ Gemini 実行中は `progress.log` の短い進捗マーカーを `monitor.py` �
 
 ### 10. 自動フック
 
-Claude Codeの起動時と終了時に自動的に以下が実行されます：
+ランタイムごとに有効化される hook が異なります。
 
-#### SessionStart: デフォルトstatusline設定
+| ランタイム | SessionStart | Stop |
+|-----------|--------------|------|
+| Claude Code | transcript保持期間を90日以上に補正、statusline未設定時にNDF標準statuslineを設定 | Slack通知（`SLACK_BOT_TOKEN`設定時） |
+| Codex | なし | Codex向けSlack通知（`NDF_CODEX_SLACK_NOTIFY=true`設定時） |
+| Kiro CLI | `scripts/install-kiro.sh` が生成する `agentSpawn` hook | `--with-slack` 指定時のみSlack通知 |
+
+#### Claude Code: SessionStart
 
 セッション開始時に `~/.claude/settings.json` を検査し、`statusLine` が**未設定の場合のみ**
 NDF標準statusline（コンテナ名/ホスト名 + project_dir + コンテキスト使用率）を設定します。
@@ -601,29 +631,37 @@ NDF標準statusline（コンテナ名/ホスト名 + project_dir + コンテキ�
 - 既にstatuslineが設定されている場合はそちらを優先し、何も変更しません
 - `/ndf:statusline set` / `/ndf:statusline restore` でいつでも切り替え・復元できます（既存設定は自動バックアップ）
 - NDF標準statusline利用中は、プラグイン更新時にスクリプト（`~/.claude/ndf-statusline.sh`）が自動で追従します
+- Codex / Kiro CLI ではこの statusline hook は有効化されません
 
 #### Stop: Slack通知
 
-作業終了時にSlackへ要約通知を送信します（`SLACK_BOT_TOKEN`設定時のみ）。
+作業終了時にSlackへ要約通知を送信します。Claude Code / Kiro CLI と Codex では通知の有効化条件が異なります。
 
-**機能:**
-- Claude Codeとのやり取りをAIが自動要約（40文字）
-- Claude CLI + `--no-session-persistence`を使用（要約生成時に追加のセッションログを作成しない）
-- Claude Codeの認証設定を自動継承（API KeyでもBedrockでも対応）
+**Claude Code / Kiro CLI の機能:**
+- 会話内容をAIが自動要約（40文字）
+- Claude Code では Claude CLI + `--no-session-persistence`を使用（要約生成時に追加のセッションログを作成しない）
+- Claude Code では認証設定を自動継承（API KeyでもBedrockでも対応）
+- Kiro CLI では hook payload の `assistant_response` を優先して要約に使用
 - 会話履歴、transcriptから最適な情報源を自動選択
 - リポジトリ名とタイムスタンプも含めて通知
 
+**Codex の機能:**
+- `NDF_CODEX_SLACK_NOTIFY=true` の場合のみ通知
+- Codex transcript から作業要約を生成
+- Claude Code向け statusline / transcript保持期間 hook は実行しない
+
 **設定:**
 - `.env`に`SLACK_BOT_TOKEN`、`SLACK_CHANNEL_ID`、`SLACK_USER_MENTION`を設定
+- Codex版では追加で `NDF_CODEX_SLACK_NOTIFY=true` を設定
 - 詳細な設定手順は上記の[SLACK_BOT_TOKENとSLACK_CHANNEL_IDの設定方法](#各認証情報の詳細設定)を参照
-- 設定後、Claude Codeを再起動で有効化
+- 設定後、利用中のランタイムを再起動して有効化
 
 **注意:**
 - プラグイン更新後も再起動が必要です
 
 ## 環境変数リファレンス
 
-各MCPサーバーが使用する環境変数の完全な一覧です。太字は必須、通常テキストはオプションです。
+NDF本体と、併用できる個別MCPプラグインの環境変数一覧です。太字は該当機能を使う場合の必須、通常テキストはオプションです。
 
 ### 📋 環境変数テンプレート
 
@@ -631,9 +669,9 @@ NDF標準statusline（コンテナ名/ホスト名 + project_dir + コンテキ�
 
 ```bash
 # ============================================
-# Serena MCP - セマンティックコード操作
+# mcp-serena（個別プラグイン）
 # ============================================
-SERENA_HOME=.serena
+# SERENA_HOME=.serena
 
 # ============================================
 # Codex CLI - /ndf:codex skill 経由で使用 (v4.0.0でMCPサーバは廃止)
@@ -649,17 +687,18 @@ SERENA_HOME=.serena
 SLACK_BOT_TOKEN=xoxb-your-slack-bot-token
 SLACK_CHANNEL_ID=C0123456789
 SLACK_USER_MENTION=<@U0123456789>
+# NDF_CODEX_SLACK_NOTIFY=true  # Codex版でSlack通知を送る場合のみ
 ```
 
 **追加のMCPプラグインが必要な場合:**
 
-以下のMCPは個別プラグインとしてインストール可能です。必要に応じて環境変数を設定してください。
+以下のMCPはClaude Code向けの個別プラグインとしてインストール可能です。必要に応じて環境変数を設定してください。
 
 ```bash
 # ============================================
 # Chrome DevTools MCP (mcp-chrome-devtools)
 # ============================================
-# 専用環境変数なし - envFileのみ
+# 専用環境変数なし
 
 # ============================================
 # Notion MCP (mcp-notion)
@@ -685,19 +724,19 @@ BIGQUERY_LOCATION=US
 DSN=mysql://user:password@host:3306/database
 ```
 
-### 📊 MCPサーバー別環境変数詳細
+### 📊 個別MCPプラグイン・外部ツール別環境変数詳細
 
-> **Note (v2.6.0)**: NDFプラグインはコアMCP（Serena、Codex）のみを含みます。GitHub MCP、Context7 MCPは公式プラグイン（`anthropics/claude-plugins-official`）から、その他のMCP（BigQuery、Notion、AWS Docs、DBHub、Chrome DevTools）は個別プラグインとしてインストールしてください。
+> **Note (v4.0.0以降)**: NDFプラグイン本体はコアMCPを同梱しません。GitHub MCP、Context7 MCPは公式プラグイン（`anthropics/claude-plugins-official`）から、Serena、BigQuery、Notion、AWS Docs、DBHub、Chrome DevToolsは個別プラグインとしてインストールしてください。Codex連携はMCPではなく Codex CLI 直接実行です。
 
-#### 1. Serena MCP（コアMCP）
+#### 1. Serena MCP（個別プラグイン: `mcp-serena`）
 
 | 環境変数 | 必須/オプション | デフォルト値 | 説明 |
 |---------|--------------|------------|------|
 | SERENA_HOME | オプション | `.serena` | Serenaのホームディレクトリ |
 
 **注意:**
-- GOOGLE_API_KEY、ANTHROPIC_API_KEYは不要です（自動検出）
-- Claude CodeのAPI設定を自動的に継承します
+- NDF本体には同梱されません
+- プロジェクトで使用する前に Serena 側で project activation が必要です
 
 #### 2. Codex CLI（`/ndf:codex` skill 経由、v4.0.0 でMCPサーバは廃止）
 
@@ -716,7 +755,7 @@ codex login
 
 ---
 
-**以下のMCPは個別プラグインとしてインストール可能です:**
+**以下のMCPはClaude Code向けの個別プラグインとしてインストール可能です:**
 
 #### 3. Chrome DevTools MCP (mcp-chrome-devtools)
 
@@ -724,7 +763,7 @@ codex login
 /plugin install mcp-chrome-devtools@ai-plugins
 ```
 
-**専用環境変数なし** - `.env`ファイルの`envFile`設定のみ使用。
+**専用環境変数なし**。
 
 #### 4. Notion MCP (mcp-notion)
 
@@ -780,6 +819,7 @@ DSN形式の詳細については、各プラグインのREADMEを参照して�
 | SLACK_BOT_TOKEN | 必須（Slack通知用） | - | Slack Bot User OAuth Token（`xoxb-`で始まる） |
 | SLACK_CHANNEL_ID | 必須（Slack通知用） | - | 通知先チャンネルID（`C`で始まる） |
 | SLACK_USER_MENTION | オプション | - | メンション対象ユーザーID（`<@U0123456789>`形式） |
+| NDF_CODEX_SLACK_NOTIFY | Codex版のみ必須（Codex Slack通知用） | `false` | `true` の場合のみ Codex Stop hook がSlack通知を送信 |
 
 詳細な設定手順は[SLACK_BOT_TOKENとSLACK_CHANNEL_IDの設定方法](#各認証情報の詳細設定)を参照してください。
 
@@ -803,7 +843,7 @@ NDFプラグインと併用することで、以下の機能が追加されま�
 - **TDDワークフロー**: `/tdd`コマンドで5段階TDDプロセスをガイド
 - **セキュリティチェック**: OWASP Top 10準拠の脆弱性検出
 
-### インストール方法
+### インストール方法（Claude Code）
 
 ```bash
 /plugin install affaan-m@ai-plugins
@@ -813,7 +853,7 @@ NDFプラグインと併用することで、以下の機能が追加されま�
 
 | プラグイン | 役割 |
 |-----------|------|
-| **NDFプラグイン** | MCP統合、公開スキル（Claude/Kiro core 27個、Codex core 29個）、専門エージェント |
+| **NDFプラグイン** | MCP連携ガイド、公開スキル（Claude/Kiro core 28個、Codex core 30個）、専門エージェント |
 | **affaan-mプラグイン** | コンテキスト管理、品質保証、TDDワークフロー |
 
 詳細は[affaan-mプラグインREADME](../affaan-m/README.md)を参照してください。
