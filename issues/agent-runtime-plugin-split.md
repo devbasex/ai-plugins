@@ -530,7 +530,8 @@ base branch: `main`
   - ローカル作業ツリーを marketplace source として追加し、`ndf` と主要 `mcp-*` plugin を実際に install する
   - Skill、MCP、hook、agents / Kiro agent config が runtime plugin 配下から参照できることを確認する
   - secret がない環境では install / config / hook payload / MCP config の非認証 smoke を必須にする
-  - 開発環境または信頼済み CI に secret が存在する場合は、許可リストに従って tmpfs または個別 read-only bind mount でコンテナへ注入し、認証付き Skill / MCP smoke まで実行する
+  - 開発環境または信頼済み CI に secret が存在する場合は、許可リストに従って `--rm` コンテナへ注入し、認証付き Skill / MCP smoke まで実行する
+  - secret 注入時は `--keep-container` を禁止し、secret と認証済み runtime cache の残存を防ぐ
   - `pull_request` CI では secret を渡さず、非認証 smoke のみを実行する
   - ブラウザ認証しかできない runtime、または `--with-secrets=off` の非認証 smoke では、login prompt / 認証 URL 表示まで到達すれば合格とする
   - 詳細は `issues/runtime-plugin-container-test-plan.md` に従う
@@ -575,7 +576,7 @@ base branch: `main`
 | CLI 実インストール smoke がホスト環境を汚染する | Docker コンテナ内に HOME / cache / config を閉じ込め、ホストの credential directory は mount しない |
 | CLI や marketplace 機能が experimental で破壊的変更を受ける | smoke test は install 手順を fixture 化し、CLI version をログ出力する。破壊的変更時は plan 側ではなく runtime 別 adapter を更新する |
 | PR CI で secret が漏洩する | `pull_request` では secret を渡さず、認証付き smoke は protected workflow / default branch / local の信頼済み context だけで実行する |
-| 認証が必要な機能を CI で実行できない | secret がある場合は許可リストに従って tmpfs または個別 read-only bind mount で container へ注入して認証付き smoke を実行する。secret がない場合は skip として記録する |
+| 認証が必要な機能を CI で実行できない | secret がある場合は許可リストに従って `--rm` container へ注入して認証付き smoke を実行する。`auto` では secret がない場合は skip として記録し、`required` では失敗扱いにする |
 | ブラウザ認証が非対話コンテナで完了できない | ブラウザ認証しかできない runtime、または `--with-secrets=off` の非認証 smoke では login prompt / 認証 URL 表示まで到達すれば合格とする。secret がある場合の browser prompt fallback は失敗扱いにする |
 
 ## テスト計画
@@ -589,8 +590,8 @@ base branch: `main`
 - [ ] `bash scripts/runtime-smoke-test.sh --runtime kiro`
 - [ ] `.github/workflows/runtime-plugin-validate.yml` が build check / validate / link check を実行する
 - [ ] `.github/workflows/runtime-plugin-smoke.yml` が軽量コンテナで runtime smoke を実行する
-- [ ] `rg "plugins/ndf/" README.md AGENTS.md CLAUDE.md KIRO.md docs plugins scripts` で旧 NDF パス残存を確認
-- [ ] `rg "plugins/mcp-[a-z]" README.md AGENTS.md CLAUDE.md KIRO.md docs plugins scripts` で旧 MCP パス残存を確認
+- [ ] `rg "plugins/ndf($|[^-])|plugins/ndf/" README.md AGENTS.md CLAUDE.md KIRO.md docs plugins scripts .claude-plugin .agents` で旧 NDF パス残存を確認
+- [ ] `rg "plugins/mcp-[a-z]" README.md AGENTS.md CLAUDE.md KIRO.md docs plugins scripts .claude-plugin .agents` で旧 MCP パス残存を確認
 
 ## 完了の定義
 
