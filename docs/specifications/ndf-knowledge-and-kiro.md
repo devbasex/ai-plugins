@@ -6,12 +6,9 @@ NDF の知識配置、Serena MCP 分離、Kiro CLI 対応に関する確定仕�
 
 Skill の挙動仕様は本ディレクトリでは管理しない。Skill は `plugins/ndf/skills/*/SKILL.md` または `plugins/ndf/skills-codex/*/SKILL.md` を正とする。
 
-## 元資料
+## 仕様化の扱い
 
-| 領域 | 元資料 |
-|---|---|
-| NDF 知識構造・Serena 分離 | `issues/ndf-claude-ndf-md-abolition.md`, `issues/memory_replaning.md` |
-| Kiro CLI 対応 | `issues/PLAN14.md`, `issues/i10.md`, `issues/i14.md` |
+本仕様は、完了済み issues / plans の内容を統合した現行仕様である。元の `issues/*` ファイルは完了後に削除されるため、マージ後の正は本ファイル、`AGENTS.md`、`KIRO.md`、`plugins/ndf/README.md`、`docs/ndf-plugin-reference.md` とする。過去の検討履歴が必要な場合は、この仕様を追加した commit の git 履歴を参照する。
 
 ## NDF 知識構造
 

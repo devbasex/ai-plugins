@@ -34,7 +34,7 @@ host repo
 
 コンテナは毎回破棄する。テスト後にホストへ残すものは JUnit / log / artifact だけにする。
 
-開発環境または信頼済み CI に secret が存在する場合は、許可リストに載せた環境変数と認証ファイルだけをコンテナへ注入して認証付きテストを実行する。ホストの credential directory 全体や SSH agent は mount しない。ファイル secret は `--rm` 付きコンテナ内の `/tmp/runtime-secrets/` へコピーし、終了時にコンテナごと破棄する。DooD 環境では host bind mount が期待通り動かない場合があるため、bind mount は必須方式にしない。
+開発環境または信頼済み CI に secret が存在する場合は、許可リストに載せた環境変数と認証ファイルだけをコンテナへ注入して認証付きテストを実行する。ホストの credential directory 全体や SSH agent は mount しない。ファイル secret は `--tmpfs /tmp/runtime-secrets:rw,noexec,nosuid,nodev,size=1m` を付けた `--rm` コンテナへ host wrapper から `docker cp` で注入し、終了時に tmpfs とコンテナを破棄する。DooD 環境では host bind mount が期待通り動かない場合があるため、bind mount は必須方式にしない。
 
 ### 2. secret があれば認証付き smoke まで実行する
 
@@ -94,7 +94,7 @@ MCP plugin の env 名は、各 runtime plugin の実 `.mcp.json` / manifest / R
 
 `--secret-file` の `key` は `^[A-Za-z0-9_.-]+$` に一致し、かつ `tests/runtime-smoke/secrets-files.allowlist` に載る固定キーだけ許可する。`key` はコピー先 basename としてのみ扱い、`/` や `..` を含む値は拒否する。ファイル permission は container 内で `0400` にし、artifact 収集対象から `/tmp/runtime-secrets/**` を明示除外する。
 
-ファイル secret は container 内で `/tmp/runtime-secrets/` に置き、test 終了時に削除する。`docker run --rm` を必須にし、異常終了時も wrapper が `docker rm -f` を実行する。`--keep-container` は secret 注入モードでは即エラーにする。ファイル secret は container 内のコピー先へ環境変数を必ず再設定する。
+ファイル secret は container 内の tmpfs `/tmp/runtime-secrets/` に置き、test 終了時に削除する。`docker run --rm --tmpfs /tmp/runtime-secrets:rw,noexec,nosuid,nodev,size=1m` を必須にし、異常終了時も wrapper が `docker rm -f` を実行する。`--keep-container` は secret 注入モードでは即エラーにする。ファイル secret は container 内のコピー先へ環境変数を必ず再設定する。
 
 例:
 
@@ -102,11 +102,15 @@ MCP plugin の env 名は、各 runtime plugin の実 `.mcp.json` / manifest / R
 # host
 GOOGLE_APPLICATION_CREDENTIALS=/Users/me/.config/gcloud/application_default_credentials.json
 
-# container
-mkdir -p /tmp/runtime-secrets
-cp "$GOOGLE_APPLICATION_CREDENTIALS" /tmp/runtime-secrets/google-credentials.json
-chmod 0400 /tmp/runtime-secrets/google-credentials.json
-export GOOGLE_APPLICATION_CREDENTIALS=/tmp/runtime-secrets/google-credentials.json
+# host wrapper
+cid="$(docker run -d --rm \
+  --tmpfs /tmp/runtime-secrets:rw,noexec,nosuid,nodev,size=1m \
+  runtime-smoke:claude sleep infinity)"
+docker cp "$GOOGLE_APPLICATION_CREDENTIALS" "$cid:/tmp/runtime-secrets/google-credentials.json"
+docker exec "$cid" chmod 0400 /tmp/runtime-secrets/google-credentials.json
+docker exec \
+  -e GOOGLE_APPLICATION_CREDENTIALS=/tmp/runtime-secrets/google-credentials.json \
+  "$cid" bash /workspace/ai-plugins/tests/runtime-smoke/adapters/claude.sh
 ```
 
 AWS は profile 名だけでは認証できないため、基本は `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN` の環境変数方式を使う。profile を使う必要がある場合は、`--secret-file aws-credentials=/path/to/credentials` と `--secret-file aws-config=/path/to/config` で単一ファイルとして明示注入し、container 内で `AWS_SHARED_CREDENTIALS_FILE=/tmp/runtime-secrets/aws-credentials` と `AWS_CONFIG_FILE=/tmp/runtime-secrets/aws-config` を再設定する。`~/.aws` directory mount は引き続き禁止する。
@@ -188,7 +192,7 @@ Kiro は公式 installer を使う。CLI がコンテナで非対話 install で
 
 ### ネットワーク
 
-CLI install、npm package 解決、認証付き smoke のため、container build / smoke では network を許可する。ただし host の credential directory や SSH agent は mount せず、許可リストに載せた secret だけを `--rm` コンテナ内の `/tmp/runtime-secrets/` へ注入する。
+CLI install、npm package 解決、認証付き smoke のため、container build / smoke では network を許可する。ただし host の credential directory や SSH agent は mount せず、許可リストに載せた secret だけを `--rm --tmpfs /tmp/runtime-secrets:rw,noexec,nosuid,nodev,size=1m` コンテナへ注入する。
 
 ### version pinning
 
@@ -305,7 +309,7 @@ assertion:
 | RST-011 | all | MCP config | ○ | MCP config が存在し、env placeholder が secret 実値になっていない |
 | RST-012 | all | idempotency | ○ | install を 2 回実行しても重複登録しない |
 | RST-013 | all | no contamination | ○ | host HOME / repo root に runtime config を作らない |
-| RST-014 | all | secret injection | 条件付き必須 | 開発環境または信頼済み CI に secret がある場合、許可リストに従って `--rm` container へ注入し、container 内 path へ env を再設定する |
+| RST-014 | all | secret injection | 条件付き必須 | 開発環境または信頼済み CI に secret がある場合、許可リストに従って `--rm --tmpfs /tmp/runtime-secrets` container へ注入し、container 内 path へ env を再設定する |
 | RST-015 | all | authenticated skill run | 条件付き必須 | 認証情報がある場合は代表 Skill を実際に呼ぶ |
 | RST-016 | all | real MCP handshake | 条件付き必須 | sandbox credential がある MCP は handshake / sandbox query まで確認する |
 | RST-017 | all | browser auth fallback | ○ | `--with-secrets=off`、または非ブラウザ認証手段がない場合のみ login prompt / 認証 URL 表示まで到達する。`auto|required` で secret がある場合の browser prompt fallback は失敗扱い |
@@ -360,7 +364,7 @@ secret が未設定の場合、`--with-secrets=auto` では非認証 smoke の�
 - [ ] `scripts/runtime-smoke-test.sh` で runtime を選択できる
 - [ ] Claude / Codex / Kiro の container image が分かれている
 - [ ] smoke は host HOME と credential directory を mount しない
-- [ ] secret が存在する場合は許可リストに従って `--rm` container へ注入され、container 内 path へ env が再設定される
+- [ ] secret が存在する場合は許可リストに従って `--rm --tmpfs /tmp/runtime-secrets` container へ注入され、container 内 path へ env が再設定される
 - [ ] `--with-secrets=auto|required` と `--keep-container` の併用が拒否される
 - [ ] `ndf@ai-plugins` の実 install を確認する
 - [ ] `mcp-bigquery@ai-plugins` 相当の実 install を全 runtime で確認する
