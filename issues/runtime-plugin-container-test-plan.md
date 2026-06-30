@@ -34,7 +34,7 @@ host repo
 
 コンテナは毎回破棄する。テスト後にホストへ残すものは JUnit / log / artifact だけにする。
 
-開発環境または信頼済み CI に secret が存在する場合は、許可リストに載せた環境変数と認証ファイルだけをコンテナ内の一時ディレクトリへコピーして認証付きテストを実行する。ホストの credential directory 全体や SSH agent は mount しない。
+開発環境または信頼済み CI に secret が存在する場合は、許可リストに載せた環境変数と認証ファイルだけをコンテナへ注入して認証付きテストを実行する。ホストの credential directory 全体や SSH agent は mount しない。ファイル secret はコンテナの通常 R/W layer に残さず、`--tmpfs /tmp/runtime-secrets` への注入、または個別ファイルの read-only bind mount のどちらかで扱う。
 
 ### 2. secret があれば認証付き smoke まで実行する
 
@@ -49,13 +49,21 @@ host repo
 - secret が存在する場合の実 Skill invocation
 - secret が存在する場合の MCP handshake / sandbox query
 
-secret が不足している場合は、認証付き項目を skip として記録し、非認証 smoke の結果だけで合否を判定する。secret が存在するのに認証付き項目が失敗した場合は失敗扱いにする。
+`--with-secrets` は次の 3 モードにする。
 
-ブラウザ認証が必要な runtime は、非対話コンテナでは認証完了できないため、認証 URL / device code / login prompt の表示または認証待ち状態まで到達すれば合格とする。ただし、この fallback を使えるのは、その runtime に非ブラウザ認証手段がない場合、または該当 secret が未提供の場合だけとする。API key などの secret が存在するのに runtime が認証できず browser prompt へ落ちた場合は失敗扱いにする。ブラウザ認証済み profile をホストからコピーすることは原則禁止する。
+| mode | 用途 | secret 不足時 |
+|---|---|---|
+| `off` | PR CI / 非認証 smoke | 認証付き項目を実行しない |
+| `auto` | ローカル任意実行 | 認証付き項目を skip として JUnit に記録 |
+| `required` | protected CI / release 前確認 | 失敗扱い |
 
-### 3. secret コピーのルール
+secret が存在するのに認証付き項目が失敗した場合は、`auto` / `required` のどちらでも失敗扱いにする。
 
-secret は `scripts/runtime-smoke-test.sh --with-secrets=auto` で検出し、許可リストに合致するものだけを container build context とは別の一時ディレクトリへコピーする。Docker image layer に secret を焼き込まない。
+ブラウザ認証が必要な runtime は、非対話コンテナでは認証完了できないため、認証 URL / device code / login prompt の表示または認証待ち状態まで到達すれば合格とする。ただし、この fallback を使えるのは、`--with-secrets=off`、またはその runtime に非ブラウザ認証手段がない場合だけとする。`--with-secrets=auto|required` で API key などの secret が存在するのに runtime が認証できず browser prompt へ落ちた場合は失敗扱いにする。ブラウザ認証済み profile をホストからコピーすることは原則禁止する。
+
+### 3. secret 注入のルール
+
+secret は `scripts/runtime-smoke-test.sh --with-secrets=auto|required` で検出し、許可リストに合致するものだけを container build context とは別に注入する。Docker image layer に secret を焼き込まない。
 
 許可する環境変数:
 
@@ -65,12 +73,14 @@ secret は `scripts/runtime-smoke-test.sh --with-secrets=auto` で検出し、�
 - `AWS_ACCESS_KEY_ID`
 - `AWS_SECRET_ACCESS_KEY`
 - `AWS_SESSION_TOKEN`
-- MCP plugin ごとの sandbox env。例: `BIGQUERY_PROJECT_ID`, `REDASH_URL`, `REDASH_API_KEY`
+- MCP plugin ごとの sandbox env。例: `BIGQUERY_PROJECT`, `BIGQUERY_LOCATION`, `BIGQUERY_DATASET`, `BIGQUERY_KEY_FILE`, `REDASH_URL`, `REDASH_API_KEY`
+
+MCP plugin の env 名は、各 runtime plugin の実 `.mcp.json` / manifest / README から生成または検証する。例として `mcp-bigquery` は現行 `.mcp.json` が `BIGQUERY_PROJECT`, `BIGQUERY_LOCATION`, `BIGQUERY_DATASET`, `BIGQUERY_KEY_FILE` を参照するため、smoke test でもこの名前を使う。README と `.mcp.json` の env 名が食い違う場合は、テスト側で alias せず、plugin 側の docs / manifest mismatch として失敗させる。
 
 許可するファイル:
 
 - `$GOOGLE_APPLICATION_CREDENTIALS` が指す service account / ADC file
-- 明示指定された `--secret-file name=/path/to/file`
+- 明示指定された `--secret-file key=/path/to/file`
 - `tests/runtime-smoke/secrets-files.allowlist` に載せた path
 
 禁止事項:
@@ -79,8 +89,11 @@ secret は `scripts/runtime-smoke-test.sh --with-secrets=auto` で検出し、�
 - `~/.ssh`, `~/.aws`, `~/.config`, `~/.claude`, `~/.codex`, `~/.kiro` の directory mount
 - secret 値の log / JUnit / artifact 出力
 - secret を Dockerfile の `ARG` / `ENV` / image layer に残す
+- `--secret-file` の `key` に path separator、空文字、未許可文字、allowlist 外の名前を許すこと
 
-コピーされた secret は container 内で `/tmp/runtime-secrets/` に置き、test 終了時に削除する。ファイル secret は container 内のコピー先へ環境変数を必ず再設定する。
+`--secret-file` の `key` は `^[A-Za-z0-9_.-]+$` に一致し、かつ `tests/runtime-smoke/secrets-files.allowlist` に載る固定キーだけ許可する。`key` はコピー先 basename としてのみ扱い、`/` や `..` を含む値は拒否する。ファイル permission は container 内で `0400` にし、artifact 収集対象から `/tmp/runtime-secrets/**` を明示除外する。
+
+ファイル secret は container 内で `/tmp/runtime-secrets/` に置き、test 終了時に削除する。`/tmp/runtime-secrets` は `tmpfs` にするか、個別ファイルを read-only bind mount する。ファイル secret は container 内のコピー先へ環境変数を必ず再設定する。
 
 例:
 
@@ -88,12 +101,13 @@ secret は `scripts/runtime-smoke-test.sh --with-secrets=auto` で検出し、�
 # host
 GOOGLE_APPLICATION_CREDENTIALS=/Users/me/.config/gcloud/application_default_credentials.json
 
-# container
+# container (/tmp/runtime-secrets は tmpfs または read-only bind mount)
 cp "$GOOGLE_APPLICATION_CREDENTIALS" /tmp/runtime-secrets/google-credentials.json
+chmod 0400 /tmp/runtime-secrets/google-credentials.json
 export GOOGLE_APPLICATION_CREDENTIALS=/tmp/runtime-secrets/google-credentials.json
 ```
 
-AWS は profile 名だけでは認証できないため、基本は `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN` の環境変数方式を使う。profile を使う必要がある場合は、`--secret-file aws-credentials=/path/to/credentials` と `--secret-file aws-config=/path/to/config` で単一ファイルとして明示コピーし、container 内で `AWS_SHARED_CREDENTIALS_FILE=/tmp/runtime-secrets/aws-credentials` と `AWS_CONFIG_FILE=/tmp/runtime-secrets/aws-config` を再設定する。`~/.aws` directory mount は引き続き禁止する。
+AWS は profile 名だけでは認証できないため、基本は `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN` の環境変数方式を使う。profile を使う必要がある場合は、`--secret-file aws-credentials=/path/to/credentials` と `--secret-file aws-config=/path/to/config` で単一ファイルとして明示注入し、container 内で `AWS_SHARED_CREDENTIALS_FILE=/tmp/runtime-secrets/aws-credentials` と `AWS_CONFIG_FILE=/tmp/runtime-secrets/aws-config` を再設定する。`~/.aws` directory mount は引き続き禁止する。
 
 ### 4. runtime adapter で CLI 差分を閉じ込める
 
@@ -142,6 +156,9 @@ bash scripts/runtime-smoke-test.sh --runtime claude --with-secrets=auto
 bash scripts/runtime-smoke-test.sh --runtime codex --with-secrets=auto
 bash scripts/runtime-smoke-test.sh --runtime kiro --with-secrets=auto
 
+# protected CI / release 前確認では secret 必須
+bash scripts/runtime-smoke-test.sh --runtime claude --with-secrets=required
+
 # debug
 bash scripts/runtime-smoke-test.sh --runtime codex --keep-container
 ```
@@ -169,7 +186,7 @@ Kiro は公式 installer を使う。CLI がコンテナで非対話 install で
 
 ### ネットワーク
 
-CLI install、npm package 解決、認証付き smoke のため、container build / smoke では network を許可する。ただし host の credential directory や SSH agent は mount せず、許可リストに載せた secret だけを一時コピーする。
+CLI install、npm package 解決、認証付き smoke のため、container build / smoke では network を許可する。ただし host の credential directory や SSH agent は mount せず、許可リストに載せた secret だけを tmpfs または個別 read-only bind mount で注入する。
 
 ### version pinning
 
@@ -207,7 +224,7 @@ assertion:
 - `.mcp.json` に secret 実値がなく、`${...}` 形式の env placeholder だけがある
 - hook script を fixture payload で実行して exit code 0 を確認する
 - `ANTHROPIC_API_KEY` または利用可能な Claude 認証情報がある場合、代表 Skill を 1 つ実行する
-- Claude がブラウザ認証だけを要求する場合、login prompt / 認証 URL 表示まで到達することを確認する。ただし `ANTHROPIC_API_KEY` などの非ブラウザ認証 secret が存在する場合は、browser prompt へ落ちた時点で失敗扱いにする
+- Claude がブラウザ認証だけを要求する場合、login prompt / 認証 URL 表示まで到達することを確認する。ただし `--with-secrets=auto|required` で `ANTHROPIC_API_KEY` などの非ブラウザ認証 secret が存在する場合は、browser prompt へ落ちた時点で失敗扱いにする
 
 ### Codex
 
@@ -232,7 +249,7 @@ assertion:
 - MCP plugin の config が Codex の plugin manifest から参照できる
 - hook script を Codex fixture payload で実行して exit code 0 を確認する
 - `OPENAI_API_KEY` または Codex が利用可能な認証情報がある場合、代表 Skill を 1 つ実行する
-- Codex がブラウザ認証だけを要求する場合、login prompt / 認証 URL 表示まで到達することを確認する。ただし `OPENAI_API_KEY` などの非ブラウザ認証 secret が存在する場合は、browser prompt へ落ちた時点で失敗扱いにする
+- Codex がブラウザ認証だけを要求する場合、login prompt / 認証 URL 表示まで到達することを確認する。ただし `--with-secrets=auto|required` で `OPENAI_API_KEY` などの非ブラウザ認証 secret が存在する場合は、browser prompt へ落ちた時点で失敗扱いにする
 
 注意:
 
@@ -267,7 +284,7 @@ assertion:
 - 生成された config に secret 実値がない
 - installer を 2 回実行しても重複定義を作らない
 - Kiro が利用可能な認証情報または sandbox MCP credential がある場合、代表 Skill / MCP handshake を実行する
-- Kiro がブラウザ認証だけを要求する場合、login prompt / 認証 URL 表示まで到達することを確認する。ただし非ブラウザ認証 secret が存在する場合は、browser prompt へ落ちた時点で失敗扱いにする
+- Kiro がブラウザ認証だけを要求する場合、login prompt / 認証 URL 表示まで到達することを確認する。ただし `--with-secrets=auto|required` で非ブラウザ認証 secret が存在する場合は、browser prompt へ落ちた時点で失敗扱いにする
 
 ## テストマトリクス
 
@@ -286,10 +303,10 @@ assertion:
 | RST-011 | all | MCP config | ○ | MCP config が存在し、env placeholder が secret 実値になっていない |
 | RST-012 | all | idempotency | ○ | install を 2 回実行しても重複登録しない |
 | RST-013 | all | no contamination | ○ | host HOME / repo root に runtime config を作らない |
-| RST-014 | all | secret copy | 条件付き必須 | 開発環境または信頼済み CI に secret がある場合、許可リストに従って container へ一時コピーし、container 内 path へ env を再設定する |
+| RST-014 | all | secret injection | 条件付き必須 | 開発環境または信頼済み CI に secret がある場合、許可リストに従って tmpfs または個別 read-only bind mount で container へ注入し、container 内 path へ env を再設定する |
 | RST-015 | all | authenticated skill run | 条件付き必須 | 認証情報がある場合は代表 Skill を実際に呼ぶ |
 | RST-016 | all | real MCP handshake | 条件付き必須 | sandbox credential がある MCP は handshake / sandbox query まで確認する |
-| RST-017 | all | browser auth fallback | ○ | ブラウザ認証しかない、または secret が未提供の場合は login prompt / 認証 URL 表示まで到達する。secret がある場合の browser prompt fallback は失敗扱い |
+| RST-017 | all | browser auth fallback | ○ | `--with-secrets=off`、または非ブラウザ認証手段がない場合のみ login prompt / 認証 URL 表示まで到達する。`auto|required` で secret がある場合の browser prompt fallback は失敗扱い |
 
 ## CI 設計
 
@@ -315,7 +332,7 @@ assertion:
 認証付き smoke は次の信頼済み context だけで実行する。
 
 - `workflow_dispatch` + protected environment
-- default branch への merge 後 workflow
+- default branch への merge 後 workflow。secret が期待される場合は `--with-secrets=required`
 - maintainer が明示実行する local command
 
 secret が未設定の場合は非認証 smoke のみを実行し、認証付き項目は skip として JUnit に記録する。
@@ -334,19 +351,19 @@ secret が未設定の場合は非認証 smoke のみを実行し、認証付き
   - 実際の Skill invocation
   - MCP handshake
   - Slack / external notification は dry-run のみ
-  - ブラウザ認証 runtime は認証準備完了まで
+  - ブラウザ認証 runtime は、非ブラウザ認証手段がない場合だけ認証準備完了まで
 
 ## 完了の定義
 
 - [ ] `scripts/runtime-smoke-test.sh` で runtime を選択できる
 - [ ] Claude / Codex / Kiro の container image が分かれている
 - [ ] smoke は host HOME と credential directory を mount しない
-- [ ] secret が存在する場合は許可リストに従って container へ一時コピーされ、container 内 path へ env が再設定される
+- [ ] secret が存在する場合は許可リストに従って tmpfs または個別 read-only bind mount で container へ注入され、container 内 path へ env が再設定される
 - [ ] `ndf@ai-plugins` の実 install を確認する
 - [ ] `mcp-bigquery@ai-plugins` 相当の実 install を全 runtime で確認する
 - [ ] Skill / MCP / hook / agents または Kiro agent config の assertion がある
 - [ ] hook script は fixture payload で非認証実行できる
 - [ ] secret が存在する場合は認証付き Skill / MCP smoke が実行される
-- [ ] ブラウザ認証しかない runtime、または secret 未提供時だけ、認証準備完了までを合格条件にする
+- [ ] ブラウザ認証しかない runtime、または `--with-secrets=off` の非認証 smoke だけ、認証準備完了までを合格条件にする
 - [ ] CI で smoke test log と JUnit を artifact 化する
 - [ ] secret 値が log / JUnit / artifact に出力されない

@@ -309,6 +309,8 @@ codex plugin add mcp-bigquery@ai-plugins
 codex plugin add mcp-serena@ai-plugins
 ```
 
+Claude / Codex の marketplace URL は同一 repository root を指定し、各 CLI が自 runtime 用 manifest (`.claude-plugin/marketplace.json` または `.agents/plugins/marketplace.json`) を解決する前提にする。この前提は `scripts/runtime-smoke-test.sh --runtime claude|codex` で必ず検証する。CLI が root URL から正しい manifest を解決できない場合は、ユーザー向け docs と adapter を runtime 固有の marketplace URL / path 指定へ切り替える。
+
 ローカル検証時:
 
 ```bash
@@ -443,7 +445,7 @@ base branch: `main`
 | 5 | `feature/runtime-split-docs-cleanup` | README / AGENTS / docs / specs をランタイム分離後の表現に更新し、`plugins/ndf` を stub 化または削除する | PR2, PR3, PR4 | × |
 | 6 | `feature/runtime-split-mcp-plugins` | MCP plugin を `plugins/mcp/shared|claude|codex|kiro` に分離し、各 marketplace / installer から同一 plugin 名で導入できるようにする | PR1 | ○ |
 | 7 | `feature/runtime-split-validation` | validate script、開発者 hook、CI、リンク検証、plugin validate を追加・実行する | PR2, PR3, PR4, PR6 | ○ |
-| 8 | `feature/runtime-split-container-smoke` | Claude / Codex / Kiro を軽量コンテナに実インストールし、plugin install、Skill、MCP、hook、agents の smoke test を追加する | PR7 | ○ |
+| 8 | `feature/runtime-split-container-smoke` | Claude / Codex / Kiro を軽量コンテナに実インストールし、plugin install、Skill、MCP、hook、agents の smoke test を追加する | PR7 | × |
 
 単一 PR では差分が大きく、marketplace source 変更とディレクトリ移動が混在してレビュー困難になるため、release branch + 個別 PR 方式を採用する。
 
@@ -528,9 +530,9 @@ base branch: `main`
   - ローカル作業ツリーを marketplace source として追加し、`ndf` と主要 `mcp-*` plugin を実際に install する
   - Skill、MCP、hook、agents / Kiro agent config が runtime plugin 配下から参照できることを確認する
   - secret がない環境では install / config / hook payload / MCP config の非認証 smoke を必須にする
-  - 開発環境または信頼済み CI に secret が存在する場合は、許可リストに従ってコンテナへ一時コピーし、認証付き Skill / MCP smoke まで実行する
+  - 開発環境または信頼済み CI に secret が存在する場合は、許可リストに従って tmpfs または個別 read-only bind mount でコンテナへ注入し、認証付き Skill / MCP smoke まで実行する
   - `pull_request` CI では secret を渡さず、非認証 smoke のみを実行する
-  - ブラウザ認証しかできない runtime、または secret 未提供時は、login prompt / 認証 URL 表示まで到達すれば合格とする
+  - ブラウザ認証しかできない runtime、または `--with-secrets=off` の非認証 smoke では、login prompt / 認証 URL 表示まで到達すれば合格とする
   - 詳細は `issues/runtime-plugin-container-test-plan.md` に従う
 
 ## 影響範囲
@@ -573,8 +575,8 @@ base branch: `main`
 | CLI 実インストール smoke がホスト環境を汚染する | Docker コンテナ内に HOME / cache / config を閉じ込め、ホストの credential directory は mount しない |
 | CLI や marketplace 機能が experimental で破壊的変更を受ける | smoke test は install 手順を fixture 化し、CLI version をログ出力する。破壊的変更時は plan 側ではなく runtime 別 adapter を更新する |
 | PR CI で secret が漏洩する | `pull_request` では secret を渡さず、認証付き smoke は protected workflow / default branch / local の信頼済み context だけで実行する |
-| 認証が必要な機能を CI で実行できない | secret がある場合は許可リストに従って container へ一時コピーして認証付き smoke を実行する。secret がない場合は skip として記録する |
-| ブラウザ認証が非対話コンテナで完了できない | ブラウザ認証しかできない runtime、または secret 未提供時は login prompt / 認証 URL 表示まで到達すれば合格とする。secret がある場合の browser prompt fallback は失敗扱いにする |
+| 認証が必要な機能を CI で実行できない | secret がある場合は許可リストに従って tmpfs または個別 read-only bind mount で container へ注入して認証付き smoke を実行する。secret がない場合は skip として記録する |
+| ブラウザ認証が非対話コンテナで完了できない | ブラウザ認証しかできない runtime、または `--with-secrets=off` の非認証 smoke では login prompt / 認証 URL 表示まで到達すれば合格とする。secret がある場合の browser prompt fallback は失敗扱いにする |
 
 ## テスト計画
 
