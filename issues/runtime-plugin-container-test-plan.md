@@ -103,7 +103,7 @@ MCP plugin の env 名は、各 runtime plugin の実 `.mcp.json` / manifest / R
 - `--secret-file` の `key` に path separator、空文字、未許可文字、allowlist 外の名前を許すこと
 - `--with-secrets=auto|required` と `--keep-container` の併用
 
-`--secret-file` の `key` は `^[A-Za-z0-9_.-]+$` に一致し、かつ `tests/runtime-smoke/secrets-files.allowlist` に載る固定キーだけ許可する。`key` はコピー先 basename としてのみ扱い、`/` や `..` を含む値は拒否する。ファイル permission は container 内で `0400` にし、artifact 収集対象から `/tmp/runtime-secrets/**` を明示除外する。
+`--secret-file` の `key` は `^[A-Za-z0-9_.-]+$` に一致し、かつ `tests/runtime-smoke/secrets-files.allowlist` に載る固定キーだけ許可する。`key` はコピー先 basename としてのみ扱い、`/` や `..` を含む値は拒否する。ファイル permission は container 内で `0444` にし、artifact 収集対象から `/tmp/runtime-secrets/**` を明示除外する。
 
 ファイル secret は container 内の tmpfs `/tmp/runtime-secrets/` に置き、test 終了時に削除する。`docker run --rm --tmpfs /tmp/runtime-secrets:rw,noexec,nosuid,nodev,size=1m` を必須にし、異常終了時も wrapper が `docker rm -f` を実行する。`--keep-container` は secret 注入モードでは即エラーにする。ファイル secret は container 内のコピー先へ環境変数を必ず再設定する。
 
