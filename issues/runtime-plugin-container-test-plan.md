@@ -61,6 +61,8 @@ secret が存在するのに認証付き項目が失敗した場合は、`auto` 
 
 ブラウザ認証が必要な runtime は、非対話コンテナでは認証完了できないため、認証 URL / device code / login prompt の表示または認証待ち状態まで到達すれば合格とする。ただし、この fallback を使えるのは、`--with-secrets=off`、またはその runtime に非ブラウザ認証手段がない場合だけとする。`--with-secrets=auto|required` で API key などの secret が存在するのに runtime が認証できず browser prompt へ落ちた場合は失敗扱いにする。ブラウザ認証済み profile をホストからコピーすることは原則禁止する。
 
+ブラウザ認証準備の smoke はハングさせない。adapter は `timeout 30s <login command>` のように上限時間付きで実行し、stdout / stderr に認証 URL、device code、login prompt のいずれかが出たことを assertion してからプロセスを終了する。`timeout` の終了コード自体は、期待する認証待ち出力が得られていれば成功扱いにしてよい。
+
 ### 3. secret 注入のルール
 
 secret は `scripts/runtime-smoke-test.sh --with-secrets=auto|required` で検出し、許可リストに合致するものだけを container build context とは別に注入する。Docker image layer に secret を焼き込まない。
@@ -80,6 +82,8 @@ secret は `scripts/runtime-smoke-test.sh --with-secrets=auto|required` で検�
 - `BIGQUERY_KEY_FILE`
 
 ファイルパス環境変数は host 側のコピー元 path としてだけ読む。container へ raw host path を渡してはいけない。host wrapper が `docker cp` で `/tmp/runtime-secrets/<key>` へ注入した後、container 内 env を `/tmp/runtime-secrets/<key>` へ再設定する。
+
+raw 環境変数 secret も `docker run -e` では渡さない。`docker inspect` 等に残るのを避けるため、secret なしで起動した container に対し、adapter 実行時の `docker exec -e NAME=...` でだけ渡す。実行後は wrapper が container を破棄する。
 
 MCP plugin の env 名は、各 runtime plugin の実 `.mcp.json` / manifest / README から生成または検証する。例として `mcp-bigquery` は現行 `.mcp.json` が `BIGQUERY_PROJECT`, `BIGQUERY_LOCATION`, `BIGQUERY_DATASET`, `BIGQUERY_KEY_FILE` を参照するため、smoke test でもこの名前を使う。ただし `BIGQUERY_KEY_FILE` はファイルパス環境変数として扱い、container 内 path へ再設定する。README と `.mcp.json` の env 名が食い違う場合は、テスト側で alias せず、plugin 側の docs / manifest mismatch として失敗させる。
 
@@ -113,9 +117,11 @@ GOOGLE_APPLICATION_CREDENTIALS=/Users/me/.config/gcloud/application_default_cred
 cid="$(docker run -d --rm \
   --tmpfs /tmp/runtime-secrets:rw,noexec,nosuid,nodev,size=1m \
   runtime-smoke:claude sleep infinity)"
+trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
 docker cp "$GOOGLE_APPLICATION_CREDENTIALS" "$cid:/tmp/runtime-secrets/google-credentials.json"
-docker exec "$cid" chmod 0400 /tmp/runtime-secrets/google-credentials.json
+docker exec "$cid" chmod 0444 /tmp/runtime-secrets/google-credentials.json
 docker exec \
+  -e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
   -e GOOGLE_APPLICATION_CREDENTIALS=/tmp/runtime-secrets/google-credentials.json \
   "$cid" bash /workspace/ai-plugins/tests/runtime-smoke/adapters/claude.sh
 ```

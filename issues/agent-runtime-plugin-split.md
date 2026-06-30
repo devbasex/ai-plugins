@@ -194,6 +194,8 @@ bash scripts/build-runtime-plugins.sh --check
 | `pre-commit` | `bash scripts/build-runtime-plugins.sh --check` | `ndf-shared` と runtime plugin 生成物の同期漏れを commit 前に止める |
 | `pre-push` | `bash scripts/validate-runtime-plugins.sh` | plugin validate、manifest、リンク、生成物同期を push 前に確認する |
 
+`pre-commit` は working tree だけでなく staged 状態も検査する。`build-runtime-plugins.sh --check` 後に runtime 生成物へ未ステージ差分が残っている場合、つまり開発者が build 後に `git add` を忘れている場合は失敗させる。少なくとも `git diff --name-only -- plugins/ndf-claude plugins/ndf-codex plugins/ndf-kiro plugins/mcp/claude plugins/mcp/codex plugins/mcp/kiro` と `git diff --cached --name-only -- ...` の両方を見て、生成元と生成先の staged set が不整合な commit を止める。
+
 CI では hook と同等以上の検証を必須にする。ローカル hook は任意導入だが、CI は最終防衛線として必須にする。
 
 | CI job | 実行内容 |
