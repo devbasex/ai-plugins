@@ -65,21 +65,28 @@ secret が存在するのに認証付き項目が失敗した場合は、`auto` 
 
 secret は `scripts/runtime-smoke-test.sh --with-secrets=auto|required` で検出し、許可リストに合致するものだけを container build context とは別に注入する。Docker image layer に secret を焼き込まない。
 
-許可する環境変数:
+許可する raw 環境変数:
 
 - `ANTHROPIC_API_KEY`
 - `OPENAI_API_KEY`
-- `GOOGLE_APPLICATION_CREDENTIALS`
 - `AWS_ACCESS_KEY_ID`
 - `AWS_SECRET_ACCESS_KEY`
 - `AWS_SESSION_TOKEN`
-- MCP plugin ごとの sandbox env。例: `BIGQUERY_PROJECT`, `BIGQUERY_LOCATION`, `BIGQUERY_DATASET`, `BIGQUERY_KEY_FILE`, `REDASH_URL`, `REDASH_API_KEY`
+- MCP plugin ごとの sandbox env。例: `BIGQUERY_PROJECT`, `BIGQUERY_LOCATION`, `BIGQUERY_DATASET`, `REDASH_URL`, `REDASH_API_KEY`
 
-MCP plugin の env 名は、各 runtime plugin の実 `.mcp.json` / manifest / README から生成または検証する。例として `mcp-bigquery` は現行 `.mcp.json` が `BIGQUERY_PROJECT`, `BIGQUERY_LOCATION`, `BIGQUERY_DATASET`, `BIGQUERY_KEY_FILE` を参照するため、smoke test でもこの名前を使う。README と `.mcp.json` の env 名が食い違う場合は、テスト側で alias せず、plugin 側の docs / manifest mismatch として失敗させる。
+許可するファイルパス環境変数:
+
+- `GOOGLE_APPLICATION_CREDENTIALS`
+- `BIGQUERY_KEY_FILE`
+
+ファイルパス環境変数は host 側のコピー元 path としてだけ読む。container へ raw host path を渡してはいけない。host wrapper が `docker cp` で `/tmp/runtime-secrets/<key>` へ注入した後、container 内 env を `/tmp/runtime-secrets/<key>` へ再設定する。
+
+MCP plugin の env 名は、各 runtime plugin の実 `.mcp.json` / manifest / README から生成または検証する。例として `mcp-bigquery` は現行 `.mcp.json` が `BIGQUERY_PROJECT`, `BIGQUERY_LOCATION`, `BIGQUERY_DATASET`, `BIGQUERY_KEY_FILE` を参照するため、smoke test でもこの名前を使う。ただし `BIGQUERY_KEY_FILE` はファイルパス環境変数として扱い、container 内 path へ再設定する。README と `.mcp.json` の env 名が食い違う場合は、テスト側で alias せず、plugin 側の docs / manifest mismatch として失敗させる。
 
 許可するファイル:
 
 - `$GOOGLE_APPLICATION_CREDENTIALS` が指す service account / ADC file
+- `$BIGQUERY_KEY_FILE` が指す service account key file
 - 明示指定された `--secret-file key=/path/to/file`
 - `tests/runtime-smoke/secrets-files.allowlist` に載せた path
 
