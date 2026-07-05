@@ -69,15 +69,30 @@ copy_tree() {
 
 rewrite_codex_skill_paths() {
   local skills_dir="$1"
+  local script_dir="$2"
+  local file
 
-  sed -i 's#${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/skills/fix/scripts/fetch-pr-comments.sh#${PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}/skills-codex/fix/scripts/fetch-pr-comments.sh#g' \
+  for file in \
     "$skills_dir/fix/SKILL.md" \
     "$skills_dir/review-pr-comments/SKILL.md"
-  sed -i \
-    -e 's#${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}#${PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}#g' \
-    -e 's#skills/cross-review/scripts#skills-codex/cross-review/scripts#g' \
+  do
+    [ -f "$file" ] || continue
+    sed "s#\${PLUGIN_ROOT:-\${CLAUDE_PLUGIN_ROOT}}/skills/fix/scripts/fetch-pr-comments.sh#\${PLUGIN_ROOT:-\${CODEX_PLUGIN_ROOT:-\${CLAUDE_PLUGIN_ROOT}}}/$script_dir/fix/scripts/fetch-pr-comments.sh#g" \
+      "$file" >"$file.tmp"
+    mv "$file.tmp" "$file"
+  done
+
+  for file in \
     "$skills_dir/cross-review/SKILL.md" \
     "$skills_dir/cross-review/docs/01-state-and-review.md"
+  do
+    [ -f "$file" ] || continue
+    sed \
+      -e 's#${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}#${PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}#g' \
+      -e "s#skills/cross-review/scripts#$script_dir/cross-review/scripts#g" \
+      "$file" >"$file.tmp"
+    mv "$file.tmp" "$file"
+  done
 }
 
 sync_skills() {
@@ -129,7 +144,9 @@ sync_skills() {
   \) -exec rm -rf {} + 2>/dev/null || true
 
   if [ "$variant" = codex-legacy ]; then
-    rewrite_codex_skill_paths "$tmp_dir"
+    rewrite_codex_skill_paths "$tmp_dir" skills-codex
+  elif [ "$variant" = codex-runtime ]; then
+    rewrite_codex_skill_paths "$tmp_dir" skills
   fi
 
   if [ "$CHECK" = true ]; then
@@ -168,7 +185,11 @@ sync_runtime_if_present() {
   local plugin_dir="$ROOT_DIR/plugins/ndf-$runtime"
 
   [ -d "$plugin_dir" ] || return 0
-  sync_skills "$manifest" "$SHARED_DIR/skills" "$plugin_dir/skills"
+  if [ "$runtime" = codex ]; then
+    sync_skills "$manifest" "$SHARED_DIR/skills" "$plugin_dir/skills" codex-runtime
+  else
+    sync_skills "$manifest" "$SHARED_DIR/skills" "$plugin_dir/skills"
+  fi
   copy_tree "$SHARED_DIR/scripts" "$plugin_dir/scripts"
 }
 
