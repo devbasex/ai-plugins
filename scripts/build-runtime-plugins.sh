@@ -53,9 +53,9 @@ copy_tree() {
       rm -rf "$tmp_dir"
       return 1
     fi
-    if ! diff -ruN "$tmp_dir" "$dest_dir" >/tmp/runtime-plugin-build-check.diff; then
+    if ! diff -ruN "$tmp_dir" "$dest_dir" >"$tmp_dir/check.diff"; then
       echo "Generated directory is out of date: ${dest_dir#$ROOT_DIR/}" >&2
-      cat /tmp/runtime-plugin-build-check.diff >&2
+      cat "$tmp_dir/check.diff" >&2
       rm -rf "$tmp_dir"
       return 1
     fi
@@ -67,10 +67,19 @@ copy_tree() {
   fi
 }
 
+rewrite_codex_skill_paths() {
+  local skills_dir="$1"
+
+  sed -i 's#${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/skills/fix/scripts/fetch-pr-comments.sh#${PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}/skills-codex/fix/scripts/fetch-pr-comments.sh#g' \
+    "$skills_dir/fix/SKILL.md" \
+    "$skills_dir/review-pr-comments/SKILL.md"
+}
+
 sync_skills() {
   local manifest="$1"
   local source_dir="$2"
   local dest_dir="$3"
+  local variant="${4:-}"
   local tmp_dir
   local skill
 
@@ -114,15 +123,19 @@ sync_skills() {
     -name '*.pyo' \
   \) -exec rm -rf {} + 2>/dev/null || true
 
+  if [ "$variant" = codex-legacy ]; then
+    rewrite_codex_skill_paths "$tmp_dir"
+  fi
+
   if [ "$CHECK" = true ]; then
     if [ ! -d "$dest_dir" ]; then
       echo "Generated directory missing: ${dest_dir#$ROOT_DIR/}" >&2
       rm -rf "$tmp_dir"
       return 1
     fi
-    if ! diff -ruN "$tmp_dir" "$dest_dir" >/tmp/runtime-plugin-build-check.diff; then
+    if ! diff -ruN "$tmp_dir" "$dest_dir" >"$tmp_dir/check.diff"; then
       echo "Generated directory is out of date: ${dest_dir#$ROOT_DIR/}" >&2
-      cat /tmp/runtime-plugin-build-check.diff >&2
+      cat "$tmp_dir/check.diff" >&2
       rm -rf "$tmp_dir"
       return 1
     fi
@@ -135,10 +148,12 @@ sync_skills() {
 }
 
 sync_legacy_ndf() {
+  copy_tree "$SHARED_DIR/skills" "$ROOT_DIR/plugins/ndf/skills"
   sync_skills \
-    "$SHARED_DIR/manifests/claude-skills.txt" \
+    "$SHARED_DIR/manifests/codex-skills.txt" \
     "$SHARED_DIR/skills" \
-    "$ROOT_DIR/plugins/ndf/skills"
+    "$ROOT_DIR/plugins/ndf/skills-codex" \
+    codex-legacy
   copy_tree "$SHARED_DIR/scripts" "$ROOT_DIR/plugins/ndf/scripts"
 }
 
