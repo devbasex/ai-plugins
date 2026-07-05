@@ -1,5 +1,6 @@
 {
   "name": "ai-plugins",
+  "description": "Claude Code plugin marketplace for NDF workflow tooling and MCP server plugins.",
   "owner": {
     "name": "takemi-ohama",
     "email": "takemi.ohama+ai-plugins@gmail.com"
@@ -7,8 +8,8 @@
   "plugins": [
     {
       "name": "ndf",
-      "source": "./plugins/ndf",
-      "description": "All-in-one plugin (v4.19.0): Claude Code/Kiro and Codex skill exposure split, 8 specialized agents (model-tiered), 49 source skills including plan-to-spec final specification workflow, pytest-playwright E2E testing (7 focused skills: test-planning, script-creation, execution, report, kit-ops, browser-connect, evidence-drive), CDP remote browser support, Google Drive evidence archival, ML model structure standard, PR/review workflows, principles, data analysis, Codex/Gemini CLI integration, skill usage stats, statusline switcher (/ndf:statusline). SessionStart hook (transcript retention >= 90 days, default statusline when none is configured), Stop hook (AI-summarized Slack notifications)."
+      "source": "./plugins/ndf-claude",
+      "description": "Claude Code plugin (v4.19.0): 8 specialized agents, focused NDF skills for PR/review workflows, implementation planning, plan-to-spec, browser smoke testing, statusline, Codex CLI delegation, transcript retention guard, default statusline setup, and optional Slack notifications."
     },
     {
       "name": "mcp-playwright",

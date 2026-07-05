@@ -1,0 +1,61 @@
+{
+  "name": "ndf",
+  "version": "4.19.0",
+  "description": "Claude Code plugin with 8 specialized agents, focused NDF skills for PR/review workflows, implementation planning, debugging principles, statusline, browser smoke testing, Codex CLI delegation, transcript retention guard, default statusline setup, and optional Slack notifications.",
+  "author": {
+    "name": "takemi-ohama",
+    "url": "https://github.com/takemi-ohama"
+  },
+  "keywords": [
+    "mcp",
+    "codex",
+    "workflow",
+    "slack",
+    "notifications",
+    "agents",
+    "skills",
+    "director",
+    "orchestrator"
+  ],
+  "agents": [
+    "./agents/director.md",
+    "./agents/data-analyst.md",
+    "./agents/corder.md",
+    "./agents/researcher.md",
+    "./agents/qa.md",
+    "./agents/debugger.md",
+    "./agents/devops-engineer.md",
+    "./agents/code-reviewer.md"
+  ],
+  "skills": [
+    "./skills/pr",
+    "./skills/pr-tests",
+    "./skills/fix",
+    "./skills/review",
+    "./skills/cross-review",
+    "./skills/merged",
+    "./skills/clean",
+    "./skills/ndf-policies",
+    "./skills/markdown-writing",
+    "./skills/python-execution",
+    "./skills/docker-container-access",
+    "./skills/git-gh-operations",
+    "./skills/branch-fix-strategy",
+    "./skills/implementation-plan",
+    "./skills/investigation-rules",
+    "./skills/problem-solving",
+    "./skills/logging-guidelines",
+    "./skills/sync-main",
+    "./skills/cherry-pick-pr",
+    "./skills/deploy",
+    "./skills/review-branch",
+    "./skills/review-pr-comments",
+    "./skills/resolve-pr-comments",
+    "./skills/browser-test",
+    "./skills/codex",
+    "./skills/gemini",
+    "./skills/statusline",
+    "./skills/issue-plan-strategy",
+    "./skills/plan-to-spec"
+  ]
+}
