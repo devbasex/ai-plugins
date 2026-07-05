@@ -343,8 +343,7 @@ PATCH リリース。
   - `test_state_merge_fix.py` — 正規 / `/tmp/` fallback / key 別名 / 全候補不在 /
     `--file` 明示の 5 ケース。
 - **関連 issue / plan**:
-  - `issues/i18-issue-gemini.md` (再現報告) /
-    `issues/PLAN21_cross-review-gemini-stall-and-fix-merge.md` (実装プラン)。
+  - 完了済み開発記録として削除済み。詳細な検討履歴が必要な場合は、本バージョン追加時の git 履歴を参照。
 
 #### 既存ユーザへの影響
 
@@ -398,7 +397,7 @@ result.json を書き出すケースで intent が silent に None マージさ�
     benign 判定と、本物 fatal が依然検知される回帰テスト 7 ケース。
   - ローカル実行: `uv run --with pytest pytest plugins/ndf/skills/cross-review/tests`。
 - **関連 issue / plan**:
-  - `issues/i17.md` (再現報告) / `issues/PLAN20_cross-review-worktree-and-result-schema-fix.md` (実装プラン)。
+  - 完了済み開発記録として削除済み。詳細な検討履歴が必要な場合は、本バージョン追加時の git 履歴を参照。
 
 #### 既存ユーザへの影響
 
@@ -626,7 +625,7 @@ PR #72 の実機テストで得た codex / gemini からの指摘および追加
 
 > **注意**: 互換性破壊リリース。Python パッケージ名・fixture 名・CLI option・
 > 環境変数・内部クラス名がすべて変わる。既存利用者は manual に書き換え必要。
-> 詳細は [PLAN19](../../issues/PLAN19.md) を参照。
+> 詳細な検討履歴が必要な場合は、本バージョン追加時の git 履歴を参照。
 
 - **`playwright-scenario-test` v0.5.0** (Skill 非依存化 + 名前空間整理):
   - **目的**: 旧 v0.4.0 までは Skill ディレクトリで `uv sync` する必要があり、
@@ -726,7 +725,7 @@ PR #72 の実機テストで得た codex / gemini からの指摘および追加
   等を **テスト失敗として検出**) を **default 有効** で復活させた。
   まだ開発・検証段階の skill のため互換性は重視せず、config 無記述でも
   PHP プロジェクトで素直に効くよう default で `enabled=True` + PHP 系
-  パターンを内蔵する。詳細は [PLAN18](../../issues/PLAN18.md) を参照。
+  パターンを内蔵する。詳細な検討履歴が必要な場合は、本バージョン追加時の git 履歴を参照。
   - **新モジュール**:
     - `scenario_test/body_check.py` — 純粋関数 `scan_body` / `is_html_response`
       と `BodyViolation` dataclass。substring match で fatal / warning /
@@ -768,8 +767,8 @@ PR #72 の実機テストで得た codex / gemini からの指摘および追加
 ### v4.2.0 (playwright-scenario-test v0.3.0 — pure pytest-playwright 完全移行)
 
 > **注意**: 互換性破壊リリース。v0.2.5 までの自前 YAML DSL は **完全廃止** し、
-> 利用者は通常の pytest-playwright テストを書く形に移行する。詳細は
-> [PLAN17](../../../issues/PLAN17.md) を参照。
+> 利用者は通常の pytest-playwright テストを書く形に移行する。詳細な検討履歴が必要な場合は、
+> 本バージョン追加時の git 履歴を参照。
 
 - **`playwright-scenario-test` v0.3.0** (pure pytest-playwright):
   - **アーキテクチャ全面刷新**: 自前 DSL (testcase YAML / runner / dispatcher /

@@ -83,7 +83,7 @@ secret は `scripts/runtime-smoke-test.sh --with-secrets=auto|required` で検�
 
 ファイルパス環境変数は host 側のコピー元 path としてだけ読む。container へ raw host path を渡してはいけない。host wrapper が `docker cp` で `/tmp/runtime-secrets/<key>` へ注入した後、container 内 env を `/tmp/runtime-secrets/<key>` へ再設定する。
 
-raw 環境変数 secret も `docker run -e` では渡さない。`docker inspect` 等に残るのを避けるため、secret なしで起動した container に対し、adapter 実行時の `docker exec -e NAME=...` でだけ渡す。実行後は wrapper が container を破棄する。
+raw 環境変数 secret も `docker run -e` / `docker exec -e` / command string では渡さない。`docker inspect` や host 側 process argv に secret 値が残るのを避けるため、secret なしで起動した container に対し、`docker exec -i` の stdin で tmpfs 上の `/tmp/runtime-secrets/raw-env` へ shell-escaped な env file として注入する。adapter 実行時は同じ container 内でこの env file を source し、実行後は wrapper が container を破棄する。
 
 MCP plugin の env 名は、各 runtime plugin の実 `.mcp.json` / manifest / README から生成または検証する。例として `mcp-bigquery` は現行 `.mcp.json` が `BIGQUERY_PROJECT`, `BIGQUERY_LOCATION`, `BIGQUERY_DATASET`, `BIGQUERY_KEY_FILE` を参照するため、smoke test でもこの名前を使う。ただし `BIGQUERY_KEY_FILE` はファイルパス環境変数として扱い、container 内 path へ再設定する。README と `.mcp.json` の env 名が食い違う場合は、テスト側で alias せず、plugin 側の docs / manifest mismatch として失敗させる。
 
@@ -120,10 +120,14 @@ cid="$(docker run -d --rm \
 trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
 docker cp "$GOOGLE_APPLICATION_CREDENTIALS" "$cid:/tmp/runtime-secrets/google-credentials.json"
 docker exec "$cid" chmod 0444 /tmp/runtime-secrets/google-credentials.json
+
+{
+  printf 'export ANTHROPIC_API_KEY=%q\n' "$ANTHROPIC_API_KEY"
+} | docker exec -i "$cid" sh -c 'cat > /tmp/runtime-secrets/raw-env && chmod 0444 /tmp/runtime-secrets/raw-env'
+
 docker exec \
-  -e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
   -e GOOGLE_APPLICATION_CREDENTIALS=/tmp/runtime-secrets/google-credentials.json \
-  "$cid" bash /workspace/ai-plugins/tests/runtime-smoke/adapters/claude.sh
+  "$cid" bash -lc 'source /tmp/runtime-secrets/raw-env && exec /workspace/ai-plugins/tests/runtime-smoke/adapters/claude.sh'
 ```
 
 AWS は profile 名だけでは認証できないため、基本は `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN` の環境変数方式を使う。profile を使う必要がある場合は、`--secret-file aws-credentials=/path/to/credentials` と `--secret-file aws-config=/path/to/config` で単一ファイルとして明示注入し、container 内で `AWS_SHARED_CREDENTIALS_FILE=/tmp/runtime-secrets/aws-credentials` と `AWS_CONFIG_FILE=/tmp/runtime-secrets/aws-config` を再設定する。`~/.aws` directory mount は引き続き禁止する。
@@ -371,6 +375,81 @@ secret が未設定の場合、`--with-secrets=auto` では非認証 smoke の�
   - MCP handshake
   - Slack / external notification は dry-run のみ
   - ブラウザ認証 runtime は、非ブラウザ認証手段がない場合だけ認証準備完了まで
+
+## PR 分割計画
+
+release branch: `release/runtime-plugin-container-smoke`
+base branch: `release/runtime-plugin-split` (親計画の PR7 merge 後。親計画が main へ merge 済みなら `main`)
+
+| PR # | branch 名 | 概要 | 依存 | 並行可否 |
+|---|---|---|---|---|
+| 1 | `feature/runtime-smoke-harness` | `scripts/runtime-smoke-test.sh`、共通 Containerfile、artifact/JUnit 出力、runtime 選択 CLI を追加する | 親計画 PR7 | ○ |
+| 2 | `feature/runtime-smoke-adapters` | Claude / Codex / Kiro adapter を追加し、CLI install、marketplace add、plugin install、version 取得を runtime ごとに閉じ込める | PR1 | ○ |
+| 3 | `feature/runtime-smoke-assertions` | plugin cache、Skill、MCP config、hook fixture、Kiro agent config、host contamination の共通 assertion を追加する | PR1 | ○ |
+| 4 | `feature/runtime-smoke-secrets` | `--with-secrets=off|auto|required`、allowlist、tmpfs secret 注入、redaction、`--keep-container` 併用拒否を実装する | PR1 | ○ |
+| 5 | `feature/runtime-smoke-ci` | 非認証 PR workflow と protected authenticated workflow を追加し、artifact / JUnit を収集する | PR2, PR3, PR4 | × |
+| 6 | `feature/runtime-smoke-docs` | README とテスト運用ドキュメントを更新し、local / CI / secret 付き実行手順を整理する | PR5 | × |
+
+単一 PR では Docker 実行基盤、runtime adapter、secret 注入、CI 権限設計が混在し、レビュー観点が分散する。特に secret 注入はセキュリティレビューを独立させる必要があるため、release branch + 個別 PR 方式を採用する。
+
+実行開始条件:
+
+- 親計画 `issues/agent-runtime-plugin-split.md` の PR7 (`feature/runtime-split-validation`) までが `release/runtime-plugin-split` に merge 済みであること
+- `plugins/ndf-claude`, `plugins/ndf-codex`, `plugins/ndf-kiro`, `plugins/mcp/claude|codex|kiro/*` の runtime 別配布物が存在し、smoke test の install 対象として使えること
+- 上記が満たされるまでは `release/runtime-plugin-container-smoke` と個別 PR branch を作成しない
+
+## タスク分解
+
+### Task 1: smoke test 共通 harness を作る
+
+- **対象ファイル:** `scripts/runtime-smoke-test.sh`, `tests/runtime-smoke/README.md`, `tests/runtime-smoke/Containerfile.base`, `tests/runtime-smoke/fixtures/**`
+- **変更内容:**
+  - `--runtime claude|codex|kiro|all`、`--with-secrets=off|auto|required`、`--keep-container`、artifact 出力先を受け付ける入口を作る
+  - repo を container 内 `/workspace/ai-plugins`、HOME を `/tmp/runtime-home`、project を `/tmp/runtime-project` に分離する
+  - JUnit XML、install log、version log、generated config tree を artifact 化する
+
+### Task 2: runtime adapter を追加する
+
+- **対象ファイル:** `tests/runtime-smoke/Containerfile.claude`, `tests/runtime-smoke/Containerfile.codex`, `tests/runtime-smoke/Containerfile.kiro`, `tests/runtime-smoke/adapters/*.sh`
+- **変更内容:**
+  - Claude / Codex / Kiro の CLI install と `--version` 取得を adapter に閉じ込める
+  - local marketplace の追加、`ndf@ai-plugins`、`mcp-bigquery@ai-plugins` 相当の install を実行する
+  - ブラウザ認証 runtime は timeout 付きで login prompt / 認証 URL / device code の表示を assertion する
+
+### Task 3: 共通 assertion を追加する
+
+- **対象ファイル:** `tests/runtime-smoke/assertions/*.sh`, `tests/runtime-smoke/fixtures/hook-*.json`, `tests/runtime-smoke/fixtures/mcp-env.example`
+- **変更内容:**
+  - install 後の Skill / MCP / hook / agents または Kiro agent config の存在を確認する
+  - `.mcp.json` や runtime config に secret 実値が出ていないことを確認する
+  - hook script を fixture payload で実行し、exit code 0 を確認する
+  - host HOME、credential directory、repo root への runtime config 汚染がないことを確認する
+
+### Task 4: secret 注入と redaction を実装する
+
+- **対象ファイル:** `tests/runtime-smoke/secrets/**`, `tests/runtime-smoke/secrets-files.allowlist`, `scripts/runtime-smoke-test.sh`
+- **変更内容:**
+  - raw 環境変数と file secret を allowlist で検出する
+  - file secret は `docker cp` で tmpfs `/tmp/runtime-secrets/` へ注入し、container 内 path へ env を再設定する
+  - raw secret は `docker exec -i` の stdin で `/tmp/runtime-secrets/raw-env` へ書き込み、adapter 実行時に source する
+  - `--with-secrets=auto|required` と `--keep-container` の併用を拒否する
+  - log / JUnit / artifact から secret 値と `/tmp/runtime-secrets/**` を除外する
+
+### Task 5: CI workflow を追加する
+
+- **対象ファイル:** `.github/workflows/runtime-plugin-smoke.yml`, `.github/workflows/runtime-plugin-authenticated-smoke.yml`
+- **変更内容:**
+  - `pull_request` では secret なしの非認証 smoke のみを実行する
+  - `workflow_dispatch` + protected environment で認証付き smoke を実行できるようにする
+  - default branch merge 後の release 前確認では、必要に応じて `--with-secrets=required` を使える構成にする
+
+### Task 6: ドキュメントと運用手順を更新する
+
+- **対象ファイル:** `README.md`, `docs/ndf-plugin-reference.md`, `issues/agent-runtime-plugin-split.md`, `tests/runtime-smoke/README.md`
+- **変更内容:**
+  - local 実行、CI 実行、secret 付き実行、debug 実行の手順を整理する
+  - secret を渡せない PR CI と protected authenticated smoke の責務を明記する
+  - 親計画の Task 8 完了条件から本 plan の smoke test 完了条件へリンクする
 
 ## 完了の定義
 
