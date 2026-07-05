@@ -306,6 +306,7 @@ git push
 
 - [CLAUDE.md](./CLAUDE.md) - AIエージェント向けガイドライン（Claude Code）
 - [KIRO.md](./KIRO.md) - AIエージェント向けガイドライン（Kiro CLI）
+- [docs/specifications/](./docs/specifications/) - 完了済みplan/issue由来の確定仕様
 - [LICENSE](./LICENSE) - MITライセンス
 
 ## コントリビューション

@@ -27,7 +27,7 @@ docs/       → リポジトリ知識
 skills/     → 実行可能なワークフロー
 ```
 
-詳細は `issues/memory_replaning.md` を参照。
+詳細は `docs/specifications/ndf-knowledge-and-kiro.md` を参照。
 
 ## NDF v4.18.0 / cross-review
 
