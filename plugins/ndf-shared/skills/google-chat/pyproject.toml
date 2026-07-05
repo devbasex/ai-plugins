@@ -1,0 +1,11 @@
+[project]
+name = "google-chat-skill"
+version = "0.1.0"
+description = "Google Chat API アクセスの依存関係 (ndf:google-auth と組み合わせて使用)"
+requires-python = ">=3.9"
+dependencies = [
+    "google-apps-chat>=0.1.0",
+    "google-auth>=2.0.0",
+    "google-auth-httplib2>=0.2.0",
+    "google-auth-oauthlib>=1.0.0",
+]

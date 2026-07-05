@@ -1,0 +1,13 @@
+[project]
+name = "deepwiki-transfer-scripts"
+version = "1.0.0"
+description = "DeepWiki MCP コンテンツ取得・分割・GFM検証スクリプト"
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.28.0",
+]
+
+[project.scripts]
+fetch-wiki = "fetch_wiki:main"
+split-pages = "split_pages:main"
+validate-gfm = "validate_gfm:main"

@@ -1,0 +1,33 @@
+"""フォーム (form) 系テストの雛形。
+
+入力 → 送信 → 結果検証の正常系を 1 ファイル 1 シナリオで書く。
+``page_role("form")`` 付与で accessibility autouse。
+"""
+
+from __future__ import annotations
+
+import pytest
+from playwright.sync_api import Page, expect
+
+
+@pytest.mark.page_role("form")
+@pytest.mark.role("admin")
+def test_create_user_happy_path(page: Page, pwk_role_admin, pwk_config):
+    page.goto(f"{pwk_config.base_url}/admin/users/new", wait_until="domcontentloaded")
+
+    page.get_by_label("メールアドレス").fill("new.user@example.com")
+    page.get_by_label("氏名").fill("テスト太郎")
+    page.get_by_role("button", name="保存").click()
+
+    expect(page.get_by_role("alert")).to_contain_text("作成しました")
+    expect(page).to_have_url(lambda u: "/admin/users" in u)
+
+
+@pytest.mark.page_role("form")
+def test_create_user_validation_blocks_empty_submit(
+    page: Page, pwk_role_admin, pwk_config
+):
+    page.goto(f"{pwk_config.base_url}/admin/users/new", wait_until="domcontentloaded")
+    page.get_by_role("button", name="保存").click()
+    expect(page.get_by_text("メールアドレスは必須です")).to_be_visible()
+    expect(page).to_have_url(lambda u: "/users/new" in u)

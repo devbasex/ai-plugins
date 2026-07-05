@@ -1,0 +1,28 @@
+"""一覧 (list) 系テストの雛形。
+
+ページネーション / ソート / 検索の正常系を検証。``page_role("list")`` 付与で
+accessibility / web vitals が autouse される。
+"""
+
+from __future__ import annotations
+
+import pytest
+from playwright.sync_api import Page, expect
+
+
+@pytest.mark.page_role("list")
+@pytest.mark.role("admin")
+def test_user_list_first_page(page: Page, pwk_role_admin, pwk_config):
+    page.goto(f"{pwk_config.base_url}/admin/users", wait_until="domcontentloaded")
+    expect(page.get_by_role("heading", name="ユーザ一覧")).to_be_visible()
+
+    # 先頭ページに少なくとも 1 行表示されること
+    rows = page.get_by_role("row")
+    expect(rows).not_to_have_count(0)
+
+
+@pytest.mark.page_role("list")
+def test_user_list_pagination(page: Page, pwk_role_admin, pwk_config):
+    page.goto(f"{pwk_config.base_url}/admin/users", wait_until="domcontentloaded")
+    page.get_by_role("link", name="次へ").click()
+    expect(page).to_have_url(lambda u: "page=2" in u)
