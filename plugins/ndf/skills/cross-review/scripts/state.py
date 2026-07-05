@@ -1299,11 +1299,10 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     meta_patterns = ("check_pr_requirements", "assignees", "reviewers", "labels", "meta")
     failed = fix.get("ci_failed_checks") or []
     code_fail = False
-    meta_fail = False
     for name in failed:
         low = name.lower()
         if any(p in low for p in meta_patterns):
-            meta_fail = True
+            continue
         elif any(p in low for p in code_patterns):
             code_fail = True
         else:

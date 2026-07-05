@@ -193,8 +193,8 @@ flowchart TD
 各ステップの詳細は `docs/` 参照。メインは以下のテンプレートで scripts/ を呼ぶだけ:
 
 ```bash
-PLUGIN_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}"
-SCRIPTS="$PLUGIN_ROOT/skills/cross-review/scripts"
+PLUGIN_ROOT="${PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}"
+SCRIPTS="$PLUGIN_ROOT/skills-codex/cross-review/scripts"
 
 # STATE_PR は state.json のキー (= 最初に init した PR 番号)。
 # rotation 後も state.json のパスは変わらないため、scripts/ への引数には常に

@@ -73,6 +73,11 @@ rewrite_codex_skill_paths() {
   sed -i 's#${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/skills/fix/scripts/fetch-pr-comments.sh#${PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}/skills-codex/fix/scripts/fetch-pr-comments.sh#g' \
     "$skills_dir/fix/SKILL.md" \
     "$skills_dir/review-pr-comments/SKILL.md"
+  sed -i \
+    -e 's#${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}#${PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}#g' \
+    -e 's#skills/cross-review/scripts#skills-codex/cross-review/scripts#g' \
+    "$skills_dir/cross-review/SKILL.md" \
+    "$skills_dir/cross-review/docs/01-state-and-review.md"
 }
 
 sync_skills() {
