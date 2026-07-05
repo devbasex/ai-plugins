@@ -40,13 +40,20 @@ SLACK_USER_MENTION=<@U0123456789>
 
 `SLACK_USER_MENTION` は任意です。機密値は `.env` などで管理し、リポジトリへコミットしないでください。
 
-## Codex CLI 委譲
+## 外部 AI 委譲
 
 `/ndf:codex` skill または `corder` エージェントから外部 AI 委譲を使う場合は、利用環境に Codex CLI をインストールしてログインします。
 
 ```bash
 npm install -g @openai/codex
 codex login
+```
+
+`/ndf:review <PR番号> gemini` や `/ndf:cross-review` で Gemini 委譲を使う場合は、利用環境に Gemini CLI をインストールしてログインします。
+
+```bash
+npm install -g @google/gemini-cli
+gemini
 ```
 
 ## 開発者向け

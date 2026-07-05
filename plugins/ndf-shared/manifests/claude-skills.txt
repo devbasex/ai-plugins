@@ -23,6 +23,7 @@ review-pr-comments
 resolve-pr-comments
 browser-test
 codex
+gemini
 statusline
 issue-plan-strategy
 plan-to-spec
