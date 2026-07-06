@@ -40,7 +40,7 @@ __pycache__/
 .venv/
 
 # Plugin-generated context files
-# (none currently)
+.kiro/
 
 # cross-review worktree tmp
 .cross_review/
