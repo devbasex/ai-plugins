@@ -1,0 +1,17 @@
+{
+  "name": "default",
+  "description": "NDF統合開発エージェント（Kiro CLI用）",
+  "resources": [
+    "file://AGENTS.md",
+    "file://README.md",
+    "file://.kiro/skills/ndf-policies/SKILL.md",
+    "skill://.kiro/skills/**/SKILL.md"
+  ],
+  "hooks": {
+    "agentSpawn": [
+      {
+        "command": "if [ -f \"${PWD}/CLAUDE.ndf.md\" ] || [ -f \"$HOME/.claude/CLAUDE.ndf.md\" ]; then echo \"[NDF] CLAUDE.ndf.md が検出されました。廃止済みです。cleanup を実行して削除してください。\"; fi"
+      }
+    ]
+  }
+}

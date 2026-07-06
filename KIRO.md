@@ -15,19 +15,19 @@
 
 ```bash
 # 基本（Skills + agentSpawnフックのみ）
-bash scripts/install-kiro.sh
+bash plugins/ndf-kiro/install.sh
 
 # Slack通知も有効化
-bash scripts/install-kiro.sh --with-slack
+bash plugins/ndf-kiro/install.sh --with-slack
 
 # 全部入り（Slack通知 + Kiro 側 Codex MCP 設定生成）
 # 注: NDF v4.0.0 本体は Codex MCP に依存せず、/ndf:codex skill 経由で
 # CLI 直接実行に一本化。--with-codex は Kiro セッションで
 # `mcp__codex__*` を直接呼びたい場合のみ有効化すればよい。
-bash scripts/install-kiro.sh --with-slack --with-codex
+bash plugins/ndf-kiro/install.sh --with-slack --with-codex
 ```
 
-インストーラーは `plugin.json` からskills一覧を読み取り、`.kiro/agents/default.json` を生成します。
+インストーラーは `plugins/ndf-kiro/skills/` から `.kiro/skills/` への symlink と `.kiro/agents/default.json` を生成します。`plugins/ndf-kiro/skills/` は `plugins/ndf-shared/manifests/kiro-skills.txt` から build された生成物です。
 
 ### Slack通知の設定（オプション）
 
@@ -43,7 +43,7 @@ SLACK_USER_MENTION=<@U0123456789>
 - スキルはdescriptionのキーワードに基づいて自動参照されます
 - ワークフロー系スキル（pr, fix, review等）は手動で指示してください
   - 例: 「prスキルの手順に従ってPRを作成して」
-- plugin.jsonにskillが追加された場合、再度インストーラーを実行してください
+- `plugins/ndf-shared/manifests/kiro-skills.txt` に skill が追加された場合、`bash scripts/build-runtime-plugins.sh` 後に再度インストーラーを実行してください
 
 ## Kiro CLIでのコード探索
 
@@ -55,7 +55,7 @@ SLACK_USER_MENTION=<@U0123456789>
 ls -la plugins/
 
 # 特定のプラグインディレクトリを確認
-ls -la plugins/ndf/
+ls -la plugins/ndf-kiro/
 ```
 
 #### 2. コードインテリジェンスの活用
@@ -66,7 +66,7 @@ ls -la plugins/ndf/
 code search_symbols "ndf"
 
 # 特定のファイル内のシンボル一覧
-code get_document_symbols plugins/ndf/.claude-plugin/plugin.json
+code get_document_symbols plugins/ndf-kiro/agents/default.json.template
 ```
 
 **パターン検索**:
@@ -82,10 +82,10 @@ grep "MCP" --include="*.md"
 
 ```
 # ファイル全体を読む
-fs_read plugins/ndf/.claude-plugin/plugin.json
+fs_read plugins/ndf-kiro/agents/default.json.template
 
 # 特定の行範囲を読む
-fs_read plugins/ndf/README.md --start_line=1 --end_line=50
+fs_read plugins/ndf-kiro/README.md --start_line=1 --end_line=50
 ```
 
 ## Kiro CLI特有の注意事項
