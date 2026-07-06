@@ -268,7 +268,7 @@ GitHub は **自分の PR には `REQUEST_CHANGES` で投稿できない**（`HT
 
 ### `codex` 指定時
 
-呼び出し手順の詳細は `/ndf:codex` skill（`plugins/ndf/skills/codex/SKILL.md`）に従う。要点:
+呼び出し手順の詳細は、利用 runtime に `/ndf:codex` skill が同梱されている場合はその skill に従う。要点:
 
 - プロンプトを `/tmp/codex-review-pr<番号>-prompt.md` に書き出し
 - 出力先ファイルを `/tmp/codex-output-review-pr<番号>.md` として **プロンプト内で `apply_patch` 書き出しを必須化**
@@ -283,7 +283,7 @@ GitHub は **自分の PR には `REQUEST_CHANGES` で投稿できない**（`HT
 
 ### `gemini` 指定時
 
-呼び出し手順の詳細は `/ndf:gemini` skill（`plugins/ndf/skills/gemini/SKILL.md`）に従う。要点:
+呼び出し手順の詳細は、利用 runtime に `/ndf:gemini` skill が同梱されている場合はその skill に従う。要点:
 
 - プロンプトを `/tmp/gemini-review-pr<番号>-prompt.md` に書き出し
 - **AI 直接投稿フローでは `--yolo` 必須**（`gh api -X POST` がシェル実行のため、`plan` / `auto_edit` だとブロックされる）

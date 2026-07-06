@@ -1,0 +1,51 @@
+# scenario-test ランタイムプロジェクト用 pyproject.toml。
+#
+# このファイルは Skill の `scripts/init_project.sh` によって利用者プロジェクトの
+# `<runtime-dir>/pyproject.toml` として配置される。
+# Skill 開発用 (リポジトリルート相当) の `pyproject.toml` から、開発者向け設定
+# (optional-dependencies.dev など) を排除した「実行に必要な最小構成」。
+
+[project]
+name = "playwright_kit"
+version = "0.5.0"
+description = "scenario-test ランタイム — pytest-playwright 上で動く Web シナリオ E2E テスト (利用者プロジェクト埋め込み版)。"
+requires-python = ">=3.11"
+dependencies = [
+    "playwright>=1.50,<2.0",
+    "pyyaml>=6.0",
+    # webm → mp4 変換用 (Google Drive プレビュアの安定性のため)
+    "imageio-ffmpeg>=0.4",
+    "pytest>=8.0",
+    "pytest-playwright>=0.5",
+    "pytest-xdist>=3.0",
+    # accessibility autouse は scenario.config.yaml で default 有効。
+    # self-contained (Skill 非依存) を維持するため main dep に含める。
+    "axe-playwright-python>=0.1.4",
+]
+
+[project.optional-dependencies]
+# Drive 連携: scripts/upload_evidence.py / gdrive_upload_dir.py 等が使用
+drive = [
+    "google-api-python-client>=2.0",
+    "google-auth>=2.0",
+    "google-auth-oauthlib>=1.0",
+]
+
+[project.entry-points."pytest11"]
+# pytest が auto-discover する plugin entry-point。
+# `uv sync` 完了後 (editable install) は `pytest` 起動だけで playwright_kit
+# plugin が有効になる。
+playwright-kit = "playwright_kit.pytest_plugin"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["playwright_kit"]
+
+[tool.pytest.ini_options]
+# all-in-one ランタイム配置では tests/ が runtime ディレクトリ直下にあるため、
+# 相対パス "tests" がそのまま効く。
+testpaths = ["tests"]
+addopts = "-q"
