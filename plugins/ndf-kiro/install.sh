@@ -78,6 +78,9 @@ done < <(find "$PLUGIN_SKILLS_DIR" -mindepth 1 -maxdepth 1 -type d | sort)
 echo "ワークフロープロンプトを作成中..."
 if [ "$DRY_RUN" = false ]; then
   mkdir -p "$PROMPTS_DIR"
+  if [ "$WITH_CODEX" = false ]; then
+    rm -f "$PROMPTS_DIR/codex.md"
+  fi
 fi
 
 while IFS= read -r prompt_file; do
