@@ -193,7 +193,7 @@ flowchart TD
 各ステップの詳細は `docs/` 参照。メインは以下のテンプレートで scripts/ を呼ぶだけ:
 
 ```bash
-PLUGIN_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}"
+PLUGIN_ROOT="${PLUGIN_ROOT:-plugins/ndf-kiro}"
 SCRIPTS="$PLUGIN_ROOT/skills/cross-review/scripts"
 
 # STATE_PR は state.json のキー (= 最初に init した PR 番号)。

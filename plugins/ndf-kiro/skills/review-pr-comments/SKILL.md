@@ -47,7 +47,7 @@ PR_NUMBER="${ARGUMENTS:-$(gh pr view --json number --jq .number)}"
 fix skill の共有スクリプトで インラインコメント / レビュー body / PR レベルコメントを一括取得:
 
 ```bash
-FETCH_SCRIPT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/skills/fix/scripts/fetch-pr-comments.sh"
+FETCH_SCRIPT="${PLUGIN_ROOT:-plugins/ndf-kiro}/skills/fix/scripts/fetch-pr-comments.sh"
 "$FETCH_SCRIPT" "$(gh repo view --json nameWithOwner -q .nameWithOwner)" "$PR_NUMBER"
 ```
 

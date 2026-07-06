@@ -27,7 +27,7 @@ NDF 標準 statusline (コンテナ名/ホスト名 + project_dir + コンテキ
 引数に応じて以下のコマンドを実行する:
 
 ```bash
-PLUGIN_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}"
+PLUGIN_ROOT="${PLUGIN_ROOT:-plugins/ndf-kiro}"
 
 # 状態確認 (引数なし or status)
 bash "${PLUGIN_ROOT}/scripts/statusline-switch.sh" status

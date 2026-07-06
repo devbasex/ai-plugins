@@ -99,13 +99,13 @@ Kiro CLI では、リポジトリ付属のインストーラーで `.kiro/skills
 
 ```bash
 # 基本（manifest-selected skills + agentSpawn hook）
-bash scripts/install-kiro.sh
+bash plugins/ndf-kiro/install.sh
 
 # Slack通知も有効化
-bash scripts/install-kiro.sh --with-slack
+bash plugins/ndf-kiro/install.sh --with-slack
 
 # Codex CLI連携プロンプトも追加
-bash scripts/install-kiro.sh --with-codex
+bash plugins/ndf-kiro/install.sh --with-codex
 ```
 
 インストール後、Kiro CLI を起動します。
@@ -280,7 +280,7 @@ Claude Code / Codex では、ワークフロースキルをスラッシュコマ
 /ndf:merged
 ```
 
-Kiro CLI では `scripts/install-kiro.sh` が `.kiro/prompts/` に作成したプロンプト、または自然言語から同じ skill 手順を参照します。
+Kiro CLI では `plugins/ndf-kiro/install.sh` が `.kiro/prompts/` に作成したプロンプト、または自然言語から同じ skill 手順を参照します。
 
 ## 機能詳細
 
@@ -621,7 +621,7 @@ Gemini 実行中は `progress.log` の短い進捗マーカーを `monitor.py` �
 |-----------|--------------|------|
 | Claude Code | transcript保持期間を90日以上に補正、statusline未設定時にNDF標準statuslineを設定 | Slack通知（`SLACK_BOT_TOKEN`設定時） |
 | Codex | なし | Codex向けSlack通知（`NDF_CODEX_SLACK_NOTIFY=true`設定時） |
-| Kiro CLI | `scripts/install-kiro.sh` が生成する `agentSpawn` hook | `--with-slack` 指定時のみSlack通知 |
+| Kiro CLI | `plugins/ndf-kiro/install.sh` が生成する `agentSpawn` hook | `--with-slack` 指定時のみSlack通知 |
 
 #### Claude Code: SessionStart
 

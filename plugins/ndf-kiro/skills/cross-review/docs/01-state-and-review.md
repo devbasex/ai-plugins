@@ -82,7 +82,7 @@
 ## Step 0: 準備 + 既存 state 引き継ぎ
 
 ```bash
-PLUGIN_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}"
+PLUGIN_ROOT="${PLUGIN_ROOT:-plugins/ndf-kiro}"
 SCRIPTS="$PLUGIN_ROOT/skills/cross-review/scripts"  # or 直接の絶対パス
 
 # state 初期化 / 再開（プリチェック・worktree 作成・既存コメントスナップショットを内部実行）
