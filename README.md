@@ -67,16 +67,16 @@ cd ai-plugins
 
 ```bash
 # 基本（Skills + agentSpawnフックのみ）
-bash scripts/install-kiro.sh
+bash plugins/ndf-kiro/install.sh
 
 # Slack通知も有効化
-bash scripts/install-kiro.sh --with-slack
+bash plugins/ndf-kiro/install.sh --with-slack
 
 # 全部入り（Slack + Codex CLI 連携）
-bash scripts/install-kiro.sh --with-slack --with-codex
+bash plugins/ndf-kiro/install.sh --with-slack --with-codex
 ```
 
-インストーラーは `plugin.json` からskills一覧を読み取り、`.kiro/agents/default.json` を自動生成します。
+インストーラーは `plugins/ndf-kiro/skills/` から `.kiro/skills/` への symlink と `.kiro/agents/default.json` を生成します。
 
 #### 3. Slack通知の設定（オプション）
 
@@ -99,7 +99,7 @@ kiro-cli chat
 
 | プラグイン名 | バージョン | 説明 | 詳細 |
 |------------|----------|------|------|
-| **ndf** | 4.19.0 | Claude Code / Codex / Kiro CLI開発環境を**オールインワン**で強化する統合プラグイン。8個の専門エージェント（director、data-analyst、corder、researcher、qa、debugger、devops-engineer、code-reviewer）、公開Skills（Claude Code向け core 29個、Kiro向け core 28個、Codex向け core 30個）、SessionStartフック（transcript保持期間自動管理）、Stopフック（AI要約生成+Slack通知）を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:codex` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [README](./plugins/ndf/README.md) |
+| **ndf** | 4.19.0 | Claude Code / Codex / Kiro CLI開発環境を**オールインワン**で強化する統合プラグイン。8個の専門エージェント（director、data-analyst、corder、researcher、qa、debugger、devops-engineer、code-reviewer）、公開Skills（Claude Code向け core 29個、Kiro向け core 28個、Codex向け core 30個）、SessionStartフック（transcript保持期間自動管理）、Stopフック（AI要約生成+Slack通知）を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:codex` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [Claude](./plugins/ndf-claude/README.md) / [Codex](./plugins/ndf-codex/README.md) / [Kiro](./plugins/ndf-kiro/README.md) |
 
 ### NDF v4.19.0 の主な変更
 

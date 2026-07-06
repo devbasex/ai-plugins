@@ -95,6 +95,32 @@ rewrite_codex_skill_paths() {
   done
 }
 
+rewrite_kiro_skill_paths() {
+  local skills_dir="$1"
+  local file
+
+  for file in \
+    "$skills_dir/fix/SKILL.md" \
+    "$skills_dir/review-pr-comments/SKILL.md"
+  do
+    [ -f "$file" ] || continue
+    sed 's#${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/skills/fix/scripts/fetch-pr-comments.sh#${PLUGIN_ROOT:-plugins/ndf-kiro}/skills/fix/scripts/fetch-pr-comments.sh#g' \
+      "$file" >"$file.tmp"
+    mv "$file.tmp" "$file"
+  done
+
+  for file in \
+    "$skills_dir/statusline/SKILL.md" \
+    "$skills_dir/cross-review/SKILL.md" \
+    "$skills_dir/cross-review/docs/01-state-and-review.md"
+  do
+    [ -f "$file" ] || continue
+    sed 's#${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}#${PLUGIN_ROOT:-plugins/ndf-kiro}#g' \
+      "$file" >"$file.tmp"
+    mv "$file.tmp" "$file"
+  done
+}
+
 sync_skills() {
   local manifest="$1"
   local source_dir="$2"
@@ -147,6 +173,8 @@ sync_skills() {
     rewrite_codex_skill_paths "$tmp_dir" skills-codex
   elif [ "$variant" = codex-runtime ]; then
     rewrite_codex_skill_paths "$tmp_dir" skills
+  elif [ "$variant" = kiro-runtime ]; then
+    rewrite_kiro_skill_paths "$tmp_dir"
   fi
 
   if [ "$CHECK" = true ]; then
@@ -187,6 +215,8 @@ sync_runtime_if_present() {
   [ -d "$plugin_dir" ] || return 0
   if [ "$runtime" = codex ]; then
     sync_skills "$manifest" "$SHARED_DIR/skills" "$plugin_dir/skills" codex-runtime
+  elif [ "$runtime" = kiro ]; then
+    sync_skills "$manifest" "$SHARED_DIR/skills" "$plugin_dir/skills" kiro-runtime
   else
     sync_skills "$manifest" "$SHARED_DIR/skills" "$plugin_dir/skills"
   fi

@@ -538,6 +538,30 @@ base branch: `main`
   - ブラウザ認証しかできない runtime、または `--with-secrets=off` の非認証 smoke では、login prompt / 認証 URL 表示まで到達すれば合格とする
   - 詳細は `issues/runtime-plugin-container-test-plan.md` に従う
 
+## 実装進捗
+
+2026-07-06 時点の進捗。
+
+| 状態 | PR | branch | 内容 | 備考 |
+|---|---:|---|---|---|
+| 完了 | #45 | `release/runtime-plugin-split` | release PR | Draft のまま。個別 PR を release branch へ集約中 |
+| merge 済み | #46 | `feature/runtime-split-shared-builder` | Task 1: `ndf-shared` と `scripts/build-runtime-plugins.sh` を追加 | cross-review approved。`release/runtime-plugin-split` へ merge 済み。worktree / local branch cleanup 済み |
+| merge 済み | #47 | `feature/runtime-split-claude` | Task 2: `plugins/ndf-claude` を追加し、Claude marketplace を切替 | cross-review approved。`release/runtime-plugin-split` へ merge 済み。worktree / local branch cleanup 済み |
+| merge 済み | #48 | `feature/runtime-split-codex` | Task 3: `plugins/ndf-codex` を追加し、Codex marketplace を切替 | cross-review approved。`release/runtime-plugin-split` へ merge 済み。worktree / local branch cleanup 済み |
+| 実装中 | #49 | `feature/runtime-split-kiro` | Task 4: `plugins/ndf-kiro` を作成し、Kiro installer / docs / templates を移動 | installer の Claude manifest 依存を除去し、Kiro runtime 生成物を追加中 |
+| 未着手 | #50 | `feature/runtime-split-docs-cleanup` | Task 5: README / AGENTS / docs / specs 更新、旧 `plugins/ndf` の stub 化または削除 | PR2, PR3, PR4 merge 後 |
+| 未着手 | #51 | `feature/runtime-split-mcp-plugins` | Task 6: MCP plugin を runtime 別に分離 | PR1 merge 後なので着手可能だが、Kiro との接続方針確認後が安全 |
+| 未着手 | #52 | `feature/runtime-split-validation` | Task 7: validate script、dev hook、CI、リンク検証 | PR2, PR3, PR4, PR6 merge 後 |
+| 未着手 | #53 | `feature/runtime-split-container-smoke` | Task 8: runtime smoke test | PR7 merge 後 |
+
+再開時の前提:
+
+- 現在の作業ブランチは `feature/runtime-split-kiro`。
+- `main` は `origin/main` と同期済み。
+- `release/runtime-plugin-split` は `origin/release/runtime-plugin-split` と同期済み。
+- PR #46 / #47 / #48 用の一時 worktree は削除済み。
+- 次は PR #49 `feature/runtime-split-kiro` の実装差分をレビューし、必要な修正後に push / Draft PR 更新を行う。
+
 ## 影響範囲
 
 | 領域 | 影響 |
