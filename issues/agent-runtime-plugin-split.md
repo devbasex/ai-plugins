@@ -544,7 +544,7 @@ base branch: `main`
 
 | 状態 | PR | branch | 内容 | 備考 |
 |---|---:|---|---|---|
-| 完了 | #45 | `release/runtime-plugin-split` | release PR | Draft のまま。個別 PR を release branch へ集約中 |
+| 最終確認待ち | #45 | `release/runtime-plugin-split` | release PR | Draft/Open。Task 1-8 の個別 PR 集約後、main merge 前の最終確認待ち |
 | merge 済み | #46 | `feature/runtime-split-shared-builder` | Task 1: `ndf-shared` と `scripts/build-runtime-plugins.sh` を追加 | cross-review approved。`release/runtime-plugin-split` へ merge 済み。worktree / local branch cleanup 済み |
 | merge 済み | #47 | `feature/runtime-split-claude` | Task 2: `plugins/ndf-claude` を追加し、Claude marketplace を切替 | cross-review approved。`release/runtime-plugin-split` へ merge 済み。worktree / local branch cleanup 済み |
 | merge 済み | #48 | `feature/runtime-split-codex` | Task 3: `plugins/ndf-codex` を追加し、Codex marketplace を切替 | cross-review approved。`release/runtime-plugin-split` へ merge 済み。worktree / local branch cleanup 済み |
@@ -552,13 +552,13 @@ base branch: `main`
 | merge 済み | #50 | `feature/runtime-split-docs-cleanup` | Task 5: README / AGENTS / docs / specs 更新、旧 `plugins/ndf` の削除 | cross-review approved。`release/runtime-plugin-split` へ merge 済み。merge 後検証済み |
 | merge 済み | #51 / #54 | `feature/runtime-split-mcp-plugins` | Task 6: MCP plugin を runtime 別に分離 | #51 はローテーションで close。#54 が cross-review approved、`release/runtime-plugin-split` へ merge 済み |
 | merge 済み | #52 | `feature/runtime-split-validation` | Task 7: validate script、dev hook、CI、リンク検証 | cross-review approved。`release/runtime-plugin-split` へ merge 済み。merge 後検証済み |
-| 実装済み | #53 | `feature/runtime-split-container-smoke` | Task 8: runtime smoke test | `scripts/runtime-smoke-test.sh`、runtime 別 Containerfile / adapter / assertion、secret 注入、CI workflow、docs を追加。この PR で cross-review / merge 後検証予定 |
+| merge 済み | #53 | `feature/runtime-split-container-smoke` | Task 8: runtime smoke test | cross-review approved。`release/runtime-plugin-split` へ merge 済み。merge 後検証済み |
 
 再開時の前提:
 
-- 現在の作業ブランチは `feature/runtime-split-container-smoke`。
-- `release/runtime-plugin-split` には PR #46 / #47 / #48 / #49 / #50 / #52 / #54 が merge 済み。
-- 次は PR #53 の container smoke 実装を cross-review し、`release/runtime-plugin-split` へ merge する。
+- `release/runtime-plugin-split` には PR #46 / #47 / #48 / #49 / #50 / #52 / #53 / #54 が merge 済み。
+- Task 1-8 の個別 PR は cross-review と merge 後検証まで完了済み。
+- 残る判断は release PR #45 を最終確認し、main へ merge するタイミングのみ。
 
 ## 影響範囲
 
