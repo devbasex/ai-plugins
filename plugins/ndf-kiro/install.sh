@@ -67,7 +67,17 @@ echo "Skills シンボリックリンクを作成中..."
 SKILL_COUNT=0
 if [ "$DRY_RUN" = false ]; then
   mkdir -p "$SKILLS_DIR"
-  find "$SKILLS_DIR" -mindepth 1 -maxdepth 1 -type l -exec rm -f {} +
+  while IFS= read -r skill_link; do
+    target="$(readlink "$skill_link")"
+    case "$target" in
+      /*) target_abs="$target" ;;
+      *) target_abs="$(realpath -m "$(dirname "$skill_link")/$target")" ;;
+    esac
+    plugin_skills_abs="$(realpath -m "$PLUGIN_SKILLS_DIR")"
+    case "$target_abs" in
+      "$plugin_skills_abs"/*) rm -f "$skill_link" ;;
+    esac
+  done < <(find "$SKILLS_DIR" -mindepth 1 -maxdepth 1 -type l | sort)
 fi
 
 while IFS= read -r src_dir; do
@@ -127,19 +137,22 @@ if [ -f "$AGENT_FILE" ]; then
   echo "既存設定をバックアップ: ${AGENT_FILE}.bak"
 fi
 
-python3 - "$TEMPLATE_FILE" "$WITH_SLACK" "$WITH_CODEX" "$AGENT_FILE" <<'PY'
+python3 - "$TEMPLATE_FILE" "$WITH_SLACK" "$WITH_CODEX" "$AGENT_FILE" "$SCRIPT_DIR" <<'PY'
 import json
+import shlex
 import sys
+from pathlib import Path
 
-template_file, with_slack, with_codex, agent_file = sys.argv[1:5]
+template_file, with_slack, with_codex, agent_file, script_dir = sys.argv[1:6]
 with open(template_file, encoding="utf-8") as f:
     config = json.load(f)
 
 hooks = config.setdefault("hooks", {})
 if with_slack == "true":
+    slack_script = Path(script_dir) / "scripts" / "slack-notify.js"
     hooks["stop"] = [
         {
-            "command": "node plugins/ndf-kiro/scripts/slack-notify.js session_end",
+            "command": f"node {shlex.quote(str(slack_script))} session_end",
             "timeout_ms": 70000,
         }
     ]

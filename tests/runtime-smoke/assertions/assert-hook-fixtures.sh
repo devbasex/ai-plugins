@@ -20,6 +20,21 @@ case "$runtime" in
   kiro)
     test -f "$PROJECT_DIR/.kiro/agents/default.json"
     jq -e '.hooks.agentSpawn[0].command' "$PROJECT_DIR/.kiro/agents/default.json" >/dev/null
+    stop_command="$(jq -r '.hooks.stop[0].command // empty' "$PROJECT_DIR/.kiro/agents/default.json")"
+    test -n "$stop_command"
+    stop_script="$(python3 - "$stop_command" <<'PY'
+import shlex
+import sys
+
+parts = shlex.split(sys.argv[1])
+if len(parts) < 2 or parts[0] != "node":
+    raise SystemExit(1)
+print(parts[1])
+PY
+)"
+    test -f "$stop_script"
+    PLUGIN_ROOT="$REPO_ROOT/plugins/ndf-kiro" \
+      node "$stop_script" session_end < "$REPO_ROOT/tests/runtime-smoke/fixtures/hook-stop.json" >/dev/null
     ;;
   *) echo "unknown runtime: $runtime" >&2; exit 2 ;;
 esac
