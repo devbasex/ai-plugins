@@ -622,7 +622,7 @@
 
 ### 1. Skillsの配置場所
 ```
-plugins/ndf/
+plugins/ndf-shared/
 ├── skills/
 │   ├── director/
 │   │   ├── brainstorming/SKILL.md

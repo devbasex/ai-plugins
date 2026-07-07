@@ -101,7 +101,7 @@ Drive 連携は optional dependency です。`--pwk-drive-folder` や Drive 系�
 Drive extra を同期してください。
 
 ```bash
-export GOOGLE_AUTH_SCRIPTS=/path/to/plugins/ndf/skills/google-auth/scripts
+export GOOGLE_AUTH_SCRIPTS=/path/to/plugins/ndf-shared/skills/google-auth/scripts
 uv sync --extra drive
 ```
 

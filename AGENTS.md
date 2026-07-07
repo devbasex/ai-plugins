@@ -2,7 +2,7 @@
 
 ## プロジェクト概要
 
-**Claude Codeプラグインマーケットプレイス**の開発プロジェクトです。チーム全体でClaude Codeの導入を加速するための事前設定されたプラグインを提供します。
+**Claude Code / Codex / Kiro CLI 向けプラグインマーケットプレイス**の開発プロジェクトです。チーム全体で AI 開発ツールの導入を加速するための事前設定されたプラグインを提供します。
 
 **リポジトリ**: https://github.com/devbasex/ai-plugins
 
@@ -40,8 +40,15 @@ ai-plugins/
 ├── .claude-plugin/
 │   └── marketplace.json          # マーケットプレイス定義（必須）
 ├── plugins/
-│   ├── ndf/                      # NDFプラグイン（メイン）
-│   └── {plugin-name}/            # その他のプラグイン
+│   ├── ndf-shared/               # NDF共通編集元（直接installしない）
+│   ├── ndf-claude/               # Claude Code版NDF
+│   ├── ndf-codex/                # Codex版NDF
+│   ├── ndf-kiro/                 # Kiro CLI版NDF
+│   └── mcp/
+│       ├── shared/               # MCPプラグイン共通編集元
+│       ├── claude/               # Claude Code版MCP配布物
+│       ├── codex/                # Codex版MCP配布物
+│       └── kiro/                 # Kiro CLI版MCP配布物
 ├── docs/                         # リポジトリ知識
 ├── AGENTS.md                     # 共通エントリポイント
 ├── CLAUDE.md                     # Claude Code固有設定
@@ -59,18 +66,20 @@ ai-plugins/
 | [docs/specifications/](docs/specifications/) | 完了済みplan/issue由来の確定仕様 |
 | [docs/claude-code-skills-survey.md](docs/claude-code-skills-survey.md) | Claude Code Skills調査レポート |
 | [docs/development-history/](docs/development-history/) | 開発履歴と知見 |
-| [plugins/ndf/README.md](plugins/ndf/README.md) | NDFプラグインドキュメント |
+| [plugins/ndf-claude/README.md](plugins/ndf-claude/README.md) | Claude Code版NDFプラグイン |
+| [plugins/ndf-codex/README.md](plugins/ndf-codex/README.md) | Codex版NDFプラグイン |
+| [plugins/ndf-kiro/README.md](plugins/ndf-kiro/README.md) | Kiro CLI版NDF installer |
 
 ## NDFプラグインについて
 
-**NDFプラグイン**は、このマーケットプレイスの主要プラグインです（v4.19.0）：
-- 8個の専門サブエージェント（director、data-analyst、corder、researcher、qa、debugger、devops-engineer、code-reviewer）
-- 49個のsource Skills（PR/コードレビューワークフロー、AIクロスレビュー (codex/gemini)、plan-to-spec確定仕様化、原則・ガイドライン、MLモデル構造標準 (ml-model-structure)、issue→multi-PR ワークフロー戦略、SQL最適化、データエクスポート、skill利用統計、statusline切替 (/ndf:statusline)、Codex CLI連携、Playwrightシナリオテスト (CDPリモート接続・Google Driveエビデンス保管含む)、Google Drive/Chat連携 等）
-- SessionStartフック（transcript保持期間自動管理 `cleanupPeriodDays >= 90`、statusLine未設定時のNDF標準statusline自動設定）
-- Stopフック（AI要約生成 + 自動Slack通知）
+**NDFプラグイン**は、このマーケットプレイスの主要プラグインです（v4.19.0）。plugin 名は全ランタイムで `ndf` を維持し、配布物は `plugins/ndf-claude` / `plugins/ndf-codex` / `plugins/ndf-kiro` に分離しています。
+- 共通編集元は `plugins/ndf-shared/`
+- Claude Code版は 8個の専門サブエージェント、公開Skills、SessionStart/Stopフックを提供
+- Codex版は Codex向け公開Skillsと任意Slack通知hookを提供
+- Kiro版は installer で `.kiro/skills/` と `.kiro/agents/default.json` を生成
 - 外部AI委譲は `/ndf:codex` skill と `corder` エージェント経由で Codex CLI を呼び出し（v4.0.0 で Codex MCP サーバは廃止）
 
-詳細は `plugins/ndf/README.md` および `docs/ndf-plugin-reference.md` を参照。
+詳細は各 runtime README と `docs/ndf-plugin-reference.md` を参照。
 
 ## ベストプラクティス
 

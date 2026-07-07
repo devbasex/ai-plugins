@@ -175,9 +175,7 @@ sync_skills() {
     -name '*.pyo' \
   \) -exec rm -rf {} + 2>/dev/null || true
 
-  if [ "$variant" = codex-legacy ]; then
-    rewrite_codex_skill_paths "$tmp_dir" skills-codex
-  elif [ "$variant" = codex-runtime ]; then
+  if [ "$variant" = codex-runtime ]; then
     rewrite_codex_skill_paths "$tmp_dir" skills
   elif [ "$variant" = kiro-runtime ]; then
     rewrite_kiro_skill_paths "$tmp_dir"
@@ -204,16 +202,6 @@ sync_skills() {
     mkdir -p "$(dirname "$dest_dir")"
     mv "$tmp_dir" "$dest_dir"
   fi
-}
-
-sync_legacy_ndf() {
-  copy_tree "$SHARED_DIR/skills" "$ROOT_DIR/plugins/ndf/skills"
-  sync_skills \
-    "$SHARED_DIR/manifests/codex-skills.txt" \
-    "$SHARED_DIR/skills" \
-    "$ROOT_DIR/plugins/ndf/skills-codex" \
-    codex-legacy
-  copy_tree "$SHARED_DIR/scripts" "$ROOT_DIR/plugins/ndf/scripts"
 }
 
 sync_runtime_if_present() {
@@ -606,7 +594,6 @@ sync_mcp_plugins() {
   done
 }
 
-sync_legacy_ndf
 sync_runtime_if_present claude "$SHARED_DIR/manifests/claude-skills.txt"
 sync_runtime_if_present codex "$SHARED_DIR/manifests/codex-skills.txt"
 sync_runtime_if_present kiro "$SHARED_DIR/manifests/kiro-skills.txt"

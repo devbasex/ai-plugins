@@ -11,19 +11,19 @@ NDFプラグイン同梱のインストーラを使う方法:
 
 ```bash
 # 利用可能Skill一覧を表示（ライセンス分類付き）
-bash plugins/ndf/scripts/install-official-skills.sh --list
+bash plugins/ndf-shared/scripts/install-official-skills.sh --list
 
 # 必要なSkillをユーザー領域（~/.claude/skills/）にインストール
-bash plugins/ndf/scripts/install-official-skills.sh docx pptx xlsx
+bash plugins/ndf-shared/scripts/install-official-skills.sh docx pptx xlsx
 
 # プロジェクト .claude/skills/ に配置する場合
-bash plugins/ndf/scripts/install-official-skills.sh --scope project pdf
+bash plugins/ndf-shared/scripts/install-official-skills.sh --scope project pdf
 
 # 全Skillをインストール
-bash plugins/ndf/scripts/install-official-skills.sh --all
+bash plugins/ndf-shared/scripts/install-official-skills.sh --all
 
 # 公式リポジトリを最新化
-bash plugins/ndf/scripts/install-official-skills.sh --update
+bash plugins/ndf-shared/scripts/install-official-skills.sh --update
 ```
 
 ### インストーラの動作
@@ -107,11 +107,11 @@ cp -r ~/work/anthropic-skills/skills/docx .claude/skills/
 
 ### NDFが同梱している公式Skill（Apache-2.0のみ）
 
-- `mcp-builder` → `plugins/ndf/skills/mcp-builder/`（LICENSE.txt同梱）
+- `mcp-builder` → `plugins/ndf-shared/skills/mcp-builder/`（LICENSE.txt同梱）
 
 ### NDFが提供するインストーラ
 
-- `plugins/ndf/scripts/install-official-skills.sh` → Apache-2.0 / プロプライエタリいずれも個人利用者環境にインストール可能
+- `plugins/ndf-shared/scripts/install-official-skills.sh` → Apache-2.0 / プロプライエタリいずれも個人利用者環境にインストール可能
 
 ### NDFに独自実装を作らない方針
 
@@ -130,5 +130,5 @@ cp -r ~/work/anthropic-skills/skills/docx .claude/skills/
 
 - 公式リポジトリ: https://github.com/anthropics/skills
 - Skills公式ドキュメント: https://docs.claude.com/en/docs/claude-code/skills
-- NDFインストーラ: `plugins/ndf/scripts/install-official-skills.sh`
+- NDFインストーラ: `plugins/ndf-shared/scripts/install-official-skills.sh`
 - Skillフロントマター仕様: [docs/claude-code-skills-official-reference.md](./claude-code-skills-official-reference.md)
