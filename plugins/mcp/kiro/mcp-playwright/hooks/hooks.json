@@ -10,7 +10,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}/scripts/ensure-playwright.js",
+            "command": "node ${PLUGIN_ROOT:-.kiro/plugins/mcp-playwright}/scripts/ensure-playwright.js",
             "description": "Auto-install Playwright chromium on first use",
             "continueOnError": false,
             "suppressOutput": false
