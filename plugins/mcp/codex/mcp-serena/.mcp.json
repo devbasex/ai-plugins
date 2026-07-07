@@ -14,7 +14,6 @@
     ],
     "env": {
       "SERENA_HOME": "${SERENA_HOME:-.serena}"
-    },
-    "envFile": "${workspaceFolder}/.env"
+    }
   }
 }

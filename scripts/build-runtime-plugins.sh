@@ -72,10 +72,6 @@ copy_tree() {
   fi
 }
 
-json_string() {
-  python3 -c 'import json,sys; print(json.dumps(sys.argv[1], ensure_ascii=False))' "$1"
-}
-
 rewrite_codex_skill_paths() {
   local skills_dir="$1"
   local script_dir="$2"

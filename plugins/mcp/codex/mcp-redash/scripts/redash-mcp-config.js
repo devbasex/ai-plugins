@@ -15,8 +15,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const MCP_JSON_PATH = path.resolve(process.cwd(), '.mcp.json');
 const MCP_PACKAGE = '@suthio/redash-mcp';
+const MCP_JSON_PATH = path.join(resolveProjectRoot(), '.mcp.json');
 
 // --- helpers ---
 
@@ -42,6 +42,75 @@ function mcpEntry(suffix) {
       REDASH_API_KEY: `\${${env.key}}`,
     },
   };
+}
+
+function isCodexRuntime() {
+  return Boolean(process.env.CODEX_PLUGIN_ROOT) || path.normalize(__dirname).split(path.sep).includes('codex');
+}
+
+function resolveProjectRoot() {
+  const envNames = [
+    'PROJECT_ROOT',
+    'WORKSPACE_ROOT',
+    'GIT_WORK_TREE',
+    'CLAUDE_PROJECT_DIR',
+    'CODEX_WORKSPACE_ROOT',
+    'KIRO_WORKSPACE_ROOT',
+  ];
+
+  for (const name of envNames) {
+    const value = process.env[name];
+    if (value && fs.existsSync(value) && fs.statSync(value).isDirectory()) {
+      return path.resolve(value);
+    }
+  }
+
+  let dir = process.cwd();
+  let nearestMcpDir = null;
+  while (true) {
+    if (!nearestMcpDir && fs.existsSync(path.join(dir, '.mcp.json'))) {
+      nearestMcpDir = dir;
+    }
+    if (fs.existsSync(path.join(dir, '.git'))) {
+      return dir;
+    }
+
+    const parent = path.dirname(dir);
+    if (parent === dir) {
+      return nearestMcpDir || process.cwd();
+    }
+    dir = parent;
+  }
+}
+
+function createMcpJson() {
+  return isCodexRuntime() ? {} : { mcpServers: {} };
+}
+
+function serverMap(data, create) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    return null;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(data, 'mcpServers')) {
+    if (!data.mcpServers && create) {
+      data.mcpServers = {};
+    }
+    return data.mcpServers && typeof data.mcpServers === 'object' && !Array.isArray(data.mcpServers)
+      ? data.mcpServers
+      : null;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(data, 'mcp_servers')) {
+    if (!data.mcp_servers && create) {
+      data.mcp_servers = {};
+    }
+    return data.mcp_servers && typeof data.mcp_servers === 'object' && !Array.isArray(data.mcp_servers)
+      ? data.mcp_servers
+      : null;
+  }
+
+  return data;
 }
 
 function readMcpJson() {
@@ -82,19 +151,21 @@ function cmdAdd(suffix) {
   }
 
   if (data === null) {
-    data = { mcpServers: {} };
+    data = createMcpJson();
   }
 
-  if (!data.mcpServers) {
-    data.mcpServers = {};
+  const servers = serverMap(data, true);
+  if (!servers) {
+    console.error('エラー: .mcp.json の MCP server 定義形式を解釈できません。');
+    process.exit(1);
   }
 
-  if (data.mcpServers[name]) {
+  if (servers[name]) {
     console.log(`${name} は既に登録されています。変更はありません。`);
     process.exit(0);
   }
 
-  data.mcpServers[name] = mcpEntry(suffix);
+  servers[name] = mcpEntry(suffix);
   writeMcpJson(data);
 
   const env = envName(suffix);
@@ -121,12 +192,13 @@ function cmdRemove(suffix) {
     process.exit(1);
   }
 
-  if (data === null || !data.mcpServers || !data.mcpServers[name]) {
+  const servers = serverMap(data, false);
+  if (data === null || !servers || !servers[name]) {
     console.log(`${name} は登録されていません。変更はありません。`);
     process.exit(0);
   }
 
-  delete data.mcpServers[name];
+  delete servers[name];
   writeMcpJson(data);
 
   console.log(`${name} を .mcp.json から削除しました。`);
@@ -142,8 +214,9 @@ function cmdList() {
     console.error('警告: .mcp.json の JSON が壊れています。');
     return;
   }
-  if (data && data.mcpServers) {
-    const names = Object.keys(data.mcpServers)
+  const servers = serverMap(data, false);
+  if (servers) {
+    const names = Object.keys(servers)
       .filter((n) => isRedashServer(n) && n !== 'redash')
       .sort();
     for (const name of names) {
@@ -168,8 +241,9 @@ function cmdStatus() {
     console.error('警告: .mcp.json の JSON が壊れています。');
     return;
   }
-  if (data && data.mcpServers) {
-    const names = Object.keys(data.mcpServers)
+  const servers = serverMap(data, false);
+  if (servers) {
+    const names = Object.keys(servers)
       .filter((n) => isRedashServer(n) && n !== 'redash')
       .sort();
     for (const name of names) {
