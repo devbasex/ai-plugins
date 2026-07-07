@@ -55,8 +55,9 @@ function mcpEntry(suffix) {
 }
 
 function isKiroRuntime() {
-  const parts = path.normalize(__dirname).split(path.sep);
-  return Boolean(process.env.KIRO_WORKSPACE_ROOT) || parts.includes('kiro') || parts.includes('.kiro');
+  const normalizedDir = path.normalize(__dirname);
+  const runtimePath = path.join('mcp', 'kiro') + path.sep;
+  return Boolean(process.env.KIRO_WORKSPACE_ROOT) || normalizedDir.includes(runtimePath);
 }
 
 function resolveProjectRoot() {
@@ -105,7 +106,7 @@ function normalizeWritableMcpJson(data) {
   if (Object.prototype.hasOwnProperty.call(data, 'mcp_servers')) {
     return { mcpServers: data.mcp_servers };
   }
-  return { mcpServers: data };
+  return data;
 }
 
 function serverMap(data, create) {
