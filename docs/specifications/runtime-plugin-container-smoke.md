@@ -203,4 +203,4 @@ authenticated workflow は `ANTHROPIC_API_KEY`、`OPENAI_API_KEY`、BigQuery 関
 - [runtime plugin validation](../../scripts/validate-runtime-plugins.sh)
 - [Runtime plugin smoke workflow](../../.github/workflows/runtime-plugin-smoke.yml)
 - [Runtime plugin authenticated smoke workflow](../../.github/workflows/runtime-plugin-authenticated-smoke.yml)
-- [runtime 分離仕様](ndf-knowledge-and-kiro.md)
+- [Runtime Plugin Distribution 仕様](runtime-plugin-distribution.md)
