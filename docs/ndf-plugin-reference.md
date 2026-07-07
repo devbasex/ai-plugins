@@ -117,4 +117,4 @@ Codex MCP サーバは廃止済みです。外部 AI 委譲は `/ndf:codex` Skil
 - [Codex版 README](../plugins/ndf-codex/README.md)
 - [Kiro CLI版 README](../plugins/ndf-kiro/README.md)
 - [共通編集元 README](../plugins/ndf-shared/README.md)
-- [runtime plugin container test plan](../issues/runtime-plugin-container-test-plan.md)
+- [runtime plugin container smoke 仕様](specifications/runtime-plugin-container-smoke.md)

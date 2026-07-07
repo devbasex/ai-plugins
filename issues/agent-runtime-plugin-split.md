@@ -4,7 +4,7 @@
 
 - 調査対象: `plugins/ndf/`, `.claude-plugin/marketplace.json`, `.agents/plugins/marketplace.json`, `.kiro/`, `scripts/install-kiro.sh`
 - 背景調査: Claude Code / Codex / Kiro は Skill 本文を共有しやすい一方、plugin manifest、hooks、agents、marketplace、Kiro agent config はランタイム固有である
-- テスト設計: `issues/runtime-plugin-container-test-plan.md`
+- テスト仕様: `docs/specifications/runtime-plugin-container-smoke.md`
 
 ## 概要
 
@@ -536,7 +536,7 @@ base branch: `main`
   - secret 注入時は `--keep-container` を禁止し、secret と認証済み runtime cache の残存を防ぐ
   - `pull_request` CI では secret を渡さず、非認証 smoke のみを実行する
   - ブラウザ認証しかできない runtime、または `--with-secrets=off` の非認証 smoke では、login prompt / 認証 URL 表示まで到達すれば合格とする
-  - 詳細は `issues/runtime-plugin-container-test-plan.md` に従う
+  - 詳細は `docs/specifications/runtime-plugin-container-smoke.md` に従う
 
 ## 実装進捗
 
@@ -605,7 +605,7 @@ base branch: `main`
 
 ## テスト計画
 
-詳細なテスト設計は `issues/runtime-plugin-container-test-plan.md` に分離する。この親計画では以下を完了条件として追跡する。
+詳細なテスト仕様は `docs/specifications/runtime-plugin-container-smoke.md` に分離する。この親計画では以下を完了条件として追跡する。
 
 - [x] `bash scripts/build-runtime-plugins.sh --check`
 - [x] `bash scripts/validate-runtime-plugins.sh`
