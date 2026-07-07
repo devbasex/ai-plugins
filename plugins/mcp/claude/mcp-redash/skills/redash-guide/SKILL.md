@@ -62,9 +62,10 @@ REDASH_STG_API_KEY=your-stg-api-key
 | dev | redash-dev | REDASH_DEV_URL, REDASH_DEV_API_KEY |
 | stg | redash-stg | REDASH_STG_URL, REDASH_STG_API_KEY |
 | prod2 | redash-prod2 | REDASH_PROD2_URL, REDASH_PROD2_API_KEY |
-| sandbox | redash-sandbox | REDASH_SANDBOX_URL, REDASH_SANDBOX_API_KEY |
+| sandbox-1 | redash-sandbox-1 | REDASH_SANDBOX_1_URL, REDASH_SANDBOX_1_API_KEY |
 
-- suffix は英数字で自由に指定可能
+- suffix は英小文字・数字・ハイフンで自由に指定可能
+- 環境変数名では suffix 内のハイフンをアンダースコアに変換
 - `default` は予約語のため使用不可（plugin 同梱の `redash` が該当）
 
 ## 環境の削除

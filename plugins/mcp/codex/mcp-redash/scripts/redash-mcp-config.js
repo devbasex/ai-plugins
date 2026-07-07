@@ -23,7 +23,7 @@ const KIRO_AGENT_PATH = path.join(PROJECT_ROOT, '.kiro', 'agents', 'default.json
 // --- helpers ---
 
 function envName(suffix) {
-  const upper = suffix.toUpperCase();
+  const upper = suffix.toUpperCase().replaceAll('-', '_');
   return {
     url: `REDASH_${upper}_URL`,
     key: `REDASH_${upper}_API_KEY`,
@@ -52,10 +52,6 @@ function mcpEntry(suffix) {
       REDASH_API_KEY: `\${${env.key}}`,
     },
   };
-}
-
-function isCodexRuntime() {
-  return Boolean(process.env.CODEX_PLUGIN_ROOT) || path.normalize(__dirname).split(path.sep).includes('codex');
 }
 
 function isKiroRuntime() {
@@ -99,7 +95,17 @@ function resolveProjectRoot() {
 }
 
 function createMcpJson() {
-  return isCodexRuntime() ? {} : { mcpServers: {} };
+  return { mcpServers: {} };
+}
+
+function normalizeWritableMcpJson(data) {
+  if (Object.prototype.hasOwnProperty.call(data, 'mcpServers')) {
+    return data;
+  }
+  if (Object.prototype.hasOwnProperty.call(data, 'mcp_servers')) {
+    return { mcpServers: data.mcp_servers };
+  }
+  return { mcpServers: data };
 }
 
 function serverMap(data, create) {
@@ -208,6 +214,8 @@ function cmdAdd(suffix) {
 
   if (data === null) {
     data = createMcpJson();
+  } else {
+    data = normalizeWritableMcpJson(data);
   }
 
   const servers = serverMap(data, true);
@@ -251,6 +259,10 @@ function cmdRemove(suffix) {
   if (data === undefined) {
     console.error('エラー: .mcp.json の JSON が壊れています。手動で修正してください。');
     process.exit(1);
+  }
+
+  if (data !== null) {
+    data = normalizeWritableMcpJson(data);
   }
 
   const servers = serverMap(data, false);
