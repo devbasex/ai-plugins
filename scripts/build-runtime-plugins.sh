@@ -287,6 +287,17 @@ config_path.write_text(json.dumps(servers, indent=2, ensure_ascii=False) + "\n")
 PY
 }
 
+apply_mcp_readme_template() {
+  local runtime="$1"
+  local plugin_dir="$2"
+  local readme_template="$plugin_dir/README.$runtime.md"
+
+  if [ -f "$readme_template" ]; then
+    mv "$readme_template" "$plugin_dir/README.md"
+  fi
+  rm -f "$plugin_dir"/README.claude.md "$plugin_dir"/README.codex.md "$plugin_dir"/README.kiro.md
+}
+
 rewrite_kiro_mcp_paths() {
   local plugin_dir="$1"
   local plugin_name="$2"
@@ -461,6 +472,7 @@ sync_mcp_runtime() {
     -name '*.pyc' -o \
     -name '*.pyo' \
   \) -exec rm -rf {} + 2>/dev/null || true
+  apply_mcp_readme_template "$runtime" "$tmp_dir"
 
   case "$runtime" in
     claude)

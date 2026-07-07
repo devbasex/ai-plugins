@@ -10,6 +10,7 @@ const FLAG_FILE = path.join(os.homedir(), '.claude-playwright-installed');
 const BROWSER_PATH = path.join(os.homedir(), '.cache', 'ms-playwright');
 const TIMEOUT_MS = 5 * 60 * 1000; // 5分タイムアウト
 const PLAYWRIGHT_VERSION_PATTERN = /^[~^]?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
+const EXEC_FILE_OPTIONS = process.platform === 'win32' ? { shell: true } : {};
 
 // 既にインストール済みかチェック（冪等性）
 if (fs.existsSync(FLAG_FILE)) {
@@ -30,7 +31,8 @@ try {
   const depsOutput = execFileSync('npm', ['view', '@playwright/mcp@latest', 'dependencies', '--json'], {
     encoding: 'utf-8',
     cwd: PLUGIN_ROOT,
-    timeout: 30000
+    timeout: 30000,
+    ...EXEC_FILE_OPTIONS
   });
 
   const deps = JSON.parse(depsOutput);
@@ -52,6 +54,7 @@ try {
     stdio: 'inherit',
     cwd: PLUGIN_ROOT,
     timeout: TIMEOUT_MS,
+    ...EXEC_FILE_OPTIONS,
     env: {
       ...process.env,
       PLAYWRIGHT_BROWSERS_PATH: BROWSER_PATH,
