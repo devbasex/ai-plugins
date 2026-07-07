@@ -141,6 +141,21 @@ plugins/{plugin-name}/
 /plugin install {plugin-name}@ai-plugins
 ```
 
+### Runtime plugin 検証
+
+NDF / MCP の runtime 別配布物を変更した場合は、以下を実行します。
+
+```bash
+bash scripts/build-runtime-plugins.sh
+bash scripts/validate-runtime-plugins.sh
+```
+
+ローカル hook は任意で導入できます。
+
+```bash
+bash scripts/install-dev-hooks.sh
+```
+
 ### 検証チェックリスト
 
 - [ ] marketplace.jsonが正しい形式

@@ -82,12 +82,15 @@ Claude Code と Codex は marketplace から同じ plugin 名で install しま�
 ```bash
 bash scripts/build-runtime-plugins.sh
 bash scripts/build-runtime-plugins.sh --check
+bash scripts/validate-runtime-plugins.sh
 claude plugin validate plugins/ndf-claude
 python3 -m json.tool plugins/ndf-codex/.codex-plugin/plugin.json >/dev/null
 bash plugins/ndf-kiro/install.sh --help
 ```
 
-`--check` は `plugins/ndf-*` と `plugins/mcp/claude|codex|kiro` の生成物が共通編集元と同期していることを検証します。
+`--check` は `plugins/ndf-*` と `plugins/mcp/claude|codex|kiro` の生成物が共通編集元と同期していることを検証します。`validate-runtime-plugins.sh` は生成物同期、JSON / manifest、marketplace source、Kiro installer、Markdown ローカルリンクをまとめて確認します。
+
+ローカル hook を使う場合は `bash scripts/install-dev-hooks.sh` で `.githooks/` を有効化します。
 
 ## 外部 AI 委譲
 
