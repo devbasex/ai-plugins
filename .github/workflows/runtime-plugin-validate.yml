@@ -1,0 +1,67 @@
+name: Runtime plugin validation
+
+on:
+  pull_request:
+    paths:
+      - ".agents/**"
+      - ".claude-plugin/**"
+      - ".github/workflows/runtime-plugin-validate.yml"
+      - ".githooks/**"
+      - "AGENTS.md"
+      - "CLAUDE.md"
+      - "KIRO.md"
+      - "README.md"
+      - "docs/**"
+      - "plugins/**"
+      - "scripts/**"
+  push:
+    branches:
+      - main
+      - "release/**"
+    paths:
+      - ".agents/**"
+      - ".claude-plugin/**"
+      - ".github/workflows/runtime-plugin-validate.yml"
+      - ".githooks/**"
+      - "AGENTS.md"
+      - "CLAUDE.md"
+      - "KIRO.md"
+      - "README.md"
+      - "docs/**"
+      - "plugins/**"
+      - "scripts/**"
+
+jobs:
+  runtime-plugin-build-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - run: bash scripts/build-runtime-plugins.sh --check
+
+  runtime-plugin-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - run: npm install -g @anthropic-ai/claude-code
+      - run: bash scripts/validate-runtime-plugins.sh
+
+  markdown-link-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - run: python3 scripts/check-markdown-links.py --root .

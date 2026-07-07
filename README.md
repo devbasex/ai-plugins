@@ -134,6 +134,21 @@ ai-plugins/
 └── CLAUDE.md                     # AIエージェント向けガイドライン
 ```
 
+#### Runtime plugin の検証
+
+共通ソースや runtime 配布物を変更した場合は、生成物同期と manifest / link 検証を実行します。
+
+```bash
+bash scripts/build-runtime-plugins.sh
+bash scripts/validate-runtime-plugins.sh
+```
+
+ローカル hook を使う場合は以下を実行します。
+
+```bash
+bash scripts/install-dev-hooks.sh
+```
+
 #### 新しいプラグインの作成手順
 
 **1. プラグインディレクトリを作成:**
