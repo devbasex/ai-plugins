@@ -104,7 +104,9 @@ function normalizeWritableMcpJson(data) {
     return data;
   }
   if (Object.prototype.hasOwnProperty.call(data, 'mcp_servers')) {
-    return { mcpServers: data.mcp_servers };
+    const normalized = { ...data, mcpServers: data.mcp_servers };
+    delete normalized.mcp_servers;
+    return normalized;
   }
   return data;
 }

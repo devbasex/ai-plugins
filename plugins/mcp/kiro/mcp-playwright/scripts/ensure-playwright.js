@@ -7,18 +7,18 @@ const os = require('os');
 
 const PLUGIN_ROOT = process.env.PLUGIN_ROOT || process.env.CODEX_PLUGIN_ROOT || process.env.CLAUDE_PLUGIN_ROOT || __dirname;
 const FLAG_FILE = path.join(os.homedir(), '.claude-playwright-installed');
-const BROWSER_PATH = path.join(os.homedir(), '.cache', 'ms-playwright');
+const BROWSER_PATH = process.env.PLAYWRIGHT_BROWSERS_PATH || path.join(os.homedir(), '.cache', 'ms-playwright');
 const TIMEOUT_MS = 5 * 60 * 1000; // 5分タイムアウト
 const PLAYWRIGHT_VERSION_PATTERN = /^[~^]?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
 const EXEC_FILE_OPTIONS = process.platform === 'win32' ? { shell: true } : {};
 
-function readInstalledVersion() {
+function readInstalledFlag() {
   if (!fs.existsSync(FLAG_FILE)) {
     return null;
   }
   try {
     const flagData = JSON.parse(fs.readFileSync(FLAG_FILE, 'utf-8'));
-    return typeof flagData.playwrightVersion === 'string' ? flagData.playwrightVersion : null;
+    return flagData && typeof flagData === 'object' ? flagData : null;
   } catch {
     return null;
   }
@@ -55,8 +55,12 @@ try {
   console.log(`✓ Playwright ${playwrightVersion} を使用します`);
   console.log('');
 
-  const installedVersion = readInstalledVersion();
-  if (installedVersion === playwrightVersion) {
+  const installedFlag = readInstalledFlag();
+  if (
+    installedFlag &&
+    installedFlag.playwrightVersion === playwrightVersion &&
+    installedFlag.browserPath === BROWSER_PATH
+  ) {
     console.log('既に同じ Playwright バージョンでセットアップ済みです。');
     process.exit(0);
   }
