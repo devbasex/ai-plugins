@@ -2,6 +2,18 @@
   "name": "mcp-serena",
   "version": "1.0.0",
   "description": "Serena MCP server for semantic code intelligence (symbol search, reference search, refactoring)",
-  "keywords": ["mcp", "serena", "lsp", "symbol-search", "refactoring", "code-intelligence"],
-  "mcpServers": "./.mcp.json"
+  "author": {
+    "name": "takemi-ohama",
+    "url": "https://github.com/takemi-ohama"
+  },
+  "keywords": [
+    "mcp",
+    "serena",
+    "lsp",
+    "symbol-search",
+    "refactoring",
+    "code-intelligence"
+  ],
+  "mcpServers": "./.mcp.json",
+  "hooks": "./hooks/hooks.json"
 }

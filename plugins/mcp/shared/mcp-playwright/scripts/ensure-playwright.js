@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || __dirname;
+const PLUGIN_ROOT = process.env.PLUGIN_ROOT || process.env.CODEX_PLUGIN_ROOT || process.env.CLAUDE_PLUGIN_ROOT || __dirname;
 const FLAG_FILE = path.join(os.homedir(), '.claude-playwright-installed');
 const BROWSER_PATH = path.join(os.homedir(), '.cache', 'ms-playwright');
 const TIMEOUT_MS = 5 * 60 * 1000; // 5分タイムアウト

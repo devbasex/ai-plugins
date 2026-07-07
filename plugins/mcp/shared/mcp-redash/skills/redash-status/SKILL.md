@@ -16,7 +16,7 @@ Redash MCP の設定状況を詳細表示します。各 MCP が必要とする�
 以下のコマンドを実行してください。
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/redash-mcp-config.js" status
+node "${PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}/scripts/redash-mcp-config.js" status
 ```
 
 ## 実行後

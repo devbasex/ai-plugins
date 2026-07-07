@@ -16,7 +16,7 @@ allowed-tools:
 以下のコマンドを実行してください。
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/redash-mcp-config.js" list
+node "${PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}/scripts/redash-mcp-config.js" list
 ```
 
 ## 実行後

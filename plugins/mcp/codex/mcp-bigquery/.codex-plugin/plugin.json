@@ -2,6 +2,17 @@
   "name": "mcp-bigquery",
   "version": "1.0.0",
   "description": "BigQuery MCP server for data analysis and SQL queries",
-  "keywords": ["mcp", "bigquery", "sql", "data", "analysis", "gcp"],
+  "author": {
+    "name": "takemi-ohama",
+    "url": "https://github.com/takemi-ohama"
+  },
+  "keywords": [
+    "mcp",
+    "bigquery",
+    "sql",
+    "data",
+    "analysis",
+    "gcp"
+  ],
   "mcpServers": "./.mcp.json"
 }

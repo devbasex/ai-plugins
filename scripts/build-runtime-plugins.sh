@@ -240,28 +240,31 @@ write_codex_mcp_manifest() {
   local plugin_dir="$1"
   local claude_manifest="$plugin_dir/.claude-plugin/plugin.json"
   local codex_manifest="$plugin_dir/.codex-plugin/plugin.json"
-  local name version description keywords
 
   if [ ! -f "$claude_manifest" ]; then
     echo "ERROR: Claude manifest not found: $claude_manifest" >&2
     exit 1
   fi
 
-  name="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["name"])' "$claude_manifest")"
-  version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("version","1.0.0"))' "$claude_manifest")"
-  description="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("description",""))' "$claude_manifest")"
-  keywords="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1])).get("keywords", []), ensure_ascii=False))' "$claude_manifest")"
-
   mkdir -p "$(dirname "$codex_manifest")"
-  cat > "$codex_manifest" <<EOF
-{
-  "name": $(json_string "$name"),
-  "version": $(json_string "$version"),
-  "description": $(json_string "$description"),
-  "keywords": $keywords,
-  "mcpServers": "./.mcp.json"
-}
-EOF
+  python3 - "$plugin_dir" "$claude_manifest" "$codex_manifest" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+plugin_dir = Path(sys.argv[1])
+claude_manifest = Path(sys.argv[2])
+codex_manifest = Path(sys.argv[3])
+
+manifest = json.loads(claude_manifest.read_text())
+manifest["mcpServers"] = "./.mcp.json"
+if (plugin_dir / "skills").is_dir():
+    manifest["skills"] = "./skills/"
+if (plugin_dir / "hooks" / "hooks.json").is_file():
+    manifest["hooks"] = "./hooks/hooks.json"
+
+codex_manifest.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
+PY
 }
 
 write_codex_mcp_config() {
