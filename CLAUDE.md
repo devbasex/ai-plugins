@@ -17,7 +17,7 @@ Serena MCPは**mcp-serena**プラグインとして提供されます（NDFと�
 
 **Serena memoryは使用禁止**。知識は `docs/` に、手順は `skills/` に配置してください。
 
-詳細は `plugins/mcp-serena/docs/serena-guide.md` を参照。
+詳細は `plugins/mcp/shared/mcp-serena/docs/serena-guide.md` を参照。
 
 ## 知識アーキテクチャ
 

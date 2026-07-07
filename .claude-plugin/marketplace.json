@@ -1,5 +1,6 @@
 {
   "name": "ai-plugins",
+  "description": "Claude Code plugin marketplace for NDF workflow tooling and MCP server plugins.",
   "owner": {
     "name": "takemi-ohama",
     "email": "takemi.ohama+ai-plugins@gmail.com"
@@ -7,57 +8,57 @@
   "plugins": [
     {
       "name": "ndf",
-      "source": "./plugins/ndf",
-      "description": "All-in-one plugin (v4.19.0): Claude Code/Kiro and Codex skill exposure split, 8 specialized agents (model-tiered), 49 source skills including plan-to-spec final specification workflow, pytest-playwright E2E testing (7 focused skills: test-planning, script-creation, execution, report, kit-ops, browser-connect, evidence-drive), CDP remote browser support, Google Drive evidence archival, ML model structure standard, PR/review workflows, principles, data analysis, Codex/Gemini CLI integration, skill usage stats, statusline switcher (/ndf:statusline). SessionStart hook (transcript retention >= 90 days, default statusline when none is configured), Stop hook (AI-summarized Slack notifications)."
+      "source": "./plugins/ndf-claude",
+      "description": "Claude Code plugin (v4.19.0): 8 specialized agents, focused NDF skills for PR/review workflows, implementation planning, plan-to-spec, browser smoke testing, statusline, Codex CLI delegation, transcript retention guard, default statusline setup, and optional Slack notifications."
     },
     {
       "name": "mcp-playwright",
-      "source": "./plugins/mcp-playwright",
+      "source": "./plugins/mcp/claude/mcp-playwright",
       "description": "Playwright MCP auto-setup plugin with Chromium browser installation and configuration"
     },
     {
       "name": "mcp-chrome-devtools",
-      "source": "./plugins/mcp-chrome-devtools",
+      "source": "./plugins/mcp/claude/mcp-chrome-devtools",
       "description": "Chrome DevTools MCP server for browser automation and testing"
     },
     {
       "name": "mcp-bigquery",
-      "source": "./plugins/mcp-bigquery",
+      "source": "./plugins/mcp/claude/mcp-bigquery",
       "description": "BigQuery MCP server for data analysis and SQL queries"
     },
     {
       "name": "mcp-aws-docs",
-      "source": "./plugins/mcp-aws-docs",
+      "source": "./plugins/mcp/claude/mcp-aws-docs",
       "description": "AWS Documentation MCP server for accessing official AWS documentation"
     },
     {
       "name": "mcp-dbhub",
-      "source": "./plugins/mcp-dbhub",
+      "source": "./plugins/mcp/claude/mcp-dbhub",
       "description": "DBHub MCP server for database operations and SQL queries"
     },
     {
       "name": "mcp-notion",
-      "source": "./plugins/mcp-notion",
+      "source": "./plugins/mcp/claude/mcp-notion",
       "description": "Notion MCP server for note management and knowledge base operations"
     },
     {
       "name": "mcp-devin",
-      "source": "./plugins/mcp-devin",
+      "source": "./plugins/mcp/claude/mcp-devin",
       "description": "Devin MCP server for accessing repository documentation and code knowledge via DeepWiki"
     },
     {
       "name": "mcp-redash",
-      "source": "./plugins/mcp-redash",
+      "source": "./plugins/mcp/claude/mcp-redash",
       "description": "Redash MCP server with multi-environment support (arbitrary suffix)"
     },
     {
       "name": "mcp-markitdown",
-      "source": "./plugins/mcp-markitdown",
+      "source": "./plugins/mcp/claude/mcp-markitdown",
       "description": "MarkItDown MCP server for converting documents (PDF, Office, images, etc.) to Markdown"
     },
     {
       "name": "mcp-serena",
-      "source": "./plugins/mcp-serena",
+      "source": "./plugins/mcp/claude/mcp-serena",
       "description": "Serena MCP server for semantic code intelligence (symbol search, reference search, refactoring)"
     }
   ]

@@ -2,219 +2,119 @@
 
 ## 概要
 
-NDF プラグインは、Claude Code / Codex / Kiro CLI 向けのオールインワン開発支援プラグイン。エージェント、Skills、フックを統合して提供する。
+NDF は Claude Code / Codex / Kiro CLI 向けの開発支援プラグイン群です。marketplace 上の plugin 名は全ランタイムで `ndf` を維持し、配布物はランタイム別ディレクトリに分けます。
 
-**現行バージョン**: **v4.19.0** — `plan-to-spec` skill を追加し、実装完了後の plan を `docs/` 配下の確定仕様書へ移動・リライト・レビューする標準フローと完了報告テンプレートを定義した。**v4.18.0** で `cross-review` は Gemini の進捗ログを heartbeat に表示し、`--focus` / `--extra-instructions-file` と PR 種別別の自動レビュー観点テンプレートを追加した。Codex plugin 対応として Claude Code / Kiro と Codex の公開 Skill セットを分離し、Codex では `skills-codex/` の core 30 個のみを公開する。Skill 実体は `skills/` に集約し、Claude Code / Kiro は manifest 配列指定で公開対象を制御する。Codex 向け公開ディレクトリは marketplace cache で欠落しないよう実ディレクトリとして同梱する。詳細は [CHANGELOG.md](../plugins/ndf/CHANGELOG.md)。`/ndf:codex` skill + `corder` エージェント経由の Codex CLI 直接実行に一本化、Serena MCP は別プラグイン `mcp-serena` に分離済み、Playwright シナリオ E2E、Google Drive / Chat 連携 skill を提供。
+| 用途 | ディレクトリ | 配布方法 |
+|---|---|---|
+| 共通編集元 | `plugins/ndf-shared/` | 直接 install しない |
+| Claude Code | `plugins/ndf-claude/` | `.claude-plugin/marketplace.json` の `ndf` |
+| Codex | `plugins/ndf-codex/` | `.agents/plugins/marketplace.json` の `ndf` |
+| Kiro CLI | `plugins/ndf-kiro/` | `plugins/ndf-kiro/install.sh` |
+
+旧 monolithic NDF ディレクトリは廃止済みです。Skill や共通スクリプトを変更する場合は `plugins/ndf-shared/` を編集し、`bash scripts/build-runtime-plugins.sh` で runtime 配布物を再生成します。
 
 ## ディレクトリ構造
 
+```text
+plugins/
+├── ndf-shared/
+│   ├── skills/
+│   ├── scripts/
+│   └── manifests/
+├── ndf-claude/
+│   ├── .claude-plugin/plugin.json
+│   ├── agents/
+│   ├── hooks/
+│   ├── skills/
+│   └── scripts/
+├── ndf-codex/
+│   ├── .codex-plugin/plugin.json
+│   ├── hooks/
+│   ├── skills/
+│   └── scripts/
+└── ndf-kiro/
+    ├── install.sh
+    ├── agents/default.json.template
+    ├── prompts/
+    ├── skills/
+    └── scripts/
 ```
-plugins/ndf/
-├── .claude-plugin/
-│   └── plugin.json          # プラグインメタデータ
-├── hooks/
-│   └── hooks.json           # SessionStart (保持期間管理/デフォルトstatusline) / Stop (Slack通知)
-├── scripts/
-│   ├── ensure-retention.sh  # cleanupPeriodDays >= 90 を保つ
-│   ├── statusline.sh        # NDF標準statusline本体
-│   ├── statusline-switch.sh # statusline の導入・切替・復元 (ensure/set/restore/status)
-│   └── slack-notify.js      # Slack通知スクリプト
-├── agents/                  # 専門エージェント（8個）
-├── skills/                  # 全Skill実体（49個。Claude Code/Kiroはmanifest配列で公開対象を指定）
-├── skills-codex/            # Codex向け公開Skill（core 30個。marketplace cache対応の実ディレクトリ）
-├── skills-optional/         # ランタイム別除外候補リスト
-├── CLAUDE.md                # プラグイン開発者向けガイド
-└── README.md                # 利用者向けドキュメント
-```
 
-## 機能
+生成物は commit 対象です。利用者が plugin install 時に build を実行する必要はありません。
 
-### 1. MCP サーバー
+## Runtime 別の同梱内容
 
-NDF プラグイン本体はコア MCP サーバを**同梱しない**（v4.0.0 で Codex MCP を廃止）。関連 MCP は個別プラグインとして提供：
-
-| MCP | 提供プラグイン | 用途 |
-|---|---|---|
-| Serena MCP | `mcp-serena` | セマンティックコード操作 |
-| GitHub MCP | Anthropic 公式 | GitHub 操作 |
-| Context7 MCP | Anthropic 公式 | 最新ライブラリドキュメント |
-| Chrome DevTools MCP | `mcp-chrome-devtools` | ブラウザ自動化・パフォーマンス |
-| BigQuery MCP | `mcp-bigquery` | BigQuery データ分析 |
-| AWS Docs MCP | `mcp-aws-docs` | AWS 公式ドキュメント |
-| DBHub MCP | `mcp-dbhub` | 汎用データベース |
-| Notion MCP | `mcp-notion` | Notion 連携 |
-
-### 2. ワークフロー Skills（スラッシュコマンド）
-
-`/ndf:<name>` でユーザーから直接起動する Skill 群：
-
-| Skill | 用途 |
+| Runtime | 同梱内容 |
 |---|---|
-| `/ndf:pr` | commit+push+PR 作成 / 既存 PR 説明更新 |
-| `/ndf:pr-tests` | PR の Test Plan を自動実行 |
-| `/ndf:fix` | レビューコメントの修正対応 |
-| `/ndf:review` | PR を Approve/Request Changes 判定 |
-| `/ndf:review-branch` | PR 前のローカル差分レビュー |
-| `/ndf:review-pr-comments` | PR コメントの分類 (READ-ONLY) |
-| `/ndf:resolve-pr-comments` | 対応済みコメント返信+Resolve |
-| `/ndf:cherry-pick-pr` | 環境ブランチへの cherry-pick PR |
-| `/ndf:deploy` | 環境ブランチへのデプロイ PR |
-| `/ndf:sync-main` | main を現ブランチに取り込み |
-| `/ndf:merged` | マージ後のクリーンアップ |
-| `/ndf:clean` | マージ済みブランチ一括削除 |
-| `/ndf:browser-test` | Playwright/Chrome DevTools での動作確認 |
-| `/ndf:skill-stats` | Skill 利用統計の集計（期間/プロジェクト別） |
-| `/ndf:statusline` | NDF標準statuslineの切り替え・復元・状態確認 (`set`/`restore`/`status`) |
+| Claude Code | 8個の専門エージェント、Claude向け公開Skills、SessionStart/Stop hook、statusline、Slack通知スクリプト |
+| Codex | Codex向け公開Skills、Stop hook、任意Slack通知スクリプト |
+| Kiro CLI | Kiro向け公開Skills、agent config template、workflow prompts、installer |
 
-### 3. 原則・ガイドライン Skills（モデル起動型）
+Claude Code 専用の agents / statusline / transcript retention hook は Codex 版と Kiro 版には含めません。Codex 版と Kiro 版は、それぞれの runtime が読むディレクトリだけで完結します。
 
-該当文脈で自動的に参照される Skill 群：
+## Skills
 
-| Skill | 対象領域 |
+NDF の Skill 実装は `plugins/ndf-shared/skills/` が編集元です。公開セットは manifest で管理します。
+
+| Manifest | 出力先 |
 |---|---|
-| `ndf-policies` | プラグイン共通ポリシー（常時注入） |
-| `branch-fix-strategy` | 複数ブランチ適用戦略 (cherry-pick) |
-| `implementation-plan` | `issues/` 配下の実装プラン管理 |
-| `plan-to-spec` | 実装完了後の plan を確定仕様書へ移動・リライト・レビュー |
-| `investigation-rules` | 調査時のエビデンス主義 |
-| `problem-solving` | 根本原因分析・多層防御 |
-| `logging-guidelines` | ログ運用 (言語非依存) |
-| `markdown-writing` | Markdown 文書の体裁 |
-| `issue-plan-strategy` | issue→plan 作成・multi-PR 実行のワークフロー戦略 |
-| `ml-model-structure` | ML モデル構築・推論API の標準ディレクトリ構造 (版内 feature SSoT / train↔serve 契約) |
+| `plugins/ndf-shared/manifests/claude-skills.txt` | `plugins/ndf-claude/skills/` |
+| `plugins/ndf-shared/manifests/codex-skills.txt` | `plugins/ndf-codex/skills/` |
+| `plugins/ndf-shared/manifests/kiro-skills.txt` | `plugins/ndf-kiro/skills/` |
 
-### 4. 補助 Skills
+主な Skill 領域:
 
-| Skill | 用途 |
-|---|---|
-| `data-analyst-sql-optimization` | SQL 最適化パターン |
-| `data-analyst-export` | CSV/JSON/Excel 出力 |
-| `qa-security-scan` | OWASP Top 10 チェック |
-| `python-execution` | Python 実行環境の自動判定 |
-| `docker-container-access` | Docker コンテナ接続判定 |
-| `git-gh-operations` | git/gh 操作パターン |
-| `google-auth` | Google API OAuth2 |
-| `codex` | Codex CLI 直接実行ガイド |
-| `deepwiki-transfer` | DeepWiki 知識転送 |
-| `knowledge-reorg` | 知識再編成 |
-| `mcp-builder` | MCP サーバ作成（Anthropic 公式） |
-| `official-skills-autoloader` | Anthropic 公式 Skill の自動ロード |
-| `playwright-test-planning` | E2E テスト計画立案 (HTSM/ISTQB) |
-| `playwright-script-creation` | E2E テストスクリプト作成 |
-| `playwright-execution` | E2E 実行+エビデンス収集 (動画/a11y/CWV) |
-| `playwright-report` | E2E テスト結果の Markdown レポート |
-| `playwright-kit-ops` | playwright_kit スクリプト操作 |
-| `playwright-scenario-test` | フル E2E ワークフロー統括 |
-| `google-drive` | Google Drive/Docs 操作 |
-| `google-chat` | Google Chat メッセージ取得 |
-| `cross-review` | codex/gemini 両方でレビュー自動ループ |
-| `gemini` | gemini CLI 直接実行 |
+- PR / review workflow: `pr`, `pr-tests`, `fix`, `review`, `cross-review`, `resolve-pr-comments`
+- branch / release workflow: `deploy`, `cherry-pick-pr`, `sync-main`, `merged`, `clean`
+- planning / documentation: `implementation-plan`, `issue-plan-strategy`, `plan-to-spec`, `markdown-writing`
+- quality / execution: `playwright-*`, `python-execution`, `docker-container-access`, `git-gh-operations`
+- external services: `google-drive`, `google-chat`, `data-analyst-*`
+- policy: `ndf-policies`, `problem-solving`, `logging-guidelines`
 
-### 5. 専門エージェント（8個、モデル階層化）
+## MCP Plugins
 
-| エージェント | モデル | 役割 |
-|-------------|------|------|
-| **director** | opus | タスク統括・設計立案 |
-| **corder** | sonnet | Codex CLI 経由の独立レビュー・大規模調査 |
-| **data-analyst** | sonnet | データ分析・SQL |
-| **researcher** | sonnet | AWS Docs / Chrome DevTools 調査 |
-| **qa** | sonnet | 品質・セキュリティ検証 |
-| **debugger** | sonnet | 根本原因分析 |
-| **devops-engineer** | sonnet | Docker/CI/CD/K8s |
-| **code-reviewer** | sonnet | git diff/PR レビュー（Codex 非使用） |
+MCP plugin も runtime 別に配布します。共通編集元は `plugins/mcp/shared/<plugin-name>/`、配布物は `plugins/mcp/claude|codex|kiro/<plugin-name>/` です。
 
-### 6. 自動フック
+Claude Code と Codex は marketplace から同じ plugin 名で install します。Kiro CLI は `plugins/mcp/kiro/<plugin-name>/install.sh` で対象プロジェクトの `.mcp.json` と必要な Kiro agent 設定を更新します。
 
-| イベント | 用途 |
-|---|---|
-| `SessionStart` (matcher: `startup`) | `~/.claude/settings.json` の `cleanupPeriodDays` を最低 90 日に保つ (7日タイムスタンプガード + flock でアトミック更新) |
-| `SessionStart` (matcher: `startup`) | `statusLine` 未設定時のみ NDF 標準 statusline を設定 (既存設定優先、NDF 版利用中はスクリプト更新のみ追従) |
-| `Stop` | AI 要約を生成して Slack に通知 (`SLACK_BOT_TOKEN` 設定時のみ) |
-
-## 環境変数
-
-### Slack 通知（推奨）
-- `SLACK_BOT_TOKEN` — Bot User OAuth Token (`xoxb-...`)
-- `SLACK_CHANNEL_ID` — 通知先チャンネル (`C...`)
-- `SLACK_USER_MENTION` — メンション対象ユーザー (`<@U...>`)
-
-### Codex CLI（`/ndf:codex` / `corder` エージェント利用時）
-- `CODEX_HOME` — Codex CLI のホーム (default: `~/.codex`)
-- `OPENAI_API_KEY` — `codex login` 済みなら不要
-
-### 個別 MCP プラグイン（利用する場合）
-各プラグイン README を参照。
-
-## 実装上の知見
-
-### Stop Hook 無限ループ防止
-
-Stop hook 内で Claude CLI を呼び出す際は `--settings` で hooks と plugins を両方無効化する：
+## Build / Validation
 
 ```bash
-claude -p --settings '{"disableAllHooks": true, "disableAllPlugins": true}' --output-format text
+bash scripts/build-runtime-plugins.sh
+bash scripts/build-runtime-plugins.sh --check
+bash scripts/validate-runtime-plugins.sh
+claude plugin validate plugins/ndf-claude
+python3 -m json.tool plugins/ndf-codex/.codex-plugin/plugin.json >/dev/null
+bash plugins/ndf-kiro/install.sh --dry-run
+bash scripts/runtime-smoke-test.sh --runtime claude
+bash scripts/runtime-smoke-test.sh --runtime codex
+bash scripts/runtime-smoke-test.sh --runtime kiro
 ```
 
-- `CLAUDE_DISABLE_HOOKS` 環境変数 → 存在しない
-- `stop_hook_active` フィールド → 実際には送信されない
-- `--settings` で両方無効化 → 確実に動作
+`--check` は `plugins/ndf-*` と `plugins/mcp/claude|codex|kiro` の生成物が共通編集元と同期していることを検証します。`validate-runtime-plugins.sh` は生成物同期、JSON / manifest、marketplace source、Kiro installer、Markdown ローカルリンクをまとめて確認します。
 
-### 要約生成の3段階フォールバック
+`runtime-smoke-test.sh` は Docker コンテナ内に repo copy、`/tmp/runtime-home`、`/tmp/runtime-project`、`/tmp/runtime-secrets` を分離して作成し、Claude / Codex / Kiro それぞれで `ndf` と `mcp-bigquery` 相当の実 install、Skill / MCP / hook / agent config の assertion、JUnit / log artifact 出力を確認します。PR CI は `--with-secrets=off` の非認証 smoke のみを実行し、認証付き smoke は `runtime-plugin-authenticated-smoke.yml` の protected workflow で実行します。
 
-1. **Claude CLI**（優先） — AI による高品質要約
-2. **transcript 解析**（フォールバック1） — セッションログから抽出
-3. **git diff**（フォールバック2） — ファイル変更から推測
+ローカル hook を使う場合は `bash scripts/install-dev-hooks.sh` で `.githooks/` を有効化します。
 
-### 保持期間管理の実装
+## 外部 AI 委譲
 
-`SessionStart` hook で `~/.claude/settings.json` の `cleanupPeriodDays` を検査し、90 未満なら 90 に更新する：
+Codex MCP サーバは廃止済みです。外部 AI 委譲は `/ndf:codex` Skill と Claude Code 版の `corder` エージェントから Codex CLI を直接呼び出す方式を標準とします。
 
-- 実行は `~/.claude/.ndf-retention-checked` の 7 日タイムスタンプで抑止
-- 書き込みは `flock` で排他ロックし、並列セッションでの lost update を防止 (flock 不在環境は atomic rename に依存)
-- Claude Code の公開 API には「プラグインインストール時」hook が存在しないため、`SessionStart + startup` matcher が実用上の最適解
+## Slack 通知
 
-### デフォルト statusline の実装（v4.14.0）
+| Runtime | 通知方法 |
+|---|---|
+| Claude Code | Stop hook で `plugins/ndf-claude/scripts/slack-notify.js` を実行 |
+| Codex | `NDF_CODEX_SLACK_NOTIFY=true` の場合のみ Stop hook で通知 |
+| Kiro CLI | `plugins/ndf-kiro/install.sh --with-slack` で通知 hook を生成 |
 
-`SessionStart` hook で `statusline-switch.sh ensure` を実行する：
+機密情報は環境変数で管理し、リポジトリにはコミットしません。
 
-- プラグイン同梱の `statusline.sh` を `~/.claude/ndf-statusline.sh` にコピー（差分時のみ。プラグイン更新に追従させるため、settings からはプラグインキャッシュパスではなく固定パスを参照）
-- `statusLine` が未設定の場合のみ `bash ~/.claude/ndf-statusline.sh` を設定。既存設定があれば何もしない（既存優先）
-- `/ndf:statusline set` は既存設定を `~/.claude/.ndf-statusline-backup.json` にバックアップしてから切り替え、`restore` で復元（バックアップ無しなら `statusLine` キーを削除）
-- 書き込みは `flock` + atomic rename（保持期間管理と同パターン）
+## 関連ドキュメント
 
-### Codex の扱い（v4.0.0）
-
-- Codex MCP サーバは廃止
-- `/ndf:codex` skill に CLI 直接実行の詳細手順（サンドボックス、プロンプト設計、バックグラウンド実行、stderr/stdout 回収）を記載
-- `corder` エージェントは本 skill を参照して `codex exec` を呼び出す
-
-### バージョン変遷（抜粋）
-
-| バージョン | 主な変更 |
-|-----------|---------|
-| v1.0.0 | 初期リリース |
-| v2.0.0 | 公式プラグインへの MCP 重複解消 |
-| v2.6.0 | NDF コア MCP 最小化 (Serena + Codex) |
-| v2.7.0 | commands → skills 統合 (Claude Code 2.1.3 対応) |
-| v3.0.0 | Serena MCP 分離 (`mcp-serena`)、memory 系 Skill 廃止、CLAUDE.ndf.md 注入廃止 |
-| v3.1.0 | Kiro CLI 対応、`google-auth` skill 追加 |
-| v3.5.0 | Agent/Skill 再編、モデル階層化、公式 Skill 連携 |
-| v3.6.0 | 汎用 skill 13 個追加 (原則系・PR ワークフロー系・codex) |
-| v3.7.0 | transcript 保持期間自動管理 hook、`/ndf:skill-stats` skill |
-| **v4.0.0 (BREAKING)** | **Codex MCP 廃止 → CLI 直接実行一本化**、レガシー CLAUDE.ndf.md 救済機構削除、skill-stats にプロジェクト別/日付範囲フィルタ追加 |
-| **v4.1.0** | `playwright-scenario-test` / `google-drive` / `google-chat` skill 追加、`google-auth` v0.2.0 (永続トークン `~/.config/gcloud/google_token.json` + `get_credentials()` API + 手動 copy-paste フロー) |
-| **v4.10.0** | `ml-model-structure` skill 追加 (MLモデル構築・推論API開発の標準ディレクトリ構造、版内 feature SSoT / train↔serve 契約) |
-| **v4.11.0** | `/ndf:cross-review` 堅牢性改善: monitor.py EARLY_ERROR 誤検知解消 (文字列リテラル / grep ソース引用行を benign 判定) + ループ終了時の最終スイープ (残 open thread 全 Resolve) 必須化 |
-| **v4.12.0** | Playwright E2E に `playwright-browser-connect` (CDP リモートブラウザ接続) / `playwright-evidence-drive` (Google Drive エビデンスアーカイブ) の 2 skill 追加 (45→47個) |
-| **v4.12.1** | `/ndf:cross-review` デフォルト調整: `--max-rounds` 6→12 / `--rotate-after` 5→8、`--rotate-mode squash` 説明から「既存挙動」表記を削除 |
-| **v4.13.0** | `issue-plan-strategy`: release PR body の self-contained 必須化 (レビュアー視点の原則明文化、子 PR チェックリストを `<details>` に格下げ、Ready 前の body 最終化ステップ追加) |
-| **v4.14.0** | `statusline` skill + デフォルト statusline 設定 hook 追加 (47→48個)。statusLine 未設定時のみ NDF 標準 statusline を自動設定、`/ndf:statusline set\|restore\|status` で切替・復元 |
-| **v4.15.0** | cross-review: worktree 生成先を `<システム tmpdir>/ndf-worktrees/<owner>--<repo>/pr<N>` に変更 (非永続化 + リポジトリ別分離)。未登録パスの残骸は `.stale-<ts>` に退避して作り直すガード追加 |
-| **v4.16.0** | statusline: `[ctx:` の固定ラベルを利用モデル表示名 (例 `Opus 4.8`) に置換。モデル名が取れない場合は `ctx` にフォールバック |
-| **v4.16.1** | statusline: NDF 由来の旧コピー (マーカー付き / レガシー `statusline-command.sh`) を `settings.json` が指す場合、SessionStart で正規パス (`~/.claude/ndf-statusline.sh`) へ自動移行しバージョンアップ追従を回復。ユーザー独自 statusline は誤検出ガードで保護。`skills/statusline/tests/` 新設 |
-| **v4.17.0** | Codex plugin 対応: Claude Code / Kiro と Codex の公開 Skill セットを分離。Claude Code / Kiro は manifest 配列指定、Codex は marketplace cache 対応の `skills-codex/` 実ディレクトリで core 28 個を公開 |
-| **v4.17.1** | `cross-review` の公開漏れ修正。Claude Code/Kiro manifest と Codex `skills-codex/` に追加し、Codex core 29 個として公開 |
-| **v4.17.2** | Codex Stop hook の Slack 通知を Claude 版に合わせ、メンション付き投稿後にメンションなし投稿を残してメンション付き投稿を削除 |
-| **v4.17.3** | Slack 終了通知 hook の失敗時終了コードを安定化し、Stop hook 全体を `code 1` にしないよう修正 |
-| **v4.18.0** | `cross-review`: Gemini 進捗ログの heartbeat 表示、`--focus` / `--extra-instructions-file`、PR 種別別の自動レビュー観点テンプレートを追加 |
-| **v4.19.0** | `plan-to-spec` skill を追加。実装完了後の plan を確定仕様書へ移動・リライト・レビューする標準フローと完了報告テンプレートを定義 |
+- [Claude Code版 README](../plugins/ndf-claude/README.md)
+- [Codex版 README](../plugins/ndf-codex/README.md)
+- [Kiro CLI版 README](../plugins/ndf-kiro/README.md)
+- [共通編集元 README](../plugins/ndf-shared/README.md)
+- [runtime plugin container test plan](../issues/runtime-plugin-container-test-plan.md)

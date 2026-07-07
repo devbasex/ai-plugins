@@ -453,16 +453,16 @@ base branch: `release/runtime-plugin-split` (親計画の PR7 merge 後。親計
 
 ## 完了の定義
 
-- [ ] `scripts/runtime-smoke-test.sh` で runtime を選択できる
-- [ ] Claude / Codex / Kiro の container image が分かれている
-- [ ] smoke は host HOME と credential directory を mount しない
-- [ ] secret が存在する場合は許可リストに従って `--rm --tmpfs /tmp/runtime-secrets` container へ注入され、container 内 path へ env が再設定される
-- [ ] `--with-secrets=auto|required` と `--keep-container` の併用が拒否される
-- [ ] `ndf@ai-plugins` の実 install を確認する
-- [ ] `mcp-bigquery@ai-plugins` 相当の実 install を全 runtime で確認する
-- [ ] Skill / MCP / hook / agents または Kiro agent config の assertion がある
-- [ ] hook script は fixture payload で非認証実行できる
-- [ ] secret が存在する場合は認証付き Skill / MCP smoke が実行される
-- [ ] ブラウザ認証しかない runtime、または `--with-secrets=off` の非認証 smoke だけ、認証準備完了までを合格条件にする
-- [ ] CI で smoke test log と JUnit を artifact 化する
-- [ ] secret 値が log / JUnit / artifact に出力されない
+- [x] `scripts/runtime-smoke-test.sh` で runtime を選択できる
+- [x] Claude / Codex / Kiro の container image が分かれている
+- [x] smoke は host HOME と credential directory を mount しない
+- [x] secret が存在する場合は許可リストに従って `--rm --tmpfs /tmp/runtime-secrets` container へ注入され、container 内 path へ env が再設定される
+- [x] `--with-secrets=auto|required` と `--keep-container` の併用が拒否される
+- [x] `ndf@ai-plugins` の実 install を確認する
+- [x] `mcp-bigquery@ai-plugins` 相当の実 install を全 runtime で確認する
+- [x] Skill / MCP / hook / agents または Kiro agent config の assertion がある
+- [x] hook script は fixture payload で非認証実行できる
+- [x] secret が存在する場合は認証付き Skill / MCP smoke が実行される
+- [x] ブラウザ認証しかない runtime、または `--with-secrets=off` の非認証 smoke だけ、認証準備完了までを合格条件にする
+- [x] CI で smoke test log と JUnit を artifact 化する
+- [x] secret 値が log / JUnit / artifact に出力されない

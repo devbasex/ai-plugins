@@ -31,6 +31,7 @@ yarn-error.log*
 # Temporary files
 *.tmp
 *.bak
+tmp/
 
 # Python
 __pycache__/
@@ -40,7 +41,7 @@ __pycache__/
 .venv/
 
 # Plugin-generated context files
-# (none currently)
+.kiro/
 
 # cross-review worktree tmp
 .cross_review/

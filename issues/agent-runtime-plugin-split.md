@@ -538,6 +538,28 @@ base branch: `main`
   - ブラウザ認証しかできない runtime、または `--with-secrets=off` の非認証 smoke では、login prompt / 認証 URL 表示まで到達すれば合格とする
   - 詳細は `issues/runtime-plugin-container-test-plan.md` に従う
 
+## 実装進捗
+
+2026-07-07 時点の進捗。
+
+| 状態 | PR | branch | 内容 | 備考 |
+|---|---:|---|---|---|
+| 最終確認待ち | #45 | `release/runtime-plugin-split` | release PR | Draft/Open。Task 1-8 の個別 PR 集約後、main merge 前の最終確認待ち |
+| merge 済み | #46 | `feature/runtime-split-shared-builder` | Task 1: `ndf-shared` と `scripts/build-runtime-plugins.sh` を追加 | cross-review approved。`release/runtime-plugin-split` へ merge 済み。worktree / local branch cleanup 済み |
+| merge 済み | #47 | `feature/runtime-split-claude` | Task 2: `plugins/ndf-claude` を追加し、Claude marketplace を切替 | cross-review approved。`release/runtime-plugin-split` へ merge 済み。worktree / local branch cleanup 済み |
+| merge 済み | #48 | `feature/runtime-split-codex` | Task 3: `plugins/ndf-codex` を追加し、Codex marketplace を切替 | cross-review approved。`release/runtime-plugin-split` へ merge 済み。worktree / local branch cleanup 済み |
+| merge 済み | #49 | `feature/runtime-split-kiro` | Task 4: `plugins/ndf-kiro` を作成し、Kiro installer / docs / templates を移動 | cross-review approved。`release/runtime-plugin-split` へ merge 済み。worktree / local branch cleanup 済み |
+| merge 済み | #50 | `feature/runtime-split-docs-cleanup` | Task 5: README / AGENTS / docs / specs 更新、旧 `plugins/ndf` の削除 | cross-review approved。`release/runtime-plugin-split` へ merge 済み。merge 後検証済み |
+| merge 済み | #51 / #54 | `feature/runtime-split-mcp-plugins` | Task 6: MCP plugin を runtime 別に分離 | #51 はローテーションで close。#54 が cross-review approved、`release/runtime-plugin-split` へ merge 済み |
+| merge 済み | #52 | `feature/runtime-split-validation` | Task 7: validate script、dev hook、CI、リンク検証 | cross-review approved。`release/runtime-plugin-split` へ merge 済み。merge 後検証済み |
+| merge 済み | #53 | `feature/runtime-split-container-smoke` | Task 8: runtime smoke test | cross-review approved。`release/runtime-plugin-split` へ merge 済み。merge 後検証済み |
+
+再開時の前提:
+
+- `release/runtime-plugin-split` には PR #46 / #47 / #48 / #49 / #50 / #52 / #53 / #54 が merge 済み。
+- Task 1-8 の個別 PR は cross-review と merge 後検証まで完了済み。
+- 残る判断は release PR #45 を最終確認し、main へ merge するタイミングのみ。
+
 ## 影響範囲
 
 | 領域 | 影響 |
@@ -585,25 +607,25 @@ base branch: `main`
 
 詳細なテスト設計は `issues/runtime-plugin-container-test-plan.md` に分離する。この親計画では以下を完了条件として追跡する。
 
-- [ ] `bash scripts/build-runtime-plugins.sh --check`
-- [ ] `bash scripts/validate-runtime-plugins.sh`
-- [ ] `bash scripts/runtime-smoke-test.sh --runtime claude`
-- [ ] `bash scripts/runtime-smoke-test.sh --runtime codex`
-- [ ] `bash scripts/runtime-smoke-test.sh --runtime kiro`
-- [ ] `.github/workflows/runtime-plugin-validate.yml` が build check / validate / link check を実行する
-- [ ] `.github/workflows/runtime-plugin-smoke.yml` が軽量コンテナで runtime smoke を実行する
-- [ ] `rg "plugins/ndf($|[^-])|plugins/ndf/" README.md AGENTS.md CLAUDE.md KIRO.md docs plugins scripts .claude-plugin .agents` で旧 NDF パス残存を確認
-- [ ] `rg "plugins/mcp-[a-z]" README.md AGENTS.md CLAUDE.md KIRO.md docs plugins scripts .claude-plugin .agents` で旧 MCP パス残存を確認
+- [x] `bash scripts/build-runtime-plugins.sh --check`
+- [x] `bash scripts/validate-runtime-plugins.sh`
+- [x] `bash scripts/runtime-smoke-test.sh --runtime claude`
+- [x] `bash scripts/runtime-smoke-test.sh --runtime codex`
+- [x] `bash scripts/runtime-smoke-test.sh --runtime kiro`
+- [x] `.github/workflows/runtime-plugin-validate.yml` が build check / validate / link check を実行する
+- [x] `.github/workflows/runtime-plugin-smoke.yml` が軽量コンテナで runtime smoke を実行する
+- [x] `rg "plugins/ndf($|[^-])|plugins/ndf/" README.md AGENTS.md CLAUDE.md KIRO.md docs plugins scripts .claude-plugin .agents` で旧 NDF パス残存を確認
+- [x] `rg "plugins/mcp-[a-z]" README.md AGENTS.md CLAUDE.md KIRO.md docs plugins scripts .claude-plugin .agents` で旧 MCP パス残存を確認
 
 ## 完了の定義
 
-- [ ] Claude / Codex / Kiro の配布単位が別ディレクトリになっている
-- [ ] `plugins/ndf` が削除または README stub のみに縮退している
-- [ ] marketplace source がランタイム別ディレクトリを指している
-- [ ] Kiro installer が Claude manifest に依存していない
-- [ ] 共通 Skill の編集元と生成先の同期チェックがある
-- [ ] MCP plugin が `plugins/mcp/shared|claude|codex|kiro` に分離されている
-- [ ] Claude / Codex / Kiro の各導入手順で `mcp-bigquery@ai-plugins` が同じ名前で使える
-- [ ] README / docs が新構成を案内している
-- [ ] 各ランタイムの検証手順が通っている
-- [ ] 各ランタイムの実インストール smoke test がコンテナ内で通っている
+- [x] Claude / Codex / Kiro の配布単位が別ディレクトリになっている
+- [x] `plugins/ndf` が削除または README stub のみに縮退している
+- [x] marketplace source がランタイム別ディレクトリを指している
+- [x] Kiro installer が Claude manifest に依存していない
+- [x] 共通 Skill の編集元と生成先の同期チェックがある
+- [x] MCP plugin が `plugins/mcp/shared|claude|codex|kiro` に分離されている
+- [x] Claude / Codex / Kiro の各導入手順で `mcp-bigquery@ai-plugins` が同じ名前で使える
+- [x] README / docs が新構成を案内している
+- [x] 各ランタイムの検証手順が通っている
+- [x] 各ランタイムの実インストール smoke test がコンテナ内で通っている

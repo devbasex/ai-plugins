@@ -4,11 +4,11 @@
 
 NDF の知識配置、Serena MCP 分離、Kiro CLI 対応に関する確定仕様。
 
-Skill の挙動仕様は本ディレクトリでは管理しない。Skill は `plugins/ndf/skills/*/SKILL.md` または `plugins/ndf/skills-codex/*/SKILL.md` を正とする。
+Skill の挙動仕様は本ディレクトリでは管理しない。Skill は `plugins/ndf-shared/skills/*/SKILL.md` を編集元とし、Kiro では build 済みの `plugins/ndf-kiro/skills/*/SKILL.md` を配布物として使う。
 
 ## 仕様化の扱い
 
-本仕様は、完了済み issues / plans の内容を統合した現行仕様である。元の `issues/*` ファイルは完了後に削除されるため、マージ後の正は本ファイル、`AGENTS.md`、`KIRO.md`、`plugins/ndf/README.md`、`docs/ndf-plugin-reference.md` とする。過去の検討履歴が必要な場合は、この仕様を追加した commit の git 履歴を参照する。
+本仕様は、完了済み issues / plans の内容を統合した現行仕様である。元の `issues/*` ファイルは完了後に削除されるため、マージ後の正は本ファイル、`AGENTS.md`、`KIRO.md`、`plugins/ndf-claude/README.md`、`docs/ndf-plugin-reference.md` とする。過去の検討履歴が必要な場合は、この仕様を追加した commit の git 履歴を参照する。
 
 ## NDF 知識構造
 
@@ -29,7 +29,7 @@ AI エージェント向けの知識は以下の層で管理する。
 
 Kiro CLI 用設定は `.kiro/agents/default.json` で管理する。agent 設定は `AGENTS.md` と `README.md` を `file://` resource として読み込み、`.kiro/skills/**/SKILL.md` を `skill://` resource として参照する。
 
-Kiro CLI では `scripts/install-kiro.sh` が `.kiro/skills/` と `.kiro/agents/default.json` を生成する。`agentSpawn` hook は初期化時の案内に使い、`--with-slack` 指定時のみ `stop` hook 相当の Slack 通知を有効化する。Kiro の stop hook payload に `assistant_response` が含まれる場合、`plugins/ndf/scripts/slack-notify.js` は transcript よりも `assistant_response` を優先して要約に使う。
+Kiro CLI では `plugins/ndf-kiro/install.sh` が `plugins/ndf-kiro/skills/` から `.kiro/skills/` への symlink と `.kiro/agents/default.json` を生成する。`agentSpawn` hook は初期化時の案内に使い、`--with-slack` 指定時のみ `stop` hook 相当の Slack 通知を有効化する。Kiro の stop hook payload に `assistant_response` が含まれる場合、`plugins/ndf-kiro/scripts/slack-notify.js` は transcript よりも `assistant_response` を優先して要約に使う。
 
 Codex 連携は MCP サーバではなく `/ndf:codex` skill と `corder` エージェント経由の Codex CLI 直接実行を標準とする。Kiro 用 `--with-codex` は Kiro セッションから Codex CLI を扱う場合の補助設定である。
 
@@ -59,6 +59,6 @@ Codex 連携は MCP サーバではなく `/ndf:codex` skill と `corder` エー
 
 ## 関連リンク
 
-- [mcp-serena README](../../plugins/mcp-serena/README.md)
+- [mcp-serena README](../../plugins/mcp/shared/mcp-serena/README.md)
 - [NDF Plugin リファレンス](../ndf-plugin-reference.md)
-- [NDF README](../../plugins/ndf/README.md)
+- [NDF README](../../plugins/ndf-claude/README.md)

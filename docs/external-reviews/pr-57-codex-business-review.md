@@ -9,7 +9,7 @@
 | **実行時間** | 約 8 分 / tokens 129,705 |
 | **背景** | 技術レビュー (Codex 3 ラウンド + Amazon Q + Gemini) 完了後、事業観点のみに絞って依頼 |
 | **結論** | ⚠️ **コード品質ではなく、事業的な梱包がまだ追いついていない**。power-user 向け merge は合理的、新看板機能として広報するなら周辺メッセージ修正を同時に。 |
-| **直近 1ヶ月の最重要アクション** | (1) `marketplace.json` / `plugin.json` / `plugins/ndf/README.md` の storefront 文言更新 / (2) `browser-test` と `playwright-scenario-test` の役割分担を docs で明確化 / (3) 10分で動くデモケースの公開 |
+| **直近 1ヶ月の最重要アクション** | (1) `marketplace.json` / `plugin.json` / `plugins/ndf-claude/README.md` の storefront 文言更新 / (2) `browser-test` と `playwright-scenario-test` の役割分担を docs で明確化 / (3) 10分で動くデモケースの公開 |
 | **PR コメント** | https://github.com/takemi-ohama/ai-plugins/pull/57#issuecomment-4321871998 |
 
 ---
@@ -27,7 +27,7 @@
 
 ### 1.1 強み
 この skill の本質は、Playwright そのものの代替ではなく、**Playwright を AI エージェント運用に最適化した“実務レイヤー”** にあります。  
-Playwright 公式はブラウザ自動化基盤として強いですが、`/work/ai-plugins/plugins/ndf/skills/playwright-scenario-test/SKILL.md` を読む限り、本 skill はそこに **テスト設計の方法論、page role 分類、証跡標準化、Drive 共有、Markdown レポート** を足しています。  
+Playwright 公式はブラウザ自動化基盤として強いですが、`/work/ai-plugins/plugins/ndf-shared/skills/playwright-scenario-test/SKILL.md` を読む限り、本 skill はそこに **テスト設計の方法論、page role 分類、証跡標準化、Drive 共有、Markdown レポート** を足しています。
 つまり競争軸は「ブラウザを動かせるか」ではなく、**“AI が再現性の高い E2E を短時間で作り、レビュー可能な証跡まで揃えられるか”** です。  
 この位置づけは、Playwright / Selenium / Puppeteer のような実行基盤とは競争しつつも、実は真正面からは競合しません。  
 むしろ「それらをどう現場の開発運用に落とすか」の層を取ろうとしている点が重要です。  
@@ -60,7 +60,7 @@ NDF はその上に載せられる可能性があるが、現状は **ローカ�
 
 ### 1.2 弱み / 競合との差
 弱みは明確で、**今のままだと“何でも入った NDF の一機能”に見えてしまい、単独価値として発見されにくい**ことです。  
-`plugins/ndf/.claude-plugin/plugin.json` の description には機能が多く並びますが、焦点が広すぎます。  
+`plugins/ndf-claude/.claude-plugin/plugin.json` の description には機能が多く並びますが、焦点が広すぎます。
 利用者は「PR ワークフロー」「Codex 連携」「Slack 通知」「Google Drive」「E2E テスト」のどれを主価値として認識すべきか迷います。  
 
 `plugin.json` の `keywords` に `playwright` `pytest` `e2e` `qa` `accessibility` `testing` が入っていないのも機会損失です。  
@@ -185,7 +185,7 @@ OSS として広げるなら、**“Claude Code plugin でありつつ、中身�
 ## 3. Skill のディスカバラビリティと活性化
 
 ### 3.1 description / Triggers の妥当性
-`/work/ai-plugins/plugins/ndf/skills/playwright-scenario-test/SKILL.md` の `description` は情報量が豊富で、技術的にはかなり良いです。  
+`/work/ai-plugins/plugins/ndf-shared/skills/playwright-scenario-test/SKILL.md` の `description` は情報量が豊富で、技術的にはかなり良いです。
 ただし business 観点では、**少し盛り込みすぎ**です。  
 利用者に価値を伝える文章としては強いが、AI の auto-invoke trigger としては信号が散っています。  
 
@@ -194,7 +194,7 @@ OSS として広げるなら、**“Claude Code plugin でありつつ、中身�
 AI にとっても人にとっても、「これは E2E planning skill なのか、動画証跡 skill なのか、品質ゲート skill なのか」が一読で定まりにくい。  
 
 `when_to_use` で Triggers を分離した設計自体は正しいです。  
-`plugins/ndf/CLAUDE.md` でもその改善意図が記録されており、方向性は良いです。  
+`CLAUDE.md` でもその改善意図が記録されており、方向性は良いです。
 ただし trigger phrase はまだ改善余地があります。  
 
 現状の trigger は、技術者寄りの言葉に少し偏っています。  
@@ -225,7 +225,7 @@ Claude Code plugin モデルと相性は良いです。
 
 ただし問題は、**scenario-test 単体の価値に最短で到達できない**ことです。  
 利用者はまず NDF 全体を理解させられます。  
-`plugins/ndf/README.md` も大きな統合プラグインの説明が先に来るため、testing use case の人には情報密度が高すぎます。  
+`plugins/ndf-claude/README.md` も大きな統合プラグインの説明が先に来るため、testing use case の人には情報密度が高すぎます。
 
 `marketplace.json` の `ndf` description が古いのは、導線上かなり痛いです。  
 ここは marketplace 上の第一印象なので、**PR #57 の価値を最初に伝える場所**です。  
@@ -335,7 +335,7 @@ Drive 共有、HUD 動画、a11y/CWV は、単体では売りにくいです。
 
 ### 6.1 v0.4.0 で優先すべきこと (Top 3)
 **Top 1: プロダクトの見せ方を刷新すること**  
-`marketplace.json`、`plugin.json`、`plugins/ndf/README.md` の scenario-test 訴求を更新し、  
+`marketplace.json`、`plugin.json`、`plugins/ndf-claude/README.md` の scenario-test 訴求を更新し、
 「AI が pytest-playwright テストを書き、証跡を残し、共有まで行う skill」  
 と一文で伝わるようにするべきです。  
 これは最優先です。  
@@ -405,7 +405,7 @@ NDF は test management ではなく **AI-assisted test execution workflow** に
 - 逆に、これを「広く採用される新看板機能」として出すなら、周辺メッセージ修正を同時にやるべきです。
 
 - 直近 1 ヶ月の最重要アクション 1:
-- `marketplace.json` `plugin.json` `plugins/ndf/README.md` を更新し、scenario-test の価値を storefront レベルで伝える。
+- `marketplace.json` `plugin.json` `plugins/ndf-claude/README.md` を更新し、scenario-test の価値を storefront レベルで伝える。
 - ここで「AI が pytest-playwright テストと証跡を自動生成する」という一文を明示する。
 
 - 直近 1 ヶ月の最重要アクション 2:
@@ -443,17 +443,17 @@ NDF は test management ではなく **AI-assisted test execution workflow** に
 - [CLAUDE.md](/work/ai-plugins/CLAUDE.md)
 - [docs/project-overview.md](/work/ai-plugins/docs/project-overview.md)
 - [docs/ndf-plugin-reference.md](/work/ai-plugins/docs/ndf-plugin-reference.md)
-- [plugins/ndf/README.md](/work/ai-plugins/plugins/ndf/README.md)
-- [plugins/ndf/CLAUDE.md](/work/ai-plugins/plugins/ndf/CLAUDE.md)
-- [plugins/ndf/.claude-plugin/plugin.json](/work/ai-plugins/plugins/ndf/.claude-plugin/plugin.json)
+- [plugins/ndf-claude/README.md](/work/ai-plugins/plugins/ndf-claude/README.md)
+- [CLAUDE.md](/work/ai-plugins/CLAUDE.md)
+- [plugins/ndf-claude/.claude-plugin/plugin.json](/work/ai-plugins/plugins/ndf-claude/.claude-plugin/plugin.json)
 - [.claude-plugin/marketplace.json](/work/ai-plugins/.claude-plugin/marketplace.json)
-- [plugins/ndf/skills/playwright-scenario-test/SKILL.md](/work/ai-plugins/plugins/ndf/skills/playwright-scenario-test/SKILL.md)
-- [plugins/ndf/skills/playwright-scenario-test/docs/README.md](/work/ai-plugins/plugins/ndf/skills/playwright-scenario-test/docs/README.md)
-- [plugins/ndf/skills/playwright-scenario-test/docs/01-methodology.md](/work/ai-plugins/plugins/ndf/skills/playwright-scenario-test/docs/01-methodology.md)
-- [plugins/ndf/skills/playwright-scenario-test/docs/02-page-roles.md](/work/ai-plugins/plugins/ndf/skills/playwright-scenario-test/docs/02-page-roles.md)
-- [plugins/ndf/skills/playwright-scenario-test/docs/06-pytest-playwright.md](/work/ai-plugins/plugins/ndf/skills/playwright-scenario-test/docs/06-pytest-playwright.md)
-- [plugins/ndf/skills/playwright-scenario-test/pyproject.toml](/work/ai-plugins/plugins/ndf/skills/playwright-scenario-test/pyproject.toml)
-- [plugins/ndf/skills/playwright-scenario-test/templates/conftest.py.template](/work/ai-plugins/plugins/ndf/skills/playwright-scenario-test/templates/conftest.py.template)
+- [plugins/ndf-shared/skills/playwright-scenario-test/SKILL.md](/work/ai-plugins/plugins/ndf-shared/skills/playwright-scenario-test/SKILL.md)
+- [plugins/ndf-shared/skills/playwright-scenario-test/docs/README.md](/work/ai-plugins/plugins/ndf-shared/skills/playwright-scenario-test/docs/README.md)
+- [plugins/ndf-shared/skills/playwright-scenario-test/docs/01-methodology.md](/work/ai-plugins/plugins/ndf-shared/skills/playwright-scenario-test/docs/01-methodology.md)
+- [plugins/ndf-shared/skills/playwright-scenario-test/docs/02-page-roles.md](/work/ai-plugins/plugins/ndf-shared/skills/playwright-scenario-test/docs/02-page-roles.md)
+- [plugins/ndf-shared/skills/playwright-scenario-test/docs/06-pytest-playwright.md](/work/ai-plugins/plugins/ndf-shared/skills/playwright-scenario-test/docs/06-pytest-playwright.md)
+- [plugins/ndf-shared/skills/playwright-scenario-test/pyproject.toml](/work/ai-plugins/plugins/ndf-shared/skills/playwright-scenario-test/pyproject.toml)
+- [plugins/ndf-shared/skills/playwright-scenario-test/templates/conftest.py.template](/work/ai-plugins/plugins/ndf-shared/skills/playwright-scenario-test/templates/conftest.py.template)
 
 ## 外部比較で参照した公式情報
 - Playwright Python: https://playwright.dev/python/

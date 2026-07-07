@@ -1,0 +1,10 @@
+{
+  "name": "mcp-devin",
+  "version": "1.0.0",
+  "description": "Devin MCP server for accessing repository documentation and code knowledge via DeepWiki",
+  "author": {
+    "name": "takemi-ohama",
+    "url": "https://github.com/takemi-ohama"
+  },
+  "keywords": ["mcp", "devin", "deepwiki", "documentation", "repository", "wiki", "code-knowledge"]
+}
