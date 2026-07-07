@@ -11,6 +11,7 @@ Skill の挙動仕様は本ディレクトリでは管理しない。Skill に�
 | 仕様書 | 内容 |
 |---|---|
 | [ndf-knowledge-and-kiro.md](ndf-knowledge-and-kiro.md) | NDF 知識構造、Serena 分離、Kiro CLI 対応 |
+| [runtime-plugin-container-smoke.md](runtime-plugin-container-smoke.md) | runtime 分離 plugin の container smoke test |
 
 ## 対象外
 
