@@ -1,0 +1,45 @@
+name: Runtime plugin authenticated smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      runtime:
+        description: Runtime to test
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - claude
+          - codex
+          - kiro
+
+jobs:
+  authenticated-smoke:
+    runs-on: ubuntu-latest
+    environment: runtime-smoke
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run authenticated runtime smoke
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          BIGQUERY_PROJECT: ${{ secrets.BIGQUERY_PROJECT }}
+          BIGQUERY_LOCATION: ${{ secrets.BIGQUERY_LOCATION }}
+          BIGQUERY_DATASET: ${{ secrets.BIGQUERY_DATASET }}
+          BIGQUERY_KEY_FILE_JSON: ${{ secrets.BIGQUERY_KEY_FILE_JSON }}
+        run: |
+          extra_args=()
+          if [ -n "$BIGQUERY_KEY_FILE_JSON" ]; then
+            mkdir -p tmp/runtime-smoke-secrets
+            export BIGQUERY_KEY_FILE="$PWD/tmp/runtime-smoke-secrets/bigquery-key-file.json"
+            printf '%s' "$BIGQUERY_KEY_FILE_JSON" > "$BIGQUERY_KEY_FILE"
+            extra_args+=(--secret-file "bigquery-key-file=$BIGQUERY_KEY_FILE")
+          fi
+          bash scripts/runtime-smoke-test.sh --runtime "${{ inputs.runtime }}" --with-secrets=auto "${extra_args[@]}"
+      - name: Upload smoke artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: runtime-smoke-authenticated
+          path: tmp/runtime-smoke

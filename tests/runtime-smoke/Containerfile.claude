@@ -1,0 +1,3 @@
+FROM ai-plugins-runtime-smoke-base
+
+RUN npm install -g @anthropic-ai/claude-code

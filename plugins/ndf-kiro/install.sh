@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # NDF Plugin Installer for Kiro CLI
-# Usage: bash plugins/ndf-kiro/install.sh [--with-slack] [--with-codex] [--dry-run]
+# Usage: bash plugins/ndf-kiro/install.sh [--project PATH] [--with-slack] [--with-codex] [--dry-run]
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PROJECT_ROOT="$(pwd)"
 PLUGIN_DIR="$SCRIPT_DIR"
 KIRO_DIR="$PROJECT_ROOT/.kiro"
 SKILLS_DIR="$KIRO_DIR/skills"
@@ -18,8 +18,17 @@ PLUGIN_PROMPTS_DIR="$PLUGIN_DIR/prompts"
 WITH_SLACK=false
 WITH_CODEX=false
 DRY_RUN=false
-for arg in "$@"; do
-  case "$arg" in
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --project)
+      [ "$#" -ge 2 ] || { echo "ERROR: --project requires a path" >&2; exit 2; }
+      PROJECT_ROOT="$(cd "$2" && pwd)"
+      KIRO_DIR="$PROJECT_ROOT/.kiro"
+      SKILLS_DIR="$KIRO_DIR/skills"
+      PROMPTS_DIR="$KIRO_DIR/prompts"
+      AGENT_FILE="$KIRO_DIR/agents/default.json"
+      shift
+      ;;
     --with-slack) WITH_SLACK=true ;;
     --with-codex) WITH_CODEX=true ;;
     --dry-run) DRY_RUN=true ;;
@@ -27,6 +36,7 @@ for arg in "$@"; do
       echo "Usage: bash plugins/ndf-kiro/install.sh [OPTIONS]"
       echo ""
       echo "Options:"
+      echo "  --project PATH  install into PATH instead of current directory"
       echo "  --with-slack   stopフックにSlack通知を追加"
       echo "  --with-codex   Codex CLI直接実行用プロンプトを追加"
       echo "  --dry-run      書き込みを行わず実行内容を表示"
@@ -34,10 +44,11 @@ for arg in "$@"; do
       exit 0
       ;;
     *)
-      echo "ERROR: unknown option: $arg" >&2
+      echo "ERROR: unknown option: $1" >&2
       exit 2
       ;;
   esac
+  shift
 done
 
 echo "=== NDF Plugin Installer for Kiro CLI ==="
@@ -68,7 +79,7 @@ while IFS= read -r src_dir; do
   fi
 
   if [ "$DRY_RUN" = false ]; then
-    ln -sfn "../../plugins/ndf-kiro/skills/$skill_name" "$SKILLS_DIR/$skill_name"
+    ln -sfn "$PLUGIN_SKILLS_DIR/$skill_name" "$SKILLS_DIR/$skill_name"
   fi
   echo "  linked: $skill_name"
   SKILL_COUNT=$((SKILL_COUNT + 1))
