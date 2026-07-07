@@ -64,7 +64,7 @@ skill を同梱しないため、Drive 系コマンドや `--pwk-drive-folder` �
 `GOOGLE_AUTH_SCRIPTS` を `google-auth/scripts` の実パスへ設定する。
 
 ```bash
-export GOOGLE_AUTH_SCRIPTS=/path/to/plugins/ndf/skills/google-auth/scripts
+export GOOGLE_AUTH_SCRIPTS=/path/to/plugins/ndf-shared/skills/google-auth/scripts
 cd scenario-test
 uv sync --extra drive
 ```

@@ -93,7 +93,7 @@ Read(file_path="$HOME/.claude/skills/<SKILL_NAME>/SKILL.md")
 
 - cache: `~/.cache/anthropic-skills/` （XDG準拠）
 - リンク先: `~/.claude/skills/<name>/` （ユーザー領域）
-- プロジェクト単位で配置したい場合は `plugins/ndf/scripts/install-official-skills.sh --scope project <name>` を直接実行
+- プロジェクト単位で配置したい場合は `plugins/ndf-shared/scripts/install-official-skills.sh --scope project <name>` を直接実行
 
 ### 再読込
 
@@ -101,9 +101,9 @@ Read(file_path="$HOME/.claude/skills/<SKILL_NAME>/SKILL.md")
 
 ### 手動管理したい場合
 
-- 一覧表示: `bash plugins/ndf/scripts/install-official-skills.sh --list`
-- 更新: `bash plugins/ndf/scripts/install-official-skills.sh --update`
-- 明示的なインストール: `bash plugins/ndf/scripts/install-official-skills.sh <name...>`
+- 一覧表示: `bash plugins/ndf-shared/scripts/install-official-skills.sh --list`
+- 更新: `bash plugins/ndf-shared/scripts/install-official-skills.sh --update`
+- 明示的なインストール: `bash plugins/ndf-shared/scripts/install-official-skills.sh <name...>`
 
 ## エラーハンドリング
 

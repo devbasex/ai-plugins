@@ -23,7 +23,7 @@ for _cmd in ("bash", "jq"):
     if shutil.which(_cmd) is None:
         pytest.skip(f"{_cmd} not available", allow_module_level=True)
 
-# plugins/ndf/skills/statusline/tests/ -> plugins/ndf/scripts/statusline-switch.sh
+# plugins/ndf-shared/skills/statusline/tests/ -> plugins/ndf-shared/scripts/statusline-switch.sh
 SWITCH = Path(__file__).resolve().parents[3] / "scripts" / "statusline-switch.sh"
 NDF_COMMAND = "bash ~/.claude/ndf-statusline.sh"
 

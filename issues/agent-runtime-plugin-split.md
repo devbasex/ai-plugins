@@ -549,18 +549,17 @@ base branch: `main`
 | merge 済み | #47 | `feature/runtime-split-claude` | Task 2: `plugins/ndf-claude` を追加し、Claude marketplace を切替 | cross-review approved。`release/runtime-plugin-split` へ merge 済み。worktree / local branch cleanup 済み |
 | merge 済み | #48 | `feature/runtime-split-codex` | Task 3: `plugins/ndf-codex` を追加し、Codex marketplace を切替 | cross-review approved。`release/runtime-plugin-split` へ merge 済み。worktree / local branch cleanup 済み |
 | merge 済み | #49 | `feature/runtime-split-kiro` | Task 4: `plugins/ndf-kiro` を作成し、Kiro installer / docs / templates を移動 | cross-review approved。`release/runtime-plugin-split` へ merge 済み。worktree / local branch cleanup 済み |
-| 未着手 | #50 | `feature/runtime-split-docs-cleanup` | Task 5: README / AGENTS / docs / specs 更新、旧 `plugins/ndf` の stub 化または削除 | PR2, PR3, PR4 merge 後 |
-| 実装中 | #51 | `feature/runtime-split-mcp-plugins` | Task 6: MCP plugin を runtime 別に分離 | MCP plugin を `plugins/mcp/shared` へ移動し、Claude / Codex / Kiro runtime 生成物を追加中 |
-| 未着手 | #52 | `feature/runtime-split-validation` | Task 7: validate script、dev hook、CI、リンク検証 | PR2, PR3, PR4, PR6 merge 後 |
+| 実装中 | #50 | `feature/runtime-split-docs-cleanup` | Task 5: README / AGENTS / docs / specs 更新、旧 `plugins/ndf` の削除 | 旧 monolithic plugin directory を削除し、docs / README / AGENTS を runtime 分離後の構成へ更新中 |
+| merge 済み | #51 / #54 | `feature/runtime-split-mcp-plugins` | Task 6: MCP plugin を runtime 別に分離 | #51 はローテーションで close。#54 が cross-review approved、`release/runtime-plugin-split` へ merge 済み |
+| 未着手 | #52 | `feature/runtime-split-validation` | Task 7: validate script、dev hook、CI、リンク検証 | #50 merge 後に実施 |
 | 未着手 | #53 | `feature/runtime-split-container-smoke` | Task 8: runtime smoke test | PR7 merge 後 |
 
 再開時の前提:
 
-- 現在の作業ブランチは `feature/runtime-split-mcp-plugins`。
-- `main` は `origin/main` と同期済み。
-- `release/runtime-plugin-split` は `origin/release/runtime-plugin-split` と同期済み。
-- PR #46 / #47 / #48 / #49 用の一時 worktree は削除済み。
-- 次は PR #51 `feature/runtime-split-mcp-plugins` の実装差分をレビューし、必要な修正後に push / Draft PR 更新と cross-review を行う。
+- 現在の作業ブランチは `feature/runtime-split-docs-cleanup`。
+- `release/runtime-plugin-split` には PR #46 / #47 / #48 / #49 / #54 が merge 済み。
+- 次は PR #50 の docs cleanup を push し、cross-review 後に `release/runtime-plugin-split` へ merge する。
+- PR #50 merge 後に PR #52 `feature/runtime-split-validation`、PR #53 `feature/runtime-split-container-smoke` の順で進める。
 
 ## 影響範囲
 

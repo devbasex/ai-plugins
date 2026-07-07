@@ -77,7 +77,7 @@ def test_grep_style_source_citation_is_benign(tmp_path, monitor_mod):
     """
     log = _write(
         tmp_path / "err.log",
-        '/work/worktrees/pr23/plugins/ndf/skills/cross-review/tests/'
+        '/work/worktrees/pr23/plugins/ndf-shared/skills/cross-review/tests/'
         'test_monitor_early_error.py:22:    log = _write(tmp_path / "err.log", '
         '"quota exceeded: please upgrade\\n")\n',
     )

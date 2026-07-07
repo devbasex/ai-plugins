@@ -18,40 +18,40 @@
 
 | ファイル | 責務 |
 |---|---|
-| `plugins/ndf/skills/playwright-script-creation/SKILL.md` | Phase 2 スキル: テストスクリプト作成ガイド |
-| `plugins/ndf/skills/playwright-execution/SKILL.md` | Phase 3 スキル: テスト実行+エビデンス収集 (3 スキル統合) |
-| `plugins/ndf/skills/playwright-kit-ops/tests/test_video_default.py` | `--pwk-no-video` オプションと動画デフォルト ON のテスト |
+| `plugins/ndf-shared/skills/playwright-script-creation/SKILL.md` | Phase 2 スキル: テストスクリプト作成ガイド |
+| `plugins/ndf-shared/skills/playwright-execution/SKILL.md` | Phase 3 スキル: テスト実行+エビデンス収集 (3 スキル統合) |
+| `plugins/ndf-shared/skills/playwright-kit-ops/tests/test_video_default.py` | `--pwk-no-video` オプションと動画デフォルト ON のテスト |
 
 ### 変更
 
 | ファイル | 変更内容 |
 |---|---|
-| `plugins/ndf/skills/playwright-kit-ops/playwright_kit/pytest_plugin.py` | `--pwk-no-video` CLI オプション追加 + `pytest_configure` で動画デフォルト ON |
-| `plugins/ndf/skills/playwright-kit-ops/templates/run.sh` | `--video=on` フォールバック追加 |
-| `plugins/ndf/skills/playwright-kit-ops/templates/conftest.py.template` | テストスクリプト存在チェック追加 |
-| `plugins/ndf/skills/playwright-test-planning/SKILL.md` | 次フェーズ導線追加 |
-| `plugins/ndf/skills/playwright-report/SKILL.md` | Drive 共有セクション削除 |
-| `plugins/ndf/skills/playwright-scenario-test/SKILL.md` | 5 スキル案内テーブル更新 + 大原則記載 |
-| `plugins/ndf/.claude-plugin/plugin.json` | skills 配列更新 (3 削除 + 2 追加) |
+| `plugins/ndf-shared/skills/playwright-kit-ops/playwright_kit/pytest_plugin.py` | `--pwk-no-video` CLI オプション追加 + `pytest_configure` で動画デフォルト ON |
+| `plugins/ndf-shared/skills/playwright-kit-ops/templates/run.sh` | `--video=on` フォールバック追加 |
+| `plugins/ndf-shared/skills/playwright-kit-ops/templates/conftest.py.template` | テストスクリプト存在チェック追加 |
+| `plugins/ndf-shared/skills/playwright-test-planning/SKILL.md` | 次フェーズ導線追加 |
+| `plugins/ndf-shared/skills/playwright-report/SKILL.md` | Drive 共有セクション削除 |
+| `plugins/ndf-shared/skills/playwright-scenario-test/SKILL.md` | 5 スキル案内テーブル更新 + 大原則記載 |
+| `plugins/ndf-claude/.claude-plugin/plugin.json` | skills 配列更新 (3 削除 + 2 追加) |
 
 ### 削除
 
 | ディレクトリ | 理由 |
 |---|---|
-| `plugins/ndf/skills/playwright-evidence/` | `playwright-execution` に統合 |
-| `plugins/ndf/skills/playwright-overlay/` | `playwright-execution` に統合 |
-| `plugins/ndf/skills/playwright-quality/` | `playwright-execution` に統合 |
+| `plugins/ndf-shared/skills/playwright-evidence/` | `playwright-execution` に統合 |
+| `plugins/ndf-shared/skills/playwright-overlay/` | `playwright-execution` に統合 |
+| `plugins/ndf-shared/skills/playwright-quality/` | `playwright-execution` に統合 |
 
 ---
 
 ## Task 1: `--pwk-no-video` CLI オプション追加 + 動画デフォルト ON のテスト
 
 **Files:**
-- Create: `plugins/ndf/skills/playwright-kit-ops/tests/test_video_default.py`
+- Create: `plugins/ndf-shared/skills/playwright-kit-ops/tests/test_video_default.py`
 
 - [ ] **Step 1: テストファイルを作成**
 
-`plugins/ndf/skills/playwright-kit-ops/tests/test_video_default.py` に以下を書く:
+`plugins/ndf-shared/skills/playwright-kit-ops/tests/test_video_default.py` に以下を書く:
 
 ```python
 """--pwk-no-video オプションと動画デフォルト ON の検証。
@@ -121,14 +121,14 @@ def test_explicit_video_flag_takes_precedence(pytester):
 
 - [ ] **Step 2: テストを実行して FAIL を確認**
 
-Run: `cd /work/ai-plugins/plugins/ndf/skills/playwright-kit-ops && uv run pytest tests/test_video_default.py -v`
+Run: `cd /work/ai-plugins/plugins/ndf-shared/skills/playwright-kit-ops && uv run pytest tests/test_video_default.py -v`
 
 Expected: `test_pwk_no_video_option_registered` → FAIL (`--pwk-no-video` がまだ登録されていない)。`test_video_default_on` → FAIL (デフォルトが `on` ではない)。`test_pwk_no_video_sets_off` → FAIL。`test_explicit_video_flag_takes_precedence` → 結果は pytest-playwright の状態に依存。
 
 - [ ] **Step 3: コミット**
 
 ```bash
-git add plugins/ndf/skills/playwright-kit-ops/tests/test_video_default.py
+git add plugins/ndf-shared/skills/playwright-kit-ops/tests/test_video_default.py
 git commit -m "test: --pwk-no-video オプションと動画デフォルト ON の failing tests 追加"
 ```
 
@@ -137,12 +137,12 @@ git commit -m "test: --pwk-no-video オプションと動画デフォルト ON �
 ## Task 2: `pytest_plugin.py` に `--pwk-no-video` を実装して動画デフォルト ON にする
 
 **Files:**
-- Modify: `plugins/ndf/skills/playwright-kit-ops/playwright_kit/pytest_plugin.py:44-93` (pytest_addoption)
-- Modify: `plugins/ndf/skills/playwright-kit-ops/playwright_kit/pytest_plugin.py:110-137` (pytest_configure)
+- Modify: `plugins/ndf-shared/skills/playwright-kit-ops/playwright_kit/pytest_plugin.py:44-93` (pytest_addoption)
+- Modify: `plugins/ndf-shared/skills/playwright-kit-ops/playwright_kit/pytest_plugin.py:110-137` (pytest_configure)
 
 - [ ] **Step 1: `pytest_addoption` に `--pwk-no-video` を追加**
 
-`plugins/ndf/skills/playwright-kit-ops/playwright_kit/pytest_plugin.py` の `pytest_addoption` 関数内、`--pwk-overlay` の直前に追加する:
+`plugins/ndf-shared/skills/playwright-kit-ops/playwright_kit/pytest_plugin.py` の `pytest_addoption` 関数内、`--pwk-overlay` の直前に追加する:
 
 ```python
     group.addoption(
@@ -177,20 +177,20 @@ git commit -m "test: --pwk-no-video オプションと動画デフォルト ON �
 
 - [ ] **Step 3: テストを実行して PASS を確認**
 
-Run: `cd /work/ai-plugins/plugins/ndf/skills/playwright-kit-ops && uv run pytest tests/test_video_default.py -v`
+Run: `cd /work/ai-plugins/plugins/ndf-shared/skills/playwright-kit-ops && uv run pytest tests/test_video_default.py -v`
 
 Expected: 4 テスト全て PASS。
 
 - [ ] **Step 4: 既存テストが壊れていないことを確認**
 
-Run: `cd /work/ai-plugins/plugins/ndf/skills/playwright-kit-ops && uv run pytest -q`
+Run: `cd /work/ai-plugins/plugins/ndf-shared/skills/playwright-kit-ops && uv run pytest -q`
 
 Expected: 全テスト PASS (テスト数は変動する可能性あり)。
 
 - [ ] **Step 5: コミット**
 
 ```bash
-git add plugins/ndf/skills/playwright-kit-ops/playwright_kit/pytest_plugin.py
+git add plugins/ndf-shared/skills/playwright-kit-ops/playwright_kit/pytest_plugin.py
 git commit -m "feat: --pwk-no-video オプション追加 + 動画デフォルト ON"
 ```
 
@@ -199,11 +199,11 @@ git commit -m "feat: --pwk-no-video オプション追加 + 動画デフォル�
 ## Task 3: `run.sh` テンプレートに `--video=on` フォールバックを追加
 
 **Files:**
-- Modify: `plugins/ndf/skills/playwright-kit-ops/templates/run.sh:80-89` (pytest 実行部分)
+- Modify: `plugins/ndf-shared/skills/playwright-kit-ops/templates/run.sh:80-89` (pytest 実行部分)
 
 - [ ] **Step 1: `run.sh` の pytest 実行部分を変更**
 
-`plugins/ndf/skills/playwright-kit-ops/templates/run.sh` の末尾 pytest 実行部分を以下に置換する:
+`plugins/ndf-shared/skills/playwright-kit-ops/templates/run.sh` の末尾 pytest 実行部分を以下に置換する:
 
 ```bash
 # --- 3) pytest 実行 ------------------------------------------------
@@ -236,7 +236,7 @@ exec uv run pytest \
 - [ ] **Step 3: コミット**
 
 ```bash
-git add plugins/ndf/skills/playwright-kit-ops/templates/run.sh
+git add plugins/ndf-shared/skills/playwright-kit-ops/templates/run.sh
 git commit -m "feat: run.sh に --video=on デフォルト + --pwk-no-video 対応追加"
 ```
 
@@ -245,11 +245,11 @@ git commit -m "feat: run.sh に --video=on デフォルト + --pwk-no-video 対�
 ## Task 4: conftest.py テンプレートにテストスクリプト存在チェックを追加
 
 **Files:**
-- Modify: `plugins/ndf/skills/playwright-kit-ops/templates/conftest.py.template`
+- Modify: `plugins/ndf-shared/skills/playwright-kit-ops/templates/conftest.py.template`
 
 - [ ] **Step 1: テストスクリプト存在チェックを追加**
 
-`plugins/ndf/skills/playwright-kit-ops/templates/conftest.py.template` の末尾に以下を追加する:
+`plugins/ndf-shared/skills/playwright-kit-ops/templates/conftest.py.template` の末尾に以下を追加する:
 
 ```python
 
@@ -268,7 +268,7 @@ def pytest_collection_modifyitems(session, config, items):
 - [ ] **Step 2: コミット**
 
 ```bash
-git add plugins/ndf/skills/playwright-kit-ops/templates/conftest.py.template
+git add plugins/ndf-shared/skills/playwright-kit-ops/templates/conftest.py.template
 git commit -m "feat: conftest テンプレートにテストスクリプト存在チェック追加"
 ```
 
@@ -277,16 +277,16 @@ git commit -m "feat: conftest テンプレートにテストスクリプト存�
 ## Task 5: 旧スキルディレクトリを削除
 
 **Files:**
-- Delete: `plugins/ndf/skills/playwright-evidence/` (ディレクトリごと)
-- Delete: `plugins/ndf/skills/playwright-overlay/` (ディレクトリごと)
-- Delete: `plugins/ndf/skills/playwright-quality/` (ディレクトリごと)
+- Delete: `plugins/ndf-shared/skills/playwright-evidence/` (ディレクトリごと)
+- Delete: `plugins/ndf-shared/skills/playwright-overlay/` (ディレクトリごと)
+- Delete: `plugins/ndf-shared/skills/playwright-quality/` (ディレクトリごと)
 
 - [ ] **Step 1: 3 ディレクトリを削除**
 
 ```bash
-git rm -r plugins/ndf/skills/playwright-evidence
-git rm -r plugins/ndf/skills/playwright-overlay
-git rm -r plugins/ndf/skills/playwright-quality
+git rm -r plugins/ndf-shared/skills/playwright-evidence
+git rm -r plugins/ndf-shared/skills/playwright-overlay
+git rm -r plugins/ndf-shared/skills/playwright-quality
 ```
 
 - [ ] **Step 2: コミット**
@@ -300,11 +300,11 @@ git commit -m "refactor: playwright-evidence/overlay/quality を削除 (playwrig
 ## Task 6: `playwright-execution/SKILL.md` を新規作成
 
 **Files:**
-- Create: `plugins/ndf/skills/playwright-execution/SKILL.md`
+- Create: `plugins/ndf-shared/skills/playwright-execution/SKILL.md`
 
 - [ ] **Step 1: SKILL.md を作成**
 
-`plugins/ndf/skills/playwright-execution/SKILL.md`:
+`plugins/ndf-shared/skills/playwright-execution/SKILL.md`:
 
 ```markdown
 ---
@@ -411,7 +411,7 @@ reports/<run-id>/
 - [ ] **Step 2: コミット**
 
 ```bash
-git add plugins/ndf/skills/playwright-execution/SKILL.md
+git add plugins/ndf-shared/skills/playwright-execution/SKILL.md
 git commit -m "feat: playwright-execution スキル追加 (evidence+overlay+quality 統合)"
 ```
 
@@ -420,11 +420,11 @@ git commit -m "feat: playwright-execution スキル追加 (evidence+overlay+qual
 ## Task 7: `playwright-script-creation/SKILL.md` を新規作成
 
 **Files:**
-- Create: `plugins/ndf/skills/playwright-script-creation/SKILL.md`
+- Create: `plugins/ndf-shared/skills/playwright-script-creation/SKILL.md`
 
 - [ ] **Step 1: SKILL.md を作成**
 
-`plugins/ndf/skills/playwright-script-creation/SKILL.md`:
+`plugins/ndf-shared/skills/playwright-script-creation/SKILL.md`:
 
 ```markdown
 ---
@@ -540,7 +540,7 @@ fixture / marker の完全な一覧は `playwright_kit/pytest_plugin.py` の `_P
 - [ ] **Step 2: コミット**
 
 ```bash
-git add plugins/ndf/skills/playwright-script-creation/SKILL.md
+git add plugins/ndf-shared/skills/playwright-script-creation/SKILL.md
 git commit -m "feat: playwright-script-creation スキル追加 (テストスクリプト作成ガイド)"
 ```
 
@@ -549,11 +549,11 @@ git commit -m "feat: playwright-script-creation スキル追加 (テストスク
 ## Task 8: `playwright-test-planning/SKILL.md` を改修
 
 **Files:**
-- Modify: `plugins/ndf/skills/playwright-test-planning/SKILL.md`
+- Modify: `plugins/ndf-shared/skills/playwright-test-planning/SKILL.md`
 
 - [ ] **Step 1: ワークフロー末尾に次フェーズ導線を追加**
 
-`plugins/ndf/skills/playwright-test-planning/SKILL.md` のワークフロー `[E]` の後に以下を追加する:
+`plugins/ndf-shared/skills/playwright-test-planning/SKILL.md` のワークフロー `[E]` の後に以下を追加する:
 
 ```markdown
       ▼
@@ -577,7 +577,7 @@ git commit -m "feat: playwright-script-creation スキル追加 (テストスク
 - [ ] **Step 3: コミット**
 
 ```bash
-git add plugins/ndf/skills/playwright-test-planning/SKILL.md
+git add plugins/ndf-shared/skills/playwright-test-planning/SKILL.md
 git commit -m "Update: playwright-test-planning にスクリプト作成フェーズへの導線追加"
 ```
 
@@ -586,11 +586,11 @@ git commit -m "Update: playwright-test-planning にスクリプト作成フェ�
 ## Task 9: `playwright-report/SKILL.md` から Drive 共有を削除
 
 **Files:**
-- Modify: `plugins/ndf/skills/playwright-report/SKILL.md`
+- Modify: `plugins/ndf-shared/skills/playwright-report/SKILL.md`
 
 - [ ] **Step 1: Drive 関連セクションを削除**
 
-`plugins/ndf/skills/playwright-report/SKILL.md` から以下のセクションを削除する:
+`plugins/ndf-shared/skills/playwright-report/SKILL.md` から以下のセクションを削除する:
 - `## Google Drive アップロード` セクション全体 (「### テスト実行時に自動アップロード」と「### 手動アップロード」を含む)
 
 - [ ] **Step 2: 関連 Skill セクションを更新**
@@ -608,7 +608,7 @@ git commit -m "Update: playwright-test-planning にスクリプト作成フェ�
 - [ ] **Step 3: コミット**
 
 ```bash
-git add plugins/ndf/skills/playwright-report/SKILL.md
+git add plugins/ndf-shared/skills/playwright-report/SKILL.md
 git commit -m "Update: playwright-report から Drive 共有セクションを削除"
 ```
 
@@ -617,11 +617,11 @@ git commit -m "Update: playwright-report から Drive 共有セクションを�
 ## Task 10: `playwright-scenario-test/SKILL.md` (orchestrator) を改修
 
 **Files:**
-- Modify: `plugins/ndf/skills/playwright-scenario-test/SKILL.md`
+- Modify: `plugins/ndf-shared/skills/playwright-scenario-test/SKILL.md`
 
 - [ ] **Step 1: SKILL.md を全面改修**
 
-`plugins/ndf/skills/playwright-scenario-test/SKILL.md` の内容を以下に置換する (frontmatter を含めて全体を差し替え):
+`plugins/ndf-shared/skills/playwright-scenario-test/SKILL.md` の内容を以下に置換する (frontmatter を含めて全体を差し替え):
 
 ```markdown
 ---
@@ -695,7 +695,7 @@ Web アプリの E2E シナリオを **理論ベース** で計画し、**再現
 - [ ] **Step 2: コミット**
 
 ```bash
-git add plugins/ndf/skills/playwright-scenario-test/SKILL.md
+git add plugins/ndf-shared/skills/playwright-scenario-test/SKILL.md
 git commit -m "Update: playwright-scenario-test orchestrator を 5 スキル構成に改修"
 ```
 
@@ -704,11 +704,11 @@ git commit -m "Update: playwright-scenario-test orchestrator を 5 スキル構�
 ## Task 11: `plugin.json` を更新
 
 **Files:**
-- Modify: `plugins/ndf/.claude-plugin/plugin.json`
+- Modify: `plugins/ndf-claude/.claude-plugin/plugin.json`
 
 - [ ] **Step 1: skills 配列を更新**
 
-`plugins/ndf/.claude-plugin/plugin.json` の `skills` 配列から以下を削除:
+`plugins/ndf-claude/.claude-plugin/plugin.json` の `skills` 配列から以下を削除:
 ```json
     "./skills/playwright-evidence",
     "./skills/playwright-overlay",
@@ -738,7 +738,7 @@ git commit -m "Update: playwright-scenario-test orchestrator を 5 スキル構�
 - [ ] **Step 4: コミット**
 
 ```bash
-git add plugins/ndf/.claude-plugin/plugin.json
+git add plugins/ndf-claude/.claude-plugin/plugin.json
 git commit -m "Update: plugin.json を 5 スキル構成に更新 (v4.9.0)"
 ```
 
@@ -756,7 +756,7 @@ Expected: 検証が通ること。エラーがあればその場で修正する�
 
 - [ ] **Step 2: 全テストを実行**
 
-Run: `cd /work/ai-plugins/plugins/ndf/skills/playwright-kit-ops && uv run pytest -q`
+Run: `cd /work/ai-plugins/plugins/ndf-shared/skills/playwright-kit-ops && uv run pytest -q`
 
 Expected: 全テスト PASS。
 
