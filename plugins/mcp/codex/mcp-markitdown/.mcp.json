@@ -1,11 +1,9 @@
 {
-  "mcpServers": {
-    "markitdown": {
-      "type": "stdio",
-      "command": "uvx",
-      "args": [
-        "markitdown-mcp"
-      ]
-    }
+  "markitdown": {
+    "type": "stdio",
+    "command": "uvx",
+    "args": [
+      "markitdown-mcp"
+    ]
   }
 }

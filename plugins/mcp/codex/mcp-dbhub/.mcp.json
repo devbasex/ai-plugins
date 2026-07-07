@@ -1,12 +1,10 @@
 {
-  "mcpServers": {
-    "dbhub": {
-      "type": "stdio",
-      "command": "npx",
-      "args": [
-        "--yes",
-        "@bytebase/dbhub"
-      ]
-    }
+  "dbhub": {
+    "type": "stdio",
+    "command": "npx",
+    "args": [
+      "--yes",
+      "@bytebase/dbhub"
+    ]
   }
 }

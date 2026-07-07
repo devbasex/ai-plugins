@@ -1,13 +1,11 @@
 {
-  "mcpServers": {
-    "awslabs.aws-docs": {
-      "type": "stdio",
-      "command": "uvx",
-      "args": [
-        "awslabs.aws-documentation-mcp-server@latest"
-      ],
-      "env": {},
-      "envFile": "${workspaceFolder}/.env"
-    }
+  "awslabs.aws-docs": {
+    "type": "stdio",
+    "command": "uvx",
+    "args": [
+      "awslabs.aws-documentation-mcp-server@latest"
+    ],
+    "env": {},
+    "envFile": "${workspaceFolder}/.env"
   }
 }

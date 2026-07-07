@@ -1,10 +1,8 @@
 {
-  "mcpServers": {
-    "notion": {
-      "type": "http",
-      "url": "https://mcp.notion.com/mcp",
-      "env": {},
-      "envFile": "${workspaceFolder}/.env"
-    }
+  "notion": {
+    "type": "http",
+    "url": "https://mcp.notion.com/mcp",
+    "env": {},
+    "envFile": "${workspaceFolder}/.env"
   }
 }

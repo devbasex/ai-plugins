@@ -264,6 +264,30 @@ write_codex_mcp_manifest() {
 EOF
 }
 
+write_codex_mcp_config() {
+  local plugin_dir="$1"
+  local mcp_config="$plugin_dir/.mcp.json"
+
+  if [ ! -f "$mcp_config" ]; then
+    echo "ERROR: MCP config not found: $mcp_config" >&2
+    exit 1
+  fi
+
+  python3 - "$mcp_config" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+config_path = Path(sys.argv[1])
+config = json.loads(config_path.read_text())
+servers = config.get("mcpServers")
+if not isinstance(servers, dict):
+    raise SystemExit(f"ERROR: mcpServers object not found: {config_path}")
+
+config_path.write_text(json.dumps(servers, indent=2, ensure_ascii=False) + "\n")
+PY
+}
+
 write_kiro_mcp_installer() {
   local plugin_dir="$1"
   local installer="$plugin_dir/install.sh"
@@ -353,6 +377,7 @@ sync_mcp_runtime() {
       ;;
     codex)
       write_codex_mcp_manifest "$tmp_dir"
+      write_codex_mcp_config "$tmp_dir"
       rm -rf "$tmp_dir/.claude-plugin"
       ;;
     kiro)
