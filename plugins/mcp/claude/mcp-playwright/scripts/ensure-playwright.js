@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -9,6 +9,7 @@ const PLUGIN_ROOT = process.env.PLUGIN_ROOT || process.env.CODEX_PLUGIN_ROOT || 
 const FLAG_FILE = path.join(os.homedir(), '.claude-playwright-installed');
 const BROWSER_PATH = path.join(os.homedir(), '.cache', 'ms-playwright');
 const TIMEOUT_MS = 5 * 60 * 1000; // 5分タイムアウト
+const PLAYWRIGHT_VERSION_PATTERN = /^[~^]?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
 
 // 既にインストール済みかチェック（冪等性）
 if (fs.existsSync(FLAG_FILE)) {
@@ -26,7 +27,7 @@ console.log('');
 try {
   // @playwright/mcpが依存するPlaywrightのバージョンを取得
   console.log('🔍 @playwright/mcpが使用するPlaywrightバージョンを確認中...');
-  const depsOutput = execSync('npm view @playwright/mcp@latest dependencies --json', {
+  const depsOutput = execFileSync('npm', ['view', '@playwright/mcp@latest', 'dependencies', '--json'], {
     encoding: 'utf-8',
     cwd: PLUGIN_ROOT,
     timeout: 30000
@@ -38,13 +39,16 @@ try {
   if (!playwrightVersion) {
     throw new Error('@playwright/mcpの依存関係からPlaywrightバージョンを取得できませんでした');
   }
+  if (!PLAYWRIGHT_VERSION_PATTERN.test(playwrightVersion)) {
+    throw new Error(`不正なPlaywrightバージョンです: ${playwrightVersion}`);
+  }
 
   console.log(`✓ Playwright ${playwrightVersion} を使用します`);
   console.log('');
 
   // @playwright/mcpと互換性のあるバージョンのChromiumをインストール
   console.log(`📦 Playwright ${playwrightVersion} でChromiumをインストール中...`);
-  execSync(`npx -y playwright@${playwrightVersion} install chromium`, {
+  execFileSync('npx', ['-y', `playwright@${playwrightVersion}`, 'install', 'chromium'], {
     stdio: 'inherit',
     cwd: PLUGIN_ROOT,
     timeout: TIMEOUT_MS,

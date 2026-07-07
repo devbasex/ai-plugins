@@ -32,6 +32,14 @@ function mcpName(suffix) {
   return `redash-${suffix}`;
 }
 
+function validateSuffix(suffix) {
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(suffix)) {
+    console.error('エラー: suffix は英小文字・数字・ハイフンのみで指定してください。');
+    console.error('例: dev, stg, prod2, sandbox-1');
+    process.exit(1);
+  }
+}
+
 function mcpEntry(suffix) {
   const env = envName(suffix);
   return {
@@ -141,6 +149,7 @@ function cmdAdd(suffix) {
     console.error('suffix には dev, stg, prod2, sandbox などを指定してください。');
     process.exit(1);
   }
+  validateSuffix(suffix);
 
   const name = mcpName(suffix);
   let data = readMcpJson();
@@ -183,6 +192,7 @@ function cmdRemove(suffix) {
     console.error('エラー: デフォルトの redash は plugin 同梱のため削除できません。');
     process.exit(1);
   }
+  validateSuffix(suffix);
 
   const name = mcpName(suffix);
   let data = readMcpJson();

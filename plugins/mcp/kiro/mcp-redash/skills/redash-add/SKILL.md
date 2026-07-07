@@ -19,7 +19,7 @@ allowed-tools:
 以下のコマンドを実行してください。`$ARGUMENTS` にはユーザーが指定した suffix が入ります。
 
 ```bash
-node "${PLUGIN_ROOT:-.kiro/plugins/mcp-redash}/scripts/redash-mcp-config.js" add $ARGUMENTS
+node "${PLUGIN_ROOT:-.kiro/plugins/mcp-redash}/scripts/redash-mcp-config.js" add "$ARGUMENTS"
 ```
 
 ## 実行後
