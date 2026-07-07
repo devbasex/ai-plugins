@@ -1,10 +1,10 @@
 # mcp-redash
 
-Redash MCP サーバーをマルチ環境対応で利用するための Claude Code プラグイン。
+Redash MCP サーバーをマルチ環境対応で利用するための Codex プラグイン。
 
 ## 概要
 
-[redash-mcp](https://github.com/suthio/redash-mcp) を Claude Code から利用するためのプラグインです。
+[redash-mcp](https://github.com/suthio/redash-mcp) を Codex から利用するためのプラグインです。
 
 - 1つだけ使う場合は最小設定（`REDASH_URL` と `REDASH_API_KEY` のみ）
 - 必要になったら suffix 付きで環境を増やせる
@@ -12,29 +12,15 @@ Redash MCP サーバーをマルチ環境対応で利用するための Claude C
 
 ## 前提条件
 
-- Claude Code
+- Codex
 - Node.js（npx が使える環境）
 
 ## インストール
-
-### Claude Code
-
-```bash
-/plugin install mcp-redash@ai-plugins
-```
 
 ### Codex
 
 ```bash
 codex plugin add mcp-redash@ai-plugins
-```
-
-### Kiro CLI
-
-Kiro では repository clone 後、対象 plugin の installer を project root で実行します。
-
-```bash
-bash plugins/mcp/kiro/mcp-redash/install.sh
 ```
 
 ### 必要な環境変数

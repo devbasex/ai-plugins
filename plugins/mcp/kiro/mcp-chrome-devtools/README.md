@@ -1,6 +1,6 @@
 # Chrome DevTools MCP
 
-Chrome DevTools MCPサーバーをClaude Codeで利用するためのプラグインです。
+Chrome DevTools MCPサーバーをKiroで利用するためのプラグインです。
 
 ## 概要
 
@@ -16,18 +16,6 @@ Chrome DevTools MCPサーバーをClaude Codeで利用するためのプラグ�
 - コンソールログの取得
 
 ## インストール
-
-### Claude Code
-
-```bash
-/plugin install mcp-chrome-devtools@ai-plugins
-```
-
-### Codex
-
-```bash
-codex plugin add mcp-chrome-devtools@ai-plugins
-```
 
 ### Kiro CLI
 

@@ -4,7 +4,7 @@ Playwright MCPを自動的にセットアップし、ブラウザ自動化機能
 
 ## 概要
 
-このプラグインは、Playwright MCPサーバーとChromiumブラウザを自動的にインストール・設定します。Claude Codeでブラウザ自動化タスク（Webスクレイピング、E2Eテスト、スクリーンショット取得など）を簡単に実行できるようになります。
+このプラグインは、Playwright MCPサーバーとChromiumブラウザを自動的にインストール・設定します。Kiroでブラウザ自動化タスク（Webスクレイピング、E2Eテスト、スクリーンショット取得など）を簡単に実行できるようになります。
 
 ## 機能
 
@@ -14,18 +14,6 @@ Playwright MCPを自動的にセットアップし、ブラウザ自動化機能
 - **環境変数対応**: PLAYWRIGHT_BROWSERS_PATHで共有キャッシュを利用
 
 ## インストール
-
-### Claude Code
-
-```bash
-/plugin install mcp-playwright@ai-plugins
-```
-
-### Codex
-
-```bash
-codex plugin add mcp-playwright@ai-plugins
-```
 
 ### Kiro CLI
 
@@ -43,11 +31,11 @@ bash plugins/mcp/kiro/mcp-playwright/install.sh
 
 ### 基本的な使い方
 
-プラグインをインストールして、Claude Codeを起動するだけで自動的にセットアップが実行されます。
+プラグインをインストールして、Kiroを起動するだけで自動的にセットアップが実行されます。
 
 ```bash
-# Claude Codeを起動
-claude
+# Kiroを起動
+kiro
 ```
 
 初回起動時、以下のようなメッセージが表示されます：

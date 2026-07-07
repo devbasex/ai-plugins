@@ -1,6 +1,6 @@
 # BigQuery MCP
 
-BigQuery MCPサーバーをClaude Codeで利用するためのプラグインです。
+BigQuery MCPサーバーをCodexで利用するためのプラグインです。
 
 ## 概要
 
@@ -40,24 +40,10 @@ BIGQUERY_KEY_FILE=/path/to/service-account-key.json
 
 ## インストール
 
-### Claude Code
-
-```bash
-/plugin install mcp-bigquery@ai-plugins
-```
-
 ### Codex
 
 ```bash
 codex plugin add mcp-bigquery@ai-plugins
-```
-
-### Kiro CLI
-
-Kiro では repository clone 後、対象 plugin の installer を project root で実行します。
-
-```bash
-bash plugins/mcp/kiro/mcp-bigquery/install.sh
 ```
 
 ### 必要な環境変数

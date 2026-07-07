@@ -287,6 +287,57 @@ config_path.write_text(json.dumps(servers, indent=2, ensure_ascii=False) + "\n")
 PY
 }
 
+rewrite_mcp_readme_for_runtime() {
+  local runtime="$1"
+  local readme="$2"
+
+  [ "$runtime" != claude ] || return 0
+  [ -f "$readme" ] || return 0
+
+  python3 - "$runtime" "$readme" <<'PY'
+import sys
+from pathlib import Path
+
+runtime = sys.argv[1]
+readme_path = Path(sys.argv[2])
+text = readme_path.read_text()
+
+runtime_titles = {"Claude Code", "Codex", "Kiro CLI"}
+keep_title = {"codex": "Codex", "kiro": "Kiro CLI"}[runtime]
+
+lines = text.splitlines(keepends=True)
+rewritten = []
+in_install = False
+keep_subsection = True
+
+for line in lines:
+    if line.startswith("## "):
+        in_install = line.strip() == "## インストール"
+        keep_subsection = True
+        rewritten.append(line)
+        continue
+
+    if in_install and line.startswith("### "):
+        title = line[4:].strip()
+        keep_subsection = title not in runtime_titles or title == keep_title
+
+    if keep_subsection:
+        rewritten.append(line)
+
+text = "".join(rewritten)
+runtime_name = {"codex": "Codex", "kiro": "Kiro"}[runtime]
+runtime_command = {"codex": "codex", "kiro": "kiro"}[runtime]
+
+text = text.replace("Claude Code", runtime_name)
+text = "\n".join(
+    runtime_command if line == "claude" else line
+    for line in text.split("\n")
+)
+
+readme_path.write_text(text)
+PY
+}
+
 apply_mcp_readme_template() {
   local runtime="$1"
   local plugin_dir="$2"
@@ -294,6 +345,8 @@ apply_mcp_readme_template() {
 
   if [ -f "$readme_template" ]; then
     mv "$readme_template" "$plugin_dir/README.md"
+  else
+    rewrite_mcp_readme_for_runtime "$runtime" "$plugin_dir/README.md"
   fi
   rm -f "$plugin_dir"/README.claude.md "$plugin_dir"/README.codex.md "$plugin_dir"/README.kiro.md
 }

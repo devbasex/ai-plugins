@@ -31,18 +31,6 @@ NOTION_TOKEN=<your-notion-integration-token>
 
 ## インストール
 
-### Claude Code
-
-```bash
-/plugin install mcp-notion@ai-plugins
-```
-
-### Codex
-
-```bash
-codex plugin add mcp-notion@ai-plugins
-```
-
 ### Kiro CLI
 
 Kiro では repository clone 後、対象 plugin の installer を project root で実行します。
