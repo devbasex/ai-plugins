@@ -1,0 +1,4 @@
+BIGQUERY_PROJECT=example-project
+BIGQUERY_LOCATION=US
+BIGQUERY_DATASET=example_dataset
+BIGQUERY_KEY_FILE=/tmp/runtime-secrets/bigquery-key-file

@@ -31,6 +31,7 @@ yarn-error.log*
 # Temporary files
 *.tmp
 *.bak
+tmp/
 
 # Python
 __pycache__/

@@ -1,0 +1,5 @@
+{
+  "hook_event_name": "SessionStart",
+  "session_id": "runtime-smoke-session",
+  "cwd": "/tmp/runtime-project"
+}

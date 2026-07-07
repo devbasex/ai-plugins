@@ -1,0 +1,3 @@
+FROM ai-plugins-runtime-smoke-base
+
+RUN curl -fsSL https://cli.kiro.dev/install | bash || true

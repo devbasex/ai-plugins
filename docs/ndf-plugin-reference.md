@@ -85,10 +85,15 @@ bash scripts/build-runtime-plugins.sh --check
 bash scripts/validate-runtime-plugins.sh
 claude plugin validate plugins/ndf-claude
 python3 -m json.tool plugins/ndf-codex/.codex-plugin/plugin.json >/dev/null
-bash plugins/ndf-kiro/install.sh --help
+bash plugins/ndf-kiro/install.sh --dry-run
+bash scripts/runtime-smoke-test.sh --runtime claude
+bash scripts/runtime-smoke-test.sh --runtime codex
+bash scripts/runtime-smoke-test.sh --runtime kiro
 ```
 
 `--check` は `plugins/ndf-*` と `plugins/mcp/claude|codex|kiro` の生成物が共通編集元と同期していることを検証します。`validate-runtime-plugins.sh` は生成物同期、JSON / manifest、marketplace source、Kiro installer、Markdown ローカルリンクをまとめて確認します。
+
+`runtime-smoke-test.sh` は Docker コンテナ内に repo copy、`/tmp/runtime-home`、`/tmp/runtime-project`、`/tmp/runtime-secrets` を分離して作成し、Claude / Codex / Kiro それぞれで `ndf` と `mcp-bigquery` 相当の実 install、Skill / MCP / hook / agent config の assertion、JUnit / log artifact 出力を確認します。PR CI は `--with-secrets=off` の非認証 smoke のみを実行し、認証付き smoke は `runtime-plugin-authenticated-smoke.yml` の protected workflow で実行します。
 
 ローカル hook を使う場合は `bash scripts/install-dev-hooks.sh` で `.githooks/` を有効化します。
 

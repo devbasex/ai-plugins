@@ -6,7 +6,7 @@ PLUGIN_NAME="$(basename "$SCRIPT_DIR")"
 PROJECT_ROOT="$(pwd)"
 KIRO_DIR="$PROJECT_ROOT/.kiro"
 KIRO_AGENT_FILE="$KIRO_DIR/agents/default.json"
-KIRO_PLUGIN_LINK="$KIRO_DIR/plugins/$PLUGIN_NAME"
+KIRO_PLUGIN_LINK="$KIRO_DIR/mcp_runtime/$PLUGIN_NAME"
 KIRO_SKILLS_DIR="$KIRO_DIR/skills"
 TARGET_MCP="$PROJECT_ROOT/.mcp.json"
 SOURCE_MCP="$SCRIPT_DIR/.mcp.json"
@@ -16,7 +16,7 @@ DRY_RUN=false
 
 usage() {
   cat <<'USAGE'
-Usage: bash install.sh [--dry-run]
+Usage: bash install.sh [--project PATH] [--dry-run]
 
 Install this MCP plugin into the current project's Kiro settings.
 USAGE
@@ -24,6 +24,16 @@ USAGE
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --project)
+      [ "$#" -ge 2 ] || { echo "ERROR: --project requires a path" >&2; exit 2; }
+      PROJECT_ROOT="$(cd "$2" && pwd)"
+      KIRO_DIR="$PROJECT_ROOT/.kiro"
+      KIRO_AGENT_FILE="$KIRO_DIR/agents/default.json"
+      KIRO_PLUGIN_LINK="$KIRO_DIR/mcp_runtime/$PLUGIN_NAME"
+      KIRO_SKILLS_DIR="$KIRO_DIR/skills"
+      TARGET_MCP="$PROJECT_ROOT/.mcp.json"
+      shift
+      ;;
     --dry-run) DRY_RUN=true ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
@@ -48,12 +58,12 @@ if [ "$DRY_RUN" = true ]; then
   exit 0
 fi
 
-mkdir -p "$KIRO_DIR/plugins" "$KIRO_SKILLS_DIR" "$(dirname "$KIRO_AGENT_FILE")"
+mkdir -p "$KIRO_DIR/mcp_runtime" "$KIRO_SKILLS_DIR" "$(dirname "$KIRO_AGENT_FILE")"
 if [ -e "$KIRO_PLUGIN_LINK" ] && [ ! -L "$KIRO_PLUGIN_LINK" ]; then
   echo "ERROR: $KIRO_PLUGIN_LINK already exists and is not a symlink" >&2
   exit 1
 fi
-ln -sfn "../../plugins/mcp/kiro/$PLUGIN_NAME" "$KIRO_PLUGIN_LINK"
+ln -sfn "$SCRIPT_DIR" "$KIRO_PLUGIN_LINK"
 
 if [ -d "$SOURCE_SKILLS" ]; then
   find "$SOURCE_SKILLS" -mindepth 1 -maxdepth 1 -type d | sort | while IFS= read -r skill_dir; do
@@ -64,7 +74,7 @@ if [ -d "$SOURCE_SKILLS" ]; then
       echo "ERROR: $skill_link already exists and is not a symlink" >&2
       exit 1
     fi
-    ln -sfn "../plugins/$PLUGIN_NAME/skills/$skill_name" "$skill_link"
+    ln -sfn "$skill_dir" "$skill_link"
     echo "Linked Kiro skill: $skill_name"
   done
 fi

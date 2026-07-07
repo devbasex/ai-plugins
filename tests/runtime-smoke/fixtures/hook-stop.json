@@ -1,0 +1,6 @@
+{
+  "hook_event_name": "Stop",
+  "session_id": "runtime-smoke-session",
+  "cwd": "/tmp/runtime-project",
+  "transcript_path": "/tmp/runtime-project/transcript.jsonl"
+}

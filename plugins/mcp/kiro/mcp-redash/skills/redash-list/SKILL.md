@@ -16,7 +16,7 @@ allowed-tools:
 以下のコマンドを実行してください。
 
 ```bash
-node "${PLUGIN_ROOT:-.kiro/plugins/mcp-redash}/scripts/redash-mcp-config.js" list
+node "${PLUGIN_ROOT:-.kiro/mcp_runtime/mcp-redash}/scripts/redash-mcp-config.js" list
 ```
 
 ## 実行後

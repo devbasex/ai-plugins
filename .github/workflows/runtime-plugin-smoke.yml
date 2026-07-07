@@ -1,0 +1,37 @@
+name: Runtime plugin smoke
+
+on:
+  pull_request:
+    paths:
+      - "plugins/**"
+      - "scripts/runtime-smoke-test.sh"
+      - "tests/runtime-smoke/**"
+      - ".github/workflows/runtime-plugin-smoke.yml"
+      - ".github/workflows/runtime-plugin-authenticated-smoke.yml"
+  push:
+    branches:
+      - main
+      - "release/**"
+    paths:
+      - "plugins/**"
+      - "scripts/runtime-smoke-test.sh"
+      - "tests/runtime-smoke/**"
+      - ".github/workflows/runtime-plugin-smoke.yml"
+
+jobs:
+  runtime-smoke:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [claude, codex, kiro]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run unauthenticated runtime smoke
+        run: bash scripts/runtime-smoke-test.sh --runtime "${{ matrix.runtime }}" --with-secrets=off
+      - name: Upload smoke artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: runtime-smoke-${{ matrix.runtime }}
+          path: tmp/runtime-smoke/${{ matrix.runtime }}

@@ -143,6 +143,15 @@ bash scripts/build-runtime-plugins.sh
 bash scripts/validate-runtime-plugins.sh
 ```
 
+実ランタイムのインストール経路を確認する場合は、Docker コンテナ内で smoke test を実行します。
+
+```bash
+bash scripts/runtime-smoke-test.sh
+bash scripts/runtime-smoke-test.sh --runtime claude
+bash scripts/runtime-smoke-test.sh --runtime codex
+bash scripts/runtime-smoke-test.sh --runtime kiro
+```
+
 ローカル hook を使う場合は以下を実行します。
 
 ```bash
