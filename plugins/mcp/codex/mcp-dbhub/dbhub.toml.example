@@ -1,0 +1,38 @@
+# dbhub.toml - データベース接続設定
+# このファイルを dbhub.toml にコピーしてプロジェクトルートに配置してください。
+# dbhub.toml は .gitignore に追加し、認証情報をコミットしないでください。
+
+# 単一データベース（SSH踏み台なし）
+[[sources]]
+id = "mydb"
+description = "開発用 MySQL"
+dsn = "mysql://user:password@localhost:3306/mydb"
+
+# 単一データベース（SSH踏み台経由）
+# [[sources]]
+# id = "production"
+# description = "本番 MySQL（踏み台経由）"
+# dsn = "mysql://user:password@db.internal:3306/myapp"
+# ssh_host = "bastion.example.com"
+# ssh_port = 22
+# ssh_user = "ubuntu"
+# ssh_key = "~/.ssh/id_rsa"
+
+# 複数データベース
+# [[sources]]
+# id = "production"
+# description = "本番 MySQL"
+# dsn = "mysql://user:password@prod-db.internal:3306/myapp"
+# ssh_host = "bastion.example.com"
+# ssh_port = 22
+# ssh_user = "ubuntu"
+# ssh_key = "~/.ssh/id_rsa"
+#
+# [[sources]]
+# id = "staging"
+# description = "ステージング MySQL"
+# dsn = "mysql://user:password@staging-db.internal:3306/myapp_stg"
+# ssh_host = "bastion.example.com"
+# ssh_port = 22
+# ssh_user = "ubuntu"
+# ssh_key = "~/.ssh/id_rsa"

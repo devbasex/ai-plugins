@@ -1,0 +1,22 @@
+{
+  "description": "Playwright MCP auto-setup hook",
+  "hooks": {
+    "SessionStart": [
+      {
+        "description": "Ensure Playwright browser is installed",
+        "matcher": "startup|resume",
+        "priority": 100,
+        "enabled": true,
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/ensure-playwright.js",
+            "description": "Auto-install Playwright chromium on first use",
+            "continueOnError": false,
+            "suppressOutput": false
+          }
+        ]
+      }
+    ]
+  }
+}

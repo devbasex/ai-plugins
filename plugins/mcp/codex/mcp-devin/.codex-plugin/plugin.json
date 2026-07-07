@@ -1,0 +1,7 @@
+{
+  "name": "mcp-devin",
+  "version": "1.0.0",
+  "description": "Devin MCP server for accessing repository documentation and code knowledge via DeepWiki",
+  "keywords": ["mcp", "devin", "deepwiki", "documentation", "repository", "wiki", "code-knowledge"],
+  "mcpServers": "./.mcp.json"
+}

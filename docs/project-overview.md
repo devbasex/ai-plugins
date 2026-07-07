@@ -28,12 +28,15 @@ ai-plugins/
 ├── .claude-plugin/
 │   └── marketplace.json          # Claude Codeマーケットプレイスメタデータ
 ├── plugins/
-│   ├── ndf/                      # NDFプラグイン（メイン）
-│   │   ├── skills/               # 全Skill実体（Claude Code/Kiroはmanifest配列で公開対象を指定）
-│   │   ├── skills-codex/         # Codex向け公開Skill（実ディレクトリ）
-│   │   └── skills-optional/      # ランタイム別除外候補リスト
-│   ├── mcp-serena/               # Serena MCPプラグイン
-│   └── {plugin-name}/            # その他のプラグイン
+│   ├── ndf-shared/               # NDF共通ソース
+│   ├── ndf-claude/               # Claude Code版NDF
+│   ├── ndf-codex/                # Codex版NDF
+│   ├── ndf-kiro/                 # Kiro CLI版NDF
+│   └── mcp/
+│       ├── shared/               # MCPプラグイン共通ソース
+│       ├── claude/               # Claude Code版MCPプラグイン
+│       ├── codex/                # Codex版MCPプラグイン
+│       └── kiro/                 # Kiro CLI版MCPプラグイン
 ├── docs/                         # リポジトリ知識
 ├── AGENTS.md                     # 共通エントリポイント
 ├── CLAUDE.md                     # Claude Code固有設定

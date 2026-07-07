@@ -15,6 +15,156 @@
       "interface": {
         "displayName": "NDF"
       }
+    },
+    {
+      "name": "mcp-playwright",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mcp/codex/mcp-playwright"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity",
+      "interface": {
+        "displayName": "Playwright MCP"
+      }
+    },
+    {
+      "name": "mcp-chrome-devtools",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mcp/codex/mcp-chrome-devtools"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity",
+      "interface": {
+        "displayName": "Chrome DevTools MCP"
+      }
+    },
+    {
+      "name": "mcp-bigquery",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mcp/codex/mcp-bigquery"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity",
+      "interface": {
+        "displayName": "BigQuery MCP"
+      }
+    },
+    {
+      "name": "mcp-aws-docs",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mcp/codex/mcp-aws-docs"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity",
+      "interface": {
+        "displayName": "AWS Docs MCP"
+      }
+    },
+    {
+      "name": "mcp-dbhub",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mcp/codex/mcp-dbhub"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity",
+      "interface": {
+        "displayName": "DBHub MCP"
+      }
+    },
+    {
+      "name": "mcp-notion",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mcp/codex/mcp-notion"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity",
+      "interface": {
+        "displayName": "Notion MCP"
+      }
+    },
+    {
+      "name": "mcp-devin",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mcp/codex/mcp-devin"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity",
+      "interface": {
+        "displayName": "Devin MCP"
+      }
+    },
+    {
+      "name": "mcp-redash",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mcp/codex/mcp-redash"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity",
+      "interface": {
+        "displayName": "Redash MCP"
+      }
+    },
+    {
+      "name": "mcp-markitdown",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mcp/codex/mcp-markitdown"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity",
+      "interface": {
+        "displayName": "MarkItDown MCP"
+      }
+    },
+    {
+      "name": "mcp-serena",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mcp/codex/mcp-serena"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity",
+      "interface": {
+        "displayName": "Serena MCP"
+      }
     }
   ]
 }

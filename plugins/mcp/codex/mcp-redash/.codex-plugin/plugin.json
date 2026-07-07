@@ -1,0 +1,7 @@
+{
+  "name": "mcp-redash",
+  "version": "1.0.0",
+  "description": "Redash MCP server with multi-environment support (arbitrary suffix)",
+  "keywords": ["mcp", "redash", "sql", "data", "visualization", "multi-environment"],
+  "mcpServers": "./.mcp.json"
+}

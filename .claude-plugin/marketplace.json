@@ -13,52 +13,52 @@
     },
     {
       "name": "mcp-playwright",
-      "source": "./plugins/mcp-playwright",
+      "source": "./plugins/mcp/claude/mcp-playwright",
       "description": "Playwright MCP auto-setup plugin with Chromium browser installation and configuration"
     },
     {
       "name": "mcp-chrome-devtools",
-      "source": "./plugins/mcp-chrome-devtools",
+      "source": "./plugins/mcp/claude/mcp-chrome-devtools",
       "description": "Chrome DevTools MCP server for browser automation and testing"
     },
     {
       "name": "mcp-bigquery",
-      "source": "./plugins/mcp-bigquery",
+      "source": "./plugins/mcp/claude/mcp-bigquery",
       "description": "BigQuery MCP server for data analysis and SQL queries"
     },
     {
       "name": "mcp-aws-docs",
-      "source": "./plugins/mcp-aws-docs",
+      "source": "./plugins/mcp/claude/mcp-aws-docs",
       "description": "AWS Documentation MCP server for accessing official AWS documentation"
     },
     {
       "name": "mcp-dbhub",
-      "source": "./plugins/mcp-dbhub",
+      "source": "./plugins/mcp/claude/mcp-dbhub",
       "description": "DBHub MCP server for database operations and SQL queries"
     },
     {
       "name": "mcp-notion",
-      "source": "./plugins/mcp-notion",
+      "source": "./plugins/mcp/claude/mcp-notion",
       "description": "Notion MCP server for note management and knowledge base operations"
     },
     {
       "name": "mcp-devin",
-      "source": "./plugins/mcp-devin",
+      "source": "./plugins/mcp/claude/mcp-devin",
       "description": "Devin MCP server for accessing repository documentation and code knowledge via DeepWiki"
     },
     {
       "name": "mcp-redash",
-      "source": "./plugins/mcp-redash",
+      "source": "./plugins/mcp/claude/mcp-redash",
       "description": "Redash MCP server with multi-environment support (arbitrary suffix)"
     },
     {
       "name": "mcp-markitdown",
-      "source": "./plugins/mcp-markitdown",
+      "source": "./plugins/mcp/claude/mcp-markitdown",
       "description": "MarkItDown MCP server for converting documents (PDF, Office, images, etc.) to Markdown"
     },
     {
       "name": "mcp-serena",
-      "source": "./plugins/mcp-serena",
+      "source": "./plugins/mcp/claude/mcp-serena",
       "description": "Serena MCP server for semantic code intelligence (symbol search, reference search, refactoring)"
     }
   ]
