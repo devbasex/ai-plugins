@@ -107,7 +107,8 @@ else
   echo "==> claude CLI not found; skipped claude plugin validate"
 fi
 
-run bash "$ROOT_DIR/plugins/ndf-kiro/install.sh" --help >/dev/null
+run bash "$ROOT_DIR/plugins/ndf-kiro/install.sh" --dry-run >/dev/null
+run bash "$ROOT_DIR/plugins/ndf-kiro/install.sh" --dry-run --with-codex >/dev/null
 
 while IFS= read -r installer; do
   run bash "$installer" --dry-run >/dev/null

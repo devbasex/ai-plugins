@@ -17,6 +17,7 @@ from urllib.parse import unquote, urlparse
 
 LINK_RE = re.compile(r"(?<!!)\[[^\]]+\]\(([^)]+)\)")
 INLINE_HTML_RE = re.compile(r"<a\s+[^>]*href=[\"']([^\"']+)[\"']", re.IGNORECASE)
+TITLE_RE = re.compile(r"\s+(?:\"[^\"]*\"|'[^']*'|\([^)]*\))\s*$")
 
 
 def iter_markdown_files(root: Path) -> list[Path]:
@@ -34,9 +35,7 @@ def strip_title(target: str) -> str:
     target = target.strip()
     if target.startswith("<") and target.endswith(">"):
         target = target[1:-1].strip()
-    if " " in target and not target.startswith(("./", "../", "/")):
-        return target.split()[0]
-    return target
+    return TITLE_RE.sub("", target)
 
 
 def should_skip(target: str) -> bool:
