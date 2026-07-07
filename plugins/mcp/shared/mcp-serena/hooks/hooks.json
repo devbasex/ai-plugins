@@ -1,0 +1,19 @@
+{
+  "description": "mcp-serena: Auto-activate Serena on session start",
+  "hooks": {
+    "SessionStart": [
+      {
+        "description": "Remind to activate Serena project",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '[mcp-serena] Serena MCPが利用可能です。activate_project でプロジェクトをアクティベートしてください。'",
+            "description": "Output Serena activation reminder",
+            "continueOnError": true,
+            "suppressOutput": false
+          }
+        ]
+      }
+    ]
+  }
+}

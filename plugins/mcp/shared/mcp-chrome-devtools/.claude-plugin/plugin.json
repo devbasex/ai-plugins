@@ -1,0 +1,10 @@
+{
+  "name": "mcp-chrome-devtools",
+  "version": "1.0.0",
+  "description": "Chrome DevTools MCP server for browser automation and testing",
+  "author": {
+    "name": "takemi-ohama",
+    "url": "https://github.com/takemi-ohama"
+  },
+  "keywords": ["mcp", "chrome", "devtools", "browser", "automation", "testing"]
+}

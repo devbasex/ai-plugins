@@ -59,6 +59,6 @@ Codex 連携は MCP サーバではなく `/ndf:codex` skill と `corder` エー
 
 ## 関連リンク
 
-- [mcp-serena README](../../plugins/mcp-serena/README.md)
+- [mcp-serena README](../../plugins/mcp/shared/mcp-serena/README.md)
 - [NDF Plugin リファレンス](../ndf-plugin-reference.md)
 - [NDF README](../../plugins/ndf/README.md)

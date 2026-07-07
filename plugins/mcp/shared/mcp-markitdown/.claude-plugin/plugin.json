@@ -1,0 +1,10 @@
+{
+  "name": "mcp-markitdown",
+  "version": "1.0.0",
+  "description": "MarkItDown MCP server for converting documents (PDF, Office, images, etc.) to Markdown",
+  "author": {
+    "name": "takemi-ohama",
+    "url": "https://github.com/takemi-ohama"
+  },
+  "keywords": ["mcp", "markitdown", "markdown", "pdf", "docx", "pptx", "xlsx", "images", "converter"]
+}

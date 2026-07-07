@@ -1,0 +1,17 @@
+{
+  "name": "mcp-redash",
+  "version": "1.0.0",
+  "description": "Redash MCP server with multi-environment support (arbitrary suffix)",
+  "author": {
+    "name": "takemi-ohama",
+    "url": "https://github.com/takemi-ohama"
+  },
+  "keywords": ["mcp", "redash", "sql", "data", "visualization", "multi-environment"],
+  "skills": [
+    "./skills/redash-add",
+    "./skills/redash-remove",
+    "./skills/redash-list",
+    "./skills/redash-status",
+    "./skills/redash-guide"
+  ]
+}
