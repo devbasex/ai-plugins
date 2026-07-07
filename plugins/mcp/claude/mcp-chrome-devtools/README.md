@@ -23,20 +23,6 @@ Chrome DevTools MCPサーバーをClaude Codeで利用するためのプラグ�
 /plugin install mcp-chrome-devtools@ai-plugins
 ```
 
-### Codex
-
-```bash
-codex plugin add mcp-chrome-devtools@ai-plugins
-```
-
-### Kiro CLI
-
-Kiro では repository clone 後、対象 plugin の installer を project root で実行します。
-
-```bash
-bash plugins/mcp/kiro/mcp-chrome-devtools/install.sh
-```
-
 ### 必要な環境変数
 
 - 追加の環境変数は不要です。

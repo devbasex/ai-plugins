@@ -20,20 +20,6 @@
 /plugin install mcp-markitdown@ai-plugins
 ```
 
-### Codex
-
-```bash
-codex plugin add mcp-markitdown@ai-plugins
-```
-
-### Kiro CLI
-
-Kiro では repository clone 後、対象 plugin の installer を project root で実行します。
-
-```bash
-bash plugins/mcp/kiro/mcp-markitdown/install.sh
-```
-
 ### 必要な環境変数
 
 - 追加の環境変数は不要です。

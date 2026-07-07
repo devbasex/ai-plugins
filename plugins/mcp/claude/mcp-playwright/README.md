@@ -21,20 +21,6 @@ Playwright MCPを自動的にセットアップし、ブラウザ自動化機能
 /plugin install mcp-playwright@ai-plugins
 ```
 
-### Codex
-
-```bash
-codex plugin add mcp-playwright@ai-plugins
-```
-
-### Kiro CLI
-
-Kiro では repository clone 後、対象 plugin の installer を project root で実行します。
-
-```bash
-bash plugins/mcp/kiro/mcp-playwright/install.sh
-```
-
 ### 必要な環境変数
 
 - `HOME`

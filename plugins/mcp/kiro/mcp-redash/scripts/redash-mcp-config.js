@@ -60,6 +60,12 @@ function isKiroRuntime() {
   return Boolean(process.env.KIRO_WORKSPACE_ROOT) || normalizedDir.includes(runtimePath);
 }
 
+function isCodexRuntime() {
+  const normalizedDir = path.normalize(__dirname);
+  const runtimePath = path.join('mcp', 'codex') + path.sep;
+  return Boolean(process.env.CODEX_WORKSPACE_ROOT) || normalizedDir.includes(runtimePath);
+}
+
 function resolveProjectRoot() {
   const envNames = [
     'PROJECT_ROOT',
@@ -96,7 +102,7 @@ function resolveProjectRoot() {
 }
 
 function createMcpJson() {
-  return { mcpServers: {} };
+  return isCodexRuntime() ? {} : { mcpServers: {} };
 }
 
 function normalizeWritableMcpJson(data) {

@@ -10,20 +10,6 @@ Serena MCPサーバーを提供するプラグインです。セマンティッ�
 /plugin install mcp-serena@ai-plugins
 ```
 
-### Codex
-
-```bash
-codex plugin add mcp-serena@ai-plugins
-```
-
-### Kiro CLI
-
-Kiro では repository clone 後、対象 plugin の installer を project root で実行します。
-
-```bash
-bash plugins/mcp/kiro/mcp-serena/install.sh
-```
-
 ### 必要な環境変数
 
 - `SERENA_HOME`

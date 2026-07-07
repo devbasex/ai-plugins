@@ -291,7 +291,6 @@ rewrite_mcp_readme_for_runtime() {
   local runtime="$1"
   local readme="$2"
 
-  [ "$runtime" != claude ] || return 0
   [ -f "$readme" ] || return 0
 
   python3 - "$runtime" "$readme" <<'PY'
@@ -303,7 +302,7 @@ readme_path = Path(sys.argv[2])
 text = readme_path.read_text()
 
 runtime_titles = {"Claude Code", "Codex", "Kiro CLI"}
-keep_title = {"codex": "Codex", "kiro": "Kiro CLI"}[runtime]
+keep_title = {"claude": "Claude Code", "codex": "Codex", "kiro": "Kiro CLI"}[runtime]
 
 lines = text.splitlines(keepends=True)
 rewritten = []
@@ -325,8 +324,8 @@ for line in lines:
         rewritten.append(line)
 
 text = "".join(rewritten)
-runtime_name = {"codex": "Codex", "kiro": "Kiro"}[runtime]
-runtime_command = {"codex": "codex", "kiro": "kiro"}[runtime]
+runtime_name = {"claude": "Claude Code", "codex": "Codex", "kiro": "Kiro"}[runtime]
+runtime_command = {"claude": "claude", "codex": "codex", "kiro": "kiro"}[runtime]
 
 text = text.replace("Claude Code", runtime_name)
 text = "\n".join(
