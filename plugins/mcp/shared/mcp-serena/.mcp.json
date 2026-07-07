@@ -14,7 +14,7 @@
         "False"
       ],
       "env": {
-        "SERENA_HOME": "${SERENA_HOME:-.serena}"
+        "SERENA_HOME": ".serena"
       }
     }
   }

@@ -16,7 +16,9 @@ const fs = require('fs');
 const path = require('path');
 
 const MCP_PACKAGE = '@suthio/redash-mcp';
-const MCP_JSON_PATH = path.join(resolveProjectRoot(), '.mcp.json');
+const PROJECT_ROOT = resolveProjectRoot();
+const MCP_JSON_PATH = path.join(PROJECT_ROOT, '.mcp.json');
+const KIRO_AGENT_PATH = path.join(PROJECT_ROOT, '.kiro', 'agents', 'default.json');
 
 // --- helpers ---
 
@@ -54,6 +56,11 @@ function mcpEntry(suffix) {
 
 function isCodexRuntime() {
   return Boolean(process.env.CODEX_PLUGIN_ROOT) || path.normalize(__dirname).split(path.sep).includes('codex');
+}
+
+function isKiroRuntime() {
+  const parts = path.normalize(__dirname).split(path.sep);
+  return Boolean(process.env.KIRO_WORKSPACE_ROOT) || parts.includes('kiro') || parts.includes('.kiro');
 }
 
 function resolveProjectRoot() {
@@ -137,6 +144,46 @@ function writeMcpJson(data) {
   fs.writeFileSync(MCP_JSON_PATH, JSON.stringify(data, null, 2) + '\n', 'utf-8');
 }
 
+function syncKiroAgent(data) {
+  if (!isKiroRuntime()) {
+    return;
+  }
+
+  const servers = serverMap(data, false) || {};
+  let agent = {};
+  if (fs.existsSync(KIRO_AGENT_PATH)) {
+    try {
+      agent = JSON.parse(fs.readFileSync(KIRO_AGENT_PATH, 'utf-8'));
+    } catch {
+      console.error('エラー: .kiro/agents/default.json の JSON が壊れています。手動で修正してください。');
+      process.exit(1);
+    }
+  } else {
+    agent = {
+      name: 'default',
+      resources: ['skill://.kiro/skills/**/SKILL.md'],
+    };
+  }
+
+  if (!agent.mcpServers || typeof agent.mcpServers !== 'object' || Array.isArray(agent.mcpServers)) {
+    agent.mcpServers = {};
+  }
+
+  for (const name of Object.keys(agent.mcpServers)) {
+    if (isRedashServer(name)) {
+      delete agent.mcpServers[name];
+    }
+  }
+  for (const [name, server] of Object.entries(servers)) {
+    if (isRedashServer(name)) {
+      agent.mcpServers[name] = server;
+    }
+  }
+
+  fs.mkdirSync(path.dirname(KIRO_AGENT_PATH), { recursive: true });
+  fs.writeFileSync(KIRO_AGENT_PATH, JSON.stringify(agent, null, 2) + '\n', 'utf-8');
+}
+
 function isRedashServer(name) {
   return name === 'redash' || name.startsWith('redash-');
 }
@@ -176,9 +223,13 @@ function cmdAdd(suffix) {
 
   servers[name] = mcpEntry(suffix);
   writeMcpJson(data);
+  syncKiroAgent(data);
 
   const env = envName(suffix);
   console.log(`${name} を .mcp.json に追加しました。`);
+  if (isKiroRuntime()) {
+    console.log(`${name} を .kiro/agents/default.json に同期しました。`);
+  }
   console.log('');
   console.log('必要な環境変数:');
   console.log(`  ${env.url}`);
@@ -210,8 +261,12 @@ function cmdRemove(suffix) {
 
   delete servers[name];
   writeMcpJson(data);
+  syncKiroAgent(data);
 
   console.log(`${name} を .mcp.json から削除しました。`);
+  if (isKiroRuntime()) {
+    console.log(`${name} を .kiro/agents/default.json から削除しました。`);
+  }
 }
 
 function cmdList() {
