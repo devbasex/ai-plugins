@@ -64,7 +64,7 @@ issue 取得 ─┤                                                    │
 既存 plan ─▶│  Step 3: release branch 作成 + Draft release PR     │
             │  Step 4: 個別 PR ブランチ作成 + 各 Draft PR (release base)
             │  Step 5: git worktree で並行開発 (依存関係を考慮)    │
-            │  Step 6: 個別 PR ごとに /ndf:review or /ndf:cross-review
+            │  Step 6: 個別 PR ごとに /ndf:cross-review (原則必須) │
             │           → /ndf:fix → merge into release           │
             │  Step 7: release ブランチで結合テスト相当のレビュー │
             │  Step 8: release PR body 最終化 → Ready & merge      │
@@ -225,16 +225,22 @@ git worktree add ../<repo>-<PLAN-ID>-ui     feature/<PLAN-ID>-ui
 
 ## Step 6: 個別 PR のレビュー
 
-**レビューは原則個別 PR 単位**で行う:
+**個別 PR は原則 `/ndf:cross-review <PR番号>` を必須**とする。codex + gemini の両者が
+`APPROVE` に収束したことを確認してから Draft を解除し、release ブランチへ merge する。
+個別 PR で重大バグを取りこぼすと、release PR 側の cross-review がまとめて検出する形に
+なり、本 skill が禁止する「release PR で個別 PR 範囲の指摘を解決する」状態に陥る。
 
-| 用途 | コマンド |
-|---|---|
-| PR 作成前のセルフレビュー | `/ndf:review-branch` |
-| GitHub 上の単体レビュー | `/ndf:review <PR番号>` |
-| codex + gemini 両方の収束ループ | `/ndf:cross-review <PR番号>` |
-| 指摘の修正 | `/ndf:fix <PR番号>` |
+| 用途 | コマンド | 位置づけ |
+|---|---|---|
+| PR 作成前のセルフレビュー | `/ndf:review-branch` | push / PR 化の前段。cross-review の代替にはしない |
+| 個別 PR の収束レビュー (原則必須) | `/ndf:cross-review <PR番号>` | codex + gemini 両方の APPROVE 収束を確認する本線 |
+| GitHub 上の例外的な単発確認 | `/ndf:review <PR番号>` | ごく軽微な差分の単発確認に限定。cross-review の代替にはしない |
+| 指摘の修正 | `/ndf:fix <PR番号>` | cross-review ループ内・後で自動起動される |
 
-個別 PR が APPROVE → Draft 解除 → release ブランチへ merge (squash 推奨)。
+- `ndf:code-reviewer` エージェントや `/ndf:review` の単発レビューを **cross-review の
+  代替にしない**。単発レビューは片側 AI の一発判定にとどまり、収束ループを回さないため
+  取りこぼしが残る。
+- 個別 PR が cross-review で APPROVE → Draft 解除 → release ブランチへ merge (squash 推奨)。
 
 ## Step 7: release ブランチのレビュー (結合テスト相当のみ)
 
@@ -264,10 +270,16 @@ gh pr edit <release-pr-number> --title "..." --body "..."
 
 最終化のチェック観点 (Step 3 のレビュアー視点の原則を満たすこと):
 
+- [ ] **全個別 PR が `/ndf:cross-review` で APPROVE 収束済み** (Step 6 の前提。未実施の PR が残っていないこと)
 - [ ] 「何のために」「何を」が個別 PR や plan ファイルを辿らずに理解できる
 - [ ] 実装中の方針変更・スコープ増減が body に反映されている
 - [ ] 個別 PR への参照が本文に残っていない (`<details>` 内の開発用情報は残してよい)
 - [ ] 内部用語 (round、rotated 等) が漏れていない
+
+> **cross-review を省略した個別 PR が残っている場合のフォールバック**: release PR に対して
+> `/ndf:cross-review <release-pr-number>` を必須実行する。ただし個別 PR 範囲の指摘が
+> release PR 側でまとめて出るため、該当の個別コミット (既に merge 済みなら release 配下の
+> 修正 PR) へ差し戻す手戻りが増える。原則は Step 6 で各個別 PR を cross-review 済みにしておくこと。
 
 ### Draft 解除と merge
 
@@ -319,6 +331,7 @@ git checkout release/<PLAN-ID>
 | release ブランチを作らず巨大な 1 PR で出す | レビュー困難・revert 困難・並行開発不可 |
 | 個別 PR の base を default にする | release で統合する意味が失われ、partial merge が default を汚染する |
 | 個別 PR Draft 作成を実装後に回す | PR 番号が未確定でクロス参照や CI 待機の段取りが組めない |
+| 個別 PR を cross-review せず、code-reviewer / 単発レビューだけで release へ merge する | 片側 AI の一発判定で収束ループを回さないため重大バグを取りこぼし、release PR 側でまとめて検出され手戻りが増える (Step 6) |
 | release PR で個別 PR 範囲の指摘を解決しようとする | 該当 PR が既に閉じている場合、コミット意図がずれる |
 | release PR の body を個別 PR リンクの列挙だけにする | レビュアーは release PR 単体で変更を把握できず、個別 PR や plan を辿ることになる。body は self-contained 必須 (Step 3 / Step 8) |
 | body 最終化せずに Ready for review にする | Draft 作成時の plan ベースの暫定 body のままだと実装の最終形と乖離する |

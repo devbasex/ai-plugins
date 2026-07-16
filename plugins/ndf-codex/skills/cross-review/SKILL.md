@@ -472,4 +472,7 @@ pint / larastan / test / build などは **中断** を原則とする。
 - `/ndf:codex` — codex CLI 呼び出し手順
 - `/ndf:gemini` — gemini CLI 呼び出し手順
 - `/ndf:resolve-pr-comments` — Resolve Conversation の詳細
+- `/ndf:issue-plan-strategy` — multi-PR ワークフローでは **個別 PR ごとに本 cross-review が原則必須**。
+  `/ndf:review` 単発や `ndf:code-reviewer` は代替にせず、release ブランチへ merge する前に
+  codex + gemini の APPROVE 収束を確認する (Step 6)
 - `general-purpose` エージェント — fix 実行用サブエージェント
