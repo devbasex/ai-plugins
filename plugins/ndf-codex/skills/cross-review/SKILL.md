@@ -1,6 +1,7 @@
 ---
 name: cross-review
 description: "Run iterative Codex and Gemini PR reviews."
+when_to_use: "PR を codex + gemini 両方でレビューし、両者 APPROVE まで自動収束させたいときに限定して使う。明示トリガ: 'cross-review', 'クロスレビュー', '両AIレビュー', '収束レビュー', 'codex と gemini でレビュー'。通常の単発 PR レビュー依頼 (第二意見が 1 回欲しい等) は本 skill を選ばず /ndf:review を使う。重い収束ループ (codex+gemini を複数ラウンド起動) のため、単発レビューと責務を明確に分ける。"
 argument-hint: "[PR番号] [--max-rounds N] [--rotate-after K] [--rotate-mode light|squash] [--only codex|gemini] [--focus TEXT] [--extra-instructions-file PATH]"
 allowed-tools:
   - Bash
@@ -472,6 +473,6 @@ pint / larastan / test / build などは **中断** を原則とする。
 - `/ndf:gemini` — gemini CLI 呼び出し手順
 - `/ndf:resolve-pr-comments` — Resolve Conversation の詳細
 - `/ndf:issue-plan-strategy` — multi-PR ワークフローでは **個別 PR ごとに本 cross-review が原則必須**。
-  `/ndf:review` 単発や `ndf:code-reviewer` は代替にせず、release ブランチへ merge する前に
+  `/ndf:review` 単発や Claude Code の `code-reviewer` は代替にせず、release ブランチへ merge する前に
   codex + gemini の APPROVE 収束を確認する (Step 6)
 - `general-purpose` エージェント — fix 実行用サブエージェント

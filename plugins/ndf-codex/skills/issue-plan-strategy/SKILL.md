@@ -237,9 +237,9 @@ git worktree add ../<repo>-<PLAN-ID>-ui     feature/<PLAN-ID>-ui
 | GitHub 上の例外的な単発確認 | `/ndf:review <PR番号>` | ごく軽微な差分の単発確認に限定。cross-review の代替にはしない |
 | 指摘の修正 | `/ndf:fix <PR番号>` | cross-review ループ内・後で自動起動される |
 
-- `ndf:code-reviewer` エージェントや `/ndf:review` の単発レビューを **cross-review の
-  代替にしない**。単発レビューは片側 AI の一発判定にとどまり、収束ループを回さないため
-  取りこぼしが残る。
+- Claude Code の `code-reviewer` などの単発レビュアーや `/ndf:review` の単発レビューを
+  **cross-review の代替にしない**。単発レビューは片側 AI の一発判定にとどまり、収束ループを
+  回さないため取りこぼしが残る。
 - 個別 PR が cross-review で APPROVE → Draft 解除 → release ブランチへ merge (squash 推奨)。
 
 ## Step 7: release ブランチのレビュー (結合テスト相当のみ)
@@ -276,10 +276,13 @@ gh pr edit <release-pr-number> --title "..." --body "..."
 - [ ] 個別 PR への参照が本文に残っていない (`<details>` 内の開発用情報は残してよい)
 - [ ] 内部用語 (round、rotated 等) が漏れていない
 
-> **cross-review を省略した個別 PR が残っている場合のフォールバック**: release PR に対して
-> `/ndf:cross-review <release-pr-number>` を必須実行する。ただし個別 PR 範囲の指摘が
-> release PR 側でまとめて出るため、該当の個別コミット (既に merge 済みなら release 配下の
-> 修正 PR) へ差し戻す手戻りが増える。原則は Step 6 で各個別 PR を cross-review 済みにしておくこと。
+> **cross-review を省略した個別 PR が残っている場合のフォールバック**: Ready for review の前に
+> 未 cross-review の個別 PR を特定し、**その個別 PR に対して** `/ndf:cross-review <個別PR番号>` を
+> 回して APPROVE 収束させる。該当個別 PR が既に閉じている場合は release ブランチ配下に修正 PR を
+> 作成し、その修正 PR で cross-review を回す。**release PR に対して直接 cross-review を回すのは
+> 避ける** — ループ内の `/ndf:fix` が release PR を対象に修正・Resolve してしまい、「個別 PR 範囲の
+> 指摘は個別 PR 側で解決する」原則 (Step 7) が崩れるため。いずれにせよ後追い対応で手戻りが増えるので、
+> 原則は Step 6 で各個別 PR を cross-review 済みにしておくこと。
 
 ### Draft 解除と merge
 
@@ -331,7 +334,7 @@ git checkout release/<PLAN-ID>
 | release ブランチを作らず巨大な 1 PR で出す | レビュー困難・revert 困難・並行開発不可 |
 | 個別 PR の base を default にする | release で統合する意味が失われ、partial merge が default を汚染する |
 | 個別 PR Draft 作成を実装後に回す | PR 番号が未確定でクロス参照や CI 待機の段取りが組めない |
-| 個別 PR を cross-review せず、code-reviewer / 単発レビューだけで release へ merge する | 片側 AI の一発判定で収束ループを回さないため重大バグを取りこぼし、release PR 側でまとめて検出され手戻りが増える (Step 6) |
+| 個別 PR を cross-review せず、Claude Code の code-reviewer 等の単発レビューだけで release へ merge する | 片側 AI の一発判定で収束ループを回さないため重大バグを取りこぼし、release PR 側でまとめて検出され手戻りが増える (Step 6) |
 | release PR で個別 PR 範囲の指摘を解決しようとする | 該当 PR が既に閉じている場合、コミット意図がずれる |
 | release PR の body を個別 PR リンクの列挙だけにする | レビュアーは release PR 単体で変更を把握できず、個別 PR や plan を辿ることになる。body は self-contained 必須 (Step 3 / Step 8) |
 | body 最終化せずに Ready for review にする | Draft 作成時の plan ベースの暫定 body のままだと実装の最終形と乖離する |
