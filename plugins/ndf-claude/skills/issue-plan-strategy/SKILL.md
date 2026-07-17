@@ -277,12 +277,18 @@ gh pr edit <release-pr-number> --title "..." --body "..."
 - [ ] 内部用語 (round、rotated 等) が漏れていない
 
 > **cross-review を省略した個別 PR が残っている場合のフォールバック**: Ready for review の前に
-> 未 cross-review の個別 PR を特定し、**その個別 PR に対して** `/ndf:cross-review <個別PR番号>` を
-> 回して APPROVE 収束させる。該当個別 PR が既に閉じている場合は release ブランチ配下に修正 PR を
-> 作成し、その修正 PR で cross-review を回す。**release PR に対して直接 cross-review を回すのは
-> 避ける** — ループ内の `/ndf:fix` が release PR を対象に修正・Resolve してしまい、「個別 PR 範囲の
-> 指摘は個別 PR 側で解決する」原則 (Step 7) が崩れるため。いずれにせよ後追い対応で手戻りが増えるので、
-> 原則は Step 6 で各個別 PR を cross-review 済みにしておくこと。
+> 未 cross-review の個別 PR を特定し、その **状態に応じて** 対応する:
+>
+> - **個別 PR がまだ open**: その個別 PR に対して `/ndf:cross-review <個別PR番号>` を回して APPROVE
+>   収束させてから release へ merge する。**release PR に対して直接は回さない** — ループ内の
+>   `/ndf:fix` が release PR を修正・Resolve してしまい、「個別 PR 範囲の指摘は個別 PR 側で解決する」
+>   原則 (Step 7) が崩れるため。
+> - **個別 PR が既に release へ merge 済み** (元の差分が release ブランチに取り込まれ、新規 PR には
+>   乗らない): release PR に対して `/ndf:cross-review <release-pr-number>` を回し、当該差分をまとめて
+>   レビューする。この場合ループ内の `/ndf:fix` は release ブランチを直接修正する **追認的な対応** に
+>   なる（個別 PR 単位のレビューは既に取り返せないため）。
+>
+> いずれも後追い対応で手戻りが増えるので、原則は Step 6 で各個別 PR を cross-review 済みにしておくこと。
 
 ### Draft 解除と merge
 
