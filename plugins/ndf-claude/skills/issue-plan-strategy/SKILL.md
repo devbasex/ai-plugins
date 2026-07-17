@@ -252,7 +252,7 @@ release ブランチへの merge が一通り進んだ段階で:
   - 設定値の重複・矛盾
   - migration の順序依存
   - E2E シナリオ (`/ndf:playwright-scenario-test` の活用)
-- ここで **新たに** 個別 PR 範囲のバグが見つかった場合は、**release PR にコメントせず**、該当の個別 PR (既に merge 済みなら修正差分を載せた新しい修正 PR を release 配下に作成) 側に指摘を書き込み、修正ループを回す。この場合レビュー対象は **修正差分** であり新規 PR でレビューできる（元の差分がそもそも cross-review 未実施だったケースの扱いは Step 8 のフォールバック参照。そちらは元差分が既に release に取り込まれ新規 PR に乗らないため扱いが異なる）
+- ここで **新たに** 個別 PR 範囲のバグが見つかった場合は、**release PR にコメントせず**、該当の個別 PR (既に merge 済みなら修正差分を載せた新しい修正 PR を release 配下に作成) 側に指摘を書き込み、修正ループを回す。この場合レビュー対象は **修正差分** であり新規 PR でレビューできる（元の差分がそもそも cross-review 未実施だったケースは扱いが異なるため Step 8 のフォールバック参照）
 - release PR には integration 観点の指摘のみ残す
 
 ## Step 8: release PR body の最終化と release → default の merge
