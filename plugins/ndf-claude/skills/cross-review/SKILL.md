@@ -2,7 +2,6 @@
 name: cross-review
 description: "Run iterative Codex and Gemini PR reviews."
 argument-hint: "[PR番号] [--max-rounds N] [--rotate-after K] [--rotate-mode light|squash] [--only codex|gemini] [--focus TEXT] [--extra-instructions-file PATH]"
-disable-model-invocation: true
 allowed-tools:
   - Bash
   - Read
