@@ -14,7 +14,7 @@ Step 6 を「個別 PR は原則 `/ndf:cross-review` 必須」と読める内容
 
 ## 問題・背景
 
-現行の Step 6 は `/ndf:review-branch`、`/ndf:review`、`/ndf:cross-review` を選択肢として並べているため、個別 PR を `code-reviewer` や単発レビューだけで release ブランチへ merge できるように読める。
+現行の Step 6 は `/ndf:review-branch`、`/ndf:review`、`/ndf:cross-review` を選択肢として並べているため、個別 PR を Claude Code の code-reviewer や単発レビューだけで release ブランチへ merge できるように読める。
 
 その運用では、release PR 側の cross-review が個別 PR 範囲の重大バグをまとめて検出する形になり、ワークフロー自身が禁止している「release PR で個別 PR 範囲の指摘を解決する」状態に近づく。
 
@@ -39,7 +39,7 @@ runtime 別配布物は `plugins/ndf-shared` を正とし、`scripts/build-runti
 ### Task 2: 軽量レビューの位置づけを限定
 
 - **対象ファイル:** `plugins/ndf-shared/skills/issue-plan-strategy/SKILL.md`
-- **変更内容:** `/ndf:review-branch` は PR 作成前のセルフレビュー、`/ndf:review` は例外的な単発確認に限定する。`ndf:code-reviewer` 単発レビューを cross-review の代替にしない方針を明記する。
+- **変更内容:** `/ndf:review-branch` は PR 作成前のセルフレビュー、`/ndf:review` は例外的な単発確認に限定する。Claude Code の code-reviewer 単発レビューを cross-review の代替にしない方針を明記する。
 
 ### Task 3: release PR Ready 前チェックを追加
 
@@ -49,7 +49,7 @@ runtime 別配布物は `plugins/ndf-shared` を正とし、`scripts/build-runti
 ### Task 4: アンチパターン追記
 
 - **対象ファイル:** `plugins/ndf-shared/skills/issue-plan-strategy/SKILL.md`
-- **変更内容:** 「個別 PR を cross-review せず、code-reviewer / 単発レビューだけで release へ merge する」をアンチパターン表に追加する。
+- **変更内容:** 「個別 PR を cross-review せず、Claude Code の code-reviewer / 単発レビューだけで release へ merge する」をアンチパターン表に追加する。
 
 ### Task 5: cross-review 側との整合確認
 
