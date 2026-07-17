@@ -44,7 +44,7 @@ runtime 別配布物は `plugins/ndf-shared` を正とし、`scripts/build-runti
 ### Task 3: release PR Ready 前チェックを追加
 
 - **対象ファイル:** `plugins/ndf-shared/skills/issue-plan-strategy/SKILL.md`
-- **変更内容:** Step 8 の body 最終化 / Ready for review 前チェックに「全個別 PR が cross-review approved 済み」を追加する。省略した場合のフォールバックとして、release PR で `/ndf:cross-review` を必須実行するが、手戻りが増えることを明記する。
+- **変更内容:** Step 8 の body 最終化 / Ready for review 前チェックに「全個別 PR が cross-review approved 済み」を追加する。省略した場合のフォールバックとして、未 cross-review の個別 PR（既に閉じていれば release 配下の修正 PR）で `/ndf:cross-review` を回す手順を明記する。release PR に直接 `/ndf:cross-review` を回すのは避ける（ループ内 `/ndf:fix` が release PR を修正し、個別 PR 範囲の指摘を個別 PR 側で解決する原則が崩れるため）。いずれも後追い対応で手戻りが増える点も記載する。
 
 ### Task 4: アンチパターン追記
 

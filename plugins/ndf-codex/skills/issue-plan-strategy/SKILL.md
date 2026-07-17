@@ -125,7 +125,7 @@ git push -u origin release/<PLAN-ID>
 
 ### レビュアー視点の原則 (release PR body の大前提)
 
-個別 PR はセルフレビュー (`/ndf:cross-review` 等) で merge される。**人間のレビュアーが見るのは release PR だけ**であり、個別 PR の存在をレビュアーに意識させてはならない。したがって:
+個別 PR は AI による収束レビュー (`/ndf:cross-review` 等) で merge される。**人間のレビュアーが見るのは release PR だけ**であり、個別 PR の存在をレビュアーに意識させてはならない。したがって:
 
 - release PR の body は **self-contained 必須**: 「何のために」(背景・解決したい課題) と「何を」(release ブランチ全体としての変更内容) を、**個別 PR を一切参照せずに**理解できる粒度で書く
 - 個別 PR リンクの列挙を body の本文にしない。開発中の進捗管理に使う場合は `<details>` 折りたたみ内の補足情報に格下げする
