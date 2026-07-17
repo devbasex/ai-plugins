@@ -252,7 +252,7 @@ release ブランチへの merge が一通り進んだ段階で:
   - 設定値の重複・矛盾
   - migration の順序依存
   - E2E シナリオ (`/ndf:playwright-scenario-test` の活用)
-- ここで個別 PR 範囲のバグが見つかった場合は、**release PR にコメントせず**、該当の個別 PR (既に merge 済みなら新しい修正 PR を release 配下に作成) 側に指摘を書き込み、修正ループを回す
+- ここで **新たに** 個別 PR 範囲のバグが見つかった場合は、**release PR にコメントせず**、該当の個別 PR (既に merge 済みなら修正差分を載せた新しい修正 PR を release 配下に作成) 側に指摘を書き込み、修正ループを回す。この場合レビュー対象は **修正差分** であり新規 PR でレビューできる（元の差分がそもそも cross-review 未実施だったケースの扱いは Step 8 のフォールバック参照。そちらは元差分が既に release に取り込まれ新規 PR に乗らないため扱いが異なる）
 - release PR には integration 観点の指摘のみ残す
 
 ## Step 8: release PR body の最終化と release → default の merge
@@ -284,9 +284,10 @@ gh pr edit <release-pr-number> --title "..." --body "..."
 >   `/ndf:fix` が release PR を修正・Resolve してしまい、「個別 PR 範囲の指摘は個別 PR 側で解決する」
 >   原則 (Step 7) が崩れるため。
 > - **個別 PR が既に release へ merge 済み** (元の差分が release ブランチに取り込まれ、新規 PR には
->   乗らない): release PR に対して `/ndf:cross-review <release-pr-number>` を回し、当該差分をまとめて
->   レビューする。この場合ループ内の `/ndf:fix` は release ブランチを直接修正する **追認的な対応** に
->   なる（個別 PR 単位のレビューは既に取り返せないため）。
+>   乗らない): release PR に対して `/ndf:cross-review <release-pr-number>` を回し、**release PR 全体を
+>   改めてレビューする**（当該差分もその中に含まれる。個別差分だけを抽出しての再レビューにはならず、
+>   release PR 全体が対象になるぶん手戻りが大きい）。この場合ループ内の `/ndf:fix` は release ブランチを
+>   直接修正する **追認的な対応** になる（個別 PR 単位のレビューは既に取り返せないため）。
 >
 > いずれも後追い対応で手戻りが増えるので、原則は Step 6 で各個別 PR を cross-review 済みにしておくこと。
 
