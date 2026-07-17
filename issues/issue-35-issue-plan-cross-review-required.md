@@ -61,6 +61,12 @@ runtime 別配布物は `plugins/ndf-shared` を正とし、`scripts/build-runti
 - **対象ファイル:** `plugins/ndf-claude/`, `plugins/ndf-codex/`, `plugins/ndf-kiro/`
 - **変更内容:** `bash scripts/build-runtime-plugins.sh` を実行し、shared の変更を runtime 別配布物へ反映する。
 
+### Task 7: cross-review skill を model 起動可能化（実装中に追加）
+
+- **対象ファイル:** `plugins/ndf-shared/skills/cross-review/SKILL.md`
+- **背景:** 本 issue の実装中、cross-review を毎回スラッシュコマンドで手入力する必要があった（`disable-model-invocation: true` によりモデルから起動不可のため）ことから、追加要望として対応した。
+- **変更内容:** `disable-model-invocation: true` を削除し、メインセッションから Skill tool 経由で起動可能にする。あわせて `when_to_use` を追加し、通常の単発レビュー依頼は `/ndf:review`、本 skill は収束ループを明示したときのみという責務分担を明文化する（重い codex + gemini 収束ループが単発レビュー依頼で自動選択されるのを防ぐ）。
+
 ## PR 分割計画
 
 単一 PR で進める。変更は主に skill 文書の運用ルール強化で、コード変更や複数機能の段階的 merge は不要。
@@ -78,6 +84,7 @@ base branch: `main`
 - 個別 PR と release PR のレビュー責務分担
 - release PR Ready 前のチェックリスト
 - runtime 別 NDF plugin 配布物
+- `ndf:cross-review` skill の起動方式（model 起動可能化 + `when_to_use` 追加。Task 7）
 
 ## テスト計画
 
