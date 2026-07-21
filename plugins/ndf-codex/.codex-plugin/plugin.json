@@ -1,6 +1,6 @@
 {
   "name": "ndf",
-  "version": "4.19.0",
+  "version": "4.20.0",
   "description": "Codex plugin with focused NDF skills for PR/review workflows, cross-review, implementation planning, Playwright testing, Docker container access, GitHub operations, and optional Slack completion notifications.",
   "skills": "./skills/",
   "hooks": "./hooks/hooks.json"
