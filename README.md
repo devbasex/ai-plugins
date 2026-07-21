@@ -6,7 +6,7 @@ Claude Code / Codex / Kiro CLI向けのスキル・MCP設定を共有するた�
 
 このマーケットプレイスは、チーム全体でAI開発ツール（Claude Code / Codex / Kiro CLI）の導入を加速するための事前設定されたプラグインを提供します。
 
-**NDFプラグイン v4.19.0** は、同じ `ndf@ai-plugins` という名前で Claude Code / Codex / Kiro CLI へ配布されるランタイム別プラグインです。共通ソースは `plugins/ndf-shared/` に集約し、利用者が install する配布物は `plugins/ndf-claude/` / `plugins/ndf-codex/` / `plugins/ndf-kiro/` に分かれています。
+**NDFプラグイン v4.20.0** は、同じ `ndf@ai-plugins` という名前で Claude Code / Codex / Kiro CLI へ配布されるランタイム別プラグインです。共通ソースは `plugins/ndf-shared/` に集約し、利用者が install する配布物は `plugins/ndf-claude/` / `plugins/ndf-codex/` / `plugins/ndf-kiro/` に分かれています。
 
 - **公開Skills**: Claude Code向け core 29個、Kiro向け core 28個、Codex向け core 30個に分離。
 - **元Skills（49個）**:
@@ -100,7 +100,14 @@ kiro-cli chat
 
 | プラグイン名 | バージョン | 説明 | 詳細 |
 |------------|----------|------|------|
-| **ndf** | 4.19.0 | Claude Code / Codex / Kiro CLI 向けに runtime 別配布物を提供する NDF プラグイン。8個の専門エージェント（Claude版）、公開Skills（Claude Code向け core 29個、Kiro向け core 28個、Codex向け core 30個）、Claude SessionStart/Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:codex` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [Claude](./plugins/ndf-claude/README.md) / [Codex](./plugins/ndf-codex/README.md) / [Kiro](./plugins/ndf-kiro/README.md) |
+| **ndf** | 4.20.0 | Claude Code / Codex / Kiro CLI 向けに runtime 別配布物を提供する NDF プラグイン。8個の専門エージェント（Claude版）、公開Skills（Claude Code向け core 29個、Kiro向け core 28個、Codex向け core 30個）、Claude SessionStart/Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:codex` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [Claude](./plugins/ndf-claude/README.md) / [Codex](./plugins/ndf-codex/README.md) / [Kiro](./plugins/ndf-kiro/README.md) |
+
+### NDF v4.20.0 の主な変更
+
+- `markdown-writing` skill を、体裁ルールから**第三者可読性のルール**へ拡張しました。適用対象に仕様書・PR 本文・調査レポート・レビューコメントを追加しています。
+- 説明文にテーブル名・カラム名などの内部識別子や、会話中に作ったローカル略語を持ち込まないルールを追加しました。「何のために」「何をやったか」の説明で識別子を使うと、書いた側は説明した気になり読み手には伝わらないためです。
+- 検討過程の痕跡（案A / Option A 等）と変更履歴（「以前は〜だったが変更した」）を本文に残さないルール、否定的な結論にエビデンスを必須とするルール、個人情報・認証情報を文書に含めないルールを追加しました。
+- 書き終えた後の grep セルフチェックとチェックリストを整備しました。
 
 ### NDF v4.19.0 の主な変更
 

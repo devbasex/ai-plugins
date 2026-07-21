@@ -9,7 +9,7 @@
     {
       "name": "ndf",
       "source": "./plugins/ndf-claude",
-      "description": "Claude Code plugin (v4.19.0): 8 specialized agents, focused NDF skills for PR/review workflows, implementation planning, plan-to-spec, browser smoke testing, statusline, Codex CLI delegation, transcript retention guard, default statusline setup, and optional Slack notifications."
+      "description": "Claude Code plugin (v4.20.0): 8 specialized agents, focused NDF skills for PR/review workflows, implementation planning, plan-to-spec, browser smoke testing, statusline, Codex CLI delegation, transcript retention guard, default statusline setup, and optional Slack notifications."
     },
     {
       "name": "mcp-playwright",
