@@ -6,6 +6,8 @@ allowed-tools:
   - Read
   - Write
   - Edit
+  - Grep
+  - Bash
 ---
 
 # Markdown Writing Skill
@@ -163,7 +165,7 @@ docs/feature-guide/
 **識別子と略語の混入**（説明文の中に裸で出ていないか。コードブロック内のヒットは無視してよい）:
 
 ```bash
-grep -nE '[a-z]+_[a-z_]{3,}' <対象ファイル>
+grep -nE '[a-z]+_[a-z0-9_]{2,}' <対象ファイル>
 ```
 
 **検討痕跡・変更履歴の混入**（プロジェクトやその場の符丁に応じて語を足す）:
