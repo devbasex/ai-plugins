@@ -1,6 +1,6 @@
 # プレゼンテーション資料
 
-社内勉強会などで使うスライド資料を Marp 形式で管理します。
+発表用のスライド資料を Marp 形式で管理します。
 
 公開先: **https://devbasex.github.io/ai-plugins/presentations/**
 
