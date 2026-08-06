@@ -1,6 +1,9 @@
 {
   "name": "default",
   "description": "NDF統合開発エージェント（Kiro CLI用）",
+  "tools": [
+    "*"
+  ],
   "resources": [
     "file://AGENTS.md",
     "file://README.md",
