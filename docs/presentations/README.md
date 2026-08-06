@@ -4,7 +4,7 @@
 
 公開先: **https://devbasex.github.io/ai-plugins/presentations/**
 
-`main` にマージすると GitHub Pages が更新されます。Pages は `main` ブランチの `docs/` を配信するよう設定されています。Jekyll は無効（`docs/.nojekyll`）で、ファイルはそのまま配信されます。
+`main` にマージすると GitHub Pages が更新されます。Pages は `main` ブランチの `docs/` を配信するよう設定されています。Jekyll は無効（`docs/.nojekyll`）で、ファイルはそのまま配信されます。サイトのルート（`docs/index.html`）は資料一覧へ転送します。
 
 ## 資料一覧
 
