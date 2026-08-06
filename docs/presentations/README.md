@@ -6,7 +6,7 @@
 
 | ファイル | 内容 | 想定時間 |
 |---|---|---|
-| [2026-08-06-ai-plugins-intro.md](2026-08-06-ai-plugins-intro.md) | ai-plugins / NDF v4.20.1 の個別機能紹介。PR・レビューワークフローと設計・仕様ドキュメント系スキルが中心 | 15分 / 12枚 |
+| [2026-08-06-ai-plugins-intro.md](2026-08-06-ai-plugins-intro.md) | ai-plugins / NDF v4.20.1 の個別機能紹介。各スキルに何が書いてあり、何を重視しているかを扱う | 15分 / 15枚 |
 
 配布・閲覧用に、書き出し済みの PDF も同じディレクトリに置いています（[2026-08-06-ai-plugins-intro.pdf](2026-08-06-ai-plugins-intro.pdf)）。しおりから各スライドに移動できます。**Markdown を編集したら PDF も再生成してコミットしてください。**
 
