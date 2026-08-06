@@ -1,0 +1,15 @@
+flowchart LR
+  P(["PR"]) --> CX["codex がレビュー"]
+  P --> GM["gemini がレビュー"]
+  CX --> J{"両方 APPROVE?"}
+  GM --> J
+  J -- "No" --> FIX["/ndf:fix<br/>サブエージェントで修正"]
+  FIX --> P
+  J -- "Yes" --> DONE(["収束・完了"])
+
+  classDef ai fill:#eaf2fb,stroke:#4a90d9,stroke-width:1.5px,color:#12263a
+  classDef gate fill:#fff4e5,stroke:#f5a623,stroke-width:1.5px,color:#12263a
+  classDef done fill:#e8f5e9,stroke:#4caf50,stroke-width:1.5px,color:#12263a
+  class CX,GM,FIX ai
+  class J gate
+  class P,DONE done

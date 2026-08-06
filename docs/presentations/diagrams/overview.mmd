@@ -1,0 +1,17 @@
+flowchart TB
+  S["plugins/ndf-shared/<br/>skills 49 個<br/><i>ここだけを編集する</i>"]
+
+  S --> C["ndf-claude<br/>skills 29 + agents 8<br/>+ SessionStart/Stop hook"]
+  S --> X["ndf-codex<br/>skills 30 + hook"]
+  S --> K["ndf-kiro<br/>skills 28 + install.sh"]
+
+  C --> C2(["Claude Code"])
+  X --> X2(["Codex CLI"])
+  K --> K2(["Kiro CLI"])
+
+  classDef src fill:#1f3a5f,stroke:#4a90d9,stroke-width:2px,color:#ffffff
+  classDef dist fill:#eaf2fb,stroke:#4a90d9,stroke-width:1.5px,color:#12263a
+  classDef rt fill:#ffffff,stroke:#7a8a99,stroke-width:1.5px,color:#12263a
+  class S src
+  class C,X,K dist
+  class C2,X2,K2 rt

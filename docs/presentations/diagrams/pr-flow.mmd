@@ -1,0 +1,32 @@
+flowchart TB
+  subgraph P1["① 作る前 → ② 出す"]
+    direction LR
+    A["/ndf:implementation-plan<br/>プランを issues/ に置く"]
+    B["/ndf:review-branch<br/>PR 前セルフレビュー"]
+    C["/ndf:pr<br/>commit → push → PR"]
+    A --> B --> C
+  end
+
+  subgraph P3["③ レビューを回す"]
+    direction LR
+    D["/ndf:review<br/>/ndf:cross-review"]
+    E["/ndf:review-pr-comments<br/>指摘を分類"]
+    F["/ndf:fix<br/>修正"]
+    G["/ndf:resolve-pr-comments<br/>スレッドを閉じる"]
+    D --> E --> F --> G
+    F -. "APPROVE まで戻る" .-> D
+  end
+
+  subgraph P4["④ 残す"]
+    direction LR
+    H["/ndf:plan-to-spec<br/>docs/ の確定仕様へ"]
+  end
+
+  P1 --> P3 --> P4
+
+  classDef step fill:#eaf2fb,stroke:#4a90d9,stroke-width:1.5px,color:#12263a
+  classDef keep fill:#e8f5e9,stroke:#4caf50,stroke-width:1.5px,color:#12263a
+  class A,B,C,D,E,F,G step
+  class H keep
+  classDef phase fill:#f7f9fb,stroke:#c3cfd9,stroke-width:1px,color:#5a6b7a
+  class P1,P3,P4 phase
