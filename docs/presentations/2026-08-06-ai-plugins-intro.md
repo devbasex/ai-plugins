@@ -46,7 +46,7 @@ style: |
 
 ## NDF、実際のところ どう使うのか
 
-社内勉強会 / 2026-08-06
+2026-08-06
 Claude Code・Codex CLI・Kiro CLI 対応
 
 <!--
