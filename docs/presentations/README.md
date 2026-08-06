@@ -2,6 +2,10 @@
 
 社内勉強会などで使うスライド資料を Marp 形式で管理します。
 
+公開先: **https://devbasex.github.io/ai-plugins/presentations/**
+
+`main` にマージすると GitHub Pages が更新されます。Pages は `main` ブランチの `docs/` を配信するよう設定されています。Jekyll は無効（`docs/.nojekyll`）で、ファイルはそのまま配信されます。
+
 ## 資料一覧
 
 | ファイル | 内容 | 想定時間 |
@@ -31,6 +35,7 @@ HTML は画像を data URI として埋め込み、絵文字も文字に戻し�
 ```
 docs/presentations/
 ├── README.md
+├── index.html                       # 公開ページの入口（資料一覧）
 ├── 2026-08-06-ai-plugins-intro.md   # スライド本体（Marp Markdown）
 ├── 2026-08-06-ai-plugins-intro.pdf  # 配布用 PDF（build.sh が生成）
 ├── 2026-08-06-ai-plugins-intro.html # 発表用の単一ファイル HTML（build.sh が生成）
@@ -100,3 +105,4 @@ done
 - 図版は Mermaid で書いて `diagrams/` にソースを残す。PNG だけをコミットしない
 - 発表台本は各スライド末尾の HTML コメントに書く
 - 書き出しは `build.sh` を使う（引数にスライドの Markdown を渡せる）
+- 公開ページに載せる場合は `index.html` の資料一覧にも追加する
