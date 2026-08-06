@@ -8,9 +8,23 @@
 |---|---|---|
 | [2026-08-06-ai-plugins-intro.md](2026-08-06-ai-plugins-intro.md) | ai-plugins / NDF v4.20.1 の個別機能紹介。各スキルに何が書いてあり、何を重視しているかを扱う | 15分 / 15枚 |
 
-配布・閲覧用に、書き出し済みの PDF も同じディレクトリに置いています（[2026-08-06-ai-plugins-intro.pdf](2026-08-06-ai-plugins-intro.pdf)）。しおりから各スライドに移動できます。**Markdown を編集したら PDF も再生成してコミットしてください。**
+書き出し済みの成果物も同じディレクトリに置いています。**Markdown を編集したら `build.sh` で両方を再生成してコミットしてください。**
 
-各スライドの HTML コメントには発表用の台本と時間配分を記載しています。Marp のプレゼンターモードで参照できます。PDF には台本は出力されません。
+| 成果物 | 用途 | 特徴 |
+|---|---|---|
+| [2026-08-06-ai-plugins-intro.pdf](2026-08-06-ai-plugins-intro.pdf) | 配布・共有ドライブへの掲載 | しおり付き。どこでも開ける。台本は出力されない |
+| [2026-08-06-ai-plugins-intro.html](2026-08-06-ai-plugins-intro.html) | 発表本番 | 単一ファイル。**プレゼンタービューで台本が読める** |
+
+HTML は画像を data URI として埋め込み、絵文字も文字に戻してあるため、このファイル1つで完結します。外部への通信は発生しません。ブラウザで開いたときの操作は以下のとおりです。
+
+| キー | 動作 |
+|---|---|
+| `→` / `←` / スペース | スライド送り・戻し |
+| `f` | フルスクリーン |
+| `p` | プレゼンタービュー（次スライド・台本・タイマー）を別ウィンドウで開く |
+| `o` | 一覧表示 |
+
+各スライドの HTML コメントに発表台本と時間配分を書いており、プレゼンタービューに表示されます。
 
 ## ディレクトリ構成
 
@@ -18,7 +32,9 @@
 docs/presentations/
 ├── README.md
 ├── 2026-08-06-ai-plugins-intro.md   # スライド本体（Marp Markdown）
-├── 2026-08-06-ai-plugins-intro.pdf  # 上記から書き出した配布用 PDF
+├── 2026-08-06-ai-plugins-intro.pdf  # 配布用 PDF（build.sh が生成）
+├── 2026-08-06-ai-plugins-intro.html # 発表用の単一ファイル HTML（build.sh が生成）
+├── build.sh                         # PDF と HTML を書き出す
 ├── diagrams/                        # 図版のソース（Mermaid）
 │   ├── overview.mmd
 │   ├── pr-flow.mmd
@@ -40,21 +56,23 @@ VS Code の [Marp for VS Code](https://marketplace.visualstudio.com/items?itemNa
 ### PDF / HTML に書き出す
 
 ```bash
-cd docs/presentations
-
-npx @marp-team/marp-cli@4 --pdf --pdf-outlines --allow-local-files 2026-08-06-ai-plugins-intro.md
-npx @marp-team/marp-cli@4 --html --allow-local-files 2026-08-06-ai-plugins-intro.md
+bash docs/presentations/build.sh
 ```
 
-`--allow-local-files` は `images/` のローカル PNG を埋め込むために必要です。`--pdf-outlines` は PDF にしおりを付けます。コミットする PDF はこの指定で生成してください。
+PDF と、単一ファイル化した HTML の両方を書き出します。
 
-台本も配る場合は `--pdf-notes` を付けると、各スライドの HTML コメントが PDF の注釈として埋め込まれます。
+`build.sh` が単一ファイル化まで行うのは、Marp の HTML 出力が `images/` を相対パスで参照し、絵文字を CDN 上の SVG に置き換えるためです。そのまま配ると画像が表示されず、オフラインでは絵文字も欠けます。`build.sh` は画像を data URI として埋め込み、絵文字を文字へ戻したうえで、外部アセット参照が残っていないことを検証します。
 
-PDF 出力には Chromium が必要です。見つからない場合は取得してパスを渡します。
+Chromium が必要です。見つからない場合は取得してからもう一度実行してください。
 
 ```bash
 npx playwright@1.49 install chromium
-export CHROME_PATH="$HOME/.cache/ms-playwright/chromium-1148/chrome-linux/chrome"
+```
+
+台本も配る場合は、`--pdf-notes` を付けると各スライドの HTML コメントが PDF の注釈として埋め込まれます。
+
+```bash
+npx @marp-team/marp-cli@4 --pdf --pdf-notes --allow-local-files 2026-08-06-ai-plugins-intro.md
 ```
 
 ### 図版を再生成する
@@ -81,3 +99,4 @@ done
 - ファイル名は `YYYY-MM-DD-{topic}.md` とし、日本語は含めない
 - 図版は Mermaid で書いて `diagrams/` にソースを残す。PNG だけをコミットしない
 - 発表台本は各スライド末尾の HTML コメントに書く
+- 書き出しは `build.sh` を使う（引数にスライドの Markdown を渡せる）
