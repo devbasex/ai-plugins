@@ -20,6 +20,15 @@ case "$runtime" in
     ;;
   kiro)
     test -f "$PROJECT_DIR/.kiro/agents/default.json"
+    # tools が未宣言だと Kiro CLI はツールなしのエージェントとして読み込み、
+    # skill が SKILL.md を読むことも git / gh を実行することもできなくなる。
+    python3 -c '
+import json, sys
+config = json.load(open(sys.argv[1]))
+tools = config.get("tools")
+if not tools:
+    sys.exit("agent config declares no tools: " + sys.argv[1])
+' "$PROJECT_DIR/.kiro/agents/default.json"
     find -L "$PROJECT_DIR/.kiro/skills" -path '*/SKILL.md' -print | grep -q .
     test -f "$PROJECT_DIR/.kiro/prompts/pr.md"
     test -L "$PROJECT_DIR/.kiro/mcp_runtime/mcp-bigquery"
