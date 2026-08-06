@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>プレゼンテーション資料 — ai-plugins</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: "Hiragino Sans", "Noto Sans JP", "Yu Gothic", system-ui, sans-serif;
+    max-width: 44rem; margin: 0 auto; padding: 3rem 1.5rem; line-height: 1.8;
+    color: #12263a; background: #ffffff;
+  }
+  h1 { font-size: 1.7rem; color: #1f3a5f; border-bottom: 3px solid #4a90d9; padding-bottom: .4rem; }
+  h2 { font-size: 1.15rem; color: #1f3a5f; margin-top: 2.5rem; }
+  .card { border: 1px solid #c3cfd9; border-radius: 8px; padding: 1.2rem 1.4rem; margin: 1rem 0; }
+  .card h3 { margin: 0 0 .3rem; font-size: 1.05rem; }
+  .card p { margin: .3rem 0 .9rem; color: #5a6b7a; font-size: .92rem; }
+  a { color: #2b6cb0; }
+  .actions a {
+    display: inline-block; margin-right: .6rem; padding: .45rem 1rem;
+    border: 1px solid #4a90d9; border-radius: 6px; text-decoration: none; font-size: .92rem;
+  }
+  .actions a.primary { background: #1f3a5f; border-color: #1f3a5f; color: #fff; }
+  footer { margin-top: 3rem; font-size: .85rem; color: #7a8a99; }
+  @media (prefers-color-scheme: dark) {
+    body { color: #e6edf3; background: #0d1117; }
+    h1, h2 { color: #9fc4e8; }
+    .card { border-color: #30363d; }
+    .card p, footer { color: #9aa7b4; }
+    a { color: #79b8ff; }
+    .actions a.primary { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+  }
+</style>
+</head>
+<body>
+
+<h1>プレゼンテーション資料</h1>
+
+<p>社内勉強会などで使うスライド資料です。ソースは
+<a href="https://github.com/devbasex/ai-plugins/tree/main/docs/presentations">devbasex/ai-plugins</a> で管理しています。</p>
+
+<div class="card">
+  <h3>ai-plugins — NDF、実際のところ どう使うのか</h3>
+  <p>2026-08-06 ／ 15分 ・ 15枚 ／ NDF v4.20.1<br>
+  各スキルに何が書いてあり、何を重視しているかを紹介します。</p>
+  <div class="actions">
+    <a class="primary" href="2026-08-06-ai-plugins-intro.html">スライドを開く</a>
+    <a href="2026-08-06-ai-plugins-intro.pdf">PDF</a>
+    <a href="https://github.com/devbasex/ai-plugins/blob/main/docs/presentations/2026-08-06-ai-plugins-intro.md">Markdown</a>
+  </div>
+</div>
+
+<h2>スライドの操作</h2>
+
+<p>ブラウザで開いたあと、<code>→</code> / <code>←</code> でスライドを送り、<code>f</code> でフルスクリーン、
+<code>o</code> で一覧表示。<code>p</code> を押すと発表者用の別ウィンドウが開き、次のスライドと発表台本とタイマーが表示されます。</p>
+
+<footer>
+ai-plugins — Claude Code / Codex CLI / Kiro CLI 向けプラグインマーケットプレイス
+</footer>
+
+</body>
+</html>

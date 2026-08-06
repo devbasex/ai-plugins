@@ -1,0 +1,12 @@
+flowchart LR
+  A["/ndf:implementation-plan<br/><b>① 作る前</b><br/>プランを issues/ に置く"]
+  B["/ndf:pr<br/><b>② 出す</b><br/>commit → push → PR"]
+  C["/ndf:review<br/>/ndf:cross-review<br/><b>③ レビューを回す</b><br/>指摘 → 修正 → 再レビュー"]
+  D["/ndf:plan-to-spec<br/><b>④ 残す</b><br/>docs/ の確定仕様へ"]
+
+  A --> B --> C --> D
+
+  classDef step fill:#eaf2fb,stroke:#4a90d9,stroke-width:1.5px,color:#12263a
+  classDef keep fill:#e8f5e9,stroke:#4caf50,stroke-width:1.5px,color:#12263a
+  class A,B,C step
+  class D keep
