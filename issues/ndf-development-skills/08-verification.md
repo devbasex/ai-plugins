@@ -58,6 +58,7 @@
 - [ ] `skills-ref validate` が全 Skill で成功する
 - [ ] `SKILL.md` が 500 行を超えていない
 - [ ] Skill の追加・統合・削除が 3 つの manifest すべてに反映されている
+- [ ] 版数を上げた PR で `grep -rn '<旧版数>'` が残っていない（`plugin.json` 以外にも `marketplace.json` の説明文、`AGENTS.md`、`README.md`、プレゼン資料に記載がある）
 
 ### Release 0 固有
 

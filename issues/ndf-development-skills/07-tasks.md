@@ -98,11 +98,23 @@
 
 ### Task 0-10: 棚卸の仕上げ
 
-- **対象ファイル:** manifest 3 種、`ndf-policies/SKILL.md`、`AGENTS.md`、`CLAUDE.md`、`KIRO.md`、`docs/ndf-plugin-reference.md`、各 runtime `README.md`、`plugin.json`
+- **対象ファイル:** manifest 3 種、`ndf-policies/SKILL.md`、`AGENTS.md`、`CLAUDE.md`、`KIRO.md`、`docs/ndf-plugin-reference.md`、各 runtime `README.md`、下記のバージョン記載ファイル一式
 - **変更内容:**
   - 統合と整理の結果を manifest 3 種すべてへ反映する
   - `ndf-policies` に旧 Skill 名から新 Skill 名への対応表を記載する
-  - version bump 5.0.0
+  - バージョンを 5.0.0 へ上げる。版数は `plugin.json` 以外にも散在しており、実測で次の箇所にある
+
+| ファイル | 記載箇所 |
+| --- | --- |
+| `plugins/ndf-claude/.claude-plugin/plugin.json` | `version` |
+| `plugins/ndf-codex/.codex-plugin/plugin.json` | `version` |
+| `.claude-plugin/marketplace.json` | `description` の本文 |
+| `AGENTS.md` | プラグイン概要 |
+| `README.md` | 冒頭、プラグイン一覧表、変更点の見出し |
+| `docs/presentations/README.md` | 資料一覧の説明 |
+| `docs/presentations/2026-08-06-ai-plugins-intro.md` | `header` |
+
+  - 更新漏れを防ぐため、`grep -rn '<旧版数>'` が生成物とプレゼン資料を除いてヒットしないことを確認する。継続的に検査したい場合は版数の一致検査をスクリプト化する
 
 ## Release 1
 
