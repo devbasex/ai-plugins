@@ -8,14 +8,16 @@ base branch: `main`
 
 ```mermaid
 flowchart TD
-    R0["Release 0 / v5.0.0<br/>棚卸: 実測に基づき 49 → 29 へ整理、<br/>設定見直しで自然文からの発動を効かせる"]
+    R0["Release 0 / v5.0.0<br/>棚卸: 実測に基づき統合と削除で整理、<br/>設定見直しで自然文からの発動を効かせる"]
     R1["Release 1 / v5.1.0<br/>要求 → 実装 → 構造改善 → レビュー → テスト<br/>のループを閉じる"]
     R2["Release 2 / v5.2.0<br/>設計品質を architecture モードで追加"]
     R3["Release 3 / v5.3.0<br/>一気通貫実行、挙動評価、整合性チェック、文書整備"]
     R0 --> R1 --> R2 --> R3
 ```
 
-棚卸を最初に置くのは、整理されていない 49 個の上に 9 個を積むとトリガ衝突とコンテキスト肥大が悪化するためである。一気通貫実行を最後に置くのは、呼び出す工程 Skill がすべて揃ってからでないと調整役として成立しないためである。
+棚卸を最初に置くのは、整理されていない 49 個の上に新設 9 個を積むとトリガ衝突とコンテキスト肥大が悪化するためである。一気通貫実行を最後に置くのは、呼び出す工程 Skill がすべて揃ってからでないと調整役として成立しないためである。
+
+新設 9 個は Release 1 と Release 2 の開発方法論レイヤー 8 個（`requirements-design` / `tdd-cycle` / `safe-refactoring` / `quality-gates` / `development-workflow` / `design-review` / `domain-modeling` / `object-design`）と、Release 3 の `execute-plan` 1 個からなる。段階ごとの Skill 総数は [02-skill-inventory.md](02-skill-inventory.md)「Skill 総数の推移」を参照する。
 
 ## バージョンの扱い
 
@@ -44,7 +46,7 @@ Skill 名の統合は既存のコマンド名を壊す。`4.20.1` → **`5.0.0`*
 | 1-2 | `feature/devskills-tdd-cycle` | `tdd-cycle` | なし | ○ |
 | 1-3 | `feature/devskills-safe-refactoring` | `safe-refactoring` | なし | ○ |
 | 1-4 | `feature/devskills-quality-gates` | `quality-gates` | なし | ○ |
-| 1-5 | `feature/devskills-licensing` | `THIRD_PARTY_NOTICES.md` + `upstream-skills.lock.yaml` | なし | ○ |
+| 1-5 | `feature/devskills-licensing` | `THIRD_PARTY_NOTICES.md` + `upstream-skills.lock.yaml`、3 ランタイム配布物への告知同期と Kiro 導入時の配置 | なし | ○ |
 | 1-6 | `feature/devskills-workflow-router` | `development-workflow`（4 モード判定と振り分け） | 1-1〜1-4 | × |
 | 1-7 | `feature/devskills-existing-skills` | 既存 6 Skill（`implementation-plan` / `problem-solving` / `review` / `pr-tests` / `plan-to-spec` / `investigation-rules`）の改修 + manifest 登録 + version bump | 1-6 | × |
 
@@ -57,7 +59,7 @@ PR 1-6 を後段に置くのは、`scripts/check-markdown-links.py` がリンク
 | 2-1 | `feature/devskills-design-review` | `design-review` | なし | ○ |
 | 2-2 | `feature/devskills-domain-modeling` | `domain-modeling` | なし | ○ |
 | 2-3 | `feature/devskills-object-design` | `object-design` | なし | ○ |
-| 2-4 | `feature/devskills-routing-update` | `director` 改修、`cross-review` の適用範囲限定、manifest 登録、version bump | 2-1〜2-3 | × |
+| 2-4 | `feature/devskills-routing-update` | `director` を `development-workflow` へ判定委譲する形へ改修、`cross-review` の適用範囲限定、manifest 登録、version bump | 2-1〜2-3 | × |
 
 ドメインモデリングは全変更へ適用せず、`architecture` モードでのみ有効化する。
 

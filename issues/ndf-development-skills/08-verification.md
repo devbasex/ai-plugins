@@ -6,15 +6,15 @@
 
 | 対象 | 影響 |
 | --- | --- |
-| Skill 総数 | 49 → 38（統合）→ 29（削除）→ 38（新規 9 個追加後） |
+| Skill 総数 | [02-skill-inventory.md](02-skill-inventory.md)「Skill 総数の推移」のとおり、統合と削除で 29 まで減り、新設 9 個（開発方法論レイヤー 8 個 + `execute-plan` 1 個）を加えて最終 38 |
 | コマンド名 | 起動実績のない `/ndf:clean` `/ndf:review-pr-comments` `/ndf:resolve-pr-comments` `/ndf:git-gh-operations` などが消える。起動上位 5 個（`fix` `cross-review` `merged` `pr` `issue-plan-strategy`、計 1,145 回）は改名しない。`/ndf:codex` `/ndf:gemini`(計 5 回) と `/ndf:branch-fix-strategy`(4 回) `/ndf:sync-main`(1 回) `/ndf:review-branch`(3 回) が変わる |
 | 自動発動の挙動 | `merged` / `review` / `pr` / `pr-tests` が自然文で起動するようになる。起動しない前提の運用があれば変わる |
 | 常時注入されるコンテキスト | 棚卸で削減、新規追加で増加。合計サイズを継続的インテグレーションで監視 |
 | 3 ランタイム | manifest 経由で配布。`build-runtime-plugins.sh --check` で生成物の差異を検出 |
 | Kiro の導入方式 | エージェント名 `default` → `ndf`、Skill 読み込み指定の削除、steering 生成、スコープ選択。**既存の `.kiro/agents/default.json` を持つプロジェクトは再インストールが必要** |
 | Codex の配布物 | 明示指示専用の Skill それぞれの直下に `agents/openai.yaml` が追加され、その Skill が暗黙起動しなくなる |
-| `director` エージェント | Claude Code 版のみ改修。Kiro は Skill 経由で追随、Codex はエージェント定義を持たない |
-| ライセンス | 上流の文章を直接転用しない方針。転用が発生した場合のみ告知の記載が必須になる |
+| `director` エージェント | Claude Code 版のみ改修。モード判定は持たず `development-workflow` へ委ねるため、モード追加時の変更は同 Skill に閉じる。Kiro は Skill 経由で追随、Codex はエージェント定義を持たない |
+| ライセンス | 上流の文章を直接転用しない方針。転用が発生した場合は告知の記載に加え、3 ランタイム配布物と Kiro の導入先まで告知が届くことが Apache-2.0 の要件になる |
 | 継続的インテグレーション | 既存 2 種が通ること。Release 0 で frontmatter 検査、Release 3 で挙動評価を追加 |
 
 ## リスクと対処
@@ -41,6 +41,8 @@
 | 完了条件が会話に現れない事実を前提にして永久に充足しない | 評価器はツールを呼ばないため、条件は出力で証明できる形に限る。ターン上限を条件へ含める |
 | 工程が重くなり日常作業が滞る | `light` モードを既定とし、`standard` 以上は明示的な条件でのみ発動 |
 | 上流の文章転用によるライセンス違反 | 再執筆を原則とし、固定コミットと改変内容を記録 |
+| 告知がリポジトリ内にとどまり、導入した利用者の手元へ届かない | 編集元 1 ファイルから `build-runtime-plugins.sh` が 3 配布物へ同期し、Kiro は `install.sh` が導入先へ配置する。同期漏れは `--check` で検出（[07-tasks.md](07-tasks.md) Task 1-5） |
+| モード判定の基準が複数箇所に写され、モード追加時に食い違う | 判定は `development-workflow` の 1 箇所に限り、`director` は判定結果を受け取るだけにする。Release 2 のテスト項目で写しがないことを確認 |
 | ランタイム間の機能差 | manifest 3 ファイルへの反映を PR チェックリスト項目にする |
 | リンク切れ | 依存順に PR を並べ、`python3 scripts/check-markdown-links.py` を各 PR で実行 |
 
@@ -74,6 +76,18 @@
 - [ ] 明示指示専用の Skill それぞれに `skills/<Skill 名>/agents/openai.yaml` が生成されている
 - [ ] Codex で明示指示専用の Skill が暗黙起動しない
 - [ ] Codex の初期一覧に載る合計が 8,000 文字以内に収まり、起動時に一覧の省略警告が出ない
+- [ ] `when_to_use` を持つ Skill が `description` にない追加トリガを実際に持ち、`description` だけで足りる Skill には付いていない
+
+### Release 1 固有
+
+- [ ] `THIRD_PARTY_NOTICES.md` が `plugins/ndf-claude/` / `plugins/ndf-codex/` / `plugins/ndf-kiro/` の 3 ランタイム配布物すべてに含まれる
+- [ ] 編集元の `THIRD_PARTY_NOTICES.md` を変更した後 `bash scripts/build-runtime-plugins.sh --check` が差異を検出する
+- [ ] `install.sh` 実行後、告知が導入先（`--scope workspace` は `.kiro/`、`global` は `~/.kiro/`）に配置される
+
+### Release 2 固有
+
+- [ ] `director.md` にモード判定の基準と振り分け表が書かれておらず、`development-workflow` を呼ぶ手順だけになっている
+- [ ] `development-workflow` のモード定義を 1 つ変更したとき、他のファイルを直さずに `director` の振る舞いが追随する
 
 ### Release 3 固有
 

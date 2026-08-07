@@ -2,6 +2,8 @@
 
 用語は [01-overview.md](01-overview.md) を参照。
 
+本文書が扱うのは開発方法論レイヤーの 8 個である。新設する Skill はこれに一気通貫実行の `execute-plan`（[05-goal-workflow.md](05-goal-workflow.md)）1 個を加えた計 9 個であり、段階ごとの Skill 総数は [02-skill-inventory.md](02-skill-inventory.md)「Skill 総数の推移」を参照する。
+
 ## 新設する Skill
 
 ```text
@@ -58,7 +60,7 @@ plugins/ndf-shared/skills/
 
 ## ワークフローの 4 モード
 
-全変更にフル工程を課さず、`development-workflow` が最初にモードを判定する。
+全変更にフル工程を課さず、`development-workflow` が最初にモードを判定する。**判定基準と振り分け表を持つのは `development-workflow` だけとし、他の Skill とエージェント定義は判定結果を受け取る側に徹する。** 同じ基準を複数の場所へ書くと、モードを追加・変更したときに片方だけが古くなる。
 
 | モード | 対象 | 必須工程 |
 | --- | --- | --- |
@@ -129,7 +131,7 @@ ramziddin/solid-skills の「メソッド 10 行未満」「インスタンス�
 | `skills/plan-to-spec/SKILL.md` | ドメイン用語集、不変条件、公開インタフェース、設計判断記録の結論を確定仕様へ引き継ぐ | 1-7 |
 | `skills/investigation-rules/SKILL.md` | トリガ `'調査'` を具体化し、`problem-solving` との境界を明記 | 1-7 |
 | `skills/cross-review/SKILL.md` | 起動対象を `architecture` モード相当の高リスク変更に限定。同じ基準で `execute-plan` のレビュー段階も分岐する（[05-goal-workflow.md](05-goal-workflow.md)） | 2-4 |
-| `plugins/ndf-claude/agents/director.md` | 4 モードを判定して Skill へ振り分ける | 2-4 |
+| `plugins/ndf-claude/agents/director.md` | モード判定は自前で持たず、`development-workflow` を呼んで判定させる。返ったモードに対応する Skill を起動する手順だけを書く | 2-4 |
 | `skills/issue-plan-strategy/SKILL.md` | `execute-plan` から呼ばれる手順として整理し、責務の境界を明記。組み込みの `/goal` ループから直接駆動される実績（8 回）があるため、ターンをまたいで再開できる記述にする | 3-1 |
 
 `review` の二段構成:
@@ -158,11 +160,15 @@ ramziddin/solid-skills の「メソッド 10 行未満」「インスタンス�
 
 `director` の改修は Claude Code 版のみに閉じる。Kiro 版へは Skill 経由で効かせる。判定ロジックを Skill 側に置けば、Kiro の組み込みエージェントが `.kiro/skills/` を読むため追随する。Codex はエージェント定義を持たない。
 
+エージェント定義はランタイムごとに別ファイルであり、生成元を共有していない。したがって判定基準をエージェント定義へ書くと、ランタイムの数だけ写しが増える。`development-workflow` を判定の唯一の置き場所とし、`director` は判定を委ねる側にすることで、モードの追加・変更が 1 ファイルの修正で済む状態を保つ。
+
 ## ライセンスと上流の固定
 
 `THIRD_PARTY_NOTICES.md` と `upstream-skills.lock.yaml` を追加し、参照元リポジトリ、固定コミット、参照したパス、対応する Skill、ライセンス、改変内容を記録する。
 
 modu-ai/moai-adk は Apache-2.0 のため、告知の保持と改変記録の要件を満たす記述にする。他は MIT。本体は MIT を維持する。
+
+Apache-2.0 の告知保持は、頒布物の受領者に告知が届くことを求める。リポジトリ直下に置くだけでは、プラグインとして導入した利用者の手元に届かない。`THIRD_PARTY_NOTICES.md` は編集元を単一に保ったまま、`scripts/build-runtime-plugins.sh` が 3 ランタイムの配布物へ同期する。Kiro は配布物をそのまま読ませる方式ではないため、`install.sh` が導入先へ配置する。手順は [07-tasks.md](07-tasks.md) Task 1-5 に置く。
 
 上流由来の Skill には frontmatter へ帰属を記録する。Agent Skills 仕様が定める項目なのでランタイムを問わず残る。
 

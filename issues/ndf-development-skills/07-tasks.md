@@ -41,7 +41,7 @@
 - **変更内容:**
   - `merged` / `pr` / `review` / `pr-tests` から `disable-model-invocation` を外し、`description` に発動条件を含める
   - `deploy` と `cherry-pick-pr` 相当の破壊的操作は明示指示専用を維持する
-  - `when_to_use` 未設定の Skill すべてに付与する
+  - 主要トリガは `description` に入れる。`when_to_use` は Claude Code 向けの追加トリガが要る Skill にだけ付与し、`description` で足りるものには付けない（[03-runtime-conformance.md](03-runtime-conformance.md)）
   - `plan-to-spec` の長い `description` は要点を残して `when_to_use` へ移す。`cross-review` は逆に、`when_to_use` に置いた明示トリガの要点を `description` へ移す
   - 広すぎるトリガを具体化する
   - `description` の先頭に主要な用途とトリガ語を置き、合計を Codex の初期一覧予算へ収める（[02-skill-inventory.md](02-skill-inventory.md)「Codex の初期一覧予算」）
@@ -62,6 +62,7 @@
 | 運用 | `description` が 300 文字超 |
 | 運用 | Codex の初期一覧に載る合計（全 Skill の `name` + `description` + ファイルパス）が 8,000 文字超 |
 | 運用 | `description` + `when_to_use` が 1,536 文字超 |
+| 運用 | `when_to_use` があるのに `description` の内容を言い換えただけで、追加トリガを含まない（`when_to_use` は追加トリガがある場合のみ付ける。未設定は失敗としない） |
 | 運用 | `SKILL.md` が 500 行超 |
 | 運用 | 全 Skill の frontmatter 合計が基準値超 |
 | 運用 | `disable-model-invocation` があるのに `argument-hint` がない |
@@ -146,14 +147,18 @@
 
 ### Task 1-5: ライセンスと上流の固定
 
-- **対象ファイル:** `THIRD_PARTY_NOTICES.md`、`upstream-skills.lock.yaml`
+- **対象ファイル:** `THIRD_PARTY_NOTICES.md`、`upstream-skills.lock.yaml`、`scripts/build-runtime-plugins.sh`、`plugins/ndf-kiro/install.sh`
 - **変更内容:** [04-development-skills.md](04-development-skills.md) の「ライセンスと上流の固定」に記載のとおり
+  - 告知の編集元はリポジトリ直下の `THIRD_PARTY_NOTICES.md` 1 ファイルとする
+  - `build-runtime-plugins.sh` に、編集元を `plugins/ndf-claude/` / `plugins/ndf-codex/` / `plugins/ndf-kiro/` へ同期する処理を追加する。同期漏れは `--check` で差異として検出できる状態にする
+  - Kiro は配布物を直接読ませないため、`install.sh` が同梱の告知を導入先（`--scope workspace` は `.kiro/`、`global` は `~/.kiro/`）へ配置する。Task 0-9 は告知を扱わず、配置処理はこのタスクにまとめる
+  - 転用が発生していない時点でも同期経路を先に用意する。転用が生じてから経路を足すと配布物への反映漏れに気づけない
 
 ### Task 1-6: `development-workflow`
 
 - **対象ファイル:** `skills/development-workflow/SKILL.md`、`references/workflow-modes.md`
 - **変更内容:**
-  - 変更内容から 4 モードを判定するフローを定義する
+  - 変更内容から 4 モードを判定するフローを定義する。この Skill を判定基準の唯一の置き場所とし、呼び出し側が判定結果だけを受け取れる出力形式にする
   - モードごとに起動する Skill を表で明示する
   - 標準フローを記載する
   - この時点で `design-review` / `domain-modeling` / `object-design` は未実装のため、`architecture` モードは Release 2 で有効化すると現状として明記し、リンク切れを作らない
@@ -179,7 +184,8 @@
 
 - **対象ファイル:** `plugins/ndf-claude/agents/director.md`、`skills/cross-review/SKILL.md`、`skills/development-workflow/SKILL.md`、manifest 3 種、`plugin.json`
 - **変更内容:**
-  - `director` の要求理解フェーズにモード判定を追加し、モード別の振り分け表を記載する
+  - `director` の要求理解フェーズで `development-workflow` を呼び、返ったモードを受け取る手順を記載する。判定基準と振り分け表を `director` 側へ写さない（[04-development-skills.md](04-development-skills.md)「ワークフローの 4 モード」）
+  - `development-workflow` を判定の唯一の置き場所として維持する。モードの追加・変更はこの Skill だけを直せば全ランタイムへ効く
   - `cross-review` の起動条件を高リスク変更に限定する。この基準は Task 3-1 の `execute-plan` のレビュー段階の分岐と共有する（[05-goal-workflow.md](05-goal-workflow.md)）
   - `development-workflow` の `architecture` モードを有効化する
 

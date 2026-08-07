@@ -7,7 +7,7 @@
 | `01-overview.md` | 目的、用語、解決したい課題 |
 | [02-skill-inventory.md](02-skill-inventory.md) | 既存 Skill の棚卸（統合・削除・設定規約） |
 | [03-runtime-conformance.md](03-runtime-conformance.md) | Claude Code / Codex / Kiro の規約差分と対応 |
-| [04-development-skills.md](04-development-skills.md) | 新設する 8 個の Skill と既存 Skill の改修 |
+| [04-development-skills.md](04-development-skills.md) | 開発方法論レイヤーの 8 個と既存 Skill の改修 |
 | [05-goal-workflow.md](05-goal-workflow.md) | 設計確定後の一気通貫実行 |
 | [06-release-plan.md](06-release-plan.md) | リリース分割と PR 分割 |
 | [07-tasks.md](07-tasks.md) | タスク分解 |
@@ -39,9 +39,11 @@
 3. **既存 Skill の改修** — 新レイヤーへの接続
 4. **一気通貫実行の整備** — ランタイム組み込みの `/goal` ループを土台に、設計確定後からリリース直前までを自動で進める `execute-plan` を新設する
 
+新設する Skill は、項目 2 の開発方法論レイヤー 8 個と項目 4 の `execute-plan` 1 個をあわせた計 9 個である。段階ごとの Skill 総数は [02-skill-inventory.md](02-skill-inventory.md)「Skill 総数の推移」を唯一の基準とし、本文書では数値を書き下さない。
+
 外部リポジトリは submodule やコピーで取り込まず、独自の Skill として再執筆し、参照元は `upstream-skills.lock.yaml` で固定する。
 
-棚卸を先に行う。整理されていない 49 個の上に 9 個を積むと、トリガ衝突とコンテキスト肥大が悪化するためである。
+棚卸を先に行う。整理されていない 49 個の上に新設 9 個を積むと、トリガ衝突とコンテキスト肥大が悪化するためである。
 
 ## 解決したい課題
 
@@ -95,7 +97,7 @@ review, statusline, sync-main
 
 このうち `review` と `pr` は日常的に「レビューして」「プルリクエスト作って」と自然文で依頼される。起動しないため、エージェントが Skill を使わず独自手順で実行する。
 
-`when_to_use` 未設定の 14 個は英語 1 行の `description` だけで判定されるため、日本語の依頼に反応しにくい。
+`when_to_use` が未設定の 14 個は、英語 1 行の `description` だけで判定されるため日本語の依頼に反応しにくい。ただし `when_to_use` は Claude Code 以外では読まれないため、補うべきは `description` の側である。
 
 逆方向の問題もある。`python-execution` のトリガは `'python'` `'スクリプト'`、`git-gh-operations` のトリガは `'git add'` `'git commit'` で、ほぼ全セッションにヒットする。広すぎるトリガは他 Skill の発動を埋もれさせる。
 

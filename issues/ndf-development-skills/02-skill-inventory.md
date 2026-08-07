@@ -130,6 +130,24 @@ review-pr-comments, skill-stats
 
 合計 **-9**（38 → 29）。
 
+## Skill 総数の推移
+
+本プラン全体で使う Skill 数はこの表を唯一の基準とする。他の文書は数値を書き下さず、この節を参照する。
+
+| 段階 | 増減 | 総数 |
+| --- | --- | --- |
+| 現状 | — | 49 |
+| 統合後 | -11 | 38 |
+| 削除後 | -9 | 29 |
+| 新設後 | +9 | 38 |
+
+新設 9 個の内訳は次のとおりで、性格が異なるため常に分けて数える。
+
+| 区分 | 個数 | 定義場所 |
+| --- | --- | --- |
+| 開発方法論レイヤー | 8 | [04-development-skills.md](04-development-skills.md) |
+| 一気通貫実行（`execute-plan`） | 1 | [05-goal-workflow.md](05-goal-workflow.md) |
+
 ## 発動改善
 
 起動ゼロだが機会があり、削除の例外に当たらないものは発動条件を見直す。いずれも削除しない。
@@ -170,7 +188,7 @@ when_to_use: "Claude Code 向けの追加トリガのみ"
 
 | 分類 | Claude Code | Codex | Kiro | 対象 |
 | --- | --- | --- | --- | --- |
-| 自動発動（既定） | `when_to_use` 併記 | 既定で暗黙起動可 | 自動ロード | 知識・判断基準・ワークフロー |
+| 自動発動（既定） | 追加トリガがあれば `when_to_use` 併記 | 既定で暗黙起動可 | 自動ロード | 知識・判断基準・ワークフロー |
 | パス限定自動発動 | 上記 + `paths` | `paths` 無効 | `paths` 無効 | 特定ディレクトリでのみ意味を持つもの |
 | 明示指示専用 | `disable-model-invocation: true` + `argument-hint` | Skill ごとの `<Skill 名>/agents/openai.yaml` の `policy.allow_implicit_invocation: false` | 制御手段なし。`description` に「利用者が明示的に指示したときのみ実行する」と記載 | 破壊的操作・外部への書き込み |
 | 常時注入のみ | `user-invocable: false` | 相当機能なし | 相当機能なし | `ndf-policies` |
@@ -181,6 +199,7 @@ when_to_use: "Claude Code 向けの追加トリガのみ"
 
 - `merged`(247) / `pr`(171) / `review`(57) / `pr-tests`(2) から `disable-model-invocation` を外し、`description` に発動条件を含める。いずれも明示指示でしか使えていない
 - `deploy` は環境ブランチへ書き込む破壊的操作のため明示指示専用を維持する。起動ゼロだが機会が 340 あるため、発動改善の対象として `description` を改善する
+- `when_to_use` は Claude Code 向けの追加トリガが要る Skill にだけ付与する。主要トリガは `description` に置くため、未設定であること自体は不備とせず、一律付与もしない（[03-runtime-conformance.md](03-runtime-conformance.md)）
 - `plan-to-spec` は `description` が 492 文字あるため、要点を残して残りを `when_to_use` へ移す。`cross-review` は逆に `description` が 57 文字で発動条件を含まず、529 文字の `when_to_use` に依存しているため、明示トリガの要点を `description` へ移す
 - 広すぎるトリガを具体化する（`'python'` → `'uv run'` `'venv が見つからない'`、`'git add'` → `'fatal:'` `'non-fast-forward'`、`'調査'` → `'調査レポートを書く'`）
 - frontmatter に `<` と `>` を含めない。Agent Skills 仕様がシステムプロンプトへの注入リスクとして警告している
@@ -215,7 +234,7 @@ Codex は起動時に Skill の `name` と `description` に加えてファイ�
 
 出典: [Build skills](https://learn.chatgpt.com/docs/build-skills)（`https://developers.openai.com/codex/skills` はこのページへ転送される）。2026-08-07 に取得。
 
-`description` を 1 個あたり 300 文字で運用しても、この総量予算には収まらない。棚卸後の 38 個に 300 文字を割り当てると 11,400 文字となり、`name` とファイルパスを加える前の時点で 8,000 文字を超える。コンテキストウィンドウが判明している場合の 2% は 8,000 文字より厳しくなることがあり、たとえばコンテキストウィンドウが 272,000 のモデルでは 5,440 文字となる。
+`description` を 1 個あたり 300 文字で運用しても、この総量予算には収まらない。最終構成の 38 個（「Skill 総数の推移」）に 300 文字を割り当てると 11,400 文字となり、`name` とファイルパスを加える前の時点で 8,000 文字を超える。コンテキストウィンドウが判明している場合の 2% は 8,000 文字より厳しくなることがあり、たとえばコンテキストウィンドウが 272,000 のモデルでは 5,440 文字となる。
 
 したがって 300 文字は**1 個あたりの上限**であって全 Skill に一律で使ってよい枠ではない。実際の配分は総量が予算へ収まることを条件に決め、超過分は `when_to_use` と本文へ逃がす。あわせて、短縮されても暗黙起動が働くよう `description` の先頭に主要な用途とトリガ語を置く（適用方針の先頭トリガ規約）。この 2 点は [07-tasks.md](07-tasks.md) Task 0-7 の検査項目として機械的に検査する。
 
