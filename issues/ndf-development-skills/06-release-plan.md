@@ -8,7 +8,7 @@ base branch: `main`
 
 ```mermaid
 flowchart TD
-    R0["Release 0 / v5.0.0<br/>棚卸: 49 → 36 へ統合、スコープ限定と整理、<br/>設定見直しで自然文からの発動を効かせる"]
+    R0["Release 0 / v5.0.0<br/>棚卸: 実測に基づき 49 → 28 へ整理、<br/>設定見直しで自然文からの発動を効かせる"]
     R1["Release 1 / v5.1.0<br/>要求 → 実装 → 構造改善 → レビュー → テスト<br/>のループを閉じる"]
     R2["Release 2 / v5.2.0<br/>設計品質を architecture モードで追加"]
     R3["Release 3 / v5.3.0<br/>一気通貫実行、挙動評価、整合性チェック、文書整備"]
@@ -28,9 +28,9 @@ Skill 名の統合は既存のコマンド名を壊す。`4.20.1` → **`5.0.0`*
 | 0-1 | `feature/inventory-measure` | 全 Skill の起動率を実測し棚卸台帳を作成。frontmatter 規約を明文化 | なし | ○ |
 | 0-2 | `feature/inventory-merge-review` | `review` + `review-branch` 統合、`review-pr-comments` + `fix` + `resolve-pr-comments` 統合 | 0-1 | × |
 | 0-3 | `feature/inventory-merge-external-ai` | `codex` + `gemini` → `external-ai` 統合 | 0-1 | ○ |
-| 0-4 | `feature/inventory-merge-git` | `clean` + `merged` + `sync-main` → `git-cleanup`、`cherry-pick-pr` → `branch-fix-strategy` 統合 | 0-1 | ○ |
+| 0-4 | `feature/inventory-merge-git` | `clean` → `merged` 統合、`branch-fix-strategy` → `cherry-pick-pr` 統合、`sync-main` 削除 | 0-1 | ○ |
 | 0-5 | `feature/inventory-merge-playwright` | ブラウザ自動テスト 9 個 → 4 個へ集約 | 0-1 | ○ |
-| 0-6 | `feature/inventory-merge-misc` | `data-analyst-*` 統合、整理候補の判定結果を反映 | 0-1 | ○ |
+| 0-6 | `feature/inventory-delete` | 起動ゼロ 9 個の削除、発動改善対象の `description` 見直し | 0-1 | ○ |
 | 0-7 | `feature/inventory-frontmatter` | 全 Skill の frontmatter 見直しと検査スクリプト追加 | 0-2〜0-6 | × |
 | 0-8 | `feature/inventory-codex-conformance` | Codex の `agents/openai.yaml` 生成 | 0-7 | ○ |
 | 0-9 | `feature/inventory-kiro-delivery` | Kiro 導入方式の修正 | 0-7 | ○ |

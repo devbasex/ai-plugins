@@ -6,14 +6,16 @@
 
 ### Task 0-1: 棚卸台帳と frontmatter 規約
 
-- **対象ファイル:** `docs/specifications/ndf-skill-inventory.md`、`plugins/ndf-shared/skills/README.md`
+利用実績の実測は完了済み（[02-skill-inventory.md](02-skill-inventory.md)、2026-08-07 時点、1,938 セッション / 80 日）。
+
+- **対象ファイル:** `docs/specifications/ndf-skill-inventory.md`、`plugins/ndf-shared/skills/README.md`、`plugins/ndf-shared/skills/skill-stats/scripts/skill-stats.py`
 - **変更内容:**
-  - `/ndf:skill-stats` で全 Skill の起動率を実測し、台帳に「Skill 名 / 行数 / frontmatter 設定 / 起動率 / 判定 / 判定根拠」を記録する
-  - 整理候補 8 個について、実測起動率を根拠に「維持 / スコープ限定 / 縮小 / 削除」を確定する
+  - 実測結果を台帳へ転記し、Skill ごとに「行数 / frontmatter 設定 / 起動数 / 機会数 / 判定 / 判定根拠」を記録する
+  - `skill-stats` の測定機能を修正する。現状は `when_to_use` からのトリガ抽出が 49 個中 48 個で失敗し、利用者のスラッシュコマンドも数えないため、実際の起動数と大きく乖離する
   - frontmatter 規約（[02-skill-inventory.md](02-skill-inventory.md)）を明文化する
   - トリガ語の一意性ルールと、広すぎるトリガの禁止例を記載する
 
-### Task 0-2〜0-6: Skill 統合
+### Task 0-2〜0-6: Skill の統合と削除
 
 共通手順:
 
@@ -29,15 +31,15 @@
 | --- | --- |
 | 0-2 | `cross-review` が `fix` をループ内で呼ぶ。呼び出し規約を壊さない。`review` は `--branch` 引数でローカル差分レビューに切り替える |
 | 0-3 | 外部 AI 呼び出しの差分を `references/cli-codex.md` / `references/cli-gemini.md` に分離する。`cross-review` は両方を呼ぶため呼び出し箇所を更新する |
-| 0-4 | `cherry-pick-pr` は明示指示専用。統合後も破壊的操作部分は明示指示専用を維持する |
+| 0-4 | 起動 247 回の `merged` を残し、`clean` を吸収する。改名しない。`cherry-pick-pr`(16 回) に `branch-fix-strategy`(4 回) を吸収し、実行コマンド側の名前を残す |
 | 0-5 | `playwright-kit-ops` は実行環境ディレクトリとスクリプトを持つ。移動先を明示し、`build-runtime-plugins.sh` の除外パターンが効く配置を保つ |
-| 0-6 | 削除するのは Task 0-1 の台帳で削除判定されたものに限る |
+| 0-6 | 削除対象は台帳で削除判定した 9 個に限る。起動ゼロでも機会のあるものは削除せず発動条件を見直す |
 
 ### Task 0-7: frontmatter 一括見直し
 
 - **対象ファイル:** 全 `SKILL.md` の frontmatter、`scripts/check-skill-frontmatter.py`（新規）、`.github/workflows/runtime-plugin-validate.yml`
 - **変更内容:**
-  - `review` / `pr` / `pr-tests` / `git-cleanup` から `disable-model-invocation` を外し、`when_to_use` を付与する
+  - `merged` / `pr` / `cross-review` / `review` / `pr-tests` から `disable-model-invocation` を外し、`description` に発動条件を含める
   - `deploy` と `cherry-pick-pr` 相当の破壊的操作は明示指示専用を維持する
   - `when_to_use` 未設定の Skill すべてに付与する
   - `plan-to-spec` と `cross-review` の長い `description` を `when_to_use` へ移す
