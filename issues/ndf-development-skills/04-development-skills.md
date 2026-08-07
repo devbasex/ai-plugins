@@ -102,7 +102,15 @@ flowchart TD
 
 modu-ai/moai-adk の「構造分析 → 現状固定 → 改善」サイクルは有用だが、同リポジトリが DDD と呼ぶものは Domain-Driven **Development** である。このサイクルは `safe-refactoring` の legacy モードとして取り込み、`domain-modeling` は Evans の Domain-Driven **Design** 専用とする。
 
-modu-ai/moai-adk の固定閾値（カバレッジ 10% 未満 / 最終 85% 以上）はプロジェクト設定にする。
+modu-ai/moai-adk の固定閾値（カバレッジ 10% 未満 / 最終 85% 以上）は採用しない。閾値は Skill 側に既定値を持たず、対象プロジェクトが既に持つカバレッジツールの設定を唯一の基準とする。
+
+| 対象 | 参照する設定 |
+| --- | --- |
+| Python | `pyproject.toml` の `[tool.coverage.report]` の `fail_under`、または `.coveragerc` |
+| JavaScript / TypeScript | `jest.config.*` の `coverageThreshold`、または `vitest.config.*` の `test.coverage.thresholds` |
+| その他 | 各言語のカバレッジツール設定ファイル |
+
+`quality-gates` は完了判定の前にこれらを読み、記載された閾値でのみ合否を判断する。設定がないプロジェクトでは閾値による判定を行わず、カバレッジは測定値を証跡へ記録するだけにとどめる。閾値を新設する場合は、Skill ではなくプロジェクト側の設定ファイルへ追加する。
 
 ## 行数ルールを使わない
 

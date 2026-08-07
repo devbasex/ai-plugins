@@ -32,8 +32,8 @@
 | 0-2 | `cross-review` が `fix` をループ内で呼ぶ。呼び出し規約を壊さない。`review` は `--branch` 引数でローカル差分レビューに切り替える |
 | 0-3 | 外部 AI 呼び出しの差分を `references/cli-codex.md` / `references/cli-gemini.md` に分離する。`cross-review` は両方を呼ぶため呼び出し箇所を更新する |
 | 0-4 | 起動 247 回の `merged` を残し、`clean` を吸収する。改名しない。`cherry-pick-pr`(16 回) に `branch-fix-strategy`(4 回) を吸収し、実行コマンド側の名前を残す |
-| 0-5 | `playwright-kit-ops` は実行環境ディレクトリとスクリプトを持つ。移動先を明示し、`build-runtime-plugins.sh` の除外パターンが効く配置を保つ |
-| 0-6 | 削除対象は台帳で削除判定した 9 個に限る。起動ゼロでも機会のあるものは削除せず発動条件を見直す |
+| 0-5 | ブラウザ自動テストは [02-skill-inventory.md](02-skill-inventory.md) の対応表どおり 4 個へまとめる。`playwright-kit-ops` は実行環境ディレクトリとスクリプトを持つため単独で残し、`build-runtime-plugins.sh` の除外パターンが効く配置を保つ |
+| 0-6 | 削除対象は台帳で削除判定した 9 個に限り、判定は [02-skill-inventory.md](02-skill-inventory.md) の判断基準表に従う。うち `sync-main` は 0-4 で処理するため、この PR の対象は 8 個 |
 
 ### Task 0-7: frontmatter 一括見直し
 
@@ -86,7 +86,7 @@
   - 完了メッセージを `kiro-cli chat --agent ndf` へ修正する
   - `resources` から `skill://.kiro/skills/**/SKILL.md` を削除する
   - `.kiro/steering/ndf-policies.md` を生成し、`resources` の `file://.kiro/skills/ndf-policies/SKILL.md` を削除する
-  - `--scope workspace|global`（既定 `workspace`）を追加する
+  - `--scope workspace|global`（既定 `workspace`）を追加する。`global` では Skill を `~/.kiro/skills/`、常時指示を `~/.kiro/steering/ndf-policies.md` へ生成する
   - 既存の `.kiro/agents/default.json` を検出したらバックアップし、移行手順を案内する
   - `README.md` に、プロジェクト配置では `allowed-tools` が事前承認にならないこと（[#6055](https://github.com/kirodotdev/Kiro/issues/6055)）を明記する。あわせて検証日と版数つきで、シンボリックリンクと起動時読み込みは 2.16.1 で問題なしと記録する
   - `runtime-smoke-test.sh` に、`agent list` へ `ndf` が現れること、`--set-default` 後に既定が切り替わること、コンテキスト占有率が基準以内であることの検査を追加する
@@ -139,6 +139,7 @@
   - 限定的な検証 → 全体テスト → ビルド・静的解析・型検査・結合テストの段階を定義する
   - 実行していないテストを「通った」と報告することを明示的に禁じる
   - モード別の完了の定義を記載する
+  - カバレッジ閾値を Skill 側に持たず、対象プロジェクトのカバレッジツール設定から読む手順を記載する（[04-development-skills.md](04-development-skills.md)）。設定がない場合は閾値判定を行わない
 
 ### Task 1-5: ライセンスと上流の固定
 

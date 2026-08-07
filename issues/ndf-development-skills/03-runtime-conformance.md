@@ -113,6 +113,8 @@ Kiro CLI には Skill・フック・外部連携・常時指示をまとめて�
 
 `resources` の `file://.kiro/skills/ndf-policies/SKILL.md` はエージェントが選択されていなければ効かない。Kiro の steering はエージェント選択に依存しないため、`.kiro/steering/ndf-policies.md` を生成する。既定エージェントを書き換えない方針を採るため、この移行は必須になる。
 
+配置先は導入スコープに従う。`--scope workspace` では `.kiro/steering/`、`--scope global` では `~/.kiro/steering/` へ生成し、後者はプロジェクト外のディレクトリで起動した場合も参照される。
+
 ## Codex 導入方式の変更
 
 `disable-model-invocation: true` に相当する制御は `agents/openai.yaml` の `policy.allow_implicit_invocation: false` である。このファイルは Skill ディレクトリ配下の `<Skill 名>/agents/openai.yaml` として読まれるため、制御したい Skill ごとに置く必要がある（[Build skills](https://developers.openai.com/codex/skills)）。配布物の直下に単一ファイルを置いても、個別 Skill の暗黙起動には効かない。
@@ -130,6 +132,6 @@ Codex 配布物にこのファイルがないため、`deploy` を含む全 Skil
 
 ## 配布先を広げる際の制約
 
-Agent Skills 仕様が定めるのは `name` / `description` / `license` / `compatibility` / `metadata` / `allowed-tools` の 6 項目のみで、`when_to_use` / `argument-hint` / `disable-model-invocation` / `user-invocable` / `paths` は Claude Code 独自である。
+Agent Skills 仕様が定めるのは `name` / `description` / `license` / `compatibility` / `metadata` / `allowed-tools` の 6 項目のみで、`when_to_use` / `argument-hint` / `arguments` / `disable-model-invocation` / `user-invocable` / `paths` は Claude Code 独自である。
 
 仕様準拠のランタイムは未知の項目を無視するが、claude.ai へのアップロードや Skills API 経由では `Unexpected key(s) in SKILL.md frontmatter` のエラーになる。現在の配布先 3 種では問題にならないが、配布先を広げる際の制約として記録する。

@@ -102,6 +102,8 @@ disable-model-invocation: true   # 破壊的操作を含むため明示指示専
 effort: high
 ```
 
+`arguments` は名前付き引数を宣言する項目で、宣言した名前を本文で `$plan` として参照する。Claude Code 独自の項目であり Agent Skills 仕様には含まれないため、Codex と Kiro では無視される（[03-runtime-conformance.md](03-runtime-conformance.md)）。両ランタイムでは `argument-hint` が示す形式のまま引数全体を本文側で解釈する前提で書く。
+
 `context: fork` は使わない。Claude Code の `/goal` はセッション単位の Stop フックとして動くため、分離した実行単位では評価器が働かない。
 
 ## 事前チェックと確認モード

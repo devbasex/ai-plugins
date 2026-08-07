@@ -53,9 +53,9 @@ review-pr-comments, skill-stats
 | `python-execution` | 0 | 38 | 同上 |
 | `logging-guidelines` | 0 | 3 | 機会自体がほぼない |
 | `plan-to-spec` | 0 | 1 | 機会自体がほぼない |
-| `git-gh-operations` / `knowledge-reorg` / `google-chat` / `mcp-builder` | 0 | 0 | 需要がない |
+| `git-gh-operations` / `knowledge-reorg` / `google-chat` / `mcp-builder` / `data-analyst-sql-optimization` | 0 | 0 | 需要がない |
 
-`ndf-policies` は `user-invocable: false` で説明のみを常時注入する設計のため、起動ゼロは想定どおりであり判定対象外とする。
+`ndf-policies` は `user-invocable: false` で説明のみを常時注入する設計、`skill-stats` は測定ツール自体である。いずれも自然文からの発動を前提としないため判定対象外とする。
 
 ### 測定の限界
 
@@ -65,10 +65,22 @@ review-pr-comments, skill-stats
 
 ### 測定ツールの不具合
 
-`skill-stats` は次の 2 点で今回の測定に使えず、集計は個別に実装した。Task 0-1 の前提となるため、修正するか置き換えるかの判断が要る。
+`skill-stats` は次の 2 点でこの測定に使えず、集計は個別に実装した。Task 0-1 の前提となるため、修正するか置き換えるかの判断が要る。
 
 - 49 個中 48 個で `when_to_use` からのトリガ抽出に失敗し、ヒット率が算出されない
 - 利用者のスラッシュコマンドを数えず、エージェントの自動起動しか数えない。`cross-review` を 14 と報告するが実際は 285
+
+## 整理の判断基準
+
+機能が他 Skill と重複するものは、起動数にかかわらず統合の対象とし、内容は統合先へ残す。統合対象を除いた Skill には、起動数と機会数の 2 軸で次の判定を適用する。**この表を唯一の基準とし、以降の削除・発動改善の区分と [08-verification.md](08-verification.md) のリスク対処もこれに従う。**
+
+| 起動数 | 機会数 | 既定の判定 | 例外として削除する条件 |
+| ---: | ---: | --- | --- |
+| 0 | 0 | 削除 | — |
+| 0 | 1 以上 | 発動改善 | 手順の中身が現在のモデルの標準能力で足り、Skill 固有の知識が残らないとき |
+| 1 以上 | 問わない | 維持 | 起動が 1 回にとどまり、機能が他 Skill または単一のコマンドで代替できるとき |
+
+例外を適用したものは、削除の表に適用した条件を記載する。
 
 ## 統合
 
@@ -81,9 +93,20 @@ review-pr-comments, skill-stats
 | `review` | `review`(58) + `review-branch`(3) | -1 |
 | `cherry-pick-pr` | `cherry-pick-pr`(16) + `branch-fix-strategy`(4) | -1 |
 | `external-ai` | `codex`(4) + `gemini`(1) | -1 |
-| ブラウザ自動テスト 3 個 | 既存 8 個 + `browser-test`（計 20 回） | -6 |
+| ブラウザ自動テスト 4 個 | 既存 8 個 + `browser-test`（計 20 回） | -5 |
 
-合計 **-12**（49 → 37）。
+合計 **-11**（49 → 38）。
+
+ブラウザ自動テストの 9 個は、工程ごとに次の 4 個へまとめる。
+
+| 統合後 | 統合元 |
+| --- | --- |
+| テスト計画 | `playwright-test-planning` + `playwright-scenario-test` |
+| スクリプト作成と実行 | `playwright-script-creation` + `playwright-execution` + `browser-test` + `playwright-browser-connect` |
+| 証跡とレポート | `playwright-report` + `playwright-evidence-drive` |
+| 実行環境の運用 | `playwright-kit-ops` |
+
+`playwright-kit-ops` は実行環境ディレクトリとスクリプトを持つため他へ吸収せず、単独で残す。
 
 統合の方向は実績に従う。`merged` を `git-cleanup` のような新名へ改名しない。`cherry-pick-pr`(16) は知識 Skill の `branch-fix-strategy`(4) より使われているため、実行コマンド側の名前を残す。
 
@@ -91,34 +114,33 @@ review-pr-comments, skill-stats
 
 ## 削除
 
-起動ゼロかつ機会ゼロのもの、および現在のモデルが自力で代替できるものを削除する。
+「整理の判断基準」の表に従って削除する。
 
-| Skill | 起動 / 機会 | 理由 |
-| --- | --- | --- |
-| `git-gh-operations` | 0 / 0 | 需要がない。Git とコマンドラインツールの一般操作は現在のモデルが熟知 |
-| `knowledge-reorg` | 0 / 0 | 需要がない |
-| `google-chat` | 0 / 0 | 需要がない |
-| `mcp-builder` | 0 / 0 | 需要がない |
-| `python-execution` | 0 / 38 | 機会はあるが、実行環境の検出は現在のモデルが自力で行える |
-| `data-analyst-export` | 0 / 45 | データ分析エージェントの定義に直接書けば足りる |
-| `data-analyst-sql-optimization` | 0 / 0 | 同上 |
-| `deepwiki-transfer` | 1 | 最終利用 2026-05-21。以降 2 か月半使われていない |
-| `sync-main` | 1 | 最終利用 2026-07-22。Git 操作 1 コマンドに 48 行を割いている |
+| Skill | 起動 / 機会 | 適用した判定 | 理由 |
+| --- | --- | --- | --- |
+| `git-gh-operations` | 0 / 0 | 既定 | Git とコマンドラインツールの一般操作は現在のモデルが熟知 |
+| `knowledge-reorg` | 0 / 0 | 既定 | 需要がない |
+| `google-chat` | 0 / 0 | 既定 | 需要がない |
+| `mcp-builder` | 0 / 0 | 既定 | 需要がない |
+| `data-analyst-sql-optimization` | 0 / 0 | 既定 | 需要がない |
+| `python-execution` | 0 / 38 | 例外（モデルの標準能力で足りる） | 実行環境の検出はモデルが自力で行える。Skill 固有の知識が残らない |
+| `data-analyst-export` | 0 / 45 | 例外（モデルの標準能力で足りる） | 出力形式の指定のみで、データ分析エージェントの定義に直接書けば足りる |
+| `deepwiki-transfer` | 1 / — | 例外（起動 1 回・代替あり） | 最終利用 2026-05-21。取り込み手順は汎用の取得コマンドで代替できる |
+| `sync-main` | 1 / — | 例外（起動 1 回・代替あり） | 最終利用 2026-07-22。Git 操作 1 コマンドに 48 行を割いており `merged` へ吸収できる |
 
-合計 **-9**（37 → 28）。
+合計 **-9**（38 → 29）。
 
 ## 発動改善
 
-起動ゼロだが機会があるものは、削除ではなく発動条件を見直す。
+起動ゼロだが機会があり、削除の例外に当たらないものは発動条件を見直す。いずれも削除しない。
 
 | Skill | 起動 / 機会 | 対応 |
 | --- | --- | --- |
-| `deploy` | 0 / 340 | 明示指示専用のまま使われていない。実際の運用手順を確認し、不要なら削除、必要なら周知と `description` 改善 |
+| `deploy` | 0 / 340 | 破壊的操作のため明示指示専用は維持する。実際の運用手順を確認したうえで `description` を改善し、利用方法を周知する |
 | `qa-security-scan` | 0 / 66 | `description` に発動条件を含めて自動発動させる |
-| `official-skills-autoloader` | 0 / 43 | 各ランタイムの公式 Skill 提供状況を確認したうえで、発動条件を見直すか削除する |
+| `official-skills-autoloader` | 0 / 43 | 各ランタイムの公式 Skill 提供状況を確認したうえで発動条件を見直す |
 | `logging-guidelines` | 0 / 3 | `paths` でコード変更時に限定する |
 | `plan-to-spec` | 0 / 1 | 機会自体が少ない。運用に組み込まれていないため、[04-development-skills.md](04-development-skills.md) の改修とあわせて発動条件を設計し直す |
-| `skill-stats` | 0 / — | 測定機能が壊れている。修正するか、今回の集計方法へ置き換える |
 
 ## 自動発動の実態
 
@@ -158,7 +180,7 @@ when_to_use: "Claude Code 向けの追加トリガのみ"
 ### 適用方針
 
 - `merged`(247) / `pr`(171) / `review`(57) / `pr-tests`(2) から `disable-model-invocation` を外し、`description` に発動条件を含める。いずれも明示指示でしか使えていない
-- `deploy` は環境ブランチへ書き込む破壊的操作のため明示指示専用を維持する。ただし起動ゼロなので存続自体を判断する
+- `deploy` は環境ブランチへ書き込む破壊的操作のため明示指示専用を維持する。起動ゼロだが機会が 340 あるため、発動改善の対象として `description` を改善する
 - `plan-to-spec` は `description` が 492 文字あるため、要点を残して残りを `when_to_use` へ移す。`cross-review` は逆に `description` が 57 文字で発動条件を含まず、529 文字の `when_to_use` に依存しているため、明示トリガの要点を `description` へ移す
 - 広すぎるトリガを具体化する（`'python'` → `'uv run'` `'venv が見つからない'`、`'git add'` → `'fatal:'` `'non-fast-forward'`、`'調査'` → `'調査レポートを書く'`）
 - frontmatter に `<` と `>` を含めない。Agent Skills 仕様がシステムプロンプトへの注入リスクとして警告している

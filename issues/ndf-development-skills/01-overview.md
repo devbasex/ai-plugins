@@ -25,6 +25,7 @@
 | `when_to_use` | 発動トリガの補足。Claude Code 独自の項目 |
 | `disable-model-invocation` | エージェントによる自動起動を禁じ、利用者の明示指示だけで動かす設定 |
 | `paths` | 指定したファイルを扱うときだけ自動起動させる設定。Claude Code 独自 |
+| `arguments` | 名前付き引数を宣言し、本文で `$名前` として参照する設定。Claude Code 独自 |
 | manifest | ランタイムごとにどの Skill を配布するかを列挙したファイル |
 | ランタイム | Skill を実行する処理系。本プロジェクトでは Claude Code / Codex / Kiro の 3 種 |
 | 上流 | 参考にした外部の Skill 集リポジトリ |
