@@ -6,7 +6,7 @@
 
 | 対象 | 影響 |
 | --- | --- |
-| Skill 総数 | [02-skill-inventory.md](02-skill-inventory.md)「Skill 総数の推移」のとおり、統合と削除で 29 まで減り、新設 9 個（開発方法論レイヤー 8 個 + `execute-plan` 1 個）を加えて最終 38 |
+| Skill 総数 | [02-skill-inventory.md](02-skill-inventory.md)「Skill 総数の推移」のとおり、統合と削除で 29 まで減り、新設 9 個（開発方法論レイヤー 8 個 + `execute-goal` 1 個）を加えて最終 38 |
 | コマンド名 | 起動実績のない `/ndf:clean` `/ndf:review-pr-comments` `/ndf:resolve-pr-comments` `/ndf:git-gh-operations` などが消える。起動上位 5 個（`fix` `cross-review` `merged` `pr` `issue-plan-strategy`、計 1,145 回）は改名しない。`/ndf:codex` `/ndf:gemini`(計 5 回) と `/ndf:branch-fix-strategy`(4 回) `/ndf:sync-main`(1 回) `/ndf:review-branch`(3 回) が変わる |
 | 自動発動の挙動 | `merged` / `review` / `pr` / `pr-tests` が自然文で起動するようになる。起動しない前提の運用があれば変わる |
 | 常時注入されるコンテキスト | 棚卸で削減、新規追加で増加。合計サイズを継続的インテグレーションで監視 |
@@ -62,6 +62,8 @@
 
 ### Release 0 固有
 
+- [ ] 修正後の `skill-stats` が、[02-skill-inventory.md](02-skill-inventory.md)「利用実績の実測」と同じ期間で同じ「計 / 自動 / 明示」を出力する
+- [ ] 修正後の `skill-stats` でトリガ抽出に失敗する Skill が 13 個だけになる（`when_to_use` を持たない 14 個のうち、`plan-to-spec` は `description` にトリガを持つ）
 - [ ] 統合前後で機能が減っていない（統合元の手順が統合先に残っている）
 - [ ] `grep -rn '<削除した Skill 名>'` がリポジトリ全体でヒットしない
 - [ ] `merged` / `pr` / `review` / `pr-tests` が自然文の依頼で起動する

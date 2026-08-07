@@ -65,10 +65,14 @@ review-pr-comments, skill-stats
 
 ### 測定ツールの不具合
 
-`skill-stats` は次の 2 点でこの測定に使えず、集計は個別に実装した。Task 0-1 の前提となるため、修正するか置き換えるかの判断が要る。
+`skill-stats` は次の 2 点でこの測定に使えず、上表の集計は個別に実装した。置き換えではなく `skill-stats` 自体を修正し、以降の計測はこのツールへ一本化する（Task 0-1）。
 
-- 49 個中 48 個で `when_to_use` からのトリガ抽出に失敗し、ヒット率が算出されない
-- 利用者のスラッシュコマンドを数えず、エージェントの自動起動しか数えない。`cross-review` を 14 と報告するが実際は 285
+| 不具合 | 原因 |
+| --- | --- |
+| 49 個中 48 個でトリガ抽出に失敗し、ヒット率が算出されない | 抽出対象が `description` に限られ、トリガ語を列挙している `when_to_use` を読まない。トリガ語が `description` にあるのは 1 個だけで、34 個は `when_to_use` に置かれている（残る 14 個は `when_to_use` 自体がない）。加えて抽出パターンが `Triggers:` 表記に限られるため、`明示トリガ:` と書いている `cross-review` は `when_to_use` を読んでも拾えない |
+| 利用者の明示起動を数えず、`cross-review` を 14 と報告する（実測は 285） | 明示起動は会話ログに `<command-name>/ndf:cross-review</command-name>` を含む利用者メッセージとして残るが、これをシステム由来の記述として除外している。数えているのはエージェントによる `Skill` ツール呼び出しだけである |
+
+トリガ語の所在は `grep -l '^description:.*[Tt]riggers\?:' */SKILL.md`（1 件）と `grep '^when_to_use:' */SKILL.md | grep -ci 'triggers\?:'`（34 件）で確認した。明示起動の形式は会話ログ 1,938 セッションから `<command-name>` を集計して確認しており、`/ndf:cross-review` 273 件、`/ndf:merged` 249 件が現れる。
 
 ## 整理の判断基準
 
@@ -146,7 +150,7 @@ review-pr-comments, skill-stats
 | 区分 | 個数 | 定義場所 |
 | --- | --- | --- |
 | 開発方法論レイヤー | 8 | [04-development-skills.md](04-development-skills.md) |
-| 一気通貫実行（`execute-plan`） | 1 | [05-goal-workflow.md](05-goal-workflow.md) |
+| 一気通貫実行（`execute-goal`） | 1 | [05-goal-workflow.md](05-goal-workflow.md) |
 
 ## 発動改善
 

@@ -17,7 +17,7 @@ flowchart TD
 
 棚卸を最初に置くのは、整理されていない 49 個の上に新設 9 個を積むとトリガ衝突とコンテキスト肥大が悪化するためである。一気通貫実行を最後に置くのは、呼び出す工程 Skill がすべて揃ってからでないと調整役として成立しないためである。
 
-新設 9 個は Release 1 と Release 2 の開発方法論レイヤー 8 個（`requirements-design` / `tdd-cycle` / `safe-refactoring` / `quality-gates` / `development-workflow` / `design-review` / `domain-modeling` / `object-design`）と、Release 3 の `execute-plan` 1 個からなる。段階ごとの Skill 総数は [02-skill-inventory.md](02-skill-inventory.md)「Skill 総数の推移」を参照する。
+新設 9 個は Release 1 と Release 2 の開発方法論レイヤー 8 個（`requirements-design` / `tdd-cycle` / `safe-refactoring` / `quality-gates` / `development-workflow` / `design-review` / `domain-modeling` / `object-design`）と、Release 3 の `execute-goal` 1 個からなる。段階ごとの Skill 総数は [02-skill-inventory.md](02-skill-inventory.md)「Skill 総数の推移」を参照する。
 
 ## バージョンの扱い
 
@@ -67,7 +67,7 @@ PR 1-6 を後段に置くのは、`scripts/check-markdown-links.py` がリンク
 
 | PR # | branch 名 | 概要 | 依存 | 並行可否 |
 | --- | --- | --- | --- | --- |
-| 3-1 | `feature/execute-plan-skill` | `execute-plan` 本体と完了条件の組み立て | なし | ○ |
+| 3-1 | `feature/execute-goal-skill` | `execute-goal` 本体と完了条件の組み立て | なし | ○ |
 | 3-2 | `feature/devskills-eval-harness` | Skill 挙動評価 12 シナリオ + 継続的インテグレーション設定 | なし | ○ |
 | 3-3 | `feature/devskills-spec-consistency` | 仕様・設計・タスクの整合性チェックを `plan-to-spec` へ追加 | なし | ○ |
 | 3-4 | `feature/devskills-docs` | 確定仕様書、`AGENTS.md`、各 README 更新、version bump | 3-1〜3-3 | × |

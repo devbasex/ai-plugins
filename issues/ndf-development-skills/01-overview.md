@@ -37,9 +37,9 @@
 1. **既存 Skill の棚卸** — 49 個ある Skill の重複統合、利用実績の乏しい Skill の整理、frontmatter の見直し
 2. **開発方法論レイヤーの追加** — 8 個の Skill を新設し、要求定義から検証までの工程を埋める
 3. **既存 Skill の改修** — 新レイヤーへの接続
-4. **一気通貫実行の整備** — ランタイム組み込みの `/goal` ループを土台に、設計確定後からリリース直前までを自動で進める `execute-plan` を新設する
+4. **一気通貫実行の整備** — ランタイム組み込みの `/goal` ループを土台に、設計確定後からリリース直前までを自動で進める `execute-goal` を新設する
 
-新設する Skill は、項目 2 の開発方法論レイヤー 8 個と項目 4 の `execute-plan` 1 個をあわせた計 9 個である。段階ごとの Skill 総数は [02-skill-inventory.md](02-skill-inventory.md)「Skill 総数の推移」を唯一の基準とし、本文書では数値を書き下さない。
+新設する Skill は、項目 2 の開発方法論レイヤー 8 個と項目 4 の `execute-goal` 1 個をあわせた計 9 個である。段階ごとの Skill 総数は [02-skill-inventory.md](02-skill-inventory.md)「Skill 総数の推移」を唯一の基準とし、本文書では数値を書き下さない。
 
 外部リポジトリは submodule やコピーで取り込まず、独自の Skill として再執筆し、参照元は `upstream-skills.lock.yaml` で固定する。
 

@@ -2,7 +2,7 @@
 
 用語は [01-overview.md](01-overview.md) を参照。
 
-本文書が扱うのは開発方法論レイヤーの 8 個である。新設する Skill はこれに一気通貫実行の `execute-plan`（[05-goal-workflow.md](05-goal-workflow.md)）1 個を加えた計 9 個であり、段階ごとの Skill 総数は [02-skill-inventory.md](02-skill-inventory.md)「Skill 総数の推移」を参照する。
+本文書が扱うのは開発方法論レイヤーの 8 個である。新設する Skill はこれに一気通貫実行の `execute-goal`（[05-goal-workflow.md](05-goal-workflow.md)）1 個を加えた計 9 個であり、段階ごとの Skill 総数は [02-skill-inventory.md](02-skill-inventory.md)「Skill 総数の推移」を参照する。
 
 ## 新設する Skill
 
@@ -130,9 +130,9 @@ ramziddin/solid-skills の「メソッド 10 行未満」「インスタンス�
 | `skills/pr-tests/SKILL.md` | 限定的な検証と全体テストを区別。実行コマンド・終了コード・実行時刻を証跡として残す | 1-7 |
 | `skills/plan-to-spec/SKILL.md` | ドメイン用語集、不変条件、公開インタフェース、設計判断記録の結論を確定仕様へ引き継ぐ | 1-7 |
 | `skills/investigation-rules/SKILL.md` | トリガ `'調査'` を具体化し、`problem-solving` との境界を明記 | 1-7 |
-| `skills/cross-review/SKILL.md` | 起動対象を `architecture` モード相当の高リスク変更に限定。同じ基準で `execute-plan` のレビュー段階も分岐する（[05-goal-workflow.md](05-goal-workflow.md)） | 2-4 |
+| `skills/cross-review/SKILL.md` | 起動対象を `architecture` モード相当の高リスク変更に限定。同じ基準で `execute-goal` のレビュー段階も分岐する（[05-goal-workflow.md](05-goal-workflow.md)） | 2-4 |
 | `plugins/ndf-claude/agents/director.md` | モード判定は自前で持たず、`development-workflow` を呼んで判定させる。返ったモードに対応する Skill を起動する手順だけを書く | 2-4 |
-| `skills/issue-plan-strategy/SKILL.md` | `execute-plan` から呼ばれる手順として整理し、責務の境界を明記。組み込みの `/goal` ループから直接駆動される実績（8 回）があるため、ターンをまたいで再開できる記述にする | 3-1 |
+| `skills/issue-plan-strategy/SKILL.md` | `execute-goal` から呼ばれる手順として整理し、責務の境界を明記。組み込みの `/goal` ループから直接駆動される実績（8 回）があるため、ターンをまたいで再開できる記述にする | 3-1 |
 
 `review` の二段構成:
 
