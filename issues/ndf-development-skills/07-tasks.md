@@ -1,0 +1,207 @@
+# タスク分解
+
+用語は [01-overview.md](01-overview.md)、PR 番号は [06-release-plan.md](06-release-plan.md) を参照。
+
+## Release 0
+
+### Task 0-1: 棚卸台帳と frontmatter 規約
+
+- **対象ファイル:** `docs/specifications/ndf-skill-inventory.md`、`plugins/ndf-shared/skills/README.md`
+- **変更内容:**
+  - `/ndf:skill-stats` で全 Skill の起動率を実測し、台帳に「Skill 名 / 行数 / frontmatter 設定 / 起動率 / 判定 / 判定根拠」を記録する
+  - 整理候補 8 個について、実測起動率を根拠に「維持 / スコープ限定 / 縮小 / 削除」を確定する
+  - frontmatter 規約（[02-skill-inventory.md](02-skill-inventory.md)）を明文化する
+  - トリガ語の一意性ルールと、広すぎるトリガの禁止例を記載する
+
+### Task 0-2〜0-6: Skill 統合
+
+共通手順:
+
+1. 統合先へ内容を取り込む。単純連結ではなく、重複記述を落として再構成する
+2. 統合元ディレクトリを削除する
+3. `manifests/{claude,codex,kiro}-skills.txt` から統合元を削除する
+4. 他 Skill・エージェント定義・文書からの参照を `grep -rn '<旧 Skill 名>'` で洗い出して更新する
+5. `python3 scripts/check-markdown-links.py` でリンク切れがないことを確認する
+
+個別の注意点:
+
+| PR | 注意点 |
+| --- | --- |
+| 0-2 | `cross-review` が `fix` をループ内で呼ぶ。呼び出し規約を壊さない。`review` は `--branch` 引数でローカル差分レビューに切り替える |
+| 0-3 | 外部 AI 呼び出しの差分を `references/cli-codex.md` / `references/cli-gemini.md` に分離する。`cross-review` は両方を呼ぶため呼び出し箇所を更新する |
+| 0-4 | `cherry-pick-pr` は明示指示専用。統合後も破壊的操作部分は明示指示専用を維持する |
+| 0-5 | `playwright-kit-ops` は実行環境ディレクトリとスクリプトを持つ。移動先を明示し、`build-runtime-plugins.sh` の除外パターンが効く配置を保つ |
+| 0-6 | 削除するのは Task 0-1 の台帳で削除判定されたものに限る |
+
+### Task 0-7: frontmatter 一括見直し
+
+- **対象ファイル:** 全 `SKILL.md` の frontmatter、`scripts/check-skill-frontmatter.py`（新規）、`.github/workflows/runtime-plugin-validate.yml`
+- **変更内容:**
+  - `review` / `pr` / `pr-tests` / `git-cleanup` から `disable-model-invocation` を外し、`when_to_use` を付与する
+  - `deploy` と `cherry-pick-pr` 相当の破壊的操作は明示指示専用を維持する
+  - `when_to_use` 未設定の Skill すべてに付与する
+  - `plan-to-spec` と `cross-review` の長い `description` を `when_to_use` へ移す
+  - 広すぎるトリガを具体化する
+  - `paths` / `effort` / `arguments` / `license` / `metadata` を導入方針に従って付与する
+  - 検査スクリプトを継続的インテグレーションへ組み込む
+
+検査項目:
+
+| 系統 | 失敗条件 |
+| --- | --- |
+| 仕様準拠 | `name` が親ディレクトリ名と不一致 / 64 文字超 / 文字種違反 / 連続ハイフン |
+| 仕様準拠 | `description` が空、または 1,024 文字超 |
+| 仕様準拠 | `compatibility` が 500 文字超 |
+| 安全性 | frontmatter に `<` または `>` が含まれる |
+| 可搬性 | `description` に発動条件を示す語（`Use when` / `使う`）が含まれない |
+| 可搬性 | `description` が二重引用符で囲まれていない |
+| 運用 | `description` が 300 文字超 |
+| 運用 | `description` + `when_to_use` が 1,536 文字超 |
+| 運用 | `SKILL.md` が 500 行超 |
+| 運用 | 全 Skill の frontmatter 合計が基準値超 |
+| 運用 | `disable-model-invocation` があるのに `argument-hint` がない |
+| 運用 | `disable-model-invocation` と `user-invocable: false` が同時指定（誰も起動できなくなる） |
+| 運用 | `context: fork` 以外で `agent` / `background` が指定されている |
+| 運用 | トリガ語が他 Skill と重複 |
+| 運用 | 未知の項目名（`when-to-use` のようなハイフン誤りを弾く） |
+
+### Task 0-8: Codex の規約対応
+
+- **対象ファイル:** `scripts/build-runtime-plugins.sh`、`plugins/ndf-codex/`
+- **変更内容:**
+  - `agents/openai.yaml` をビルド時に生成する。`disable-model-invocation: true` を `policy.allow_implicit_invocation: false` へ変換し、`argument-hint` を `interface.default_prompt` に対応付ける。既存の Codex 用マニフェスト生成処理と同じ形で実装する
+  - 実装前に Codex CLI 実機で `agents/openai.yaml` のスキーマを検証する。検証できない場合はこの PR を保留し、他を先に進める
+
+### Task 0-9: Kiro 導入方式の修正
+
+検証は完了済み（[03-runtime-conformance.md](03-runtime-conformance.md)、kiro-cli 2.16.1 / 2026-08-07）。
+
+- **対象ファイル:** `plugins/ndf-kiro/install.sh`、`plugins/ndf-kiro/agents/default.json.template`、`plugins/ndf-kiro/README.md`、`scripts/runtime-smoke-test.sh`、`docs/specifications/ndf-skill-inventory.md`
+- **変更内容:**
+  - エージェント名を `ndf` にする。`--set-default` オプトインを追加し、指定時のみ `kiro-cli agent set-default ndf` を実行する。実行前に現在の既定を表示して確認を取る
+  - 完了メッセージを `kiro-cli chat --agent ndf` へ修正する
+  - `resources` から `skill://.kiro/skills/**/SKILL.md` を削除する
+  - `.kiro/steering/ndf-policies.md` を生成し、`resources` の `file://.kiro/skills/ndf-policies/SKILL.md` を削除する
+  - `--scope workspace|global`（既定 `workspace`）を追加する
+  - 既存の `.kiro/agents/default.json` を検出したらバックアップし、移行手順を案内する
+  - `README.md` に、プロジェクト配置では `allowed-tools` が事前承認にならないこと（[#6055](https://github.com/kirodotdev/Kiro/issues/6055)）を明記する。あわせて検証日と版数つきで、シンボリックリンクと起動時読み込みは 2.16.1 で問題なしと記録する
+  - `runtime-smoke-test.sh` に、`agent list` へ `ndf` が現れること、`--set-default` 後に既定が切り替わること、コンテキスト占有率が基準以内であることの検査を追加する
+  - 検証結果（日付 / kiro-cli 版数 / 各項目の結果 / 実測占有率）を台帳へ残す
+
+### Task 0-10: 棚卸の仕上げ
+
+- **対象ファイル:** manifest 3 種、`ndf-policies/SKILL.md`、`AGENTS.md`、`CLAUDE.md`、`KIRO.md`、`docs/ndf-plugin-reference.md`、各 runtime `README.md`、`plugin.json`
+- **変更内容:**
+  - 統合と整理の結果を manifest 3 種すべてへ反映する
+  - `ndf-policies` に旧 Skill 名から新 Skill 名への対応表を記載する
+  - version bump 5.0.0
+
+## Release 1
+
+### Task 1-1: `requirements-design`
+
+- **対象ファイル:** `skills/requirements-design/SKILL.md`、`references/spec-template.md`、`references/acceptance-criteria.md`
+- **変更内容:**
+  - 実装前に、目的・成功条件・実行コマンド・プロジェクト構造・コーディング規約・テスト戦略・「常に行う / 確認してから行う / 行わない」の境界を明文化させる
+  - 曖昧な要求をそのまま実装させず、前提条件を明示して検証可能な成功条件へ変換する手順を規定する
+  - `acceptance-criteria.md` に条件記述の形式と、受け入れ条件が満たすべき性質（観測可能・一意・テスト可能）を記載する
+  - `spec-template.md` は `implementation-plan` と重複させず、「何を満たすか」と「どう分解するか」を分離する
+
+### Task 1-2: `tdd-cycle`
+
+- **対象ファイル:** `skills/tdd-cycle/SKILL.md`、`references/test-quality.md`、`references/testing-levels.md`
+- **変更内容:**
+  - [04-development-skills.md](04-development-skills.md) の統合方針を本文化する
+  - 失敗の証跡（実行コマンド・失敗メッセージ・失敗理由が期待どおりか）を必須化する
+  - テスト駆動を適用しない例外（ドキュメント、静的設定、生成物）を明示する
+  - `test-quality.md` に脆いテストの例と代替を記載する
+  - `testing-levels.md` に単体・結合・契約・端から端までの使い分けを記載する
+
+### Task 1-3: `safe-refactoring`
+
+- **対象ファイル:** `skills/safe-refactoring/SKILL.md`、`references/characterization-tests.md`、`references/code-smells.md`、`references/refactoring-catalog.md`
+- **変更内容:**
+  - 「テストがなければ構造改善ではなく単なる編集である」を原則として明記する
+  - テストがある場合と、テストが乏しい既存コードの場合で手順を分岐する
+  - `code-smells.md` に長すぎるメソッド、肥大したクラス、重複、長い引数リスト、他クラスへの過度な関心、基本型への固執、マジックナンバー、深いネスト、デッドコード、過度な相互依存を記載する
+  - `refactoring-catalog.md` にメソッド抽出、型による安全化、戦略の切り出し、責務の連鎖などの適用条件を記載する
+  - 機能変更と構造改善を同一差分に混ぜない規則を置く
+
+### Task 1-4: `quality-gates`
+
+- **対象ファイル:** `skills/quality-gates/SKILL.md`、`references/definition-of-done.md`
+- **変更内容:**
+  - 完了宣言の前に、コマンドを実行してその結果（コマンド、終了コード、実行時刻）を根拠として要求する
+  - 限定的な検証 → 全体テスト → ビルド・静的解析・型検査・結合テストの段階を定義する
+  - 実行していないテストを「通った」と報告することを明示的に禁じる
+  - モード別の完了の定義を記載する
+
+### Task 1-5: ライセンスと上流の固定
+
+- **対象ファイル:** `THIRD_PARTY_NOTICES.md`、`upstream-skills.lock.yaml`
+- **変更内容:** [04-development-skills.md](04-development-skills.md) の「ライセンスと上流の固定」に記載のとおり
+
+### Task 1-6: `development-workflow`
+
+- **対象ファイル:** `skills/development-workflow/SKILL.md`、`references/workflow-modes.md`
+- **変更内容:**
+  - 変更内容から 4 モードを判定するフローを定義する
+  - モードごとに起動する Skill を表で明示する
+  - 標準フローを記載する
+  - この時点で `design-review` / `domain-modeling` / `object-design` は未実装のため、`architecture` モードは Release 2 で有効化すると現状として明記し、リンク切れを作らない
+
+### Task 1-7: 既存 Skill 改修
+
+- **対象ファイル:** `implementation-plan` / `problem-solving` / `review` / `pr-tests` / `plan-to-spec` の各 `SKILL.md`、manifest 3 種、`plugin.json`
+- **変更内容:** [04-development-skills.md](04-development-skills.md) の「既存 Skill の改修」に記載のとおり
+  - `review` は Release 0 で `review-branch` を統合済みのため、ここでは二段構成への再編のみ行う
+  - `bash scripts/build-runtime-plugins.sh` で生成物を同期し、`--check` で差異がないことを確認する
+
+## Release 2
+
+### Task 2-1〜2-3: 設計品質の 3 Skill
+
+- **対象ファイル:** `design-review` / `domain-modeling` / `object-design` の各 `SKILL.md` と補助ファイル
+- **変更内容:**
+  - `design-review`: 文脈収集 → 全体構造レビュー → 詳細レビュー → 判定 の流れを、実装前の設計に適用する
+  - `domain-modeling`: 共通言語、サブドメイン、境界づけられたコンテキスト、コンテキストマップ、エンティティ、値オブジェクト、集約、不変条件、リポジトリ、ドメインサービス、ドメインイベント、腐敗防止層、クリーンアーキテクチャ、ヘキサゴナルアーキテクチャを扱う。適用条件（境界づけられたコンテキストが複数ある、複雑な状態遷移がある、単純な登録参照更新削除で表せない不変条件がある 等）を先に判定させ、単純な管理画面へ集約を持ち込ませない
+  - `object-design`: 設計原則をレビュー質問として使う。パターン採用時は「解決する現在の問題 / 存在する差異 / パターンを使わない単純案 / 採用理由 / 増える複雑性 / 削除条件」の記録を必須化する
+
+### Task 2-4: 振り分けの更新
+
+- **対象ファイル:** `plugins/ndf-claude/agents/director.md`、`skills/cross-review/SKILL.md`、`skills/development-workflow/SKILL.md`、manifest 3 種、`plugin.json`
+- **変更内容:**
+  - `director` の要求理解フェーズにモード判定を追加し、モード別の振り分け表を記載する
+  - `cross-review` の起動条件を高リスク変更に限定する
+  - `development-workflow` の `architecture` モードを有効化する
+
+## Release 3
+
+### Task 3-1: 一気通貫実行機能
+
+- **対象ファイル:** `skills/goal/SKILL.md`、`references/stop-conditions.md`、`references/state-format.md`
+- **変更内容:** [05-goal-workflow.md](05-goal-workflow.md) に記載のとおり
+
+### Task 3-2: Skill 挙動評価
+
+- **対象ファイル:** `tests/skill-eval/`、`.github/workflows/skill-eval.yml`
+- **評価シナリオ:**
+  1. ドキュメント修正でフル工程を要求しない
+  2. 新しい振る舞いをテストより先に実装しようとすると止める
+  3. バグ修正では再現テストを先に作る
+  4. テストのない既存コードでは現状固定テストへ切り替える
+  5. 差異が 1 つしかない処理に戦略や生成の抽象化を導入しない
+  6. 集約の不変条件を上位層から迂回して変更するとレビューで検出する
+  7. 内部メソッドの呼出回数だけを検証する脆いテストを検出する
+  8. コマンド実行結果なしの完了報告を拒否する
+  9. 機能変更と無関係な大規模構造改善を同じ差分へ混ぜない
+  10. `architecture` モードでは設計レビュー前に実装へ進まない
+  11. 「レビューして」の自然文で `review` が自動起動する
+  12. 一気通貫実行がリリース用プルリクエストを下書きのまま残して停止する
+
+### Task 3-3〜3-4: 整合性チェックと文書整備
+
+- **対象ファイル:** `plan-to-spec/SKILL.md`、`docs/specifications/ndf-development-workflow.md`、`AGENTS.md`、`docs/ndf-plugin-reference.md`、各 runtime `README.md`
+- **変更内容:**
+  - 変更単位で提案・仕様・設計・タスクの整合性を確認する観点を `plan-to-spec` へ追加する。ディレクトリ構造は既存の `issues/` → 確定仕様化 → `docs/` を維持する
+  - `bash scripts/runtime-smoke-test.sh` で 3 ランタイムとも新 Skill が読み込まれることを確認する
