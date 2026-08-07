@@ -59,10 +59,14 @@ transcript JSONL 先頭の `cwd` フィールドを優先してプロジェク�
 
 | 項目 | 定義 |
 |---|---|
-| **呼び出し数** (invocations) | `assistant` メッセージ内の `tool_use.name=="Skill"` で `input.skill=="ndf:<name>"` の件数 |
-| **関連話題数** (triggers) | `user` メッセージのテキストに、skillの `description` / Triggers キーワードが含まれる件数 |
-| **ヒット数** (hits) | 関連話題を含むユーザーメッセージの直後 (次のユーザーメッセージまでの間) に該当skillが呼ばれた件数 |
+| **自動起動数** (auto) | `assistant` メッセージ内の `tool_use.name=="Skill"` で `input.skill=="ndf:<name>"` の件数 |
+| **明示起動数** (explicit) | `user` メッセージの `<command-name>/ndf:<name></command-name>` の件数。プラグイン接頭辞のない `/name` 形式も同じ skill として数える |
+| **呼び出し数** (invocations) | 自動起動数 + 明示起動数 |
+| **関連話題数** (triggers) | `user` メッセージのテキストに、skillの `description` / `when_to_use` に列挙された Triggers キーワードが含まれる件数 |
+| **ヒット数** (hits) | 関連話題を含むユーザーメッセージの直後 (次のユーザーメッセージまでの間) に該当skillが**自動起動**した件数。間にスラッシュコマンドが入った場合はそこで打ち切る (利用者が自分で打った時点でトリガは発火しなかったため) |
 | **ヒット率** (hit_rate) | `hits / triggers` (%) |
+
+Triggers キーワードは `Triggers:` と `明示トリガ:` のどちらの見出しでも抽出する。
 
 ### ヒット率の解釈
 
@@ -73,12 +77,12 @@ transcript JSONL 先頭の `cwd` フィールドを優先してプロジェク�
 ## 出力例 (Markdown)
 
 ```
-| skill | 呼び出し数 | 関連話題 | ヒット | ヒット率 |
-|---|---:|---:|---:|---:|
-| ndf:pr | 12 | 25 | 10 | 40.0% |
-| ndf:fix | 3 | 8 | 3 | 37.5% |
+| skill | triggers源 | 計 | 自動 | 明示 | 関連話題 | ヒット | ヒット率 |
+|---|---|---:|---:|---:|---:|---:|---:|
+| ndf:pr | none | 12 | 2 | 10 | - | - | - |
+| ndf:fix | explicit | 11 | 3 | 8 | 8 | 3 | 37.5% |
 ...
-| **合計** | **56** | **142** | **45** | **31.7%** |
+| **合計** | | **56** | **14** | **42** | **142** | **45** | **31.7%** |
 ```
 
 ## 前提条件
@@ -89,8 +93,8 @@ transcript JSONL 先頭の `cwd` フィールドを優先してプロジェク�
 
 ## 制限事項
 
-- **モデル起動型以外は関連話題数が計算できない場合がある**: `disable-model-invocation: true` の skill (例: `/ndf:pr` などのワークフロー系) は、ユーザーが明示的にスラッシュコマンドで呼び出すのが通常。triggers キーワードが description に明示されていなければ「関連話題」が 0 となり、ヒット率も計算不能となる
-- **ユーザーメッセージのパース**: `<local-command-*>`, `<command-name>`, `<system-reminder>` タグは除外する。tool_result ブロックも除外
+- **モデル起動型以外は関連話題数が計算できない場合がある**: `disable-model-invocation: true` の skill (例: `/ndf:pr` などのワークフロー系) は、ユーザーが明示的にスラッシュコマンドで呼び出すのが通常。triggers キーワードが `description` / `when_to_use` のどちらにも明示されていなければ「関連話題」が 0 となり、ヒット率も計算不能となる
+- **ユーザーメッセージのパース**: 関連話題の判定では `<local-command-*>`, `<command-name>`, `<system-reminder>` タグを除外する (tool_result ブロックも除外)。明示起動数だけは `<command-name>` を対象に数える
 - **日本語キーワードマッチ**: 単純な部分一致 (case-insensitive) のため、文脈を考慮した判定ではない
 
 ## 関連スキル
