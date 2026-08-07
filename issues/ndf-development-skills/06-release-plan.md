@@ -32,7 +32,7 @@ Skill 名の統合は既存のコマンド名を壊す。`4.20.1` → **`5.0.0`*
 | 0-5 | `feature/inventory-merge-playwright` | ブラウザ自動テスト 9 個 → 4 個へ集約 | 0-1 | ○ |
 | 0-6 | `feature/inventory-delete` | 起動ゼロ 9 個の削除、発動改善対象の `description` 見直し | 0-1 | ○ |
 | 0-7 | `feature/inventory-frontmatter` | 全 Skill の frontmatter 見直しと検査スクリプト追加 | 0-2〜0-6 | × |
-| 0-8 | `feature/inventory-codex-conformance` | Codex の `agents/openai.yaml` 生成 | 0-7 | ○ |
+| 0-8 | `feature/inventory-codex-conformance` | Codex の Skill ごとの `agents/openai.yaml` 生成 | 0-7 | ○ |
 | 0-9 | `feature/inventory-kiro-delivery` | Kiro 導入方式の修正 | 0-7 | ○ |
 | 0-10 | `feature/inventory-finalize` | manifest 3 種の更新、旧名からの移行案内、文書更新、version bump | 0-8, 0-9 | × |
 

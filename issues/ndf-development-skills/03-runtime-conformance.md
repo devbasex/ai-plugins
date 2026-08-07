@@ -11,10 +11,10 @@ Skill は Claude Code / Codex / Kiro に配布する。2026-08-07 時点の各�
 | 準拠 | Agent Skills 仕様 + 独自拡張（全 17 項目） | 仕様の `name` / `description` が必須 | Agent Skills 仕様に準拠と明記 |
 | 文書化された項目 | 17 | 2 | 5（`name` / `description` / `license` / `compatibility` / `metadata`） |
 | 配置 | `.claude/skills/`、プラグインの `skills/` | `.agents/skills/`（作業ディレクトリ → リポジトリルート → ホーム → システム） | `.kiro/skills/`（プロジェクト）/ `~/.kiro/skills/`（全体） |
-| 発動制御 | `disable-model-invocation` / `user-invocable` | `agents/openai.yaml` の `policy.allow_implicit_invocation` | 文書化された制御手段なし |
-| 引数 | `argument-hint` / `arguments` | `agents/openai.yaml` の `interface.default_prompt` | なし |
+| 発動制御 | `disable-model-invocation` / `user-invocable` | Skill ごとの `<Skill 名>/agents/openai.yaml` の `policy.allow_implicit_invocation` | 文書化された制御手段なし |
+| 引数 | `argument-hint` / `arguments` | Skill ごとの `<Skill 名>/agents/openai.yaml` の `interface.default_prompt` | なし |
 | `when_to_use` | 対応 | 文書なし | 文書なし |
-| `allowed-tools` | 対応（ターン単位） | `agents/openai.yaml` の `dependencies.tools` | プロジェクト配置では機能しない |
+| `allowed-tools` | 対応（ターン単位） | Skill ごとの `<Skill 名>/agents/openai.yaml` の `dependencies.tools` | プロジェクト配置では機能しない |
 | 段階的読み込み | メタデータのみ起動時、本文は発動時 | 起動時に `name` + `description` をシステムプロンプトへ読み込み | メタデータのみ起動時、本文はファイル読み取りで取得 |
 
 ## `description` に発動条件を含める
@@ -115,9 +115,18 @@ Kiro CLI には Skill・フック・外部連携・常時指示をまとめて�
 
 ## Codex 導入方式の変更
 
-`disable-model-invocation: true` に相当する制御は `agents/openai.yaml` の `policy.allow_implicit_invocation: false` である。Codex 配布物にこのファイルがないため、`deploy` を含む全 Skill が暗黙起動できる状態にある。
+`disable-model-invocation: true` に相当する制御は `agents/openai.yaml` の `policy.allow_implicit_invocation: false` である。このファイルは Skill ディレクトリ配下の `<Skill 名>/agents/openai.yaml` として読まれるため、制御したい Skill ごとに置く必要がある（[Build skills](https://developers.openai.com/codex/skills)）。配布物の直下に単一ファイルを置いても、個別 Skill の暗黙起動には効かない。
 
-`scripts/build-runtime-plugins.sh` で `agents/openai.yaml` を生成する。既存の Codex 用マニフェスト生成処理と同じ形で実装できる。
+```text
+plugins/ndf-codex/skills/deploy/
+├── SKILL.md
+└── agents/
+    └── openai.yaml
+```
+
+Codex 配布物にこのファイルがないため、`deploy` を含む全 Skill が暗黙起動できる状態にある。
+
+`scripts/build-runtime-plugins.sh` で、`disable-model-invocation: true` を持つ Skill それぞれに `agents/openai.yaml` を生成する。既存の Codex 用マニフェスト生成処理と同じ形で実装できる。
 
 ## 配布先を広げる際の制約
 

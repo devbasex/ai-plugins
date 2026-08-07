@@ -124,7 +124,9 @@ review-pr-comments, skill-stats
 
 `fix` の自動起動 235 回は**すべてサブエージェントのセッション**で発生しており、`cross-review` のループからの内部呼び出しである。利用者の自然文から独立して発見された起動は 64 回の明示指示のみとなる。
 
-`merged`(247) `pr`(171) `cross-review`(271) `review`(57) は、いずれもほぼ全数が利用者の明示指示である。これらは `disable-model-invocation: true` が付いており自動起動できない。自然文からの発動を有効にする対象として優先度が高い。
+`merged`(247) `pr`(171) `review`(57) は、いずれもほぼ全数が利用者の明示指示である。これらは `disable-model-invocation: true` が付いており自動起動できない。自然文からの発動を有効にする対象として優先度が高い。
+
+`cross-review`(271) も明示指示が大半だが、事情が異なる。`disable-model-invocation` は付いておらず、`when_to_use` が明示トリガ限定と宣言することで自動起動を抑えている。
 
 一方 `implementation-plan`(33) `investigation-rules`(30) は全数が自動起動であり、現在の `when_to_use` が機能している例といえる。
 
@@ -148,16 +150,16 @@ when_to_use: "Claude Code 向けの追加トリガのみ"
 | --- | --- | --- | --- | --- |
 | 自動発動（既定） | `when_to_use` 併記 | 既定で暗黙起動可 | 自動ロード | 知識・判断基準・ワークフロー |
 | パス限定自動発動 | 上記 + `paths` | `paths` 無効 | `paths` 無効 | 特定ディレクトリでのみ意味を持つもの |
-| 明示指示専用 | `disable-model-invocation: true` + `argument-hint` | `agents/openai.yaml` の `policy.allow_implicit_invocation: false` | 制御手段なし。`description` に「利用者が明示的に指示したときのみ実行する」と記載 | 破壊的操作・外部への書き込み |
+| 明示指示専用 | `disable-model-invocation: true` + `argument-hint` | Skill ごとの `<Skill 名>/agents/openai.yaml` の `policy.allow_implicit_invocation: false` | 制御手段なし。`description` に「利用者が明示的に指示したときのみ実行する」と記載 | 破壊的操作・外部への書き込み |
 | 常時注入のみ | `user-invocable: false` | 相当機能なし | 相当機能なし | `ndf-policies` |
 
 `disable-model-invocation: true` の Skill は `description` がコンテキストへ載らない。`user-invocable: false` は載る。
 
 ### 適用方針
 
-- `merged`(247) / `pr`(171) / `cross-review`(271) / `review`(57) / `pr-tests`(2) から `disable-model-invocation` を外し、`description` に発動条件を含める。いずれも明示指示でしか使えていない
+- `merged`(247) / `pr`(171) / `review`(57) / `pr-tests`(2) から `disable-model-invocation` を外し、`description` に発動条件を含める。いずれも明示指示でしか使えていない
 - `deploy` は環境ブランチへ書き込む破壊的操作のため明示指示専用を維持する。ただし起動ゼロなので存続自体を判断する
-- `plan-to-spec` と `cross-review` は `description` に長文を入れているため、`when_to_use` へ移して `description` を短くする
+- `plan-to-spec` は `description` が 492 文字あるため、要点を残して残りを `when_to_use` へ移す。`cross-review` は逆に `description` が 57 文字で発動条件を含まず、529 文字の `when_to_use` に依存しているため、明示トリガの要点を `description` へ移す
 - 広すぎるトリガを具体化する（`'python'` → `'uv run'` `'venv が見つからない'`、`'git add'` → `'fatal:'` `'non-fast-forward'`、`'調査'` → `'調査レポートを書く'`）
 - frontmatter に `<` と `>` を含めない。Agent Skills 仕様がシステムプロンプトへの注入リスクとして警告している
 - `description` は二重引用符で囲む。Kiro はコロンを含む未引用の `description` を持つ Skill を検出対象から落とす（[kirodotdev/Kiro#8329](https://github.com/kirodotdev/Kiro/issues/8329)）

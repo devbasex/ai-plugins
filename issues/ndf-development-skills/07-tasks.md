@@ -39,10 +39,10 @@
 
 - **対象ファイル:** 全 `SKILL.md` の frontmatter、`scripts/check-skill-frontmatter.py`（新規）、`.github/workflows/runtime-plugin-validate.yml`
 - **変更内容:**
-  - `merged` / `pr` / `cross-review` / `review` / `pr-tests` から `disable-model-invocation` を外し、`description` に発動条件を含める
+  - `merged` / `pr` / `review` / `pr-tests` から `disable-model-invocation` を外し、`description` に発動条件を含める
   - `deploy` と `cherry-pick-pr` 相当の破壊的操作は明示指示専用を維持する
   - `when_to_use` 未設定の Skill すべてに付与する
-  - `plan-to-spec` と `cross-review` の長い `description` を `when_to_use` へ移す
+  - `plan-to-spec` の長い `description` は要点を残して `when_to_use` へ移す。`cross-review` は逆に、`when_to_use` に置いた明示トリガの要点を `description` へ移す
   - 広すぎるトリガを具体化する
   - `paths` / `effort` / `arguments` / `license` / `metadata` を導入方針に従って付与する
   - 検査スクリプトを継続的インテグレーションへ組み込む
@@ -69,10 +69,12 @@
 
 ### Task 0-8: Codex の規約対応
 
-- **対象ファイル:** `scripts/build-runtime-plugins.sh`、`plugins/ndf-codex/`
+- **対象ファイル:** `scripts/build-runtime-plugins.sh`、`plugins/ndf-codex/skills/<Skill 名>/agents/openai.yaml`
 - **変更内容:**
-  - `agents/openai.yaml` をビルド時に生成する。`disable-model-invocation: true` を `policy.allow_implicit_invocation: false` へ変換し、`argument-hint` を `interface.default_prompt` に対応付ける。既存の Codex 用マニフェスト生成処理と同じ形で実装する
-  - 実装前に Codex CLI 実機で `agents/openai.yaml` のスキーマを検証する。検証できない場合はこの PR を保留し、他を先に進める
+  - Codex は `agents/openai.yaml` を Skill ディレクトリ配下のファイルとして読む（[Build skills](https://developers.openai.com/codex/skills)）。単一ファイルでは個別 Skill の暗黙起動を制御できないため、`disable-model-invocation: true` を持つ Skill それぞれに `skills/<Skill 名>/agents/openai.yaml` をビルド時に生成する
+  - `disable-model-invocation: true` を `policy.allow_implicit_invocation: false` へ変換し、`argument-hint` を `interface.default_prompt` に対応付ける。既存の Codex 用マニフェスト生成処理と同じ形で実装する
+  - 生成対象を持たない Skill にはファイルを置かない。`build-runtime-plugins.sh --check` で生成物の差異を検出できる状態を保つ
+  - 実装前に Codex CLI 実機でスキーマと配置を検証する。検証できない場合はこの PR を保留し、他を先に進める
 
 ### Task 0-9: Kiro 導入方式の修正
 
@@ -154,7 +156,7 @@
 
 ### Task 1-7: 既存 Skill 改修
 
-- **対象ファイル:** `implementation-plan` / `problem-solving` / `review` / `pr-tests` / `plan-to-spec` の各 `SKILL.md`、manifest 3 種、`plugin.json`
+- **対象ファイル:** `implementation-plan` / `problem-solving` / `review` / `pr-tests` / `plan-to-spec` / `investigation-rules` の各 `SKILL.md`、manifest 3 種、`plugin.json`
 - **変更内容:** [04-development-skills.md](04-development-skills.md) の「既存 Skill の改修」に記載のとおり
   - `review` は Release 0 で `review-branch` を統合済みのため、ここでは二段構成への再編のみ行う
   - `bash scripts/build-runtime-plugins.sh` で生成物を同期し、`--check` で差異がないことを確認する
@@ -181,12 +183,13 @@
 
 ### Task 3-1: 一気通貫実行
 
-- **対象ファイル:** `skills/execute-plan/SKILL.md`、`references/goal-conditions.md`
+- **対象ファイル:** `skills/execute-plan/SKILL.md`、`references/goal-conditions.md`、`skills/issue-plan-strategy/SKILL.md`
 - **変更内容:** [05-goal-workflow.md](05-goal-workflow.md) に記載のとおり
   - `goal` という名前は使わない。Claude Code と Codex の組み込みコマンド名と衝突する
   - 継続ループを実装しない。組み込みの `/goal` へ渡す完了条件を組み立てる
   - `goal-conditions.md` に、評価器がツールを呼ばない前提で書く条件文の型と例を置く
   - Kiro には継続ループがないため、段階ごとに続行指示を要する手順として動く旨を明記する
+  - `issue-plan-strategy` を `execute-plan` から呼ばれる手順として整理する。詳細は [04-development-skills.md](04-development-skills.md) の「既存 Skill の改修」に記載のとおり
 
 ### Task 3-2: Skill 挙動評価
 
