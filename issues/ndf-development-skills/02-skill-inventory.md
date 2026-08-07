@@ -200,7 +200,7 @@ when_to_use: "Claude Code 向けの追加トリガのみ"
 - `merged`(247) / `pr`(171) / `review`(57) / `pr-tests`(2) から `disable-model-invocation` を外し、`description` に発動条件を含める。いずれも明示指示でしか使えていない
 - `deploy` は環境ブランチへ書き込む破壊的操作のため明示指示専用を維持する。起動ゼロだが機会が 340 あるため、発動改善の対象として `description` を改善する
 - `when_to_use` は Claude Code 向けの追加トリガが要る Skill にだけ付与する。主要トリガは `description` に置くため、未設定であること自体は不備とせず、一律付与もしない（[03-runtime-conformance.md](03-runtime-conformance.md)）
-- `plan-to-spec` は `description` が 492 文字あるため、要点を残して残りを `when_to_use` へ移す。`cross-review` は逆に `description` が 57 文字で発動条件を含まず、529 文字の `when_to_use` に依存しているため、明示トリガの要点を `description` へ移す
+- `plan-to-spec` は `description` が 401 文字あるため、要点を残して残りを `when_to_use` へ移す。`cross-review` は逆に `description` が 42 文字で発動条件を含まず、254 文字の `when_to_use` に依存しているため、明示トリガの要点を `description` へ移す
 - 広すぎるトリガを具体化する（`'python'` → `'uv run'` `'venv が見つからない'`、`'git add'` → `'fatal:'` `'non-fast-forward'`、`'調査'` → `'調査レポートを書く'`）
 - frontmatter に `<` と `>` を含めない。Agent Skills 仕様がシステムプロンプトへの注入リスクとして警告している
 - `description` は二重引用符で囲む。Kiro はコロンを含む未引用の `description` を持つ Skill を検出対象から落とす（[kirodotdev/Kiro#8329](https://github.com/kirodotdev/Kiro/issues/8329)）

@@ -119,7 +119,7 @@ Claude Code と Codex は完了条件まで作業を継続する `/goal` を組�
 
 ## 参照
 
-- 調査レポート: [../report01.md](../report01.md)
+- 調査レポート: [../report01.md](../report01.md)（同レポートの基準日は 2026-08-08。本プランの実測と検証は 2026-08-07 時点であり、両者は別の基準日に基づく）
 - 仕様: [Agent Skills Specification](https://agentskills.io/specification)
 - 仕様: [Claude Code Skills — Frontmatter reference](https://code.claude.com/docs/en/skills#frontmatter-reference)
 - 仕様: [Codex — Build skills](https://learn.chatgpt.com/docs/build-skills)
