@@ -15,7 +15,8 @@ Skill は Claude Code / Codex / Kiro に配布する。2026-08-07 時点の各�
 | 引数 | `argument-hint` / `arguments` | Skill ごとの `<Skill 名>/agents/openai.yaml` の `interface.default_prompt` | なし |
 | `when_to_use` | 対応 | 文書なし | 文書なし |
 | `allowed-tools` | 対応（ターン単位） | Skill ごとの `<Skill 名>/agents/openai.yaml` の `dependencies.tools` | プロジェクト配置では機能しない |
-| 段階的読み込み | メタデータのみ起動時、本文は発動時 | 起動時に `name` + `description` をシステムプロンプトへ読み込み | メタデータのみ起動時、本文はファイル読み取りで取得 |
+| 段階的読み込み | メタデータのみ起動時、本文は発動時 | 起動時に `name` + `description` + ファイルパスをシステムプロンプトへ読み込み | メタデータのみ起動時、本文はファイル読み取りで取得 |
+| 初期一覧の総量予算 | 文書なし | コンテキストウィンドウの 2%、不明時は 8,000 文字。超過時は `description` を短縮し、なお超えると Skill を一覧から省略して警告（[02-skill-inventory.md](02-skill-inventory.md)） | 文書なし |
 
 ## `description` に発動条件を含める
 
@@ -23,7 +24,7 @@ Codex と Kiro は `when_to_use` を文書化していない。仕様は未知�
 
 現状は `description` を英語 1 行の「何をするか」だけにし、「いつ使うか」を Claude Code 独自項目へ置いている。Agent Skills 仕様は `description` について「what the skill does and when to use it」の両方を書くよう求めており、現状の構造では Codex と Kiro で発動精度が落ちる。
 
-`description` に「何をするか + 主要トリガ」を入れ、`when_to_use` は Claude Code 向けの追加トリガに限定する。
+`description` に「何をするか + 主要トリガ」を入れ、`when_to_use` は Claude Code 向けの追加トリガに限定する。Codex は初期一覧が予算を超えると `description` を短縮するため、主要トリガは先頭へ置く。
 
 ## Kiro の実機検証結果
 

@@ -44,6 +44,7 @@
   - `when_to_use` 未設定の Skill すべてに付与する
   - `plan-to-spec` の長い `description` は要点を残して `when_to_use` へ移す。`cross-review` は逆に、`when_to_use` に置いた明示トリガの要点を `description` へ移す
   - 広すぎるトリガを具体化する
+  - `description` の先頭に主要な用途とトリガ語を置き、合計を Codex の初期一覧予算へ収める（[02-skill-inventory.md](02-skill-inventory.md)「Codex の初期一覧予算」）
   - `paths` / `effort` / `arguments` / `license` / `metadata` を導入方針に従って付与する
   - 検査スクリプトを継続的インテグレーションへ組み込む
 
@@ -57,7 +58,9 @@
 | 安全性 | frontmatter に `<` または `>` が含まれる |
 | 可搬性 | `description` に発動条件を示す語（`Use when` / `使う`）が含まれない |
 | 可搬性 | `description` が二重引用符で囲まれていない |
+| 可搬性 | `description` の最初の 1 文に主要な用途とトリガ語が含まれない（Codex が短縮しても暗黙起動が働くようにする） |
 | 運用 | `description` が 300 文字超 |
+| 運用 | Codex の初期一覧に載る合計（全 Skill の `name` + `description` + ファイルパス）が 8,000 文字超 |
 | 運用 | `description` + `when_to_use` が 1,536 文字超 |
 | 運用 | `SKILL.md` が 500 行超 |
 | 運用 | 全 Skill の frontmatter 合計が基準値超 |
@@ -177,7 +180,7 @@
 - **対象ファイル:** `plugins/ndf-claude/agents/director.md`、`skills/cross-review/SKILL.md`、`skills/development-workflow/SKILL.md`、manifest 3 種、`plugin.json`
 - **変更内容:**
   - `director` の要求理解フェーズにモード判定を追加し、モード別の振り分け表を記載する
-  - `cross-review` の起動条件を高リスク変更に限定する
+  - `cross-review` の起動条件を高リスク変更に限定する。この基準は Task 3-1 の `execute-plan` のレビュー段階の分岐と共有する（[05-goal-workflow.md](05-goal-workflow.md)）
   - `development-workflow` の `architecture` モードを有効化する
 
 ## Release 3
@@ -190,6 +193,7 @@
   - 継続ループを実装しない。組み込みの `/goal` へ渡す完了条件を組み立てる
   - `goal-conditions.md` に、評価器がツールを呼ばない前提で書く条件文の型と例を置く
   - Kiro には継続ループがないため、段階ごとに続行指示を要する手順として動く旨を明記する
+  - レビュー段階は最初のモード判定の結果で呼び先を分ける。`light` / `standard` / `legacy-refactor` は `review`、`architecture` と途中で検出した高リスク変更は `cross-review`。Task 2-4 で限定した `cross-review` の起動条件と同じ基準にする
   - `issue-plan-strategy` を `execute-plan` から呼ばれる手順として整理する。詳細は [04-development-skills.md](04-development-skills.md) の「既存 Skill の改修」に記載のとおり
 
 ### Task 3-2: Skill 挙動評価
