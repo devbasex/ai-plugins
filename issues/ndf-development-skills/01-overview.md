@@ -8,7 +8,7 @@
 | [02-skill-inventory.md](02-skill-inventory.md) | 既存 Skill の棚卸（統合・削除・設定規約） |
 | [03-runtime-conformance.md](03-runtime-conformance.md) | Claude Code / Codex / Kiro の規約差分と対応 |
 | [04-development-skills.md](04-development-skills.md) | 新設する 8 個の Skill と既存 Skill の改修 |
-| [05-goal-workflow.md](05-goal-workflow.md) | 設計確定後の一気通貫実行機能 |
+| [05-goal-workflow.md](05-goal-workflow.md) | 設計確定後の一気通貫実行 |
 | [06-release-plan.md](06-release-plan.md) | リリース分割と PR 分割 |
 | [07-tasks.md](07-tasks.md) | タスク分解 |
 | [08-verification.md](08-verification.md) | 影響範囲、リスク、テスト計画、未確認事項 |
@@ -36,7 +36,7 @@
 1. **既存 Skill の棚卸** — 49 個ある Skill の重複統合、利用実績の乏しい Skill の整理、frontmatter の見直し
 2. **開発方法論レイヤーの追加** — 8 個の Skill を新設し、要求定義から検証までの工程を埋める
 3. **既存 Skill の改修** — 新レイヤーへの接続
-4. **一気通貫実行機能の新設** — 設計確定後、リリース直前まで開発ワークフローを自動で進める
+4. **一気通貫実行の整備** — ランタイム組み込みの `/goal` ループを土台に、設計確定後からリリース直前までを自動で進める `execute-plan` を新設する
 
 外部リポジトリは submodule やコピーで取り込まず、独自の Skill として再執筆し、参照元は `upstream-skills.lock.yaml` で固定する。
 
@@ -102,6 +102,8 @@ review, statusline, sync-main
 
 `issue-plan-strategy` がリリースブランチ作成から個別プルリクエスト、相互レビュー、マージまでの手順を文書として定義しているが、実行するのは利用者の逐次指示である。設計が固まった後も各ステップを起動し続ける必要がある。
 
+Claude Code と Codex は完了条件まで作業を継続する `/goal` を組み込みで持ち、`/goal /ndf:cross-review 14256` のように NDF の Skill を駆動した記録が 8 回ある。継続ループは既に存在するため、不足しているのは条件文の組み立てと工程の接続である。
+
 ## 外部 Skill 集を丸ごと取り込まない理由
 
 | 上流 | 取り込まない理由 |
@@ -119,5 +121,6 @@ review, statusline, sync-main
 - 仕様: [Claude Code Skills — Frontmatter reference](https://code.claude.com/docs/en/skills#frontmatter-reference)
 - 仕様: [Codex — Build skills](https://learn.chatgpt.com/docs/build-skills)
 - 仕様: [Kiro — Skills](https://kiro.dev/docs/skills/)
+- 組み込み機能: [Claude Code — Keep Claude working toward a goal](https://code.claude.com/docs/en/goal) / [Codex — Slash commands](https://developers.openai.com/codex/guides/slash-commands/)
 - 検証ツール: [skills-ref](https://github.com/agentskills/agentskills/tree/main/skills-ref)
 - 上流候補: [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills) / [obra/superpowers](https://github.com/obra/superpowers) / [wshobson/agents](https://github.com/wshobson/agents) / [github/awesome-copilot](https://github.com/github/awesome-copilot) / [modu-ai/moai-adk](https://github.com/modu-ai/moai-adk)

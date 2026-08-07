@@ -118,7 +118,7 @@ ramziddin/solid-skills の「メソッド 10 行未満」「インスタンス�
 | `skills/pr-tests/SKILL.md` | 限定的な検証と全体テストを区別。実行コマンド・終了コード・実行時刻を証跡として残す |
 | `skills/plan-to-spec/SKILL.md` | ドメイン用語集、不変条件、公開インタフェース、設計判断記録の結論を確定仕様へ引き継ぐ |
 | `skills/cross-review/SKILL.md` | 起動対象を `architecture` モード相当の高リスク変更に限定 |
-| `skills/issue-plan-strategy/SKILL.md` | 一気通貫実行機能から呼ばれる手順として整理し、責務の境界を明記 |
+| `skills/issue-plan-strategy/SKILL.md` | `execute-plan` から呼ばれる手順として整理し、責務の境界を明記。組み込みの `/goal` ループから直接駆動される実績（8 回）があるため、ターンをまたいで再開できる記述にする |
 | `skills/investigation-rules/SKILL.md` | トリガ `'調査'` を具体化し、`problem-solving` との境界を明記 |
 | `plugins/ndf-claude/agents/director.md` | 4 モードを判定して Skill へ振り分ける |
 

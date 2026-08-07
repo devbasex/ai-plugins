@@ -179,10 +179,14 @@
 
 ## Release 3
 
-### Task 3-1: 一気通貫実行機能
+### Task 3-1: 一気通貫実行
 
-- **対象ファイル:** `skills/goal/SKILL.md`、`references/stop-conditions.md`、`references/state-format.md`
+- **対象ファイル:** `skills/execute-plan/SKILL.md`、`references/goal-conditions.md`
 - **変更内容:** [05-goal-workflow.md](05-goal-workflow.md) に記載のとおり
+  - `goal` という名前は使わない。Claude Code と Codex の組み込みコマンド名と衝突する
+  - 継続ループを実装しない。組み込みの `/goal` へ渡す完了条件を組み立てる
+  - `goal-conditions.md` に、評価器がツールを呼ばない前提で書く条件文の型と例を置く
+  - Kiro には継続ループがないため、段階ごとに続行指示を要する手順として動く旨を明記する
 
 ### Task 3-2: Skill 挙動評価
 
@@ -199,7 +203,7 @@
   9. 機能変更と無関係な大規模構造改善を同じ差分へ混ぜない
   10. `architecture` モードでは設計レビュー前に実装へ進まない
   11. 「レビューして」の自然文で `review` が自動起動する
-  12. 一気通貫実行がリリース用プルリクエストを下書きのまま残して停止する
+  12. 一気通貫実行がリリース用プルリクエストを下書きのまま残して完了条件を満たす
 
 ### Task 3-3〜3-4: 整合性チェックと文書整備
 

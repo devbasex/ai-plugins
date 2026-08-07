@@ -65,7 +65,7 @@ PR 1-6 を後段に置くのは、`scripts/check-markdown-links.py` がリンク
 
 | PR # | branch 名 | 概要 | 依存 | 並行可否 |
 | --- | --- | --- | --- | --- |
-| 3-1 | `feature/goal-skill` | `goal` 本体、停止条件、状態ファイル形式 | なし | ○ |
+| 3-1 | `feature/execute-plan-skill` | `execute-plan` 本体と完了条件の組み立て | なし | ○ |
 | 3-2 | `feature/devskills-eval-harness` | Skill 挙動評価 12 シナリオ + 継続的インテグレーション設定 | なし | ○ |
 | 3-3 | `feature/devskills-spec-consistency` | 仕様・設計・タスクの整合性チェックを `plan-to-spec` へ追加 | なし | ○ |
 | 3-4 | `feature/devskills-docs` | 確定仕様書、`AGENTS.md`、各 README 更新、version bump | 3-1〜3-3 | × |

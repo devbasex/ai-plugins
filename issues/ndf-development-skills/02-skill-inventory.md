@@ -185,7 +185,7 @@ Claude Code は 17 項目を提供するが、現在使っているのは 7 項�
 | 項目 | 適用先 |
 | --- | --- |
 | `paths` | `ml-model-structure`（`analysis/**`）、ブラウザ自動テスト群（`tests/**` `e2e/**`）、`logging-guidelines`、`python-execution`（残す場合） |
-| `context: fork` + `background: false` | 一気通貫実行機能、`cross-review`（長時間実行をメインコンテキストから隔離） |
+| `context: fork` + `background: false` | `cross-review`（長時間実行をメインコンテキストから隔離）。組み込みの `/goal` と併用する Skill には使わない。セッション単位の Stop フックとして動く評価器が分離実行では働かない |
 | `effort: high` | `design-review`、`domain-modeling`、`review` |
 | `arguments` | `argument-hint` を持つ全 Skill。引数の手動解析を名前付き引数に置き換える |
 | `license` / `metadata` | 上流由来 Skill に参照元名・固定コミット・ライセンスを記録 |
