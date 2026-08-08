@@ -1,7 +1,7 @@
 ---
 name: official-skills-autoloader
-description: "Install an Anthropic official Skill on demand (docx / pptx / xlsx / pdf / frontend-design / webapp-testing / mcp-builder) and run it. Use when a request needs Office or PDF output that no local Skill covers. Triggers: 'Word作成', 'Excel出力', 'スライド生成', 'PDF作成'"
-when_to_use: "Claude Code 専用。~/.claude/skills/ へ公式 Skill を取得して読み込む。追加トリガ: '.docx', '.pptx', '.xlsx', '.pdf', 'MCPサーバーを作りたい', 'フロントエンド設計'"
+description: "Install an Anthropic official Skill on demand and run it. Use when a request needs Office or PDF output that no local Skill covers. Triggers: 'Word作成', 'Excel出力', 'スライド生成', 'PDF作成'. 対象は docx / pptx / xlsx / pdf / frontend-design / webapp-testing / mcp-builder。取得元・書き込み先・対象 Skill を提示して同意を得てから実行する。"
+when_to_use: "Claude Code 専用。~/.claude/skills/ へ公式 Skill を取得して読み込む。インストールは同意を得てから実行する。追加トリガ: '.docx', '.pptx', '.xlsx', '.pdf', 'MCPサーバーを作りたい', 'フロントエンド設計'"
 allowed-tools:
   - Bash
   - Read
@@ -9,7 +9,7 @@ allowed-tools:
 
 # 公式Skill自動ローダー
 
-ユーザーの要求から必要なAnthropic公式Skillを特定し、未インストールなら自動でインストール→読込して作業を進めます。利用者は**インストール作業を意識する必要がありません**。
+ユーザーの要求から必要なAnthropic公式Skillを特定し、未インストールなら**同意を得たうえで**インストール→読込して作業を進めます。利用者はインストール手順そのものを調べる必要はありませんが、**外部リポジトリの取得とホームディレクトリへの書き込みは同意なしに行いません**。
 
 ## 対応マッピング
 
@@ -32,6 +32,42 @@ allowed-tools:
 
 配布先は `plugins/ndf-shared/manifests/claude-skills.txt` のみとする。Codex / Kiro の manifest には載せない。
 
+## インストール前の同意取得（必須）
+
+この Skill は自然文の依頼でも起動する。インストールは**外部リポジトリの取得**と
+**ホームディレクトリ配下への書き込み**を伴い、利用者が明示的に頼んでいない操作になりうる。
+**ステップ3 を実行する前に、以下の 4 点を一覧で提示して利用者の同意を得る。同意が得られなければ
+インストールを行わず、その Skill を使わない方法で作業を続けるか、作業を中断する。**
+
+| 提示する項目 | 値 |
+|---|---|
+| 対象 Skill 名 | ステップ1 で特定した名前（複数なら全件） |
+| クローン元 URL | `https://github.com/anthropics/skills.git`（`--depth 1`） |
+| クローン先 | `${XDG_CACHE_HOME:-$HOME/.cache}/anthropic-skills`（実際に展開したパスを表示する） |
+| symlink を張る先 | `$HOME/.claude/skills/<対象 Skill 名>` |
+
+提示例:
+
+```
+公式 Skill `pptx` が未インストールです。インストールしてよろしいですか。
+- 取得元: https://github.com/anthropics/skills.git (--depth 1)
+- 取得先: /home/user/.cache/anthropic-skills
+- リンク作成先: /home/user/.claude/skills/pptx
+- 対象 Skill: pptx
+```
+
+規則:
+
+- 「インストールしてよいですか」だけを尋ねるのは確認にならない。**上記 4 点を必ず示す**
+- 利用者が `/ndf:official-skills-autoloader pptx` のように対象を指定して明示起動した場合や、
+  「公式 Skill を入れて」のように依頼自体がインストールを含む場合は、その依頼を同意とみなす。
+  それでも取得元・取得先・リンク作成先は提示する
+- **暗黙起動（「スライドを作って」等）の場合は、提示のうえ明示的な同意を得てから実行する**
+- すでにインストール済み（ステップ2 が `INSTALLED`）ならインストールは発生しないため、
+  同意取得は不要。ステップ4 へ進む
+- ライセンスがプロプライエタリな Skill（`docx` / `pptx` / `xlsx` / `pdf`）では、
+  「注意事項 > ライセンス」の制約もあわせて提示する
+
 ## 動作手順
 
 ### ステップ1: 対象Skillを特定
@@ -51,7 +87,10 @@ else
 fi
 ```
 
-### ステップ3: 未インストールなら自動インストール
+### ステップ3: 未インストールならインストール
+
+**「インストール前の同意取得（必須）」を先に実施し、同意を得てからこのコマンドを実行する。**
+同意が得られていない状態でこのブロックを実行してはならない。
 
 ```bash
 SKILL_NAME="<対象名>"
@@ -77,7 +116,7 @@ ln -sfn "$CACHE_DIR/skills/$SKILL_NAME" "$USER_SKILLS/$SKILL_NAME"
 echo "Installed: $USER_SKILLS/$SKILL_NAME"
 ```
 
-ユーザーには「公式Skill `<name>` を準備しています...」と一言伝える。
+同意を得たうえで実行し、ユーザーには「公式Skill `<name>` を準備しています...」と一言伝える。
 
 ### ステップ4: SKILL.mdを読み込んで実行
 
@@ -100,7 +139,7 @@ Read(file_path="$HOME/.claude/skills/<SKILL_NAME>/SKILL.md")
 
 - cache: `~/.cache/anthropic-skills/` （XDG準拠）
 - リンク先: `~/.claude/skills/<name>/` （ユーザー領域）
-- プロジェクト単位で配置したい場合は `plugins/ndf-shared/scripts/install-official-skills.sh --scope project <name>` を直接実行
+- プロジェクト単位で配置したい場合は `bash ${CLAUDE_PLUGIN_ROOT}/scripts/install-official-skills.sh --scope project <name>` を直接実行
 
 ### 再読込
 
@@ -108,9 +147,15 @@ Read(file_path="$HOME/.claude/skills/<SKILL_NAME>/SKILL.md")
 
 ### 手動管理したい場合
 
-- 一覧表示: `bash plugins/ndf-shared/scripts/install-official-skills.sh --list`
-- 更新: `bash plugins/ndf-shared/scripts/install-official-skills.sh --update`
-- 明示的なインストール: `bash plugins/ndf-shared/scripts/install-official-skills.sh <name...>`
+スクリプトはプラグインの配布物に含まれる。`${CLAUDE_PLUGIN_ROOT}` は Claude Code が
+インストール済みプラグインのルートに展開する環境変数で、`scripts/` はその直下にある。
+
+- 一覧表示: `bash ${CLAUDE_PLUGIN_ROOT}/scripts/install-official-skills.sh --list`
+- 更新: `bash ${CLAUDE_PLUGIN_ROOT}/scripts/install-official-skills.sh --update`
+- 明示的なインストール: `bash ${CLAUDE_PLUGIN_ROOT}/scripts/install-official-skills.sh <name...>`
+
+リポジトリを直接 clone して作業している場合は `plugins/ndf-claude/scripts/install-official-skills.sh`
+（編集元は `plugins/ndf-shared/scripts/install-official-skills.sh`）を使う。
 
 ## エラーハンドリング
 

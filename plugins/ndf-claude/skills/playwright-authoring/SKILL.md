@@ -245,5 +245,6 @@ Chrome DevTools MCP の利用可能な方を自動選択する。どちらも使
 - `/ndf:review --branch` — 変更差分のコードレビュー
 - `/ndf:pr-tests` — PR Test Plan の自動実行
 
-> `playwright-planning` / `playwright-evidence` / `playwright-kit-ops` は Codex 公開セットに同梱される。
-> Claude Code / Kiro CLI では `plugins/ndf-shared/skills/` を直接参照する。
+> `playwright-planning` / `playwright-evidence` / `playwright-kit-ops` は Codex 公開セットにのみ同梱される。
+> Claude Code / Kiro CLI のプラグインには含まれないため、必要な場合はリポジトリ
+> [devbasex/ai-plugins](https://github.com/devbasex/ai-plugins) の `plugins/ndf-shared/skills/` を参照する。

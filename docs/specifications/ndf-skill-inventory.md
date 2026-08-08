@@ -177,6 +177,7 @@ frontmatter を [規約](../../plugins/ndf-shared/skills/README.md) へ揃えた
 | `merged` / `pr` | 実行前確認を必須手順として本文へ固定 | 上記 2 つは取り消しの難しい操作（worktree / ブランチ削除、push と PR 作成）を含む。自動発動を許すかわりに、削除・書き込みの直前に対象を一覧提示して同意を得る手順を `SKILL.md` と `description` に固定した。`disable-model-invocation` を解釈しない Codex / Kiro でも同じ安全性が働く |
 | `deploy` / `cherry-pick-pr` / `statusline` | 明示指示専用を維持 | 環境ブランチへの書き込みと設定ファイルの書き換えを伴う。`description` に「利用者が明示的に指示したときのみ実行する」と明記し、Codex / Kiro でも意図が伝わるようにした |
 | `ndf-policies` | `user-invocable: false` を維持 | `description` に「知識として参照するだけで、手順として実行しない」と明記した |
+| `official-skills-autoloader` | 自動発動を維持し、実行前確認を必須手順として本文へ固定 | 本 PR で Claude Code の manifest へ追加したことで暗黙起動が可能になり、外部リポジトリの clone と `~/.claude/skills/` への symlink 作成が同意なしに走りうる状態になった。明示指示専用（`disable-model-invocation`）も検討したが、この Skill は起動 0 / 機会 97 で台帳の判定が「発動改善」であり、明示専用は判定と逆行して機会 97 をそのまま取りこぼす。また `~/.claude/skills/` を読むのは Claude Code だけで Codex / Kiro には配布しないが、`disable-model-invocation` は Claude Code でも発動制御であって実行前確認ではないため、これだけでは同意取得を保証できない。したがって `merged` / `pr` と同じ「自動発動 + 実行前確認」を採り、クローン元 URL・クローン先・symlink を張る先・対象 Skill 名の 4 点を一覧提示して同意を得る手順を `SKILL.md` と `description` に固定した |
 
 ### 配布先
 
@@ -202,10 +203,15 @@ frontmatter を [規約](../../plugins/ndf-shared/skills/README.md) へ揃えた
 | --- | ---: | ---: | ---: |
 | 検査エラー | 33 | 0 | 0 |
 | 検査警告 | 16 | 0 | — |
-| `description` 最大 | 401 | 288 | 300 |
-| Claude Code 初期一覧 | 3,133 | 6,029 | 8,000 |
-| Codex 初期一覧 | 3,933 | 6,466 | 8,000 |
-| frontmatter 合計 | 12,724 | 12,145 | 13,000 |
+| `description` 最大 | 401 | 296 | 300 |
+| Claude Code 初期一覧 | 3,133 | 6,036 | 8,000 |
+| Codex 初期一覧 | 3,933 | 6,473 | 8,000 |
+| frontmatter 合計 | 12,724 | 12,211 | 13,000 |
+
+見直し後の値は `python3 scripts/check-skill-frontmatter.py --report` の出力（Skill 29 個、
+エラー 0 / 警告 0）である。Claude Code の初期一覧は 1 項目を 250 文字で切り詰めてから積むため、
+`description` を 250 文字より長くしても合計は増えない。Codex の初期一覧は Codex の manifest に
+載る Skill だけを数えるため、Claude Code 限定の `official-skills-autoloader` は含まれない。
 
 初期一覧の合計が増えているのは、`when_to_use` に置いていたトリガ語を `description` へ移し、
 Codex と Kiro でも発動判定に効くようにしたためである。

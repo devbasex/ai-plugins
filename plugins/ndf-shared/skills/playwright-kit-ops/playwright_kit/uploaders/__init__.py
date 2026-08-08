@@ -45,7 +45,7 @@ def _ensure_google_auth_on_path() -> None:
         "Google Drive 連携には optional skill `google-auth` が必要です。\n"
         "Codex 公開セットには同梱していないため、Drive 系コマンドを使う前に "
         "`GOOGLE_AUTH_SCRIPTS` を google-auth/scripts へ設定してください。\n"
-        "例: export GOOGLE_AUTH_SCRIPTS=/path/to/plugins/ndf-shared/skills/google-auth/scripts\n"
+        "例: export GOOGLE_AUTH_SCRIPTS=<ai-plugins のパス>/plugins/ndf-shared/skills/google-auth/scripts\n"
         "検索した候補:\n  - "
         f"{searched}"
     )
