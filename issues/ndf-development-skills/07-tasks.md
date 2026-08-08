@@ -45,6 +45,7 @@
 - **変更内容:**
   - `merged` / `pr` / `review` / `pr-tests` から `disable-model-invocation` を外し、`description` に発動条件を含める
   - `deploy` と `cherry-pick-pr` 相当の破壊的操作は明示指示専用を維持する
+  - 0-4 で `cherry-pick-pr` に統合した `branch-fix-strategy` 由来の核心ルール（環境ブランチへの適用原則、ブランチ汚染の回避）を、常時読み込まれる `ndf-policies` へ移す。明示指示専用の Skill に閉じ込めた知識が自然文の質問から参照できなくなる退行を防ぐ
   - 主要トリガは `description` に入れる。`when_to_use` は Claude Code 向けの追加トリガが要る Skill にだけ付与し、`description` で足りるものには付けない（[03-runtime-conformance.md](03-runtime-conformance.md)）
   - `plan-to-spec` の長い `description` は要点を残して `when_to_use` へ移す。`cross-review` は逆に、`when_to_use` に置いた明示トリガの要点を `description` へ移す
   - 広すぎるトリガを具体化する
