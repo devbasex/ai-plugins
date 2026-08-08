@@ -1,6 +1,6 @@
 {
   "name": "ndf",
-  "description": "NDF統合開発エージェント（Kiro CLI用）",
+  "description": "NDF統合開発エージェント（Kiro CLI用 / v{{VERSION}}）",
   "tools": [
     "*"
   ],

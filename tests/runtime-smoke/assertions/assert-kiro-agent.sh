@@ -37,6 +37,27 @@ test -f "$AGENT_FILE"
 test -s "$STEERING_FILE"
 find -L "$KIRO_DIR/skills" -path '*/SKILL.md' -print | grep -q .
 
+# Kiro 配布物は plugin.json を持たないため、版数は VERSION ファイルと導入後の
+# エージェント description でしか確認できない。両者が一致することを検査する。
+VERSION_FILE="$REPO_ROOT/plugins/ndf-kiro/VERSION"
+test -s "$VERSION_FILE"
+ndf_version="$(tr -d '[:space:]' < "$VERSION_FILE")"
+# grep だと 5.0.0 の . が任意文字に一致するため、JSON を読んで厳密に照合する。
+python3 - "$AGENT_FILE" "$ndf_version" >> "$LOG" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+agent_file, version = sys.argv[1:3]
+description = json.loads(Path(agent_file).read_text(encoding="utf-8")).get("description", "")
+expected = f"NDF統合開発エージェント（Kiro CLI用 / v{version}）"
+if description != expected:
+    raise SystemExit(
+        f"installed agent description must be {expected!r}, got {description!r}"
+    )
+print(f"kiro version surfaced: v{version}")
+PY
+
 # ndf-policies は steering として配置する。Skill としても置くと Kiro 組み込みルールの
 # Skill 読み込みと steering 読み込みで文脈へ二重注入される。
 if [ -e "$KIRO_DIR/skills/ndf-policies" ]; then
