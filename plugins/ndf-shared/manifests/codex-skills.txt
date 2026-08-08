@@ -1,9 +1,8 @@
-branch-fix-strategy
 cherry-pick-pr
-clean
 cross-review
 deploy
 docker-container-access
+external-ai
 fix
 implementation-plan
 investigation-rules
@@ -20,5 +19,5 @@ playwright-planning
 pr
 pr-tests
 problem-solving
+qa-security-scan
 review
-sync-main

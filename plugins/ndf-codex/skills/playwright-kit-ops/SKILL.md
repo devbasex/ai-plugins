@@ -1,7 +1,6 @@
 ---
 name: playwright-kit-ops
-description: "Operate playwright_kit setup, scans, and evidence tools."
-when_to_use: "playwright_kit のスクリプトを実行するとき / E2E テストプロジェクトの初期化 / page role 自動分類 / 単発 a11y・CWV スキャン / Google Drive エビデンスアップロードが必要なとき。Triggers: 'init_project', 'プロジェクト初期化', 'classify_page_role', 'run_a11y_scan', 'check_cwv', 'upload_evidence', 'record_scenario', 'playwright_kit 実行'"
+description: "Run the playwright_kit scripts: project init, page-role classification, one-off a11y / CWV scans, and Drive upload helpers. Use when a playwright_kit script has to be run directly. Triggers: 'init_project.sh', 'classify_page_role.py', 'run_a11y_scan.py', 'upload_evidence.py'"
 allowed-tools:
   - Read
   - Bash(python *)
@@ -59,12 +58,14 @@ cd /path/to/your-app
 ./scenario-test/run.sh --pwk-drive-folder=<ID>    # Drive 自動アップロード
 ```
 
-Drive 連携は optional dependency として扱う。Codex 公開セットには `google-auth`
-skill を同梱しないため、Drive 系コマンドや `--pwk-drive-folder` を使う場合は
-`GOOGLE_AUTH_SCRIPTS` を `google-auth/scripts` の実パスへ設定する。
+Drive 連携は optional dependency として扱う。`google-auth` skill はどのランタイムの
+配布物にも同梱していないため、Drive 系コマンドや `--pwk-drive-folder` を使う場合は
+リポジトリ [devbasex/ai-plugins](https://github.com/devbasex/ai-plugins) を clone し、
+`GOOGLE_AUTH_SCRIPTS` をその clone 先の `google-auth/scripts` へ設定する。
 
 ```bash
-export GOOGLE_AUTH_SCRIPTS=/path/to/plugins/ndf-shared/skills/google-auth/scripts
+# <ai-plugins を clone した先> を実パスに置き換える
+export GOOGLE_AUTH_SCRIPTS=<ai-plugins のパス>/plugins/ndf-shared/skills/google-auth/scripts
 cd scenario-test
 uv sync --extra drive
 ```

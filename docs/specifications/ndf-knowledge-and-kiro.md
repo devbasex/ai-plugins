@@ -31,7 +31,7 @@ Kiro CLI 用設定は `.kiro/agents/ndf.json` で管理する。agent 設定は 
 
 Kiro CLI では `plugins/ndf-kiro/install.sh` が `plugins/ndf-kiro/skills/` から `.kiro/skills/` への symlink、`.kiro/steering/ndf-policies.md`、`.kiro/agents/ndf.json` を生成する。`ndf-policies` は steering の生成元としてのみ使い、`.kiro/skills/` へは symlink しない。Kiro は `.kiro/skills/*/SKILL.md` と `.kiro/steering/**/*.md` の両方を文脈へ読み込むため、両方に置くと同じ内容が 2 回注入されるからである。manifest（`plugins/ndf-shared/manifests/kiro-skills.txt`）には steering の生成元として残す。`--scope global` を指定した場合の生成先は `~/.kiro/` 配下になる。生成した agent は既定にならないため、`--set-default` を指定したときだけ `kiro-cli agent set-default ndf` を実行する。`kiro-cli` は workspace agent を cwd 配下の `.kiro/agents/` からのみ検出するため、この呼び出しは導入先（`workspace` なら `--project` のパス、`global` なら `$HOME`）で行い、`agent list` で反映を検証する（`set-default` は agent 未検出でも終了コード 0 を返すため）。`agentSpawn` hook は初期化時の案内に使い、`--with-slack` 指定時のみ `stop` hook 相当の Slack 通知を有効化する。Kiro の stop hook payload に `assistant_response` が含まれる場合、`plugins/ndf-kiro/scripts/slack-notify.js` は transcript よりも `assistant_response` を優先して要約に使う。
 
-Codex 連携は MCP サーバではなく `/ndf:codex` skill と `corder` エージェント経由の Codex CLI 直接実行を標準とする。Kiro 用 `--with-codex` は Kiro セッションから Codex CLI を扱う場合の補助設定である。
+Codex 連携は MCP サーバではなく `/ndf:external-ai` skill と `corder` エージェント経由の Codex CLI 直接実行を標準とする。Kiro 用 `--with-codex` は Kiro セッションから Codex CLI を扱う場合の補助設定である。
 
 ## データ・設定
 
@@ -48,7 +48,7 @@ Codex 連携は MCP サーバではなく `/ndf:codex` skill と `corder` エー
 |---|---|
 | Kiro CLI | `.kiro/agents/ndf.json`、`.kiro/steering/`、`.kiro/skills/` で Skill / hook / MCP 設定を提供 |
 | Serena MCP | `mcp-serena` プラグインとして分離提供 |
-| Codex CLI | `/ndf:codex` skill と `corder` エージェントから直接実行 |
+| Codex CLI | `/ndf:external-ai` skill と `corder` エージェントから直接実行 |
 | Slack | Claude Code / Kiro / Codex の終了通知に使用 |
 
 ## テスト観点

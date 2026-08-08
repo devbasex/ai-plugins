@@ -1,6 +1,6 @@
 ---
 name: logging-guidelines
-description: "Choose log levels and write safe, useful application logs when adding or reworking logging in code（ログ追加 / logger / ログレベル / デバッグログ / エラーログ / print文をログに）. Use when editing source code that emits logs, to pick the level and keep secrets and personal data out of the output."
+description: "Choose log levels and keep secrets and personal data out of application logs. Use when adding, reworking, or reviewing logging in source code. Triggers: 'ログ追加', 'ログレベルを決める', 'ログ設計', 'print文をログに', 'ログに個人情報'"
 paths:
   - "**/*.py"
   - "**/*.ts"

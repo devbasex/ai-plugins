@@ -1,8 +1,7 @@
 ---
 name: pr
-description: "Commit, push, and create or update PRs."
+description: "Commit, push, and create or update a pull request. push と PR 作成の前に対象ブランチ・base・変更ファイルを提示して同意を取る。Use when asked to commit and open a PR, update a PR, or push work for review. Triggers: 'PRを作って', 'PR作成', 'コミットしてプッシュ', 'PRを更新', 'draft PR'"
 argument-hint: "[--draft] [base-branch] or [commit-message]"
-disable-model-invocation: true
 allowed-tools:
   - Bash
   - Read
@@ -33,6 +32,28 @@ allowed-tools:
 - それ以外の文字列はコミットメッセージとして扱う
 - デフォルトは `main` ベース、非ドラフト
 
+## push / PR 作成前の同意取得（必須）
+
+push と PR 作成は外部（GitHub）への書き込みで、取り消しには追加の操作が要る。
+この Skill は自然文の依頼でも起動するため、安全性はこの手順で担保する
+（frontmatter の発動制御には依存しない）。
+
+**手順 4（プッシュ）と手順 5（PR 作成）の直前に、次を提示する。**
+
+- push 先のブランチ名と、PR のベースブランチ
+- コミット対象のファイル一覧（`git status --short`）と変更量（`git diff --stat`）
+- 使用するコミットメッセージ
+- 既存 PR の有無（新規作成なのか、既存 PR の更新なのか）
+
+同意の扱い:
+
+- 利用者の依頼が push と PR 作成まで明示的に含む場合（`/ndf:pr` の明示起動、
+  「コミットしてPRを作って」等）は、その依頼を同意とみなしてよい。提示は行い、
+  結果報告に含める
+- それ以外（作業の流れで暗黙に起動した場合）は、提示したうえで**明示的な同意を得てから
+  push する**。同意が得られなければ commit までで止め、push も PR 作成も行わない
+- ベースブランチが `main`/`master` 以外の場合は、手順 2 の誘導を優先する
+
 ## 手順
 
 ### 0. PR確認
@@ -40,7 +61,7 @@ allowed-tools:
 - `git branch --show-current` で現在ブランチを確認
 - `gh pr list --head <branch>` で既存PR確認
 - 既にPRが存在しOPEN状態なら:
-  - `git add` → `git commit`（日本語メッセージ）→ `git push`
+  - `git add` → `git commit`（日本語メッセージ）→ **「push / PR 作成前の同意取得」に従って提示** → `git push`
   - **既存PR説明を更新** する（「PR説明の更新」節を参照）
   - 終了報告
 - PRがない、またはmerge/close済みなら次へ
@@ -54,7 +75,7 @@ allowed-tools:
 
 - 引数の末尾が `main`/`master` 以外のベースブランチ名（`qa/staging`, `release/v2` 等）の場合:
   - **警告を出して `/ndf:cherry-pick-pr <base>` に誘導する**
-  - 理由: base非mainのPRに直接pushすると `feature → main` のPRに環境固有コードが混入する（詳細は `/ndf:branch-fix-strategy`）
+  - 理由: base非mainのPRに直接pushすると `feature → main` のPRに環境固有コードが混入する（詳細は `/ndf:cherry-pick-pr`）
   - ユーザーが明示的に継続を指示した場合のみ進める
 
 ### 3. 変更コミット
@@ -65,12 +86,16 @@ allowed-tools:
 
 ### 4. プッシュ
 
+**「push / PR 作成前の同意取得」に従って提示し、同意を確認してから実行する。**
+
 ```bash
 git push -u origin <branch-name>
 ```
 
 ### 5. PR作成
 
+- **作成する PR のタイトル・ベースブランチ・ドラフト有無を提示してから実行する**
+  （手順 4 で一括して同意を得ている場合は再確認不要）
 - `.github/pull_request_template.md` が存在すれば適用
 - `--draft` 指定ならドラフトPR作成
 - タイトル・説明は日本語、body は `## Summary` + `## Test plan`
@@ -137,9 +162,7 @@ feature/xxx ──PR──→ qa/staging   ← ❌ qa/staging をmergeするとm
 
 ### 正しい手順
 
-`/ndf:cherry-pick-pr <base-branch>` を使う（自動化済み）。詳細な理由と手順は:
-- `/ndf:cherry-pick-pr` — 自動化コマンド
-- `/ndf:branch-fix-strategy` — 原則と手順
+`/ndf:cherry-pick-pr <base-branch>` を使う（自動化済み）。原則と手順は `/ndf:cherry-pick-pr` に記載のとおり。
 
 ## 作業完了報告（必須）
 
@@ -157,5 +180,4 @@ PR作成/更新完了後、以下を報告:
 - `/ndf:deploy` — 環境ブランチへのデプロイPR（ブランチ全体）
 - `/ndf:pr-tests` — Test Plan 自動実行
 - `/ndf:review` — PR単位レビュー
-- `/ndf:sync-main` — 現ブランチに main を取り込み
-- `/ndf:branch-fix-strategy` — ブランチ戦略の原則
+- `/ndf:merged` — マージ後のブランチ整理 / 現ブランチに main を取り込み

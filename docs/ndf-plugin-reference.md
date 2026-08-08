@@ -65,7 +65,7 @@ NDF の Skill 実装は `plugins/ndf-shared/skills/` が編集元です。公開
 主な Skill 領域:
 
 - PR / review workflow: `pr`, `pr-tests`, `fix`, `review`, `cross-review`
-- branch / release workflow: `deploy`, `cherry-pick-pr`, `sync-main`, `merged`, `clean`
+- branch / release workflow: `deploy`, `cherry-pick-pr`, `merged`
 - planning / documentation: `implementation-plan`, `issue-plan-strategy`, `plan-to-spec`, `markdown-writing`
 - quality / execution: `playwright-*`, `docker-container-access`
 - external services: `google-drive`
@@ -99,7 +99,7 @@ bash scripts/runtime-smoke-test.sh --runtime kiro
 
 ## 外部 AI 委譲
 
-Codex MCP サーバは廃止済みです。外部 AI 委譲は `/ndf:codex` Skill と Claude Code 版の `corder` エージェントから Codex CLI を直接呼び出す方式を標準とします。
+Codex MCP サーバは廃止済みです。外部 AI 委譲は `/ndf:external-ai` Skill と Claude Code 版の `corder` エージェントから Codex / Gemini CLI を直接呼び出す方式を標準とします。
 
 ## Slack 通知
 

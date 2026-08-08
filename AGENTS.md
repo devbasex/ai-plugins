@@ -78,7 +78,7 @@ ai-plugins/
 - Claude Code版は 8個の専門サブエージェント、公開Skills、SessionStart/Stopフックを提供
 - Codex版は Codex向け公開Skillsと任意Slack通知hookを提供
 - Kiro版は installer で `.kiro/skills/`、`.kiro/steering/ndf-policies.md`、`.kiro/agents/ndf.json` を生成
-- 外部AI委譲は `/ndf:codex` skill と `corder` エージェント経由で Codex CLI を呼び出し（v4.0.0 で Codex MCP サーバは廃止）
+- 外部AI委譲は `/ndf:external-ai` skill と `corder` エージェント経由で Codex / Gemini CLI を呼び出し（v4.0.0 で Codex MCP サーバは廃止）
 
 詳細は各 runtime README と `docs/ndf-plugin-reference.md` を参照。
 

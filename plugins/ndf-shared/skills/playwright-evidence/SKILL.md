@@ -1,7 +1,6 @@
 ---
 name: playwright-evidence
-description: "Generate the Playwright test report and store its evidence on Google Drive. Use when generating report.md, sharing E2E test results, or uploading video / trace / HAR evidence to Drive (テストレポート / テスト結果共有 / テスト報告書 / エビデンス保管 / Drive アップロード)."
-when_to_use: "レポート生成 / エビデンスのチーム配布 / Drive リンクを埋め込んだ Google Docs 作成が必要なとき。Triggers: 'report.md', 'pwk-drive-folder', 'upload_evidence', 'gdrive_upload_dir', 'trace viewer', 'report を Docs に'"
+description: "Generate the Playwright test report and store its evidence on Google Drive. Use when producing report.md, sharing E2E results, or archiving video / trace / HAR evidence. Triggers: 'report.md', 'テスト報告書', 'エビデンスをDriveへ保管', 'trace viewer'"
 allowed-tools:
   - Read
   - Bash(python *)
