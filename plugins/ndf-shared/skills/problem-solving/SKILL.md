@@ -131,7 +131,7 @@ Layer 4: 出力時検証（結果の妥当性チェック）
 
 - 根本原因の修正とデータ修復は**別コミット**にする（Revertしやすい）
 - 重複コードは発見次第リファクタリングする
-- 検証環境向けPRは `cherry-pick-pr` 方式で作成し、mainブランチを汚染しない（詳細は `branch-fix-strategy` スキル参照）
+- 検証環境向けPRは `cherry-pick-pr` 方式で作成し、mainブランチを汚染しない（詳細は `cherry-pick-pr` スキル参照）
 
 ## 6. 調査レポートの書き方
 
@@ -158,5 +158,5 @@ SQLクエリ結果をそのまま貼り、「コードを読んだ推測」と�
 ## 関連スキル
 
 - `/ndf:investigation-rules` — 調査レポート作成時のエビデンス主義
-- `/ndf:branch-fix-strategy` — 複数ブランチへの修正適用戦略
+- `/ndf:cherry-pick-pr` — 複数ブランチへの修正適用戦略
 - `/ndf:logging-guidelines` — ログ設計（原因特定を容易にする）

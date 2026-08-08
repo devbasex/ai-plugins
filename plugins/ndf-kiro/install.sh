@@ -13,6 +13,8 @@ AGENT_FILE="$KIRO_DIR/agents/default.json"
 TEMPLATE_FILE="$PLUGIN_DIR/agents/default.json.template"
 PLUGIN_SKILLS_DIR="$PLUGIN_DIR/skills"
 PLUGIN_PROMPTS_DIR="$PLUGIN_DIR/prompts"
+# Skill 統合により配布を終えた prompt。過去のインストールで .kiro/prompts/ に残った分を除去する
+DEPRECATED_PROMPTS="clean.md"
 
 # Parse options
 WITH_SLACK=false
@@ -102,6 +104,12 @@ if [ "$DRY_RUN" = false ]; then
   if [ "$WITH_CODEX" = false ]; then
     rm -f "$PROMPTS_DIR/codex.md"
   fi
+  for deprecated_prompt in $DEPRECATED_PROMPTS; do
+    if [ -f "$PROMPTS_DIR/$deprecated_prompt" ]; then
+      rm -f "$PROMPTS_DIR/$deprecated_prompt"
+      echo "  removed (deprecated): ${deprecated_prompt%.md}"
+    fi
+  done
 fi
 
 while IFS= read -r prompt_file; do

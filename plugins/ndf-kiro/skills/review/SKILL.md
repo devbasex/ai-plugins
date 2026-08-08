@@ -225,8 +225,9 @@ gh api -X POST "repos/$OWNER_REPO/pulls/$PR/comments" \
 第二引数が指定された場合、上記「観点」「具体的なチェックポイント」「PR モードの手順」の
 内容を **レビュー指示プロンプト** として組み立て、指定された CLI に渡す。
 
-呼び出し手順の詳細は、利用 runtime に `/ndf:codex` / `/ndf:gemini` skill が同梱されて
-いる場合はその skill に従う。同梱されていない runtime では以下の要点に従う。
+呼び出し手順の詳細は、利用 runtime に `/ndf:external-ai` skill が同梱されている場合は
+その skill の `references/cli-codex.md` / `references/cli-gemini.md` に従う。
+同梱されていない runtime では以下の要点に従う。
 
 **`codex` 指定時**
 
@@ -239,6 +240,7 @@ gh api -X POST "repos/$OWNER_REPO/pulls/$PR/comments" \
 > ⚠️ `--dangerously-bypass-approvals-and-sandbox` は codex のサンドボックスを完全に無効化し、
 > 任意のシェル実行・ファイル編集を無確認で許可する。**必ず Docker / devcontainer / VM / CI ランナー等の
 > 外部隔離環境内** でのみ使用すること。ホスト直接実行や本番リポジトリでは使わない。
+> 背景・代替策は `/ndf:external-ai` skill の `references/cli-codex.md`「サンドボックス制約」節を参照。
 
 **`gemini` 指定時**
 
@@ -250,7 +252,7 @@ gh api -X POST "repos/$OWNER_REPO/pulls/$PR/comments" \
 - 成果物は stdout サマリ + `/tmp/gemini-review-pr<番号>-result.json` で回収
 
 > ⚠️ `--yolo` も同様に外部隔離環境内でのみ実行する。プロンプトでの「リポジトリ編集禁止」明示は必須だが、
-> sandbox の代替にはならない。
+> sandbox の代替にはならない。詳細は `/ndf:external-ai` skill の `references/cli-gemini.md` を参照。
 
 ### プロンプト組み立て
 
@@ -351,6 +353,5 @@ PR モードではレビュー結果が **PR 上に投稿済み** であるこ�
 
 - `/ndf:fix` — レビュー指摘の分類と修正対応
 - `/ndf:cross-review` — codex + gemini の収束レビュー
-- `/ndf:codex` — Codex CLI の呼び出し手順（同梱 runtime のみ）
-- `/ndf:gemini` — Gemini CLI の呼び出し手順（同梱 runtime のみ）
+- `/ndf:external-ai` — Codex / Gemini CLI の呼び出し手順（同梱 runtime のみ）
 - `/ndf:logging-guidelines` — ログ設計
