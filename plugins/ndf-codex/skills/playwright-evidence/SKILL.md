@@ -158,7 +158,7 @@ uv run python scripts/upload_evidence.py reports/.../trace.zip \
 
 | 症状 | 原因 | 対策 |
 |---|---|---|
-| `google_auth スキルが見つかりません` | google-auth skill 未導入 | `GOOGLE_AUTH_SCRIPTS` env を設定、または `google-auth` skill を導入して認証をセットアップ |
+| `Google Drive 連携には optional skill google-auth が必要です` | `google-auth` 未導入 | `GOOGLE_AUTH_SCRIPTS` を `google-auth/scripts` へ設定するか、同 skill を利用先へ導入する |
 | `HttpError 403: insufficient permissions` | drive.file スコープ不足 | `google-auth` skill で再認証 (`drive.file` スコープ指定) |
 | `HttpError 404: File not found` | FOLDER_ID が間違っている / アクセス権なし | Drive で共有フォルダ ID を確認 |
 | `resumable upload failed` | ファイルサイズが大きい / ネットワーク不安定 | 再試行。動画は mp4 (H.264) で容量を抑える |

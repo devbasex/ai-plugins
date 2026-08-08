@@ -6,8 +6,9 @@ sys.path から発見する。本モジュールにロジックを集約する�
 
 Drive 連携は optional dependency。`GOOGLE_AUTH_SCRIPTS` 環境変数が設定されて
 いればそれを使い、それ以外は標準インストール先と sibling の google-auth
-スキルを探す。Codex 公開セットには google-auth を含めないため、Codex で
-Drive 系コマンドを使う場合は `GOOGLE_AUTH_SCRIPTS` を明示する。
+スキルを探す。google-auth はどの公開セットにも含めていないため、Drive 系
+コマンドを使う場合は `GOOGLE_AUTH_SCRIPTS` を明示するか、同スキルを利用先へ
+導入する。
 """
 
 from __future__ import annotations
@@ -41,7 +42,7 @@ def _ensure_google_auth_on_path() -> None:
     searched = "\n  - ".join(str(p) for p in _CANDIDATES)
     raise RuntimeError(
         "Google Drive 連携には optional skill `google-auth` が必要です。\n"
-        "Codex 公開セットには同梱していないため、Drive 系コマンドを使う前に "
+        "どの公開セットにも同梱していないため、Drive 系コマンドを使う前に "
         "`GOOGLE_AUTH_SCRIPTS` を google-auth/scripts へ設定してください。\n"
         "例: export GOOGLE_AUTH_SCRIPTS=<ai-plugins のパス>/plugins/ndf-shared/skills/google-auth/scripts\n"
         "検索した候補:\n  - "
