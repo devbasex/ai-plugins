@@ -1,7 +1,6 @@
 ---
 name: qa-security-scan
-description: "Run OWASP-focused security checks."
-when_to_use: "Use when conducting security testing or vulnerability assessment. Triggers: 'security scan', 'vulnerability check', 'OWASP', 'security test', 'セキュリティスキャン', '脆弱性チェック', 'セキュリティテスト'"
+description: "Run an OWASP Top 10 security review of code, authentication, authorization, and data protection. Use when asked for a security scan, vulnerability assessment, or a security review of a change（セキュリティスキャン / 脆弱性チェック / セキュリティレビュー / OWASP / 認証認可の確認 / SQLインジェクションの確認）."
 ---
 
 # QA Security Scan Skill

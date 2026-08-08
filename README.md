@@ -8,13 +8,13 @@ Claude Code / Codex / Kiro CLI向けのスキル・MCP設定を共有するた�
 
 **NDFプラグイン v4.20.1** は、同じ `ndf@ai-plugins` という名前で Claude Code / Codex / Kiro CLI へ配布されるランタイム別プラグインです。共通ソースは `plugins/ndf-shared/` に集約し、利用者が install する配布物は `plugins/ndf-claude/` / `plugins/ndf-codex/` / `plugins/ndf-kiro/` に分かれています。
 
-- **公開Skills**: Claude Code向け core 29個、Kiro向け core 28個、Codex向け core 29個に分離。
-- **元Skills（44個）**:
+- **公開Skills**: Claude Code向け core 27個、Kiro向け core 26個、Codex向け core 27個に分離。
+- **元Skills（36個）**:
   - PR/レビューワークフロー (12): pr, pr-tests, fix, review, review-branch, review-pr-comments, resolve-pr-comments, cherry-pick-pr, deploy, sync-main, merged, clean
   - 原則・ガイドライン (10): ndf-policies, branch-fix-strategy, implementation-plan, plan-to-spec, investigation-rules, problem-solving, logging-guidelines, markdown-writing, issue-plan-strategy, ml-model-structure
-  - データ分析・品質・環境 (12): data-analyst-sql-optimization, data-analyst-export, qa-security-scan, python-execution, docker-container-access, git-gh-operations, google-auth, codex, deepwiki-transfer, knowledge-reorg, mcp-builder, official-skills-autoloader
+  - データ分析・品質・環境 (5): qa-security-scan, docker-container-access, google-auth, codex, official-skills-autoloader
   - E2Eテスト/Playwright (4): playwright-planning, playwright-authoring, playwright-evidence, playwright-kit-ops
-  - 外部サービス連携 (2): google-drive, google-chat
+  - 外部サービス連携 (1): google-drive
   - AIクロスレビュー (2): cross-review, gemini
   - 運用 (2): skill-stats, statusline
 - **8つの専門エージェント**: director, data-analyst, corder, researcher, qa, debugger, devops-engineer, code-reviewer

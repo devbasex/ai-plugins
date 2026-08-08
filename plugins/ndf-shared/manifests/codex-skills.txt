@@ -5,7 +5,6 @@ cross-review
 deploy
 docker-container-access
 fix
-git-gh-operations
 implementation-plan
 investigation-rules
 issue-plan-strategy
@@ -21,7 +20,6 @@ playwright-planning
 pr
 pr-tests
 problem-solving
-python-execution
 resolve-pr-comments
 review
 review-branch

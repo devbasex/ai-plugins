@@ -100,4 +100,3 @@ Triggers キーワードは `Triggers:` と `明示トリガ:` のどちらの�
 ## 関連スキル
 
 - `/ndf:markdown-writing` — 結果を読みやすく整形するためのガイドライン
-- `/ndf:python-execution` — Python実行環境の判定
