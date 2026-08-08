@@ -2,11 +2,15 @@
 """NDF skill usage statistics from Claude Code transcripts.
 
 Scans ~/.claude/projects/**/*.jsonl and counts, for each NDF skill:
-  - invocations: tool_use where name="Skill" and input.skill="ndf:<name>"
+  - auto:        tool_use where name="Skill" and input.skill="ndf:<name>"
+  - explicit:    user slash commands, recorded as <command-name>/ndf:<name>
+  - invocations: auto + explicit
   - triggers:    user messages whose text contains keywords from the skill's
-                 description / "Triggers:" line
+                 description / when_to_use "Triggers:" line
   - hits:        user messages that (a) matched a trigger AND (b) were followed
-                 by an invocation of the same skill before the next user turn
+                 by an auto invocation of the same skill before the next user
+                 turn. A slash command ends the window: typing the command
+                 means the trigger did not fire on its own.
   - hit_rate:    hits / triggers (percent)
 
 Supports project-level breakdown and date-range filtering.
@@ -94,6 +98,10 @@ def iter_events(path: pathlib.Path) -> Iterable[dict]:
 
 _FRONT_MATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 _QUOTED_RE = re.compile(r"['\"]([^'\"]+)['\"]")
+_TRIGGER_LABEL_RE = re.compile(
+    r"(?:Triggers?|明示トリガ|トリガー?)\s*[:：]\s*(.+)",
+    re.IGNORECASE | re.DOTALL,
+)
 _JA_WORD_RE = re.compile(r"[一-龥ぁ-んァ-ヶー]{2,}|[A-Za-z][A-Za-z0-9_-]{2,}")
 _STOPWORDS = {
     "true", "false", "null", "none", "when", "triggers", "trigger",
@@ -123,17 +131,37 @@ def parse_front_matter(text: str) -> dict[str, str]:
     return out
 
 
-def extract_triggers(description: str, include_fallback: bool = False) -> tuple[list[str], str]:
+def extract_triggers(
+    description: str,
+    when_to_use: str = "",
+    include_fallback: bool = False,
+) -> tuple[list[str], str]:
+    """Collect trigger keywords declared in description / when_to_use.
+
+    Almost every skill lists its triggers in `when_to_use`, not `description`,
+    and the label is written either as "Triggers:" or in Japanese
+    ("明示トリガ:"). Both fields and both labels are accepted.
+
+    Each field is searched independently: `_TRIGGER_LABEL_RE` uses DOTALL, so
+    matching against the two fields joined together would let a label found in
+    `description` swallow the whole of `when_to_use` and pick up unrelated
+    quoted strings from it.
+    """
     triggers: list[str] = []
-    m = re.search(r"Triggers?:\s*(.+)", description, re.IGNORECASE | re.DOTALL)
-    if m:
+    for field in (description, when_to_use):
+        if not field:
+            continue
+        m = _TRIGGER_LABEL_RE.search(field)
+        if not m:
+            continue
         for q in _QUOTED_RE.findall(m.group(1)):
             triggers.append(q.strip())
     if triggers:
         return _dedupe_ci(triggers), "explicit"
     if not include_fallback:
         return [], "none"
-    flat = description.replace('"', " ").replace("'", " ")
+    text = "\n".join(t for t in (description, when_to_use) if t)
+    flat = text.replace('"', " ").replace("'", " ")
     seen: set[str] = set()
     for w in _JA_WORD_RE.findall(flat):
         w = w.strip()
@@ -179,7 +207,10 @@ def load_skills(plugin_root: pathlib.Path, include_fallback: bool = False) -> li
         fm = parse_front_matter(text)
         name = fm.get("name", d.name).strip().strip('"')
         desc = fm.get("description", "").strip().strip('"')
-        triggers, source = extract_triggers(desc, include_fallback=include_fallback)
+        when = fm.get("when_to_use", "").strip().strip('"')
+        triggers, source = extract_triggers(
+            desc, when, include_fallback=include_fallback
+        )
         out.append({
             "name": name,
             "qualified": f"ndf:{name}",
@@ -191,6 +222,37 @@ def load_skills(plugin_root: pathlib.Path, include_fallback: bool = False) -> li
 
 
 _SYSTEM_TAG_RE = re.compile(r"^\s*<(local-command|command-name|command-message|command-args|system-reminder)")
+_COMMAND_NAME_RE = re.compile(r"<command-name>\s*/([^<\s]+)\s*</command-name>")
+
+
+def raw_user_text(ev: dict) -> str:
+    """Return the user message text without dropping system-tagged content."""
+    msg = ev.get("message") or {}
+    c = msg.get("content")
+    if isinstance(c, str):
+        return c
+    if isinstance(c, list):
+        return "\n".join(
+            b.get("text", "") for b in c
+            if isinstance(b, dict) and b.get("type") == "text"
+        )
+    return ""
+
+
+def extract_slash_invocation(ev: dict, skill_names: set[str]) -> str | None:
+    """Return the skill a user invoked by slash command, if this event is one.
+
+    Explicit invocations never appear as a Skill tool_use; they are recorded as
+    a user message carrying <command-name>/ndf:review</command-name>. Installs
+    that predate the plugin prefix record the bare name (/review).
+    """
+    if ev.get("type") != "user":
+        return None
+    m = _COMMAND_NAME_RE.search(raw_user_text(ev))
+    if not m:
+        return None
+    name = m.group(1).split(":")[-1]
+    return f"ndf:{name}" if name in skill_names else None
 
 
 def extract_user_text(ev: dict) -> str:
@@ -252,7 +314,10 @@ def detect_project(path: pathlib.Path, first_cwd: str | None) -> str:
     return parent
 
 
-def build_timeline(path: pathlib.Path) -> tuple[list[tuple[str, object]], str]:
+def build_timeline(
+    path: pathlib.Path,
+    skill_names: set[str],
+) -> tuple[list[tuple[str, object]], str]:
     """Return (timeline, project_label)."""
     timeline: list[tuple[str, object]] = []
     first_cwd: str | None = None
@@ -263,6 +328,10 @@ def build_timeline(path: pathlib.Path) -> tuple[list[tuple[str, object]], str]:
                 first_cwd = cwd
         t = ev.get("type")
         if t == "user":
+            slash = extract_slash_invocation(ev, skill_names)
+            if slash:
+                timeline.append(("slash", slash))
+                continue
             text = extract_user_text(ev)
             if text:
                 timeline.append(("user", text))
@@ -276,22 +345,37 @@ def build_timeline(path: pathlib.Path) -> tuple[list[tuple[str, object]], str]:
 def aggregate_by_project(
     transcripts: list[pathlib.Path],
     skills: list[dict],
+    all_skill_names: set[str] | None = None,
     lookahead_cap: int = 100,
-) -> dict[str, tuple[Counter, Counter, Counter]]:
-    """Return { project: (invocations, triggers_hits, hits) }."""
-    result: dict[str, tuple[Counter, Counter, Counter]] = defaultdict(
-        lambda: (Counter(), Counter(), Counter())
+) -> dict[str, tuple[Counter, Counter, Counter, Counter]]:
+    """Return { project: (auto, explicit, triggers_hits, hits) }.
+
+    `skills` may already be narrowed by `--skill`; it only decides which rows
+    are counted. Slash-command detection must stay based on the *unfiltered*
+    skill set (`all_skill_names`), because every slash command closes the
+    hit-lookahead window. Deriving the boundary set from a filtered `skills`
+    would hide other skills' slash commands and over-count hits.
+    """
+    result: dict[str, tuple[Counter, Counter, Counter, Counter]] = defaultdict(
+        lambda: (Counter(), Counter(), Counter(), Counter())
+    )
+    skill_names = (
+        all_skill_names if all_skill_names is not None
+        else {s["name"] for s in skills}
     )
     skill_triggers = [
         (s["qualified"], [t.lower() for t in s["triggers"] if t])
         for s in skills
     ]
     for path in transcripts:
-        tl, project = build_timeline(path)
-        inv, trig_h, hits = result[project]
+        tl, project = build_timeline(path, skill_names)
+        auto, explicit, trig_h, hits = result[project]
         for i, (kind, data) in enumerate(tl):
             if kind == "skill":
-                inv[data] += 1
+                auto[data] += 1
+                continue
+            if kind == "slash":
+                explicit[data] += 1
                 continue
             if kind != "user":
                 continue
@@ -304,7 +388,7 @@ def aggregate_by_project(
                     end = min(i + 1 + lookahead_cap, len(tl))
                     for j in range(i + 1, end):
                         k2, d2 = tl[j]
-                        if k2 == "user":
+                        if k2 in ("user", "slash"):
                             break
                         if k2 == "skill" and d2 == qualified:
                             hits[qualified] += 1
@@ -313,48 +397,57 @@ def aggregate_by_project(
 
 
 def merge_counters(
-    per_project: dict[str, tuple[Counter, Counter, Counter]],
-) -> tuple[Counter, Counter, Counter]:
-    inv_total: Counter = Counter()
+    per_project: dict[str, tuple[Counter, Counter, Counter, Counter]],
+) -> tuple[Counter, Counter, Counter, Counter]:
+    auto_total: Counter = Counter()
+    explicit_total: Counter = Counter()
     trig_total: Counter = Counter()
     hits_total: Counter = Counter()
-    for inv, trig, hits in per_project.values():
-        inv_total.update(inv)
+    for auto, explicit, trig, hits in per_project.values():
+        auto_total.update(auto)
+        explicit_total.update(explicit)
         trig_total.update(trig)
         hits_total.update(hits)
-    return inv_total, trig_total, hits_total
+    return auto_total, explicit_total, trig_total, hits_total
 
 
 def build_rows(
     skills: list[dict],
-    invocations: Counter,
+    auto: Counter,
+    explicit: Counter,
     triggers_hits: Counter,
     hits: Counter,
 ) -> tuple[list[dict], dict]:
     rows: list[dict] = []
-    total_inv = total_trig = total_hit = 0
+    total_auto = total_explicit = total_trig = total_hit = 0
     for s in sorted(skills, key=lambda x: x["name"]):
         q = s["qualified"]
-        inv = invocations.get(q, 0)
+        a = auto.get(q, 0)
+        e = explicit.get(q, 0)
         trig = triggers_hits.get(q, 0)
         hit = hits.get(q, 0)
         rate = round(hit / trig * 100, 1) if trig else 0.0
         rows.append({
             "skill": q,
             "triggers_source": s["triggers_source"],
-            "invocations": inv,
+            "invocations": a + e,
+            "auto": a,
+            "explicit": e,
             "triggers": trig,
             "hits": hit,
             "hit_rate_pct": rate,
             "trigger_keywords": s["triggers"],
         })
-        total_inv += inv
+        total_auto += a
+        total_explicit += e
         if s["triggers_source"] == "explicit":
             total_trig += trig
             total_hit += hit
     total_rate = round(total_hit / total_trig * 100, 1) if total_trig else 0.0
     total = {
-        "invocations": total_inv,
+        "invocations": total_auto + total_explicit,
+        "auto": total_auto,
+        "explicit": total_explicit,
         "triggers": total_trig,
         "hits": total_hit,
         "hit_rate_pct": total_rate,
@@ -367,8 +460,8 @@ def format_markdown(rows: list[dict], total: dict, heading: str | None = None) -
     if heading:
         lines.append(heading)
     lines.extend([
-        "| skill | triggers源 | 呼び出し数 | 関連話題 | ヒット | ヒット率 |",
-        "|---|---|---:|---:|---:|---:|",
+        "| skill | triggers源 | 計 | 自動 | 明示 | 関連話題 | ヒット | ヒット率 |",
+        "|---|---|---:|---:|---:|---:|---:|---:|",
     ])
     for r in rows:
         src = r["triggers_source"]
@@ -381,10 +474,13 @@ def format_markdown(rows: list[dict], total: dict, heading: str | None = None) -
             trig = str(r["triggers"])
             hit = str(r["hits"])
         lines.append(
-            f"| {r['skill']} | {src} | {r['invocations']} | {trig} | {hit} | {rate} |"
+            f"| {r['skill']} | {src} | {r['invocations']} | {r['auto']} | "
+            f"{r['explicit']} | {trig} | {hit} | {rate} |"
         )
     lines.append(
-        f"| **合計** | | **{total['invocations']}** | **{total['triggers']}** | **{total['hits']}** | **{total['hit_rate_pct']}%** |"
+        f"| **合計** | | **{total['invocations']}** | **{total['auto']}** | "
+        f"**{total['explicit']}** | **{total['triggers']}** | "
+        f"**{total['hits']}** | **{total['hit_rate_pct']}%** |"
     )
     return "\n".join(lines)
 
@@ -426,6 +522,9 @@ def main() -> int:
     effective_days = args.days if (date_from is None and date_to is None) else None
 
     skills = load_skills(plugin_root, include_fallback=args.include_fallback)
+    # Slash boundaries must be detected across every skill, not just the ones
+    # left after --skill narrowing.
+    all_skill_names = {s["name"] for s in skills}
     if args.skill:
         skills = [s for s in skills if args.skill in s["name"]]
 
@@ -445,7 +544,7 @@ def main() -> int:
         file=sys.stderr,
     )
 
-    per_project = aggregate_by_project(transcripts, skills)
+    per_project = aggregate_by_project(transcripts, skills, all_skill_names)
     if args.project:
         needle = args.project.lower()
         per_project = {
@@ -457,15 +556,14 @@ def main() -> int:
 
     if args.format == "json":
         projects_json = []
-        for project, (inv, trig, hits) in sorted(per_project.items()):
-            rows, total = build_rows(skills, inv, trig, hits)
+        for project, (auto, explicit, trig, hits) in sorted(per_project.items()):
+            rows, total = build_rows(skills, auto, explicit, trig, hits)
             projects_json.append({
                 "project": project,
                 "total": total,
                 "skills": rows,
             })
-        all_inv, all_trig, all_hits = merge_counters(per_project)
-        grand_rows, grand_total = build_rows(skills, all_inv, all_trig, all_hits)
+        grand_rows, grand_total = build_rows(skills, *merge_counters(per_project))
         out = {
             "meta": {
                 "days": effective_days,
@@ -483,20 +581,18 @@ def main() -> int:
         print(json.dumps(out, ensure_ascii=False, indent=2))
     else:
         if args.by_project:
-            for project, (inv, trig, hits) in sorted(per_project.items()):
-                rows, total = build_rows(skills, inv, trig, hits)
+            for project, (auto, explicit, trig, hits) in sorted(per_project.items()):
+                rows, total = build_rows(skills, auto, explicit, trig, hits)
                 if total["invocations"] == 0 and total["triggers"] == 0:
                     continue  # skip silent projects
                 print()
                 print(format_markdown(rows, total, heading=f"## {project}"))
             # grand total
-            all_inv, all_trig, all_hits = merge_counters(per_project)
-            grand_rows, grand_total = build_rows(skills, all_inv, all_trig, all_hits)
+            grand_rows, grand_total = build_rows(skills, *merge_counters(per_project))
             print()
             print(format_markdown(grand_rows, grand_total, heading="## 全プロジェクト合計"))
         else:
-            all_inv, all_trig, all_hits = merge_counters(per_project)
-            rows, total = build_rows(skills, all_inv, all_trig, all_hits)
+            rows, total = build_rows(skills, *merge_counters(per_project))
             print(format_markdown(rows, total))
 
         if args.show_keywords:

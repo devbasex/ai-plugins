@@ -11,7 +11,11 @@
 - **対象ファイル:** `docs/specifications/ndf-skill-inventory.md`、`plugins/ndf-shared/skills/README.md`、`plugins/ndf-shared/skills/skill-stats/scripts/skill-stats.py`
 - **変更内容:**
   - 実測結果を台帳へ転記し、Skill ごとに「行数 / frontmatter 設定 / 起動数 / 機会数 / 判定 / 判定根拠」を記録する
-  - `skill-stats` の測定機能を修正する。現状は `when_to_use` からのトリガ抽出が 49 個中 48 個で失敗し、利用者のスラッシュコマンドも数えないため、実際の起動数と大きく乖離する
+  - `skill-stats` を修正する（不具合と原因は [02-skill-inventory.md](02-skill-inventory.md)「測定ツールの不具合」）
+    - トリガ抽出の対象に `when_to_use` を加え、見出し語として `Triggers:` と `明示トリガ:` の双方を受ける
+    - `<command-name>` を含む利用者メッセージから明示起動を数え、エージェントの `Skill` ツール呼び出しと合算する。トリガ一致の判定からは従来どおり除外する（明示起動は「機会」ではない）
+    - 出力に「計 / 自動 / 明示」の 3 列を持たせ、台帳へそのまま転記できる形にする
+    - Task 0-7 で `cross-review` の明示トリガを `description` へ移すため、修正後も `when_to_use` の有無どちらでも同じ結果になることを確認する
   - frontmatter 規約（[02-skill-inventory.md](02-skill-inventory.md)）を明文化する
   - トリガ語の一意性ルールと、広すぎるトリガの禁止例を記載する
 
@@ -198,21 +202,22 @@
 - **変更内容:**
   - `director` の要求理解フェーズで `development-workflow` を呼び、返ったモードを受け取る手順を記載する。判定基準と振り分け表を `director` 側へ写さない（[04-development-skills.md](04-development-skills.md)「ワークフローの 4 モード」）
   - `development-workflow` を判定の唯一の置き場所として維持する。モードの追加・変更はこの Skill だけを直せば全ランタイムへ効く
-  - `cross-review` の起動条件を高リスク変更に限定する。この基準は Task 3-1 の `execute-plan` のレビュー段階の分岐と共有する（[05-goal-workflow.md](05-goal-workflow.md)）
+  - `cross-review` の起動条件を高リスク変更に限定する。この基準は Task 3-1 の `execute-goal` のレビュー段階の分岐と共有する（[05-goal-workflow.md](05-goal-workflow.md)）
   - `development-workflow` の `architecture` モードを有効化する
 
 ## Release 3
 
 ### Task 3-1: 一気通貫実行
 
-- **対象ファイル:** `skills/execute-plan/SKILL.md`、`references/goal-conditions.md`、`skills/issue-plan-strategy/SKILL.md`
+- **対象ファイル:** `skills/execute-goal/SKILL.md`、`skills/execute-goal/references/goal-conditions.md`、`skills/issue-plan-strategy/SKILL.md`、`plugins/ndf-kiro/README.md`
 - **変更内容:** [05-goal-workflow.md](05-goal-workflow.md) に記載のとおり
-  - `goal` という名前は使わない。Claude Code と Codex の組み込みコマンド名と衝突する
+  - Skill 名は `goal` で始めない。組み込みコマンド `/goal` と同名になる名前、および先頭一致してタブ補完で競合する名前を避ける
   - 継続ループを実装しない。組み込みの `/goal` へ渡す完了条件を組み立てる
   - `goal-conditions.md` に、評価器がツールを呼ばない前提で書く条件文の型と例を置く
   - Kiro には継続ループがないため、段階ごとに続行指示を要する手順として動く旨を明記する
   - レビュー段階は最初のモード判定の結果で呼び先を分ける。`light` / `standard` / `legacy-refactor` は `review`、`architecture` と途中で検出した高リスク変更は `cross-review`。Task 2-4 で限定した `cross-review` の起動条件と同じ基準にする
-  - `issue-plan-strategy` を `execute-plan` から呼ばれる手順として整理する。詳細は [04-development-skills.md](04-development-skills.md) の「既存 Skill の改修」に記載のとおり
+  - `issue-plan-strategy` を `execute-goal` から呼ばれる手順として整理する。詳細は [04-development-skills.md](04-development-skills.md) の「既存 Skill の改修」に記載のとおり
+  - Codex で引数を受け取る `skills/execute-goal/agents/openai.yaml` は、Task 0-8 の生成処理が `disable-model-invocation: true` を持つ Skill を対象にビルド時へ出力する。このタスクの対象ファイルには含めない
 
 ### Task 3-2: Skill 挙動評価
 
