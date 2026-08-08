@@ -76,7 +76,7 @@ kiro-cli agent set-default kiro_default
 
 v4 系の installer は `.kiro/agents/default.json` を生成していました。この設定は Kiro の既定エージェントにならず、フックも `resources` も無効のままでした。エージェント名を `ndf` に変えたため、再インストールが必要です。
 
-旧 installer が張った `.kiro/skills/ndf-policies` の symlink は、リンク先が現在のプラグイン配下でなくても再インストール時に削除します（削除するのはリンク自体だけで、リンク先の実体には触れません）。別の checkout パスから導入した環境でも、steering との二重注入が再インストール 1 回で解消されます。
+旧 installer が張った `.kiro/skills/ndf-policies` の symlink は、リンク先が現在のプラグイン配下でなくても再インストール時に削除します（削除するのはリンク自体だけで、リンク先の実体には触れません）。`.kiro/skills/ndf-policies` が symlink ではなく実体のディレクトリやファイルだった場合は、利用者が置いたものの可能性があるため installer は削除せず警告を出します。二重注入を避けるため、内容を確認のうえ手動で退避または削除してください。別の checkout パスから導入した環境でも、steering との二重注入が再インストール 1 回で解消されます。
 
 ```bash
 # 1. 再インストール（旧 default.json は自動でバックアップされます）

@@ -134,10 +134,18 @@ while IFS= read -r src_dir; do
   # $PLUGIN_SKILLS_DIR 配下を指すものだけ削除）に掛からないため、ここで
   # リンク先に関係なく既存のエントリを取り除いてから skip する。
   if [ "$skill_name" = "ndf-policies" ]; then
-    if [ "$DRY_RUN" = false ] &&
-       { [ -e "$SKILLS_DIR/$skill_name" ] || [ -L "$SKILLS_DIR/$skill_name" ]; }; then
-      rm -rf "$SKILLS_DIR/$skill_name"
-      echo "  REMOVED: $skill_name (steering へ移行済みのため .kiro/skills から削除)"
+    # 削除するのは旧 installer が張ったシンボリックリンクだけに限る。実体
+    # ディレクトリや通常ファイルは利用者が置いたものの可能性があるため、
+    # 消さずに案内して手動対応に委ねる。
+    if [ -L "$SKILLS_DIR/$skill_name" ]; then
+      if [ "$DRY_RUN" = false ]; then
+        rm -f "$SKILLS_DIR/$skill_name"
+      fi
+      echo "  REMOVED: $skill_name (steering へ移行済みのため .kiro/skills のリンクを削除)"
+    elif [ -e "$SKILLS_DIR/$skill_name" ]; then
+      echo "  WARN: $SKILLS_DIR/$skill_name はシンボリックリンクではありません。" >&2
+      echo "        steering (.kiro/steering/ndf-policies.md) と二重に読み込まれるため、" >&2
+      echo "        内容を確認のうえ手動で退避または削除してください。" >&2
     fi
     echo "  SKIP: $skill_name (steering として配置)"
     continue
