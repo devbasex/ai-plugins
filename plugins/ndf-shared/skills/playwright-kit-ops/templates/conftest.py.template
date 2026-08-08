@@ -1,6 +1,6 @@
 """利用者プロジェクトの ``tests/conftest.py`` 雛形。
 
-playwright-scenario-test (playwright_kit) を pytest-playwright 上で使うための
+playwright_kit を pytest-playwright 上で使うための
 共通設定。plugin (``playwright_kit.pytest_plugin``) は entry-point 経由で
 auto-load されるため、import や ``pytest_plugins`` 宣言は不要。
 
@@ -29,7 +29,7 @@ from playwright.sync_api import Browser, BrowserType
 # scenario.config.yaml の browser.mode に応じてブラウザ接続を切り替える。
 # - local: pytest-playwright デフォルト (chromium.launch())
 # - cdp-remote: connect_over_cdp() で既存 Chrome に CDP 接続
-#   → /ndf:playwright-browser-connect 参照
+#   → /ndf:playwright-authoring 参照
 
 
 @pytest.fixture(scope="session")

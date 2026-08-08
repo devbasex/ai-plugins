@@ -468,9 +468,8 @@ pint / larastan / test / build などは **中断** を原則とする。
 ## 関連
 
 - `/ndf:review` — 単発レビュー（AI 直接投稿対応）
-- `/ndf:fix` — 修正対応（サブエージェント起動対応）
+- `/ndf:fix` — 指摘の分類・修正・返信・Resolve（サブエージェント起動対応）
 - `/ndf:external-ai` — codex / gemini CLI 呼び出し手順（CLI 別の差分は `references/cli-codex.md` / `references/cli-gemini.md`）
-- `/ndf:resolve-pr-comments` — Resolve Conversation の詳細
 - `/ndf:issue-plan-strategy` — multi-PR ワークフローでは **個別 PR ごとに本 cross-review が原則必須**。
   `/ndf:review` 単発や Claude Code の `code-reviewer` は代替にせず、release ブランチへ merge する前に
   codex + gemini の APPROVE 収束を確認する (Step 6)

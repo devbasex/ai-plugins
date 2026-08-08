@@ -232,7 +232,7 @@ git worktree add ../<repo>-<PLAN-ID>-ui     feature/<PLAN-ID>-ui
 
 | 用途 | コマンド | 位置づけ |
 |---|---|---|
-| PR 作成前のセルフレビュー | `/ndf:review-branch` | push / PR 化の前段。cross-review の代替にはしない |
+| PR 作成前のセルフレビュー | `/ndf:review --branch` | push / PR 化の前段。cross-review の代替にはしない |
 | 個別 PR の収束レビュー (原則必須) | `/ndf:cross-review <PR番号>` | codex + gemini 両方の APPROVE 収束を確認する本線 |
 | GitHub 上の例外的な単発確認 | `/ndf:review <PR番号>` | ごく軽微な差分の単発確認に限定。cross-review の代替にはしない |
 | 指摘の修正 | `/ndf:fix <PR番号>` | cross-review ループ内・後で自動起動される |
@@ -251,7 +251,7 @@ release ブランチへの merge が一通り進んだ段階で:
   - PR 間の API / 型 / スキーマ整合
   - 設定値の重複・矛盾
   - migration の順序依存
-  - E2E シナリオ (`/ndf:playwright-scenario-test` の活用)
+  - E2E シナリオ (`/ndf:playwright-planning` の活用)
 - ここで **新たに** 個別 PR 範囲のバグが見つかった場合は、**release PR にコメントせず**、該当の個別 PR (既に merge 済みなら修正差分を載せた新しい修正 PR を release 配下に作成) 側に指摘を書き込み、修正ループを回す。この場合レビュー対象は **修正差分** であり新規 PR でレビューできる（元の差分がそもそも cross-review 未実施だったケースは扱いが異なるため Step 8 のフォールバック参照）
 - release PR には integration 観点の指摘のみ残す
 
@@ -353,6 +353,6 @@ git checkout release/<PLAN-ID>
 - `/ndf:branch-fix-strategy` — ブランチ汚染を避ける原則
 - `/ndf:pr` — 通常の PR 作成 / 更新
 - `/ndf:cherry-pick-pr` — 検証ブランチへの cherry-pick PR
-- `/ndf:review` / `/ndf:review-branch` / `/ndf:cross-review` — レビュー
-- `/ndf:fix` / `/ndf:resolve-pr-comments` — コメント対応
-- `/ndf:playwright-scenario-test` — release ブランチでの E2E 結合テスト
+- `/ndf:review` / `/ndf:cross-review` — レビュー（`--branch` で PR 前のセルフレビュー）
+- `/ndf:fix` — コメントの分類・修正・返信・Resolve
+- `/ndf:playwright-planning` — release ブランチでの E2E 結合テスト
