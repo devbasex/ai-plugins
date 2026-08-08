@@ -7,7 +7,7 @@
 検査は 3 種類に分かれる。
 
 - **individual** — Skill 単位。仕様準拠・安全性・可搬性・運用
-- **aggregate**  — 全 Skill の合計。Codex の初期一覧予算と frontmatter 総量
+- **aggregate**  — 配布先ごとの初期一覧予算（Claude Code / Codex）と frontmatter 総量
 - **cross**      — Skill 間。トリガ語の重複
 
 判定が本質的に近似になる項目（description 先頭のトリガ語、when_to_use の追加トリガ）は
@@ -37,6 +37,8 @@ COMPATIBILITY_MAX = 500       # Agent Skills 仕様
 DESC_PLUS_WTU_MAX = 1536      # Claude Code の一覧切り詰め
 SKILL_MD_MAX_LINES = 500      # 仕様の推奨 / コンパクション対策
 CODEX_LISTING_MAX = 8000      # Codex の初期一覧予算（コンテキスト長不明時）
+CLAUDE_LISTING_MAX = 8000     # Claude Code の初期一覧予算（コンテキスト長不明時）
+CLAUDE_ITEM_TRUNCATE = 250    # Claude Code は 1 項目をこの長さで切り詰める
 FRONTMATTER_TOTAL_MAX = 12000 # 全 Skill の frontmatter 合計。棚卸完了時の実測を基準に設定
 
 # --- 許可する frontmatter の項目 -------------------------------------------
@@ -230,6 +232,19 @@ def check_skill(s: dict) -> list[Finding]:
             add("warn", "ops/wtu-no-extra",
                 "when_to_use のトリガ語が description と同一で、追加トリガがない")
 
+    # Codex と Kiro には disable-model-invocation / user-invocable がなく description は
+    # 常に読まれる。発動制御の意図を description 自体へ書き残す必要がある。
+    if unquote(fm.get("disable-model-invocation", "")).lower() == "true":
+        if not re.search(r"明示|explicit|Explicit", desc):
+            add("error", "portability/explicit-only",
+                "明示指示専用の Skill は description に「利用者が明示的に指示したときのみ実行する」"
+                "旨を書く（Codex / Kiro は disable-model-invocation を解釈しない）")
+    if unquote(fm.get("user-invocable", "")).lower() == "false":
+        if not re.search(r"知識として|参照する|実行しない|reference only|do not execute", desc):
+            add("error", "portability/inject-only",
+                "常時注入のみの Skill は description に「知識として参照する。手順として実行しない」"
+                "旨を書く（Codex / Kiro は user-invocable を解釈しない）")
+
     dmi = unquote(fm.get("disable-model-invocation", "")).lower() == "true"
     uinv = unquote(fm.get("user-invocable", "")).lower() == "false"
     if dmi and uinv:
@@ -251,31 +266,52 @@ def check_skill(s: dict) -> list[Finding]:
     return out
 
 
-def check_aggregate(skills: list[dict], skills_dir: pathlib.Path) -> tuple[list[Finding], dict]:
-    """Codex の初期一覧予算と frontmatter 総量を検査する。
+def load_manifests(skills_dir: pathlib.Path) -> dict[str, set[str]]:
+    """manifests/<runtime>-skills.txt を読み、配布先ごとの Skill 名集合を返す。"""
+    man_dir = skills_dir.parent / "manifests"
+    out: dict[str, set[str]] = {}
+    for runtime in ("claude", "codex", "kiro"):
+        f = man_dir / f"{runtime}-skills.txt"
+        if f.exists():
+            out[runtime] = {line.strip() for line in f.read_text().split() if line.strip()}
+    return out
 
-    Codex は起動時に name / description / ファイルパスを一覧として読み込み、
-    この一覧に総量予算を設けている（超過すると description を短縮し、なお超えると
-    Skill を一覧から省略して警告を出す）。
+
+def check_aggregate(skills: list[dict], skills_dir: pathlib.Path) -> tuple[list[Finding], dict]:
+    """初期一覧の予算と frontmatter 総量を検査する。
+
+    Claude Code と Codex は起動時に name / description / ファイルパスを一覧として
+    読み込み、この一覧に総量予算を設けている（超過すると description を短縮し、
+    なお超えると Skill を一覧から省略して警告を出す）。予算は配布先ごとに効くため、
+    manifest に載っている Skill だけを数える。
     """
-    listing = 0
+    manifests = load_manifests(skills_dir)
+    listings: dict[str, int] = {r: 0 for r in manifests}
     fm_total = 0
     for s in skills:
         fm = s["fm"] or {}
         name = unquote(fm.get("name", s["dir"]))
         desc = unquote(fm.get("description", ""))
         rel = f"{skills_dir.name}/{s['dir']}/SKILL.md"
-        listing += len(name) + len(desc) + len(rel)
         fm_total += len(s["block"])
+        for runtime, members in manifests.items():
+            if s["dir"] not in members:
+                continue
+            # Claude Code は 1 項目を 250 文字で切り詰めてから積む。
+            d = desc[:CLAUDE_ITEM_TRUNCATE] if runtime == "claude" else desc
+            listings[runtime] += len(name) + len(d) + len(rel)
 
     out: list[Finding] = []
-    if listing > CODEX_LISTING_MAX:
-        out.append(Finding("(全体)", "error", "ops/codex-listing",
-                           f"Codex の初期一覧に載る合計が {listing} 文字（上限 {CODEX_LISTING_MAX}）"))
+    limits = {"claude": CLAUDE_LISTING_MAX, "codex": CODEX_LISTING_MAX, "kiro": None}
+    for runtime, total in sorted(listings.items()):
+        limit = limits.get(runtime)
+        if limit is not None and total > limit:
+            out.append(Finding("(全体)", "error", f"ops/{runtime}-listing",
+                               f"{runtime} の初期一覧に載る合計が {total} 文字（上限 {limit}）"))
     if fm_total > FRONTMATTER_TOTAL_MAX:
         out.append(Finding("(全体)", "error", "ops/frontmatter-total",
                            f"全 Skill の frontmatter 合計が {fm_total} 文字（上限 {FRONTMATTER_TOTAL_MAX}）"))
-    return out, {"codex_listing": listing, "frontmatter_total": fm_total}
+    return out, {"listings": listings, "frontmatter_total": fm_total}
 
 
 def check_trigger_collisions(skills: list[dict]) -> list[Finding]:
@@ -339,7 +375,8 @@ def main() -> int:
                   f"{len(unquote(fm.get('description', ''))):>5} "
                   f"{len(unquote(fm.get('when_to_use', ''))):>5}  {','.join(flags)}")
         print(f"\nSkill 数: {len(skills)}")
-        print(f"Codex 初期一覧の合計: {metrics['codex_listing']} 文字 (上限 {CODEX_LISTING_MAX})")
+        for runtime, total in sorted(metrics["listings"].items()):
+            print(f"{runtime} の初期一覧の合計: {total} 文字")
         print(f"frontmatter 合計: {metrics['frontmatter_total']} 文字 (上限 {FRONTMATTER_TOTAL_MAX})")
         return 0
 
@@ -349,7 +386,9 @@ def main() -> int:
         print(str(f), file=sys.stderr if f.level == "error" else sys.stdout)
 
     print(f"\nSkill {len(skills)} 個を検査 — エラー {len(errors)} 件 / 警告 {len(warns)} 件")
-    print(f"Codex 初期一覧の合計: {metrics['codex_listing']} / {CODEX_LISTING_MAX} 文字")
+    for runtime, total in sorted(metrics["listings"].items()):
+        limit = {"claude": CLAUDE_LISTING_MAX, "codex": CODEX_LISTING_MAX}.get(runtime)
+        print(f"{runtime} の初期一覧の合計: {total}" + (f" / {limit} 文字" if limit else " 文字"))
     print(f"frontmatter 合計: {metrics['frontmatter_total']} / {FRONTMATTER_TOTAL_MAX} 文字")
 
     if errors or (args.strict and warns):
