@@ -66,8 +66,20 @@ PR: <PR番号>
 インラインコメント / レビュー body / PR レベルコメントを一括取得する。
 どれか 1 つでも欠けると指摘を取りこぼす。
 
+`$ARGUMENTS` には PR 番号とオプションが混在するため、**そのまま PR 番号として扱わない**。
+数値トークンだけを PR 番号として取り出し、`--` で始まるトークンはオプションとして解釈する。
+
 ```bash
-PR_NUMBER="${ARGUMENTS:-$(gh pr view --json number --jq .number)}"
+# PR 番号 = 最初の数値トークン。無ければ直前 PR
+PR_NUMBER=$(printf '%s\n' "$ARGUMENTS" | tr ' ' '\n' | grep -m1 -E '^[0-9]+$' || true)
+PR_NUMBER="${PR_NUMBER:-$(gh pr view --json number --jq .number)}"
+
+# オプションは $ARGUMENTS から個別に判定する
+case " $ARGUMENTS " in *" --classify-only "*) CLASSIFY_ONLY=1 ;; esac
+case " $ARGUMENTS " in *" --defer-nit "*) DEFER_NIT=1 ;; esac
+SEVERITY_MIN=$(printf '%s\n' "$ARGUMENTS" | sed -n 's/.*--severity-min[ =]\([a-z]*\).*/\1/p')
+SEVERITY_MIN="${SEVERITY_MIN:-minor}"
+
 FETCH_SCRIPT="${PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}/skills/fix/scripts/fetch-pr-comments.sh"
 "$FETCH_SCRIPT" "$(gh repo view --json nameWithOwner -q .nameWithOwner)" "$PR_NUMBER"
 
@@ -222,23 +234,31 @@ gh api repos/{owner}/{repo}/pulls/{pr_number}/comments \
 **修正済みのスレッドのみ** Resolve する。`deferred` / `rejected` は次ラウンドで再評価する
 ため Resolve しない。
 
+`resolveReviewThread` が要求するのは **review thread** の ID（`PRRT_...`）であり、
+レビューコメントの `node_id`（`PRRT_` ではなく `PRRC_...`）ではない。
+`repos/{owner}/{repo}/pulls/comments/<comment_id>` から引ける `node_id` はコメント側の ID
+なので **Resolve には使えない**。必ず下記 query の `nodes[].id` を使い、
+`comments.nodes[].databaseId`（返信に使ったコメント ID）または本文と突き合わせて特定する。
+
 ```bash
-# スレッド一覧を node_id 付きで取得
+# スレッド一覧を thread ID (PRRT_...) 付きで取得
 gh api graphql -f query='
   query {
     repository(owner: "{owner}", name: "{repo}") {
       pullRequest(number: {pr_number}) {
         reviewThreads(first: 100) {
-          nodes { id isResolved path line comments(first: 1) { nodes { body } } }
+          nodes {
+            id isResolved path line
+            comments(first: 1) { nodes { databaseId body } }
+          }
         }
       }
     }
-  }'
+  }' --jq '.data.repository.pullRequest.reviewThreads.nodes[]
+           | select(.isResolved == false)
+           | {thread_id: .id, path, line, comment_id: .comments.nodes[0].databaseId}'
 
-# コメント ID から直接 node_id を引くこともできる
-gh api "repos/{owner}/{repo}/pulls/comments/<comment_id>" --jq '.node_id'
-
-# Resolve
+# 上で得た thread_id（PRRT_...）を THREAD_ID に入れて Resolve
 gh api graphql -f query='
   mutation($id: ID!) {
     resolveReviewThread(input: {threadId: $id}) { thread { isResolved } }
