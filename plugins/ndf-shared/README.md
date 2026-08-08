@@ -18,6 +18,7 @@ bash scripts/build-runtime-plugins.sh --check
 ## Layout
 
 - `skills/` - shared Skill implementations.
+- `skills/README.md` - frontmatter conventions for Skill authoring.
 - `scripts/` - shared helper scripts copied into runtime plugins.
 - `manifests/claude-skills.txt` - Claude Code published Skill set.
 - `manifests/codex-skills.txt` - Codex published Skill set.
