@@ -65,6 +65,37 @@ TRIGGER_LABEL_RE = re.compile(
 USE_WHEN_RE = re.compile(r"Use\s+when|use\s+when|使う|使い|とき|時に|ときに")
 SENTENCE_SPLIT_RE = re.compile(r"(?<=[.。])\s*")
 
+# --- 「引数を取る Skill か」の判定 -------------------------------------------
+# 規約（README「発動制御の 4 分類」）は明示指示専用の Skill に対して
+# 「disable-model-invocation: true（引数を取るなら + argument-hint）」と定めている。
+# 引数を取らない明示指示専用 Skill まで落とさないよう、引数の有無を SKILL.md から
+# 機械的に判定する。判定材料は、実際の Skill が引数を表現している次の 3 通り。
+#
+#   1. frontmatter の `arguments` … Claude Code の名前付き引数を宣言している
+#   2. 本文の `$ARGUMENTS`        … 引数をそのまま展開する（deploy / fix / plan-to-spec）
+#   3. 本文が引数を説明している    … 「## 引数」節（review / pr-tests / cross-review）、
+#                                    「### 1. 引数・現状確認」（cherry-pick-pr）、
+#                                    「引数に応じて…」（statusline）など表記は揺れる
+#
+# 3 は見出しに限定すると statusline のような散文の説明を取りこぼすため、本文中の
+# 「引数」への言及も拾う。英語表記は一般語と紛れるので見出しに限定する。
+# 引数を取るのに SKILL.md がそれを一切説明していない Skill は判定から漏れるが、
+# その場合は利用者にも引数が伝わらないため argument-hint 以前の問題として扱う。
+ARGUMENTS_VAR_RE = re.compile(r"\$\{?ARGUMENTS\}?")
+ARGUMENTS_HEADING_RE = re.compile(r"^#{1,6}\s.*\b(?:arguments?|options?)\b", re.MULTILINE | re.IGNORECASE)
+ARGUMENTS_TEXT_RE = re.compile(r"引数")
+
+
+def takes_arguments(fm: dict[str, str], body: str) -> bool:
+    """SKILL.md が引数を取ると読めるかを判定する（判定根拠は上のコメント）。"""
+    if "arguments" in fm:
+        return True
+    return bool(
+        ARGUMENTS_VAR_RE.search(body)
+        or ARGUMENTS_TEXT_RE.search(body)
+        or ARGUMENTS_HEADING_RE.search(body)
+    )
+
 
 class Finding:
     __slots__ = ("skill", "level", "code", "message")
@@ -142,11 +173,13 @@ def load_skills(skills_dir: pathlib.Path) -> list[dict]:
             continue
         text = f.read_text(encoding="utf-8", errors="replace")
         fm, block = parse_front_matter(text)
+        m = FRONT_MATTER_RE.match(text)
         skills.append({
             "dir": d.name,
             "path": f,
             "fm": fm,
             "block": block,
+            "body": text[m.end():] if m else text,
             "lines": len(text.splitlines()),
         })
     return skills
@@ -253,11 +286,11 @@ def check_skill(s: dict) -> list[Finding]:
     if dmi and uinv:
         add("error", "ops/uninvocable",
             "disable-model-invocation: true と user-invocable: false の同時指定は誰も起動できない")
-    if dmi and not fm.get("argument-hint"):
-        # 近似判定ではなく機械的に判定できるため、計画（Task 0-7 の検査項目表）どおり
-        # 失敗条件として扱う。
+    if dmi and takes_arguments(fm, s["body"]) and not fm.get("argument-hint"):
+        # 規約は「引数を取るなら + argument-hint」。引数を取らない明示指示専用 Skill には
+        # 要求しない（判定方法は takes_arguments の説明を参照）。
         add("error", "ops/argument-hint",
-            "disable-model-invocation があるのに argument-hint がない（明示起動時の引数が伝わらない）")
+            "引数を取る明示指示専用 Skill に argument-hint がない（明示起動時の引数が伝わらない）")
 
     ctx = unquote(fm.get("context", ""))
     for k in ("agent", "background"):

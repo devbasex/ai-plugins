@@ -65,13 +65,13 @@ when_to_use: "Claude Code 向けの追加トリガのみ。description で足り
 | --- | --- | --- | --- | --- |
 | 自動発動（既定） | 追加トリガがあれば `when_to_use` を併記 | 既定で暗黙起動可 | 自動ロード | 知識・判断基準・ワークフロー |
 | パス限定自動発動 | 上記 + `paths` | `paths` 無効 | `paths` 無効 | 特定ディレクトリでのみ意味を持つもの |
-| 明示指示専用 | `disable-model-invocation: true`（引数を取るなら + `argument-hint`） | 現状は制御手段なし。`description` に明示指示専用である旨を記載する | 制御手段なし。`description` に「利用者が明示的に指示したときのみ実行する」と記載 | 破壊的操作・外部への書き込み |
+| 明示指示専用 | `disable-model-invocation: true`（引数を取るなら + `argument-hint`） | `agents/openai.yaml` の `policy.allow_implicit_invocation: false`。加えて `description` に明示指示専用である旨を記載する | 制御手段なし。`description` に「利用者が明示的に指示したときのみ実行する」と記載 | 取り消しが難しく、かつ明示起動が定着している操作 |
 | 常時注入のみ | `user-invocable: false` | 相当機能なし | 相当機能なし | `ndf-policies` |
 
-- Codex には `<Skill 名>/agents/openai.yaml` の `policy.allow_implicit_invocation: false` という
-  相当機能があるが、現在の `plugins/ndf-codex` 配布物はこのファイルを生成していないため利用でき
-  ない。生成処理の追加は
-  [棚卸の計画](../../../issues/ndf-development-skills/07-tasks.md) の Task 0-8 で行う
+- Codex の相当機能は `<Skill 名>/agents/openai.yaml` の `policy.allow_implicit_invocation: false`
+  である。`scripts/build-runtime-plugins.sh` が `disable-model-invocation: true` の Skill に対して
+  このファイルを自動生成するため、共通編集元では frontmatter だけを書けばよい
+  （[棚卸の計画](../../../issues/ndf-development-skills/07-tasks.md) の Task 0-8）
 - 「常時注入のみ」に相当する機能は Codex と Kiro にない。両ランタイムは `user-invocable: false`
   を解釈せず、この分類の Skill も通常の Skill として扱う。唯一の対象である `ndf-policies` は
   3 ランタイムすべてへ配布している（`plugins/ndf-shared/manifests/`）ため、Codex では暗黙起動
@@ -83,10 +83,36 @@ when_to_use: "Claude Code 向けの追加トリガのみ。description で足り
   へ載らず、`user-invocable: false` は載る。Codex と Kiro にはこのキーがなく `description` は
   常に読まれるため、明示指示専用にする Skill は `description` 自体へ「利用者が明示的に指示した
   ときのみ実行する」と書き残す
-- 明示指示専用にしてよいのは、実行してしまうと取り消しが難しい操作に限る。日常的に自然文で
-  依頼される Skill に付けると、エージェントは Skill を使わず独自手順で実行する
 - `disable-model-invocation: true` と `user-invocable: false` を同時に指定しない。誰も起動
   できなくなる
+- 「引数を取るなら + `argument-hint`」の引数の有無は `scripts/check-skill-frontmatter.py` が
+  `SKILL.md` から機械的に判定する。frontmatter の `arguments`、本文の `$ARGUMENTS`、本文の
+  「引数」への言及（節見出しでも散文でもよい）のいずれかがあれば引数を取るとみなす。
+  引数を取るのに本文がそれに一切触れていないと判定から漏れるため、引数の説明は本文に書く
+
+### 取り消しの難しい操作をどちらで守るか
+
+破壊的操作・外部への書き込みを含む Skill の守り方は 2 つある。**取り消しの難しさだけでは
+決まらない。** 明示指示専用は「その Skill が使われなくなる」副作用を持つため、
+**利用者がどう依頼しているかの実測**で選ぶ。
+
+| 守り方 | 選ぶ条件 | 実装 |
+| --- | --- | --- |
+| 明示指示専用 | 取り消しが難しく、**かつ**利用者が `/ndf:<name>` で明示起動する運用が定着している（自然文での依頼がほぼない） | `disable-model-invocation: true` + `description` に明示指示専用と明記（Codex の `openai.yaml` はビルドで自動生成） |
+| 自動発動 + 実行前確認 | 取り消しは難しいが、**日常的に自然文で依頼される**。明示指示専用にすると Skill が使われず、エージェントが独自手順で同じ操作を実行してしまう | 暗黙起動を許し、取り消しの難しい手順の**直前に対象の一覧提示と利用者の同意**を必須手順として `SKILL.md` 本文へ固定する。`description` にも確認を取る旨を書く |
+
+判断材料は
+[棚卸台帳](../../../docs/specifications/ndf-skill-inventory.md)の実測起動数と、
+そのうち明示起動が占める割合である。明示起動がほぼ全数なら前者、自然文の依頼が多い、あるいは
+Skill を使わず独自手順で実行された形跡があるなら後者を選ぶ。
+
+- 後者では安全性の担保を frontmatter ではなく **本文の手順と `description`** に置く。Codex と
+  Kiro は `disable-model-invocation` を解釈せず、Claude Code でもそれは発動制御であって
+  実行前確認ではないため、そもそも frontmatter だけでは守れない
+- 実行前確認では、**何を消すか / 何を外部へ書き込むか**を一覧で提示する。対象を示さない
+  「実行してよいですか」は同意になっていない
+- 現時点の適用: 明示指示専用は `deploy` / `cherry-pick-pr` / `statusline`、
+  自動発動 + 実行前確認は `merged` / `pr`
 
 ## トリガ語の規則
 
