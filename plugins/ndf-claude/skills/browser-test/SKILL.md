@@ -155,5 +155,5 @@ curl -fsS http://localhost:<port>/health || echo "NOT RUNNING"
 
 ## 関連
 
-- `/ndf:review-branch` — 変更差分のコードレビュー
+- `/ndf:review --branch` — 変更差分のコードレビュー
 - `/ndf:pr-tests` — PR Test Plan の自動実行

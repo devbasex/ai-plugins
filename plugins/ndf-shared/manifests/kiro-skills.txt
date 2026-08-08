@@ -18,9 +18,6 @@ logging-guidelines
 sync-main
 cherry-pick-pr
 deploy
-review-branch
-review-pr-comments
-resolve-pr-comments
 browser-test
 codex
 statusline

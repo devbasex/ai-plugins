@@ -78,8 +78,7 @@ rewrite_codex_skill_paths() {
   local file
 
   for file in \
-    "$skills_dir/fix/SKILL.md" \
-    "$skills_dir/review-pr-comments/SKILL.md"
+    "$skills_dir/fix/SKILL.md"
   do
     [ -f "$file" ] || continue
     sed "s#\${PLUGIN_ROOT:-\${CLAUDE_PLUGIN_ROOT}}/skills/fix/scripts/fetch-pr-comments.sh#\${PLUGIN_ROOT:-\${CODEX_PLUGIN_ROOT:-\${CLAUDE_PLUGIN_ROOT}}}/$script_dir/fix/scripts/fetch-pr-comments.sh#g" \
@@ -105,8 +104,7 @@ rewrite_kiro_skill_paths() {
   local file
 
   for file in \
-    "$skills_dir/fix/SKILL.md" \
-    "$skills_dir/review-pr-comments/SKILL.md"
+    "$skills_dir/fix/SKILL.md"
   do
     [ -f "$file" ] || continue
     sed 's#${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/skills/fix/scripts/fetch-pr-comments.sh#${PLUGIN_ROOT:-plugins/ndf-kiro}/skills/fix/scripts/fetch-pr-comments.sh#g' \

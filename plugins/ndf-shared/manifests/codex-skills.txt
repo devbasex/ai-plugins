@@ -23,8 +23,5 @@ pr
 pr-tests
 problem-solving
 python-execution
-resolve-pr-comments
 review
-review-branch
-review-pr-comments
 sync-main

@@ -64,7 +64,7 @@ NDF の Skill 実装は `plugins/ndf-shared/skills/` が編集元です。公開
 
 主な Skill 領域:
 
-- PR / review workflow: `pr`, `pr-tests`, `fix`, `review`, `cross-review`, `resolve-pr-comments`
+- PR / review workflow: `pr`, `pr-tests`, `fix`, `review`, `cross-review`
 - branch / release workflow: `deploy`, `cherry-pick-pr`, `sync-main`, `merged`, `clean`
 - planning / documentation: `implementation-plan`, `issue-plan-strategy`, `plan-to-spec`, `markdown-writing`
 - quality / execution: `playwright-*`, `python-execution`, `docker-container-access`, `git-gh-operations`
