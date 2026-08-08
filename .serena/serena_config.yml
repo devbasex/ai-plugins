@@ -103,6 +103,7 @@ projects:
 # list of paths to ignore across all projects.
 # Same syntax as gitignore, so you can use * and **.
 # These patterns are merged additively with each project's own ignored_paths.
+# Quote patterns that start with `*`, e.g. `"**/bin/**"`.
 ignored_paths: []
 
 # time budget (seconds) per tool call for the retrieval of additional symbol information
@@ -191,7 +192,22 @@ jetbrains_launch_command:
 #     - /home/user/projects/**
 #     - C:\Users\Anna\Dev\work\**
 # The pattern "**" matches any project path, so it can be used to trust all projects.
-# NOTE: リポジトリにコミットする設定では信頼対象を空にしておく。
-# 任意の project.yml の trusted 限定設定（activation_command / ls_specific_settings 等）を
-# 無条件に受け入れないようにするため。信頼が必要な場合は各自のローカル設定で指定する。
 trusted_project_path_patterns: []
+
+# mapping from language server keys to integer priority values (higher = more preferred), which determine
+# language server selection during automatic project creation and are used to break ties when multiple
+# language servers match an equal number of source files.
+# The priority values override Serena's default priorities:
+#   * 0 = experimental or secondary language servers, which are never auto-detected
+#         (e.g. `python_*` and `php_*` are "secondary"; also applies to non-programming languages like `json`)
+#   * 1 = supersets of other languages, which shall be preferred only if they match more files
+#         (e.g. `vue` and `svelte`, which are supersets of `typescript`)
+#   * 2 = default priority
+# Example:
+#   ls_priorities:
+#     python: 0
+#     python_basedpyright: 3
+# This example would achieve that `python_basedpyright` becomes the preferred language server for Python,
+# giving it a high priority of 3, while the default Python language server is fully excluded from
+# auto-detection with priority 0.
+ls_priorities:

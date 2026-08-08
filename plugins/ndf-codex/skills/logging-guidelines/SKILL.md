@@ -1,7 +1,19 @@
 ---
 name: logging-guidelines
-description: "Design safe and useful application logging."
-when_to_use: "コードにログを追加・修正・整理するとき。Triggers: 'ログ追加', 'log追加', 'logger', 'logging', 'ログレベル', 'log level', 'デバッグログ', 'エラーログ', 'logger.info', 'logger.error', 'print文をログに'"
+description: "Choose log levels and write safe, useful application logs when adding or reworking logging in code（ログ追加 / logger / ログレベル / デバッグログ / エラーログ / print文をログに）. Use when editing source code that emits logs, to pick the level and keep secrets and personal data out of the output."
+paths:
+  - "**/*.py"
+  - "**/*.ts"
+  - "**/*.tsx"
+  - "**/*.js"
+  - "**/*.jsx"
+  - "**/*.go"
+  - "**/*.rb"
+  - "**/*.java"
+  - "**/*.kt"
+  - "**/*.php"
+  - "**/*.rs"
+  - "**/*.sh"
 ---
 
 # ログ運用ガイドライン
