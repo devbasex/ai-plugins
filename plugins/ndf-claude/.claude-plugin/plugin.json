@@ -51,7 +51,7 @@
     "./skills/review-branch",
     "./skills/review-pr-comments",
     "./skills/resolve-pr-comments",
-    "./skills/browser-test",
+    "./skills/playwright-authoring",
     "./skills/codex",
     "./skills/gemini",
     "./skills/statusline",
