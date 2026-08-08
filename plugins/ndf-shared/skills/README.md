@@ -66,6 +66,13 @@ when_to_use: "Claude Code 向けの追加トリガのみ。description で足り
   相当機能があるが、現在の `plugins/ndf-codex` 配布物はこのファイルを生成していないため利用でき
   ない。生成処理の追加は
   [棚卸の計画](../../../issues/ndf-development-skills/07-tasks.md) の Task 0-8 で行う
+- 「常時注入のみ」に相当する機能は Codex と Kiro にない。両ランタイムは `user-invocable: false`
+  を解釈せず、この分類の Skill も通常の Skill として扱う。唯一の対象である `ndf-policies` は
+  3 ランタイムすべてへ配布している（`plugins/ndf-shared/manifests/`）ため、Codex では暗黙起動
+  されうる。したがってこの分類の Skill は `description` に**「知識として参照する。手順として
+  実行しない」旨を明記する**。Kiro は Skill として配らず `.kiro/steering/` へ常時指示として
+  置き換えることで回避する（[棚卸の計画](../../../issues/ndf-development-skills/07-tasks.md)
+  の Task 0-9）。`description` の書き換えは同計画の Task 0-10 で行う
 - **Claude Code では** `disable-model-invocation: true` の Skill は `description` がコンテキスト
   へ載らず、`user-invocable: false` は載る。Codex と Kiro にはこのキーがなく `description` は
   常に読まれるため、明示指示専用にする Skill は `description` 自体へ「利用者が明示的に指示した

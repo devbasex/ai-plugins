@@ -106,6 +106,7 @@
 - **変更内容:**
   - 統合と整理の結果を manifest 3 種すべてへ反映する
   - `ndf-policies` に旧 Skill 名から新 Skill 名への対応表を記載する
+  - `ndf-policies` の `description` に「知識として参照する。手順として実行しない」旨を追記する。Codex には `user-invocable: false` の相当機能がなく、通常の Skill として暗黙起動されうるため
   - バージョンを 5.0.0 へ上げる。版数は `plugin.json` 以外にも散在しており、実測で次の箇所にある
 
 | ファイル | 記載箇所 |
