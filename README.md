@@ -77,7 +77,7 @@ bash plugins/ndf-kiro/install.sh --with-slack
 bash plugins/ndf-kiro/install.sh --with-slack --with-codex
 ```
 
-インストーラーは `plugins/ndf-kiro/skills/` から `.kiro/skills/` への symlink と `.kiro/agents/default.json` を生成します。
+インストーラーは `plugins/ndf-kiro/skills/` から `.kiro/skills/` への symlink、`.kiro/steering/ndf-policies.md`、`.kiro/agents/ndf.json` を生成します。
 
 #### 3. Slack通知の設定（オプション）
 
@@ -91,8 +91,10 @@ SLACK_USER_MENTION=<@U0123456789>
 #### 4. 起動
 
 ```bash
-kiro-cli chat
+kiro-cli chat --agent ndf
 ```
+
+既定エージェントとして使いたい場合は `bash plugins/ndf-kiro/install.sh --set-default` を実行します。
 
 詳細は [KIRO.md](./KIRO.md) を参照。
 

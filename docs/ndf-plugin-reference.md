@@ -34,7 +34,7 @@ plugins/
 │   └── scripts/
 └── ndf-kiro/
     ├── install.sh
-    ├── agents/default.json.template
+    ├── agents/ndf.json.template
     ├── prompts/
     ├── skills/
     └── scripts/

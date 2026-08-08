@@ -18,6 +18,10 @@ run_step "kiro install mcp-bigquery idempotent" bash "$REPO_ROOT/plugins/mcp/kir
 "$REPO_ROOT/tests/runtime-smoke/assertions/assert-plugin-files.sh" kiro
 "$REPO_ROOT/tests/runtime-smoke/assertions/assert-mcp-config.sh" kiro "$PROJECT_DIR/.mcp.json"
 "$REPO_ROOT/tests/runtime-smoke/assertions/assert-hook-fixtures.sh" kiro
+"$REPO_ROOT/tests/runtime-smoke/assertions/assert-kiro-agent.sh" workspace
+
+run_step "kiro install ndf global" bash "$REPO_ROOT/plugins/ndf-kiro/install.sh" --scope global --with-slack
+"$REPO_ROOT/tests/runtime-smoke/assertions/assert-kiro-agent.sh" global
 "$REPO_ROOT/tests/runtime-smoke/assertions/assert-authenticated-smoke.sh" kiro
 "$REPO_ROOT/tests/runtime-smoke/assertions/assert-no-host-contamination.sh" kiro
 write_junit kiro
