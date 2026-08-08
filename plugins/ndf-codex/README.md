@@ -20,6 +20,48 @@ codex plugin add ndf@ai-plugins
 
 Claude Code 専用の agents、statusline 自動設定、transcript retention 自動設定は含めません。Codex runtime が読むファイルはこの `plugins/ndf-codex` 配下だけで完結します。
 
+## 暗黙起動を抑止する Skill
+
+破壊的操作を伴う以下 8 個の Skill は、`skills/<name>/agents/openai.yaml` の `policy.allow_implicit_invocation: false` によって **Codex の暗黙起動 (モデルが自分で選んで起動する経路) を抑止**しています。共有 Skill の frontmatter が `disable-model-invocation: true` のものが対象で、`scripts/build-runtime-plugins.sh` が自動生成します。
+
+| Skill | 内容 |
+|-------|------|
+| `cherry-pick-pr` | 環境ブランチへの cherry-pick PR 作成 |
+| `clean` | マージ済みローカル/リモートブランチの削除 |
+| `deploy` | 環境ブランチ (qa/staging, release/v2 等) への deploy PR 作成 |
+| `merged` | PR マージ後のクリーンアップ |
+| `pr` | commit / push / PR 作成・更新 |
+| `pr-tests` | PR テストプランの実行と結果コメント |
+| `review` | PR / ブランチ差分のレビューと approve・request-changes 投稿 |
+| `sync-main` | main / master の取り込み |
+
+### 利用者への影響と起動方法
+
+これらの Skill は Codex のセッションに読み込まれる **skill 一覧に載らなくなります**。Codex には Claude Code の `/ndf:deploy` のような明示起動用の slash command 口がないため、**起動するにはファイルパスまたは Skill 名を示して Codex に読ませてください**。
+
+```text
+# 動く: パスを示して読ませる
+.agents/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+
+# 動かない: 名前だけで起動を依頼する
+deploy skill を実行してください。
+```
+
+Codex plugin としてインストールした場合の実体パスは Codex のプラグインキャッシュ配下になります。パスが不明なときは「`deploy` の SKILL.md を探して読み、その手順どおりに実行してください」のようにファイル探索を許可する形で依頼してください。
+
+### 実機検証結果 (codex-cli 0.146.1 / gpt-5.5)
+
+`.agents/skills/` 配下に検証用 Skill を置いて確認した結果です。
+
+| 検証 | 設定 | 結果 |
+|------|------|------|
+| 抑止 | 本プラグインの生成物と同一の `openai.yaml` を配置 | skill 一覧に **載らない**。エラー・警告は出ない |
+| 対照 | 同一構造で `allow_implicit_invocation: true` のみ変更 | skill 一覧に **載る** |
+| 名前で起動依頼 | 抑止済み Skill を名前だけで指定 | 「利用可能なスキル一覧に無い」として拒否。別 Skill で代替されることがある |
+| パスで起動依頼 | `SKILL.md` のパスを指定 | Codex が自分で読み込み、本文どおり実行する |
+
+対照検証により、抑止は yaml のパース失敗による Skill の取りこぼしではなく `policy` が意図どおり効いた結果であることを確認しています。
+
 ## Slack 通知
 
 Codex 版の Stop hook は `NDF_CODEX_SLACK_NOTIFY=true` が設定されている場合だけ Slack 通知を送ります。通知を使う場合は、利用プロジェクト側で以下の環境変数を設定します。
