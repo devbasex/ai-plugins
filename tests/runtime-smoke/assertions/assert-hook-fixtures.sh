@@ -18,9 +18,9 @@ case "$runtime" in
       node "$REPO_ROOT/plugins/ndf-codex/scripts/codex-slack-notify.js" < "$REPO_ROOT/tests/runtime-smoke/fixtures/hook-stop.json" >/dev/null
     ;;
   kiro)
-    test -f "$PROJECT_DIR/.kiro/agents/default.json"
-    jq -e '.hooks.agentSpawn[0].command' "$PROJECT_DIR/.kiro/agents/default.json" >/dev/null
-    stop_command="$(jq -r '.hooks.stop[0].command // empty' "$PROJECT_DIR/.kiro/agents/default.json")"
+    test -f "$PROJECT_DIR/.kiro/agents/ndf.json"
+    jq -e '.hooks.agentSpawn[0].command' "$PROJECT_DIR/.kiro/agents/ndf.json" >/dev/null
+    stop_command="$(jq -r '.hooks.stop[0].command // empty' "$PROJECT_DIR/.kiro/agents/ndf.json")"
     test -n "$stop_command"
     stop_script="$(python3 - "$stop_command" <<'PY'
 import shlex

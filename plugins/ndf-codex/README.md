@@ -20,6 +20,67 @@ codex plugin add ndf@ai-plugins
 
 Claude Code 専用の agents、statusline 自動設定、transcript retention 自動設定は含めません。Codex runtime が読むファイルはこの `plugins/ndf-codex` 配下だけで完結します。
 
+## 暗黙起動を抑止する Skill
+
+取り消しが難しい以下 2 個の Skill は、`skills/<name>/agents/openai.yaml` の `policy.allow_implicit_invocation: false` によって **Codex の暗黙起動 (モデルが自分で選んで起動する経路) を抑止**しています。共有 Skill の frontmatter が `disable-model-invocation: true` のものが対象で、`scripts/build-runtime-plugins.sh` が自動生成します。
+
+| Skill | 内容 |
+|-------|------|
+| `cherry-pick-pr` | 環境ブランチへの cherry-pick PR 作成 |
+| `deploy` | 環境ブランチ (qa/staging, release/v2 等) への deploy PR 作成 |
+
+`merged` / `pr` / `pr-tests` / `review` は日常的に自然文で依頼されるため、v5.0.0 で暗黙起動を許可しました。代わりに、取り消しの難しい手順 (push、PR 作成、ブランチ・worktree の削除) の直前に対象を提示して同意を得ることを各 Skill の本文で必須化しています。
+
+### 利用者への影響と起動方法
+
+抑止されるのは **暗黙起動だけ**です。`$<skill 名>` による明示起動は抑止後も従来どおり動きます。
+
+| 起動経路 | 抑止後の挙動 |
+|----------|-------------|
+| 暗黙起動 (モデルが自分で選ぶ) | **起動しない**。セッションの skill 一覧 (`## Skills` の `### Available skills`) に載らない |
+| 明示起動 `$deploy` | **起動する**。Codex CLI が `$<名前>` を展開し、SKILL.md 本文を `<skill>` ブロックとして注入する |
+| 名前だけの自然文依頼 (`deploy skill を実行して`) | **起動しない**。一覧に無いため拒否され、別の Skill で代替されることがある |
+| SKILL.md の絶対パスを示す | 通常のファイル読み取りとして読み込まれ、本文どおり実行される |
+
+推奨は `$<skill 名>` です。対話モード / 非対話モード (`codex exec`) のどちらでも同じ展開が行われます。
+
+```text
+# 動く: 明示起動 (推奨)
+$deploy qa/staging
+
+# 動く: 実体パスを示して読ませる
+~/.codex/plugins/cache/ai-plugins/ndf/5.0.0/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+
+# 動かない: 名前だけで起動を依頼する
+deploy skill を実行してください。
+```
+
+対話モード (`codex` を引数なしで起動) では `/skills` で Skill 一覧と有効・無効を確認できます。
+
+### プラグイン Skill のファイル探索に関する注意
+
+marketplace 経由でインストールした場合、Skill の実体は **ワークスペース外**の Codex プラグインキャッシュに置かれます。
+
+```text
+$CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
+# 既定 ($CODEX_HOME=~/.codex) の例:
+# ~/.codex/plugins/cache/ai-plugins/ndf/5.0.0/skills/deploy/SKILL.md
+```
+
+そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。`$<skill 名>` はキャッシュ配下の Skill も skill roots から解決するため、まず `$` 起動を使ってください。パスで指示したい場合は `codex plugin list` で実体パスを確認し、絶対パスを渡します。
+
+### 実機検証結果 (codex-cli 0.146.1 / gpt-5.5)
+
+`.agents/skills/` 配下に検証用 Skill (`probe-explicit` = 本プラグインと同じ `openai.yaml` を配置 / `probe-open` = 抑止なし) を置き、`codex exec` で確認した結果です。表中のパスは検証時点 (プラグイン v4.20.1) の実測値をそのまま載せています。
+
+| 検証 | 内容 | 結果 |
+|------|------|------|
+| 暗黙起動の抑止 | 「Available skills のうち probe で始まるものを列挙」と依頼 | `probe-open` のみ。`probe-explicit` は **載らない**。エラー・警告は出ない |
+| 明示起動 | `codex exec '$probe-explicit'` | **起動した**。セッションログに `<skill><name>probe-explicit</name><path>…</path>` + SKILL.md 本文が注入される |
+| プラグイン Skill の明示起動 | ワークスペース外にインストール済みの `ndf` に対し、無関係な作業ディレクトリで `codex exec '$deploy'` | **解決した**。`~/.codex/plugins/cache/ai-plugins/ndf/4.20.1/skills/deploy/SKILL.md` を読み込んで実行 |
+
+暗黙起動の抑止と明示起動の可否は独立しており、抑止した Skill も `$` で起動できることを確認しています。
+
 ## Slack 通知
 
 Codex 版の Stop hook は `NDF_CODEX_SLACK_NOTIFY=true` が設定されている場合だけ Slack 通知を送ります。通知を使う場合は、利用プロジェクト側で以下の環境変数を設定します。

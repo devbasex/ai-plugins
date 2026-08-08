@@ -13,42 +13,22 @@ scripts/upload_evidence.py の CLI スタンドアロン用途 (利用者が
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 from urllib.parse import quote
 
 
 _HERE = Path(__file__).resolve()
-_CANDIDATES: tuple[Path, ...] = tuple(
-    Path(p).expanduser()
-    for p in (
-        os.environ.get("GOOGLE_AUTH_SCRIPTS"),
-        "~/.claude/skills/google-auth/scripts",
-        "~/.codex/skills/google-auth/scripts",
-        str(_HERE.parent.parent.parent / "scripts"),
-        str(_HERE.parent.parent.parent.parent / "google-auth" / "scripts"),
-    )
-    if p
-)
+# Drive 認証の候補探索は scripts/_drive_auth.py を唯一の実装とする。
+# パッケージ側からも同じ探索を使うため、skill 直下の scripts/ を sys.path へ入れて読む。
+_SCRIPTS_DIR = _HERE.parent.parent.parent / "scripts"
 
 
-def _ensure_google_auth_on_path() -> None:
-    for p in _CANDIDATES:
-        if p.is_dir():
-            path = str(p)
-            if path not in sys.path:
-                sys.path.insert(0, path)
-            return
-    searched = "\n  - ".join(str(p) for p in _CANDIDATES)
-    raise RuntimeError(
-        "Google Drive 連携には optional skill `google-auth` が必要です。\n"
-        "Codex 公開セットには同梱していないため、Drive 系コマンドを使う前に "
-        "`GOOGLE_AUTH_SCRIPTS` を google-auth/scripts へ設定してください。\n"
-        "例: export GOOGLE_AUTH_SCRIPTS=/path/to/plugins/ndf-shared/skills/google-auth/scripts\n"
-        "検索した候補:\n  - "
-        f"{searched}"
-    )
+def _drive_service(scopes: list[str]):
+    if str(_SCRIPTS_DIR) not in sys.path:
+        sys.path.insert(0, str(_SCRIPTS_DIR))
+    from _drive_auth import drive_service  # type: ignore  # noqa: E402
+    return drive_service(scopes)
 
 
 # 拡張子 → kind の自動判定
@@ -108,13 +88,9 @@ def upload(
             f"未対応の kind: {kind!r} (allowed: {sorted(ALLOWED_KINDS)})"
         )
 
-    _ensure_google_auth_on_path()
-    from google_auth import get_credentials  # type: ignore  # noqa: E402
-    from googleapiclient.discovery import build  # noqa: E402
     from googleapiclient.http import MediaFileUpload  # noqa: E402
 
-    creds = get_credentials(["drive.file"])
-    service = build("drive", "v3", credentials=creds)
+    service = _drive_service(["drive.file"])
 
     metadata: dict = {"name": file_path.name}
     if parent_folder_id:

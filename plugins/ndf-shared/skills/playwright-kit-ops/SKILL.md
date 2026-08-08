@@ -1,7 +1,6 @@
 ---
 name: playwright-kit-ops
-description: "Operate playwright_kit setup, scans, and evidence tools."
-when_to_use: "playwright_kit のスクリプトを実行するとき / E2E テストプロジェクトの初期化 / page role 自動分類 / 単発 a11y・CWV スキャン / Google Drive エビデンスアップロードが必要なとき。Triggers: 'init_project', 'プロジェクト初期化', 'classify_page_role', 'run_a11y_scan', 'check_cwv', 'upload_evidence', 'record_scenario', 'playwright_kit 実行'"
+description: "Run the playwright_kit scripts: project init, page-role classification, one-off a11y / CWV scans, and Drive upload helpers. Use when a playwright_kit script has to be run directly. Triggers: 'init_project.sh', 'classify_page_role.py', 'run_a11y_scan.py', 'upload_evidence.py'"
 allowed-tools:
   - Read
   - Bash(python *)
@@ -59,12 +58,14 @@ cd /path/to/your-app
 ./scenario-test/run.sh --pwk-drive-folder=<ID>    # Drive 自動アップロード
 ```
 
-Drive 連携は optional dependency として扱う。Codex 公開セットには `google-auth`
-skill を同梱しないため、Drive 系コマンドや `--pwk-drive-folder` を使う場合は
-`GOOGLE_AUTH_SCRIPTS` を `google-auth/scripts` の実パスへ設定する。
+Drive 連携は optional dependency として扱う。`google-auth` skill はどのランタイムの
+配布物にも同梱していないため、Drive 系コマンドや `--pwk-drive-folder` を使う場合は
+リポジトリ [devbasex/ai-plugins](https://github.com/devbasex/ai-plugins) を clone し、
+`GOOGLE_AUTH_SCRIPTS` をその clone 先の `google-auth/scripts` へ設定する。
 
 ```bash
-export GOOGLE_AUTH_SCRIPTS=/path/to/plugins/ndf-shared/skills/google-auth/scripts
+# <ai-plugins を clone した先> を実パスに置き換える
+export GOOGLE_AUTH_SCRIPTS=<ai-plugins のパス>/plugins/ndf-shared/skills/google-auth/scripts
 cd scenario-test
 uv sync --extra drive
 ```
@@ -93,17 +94,24 @@ python scripts/check_cwv.py --url https://example.com
 
 ```bash
 # 単一ファイルを Drive にアップロード
-python scripts/upload_evidence.py reports/run-001/test_login/trace.zip --kind trace
+python scripts/upload_evidence.py reports/run-001/test_login/trace.zip \
+  --kind trace --parent-folder-id FOLDER_ID
 
 # ディレクトリごとアップロード
-python scripts/gdrive_upload_dir.py reports/run-001/ --folder-id <FOLDER_ID>
+python scripts/gdrive_upload_dir.py --local reports/run-001/ --parent FOLDER_ID
 
-# Markdown → Google Doc 変換
-python scripts/upload_md_as_gdoc.py reports/run-001/report.md
+# Markdown を Google Doc へ変換
+python scripts/upload_md_as_gdoc.py --md reports/run-001/report.md --parent FOLDER_ID
 
-# Google Doc にエビデンス Drive リンクを埋め込み
-python scripts/build_gdoc_with_drive_links.py <doc-id> reports/run-001/
+# エビデンスの Drive リンクを埋め込んだ Google Doc を作る
+python scripts/build_gdoc_with_drive_links.py \
+  --md reports/run-001/report.md --folder FOLDER_ID \
+  --run-id run-001 --name "run-001 レポート"
 ```
+
+`--parent` / `--parent-folder-id` / `--folder` に渡すのは Drive のフォルダ ID。
+`upload_evidence.py` の `--parent-folder-id` だけは省略でき、その場合はマイドライブ
+直下へ置く。
 
 ## パッケージ参照
 
@@ -111,9 +119,6 @@ playwright_kit Python パッケージ本体・templates・tests はこの skill 
 
 ## 関連 Skill
 
-- `/ndf:playwright-test-planning` — テスト計画 (方法論 + チェックリスト)
-- `/ndf:playwright-script-creation` — テストスクリプト作成
-- `/ndf:playwright-execution` — テスト実行 + エビデンス収集 (video/trace/overlay/quality)
-- `/ndf:playwright-browser-connect` — ブラウザ接続構成 (local / CDP remote)
-- `/ndf:playwright-report` — レポート生成
-- `/ndf:playwright-scenario-test` — 全機能統括
+- `/ndf:playwright-planning` — テスト計画 (方法論 + チェックリスト + ワークフロー全体像)
+- `/ndf:playwright-authoring` — スクリプト作成と実行 (テストコード / エビデンス / ブラウザ接続)
+- `/ndf:playwright-evidence` — 証跡とレポート (report.md / Google Drive 保管)

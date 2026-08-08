@@ -1,0 +1,50 @@
+[project]
+name = "playwright_kit"
+version = "0.5.0"
+description = "pytest-playwright 上で動く Web シナリオ E2E テストの理論ベース実施フレームワーク (Claude Code skill)。v0.3.0: 自前 YAML DSL を全廃し、pytest plugin / fixture / marker / accessibility autouse / web vitals autouse / overlay / report.md / Google Drive 連携を提供。v0.4.0: PHP / SSR がフロント漏れさせる Fatal error / STRICT: 等を検出する body_check autouse を default 有効で復活 (PHP 系パターン内蔵)。v0.5.0: パッケージ名を playwright_kit に rename し、利用者プロジェクト直下で自己完結 (Skill 非依存) に動作させる構成へ移行。"
+requires-python = ">=3.11"
+dependencies = [
+    "playwright>=1.50,<2.0",
+    "pyyaml>=6.0",
+    # webm → mp4 変換用。Playwright 録画は webm のみ生成するが、
+    # Google Drive のプレビュアでは mp4 (H.264) の方が安定するため変換する。
+    "imageio-ffmpeg>=0.4",
+    # v0.3.0: pure pytest-playwright 移行
+    # pytest 本体と pytest-playwright fixture (page / context / browser_context_args)、
+    # pytest-xdist による並列実行を main 依存として要求する。
+    "pytest>=8.0",
+    "pytest-playwright>=0.5",
+    "pytest-xdist>=3.0",
+    # accessibility autouse は scenario.config.yaml で default 有効。
+    # runtime テンプレート (templates/pyproject.toml.runtime) と揃えて main dep に含める。
+    "axe-playwright-python>=0.1.4",
+]
+
+[project.optional-dependencies]
+# Drive 連携: scripts/trace_link.py / build_gdoc_with_drive_links.py 等が使用
+drive = [
+    "google-api-python-client>=2.0",
+    "google-auth>=2.0",
+    "google-auth-oauthlib>=1.0",
+]
+# 開発用: pure function の単体テスト (uv run --extra dev pytest)
+# pytest 本体は main deps に移行済 (v0.3.0)。dev には開発時のみの拡張を入れる余地。
+dev = [
+    "pytest>=8.0",
+]
+
+[project.entry-points."pytest11"]
+# pytest が auto-discover する plugin entry-point。
+# ``uv pip install -e .`` 後は ``pytest`` 起動だけで playwright_kit plugin が有効になる。
+playwright-kit = "playwright_kit.pytest_plugin"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["playwright_kit"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

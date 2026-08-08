@@ -1,9 +1,9 @@
 flowchart TB
-  S["plugins/ndf-shared/<br/>skills 49 個<br/><i>ここだけを編集する</i>"]
+  S["plugins/ndf-shared/<br/>skills 29 個<br/><i>ここだけを編集する</i>"]
 
-  S --> C["ndf-claude<br/>skills 29 + agents 8<br/>+ SessionStart/Stop hook"]
-  S --> X["ndf-codex<br/>skills 30 + hook"]
-  S --> K["ndf-kiro<br/>skills 28 + install.sh"]
+  S --> C["ndf-claude<br/>skills 25 + agents 8<br/>+ SessionStart/Stop hook"]
+  S --> X["ndf-codex<br/>skills 23 + hook"]
+  S --> K["ndf-kiro<br/>skills 24 + install.sh"]
 
   C --> C2(["Claude Code"])
   X --> X2(["Codex CLI"])

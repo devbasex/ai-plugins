@@ -6,8 +6,9 @@ sys.path から発見する。本モジュールにロジックを集約する�
 
 Drive 連携は optional dependency。`GOOGLE_AUTH_SCRIPTS` 環境変数が設定されて
 いればそれを使い、それ以外は標準インストール先と sibling の google-auth
-スキルを探す。Codex 公開セットには google-auth を含めないため、Codex で
-Drive 系コマンドを使う場合は `GOOGLE_AUTH_SCRIPTS` を明示する。
+スキルを探す。google-auth はどの公開セットにも含めていないため、Drive 系
+コマンドを使う場合は `GOOGLE_AUTH_SCRIPTS` を明示するか、同スキルを利用先へ
+導入する。
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ _CANDIDATES: tuple[Path, ...] = tuple(
         os.environ.get("GOOGLE_AUTH_SCRIPTS"),
         "~/.claude/skills/google-auth/scripts",
         "~/.codex/skills/google-auth/scripts",
+        "~/.kiro/skills/google-auth/scripts",
         str(_HERE.parent.parent.parent / "google-auth" / "scripts"),
     )
     if p
@@ -31,9 +33,14 @@ _CANDIDATES: tuple[Path, ...] = tuple(
 
 
 def _ensure_google_auth_on_path() -> None:
-    """`from google_auth import get_credentials` できるよう sys.path を整える。"""
+    """`from google_auth import get_credentials` できるよう sys.path を整える。
+
+    ディレクトリの存在だけで採用すると、`google_auth.py` を含まない別の
+    `scripts/` を先に拾って後続の候補を見ないまま import に失敗する。
+    実体の有無まで確かめてから sys.path へ入れる。
+    """
     for p in _CANDIDATES:
-        if p.is_dir():
+        if (p / "google_auth.py").is_file():
             path = str(p)
             if path not in sys.path:
                 sys.path.insert(0, path)
@@ -41,10 +48,10 @@ def _ensure_google_auth_on_path() -> None:
     searched = "\n  - ".join(str(p) for p in _CANDIDATES)
     raise RuntimeError(
         "Google Drive 連携には optional skill `google-auth` が必要です。\n"
-        "Codex 公開セットには同梱していないため、Drive 系コマンドを使う前に "
+        "どの公開セットにも同梱していないため、Drive 系コマンドを使う前に "
         "`GOOGLE_AUTH_SCRIPTS` を google-auth/scripts へ設定してください。\n"
-        "例: export GOOGLE_AUTH_SCRIPTS=/path/to/plugins/ndf-shared/skills/google-auth/scripts\n"
-        "検索した候補:\n  - "
+        "例: export GOOGLE_AUTH_SCRIPTS=<ai-plugins のパス>/plugins/ndf-shared/skills/google-auth/scripts\n"
+        "google_auth.py を探した候補:\n  - "
         f"{searched}"
     )
 

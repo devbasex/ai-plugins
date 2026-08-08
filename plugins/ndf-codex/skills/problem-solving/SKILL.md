@@ -1,7 +1,6 @@
 ---
 name: problem-solving
-description: "Solve bugs, incidents, and data inconsistencies at root cause."
-when_to_use: "データ不整合 / バグ / 障害対応時に自動参照。「つじつま合わせ」を避けて上流で直す判断が必要なとき。Triggers: 'バグ修正', 'データ不整合', '障害対応', '根本原因', 'root cause analysis', 'data inconsistency', 'incident', '上流で直す', 'patch vs fix'"
+description: "Solve bugs, incidents, and data inconsistencies at the root cause instead of patching downstream. Use when a bug, outage, or data inconsistency needs a fix decision. Triggers: 'バグの根本原因', 'データ不整合', '障害対応', 'root cause analysis', '上流で直す', 'patch vs fix'"
 ---
 
 # 問題解決ガイドライン
@@ -131,7 +130,7 @@ Layer 4: 出力時検証（結果の妥当性チェック）
 
 - 根本原因の修正とデータ修復は**別コミット**にする（Revertしやすい）
 - 重複コードは発見次第リファクタリングする
-- 検証環境向けPRは `cherry-pick-pr` 方式で作成し、mainブランチを汚染しない（詳細は `branch-fix-strategy` スキル参照）
+- 検証環境向けPRは `cherry-pick-pr` 方式で作成し、mainブランチを汚染しない（詳細は `cherry-pick-pr` スキル参照）
 
 ## 6. 調査レポートの書き方
 
@@ -158,5 +157,5 @@ SQLクエリ結果をそのまま貼り、「コードを読んだ推測」と�
 ## 関連スキル
 
 - `/ndf:investigation-rules` — 調査レポート作成時のエビデンス主義
-- `/ndf:branch-fix-strategy` — 複数ブランチへの修正適用戦略
+- `/ndf:cherry-pick-pr` — 複数ブランチへの修正適用戦略
 - `/ndf:logging-guidelines` — ログ設計（原因特定を容易にする）

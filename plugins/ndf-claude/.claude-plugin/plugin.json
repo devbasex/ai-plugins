@@ -1,7 +1,7 @@
 {
   "name": "ndf",
-  "version": "4.20.1",
-  "description": "Claude Code plugin with 8 specialized agents, focused NDF skills for PR/review workflows, implementation planning, debugging principles, statusline, browser smoke testing, Codex CLI delegation, transcript retention guard, default statusline setup, and optional Slack notifications.",
+  "version": "5.0.0",
+  "description": "Claude Code plugin (v5.0.0): 8 specialized agents and 25 focused NDF skills for PR/review workflows, cross-review, implementation planning, plan-to-spec, browser automation, Docker container access, statusline, external AI delegation (Codex/Gemini), transcript retention guard, and optional Slack notifications.",
   "author": {
     "name": "takemi-ohama",
     "url": "https://github.com/takemi-ohama"
@@ -34,28 +34,24 @@
     "./skills/review",
     "./skills/cross-review",
     "./skills/merged",
-    "./skills/clean",
     "./skills/ndf-policies",
     "./skills/markdown-writing",
-    "./skills/python-execution",
     "./skills/docker-container-access",
-    "./skills/git-gh-operations",
-    "./skills/branch-fix-strategy",
     "./skills/implementation-plan",
     "./skills/investigation-rules",
     "./skills/problem-solving",
     "./skills/logging-guidelines",
-    "./skills/sync-main",
     "./skills/cherry-pick-pr",
     "./skills/deploy",
-    "./skills/review-branch",
-    "./skills/review-pr-comments",
-    "./skills/resolve-pr-comments",
-    "./skills/browser-test",
-    "./skills/codex",
-    "./skills/gemini",
+    "./skills/playwright-planning",
+    "./skills/playwright-authoring",
+    "./skills/playwright-evidence",
+    "./skills/playwright-kit-ops",
+    "./skills/external-ai",
     "./skills/statusline",
     "./skills/issue-plan-strategy",
-    "./skills/plan-to-spec"
+    "./skills/plan-to-spec",
+    "./skills/qa-security-scan",
+    "./skills/official-skills-autoloader"
   ]
 }

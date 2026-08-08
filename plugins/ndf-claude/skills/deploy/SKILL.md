@@ -1,7 +1,7 @@
 ---
 name: deploy
-description: "Create deploy PRs from feature to environment branches."
-argument-hint: "<env-branch> (例: qa/staging, release/v2)"
+description: "Create a deploy PR from the current feature branch to an environment branch such as qa/staging or release/v2. 破壊的操作のため、利用者が /ndf:deploy を明示的に指示したときのみ実行する。Triggers: '環境ブランチへデプロイ', 'qaに上げる', 'stagingへデプロイ', 'リリースブランチへPR'"
+argument-hint: "環境ブランチ名 (例: qa/staging, release/v2)"
 disable-model-invocation: true
 allowed-tools:
   - Bash
@@ -109,6 +109,5 @@ git checkout "$FEATURE_BRANCH"
 
 ## 関連
 
-- `/ndf:cherry-pick-pr` — 一部コミットだけを環境に届ける場合
-- `/ndf:branch-fix-strategy` — ブランチ運用戦略の原則
-- `/ndf:sync-main` — featureブランチに main を取り込む
+- `/ndf:cherry-pick-pr` — 一部コミットだけを環境に届ける場合とブランチ運用戦略の原則
+- `/ndf:merged` — featureブランチに main を取り込む / マージ後のブランチ整理

@@ -19,7 +19,7 @@ case "$runtime" in
     find "$HOME" -path '*/hooks/hooks.json' -print | grep -q .
     ;;
   kiro)
-    test -f "$PROJECT_DIR/.kiro/agents/default.json"
+    test -f "$PROJECT_DIR/.kiro/agents/ndf.json"
     # tools が未宣言だと Kiro CLI はツールなしのエージェントとして読み込み、
     # skill が SKILL.md を読むことも git / gh を実行することもできなくなる。
     python3 -c '
@@ -28,9 +28,10 @@ config = json.load(open(sys.argv[1]))
 tools = config.get("tools")
 if not tools:
     sys.exit("agent config declares no tools: " + sys.argv[1])
-' "$PROJECT_DIR/.kiro/agents/default.json"
+' "$PROJECT_DIR/.kiro/agents/ndf.json"
     find -L "$PROJECT_DIR/.kiro/skills" -path '*/SKILL.md' -print | grep -q .
     test -f "$PROJECT_DIR/.kiro/prompts/pr.md"
+    test -s "$PROJECT_DIR/.kiro/steering/ndf-policies.md"
     test -L "$PROJECT_DIR/.kiro/mcp_runtime/mcp-bigquery"
     ;;
   *) echo "unknown runtime: $runtime" >&2; exit 2 ;;

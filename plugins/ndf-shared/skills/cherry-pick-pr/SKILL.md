@@ -1,7 +1,7 @@
 ---
 name: cherry-pick-pr
-description: "Create cherry-pick PRs for environment branches."
-argument-hint: "<base-branch> (例: qa/staging, release/v2)"
+description: "Cherry-pick a merged fix onto environment branches (qa/staging, release) as a new PR. 破壊的操作のため、利用者が /ndf:cherry-pick-pr を明示的に指示したときのみ実行する。Triggers: 'cherry-pick', 'qaにも同じ修正を適用', 'stagingにも反映', 'release branchへ適用', 'multi-branch fix'"
+argument-hint: "ベースブランチ名 (例: qa/staging, release/v2)"
 disable-model-invocation: true
 allowed-tools:
   - Bash
@@ -11,7 +11,7 @@ allowed-tools:
 
 # cherry-pick PR 作成コマンド
 
-featureブランチから指定ベースブランチへ、短命ブランチ経由で cherry-pick PR を作成する。`feature → main` の PR にベースブランチ固有コードが混入するのを防ぐ。
+featureブランチから指定ベースブランチ（`qa/*`, `staging/*`, `release/*` 等の環境ブランチ）へ、短命ブランチ経由で cherry-pick PR を作成する。同じ修正を複数ブランチへ並行適用する場面全般で、この原則と手順に従う。
 
 ## 使用方法
 
@@ -24,7 +24,22 @@ featureブランチから指定ベースブランチへ、短命ブランチ経�
 
 featureブランチに環境ブランチ(`qa/staging`等)を merge して conflict を解消すると、`feature → main` の PR に環境ブランチ固有のコードが混入する（main汚染）。短命ブランチ + cherry-pick で、必要なコミットだけを対象ブランチに届ける。
 
-詳細な原則は `/ndf:branch-fix-strategy` スキル参照。
+| 観点 | 正しい順序 | 誤った順序 |
+|------|-----------|-----------|
+| 単一ソース | feature ブランチが唯一の正 | 二箇所で実装 |
+| 一貫性 | cherry-pick で完全一致 | 手書き差分でズレる |
+| 追跡性 | `-x` で元 commit が明記 | 関連 commit 不明確 |
+
+## 核心ルール
+
+原則は `ndf-policies`「ブランチ運用の原則」に定義されている。本 Skill の処理フローはその原則を手順へ落としたもので、対応は次のとおり。
+
+| 原則 | 対応する処理フロー |
+|------|------------------|
+| feature に先に commit し cherry-pick で届ける | 3・6 |
+| 環境ブランチを feature に merge しない | 「なぜ必要か」 |
+| push 前に `origin/main` を取り込む | 5 |
+| マージ済みブランチには push しない | 2 |
 
 ## 処理フロー
 
@@ -110,11 +125,11 @@ git checkout <original-branch>
 
 - 短命ブランチは PR マージ後に削除してよい
 - `feature → main` の PR には影響しない
-- ベースブランチを feature ブランチに merge するのは **禁止**（main汚染の原因）
-- `-x` オプションで元commit参照を残す（追跡性）
+- revert の扱いは `ndf-policies`「ブランチ運用の原則」5 に従う
 
 ## 関連
 
-- `/ndf:branch-fix-strategy` — なぜこの手順が必要かの原則
-- `/ndf:pr` — 通常のPR作成（base=main）
+- `ndf-policies` — 環境ブランチへの適用原則とブランチ汚染の回避（本 Skill の前提）
+- `/ndf:pr` — 通常のPR作成（base=main）。非 main ベースは本 Skill に誘導される
+- `/ndf:merged` — マージ後のブランチ整理と、現ブランチへの main 取り込み
 - `/ndf:deploy` — ブランチ全体を環境へデプロイ（cherry-pickとは別用途）

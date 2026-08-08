@@ -3,7 +3,7 @@ marp: true
 theme: default
 paginate: true
 size: 16:9
-header: 'ai-plugins / NDF v4.20.1'
+header: 'ai-plugins / NDF v5.0.0'
 style: |
   section {
     font-family: "Hiragino Sans", "Noto Sans JP", "Yu Gothic", sans-serif;
@@ -73,7 +73,7 @@ NDFが何なのかは前回話したので、今日は「で、結局どのス�
 【0:35-1:25】
 構成はシンプルです。スキルの本体は ndf-shared の1か所。ここを直すと、Claude用・Codex用・Kiro用の配布物がビルドで生成されます。
 なので「Claudeでは直ってるけどCodexでは古い」が起きない。地味ですがこれが一番効いてます。
-数が違うのは、ランタイムごとに意味のないスキルを外しているからです。Claudeは29、Codexは30、Kiroは28。
+数が違うのは、ランタイムごとに意味のないスキルを外しているからです。Claudeは25、Codexは23、Kiroは24。
 MCPプラグインが10個。今日は時間の都合で名前だけにします。
 -->
 
@@ -93,7 +93,7 @@ MCPプラグインが10個。今日は時間の都合で名前だけにします
 
 | | |
 |---|---|
-| **スキル 29個** | `/ndf:pr`, `/ndf:review` … スラッシュで直接呼べる |
+| **スキル 25個** | `/ndf:pr`, `/ndf:review` … スラッシュで直接呼べる |
 | **エージェント 8個** | director / corder / qa / debugger / devops-engineer など |
 | **フック 2種** | SessionStart（transcript保持を90日に維持）/ Stop（AI要約+Slack通知） |
 
@@ -498,11 +498,11 @@ codex plugin add ndf@ai-plugins
 ```
 
 セッション内では `ndf:` 接頭辞で
-**30個**のスキルが使えます。
+**23個**のスキルが使えます。
 
 <div class="small">
 
-Claude版との差: エージェント8個とSessionStart/Stopフックは無し。代わりに Playwright 系スキル5個が入ります。
+Claude版との差: エージェント8個とSessionStart/Stopフックは無し。Playwright 系スキル4個は Claude 版にも入ります。
 
 </div>
 
@@ -515,11 +515,12 @@ Claude版との差: エージェント8個とSessionStart/Stopフックは無し
 git clone \
   https://github.com/devbasex/ai-plugins.git
 bash plugins/ndf-kiro/install.sh
-kiro-cli chat
+kiro-cli chat --agent ndf
 ```
 
-`.kiro/skills/` に**28個**、
-`.kiro/agents/default.json` を生成。
+`.kiro/skills/` に**23個**（配布 24 個のうち `ndf-policies` は steering へ）、
+`.kiro/agents/ndf.json` と
+`.kiro/steering/ndf-policies.md` を生成。
 
 <div class="small">
 
@@ -533,7 +534,7 @@ kiro-cli chat
 <!--
 【12:50-13:40】
 CodexとKiroです。ここは「同じものが使える」ということだけ持って帰ってください。
-Codexはマーケットプレイス方式で、Claudeとほぼ同じ2コマンド。セッションに入るとndfコロン付きでスキルが並びます。実際に叩いて30個読み込まれているのを確認済みです。
+Codexはマーケットプレイス方式で、Claudeとほぼ同じ2コマンド。セッションに入るとndfコロン付きでスキルが並びます。実際に叩いて23個読み込まれているのを確認済みです。
 Kiroだけ方式が違って、リポジトリをcloneしてinstall.shを叩きます。.kiro/skills/ 以下にスキルが並んで、エージェント定義も一緒に作られます。何度実行しても壊れないので、更新したら叩き直せばいいです。
 -->
 

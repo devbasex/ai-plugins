@@ -1,7 +1,8 @@
 ---
 name: ml-model-structure
-description: "Structure ML training, inference, and versioned models."
-when_to_use: "機械学習モデルの新規構築・再学習・推論API/コンテナ開発・モデルのバージョン管理/並行運用を行うとき。analysis/ 配下に学習スクリプトや推論コードを配置する設計判断が必要なとき。Triggers: 'モデル構築', 'モデル再学習', 'モデルのバージョン管理', '推論コンテナ', '推論API', 'SageMaker', 'feature SSoT', 'train/serve skew', 'analysis ディレクトリ', 'champion challenger', '並行運用'"
+description: "Lay out ML training and inference code as self-contained versioned directories with a per-version feature SSoT. Use when building, retraining, or versioning a model. Triggers: 'モデル構築', 'モデル再学習', 'モデルのバージョン管理', '推論API', 'train/serve skew', 'champion challenger'"
+paths:
+  - "analysis/**"
 allowed-tools:
   - Read
   - Write
