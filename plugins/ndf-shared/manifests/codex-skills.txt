@@ -19,4 +19,5 @@ playwright-planning
 pr
 pr-tests
 problem-solving
+qa-security-scan
 review

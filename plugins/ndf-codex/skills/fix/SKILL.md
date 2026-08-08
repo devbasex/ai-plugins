@@ -1,7 +1,6 @@
 ---
 name: fix
-description: "Classify PR review comments, fix the actionable ones, then reply and resolve each thread. Use when responding to PR review feedback from codex, gemini, bots, or humans."
-when_to_use: "PR レビューコメントへの対応全般。分類だけしたいときは --classify-only。Triggers: 'PRコメント対応', 'PRレビュー修正', 'PRコメントを確認', 'PRコメントを分類', 'コメント対応の優先度', 'PR fix', 'classify PR comments', 'コメントに対応して修正', 'Resolveして'"
+description: "Classify PR review comments, fix the actionable ones, then reply and resolve each thread. Use when responding to review feedback from codex, gemini, bots, or humans on a PR. Triggers: 'PRコメント対応', 'PRレビュー修正', 'PRコメントを分類', 'コメントに対応して修正', 'Resolveして'"
 argument-hint: "[PR番号] [--classify-only] [--defer-nit] [--severity-min critical|major|minor]"
 allowed-tools:
   - Bash

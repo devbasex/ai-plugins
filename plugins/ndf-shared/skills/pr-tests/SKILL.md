@@ -1,8 +1,7 @@
 ---
 name: pr-tests
-description: "Run PR test plans and comment results."
+description: "Run the test plan written in a PR body and post the results back as a PR comment. Use when a PR test plan has to be executed and reported. Triggers: 'PRのテストを実行', 'テストプランを実行', 'テスト結果をPRにコメント'"
 argument-hint: "[PR番号]"
-disable-model-invocation: true
 allowed-tools:
   - Bash
   - Read

@@ -1,7 +1,6 @@
 ---
 name: playwright-authoring
-description: "Create reproducible Playwright test scripts and run them with evidence, or check a page over browser MCP. Use when writing E2E test code, running E2E tests, doing a browser smoke check, or connecting to a remote Chrome over CDP (テストスクリプト作成 / テスト実行 / ブラウザ動作確認 / CDP 接続)."
-when_to_use: "テストコード実装 / エビデンス動画・trace 収集 / accessibility・Core Web Vitals 計測 / ブラウザ接続先の変更が必要なとき。Triggers: 'playwright codegen', 'pwk_evidence', 'axe-core', 'WCAG', 'LCP', 'CLS', 'body_check', 'overlay', 'connectOverCDP', 'host.docker.internal', 'remote debugging'"
+description: "Write Playwright E2E test scripts and run them with video / trace evidence, or check a page over browser MCP. Use when writing or running E2E tests, doing a browser smoke check, or connecting to Chrome over CDP. Triggers: 'playwright codegen', 'axe-core', 'connectOverCDP', 'ブラウザ動作確認'"
 argument-hint: "[url]"
 allowed-tools:
   - Read
@@ -246,5 +245,6 @@ Chrome DevTools MCP の利用可能な方を自動選択する。どちらも使
 - `/ndf:review --branch` — 変更差分のコードレビュー
 - `/ndf:pr-tests` — PR Test Plan の自動実行
 
-> `playwright-planning` / `playwright-evidence` / `playwright-kit-ops` は Codex 公開セットに同梱される。
-> Claude Code / Kiro CLI では `plugins/ndf-shared/skills/` を直接参照する。
+> `playwright-planning` / `playwright-evidence` / `playwright-kit-ops` は Codex 公開セットにのみ同梱される。
+> Claude Code / Kiro CLI のプラグインには含まれないため、必要な場合はリポジトリ
+> [devbasex/ai-plugins](https://github.com/devbasex/ai-plugins) の `plugins/ndf-shared/skills/` を参照する。

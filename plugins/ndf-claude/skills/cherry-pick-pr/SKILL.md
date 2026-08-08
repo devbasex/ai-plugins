@@ -1,7 +1,7 @@
 ---
 name: cherry-pick-pr
-description: "Create cherry-pick PRs for environment branches and apply the same fix across multiple branches."
-argument-hint: "<base-branch> (例: qa/staging, release/v2)"
+description: "Cherry-pick a merged fix onto environment branches (qa/staging, release) as a new PR. 破壊的操作のため、利用者が /ndf:cherry-pick-pr を明示的に指示したときのみ実行する。Triggers: 'cherry-pick', 'qaにも同じ修正を適用', 'stagingにも反映', 'release branchへ適用', 'multi-branch fix'"
+argument-hint: "ベースブランチ名 (例: qa/staging, release/v2)"
 disable-model-invocation: true
 allowed-tools:
   - Bash

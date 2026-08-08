@@ -96,12 +96,15 @@ web vitals (LCP/CLS/TTFB) が **autouse で自動実行** されます。
 - `--pwk-overlay`: 動画に赤丸カーソル + 字幕を焼き込む
 - `--pwk-drive-folder <id>`: 終了後に成果物を Google Drive にアップロード
 
-Drive 連携は optional dependency です。`--pwk-drive-folder` や Drive 系スクリプトを
-使う場合は、事前に `GOOGLE_AUTH_SCRIPTS` を `google-auth/scripts` の実パスへ設定し、
+Drive 連携は optional dependency です。`google-auth` skill はどのランタイムの配布物にも
+同梱していないため、`--pwk-drive-folder` や Drive 系スクリプトを使う場合はリポジトリ
+[devbasex/ai-plugins](https://github.com/devbasex/ai-plugins) を clone し、事前に
+`GOOGLE_AUTH_SCRIPTS` をその clone 先の `google-auth/scripts` へ設定してから
 Drive extra を同期してください。
 
 ```bash
-export GOOGLE_AUTH_SCRIPTS=/path/to/plugins/ndf-shared/skills/google-auth/scripts
+# <ai-plugins のパス> を clone 先の実パスに置き換える
+export GOOGLE_AUTH_SCRIPTS=<ai-plugins のパス>/plugins/ndf-shared/skills/google-auth/scripts
 uv sync --extra drive
 ```
 

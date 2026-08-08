@@ -1,6 +1,6 @@
 ---
 name: ndf-policies
-description: "Apply core NDF project policies, including the branch strategy for applying the same fix to environment branches (qa/staging/release) without contaminating feature branches."
+description: "Core NDF project policies. 知識として参照するだけで、手順として実行しない。判断に迷ったときの基準として使う: ブランチ戦略、環境ブランチ (qa/staging/release) へ同じ修正を適用する原則、feature ブランチを汚さない運用、PR 運用ルール。"
 user-invocable: false
 ---
 
