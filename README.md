@@ -8,8 +8,8 @@ Claude Code / Codex / Kiro CLI向けのスキル・MCP設定を共有するた�
 
 **NDFプラグイン v4.20.1** は、同じ `ndf@ai-plugins` という名前で Claude Code / Codex / Kiro CLI へ配布されるランタイム別プラグインです。共通ソースは `plugins/ndf-shared/` に集約し、利用者が install する配布物は `plugins/ndf-claude/` / `plugins/ndf-codex/` / `plugins/ndf-kiro/` に分かれています。
 
-- **公開Skills**: Claude Code向け core 29個、Kiro向け core 28個、Codex向け core 30個に分離。
-- **元Skills（49個）**:
+- **公開Skills**: Claude Code向け core 26個、Kiro向け core 25個、Codex向け core 27個に分離。
+- **元Skills（46個）**:
   - PR/レビューワークフロー (10): pr, pr-tests, fix, review, cherry-pick-pr, deploy, sync-main, merged, clean, browser-test
   - 原則・ガイドライン (10): ndf-policies, branch-fix-strategy, implementation-plan, plan-to-spec, investigation-rules, problem-solving, logging-guidelines, markdown-writing, issue-plan-strategy, ml-model-structure
   - データ分析・品質・環境 (12): data-analyst-sql-optimization, data-analyst-export, qa-security-scan, python-execution, docker-container-access, git-gh-operations, google-auth, codex, deepwiki-transfer, knowledge-reorg, mcp-builder, official-skills-autoloader
@@ -100,7 +100,7 @@ kiro-cli chat
 
 | プラグイン名 | バージョン | 説明 | 詳細 |
 |------------|----------|------|------|
-| **ndf** | 4.20.1 | Claude Code / Codex / Kiro CLI 向けに runtime 別配布物を提供する NDF プラグイン。8個の専門エージェント（Claude版）、公開Skills（Claude Code向け core 29個、Kiro向け core 28個、Codex向け core 30個）、Claude SessionStart/Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:codex` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [Claude](./plugins/ndf-claude/README.md) / [Codex](./plugins/ndf-codex/README.md) / [Kiro](./plugins/ndf-kiro/README.md) |
+| **ndf** | 4.20.1 | Claude Code / Codex / Kiro CLI 向けに runtime 別配布物を提供する NDF プラグイン。8個の専門エージェント（Claude版）、公開Skills（Claude Code向け core 26個、Kiro向け core 25個、Codex向け core 27個）、Claude SessionStart/Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:codex` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [Claude](./plugins/ndf-claude/README.md) / [Codex](./plugins/ndf-codex/README.md) / [Kiro](./plugins/ndf-kiro/README.md) |
 
 ### NDF v4.20.1 の主な変更
 

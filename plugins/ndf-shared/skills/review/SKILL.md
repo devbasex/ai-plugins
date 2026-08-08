@@ -224,7 +224,7 @@ gh api -X POST "repos/$OWNER_REPO/pulls/$PR/comments" \
 
 第二引数が指定された場合、上記「観点」「具体的なチェックポイント」「PR モードの手順」の
 内容を **レビュー指示プロンプト** として組み立て、指定された CLI に渡す。
-呼び出し手順の詳細は `/ndf:external-ai` を参照。
+呼び出し手順の詳細は `/ndf:codex` / `/ndf:gemini` を参照。
 
 ### プロンプト組み立て
 
@@ -325,5 +325,6 @@ PR モードではレビュー結果が **PR 上に投稿済み** であるこ�
 
 - `/ndf:fix` — レビュー指摘の分類と修正対応
 - `/ndf:cross-review` — codex + gemini の収束レビュー
-- `/ndf:external-ai` — 外部 AI CLI の呼び出し手順
+- `/ndf:codex` — Codex CLI の呼び出し手順
+- `/ndf:gemini` — Gemini CLI の呼び出し手順
 - `/ndf:logging-guidelines` — ログ設計
