@@ -113,7 +113,7 @@ Skill を利用実績にもとづいて棚卸し、**49 個から 29 個へ整�
 - **自然文で発動するようになりました**: `merged` / `pr` / `review` / `pr-tests` から明示指示専用の設定を外しました。取り消しの難しい手順の前には対象を提示して確認を取ります。
 - **frontmatter 規約と機械検査**: 発動判定に必要な情報を `description` へ集約し、`scripts/check-skill-frontmatter.py` で CI 検査します（規約は `plugins/ndf-shared/skills/README.md`）。
 - **Kiro CLI**: エージェント名が `default` → `ndf` に変わりました。`install.sh` の再実行が必要です。`--set-default` と `--scope workspace|global` を追加し、常時指示を `.kiro/steering/` へ移しました。
-- **Codex**: 明示指示専用の Skill に `agents/openai.yaml` を生成し、暗黙起動を抑止します。`$<skill 名>` での明示起動は従来どおり動きます。
+- **Codex**: 明示指示専用の Skill に `agents/openai.yaml` を生成し、暗黙起動を抑止します。プラグイン配布の Skill は抑止すると `$<skill 名>` も効かないため、起動するには SKILL.md のパスを示します（`plugins/ndf-codex/README.md`）。
 
 ### NDF v4.20.1 の主な変更
 
