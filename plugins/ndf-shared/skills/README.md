@@ -4,7 +4,11 @@
 編集元である。ここでは frontmatter の書き方を規約として定める。本文の書き方は各 `SKILL.md`
 に委ね、規約は発動と配布に関わる部分だけを扱う。
 
-規約は `scripts/check-skill-frontmatter.py` で機械検査し、継続的インテグレーションで実行する。
+frontmatter の機械検査は未実装である。現在の継続的インテグレーションは
+`scripts/build-runtime-plugins.sh --check` / `scripts/validate-runtime-plugins.sh` /
+`scripts/check-markdown-links.py` を実行しており、本規約はそれまで人手で確認する。検査スクリプト
+`scripts/check-skill-frontmatter.py` の追加は
+[棚卸の計画](../../../issues/ndf-development-skills/07-tasks.md) の Task 0-7 で行う。
 
 利用実績と維持・統合・削除の判定は
 [docs/specifications/ndf-skill-inventory.md](../../../docs/specifications/ndf-skill-inventory.md)
@@ -33,8 +37,9 @@ when_to_use: "Claude Code 向けの追加トリガのみ。description で足り
 - `description` は「何をするか」と「いつ使うか」の両方を書く
 - **主要な用途とトリガ語を最初の 1 文に置く。** Codex は初期一覧が予算を超えると `description`
   を先頭から残して短縮するため、後半へ置いたトリガ語は暗黙起動の判定に届かない
-- `description` は二重引用符で囲む。Kiro はコロンを含む未引用の `description` を持つ Skill を
-  検出対象から落とす（[kirodotdev/Kiro#8329](https://github.com/kirodotdev/Kiro/issues/8329)）
+- `description` は二重引用符で囲む。`:` に空白が続く文字列を未引用で書くと YAML はマッピングと
+  解釈して構文エラーになり、Kiro はその Skill を検出対象から落とす
+  （[kirodotdev/Kiro#8329](https://github.com/kirodotdev/Kiro/issues/8329)）
 - frontmatter に `<` と `>` を含めない。Agent Skills 仕様がシステムプロンプトへの注入リスクと
   して警告している
 - `when_to_use` は Claude Code 向けの**追加**トリガが要る Skill にだけ付ける。`description` の
@@ -46,9 +51,13 @@ when_to_use: "Claude Code 向けの追加トリガのみ。description で足り
 | --- | --- | --- | --- | --- |
 | 自動発動（既定） | 追加トリガがあれば `when_to_use` を併記 | 既定で暗黙起動可 | 自動ロード | 知識・判断基準・ワークフロー |
 | パス限定自動発動 | 上記 + `paths` | `paths` 無効 | `paths` 無効 | 特定ディレクトリでのみ意味を持つもの |
-| 明示指示専用 | `disable-model-invocation: true` + `argument-hint` | `<Skill 名>/agents/openai.yaml` の `policy.allow_implicit_invocation: false` | 制御手段なし。`description` に「利用者が明示的に指示したときのみ実行する」と記載 | 破壊的操作・外部への書き込み |
+| 明示指示専用 | `disable-model-invocation: true`（引数を取るなら + `argument-hint`） | 現状は制御手段なし。`description` に明示指示専用である旨を記載する | 制御手段なし。`description` に「利用者が明示的に指示したときのみ実行する」と記載 | 破壊的操作・外部への書き込み |
 | 常時注入のみ | `user-invocable: false` | 相当機能なし | 相当機能なし | `ndf-policies` |
 
+- Codex には `<Skill 名>/agents/openai.yaml` の `policy.allow_implicit_invocation: false` という
+  相当機能があるが、現在の `plugins/ndf-codex` 配布物はこのファイルを生成していないため利用でき
+  ない。生成処理の追加は
+  [棚卸の計画](../../../issues/ndf-development-skills/07-tasks.md) の Task 0-8 で行う
 - `disable-model-invocation: true` の Skill は `description` がコンテキストへ載らない。
   `user-invocable: false` は載る
 - 明示指示専用にしてよいのは、実行してしまうと取り消しが難しい操作に限る。日常的に自然文で
@@ -86,7 +95,8 @@ when_to_use: "Claude Code 向けの追加トリガのみ。description で足り
 
 | 項目 | 上限 | 根拠 |
 | --- | --- | --- |
-| `name` | 64 文字。小文字英数とハイフンのみ。先頭末尾ハイフン不可、連続ハイフン不可。親ディレクトリ名と一致 | Agent Skills 仕様（必須） |
+| `name` | 64 文字。小文字英数とハイフンのみ。先頭末尾ハイフン不可、連続ハイフン不可 | Agent Skills 仕様（必須） |
+| `name` と親ディレクトリ名 | 一致させる | プロジェクト規約。仕様上は任意（Claude Code は `name` 省略時にディレクトリ名を使う） |
 | `description` | 1,024 文字。運用目標は 300 文字以内 | 仕様上限 / 運用目標 |
 | `description` + `when_to_use` | 1,536 文字 | Claude Code。超えると一覧で切り詰められる |
 | `compatibility` | 500 文字 | Agent Skills 仕様 |

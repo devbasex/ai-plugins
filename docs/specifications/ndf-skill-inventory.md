@@ -66,7 +66,7 @@ python3 plugins/ndf-shared/skills/skill-stats/scripts/skill-stats.py \
 | `investigation-rules` | CXK | 105 | 54 | wtu | 25 | 25 | 0 | 1271 | 維持 | 起動 25 回が全数自動起動。ただしトリガ `調査` が広すぎるため具体化する |
 | `issue-plan-strategy` | CXK | 358 | 52 | wtu / 引数 / tools | 141 | 38 | 103 | 142 | 維持 | 起動 141 回 |
 | `knowledge-reorg` | — | 269 | 46 | 明示専用 / 引数 / tools | 0 | 0 | 0 | — | 削除 | 既定（起動 0 / 機会 0） |
-| `logging-guidelines` | CXK | 112 | 43 | wtu | 0 | 0 | 0 | 112 | 発動改善 | 機会 112 に対し起動 0。`paths` でコード変更時に限定する |
+| `logging-guidelines` | CXK | 112 | 43 | wtu | 0 | 0 | 0 | 112 | 発動改善 | 機会 112 に対し起動 0。`paths` は Claude Code 専用で配布先 3 種のうち Codex/Kiro に効かないため、`description` のトリガ語を `logger` `logging` からログ設計の依頼を表す語へ具体化して 3 ランタイム共通で絞る |
 | `markdown-writing` | CXK | 203 | 76 | wtu / tools | 40 | 21 | 19 | 874 | 維持 | 起動 40 回 |
 | `mcp-builder` | — | 236 | 31 | — | 0 | 0 | 0 | — | 削除 | 既定（起動 0 / 機会 0） |
 | `merged` | CXK | 29 | 30 | 明示専用 / 引数 / tools | 248 | 0 | 248 | — | 統合先 | `clean` を吸収。起動 248 回。改名しない |
@@ -86,14 +86,14 @@ python3 plugins/ndf-shared/skills/skill-stats/scripts/skill-stats.py \
 | `pr-tests` | CXK | 31 | 38 | 明示専用 / 引数 / tools | 2 | 0 | 2 | — | 維持 | 起動 2 回。`disable-model-invocation` を外して自然文から発動させる |
 | `problem-solving` | CXK | 162 | 62 | wtu | 3 | 3 | 0 | 229 | 維持 | 起動 3 回。バグ・障害対応の判断基準として保持 |
 | `python-execution` | CXK | 86 | 44 | wtu / tools | 0 | 0 | 0 | 1207 | 削除 | 例外（モデルの標準能力で足りる）。実行環境の検出はモデルが自力で行える。トリガ `python` `スクリプト` が広すぎ他 Skill の発動を埋もれさせている |
-| `qa-security-scan` | — | 56 | 34 | wtu | 0 | 0 | 0 | 0 | 発動改善 | 初期実測の機会 66 に対し起動 0。`description` に発動条件を含めて自動発動させる |
+| `qa-security-scan` | — | 56 | 34 | wtu | 0 | 0 | 0 | 0 | 発動改善 | 宣言トリガ語での機会は 0 だが、初期実測の手書きキーワードでは 66。宣言トリガ語が実際の発話と乖離しているため、`description` に発動条件を含めたうえでトリガ語を実態へ寄せる |
 | `resolve-pr-comments` | CXK | 146 | 39 | 明示専用 / 引数 / tools | 0 | 0 | 0 | — | 統合元 | 分類・修正・返信が 3 分割されており、`fix` の一連の流れに含まれる |
 | `review` | CXK | 337 | 48 | 明示専用 / 引数 / tools | 58 | 1 | 57 | — | 統合先 | `review-branch` を吸収し `--branch` 引数で切り替える。起動 58 回 |
 | `review-branch` | CXK | 129 | 46 | wtu / 引数 / tools | 3 | 3 | 0 | 150 | 統合元 | 対象がローカル差分かの違いのみで、レビュー観点は `review` と同一 |
 | `review-pr-comments` | CXK | 110 | 44 | wtu / 引数 / tools | 0 | 0 | 0 | 0 | 統合元 | 分類・修正・返信が 3 分割されており、`fix` の一連の流れに含まれる |
 | `skill-stats` | — | 103 | 49 | wtu / tools | 0 | 0 | 0 | 1 | 維持 | 測定ツール自体。自然文からの発動を前提としないため判定対象外 |
 | `statusline` | CK | 51 | 47 | 明示専用 / wtu / tools | 3 | 0 | 3 | 16 | 維持 | 起動 3 回 |
-| `sync-main` | CXK | 48 | 44 | 明示専用 / tools | 0 | 0 | 0 | — | 削除 | 例外（起動 1 回・代替あり）。Git 操作 1 コマンドに 48 行を割いており `merged` へ吸収できる |
+| `sync-main` | CXK | 48 | 44 | 明示専用 / tools | 0 | 0 | 0 | — | 削除 | 既定（起動 0 / 機会 0）。Git 操作 1 コマンドに 48 行を割いており `merged` で代替できる |
 
 ## 判定の内訳
 
@@ -137,7 +137,7 @@ merged, ndf-policies, pr, pr-tests, resolve-pr-comments, review, sync-main
 | --- | --- |
 | 測定日が 1 日ずれている | 対象セッションが 1,938 → 1,943 件に増え、起動数が数件増減している |
 | 機会の判定に使うキーワードが異なる | 初期実測は手書きのキーワード、本台帳は Skill が宣言したトリガ語を使う |
-| トリガ語を宣言していない Skill の機会を測れない | 初期実測が値を持っていた `deploy`(340) `clean`(251) `qa-security-scan`(66) は本台帳では `—` になる |
+| トリガ語を宣言していない Skill の機会を測れない | 初期実測が値を持っていた `deploy`(340) `clean`(251) は本台帳では `—` になる |
 
 判定に影響する差異は次の 3 件で、いずれも削除の結論は変わらないが、適用する条件が
 「既定（起動 0 / 機会 0）」から「例外（モデルの標準能力で足りる）」へ変わる。
@@ -148,8 +148,14 @@ merged, ndf-policies, pr, pr-tests, resolve-pr-comments, review, sync-main
 | `google-chat` | 0 | 16 | 通知先の言及にとどまる |
 | `data-analyst-sql-optimization` | 0 | 14 | 同上 |
 
-`deploy` と `qa-security-scan` の機会は本台帳では測定できないため、発動改善の判定は初期実測の
-値（それぞれ 340 と 66）を根拠とする。両 Skill にトリガ語を宣言したうえで再測定することを、
+`deploy` はトリガ語を宣言しておらず機会を測定できないため、発動改善の判定は初期実測の値
+（340）を根拠とする。
+
+`qa-security-scan` はトリガ語を宣言しており機会 0 と測定できている。初期実測の手書きキーワード
+では 66 だったため、この差は宣言トリガ語（`security scan` `OWASP` など）が実際の発話と乖離して
+いることを示す。発動改善の判定はこの乖離を根拠とする。
+
+`deploy` へのトリガ語宣言と `qa-security-scan` のトリガ語見直しののち再測定することを、
 frontmatter 見直し後の確認項目とする。
 
 ## 参照
