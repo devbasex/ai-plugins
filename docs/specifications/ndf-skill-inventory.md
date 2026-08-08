@@ -41,6 +41,10 @@ python3 plugins/ndf-shared/skills/skill-stats/scripts/skill-stats.py \
 
 例外を適用したものは、判定根拠の列に適用した条件を記載する。
 
+機会が `—`（トリガ語を宣言しておらず測定できない）の Skill は、機会数を 0 と断定しない。
+起動 0 かつ機会が測定不能なものは、需要を示す実測値が得られていないものとして削除の既定を
+準用し、判定根拠の列に「既定を準用」と記載する。
+
 ## 台帳
 
 | Skill | 配布 | 行数 | desc | frontmatter 設定 | 計 | 自動 | 明示 | 機会 | 判定 | 判定根拠 |
@@ -65,10 +69,10 @@ python3 plugins/ndf-shared/skills/skill-stats/scripts/skill-stats.py \
 | `implementation-plan` | CXK | 98 | 43 | wtu | 24 | 24 | 0 | 344 | 維持 | 起動 24 回が全数自動起動。現在の `when_to_use` が機能している |
 | `investigation-rules` | CXK | 105 | 54 | wtu | 25 | 25 | 0 | 1271 | 維持 | 起動 25 回が全数自動起動。ただしトリガ `調査` が広すぎるため具体化する |
 | `issue-plan-strategy` | CXK | 358 | 52 | wtu / 引数 / tools | 141 | 38 | 103 | 142 | 維持 | 起動 141 回 |
-| `knowledge-reorg` | — | 269 | 46 | 明示専用 / 引数 / tools | 0 | 0 | 0 | — | 削除 | 既定（起動 0 / 機会 0） |
+| `knowledge-reorg` | — | 269 | 46 | 明示専用 / 引数 / tools | 0 | 0 | 0 | — | 削除 | 既定を準用（起動 0 / 機会は測定不能） |
 | `logging-guidelines` | CXK | 112 | 43 | wtu | 0 | 0 | 0 | 112 | 発動改善 | 機会 112 に対し起動 0。`paths` は Claude Code 専用で配布先 3 種のうち Codex/Kiro に効かないため、`description` のトリガ語を `logger` `logging` からログ設計の依頼を表す語へ具体化して 3 ランタイム共通で絞る |
 | `markdown-writing` | CXK | 203 | 76 | wtu / tools | 40 | 21 | 19 | 874 | 維持 | 起動 40 回 |
-| `mcp-builder` | — | 236 | 31 | — | 0 | 0 | 0 | — | 削除 | 既定（起動 0 / 機会 0） |
+| `mcp-builder` | — | 236 | 31 | — | 0 | 0 | 0 | — | 削除 | 既定を準用（起動 0 / 機会は測定不能） |
 | `merged` | CXK | 29 | 30 | 明示専用 / 引数 / tools | 248 | 0 | 248 | — | 統合先 | `clean` を吸収。起動 248 回。改名しない |
 | `ml-model-structure` | — | 152 | 55 | wtu / tools | 2 | 0 | 2 | 94 | 維持 | 起動 2 回。`paths` で `analysis/**` に限定する |
 | `ndf-policies` | CXK | 10 | 32 | 常時注入 | 0 | 0 | 0 | — | 維持 | `user-invocable: false` で説明のみを常時注入する設計。自然文からの発動を前提としないため判定対象外 |
@@ -93,7 +97,7 @@ python3 plugins/ndf-shared/skills/skill-stats/scripts/skill-stats.py \
 | `review-pr-comments` | CXK | 110 | 44 | wtu / 引数 / tools | 0 | 0 | 0 | 0 | 統合元 | 分類・修正・返信が 3 分割されており、`fix` の一連の流れに含まれる |
 | `skill-stats` | — | 103 | 49 | wtu / tools | 0 | 0 | 0 | 1 | 維持 | 測定ツール自体。自然文からの発動を前提としないため判定対象外 |
 | `statusline` | CK | 51 | 47 | 明示専用 / wtu / tools | 3 | 0 | 3 | 16 | 維持 | 起動 3 回 |
-| `sync-main` | CXK | 48 | 44 | 明示専用 / tools | 0 | 0 | 0 | — | 削除 | 既定（起動 0 / 機会 0）。Git 操作 1 コマンドに 48 行を割いており `merged` で代替できる |
+| `sync-main` | CXK | 48 | 44 | 明示専用 / tools | 0 | 0 | 0 | — | 削除 | 既定を準用（起動 0 / 機会は測定不能）。Git 操作 1 コマンドに 48 行を割いており `merged` で代替できる |
 
 ## 判定の内訳
 

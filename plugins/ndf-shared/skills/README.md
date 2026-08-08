@@ -16,10 +16,17 @@ frontmatter の機械検査は未実装である。現在の継続的インテ�
 
 ## `description` を単一の真実とする
 
-3 ランタイムで共通に効くのは Agent Skills 仕様の 6 項目（`name` / `description` / `license` /
-`compatibility` / `metadata` / `allowed-tools`）だけである。`when_to_use` は Claude Code 独自の
-項目で、Codex と Kiro は文書化していない。仕様は未知の項目を無視すると定めているため壊れは
-しないが、**両ランタイムでは `description` だけで発動が判定される**。
+3 ランタイムに共通する土台は Agent Skills 仕様の 6 項目（`name` / `description` / `license` /
+`compatibility` / `metadata` / `allowed-tools`）である。ただし共通に効く度合いは項目ごとに異なる。
+
+| 項目 | 3 ランタイムでの扱い |
+| --- | --- |
+| `name` / `description` | いずれも解釈する。発動判定に効くのは `description` |
+| `license` / `compatibility` / `metadata` | 解釈されるが発動には関与しない |
+| `allowed-tools` | 仕様上 experimental。Claude Code は解釈するが、Kiro は frontmatter 一覧に載せておらず解釈は保証されない。ツール制限は実装差がある前提で書く |
+
+`when_to_use` は Claude Code 独自の項目で、Codex と Kiro は文書化していない。仕様は未知の項目を
+無視すると定めているため壊れはしないが、**両ランタイムでは `description` だけで発動が判定される**。
 
 したがって **発動判定に必要な情報はすべて `description` に入れる**。Claude Code 独自項目は
 その上乗せとして扱う。
@@ -58,8 +65,10 @@ when_to_use: "Claude Code 向けの追加トリガのみ。description で足り
   相当機能があるが、現在の `plugins/ndf-codex` 配布物はこのファイルを生成していないため利用でき
   ない。生成処理の追加は
   [棚卸の計画](../../../issues/ndf-development-skills/07-tasks.md) の Task 0-8 で行う
-- `disable-model-invocation: true` の Skill は `description` がコンテキストへ載らない。
-  `user-invocable: false` は載る
+- **Claude Code では** `disable-model-invocation: true` の Skill は `description` がコンテキスト
+  へ載らず、`user-invocable: false` は載る。Codex と Kiro にはこのキーがなく `description` は
+  常に読まれるため、明示指示専用にする Skill は `description` 自体へ「利用者が明示的に指示した
+  ときのみ実行する」と書き残す
 - 明示指示専用にしてよいのは、実行してしまうと取り消しが難しい操作に限る。日常的に自然文で
   依頼される Skill に付けると、エージェントは Skill を使わず独自手順で実行する
 - `disable-model-invocation: true` と `user-invocable: false` を同時に指定しない。誰も起動
