@@ -15,7 +15,7 @@ POLICY_SKILL_FILE="$PLUGIN_SKILLS_DIR/ndf-policies/SKILL.md"
 VERSION_FILE="$PLUGIN_DIR/VERSION"
 # Kiro 配布物は plugin.json を持たないため、版数は VERSION ファイルで示す。
 # build-runtime-plugins.sh が Claude 版 plugin.json から生成する。
-NDF_VERSION="$( [ -f "$VERSION_FILE" ] && tr -d '[:space:]' < "$VERSION_FILE" || echo unknown )"
+# 版数を確認する唯一の手段なので、欠落や空は不完全な配布物として扱い先に落とす。
 # Skill 統合により配布を終えた prompt。過去のインストールで .kiro/prompts/ に残った分を除去する
 DEPRECATED_PROMPTS="clean.md"
 
@@ -98,6 +98,17 @@ if [ ! -d "$PLUGIN_SKILLS_DIR" ]; then
   echo "ERROR: $PLUGIN_SKILLS_DIR が見つかりません。先に scripts/build-runtime-plugins.sh を実行してください。" >&2
   exit 1
 fi
+if [ ! -s "$VERSION_FILE" ]; then
+  echo "ERROR: $VERSION_FILE が見つからないか空です" >&2
+  echo "       bash scripts/build-runtime-plugins.sh を実行して配布物を生成してください" >&2
+  exit 1
+fi
+NDF_VERSION="$(tr -d '[:space:]' < "$VERSION_FILE")"
+if [ -z "$NDF_VERSION" ]; then
+  echo "ERROR: $VERSION_FILE から版数を読み取れません" >&2
+  exit 1
+fi
+
 if [ ! -f "$TEMPLATE_FILE" ]; then
   echo "ERROR: $TEMPLATE_FILE が見つかりません" >&2
   exit 1
