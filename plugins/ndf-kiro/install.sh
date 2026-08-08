@@ -222,6 +222,7 @@ sys.exit(0 if config.get("name") == "default" and "NDF" in (config.get("descript
     echo "        2. 不要になったら rm $LEGACY_AGENT_FILE ${LEGACY_AGENT_FILE}.bak"
     echo "      Kiro 用 MCP プラグインの installer は default.json を更新するため、"
     echo "      MCP を併用する場合は上記の写し替えが必要です。"
+    echo "      写した設定は本 installer を再実行しても保持されます。"
   fi
   echo ""
 fi
@@ -234,6 +235,10 @@ if [ -f "$AGENT_FILE" ]; then
   echo "既存設定をバックアップ: ${AGENT_FILE}.bak"
 fi
 
+# installer が管理するのはテンプレート由来のキー（name / description / tools /
+# resources / hooks.agentSpawn）と、フラグで切り替える hooks.stop / mcpServers.codex
+# だけ。それ以外（利用者が足した mcpServers エントリ、独自フック、独自キー）は
+# 既存の $AGENT_FILE から引き継ぐ。再インストールで写し替えた設定が消えないようにする。
 python3 - "$TEMPLATE_FILE" "$WITH_SLACK" "$WITH_CODEX" "$AGENT_FILE" "$SCRIPT_DIR" <<'PY'
 import json
 import shlex
@@ -243,6 +248,11 @@ from pathlib import Path
 template_file, with_slack, with_codex, agent_file, script_dir = sys.argv[1:6]
 with open(template_file, encoding="utf-8") as f:
     config = json.load(f)
+
+# installer が上書きする範囲
+managed_keys = set(config) | {"mcpServers"}
+managed_hooks = set(config.get("hooks") or {}) | {"stop"}
+managed_servers = {"codex"}
 
 hooks = config.setdefault("hooks", {})
 if with_slack == "true":
@@ -256,20 +266,54 @@ if with_slack == "true":
 else:
     hooks.pop("stop", None)
 
+servers = {}
 if with_codex == "true":
-    config["mcpServers"] = {
-        "codex": {
-            "command": "codex",
-            "args": ["mcp-server"],
-            "env": {},
-        }
+    servers["codex"] = {
+        "command": "codex",
+        "args": ["mcp-server"],
+        "env": {},
     }
+
+existing = {}
+agent_path = Path(agent_file)
+if agent_path.is_file():
+    try:
+        loaded = json.loads(agent_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        print(f"  WARN: 既存の {agent_file} を読めないため引き継ぎません: {exc}")
+    else:
+        if isinstance(loaded, dict):
+            existing = loaded
+        else:
+            print(f"  WARN: 既存の {agent_file} が JSON オブジェクトではないため引き継ぎません")
+
+kept = []
+for key, value in existing.items():
+    if key not in managed_keys:
+        config[key] = value
+        kept.append(key)
+for key, value in (existing.get("hooks") or {}).items():
+    if key not in managed_hooks:
+        hooks[key] = value
+        kept.append(f"hooks.{key}")
+for key, value in (existing.get("mcpServers") or {}).items():
+    if key not in managed_servers:
+        servers[key] = value
+        kept.append(f"mcpServers.{key}")
+
+if not hooks:
+    config.pop("hooks", None)
+if servers:
+    config["mcpServers"] = servers
 else:
     config.pop("mcpServers", None)
 
 with open(agent_file, "w", encoding="utf-8") as f:
     json.dump(config, f, indent=2, ensure_ascii=False)
     f.write("\n")
+
+if kept:
+    print("  利用者管理の設定を引き継ぎました: " + ", ".join(sorted(kept)))
 PY
 
 # --- Step 6: Optionally switch the default agent ---

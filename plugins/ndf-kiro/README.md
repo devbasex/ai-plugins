@@ -91,7 +91,22 @@ rm .kiro/agents/default.json .kiro/agents/default.json.bak
 bash plugins/ndf-kiro/install.sh --set-default
 ```
 
-Kiro 用 MCP プラグインの installer（`plugins/mcp/kiro/*/install.sh`）は `.kiro/agents/default.json` を更新します。MCP を併用する場合は、`mcpServers` を `.kiro/agents/ndf.json` へ写してください。
+Kiro 用 MCP プラグインの installer（`plugins/mcp/kiro/*/install.sh`）は `.kiro/agents/default.json` を更新します。MCP を併用する場合は、`mcpServers` を `.kiro/agents/ndf.json` へ写してください。写し替えは一度だけで済みます。`install.sh` を再実行しても、写した `mcpServers` は保持されます。
+
+### 再インストール時に保持される設定
+
+`install.sh` は `.kiro/agents/ndf.json` を毎回テンプレートから再生成しますが、上書きするのは installer が管理するキーだけです。既存ファイルにある利用者管理の設定は読み取ってマージし直します。
+
+| 区分 | キー | 再実行時の扱い |
+| --- | --- | --- |
+| installer 管理 | `name` / `description` / `tools` / `resources` / `hooks.agentSpawn` | テンプレートから再生成する（上書き） |
+| installer 管理 | `hooks.stop` | `--with-slack` の有無で生成・削除する |
+| installer 管理 | `mcpServers.codex` | `--with-codex` の有無で生成・削除する |
+| 利用者管理 | 上記以外の `mcpServers` エントリ、`hooks` の項目、トップレベルキー | そのまま引き継ぐ |
+
+引き継いだ項目は実行ログに `利用者管理の設定を引き継ぎました: mcpServers.bigquery` のように表示します。再生成の前に `.kiro/agents/ndf.json.bak` へバックアップも取るため、意図しない結果になった場合は差し戻せます。
+
+`mcpServers.codex` だけは installer 管理です。`--with-codex` を付けずに再実行すると削除されるため、Codex MCP を使う場合は `--with-codex` を付けたまま運用してください。
 
 ## Kiro CLI の制限
 
@@ -124,6 +139,11 @@ kiro-cli **2.16.1** / 検証日 **2026-08-07**（ランタイム規約の調査�
 | `--scope global --set-default` が効くか | 効く | `$HOME` で `kiro-cli` を実行し `agent list` の `*` が `ndf` へ移った。検証後に `kiro-cli agent set-default kiro_default` で復旧し、`~/.kiro` の `find` 比較で検証前と一致することを確認 |
 | `--scope global` で `~/.kiro/` へ配置されるか | 配置される | `~/.kiro/{skills,steering,prompts,agents}` が生成され、プロジェクト外でも `Global` として一覧に出た |
 | steering がエージェント選択に依存せず読まれるか | 読まれる | `kiro_default` の `/context show` にも `.kiro/steering/**/*.md` の一致として現れた |
+| 再インストールで利用者管理の設定が残るか | 残る | `mcpServers.bigquery` / `hooks.userPromptSubmit` / `toolsSettings` を書き足してから再実行し、すべて残ることを確認。ログに `利用者管理の設定を引き継ぎました: hooks.userPromptSubmit, mcpServers.bigquery, toolsSettings` |
+| `--with-codex` を外した再実行の挙動 | `mcpServers.codex` だけ消える | 同じ再実行で `mcpServers.bigquery` は残った。`codex` は installer 管理のため |
+| 既存 `ndf.json` が壊れた JSON のとき | テンプレートから再生成する | `WARN: 既存の … を読めないため引き継ぎません` を出して続行し、`.bak` は残る |
+| `kiro-cli agent set-default` の保存先 | `~/.local/share/kiro-cli/data.sqlite3`（マシン全体の設定） | 実行した cwd に `.kiro/settings.json` は生成されず、`find ~/.kiro ~/.aws` にも差分が出なかった |
+| 既定エージェントが cwd 依存で復旧できるか | 導入先から実行すれば復旧できる | 対象プロジェクト限定の workspace エージェントを既定にした状態では、別 cwd からの `set-default` が `No agent with name … found` になりつつ終了コード 0 を返し、既定が戻らなかった |
 
 コンテキスト占有率を `kiro-cli chat --agent <名前> --no-interactive '/context show'` で実測しました。測定用プロジェクトには本リポジトリの `AGENTS.md` と `README.md` を置き、`install.sh --project <測定用ディレクトリ>` で配布物（Skill 23 個）を導入しています。`一致ファイル数` と `合計文字数` は `/context show` が列挙したファイルを数え上げた値、`占有率` は `Context files total` の表示値です。
 
