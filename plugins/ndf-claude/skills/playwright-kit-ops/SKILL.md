@@ -94,17 +94,24 @@ python scripts/check_cwv.py --url https://example.com
 
 ```bash
 # 単一ファイルを Drive にアップロード
-python scripts/upload_evidence.py reports/run-001/test_login/trace.zip --kind trace
+python scripts/upload_evidence.py reports/run-001/test_login/trace.zip \
+  --kind trace --parent-folder-id FOLDER_ID
 
 # ディレクトリごとアップロード
-python scripts/gdrive_upload_dir.py reports/run-001/ --folder-id <FOLDER_ID>
+python scripts/gdrive_upload_dir.py --local reports/run-001/ --parent FOLDER_ID
 
-# Markdown → Google Doc 変換
-python scripts/upload_md_as_gdoc.py reports/run-001/report.md
+# Markdown を Google Doc へ変換
+python scripts/upload_md_as_gdoc.py --md reports/run-001/report.md --parent FOLDER_ID
 
-# Google Doc にエビデンス Drive リンクを埋め込み
-python scripts/build_gdoc_with_drive_links.py <doc-id> reports/run-001/
+# エビデンスの Drive リンクを埋め込んだ Google Doc を作る
+python scripts/build_gdoc_with_drive_links.py \
+  --md reports/run-001/report.md --folder FOLDER_ID \
+  --run-id run-001 --name "run-001 レポート"
 ```
+
+`--parent` / `--parent-folder-id` / `--folder` に渡すのは Drive のフォルダ ID。
+`upload_evidence.py` の `--parent-folder-id` だけは省略でき、その場合はマイドライブ
+直下へ置く。
 
 ## パッケージ参照
 
