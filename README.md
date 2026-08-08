@@ -8,10 +8,10 @@ Claude Code / Codex / Kiro CLI向けのスキル・MCP設定を共有するた�
 
 **NDFプラグイン v4.20.1** は、同じ `ndf@ai-plugins` という名前で Claude Code / Codex / Kiro CLI へ配布されるランタイム別プラグインです。共通ソースは `plugins/ndf-shared/` に集約し、利用者が install する配布物は `plugins/ndf-claude/` / `plugins/ndf-codex/` / `plugins/ndf-kiro/` に分かれています。
 
-- **公開Skills**: Claude Code向け core 24個、Kiro向け core 23個、Codex向け core 24個に分離。
-- **元Skills（33個）**:
-  - PR/レビューワークフロー (9): pr, pr-tests, fix, review, cherry-pick-pr, deploy, sync-main, merged, clean
-  - 原則・ガイドライン (10): ndf-policies, branch-fix-strategy, implementation-plan, plan-to-spec, investigation-rules, problem-solving, logging-guidelines, markdown-writing, issue-plan-strategy, ml-model-structure
+- **公開Skills**: Claude Code向け core 21個、Kiro向け core 20個、Codex向け core 21個に分離。
+- **元Skills（30個）**:
+  - PR/レビューワークフロー (7): pr, pr-tests, fix, review, cherry-pick-pr, deploy, merged
+  - 原則・ガイドライン (9): ndf-policies, implementation-plan, plan-to-spec, investigation-rules, problem-solving, logging-guidelines, markdown-writing, issue-plan-strategy, ml-model-structure
   - データ分析・品質・環境 (5): qa-security-scan, docker-container-access, google-auth, codex, official-skills-autoloader
   - E2Eテスト/Playwright (4): playwright-planning, playwright-authoring, playwright-evidence, playwright-kit-ops
   - 外部サービス連携 (1): google-drive
@@ -100,7 +100,7 @@ kiro-cli chat
 
 | プラグイン名 | バージョン | 説明 | 詳細 |
 |------------|----------|------|------|
-| **ndf** | 4.20.1 | Claude Code / Codex / Kiro CLI 向けに runtime 別配布物を提供する NDF プラグイン。8個の専門エージェント（Claude版）、公開Skills（Claude Code向け core 26個、Kiro向け core 25個、Codex向け core 27個）、Claude SessionStart/Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:codex` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [Claude](./plugins/ndf-claude/README.md) / [Codex](./plugins/ndf-codex/README.md) / [Kiro](./plugins/ndf-kiro/README.md) |
+| **ndf** | 4.20.1 | Claude Code / Codex / Kiro CLI 向けに runtime 別配布物を提供する NDF プラグイン。8個の専門エージェント（Claude版）、公開Skills（Claude Code向け core 21個、Kiro向け core 20個、Codex向け core 21個）、Claude SessionStart/Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:codex` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [Claude](./plugins/ndf-claude/README.md) / [Codex](./plugins/ndf-codex/README.md) / [Kiro](./plugins/ndf-kiro/README.md) |
 
 ### NDF v4.20.1 の主な変更
 
