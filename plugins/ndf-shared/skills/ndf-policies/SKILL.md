@@ -50,6 +50,7 @@ Skill の棚卸で 49 個を 29 個へ整理した。旧コマンドは存在し
 - `merged` / `pr` / `review` / `pr-tests` が自然文の依頼でも起動するようになった。
   取り消しの難しい手順の前には確認を取る
 - Kiro はエージェント名が `default` → `ndf` に変わった。`install.sh` を再実行する
-- Codex では `deploy` / `cherry-pick-pr` が暗黙起動の一覧から外れる。`$<skill 名>` で
-  明示起動する
+- Codex では `deploy` / `cherry-pick-pr` が暗黙起動の一覧から外れる。プラグイン配布の
+  Skill は抑止すると `$<skill 名>` も効かないため、SKILL.md のパスを示して読ませる
+  （`plugins/ndf-codex/README.md`）
 
