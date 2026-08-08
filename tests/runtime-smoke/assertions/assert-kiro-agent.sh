@@ -149,6 +149,103 @@ config.pop("smokeUserKey", None)
 path.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 PY
 echo "reinstall preserved user-managed agent settings" >> "$LOG"
+
+# 旧 .kiro/agents/default.json からの自動移行を検査する。kiro-cli には依存しない。
+MIGRATION_ROOT="$ARTIFACT_DIR/kiro-legacy-migration"
+rm -rf "$MIGRATION_ROOT"
+
+# $1: プロジェクト, $2: description（installer の NDF 生成物判定に使う）
+write_legacy_agent() {
+  mkdir -p "$1/.kiro/agents"
+  cat > "$1/.kiro/agents/default.json" <<JSON
+{
+  "name": "default",
+  "description": "$2",
+  "mcpServers": { "legacy-user-mcp": { "command": "echo", "args": ["legacy"] } }
+}
+JSON
+}
+install_into() {
+  bash "$REPO_ROOT/plugins/ndf-kiro/install.sh" --project "$1" "${@:2}" >> "$LOG" 2>&1
+}
+
+# 1. NDF 生成物 + ndf.json なし → 自動移行し、利用者の mcpServers を引き継ぐ
+case_ndf="$MIGRATION_ROOT/ndf-generated"
+write_legacy_agent "$case_ndf" "NDF workflow agent"
+install_into "$case_ndf"
+test ! -e "$case_ndf/.kiro/agents/default.json"
+test -f "$case_ndf/.kiro/agents/default.json.bak"
+python3 - "$case_ndf/.kiro/agents/ndf.json" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+config = json.loads(path.read_text(encoding="utf-8"))
+if config.get("name") != "ndf":
+    raise SystemExit(f"legacy migration did not refresh installer-managed keys: {path}")
+if "legacy-user-mcp" not in config.get("mcpServers", {}):
+    raise SystemExit(f"legacy migration dropped a user-managed mcpServers entry: {path}")
+PY
+
+# 2. NDF 生成物と判定できない default.json → 移行せず元のまま残す
+case_user="$MIGRATION_ROOT/user-owned"
+write_legacy_agent "$case_user" "my own agent"
+install_into "$case_user"
+test -f "$case_user/.kiro/agents/default.json"
+test -f "$case_user/.kiro/agents/default.json.bak"
+python3 - "$case_user/.kiro/agents/ndf.json" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+config = json.loads(path.read_text(encoding="utf-8"))
+if "legacy-user-mcp" in config.get("mcpServers", {}):
+    raise SystemExit(f"a non-NDF default.json must not be migrated automatically: {path}")
+PY
+
+# 3. default.json と ndf.json の両方がある → 移行せず既存の ndf.json を尊重する
+case_both="$MIGRATION_ROOT/both"
+mkdir -p "$case_both"
+install_into "$case_both"
+python3 - "$case_both/.kiro/agents/ndf.json" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+config = json.loads(path.read_text(encoding="utf-8"))
+config["smokeExistingKey"] = "keep-me"
+path.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+PY
+write_legacy_agent "$case_both" "NDF workflow agent"
+install_into "$case_both"
+test -f "$case_both/.kiro/agents/default.json"
+python3 - "$case_both/.kiro/agents/ndf.json" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+config = json.loads(path.read_text(encoding="utf-8"))
+if config.get("smokeExistingKey") != "keep-me":
+    raise SystemExit(f"legacy migration overwrote an existing ndf.json: {path}")
+if "legacy-user-mcp" in config.get("mcpServers", {}):
+    raise SystemExit(f"legacy migration overwrote an existing ndf.json: {path}")
+PY
+
+# 4. --dry-run → 移行を含め一切書き込まない
+case_dry="$MIGRATION_ROOT/dry-run"
+write_legacy_agent "$case_dry" "NDF workflow agent"
+dry_state() { (cd "$case_dry" && find . | sort && find . -type f -exec sha256sum {} + | sort); }
+before_dry="$(dry_state)"
+install_into "$case_dry" --dry-run
+if [ "$(dry_state)" != "$before_dry" ]; then
+  echo "--dry-run modified the project: $case_dry" >&2
+  exit 1
+fi
+echo "installer migrated a legacy default.json only when it is safe" >> "$LOG"
 fi
 # --- workspace 限定の検査ここまで ---
 

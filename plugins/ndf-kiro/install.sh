@@ -187,6 +187,9 @@ if [ "$WITH_CODEX" = true ]; then echo "Codex CLI連携: 有効"; else echo "Cod
 if [ "$DRY_RUN" = true ]; then
   echo ""
   echo "DRY RUN: 書き込みは行いませんでした"
+  if [ -f "$LEGACY_AGENT_FILE" ]; then
+    echo "  旧設定 $LEGACY_AGENT_FILE を検出（実行時に移行可否を判定します）"
+  fi
   echo "  エージェント設定: $AGENT_FILE"
   echo "  常時指示: $STEERING_FILE"
   echo "  Skills数: $SKILL_COUNT"
@@ -216,6 +219,7 @@ PY
 echo "常時指示を生成: $STEERING_FILE"
 
 # --- Step 4: Migrate legacy default agent ---
+MIGRATED_FROM_LEGACY=false
 if [ -f "$LEGACY_AGENT_FILE" ]; then
   cp "$LEGACY_AGENT_FILE" "${LEGACY_AGENT_FILE}.bak"
   echo ""
@@ -236,9 +240,22 @@ except Exception:
     sys.exit(1)
 sys.exit(0 if matched else 1)
 ' "$LEGACY_AGENT_FILE"; then
-    echo "      これは旧版 NDF installer の生成物です。移行手順:"
-    echo "        1. 独自に追記した設定があればバックアップから $AGENT_FILE へ写す"
-    echo "        2. rm $LEGACY_AGENT_FILE ${LEGACY_AGENT_FILE}.bak"
+    echo "      これは旧版 NDF installer の生成物です。"
+    if [ -f "$AGENT_FILE" ]; then
+      # 移行先が既にある場合に上書きすると、そちらの利用者設定を失う。手動判断へ回す。
+      echo "      ただし $AGENT_FILE が既に存在するため自動移行しません。"
+      echo "      移行手順:"
+      echo "        1. 必要な設定が ${LEGACY_AGENT_FILE}.bak にだけ残っていないか確認する"
+      echo "        2. rm $LEGACY_AGENT_FILE"
+    else
+      # 旧設定を移行先へ置いてから Step 5 に進める。Step 5 は既存ファイルから
+      # installer 管理外のキーを引き継ぐため、これだけで利用者設定の移行と
+      # テンプレート由来キー（エージェント名など）の最新化が両方完了する。
+      mv "$LEGACY_AGENT_FILE" "$AGENT_FILE"
+      MIGRATED_FROM_LEGACY=true
+      echo "      $AGENT_FILE へ自動移行しました（利用者が追記した設定は下で引き継ぎます）。"
+      echo "      不要になったら: rm ${LEGACY_AGENT_FILE}.bak"
+    fi
   else
     echo "      NDF 以外が管理している設定です。移行手順:"
     echo "        1. 必要な mcpServers / hooks を $AGENT_FILE へ写す"
@@ -253,7 +270,8 @@ fi
 # --- Step 5: Generate agent config ---
 mkdir -p "$KIRO_DIR/agents"
 
-if [ -f "$AGENT_FILE" ]; then
+# Step 4 で移行した直後は ${LEGACY_AGENT_FILE}.bak が同じ内容のバックアップなので取らない。
+if [ -f "$AGENT_FILE" ] && [ "$MIGRATED_FROM_LEGACY" = false ]; then
   cp "$AGENT_FILE" "${AGENT_FILE}.bak"
   echo "既存設定をバックアップ: ${AGENT_FILE}.bak"
 fi

@@ -79,21 +79,27 @@ v4 系の installer は `.kiro/agents/default.json` を生成していました�
 旧 installer が張った `.kiro/skills/ndf-policies` の symlink は、リンク先が現在のプラグイン配下でなくても再インストール時に削除します（削除するのはリンク自体だけで、リンク先の実体には触れません）。`.kiro/skills/ndf-policies` が symlink ではなく実体のディレクトリやファイルだった場合は、利用者が置いたものの可能性があるため installer は削除せず警告を出します。二重注入を避けるため、内容を確認のうえ手動で退避または削除してください。別の checkout パスから導入した環境でも、steering との二重注入が再インストール 1 回で解消されます。
 
 ```bash
-# 1. 再インストール（旧 default.json は自動でバックアップされます）
+# 1. 再インストール（旧 default.json は自動でバックアップ・移行されます）
 bash plugins/ndf-kiro/install.sh --with-slack
 
-# 2. 旧設定に独自の追記があれば .kiro/agents/ndf.json へ写す
-#    差分の確認例
-diff .kiro/agents/default.json.bak .kiro/agents/ndf.json
-
-# 3. 旧設定を削除する
-rm .kiro/agents/default.json .kiro/agents/default.json.bak
-
-# 4. 必要なら既定エージェントを切り替える
+# 2. 必要なら既定エージェントを切り替える
 bash plugins/ndf-kiro/install.sh --set-default
+
+# 3. 移行を確認したらバックアップを削除する
+rm .kiro/agents/default.json.bak
 ```
 
-Kiro 用 MCP プラグインの installer（`plugins/mcp/kiro/*/install.sh`）は `.kiro/agents/default.json` を更新します。MCP を併用する場合は、`mcpServers` を `.kiro/agents/ndf.json` へ写してください。写し替えは一度だけで済みます。`install.sh` を再実行しても、写した `mcpServers` は保持されます。
+`.kiro/agents/default.json` は再インストール時に必ず `.kiro/agents/default.json.bak` へバックアップされます。そのうえで installer は次のように振る舞います。
+
+| 旧 `default.json` | `ndf.json` | 振る舞い |
+| --- | --- | --- |
+| 旧版 NDF installer の生成物（`name` が `default` かつ `description` に `NDF` を含む） | なし | `ndf.json` へ自動移行する（`default.json` は残らない）。独自に追記した `mcpServers` / フック / 独自キーは下表のマージで保持される |
+| 同上 | あり | 自動移行しない（`ndf.json` の設定を失わないため）。`default.json` は残るので、必要な設定を写したうえで削除する |
+| NDF 以外が管理している（利用者が作成したものなど） | 問わない | 自動移行しない。勝手に移行すると利用者の設定を壊すため、バックアップと移行手順の案内のみを行う |
+
+`--dry-run` では上記の移行を含め一切の書き込みを行いません（旧設定を検出したことだけ表示します）。
+
+Kiro 用 MCP プラグインの installer（`plugins/mcp/kiro/*/install.sh`）は `.kiro/agents/default.json` を更新します。自動移行後に MCP installer を実行すると `default.json` が再び作られるため、`mcpServers` を `.kiro/agents/ndf.json` へ写してください。写し替えは一度だけで済みます。`install.sh` を再実行しても、写した `mcpServers` は保持されます。
 
 ### 再インストール時に保持される設定
 
