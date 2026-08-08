@@ -55,7 +55,7 @@ Codex 連携は MCP サーバではなく `/ndf:codex` skill と `corder` エー
 
 | 領域 | 確認内容 |
 |---|---|
-| Kiro CLI | `.kiro/agents/ndf.json` が resources / hooks / mcpServers を持ち、`kiro-cli agent list` に `ndf` が現れること |
+| Kiro CLI | `.kiro/agents/ndf.json` が resources と hooks を持ち、`kiro-cli agent list` に `ndf` が現れること。`mcpServers` は `--with-codex` 指定時、または既存の利用者管理設定を引き継いだ場合にのみ現れる |
 | ドキュメント | `AGENTS.md` / `CLAUDE.md` / `KIRO.md` / `docs/` の役割が重複しすぎていないこと |
 
 ## 関連リンク
