@@ -130,7 +130,15 @@ while IFS= read -r src_dir; do
   # ndf-policies は Step 3 で steering として展開する。Skill としてもリンクすると
   # Kiro 組み込みルールの Skill 読み込みと steering 読み込みで文脈へ二重注入されるため、
   # ここではリンクしない。manifest には残す（steering の生成元として必要なため）。
+  # 旧 installer が別 checkout から張ったリンクは Step 1 の掃除（現在の
+  # $PLUGIN_SKILLS_DIR 配下を指すものだけ削除）に掛からないため、ここで
+  # リンク先に関係なく既存のエントリを取り除いてから skip する。
   if [ "$skill_name" = "ndf-policies" ]; then
+    if [ "$DRY_RUN" = false ] &&
+       { [ -e "$SKILLS_DIR/$skill_name" ] || [ -L "$SKILLS_DIR/$skill_name" ]; }; then
+      rm -rf "$SKILLS_DIR/$skill_name"
+      echo "  REMOVED: $skill_name (steering へ移行済みのため .kiro/skills から削除)"
+    fi
     echo "  SKIP: $skill_name (steering として配置)"
     continue
   fi
@@ -209,9 +217,16 @@ if [ -f "$LEGACY_AGENT_FILE" ]; then
 import json, sys
 try:
     config = json.load(open(sys.argv[1], encoding="utf-8"))
+    # JSON がオブジェクト以外（配列など）でも AttributeError にせず、壊れた JSON と
+    # 同じ「NDF 生成物ではない」扱いへ倒す。
+    matched = (
+        isinstance(config, dict)
+        and config.get("name") == "default"
+        and "NDF" in (config.get("description") or "")
+    )
 except Exception:
     sys.exit(1)
-sys.exit(0 if config.get("name") == "default" and "NDF" in (config.get("description") or "") else 1)
+sys.exit(0 if matched else 1)
 ' "$LEGACY_AGENT_FILE"; then
     echo "      これは旧版 NDF installer の生成物です。移行手順:"
     echo "        1. 独自に追記した設定があればバックアップから $AGENT_FILE へ写す"
@@ -350,7 +365,8 @@ if [ "$SET_DEFAULT" = true ]; then
   if [ "$ASSUME_YES" = false ]; then
     if [ -t 0 ]; then
       printf '既定エージェントを %s に変更しますか? [y/N]: ' "$AGENT_NAME"
-      read -r answer
+      # EOF (Ctrl+D) で read が非ゼロ終了しても set -e で落とさず、既定の N へ倒す
+      read -r answer || answer=""
       case "$answer" in
         [yY]|[yY][eE][sS]) ;;
         *) proceed=false ;;

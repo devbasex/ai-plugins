@@ -13,9 +13,16 @@ scope="${1:-workspace}"
 : "${HOME:=/tmp/runtime-home}"
 
 AGENT_NAME="ndf"
+# INSTALL_ARGS: この scope の導入先を再現する installer 引数
 case "$scope" in
-  workspace) KIRO_DIR="$PROJECT_DIR/.kiro" ;;
-  global) KIRO_DIR="$HOME/.kiro" ;;
+  workspace)
+    KIRO_DIR="$PROJECT_DIR/.kiro"
+    INSTALL_ARGS=(--project "$PROJECT_DIR")
+    ;;
+  global)
+    KIRO_DIR="$HOME/.kiro"
+    INSTALL_ARGS=(--scope global)
+    ;;
   *) echo "unknown scope: $scope" >&2; exit 2 ;;
 esac
 
@@ -72,8 +79,23 @@ if total > budget:
     raise SystemExit(f"context files exceed the budget: {total} > {budget}")
 PY
 
-[ "$scope" = workspace ] || exit 0
+# 旧 installer が別 checkout から張った .kiro/skills/ndf-policies symlink は、現在の
+# プラグイン配下を指さないため「自分が張ったリンクだけ消す」掃除に掛からない。旧導入済み
+# プロジェクトでも steering との二重注入が解消されることを検査する。
+STALE_ROOT="$ARTIFACT_DIR/stale-checkout-$scope/skills/ndf-policies"
+mkdir -p "$STALE_ROOT"
+echo "stale" > "$STALE_ROOT/SKILL.md"
+ln -sfn "$STALE_ROOT" "$KIRO_DIR/skills/ndf-policies"
+bash "$REPO_ROOT/plugins/ndf-kiro/install.sh" "${INSTALL_ARGS[@]}" --with-slack >> "$LOG" 2>&1
+if [ -e "$KIRO_DIR/skills/ndf-policies" ] || [ -L "$KIRO_DIR/skills/ndf-policies" ]; then
+  echo "installer left a stale ndf-policies skill link: $KIRO_DIR/skills/ndf-policies" >&2
+  exit 1
+fi
+test -f "$STALE_ROOT/SKILL.md"  # リンク先の実体まで消していないこと
+echo "installer removed a stale ndf-policies skill link" >> "$LOG"
 
+# --- workspace 限定の検査（ここから fi まで。heredoc の終端子の都合でインデントしない） ---
+if [ "$scope" = workspace ]; then
 # 利用者が $AGENT_FILE へ写した設定（MCP プラグインの mcpServers など）が、
 # installer の再実行で失われないことを検査する。kiro-cli には依存しない。
 python3 - "$AGENT_FILE" <<'PY'
@@ -127,28 +149,46 @@ config.pop("smokeUserKey", None)
 path.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 PY
 echo "reinstall preserved user-managed agent settings" >> "$LOG"
+fi
+# --- workspace 限定の検査ここまで ---
 
 if ! command -v kiro-cli >/dev/null 2>&1; then
   echo "kiro-cli agent checks skipped: kiro-cli is not available" >> "$LOG"
   exit 0
 fi
 
+# kiro-cli は workspace エージェントを cwd 配下の .kiro/agents からしか検出しない。
+# scope ごとに、生成した $AGENT_FILE を検出できる cwd と installer の再実行引数を選ぶ。
+case "$scope" in
+  workspace) KIRO_CWD="$PROJECT_DIR" ;;
+  # global エージェントはどこからでも解決できるはずなので、.kiro を持たない中立の
+  # ディレクトリを cwd にする。$HOME を使うと $HOME/.kiro が workspace 扱いにもなり、
+  # 「Global として見えている」ことの検査にならない。
+  global) KIRO_CWD="$ARTIFACT_DIR" ;;
+esac
+if [ "$scope" = global ] && [ -e "$KIRO_CWD/.kiro" ]; then
+  echo "global agent checks need a cwd without .kiro: $KIRO_CWD" >&2
+  exit 1
+fi
+
 esc="$(printf '\033')"
 agent_list() {
   # kiro-cli 2.16.1 の agent list は一覧を標準エラー出力へ書く
-  (cd "$PROJECT_DIR" && kiro-cli agent list 2>&1) | sed -e "s/${esc}\\[[0-9;]*m//g"
+  (cd "$KIRO_CWD" && kiro-cli agent list 2>&1) | sed -e "s/${esc}\\[[0-9;]*m//g"
 }
 current_default() {
   agent_list | awk '/^\*/ { print $2; exit }'
 }
 
-if ! agent_list > "$ARTIFACT_DIR/kiro-agent-list.txt"; then
+if ! agent_list > "$ARTIFACT_DIR/kiro-agent-list-$scope.txt"; then
   echo "kiro-cli agent checks skipped: agent list failed" >> "$LOG"
   exit 0
 fi
-if ! awk '{ print $1, $2 }' "$ARTIFACT_DIR/kiro-agent-list.txt" | grep -qw "$AGENT_NAME"; then
-  echo "agent list does not contain $AGENT_NAME" >&2
-  cat "$ARTIFACT_DIR/kiro-agent-list.txt" >&2
+# global scope の $KIRO_CWD には .kiro がないため、ここに $AGENT_NAME が出ること自体が
+# 「Global: ~/.kiro/agents 経由でどこからでも解決できる」ことの検査になる。
+if ! awk '{ print $1, $2 }' "$ARTIFACT_DIR/kiro-agent-list-$scope.txt" | grep -qw "$AGENT_NAME"; then
+  echo "agent list ($scope) does not contain $AGENT_NAME" >&2
+  cat "$ARTIFACT_DIR/kiro-agent-list-$scope.txt" >&2
   exit 1
 fi
 
@@ -158,12 +198,12 @@ echo "default agent before: ${before_default:-unknown}" >> "$LOG"
 # kiro-cli の既定エージェントは ~/.local/share/kiro-cli/data.sqlite3 に保存されるマシン全体の
 # 設定であり、この検査は必ず元へ戻す必要がある。set-default は agent list と同じく workspace
 # エージェントを cwd 配下からしか検出せず、しかも未検出でも終了コード 0 を返すため、
-# agent_list と同じ PROJECT_DIR から実行し、戻ったことを agent list で検証する。
+# agent_list と同じ $KIRO_CWD から実行し、戻ったことを agent list で検証する。
 # 途中の検査が落ちても復旧するよう trap で実行する。
 restore_default() {
   [ -n "$before_default" ] || return 0
   [ "$before_default" != "$AGENT_NAME" ] || return 0
-  (cd "$PROJECT_DIR" && kiro-cli agent set-default "$before_default") >> "$LOG" 2>&1 || true
+  (cd "$KIRO_CWD" && kiro-cli agent set-default "$before_default") >> "$LOG" 2>&1 || true
   restored_default="$(current_default || true)"
   echo "default agent restored: ${restored_default:-unknown}" >> "$LOG"
   if [ "$restored_default" != "$before_default" ]; then
@@ -173,12 +213,13 @@ restore_default() {
 }
 trap 'rc=$?; restore_default || rc=1; exit $rc' EXIT
 
-# kiro-cli は workspace エージェントを cwd 配下からのみ検出する。--project で別ディレクトリへ
-# 導入したときに --set-default が効くことを検査するため、PROJECT_DIR 以外の cwd から実行する。
-(cd "$ARTIFACT_DIR" && bash "$REPO_ROOT/plugins/ndf-kiro/install.sh" --project "$PROJECT_DIR" --with-slack --set-default --yes) >> "$LOG" 2>&1
+# kiro-cli はエージェントを cwd / $HOME 配下からのみ検出する。workspace では --project で
+# 別ディレクトリへ導入したときに --set-default が効くことを検査するため、PROJECT_DIR 以外の
+# cwd から実行する。global でも同様に $HOME 以外の cwd から実行して既定切替を検査する。
+(cd "$ARTIFACT_DIR" && bash "$REPO_ROOT/plugins/ndf-kiro/install.sh" "${INSTALL_ARGS[@]}" --with-slack --set-default --yes) >> "$LOG" 2>&1
 after_default="$(current_default)"
 echo "default agent after: ${after_default:-unknown}" >> "$LOG"
 if [ "$after_default" != "$AGENT_NAME" ]; then
-  echo "--set-default did not switch the default agent: ${after_default:-unknown}" >&2
+  echo "--set-default did not switch the default agent ($scope): ${after_default:-unknown}" >&2
   exit 1
 fi
