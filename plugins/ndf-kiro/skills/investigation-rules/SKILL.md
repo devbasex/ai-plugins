@@ -1,7 +1,6 @@
 ---
 name: investigation-rules
-description: "Write evidence-backed investigation and debug reports."
-when_to_use: "調査・デバッグ・不具合レポートを作成するとき。「ない」「該当なし」等の否定的結論を出すときは必ず参照。Triggers: '調査', 'デバッグ', '不具合レポート', '原因調査', 'investigation', 'root cause', 'カラムがない', '該当コードがない', 'データがない'"
+description: "Write evidence-backed investigation and debug reports, and never state a negative finding without showing the search behind it. Use when writing an investigation or bug report. Triggers: '調査レポートを書く', '不具合レポート', '原因調査', 'カラムがない', '該当コードがない'"
 ---
 
 # 調査レポート作成ルール

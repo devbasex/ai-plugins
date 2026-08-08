@@ -31,7 +31,7 @@ NDF plugin の plugin name は全 runtime で `ndf` を維持する。旧 `plugi
 |---|---|---|
 | Claude Code | `plugins/ndf-claude/.claude-plugin/plugin.json` | Claude Code agents、hooks、skills、scripts |
 | Codex | `plugins/ndf-codex/.codex-plugin/plugin.json` | Codex 用 skills、hooks、scripts |
-| Kiro CLI | `plugins/ndf-kiro/install.sh` | `.kiro/agents/default.json`、`.kiro/skills/` symlink、prompts、任意 hook |
+| Kiro CLI | `plugins/ndf-kiro/install.sh` | `.kiro/agents/ndf.json`、`.kiro/steering/ndf-policies.md`、`.kiro/skills/` symlink、prompts、任意 hook |
 
 `plugins/ndf-shared/manifests/{claude,codex,kiro}-skills.txt` は runtime ごとの配布 Skill 一覧を定義する。`scripts/build-runtime-plugins.sh` はこの manifest を読み、`plugins/ndf-shared/skills` から各 runtime の `skills/` へ同期する。
 
@@ -59,6 +59,8 @@ MCP plugin は `plugins/mcp/shared/<plugin-name>` を編集元とし、runtime �
 Claude 用配布物は `.claude-plugin/plugin.json` と `.mcp.json` を持つ。Codex 用配布物は `.codex-plugin/plugin.json` と `.mcp.json` を持つ。Kiro 用配布物は `.mcp.json` と `install.sh` を持つ。
 
 Kiro MCP installer は対象 project の `.mcp.json` へ MCP server 設定を merge する。hooks や skills を持つ MCP plugin では、必要に応じて `.kiro/agents/default.json` や `.kiro/skills/` も更新する。
+
+NDF installer が生成する agent は `.kiro/agents/ndf.json` であり、MCP installer が更新する `.kiro/agents/default.json` とは別である。NDF と Kiro MCP plugin を併用する場合、MCP server 設定は `ndf.json` へ写す必要がある（`plugins/ndf-kiro/README.md`「旧バージョンからの移行」）。MCP installer 側の出力先統一は未対応。
 
 ## Marketplace
 

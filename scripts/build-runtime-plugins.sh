@@ -78,8 +78,7 @@ rewrite_codex_skill_paths() {
   local file
 
   for file in \
-    "$skills_dir/fix/SKILL.md" \
-    "$skills_dir/review-pr-comments/SKILL.md"
+    "$skills_dir/fix/SKILL.md"
   do
     [ -f "$file" ] || continue
     sed "s#\${PLUGIN_ROOT:-\${CLAUDE_PLUGIN_ROOT}}/skills/fix/scripts/fetch-pr-comments.sh#\${PLUGIN_ROOT:-\${CODEX_PLUGIN_ROOT:-\${CLAUDE_PLUGIN_ROOT}}}/$script_dir/fix/scripts/fetch-pr-comments.sh#g" \
@@ -100,13 +99,73 @@ rewrite_codex_skill_paths() {
   done
 }
 
+# Codex は Skill ごとの `<Skill 名>/agents/openai.yaml` で暗黙起動を制御する。
+# SKILL.md の frontmatter を読み、`disable-model-invocation: true` を持つ Skill だけへ生成する。
+write_codex_skill_policies() {
+  local skills_dir="$1"
+
+  python3 - "$skills_dir" <<'PY'
+import sys
+from pathlib import Path
+
+skills_dir = Path(sys.argv[1])
+
+
+def parse_frontmatter(text: str) -> dict[str, str]:
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return {}
+    fields: dict[str, str] = {}
+    for line in lines[1:]:
+        if line.strip() == "---":
+            break
+        # ネストした値（allowed-tools のリストなど）はここでは扱わない
+        if not line or line[0].isspace() or ":" not in line:
+            continue
+        key, _, value = line.partition(":")
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        fields[key.strip()] = value
+    return fields
+
+
+def yaml_double_quoted(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+for skill_dir in sorted(p for p in skills_dir.iterdir() if p.is_dir()):
+    skill_md = skill_dir / "SKILL.md"
+    if not skill_md.is_file():
+        continue
+
+    agents_dir = skill_dir / "agents"
+    policy_path = agents_dir / "openai.yaml"
+    # 前回の生成物を必ず捨ててから作り直す（対象から外れた Skill に残さない）
+    policy_path.unlink(missing_ok=True)
+
+    fields = parse_frontmatter(skill_md.read_text(encoding="utf-8"))
+    if fields.get("disable-model-invocation") != "true":
+        if agents_dir.is_dir() and not any(agents_dir.iterdir()):
+            agents_dir.rmdir()
+        continue
+
+    lines = ["policy:", "  allow_implicit_invocation: false"]
+    argument_hint = fields.get("argument-hint")
+    if argument_hint:
+        lines += ["interface:", f"  default_prompt: {yaml_double_quoted(argument_hint)}"]
+
+    agents_dir.mkdir(parents=True, exist_ok=True)
+    policy_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+PY
+}
+
 rewrite_kiro_skill_paths() {
   local skills_dir="$1"
   local file
 
   for file in \
-    "$skills_dir/fix/SKILL.md" \
-    "$skills_dir/review-pr-comments/SKILL.md"
+    "$skills_dir/fix/SKILL.md"
   do
     [ -f "$file" ] || continue
     sed 's#${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/skills/fix/scripts/fetch-pr-comments.sh#${PLUGIN_ROOT:-plugins/ndf-kiro}/skills/fix/scripts/fetch-pr-comments.sh#g' \
@@ -177,6 +236,7 @@ sync_skills() {
 
   if [ "$variant" = codex-runtime ]; then
     rewrite_codex_skill_paths "$tmp_dir" skills
+    write_codex_skill_policies "$tmp_dir"
   elif [ "$variant" = kiro-runtime ]; then
     rewrite_kiro_skill_paths "$tmp_dir"
   fi

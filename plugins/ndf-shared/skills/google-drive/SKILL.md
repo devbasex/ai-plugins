@@ -1,7 +1,6 @@
 ---
 name: google-drive
-description: "Export, download, upload, and share Google Drive files."
-when_to_use: "Google Drive / Docs のファイル操作が必要なとき。Triggers: 'Google Drive', 'Google Docs', 'drive.file', 'ファイルエクスポート', 'ダウンロード', 'アップロード', '公開共有リンク'"
+description: "Export, download, upload, and share Google Drive and Docs files. Use when a file has to be fetched from or published to Drive, or a share link is needed. Triggers: 'Google Drive', 'Google Docs', 'Driveにファイルをアップロード', '公開共有リンク'"
 allowed-tools:
   - Read
   - Bash(python *)

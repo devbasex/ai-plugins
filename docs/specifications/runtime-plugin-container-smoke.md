@@ -98,6 +98,7 @@ Kiro adapter は以下を実行する。
 | `assert-plugin-files.sh` | runtime 側の install 先に plugin manifest、Skill、hook、agent / prompt / MCP runtime link が存在することを確認する |
 | `assert-mcp-config.sh` | `mcp-bigquery` config に `BIGQUERY_PROJECT`、`BIGQUERY_LOCATION`、`BIGQUERY_DATASET`、`BIGQUERY_KEY_FILE` の placeholder があり、secret 実値や `/tmp/runtime-secrets` が混入していないことを確認する |
 | `assert-hook-fixtures.sh` | fixture payload で Claude / Codex / Kiro の hook script を非認証実行できることを確認する |
+| `assert-kiro-agent.sh` | Kiro の `ndf` エージェント定義と steering を検査する。`kiro-cli` が使える場合は `agent list` に `ndf` が現れること、`--set-default` で既定が切り替わることも確認し、確認後に既定を元へ戻す。文脈ファイルの合計文字数が予算内であることも検査する |
 | `assert-authenticated-smoke.sh` | `--with-secrets` が有効な場合に、利用可能な runtime / BigQuery secret で認証付き smoke を実行する |
 | `assert-no-host-contamination.sh` | `HOME` と project が `/tmp/runtime-*` 配下であり、repo root や host-like credential path が汚染されていないことを確認する |
 

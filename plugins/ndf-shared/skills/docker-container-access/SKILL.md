@@ -1,7 +1,6 @@
 ---
 name: docker-container-access
-description: "Diagnose Docker container access and localhost routing."
-when_to_use: "Docker / コンテナへのアクセス・localhost 接続不可・DinD/DooD 環境判定が必要なとき。Triggers: 'docker access', 'container connect', 'localhost not working', 'DinD', 'DooD', 'Docker接続', 'コンテナアクセス', 'curl container'"
+description: "Diagnose Docker container access and localhost routing failures. Use when a container is unreachable, localhost does not connect, or DinD/DooD has to be identified. Triggers: 'localhost not working', 'コンテナに接続できない', 'DinD', 'DooD', 'curl container'"
 allowed-tools:
   - Read
   - Bash
@@ -67,7 +66,6 @@ ls -la /var/run/docker.sock 2>/dev/null && echo "DooD環境" || echo "DinDまた
 
 ## 関連Skill
 
-- **python-execution**: Python実行環境の判定
 - **corder-code-templates**: Dockerfileテンプレート
 
 ## 関連リソース

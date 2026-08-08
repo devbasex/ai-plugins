@@ -9,7 +9,7 @@
 ### 前提条件
 - Kiro CLI がインストール済み
 - Node.js（Slack通知を使う場合）
-- Codex CLI（`/ndf:codex` skill で外部AI委譲を使う場合、または `--with-codex` で Kiro に Codex MCP サーバ設定を生成する場合）: `npm install -g @openai/codex`
+- Codex CLI（`/ndf:external-ai` skill で外部AI委譲を使う場合、または `--with-codex` で Kiro に Codex MCP サーバ設定を生成する場合）: `npm install -g @openai/codex`
 
 ### インストール
 
@@ -21,13 +21,13 @@ bash plugins/ndf-kiro/install.sh
 bash plugins/ndf-kiro/install.sh --with-slack
 
 # 全部入り（Slack通知 + Kiro 側 Codex MCP 設定生成）
-# 注: NDF v4.0.0 本体は Codex MCP に依存せず、/ndf:codex skill 経由で
+# 注: NDF v4.0.0 本体は Codex MCP に依存せず、/ndf:external-ai skill 経由で
 # CLI 直接実行に一本化。--with-codex は Kiro セッションで
 # `mcp__codex__*` を直接呼びたい場合のみ有効化すればよい。
 bash plugins/ndf-kiro/install.sh --with-slack --with-codex
 ```
 
-インストーラーは `plugins/ndf-kiro/skills/` から `.kiro/skills/` への symlink と `.kiro/agents/default.json` を生成します。`plugins/ndf-kiro/skills/` は `plugins/ndf-shared/manifests/kiro-skills.txt` から build された生成物です。
+インストーラーは `plugins/ndf-kiro/skills/` から `.kiro/skills/` への symlink、`.kiro/steering/ndf-policies.md`、`.kiro/agents/ndf.json` を生成します。`plugins/ndf-kiro/skills/` は `plugins/ndf-shared/manifests/kiro-skills.txt` から build された生成物です。`ndf-policies` だけは steering の生成元として使い、`.kiro/skills/` へは symlink しません（Skill と steering の二重注入を避けるため）。
 
 ### Slack通知の設定（オプション）
 
@@ -66,7 +66,7 @@ ls -la plugins/ndf-kiro/
 code search_symbols "ndf"
 
 # 特定のファイル内のシンボル一覧
-code get_document_symbols plugins/ndf-kiro/agents/default.json.template
+code get_document_symbols plugins/ndf-kiro/agents/ndf.json.template
 ```
 
 **パターン検索**:
@@ -82,7 +82,7 @@ grep "MCP" --include="*.md"
 
 ```
 # ファイル全体を読む
-fs_read plugins/ndf-kiro/agents/default.json.template
+fs_read plugins/ndf-kiro/agents/ndf.json.template
 
 # 特定の行範囲を読む
 fs_read plugins/ndf-kiro/README.md --start_line=1 --end_line=50

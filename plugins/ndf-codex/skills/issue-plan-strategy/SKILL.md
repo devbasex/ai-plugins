@@ -1,7 +1,6 @@
 ---
 name: issue-plan-strategy
-description: "Turn issues into plans and implementation workflows."
-when_to_use: "issue → plan 作成 / 既存 plan の実装 (実行) を依頼されたとき。複数 PR に分割される設計や、release branch + 個別 PR + worktree 運用が必要なときに参照する。Triggers: 'issueのplanを作って', 'PLANxxの設計', '設計書を起こして', 'このplanを実装して', 'PLANxxを実装', 'planを実行', 'release branch 作って実装開始', 'multi-PR で進めて'"
+description: "Turn an issue into a plan, then drive the plan through a release branch, per-PR worktrees, and multi-PR execution. Use when asked to design a plan from an issue or to execute an existing plan. Triggers: 'issueのplanを作って', 'このplanを実装して', 'planを実行', 'release branch 作って実装開始', 'multi-PR で進めて'"
 argument-hint: "[issue-path-or-url] (例: issues/i16.md, https://github.com/org/repo/issues/123)"
 allowed-tools:
   - Bash
@@ -232,7 +231,7 @@ git worktree add ../<repo>-<PLAN-ID>-ui     feature/<PLAN-ID>-ui
 
 | 用途 | コマンド | 位置づけ |
 |---|---|---|
-| PR 作成前のセルフレビュー | `/ndf:review-branch` | push / PR 化の前段。cross-review の代替にはしない |
+| PR 作成前のセルフレビュー | `/ndf:review --branch` | push / PR 化の前段。cross-review の代替にはしない |
 | 個別 PR の収束レビュー (原則必須) | `/ndf:cross-review <PR番号>` | codex + gemini 両方の APPROVE 収束を確認する本線 |
 | GitHub 上の例外的な単発確認 | `/ndf:review <PR番号>` | ごく軽微な差分の単発確認に限定。cross-review の代替にはしない |
 | 指摘の修正 | `/ndf:fix <PR番号>` | cross-review ループ内・後で自動起動される |
@@ -251,7 +250,7 @@ release ブランチへの merge が一通り進んだ段階で:
   - PR 間の API / 型 / スキーマ整合
   - 設定値の重複・矛盾
   - migration の順序依存
-  - E2E シナリオ (`/ndf:playwright-scenario-test` の活用)
+  - E2E シナリオ (`/ndf:playwright-planning` の活用)
 - ここで **新たに** 個別 PR 範囲のバグが見つかった場合は、**release PR にコメントせず**、該当の個別 PR (既に merge 済みなら修正差分を載せた新しい修正 PR を release 配下に作成) 側に指摘を書き込み、修正ループを回す。この場合レビュー対象は **修正差分** であり新規 PR でレビューできる（元の差分がそもそも cross-review 未実施だったケースは扱いが異なるため Step 8 のフォールバック参照）
 - release PR には integration 観点の指摘のみ残す
 
@@ -332,7 +331,7 @@ git checkout release/<PLAN-ID>
 /ndf:cherry-pick-pr qa/staging
 ```
 
-詳細は `/ndf:cherry-pick-pr` と `/ndf:branch-fix-strategy` を参照。`feature → main` 系 PR を汚染しないため、検証ブランチ向けは必ず短命ブランチ経由で扱う。
+詳細は `/ndf:cherry-pick-pr` を参照。`feature → main` 系 PR を汚染しないため、検証ブランチ向けは必ず短命ブランチ経由で扱う。
 
 ## アンチパターン
 
@@ -345,14 +344,13 @@ git checkout release/<PLAN-ID>
 | release PR で個別 PR 範囲の指摘を解決しようとする | 該当 PR が既に閉じている場合、コミット意図がずれる |
 | release PR の body を個別 PR リンクの列挙だけにする | レビュアーは release PR 単体で変更を把握できず、個別 PR や plan を辿ることになる。body は self-contained 必須 (Step 3 / Step 8) |
 | body 最終化せずに Ready for review にする | Draft 作成時の plan ベースの暫定 body のままだと実装の最終形と乖離する |
-| 検証ブランチを feature/release に merge する | `feature → main` PR への汚染 (詳細: `/ndf:branch-fix-strategy`) |
+| 検証ブランチを feature/release に merge する | `feature → main` PR への汚染 (詳細: `/ndf:cherry-pick-pr`) |
 
 ## 関連 skill
 
 - `/ndf:implementation-plan` — plan ファイルのフォーマット (本 skill が依存)
-- `/ndf:branch-fix-strategy` — ブランチ汚染を避ける原則
 - `/ndf:pr` — 通常の PR 作成 / 更新
-- `/ndf:cherry-pick-pr` — 検証ブランチへの cherry-pick PR
-- `/ndf:review` / `/ndf:review-branch` / `/ndf:cross-review` — レビュー
-- `/ndf:fix` / `/ndf:resolve-pr-comments` — コメント対応
-- `/ndf:playwright-scenario-test` — release ブランチでの E2E 結合テスト
+- `/ndf:cherry-pick-pr` — 検証ブランチへの cherry-pick PR とブランチ汚染を避ける原則
+- `/ndf:review` / `/ndf:cross-review` — レビュー（`--branch` で PR 前のセルフレビュー）
+- `/ndf:fix` — コメントの分類・修正・返信・Resolve
+- `/ndf:playwright-planning` — release ブランチでの E2E 結合テスト

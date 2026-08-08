@@ -1,7 +1,6 @@
 ---
 name: implementation-plan
-description: "Create or update implementation plan files."
-when_to_use: "実装開始時 / PR作成時に実装プランの作成・更新が必要なとき。複数ファイル変更・新機能追加・DBマイグレーションを含む変更で自動参照。Triggers: '実装プラン', '実装を開始', 'PR作成', 'implementation plan', 'plan first', '設計書を作成', 'issues/に追加'"
+description: "Create or update an implementation plan file under issues/ before coding starts. Use when a change spans multiple files, adds a feature, or includes a DB migration. Triggers: '実装プラン', '実装を開始', 'implementation plan', '設計書を作成', 'issues/に追加'"
 ---
 
 # 実装プランガイド
