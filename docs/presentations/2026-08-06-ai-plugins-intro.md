@@ -73,7 +73,7 @@ NDFが何なのかは前回話したので、今日は「で、結局どのス�
 【0:35-1:25】
 構成はシンプルです。スキルの本体は ndf-shared の1か所。ここを直すと、Claude用・Codex用・Kiro用の配布物がビルドで生成されます。
 なので「Claudeでは直ってるけどCodexでは古い」が起きない。地味ですがこれが一番効いてます。
-数が違うのは、ランタイムごとに意味のないスキルを外しているからです。Claudeは29、Codexは30、Kiroは28。
+数が違うのは、ランタイムごとに意味のないスキルを外しているからです。Claudeは25、Codexは23、Kiroは24。
 MCPプラグインが10個。今日は時間の都合で名前だけにします。
 -->
 
@@ -518,7 +518,7 @@ bash plugins/ndf-kiro/install.sh
 kiro-cli chat --agent ndf
 ```
 
-`.kiro/skills/` に**23個**、
+`.kiro/skills/` に**23個**（配布 24 個のうち `ndf-policies` は steering へ）、
 `.kiro/agents/ndf.json` と
 `.kiro/steering/ndf-policies.md` を生成。
 
