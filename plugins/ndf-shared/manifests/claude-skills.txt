@@ -22,8 +22,7 @@ review-branch
 review-pr-comments
 resolve-pr-comments
 browser-test
-codex
-gemini
+external-ai
 statusline
 issue-plan-strategy
 plan-to-spec

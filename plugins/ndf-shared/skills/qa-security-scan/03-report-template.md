@@ -92,7 +92,7 @@
 
 ## Codex CLI 連携
 
-詳細な独立レビューが必要な場合は `corder` エージェントに委譲するか、`/ndf:codex` skill の手順で `codex exec` を直接起動する。例:
+詳細な独立レビューが必要な場合は `corder` エージェントに委譲するか、`/ndf:external-ai` skill の手順で `codex exec` を直接起動する。例:
 
 ```bash
 # プロンプト書き出し
@@ -116,4 +116,4 @@ codex exec --dangerously-bypass-approvals-and-sandbox -C "$PWD" \
   2> /tmp/sec-scan-err.log &
 ```
 
-詳細は `/ndf:codex` skill を参照。
+詳細は `/ndf:external-ai` skill と `references/cli-codex.md` を参照。

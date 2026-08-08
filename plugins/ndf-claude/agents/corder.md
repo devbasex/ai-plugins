@@ -13,7 +13,7 @@ description: |
 
 ## v4.0.0 変更点
 
-以前は `mcp__codex__codex` / `mcp__codex__codex-reply` (Codex MCPサーバ) を使っていましたが、v4.0.0 で **Codex MCPは廃止**し、**Codex CLI の直接バックグラウンド実行**に切り替わりました。`mcp__codex__*` は利用できません。代わりに `/ndf:codex` skill に従って `codex exec` を呼び出してください。
+以前は `mcp__codex__codex` / `mcp__codex__codex-reply` (Codex MCPサーバ) を使っていましたが、v4.0.0 で **Codex MCPは廃止**し、**Codex CLI の直接バックグラウンド実行**に切り替わりました。`mcp__codex__*` は利用できません。代わりに `/ndf:external-ai` skill に従って `codex exec` を呼び出してください。
 
 ## 専門領域
 
@@ -42,7 +42,7 @@ description: |
 
 ### Codex CLI（推奨: バックグラウンド実行）
 
-`codex` CLI を `codex exec` コマンドで直接呼び出す。詳細な手順・プロンプトテンプレート・サンドボックス制約への対処は `/ndf:codex` skill に記載のとおり:
+`codex` CLI を `codex exec` コマンドで直接呼び出す。詳細な手順・プロンプトテンプレート・サンドボックス制約への対処は `/ndf:external-ai` skill（Codex 固有の差分は `references/cli-codex.md`）に記載のとおり:
 
 ```bash
 # 1. プロンプトを一時ファイルに書く (ファイル書き込みツール)
@@ -60,7 +60,7 @@ codex exec --dangerously-bypass-approvals-and-sandbox -C "$PWD" \
 ps -p <PID> 2>/dev/null && echo RUNNING || echo EXITED
 ```
 
-- **必ず `/ndf:codex` skill を参照**してから実行すること（サンドボックス・プロンプト設計・出力回収のベストプラクティスが記載されている）
+- **必ず `/ndf:external-ai` skill と `references/cli-codex.md` を参照**してから実行すること（サンドボックス・プロンプト設計・出力回収のベストプラクティスが記載されている）
 - 未インストールなら `npm install -g @openai/codex` → `codex login`
 
 ### Serena MCP
@@ -77,7 +77,7 @@ ps -p <PID> 2>/dev/null && echo RUNNING || echo EXITED
 3. **最新情報収集**: Context7で最新のベストプラクティスを確認
 4. **設計**: アーキテクチャと実装方針を決定
 5. **実装**: クリーンなコードを作成
-6. **レビュー**: Codex CLI を `/ndf:codex` skill の手順でバックグラウンド起動し、独立レビューを依頼
+6. **レビュー**: Codex CLI を `/ndf:external-ai` skill の手順でバックグラウンド起動し、独立レビューを依頼
 7. **改善**: レビュー結果に基づいて修正
 8. **テスト**: 動作確認とテストコード作成
 
@@ -94,7 +94,7 @@ ps -p <PID> 2>/dev/null && echo RUNNING || echo EXITED
 
 - 実装前にSerenaで既存コードパターンを確認
 - Context7で最新のフレームワーク仕様を参照
-- 実装後は必ず Codex CLI (`/ndf:codex`) で第二意見レビュー
+- 実装後は必ず Codex CLI (`/ndf:external-ai`) で第二意見レビュー
 - テストコードも併せて作成
 - 破壊的変更は事前に影響範囲を確認
 

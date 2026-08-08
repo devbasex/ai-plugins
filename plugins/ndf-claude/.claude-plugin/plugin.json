@@ -52,8 +52,7 @@
     "./skills/review-pr-comments",
     "./skills/resolve-pr-comments",
     "./skills/browser-test",
-    "./skills/codex",
-    "./skills/gemini",
+    "./skills/external-ai",
     "./skills/statusline",
     "./skills/issue-plan-strategy",
     "./skills/plan-to-spec"

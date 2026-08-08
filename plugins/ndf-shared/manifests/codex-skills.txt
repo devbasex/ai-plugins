@@ -4,6 +4,7 @@ clean
 cross-review
 deploy
 docker-container-access
+external-ai
 fix
 git-gh-operations
 implementation-plan

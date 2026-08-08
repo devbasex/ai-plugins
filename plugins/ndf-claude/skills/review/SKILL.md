@@ -268,7 +268,7 @@ GitHub は **自分の PR には `REQUEST_CHANGES` で投稿できない**（`HT
 
 ### `codex` 指定時
 
-呼び出し手順の詳細は、利用 runtime に `/ndf:codex` skill が同梱されている場合はその skill に従う。要点:
+呼び出し手順の詳細は、利用 runtime に `/ndf:external-ai` skill が同梱されている場合はその skill の `references/cli-codex.md` に従う。要点:
 
 - プロンプトを `/tmp/codex-review-pr<番号>-prompt.md` に書き出し
 - 出力先ファイルを `/tmp/codex-output-review-pr<番号>.md` として **プロンプト内で `apply_patch` 書き出しを必須化**
@@ -278,12 +278,12 @@ GitHub は **自分の PR には `REQUEST_CHANGES` で投稿できない**（`HT
 
 > ⚠️ **`--dangerously-bypass-approvals-and-sandbox` のセキュリティ注意**: このフラグは codex の bwrap サンドボックスを完全に無効化し、
 > 任意のシェル実行・任意のファイル編集を無確認で許可する。**必ず Docker / devcontainer / VM / CI ランナー等の外部隔離環境内** でのみ使用すること。
-> ホスト直接実行や本番リポジトリでは使わない。詳細な背景・代替策（`unprivileged_userns_clone` 有効化など）は `/ndf:codex` skill の
-> 「サンドボックス制約」節を参照。
+> ホスト直接実行や本番リポジトリでは使わない。詳細な背景・代替策（`unprivileged_userns_clone` 有効化など）は `/ndf:external-ai` skill の
+> `references/cli-codex.md`「サンドボックス制約」節を参照。
 
 ### `gemini` 指定時
 
-呼び出し手順の詳細は、利用 runtime に `/ndf:gemini` skill が同梱されている場合はその skill に従う。要点:
+呼び出し手順の詳細は、利用 runtime に `/ndf:external-ai` skill が同梱されている場合はその skill の `references/cli-gemini.md` に従う。要点:
 
 - プロンプトを `/tmp/gemini-review-pr<番号>-prompt.md` に書き出し
 - **AI 直接投稿フローでは `--yolo` 必須**（`gh api -X POST` がシェル実行のため、`plan` / `auto_edit` だとブロックされる）
@@ -292,7 +292,7 @@ GitHub は **自分の PR には `REQUEST_CHANGES` で投稿できない**（`HT
 - `kill -0 $PID` ポーリングで完了検知（Codex と異なり sentinel 不要 / プロセス exit を見る）
 - 成果物は stdout サマリ + `/tmp/gemini-review-pr<番号>-result.json` で回収
 
-> ⚠️ **`--yolo` の制約は依然有効**: `/ndf:gemini` skill のセキュリティ警告通り、必ず外部隔離環境内でのみ実行する。プロンプトで「リポジトリ編集禁止」を明示することは必須だが、それは sandbox の代替にはならない。
+> ⚠️ **`--yolo` の制約は依然有効**: `/ndf:external-ai` skill の `references/cli-gemini.md` のセキュリティ警告通り、必ず外部隔離環境内でのみ実行する。プロンプトで「リポジトリ編集禁止」を明示することは必須だが、それは sandbox の代替にはならない。
 
 ### メイン側の検証とフォールバック
 

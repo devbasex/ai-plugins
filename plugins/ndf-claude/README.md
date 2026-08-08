@@ -42,7 +42,7 @@ SLACK_USER_MENTION=<@U0123456789>
 
 ## 外部 AI 委譲
 
-`/ndf:codex` skill または `corder` エージェントから外部 AI 委譲を使う場合は、利用環境に Codex CLI をインストールしてログインします。
+`/ndf:external-ai` skill または `corder` エージェントから外部 AI 委譲を使う場合は、利用環境に Codex CLI をインストールしてログインします。
 
 ```bash
 npm install -g @openai/codex
