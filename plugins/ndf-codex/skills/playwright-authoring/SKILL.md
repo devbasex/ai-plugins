@@ -243,7 +243,7 @@ Chrome DevTools MCP の利用可能な方を自動選択する。どちらも使
 - `/ndf:playwright-evidence` — 証跡とレポート (後段)
 - `/ndf:playwright-kit-ops` — 実行環境の運用 (init_project / codegen / スキャン)
 - `/ndf:docker-container-access` — Docker コンテナアクセス一般
-- `/ndf:review-branch` — 変更差分のコードレビュー
+- `/ndf:review --branch` — 変更差分のコードレビュー
 - `/ndf:pr-tests` — PR Test Plan の自動実行
 
 > `playwright-planning` / `playwright-evidence` / `playwright-kit-ops` は Codex 公開セットに同梱される。

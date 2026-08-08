@@ -20,8 +20,5 @@ playwright-planning
 pr
 pr-tests
 problem-solving
-resolve-pr-comments
 review
-review-branch
-review-pr-comments
 sync-main
