@@ -93,7 +93,7 @@ MCPプラグインが10個。今日は時間の都合で名前だけにします
 
 | | |
 |---|---|
-| **スキル 22個** | `/ndf:pr`, `/ndf:review` … スラッシュで直接呼べる |
+| **スキル 25個** | `/ndf:pr`, `/ndf:review` … スラッシュで直接呼べる |
 | **エージェント 8個** | director / corder / qa / debugger / devops-engineer など |
 | **フック 2種** | SessionStart（transcript保持を90日に維持）/ Stop（AI要約+Slack通知） |
 
@@ -502,7 +502,7 @@ codex plugin add ndf@ai-plugins
 
 <div class="small">
 
-Claude版との差: エージェント8個とSessionStart/Stopフックは無し。代わりに Playwright 系スキル4個が入ります。
+Claude版との差: エージェント8個とSessionStart/Stopフックは無し。Playwright 系スキル4個は Claude 版にも入ります。
 
 </div>
 
@@ -518,7 +518,7 @@ bash plugins/ndf-kiro/install.sh
 kiro-cli chat --agent ndf
 ```
 
-`.kiro/skills/` に**20個**、
+`.kiro/skills/` に**23個**、
 `.kiro/agents/ndf.json` と
 `.kiro/steering/ndf-policies.md` を生成。
 

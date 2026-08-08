@@ -228,7 +228,7 @@ footer { color: #8899aa; font-size: 16px; }
 </thead>
 <tbody>
 <tr>
-<td><strong>スキル 22個</strong></td>
+<td><strong>スキル 25個</strong></td>
 <td><code>/ndf:pr</code>, <code>/ndf:review</code> … スラッシュで直接呼べる</td>
 </tr>
 <tr>
@@ -1311,7 +1311,7 @@ codex plugin add ndf@ai-plugins
 <p>セッション内では <code>ndf:</code> 接頭辞で<br />
 <strong>23個</strong>のスキルが使えます。</p>
 <div class="small">
-<p>Claude版との差: エージェント8個とSessionStart/Stopフックは無し。代わりに Playwright 系スキル4個が入ります。</p>
+<p>Claude版との差: エージェント8個とSessionStart/Stopフックは無し。Playwright 系スキル4個は Claude 版にも入ります。</p>
 </div>
 </div>
 <div>
@@ -1321,7 +1321,7 @@ codex plugin add ndf@ai-plugins
 bash plugins/ndf-kiro/install.sh
 kiro-cli chat --agent ndf
 </code></pre>
-<p><code>.kiro/skills/</code> に<strong>20個</strong>、<br />
+<p><code>.kiro/skills/</code> に<strong>23個</strong>、<br />
 <code>.kiro/agents/ndf.json</code> と<br />
 <code>.kiro/steering/ndf-policies.md</code> を生成。</p>
 <div class="small">

@@ -15,7 +15,9 @@ allowed-tools:
 ## 前提条件
 
 - テスト実行済みで `reports/<run-id>/` にエビデンスが存在すること (`/ndf:playwright-authoring`)
-- Drive へ保管する場合のみ、`/ndf:google-auth` で OAuth2 認証が完了していること (drive.file スコープ)
+- Drive へ保管する場合のみ、`google-auth` skill で OAuth2 認証が完了していること (drive.file スコープ)。
+  同 skill は既定の配布セットに含まれないため、`plugins/ndf-shared/skills/google-auth/` を利用先へ
+  導入するか、`GOOGLE_AUTH_SCRIPTS` 環境変数で認証スクリプトの場所を指す
 
 ## レポート生成
 
@@ -156,8 +158,8 @@ uv run python scripts/upload_evidence.py reports/.../trace.zip \
 
 | 症状 | 原因 | 対策 |
 |---|---|---|
-| `google_auth スキルが見つかりません` | google-auth skill 未インストール | `GOOGLE_AUTH_SCRIPTS` env を設定、または `/ndf:google-auth` で認証セットアップ |
-| `HttpError 403: insufficient permissions` | drive.file スコープ不足 | `/ndf:google-auth` で再認証 (`drive.file` スコープ指定) |
+| `google_auth スキルが見つかりません` | google-auth skill 未導入 | `GOOGLE_AUTH_SCRIPTS` env を設定、または `google-auth` skill を導入して認証をセットアップ |
+| `HttpError 403: insufficient permissions` | drive.file スコープ不足 | `google-auth` skill で再認証 (`drive.file` スコープ指定) |
 | `HttpError 404: File not found` | FOLDER_ID が間違っている / アクセス権なし | Drive で共有フォルダ ID を確認 |
 | `resumable upload failed` | ファイルサイズが大きい / ネットワーク不安定 | 再試行。動画は mp4 (H.264) で容量を抑える |
 | pytest 後に自動アップロードされない | `--pwk-drive-folder` 未指定 | CLI 引数を確認 |
@@ -167,5 +169,6 @@ uv run python scripts/upload_evidence.py reports/.../trace.zip \
 - `/ndf:playwright-authoring` — スクリプト作成と実行 (前段)
 - `/ndf:playwright-planning` — テスト計画
 - `/ndf:playwright-kit-ops` — 実行環境の運用 (アップロードスクリプトの配置元)
-- `/ndf:google-auth` — Google API OAuth2 認証
-- `/ndf:google-drive` — Google Drive 汎用操作
+- `google-auth` / `google-drive` — Google API の認証と Drive 操作。どちらも既定の配布セットには
+  含まれない（`plugins/ndf-shared/skills/` にはあるが manifest には載せていない）。Drive 連携を
+  使う場合だけ利用先へ導入する
