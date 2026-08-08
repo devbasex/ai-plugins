@@ -47,7 +47,9 @@ Skill の棚卸で 49 個を 29 個へ整理した。旧コマンドは存在し
 
 そのほかの非互換な変更:
 
-- `merged` / `pr` / `review` / `pr-tests` が自然文の依頼でも起動するようになった。
+- `merged` / `pr` / `pr-tests` が自然文の依頼でも起動するようになった。
+  `review` も同じ設定にしたが、Claude Code では組み込みの `code-review` が同じ用途を
+  持つため自然文では選ばれない。`/ndf:review` で明示的に起動する。
   取り消しの難しい手順の前には確認を取る
 - Kiro はエージェント名が `default` → `ndf` に変わった。`install.sh` を再実行する
 - Codex では `deploy` / `cherry-pick-pr` が暗黙起動の一覧から外れる。プラグイン配布の

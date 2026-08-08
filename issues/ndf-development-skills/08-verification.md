@@ -8,7 +8,7 @@
 | --- | --- |
 | Skill 総数 | [02-skill-inventory.md](02-skill-inventory.md)「Skill 総数の推移」のとおり、統合と削除で 29 まで減り、新設 9 個（開発方法論レイヤー 8 個 + `execute-goal` 1 個）を加えて最終 38 |
 | コマンド名 | 起動実績のない `/ndf:clean` `/ndf:review-pr-comments` `/ndf:resolve-pr-comments` `/ndf:git-gh-operations` などが消える。起動上位 5 個（`fix` `cross-review` `merged` `pr` `issue-plan-strategy`、計 1,145 回）は改名しない。`/ndf:codex` `/ndf:gemini`(計 5 回) と `/ndf:branch-fix-strategy`(4 回) `/ndf:sync-main`(1 回) `/ndf:review-branch`(3 回) が変わる |
-| 自動発動の挙動 | `merged` / `review` / `pr` / `pr-tests` が自然文で起動するようになる。起動しない前提の運用があれば変わる |
+| 自動発動の挙動 | `merged` / `pr` / `pr-tests` が自然文で起動するようになる。起動しない前提の運用があれば変わる。`review` も同じ設定にしたが、Claude Code では組み込みの `code-review` が優先されるため自然文では起動しない（「自然文からの発動の実測」） |
 | 常時注入されるコンテキスト | 棚卸で削減、新規追加で増加。合計サイズを継続的インテグレーションで監視 |
 | 3 ランタイム | manifest 経由で配布。`build-runtime-plugins.sh --check` で生成物の差異を検出 |
 | Kiro の導入方式 | エージェント名 `default` → `ndf`、Skill 読み込み指定の削除、steering 生成、スコープ選択。**既存の `.kiro/agents/default.json` を持つプロジェクトは再インストールが必要** |
@@ -100,7 +100,7 @@
 - [ ] リリース用プルリクエストを下書きのまま残して完了条件を満たす
 - [ ] Claude Code と Codex の組み込み `/goal` に渡した条件でループが終了する
 - [ ] 中断後の再実行で、既存のブランチとプルリクエストを重複作成せず途中から再開する
-- [ ] `standard` と判定された計画のレビュー段階で `review` が呼ばれ、`cross-review` が起動しない
+- [ ] `standard` と判定された計画のレビュー段階で `review` が呼ばれ、`cross-review` が起動しない（`execute-goal` は `review` を**明示的に**呼ぶこと。自然文に任せると Claude Code では組み込みの `code-review` が起動して手順が変わる）
 - [ ] `architecture` と判定された計画、およびデータベース移行を含む計画のレビュー段階で `cross-review` が起動する
 - [ ] Kiro では段階ごとに続行指示を求め、途中で破綻しない
 - [ ] 挙動評価の 12 シナリオがすべて期待どおりになる
@@ -151,6 +151,12 @@ v5.0.0 を `main` へマージしたあと、Claude Code で `--output-format st
 
 したがって機能は失われていない。名前や責務の見直しは破壊的変更になるため、
 [#83](https://github.com/devbasex/ai-plugins/issues/83) で追跡する。
+
+### 後続リリースへの申し送り
+
+`execute-goal`（Release 3）のレビュー段階は、`review` を**明示的に**呼ぶ手順として書く。
+自然文でレビューを依頼する形にすると、Claude Code では組み込みの `code-review` が起動して
+判定の投稿経路が変わる。`cross-review` は既に内部で `review` を直接呼んでいるため影響しない。
 
 ### トリガ語の重複検査の限界
 
