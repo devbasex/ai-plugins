@@ -93,7 +93,7 @@ rm .kiro/agents/default.json.bak
 
 | 旧 `default.json` | `ndf.json` | 振る舞い |
 | --- | --- | --- |
-| 旧版 NDF installer の生成物（`name` が `default` かつ `description` に `NDF` を含む） | なし | `ndf.json` へ自動移行する（`default.json` は残らない）。独自に追記した `mcpServers` / フック / 独自キーは下表のマージで保持される |
+| 旧版 NDF installer の生成物（`name` が `default`、`description` が旧テンプレートと完全一致、かつ旧 `resources` の `skill://.kiro/skills/**/SKILL.md` または `agentSpawn` フックの `CLAUDE.ndf.md` 検査を持つ） | なし | `ndf.json` へ自動移行する（`default.json` は残らない）。独自に追記した `mcpServers` / フック / 独自キーは下表のマージで保持される |
 | 同上 | あり | 自動移行しない（`ndf.json` の設定を失わないため）。`default.json` は残るので、必要な設定を写したうえで削除する |
 | NDF 以外が管理している（利用者が作成したものなど） | 問わない | 自動移行しない。勝手に移行すると利用者の設定を壊すため、バックアップと移行手順の案内のみを行う |
 

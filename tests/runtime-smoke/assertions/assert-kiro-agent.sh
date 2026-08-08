@@ -154,16 +154,44 @@ echo "reinstall preserved user-managed agent settings" >> "$LOG"
 MIGRATION_ROOT="$ARTIFACT_DIR/kiro-legacy-migration"
 rm -rf "$MIGRATION_ROOT"
 
-# $1: プロジェクト, $2: description（installer の NDF 生成物判定に使う）
+# $1: プロジェクト, $2: ndf ならば旧 installer の生成物そのままの fixture、
+# それ以外なら NDF 生成物と判定されない fixture を書く。
+#
+# installer の判定は「旧テンプレート固有の description の完全一致」+「旧 resources
+# の skill:// 指定 または agentSpawn フックの CLAUDE.ndf.md 検査」なので、
+# 自動移行ケースの fixture は旧 default.json.template と同じ値を持たせる。
 write_legacy_agent() {
   mkdir -p "$1/.kiro/agents"
-  cat > "$1/.kiro/agents/default.json" <<JSON
+  if [ "$2" = ndf ]; then
+    cat > "$1/.kiro/agents/default.json" <<'JSON'
 {
   "name": "default",
-  "description": "$2",
+  "description": "NDF統合開発エージェント（Kiro CLI用）",
+  "tools": ["*"],
+  "resources": [
+    "file://AGENTS.md",
+    "file://README.md",
+    "file://.kiro/skills/ndf-policies/SKILL.md",
+    "skill://.kiro/skills/**/SKILL.md"
+  ],
+  "hooks": {
+    "agentSpawn": [
+      { "command": "if [ -f \"${PWD}/CLAUDE.ndf.md\" ]; then echo \"[NDF] CLAUDE.ndf.md\"; fi" }
+    ]
+  },
   "mcpServers": { "legacy-user-mcp": { "command": "echo", "args": ["legacy"] } }
 }
 JSON
+  else
+    cat > "$1/.kiro/agents/default.json" <<'JSON'
+{
+  "name": "default",
+  "description": "my own agent",
+  "resources": ["file://AGENTS.md"],
+  "mcpServers": { "legacy-user-mcp": { "command": "echo", "args": ["legacy"] } }
+}
+JSON
+  fi
 }
 install_into() {
   bash "$REPO_ROOT/plugins/ndf-kiro/install.sh" --project "$1" "${@:2}" >> "$LOG" 2>&1
@@ -171,7 +199,7 @@ install_into() {
 
 # 1. NDF 生成物 + ndf.json なし → 自動移行し、利用者の mcpServers を引き継ぐ
 case_ndf="$MIGRATION_ROOT/ndf-generated"
-write_legacy_agent "$case_ndf" "NDF workflow agent"
+write_legacy_agent "$case_ndf" ndf
 install_into "$case_ndf"
 test ! -e "$case_ndf/.kiro/agents/default.json"
 test -f "$case_ndf/.kiro/agents/default.json.bak"
@@ -190,7 +218,7 @@ PY
 
 # 2. NDF 生成物と判定できない default.json → 移行せず元のまま残す
 case_user="$MIGRATION_ROOT/user-owned"
-write_legacy_agent "$case_user" "my own agent"
+write_legacy_agent "$case_user" user
 install_into "$case_user"
 test -f "$case_user/.kiro/agents/default.json"
 test -f "$case_user/.kiro/agents/default.json.bak"
@@ -219,7 +247,7 @@ config = json.loads(path.read_text(encoding="utf-8"))
 config["smokeExistingKey"] = "keep-me"
 path.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 PY
-write_legacy_agent "$case_both" "NDF workflow agent"
+write_legacy_agent "$case_both" ndf
 install_into "$case_both"
 test -f "$case_both/.kiro/agents/default.json"
 python3 - "$case_both/.kiro/agents/ndf.json" <<'PY'
@@ -237,7 +265,7 @@ PY
 
 # 4. --dry-run → 移行を含め一切書き込まない
 case_dry="$MIGRATION_ROOT/dry-run"
-write_legacy_agent "$case_dry" "NDF workflow agent"
+write_legacy_agent "$case_dry" ndf
 dry_state() { (cd "$case_dry" && find . | sort && find . -type f -exec sha256sum {} + | sort); }
 before_dry="$(dry_state)"
 install_into "$case_dry" --dry-run
