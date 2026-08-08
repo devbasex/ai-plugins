@@ -8,7 +8,7 @@
 | --- | --- |
 | Skill 総数 | [02-skill-inventory.md](02-skill-inventory.md)「Skill 総数の推移」のとおり、統合と削除で 29 まで減り、新設 9 個（開発方法論レイヤー 8 個 + `execute-goal` 1 個）を加えて最終 38 |
 | コマンド名 | 起動実績のない `/ndf:clean` `/ndf:review-pr-comments` `/ndf:resolve-pr-comments` `/ndf:git-gh-operations` などが消える。起動上位 5 個（`fix` `cross-review` `merged` `pr` `issue-plan-strategy`、計 1,145 回）は改名しない。`/ndf:codex` `/ndf:gemini`(計 5 回) と `/ndf:branch-fix-strategy`(4 回) `/ndf:sync-main`(1 回) `/ndf:review-branch`(3 回) が変わる |
-| 自動発動の挙動 | `merged` / `review` / `pr` / `pr-tests` が自然文で起動するようになる。起動しない前提の運用があれば変わる |
+| 自動発動の挙動 | `merged` / `pr` / `pr-tests` が自然文で起動するようになる。起動しない前提の運用があれば変わる。`review` も同じ設定にしたが、Claude Code では組み込みの `code-review` が優先されるため自然文では起動しない（「自然文からの発動の実測」） |
 | 常時注入されるコンテキスト | 棚卸で削減、新規追加で増加。合計サイズを継続的インテグレーションで監視 |
 | 3 ランタイム | manifest 経由で配布。`build-runtime-plugins.sh --check` で生成物の差異を検出 |
 | Kiro の導入方式 | エージェント名 `default` → `ndf`、Skill 読み込み指定の削除、steering 生成、スコープ選択。**既存の `.kiro/agents/default.json` を持つプロジェクトは再インストールが必要** |
@@ -66,7 +66,8 @@
 - [ ] 修正後の `skill-stats` でトリガ抽出に失敗する Skill が 13 個だけになる（`when_to_use` を持たない 14 個のうち、`plan-to-spec` は `description` にトリガを持つ）
 - [ ] 統合前後で機能が減っていない（統合元の手順が統合先に残っている）
 - [ ] `grep -rn '<削除した Skill 名>'` がリポジトリ全体でヒットしない
-- [ ] `merged` / `pr` / `review` / `pr-tests` が自然文の依頼で起動する
+- [x] `merged` / `pr` / `pr-tests` が自然文の依頼で起動する
+- [ ] `review` が自然文の依頼で起動する — **満たせない**。実測を「自然文からの発動の実測」に記載
 - [ ] `merged` `fix` `cross-review` `pr` `issue-plan-strategy` のコマンド名が変わっていない
 - [ ] `deploy` と `cherry-pick-pr` 相当がエージェントから自動起動しない
 - [ ] `install.sh` 実行後、`kiro-cli agent list` に `ndf` が現れる
@@ -99,7 +100,7 @@
 - [ ] リリース用プルリクエストを下書きのまま残して完了条件を満たす
 - [ ] Claude Code と Codex の組み込み `/goal` に渡した条件でループが終了する
 - [ ] 中断後の再実行で、既存のブランチとプルリクエストを重複作成せず途中から再開する
-- [ ] `standard` と判定された計画のレビュー段階で `review` が呼ばれ、`cross-review` が起動しない
+- [ ] `standard` と判定された計画のレビュー段階で `review` が呼ばれ、`cross-review` が起動しない（`execute-goal` は `review` を**明示的に**呼ぶこと。自然文に任せると Claude Code では組み込みの `code-review` が起動して手順が変わる）
 - [ ] `architecture` と判定された計画、およびデータベース移行を含む計画のレビュー段階で `cross-review` が起動する
 - [ ] Kiro では段階ごとに続行指示を求め、途中で破綻しない
 - [ ] 挙動評価の 12 シナリオがすべて期待どおりになる
@@ -117,6 +118,51 @@
 - [ ] 既存のプルリクエスト運用（作成 → レビュー → 修正 → 後処理）が統合後も通しで動作する
 - [ ] `cross-review` が統合後の `external-ai` と `fix` を正しく呼び出す
 - [ ] 文言修正のみの変更で仕様作成とテスト駆動が要求されない
+
+## 自然文からの発動の実測
+
+v5.0.0 を `main` へマージしたあと、Claude Code で `--output-format stream-json` を使い、
+`Skill` ツール呼び出しを抽出して実測した（claude-haiku-4-5、一時 git リポジトリ）。
+
+| 依頼文 | 起動された Skill |
+| --- | --- |
+| マージ済みのブランチを整理してください。 | `ndf:merged` |
+| この変更で PR を作ってください。 | `ndf:pr` |
+| PRテストを実行してください。 | `ndf:pr-tests` |
+| このブランチの変更をレビューしてください。 | `code-review`（Claude Code 組み込み） |
+| マージ前チェックをしてください。 | `code-review` |
+| PR を作る前にセルフレビューしてください。 | `code-review` |
+| codex にこのブランチをレビューさせてください。 | `ndf:external-ai` |
+
+`disable-model-invocation` を外したこと自体は効いており、4 個のうち 3 個は狙いどおり
+起動する。`review` だけが **Claude Code 組み込みの `code-review` に負ける**。
+
+`description` を「PR へ APPROVE / REQUEST_CHANGES の判定を投稿する」「codex / gemini へ
+委譲する」という差別化点へ寄せて測り直したが、結果は変わらなかった。組み込み側も
+`--comment` でインラインコメントを投稿でき、用途の重なりが大きいためと考えられる。
+
+### 判断
+
+`review` の自然文発動は**この条件では達成できないものとして扱い、追わない**。
+
+- `/ndf:review` の明示起動は動作する（`--branch` で統合後の報告形式が出ることを確認済み）
+- `cross-review` は内部で `review` を直接呼ぶため、収束レビューの経路は影響を受けない
+- 「codex にレビューさせる」意図が `external-ai` へ向かうのは責務どおりで、退行ではない
+
+したがって機能は失われていない。名前や責務の見直しは破壊的変更になるため、
+[#83](https://github.com/devbasex/ai-plugins/issues/83) で追跡する。
+
+### 後続リリースへの申し送り
+
+`execute-goal`（Release 3）のレビュー段階は、`review` を**明示的に**呼ぶ手順として書く。
+自然文でレビューを依頼する形にすると、Claude Code では組み込みの `code-review` が起動して
+判定の投稿経路が変わる。`cross-review` は既に内部で `review` を直接呼んでいるため影響しない。
+
+### トリガ語の重複検査の限界
+
+`scripts/check-skill-frontmatter.py` の重複検査は **NDF の Skill 同士**しか見ない。
+ランタイム組み込みの Skill や他プラグインとの競合は、配布先の環境に依存するため
+機械的に検査できない。`review` の件はこの限界が表面化した例である。
 
 ## 未確認事項
 
