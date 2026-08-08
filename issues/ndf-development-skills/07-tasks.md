@@ -46,7 +46,7 @@
   - `merged` / `pr` / `review` / `pr-tests` から `disable-model-invocation` を外し、`description` に発動条件を含める
   - `deploy` と `cherry-pick-pr` 相当の破壊的操作は明示指示専用を維持する
   - 主要トリガは `description` に入れる。`when_to_use` は Claude Code 向けの追加トリガが要る Skill にだけ付与し、`description` で足りるものには付けない（[03-runtime-conformance.md](03-runtime-conformance.md)）
-  - `plan-to-spec` の長い `description` は要点を残して `when_to_use` へ移す。`cross-review` は逆に、`when_to_use` に置いた明示トリガの要点を `description` へ移す
+  - `plan-to-spec` は配布が `CXK` で `when_to_use` が Codex/Kiro に効かないため、401 文字の `description` はトリガ語を残したまま重複した言い換えを削って要約し、手順の説明は本文へ逃がす。`cross-review` は逆に、`when_to_use` に置いた明示トリガの要点を `description` へ移す
   - 広すぎるトリガを具体化する
   - `description` の先頭に主要な用途とトリガ語を置き、合計を Codex の初期一覧予算へ収める（[02-skill-inventory.md](02-skill-inventory.md)「Codex の初期一覧予算」）
   - `paths` / `effort` / `arguments` / `license` / `metadata` を導入方針に従って付与する
@@ -106,6 +106,7 @@
 - **変更内容:**
   - 統合と整理の結果を manifest 3 種すべてへ反映する
   - `ndf-policies` に旧 Skill 名から新 Skill 名への対応表を記載する
+  - `ndf-policies` の `description` に「知識として参照する。手順として実行しない」旨を追記する。Codex には `user-invocable: false` の相当機能がなく、通常の Skill として暗黙起動されうるため
   - バージョンを 5.0.0 へ上げる。版数は `plugin.json` 以外にも散在しており、実測で次の箇所にある
 
 | ファイル | 記載箇所 |

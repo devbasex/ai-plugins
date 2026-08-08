@@ -204,7 +204,7 @@ when_to_use: "Claude Code 向けの追加トリガのみ"
 - `merged`(247) / `pr`(171) / `review`(57) / `pr-tests`(2) から `disable-model-invocation` を外し、`description` に発動条件を含める。いずれも明示指示でしか使えていない
 - `deploy` は環境ブランチへ書き込む破壊的操作のため明示指示専用を維持する。起動ゼロだが機会が 340 あるため、発動改善の対象として `description` を改善する
 - `when_to_use` は Claude Code 向けの追加トリガが要る Skill にだけ付与する。主要トリガは `description` に置くため、未設定であること自体は不備とせず、一律付与もしない（[03-runtime-conformance.md](03-runtime-conformance.md)）
-- `plan-to-spec` は `description` が 401 文字あるため、要点を残して残りを `when_to_use` へ移す。`cross-review` は逆に `description` が 42 文字で発動条件を含まず、254 文字の `when_to_use` に依存しているため、明示トリガの要点を `description` へ移す
+- `plan-to-spec` は `description` が 401 文字あるが、配布が `CXK` で `when_to_use` は Codex/Kiro に効かないため、トリガ語は `description` に残したまま重複した言い換えを削って要約する。`cross-review` は逆に `description` が 42 文字で発動条件を含まず、254 文字の `when_to_use` に依存しているため、明示トリガの要点を `description` へ移す
 - 広すぎるトリガを具体化する（`'python'` → `'uv run'` `'venv が見つからない'`、`'git add'` → `'fatal:'` `'non-fast-forward'`、`'調査'` → `'調査レポートを書く'`）
 - frontmatter に `<` と `>` を含めない。Agent Skills 仕様がシステムプロンプトへの注入リスクとして警告している
 - `description` は二重引用符で囲む。Kiro はコロンを含む未引用の `description` を持つ Skill を検出対象から落とす（[kirodotdev/Kiro#8329](https://github.com/kirodotdev/Kiro/issues/8329)）
@@ -240,7 +240,7 @@ Codex は起動時に Skill の `name` と `description` に加えてファイ�
 
 `description` を 1 個あたり 300 文字で運用しても、この総量予算には収まらない。最終構成の 38 個（「Skill 総数の推移」）に 300 文字を割り当てると 11,400 文字となり、`name` とファイルパスを加える前の時点で 8,000 文字を超える。コンテキストウィンドウが判明している場合の 2% は 8,000 文字より厳しくなることがあり、たとえばコンテキストウィンドウが 272,000 のモデルでは 5,440 文字となる。
 
-したがって 300 文字は**1 個あたりの上限**であって全 Skill に一律で使ってよい枠ではない。実際の配分は総量が予算へ収まることを条件に決め、超過分は `when_to_use` と本文へ逃がす。あわせて、短縮されても暗黙起動が働くよう `description` の先頭に主要な用途とトリガ語を置く（適用方針の先頭トリガ規約）。この 2 点は [07-tasks.md](07-tasks.md) Task 0-7 の検査項目として機械的に検査する。
+したがって 300 文字は**1 個あたりの上限**であって全 Skill に一律で使ってよい枠ではない。実際の配分は総量が予算へ収まることを条件に決め、超過分を逃がす。逃がし先は配布先で選ぶ。Claude Code だけに配布する Skill は `when_to_use` へ移してよいが、`when_to_use` は Codex と Kiro では読まれないため、3 ランタイムへ配布する Skill はトリガ語を `description` に残したまま要約し、手順の説明を本文へ逃がす。あわせて、短縮されても暗黙起動が働くよう `description` の先頭に主要な用途とトリガ語を置く（適用方針の先頭トリガ規約）。この 2 点は [07-tasks.md](07-tasks.md) Task 0-7 の検査項目として機械的に検査する。
 
 ### 未使用項目の導入
 
