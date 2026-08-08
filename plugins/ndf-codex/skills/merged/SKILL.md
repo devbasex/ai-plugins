@@ -27,12 +27,14 @@ PR マージ後の後始末をまとめて実行する。対象 PR のブラン�
 ## クリーンアップの手順
 
 1. **マージ確認**: 引数の（引数がなければ自身が作成した最新の）PR が main に merge されていることを github mcp で確認。merge されていなければクリーンアップは実施せず終了
-2. **作業ツリー退避**: `git status` を確認し、変更があれば `git stash`
+2. **作業ツリー退避**: `git branch --show-current` で**退避元のブランチ名を記録**し、`git status` を確認して変更があれば `git stash`
 3. **main 更新**: `git checkout main` → `git pull`
 4. **worktree クリーンアップ**: `git worktree list` で当該 PR 番号に対応する worktree (`pr<PR番号>`) を探し、あれば `git worktree remove <path>` で削除（worktree 内の `.cross_review/` も一緒に消える）
 5. **ブランチ削除**: `git branch -d <feature-branch>`
 6. **マージ済みブランチの整理**: 下記の手順で残存ブランチをまとめて削除
-7. **復元**: 手順 2 で stash していれば `git stash pop`
+7. **復元**: 手順 2 で stash していれば、**退避元のブランチへ戻してから**復元する
+   - 退避元のブランチが残っている場合: `git checkout <退避元のブランチ>` → `git stash pop`
+   - 退避元のブランチを手順 5 / 6 で削除した場合: **`git stash pop` を実行しない**。手順 3 以降は main に居るため、そのまま pop すると無関係な変更が main の作業ツリーへ展開される。stash は残したまま `git stash list` の該当エントリを作業完了報告に記載し、復元先ブランチの作成か破棄かをユーザーに判断してもらう
 
 **注意**: 冪等性保証・エラー時中断・削除済み無視
 
@@ -67,6 +69,7 @@ git push origin --delete <branch> # 3. リモートにも残っていれば削�
 
 - 実行サマリー（PR タイトル、マージコミット、削除したブランチ、現在のブランチ）
 - main ブランチの状態
+- 復元していない stash が残っている場合はその旨と `git stash list` の該当エントリ
 - PR URL
 
 ## 関連

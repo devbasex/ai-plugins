@@ -35,7 +35,7 @@
 | --- | --- |
 | 0-2 | `cross-review` が `fix` をループ内で呼ぶ。呼び出し規約を壊さない。`review` は `--branch` 引数でローカル差分レビューに切り替える |
 | 0-3 | 外部 AI 呼び出しの差分を `references/cli-codex.md` / `references/cli-gemini.md` に分離する。`cross-review` は両方を呼ぶため呼び出し箇所を更新する |
-| 0-4 | 起動 247 回の `merged` を残し、`clean` を吸収する。改名しない。`cherry-pick-pr`(16 回) に `branch-fix-strategy`(4 回) を吸収し、実行コマンド側の名前を残す |
+| 0-4 | 起動 247 回の `merged` を残し、`clean` を吸収する。改名しない。`cherry-pick-pr`(16 回) に `branch-fix-strategy`(4 回) を吸収し、実行コマンド側の名前を残す。`cherry-pick-pr` は明示指示専用のため、`branch-fix-strategy` 由来の核心ルール（環境ブランチへの適用原則、ブランチ汚染の回避）は常時読み込まれる `ndf-policies` へ移し、自然文の質問から参照できなくなる退行を防ぐ |
 | 0-5 | ブラウザ自動テストは [02-skill-inventory.md](02-skill-inventory.md) の対応表どおり 4 個へまとめる。`playwright-kit-ops` は実行環境ディレクトリとスクリプトを持つため単独で残し、`build-runtime-plugins.sh` の除外パターンが効く配置を保つ |
 | 0-6 | 削除対象は台帳で削除判定した 9 個に限り、判定は [02-skill-inventory.md](02-skill-inventory.md) の判断基準表に従う。うち `sync-main` は 0-4 で処理するため、この PR の対象は 8 個 |
 
@@ -45,7 +45,6 @@
 - **変更内容:**
   - `merged` / `pr` / `review` / `pr-tests` から `disable-model-invocation` を外し、`description` に発動条件を含める
   - `deploy` と `cherry-pick-pr` 相当の破壊的操作は明示指示専用を維持する
-  - 0-4 で `cherry-pick-pr` に統合した `branch-fix-strategy` 由来の核心ルール（環境ブランチへの適用原則、ブランチ汚染の回避）を、常時読み込まれる `ndf-policies` へ移す。明示指示専用の Skill に閉じ込めた知識が自然文の質問から参照できなくなる退行を防ぐ
   - 主要トリガは `description` に入れる。`when_to_use` は Claude Code 向けの追加トリガが要る Skill にだけ付与し、`description` で足りるものには付けない（[03-runtime-conformance.md](03-runtime-conformance.md)）
   - `plan-to-spec` の長い `description` は要点を残して `when_to_use` へ移す。`cross-review` は逆に、`when_to_use` に置いた明示トリガの要点を `description` へ移す
   - 広すぎるトリガを具体化する

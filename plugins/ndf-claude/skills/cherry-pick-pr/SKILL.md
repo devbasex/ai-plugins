@@ -32,10 +32,14 @@ featureブランチに環境ブランチ(`qa/staging`等)を merge して confli
 
 ## 核心ルール
 
-1. **修正は feature ブランチに先に commit し、cherry-pick で環境ブランチへ届ける。** 短命ブランチに先に commit して feature へ手作業で再実装すると、二重作業と不整合の原因になる
-2. **環境ブランチを feature ブランチに merge しない。** conflict 解消目的でも禁止（main汚染の原因）
-3. **短命ブランチを push する前に `origin/main` を必ず取り込む。** CI で最新 main 必須の Workflow があるため（処理フロー 5）
-4. **マージ済みブランチには push しない。** 同名の短命ブランチに既存 PR がないか先に確認する（処理フロー 2）
+原則は `ndf-policies`「ブランチ運用の原則」に定義されている。本 Skill の処理フローはその原則を手順へ落としたもので、対応は次のとおり。
+
+| 原則 | 対応する処理フロー |
+|------|------------------|
+| feature に先に commit し cherry-pick で届ける | 3・6 |
+| 環境ブランチを feature に merge しない | 「なぜ必要か」 |
+| push 前に `origin/main` を取り込む | 5 |
+| マージ済みブランチには push しない | 2 |
 
 ## 処理フロー
 
@@ -121,10 +125,11 @@ git checkout <original-branch>
 
 - 短命ブランチは PR マージ後に削除してよい
 - `feature → main` の PR には影響しない
-- revert の連鎖（revert → reapply → revert...）ではなく、**最終的なあるべき状態を直接コミット**する。履歴上の意図が明確になり、後の cherry-pick も簡単になる
+- revert の扱いは `ndf-policies`「ブランチ運用の原則」5 に従う
 
 ## 関連
 
+- `ndf-policies` — 環境ブランチへの適用原則とブランチ汚染の回避（本 Skill の前提）
 - `/ndf:pr` — 通常のPR作成（base=main）。非 main ベースは本 Skill に誘導される
 - `/ndf:merged` — マージ後のブランチ整理と、現ブランチへの main 取り込み
 - `/ndf:deploy` — ブランチ全体を環境へデプロイ（cherry-pickとは別用途）
