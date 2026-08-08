@@ -51,7 +51,7 @@ Claude Code 専用の agents、statusline 自動設定、transcript retention �
 $deploy qa/staging
 
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/4.20.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/5.0.0/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 名前だけで起動を依頼する
 deploy skill を実行してください。
@@ -66,14 +66,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/4.20.1/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/5.0.0/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。`$<skill 名>` はキャッシュ配下の Skill も skill roots から解決するため、まず `$` 起動を使ってください。パスで指示したい場合は `codex plugin list` で実体パスを確認し、絶対パスを渡します。
 
 ### 実機検証結果 (codex-cli 0.146.1 / gpt-5.5)
 
-`.agents/skills/` 配下に検証用 Skill (`probe-explicit` = 本プラグインと同じ `openai.yaml` を配置 / `probe-open` = 抑止なし) を置き、`codex exec` で確認した結果です。
+`.agents/skills/` 配下に検証用 Skill (`probe-explicit` = 本プラグインと同じ `openai.yaml` を配置 / `probe-open` = 抑止なし) を置き、`codex exec` で確認した結果です。表中のパスは検証時点 (プラグイン v4.20.1) の実測値をそのまま載せています。
 
 | 検証 | 内容 | 結果 |
 |------|------|------|

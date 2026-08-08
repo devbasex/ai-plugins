@@ -1,6 +1,6 @@
 {
   "name": "ndf",
-  "version": "4.20.1",
+  "version": "5.0.0",
   "description": "Claude Code plugin with 8 specialized agents, focused NDF skills for PR/review workflows, implementation planning, debugging principles, statusline, browser smoke testing, Codex CLI delegation, transcript retention guard, default statusline setup, and optional Slack notifications.",
   "author": {
     "name": "takemi-ohama",
@@ -47,6 +47,8 @@
     "./skills/external-ai",
     "./skills/statusline",
     "./skills/issue-plan-strategy",
-    "./skills/plan-to-spec"
+    "./skills/plan-to-spec",
+    "./skills/qa-security-scan",
+    "./skills/official-skills-autoloader"
   ]
 }

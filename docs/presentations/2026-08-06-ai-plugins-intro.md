@@ -3,7 +3,7 @@ marp: true
 theme: default
 paginate: true
 size: 16:9
-header: 'ai-plugins / NDF v4.20.1'
+header: 'ai-plugins / NDF v5.0.0'
 style: |
   section {
     font-family: "Hiragino Sans", "Noto Sans JP", "Yu Gothic", sans-serif;
@@ -515,11 +515,12 @@ Claude版との差: エージェント8個とSessionStart/Stopフックは無し
 git clone \
   https://github.com/devbasex/ai-plugins.git
 bash plugins/ndf-kiro/install.sh
-kiro-cli chat
+kiro-cli chat --agent ndf
 ```
 
-`.kiro/skills/` に**28個**、
-`.kiro/agents/default.json` を生成。
+`.kiro/skills/` に**21個**、
+`.kiro/agents/ndf.json` と
+`.kiro/steering/ndf-policies.md` を生成。
 
 <div class="small">
 
