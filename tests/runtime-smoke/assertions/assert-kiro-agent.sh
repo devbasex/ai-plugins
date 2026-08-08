@@ -37,6 +37,17 @@ test -f "$AGENT_FILE"
 test -s "$STEERING_FILE"
 find -L "$KIRO_DIR/skills" -path '*/SKILL.md' -print | grep -q .
 
+# Kiro 配布物は plugin.json を持たないため、版数は VERSION ファイルと導入後の
+# エージェント description でしか確認できない。両者が一致することを検査する。
+VERSION_FILE="$REPO_ROOT/plugins/ndf-kiro/VERSION"
+test -s "$VERSION_FILE"
+ndf_version="$(tr -d '[:space:]' < "$VERSION_FILE")"
+if ! grep -q "v$ndf_version" "$AGENT_FILE"; then
+  echo "installed agent does not carry version v$ndf_version: $AGENT_FILE" >&2
+  exit 1
+fi
+echo "kiro version surfaced: v$ndf_version" >> "$LOG"
+
 # ndf-policies は steering として配置する。Skill としても置くと Kiro 組み込みルールの
 # Skill 読み込みと steering 読み込みで文脈へ二重注入される。
 if [ -e "$KIRO_DIR/skills/ndf-policies" ]; then

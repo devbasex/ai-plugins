@@ -664,9 +664,30 @@ sync_mcp_plugins() {
   done
 }
 
+# Kiro 配布物は plugin.json を持たないため版数を示す手段がない。
+# Claude 版の plugin.json を唯一の基準として VERSION ファイルへ書き出す。
+sync_kiro_version() {
+  local src="$ROOT_DIR/plugins/ndf-claude/.claude-plugin/plugin.json"
+  local dest="$ROOT_DIR/plugins/ndf-kiro/VERSION"
+  local version
+
+  [ -f "$src" ] || return 0
+  version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$src")"
+
+  if [ "$CHECK" = true ]; then
+    if [ ! -f "$dest" ] || [ "$(cat "$dest")" != "$version" ]; then
+      echo "Generated file is stale: plugins/ndf-kiro/VERSION" >&2
+      return 1
+    fi
+    return 0
+  fi
+  printf '%s\n' "$version" > "$dest"
+}
+
 sync_runtime_if_present claude "$SHARED_DIR/manifests/claude-skills.txt"
 sync_runtime_if_present codex "$SHARED_DIR/manifests/codex-skills.txt"
 sync_runtime_if_present kiro "$SHARED_DIR/manifests/kiro-skills.txt"
+sync_kiro_version
 sync_mcp_plugins
 
 if [ "$CHECK" = true ]; then

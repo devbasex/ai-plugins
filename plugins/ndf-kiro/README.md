@@ -2,6 +2,21 @@
 
 Kiro CLI 向けの NDF 配布物です。`plugins/ndf-shared` から生成された `skills/`、Kiro agent template、workflow prompt、通知用 script を同梱します。
 
+## バージョンの確認
+
+Kiro 配布物は `plugin.json` を持たないため、版数は次の 2 か所で確認する。
+
+```bash
+# 配布物の版数（build-runtime-plugins.sh が Claude 版 plugin.json から生成）
+cat plugins/ndf-kiro/VERSION
+
+# 導入済みプロジェクトの版数
+python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
+# => NDF統合開発エージェント（Kiro CLI用 / v5.0.0）
+```
+
+`install.sh` は実行時にも `NDF バージョン: <版数>` を表示する。
+
 ## インストール
 
 リポジトリ root で実行します。
