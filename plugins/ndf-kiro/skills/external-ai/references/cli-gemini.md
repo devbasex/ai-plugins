@@ -32,6 +32,10 @@ Gemini CLI は対話モードでは tool 実行ごとに承認を求める。非
 - **コード生成タスク**: `--yolo`（実ファイル編集が必要）
 - **`gh api -X POST` などシェル実行を伴うタスク**: `--yolo` 必須（`plan` / `auto_edit` ではブロックされる）
 
+指定した承認モードは trusted directory 判定で覆される。untrusted なパスで起動すると
+`--yolo` が `default` へ降格し、非対話では承認待ちのままハングする。headless 実行では
+`GEMINI_CLI_TRUST_WORKSPACE=true` と `--skip-trust` を必ず併用すること（「起動コマンド」節参照）。
+
 > ⚠️ **`--yolo` のセキュリティ注意**: 全 tool 自動承認は `rm -rf` / 任意のシェル実行 /
 > 任意のファイル編集を**無確認で許可**する。Docker コンテナ / devcontainer / VM / CI ランナー /
 > 隔離された worktree のいずれかの**外部隔離環境内でのみ**使用すること。ホスト直接実行や
@@ -42,15 +46,21 @@ Gemini CLI は対話モードでは tool 実行ごとに承認を求める。非
 
 プロンプトは `-p "$(cat ...)"` で渡すか、stdin へパイプする。
 
+> ⚠️ **非対話実行では `GEMINI_CLI_TRUST_WORKSPACE=true` と `--skip-trust` を必ず両方付ける**。
+> Gemini CLI は未登録のディレクトリ（worktree のような新規パスを含む）を untrusted と判定し、
+> `--yolo` を `default` へ降格させる。降格すると tool ごとの承認待ちになり、非対話では
+> そのままハングする。片方だけでは降格を防げないため、環境変数とフラグの両方が必要。
+
 ```bash
-gemini --approval-mode plan --output-format text \
+GEMINI_CLI_TRUST_WORKSPACE=true gemini --approval-mode plan --skip-trust --output-format text \
   -p "$(cat /tmp/gemini-prompt.md)" \
   > /tmp/gemini-stdout.md \
   2> /tmp/gemini-err.log &
 PID=$!
 
 # stdin パイプでも可
-cat /tmp/gemini-prompt.md | gemini --yolo --output-format text -p "" \
+GEMINI_CLI_TRUST_WORKSPACE=true gemini --yolo --skip-trust --output-format text -p "" \
+  < /tmp/gemini-prompt.md \
   > /tmp/gemini-stdout.md 2> /tmp/gemini-err.log &
 ```
 
@@ -60,7 +70,10 @@ cat /tmp/gemini-prompt.md | gemini --yolo --output-format text -p "" \
 | `--output-format json` | `{session_id, response, stats}` の JSON 1 オブジェクトを出す |
 | `--include-directories <dir>` | ワークスペース外のディレクトリを参照対象へ追加する |
 | `--skip-trust` | trusted directory 判定を飛ばす。`--yolo` が無効化されるのを防ぐ |
+| `GEMINI_CLI_TRUST_WORKSPACE=true`（環境変数） | 実行ディレクトリを trusted 扱いにする。`--skip-trust` と併用必須 |
 | `-m <model>` | モデルを明示指定する（既定モデルは時期により変動する） |
+
+`/ndf:cross-review` の `scripts/launch-gemini.sh` も同じ組み合わせで起動している。
 
 ## 出力ストリーム
 
@@ -71,10 +84,12 @@ cat /tmp/gemini-prompt.md | gemini --yolo --output-format text -p "" \
 
 ```bash
 # 成果物だけ取りたい
-gemini --yolo --output-format text -p "$(cat prompt.md)" > out.md
+GEMINI_CLI_TRUST_WORKSPACE=true gemini --yolo --skip-trust --output-format text \
+  -p "$(cat prompt.md)" > out.md
 
 # 統計（トークン数・tool 呼び出し履歴）込みで取りたい
-gemini --yolo --output-format json -p "$(cat prompt.md)" > out.json
+GEMINI_CLI_TRUST_WORKSPACE=true gemini --yolo --skip-trust --output-format json \
+  -p "$(cat prompt.md)" > out.json
 jq -r '.response' out.json > out.md
 jq   '.stats'    out.json > stats.json
 ```
@@ -134,7 +149,8 @@ Markdown で 400〜500 行、日本語。
 EOF
 
 # === 2. バックグラウンド起動（レビュー用途なので読み取り専用 + text 出力） ===
-gemini --approval-mode plan --output-format text \
+# trusted directory 判定で承認モードが降格しないよう、環境変数と --skip-trust を必ず併用する
+GEMINI_CLI_TRUST_WORKSPACE=true gemini --approval-mode plan --skip-trust --output-format text \
   -p "$(cat /tmp/review-prompt.md)" \
   > /tmp/gemini-stdout.md \
   2> /tmp/gemini-err.log &
@@ -166,8 +182,10 @@ fi
 ### Q1. 非対話モードなのにプロセスがハングする
 
 **原因**: 承認が必要な tool 呼び出しで止まっている（`default` / `auto_edit` のまま）。
+指定したはずの `--yolo` が trusted directory 判定で `default` へ降格しているケースも同じ症状になる。
 
-**対処**: `--yolo` または `--approval-mode plan` を付ける。レビュー / 調査なら `plan` が安全。
+**対処**: `--yolo` または `--approval-mode plan` を付けたうえで、
+`GEMINI_CLI_TRUST_WORKSPACE=true` と `--skip-trust` を併用する。レビュー / 調査なら `plan` が安全。
 
 ### Q2. stdout に思考のような余計な出力が混ざる
 
@@ -179,13 +197,15 @@ fi
 ### Q3. ワークスペース外のファイルを読めない / 止まる
 
 **対処**: `--include-directories /path/to/extra` で対象ディレクトリを追加し、プロンプトには絶対パスを書く。
-それでも止まる場合は `--yolo` または `--skip-trust` を併用する。
+それでも止まる場合は `GEMINI_CLI_TRUST_WORKSPACE=true` + `--skip-trust` を併用する。
 
 ### Q4. `--yolo` を付けたのに承認待ちになる
 
-**原因**: trusted directory 判定によって YOLO が無効化されている。
+**原因**: trusted directory 判定によって YOLO が無効化され、承認モードが `default` へ降格している。
+worktree のような新規パスは既定で untrusted 扱いになる。
 
-**対処**: `--skip-trust` を併用する（`GEMINI_CLI_TRUST_WORKSPACE=true` の設定と組み合わせる）。
+**対処**: `GEMINI_CLI_TRUST_WORKSPACE=true` と `--skip-trust` を **両方** 付けて起動する。
+片方だけでは降格を防げない。
 
 ### Q5. `Error in: mcpServers.<name>` の警告が毎回出る
 

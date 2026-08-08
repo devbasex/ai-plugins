@@ -49,8 +49,8 @@ when_to_use: "外部 AI へコード生成 / レビュー / 調査を委譲し�
 | 観点 | Codex | Gemini |
 |---|---|---|
 | stdout の信頼性 | 最終 message が落ちることがある（ファイル書き出し必須） | stdout に response が直接出る |
-| サンドボックス | WSL2 / 一部コンテナで `--dangerously-bypass-approvals-and-sandbox` が必須 | bwrap 非依存。追加フラグ不要 |
-| 非対話実行 | `codex exec` で完結 | `--yolo` か `--approval-mode plan` が必須 |
+| サンドボックス | WSL2 / 一部コンテナで `--dangerously-bypass-approvals-and-sandbox` が必須 | bwrap 非依存。ただし trusted directory 判定があり `GEMINI_CLI_TRUST_WORKSPACE=true` + `--skip-trust` が必須 |
+| 非対話実行 | `codex exec` で完結 | `--yolo` か `--approval-mode plan` に加えて trust 解除が必須 |
 | 完了判定 | stderr の `^tokens used$` sentinel | プロセス終了（`kill -0` / `wait`） |
 | 出力フォーマット | Markdown 本文のみ | `text` / `json`（json は統計付き） |
 | 典型実行時間 | 5〜10 分 | 数十秒〜5 分 |
