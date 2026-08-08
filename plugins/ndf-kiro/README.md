@@ -153,7 +153,7 @@ kiro-cli **2.16.1** / 検証日 **2026-08-07**（ランタイム規約の調査�
 | `kiro-cli agent set-default` の保存先 | `~/.local/share/kiro-cli/data.sqlite3`（マシン全体の設定） | 実行した cwd に `.kiro/settings.json` は生成されず、`find ~/.kiro ~/.aws` にも差分が出なかった |
 | 既定エージェントが cwd 依存で復旧できるか | 導入先から実行すれば復旧できる | 対象プロジェクト限定の workspace エージェントを既定にした状態では、別 cwd からの `set-default` が `No agent with name … found` になりつつ終了コード 0 を返し、既定が戻らなかった |
 
-コンテキスト占有率を `kiro-cli chat --agent <名前> --no-interactive '/context show'` で実測しました。測定用プロジェクトには本リポジトリの `AGENTS.md` と `README.md` を置き、`install.sh --project <測定用ディレクトリ>` で配布物（Skill 23 個）を導入しています。`一致ファイル数` と `合計文字数` は `/context show` が列挙したファイルを数え上げた値、`占有率` は `Context files total` の表示値です。
+コンテキスト占有率を `kiro-cli chat --agent <名前> --no-interactive '/context show'` で実測しました。測定用プロジェクトには本リポジトリの `AGENTS.md` と `README.md` を置き、`install.sh --project <測定用ディレクトリ>` で配布物を導入しています（Kiro manifest の 21 個のうち、`ndf-policies` は `.kiro/steering/` へ回すため `.kiro/skills/` に並ぶのは 20 個）。`一致ファイル数` と `合計文字数` は `/context show` が列挙したファイルを数え上げた値、`占有率` は `Context files total` の表示値です。
 
 | 構成 | 一致ファイル数 | `ndf-policies` の注入回数 | 占有率 | 文脈ファイルの合計文字数 |
 | --- | --- | --- | --- | --- |
