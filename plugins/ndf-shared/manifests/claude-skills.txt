@@ -19,7 +19,7 @@ deploy
 review-branch
 review-pr-comments
 resolve-pr-comments
-browser-test
+playwright-authoring
 codex
 gemini
 statusline
