@@ -141,17 +141,26 @@ def extract_triggers(
     Almost every skill lists its triggers in `when_to_use`, not `description`,
     and the label is written either as "Triggers:" or in Japanese
     ("明示トリガ:"). Both fields and both labels are accepted.
+
+    Each field is searched independently: `_TRIGGER_LABEL_RE` uses DOTALL, so
+    matching against the two fields joined together would let a label found in
+    `description` swallow the whole of `when_to_use` and pick up unrelated
+    quoted strings from it.
     """
-    text = "\n".join(t for t in (description, when_to_use) if t)
     triggers: list[str] = []
-    m = _TRIGGER_LABEL_RE.search(text)
-    if m:
+    for field in (description, when_to_use):
+        if not field:
+            continue
+        m = _TRIGGER_LABEL_RE.search(field)
+        if not m:
+            continue
         for q in _QUOTED_RE.findall(m.group(1)):
             triggers.append(q.strip())
     if triggers:
         return _dedupe_ci(triggers), "explicit"
     if not include_fallback:
         return [], "none"
+    text = "\n".join(t for t in (description, when_to_use) if t)
     flat = text.replace('"', " ").replace("'", " ")
     seen: set[str] = set()
     for w in _JA_WORD_RE.findall(flat):
@@ -336,13 +345,24 @@ def build_timeline(
 def aggregate_by_project(
     transcripts: list[pathlib.Path],
     skills: list[dict],
+    all_skill_names: set[str] | None = None,
     lookahead_cap: int = 100,
 ) -> dict[str, tuple[Counter, Counter, Counter, Counter]]:
-    """Return { project: (auto, explicit, triggers_hits, hits) }."""
+    """Return { project: (auto, explicit, triggers_hits, hits) }.
+
+    `skills` may already be narrowed by `--skill`; it only decides which rows
+    are counted. Slash-command detection must stay based on the *unfiltered*
+    skill set (`all_skill_names`), because every slash command closes the
+    hit-lookahead window. Deriving the boundary set from a filtered `skills`
+    would hide other skills' slash commands and over-count hits.
+    """
     result: dict[str, tuple[Counter, Counter, Counter, Counter]] = defaultdict(
         lambda: (Counter(), Counter(), Counter(), Counter())
     )
-    skill_names = {s["name"] for s in skills}
+    skill_names = (
+        all_skill_names if all_skill_names is not None
+        else {s["name"] for s in skills}
+    )
     skill_triggers = [
         (s["qualified"], [t.lower() for t in s["triggers"] if t])
         for s in skills
@@ -502,6 +522,9 @@ def main() -> int:
     effective_days = args.days if (date_from is None and date_to is None) else None
 
     skills = load_skills(plugin_root, include_fallback=args.include_fallback)
+    # Slash boundaries must be detected across every skill, not just the ones
+    # left after --skill narrowing.
+    all_skill_names = {s["name"] for s in skills}
     if args.skill:
         skills = [s for s in skills if args.skill in s["name"]]
 
@@ -521,7 +544,7 @@ def main() -> int:
         file=sys.stderr,
     )
 
-    per_project = aggregate_by_project(transcripts, skills)
+    per_project = aggregate_by_project(transcripts, skills, all_skill_names)
     if args.project:
         needle = args.project.lower()
         per_project = {
