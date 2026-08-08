@@ -518,7 +518,7 @@ bash plugins/ndf-kiro/install.sh
 kiro-cli chat --agent ndf
 ```
 
-`.kiro/skills/` に**21個**、
+`.kiro/skills/` に**20個**、
 `.kiro/agents/ndf.json` と
 `.kiro/steering/ndf-policies.md` を生成。
 
