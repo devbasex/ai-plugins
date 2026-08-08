@@ -77,7 +77,7 @@ python3 plugins/ndf-shared/skills/skill-stats/scripts/skill-stats.py \
 | `ml-model-structure` | — | 152 | 55 | wtu / tools | 2 | 0 | 2 | 94 | 維持 | 起動 2 回。`paths` で `analysis/**` に限定する |
 | `ndf-policies` | CXK | 10 | 32 | 常時注入 | 0 | 0 | 0 | — | 維持 | `user-invocable: false` で説明のみを常時注入する設計。自然文からの発動を前提としないため判定対象外 |
 | `official-skills-autoloader` | — | 121 | 51 | wtu / tools | 0 | 0 | 0 | 97 | 発動改善 | 機会 97 に対し起動 0。各ランタイムの公式 Skill 提供状況を確認したうえで発動条件を見直す |
-| `plan-to-spec` | CXK | 182 | 401 | tools | 0 | 0 | 0 | 2 | 発動改善 | 機会 2 と少なく運用に組み込まれていない。`description` が 401 文字と最長で、要点を残して `when_to_use` へ移す |
+| `plan-to-spec` | CXK | 182 | 401 | tools | 0 | 0 | 0 | 2 | 発動改善 | 機会 2 と少なく運用に組み込まれていない。`description` が 401 文字と最長だが、配布が `CXK` で `when_to_use` は Codex/Kiro に効かないため、トリガ語は `description` に残したまま重複した言い換えを削って要約する |
 | `playwright-browser-connect` | — | 484 | 49 | wtu / tools | 5 | 5 | 0 | 48 | 統合元 | ブラウザ自動テストのスクリプト作成と実行工程へ集約 |
 | `playwright-evidence-drive` | — | 190 | 43 | wtu / tools | 0 | 0 | 0 | 3 | 統合元 | ブラウザ自動テストの証跡とレポート工程へ集約 |
 | `playwright-execution` | X | 101 | 51 | wtu / tools | 3 | 3 | 0 | 94 | 統合元 | ブラウザ自動テストのスクリプト作成と実行工程へ集約 |
