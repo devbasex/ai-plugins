@@ -1,4 +1,4 @@
-"""playwright-scenario-test の pytest plugin。
+"""playwright_kit の pytest plugin (E2E シナリオテスト)。
 
 CLI options:
 - ``--pwk-config <path>``: scenario.config.yaml を指定
@@ -42,7 +42,7 @@ pytest_plugins = [
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
-    group = parser.getgroup("pwk", "playwright-scenario-test (playwright_kit)")
+    group = parser.getgroup("pwk", "playwright E2E scenario test (playwright_kit)")
     group.addoption(
         "--pwk-config",
         action="store",

@@ -1,6 +1,6 @@
 ---
 name: deploy
-description: "Create deploy PRs from feature to environment branches."
+description: "Create a deploy PR from the current feature branch to an environment branch such as qa/staging or release/v2. 破壊的操作のため、利用者が /ndf:deploy を明示的に指示したときのみ実行する（環境ブランチへデプロイ / qaに上げる / stagingに反映 / リリースブランチへPR）。deployブランチを作成し origin/main を取り込んでからPRを出す。"
 argument-hint: "<env-branch> (例: qa/staging, release/v2)"
 disable-model-invocation: true
 allowed-tools:

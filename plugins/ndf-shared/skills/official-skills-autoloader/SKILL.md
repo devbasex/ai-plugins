@@ -1,7 +1,6 @@
 ---
 name: official-skills-autoloader
-description: "Install and use official document Skills on demand."
-when_to_use: "Use when user requests Word/Excel/PowerPoint/PDF creation/editing, frontend design, webapp testing, or other tasks handled by Anthropic's official skills collection. Triggers: 'Word作成', 'Excel出力', 'スライド生成', 'PDF作成', '.docx', '.pptx', '.xlsx', '.pdf', 'create docx', 'generate excel', 'make slides', 'create pdf'."
+description: "Install an Anthropic official Skill on demand and run it. Use when the request needs Word/Excel/PowerPoint/PDF creation or editing, frontend design, webapp testing, or MCP server scaffolding（Word作成 / Excel出力 / スライド生成 / PDF作成 / .docx / .pptx / .xlsx / .pdf / MCPサーバーを作りたい）. Claude Code 専用。"
 allowed-tools:
   - Bash
   - Read
@@ -24,6 +23,13 @@ allowed-tools:
 | HTML/Reactアプリ生成 / Artifacts | `web-artifacts-builder` |
 | 新規Skill作成 | `skill-creator` |
 | Claude API / SDK開発 | `claude-api` |
+| MCPサーバー作成 | `mcp-builder` |
+
+## 対応ランタイム
+
+**Claude Code 専用**。インストール先の `~/.claude/skills/` を読むのは Claude Code だけで、Codex は `.agents/skills/`、Kiro CLI は `.kiro/skills/` を読む。両ランタイムでは公式 Skill の自動読込は行われないため、配布するとしても Claude Code の manifest に限る。
+
+なお現在この Skill はどの manifest にも載っておらず、配布物へ含まれていない。`description` を直しても配布されるまで発動はしない。
 
 ## 動作手順
 
