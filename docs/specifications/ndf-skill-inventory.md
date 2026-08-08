@@ -173,7 +173,8 @@ frontmatter を [規約](../../plugins/ndf-shared/skills/README.md) へ揃えた
 
 | Skill | 変更 | 理由 |
 | --- | --- | --- |
-| `merged` / `pr` / `review` / `pr-tests` | `disable-model-invocation` を削除 | 日常的に自然文で依頼されるため。明示指示専用のままではエージェントが Skill を使わず独自手順で実行する |
+| `merged` / `pr` / `pr-tests` | `disable-model-invocation` を削除 | 日常的に自然文で依頼されるため。明示指示専用のままではエージェントが Skill を使わず独自手順で実行する。実測で 3 個とも自然文から起動することを確認 |
+| `review` | `disable-model-invocation` を削除 | 同上。ただし Claude Code では組み込みの `code-review` が同じ用途を持つため自然文では選ばれない。`/ndf:review` の明示起動と `cross-review` からの内部呼び出しは動作する（[#83](https://github.com/devbasex/ai-plugins/issues/83) で追跡） |
 | `merged` / `pr` | 実行前確認を必須手順として本文へ固定 | 上記 2 つは取り消しの難しい操作（worktree / ブランチ削除、push と PR 作成）を含む。自動発動を許すかわりに、削除・書き込みの直前に対象を一覧提示して同意を得る手順を `SKILL.md` と `description` に固定した。`disable-model-invocation` を解釈しない Codex / Kiro でも同じ安全性が働く |
 | `deploy` / `cherry-pick-pr` / `statusline` | 明示指示専用を維持 | 環境ブランチへの書き込みと設定ファイルの書き換えを伴う。`description` に「利用者が明示的に指示したときのみ実行する」と明記し、Codex / Kiro でも意図が伝わるようにした |
 | `ndf-policies` | `user-invocable: false` を維持 | `description` に「知識として参照するだけで、手順として実行しない」と明記した |
