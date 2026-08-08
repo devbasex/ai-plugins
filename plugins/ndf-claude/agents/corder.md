@@ -46,21 +46,42 @@ description: |
 
 ```bash
 # 1. プロンプトを一時ファイルに書く (ファイル書き込みツール)
+#    最終結果は必ず $FINAL へ apply_patch で書き出すよう本文で指示する
+FINAL=/tmp/codex-output-<タスク名>.md
 cat > /tmp/codex-prompt.md <<EOF
 ...
+## 出力先（必須）
+最終結果を **必ず** \`${FINAL}\` に \`apply_patch\` で新規作成してください。
+**stdout への出力だけでは不十分です**。書き出し後、stdout にも同じ内容を出力してください。
 EOF
 
 # 2. バックグラウンド実行
-codex exec --dangerously-bypass-approvals-and-sandbox -C "$PWD" \
+codex exec --dangerously-bypass-approvals-and-sandbox \
+  --config reasoning.effort=medium \
+  -C "$PWD" \
   < /tmp/codex-prompt.md \
-  > /tmp/codex-output.md \
+  > /tmp/codex-stdout.md \
   2> /tmp/codex-err.log &
 
-# 3. PID を控えて終了確認
-ps -p <PID> 2>/dev/null && echo RUNNING || echo EXITED
+# 3. 完了検知は stderr の sentinel で行う（`ps -p` は zombie を生存と誤判定する）
+until grep -q '^tokens used$' /tmp/codex-err.log 2>/dev/null; do
+  sleep 30
+done
+
+# 4. 成果物を回収（ファイル → stdout → stderr の三段フォールバック）
+if [ -s "$FINAL" ]; then
+    cp "$FINAL" ./codex-result.md
+elif [ -s /tmp/codex-stdout.md ]; then
+    cp /tmp/codex-stdout.md ./codex-result.md
+    echo "WARN: stdout からフォールバック回収（ファイル書き出しなし）" >&2
+else
+    echo "ERROR: Codex の最終出力を回収できませんでした。stderr 末尾を確認:" >&2
+    tail -200 /tmp/codex-err.log
+fi
 ```
 
 - **必ず `/ndf:external-ai` skill と `references/cli-codex.md` を参照**してから実行すること（サンドボックス・プロンプト設計・出力回収のベストプラクティスが記載されている）
+- **`ps -p` による完了確認は使わない**。Codex は zombie (defunct) 化して `ps -p` が 0 を返し続けるため、待機ループが抜けなくなる。脱出条件は stderr 末尾の `^tokens used$` sentinel
 - 未インストールなら `npm install -g @openai/codex` → `codex login`
 
 ### Serena MCP
