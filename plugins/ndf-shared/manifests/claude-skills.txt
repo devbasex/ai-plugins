@@ -7,9 +7,7 @@ merged
 clean
 ndf-policies
 markdown-writing
-python-execution
 docker-container-access
-git-gh-operations
 branch-fix-strategy
 implementation-plan
 investigation-rules
@@ -18,10 +16,7 @@ logging-guidelines
 sync-main
 cherry-pick-pr
 deploy
-review-branch
-review-pr-comments
-resolve-pr-comments
-browser-test
+playwright-authoring
 codex
 gemini
 statusline

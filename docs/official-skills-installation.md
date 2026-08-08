@@ -105,9 +105,9 @@ cp -r ~/work/anthropic-skills/skills/docx .claude/skills/
 
 ## NDFプラグインとの関係
 
-### NDFが同梱している公式Skill（Apache-2.0のみ）
+### NDFが同梱している公式Skill
 
-- `mcp-builder` → `plugins/ndf-shared/skills/mcp-builder/`（LICENSE.txt同梱）
+現在はありません。以前同梱していた `mcp-builder`（Apache-2.0）は利用実績がないため削除しました。必要な場合は下記インストーラで各自の環境に配置してください。
 
 ### NDFが提供するインストーラ
 
