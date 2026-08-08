@@ -332,7 +332,7 @@ git checkout release/<PLAN-ID>
 /ndf:cherry-pick-pr qa/staging
 ```
 
-詳細は `/ndf:cherry-pick-pr` と `/ndf:branch-fix-strategy` を参照。`feature → main` 系 PR を汚染しないため、検証ブランチ向けは必ず短命ブランチ経由で扱う。
+詳細は `/ndf:cherry-pick-pr` を参照。`feature → main` 系 PR を汚染しないため、検証ブランチ向けは必ず短命ブランチ経由で扱う。
 
 ## アンチパターン
 
@@ -345,14 +345,13 @@ git checkout release/<PLAN-ID>
 | release PR で個別 PR 範囲の指摘を解決しようとする | 該当 PR が既に閉じている場合、コミット意図がずれる |
 | release PR の body を個別 PR リンクの列挙だけにする | レビュアーは release PR 単体で変更を把握できず、個別 PR や plan を辿ることになる。body は self-contained 必須 (Step 3 / Step 8) |
 | body 最終化せずに Ready for review にする | Draft 作成時の plan ベースの暫定 body のままだと実装の最終形と乖離する |
-| 検証ブランチを feature/release に merge する | `feature → main` PR への汚染 (詳細: `/ndf:branch-fix-strategy`) |
+| 検証ブランチを feature/release に merge する | `feature → main` PR への汚染 (詳細: `/ndf:cherry-pick-pr`) |
 
 ## 関連 skill
 
 - `/ndf:implementation-plan` — plan ファイルのフォーマット (本 skill が依存)
-- `/ndf:branch-fix-strategy` — ブランチ汚染を避ける原則
 - `/ndf:pr` — 通常の PR 作成 / 更新
-- `/ndf:cherry-pick-pr` — 検証ブランチへの cherry-pick PR
+- `/ndf:cherry-pick-pr` — 検証ブランチへの cherry-pick PR とブランチ汚染を避ける原則
 - `/ndf:review` / `/ndf:review-branch` / `/ndf:cross-review` — レビュー
 - `/ndf:fix` / `/ndf:resolve-pr-comments` — コメント対応
 - `/ndf:playwright-scenario-test` — release ブランチでの E2E 結合テスト

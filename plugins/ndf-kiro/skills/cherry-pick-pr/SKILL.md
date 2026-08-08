@@ -1,6 +1,6 @@
 ---
 name: cherry-pick-pr
-description: "Create cherry-pick PRs for environment branches."
+description: "Create cherry-pick PRs for environment branches and apply the same fix across multiple branches."
 argument-hint: "<base-branch> (例: qa/staging, release/v2)"
 disable-model-invocation: true
 allowed-tools:
@@ -11,7 +11,7 @@ allowed-tools:
 
 # cherry-pick PR 作成コマンド
 
-featureブランチから指定ベースブランチへ、短命ブランチ経由で cherry-pick PR を作成する。`feature → main` の PR にベースブランチ固有コードが混入するのを防ぐ。
+featureブランチから指定ベースブランチ（`qa/*`, `staging/*`, `release/*` 等の環境ブランチ）へ、短命ブランチ経由で cherry-pick PR を作成する。同じ修正を複数ブランチへ並行適用する場面全般で、この原則と手順に従う。
 
 ## 使用方法
 
@@ -24,7 +24,18 @@ featureブランチから指定ベースブランチへ、短命ブランチ経�
 
 featureブランチに環境ブランチ(`qa/staging`等)を merge して conflict を解消すると、`feature → main` の PR に環境ブランチ固有のコードが混入する（main汚染）。短命ブランチ + cherry-pick で、必要なコミットだけを対象ブランチに届ける。
 
-詳細な原則は `/ndf:branch-fix-strategy` スキル参照。
+| 観点 | 正しい順序 | 誤った順序 |
+|------|-----------|-----------|
+| 単一ソース | feature ブランチが唯一の正 | 二箇所で実装 |
+| 一貫性 | cherry-pick で完全一致 | 手書き差分でズレる |
+| 追跡性 | `-x` で元 commit が明記 | 関連 commit 不明確 |
+
+## 核心ルール
+
+1. **修正は feature ブランチに先に commit し、cherry-pick で環境ブランチへ届ける。** 短命ブランチに先に commit して feature へ手作業で再実装すると、二重作業と不整合の原因になる
+2. **環境ブランチを feature ブランチに merge しない。** conflict 解消目的でも禁止（main汚染の原因）
+3. **短命ブランチを push する前に `origin/main` を必ず取り込む。** CI で最新 main 必須の Workflow があるため（処理フロー 5）
+4. **マージ済みブランチには push しない。** 同名の短命ブランチに既存 PR がないか先に確認する（処理フロー 2）
 
 ## 処理フロー
 
@@ -110,11 +121,10 @@ git checkout <original-branch>
 
 - 短命ブランチは PR マージ後に削除してよい
 - `feature → main` の PR には影響しない
-- ベースブランチを feature ブランチに merge するのは **禁止**（main汚染の原因）
-- `-x` オプションで元commit参照を残す（追跡性）
+- revert の連鎖（revert → reapply → revert...）ではなく、**最終的なあるべき状態を直接コミット**する。履歴上の意図が明確になり、後の cherry-pick も簡単になる
 
 ## 関連
 
-- `/ndf:branch-fix-strategy` — なぜこの手順が必要かの原則
-- `/ndf:pr` — 通常のPR作成（base=main）
+- `/ndf:pr` — 通常のPR作成（base=main）。非 main ベースは本 Skill に誘導される
+- `/ndf:merged` — マージ後のブランチ整理と、現ブランチへの main 取り込み
 - `/ndf:deploy` — ブランチ全体を環境へデプロイ（cherry-pickとは別用途）
