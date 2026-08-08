@@ -1,3 +1,4 @@
 Codex CLIにコード生成・レビュー・調査を委譲してください。
 
-codexスキルの手順に従って実行してください。引数があればそのまま使用します。
+external-aiスキルの手順に従って実行してください。Codex CLI 固有の呼び出し方法は
+`skills/external-ai/references/cli-codex.md` を参照します。引数があればそのまま使用します。
