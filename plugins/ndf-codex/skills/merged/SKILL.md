@@ -1,8 +1,7 @@
 ---
 name: merged
-description: "Clean up after a PR is merged: update main, remove the worktree, and delete merged branches."
+description: "Clean up after a PR is merged: update main, remove the worktree, and delete the merged branch. Use when a PR has just been merged or leftover branches and worktrees need clearing. Triggers: 'マージ後の後片付け', 'ブランチを整理', 'worktreeを削除', 'merged cleanup'"
 argument-hint: "[PR番号]"
-disable-model-invocation: true
 allowed-tools:
   - Bash
   - Read

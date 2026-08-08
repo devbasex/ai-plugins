@@ -1,7 +1,6 @@
 ---
 name: google-auth
-description: "Set up OAuth for Google APIs."
-when_to_use: "Google API の OAuth2 認証が必要なときに自動参照。Triggers: 'Google認証', 'OAuth', 'google_token', 'spreadsheets', 'Google API', 'client_secret'"
+description: "Set up OAuth2 credentials for Google APIs (Drive, Docs, Sheets). Use when a script needs Google API access and the token is missing or expired. Triggers: 'Google認証', 'client_secret', 'google_token', 'OAuth2 認証'"
 allowed-tools:
   - Read
   - Bash(python *)

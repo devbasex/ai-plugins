@@ -1,7 +1,6 @@
 ---
 name: playwright-kit-ops
-description: "Operate playwright_kit setup, scans, and evidence tools."
-when_to_use: "playwright_kit のスクリプトを実行するとき / E2E テストプロジェクトの初期化 / page role 自動分類 / 単発 a11y・CWV スキャン / Google Drive エビデンスアップロードが必要なとき。Triggers: 'init_project', 'プロジェクト初期化', 'classify_page_role', 'run_a11y_scan', 'check_cwv', 'upload_evidence', 'record_scenario', 'playwright_kit 実行'"
+description: "Run the playwright_kit scripts: project init, page-role classification, one-off a11y / CWV scans, and Drive upload helpers. Use when a playwright_kit script has to be run directly. Triggers: 'init_project.sh', 'classify_page_role.py', 'run_a11y_scan.py', 'upload_evidence.py'"
 allowed-tools:
   - Read
   - Bash(python *)

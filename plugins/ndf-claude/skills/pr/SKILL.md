@@ -1,8 +1,7 @@
 ---
 name: pr
-description: "Commit, push, and create or update PRs."
+description: "Commit, push, and create or update a pull request for the current branch. Use when asked to commit and open a PR, update an existing PR, or push work for review. Triggers: 'PRを作って', 'PR作成', 'コミットしてプッシュ', 'PRを更新', 'draft PR'"
 argument-hint: "[--draft] [base-branch] or [commit-message]"
-disable-model-invocation: true
 allowed-tools:
   - Bash
   - Read

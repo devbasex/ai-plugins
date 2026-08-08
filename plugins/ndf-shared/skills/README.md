@@ -4,11 +4,17 @@
 編集元である。ここでは frontmatter の書き方を規約として定める。本文の書き方は各 `SKILL.md`
 に委ね、規約は発動と配布に関わる部分だけを扱う。
 
-frontmatter の機械検査は未実装である。現在の継続的インテグレーションは
-`scripts/build-runtime-plugins.sh --check` / `scripts/validate-runtime-plugins.sh` /
-`scripts/check-markdown-links.py` を実行しており、本規約はそれまで人手で確認する。検査スクリプト
-`scripts/check-skill-frontmatter.py` の追加は
-[棚卸の計画](../../../issues/ndf-development-skills/07-tasks.md) の Task 0-7 で行う。
+本規約のうち機械的に判定できる項目は `scripts/check-skill-frontmatter.py` が検査し、
+継続的インテグレーションで実行する（`scripts/build-runtime-plugins.sh --check` /
+`scripts/validate-runtime-plugins.sh` / `scripts/check-markdown-links.py` と同じワークフロー）。
+
+```bash
+python3 scripts/check-skill-frontmatter.py           # 検査
+python3 scripts/check-skill-frontmatter.py --report  # 実測値の一覧
+```
+
+判定が本質的に近似になる項目（`description` 先頭のトリガ語、`when_to_use` の追加トリガ）は
+警告にとどまり、`--strict` を付けたときだけ失敗する。
 
 利用実績と維持・統合・削除の判定は
 [docs/specifications/ndf-skill-inventory.md](../../../docs/specifications/ndf-skill-inventory.md)
@@ -121,6 +127,7 @@ when_to_use: "Claude Code 向けの追加トリガのみ。description で足り
 | `SKILL.md` 本文 | 5,000 トークン | 仕様の推奨 |
 | Claude Code の初期 Skill 一覧の合計 | コンテキストウィンドウの 1%。不明な場合は 8,000 文字。1 項目あたり 250 文字で切り詰め | Claude Code 公式ドキュメント |
 | Codex の初期 Skill 一覧の合計 | コンテキストウィンドウの 2%。不明な場合は 8,000 文字 | Codex 公式ドキュメント |
+| 全 Skill の frontmatter 合計 | 13,000 文字 | リポジトリ固有の運用値。Task 0-7 完了時点の実測 12,145 文字（Skill 29 個）に約 7% の余裕を足した値。`scripts/check-skill-frontmatter.py` の `FRONTMATTER_TOTAL_MAX` |
 
 運用目標の 300 文字は仕様上限より厳しい。全 Skill 分の `description` が常時注入されるため、
 仕様上限は 1 個で使い切ってよい量ではない。

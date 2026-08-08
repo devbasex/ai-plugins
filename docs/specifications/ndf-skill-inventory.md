@@ -163,6 +163,52 @@ merged, ndf-policies, pr, pr-tests, resolve-pr-comments, review, sync-main
 `deploy` へのトリガ語宣言と `qa-security-scan` のトリガ語見直しののち再測定することを、
 frontmatter 見直し後の確認項目とする。
 
+## frontmatter 見直しの結果
+
+[棚卸の計画](../../issues/ndf-development-skills/07-tasks.md) の Task 0-7 で全 29 Skill の
+frontmatter を [規約](../../plugins/ndf-shared/skills/README.md) へ揃えた。台帳の表は測定日
+時点の値であり、以下の変更は表へ反映していない。
+
+### 発動制御
+
+| Skill | 変更 | 理由 |
+| --- | --- | --- |
+| `merged` / `pr` / `review` / `pr-tests` | `disable-model-invocation` を削除 | 日常的に自然文で依頼されるため。明示指示専用のままではエージェントが Skill を使わず独自手順で実行する |
+| `deploy` / `cherry-pick-pr` / `statusline` | 明示指示専用を維持 | 環境ブランチへの書き込みと設定ファイルの書き換えを伴う。`description` に「利用者が明示的に指示したときのみ実行する」と明記し、Codex / Kiro でも意図が伝わるようにした |
+| `ndf-policies` | `user-invocable: false` を維持 | `description` に「知識として参照するだけで、手順として実行しない」と明記した |
+
+### 配布先
+
+| Skill | 台帳の配布 | 変更後 | 理由 |
+| --- | --- | --- | --- |
+| `qa-security-scan` | — | CXK | 発動改善の判定はどこにも配布されていない状態では効かない。ランタイム非依存の判断基準であり 3 種すべてへ配る |
+| `official-skills-autoloader` | — | C | 同上。ただし取得先が `~/.claude/skills/` のため Claude Code 限定 |
+
+### トリガ語
+
+- 広すぎるトリガを具体化した。`investigation-rules` の `調査` → `調査レポートを書く`、
+  `implementation-plan` の `PR作成` を削除して `pr` へ寄せる、`markdown-writing` の
+  `仕様書` → `仕様書を書く`、`problem-solving` の `バグ修正` → `バグの根本原因`
+- `playwright-evidence` と `playwright-kit-ops` で重複していた `upload_evidence` を解消した。
+  スクリプトを持つ `playwright-kit-ops` 側に `upload_evidence.py` として残し、
+  `playwright-evidence` は `エビデンスをDriveへ保管` に置き換えた
+- `deploy` と `cherry-pick-pr` はトリガ語を宣言していなかったため新たに宣言した。
+  次回の `/ndf:skill-stats` で両者の機会を測定できる
+
+### 実測値
+
+| 項目 | 見直し前 | 見直し後 | 上限 |
+| --- | ---: | ---: | ---: |
+| 検査エラー | 33 | 0 | 0 |
+| 検査警告 | 16 | 0 | — |
+| `description` 最大 | 401 | 288 | 300 |
+| Claude Code 初期一覧 | 3,133 | 6,029 | 8,000 |
+| Codex 初期一覧 | 3,933 | 6,466 | 8,000 |
+| frontmatter 合計 | 12,724 | 12,145 | 13,000 |
+
+初期一覧の合計が増えているのは、`when_to_use` に置いていたトリガ語を `description` へ移し、
+Codex と Kiro でも発動判定に効くようにしたためである。
+
 ## 参照
 
 - 棚卸の計画: [issues/ndf-development-skills/02-skill-inventory.md](../../issues/ndf-development-skills/02-skill-inventory.md)

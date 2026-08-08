@@ -1,7 +1,6 @@
 ---
 name: cross-review
-description: "Run iterative Codex and Gemini PR reviews."
-when_to_use: "PR を codex + gemini 両方でレビューし、両者 APPROVE まで自動収束させたいときに限定して使う。明示トリガ: 'cross-review', 'クロスレビュー', '両AIレビュー', '収束レビュー', 'codex と gemini でレビュー'。通常の単発 PR レビュー依頼 (第二意見が 1 回欲しい等) は本 skill を選ばず /ndf:review を使う。重い収束ループ (codex+gemini を複数ラウンド起動) のため、単発レビューと責務を明確に分ける。"
+description: "Review a PR with both Codex and Gemini, looping fixes until both APPROVE. Use when a converging two-AI review is wanted; for a one-shot second opinion use /ndf:review. Triggers: 'cross-review', 'クロスレビュー', '両AIレビュー', '収束レビュー', 'codex と gemini でレビュー'"
 argument-hint: "[PR番号] [--max-rounds N] [--rotate-after K] [--rotate-mode light|squash] [--only codex|gemini] [--focus TEXT] [--extra-instructions-file PATH]"
 allowed-tools:
   - Bash

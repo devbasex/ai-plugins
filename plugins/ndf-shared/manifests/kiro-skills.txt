@@ -18,3 +18,4 @@ external-ai
 statusline
 issue-plan-strategy
 plan-to-spec
+qa-security-scan

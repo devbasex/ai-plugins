@@ -1,7 +1,7 @@
 ---
 name: statusline
-description: "Switch, restore, or inspect the NDF statusline."
-when_to_use: "statuslineを切り替え/復元/確認したいとき。Triggers: 'statusline', 'ステータスライン', 'statusline 切り替え', 'statusline 戻す'"
+description: "Switch, restore, or inspect the NDF statusline in the Claude Code settings file. 設定ファイルを書き換えるため、利用者が /ndf:statusline を明示的に指示したときのみ実行する。Triggers: 'statusline 切り替え', 'statusline 戻す', 'ステータスライン'"
+argument-hint: "status | set | restore"
 disable-model-invocation: true
 allowed-tools:
   - Bash

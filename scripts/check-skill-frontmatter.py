@@ -39,7 +39,10 @@ SKILL_MD_MAX_LINES = 500      # 仕様の推奨 / コンパクション対策
 CODEX_LISTING_MAX = 8000      # Codex の初期一覧予算（コンテキスト長不明時）
 CLAUDE_LISTING_MAX = 8000     # Claude Code の初期一覧予算（コンテキスト長不明時）
 CLAUDE_ITEM_TRUNCATE = 250    # Claude Code は 1 項目をこの長さで切り詰める
-FRONTMATTER_TOTAL_MAX = 12000 # 全 Skill の frontmatter 合計。棚卸完了時の実測を基準に設定
+# 全 Skill の frontmatter 合計。棚卸（Task 0-7）完了時点の実測 12,145 文字（Skill 29 個、
+# 2026-08-08）を基準に、約 7% の余裕を足して 13,000 とした。余裕分は Skill 2〜3 個分の
+# frontmatter に相当する。Skill を増やすときは実測しなおしてこの値を更新する。
+FRONTMATTER_TOTAL_MAX = 13000
 
 # --- 許可する frontmatter の項目 -------------------------------------------
 # Agent Skills 仕様の 6 項目 + Claude Code 独自項目。
@@ -251,7 +254,9 @@ def check_skill(s: dict) -> list[Finding]:
         add("error", "ops/uninvocable",
             "disable-model-invocation: true と user-invocable: false の同時指定は誰も起動できない")
     if dmi and not fm.get("argument-hint"):
-        add("warn", "ops/argument-hint",
+        # 近似判定ではなく機械的に判定できるため、計画（Task 0-7 の検査項目表）どおり
+        # 失敗条件として扱う。
+        add("error", "ops/argument-hint",
             "disable-model-invocation があるのに argument-hint がない（明示起動時の引数が伝わらない）")
 
     ctx = unquote(fm.get("context", ""))
@@ -267,13 +272,24 @@ def check_skill(s: dict) -> list[Finding]:
 
 
 def load_manifests(skills_dir: pathlib.Path) -> dict[str, set[str]]:
-    """manifests/<runtime>-skills.txt を読み、配布先ごとの Skill 名集合を返す。"""
+    """manifests/(runtime)-skills.txt を読み、配布先ごとの Skill 名集合を返す。
+
+    行末の `#` 以降はコメントとして落とす。scripts/build-runtime-plugins.sh の
+    manifest 解釈と揃えるため（揃っていないと、コメント付きの manifest で
+    配布先の判定が実際のビルド結果とずれる）。
+    """
     man_dir = skills_dir.parent / "manifests"
     out: dict[str, set[str]] = {}
     for runtime in ("claude", "codex", "kiro"):
         f = man_dir / f"{runtime}-skills.txt"
-        if f.exists():
-            out[runtime] = {line.strip() for line in f.read_text().split() if line.strip()}
+        if not f.exists():
+            continue
+        members: set[str] = set()
+        for line in f.read_text(encoding="utf-8").splitlines():
+            name = line.split("#", 1)[0].strip()
+            if name:
+                members.add(name)
+        out[runtime] = members
     return out
 
 
