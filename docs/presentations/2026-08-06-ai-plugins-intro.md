@@ -93,7 +93,7 @@ MCPプラグインが10個。今日は時間の都合で名前だけにします
 
 | | |
 |---|---|
-| **スキル 29個** | `/ndf:pr`, `/ndf:review` … スラッシュで直接呼べる |
+| **スキル 22個** | `/ndf:pr`, `/ndf:review` … スラッシュで直接呼べる |
 | **エージェント 8個** | director / corder / qa / debugger / devops-engineer など |
 | **フック 2種** | SessionStart（transcript保持を90日に維持）/ Stop（AI要約+Slack通知） |
 
@@ -498,11 +498,11 @@ codex plugin add ndf@ai-plugins
 ```
 
 セッション内では `ndf:` 接頭辞で
-**30個**のスキルが使えます。
+**23個**のスキルが使えます。
 
 <div class="small">
 
-Claude版との差: エージェント8個とSessionStart/Stopフックは無し。代わりに Playwright 系スキル5個が入ります。
+Claude版との差: エージェント8個とSessionStart/Stopフックは無し。代わりに Playwright 系スキル4個が入ります。
 
 </div>
 
@@ -534,7 +534,7 @@ kiro-cli chat --agent ndf
 <!--
 【12:50-13:40】
 CodexとKiroです。ここは「同じものが使える」ということだけ持って帰ってください。
-Codexはマーケットプレイス方式で、Claudeとほぼ同じ2コマンド。セッションに入るとndfコロン付きでスキルが並びます。実際に叩いて30個読み込まれているのを確認済みです。
+Codexはマーケットプレイス方式で、Claudeとほぼ同じ2コマンド。セッションに入るとndfコロン付きでスキルが並びます。実際に叩いて23個読み込まれているのを確認済みです。
 Kiroだけ方式が違って、リポジトリをcloneしてinstall.shを叩きます。.kiro/skills/ 以下にスキルが並んで、エージェント定義も一緒に作られます。何度実行しても壊れないので、更新したら叩き直せばいいです。
 -->
 

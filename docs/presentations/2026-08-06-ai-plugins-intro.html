@@ -228,7 +228,7 @@ footer { color: #8899aa; font-size: 16px; }
 </thead>
 <tbody>
 <tr>
-<td><strong>スキル 29個</strong></td>
+<td><strong>スキル 22個</strong></td>
 <td><code>/ndf:pr</code>, <code>/ndf:review</code> … スラッシュで直接呼べる</td>
 </tr>
 <tr>
@@ -1309,9 +1309,9 @@ footer { color: #8899aa; font-size: 16px; }
 codex plugin add ndf@ai-plugins
 </code></pre>
 <p>セッション内では <code>ndf:</code> 接頭辞で<br />
-<strong>30個</strong>のスキルが使えます。</p>
+<strong>23個</strong>のスキルが使えます。</p>
 <div class="small">
-<p>Claude版との差: エージェント8個とSessionStart/Stopフックは無し。代わりに Playwright 系スキル5個が入ります。</p>
+<p>Claude版との差: エージェント8個とSessionStart/Stopフックは無し。代わりに Playwright 系スキル4個が入ります。</p>
 </div>
 </div>
 <div>
@@ -1482,7 +1482,7 @@ PRの変更ファイルを全件取って中身で分類し、その種類に効
 下の一文が個人的に好きで、エビデンスなしで残課題の優先度を「低」にするのは誤判断の典型、と名指しされている。優先度を下げるのって実質「やらない」なので、そこにこそ根拠が要る。
 右のproblem-solving。データがおかしいときに、そのデータだけ直して終わりにするな、と。なぜ入ったかを遡って、入口にバリデーションを足してから直す。あとコードの修正とデータの修復を別コミットにしろと。混ぜるとRevertできなくなるので。</p></div><div class="bespoke-marp-note" data-index="13" tabindex="0"><p>【12:50-13:40】
 CodexとKiroです。ここは「同じものが使える」ということだけ持って帰ってください。
-Codexはマーケットプレイス方式で、Claudeとほぼ同じ2コマンド。セッションに入るとndfコロン付きでスキルが並びます。実際に叩いて30個読み込まれているのを確認済みです。
+Codexはマーケットプレイス方式で、Claudeとほぼ同じ2コマンド。セッションに入るとndfコロン付きでスキルが並びます。実際に叩いて23個読み込まれているのを確認済みです。
 Kiroだけ方式が違って、リポジトリをcloneしてinstall.shを叩きます。.kiro/skills/ 以下にスキルが並んで、エージェント定義も一緒に作られます。何度実行しても壊れないので、更新したら叩き直せばいいです。</p></div><div class="bespoke-marp-note" data-index="14" tabindex="0"><p>【13:40-14:30】
 まとめです。
 今日いろいろ見てきましたが、共通しているのは、どのスキルにも「何をやるか」の前に「何を重視するか」が書いてあることです。レビューなら観点の優先順位、文章なら誰に向けて書くか、調査なら何を根拠とするか。
