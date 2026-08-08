@@ -27,7 +27,7 @@ bash plugins/ndf-kiro/install.sh --with-slack
 bash plugins/ndf-kiro/install.sh --with-slack --with-codex
 ```
 
-インストーラーは `plugins/ndf-kiro/skills/` から `.kiro/skills/` への symlink と `.kiro/agents/default.json` を生成します。`plugins/ndf-kiro/skills/` は `plugins/ndf-shared/manifests/kiro-skills.txt` から build された生成物です。
+インストーラーは `plugins/ndf-kiro/skills/` から `.kiro/skills/` への symlink、`.kiro/steering/ndf-policies.md`、`.kiro/agents/ndf.json` を生成します。`plugins/ndf-kiro/skills/` は `plugins/ndf-shared/manifests/kiro-skills.txt` から build された生成物です。
 
 ### Slack通知の設定（オプション）
 
@@ -66,7 +66,7 @@ ls -la plugins/ndf-kiro/
 code search_symbols "ndf"
 
 # 特定のファイル内のシンボル一覧
-code get_document_symbols plugins/ndf-kiro/agents/default.json.template
+code get_document_symbols plugins/ndf-kiro/agents/ndf.json.template
 ```
 
 **パターン検索**:
@@ -82,7 +82,7 @@ grep "MCP" --include="*.md"
 
 ```
 # ファイル全体を読む
-fs_read plugins/ndf-kiro/agents/default.json.template
+fs_read plugins/ndf-kiro/agents/ndf.json.template
 
 # 特定の行範囲を読む
 fs_read plugins/ndf-kiro/README.md --start_line=1 --end_line=50

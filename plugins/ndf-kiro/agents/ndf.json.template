@@ -1,14 +1,12 @@
 {
-  "name": "default",
+  "name": "ndf",
   "description": "NDF統合開発エージェント（Kiro CLI用）",
   "tools": [
     "*"
   ],
   "resources": [
     "file://AGENTS.md",
-    "file://README.md",
-    "file://.kiro/skills/ndf-policies/SKILL.md",
-    "skill://.kiro/skills/**/SKILL.md"
+    "file://README.md"
   ],
   "hooks": {
     "agentSpawn": [

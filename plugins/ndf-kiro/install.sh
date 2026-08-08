@@ -1,20 +1,24 @@
 #!/usr/bin/env bash
 # NDF Plugin Installer for Kiro CLI
-# Usage: bash plugins/ndf-kiro/install.sh [--project PATH] [--with-slack] [--with-codex] [--dry-run]
+# Usage: bash plugins/ndf-kiro/install.sh [--project PATH] [--scope workspace|global]
+#                                        [--set-default] [--yes]
+#                                        [--with-slack] [--with-codex] [--dry-run]
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_ROOT="$(pwd)"
 PLUGIN_DIR="$SCRIPT_DIR"
-KIRO_DIR="$PROJECT_ROOT/.kiro"
-SKILLS_DIR="$KIRO_DIR/skills"
-PROMPTS_DIR="$KIRO_DIR/prompts"
-AGENT_FILE="$KIRO_DIR/agents/default.json"
-TEMPLATE_FILE="$PLUGIN_DIR/agents/default.json.template"
+AGENT_NAME="ndf"
+TEMPLATE_FILE="$PLUGIN_DIR/agents/$AGENT_NAME.json.template"
 PLUGIN_SKILLS_DIR="$PLUGIN_DIR/skills"
 PLUGIN_PROMPTS_DIR="$PLUGIN_DIR/prompts"
+POLICY_SKILL_FILE="$PLUGIN_SKILLS_DIR/ndf-policies/SKILL.md"
 
 # Parse options
+PROJECT_ROOT="$(pwd)"
+PROJECT_GIVEN=false
+SCOPE="workspace"
+SET_DEFAULT=false
+ASSUME_YES=false
 WITH_SLACK=false
 WITH_CODEX=false
 DRY_RUN=false
@@ -23,12 +27,16 @@ while [ "$#" -gt 0 ]; do
     --project)
       [ "$#" -ge 2 ] || { echo "ERROR: --project requires a path" >&2; exit 2; }
       PROJECT_ROOT="$(cd "$2" && pwd)"
-      KIRO_DIR="$PROJECT_ROOT/.kiro"
-      SKILLS_DIR="$KIRO_DIR/skills"
-      PROMPTS_DIR="$KIRO_DIR/prompts"
-      AGENT_FILE="$KIRO_DIR/agents/default.json"
+      PROJECT_GIVEN=true
       shift
       ;;
+    --scope)
+      [ "$#" -ge 2 ] || { echo "ERROR: --scope requires workspace or global" >&2; exit 2; }
+      SCOPE="$2"
+      shift
+      ;;
+    --set-default) SET_DEFAULT=true ;;
+    --yes|-y) ASSUME_YES=true ;;
     --with-slack) WITH_SLACK=true ;;
     --with-codex) WITH_CODEX=true ;;
     --dry-run) DRY_RUN=true ;;
@@ -36,11 +44,14 @@ while [ "$#" -gt 0 ]; do
       echo "Usage: bash plugins/ndf-kiro/install.sh [OPTIONS]"
       echo ""
       echo "Options:"
-      echo "  --project PATH  install into PATH instead of current directory"
-      echo "  --with-slack   stopフックにSlack通知を追加"
-      echo "  --with-codex   Codex CLI直接実行用プロンプトを追加"
-      echo "  --dry-run      書き込みを行わず実行内容を表示"
-      echo "  -h, --help     このヘルプを表示"
+      echo "  --project PATH   install into PATH instead of current directory (--scope workspace のみ)"
+      echo "  --scope SCOPE    workspace（既定, プロジェクトの .kiro/）または global（~/.kiro/）"
+      echo "  --set-default    kiro-cli の既定エージェントを ndf に切り替える（オプトイン）"
+      echo "  -y, --yes        --set-default の確認プロンプトを省略する"
+      echo "  --with-slack     stopフックにSlack通知を追加"
+      echo "  --with-codex     Codex CLI直接実行用プロンプトを追加"
+      echo "  --dry-run        書き込みを行わず実行内容を表示"
+      echo "  -h, --help       このヘルプを表示"
       exit 0
       ;;
     *)
@@ -51,7 +62,31 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
+case "$SCOPE" in
+  workspace)
+    KIRO_DIR="$PROJECT_ROOT/.kiro"
+    ;;
+  global)
+    [ -n "${HOME:-}" ] || { echo "ERROR: --scope global には HOME が必要です" >&2; exit 2; }
+    KIRO_DIR="$HOME/.kiro"
+    if [ "$PROJECT_GIVEN" = true ]; then
+      echo "WARN: --scope global では --project は使用されません" >&2
+    fi
+    ;;
+  *)
+    echo "ERROR: invalid --scope: $SCOPE (workspace|global)" >&2
+    exit 2
+    ;;
+esac
+
+SKILLS_DIR="$KIRO_DIR/skills"
+PROMPTS_DIR="$KIRO_DIR/prompts"
+STEERING_FILE="$KIRO_DIR/steering/ndf-policies.md"
+AGENT_FILE="$KIRO_DIR/agents/$AGENT_NAME.json"
+LEGACY_AGENT_FILE="$KIRO_DIR/agents/default.json"
+
 echo "=== NDF Plugin Installer for Kiro CLI ==="
+echo "  スコープ: $SCOPE ($KIRO_DIR)"
 
 if [ ! -d "$PLUGIN_SKILLS_DIR" ]; then
   echo "ERROR: $PLUGIN_SKILLS_DIR が見つかりません。先に scripts/build-runtime-plugins.sh を実行してください。" >&2
@@ -61,8 +96,12 @@ if [ ! -f "$TEMPLATE_FILE" ]; then
   echo "ERROR: $TEMPLATE_FILE が見つかりません" >&2
   exit 1
 fi
+if [ ! -f "$POLICY_SKILL_FILE" ]; then
+  echo "ERROR: $POLICY_SKILL_FILE が見つかりません" >&2
+  exit 1
+fi
 
-# --- Step 1: Create symlinks in .kiro/skills/ ---
+# --- Step 1: Create symlinks in <scope>/skills/ ---
 echo "Skills シンボリックリンクを作成中..."
 SKILL_COUNT=0
 if [ "$DRY_RUN" = false ]; then
@@ -95,7 +134,7 @@ while IFS= read -r src_dir; do
   SKILL_COUNT=$((SKILL_COUNT + 1))
 done < <(find "$PLUGIN_SKILLS_DIR" -mindepth 1 -maxdepth 1 -type d | sort)
 
-# --- Step 2: Create prompts in .kiro/prompts/ for workflow skills ---
+# --- Step 2: Create prompts in <scope>/prompts/ for workflow skills ---
 echo "ワークフロープロンプトを作成中..."
 if [ "$DRY_RUN" = false ]; then
   mkdir -p "$PROMPTS_DIR"
@@ -125,11 +164,61 @@ if [ "$DRY_RUN" = true ]; then
   echo ""
   echo "DRY RUN: 書き込みは行いませんでした"
   echo "  エージェント設定: $AGENT_FILE"
+  echo "  常時指示: $STEERING_FILE"
   echo "  Skills数: $SKILL_COUNT"
   exit 0
 fi
 
-# --- Step 3: Generate agent config ---
+# --- Step 3: Generate steering (always-on instructions) ---
+# steering はエージェント選択に依存せず読み込まれるため、常時指示はここへ置く。
+mkdir -p "$(dirname "$STEERING_FILE")"
+python3 - "$POLICY_SKILL_FILE" "$STEERING_FILE" <<'PY'
+import sys
+from pathlib import Path
+
+source, dest = (Path(p) for p in sys.argv[1:3])
+text = source.read_text(encoding="utf-8")
+if text.startswith("---\n"):
+    end = text.find("\n---\n", 3)
+    if end != -1:
+        text = text[end + len("\n---\n"):]
+body = text.strip("\n")
+header = (
+    "<!-- plugins/ndf-kiro/install.sh が生成します。直接編集しないでください。 -->\n"
+    "<!-- 編集元: plugins/ndf-shared/skills/ndf-policies/SKILL.md -->\n"
+)
+dest.write_text(f"{header}\n{body}\n", encoding="utf-8")
+PY
+echo "常時指示を生成: $STEERING_FILE"
+
+# --- Step 4: Migrate legacy default agent ---
+if [ -f "$LEGACY_AGENT_FILE" ]; then
+  cp "$LEGACY_AGENT_FILE" "${LEGACY_AGENT_FILE}.bak"
+  echo ""
+  echo "WARN: 旧エージェント設定 $LEGACY_AGENT_FILE を検出しました。"
+  echo "      バックアップ: ${LEGACY_AGENT_FILE}.bak"
+  if python3 -c '
+import json, sys
+try:
+    config = json.load(open(sys.argv[1], encoding="utf-8"))
+except Exception:
+    sys.exit(1)
+sys.exit(0 if config.get("name") == "default" and "NDF" in (config.get("description") or "") else 1)
+' "$LEGACY_AGENT_FILE"; then
+    echo "      これは旧版 NDF installer の生成物です。移行手順:"
+    echo "        1. 独自に追記した設定があればバックアップから $AGENT_FILE へ写す"
+    echo "        2. rm $LEGACY_AGENT_FILE ${LEGACY_AGENT_FILE}.bak"
+  else
+    echo "      NDF 以外が管理している設定です。移行手順:"
+    echo "        1. 必要な mcpServers / hooks を $AGENT_FILE へ写す"
+    echo "        2. 不要になったら rm $LEGACY_AGENT_FILE ${LEGACY_AGENT_FILE}.bak"
+    echo "      Kiro 用 MCP プラグインの installer は default.json を更新するため、"
+    echo "      MCP を併用する場合は上記の写し替えが必要です。"
+  fi
+  echo ""
+fi
+
+# --- Step 5: Generate agent config ---
 mkdir -p "$KIRO_DIR/agents"
 
 if [ -f "$AGENT_FILE" ]; then
@@ -175,10 +264,50 @@ with open(agent_file, "w", encoding="utf-8") as f:
     f.write("\n")
 PY
 
+# --- Step 6: Optionally switch the default agent ---
+if [ "$SET_DEFAULT" = true ]; then
+  echo ""
+  if ! command -v kiro-cli >/dev/null 2>&1; then
+    echo "ERROR: kiro-cli が見つからないため既定エージェントを変更できません" >&2
+    exit 1
+  fi
+  esc="$(printf '\033')"
+  # kiro-cli 2.16.1 の agent list は一覧を標準エラー出力へ書く
+  current_default="$(kiro-cli agent list 2>&1 \
+    | sed -e "s/${esc}\\[[0-9;]*m//g" \
+    | awk '/^\*/ { print $2; exit }')"
+  echo "現在の既定エージェント: ${current_default:-不明}"
+  echo "変更後の既定エージェント: $AGENT_NAME"
+  proceed=true
+  if [ "$ASSUME_YES" = false ]; then
+    if [ -t 0 ]; then
+      printf '既定エージェントを %s に変更しますか? [y/N]: ' "$AGENT_NAME"
+      read -r answer
+      case "$answer" in
+        [yY]|[yY][eE][sS]) ;;
+        *) proceed=false ;;
+      esac
+    else
+      echo "確認入力を取得できないため、--set-default の指定を承認とみなして続行します"
+    fi
+  fi
+  if [ "$proceed" = true ]; then
+    kiro-cli agent set-default "$AGENT_NAME"
+    echo "既定エージェントを $AGENT_NAME に変更しました（元に戻す: kiro-cli agent set-default ${current_default:-kiro_default}）"
+  else
+    echo "既定エージェントは変更しませんでした"
+  fi
+fi
+
 echo ""
 echo "=== インストール完了 ==="
 echo "  エージェント設定: $AGENT_FILE"
-echo "  Skills数: $SKILL_COUNT (シンボリックリンク: .kiro/skills/)"
+echo "  常時指示: $STEERING_FILE"
+echo "  Skills数: $SKILL_COUNT (シンボリックリンク: $SKILLS_DIR)"
 echo ""
 echo "Kiro CLIを起動して動作確認してください:"
-echo "  kiro-cli chat"
+echo "  kiro-cli chat --agent $AGENT_NAME"
+if [ "$SET_DEFAULT" = false ]; then
+  echo ""
+  echo "既定エージェントとして起動したい場合は --set-default を付けて再実行してください。"
+fi
