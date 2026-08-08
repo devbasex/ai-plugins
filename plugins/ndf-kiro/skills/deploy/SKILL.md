@@ -109,6 +109,5 @@ git checkout "$FEATURE_BRANCH"
 
 ## 関連
 
-- `/ndf:cherry-pick-pr` — 一部コミットだけを環境に届ける場合
-- `/ndf:branch-fix-strategy` — ブランチ運用戦略の原則
-- `/ndf:sync-main` — featureブランチに main を取り込む
+- `/ndf:cherry-pick-pr` — 一部コミットだけを環境に届ける場合とブランチ運用戦略の原則
+- `/ndf:merged` — featureブランチに main を取り込む / マージ後のブランチ整理

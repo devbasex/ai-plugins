@@ -54,7 +54,7 @@ description: |
 
 ### MCPツール（必要に応じて）
 - Serena MCP（シンボル参照解析）
-- Codex CLI（`/ndf:codex` skill または `corder` エージェント経由、独立した原因分析の第二意見）
+- Codex CLI（`/ndf:external-ai` skill または `corder` エージェント経由、独立した原因分析の第二意見）
 
 ## 診断方針
 

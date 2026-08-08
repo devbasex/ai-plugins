@@ -92,11 +92,13 @@
 
 ## Codex CLI 連携
 
-詳細な独立レビューが必要な場合は `corder` エージェントに委譲するか、`/ndf:codex` skill の手順で `codex exec` を直接起動する。例:
+詳細な独立レビューが必要な場合は `corder` エージェントに委譲するか、`/ndf:external-ai` skill の手順で `codex exec` を直接起動する。例:
 
 ```bash
-# プロンプト書き出し
-cat > /tmp/sec-scan-prompt.md <<'EOF'
+# === 1. プロンプト書き出し（最終出力先を明示し apply_patch で書かせる） ===
+FINAL=/tmp/codex-output-sec-scan.md
+
+cat > /tmp/sec-scan-prompt.md <<EOF
 あなたはセキュリティレビュアーです。以下の観点で対象ファイルを精査してください:
 - OWASP Top 10 の脆弱性
 - 認証・認可の問題
@@ -105,15 +107,38 @@ cat > /tmp/sec-scan-prompt.md <<'EOF'
 ## 対象ファイル（絶対パス）
 /workspace/src/...
 
+## 出力先（必須）
+最終的なスキャン結果を **必ず** \`${FINAL}\` に \`apply_patch\` で新規作成してください。
+**stdout への出力だけでは不十分です**。書き出し後、stdout にも同じ内容を出力してください。
+
 ## 出力形式
-Markdown 標準出力。行番号と該当コードスニペットを明記。
+Markdown。行番号と該当コードスニペットを明記。tool 呼び出しのみで終了せず、
+最後に必ず assistant message として 1 回出力してください。
 EOF
 
-# バックグラウンド起動
-codex exec --dangerously-bypass-approvals-and-sandbox -C "$PWD" \
+# === 2. バックグラウンド起動 ===
+codex exec --dangerously-bypass-approvals-and-sandbox \
+  --config reasoning.effort=medium \
+  -C "$PWD" \
   < /tmp/sec-scan-prompt.md \
-  > /tmp/sec-scan-output.md \
+  > /tmp/sec-scan-stdout.md \
   2> /tmp/sec-scan-err.log &
+
+# === 3. 完了確認（^tokens used$ sentinel を待つ。`ps -p` は zombie を生存と誤判定する） ===
+until grep -q '^tokens used$' /tmp/sec-scan-err.log 2>/dev/null; do
+  sleep 30
+done
+
+# === 4. 成果物を回収（ファイル → stdout → stderr の三段フォールバック） ===
+if [ -s "$FINAL" ]; then
+    cp "$FINAL" ./sec-scan-result.md
+elif [ -s /tmp/sec-scan-stdout.md ]; then
+    cp /tmp/sec-scan-stdout.md ./sec-scan-result.md
+    echo "WARN: stdout からフォールバック回収（ファイル書き出しなし）" >&2
+else
+    echo "ERROR: Codex の最終出力を回収できませんでした。stderr 末尾を確認:" >&2
+    tail -200 /tmp/sec-scan-err.log
+fi
 ```
 
-詳細は `/ndf:codex` skill を参照。
+詳細は `/ndf:external-ai` skill と `references/cli-codex.md` を参照。

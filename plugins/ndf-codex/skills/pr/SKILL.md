@@ -54,7 +54,7 @@ allowed-tools:
 
 - 引数の末尾が `main`/`master` 以外のベースブランチ名（`qa/staging`, `release/v2` 等）の場合:
   - **警告を出して `/ndf:cherry-pick-pr <base>` に誘導する**
-  - 理由: base非mainのPRに直接pushすると `feature → main` のPRに環境固有コードが混入する（詳細は `/ndf:branch-fix-strategy`）
+  - 理由: base非mainのPRに直接pushすると `feature → main` のPRに環境固有コードが混入する（詳細は `/ndf:cherry-pick-pr`）
   - ユーザーが明示的に継続を指示した場合のみ進める
 
 ### 3. 変更コミット
@@ -137,9 +137,7 @@ feature/xxx ──PR──→ qa/staging   ← ❌ qa/staging をmergeするとm
 
 ### 正しい手順
 
-`/ndf:cherry-pick-pr <base-branch>` を使う（自動化済み）。詳細な理由と手順は:
-- `/ndf:cherry-pick-pr` — 自動化コマンド
-- `/ndf:branch-fix-strategy` — 原則と手順
+`/ndf:cherry-pick-pr <base-branch>` を使う（自動化済み）。原則と手順は `/ndf:cherry-pick-pr` に記載のとおり。
 
 ## 作業完了報告（必須）
 
@@ -157,5 +155,4 @@ PR作成/更新完了後、以下を報告:
 - `/ndf:deploy` — 環境ブランチへのデプロイPR（ブランチ全体）
 - `/ndf:pr-tests` — Test Plan 自動実行
 - `/ndf:review` — PR単位レビュー
-- `/ndf:sync-main` — 現ブランチに main を取り込み
-- `/ndf:branch-fix-strategy` — ブランチ戦略の原則
+- `/ndf:merged` — マージ後のブランチ整理 / 現ブランチに main を取り込み
