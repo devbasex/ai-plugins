@@ -67,7 +67,6 @@ ls -la /var/run/docker.sock 2>/dev/null && echo "DooD環境" || echo "DinDまた
 
 ## 関連Skill
 
-- **python-execution**: Python実行環境の判定
 - **corder-code-templates**: Dockerfileテンプレート
 
 ## 関連リソース

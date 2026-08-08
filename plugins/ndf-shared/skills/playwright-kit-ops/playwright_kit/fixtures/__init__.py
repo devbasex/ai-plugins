@@ -1,4 +1,4 @@
-"""playwright-scenario-test pytest fixtures。
+"""playwright_kit pytest fixtures (E2E シナリオテスト)。
 
 利用者は通常の pytest テストを書き、`pwk_config` / `pwk_role_<id>` 等の
 fixture をパラメタ宣言するだけで NDF の機能 (config / 認証 / evidence /
