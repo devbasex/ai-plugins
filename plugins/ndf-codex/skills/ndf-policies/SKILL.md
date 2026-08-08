@@ -32,9 +32,9 @@ Skill の棚卸で 49 個を 29 個へ整理した。旧コマンドは存在し
 | `/ndf:sync-main` | `/ndf:merged` |
 | `/ndf:branch-fix-strategy` | `/ndf:cherry-pick-pr`（原則は本 Skill の「ブランチ運用の原則」） |
 | `/ndf:codex` `/ndf:gemini` | `/ndf:external-ai` |
-| `/ndf:playwright-test-planning` `/ndf:playwright-scenario-test` | `/ndf:playwright-planning` |
+| `/ndf:playwright-test-planning` `/ndf:playwright-scenario-test` | `/ndf:playwright-planning`（Codex のみ配布） |
 | `/ndf:playwright-script-creation` `/ndf:playwright-execution` `/ndf:browser-test` `/ndf:playwright-browser-connect` | `/ndf:playwright-authoring` |
-| `/ndf:playwright-report` `/ndf:playwright-evidence-drive` | `/ndf:playwright-evidence` |
+| `/ndf:playwright-report` `/ndf:playwright-evidence-drive` | `/ndf:playwright-evidence`（Codex のみ配布） |
 
 移行先を用意せず削除したもの（いずれも起動実績がなく、現在のモデルの標準能力か
 汎用コマンドで足りる）:
