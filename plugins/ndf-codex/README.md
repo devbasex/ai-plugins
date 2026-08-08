@@ -70,7 +70,14 @@ $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.
 # ~/.codex/plugins/cache/ai-plugins/ndf/5.0.0/skills/deploy/SKILL.md
 ```
 
-そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。`$<skill 名>` はキャッシュ配下の Skill も skill roots から解決するため、まず `$` 起動を使ってください。パスで指示したい場合は `codex plugin list` で実体パスを確認し、絶対パスを渡します。
+そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
+
+```bash
+codex plugin list | grep 'ndf@ai-plugins'
+# => ndf@ai-plugins  installed, enabled  5.0.0  <path>
+```
+
+抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
 
 ### 実機検証結果 (codex-cli 0.146.1 / gpt-5.5)
 
