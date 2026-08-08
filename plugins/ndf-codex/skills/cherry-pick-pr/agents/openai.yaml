@@ -1,4 +1,4 @@
 policy:
   allow_implicit_invocation: false
 interface:
-  default_prompt: "<base-branch> (例: qa/staging, release/v2)"
+  default_prompt: "ベースブランチ名 (例: qa/staging, release/v2)"

@@ -1,4 +1,4 @@
 policy:
   allow_implicit_invocation: false
 interface:
-  default_prompt: "<env-branch> (例: qa/staging, release/v2)"
+  default_prompt: "環境ブランチ名 (例: qa/staging, release/v2)"
