@@ -246,7 +246,7 @@ sys.exit(0 if matched else 1)
       echo "      ただし $AGENT_FILE が既に存在するため自動移行しません。"
       echo "      移行手順:"
       echo "        1. 必要な設定が ${LEGACY_AGENT_FILE}.bak にだけ残っていないか確認する"
-      echo "        2. rm $LEGACY_AGENT_FILE"
+      echo "        2. 不要になったら rm $LEGACY_AGENT_FILE ${LEGACY_AGENT_FILE}.bak"
     else
       # 旧設定を移行先へ置いてから Step 5 に進める。Step 5 は既存ファイルから
       # installer 管理外のキーを引き継ぐため、これだけで利用者設定の移行と
