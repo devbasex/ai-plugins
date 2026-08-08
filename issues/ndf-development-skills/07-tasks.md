@@ -217,6 +217,7 @@
   - Kiro には継続ループがないため、段階ごとに続行指示を要する手順として動く旨を明記する
   - レビュー段階は最初のモード判定の結果で呼び先を分ける。`light` / `standard` / `legacy-refactor` は `review`、`architecture` と途中で検出した高リスク変更は `cross-review`。Task 2-4 で限定した `cross-review` の起動条件と同じ基準にする
   - `issue-plan-strategy` を `execute-goal` から呼ばれる手順として整理する。詳細は [04-development-skills.md](04-development-skills.md) の「既存 Skill の改修」に記載のとおり
+  - Codex で引数を受け取る `skills/execute-goal/agents/openai.yaml` は、Task 0-8 の生成処理が `disable-model-invocation: true` を持つ Skill を対象にビルド時へ出力する。このタスクの対象ファイルには含めない
 
 ### Task 3-2: Skill 挙動評価
 
