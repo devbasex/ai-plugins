@@ -68,6 +68,10 @@ kiro-cli agent set-default kiro_default
 
 常時適用したい指示は steering へ置きます。steering はエージェント選択に依存せず読み込まれるため、既定エージェントを書き換えない運用でも効きます。`.kiro/steering/ndf-policies.md` は `plugins/ndf-shared/skills/ndf-policies/SKILL.md` から生成されるため、直接編集しないでください。
 
+`ndf-policies` は steering の生成元としてのみ使うため、`.kiro/skills/` へは symlink しません。Kiro は `.kiro/skills/*/SKILL.md` と `.kiro/steering/**/*.md` の両方を文脈へ読み込むため、両方に置くと同じ内容が 2 回注入されます。`plugins/ndf-shared/manifests/kiro-skills.txt` には引き続き載せます（`plugins/ndf-kiro/skills/ndf-policies/SKILL.md` が steering の生成元だからです）。
+
+`--project` で別ディレクトリへ導入する場合も `--set-default` は正しく動きます。`kiro-cli` は workspace エージェントを cwd 配下の `.kiro/agents/` からのみ検出するため、installer は `kiro-cli` を導入先（`--scope workspace` なら `--project` のパス、`--scope global` なら `$HOME`）で実行します。`kiro-cli agent set-default` はエージェントが見つからなくても終了コード 0 を返すので、installer は実行後に `agent list` で反映を検証し、切り替わっていなければ失敗させます。
+
 ### 旧バージョンからの移行
 
 v4 系の installer は `.kiro/agents/default.json` を生成していました。この設定は Kiro の既定エージェントにならず、フックも `resources` も無効のままでした。エージェント名を `ndf` に変えたため、再インストールが必要です。
@@ -116,20 +120,25 @@ kiro-cli **2.16.1** / 検証日 **2026-08-07**（ランタイム規約の調査�
 | `install.sh` 後に `kiro-cli agent list` へ現れるか | 現れる | `ndf  Workspace  NDF統合開発エージェント（Kiro CLI用）` |
 | `--agent ndf` で agentSpawn フックが動くか | 動く | `[NDF] CLAUDE.ndf.md が検出されました…` が文脈へ注入された。`kiro_default` では注入されない |
 | `--set-default` で既定が切り替わるか | 切り替わる | `agent list` の `*` が `ndf` へ移り、素の `kiro-cli chat` でも agentSpawn フックが動いた |
+| `--project` で別ディレクトリへ導入したとき `--set-default` が効くか | 効く（修正後） | 修正前は導入先以外の cwd から実行すると `Failed to set default agent: No agent with name ndf found` になり、しかも終了コード 0 で「変更しました」と表示していた。修正後は導入先で `kiro-cli` を実行し、`agent list` で反映を検証する |
+| `--scope global --set-default` が効くか | 効く | `$HOME` で `kiro-cli` を実行し `agent list` の `*` が `ndf` へ移った。検証後に `kiro-cli agent set-default kiro_default` で復旧し、`~/.kiro` の `find` 比較で検証前と一致することを確認 |
 | `--scope global` で `~/.kiro/` へ配置されるか | 配置される | `~/.kiro/{skills,steering,prompts,agents}` が生成され、プロジェクト外でも `Global` として一覧に出た |
 | steering がエージェント選択に依存せず読まれるか | 読まれる | `kiro_default` の `/context show` にも `.kiro/steering/**/*.md` の一致として現れた |
 
-コンテキスト占有率（Skill 23 個の配布物、`/context show` の `Context files total`）:
+コンテキスト占有率を `kiro-cli chat --agent <名前> --no-interactive '/context show'` で実測しました。測定用プロジェクトには本リポジトリの `AGENTS.md` と `README.md` を置き、`install.sh --project <測定用ディレクトリ>` で配布物（Skill 23 個）を導入しています。`一致ファイル数` と `合計文字数` は `/context show` が列挙したファイルを数え上げた値、`占有率` は `Context files total` の表示値です。
 
-| 構成 | 一致ファイル数 | 占有率 | 文脈ファイルの合計文字数 |
-| --- | --- | --- | --- |
-| 変更前 `default` エージェント | 26（`ndf-policies/SKILL.md` が二重） | 0.2% | 112,598 |
-| 変更後 `ndf` エージェント | 26（重複なし、steering が 1 件増） | 0.2% | 112,621 |
-| 参考: 組み込み `kiro_default` | 25 | 0.2% | - |
+| 構成 | 一致ファイル数 | `ndf-policies` の注入回数 | 占有率 | 文脈ファイルの合計文字数 |
+| --- | --- | --- | --- | --- |
+| 変更前 `default` エージェント | 26 | 2（`resources` + Skill） | 0.6% | 125,723 |
+| 本 PR 初版 `ndf` エージェント | 26 | 2（Skill + steering） | 0.6% | 125,746 |
+| 修正後 `ndf` エージェント | 25 | 1（steering のみ） | 0.6% | 125,562 |
+| 参考: 組み込み `kiro_default` | 25 | 1（steering のみ） | 0.6% | 125,562 |
 
-`resources` の二重登録は解消しましたが、代わりに steering ファイルが 1 件増えるため、総量はほぼ変わりません（+23 文字は生成ヘッダ 2 行分）。`/context show` の表示は 0.1% 刻みのため、この差は表示上変化しません。
+`resources` の二重登録を解消しただけでは、代わりに steering が 1 件増えるためファイル数は 26 のまま減りませんでした。`ndf-policies` を `.kiro/skills/` へ symlink しない変更を加えて、はじめて 26 → 25 に減っています。ただし `ndf-policies/SKILL.md` は 184 文字しかないため、合計文字数の削減は 125,746 → 125,562（-184 文字）にとどまり、`/context show` の表示（0.1% 刻み）は 0.6% のまま変わりません。重複解消の目的は表示上の占有率低減ではなく、同じ指示が 2 回注入される状態を解消することです。
 
-`--scope global` でプロジェクト側に Skill がない状態では 24 ファイル / 0.1% でした。
+`ndf-policies` を Skill として置かなくても機能は落ちません。`user-invocable: false` で本文の参照を前提としない Skill であり、内容は steering として常時読み込まれるためです。
+
+なお 2026-08-07 に別プロジェクトで測った 0.2% / 112,598 文字という値は、測定用プロジェクトの `AGENTS.md` / `README.md` が異なるため本表とは比較できません。上表は 4 構成すべてを同一プロジェクトで測り直した値です。
 
 ## 開発
 

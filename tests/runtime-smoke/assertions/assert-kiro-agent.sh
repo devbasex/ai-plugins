@@ -30,8 +30,15 @@ test -f "$AGENT_FILE"
 test -s "$STEERING_FILE"
 find -L "$KIRO_DIR/skills" -path '*/SKILL.md' -print | grep -q .
 
+# ndf-policies は steering として配置する。Skill としても置くと Kiro 組み込みルールの
+# Skill 読み込みと steering 読み込みで文脈へ二重注入される。
+if [ -e "$KIRO_DIR/skills/ndf-policies" ]; then
+  echo "ndf-policies must be delivered via steering only: $KIRO_DIR/skills/ndf-policies" >&2
+  exit 1
+fi
+
 # エージェント定義と、起動時に読み込まれる文脈量を検査する。
-# 上限は 2026-08-07 / kiro-cli 2.16.1 の実測 112,621 文字に対する余裕分。
+# 上限は 2026-08-08 / kiro-cli 2.16.1 でのこのフィクスチャの実測 112,404 文字に対する余裕分。
 python3 - "$AGENT_FILE" "$KIRO_DIR" "$PROJECT_DIR" "$STEERING_FILE" 200000 >> "$LOG" <<'PY'
 import json
 import sys
@@ -93,7 +100,9 @@ fi
 
 before_default="$(current_default)"
 echo "default agent before: ${before_default:-unknown}" >> "$LOG"
-bash "$REPO_ROOT/plugins/ndf-kiro/install.sh" --project "$PROJECT_DIR" --with-slack --set-default --yes >> "$LOG" 2>&1
+# kiro-cli は workspace エージェントを cwd 配下からのみ検出する。--project で別ディレクトリへ
+# 導入したときに --set-default が効くことを検査するため、PROJECT_DIR 以外の cwd から実行する。
+(cd "$ARTIFACT_DIR" && bash "$REPO_ROOT/plugins/ndf-kiro/install.sh" --project "$PROJECT_DIR" --with-slack --set-default --yes) >> "$LOG" 2>&1
 after_default="$(current_default)"
 echo "default agent after: ${after_default:-unknown}" >> "$LOG"
 if [ "$after_default" != "$AGENT_NAME" ]; then

@@ -27,7 +27,7 @@ bash plugins/ndf-kiro/install.sh --with-slack
 bash plugins/ndf-kiro/install.sh --with-slack --with-codex
 ```
 
-インストーラーは `plugins/ndf-kiro/skills/` から `.kiro/skills/` への symlink、`.kiro/steering/ndf-policies.md`、`.kiro/agents/ndf.json` を生成します。`plugins/ndf-kiro/skills/` は `plugins/ndf-shared/manifests/kiro-skills.txt` から build された生成物です。
+インストーラーは `plugins/ndf-kiro/skills/` から `.kiro/skills/` への symlink、`.kiro/steering/ndf-policies.md`、`.kiro/agents/ndf.json` を生成します。`plugins/ndf-kiro/skills/` は `plugins/ndf-shared/manifests/kiro-skills.txt` から build された生成物です。`ndf-policies` だけは steering の生成元として使い、`.kiro/skills/` へは symlink しません（Skill と steering の二重注入を避けるため）。
 
 ### Slack通知の設定（オプション）
 
