@@ -239,10 +239,35 @@ try:
     config = json.load(open(sys.argv[1], encoding="utf-8"))
     # JSON がオブジェクト以外（配列など）でも AttributeError にせず、壊れた JSON と
     # 同じ「NDF 生成物ではない」扱いへ倒す。
+    # 旧 installer が生成したものだけを識別する。description に NDF が含まれる
+    # だけでは、利用者が NDF 用に自作した default エージェントまで移行対象に
+    # なり、テンプレートで上書きしてしまう。旧テンプレート固有の値との一致を
+    # 求める。
+    LEGACY_DESCRIPTION = "NDF統合開発エージェント（Kiro CLI用）"
+    LEGACY_RESOURCE = "skill://.kiro/skills/**/SKILL.md"
+    LEGACY_HOOK_MARK = "CLAUDE.ndf.md"
+
+    def has_legacy_hook(cfg):
+        hooks = cfg.get("hooks")
+        if not isinstance(hooks, dict):
+            return False
+        spawn = hooks.get("agentSpawn")
+        if not isinstance(spawn, list):
+            return False
+        return any(
+            isinstance(h, dict) and LEGACY_HOOK_MARK in str(h.get("command") or "")
+            for h in spawn
+        )
+
+    resources = config.get("resources") if isinstance(config, dict) else None
     matched = (
         isinstance(config, dict)
         and config.get("name") == "default"
-        and "NDF" in (config.get("description") or "")
+        and config.get("description") == LEGACY_DESCRIPTION
+        and (
+            (isinstance(resources, list) and LEGACY_RESOURCE in resources)
+            or has_legacy_hook(config)
+        )
     )
 except Exception:
     sys.exit(1)
@@ -341,14 +366,22 @@ for key, value in existing.items():
     if key not in managed_keys:
         config[key] = value
         kept.append(key)
-for key, value in (existing.get("hooks") or {}).items():
-    if key not in managed_hooks:
-        hooks[key] = value
-        kept.append(f"hooks.{key}")
-for key, value in (existing.get("mcpServers") or {}).items():
-    if key not in managed_servers:
-        servers[key] = value
-        kept.append(f"mcpServers.{key}")
+# hooks / mcpServers が dict 以外（配列や文字列）だと .items() で落ちるため、
+# 壊れた JSON と同じく警告して引き継ぎ対象から外す。
+for section, target, managed in (
+    ("hooks", hooks, managed_hooks),
+    ("mcpServers", servers, managed_servers),
+):
+    value = existing.get(section)
+    if value is None:
+        continue
+    if not isinstance(value, dict):
+        print(f"  WARN: 既存の {agent_file} の {section} が JSON オブジェクトではないため引き継ぎません")
+        continue
+    for key, item in value.items():
+        if key not in managed:
+            target[key] = item
+            kept.append(f"{section}.{key}")
 
 if not hooks:
     config.pop("hooks", None)
