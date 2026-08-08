@@ -2,6 +2,7 @@ cherry-pick-pr
 cross-review
 deploy
 docker-container-access
+external-ai
 fix
 implementation-plan
 investigation-rules

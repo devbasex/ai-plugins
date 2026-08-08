@@ -14,8 +14,7 @@ logging-guidelines
 cherry-pick-pr
 deploy
 playwright-authoring
-codex
-gemini
+external-ai
 statusline
 issue-plan-strategy
 plan-to-spec

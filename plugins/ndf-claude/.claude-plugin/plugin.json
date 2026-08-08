@@ -44,8 +44,7 @@
     "./skills/cherry-pick-pr",
     "./skills/deploy",
     "./skills/playwright-authoring",
-    "./skills/codex",
-    "./skills/gemini",
+    "./skills/external-ai",
     "./skills/statusline",
     "./skills/issue-plan-strategy",
     "./skills/plan-to-spec"

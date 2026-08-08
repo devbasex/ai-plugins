@@ -99,7 +99,7 @@ bash scripts/runtime-smoke-test.sh --runtime kiro
 
 ## 外部 AI 委譲
 
-Codex MCP サーバは廃止済みです。外部 AI 委譲は `/ndf:codex` Skill と Claude Code 版の `corder` エージェントから Codex CLI を直接呼び出す方式を標準とします。
+Codex MCP サーバは廃止済みです。外部 AI 委譲は `/ndf:external-ai` Skill と Claude Code 版の `corder` エージェントから Codex / Gemini CLI を直接呼び出す方式を標準とします。
 
 ## Slack 通知
 
