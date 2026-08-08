@@ -1,0 +1,28 @@
+# scenario-test ランタイム用 .gitignore。
+#
+# `playwright_kit/` パッケージ本体・`scripts/` 補助スクリプト・`tests/` 利用者
+# テスト・`pyproject.toml` / `uv.lock` / `scenario.config.yaml` / `run.sh` /
+# `run.bat` / `README.md` は commit してよい (再現性のため逆に推奨)。
+# 一方、ローカル仮想環境とテスト出力物は当然 ignore する。
+
+# Python 仮想環境 (uv sync で作られる)
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# テスト実行で生成される成果物 (HAR / trace / 動画 / report.md / body_check.jsonl)
+reports/
+
+# 認証情報 (うっかり commit 防止)
+.env
+.env.*
+!.env.example
+*.local
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

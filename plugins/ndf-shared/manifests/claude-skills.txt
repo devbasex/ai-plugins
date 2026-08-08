@@ -13,7 +13,10 @@ problem-solving
 logging-guidelines
 cherry-pick-pr
 deploy
+playwright-planning
 playwright-authoring
+playwright-evidence
+playwright-kit-ops
 external-ai
 statusline
 issue-plan-strategy

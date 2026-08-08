@@ -31,7 +31,7 @@ skills/     → 実行可能なワークフロー
 
 ## NDF v5.0.0 の Skill 構成
 
-Skill は 29 個で、配布は `plugins/ndf-shared/manifests/` が唯一の基準（Claude Code 22 / Codex 23 / Kiro 21）。frontmatter の書き方は `plugins/ndf-shared/skills/README.md` の規約に従い、`python3 scripts/check-skill-frontmatter.py` で検査する。利用実績と維持・統合・削除の判定は `docs/specifications/ndf-skill-inventory.md` に記録する。
+Skill は 29 個で、配布は `plugins/ndf-shared/manifests/` が唯一の基準（Claude Code 25 / Codex 23 / Kiro 24）。frontmatter の書き方は `plugins/ndf-shared/skills/README.md` の規約に従い、`python3 scripts/check-skill-frontmatter.py` で検査する。利用実績と維持・統合・削除の判定は `docs/specifications/ndf-skill-inventory.md` に記録する。
 
 v4.20.1 から統合・削除で消えたコマンド名の対応表は `ndf-policies` skill にある（v6.0.0 で削除）。
 

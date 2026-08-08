@@ -51,7 +51,7 @@ while [ "$#" -gt 0 ]; do
       echo "  --set-default    kiro-cli の既定エージェントを ndf に切り替える（オプトイン）"
       echo "  -y, --yes        --set-default の確認プロンプトを省略する"
       echo "  --with-slack     stopフックにSlack通知を追加"
-      echo "  --with-codex     Codex CLI直接実行用プロンプトを追加"
+      echo "  --with-codex     Codex MCPサーバ設定と直接実行用プロンプトを追加"
       echo "  --dry-run        書き込みを行わず実行内容を表示"
       echo "  -h, --help       このヘルプを表示"
       exit 0
