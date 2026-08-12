@@ -434,8 +434,12 @@ def check_external_name_collisions(skills: list[dict]) -> list[Finding]:
     for s in skills:
         name = unquote((s["fm"] or {}).get("name", "")) or s["dir"]
         # 区切りは `-`（`code-review` の `review`）と `:`（`plugin:review` の `review`）の両方を見る。
-        # `:` は、将来 KNOWN_EXTERNAL_SKILL_NAMES に名前空間付きのエントリを足したときに
-        # 検知漏れを起こさないための防御であり、現在の一覧はすべて名前空間なしなので挙動は変わらない。
+        # KNOWN_EXTERNAL_SKILL_NAMES の規約は「名前空間を除いた Skill 名」で確定していて、これを
+        # 変える予定はない。`:` を見るのは規約を変える想定だからではなく、規約に反して
+        # `coderabbit:code-review` のような表示名がそのまま貼られた場合に、検査が黙って
+        # すり抜けるのを防ぐためである。`/` メニューの表示名をコピーしてしまう誤りは起きやすく、
+        # `-` だけの判定だと衝突があっても警告が出ず、見逃したことにも気づけない。
+        # 規約どおりのエントリしかない現状では、この分岐があっても挙動は変わらない。
         hits = [e for e in KNOWN_EXTERNAL_SKILL_NAMES
                 if e == name or e.endswith(("-" + name, ":" + name))]
         if hits:
