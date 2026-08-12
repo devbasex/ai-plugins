@@ -16,8 +16,9 @@ VERSION_FILE="$PLUGIN_DIR/VERSION"
 # Kiro 配布物は plugin.json を持たないため、版数は VERSION ファイルで示す。
 # build-runtime-plugins.sh が Claude 版 plugin.json から生成する。
 # 版数を確認する唯一の手段なので、欠落や空は不完全な配布物として扱い先に落とす。
-# Skill 統合により配布を終えた prompt。過去のインストールで .kiro/prompts/ に残った分を除去する
-DEPRECATED_PROMPTS="clean.md"
+# Skill の統合・改名により配布を終えた prompt。過去のインストールで .kiro/prompts/ に残った分を除去する
+# review.md は v6.0.0 で pr-review.md へ改名した
+DEPRECATED_PROMPTS="clean.md review.md"
 
 # Parse options
 PROJECT_ROOT="$(pwd)"

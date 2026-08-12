@@ -95,6 +95,8 @@ PR に対する操作という責務が名前に出るため。
 | `docs/` 内の参照 | 18 箇所 |
 | `plugins/ndf-shared/manifests/{claude,codex,kiro}-skills.txt` | 各 1 行 |
 | 各ランタイムの `plugin.json` の `skills` 配列 | 3 ランタイム |
+| `plugins/ndf-kiro/prompts/review.md`（手書き管理。生成対象外） | ファイル 1 |
+| `plugins/ndf-kiro/install.sh` の `DEPRECATED_PROMPTS`（手書き管理） | 1 行 |
 | `plugins/ndf-shared/skills/ndf-policies/SKILL.md`（旧名対応表） | 1 節 |
 | `plugins/ndf-shared/skills/README.md`（命名規約） | 1 節 |
 | `scripts/check-skill-frontmatter.py`（既知競合名の検査） | 1 関数 |
@@ -158,6 +160,18 @@ base branch: `main`
     `review` が含まれるため、`grep -w` や単純な `sed s/review/pr-review/` は
     `cross-review` を `cross-pr-review` に壊す。`/ndf:review` と `skills/review/` の
     2 パターンに限定して置換し、置換後に `grep -rn "cross-pr-review"` で 0 件を確認する
+  - **限定置換は「壊す側」だけでなく「取りこぼす側」も確認する。** 2 パターンに
+    絞ると、名前が単独で現れる箇所を拾えない。実際に `plugins/ndf-kiro/prompts/review.md`
+    （Kiro 向けプロンプト。`build-runtime-plugins.sh` の生成対象ではなく手書き管理）が
+    漏れ、round 1 で gemini が検出した。置換後に次で洗い直す:
+
+    ```bash
+    find plugins -name 'review*' -not -path '*/node_modules/*'
+    git grep -nE '(^|[^-a-z])review([^-a-z]|$)' -- plugins/
+    ```
+
+  - 併せて `plugins/ndf-kiro/install.sh` の `DEPRECATED_PROMPTS` へ旧ファイル名を足す。
+    利用環境に残った旧プロンプトを再インストール時に削除するための一覧である
   - `skill-stats.py` の 1 箇所は集計対象名の可能性があるため、旧名の実績が
     失われないか（旧名の集計が必要か）を確認したうえで直す
 
@@ -237,9 +251,17 @@ base branch: `main`
 
 ## テスト計画
 
-- [ ] `git grep -n "/ndf:review\b"` が 0 件（`/ndf:pr-review` にヒットしないよう `\b` を使う）
-- [ ] `git grep -n "cross-pr-review"` が 0 件（置換事故の検出）
-- [ ] `git grep -n "skills/review/"` が 0 件
+- [ ] `git grep -nE "/ndf:review([^-a-zA-Z]|$)" -- plugins/` が 0 件
+
+      `\b` は使わない。`\b` は `-` の直前にもマッチするため、`ndf-policies` の対応表に残す
+      **旧コマンド名** `/ndf:review-branch` / `/ndf:review-pr-comments` まで拾ってしまう。
+      同じ理由で、一括置換に `sed 's|/ndf:review\b|/ndf:pr-review|g'` を使うと旧名が
+      `/ndf:pr-review-branch` に壊れる（round 1 で codex が検出）。置換後は
+      `git grep -n "/ndf:pr-review-"` が 0 件であることも確認する
+- [ ] `git grep -n "cross-pr-review" -- plugins/ docs/` が 0 件（置換事故の検出）
+- [ ] `git grep -n "skills/review\b" -- plugins/ docs/` が 0 件
+- [ ] `docs/` と `issues/` に残る `/ndf:review` が、**v5.0.0 時点の記録**（棚卸台帳・受け入れ条件・
+      リリースノート・日付入りプレゼン資料）だけであることを目視確認する
 - [ ] `python3 scripts/check-skill-frontmatter.py` がエラー 0 / 警告 0
 - [ ] `bash scripts/build-runtime-plugins.sh --check` が差異を検出しない
 - [ ] `python3 scripts/check-markdown-links.py --root .` が成功する
@@ -263,3 +285,11 @@ base branch: `main`
   検査時点で分からない。Task 7 は手動更新のリストによる best-effort に留める
 - **旧名のエイリアス提供** — Skill 名のエイリアス機構が無く、ディレクトリを 2 つ置くと
   manifest と実績集計が二重になる。移行は対応表の案内で行う
+- **日付入りプレゼン資料の書き換え** — `docs/presentations/2026-08-06-ai-plugins-intro.*` は
+  2026-08-06 に行った v5.0.0 紹介の**発表記録**である。当日話していない名前へ書き換えると
+  記録として不正確になり、`build.sh` による PDF / 単一ファイル HTML の再生成（Chromium 必須）で
+  巨大なバイナリ差分も出る。`diagrams/pr-flow.mmd` を含めて旧名のまま残す
+- **v5.0.0 時点の記録の書き換え** — 棚卸台帳（`ndf-skill-inventory.md`）、受け入れ条件
+  （`08-verification.md`）、`README.md` の「NDF v5.0.0 の主な変更」節は、その時点の事実の記録。
+  旧名のまま残し、**改名した事実を注記で足す**にとどめる。v6.0.0 の変更は PR2 で
+  「NDF v6.0.0 の主な変更」節として別に書く

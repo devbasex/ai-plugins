@@ -93,7 +93,7 @@ GitHub MCP を使う場合は `mcp__github__get_pull_request_comments` を利用
 
 ## 重要度の判定
 
-`[重要度 / カテゴリ]` プレフィックス（`/ndf:review` の出力規約）を手がかりにするが、
+`[重要度 / カテゴリ]` プレフィックス（`/ndf:pr-review` の出力規約）を手がかりにするが、
 **重要度ラベルを鵜呑みにしない**。各指摘ごとにコード・仕様を独自に調査し、本来の重要度を
 判定し直してから下表の動作を適用する。bot のラベリングは参考値に過ぎない。
 
@@ -339,5 +339,5 @@ EOMD
 
 ## 関連
 
-- `/ndf:review` — PR / ブランチのレビュー（Approve / Request Changes 判定）
+- `/ndf:pr-review` — PR / ブランチのレビュー（Approve / Request Changes 判定）
 - `/ndf:cross-review` — codex + gemini の収束レビュー。内部からこの Skill を呼ぶ

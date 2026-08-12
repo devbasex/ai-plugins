@@ -39,8 +39,8 @@ python3 scripts/check-skill-frontmatter.py --report  # 実測値の一覧
 
 ```yaml
 ---
-name: review
-description: "Review a PR or local branch diff and post an approve/changes verdict. Use when asked to review a PR, check a diff before merge, or self-review a branch (レビューして / PR確認 / マージ前チェック)."
+name: pr-review
+description: "Review a PR or local branch diff and post an approve/changes verdict. Use when asked to review a PR, check a diff before merge, or self-review a branch (PRレビュー / PR確認 / マージ前チェック)."
 when_to_use: "Claude Code 向けの追加トリガのみ。description で足りるなら付けない"
 ---
 ```
@@ -141,13 +141,13 @@ Skill を使わず独自手順で実行された形跡があるなら後者を�
 **ランタイム組み込みの Skill や他プラグインとの競合は検査できない。** 配布先の環境に
 何が入っているかに依存するためである。
 
-実例: `review` は `disable-model-invocation` を外して自動発動できるようにしたが、
-Claude Code 組み込みの `code-review` が同じ用途を持つため、「レビューして」のような
-依頼では常に組み込み側が選ばれる（実測は
+実例: 旧 `review`（現 `pr-review`）は `disable-model-invocation` を外して自動発動できる
+ようにしたが、Claude Code 組み込みの `code-review` が同じ用途を持つため、「レビューして」の
+ような依頼では常に組み込み側が選ばれる（実測は
 [08-verification.md](../../../issues/ndf-development-skills/08-verification.md)
 「自然文からの発動の実測」）。同名・同用途の組み込み Skill があるランタイムでは、
 `description` を差別化しても勝てないことがある。明示起動で使う前提に切り替えるか、
-用途が重ならない名前へ寄せる。
+用途が重ならない名前へ寄せる。この Skill は後者を採り、v6.0.0 で `pr-review` へ改名した。
 
 ### 広すぎるトリガを置かない
 
