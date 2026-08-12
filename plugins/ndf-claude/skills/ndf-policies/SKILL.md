@@ -25,8 +25,8 @@ Skill の棚卸で 49 個を 29 個へ整理した。旧コマンドは存在し
 
 | 旧コマンド | 移行先 |
 | --- | --- |
-| `/ndf:pr-review-branch` | `/ndf:pr-review --branch` |
-| `/ndf:pr-review-pr-comments` | `/ndf:fix --classify-only` |
+| `/ndf:review-branch` | `/ndf:pr-review --branch` |
+| `/ndf:review-pr-comments` | `/ndf:fix --classify-only` |
 | `/ndf:resolve-pr-comments` | `/ndf:fix` |
 | `/ndf:clean` | `/ndf:merged` |
 | `/ndf:sync-main` | `/ndf:merged` |
