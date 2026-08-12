@@ -18,41 +18,19 @@ user-invocable: false
 4. **マージ済みブランチには push しない。** 既存 PR の状態を確認し、マージ済みなら新ブランチ + 新 PR を作る（サフィックス `-v2`, `-v3`）
 5. **revert を連鎖させない。** 最終的なあるべき状態を直接コミットする方が履歴上の意図が明確になり、後の cherry-pick も簡単になる
 
-## v5.0.0 で変わったコマンド名（v6.0.0 で削除）
-
-Skill の棚卸で 49 個を 29 個へ整理した。旧コマンドは存在しない。次のメジャー
-バージョンでこの節ごと削除する。
+## v6.0.0 で変わったコマンド名（v7.0.0 で削除）
 
 | 旧コマンド | 移行先 |
 | --- | --- |
-| `/ndf:review-branch` | `/ndf:pr-review --branch` |
-| `/ndf:review-pr-comments` | `/ndf:fix --classify-only` |
-| `/ndf:resolve-pr-comments` | `/ndf:fix` |
-| `/ndf:clean` | `/ndf:merged` |
-| `/ndf:sync-main` | `/ndf:merged` |
-| `/ndf:branch-fix-strategy` | `/ndf:cherry-pick-pr`（原則は本 Skill の「ブランチ運用の原則」） |
-| `/ndf:codex` `/ndf:gemini` | `/ndf:external-ai` |
-| `/ndf:playwright-test-planning` `/ndf:playwright-scenario-test` | `/ndf:playwright-planning` |
-| `/ndf:playwright-script-creation` `/ndf:playwright-execution` `/ndf:browser-test` `/ndf:playwright-browser-connect` | `/ndf:playwright-authoring` |
-| `/ndf:playwright-report` `/ndf:playwright-evidence-drive` | `/ndf:playwright-evidence` |
+| `/ndf:review` | `/ndf:pr-review` |
 
-移行先を用意せず削除したもの（いずれも起動実績がなく、現在のモデルの標準能力か
-汎用コマンドで足りる）:
-`/ndf:git-gh-operations` `/ndf:python-execution` `/ndf:data-analyst-export`
-`/ndf:data-analyst-sql-optimization` `/ndf:deepwiki-transfer` `/ndf:google-chat`
-`/ndf:knowledge-reorg` `/ndf:mcp-builder`
+引数と挙動は変わらない。改名したのは、`review` が `code-review`（Claude Code 組み込み）
+`security-review` `cross-review` の末尾要素で、`/` メニューで `review` と打つと候補に
+埋もれるため（[#83](https://github.com/devbasex/ai-plugins/issues/83)）。`/pr-rev` まで
+打てば一意に決まる。
 
-`data-analyst-export` と `data-analyst-sql-optimization` の内容は `data-analyst`
-エージェントの定義へ移した。
+`pr-review` は Claude Code では自然文で起動しない。組み込みの `code-review` が同じ用途を
+持ち、そちらが常に選ばれる。**`/ndf:pr-review` で明示的に起動する。**
 
-そのほかの非互換な変更:
-
-- `merged` / `pr` / `pr-tests` が自然文の依頼でも起動するようになった。
-  `review` も同じ設定にしたが、Claude Code では組み込みの `code-review` が同じ用途を
-  持つため自然文では選ばれない。`/ndf:pr-review` で明示的に起動する。
-  取り消しの難しい手順の前には確認を取る
-- Kiro はエージェント名が `default` → `ndf` に変わった。`install.sh` を再実行する
-- Codex では `deploy` / `cherry-pick-pr` が暗黙起動の一覧から外れる。プラグイン配布の
-  Skill は抑止すると `$<skill 名>` も効かないため、SKILL.md のパスを示して読ませる
-  （`plugins/ndf-codex/README.md`）
-
+v5.0.0 で 49 個を 29 個へ整理したときの対応表は、予告どおり本バージョンで削除した。
+v4.20.1 以前から移行する場合は v5.0.0 の `ndf-policies` を参照する。
