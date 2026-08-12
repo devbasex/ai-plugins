@@ -135,10 +135,13 @@ Skill 名は、自動発動（トリガ語）とは別に **明示起動の入�
 
 実例（2026-08-12 実測、[#83](https://github.com/devbasex/ai-plugins/issues/83)）:
 
-| NDF の Skill 名 | 同じ語を末尾に持つ外部 Skill | 結果 |
+| NDF の Skill 名 | 同じ語を末尾に持つ外部 Skill（`/` メニューでの表示名 → Skill 名） | 結果 |
 | --- | --- | --- |
-| 旧 `review` | `code-review`（組み込み）、`security-review`（組み込み）、`coderabbit:code-review`、`superpowers:requesting-code-review`、`superpowers:receiving-code-review` | `/review` では候補に埋もれ、`/ndf:` から辿るしかなかった |
+| 旧 `review` | `code-review`（組み込み）→ `code-review`、`security-review`（組み込み）→ `security-review`、`coderabbit:code-review` → `code-review`、`coderabbit:coderabbit-review` → `coderabbit-review`、`superpowers:requesting-code-review` → `requesting-code-review`、`superpowers:receiving-code-review` → `receiving-code-review` | `/review` では候補に埋もれ、`/ndf:` から辿るしかなかった |
 | `fix` | なし | `/fix` で一意に決まる |
+
+表の左側が `/` メニューでの表示名、右側が名前空間（`coderabbit:` などのプラグイン接頭辞）を
+除いた Skill 名である。
 
 `review` は v6.0.0 で **`pr-review`** へ改名して解消した。`/pr-rev` まで打てば一意に決まり、
 `pr` / `pr-tests` / `pr-review` と接頭辞も揃う。
@@ -146,9 +149,12 @@ Skill 名は、自動発動（トリガ語）とは別に **明示起動の入�
 逆に、外部名を**末尾に含む**のは問題ない。`cross-review` は `code-review` の末尾要素では
 ないため、`/cross` の時点で一意に決まる。
 
-`scripts/check-skill-frontmatter.py` が既知の外部名との衝突を警告する。ただし配布先に
-何が入っているかは検査時点で分からないため、**一覧は手で更新する best-effort** であり
-網羅ではない。新しい Skill を足すときは、実際に `/` メニューで名前を打って確認する。
+`scripts/check-skill-frontmatter.py` が既知の外部名との衝突を警告する。検査が突き合わせる
+一覧（`KNOWN_EXTERNAL_SKILL_NAMES`）は**名前空間を除いた Skill 名**で持つ。組み込み Skill は
+そもそも名前空間を持たず、また `/` メニューで埋もれるかどうかを決めるのは名前空間ではなく
+Skill 名の部分だからである。ただし配布先に何が入っているかは検査時点で分からないため、
+**一覧は手で更新する best-effort** であり網羅ではない。新しい Skill を足すときは、実際に
+`/` メニューで名前を打って確認する。
 
 ### 名前と親ディレクトリ名を一致させる
 

@@ -49,17 +49,29 @@ FRONTMATTER_TOTAL_MAX = 13000
 # --- 既知の外部 Skill 名 ----------------------------------------------------
 # ランタイム組み込み・他プラグインの Skill 名のうち、実際に観測できたもの。
 #
+# **エントリは名前空間（`coderabbit:` などのプラグイン接頭辞）を除いた Skill 名で持つ。**
+# 理由は 2 つ。
+#
+# 1. 組み込み Skill（code-review / security-review）はそもそも名前空間を持たないため、
+#    名前空間付きに統一することができない
+# 2. `/` メニューで NDF の Skill が埋もれるかどうかを決めるのは名前空間ではなく
+#    Skill 名の部分である。`coderabbit:code-review` の Skill 名は `code-review` で、
+#    埋もれる原因になるのはこの `code-review` の側
+#
+# したがって一覧の単位は「名前空間を除いた Skill 名」が正しい。行末に、`/` メニューで
+# どう表示されていたか（名前空間付きの表示名）を観測元として残す。
+#
 # この一覧は網羅ではない。配布先の環境に何が入っているかは検査時点では分からず、
 # 利用者が入れる他プラグインまでは列挙できない。観測できたものを手で足していく
 # best-effort の検査であり、ここに無い競合を見逃すことを前提にする。
 #
 # 出典: 2026-08-12 に Claude Code の `/` メニューで観測（issue #83）。
 KNOWN_EXTERNAL_SKILL_NAMES = (
-    "code-review",              # Claude Code 組み込み
-    "security-review",          # Claude Code 組み込み
-    "coderabbit-review",        # coderabbit プラグイン
-    "requesting-code-review",   # superpowers プラグイン
-    "receiving-code-review",    # superpowers プラグイン
+    "code-review",              # Claude Code 組み込み（`code-review`）/ `coderabbit:code-review`
+    "security-review",          # Claude Code 組み込み（`security-review`）
+    "coderabbit-review",        # `coderabbit:coderabbit-review`
+    "requesting-code-review",   # `superpowers:requesting-code-review`
+    "receiving-code-review",    # `superpowers:receiving-code-review`
 )
 
 # --- 許可する frontmatter の項目 -------------------------------------------
@@ -414,13 +426,18 @@ def check_external_name_collisions(skills: list[dict]) -> list[Finding]:
     逆向き（外部名が NDF 名の末尾要素）は検査しない。`pr-review` のように接頭辞で
     区別できていれば、利用者は `/pr-rev` まで打った時点で一意に決められる。
 
-    KNOWN_EXTERNAL_SKILL_NAMES が網羅でないため、警告にとどめエラーにはしない。
+    突き合わせる相手は KNOWN_EXTERNAL_SKILL_NAMES で、そのエントリは名前空間を除いた
+    Skill 名である（一覧の定義コメントを参照）。KNOWN_EXTERNAL_SKILL_NAMES が網羅でない
+    ため、警告にとどめエラーにはしない。
     """
     out: list[Finding] = []
     for s in skills:
         name = unquote((s["fm"] or {}).get("name", "")) or s["dir"]
+        # 区切りは `-`（`code-review` の `review`）と `:`（`plugin:review` の `review`）の両方を見る。
+        # `:` は、将来 KNOWN_EXTERNAL_SKILL_NAMES に名前空間付きのエントリを足したときに
+        # 検知漏れを起こさないための防御であり、現在の一覧はすべて名前空間なしなので挙動は変わらない。
         hits = [e for e in KNOWN_EXTERNAL_SKILL_NAMES
-                if e == name or e.endswith("-" + name)]
+                if e == name or e.endswith(("-" + name, ":" + name))]
         if hits:
             out.append(Finding(s["dir"], "warn", "portability/external-name",
                                f"Skill 名 '{name}' が既知の外部 Skill "
