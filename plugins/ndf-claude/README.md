@@ -49,7 +49,7 @@ npm install -g @openai/codex
 codex login
 ```
 
-`/ndf:review <PR番号> gemini` や `/ndf:cross-review` で Gemini 委譲を使う場合は、利用環境に Gemini CLI をインストールしてログインします。
+`/ndf:pr-review <PR番号> gemini` や `/ndf:cross-review` で Gemini 委譲を使う場合は、利用環境に Gemini CLI をインストールしてログインします。
 
 ```bash
 npm install -g @google/gemini-cli

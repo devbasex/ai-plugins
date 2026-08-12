@@ -237,9 +237,11 @@ base branch: `main`
 
 ## テスト計画
 
-- [ ] `git grep -n "/ndf:review\b"` が 0 件（`/ndf:pr-review` にヒットしないよう `\b` を使う）
-- [ ] `git grep -n "cross-pr-review"` が 0 件（置換事故の検出）
-- [ ] `git grep -n "skills/review/"` が 0 件
+- [ ] `git grep -n "/ndf:review\b" -- plugins/` が 0 件（`/ndf:pr-review` にヒットしないよう `\b` を使う）
+- [ ] `git grep -n "cross-pr-review" -- plugins/ docs/` が 0 件（置換事故の検出）
+- [ ] `git grep -n "skills/review\b" -- plugins/ docs/` が 0 件
+- [ ] `docs/` と `issues/` に残る `/ndf:review` が、**v5.0.0 時点の記録**（棚卸台帳・受け入れ条件・
+      リリースノート・日付入りプレゼン資料）だけであることを目視確認する
 - [ ] `python3 scripts/check-skill-frontmatter.py` がエラー 0 / 警告 0
 - [ ] `bash scripts/build-runtime-plugins.sh --check` が差異を検出しない
 - [ ] `python3 scripts/check-markdown-links.py --root .` が成功する
@@ -263,3 +265,11 @@ base branch: `main`
   検査時点で分からない。Task 7 は手動更新のリストによる best-effort に留める
 - **旧名のエイリアス提供** — Skill 名のエイリアス機構が無く、ディレクトリを 2 つ置くと
   manifest と実績集計が二重になる。移行は対応表の案内で行う
+- **日付入りプレゼン資料の書き換え** — `docs/presentations/2026-08-06-ai-plugins-intro.*` は
+  2026-08-06 に行った v5.0.0 紹介の**発表記録**である。当日話していない名前へ書き換えると
+  記録として不正確になり、`build.sh` による PDF / 単一ファイル HTML の再生成（Chromium 必須）で
+  巨大なバイナリ差分も出る。`diagrams/pr-flow.mmd` を含めて旧名のまま残す
+- **v5.0.0 時点の記録の書き換え** — 棚卸台帳（`ndf-skill-inventory.md`）、受け入れ条件
+  （`08-verification.md`）、`README.md` の「NDF v5.0.0 の主な変更」節は、その時点の事実の記録。
+  旧名のまま残し、**改名した事実を注記で足す**にとどめる。v6.0.0 の変更は PR2 で
+  「NDF v6.0.0 の主な変更」節として別に書く

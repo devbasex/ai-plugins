@@ -179,5 +179,5 @@ PR作成/更新完了後、以下を報告:
 - `/ndf:cherry-pick-pr` — 環境ブランチへのcherry-pick PR
 - `/ndf:deploy` — 環境ブランチへのデプロイPR（ブランチ全体）
 - `/ndf:pr-tests` — Test Plan 自動実行
-- `/ndf:review` — PR単位レビュー
+- `/ndf:pr-review` — PR単位レビュー
 - `/ndf:merged` — マージ後のブランチ整理 / 現ブランチに main を取り込み

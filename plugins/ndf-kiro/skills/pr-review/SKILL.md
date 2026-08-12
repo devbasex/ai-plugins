@@ -1,6 +1,6 @@
 ---
-name: review
-description: "Review a PR diff, or the current branch diff with --branch, and post an approve or request-changes verdict. Use when asked to review a PR, check a diff before merge, or self-review a branch. Triggers: 'レビューして', 'PRレビュー', 'マージ前チェック', 'ブランチをレビュー', 'セルフレビュー'"
+name: pr-review
+description: "Review a PR diff, or the current branch diff with --branch, and post an approve or request-changes verdict. Use when asked to review a PR, check a diff before merge, or self-review a branch. Triggers: 'PRレビュー', 'マージ前チェック', 'ブランチをレビュー', 'セルフレビュー', 'PRをレビューして'"
 argument-hint: "[PR番号 | --branch] [AIエージェント(codex|gemini)] [--focus AREA]"
 effort: high
 allowed-tools:
@@ -24,11 +24,11 @@ PR 差分、または `--branch` 指定時は現在のブランチの差分を�
 | `--focus AREA` | 重点観点（`security` / `performance` / `tests` / 任意の文字列） | なし |
 
 ```
-/ndf:review                       # 直前 PR をレビュー
-/ndf:review 9352                  # PR 番号を指定
-/ndf:review 9352 codex            # Codex CLI に委譲
-/ndf:review --branch              # ローカルブランチをセルフレビュー
-/ndf:review --branch security     # セキュリティに焦点を当ててセルフレビュー
+/ndf:pr-review                       # 直前 PR をレビュー
+/ndf:pr-review 9352                  # PR 番号を指定
+/ndf:pr-review 9352 codex            # Codex CLI に委譲
+/ndf:pr-review --branch              # ローカルブランチをセルフレビュー
+/ndf:pr-review --branch security     # セキュリティに焦点を当ててセルフレビュー
 ```
 
 ## 2 つのモード
