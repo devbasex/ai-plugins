@@ -8,10 +8,12 @@
 
 - **individual** — Skill 単位。仕様準拠・安全性・可搬性・運用
 - **aggregate**  — 配布先ごとの初期一覧予算（Claude Code / Codex）と frontmatter 総量
-- **cross**      — Skill 間。トリガ語の重複
+- **cross**      — Skill 間。トリガ語の重複と、既知の外部 Skill 名との衝突
 
-判定が本質的に近似になる項目（description 先頭のトリガ語、when_to_use の追加トリガ）は
-警告にとどめ、`--strict` を付けたときだけ失敗させる。
+判定が本質的に近似になる項目（description 先頭のトリガ語、when_to_use の追加トリガ、
+既知の外部 Skill 名との衝突）は警告にとどめ、`--strict` を付けたときだけ失敗させる。
+外部 Skill 名の一覧は網羅できないため（KNOWN_EXTERNAL_SKILL_NAMES の注記を参照）、
+この検査は見逃しを前提にした補助である。
 
 使い方:
 
@@ -43,6 +45,22 @@ CLAUDE_ITEM_TRUNCATE = 250    # Claude Code は 1 項目をこの長さで切り
 # 2026-08-08）を基準に、約 6% の余裕を足して 13,000 とした。余裕分は Skill 2〜3 個分の
 # frontmatter に相当する。Skill を増やすときは実測しなおしてこの値を更新する。
 FRONTMATTER_TOTAL_MAX = 13000
+
+# --- 既知の外部 Skill 名 ----------------------------------------------------
+# ランタイム組み込み・他プラグインの Skill 名のうち、実際に観測できたもの。
+#
+# この一覧は網羅ではない。配布先の環境に何が入っているかは検査時点では分からず、
+# 利用者が入れる他プラグインまでは列挙できない。観測できたものを手で足していく
+# best-effort の検査であり、ここに無い競合を見逃すことを前提にする。
+#
+# 出典: 2026-08-12 に Claude Code の `/` メニューで観測（issue #83）。
+KNOWN_EXTERNAL_SKILL_NAMES = (
+    "code-review",              # Claude Code 組み込み
+    "security-review",          # Claude Code 組み込み
+    "coderabbit-review",        # coderabbit プラグイン
+    "requesting-code-review",   # superpowers プラグイン
+    "receiving-code-review",    # superpowers プラグイン
+)
 
 # --- 許可する frontmatter の項目 -------------------------------------------
 # Agent Skills 仕様の 6 項目 + Claude Code 独自項目。
@@ -385,6 +403,33 @@ def check_trigger_collisions(skills: list[dict]) -> list[Finding]:
     return out
 
 
+def check_external_name_collisions(skills: list[dict]) -> list[Finding]:
+    """Skill 名が既知の外部 Skill 名の末尾要素になっていないかを検査する。
+
+    利用者が `/` メニューで名前の一部を打つと、その語を末尾に含む候補がすべて並ぶ。
+    NDF の Skill 名が外部 Skill 名の末尾要素だと、外部側に埋もれて選びにくくなる。
+    実例は `review`（`code-review` / `security-review` の末尾）で、issue #83 で
+    `pr-review` へ改名した。
+
+    逆向き（外部名が NDF 名の末尾要素）は検査しない。`pr-review` のように接頭辞で
+    区別できていれば、利用者は `/pr-rev` まで打った時点で一意に決められる。
+
+    KNOWN_EXTERNAL_SKILL_NAMES が網羅でないため、警告にとどめエラーにはしない。
+    """
+    out: list[Finding] = []
+    for s in skills:
+        name = unquote((s["fm"] or {}).get("name", "")) or s["dir"]
+        hits = [e for e in KNOWN_EXTERNAL_SKILL_NAMES
+                if e == name or e.endswith("-" + name)]
+        if hits:
+            out.append(Finding(s["dir"], "warn", "portability/external-name",
+                               f"Skill 名 '{name}' が既知の外部 Skill "
+                               f"({', '.join(hits)}) の末尾要素になっている。"
+                               "`/` メニューで外部側に埋もれるため、"
+                               "接頭辞で区別できる名前へ寄せる"))
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -412,6 +457,7 @@ def main() -> int:
     agg, metrics = check_aggregate(skills, skills_dir)
     findings.extend(agg)
     findings.extend(check_trigger_collisions(skills))
+    findings.extend(check_external_name_collisions(skills))
 
     if args.report:
         print(f"{'skill':34} {'lines':>5} {'desc':>5} {'wtu':>5}  flags")

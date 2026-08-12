@@ -123,6 +123,38 @@ Skill を使わず独自手順で実行された形跡があるなら後者を�
 | `pr` | 自動発動 + 実行前確認 | commit / push / PR 作成 | 起動 173（明示 171 / 自動 2）。自然文の依頼では Skill を通らず独自手順で実行されていた |
 | `official-skills-autoloader` | 自動発動 + 実行前確認 | 外部リポジトリの clone と `~/.claude/skills/` への symlink 作成 | 起動 0 / 機会 97。台帳の判定は「発動改善」で、明示指示専用は判定と逆行する |
 
+## 命名の規則
+
+Skill 名は、自動発動（トリガ語）とは別に **明示起動の入力コスト**を決める。利用者が
+`/` メニューで名前の一部を打つと、その語を含む候補がすべて並ぶためである。
+
+### 外部 Skill 名の末尾要素にしない
+
+**Skill 名を、ランタイム組み込みや主要プラグインの Skill 名の末尾要素にしない。**
+末尾要素になっていると、その語を打ったとき外部側の候補に埋もれて選べない。
+
+実例（2026-08-12 実測、[#83](https://github.com/devbasex/ai-plugins/issues/83)）:
+
+| NDF の Skill 名 | 同じ語を末尾に持つ外部 Skill | 結果 |
+| --- | --- | --- |
+| 旧 `review` | `code-review`（組み込み）、`security-review`（組み込み）、`coderabbit:code-review`、`superpowers:requesting-code-review`、`superpowers:receiving-code-review` | `/review` では候補に埋もれ、`/ndf:` から辿るしかなかった |
+| `fix` | なし | `/fix` で一意に決まる |
+
+`review` は v6.0.0 で **`pr-review`** へ改名して解消した。`/pr-rev` まで打てば一意に決まり、
+`pr` / `pr-tests` / `pr-review` と接頭辞も揃う。
+
+逆に、外部名を**末尾に含む**のは問題ない。`cross-review` は `code-review` の末尾要素では
+ないため、`/cross` の時点で一意に決まる。
+
+`scripts/check-skill-frontmatter.py` が既知の外部名との衝突を警告する。ただし配布先に
+何が入っているかは検査時点で分からないため、**一覧は手で更新する best-effort** であり
+網羅ではない。新しい Skill を足すときは、実際に `/` メニューで名前を打って確認する。
+
+### 名前と親ディレクトリ名を一致させる
+
+`name` と親ディレクトリ名を揃える（[上限値](#上限値)の表を参照）。改名するときは
+ディレクトリ・`name`・3 つの manifest・各 `plugin.json` を同時に直す。
+
 ## トリガ語の規則
 
 ### 一意であること
