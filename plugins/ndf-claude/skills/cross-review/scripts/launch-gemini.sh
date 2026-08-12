@@ -59,7 +59,7 @@ EXTRA_EOF
 fi
 
 cat > "$PROMPT" <<EOF
-# /ndf:review 実行 (cross-review gemini / round $ROUND)
+# /ndf:pr-review 実行 (cross-review gemini / round $ROUND)
 
 PR #$PR を **gemini の観点でレビューし、gh api で直接 PR に投稿** してください。
 

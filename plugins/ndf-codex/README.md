@@ -29,7 +29,7 @@ Claude Code 専用の agents、statusline 自動設定、transcript retention �
 | `cherry-pick-pr` | 環境ブランチへの cherry-pick PR 作成 |
 | `deploy` | 環境ブランチ (qa/staging, release/v2 等) への deploy PR 作成 |
 
-`merged` / `pr` / `pr-tests` / `review` は日常的に自然文で依頼されるため、v5.0.0 で暗黙起動を許可しました。代わりに、取り消しの難しい手順 (push、PR 作成、ブランチ・worktree の削除) の直前に対象を提示して同意を得ることを各 Skill の本文で必須化しています。
+`merged` / `pr` / `pr-tests` / `pr-review` は日常的に自然文で依頼されるため、v5.0.0 で暗黙起動を許可しました。代わりに、取り消しの難しい手順 (push、PR 作成、ブランチ・worktree の削除) の直前に対象を提示して同意を得ることを各 Skill の本文で必須化しています。
 
 ### 利用者への影響と起動方法
 

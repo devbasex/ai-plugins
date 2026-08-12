@@ -1,7 +1,7 @@
 pr
 pr-tests
 fix
-review
+pr-review
 cross-review
 merged
 ndf-policies

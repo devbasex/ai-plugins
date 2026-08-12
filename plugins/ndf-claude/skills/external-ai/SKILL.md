@@ -21,7 +21,7 @@ description: "Delegate coding, review, or research to an external AI CLI (Codex 
 ## NDF との関係
 
 - Claude Code 版の `corder` エージェントは本スキルの手順で Codex CLI を呼び出す
-- `/ndf:review <PR番号> codex` / `/ndf:review <PR番号> gemini` の委譲先として利用される
+- `/ndf:pr-review <PR番号> codex` / `/ndf:pr-review <PR番号> gemini` の委譲先として利用される
 - `/ndf:cross-review` は codex / gemini を**並列に起動**して両者の APPROVE 収束を待つ
 - v4.0.0 で Codex MCP サーバは廃止。`mcp__codex__*` ツールは存在しない
 - Gemini 専用エージェントは未整備。委譲時はメインエージェントから本スキルを参照して直接 CLI を起動する
@@ -279,6 +279,6 @@ CLI 固有の症状（サンドボックス失敗、承認モードによるハ�
 - [references/cli-codex.md](references/cli-codex.md) — Codex CLI 固有の手順
 - [references/cli-gemini.md](references/cli-gemini.md) — Gemini CLI 固有の手順
 - `/ndf:cross-review` — codex / gemini 両方を並列起動して APPROVE 収束まで回す
-- `/ndf:review` — 第二引数に `codex` / `gemini` を指定すると本スキルの手順へ委譲する
+- `/ndf:pr-review` — 第二引数に `codex` / `gemini` を指定すると本スキルの手順へ委譲する
 - Claude Code 版 `corder` エージェント — 本スキルの手順で Codex CLI を呼び出す独立レビュー担当
 - 他の AI CLI（`claude`, `ollama` 等）も同じパターンで利用できる
