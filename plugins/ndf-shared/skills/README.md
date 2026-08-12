@@ -13,8 +13,8 @@ python3 scripts/check-skill-frontmatter.py           # 検査
 python3 scripts/check-skill-frontmatter.py --report  # 実測値の一覧
 ```
 
-判定が本質的に近似になる項目（`description` 先頭のトリガ語、`when_to_use` の追加トリガ）は
-警告にとどまり、`--strict` を付けたときだけ失敗する。
+判定が本質的に近似になる項目（`description` 先頭のトリガ語、`when_to_use` の追加トリガ、
+既知の外部 Skill 名との衝突）は警告にとどまり、`--strict` を付けたときだけ失敗する。
 
 利用実績と維持・統合・削除の判定は
 [docs/specifications/ndf-skill-inventory.md](../../../docs/specifications/ndf-skill-inventory.md)
