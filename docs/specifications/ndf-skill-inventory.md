@@ -180,6 +180,13 @@ frontmatter を [規約](../../plugins/ndf-shared/skills/README.md) へ揃えた
 | `ndf-policies` | `user-invocable: false` を維持 | `description` に「知識として参照するだけで、手順として実行しない」と明記した |
 | `official-skills-autoloader` | 自動発動を維持し、実行前確認を必須手順として本文へ固定 | 本 PR で Claude Code の manifest へ追加したことで暗黙起動が可能になり、外部リポジトリの clone と `~/.claude/skills/` への symlink 作成が同意なしに走りうる状態になった。明示指示専用（`disable-model-invocation`）も検討したが、この Skill は起動 0 / 機会 97 で台帳の判定が「発動改善」であり、明示専用は判定と逆行して機会 97 をそのまま取りこぼす。また `~/.claude/skills/` を読むのは Claude Code だけで Codex / Kiro には配布しないが、`disable-model-invocation` は Claude Code でも発動制御であって実行前確認ではないため、これだけでは同意取得を保証できない。したがって `merged` / `pr` と同じ「自動発動 + 実行前確認」を採り、クローン元 URL・クローン先・symlink を張る先・対象 Skill 名の 4 点を一覧提示して同意を得る手順を `SKILL.md` と `description` に固定した |
 
+> **v6.0.0 での後続変更**: 上表の `review` は v6.0.0 で **`pr-review` へ改名**した
+> （[#83](https://github.com/devbasex/ai-plugins/issues/83)）。自然文発動は
+> [#85](https://github.com/devbasex/ai-plugins/pull/85) で追わないと確定しており、改名の目的は
+> 明示起動時の識別性である（`review` は `code-review` / `security-review` / `cross-review` の
+> 部分文字列で、スラッシュ補完の候補に埋もれる）。上表と以降の集計は **v5.0.0 時点の記録**
+> なので旧名のまま残す。
+
 ### 配布先
 
 | Skill | 台帳の配布 | 変更後 | 理由 |

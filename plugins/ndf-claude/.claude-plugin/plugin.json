@@ -31,7 +31,7 @@
     "./skills/pr",
     "./skills/pr-tests",
     "./skills/fix",
-    "./skills/review",
+    "./skills/pr-review",
     "./skills/cross-review",
     "./skills/merged",
     "./skills/ndf-policies",

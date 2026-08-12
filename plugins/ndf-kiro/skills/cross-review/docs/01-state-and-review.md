@@ -204,7 +204,7 @@ launcher が生成するプロンプトに以下を強制している:
 | `$TMP_DIR/<agent>-review-pr<PR>-result.json` | `{event, posted_as, comments_count, review_url, by_severity}` のサマリ |
 | `$TMP_DIR/<agent>-review-pr<PR>-round<R>-payload.json` | `{comments: [{path, line, body, severity}, ...]}` 振動検知用 |
 
-`/ndf:review` の result.json 出力規約に `posted_as` フィールドを含むこと
+`/ndf:pr-review` の result.json 出力規約に `posted_as` フィールドを含むこと
 （自分PR ダウングレード時に GitHub に実際送った event。デフォルトは `event` と同値）。
 
 ### 2.4 result.json を state にマージ

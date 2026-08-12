@@ -152,11 +152,17 @@ v5.0.0 を `main` へマージしたあと、Claude Code で `--output-format st
 したがって機能は失われていない。名前や責務の見直しは破壊的変更になるため、
 [#83](https://github.com/devbasex/ai-plugins/issues/83) で追跡する。
 
+> **v6.0.0 での決着**: #83 は改名で決着した。`review` は **`pr-review`** へ改名し、
+> 上の記述にある `/ndf:review` は v6.0.0 以降 `/ndf:pr-review` である。本節は
+> v5.0.0 時点の実測記録なので旧名のまま残す。改名の理由は自然文発動ではなく、
+> `review` が `code-review` / `security-review` / `cross-review` の部分文字列で
+> スラッシュ補完の候補に埋もれることにある。
+
 ### 後続リリースへの申し送り
 
-`execute-goal`（Release 3）のレビュー段階は、`review` を**明示的に**呼ぶ手順として書く。
+`execute-goal`（Release 3）のレビュー段階は、`pr-review` を**明示的に**呼ぶ手順として書く。
 自然文でレビューを依頼する形にすると、Claude Code では組み込みの `code-review` が起動して
-判定の投稿経路が変わる。`cross-review` は既に内部で `review` を直接呼んでいるため影響しない。
+判定の投稿経路が変わる。`cross-review` は既に内部で `pr-review` を直接呼んでいるため影響しない。
 
 ### トリガ語の重複検査の限界
 
