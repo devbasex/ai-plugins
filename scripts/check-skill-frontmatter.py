@@ -8,10 +8,12 @@
 
 - **individual** — Skill 単位。仕様準拠・安全性・可搬性・運用
 - **aggregate**  — 配布先ごとの初期一覧予算（Claude Code / Codex）と frontmatter 総量
-- **cross**      — Skill 間。トリガ語の重複
+- **cross**      — Skill 間。トリガ語の重複と、既知の外部 Skill 名との衝突
 
-判定が本質的に近似になる項目（description 先頭のトリガ語、when_to_use の追加トリガ）は
-警告にとどめ、`--strict` を付けたときだけ失敗させる。
+判定が本質的に近似になる項目（description 先頭のトリガ語、when_to_use の追加トリガ、
+既知の外部 Skill 名との衝突）は警告にとどめ、`--strict` を付けたときだけ失敗させる。
+外部 Skill 名の一覧は網羅できないため（KNOWN_EXTERNAL_SKILL_NAMES の注記を参照）、
+この検査は見逃しを前提にした補助である。
 
 使い方:
 
@@ -43,6 +45,34 @@ CLAUDE_ITEM_TRUNCATE = 250    # Claude Code は 1 項目をこの長さで切り
 # 2026-08-08）を基準に、約 6% の余裕を足して 13,000 とした。余裕分は Skill 2〜3 個分の
 # frontmatter に相当する。Skill を増やすときは実測しなおしてこの値を更新する。
 FRONTMATTER_TOTAL_MAX = 13000
+
+# --- 既知の外部 Skill 名 ----------------------------------------------------
+# ランタイム組み込み・他プラグインの Skill 名のうち、実際に観測できたもの。
+#
+# **エントリは名前空間（`coderabbit:` などのプラグイン接頭辞）を除いた Skill 名で持つ。**
+# 理由は 2 つ。
+#
+# 1. 組み込み Skill（code-review / security-review）はそもそも名前空間を持たないため、
+#    名前空間付きに統一することができない
+# 2. `/` メニューで NDF の Skill が埋もれるかどうかを決めるのは名前空間ではなく
+#    Skill 名の部分である。`coderabbit:code-review` の Skill 名は `code-review` で、
+#    埋もれる原因になるのはこの `code-review` の側
+#
+# したがって一覧の単位は「名前空間を除いた Skill 名」が正しい。行末に、`/` メニューで
+# どう表示されていたか（名前空間付きの表示名）を観測元として残す。
+#
+# この一覧は網羅ではない。配布先の環境に何が入っているかは検査時点では分からず、
+# 利用者が入れる他プラグインまでは列挙できない。観測できたものを手で足していく
+# best-effort の検査であり、ここに無い競合を見逃すことを前提にする。
+#
+# 出典: 2026-08-12 に Claude Code の `/` メニューで観測（issue #83）。
+KNOWN_EXTERNAL_SKILL_NAMES = (
+    "code-review",              # Claude Code 組み込み（`code-review`）/ `coderabbit:code-review`
+    "security-review",          # Claude Code 組み込み（`security-review`）
+    "coderabbit-review",        # `coderabbit:coderabbit-review`
+    "requesting-code-review",   # `superpowers:requesting-code-review`
+    "receiving-code-review",    # `superpowers:receiving-code-review`
+)
 
 # --- 許可する frontmatter の項目 -------------------------------------------
 # Agent Skills 仕様の 6 項目 + Claude Code 独自項目。
@@ -385,6 +415,42 @@ def check_trigger_collisions(skills: list[dict]) -> list[Finding]:
     return out
 
 
+def check_external_name_collisions(skills: list[dict]) -> list[Finding]:
+    """Skill 名が既知の外部 Skill 名の末尾要素になっていないかを検査する。
+
+    利用者が `/` メニューで名前の一部を打つと、その語を末尾に含む候補がすべて並ぶ。
+    NDF の Skill 名が外部 Skill 名の末尾要素だと、外部側に埋もれて選びにくくなる。
+    実例は `review`（`code-review` / `security-review` の末尾）で、issue #83 で
+    `pr-review` へ改名した。
+
+    逆向き（外部名が NDF 名の末尾要素）は検査しない。`pr-review` のように接頭辞で
+    区別できていれば、利用者は `/pr-rev` まで打った時点で一意に決められる。
+
+    突き合わせる相手は KNOWN_EXTERNAL_SKILL_NAMES で、そのエントリは名前空間を除いた
+    Skill 名である（一覧の定義コメントを参照）。KNOWN_EXTERNAL_SKILL_NAMES が網羅でない
+    ため、警告にとどめエラーにはしない。
+    """
+    out: list[Finding] = []
+    for s in skills:
+        name = unquote((s["fm"] or {}).get("name", "")) or s["dir"]
+        # 区切りは `-`（`code-review` の `review`）と `:`（`plugin:review` の `review`）の両方を見る。
+        # KNOWN_EXTERNAL_SKILL_NAMES の規約は「名前空間を除いた Skill 名」で確定していて、これを
+        # 変える予定はない。`:` を見るのは規約を変える想定だからではなく、規約に反して
+        # `coderabbit:code-review` のような表示名がそのまま貼られた場合に、検査が黙って
+        # すり抜けるのを防ぐためである。`/` メニューの表示名をコピーしてしまう誤りは起きやすく、
+        # `-` だけの判定だと衝突があっても警告が出ず、見逃したことにも気づけない。
+        # 規約どおりのエントリしかない現状では、この分岐があっても挙動は変わらない。
+        hits = [e for e in KNOWN_EXTERNAL_SKILL_NAMES
+                if e == name or e.endswith(("-" + name, ":" + name))]
+        if hits:
+            out.append(Finding(s["dir"], "warn", "portability/external-name",
+                               f"Skill 名 '{name}' が既知の外部 Skill "
+                               f"({', '.join(hits)}) の末尾要素になっている。"
+                               "`/` メニューで外部側に埋もれるため、"
+                               "接頭辞で区別できる名前へ寄せる"))
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -412,6 +478,7 @@ def main() -> int:
     agg, metrics = check_aggregate(skills, skills_dir)
     findings.extend(agg)
     findings.extend(check_trigger_collisions(skills))
+    findings.extend(check_external_name_collisions(skills))
 
     if args.report:
         print(f"{'skill':34} {'lines':>5} {'desc':>5} {'wtu':>5}  flags")
