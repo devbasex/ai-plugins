@@ -10,7 +10,7 @@ Claude Code / Codex / Kiro CLI向けのスキル・MCP設定を共有するた�
 
 - **公開Skills**: Claude Code向け core 25個、Kiro向け core 24個、Codex向け core 23個に分離。
 - **元Skills（29個）**:
-  - PR/レビューワークフロー (7): pr, pr-tests, fix, review, cherry-pick-pr, deploy, merged
+  - PR/レビューワークフロー (7): pr, pr-tests, fix, pr-review, cherry-pick-pr, deploy, merged
   - 原則・ガイドライン (9): ndf-policies, implementation-plan, plan-to-spec, investigation-rules, problem-solving, logging-guidelines, markdown-writing, issue-plan-strategy, ml-model-structure
   - データ分析・品質・環境 (4): qa-security-scan, docker-container-access, google-auth, official-skills-autoloader
   - E2Eテスト/Playwright (4): playwright-planning, playwright-authoring, playwright-evidence, playwright-kit-ops
