@@ -13,8 +13,8 @@ python3 scripts/check-skill-frontmatter.py           # 検査
 python3 scripts/check-skill-frontmatter.py --report  # 実測値の一覧
 ```
 
-判定が本質的に近似になる項目（`description` 先頭のトリガ語、`when_to_use` の追加トリガ）は
-警告にとどまり、`--strict` を付けたときだけ失敗する。
+判定が本質的に近似になる項目（`description` 先頭のトリガ語、`when_to_use` の追加トリガ、
+既知の外部 Skill 名との衝突）は警告にとどまり、`--strict` を付けたときだけ失敗する。
 
 利用実績と維持・統合・削除の判定は
 [docs/specifications/ndf-skill-inventory.md](../../../docs/specifications/ndf-skill-inventory.md)
@@ -39,8 +39,8 @@ python3 scripts/check-skill-frontmatter.py --report  # 実測値の一覧
 
 ```yaml
 ---
-name: review
-description: "Review a PR or local branch diff and post an approve/changes verdict. Use when asked to review a PR, check a diff before merge, or self-review a branch (レビューして / PR確認 / マージ前チェック)."
+name: pr-review
+description: "Review a PR or local branch diff and post an approve/changes verdict. Use when asked to review a PR, check a diff before merge, or self-review a branch (PRレビュー / PR確認 / マージ前チェック)."
 when_to_use: "Claude Code 向けの追加トリガのみ。description で足りるなら付けない"
 ---
 ```
@@ -123,6 +123,44 @@ Skill を使わず独自手順で実行された形跡があるなら後者を�
 | `pr` | 自動発動 + 実行前確認 | commit / push / PR 作成 | 起動 173（明示 171 / 自動 2）。自然文の依頼では Skill を通らず独自手順で実行されていた |
 | `official-skills-autoloader` | 自動発動 + 実行前確認 | 外部リポジトリの clone と `~/.claude/skills/` への symlink 作成 | 起動 0 / 機会 97。台帳の判定は「発動改善」で、明示指示専用は判定と逆行する |
 
+## 命名の規則
+
+Skill 名は、自動発動（トリガ語）とは別に **明示起動の入力コスト**を決める。利用者が
+`/` メニューで名前の一部を打つと、その語を含む候補がすべて並ぶためである。
+
+### 外部 Skill 名の末尾要素にしない
+
+**Skill 名を、ランタイム組み込みや主要プラグインの Skill 名の末尾要素にしない。**
+末尾要素になっていると、その語を打ったとき外部側の候補に埋もれて選べない。
+
+実例（2026-08-12 実測、[#83](https://github.com/devbasex/ai-plugins/issues/83)）:
+
+| NDF の Skill 名 | 同じ語を末尾に持つ外部 Skill（`/` メニューでの表示名 → Skill 名） | 結果 |
+| --- | --- | --- |
+| 旧 `review` | `code-review`（組み込み）→ `code-review`、`security-review`（組み込み）→ `security-review`、`coderabbit:code-review` → `code-review`、`coderabbit:coderabbit-review` → `coderabbit-review`、`superpowers:requesting-code-review` → `requesting-code-review`、`superpowers:receiving-code-review` → `receiving-code-review` | `/review` では候補に埋もれ、`/ndf:` から辿るしかなかった |
+| `fix` | なし | `/fix` で一意に決まる |
+
+表の左側が `/` メニューでの表示名、右側が名前空間（`coderabbit:` などのプラグイン接頭辞）を
+除いた Skill 名である。
+
+`review` は v6.0.0 で **`pr-review`** へ改名して解消した。`/pr-rev` まで打てば一意に決まり、
+`pr` / `pr-tests` / `pr-review` と接頭辞も揃う。
+
+逆に、外部名を**末尾に含む**のは問題ない。`cross-review` は `code-review` の末尾要素では
+ないため、`/cross` の時点で一意に決まる。
+
+`scripts/check-skill-frontmatter.py` が既知の外部名との衝突を警告する。検査が突き合わせる
+一覧（`KNOWN_EXTERNAL_SKILL_NAMES`）は**名前空間を除いた Skill 名**で持つ。組み込み Skill は
+そもそも名前空間を持たず、また `/` メニューで埋もれるかどうかを決めるのは名前空間ではなく
+Skill 名の部分だからである。ただし配布先に何が入っているかは検査時点で分からないため、
+**一覧は手で更新する best-effort** であり網羅ではない。新しい Skill を足すときは、実際に
+`/` メニューで名前を打って確認する。
+
+### 名前と親ディレクトリ名を一致させる
+
+`name` と親ディレクトリ名を揃える（[上限値](#上限値)の表を参照）。改名するときは
+ディレクトリ・`name`・3 つの manifest・各 `plugin.json` を同時に直す。
+
 ## トリガ語の規則
 
 ### 一意であること
@@ -141,13 +179,13 @@ Skill を使わず独自手順で実行された形跡があるなら後者を�
 **ランタイム組み込みの Skill や他プラグインとの競合は検査できない。** 配布先の環境に
 何が入っているかに依存するためである。
 
-実例: `review` は `disable-model-invocation` を外して自動発動できるようにしたが、
-Claude Code 組み込みの `code-review` が同じ用途を持つため、「レビューして」のような
-依頼では常に組み込み側が選ばれる（実測は
+実例: 旧 `review`（現 `pr-review`）は `disable-model-invocation` を外して自動発動できる
+ようにしたが、Claude Code 組み込みの `code-review` が同じ用途を持つため、「レビューして」の
+ような依頼では常に組み込み側が選ばれる（実測は
 [08-verification.md](../../../issues/ndf-development-skills/08-verification.md)
 「自然文からの発動の実測」）。同名・同用途の組み込み Skill があるランタイムでは、
 `description` を差別化しても勝てないことがある。明示起動で使う前提に切り替えるか、
-用途が重ならない名前へ寄せる。
+用途が重ならない名前へ寄せる。この Skill は後者を採り、v6.0.0 で `pr-review` へ改名した。
 
 ### 広すぎるトリガを置かない
 

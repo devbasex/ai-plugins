@@ -1,6 +1,6 @@
 ---
 name: cross-review
-description: "Review a PR with both Codex and Gemini, looping fixes until both APPROVE. Use when a converging two-AI review is wanted; for a one-shot second opinion use /ndf:review. Triggers: 'cross-review', 'クロスレビュー', '両AIレビュー', '収束レビュー', 'codex と gemini でレビュー'"
+description: "Review a PR with both Codex and Gemini, looping fixes until both APPROVE. Use when a converging two-AI review is wanted; for a one-shot second opinion use /ndf:pr-review. Triggers: 'cross-review', 'クロスレビュー', '両AIレビュー', '収束レビュー', 'codex と gemini でレビュー'"
 argument-hint: "[PR番号] [--max-rounds N] [--rotate-after K] [--rotate-mode light|squash] [--only codex|gemini] [--focus TEXT] [--extra-instructions-file PATH]"
 allowed-tools:
   - Bash
@@ -14,7 +14,7 @@ allowed-tools:
 # クロスレビュー収束ループ
 
 PR を **codex / gemini 両方** にレビューさせ、両者が `APPROVE` を返すまで
-`/ndf:review` と `/ndf:fix` を自動で回す。
+`/ndf:pr-review` と `/ndf:fix` を自動で回す。
 
 /goalの引数として呼ばれた場合は、codex / gemini が`APPROVE` になるまで/cross-reviewを繰り返す。
   * codex / geminiのいずれかが不具合などで実行できなくなった場合は異常終了とする
@@ -102,7 +102,7 @@ codex / gemini 両 launcher に同じ追加観点を渡す。`--focus` /
 
 ## 前提
 
-- `/ndf:review` が **AI 直接投稿**（外部 AI 自身が `gh api` で投稿）に対応
+- `/ndf:pr-review` が **AI 直接投稿**（外部 AI 自身が `gh api` で投稿）に対応
 - `/ndf:fix` が **サブエージェント起動 + 重要度ベース自動修正 + Resolve Conversation** に対応
 - `codex` / `gemini` CLI が動作し、`gh` CLI が認証済み
 - `Agent(subagent_type="general-purpose", ...)` でサブエージェントを起動可能
@@ -158,8 +158,8 @@ flowchart TD
     Start([事前確認 / loop 開始前に 1 回だけ]):::phase --> Init["worktree 作成 + state.json 初期化<br/>・自分の PR 判定 → event downgrade 設定<br/>・&lt;worktree-base&gt;/pr&lt;PR&gt; を用意<br/>・既存コメントスナップショット保存"]
     Init --> Round["Round N start<br/>current_pr = PR#"]:::phase
 
-    Round -.並列バックグラウンド.-> Codex["/ndf:review &lt;PR&gt; codex<br/>(AI が gh api で直接投稿)<br/>body 先頭: cross-review / round N / codex / intent<br/>→ result.json (intent + posted_as)"]
-    Round -.並列バックグラウンド.-> Gemini["/ndf:review &lt;PR&gt; gemini<br/>--skip-trust 必須<br/>body 先頭: cross-review / round N / gemini / intent<br/>→ result.json (intent + posted_as)"]
+    Round -.並列バックグラウンド.-> Codex["/ndf:pr-review &lt;PR&gt; codex<br/>(AI が gh api で直接投稿)<br/>body 先頭: cross-review / round N / codex / intent<br/>→ result.json (intent + posted_as)"]
+    Round -.並列バックグラウンド.-> Gemini["/ndf:pr-review &lt;PR&gt; gemini<br/>--skip-trust 必須<br/>body 先頭: cross-review / round N / gemini / intent<br/>→ result.json (intent + posted_as)"]
 
     Codex --> Decide{"判定 (intent ベース)"}
     Gemini --> Decide
@@ -466,10 +466,10 @@ pint / larastan / test / build などは **中断** を原則とする。
 
 ## 関連
 
-- `/ndf:review` — 単発レビュー（AI 直接投稿対応）
+- `/ndf:pr-review` — 単発レビュー（AI 直接投稿対応）
 - `/ndf:fix` — 指摘の分類・修正・返信・Resolve（サブエージェント起動対応）
 - `/ndf:external-ai` — codex / gemini CLI 呼び出し手順（CLI 別の差分は `references/cli-codex.md` / `references/cli-gemini.md`）
 - `/ndf:issue-plan-strategy` — multi-PR ワークフローでは **個別 PR ごとに本 cross-review が原則必須**。
-  `/ndf:review` 単発や Claude Code の `code-reviewer` は代替にせず、release ブランチへ merge する前に
+  `/ndf:pr-review` 単発や Claude Code の `code-reviewer` は代替にせず、release ブランチへ merge する前に
   codex + gemini の APPROVE 収束を確認する (Step 6)
 - `general-purpose` エージェント — fix 実行用サブエージェント

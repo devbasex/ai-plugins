@@ -243,7 +243,7 @@ def extract_slash_invocation(ev: dict, skill_names: set[str]) -> str | None:
     """Return the skill a user invoked by slash command, if this event is one.
 
     Explicit invocations never appear as a Skill tool_use; they are recorded as
-    a user message carrying <command-name>/ndf:review</command-name>. Installs
+    a user message carrying <command-name>/ndf:pr-review</command-name>. Installs
     that predate the plugin prefix record the bare name (/review).
     """
     if ev.get("type") != "user":

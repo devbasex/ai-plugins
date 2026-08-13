@@ -20,4 +20,4 @@ pr
 pr-tests
 problem-solving
 qa-security-scan
-review
+pr-review

@@ -6,11 +6,11 @@ Claude Code / Codex / Kiro CLI向けのスキル・MCP設定を共有するた�
 
 このマーケットプレイスは、チーム全体でAI開発ツール（Claude Code / Codex / Kiro CLI）の導入を加速するための事前設定されたプラグインを提供します。
 
-**NDFプラグイン v5.0.0** は、同じ `ndf@ai-plugins` という名前で Claude Code / Codex / Kiro CLI へ配布されるランタイム別プラグインです。共通ソースは `plugins/ndf-shared/` に集約し、利用者が install する配布物は `plugins/ndf-claude/` / `plugins/ndf-codex/` / `plugins/ndf-kiro/` に分かれています。
+**NDFプラグイン v6.0.0** は、同じ `ndf@ai-plugins` という名前で Claude Code / Codex / Kiro CLI へ配布されるランタイム別プラグインです。共通ソースは `plugins/ndf-shared/` に集約し、利用者が install する配布物は `plugins/ndf-claude/` / `plugins/ndf-codex/` / `plugins/ndf-kiro/` に分かれています。
 
 - **公開Skills**: Claude Code向け core 25個、Kiro向け core 24個、Codex向け core 23個に分離。
 - **元Skills（29個）**:
-  - PR/レビューワークフロー (7): pr, pr-tests, fix, review, cherry-pick-pr, deploy, merged
+  - PR/レビューワークフロー (7): pr, pr-tests, fix, pr-review, cherry-pick-pr, deploy, merged
   - 原則・ガイドライン (9): ndf-policies, implementation-plan, plan-to-spec, investigation-rules, problem-solving, logging-guidelines, markdown-writing, issue-plan-strategy, ml-model-structure
   - データ分析・品質・環境 (4): qa-security-scan, docker-container-access, google-auth, official-skills-autoloader
   - E2Eテスト/Playwright (4): playwright-planning, playwright-authoring, playwright-evidence, playwright-kit-ops
@@ -102,7 +102,28 @@ kiro-cli chat --agent ndf
 
 | プラグイン名 | バージョン | 説明 | 詳細 |
 |------------|----------|------|------|
-| **ndf** | 5.0.0 | Claude Code / Codex / Kiro CLI 向けに runtime 別配布物を提供する NDF プラグイン。8個の専門エージェント（Claude版）、公開Skills（Claude Code向け core 25個、Kiro向け core 24個、Codex向け core 23個）、Claude SessionStart/Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:external-ai` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [Claude](./plugins/ndf-claude/README.md) / [Codex](./plugins/ndf-codex/README.md) / [Kiro](./plugins/ndf-kiro/README.md) |
+| **ndf** | 6.0.0 | Claude Code / Codex / Kiro CLI 向けに runtime 別配布物を提供する NDF プラグイン。8個の専門エージェント（Claude版）、公開Skills（Claude Code向け core 25個、Kiro向け core 24個、Codex向け core 23個）、Claude SessionStart/Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:external-ai` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [Claude](./plugins/ndf-claude/README.md) / [Codex](./plugins/ndf-codex/README.md) / [Kiro](./plugins/ndf-kiro/README.md) |
+
+### NDF v6.0.0 の主な変更（非互換）
+
+**`/ndf:review` を `/ndf:pr-review` へ改名しました。** 引数と挙動は変わりません。
+
+| 旧コマンド | 移行先 |
+|---|---|
+| `/ndf:review` | `/ndf:pr-review` |
+
+理由は、`review` が `code-review`（Claude Code 組み込み）/ `security-review` /
+`cross-review` の末尾要素で、`/` メニューで `review` と打つと候補に埋もれるためです
+（[#83](https://github.com/devbasex/ai-plugins/issues/83)）。`/pr-rev` まで打てば一意に
+決まり、`/ndf:pr` `/ndf:pr-tests` とも接頭辞が揃います。
+
+あわせて Skill の**命名規約**に「ランタイム組み込みや主要プラグインの Skill 名の末尾要素に
+しない」を追加し、`scripts/check-skill-frontmatter.py` が既知の外部 Skill 名との衝突を
+警告するようにしました。配布先の環境に何が入っているかは検査時点で分からないため、
+この検査は手動更新の一覧による best-effort です。
+
+v5.0.0 で載せた旧コマンド名の対応表は、予告どおり `ndf-policies` から削除しました。
+v4.20.1 以前から移行する場合は v5.0.0 の `ndf-policies` を参照してください。
 
 ### NDF v5.0.0 の主な変更（非互換）
 
