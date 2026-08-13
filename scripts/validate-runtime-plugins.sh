@@ -91,7 +91,14 @@ if claude_manifest.is_file() and claude_plugin_json.is_file():
     ]
     expected_set = {name for name in expected if name}
     declared = json.loads(claude_plugin_json.read_text(encoding="utf-8")).get("skills")
-    if isinstance(declared, list):
+    if not isinstance(declared, list):
+        # 配列以外（ディレクトリ指定・欠落）を許すと、この突き合わせが黙って skip され
+        # 配布漏れの再発を検出できなくなる。Claude 版は配列で明示する形式に固定する。
+        errors.append(
+            "claude plugin.json の skills が配列ではない"
+            f"（実際: {type(declared).__name__}）。manifest との突き合わせができない"
+        )
+    else:
         declared_set = {entry.rsplit("/", 1)[-1] for entry in declared}
         for missing in sorted(expected_set - declared_set):
             errors.append(
