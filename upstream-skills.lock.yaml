@@ -1,0 +1,103 @@
+# NDF の Skill を設計する際に参照した外部リポジトリの固定記録。
+#
+# 目的は 2 つある。
+#
+#   1. 上流の更新差分を後から監査できるようにする（commit を固定する）
+#   2. ライセンス上の義務が発生したときに、対象と範囲を特定できるようにする
+#
+# 利用者向けの告知は THIRD_PARTY_NOTICES.md にある。こちらは監査用の記録であり、
+# 配布物へは同期しない。
+#
+# 項目:
+#   repository    参照元（owner/repo）
+#   commit        参照時点で固定したコミット。更新差分の監査はこの点からの差分で行う
+#   commit_date   上記コミットの日付
+#   license       参照時点の SPDX 識別子
+#   notice_file   上流の NOTICE ファイル（Apache-2.0 の告知保持要件で必要。無い場合は null）
+#   source_paths  参照した範囲。commit の時点で存在を確認したパス
+#   local_skills  対応する NDF の Skill
+#   text_reuse    文章・コードの転用の有無。none は転用なし（設計方針のみ参照）
+#   adaptation    NDF でどう変えたか
+
+version: 1
+recorded_at: "2026-08-13"
+
+# 転用の方針。none 以外へ変える場合は THIRD_PARTY_NOTICES.md へライセンス全文と
+# 転用範囲を追記し、build-runtime-plugins.sh で 3 ランタイムへ同期する。
+policy:
+  text_reuse: none
+  rationale: "上流の文章は転用せず、工程の分け方と判断基準だけを参照して書き下ろす"
+
+sources:
+  - name: addyosmani-agent-skills
+    repository: addyosmani/agent-skills
+    commit: "be42637c5af93fdc8526b68ec2f2651b930f316c"
+    commit_date: "2026-08-11"
+    license: MIT
+    notice_file: null
+    source_paths:
+      - skills/spec-driven-development/SKILL.md
+      - skills/test-driven-development/SKILL.md
+      - skills/planning-and-task-breakdown/SKILL.md
+      - skills/code-simplification/SKILL.md
+    local_skills:
+      - requirements-design
+      - tdd-cycle
+    text_reuse: none
+    adaptation: >-
+      仕様先行の進め方とテスト駆動の規律を参照した。NDF では受け入れ条件の作成
+      (requirements-design) とサイクルの実行 (tdd-cycle) に責務を分け、日本語で
+      書き下ろしたうえでランタイム非依存にした。カバレッジ閾値は持たせていない。
+
+  - name: obra-superpowers
+    repository: obra/superpowers
+    commit: "b36e0829c6d0140e93cfef2ca599b1b07d4a7797"
+    commit_date: "2026-08-12"
+    license: MIT
+    notice_file: null
+    source_paths:
+      - skills/test-driven-development/SKILL.md
+      - skills/test-driven-development/writing-good-tests.md
+      - skills/verification-before-completion/SKILL.md
+    local_skills:
+      - tdd-cycle
+      - quality-gates
+    text_reuse: none
+    adaptation: >-
+      工程を飛ばさせない規律（失敗理由の確認、最小実装、実行していないテストを
+      通ったと報告しない）を参照した。NDF では証跡の項目（実行コマンド・終了コード・
+      実行時刻・対象範囲）を quality-gates 側の要求として明文化した。
+
+  - name: moai-adk
+    repository: modu-ai/moai-adk
+    commit: "7f61332ef13037dbab0925ce92c9bb18990d8b95"
+    commit_date: "2026-08-13"
+    license: Apache-2.0
+    notice_file: null   # 上記コミット時点で NOTICE ファイルは存在しない
+    source_paths:
+      - .claude/skills/moai-workflow-tdd/SKILL.md
+      - .claude/skills/moai-foundation-quality/SKILL.md
+    local_skills:
+      - safe-refactoring
+      - quality-gates
+    text_reuse: none
+    adaptation: >-
+      テストが乏しい既存コードで現状固定テストを先行させる考え方を参照した。
+      同リポジトリが DDD と呼ぶ枠組みは Domain-Driven Development であり、
+      NDF では safe-refactoring の既存コード向け手順として取り込む。Evans の
+      Domain-Driven Design は別 Skill (domain-modeling) が扱う。固定の
+      カバレッジ閾値は採用しない。
+
+  - name: ramziddin-solid-skills
+    repository: ramziddin/solid-skills
+    commit: null   # 参照したが採用していないため固定していない
+    commit_date: null
+    license: MIT
+    notice_file: null
+    source_paths: []
+    local_skills: []
+    text_reuse: none
+    adaptation: >-
+      メソッドの行数上限やインスタンス変数の個数上限といった数値規則は採用しない。
+      判断は凝集度・結合度・変更理由・認知負荷・テスト容易性で行う。採用しなかった
+      判断の記録として残す。
