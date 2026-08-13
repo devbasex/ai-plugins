@@ -13,6 +13,11 @@ PLUGIN_SKILLS_DIR="$PLUGIN_DIR/skills"
 PLUGIN_PROMPTS_DIR="$PLUGIN_DIR/prompts"
 POLICY_SKILL_FILE="$PLUGIN_SKILLS_DIR/ndf-policies/SKILL.md"
 VERSION_FILE="$PLUGIN_DIR/VERSION"
+# Kiro は配布物をそのまま読ませる方式ではないため、サードパーティー告知を導入先へ配置する。
+# Apache-2.0 の告知保持は頒布物の受領者へ届くことを求めるため、リポジトリ内に置くだけでは
+# 足りない。編集元はリポジトリ直下の THIRD_PARTY_NOTICES.md で、配布物へは
+# scripts/build-runtime-plugins.sh が同期する。
+NOTICES_SOURCE_FILE="$PLUGIN_DIR/THIRD_PARTY_NOTICES.md"
 # Kiro 配布物は plugin.json を持たないため、版数は VERSION ファイルで示す。
 # build-runtime-plugins.sh が Claude 版 plugin.json から生成する。
 # 版数を確認する唯一の手段なので、欠落や空は不完全な配布物として扱い先に落とす。
@@ -91,6 +96,7 @@ PROMPTS_DIR="$KIRO_DIR/prompts"
 STEERING_FILE="$KIRO_DIR/steering/ndf-policies.md"
 AGENT_FILE="$KIRO_DIR/agents/$AGENT_NAME.json"
 LEGACY_AGENT_FILE="$KIRO_DIR/agents/default.json"
+NOTICES_FILE="$KIRO_DIR/THIRD_PARTY_NOTICES.md"
 
 echo "=== NDF Plugin Installer for Kiro CLI ==="
 echo "  スコープ: $SCOPE ($KIRO_DIR)"
@@ -116,6 +122,11 @@ if [ ! -f "$TEMPLATE_FILE" ]; then
 fi
 if [ ! -f "$POLICY_SKILL_FILE" ]; then
   echo "ERROR: $POLICY_SKILL_FILE が見つかりません" >&2
+  exit 1
+fi
+if [ ! -f "$NOTICES_SOURCE_FILE" ]; then
+  echo "ERROR: $NOTICES_SOURCE_FILE が見つかりません" >&2
+  echo "       bash scripts/build-runtime-plugins.sh を実行して配布物を生成してください" >&2
   exit 1
 fi
 
@@ -217,6 +228,7 @@ if [ "$DRY_RUN" = true ]; then
   echo "  NDF バージョン: $NDF_VERSION"
   echo "  エージェント設定: $AGENT_FILE"
   echo "  常時指示: $STEERING_FILE"
+  echo "  サードパーティー告知: $NOTICES_FILE"
   echo "  Skills数: $SKILL_COUNT"
   exit 0
 fi
@@ -242,6 +254,10 @@ header = (
 dest.write_text(f"{header}\n{body}\n", encoding="utf-8")
 PY
 echo "常時指示を生成: $STEERING_FILE"
+
+# --- Step 3b: Place third-party notices at the install destination ---
+cp "$NOTICES_SOURCE_FILE" "$NOTICES_FILE"
+echo "サードパーティー告知を配置: $NOTICES_FILE"
 
 # --- Step 4: Migrate legacy default agent ---
 MIGRATED_FROM_LEGACY=false
@@ -482,6 +498,7 @@ echo "=== インストール完了 ==="
 echo "  NDF バージョン: $NDF_VERSION"
 echo "  エージェント設定: $AGENT_FILE"
 echo "  常時指示: $STEERING_FILE"
+echo "  サードパーティー告知: $NOTICES_FILE"
 echo "  Skills数: $SKILL_COUNT (シンボリックリンク: $SKILLS_DIR)"
 echo ""
 echo "Kiro CLIを起動して動作確認してください:"

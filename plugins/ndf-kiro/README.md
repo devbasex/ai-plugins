@@ -76,10 +76,12 @@ kiro-cli agent set-default kiro_default
 
 ### 導入スコープ
 
-| スコープ | Skills | 常時指示 | エージェント定義 |
-| --- | --- | --- | --- |
-| `workspace`（既定） | `.kiro/skills/` | `.kiro/steering/ndf-policies.md` | `.kiro/agents/ndf.json` |
-| `global` | `~/.kiro/skills/` | `~/.kiro/steering/ndf-policies.md` | `~/.kiro/agents/ndf.json` |
+| スコープ | Skills | 常時指示 | エージェント定義 | サードパーティー告知 |
+| --- | --- | --- | --- | --- |
+| `workspace`（既定） | `.kiro/skills/` | `.kiro/steering/ndf-policies.md` | `.kiro/agents/ndf.json` | `.kiro/THIRD_PARTY_NOTICES.md` |
+| `global` | `~/.kiro/skills/` | `~/.kiro/steering/ndf-policies.md` | `~/.kiro/agents/ndf.json` | `~/.kiro/THIRD_PARTY_NOTICES.md` |
+
+サードパーティー告知は installer が導入先へ配置します。Claude Code / Codex 版は配布物に同梱された `THIRD_PARTY_NOTICES.md` がそのまま利用者へ届きますが、Kiro 版は配布物を直接読ませないため、導入時に複製する必要があります。編集元はリポジトリ直下の `THIRD_PARTY_NOTICES.md` で、配布物への同期は `scripts/build-runtime-plugins.sh` が行います。
 
 常時適用したい指示は steering へ置きます。steering はエージェント選択に依存せず読み込まれるため、既定エージェントを書き換えない運用でも効きます。`.kiro/steering/ndf-policies.md` は `plugins/ndf-shared/skills/ndf-policies/SKILL.md` から生成されるため、直接編集しないでください。
 
