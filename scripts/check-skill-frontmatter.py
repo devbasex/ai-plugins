@@ -92,6 +92,15 @@ QUOTED_RE = re.compile(r"['\"]([^'\"]+)['\"]")
 TRIGGER_LABEL_RE = re.compile(
     r"(?:Triggers?|明示トリガ|トリガー?)\s*[:：]\s*(.+)", re.IGNORECASE | re.DOTALL
 )
+# 末尾の全角丸括弧に「・」区切りで並べたトリガ語。`Triggers: 'a', 'b'` より短く書けるため
+# こちらを既定の書式とする（規約「トリガ語の書式」）。
+#
+# 誤検出を避けるため 2 つの条件を課す。
+#   1. description の**末尾**にあること（本文中の `(Codex/Gemini)` のような補足を拾わない）
+#   2. 日本語を 1 文字以上含むこと（英語の補足を拾わない）
+# 条件を外すと、トリガ宣言でない括弧が重複検査へ流れ込み、偽の衝突が出る。
+TRIGGER_PAREN_RE = re.compile(r"（([^（）]{2,160})）\s*[.。]?\s*$")
+HAS_JA_RE = re.compile(r"[ぁ-んァ-ヶ一-龠ー]")
 # 「いつ使うか」を示す語。description にこれが無いと Codex / Kiro で発動判定できない。
 USE_WHEN_RE = re.compile(r"Use\s+when|use\s+when|使う|使い|とき|時に|ときに")
 SENTENCE_SPLIT_RE = re.compile(r"(?<=[.。])\s*")
@@ -177,11 +186,22 @@ def unquote(value: str) -> str:
 
 
 def extract_triggers(*fields: str) -> list[str]:
-    """`Triggers:` / `明示トリガ:` 以降に列挙された引用符付きの語を集める。"""
+    """宣言されたトリガ語を集める。
+
+    2 つの書式を受ける。
+
+    - 既定: 末尾の全角丸括弧に `・` 区切りで並べる（`… Use when …（PRを作って・PR作成）.`）
+    - 旧式: `Triggers: 'a', 'b'` の引用符付き列挙
+
+    旧式も受けるのは、書式の移行を Skill ごとに進められるようにするためである。
+    """
     triggers: list[str] = []
     for field in fields:
         if not field:
             continue
+        p = TRIGGER_PAREN_RE.search(field.strip())
+        if p and HAS_JA_RE.search(p.group(1)):
+            triggers.extend(t.strip() for t in re.split(r"[・/／,、]", p.group(1)))
         m = TRIGGER_LABEL_RE.search(field)
         if not m:
             continue

@@ -1,6 +1,6 @@
 ---
 name: merged
-description: "Clean up after a merged PR: update main, remove the worktree, and delete merged branches. 削除の前に対象を一覧提示して同意を取る。Use when a PR was merged or branches and worktrees need clearing. Triggers: 'マージ後の後片付け', 'ブランチを整理', 'worktreeを削除', 'merged cleanup'"
+description: "Delete merged branches and worktrees after listing them for approval, then update main. Use when a PR was merged（マージ後の後片付け・ブランチを整理・worktreeを削除）."
 argument-hint: "[PR番号]"
 allowed-tools:
   - Bash

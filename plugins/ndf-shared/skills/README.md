@@ -59,6 +59,30 @@ when_to_use: "Claude Code 向けの追加トリガのみ。description で足り
 - `when_to_use` は Claude Code 向けの**追加**トリガが要る Skill にだけ付ける。`description` の
   言い換えにしない。未設定であること自体は不備ではない
 
+### トリガ語の書式
+
+トリガ語は **`Use when` の文末の全角丸括弧に `・` 区切りで並べる**。
+
+```yaml
+description: "Delete merged branches and worktrees after listing them for approval, then update main. Use when a PR was merged（マージ後の後片付け・ブランチを整理・worktreeを削除）."
+```
+
+旧書式（`Triggers: 'a', 'b'`）も検査は受けるが、新規の Skill では使わない。ラベルと引用符の
+分だけ長くなり、初期一覧の予算を圧迫するためである。実測では 1 Skill あたり 50〜100 文字の差が
+出た（`merged` 241 → 144 文字）。
+
+書式を変えても暗黙起動は落ちない。実測は
+[docs/specifications/ndf-skill-inventory.md](../../../docs/specifications/ndf-skill-inventory.md)
+「トリガ書式の変更の実測」に記録している。
+
+規則:
+
+- トリガ語は 2〜4 個。`Use when` の条件と重複する語は入れない
+- 括弧内は**日本語のみ**にする。英語のトリガ語は `Use when` の条件文へ埋め込む
+  （検査は「末尾の全角括弧かつ日本語を含む」ものだけをトリガ宣言と見なす。英語の補足
+  `(Codex/Gemini)` をトリガと誤認しないための条件）
+- 括弧は全角 `（）`。半角丸括弧は本文の補足に使うため、宣言と区別できなくなる
+
 ## 発動制御の 4 分類
 
 | 分類 | Claude Code | Codex | Kiro | 対象 |
