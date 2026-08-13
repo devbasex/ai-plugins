@@ -1,6 +1,6 @@
 ---
 name: skill-stats
-description: "Measure Skill usage from Claude Code transcripts: invocation counts, trigger hit rate, and per-Skill breakdown. Use when auditing which Skills actually fire. Triggers: 'skill統計', 'skill利用分析', 'skill hit rate', 'skill-stats'"
+description: "Measure Skill usage from Claude Code transcripts: invocations, trigger hit rate, per-Skill breakdown. Use when auditing which Skills fire（skill統計・skill利用分析）."
 allowed-tools:
   - Bash
   - Read

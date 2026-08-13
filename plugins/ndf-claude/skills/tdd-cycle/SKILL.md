@@ -1,6 +1,6 @@
 ---
 name: tdd-cycle
-description: "Write a failing test first, then the smallest implementation that passes. Use when adding behavior or fixing a bug. Triggers: 'テスト駆動', '先にテスト', '再現テスト'"
+description: "Write a failing test first, then the smallest implementation that passes. Use when adding behavior or fixing a bug（テスト駆動・先にテスト・再現テスト）."
 ---
 
 # テスト駆動のサイクル

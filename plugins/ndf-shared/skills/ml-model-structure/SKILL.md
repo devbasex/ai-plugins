@@ -1,6 +1,6 @@
 ---
 name: ml-model-structure
-description: "Lay out ML training and inference code as self-contained versioned directories with a per-version feature SSoT. Use when building, retraining, or versioning a model. Triggers: 'モデル構築', 'モデル再学習', 'モデルのバージョン管理', '推論API', 'train/serve skew', 'champion challenger'"
+description: "Lay out ML training and inference code as versioned directories with a feature SSoT. Use when building or retraining a model（モデル構築・モデル再学習・推論API）."
 paths:
   - "analysis/**"
 allowed-tools:

@@ -1,6 +1,6 @@
 ---
 name: playwright-kit-ops
-description: "Run the playwright_kit scripts: project init, page-role classification, one-off a11y / CWV scans, and Drive upload helpers. Use when a playwright_kit script has to be run directly. Triggers: 'init_project.sh', 'classify_page_role.py', 'run_a11y_scan.py', 'upload_evidence.py'"
+description: "Run the playwright_kit scripts: init, page-role classification, a11y / CWV scans, Drive upload. Use when running one directly（playwright_kitのスクリプトを実行・a11yスキャン）."
 allowed-tools:
   - Read
   - Bash(python *)

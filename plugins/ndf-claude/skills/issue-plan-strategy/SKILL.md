@@ -1,6 +1,6 @@
 ---
 name: issue-plan-strategy
-description: "Turn an issue into a plan, then drive the plan through a release branch, per-PR worktrees, and multi-PR execution. Use when asked to design a plan from an issue or to execute an existing plan. Triggers: 'issueのplanを作って', 'このplanを実装して', 'planを実行', 'release branch 作って実装開始', 'multi-PR で進めて'"
+description: "Turn an issue into a plan and run it through a release branch and multiple PRs. Use when designing or executing a plan（issueのplanを作って・planを実行・multi-PRで進めて）."
 argument-hint: "[issue-path-or-url] (例: issues/i16.md, https://github.com/org/repo/issues/123)"
 allowed-tools:
   - Bash

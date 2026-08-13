@@ -1,6 +1,6 @@
 ---
 name: playwright-planning
-description: "Plan Playwright E2E tests: judge the page role, then pick checklists and test techniques. Use when starting E2E scenario testing or designing test cases. Triggers: 'テスト計画書', 'テスト観点', 'page role 分類', 'HTSM', 'ISTQB', 'FEW HICCUPPS'"
+description: "Plan Playwright E2E tests: judge the page role, then pick checklists and techniques. Use when designing E2E test cases（テスト計画書・テスト観点・page role 分類）."
 allowed-tools:
   - Read
   - Bash(python *)

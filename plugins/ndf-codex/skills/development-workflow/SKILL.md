@@ -1,6 +1,6 @@
 ---
 name: development-workflow
-description: "Classify a change into 4 workflow modes and route it to the required steps. Use when deciding how much process a change needs. Triggers: 'モード判定', '工程の振り分け'"
+description: "Classify a change into 4 workflow modes and route it to the required steps. Use when deciding how much process a change needs（モード判定・工程の振り分け）."
 ---
 
 # 開発ワークフローの振り分け

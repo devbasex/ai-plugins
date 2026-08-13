@@ -1,6 +1,6 @@
 ---
 name: problem-solving
-description: "Solve bugs, incidents, and data inconsistencies at the root cause instead of patching downstream. Use when a bug, outage, or data inconsistency needs a fix decision. Triggers: 'バグの根本原因', 'データ不整合', '障害対応', '上流で直す'"
+description: "Fix bugs and data inconsistencies upstream at the root cause. Use when a bug or outage needs a fix decision（バグの根本原因・データ不整合・障害対応）."
 ---
 
 # 問題解決ガイドライン

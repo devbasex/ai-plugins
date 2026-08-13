@@ -1,6 +1,6 @@
 ---
 name: quality-gates
-description: "Require command evidence before declaring work complete. Use when about to report a change as done. Triggers: '完了判定', '完了の定義', '検証証跡'"
+description: "Require command evidence before declaring work complete. Use when about to report a change as done（完了判定・完了の定義・検証証跡）."
 ---
 
 # 完了判定と検証の証跡
