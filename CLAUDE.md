@@ -29,9 +29,11 @@ skills/     → 実行可能なワークフロー
 
 詳細は `docs/specifications/ndf-knowledge-and-kiro.md` を参照。
 
-## NDF v6.0.0 の Skill 構成
+## NDF v6.1.0 の Skill 構成
 
-Skill は 29 個で、配布は `plugins/ndf-shared/manifests/` が唯一の基準（Claude Code 25 / Codex 23 / Kiro 24）。frontmatter の書き方は `plugins/ndf-shared/skills/README.md` の規約に従い、`python3 scripts/check-skill-frontmatter.py` で検査する。利用実績と維持・統合・削除の判定は `docs/specifications/ndf-skill-inventory.md` に記録する。
+Skill は 34 個で、配布は `plugins/ndf-shared/manifests/` が唯一の基準（Claude Code 30 / Codex 28 / Kiro 29）。frontmatter の書き方は `plugins/ndf-shared/skills/README.md` の規約に従い、`python3 scripts/check-skill-frontmatter.py` で検査する。利用実績と維持・統合・削除の判定は `docs/specifications/ndf-skill-inventory.md` に記録する。
+
+v6.1.0 で開発方法論レイヤーの 5 個（`development-workflow` / `requirements-design` / `tdd-cycle` / `safe-refactoring` / `quality-gates`）を追加した。モード判定の基準を持つのは `development-workflow` だけで、他の Skill とエージェント定義は判定結果を受け取る側に徹する。
 
 v6.0.0 で `review` を `pr-review` へ改名した。対応表は `ndf-policies` skill にある（v7.0.0 で削除）。v5.0.0 の対応表（v4.20.1 からの統合・削除分）は予告どおり削除済み。
 

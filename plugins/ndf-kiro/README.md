@@ -12,7 +12,7 @@ cat plugins/ndf-kiro/VERSION
 
 # 導入済みプロジェクトの版数
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v6.0.0）
+# => NDF統合開発エージェント（Kiro CLI用 / v6.1.0）
 ```
 
 `install.sh` は実行時にも `NDF バージョン: <版数>` を表示する。

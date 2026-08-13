@@ -6,11 +6,12 @@ Claude Code / Codex / Kiro CLI向けのスキル・MCP設定を共有するた�
 
 このマーケットプレイスは、チーム全体でAI開発ツール（Claude Code / Codex / Kiro CLI）の導入を加速するための事前設定されたプラグインを提供します。
 
-**NDFプラグイン v6.0.0** は、同じ `ndf@ai-plugins` という名前で Claude Code / Codex / Kiro CLI へ配布されるランタイム別プラグインです。共通ソースは `plugins/ndf-shared/` に集約し、利用者が install する配布物は `plugins/ndf-claude/` / `plugins/ndf-codex/` / `plugins/ndf-kiro/` に分かれています。
+**NDFプラグイン v6.1.0** は、同じ `ndf@ai-plugins` という名前で Claude Code / Codex / Kiro CLI へ配布されるランタイム別プラグインです。共通ソースは `plugins/ndf-shared/` に集約し、利用者が install する配布物は `plugins/ndf-claude/` / `plugins/ndf-codex/` / `plugins/ndf-kiro/` に分かれています。
 
-- **公開Skills**: Claude Code向け core 25個、Kiro向け core 24個、Codex向け core 23個に分離。
-- **元Skills（29個）**:
+- **公開Skills**: Claude Code向け core 30個、Kiro向け core 29個、Codex向け core 28個に分離。
+- **元Skills（34個）**:
   - PR/レビューワークフロー (7): pr, pr-tests, fix, pr-review, cherry-pick-pr, deploy, merged
+  - 開発方法論 (5): development-workflow, requirements-design, tdd-cycle, safe-refactoring, quality-gates
   - 原則・ガイドライン (9): ndf-policies, implementation-plan, plan-to-spec, investigation-rules, problem-solving, logging-guidelines, markdown-writing, issue-plan-strategy, ml-model-structure
   - データ分析・品質・環境 (4): qa-security-scan, docker-container-access, google-auth, official-skills-autoloader
   - E2Eテスト/Playwright (4): playwright-planning, playwright-authoring, playwright-evidence, playwright-kit-ops
@@ -102,7 +103,35 @@ kiro-cli chat --agent ndf
 
 | プラグイン名 | バージョン | 説明 | 詳細 |
 |------------|----------|------|------|
-| **ndf** | 6.0.0 | Claude Code / Codex / Kiro CLI 向けに runtime 別配布物を提供する NDF プラグイン。8個の専門エージェント（Claude版）、公開Skills（Claude Code向け core 25個、Kiro向け core 24個、Codex向け core 23個）、Claude SessionStart/Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:external-ai` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [Claude](./plugins/ndf-claude/README.md) / [Codex](./plugins/ndf-codex/README.md) / [Kiro](./plugins/ndf-kiro/README.md) |
+| **ndf** | 6.1.0 | Claude Code / Codex / Kiro CLI 向けに runtime 別配布物を提供する NDF プラグイン。8個の専門エージェント（Claude版）、公開Skills（Claude Code向け core 30個、Kiro向け core 29個、Codex向け core 28個）、Claude SessionStart/Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:external-ai` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [Claude](./plugins/ndf-claude/README.md) / [Codex](./plugins/ndf-codex/README.md) / [Kiro](./plugins/ndf-kiro/README.md) |
+
+### NDF v6.1.0 の主な変更
+
+**開発方法論の Skill を 5 個追加しました。** 既存のコマンド名・引数・挙動は変わりません。
+
+| 追加した Skill | 役割 |
+|---|---|
+| `/ndf:development-workflow` | 変更を 4 モード（`light` / `standard` / `architecture` / `legacy-refactor`）へ分類し、必要な工程だけへ振り分ける |
+| `/ndf:requirements-design` | 曖昧な要求を、観測可能で検証できる受け入れ条件へ変換する |
+| `/ndf:tdd-cycle` | 「失敗するテスト → 通す最小実装 → 整理」のサイクルを定義する |
+| `/ndf:safe-refactoring` | コードスメル起点の構造改善と、テストが乏しい既存コード向けの現状固定テスト |
+| `/ndf:quality-gates` | 完了宣言の前に、実行コマンド・終了コード・実行時刻・対象範囲を証跡として要求する |
+
+全変更にフル工程を課さないことを設計の中心に置いています。文言修正や設定変更は
+`light` モードとして軽い経路だけを通り、モードの判定基準は `development-workflow` の
+1 箇所だけが持ちます。
+
+既存 6 Skill をこのレイヤーへ接続しました。`implementation-plan` は受け入れ条件・不変条件・
+互換性・切り戻し手順・完了の定義をプラン書式へ追加、`problem-solving` は修正前の再現テストを
+必須化、`pr-review` は仕様適合とコード品質の二段構成へ再編、`pr-tests` は限定的な検証と
+全体テストを区別して証跡を要求、`plan-to-spec` はドメイン用語・不変条件・公開インタフェース・
+設計判断の結論を確定仕様へ引き継ぎ、`investigation-rules` は `problem-solving` との境界を
+明記しました。
+
+あわせて `upstream-skills.lock.yaml` を追加し、Skill の設計で参照した外部リポジトリと固定
+コミットを記録しました。上流の文章は転用しておらず、工程の分け方と判断基準だけを参照して
+書き下ろしているため、配布物へ同梱する告知は持ちません。転用が生じた場合はこの記録を起点に
+告知を用意します。
 
 ### NDF v6.0.0 の主な変更（非互換）
 
