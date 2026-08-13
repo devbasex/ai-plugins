@@ -684,40 +684,10 @@ sync_kiro_version() {
   printf '%s\n' "$version" > "$dest"
 }
 
-# Apache-2.0 の告知保持は、頒布物の受領者に告知が届くことを求める。リポジトリ直下に置く
-# だけではプラグインとして導入した利用者の手元に届かないため、編集元を 1 ファイルに保った
-# まま 3 ランタイムの配布物へ同期する。Kiro は配布物をそのまま読ませる方式ではないので、
-# plugins/ndf-kiro/install.sh が導入先へ配置する。
-sync_third_party_notices() {
-  local src="$ROOT_DIR/THIRD_PARTY_NOTICES.md"
-  local runtime plugin_dir dest
-
-  if [ ! -f "$src" ]; then
-    echo "ERROR: source not found: THIRD_PARTY_NOTICES.md" >&2
-    exit 1
-  fi
-
-  for runtime in claude codex kiro; do
-    plugin_dir="$ROOT_DIR/plugins/ndf-$runtime"
-    [ -d "$plugin_dir" ] || continue
-    dest="$plugin_dir/THIRD_PARTY_NOTICES.md"
-
-    if [ "$CHECK" = true ]; then
-      if [ ! -f "$dest" ] || ! cmp -s "$src" "$dest"; then
-        echo "Generated file is stale: plugins/ndf-$runtime/THIRD_PARTY_NOTICES.md" >&2
-        return 1
-      fi
-    else
-      cp "$src" "$dest"
-    fi
-  done
-}
-
 sync_runtime_if_present claude "$SHARED_DIR/manifests/claude-skills.txt"
 sync_runtime_if_present codex "$SHARED_DIR/manifests/codex-skills.txt"
 sync_runtime_if_present kiro "$SHARED_DIR/manifests/kiro-skills.txt"
 sync_kiro_version
-sync_third_party_notices
 sync_mcp_plugins
 
 if [ "$CHECK" = true ]; then

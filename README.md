@@ -128,9 +128,10 @@ kiro-cli chat --agent ndf
 設計判断の結論を確定仕様へ引き継ぎ、`investigation-rules` は `problem-solving` との境界を
 明記しました。
 
-あわせて `THIRD_PARTY_NOTICES.md` と `upstream-skills.lock.yaml` を追加し、Skill の設計で
-参照した外部リポジトリと固定コミットを記録しました。告知は 3 ランタイムの配布物へ同期され、
-Kiro では `install.sh` が導入先へ配置します。
+あわせて `upstream-skills.lock.yaml` を追加し、Skill の設計で参照した外部リポジトリと固定
+コミットを記録しました。上流の文章は転用しておらず、工程の分け方と判断基準だけを参照して
+書き下ろしているため、配布物へ同梱する告知は持ちません。転用が生じた場合はこの記録を起点に
+告知を用意します。
 
 ### NDF v6.0.0 の主な変更（非互換）
 

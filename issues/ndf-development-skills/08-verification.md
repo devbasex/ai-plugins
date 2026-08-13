@@ -84,9 +84,10 @@
 
 ### Release 1 固有
 
-- [ ] `THIRD_PARTY_NOTICES.md` が `plugins/ndf-claude/` / `plugins/ndf-codex/` / `plugins/ndf-kiro/` の 3 ランタイム配布物すべてに含まれる
-- [ ] 編集元の `THIRD_PARTY_NOTICES.md` を変更した後 `bash scripts/build-runtime-plugins.sh --check` が差異を検出する
-- [ ] `install.sh` 実行後、告知が導入先（`--scope workspace` は `.kiro/`、`global` は `~/.kiro/`）に配置される
+- [x] `upstream-skills.lock.yaml` に参照元・固定コミット・参照したパス・対応 Skill・改変内容が記録されている
+- ~~`THIRD_PARTY_NOTICES.md` が 3 ランタイム配布物すべてに含まれる~~ — **取り下げ**。転用がなく告知の義務が発生しないため、告知を持たない判断にした（[04-development-skills.md](04-development-skills.md)「ライセンスと上流の固定」の実装時の判断）
+- ~~編集元の変更を `bash scripts/build-runtime-plugins.sh --check` が差異として検出する~~ — 同上
+- ~~`install.sh` 実行後、告知が導入先へ配置される~~ — 同上
 
 ### Release 2 固有
 
