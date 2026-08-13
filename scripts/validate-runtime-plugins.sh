@@ -99,15 +99,28 @@ if claude_manifest.is_file() and claude_plugin_json.is_file():
             f"（実際: {type(declared).__name__}）。manifest との突き合わせができない"
         )
     else:
-        declared_set = {entry.rsplit("/", 1)[-1] for entry in declared}
-        for missing in sorted(expected_set - declared_set):
+        # 比較はパス全体で行う。basename だけを見ると `./wrong/pr` のように
+        # 実在しない場所を指す項目を通してしまう（claude CLI が無い環境では
+        # 後段の `claude plugin validate` も skip されるため気づけない）。
+        expected_entries = {f"./skills/{name}" for name in expected_set}
+        declared_entries = set()
+        for entry in declared:
+            if not isinstance(entry, str):
+                errors.append(
+                    "claude plugin.json の skills 配列に文字列以外の項目がある"
+                    f"（{type(entry).__name__}）"
+                )
+                continue
+            declared_entries.add(entry)
+        for missing in sorted(expected_entries - declared_entries):
             errors.append(
-                "claude plugin.json の skills 配列に載っていない: "
-                f"{missing}（manifest には登録済み）"
+                f"claude plugin.json の skills 配列に載っていない: {missing}"
+                "（manifest には登録済み）"
             )
-        for extra in sorted(declared_set - expected_set):
+        for extra in sorted(declared_entries - expected_entries):
             errors.append(
-                f"claude plugin.json の skills 配列に余分な項目: {extra}（manifest に無い）"
+                f"claude plugin.json の skills 配列に余分な項目: {extra}"
+                "（manifest に無い、またはパスが `./skills/<Skill 名>` の形式でない）"
             )
 
 for mcp in sorted((root / "plugins/mcp/shared").iterdir()):
