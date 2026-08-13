@@ -79,6 +79,50 @@ for manifest in (root / "plugins/ndf-shared/manifests").glob("*-skills.txt"):
         if not (runtime_skills / skill / "SKILL.md").is_file():
             errors.append(f"{runtime} runtime skill missing: {skill}")
 
+# Claude 版の plugin.json は skills を配列で明示する。配列に載っていない Skill は
+# Claude Code から読み込まれないため、manifest と一致していないと配布漏れになる。
+# 生成物のディレクトリだけを見る上の検査では検出できないので、ここで突き合わせる。
+claude_manifest = root / "plugins/ndf-shared/manifests/claude-skills.txt"
+claude_plugin_json = root / "plugins/ndf-claude/.claude-plugin/plugin.json"
+if claude_manifest.is_file() and claude_plugin_json.is_file():
+    expected = [
+        line.split("#", 1)[0].strip()
+        for line in claude_manifest.read_text(encoding="utf-8").splitlines()
+    ]
+    expected_set = {name for name in expected if name}
+    declared = json.loads(claude_plugin_json.read_text(encoding="utf-8")).get("skills")
+    if not isinstance(declared, list):
+        # 配列以外（ディレクトリ指定・欠落）を許すと、この突き合わせが黙って skip され
+        # 配布漏れの再発を検出できなくなる。Claude 版は配列で明示する形式に固定する。
+        errors.append(
+            "claude plugin.json の skills が配列ではない"
+            f"（実際: {type(declared).__name__}）。manifest との突き合わせができない"
+        )
+    else:
+        # 比較はパス全体で行う。basename だけを見ると `./wrong/pr` のように
+        # 実在しない場所を指す項目を通してしまう（claude CLI が無い環境では
+        # 後段の `claude plugin validate` も skip されるため気づけない）。
+        expected_entries = {f"./skills/{name}" for name in expected_set}
+        declared_entries = set()
+        for entry in declared:
+            if not isinstance(entry, str):
+                errors.append(
+                    "claude plugin.json の skills 配列に文字列以外の項目がある"
+                    f"（{type(entry).__name__}）"
+                )
+                continue
+            declared_entries.add(entry)
+        for missing in sorted(expected_entries - declared_entries):
+            errors.append(
+                f"claude plugin.json の skills 配列に載っていない: {missing}"
+                "（manifest には登録済み）"
+            )
+        for extra in sorted(declared_entries - expected_entries):
+            errors.append(
+                f"claude plugin.json の skills 配列に余分な項目: {extra}"
+                "（manifest に無い、またはパスが `./skills/<Skill 名>` の形式でない）"
+            )
+
 for mcp in sorted((root / "plugins/mcp/shared").iterdir()):
     if not mcp.is_dir():
         continue
