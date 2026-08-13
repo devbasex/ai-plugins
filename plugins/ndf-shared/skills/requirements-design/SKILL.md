@@ -19,6 +19,9 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 受け入れ条件のない計画は、完了判定ができない。逆に、受け入れ条件だけあって分解がない
 状態は問題ない（分解は `implementation-plan` が続けて行う）。
 
+`tdd-cycle` / `quality-gates` は開発ループの後段を担う Skill で、順次追加している。
+導入されていない環境では、実装とテストは対象プロジェクトの既存手順に従う。
+
 ## 使う場面
 
 - 新しい振る舞いを追加する、既存の振る舞いを変える
