@@ -1,6 +1,6 @@
 ---
 name: markdown-writing
-description: "Write Markdown docs, specs, PR bodies, and reports that read well to a third party, including tables and mermaid diagrams. Use when authoring or editing a Markdown document. Triggers: 'ドキュメント作成', 'PR本文', 'PR説明', '仕様書を書く', 'mermaid', 'write docs'"
+description: "Write Markdown docs, specs, PR bodies, and reports for a third-party reader, with tables and mermaid. Use when authoring or editing a Markdown document（ドキュメント作成・仕様書を書く・PR本文）."
 allowed-tools:
   - Read
   - Write

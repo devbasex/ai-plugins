@@ -1,6 +1,6 @@
 ---
 name: docker-container-access
-description: "Diagnose Docker container access and localhost routing failures. Use when a container is unreachable, localhost does not connect, or DinD/DooD has to be identified. Triggers: 'localhost not working', 'コンテナに接続できない', 'DinD', 'DooD', 'curl container'"
+description: "Diagnose container access and localhost routing failures, including DinD/DooD. Use when a container is unreachable（コンテナに接続できない・localhostが繋がらない）."
 allowed-tools:
   - Read
   - Bash

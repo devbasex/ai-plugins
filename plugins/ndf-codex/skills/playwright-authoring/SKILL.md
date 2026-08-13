@@ -1,6 +1,6 @@
 ---
 name: playwright-authoring
-description: "Write Playwright E2E test scripts and run them with video / trace evidence, or check a page over browser MCP. Use when writing or running E2E tests, doing a browser smoke check, or connecting to Chrome over CDP. Triggers: 'playwright codegen', 'axe-core', 'connectOverCDP', 'ブラウザ動作確認'"
+description: "Write Playwright E2E scripts and run them with video / trace evidence. Use when writing or running E2E tests, or checking a page over CDP（playwright codegen・ブラウザ動作確認）."
 argument-hint: "[url]"
 allowed-tools:
   - Read

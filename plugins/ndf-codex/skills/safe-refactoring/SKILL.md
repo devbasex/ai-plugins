@@ -1,6 +1,6 @@
 ---
 name: safe-refactoring
-description: "Change structure without changing behavior, guarded by tests. Use when cleaning up code or touching legacy code. Triggers: 'リファクタリング', 'コードスメル', '現状固定テスト'"
+description: "Change structure without changing behavior, guarded by tests. Use when cleaning up code or touching legacy code（リファクタリング・コードスメル・現状固定テスト）."
 ---
 
 # 安全な構造改善

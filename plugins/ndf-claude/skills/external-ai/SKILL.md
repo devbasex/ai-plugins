@@ -1,6 +1,6 @@
 ---
 name: external-ai
-description: "Delegate coding, review, or research to an external AI CLI (Codex or Gemini). Use when a second opinion or an offloaded investigation is wanted. Triggers: 'codexで調査', 'geminiレビュー', '第二意見レビュー', 'codex exec', 'gemini exec', '外部AIに投げて'"
+description: "Delegate coding, review, or research to codex exec or gemini exec. Use when a second opinion or an offloaded investigation is wanted（codexで調査・geminiレビュー・外部AIに投げて）."
 ---
 
 # 外部 AI 委譲スキル (Codex / Gemini)
