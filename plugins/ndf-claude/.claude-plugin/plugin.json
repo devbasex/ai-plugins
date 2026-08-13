@@ -52,6 +52,11 @@
     "./skills/issue-plan-strategy",
     "./skills/plan-to-spec",
     "./skills/qa-security-scan",
-    "./skills/official-skills-autoloader"
+    "./skills/official-skills-autoloader",
+    "./skills/development-workflow",
+    "./skills/requirements-design",
+    "./skills/tdd-cycle",
+    "./skills/safe-refactoring",
+    "./skills/quality-gates"
   ]
 }

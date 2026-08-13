@@ -79,6 +79,30 @@ for manifest in (root / "plugins/ndf-shared/manifests").glob("*-skills.txt"):
         if not (runtime_skills / skill / "SKILL.md").is_file():
             errors.append(f"{runtime} runtime skill missing: {skill}")
 
+# Claude 版の plugin.json は skills を配列で明示する。配列に載っていない Skill は
+# Claude Code から読み込まれないため、manifest と一致していないと配布漏れになる。
+# 生成物のディレクトリだけを見る上の検査では検出できないので、ここで突き合わせる。
+claude_manifest = root / "plugins/ndf-shared/manifests/claude-skills.txt"
+claude_plugin_json = root / "plugins/ndf-claude/.claude-plugin/plugin.json"
+if claude_manifest.is_file() and claude_plugin_json.is_file():
+    expected = [
+        line.split("#", 1)[0].strip()
+        for line in claude_manifest.read_text(encoding="utf-8").splitlines()
+    ]
+    expected_set = {name for name in expected if name}
+    declared = json.loads(claude_plugin_json.read_text(encoding="utf-8")).get("skills")
+    if isinstance(declared, list):
+        declared_set = {entry.rsplit("/", 1)[-1] for entry in declared}
+        for missing in sorted(expected_set - declared_set):
+            errors.append(
+                "claude plugin.json の skills 配列に載っていない: "
+                f"{missing}（manifest には登録済み）"
+            )
+        for extra in sorted(declared_set - expected_set):
+            errors.append(
+                f"claude plugin.json の skills 配列に余分な項目: {extra}（manifest に無い）"
+            )
+
 for mcp in sorted((root / "plugins/mcp/shared").iterdir()):
     if not mcp.is_dir():
         continue
