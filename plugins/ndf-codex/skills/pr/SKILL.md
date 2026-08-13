@@ -1,6 +1,6 @@
 ---
 name: pr
-description: "Commit, push, and create or update a pull request. push と PR 作成の前に対象ブランチ・base・変更ファイルを提示して同意を取る。Use when asked to commit and open a PR, update a PR, or push work for review. Triggers: 'PRを作って', 'PR作成', 'コミットしてプッシュ', 'PRを更新', 'draft PR'"
+description: "Commit, push, and open or update a pull request. Shows branch, base and files for approval first. Use when asked to create or update a PR（PRを作って・コミットしてプッシュ・PRを更新）."
 argument-hint: "[--draft] [base-branch] or [commit-message]"
 allowed-tools:
   - Bash
