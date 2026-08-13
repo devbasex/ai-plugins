@@ -58,14 +58,14 @@ mode: standard
 | `light` | 文言、ドキュメント、設定、振る舞いを変えない局所変更 | 成功条件の確認、対象範囲の確定、限定的な検証と静的解析 |
 | `standard` | 一般的な機能追加・バグ修正、テストが十分にある構造改善 | 仕様、計画、テスト駆動、小規模な整理、レビュー、全体検証 |
 | `architecture` | 公開インタフェース、移行を伴うスキーマ変更、認証、複数モジュール、重要なドメイン変更 | ドメインモデリング、設計判断の記録、設計レビュー、テスト駆動、契約テストと結合テスト、相互レビュー |
-| `legacy-refactor` | テストが少ない既存コードの振る舞い維持型改善 | 構造分析、現状固定テスト、段階的改善、退行検証 |
+| `legacy-refactor` | テストが少ない既存コードの振る舞い維持型改善 | 構造分析、計画、現状固定テスト、段階的改善、レビュー、退行検証 |
 
 ## モードごとに起動する Skill
 
 | 工程 | `light` | `standard` | `architecture` | `legacy-refactor` |
 | --- | --- | --- | --- | --- |
 | 要求と受け入れ条件 | — | `requirements-design` | `requirements-design` | — |
-| 設計 | — | — | 設計レビュー（Release 2 で有効化） | — |
+| 設計 | — | `implementation-plan` に代替案と採否を記録 | ドメインモデリングと設計レビュー（Release 2 で有効化） | `implementation-plan` に代替案と採否を記録 |
 | 計画 | — | `implementation-plan` | `implementation-plan` | `implementation-plan` |
 | 実装 | 直接編集 | `tdd-cycle` | `tdd-cycle` | `safe-refactoring` |
 | 構造改善 | — | `safe-refactoring`（必要な場合） | `safe-refactoring`（必要な場合） | `safe-refactoring` |
@@ -73,10 +73,17 @@ mode: standard
 | 完了判定 | `quality-gates` | `quality-gates` | `quality-gates` | `quality-gates` |
 | 確定仕様化 | — | `plan-to-spec`（仕様が変わった場合） | `plan-to-spec` | — |
 
+「設計」行の `standard` と `legacy-refactor` は**専用の設計 Skill を起動しない**。設計と代替案の
+検討そのものは行い、結果を `implementation-plan` の中に残す。そのため「モードと必須工程」表では
+「計画」に含めて数えている。
+
 レビュー段階は**明示的に呼ぶ**。自然文で「レビューして」と依頼すると、Claude Code では
 組み込みの `code-review` が起動して判定の投稿経路が変わる。
 
 ## 標準フロー
+
+この図は**工程の全体像**を表す。どの Skill を起動するかは前節の表が基準であり、図はその
+工程が何を指すかを示す。実線は `architecture` の経路、破線は各モードが飛ばす経路である。
 
 ```mermaid
 flowchart TD
@@ -94,12 +101,20 @@ flowchart TD
     K --> N[全体テスト → ビルド・結合テスト]
     N --> L[プルリクエスト作成]
     L --> M[確定仕様化]
+    C -.->|standard| G
+    A -.->|legacy-refactor| C
     A -.->|light| K
     K -.->|light| L
 ```
 
-`light` モードは破線の経路（A → K → L）のみを通る。**N の全体テストと結合テストは通らない**
-（K は変更箇所を 1 度実行する限定的な検証と静的解析だけを指す）。
+- `standard` は A → B → C から破線で G へ抜け、**D・E・F（ドメインモデリングと専用 Skill による
+  設計レビュー）を通らない**。C の設計と代替案の検討は行うが、専用 Skill は使わず
+  `implementation-plan`（G）に代替案と採否として書く
+- `light` は破線の経路（A → K → L）のみを通る。**N の全体テストと結合テストは通らない**
+  （K は変更箇所を 1 度実行する限定的な検証と静的解析だけを指す）
+- `legacy-refactor` は A から C へ抜けて `standard` と同じ経路をたどり、**B（要求と受け入れ条件）と
+  M（確定仕様化）は通らない**。H は「現状固定テスト → 段階的改善」、I は「振る舞いが変わって
+  いないことの確認」として読む
 
 ## `architecture` モードの現状
 
