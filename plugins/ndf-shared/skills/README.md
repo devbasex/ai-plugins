@@ -214,7 +214,7 @@ Skill 名の部分だからである。ただし配布先に何が入ってい�
 | `SKILL.md` 本文 | 5,000 トークン | 仕様の推奨 |
 | Claude Code の初期 Skill 一覧の合計 | コンテキストウィンドウの 1%。不明な場合は 8,000 文字。1 項目あたり 250 文字で切り詰め | Claude Code 公式ドキュメント |
 | Codex の初期 Skill 一覧の合計 | コンテキストウィンドウの 2%。不明な場合は 8,000 文字 | Codex 公式ドキュメント |
-| 全 Skill の frontmatter 合計 | 13,000 文字 | リポジトリ固有の運用値。Task 0-7 完了時点の実測 12,211 文字（Skill 29 個）に約 6% の余裕を足した値。`scripts/check-skill-frontmatter.py` の `FRONTMATTER_TOTAL_MAX` |
+| 全 Skill の frontmatter 合計 | 14,300 文字 | リポジトリ固有の運用値。開発方法論レイヤー 5 個の追加分（1 個あたり実測 約 210 文字）と帰属記録を見込み、約 6% の余裕を足した値。`scripts/check-skill-frontmatter.py` の `FRONTMATTER_TOTAL_MAX` |
 
 運用目標の 300 文字は仕様上限より厳しい。全 Skill 分の `description` が常時注入されるため、
 仕様上限は 1 個で使い切ってよい量ではない。
