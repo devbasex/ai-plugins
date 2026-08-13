@@ -22,3 +22,8 @@ statusline
 issue-plan-strategy
 plan-to-spec
 qa-security-scan
+development-workflow
+requirements-design
+tdd-cycle
+safe-refactoring
+quality-gates

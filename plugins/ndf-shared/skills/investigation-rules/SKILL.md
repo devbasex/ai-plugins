@@ -1,11 +1,28 @@
 ---
 name: investigation-rules
-description: "Write evidence-backed investigation and debug reports, and never state a negative finding without showing the search behind it. Use when writing an investigation or bug report. Triggers: '調査レポートを書く', '不具合レポート', '原因調査', 'カラムがない', '該当コードがない'"
+description: "Write evidence-backed investigation and bug reports; never claim something is absent without showing the search. Use when writing an investigation or bug report. Triggers: '調査レポートを書く', '不具合レポート', 'カラムがない', '該当コードがない'"
 ---
 
 # 調査レポート作成ルール
 
 不具合調査・データ調査・仕様調査でレポートを作成する際のルール。コード読解だけに頼らず、必ず実行結果・出力・実データで裏取りする。
+
+## この Skill を使う場面
+
+**レポート・報告文を書くとき**に使う。原因を突き止める作業そのものは扱わない。
+
+| 依頼 | 使う Skill |
+| --- | --- |
+| 調査結果をレポートにまとめる / 「ない」ことを結論に書く | この Skill |
+| 不具合の原因を突き止めて直す | `problem-solving` |
+| 期待どおり動かない理由を切り分ける | `problem-solving` |
+| 原因が分かったので修正する | `problem-solving` → `tdd-cycle`（再現テストから） |
+
+`problem-solving` で原因を特定し、その結果を文章にする段でこの Skill の裏取り規則が効く。
+両方に該当する依頼（「原因を調べてレポートにして」）では両方を使う。
+
+トリガ語は「調査」のような広い語を置かない。ほぼ全セッションに一致してしまい、他の Skill の
+発動を埋もれさせる。
 
 ## 否定的結論にはエビデンス必須
 
@@ -101,4 +118,5 @@ SQLクエリ結果・コマンド出力をそのまま貼り、「コードを�
 
 ## 関連スキル
 
-- `/ndf:problem-solving` — 根本原因分析と多層防御の原則
+- `/ndf:problem-solving` — 根本原因分析と多層防御の原則（原因を突き止める側の担当）
+- `/ndf:markdown-writing` — 第三者が読めるレポートの書き方

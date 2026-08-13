@@ -1,6 +1,6 @@
 ---
 name: plan-to-spec
-description: "Rewrite a finished implementation plan into a permanent specification under docs/. Use when implementation is complete and an issues/ plan should become the as-is specification. Triggers: 'planを仕様書にして', '確定仕様書に移動', 'planをdocsへ移動', 'plan-to-spec'"
+description: "Rewrite a finished implementation plan into a permanent specification under docs/. Use when implementation is complete and an issues/ plan becomes the as-is specification. Triggers: 'planを仕様書にして', '確定仕様書に移動', 'planをdocsへ移動'"
 allowed-tools:
   - Bash
   - Read
@@ -95,6 +95,29 @@ docs/architecture/plugin-skill-loading.md
 
 該当しない章は削除してよい。小さな仕様では `概要`、`仕様`、`運用`、`テスト観点`、`関連リンク` 程度に圧縮する。
 
+plan に次の項目がある場合は、**削除せず確定仕様へ引き継ぐ**。いずれも「開発中の記録」では
+なく、実装後も読み手が必要とする仕様の一部である。
+
+| plan の項目 | 引き継ぎ先の章 | 書き換え方 |
+| --- | --- | --- |
+| ドメイン用語 | `概要` の直後に `用語` として独立させる | 定義をそのまま残す。「今回定義した」などの経緯は落とす |
+| 不変条件 | `仕様` の中に「常に成り立つ条件」として書く | 「〜を保つ」の現在形にする。破れたときの扱い（拒否・例外）も書く |
+| 公開インタフェース（API・イベント・コマンド・スキーマ） | `仕様` / `データ・設定` / `外部連携` | 入出力・型・必須性・エラー形式を確定形で書く。互換性の履歴は落とし、**現行の契約**だけ残す |
+| 設計判断の記録（代替案と採否） | `背景`、または `仕様` の該当箇所に 1〜2 行 | **結論と理由だけ**残す。比較表・不採用案の詳細・検討経緯は落とす |
+| 受け入れ条件 | `テスト観点` | 「〜を満たすこと」の観点へ言い換える。チェックボックスは外す |
+
+設計判断の引き継ぎ例:
+
+```markdown
+（plan）
+| 案 | 内容 | 採否 | 理由 |
+| A | 同期処理で書き込む | 採用 | 件数上限が小さく、失敗を即座に返せる |
+| B | キュー経由で非同期化 | 不採用 | 遅延と再送の設計が必要で、現状の規模に見合わない |
+
+（確定仕様）
+書き込みは同期で行う。件数上限が小さく、失敗をその場で呼び出し元へ返せるためである。
+```
+
 ### 4. 削除・変換ルール
 
 削除するもの:
@@ -102,7 +125,7 @@ docs/architecture/plugin-skill-loading.md
 - 実装タスクのチェックリスト
 - PR 分割計画、worktree 運用、作業担当、レビュー進捗
 - 「これから実装する」「予定」「案」「未定」など完了前提の表現
-- 開発中に破棄された方針、調査メモ、試行錯誤
+- 開発中に破棄された方針、調査メモ、試行錯誤（**採否の結論は上記のとおり残す**）
 - AI エージェント向けの作業指示
 
 変換するもの:
