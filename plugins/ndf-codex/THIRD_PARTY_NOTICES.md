@@ -35,14 +35,6 @@ NDF プラグインの Skill を設計する際に参照した外部リポジト
 | [obra/superpowers](https://github.com/obra/superpowers) | MIT | 失敗が期待した理由で起きたことを確認する規律、通す実装を最小限に保つ規律、整理中はテストを通ったまま保つ規律、実行していないテストを「通った」と報告しない規律、完了前の検証 | `tdd-cycle`、`quality-gates` |
 | [modu-ai/moai-adk](https://github.com/modu-ai/moai-adk) | Apache-2.0 | テストが乏しい既存コードで現状固定テストを先行させる考え方、小さな安全な状態を積み重ねる進め方、完了前の品質ゲート | `safe-refactoring`、`quality-gates` |
 
-採用しなかった方針も記録しておく。
-
-| 参照元 | 採用しなかったもの | 理由 |
-| --- | --- | --- |
-| modu-ai/moai-adk | 固定のカバレッジ閾値（下限・最終値） | 閾値は対象プロジェクトのカバレッジツール設定を唯一の基準とし、Skill 側に既定値を持たせない |
-| modu-ai/moai-adk | 同リポジトリが DDD と呼ぶ枠組み | 指すものが Domain-Driven **Development** であり、Evans の Domain-Driven **Design** とは別物。前者は `safe-refactoring` の既存コード向け手順として扱う |
-| [ramziddin/solid-skills](https://github.com/ramziddin/solid-skills) | メソッドの行数上限・インスタンス変数の個数上限といった数値規則 | 凝集度・結合度・変更理由・認知負荷・テスト容易性をレビュー質問として使う方針を採る |
-
 ## ライセンス
 
 ### Apache-2.0（modu-ai/moai-adk）
@@ -52,7 +44,7 @@ Apache-2.0 は、頒布物の受領者へ著作権表示・ライセンス・変
 
 ライセンス全文: https://www.apache.org/licenses/LICENSE-2.0
 
-### MIT（addyosmani/agent-skills、obra/superpowers、ramziddin/solid-skills）
+### MIT（addyosmani/agent-skills、obra/superpowers）
 
 MIT は、実質的な部分を複製・頒布する場合に著作権表示とライセンス表示の保持を求める。
 
@@ -60,7 +52,6 @@ MIT は、実質的な部分を複製・頒布する場合に著作権表示と�
 
 - https://github.com/addyosmani/agent-skills/blob/main/LICENSE
 - https://github.com/obra/superpowers/blob/main/LICENSE
-- https://github.com/ramziddin/solid-skills/blob/main/LICENSE
 
 ### ライセンス全文
 
