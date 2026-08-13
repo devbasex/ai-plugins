@@ -2,13 +2,6 @@
 name: fix
 description: "Fix actionable PR review comments, then reply and resolve each thread. Use when responding to review feedback on a PR（PRコメント対応・PRレビュー修正・Resolveして）."
 argument-hint: "[PR番号] [--classify-only] [--defer-nit] [--severity-min critical|major|minor]"
-allowed-tools:
-  - Bash
-  - Read
-  - Edit
-  - Write
-  - Glob
-  - Grep
 ---
 
 # PR コメント対応コマンド

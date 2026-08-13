@@ -83,6 +83,24 @@ description: "Delete merged branches and worktrees after listing them for approv
   `(Codex/Gemini)` をトリガと誤認しないための条件）
 - 括弧は全角 `（）`。半角丸括弧は本文の補足に使うため、宣言と区別できなくなる
 
+## `allowed-tools` を付ける条件
+
+`allowed-tools` は **制限が意味を持つ Skill にだけ付ける**。次のどちらかに当てはまるものが対象。
+
+| 条件 | 例 |
+| --- | --- |
+| 本文が「これ以外はしない」と明言している | `pr-review`（分析と指摘のみ）、`pr-tests`（テスト実行と報告のみ） |
+| 破壊的操作を持ち、ファイル編集まで許す必要がない | `deploy` / `merged` / `cherry-pick-pr` / `statusline` |
+
+逆に、`Read` / `Write` / `Edit` / `Bash` / `Glob` / `Grep` をほぼ全部並べたものは**制限に
+なっていない**ため付けない。既定と同じ範囲を宣言するだけで、frontmatter の量だけが増える。
+
+MCP ツールを許可する場合は **サーバ単位でまとめる**（`mcp__playwright`）。ツール名を 1 つずつ
+並べると量が跳ね上がる（`playwright-authoring` は 43 個の列挙で 1,916 文字あった）。
+
+**制限を frontmatter だけに頼らない。** Kiro は `allowed-tools` を解釈せず、Codex にも対応する
+項目がない。「これ以外はしない」は本文の手順にも書く。
+
 ## 発動制御の 4 分類
 
 | 分類 | Claude Code | Codex | Kiro | 対象 |
