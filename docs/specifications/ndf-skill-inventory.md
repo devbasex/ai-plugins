@@ -224,6 +224,32 @@ frontmatter を [規約](../../plugins/ndf-shared/skills/README.md) へ揃えた
 初期一覧の合計が増えているのは、`when_to_use` に置いていたトリガ語を `description` へ移し、
 Codex と Kiro でも発動判定に効くようにしたためである。
 
+## v6.1.0 での追加（開発方法論レイヤー）
+
+Skill を 29 個から **34 個**へ増やした。追加した 5 個は起動実績をまだ持たないため、判定は
+次回の測定まで保留する。統合・削除の対象ではない。
+
+| Skill | 配布 | 役割 | 判定 |
+| --- | --- | --- | --- |
+| `development-workflow` | CXK | 変更を 4 モードへ分類し工程へ振り分ける。判定基準の唯一の置き場所 | 未測定 |
+| `requirements-design` | CXK | 要求から受け入れ条件と仕様を起こす | 未測定 |
+| `tdd-cycle` | CXK | 失敗するテスト → 最小実装 → 整理のサイクル | 未測定 |
+| `safe-refactoring` | CXK | コードスメル起点の構造改善と現状固定テスト | 未測定 |
+| `quality-gates` | CXK | 完了の定義と、完了宣言前の検証証跡 | 未測定 |
+
+追加にあたり予算を実測しなおした。
+
+| 項目 | v6.0.0（Skill 29 個） | v6.1.0（Skill 34 個） | 上限 |
+| --- | ---: | ---: | ---: |
+| Claude Code 初期一覧 | 6,919 | 7,772 | 8,000 |
+| Codex 初期一覧 | 6,485 | 7,329 | 8,000 |
+| frontmatter 合計 | 12,220 | 13,017 | 13,800 |
+
+Claude Code の初期一覧は上限に対する余裕が 228 文字（約 3%）しかない。**次に Skill を追加する
+ときは、`description` の合計を先に見積もる必要がある。** v6.1.0 では既存 6 Skill の
+`description` から重複したトリガ語（英語表記の言い換え、Skill 名そのもの）を落として 150 文字
+分を確保した。frontmatter 合計の運用値は実測 13,017 に約 6% の余裕を足して 13,800 へ更新した。
+
 ## 参照
 
 - 棚卸の計画: [issues/ndf-development-skills/02-skill-inventory.md](../../issues/ndf-development-skills/02-skill-inventory.md)

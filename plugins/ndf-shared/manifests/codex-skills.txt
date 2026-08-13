@@ -1,6 +1,7 @@
 cherry-pick-pr
 cross-review
 deploy
+development-workflow
 docker-container-access
 external-ai
 fix
@@ -17,7 +18,11 @@ playwright-evidence
 playwright-kit-ops
 playwright-planning
 pr
+pr-review
 pr-tests
 problem-solving
 qa-security-scan
-pr-review
+quality-gates
+requirements-design
+safe-refactoring
+tdd-cycle

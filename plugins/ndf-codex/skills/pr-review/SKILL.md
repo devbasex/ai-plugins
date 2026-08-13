@@ -1,6 +1,6 @@
 ---
 name: pr-review
-description: "Review a PR diff, or the current branch diff with --branch, and post an approve or request-changes verdict. Use when asked to review a PR, check a diff before merge, or self-review a branch. Triggers: 'PRレビュー', 'マージ前チェック', 'ブランチをレビュー', 'セルフレビュー', 'PRをレビューして'"
+description: "Review a PR diff, or the current branch diff with --branch, and post an approve or request-changes verdict. Use when asked to review a PR or check a diff before merge. Triggers: 'PRレビュー', 'マージ前チェック', 'ブランチをレビュー', 'セルフレビュー'"
 argument-hint: "[PR番号 | --branch] [AIエージェント(codex|gemini)] [--focus AREA]"
 effort: high
 allowed-tools:

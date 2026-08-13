@@ -23,3 +23,8 @@ issue-plan-strategy
 plan-to-spec
 qa-security-scan
 official-skills-autoloader
+development-workflow
+requirements-design
+tdd-cycle
+safe-refactoring
+quality-gates

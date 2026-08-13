@@ -1,6 +1,6 @@
 ---
 name: plan-to-spec
-description: "Rewrite a finished implementation plan into a permanent specification under docs/. Use when implementation is complete and an issues/ plan should become the as-is specification. Triggers: 'planを仕様書にして', '確定仕様書に移動', 'planをdocsへ移動', 'plan-to-spec'"
+description: "Rewrite a finished implementation plan into a permanent specification under docs/. Use when implementation is complete and an issues/ plan becomes the as-is specification. Triggers: 'planを仕様書にして', '確定仕様書に移動', 'planをdocsへ移動'"
 allowed-tools:
   - Bash
   - Read

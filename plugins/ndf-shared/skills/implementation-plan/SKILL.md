@@ -1,6 +1,6 @@
 ---
 name: implementation-plan
-description: "Create or update an implementation plan file under issues/ before coding starts. Use when a change spans multiple files, adds a feature, or includes a DB migration. Triggers: '実装プラン', '実装を開始', 'implementation plan', '設計書を作成', 'issues/に追加'"
+description: "Create or update an implementation plan under issues/ before coding starts. Use when a change spans multiple files, adds a feature, or includes a DB migration. Triggers: '実装プラン', '実装を開始', '設計書を作成', 'issues/に追加'"
 ---
 
 # 実装プランガイド

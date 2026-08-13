@@ -1,6 +1,6 @@
 ---
 name: investigation-rules
-description: "Write evidence-backed investigation and debug reports, and never state a negative finding without showing the search behind it. Use when writing an investigation or bug report. Triggers: '調査レポートを書く', '不具合レポート', 'カラムがない', '該当コードがない', 'データがない'"
+description: "Write evidence-backed investigation and bug reports; never claim something is absent without showing the search. Use when writing an investigation or bug report. Triggers: '調査レポートを書く', '不具合レポート', 'カラムがない', '該当コードがない'"
 ---
 
 # 調査レポート作成ルール
