@@ -92,7 +92,7 @@ description: "Delete merged branches and worktrees after listing them for approv
 | 本文が「これ以外はしない」と明言している | `pr-review`（分析と指摘のみ）、`pr-tests`（テスト実行と報告のみ） |
 | 破壊的操作を持ち、ファイル編集まで許す必要がない | `deploy` / `merged` / `cherry-pick-pr` / `statusline` |
 | 実行するコマンドが限られており、`Bash` をコマンド単位で絞れる | `google-auth` / `google-drive`（`Bash(python *)` `Bash(uv *)`）、`playwright-kit-ops`、`skill-stats` |
-| 特定の MCP サーバだけを使う | `playwright-authoring`（`mcp__playwright` / `mcp__chrome-devtools`） |
+| 特定の MCP ツールだけを使う | `playwright-authoring`（`mcp__playwright__browser_navigate` など個別に列挙） |
 
 逆に、`Read` / `Write` / `Edit` / `Bash` / `Glob` / `Grep` をほぼ全部並べたものは**制限に
 なっていない**ため付けない。既定と同じ範囲を宣言するだけで、frontmatter の量だけが増える。
