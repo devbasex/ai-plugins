@@ -1,7 +1,7 @@
 ---
 name: official-skills-autoloader
 description: "Install an official Anthropic Skill (docx / pptx / xlsx / pdf) on demand, showing the source first. Use when Office or PDF output is needed（Word作成・Excel出力・PDF作成）."
-when_to_use: "Claude Code 専用。~/.claude/skills/ へ公式 Skill を取得して読み込む。インストールは同意を得てから実行する。追加トリガ: '.docx', '.pptx', '.xlsx', '.pdf', 'MCPサーバーを作りたい', 'フロントエンド設計'"
+when_to_use: "Claude Code 専用。~/.claude/skills/ へ公式 Skill を取得して読み込む。インストールは同意を得てから実行する（.docx・.pptx・.xlsx・.pdf・MCPサーバーを作りたい・フロントエンド設計）."
 allowed-tools:
   - Bash
   - Read

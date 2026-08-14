@@ -6,7 +6,7 @@ Scans ~/.claude/projects/**/*.jsonl and counts, for each NDF skill:
   - explicit:    user slash commands, recorded as <command-name>/ndf:<name>
   - invocations: auto + explicit
   - triggers:    user messages whose text contains keywords from the skill's
-                 description / when_to_use "Triggers:" line
+                 description / when_to_use trigger declaration
   - hits:        user messages that (a) matched a trigger AND (b) were followed
                  by an auto invocation of the same skill before the next user
                  turn. A slash command ends the window: typing the command
@@ -97,11 +97,12 @@ def iter_events(path: pathlib.Path) -> Iterable[dict]:
 
 
 _FRONT_MATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n", re.DOTALL)
-_QUOTED_RE = re.compile(r"['\"]([^'\"]+)['\"]")
-_TRIGGER_LABEL_RE = re.compile(
-    r"(?:Triggers?|明示トリガ|トリガー?)\s*[:：]\s*(.+)",
-    re.IGNORECASE | re.DOTALL,
-)
+# トリガ語の宣言は description 末尾の全角丸括弧に「・」区切りで並べる
+# （規約: plugins/ndf-shared/skills/README.md「トリガ語の書式」）。
+# 誤検出を避けるため、末尾にあり日本語を 1 文字以上含むものだけを宣言と見なす。
+_TRIGGER_PAREN_RE = re.compile(r"（([^（）]{2,160})）\s*[.。]?\s*$")
+_HAS_JA_RE = re.compile(r"[ぁ-んァ-ヶ一-龠ー]")
+_TRIGGER_SPLIT_RE = re.compile(r"[・/／,、]")
 _JA_WORD_RE = re.compile(r"[一-龥ぁ-んァ-ヶー]{2,}|[A-Za-z][A-Za-z0-9_-]{2,}")
 _STOPWORDS = {
     "true", "false", "null", "none", "when", "triggers", "trigger",
@@ -138,24 +139,23 @@ def extract_triggers(
 ) -> tuple[list[str], str]:
     """Collect trigger keywords declared in description / when_to_use.
 
-    Almost every skill lists its triggers in `when_to_use`, not `description`,
-    and the label is written either as "Triggers:" or in Japanese
-    ("明示トリガ:"). Both fields and both labels are accepted.
+    Triggers are declared as a full-width parenthesised list at the end of the
+    field: `... Use when a PR was merged（マージ後の後片付け・ブランチを整理）.`
 
-    Each field is searched independently: `_TRIGGER_LABEL_RE` uses DOTALL, so
-    matching against the two fields joined together would let a label found in
-    `description` swallow the whole of `when_to_use` and pick up unrelated
-    quoted strings from it.
+    Each field is searched independently so that a declaration in `description`
+    cannot swallow `when_to_use`.
     """
     triggers: list[str] = []
     for field in (description, when_to_use):
         if not field:
             continue
-        m = _TRIGGER_LABEL_RE.search(field)
-        if not m:
+        m = _TRIGGER_PAREN_RE.search(field.strip())
+        if not m or not _HAS_JA_RE.search(m.group(1)):
             continue
-        for q in _QUOTED_RE.findall(m.group(1)):
-            triggers.append(q.strip())
+        for w in _TRIGGER_SPLIT_RE.split(m.group(1)):
+            w = w.strip()
+            if w:
+                triggers.append(w)
     if triggers:
         return _dedupe_ci(triggers), "explicit"
     if not include_fallback:
