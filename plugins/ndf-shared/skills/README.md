@@ -29,7 +29,7 @@ python3 scripts/check-skill-frontmatter.py --report  # 実測値の一覧
 | --- | --- |
 | `name` / `description` | いずれも解釈する。発動判定に効くのは `description` |
 | `license` / `compatibility` / `metadata` | 解釈されるが発動には関与しない |
-| `allowed-tools` | 仕様上 experimental。Claude Code は解釈するが、Kiro は frontmatter 一覧に載せておらず解釈は保証されない。ツール制限は実装差がある前提で書く |
+| `allowed-tools` | 仕様上 experimental。**利用制限ではなく事前承認**（下記「`allowed-tools` の意味と付け方」）。Claude Code は解釈するが、Kiro は frontmatter 一覧に載せておらず解釈は保証されない。事前承認の扱いは実装差がある前提で書く |
 
 `when_to_use` は Claude Code 独自の項目で、Codex と Kiro は文書化していない。仕様は未知の項目を
 無視すると定めているため壊れはしないが、**両ランタイムでは `description` だけで発動が判定される**。
