@@ -477,7 +477,22 @@ PHP の列で重要なのは 2 点。**first-class callable 構文と backed enu
   `if` / ループ / 列挙型に対する無条件の禁止ではない。本文冒頭に「この Skill は `if` / ループ /
   定数の**禁止規則ではない**」と明記している
 
-## 3.4 未了
+## 3.4 cross-review round 1 での事実訂正
+
+- **一括処理の失敗方針（SKILL.md MUST）**: 初版は「最初の失敗で打ち切らない」を全一括処理へ
+  無条件に課していた。原子性を持つ処理・安全性検査・不正入力が後続へ波及する処理では継続の
+  ほうが危険なため、MUST の適用範囲を「項目どうしが独立に処理できる場合」へ限定し、
+  fail-fast / rollback を MAY へ追加した（打ち切り位置・理由・巻き戻し範囲の記録が条件）
+- **PHP の一括演算（language-notes.md）**: 初版の「PHP に一括演算の基盤はない」は拡張・外部
+  ライブラリまで否定する主張になっていた。第 1 部の調査で確認できたのは標準ランタイムに
+  ネイティブな基盤がないことなので、「PHP 標準に一括演算の基盤はない」へ範囲を限定し、
+  拡張を採用する場合は計測して選ぶ旨を追記した
+- **配布物の版数**: `plugins/ndf-codex/.codex-plugin/plugin.json` は
+  `scripts/build-runtime-plugins.sh` の生成対象外（`write_codex_mcp_manifest` は
+  `plugins/mcp/codex/*` 専用で、`ndf-codex` は `skills/` のみ同期される）であり、手で維持する
+  ファイルである。7.0.0 / 24 skills のまま取り残されていたため 7.1.0 / 25 skills へ更新した
+
+## 3.5 未了
 
 - [ ] 3 ランタイムでの発動実測（`docs/specifications/ndf-skill-inventory.md` への記録）。
   配布後に利用実績が出てから測定する。台帳には「未測定」として行を追加済み
