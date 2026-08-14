@@ -29,7 +29,7 @@ python3 scripts/check-skill-frontmatter.py --report  # 実測値の一覧
 | --- | --- |
 | `name` / `description` | いずれも解釈する。発動判定に効くのは `description` |
 | `license` / `compatibility` / `metadata` | 解釈されるが発動には関与しない |
-| `allowed-tools` | 仕様上 experimental。Claude Code は解釈するが、Kiro は frontmatter 一覧に載せておらず解釈は保証されない。ツール制限は実装差がある前提で書く |
+| `allowed-tools` | 仕様上 experimental。**利用制限ではなく事前承認**（下記「`allowed-tools` の意味と付け方」）。Claude Code は解釈するが、Kiro は frontmatter 一覧に載せておらず解釈は保証されない。事前承認の扱いは実装差がある前提で書く |
 
 `when_to_use` は Claude Code 独自の項目で、Codex と Kiro は文書化していない。仕様は未知の項目を
 無視すると定めているため壊れはしないが、**両ランタイムでは `description` だけで発動が判定される**。
@@ -82,6 +82,32 @@ description: "Delete merged branches and worktrees after listing them for approv
   （検査は「末尾の全角括弧かつ日本語を含む」ものだけをトリガ宣言と見なす。英語の補足
   `(Codex/Gemini)` をトリガと誤認しないための条件）
 - 括弧は全角 `（）`。半角丸括弧は本文の補足に使うため、宣言と区別できなくなる
+
+## `allowed-tools` の意味と付け方
+
+**`allowed-tools` は利用制限ではなく、事前承認（確認プロンプトのスキップ）である。**
+
+> Tools Claude can use without asking permission when this skill is active.
+> — [Claude Code 公式リファレンス](../../../docs/claude-code-skills-official-reference.md)
+
+したがって、外すと「その Skill が使えるツールが減る」のではなく、**Skill の手順の途中で
+利用者に確認を求める回数が増える**。ファイル編集を伴う Skill から `Write` / `Edit` を外すと、
+手順のたびに承認が要る。
+
+規則:
+
+- **その Skill の手順が実際に使うツールを列挙する。** 使わないツールを足さない（事前承認の
+  範囲が広がるだけで、利用者が意図しない操作まで無確認になる）
+- `Bash` はコマンドが限られるならコマンド単位で絞る（`Bash(python *)` / `Bash(gh *)`）
+- MCP ツールは **1 つずつ列挙する**。`mcp__playwright` のようなサーバ名の指定が個別ツール
+  （`mcp__playwright__browser_navigate` 等）へ前方一致するかは仕様上自明でなく、確認できて
+  いない。前方一致しなければ MCP ツールが 1 つも事前承認されない
+- **取り消しの難しい操作を無確認にしない。** 事前承認は確認プロンプトを飛ばす仕組みなので、
+  破壊的操作を持つ Skill は「対象を提示して同意を取る」手順を本文へ必ず置く（frontmatter で
+  守れるのは承認プロンプトの有無だけで、Kiro と Codex には対応する項目がない）
+
+量が問題になるのは MCP ツールを多用する Skill だけである（`playwright-authoring` は 43 個の
+列挙で 1,916 文字）。この種の Skill は本体プラグインからの分離を検討する。
 
 ## 発動制御の 4 分類
 
