@@ -61,7 +61,7 @@ NDF のフィールド別内訳:
 - [x] claude の初期一覧に載る NDF の合計が **5,000 文字以下**になる（7,772 → **4,990**）
 - [x] frontmatter 合計が **9,000 文字以下**になる（13,017 → **7,578**、ndf 単独）
 - [x] `python3 scripts/check-skill-frontmatter.py` がエラー 0 / 警告 0
-- [x] 圧縮前に自動起動していた Skill が、圧縮後も同じ依頼文で起動する（Claude Code で実測。Codex / Kiro は残課題）
+- [x] 圧縮前に自動起動していた Skill が、圧縮後も同じ依頼文で起動する（Claude Code / Codex / Kiro の 3 ランタイムで単独条件の A/B を実測）
 - [x] `/ndf:` で始まる既存コマンド名が、playwright 系 4 個を除いて変わっていない
 - [x] playwright 系 4 個は新プラグインから同じ Skill 名で起動できる
 - [x] 旧 `/ndf:playwright-*` の移行先が `ndf-policies` の対応表に載っている
@@ -237,7 +237,7 @@ PR 1 を先頭に置くのは、トリガ廃止が発動に効くかを確かめ
 | claude 初期一覧が 5,000 文字以下 | **4,990**（ndf 単独） |
 | frontmatter 合計が 9,000 文字以下 | **7,578**（ndf 単独） |
 | 検査がエラー 0 / 警告 0 | 達成 |
-| 圧縮後も同じ依頼文で起動する | Claude Code で実測。Codex は一覧掲載と解決先を確認、Kiro は未認証で測定不能 |
+| 圧縮後も同じ依頼文で起動する | **3 ランタイムすべてで単独条件の A/B を実測**（Claude Code / Codex 0.147.0 / Kiro 2.16.1）。新書式による退行なし |
 | 既存コマンド名が変わっていない | playwright 系 4 個を除いて不変 |
 | playwright 系が新プラグインから同じ Skill 名で起動する | 達成（`/playwright-kit:playwright-*`） |
 | 対応表がある | `ndf-policies` に v8.0.0 で削除する予告つきで記載 |
@@ -254,8 +254,9 @@ PR 1 を先頭に置くのは、トリガ廃止が発動に効くかを確かめ
 
 ### 残課題
 
-- Codex / Kiro での単独条件の発動実測（Codex は `codex exec` が所定時間内に応答せず未完、
-  Kiro は `kiro-cli` 未認証）
+- ~~Codex / Kiro での単独条件の発動実測~~ — **完了（2026-08-14）**。CLI を更新して再ログイン後、
+  3 ランタイムすべてで単独条件の A/B を実測した。新書式による退行はなし（台帳の
+  「トリガ書式の変更の実測」を参照）
 - 起動 0 の Skill（`deploy` / `official-skills-autoloader` / `qa-security-scan` /
   `plan-to-spec` / `logging-guidelines`）の削除判断。v7.0.0 リリース後に `skill-stats` を
   回して再測定してから判断する
