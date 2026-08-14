@@ -44,6 +44,10 @@ ai-plugins/
 │   ├── ndf-claude/               # Claude Code版NDF
 │   ├── ndf-codex/                # Codex版NDF
 │   ├── ndf-kiro/                 # Kiro CLI版NDF
+│   ├── playwright-kit-shared/    # playwright-kit共通編集元（直接installしない）
+│   ├── playwright-kit-claude/    # Claude Code版playwright-kit
+│   ├── playwright-kit-codex/     # Codex版playwright-kit
+│   ├── playwright-kit-kiro/      # Kiro CLI版playwright-kit installer
 │   └── mcp/
 │       ├── shared/               # MCPプラグイン共通編集元
 │       ├── claude/               # Claude Code版MCP配布物

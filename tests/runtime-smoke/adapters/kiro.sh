@@ -12,6 +12,8 @@ fi
 
 run_step "kiro install ndf" bash "$REPO_ROOT/plugins/ndf-kiro/install.sh" --project "$PROJECT_DIR" --with-slack
 run_step "kiro install ndf idempotent" bash "$REPO_ROOT/plugins/ndf-kiro/install.sh" --project "$PROJECT_DIR" --with-slack
+run_step "kiro install playwright-kit" bash "$REPO_ROOT/plugins/playwright-kit-kiro/install.sh" --project "$PROJECT_DIR"
+run_step "kiro install playwright-kit idempotent" bash "$REPO_ROOT/plugins/playwright-kit-kiro/install.sh" --project "$PROJECT_DIR"
 run_step "kiro install mcp-bigquery" bash "$REPO_ROOT/plugins/mcp/kiro/mcp-bigquery/install.sh" --project "$PROJECT_DIR"
 run_step "kiro install mcp-bigquery idempotent" bash "$REPO_ROOT/plugins/mcp/kiro/mcp-bigquery/install.sh" --project "$PROJECT_DIR"
 

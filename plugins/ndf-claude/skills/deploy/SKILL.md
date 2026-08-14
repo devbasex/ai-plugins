@@ -1,6 +1,6 @@
 ---
 name: deploy
-description: "Create a deploy PR from a feature branch to an environment branch such as qa/staging. 明示指示のみで実行する。Use when deploying to an environment branch（qaに上げる・stagingへデプロイ・環境ブランチへデプロイ）."
+description: "Create a deploy PR to an environment branch such as qa/staging. 明示指示のみで実行する。Use when deploying to an environment branch（qaに上げる・stagingへデプロイ）."
 argument-hint: "環境ブランチ名 (例: qa/staging, release/v2)"
 disable-model-invocation: true
 allowed-tools:

@@ -7,7 +7,8 @@
 検査は 3 種類に分かれる。
 
 - **individual** — Skill 単位。仕様準拠・安全性・可搬性・運用
-- **aggregate**  — 配布先ごとの初期一覧予算（Claude Code / Codex）と frontmatter 総量
+- **aggregate**  — 配布先ごとの初期一覧予算（Claude Code / Codex）と frontmatter 総量。
+  予算は検査対象の plugin family すべての合計に対して判定する
 - **cross**      — Skill 間。トリガ語の重複と、既知の外部 Skill 名との衝突
 
 判定が本質的に近似になる項目（description 先頭のトリガ語、when_to_use の追加トリガ、
@@ -377,13 +378,17 @@ def load_manifests(skills_dir: pathlib.Path) -> dict[str, set[str]]:
     return out
 
 
-def check_aggregate(skills: list[dict], skills_dir: pathlib.Path) -> tuple[list[Finding], dict]:
-    """初期一覧の予算と frontmatter 総量を検査する。
+def measure_aggregate(skills: list[dict], skills_dir: pathlib.Path) -> dict:
+    """初期一覧に載る文字数と frontmatter 総量を計測する（判定はしない）。
 
     Claude Code と Codex は起動時に name / description / ファイルパスを一覧として
     読み込み、この一覧に総量予算を設けている（超過すると description を短縮し、
     なお超えると Skill を一覧から省略して警告を出す）。予算は配布先ごとに効くため、
     manifest に載っている Skill だけを数える。
+
+    予算の判定は plugin family をまたいだ合計に対して行う（利用者の環境では複数の
+    plugin が同時に入るため、family 単位で判定すると合計の超過を見逃す）。
+    そのためこの関数は計測値だけを返し、上限との比較は check_budget が行う。
     """
     manifests = load_manifests(skills_dir)
     listings: dict[str, int] = {r: 0 for r in manifests}
@@ -401,17 +406,26 @@ def check_aggregate(skills: list[dict], skills_dir: pathlib.Path) -> tuple[list[
             d = desc[:CLAUDE_ITEM_TRUNCATE] if runtime == "claude" else desc
             listings[runtime] += len(name) + len(d) + len(rel)
 
+    return {"listings": listings, "frontmatter_total": fm_total}
+
+
+def check_budget(metrics: dict) -> list[Finding]:
+    """検査対象すべての合計値を予算と突き合わせる。
+
+    引数は measure_aggregate の計測値を plugin family 横断で合計したもの。
+    """
     out: list[Finding] = []
     limits = {"claude": CLAUDE_LISTING_MAX, "codex": CODEX_LISTING_MAX, "kiro": None}
-    for runtime, total in sorted(listings.items()):
+    for runtime, total in sorted(metrics["listings"].items()):
         limit = limits.get(runtime)
         if limit is not None and total > limit:
             out.append(Finding("(全体)", "error", f"ops/{runtime}-listing",
                                f"{runtime} の初期一覧に載る合計が {total} 文字（上限 {limit}）"))
+    fm_total = metrics["frontmatter_total"]
     if fm_total > FRONTMATTER_TOTAL_MAX:
         out.append(Finding("(全体)", "error", "ops/frontmatter-total",
                            f"全 Skill の frontmatter 合計が {fm_total} 文字（上限 {FRONTMATTER_TOTAL_MAX}）"))
-    return out, {"listings": listings, "frontmatter_total": fm_total}
+    return out
 
 
 def check_trigger_collisions(skills: list[dict]) -> list[Finding]:
@@ -475,33 +489,64 @@ def check_external_name_collisions(skills: list[dict]) -> list[Finding]:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--skills-dir", default="plugins/ndf-shared/skills",
-                    help="検査対象の Skill ディレクトリ（default: %(default)s）")
+    ap.add_argument("--skills-dir", action="append", default=None,
+                    help="検査対象の Skill ディレクトリ。複数指定できる"
+                         "（既定: plugins/*-shared/skills を全て検査）")
     ap.add_argument("--strict", action="store_true",
                     help="警告も失敗として扱う")
     ap.add_argument("--report", action="store_true",
                     help="判定せず実測値の一覧だけ出力する")
     args = ap.parse_args()
 
-    skills_dir = pathlib.Path(args.skills_dir)
-    if not skills_dir.is_dir():
-        print(f"[check-skill-frontmatter] ディレクトリがない: {skills_dir}", file=sys.stderr)
-        return 2
-
-    skills = load_skills(skills_dir)
-    if not skills:
-        print(f"[check-skill-frontmatter] SKILL.md が見つからない: {skills_dir}", file=sys.stderr)
+    if args.skills_dir:
+        skills_dirs = [pathlib.Path(d) for d in args.skills_dir]
+    else:
+        # plugin family（<family>-shared）を検出する。初期一覧の予算はプラグイン横断で
+        # 共有されるため、既定では全 family を対象にして合計も出す。
+        skills_dirs = sorted(
+            d / "skills" for d in pathlib.Path("plugins").glob("*-shared")
+            if (d / "skills").is_dir()
+        )
+    for d in skills_dirs:
+        if not d.is_dir():
+            print(f"[check-skill-frontmatter] ディレクトリがない: {d}", file=sys.stderr)
+            return 2
+    if not skills_dirs:
+        print("[check-skill-frontmatter] 検査対象が見つからない", file=sys.stderr)
         return 2
 
     findings: list[Finding] = []
-    for s in skills:
-        findings.extend(check_skill(s))
-    agg, metrics = check_aggregate(skills, skills_dir)
-    findings.extend(agg)
+    skills: list[dict] = []
+    per_family: list[tuple[pathlib.Path, dict]] = []
+    for skills_dir in skills_dirs:
+        family_skills = load_skills(skills_dir)
+        if not family_skills:
+            print(f"[check-skill-frontmatter] SKILL.md が見つからない: {skills_dir}", file=sys.stderr)
+            return 2
+        for s in family_skills:
+            findings.extend(check_skill(s))
+        # トリガ語の重複・外部名の衝突・初期一覧の予算は family をまたいで判定する
+        # （利用者の環境では両方のプラグインが同時に入るため、family 内だけ見ても
+        # 衝突や合計の超過を見逃す）
+        skills.extend(family_skills)
+        per_family.append((skills_dir, measure_aggregate(family_skills, skills_dir)))
     findings.extend(check_trigger_collisions(skills))
     findings.extend(check_external_name_collisions(skills))
+    metrics = {
+        "listings": {},
+        "frontmatter_total": sum(m["frontmatter_total"] for _, m in per_family),
+    }
+    for _, m in per_family:
+        for runtime, total in m["listings"].items():
+            metrics["listings"][runtime] = metrics["listings"].get(runtime, 0) + total
+    findings.extend(check_budget(metrics))
 
     if args.report:
+        for skills_dir, m in per_family:
+            print(f"# {skills_dir}  Skill {sum(1 for s in skills if str(skills_dir) in str(s['path']))} 個"
+                  f" / frontmatter {m['frontmatter_total']} 文字"
+                  f" / claude 一覧 {m['listings'].get('claude', 0)} 文字")
+        print()
         print(f"{'skill':34} {'lines':>5} {'desc':>5} {'wtu':>5}  flags")
         for s in sorted(skills, key=lambda x: x["dir"]):
             fm = s["fm"] or {}

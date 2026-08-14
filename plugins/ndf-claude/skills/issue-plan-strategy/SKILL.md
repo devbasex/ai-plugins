@@ -250,7 +250,7 @@ release ブランチへの merge が一通り進んだ段階で:
   - PR 間の API / 型 / スキーマ整合
   - 設定値の重複・矛盾
   - migration の順序依存
-  - E2E シナリオ (`/ndf:playwright-planning` の活用)
+  - E2E シナリオ (`/playwright-kit:playwright-planning` の活用。別プラグイン)
 - ここで **新たに** 個別 PR 範囲のバグが見つかった場合は、**release PR にコメントせず**、該当の個別 PR (既に merge 済みなら修正差分を載せた新しい修正 PR を release 配下に作成) 側に指摘を書き込み、修正ループを回す。この場合レビュー対象は **修正差分** であり新規 PR でレビューできる（元の差分がそもそも cross-review 未実施だったケースは扱いが異なるため Step 8 のフォールバック参照）
 - release PR には integration 観点の指摘のみ残す
 
@@ -353,4 +353,4 @@ git checkout release/<PLAN-ID>
 - `/ndf:cherry-pick-pr` — 検証ブランチへの cherry-pick PR とブランチ汚染を避ける原則
 - `/ndf:pr-review` / `/ndf:cross-review` — レビュー（`--branch` で PR 前のセルフレビュー）
 - `/ndf:fix` — コメントの分類・修正・返信・Resolve
-- `/ndf:playwright-planning` — release ブランチでの E2E 結合テスト
+- `/playwright-kit:playwright-planning` — release ブランチでの E2E 結合テスト（別プラグイン）
