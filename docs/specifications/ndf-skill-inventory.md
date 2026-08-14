@@ -369,7 +369,16 @@ Claude Code 組み込みの `security-review` が優先される。いずれも�
 ### 残るリスク
 
 3 ランタイムとも単独条件で実測し、新書式による退行は見つからなかった。ただし測定した依頼文は
-限られる（Claude Code 6 種 / Codex 2 種 / Kiro 4 種、対象は起動実績上位の 3 Skill と抜き取りの 5 Skill）。他の Skill で起動しないものが見つかった場合は、
+限られる。
+
+| 測定 | 依頼文 | 対象 Skill |
+| --- | ---: | --- |
+| Claude Code（書式の A/B） | 6 種 | 起動実績上位の 3 個（`merged` / `pr` / `pr-tests`） |
+| Claude Code（全 Skill 圧縮後の抜き取り） | 5 種 | `fix` / `markdown-writing` / `implementation-plan` / `problem-solving` / `qa-security-scan` |
+| Codex | 2 種 | 上位 3 個のうち 2 個 |
+| Kiro | 4 種 | 上位 3 個 |
+
+残り 22 個の Skill は依頼文での実測をしていない。他の Skill で起動しないものが見つかった場合は、
 その Skill の**用途文**を見直す（旧書式へ戻す道は残していない。`Triggers:` は廃止し、残っていると
 検査が失敗する）。実測では、旧書式で宣言していたトリガ語が届かず新書式で届いた例があり、
 戻すことが解決になるとは限らない。
