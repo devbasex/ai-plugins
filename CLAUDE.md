@@ -35,7 +35,9 @@ Skill は 30 個で、配布は `plugins/ndf-shared/manifests/` が唯一の基�
 
 v6.1.0 で開発方法論レイヤーの 5 個（`development-workflow` / `requirements-design` / `tdd-cycle` / `safe-refactoring` / `quality-gates`）を追加した。モード判定の基準を持つのは `development-workflow` だけで、他の Skill とエージェント定義は判定結果を受け取る側に徹する。
 
-v6.0.0 で `review` を `pr-review` へ改名した。対応表は `ndf-policies` skill にある（v7.0.0 で削除）。v5.0.0 の対応表（v4.20.1 からの統合・削除分）は予告どおり削除済み。
+v7.0.0 で playwright 系 4 個を `playwright-kit` プラグインへ分離した。対応表は `ndf-policies` skill にある（v8.0.0 で削除）。
+
+v6.0.0 の対応表（`review` → `pr-review`）は予告どおり削除済み。v6.0.0 以前から移行する場合は v6.1.0 の `ndf-policies` を参照する。
 
 ## cross-review
 
