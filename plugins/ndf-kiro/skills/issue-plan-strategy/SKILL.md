@@ -2,6 +2,13 @@
 name: issue-plan-strategy
 description: "Turn an issue into a plan and run it through a release branch and multiple PRs. Use when designing or executing a plan（issueのplanを作って・planを実行・multi-PRで進めて）."
 argument-hint: "[issue-path-or-url] (例: issues/i16.md, https://github.com/org/repo/issues/123)"
+allowed-tools:
+  - Bash
+  - Read
+  - Write
+  - Edit
+  - Glob
+  - Grep
 ---
 
 # issue → plan → multi-PR ワークフロー

@@ -1,6 +1,12 @@
 ---
 name: markdown-writing
 description: "Write Markdown docs, specs, PR bodies, and reports for a third-party reader, with tables and mermaid. Use when authoring or editing a Markdown document（ドキュメント作成・仕様書を書く・PR本文）."
+allowed-tools:
+  - Read
+  - Write
+  - Edit
+  - Grep
+  - Bash
 ---
 
 # Markdown Writing Skill

@@ -2,6 +2,13 @@
 name: cross-review
 description: "Review a PR with both Codex and Gemini, looping fixes until both APPROVE. Use when a converging two-AI review is wanted（クロスレビュー・両AIレビュー・収束レビュー）."
 argument-hint: "[PR番号] [--max-rounds N] [--rotate-after K] [--rotate-mode light|squash] [--only codex|gemini] [--focus TEXT] [--extra-instructions-file PATH]"
+allowed-tools:
+  - Bash
+  - Read
+  - Edit
+  - Write
+  - Glob
+  - Grep
 ---
 
 # クロスレビュー収束ループ

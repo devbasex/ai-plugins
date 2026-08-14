@@ -1,6 +1,13 @@
 ---
 name: plan-to-spec
 description: "Rewrite a finished implementation plan into a permanent specification under docs/. Use when implementation is complete（planを仕様書にして・確定仕様書に移動）."
+allowed-tools:
+  - Bash
+  - Read
+  - Write
+  - Edit
+  - Glob
+  - Grep
 ---
 
 # Plan to Spec

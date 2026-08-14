@@ -83,27 +83,31 @@ description: "Delete merged branches and worktrees after listing them for approv
   `(Codex/Gemini)` をトリガと誤認しないための条件）
 - 括弧は全角 `（）`。半角丸括弧は本文の補足に使うため、宣言と区別できなくなる
 
-## `allowed-tools` を付ける条件
+## `allowed-tools` の意味と付け方
 
-`allowed-tools` は **制限が意味を持つ Skill にだけ付ける**。次のいずれかに当てはまるものが対象。
+**`allowed-tools` は利用制限ではなく、事前承認（確認プロンプトのスキップ）である。**
 
-| 条件 | 例 |
-| --- | --- |
-| 本文が「これ以外はしない」と明言している | `pr-review`（分析と指摘のみ）、`pr-tests`（テスト実行と報告のみ） |
-| 破壊的操作を持ち、ファイル編集まで許す必要がない | `deploy` / `merged` / `cherry-pick-pr` / `statusline` |
-| 実行するコマンドが限られており、`Bash` をコマンド単位で絞れる | `google-auth` / `google-drive`（`Bash(python *)` `Bash(uv *)`）、`playwright-kit-ops`、`skill-stats` |
-| 特定の MCP ツールだけを使う | `playwright-authoring`（`mcp__playwright__browser_navigate` など個別に列挙） |
+> Tools Claude can use without asking permission when this skill is active.
+> — [Claude Code 公式リファレンス](../../../docs/claude-code-skills-official-reference.md)
 
-逆に、`Read` / `Write` / `Edit` / `Bash` / `Glob` / `Grep` をほぼ全部並べたものは**制限に
-なっていない**ため付けない。既定と同じ範囲を宣言するだけで、frontmatter の量だけが増える。
+したがって、外すと「その Skill が使えるツールが減る」のではなく、**Skill の手順の途中で
+利用者に確認を求める回数が増える**。ファイル編集を伴う Skill から `Write` / `Edit` を外すと、
+手順のたびに承認が要る。
 
-MCP ツールは **1 つずつ列挙する**。`mcp__playwright` のようなサーバ名の指定が個別ツール
-（`mcp__playwright__browser_navigate` 等）へ前方一致するかは仕様上自明でなく、この環境では
-検証できていない。列挙は量が大きい（`playwright-authoring` は 43 個で 1,916 文字）ため、
-MCP を多用する Skill は本体プラグインから分離することを検討する。
+規則:
 
-**制限を frontmatter だけに頼らない。** Kiro は `allowed-tools` を解釈せず、Codex にも対応する
-項目がない。「これ以外はしない」は本文の手順にも書く。
+- **その Skill の手順が実際に使うツールを列挙する。** 使わないツールを足さない（事前承認の
+  範囲が広がるだけで、利用者が意図しない操作まで無確認になる）
+- `Bash` はコマンドが限られるならコマンド単位で絞る（`Bash(python *)` / `Bash(gh *)`）
+- MCP ツールは **1 つずつ列挙する**。`mcp__playwright` のようなサーバ名の指定が個別ツール
+  （`mcp__playwright__browser_navigate` 等）へ前方一致するかは仕様上自明でなく、確認できて
+  いない。前方一致しなければ MCP ツールが 1 つも事前承認されない
+- **取り消しの難しい操作を無確認にしない。** 事前承認は確認プロンプトを飛ばす仕組みなので、
+  破壊的操作を持つ Skill は「対象を提示して同意を取る」手順を本文へ必ず置く（frontmatter で
+  守れるのは承認プロンプトの有無だけで、Kiro と Codex には対応する項目がない）
+
+量が問題になるのは MCP ツールを多用する Skill だけである（`playwright-authoring` は 43 個の
+列挙で 1,916 文字）。この種の Skill は本体プラグインからの分離を検討する。
 
 ## 発動制御の 4 分類
 

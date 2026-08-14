@@ -3,6 +3,11 @@ name: ml-model-structure
 description: "Lay out ML training and inference code as versioned directories with a feature SSoT. Use when building or retraining a model（モデル構築・モデル再学習・推論API）."
 paths:
   - "analysis/**"
+allowed-tools:
+  - Read
+  - Write
+  - Edit
+  - Bash
 ---
 
 # ML モデル構築・API開発の標準構造
