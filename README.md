@@ -117,7 +117,17 @@ kiro-cli chat --agent ndf
 | `/ndf:playwright-evidence` | `/playwright-kit:playwright-evidence` |
 | `/ndf:playwright-kit-ops` | `/playwright-kit:playwright-kit-ops` |
 
-利用するには `playwright-kit` を別途インストールしてください（[導入手順](./plugins/playwright-kit-claude/README.md)）。
+利用するには `playwright-kit` を別途インストールしてください（導入手順は
+[playwright-kit の README](./plugins/playwright-kit-claude/README.md) にランタイム別で記載）。
+
+```bash
+# Claude Code
+/plugin install playwright-kit@ai-plugins
+# Codex
+codex plugin add playwright-kit@ai-plugins
+# Kiro CLI
+bash plugins/playwright-kit-kiro/install.sh
+```
 
 **Skill の `description` を圧縮しました。** 挙動は変わりません。
 
