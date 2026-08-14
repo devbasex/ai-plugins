@@ -24,3 +24,4 @@ requirements-design
 tdd-cycle
 safe-refactoring
 quality-gates
+analyzable-coding

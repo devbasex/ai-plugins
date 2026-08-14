@@ -425,6 +425,31 @@ superpowers は 28 個で NDF と同規模ながら frontmatter が 1/2.7 だっ
 `description` が `Use when …` の 1 文だけで、トリガ語の列挙・引用符・追加フィールドを持たない。
 v7.0.0 の書式はこの方針に寄せたものである。
 
+## v7.1.0 での追加（analyzable-coding）
+
+Skill を 30 個から **31 個**へ増やした。起動実績をまだ持たないため、判定は次回の測定まで
+保留する。統合・削除の対象ではない。
+
+| Skill | 配布 | 役割 | 判定 |
+| --- | --- | --- | --- |
+| `analyzable-coding` | CXK | 分岐・反復・定数を検査可能なデータとして表現し、判断を記録可能にする規範 | 未測定 |
+
+`description` を言語非依存にしてある（言語名をトリガ語に入れていない）。対象言語の
+Python / TypeScript / PHP は `references/language-notes.md` にのみ現れ、規範本文は
+判定基準だけで構成する。言語を増やしても本文は変わらない。
+
+予算への影響は次のとおり（`python3 scripts/check-skill-frontmatter.py --report`）。
+
+| 指標 | v7.0.0（全 family 合計） | v7.1.0（全 family 合計） | 運用値 |
+| --- | ---: | ---: | ---: |
+| Skill 数（ndf 単独） | 30 | 31 | — |
+| Claude Code 初期一覧 | 5,807 | 6,041 | 8,000 |
+| Codex 初期一覧 | 5,395 | 5,629 | 8,000 |
+| frontmatter 合計 | 10,559 | 10,782 | 11,200 |
+
+`description` は 184 文字で、v7.0.0 の平均 148 文字より長い。判定表を持つ Skill であり
+用途文を削ると発動が落ちるため、この長さを許容する。運用値には余裕がある。
+
 ## 参照
 
 - 棚卸の計画: [issues/ndf-development-skills/02-skill-inventory.md](../../issues/ndf-development-skills/02-skill-inventory.md)

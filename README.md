@@ -6,12 +6,12 @@ Claude Code / Codex / Kiro CLI向けのスキル・MCP設定を共有するた�
 
 このマーケットプレイスは、チーム全体でAI開発ツール（Claude Code / Codex / Kiro CLI）の導入を加速するための事前設定されたプラグインを提供します。
 
-**NDFプラグイン v7.0.0** は、同じ `ndf@ai-plugins` という名前で Claude Code / Codex / Kiro CLI へ配布されるランタイム別プラグインです。共通ソースは `plugins/ndf-shared/` に集約し、利用者が install する配布物は `plugins/ndf-claude/` / `plugins/ndf-codex/` / `plugins/ndf-kiro/` に分かれています。
+**NDFプラグイン v7.1.0** は、同じ `ndf@ai-plugins` という名前で Claude Code / Codex / Kiro CLI へ配布されるランタイム別プラグインです。共通ソースは `plugins/ndf-shared/` に集約し、利用者が install する配布物は `plugins/ndf-claude/` / `plugins/ndf-codex/` / `plugins/ndf-kiro/` に分かれています。
 
-- **公開Skills**: Claude Code向け core 26個、Kiro向け core 25個、Codex向け core 24個に分離。
-- **元Skills（30個）**:
+- **公開Skills**: Claude Code向け core 27個、Kiro向け core 26個、Codex向け core 25個に分離。
+- **元Skills（31個）**:
   - PR/レビューワークフロー (7): pr, pr-tests, fix, pr-review, cherry-pick-pr, deploy, merged
-  - 開発方法論 (5): development-workflow, requirements-design, tdd-cycle, safe-refactoring, quality-gates
+  - 開発方法論 (6): development-workflow, requirements-design, tdd-cycle, safe-refactoring, quality-gates, analyzable-coding
   - 原則・ガイドライン (9): ndf-policies, implementation-plan, plan-to-spec, investigation-rules, problem-solving, logging-guidelines, markdown-writing, issue-plan-strategy, ml-model-structure
   - データ分析・品質・環境 (4): qa-security-scan, docker-container-access, google-auth, official-skills-autoloader
   - 外部サービス連携 (1): google-drive
@@ -102,8 +102,26 @@ kiro-cli chat --agent ndf
 
 | プラグイン名 | バージョン | 説明 | 詳細 |
 |------------|----------|------|------|
-| **ndf** | 7.0.0 | Claude Code / Codex / Kiro CLI 向けに runtime 別配布物を提供する NDF プラグイン。8個の専門エージェント（Claude版）、公開Skills（Claude Code向け core 26個、Kiro向け core 25個、Codex向け core 24個）、Claude SessionStart/Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:external-ai` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [Claude](./plugins/ndf-claude/README.md) / [Codex](./plugins/ndf-codex/README.md) / [Kiro](./plugins/ndf-kiro/README.md) |
+| **ndf** | 7.1.0 | Claude Code / Codex / Kiro CLI 向けに runtime 別配布物を提供する NDF プラグイン。8個の専門エージェント（Claude版）、公開Skills（Claude Code向け core 27個、Kiro向け core 26個、Codex向け core 25個）、Claude SessionStart/Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:external-ai` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [Claude](./plugins/ndf-claude/README.md) / [Codex](./plugins/ndf-codex/README.md) / [Kiro](./plugins/ndf-kiro/README.md) |
 | **playwright-kit** | 1.0.0 | Playwright による E2E テストの計画・実装・証跡管理を提供するプラグイン。ページ役割からのテスト計画、動画 / trace 付きスクリプト実装、レポート生成と Drive 保管、playwright_kit ランタイム（init、a11y / CWV スキャン）の 4 Skill。NDF v7.0.0 で分離。 | [Claude](./plugins/playwright-kit-claude/README.md) |
+
+### NDF v7.1.0 の主な変更
+
+**分析可能なコードのための Skill を 1 個追加しました。** 既存のコマンド名・引数・挙動は
+変わりません。
+
+| 追加した Skill | 役割 |
+|---|---|
+| `/ndf:analyzable-coding` | 分岐・反復・定数を検査可能なデータとして表現し、判断の理由を記録可能にする判断基準 |
+
+判断基準は言語に依存しません。「`if` を使うな」「ループを使うな」という禁止規則ではなく、
+**変化する知識をデータへ、安定した機構と不変条件をコードへ**という切り分けを MUST /
+SHOULD / MAY で示します。単純なガード節、静的に網羅性を検査できる分岐、逐次依存のループ、
+閉じた状態集合の列挙型は、いずれも MAY として「そのままでよい」と明示しています。
+
+Python / TypeScript / PHP での具体的な手段は
+[references/language-notes.md](./plugins/ndf-shared/skills/analyzable-coding/references/language-notes.md)
+に分離しているため、記載のない言語でも判断基準はそのまま使えます。
 
 ### NDF v7.0.0 の主な変更（非互換）
 

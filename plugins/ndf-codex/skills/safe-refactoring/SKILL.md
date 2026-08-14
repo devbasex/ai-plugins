@@ -128,6 +128,8 @@ flowchart TD
 
 ## 参照
 
+- `analyzable-coding` — **改善の方向**の判断基準（分岐・反復・定数をどう表現するか）。
+  この Skill は手順を、`analyzable-coding` は方向を担当する
 - [references/code-smells.md](references/code-smells.md) — 構造改善の起点になる兆候
 - [references/refactoring-catalog.md](references/refactoring-catalog.md) — 手法と適用条件
 - [references/characterization-tests.md](references/characterization-tests.md) — 現状固定テストの作り方
