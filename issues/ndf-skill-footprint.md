@@ -61,7 +61,7 @@ NDF のフィールド別内訳:
 - [x] claude の初期一覧に載る NDF の合計が **5,000 文字以下**になる（7,772 → **4,990**）
 - [x] frontmatter 合計が **9,000 文字以下**になる（13,017 → **7,578**、ndf 単独）
 - [x] `python3 scripts/check-skill-frontmatter.py` がエラー 0 / 警告 0
-- [x] 圧縮前に自動起動していた Skill が、圧縮後も同じ依頼文で起動する（Claude Code で実測。Codex / Kiro は残課題）
+- [x] 圧縮前に自動起動していた Skill が、圧縮後も同じ依頼文で起動する（Claude Code / Codex / Kiro の 3 ランタイムで単独条件の A/B を実測）
 - [x] `/ndf:` で始まる既存コマンド名が、playwright 系 4 個を除いて変わっていない
 - [x] playwright 系 4 個は新プラグインから同じ Skill 名で起動できる
 - [x] 旧 `/ndf:playwright-*` の移行先が `ndf-policies` の対応表に載っている
