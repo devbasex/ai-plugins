@@ -85,7 +85,7 @@ description: "Delete merged branches and worktrees after listing them for approv
 
 ## `allowed-tools` を付ける条件
 
-`allowed-tools` は **制限が意味を持つ Skill にだけ付ける**。次のどちらかに当てはまるものが対象。
+`allowed-tools` は **制限が意味を持つ Skill にだけ付ける**。次のいずれかに当てはまるものが対象。
 
 | 条件 | 例 |
 | --- | --- |
@@ -97,8 +97,10 @@ description: "Delete merged branches and worktrees after listing them for approv
 逆に、`Read` / `Write` / `Edit` / `Bash` / `Glob` / `Grep` をほぼ全部並べたものは**制限に
 なっていない**ため付けない。既定と同じ範囲を宣言するだけで、frontmatter の量だけが増える。
 
-MCP ツールを許可する場合は **サーバ単位でまとめる**（`mcp__playwright`）。ツール名を 1 つずつ
-並べると量が跳ね上がる（`playwright-authoring` は 43 個の列挙で 1,916 文字あった）。
+MCP ツールは **1 つずつ列挙する**。`mcp__playwright` のようなサーバ名の指定が個別ツール
+（`mcp__playwright__browser_navigate` 等）へ前方一致するかは仕様上自明でなく、この環境では
+検証できていない。列挙は量が大きい（`playwright-authoring` は 43 個で 1,916 文字）ため、
+MCP を多用する Skill は本体プラグインから分離することを検討する。
 
 **制限を frontmatter だけに頼らない。** Kiro は `allowed-tools` を解釈せず、Codex にも対応する
 項目がない。「これ以外はしない」は本文の手順にも書く。
