@@ -25,8 +25,24 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
-SHARED_DIR="$ROOT_DIR/plugins/ndf-shared"
 MCP_SHARED_DIR="$ROOT_DIR/plugins/mcp/shared"
+
+# Skill を配る plugin family を検出する。<family>-shared を編集元に、<family>-<runtime> を
+# 生成物とする規約で、manifests/ を持つものだけを対象にする（plugins/mcp/shared は別系統）。
+# 固定リストを置かないのは、追加時に build と validate の検出がずれて生成物の stale 検出だけ
+# 漏れる経路を作らないためである（scripts/validate-runtime-plugins.sh と同じ規約）。
+detect_plugin_families() {
+  local dir
+  for dir in "$ROOT_DIR"/plugins/*-shared; do
+    [ -d "$dir/manifests" ] || continue
+    basename "$dir" | sed 's/-shared$//'
+  done | sort
+}
+PLUGIN_FAMILIES="$(detect_plugin_families)"
+if [ -z "$PLUGIN_FAMILIES" ]; then
+  echo "ERROR: plugin family が見つからない（plugins/<family>-shared/manifests）" >&2
+  exit 1
+fi
 
 copy_tree() {
   local source_dir="$1"
@@ -162,13 +178,15 @@ PY
 
 rewrite_kiro_skill_paths() {
   local skills_dir="$1"
+  local family="$2"
+  local kiro_root="plugins/$family-kiro"
   local file
 
   for file in \
     "$skills_dir/fix/SKILL.md"
   do
     [ -f "$file" ] || continue
-    sed 's#${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/skills/fix/scripts/fetch-pr-comments.sh#${PLUGIN_ROOT:-plugins/ndf-kiro}/skills/fix/scripts/fetch-pr-comments.sh#g' \
+    sed "s#\${PLUGIN_ROOT:-\${CLAUDE_PLUGIN_ROOT}}/skills/fix/scripts/fetch-pr-comments.sh#\${PLUGIN_ROOT:-$kiro_root}/skills/fix/scripts/fetch-pr-comments.sh#g" \
       "$file" >"$file.tmp"
     mv "$file.tmp" "$file"
   done
@@ -179,7 +197,7 @@ rewrite_kiro_skill_paths() {
     "$skills_dir/cross-review/docs/01-state-and-review.md"
   do
     [ -f "$file" ] || continue
-    sed 's#${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}#${PLUGIN_ROOT:-plugins/ndf-kiro}#g' \
+    sed "s#\${PLUGIN_ROOT:-\${CLAUDE_PLUGIN_ROOT}}#\${PLUGIN_ROOT:-$kiro_root}#g" \
       "$file" >"$file.tmp"
     mv "$file.tmp" "$file"
   done
@@ -190,6 +208,7 @@ sync_skills() {
   local source_dir="$2"
   local dest_dir="$3"
   local variant="${4:-}"
+  local family="${5:-}"
   local tmp_dir
   local diff_file
   local skill
@@ -238,7 +257,7 @@ sync_skills() {
     rewrite_codex_skill_paths "$tmp_dir" skills
     write_codex_skill_policies "$tmp_dir"
   elif [ "$variant" = kiro-runtime ]; then
-    rewrite_kiro_skill_paths "$tmp_dir"
+    rewrite_kiro_skill_paths "$tmp_dir" "$family"
   fi
 
   if [ "$CHECK" = true ]; then
@@ -265,19 +284,24 @@ sync_skills() {
 }
 
 sync_runtime_if_present() {
-  local runtime="$1"
-  local manifest="$2"
-  local plugin_dir="$ROOT_DIR/plugins/ndf-$runtime"
+  local family="$1"
+  local runtime="$2"
+  local shared_dir="$ROOT_DIR/plugins/$family-shared"
+  local manifest="$shared_dir/manifests/$runtime-skills.txt"
+  local plugin_dir="$ROOT_DIR/plugins/$family-$runtime"
 
   [ -d "$plugin_dir" ] || return 0
   if [ "$runtime" = codex ]; then
-    sync_skills "$manifest" "$SHARED_DIR/skills" "$plugin_dir/skills" codex-runtime
+    sync_skills "$manifest" "$shared_dir/skills" "$plugin_dir/skills" codex-runtime
   elif [ "$runtime" = kiro ]; then
-    sync_skills "$manifest" "$SHARED_DIR/skills" "$plugin_dir/skills" kiro-runtime
+    sync_skills "$manifest" "$shared_dir/skills" "$plugin_dir/skills" kiro-runtime "$family"
   else
-    sync_skills "$manifest" "$SHARED_DIR/skills" "$plugin_dir/skills"
+    sync_skills "$manifest" "$shared_dir/skills" "$plugin_dir/skills"
   fi
-  copy_tree "$SHARED_DIR/scripts" "$plugin_dir/scripts"
+  # scripts/ を持たない family（playwright-kit など）では同期しない
+  if [ -d "$shared_dir/scripts" ]; then
+    copy_tree "$shared_dir/scripts" "$plugin_dir/scripts"
+  fi
 }
 
 write_codex_mcp_manifest() {
@@ -667,16 +691,18 @@ sync_mcp_plugins() {
 # Kiro 配布物は plugin.json を持たないため版数を示す手段がない。
 # Claude 版の plugin.json を唯一の基準として VERSION ファイルへ書き出す。
 sync_kiro_version() {
-  local src="$ROOT_DIR/plugins/ndf-claude/.claude-plugin/plugin.json"
-  local dest="$ROOT_DIR/plugins/ndf-kiro/VERSION"
+  local family="$1"
+  local src="$ROOT_DIR/plugins/$family-claude/.claude-plugin/plugin.json"
+  local dest="$ROOT_DIR/plugins/$family-kiro/VERSION"
   local version
 
   [ -f "$src" ] || return 0
+  [ -d "$ROOT_DIR/plugins/$family-kiro" ] || return 0
   version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$src")"
 
   if [ "$CHECK" = true ]; then
     if [ ! -f "$dest" ] || [ "$(cat "$dest")" != "$version" ]; then
-      echo "Generated file is stale: plugins/ndf-kiro/VERSION" >&2
+      echo "Generated file is stale: plugins/$family-kiro/VERSION" >&2
       return 1
     fi
     return 0
@@ -684,10 +710,16 @@ sync_kiro_version() {
   printf '%s\n' "$version" > "$dest"
 }
 
-sync_runtime_if_present claude "$SHARED_DIR/manifests/claude-skills.txt"
-sync_runtime_if_present codex "$SHARED_DIR/manifests/codex-skills.txt"
-sync_runtime_if_present kiro "$SHARED_DIR/manifests/kiro-skills.txt"
-sync_kiro_version
+for family in $PLUGIN_FAMILIES; do
+  if [ ! -d "$ROOT_DIR/plugins/$family-shared" ]; then
+    echo "ERROR: shared source not found: plugins/$family-shared" >&2
+    exit 1
+  fi
+  sync_runtime_if_present "$family" claude
+  sync_runtime_if_present "$family" codex
+  sync_runtime_if_present "$family" kiro
+  sync_kiro_version "$family"
+done
 sync_mcp_plugins
 
 if [ "$CHECK" = true ]; then

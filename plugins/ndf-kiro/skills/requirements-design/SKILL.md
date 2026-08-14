@@ -1,6 +1,6 @@
 ---
 name: requirements-design
-description: "Turn a vague request into verifiable acceptance criteria before implementing. Use when the goal or the done-condition is unclear. Triggers: '受け入れ条件', '要求を整理', '成功条件'"
+description: "Turn a vague request into verifiable acceptance criteria before implementing. Use when the done-condition is unclear（受け入れ条件・要求を整理・成功条件）."
 ---
 
 # 要求と受け入れ条件

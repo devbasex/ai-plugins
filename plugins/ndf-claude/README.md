@@ -1,6 +1,6 @@
 # NDF Claude Code Plugin
 
-Claude Code 向けの NDF プラグインです。PR 運用、レビュー、調査、実装計画、仕様書化、browser smoke test、statusline、Codex CLI 委譲、Slack 通知を Claude Code の plugin として提供します。
+Claude Code 向けの NDF プラグインです。PR 運用、レビュー、調査、実装計画、仕様書化、開発方法論（要求定義・テスト駆動・構造改善・完了判定）、statusline、Codex CLI 委譲、Slack 通知を Claude Code の plugin として提供します。
 
 ## インストール
 
@@ -10,6 +10,19 @@ Claude Code で marketplace を追加し、`ndf` をインストールします�
 /plugin marketplace add https://github.com/devbasex/ai-plugins
 /plugin install ndf@ai-plugins
 ```
+
+
+## Playwright テストについて
+
+v7.0.0 で Playwright による E2E テストの 4 Skill を **`playwright-kit` プラグイン**へ分離しました。
+Skill 名は変わらないため `/playwright-` まで打てば従来どおり候補に出ますが、プラグインを別途
+インストールする必要があります。
+
+```bash
+/plugin install playwright-kit@ai-plugins
+```
+
+移行先の対応表は `ndf-policies` skill にあります（v8.0.0 で削除）。
 
 ## 同梱内容
 

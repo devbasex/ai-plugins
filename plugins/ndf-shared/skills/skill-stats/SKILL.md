@@ -1,6 +1,6 @@
 ---
 name: skill-stats
-description: "Measure Skill usage from Claude Code transcripts: invocation counts, trigger hit rate, and per-Skill breakdown. Use when auditing which Skills actually fire. Triggers: 'skill統計', 'skill利用分析', 'skill hit rate', 'skill-stats'"
+description: "Measure Skill usage from Claude Code transcripts: invocations, trigger hit rate, per-Skill breakdown. Use when auditing which Skills fire（skill統計・skill利用分析）."
 allowed-tools:
   - Bash
   - Read
@@ -65,7 +65,7 @@ transcript JSONL 先頭の `cwd` フィールドを優先してプロジェク�
 | **ヒット数** (hits) | 関連話題を含むユーザーメッセージの直後 (次のユーザーメッセージまでの間) に該当skillが**自動起動**した件数。間にスラッシュコマンドが入った場合はそこで打ち切る (利用者が自分で打った時点でトリガは発火しなかったため) |
 | **ヒット率** (hit_rate) | `hits / triggers` (%) |
 
-Triggers キーワードは `Triggers:` と `明示トリガ:` のどちらの見出しでも抽出する。
+トリガ語は `description` / `when_to_use` 末尾の全角括弧（`（語・語）`）から抽出する。
 
 ### ヒット率の解釈
 

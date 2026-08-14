@@ -1,6 +1,6 @@
 ---
 name: google-auth
-description: "Set up OAuth2 credentials for Google APIs (Drive, Docs, Sheets). Use when a script needs Google API access and the token is missing or expired. Triggers: 'Google認証', 'client_secret', 'google_token', 'OAuth2 認証'"
+description: "Set up OAuth2 credentials for Google APIs (Drive, Docs, Sheets). Use when a token is missing or expired（Google認証・OAuth2認証・client_secret）."
 allowed-tools:
   - Read
   - Bash(python *)

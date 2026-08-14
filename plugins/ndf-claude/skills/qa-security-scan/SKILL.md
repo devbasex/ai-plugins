@@ -1,6 +1,6 @@
 ---
 name: qa-security-scan
-description: "Run an OWASP Top 10 security review of code, authentication, authorization, and data protection. Use when asked for a security review of a change or a vulnerability check. Triggers: 'セキュリティレビュー', 'セキュリティスキャン', '脆弱性チェック', 'OWASP', '認証認可の確認', 'SQLインジェクション'"
+description: "Run an OWASP Top 10 review of code, auth, and data protection. Use when a security review or vulnerability check is asked for（セキュリティレビュー・脆弱性チェック・認証認可の確認）."
 ---
 
 # QA Security Scan Skill

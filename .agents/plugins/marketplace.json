@@ -17,6 +17,21 @@
       }
     },
     {
+      "name": "playwright-kit",
+      "source": {
+        "source": "local",
+        "path": "./plugins/playwright-kit-codex"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity",
+      "interface": {
+        "displayName": "Playwright Kit"
+      }
+    },
+    {
       "name": "mcp-playwright",
       "source": {
         "source": "local",

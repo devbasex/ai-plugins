@@ -1,7 +1,7 @@
 ---
 name: official-skills-autoloader
-description: "Install an Anthropic official Skill on demand and run it. Use when a request needs Office or PDF output that no local Skill covers. Triggers: 'Word作成', 'Excel出力', 'スライド生成', 'PDF作成'. 対象は docx / pptx / xlsx / pdf / frontend-design / webapp-testing / mcp-builder。取得元・書き込み先・対象 Skill を提示して同意を得てから実行する。"
-when_to_use: "Claude Code 専用。~/.claude/skills/ へ公式 Skill を取得して読み込む。インストールは同意を得てから実行する。追加トリガ: '.docx', '.pptx', '.xlsx', '.pdf', 'MCPサーバーを作りたい', 'フロントエンド設計'"
+description: "Install an official Anthropic Skill (docx / pptx / xlsx / pdf) on demand, showing the source first. Use when Office or PDF output is needed（Word作成・Excel出力・PDF作成）."
+when_to_use: "Claude Code 専用。~/.claude/skills/ へ公式 Skill を取得して読み込む。インストールは同意を得てから実行する（.docx・.pptx・.xlsx・.pdf・MCPサーバーを作りたい・フロントエンド設計）."
 allowed-tools:
   - Bash
   - Read

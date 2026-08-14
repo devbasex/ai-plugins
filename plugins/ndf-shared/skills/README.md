@@ -29,7 +29,7 @@ python3 scripts/check-skill-frontmatter.py --report  # 実測値の一覧
 | --- | --- |
 | `name` / `description` | いずれも解釈する。発動判定に効くのは `description` |
 | `license` / `compatibility` / `metadata` | 解釈されるが発動には関与しない |
-| `allowed-tools` | 仕様上 experimental。Claude Code は解釈するが、Kiro は frontmatter 一覧に載せておらず解釈は保証されない。ツール制限は実装差がある前提で書く |
+| `allowed-tools` | 仕様上 experimental。**利用制限ではなく事前承認**（下記「`allowed-tools` の意味と付け方」）。Claude Code は解釈するが、Kiro は frontmatter 一覧に載せておらず解釈は保証されない。事前承認の扱いは実装差がある前提で書く |
 
 `when_to_use` は Claude Code 独自の項目で、Codex と Kiro は文書化していない。仕様は未知の項目を
 無視すると定めているため壊れはしないが、**両ランタイムでは `description` だけで発動が判定される**。
@@ -58,6 +58,57 @@ when_to_use: "Claude Code 向けの追加トリガのみ。description で足り
   して警告している
 - `when_to_use` は Claude Code 向けの**追加**トリガが要る Skill にだけ付ける。`description` の
   言い換えにしない。未設定であること自体は不備ではない
+
+### トリガ語の書式
+
+トリガ語は **`Use when` の文末の全角丸括弧に `・` 区切りで並べる**。
+
+```yaml
+description: "Delete merged branches and worktrees after listing them for approval, then update main. Use when a PR was merged（マージ後の後片付け・ブランチを整理・worktreeを削除）."
+```
+
+**旧書式（`Triggers: 'a', 'b'` / `明示トリガ:`）は廃止した。** 残っていると
+`scripts/check-skill-frontmatter.py` が失敗する。ラベルと引用符の分だけ長いうえ、実測では
+`description` 末尾の列挙は暗黙起動へ届きにくかった（1 Skill あたり 50〜100 文字の差、
+`merged` 241 → 144 文字）。
+
+書式を変えても暗黙起動は落ちない。実測は
+[docs/specifications/ndf-skill-inventory.md](../../../docs/specifications/ndf-skill-inventory.md)
+「トリガ書式の変更の実測」に記録している。
+
+規則:
+
+- トリガ語は 2〜4 個。`Use when` の条件と重複する語は入れない
+- 括弧内は**日本語のみ**にする。英語のトリガ語は `Use when` の条件文へ埋め込む
+  （検査は「末尾の全角括弧かつ日本語を含む」ものだけをトリガ宣言と見なす。英語の補足
+  `(Codex/Gemini)` をトリガと誤認しないための条件）
+- 括弧は全角 `（）`。半角丸括弧は本文の補足に使うため、宣言と区別できなくなる
+
+## `allowed-tools` の意味と付け方
+
+**`allowed-tools` は利用制限ではなく、事前承認（確認プロンプトのスキップ）である。**
+
+> Tools Claude can use without asking permission when this skill is active.
+> — [Claude Code 公式リファレンス](../../../docs/claude-code-skills-official-reference.md)
+
+したがって、外すと「その Skill が使えるツールが減る」のではなく、**Skill の手順の途中で
+利用者に確認を求める回数が増える**。ファイル編集を伴う Skill から `Write` / `Edit` を外すと、
+手順のたびに承認が要る。
+
+規則:
+
+- **その Skill の手順が実際に使うツールを列挙する。** 使わないツールを足さない（事前承認の
+  範囲が広がるだけで、利用者が意図しない操作まで無確認になる）
+- `Bash` はコマンドが限られるならコマンド単位で絞る（`Bash(python *)` / `Bash(gh *)`）
+- MCP ツールは **1 つずつ列挙する**。`mcp__playwright` のようなサーバ名の指定が個別ツール
+  （`mcp__playwright__browser_navigate` 等）へ前方一致するかは仕様上自明でなく、確認できて
+  いない。前方一致しなければ MCP ツールが 1 つも事前承認されない
+- **取り消しの難しい操作を無確認にしない。** 事前承認は確認プロンプトを飛ばす仕組みなので、
+  破壊的操作を持つ Skill は「対象を提示して同意を取る」手順を本文へ必ず置く（frontmatter で
+  守れるのは承認プロンプトの有無だけで、Kiro と Codex には対応する項目がない）
+
+量が問題になるのは MCP ツールを多用する Skill だけである（`playwright-authoring` は 43 個の
+列挙で 1,916 文字）。この種の Skill は本体プラグインからの分離を検討する。
 
 ## 発動制御の 4 分類
 
@@ -214,7 +265,7 @@ Skill 名の部分だからである。ただし配布先に何が入ってい�
 | `SKILL.md` 本文 | 5,000 トークン | 仕様の推奨 |
 | Claude Code の初期 Skill 一覧の合計 | コンテキストウィンドウの 1%。不明な場合は 8,000 文字。1 項目あたり 250 文字で切り詰め | Claude Code 公式ドキュメント |
 | Codex の初期 Skill 一覧の合計 | コンテキストウィンドウの 2%。不明な場合は 8,000 文字 | Codex 公式ドキュメント |
-| 全 Skill の frontmatter 合計 | 13,800 文字 | リポジトリ固有の運用値。v6.1.0 時点の実測 13,017 文字（Skill 34 個）に約 6% の余裕を足した値。`scripts/check-skill-frontmatter.py` の `FRONTMATTER_TOTAL_MAX` |
+| 全 Skill の frontmatter 合計 | 11,200 文字 | リポジトリ固有の運用値。**plugin family をまたいだ合計**で、v7.0.0 時点の実測 10,559 文字（ndf 30 個 + playwright-kit 4 個）に約 6% の余裕を足した値。`scripts/check-skill-frontmatter.py` の `FRONTMATTER_TOTAL_MAX` |
 
 運用目標の 300 文字は仕様上限より厳しい。全 Skill 分の `description` が常時注入されるため、
 仕様上限は 1 個で使い切ってよい量ではない。

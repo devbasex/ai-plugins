@@ -44,6 +44,10 @@ ai-plugins/
 │   ├── ndf-claude/               # Claude Code版NDF
 │   ├── ndf-codex/                # Codex版NDF
 │   ├── ndf-kiro/                 # Kiro CLI版NDF
+│   ├── playwright-kit-shared/    # playwright-kit共通編集元（直接installしない）
+│   ├── playwright-kit-claude/    # Claude Code版playwright-kit
+│   ├── playwright-kit-codex/     # Codex版playwright-kit
+│   ├── playwright-kit-kiro/      # Kiro CLI版playwright-kit installer
 │   └── mcp/
 │       ├── shared/               # MCPプラグイン共通編集元
 │       ├── claude/               # Claude Code版MCP配布物
@@ -73,7 +77,7 @@ ai-plugins/
 
 ## NDFプラグインについて
 
-**NDFプラグイン**は、このマーケットプレイスの主要プラグインです（v6.1.0）。plugin 名は全ランタイムで `ndf` を維持し、配布物は `plugins/ndf-claude` / `plugins/ndf-codex` / `plugins/ndf-kiro` に分離しています。
+**NDFプラグイン**は、このマーケットプレイスの主要プラグインです（v7.0.0）。plugin 名は全ランタイムで `ndf` を維持し、配布物は `plugins/ndf-claude` / `plugins/ndf-codex` / `plugins/ndf-kiro` に分離しています。
 - 共通編集元は `plugins/ndf-shared/`
 - Claude Code版は 8個の専門サブエージェント、公開Skills、SessionStart/Stopフックを提供
 - Codex版は Codex向け公開Skillsと任意Slack通知hookを提供

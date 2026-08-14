@@ -1,6 +1,6 @@
 ---
 name: cross-review
-description: "Review a PR with both Codex and Gemini, looping fixes until both APPROVE. Use when a converging two-AI review is wanted; for a one-shot second opinion use /ndf:pr-review. Triggers: 'cross-review', 'クロスレビュー', '両AIレビュー', '収束レビュー', 'codex と gemini でレビュー'"
+description: "Review a PR with both Codex and Gemini, looping fixes until both APPROVE. Use when a converging two-AI review is wanted（クロスレビュー・両AIレビュー・収束レビュー）."
 argument-hint: "[PR番号] [--max-rounds N] [--rotate-after K] [--rotate-mode light|squash] [--only codex|gemini] [--focus TEXT] [--extra-instructions-file PATH]"
 allowed-tools:
   - Bash

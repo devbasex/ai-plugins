@@ -12,10 +12,23 @@ cat plugins/ndf-kiro/VERSION
 
 # 導入済みプロジェクトの版数
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v6.1.0）
+# => NDF統合開発エージェント（Kiro CLI用 / v7.0.0）
 ```
 
 `install.sh` は実行時にも `NDF バージョン: <版数>` を表示する。
+
+
+## Playwright テストについて
+
+v7.0.0 で Playwright による E2E テストの 4 Skill を **`playwright-kit` プラグイン**へ分離しました。
+Skill 名は変わらないため `/playwright-` まで打てば従来どおり候補に出ますが、プラグインを別途
+インストールする必要があります。
+
+```bash
+bash plugins/playwright-kit-kiro/install.sh
+```
+
+移行先の対応表は `.kiro/steering/ndf-policies.md`（`ndf-policies` skill から生成）にあります。
 
 ## インストール
 

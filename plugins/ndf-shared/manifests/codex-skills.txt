@@ -13,10 +13,6 @@ markdown-writing
 merged
 ndf-policies
 plan-to-spec
-playwright-authoring
-playwright-evidence
-playwright-kit-ops
-playwright-planning
 pr
 pr-review
 pr-tests

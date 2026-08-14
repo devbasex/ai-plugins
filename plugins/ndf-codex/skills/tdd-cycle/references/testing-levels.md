@@ -61,7 +61,8 @@
 
 - シナリオを増やすほど不安定になる。**代表シナリオを決めて数を固定する**
 - 落ちたときに原因が分かるよう、失敗時の証跡（画面記録・ログ・通信記録）を残す
-- ブラウザ操作を伴う場合の作成手順と証跡は `playwright-planning` / `playwright-authoring` を使う
+- ブラウザ操作を伴う場合の作成手順と証跡は `playwright-kit` プラグインの
+  `playwright-planning` / `playwright-authoring` を使う（導入していなければ対象プロジェクトの手順に従う）
 
 ## 実行時間の目安
 
