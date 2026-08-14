@@ -67,9 +67,10 @@ when_to_use: "Claude Code 向けの追加トリガのみ。description で足り
 description: "Delete merged branches and worktrees after listing them for approval, then update main. Use when a PR was merged（マージ後の後片付け・ブランチを整理・worktreeを削除）."
 ```
 
-旧書式（`Triggers: 'a', 'b'`）も検査は受けるが、新規の Skill では使わない。ラベルと引用符の
-分だけ長くなり、初期一覧の予算を圧迫するためである。実測では 1 Skill あたり 50〜100 文字の差が
-出た（`merged` 241 → 144 文字）。
+**旧書式（`Triggers: 'a', 'b'` / `明示トリガ:`）は廃止した。** 残っていると
+`scripts/check-skill-frontmatter.py` が失敗する。ラベルと引用符の分だけ長いうえ、実測では
+`description` 末尾の列挙は暗黙起動へ届きにくかった（1 Skill あたり 50〜100 文字の差、
+`merged` 241 → 144 文字）。
 
 書式を変えても暗黙起動は落ちない。実測は
 [docs/specifications/ndf-skill-inventory.md](../../../docs/specifications/ndf-skill-inventory.md)

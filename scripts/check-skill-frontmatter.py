@@ -89,11 +89,11 @@ NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 FRONT_MATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 KEY_RE = re.compile(r"^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$")
 QUOTED_RE = re.compile(r"['\"]([^'\"]+)['\"]")
-TRIGGER_LABEL_RE = re.compile(
-    r"(?:Triggers?|明示トリガ|トリガー?)\s*[:：]\s*(.+)", re.IGNORECASE | re.DOTALL
-)
-# 末尾の全角丸括弧に「・」区切りで並べたトリガ語。`Triggers: 'a', 'b'` より短く書けるため
-# こちらを既定の書式とする（規約「トリガ語の書式」）。
+# 廃止した旧書式（`Triggers: 'a', 'b'`）。残っていたら失敗させる。ラベルと引用符の分だけ
+# 長いうえ、実測では description 末尾の列挙は暗黙起動へ届きにくかった
+# （docs/specifications/ndf-skill-inventory.md「トリガ書式の変更の実測」）。
+LEGACY_TRIGGER_RE = re.compile(r"(?:Triggers?|明示トリガ|トリガー?)\s*[:：]", re.IGNORECASE)
+# 末尾の全角丸括弧に「・」区切りで並べたトリガ語（規約「トリガ語の書式」）。
 #
 # 誤検出を避けるため 2 つの条件を課す。
 #   1. description の**末尾**にあること（本文中の `(Codex/Gemini)` のような補足を拾わない）
@@ -188,12 +188,8 @@ def unquote(value: str) -> str:
 def extract_triggers(*fields: str) -> list[str]:
     """宣言されたトリガ語を集める。
 
-    2 つの書式を受ける。
-
-    - 既定: 末尾の全角丸括弧に `・` 区切りで並べる（`… Use when …（PRを作って・PR作成）.`）
-    - 旧式: `Triggers: 'a', 'b'` の引用符付き列挙
-
-    旧式も受けるのは、書式の移行を Skill ごとに進められるようにするためである。
+    書式は 1 つだけ。末尾の全角丸括弧に `・` 区切りで並べる
+    （`… Use when a PR was merged（マージ後の後片付け・ブランチを整理）.`）。
     """
     triggers: list[str] = []
     for field in fields:
@@ -202,10 +198,6 @@ def extract_triggers(*fields: str) -> list[str]:
         p = TRIGGER_PAREN_RE.search(field.strip())
         if p and HAS_JA_RE.search(p.group(1)):
             triggers.extend(t.strip() for t in re.split(r"[・/／,、]", p.group(1)))
-        m = TRIGGER_LABEL_RE.search(field)
-        if not m:
-            continue
-        triggers.extend(q.strip() for q in QUOTED_RE.findall(m.group(1)))
     seen: set[str] = set()
     out: list[str] = []
     for t in triggers:
@@ -299,6 +291,11 @@ def check_skill(s: dict) -> list[Finding]:
             add("warn", "portability/lead",
                 f"description の先頭 {DESC_LEAD_CHARS} 文字に用途もトリガ語も現れない"
                 "（Codex は予算超過時に description を先頭から残して短縮する）")
+
+    if LEGACY_TRIGGER_RE.search(desc) or LEGACY_TRIGGER_RE.search(wtu):
+        add("error", "portability/legacy-trigger",
+            "廃止した旧書式のトリガ宣言（Triggers: / 明示トリガ:）が残っている。"
+            "末尾の全角括弧へ `（語・語）` の形で並べる")
 
     # --- 運用 ---
     if len(desc) > DESCRIPTION_OPS_MAX:
