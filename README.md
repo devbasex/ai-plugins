@@ -123,7 +123,7 @@ kiro-cli chat --agent ndf
 
 | 指標 | v6.1.0 | v7.0.0（NDF 単独） |
 |---|---:|---:|
-| `description` の 1 個あたり平均 | 237 | **150** |
+| `description` の 1 個あたり平均 | 237 | **148** |
 | Claude Code 初期一覧の合計 | 7,772 | **4,990** |
 | frontmatter 合計 | 13,017 | **7,578** |
 
