@@ -10,6 +10,21 @@ run() {
 
 run bash "$ROOT_DIR/scripts/build-runtime-plugins.sh" --check
 
+# Skill を配る plugin family を <family>-shared から検出する（plugins/mcp/shared は別系統）。
+# 後段の静的解析（claude plugin validate / Kiro installer の dry-run）もこの一覧で回すため、
+# family を足したときに検査対象から漏れることがない。
+FAMILIES=()
+for shared_dir in "$ROOT_DIR"/plugins/*-shared; do
+  [ -d "$shared_dir/manifests" ] || continue
+  family="$(basename "$shared_dir")"
+  FAMILIES+=("${family%-shared}")
+done
+if [ "${#FAMILIES[@]}" -eq 0 ]; then
+  echo "ERROR: plugin family が見つからない（plugins/<family>-shared/manifests）" >&2
+  exit 1
+fi
+echo "==> plugin families: ${FAMILIES[*]}"
+
 run python3 -m json.tool "$ROOT_DIR/.claude-plugin/marketplace.json" >/dev/null
 run python3 -m json.tool "$ROOT_DIR/.agents/plugins/marketplace.json" >/dev/null
 
@@ -21,12 +36,15 @@ while IFS= read -r mcp_config; do
   run python3 -m json.tool "$mcp_config" >/dev/null
 done < <(find "$ROOT_DIR/plugins/mcp" -name .mcp.json | sort)
 
-run python3 - "$ROOT_DIR" <<'PY'
+run python3 - "$ROOT_DIR" "${FAMILIES[@]}" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 root = Path(sys.argv[1])
+# 検出済みの plugin family は呼び出し側から受け取る（検出を 2 箇所に持つと、
+# 一方だけが新しい family を拾って検査範囲が食い違う）。
+families = sys.argv[2:]
 
 def read_json(path: Path):
     with path.open(encoding="utf-8") as fh:
@@ -60,15 +78,6 @@ for plugin in codex_marketplace.get("plugins", []):
         continue
     if not (plugin_dir / ".codex-plugin/plugin.json").is_file():
         errors.append(f"Codex plugin manifest missing under {source_path}")
-
-# Skill を配る plugin family を <family>-shared から検出する（plugins/mcp/shared は別系統）。
-families = sorted(
-    d.name.removesuffix("-shared")
-    for d in (root / "plugins").iterdir()
-    if d.is_dir() and d.name.endswith("-shared") and (d / "manifests").is_dir()
-)
-if not families:
-    errors.append("plugin family が見つからない（plugins/<family>-shared/manifests）")
 
 for family in families:
     shared = root / f"plugins/{family}-shared"
@@ -158,13 +167,23 @@ print("runtime plugin manifests and generated paths are valid")
 PY
 
 if command -v claude >/dev/null 2>&1; then
-  run claude plugin validate "$ROOT_DIR/plugins/ndf-claude"
+  for family in "${FAMILIES[@]}"; do
+    [ -d "$ROOT_DIR/plugins/$family-claude" ] || continue
+    run claude plugin validate "$ROOT_DIR/plugins/$family-claude"
+  done
   run claude plugin validate "$ROOT_DIR/.claude-plugin/marketplace.json"
 else
   echo "==> claude CLI not found; skipped claude plugin validate"
 fi
 
-run bash "$ROOT_DIR/plugins/ndf-kiro/install.sh" --dry-run >/dev/null
+for family in "${FAMILIES[@]}"; do
+  installer="$ROOT_DIR/plugins/$family-kiro/install.sh"
+  [ -f "$installer" ] || continue
+  run bash "$installer" --dry-run >/dev/null
+done
+
+# --with-codex を持つのは NDF の installer だけ（Codex 向け Skill も併せて配置する経路）。
+# family 共通の引数ではないため、ここだけは対象を明示して検査する。
 run bash "$ROOT_DIR/plugins/ndf-kiro/install.sh" --dry-run --with-codex >/dev/null
 
 while IFS= read -r installer; do

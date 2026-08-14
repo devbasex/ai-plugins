@@ -7,7 +7,8 @@
 検査は 3 種類に分かれる。
 
 - **individual** — Skill 単位。仕様準拠・安全性・可搬性・運用
-- **aggregate**  — 配布先ごとの初期一覧予算（Claude Code / Codex）と frontmatter 総量
+- **aggregate**  — 配布先ごとの初期一覧予算（Claude Code / Codex）と frontmatter 総量。
+  予算は検査対象の plugin family すべての合計に対して判定する
 - **cross**      — Skill 間。トリガ語の重複と、既知の外部 Skill 名との衝突
 
 判定が本質的に近似になる項目（description 先頭のトリガ語、when_to_use の追加トリガ、
@@ -377,13 +378,17 @@ def load_manifests(skills_dir: pathlib.Path) -> dict[str, set[str]]:
     return out
 
 
-def check_aggregate(skills: list[dict], skills_dir: pathlib.Path) -> tuple[list[Finding], dict]:
-    """初期一覧の予算と frontmatter 総量を検査する。
+def measure_aggregate(skills: list[dict], skills_dir: pathlib.Path) -> dict:
+    """初期一覧に載る文字数と frontmatter 総量を計測する（判定はしない）。
 
     Claude Code と Codex は起動時に name / description / ファイルパスを一覧として
     読み込み、この一覧に総量予算を設けている（超過すると description を短縮し、
     なお超えると Skill を一覧から省略して警告を出す）。予算は配布先ごとに効くため、
     manifest に載っている Skill だけを数える。
+
+    予算の判定は plugin family をまたいだ合計に対して行う（利用者の環境では複数の
+    plugin が同時に入るため、family 単位で判定すると合計の超過を見逃す）。
+    そのためこの関数は計測値だけを返し、上限との比較は check_budget が行う。
     """
     manifests = load_manifests(skills_dir)
     listings: dict[str, int] = {r: 0 for r in manifests}
@@ -401,17 +406,26 @@ def check_aggregate(skills: list[dict], skills_dir: pathlib.Path) -> tuple[list[
             d = desc[:CLAUDE_ITEM_TRUNCATE] if runtime == "claude" else desc
             listings[runtime] += len(name) + len(d) + len(rel)
 
+    return {"listings": listings, "frontmatter_total": fm_total}
+
+
+def check_budget(metrics: dict) -> list[Finding]:
+    """検査対象すべての合計値を予算と突き合わせる。
+
+    引数は measure_aggregate の計測値を plugin family 横断で合計したもの。
+    """
     out: list[Finding] = []
     limits = {"claude": CLAUDE_LISTING_MAX, "codex": CODEX_LISTING_MAX, "kiro": None}
-    for runtime, total in sorted(listings.items()):
+    for runtime, total in sorted(metrics["listings"].items()):
         limit = limits.get(runtime)
         if limit is not None and total > limit:
             out.append(Finding("(全体)", "error", f"ops/{runtime}-listing",
                                f"{runtime} の初期一覧に載る合計が {total} 文字（上限 {limit}）"))
+    fm_total = metrics["frontmatter_total"]
     if fm_total > FRONTMATTER_TOTAL_MAX:
         out.append(Finding("(全体)", "error", "ops/frontmatter-total",
                            f"全 Skill の frontmatter 合計が {fm_total} 文字（上限 {FRONTMATTER_TOTAL_MAX}）"))
-    return out, {"listings": listings, "frontmatter_total": fm_total}
+    return out
 
 
 def check_trigger_collisions(skills: list[dict]) -> list[Finding]:
@@ -511,12 +525,11 @@ def main() -> int:
             return 2
         for s in family_skills:
             findings.extend(check_skill(s))
-        agg, m = check_aggregate(family_skills, skills_dir)
-        findings.extend(agg)
-        # トリガ語の重複と外部名の衝突は family をまたいで判定する（利用者の環境では
-        # 両方のプラグインが同時に入るため、family 内だけ見ても衝突を見逃す）
+        # トリガ語の重複・外部名の衝突・初期一覧の予算は family をまたいで判定する
+        # （利用者の環境では両方のプラグインが同時に入るため、family 内だけ見ても
+        # 衝突や合計の超過を見逃す）
         skills.extend(family_skills)
-        per_family.append((skills_dir, m))
+        per_family.append((skills_dir, measure_aggregate(family_skills, skills_dir)))
     findings.extend(check_trigger_collisions(skills))
     findings.extend(check_external_name_collisions(skills))
     metrics = {
@@ -526,6 +539,7 @@ def main() -> int:
     for _, m in per_family:
         for runtime, total in m["listings"].items():
             metrics["listings"][runtime] = metrics["listings"].get(runtime, 0) + total
+    findings.extend(check_budget(metrics))
 
     if args.report:
         for skills_dir, m in per_family:
