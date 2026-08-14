@@ -6,7 +6,7 @@ Claude Code / Codex / Kiro CLI向けのスキル・MCP設定を共有するた�
 
 このマーケットプレイスは、チーム全体でAI開発ツール（Claude Code / Codex / Kiro CLI）の導入を加速するための事前設定されたプラグインを提供します。
 
-**NDFプラグイン v6.1.0** は、同じ `ndf@ai-plugins` という名前で Claude Code / Codex / Kiro CLI へ配布されるランタイム別プラグインです。共通ソースは `plugins/ndf-shared/` に集約し、利用者が install する配布物は `plugins/ndf-claude/` / `plugins/ndf-codex/` / `plugins/ndf-kiro/` に分かれています。
+**NDFプラグイン v7.0.0** は、同じ `ndf@ai-plugins` という名前で Claude Code / Codex / Kiro CLI へ配布されるランタイム別プラグインです。共通ソースは `plugins/ndf-shared/` に集約し、利用者が install する配布物は `plugins/ndf-claude/` / `plugins/ndf-codex/` / `plugins/ndf-kiro/` に分かれています。
 
 - **公開Skills**: Claude Code向け core 26個、Kiro向け core 25個、Codex向け core 24個に分離。
 - **元Skills（30個）**:
@@ -102,8 +102,43 @@ kiro-cli chat --agent ndf
 
 | プラグイン名 | バージョン | 説明 | 詳細 |
 |------------|----------|------|------|
-| **ndf** | 6.1.0 | Claude Code / Codex / Kiro CLI 向けに runtime 別配布物を提供する NDF プラグイン。8個の専門エージェント（Claude版）、公開Skills（Claude Code向け core 26個、Kiro向け core 25個、Codex向け core 24個）、Claude SessionStart/Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:external-ai` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [Claude](./plugins/ndf-claude/README.md) / [Codex](./plugins/ndf-codex/README.md) / [Kiro](./plugins/ndf-kiro/README.md) |
-| **playwright-kit** | 1.0.0 | Playwright による E2E テストの計画・実装・証跡管理を提供するプラグイン。ページ役割からのテスト計画、動画 / trace 付きスクリプト実装、レポート生成と Drive 保管、playwright_kit ランタイム（init、a11y / CWV スキャン）の 4 Skill。v6.1.0 の NDF から分離。 | [Claude](./plugins/playwright-kit-claude/README.md) |
+| **ndf** | 7.0.0 | Claude Code / Codex / Kiro CLI 向けに runtime 別配布物を提供する NDF プラグイン。8個の専門エージェント（Claude版）、公開Skills（Claude Code向け core 26個、Kiro向け core 25個、Codex向け core 24個）、Claude SessionStart/Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:external-ai` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [Claude](./plugins/ndf-claude/README.md) / [Codex](./plugins/ndf-codex/README.md) / [Kiro](./plugins/ndf-kiro/README.md) |
+| **playwright-kit** | 1.0.0 | Playwright による E2E テストの計画・実装・証跡管理を提供するプラグイン。ページ役割からのテスト計画、動画 / trace 付きスクリプト実装、レポート生成と Drive 保管、playwright_kit ランタイム（init、a11y / CWV スキャン）の 4 Skill。NDF v7.0.0 で分離。 | [Claude](./plugins/playwright-kit-claude/README.md) |
+
+### NDF v7.0.0 の主な変更（非互換）
+
+**ブラウザ自動テストの 4 Skill を `playwright-kit` プラグインへ分離しました。** Skill 名は
+変わらないため、`/playwright-` まで打てば従来どおり候補に出ます。変わるのはプラグイン接頭辞だけです。
+
+| 旧コマンド | 移行先 |
+|---|---|
+| `/ndf:playwright-planning` | `/playwright-kit:playwright-planning` |
+| `/ndf:playwright-authoring` | `/playwright-kit:playwright-authoring` |
+| `/ndf:playwright-evidence` | `/playwright-kit:playwright-evidence` |
+| `/ndf:playwright-kit-ops` | `/playwright-kit:playwright-kit-ops` |
+
+利用するには `playwright-kit` を別途インストールしてください（[導入手順](./plugins/playwright-kit-claude/README.md)）。
+
+**Skill の `description` を圧縮しました。** 挙動は変わりません。
+
+| 指標 | v6.1.0 | v7.0.0（NDF 単独） |
+|---|---:|---:|
+| `description` の 1 個あたり平均 | 237 | **150** |
+| Claude Code 初期一覧の合計 | 7,772 | **4,990** |
+| frontmatter 合計 | 13,017 | **7,578** |
+
+Skill の `name` と `description` は起動時の一覧としてコンテキストへ常時注入され、その予算は
+**プラグイン横断で共有されます**。この開発環境の実測では、公式プラグイン 35 Skill と NDF の
+合計が 14,485 文字ありました。NDF の取り分を下げるため、次の 3 つを行いました。
+
+- トリガ語の書式を `Triggers: 'a', 'b'` から `Use when …（a・b）` へ変更（旧書式は廃止）
+- 使う場面が限られ frontmatter が大きい playwright 系をプラグインへ分離
+- `allowed-tools` は**削っていません**。調査の結果これは利用制限ではなく事前承認（確認プロンプトの
+  スキップ）で、外すと手順のたびに承認を求められるためです
+
+実測で分かったこととして、`Triggers:` の列挙は `description` 末尾にあるため暗黙起動に届きにくく、
+用途文へ埋め込んだ方が安定して起動します（詳細は
+[docs/specifications/ndf-skill-inventory.md](docs/specifications/ndf-skill-inventory.md)）。
 
 ### NDF v6.1.0 の主な変更
 

@@ -18,19 +18,33 @@ user-invocable: false
 4. **マージ済みブランチには push しない。** 既存 PR の状態を確認し、マージ済みなら新ブランチ + 新 PR を作る（サフィックス `-v2`, `-v3`）
 5. **revert を連鎖させない。** 最終的なあるべき状態を直接コミットする方が履歴上の意図が明確になり、後の cherry-pick も簡単になる
 
-## v6.0.0 で変わったコマンド名（v7.0.0 で削除）
+## v7.0.0 で移動した Skill（v8.0.0 で削除）
+
+ブラウザ自動テストの 4 Skill を **`playwright-kit` プラグイン**へ分離した。**Skill 名は
+変わらない**ため、`/playwright-` まで打てば従来どおり候補に出る。
 
 | 旧コマンド | 移行先 |
 | --- | --- |
-| `/ndf:review` | `/ndf:pr-review` |
+| `/ndf:playwright-planning` | `/playwright-kit:playwright-planning` |
+| `/ndf:playwright-authoring` | `/playwright-kit:playwright-authoring` |
+| `/ndf:playwright-evidence` | `/playwright-kit:playwright-evidence` |
+| `/ndf:playwright-kit-ops` | `/playwright-kit:playwright-kit-ops` |
 
-引数と挙動は変わらない。改名したのは、`review` が `code-review`（Claude Code 組み込み）
-`security-review` `cross-review` の末尾要素で、`/` メニューで `review` と打つと候補に
-埋もれるため（[#83](https://github.com/devbasex/ai-plugins/issues/83)）。`/pr-rev` まで
-打てば一意に決まる。
+利用するにはプラグインを別途インストールする。
 
-`pr-review` は Claude Code では自然文で起動しない。組み込みの `code-review` が同じ用途を
-持ち、そちらが常に選ばれる。**`/ndf:pr-review` で明示的に起動する。**
+```bash
+# Claude Code
+/plugin install playwright-kit@ai-plugins
+# Codex
+codex plugin add playwright-kit@ai-plugins
+# Kiro CLI
+bash plugins/playwright-kit-kiro/install.sh
+```
 
-v5.0.0 で 49 個を 29 個へ整理したときの対応表は、予告どおり本バージョンで削除した。
-v4.20.1 以前から移行する場合は v5.0.0 の `ndf-policies` を参照する。
+分離したのは、Skill の `name` と `description` が起動時の一覧として常時注入され、その予算が
+プラグイン横断で共有されるためである。ブラウザ自動テストは使う場面が限られる一方で MCP
+ツールを多用するため frontmatter が大きく（4 個で約 2,400 文字）、全利用者へ常時注入する
+取り分に見合わなかった。
+
+v6.0.0 の対応表（`/ndf:review` → `/ndf:pr-review`）は、予告どおり本バージョンで削除した。
+v6.0.0 以前から移行する場合は v6.1.0 の `ndf-policies` を参照する。
