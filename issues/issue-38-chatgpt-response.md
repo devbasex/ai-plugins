@@ -1,3 +1,13 @@
+> **注記（本リポジトリによる追記。以下は ChatGPT の回答の生ログであり、本文は改変していない）**
+>
+> - 生ログとしての記録価値を保つため、誤りが含まれていても本文は書き換えていない。
+> - 脚注 `[1]` のリンクテキスト `"Cat's Cradle"` は誤り。正しくは Eric S. Raymond,
+>   *The Art of Unix Programming*（URL `https://www.catb.org/esr/writings/taoup/html/ch01s06.html`
+>   自体は正しい）。`"Cat's Cradle"` はカート・ヴォネガットの小説であり、Rule of
+>   Representation の出典ではない。
+> - 検証済みの事実関係は [`issue-38-coding-skill-plan.md`](issue-38-coding-skill-plan.md) の
+>   「1.4 事実確認の記録」にまとめてある。本ファイルではなくそちらを参照すること。
+
 ## 調査結果
 
 あります。しかも、草稿の中心にある **「判断や知識をコードではなくデータへ移し、処理系を単純にする」** という発想には、かなり明確な理論的系譜があります。
@@ -25,6 +35,8 @@ Unix 哲学には、次の原則があります。
 > “Fold knowledge into data, so program logic can be stupid and robust.”
 
 つまり、**知識をデータへ畳み込み、プログラムロジックを単純で堅牢にする**という考え方です。草稿の「コードは基本原則のみ」「判断やロジックは極力データとして表現する」は、この原則とほぼ同じ方向を向いています。([Cat's Cradle][1])
+
+> 注記: 上のリンクテキスト `Cat's Cradle` は誤り。出典は Eric S. Raymond, *The Art of Unix Programming*（リンク先 URL は正しい）。冒頭の注記を参照。
 
 たとえば、
 

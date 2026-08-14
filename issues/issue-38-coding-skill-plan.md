@@ -492,7 +492,26 @@ PHP の列で重要なのは 2 点。**first-class callable 構文と backed enu
   `plugins/mcp/codex/*` 専用で、`ndf-codex` は `skills/` のみ同期される）であり、手で維持する
   ファイルである。7.0.0 / 24 skills のまま取り残されていたため 7.1.0 / 25 skills へ更新した
 
-## 3.5 未了
+## 3.5 cross-review round 2 での事実訂正
+
+- **pandas `.apply()` の記述（language-notes.md）**: 初版は「行ごとの呼び出し」と断定していたが、
+  `DataFrame.apply` は既定 `axis=0` で列単位、`axis=1` で行単位であり、ufunc を渡すなど内部で
+  一括実行に落ちる経路もある。「Python の関数を要素・行・列のいずれかの単位で呼ぶ経路である
+  限りは一括演算ではない」と書き換えた。この節の主題は「置き換えても実行の実体が変わらないこと
+  がある」点なので、pandas の API 仕様の解説には広げていない
+- **ChatGPT 生ログの脚注（`issue-38-chatgpt-response.md`）**: 脚注 `[1]` のリンクテキストが
+  `"Cat's Cradle"`（カート・ヴォネガットの小説）になっているが、URL は catb.org で、正しい出典は
+  Eric S. Raymond, *The Art of Unix Programming*。**生ログは記録価値のため改変しない**方針を取り、
+  ファイル冒頭に注記ブロックを、該当箇所に短い注記を追加して、検証済みの事実関係は
+  「1.4 事実確認の記録」を参照するよう誘導した
+- **マーケットプレイス定義の版数**: `.claude-plugin/marketplace.json` の `ndf` エントリの
+  `description` が `v7.0.0` / `26 focused NDF skills` のまま取り残されていた。このファイルも
+  `scripts/build-runtime-plugins.sh` の生成対象ではなく手で維持するファイルで、
+  `validate-runtime-plugins.sh` は JSON 妥当性と `source` の実在しか見ないため CI をすり抜けていた。
+  `plugins/ndf-shared/manifests/claude-skills.txt` の実数 27 に合わせ `v7.1.0` / `27 focused NDF skills`
+  へ更新した
+
+## 3.6 未了
 
 - [ ] 3 ランタイムでの発動実測（`docs/specifications/ndf-skill-inventory.md` への記録）。
   配布後に利用実績が出てから測定する。台帳には「未測定」として行を追加済み
