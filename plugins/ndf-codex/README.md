@@ -1,6 +1,8 @@
 # NDF Codex Plugin
 
-Codex CLI 向けの NDF プラグインです。PR 運用、レビュー、cross-review、実装計画、仕様書化、Playwright テスト運用、Docker container access、GitHub 操作補助などの Codex 用 skills と、Codex 終了時の任意 Slack 通知 hook を提供します。
+Codex CLI 向けの NDF プラグインです。PR 運用、レビュー、cross-review、実装計画、仕様書化、開発方法論（要求定義・テスト駆動・構造改善・完了判定）、Docker container access、GitHub 操作補助などの Codex 用 skills と、Codex 終了時の任意 Slack 通知 hook を提供します。
+
+Playwright による E2E テストは v7.0.0 で **`playwright-kit` プラグイン**へ分離しました。`codex plugin add playwright-kit@ai-plugins` で導入してください（移行先は `ndf-policies` の対応表）。
 
 ## インストール
 

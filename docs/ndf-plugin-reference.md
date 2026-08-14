@@ -67,7 +67,8 @@ NDF の Skill 実装は `plugins/ndf-shared/skills/` が編集元です。公開
 - PR / review workflow: `pr`, `pr-tests`, `fix`, `review`, `cross-review`
 - branch / release workflow: `deploy`, `cherry-pick-pr`, `merged`
 - planning / documentation: `implementation-plan`, `issue-plan-strategy`, `plan-to-spec`, `markdown-writing`
-- quality / execution: `playwright-*`, `docker-container-access`
+- quality / execution: `docker-container-access`, `qa-security-scan`
+  （Playwright による E2E テストは v7.0.0 で `playwright-kit` プラグインへ分離）
 - external services: `google-drive`
 - policy: `ndf-policies`, `problem-solving`, `logging-guidelines`
 
