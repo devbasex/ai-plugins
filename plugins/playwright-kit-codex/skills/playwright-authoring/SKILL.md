@@ -69,8 +69,8 @@ allowed-tools:
 
 ## 前提条件
 
-- テスト計画が完了していること (`/ndf:playwright-planning`)
-- `init_project.sh` でプロジェクトが初期化済みであること (`/ndf:playwright-kit-ops`)
+- テスト計画が完了していること (`/playwright-kit:playwright-planning`)
+- `init_project.sh` でプロジェクトが初期化済みであること (`/playwright-kit:playwright-kit-ops`)
 - `scenario.config.yaml` が設定済みであること
 
 ## ワークフロー
@@ -86,7 +86,7 @@ allowed-tools:
       ▼
 [E] テスト実行 + エビデンス収集   ./scenario-test/run.sh
       ▼
-[F] レポートと証跡へ → /ndf:playwright-evidence
+[F] レポートと証跡へ → /playwright-kit:playwright-evidence
 ```
 
 ## テストスクリプト作成
@@ -151,7 +151,7 @@ overlay API (`set_caption`, `flash_click`, `hide_cursor`) の使用例は `playw
 | `--pwk-no-evidence` | HAR / trace / video の収集を全て OFF |
 | `--pwk-har-mode {minimal,full,none}` | HAR 録画モード (default: minimal) |
 | `--pwk-overlay` | overlay (赤丸カーソル + 字幕) を ON |
-| `--pwk-drive-folder=<ID>` | 実行後に Drive へ自動アップロード (→ `/ndf:playwright-evidence`) |
+| `--pwk-drive-folder=<ID>` | 実行後に Drive へ自動アップロード (→ `/playwright-kit:playwright-evidence`) |
 
 ### エビデンス種別と成果物
 
@@ -211,8 +211,8 @@ Chrome の起動、`conftest.py` への統合、ネットワーク到達性の�
 Chrome DevTools MCP の利用可能な方を自動選択する。どちらも使えない環境では手動確認手順を案内する。
 
 ```
-/ndf:playwright-authoring                       # 現在のブランチの実装を確認
-/ndf:playwright-authoring http://localhost:8080 # 特定 URL を確認
+/playwright-kit:playwright-authoring                       # 現在のブランチの実装を確認
+/playwright-kit:playwright-authoring http://localhost:8080 # 特定 URL を確認
 ```
 
 | MCP | 特徴 | 前提 |
@@ -238,9 +238,12 @@ Chrome DevTools MCP の利用可能な方を自動選択する。どちらも使
 
 ## 関連 Skill
 
-- `/ndf:playwright-planning` — テスト計画 (前段)
-- `/ndf:playwright-evidence` — 証跡とレポート (後段)
-- `/ndf:playwright-kit-ops` — 実行環境の運用 (init_project / codegen / スキャン)
+- `/playwright-kit:playwright-planning` — テスト計画 (前段)
+- `/playwright-kit:playwright-evidence` — 証跡とレポート (後段)
+- `/playwright-kit:playwright-kit-ops` — 実行環境の運用 (init_project / codegen / スキャン)
+次の 3 つは **ndf プラグイン**の Skill である（このプラグインには含まれない。導入していない
+場合は対象プロジェクトの手順に従う）。
+
 - `/ndf:docker-container-access` — Docker コンテナアクセス一般
 - `/ndf:pr-review --branch` — 変更差分のコードレビュー
 - `/ndf:pr-tests` — PR Test Plan の自動実行

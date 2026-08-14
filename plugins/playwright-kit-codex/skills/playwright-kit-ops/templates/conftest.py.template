@@ -29,7 +29,7 @@ from playwright.sync_api import Browser, BrowserType
 # scenario.config.yaml の browser.mode に応じてブラウザ接続を切り替える。
 # - local: pytest-playwright デフォルト (chromium.launch())
 # - cdp-remote: connect_over_cdp() で既存 Chrome に CDP 接続
-#   → /ndf:playwright-authoring 参照
+#   → /playwright-kit:playwright-authoring 参照
 
 
 @pytest.fixture(scope="session")

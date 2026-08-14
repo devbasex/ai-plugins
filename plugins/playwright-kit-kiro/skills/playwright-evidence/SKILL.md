@@ -14,7 +14,7 @@ allowed-tools:
 
 ## 前提条件
 
-- テスト実行済みで `reports/<run-id>/` にエビデンスが存在すること (`/ndf:playwright-authoring`)
+- テスト実行済みで `reports/<run-id>/` にエビデンスが存在すること (`/playwright-kit:playwright-authoring`)
 - Drive へ保管する場合のみ、`google-auth` skill で OAuth2 認証が完了していること (drive.file スコープ)。
   同 skill は既定の配布セットに含まれないため、`plugins/ndf-shared/skills/google-auth/` を利用先へ
   導入するか、`GOOGLE_AUTH_SCRIPTS` 環境変数で認証スクリプトの場所を指す
@@ -166,9 +166,9 @@ uv run python scripts/upload_evidence.py reports/.../trace.zip \
 
 ## 関連 Skill
 
-- `/ndf:playwright-authoring` — スクリプト作成と実行 (前段)
-- `/ndf:playwright-planning` — テスト計画
-- `/ndf:playwright-kit-ops` — 実行環境の運用 (アップロードスクリプトの配置元)
+- `/playwright-kit:playwright-authoring` — スクリプト作成と実行 (前段)
+- `/playwright-kit:playwright-planning` — テスト計画
+- `/playwright-kit:playwright-kit-ops` — 実行環境の運用 (アップロードスクリプトの配置元)
 - `google-auth` / `google-drive` — Google API の認証と Drive 操作。どちらも既定の配布セットには
   含まれない（`plugins/ndf-shared/skills/` にはあるが manifest には載せていない）。Drive 連携を
   使う場合だけ利用先へ導入する

@@ -119,6 +119,6 @@ playwright_kit Python パッケージ本体・templates・tests はこの skill 
 
 ## 関連 Skill
 
-- `/ndf:playwright-planning` — テスト計画 (方法論 + チェックリスト + ワークフロー全体像)
-- `/ndf:playwright-authoring` — スクリプト作成と実行 (テストコード / エビデンス / ブラウザ接続)
-- `/ndf:playwright-evidence` — 証跡とレポート (report.md / Google Drive 保管)
+- `/playwright-kit:playwright-planning` — テスト計画 (方法論 + チェックリスト + ワークフロー全体像)
+- `/playwright-kit:playwright-authoring` — スクリプト作成と実行 (テストコード / エビデンス / ブラウザ接続)
+- `/playwright-kit:playwright-evidence` — 証跡とレポート (report.md / Google Drive 保管)

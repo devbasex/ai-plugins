@@ -17,7 +17,7 @@
 # cdp-remote: Chrome DevTools Protocol 経由でリモートブラウザに接続
 #   → Windows / macOS のホスト Chrome を GUI 付きで操作可能
 #   → ログイン済み Session (Google, AWS, Slack 等) をそのまま再利用
-#   → 詳細は /ndf:playwright-authoring を参照
+#   → 詳細は /playwright-kit:playwright-authoring を参照
 browser:
   mode: local
   # cdp-remote 時のみ有効。環境変数で切り替え推奨:

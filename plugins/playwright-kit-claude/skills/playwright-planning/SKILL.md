@@ -20,25 +20,25 @@ HTSM / ISTQB / FEW HICCUPPS に基づいて E2E テストシナリオを計画�
 ## 全体ワークフロー
 
 ```
-[1] テスト計画            /ndf:playwright-planning   ← 本 Skill
+[1] テスト計画            /playwright-kit:playwright-planning   ← 本 Skill
       │  対象 URL → page role 判定 → チェックリスト → テスト技法確定
       ▼
-[2] スクリプト作成と実行  /ndf:playwright-authoring
+[2] スクリプト作成と実行  /playwright-kit:playwright-authoring
       │  テンプレート → 実装 → 再現可能性レビュー → 実行 + エビデンス収集
       │  ※ スクリプトが完成するまでテスト実行に進まない
       ▼
-[3] 証跡とレポート        /ndf:playwright-evidence
+[3] 証跡とレポート        /playwright-kit:playwright-evidence
       │  reports/<run-id>/report.md 生成 → Google Drive 保管・共有
       ▼
-[任意] 実行環境の運用     /ndf:playwright-kit-ops
+[任意] 実行環境の運用     /playwright-kit:playwright-kit-ops
        init_project / 単発スキャン / アップロードスクリプト (任意タイミング)
 ```
 
 ## クイックスタート
 
-1. プロジェクト初期化: `/ndf:playwright-kit-ops` で `./scripts/init_project.sh /path/to/your-app` を実行
+1. プロジェクト初期化: `/playwright-kit:playwright-kit-ops` で `./scripts/init_project.sh /path/to/your-app` を実行
 2. 設定編集: `scenario-test/scenario.config.yaml`
-3. テストスクリプト作成: `scenario-test/tests/test_*.py` (→ `/ndf:playwright-authoring`)
+3. テストスクリプト作成: `scenario-test/tests/test_*.py` (→ `/playwright-kit:playwright-authoring`)
 4. テスト実行 (動画デフォルト ON): `./scenario-test/run.sh`
 5. 動画スキップ: `./scenario-test/run.sh --pwk-no-video`
 
@@ -58,7 +58,7 @@ HTSM / ISTQB / FEW HICCUPPS に基づいて E2E テストシナリオを計画�
       ▼
 [E] pytest テストを書く        → templates/test_<role>.py.template を起点に
       ▼
-[F] スクリプト作成と実行へ     → /ndf:playwright-authoring
+[F] スクリプト作成と実行へ     → /playwright-kit:playwright-authoring
       テスト計画が完了するまでスクリプト作成には進まない。
 ```
 
@@ -99,7 +99,7 @@ HTSM / ISTQB / FEW HICCUPPS に基づいて E2E テストシナリオを計画�
 
 ## 補助スクリプト
 
-スクリプトの実行は `/ndf:playwright-kit-ops` を参照。計画フェーズで使う主なコマンド:
+スクリプトの実行は `/playwright-kit:playwright-kit-ops` を参照。計画フェーズで使う主なコマンド:
 
 ```bash
 # page role を自動推定
@@ -118,6 +118,6 @@ python scripts/record_scenario.py <URL>
 
 ## 関連 Skill
 
-- `/ndf:playwright-authoring` — スクリプト作成と実行 (次フェーズ)
-- `/ndf:playwright-evidence` — 証跡とレポート
-- `/ndf:playwright-kit-ops` — 実行環境の運用 (init_project / スキャン / アップロード)
+- `/playwright-kit:playwright-authoring` — スクリプト作成と実行 (次フェーズ)
+- `/playwright-kit:playwright-evidence` — 証跡とレポート
+- `/playwright-kit:playwright-kit-ops` — 実行環境の運用 (init_project / スキャン / アップロード)
