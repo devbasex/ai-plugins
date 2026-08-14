@@ -25,10 +25,24 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
-# Skill を配る plugin family。<family>-shared を編集元に、<family>-<runtime> を生成物とする。
-# 追加した family も同じ規約に従えば、このリストへ足すだけで同期・検査の対象になる。
-PLUGIN_FAMILIES="ndf playwright-kit"
 MCP_SHARED_DIR="$ROOT_DIR/plugins/mcp/shared"
+
+# Skill を配る plugin family を検出する。<family>-shared を編集元に、<family>-<runtime> を
+# 生成物とする規約で、manifests/ を持つものだけを対象にする（plugins/mcp/shared は別系統）。
+# 固定リストを置かないのは、追加時に build と validate の検出がずれて生成物の stale 検出だけ
+# 漏れる経路を作らないためである（scripts/validate-runtime-plugins.sh と同じ規約）。
+detect_plugin_families() {
+  local dir
+  for dir in "$ROOT_DIR"/plugins/*-shared; do
+    [ -d "$dir/manifests" ] || continue
+    basename "$dir" | sed 's/-shared$//'
+  done | sort
+}
+PLUGIN_FAMILIES="$(detect_plugin_families)"
+if [ -z "$PLUGIN_FAMILIES" ]; then
+  echo "ERROR: plugin family が見つからない（plugins/<family>-shared/manifests）" >&2
+  exit 1
+fi
 
 copy_tree() {
   local source_dir="$1"
@@ -164,13 +178,15 @@ PY
 
 rewrite_kiro_skill_paths() {
   local skills_dir="$1"
+  local family="$2"
+  local kiro_root="plugins/$family-kiro"
   local file
 
   for file in \
     "$skills_dir/fix/SKILL.md"
   do
     [ -f "$file" ] || continue
-    sed 's#${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/skills/fix/scripts/fetch-pr-comments.sh#${PLUGIN_ROOT:-plugins/ndf-kiro}/skills/fix/scripts/fetch-pr-comments.sh#g' \
+    sed "s#\${PLUGIN_ROOT:-\${CLAUDE_PLUGIN_ROOT}}/skills/fix/scripts/fetch-pr-comments.sh#\${PLUGIN_ROOT:-$kiro_root}/skills/fix/scripts/fetch-pr-comments.sh#g" \
       "$file" >"$file.tmp"
     mv "$file.tmp" "$file"
   done
@@ -181,7 +197,7 @@ rewrite_kiro_skill_paths() {
     "$skills_dir/cross-review/docs/01-state-and-review.md"
   do
     [ -f "$file" ] || continue
-    sed 's#${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}#${PLUGIN_ROOT:-plugins/ndf-kiro}#g' \
+    sed "s#\${PLUGIN_ROOT:-\${CLAUDE_PLUGIN_ROOT}}#\${PLUGIN_ROOT:-$kiro_root}#g" \
       "$file" >"$file.tmp"
     mv "$file.tmp" "$file"
   done
@@ -192,6 +208,7 @@ sync_skills() {
   local source_dir="$2"
   local dest_dir="$3"
   local variant="${4:-}"
+  local family="${5:-}"
   local tmp_dir
   local diff_file
   local skill
@@ -240,7 +257,7 @@ sync_skills() {
     rewrite_codex_skill_paths "$tmp_dir" skills
     write_codex_skill_policies "$tmp_dir"
   elif [ "$variant" = kiro-runtime ]; then
-    rewrite_kiro_skill_paths "$tmp_dir"
+    rewrite_kiro_skill_paths "$tmp_dir" "$family"
   fi
 
   if [ "$CHECK" = true ]; then
@@ -277,7 +294,7 @@ sync_runtime_if_present() {
   if [ "$runtime" = codex ]; then
     sync_skills "$manifest" "$shared_dir/skills" "$plugin_dir/skills" codex-runtime
   elif [ "$runtime" = kiro ]; then
-    sync_skills "$manifest" "$shared_dir/skills" "$plugin_dir/skills" kiro-runtime
+    sync_skills "$manifest" "$shared_dir/skills" "$plugin_dir/skills" kiro-runtime "$family"
   else
     sync_skills "$manifest" "$shared_dir/skills" "$plugin_dir/skills"
   fi

@@ -11,6 +11,19 @@ Claude Code で marketplace を追加し、`ndf` をインストールします�
 /plugin install ndf@ai-plugins
 ```
 
+
+## Playwright テストについて
+
+v7.0.0 で Playwright による E2E テストの 4 Skill を **`playwright-kit` プラグイン**へ分離しました。
+Skill 名は変わらないため `/playwright-` まで打てば従来どおり候補に出ますが、プラグインを別途
+インストールする必要があります。
+
+```bash
+/plugin install playwright-kit@ai-plugins
+```
+
+移行先の対応表は `ndf-policies` skill にあります（v8.0.0 で削除）。
+
 ## 同梱内容
 
 - `.claude-plugin/plugin.json`: Claude Code plugin manifest
