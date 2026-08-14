@@ -42,11 +42,11 @@ SKILL_MD_MAX_LINES = 500      # 仕様の推奨 / コンパクション対策
 CODEX_LISTING_MAX = 8000      # Codex の初期一覧予算（コンテキスト長不明時）
 CLAUDE_LISTING_MAX = 8000     # Claude Code の初期一覧予算（コンテキスト長不明時）
 CLAUDE_ITEM_TRUNCATE = 250    # Claude Code は 1 項目をこの長さで切り詰める
-# 全 Skill の frontmatter 合計。開発方法論レイヤーの追加（Skill 5 個）を含む
-# v6.1.0 時点の実測 13,017 文字（Skill 34 個、2026-08-13）を基準に、約 6% の余裕を
-# 足して 13,800 とした。余裕分は Skill 3〜4 個分の frontmatter に相当する。
-# Skill を増やすときは実測しなおしてこの値を更新する。
-FRONTMATTER_TOTAL_MAX = 13800
+# 全 Skill の frontmatter 合計。**plugin family をまたいで合計する**（利用者の環境では
+# 複数のプラグインが同時に入るため、family 内だけ見ても実際の注入量にならない）。
+# v7.0.0 時点の実測 10,559 文字（ndf 30 個 + playwright-kit 4 個、2026-08-14）を基準に、
+# 約 6% の余裕を足して 11,200 とした。Skill を増やすときは実測しなおして更新する。
+FRONTMATTER_TOTAL_MAX = 11200
 
 # --- 既知の外部 Skill 名 ----------------------------------------------------
 # ランタイム組み込み・他プラグインの Skill 名のうち、実際に観測できたもの。

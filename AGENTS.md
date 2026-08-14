@@ -77,7 +77,7 @@ ai-plugins/
 
 ## NDFプラグインについて
 
-**NDFプラグイン**は、このマーケットプレイスの主要プラグインです（v6.1.0）。plugin 名は全ランタイムで `ndf` を維持し、配布物は `plugins/ndf-claude` / `plugins/ndf-codex` / `plugins/ndf-kiro` に分離しています。
+**NDFプラグイン**は、このマーケットプレイスの主要プラグインです（v7.0.0）。plugin 名は全ランタイムで `ndf` を維持し、配布物は `plugins/ndf-claude` / `plugins/ndf-codex` / `plugins/ndf-kiro` に分離しています。
 - 共通編集元は `plugins/ndf-shared/`
 - Claude Code版は 8個の専門サブエージェント、公開Skills、SessionStart/Stopフックを提供
 - Codex版は Codex向け公開Skillsと任意Slack通知hookを提供

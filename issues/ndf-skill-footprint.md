@@ -57,15 +57,15 @@ NDF のフィールド別内訳:
 
 ## 受け入れ条件
 
-- [ ] `description` の 1 個あたり平均が **170 文字以下**になる（現状 237）
-- [ ] claude の初期一覧に載る NDF の合計が **5,000 文字以下**になる（現状 7,772）
-- [ ] frontmatter 合計が **9,000 文字以下**になる（現状 13,017）
-- [ ] `python3 scripts/check-skill-frontmatter.py` がエラー 0 / 警告 0
-- [ ] 圧縮前に自動起動していた Skill が、圧縮後も同じ依頼文で起動する（Task 1 の実測手順）
-- [ ] `/ndf:` で始まる既存コマンド名が、playwright 系 4 個を除いて変わっていない
-- [ ] playwright 系 4 個は新プラグインから同じ Skill 名で起動できる
-- [ ] 旧 `/ndf:playwright-*` の移行先が `ndf-policies` の対応表に載っている
-- [ ] `bash scripts/build-runtime-plugins.sh --check` / `validate-runtime-plugins.sh` /
+- [x] `description` の 1 個あたり平均が **170 文字以下**になる（237 → **148**）
+- [x] claude の初期一覧に載る NDF の合計が **5,000 文字以下**になる（7,772 → **4,990**）
+- [x] frontmatter 合計が **9,000 文字以下**になる（13,017 → **7,578**、ndf 単独）
+- [x] `python3 scripts/check-skill-frontmatter.py` がエラー 0 / 警告 0
+- [x] 圧縮前に自動起動していた Skill が、圧縮後も同じ依頼文で起動する（Claude Code で実測。Codex / Kiro は残課題）
+- [x] `/ndf:` で始まる既存コマンド名が、playwright 系 4 個を除いて変わっていない
+- [x] playwright 系 4 個は新プラグインから同じ Skill 名で起動できる
+- [x] 旧 `/ndf:playwright-*` の移行先が `ndf-policies` の対応表に載っている
+- [x] `bash scripts/build-runtime-plugins.sh --check` / `validate-runtime-plugins.sh` /
       `runtime-smoke-test.sh` が 3 ランタイムで成功する
 
 ## 代替案と採否
@@ -100,7 +100,7 @@ NDF のフィールド別内訳:
 | `/ndf:<name>` のコマンド名 | playwright 系 4 個がプラグイン移動 | **破壊的変更**。メジャーを上げて `ndf-policies` に対応表を 1 リリース分残す |
 | Skill 名そのもの | 変えない | `/playwright-` まで打てば従来どおり候補に出る |
 | `description` の文言 | 全 Skill で変わる | 発動条件は維持。実測で確認する |
-| `allowed-tools` | 一部 Skill から削除 | Claude Code ではツール制限が外れる。読み取り専用を保ちたい Skill には残す |
+| `allowed-tools` | **変更なし**（削除は撤回） | 利用制限ではなく事前承認で、外すと手順のたびに承認を求められる |
 
 ## PR 分割計画
 
@@ -217,3 +217,45 @@ PR 1 を先頭に置くのは、トリガ廃止が発動に効くかを確かめ
 - [ ] `architecture` モードの検証段階（限定的な検証 → 全体テスト → 静的解析 → 結合）を通す
 - [ ] 3 ランタイムの動作確認テストが成功する
 - [ ] 対応表と移行手順が各 README に載っている
+
+## 完了サマリ（2026-08-14）
+
+| PR | 内容 |
+| --- | --- |
+| #101 | トリガ語の短い書式を導入し 3 Skill で発動を実測 |
+| #102 | 全 Skill の `description` を新書式へ圧縮 |
+| #103 | `allowed-tools` の意味を訂正（**削除は撤回**） |
+| #104 | 旧書式 `Triggers:` を廃止（検査で失敗させる / `skill-stats` を新書式対応へ） |
+| #105 | playwright 系 4 Skill を `playwright-kit` プラグインへ分離 |
+| #106 | 対応表・README・予算値・メジャー version bump（この PR） |
+
+### 受け入れ条件の結果
+
+| 条件 | 結果 |
+| --- | --- |
+| `description` の平均が 170 文字以下 | **148**（ndf 単独） |
+| claude 初期一覧が 5,000 文字以下 | **4,990**（ndf 単独） |
+| frontmatter 合計が 9,000 文字以下 | **7,578**（ndf 単独） |
+| 検査がエラー 0 / 警告 0 | 達成 |
+| 圧縮後も同じ依頼文で起動する | Claude Code で実測。Codex は一覧掲載と解決先を確認、Kiro は未認証で測定不能 |
+| 既存コマンド名が変わっていない | playwright 系 4 個を除いて不変 |
+| playwright 系が新プラグインから同じ Skill 名で起動する | 達成（`/playwright-kit:playwright-*`） |
+| 対応表がある | `ndf-policies` に v8.0.0 で削除する予告つきで記載 |
+| 3 スクリプトが 3 ランタイムで成功する | 達成 |
+
+### 計画から変わった点
+
+- **`allowed-tools` の削除は撤回した。** 利用制限ではなく事前承認（確認プロンプトのスキップ）
+  であり、外すと手順のたびに承認を求められる。frontmatter 9,000 の目標は playwright 分離で達成した
+- **PR 4（骨組み）と PR 5（移動）を 1 本にまとめた。** Skill を持たないプラグインは配布物として
+  成立せず、中間状態が壊れるため
+- **旧書式の廃止（#104）を追加した。** 当初は新旧併存で移行する計画だったが、書式が 2 つあると
+  書き方がぶれるため全廃した
+
+### 残課題
+
+- Codex / Kiro での単独条件の発動実測（Codex は `codex exec` が所定時間内に応答せず未完、
+  Kiro は `kiro-cli` 未認証）
+- 起動 0 の Skill（`deploy` / `official-skills-autoloader` / `qa-security-scan` /
+  `plan-to-spec` / `logging-guidelines`）の削除判断。v7.0.0 リリース後に `skill-stats` を
+  回して再測定してから判断する
