@@ -254,8 +254,9 @@ PR 1 を先頭に置くのは、トリガ廃止が発動に効くかを確かめ
 
 ### 残課題
 
-- Codex / Kiro での単独条件の発動実測（Codex は `codex exec` が所定時間内に応答せず未完、
-  Kiro は `kiro-cli` 未認証）
+- ~~Codex / Kiro での単独条件の発動実測~~ — **完了（2026-08-14）**。CLI を更新して再ログイン後、
+  3 ランタイムすべてで単独条件の A/B を実測した。新書式による退行はなし（台帳の
+  「トリガ書式の変更の実測」を参照）
 - 起動 0 の Skill（`deploy` / `official-skills-autoloader` / `qa-security-scan` /
   `plan-to-spec` / `logging-guidelines`）の削除判断。v7.0.0 リリース後に `skill-stats` を
   回して再測定してから判断する
