@@ -300,6 +300,7 @@ Claude Code の初期一覧は上限に対する余裕が 228 文字（約 3%）
 | 依頼文 | 旧書式 | 新書式 |
 | --- | --- | --- |
 | マージ済みのブランチを整理してください。 | `merged` | `merged` |
+| この変更で PR を作ってください。 | `pr` | `pr` |
 | テスト結果を PR にコメントしてください。 | `pr-tests` | `pr-tests` |
 
 `description` をそのまま引用させると、旧環境は `Triggers: 'マージ後の後片付け', …` を含む旧文面、
@@ -319,7 +320,7 @@ Claude Code で旧書式が落ちた「テスト結果を PR にコメントし�
 
 | 依頼文 | 旧書式 | 新書式 |
 | --- | --- | --- |
-| マージ済みのブランチを整理してください。 | `merged`（2 回） | `merged` |
+| マージ済みのブランチを整理してください。 | `merged` | `merged` |
 | この変更で PR を作ってください。 | `pr` | `pr` |
 | PRテストを実行してください。 | `pr-tests` | `pr-tests` |
 | テスト結果を PR にコメントしてください。 | `pr-tests` | `pr-tests` |
@@ -375,7 +376,7 @@ Claude Code 組み込みの `security-review` が優先される。いずれも�
 | --- | ---: | --- |
 | Claude Code（書式の A/B） | 6 種 | 起動実績上位の 3 個（`merged` / `pr` / `pr-tests`） |
 | Claude Code（全 Skill 圧縮後の抜き取り） | 5 種 | `fix` / `markdown-writing` / `implementation-plan` / `problem-solving` / `qa-security-scan` |
-| Codex | 2 種 | 上位 3 個のうち 2 個 |
+| Codex | 3 種 | 上位 3 個 |
 | Kiro | 4 種 | 上位 3 個 |
 
 残り 22 個の Skill は依頼文での実測をしていない。他の Skill で起動しないものが見つかった場合は、
