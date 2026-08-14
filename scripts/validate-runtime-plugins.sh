@@ -61,30 +61,43 @@ for plugin in codex_marketplace.get("plugins", []):
     if not (plugin_dir / ".codex-plugin/plugin.json").is_file():
         errors.append(f"Codex plugin manifest missing under {source_path}")
 
-for manifest in (root / "plugins/ndf-shared/manifests").glob("*-skills.txt"):
-    runtime = manifest.name.removesuffix("-skills.txt")
-    runtime_skills = root / f"plugins/ndf-{runtime}/skills"
-    if not runtime_skills.is_dir():
-        errors.append(f"runtime skills directory missing: {runtime_skills.relative_to(root)}")
-        continue
-    for raw in manifest.read_text(encoding="utf-8").splitlines():
-        skill = raw.split("#", 1)[0].strip()
-        if not skill:
+# Skill を配る plugin family を <family>-shared から検出する（plugins/mcp/shared は別系統）。
+families = sorted(
+    d.name.removesuffix("-shared")
+    for d in (root / "plugins").iterdir()
+    if d.is_dir() and d.name.endswith("-shared") and (d / "manifests").is_dir()
+)
+if not families:
+    errors.append("plugin family が見つからない（plugins/<family>-shared/manifests）")
+
+for family in families:
+    shared = root / f"plugins/{family}-shared"
+    for manifest in sorted((shared / "manifests").glob("*-skills.txt")):
+        runtime = manifest.name.removesuffix("-skills.txt")
+        runtime_skills = root / f"plugins/{family}-{runtime}/skills"
+        if not runtime_skills.is_dir():
+            errors.append(f"runtime skills directory missing: {runtime_skills.relative_to(root)}")
             continue
-        if "/" in skill or ".." in skill:
-            errors.append(f"invalid skill name in {manifest.relative_to(root)}: {skill}")
-            continue
-        if not (root / "plugins/ndf-shared/skills" / skill / "SKILL.md").is_file():
-            errors.append(f"shared skill missing: {skill}")
-        if not (runtime_skills / skill / "SKILL.md").is_file():
-            errors.append(f"{runtime} runtime skill missing: {skill}")
+        for raw in manifest.read_text(encoding="utf-8").splitlines():
+            skill = raw.split("#", 1)[0].strip()
+            if not skill:
+                continue
+            if "/" in skill or ".." in skill:
+                errors.append(f"invalid skill name in {manifest.relative_to(root)}: {skill}")
+                continue
+            if not (shared / "skills" / skill / "SKILL.md").is_file():
+                errors.append(f"{family} shared skill missing: {skill}")
+            if not (runtime_skills / skill / "SKILL.md").is_file():
+                errors.append(f"{family} {runtime} runtime skill missing: {skill}")
 
 # Claude 版の plugin.json は skills を配列で明示する。配列に載っていない Skill は
 # Claude Code から読み込まれないため、manifest と一致していないと配布漏れになる。
 # 生成物のディレクトリだけを見る上の検査では検出できないので、ここで突き合わせる。
-claude_manifest = root / "plugins/ndf-shared/manifests/claude-skills.txt"
-claude_plugin_json = root / "plugins/ndf-claude/.claude-plugin/plugin.json"
-if claude_manifest.is_file() and claude_plugin_json.is_file():
+for family in families:
+    claude_manifest = root / f"plugins/{family}-shared/manifests/claude-skills.txt"
+    claude_plugin_json = root / f"plugins/{family}-claude/.claude-plugin/plugin.json"
+    if not (claude_manifest.is_file() and claude_plugin_json.is_file()):
+        continue
     expected = [
         line.split("#", 1)[0].strip()
         for line in claude_manifest.read_text(encoding="utf-8").splitlines()
@@ -95,7 +108,7 @@ if claude_manifest.is_file() and claude_plugin_json.is_file():
         # 配列以外（ディレクトリ指定・欠落）を許すと、この突き合わせが黙って skip され
         # 配布漏れの再発を検出できなくなる。Claude 版は配列で明示する形式に固定する。
         errors.append(
-            "claude plugin.json の skills が配列ではない"
+            f"{family} の claude plugin.json の skills が配列ではない"
             f"（実際: {type(declared).__name__}）。manifest との突き合わせができない"
         )
     else:
@@ -114,12 +127,12 @@ if claude_manifest.is_file() and claude_plugin_json.is_file():
             declared_entries.add(entry)
         for missing in sorted(expected_entries - declared_entries):
             errors.append(
-                f"claude plugin.json の skills 配列に載っていない: {missing}"
+                f"{family} の claude plugin.json の skills 配列に載っていない: {missing}"
                 "（manifest には登録済み）"
             )
         for extra in sorted(declared_entries - expected_entries):
             errors.append(
-                f"claude plugin.json の skills 配列に余分な項目: {extra}"
+                f"{family} の claude plugin.json の skills 配列に余分な項目: {extra}"
                 "（manifest に無い、またはパスが `./skills/<Skill 名>` の形式でない）"
             )
 

@@ -30,6 +30,9 @@ if not tools:
     sys.exit("agent config declares no tools: " + sys.argv[1])
 ' "$PROJECT_DIR/.kiro/agents/ndf.json"
     find -L "$PROJECT_DIR/.kiro/skills" -path '*/SKILL.md' -print | grep -q .
+    # playwright-kit は別プラグインとして導入する（NDF の manifest には含まれない）
+    test -L "$PROJECT_DIR/.kiro/skills/playwright-planning"
+    test -f "$PROJECT_DIR/.kiro/skills/playwright-planning/SKILL.md"
     test -f "$PROJECT_DIR/.kiro/prompts/pr.md"
     test -s "$PROJECT_DIR/.kiro/steering/ndf-policies.md"
     test -L "$PROJECT_DIR/.kiro/mcp_runtime/mcp-bigquery"

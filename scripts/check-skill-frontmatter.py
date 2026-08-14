@@ -475,33 +475,64 @@ def check_external_name_collisions(skills: list[dict]) -> list[Finding]:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--skills-dir", default="plugins/ndf-shared/skills",
-                    help="検査対象の Skill ディレクトリ（default: %(default)s）")
+    ap.add_argument("--skills-dir", action="append", default=None,
+                    help="検査対象の Skill ディレクトリ。複数指定できる"
+                         "（既定: plugins/*-shared/skills を全て検査）")
     ap.add_argument("--strict", action="store_true",
                     help="警告も失敗として扱う")
     ap.add_argument("--report", action="store_true",
                     help="判定せず実測値の一覧だけ出力する")
     args = ap.parse_args()
 
-    skills_dir = pathlib.Path(args.skills_dir)
-    if not skills_dir.is_dir():
-        print(f"[check-skill-frontmatter] ディレクトリがない: {skills_dir}", file=sys.stderr)
-        return 2
-
-    skills = load_skills(skills_dir)
-    if not skills:
-        print(f"[check-skill-frontmatter] SKILL.md が見つからない: {skills_dir}", file=sys.stderr)
+    if args.skills_dir:
+        skills_dirs = [pathlib.Path(d) for d in args.skills_dir]
+    else:
+        # plugin family（<family>-shared）を検出する。初期一覧の予算はプラグイン横断で
+        # 共有されるため、既定では全 family を対象にして合計も出す。
+        skills_dirs = sorted(
+            d / "skills" for d in pathlib.Path("plugins").glob("*-shared")
+            if (d / "skills").is_dir()
+        )
+    for d in skills_dirs:
+        if not d.is_dir():
+            print(f"[check-skill-frontmatter] ディレクトリがない: {d}", file=sys.stderr)
+            return 2
+    if not skills_dirs:
+        print("[check-skill-frontmatter] 検査対象が見つからない", file=sys.stderr)
         return 2
 
     findings: list[Finding] = []
-    for s in skills:
-        findings.extend(check_skill(s))
-    agg, metrics = check_aggregate(skills, skills_dir)
-    findings.extend(agg)
+    skills: list[dict] = []
+    per_family: list[tuple[pathlib.Path, dict]] = []
+    for skills_dir in skills_dirs:
+        family_skills = load_skills(skills_dir)
+        if not family_skills:
+            print(f"[check-skill-frontmatter] SKILL.md が見つからない: {skills_dir}", file=sys.stderr)
+            return 2
+        for s in family_skills:
+            findings.extend(check_skill(s))
+        agg, m = check_aggregate(family_skills, skills_dir)
+        findings.extend(agg)
+        # トリガ語の重複と外部名の衝突は family をまたいで判定する（利用者の環境では
+        # 両方のプラグインが同時に入るため、family 内だけ見ても衝突を見逃す）
+        skills.extend(family_skills)
+        per_family.append((skills_dir, m))
     findings.extend(check_trigger_collisions(skills))
     findings.extend(check_external_name_collisions(skills))
+    metrics = {
+        "listings": {},
+        "frontmatter_total": sum(m["frontmatter_total"] for _, m in per_family),
+    }
+    for _, m in per_family:
+        for runtime, total in m["listings"].items():
+            metrics["listings"][runtime] = metrics["listings"].get(runtime, 0) + total
 
     if args.report:
+        for skills_dir, m in per_family:
+            print(f"# {skills_dir}  Skill {sum(1 for s in skills if str(skills_dir) in str(s['path']))} 個"
+                  f" / frontmatter {m['frontmatter_total']} 文字"
+                  f" / claude 一覧 {m['listings'].get('claude', 0)} 文字")
+        print()
         print(f"{'skill':34} {'lines':>5} {'desc':>5} {'wtu':>5}  flags")
         for s in sorted(skills, key=lambda x: x["dir"]):
             fm = s["fm"] or {}
