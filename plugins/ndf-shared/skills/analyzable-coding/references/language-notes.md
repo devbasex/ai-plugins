@@ -52,6 +52,10 @@ def label(rank: Rank) -> str:
 `Rank` に階級を足すと mypy が `assert_never` の行で型エラーを出す。**この検査が効いている
 分岐は、`dict` へ移さない。**
 
+外部化した値を実行時にロードするなら、型注釈を用意していてもロード境界の検証は要る。
+`cast(Rates, json.load(f))` は mypy を黙らせるだけで実体を検査しないので、`pydantic` の
+`TypeAdapter` や `jsonschema` を通してから使う。
+
 ### 一括演算とその反例
 
 Python は一括演算の基盤（NumPy）を持つ数少ない対象言語である。ただし**「ループを消したこと」
@@ -134,6 +138,16 @@ const DISCOUNT_RATES = {
 const rate = DISCOUNT_RATES[rank];
 ```
 
+この表を実行時にロードするなら、型を生成していてもロード境界の検証は要る。
+
+```typescript
+// ❌ 型生成をスキーマ検証の代わりにしている。実体は何も検査されない
+const rates = JSON.parse(raw) as Record<Rank, number>;
+
+// ✅ ロード境界で検証してから使う（zod / JSON Schema）
+const rates = RatesSchema.parse(JSON.parse(raw));
+```
+
 ### 並行と並列を混同しない
 
 `Promise.all` は待ち時間を重ねるだけで、計算時間は減らない。CPU を使う処理を並列化するには
@@ -162,6 +176,8 @@ return RATES[rank];
 ```
 
 JSDoc の型注釈と `checkJs` を入れられるなら、TypeScript 側の静的検査が使える状態に戻せる。
+ただしその場合も、実行時にロードするならロード境界の検証は同じく要る（JSDoc の型は実体を検査
+しない）。
 
 ## PHP（8.1 以降）
 
@@ -211,8 +227,10 @@ return $labels[$rank->value];
 埋める。**
 
 一方、スキーマから backed enum や定数クラスを**生成**してビルド時に取り込めば、外部化しても
-`match.unhandled` の検査は残る。外部化と静的検査は排他ではない。生成できないときにだけ、
-スキーマ検証で埋める。
+`match.unhandled` の検査は残る。外部化と静的検査は排他ではない。ただし**データを実行時に
+ロードするなら、型を生成していてもロード境界の検証は要る**。`json_decode` の戻り値に
+`@var GeneratedShape` を付けるだけでは、静的解析が信じるだけで実体は検査されない。
+`Valinor` などのマッパか JSON Schema 検証を通してから使う。
 
 逆に、値が固定で外部化する理由がないなら、`match` のまま置くほうが分析可能性は高い。
 
