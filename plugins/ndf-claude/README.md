@@ -1,6 +1,6 @@
 # NDF Claude Code Plugin
 
-Claude Code 向けの NDF プラグインです。PR 運用、レビュー、調査、実装計画、仕様書化、browser smoke test、statusline、Codex CLI 委譲、Slack 通知を Claude Code の plugin として提供します。
+Claude Code 向けの NDF プラグインです。PR 運用、レビュー、調査、実装計画、仕様書化、開発方法論（要求定義・テスト駆動・構造改善・完了判定）、statusline、Codex CLI 委譲、Slack 通知を Claude Code の plugin として提供します。
 
 ## インストール
 
