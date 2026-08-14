@@ -97,7 +97,6 @@ def iter_events(path: pathlib.Path) -> Iterable[dict]:
 
 
 _FRONT_MATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n", re.DOTALL)
-_QUOTED_RE = re.compile(r"['\"]([^'\"]+)['\"]")
 # トリガ語の宣言は description 末尾の全角丸括弧に「・」区切りで並べる
 # （規約: plugins/ndf-shared/skills/README.md「トリガ語の書式」）。
 # 誤検出を避けるため、末尾にあり日本語を 1 文字以上含むものだけを宣言と見なす。

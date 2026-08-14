@@ -88,11 +88,14 @@ ALLOWED_KEYS = SPEC_KEYS | CLAUDE_KEYS
 NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 FRONT_MATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 KEY_RE = re.compile(r"^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$")
-QUOTED_RE = re.compile(r"['\"]([^'\"]+)['\"]")
 # 廃止した旧書式（`Triggers: 'a', 'b'`）。残っていたら失敗させる。ラベルと引用符の分だけ
 # 長いうえ、実測では description 末尾の列挙は暗黙起動へ届きにくかった
 # （docs/specifications/ndf-skill-inventory.md「トリガ書式の変更の実測」）。
-LEGACY_TRIGGER_RE = re.compile(r"(?:Triggers?|明示トリガ|トリガー?)\s*[:：]", re.IGNORECASE)
+LEGACY_TRIGGER_RE = re.compile(
+    # ラベルの直後に引用符付きの語が続くものだけを旧書式と見なす。
+    # 「This will trigger: ...」のような一般名詞としての用法で失敗させないため。
+    r"(?:Triggers?|明示トリガ|トリガー?|追加トリガ)\s*[:：]\s*['\"]", re.IGNORECASE
+)
 # 末尾の全角丸括弧に「・」区切りで並べたトリガ語（規約「トリガ語の書式」）。
 #
 # 誤検出を避けるため 2 つの条件を課す。
