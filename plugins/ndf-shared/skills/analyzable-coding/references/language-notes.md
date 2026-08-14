@@ -5,20 +5,20 @@
 
 ## 対応表
 
-| 判定 | Python | TypeScript | PHP（8.1+） |
-| --- | --- | --- | --- |
-| 値から値への対応 | `dict` / `Mapping` | `Record` + `as const` | 連想配列 / `match` |
-| 処理方式の切り替え | 関数を値に持つ `dict` | ハンドラの `Record` | first-class callable 構文 `foo(...)` |
-| 閉じた状態集合 | `Enum` / `Literal` | 判別可能ユニオン | backed enum |
-| 網羅性の静的検査 | mypy + `assert_never` | `never` への代入 | PHPStan `match.unhandled` |
-| 不変性 | `@dataclass(frozen=True)` | `readonly` / `as const` | `readonly` プロパティ |
-| スキーマ検証 | pydantic / jsonschema | zod / JSON Schema | JSON Schema / Valinor |
-| 一括処理 | NumPy / pandas（一括演算） | 一括 API / `Promise.all`（並行） | **一括入出力**（一括演算の基盤はない） |
-| 失敗の集計 | 失敗を集めて返す | 結果型に集約 | 失敗を集めて返す |
+| 判定 | Python | JavaScript | TypeScript | PHP（8.1+） |
+| --- | --- | --- | --- | --- |
+| 値から値への対応 | `dict` / `Mapping` | `Object.freeze` のオブジェクト | `Record` + `as const` | 連想配列 / `match` |
+| 処理方式の切り替え | 関数を値に持つ `dict` | 関数を値に持つオブジェクト | ハンドラの `Record` | first-class callable 構文 `foo(...)` |
+| 閉じた状態集合 | `Enum` / `Literal` | 凍結した定数オブジェクト | 判別可能ユニオン | backed enum |
+| 網羅性の静的検査 | mypy + `assert_never` | **手段なし**（実行時に失敗させる） | `never` への代入 | PHPStan `match.unhandled` |
+| 不変性 | `@dataclass(frozen=True)` | `Object.freeze` | `readonly` / `as const` | `readonly` プロパティ |
+| スキーマ検証 | pydantic / jsonschema | zod / JSON Schema | zod / JSON Schema | JSON Schema / Valinor |
+| 一括処理 | NumPy / pandas（一括演算） | 一括 API / `Promise.all`（並行） | 同左 | **一括入出力**（一括演算の基盤はない） |
+| 失敗の集計 | 失敗を集めて返す | 失敗を集めて返す | 結果型に集約 | 失敗を集めて返す |
 
 ## 共通: そのままでよいもの
 
-3 言語に共通して、次は書き換えの対象ではない。判定表の「データ化しない」行にあたる。
+どの言語でも、次は書き換えの対象ではない。判定表の「データ化しない」行にあたる。
 
 ```text
 前提条件の検査（ガード節）        → 早期リターンのまま
@@ -26,7 +26,7 @@
 ```
 
 **網羅性の静的検査が効いている分岐を、動的な対応表へ移さない。** 移した瞬間、ケースの
-追加漏れが実行時まで発見できなくなる。これは 3 言語すべてで起きる。
+追加漏れが実行時まで発見できなくなる。これはどの言語でも起きる。
 
 ## Python
 
@@ -139,6 +139,30 @@ const rate = DISCOUNT_RATES[rank];
 `Promise.all` は待ち時間を重ねるだけで、計算時間は減らない。CPU を使う処理を並列化するには
 worker が要る。判定表の「並行処理」と「並列処理」は別の行である。
 
+## JavaScript
+
+手段は上の TypeScript の節がそのまま使える。違いは 1 点だけで、**型注釈がないため静的な網羅性
+検査が効かない**。この 1 点が判定を変える。
+
+- `SKILL.md` の MAY にある「閉じた型に対する網羅的な分岐（静的に網羅性を検査できるもの）」の
+  条件が成立しない。分岐をそのまま残しても追加漏れは実行時まで分からないので、**未知のケースで
+  必ず失敗させる**書き方を併せて用意する
+- 外部化した対応表を守る手段が実行時のスキーマ検証しかない。**静的検査で埋め合わせができない
+  分、スキーマ検証の必要性が TypeScript より高い**
+
+```javascript
+// ❌ 未知のケースが undefined として下流へ流れ、どこで壊れたか分からなくなる
+const RATES = { gold: 0.2, silver: 0.1 };
+return RATES[rank];
+
+// ✅ 未知のケースをその場で失敗させる
+const RATES = Object.freeze({ gold: 0.2, silver: 0.1, bronze: 0 });
+if (!Object.hasOwn(RATES, rank)) throw new Error(`unknown rank: ${rank}`);
+return RATES[rank];
+```
+
+JSDoc の型注釈と `checkJs` を入れられるなら、TypeScript 側の静的検査が使える状態に戻せる。
+
 ## PHP（8.1 以降）
 
 8.1 で backed enum・`readonly` プロパティ・first-class callable 構文が入り、**データ化しても
@@ -180,10 +204,15 @@ return $labels[$rank->value];
 | その場に書いた連想配列 | 検出なし | `offsetAccess.notFound` で検出 |
 | 外部から渡した対応表（`array<string, string>`） | 検出なし | **検出なし** |
 
-3 行目が重要である。**変化する業務ルールを外部化すると、その対応表は定義ごと静的解析の
-視界から外れる。** これは外部化の失敗ではなく、外部化とはそういうものである。だからこそ
-`SKILL.md` の「データ化の前提」（スキーマ・バリデーション・版・テスト）が必須になる。
-**静的検査で守れなくなった分を、スキーマ検証で埋める。**
+**この表が測っているのは、型情報を伴わずに実行時ロードした場合である**（3 行目は
+`array<string, string>` という幅の広い型で対応表を受け取る形）。この形にすると、変化する業務
+ルールは定義ごと静的解析の視界から外れるため、`SKILL.md` の「データ化の前提」（スキーマ・
+バリデーション・版・テスト）が必須になる。**静的検査で守れなくなった分を、スキーマ検証で
+埋める。**
+
+一方、スキーマから backed enum や定数クラスを**生成**してビルド時に取り込めば、外部化しても
+`match.unhandled` の検査は残る。外部化と静的検査は排他ではない。生成できないときにだけ、
+スキーマ検証で埋める。
 
 逆に、値が固定で外部化する理由がないなら、`match` のまま置くほうが分析可能性は高い。
 

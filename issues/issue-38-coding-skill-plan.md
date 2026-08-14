@@ -148,7 +148,7 @@ Alex Papadimoulis が名付けた **Soft Coding / Inner-Platform Effect**（The 
 
 思想の各部品は既存だが、**それらを言語横断のコード生成・レビュー・リファクタリング skill として統合する点には十分な独自性がある**。
 
-## 1.6 言語非依存性をどう担保するか（Python / TypeScript / PHP）
+## 1.6 言語非依存性をどう担保するか（Python / JavaScript / TypeScript / PHP）
 
 対象言語は Python / JavaScript / TypeScript / PHP とする。ただし **Skill 自体は言語に寄らず発動し、使えること**を要件とする。これは「例を 4 言語分並べる」ことではなく、**規範の階層を分けること**で達成する。
 
@@ -160,18 +160,20 @@ Alex Papadimoulis が名付けた **Soft Coding / Inner-Platform Effect**（The 
 
 判定層までを言語非依存に保てば、Go や Ruby など対象外の言語でも Skill は成立する。逆に「numpy を使え」「`never` で網羅性を検査せよ」を規範本文に書くと、その言語以外では使えない Skill になる。
 
-3 言語での手段の対応は次のとおり。
+4 言語での手段の対応は次のとおり。
 
-| 判定 | Python | TypeScript | PHP |
-| --- | --- | --- | --- |
-| 値 → 値の対応 | `dict`、`Mapping` | `Record`、`as const` | 連想配列、`match` |
-| 処理方式の切替 | 関数を値として持つ `dict` | handler map | first-class callable 構文 `foo(...)`（静的解析が追える） |
-| 閉じた状態集合 | `Enum`、`Literal` | discriminated union、literal union | backed enum（8.1+） |
-| 網羅性の静的検査 | mypy の `assert_never` | `never` による網羅性チェック | PHPStan の `match.unhandled` |
-| 不変性 | `frozen=True` の dataclass | `readonly`、`as const` | `readonly` プロパティ（8.1+） |
-| スキーマ検証 | pydantic、jsonschema | zod、JSON Schema | JSON Schema、Valinor 等 |
-| 一括処理 | NumPy / pandas（ベクトル演算） | バッチ API、`Promise.all` | **bulk SQL / chunk 取得**（ベクトル演算基盤はない） |
-| 失敗の集計 | 例外を集めて返す / `errors='coerce'` | Result 型、集約 | 例外を集めて返す（Notification パターン） |
+| 判定 | Python | JavaScript | TypeScript | PHP |
+| --- | --- | --- | --- | --- |
+| 値 → 値の対応 | `dict`、`Mapping` | `Object.freeze` のオブジェクト | `Record`、`as const` | 連想配列、`match` |
+| 処理方式の切替 | 関数を値として持つ `dict` | 関数を値として持つオブジェクト | handler map | first-class callable 構文 `foo(...)`（静的解析が追える） |
+| 閉じた状態集合 | `Enum`、`Literal` | 凍結した定数オブジェクト | discriminated union、literal union | backed enum（8.1+） |
+| 網羅性の静的検査 | mypy の `assert_never` | **手段なし**（実行時に失敗させる） | `never` による網羅性チェック | PHPStan の `match.unhandled` |
+| 不変性 | `frozen=True` の dataclass | `Object.freeze` | `readonly`、`as const` | `readonly` プロパティ（8.1+） |
+| スキーマ検証 | pydantic、jsonschema | zod、JSON Schema | zod、JSON Schema | JSON Schema、Valinor 等 |
+| 一括処理 | NumPy / pandas（ベクトル演算） | バッチ API、`Promise.all` | 同左 | **bulk SQL / chunk 取得**（ベクトル演算基盤はない） |
+| 失敗の集計 | 例外を集めて返す / `errors='coerce'` | 失敗を集めて返す | Result 型、集約 | 例外を集めて返す（Notification パターン） |
+
+JavaScript の列で重要なのは、手段は TypeScript と同じでありながら、**網羅性の静的検査だけが成立しない**こと。したがって JS では MAY の「静的に網羅性を検査できる分岐はそのままでよい」という条件が成立しにくく、静的検査で守れない分をスキーマ検証と実行時の即時失敗で埋める必要性が TypeScript より高い。
 
 PHP の列で重要なのは 2 点。**first-class callable 構文と backed enum によって「データ化しても静的解析が効く」範囲が PHP でも成立する**こと。そして **一括処理の主戦場が SIMD ではなく I/O（N+1 の解消、bulk insert）である**こと。後者は 1.3 危険 3 の結論と一致する。
 
@@ -220,7 +222,7 @@ PHP の列で重要なのは 2 点。**first-class callable 構文と backed enu
 - [x] AC-1: `plugins/ndf-shared/skills/analyzable-coding/SKILL.md` が存在し、`python3 scripts/check-skill-frontmatter.py --strict` が成功する
 - [x] AC-2: SKILL.md が MUST / SHOULD / MAY の 3 段構成を持ち、MAY 節に「単純なガード節の `if`」「閉じた型の網羅的 `switch`」「逐次依存・早期終了・ストリーム処理の明示的ループ」「不変条件・プロトコル・閉じた状態集合の定数と enum」の 4 つが明記されている
 - [x] AC-3: 「分岐の種類 → 適切な表現」「反復の種類（高階反復 / ベクトル演算 / バッチ / 並行 / 並列 / 分散）」「定数の性質 → 置き場所」の 3 つの判定表が含まれる。いずれの表も、行の内容が特定言語の機能名に依存していない
-- [x] AC-4: Python / TypeScript / PHP の 3 言語について、良い例・悪い例が最低 1 組ずつ含まれる（`references/language-notes.md` を含めた全体で判定してよい）
+- [x] AC-4: Python / JavaScript / TypeScript / PHP の 4 言語について、良い例・悪い例が最低 1 組ずつ含まれる（`references/language-notes.md` を含めた全体で判定してよい）
 - [x] AC-9: **言語非依存性** — (a) `description` と `when_to_use` に言語名が発動条件として現れない (b) SKILL.md 本文（原則層・判定層）に特定言語の API 名・ライブラリ名・バージョン番号が現れず、言語固有の記述はすべて `references/language-notes.md` にある (c) 判定表の各行が、対象 4 言語のいずれにも依存しない語で書かれている
 - [x] AC-5: 3 つの manifest（`claude-skills.txt` / `codex-skills.txt` / `kiro-skills.txt`）に `analyzable-coding` が追記され、`bash scripts/build-runtime-plugins.sh` 実行後に `plugins/ndf-{claude,codex,kiro}/skills/analyzable-coding/SKILL.md` が生成される
 - [x] AC-6: `bash scripts/validate-runtime-plugins.sh` と `python3 scripts/check-markdown-links.py` が成功する
@@ -266,7 +268,7 @@ PHP の列で重要なのは 2 点。**first-class callable 構文と backed enu
 新規:
 
 - `plugins/ndf-shared/skills/analyzable-coding/SKILL.md`
-- `plugins/ndf-shared/skills/analyzable-coding/references/language-notes.md`（言語別の手段。Python / TypeScript / PHP）
+- `plugins/ndf-shared/skills/analyzable-coding/references/language-notes.md`（言語別の手段。Python / JavaScript / TypeScript / PHP）
 - `plugins/ndf-shared/skills/analyzable-coding/references/decision-tables.md`（判定表と例が SKILL.md に収まらない場合）
 
 変更:
@@ -321,13 +323,14 @@ PHP の列で重要なのは 2 点。**first-class callable 構文と backed enu
 - **満たす受け入れ条件:** AC-4, AC-8, AC-9
 - **進め方:** 各例を「この例から言語固有の語を消せるか」で点検する。消せないものは Task 4 へ移す
 
-### Task 4: 言語別の手段（Python / TypeScript / PHP）を書く
+### Task 4: 言語別の手段（Python / JavaScript / TypeScript / PHP）を書く
 
 - **対象ファイル:** `plugins/ndf-shared/skills/analyzable-coding/references/language-notes.md`
 - **変更内容:** 1.6 の対応表を基に、言語ごとに良い例・悪い例を 1 組以上。
-  - **共通の MAY の例**（3 言語すべてで示す）: ガード節の `if` と、閉じた型に対する網羅的分岐を「そのままでよい例」として先に提示する
+  - **共通の MAY の例**（言語を問わず示す）: ガード節の `if` と、閉じた型に対する網羅的分岐を「そのままでよい例」として先に提示する
   - **Python**: 逐次ループ vs NumPy broadcasting。あわせて `np.vectorize` と `.apply` が高速化にならない反例（公式注記 "provided primarily for convenience, not for performance" を引用）。網羅性は mypy の `assert_never`
   - **TypeScript**: discriminated union + `never` による網羅性チェックを、動的な文字列辞書へ置き換えると静的解析が落ちる例
+  - **JavaScript**: 手段は TypeScript と同じだが型注釈がなく網羅性の静的検査が効かないこと、その分を実行時の即時失敗とスキーマ検証で埋める例（未知のキーで `undefined` を返す悪い例 / 明示的に失敗させる良い例）
   - **PHP（8.1+）**: backed enum + `match` を PHPStan の `match.unhandled` が静的に検出する例。dispatch table は first-class callable 構文 `foo(...)` で書くと静的解析が追えること。**一括処理は N+1 の解消と bulk insert であってベクトル演算ではない**ことを明記し、`array_map` への置換が高速化ではない旨を書く。8.0 以下向けの代替（クラス定数 + `switch`）を注記
 - **満たす受け入れ条件:** AC-4, AC-9
 - **進め方:** 例のコードは実際に動かして確認する。Python の反例は計測して「map / `np.vectorize` への置換では速くならない」ことを数値で示す。PHP は PHPStan を実行して `match.unhandled` が実際に出ることを確認する
@@ -464,14 +467,17 @@ PHP の列で重要なのは 2 点。**first-class callable 構文と backed enu
 | 外部から渡した対応表（`array<string, string>`） | 検出なし | **検出なし** |
 
 当初 `references/language-notes.md` には「連想配列へ移すと検査が効かなくなる」と書いていたが、
-その場に書いた連想配列は level max なら検出されるため不正確だった。実測に合わせて表へ差し替え、
-**「外部化した時点で対応表は静的解析の視界から外れる。静的検査で守れなくなった分をスキーマ検証で
-埋める」**という記述に改めた。これは Skill の「データ化の前提」節の根拠にもなっている。
+その場に書いた連想配列は level max なら検出されるため不正確だった。実測に合わせて表へ差し替えた。
+
+**この表が測っているのは「型情報を伴わずに実行時ロードした場合」に限られる**（3 行目は
+`array<string, string>` という幅の広い型で対応表を受け取る形）。外部化一般について
+「静的解析の視界から外れる」と言えるわけではない。スキーマから型・定数を生成してビルド時に
+取り込む経路をとれば、外部化しても静的検査は維持できる。この限定は round 3 で反映した（3.6）。
 
 ## 3.3 受け入れ条件の判定における注記
 
 - **AC-9(b)**: SKILL.md 本文に残った言語名は、参照節の
-  「`references/language-notes.md` — Python / TypeScript / PHP での手段」1 行のみ。規範ではなく
+  「`references/language-notes.md` — Python / JavaScript / TypeScript / PHP での手段」1 行のみ。規範ではなく
   参照先の内容説明であり、条件を満たすと判断した
 - **AC-8**: 検出された唯一の「使わない」表現は「不透明なコード値を使わない」であり、
   `if` / ループ / 列挙型に対する無条件の禁止ではない。本文冒頭に「この Skill は `if` / ループ /
@@ -511,7 +517,33 @@ PHP の列で重要なのは 2 点。**first-class callable 構文と backed enu
   `plugins/ndf-shared/manifests/claude-skills.txt` の実数 27 に合わせ `v7.1.0` / `27 focused NDF skills`
   へ更新した
 
-## 3.6 未了
+## 3.6 cross-review round 3 での事実訂正
+
+- **外部化と静的解析の関係（SKILL.md「データ化の前提」/ language-notes.md）**: 初版は
+  「**外部化した時点で、その対応表は静的解析の視界から外れる**」と書いていたが、これは
+  PHPStan の実測（`array<string, string>` を渡した 3 行目）が支える範囲を超えた一般化だった。
+  実測が示すのは「型情報を伴わずに実行時ロードした場合」に限られる。スキーマから型・定数を
+  **生成**してビルド時に取り込めば、外部化しても静的検査は維持できる。次のとおり直した。
+  - SKILL.md: 記述を「型情報を伴わずに実行時ロードすると〜」へ限定し、選択肢を
+    **(1) スキーマから型・定数を生成してビルド時に取り込む → (2) 生成できないならスキーマ検証で
+    埋める → (3) どちらもできないなら外部化しない** の順に提示する形へ変更。生成が最良の選択肢
+    なので先頭に置いた。表現は言語非依存の語（コード生成 / 型生成 / ビルド時）に留めている
+  - language-notes.md: PHPStan 実測表の直後に「この表が測っているのは型情報を伴わずに実行時
+    ロードした場合である」と明記し、生成による静的検査の維持を補記
+  - 「先に読む: この Skill が禁じていないこと」の表の括弧書きも同じ限定に揃えた
+- **対象言語の不整合（プラン / language-notes.md）**: 「2.1 目的」と AC-9(c) は対象を
+  **Python / JavaScript / TypeScript / PHP の 4 言語**としていたのに、AC-4 と
+  `references/language-notes.md` は JavaScript を欠いた 3 言語のままで完了扱いになっていた。
+  **スコープを縮めるのではなく JavaScript を追加する方向で揃えた**（Skill の対象読者には JS の
+  みで書くコードが多く、目的側の記述が本来の意図であるため）。
+  - `references/language-notes.md`: 対応表に JavaScript 列を追加し、`## JavaScript` 節を新設。
+    要点は「手段は TypeScript の節と同じだが、**型注釈がないため静的な網羅性検査が効かない**」
+    こと。その帰結として (a) MAY の「静的に網羅性を検査できる分岐」の条件が成立せず未知の
+    ケースで即時失敗させる必要があること (b) スキーマ検証の必要性が TypeScript より高いこと
+    を、悪い例 / 良い例 1 組とあわせて簡潔に記述した
+  - プラン: 1.6 の見出し・対応表・AC-4・Task 4・2.8・3.3 の言語表記を 4 言語へ揃えた
+
+## 3.7 未了
 
 - [ ] 3 ランタイムでの発動実測（`docs/specifications/ndf-skill-inventory.md` への記録）。
   配布後に利用実績が出てから測定する。台帳には「未測定」として行を追加済み
