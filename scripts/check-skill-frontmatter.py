@@ -42,16 +42,33 @@ SKILL_MD_MAX_LINES = 500      # 仕様の推奨 / コンパクション対策
 
 # --- 初期一覧の予算 ---------------------------------------------------------
 # 各ランタイムは起動時に Skill の一覧（name / description / パス）を読み込み、
-# その総量に予算を設けている。予算はモデルのコンテキスト長に比例するため、
-# **既定モデルのコンテキスト長を実測して算出する**（2026-08-15 実測）。
+# その総量に予算を設けている。予算はモデルのコンテキスト長に比例する。
+#
+# **予算はトークン単位で効く**。Claude Code で実測して確かめた（2026-08-15）。
+#
+#   $ claude -p "/context" --output-format json                    # 既定予算
+#   | Skills | 5.1k | 0.5% |
+#   $ SLASH_COMMAND_TOOL_CHAR_BUDGET=200000 claude -p "/context"   # 予算を 20 倍
+#   | Skills | 5.1k | 0.5% |                                       # 変わらない
+#   $ SLASH_COMMAND_TOOL_CHAR_BUDGET=1000 claude -p "/context"     # 予算を絞る
+#   | Skills | 2.3k | 0.2% |                                       # 切り詰められる
+#
+# 予算を上げても増えないので、既定の予算では**全量が載っており切り詰めが起きていない**。
+# このとき一覧の全量は 5.1k トークンで、本スクリプトの文字数計測では 16,000 文字相当に
+# なる。文字数として 1% = 10,000 を当てると超過するはずだが切り詰めは起きていないため、
+# 比率はコンテキスト長（トークン）に対して効いていると判断する。
+#
+# そこで **トークンで予算を持ち、文字数へ換算して判定する**。換算比は同じ実測から得た
+# NDF 分の 4,393 文字 / 1,360 トークン = 3.2 文字/トークン。日本語が増えるほど比が下がる
+# （日本語は 1 文字がほぼ 1 トークン）ため、安全側の 2.5 を採る。
+CHARS_PER_TOKEN = 2.5
 #
 # Claude Code（公式ドキュメント "Extend Claude with skills"）:
 #   "The budget scales at 1% of the model's context window."
 #   引き上げは skillListingBudgetFraction 設定 / SLASH_COMMAND_TOOL_CHAR_BUDGET 環境変数。
-#   予算が文字数で指定できることから、比率も文字数として扱う。
-#   Opus 5 の 1,000,000 で 1% = 10,000 文字。
+#   Opus 5 の 1,000,000 トークンで 1% = 10,000 トークン。
 CLAUDE_CONTEXT_TOKENS = 1_000_000
-CLAUDE_LISTING_MAX = 10_000
+CLAUDE_LISTING_MAX = int(CLAUDE_CONTEXT_TOKENS * 0.01 * CHARS_PER_TOKEN)   # 25,000 文字
 #   1 項目は description + when_to_use を合わせて 1,536 文字で切り詰める。
 #   "each entry's combined text is capped at 1,536 characters regardless of budget"
 CLAUDE_ITEM_TRUNCATE = 1_536
@@ -60,14 +77,12 @@ CLAUDE_ITEM_TRUNCATE = 1_536
 #   "at most 2% of the model's context window, or 8,000 characters when the
 #    context window is unknown"
 #   既定モデル gpt-5.6-sol のコンテキストは 272,000（kiro-cli --list-models で実測）。
-#   2% = 5,440 文字。コンテキスト長が判明しているため 8,000 のフォールバックは使わない。
-#   **4 ランタイムの中で最も厳しい予算であり、実質ここが全体の制約になる。**
+#   2% = 5,440 トークン。コンテキスト長が判明しているため 8,000 のフォールバックは使わない。
+#   比率は 2 倍でもコンテキストが 1/3.7 のため、**予算は Claude Code の約半分**にしかならず、
+#   実質ここが全体の制約になる。
 CODEX_CONTEXT_TOKENS = 272_000
-CODEX_LISTING_MAX = 5_440
-#   現状はこの予算をわずかに超えている。開発ワークフロー外の Skill を別プラグインへ移す
-#   作業（issue #115）で解消する見込みのため、それまでは警告にとどめる。
-#   移動が済んだら "error" へ戻す。
-CODEX_LISTING_LEVEL = "warn"
+CODEX_LISTING_MAX = int(CODEX_CONTEXT_TOKENS * 0.02 * CHARS_PER_TOKEN)     # 13,600 文字
+CODEX_LISTING_LEVEL = "error"
 #
 # Kiro: 公式ドキュメント（kiro.dev/docs/skills）に一覧予算の規定が無い。
 #   既定モデル auto のコンテキストは 1,000,000（--list-models で実測）だが、
