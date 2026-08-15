@@ -196,3 +196,28 @@ def test_cutting_off_a_test_kills_its_children(refactor, work):
 
     time.sleep(3)
     assert not marker.exists(), "子プロセスが生き残って書き込んでいる"
+
+
+def test_cutting_off_kills_children_that_ignore_sigterm(refactor, work):
+    """SIGTERM を無視する子にも必ず SIGKILL が届くこと。
+
+    親シェルの終了で打ち切ると、無視する子はグループに残って作業ディレクトリを
+    書き換え続ける。判定はグループの存否で行う。
+    """
+    import time
+
+    sha = _commit(work, "Refactor: TERM を無視" + TRAILERS,
+                  {"src/foo.py": "def f():\n    return 4\n"})
+    marker = work / "stubborn-ran"
+    command = f"trap '' TERM; (sleep 3 && touch {marker}) & sleep 30"
+
+    started = time.monotonic()
+    status = refactor.run_test_at(
+        str(work), sha, command, "main", timeout=1, kill_grace=1.0
+    )
+    elapsed = time.monotonic() - started
+
+    assert status == "fail"
+    assert elapsed < 20, f"打ち切りに時間がかかりすぎている: {elapsed:.1f}s"
+    time.sleep(4)
+    assert not marker.exists(), "SIGTERM を無視する子が生き残っている"

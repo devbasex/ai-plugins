@@ -1720,7 +1720,7 @@ def commit_touches_tests(work: str, sha: str) -> bool:
 
 
 def _run_with_timeout(
-    command: str, cwd: str, timeout: int
+    command: str, cwd: str, timeout: int, kill_grace: float = 5.0
 ) -> tuple[Optional[int], bool]:
     """テストコマンドを実行し `(終了コード, 打ち切ったか)` を返す。
 
@@ -1737,38 +1737,68 @@ def _run_with_timeout(
         proc.communicate(timeout=timeout)
         return proc.returncode, False
     except subprocess.TimeoutExpired:
-        _kill_process_group(proc)
-        # 取りこぼしが無いよう、後始末が終わるまで待ってから戻る。
+        _kill_process_group(proc, kill_grace)
+        # 出力はもう使わない。**パイプを閉じてから**待つ。開いたままだと、
+        # パイプを継承した子が残っている限り EOF が来ず、ここで止まる。
+        for pipe in (proc.stdout, proc.stderr):
+            if pipe is not None:
+                pipe.close()
         try:
-            proc.communicate(timeout=30)
+            proc.wait(timeout=kill_grace)
         except subprocess.TimeoutExpired:
             proc.kill()
-            proc.communicate()
         return None, True
 
 
-def _kill_process_group(proc: "subprocess.Popen[bytes]") -> None:
-    """プロセスグループごと止める。SIGTERM のあと、残っていれば SIGKILL。"""
+def _process_group_alive(pgid: int) -> bool:
+    """プロセスグループに生きたプロセスが残っているか。"""
+    try:
+        os.killpg(pgid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except (PermissionError, OSError):
+        # 判断できないときは「残っている」側に倒す（SIGKILL まで進める）。
+        return True
+
+
+def _kill_process_group(
+    proc: "subprocess.Popen[bytes]", grace: float = 5.0
+) -> None:
+    """プロセスグループごと止める。SIGTERM のあと、残っていれば SIGKILL。
+
+    **親シェルの終了で打ち切らない。** 親が終わっても、SIGTERM を無視する子は
+    グループに残って作業ディレクトリを書き換え続ける。判定は必ず
+    **グループの存否**で行う。
+    """
     try:
         pgid = os.getpgid(proc.pid)
     except (ProcessLookupError, PermissionError, OSError):
         proc.kill()
         return
-    for sig in (signal.SIGTERM, signal.SIGKILL):
-        try:
-            os.killpg(pgid, sig)
-        except (ProcessLookupError, PermissionError, OSError):
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    except (PermissionError, OSError):
+        proc.kill()
+        return
+
+    deadline = time.monotonic() + grace
+    while time.monotonic() < deadline:
+        if not _process_group_alive(pgid):
             return
-        try:
-            proc.wait(timeout=5)
-            return
-        except subprocess.TimeoutExpired:
-            continue
+        time.sleep(0.2)
+
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
 
 
 def run_test_at(
     work: str, sha: str, command: str, head_branch: str,
-    timeout: int = DEFAULT_TEST_TIMEOUT,
+    timeout: int = DEFAULT_TEST_TIMEOUT, kill_grace: float = 5.0,
 ) -> str:
     """指定コミットを取り出してテストを実行し `pass` / `fail` を返す。
 
@@ -1782,7 +1812,7 @@ def run_test_at(
     if _git_out(work, ["checkout", "--detach", sha]) is None:
         return "missing"
     try:
-        code, timed_out = _run_with_timeout(command, work, timeout)
+        code, timed_out = _run_with_timeout(command, work, timeout, kill_grace)
         if timed_out:
             info(f"⚠ コミット {sha[:7]} のテストが {timeout} 秒で終わりませんでした")
             return "fail"
