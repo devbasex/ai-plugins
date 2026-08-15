@@ -6,6 +6,7 @@
 - 参考 Skill: `plugins/ndf-shared/skills/cross-review/SKILL.md`
 - 参考 Skill: `plugins/ndf-shared/skills/refactoring/SKILL.md`
 - 参考 Skill: `plugins/ndf-shared/skills/external-ai/SKILL.md`
+- **Task 3 の検証記録: [issue-113-task3-cli-verification.md](issue-113-task3-cli-verification.md)**
 - Kiro 実機検証の記録: `issues/ndf-development-skills/03-runtime-conformance.md`
 
 ## 概要
@@ -147,7 +148,8 @@ claude が参加者になる場合（ホストが Codex / Kiro のとき）も�
 
 - `<worktree-base>` の解決順は cross-review と同じ（`NDF_WORKTREE_BASE` env >
   `<システム tmpdir>/ndf-worktrees`）。
-- **同一ブランチを 2 つの worktree に checkout できない**という git の制約があるため、
+- **同一ブランチを 2 つの worktree に checkout できない**という git の制約があるため
+  （git 2.43.0 で実測。2 つ目は `fatal: '<branch>' is already used by worktree at ...` で失敗する）、
   提案・レビュー用は必ず `--detach` にする。各フェーズ開始時に `git fetch` +
   `git checkout --detach <対象 sha>` で同期する。
 - 読み取り専用でも worktree を分ける理由は 3 つ。
@@ -177,39 +179,23 @@ Kiro は codex / gemini と前提が異なるため、launcher に固有処理�
 
 | 事項 | 内容 | 対応 |
 |---|---|---|
-| 実行形式 | 非対話実行は `kiro-cli chat --no-interactive "<prompt>"` | launcher はプロンプトをファイルに書き、その内容を渡す |
-| ツール事前承認 | Skill frontmatter の `allowed-tools` は**事前承認として機能しない**（`execute_bash` が denied list で拒否された実測あり） | **agent 定義側**で許可する。cross-refactoring 専用の agent JSON を worktree の `.kiro/agents/` に生成する（下記） |
-| workspace agent の検出 | cwd 配下の `.kiro/agents` からしか検出しない | `prepare-worktrees.sh` が kiro worktree 内に agent JSON を生成する。生成物は commit しない |
-| 既定エージェント | `~/.local/share/kiro-cli/data.sqlite3` に保存される**マシン全体の設定** | `kiro-cli agent set-default` は**絶対に呼ばない**。常に `--agent <name>` で明示指定する |
+| 実行形式 | 非対話実行は `kiro-cli chat --no-interactive "<prompt>"` | launcher はプロンプトをファイルに書いて渡す（stdin 可否は未確認） |
+| ツール事前承認 | Skill frontmatter の `allowed-tools` も **agent JSON の `allowedTools` も当てにできない**（[#7467](https://github.com/kirodotdev/Kiro/issues/7467) で「honored されず毎回 `Allow this action?` が出る」と報告。回避策は `--trust-tools` フラグ） | **フラグで明示承認する**。`--trust-all-tools` を既定とし、ツール名が確定したら `--trust-tools` で絞る。**専用 agent JSON の生成は行わない** |
+| 承認漏れの現れ方 | `--no-interactive` は「全承認」か「**承認待ちで無限ハング**」の二択で、安全な中間がない（[#7483](https://github.com/kirodotdev/Kiro/issues/7483)） | 承認漏れはエラーではなくハングになる。`monitor.py` の stall timeout を必須にし、`Allow this action?` を早期エラーパターンに追加して即 kill する |
+| 既定エージェント | `~/.local/share/kiro-cli/data.sqlite3` に保存される**マシン全体の設定** | `kiro-cli agent set-default` は**絶対に呼ばない** |
 | `agent list` の出力先 | 2.16.1 では一覧を **stderr** に書く | 存在確認で stdout をパースしない |
 | slash command | `/goal` は `unrecognized subcommand`。`/ndf:*` 形式のコマンドは存在しない | プロンプトは**自己完結した平文**にする。`/ndf:pr-review` のようなコマンド呼び出しを書かない |
 | Skill 本文の読み込み | 起動時には読まず、必要時にファイル読み取りツールで取得する | 参照させたいファイルは worktree 内の**明示パス**で指示する（§4 の `refs/` コピー） |
 
-専用 agent JSON（`prepare-worktrees.sh` が生成する雛形）:
-
-```json
-{
-  "name": "ndf-cross-refactoring",
-  "description": "cross-refactoring participant",
-  "tools": ["*"],
-  "allowedTools": ["fs_read", "fs_write", "execute_bash"],
-  "resources": []
-}
-```
-
-> ⚠ **要検証**: `allowedTools` による事前承認が kiro-cli 2.16.1 の非対話実行で実際に効くかは
-> 未確認である。Skill frontmatter の `allowed-tools` が効かないことは実測済みだが、agent 定義の
-> `allowedTools` は別機構であり、同じ結論を当てはめてはならない。Task 3 の最初に
-> 次のコマンドで単独検証し、結果を `03-runtime-conformance.md` の追記として残す。
+> **調査済み**: 詳細と出典は
+> [issue-113-task3-cli-verification.md](issue-113-task3-cli-verification.md) §3。
+> `allowedTools` に依存する初版の設計（worktree へ専用 agent JSON を生成する案）は**破棄**した。
+> カスタム agent 自体が不要になるため、`prepare-worktrees.sh` の該当処理も削る。
 >
-> ```bash
-> cd <kiro worktree>
-> kiro-cli chat --agent ndf-cross-refactoring --no-interactive \
->   "git status --short を実行して結果をそのまま出力してください"
-> ```
->
-> 承認要求で止まる／拒否される場合は、代替として `--trust-all-tools` 相当のフラグ
-> （`kiro-cli chat --help` で確認）を launcher に追加する。どちらも効かない場合、
+> ⚠ **実機未確認**（kiro-cli がこのコンテナに無いため）: `--trust-tools` に渡すツール名の正確な
+> 綴り、`--no-interactive` との併用可否、プロンプトの stdin 可否、完了検知の手段、root 実行の
+> 可否。Task 3 で kiro-cli のある環境から確認する（検証記録 §4 のチェックリスト）。
+> どうしてもシェル実行が通らない場合、
 > **Kiro は提案・レビュー専任（読み取りのみ）**とし、実装フェーズの輪番からは外す
 > 縮退設計へ切り替える。この場合も参加者は 3 者のままで、`impl` の輪番だけが残り 2 者に
 > 縮む（レビューは常に impl 以外の 2 者が担当するため構造は変わらない）。
@@ -218,19 +204,28 @@ Kiro は codex / gemini と前提が異なるため、launcher に固有処理�
 #### 5-2. Claude（ホストが Codex / Kiro のとき）
 
 参加者としての claude は **ヘッドレス CLI** で起動する。ホストが Claude Code のときは
-参加者に含まれないため、この経路は使わない。
+参加者に含まれないため、この経路は使わない。**実機検証済み**（claude 2.1.233 / root 実行）。
+詳細は [issue-113-task3-cli-verification.md](issue-113-task3-cli-verification.md) §2。
 
-| 事項 | 内容 |
+確定した起動形式:
+
+```bash
+cat prompt.md | claude -p \
+    --permission-mode acceptEdits \
+    --allowed-tools "Bash,Write" \
+    --output-format json
+```
+
+| 事項 | 確認結果 |
 |---|---|
-| 実行形式 | `claude -p "<prompt>"`（print モード）。プロンプトは長いためファイルから流し込む |
-| 権限 | 非対話で編集・シェル実行を通すため `--permission-mode` の指定が要る。worktree が隔離済みである前提で許可範囲を決める |
+| プロンプトの渡し方 | **stdin から渡せる**。長いプロンプトを argv に載せる必要がない |
+| workspace trust | `-p` 指定時は trust ダイアログが skip される。gemini の `--skip-trust` に相当する対応は不要 |
+| 権限モード | **`bypassPermissions` は root 実行で拒否される**（`--dangerously-skip-permissions cannot be used with root/sudo privileges`）。CI / コンテナは root が多いため既定にできない。`acceptEdits` + `--allowed-tools` の明示で root でも通ることを実測 |
+| 完了検知 | `--output-format json` の `is_error` / `subtype` で確定できる。sentinel 不要 |
+| 承認失敗の検知 | 同 JSON の `permission_denials` が非空なら承認失敗。早期エラーとして扱える |
 | 作業ディレクトリ | 参加者用 worktree を cwd にする（`--add-dir` で範囲を広げない） |
 | Skill 依存 | 対象リポジトリに NDF が入っている保証がないため、`/ndf:*` を呼ばず、§4 の `refs/` を明示パスで読ませる |
-| 完了検知 | 終了コード + 結果 JSON の存在で判定する（codex と同じくファイル書き出しを必須にする） |
-
-> ⚠ **要検証**: 非対話実行で編集とシェル実行を通すための正確なフラグ（`--permission-mode`
-> の取り得る値、`--dangerously-skip-permissions` の要否と可否）は、Task 3 で kiro と同様に
-> 実機確認して `references/cli-claude.md` に記録する。
+| 実行コスト | ごく単純な 3 ターンのタスクで `total_cost_usd` = 0.259。上限値の既定は保守的に置く |
 
 ### 6. メイン骨組み（cross-review と同じ形）
 
@@ -473,7 +468,7 @@ plugins/ndf-shared/skills/cross-refactoring/
   — `8.0.0` → `8.1.0`
 - `CLAUDE.md` / `README.md` / `docs/ndf-plugin-reference.md` /
   `docs/specifications/ndf-skill-inventory.md` / 各 runtime README — Skill 数と新 Skill の記述
-- `issues/ndf-development-skills/03-runtime-conformance.md` — `allowedTools` 検証結果の追記
+- `issues/issue-113-task3-cli-verification.md` — Kiro 実機確認の結果を追記（Task 3 の残件）
 
 ### v1 の配布範囲
 
@@ -509,30 +504,32 @@ Skill がランタイム中立になったためである。最終ゲートで�
   既存パスが現リポジトリの登録済み worktree でなければ `.stale-<ts>` に退避して作り直す
   （cross-review の既存ガードを踏襲）。`sync <sha>` サブコマンドで読み取り用 worktree を
   指定 SHA へ `git fetch` + `checkout --detach` する。あわせて各 worktree の
-  `.cross_refactoring/refs/` へ `refactoring` Skill の参照ファイルをコピーし、kiro worktree には
-  `.kiro/agents/ndf-cross-refactoring.json` を生成する（生成物は commit しない）。
+  `.cross_refactoring/refs/` へ `refactoring` Skill の参照ファイルをコピーする。
+  **kiro 専用 agent JSON の生成は行わない**（Task 3 の調査で `allowedTools` に依存しない方針が
+  確定したため。承認はフラグで与える）。
 
 ### Task 3: Kiro / Claude CLI の非対話実行手順の確立（他タスクの前提）
 
 - **対象:** `plugins/ndf-shared/skills/external-ai/references/cli-kiro.md`,
   `plugins/ndf-shared/skills/external-ai/references/cli-claude.md`,
   `issues/ndf-development-skills/03-runtime-conformance.md`
-- **内容:** §5 の「要検証」項目を実機で確認し、両 CLI の非対話実行手順を確定する。
-  codex / gemini は cross-review に実績があるため対象外。
+- **状態:** **Claude は完了**（実測で起動形式・完了検知・root 制約を確定）。
+  **Kiro は調査のみ完了、実機確認が残**。codex / gemini は cross-review に実績があるため対象外。
+- **内容:** 検証記録は
+  [issue-113-task3-cli-verification.md](issue-113-task3-cli-verification.md)。
+  残っているのは kiro-cli のある環境での次の 6 点（同記録 §4）。
 
-  **Kiro**
-  1. `kiro-cli chat --agent <name> --no-interactive` で `execute_bash` が承認なしに通るか
-  2. 通らない場合の代替フラグ（`kiro-cli chat --help` で確認）
-  3. プロンプトの渡し方（引数長の上限、ファイル経由の可否）
-  4. 完了検知の手段（終了コード / sentinel / 出力ファイル）と所要時間の目安
+  1. `--trust-tools` に渡すツール名の正確な綴り（既存実測は `execute_bash`、
+     [#7467](https://github.com/kirodotdev/Kiro/issues/7467) の例は `read,write,aws,report` と表記ゆれ）
+  2. `--trust-all-tools` / `--trust-tools` が `--no-interactive` と併用できるか
+  3. プロンプトを stdin から渡せるか（argv 必須か）
+  4. 完了検知の手段（終了コード / 出力ファイル）を正常・ツール拒否・未認証の 3 ケースで確認
+  5. root 実行の可否（claude と同様の拒否がないか）
+  6. 検証に使った kiro-cli の版数（2.16.1 から挙動が変わっていないか）
 
-  **Claude**
-  1. `claude -p` で編集とシェル実行を非対話で通すための `--permission-mode` の値
-  2. worktree を cwd にしたときの参照範囲（`--add-dir` を使わずに済むか）
-  3. 完了検知の手段と、結果 JSON の書き出しが安定するか
-
-  **結果を先に確定しないと Task 4〜7 の launcher が書けない**ため、最初に着手する。
-  Kiro でシェル実行がどうしても通らない場合は §5-1 の縮退設計（提案・レビュー専任、
+  確認後、`cli-kiro.md` / `cli-claude.md` を書き起こす。
+  **Kiro の結果を確定しないと Task 4〜7 の kiro 分岐が書けない**ため、実装より先に着手する。
+  シェル実行がどうしても通らない場合は §5-1 の縮退設計（提案・レビュー専任、
   `impl_capable` から除外）へ切り替える。
 
 ### Task 4: 提案フェーズ
@@ -542,9 +539,16 @@ Skill がランタイム中立になったためである。最終ゲートで�
 - **内容:** 3 CLI に同一プロンプトで提案させ、`propose-<agent>-rf<ID>-r<round>.json` に
   提出させる。`merge-proposals` が語彙検証・重複排除・優先度付け・しきい値による採否・
   1 ラウンド上限での切り出しを行い、`items[]` を生成する。採用 0 件なら exit 2（外側収束）。
-  `launch-cli.sh` は agent 名で 4 分岐し、codex は `--dangerously-bypass-approvals-and-sandbox`、
-  gemini は `_gemini-env.sh` 経由の trusted directory 対応、kiro / claude は Task 3 で確定した
-  手順を使う。**ホスト自身は起動対象に現れない**（state.json の `runtimes` にいないため）。
+  `launch-cli.sh` は agent 名で 4 分岐する。
+
+  | agent | 起動形式 |
+  |---|---|
+  | codex | `codex exec --dangerously-bypass-approvals-and-sandbox`（cross-review 既存） |
+  | gemini | `_gemini-env.sh` 経由の trusted directory 対応 + `--skip-trust`（cross-review 既存） |
+  | claude | `cat prompt.md \| claude -p --permission-mode acceptEdits --allowed-tools ... --output-format json`（確定済み） |
+  | kiro | `kiro-cli chat --no-interactive --trust-all-tools`（Task 3 の実機確認後に確定） |
+
+  **ホスト自身は起動対象に現れない**（state.json の `runtimes` にいないため）。
   対象スコープ（`--scope PATH...`）を渡し、提案が無制限に広がらないようにする。
 
 ### Task 5: 適用フェーズ
@@ -596,9 +600,15 @@ Skill がランタイム中立になったためである。最終ゲートで�
   - `--stem-template "{agent}-propose-rf{id}"` — 既定は現行の `{agent}-review-pr{id}`
   - `--state-file PATH` — state.json のパス指定（現行の PR 番号からの導出も維持）
 
-  kiro / claude 固有の早期エラーパターン（未認証 / agent 未検出 / ツール拒否 / 権限モード
-  拒否）を `EARLY_ERROR_FATAL` へ追加する。**既存テストを 1 つも変更せずに通す**ことを
-  完了条件とする。
+  あわせて早期エラーパターンを追加する。
+
+  - **claude**: `--output-format json` の `permission_denials` が非空 / `is_error: true` /
+    `--dangerously-skip-permissions cannot be used with root` を致命として扱う
+  - **kiro**: `Allow this action?`（承認待ちに入った合図）を致命として扱い即 kill する。
+    承認漏れはエラーではなく**無限ハング**として現れるため（[#7483](https://github.com/kirodotdev/Kiro/issues/7483)）、
+    kiro に対しては stall timeout を必ず有効にする
+
+  **既存テストを 1 つも変更せずに通す**ことを完了条件とする。
 
 ### Task 10: SKILL.md と docs
 
@@ -662,7 +672,10 @@ Skill がランタイム中立になったためである。最終ゲートで�
 |---|---|
 | **Kiro が非対話でシェル実行できない** | Task 3 で最初に検証する。不可なら Kiro を提案・レビュー専任に縮退し、`impl_capable` から外す（レビューは 2 者のまま。設計の他部分は変わらない） |
 | **ホスト判定を誤り、ホスト自身を CLI として起動する** | `--host` 明示指定を第一とし、推定結果を `init` 出力と state.json に必ず残す。参加者リストにホストが含まれたら `init` を失敗させる |
-| Claude をヘッドレスで参加させる際の権限モードが不明 | Task 3 で `claude -p` の実行手順を確定し `cli-claude.md` に記録する。ホストが Claude Code のときはこの経路自体を使わない |
+| **root 実行で claude の `bypassPermissions` が使えない** | 実測で確認済み。`acceptEdits` + `--allowed-tools` の明示を launcher の既定にする（root でも通ることを実測） |
+| **kiro の承認漏れがエラーではなくハングになる** | stall timeout を必須にし、`Allow this action?` を早期エラーパターンに追加。承認範囲は `--trust-all-tools` で事前に固定する |
+| claude 参加時の実行コスト | 単純な 3 ターンで $0.26。1 ラウンド最低 6 回の CLI 起動が走るため、上限値（`--max-items-per-round` / `--max-outer-rounds`）の既定を保守的に置く |
+| frontmatter 予算の逼迫 | 残余 588 文字に対し cross-review 相当で 407 文字。`argument-hint` を短く保ち、超える場合は Task 12 で上限見直しか既存 `description` 圧縮を行う |
 | Kiro の agent 定義が worktree で検出されない | `prepare-worktrees.sh` が cwd 配下の `.kiro/agents/` に生成し、常に `--agent` で明示指定する |
 | `agent set-default` でユーザのマシン全体設定を奪う | 呼ばない。受け入れ条件に含める |
 | 提案が発散して PR が肥大する | `--scope` 必須化、`--max-items-per-round`（既定 5）、`--max-outer-rounds`（既定 3） |
