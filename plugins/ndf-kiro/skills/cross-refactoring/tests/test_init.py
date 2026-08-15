@@ -179,3 +179,57 @@ def test_init_emits_shell_assignments(run_init, tmp_path, capsys):
     assert "RUNTIMES='codex gemini kiro'" in out
     assert "IMPL_POOL='claude codex kiro'" in out
     assert "TMP_DIR=" in out and "WORK=" in out
+
+
+def test_existing_worktree_is_synced_to_origin(run_init, tmp_path, origin_repo):
+    """再開までに head が進んでいたら、追いついてから始めること。
+
+    同期せずに使うと、古い HEAD に対して提案・適用してしまう。
+    """
+    run_init(_args(tmp_path))
+    work = tmp_path / "rf130" / "work"
+    before = subprocess.run(["git", "rev-parse", "HEAD"], cwd=work,
+                            capture_output=True, text=True).stdout.strip()
+
+    # origin 側だけを進める
+    clone = tmp_path / "advance"
+    subprocess.run(["git", "clone", "-q", "-b", HEAD_BRANCH,
+                    str(tmp_path / "origin.git"), str(clone)],
+                   check=True, capture_output=True)
+    _git("config", "user.email", "t@e.st", cwd=clone)
+    _git("config", "user.name", "test", cwd=clone)
+    (clone / "src" / "baz.py").write_text("z = 1\n")
+    _git("add", "-A", cwd=clone)
+    _git("commit", "-qm", "advance", cwd=clone)
+    _git("push", "-q", "origin", HEAD_BRANCH, cwd=clone)
+
+    run_init(_args(tmp_path))
+
+    after = subprocess.run(["git", "rev-parse", "HEAD"], cwd=work,
+                           capture_output=True, text=True).stdout.strip()
+    assert after != before, "origin の head へ同期していない"
+    assert (work / "src" / "baz.py").is_file()
+
+
+def test_diverged_worktree_stops_the_run(run_init, tmp_path):
+    """早送りできない（履歴が分かれた）ときは中断すること。"""
+    run_init(_args(tmp_path))
+    work = tmp_path / "rf130" / "work"
+    (work / "src" / "local.py").write_text("local = 1\n")
+    _git("add", "-A", cwd=work)
+    _git("-c", "user.email=t@e.st", "-c", "user.name=test",
+         "commit", "-qm", "local only", cwd=work)
+
+    clone = tmp_path / "advance2"
+    subprocess.run(["git", "clone", "-q", "-b", HEAD_BRANCH,
+                    str(tmp_path / "origin.git"), str(clone)],
+                   check=True, capture_output=True)
+    _git("config", "user.email", "t@e.st", cwd=clone)
+    _git("config", "user.name", "test", cwd=clone)
+    (clone / "src" / "remote.py").write_text("remote = 1\n")
+    _git("add", "-A", cwd=clone)
+    _git("commit", "-qm", "remote only", cwd=clone)
+    _git("push", "-q", "origin", HEAD_BRANCH, cwd=clone)
+
+    with pytest.raises(SystemExit):
+        run_init(_args(tmp_path))

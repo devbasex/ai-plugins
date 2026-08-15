@@ -831,3 +831,47 @@ def test_broken_diff_lines_does_not_crash(
     assert state["rounds"][0]["durations"]["apply"] == 0
     # 差分行数も git 由来の事実から取る
     assert state["items"][0]["diff_lines"] == 12
+
+
+# ---------- 再実行の冪等性 ----------
+
+def test_merge_apply_is_idempotent(refactor, tmp_path, env_tmp_dir, no_git, git_facts):
+    """取り込み済みで叩き直しても、同じ判定を返して二重に処理しないこと。
+
+    push の失敗などで再実行すると、前回作った取り消しコミットが「未割当」と
+    判定され、成功した項目まで巻き込んでラウンド全体を取り消してしまう。
+    """
+    items = [item(item_id="R1-001")]
+    state_path = _state_with_items(tmp_path, items)
+    env_tmp_dir(state_path)
+    git_facts({"ok111": fact(sha="ok111")}, in_range=["ok111"])
+    write_result(state_path, "codex-apply-r1", {
+        "items": [{"item_id": "R1-001", "commits": [{"sha": "ok111"}]}],
+    })
+    args = type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+    refactor.cmd_merge_apply(args)
+    first = read_state(state_path)
+
+    # 2 回目は範囲に取り消しコミットが増えた状況を模しても、判定が変わらない
+    git_facts({}, in_range=["revert111", "ok111"])
+    refactor.cmd_merge_apply(args)
+    second = read_state(state_path)
+
+    assert second["rounds"][0]["apply"]["applied"] == ["R1-001"]
+    assert second["items"][0]["status"] == "reviewing"
+    assert second["rounds"][0]["apply"] == first["rounds"][0]["apply"]
+
+
+def test_merge_apply_dry_run_leaves_no_processed_marker(
+    refactor, tmp_path, env_tmp_dir, no_git, git_facts
+):
+    """`--dry-run` は状態を進めないので、取り込み済みの印も残さない。"""
+    items = [item(item_id="R1-001")]
+    state_path = _state_with_items(tmp_path, items)
+    env_tmp_dir(state_path)
+    git_facts({"ok111": fact(sha="ok111")}, in_range=["ok111"])
+    write_result(state_path, "codex-apply-r1", {
+        "items": [{"item_id": "R1-001", "commits": [{"sha": "ok111"}]}],
+    })
+    refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": True})())
+    assert not (read_state(state_path)["rounds"][0]["apply"] or {}).get("merged_at")

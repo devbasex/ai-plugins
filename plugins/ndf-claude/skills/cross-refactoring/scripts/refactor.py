@@ -27,6 +27,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import pathlib
@@ -638,6 +639,7 @@ def _ensure_work_worktree(work: pathlib.Path, head_branch: str) -> None:
     """
     if work.exists():
         if _is_registered_worktree(work):
+            _sync_work_worktree(work, head_branch)
             return
         stale = work.with_name(f"work.stale-{time.strftime('%Y%m%d%H%M%S')}")
         work.rename(stale)
@@ -657,6 +659,30 @@ def _ensure_work_worktree(work: pathlib.Path, head_branch: str) -> None:
         _sh(["git", "worktree", "add", "-b", head_branch, str(work),
              f"origin/{head_branch}"])
     info(f"✅ 書き込み用の作業ディレクトリを作成しました: {work}")
+
+
+def _sync_work_worktree(work: pathlib.Path, head_branch: str) -> None:
+    """既存の書き込み用作業ディレクトリを origin の head へ追いつかせる。
+
+    再開までに Pull Request の head が進んでいることがある。同期せずに使うと、
+    **古い HEAD に対して提案・適用**してしまう。早送りできない（履歴が分かれた）
+    ときは、どちらが正しいかを機械が決められないので中断する。
+    """
+    subprocess.run(
+        ["git", "fetch", "origin", head_branch],
+        cwd=str(work), capture_output=True, text=True,
+    )
+    r = subprocess.run(
+        ["git", "merge", "--ff-only", f"origin/{head_branch}"],
+        cwd=str(work), capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        die(
+            f"作業ディレクトリを origin/{head_branch} へ早送りできませんでした: "
+            f"{r.stderr.strip()[:300]}。"
+            "履歴が分かれています。内容を確認してから再実行してください"
+        )
+    info(f"↻ 作業ディレクトリを origin/{head_branch} へ同期しました: {work}")
 
 
 def _is_registered_worktree(path: pathlib.Path) -> bool:
@@ -861,6 +887,21 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
     """
     path, state = _load(args.id)
     entry = _round(state, args.round)
+
+    # **叩き直しても同じ判定を返す。** 取り込み済みで再実行すると、前回作った
+    # 取り消しコミットが「未割当」と判定され、成功した項目まで巻き込んで
+    # ラウンド全体を取り消してしまう。
+    if (entry.get("apply") or {}).get("merged_at"):
+        applied_before = entry["apply"].get("applied") or []
+        info(
+            f"↻ ラウンド {args.round} の適用は取り込み済みです"
+            f"（採用 {len(applied_before)} 件 / 失敗 "
+            f"{len(entry['apply'].get('failed') or [])} 件）"
+        )
+        if not applied_before:
+            sys.exit(2)
+        return
+
     impl = entry["impl"]
     result = _result_path(state, impl, stem_for(impl, "apply", state["id"], args.round))
     payload = _read_result(result, impl)
@@ -989,6 +1030,7 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
             "unassigned_commits": unassigned,
             "unknown_item_ids": unknown_ids,
             "duplicated_commits": duplicated,
+            "merged_at": statefile.now(),
         }
         state["phase"] = "propose"
         if args.dry_run:
@@ -1037,6 +1079,8 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
         # 起点はオーケストレータが記録したもの。申告は記録にも残さない。
         "base_sha": entry.get("apply_base_sha"),
         "head_sha": head_sha,
+        # 取り込み済みの印。叩き直しでの二重処理を防ぐ。
+        "merged_at": None if args.dry_run else statefile.now(),
     }
     entry.setdefault("durations", {})["apply"] = _safe_int(
         payload.get("elapsed_seconds")
@@ -1173,6 +1217,13 @@ def cmd_abandon_items(args: argparse.Namespace) -> None:
     """
     path, state = _load(args.id)
     entry = _round(state, args.round)
+
+    # 取り消し自体は `reverted` で冪等だが、見送りの記録は重複しうる。
+    if entry.get("abandoned") is not None:
+        info(f"↻ ラウンド {args.round} の見送りは処理済みです"
+             f"（{len(entry['abandoned'])} 件）")
+        return
+
     targets, whole_round = unresolved_item_ids(entry["reviews"], entry["apply"]["applied"])
     if whole_round:
         info(
@@ -1181,6 +1232,9 @@ def cmd_abandon_items(args: argparse.Namespace) -> None:
         )
     if not targets:
         info("取り消す項目はありません")
+        if not args.dry_run:
+            entry["abandoned"] = []
+            statefile.save(path, state)
         return
 
     for item_id in targets:
@@ -1214,6 +1268,22 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     result = _result_path(state, impl, stem_for(impl, "fix", state["id"], args.round))
     payload = _read_result(result, impl)
 
+    # **叩き直しても二重に取り込まない。** 修正は同じラウンドで何度も回るため、
+    # 「このラウンドで処理済みか」では判定できない。**入力が前回と同じか**で見る。
+    # 次の修正ラウンドでは結果ファイルが上書きされ、HEAD も進むので鍵が変わる。
+    work = state["worktrees"]["work"]
+    head_now = _git_out(work, ["rev-parse", "HEAD"]) or ""
+    merge_key = hashlib.sha256(
+        result.read_bytes() + head_now.encode("utf-8")
+    ).hexdigest()
+    merged_keys = entry.setdefault("fix_merged_keys", [])
+    if merge_key in merged_keys:
+        info(
+            f"↻ この修正結果は取り込み済みです"
+            f"（修正ラウンド {entry['fix_rounds']}）"
+        )
+        return
+
     # 自己申告をそのまま信じない。解決 API に失敗・未実行でも「解決済み」と
     # 書けてしまい、未解決の指摘が取り消し対象から外れる。GitHub 側の
     # `isResolved` と突き合わせ、**両方が解決と言っているものだけ**を反映する。
@@ -1239,16 +1309,14 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
 
     # 修正コミットも適用と同じ基準で、**git と実際のテスト実行から**検証する。
     # 結果ファイルの申告で済ませると、手順を満たさない変更が収束済みになれてしまう。
-    work = state["worktrees"]["work"]
     baseline = state.get("baseline_test") or {}
     # 修正の範囲も**オーケストレータが記録した起点**から取る。起点は
     # `judge-review` が変更要求を返したときの HEAD である。
-    head_sha = _git_out(work, ["rev-parse", "HEAD"]) or ""
-    ordered_range = commits_in_range(work, entry.get("fix_base_sha"), head_sha)
+    ordered_range = commits_in_range(work, entry.get("fix_base_sha"), head_now)
     if ordered_range is None:
         die(
             "修正の範囲を確定できませんでした"
-            f"（起点 {entry.get('fix_base_sha')} / HEAD {head_sha}）。"
+            f"（起点 {entry.get('fix_base_sha')} / HEAD {head_now}）。"
             "検証できない修正は採りません",
             code=2,
         )
@@ -1317,6 +1385,7 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
                 continue
             finding["resolved"] = True
 
+    merged_keys.append(merge_key)
     entry["fix_rounds"] += 1
     entry.setdefault("durations", {})["fix"] = (
         entry.get("durations", {}).get("fix", 0)

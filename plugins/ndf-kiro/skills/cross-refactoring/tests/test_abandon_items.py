@@ -543,3 +543,63 @@ def test_revert_is_idempotent(refactor, tmp_path, env_tmp_dir, monkeypatch):
     calls.clear()
     refactor.cmd_abandon_items(_args(dry_run=False))
     assert [c for c in calls if c[:2] == ["git", "revert"]] == []
+
+
+def test_abandon_items_is_idempotent(refactor, tmp_path, env_tmp_dir, monkeypatch):
+    """叩き直しても見送りの記録を重複させないこと。"""
+    state_path = _state(tmp_path, [_finding("R1-001")])
+    env_tmp_dir(state_path)
+    _no_git(refactor, monkeypatch)
+    refactor.cmd_abandon_items(_args(dry_run=False))
+    refactor.cmd_abandon_items(_args(dry_run=False))
+    state = read_state(state_path)
+    assert [d["item_id"] for d in state["deferred_items"]] == ["R1-001"]
+
+
+def test_abandon_items_records_processing_even_with_no_targets(
+    refactor, tmp_path, env_tmp_dir, monkeypatch
+):
+    state_path = _state(tmp_path, [_finding("R1-001", resolved=True)])
+    env_tmp_dir(state_path)
+    _no_git(refactor, monkeypatch)
+    refactor.cmd_abandon_items(_args(dry_run=False))
+    assert read_state(state_path)["rounds"][0]["abandoned"] == []
+
+
+def test_merge_fix_is_idempotent_for_the_same_input(
+    refactor, tmp_path, env_tmp_dir, monkeypatch
+):
+    """同じ結果ファイルと同じ HEAD で叩き直しても、修正ラウンドを二重に数えない。
+
+    修正は同じラウンドで何度も回るため「処理済みか」では判定できない。
+    入力が前回と同じかで見る。
+    """
+    state_path = _prepare_fix(refactor, tmp_path, env_tmp_dir, monkeypatch, ["PRRT_a"])
+    monkeypatch.setattr(refactor, "resolved_threads_on_github",
+                        lambda repo, pr: {"PRRT_a"})
+    args = type("A", (), {"id": 130, "round": 1})()
+    refactor.cmd_merge_fix(args)
+    refactor.cmd_merge_fix(args)
+
+    entry = read_state(state_path)["rounds"][0]
+    assert entry["fix_rounds"] == 1
+    assert read_state(state_path)["items"][0]["commits"].count("fix111") == 1
+
+
+def test_merge_fix_counts_a_new_result_as_a_new_round(
+    refactor, tmp_path, env_tmp_dir, monkeypatch
+):
+    """結果ファイルが書き換わったら、次の修正ラウンドとして数えること。"""
+    state_path = _prepare_fix(refactor, tmp_path, env_tmp_dir, monkeypatch, ["PRRT_a"])
+    monkeypatch.setattr(refactor, "resolved_threads_on_github",
+                        lambda repo, pr: {"PRRT_a"})
+    args = type("A", (), {"id": 130, "round": 1})()
+    refactor.cmd_merge_fix(args)
+
+    result = state_path.parent / "codex-fix-r1-result.json"
+    payload = __import__("json").loads(result.read_text(encoding="utf-8"))
+    payload["elapsed_seconds"] = 99
+    result.write_text(__import__("json").dumps(payload), encoding="utf-8")
+    refactor.cmd_merge_fix(args)
+
+    assert read_state(state_path)["rounds"][0]["fix_rounds"] == 2
