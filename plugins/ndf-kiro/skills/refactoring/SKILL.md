@@ -9,9 +9,9 @@ description: "Change structure without changing behavior, guarded by tests, judg
 ことを示す手段がない書き換えは、この Skill の対象外として扱う。
 
 この工程は**レビューと同じく、実装のあとに必ず通す**。動くコードが出た時点では整理が済んで
-いないことを前提に置く。ただし通すことと手を入れることは別で、**結果が「手を付けない」でも
-よい**。その場合は理由を残す（「変更予定のない領域」「削除予定」など。判断は
-[references/code-smells.md](references/code-smells.md) の「スメルに手を付けない場合」）。
+いないことを前提に置き、**今回の変更が触れた範囲に見つけたスメルは直す**。見送るのは
+[references/code-smells.md](references/code-smells.md) の「スメルに手を付けない場合」に
+当てはまるときだけで、そのときは理由を残す。
 
 ## 最初に決める 2 つのこと
 
