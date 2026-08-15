@@ -180,9 +180,9 @@ Kiro は codex / gemini と前提が異なるため、launcher に固有処理�
 
 | 事項 | 内容 | 対応 |
 |---|---|---|
-| 実行形式 | `kiro-cli chat --no-interactive` は **stdin からプロンプトを受け取る**（26KB で実測）。argv の `[INPUT]` も可 | `cat prompt.md \| kiro-cli chat --no-interactive --trust-tools=...` で起動する |
-| ツール事前承認 | `--trust-tools` の**絞り込みは実効性がある**（許可外は拒否される）。ツール名は内部名 `execute_bash` / `fs_read` / `fs_write` | **フラグで明示承認する**。既定は `--trust-tools=execute_bash,fs_read,fs_write`。**専用 agent JSON の生成は行わない** |
-| 承認漏れの現れ方 | ハングせず、**stderr に拒否メッセージを出して exit 0** で終わる（9 秒で終了を実測）。#7483 の無限ハングは 2.18.0 では再現しない | 早期エラーパターンに `is rejected because it matches one or more rules on the denied list` と `WARNING: --trust-tools arg for custom tool` を追加する。stall timeout は別要因への保険として残す |
+| 実行形式 | `kiro-cli chat --no-interactive` は **stdin からプロンプトを受け取る**（26KB で実測）。argv の `[INPUT]` も可 | `cat prompt.md \| kiro-cli chat --no-interactive --trust-all-tools` で起動する |
+| ツール事前承認 | `--trust-tools` の絞り込みは実効性があるが、**シェルを許可した時点で他ツールの制限は迂回される**（実測） | **`--trust-all-tools` で全許可する**（codex / gemini と同じ整理）。絞り込みは防御力を持たず綴り違いの事故リスクだけが残るため採用しない。**専用 agent JSON の生成も行わない** |
+| 承認漏れの現れ方 | ハングせず、**stderr に拒否メッセージを出して exit 0** で終わる（9 秒で終了を実測）。#7483 の無限ハングは 2.18.0 では再現しない | 早期エラーパターンに `is rejected because it matches one or more rules on the denied list` を追加する。stall timeout は別要因への保険として残す |
 | 完了検知 | **終了コードは使えない**。ツール拒否でもシェルの失敗でも 0 を返す。1 は未認証・入力なしのみ | result.json の存在と stderr のパターン照合で判定する。exit 1 は即エラー扱い |
 | 出力の色 | `NO_COLOR=1` / `TERM=dumb` / 非 TTY でも **ANSI エスケープが残る** | パターン照合の前に ANSI を除去する |
 | 既定エージェント | `~/.local/share/kiro-cli/data.sqlite3` に保存される**マシン全体の設定** | `kiro-cli agent set-default` は**絶対に呼ばない**。`kiro-cli agent create` も `$EDITOR` を開くため非対話から呼ばない |
@@ -201,8 +201,9 @@ Kiro は codex / gemini と前提が異なるため、launcher に固有処理�
 > ⚠ **`--trust-tools` による絞り込みはセキュリティ境界にならない。** `execute_bash` を
 > 許可したうえで `fs_write` を拒否したケースでは、モデルが `echo ... > file` をシェル経由で
 > 実行してファイルを作成した。実効的な防御は **worktree 隔離だけ**である。
-> ツール名を綴り間違えても WARNING が出るだけで exit 0 になるため、launcher は
-> ツール名を定数で持ち、WARNING を検知したら即エラーにする。
+> 加えてツール名を綴り間違えても WARNING が出るだけで exit 0 になり、「何も信頼しない状態で
+> 正常終了した」ように見える。**防御力が無いのに事故リスクだけが残る**ため、
+> 絞り込みは採用せず `--trust-all-tools` で全許可する。
 
 #### 5-2. Claude（ホストが Codex / Kiro のとき）
 
@@ -525,8 +526,7 @@ Skill がランタイム中立になったためである。最終ゲートで�
 
   ```bash
   # Kiro
-  cat prompt.md | kiro-cli chat --no-interactive \
-      --trust-tools=execute_bash,fs_read,fs_write > out.txt 2> err.txt
+  cat prompt.md | kiro-cli chat --no-interactive --trust-all-tools > out.txt 2> err.txt
   # Claude
   cat prompt.md | claude -p --permission-mode acceptEdits \
       --allowed-tools "Bash,Write" --output-format json > out.json
@@ -536,7 +536,8 @@ Skill がランタイム中立になったためである。最終ゲートで�
 
   1. **終了コードで成否を判定しない**（kiro はツール拒否でもシェル失敗でも 0 を返す）
   2. **stderr のパターン照合の前に ANSI エスケープを除去する**（`NO_COLOR` では消えない）
-  3. **ツール名は内部名で定数化する**（綴り違いは WARNING のみで素通りする）
+  3. **`--trust-tools` での絞り込みは使わない**（シェル経由で迂回でき防御力が無い一方、
+     綴り違いが WARNING のみで素通りする。隔離は worktree で担保する）
   4. **`agent set-default` / `agent create` を呼ばない**（前者はマシン全体の設定を奪い、
      後者は `$EDITOR` を開いて非対話実行が止まる）
 
@@ -554,7 +555,7 @@ Skill がランタイム中立になったためである。最終ゲートで�
   | codex | `codex exec --dangerously-bypass-approvals-and-sandbox`（cross-review 既存） |
   | gemini | `_gemini-env.sh` 経由の trusted directory 対応 + `--skip-trust`（cross-review 既存） |
   | claude | `cat prompt.md \| claude -p --permission-mode acceptEdits --allowed-tools ... --output-format json`（確定済み） |
-  | kiro | `cat prompt.md \| kiro-cli chat --no-interactive --trust-tools=execute_bash,fs_read,fs_write`（確定済み） |
+  | kiro | `cat prompt.md \| kiro-cli chat --no-interactive --trust-all-tools`（確定済み） |
 
   **ホスト自身は起動対象に現れない**（state.json の `runtimes` にいないため）。
   対象スコープ（`--scope PATH...`）を渡し、提案が無制限に広がらないようにする。
@@ -612,11 +613,11 @@ Skill がランタイム中立になったためである。最終ゲートで�
 
   - **claude**: `--output-format json` の `permission_denials` が非空 / `is_error: true` /
     `--dangerously-skip-permissions cannot be used with root` を致命として扱う
-  - **kiro**: 次の 2 つを致命として扱う（2.18.0 実測）。
-    - `is rejected because it matches one or more rules on the denied list` — ツール承認漏れ
-    - `WARNING: --trust-tools arg for custom tool` — ツール名の綴り違い
-    どちらも**プロセスは exit 0 で正常終了してしまう**ため、終了コード軸だけでは検知できない。
-    照合の前に ANSI エスケープを除去すること。`Allow this action?` は 2.18.0 では出ない。
+  - **kiro**: `is rejected because it matches one or more rules on the denied list`
+    （ツール承認漏れ）を致命として扱う。`--trust-all-tools` を渡していれば本来出ないが、
+    フラグが効かない環境を検知するために残す。**プロセスは exit 0 で正常終了してしまう**ため、
+    終了コード軸だけでは検知できない。照合の前に ANSI エスケープを除去すること。
+    `Allow this action?` は 2.18.0 では出ない。
     stall timeout は MCP 起動待ちなど別要因への保険として有効にしておく
 
   **既存テストを 1 つも変更せずに通す**ことを完了条件とする。
@@ -685,8 +686,8 @@ Skill がランタイム中立になったためである。最終ゲートで�
 | **ホスト判定を誤り、ホスト自身を CLI として起動する** | `--host` 明示指定を第一とし、推定結果を `init` 出力と state.json に必ず残す。参加者リストにホストが含まれたら `init` を失敗させる |
 | **root 実行で claude の `bypassPermissions` が使えない** | 実測で確認済み。`acceptEdits` + `--allowed-tools` の明示を launcher の既定にする（root でも通ることを実測） |
 | **kiro の承認漏れが exit 0 のまま素通りする** | ハングではなく「拒否 + exit 0」で現れる（2.18.0 実測）。stderr の拒否メッセージと `--trust-tools` の WARNING を早期エラーに追加し、終了コード 0 を成功とみなさない |
-| **kiro でツール名を綴り間違えると黙って何も信頼しない状態で走る** | ツール名は launcher の定数（`execute_bash,fs_read,fs_write`）で持ち、`WARNING: --trust-tools arg for custom tool` を検知したら即エラーにする |
-| **`--trust-tools` の絞り込みがセキュリティ境界にならない** | `execute_bash` を許可すると `echo > file` で書き込み制限を迂回できる（実測）。防御は worktree 隔離に一本化し、絞り込みは事故防止程度と位置づける |
+| **`--trust-tools` の絞り込みがセキュリティ境界にならない** | `execute_bash` を許可すると `echo > file` で書き込み制限を迂回できる（実測）。防御は worktree 隔離に一本化し、**絞り込みは採用せず `--trust-all-tools` を使う**（綴り違いが WARNING のみで素通りする事故も同時に避けられる） |
+| **`--trust-all-tools` で worktree 外を触られる** | 参加 CLI の cwd を worktree に固定し、書き込み可能なのは `work/` のみ、他は `--detach` にする。ホストのリポジトリ本体は参加 CLI に渡さない |
 | claude 参加時の実行コスト | 単純な 3 ターンで $0.26。1 ラウンド最低 6 回の CLI 起動が走るため、上限値（`--max-items-per-round` / `--max-outer-rounds`）の既定を保守的に置く |
 | frontmatter 予算の逼迫 | 残余 588 文字に対し cross-review 相当で 407 文字。`argument-hint` を短く保ち、超える場合は Task 12 で上限見直しか既存 `description` 圧縮を行う |
 | ~~Kiro の agent 定義が worktree で検出されない~~ | **該当しなくなった**。専用 agent JSON を生成せず、承認は `--trust-tools` フラグで与えるため、agent 定義の検出に依存しない |

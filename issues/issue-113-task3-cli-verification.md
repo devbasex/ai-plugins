@@ -115,13 +115,18 @@ kiro-cli 2.18.0 で §4 のチェックリストをすべて実測した。**公
 ### 3-0. 採用する起動形式（結論）
 
 ```bash
-cat prompt.md | kiro-cli chat --no-interactive --trust-tools=execute_bash,fs_read,fs_write \
-    > out.txt 2> err.txt
+cat prompt.md | kiro-cli chat --no-interactive --trust-all-tools > out.txt 2> err.txt
 ```
 
 - プロンプトは **stdin から渡せる**（26KB で実測）。argv に載せる必要はない
 - **終了コードは完了判定に使えない**。判定は `err.txt` のパターン検査で行う（3-5）
 - 出力には ANSI エスケープが必ず混ざるため、パース前に除去する（3-7）
+
+**`--trust-tools` での絞り込みは採用しない。** 絞り込み自体は実効性があるが（3-2）、
+`execute_bash` を許可する時点で他ツールの制限はシェル経由で迂回できるため、
+**防御力を持たないまま綴り違いの事故リスクだけが残る**。実効的な防御は worktree 隔離に
+一本化し、承認は codex の `--dangerously-bypass-approvals-and-sandbox` / gemini の
+`--skip-trust` と同じ整理で全許可とする。
 
 ### 3-1. `--no-interactive` と trust フラグは併用できる（チェック項目 2）
 
@@ -157,18 +162,21 @@ master
 **ツール名は内部名・表示名のどちらでも受け付ける。** シェルは内部名 `execute_bash` /
 表示名 `shell`、書き込みは内部名 `fs_write` / 表示名 `write` で、`--trust-tools=shell` /
 `--trust-tools=write` でも同じく通った。拒否メッセージと `--help` の例は内部名で書かれて
-いるため、**launcher は内部名（`execute_bash` / `fs_read` / `fs_write`）で統一する**。
+いるため、`--trust-tools` を使う場合は内部名で統一するのがよい。
+**ただし launcher は `--trust-all-tools` を採用するため、この綴りに依存しない**（3-0）。
 
 > ⚠ **絞り込みにセキュリティ上の意味はほとんど無い。** `--trust-tools=execute_bash` で
 > `fs_write` を拒否したケースでは、モデルが拒否を受けて
 > `echo '{"q": 1}' > q.json` をシェル経由で実行し、**結局ファイルを作成した**。
 > シェルを許可する以上、他ツールの制限は迂回される。実効的な防御は worktree 隔離だけである。
+> **これが `--trust-all-tools` を採用した理由**（3-0）。
 
 > ⚠ **無効なツール名は警告のみで、実行は続行される。**
 > `--trust-tools=bogus_tool_xyz` は stderr に
 > `WARNING: --trust-tools arg for custom tool bogus_tool_xyz needs to be prepended with @{MCPSERVERNAME}/`
-> を出すだけで exit 0。**綴りを間違えると「黙って何も信頼しない」状態で走る**ため、
-> launcher はこの WARNING も早期エラーとして扱う。
+> を出すだけで exit 0。**綴りを間違えると「黙って何も信頼しない」状態で走る**。
+> `--trust-all-tools` ならこの事故は起きないが、将来 `--trust-tools` へ戻す場合は
+> この WARNING を早期エラーとして扱う必要がある。
 
 なお `--trust-all-tools` と `--trust-tools` を同時に指定すると **`--trust-all-tools` が優先**
 される（`All tools are now trusted (!)` が表示され、絞り込みは無視される）。
@@ -334,7 +342,7 @@ launcher は **`--trust-tools` / `--trust-all-tools` フラグで明示的に承
 
 | # | 確認事項 | 結果 | 節 |
 | --- | --- | --- | --- |
-| 1 | `--trust-tools` で渡すツール名の正確な綴り | 内部名 `execute_bash` / `fs_read` / `fs_write`。表示名 `shell` / `write` も受理される。**launcher は内部名で統一**。無効名は WARNING のみで exit 0 | 3-2 |
+| 1 | `--trust-tools` で渡すツール名の正確な綴り | 内部名 `execute_bash` / `fs_read` / `fs_write`。表示名 `shell` / `write` も受理される。無効名は WARNING のみで exit 0。**launcher は `--trust-all-tools` を採用するため綴りに依存しない** | 3-0 / 3-2 |
 | 2 | `--trust-all-tools` / `--trust-tools` が `--no-interactive` と併用できるか | **併用できる**。ツール実行・ファイル編集とも通る。Kiro の縮退案は不要 | 3-1 |
 | 3 | プロンプトを stdin から渡せるか | **渡せる**（26,044 バイトで実測） | 3-0 / 3-7 |
 | 4 | 完了検知の手段 | **終了コードは使えない**（拒否でもシェル失敗でも 0）。stderr のパターン照合と result.json で判定する | 3-3 / 3-4 |
@@ -348,8 +356,8 @@ launcher は **`--trust-tools` / `--trust-all-tools` フラグで明示的に承
 | 項目 | 変更 |
 | --- | --- |
 | Task 2 | **kiro 専用 agent JSON の生成を削除**する（`allowedTools` に依存しないため不要） |
-| Task 4 | `launch-cli.sh` の claude 分岐を「stdin からプロンプト + `--permission-mode acceptEdits` + `--allowed-tools` + `--output-format json`」で確定。kiro 分岐は **`cat prompt.md \| kiro-cli chat --no-interactive --trust-tools=execute_bash,fs_read,fs_write`** で確定（実測済み） |
-| Task 9 | claude は `permission_denials` 非空を早期エラーに追加。**kiro は `is rejected because it matches one or more rules on the denied list` と `WARNING: --trust-tools arg for custom tool` を早期エラーに追加し、判定前に ANSI エスケープを除去する**。kiro の終了コード 0 は成功とみなさない（stall timeout は別要因への保険として残す） |
+| Task 4 | `launch-cli.sh` の claude 分岐を「stdin からプロンプト + `--permission-mode acceptEdits` + `--allowed-tools` + `--output-format json`」で確定。kiro 分岐は **`cat prompt.md \| kiro-cli chat --no-interactive --trust-all-tools`** で確定（実測済み） |
+| Task 9 | claude は `permission_denials` 非空を早期エラーに追加。**kiro は `is rejected because it matches one or more rules on the denied list` を早期エラーに追加し、判定前に ANSI エスケープを除去する**。kiro の終了コード 0 は成功とみなさない（stall timeout は別要因への保険として残す） |
 | リスク表 | 「root で `bypassPermissions` が使えない」を追加。claude 参加時のコスト（単純タスクで $0.26）を運用上の注意として追加。**kiro はシェルを許可すると他ツールの制限を迂回するため、防御は worktree 隔離のみに依存すること**を追加 |
 
 ## 6. frontmatter 予算の確認（実測）

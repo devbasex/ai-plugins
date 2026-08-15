@@ -46,9 +46,11 @@ kiro-cli 2.18.0 で [検証記録 §4](issue-113-task3-cli-verification.md) の 
 
 1. **`--no-interactive` と trust フラグは併用でき、シェル実行もファイル編集も通る**
    → 縮退設計（`impl_capable` から kiro を外す案）は**不要**になった
-2. **ツール名は内部名 `execute_bash` / `fs_read` / `fs_write`**（表示名 `shell` / `write` も可）
-   → 起動形式は
-   `cat prompt.md | kiro-cli chat --no-interactive --trust-tools=execute_bash,fs_read,fs_write`
+2. **承認は `--trust-all-tools` で全許可する**（利用者の判断で確定）
+   → 起動形式は `cat prompt.md | kiro-cli chat --no-interactive --trust-all-tools`。
+   `--trust-tools` の絞り込みは実効性こそあるが、シェルを許可した時点で迂回できるため
+   防御力を持たず、綴り違いの事故リスクだけが残る（ツール名は内部名
+   `execute_bash` / `fs_read` / `fs_write`、表示名 `shell` / `write` も可）
 3. **承認漏れはハングではなく「拒否 + exit 0」**（#7483 は 2.18.0 で再現せず）
    → 検知は stderr のパターン照合。**kiro の終了コードは完了判定に使えない**
 
@@ -79,6 +81,7 @@ state（Task 1）と worktree（Task 2）が無いと他が動かない。以降
 | Kiro の承認は**フラグ**で与える（agent JSON に依存しない） | agent JSON の `allowedTools` が honored されない報告があるため（Kiro#7467）。2.18.0 の実測でフラグ経路が正しく効くことを確認済み |
 | Kiro も実装フェーズの輪番に含める（`impl_capable` は 3 者） | `--no-interactive` + `--trust-tools` でシェル実行とファイル編集が通ることを実測（kiro-cli 2.18.0） |
 | kiro の完了判定に終了コードを使わない | ツール拒否でもシェル失敗でも exit 0 を返すため（実測）。stderr のパターン照合と result.json で判定する |
+| kiro の承認は `--trust-all-tools`（絞り込まない） | 絞り込んでもシェル経由で迂回できるうえ、ツール名の綴り違いが WARNING のみで素通りする。防御は worktree 隔離に一本化する |
 | claude の権限は `acceptEdits` + `--allowed-tools` | `bypassPermissions` は root 実行で拒否される（実測済み）。CI / コンテナは root が多い |
 | `monitor.py` は複製せず汎用化 | 多軸完了判定は運用で作り込まれた資産。複製すると片方だけ直る事故が起きる |
 | PR ローテーションは v1 では作らない | 件数上限で総量を抑える方針を先に検証する（最小限のコード実装） |
@@ -97,11 +100,13 @@ state（Task 1）と worktree（Task 2）が無いと他が動かない。以降
    初版は #7483 を根拠に「承認漏れ＝無限ハング」を前提にしていた。kiro-cli 2.18.0 の
    実機検証では**ハングせず 9 秒で拒否して exit 0** になったため、検知手段を stderr の
    パターン照合へ変更した（stall timeout は別要因への保険として残す）。
-4. **kiro の trust フラグ: `--trust-all-tools` 既定 → `--trust-tools` の明示列挙**
-   絞り込みが実効性を持つことを実測できたため、既定を
-   `--trust-tools=execute_bash,fs_read,fs_write` に変更した。ただし
-   **シェルを許可する以上、他ツールの制限は迂回できる**（実測）ので、
-   セキュリティ境界としては worktree 隔離だけに依存する。
+4. **kiro の trust フラグ: `--trust-all-tools` で確定**
+   実測では `--trust-tools` の絞り込みも機能したため一度は明示列挙を既定にしたが、
+   **シェルを許可する以上どのみち迂回できる**（`echo > file` で書き込み制限を突破するのを
+   実測）ため、防御力を持たないまま綴り違いの事故リスクだけが残ると判断し、
+   利用者の判断で `--trust-all-tools` に確定した。codex の
+   `--dangerously-bypass-approvals-and-sandbox` / gemini の `--skip-trust` と同じ整理になる。
+   セキュリティ境界は **worktree 隔離だけ**に一本化する。
 
 ## 6. 落とし穴（実装前に必ず読む）
 
@@ -115,9 +120,13 @@ state（Task 1）と worktree（Task 2）が無いと他が動かない。以降
   `WARNING: --trust-tools arg for custom tool` で行う
 - **kiro の出力から ANSI エスケープを除去してからパースする。** `NO_COLOR=1` も
   `TERM=dumb` も非 TTY も効かず、色コードが必ず混ざる
-- **kiro でツール名を綴り間違えても警告だけで走ってしまう。** `--trust-tools=bogus` は
-  WARNING を出して exit 0。何も信頼しない状態で全ツールが拒否されるので、
-  「モデルが何もせず正常終了した」ように見える
+- **kiro で `--trust-tools` を使うなら綴りに注意。** `--trust-tools=bogus` は WARNING を
+  出して exit 0。何も信頼しない状態で全ツールが拒否されるので、「モデルが何もせず正常終了
+  した」ように見える。**既定は `--trust-all-tools` なのでこの経路には入らない**が、
+  絞り込みへ戻す変更をするときに必ず踏む
+- **`--trust-all-tools` は worktree 隔離が前提。** 参加 CLI の cwd を worktree に固定し、
+  ホストのリポジトリ本体を渡さないこと。書き込みを許すのは `work/` だけで、
+  他は `--detach` にする
 - **`claude --permission-mode bypassPermissions` は root で必ず失敗する。** ローカルの
   非 root 環境でだけ動作確認すると、CI / コンテナで初めて詰まる
 - **frontmatter 予算の残余は 588 文字しかない**（上限 11200 / 現在 10612）。
@@ -136,7 +145,7 @@ state（Task 1）と worktree（Task 2）が無いと他が動かない。以降
 | # | 未決事項 | 選択肢 |
 | --- | --- | --- |
 | ~~1~~ | ~~Kiro でシェル実行が通らなかった場合の扱い~~ | **解消**。kiro-cli 2.18.0 でシェル実行・ファイル編集とも通ることを実測したため、縮退は不要 |
-| 2 | kiro の trust フラグをどこまで絞るか | 実測を踏まえ `--trust-tools=execute_bash,fs_read,fs_write` を既定に置いた。ただし**シェルを許可した時点で書き込み制限は迂回できる**ため、絞り込みは事故防止以上の意味を持たない。`--trust-all-tools` に戻して単純化する選択肢もある |
+| ~~2~~ | ~~kiro の trust フラグをどこまで絞るか~~ | **決定済み（利用者判断）**: `--trust-all-tools` を使う。絞り込みはシェル経由で迂回できて防御力が無く、綴り違いの事故リスクだけが残るため |
 | 3 | claude 参加時の実行コスト上限 | 単純な 3 ターンで $0.26。1 ラウンド最低 6 回の CLI 起動が走る。上限値の既定（`--max-items-per-round` = 5 / `--max-outer-rounds` = 3）をさらに絞るか |
 | 4 | 対象スコープ（`--scope`）を必須にするか | 必須にすると誤爆しないが手間が増える。現計画では必須 |
 
