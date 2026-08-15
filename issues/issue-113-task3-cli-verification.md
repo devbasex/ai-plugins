@@ -8,18 +8,19 @@
 
 ## 検証環境
 
-| 項目 | 値 |
-| --- | --- |
-| 実施日 | 2026-08-15 |
-| 実行環境 | Claude Code on the web のリモートコンテナ（**root 実行**） |
-| git | 2.43.0 |
-| claude | 2.1.233 |
-| codex / gemini / kiro-cli | **未インストール**（このコンテナでは実機検証不可） |
+検証は 2 つの環境に分かれる。§1・§2・§6 は環境 A、§3 は環境 B での実測である。
 
-コンテナに codex / gemini / kiro-cli が無いため、この 3 つは実機検証できていない。
-codex / gemini は cross-review で運用実績があるため対象外とし、**Kiro のみ公開情報からの
-調査**に留めた。Kiro の実機確認は kiro-cli が入った環境で別途行う必要がある（下記
-「未解決」を参照）。
+| 項目 | 環境 A（claude / worktree / frontmatter） | 環境 B（Kiro 実機確認） |
+| --- | --- | --- |
+| 実施日 | 2026-08-15 | 2026-08-15 |
+| 実行環境 | Claude Code on the web のリモートコンテナ（**root 実行**） | ローカルコンテナ（**非 root**: uid 1000 / `sudo` 可） |
+| git | 2.43.0 | 2.43.0 |
+| claude | 2.1.233 | 2.1.233 |
+| kiro-cli | **未インストール** | **2.18.0**（IAM Identity Center でログイン済み） |
+| codex / gemini | 未インストール | インストール済み（本検証では未使用） |
+
+codex / gemini は cross-review で運用実績があるため検証対象外とした。
+**Kiro は環境 B で §4 のチェックリスト 6 項目をすべて実測し、未解決項目は残っていない。**
 
 ## 1. git worktree の同一ブランチ制約（実測・確定）
 
@@ -106,12 +107,179 @@ cross-refactoring は 1 提案ラウンドあたり最低でも「提案 3 + 適
 指摘修正が入るとさらに増える。claude を参加させる構成（ホストが Codex / Kiro）では
 コストが無視できないため、SKILL.md の引数表に**上限値の既定を保守的に置く**方針は維持する。
 
-## 3. Kiro CLI — 公開情報の調査（実機未確認）
+## 3. Kiro CLI（`kiro-cli chat`）— 実測・確定
 
-このコンテナに kiro-cli が無いため、以下は公開情報からの整理である。**実機確認前に実装へ
-進んではならない**項目を「未解決」に分けた。
+kiro-cli 2.18.0 で §4 のチェックリストをすべて実測した。**公開 Issue（#7467 / #7483）を
+根拠にしていた前提のうち 2 つが 2.18.0 では成り立たない**ため、設計を再度変更している。
 
-### 3-1. `allowedTools`（agent JSON）は当てにできない
+### 3-0. 採用する起動形式（結論）
+
+```bash
+cat prompt.md | kiro-cli chat --no-interactive --trust-tools=execute_bash,fs_read,fs_write \
+    > out.txt 2> err.txt
+```
+
+- プロンプトは **stdin から渡せる**（26KB で実測）。argv に載せる必要はない
+- **終了コードは完了判定に使えない**。判定は `err.txt` のパターン検査で行う（3-5）
+- 出力には ANSI エスケープが必ず混ざるため、パース前に除去する（3-7）
+
+### 3-1. `--no-interactive` と trust フラグは併用できる（チェック項目 2）
+
+`--no-interactive` と `--trust-all-tools` / `--trust-tools` は同一 `chat` サブコマンドの
+オプションとして共存し、**併用してツール実行が通る**。
+
+```console
+$ kiro-cli chat --no-interactive --trust-all-tools 'git rev-parse --abbrev-ref HEAD を実行して'
+I will run the following command: git rev-parse --abbrev-ref HEAD (using tool: shell)
+master
+ - Completed in 0.4s
+(exit 0)
+```
+
+**Kiro を実装フェーズの輪番から外す縮退案（引き継ぎメモ §7-1）は不要**になった。
+`impl_capable` に kiro を含めてよい。ファイル編集も実測で通っている（3-8）。
+
+### 3-2. `--trust-tools` の絞り込みは実効性がある（チェック項目 1）
+
+#7467 が報告する「設定が honored されず毎回 `Allow this action?` が出る」現象は、
+**2.18.0 のフラグ経路では再現しなかった**。許可したツールは通り、許可しなかったツールは
+拒否される。
+
+| 渡した値 | シェル実行 | ファイル書き込み |
+| --- | --- | --- |
+| `--trust-all-tools` | 通る | 通る |
+| `--trust-tools=execute_bash` | 通る | **拒否**（`fs_write` が denied） |
+| `--trust-tools=fs_read` | **拒否**（`execute_bash` が denied） | — |
+| `--trust-tools=fs_read,fs_write` | — | 通る |
+| `--trust-tools=`（空） | 拒否 | 拒否 |
+| フラグなし | 拒否 | 拒否 |
+
+**ツール名は内部名・表示名のどちらでも受け付ける。** シェルは内部名 `execute_bash` /
+表示名 `shell`、書き込みは内部名 `fs_write` / 表示名 `write` で、`--trust-tools=shell` /
+`--trust-tools=write` でも同じく通った。拒否メッセージと `--help` の例は内部名で書かれて
+いるため、**launcher は内部名（`execute_bash` / `fs_read` / `fs_write`）で統一する**。
+
+> ⚠ **絞り込みにセキュリティ上の意味はほとんど無い。** `--trust-tools=execute_bash` で
+> `fs_write` を拒否したケースでは、モデルが拒否を受けて
+> `echo '{"q": 1}' > q.json` をシェル経由で実行し、**結局ファイルを作成した**。
+> シェルを許可する以上、他ツールの制限は迂回される。実効的な防御は worktree 隔離だけである。
+
+> ⚠ **無効なツール名は警告のみで、実行は続行される。**
+> `--trust-tools=bogus_tool_xyz` は stderr に
+> `WARNING: --trust-tools arg for custom tool bogus_tool_xyz needs to be prepended with @{MCPSERVERNAME}/`
+> を出すだけで exit 0。**綴りを間違えると「黙って何も信頼しない」状態で走る**ため、
+> launcher はこの WARNING も早期エラーとして扱う。
+
+なお `--trust-all-tools` と `--trust-tools` を同時に指定すると **`--trust-all-tools` が優先**
+される（`All tools are now trusted (!)` が表示され、絞り込みは無視される）。
+
+### 3-3. 承認漏れは「ハング」ではなく「拒否 + exit 0」で現れる（チェック項目 4）
+
+#7483 が報告する「承認待ちで無限にハングする」現象も **2.18.0 では再現しなかった**。
+trust フラグ無しでシェル実行を要求しても **9 秒で終了し exit 0** を返す。
+
+```console
+$ kiro-cli chat --no-interactive 'execute_bash で pwd を実行して'   # trust フラグなし
+(stderr)
+Command execute_bash is rejected because it matches one or more rules on the denied list:
+  - non-interactive mode (no user to approve)
+(stdout)
+> execute_bash の実行がブロックされました。非インタラクティブモードで動作しているため…
+(exit 0, elapsed 9s)
+```
+
+**検知は stderr のパターン照合で行う。** 早期エラーパターンに追加する文字列は
+`Allow this action?` ではなく次の 2 つ:
+
+- `is rejected because it matches one or more rules on the denied list`
+- `WARNING: --trust-tools arg for custom tool`
+
+stall timeout は「MCP サーバ起動待ちなど別要因のハング」への保険として残すが、
+**承認漏れの検知手段としては不要**になった。
+
+### 3-4. 終了コードは完了判定に使えない（チェック項目 4）
+
+実測した全ケースの終了コードは次のとおり。
+
+| ケース | exit |
+| --- | --- |
+| 正常完了（ツール実行あり） | 0 |
+| **ツール承認漏れで拒否された** | **0** |
+| **実行したシェルコマンドが `exit 1` を返した** | **0** |
+| 未認証（`Not logged in`） | 1 |
+| 入力なし（argv も stdin も空） | 1 |
+
+`exit 1` は CLI レベルの致命エラー（未認証・入力なし）だけを表す。**モデルの作業が成功
+したかどうかは終了コードに反映されない**ため、claude の `--output-format json`
+（`is_error` / `permission_denials`）に相当する機械可読な完了検知は Kiro には存在しない。
+
+- 未認証時のメッセージ: `Failed to open browser for authentication.` /
+  `Please try again with: kiro-cli login --use-device-flow` / `error: Permission denied (os error 13)`
+- 入力なしのメッセージ: `error: Input must be supplied when running in non-interactive mode`
+
+**結論**: kiro は `monitor.py` の **result.json 軸（成果物の存在）と stderr の早期エラー軸**
+で判定する。終了コード軸は「1 なら即エラー」のみに使い、0 を成功とみなさない。
+
+### 3-5. root 実行は拒否されない（チェック項目 5）
+
+`sudo -n env HOME=$HOME PATH=$PATH kiro-cli chat --no-interactive --trust-all-tools 'ok とだけ答えて'`
+は exit 0 で正常応答した。claude の `bypassPermissions` のような root 拒否は無い。
+
+### 3-6. 出力の ANSI エスケープは抑制できない（実装上の注意）
+
+`NO_COLOR=1 TERM=dumb` を与え、かつ標準出力がパイプ（非 TTY）でも ANSI が残る。
+
+```console
+$ NO_COLOR=1 TERM=dumb kiro-cli chat --no-interactive --trust-all-tools 'ok とだけ答えて' | cat -v
+^[[m> ^[[0mok
+```
+
+`--wrap never` は改行制御のみで色は消えない。**launcher / monitor は
+`sed -r 's/\x1B\[[0-9;]*[A-Za-z]//g'` 相当の除去を通してからパターン照合する。**
+
+### 3-7. worktree・プロンプトサイズ・並列実行（追加実測）
+
+| 項目 | 結果 |
+| --- | --- |
+| `--detach` worktree での読み取り | 通る（`git rev-parse --abbrev-ref HEAD` → `HEAD`、`cat a.txt` → 内容取得） |
+| ブランチ付き worktree での編集 | 通る（`a.txt` を書き換え、`git diff --stat` まで実行） |
+| stdin プロンプトのサイズ | **26,044 バイトで通る**（argv 長制限の回避に使える） |
+| 2 プロセス同時実行 | 別 worktree で並列実行し、両方 exit 0。セッション DB の競合は観測されず |
+
+### 3-8. 実行コストの実測（運用上の注意）
+
+stderr のフッタに `▸ Credits: 0.06 • Time: 4s` の形式で消費量が出る。単純なタスクで
+**0.02〜0.09 Credits**。claude の `total_cost_usd`（同種のタスクで $0.26）とは単位が異なる
+ため直接比較はできないが、kiro 側は 1 回あたりの表示値が小さい。
+
+### 3-9. 参考：`kiro-cli agent create` が生成する雛形
+
+専用 agent JSON は生成しない方針だが、スキーマ確認のため実行した結果を残す。
+2.18.0 では `allowedTools` に加えて `permissions.rules` が存在する。
+
+```json
+{
+  "name": "probe_tmp", "description": "", "prompt": null,
+  "mcpServers": {}, "tools": ["*"], "toolAliases": {},
+  "allowedTools": [], "resources": [], "toolsSettings": {},
+  "includeMcpJson": true, "model": null,
+  "permissions": { "rules": [] }
+}
+```
+
+`kiro-cli agent create` は `$EDITOR` を対話的に開くため、**非対話スクリプトから呼んでは
+いけない**（本検証では vim が起動したまま止まり、タイムアウトで打ち切った）。
+`kiro-cli agent list` は未認証だと `error: You are not logged in` で exit する。
+
+なお `/tools`（対話コマンド）を `--no-interactive` の入力として渡しても**出力は空**で、
+ツール名の一覧はこの経路では取得できない。
+
+### 3-10. 旧・公開情報ベースの記述（2.18.0 で不成立）
+
+以下は本 PR の初版が根拠にしていた記述である。**2.18.0 の実測で否定された**が、
+判断の経緯として残す。
+
+#### `allowedTools`（agent JSON）は当てにできない
 
 計画の初版では、worktree に専用 agent JSON を生成して `allowedTools` で `execute_bash` を
 事前承認する想定だった。しかし公開情報はこれを否定している。
@@ -129,7 +297,12 @@ launcher は **`--trust-tools` / `--trust-all-tools` フラグで明示的に承
 これにより `prepare-worktrees.sh` での専用 agent JSON 生成そのものが不要になる
 （プロンプトは自己完結させる方針のため、そもそもカスタム agent を必要としない）。
 
-### 3-2. 非対話モードは「全承認」か「ハング」の二択
+> **実測との差分**: フラグで承認する結論は 3-2 の実測でも変わらない。ただし
+> #7467 が言う「毎回 `Allow this action?` が出る」は 2.18.0 では観測されず、
+> `--trust-tools` の絞り込みは正しく効いた。agent JSON 自体の検証は行っていない
+> （使わない方針のため）。
+
+#### 非対話モードは「全承認」か「ハング」の二択
 
 - [kirodotdev/Kiro#7483](https://github.com/kirodotdev/Kiro/issues/7483):
   `--no-interactive` では `--trust-all-tools`（全自動承認）か、既定動作（承認待ちで**無限に
@@ -145,7 +318,11 @@ launcher は **`--trust-tools` / `--trust-all-tools` フラグで明示的に承
    codex の `--dangerously-bypass-approvals-and-sandbox` / gemini の `--skip-trust` と
    同じ整理で `--trust-all-tools` を既定とし、`--trust-tools` での絞り込みを opt-in にする。
 
-### 3-3. 参考にした情報源
+> **実測との差分**: 「ハングする」は 2.18.0 では**再現しない**（3-3）。承認漏れは
+> 9 秒で拒否され exit 0 で終わる。したがって設計への影響 1 は撤回し、検知は
+> stderr のパターン照合に置き換える。影響 2（フラグで承認範囲を固定する）は維持する。
+
+### 3-11. 参考にした情報源
 
 - [kirodotdev/Kiro#7467](https://github.com/kirodotdev/Kiro/issues/7467) — agent JSON / mcp.json の設定が効かない
 - [kirodotdev/Kiro#7483](https://github.com/kirodotdev/Kiro/issues/7483) — `--no-interactive` に安全な中間がない
@@ -153,27 +330,27 @@ launcher は **`--trust-tools` / `--trust-all-tools` フラグで明示的に承
 - [kirodotdev/Kiro#5449](https://github.com/kirodotdev/Kiro/issues/5449) — subagent が親の `allowedTools` を継承しない
 - 公式ドキュメント（`kiro.dev/docs/cli/...`）は**このコンテナの egress proxy でブロック**されており参照できなかった
 
-## 4. 未解決（kiro-cli のある環境で確認する）
+## 4. チェックリストの結果（すべて実測済み・未解決なし）
 
-| # | 確認事項 | 確認方法 |
-| --- | --- | --- |
-| 1 | `--trust-tools` で渡すツール名の正確な綴り | `kiro-cli chat --help` と `/tools` の一覧。既存実測では `execute_bash`、#7467 の例では `read,write,aws,report` と表記ゆれがある |
-| 2 | `--trust-all-tools` / `--trust-tools` が `--no-interactive` と併用できるか | `kiro-cli chat --no-interactive --trust-all-tools "git status --short を実行して"` |
-| 3 | プロンプトを stdin から渡せるか（argv 必須か） | 上記を `cat prompt.md \| kiro-cli chat --no-interactive --trust-all-tools` で試す |
-| 4 | 完了検知の手段（終了コード / 出力ファイル） | 正常終了・ツール拒否・未認証の 3 ケースで終了コードと stderr を記録 |
-| 5 | root 実行の可否 | claude と同様の root 拒否がないかを確認 |
-| 6 | 検証に使った kiro-cli の版数 | `kiro-cli --version`。2.16.1 と挙動が変わっていないか |
+| # | 確認事項 | 結果 | 節 |
+| --- | --- | --- | --- |
+| 1 | `--trust-tools` で渡すツール名の正確な綴り | 内部名 `execute_bash` / `fs_read` / `fs_write`。表示名 `shell` / `write` も受理される。**launcher は内部名で統一**。無効名は WARNING のみで exit 0 | 3-2 |
+| 2 | `--trust-all-tools` / `--trust-tools` が `--no-interactive` と併用できるか | **併用できる**。ツール実行・ファイル編集とも通る。Kiro の縮退案は不要 | 3-1 |
+| 3 | プロンプトを stdin から渡せるか | **渡せる**（26,044 バイトで実測） | 3-0 / 3-7 |
+| 4 | 完了検知の手段 | **終了コードは使えない**（拒否でもシェル失敗でも 0）。stderr のパターン照合と result.json で判定する | 3-3 / 3-4 |
+| 5 | root 実行の可否 | **拒否されない**（`sudo` 実行で exit 0）。claude の `bypassPermissions` のような制約は無い | 3-5 |
+| 6 | 検証に使った kiro-cli の版数 | **2.18.0**（既存実測は 2.16.1）。#7467 / #7483 の報告は 2.18.0 では再現しない | 3-2 / 3-3 |
 
-確認結果は本ファイルに追記し、`external-ai/references/cli-kiro.md` の初版に反映する。
+確認結果は `external-ai/references/cli-kiro.md` の初版に反映する（Task 3 の残作業）。
 
 ## 5. 計画への反映（確定分）
 
 | 項目 | 変更 |
 | --- | --- |
 | Task 2 | **kiro 専用 agent JSON の生成を削除**する（`allowedTools` に依存しないため不要） |
-| Task 4 | `launch-cli.sh` の claude 分岐を「stdin からプロンプト + `--permission-mode acceptEdits` + `--allowed-tools` + `--output-format json`」で確定。kiro 分岐は `--no-interactive --trust-all-tools` を既定に置き、ツール名が確定したら `--trust-tools` へ絞る |
-| Task 9 | claude は `permission_denials` 非空、kiro は `Allow this action?` を早期エラーパターンに追加。kiro は承認漏れがハングとして現れるため stall timeout を必須にする |
-| リスク表 | 「root で `bypassPermissions` が使えない」を追加。claude 参加時のコスト（単純タスクで $0.26）を運用上の注意として追加 |
+| Task 4 | `launch-cli.sh` の claude 分岐を「stdin からプロンプト + `--permission-mode acceptEdits` + `--allowed-tools` + `--output-format json`」で確定。kiro 分岐は **`cat prompt.md \| kiro-cli chat --no-interactive --trust-tools=execute_bash,fs_read,fs_write`** で確定（実測済み） |
+| Task 9 | claude は `permission_denials` 非空を早期エラーに追加。**kiro は `is rejected because it matches one or more rules on the denied list` と `WARNING: --trust-tools arg for custom tool` を早期エラーに追加し、判定前に ANSI エスケープを除去する**。kiro の終了コード 0 は成功とみなさない（stall timeout は別要因への保険として残す） |
+| リスク表 | 「root で `bypassPermissions` が使えない」を追加。claude 参加時のコスト（単純タスクで $0.26）を運用上の注意として追加。**kiro はシェルを許可すると他ツールの制限を迂回するため、防御は worktree 隔離のみに依存すること**を追加 |
 
 ## 6. frontmatter 予算の確認（実測）
 

@@ -28,31 +28,31 @@
 - [x] 設計の確定（三重ループ / ランタイム輪番 / worktree 構成 / 終了条件 / state スキーマ）
 - [x] 12 タスクへの分解と受け入れ条件の定義
 - [x] **Task 3 のうち Claude CLI 部分**（実測で起動形式・完了検知・root 制約を確定）
-- [x] **Task 3 のうち Kiro 部分の公開情報調査**（`allowedTools` に依存しない方針を確定）
+- [x] **Task 3 のうち Kiro 部分の実機検証**（kiro-cli 2.18.0 / 2026-08-15。チェックリスト 6 項目すべて）
 - [x] git worktree の同一ブランチ制約の実測
 - [x] frontmatter 予算の実測（残余 588 文字）
 
 ### 未着手
 
-- [ ] **Task 3 の残件（Kiro の実機確認）— 最優先。これが終わるまで実装に入らない**
+- [ ] Task 3 の残り: `cli-kiro.md` / `cli-claude.md` の書き起こし（**実装のブロッカーではない**）
 - [ ] Task 1〜2, 4〜12（実装・テスト・配布物同期）
 
 ## 4. 次にやること（この順序で）
 
-### 4-1. Task 3 の残件を潰す（最優先）
+### 4-1. Task 3 の実機確認は完了（2026-08-15）
 
-**kiro-cli が入った環境**が要る。このブランチを作った Claude Code on the web の
-コンテナには codex / gemini / kiro-cli が無く、確認できなかった。
+kiro-cli 2.18.0 で [検証記録 §4](issue-113-task3-cli-verification.md) の 6 項目をすべて
+実測し、**未解決は残っていない**。設計に効いた結果は次の 3 つ。
 
-確認項目は [検証記録 §4](issue-113-task3-cli-verification.md) の 6 点。特に重要なのは
-次の 2 つで、結果次第で設計が変わる。
+1. **`--no-interactive` と trust フラグは併用でき、シェル実行もファイル編集も通る**
+   → 縮退設計（`impl_capable` から kiro を外す案）は**不要**になった
+2. **ツール名は内部名 `execute_bash` / `fs_read` / `fs_write`**（表示名 `shell` / `write` も可）
+   → 起動形式は
+   `cat prompt.md | kiro-cli chat --no-interactive --trust-tools=execute_bash,fs_read,fs_write`
+3. **承認漏れはハングではなく「拒否 + exit 0」**（#7483 は 2.18.0 で再現せず）
+   → 検知は stderr のパターン照合。**kiro の終了コードは完了判定に使えない**
 
-1. **`--trust-tools` / `--trust-all-tools` が `--no-interactive` と併用できるか**
-   → 併用できなければ Kiro は実装フェーズに参加できず、`impl_capable` から外す縮退設計へ移る
-2. **`--trust-tools` に渡すツール名の正確な綴り**
-   → 既存実測は `execute_bash`、Kiro#7467 の例は `read,write,aws,report` と表記が揺れている
-
-結果は検証記録に追記し、`external-ai/references/cli-kiro.md` の初版に反映する。
+残るのは `cli-kiro.md` / `cli-claude.md` の書き起こしだけで、他タスクを止めない。
 
 ### 4-2. Task 9（`monitor.py` の汎用化）を先に片付ける
 
@@ -76,7 +76,9 @@ state（Task 1）と worktree（Task 2）が無いと他が動かない。以降
 | 読み取り用 worktree は `--detach` | git が同一ブランチの二重 checkout を拒否する（実測済み） |
 | 適用は直列、提案とレビューは並列 | 同一ブランチへの同時コミットは競合とレビュー単位の曖昧化を招く |
 | 収束しない item は revert して捨てる | リファクタリングは任意作業。揉める提案を PR に残すより捨てる方が安全 |
-| Kiro の承認は**フラグ**で与える（agent JSON に依存しない） | agent JSON の `allowedTools` が honored されない報告があるため（Kiro#7467） |
+| Kiro の承認は**フラグ**で与える（agent JSON に依存しない） | agent JSON の `allowedTools` が honored されない報告があるため（Kiro#7467）。2.18.0 の実測でフラグ経路が正しく効くことを確認済み |
+| Kiro も実装フェーズの輪番に含める（`impl_capable` は 3 者） | `--no-interactive` + `--trust-tools` でシェル実行とファイル編集が通ることを実測（kiro-cli 2.18.0） |
+| kiro の完了判定に終了コードを使わない | ツール拒否でもシェル失敗でも exit 0 を返すため（実測）。stderr のパターン照合と result.json で判定する |
 | claude の権限は `acceptEdits` + `--allowed-tools` | `bypassPermissions` は root 実行で拒否される（実測済み）。CI / コンテナは root が多い |
 | `monitor.py` は複製せず汎用化 | 多軸完了判定は運用で作り込まれた資産。複製すると片方だけ直る事故が起きる |
 | PR ローテーションは v1 では作らない | 件数上限で総量を抑える方針を先に検証する（最小限のコード実装） |
@@ -91,14 +93,31 @@ state（Task 1）と worktree（Task 2）が無いと他が動かない。以降
 2. **Kiro 専用 agent JSON の生成 → 廃止**
    `allowedTools` で事前承認する案は Kiro#7467 の報告により破棄。フラグ指定へ移行し、
    `prepare-worktrees.sh` の該当処理も削除した。
+3. **kiro の承認漏れ検知: stall timeout → stderr のパターン照合**
+   初版は #7483 を根拠に「承認漏れ＝無限ハング」を前提にしていた。kiro-cli 2.18.0 の
+   実機検証では**ハングせず 9 秒で拒否して exit 0** になったため、検知手段を stderr の
+   パターン照合へ変更した（stall timeout は別要因への保険として残す）。
+4. **kiro の trust フラグ: `--trust-all-tools` 既定 → `--trust-tools` の明示列挙**
+   絞り込みが実効性を持つことを実測できたため、既定を
+   `--trust-tools=execute_bash,fs_read,fs_write` に変更した。ただし
+   **シェルを許可する以上、他ツールの制限は迂回できる**（実測）ので、
+   セキュリティ境界としては worktree 隔離だけに依存する。
 
 ## 6. 落とし穴（実装前に必ず読む）
 
 - **`kiro-cli agent set-default` を呼んではいけない。** 既定エージェントは
   `~/.local/share/kiro-cli/data.sqlite3` に保存される**マシン全体の設定**であり、
-  利用者の既存設定を奪う。常に `--agent` で明示指定する
-- **Kiro の承認漏れはエラーではなくハングとして現れる**（Kiro#7483）。終了コードでは
-  検知できないため、stall timeout が唯一の検知手段になる
+  利用者の既存設定を奪う。`kiro-cli agent create` も `$EDITOR`（vim）を対話的に開くため、
+  非対話スクリプトから呼ぶと**タイムアウトまで止まる**（検証中に踏んだ）
+- **kiro の終了コードは成否を表さない。** ツール承認漏れでも、実行したシェルコマンドが
+  `exit 1` を返しても、kiro-cli は **exit 0** で終わる。`exit 1` は未認証と入力なしだけ。
+  検知は stderr の `is rejected because it matches one or more rules on the denied list` /
+  `WARNING: --trust-tools arg for custom tool` で行う
+- **kiro の出力から ANSI エスケープを除去してからパースする。** `NO_COLOR=1` も
+  `TERM=dumb` も非 TTY も効かず、色コードが必ず混ざる
+- **kiro でツール名を綴り間違えても警告だけで走ってしまう。** `--trust-tools=bogus` は
+  WARNING を出して exit 0。何も信頼しない状態で全ツールが拒否されるので、
+  「モデルが何もせず正常終了した」ように見える
 - **`claude --permission-mode bypassPermissions` は root で必ず失敗する。** ローカルの
   非 root 環境でだけ動作確認すると、CI / コンテナで初めて詰まる
 - **frontmatter 予算の残余は 588 文字しかない**（上限 11200 / 現在 10612）。
@@ -116,8 +135,8 @@ state（Task 1）と worktree（Task 2）が無いと他が動かない。以降
 
 | # | 未決事項 | 選択肢 |
 | --- | --- | --- |
-| 1 | Kiro でシェル実行が通らなかった場合の扱い | (a) 提案・レビュー専任へ縮退（`impl_capable` から除外） / (b) Kiro 参加自体を見送る |
-| 2 | `--trust-all-tools` を既定にしてよいか | worktree は隔離済みで、codex の `--dangerously-bypass-approvals-and-sandbox` / gemini の `--skip-trust` と同じ整理。より厳しくするなら `--trust-tools` の明示列挙を既定にする |
+| ~~1~~ | ~~Kiro でシェル実行が通らなかった場合の扱い~~ | **解消**。kiro-cli 2.18.0 でシェル実行・ファイル編集とも通ることを実測したため、縮退は不要 |
+| 2 | kiro の trust フラグをどこまで絞るか | 実測を踏まえ `--trust-tools=execute_bash,fs_read,fs_write` を既定に置いた。ただし**シェルを許可した時点で書き込み制限は迂回できる**ため、絞り込みは事故防止以上の意味を持たない。`--trust-all-tools` に戻して単純化する選択肢もある |
 | 3 | claude 参加時の実行コスト上限 | 単純な 3 ターンで $0.26。1 ラウンド最低 6 回の CLI 起動が走る。上限値の既定（`--max-items-per-round` = 5 / `--max-outer-rounds` = 3）をさらに絞るか |
 | 4 | 対象スコープ（`--scope`）を必須にするか | 必須にすると誤爆しないが手間が増える。現計画では必須 |
 
