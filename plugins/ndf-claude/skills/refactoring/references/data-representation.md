@@ -113,8 +113,10 @@
    同じで、生成した型は、ロードした値がその形である保証を与えない
 3. どちらも満たせないなら、外部化しない
 
-型情報を伴わずに実行時ロードした対応表は、静的解析の対象から外れる。言語ごとにどの検査が
-どこまで効くかは [language-notes.md](language-notes.md) にある。
+型情報を伴わずに実行時ロードした対応表は、静的解析の対象から外れる。どの検査がどこまで効くかは
+言語によって違う。**対象の言語のファイルだけを読む** —
+[lang-python.md](lang-python.md) / [lang-javascript.md](lang-javascript.md) /
+[lang-typescript.md](lang-typescript.md) / [lang-php.md](lang-php.md)。
 
 ## 判断を記録できるようにする
 

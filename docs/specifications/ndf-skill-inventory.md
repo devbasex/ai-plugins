@@ -448,7 +448,7 @@ v7.0.0 の書式はこの方針に寄せたものである。
 | コードスメル 3 件 | 業務ルールの埋め込み / 一件ずつの反復 / 検証のない外部化 |
 | 手法 2 件 | 対応表への置き換え / 一括処理への置き換え |
 | `references/data-representation.md` | 分岐・反復・定数の判定表、外部化してよい条件、判断の記録 |
-| `references/language-notes.md` | Python / JavaScript / TypeScript / PHP での手段 |
+| `references/lang-python.md` ほか 3 件 | 言語ごとの手段。1 言語 1 ファイルとし、SKILL.md が対象言語のものだけを読ませる |
 
 改名は公開コマンドの非互換変更にあたるため、対応表を `ndf-policies` へ置いた（v9.0.0 で削除）。
 あわせて v7.0.0 の対応表（playwright 系の分離）を予告どおり削除した。

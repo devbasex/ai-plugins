@@ -133,5 +133,10 @@ flowchart TD
 - [references/code-smells.md](references/code-smells.md) — 構造改善の起点になる兆候
 - [references/refactoring-catalog.md](references/refactoring-catalog.md) — 手法と適用条件
 - [references/data-representation.md](references/data-representation.md) — 分岐・反復・定数を何にどう置き換えるか
-- [references/language-notes.md](references/language-notes.md) — Python / JavaScript / TypeScript / PHP での手段
+- 言語ごとの手段 — **対象の言語のファイルだけを読む**
+  - [references/lang-python.md](references/lang-python.md)
+  - [references/lang-javascript.md](references/lang-javascript.md)
+  - [references/lang-typescript.md](references/lang-typescript.md)
+  - [references/lang-php.md](references/lang-php.md)
+  - 一覧にない言語は、`data-representation.md` の判定表から自分で対応付ける
 - [references/characterization-tests.md](references/characterization-tests.md) — 現状固定テストの作り方

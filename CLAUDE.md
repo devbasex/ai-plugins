@@ -37,7 +37,7 @@ v6.1.0 で開発方法論レイヤーの 5 個（`development-workflow` / `requi
 
 v7.0.0 で playwright 系 4 個を `playwright-kit` プラグインへ分離した。対応表は予告どおり v8.0.0 で削除済み。
 
-v8.0.0 で `safe-refactoring` を `refactoring` へ改名し、分岐・反復・定数の表現を決める観点を統合した。観点は `references/data-representation.md` に置き、言語固有の手段は `references/language-notes.md` にだけ置く。言語を追加するときも他のファイルは変更しない。対応表は `ndf-policies` にある（v9.0.0 で削除）。
+v8.0.0 で `safe-refactoring` を `refactoring` へ改名し、分岐・反復・定数の表現を決める観点を統合した。観点は `references/data-representation.md` に置き、言語固有の手段は `references/lang-<言語>.md` に 1 言語 1 ファイルで置く。SKILL.md が対象言語のファイルだけを読ませるため、他言語の内容はコンテキストに載らない。言語を追加するときも他のファイルは変更しない。対応表は `ndf-policies` にある（v9.0.0 で削除）。
 
 v6.0.0 の対応表（`review` → `pr-review`）は予告どおり削除済み。v6.0.0 以前から移行する場合は v6.1.0 の `ndf-policies` を参照する。
 

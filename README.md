@@ -129,9 +129,11 @@ kiro-cli chat --agent ndf
 [references/data-representation.md](./plugins/ndf-shared/skills/refactoring/references/data-representation.md)
 にあります。「分岐が多いから表にする」ではなく**変化するから表にする**、という切り分けを置き、
 ガード節・静的に網羅性を検査できる分岐・逐次依存のループ・閉じた状態集合の列挙型は「そのままで
-よい」ものとして明示しています。Python / JavaScript / TypeScript / PHP での具体的な手段は
-[references/language-notes.md](./plugins/ndf-shared/skills/refactoring/references/language-notes.md)
-に分離しているため、記載のない言語でも判断材料はそのまま使えます。
+よい」ものとして明示しています。具体的な手段は言語ごとに 1 ファイルへ分けており（`references/lang-python.md` /
+`lang-javascript.md` / `lang-typescript.md` /
+[`lang-php.md`](./plugins/ndf-shared/skills/refactoring/references/lang-php.md)）、
+SKILL.md が対象言語のファイルだけを読ませます。他言語の内容はコンテキストに載りません。
+記載のない言語でも判断材料はそのまま使えます。
 
 ### NDF v7.0.0 の主な変更（非互換）
 
