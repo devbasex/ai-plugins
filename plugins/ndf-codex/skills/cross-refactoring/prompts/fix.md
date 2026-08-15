@@ -81,4 +81,5 @@ Impl-Model: $RF_MODEL
 ```
 
 - `resolved_thread_ids` には**実際に解決したスレッド**だけを入れてください。
-  ここに書いたスレッドは解決済みとして扱われ、取り消しの対象から外れます
+  申告は GitHub の `reviewThreads` の `isResolved` と突き合わせます。
+  **`resolveReviewThread` を実行していないスレッドを書いても解決済みにはなりません。**

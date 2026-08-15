@@ -164,7 +164,7 @@ def test_partial_failure_keeps_the_rest(refactor, tmp_path, env_tmp_dir):
             {"item_id": "R1-002", "diff_lines": 30, "commits": []},
         ],
     })
-    refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1})())
+    refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": True})())
 
     state = read_state(state_path)
     assert state["rounds"][0]["apply"]["applied"] == ["R1-001"]
@@ -182,7 +182,7 @@ def test_all_failed_exits_2(refactor, tmp_path, env_tmp_dir):
         {"item_id": "R1-001", "diff_lines": 0, "commits": []},
     ]})
     with pytest.raises(SystemExit) as e:
-        refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1})())
+        refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": True})())
     assert e.value.code == 2
     assert read_state(state_path)["phase"] == "propose"
 
@@ -193,8 +193,67 @@ def test_missing_item_in_result_is_a_failure(refactor, tmp_path, env_tmp_dir):
     env_tmp_dir(state_path)
     write_result(state_path, "codex-apply-r1", {"items": []})
     with pytest.raises(SystemExit):
-        refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1})())
+        refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": True})())
     assert read_state(state_path)["items"][0]["status"] == "abandoned"
+
+
+def test_failed_item_commits_are_reverted(refactor, tmp_path, env_tmp_dir, monkeypatch):
+    """検証に失敗した項目のコミットを Pull Request に残さない。
+
+    実装担当は項目ごとに push しているため、状態を `abandoned` にするだけでは
+    差分が残り、以後のレビュー対象にも混入する。
+    """
+    import subprocess
+
+    items = [item(item_id="R1-001"), item(item_id="R1-002")]
+    state_path = _state_with_items(tmp_path, items)
+    env_tmp_dir(state_path)
+    write_result(state_path, "codex-apply-r1", {
+        "items": [
+            {"item_id": "R1-001", "diff_lines": 30, "commits": [commit(sha="ok111")]},
+            # 差分予算を超えた項目。コミットは既に push されている
+            {"item_id": "R1-002", "diff_lines": 500,
+             "commits": [commit(sha="bad111", trailers=trailers(item_id="R1-002")),
+                         commit(sha="bad222", trailers=trailers(item_id="R1-002"))]},
+        ],
+    })
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        refactor.subprocess, "run",
+        lambda cmd, **kw: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0, "", ""),
+    )
+    pushes: list[list[str]] = []
+    monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: pushes.append(cmd) or "")
+
+    refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
+
+    reverts = [c for c in calls if c[:2] == ["git", "revert"]]
+    # 新しいコミットから順に戻す
+    assert [c[-1] for c in reverts] == ["bad222", "bad111"]
+    assert pushes, "取り消し後に push していない"
+    for cmd in pushes:
+        assert "--force" not in cmd
+
+    state = read_state(state_path)
+    by_id = {i["item_id"]: i for i in state["items"]}
+    assert by_id["R1-001"]["status"] == "reviewing"
+    assert by_id["R1-002"]["status"] == "abandoned"
+    assert by_id["R1-002"]["commits"] == ["bad111", "bad222"]
+
+
+def test_no_push_when_nothing_was_reverted(refactor, tmp_path, env_tmp_dir, monkeypatch):
+    """全項目が通ったときに余計な push をしない。"""
+    items = [item(item_id="R1-001")]
+    state_path = _state_with_items(tmp_path, items)
+    env_tmp_dir(state_path)
+    write_result(state_path, "codex-apply-r1", {
+        "items": [{"item_id": "R1-001", "diff_lines": 30, "commits": [commit()]}],
+    })
+    pushes: list[list[str]] = []
+    monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: pushes.append(cmd) or "")
+    refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
+    assert pushes == []
 
 
 def test_red_baseline_blocks_every_item(refactor, tmp_path, env_tmp_dir):
@@ -207,6 +266,6 @@ def test_red_baseline_blocks_every_item(refactor, tmp_path, env_tmp_dir):
     env_tmp_dir(state_path)
     write_result(state_path, "codex-apply-r1", {"items": []})
     with pytest.raises(SystemExit) as e:
-        refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1})())
+        refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": True})())
     assert e.value.code == 2
     assert read_state(state_path)["items"][0]["status"] == "blocked"

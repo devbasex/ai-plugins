@@ -802,6 +802,7 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
     reported = {r.get("item_id"): r for r in payload.get("items", []) if isinstance(r, dict)}
     applied: list[str] = []
     failed: list[str] = []
+    reverted = 0
     for item_id in entry["items"]:
         item = _find_item(state, item_id)
         got = reported.get(item_id)
@@ -814,6 +815,13 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
             item["failure_reason"] = problem
             item["test_failed"] = bool(got and "テストが成功していません" in problem)
             item["budget_exceeded"] = bool(got and "差分予算" in problem)
+            # **検証に失敗した項目のコミットを Pull Request に残さない。**
+            # 実装担当は項目ごとに push しているため、状態を `abandoned` にする
+            # だけでは差分が残り、以後のレビュー対象にも混入する。
+            item["commits"] = [
+                c.get("sha") for c in (got or {}).get("commits", []) if c.get("sha")
+            ]
+            reverted += _revert_item_commits(state, item, args.dry_run)
             failed.append(item_id)
             info(f"❌ {item_id}: {problem}")
             continue
@@ -832,6 +840,9 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
     entry.setdefault("durations", {})["apply"] = payload.get("elapsed_seconds") or 0
     state["phase"] = "review" if applied else "propose"
     statefile.save(path, state)
+
+    if reverted and not args.dry_run:
+        _push_head(state)
 
     if not applied:
         info("全項目が失敗したため、このラウンドのレビューは行いません")
@@ -952,25 +963,9 @@ def cmd_abandon_items(args: argparse.Namespace) -> None:
         info("取り消す項目はありません")
         return
 
-    work = state["worktrees"]["work"]
     for item_id in targets:
         item = _find_item(state, item_id)
-        # 新しいコミットから順に戻す。逆順にしないと後続の取り消しが競合する。
-        for sha in reversed(item.get("commits") or []):
-            if args.dry_run:
-                info(f"（dry-run）git revert --no-edit {sha}")
-                continue
-            r = subprocess.run(
-                ["git", "revert", "--no-edit", sha],
-                cwd=work, capture_output=True, text=True,
-            )
-            if r.returncode != 0:
-                subprocess.run(["git", "revert", "--abort"], cwd=work,
-                               capture_output=True, text=True)
-                die(
-                    f"{item_id} のコミット {sha} を取り消せませんでした: "
-                    f"{r.stderr.strip()[:400]}"
-                )
+        count = _revert_item_commits(state, item, args.dry_run)
         item["status"] = "abandoned"
         item.setdefault("failure_reason", "修正ラウンドの上限に達しても指摘が解決しなかった")
         state["deferred_items"].append({
@@ -979,11 +974,10 @@ def cmd_abandon_items(args: argparse.Namespace) -> None:
             "round": entry["round"],
             "defer_reason": item["failure_reason"],
         })
-        info(f"↩ {item_id} を取り消しました（{len(item.get('commits') or [])} コミット）")
+        info(f"↩ {item_id} を取り消しました（{count} コミット）")
 
     if not args.dry_run:
-        # `--force` は使わない。他者の作業を消す事故を起こさないため。
-        _sh(["git", "push", "origin", f"HEAD:{state['head_branch']}"], cwd=work)
+        _push_head(state)
     entry["abandoned"] = targets
     state["phase"] = "propose"
     statefile.save(path, state)
@@ -997,7 +991,20 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     result = _result_path(state, impl, stem_for(impl, "fix", state["id"], args.round))
     payload = _read_result(result, impl)
 
-    resolved = {t for t in payload.get("resolved_thread_ids", []) if t}
+    # 自己申告をそのまま信じない。解決 API に失敗・未実行でも「解決済み」と
+    # 書けてしまい、未解決の指摘が取り消し対象から外れる。GitHub 側の
+    # `isResolved` と突き合わせ、**両方が解決と言っているものだけ**を反映する。
+    claimed = {t for t in payload.get("resolved_thread_ids", []) if t}
+    actual = resolved_threads_on_github(state["repo"], state["current_pr"])
+    if actual is None:
+        info("⚠ レビュースレッドの解決状態を取得できませんでした。"
+             "自己申告は採用せず、未解決のまま扱います")
+        resolved: set[str] = set()
+    else:
+        resolved = claimed & actual
+        for thread_id in sorted(claimed - actual):
+            info(f"⚠ {thread_id} は解決済みと申告されましたが、GitHub では未解決です")
+
     for review in entry["reviews"]:
         for finding in review["findings"]:
             if finding.get("thread_id") in resolved:
@@ -1156,6 +1163,102 @@ def _item_table(state: dict[str, Any]) -> str:
 
 # ---------------- 補助 ----------------
 
+_REVIEW_THREADS_QUERY = """
+query($owner: String!, $repo: String!, $pr: Int!, $cursor: String) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $pr) {
+      reviewThreads(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes { id isResolved }
+      }
+    }
+  }
+}
+"""
+
+
+def resolved_threads_on_github(repo: str, pr: int) -> Optional[set[str]]:
+    """GitHub 上で実際に解決済みのレビュースレッド ID を返す。
+
+    取得できなければ `None` を返す。呼び出し側は**空集合と区別する**こと。
+    「取得できなかった」を「解決済みが 0 件」と混同すると、通信が失敗しただけで
+    全ての指摘を未解決扱いにするか、逆に自己申告を素通しすることになる。
+    """
+    owner, _, name = repo.partition("/")
+    if not owner or not name:
+        return None
+    resolved: set[str] = set()
+    cursor: Optional[str] = None
+    while True:
+        cmd = [
+            "gh", "api", "graphql",
+            "-f", f"query={_REVIEW_THREADS_QUERY}",
+            "-F", f"owner={owner}", "-F", f"repo={name}", "-F", f"pr={pr}",
+        ]
+        if cursor:
+            cmd += ["-F", f"cursor={cursor}"]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode != 0:
+            info(f"⚠ レビュースレッドの取得に失敗しました: {r.stderr.strip()[:200]}")
+            return None
+        try:
+            threads = (
+                json.loads(r.stdout)["data"]["repository"]["pullRequest"]["reviewThreads"]
+            )
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
+            info(f"⚠ レビュースレッドの応答を解釈できませんでした: {e}")
+            return None
+        resolved.update(
+            n["id"] for n in threads.get("nodes", []) if n.get("isResolved")
+        )
+        page = threads.get("pageInfo") or {}
+        if not page.get("hasNextPage"):
+            return resolved
+        cursor = page.get("endCursor")
+        if not cursor:
+            return resolved
+
+
+def _revert_item_commits(
+    state: dict[str, Any], item: dict[str, Any], dry_run: bool = False
+) -> int:
+    """改善項目のコミットを取り消し、取り消した件数を返す。
+
+    **新しいコミットから順に戻す。** 逆順にすると後続の取り消しが競合する。
+    取り消しに失敗したら中断する。半端な状態を Pull Request に残さない。
+
+    適用の検証に失敗したときと、レビューが収束しなかったときの両方から呼ぶ。
+    前者で呼ばないと、実装担当が既に push した差分が Pull Request に残り、
+    以後のレビュー対象にも混入する。
+    """
+    work = state["worktrees"]["work"]
+    shas = [s for s in (item.get("commits") or []) if s]
+    for sha in reversed(shas):
+        if dry_run:
+            info(f"（dry-run）git revert --no-edit {sha}")
+            continue
+        r = subprocess.run(
+            ["git", "revert", "--no-edit", sha],
+            cwd=work, capture_output=True, text=True,
+        )
+        if r.returncode != 0:
+            subprocess.run(["git", "revert", "--abort"], cwd=work,
+                           capture_output=True, text=True)
+            die(
+                f"{item['item_id']} のコミット {sha} を取り消せませんでした: "
+                f"{r.stderr.strip()[:400]}"
+            )
+    return len(shas)
+
+
+def _push_head(state: dict[str, Any]) -> None:
+    """head ブランチへ push する。**`--force` は使わない。**"""
+    _sh(
+        ["git", "push", "origin", f"HEAD:{state['head_branch']}"],
+        cwd=state["worktrees"]["work"],
+    )
+
+
 def _current_round(state: dict[str, Any]) -> dict[str, Any]:
     if not state["rounds"]:
         die("提案ラウンドが開かれていません。先に start-round を実行してください")
@@ -1258,7 +1361,6 @@ def main() -> None:
         sp.set_defaults(func=func)
 
     for name, func, help_ in (
-        ("merge-apply", cmd_merge_apply, "適用結果を検証して取り込む"),
         ("judge-review", cmd_judge_review, "レビュー 2 者の判定を取り込む"),
         ("should-abandon", cmd_should_abandon, "修正ラウンド上限の到達判定"),
         ("merge-fix", cmd_merge_fix, "修正結果を取り込む"),
@@ -1268,12 +1370,17 @@ def main() -> None:
         sp.add_argument("round", type=int)
         sp.set_defaults(func=func)
 
-    ab = sub.add_parser("abandon-items", help="未解決の指摘に紐づく項目を取り消す")
-    ab.add_argument("id", type=int)
-    ab.add_argument("round", type=int)
-    ab.add_argument("--dry-run", action="store_true",
-                    help="取り消すコミットを表示するだけで実行しない")
-    ab.set_defaults(func=cmd_abandon_items)
+    # コミットを取り消しうる 2 つは、実行前に何が消えるかを確かめられるようにする。
+    for name, func, help_ in (
+        ("merge-apply", cmd_merge_apply, "適用結果を検証して取り込む"),
+        ("abandon-items", cmd_abandon_items, "未解決の指摘に紐づく項目を取り消す"),
+    ):
+        sp = sub.add_parser(name, help=help_)
+        sp.add_argument("id", type=int)
+        sp.add_argument("round", type=int)
+        sp.add_argument("--dry-run", action="store_true",
+                        help="取り消すコミットを表示するだけで実行しない")
+        sp.set_defaults(func=func)
 
     rp = sub.add_parser("report", help="実行報告を出す")
     rp.add_argument("id", type=int)

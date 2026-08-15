@@ -156,24 +156,97 @@ def test_push_never_uses_force(refactor, tmp_path, env_tmp_dir, monkeypatch):
 
 # ---------- 修正の取り込み ----------
 
-def test_merge_fix_resolves_threads_and_counts_rounds(
-    refactor, tmp_path, env_tmp_dir
-):
-    state_path = _state(tmp_path, [_finding("R1-001", thread="PRRT_a")])
+def _prepare_fix(refactor, tmp_path, env_tmp_dir, claimed, thread="PRRT_a"):
+    state_path = _state(tmp_path, [_finding("R1-001", thread=thread)])
     state = read_state(state_path)
     state["rounds"][0]["fix_rounds"] = 0
     state_path.write_text(__import__("json").dumps(state), encoding="utf-8")
     env_tmp_dir(state_path)
     write_result(state_path, "codex-fix-r1", {
-        "resolved_thread_ids": ["PRRT_a"],
+        "resolved_thread_ids": claimed,
         "elapsed_seconds": 12,
         "commits": [{"sha": "fix111", "trailers": {
             "Item-Id": "R1-001", "Round": "1",
             "Impl-Runtime": "codex", "Impl-Model": "gpt-5.5"}}],
     })
+    return state_path
+
+
+def test_merge_fix_resolves_threads_and_counts_rounds(
+    refactor, tmp_path, env_tmp_dir, monkeypatch
+):
+    state_path = _prepare_fix(refactor, tmp_path, env_tmp_dir, ["PRRT_a"])
+    monkeypatch.setattr(refactor, "resolved_threads_on_github",
+                        lambda repo, pr: {"PRRT_a"})
     refactor.cmd_merge_fix(type("A", (), {"id": 130, "round": 1})())
 
     state = read_state(state_path)
     assert state["rounds"][0]["fix_rounds"] == 1
     assert state["rounds"][0]["reviews"][0]["findings"][0]["resolved"] is True
     assert "fix111" in state["items"][0]["commits"]
+
+
+def test_merge_fix_rejects_unverified_resolution_claims(
+    refactor, tmp_path, env_tmp_dir, monkeypatch
+):
+    """解決 API に失敗・未実行でも「解決済み」と書けてしまうため、突き合わせる。"""
+    state_path = _prepare_fix(refactor, tmp_path, env_tmp_dir, ["PRRT_a"])
+    monkeypatch.setattr(refactor, "resolved_threads_on_github", lambda repo, pr: set())
+    refactor.cmd_merge_fix(type("A", (), {"id": 130, "round": 1})())
+
+    state = read_state(state_path)
+    assert state["rounds"][0]["reviews"][0]["findings"][0]["resolved"] is False
+
+
+def test_merge_fix_treats_unreachable_github_as_unresolved(
+    refactor, tmp_path, env_tmp_dir, monkeypatch
+):
+    """取得できないことと「解決済みが 0 件」を混同しない。安全側に倒す。"""
+    state_path = _prepare_fix(refactor, tmp_path, env_tmp_dir, ["PRRT_a"])
+    monkeypatch.setattr(refactor, "resolved_threads_on_github", lambda repo, pr: None)
+    refactor.cmd_merge_fix(type("A", (), {"id": 130, "round": 1})())
+
+    state = read_state(state_path)
+    assert state["rounds"][0]["reviews"][0]["findings"][0]["resolved"] is False
+
+
+def test_resolved_threads_returns_none_when_gh_fails(refactor, monkeypatch):
+    monkeypatch.setattr(
+        refactor.subprocess, "run",
+        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, "", "auth required"),
+    )
+    assert refactor.resolved_threads_on_github("a/b", 1) is None
+
+
+def test_resolved_threads_reads_only_resolved_ids(refactor, monkeypatch):
+    payload = {"data": {"repository": {"pullRequest": {"reviewThreads": {
+        "pageInfo": {"hasNextPage": False, "endCursor": None},
+        "nodes": [{"id": "T1", "isResolved": True}, {"id": "T2", "isResolved": False}],
+    }}}}}
+    monkeypatch.setattr(
+        refactor.subprocess, "run",
+        lambda cmd, **kw: subprocess.CompletedProcess(
+            cmd, 0, __import__("json").dumps(payload), ""),
+    )
+    assert refactor.resolved_threads_on_github("a/b", 1) == {"T1"}
+
+
+def test_resolved_threads_follows_pagination(refactor, monkeypatch):
+    pages = [
+        {"data": {"repository": {"pullRequest": {"reviewThreads": {
+            "pageInfo": {"hasNextPage": True, "endCursor": "C1"},
+            "nodes": [{"id": "T1", "isResolved": True}]}}}}},
+        {"data": {"repository": {"pullRequest": {"reviewThreads": {
+            "pageInfo": {"hasNextPage": False, "endCursor": None},
+            "nodes": [{"id": "T2", "isResolved": True}]}}}}},
+    ]
+    calls = []
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(
+            cmd, 0, __import__("json").dumps(pages[len(calls) - 1]), "")
+
+    monkeypatch.setattr(refactor.subprocess, "run", fake_run)
+    assert refactor.resolved_threads_on_github("a/b", 1) == {"T1", "T2"}
+    assert any("cursor=C1" in "".join(c) for c in calls)
