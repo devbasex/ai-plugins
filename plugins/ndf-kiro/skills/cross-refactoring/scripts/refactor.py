@@ -912,29 +912,46 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
     # **範囲のコミットは全て、いずれかの改善項目に割り当てられていること。**
     # 申告から漏れたコミットはテストもトレーラーも差分予算も検査されず、そのまま
     # Pull Request に残る。都合の悪い変更を申告しないだけで検査を回避できてしまう。
-    claimed = {
-        sha for r in reported.values() for sha in _reported_shas(r)
-    }
+    # **1 コミットの所有項目は 1 つだけ。** 同じコミットを 2 つの項目が申告すると、
+    # 片方が失敗して取り消したときに、もう片方は成功のまま残る。状態ファイルと
+    # 実際の差分が食い違い、どちらが正しいか決められなくなる。
+    owner_of: dict[str, str] = {}
+    duplicated: list[str] = []
+    for item_id, r in reported.items():
+        for sha in _reported_shas(r):
+            if sha in owner_of and owner_of[sha] != item_id:
+                duplicated.append(sha)
+            owner_of.setdefault(sha, item_id)
+
     claimed_full = {
         full for full in (
             _git_out(work, ["rev-parse", "--verify", f"{s}^{{commit}}"])
-            for s in claimed
+            for s in owner_of
         ) if full
     }
     unassigned = sorted(in_range - claimed_full)
-    if unassigned or unknown_ids:
-        reason = (
-            f"どの改善項目にも割り当てられていないコミットが {len(unassigned)} 件あります"
-            f"（{', '.join(s[:7] for s in unassigned[:5])}）。"
-            "検証を回避した変更を Pull Request に残さないため、ラウンドごと取り消します"
-        )
-        if unknown_ids:
-            reason = (
-                f"このラウンドに無い改善項目 ID の申告があります"
-                f"（{', '.join(unknown_ids[:5])}）。"
-                + ("" if not unassigned else f"未割当のコミットも {len(unassigned)} 件あります。")
-                + "検証を回避した変更を Pull Request に残さないため、ラウンドごと取り消します"
+    if unassigned or unknown_ids or duplicated:
+        causes = []
+        if unassigned:
+            causes.append(
+                f"どの改善項目にも割り当てられていないコミットが {len(unassigned)} 件"
+                f"（{', '.join(s[:7] for s in unassigned[:5])}）"
             )
+        if unknown_ids:
+            causes.append(
+                f"このラウンドに無い改善項目 ID の申告"
+                f"（{', '.join(unknown_ids[:5])}）"
+            )
+        if duplicated:
+            causes.append(
+                f"複数の項目が同じコミットを申告しています"
+                f"（{', '.join(s[:7] for s in duplicated[:5])}）"
+            )
+        reason = (
+            "、".join(causes)
+            + "。検証を回避した変更や、状態と実差分の食い違いを Pull Request に"
+              "残さないため、ラウンドごと取り消します"
+        )
         info(f"❌ {reason}")
         for item_id in entry["items"]:
             it = _find_item(state, item_id)
@@ -953,6 +970,7 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
             "base_sha": entry.get("apply_base_sha"), "head_sha": head_sha,
             "unassigned_commits": unassigned,
             "unknown_item_ids": unknown_ids,
+            "duplicated_commits": duplicated,
         }
         state["phase"] = "propose"
         if args.dry_run:
@@ -1232,31 +1250,32 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         work, reported_shas, set(ordered_range),
         baseline.get("command") or "true", state["head_branch"],
     )
-    invalid_items: set[str] = set()
-    # 項目を特定できない不正コミット。**1 件でもあれば解決の申告を一切採らない。**
-    # `invalid_items` に `None` を入れても、指摘側の `item_id` とは一致しないため
-    # 素通りしてしまう（不正な修正があるのにスレッドが解決済みへ進む）。
-    unattributable = False
+
+    # **不正なコミットが 1 件でもあれば、修正ラウンドの範囲ごと取り消す。**
+    # 状態を記録しないだけでは、未検証の変更が Pull Request に残り続ける
+    # （見送りの対象にもならない）。どのコミットが安全かは決められないので、
+    # 適用フェーズの未割当コミットと同じ扱いにする。
+    problems: list[str] = []
+    accepted: list[tuple[str, str]] = []      # (item_id, sha)
     for commit in facts:
         item_id = (commit.get("trailers") or {}).get("Item-Id")
         problem = verify_fix_commit(commit)
         if problem:
+            problems.append(problem)
             info(f"❌ 修正コミットが手順を満たしていません: {problem}")
-            if item_id in {i["item_id"] for i in state["items"]}:
-                invalid_items.add(item_id)
-            else:
-                unattributable = True
             continue
-        item = _find_item(state, item_id, required=False)
-        if item is not None:
-            item.setdefault("commits", []).append(commit["sha"])
+        accepted.append((item_id, commit["sha"]))
 
     if unassigned:
         info(
             f"❌ どの申告にも含まれていない修正コミットが {len(unassigned)} 件あります"
-            f"（{', '.join(s[:7] for s in unassigned[:5])}）。"
-            "検証を受けていない変更を残さないため、この修正ラウンドの範囲を取り消します"
+            f"（{', '.join(s[:7] for s in unassigned[:5])}）"
         )
+
+    if unassigned or problems:
+        # **状態へ記録する前に取り消す。** 先に記録すると、取り消し済みのコミットが
+        # 状態ファイルに残り、後の見送り処理が同じコミットをもう一度取り消そうとする。
+        info("検証を通らない変更を残さないため、この修正ラウンドの範囲を取り消します")
         _revert_item_commits(
             state,
             {"item_id": f"R{entry['round']}-fix{entry['fix_rounds'] + 1}",
@@ -1264,23 +1283,17 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
             dry_run=False,
         )
         _push_head(state)
-
-    if unassigned or unattributable:
-        # どの項目の話か決められない不正がある。解決の申告は一切採らない。
-        info("⚠ 検証を通らない修正があるため、解決の申告は採用しません")
+        info("⚠ 修正を取り消したため、解決の申告は採用しません")
         resolved = set()
+    else:
+        for item_id, sha in accepted:
+            item = _find_item(state, item_id, required=False)
+            if item is not None:
+                item.setdefault("commits", []).append(sha)
 
     for review in entry["reviews"]:
         for finding in review["findings"]:
             if finding.get("thread_id") not in resolved:
-                continue
-            if finding.get("item_id") in invalid_items:
-                # 修正そのものが手順を満たしていないので、解決したことにしない。
-                # 修正ラウンドの上限に達すればこの項目は取り消される。
-                info(
-                    f"⚠ {finding['item_id']} は修正コミットが手順を満たしていないため、"
-                    "解決済みにしません"
-                )
                 continue
             finding["resolved"] = True
 

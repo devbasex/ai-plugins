@@ -706,3 +706,53 @@ def test_non_object_result_file_fails(refactor, tmp_path, env_tmp_dir, no_git):
             type("A", (), {"id": 130, "round": 1, "dry_run": False})()
         )
     assert e.value.code == 2
+
+
+def test_same_commit_claimed_by_two_items_fails_the_round(
+    refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
+):
+    """1 コミットの所有項目は 1 つだけ。
+
+    重複したまま進むと、片方が失敗して取り消したときにもう片方は成功のまま残り、
+    状態ファイルと実際の差分が食い違う。
+    """
+    items = [item(item_id="R1-001"), item(item_id="R1-002")]
+    state_path = _state_with_items(tmp_path, items)
+    env_tmp_dir(state_path)
+    git_facts({"shared": fact(sha="shared")}, in_range=["shared"])
+    write_result(state_path, "codex-apply-r1", {
+        "items": [
+            {"item_id": "R1-001", "commits": [{"sha": "shared"}]},
+            {"item_id": "R1-002", "commits": [{"sha": "shared"}]},
+        ],
+    })
+    monkeypatch.setattr(
+        refactor.subprocess, "run",
+        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "", ""),
+    )
+    monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: "")
+
+    with pytest.raises(SystemExit) as e:
+        refactor.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+        )
+    assert e.value.code == 2
+    state = read_state(state_path)
+    assert state["rounds"][0]["apply"]["duplicated_commits"] == ["shared"]
+    assert all(i["status"] == "abandoned" for i in state["items"])
+
+
+def test_same_commit_reported_twice_for_one_item_is_fine(
+    refactor, tmp_path, env_tmp_dir, no_git, git_facts
+):
+    """同じ項目が同じコミットを重ねて書いただけなら、食い違いは起きない。"""
+    items = [item(item_id="R1-001")]
+    state_path = _state_with_items(tmp_path, items)
+    env_tmp_dir(state_path)
+    git_facts({"ok111": fact(sha="ok111")}, in_range=["ok111"])
+    write_result(state_path, "codex-apply-r1", {
+        "items": [{"item_id": "R1-001",
+                   "commits": [{"sha": "ok111"}, {"sha": "ok111"}]}],
+    })
+    refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
+    assert read_state(state_path)["items"][0]["status"] == "reviewing"

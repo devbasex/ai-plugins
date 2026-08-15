@@ -256,21 +256,39 @@ def test_merge_fix_rejects_unverified_resolution_claims(
     assert state["rounds"][0]["reviews"][0]["findings"][0]["resolved"] is False
 
 
+def _no_git(refactor, monkeypatch):
+    """取り消しと push を実際には走らせず、実行されたコマンドを記録する。"""
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        refactor.subprocess, "run",
+        lambda cmd, **kw: calls.append(list(cmd))
+        or subprocess.CompletedProcess(cmd, 0, "", ""),
+    )
+    monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: calls.append(list(cmd)) or "")
+    return calls
+
+
 def test_merge_fix_rejects_commits_that_skip_the_procedure(
     refactor, tmp_path, env_tmp_dir, monkeypatch
 ):
-    """修正側だけ素通しにすると、手順を外れた変更がそのまま収束済みになる。"""
+    """修正側だけ素通しにすると、手順を外れた変更がそのまま収束済みになる。
+
+    記録しないだけでは Pull Request に残るため、**範囲ごと取り消す**。
+    """
     state_path = _prepare_fix(
         refactor, tmp_path, env_tmp_dir, monkeypatch, ["PRRT_a"],
         facts=[_fix_commit(test_status="fail")],
     )
     monkeypatch.setattr(refactor, "resolved_threads_on_github",
                         lambda repo, pr: {"PRRT_a"})
+    calls = _no_git(refactor, monkeypatch)
     refactor.cmd_merge_fix(type("A", (), {"id": 130, "round": 1})())
 
     state = read_state(state_path)
     assert state["rounds"][0]["reviews"][0]["findings"][0]["resolved"] is False
     assert "fix111" not in state["items"][0]["commits"]
+    assert [c[-1] for c in calls if c[:2] == ["git", "revert"]] == ["fix111"]
+    assert any(c[:2] == ["git", "push"] for c in calls)
 
 
 def test_merge_fix_rejects_commits_missing_trailers(
@@ -283,10 +301,12 @@ def test_merge_fix_rejects_commits_missing_trailers(
     )
     monkeypatch.setattr(refactor, "resolved_threads_on_github",
                         lambda repo, pr: {"PRRT_a"})
+    calls = _no_git(refactor, monkeypatch)
     refactor.cmd_merge_fix(type("A", (), {"id": 130, "round": 1})())
 
     state = read_state(state_path)
     assert state["rounds"][0]["reviews"][0]["findings"][0]["resolved"] is False
+    assert [c[-1] for c in calls if c[:2] == ["git", "revert"]] == ["fix111"]
 
 
 def test_merge_fix_treats_unreachable_github_as_unresolved(
@@ -458,7 +478,34 @@ def test_unattributable_invalid_commit_blocks_all_resolutions(
     )
     monkeypatch.setattr(refactor, "resolved_threads_on_github",
                         lambda repo, pr: {"PRRT_a"})
+    calls = _no_git(refactor, monkeypatch)
     refactor.cmd_merge_fix(type("A", (), {"id": 130, "round": 1})())
 
     state = read_state(state_path)
     assert state["rounds"][0]["reviews"][0]["findings"][0]["resolved"] is False
+    # 取り消し済みのコミットを状態へ残さない（後の見送りで二重に取り消さない）
+    assert "fix111" not in state["items"][0]["commits"]
+    assert [c[-1] for c in calls if c[:2] == ["git", "revert"]] == ["fix111"]
+
+
+def test_reverted_fix_commits_are_not_recorded_in_state(
+    refactor, tmp_path, env_tmp_dir, monkeypatch
+):
+    """全件取り消しになるときは、状態へコミットを記録しないこと。
+
+    先に記録すると、取り消し済みのコミットが状態ファイルに残り、後の見送り処理が
+    同じコミットをもう一度取り消そうとして落ちる。
+    """
+    good = _fix_commit(sha="good111")
+    bad = _fix_commit(sha="bad222", test_status="fail")
+    state_path = _prepare_fix(
+        refactor, tmp_path, env_tmp_dir, monkeypatch, ["PRRT_a"], facts=[good, bad]
+    )
+    monkeypatch.setattr(refactor, "resolved_threads_on_github",
+                        lambda repo, pr: {"PRRT_a"})
+    _no_git(refactor, monkeypatch)
+    refactor.cmd_merge_fix(type("A", (), {"id": 130, "round": 1})())
+
+    recorded = read_state(state_path)["items"][0]["commits"]
+    assert "good111" not in recorded, "取り消したコミットが状態に残っている"
+    assert "bad222" not in recorded
