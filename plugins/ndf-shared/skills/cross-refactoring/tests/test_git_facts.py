@@ -161,3 +161,17 @@ def test_reverting_in_history_order_succeeds(refactor, work):
     assert not (work / "src" / "a.py").exists()
     diff = _git("diff", "--name-only", base, "HEAD", cwd=work).stdout.strip()
     assert diff == "", f"着手前との差分が残っている: {diff}"
+
+
+def test_hanging_test_is_cut_off(refactor, work):
+    """テストが終わらないときは打ち切って失敗にする。
+
+    無限ループに入ったコードを待ち続けると、進行全体が止まる。
+    """
+    sha = _commit(work, "Refactor: 無限ループ" + TRAILERS,
+                  {"src/foo.py": "def f():\n    return 2\n"})
+    status = refactor.run_test_at(
+        str(work), sha, "sleep 30", "main", timeout=1
+    )
+    assert status == "fail"
+    assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=work).stdout.strip() == "main"

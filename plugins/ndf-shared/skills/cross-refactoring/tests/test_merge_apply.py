@@ -289,7 +289,7 @@ def git_facts(refactor, monkeypatch):
         )
         monkeypatch.setattr(
             refactor, "collect_commit_facts",
-            lambda work, shas, rng, cmd, branch: [
+            lambda work, shas, rng, cmd, branch, timeout=None: [
                 mapping.get(s, {"sha": s, "exists": False}) for s in shas
             ],
         )
@@ -783,7 +783,7 @@ def test_short_and_full_sha_are_seen_as_the_same_commit(
     )
     monkeypatch.setattr(
         refactor, "collect_commit_facts",
-        lambda work, shas, rng, cmd, branch: [fact(sha=s) for s in shas],
+        lambda work, shas, rng, cmd, branch, timeout=None: [fact(sha=s) for s in shas],
     )
     write_result(state_path, "codex-apply-r1", {
         "items": [

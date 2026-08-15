@@ -110,6 +110,10 @@ REQUIRED_SKILLS = ("refactoring", "tdd-cycle", "quality-gates")
 # 実差分行数が見積りのこの倍数を超えたら範囲の逸脱とみなす。
 DIFF_BUDGET_FACTOR = 2
 
+# テスト 1 回あたりの上限（秒）。生成されたコードやテストが無限ループに入ると、
+# 待ち続けて**進行全体が止まる**。打ち切って失敗として扱う。
+DEFAULT_TEST_TIMEOUT = 900
+
 # 提案の重複率がこの割合を超えたら、提案ラウンドの繰り返しを収束とみなす。
 DUPLICATE_RATE_THRESHOLD = 0.7
 
@@ -574,7 +578,7 @@ def cmd_init(args: argparse.Namespace) -> None:
             _emit_init(state)
             return
 
-    baseline = _run_baseline_test(args.baseline_test, work)
+    baseline = _run_baseline_test(args.baseline_test, work, args.test_timeout)
 
     state: dict[str, Any] = {
         "id": args.pr,
@@ -598,6 +602,7 @@ def cmd_init(args: argparse.Namespace) -> None:
         "max_items_per_round": args.max_items_per_round,
         "severity_threshold": args.severity_threshold,
         "baseline_test": baseline,
+        "test_timeout": args.test_timeout,
         "outer_round": 0,
         "phase": "init",
         "rounds": [],
@@ -699,15 +704,27 @@ def _is_registered_worktree(path: pathlib.Path) -> bool:
     return any(line == f"worktree {target}" for line in out.splitlines())
 
 
-def _run_baseline_test(command: str, work: pathlib.Path) -> dict[str, Any]:
+def _run_baseline_test(
+    command: str, work: pathlib.Path, timeout: int = DEFAULT_TEST_TIMEOUT
+) -> dict[str, Any]:
     """着手前のテストを実行して記録する。
 
     失敗している状態で構造改善に入ると、**壊したのか元から壊れていたのか**
     区別できない。そもそも振る舞いが変わっていないことを示す手段が無い書き換えは
     構造改善ではないため、テストコマンドは必須にしている。
     """
-    r = subprocess.run(command, shell=True, cwd=str(work), capture_output=True, text=True)
-    status = "green" if r.returncode == 0 else "red"
+    try:
+        r = subprocess.run(
+            command, shell=True, cwd=str(work), capture_output=True, text=True,
+            timeout=timeout,
+        )
+        status = "green" if r.returncode == 0 else "red"
+    except subprocess.TimeoutExpired:
+        die(
+            f"着手前のテストが {timeout} 秒で終わりませんでした（{command}）。"
+            "打ち切りました"
+        )
+        raise SystemExit(1)
     if status == "red":
         die(
             f"着手前のテストが失敗しています（{command}）。"
@@ -895,6 +912,8 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
     """
     path, state = _load(args.id)
     entry = _round(state, args.round)
+    if not args.dry_run:
+        _flush_pending_push(path, state, entry)
 
     # **叩き直しても同じ判定を返す。** 取り込み済みで再実行すると、前回作った
     # 取り消しコミットが「未割当」と判定され、成功した項目まで巻き込んで
@@ -1044,8 +1063,7 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
         if args.dry_run:
             info("（dry-run）状態ファイルは更新していません")
         else:
-            statefile.save(path, state)
-            _push_head(state)
+            _push_with_retry_marker(path, state, entry)
         sys.exit(2)
 
     applied: list[str] = []
@@ -1059,7 +1077,8 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
             facts: list[dict[str, Any]] = []
         else:
             facts = collect_commit_facts(
-                work, _reported_shas(got), in_range, test_command, head_branch
+                work, _reported_shas(got), in_range, test_command, head_branch,
+                _safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT),
             )
             problem = verify_apply_item(item, facts)
         if problem:
@@ -1103,7 +1122,7 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
         # 保存してから push する。push が失敗しても、記録とローカルの git が食い違わない。
         statefile.save(path, state)
         if reverted:
-            _push_head(state)
+            _push_with_retry_marker(path, state, entry)
 
     if not applied:
         info("全項目が失敗したため、このラウンドのレビューは行いません")
@@ -1120,7 +1139,10 @@ def cmd_judge_review(args: argparse.Namespace) -> None:
     reviewers = entry["reviewers"]
 
     reviews: dict[str, dict[str, Any]] = {}
-    digest = hashlib.sha256()
+    # 鍵には**修正の世代**を含める。1 回修正したあとに同じ指摘文が返ってくることは
+    # 普通にあり、内容だけで見ると「叩き直し」と区別できず、起点も試行番号も
+    # 更新されないまま止まってしまう。
+    digest = hashlib.sha256(f"fix{entry.get('fix_rounds', 0)}:".encode("ascii"))
     for name in reviewers:
         result = _result_path(state, name, stem_for(name, "review", state["id"], args.round))
         digest.update(name.encode("utf-8"))
@@ -1250,6 +1272,8 @@ def cmd_abandon_items(args: argparse.Namespace) -> None:
     """
     path, state = _load(args.id)
     entry = _round(state, args.round)
+    if not args.dry_run:
+        _flush_pending_push(path, state, entry)
 
     # 取り消し自体は `reverted` で冪等だが、見送りの記録は重複しうる。
     if entry.get("abandoned") is not None:
@@ -1290,13 +1314,14 @@ def cmd_abandon_items(args: argparse.Namespace) -> None:
         return
     # 保存してから push する。push が失敗しても、記録とローカルの git が食い違わない。
     statefile.save(path, state)
-    _push_head(state)
+    _push_with_retry_marker(path, state, entry)
 
 
 def cmd_merge_fix(args: argparse.Namespace) -> None:
     """Step 6 — 修正結果を取り込み、修正ラウンドを 1 つ進める。"""
     path, state = _load(args.id)
     entry = _round(state, args.round)
+    _flush_pending_push(path, state, entry)
     impl = entry["impl"]
     result = _result_path(state, impl, stem_for(impl, "fix", state["id"], args.round))
     payload = _read_result(result, impl)
@@ -1382,6 +1407,7 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     facts = collect_commit_facts(
         work, reported_shas, set(ordered_range),
         baseline.get("command") or "true", state["head_branch"],
+        _safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT),
     )
 
     # **不正なコミットが 1 件でもあれば、修正ラウンドの範囲ごと取り消す。**
@@ -1444,7 +1470,7 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     )
     statefile.save(path, state)
     if needs_push:
-        _push_head(state)
+        _push_with_retry_marker(path, state, entry)
     info(f"修正を取り込みました（解決 {len(resolved)} スレッド / 修正ラウンド {entry['fix_rounds']}）")
 
 
@@ -1696,20 +1722,30 @@ def commit_touches_tests(work: str, sha: str) -> bool:
     return False
 
 
-def run_test_at(work: str, sha: str, command: str, head_branch: str) -> str:
+def run_test_at(
+    work: str, sha: str, command: str, head_branch: str,
+    timeout: int = DEFAULT_TEST_TIMEOUT,
+) -> str:
     """指定コミットを取り出してテストを実行し `pass` / `fail` を返す。
 
     **各コミットでテストが通ったかは、実際に走らせないと分からない。**
     結果ファイルの `test_status` は実装担当の申告にすぎず、検査の根拠にできない。
     実行後は必ず元のブランチへ戻す。
+
+    上限時間を超えたら `fail` とする。生成されたコードやテストが無限ループに入ると、
+    待ち続けて進行全体が止まるためで、通す側には倒さない。
     """
     if _git_out(work, ["checkout", "--detach", sha]) is None:
         return "missing"
     try:
         r = subprocess.run(
-            command, shell=True, cwd=work, capture_output=True, text=True
+            command, shell=True, cwd=work, capture_output=True, text=True,
+            timeout=timeout,
         )
         return "pass" if r.returncode == 0 else "fail"
+    except subprocess.TimeoutExpired:
+        info(f"⚠ コミット {sha[:7]} のテストが {timeout} 秒で終わりませんでした")
+        return "fail"
     finally:
         subprocess.run(
             ["git", "checkout", head_branch], cwd=work, capture_output=True, text=True
@@ -1718,7 +1754,7 @@ def run_test_at(work: str, sha: str, command: str, head_branch: str) -> str:
 
 def collect_commit_facts(
     work: str, shas: list[str], in_range: set[str], test_command: str,
-    head_branch: str,
+    head_branch: str, test_timeout: int = DEFAULT_TEST_TIMEOUT,
 ) -> list[dict[str, Any]]:
     """申告されたコミットについて、git と実際のテスト実行から事実を集める。
 
@@ -1737,7 +1773,9 @@ def collect_commit_facts(
             "trailers": commit_trailers(work, full),
             "diff_lines": commit_diff_lines(work, full),
             "touches_tests": commit_touches_tests(work, full),
-            "test_status": run_test_at(work, full, test_command, head_branch),
+            "test_status": run_test_at(
+                work, full, test_command, head_branch, test_timeout
+            ),
         })
     return facts
 
@@ -1876,6 +1914,33 @@ def _push_head(state: dict[str, Any]) -> None:
     )
 
 
+def _push_with_retry_marker(
+    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any]
+) -> None:
+    """保留の印を立ててから push し、成功したら印を消す。
+
+    印を残さずに push すると、失敗したときに**取り消しがローカルだけに留まる**。
+    処理済みガードで次回は素通りするため、Pull Request へ永久に反映されない。
+    """
+    entry["pending_push"] = True
+    statefile.save(path, state)
+    _push_head(state)
+    entry["pending_push"] = False
+    statefile.save(path, state)
+
+
+def _flush_pending_push(
+    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any]
+) -> None:
+    """前回やり残した push を、処理済みの判定より**先に**片づける。"""
+    if not entry.get("pending_push"):
+        return
+    info("↻ 前回 push できなかった取り消しを反映します")
+    _push_head(state)
+    entry["pending_push"] = False
+    statefile.save(path, state)
+
+
 def _current_round(state: dict[str, Any]) -> dict[str, Any]:
     if not state["rounds"]:
         die("提案ラウンドが開かれていません。先に start-round を実行してください")
@@ -1974,6 +2039,9 @@ def main() -> None:
                       choices=[s for s in SEVERITY_ORDER if s != "unknown"])
     init.add_argument("--model", action="append", metavar="RUNTIME=MODEL",
                       help="ランタイムごとのモデル指定。繰り返し指定できる")
+    init.add_argument("--test-timeout", type=int, default=DEFAULT_TEST_TIMEOUT,
+                      help="テスト 1 回あたりの上限秒数。超えたら失敗として扱う "
+                           f"(default: {DEFAULT_TEST_TIMEOUT})")
     init.add_argument("--baseline-test", required=True,
                       help="着手前と各コミットで実行するテストコマンド。"
                            "振る舞い不変を示す手段が無い書き換えは構造改善ではないため必須")

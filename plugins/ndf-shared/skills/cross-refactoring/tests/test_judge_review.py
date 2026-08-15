@@ -344,3 +344,34 @@ def test_judge_command_replays_the_approval(refactor, tmp_path, env_tmp_dir):
     state = read_state(state_path)
     assert len(state["rounds"][0]["reviews"]) == 1
     assert all(i["status"] == "done" for i in state["items"])
+
+
+def test_same_review_after_a_fix_is_a_new_generation(
+    refactor, tmp_path, env_tmp_dir, no_git
+):
+    """1 回修正したあとに同じ指摘文が返ってきたら、別の世代として扱うこと。
+
+    内容だけを鍵にすると「叩き直し」と区別できず、起点も試行番号も更新されない
+    まま止まってしまう。
+    """
+    state_path = _state(tmp_path)
+    env_tmp_dir(state_path)
+    write_result(state_path, "gemini-review-r1", review("REQUEST_CHANGES", [finding()]))
+    write_result(state_path, "kiro-review-r1", review())
+    args = type("A", (), {"id": 130, "round": 1})()
+
+    with pytest.raises(SystemExit):
+        refactor.cmd_judge_review(args)
+    assert read_state(state_path)["rounds"][0]["fix_attempts"] == 1
+
+    # 修正を 1 回取り込んだ（世代が進んだ）状態にする
+    state = read_state(state_path)
+    state["rounds"][0]["fix_rounds"] = 1
+    state_path.write_text(__import__("json").dumps(state), encoding="utf-8")
+
+    with pytest.raises(SystemExit):
+        refactor.cmd_judge_review(args)
+
+    entry = read_state(state_path)["rounds"][0]
+    assert entry["fix_attempts"] == 2, "同じ指摘文でも別の世代として扱う"
+    assert len(entry["reviews"]) == 2

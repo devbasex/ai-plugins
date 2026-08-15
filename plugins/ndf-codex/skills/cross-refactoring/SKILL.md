@@ -56,6 +56,7 @@ allowed-tools:
 | `--max-fix-rounds N` | 1 ラウンドあたりの修正の上限 | `3` |
 | `--max-items-per-round N` | 1 ラウンドの採用上限 | `5` |
 | `--severity-threshold LEVEL` | この重要度未満は採用しない | `minor` |
+| `--test-timeout SEC` | テスト 1 回あたりの上限秒数。超えたら失敗として扱う | `900` |
 
 ```text
 /ndf:cross-refactoring 130 --scope src/services --baseline-test "pytest -q"

@@ -242,7 +242,7 @@ def _prepare_fix(refactor, tmp_path, env_tmp_dir, monkeypatch, claimed,
     # 検証の材料は git から取る。テストでは git 由来の事実だけを差し替える。
     monkeypatch.setattr(
         refactor, "collect_commit_facts",
-        lambda work, shas, rng, cmd, branch: resolved_facts,
+        lambda work, shas, rng, cmd, branch, timeout=None: resolved_facts,
     )
     write_result(state_path, "codex-fix-r1", {
         "resolved_thread_ids": claimed,
@@ -405,7 +405,7 @@ def test_broken_fix_result_does_not_crash(
     monkeypatch.setattr(refactor, "_git_out", lambda work, args: "HEAD")
     monkeypatch.setattr(
         refactor, "collect_commit_facts",
-        lambda work, shas, rng, cmd, branch: [],
+        lambda work, shas, rng, cmd, branch, timeout=None: [],
     )
     refactor.cmd_merge_fix(type("A", (), {"id": 130, "round": 1})())
     state = read_state(state_path)
@@ -724,3 +724,46 @@ def test_merge_fix_saves_before_pushing(refactor, tmp_path, env_tmp_dir, monkeyp
     refactor.cmd_merge_fix(type("A", (), {"id": 130, "round": 1})())
 
     assert saved_at_push == [True], "push の前に起点の更新が保存されていない"
+
+
+def test_pending_push_is_retried_on_the_next_run(
+    refactor, tmp_path, env_tmp_dir, monkeypatch
+):
+    """push に失敗したら、次の実行で必ず再試行すること。
+
+    印を残さないと、取り消しがローカルだけに留まったまま処理済みガードで
+    素通りし、Pull Request へ永久に反映されない。
+    """
+    state_path = _prepare_fix(
+        refactor, tmp_path, env_tmp_dir, monkeypatch, ["PRRT_a"],
+        facts=[_fix_commit(test_status="fail")],
+    )
+    monkeypatch.setattr(refactor, "resolved_threads_on_github",
+                        lambda repo, pr: {"PRRT_a"})
+    monkeypatch.setattr(
+        refactor.subprocess, "run",
+        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "", ""),
+    )
+
+    pushes: list[list[str]] = []
+
+    def failing_sh(cmd, **kw):
+        pushes.append(list(cmd))
+        if cmd[:2] == ["git", "push"]:
+            raise SystemExit(1)
+        return ""
+
+    monkeypatch.setattr(refactor, "_sh", failing_sh)
+    args = type("A", (), {"id": 130, "round": 1})()
+    with pytest.raises(SystemExit):
+        refactor.cmd_merge_fix(args)
+
+    assert read_state(state_path)["rounds"][0]["pending_push"] is True
+
+    # 次の実行では、処理済みの判定より先に push を片づける
+    pushes.clear()
+    monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: pushes.append(list(cmd)) or "")
+    refactor.cmd_merge_fix(args)
+
+    assert [c for c in pushes if c[:2] == ["git", "push"]], "再試行していない"
+    assert read_state(state_path)["rounds"][0]["pending_push"] is False
