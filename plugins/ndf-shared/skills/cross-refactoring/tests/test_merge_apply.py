@@ -693,3 +693,16 @@ def test_broken_apply_result_does_not_crash(
         )
     assert e.value.code == 2
     assert read_state(state_path)["items"][0]["status"] == "abandoned"
+
+
+def test_non_object_result_file_fails(refactor, tmp_path, env_tmp_dir, no_git):
+    """結果が JSON オブジェクトでなければ、読み込みの時点で弾く。"""
+    items = [item(item_id="R1-001")]
+    state_path = _state_with_items(tmp_path, items)
+    env_tmp_dir(state_path)
+    write_result(state_path, "codex-apply-r1", ["配列で返ってきた"])
+    with pytest.raises(SystemExit) as e:
+        refactor.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+        )
+    assert e.value.code == 2

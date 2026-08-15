@@ -206,7 +206,13 @@ def _prepare_fix(refactor, tmp_path, env_tmp_dir, monkeypatch, claimed,
     state_path.write_text(__import__("json").dumps(state), encoding="utf-8")
     env_tmp_dir(state_path)
     resolved_facts = [_fix_commit()] if facts is None else facts
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args: "HEAD_NOW")
+    # `rev-parse --verify <sha>^{commit}` は SHA をそのまま返す形にしておく。
+    # 未申告コミットの判定がこの解決を通るため。
+    monkeypatch.setattr(
+        refactor, "_git_out",
+        lambda work, args: (args[-1].replace("^{commit}", "")
+                            if args[:2] == ["rev-parse", "--verify"] else "HEAD_NOW"),
+    )
     monkeypatch.setattr(
         refactor, "commits_in_range",
         lambda work, base, head: [f["sha"] for f in resolved_facts],
@@ -381,7 +387,11 @@ def test_merge_fix_uses_the_recorded_range(refactor, tmp_path, env_tmp_dir, monk
         refactor, "commits_in_range",
         lambda work, base, head: seen.append((base, head)) or ["fix111"],
     )
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args: "HEAD_NOW")
+    monkeypatch.setattr(
+        refactor, "_git_out",
+        lambda work, args: (args[-1].replace("^{commit}", "")
+                            if args[:2] == ["rev-parse", "--verify"] else "HEAD_NOW"),
+    )
     monkeypatch.setattr(refactor, "resolved_threads_on_github",
                         lambda repo, pr: {"PRRT_a"})
     refactor.cmd_merge_fix(type("A", (), {"id": 130, "round": 1})())
@@ -401,3 +411,54 @@ def test_merge_fix_fails_when_the_range_cannot_be_determined(
     with pytest.raises(SystemExit) as e:
         refactor.cmd_merge_fix(type("A", (), {"id": 130, "round": 1})())
     assert e.value.code == 2
+
+
+def test_merge_fix_rejects_unreported_commits(
+    refactor, tmp_path, env_tmp_dir, monkeypatch
+):
+    """申告から漏れた修正コミットは検証を受けずに残る。範囲ごと取り消す。"""
+    state_path = _prepare_fix(refactor, tmp_path, env_tmp_dir, monkeypatch, ["PRRT_a"])
+    # 範囲には 2 件あるが、申告は 1 件だけ
+    monkeypatch.setattr(
+        refactor, "commits_in_range", lambda work, base, head: ["sneaky", "fix111"])
+    monkeypatch.setattr(
+        refactor, "_git_out",
+        lambda work, args: args[-1].replace("^{commit}", "") if args[0] == "rev-parse"
+        else "HEAD_NOW",
+    )
+    monkeypatch.setattr(refactor, "resolved_threads_on_github",
+                        lambda repo, pr: {"PRRT_a"})
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        refactor.subprocess, "run",
+        lambda cmd, **kw: calls.append(list(cmd))
+        or subprocess.CompletedProcess(cmd, 0, "", ""),
+    )
+    monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: "")
+
+    refactor.cmd_merge_fix(type("A", (), {"id": 130, "round": 1})())
+
+    reverts = [c[-1] for c in calls if c[:2] == ["git", "revert"]]
+    assert reverts == ["sneaky", "fix111"]
+    state = read_state(state_path)
+    assert state["rounds"][0]["reviews"][0]["findings"][0]["resolved"] is False
+
+
+def test_unattributable_invalid_commit_blocks_all_resolutions(
+    refactor, tmp_path, env_tmp_dir, monkeypatch
+):
+    """項目を特定できない不正コミットがあれば、解決の申告を一切採らない。
+
+    `invalid_items` に `None` を入れても指摘の `item_id` とは一致しないため、
+    そのままではスレッドが解決済みへ進んでしまう。
+    """
+    broken = _fix_commit(sha="fix111", trailers={})   # Item-Id を取れない
+    state_path = _prepare_fix(
+        refactor, tmp_path, env_tmp_dir, monkeypatch, ["PRRT_a"], facts=[broken]
+    )
+    monkeypatch.setattr(refactor, "resolved_threads_on_github",
+                        lambda repo, pr: {"PRRT_a"})
+    refactor.cmd_merge_fix(type("A", (), {"id": 130, "round": 1})())
+
+    state = read_state(state_path)
+    assert state["rounds"][0]["reviews"][0]["findings"][0]["resolved"] is False

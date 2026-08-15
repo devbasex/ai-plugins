@@ -763,6 +763,16 @@ def cmd_merge_proposals(args: argparse.Namespace) -> None:
         except json.JSONDecodeError as e:
             info(f"⚠ {runtime} の提案結果が JSON として読めません: {e}")
             continue
+        if not isinstance(payload, dict):
+            # 配列や数値のまま `payload.get(...)` を呼ぶと落ちる。
+            # 提案は無かったものとして続ける（1 者の不調で全体を止めない）。
+            info(
+                f"⚠ {runtime} の提案結果が JSON オブジェクトではありません"
+                f"（{type(payload).__name__}）。提案なしとして扱います"
+            )
+            proposals[runtime] = []
+            entry["proposed"][runtime] = 0
+            continue
         items = payload.get("items")
         proposals[runtime] = [i for i in items if isinstance(i, dict)] \
             if isinstance(items, list) else []
@@ -1206,24 +1216,59 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
             "検証できない修正は採りません",
             code=2,
         )
+    reported_shas = _reported_shas(payload)
+
+    # 適用と同じく、**範囲のコミットは全て申告されていること**を求める。
+    # 申告から漏れた修正コミットは検証を受けないまま Pull Request に残る。
+    reported_full = {
+        full for full in (
+            _git_out(work, ["rev-parse", "--verify", f"{s}^{{commit}}"])
+            for s in reported_shas
+        ) if full
+    }
+    unassigned = sorted(set(ordered_range) - reported_full)
+
     facts = collect_commit_facts(
-        work,
-        _reported_shas(payload),
-        set(ordered_range),
-        baseline.get("command") or "true",
-        state["head_branch"],
+        work, reported_shas, set(ordered_range),
+        baseline.get("command") or "true", state["head_branch"],
     )
     invalid_items: set[str] = set()
+    # 項目を特定できない不正コミット。**1 件でもあれば解決の申告を一切採らない。**
+    # `invalid_items` に `None` を入れても、指摘側の `item_id` とは一致しないため
+    # 素通りしてしまう（不正な修正があるのにスレッドが解決済みへ進む）。
+    unattributable = False
     for commit in facts:
         item_id = (commit.get("trailers") or {}).get("Item-Id")
         problem = verify_fix_commit(commit)
         if problem:
             info(f"❌ 修正コミットが手順を満たしていません: {problem}")
-            invalid_items.add(item_id)
+            if item_id in {i["item_id"] for i in state["items"]}:
+                invalid_items.add(item_id)
+            else:
+                unattributable = True
             continue
         item = _find_item(state, item_id, required=False)
         if item is not None:
             item.setdefault("commits", []).append(commit["sha"])
+
+    if unassigned:
+        info(
+            f"❌ どの申告にも含まれていない修正コミットが {len(unassigned)} 件あります"
+            f"（{', '.join(s[:7] for s in unassigned[:5])}）。"
+            "検証を受けていない変更を残さないため、この修正ラウンドの範囲を取り消します"
+        )
+        _revert_item_commits(
+            state,
+            {"item_id": f"R{entry['round']}-fix{entry['fix_rounds'] + 1}",
+             "commits": list(reversed(ordered_range))},
+            dry_run=False,
+        )
+        _push_head(state)
+
+    if unassigned or unattributable:
+        # どの項目の話か決められない不正がある。解決の申告は一切採らない。
+        info("⚠ 検証を通らない修正があるため、解決の申告は採用しません")
+        resolved = set()
 
     for review in entry["reviews"]:
         for finding in review["findings"]:
@@ -1654,13 +1699,25 @@ def _find_item(
 
 
 def _read_result(path: pathlib.Path, runtime: str) -> dict[str, Any]:
+    """結果ファイルを読む。**JSON オブジェクトでなければ失敗させる。**
+
+    配列や数値が返ってきたまま呼び出し側へ渡すと、`payload.get(...)` で
+    `AttributeError` になって進行が止まる。読み込みの時点で弾く。
+    """
     if not path.exists():
         die(f"{runtime} の結果ファイルがありません: {path}", code=2)
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as e:
         die(f"{runtime} の結果ファイルが JSON として読めません: {e}", code=2)
-    raise SystemExit(2)
+        raise SystemExit(2)
+    if not isinstance(payload, dict):
+        die(
+            f"{runtime} の結果ファイルが JSON オブジェクトではありません"
+            f"（{type(payload).__name__}）: {path}",
+            code=2,
+        )
+    return payload
 
 
 def _record_observed_model(

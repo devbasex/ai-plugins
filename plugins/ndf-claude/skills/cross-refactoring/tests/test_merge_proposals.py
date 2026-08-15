@@ -220,3 +220,26 @@ def test_merge_proposals_command_exits_2_when_nothing_adopted(
     # 呼び出し側は終了コード 2 で繰り返しを抜けるため advance を通らない。
     # ここで終了理由を確定させないと報告が「未終了」のままになる。
     assert state["final"] == "no_more_proposals"
+
+
+def test_non_object_proposal_result_is_treated_as_empty(
+    refactor, tmp_path, env_tmp_dir, no_git
+):
+    """結果が配列でもクラッシュせず、その 1 者の提案なしとして続けること。"""
+    state_path = make_state(tmp_path, rounds=[{
+        "round": 1, "impl": "codex", "reviewers": ["gemini", "kiro"],
+        "impl_model": {"requested": None, "observed": None},
+        "reviewer_models": {}, "proposed": {}, "items": [],
+        "apply": {"applied": [], "failed": []}, "fix_rounds": 0,
+        "durations": {}, "reviews": [],
+    }])
+    env_tmp_dir(state_path)
+    write_result(state_path, "codex-propose-rf130", ["配列で返ってきた"])
+    write_result(state_path, "gemini-propose-rf130", {"items": [proposal()]})
+    write_result(state_path, "kiro-propose-rf130", {"items": [proposal()]})
+
+    refactor.cmd_merge_proposals(type("A", (), {"id": 130})())
+
+    state = read_state(state_path)
+    assert state["rounds"][0]["proposed"]["codex"] == 0
+    assert len(state["items"]) == 1
