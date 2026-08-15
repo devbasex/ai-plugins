@@ -26,7 +26,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 import pathlib
+import subprocess
 import re
 import sys
 
@@ -58,17 +60,27 @@ SKILL_MD_MAX_LINES = 500      # 仕様の推奨 / コンパクション対策
 # なる。文字数として 1% = 10,000 を当てると超過するはずだが切り詰めは起きていないため、
 # 比率はコンテキスト長（トークン）に対して効いていると判断する。
 #
-# そこで **トークンで予算を持ち、文字数へ換算して判定する**。換算比は同じ実測から得た
-# NDF 分の 4,393 文字 / 1,360 トークン = 3.2 文字/トークン。日本語が増えるほど比が下がる
-# （日本語は 1 文字がほぼ 1 トークン）ため、安全側の 2.5 を採る。
-CHARS_PER_TOKEN = 2.5
+# そこで **トークンで予算を持ち、文字数へ換算して判定する**。
+#
+# 換算比は **Claude Code の実測を基準にする**。Skill 単位のトークン数を出せるのは
+# Claude Code だけで（Codex の /skills は一覧のみ、Kiro の /context show は 4 区分のみ）、
+# 実測できる唯一のランタイムに合わせるのが最も確からしい。
+#
+#   $ python3 scripts/check-skill-frontmatter.py --calibrate
+#
+# で `claude -p "/context"` を実行し、Skill ごとの実測トークンと本スクリプトの文字数計測を
+# 突き合わせて比を求め、CALIBRATION_FILE へ保存する。以後の検査はその値を使う。
+# 較正していない環境では安全側の既定を使う（日本語が増えるほど比は下がり、日本語だけなら
+# ほぼ 1 文字 = 1 トークンになるため、小さめに倒しておく）。
+DEFAULT_CHARS_PER_TOKEN = 2.5
+CALIBRATION_FILE = pathlib.Path(__file__).resolve().with_name("skill-listing-calibration.json")
 #
 # Claude Code（公式ドキュメント "Extend Claude with skills"）:
 #   "The budget scales at 1% of the model's context window."
 #   引き上げは skillListingBudgetFraction 設定 / SLASH_COMMAND_TOOL_CHAR_BUDGET 環境変数。
 #   Opus 5 の 1,000,000 トークンで 1% = 10,000 トークン。
 CLAUDE_CONTEXT_TOKENS = 1_000_000
-CLAUDE_LISTING_MAX = int(CLAUDE_CONTEXT_TOKENS * 0.01 * CHARS_PER_TOKEN)   # 25,000 文字
+CLAUDE_LISTING_FRACTION = 0.01
 #   1 項目は description + when_to_use を合わせて 1,536 文字で切り詰める。
 #   "each entry's combined text is capped at 1,536 characters regardless of budget"
 CLAUDE_ITEM_TRUNCATE = 1_536
@@ -81,13 +93,13 @@ CLAUDE_ITEM_TRUNCATE = 1_536
 #   比率は 2 倍でもコンテキストが 1/3.7 のため、**予算は Claude Code の約半分**にしかならず、
 #   実質ここが全体の制約になる。
 CODEX_CONTEXT_TOKENS = 272_000
-CODEX_LISTING_MAX = int(CODEX_CONTEXT_TOKENS * 0.02 * CHARS_PER_TOKEN)     # 13,600 文字
+CODEX_LISTING_FRACTION = 0.02
 CODEX_LISTING_LEVEL = "error"
 #
 # Kiro: 公式ドキュメント（kiro.dev/docs/skills）に一覧予算の規定が無い。
 #   既定モデル auto のコンテキストは 1,000,000（--list-models で実測）だが、
 #   比率の規定が無い以上、憶測で基準を置かない。計測だけ行い判定はしない。
-KIRO_LISTING_MAX = None
+KIRO_LISTING_FRACTION = None
 
 # 一覧に何が載るかはランタイムごとに違う。**パスを含むのは Codex だけ**である。
 #   Claude Code: "loads a listing of skill names and descriptions into context"
@@ -409,6 +421,33 @@ def check_skill(s: dict) -> list[Finding]:
     return out
 
 
+def load_calibration() -> tuple[float, str]:
+    """文字数からトークンへの換算比を返す。較正済みならその値、無ければ既定。"""
+    if CALIBRATION_FILE.is_file():
+        try:
+            d = json.loads(CALIBRATION_FILE.read_text(encoding="utf-8"))
+            cpt = float(d["chars_per_token"])
+            src = (f"{CALIBRATION_FILE.name}"
+                   f"（{d.get('measured_at', '?')} に {d.get('runtime', '?')} で実測）")
+            return cpt, src
+        except (ValueError, KeyError, OSError):
+            pass
+    return DEFAULT_CHARS_PER_TOKEN, "既定値（未較正。--calibrate で実測できる）"
+
+
+def listing_limits() -> dict[str, int | None]:
+    """初期一覧の予算を文字数で返す。予算はトークンで効くため換算比を掛ける。"""
+    cpt, _ = load_calibration()
+    out: dict[str, int | None] = {}
+    for runtime, tokens, frac in (
+        ("claude", CLAUDE_CONTEXT_TOKENS, CLAUDE_LISTING_FRACTION),
+        ("codex", CODEX_CONTEXT_TOKENS, CODEX_LISTING_FRACTION),
+        ("kiro", None, KIRO_LISTING_FRACTION),
+    ):
+        out[runtime] = None if frac is None or tokens is None else int(tokens * frac * cpt)
+    return out
+
+
 def load_manifests(skills_dir: pathlib.Path) -> dict[str, set[str]]:
     """manifests/(runtime)-skills.txt を読み、配布先ごとの Skill 名集合を返す。
 
@@ -477,11 +516,7 @@ def check_budget(metrics: dict) -> list[Finding]:
     引数は measure_aggregate の計測値を plugin family 横断で合計したもの。
     """
     out: list[Finding] = []
-    limits = {
-        "claude": CLAUDE_LISTING_MAX,
-        "codex": CODEX_LISTING_MAX,
-        "kiro": KIRO_LISTING_MAX,
-    }
+    limits = listing_limits()
     levels = {"claude": "error", "codex": CODEX_LISTING_LEVEL, "kiro": "error"}
     for runtime, total in sorted(metrics["listings"].items()):
         limit = limits.get(runtime)
@@ -556,6 +591,91 @@ def check_external_name_collisions(skills: list[dict]) -> list[Finding]:
     return out
 
 
+SKILLS_ROW_RE = re.compile(
+    r"^\|\s*(?:[\w.-]+:)?([\w.-]+)\s*\|[^|]*\|\s*[~<]?\s*([\d.]+)\s*k?\s*\|", re.M)
+
+
+def calibrate(skills_dirs: list[pathlib.Path]) -> int:
+    """Claude Code の /context を実測し、文字数→トークンの換算比を保存する。
+
+    Skill 単位のトークン数を出せるのは Claude Code だけなので、これを基準にする。
+    実測環境に入っている Skill と本リポジトリの Skill は一致しないことがあるため
+    （版が違う / 他プラグインが入っている）、**名前が一致するものだけ**で比を取る。
+    """
+    cmd = ["claude", "-p", "/context", "--output-format", "json"]
+    print(f"[calibrate] 実行: {' '.join(cmd)}", file=sys.stderr)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        print(f"[calibrate] claude の実行に失敗: {e}", file=sys.stderr)
+        return 1
+    if proc.returncode != 0:
+        print(f"[calibrate] claude が異常終了（exit {proc.returncode}）\n{proc.stderr[-500:]}",
+              file=sys.stderr)
+        return 1
+    try:
+        result = json.loads(proc.stdout).get("result", "")
+    except ValueError:
+        print("[calibrate] 出力を JSON として読めない", file=sys.stderr)
+        return 1
+
+    head = result.find("### Skills")
+    if head < 0:
+        print("[calibrate] 出力に Skills の内訳がない。/context の書式が変わった可能性がある",
+              file=sys.stderr)
+        return 1
+    measured: dict[str, float] = {}
+    for name, tok in SKILLS_ROW_RE.findall(result[head:]):
+        value = float(tok)
+        # 表は "5.1k" のような丸めを使う。k 付きは 1000 倍する。
+        if re.search(rf"\|\s*[~<]?\s*{re.escape(tok)}\s*k\s*\|", result[head:]):
+            value *= 1000
+        measured[name] = value
+
+    # 本リポジトリ側の文字数（Claude Code の一覧に載る分）
+    chars: dict[str, int] = {}
+    for skills_dir in skills_dirs:
+        manifests = load_manifests(skills_dir)
+        members = manifests.get("claude", set())
+        for sk in load_skills(skills_dir):
+            if sk["dir"] not in members:
+                continue
+            fm = sk["fm"] or {}
+            name = unquote(fm.get("name", sk["dir"]))
+            body = (unquote(fm.get("description", "")) +
+                    unquote(fm.get("when_to_use", "")))[:CLAUDE_ITEM_TRUNCATE]
+            chars[sk["dir"]] = len(name) + len(body)
+
+    common = sorted(set(chars) & set(measured))
+    if not common:
+        print("[calibrate] 実測結果と突き合わせられる Skill が無い", file=sys.stderr)
+        return 1
+    total_chars = sum(chars[k] for k in common)
+    total_tokens = sum(measured[k] for k in common)
+    if total_tokens <= 0:
+        print("[calibrate] 実測トークンが 0", file=sys.stderr)
+        return 1
+    cpt = round(total_chars / total_tokens, 2)
+
+    payload = {
+        "measured_at": __import__("datetime").date.today().isoformat(),
+        "runtime": "claude",
+        "command": " ".join(cmd),
+        "matched_skills": len(common),
+        "chars": total_chars,
+        "tokens": total_tokens,
+        "chars_per_token": cpt,
+        "note": "Skill 単位のトークンを出せるのは Claude Code だけのため、これを基準にする。",
+    }
+    CALIBRATION_FILE.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+                                encoding="utf-8")
+    print(f"[calibrate] 突き合わせ {len(common)} 個 / {total_chars} 文字 / {total_tokens:.0f} トークン")
+    print(f"[calibrate] 換算比 {cpt} 文字/トークン を {CALIBRATION_FILE} へ保存した")
+    for runtime, limit in listing_limits().items():
+        print(f"[calibrate]   {runtime} の予算: {limit if limit is not None else '—'} 文字")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -566,6 +686,8 @@ def main() -> int:
                     help="警告も失敗として扱う")
     ap.add_argument("--report", action="store_true",
                     help="判定せず実測値の一覧だけ出力する")
+    ap.add_argument("--calibrate", action="store_true",
+                    help="Claude Code の /context を実測し、文字数→トークンの換算比を保存する")
     args = ap.parse_args()
 
     if args.skills_dir:
@@ -584,6 +706,9 @@ def main() -> int:
     if not skills_dirs:
         print("[check-skill-frontmatter] 検査対象が見つからない", file=sys.stderr)
         return 2
+
+    if args.calibrate:
+        return calibrate(skills_dirs)
 
     findings: list[Finding] = []
     skills: list[dict] = []
@@ -629,8 +754,7 @@ def main() -> int:
         print(f"\nSkill 数: {len(skills)}")
         # 予算は plugin family をまたいだ合計で判定するが、利用者が片方しか入れない
         # 場合もあるため family 別の内訳も出す。
-        limits = {"claude": CLAUDE_LISTING_MAX, "codex": CODEX_LISTING_MAX,
-                  "kiro": KIRO_LISTING_MAX}
+        limits = listing_limits()
         names = [d.parent.name.replace("-shared", "") for d, _ in per_family]
         print(f"\n{'runtime':8} {'合計':>7} {'上限':>7}  " +
               "  ".join(f"{n:>14}" for n in names))
@@ -649,7 +773,7 @@ def main() -> int:
 
     print(f"\nSkill {len(skills)} 個を検査 — エラー {len(errors)} 件 / 警告 {len(warns)} 件")
     for runtime, total in sorted(metrics["listings"].items()):
-        limit = {"claude": CLAUDE_LISTING_MAX, "codex": CODEX_LISTING_MAX}.get(runtime)
+        limit = listing_limits().get(runtime)
         print(f"{runtime} の初期一覧の合計: {total}" + (f" / {limit} 文字" if limit else " 文字"))
     print(f"frontmatter 合計: {metrics['frontmatter_total']} / {FRONTMATTER_TOTAL_MAX} 文字")
 
