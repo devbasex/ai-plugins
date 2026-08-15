@@ -33,7 +33,7 @@
 - [x] **Task 3 のうち Claude CLI 部分**（実測で起動形式・完了検知・root 制約を確定）
 - [x] **Task 3 のうち Kiro 部分の実機検証**（kiro-cli 2.18.0 / 2026-08-15。チェックリスト 6 項目すべて）
 - [x] git worktree の同一ブランチ制約の実測
-- [x] frontmatter 予算の実測（残余 588 文字）
+- [x] 初期一覧の予算の実測（Codex が最も厳しく、2.8 倍の余裕がある）
 
 ### 未着手
 
@@ -194,10 +194,10 @@ state（Task 1）と worktree（Task 2）が無いと他が動かない。以降
   他は `--detach` にする
 - **`claude --permission-mode bypassPermissions` は root で必ず失敗する。** ローカルの
   非 root 環境でだけ動作確認すると、CI / コンテナで初めて詰まる
-- **frontmatter 予算の残余は 588 文字しかない**（上限 11200 / 現在 10612）。
-  cross-review の frontmatter は 407 文字。新 Skill + `external-ai` の description 拡張で
-  ほぼ使い切るため、`argument-hint` を短く保つ。超えたら `FRONTMATTER_TOTAL_MAX` の
-  見直しか既存 `description` の圧縮を同 PR で行う
+- **初期一覧の予算は Codex が最も厳しい**（予算 15,123 文字 / 現在 5,443 文字）。
+  ただし 2.8 倍の余裕があり、新 Skill 1 個の追加は影響しない。**予算を理由に
+  `description` を削らない。** かつて主たる制約としていた「frontmatter 合計 11,200 文字」は
+  ランタイムが課すものではなくリポジトリ独自の目安である
 - **`monitor.py` の変更で cross-review を壊さない。** 追加オプションはすべて既定値で
   現行挙動を維持し、既存テストは 1 行も変更しない
 - **参加ランタイムに NDF が入っている前提を置かない。** 対象リポジトリは任意なので、

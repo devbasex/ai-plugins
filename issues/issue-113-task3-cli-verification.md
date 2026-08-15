@@ -360,24 +360,29 @@ launcher は **`--trust-tools` / `--trust-all-tools` フラグで明示的に承
 | Task 9 | claude は `permission_denials` 非空を早期エラーに追加。**kiro は `is rejected because it matches one or more rules on the denied list` を早期エラーに追加し、判定前に ANSI エスケープを除去する**。kiro の終了コード 0 は成功とみなさない（stall timeout は別要因への保険として残す） |
 | リスク表 | 「root で `bypassPermissions` が使えない」を追加。claude 参加時のコスト（単純タスクで $0.26）を運用上の注意として追加。**kiro はシェルを許可すると他ツールの制限を迂回するため、防御は worktree 隔離のみに依存すること**を追加 |
 
-## 6. frontmatter 予算の確認（実測）
+## 6. 初期一覧の予算の確認（実測）
 
-新 Skill 追加が `scripts/check-skill-frontmatter.py` の上限に収まるかを確認した。
+新 Skill の追加が各ランタイムの初期一覧の予算に収まるかを確認した。
 
 ```console
-$ python3 scripts/check-skill-frontmatter.py --report | tail -2
-frontmatter 合計: 10612 文字 (上限 11200)
+$ python3 scripts/check-skill-frontmatter.py --report | tail -5
+runtime       合計      上限             ndf  playwright-kit
+claude      5070   27799            4393             677
+codex       5443   15123            4626             817
+kiro        5625       —            4808             817
 ```
 
-- 残余は **588 文字**。
-- 比較対象として `cross-review` の frontmatter は **407 文字**（`name` + `description` +
-  `argument-hint` + `allowed-tools`）。
-- cross-refactoring を同規模で書くと残り約 180 文字となり、`external-ai` の `description` を
-  4 CLI 対応へ広げる分（数十文字）を足すとほぼ使い切る。
+- **制約になるのは Codex** で、予算 15,123 文字に対し現在 5,443 文字（**2.8 倍の余裕**）。
+- 比較対象として `cross-review` の frontmatter は 407 文字、うち一覧へ載るのは
+  `name` + `description` + パスの 184 文字。同規模で書いても影響は誤差である。
 
-**方針**: `argument-hint` を短く保ち、`allowed-tools` は必要最小限に絞る。
-それでも超える場合は Task 12 で `FRONTMATTER_TOTAL_MAX` の引き上げか、既存 `description` の
-圧縮を同 PR で行う（計画 Task 10 に記載済みの分岐）。
+**方針**: 予算を理由に `description` を削る必要はない。発動精度のために
+「1 文目にトリガ語を置く」「300 文字以内」の運用目標を守ることを優先する。
+
+> かつては `FRONTMATTER_TOTAL_MAX`（全 Skill の frontmatter 合計 11,200 文字）を
+> 主たる制約として扱っていたが、これはランタイムが課すものではなくリポジトリ独自の目安で
+> ある。実際の制約は初期一覧の予算であり、そちらはトークンで効く。詳細は
+> [`plugins/ndf-shared/skills/README.md`](../plugins/ndf-shared/skills/README.md)「上限値」。
 
 ## 7. モデル指定フラグ（4 CLI 実測）
 

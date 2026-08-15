@@ -212,10 +212,11 @@ plugins/ndf-shared/skills/cross-refactoring/
 - **内容:** `cross-review` と同じ構成（設計方針表 / 引数表 / 全体フロー / ステップの骨組み /
   アンチパターン / 完了報告）で執筆する。frontmatter は
   `plugins/ndf-shared/skills/README.md` の規約に従い、`description` の 1 文目にトリガ語を置く。
-  `python3 scripts/check-skill-frontmatter.py` を通す。予算に収まらない場合は、予算値の
-  見直しか既存 `description` の圧縮を同じ Pull Request で行う。
-- 引数表に `--model <ランタイム>=<モデル>`（繰り返し可）を載せる。`argument-hint` は予算が
-  厳しいので `<pr> [--scope <path>...] [--model <rt>=<name>]` 程度に短く保つ。
+  `python3 scripts/check-skill-frontmatter.py` を通す。初期一覧の予算には 2.8 倍の余裕が
+  あるため、本 Skill 1 個の追加で問題になることはない。
+- 引数表に `--model <ランタイム>=<モデル>`（繰り返し可）を載せる。`argument-hint` は
+  `<pr> [--scope <path>...] [--model <rt>=<name>]` 程度に保つ（予算のためではなく、
+  利用者が一目で読める長さに収めるため）。
 - `docs/02-apply-and-review.md` にコミットトレーラーの形式、レビューコメントの署名形式、
   集計の読み方と比較の限界を書く。
 

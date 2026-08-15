@@ -1,92 +1,92 @@
-family,skill,runtime,name_len,desc_len,wtu_len,path_len_counted,listing_chars,frontmatter_chars
-ndf,cherry-pick-pr,claude,14,183,0,0,197,346
-ndf,cherry-pick-pr,codex,14,183,0,30,227,346
-ndf,cherry-pick-pr,kiro,14,183,0,30,227,346
-ndf,cross-review,claude,12,144,0,0,156,407
-ndf,cross-review,codex,12,144,0,28,184,407
-ndf,cross-review,kiro,12,144,0,28,184,407
-ndf,deploy,claude,6,141,0,0,147,286
-ndf,deploy,codex,6,141,0,22,169,286
-ndf,deploy,kiro,6,141,0,22,169,286
-ndf,development-workflow,claude,20,141,0,0,161,183
-ndf,development-workflow,codex,20,141,0,36,197,183
-ndf,development-workflow,kiro,20,141,0,36,197,183
-ndf,docker-container-access,claude,23,144,0,0,167,231
-ndf,docker-container-access,codex,23,144,0,39,206,231
-ndf,docker-container-access,kiro,23,144,0,39,206,231
-ndf,external-ai,claude,11,163,0,0,174,196
-ndf,external-ai,codex,11,163,0,27,201,196
-ndf,external-ai,kiro,11,163,0,27,201,196
-ndf,fix,claude,3,147,0,0,150,336
-ndf,fix,codex,3,147,0,19,169,336
-ndf,fix,kiro,3,147,0,19,169,336
-ndf,google-auth,(未配布),11,137,0,0,0,228
-ndf,google-drive,(未配布),12,156,0,0,0,248
-ndf,implementation-plan,claude,19,155,0,0,174,196
-ndf,implementation-plan,codex,19,155,0,35,209,196
-ndf,implementation-plan,kiro,19,155,0,35,209,196
-ndf,investigation-rules,claude,19,144,0,0,163,185
-ndf,investigation-rules,codex,19,144,0,35,198,185
-ndf,investigation-rules,kiro,19,144,0,35,198,185
-ndf,issue-plan-strategy,claude,19,156,0,0,175,363
-ndf,issue-plan-strategy,codex,19,156,0,35,210,363
-ndf,issue-plan-strategy,kiro,19,156,0,35,210,363
-ndf,logging-guidelines,claude,18,124,0,0,142,344
-ndf,logging-guidelines,codex,18,124,0,34,176,344
-ndf,logging-guidelines,kiro,18,124,0,34,176,344
-ndf,markdown-writing,claude,16,174,0,0,190,273
-ndf,markdown-writing,codex,16,174,0,32,222,273
-ndf,markdown-writing,kiro,16,174,0,32,222,273
-ndf,merged,claude,6,144,0,0,150,229
-ndf,merged,codex,6,144,0,22,172,229
-ndf,merged,kiro,6,144,0,22,172,229
-ndf,ml-model-structure,(未配布),18,145,0,0,0,262
-ndf,ndf-policies,claude,12,146,0,0,158,202
-ndf,ndf-policies,codex,12,146,0,28,186,202
-ndf,ndf-policies,kiro,12,146,0,28,186,202
-ndf,official-skills-autoloader,claude,26,162,119,0,307,378
-ndf,plan-to-spec,claude,12,141,0,0,153,245
-ndf,plan-to-spec,codex,12,141,0,28,181,245
-ndf,plan-to-spec,kiro,12,141,0,28,181,245
-ndf,pr,claude,2,203,0,0,205,339
-ndf,pr,codex,2,203,0,18,223,339
-ndf,pr,kiro,2,203,0,18,223,339
-ndf,pr-review,claude,9,149,0,0,158,319
-ndf,pr-review,codex,9,149,0,25,183,319
-ndf,pr-review,kiro,9,149,0,25,183,319
-ndf,pr-tests,claude,8,155,0,0,163,260
-ndf,pr-tests,codex,8,155,0,24,187,260
-ndf,pr-tests,kiro,8,155,0,24,187,260
-ndf,problem-solving,claude,15,129,0,0,144,166
-ndf,problem-solving,codex,15,129,0,31,175,166
-ndf,problem-solving,kiro,15,129,0,31,175,166
-ndf,qa-security-scan,claude,16,154,0,0,170,192
-ndf,qa-security-scan,codex,16,154,0,32,202,192
-ndf,qa-security-scan,kiro,16,154,0,32,202,192
-ndf,quality-gates,claude,13,116,0,0,129,151
-ndf,quality-gates,codex,13,116,0,29,158,151
-ndf,quality-gates,kiro,13,116,0,29,158,151
-ndf,refactoring,claude,11,195,0,0,206,228
-ndf,refactoring,codex,11,195,0,27,233,228
-ndf,refactoring,kiro,11,195,0,27,233,228
-ndf,requirements-design,claude,19,136,0,0,155,177
-ndf,requirements-design,codex,19,136,0,35,190,177
-ndf,requirements-design,kiro,19,136,0,35,190,177
-ndf,skill-stats,(未配布),11,157,0,0,0,223
-ndf,statusline,claude,10,146,0,0,156,273
-ndf,statusline,kiro,10,146,0,26,182,273
-ndf,tdd-cycle,claude,9,134,0,0,143,165
-ndf,tdd-cycle,codex,9,134,0,25,168,165
-ndf,tdd-cycle,kiro,9,134,0,25,168,165
-playwright-kit,playwright-authoring,claude,20,167,0,0,187,2148
-playwright-kit,playwright-authoring,codex,20,167,0,36,223,2148
-playwright-kit,playwright-authoring,kiro,20,167,0,36,223,2148
-playwright-kit,playwright-evidence,claude,19,128,0,0,147,246
-playwright-kit,playwright-evidence,codex,19,128,0,35,182,246
-playwright-kit,playwright-evidence,kiro,19,128,0,35,182,246
-playwright-kit,playwright-kit-ops,claude,18,160,0,0,178,357
-playwright-kit,playwright-kit-ops,codex,18,160,0,34,212,357
-playwright-kit,playwright-kit-ops,kiro,18,160,0,34,212,357
-playwright-kit,playwright-planning,claude,19,146,0,0,165,230
-playwright-kit,playwright-planning,codex,19,146,0,35,200,230
-playwright-kit,playwright-planning,kiro,19,146,0,35,200,230
+family	skill	runtime	name_len	desc_len	wtu_len	path_len_counted	listing_chars	frontmatter_chars
+ndf	cherry-pick-pr	claude	14	183	0	0	197	346
+ndf	cherry-pick-pr	codex	14	183	0	30	227	346
+ndf	cherry-pick-pr	kiro	14	183	0	30	227	346
+ndf	cross-review	claude	12	144	0	0	156	407
+ndf	cross-review	codex	12	144	0	28	184	407
+ndf	cross-review	kiro	12	144	0	28	184	407
+ndf	deploy	claude	6	141	0	0	147	286
+ndf	deploy	codex	6	141	0	22	169	286
+ndf	deploy	kiro	6	141	0	22	169	286
+ndf	development-workflow	claude	20	141	0	0	161	183
+ndf	development-workflow	codex	20	141	0	36	197	183
+ndf	development-workflow	kiro	20	141	0	36	197	183
+ndf	docker-container-access	claude	23	144	0	0	167	231
+ndf	docker-container-access	codex	23	144	0	39	206	231
+ndf	docker-container-access	kiro	23	144	0	39	206	231
+ndf	external-ai	claude	11	163	0	0	174	196
+ndf	external-ai	codex	11	163	0	27	201	196
+ndf	external-ai	kiro	11	163	0	27	201	196
+ndf	fix	claude	3	147	0	0	150	336
+ndf	fix	codex	3	147	0	19	169	336
+ndf	fix	kiro	3	147	0	19	169	336
+ndf	google-auth	(未配布)	11	137	0	0	0	228
+ndf	google-drive	(未配布)	12	156	0	0	0	248
+ndf	implementation-plan	claude	19	155	0	0	174	196
+ndf	implementation-plan	codex	19	155	0	35	209	196
+ndf	implementation-plan	kiro	19	155	0	35	209	196
+ndf	investigation-rules	claude	19	144	0	0	163	185
+ndf	investigation-rules	codex	19	144	0	35	198	185
+ndf	investigation-rules	kiro	19	144	0	35	198	185
+ndf	issue-plan-strategy	claude	19	156	0	0	175	363
+ndf	issue-plan-strategy	codex	19	156	0	35	210	363
+ndf	issue-plan-strategy	kiro	19	156	0	35	210	363
+ndf	logging-guidelines	claude	18	124	0	0	142	344
+ndf	logging-guidelines	codex	18	124	0	34	176	344
+ndf	logging-guidelines	kiro	18	124	0	34	176	344
+ndf	markdown-writing	claude	16	174	0	0	190	273
+ndf	markdown-writing	codex	16	174	0	32	222	273
+ndf	markdown-writing	kiro	16	174	0	32	222	273
+ndf	merged	claude	6	144	0	0	150	229
+ndf	merged	codex	6	144	0	22	172	229
+ndf	merged	kiro	6	144	0	22	172	229
+ndf	ml-model-structure	(未配布)	18	145	0	0	0	262
+ndf	ndf-policies	claude	12	146	0	0	158	202
+ndf	ndf-policies	codex	12	146	0	28	186	202
+ndf	ndf-policies	kiro	12	146	0	28	186	202
+ndf	official-skills-autoloader	claude	26	162	119	0	307	378
+ndf	plan-to-spec	claude	12	141	0	0	153	245
+ndf	plan-to-spec	codex	12	141	0	28	181	245
+ndf	plan-to-spec	kiro	12	141	0	28	181	245
+ndf	pr	claude	2	203	0	0	205	339
+ndf	pr	codex	2	203	0	18	223	339
+ndf	pr	kiro	2	203	0	18	223	339
+ndf	pr-review	claude	9	149	0	0	158	319
+ndf	pr-review	codex	9	149	0	25	183	319
+ndf	pr-review	kiro	9	149	0	25	183	319
+ndf	pr-tests	claude	8	155	0	0	163	260
+ndf	pr-tests	codex	8	155	0	24	187	260
+ndf	pr-tests	kiro	8	155	0	24	187	260
+ndf	problem-solving	claude	15	129	0	0	144	166
+ndf	problem-solving	codex	15	129	0	31	175	166
+ndf	problem-solving	kiro	15	129	0	31	175	166
+ndf	qa-security-scan	claude	16	154	0	0	170	192
+ndf	qa-security-scan	codex	16	154	0	32	202	192
+ndf	qa-security-scan	kiro	16	154	0	32	202	192
+ndf	quality-gates	claude	13	116	0	0	129	151
+ndf	quality-gates	codex	13	116	0	29	158	151
+ndf	quality-gates	kiro	13	116	0	29	158	151
+ndf	refactoring	claude	11	195	0	0	206	228
+ndf	refactoring	codex	11	195	0	27	233	228
+ndf	refactoring	kiro	11	195	0	27	233	228
+ndf	requirements-design	claude	19	136	0	0	155	177
+ndf	requirements-design	codex	19	136	0	35	190	177
+ndf	requirements-design	kiro	19	136	0	35	190	177
+ndf	skill-stats	(未配布)	11	157	0	0	0	223
+ndf	statusline	claude	10	146	0	0	156	273
+ndf	statusline	kiro	10	146	0	26	182	273
+ndf	tdd-cycle	claude	9	134	0	0	143	165
+ndf	tdd-cycle	codex	9	134	0	25	168	165
+ndf	tdd-cycle	kiro	9	134	0	25	168	165
+playwright-kit	playwright-authoring	claude	20	167	0	0	187	2148
+playwright-kit	playwright-authoring	codex	20	167	0	36	223	2148
+playwright-kit	playwright-authoring	kiro	20	167	0	36	223	2148
+playwright-kit	playwright-evidence	claude	19	128	0	0	147	246
+playwright-kit	playwright-evidence	codex	19	128	0	35	182	246
+playwright-kit	playwright-evidence	kiro	19	128	0	35	182	246
+playwright-kit	playwright-kit-ops	claude	18	160	0	0	178	357
+playwright-kit	playwright-kit-ops	codex	18	160	0	34	212	357
+playwright-kit	playwright-kit-ops	kiro	18	160	0	34	212	357
+playwright-kit	playwright-planning	claude	19	146	0	0	165	230
+playwright-kit	playwright-planning	codex	19	146	0	35	200	230
+playwright-kit	playwright-planning	kiro	19	146	0	35	200	230
