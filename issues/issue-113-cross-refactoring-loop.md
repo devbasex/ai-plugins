@@ -15,8 +15,8 @@
 Skill `/ndf:cross-refactoring` を追加する。
 
 **claude / codex / gemini / kiro のうち、ホストを除いた 3 CLI** に「どこを・どう直すか」を
-提案させ、提案ごとに **実装ランタイムとレビューランタイムを必ず別にして** 適用とレビューを
-回す。個々の提案がレビュー収束したら次の提案へ進み、全提案を消化したら**提案フェーズから
+提案させ、**1 提案ラウンドで採用した item 群をまとめて適用し、まとめてレビューする**。
+実装ランタイムとレビューランタイムは必ず別にする。レビューが収束したら**提案フェーズから
 やり直す**。新しい提案が出なくなった時点で完了とする。
 
 本 Skill を実行しているホストセッションは **オーケストレータに徹し、提案・実装・レビューの
@@ -32,8 +32,12 @@ Skill `/ndf:cross-refactoring` を追加する。
 gemini は Skill 配布先ランタイムではないため常に参加者側になる。どのホストでも参加者は
 必ず 3 つ揃うので、後述の輪番（実装 1 : レビュー 2）は全ランタイムで同じ形になる。
 
-cross-review が「1 本のループ」なのに対し、cross-refactoring は **三重ループ**
-（提案ラウンド → item → レビュー収束）である点が最大の構造差になる。
+cross-review が「1 本のループ」なのに対し、cross-refactoring は **二重ループ**
+（提案ラウンド → レビュー収束）である点が最大の構造差になる。
+
+> **レビューの単位は提案ラウンド**である。item 1 件ごとにレビュー収束を回す設計も検討したが、
+> CLI 起動回数が item 数に比例して膨らみ、**コストが実運用に耐えない**ため採用しなかった
+> （§1 の見積もりを参照）。
 
 ## 問題・背景
 
@@ -53,44 +57,63 @@ scope creep）はレビュー観点テンプレートに含まれていない。
 
 ## 設計方針
 
-### 1. 三重ループ
+### 1. 二重ループ
 
 ```mermaid
 flowchart TD
     Init([Step 0: PR 作成 + worktree 準備 + state 初期化]):::phase --> Outer
 
-    Outer["外側ループ: 提案ラウンド R"]:::phase --> Propose
+    Outer["外側ループ: 提案ラウンド R<br/>輪番で impl 1 / reviewer 2 を決定"]:::phase --> Propose
     Propose["Step 1: 提案フェーズ（参加 3 CLI 並列）<br/>ホストを除く 3 ランタイムが<br/>推奨箇所と具体手順を JSON で提出"]
     Propose --> Merge["Step 2: 提案マージ<br/>重複排除 / 合意数で優先度付け<br/>severity しきい値で採否<br/>1 ラウンドの上限件数で切り出し"]
     Merge --> Empty{"採用件数 = 0 ?"}
     Empty -->|はい| Final([外側ループ終了]):::ok
-    Empty -->|いいえ| Item
+    Empty -->|いいえ| Apply
 
-    Item["Step 3: 中間ループ: 提案 item を 1 件取り出す<br/>ランタイム輪番で impl / reviewer を決定"]:::phase
-    Item --> Apply["Step 4: 適用（impl CLI）<br/>refactoring Skill の手順で 1 手 1 コミット<br/>テスト green を各手で確認 → push"]
-    Apply --> Review["Step 5: 内側ループ: レビュー（reviewer 2 CLI 並列）<br/>impl とは必ず別ランタイム<br/>リファクタリング専用観点で判定"]
+    Apply["Step 3: 適用（impl CLI 1 回）<br/>採用 item を優先度順に直列適用<br/>item ごとに 1 手 1 コミット<br/>各手でテスト green を確認 → push"]
+    Apply --> Review["Step 4: 内側ループ: レビュー（reviewer 2 CLI 並列）<br/>ラウンド差分をまとめて 1 回<br/>指摘には item_id を必須で付けさせる"]
     Review --> Judge{"両 reviewer APPROVE ?"}
-    Judge -->|いいえ| Fix["Step 6: 指摘修正（impl CLI）<br/>reply + resolve まで実施"]
+    Judge -->|いいえ| Fix["Step 5: 指摘修正（impl CLI）<br/>reply + resolve まで実施"]
     Fix --> FixCap{"fix ラウンド上限 ?"}
     FixCap -->|未達| Review
-    FixCap -->|到達| Abandon["Step 6b: item を revert して放棄<br/>deferred として記録"]:::stop
-    Judge -->|はい| Done["item = done"]
-    Abandon --> Next
-    Done --> Next{"残 item あり ?"}
-    Next -->|あり| Item
-    Next -->|なし| Outer
+    FixCap -->|到達| Abandon["Step 5b: 指摘が残る item だけ revert<br/>deferred として記録<br/>合意済みの item は残す"]:::stop
+    Judge -->|はい| Done["ラウンドの全 item = done"]
+    Abandon --> Outer
+    Done --> Outer
 
-    Final --> Gate["Step 7: 最終ゲート<br/>/ndf:cross-review を PR 全体に実行"]
-    Gate --> Report["Step 8: 報告 + Draft 解除"]
+    Final --> Gate["Step 6: 最終ゲート<br/>/ndf:cross-review を PR 全体に実行"]
+    Gate --> Report["Step 7: 報告 + Draft 解除"]
 
     classDef phase fill:#eef,stroke:#557
     classDef ok fill:#dfd,stroke:#383
     classDef stop fill:#fdd,stroke:#933
 ```
 
-- **外側 = 提案ラウンド**。「指摘がなくなったら完了」の判定単位。
-- **中間 = 提案 item**。1 件ずつ直列に適用する。
+- **外側 = 提案ラウンド**。「指摘がなくなったら完了」の判定単位であり、
+  **impl / reviewer の輪番単位**でもある。
 - **内側 = レビュー収束**。「指摘がなくなるまで繰り返し」の単位。
+  対象は **item 1 件ではなくラウンドの差分全体**。
+
+#### レビュー単位を item からラウンドへ変えた理由（コスト）
+
+item 単位でレビュー収束を回すと、CLI 起動回数が **採用 item 数に比例**する。
+1 ラウンドあたりの起動回数を、採用 5 件・各 item で fix 1 回として比べる。
+
+| 単位 | 内訳 | 起動回数 |
+|---|---|---|
+| item 単位（不採用） | 提案 3 + 5 ×（適用 1 + レビュー 2 + 修正 1 + 再レビュー 2） | **33** |
+| ラウンド単位（採用） | 提案 3 + 適用 1 + レビュー 2 + 修正 1 + 再レビュー 2 | **9** |
+
+3 ラウンド回すと 99 対 27 になる。claude が参加者に入る構成では 1 起動あたり $0.26 の
+実測値があり（§5-2）、item 単位は実運用のコストに耐えない。
+
+**代わりに失うもの**と、その埋め合わせは次のとおり。
+
+| 失うもの | 埋め合わせ |
+|---|---|
+| item ごとに実装者が入れ替わらない（1 ラウンド 1 impl） | 外側ラウンドごとに輪番するため、ラウンドを重ねれば実装者は分散する |
+| 指摘がどの item に対するものか曖昧になる | レビュー結果 JSON で `item_id` を**必須**にし、語彙外・不明は差し戻す |
+| 1 件の失敗がラウンド全体を巻き込む | item ごとに 1 手 1 コミットを維持し、**放棄は item 単位で revert** する（合意済みの item は PR に残す） |
 
 ### 2. ランタイム輪番（ホストを除いた 3 者で回す）
 
@@ -100,7 +123,7 @@ flowchart TD
 
 ```
 RUNTIMES  = ["claude", "codex", "gemini", "kiro"] - [host]      # 常に 3 要素
-impl      = RUNTIMES[(outer_round + item_index) % 3]
+impl      = RUNTIMES[outer_round % 3]                            # ラウンド単位で 1 者
 reviewers = RUNTIMES から impl を除いた 2 つ
 ```
 
@@ -112,9 +135,10 @@ state.json に残す**。
 - 実装 1 : レビュー 2 を常に維持し、**2 者 APPROVE で通過**とする（リファクタリングは必須作業
   ではないため、疑義が残るなら通さない側に倒す）。
 - 指摘の修正は **impl ランタイムが行う**。レビュアーに直させるとレビューの独立性が失われる。
-- item ごとに輪番するので、1 ラウンド内でも実装者が入れ替わり、特定モデルの癖が PR 全体に
-  偏らない。
-- 割り当ては `state.json` の `items[].impl` / `items[].reviewers` に記録し、再開時も不変。
+- **輪番の単位はラウンド**である。1 ラウンドの適用を 1 者に集約することで、レビュアーを
+  「impl 以外の 2 者」として機械的に決められる。item ごとに impl を替えると 1 ラウンド内で
+  実装者が複数になり、impl と reviewer の分離が成立しなくなる。
+- 割り当ては `state.json` の `rounds[].impl` / `rounds[].reviewers` に記録し、再開時も不変。
 
 ### 3. 全参加者が CLI であることの帰結（cross-review の骨組みをそのまま使える）
 
@@ -245,6 +269,7 @@ export CROSS_REFACTORING_TMP_DIR="$TMP_DIR"
 "$SCRIPTS/prepare-worktrees.sh" "$PR"
 
 while :; do                                          # 外側: 提案ラウンド
+  # start-round が ROUND / IMPL / REVIEWERS / REVIEWERS_CSV を eval で返す
   eval "$("$SCRIPTS/refactor.py" start-round "$PR")" || break
   for a in $RUNTIMES; do
     "$SCRIPTS/launch-cli.sh" "$a" propose "$PR" "$ROUND"
@@ -253,32 +278,32 @@ while :; do                                          # 外側: 提案ラウン�
       --tmp-dir "$TMP_DIR" --stem-template '{agent}-propose-rf{id}'
   "$SCRIPTS/refactor.py" merge-proposals "$PR" || break   # exit 2 = 採用 0 件 → 収束
 
-  while eval "$("$SCRIPTS/refactor.py" next-item "$PR")"; do   # 中間: item
-    "$SCRIPTS/launch-cli.sh" "$IMPL" apply "$PR" "$ITEM_ID"
-    "$SCRIPTS/monitor.py" "$PR" --agents "$IMPL" --tmp-dir "$TMP_DIR" \
-        --stem-template "{agent}-apply-$ITEM_ID"
-    "$SCRIPTS/refactor.py" merge-apply "$PR" "$ITEM_ID" || continue  # 失敗 = 自動 abandon
+  # 適用は 1 ラウンド 1 回。impl が採用 item を優先度順に直列適用する
+  "$SCRIPTS/launch-cli.sh" "$IMPL" apply "$PR" "$ROUND"
+  "$SCRIPTS/monitor.py" "$PR" --agents "$IMPL" --tmp-dir "$TMP_DIR" \
+      --stem-template "{agent}-apply-r$ROUND"
+  "$SCRIPTS/refactor.py" merge-apply "$PR" "$ROUND" || continue  # 全件失敗 = 次ラウンドへ
 
-    while :; do                                      # 内側: レビュー収束
-      for r in $REVIEWERS; do
-        "$SCRIPTS/launch-cli.sh" "$r" review "$PR" "$ITEM_ID"
-      done
-      "$SCRIPTS/monitor.py" "$PR" --agents "$REVIEWERS_CSV" --tmp-dir "$TMP_DIR" \
-          --stem-template "{agent}-review-$ITEM_ID"
-      "$SCRIPTS/refactor.py" judge-review "$PR" "$ITEM_ID" && break   # 0 = 両者 APPROVE
-      if "$SCRIPTS/refactor.py" should-abandon "$PR" "$ITEM_ID"; then
-        "$SCRIPTS/refactor.py" abandon-item "$PR" "$ITEM_ID"; break
-      fi
-      "$SCRIPTS/launch-cli.sh" "$IMPL" fix "$PR" "$ITEM_ID"
-      "$SCRIPTS/monitor.py" "$PR" --agents "$IMPL" --tmp-dir "$TMP_DIR" \
-          --stem-template "{agent}-fix-$ITEM_ID"
-      "$SCRIPTS/refactor.py" merge-fix "$PR" "$ITEM_ID"
+  while :; do                                        # 内側: レビュー収束（ラウンド差分に対して）
+    for r in $REVIEWERS; do
+      "$SCRIPTS/launch-cli.sh" "$r" review "$PR" "$ROUND"
     done
+    "$SCRIPTS/monitor.py" "$PR" --agents "$REVIEWERS_CSV" --tmp-dir "$TMP_DIR" \
+        --stem-template "{agent}-review-r$ROUND"
+    "$SCRIPTS/refactor.py" judge-review "$PR" "$ROUND" && break   # 0 = 両者 APPROVE
+    if "$SCRIPTS/refactor.py" should-abandon "$PR" "$ROUND"; then
+      # 指摘が残る item だけ revert する（合意済みの item は PR に残す）
+      "$SCRIPTS/refactor.py" abandon-items "$PR" "$ROUND"; break
+    fi
+    "$SCRIPTS/launch-cli.sh" "$IMPL" fix "$PR" "$ROUND"
+    "$SCRIPTS/monitor.py" "$PR" --agents "$IMPL" --tmp-dir "$TMP_DIR" \
+        --stem-template "{agent}-fix-r$ROUND"
+    "$SCRIPTS/refactor.py" merge-fix "$PR" "$ROUND"
   done
 done
 
-# Step 7: 最終ゲート — /ndf:cross-review <PR> をホストが実行
-# Step 8: 報告 + Draft 解除
+# Step 6: 最終ゲート — /ndf:cross-review <PR> をホストが実行
+# Step 7: 報告 + Draft 解除
 "$SCRIPTS/refactor.py" report "$PR"
 ```
 
@@ -291,7 +316,7 @@ state.json に全状態が入るため、どこで落ちても同じコマンド
 
 | 検証 | 方法 |
 |---|---|
-| 着手前にテストが green | `baseline_test` を state に記録。red なら item を `blocked` にして着手しない |
+| 着手前にテストが green | `baseline_test` を state に記録。red ならラウンドの適用に着手せず全 item を `blocked` にする |
 | テストが無い経路は先に現状固定テスト | `test_gap=true` の item は、固定テスト追加コミットが先行しているかを `git log` で確認 |
 | 1 手 1 コミット | 適用結果 JSON の `commits[]` が 1 件以上、かつ各コミットでテスト実行結果が green |
 | 差分予算 | `estimated_diff_lines` の 2 倍を超えたら失敗（scope creep 検知） |
@@ -301,14 +326,20 @@ state.json に全状態が入るため、どこで落ちても同じコマンド
 
 | ループ | 終了条件 |
 |---|---|
-| 内側（レビュー） | reviewer 全員 APPROVE / `--max-fix-rounds`（既定 3）到達で **revert して放棄** |
-| 中間（item） | 採用 item を全件消化 |
+| 内側（レビュー） | reviewer 全員 APPROVE / `--max-fix-rounds`（既定 3）到達で **未解決の item を revert して放棄** |
 | 外側（ラウンド） | 採用 item 0 件 / `--max-outer-rounds`（既定 3）到達 / 提案の重複率が前ラウンド比 70% 以上（収束と見なす） |
 
 **収束しない item は捨てる**のが cross-review との重要な差分である。レビュー指摘の修正は
 必須だが、リファクタリングは任意作業なので、揉める提案は PR に残さない方が安全である。
 放棄した item は `deferred_items` に理由付きで記録し、次ラウンドの提案プロンプトへ
 「対象外」として渡す。
+
+**放棄は item 単位で行う。** レビューはラウンドの差分に対してまとめて実施するが、
+`--max-fix-rounds` 到達時に捨てるのは**未解決の指摘が紐づく item だけ**であり、
+指摘が無い item や解決済みの item は PR に残す。これができるように、適用は
+item ごとに 1 手 1 コミットへ分け、`items[].commits` にコミット SHA を記録しておく。
+どの item にも紐づかない指摘（ラウンド全体に対する指摘）が残った場合は、
+そのラウンドで適用した item を全件 revert する。
 
 ### 9. PR の扱い
 
@@ -349,9 +380,18 @@ state.json に全状態が入るため、どこで落ちても同じコマンド
   "rounds": [
     {
       "round": 1,
+      "impl": "codex",
+      "reviewers": ["gemini", "kiro"],
       "proposed": {"codex": 9, "gemini": 7, "kiro": 8},
       "merged": 14, "adopted": 5, "deferred": 9,
-      "items": ["R1-001", "R1-002"]
+      "items": ["R1-001", "R1-002"],
+      "apply": {"applied": ["R1-001", "R1-002"], "failed": [], "base_sha": "aaa1111", "head_sha": "ccc3333"},
+      "fix_rounds": 1,
+      "reviews": [
+        {"round": 1, "gemini": "REQUEST_CHANGES", "kiro": "APPROVE",
+         "findings": [{"item_id": "R1-002", "thread_id": "PRRT_x", "resolved": false}]},
+        {"round": 2, "gemini": "APPROVE", "kiro": "APPROVE", "findings": []}
+      ]
     }
   ],
   "items": [
@@ -368,15 +408,8 @@ state.json に全状態が入るため、どこで落ちても同じコマンド
       "test_gap": false,
       "estimated_diff_lines": 40,
       "proposed_by": ["codex", "gemini"],
-      "impl": "codex",
-      "reviewers": ["gemini", "kiro"],
       "status": "done",
-      "fix_rounds": 1,
-      "commits": ["abc1234", "def5678"],
-      "reviews": [
-        {"round": 1, "gemini": "REQUEST_CHANGES", "kiro": "APPROVE", "findings": 2},
-        {"round": 2, "gemini": "APPROVE", "kiro": "APPROVE", "findings": 0}
-      ]
+      "commits": ["abc1234", "def5678"]
     }
   ],
   "deferred_items": [],
@@ -384,8 +417,13 @@ state.json に全状態が入るため、どこで落ちても同じコマンド
 }
 ```
 
+`items[]` は **impl / reviewers / fix_rounds / reviews を持たない**。これらはラウンド単位の
+属性になったため `rounds[]` に置く。`items[].commits` は放棄時の revert 範囲を決めるために
+必須で、**item ごとに 1 手 1 コミットへ分ける**前提を state 側から支える。
+
 `status` の遷移: `pending` → `applying` → `reviewing` → (`fixing` → `reviewing`)* →
-`done` / `abandoned` / `blocked`。
+`done` / `abandoned` / `blocked`。適用に失敗した item はラウンドを止めず、
+その item だけ `abandoned` にして残りの適用を続ける。
 
 ## 提案 item のスキーマ（3 ランタイム共通の提出形式）
 
@@ -441,7 +479,7 @@ state.json に全状態が入るため、どこで落ちても同じコマンド
 plugins/ndf-shared/skills/cross-refactoring/
 ├── SKILL.md
 ├── docs/01-state-and-propose.md      # Step 0〜2
-├── docs/02-apply-and-review.md       # Step 3〜6
+├── docs/02-apply-and-review.md       # Step 3〜5
 ├── docs/03-review-viewpoints.md      # レビュー観点テンプレート
 ├── scripts/refactor.py               # 状態管理（uv 自己完結 / stdlib のみ）
 ├── scripts/prepare-worktrees.sh      # worktree をエージェント分作成・同期・refs 配置
@@ -495,7 +533,9 @@ Skill がランタイム中立になったためである。最終ゲートで�
 ### Task 1: 状態管理の骨格
 
 - **対象:** `scripts/refactor.py`, `tests/test_refactor_init.py`
-- **内容:** `init` / `start-round` / `next-item` / `advance` / `status` を実装する。`init` は PR 番号・
+- **内容:** `init` / `start-round` / `advance` / `status` を実装する。`start-round` は
+  ラウンド番号に加えて **`IMPL` / `REVIEWERS` / `REVIEWERS_CSV`** を eval で返す
+  （輪番はラウンド単位のため、item ごとに割り当てを引く `next-item` は不要）。`init` は PR 番号・
   対象スコープ・各上限値を受け取り、リポジトリ情報と `baseline_test` を記録して state.json を
   生成する。tmp ディレクトリ解決は cross-review の `_tmp_dir()` と同じ優先順
   （env `CROSS_REFACTORING_TMP_DIR` > `<work worktree>/.cross_refactoring/`）にする。
@@ -563,29 +603,43 @@ Skill がランタイム中立になったためである。最終ゲートで�
 ### Task 5: 適用フェーズ
 
 - **対象:** `prompts/apply.md`, `refactor.py merge-apply`, `tests/test_merge_apply.py`
-- **内容:** impl ランタイムに item 1 件を渡し、`refactoring` Skill の手順で適用させる。
-  戻り値 `apply-<item_id>.json`（`commits[]` / 各コミットのテスト結果 / 実差分行数 /
-  `status`）を検証し、差分予算超過・テスト red・コミット 0 件を失敗として扱う。
-  作業ディレクトリは `work/` に固定し、`--force` / `--no-verify` を禁止する。
+- **内容:** impl ランタイムを **1 ラウンド 1 回**起動し、採用 item を優先度順に直列適用させる。
+  戻り値 `apply-r<round>.json` は **item ごとの結果配列**（`item_id` / `commits[]` /
+  各コミットのテスト結果 / 実差分行数 / `status`）を持つ。`merge-apply` は item ごとに
+  差分予算超過・テスト red・コミット 0 件を検証し、**失敗した item だけ `abandoned` にして
+  残りは採用する**（1 件の失敗でラウンドを止めない）。全件失敗のときだけ exit 2 で
+  次ラウンドへ進む。作業ディレクトリは `work/` に固定し、`--force` / `--no-verify` を禁止する。
+- **要点:** プロンプトに **item ごとに 1 手 1 コミットへ分けること**を必須要件として書く。
+  放棄時の revert 範囲が item 単位で決まらなくなるため、複数 item を 1 コミットに
+  まとめた場合は失敗として扱う。
 
 ### Task 6: レビューフェーズ
 
 - **対象:** `prompts/review.md`, `docs/03-review-viewpoints.md`, `refactor.py judge-review`,
   `tests/test_judge_review.py`
-- **内容:** reviewer 2 ランタイムを並列起動し、item の差分（`git diff <base_sha>..<head_sha>`）に
-  対して上記観点でレビューさせる。指摘は PR にインラインコメントとして AI 自身が `gh api` で
-  直接投稿する（cross-review と同じ「AI 直接投稿」方針でホスト context を汚さない）。
+- **内容:** reviewer 2 ランタイムを並列起動し、**ラウンドの差分**
+  （`git diff <round.base_sha>..<round.head_sha>`）に対して上記観点でレビューさせる。
+  指摘は PR にインラインコメントとして AI 自身が `gh api` で直接投稿する（cross-review と
+  同じ「AI 直接投稿」方針でホスト context を汚さない）。
   `judge-review` は 2 者 APPROVE で `done`（exit 0）、1 つでも `REQUEST_CHANGES` なら
   `fixing` に遷移（exit 2）する。
+- **要点:** レビュー結果 JSON の各 finding に **`item_id` を必須**とする。放棄を item 単位で
+  行うために必要であり、`rounds[].items` に無い ID や欠落は**差し戻して再レビューさせる**。
+  ラウンド全体に対する指摘（item に紐づけられないもの）は `item_id: null` を明示させ、
+  放棄時はラウンド全件 revert の対象として扱う。
 
 ### Task 7: 内側ループの収束と放棄
 
-- **対象:** `prompts/fix.md`, `refactor.py merge-fix` / `should-abandon` / `abandon-item`,
-  `tests/test_abandon_item.py`
-- **内容:** 指摘修正は impl ランタイムに投げ、reply + resolve まで実行させる。
-  `fix_rounds >= max_fix_rounds` で item を放棄する。`git revert` で当該 item のコミット群を
-  打ち消して push し、開いている review thread に理由を reply して resolve、`deferred_items` に
-  記録する。**PR に中途半端な状態を残さない**ことを保証する。
+- **対象:** `prompts/fix.md`, `refactor.py merge-fix` / `should-abandon` / `abandon-items`,
+  `tests/test_abandon_items.py`
+- **内容:** 指摘修正は impl ランタイムに投げ、**ラウンドの未解決指摘をまとめて**修正させ、
+  reply + resolve まで実行させる。`rounds[].fix_rounds >= max_fix_rounds` で放棄に移る。
+- **放棄は item 単位:** `abandon-items` は未解決 finding の `item_id` を集計し、
+  **該当 item のコミット群だけを `git revert`** して push する。指摘の無い item と
+  解決済みの item は PR に残す。`item_id: null` の未解決指摘が 1 件でもあれば、
+  そのラウンドで適用した item を全件 revert する。いずれの場合も開いている review thread に
+  理由を reply して resolve し、`deferred_items` に記録する。
+  **PR に中途半端な状態を残さない**ことを保証する。
 
 ### Task 8: 外側ループの収束判定と最終ゲート
 
@@ -593,9 +647,9 @@ Skill がランタイム中立になったためである。最終ゲートで�
 - **内容:** 採用 0 件 / `max_outer_rounds` 到達 / 前ラウンドとの提案重複率 70% 以上のいずれかで
   外側ループを終了し、`final` に `converged` / `max_rounds` / `saturated` を記録する。
   重複率は `path`+`symbol`+`smell` キーの集合比較で求める。終了後は `/ndf:cross-review <PR>` で
-  PR 全体を codex + gemini の APPROVE 収束にかけ（内側レビューは item 単位のため、PR 全体の
-  整合はここで見る）、Draft を解除して、ラウンド表・item 表・放棄 item・残 deferred 提案を
-  報告する。
+  PR 全体を codex + gemini の APPROVE 収束にかけ（内側レビューはラウンド単位のため、
+  ラウンドをまたいだ整合はここで見る）、Draft を解除して、ラウンド表・item 表・放棄 item・
+  残 deferred 提案を報告する。
 
 ### Task 9: `monitor.py` の汎用化
 
@@ -640,12 +694,17 @@ Skill がランタイム中立になったためである。最終ゲートで�
   - `merge-proposals` の重複排除・語彙外降格・しきい値・上限件数
   - **ホスト別の参加者確定**: host=claude / codex / kiro の 3 ケースで `runtimes` が
     「全 4 ランタイム − ホスト」になり、ホストが `runtimes` に含まれない
-  - ランタイム輪番が impl と reviewer を必ず分離する（全 item で `impl not in reviewers`）
+  - ランタイム輪番が impl と reviewer を必ず分離する（全ラウンドで `impl not in reviewers`）
   - `impl_capable` が縮退したときも reviewers は常に 2 者になる
-  - `judge-review` の遷移（2 APPROVE / 1 REQUEST_CHANGES / 欠損 result）
+  - `merge-apply` が **失敗 item だけを `abandoned` にして残りを採用**し、全件失敗のときだけ
+    exit 2 を返す
+  - `judge-review` の遷移（2 APPROVE / 1 REQUEST_CHANGES / 欠損 result）と、
+    finding の `item_id` 欠落・未知 ID の差し戻し
+  - `abandon-items` が**未解決指摘の紐づく item だけ** revert 対象に選び、
+    `item_id: null` の未解決指摘があればラウンド全件を対象にする
   - `should-abandon` が `max_fix_rounds` 到達時のみ真を返す
   - 外側収束の 3 条件
-  - `start-round` / `next-item` の再開冪等性
+  - `start-round` の再開冪等性（同一ラウンドの再実行で impl / reviewers が変わらない）
 
 ### Task 12: 配布物同期とドキュメント更新
 
@@ -664,13 +723,16 @@ Skill がランタイム中立になったためである。最終ゲートで�
       （Claude Code ホスト → codex/gemini/kiro、Codex ホスト → gemini/kiro/claude、
       Kiro ホスト → claude/codex/gemini）
 - [ ] `--host` 明示指定と環境変数からの推定の両方が動き、確定結果が state.json に残る
-- [ ] 全 item で実装ランタイムとレビューランタイムが重ならない（state.json で検証可能）
+- [ ] 全ラウンドで実装ランタイムとレビューランタイムが重ならない（state.json で検証可能）
+- [ ] レビューが**ラウンド単位で 1 回**回り、CLI 起動回数が採用 item 数に比例しない
 - [ ] worktree がエージェント分作られ、読み取り用は `--detach`、書き込みは `work/` のみ
 - [ ] Kiro / Claude が非対話で提案・レビューを完了し、結果 JSON を書き出す（Kiro の実装参加の
       可否は Task 3 の検証結果に従い、縮退した場合はその旨を SKILL.md に明記する）
 - [ ] `kiro-cli agent set-default` を呼ばない（マシン全体の既定を書き換えない）
 - [ ] 提案 → 適用 → レビュー → 修正 の内側ループが、指摘 0 で `done` に到達する
-- [ ] 収束しない item が revert され、PR に未完成の差分が残らない
+- [ ] 収束しない item が revert され、PR に未完成の差分が残らない。かつ
+      **同ラウンドで合意済みの item は revert されずに残る**
+- [ ] 適用に失敗した item がラウンドを止めず、その item だけ `abandoned` になる
 - [ ] 提案が尽きる（または上限到達）で外側ループが終了し、`/ndf:cross-review` で最終収束する
 - [ ] ホストセッションの context に diff / レビュー本文 / エラーログが載らない
 - [ ] `monitor.py` の既存テストが無変更で通る
@@ -685,10 +747,12 @@ Skill がランタイム中立になったためである。最終ゲートで�
 | ~~**Kiro が非対話でシェル実行できない**~~ | **解消済み**。kiro-cli 2.18.0 の実機検証でシェル実行もファイル編集も通ることを確認した。縮退設計（`impl_capable` からの除外）は不要 |
 | **ホスト判定を誤り、ホスト自身を CLI として起動する** | `--host` 明示指定を第一とし、推定結果を `init` 出力と state.json に必ず残す。参加者リストにホストが含まれたら `init` を失敗させる |
 | **root 実行で claude の `bypassPermissions` が使えない** | 実測で確認済み。`acceptEdits` + `--allowed-tools` の明示を launcher の既定にする（root でも通ることを実測） |
-| **kiro の承認漏れが exit 0 のまま素通りする** | ハングではなく「拒否 + exit 0」で現れる（2.18.0 実測）。stderr の拒否メッセージと `--trust-tools` の WARNING を早期エラーに追加し、終了コード 0 を成功とみなさない |
+| **kiro の承認漏れが exit 0 のまま素通りする** | ハングではなく「拒否 + exit 0」で現れる（2.18.0 実測）。stderr の拒否メッセージを早期エラーに追加し、終了コード 0 を成功とみなさない |
 | **`--trust-tools` の絞り込みがセキュリティ境界にならない** | `execute_bash` を許可すると `echo > file` で書き込み制限を迂回できる（実測）。防御は worktree 隔離に一本化し、**絞り込みは採用せず `--trust-all-tools` を使う**（綴り違いが WARNING のみで素通りする事故も同時に避けられる） |
 | **`--trust-all-tools` で worktree 外を触られる** | 参加 CLI の cwd を worktree に固定し、書き込み可能なのは `work/` のみ、他は `--detach` にする。ホストのリポジトリ本体は参加 CLI に渡さない |
-| claude 参加時の実行コスト | 単純な 3 ターンで $0.26。1 ラウンド最低 6 回の CLI 起動が走るため、上限値（`--max-items-per-round` / `--max-outer-rounds`）の既定を保守的に置く |
+| claude 参加時の実行コスト | 単純な 3 ターンで $0.26。**レビューをラウンド単位にしたことで 1 ラウンドの起動回数を 33 → 9 に抑えた**（採用 5 件・fix 1 回の場合、§1）。それでも 1 ラウンド最低 6 回は走るため、上限値（`--max-items-per-round` / `--max-outer-rounds`）の既定は保守的に置く |
+| **ラウンド単位レビューで指摘と item の対応が崩れる** | レビュー結果の finding に `item_id` を必須にし、未知 ID / 欠落は差し戻して再レビュー。紐づかない指摘は `item_id: null` を明示させ、放棄時はラウンド全件 revert の対象にする |
+| **1 ラウンドの実装者が 1 者に固定され、モデルの癖が偏る** | 輪番の単位をラウンドにしているため、ラウンドを重ねれば実装者は分散する。`--max-outer-rounds` を 1 にしない |
 | frontmatter 予算の逼迫 | 残余 588 文字に対し cross-review 相当で 407 文字。`argument-hint` を短く保ち、超える場合は Task 12 で上限見直しか既存 `description` 圧縮を行う |
 | ~~Kiro の agent 定義が worktree で検出されない~~ | **該当しなくなった**。専用 agent JSON を生成せず、承認は `--trust-tools` フラグで与えるため、agent 定義の検出に依存しない |
 | `agent set-default` でユーザのマシン全体設定を奪う | 呼ばない。受け入れ条件に含める。`agent create` も `$EDITOR` を開いて非対話実行が止まるため呼ばない |
@@ -697,12 +761,15 @@ Skill がランタイム中立になったためである。最終ゲートで�
 | 同じ提案が毎ラウンド出続けて終わらない | 提案重複率 70% で `saturated` 終了。放棄 item は次ラウンドの提案プロンプトに「対象外」として渡す |
 | モデルが語彙を守らず重複排除が効かない | 語彙外を `unknown` として `nit` 降格し、しきい値で自動的に落ちるようにする |
 | 参加ランタイムに NDF 未導入で参照ファイルが読めない | 各 worktree の `.cross_refactoring/refs/` へ参照ファイルをコピーし、相対パスだけを参照させる |
-| CLI 実行時間が長く全体が長丁場になる | 提案とレビューは並列。適用は直列だが 1 item の差分が小さいため 1 回が短い。state.json で常時再開可能 |
+| CLI 実行時間が長く全体が長丁場になる | 提案とレビューは並列。適用は 1 ラウンド 1 回に集約したため起動回数は減るが、**1 回あたりは採用 item 数分だけ長くなる**。`--max-items-per-round`（既定 5）で 1 回の長さを抑え、state.json で常時再開可能にする |
 | cross-review の `monitor.py` 変更が既存ループを壊す | 追加オプションは全て既定値で現行挙動を維持。既存テスト無変更通過を Task 9 の完了条件にする |
 
 ## やらないこと（v1 スコープ外）
 
 - PR ローテーション（件数上限で総量を抑える方針を先に検証する）
-- 複数 item の並列適用（同一ブランチへの同時コミットは競合とレビュー単位の曖昧化を招く）
+- 複数 item の並列適用（同一ブランチへの同時コミットは競合を招く。1 ラウンドの適用は
+  impl 1 者が直列に行う）
+- item 単位のレビュー収束（CLI 起動回数が item 数に比例し、コストが実運用に耐えないため。
+  §1 の見積もりを参照）
 - ホストランタイム自身を提案・実装・レビューに参加させること（オーケストレータに徹する）
 - リファクタリング以外の変更（機能追加・不具合修正）の取り込み
