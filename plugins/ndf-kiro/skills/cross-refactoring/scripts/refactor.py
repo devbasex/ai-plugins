@@ -764,7 +764,8 @@ def cmd_merge_proposals(args: argparse.Namespace) -> None:
             info(f"⚠ {runtime} の提案結果が JSON として読めません: {e}")
             continue
         items = payload.get("items")
-        proposals[runtime] = items if isinstance(items, list) else []
+        proposals[runtime] = [i for i in items if isinstance(i, dict)] \
+            if isinstance(items, list) else []
         entry["proposed"][runtime] = len(proposals[runtime])
 
     excluded = {
@@ -879,28 +880,47 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
             code=2,
         )
 
-    reported = {r.get("item_id"): r for r in payload.get("items", []) if isinstance(r, dict)}
+    # 申告は**このラウンドの改善項目のものだけ**を採る。架空の項目 ID へ割り当てられた
+    # コミットを数に入れると、割り当て済みに見えるのに項目別の検証にも入らず、
+    # そのまま Pull Request に残せてしまう。
+    round_items = set(entry["items"])
+    reported: dict[str, dict[str, Any]] = {}
+    unknown_ids: list[str] = []
+    for r in payload.get("items", []):
+        if not isinstance(r, dict):
+            continue
+        item_id = r.get("item_id")
+        if item_id in round_items:
+            reported[item_id] = r
+        elif item_id is not None:
+            unknown_ids.append(str(item_id))
 
     # **範囲のコミットは全て、いずれかの改善項目に割り当てられていること。**
     # 申告から漏れたコミットはテストもトレーラーも差分予算も検査されず、そのまま
     # Pull Request に残る。都合の悪い変更を申告しないだけで検査を回避できてしまう。
     claimed = {
-        c.get("sha") for r in reported.values()
-        for c in r.get("commits", []) if c.get("sha")
+        sha for r in reported.values() for sha in _reported_shas(r)
     }
     claimed_full = {
         full for full in (
             _git_out(work, ["rev-parse", "--verify", f"{s}^{{commit}}"])
-            for s in claimed if s
+            for s in claimed
         ) if full
     }
     unassigned = sorted(in_range - claimed_full)
-    if unassigned:
+    if unassigned or unknown_ids:
         reason = (
             f"どの改善項目にも割り当てられていないコミットが {len(unassigned)} 件あります"
             f"（{', '.join(s[:7] for s in unassigned[:5])}）。"
             "検証を回避した変更を Pull Request に残さないため、ラウンドごと取り消します"
         )
+        if unknown_ids:
+            reason = (
+                f"このラウンドに無い改善項目 ID の申告があります"
+                f"（{', '.join(unknown_ids[:5])}）。"
+                + ("" if not unassigned else f"未割当のコミットも {len(unassigned)} 件あります。")
+                + "検証を回避した変更を Pull Request に残さないため、ラウンドごと取り消します"
+            )
         info(f"❌ {reason}")
         for item_id in entry["items"]:
             it = _find_item(state, item_id)
@@ -918,6 +938,7 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
             "applied": [], "failed": list(entry["items"]),
             "base_sha": entry.get("apply_base_sha"), "head_sha": head_sha,
             "unassigned_commits": unassigned,
+            "unknown_item_ids": unknown_ids,
         }
         state["phase"] = "propose"
         if args.dry_run:
@@ -937,9 +958,8 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
             problem = "適用結果に項目がありません"
             facts: list[dict[str, Any]] = []
         else:
-            shas = [c.get("sha") for c in got.get("commits", []) if c.get("sha")]
             facts = collect_commit_facts(
-                work, shas, in_range, test_command, head_branch
+                work, _reported_shas(got), in_range, test_command, head_branch
             )
             problem = verify_apply_item(item, facts)
         if problem:
@@ -950,15 +970,13 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
             # **検証に失敗した項目のコミットを Pull Request に残さない。**
             # 実装担当は項目ごとに push しているため、状態を `abandoned` にする
             # だけでは差分が残り、以後のレビュー対象にも混入する。
-            item["commits"] = [
-                c.get("sha") for c in (got or {}).get("commits", []) if c.get("sha")
-            ]
+            item["commits"] = _reported_shas(got)
             reverted += _revert_item_commits(state, item, args.dry_run)
             failed.append(item_id)
             info(f"❌ {item_id}: {problem}")
             continue
         item["status"] = "reviewing"
-        item["commits"] = [c.get("sha") for c in got.get("commits", [])]
+        item["commits"] = _reported_shas(got)
         item["diff_lines"] = int(got.get("diff_lines") or 0)
         applied.append(item_id)
         info(f"✅ {item_id}: {len(item['commits'])} コミット / {item['diff_lines']} 行")
@@ -1136,7 +1154,10 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     # 自己申告をそのまま信じない。解決 API に失敗・未実行でも「解決済み」と
     # 書けてしまい、未解決の指摘が取り消し対象から外れる。GitHub 側の
     # `isResolved` と突き合わせ、**両方が解決と言っているものだけ**を反映する。
-    claimed = {t for t in payload.get("resolved_thread_ids", []) if t}
+    claimed = {
+        t for t in (payload.get("resolved_thread_ids") or [])
+        if isinstance(t, str) and t.strip()
+    }
     actual = resolved_threads_on_github(state["repo"], state["current_pr"])
     if actual is None:
         info("⚠ レビュースレッドの解決状態を取得できませんでした。"
@@ -1153,7 +1174,7 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     baseline = state.get("baseline_test") or {}
     facts = collect_commit_facts(
         work,
-        [c.get("sha") for c in payload.get("commits", []) if c.get("sha")],
+        _reported_shas(payload),
         set(),                       # 修正は範囲を限定せず、実在だけを見る
         baseline.get("command") or "true",
         state["head_branch"],
@@ -1338,6 +1359,26 @@ TEST_PATH_MARKERS = ("/test/", "/tests/", "/spec/", "/specs/", "__tests__/")
 TEST_NAME_MARKERS = (".test.", ".spec.", "_test.", "_spec.", "test_", "spec_")
 
 
+def _reported_shas(reported: Any) -> list[str]:
+    """結果ファイルの `commits[]` から SHA を安全に取り出す。
+
+    相手は LLM なので、`commits` が配列でない・要素が辞書でない・`sha` が
+    文字列でないといった崩れ方をする。**壊れた形で落ちないことを型で保証しない。**
+    ここで受け止めて、取り出せたものだけを返す。
+    """
+    if not isinstance(reported, dict):
+        return []
+    commits = reported.get("commits")
+    if not isinstance(commits, list):
+        return []
+    shas: list[str] = []
+    for c in commits:
+        sha = c.get("sha") if isinstance(c, dict) else None
+        if isinstance(sha, str) and sha.strip():
+            shas.append(sha.strip())
+    return shas
+
+
 def _git_out(work: str, args: list[str]) -> Optional[str]:
     """`git` を実行して標準出力を返す。失敗したら `None`。"""
     r = subprocess.run(["git", *args], cwd=work, capture_output=True, text=True)
@@ -1517,7 +1558,7 @@ def _revert_item_commits(
     以後のレビュー対象にも混入する。
     """
     work = state["worktrees"]["work"]
-    shas = [s for s in (item.get("commits") or []) if s]
+    shas = [s for s in (item.get("commits") or []) if isinstance(s, str) and s]
     if dry_run:
         for sha in reversed(shas):
             info(f"（dry-run）git revert --no-edit {sha}")

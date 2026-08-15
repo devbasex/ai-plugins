@@ -620,3 +620,76 @@ def test_apply_base_is_recorded_by_the_orchestrator(
     with pytest.raises(SystemExit):
         refactor.cmd_merge_proposals(type("A", (), {"id": 130})())
     assert read_state(state_path)["rounds"][0]["apply_base_sha"] == "BASE_HEAD"
+
+
+def test_commits_claimed_by_an_unknown_item_are_rejected(
+    refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
+):
+    """架空の項目 ID へ割り当てても、割り当て済みとは扱わない。
+
+    数に入れてしまうと `unassigned` を通過するのに項目別の検証にも入らず、
+    そのまま Pull Request に残せてしまう。
+    """
+    items = [item(item_id="R1-001")]
+    state_path = _state_with_items(tmp_path, items)
+    env_tmp_dir(state_path)
+    git_facts({"ok111": fact(sha="ok111")}, in_range=["sneaky", "ok111"])
+    write_result(state_path, "codex-apply-r1", {
+        "items": [
+            {"item_id": "R1-001", "commits": [{"sha": "ok111"}]},
+            # 架空の項目。ここへ逃がしても割り当て済みにはならない
+            {"item_id": "GHOST", "commits": [{"sha": "sneaky"}]},
+        ],
+    })
+    monkeypatch.setattr(
+        refactor.subprocess, "run",
+        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "", ""),
+    )
+    monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: "")
+
+    with pytest.raises(SystemExit) as e:
+        refactor.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+        )
+    assert e.value.code == 2
+    apply_record = read_state(state_path)["rounds"][0]["apply"]
+    assert apply_record["unknown_item_ids"] == ["GHOST"]
+    assert apply_record["unassigned_commits"] == ["sneaky"]
+
+
+# ---------- 結果ファイルの形が崩れていても落ちない ----------
+
+@pytest.mark.parametrize("broken", [
+    {"commits": "文字列"},
+    {"commits": ["文字列"]},
+    {"commits": [{"sha": None}]},
+    {"commits": [{}]},
+    {},
+    "オブジェクトですらない",
+])
+def test_reported_shas_survives_broken_output(refactor, broken):
+    assert refactor._reported_shas(broken) == []
+
+
+def test_reported_shas_extracts_valid_entries_only(refactor):
+    payload = {"commits": [{"sha": "aaa"}, "壊れた", {"sha": ""}, {"sha": " bbb "}]}
+    assert refactor._reported_shas(payload) == ["aaa", "bbb"]
+
+
+def test_broken_apply_result_does_not_crash(
+    refactor, tmp_path, env_tmp_dir, no_git, git_facts
+):
+    """`commits` が配列でなくてもクラッシュせず、項目の失敗として扱う。"""
+    items = [item(item_id="R1-001")]
+    state_path = _state_with_items(tmp_path, items)
+    env_tmp_dir(state_path)
+    git_facts({})
+    write_result(state_path, "codex-apply-r1", {
+        "items": [{"item_id": "R1-001", "commits": "壊れている"}],
+    })
+    with pytest.raises(SystemExit) as e:
+        refactor.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+        )
+    assert e.value.code == 2
+    assert read_state(state_path)["items"][0]["status"] == "abandoned"

@@ -329,3 +329,22 @@ def test_resolved_threads_follows_pagination(refactor, monkeypatch):
     monkeypatch.setattr(refactor.subprocess, "run", fake_run)
     assert refactor.resolved_threads_on_github("a/b", 1) == {"T1", "T2"}
     assert any("cursor=C1" in "".join(c) for c in calls)
+
+
+def test_broken_fix_result_does_not_crash(
+    refactor, tmp_path, env_tmp_dir, monkeypatch
+):
+    """`commits` や `resolved_thread_ids` が壊れていてもクラッシュしない。"""
+    state_path = _state(tmp_path, [_finding("R1-001")])
+    env_tmp_dir(state_path)
+    write_result(state_path, "codex-fix-r1", {
+        "resolved_thread_ids": "文字列",
+        "commits": {"sha": "辞書ではあるが配列でない"},
+    })
+    monkeypatch.setattr(refactor, "resolved_threads_on_github", lambda repo, pr: set())
+    monkeypatch.setattr(
+        refactor, "collect_commit_facts",
+        lambda work, shas, rng, cmd, branch: [],
+    )
+    refactor.cmd_merge_fix(type("A", (), {"id": 130, "round": 1})())
+    assert read_state(state_path)["rounds"][0]["fix_rounds"] == 4
