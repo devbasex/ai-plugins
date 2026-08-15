@@ -1,0 +1,1289 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.10"
+# dependencies = []
+# ///
+"""cross-refactoring の状態管理 CLI。
+
+`<work>/.cross_refactoring/cross-refactoring-rf<ID>-state.json` の初期化・読み書きと、
+二段の収束判定（提案ラウンドの繰り返しの中にレビュー収束の繰り返しが入る）を
+1 つの CLI に集約する。
+
+サブコマンド:
+  init             Step 0  ホスト確定 / 母集合の確定 / 作業ディレクトリ root / 状態初期化
+  start-round      Step 2  提案ラウンドを開く。実装担当とレビュー担当を返す
+  merge-proposals  Step 3  提案の語彙検証・重複排除・優先度付け・採否
+  merge-apply      Step 4  適用結果の検証（差分予算 / テスト / トレーラー / 固定テスト先行）
+  judge-review     Step 5  レビュー 2 者の判定
+  should-abandon   Step 6  修正ラウンド上限の到達判定
+  abandon-items    Step 6  未解決の指摘に紐づく項目だけを取り消す
+  merge-fix        Step 6  修正結果の取り込み
+  advance          Step 7  提案ラウンドの収束判定
+  status                   現在の状態を人が読む形で出す
+  report           Step 8  ラウンド表・項目表・見送り・指標
+
+終了コードは呼び出し側の bash が分岐に使う。各サブコマンドの docstring を参照。
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import pathlib
+import subprocess
+import sys
+import time
+from typing import Any, Iterable, Optional
+
+sys.path.insert(
+    0,
+    str(pathlib.Path(__file__).resolve().parent.parent.parent
+        / "cross-review" / "scripts" / "lib"),
+)
+
+import assignment  # noqa: E402
+import metrics as metrics_lib  # noqa: E402
+import models as models_lib  # noqa: E402
+import statefile  # noqa: E402
+
+die = statefile.die
+info = statefile.info
+
+
+# ---------------- 語彙 ----------------
+# スメルと手法の語彙は `refactoring` Skill の references と 1 対 1 で対応させる。
+# **語彙を固定しないと重複排除が効かない**（同じ箇所への提案が別物として残る）。
+
+SMELLS: dict[str, str] = {
+    "long_method": "長すぎるメソッド",
+    "large_class": "肥大したクラス",
+    "duplication": "重複",
+    "long_parameter_list": "長い引数リスト",
+    "feature_envy": "他クラスへの過度な関心",
+    "primitive_obsession": "基本型への固執",
+    "magic_value": "マジックナンバー・文字列",
+    "deep_nesting": "深いネスト",
+    "dead_code": "デッドコード",
+    "circular_dependency": "過度な相互依存",
+    "inconsistent_naming": "一貫しない命名",
+    "swallowed_exception": "例外の飲み込み",
+    "conditional_chain": "条件分岐の連鎖",
+    "scattered_config": "設定の散在",
+    "embedded_business_rule": "業務ルールの埋め込み",
+    "one_by_one_iteration": "一件ずつの反復",
+    "unvalidated_externalization": "検証のない外部化",
+}
+
+TECHNIQUES: dict[str, str] = {
+    "extract_method": "メソッドの抽出",
+    "rename": "変数・関数・クラスの改名",
+    "introduce_parameter_object": "引数オブジェクトの導入",
+    "introduce_value_object": "値オブジェクトの導入",
+    "flatten_conditional": "条件分岐の平坦化",
+    "replace_conditional_with_polymorphism": "多態による分岐の置き換え",
+    "replace_with_lookup_table": "対応表への置き換え",
+    "replace_with_bulk_operation": "一括処理への置き換え",
+    "extract_strategy": "戦略の切り出し",
+    "move_responsibility": "責務の移動",
+    "fix_dependency_direction": "依存の向きを整える",
+    "split_into_pipeline": "処理の連鎖への分解",
+    "remove_dead_code": "死んだコードの削除",
+    "consolidate_duplication": "重複の共通化",
+    "introduce_named_constant": "名前付き定数・列挙の導入",
+    "propagate_exception": "呼び出し元へ伝える",
+    "centralize_configuration": "定義を 1 箇所へ寄せる",
+    "validate_at_boundary": "スキーマと版を与え、読み込み境界で検証する",
+}
+
+# 重要度。語彙外の提案は `unknown` へ降格し、しきい値で自動的に落ちるようにする。
+SEVERITY_ORDER = {"unknown": 0, "minor": 1, "major": 2, "critical": 3}
+DEFAULT_SEVERITY_THRESHOLD = "minor"
+
+# 適用と修正のコミットに必須のトレーラー。1 つでも欠けたら当該項目を失敗にする。
+# 自由文で「codex が実装」と書かせると集計に使えないため、必ずトレーラー形式にする。
+REQUIRED_TRAILERS = ("Item-Id", "Round", "Impl-Runtime", "Impl-Model")
+
+# 適用で必ず配置する Skill。ここに無いものは配らない。
+REQUIRED_SKILLS = ("refactoring", "tdd-cycle", "quality-gates")
+
+# 実差分行数が見積りのこの倍数を超えたら範囲の逸脱とみなす。
+DIFF_BUDGET_FACTOR = 2
+
+# 提案の重複率がこの割合を超えたら、提案ラウンドの繰り返しを収束とみなす。
+DUPLICATE_RATE_THRESHOLD = 0.7
+
+# レビュー結果の形式不正で差し戻せる回数。超えたら変更要求として扱う。
+# 差し戻しを無限に繰り返すと、形式を満たせないランタイムでループが止まらなくなる。
+MAX_INVALID_REVIEWS = 1
+
+
+# ---------------- パス解決 ----------------
+
+def _default_worktree_base() -> pathlib.Path:
+    """作業ディレクトリの親。解決順は cross-review と揃える。
+
+    1. 環境変数 `NDF_WORKTREE_BASE`（明示指定）
+    2. `<システム tmpdir>/ndf-worktrees`（非永続領域。コンテナ再作成で自動消滅）
+    """
+    import tempfile
+    env = os.environ.get("NDF_WORKTREE_BASE")
+    if env:
+        return pathlib.Path(env).resolve()
+    return pathlib.Path(tempfile.gettempdir()) / "ndf-worktrees"
+
+
+def _repo_slug(repo: str) -> str:
+    return repo.replace("/", "--")
+
+
+def _tmp_dir_for(work: pathlib.Path) -> pathlib.Path:
+    """一時ディレクトリ。解決順は cross-review と同じ規約に揃える。
+
+    1. 環境変数 `CROSS_REFACTORING_TMP_DIR`（明示指定）
+    2. `<work>/.cross_refactoring/`
+    """
+    env = os.environ.get("CROSS_REFACTORING_TMP_DIR")
+    return pathlib.Path(env).resolve() if env else work / ".cross_refactoring"
+
+
+def _state_path(tmp_dir: pathlib.Path, state_id: int) -> pathlib.Path:
+    return tmp_dir / f"cross-refactoring-rf{state_id}-state.json"
+
+
+def _find_state(state_id: int) -> pathlib.Path:
+    """状態ファイルを探す。見つからなければ終了する。
+
+    環境変数が設定されていればそこを、無ければ現在の作業ディレクトリからの
+    相対で探す。呼び出し側の bash は `init` の出力を `export` してから使う。
+    """
+    env = os.environ.get("CROSS_REFACTORING_TMP_DIR")
+    candidates = []
+    if env:
+        candidates.append(pathlib.Path(env) / f"cross-refactoring-rf{state_id}-state.json")
+    candidates.append(
+        pathlib.Path.cwd() / ".cross_refactoring"
+        / f"cross-refactoring-rf{state_id}-state.json"
+    )
+    for c in candidates:
+        if c.exists():
+            return c
+    die(
+        f"状態ファイルが見つかりません（rf{state_id}）。"
+        "CROSS_REFACTORING_TMP_DIR を export してから実行してください"
+    )
+    raise SystemExit(1)  # die が抜けることはないが型のために置く
+
+
+def _load(state_id: int) -> tuple[pathlib.Path, dict[str, Any]]:
+    path = _find_state(state_id)
+    return path, statefile.load(path)
+
+
+def _sh(cmd: list[str], cwd: Optional[str] = None, check: bool = True) -> str:
+    r = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
+    if check and r.returncode != 0:
+        die(f"コマンドが失敗しました ({' '.join(cmd)}): {r.stderr.strip()}")
+    return r.stdout.strip()
+
+
+def _result_path(state: dict[str, Any], runtime: str, stem: str) -> pathlib.Path:
+    """CLI が結果を書き出すパス。
+
+    gemini だけは作業領域の外への書き込みが拒否されるため、起動時に一時
+    ディレクトリを作業領域へ追加している（`--include-directories`）。
+    したがって置き場所は全ランタイムで共通でよい。
+    """
+    return pathlib.Path(state["tmp_dir"]) / f"{stem}-result.json"
+
+
+def stem_for(runtime: str, phase: str, state_id: int, round_no: Optional[int] = None) -> str:
+    """一時ファイル名の骨格。監視スクリプトの `--stem-template` と揃える。"""
+    if phase == "propose":
+        return f"{runtime}-propose-rf{state_id}"
+    return f"{runtime}-{phase}-r{round_no}"
+
+
+# ---------------- 提案のマージ ----------------
+
+def _normalize_proposal(raw: dict[str, Any], source: str) -> Optional[dict[str, Any]]:
+    """1 件の提案を正規化する。必須項目を欠くものは捨てる。
+
+    語彙外の `smell` / `technique` は `unknown` として警告し、**最低の重要度へ
+    降格**させる。しきい値で自動的に落ちるため、語彙を守らない提案が
+    重複排除をすり抜けて残ることがない。
+    """
+    path = str(raw.get("path") or "").strip()
+    symbol = str(raw.get("symbol") or "").strip()
+    if not path or not symbol:
+        info(f"⚠ {source}: path / symbol の無い提案を無視しました: {raw!r:.120}")
+        return None
+
+    smell = str(raw.get("smell") or "").strip()
+    technique = str(raw.get("technique") or "").strip()
+    severity = str(raw.get("severity") or "").strip().lower()
+    degraded = False
+    if smell not in SMELLS:
+        info(f"⚠ {source}: 語彙外のスメル `{smell}` — unknown へ降格 ({path}#{symbol})")
+        smell = "unknown"
+        degraded = True
+    if technique not in TECHNIQUES:
+        info(f"⚠ {source}: 語彙外の手法 `{technique}` — unknown へ降格 ({path}#{symbol})")
+        technique = "unknown"
+        degraded = True
+    if severity not in SEVERITY_ORDER:
+        info(f"⚠ {source}: 語彙外の重要度 `{severity}` — unknown へ降格 ({path}#{symbol})")
+        severity = "unknown"
+        degraded = True
+    if degraded:
+        severity = "unknown"
+
+    try:
+        estimated = int(raw.get("estimated_diff_lines") or 0)
+    except (TypeError, ValueError):
+        estimated = 0
+
+    return {
+        "path": path,
+        "symbol": symbol,
+        "smell": smell,
+        "technique": technique,
+        "severity": severity,
+        "rationale": str(raw.get("rationale") or "").strip(),
+        "plan": str(raw.get("plan") or "").strip(),
+        "test_gap": bool(raw.get("test_gap")),
+        "estimated_diff_lines": max(estimated, 0),
+        "proposed_by": [source],
+    }
+
+
+def _dedupe_key(item: dict[str, Any]) -> tuple[str, str, str]:
+    """重複排除の鍵。同じ箇所への同じスメルの指摘を 1 件へまとめる。"""
+    return (item["path"], item["symbol"], item["smell"])
+
+
+def _merge_one(existing: dict[str, Any], incoming: dict[str, Any]) -> None:
+    """同一の鍵を持つ提案を統合する。
+
+    `rationale` と `plan` は**最も具体的なもの**（長い方）を採る。重要度は高い方、
+    推定差分行数は大きい方を採り、見積りを楽観側へ倒さない。
+    """
+    for source in incoming["proposed_by"]:
+        if source not in existing["proposed_by"]:
+            existing["proposed_by"].append(source)
+    if len(incoming["rationale"]) > len(existing["rationale"]):
+        existing["rationale"] = incoming["rationale"]
+    if len(incoming["plan"]) > len(existing["plan"]):
+        existing["plan"] = incoming["plan"]
+    if SEVERITY_ORDER[incoming["severity"]] > SEVERITY_ORDER[existing["severity"]]:
+        existing["severity"] = incoming["severity"]
+        existing["technique"] = incoming["technique"]
+    existing["test_gap"] = existing["test_gap"] or incoming["test_gap"]
+    existing["estimated_diff_lines"] = max(
+        existing["estimated_diff_lines"], incoming["estimated_diff_lines"]
+    )
+
+
+def merge_proposals(
+    proposals: dict[str, list[dict[str, Any]]],
+    threshold: str = DEFAULT_SEVERITY_THRESHOLD,
+    max_items: int = 5,
+    excluded_keys: Iterable[tuple[str, str, str]] = (),
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """提案をマージして `(採用, 見送り)` を返す。
+
+    優先度は「**合意したランタイム数 → 重要度 → 推定差分行数の昇順**」。
+    小さく合意の多いものから直す。合意が多い提案は誤検知の確率が低く、
+    小さい提案は失敗したときの取り消し範囲も小さい。
+
+    `excluded_keys` には過去に見送った項目の鍵を渡す。見送った項目を毎ラウンド
+    再提案されると収束しないため、対象外として落とす。
+    """
+    merged: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for source, items in proposals.items():
+        for raw in items:
+            norm = _normalize_proposal(raw, source)
+            if norm is None:
+                continue
+            key = _dedupe_key(norm)
+            if key in merged:
+                _merge_one(merged[key], norm)
+            else:
+                merged[key] = norm
+
+    excluded = set(excluded_keys)
+    adopted: list[dict[str, Any]] = []
+    deferred: list[dict[str, Any]] = []
+    min_severity = SEVERITY_ORDER.get(threshold, SEVERITY_ORDER[DEFAULT_SEVERITY_THRESHOLD])
+
+    for key, item in merged.items():
+        if key in excluded:
+            item["defer_reason"] = "過去のラウンドで見送った項目のため対象外"
+            deferred.append(item)
+        elif SEVERITY_ORDER[item["severity"]] < min_severity:
+            item["defer_reason"] = f"重要度 {item['severity']} がしきい値 {threshold} 未満"
+            deferred.append(item)
+        else:
+            adopted.append(item)
+
+    adopted.sort(
+        key=lambda i: (
+            -len(i["proposed_by"]),
+            -SEVERITY_ORDER[i["severity"]],
+            i["estimated_diff_lines"],
+            i["path"],
+            i["symbol"],
+        )
+    )
+    if len(adopted) > max_items:
+        for item in adopted[max_items:]:
+            item["defer_reason"] = f"1 ラウンドの採用上限 {max_items} 件を超えた"
+        deferred.extend(adopted[max_items:])
+        adopted = adopted[:max_items]
+    return adopted, deferred
+
+
+def duplicate_rate(
+    current: Iterable[tuple[str, str, str]], previous: Iterable[tuple[str, str, str]]
+) -> float:
+    """前ラウンドの提案とどれだけ重なっているか。前ラウンドが空なら 0 を返す。"""
+    prev = set(previous)
+    cur = set(current)
+    if not prev or not cur:
+        return 0.0
+    return len(cur & prev) / len(cur)
+
+
+# ---------------- 適用結果の検証 ----------------
+
+def verify_commit_trailers(commit: dict[str, Any]) -> Optional[str]:
+    """コミットのトレーラーが 4 つ揃っているか。欠けていれば理由を返す。"""
+    trailers = commit.get("trailers") or {}
+    missing = [k for k in REQUIRED_TRAILERS if not str(trailers.get(k) or "").strip()]
+    if missing:
+        return f"コミット {commit.get('sha', '?')} にトレーラーが欠けています: {', '.join(missing)}"
+    return None
+
+
+def verify_apply_item(
+    reported: dict[str, Any], item: dict[str, Any]
+) -> Optional[str]:
+    """1 項目の適用結果を検証する。問題があれば失敗理由を返す。
+
+    振る舞い不変は機械的には確かめられないが、**手順が守られたかは結果から
+    確かめられる**。読ませ方の不確実性に対する最後の砦としてここを厚くする。
+    """
+    commits = reported.get("commits") or []
+    if not commits:
+        return "コミットが 1 件もありません（1 手 1 コミットの前提を満たしていません）"
+
+    for commit in commits:
+        problem = verify_commit_trailers(commit)
+        if problem:
+            return problem
+        if commit.get("test_status") != "pass":
+            return (
+                f"コミット {commit.get('sha', '?')} でテストが成功していません "
+                f"({commit.get('test_status')})"
+            )
+        item_id = (commit.get("trailers") or {}).get("Item-Id")
+        if item_id != item["item_id"]:
+            return (
+                f"コミット {commit.get('sha', '?')} の Item-Id が {item_id} で、"
+                f"項目 {item['item_id']} と一致しません"
+                "（複数の項目を 1 コミットにまとめると取り消し範囲が決まりません）"
+            )
+
+    if item.get("test_gap"):
+        # テストが乏しいと申告された項目は、**現状固定テストの追加が先行**していること。
+        # 実測では同じ課題で固定テストの追加数が 17 本 / 1 メソッド / 0 本と揃わなかった。
+        if not commits[0].get("characterization_test"):
+            return (
+                "テストが乏しい項目なのに、現状固定テストの追加コミットが先行していません"
+            )
+
+    budget = int(item.get("estimated_diff_lines") or 0) * DIFF_BUDGET_FACTOR
+    actual = int(reported.get("diff_lines") or 0)
+    if budget and actual > budget:
+        return f"実差分 {actual} 行が差分予算 {budget} 行を超えました（範囲の逸脱）"
+    return None
+
+
+# ---------------- レビュー判定 ----------------
+
+def judge(
+    reviews: dict[str, dict[str, Any]], reviewers: list[str], round_items: list[str]
+) -> tuple[str, list[str]]:
+    """レビュー結果を判定し `(判定, 問題の一覧)` を返す。
+
+    判定は `approved` / `changes` / `invalid` の 3 つ。
+    `invalid` は差し戻して**再レビューさせる**もので、承認にも変更要求にもしない。
+
+    指摘には改善項目 ID を必須とする。取り消しを項目単位で行うために必要で、
+    そのラウンドに無い ID や欠落は判定に使えない。ラウンド全体に対する指摘は
+    `null` を明示させ、取り消し時はラウンド全件の対象とする。
+    """
+    problems: list[str] = []
+    for name in reviewers:
+        review = reviews.get(name)
+        if not review:
+            problems.append(f"{name} のレビュー結果がありません")
+            continue
+        verdict = review.get("verdict")
+        if verdict not in {"APPROVE", "REQUEST_CHANGES"}:
+            problems.append(
+                f"{name} の判定 `{verdict}` は APPROVE / REQUEST_CHANGES のいずれかで"
+                "なければなりません（COMMENT は使いません）"
+            )
+        for i, finding in enumerate(review.get("findings") or []):
+            if "item_id" not in finding:
+                problems.append(f"{name} の指摘 {i + 1} に item_id がありません")
+                continue
+            item_id = finding["item_id"]
+            if item_id is not None and item_id not in round_items:
+                problems.append(
+                    f"{name} の指摘 {i + 1} の item_id `{item_id}` は"
+                    "このラウンドの改善項目ではありません"
+                )
+    if problems:
+        return "invalid", problems
+    if all(reviews[name].get("verdict") == "APPROVE" for name in reviewers):
+        return "approved", []
+    return "changes", []
+
+
+def unresolved_item_ids(
+    review_history: list[dict[str, Any]], round_items: list[str]
+) -> tuple[list[str], bool]:
+    """未解決の指摘から `(取り消す項目 ID, ラウンド全件が対象か)` を求める。
+
+    ID が `null` の未解決指摘（ラウンド全体に対する指摘）が 1 件でもあれば、
+    そのラウンドで適用した項目を全件取り消す。どの項目に紐づくか決められない
+    以上、一部だけ残すと Pull Request に中途半端な状態が残るためである。
+    """
+    targets: list[str] = []
+    whole_round = False
+    for review in review_history:
+        for finding in review.get("findings") or []:
+            if finding.get("resolved"):
+                continue
+            item_id = finding.get("item_id")
+            if item_id is None:
+                whole_round = True
+            elif item_id in round_items and item_id not in targets:
+                targets.append(item_id)
+    if whole_round:
+        return list(round_items), True
+    return targets, False
+
+
+# ---------------- サブコマンド ----------------
+
+def cmd_init(args: argparse.Namespace) -> None:
+    """Step 0 — ホストと母集合を確定し、作業ディレクトリ root と状態を用意する。
+
+    **提案・レビューの母集合（全 − ホスト）と適用の母集合（全 − gemini）を
+    別々に確定する。** 両者は重なるが一致しない。
+    """
+    try:
+        host, detection = assignment.detect_host(args.host)
+    except assignment.AssignmentError as e:
+        die(str(e))
+        return
+    try:
+        model_spec = models_lib.parse_model_args(args.model)
+    except models_lib.ModelSpecError as e:
+        die(str(e))
+        return
+
+    runtimes = assignment.review_pool(host)
+    impl_capable = assignment.impl_pool()
+    if host in runtimes:
+        die(f"提案・レビューの母集合にホスト {host} が含まれています（判定の誤り）")
+
+    repo = _sh(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
+    head_branch = _sh(
+        ["gh", "pr", "view", str(args.pr), "--json", "headRefName", "--jq", ".headRefName"]
+    )
+    base_branch = _sh(
+        ["gh", "pr", "view", str(args.pr), "--json", "baseRefName", "--jq", ".baseRefName"]
+    )
+
+    root = (
+        pathlib.Path(args.worktree_root).resolve() if args.worktree_root
+        else _default_worktree_base() / _repo_slug(repo) / f"rf{args.pr}"
+    )
+    work = root / "work"
+    _ensure_work_worktree(work, head_branch)
+
+    tmp_dir = _tmp_dir_for(work)
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    state_file = _state_path(tmp_dir, args.pr)
+
+    if state_file.exists():
+        state = statefile.load(state_file)
+        if state.get("final") is None:
+            info(f"↻ 前回中断した状態から再開します（提案ラウンド {state.get('outer_round', 0)}）")
+            _emit_init(state)
+            return
+
+    baseline = _run_baseline_test(args.baseline_test, work)
+
+    state: dict[str, Any] = {
+        "id": args.pr,
+        "started_at": statefile.now(),
+        "repo": repo,
+        "current_pr": args.pr,
+        "base_branch": base_branch,
+        "head_branch": head_branch,
+        "worktree_root": str(root),
+        "worktrees": {"work": str(work), **{r: str(root / r) for r in runtimes}},
+        "tmp_dir": str(tmp_dir),
+        "target_scope": list(args.scope),
+        "host": host,
+        "host_detection": detection,
+        "runtimes": runtimes,
+        "impl_capable": impl_capable,
+        "models": model_spec,
+        "skills": {"required": list(REQUIRED_SKILLS)},
+        "max_outer_rounds": args.max_outer_rounds,
+        "max_fix_rounds": args.max_fix_rounds,
+        "max_items_per_round": args.max_items_per_round,
+        "severity_threshold": args.severity_threshold,
+        "baseline_test": baseline,
+        "outer_round": 0,
+        "phase": "init",
+        "rounds": [],
+        "items": [],
+        "deferred_items": [],
+        "final": None,
+    }
+    statefile.save(state_file, state)
+    info(f"✅ 状態を初期化しました: {state_file}")
+    info(f"   ホスト: {host}（{detection}）")
+    info(f"   提案・レビュー: {' / '.join(runtimes)}")
+    info(f"   適用の母集合: {' / '.join(impl_capable)}")
+    _emit_init(state)
+
+
+def _emit_init(state: dict[str, Any]) -> None:
+    statefile.emit(
+        ID=state["id"],
+        REPO=state["repo"],
+        HOST=state["host"],
+        RUNTIMES=" ".join(state["runtimes"]),
+        RUNTIMES_CSV=",".join(state["runtimes"]),
+        IMPL_POOL=" ".join(state["impl_capable"]),
+        WORKTREE_ROOT=state["worktree_root"],
+        WORK=state["worktrees"]["work"],
+        TMP_DIR=state["tmp_dir"],
+        HEAD_BRANCH=state["head_branch"],
+        BASE_BRANCH=state["base_branch"],
+        SCOPE=" ".join(state["target_scope"]),
+    )
+
+
+def _ensure_work_worktree(work: pathlib.Path, head_branch: str) -> None:
+    """書き込み用の作業ディレクトリを冪等に用意する。
+
+    ここだけが**唯一の非 detach**（Pull Request の head ブランチを checkout する）。
+    読み取り用は `prepare-worktrees.sh` が `--detach` で作る。同一ブランチを
+    2 つの作業ディレクトリへ checkout できないという git の制約があるためである。
+    """
+    if work.exists():
+        if _is_registered_worktree(work):
+            return
+        stale = work.with_name(f"work.stale-{time.strftime('%Y%m%d%H%M%S')}")
+        work.rename(stale)
+        info(f"⚠ 現リポジトリの作業ディレクトリではないため退避しました: {stale}")
+    work.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "worktree", "prune"], capture_output=True, text=True)
+    _sh(["git", "fetch", "origin", head_branch])
+    # ローカルに head ブランチがあるかどうかで作り方が変わる。無い状態で
+    # `worktree add <path> <branch>` を叩くと「そんなブランチは無い」で失敗する。
+    exists = subprocess.run(
+        ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{head_branch}"],
+        capture_output=True, text=True,
+    ).returncode == 0
+    if exists:
+        _sh(["git", "worktree", "add", str(work), head_branch])
+    else:
+        _sh(["git", "worktree", "add", "-b", head_branch, str(work),
+             f"origin/{head_branch}"])
+    info(f"✅ 書き込み用の作業ディレクトリを作成しました: {work}")
+
+
+def _is_registered_worktree(path: pathlib.Path) -> bool:
+    out = _sh(["git", "worktree", "list", "--porcelain"], check=False)
+    target = str(path.resolve())
+    return any(line == f"worktree {target}" for line in out.splitlines())
+
+
+def _run_baseline_test(command: Optional[str], work: pathlib.Path) -> dict[str, Any]:
+    """着手前のテストを実行して記録する。
+
+    失敗している状態で構造改善に入ると、**壊したのか元から壊れていたのか**
+    区別できない。未指定のときは `unknown` として記録し、以後の検証で警告する。
+    """
+    if not command:
+        info(
+            "⚠ --baseline-test が未指定です。着手前のテスト成功を確認できないため、"
+            "振る舞い不変の担保が 1 段弱くなります"
+        )
+        return {"command": None, "status": "unknown", "checked_at": statefile.now()}
+    r = subprocess.run(command, shell=True, cwd=str(work), capture_output=True, text=True)
+    status = "green" if r.returncode == 0 else "red"
+    if status == "red":
+        die(
+            f"着手前のテストが失敗しています（{command}）。"
+            f"先に直してから開始してください:\n{r.stdout[-2000:]}\n{r.stderr[-2000:]}"
+        )
+    info(f"✅ 着手前のテスト成功: {command}")
+    return {"command": command, "status": status, "checked_at": statefile.now()}
+
+
+def cmd_start_round(args: argparse.Namespace) -> None:
+    """Step 2 — 提案ラウンドを開き、実装担当とレビュー担当を返す。
+
+    終了コード: 0 = ラウンドを開いた / 1 = 提案ラウンドの繰り返しが終了済み。
+
+    **再開しても担当は変わらない。** 同じラウンド番号を開き直したときは記録済みの
+    割り当てをそのまま返す。
+    """
+    path, state = _load(args.id)
+    if state.get("final"):
+        info(f"提案ラウンドの繰り返しは終了しています（{state['final']}）")
+        sys.exit(1)
+
+    rounds = state["rounds"]
+    if len(rounds) >= state["max_outer_rounds"]:
+        _finish(path, state, "max_outer_rounds")
+        sys.exit(1)
+
+    round_no = len(rounds) + 1
+    existing = next((r for r in rounds if r["round"] == round_no), None)
+    if existing is None:
+        impl, reviewers = assignment.assign(round_no, state["host"])
+        models = state["models"]
+        existing = {
+            "round": round_no,
+            "started_at": statefile.now(),
+            "impl": impl,
+            "impl_model": {"requested": models.get(impl), "observed": None},
+            "reviewers": reviewers,
+            "reviewer_models": {
+                r: {"requested": models.get(r), "observed": None} for r in reviewers
+            },
+            "proposed": {},
+            "merged": 0, "adopted": 0, "deferred": 0,
+            "items": [],
+            "apply": {"applied": [], "failed": [], "base_sha": None, "head_sha": None},
+            "fix_rounds": 0,
+            "durations": {},
+            "reviews": [],
+        }
+        rounds.append(existing)
+        state["outer_round"] = round_no
+        state["phase"] = "propose"
+        statefile.save(path, state)
+
+    info(
+        f"=== 提案ラウンド {round_no} / {state['max_outer_rounds']} "
+        f"（実装 {existing['impl']} / レビュー {' + '.join(existing['reviewers'])}）==="
+    )
+    statefile.emit(
+        ROUND=round_no,
+        IMPL=existing["impl"],
+        IMPL_MODEL=existing["impl_model"]["requested"],
+        REVIEWERS=" ".join(existing["reviewers"]),
+        REVIEWERS_CSV=",".join(existing["reviewers"]),
+        MAX_FIX_ROUNDS=state["max_fix_rounds"],
+    )
+
+
+def cmd_merge_proposals(args: argparse.Namespace) -> None:
+    """Step 3 — 提案をマージして改善項目を作る。
+
+    終了コード: 0 = 採用あり / 2 = 採用 0 件（提案ラウンドの繰り返しを終える）。
+    """
+    path, state = _load(args.id)
+    entry = _current_round(state)
+    proposals: dict[str, list[dict[str, Any]]] = {}
+    for runtime in state["runtimes"]:
+        result = _result_path(state, runtime, stem_for(runtime, "propose", state["id"]))
+        if not result.exists():
+            info(f"⚠ {runtime} の提案結果がありません: {result}")
+            continue
+        try:
+            payload = json.loads(result.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            info(f"⚠ {runtime} の提案結果が JSON として読めません: {e}")
+            continue
+        items = payload.get("items")
+        proposals[runtime] = items if isinstance(items, list) else []
+        entry["proposed"][runtime] = len(proposals[runtime])
+
+    excluded = {
+        (d["path"], d["symbol"], d["smell"]) for d in state["deferred_items"]
+    }
+    adopted, deferred = merge_proposals(
+        proposals,
+        threshold=state["severity_threshold"],
+        max_items=state["max_items_per_round"],
+        excluded_keys=excluded,
+    )
+
+    # 収束判定に使う「前ラウンドとの重複率」。見送りも含めた提案全体で測る。
+    current_keys = [(i["path"], i["symbol"], i["smell"]) for i in adopted + deferred]
+    entry["proposal_keys"] = [list(k) for k in current_keys]
+    entry["merged"] = len(current_keys)
+    entry["adopted"] = len(adopted)
+    entry["deferred"] = len(deferred)
+
+    round_no = entry["round"]
+    for n, item in enumerate(adopted, start=1):
+        item_id = f"R{round_no}-{n:03d}"
+        state["items"].append({
+            "item_id": item_id,
+            "round": round_no,
+            **item,
+            "status": "pending",
+            "commits": [],
+        })
+        entry["items"].append(item_id)
+    for item in deferred:
+        state["deferred_items"].append({**item, "round": round_no})
+
+    state["phase"] = "apply" if adopted else "converged"
+    if not adopted:
+        # 呼び出し側は終了コード 2 で繰り返しを抜けるため、`advance` を通らない。
+        # 終了理由をここで確定させないと、報告が「未終了」のままになる。
+        state["final"] = "no_more_proposals"
+        state["ended_at"] = statefile.now()
+    statefile.save(path, state)
+    info(
+        f"提案 {sum(entry['proposed'].values())} 件 → 統合 {entry['merged']} 件 → "
+        f"採用 {entry['adopted']} 件 / 見送り {entry['deferred']} 件"
+    )
+    for item_id in entry["items"]:
+        item = _find_item(state, item_id)
+        info(
+            f"  {item_id} [{item['severity']}] {item['path']}#{item['symbol']} "
+            f"{item['smell']} → {item['technique']} "
+            f"(合意 {len(item['proposed_by'])} / 見積 {item['estimated_diff_lines']} 行)"
+        )
+    if not adopted:
+        info("採用 0 件のため、提案ラウンドの繰り返しを終えます")
+        sys.exit(2)
+
+
+def cmd_merge_apply(args: argparse.Namespace) -> None:
+    """Step 4 — 適用結果を検証して取り込む。
+
+    終了コード: 0 = 1 件以上成功 / 2 = 全件失敗（次の提案ラウンドへ進む）。
+
+    **1 件の失敗でラウンドを止めない。** 失敗した項目だけを見送りにして、
+    残りは採用する。
+    """
+    path, state = _load(args.id)
+    entry = _round(state, args.round)
+    impl = entry["impl"]
+    result = _result_path(state, impl, stem_for(impl, "apply", state["id"], args.round))
+    payload = _read_result(result, impl)
+
+    _record_observed_model(entry, "impl", impl, state, "apply", args.round)
+
+    baseline = state.get("baseline_test") or {}
+    if baseline.get("status") == "red":
+        for item_id in entry["items"]:
+            _find_item(state, item_id)["status"] = "blocked"
+        statefile.save(path, state)
+        die("着手前のテストが失敗しているため、適用へ着手しません（全項目を blocked）", code=2)
+
+    reported = {r.get("item_id"): r for r in payload.get("items", []) if isinstance(r, dict)}
+    applied: list[str] = []
+    failed: list[str] = []
+    for item_id in entry["items"]:
+        item = _find_item(state, item_id)
+        got = reported.get(item_id)
+        if got is None:
+            problem = "適用結果に項目がありません"
+        else:
+            problem = verify_apply_item(got, item)
+        if problem:
+            item["status"] = "abandoned"
+            item["failure_reason"] = problem
+            item["test_failed"] = bool(got and "テストが成功していません" in problem)
+            item["budget_exceeded"] = bool(got and "差分予算" in problem)
+            failed.append(item_id)
+            info(f"❌ {item_id}: {problem}")
+            continue
+        item["status"] = "reviewing"
+        item["commits"] = [c.get("sha") for c in got.get("commits", [])]
+        item["diff_lines"] = int(got.get("diff_lines") or 0)
+        applied.append(item_id)
+        info(f"✅ {item_id}: {len(item['commits'])} コミット / {item['diff_lines']} 行")
+
+    entry["apply"] = {
+        "applied": applied,
+        "failed": failed,
+        "base_sha": payload.get("base_sha"),
+        "head_sha": payload.get("head_sha"),
+    }
+    entry.setdefault("durations", {})["apply"] = payload.get("elapsed_seconds") or 0
+    state["phase"] = "review" if applied else "propose"
+    statefile.save(path, state)
+
+    if not applied:
+        info("全項目が失敗したため、このラウンドのレビューは行いません")
+        sys.exit(2)
+
+
+def cmd_judge_review(args: argparse.Namespace) -> None:
+    """Step 5 — レビュー 2 者の判定を取り込む。
+
+    終了コード: 0 = 2 者とも承認 / 2 = 修正へ / 3 = 差し戻して再レビュー。
+    """
+    path, state = _load(args.id)
+    entry = _round(state, args.round)
+    reviewers = entry["reviewers"]
+
+    reviews: dict[str, dict[str, Any]] = {}
+    for name in reviewers:
+        result = _result_path(state, name, stem_for(name, "review", state["id"], args.round))
+        if not result.exists():
+            info(f"⚠ {name} のレビュー結果がありません: {result}")
+            continue
+        try:
+            reviews[name] = json.loads(result.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            info(f"⚠ {name} のレビュー結果が JSON として読めません: {e}")
+        _record_observed_model(entry, "reviewer", name, state, "review", args.round)
+
+    verdict, problems = judge(reviews, reviewers, entry["items"])
+
+    record: dict[str, Any] = {"round": len(entry["reviews"]) + 1, "findings": []}
+    for name in reviewers:
+        record[name] = (reviews.get(name) or {}).get("verdict")
+        for finding in (reviews.get(name) or {}).get("findings") or []:
+            record["findings"].append({
+                "reviewer": name,
+                "item_id": finding.get("item_id"),
+                "thread_id": finding.get("thread_id"),
+                "summary": finding.get("summary"),
+                "resolved": bool(finding.get("resolved")),
+            })
+    entry["reviews"].append(record)
+    # レビュー担当ごとの所要時間は**別々に**持つ。ラウンドの合計を各担当へ配ると、
+    # 2 者分を両方に数えることになり、担当同士の比較が成り立たない。
+    per_reviewer = entry.setdefault("reviewer_seconds", {})
+    for name in reviewers:
+        per_reviewer[name] = per_reviewer.get(name, 0) + int(
+            (reviews.get(name) or {}).get("elapsed_seconds") or 0
+        )
+    entry.setdefault("durations", {})["review"] = sum(per_reviewer.values())
+    statefile.save(path, state)
+
+    if verdict == "invalid":
+        for p in problems:
+            info(f"❌ {p}")
+        entry["invalid_reviews"] = entry.get("invalid_reviews", 0) + 1
+        if entry["invalid_reviews"] > MAX_INVALID_REVIEWS:
+            # 差し戻しを無限に繰り返さない。形式を満たせないレビューが続く以上、
+            # このラウンドの成果は検証されていないものとして扱い、変更要求へ落とす。
+            # 紐づけ先が決まらないので、取り消しはラウンド全件が対象になる。
+            record["findings"].append({
+                "reviewer": "cross-refactoring",
+                "item_id": None,
+                "thread_id": None,
+                "summary": (
+                    f"レビュー結果の形式が {MAX_INVALID_REVIEWS + 1} 回続けて不正だった: "
+                    + " / ".join(problems)
+                ),
+                "resolved": False,
+            })
+            statefile.save(path, state)
+            info("差し戻しの上限に達したため、変更要求として扱います")
+            sys.exit(2)
+        statefile.save(path, state)
+        info("レビュー結果を差し戻します。指摘には必ず改善項目 ID を付けてください")
+        sys.exit(3)
+    if verdict == "approved":
+        for item_id in entry["apply"]["applied"]:
+            _find_item(state, item_id)["status"] = "done"
+        state["phase"] = "propose"
+        statefile.save(path, state)
+        info("✅ レビュー担当 2 者とも承認しました")
+        return
+    open_findings = sum(1 for f in record["findings"] if not f["resolved"])
+    info(f"変更要求があります（未解決の指摘 {open_findings} 件）")
+    sys.exit(2)
+
+
+def cmd_should_abandon(args: argparse.Namespace) -> None:
+    """Step 6 — 修正ラウンドの上限に達したか。
+
+    終了コード: 0 = 見送りへ移る / 2 = まだ修正できる。
+    """
+    _, state = _load(args.id)
+    entry = _round(state, args.round)
+    limit = state["max_fix_rounds"]
+    if entry["fix_rounds"] >= limit:
+        info(f"修正ラウンドが上限 {limit} に達しました。未解決の項目を見送ります")
+        return
+    info(f"修正ラウンド {entry['fix_rounds']} / {limit} — まだ修正します")
+    sys.exit(2)
+
+
+def cmd_abandon_items(args: argparse.Namespace) -> None:
+    """Step 6 — 未解決の指摘に紐づく改善項目だけを取り消す。
+
+    **合意済みの項目は Pull Request に残す。** これを可能にするために、適用は
+    項目ごとに 1 手 1 コミットへ分け、状態ファイルへコミットを記録している。
+    """
+    path, state = _load(args.id)
+    entry = _round(state, args.round)
+    targets, whole_round = unresolved_item_ids(entry["reviews"], entry["apply"]["applied"])
+    if whole_round:
+        info(
+            "どの項目にも紐づかない未解決の指摘があるため、"
+            "このラウンドで適用した項目を全件取り消します"
+        )
+    if not targets:
+        info("取り消す項目はありません")
+        return
+
+    work = state["worktrees"]["work"]
+    for item_id in targets:
+        item = _find_item(state, item_id)
+        # 新しいコミットから順に戻す。逆順にしないと後続の取り消しが競合する。
+        for sha in reversed(item.get("commits") or []):
+            if args.dry_run:
+                info(f"（dry-run）git revert --no-edit {sha}")
+                continue
+            r = subprocess.run(
+                ["git", "revert", "--no-edit", sha],
+                cwd=work, capture_output=True, text=True,
+            )
+            if r.returncode != 0:
+                subprocess.run(["git", "revert", "--abort"], cwd=work,
+                               capture_output=True, text=True)
+                die(
+                    f"{item_id} のコミット {sha} を取り消せませんでした: "
+                    f"{r.stderr.strip()[:400]}"
+                )
+        item["status"] = "abandoned"
+        item.setdefault("failure_reason", "修正ラウンドの上限に達しても指摘が解決しなかった")
+        state["deferred_items"].append({
+            "item_id": item_id,
+            "path": item["path"], "symbol": item["symbol"], "smell": item["smell"],
+            "round": entry["round"],
+            "defer_reason": item["failure_reason"],
+        })
+        info(f"↩ {item_id} を取り消しました（{len(item.get('commits') or [])} コミット）")
+
+    if not args.dry_run:
+        # `--force` は使わない。他者の作業を消す事故を起こさないため。
+        _sh(["git", "push", "origin", f"HEAD:{state['head_branch']}"], cwd=work)
+    entry["abandoned"] = targets
+    state["phase"] = "propose"
+    statefile.save(path, state)
+
+
+def cmd_merge_fix(args: argparse.Namespace) -> None:
+    """Step 6 — 修正結果を取り込み、修正ラウンドを 1 つ進める。"""
+    path, state = _load(args.id)
+    entry = _round(state, args.round)
+    impl = entry["impl"]
+    result = _result_path(state, impl, stem_for(impl, "fix", state["id"], args.round))
+    payload = _read_result(result, impl)
+
+    resolved = {t for t in payload.get("resolved_thread_ids", []) if t}
+    for review in entry["reviews"]:
+        for finding in review["findings"]:
+            if finding.get("thread_id") in resolved:
+                finding["resolved"] = True
+
+    for commit in payload.get("commits", []):
+        problem = verify_commit_trailers(commit)
+        if problem:
+            info(f"⚠ 修正コミットのトレーラーが不足しています: {problem}")
+        item_id = (commit.get("trailers") or {}).get("Item-Id")
+        item = _find_item(state, item_id, required=False)
+        if item is not None and commit.get("sha"):
+            item.setdefault("commits", []).append(commit["sha"])
+
+    entry["fix_rounds"] += 1
+    entry.setdefault("durations", {})["fix"] = (
+        entry.get("durations", {}).get("fix", 0)
+        + int(payload.get("elapsed_seconds") or 0)
+    )
+    statefile.save(path, state)
+    info(f"修正を取り込みました（解決 {len(resolved)} スレッド / 修正ラウンド {entry['fix_rounds']}）")
+
+
+def cmd_advance(args: argparse.Namespace) -> None:
+    """Step 7 — 提案ラウンドの繰り返しを続けるか判定する。
+
+    終了コード: 0 = 続ける / 1 = 終了。
+
+    終了条件は 3 つ。採用 0 件 / 上限到達 / 前ラウンドとの提案重複率が
+    しきい値以上。**同じ提案が毎ラウンド出続けて終わらない**ことを防ぐ。
+    """
+    path, state = _load(args.id)
+    rounds = state["rounds"]
+    if state.get("final"):
+        info(f"終了済みです（{state['final']}）")
+        sys.exit(1)
+    if not rounds:
+        return
+    if len(rounds) >= state["max_outer_rounds"]:
+        _finish(path, state, "max_outer_rounds")
+        sys.exit(1)
+    last = rounds[-1]
+    if last.get("adopted") == 0:
+        _finish(path, state, "no_more_proposals")
+        sys.exit(1)
+    if len(rounds) >= 2:
+        rate = duplicate_rate(
+            [tuple(k) for k in last.get("proposal_keys") or []],
+            [tuple(k) for k in rounds[-2].get("proposal_keys") or []],
+        )
+        if rate >= DUPLICATE_RATE_THRESHOLD:
+            info(f"提案の重複率が {rate:.0%} で、前ラウンドとほぼ同じです")
+            _finish(path, state, "duplicate_proposals")
+            sys.exit(1)
+
+
+def _finish(path: pathlib.Path, state: dict[str, Any], reason: str) -> None:
+    state["final"] = reason
+    state["ended_at"] = statefile.now()
+    state["phase"] = "final"
+    statefile.save(path, state)
+    info(f"提案ラウンドの繰り返しを終了します（理由: {reason}）")
+
+
+def cmd_status(args: argparse.Namespace) -> None:
+    """現在の状態を人が読む形で出す。"""
+    _, state = _load(args.id)
+    print(f"# cross-refactoring rf{state['id']}（{state['repo']} #{state['current_pr']}）")
+    print(f"ホスト: {state['host']}（{state['host_detection']}）")
+    print(f"提案・レビュー: {' / '.join(state['runtimes'])}")
+    print(f"適用の母集合: {' / '.join(state['impl_capable'])}")
+    print(f"局面: {state['phase']} / 提案ラウンド {state['outer_round']} "
+          f"/ {state['max_outer_rounds']}")
+    print(f"終了理由: {state.get('final') or '（未終了）'}")
+    print()
+    print(_round_table(state))
+
+
+def cmd_report(args: argparse.Namespace) -> None:
+    """Step 8 — ラウンド表・項目表・見送り項目・指標を出す。"""
+    _, state = _load(args.id)
+    print(f"# cross-refactoring 実行報告 — {state['repo']} #{state['current_pr']}")
+    print()
+    print(f"- ホスト: {state['host']}（{state['host_detection']}）")
+    print(f"- 対象範囲: {', '.join(state['target_scope']) or '（未指定）'}")
+    print(f"- 終了理由: {state.get('final') or '（未終了）'}")
+    baseline = state.get("baseline_test") or {}
+    print(f"- 着手前のテスト: {baseline.get('command') or '（未指定）'}"
+          f"（{baseline.get('status')}）")
+    print()
+    print("## ラウンド")
+    print()
+    print(_round_table(state))
+    print()
+    print("## 改善項目")
+    print()
+    print(_item_table(state))
+    if state["deferred_items"]:
+        print()
+        print("## 見送った提案")
+        print()
+        print("| ラウンド | 対象 | スメル | 理由 |")
+        print("| --- | --- | --- | --- |")
+        for d in state["deferred_items"]:
+            print(f"| {d.get('round', '—')} | {d['path']}#{d['symbol']} | "
+                  f"{d['smell']} | {d.get('defer_reason', '—')} |")
+    if args.metrics:
+        print()
+        print("# 指標")
+        print()
+        print(metrics_lib.format_report(metrics_lib.aggregate(state)))
+
+
+def _round_table(state: dict[str, Any]) -> str:
+    lines = [
+        "| R | 実装担当 | モデル | レビュー担当 | モデル | 採用 | 適用 | 見送り | 修正 | 初回承認 |",
+        "| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | --- |",
+    ]
+    for entry in state["rounds"]:
+        reviewers = entry.get("reviewers", [])
+        reviewer_models = entry.get("reviewer_models") or {}
+        reviews = entry.get("reviews") or []
+        first_approved = "—"
+        if reviews:
+            first_approved = (
+                "はい" if all(reviews[0].get(r) == "APPROVE" for r in reviewers) else "いいえ"
+            )
+        lines.append(
+            f"| {entry['round']} | {entry.get('impl', '—')} | "
+            f"{models_lib.label((entry.get('impl_model') or {}).get('requested'))} | "
+            f"{' / '.join(reviewers) or '—'} | "
+            f"{' / '.join(models_lib.label((reviewer_models.get(r) or {}).get('requested')) for r in reviewers) or '—'} | "
+            f"{entry.get('adopted', 0)} | {len(entry.get('apply', {}).get('applied', []))} | "
+            f"{len(entry.get('apply', {}).get('failed', []))} | {entry.get('fix_rounds', 0)} | "
+            f"{first_approved} |"
+        )
+    return "\n".join(lines) if state["rounds"] else "（ラウンドなし）"
+
+
+def _item_table(state: dict[str, Any]) -> str:
+    if not state["items"]:
+        return "（改善項目なし）"
+    lines = [
+        "| ID | 対象 | スメル | 手法 | 重要度 | 提案元 | 状態 | コミット |",
+        "| --- | --- | --- | --- | --- | --- | --- | ---: |",
+    ]
+    for item in state["items"]:
+        lines.append(
+            f"| {item['item_id']} | {item['path']}#{item['symbol']} | "
+            f"{item['smell']} | {item['technique']} | {item['severity']} | "
+            f"{'/'.join(item.get('proposed_by', []))} | {item['status']} | "
+            f"{len(item.get('commits') or [])} |"
+        )
+    return "\n".join(lines)
+
+
+# ---------------- 補助 ----------------
+
+def _current_round(state: dict[str, Any]) -> dict[str, Any]:
+    if not state["rounds"]:
+        die("提案ラウンドが開かれていません。先に start-round を実行してください")
+    return state["rounds"][-1]
+
+
+def _round(state: dict[str, Any], round_no: int) -> dict[str, Any]:
+    for entry in state["rounds"]:
+        if entry["round"] == round_no:
+            return entry
+    die(f"ラウンド {round_no} がありません")
+    raise SystemExit(1)
+
+
+def _find_item(
+    state: dict[str, Any], item_id: Optional[str], required: bool = True
+) -> Any:
+    for item in state["items"]:
+        if item["item_id"] == item_id:
+            return item
+    if required:
+        die(f"改善項目 {item_id} がありません")
+    return None
+
+
+def _read_result(path: pathlib.Path, runtime: str) -> dict[str, Any]:
+    if not path.exists():
+        die(f"{runtime} の結果ファイルがありません: {path}", code=2)
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        die(f"{runtime} の結果ファイルが JSON として読めません: {e}", code=2)
+    raise SystemExit(2)
+
+
+def _record_observed_model(
+    entry: dict[str, Any], role: str, runtime: str,
+    state: dict[str, Any], phase: str, round_no: Optional[int],
+) -> None:
+    """CLI の出力から実際に使われたモデル名を拾って記録する。
+
+    取れるのは claude だけである。取れないランタイムは `None` のままにし、
+    報告では既定モデルのラウンドとして集計から区別する。
+    """
+    stem = stem_for(runtime, phase, state["id"], round_no)
+    stdout_log = pathlib.Path(state["tmp_dir"]) / f"{stem}-stdout.log"
+    if not stdout_log.exists():
+        return
+    observed = models_lib.observed_model(
+        runtime, stdout_log.read_text(encoding="utf-8", errors="replace")
+    )
+    if not observed:
+        return
+    if role == "impl":
+        entry["impl_model"]["observed"] = observed
+        requested = entry["impl_model"]["requested"]
+    else:
+        entry["reviewer_models"].setdefault(runtime, {"requested": None, "observed": None})
+        entry["reviewer_models"][runtime]["observed"] = observed
+        requested = entry["reviewer_models"][runtime]["requested"]
+    warning = models_lib.mismatch_warning(runtime, requested, observed)
+    if warning:
+        info(warning)
+
+
+# ---------------- main ----------------
+
+def main() -> None:
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    init = sub.add_parser("init", help="状態を初期化する")
+    init.add_argument("pr", type=int)
+    init.add_argument("--scope", nargs="+", required=True,
+                      help="対象範囲。提案が無制限に広がらないよう必須にしている")
+    init.add_argument("--host", choices=list(assignment.HOST_RUNTIMES), default=None,
+                      help="ホストの明示指定。未指定時は環境変数から推定する")
+    init.add_argument("--max-outer-rounds", type=int, default=3)
+    init.add_argument("--max-fix-rounds", type=int, default=3)
+    init.add_argument("--max-items-per-round", type=int, default=5)
+    init.add_argument("--severity-threshold", default=DEFAULT_SEVERITY_THRESHOLD,
+                      choices=[s for s in SEVERITY_ORDER if s != "unknown"])
+    init.add_argument("--model", action="append", metavar="RUNTIME=MODEL",
+                      help="ランタイムごとのモデル指定。繰り返し指定できる")
+    init.add_argument("--baseline-test", default=None,
+                      help="着手前に実行するテストコマンド")
+    init.add_argument("--worktree-root", default=None)
+    init.set_defaults(func=cmd_init)
+
+    for name, func, help_ in (
+        ("start-round", cmd_start_round, "提案ラウンドを開く"),
+        ("merge-proposals", cmd_merge_proposals, "提案をマージして改善項目を作る"),
+        ("advance", cmd_advance, "提案ラウンドの収束判定"),
+        ("status", cmd_status, "現在の状態を出す"),
+    ):
+        sp = sub.add_parser(name, help=help_)
+        sp.add_argument("id", type=int)
+        sp.set_defaults(func=func)
+
+    for name, func, help_ in (
+        ("merge-apply", cmd_merge_apply, "適用結果を検証して取り込む"),
+        ("judge-review", cmd_judge_review, "レビュー 2 者の判定を取り込む"),
+        ("should-abandon", cmd_should_abandon, "修正ラウンド上限の到達判定"),
+        ("merge-fix", cmd_merge_fix, "修正結果を取り込む"),
+    ):
+        sp = sub.add_parser(name, help=help_)
+        sp.add_argument("id", type=int)
+        sp.add_argument("round", type=int)
+        sp.set_defaults(func=func)
+
+    ab = sub.add_parser("abandon-items", help="未解決の指摘に紐づく項目を取り消す")
+    ab.add_argument("id", type=int)
+    ab.add_argument("round", type=int)
+    ab.add_argument("--dry-run", action="store_true",
+                    help="取り消すコミットを表示するだけで実行しない")
+    ab.set_defaults(func=cmd_abandon_items)
+
+    rp = sub.add_parser("report", help="実行報告を出す")
+    rp.add_argument("id", type=int)
+    rp.add_argument("--metrics", action="store_true",
+                    help="ランタイムとモデルの組で指標を集計する")
+    rp.set_defaults(func=cmd_report)
+
+    args = p.parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()

@@ -29,9 +29,9 @@ skills/     → 実行可能なワークフロー
 
 詳細は `docs/specifications/ndf-knowledge-and-kiro.md` を参照。
 
-## NDF v8.0.0 の Skill 構成
+## NDF v8.1.0 の Skill 構成
 
-Skill は 30 個で、配布は `plugins/ndf-shared/manifests/` が唯一の基準（Claude Code 26 / Codex 24 / Kiro 25）。ブラウザ自動テストの 4 個は `playwright-kit` プラグインへ分離した（`plugins/playwright-kit-shared/`）。frontmatter の書き方は `plugins/ndf-shared/skills/README.md` の規約に従い、`python3 scripts/check-skill-frontmatter.py` で検査する。利用実績と維持・統合・削除の判定は `docs/specifications/ndf-skill-inventory.md` に記録する。
+Skill は 31 個で、配布は `plugins/ndf-shared/manifests/` が唯一の基準（Claude Code 27 / Codex 25 / Kiro 26）。ブラウザ自動テストの 4 個は `playwright-kit` プラグインへ分離した（`plugins/playwright-kit-shared/`）。frontmatter の書き方は `plugins/ndf-shared/skills/README.md` の規約に従い、`python3 scripts/check-skill-frontmatter.py` で検査する。利用実績と維持・統合・削除の判定は `docs/specifications/ndf-skill-inventory.md` に記録する。
 
 v6.1.0 で開発方法論レイヤーの 5 個（`development-workflow` / `requirements-design` / `tdd-cycle` / `refactoring`（当時は `safe-refactoring`）/ `quality-gates`）を追加した。モード判定の基準を持つのは `development-workflow` だけで、他の Skill とエージェント定義は判定結果を受け取る側に徹する。
 
@@ -39,7 +39,23 @@ v7.0.0 で playwright 系 4 個を `playwright-kit` プラグインへ分離し�
 
 v8.0.0 で `safe-refactoring` を `refactoring` へ改名し、分岐・反復・定数の表現を決める観点を統合した。観点は `references/data-representation.md` に置き、言語固有の手段は `references/lang-<言語>.md` に 1 言語 1 ファイルで置く。SKILL.md が対象言語のファイルだけを読ませるため、他言語の内容はコンテキストに載らない。言語を追加するときも他のファイルは変更しない。対応表は `ndf-policies` にある（v9.0.0 で削除）。
 
+v8.1.0 で `cross-refactoring` を追加した。あわせて収束ループの共通層を `plugins/ndf-shared/skills/cross-review/scripts/lib/` へ切り出し、`monitor.py` は同ディレクトリへ移設して既存パスをシムにした。`cross-review` の挙動と既存テストは変えていない。
+
 v6.0.0 の対応表（`review` → `pr-review`）は予告どおり削除済み。v6.0.0 以前から移行する場合は v6.1.0 の `ndf-policies` を参照する。
+
+## cross-refactoring
+
+`/ndf:cross-refactoring` は codex / gemini / kiro / claude のうち **ホストを除く 3 者**に構造改善を提案させ、**gemini を除く 3 者**から輪番で選んだ 1 者が適用し、残り 2 者がレビューする。新しい提案が出なくなるまで繰り返す。
+
+```bash
+/ndf:cross-refactoring 130 --scope src/services --baseline-test "pytest -q"
+/ndf:cross-refactoring 130 --scope src --model codex=gpt-5.5 --model claude=opus-5
+```
+
+- `--scope` は必須。提案が発散して PR が肥大するのを防ぐ
+- ホストと同じランタイムが適用担当になる場合も、サブエージェントではなく **CLI プロセス**として起動する
+- モデルを比べるなら `--model kiro=<name>` を必ず指定する（既定 `auto` は実際に動いたモデルを取得できない）
+- 収束しない改善項目は **項目単位で取り消す**。合意済みの項目は PR に残る
 
 ## cross-review
 

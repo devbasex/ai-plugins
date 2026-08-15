@@ -64,9 +64,10 @@ NDF の Skill 実装は `plugins/ndf-shared/skills/` が編集元です。公開
 
 主な Skill 領域:
 
-- PR / review workflow: `pr`, `pr-tests`, `fix`, `pr-review`, `cross-review`
+- PR / review workflow: `pr`, `pr-tests`, `fix`, `pr-review`, `cross-review`, `cross-refactoring`
 - branch / release workflow: `deploy`, `cherry-pick-pr`, `merged`
 - planning / documentation: `implementation-plan`, `issue-plan-strategy`, `plan-to-spec`, `markdown-writing`
+- development methodology: `development-workflow`, `requirements-design`, `tdd-cycle`, `refactoring`, `quality-gates`
 - quality / execution: `docker-container-access`, `qa-security-scan`
   （Playwright による E2E テストは v7.0.0 で `playwright-kit` プラグインへ分離）
 - external services: `google-drive`

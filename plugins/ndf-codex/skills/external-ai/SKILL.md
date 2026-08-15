@@ -1,22 +1,29 @@
 ---
 name: external-ai
-description: "Delegate coding, review, or research to codex exec or gemini exec. Use when a second opinion or an offloaded investigation is wanted（codexで調査・geminiレビュー・外部AIに投げて）."
+description: "Delegate coding, review, or research to the codex, gemini, kiro-cli, or claude CLI. Use when a second opinion or an offloaded investigation is wanted（codexで調査・geminiレビュー・外部AIに投げて）."
 ---
 
-# 外部 AI 委譲スキル (Codex / Gemini)
+# 外部 AI 委譲スキル (Codex / Gemini / Kiro / Claude)
 
 ## 概要
 
-`codex` CLI（OpenAI Codex）と `gemini` CLI（Google Gemini）をローカルから直接起動し、
+`codex` CLI（OpenAI Codex）、`gemini` CLI（Google Gemini）、`kiro-cli`（Kiro CLI）、
+`claude` CLI（Claude Code のヘッドレス実行）をローカルから直接起動し、
 コード生成・独立第二意見レビュー・大規模コードベース調査を外部 AI に委譲する。
 
-**手順の大半は 2 つの CLI で共通**であり、本ファイルはその共通手順を規定する。
+**手順の大半は 4 つの CLI で共通**であり、本ファイルはその共通手順を規定する。
 起動フラグ・完了検知・出力回収など **CLI 固有の差分は補助ファイルに分離** している。
 
 | 補助ファイル | 内容 |
 |---|---|
 | [references/cli-codex.md](references/cli-codex.md) | Codex CLI のインストール、サンドボックス制約、`codex exec` の起動、sentinel 完了検知、最終 message 欠落対策 |
 | [references/cli-gemini.md](references/cli-gemini.md) | Gemini CLI のインストール、承認モード、`--output-format` の使い分け、プロセス終了による完了検知 |
+| [references/cli-kiro.md](references/cli-kiro.md) | Kiro CLI の非対話実行、**終了コードが成否を表さない**こと、ANSI エスケープ除去、ツール絞り込みを使わない理由、Skill 本文を読ませる明示指定 |
+| [references/cli-claude.md](references/cli-claude.md) | `claude -p` のヘッドレス実行、root 実行での権限モード制約、`--output-format json` による完了検知と実測モデルの取得 |
+
+**同じランタイムをホストにしていても、CLI として起動すればホストの作業文脈からは
+切り離される。** Claude Code から `claude -p` を別プロセスで起動する経路が実際に使われて
+いる（`/ndf:cross-refactoring` の適用フェーズ）。
 
 ## NDF との関係
 
@@ -43,24 +50,27 @@ description: "Delegate coding, review, or research to codex exec or gemini exec.
 - 単純な質問回答 → WebFetch / WebSearch で足りる
 - 機密情報を含むコード → 外部 API へ送信されるため、可否を組織ポリシーで確認してから
 
-## どちらの CLI を選ぶか
+## どの CLI を選ぶか
 
-| 観点 | Codex | Gemini |
-|---|---|---|
-| stdout の信頼性 | 最終 message が落ちることがある（ファイル書き出し必須） | stdout に response が直接出る |
-| サンドボックス | WSL2 / 一部コンテナで `--dangerously-bypass-approvals-and-sandbox` が必須 | bwrap 非依存。ただし trusted directory 判定があり `GEMINI_CLI_TRUST_WORKSPACE=true` + `--skip-trust` が必須 |
-| 非対話実行 | `codex exec` で完結 | `--yolo` か `--approval-mode plan` に加えて trust 解除が必須 |
-| 完了判定 | stderr の `^tokens used$` sentinel | プロセス終了（`kill -0` / `wait`） |
-| 出力フォーマット | Markdown 本文のみ | `text` / `json`（json は統計付き） |
-| 典型実行時間 | 5〜10 分 | 数十秒〜5 分 |
-| 強み | コード逐語照合、長時間の深い調査 | 横断調査、長文生成、軽量タスク |
-| 弱み | セットアップ・運用が煩雑 | 高難度コード解析でやや浅くなることがある |
+| 観点 | Codex | Gemini | Kiro | Claude |
+|---|---|---|---|---|
+| stdout の信頼性 | 最終 message が落ちることがある（ファイル書き出し必須） | stdout に response が直接出る | ANSI エスケープが必ず混ざる | `--output-format json` で構造化される |
+| 承認の与え方 | `--dangerously-bypass-approvals-and-sandbox` | `GEMINI_CLI_TRUST_WORKSPACE=true` + `--skip-trust` が**両方**必須 | `--trust-all-tools`（**絞り込みは防御にならない**） | `--permission-mode acceptEdits` + `--allowed-tools` |
+| 非対話実行 | `codex exec` で完結。プロンプトは**標準入力必須** | `--yolo` に加えて trust 解除が必須 | `chat --no-interactive` | `-p` |
+| 完了判定 | stderr の `^tokens used$` sentinel | プロセス終了（`kill -0` / `wait`） | **終了コードは使えない。** 結果ファイルと stderr の照合 | JSON の `is_error` / `subtype` |
+| 実測モデルの取得 | できない | できない | **できない**（既定 `auto` は特に不可） | `modelUsage` から取れる |
+| 典型実行時間 | 5〜10 分 | 数十秒〜5 分 | 数分 | 数分（29 ターンで 218 秒の実測） |
+| 強み | コード逐語照合、長時間の深い調査 | 横断調査、長文生成、軽量タスク | claude 系 / gpt 系のモデルを同じハーネスで選べる | 手順書（Skill）への追従が最も安定 |
+| 弱み | セットアップ・運用が煩雑 | 高難度コード解析でやや浅くなることがある | **Skill を配置しても本文を読まない**（明示パスが必須） | 実行コストが高い（1 件 1.42 ドルの実測） |
 
 **指針**:
 
 - 行番号・件数の逐語確認が要る → Codex
 - 短時間で済む独立レビュー、横断調査、長文生成 → Gemini
-- 第二意見を確実に取りたい → 両方を走らせてクロスチェック（`/ndf:cross-review` が自動化している）
+- 手順書どおりに直させたい → Claude（追従が最も安定。ただしコストが高い）
+- ハーネスを固定してモデルだけ比べたい → Kiro（claude 系と gpt 系の両方を提供する）
+- 第二意見を確実に取りたい → 複数を走らせてクロスチェック（`/ndf:cross-review` と
+  `/ndf:cross-refactoring` が自動化している）
 - Codex がレート制限・サンドボックス制約に当たった → Gemini へ代替
 
 `corder` エージェントとの使い分けは次のとおり。
@@ -82,8 +92,10 @@ CLI 固有のコマンドラインは補助ファイルを参照し、流れは�
 インストールとログイン状態を確認する。未インストール時のセットアップ手順は補助ファイルに記載。
 
 ```bash
-which codex  && codex --version
-which gemini && gemini --version
+which codex    && codex --version
+which gemini   && gemini --version
+which kiro-cli && kiro-cli --version
+which claude   && claude --version
 ```
 
 ### 2. プロンプトを一時ファイルへ書き出す
@@ -127,6 +139,8 @@ stderr には思考ログや警告が出る。Codex では数千行になるた�
 |---|---|
 | Codex | stderr に `^tokens used$` が現れる（[references/cli-codex.md](references/cli-codex.md)） |
 | Gemini | プロセスが終了する（[references/cli-gemini.md](references/cli-gemini.md)） |
+| Kiro | **結果ファイルが書かれる。** 終了コードは成否を表さない（[references/cli-kiro.md](references/cli-kiro.md)） |
+| Claude | プロセスが終了し、JSON の `is_error` が偽（[references/cli-claude.md](references/cli-claude.md)） |
 
 ### 5. 成果物を三段フォールバックで回収する
 
@@ -158,9 +172,12 @@ fi
 |---|---|---|---|
 | Codex | `OUTPUT_FILE` | `STDOUT` | stderr 末尾 |
 | Gemini | `STDOUT` | `OUTPUT_FILE` | stderr |
+| Kiro | `OUTPUT_FILE` | `STDOUT` | stderr 末尾（**ANSI 除去後**） |
+| Claude | `OUTPUT_FILE` | `STDOUT`（JSON の `result`） | stderr |
 
 Codex は最終 assistant message を返さずにセッションを終える既知挙動があるため、
 ファイルを優先する。Gemini は stdout が信頼できるため stdout を優先する。
+Kiro は終了コードが使えないので、**ファイルが書かれたことが唯一の確実な完了の証拠**になる。
 
 ### 6. 待機間隔のチューニング
 
@@ -278,7 +295,10 @@ CLI 固有の症状（サンドボックス失敗、承認モードによるハ�
 
 - [references/cli-codex.md](references/cli-codex.md) — Codex CLI 固有の手順
 - [references/cli-gemini.md](references/cli-gemini.md) — Gemini CLI 固有の手順
+- [references/cli-kiro.md](references/cli-kiro.md) — Kiro CLI 固有の手順
+- [references/cli-claude.md](references/cli-claude.md) — `claude -p` 固有の手順
 - `/ndf:cross-review` — codex / gemini 両方を並列起動して APPROVE 収束まで回す
+- `/ndf:cross-refactoring` — 4 CLI を役割ごとに分担させ、リファクタリングを収束させる
 - `/ndf:pr-review` — 第二引数に `codex` / `gemini` を指定すると本スキルの手順へ委譲する
 - Claude Code 版 `corder` エージェント — 本スキルの手順で Codex CLI を呼び出す独立レビュー担当
 - 他の AI CLI（`claude`, `ollama` 等）も同じパターンで利用できる

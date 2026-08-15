@@ -472,3 +472,41 @@ Skill 数は v7.0.0 と同じ 30 個に戻るが、初期一覧は 48 文字（f
 
 - 棚卸の計画: [issues/ndf-development-skills/02-skill-inventory.md](../../issues/ndf-development-skills/02-skill-inventory.md)
 - frontmatter 規約: [plugins/ndf-shared/skills/README.md](../../plugins/ndf-shared/skills/README.md)
+
+## v8.1.0 での追加（cross-refactoring）
+
+多ランタイム・リファクタリング収束ループ **`cross-refactoring`** を追加し、Skill 数は
+30 個から **31 個**になった。3 ランタイムすべてへ配布する（Claude Code 27 / Codex 25 /
+Kiro 26）。
+
+| Skill | 配布 | 内容 | 判定 |
+| --- | --- | --- | --- |
+| `cross-refactoring` | CXK | 提案（ホストを除く 3 CLI）→ 適用（gemini を除く 3 者から輪番で 1 者）→ レビュー（残り 2 者）を、新しい提案が出なくなるまで繰り返す | 新規。実測はこれから |
+
+追加の根拠は、`refactoring` が「テストで守りながら 1 手ずつ直す」手順を持つ一方で、
+**何を直すかの発見**と**直した結果の他者検証**を持たないことである。前者は人または単一の
+AI の主観で決まり、後者は同一モデルの自己レビューになる。この 2 つは手順の追記では埋まらず、
+**複数のランタイムへ役割を分ける進行**が要る。
+
+`cross-review` と機能が重複しないのは、対象と観点が違うためである。`cross-review` は人が
+作った Pull Request のレビューを収束させるもので、リファクタリング固有の観点（振る舞い不変、
+スメルと手法の対応、現状固定テストの妥当性、範囲の逸脱）を持たない。本 Skill は最終ゲートで
+`cross-review` を呼ぶので、両者は競合ではなく直列の関係にある。
+
+命名は `cross-review` と揃えた。`/cross-ref` まで打てば一意に決まる。
+
+予算への影響（`python3 scripts/check-skill-frontmatter.py --report`）:
+
+| 指標 | v8.0.0 | v8.1.0 | 運用値 |
+| --- | ---: | ---: | ---: |
+| Skill 数（ndf 単独） | 30 | 31 | — |
+| Claude Code 初期一覧 | 5,855 | 5,300 | 8,000 |
+| Codex 初期一覧 | 5,443 | 5,706 | 8,000 |
+| frontmatter 合計 | 10,612 | 11,112 | 11,200 |
+
+Codex の初期一覧は 263 文字増えた（`cross-refactoring` の追加と `external-ai` の
+`description` 更新）。制約になるのは Codex の 15,123 文字で、実測 5,706 文字なら 2.6 倍の
+余裕がある。**frontmatter 合計は目安 11,200 に対して 11,112 と迫っている**ため、
+次に Skill を増やすときは既存の `description` の圧縮と併せて検討する。
+
+Claude Code 初期一覧が減っているのは、較正値の再取得によるもので Skill 側の変更ではない。

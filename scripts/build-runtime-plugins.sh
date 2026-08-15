@@ -104,12 +104,16 @@ rewrite_codex_skill_paths() {
 
   for file in \
     "$skills_dir/cross-review/SKILL.md" \
-    "$skills_dir/cross-review/docs/01-state-and-review.md"
+    "$skills_dir/cross-review/docs/01-state-and-review.md" \
+    "$skills_dir/cross-refactoring/SKILL.md" \
+    "$skills_dir/cross-refactoring/docs/01-state-and-propose.md" \
+    "$skills_dir/cross-refactoring/docs/02-apply-and-review.md"
   do
     [ -f "$file" ] || continue
     sed \
       -e 's#${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}#${PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}#g' \
       -e "s#skills/cross-review/scripts#$script_dir/cross-review/scripts#g" \
+      -e "s#skills/cross-refactoring/scripts#$script_dir/cross-refactoring/scripts#g" \
       "$file" >"$file.tmp"
     mv "$file.tmp" "$file"
   done
@@ -194,7 +198,10 @@ rewrite_kiro_skill_paths() {
   for file in \
     "$skills_dir/statusline/SKILL.md" \
     "$skills_dir/cross-review/SKILL.md" \
-    "$skills_dir/cross-review/docs/01-state-and-review.md"
+    "$skills_dir/cross-review/docs/01-state-and-review.md" \
+    "$skills_dir/cross-refactoring/SKILL.md" \
+    "$skills_dir/cross-refactoring/docs/01-state-and-propose.md" \
+    "$skills_dir/cross-refactoring/docs/02-apply-and-review.md"
   do
     [ -f "$file" ] || continue
     sed "s#\${PLUGIN_ROOT:-\${CLAUDE_PLUGIN_ROOT}}#\${PLUGIN_ROOT:-$kiro_root}#g" \
