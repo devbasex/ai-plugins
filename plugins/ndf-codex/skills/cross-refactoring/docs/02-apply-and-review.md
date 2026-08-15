@@ -176,8 +176,14 @@ else
   "$LIB/monitor.py" "$ID" --agents "$IMPL" --tmp-dir "$TMP_DIR" \
       --stem-template "{agent}-fix-r$ROUND"
   "$SCRIPTS/refactor.py" merge-fix "$ID" "$ROUND"
+  # 修正後の状態を再レビューさせる
+  "$SCRIPTS/prepare-worktrees.sh" "$ID" sync "$(git -C "$WORK" rev-parse HEAD)"
 fi
 ```
+
+**修正のたびに読み取り用の作業ディレクトリを同期する。** レビュー担当は自分の
+作業ディレクトリを見るため、同期しないと 2 回目のレビューが**修正前の差分**を
+評価してしまう。適用の直後だけでなく、修正の直後にも必要である。
 
 指摘の修正は**実装担当が行う**。レビュー担当に直させるとレビューの独立性が失われる。
 ラウンドの未解決指摘をまとめて修正させ、返信と解決まで実行させる。

@@ -756,3 +756,78 @@ def test_same_commit_reported_twice_for_one_item_is_fine(
     })
     refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
     assert read_state(state_path)["items"][0]["status"] == "reviewing"
+
+
+def test_short_and_full_sha_are_seen_as_the_same_commit(
+    refactor, tmp_path, env_tmp_dir, monkeypatch
+):
+    """一方が完全 SHA、他方が短縮 SHA でも重複として検出すること。
+
+    申告の文字列をそのまま鍵にすると見逃す。
+    """
+    full = "a" * 40
+    items = [item(item_id="R1-001"), item(item_id="R1-002")]
+    state_path = _state_with_items(tmp_path, items)
+    env_tmp_dir(state_path)
+    monkeypatch.setattr(refactor, "commits_in_range", lambda w, b, h: [full])
+    # 短縮 SHA も完全 SHA も同じコミットへ解決される
+    monkeypatch.setattr(
+        refactor, "_git_out",
+        lambda work, args: full if args[:2] == ["rev-parse", "--verify"] else "HEAD",
+    )
+    monkeypatch.setattr(
+        refactor, "collect_commit_facts",
+        lambda work, shas, rng, cmd, branch: [fact(sha=s) for s in shas],
+    )
+    write_result(state_path, "codex-apply-r1", {
+        "items": [
+            {"item_id": "R1-001", "commits": [{"sha": full}]},
+            {"item_id": "R1-002", "commits": [{"sha": full[:7]}]},
+        ],
+    })
+    monkeypatch.setattr(
+        refactor.subprocess, "run",
+        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "", ""),
+    )
+    monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: "")
+
+    with pytest.raises(SystemExit) as e:
+        refactor.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+        )
+    assert e.value.code == 2
+    assert read_state(state_path)["rounds"][0]["apply"]["duplicated_commits"] == [full]
+
+
+# ---------- 数値の型崩れ ----------
+
+@pytest.mark.parametrize("broken", ["たくさん", ["50"], {"n": 1}, None, True])
+def test_safe_int_falls_back_on_broken_values(refactor, broken):
+    assert refactor._safe_int(broken) == 0
+
+
+def test_safe_int_reads_numbers_and_numeric_strings(refactor):
+    assert refactor._safe_int(42) == 42
+    assert refactor._safe_int(4.9) == 4
+    assert refactor._safe_int(" 7 ") == 7
+
+
+def test_broken_diff_lines_does_not_crash(
+    refactor, tmp_path, env_tmp_dir, no_git, git_facts
+):
+    """`elapsed_seconds` / `diff_lines` が非数値でも落ちないこと。"""
+    items = [item(item_id="R1-001")]
+    state_path = _state_with_items(tmp_path, items)
+    env_tmp_dir(state_path)
+    git_facts({"ok111": fact(sha="ok111", diff_lines=12)}, in_range=["ok111"])
+    write_result(state_path, "codex-apply-r1", {
+        "elapsed_seconds": "とても長い",
+        "items": [{"item_id": "R1-001", "diff_lines": ["壊れている"],
+                   "commits": [{"sha": "ok111"}]}],
+    })
+    refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
+
+    state = read_state(state_path)
+    assert state["rounds"][0]["durations"]["apply"] == 0
+    # 差分行数も git 由来の事実から取る
+    assert state["items"][0]["diff_lines"] == 12

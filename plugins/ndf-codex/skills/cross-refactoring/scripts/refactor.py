@@ -237,10 +237,7 @@ def _normalize_proposal(raw: dict[str, Any], source: str) -> Optional[dict[str, 
     if degraded:
         severity = "unknown"
 
-    try:
-        estimated = int(raw.get("estimated_diff_lines") or 0)
-    except (TypeError, ValueError):
-        estimated = 0
+    estimated = _safe_int(raw.get("estimated_diff_lines"))
 
     return {
         "path": path,
@@ -437,7 +434,7 @@ def verify_apply_item(
                 f"（先頭コミット {facts[0].get('sha', '?')} がテストを触っていません）"
             )
 
-    budget = int(item.get("estimated_diff_lines") or 0) * DIFF_BUDGET_FACTOR
+    budget = _safe_int(item.get("estimated_diff_lines")) * DIFF_BUDGET_FACTOR
     actual = sum(int(c.get("diff_lines") or 0) for c in facts)
     if budget and actual > budget:
         return f"実差分 {actual} 行が差分予算 {budget} 行を超えました（範囲の逸脱）"
@@ -915,21 +912,21 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
     # **1 コミットの所有項目は 1 つだけ。** 同じコミットを 2 つの項目が申告すると、
     # 片方が失敗して取り消したときに、もう片方は成功のまま残る。状態ファイルと
     # 実際の差分が食い違い、どちらが正しいか決められなくなる。
+    #
+    # 判定は**完全な SHA へ正規化してから**行う。申告の文字列をそのまま鍵にすると、
+    # 一方が完全 SHA、他方が短縮 SHA で同じコミットを指したときに重複を見逃す。
     owner_of: dict[str, str] = {}
     duplicated: list[str] = []
     for item_id, r in reported.items():
         for sha in _reported_shas(r):
-            if sha in owner_of and owner_of[sha] != item_id:
-                duplicated.append(sha)
-            owner_of.setdefault(sha, item_id)
+            full = _git_out(work, ["rev-parse", "--verify", f"{sha}^{{commit}}"])
+            if full is None:
+                continue          # 実在しない申告は項目ごとの検証で落ちる
+            if full in owner_of and owner_of[full] != item_id:
+                duplicated.append(full)
+            owner_of.setdefault(full, item_id)
 
-    claimed_full = {
-        full for full in (
-            _git_out(work, ["rev-parse", "--verify", f"{s}^{{commit}}"])
-            for s in owner_of
-        ) if full
-    }
-    unassigned = sorted(in_range - claimed_full)
+    unassigned = sorted(in_range - set(owner_of))
     if unassigned or unknown_ids or duplicated:
         causes = []
         if unassigned:
@@ -1009,7 +1006,7 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
             continue
         item["status"] = "reviewing"
         item["commits"] = _reported_shas(got)
-        item["diff_lines"] = int(got.get("diff_lines") or 0)
+        item["diff_lines"] = sum(_safe_int(c.get("diff_lines")) for c in facts)
         applied.append(item_id)
         info(f"✅ {item_id}: {len(item['commits'])} コミット / {item['diff_lines']} 行")
 
@@ -1020,7 +1017,9 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
         "base_sha": entry.get("apply_base_sha"),
         "head_sha": head_sha,
     }
-    entry.setdefault("durations", {})["apply"] = payload.get("elapsed_seconds") or 0
+    entry.setdefault("durations", {})["apply"] = _safe_int(
+        payload.get("elapsed_seconds")
+    )
     state["phase"] = "review" if applied else "propose"
 
     # `--dry-run` では git も状態ファイルも触らない。片方だけ進むと、確認の
@@ -1086,9 +1085,7 @@ def cmd_judge_review(args: argparse.Namespace) -> None:
     for name in reviewers:
         review = reviews.get(name)
         elapsed = review.get("elapsed_seconds") if isinstance(review, dict) else 0
-        per_reviewer[name] = per_reviewer.get(name, 0) + (
-            int(elapsed) if isinstance(elapsed, (int, float)) else 0
-        )
+        per_reviewer[name] = per_reviewer.get(name, 0) + _safe_int(elapsed)
     entry.setdefault("durations", {})["review"] = sum(per_reviewer.values())
     statefile.save(path, state)
 
@@ -1300,7 +1297,7 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     entry["fix_rounds"] += 1
     entry.setdefault("durations", {})["fix"] = (
         entry.get("durations", {}).get("fix", 0)
-        + int(payload.get("elapsed_seconds") or 0)
+        + _safe_int(payload.get("elapsed_seconds"))
     )
     statefile.save(path, state)
     info(f"修正を取り込みました（解決 {len(resolved)} スレッド / 修正ラウンド {entry['fix_rounds']}）")
@@ -1449,6 +1446,25 @@ def _item_table(state: dict[str, Any]) -> str:
 # テストの置き場所。現状固定テストが先行しているかの判定に使う。
 TEST_PATH_MARKERS = ("/test/", "/tests/", "/spec/", "/specs/", "__tests__/")
 TEST_NAME_MARKERS = (".test.", ".spec.", "_test.", "_spec.", "test_", "spec_")
+
+
+def _safe_int(value: Any, fallback: int = 0) -> int:
+    """LLM が返した値を int にする。数値として読めなければ `fallback`。
+
+    非数値の文字列・配列・辞書が返ってくることがあり、素の `int()` は
+    `TypeError` / `ValueError` で落ちる。落とすと進行が止まるだけで、
+    何の検証にもならない。
+    """
+    if isinstance(value, bool):
+        return fallback
+    if isinstance(value, (int, float)):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value.strip())
+        except ValueError:
+            return fallback
+    return fallback
 
 
 def _reported_shas(reported: Any) -> list[str]:

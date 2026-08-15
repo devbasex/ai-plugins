@@ -509,3 +509,18 @@ def test_reverted_fix_commits_are_not_recorded_in_state(
     recorded = read_state(state_path)["items"][0]["commits"]
     assert "good111" not in recorded, "取り消したコミットが状態に残っている"
     assert "bad222" not in recorded
+
+
+def test_broken_elapsed_seconds_does_not_crash(
+    refactor, tmp_path, env_tmp_dir, monkeypatch
+):
+    """修正結果の `elapsed_seconds` が非数値でも落ちないこと。"""
+    state_path = _prepare_fix(refactor, tmp_path, env_tmp_dir, monkeypatch, ["PRRT_a"])
+    result = state_path.parent / "codex-fix-r1-result.json"
+    payload = __import__("json").loads(result.read_text(encoding="utf-8"))
+    payload["elapsed_seconds"] = {"だいたい": 10}
+    result.write_text(__import__("json").dumps(payload), encoding="utf-8")
+    monkeypatch.setattr(refactor, "resolved_threads_on_github",
+                        lambda repo, pr: {"PRRT_a"})
+    refactor.cmd_merge_fix(type("A", (), {"id": 130, "round": 1})())
+    assert read_state(state_path)["rounds"][0]["durations"]["fix"] == 0

@@ -178,6 +178,8 @@ while :; do                                   # 提案ラウンドの繰り返�
     "$LIB/monitor.py" "$ID" --agents "$IMPL" --tmp-dir "$TMP_DIR" \
         --stem-template "{agent}-fix-r$ROUND"
     "$SCRIPTS/refactor.py" merge-fix "$ID" "$ROUND"
+    # 修正後の状態を再レビューさせる。同期しないと古い差分を評価してしまう
+    "$SCRIPTS/prepare-worktrees.sh" "$ID" sync "$(git -C "$WORK" rev-parse HEAD)"
   done
   "$SCRIPTS/refactor.py" advance "$ID" || break
 done
