@@ -19,18 +19,32 @@ Skill `/ndf:cross-refactoring` を追加する。
 実装ランタイムとレビューランタイムは必ず別にする。レビューが収束したら**提案フェーズから
 やり直す**。新しい提案が出なくなった時点で完了とする。
 
-本 Skill を実行しているホストセッションは **オーケストレータに徹し、提案・実装・レビューの
-どのフェーズにも参加しない**。参加者は常にホスト以外の 3 つで、いずれも独立した CLI
-プロセスとして起動する。
+本 Skill を実行しているホストセッションは **オーケストレータに徹し、提案とレビューには
+参加しない**。ただし**実装（適用）だけはホストも担当しうる**。その場合もホストの Agent tool
+（サブエージェント）は使わず、**独立した CLI プロセスとして起動する**ため、ホストセッションの
+context から切り離された状態は変わらない。参加者はいずれの役割でも独立した CLI である。
 
-| ホスト | 参加ランタイム（輪番） |
-|---|---|
-| Claude Code | codex / gemini / kiro |
-| Codex | gemini / kiro / claude |
-| Kiro | claude / codex / gemini |
+役割ごとに母集合が異なる。
 
-gemini は Skill 配布先ランタイムではないため常に参加者側になる。どのホストでも参加者は
-必ず 3 つ揃うので、後述の輪番（実装 1 : レビュー 2）は全ランタイムで同じ形になる。
+| 母集合 | 定義 | 中身 |
+|---|---|---|
+| **提案・レビュー**（`runtimes`） | 全ランタイム − ホスト | 常に 3 者 |
+| **実装**（`impl_capable`） | 全ランタイム − gemini | 常に `claude` / `codex` / `kiro` |
+
+| ホスト | 提案・レビュー | 実装（輪番） |
+|---|---|---|
+| Claude Code | codex / gemini / kiro | **claude** / codex / kiro |
+| Codex | claude / gemini / kiro | claude / **codex** / kiro |
+| Kiro | claude / codex / gemini | claude / codex / **kiro** |
+
+- **gemini は実装に参加しない。** NDF Skill を持たないランタイムであり、`refactoring` Skill の
+  手順を踏ませる適用フェーズには向かない。提案とレビューには常に参加する
+  （Skill 配布先ではないため、ホストになることもない）。
+- **ホストは実装にだけ参加する。** 提案とレビューから外れる点は変わらないので、
+  「実装者と評価者が同一モデルにならない」という構造は保たれる。
+
+どのホストでも提案・レビューは 3 者、実装候補も 3 者で揃うため、後述の輪番
+（実装 1 : レビュー 2）は全ランタイムで同じ形になる。
 
 cross-review が「1 本のループ」なのに対し、cross-refactoring は **二重ループ**
 （提案ラウンド → レビュー収束）である点が最大の構造差になる。
@@ -63,14 +77,14 @@ scope creep）はレビュー観点テンプレートに含まれていない。
 flowchart TD
     Init([Step 0: PR 作成 + worktree 準備 + state 初期化]):::phase --> Outer
 
-    Outer["外側ループ: 提案ラウンド R<br/>輪番で impl 1 / reviewer 2 を決定"]:::phase --> Propose
+    Outer["外側ループ: 提案ラウンド R<br/>impl は gemini 以外の 3 者から輪番<br/>reviewer はホストと impl を除く 2 者"]:::phase --> Propose
     Propose["Step 1: 提案フェーズ（参加 3 CLI 並列）<br/>ホストを除く 3 ランタイムが<br/>推奨箇所と具体手順を JSON で提出"]
     Propose --> Merge["Step 2: 提案マージ<br/>重複排除 / 合意数で優先度付け<br/>severity しきい値で採否<br/>1 ラウンドの上限件数で切り出し"]
     Merge --> Empty{"採用件数 = 0 ?"}
     Empty -->|はい| Final([外側ループ終了]):::ok
     Empty -->|いいえ| Apply
 
-    Apply["Step 3: 適用（impl CLI 1 回）<br/>採用 item を優先度順に直列適用<br/>item ごとに 1 手 1 コミット<br/>各手でテスト green を確認 → push"]
+    Apply["Step 3: 適用（impl CLI 1 回 / ホストの場合も CLI 起動）<br/>採用 item を優先度順に直列適用<br/>item ごとに 1 手 1 コミット<br/>各手でテスト green を確認 → push"]
     Apply --> Review["Step 4: 内側ループ: レビュー（reviewer 2 CLI 並列）<br/>ラウンド差分をまとめて 1 回<br/>指摘には item_id を必須で付けさせる"]
     Review --> Judge{"両 reviewer APPROVE ?"}
     Judge -->|いいえ| Fix["Step 5: 指摘修正（impl CLI）<br/>reply + resolve まで実施"]
@@ -115,36 +129,51 @@ item 単位でレビュー収束を回すと、CLI 起動回数が **採用 item
 | 指摘がどの item に対するものか曖昧になる | レビュー結果 JSON で `item_id` を**必須**にし、語彙外・不明は差し戻す |
 | 1 件の失敗がラウンド全体を巻き込む | item ごとに 1 手 1 コミットを維持し、**放棄は item 単位で revert** する（合意済みの item は PR に残す） |
 
-### 2. ランタイム輪番（ホストを除いた 3 者で回す）
+### 2. ランタイム輪番（役割ごとに母集合が違う）
 
-参加ランタイムは **全ランタイムからホストを除いて**決める。順序は固定順
-`["claude", "codex", "gemini", "kiro"]` からホストを抜いた並びとし、`init` 時に確定して
+母集合は固定順 `["claude", "codex", "gemini", "kiro"]` を基準に `init` 時へ確定し、
 `state.json` に記録する（再開時も不変）。
 
 ```
-RUNTIMES  = ["claude", "codex", "gemini", "kiro"] - [host]      # 常に 3 要素
-impl      = RUNTIMES[outer_round % 3]                            # ラウンド単位で 1 者
-reviewers = RUNTIMES から impl を除いた 2 つ
+ALL         = ["claude", "codex", "gemini", "kiro"]
+RUNTIMES    = ALL - [host]          # 提案・レビュー。常に 3 要素
+IMPL_POOL   = ALL - ["gemini"]      # 実装。常に ["claude", "codex", "kiro"]
+
+impl        = IMPL_POOL[outer_round % 3]        # ラウンド単位で 1 者
+candidates  = RUNTIMES - [impl]                 # impl == host なら 3 者、それ以外は 2 者
+reviewers   = candidates が 2 者ならそのまま
+              3 者なら candidates[(outer_round // 3) % 3] を除いた 2 者
 ```
 
+`impl == host` のとき、impl は `RUNTIMES` に含まれないので候補が 3 者残る。
+**レビュアーは常に 2 者**とし（コストを item 単位レビューから抑えた方針と揃える）、
+余る 1 者はラウンドを跨いでローテートさせて負荷を均す。
+
 ホストの判定は `--host claude|codex|kiro` の明示指定を第一とし、未指定時のみ環境変数
-（`CLAUDE_PLUGIN_ROOT` 等）から推定する。誤検出するとホストが自分自身を CLI として
-起動しようとして無駄な多重実行になるため、**推定結果は必ず `init` の出力に表示して
-state.json に残す**。
+（`CLAUDE_PLUGIN_ROOT` 等）から推定する。誤検出すると**提案・レビューの母集合が狂う**
+（ホストが提案側に混ざる / 参加すべき者が外れる）ため、**推定結果は必ず `init` の出力に
+表示して state.json に残す**。
 
 - 実装 1 : レビュー 2 を常に維持し、**2 者 APPROVE で通過**とする（リファクタリングは必須作業
   ではないため、疑義が残るなら通さない側に倒す）。
 - 指摘の修正は **impl ランタイムが行う**。レビュアーに直させるとレビューの独立性が失われる。
+- **impl がホストでも、必ず CLI プロセスとして起動する。** ホストの Agent tool は使わない。
+  Claude Code ホストが impl になる場合も `claude -p` を別プロセスで起動する（§5-2）。
+  これにより、実装がホストセッションの context を汚さない性質と、レビュアー 2 者が
+  実装者と別モデルである性質の両方が保たれる。
+- **gemini は `IMPL_POOL` に入らない。** NDF Skill を持たないため、`refactoring` Skill の
+  手順を踏む適用フェーズには参加させない。提案とレビューには常に参加する。
 - **輪番の単位はラウンド**である。1 ラウンドの適用を 1 者に集約することで、レビュアーを
-  「impl 以外の 2 者」として機械的に決められる。item ごとに impl を替えると 1 ラウンド内で
+  「impl 以外」から機械的に決められる。item ごとに impl を替えると 1 ラウンド内で
   実装者が複数になり、impl と reviewer の分離が成立しなくなる。
 - 割り当ては `state.json` の `rounds[].impl` / `rounds[].reviewers` に記録し、再開時も不変。
 
 ### 3. 全参加者が CLI であることの帰結（cross-review の骨組みをそのまま使える）
 
-参加者を 3 つとも CLI プロセスにしたことで、**ループ全体を 1 本の bash で駆動できる**。
-claude が参加者になる場合（ホストが Codex / Kiro のとき）もヘッドレス CLI
-（`claude -p`）として起動し、ホスト側の Agent tool（サブエージェント）は一切使わない。
+参加者を全て CLI プロセスにしたことで、**ループ全体を 1 本の bash で駆動できる**。
+claude が参加者になる場合はヘッドレス CLI（`claude -p`）として起動し、ホスト側の
+Agent tool（サブエージェント）は一切使わない。**ホスト自身が impl を担当するラウンドでも
+同じで、ホストは自分と同じランタイムの CLI を別プロセスとして起動する**。
 そのため cross-review が light rotation で必要としていた「bash を抜けてメインが Agent を
 起動し、再度 bash に戻る」中断・再開のプロトコルが不要になる。
 
@@ -155,6 +184,7 @@ claude が参加者になる場合（ホストが Codex / Kiro のとき）も�
 - 「AI 自身が `gh api` で PR へ直接投稿する」ことでホスト context を汚さない方針
 
 ホストが行うのは bash ループの駆動と、最後の `/ndf:cross-review` 実行だけになる。
+ホストが impl のラウンドでも、ホストセッション自身が編集するわけではないので変わらない。
 
 ### 4. worktree はエージェント分用意する
 
@@ -169,6 +199,10 @@ claude が参加者になる場合（ホストが Codex / Kiro のとき）も�
 
 `<参加N>` は state.json の `runtimes`（ホストを除いた 3 つ）から決まる。ホストが Claude Code
 なら `codex/` `gemini/` `kiro/`、ホストが Codex なら `gemini/` `kiro/` `claude/` になる。
+
+**ホストが impl を担当するラウンドでも、追加の worktree は要らない。** 適用は常に `work/` の
+中だけで行うため、読み取り用 worktree を持つのは提案・レビュー参加者（= `runtimes`）だけで
+足りる。impl はランタイムを問わず cwd を `work/` に固定して起動する。
 
 - `<worktree-base>` の解決順は cross-review と同じ（`NDF_WORKTREE_BASE` env >
   `<システム tmpdir>/ndf-worktrees`）。
@@ -220,7 +254,7 @@ Kiro は codex / gemini と前提が異なるため、launcher に固有処理�
 > カスタム agent 自体が不要になるため、`prepare-worktrees.sh` の該当処理も削る。
 >
 > **縮退設計は不要になった。** シェル実行もファイル編集も `--no-interactive` で通ることを
-> 実測したため、kiro は実装フェーズの輪番に含めてよい（`impl_capable` は 3 者すべて）。
+> 実測したため、kiro は実装フェーズの輪番に含めてよい（`impl_capable` に kiro を含める）。
 >
 > ⚠ **`--trust-tools` による絞り込みはセキュリティ境界にならない。** `execute_bash` を
 > 許可したうえで `fs_write` を拒否したケースでは、モデルが `echo ... > file` をシェル経由で
@@ -229,11 +263,19 @@ Kiro は codex / gemini と前提が異なるため、launcher に固有処理�
 > 正常終了した」ように見える。**防御力が無いのに事故リスクだけが残る**ため、
 > 絞り込みは採用せず `--trust-all-tools` で全許可する。
 
-#### 5-2. Claude（ホストが Codex / Kiro のとき）
+#### 5-2. Claude（提案・レビュー参加時、および impl 担当時）
 
-参加者としての claude は **ヘッドレス CLI** で起動する。ホストが Claude Code のときは
-参加者に含まれないため、この経路は使わない。**実機検証済み**（claude 2.1.233 / root 実行）。
+参加者としての claude は **ヘッドレス CLI** で起動する。**実機検証済み**
+（claude 2.1.233 / root 実行）。
 詳細は [issue-113-task3-cli-verification.md](issue-113-task3-cli-verification.md) §2。
+
+この経路を通るのは次の 2 つで、いずれも同じ起動形式である。
+
+1. ホストが Codex / Kiro のとき、claude が提案・レビューに参加する
+2. **ホストが Claude Code のとき、claude（= ホストと同一ランタイム）が impl を担当する**
+
+2 のケースでも Agent tool は使わず、**別プロセスの `claude -p` を起動する**。
+ホストセッションの context は汚れず、レビュアー 2 者とも別モデルである性質も保たれる。
 
 確定した起動形式:
 
@@ -261,7 +303,8 @@ cat prompt.md | claude -p \
 PLUGIN_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}"
 SCRIPTS="$PLUGIN_ROOT/skills/cross-refactoring/scripts"
 
-# init が host を確定し、RUNTIMES（ホストを除く 3 つ）と RUNTIMES_CSV を eval で返す。
+# init が host を確定し、RUNTIMES（提案・レビュー = ホストを除く 3 つ）と RUNTIMES_CSV、
+# IMPL_POOL（実装 = gemini を除く 3 つ）を eval で返す。
 eval "$("$SCRIPTS/refactor.py" init "$PR" --scope "$SCOPE" ${HOST:+--host "$HOST"} \
           --max-outer-rounds "$MAX_OUTER" --max-fix-rounds "$MAX_FIX" \
           --max-items-per-round "$MAX_ITEMS")"
@@ -369,7 +412,7 @@ item ごとに 1 手 1 コミットへ分け、`items[].commits` にコミット
   "host": "claude",
   "host_detection": "env",
   "runtimes": ["codex", "gemini", "kiro"],
-  "impl_capable": ["codex", "gemini", "kiro"],
+  "impl_capable": ["claude", "codex", "kiro"],
   "max_outer_rounds": 3,
   "max_fix_rounds": 3,
   "max_items_per_round": 5,
@@ -416,6 +459,11 @@ item ごとに 1 手 1 コミットへ分け、`items[].commits` にコミット
   "final": null
 }
 ```
+
+`runtimes` は**提案・レビューの母集合**（全ランタイム − ホスト）、`impl_capable` は
+**実装の母集合**（全ランタイム − gemini）で、**両者は別物**である。上の例はホストが
+`claude` のケースで、`claude` は `runtimes` に居ないが `impl_capable` には居る。
+`impl_capable` はホスト非依存で常に `["claude", "codex", "kiro"]` になる。
 
 `items[]` は **impl / reviewers / fix_rounds / reviews を持たない**。これらはラウンド単位の
 属性になったため `rounds[]` に置く。`items[].commits` は放棄時の revert 範囲を決めるために
@@ -537,7 +585,8 @@ Skill がランタイム中立になったためである。最終ゲートで�
   ラウンド番号に加えて **`IMPL` / `REVIEWERS` / `REVIEWERS_CSV`** を eval で返す
   （輪番はラウンド単位のため、item ごとに割り当てを引く `next-item` は不要）。`init` は PR 番号・
   対象スコープ・各上限値を受け取り、リポジトリ情報と `baseline_test` を記録して state.json を
-  生成する。tmp ディレクトリ解決は cross-review の `_tmp_dir()` と同じ優先順
+  生成する。**`runtimes`（全 − ホスト）と `impl_capable`（全 − gemini）を別々に確定**し、
+  `impl == host` のラウンドでレビュアーが 3 候補になる場合の絞り込み（§2 の式）もここに置く。tmp ディレクトリ解決は cross-review の `_tmp_dir()` と同じ優先順
   （env `CROSS_REFACTORING_TMP_DIR` > `<work worktree>/.cross_refactoring/`）にする。
   cross-review の `state.py` を読み、同じ「eval で KEY=VALUE を取り込む」呼び出し規約に揃える。
 
@@ -597,7 +646,9 @@ Skill がランタイム中立になったためである。最終ゲートで�
   | claude | `cat prompt.md \| claude -p --permission-mode acceptEdits --allowed-tools ... --output-format json`（確定済み） |
   | kiro | `cat prompt.md \| kiro-cli chat --no-interactive --trust-all-tools`（確定済み） |
 
-  **ホスト自身は起動対象に現れない**（state.json の `runtimes` にいないため）。
+  **提案フェーズにホストは現れない**（state.json の `runtimes` にいないため）。
+  ただし `launch-cli.sh` は **ホストと同一ランタイムを起動しうる**（impl 担当時）ので、
+  「ホストなら起動しない」といった分岐を入れてはならない。
   対象スコープ（`--scope PATH...`）を渡し、提案が無制限に広がらないようにする。
 
 ### Task 5: 適用フェーズ
@@ -694,7 +745,10 @@ Skill がランタイム中立になったためである。最終ゲートで�
   - `merge-proposals` の重複排除・語彙外降格・しきい値・上限件数
   - **ホスト別の参加者確定**: host=claude / codex / kiro の 3 ケースで `runtimes` が
     「全 4 ランタイム − ホスト」になり、ホストが `runtimes` に含まれない
+  - **`impl_capable` がホストによらず `["claude", "codex", "kiro"]` になり、gemini を含まない**
   - ランタイム輪番が impl と reviewer を必ず分離する（全ラウンドで `impl not in reviewers`）
+  - **`impl == host` のラウンドで reviewers が 3 者にならず 2 者に絞られ**、
+    除外される 1 者がラウンドを跨いでローテートする
   - `impl_capable` が縮退したときも reviewers は常に 2 者になる
   - `merge-apply` が **失敗 item だけを `abandoned` にして残りを採用**し、全件失敗のときだけ
     exit 2 を返す
@@ -719,9 +773,14 @@ Skill がランタイム中立になったためである。最終ゲートで�
 ## 受け入れ条件
 
 - [ ] `/ndf:cross-refactoring` が Draft PR 作成から完了報告まで、中断・再開可能に一周する
-- [ ] 参加者が**ホストを除いた 3 CLI** で確定し、ホストはどのフェーズにも参加しない
-      （Claude Code ホスト → codex/gemini/kiro、Codex ホスト → gemini/kiro/claude、
+- [ ] **提案・レビューの参加者がホストを除いた 3 CLI** で確定し、ホストは提案とレビューに
+      参加しない（Claude Code ホスト → codex/gemini/kiro、Codex ホスト → claude/gemini/kiro、
       Kiro ホスト → claude/codex/gemini）
+- [ ] **実装の母集合が `["claude", "codex", "kiro"]`**（gemini を含まない）で確定し、
+      ホストと同一ランタイムが impl になるラウンドが存在する
+- [ ] impl がホストと同一ランタイムのときも **CLI プロセスとして起動**され、
+      ホストの Agent tool を使わない
+- [ ] gemini が提案とレビューには参加し、**適用フェーズには一度も起動されない**
 - [ ] `--host` 明示指定と環境変数からの推定の両方が動き、確定結果が state.json に残る
 - [ ] 全ラウンドで実装ランタイムとレビューランタイムが重ならない（state.json で検証可能）
 - [ ] レビューが**ラウンド単位で 1 回**回り、CLI 起動回数が採用 item 数に比例しない
@@ -745,7 +804,8 @@ Skill がランタイム中立になったためである。最終ゲートで�
 | リスク | 対応 |
 |---|---|
 | ~~**Kiro が非対話でシェル実行できない**~~ | **解消済み**。kiro-cli 2.18.0 の実機検証でシェル実行もファイル編集も通ることを確認した。縮退設計（`impl_capable` からの除外）は不要 |
-| **ホスト判定を誤り、ホスト自身を CLI として起動する** | `--host` 明示指定を第一とし、推定結果を `init` 出力と state.json に必ず残す。参加者リストにホストが含まれたら `init` を失敗させる |
+| **ホスト判定を誤り、提案・レビューの母集合が狂う** | `--host` 明示指定を第一とし、推定結果を `init` 出力と state.json に必ず残す。`runtimes` にホストが含まれたら `init` を失敗させる（`impl_capable` はホスト非依存なのでこの検査の対象外） |
+| **ホストが impl のとき、うっかり Agent tool で実装させる** | `launch-cli.sh` は impl のランタイム名だけで分岐し、ホストか否かを見ない。受け入れ条件で「impl がホストと同一でも CLI 起動」を検証する |
 | **root 実行で claude の `bypassPermissions` が使えない** | 実測で確認済み。`acceptEdits` + `--allowed-tools` の明示を launcher の既定にする（root でも通ることを実測） |
 | **kiro の承認漏れが exit 0 のまま素通りする** | ハングではなく「拒否 + exit 0」で現れる（2.18.0 実測）。stderr の拒否メッセージを早期エラーに追加し、終了コード 0 を成功とみなさない |
 | **`--trust-tools` の絞り込みがセキュリティ境界にならない** | `execute_bash` を許可すると `echo > file` で書き込み制限を迂回できる（実測）。防御は worktree 隔離に一本化し、**絞り込みは採用せず `--trust-all-tools` を使う**（綴り違いが WARNING のみで素通りする事故も同時に避けられる） |
@@ -771,5 +831,6 @@ Skill がランタイム中立になったためである。最終ゲートで�
   impl 1 者が直列に行う）
 - item 単位のレビュー収束（CLI 起動回数が item 数に比例し、コストが実運用に耐えないため。
   §1 の見積もりを参照）
-- ホストランタイム自身を提案・実装・レビューに参加させること（オーケストレータに徹する）
+- ホストランタイム自身を**提案・レビュー**に参加させること（実装には CLI 駆動で参加する）
+- gemini を実装に参加させること（NDF Skill を持たないため）
 - リファクタリング以外の変更（機能追加・不具合修正）の取り込み
