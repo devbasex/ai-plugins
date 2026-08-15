@@ -8,12 +8,13 @@
 
 | ファイル | 内容 |
 | --- | --- |
-| [issue-113-cross-refactoring-loop.md](issue-113-cross-refactoring-loop.md) | 実施計画の本体。設計方針 / state スキーマ / 12 タスクの分解 / 受け入れ条件 |
+| [issue-113-cross-refactoring/](issue-113-cross-refactoring/01-overview.md) | 実施計画。8 ファイルに分割（概要 / 進行構造 / ランタイム別対応 / Skill 配置 / 計測 / データ形式 / 作業単位 / 受け入れ条件） |
 | [issue-113-task3-cli-verification.md](issue-113-task3-cli-verification.md) | Task 3（CLI 非対話実行）の検証記録。実測値と出典、未確認項目のチェックリスト |
 | 本ファイル | 進捗と引き継ぎ |
 
-読む順序は **本ファイル → 実施計画 → 検証記録**。実施計画は長いので、実装に入る前に
-§2（ランタイム輪番）・§5（ランタイム別の固有対応）・§6（bash 骨組み）だけ先に読めばよい。
+読む順序は **本ファイル → 実施計画 → 検証記録**。実装に入る前に最低限読むのは、実施計画の
+`01-overview.md`（担当の決め方と全体の流れ）・`02-loop-design.md`（輪番と終了条件）・
+`03-runtime-notes.md`（ランタイム別の起動形式）・`06-schema.md`（実行の骨組み）である。
 
 ## 2. この Skill が何をするものか（3 行）
 

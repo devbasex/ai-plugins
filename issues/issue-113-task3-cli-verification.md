@@ -2,7 +2,7 @@
 
 ## 関連リンク
 
-- 実施計画: [issue-113-cross-refactoring-loop.md](issue-113-cross-refactoring-loop.md)
+- 実施計画: [issue-113-cross-refactoring/01-overview.md](issue-113-cross-refactoring/01-overview.md)
 - GitHub Issue: https://github.com/devbasex/ai-plugins/issues/113
 - 既存の Kiro 実機検証: [ndf-development-skills/03-runtime-conformance.md](ndf-development-skills/03-runtime-conformance.md)
 
