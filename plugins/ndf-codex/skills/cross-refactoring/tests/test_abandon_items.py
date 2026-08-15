@@ -524,3 +524,22 @@ def test_broken_elapsed_seconds_does_not_crash(
                         lambda repo, pr: {"PRRT_a"})
     refactor.cmd_merge_fix(type("A", (), {"id": 130, "round": 1})())
     assert read_state(state_path)["rounds"][0]["durations"]["fix"] == 0
+
+
+def test_revert_is_idempotent(refactor, tmp_path, env_tmp_dir, monkeypatch):
+    """取り消し済みの項目へもう一度取り消しを掛けないこと。
+
+    push の失敗などで叩き直したときに、既に戻したコミットへ `git revert` を
+    掛けると必ず失敗し、そこから先へ進めなくなる。
+    """
+    state_path = _state(tmp_path, [_finding("R1-001")], item_ids=("R1-001",))
+    env_tmp_dir(state_path)
+    calls = _no_git(refactor, monkeypatch)
+    refactor.cmd_abandon_items(_args(dry_run=False))
+    first = [c for c in calls if c[:2] == ["git", "revert"]]
+    assert first, "1 回目で取り消していない"
+    assert read_state(state_path)["items"][0]["reverted"] is True
+
+    calls.clear()
+    refactor.cmd_abandon_items(_args(dry_run=False))
+    assert [c for c in calls if c[:2] == ["git", "revert"]] == []

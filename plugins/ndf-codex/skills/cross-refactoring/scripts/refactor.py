@@ -746,9 +746,26 @@ def cmd_merge_proposals(args: argparse.Namespace) -> None:
     """Step 3 — 提案をマージして改善項目を作る。
 
     終了コード: 0 = 採用あり / 2 = 採用 0 件（提案ラウンドの繰り返しを終える）。
+
+    **同じラウンドで叩き直しても二重に項目を作らない。** 進行を止めても再開できる
+    ことが前提なので、統合済みなら前回と同じ結果をそのまま返す。
     """
     path, state = _load(args.id)
     entry = _current_round(state)
+
+    if entry.get("proposal_keys") is not None:
+        info(
+            f"↻ 提案ラウンド {entry['round']} は統合済みです"
+            f"（採用 {entry.get('adopted', 0)} 件 / 見送り {entry.get('deferred', 0)} 件）"
+        )
+        for item_id in entry.get("items", []):
+            item = _find_item(state, item_id, required=False)
+            if item is not None:
+                info(f"  {item_id} [{item['severity']}] {item['path']}#{item['symbol']}")
+        if not entry.get("adopted"):
+            sys.exit(2)
+        return
+
     proposals: dict[str, list[dict[str, Any]]] = {}
     for runtime in state["runtimes"]:
         result = _result_path(state, runtime, stem_for(runtime, "propose", state["id"]))
@@ -962,6 +979,10 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
             "commits": list(reversed(ordered_range)),
         }
         _revert_item_commits(state, whole_round, args.dry_run)
+        if not args.dry_run:
+            # 取り消し後の状態を新しい起点にする。叩き直しても範囲が空になり、
+            # 取り消しコミット自体を「未割当」として再び戻すことがない。
+            entry["apply_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
         entry["apply"] = {
             "applied": [], "failed": list(entry["items"]),
             "base_sha": entry.get("apply_base_sha"), "head_sha": head_sha,
@@ -1279,6 +1300,8 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
              "commits": list(reversed(ordered_range))},
             dry_run=False,
         )
+        # 取り消し後の状態を新しい起点にする（叩き直しでの二重取り消しを防ぐ）。
+        entry["fix_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
         _push_head(state)
         info("⚠ 修正を取り消したため、解決の申告は採用しません")
         resolved = set()
@@ -1665,6 +1688,13 @@ def _revert_item_commits(
     前者で呼ばないと、実装担当が既に push した差分が Pull Request に残り、
     以後のレビュー対象にも混入する。
     """
+    # **取り消し済みなら何もしない。** push の失敗などで叩き直したときに、
+    # 既に戻したコミットへもう一度 `git revert` を掛けると必ず失敗し、
+    # そこから先へ進めなくなる。
+    if item.get("reverted"):
+        info(f"↩ {item['item_id']} は取り消し済みです")
+        return 0
+
     work = state["worktrees"]["work"]
     shas = [s for s in (item.get("commits") or []) if isinstance(s, str) and s]
     if dry_run:
@@ -1691,6 +1721,7 @@ def _revert_item_commits(
                 f"{r.stderr.strip()[:400]}"
                 f"（HEAD を {before} へ戻しました）"
             )
+    item["reverted"] = True
     return len(shas)
 
 

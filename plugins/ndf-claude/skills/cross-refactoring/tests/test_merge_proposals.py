@@ -243,3 +243,53 @@ def test_non_object_proposal_result_is_treated_as_empty(
     state = read_state(state_path)
     assert state["rounds"][0]["proposed"]["codex"] == 0
     assert len(state["items"]) == 1
+
+
+def test_merge_proposals_is_idempotent(refactor, tmp_path, env_tmp_dir, no_git):
+    """同じラウンドで叩き直しても項目を二重に作らないこと。
+
+    進行を止めても再開できることが前提なので、統合済みなら前回と同じ結果を返す。
+    """
+    state_path = make_state(tmp_path, rounds=[{
+        "round": 1, "impl": "codex", "reviewers": ["gemini", "kiro"],
+        "impl_model": {"requested": None, "observed": None},
+        "reviewer_models": {}, "proposed": {}, "items": [],
+        "apply": {"applied": [], "failed": []}, "fix_rounds": 0,
+        "durations": {}, "reviews": [],
+    }])
+    env_tmp_dir(state_path)
+    for rt in ("codex", "gemini", "kiro"):
+        write_result(state_path, f"{rt}-propose-rf130", {"items": [proposal()]})
+
+    args = type("A", (), {"id": 130})()
+    refactor.cmd_merge_proposals(args)
+    first = read_state(state_path)
+    refactor.cmd_merge_proposals(args)
+    second = read_state(state_path)
+
+    assert [i["item_id"] for i in second["items"]] == ["R1-001"]
+    assert second["items"] == first["items"]
+    assert second["rounds"][0]["adopted"] == 1
+
+
+def test_merge_proposals_replays_the_converged_exit_code(
+    refactor, tmp_path, env_tmp_dir, no_git
+):
+    """採用 0 件で終わったラウンドを叩き直しても、同じ終了コードを返す。"""
+    state_path = make_state(tmp_path, rounds=[{
+        "round": 1, "impl": "codex", "reviewers": ["gemini", "kiro"],
+        "impl_model": {"requested": None, "observed": None},
+        "reviewer_models": {}, "proposed": {}, "items": [],
+        "apply": {"applied": [], "failed": []}, "fix_rounds": 0,
+        "durations": {}, "reviews": [],
+    }])
+    env_tmp_dir(state_path)
+    for rt in ("codex", "gemini", "kiro"):
+        write_result(state_path, f"{rt}-propose-rf130", {"items": []})
+
+    args = type("A", (), {"id": 130})()
+    for _ in range(2):
+        with pytest.raises(SystemExit) as e:
+            refactor.cmd_merge_proposals(args)
+        assert e.value.code == 2
+    assert read_state(state_path)["items"] == []
