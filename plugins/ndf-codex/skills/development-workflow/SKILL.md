@@ -47,7 +47,7 @@ NULL 許容列の追加）は `standard` として扱う。判定に迷う場合
 ```text
 mode: standard
 根拠: 注文確定の振る舞いを変更する。公開 API とスキーマは変えない
-必須工程: requirements-design → implementation-plan → tdd-cycle → safe-refactoring（必要な場合）
+必須工程: requirements-design → implementation-plan → tdd-cycle → refactoring
   → pr-review → quality-gates → plan-to-spec（仕様が変わった場合）
 ```
 
@@ -59,8 +59,8 @@ mode: standard
 | モード | 対象 | 必須工程 |
 | --- | --- | --- |
 | `light` | 文言、ドキュメント、設定、テストの追加など、本番の振る舞いも本番コードの構造も変えない局所変更 | 成功条件の確認、対象範囲の確定、限定的な検証と静的解析 |
-| `standard` | 一般的な機能追加・バグ修正、テストが十分にある構造改善 | 仕様、計画、テスト駆動、構造改善（必要な場合）、レビュー、全体検証 |
-| `architecture` | 公開インタフェース、移行を伴うスキーマ変更、認証、複数モジュール、重要なドメイン変更 | ドメインモデリング、設計判断の記録、設計レビュー、テスト駆動、契約テストと結合テスト、相互レビュー |
+| `standard` | 一般的な機能追加・バグ修正、テストが十分にある構造改善 | 仕様、計画、テスト駆動、構造改善、レビュー、全体検証 |
+| `architecture` | 公開インタフェース、移行を伴うスキーマ変更、認証、複数モジュール、重要なドメイン変更 | ドメインモデリング、設計判断の記録、設計レビュー、テスト駆動、構造改善、契約テストと結合テスト、相互レビュー |
 | `legacy-refactor` | テストが少ない既存コードの振る舞い維持型改善 | 構造分析、計画、現状固定テスト、段階的改善、レビュー、退行検証 |
 
 ## モードごとに起動する Skill
@@ -70,8 +70,8 @@ mode: standard
 | 要求と受け入れ条件 | — | `requirements-design` | `requirements-design` | — |
 | 設計 | — | `implementation-plan` に代替案と採否を記録 | ドメインモデリングと設計レビュー（Release 2 で有効化） | `implementation-plan` に代替案と採否を記録 |
 | 計画 | — | `implementation-plan` | `implementation-plan` | `implementation-plan` |
-| 実装 | 直接編集 | `tdd-cycle` | `tdd-cycle` | `safe-refactoring` |
-| 構造改善 | — | `safe-refactoring`（必要な場合） | `safe-refactoring`（必要な場合） | `safe-refactoring` |
+| 実装 | 直接編集 | `tdd-cycle` | `tdd-cycle` | `refactoring` |
+| 構造改善 | — | `refactoring` | `refactoring` | `refactoring` |
 | レビュー | — | `pr-review` | `cross-review` | `pr-review` |
 | 完了判定 | `quality-gates` | `quality-gates` | `quality-gates` | `quality-gates` |
 | 確定仕様化 | — | `plan-to-spec`（仕様が変わった場合） | `plan-to-spec` | — |
@@ -82,6 +82,13 @@ mode: standard
 
 レビュー段階は**明示的に呼ぶ**。自然文で「レビューして」と依頼すると、Claude Code では
 組み込みの `code-review` が起動して判定の投稿経路が変わる。
+
+構造改善は**レビューと同じく、通す工程であって任意ではない**。動くコードが出た時点では整理が
+済んでいないことを前提に置き、見つけたスメルは直す。対象は書き換えた行だけでなく、**その
+呼び出し元・呼び出し先と、同じファイル・同じモジュールの関連箇所まで**を含む（範囲と例外は
+`refactoring` の `references/code-smells.md`「手を付ける範囲」）。
+
+`light` だけが工程ごと対象外である。本番コードの構造を変えない変更に構造改善の判断は要らない。
 
 ## 標準フロー
 
@@ -98,7 +105,8 @@ flowchart TD
     E --> F
     F --> G[実装計画]
     G --> H[失敗するテスト → 最小実装 → 整理]
-    H --> I[仕様適合レビュー]
+    H --> R[構造改善]
+    R --> I[仕様適合レビュー]
     I --> J[コード品質レビュー]
     J --> K[限定的な検証・静的解析]
     K --> N[全体テスト → ビルド・結合テスト]
@@ -117,7 +125,8 @@ flowchart TD
   （K は変更箇所を 1 度実行する限定的な検証と静的解析だけを指す。依存パッケージの版更新だけは
   例外として既存テスト一式を実行する — [references/workflow-modes.md](references/workflow-modes.md)）
 - `legacy-refactor` は A から C へ抜けて `standard` と同じ経路をたどり、**B（要求と受け入れ条件）と
-  M（確定仕様化）は通らない**。H は「現状固定テスト → 段階的改善」、I は「本番の振る舞いが
+  M（確定仕様化）は通らない**。H は「現状固定テスト」、R は「段階的改善」、I は「本番の振る舞いが
+
   変わっていないことの確認」として読む
 
 ## `architecture` モードの現状

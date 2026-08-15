@@ -425,6 +425,49 @@ superpowers は 28 個で NDF と同規模ながら frontmatter が 1/2.7 だっ
 `description` が `Use when …` の 1 文だけで、トリガ語の列挙・引用符・追加フィールドを持たない。
 v7.0.0 の書式はこの方針に寄せたものである。
 
+## v8.0.0 での統合と改名（refactoring）
+
+`safe-refactoring` を **`refactoring`** へ改名し、分岐・反復・定数の表現を決める観点を統合した。
+この観点は独立 Skill `analyzable-coding` として一度追加したもので（v7.1.0 / Skill 31 個）、
+`refactoring` へ吸収したため **Skill 数は 31 個から 30 個へ戻る**。v7.1.0 は同じリリース作業の
+途中で作った中間の版で、配布はしていない。したがって配布済みの v7.0.0 から見ると 30 個のままである。
+
+統合の根拠は本書「判断基準」節の「機能が他 Skill と重複するものは、統合の対象とし、内容は
+統合先へ残す」である。観点を独立 Skill として置くと、発動条件が「コードを書くとき」以外に
+書けず、常に該当するトリガは発動判定として働かない。構造改善の起点である
+`safe-refactoring` の観点へ寄せることで、発動点が「リファクタリングを始めるとき」に定まる。
+
+| Skill | 配布 | 変更 | 判定 |
+| --- | --- | --- | --- |
+| `refactoring` | CXK | `safe-refactoring` から改名。コードスメルに 3 件追加、参照資料を 2 件追加 | 改名前の実測を引き継ぐ |
+
+追加した観点と参照資料:
+
+| 追加物 | 内容 |
+| --- | --- |
+| コードスメル 3 件 | 業務ルールの埋め込み / 一件ずつの反復 / 検証のない外部化 |
+| 手法 2 件 | 対応表への置き換え / 一括処理への置き換え |
+| `references/data-representation.md` | 分岐・反復・定数の判定表、外部化してよい条件、判断の記録 |
+| `references/lang-python.md` ほか 3 件 | 言語ごとの手段。1 言語 1 ファイルとし、SKILL.md が対象言語のものだけを読ませる |
+
+改名は公開コマンドの非互換変更にあたるため、対応表を `ndf-policies` へ置いた（v9.0.0 で削除）。
+あわせて v7.0.0 の対応表（playwright 系の分離）を予告どおり削除した。
+
+予算への影響（`python3 scripts/check-skill-frontmatter.py --report`）:
+
+Skill 数以外は全 family 合計（ndf + playwright-kit）である。v7.1.0 は配布していない中間の版だが、
+31 個へ増えた地点の実測として残す。
+
+| 指標 | v7.0.0 | v7.1.0（未配布） | v8.0.0 | 運用値 |
+| --- | ---: | ---: | ---: | ---: |
+| Skill 数（ndf 単独） | 30 | 31 | 30 | — |
+| Claude Code 初期一覧 | 5,807 | 6,041 | 5,855 | 8,000 |
+| Codex 初期一覧 | 5,395 | 5,629 | 5,443 | 8,000 |
+| frontmatter 合計 | 10,559 | 10,782 | 10,612 | 11,200 |
+
+Skill 数は v7.0.0 と同じ 30 個に戻るが、初期一覧は 48 文字（frontmatter 合計は 53 文字）多い。
+`refactoring` の `description` を統合後の役割に合わせて書き足したためで、運用値には余裕がある。
+
 ## 参照
 
 - 棚卸の計画: [issues/ndf-development-skills/02-skill-inventory.md](../../issues/ndf-development-skills/02-skill-inventory.md)

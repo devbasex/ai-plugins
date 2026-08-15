@@ -1,12 +1,17 @@
 ---
-name: safe-refactoring
-description: "Change structure without changing behavior, guarded by tests. Use when cleaning up code or touching legacy code（リファクタリング・コードスメル・現状固定テスト）."
+name: refactoring
+description: "Change structure without changing behavior, guarded by tests, judging smells and how decisions are represented. Use when cleaning up code or touching legacy code（リファクタリング・コードスメル・分岐をデータ化・現状固定テスト）."
 ---
 
 # 安全な構造改善
 
 **テストがなければ、それは構造改善ではなく単なる編集である。** 振る舞いが変わっていない
 ことを示す手段がない書き換えは、この Skill の対象外として扱う。
+
+この工程は**レビューと同じく、実装のあとに必ず通す**。動くコードが出た時点では整理が済んで
+いないことを前提に置く。対象は書き換えた行だけでなく、**その呼び出し元・呼び出し先と、同じ
+ファイル・同じモジュールの関連箇所まで**を含む（範囲と例外は
+[references/code-smells.md](references/code-smells.md) の「手を付ける範囲」）。
 
 ## 最初に決める 2 つのこと
 
@@ -40,7 +45,9 @@ description: "Change structure without changing behavior, guarded by tests. Use 
 1. **変更前に既存テストを実行する。** ここで落ちているものがあれば、先に報告する
 2. スメルを 1 つ選ぶ（一覧は [references/code-smells.md](references/code-smells.md)）
 3. 対応する手法を選ぶ（[references/refactoring-catalog.md](references/refactoring-catalog.md)。
-   スメル一覧で ★ が付いた手法はカタログに項目がなく、一覧の記述だけで進めてよい）
+   スメル一覧で ★ が付いた手法はカタログに項目がなく、一覧の記述だけで進めてよい）。
+   分岐・反復・定数を**何にどう置き換えるか**は
+   [references/data-representation.md](references/data-representation.md) で決める
 4. **1 手だけ適用する**
 5. テストを実行する。落ちたら直前の 1 手を戻す
 6. 通ったらコミットする（1 手 = 1 コミットを既定とする）
@@ -109,7 +116,7 @@ flowchart TD
 - 固定テストが書けない（副作用が分離できない、実行に外部環境が要る）
 - 1 手で終わらず、テストを通すために本番コードの分岐を足す必要が出た
 - 改善の途中で仕様の不明点が出た（`requirements-design` へ戻る）
-- 差分が依頼範囲を超えて広がった
+- 差分が [code-smells.md](references/code-smells.md) の「手を付ける範囲」を超えて広がった
 
 止めたときは「どこまで安全な状態か」を明示する。中途半端な状態を「あとで直す」前提で
 残さない。
@@ -130,4 +137,11 @@ flowchart TD
 
 - [references/code-smells.md](references/code-smells.md) — 構造改善の起点になる兆候
 - [references/refactoring-catalog.md](references/refactoring-catalog.md) — 手法と適用条件
+- [references/data-representation.md](references/data-representation.md) — 分岐・反復・定数を何にどう置き換えるか
+- 言語ごとの手段 — **対象の言語のファイルだけを読む**
+  - [references/lang-python.md](references/lang-python.md)
+  - [references/lang-javascript.md](references/lang-javascript.md)
+  - [references/lang-typescript.md](references/lang-typescript.md)
+  - [references/lang-php.md](references/lang-php.md)
+  - 一覧にない言語は、`data-representation.md` の判定表から自分で対応付ける
 - [references/characterization-tests.md](references/characterization-tests.md) — 現状固定テストの作り方

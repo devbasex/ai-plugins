@@ -21,5 +21,5 @@ qa-security-scan
 development-workflow
 requirements-design
 tdd-cycle
-safe-refactoring
+refactoring
 quality-gates

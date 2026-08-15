@@ -22,5 +22,5 @@ official-skills-autoloader
 development-workflow
 requirements-design
 tdd-cycle
-safe-refactoring
+refactoring
 quality-gates
