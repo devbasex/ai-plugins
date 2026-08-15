@@ -278,3 +278,25 @@ def test_judge_command_records_the_fix_base(refactor, tmp_path, env_tmp_dir, mon
     with pytest.raises(SystemExit):
         refactor.cmd_judge_review(type("A", (), {"id": 130, "round": 1})())
     assert read_state(state_path)["rounds"][0]["fix_base_sha"] == "FIX_BASE"
+
+
+def test_judge_command_advances_the_fix_attempt(
+    refactor, tmp_path, env_tmp_dir, no_git
+):
+    """変更要求のたびに試行番号を進める。
+
+    `merge-fix` が「叩き直し」と「次の修正ラウンド」を区別するのに使う。
+    """
+    state_path = _state(tmp_path)
+    env_tmp_dir(state_path)
+    write_result(state_path, "gemini-review-r1", review("REQUEST_CHANGES", [finding()]))
+    write_result(state_path, "kiro-review-r1", review())
+    args = type("A", (), {"id": 130, "round": 1})()
+
+    with pytest.raises(SystemExit):
+        refactor.cmd_judge_review(args)
+    assert read_state(state_path)["rounds"][0]["fix_attempts"] == 1
+
+    with pytest.raises(SystemExit):
+        refactor.cmd_judge_review(args)
+    assert read_state(state_path)["rounds"][0]["fix_attempts"] == 2

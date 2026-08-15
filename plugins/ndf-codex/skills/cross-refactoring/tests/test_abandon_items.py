@@ -224,6 +224,7 @@ def _prepare_fix(refactor, tmp_path, env_tmp_dir, monkeypatch, claimed,
     state = read_state(state_path)
     state["rounds"][0]["fix_rounds"] = 0
     state["rounds"][0]["fix_base_sha"] = "FIX_BASE"
+    state["rounds"][0]["fix_attempts"] = 1
     state_path.write_text(__import__("json").dumps(state), encoding="utf-8")
     env_tmp_dir(state_path)
     resolved_facts = [_fix_commit()] if facts is None else facts
@@ -421,6 +422,7 @@ def test_merge_fix_uses_the_recorded_range(refactor, tmp_path, env_tmp_dir, monk
     state_path = _prepare_fix(refactor, tmp_path, env_tmp_dir, monkeypatch, ["PRRT_a"])
     state = read_state(state_path)
     state["rounds"][0]["fix_base_sha"] = "FIX_BASE"
+    state["rounds"][0]["fix_attempts"] = 1
     state_path.write_text(__import__("json").dumps(state), encoding="utf-8")
 
     seen: list = []
@@ -624,6 +626,43 @@ def test_merge_fix_counts_a_new_result_as_a_new_round(
     refactor.cmd_merge_fix(args)
 
     assert read_state(state_path)["rounds"][0]["fix_rounds"] == 2
+
+
+def test_identical_payload_in_a_later_round_still_counts(
+    refactor, tmp_path, env_tmp_dir, monkeypatch
+):
+    """次の修正ラウンドが同じ JSON を返しても、別の実行として数えること。
+
+    内容だけを鍵にすると過去のラウンドと衝突し、`fix_rounds` が進まないまま
+    同じ修正を起動し続ける。
+    """
+    state_path = _prepare_fix(refactor, tmp_path, env_tmp_dir, monkeypatch, ["PRRT_a"])
+    monkeypatch.setattr(refactor, "resolved_threads_on_github",
+                        lambda repo, pr: {"PRRT_a"})
+    args = type("A", (), {"id": 130, "round": 1})()
+    refactor.cmd_merge_fix(args)
+
+    # 2 回目の起動。結果ファイルの内容は**まったく同じ**だが、その前に
+    # `judge-review` が走って試行番号が進んでいる
+    state = read_state(state_path)
+    state["rounds"][0]["fix_attempts"] = state["rounds"][0].get("fix_attempts", 1) + 1
+    state_path.write_text(__import__("json").dumps(state), encoding="utf-8")
+
+    refactor.cmd_merge_fix(args)
+    assert read_state(state_path)["rounds"][0]["fix_rounds"] == 2
+
+
+def test_rerunning_without_relaunch_is_still_skipped(
+    refactor, tmp_path, env_tmp_dir, monkeypatch
+):
+    """起動し直していない（ファイルがそのまま）なら、叩き直しても数えないこと。"""
+    state_path = _prepare_fix(refactor, tmp_path, env_tmp_dir, monkeypatch, ["PRRT_a"])
+    monkeypatch.setattr(refactor, "resolved_threads_on_github",
+                        lambda repo, pr: {"PRRT_a"})
+    args = type("A", (), {"id": 130, "round": 1})()
+    refactor.cmd_merge_fix(args)
+    refactor.cmd_merge_fix(args)
+    assert read_state(state_path)["rounds"][0]["fix_rounds"] == 1
 
 
 def test_merge_fix_is_idempotent_after_a_revert(

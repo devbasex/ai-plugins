@@ -1196,6 +1196,8 @@ def cmd_judge_review(args: argparse.Namespace) -> None:
     # 修正フェーズの範囲の起点。ここを記録しておかないと、修正コミットが
     # 実在するかを確かめられない。
     entry["fix_base_sha"] = _git_out(state["worktrees"]["work"], ["rev-parse", "HEAD"])
+    # 試行番号。`merge-fix` が「叩き直し」と「次のラウンド」を区別するのに使う。
+    entry["fix_attempts"] = entry.get("fix_attempts", 0) + 1
     statefile.save(path, state)
     open_findings = sum(1 for f in record["findings"] if not f["resolved"])
     info(f"変更要求があります（未解決の指摘 {open_findings} 件）")
@@ -1279,13 +1281,25 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     # **叩き直しても二重に取り込まない。** 修正は同じラウンドで何度も回るため、
     # 「このラウンドで処理済みか」では判定できない。**入力が前回と同じか**で見る。
     # 次の修正ラウンドでは結果ファイルが上書きされ、HEAD も進むので鍵が変わる。
-    # 鍵は**結果ファイルの内容だけ**から作る。HEAD を混ぜると、検証に失敗して
-    # 取り消した後は HEAD が変わるため鍵が一致せず、同じ申告を再処理してしまう。
-    # 次の修正ラウンドでは `launch-cli.sh` が結果ファイルを消して書き直すので、
-    # 内容だけでも取り違えない。
+    # 鍵は**試行番号と結果ファイルの内容**から作る。
+    #
+    # - HEAD は混ぜない。検証に失敗して取り消すと HEAD が変わるため、鍵が一致せず
+    #   同じ申告を再処理してしまう。
+    # - 内容だけでも足りない。次の修正ラウンドが同じ JSON（コミットなし・同じ
+    #   未解決 ID など）を返すと過去のラウンドと衝突し、`fix_rounds` が進まないまま
+    #   同じ修正を起動し続ける。
+    # - ファイルの更新時刻も使わない。粒度が環境によって違い、書き直しても同じ値に
+    #   なりうる。
+    #
+    # 修正の前には必ず `judge-review` が走るので、そこで進めた試行番号が
+    # **実行単位の識別子**になる。叩き直しただけなら番号は変わらない。
     work = state["worktrees"]["work"]
     head_now = _git_out(work, ["rev-parse", "HEAD"]) or ""
-    merge_key = hashlib.sha256(result.read_bytes()).hexdigest()
+    attempt = entry.get("fix_attempts", 0)
+    merge_key = (
+        f"{attempt}:"
+        + hashlib.sha256(result.read_bytes()).hexdigest()
+    )
     merged_keys = entry.setdefault("fix_merged_keys", [])
     if merge_key in merged_keys:
         info(
