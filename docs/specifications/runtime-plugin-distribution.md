@@ -81,6 +81,11 @@ bash scripts/build-runtime-plugins.sh --check
 
 `--check` は生成先と shared source の差分を比較し、drift がある場合に非 0 で終了する。
 
+`.claude-plugin/marketplace.json` と `plugins/<family>-codex/.codex-plugin/plugin.json` は生成物では
+なく手で更新する。この 2 つは build の対象外で drift 検査に掛からないため、版数と Skill 数は
+`validate-runtime-plugins.sh` の突き合わせ検査で担保する。description から Skill 数を読み取れない
+場合もエラーとして扱う（記述を消すことで検査が素通りするのを防ぐ）。
+
 総合検証は `scripts/validate-runtime-plugins.sh` で行う。
 
 ```bash
@@ -98,6 +103,7 @@ bash scripts/validate-runtime-plugins.sh
 | MCP runtime | shared MCP plugin に対応する claude / codex / kiro 配布先の存在 |
 | Claude Code | `claude plugin validate` が使える環境では NDF と marketplace を検証 |
 | Kiro CLI | NDF installer と MCP installer の `--dry-run` |
+| 版数・Skill 数 | Claude 版 `plugin.json` の `version` を基準に、Codex 版 `version`、marketplace と両 plugin.json の description 内 `(vX.Y.Z)`、description の Skill 数と `manifests/<runtime>-skills.txt` の実数を突き合わせる |
 | docs | `scripts/check-markdown-links.py` による local link 検証 |
 
 ## CI
