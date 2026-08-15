@@ -263,9 +263,86 @@ Skill 名の部分だからである。ただし配布先に何が入ってい�
 | `compatibility` | 500 文字 | Agent Skills 仕様 |
 | `SKILL.md` 行数 | 500 行。超えるものは補助ファイルへ分割 | 仕様の推奨、コンパクション対策 |
 | `SKILL.md` 本文 | 5,000 トークン | 仕様の推奨 |
-| Claude Code の初期 Skill 一覧の合計 | コンテキストウィンドウの 1%。不明な場合は 8,000 文字。1 項目あたり 250 文字で切り詰め | Claude Code 公式ドキュメント |
-| Codex の初期 Skill 一覧の合計 | コンテキストウィンドウの 2%。不明な場合は 8,000 文字 | Codex 公式ドキュメント |
-| 全 Skill の frontmatter 合計 | 11,200 文字 | リポジトリ固有の運用値。**plugin family をまたいだ合計**で、v7.0.0 時点の実測 10,559 文字（ndf 30 個 + playwright-kit 4 個）に約 6% の余裕を足した値。`scripts/check-skill-frontmatter.py` の `FRONTMATTER_TOTAL_MAX` |
+| Claude Code の初期 Skill 一覧の合計 | **25,000 文字**（10,000 トークン = コンテキストの 1%）。1 項目は `description` + `when_to_use` を合わせて 1,536 文字で切り詰め | Claude Code 公式ドキュメント。既定モデル Opus 5 のコンテキスト 1,000,000 から算出 |
+| Codex の初期 Skill 一覧の合計 | **13,600 文字**（5,440 トークン = コンテキストの 2%） | Codex 公式ドキュメント。既定モデル gpt-5.6-sol のコンテキスト 272,000 から算出 |
+| Kiro の初期 Skill 一覧の合計 | **規定なし** | 公式ドキュメントに一覧予算の記述がない。計測のみ行い判定しない |
+| 全 Skill の frontmatter 合計 | 11,200 文字（**警告のみ**） | リポジトリ固有の目安。ランタイムが課す制約ではないため、超過しても警告にとどめる。**plugin family をまたいだ合計** |
+
+### 予算はトークンで効く
+
+比率が掛かるのは**コンテキスト長（トークン）**であって文字数ではない。Claude Code で
+実測して確かめた（2026-08-15）。
+
+```console
+$ claude -p "/context" --output-format json                    # 既定予算
+| Skills | 5.1k | 0.5% |
+$ SLASH_COMMAND_TOOL_CHAR_BUDGET=200000 claude -p "/context"   # 予算を 20 倍
+| Skills | 5.1k | 0.5% |                                       # 変わらない
+$ SLASH_COMMAND_TOOL_CHAR_BUDGET=1000 claude -p "/context"     # 予算を絞る
+| Skills | 2.3k | 0.2% |                                       # 切り詰められる
+```
+
+予算を上げても増えないので、**既定の予算では全量が載っており切り詰めが起きていない**。
+このとき一覧の全量は 5.1k トークン（本書の文字数計測で 16,000 文字相当）で、
+文字数として 1% = 10,000 を当てると超過するはずだが切り詰めは起きていない。
+
+そこで**トークンで予算を持ち、文字数へ換算して判定する**。
+
+### 換算比は Claude Code の実測を基準にする
+
+**Skill 単位のトークン数を出せるのは Claude Code だけ**である。Codex の `/skills` は一覧
+だけで使用量を出さず、Kiro の `/context show` は 4 区分（Context files / Tools /
+Kiro responses / Your prompts）までで Skill 単位に割れない。実測できる唯一のランタイムに
+合わせるのが最も確からしい。
+
+```bash
+python3 scripts/check-skill-frontmatter.py --calibrate
+```
+
+`claude -p "/context"` を実行し、**Skill 名が一致するものだけ**で実測トークンと文字数計測を
+突き合わせて比を求め、`scripts/skill-listing-calibration.json` に保存する。以後の検査は
+その値を使う。実測環境と本リポジトリで Skill の版や構成が違っても、名前が一致する分だけを
+使うので影響しない。較正していない環境では安全側の既定（2.5 文字/トークン）を使う。
+
+Skill を増減したときや、既定モデルが変わったときに再実行する。
+
+### 初期一覧の予算は Codex が最も厳しい
+
+| ランタイム | 既定モデル | コンテキスト | 規定 | 予算（トークン） | 予算（文字換算） |
+| --- | --- | ---: | --- | ---: | ---: |
+| Claude Code | Opus 5 | 1,000,000 | 1% | 10,000 | 27,799 |
+| Codex | gpt-5.6-sol | 272,000 | 2% | 5,440 | 15,123 |
+| Kiro | auto | 1,000,000 | 規定なし | — | — |
+
+文字換算は較正値（2026-08-15 実測で 2.78 文字/トークン）による。`--calibrate` を実行すると
+この値は更新される。
+
+**コンテキストが最も長い Claude Code ではなく、Codex が全体の制約になる。** 比率が 2 倍でも
+コンテキストが 1/3.7 のため、予算は Claude Code の約半分にしかならない。Skill を増やすときは
+Codex の 5,440 文字を基準に考える。
+
+Claude Code 側は `skillListingBudgetFraction` 設定または `SLASH_COMMAND_TOOL_CHAR_BUDGET`
+環境変数で予算を引き上げられるが、**配布先の環境に依存する設定に頼らない**。
+
+### 一覧に載るものはランタイムで違う
+
+| ランタイム | `name` | `description` | `when_to_use` | ファイルパス |
+| --- | :-: | :-: | :-: | :-: |
+| Claude Code | ○ | ○ | ○（`description` と合算して 1,536 文字で切り詰め） | **×** |
+| Codex | ○ | ○ | × | **○** |
+| Kiro | ○ | ○ | × | 規定なし（多い側で見積もる） |
+
+パスを載せるのは Codex だけである（*"In Codex, the initial list also includes each skill's
+file path."*）。Claude Code の公式記述は *"a listing of skill names and descriptions"* で
+パスに触れていない。**パスは 1 Skill あたり 30 文字前後あり、30 個なら 900 文字に達する**ので、
+どちらで数えるかで結論が変わる。
+
+### 予算は plugin family をまたいだ合計で判定する
+
+利用者の環境には複数のプラグインが同時に入るため、family 単位で見ると超過を見逃す。
+ただし片方しか入れない利用者もいるので、`--report` は family 別の内訳も出す。
+Skill ごとの実測値は [`issues/skill-frontmatter-by-runtime.csv`](../../../issues/skill-frontmatter-by-runtime.csv)
+にある。
 
 運用目標の 300 文字は仕様上限より厳しい。全 Skill 分の `description` が常時注入されるため、
 仕様上限は 1 個で使い切ってよい量ではない。
