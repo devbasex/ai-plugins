@@ -217,11 +217,11 @@ Agent tool（サブエージェント）は一切使わない。**ホスト自�
      内に tmp を置くことで回避できる
 - 実装は常に `work/` の中だけで行う。並列適用はしない（同一ブランチへの同時コミットは
   競合の温床であり、レビュー単位も曖昧になる）。**並列化するのは提案とレビューだけ**。
-- 各 worktree の `.cross_refactoring/refs/` に、`refactoring` Skill の
-  `code-smells.md` / `refactoring-catalog.md` / `data-representation.md` /
-  `characterization-tests.md` を **コピーして配置**する。参加ランタイムに NDF がインストール
-  されていることを前提にせず、プロンプトからは worktree 内の相対パスだけを参照させる
-  （gemini の workspace 制約と、Kiro に NDF 導入がない対象リポジトリの両方に対応するため）。
+- 参照ファイルは **§11 の Skill プロビジョニング**で、各 worktree のランタイム標準の
+  配置先へ Skill ごとコピーする（旧案の `.cross_refactoring/refs/` への個別コピーは
+  そこへ統合した）。参加ランタイムに NDF がインストールされていることを前提にせず、
+  プロンプトからは worktree 内の相対パスだけを参照させる方針は変わらない
+  （gemini の workspace 制約と、NDF 未導入の対象リポジトリの両方に対応するため）。
 
 ### 5. 参加ランタイム別の固有対応
 
@@ -246,7 +246,7 @@ Kiro は codex / gemini と前提が異なるため、launcher に固有処理�
 | 既定エージェント | `~/.local/share/kiro-cli/data.sqlite3` に保存される**マシン全体の設定** | `kiro-cli agent set-default` は**絶対に呼ばない**。`kiro-cli agent create` も `$EDITOR` を開くため非対話から呼ばない |
 | `agent list` の出力先 | 2.16.1 では一覧を **stderr** に書く | 存在確認で stdout をパースしない |
 | slash command | `/goal` は `unrecognized subcommand`。`/ndf:*` 形式のコマンドは存在しない | プロンプトは**自己完結した平文**にする。`/ndf:pr-review` のようなコマンド呼び出しを書かない |
-| Skill 本文の読み込み | 起動時には読まず、必要時にファイル読み取りツールで取得する | 参照させたいファイルは worktree 内の**明示パス**で指示する（§4 の `refs/` コピー） |
+| Skill 本文の読み込み | **配置しただけでは本文を読まない**（`description` の語彙で「それらしく」答えるだけ。実測） | プロンプトに `.kiro/skills/<name>/SKILL.md` の**明示パス**を書いて読ませる。claude / codex は自動発動するが、プロンプトは 3 ランタイム共通なので常に書く（§11-3） |
 
 > **実機検証済み**: 手順・ログ・出典は
 > [issue-113-task3-cli-verification.md](issue-113-task3-cli-verification.md) §3。
@@ -294,7 +294,7 @@ cat prompt.md | claude -p \
 | 完了検知 | `--output-format json` の `is_error` / `subtype` で確定できる。sentinel 不要 |
 | 承認失敗の検知 | 同 JSON の `permission_denials` が非空なら承認失敗。早期エラーとして扱える |
 | 作業ディレクトリ | 参加者用 worktree を cwd にする（`--add-dir` で範囲を広げない） |
-| Skill 依存 | 対象リポジトリに NDF が入っている保証がないため、`/ndf:*` を呼ばず、§4 の `refs/` を明示パスで読ませる |
+| Skill 依存 | 対象リポジトリに NDF が入っている保証がないため、`/ndf:*` を呼ばず、§11 で配置した Skill を明示パスで読ませる |
 | 実行コスト | ごく単純な 3 ターンのタスクで `total_cost_usd` = 0.259。上限値の既定は保守的に置く |
 
 ### 6. メイン骨組み（cross-review と同じ形）
@@ -453,9 +453,13 @@ Available models (* = default):
 | **モデル差** | ランタイムを固定 | `kiro:claude-opus-5` と `kiro:gpt-5.6-sol` |
 | **ハーネス差** | モデルを固定 | `kiro:claude-opus-5` と `claude:opus-5` |
 
-> ⚠ **kiro の既定モデルは `auto`（タスクに応じて自動選択）である。** 既定のまま走らせると
-> ラウンドごとに違うモデルが動きうるため、**計測目的の実行では `--model kiro=<name>` を
-> 明示する**。`report` は `auto` のラウンドを「モデル未確定」として集計から分離する。
+> ⚠ **kiro の既定モデルは `auto`（タスクに応じて自動選択）で、実際に選ばれたモデルは
+> 取得できない。** 出力にもセッション一覧にも出ず、唯一の記録先である
+> `~/.local/share/kiro-cli/data.sqlite3` の `model_info` も `auto` としか残らない
+> （`rate_multiplier` も 1.0 固定なので credits からの逆算もできない）。実測で確認済み。
+> したがって **計測目的の実行では `--model kiro=<name>` を必須**とし、
+> `report` は `auto` のラウンドを「モデル未確定」として集計から分離する。
+> 明示指定していれば `observed` は `requested` と一致するため、v1 では sqlite を読まない。
 
 #### 10-2. commit への明記（機械集計できる形式で）
 
@@ -515,6 +519,91 @@ Impl-Model: gpt-5.5
 - 公平に比べたいなら、**同じ対象・同じ scope で `--model` だけ変えて複数回走らせる**のが
   最も素直な方法である（1 回の実行内での比較は参考値にとどめる）。
 
+### 11. NDF Skill のプロビジョニング（Step 0.5）
+
+impl は `refactoring` Skill の手順どおりに直すことが前提だが、**参加ランタイムに NDF が
+入っている保証はない**。対象リポジトリは任意で、ホスト以外のランタイムは初めてその
+リポジトリに触れることも多い。そこで **worktree 準備の直後に「Skill が使える状態か」を
+確認し、無ければ配置するフェーズ**を置く。
+
+#### 11-1. 配置先（ランタイム標準の場所へ、worktree 内に閉じて置く）
+
+| runtime | worktree 内の配置先 |
+|---|---|
+| claude | `<worktree>/.claude/skills/<name>/` |
+| codex | `<worktree>/.agents/skills/<name>/` |
+| kiro | `<worktree>/.kiro/skills/<name>/` |
+
+- **配置は worktree の中だけで完結させる。** 利用者のホームや対象リポジトリ本体には
+  一切書き込まない（`~/.claude/` `~/.kiro/` `kiro-cli agent set-default` などは触らない）。
+- `work/` は head ブランチなので、**生成物が PR に混入しないよう
+  `.git/worktrees/<name>/info/exclude` へ追加**する。適用結果の差分検証でも
+  Skill ディレクトリ配下は無視する。
+- **impl はラウンドごとに変わる**ため、`work/` には **3 ランタイム分すべての配置先**を作る。
+  提案・レビュー用 worktree には、そのランタイムの配置先だけでよい。
+
+#### 11-2. 手順
+
+1. **検出** — 配置先に `<name>/SKILL.md` が既にあるかを見る。
+   対象リポジトリが元から NDF を入れている場合は**それを使い、上書きしない**
+   （利用者の設定を壊さない）。
+2. **配置** — 無ければホストの `$PLUGIN_ROOT/skills/<name>/` から**コピー**する
+   （シンボリックリンクにしない。worktree を消せば残らない状態にする）。
+3. **記録** — `state.json` の `skills` に `preexisting` / `provisioned` / `missing` を残す。
+4. **失敗時** — ホスト側にも見つからない Skill があれば `init` を失敗させる。
+   黙って劣化した状態で走らせない。
+
+配置する Skill は**適用フェーズで実際に使う 3 つ**に絞る。
+
+| Skill | 用途 |
+|---|---|
+| `refactoring` | 手順の本体（スメル語彙 / 手法カタログ / 現状固定テスト / 表現の判断） |
+| `tdd-cycle` | テストが乏しい経路で現状固定テストを先に書く手順 |
+| `quality-gates` | 「直し終わった」と言える条件の判定 |
+
+> `ndf-policies` は**配置しない**。git 運用やコミット規約などリポジトリ運用のポリシーであり、
+> 対象リポジトリの運用と食い違う可能性が高い。必要な規約（1 手 1 コミット、trailer、
+> `--force` 禁止など）は本 Skill のプロンプト側で明示する。
+
+#### 11-3. 発動を運任せにしない（実測で確定）
+
+3 ランタイムで「Skill 名を出さないプロンプト」を実行し、**本文が読まれたか**を確認した
+（本物の SKILL.md に合言葉を 1 行だけ足した版で判定。詳細は
+[検証記録 §8](issue-113-task3-cli-verification.md)）。
+
+| runtime | 自動発動 | 明示パス指定 |
+|---|---|---|
+| claude | **する** | — |
+| codex | **する** | — |
+| kiro | **しない** | **読む** |
+
+**kiro は配置しただけでは SKILL.md 本文を読まない。** `description` の語彙とモデルの
+一般知識だけで「それらしい」応答を返すため、**一見すると発動しているように見えて中身が
+違う**（実作業では「テストが乏しければ現状固定テストを先に書く」という中核手順を飛ばした）。
+
+> **必須要件**: プロンプトに **Skill の明示パスを必ず書く**
+> （例: `まず .kiro/skills/refactoring/SKILL.md を読み、その手順に従うこと`）。
+> kiro で明示指定すると本文を読み込み、Skill の分岐判定どおりに振る舞うことを確認済み。
+> claude / codex では冗長になるが、**3 ランタイムで同じプロンプトを使う**ため常に書く。
+
+- Skill として配置する意味は「ランタイム標準の仕組みに乗せ、参照ファイルまで含めて
+  一式が揃った状態にする」こと。
+- 発動の確実性はプロンプトの明示指示で担保する。両方を行い、どちらか一方に賭けない。
+- 既存設計の `.cross_refactoring/refs/` コピーは**この配置に統合する**。同じファイルを
+  2 箇所に置く必要はなく、プロンプトからは Skill 配置先の相対パスを参照させる。
+
+#### 11-4. 手順を踏んだかは成果物で検証する
+
+Skill を読ませても**従うとは限らない**。実測では 3 ランタイムとも構造改善自体はできたが、
+現状固定テストの追加は claude が 17 本、codex が 1 メソッド、kiro が 0 本と揃わなかった。
+`merge-apply` の機械検証（§7）で次を必ず見る。
+
+- `test_gap=true` の item に**現状固定テストの追加コミットが先行**しているか
+- 各コミットでテストが green か / trailer が揃っているか（§10-2）
+
+これらは「Skill が発動したか」ではなく「**結果として手順が守られたか**」を見る検査であり、
+発動の不確実性に対する最後の砦になる。
+
 ## state.json スキーマ
 
 配置は `<worktree>/work/.cross_refactoring/cross-refactoring-rf<ID>-state.json`。
@@ -534,7 +623,13 @@ Impl-Model: gpt-5.5
   "host_detection": "env",
   "runtimes": ["codex", "gemini", "kiro"],
   "impl_capable": ["claude", "codex", "kiro"],
-  "models": {"claude": "opus-5", "codex": "gpt-5.5", "gemini": null, "kiro": null},
+  "models": {"claude": "opus-5", "codex": "gpt-5.5", "gemini": null, "kiro": "claude-opus-5"},
+  "skills": {
+    "required": ["refactoring", "tdd-cycle", "quality-gates"],
+    "claude": {"refactoring": "provisioned", "tdd-cycle": "provisioned", "quality-gates": "provisioned"},
+    "codex":  {"refactoring": "preexisting", "tdd-cycle": "provisioned", "quality-gates": "provisioned"},
+    "kiro":   {"refactoring": "provisioned", "tdd-cycle": "provisioned", "quality-gates": "provisioned"}
+  },
   "max_outer_rounds": 3,
   "max_fix_rounds": 3,
   "max_items_per_round": 5,
@@ -625,7 +720,7 @@ Impl-Model: gpt-5.5
 ```
 
 - `smell` は `code-smells.md` の語彙に、`technique` は `refactoring-catalog.md` の語彙に
-  **限定する**（worktree 内の `refs/` にコピーしたものを読ませる）。語彙外はマージ時に
+  **限定する**（§11 で配置した Skill の `references/` を読ませる）。語彙外はマージ時に
   `unknown` として警告し、`nit` へ降格させる。語彙を固定しないと重複排除が効かない。
 - 重複排除キーは `path` + `symbol` + `smell`。同一キーの提案は `proposed_by` を統合し、
   `rationale` / `plan` は最も具体的なものを採る。
@@ -726,11 +821,18 @@ Skill がランタイム中立になったためである。最終ゲートで�
 ### Task 2: worktree 準備
 
 - **対象:** `scripts/prepare-worktrees.sh`, `tests/test_prepare_worktrees.py`
-- **内容:** `work/`（head ブランチ）と `codex/` `gemini/` `kiro/`（`--detach`）を冪等に作成する。
+- **内容（Step 0.5 を含む）:** `work/`（head ブランチ）と `codex/` `gemini/` `kiro/`
+  （`--detach`）を冪等に作成し、続けて **§11 の Skill プロビジョニング**を行う。
+  各 worktree のランタイム標準の配置先に `refactoring` / `tdd-cycle` / `quality-gates` が
+  あるかを検出し、無ければホストの `$PLUGIN_ROOT/skills/` からコピーする。
+  既存があれば上書きしない。`work/` には**3 ランタイム分すべての配置先**を作る
+  （impl がラウンドごとに変わるため）。生成物が PR に混入しないよう
+  `.git/worktrees/<name>/info/exclude` へ追加し、結果を `state.json` の `skills` に記録する。
+  ホスト側にも無い Skill があれば失敗させる。
   既存パスが現リポジトリの登録済み worktree でなければ `.stale-<ts>` に退避して作り直す
   （cross-review の既存ガードを踏襲）。`sync <sha>` サブコマンドで読み取り用 worktree を
-  指定 SHA へ `git fetch` + `checkout --detach` する。あわせて各 worktree の
-  `.cross_refactoring/refs/` へ `refactoring` Skill の参照ファイルをコピーする。
+  指定 SHA へ `git fetch` + `checkout --detach` する。参照ファイルの配置は上記の
+  Skill プロビジョニングに含める。
   **kiro 専用 agent JSON の生成は行わない**（Task 3 の調査で `allowedTools` に依存しない方針が
   確定したため。承認はフラグで与える）。
 
@@ -774,7 +876,7 @@ Skill がランタイム中立になったためである。最終ゲートで�
 
   | agent | 起動形式 |
   |---|---|
-  | codex | `codex exec --dangerously-bypass-approvals-and-sandbox`（cross-review 既存） |
+  | codex | `codex exec --dangerously-bypass-approvals-and-sandbox < prompt.md`（cross-review 既存）。**プロンプトは必ず stdin から渡す**。argv に載せると stdin が開いている限り `Reading additional input from stdin...` で待ち続けてハングする（実測） |
   | gemini | `_gemini-env.sh` 経由の trusted directory 対応 + `--skip-trust`（cross-review 既存） |
   | claude | `cat prompt.md \| claude -p --permission-mode acceptEdits --allowed-tools ... --output-format json`（確定済み） |
   | kiro | `cat prompt.md \| kiro-cli chat --no-interactive --trust-all-tools`（確定済み） |
@@ -911,6 +1013,9 @@ Skill がランタイム中立になったためである。最終ゲートで�
     `item_id: null` の未解決指摘があればラウンド全件を対象にする
   - `should-abandon` が `max_fix_rounds` 到達時のみ真を返す
   - 外側収束の 3 条件
+  - **Skill プロビジョニング**: 既存の Skill を上書きせず `preexisting` と記録する /
+    無ければコピーして `provisioned` と記録する / ホスト側にも無ければ失敗する /
+    `work/` に 3 ランタイム分の配置先ができる / exclude へ追記される
   - **`--model <rt>=<name>` の解析**（繰り返し指定 / 未指定は `null` / 未知ランタイム名は
     エラー）と、`models` が全ラウンドで不変であること
   - **commit trailer の検証**: 4 つの trailer が揃うコミットは通り、1 つでも欠ければ
@@ -952,8 +1057,15 @@ Skill がランタイム中立になったためである。最終ゲートで�
       **同ラウンドで合意済みの item は revert されずに残る**
 - [ ] 適用に失敗した item がラウンドを止めず、その item だけ `abandoned` になる
 - [ ] 提案が尽きる（または上限到達）で外側ループが終了し、`/ndf:cross-review` で最終収束する
+- [ ] **Step 0.5 で各 worktree の Skill 有無を検出**し、無ければ配置して `state.json` の
+      `skills` に `preexisting` / `provisioned` を記録する。既存の Skill を上書きしない
+- [ ] 配置が **worktree の中だけ**で完結し、利用者のホーム（`~/.claude` / `~/.kiro`）と
+      対象リポジトリ本体、および PR の差分に一切現れない
+- [ ] ホスト側にも見つからない必須 Skill があれば `init` が失敗する
 - [ ] `--model <runtime>=<model>` で各 CLI のモデルを指定でき、指定値が state.json に
       記録されて全ラウンド不変である
+- [ ] `--model kiro=<name>` を指定しない実行では、`report` が当該ラウンドを
+      「モデル未確定」として集計から分離する
 - [ ] **全コミットに `Item-Id` / `Round` / `Impl-Runtime` / `Impl-Model` の trailer が付き**、
       `git log --format='%(trailers:key=Impl-Model,valueonly)'` で集計できる
 - [ ] 全レビューコメントにレビュアーのランタイムとモデルが明記される
@@ -975,9 +1087,12 @@ Skill がランタイム中立になったためである。最終ゲートで�
 | **ホストが impl のとき、うっかり Agent tool で実装させる** | `launch-cli.sh` は impl のランタイム名だけで分岐し、ホストか否かを見ない。受け入れ条件で「impl がホストと同一でも CLI 起動」を検証する |
 | **root 実行で claude の `bypassPermissions` が使えない** | 実測で確認済み。`acceptEdits` + `--allowed-tools` の明示を launcher の既定にする（root でも通ることを実測） |
 | **kiro の承認漏れが exit 0 のまま素通りする** | ハングではなく「拒否 + exit 0」で現れる（2.18.0 実測）。stderr の拒否メッセージを早期エラーに追加し、終了コード 0 を成功とみなさない |
+| **kiro が Skill 本文を読まないまま「それらしく」直す** | 配置しただけでは本文を読まず、`description` の語彙で答える（実測）。プロンプトに明示パスを必ず書き、さらに `merge-apply` の機械検証（現状固定テストの先行 / テスト green / trailer）で結果側からも担保する |
+| **Skill を読ませても手順を守らない** | 実測で現状固定テストの追加数が 17 / 1 / 0 と揃わなかった。`test_gap=true` の item は固定テスト先行を機械検証し、守られていなければ失敗として扱う |
+| **`codex exec` に argv でプロンプトを渡してハングする** | stdin が開いている限り `Reading additional input from stdin...` で待ち続ける（600 秒でも終わらず）。cross-review 同様 **stdin から渡す**。argv 形式を使うなら `< /dev/null` が必須 |
 | **`--trust-tools` の絞り込みがセキュリティ境界にならない** | `execute_bash` を許可すると `echo > file` で書き込み制限を迂回できる（実測）。防御は worktree 隔離に一本化し、**絞り込みは採用せず `--trust-all-tools` を使う**（綴り違いが WARNING のみで素通りする事故も同時に避けられる） |
 | **`--trust-all-tools` で worktree 外を触られる** | 参加 CLI の cwd を worktree に固定し、書き込み可能なのは `work/` のみ、他は `--detach` にする。ホストのリポジトリ本体は参加 CLI に渡さない |
-| claude 参加時の実行コスト | 単純な 3 ターンで $0.26。**レビューをラウンド単位にしたことで 1 ラウンドの起動回数を 33 → 9 に抑えた**（採用 5 件・fix 1 回の場合、§1）。それでも 1 ラウンド最低 6 回は走るため、上限値（`--max-items-per-round` / `--max-outer-rounds`）の既定は保守的に置く |
+| claude 参加時の実行コスト | 単純な 3 ターンで $0.26、**実際のリファクタリング 1 件（29 ターン / 218 秒）で $1.42** の実測。**レビューをラウンド単位にしたことで 1 ラウンドの起動回数を 33 → 9 に抑えた**（採用 5 件・fix 1 回の場合、§1）が、それでも claude が絡む起動が 1 ラウンドに数回あるため 1 実行で数ドル〜十数ドルに達しうる。上限値（`--max-items-per-round` / `--max-outer-rounds`）の既定は保守的に置き、`report` に実測コストを必ず出す |
 | **ラウンド単位レビューで指摘と item の対応が崩れる** | レビュー結果の finding に `item_id` を必須にし、未知 ID / 欠落は差し戻して再レビュー。紐づかない指摘は `item_id: null` を明示させ、放棄時はラウンド全件 revert の対象にする |
 | **1 ラウンドの実装者が 1 者に固定され、モデルの癖が偏る** | 輪番の単位をラウンドにしているため、ラウンドを重ねれば実装者は分散する。`--max-outer-rounds` を 1 にしない |
 | frontmatter 予算の逼迫 | 残余 588 文字に対し cross-review 相当で 407 文字。**`--model` 追加で `argument-hint` がさらに伸びる**ため `<pr> [--scope <path>...] [--model <rt>=<name>]` 程度に切り詰める。超える場合は Task 12 で上限見直しか既存 `description` 圧縮を行う |
@@ -990,7 +1105,7 @@ Skill がランタイム中立になったためである。最終ゲートで�
 | 「振る舞い不変」が検証されないまま通る | 着手前 baseline green を必須化、`test_gap` の item は固定テスト先行を機械検証、レビュー観点の筆頭に置く |
 | 同じ提案が毎ラウンド出続けて終わらない | 提案重複率 70% で `saturated` 終了。放棄 item は次ラウンドの提案プロンプトに「対象外」として渡す |
 | モデルが語彙を守らず重複排除が効かない | 語彙外を `unknown` として `nit` 降格し、しきい値で自動的に落ちるようにする |
-| 参加ランタイムに NDF 未導入で参照ファイルが読めない | 各 worktree の `.cross_refactoring/refs/` へ参照ファイルをコピーし、相対パスだけを参照させる |
+| 参加ランタイムに NDF 未導入で参照ファイルが読めない | §11 の Step 0.5 で各 worktree のランタイム標準の配置先へ Skill をコピーし、相対パスだけを参照させる |
 | CLI 実行時間が長く全体が長丁場になる | 提案とレビューは並列。適用は 1 ラウンド 1 回に集約したため起動回数は減るが、**1 回あたりは採用 item 数分だけ長くなる**。`--max-items-per-round`（既定 5）で 1 回の長さを抑え、state.json で常時再開可能にする |
 | cross-review の `monitor.py` 変更が既存ループを壊す | 追加オプションは全て既定値で現行挙動を維持。既存テスト無変更通過を Task 9 の完了条件にする |
 

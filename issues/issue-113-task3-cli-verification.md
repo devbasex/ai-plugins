@@ -412,12 +412,114 @@ Available models (* = default):
 比較はモデルを揃えないと交絡する。`kiro:claude-opus-5` と `claude:opus-5` を比べれば
 **ハーネス差**、`kiro:claude-opus-5` と `kiro:gpt-5.6-sol` を比べれば**モデル差**が見える。
 
-### 7-2. kiro の既定は `auto` — 計測時は明示指定が必須
+### 7-2. `auto` で実際に使われたモデルは取得できない（実測）
 
 既定モデルは `auto` で、「タスクに応じて最適なモデルを選ぶ」と説明されている。
-**ラウンドごとに違うモデルが動きうるため、計測目的の実行では `--model kiro=<name>` を
-明示する**。指定しなかった場合、`report` は当該ラウンドを「モデル未確定」として
-集計から分離する必要がある。
+**では auto のとき実際にどのモデルが動いたのか**を、記録される場所すべてで確認した。
+
+| 取得手段 | 結果 |
+| --- | --- |
+| stdout / stderr | モデル名は出力されない（`▸ Credits: 0.06 • Time: 4s` のみ） |
+| `kiro-cli chat --list-sessions -f json` | `sessionId` / `title` / `updatedAt` / `messageCount` のみ。**モデル情報なし** |
+| `~/.local/share/kiro-cli/data.sqlite3` の `conversations_v2` | `model_info` を持つ。**ここが唯一の記録先** |
+| `~/.kiro/sessions/cli/*.json`（TUI 系の旧セッション） | 同じく `model_info` を持つ |
+
+`conversations_v2` は `key` = 実行時の cwd、`value` = 会話 JSON という構造で、
+`model_info` の中身は次のとおりだった。
+
+```jsonc
+// --model を指定せず（= auto）実行した後
+"model_info": {"model_name": "auto", "description": "Models chosen by task for optimal usage and consistent quality",
+               "model_id": "auto", "context_window_tokens": 1000000, "rate_multiplier": 1.0, "rate_unit": "Credit"}
+
+// --model claude-opus-5 を指定して実行した後
+"model_info": {"model_name": "claude-opus-5", "description": "Experimental preview of Claude Opus 5 model with 1M context window",
+               "model_id": "claude-opus-5", "context_window_tokens": 1000000, "rate_multiplier": 2.2, "rate_unit": "Credit"}
+```
+
+**結論**: 明示指定したモデル名は記録されるが、**`auto` は `auto` としか記録されず、
+実際に選ばれた実モデルは取得できない**。`auto` のときの `rate_multiplier` も 1.0 固定で、
+消費 credits から実モデルを逆算することもできない。
+
+**設計への影響**: 計測目的の実行では `--model kiro=<name>` を**必須**とする。
+`auto` のラウンドは `observed` を確定できないため、`report` は「モデル未確定」として
+集計から分離する。なお `observed` の取得自体は sqlite を読めば可能だが、
+**`--model` を明示していれば `requested` と一致するため、v1 では sqlite を読まず
+`requested` をそのまま記録する**（読み取り実装を増やさない）。
 
 credits 倍率がモデルごとに違う点（`gpt-5.6-luna` 0.10x 〜 `gpt-5.6-sol` 2.40x）も、
 コスト比較の際に効く。
+
+## 8. Skill の呼び出しと手順遵守の事前検証（3 ランタイム実測）
+
+計画 §11 の前提「参加ランタイムが NDF Skill の手順どおりに直せるか」を実機で確認した。
+実施日 2026-08-15、環境 B。
+
+### 8-1. 検証方法
+
+1. 同一の検証用プロジェクトを 3 つ用意する（長い `calculate` 関数 1 本 + テスト 1 件）。
+2. 本物の `refactoring` Skill を各ランタイム標準の配置先へコピーする
+   （`.claude/skills/` / `.agents/skills/` / `.kiro/skills/`）。
+3. **Skill 名を出さないプロンプト**（「`calculate` を読みやすく整理して。振る舞いは変えない」）
+   で非対話実行し、成果物を比べる。
+4. 呼び出しの有無を確実に判定するため、**本物の SKILL.md に 1 行だけ**
+   「本文を読んだら最終応答の 1 行目に `SKILL-LOADED: refactoring` と出力せよ」を挿入した
+   版を用意し、軽量プロンプト（方針を 3 行、編集禁止）で別途実行した。
+
+### 8-2. 結果 — 自動発動するのは claude / codex、kiro はしない
+
+| runtime | 配置先 | Skill 名なしで**自動発動** | 明示パス指定で読むか |
+| --- | --- | --- | --- |
+| claude | `.claude/skills/` | **する**（`SKILL-LOADED` 出力 / 5 ターン / $0.27） | — |
+| codex | `.agents/skills/` | **する**（`SKILL-LOADED` 出力 / 16 秒） | — |
+| kiro | `.kiro/skills/` | **しない**（マーカーなし） | **読む**（`SKILL.md` の読み取りログと `SKILL-LOADED` を確認） |
+
+kiro はマーカーを出さないまま「分岐をデータ化」「特性テスト（Characterization Test）」
+といった Skill 的な語彙で答えた。これは **SKILL.md 本文ではなく `description`**
+（`…（リファクタリング・コードスメル・分岐をデータ化・現状固定テスト）`）**と
+モデルの一般知識によるもの**で、本文の手順に従っているわけではない。
+プロンプトに `まず .kiro/skills/refactoring/SKILL.md を読み、その手順に従うこと` を
+足すと、本文を読み込んだうえで「テストが乏しい既存コードに該当するため、まず現状固定
+テストを追加する」と Skill の分岐判定どおりに答えた。
+
+> **設計への反映**: §11-3 の「発動を運任せにしない」は必須要件である。
+> **プロンプトに Skill の明示パスを必ず書く**。kiro は書かなければ本文を読まない。
+
+### 8-3. 実作業での成果物の差（計測の実例）
+
+Skill 名を出さずに実際の整理作業をさせた結果。**同じ Skill・同じ課題でも成果が揃わない**
+ことがはっきり出た。計画 §10 の計測が必要な理由そのものである。
+
+| runtime | 所要 | 追加テスト | 分岐のデータ化 | 現状固定テスト | コスト |
+| --- | --- | --- | --- | --- | --- |
+| claude | 218 秒 / 29 ターン | **17 本追加（計 18）** | ○（`KIND_RATES` / `RANK_RATES`） | ○（先に追加し、旧実装と 20,000 ケース比較まで実施） | **$1.42** |
+| codex | 106 秒 | 1 メソッド追加（テーブル駆動） | **✗**（`if/elif` のまま関数抽出のみ） | ○（`Characterization cases` と明記） | 37,988 tokens |
+| kiro | 27 秒 | **0 本**（既存 1 件のみ） | ○（`_KIND_DISCOUNT` / `_RANK_DISCOUNT`） | **✗**（テストを足さず「既存テスト通過」で完了） | 表示なし |
+
+3 者ともテストは green で振る舞いは壊していない。ただし
+**kiro は「テストが乏しければ現状固定テストを先に書く」という Skill の中核手順を踏んでいない**
+（本文を読んでいないため。8-2 と整合する）。
+
+### 8-4. codex は argv でプロンプトを渡すとハングする（重要）
+
+検証中に踏んだ。`codex exec ... "<prompt>"` と argv で渡すと、stdin が開いている限り
+**`Reading additional input from stdin...` のまま待ち続ける**（600 秒でも終わらず timeout）。
+
+```console
+$ codex exec --dangerously-bypass-approvals-and-sandbox "$(cat prompt.md)"
+（stderr）Reading additional input from stdin...
+（exit 124 = timeout）
+
+$ codex exec --dangerously-bypass-approvals-and-sandbox "$(cat prompt.md)" < /dev/null
+（16 秒で正常終了）
+```
+
+cross-review の既存 `launch-codex.sh` は `< "$PROMPT"` と**stdin から渡している**ため
+この問題を踏んでいない。**cross-refactoring でも stdin 渡しを踏襲する**。
+argv 形式を採る場合は `< /dev/null` が必須。
+
+### 8-5. コストの実測（計画 §10 / リスク表へ反映）
+
+claude で**実際のリファクタリング 1 件**（29 ターン / 218 秒）が **$1.42**。
+検証記録 §2-5 の「単純な 3 ターンで $0.26」の 5 倍以上で、適用フェーズは 1 起動でも重い。
+1 ラウンド 9 起動の構成でも、claude が絡む回数だけで 1 実行あたり数ドル〜十数ドルに達しうる。
