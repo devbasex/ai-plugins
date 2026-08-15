@@ -31,6 +31,7 @@ import hashlib
 import json
 import os
 import pathlib
+import signal
 import subprocess
 import sys
 import time
@@ -713,22 +714,18 @@ def _run_baseline_test(
     区別できない。そもそも振る舞いが変わっていないことを示す手段が無い書き換えは
     構造改善ではないため、テストコマンドは必須にしている。
     """
-    try:
-        r = subprocess.run(
-            command, shell=True, cwd=str(work), capture_output=True, text=True,
-            timeout=timeout,
-        )
-        status = "green" if r.returncode == 0 else "red"
-    except subprocess.TimeoutExpired:
+    code, timed_out = _run_with_timeout(command, str(work), timeout)
+    if timed_out:
         die(
             f"着手前のテストが {timeout} 秒で終わりませんでした（{command}）。"
             "打ち切りました"
         )
         raise SystemExit(1)
+    status = "green" if code == 0 else "red"
     if status == "red":
         die(
             f"着手前のテストが失敗しています（{command}）。"
-            f"先に直してから開始してください:\n{r.stdout[-2000:]}\n{r.stderr[-2000:]}"
+            "先に直してから開始してください"
         )
     info(f"✅ 着手前のテスト成功: {command}")
     return {"command": command, "status": status, "checked_at": statefile.now()}
@@ -1722,6 +1719,53 @@ def commit_touches_tests(work: str, sha: str) -> bool:
     return False
 
 
+def _run_with_timeout(
+    command: str, cwd: str, timeout: int
+) -> tuple[Optional[int], bool]:
+    """テストコマンドを実行し `(終了コード, 打ち切ったか)` を返す。
+
+    **新しいプロセスグループで起動し、打ち切るときはグループごと止める。**
+    `shell=True` のまま `subprocess.run(timeout=...)` を使うと、終了するのは
+    シェルだけで、pytest などの子プロセスは走り続ける。残ったプロセスは同じ
+    作業ディレクトリを書き換え続けるため、直後の `git checkout` と競合する。
+    """
+    proc = subprocess.Popen(
+        command, shell=True, cwd=cwd, start_new_session=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    try:
+        proc.communicate(timeout=timeout)
+        return proc.returncode, False
+    except subprocess.TimeoutExpired:
+        _kill_process_group(proc)
+        # 取りこぼしが無いよう、後始末が終わるまで待ってから戻る。
+        try:
+            proc.communicate(timeout=30)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.communicate()
+        return None, True
+
+
+def _kill_process_group(proc: "subprocess.Popen[bytes]") -> None:
+    """プロセスグループごと止める。SIGTERM のあと、残っていれば SIGKILL。"""
+    try:
+        pgid = os.getpgid(proc.pid)
+    except (ProcessLookupError, PermissionError, OSError):
+        proc.kill()
+        return
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(pgid, sig)
+        except (ProcessLookupError, PermissionError, OSError):
+            return
+        try:
+            proc.wait(timeout=5)
+            return
+        except subprocess.TimeoutExpired:
+            continue
+
+
 def run_test_at(
     work: str, sha: str, command: str, head_branch: str,
     timeout: int = DEFAULT_TEST_TIMEOUT,
@@ -1738,14 +1782,11 @@ def run_test_at(
     if _git_out(work, ["checkout", "--detach", sha]) is None:
         return "missing"
     try:
-        r = subprocess.run(
-            command, shell=True, cwd=work, capture_output=True, text=True,
-            timeout=timeout,
-        )
-        return "pass" if r.returncode == 0 else "fail"
-    except subprocess.TimeoutExpired:
-        info(f"⚠ コミット {sha[:7]} のテストが {timeout} 秒で終わりませんでした")
-        return "fail"
+        code, timed_out = _run_with_timeout(command, work, timeout)
+        if timed_out:
+            info(f"⚠ コミット {sha[:7]} のテストが {timeout} 秒で終わりませんでした")
+            return "fail"
+        return "pass" if code == 0 else "fail"
     finally:
         subprocess.run(
             ["git", "checkout", head_branch], cwd=work, capture_output=True, text=True

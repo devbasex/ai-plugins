@@ -212,6 +212,8 @@ def test_run_test_at_checks_out_and_restores(refactor, monkeypatch):
         lambda *a, **kw: (git_calls.append(a[0]) if isinstance(a[0], list) else None)
         or subprocess.CompletedProcess(a[0], 0, "", ""),
     )
+    monkeypatch.setattr(refactor, "_run_with_timeout",
+                        lambda cmd, cwd, timeout: (0, False))
     assert refactor.run_test_at("/w", "abc", "pytest -q", "main") == "pass"
     assert ["checkout", "--detach", "abc"] in git_calls
     assert ["git", "checkout", "main"] in git_calls
@@ -221,8 +223,10 @@ def test_run_test_at_reports_failure(refactor, monkeypatch):
     monkeypatch.setattr(refactor, "_git_out", lambda work, args: "")
     monkeypatch.setattr(
         refactor.subprocess, "run",
-        lambda *a, **kw: subprocess.CompletedProcess(a[0], 1, "", ""),
+        lambda *a, **kw: subprocess.CompletedProcess(a[0], 0, "", ""),
     )
+    monkeypatch.setattr(refactor, "_run_with_timeout",
+                        lambda cmd, cwd, timeout: (1, False))
     assert refactor.run_test_at("/w", "abc", "pytest -q", "main") == "fail"
 
 

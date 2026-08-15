@@ -175,3 +175,24 @@ def test_hanging_test_is_cut_off(refactor, work):
     )
     assert status == "fail"
     assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=work).stdout.strip() == "main"
+
+
+def test_cutting_off_a_test_kills_its_children(refactor, work):
+    """打ち切るときは**子プロセスまで**止めること。
+
+    シェルだけを終了すると pytest 等が走り続け、直後の checkout と同じ作業
+    ディレクトリを取り合う。
+    """
+    import time
+
+    sha = _commit(work, "Refactor: 子プロセスを残す" + TRAILERS,
+                  {"src/foo.py": "def f():\n    return 3\n"})
+    marker = work / "child-ran"
+    # 子プロセスが 2 秒後に痕跡を残そうとする
+    command = f"(sleep 2 && touch {marker}) & sleep 30"
+
+    status = refactor.run_test_at(str(work), sha, command, "main", timeout=1)
+    assert status == "fail"
+
+    time.sleep(3)
+    assert not marker.exists(), "子プロセスが生き残って書き込んでいる"
