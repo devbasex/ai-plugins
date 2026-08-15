@@ -39,13 +39,45 @@ DESC_LEAD_CHARS = 160         # この範囲に用途またはトリガ語を置
 COMPATIBILITY_MAX = 500       # Agent Skills 仕様
 DESC_PLUS_WTU_MAX = 1536      # Claude Code の一覧切り詰め
 SKILL_MD_MAX_LINES = 500      # 仕様の推奨 / コンパクション対策
-CODEX_LISTING_MAX = 8000      # Codex の初期一覧予算（コンテキスト長不明時）
-CLAUDE_LISTING_MAX = 8000     # Claude Code の初期一覧予算（コンテキスト長不明時）
-CLAUDE_ITEM_TRUNCATE = 250    # Claude Code は 1 項目をこの長さで切り詰める
+
+# --- 初期一覧の予算 ---------------------------------------------------------
+# 各ランタイムは起動時に Skill の一覧（name / description / パス）を読み込み、
+# その総量に予算を設けている。予算はモデルのコンテキスト長に比例するため、
+# **既定モデルのコンテキスト長を実測して算出する**（2026-08-15 実測）。
+#
+# Claude Code（公式ドキュメント "Extend Claude with skills"）:
+#   "The budget scales at 1% of the model's context window."
+#   引き上げは skillListingBudgetFraction 設定 / SLASH_COMMAND_TOOL_CHAR_BUDGET 環境変数。
+#   予算が文字数で指定できることから、比率も文字数として扱う。
+#   Opus 5 の 1,000,000 で 1% = 10,000 文字。
+CLAUDE_CONTEXT_TOKENS = 1_000_000
+CLAUDE_LISTING_MAX = 10_000
+#   1 項目は description + when_to_use を合わせて 1,536 文字で切り詰める。
+#   "each entry's combined text is capped at 1,536 characters regardless of budget"
+CLAUDE_ITEM_TRUNCATE = 1_536
+#
+# Codex（公式ドキュメント "Build skills"）:
+#   "at most 2% of the model's context window, or 8,000 characters when the
+#    context window is unknown"
+#   既定モデル gpt-5.6-sol のコンテキストは 272,000（kiro-cli --list-models で実測）。
+#   2% = 5,440 文字。コンテキスト長が判明しているため 8,000 のフォールバックは使わない。
+#   **4 ランタイムの中で最も厳しい予算であり、実質ここが全体の制約になる。**
+CODEX_CONTEXT_TOKENS = 272_000
+CODEX_LISTING_MAX = 5_440
+#   現状はこの予算をわずかに超えている。開発ワークフロー外の Skill を別プラグインへ移す
+#   作業（issue #115）で解消する見込みのため、それまでは警告にとどめる。
+#   移動が済んだら "error" へ戻す。
+CODEX_LISTING_LEVEL = "warn"
+#
+# Kiro: 公式ドキュメント（kiro.dev/docs/skills）に一覧予算の規定が無い。
+#   既定モデル auto のコンテキストは 1,000,000（--list-models で実測）だが、
+#   比率の規定が無い以上、憶測で基準を置かない。計測だけ行い判定はしない。
+KIRO_LISTING_MAX = None
+
 # 全 Skill の frontmatter 合計。**plugin family をまたいで合計する**（利用者の環境では
 # 複数のプラグインが同時に入るため、family 内だけ見ても実際の注入量にならない）。
-# v7.0.0 時点の実測 10,559 文字（ndf 30 個 + playwright-kit 4 個、2026-08-14）を基準に、
-# 約 6% の余裕を足して 11,200 とした。Skill を増やすときは実測しなおして更新する。
+# ランタイムが課す制約ではなく、Skill を無制限に増やさないための独自の目安であるため
+# **警告にとどめる**。実際の制約は上の初期一覧の予算で判定する。
 FRONTMATTER_TOTAL_MAX = 11200
 
 # --- 既知の外部 Skill 名 ----------------------------------------------------
@@ -397,13 +429,19 @@ def measure_aggregate(skills: list[dict], skills_dir: pathlib.Path) -> dict:
         fm = s["fm"] or {}
         name = unquote(fm.get("name", s["dir"]))
         desc = unquote(fm.get("description", ""))
+        wtu = unquote(fm.get("when_to_use", ""))
         rel = f"{skills_dir.name}/{s['dir']}/SKILL.md"
         fm_total += len(s["block"])
         for runtime, members in manifests.items():
             if s["dir"] not in members:
                 continue
-            # Claude Code は 1 項目を 250 文字で切り詰めてから積む。
-            d = desc[:CLAUDE_ITEM_TRUNCATE] if runtime == "claude" else desc
+            if runtime == "claude":
+                # Claude Code は description と when_to_use を連結し、
+                # 合わせて CLAUDE_ITEM_TRUNCATE 文字で切り詰めてから積む。
+                d = (desc + wtu)[:CLAUDE_ITEM_TRUNCATE]
+            else:
+                # Codex / Kiro は when_to_use を一覧へ載せない。
+                d = desc
             listings[runtime] += len(name) + len(d) + len(rel)
 
     return {"listings": listings, "frontmatter_total": fm_total}
@@ -415,16 +453,24 @@ def check_budget(metrics: dict) -> list[Finding]:
     引数は measure_aggregate の計測値を plugin family 横断で合計したもの。
     """
     out: list[Finding] = []
-    limits = {"claude": CLAUDE_LISTING_MAX, "codex": CODEX_LISTING_MAX, "kiro": None}
+    limits = {
+        "claude": CLAUDE_LISTING_MAX,
+        "codex": CODEX_LISTING_MAX,
+        "kiro": KIRO_LISTING_MAX,
+    }
+    levels = {"claude": "error", "codex": CODEX_LISTING_LEVEL, "kiro": "error"}
     for runtime, total in sorted(metrics["listings"].items()):
         limit = limits.get(runtime)
         if limit is not None and total > limit:
-            out.append(Finding("(全体)", "error", f"ops/{runtime}-listing",
+            out.append(Finding("(全体)", levels.get(runtime, "error"),
+                               f"ops/{runtime}-listing",
                                f"{runtime} の初期一覧に載る合計が {total} 文字（上限 {limit}）"))
     fm_total = metrics["frontmatter_total"]
     if fm_total > FRONTMATTER_TOTAL_MAX:
-        out.append(Finding("(全体)", "error", "ops/frontmatter-total",
-                           f"全 Skill の frontmatter 合計が {fm_total} 文字（上限 {FRONTMATTER_TOTAL_MAX}）"))
+        # ランタイムの制約ではなく独自の目安なので警告にとどめる。
+        out.append(Finding("(全体)", "warn", "ops/frontmatter-total",
+                           f"全 Skill の frontmatter 合計が {fm_total} 文字"
+                           f"（目安 {FRONTMATTER_TOTAL_MAX}）"))
     return out
 
 
