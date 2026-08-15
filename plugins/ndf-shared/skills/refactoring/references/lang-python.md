@@ -10,7 +10,7 @@
 | 網羅性の静的検査 | mypy + `assert_never` |
 | 不変性 | `@dataclass(frozen=True)` |
 | スキーマ検証 | pydantic / jsonschema |
-| 一括処理 | NumPy / pandas（一括演算） |
+| 一括処理 | NumPy / pandas の**ベクトル化演算**（一括演算） |
 | 失敗の集計 | 失敗を集めて返す |
 
 ## 網羅性の静的検査
