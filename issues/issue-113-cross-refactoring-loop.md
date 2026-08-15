@@ -6,20 +6,33 @@
 - 参考 Skill: `plugins/ndf-shared/skills/cross-review/SKILL.md`
 - 参考 Skill: `plugins/ndf-shared/skills/refactoring/SKILL.md`
 - 参考 Skill: `plugins/ndf-shared/skills/external-ai/SKILL.md`
-- 参考 Skill: `plugins/ndf-shared/skills/fix/SKILL.md`
+- Kiro 実機検証の記録: `issues/ndf-development-skills/03-runtime-conformance.md`
 
 ## 概要
 
 `/ndf:cross-review` がレビューを収束させるのと同じ発想で、**リファクタリングを収束させる**
 Skill `/ndf:cross-refactoring` を追加する。
 
-codex / gemini / claude の 3 ランタイムに「どこを・どう直すか」を提案させ、提案ごとに
-**実装ランタイムとレビューランタイムを必ず別にして** 適用とレビューを回す。個々の提案が
-レビュー収束したら次の提案へ進み、全提案を消化したら**提案フェーズからやり直す**。
-新しい提案が出なくなった時点で完了とする。
+**claude / codex / gemini / kiro のうち、ホストを除いた 3 CLI** に「どこを・どう直すか」を
+提案させ、提案ごとに **実装ランタイムとレビューランタイムを必ず別にして** 適用とレビューを
+回す。個々の提案がレビュー収束したら次の提案へ進み、全提案を消化したら**提案フェーズから
+やり直す**。新しい提案が出なくなった時点で完了とする。
 
-cross-review が「1 本のループ」なのに対し、cross-refactoring は **二重ループ**である点が
-最大の構造差になる。
+本 Skill を実行しているホストセッションは **オーケストレータに徹し、提案・実装・レビューの
+どのフェーズにも参加しない**。参加者は常にホスト以外の 3 つで、いずれも独立した CLI
+プロセスとして起動する。
+
+| ホスト | 参加ランタイム（輪番） |
+|---|---|
+| Claude Code | codex / gemini / kiro |
+| Codex | gemini / kiro / claude |
+| Kiro | claude / codex / gemini |
+
+gemini は Skill 配布先ランタイムではないため常に参加者側になる。どのホストでも参加者は
+必ず 3 つ揃うので、後述の輪番（実装 1 : レビュー 2）は全ランタイムで同じ形になる。
+
+cross-review が「1 本のループ」なのに対し、cross-refactoring は **三重ループ**
+（提案ラウンド → item → レビュー収束）である点が最大の構造差になる。
 
 ## 問題・背景
 
@@ -39,24 +52,24 @@ scope creep）はレビュー観点テンプレートに含まれていない。
 
 ## 設計方針
 
-### 1. 二重ループ
+### 1. 三重ループ
 
 ```mermaid
 flowchart TD
     Init([Step 0: PR 作成 + worktree 準備 + state 初期化]):::phase --> Outer
 
     Outer["外側ループ: 提案ラウンド R"]:::phase --> Propose
-    Propose["Step 1: 提案フェーズ（3 ランタイム並列）<br/>codex / gemini / claude が<br/>推奨箇所と具体手順を JSON で提出"]
+    Propose["Step 1: 提案フェーズ（参加 3 CLI 並列）<br/>ホストを除く 3 ランタイムが<br/>推奨箇所と具体手順を JSON で提出"]
     Propose --> Merge["Step 2: 提案マージ<br/>重複排除 / 合意数で優先度付け<br/>severity しきい値で採否<br/>1 ラウンドの上限件数で切り出し"]
     Merge --> Empty{"採用件数 = 0 ?"}
     Empty -->|はい| Final([外側ループ終了]):::ok
     Empty -->|いいえ| Item
 
-    Item["Step 3: 内側ループ: 提案 item を 1 件取り出す<br/>ランタイム輪番で impl / reviewer を決定"]:::phase
-    Item --> Apply["Step 4: 適用（impl ランタイム）<br/>refactoring Skill の手順で 1 手 1 コミット<br/>テスト green を各手で確認 → push"]
-    Apply --> Review["Step 5: レビュー（reviewer 2 ランタイム並列）<br/>impl とは必ず別ランタイム<br/>リファクタリング専用観点で判定"]
+    Item["Step 3: 中間ループ: 提案 item を 1 件取り出す<br/>ランタイム輪番で impl / reviewer を決定"]:::phase
+    Item --> Apply["Step 4: 適用（impl CLI）<br/>refactoring Skill の手順で 1 手 1 コミット<br/>テスト green を各手で確認 → push"]
+    Apply --> Review["Step 5: 内側ループ: レビュー（reviewer 2 CLI 並列）<br/>impl とは必ず別ランタイム<br/>リファクタリング専用観点で判定"]
     Review --> Judge{"両 reviewer APPROVE ?"}
-    Judge -->|いいえ| Fix["Step 6: 指摘修正（impl ランタイム）<br/>reply + resolve まで実施"]
+    Judge -->|いいえ| Fix["Step 6: 指摘修正（impl CLI）<br/>reply + resolve まで実施"]
     Fix --> FixCap{"fix ラウンド上限 ?"}
     FixCap -->|未達| Review
     FixCap -->|到達| Abandon["Step 6b: item を revert して放棄<br/>deferred として記録"]:::stop
@@ -74,40 +87,63 @@ flowchart TD
     classDef stop fill:#fdd,stroke:#933
 ```
 
-- **外側ループ = 提案ラウンド**。「指摘がなくなったら完了」の判定単位。
-- **内側ループ = 提案 item ごとの適用とレビュー**。「指摘がなくなるまで繰り返し」の単位。
+- **外側 = 提案ラウンド**。「指摘がなくなったら完了」の判定単位。
+- **中間 = 提案 item**。1 件ずつ直列に適用する。
+- **内側 = レビュー収束**。「指摘がなくなるまで繰り返し」の単位。
 
-### 2. ランタイム輪番（同一ランタイムに実装とレビューをさせない）
+### 2. ランタイム輪番（ホストを除いた 3 者で回す）
 
-3 ランタイムを固定順 `["codex", "gemini", "claude"]` に並べ、item ごとに次で決める。
+参加ランタイムは **全ランタイムからホストを除いて**決める。順序は固定順
+`["claude", "codex", "gemini", "kiro"]` からホストを抜いた並びとし、`init` 時に確定して
+`state.json` に記録する（再開時も不変）。
 
 ```
+RUNTIMES  = ["claude", "codex", "gemini", "kiro"] - [host]      # 常に 3 要素
 impl      = RUNTIMES[(outer_round + item_index) % 3]
 reviewers = RUNTIMES から impl を除いた 2 つ
 ```
 
-- 実装 1 : レビュー 2 を常に維持する。レビュー多数決ではなく **2 者 APPROVE で通過**とする
-  （リファクタリングは必須作業ではないため、疑義が残るなら通さない側に倒す）。
+ホストの判定は `--host claude|codex|kiro` の明示指定を第一とし、未指定時のみ環境変数
+（`CLAUDE_PLUGIN_ROOT` 等）から推定する。誤検出するとホストが自分自身を CLI として
+起動しようとして無駄な多重実行になるため、**推定結果は必ず `init` の出力に表示して
+state.json に残す**。
+
+- 実装 1 : レビュー 2 を常に維持し、**2 者 APPROVE で通過**とする（リファクタリングは必須作業
+  ではないため、疑義が残るなら通さない側に倒す）。
 - 指摘の修正は **impl ランタイムが行う**。レビュアーに直させるとレビューの独立性が失われる。
 - item ごとに輪番するので、1 ラウンド内でも実装者が入れ替わり、特定モデルの癖が PR 全体に
   偏らない。
 - 割り当ては `state.json` の `items[].impl` / `items[].reviewers` に記録し、再開時も不変。
 
-`claude` はホストランタイム（本 Skill を実行しているセッション自身）であり、CLI ではなく
-**`Agent(subagent_type="general-purpose")` サブエージェント**として参加する。
-codex / gemini はバックグラウンド CLI プロセスとして参加する。この非対称性は
-状態機械（後述）が吸収する。
+### 3. 全参加者が CLI であることの帰結（cross-review の骨組みをそのまま使える）
 
-### 3. worktree はエージェント分用意する
+参加者を 3 つとも CLI プロセスにしたことで、**ループ全体を 1 本の bash で駆動できる**。
+claude が参加者になる場合（ホストが Codex / Kiro のとき）もヘッドレス CLI
+（`claude -p`）として起動し、ホスト側の Agent tool（サブエージェント）は一切使わない。
+そのため cross-review が light rotation で必要としていた「bash を抜けてメインが Agent を
+起動し、再度 bash に戻る」中断・再開のプロトコルが不要になる。
+
+その結果、次がそのまま流用できる。
+
+- cross-review と同じ「state.py サブコマンド + launcher + monitor.py」の骨組み
+- `monitor.py` の多軸完了判定（pidfile / sentinel / 早期エラー / stall / hard timeout / result.json）
+- 「AI 自身が `gh api` で PR へ直接投稿する」ことでホスト context を汚さない方針
+
+ホストが行うのは bash ループの駆動と、最後の `/ndf:cross-review` 実行だけになる。
+
+### 4. worktree はエージェント分用意する
 
 ```
 <worktree-base>/<owner>--<repo>/rf<PR>/
 ├── work/              # 書き込み用。PR head ブランチを checkout（唯一の非 detach）
-├── codex/             # 読み取り用。git worktree add --detach <sha>
-├── gemini/            # 読み取り用。--detach
-├── claude/            # 読み取り用。--detach
+├── <参加1>/           # 読み取り用。git worktree add --detach <sha>
+├── <参加2>/           # 読み取り用。--detach
+├── <参加3>/           # 読み取り用。--detach
 └── work/.cross_refactoring/   # state.json / prompt / result / log（tmp 集約先）
 ```
+
+`<参加N>` は state.json の `runtimes`（ホストを除いた 3 つ）から決まる。ホストが Claude Code
+なら `codex/` `gemini/` `kiro/`、ホストが Codex なら `gemini/` `kiro/` `claude/` になる。
 
 - `<worktree-base>` の解決順は cross-review と同じ（`NDF_WORKTREE_BASE` env >
   `<システム tmpdir>/ndf-worktrees`）。
@@ -121,42 +157,135 @@ codex / gemini はバックグラウンド CLI プロセスとして参加する
      内に tmp を置くことで回避できる
 - 実装は常に `work/` の中だけで行う。並列適用はしない（同一ブランチへの同時コミットは
   競合の温床であり、レビュー単位も曖昧になる）。**並列化するのは提案とレビューだけ**。
+- 各 worktree の `.cross_refactoring/refs/` に、`refactoring` Skill の
+  `code-smells.md` / `refactoring-catalog.md` / `data-representation.md` /
+  `characterization-tests.md` を **コピーして配置**する。参加ランタイムに NDF がインストール
+  されていることを前提にせず、プロンプトからは worktree 内の相対パスだけを参照させる
+  （gemini の workspace 制約と、Kiro に NDF 導入がない対象リポジトリの両方に対応するため）。
 
-### 4. メイン駆動の状態機械（bash では Agent tool を呼べないため）
+### 5. 参加ランタイム別の固有対応
 
-cross-review の light rotation が `exit 10` でメイン介入を要求しているのと同じ問題が、
-本 Skill では**毎フェーズ**発生する（claude ランタイムの参加が Agent tool 経由のため）。
-そこで、ループ全体を 1 つの bash で完結させる設計を最初から採らず、
-**状態機械が「次にメインが何をすべきか」を返す**形にする。
+codex / gemini は cross-review の launcher に既存の実績があるため、そのまま流用する
+（codex: `--dangerously-bypass-approvals-and-sandbox` / gemini: `GEMINI_CLI_TRUST_WORKSPACE=true`
++ `--skip-trust` + settings sanitize）。新たに扱いを決める必要があるのは **kiro と claude** の
+2 つである。
 
-```bash
-eval "$("$SCRIPTS/refactor.py" next "$ID")"
-# → ACTION=LAUNCH_PROPOSE  CLI_AGENTS=codex,gemini  AGENT_RUNTIME=claude  ROUND=1 ...
+#### 5-1. Kiro
+
+Kiro は codex / gemini と前提が異なるため、launcher に固有処理が要る。根拠は
+`issues/ndf-development-skills/03-runtime-conformance.md`（kiro-cli 2.16.1 / 2026-08-07 実測）。
+
+| 事項 | 内容 | 対応 |
+|---|---|---|
+| 実行形式 | 非対話実行は `kiro-cli chat --no-interactive "<prompt>"` | launcher はプロンプトをファイルに書き、その内容を渡す |
+| ツール事前承認 | Skill frontmatter の `allowed-tools` は**事前承認として機能しない**（`execute_bash` が denied list で拒否された実測あり） | **agent 定義側**で許可する。cross-refactoring 専用の agent JSON を worktree の `.kiro/agents/` に生成する（下記） |
+| workspace agent の検出 | cwd 配下の `.kiro/agents` からしか検出しない | `prepare-worktrees.sh` が kiro worktree 内に agent JSON を生成する。生成物は commit しない |
+| 既定エージェント | `~/.local/share/kiro-cli/data.sqlite3` に保存される**マシン全体の設定** | `kiro-cli agent set-default` は**絶対に呼ばない**。常に `--agent <name>` で明示指定する |
+| `agent list` の出力先 | 2.16.1 では一覧を **stderr** に書く | 存在確認で stdout をパースしない |
+| slash command | `/goal` は `unrecognized subcommand`。`/ndf:*` 形式のコマンドは存在しない | プロンプトは**自己完結した平文**にする。`/ndf:pr-review` のようなコマンド呼び出しを書かない |
+| Skill 本文の読み込み | 起動時には読まず、必要時にファイル読み取りツールで取得する | 参照させたいファイルは worktree 内の**明示パス**で指示する（§4 の `refs/` コピー） |
+
+専用 agent JSON（`prepare-worktrees.sh` が生成する雛形）:
+
+```json
+{
+  "name": "ndf-cross-refactoring",
+  "description": "cross-refactoring participant",
+  "tools": ["*"],
+  "allowedTools": ["fs_read", "fs_write", "execute_bash"],
+  "resources": []
+}
 ```
 
-`ACTION` の一覧:
+> ⚠ **要検証**: `allowedTools` による事前承認が kiro-cli 2.16.1 の非対話実行で実際に効くかは
+> 未確認である。Skill frontmatter の `allowed-tools` が効かないことは実測済みだが、agent 定義の
+> `allowedTools` は別機構であり、同じ結論を当てはめてはならない。Task 3 の最初に
+> 次のコマンドで単独検証し、結果を `03-runtime-conformance.md` の追記として残す。
+>
+> ```bash
+> cd <kiro worktree>
+> kiro-cli chat --agent ndf-cross-refactoring --no-interactive \
+>   "git status --short を実行して結果をそのまま出力してください"
+> ```
+>
+> 承認要求で止まる／拒否される場合は、代替として `--trust-all-tools` 相当のフラグ
+> （`kiro-cli chat --help` で確認）を launcher に追加する。どちらも効かない場合、
+> **Kiro は提案・レビュー専任（読み取りのみ）**とし、実装フェーズの輪番からは外す
+> 縮退設計へ切り替える。この場合も参加者は 3 者のままで、`impl` の輪番だけが残り 2 者に
+> 縮む（レビューは常に impl 以外の 2 者が担当するため構造は変わらない）。
+> state.json に `impl_capable: ["codex", "gemini"]` を持たせて輪番の母集合を分ける。
 
-| ACTION | メインがすること |
+#### 5-2. Claude（ホストが Codex / Kiro のとき）
+
+参加者としての claude は **ヘッドレス CLI** で起動する。ホストが Claude Code のときは
+参加者に含まれないため、この経路は使わない。
+
+| 事項 | 内容 |
 |---|---|
-| `LAUNCH_PROPOSE` | CLI ランチャを background 起動 → claude 提案 Agent を起動 → `monitor.py` で CLI 完了待ち |
-| `MERGE_PROPOSALS` | `refactor.py merge-proposals` |
-| `APPLY` | impl が claude なら Agent、codex/gemini なら CLI ランチャ + `monitor.py` |
-| `MERGE_APPLY` | `refactor.py merge-apply` |
-| `LAUNCH_REVIEW` | reviewer 2 つを同様に起動（claude が含まれるかで分岐） |
-| `JUDGE_REVIEW` | `refactor.py judge-review` |
-| `FIX` | impl ランタイムで指摘修正 |
-| `ABANDON` | `refactor.py abandon-item`（revert + deferred 記録） |
-| `NEXT_ITEM` / `NEXT_ROUND` | `refactor.py advance` |
-| `FINAL_CROSS_REVIEW` | `/ndf:cross-review <PR>` を実行 |
-| `DONE` | `refactor.py report` |
+| 実行形式 | `claude -p "<prompt>"`（print モード）。プロンプトは長いためファイルから流し込む |
+| 権限 | 非対話で編集・シェル実行を通すため `--permission-mode` の指定が要る。worktree が隔離済みである前提で許可範囲を決める |
+| 作業ディレクトリ | 参加者用 worktree を cwd にする（`--add-dir` で範囲を広げない） |
+| Skill 依存 | 対象リポジトリに NDF が入っている保証がないため、`/ndf:*` を呼ばず、§4 の `refs/` を明示パスで読ませる |
+| 完了検知 | 終了コード + 結果 JSON の存在で判定する（codex と同じくファイル書き出しを必須にする） |
 
-利点は 3 つ。
+> ⚠ **要検証**: 非対話実行で編集とシェル実行を通すための正確なフラグ（`--permission-mode`
+> の取り得る値、`--dangerously-skip-permissions` の要否と可否）は、Task 3 で kiro と同様に
+> 実機確認して `references/cli-claude.md` に記録する。
 
-- メインの context に diff もレビュー本文も載らない（cross-review の設計方針を継承）
-- どこで落ちても `next` を叩き直せば再開できる
-- `claude` を輪番に含めても bash と Agent tool の境界を跨ぐ分岐が 1 箇所に閉じる
+### 6. メイン骨組み（cross-review と同じ形）
 
-### 5. 振る舞い不変の担保（`refactoring` Skill への委譲）
+```bash
+PLUGIN_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}"
+SCRIPTS="$PLUGIN_ROOT/skills/cross-refactoring/scripts"
+
+# init が host を確定し、RUNTIMES（ホストを除く 3 つ）と RUNTIMES_CSV を eval で返す。
+eval "$("$SCRIPTS/refactor.py" init "$PR" --scope "$SCOPE" ${HOST:+--host "$HOST"} \
+          --max-outer-rounds "$MAX_OUTER" --max-fix-rounds "$MAX_FIX" \
+          --max-items-per-round "$MAX_ITEMS")"
+export CROSS_REFACTORING_TMP_DIR="$TMP_DIR"
+"$SCRIPTS/prepare-worktrees.sh" "$PR"
+
+while :; do                                          # 外側: 提案ラウンド
+  eval "$("$SCRIPTS/refactor.py" start-round "$PR")" || break
+  for a in $RUNTIMES; do
+    "$SCRIPTS/launch-cli.sh" "$a" propose "$PR" "$ROUND"
+  done
+  "$SCRIPTS/monitor.py" "$PR" --agents "$RUNTIMES_CSV" \
+      --tmp-dir "$TMP_DIR" --stem-template '{agent}-propose-rf{id}'
+  "$SCRIPTS/refactor.py" merge-proposals "$PR" || break   # exit 2 = 採用 0 件 → 収束
+
+  while eval "$("$SCRIPTS/refactor.py" next-item "$PR")"; do   # 中間: item
+    "$SCRIPTS/launch-cli.sh" "$IMPL" apply "$PR" "$ITEM_ID"
+    "$SCRIPTS/monitor.py" "$PR" --agents "$IMPL" --tmp-dir "$TMP_DIR" \
+        --stem-template "{agent}-apply-$ITEM_ID"
+    "$SCRIPTS/refactor.py" merge-apply "$PR" "$ITEM_ID" || continue  # 失敗 = 自動 abandon
+
+    while :; do                                      # 内側: レビュー収束
+      for r in $REVIEWERS; do
+        "$SCRIPTS/launch-cli.sh" "$r" review "$PR" "$ITEM_ID"
+      done
+      "$SCRIPTS/monitor.py" "$PR" --agents "$REVIEWERS_CSV" --tmp-dir "$TMP_DIR" \
+          --stem-template "{agent}-review-$ITEM_ID"
+      "$SCRIPTS/refactor.py" judge-review "$PR" "$ITEM_ID" && break   # 0 = 両者 APPROVE
+      if "$SCRIPTS/refactor.py" should-abandon "$PR" "$ITEM_ID"; then
+        "$SCRIPTS/refactor.py" abandon-item "$PR" "$ITEM_ID"; break
+      fi
+      "$SCRIPTS/launch-cli.sh" "$IMPL" fix "$PR" "$ITEM_ID"
+      "$SCRIPTS/monitor.py" "$PR" --agents "$IMPL" --tmp-dir "$TMP_DIR" \
+          --stem-template "{agent}-fix-$ITEM_ID"
+      "$SCRIPTS/refactor.py" merge-fix "$PR" "$ITEM_ID"
+    done
+  done
+done
+
+# Step 7: 最終ゲート — /ndf:cross-review <PR> をホストが実行
+# Step 8: 報告 + Draft 解除
+"$SCRIPTS/refactor.py" report "$PR"
+```
+
+state.json に全状態が入るため、どこで落ちても同じコマンド列を叩き直せば再開できる。
+
+### 7. 振る舞い不変の担保（`refactoring` Skill への委譲）
 
 適用フェーズのプロンプトは `refactoring` Skill の手順をそのまま踏ませる。状態機械側では
 次を**機械的に検証**し、満たさない適用結果は失敗として扱う。
@@ -169,18 +298,20 @@ eval "$("$SCRIPTS/refactor.py" next "$ID")"
 | 差分予算 | `estimated_diff_lines` の 2 倍を超えたら失敗（scope creep 検知） |
 | 機能変更の混入なし | レビュー観点で判定（機械判定は不可能なため reviewer に委ねる） |
 
-### 6. 終了条件
+### 8. 終了条件
 
 | ループ | 終了条件 |
 |---|---|
-| 内側（item） | reviewer 全員 APPROVE / `--max-fix-rounds`（既定 3）到達で **revert して放棄** |
+| 内側（レビュー） | reviewer 全員 APPROVE / `--max-fix-rounds`（既定 3）到達で **revert して放棄** |
+| 中間（item） | 採用 item を全件消化 |
 | 外側（ラウンド） | 採用 item 0 件 / `--max-outer-rounds`（既定 3）到達 / 提案の重複率が前ラウンド比 70% 以上（収束と見なす） |
 
 **収束しない item は捨てる**のが cross-review との重要な差分である。レビュー指摘の修正は
 必須だが、リファクタリングは任意作業なので、揉める提案は PR に残さない方が安全である。
-放棄した item は `deferred_items` に理由付きで記録し、最終報告に列挙する。
+放棄した item は `deferred_items` に理由付きで記録し、次ラウンドの提案プロンプトへ
+「対象外」として渡す。
 
-### 7. PR の扱い
+### 9. PR の扱い
 
 - Step 0 で base ブランチから `refactor/<slug>` を切り、**Draft PR** を作成する（`/ndf:pr` を利用）。
   最初のコミットは空コミットまたは最初の現状固定テストとする。
@@ -203,9 +334,12 @@ eval "$("$SCRIPTS/refactor.py" next "$ID")"
   "base_branch": "main",
   "head_branch": "refactor/cross-refactoring-target",
   "worktree_root": "/tmp/ndf-worktrees/devbasex--ai-plugins/rf130",
-  "worktrees": {"work": "...", "codex": "...", "gemini": "...", "claude": "..."},
+  "worktrees": {"work": "...", "codex": "...", "gemini": "...", "kiro": "..."},
   "target_scope": ["plugins/ndf-shared/skills/cross-review/scripts"],
-  "runtimes": ["codex", "gemini", "claude"],
+  "host": "claude",
+  "host_detection": "env",
+  "runtimes": ["codex", "gemini", "kiro"],
+  "impl_capable": ["codex", "gemini", "kiro"],
   "max_outer_rounds": 3,
   "max_fix_rounds": 3,
   "max_items_per_round": 5,
@@ -216,7 +350,7 @@ eval "$("$SCRIPTS/refactor.py" next "$ID")"
   "rounds": [
     {
       "round": 1,
-      "proposed": {"codex": 9, "gemini": 7, "claude": 8},
+      "proposed": {"codex": 9, "gemini": 7, "kiro": 8},
       "merged": 14, "adopted": 5, "deferred": 9,
       "items": ["R1-001", "R1-002"]
     }
@@ -236,13 +370,13 @@ eval "$("$SCRIPTS/refactor.py" next "$ID")"
       "estimated_diff_lines": 40,
       "proposed_by": ["codex", "gemini"],
       "impl": "codex",
-      "reviewers": ["gemini", "claude"],
+      "reviewers": ["gemini", "kiro"],
       "status": "done",
       "fix_rounds": 1,
       "commits": ["abc1234", "def5678"],
       "reviews": [
-        {"round": 1, "gemini": "REQUEST_CHANGES", "claude": "APPROVE", "findings": 2},
-        {"round": 2, "gemini": "APPROVE", "claude": "APPROVE", "findings": 0}
+        {"round": 1, "gemini": "REQUEST_CHANGES", "kiro": "APPROVE", "findings": 2},
+        {"round": 2, "gemini": "APPROVE", "kiro": "APPROVE", "findings": 0}
       ]
     }
   ],
@@ -274,9 +408,9 @@ eval "$("$SCRIPTS/refactor.py" next "$ID")"
 }
 ```
 
-- `smell` は `refactoring/references/code-smells.md` の語彙に、`technique` は
-  `refactoring/references/refactoring-catalog.md` の語彙に**限定する**。語彙外は
-  マージ時に `unknown` として警告し、`nit` へ降格させる。語彙を固定しないと重複排除が効かない。
+- `smell` は `code-smells.md` の語彙に、`technique` は `refactoring-catalog.md` の語彙に
+  **限定する**（worktree 内の `refs/` にコピーしたものを読ませる）。語彙外はマージ時に
+  `unknown` として警告し、`nit` へ降格させる。語彙を固定しないと重複排除が効かない。
 - 重複排除キーは `path` + `symbol` + `smell`。同一キーの提案は `proposed_by` を統合し、
   `rationale` / `plan` は最も具体的なものを採る。
 - 優先度は `合意ランタイム数` → `severity` → `estimated_diff_lines` の昇順。
@@ -310,66 +444,110 @@ plugins/ndf-shared/skills/cross-refactoring/
 ├── docs/01-state-and-propose.md      # Step 0〜2
 ├── docs/02-apply-and-review.md       # Step 3〜6
 ├── docs/03-review-viewpoints.md      # レビュー観点テンプレート
-├── scripts/refactor.py               # 状態機械（uv 自己完結 / stdlib のみ）
-├── scripts/prepare-worktrees.sh      # worktree をエージェント分作成・同期
-├── scripts/launch-cli.sh             # codex / gemini を phase 引数で起動
+├── scripts/refactor.py               # 状態管理（uv 自己完結 / stdlib のみ）
+├── scripts/prepare-worktrees.sh      # worktree をエージェント分作成・同期・refs 配置
+├── scripts/launch-cli.sh             # claude / codex / gemini / kiro を phase 引数で起動
 ├── prompts/propose.md                # 提案プロンプト雛形
 ├── prompts/apply.md                  # 適用プロンプト雛形
 ├── prompts/review.md                 # レビュープロンプト雛形
+├── prompts/fix.md                    # 指摘修正プロンプト雛形
 └── tests/                            # pytest
 ```
 
 ### 変更
 
-- `plugins/ndf-shared/skills/cross-review/scripts/monitor.py` — 汎用化（下記 Task 9）
+- `plugins/ndf-shared/skills/cross-review/scripts/monitor.py` — 汎用化（Task 9）
 - `plugins/ndf-shared/skills/cross-review/scripts/_gemini-env.sh` — 新規抽出。
   `launch-gemini.sh` の trusted directory / settings sanitize 処理を切り出し、
-  cross-refactoring から `$CLAUDE_PLUGIN_ROOT/skills/cross-review/scripts/_gemini-env.sh`
-  として source する
-- `plugins/ndf-shared/manifests/claude-skills.txt` — `cross-refactoring` を追加
-- `plugins/ndf-claude/**` — `bash scripts/build-runtime-plugins.sh` による同期生成物
-- `plugins/ndf-claude/.claude-plugin/plugin.json` — `8.0.0` → `8.1.0`
+  cross-refactoring の `launch-cli.sh` から source する
+- `plugins/ndf-shared/skills/external-ai/references/cli-kiro.md` — 新規。Kiro CLI の
+  非対話実行手順（§5-1 の内容 + 実測結果）を external-ai の補助ファイル体系に載せる
+- `plugins/ndf-shared/skills/external-ai/references/cli-claude.md` — 新規。`claude -p` の
+  ヘッドレス実行手順（§5-2 の内容 + 実測結果）
+- `plugins/ndf-shared/skills/external-ai/SKILL.md` — 補助ファイル表に `cli-kiro.md` /
+  `cli-claude.md` を追加し、`description` の「codex exec or gemini exec」を 4 CLI に更新。
+  「どちらの CLI を選ぶか」の比較表も 4 者へ拡張する
+- `plugins/ndf-shared/manifests/{claude,codex,kiro}-skills.txt` — `cross-refactoring` を追加
+- `plugins/ndf-{claude,codex,kiro}/**` — `bash scripts/build-runtime-plugins.sh` の同期生成物
+- `plugins/ndf-claude/.claude-plugin/plugin.json` / `plugins/ndf-codex/.codex-plugin/plugin.json`
+  — `8.0.0` → `8.1.0`
 - `CLAUDE.md` / `README.md` / `docs/ndf-plugin-reference.md` /
-  `docs/specifications/ndf-skill-inventory.md` / `plugins/ndf-claude/README.md` — Skill 数と
-  新 Skill の記述
+  `docs/specifications/ndf-skill-inventory.md` / 各 runtime README — Skill 数と新 Skill の記述
+- `issues/ndf-development-skills/03-runtime-conformance.md` — `allowedTools` 検証結果の追記
 
 ### v1 の配布範囲
 
-**Claude Code のみ**に配布する（`claude-skills.txt` だけに追加）。ホストランタイムの
-Agent tool を輪番に組み込む設計のため、Codex / Kiro へはそのまま移せない。
-`statusline` / `google-auth` 等と同様、ランタイム別サブセットは既存の運用に沿う。
-Codex / Kiro 版は「ホスト = そのランタイム、他 2 つを CLI」に一般化してから別 Issue で扱う。
+**3 ランタイムすべてに配布する**（`claude` / `codex` / `kiro` の各 manifest に追加）。
+参加者を CLI に統一し、さらに参加者集合を「全ランタイム − ホスト」で定義したことで、
+Skill がランタイム中立になったためである。最終ゲートで呼ぶ `/ndf:cross-review` も
+3 ランタイムすべてに配布済みで、前提が揃っている。
+
+ホストごとに必要な CLI は次のとおり。`init` は不足している CLI を検出したら、その時点で
+理由を明示して失敗する（ループ途中での発覚を避ける）。
+
+| ホスト | 必要な CLI |
+|---|---|
+| Claude Code | `codex` / `gemini` / `kiro-cli` |
+| Codex | `gemini` / `kiro-cli` / `claude` |
+| Kiro | `claude` / `codex` / `gemini` |
 
 ## タスク分解
 
-### Task 1: 状態機械の骨格
+### Task 1: 状態管理の骨格
 
 - **対象:** `scripts/refactor.py`, `tests/test_refactor_init.py`
-- **内容:** `init` / `next` / `status` / `advance` を実装する。`init` は PR 番号・対象スコープ・
-  各上限値を受け取り、リポジトリ情報と `baseline_test` を記録して state.json を生成する。
-  `next` は state から次の `ACTION` を KEY=VALUE で stdout に出す。tmp ディレクトリ解決は
-  cross-review の `_tmp_dir()` と同じ優先順（env > `<work worktree>/.cross_refactoring/`）にする。
+- **内容:** `init` / `start-round` / `next-item` / `advance` / `status` を実装する。`init` は PR 番号・
+  対象スコープ・各上限値を受け取り、リポジトリ情報と `baseline_test` を記録して state.json を
+  生成する。tmp ディレクトリ解決は cross-review の `_tmp_dir()` と同じ優先順
+  （env `CROSS_REFACTORING_TMP_DIR` > `<work worktree>/.cross_refactoring/`）にする。
+  cross-review の `state.py` を読み、同じ「eval で KEY=VALUE を取り込む」呼び出し規約に揃える。
 
 ### Task 2: worktree 準備
 
 - **対象:** `scripts/prepare-worktrees.sh`, `tests/test_prepare_worktrees.py`
-- **内容:** `work/`（head ブランチ）と `codex/` `gemini/` `claude/`（`--detach`）を冪等に作成する。
+- **内容:** `work/`（head ブランチ）と `codex/` `gemini/` `kiro/`（`--detach`）を冪等に作成する。
   既存パスが現リポジトリの登録済み worktree でなければ `.stale-<ts>` に退避して作り直す
   （cross-review の既存ガードを踏襲）。`sync <sha>` サブコマンドで読み取り用 worktree を
-  指定 SHA へ `git fetch` + `checkout --detach` する。
+  指定 SHA へ `git fetch` + `checkout --detach` する。あわせて各 worktree の
+  `.cross_refactoring/refs/` へ `refactoring` Skill の参照ファイルをコピーし、kiro worktree には
+  `.kiro/agents/ndf-cross-refactoring.json` を生成する（生成物は commit しない）。
 
-### Task 3: 提案フェーズ
+### Task 3: Kiro / Claude CLI の非対話実行手順の確立（他タスクの前提）
+
+- **対象:** `plugins/ndf-shared/skills/external-ai/references/cli-kiro.md`,
+  `plugins/ndf-shared/skills/external-ai/references/cli-claude.md`,
+  `issues/ndf-development-skills/03-runtime-conformance.md`
+- **内容:** §5 の「要検証」項目を実機で確認し、両 CLI の非対話実行手順を確定する。
+  codex / gemini は cross-review に実績があるため対象外。
+
+  **Kiro**
+  1. `kiro-cli chat --agent <name> --no-interactive` で `execute_bash` が承認なしに通るか
+  2. 通らない場合の代替フラグ（`kiro-cli chat --help` で確認）
+  3. プロンプトの渡し方（引数長の上限、ファイル経由の可否）
+  4. 完了検知の手段（終了コード / sentinel / 出力ファイル）と所要時間の目安
+
+  **Claude**
+  1. `claude -p` で編集とシェル実行を非対話で通すための `--permission-mode` の値
+  2. worktree を cwd にしたときの参照範囲（`--add-dir` を使わずに済むか）
+  3. 完了検知の手段と、結果 JSON の書き出しが安定するか
+
+  **結果を先に確定しないと Task 4〜7 の launcher が書けない**ため、最初に着手する。
+  Kiro でシェル実行がどうしても通らない場合は §5-1 の縮退設計（提案・レビュー専任、
+  `impl_capable` から除外）へ切り替える。
+
+### Task 4: 提案フェーズ
 
 - **対象:** `scripts/launch-cli.sh`, `prompts/propose.md`, `refactor.py merge-proposals`,
   `tests/test_merge_proposals.py`
-- **内容:** 3 ランタイムに同一プロンプトで提案させ、`propose-<agent>-rf<ID>-r<round>.json` に
+- **内容:** 3 CLI に同一プロンプトで提案させ、`propose-<agent>-rf<ID>-r<round>.json` に
   提出させる。`merge-proposals` が語彙検証・重複排除・優先度付け・しきい値による採否・
-  1 ラウンド上限での切り出しを行い、`items[]` を生成する。
-  提案プロンプトには `refactoring` Skill の `code-smells.md` / `refactoring-catalog.md` /
-  `data-representation.md` を読ませ、**語彙をそこから選ばせる**。
-  対象スコープ（`--scope PATH...`）を渡し、無制限に広がらないようにする。
+  1 ラウンド上限での切り出しを行い、`items[]` を生成する。採用 0 件なら exit 2（外側収束）。
+  `launch-cli.sh` は agent 名で 4 分岐し、codex は `--dangerously-bypass-approvals-and-sandbox`、
+  gemini は `_gemini-env.sh` 経由の trusted directory 対応、kiro / claude は Task 3 で確定した
+  手順を使う。**ホスト自身は起動対象に現れない**（state.json の `runtimes` にいないため）。
+  対象スコープ（`--scope PATH...`）を渡し、提案が無制限に広がらないようにする。
 
-### Task 4: 適用フェーズ
+### Task 5: 適用フェーズ
 
 - **対象:** `prompts/apply.md`, `refactor.py merge-apply`, `tests/test_merge_apply.py`
 - **内容:** impl ランタイムに item 1 件を渡し、`refactoring` Skill の手順で適用させる。
@@ -377,35 +555,34 @@ Codex / Kiro 版は「ホスト = そのランタイム、他 2 つを CLI」に
   `status`）を検証し、差分予算超過・テスト red・コミット 0 件を失敗として扱う。
   作業ディレクトリは `work/` に固定し、`--force` / `--no-verify` を禁止する。
 
-### Task 5: レビューフェーズ
+### Task 6: レビューフェーズ
 
 - **対象:** `prompts/review.md`, `docs/03-review-viewpoints.md`, `refactor.py judge-review`,
   `tests/test_judge_review.py`
 - **内容:** reviewer 2 ランタイムを並列起動し、item の差分（`git diff <base_sha>..<head_sha>`）に
   対して上記観点でレビューさせる。指摘は PR にインラインコメントとして AI 自身が `gh api` で
-  直接投稿する（cross-review と同じ「AI 直接投稿」方針でメイン context を汚さない）。
-  `judge-review` は 2 者 APPROVE で `done`、1 つでも `REQUEST_CHANGES` なら `fixing` に遷移する。
+  直接投稿する（cross-review と同じ「AI 直接投稿」方針でホスト context を汚さない）。
+  `judge-review` は 2 者 APPROVE で `done`（exit 0）、1 つでも `REQUEST_CHANGES` なら
+  `fixing` に遷移（exit 2）する。
 
-### Task 6: 内側ループの収束と放棄
+### Task 7: 内側ループの収束と放棄
 
-- **対象:** `refactor.py abandon-item`, `tests/test_abandon_item.py`
-- **内容:** `fix_rounds >= max_fix_rounds` で item を放棄する。`git revert` で当該 item の
-  コミット群を打ち消して push し、開いている review thread に理由を reply して resolve、
-  `deferred_items` に記録する。**PR に中途半端な状態を残さない**ことを保証する。
+- **対象:** `prompts/fix.md`, `refactor.py merge-fix` / `should-abandon` / `abandon-item`,
+  `tests/test_abandon_item.py`
+- **内容:** 指摘修正は impl ランタイムに投げ、reply + resolve まで実行させる。
+  `fix_rounds >= max_fix_rounds` で item を放棄する。`git revert` で当該 item のコミット群を
+  打ち消して push し、開いている review thread に理由を reply して resolve、`deferred_items` に
+  記録する。**PR に中途半端な状態を残さない**ことを保証する。
 
-### Task 7: 外側ループの収束判定
+### Task 8: 外側ループの収束判定と最終ゲート
 
-- **対象:** `refactor.py advance`, `tests/test_outer_convergence.py`
+- **対象:** `refactor.py advance` / `report`, `SKILL.md`
 - **内容:** 採用 0 件 / `max_outer_rounds` 到達 / 前ラウンドとの提案重複率 70% 以上のいずれかで
-  外側ループを終了する。重複率は `path`+`symbol`+`smell` キーの集合比較で求める。
-  `final` に `converged` / `max_rounds` / `saturated` を記録する。
-
-### Task 8: 最終ゲートと報告
-
-- **対象:** `refactor.py report`, `SKILL.md`
-- **内容:** 外側ループ終了後に `/ndf:cross-review <PR>` を実行し、PR 全体を codex + gemini の
-  APPROVE 収束にかける（内側レビューは item 単位のため、PR 全体の整合はここで見る）。
-  その後 Draft を解除し、ラウンド表・item 表・放棄 item・残 deferred 提案を報告する。
+  外側ループを終了し、`final` に `converged` / `max_rounds` / `saturated` を記録する。
+  重複率は `path`+`symbol`+`smell` キーの集合比較で求める。終了後は `/ndf:cross-review <PR>` で
+  PR 全体を codex + gemini の APPROVE 収束にかけ（内側レビューは item 単位のため、PR 全体の
+  整合はここで見る）、Draft を解除して、ラウンド表・item 表・放棄 item・残 deferred 提案を
+  報告する。
 
 ### Task 9: `monitor.py` の汎用化
 
@@ -414,11 +591,14 @@ Codex / Kiro 版は「ホスト = そのランタイム、他 2 つを CLI」に
 - **内容:** 多軸監視（pidfile / sentinel / 早期エラー / stall / hard timeout / result.json）は
   実運用で作り込まれた資産なので**複製しない**。次のオプションを後方互換で追加する。
   - `--tmp-dir DIR` — tmp 解決先の明示指定
-  - `--agents codex,gemini,claude` — 監視対象エージェントの一般化（現行の `both` は維持）
-  - `--stem-template "{agent}-{phase}-rf{id}"` — 既定は現行の `{agent}-review-pr{id}`
+  - `--agents <csv>` — 監視対象エージェントの一般化。`claude` / `kiro` を含む任意の組み合わせを
+    受け付ける（現行の `both` / `codex` / `gemini` も維持）
+  - `--stem-template "{agent}-propose-rf{id}"` — 既定は現行の `{agent}-review-pr{id}`
   - `--state-file PATH` — state.json のパス指定（現行の PR 番号からの導出も維持）
 
-  **既存テストを 1 つも変更せずに通す**ことを完了条件とする。
+  kiro / claude 固有の早期エラーパターン（未認証 / agent 未検出 / ツール拒否 / 権限モード
+  拒否）を `EARLY_ERROR_FATAL` へ追加する。**既存テストを 1 つも変更せずに通す**ことを
+  完了条件とする。
 
 ### Task 10: SKILL.md と docs
 
@@ -434,33 +614,43 @@ Codex / Kiro 版は「ホスト = そのランタイム、他 2 つを CLI」に
 - **対象:** `plugins/ndf-shared/skills/cross-refactoring/tests/`
 - **内容:** cross-review の `tests/conftest.py` と同じ方式（一時ディレクトリに state.json を
   組み立てて subcommand を実行）で、`refactor.py` の全 subcommand を単体テストする。
-  外部プロセス（gh / codex / gemini / git push）は呼ばない。最低限の観点:
+  外部プロセス（gh / codex / gemini / kiro-cli / git push）は呼ばない。最低限の観点:
   - `merge-proposals` の重複排除・語彙外降格・しきい値・上限件数
+  - **ホスト別の参加者確定**: host=claude / codex / kiro の 3 ケースで `runtimes` が
+    「全 4 ランタイム − ホスト」になり、ホストが `runtimes` に含まれない
   - ランタイム輪番が impl と reviewer を必ず分離する（全 item で `impl not in reviewers`）
+  - `impl_capable` が縮退したときも reviewers は常に 2 者になる
   - `judge-review` の遷移（2 APPROVE / 1 REQUEST_CHANGES / 欠損 result）
-  - `abandon-item` が `max_fix_rounds` 到達時のみ発火する
+  - `should-abandon` が `max_fix_rounds` 到達時のみ真を返す
   - 外側収束の 3 条件
-  - `next` が各 phase で正しい `ACTION` を返す（再開の冪等性含む）
+  - `start-round` / `next-item` の再開冪等性
 
 ### Task 12: 配布物同期とドキュメント更新
 
-- **対象:** `manifests/claude-skills.txt`, `plugins/ndf-claude/**`, `CLAUDE.md`, `README.md`,
-  `docs/ndf-plugin-reference.md`, `docs/specifications/ndf-skill-inventory.md`,
-  `plugins/ndf-claude/README.md`, `plugins/ndf-claude/.claude-plugin/plugin.json`
+- **対象:** 3 manifest, `plugins/ndf-{claude,codex,kiro}/**`, `CLAUDE.md`, `README.md`,
+  `docs/ndf-plugin-reference.md`, `docs/specifications/ndf-skill-inventory.md`, 各 runtime README,
+  `plugin.json` × 2, `plugins/ndf-kiro/VERSION`
 - **内容:** manifest 追加後に `bash scripts/build-runtime-plugins.sh` で同期し、
   `--check` / `scripts/validate-runtime-plugins.sh` / `python3 scripts/check-markdown-links.py` /
-  `claude plugin validate` を通す。Skill 数の記述（30 → 31、Claude Code 26 → 27）を更新し、
-  version を `8.1.0` に上げる。
+  `claude plugin validate` を通す。Skill 数の記述（30 → 31、Claude Code 26 → 27 /
+  Codex 24 → 25 / Kiro 25 → 26）を更新し、version を `8.1.0` に上げる。
 
 ## 受け入れ条件
 
 - [ ] `/ndf:cross-refactoring` が Draft PR 作成から完了報告まで、中断・再開可能に一周する
+- [ ] 参加者が**ホストを除いた 3 CLI** で確定し、ホストはどのフェーズにも参加しない
+      （Claude Code ホスト → codex/gemini/kiro、Codex ホスト → gemini/kiro/claude、
+      Kiro ホスト → claude/codex/gemini）
+- [ ] `--host` 明示指定と環境変数からの推定の両方が動き、確定結果が state.json に残る
 - [ ] 全 item で実装ランタイムとレビューランタイムが重ならない（state.json で検証可能）
 - [ ] worktree がエージェント分作られ、読み取り用は `--detach`、書き込みは `work/` のみ
+- [ ] Kiro / Claude が非対話で提案・レビューを完了し、結果 JSON を書き出す（Kiro の実装参加の
+      可否は Task 3 の検証結果に従い、縮退した場合はその旨を SKILL.md に明記する）
+- [ ] `kiro-cli agent set-default` を呼ばない（マシン全体の既定を書き換えない）
 - [ ] 提案 → 適用 → レビュー → 修正 の内側ループが、指摘 0 で `done` に到達する
 - [ ] 収束しない item が revert され、PR に未完成の差分が残らない
 - [ ] 提案が尽きる（または上限到達）で外側ループが終了し、`/ndf:cross-review` で最終収束する
-- [ ] メインセッションの context に diff / レビュー本文 / エラーログが載らない
+- [ ] ホストセッションの context に diff / レビュー本文 / エラーログが載らない
 - [ ] `monitor.py` の既存テストが無変更で通る
 - [ ] `claude plugin validate` / `build-runtime-plugins.sh --check` /
       `validate-runtime-plugins.sh` / `check-skill-frontmatter.py` / `check-markdown-links.py`
@@ -470,17 +660,22 @@ Codex / Kiro 版は「ホスト = そのランタイム、他 2 つを CLI」に
 
 | リスク | 対応 |
 |---|---|
+| **Kiro が非対話でシェル実行できない** | Task 3 で最初に検証する。不可なら Kiro を提案・レビュー専任に縮退し、`impl_capable` から外す（レビューは 2 者のまま。設計の他部分は変わらない） |
+| **ホスト判定を誤り、ホスト自身を CLI として起動する** | `--host` 明示指定を第一とし、推定結果を `init` 出力と state.json に必ず残す。参加者リストにホストが含まれたら `init` を失敗させる |
+| Claude をヘッドレスで参加させる際の権限モードが不明 | Task 3 で `claude -p` の実行手順を確定し `cli-claude.md` に記録する。ホストが Claude Code のときはこの経路自体を使わない |
+| Kiro の agent 定義が worktree で検出されない | `prepare-worktrees.sh` が cwd 配下の `.kiro/agents/` に生成し、常に `--agent` で明示指定する |
+| `agent set-default` でユーザのマシン全体設定を奪う | 呼ばない。受け入れ条件に含める |
 | 提案が発散して PR が肥大する | `--scope` 必須化、`--max-items-per-round`（既定 5）、`--max-outer-rounds`（既定 3） |
 | 「振る舞い不変」が検証されないまま通る | 着手前 baseline green を必須化、`test_gap` の item は固定テスト先行を機械検証、レビュー観点の筆頭に置く |
 | 同じ提案が毎ラウンド出続けて終わらない | 提案重複率 70% で `saturated` 終了。放棄 item は次ラウンドの提案プロンプトに「対象外」として渡す |
 | モデルが語彙を守らず重複排除が効かない | 語彙外を `unknown` として `nit` 降格し、しきい値で自動的に落ちるようにする |
+| 参加ランタイムに NDF 未導入で参照ファイルが読めない | 各 worktree の `.cross_refactoring/refs/` へ参照ファイルをコピーし、相対パスだけを参照させる |
 | CLI 実行時間が長く全体が長丁場になる | 提案とレビューは並列。適用は直列だが 1 item の差分が小さいため 1 回が短い。state.json で常時再開可能 |
-| gemini の workspace 制約で write が失敗する | 各エージェント専用 worktree 内に tmp を置く。`_gemini-env.sh` に既存の trusted directory 対応を集約 |
 | cross-review の `monitor.py` 変更が既存ループを壊す | 追加オプションは全て既定値で現行挙動を維持。既存テスト無変更通過を Task 9 の完了条件にする |
 
 ## やらないこと（v1 スコープ外）
 
 - PR ローテーション（件数上限で総量を抑える方針を先に検証する）
-- Codex / Kiro ランタイムへの配布（ホストランタイム一般化が前提。別 Issue）
 - 複数 item の並列適用（同一ブランチへの同時コミットは競合とレビュー単位の曖昧化を招く）
+- ホストランタイム自身を提案・実装・レビューに参加させること（オーケストレータに徹する）
 - リファクタリング以外の変更（機能追加・不具合修正）の取り込み
