@@ -615,7 +615,37 @@ MUST / SHOULD / MAY の 3 段構成は、リファクタリングの文脈では
     含んでいたため訂正し、Python / TypeScript / JavaScript / PHP の各節に「型注釈・型生成は
     実体を検査しない」ことを示す 1〜2 行の具体例（`cast` / `as` / JSDoc / `@var`）を追加した
 
-## 3.8 未了
+## 3.8 cross-review round 8 での版数・Skill 数の取り残しの解消
+
+第 4 部の決定で版を v7.1.0 から v8.0.0 へ、Skill 数を 31 個から 30 個へ変えたが、
+`scripts/build-runtime-plugins.sh` の生成対象外のファイルに v7.1.0 / 旧 Skill 数が残っていた。
+round 1・round 2 で同じ 2 ファイルを同じ理由で指摘されており、3 度目の再発である。
+
+直した箇所（現在値を示すべき記述のみ）:
+
+| ファイル | 内容 |
+| --- | --- |
+| `.claude-plugin/marketplace.json` | `ndf` の description を `v8.0.0` / `26 focused NDF skills` へ |
+| `plugins/ndf-codex/.codex-plugin/plugin.json` | `version` と description を `8.0.0` / `24 focused NDF skills` へ |
+| `plugins/ndf-codex/README.md` | プラグインキャッシュのパス例 2 箇所と `codex plugin list` の出力例を `8.0.0` へ |
+| `plugins/ndf-kiro/README.md` | `.kiro/agents/ndf.json` の description 例を `v8.0.0` へ |
+| `plugins/ndf-shared/skills/ndf-policies/SKILL.md` | 「v7.1.0 の `ndf-policies` を参照」を v7.0.0 へ。**v7.1.0 は配布していない中間の版**であり、参照先として成立しない |
+| `plugins/ndf-{claude,codex,kiro}/README.md` | 「移行先の対応表は `ndf-policies` にある」は v8.0.0 での削除により成立しなくなったため、root README の「NDF v7.0.0 の主な変更（非互換）」へ誘導 |
+| `docs/specifications/ndf-skill-inventory.md` | 「Skill 数は 30 個で変わらない」を、v7.1.0 の 31 個から 30 個へ戻る旨へ訂正。予算比較表に v7.1.0（未配布）列を追加 |
+
+据え置いた箇所: 過去の事実を述べる記述（`ndf-policies` の `/ndf:safe-refactoring` 移行対応表、
+root README の「v6.1.0 当時の名称」注記、棚卸台帳の v6.1.0 / v7.0.0 節、`skills/README.md` の
+v7.0.0 時点の実測値）と、`issues/` 配下の過去の計画文書。本節より上の round 1 / round 2 の記録も
+その時点の事実として残す。`docs/presentations/2026-08-06-ai-plugins-intro.md` は日付を持つ
+勉強会資料で、v6.0.0 以前の Skill 名と個数を載せたまま本 PR より前から据え置かれているため触らない。
+
+再発防止として `scripts/validate-runtime-plugins.sh` に突き合わせ検査を追加した。Claude 版
+`plugin.json` の `version` を基準に、(a) Codex 版 `plugin.json` の `version`、(b) marketplace と
+両 `plugin.json` の description に書かれた `(vX.Y.Z)`、(c) description の Skill 数と
+`manifests/<runtime>-skills.txt` の実数、の 3 つを検査する。plugin family は既存の検出結果を
+使い回すため、family を足しても検査対象から漏れない。
+
+## 3.9 未了
 
 - [ ] 3 ランタイムでの発動実測（`docs/specifications/ndf-skill-inventory.md` への記録）。
   配布後に利用実績が出てから測定する。台帳には「未測定」として行を追加済み

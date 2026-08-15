@@ -22,7 +22,8 @@ Skill 名は変わらないため `/playwright-` まで打てば従来どおり�
 /plugin install playwright-kit@ai-plugins
 ```
 
-移行先の対応表は `ndf-policies` skill にあります（v8.0.0 で削除）。
+移行先の対応表は予告どおり v8.0.0 で `ndf-policies` から削除しました。リポジトリ root の
+[README.md](../../README.md) の「NDF v7.0.0 の主な変更（非互換）」を参照してください。
 
 ## 同梱内容
 

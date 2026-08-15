@@ -38,6 +38,7 @@ done < <(find "$ROOT_DIR/plugins/mcp" -name .mcp.json | sort)
 
 run python3 - "$ROOT_DIR" "${FAMILIES[@]}" <<'PY'
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -78,6 +79,97 @@ for plugin in codex_marketplace.get("plugins", []):
         continue
     if not (plugin_dir / ".codex-plugin/plugin.json").is_file():
         errors.append(f"Codex plugin manifest missing under {source_path}")
+
+# 版数と Skill 数は plugin.json と marketplace の description に重複して書かれている。
+# `.claude-plugin/marketplace.json` と Codex 版 plugin.json は build-runtime-plugins.sh の
+# 生成対象ではなく、古い値が残っても JSON としては妥当なため他の検査に掛からない。
+# 実際に版数と Skill 数の取り残しが繰り返し起きたので、Claude 版 plugin.json を基準に突き合わせる。
+VERSION_IN_DESCRIPTION = re.compile(r"\(v(\d+\.\d+\.\d+)\)")
+# 版数（8.0.0）や製品名（E2E）の数字を拾わないよう、前後が英数字・ドットでない整数だけを見る。
+STANDALONE_NUMBER = re.compile(r"(?<![\w.])\d+(?![\w.])")
+
+
+def manifest_skill_count(family: str, runtime: str):
+    manifest = root / f"plugins/{family}-shared/manifests/{runtime}-skills.txt"
+    if not manifest.is_file():
+        return None
+    return sum(
+        1
+        for line in manifest.read_text(encoding="utf-8").splitlines()
+        if line.split("#", 1)[0].strip()
+    )
+
+
+def described_skill_count(description: str):
+    # `<数> ... skills` の形で書く規約。`skills` の直前にある最後の整数を Skill 数とみなす。
+    head = re.split(r"\bskills\b", description, maxsplit=1)
+    if len(head) < 2:
+        return None
+    numbers = STANDALONE_NUMBER.findall(head[0])
+    return int(numbers[-1]) if numbers else None
+
+
+def check_description(label: str, description, version: str, family: str, runtime: str) -> None:
+    if not isinstance(description, str):
+        return
+    found = VERSION_IN_DESCRIPTION.search(description)
+    if not found:
+        errors.append(f"{label} の description に `(vX.Y.Z)` 形式の版数がない")
+    elif found.group(1) != version:
+        errors.append(
+            f"{label} の description の版数が古い"
+            f"（description: v{found.group(1)} / {family}-claude の plugin.json: v{version}）"
+        )
+    expected = manifest_skill_count(family, runtime)
+    described = described_skill_count(description)
+    if expected is not None and described is not None and described != expected:
+        errors.append(
+            f"{label} の description の Skill 数が manifest と食い違う"
+            f"（description: {described} / {runtime}-skills.txt: {expected}）"
+        )
+
+
+for family in families:
+    claude_plugin_path = root / f"plugins/{family}-claude/.claude-plugin/plugin.json"
+    if not claude_plugin_path.is_file():
+        continue
+    claude_plugin = read_json(claude_plugin_path)
+    version = claude_plugin.get("version")
+    if not isinstance(version, str):
+        errors.append(f"{family} の claude plugin.json に version がない")
+        continue
+    check_description(
+        f"plugins/{family}-claude/.claude-plugin/plugin.json",
+        claude_plugin.get("description"),
+        version,
+        family,
+        "claude",
+    )
+    codex_plugin_path = root / f"plugins/{family}-codex/.codex-plugin/plugin.json"
+    if codex_plugin_path.is_file():
+        codex_plugin = read_json(codex_plugin_path)
+        if codex_plugin.get("version") != version:
+            errors.append(
+                f"plugins/{family}-codex/.codex-plugin/plugin.json の version が claude 版と"
+                f"食い違う（codex: {codex_plugin.get('version')} / claude: {version}）"
+            )
+        check_description(
+            f"plugins/{family}-codex/.codex-plugin/plugin.json",
+            codex_plugin.get("description"),
+            version,
+            family,
+            "codex",
+        )
+    for plugin in claude_marketplace.get("plugins", []):
+        if plugin.get("source") != f"./plugins/{family}-claude":
+            continue
+        check_description(
+            f".claude-plugin/marketplace.json の {plugin.get('name')}",
+            plugin.get("description"),
+            version,
+            family,
+            "claude",
+        )
 
 for family in families:
     shared = root / f"plugins/{family}-shared"

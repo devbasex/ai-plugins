@@ -31,4 +31,5 @@ user-invocable: false
 `references/data-representation.md` にあり、スメル一覧からも参照される。
 
 v7.0.0 の対応表（playwright 系 4 Skill の `playwright-kit` プラグインへの分離）は、予告どおり
-本バージョンで削除した。v7.0.0 以前から移行する場合は v7.1.0 の `ndf-policies` を参照する。
+本バージョンで削除した。v7.0.0 より前から移行する場合は、この対応表を持つ最後の配布版である
+v7.0.0 の `ndf-policies` を参照する。
