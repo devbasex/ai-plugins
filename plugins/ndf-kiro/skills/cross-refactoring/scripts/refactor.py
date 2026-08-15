@@ -458,11 +458,16 @@ def judge(
     そのラウンドに無い ID や欠落は判定に使えない。ラウンド全体に対する指摘は
     `null` を明示させ、取り消し時はラウンド全件の対象とする。
     """
+    # 出力の形が崩れていても落ちないようにする。相手は LLM なので、
+    # 期待した型で返ってこないことがある。崩れていたら差し戻す。
     problems: list[str] = []
     for name in reviewers:
         review = reviews.get(name)
         if not review:
             problems.append(f"{name} のレビュー結果がありません")
+            continue
+        if not isinstance(review, dict):
+            problems.append(f"{name} のレビュー結果が JSON オブジェクトではありません")
             continue
         verdict = review.get("verdict")
         if verdict not in {"APPROVE", "REQUEST_CHANGES"}:
@@ -470,7 +475,16 @@ def judge(
                 f"{name} の判定 `{verdict}` は APPROVE / REQUEST_CHANGES のいずれかで"
                 "なければなりません（COMMENT は使いません）"
             )
-        for i, finding in enumerate(review.get("findings") or []):
+        findings = review.get("findings") or []
+        if not isinstance(findings, list):
+            problems.append(f"{name} の findings が配列ではありません")
+            continue
+        for i, finding in enumerate(findings):
+            if not isinstance(finding, dict):
+                problems.append(
+                    f"{name} の指摘 {i + 1} が JSON オブジェクトではありません"
+                )
+                continue
             if "item_id" not in finding:
                 problems.append(f"{name} の指摘 {i + 1} に item_id がありません")
                 continue
@@ -482,7 +496,7 @@ def judge(
                 )
     if problems:
         return "invalid", problems
-    if all(reviews[name].get("verdict") == "APPROVE" for name in reviewers):
+    if all((reviews[name] or {}).get("verdict") == "APPROVE" for name in reviewers):
         return "approved", []
     return "changes", []
 
@@ -784,6 +798,11 @@ def cmd_merge_proposals(args: argparse.Namespace) -> None:
     for item in deferred:
         state["deferred_items"].append({**item, "round": round_no})
 
+    # 適用の起点は**オーケストレータ側で**確定させる。実装担当の申告に委ねると、
+    # 欠落・不正時に範囲検査が無効になり、過去の任意のコミットが実在扱いになる。
+    # 提案は読むだけなので、この時点の HEAD が着手前の状態である。
+    entry["apply_base_sha"] = _git_out(state["worktrees"]["work"], ["rev-parse", "HEAD"])
+
     state["phase"] = "apply" if adopted else "converged"
     if not adopted:
         # 呼び出し側は終了コード 2 で繰り返しを抜けるため、`advance` を通らない。
@@ -844,9 +863,70 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
     head_branch = state["head_branch"]
     test_command = baseline["command"]
     head_sha = _git_out(work, ["rev-parse", "HEAD"]) or ""
-    in_range = commits_in_range(work, payload.get("base_sha"), head_sha)
+    # 起点は `merge-proposals` が記録したもの。**実装担当の申告は使わない。**
+    ordered_range = commits_in_range(work, entry.get("apply_base_sha"), head_sha)
+    in_range = set(ordered_range or [])
+    if ordered_range is None:
+        # 範囲を確定できないなら、何も検証できない。素通しにせず失敗させる。
+        for item_id in entry["items"]:
+            _find_item(state, item_id)["status"] = "blocked"
+        if not args.dry_run:
+            statefile.save(path, state)
+        die(
+            "適用の範囲を確定できませんでした"
+            f"（起点 {entry.get('apply_base_sha')} / HEAD {head_sha}）。"
+            "検証できない適用は採りません",
+            code=2,
+        )
 
     reported = {r.get("item_id"): r for r in payload.get("items", []) if isinstance(r, dict)}
+
+    # **範囲のコミットは全て、いずれかの改善項目に割り当てられていること。**
+    # 申告から漏れたコミットはテストもトレーラーも差分予算も検査されず、そのまま
+    # Pull Request に残る。都合の悪い変更を申告しないだけで検査を回避できてしまう。
+    claimed = {
+        c.get("sha") for r in reported.values()
+        for c in r.get("commits", []) if c.get("sha")
+    }
+    claimed_full = {
+        full for full in (
+            _git_out(work, ["rev-parse", "--verify", f"{s}^{{commit}}"])
+            for s in claimed if s
+        ) if full
+    }
+    unassigned = sorted(in_range - claimed_full)
+    if unassigned:
+        reason = (
+            f"どの改善項目にも割り当てられていないコミットが {len(unassigned)} 件あります"
+            f"（{', '.join(s[:7] for s in unassigned[:5])}）。"
+            "検証を回避した変更を Pull Request に残さないため、ラウンドごと取り消します"
+        )
+        info(f"❌ {reason}")
+        for item_id in entry["items"]:
+            it = _find_item(state, item_id)
+            it["status"] = "abandoned"
+            it["failure_reason"] = reason
+        # 範囲全体を取り消す。どのコミットが安全かを決められない以上、
+        # 起点まで戻すのが最も確実である。`_revert_item_commits` は渡した順の
+        # 逆から戻すので、**古い順**で渡して新しいコミットから取り消させる。
+        whole_round = {
+            "item_id": f"R{entry['round']}-range",
+            "commits": list(reversed(ordered_range)),
+        }
+        _revert_item_commits(state, whole_round, args.dry_run)
+        entry["apply"] = {
+            "applied": [], "failed": list(entry["items"]),
+            "base_sha": entry.get("apply_base_sha"), "head_sha": head_sha,
+            "unassigned_commits": unassigned,
+        }
+        state["phase"] = "propose"
+        if args.dry_run:
+            info("（dry-run）状態ファイルは更新していません")
+        else:
+            statefile.save(path, state)
+            _push_head(state)
+        sys.exit(2)
+
     applied: list[str] = []
     failed: list[str] = []
     reverted = 0
@@ -886,8 +966,9 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
     entry["apply"] = {
         "applied": applied,
         "failed": failed,
-        "base_sha": payload.get("base_sha"),
-        "head_sha": payload.get("head_sha"),
+        # 起点はオーケストレータが記録したもの。申告は記録にも残さない。
+        "base_sha": entry.get("apply_base_sha"),
+        "head_sha": head_sha,
     }
     entry.setdefault("durations", {})["apply"] = payload.get("elapsed_seconds") or 0
     state["phase"] = "review" if applied else "propose"
@@ -1263,15 +1344,20 @@ def _git_out(work: str, args: list[str]) -> Optional[str]:
     return r.stdout.strip() if r.returncode == 0 else None
 
 
-def commits_in_range(work: str, base: Optional[str], head: str) -> set[str]:
-    """`base..head` に含まれるコミットの完全な SHA。取得できなければ空集合。
+def commits_in_range(work: str, base: Optional[str], head: str) -> Optional[list[str]]:
+    """`base..head` に含まれるコミットの完全な SHA を**新しい順**で返す。
 
-    申告されたコミットが**実在し、このラウンドの範囲にある**ことを確かめるために使う。
+    取得できなければ `None`。申告されたコミットが**実在し、このラウンドの範囲にある**
+    ことを確かめるのと、範囲全体を取り消すときの順序に使う。
+
+    **空リストと `None` を区別する。** 空リストは「1 件もコミットされていない」、
+    `None` は「範囲を確定できなかった」である。混同すると、範囲を確定できないときに
+    検査が素通りしてしまう（過去の任意のコミットが実在扱いになる）。
     """
     if not base:
-        return set()
+        return None
     out = _git_out(work, ["rev-list", f"{base}..{head}"])
-    return set(out.split()) if out else set()
+    return None if out is None else out.split()
 
 
 def commit_trailers(work: str, sha: str) -> dict[str, str]:
@@ -1342,13 +1428,13 @@ def collect_commit_facts(
 ) -> list[dict[str, Any]]:
     """申告されたコミットについて、git と実際のテスト実行から事実を集める。
 
-    範囲に存在しないコミットは、そこで打ち切って `exists=False` を返す。
-    実体が無いものにテストを走らせても意味がないためである。
+    `in_range` は信頼できる起点から HEAD までのコミット集合。ここに無い SHA は
+    `exists=False` として返す。実体が無いものにテストを走らせても意味がない。
     """
     facts: list[dict[str, Any]] = []
     for sha in shas:
         full = _git_out(work, ["rev-parse", "--verify", f"{sha}^{{commit}}"])
-        if full is None or (in_range and full not in in_range):
+        if full is None or full not in in_range:
             facts.append({"sha": sha, "exists": False})
             continue
         facts.append({

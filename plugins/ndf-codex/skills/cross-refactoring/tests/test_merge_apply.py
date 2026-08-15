@@ -188,12 +188,18 @@ def test_commits_in_range_uses_rev_list(refactor, monkeypatch):
         return "aaa\nbbb"
 
     monkeypatch.setattr(refactor, "_git_out", fake)
-    assert refactor.commits_in_range("/w", "base", "head") == {"aaa", "bbb"}
+    assert refactor.commits_in_range("/w", "base", "head") == ["aaa", "bbb"]
     assert calls == [["rev-list", "base..head"]]
 
 
-def test_commits_in_range_is_empty_without_base(refactor):
-    assert refactor.commits_in_range("/w", None, "head") == set()
+def test_commits_in_range_is_none_without_base(refactor):
+    """範囲を確定できないことと「0 件」を区別する。"""
+    assert refactor.commits_in_range("/w", None, "head") is None
+
+
+def test_commits_in_range_is_none_when_git_fails(refactor, monkeypatch):
+    monkeypatch.setattr(refactor, "_git_out", lambda work, args: None)
+    assert refactor.commits_in_range("/w", "base", "head") is None
 
 
 def test_run_test_at_checks_out_and_restores(refactor, monkeypatch):
@@ -272,9 +278,14 @@ def _state_with_items(tmp_path, items, **over):
 def git_facts(refactor, monkeypatch):
     """git から取る事実を差し替える。`{sha: fact}` を渡す。"""
     def _set(mapping, in_range=None):
+        ordered = list(mapping) if in_range is None else list(in_range)
         monkeypatch.setattr(
-            refactor, "commits_in_range",
-            lambda work, base, head: set(mapping) if in_range is None else in_range,
+            refactor, "commits_in_range", lambda work, base, head: ordered)
+        # 未割当コミットの判定は `rev-parse --verify <sha>^{commit}` を通るため、
+        # SHA をそのまま返す形にしておく
+        monkeypatch.setattr(
+            refactor, "_git_out",
+            lambda work, args: args[-1].replace("^{commit}", ""),
         )
         monkeypatch.setattr(
             refactor, "collect_commit_facts",
@@ -533,3 +544,79 @@ def test_unknown_baseline_also_blocks(refactor, tmp_path, env_tmp_dir):
         )
     assert e.value.code == 2
     assert read_state(state_path)["items"][0]["status"] == "blocked"
+
+
+def test_unassigned_commit_fails_the_whole_round(
+    refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
+):
+    """申告から漏れたコミットは検査を素通りして PR に残る。ラウンドごと取り消す。"""
+    items = [item(item_id="R1-001")]
+    state_path = _state_with_items(tmp_path, items)
+    env_tmp_dir(state_path)
+    # 範囲には 2 件あるが、申告されているのは 1 件だけ
+    git_facts({"ok111": fact(sha="ok111")}, in_range=["sneaky", "ok111"])
+    write_result(state_path, "codex-apply-r1", {
+        "items": [{"item_id": "R1-001", "commits": [{"sha": "ok111"}]}],
+    })
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        refactor.subprocess, "run",
+        lambda cmd, **kw: calls.append(list(cmd))
+        or subprocess.CompletedProcess(cmd, 0, "", ""),
+    )
+    monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: "")
+
+    with pytest.raises(SystemExit) as e:
+        refactor.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+        )
+    assert e.value.code == 2
+
+    state = read_state(state_path)
+    assert state["items"][0]["status"] == "abandoned"
+    assert "割り当てられていないコミット" in state["items"][0]["failure_reason"]
+    assert state["rounds"][0]["apply"]["unassigned_commits"] == ["sneaky"]
+    # 範囲全体を新しい順に取り消す
+    reverts = [c[-1] for c in calls if c[:2] == ["git", "revert"]]
+    assert reverts == ["sneaky", "ok111"]
+
+
+def test_range_that_cannot_be_determined_fails_closed(
+    refactor, tmp_path, env_tmp_dir, no_git, monkeypatch
+):
+    """範囲を確定できないなら何も検証できない。素通しにせず失敗させる。"""
+    items = [item(item_id="R1-001")]
+    state_path = _state_with_items(tmp_path, items)
+    env_tmp_dir(state_path)
+    monkeypatch.setattr(refactor, "commits_in_range", lambda work, base, head: None)
+    write_result(state_path, "codex-apply-r1", {
+        "items": [{"item_id": "R1-001", "commits": [{"sha": "abc"}]}],
+    })
+    with pytest.raises(SystemExit) as e:
+        refactor.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+        )
+    assert e.value.code == 2
+    assert read_state(state_path)["items"][0]["status"] == "blocked"
+
+
+def test_apply_base_is_recorded_by_the_orchestrator(
+    refactor, tmp_path, env_tmp_dir, monkeypatch
+):
+    """起点を実装担当の申告に委ねない。"""
+    from conftest import make_state as _make_state
+
+    state_path = _make_state(tmp_path, rounds=[{
+        "round": 1, "impl": "codex", "reviewers": ["gemini", "kiro"],
+        "impl_model": {"requested": None, "observed": None},
+        "reviewer_models": {}, "proposed": {}, "items": [],
+        "apply": {"applied": [], "failed": []}, "fix_rounds": 0,
+        "durations": {}, "reviews": [],
+    }])
+    env_tmp_dir(state_path)
+    monkeypatch.setattr(refactor, "_git_out", lambda work, args: "BASE_HEAD")
+    for rt in ("codex", "gemini", "kiro"):
+        write_result(state_path, f"{rt}-propose-rf130", {"items": []})
+    with pytest.raises(SystemExit):
+        refactor.cmd_merge_proposals(type("A", (), {"id": 130})())
+    assert read_state(state_path)["rounds"][0]["apply_base_sha"] == "BASE_HEAD"

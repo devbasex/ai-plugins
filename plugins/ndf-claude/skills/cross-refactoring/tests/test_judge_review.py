@@ -217,3 +217,34 @@ def test_should_abandon_only_at_the_limit(refactor, tmp_path, env_tmp_dir):
     state["rounds"][0]["fix_rounds"] = 3
     state_path.write_text(__import__("json").dumps(state), encoding="utf-8")
     refactor.cmd_should_abandon(args)  # 上限到達で正常終了 = 見送りへ
+
+
+# ---------- 出力の形が崩れていても落ちない ----------
+
+def test_finding_that_is_not_an_object_is_invalid(refactor):
+    """LLM が文字列を返しても落ちず、差し戻し扱いにする。"""
+    verdict, problems = refactor.judge(
+        {"gemini": review("REQUEST_CHANGES", ["item_id を含む文字列"]),
+         "kiro": review()},
+        REVIEWERS, ROUND_ITEMS,
+    )
+    assert verdict == "invalid"
+    assert any("JSON オブジェクトではありません" in p for p in problems)
+
+
+def test_findings_that_is_not_a_list_is_invalid(refactor):
+    verdict, problems = refactor.judge(
+        {"gemini": {"verdict": "REQUEST_CHANGES", "findings": "なにか"},
+         "kiro": review()},
+        REVIEWERS, ROUND_ITEMS,
+    )
+    assert verdict == "invalid"
+    assert any("配列ではありません" in p for p in problems)
+
+
+def test_review_result_that_is_not_an_object_is_invalid(refactor):
+    verdict, problems = refactor.judge(
+        {"gemini": "APPROVE", "kiro": review()}, REVIEWERS, ROUND_ITEMS
+    )
+    assert verdict == "invalid"
+    assert any("JSON オブジェクトではありません" in p for p in problems)

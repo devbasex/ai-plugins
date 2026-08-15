@@ -174,7 +174,9 @@ def test_duplicate_rate_is_zero_without_previous_round(refactor):
 
 # ---------- サブコマンド ----------
 
-def test_merge_proposals_command_creates_items(refactor, tmp_path, env_tmp_dir, capsys):
+def test_merge_proposals_command_creates_items(
+    refactor, tmp_path, env_tmp_dir, no_git, capsys
+):
     state_path = make_state(tmp_path, rounds=[{
         "round": 1, "impl": "codex", "reviewers": ["gemini", "kiro"],
         "impl_model": {"requested": None, "observed": None},
@@ -197,7 +199,7 @@ def test_merge_proposals_command_creates_items(refactor, tmp_path, env_tmp_dir, 
 
 
 def test_merge_proposals_command_exits_2_when_nothing_adopted(
-    refactor, tmp_path, env_tmp_dir
+    refactor, tmp_path, env_tmp_dir, no_git
 ):
     state_path = make_state(tmp_path, rounds=[{
         "round": 1, "impl": "codex", "reviewers": ["gemini", "kiro"],

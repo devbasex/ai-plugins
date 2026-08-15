@@ -752,15 +752,21 @@ def monitor_agent(
         # echo するケースや gemini の config validation 警告で誤 kill されるのを防ぐ。
         if not no_early_error:
             fatal_err = _scan_early_fatal(paths.err_log)
+            fatal_source = "err.log"
             if not fatal_err and agent == "claude":
                 # claude は承認失敗・実行失敗を標準出力の JSON に載せる。
                 fatal_err = _scan_claude_stdout_fatal(paths.stdout_log)
+                fatal_source = "stdout.log"
             if fatal_err:
                 if alive:
                     _kill_pid(pid)
                 status.status = "EARLY_ERROR"
                 status.exit_code = 4
-                status.detail = f"early error (fatal) in err.log: {fatal_err[:200]}"
+                # 検知元を書く。err.log と決め打ちすると、標準出力から検知したときに
+                # 存在しない行を探させることになる。
+                status.detail = (
+                    f"early error (fatal) in {fatal_source}: {fatal_err[:200]}"
+                )
                 _emit_log(log_prefix, agent, status)
                 return status
 
