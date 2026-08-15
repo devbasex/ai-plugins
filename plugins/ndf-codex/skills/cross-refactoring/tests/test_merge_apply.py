@@ -152,7 +152,7 @@ def _state_with_items(tmp_path, items, **over):
     )
 
 
-def test_partial_failure_keeps_the_rest(refactor, tmp_path, env_tmp_dir):
+def test_partial_failure_keeps_the_rest(refactor, tmp_path, env_tmp_dir, no_git):
     """1 件の失敗でラウンドを止めず、失敗した項目だけを見送りにする。"""
     items = [item(item_id="R1-001"), item(item_id="R1-002")]
     state_path = _state_with_items(tmp_path, items)
@@ -164,7 +164,7 @@ def test_partial_failure_keeps_the_rest(refactor, tmp_path, env_tmp_dir):
             {"item_id": "R1-002", "diff_lines": 30, "commits": []},
         ],
     })
-    refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": True})())
+    refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
 
     state = read_state(state_path)
     assert state["rounds"][0]["apply"]["applied"] == ["R1-001"]
@@ -174,7 +174,7 @@ def test_partial_failure_keeps_the_rest(refactor, tmp_path, env_tmp_dir):
     assert state["phase"] == "review"
 
 
-def test_all_failed_exits_2(refactor, tmp_path, env_tmp_dir):
+def test_all_failed_exits_2(refactor, tmp_path, env_tmp_dir, no_git):
     items = [item(item_id="R1-001")]
     state_path = _state_with_items(tmp_path, items)
     env_tmp_dir(state_path)
@@ -182,18 +182,18 @@ def test_all_failed_exits_2(refactor, tmp_path, env_tmp_dir):
         {"item_id": "R1-001", "diff_lines": 0, "commits": []},
     ]})
     with pytest.raises(SystemExit) as e:
-        refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": True})())
+        refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
     assert e.value.code == 2
     assert read_state(state_path)["phase"] == "propose"
 
 
-def test_missing_item_in_result_is_a_failure(refactor, tmp_path, env_tmp_dir):
+def test_missing_item_in_result_is_a_failure(refactor, tmp_path, env_tmp_dir, no_git):
     items = [item(item_id="R1-001")]
     state_path = _state_with_items(tmp_path, items)
     env_tmp_dir(state_path)
     write_result(state_path, "codex-apply-r1", {"items": []})
     with pytest.raises(SystemExit):
-        refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": True})())
+        refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
     assert read_state(state_path)["items"][0]["status"] == "abandoned"
 
 
@@ -256,8 +256,61 @@ def test_no_push_when_nothing_was_reverted(refactor, tmp_path, env_tmp_dir, monk
     assert pushes == []
 
 
-def test_red_baseline_blocks_every_item(refactor, tmp_path, env_tmp_dir):
-    """着手前のテストが失敗していたら、適用へ着手せず全項目を blocked にする。"""
+def test_dry_run_touches_neither_git_nor_state(
+    refactor, tmp_path, env_tmp_dir, no_git
+):
+    """確認目的の実行で状態だけが進むと、利用者の進行が壊れる。"""
+    items = [item(item_id="R1-001")]
+    state_path = _state_with_items(tmp_path, items)
+    env_tmp_dir(state_path)
+    before = state_path.read_text(encoding="utf-8")
+    write_result(state_path, "codex-apply-r1", {
+        "items": [{"item_id": "R1-001", "diff_lines": 500,
+                   "commits": [commit(sha="bad111")]}],
+    })
+    with pytest.raises(SystemExit):
+        refactor.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": True})()
+        )
+    assert state_path.read_text(encoding="utf-8") == before
+    assert not [c for c in no_git if c[:2] == ["git", "revert"]]
+    assert not [c for c in no_git if c[:2] == ["git", "push"]]
+
+
+def test_state_is_saved_before_push(refactor, tmp_path, env_tmp_dir, monkeypatch):
+    """push が失敗しても、記録とローカルの git が食い違わないようにする。"""
+    import subprocess
+
+    items = [item(item_id="R1-001")]
+    state_path = _state_with_items(tmp_path, items)
+    env_tmp_dir(state_path)
+    write_result(state_path, "codex-apply-r1", {
+        "items": [{"item_id": "R1-001", "diff_lines": 500,
+                   "commits": [commit(sha="bad111")]}],
+    })
+    monkeypatch.setattr(
+        refactor.subprocess, "run",
+        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "", ""),
+    )
+    saved_at_push: list[bool] = []
+
+    def fake_sh(cmd, **kw):
+        if cmd[:2] == ["git", "push"]:
+            saved_at_push.append(
+                read_state(state_path)["items"][0]["status"] == "abandoned"
+            )
+        return ""
+
+    monkeypatch.setattr(refactor, "_sh", fake_sh)
+    with pytest.raises(SystemExit):
+        refactor.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+        )
+    assert saved_at_push == [True], "push の前に状態が保存されていない"
+
+
+def test_unverified_baseline_blocks_every_item(refactor, tmp_path, env_tmp_dir):
+    """着手前のテストが成功と確認できていなければ、適用へ着手せず全項目を blocked にする。"""
     items = [item(item_id="R1-001")]
     state_path = _state_with_items(
         tmp_path, items,
@@ -266,6 +319,27 @@ def test_red_baseline_blocks_every_item(refactor, tmp_path, env_tmp_dir):
     env_tmp_dir(state_path)
     write_result(state_path, "codex-apply-r1", {"items": []})
     with pytest.raises(SystemExit) as e:
-        refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": True})())
+        refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
+    assert e.value.code == 2
+    assert read_state(state_path)["items"][0]["status"] == "blocked"
+
+
+def test_unknown_baseline_also_blocks(refactor, tmp_path, env_tmp_dir):
+    """`red` だけでなく「確認していない」状態も通さない。
+
+    確認していない状態を通すと、壊したのか元から壊れていたのかを判別する手段が
+    無いまま進む。
+    """
+    items = [item(item_id="R1-001")]
+    state_path = _state_with_items(
+        tmp_path, items,
+        baseline_test={"command": None, "status": "unknown", "checked_at": "x"},
+    )
+    env_tmp_dir(state_path)
+    write_result(state_path, "codex-apply-r1", {"items": []})
+    with pytest.raises(SystemExit) as e:
+        refactor.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+        )
     assert e.value.code == 2
     assert read_state(state_path)["items"][0]["status"] == "blocked"

@@ -50,7 +50,7 @@ allowed-tools:
 | `--scope PATH...` | 対象範囲。**提案が無制限に広がらないよう必須** | 必須 |
 | `--host claude\|codex\|kiro` | ホストの明示指定。未指定時は環境変数から推定 | 推定 |
 | `--model RT=MODEL` | ランタイムごとのモデル。繰り返し指定できる | CLI の既定 |
-| `--baseline-test CMD` | 着手前と各コミットで実行するテスト | なし |
+| `--baseline-test CMD` | 着手前と各コミットで実行するテスト。**振る舞い不変を示す手段が無い書き換えは構造改善ではないため必須** | 必須 |
 | `--max-outer-rounds N` | 提案ラウンドの上限 | `3` |
 | `--max-fix-rounds N` | 1 ラウンドあたりの修正の上限 | `3` |
 | `--max-items-per-round N` | 1 ラウンドの採用上限 | `5` |
@@ -138,7 +138,7 @@ SCRIPTS="$PLUGIN_ROOT/skills/cross-refactoring/scripts"
 LIB="$PLUGIN_ROOT/skills/cross-review/scripts/lib"
 
 eval "$("$SCRIPTS/refactor.py" init "$PR" --scope $SCOPE \
-          ${HOST:+--host "$HOST"} ${BASELINE:+--baseline-test "$BASELINE"} \
+          --baseline-test "$BASELINE" ${HOST:+--host "$HOST"} \
           --max-outer-rounds "$MAX_OUTER" --max-fix-rounds "$MAX_FIX" \
           --max-items-per-round "$MAX_ITEMS" $MODEL_ARGS)"
 export CROSS_REFACTORING_TMP_DIR="$TMP_DIR"
@@ -195,6 +195,7 @@ done
 | ホストのサブエージェントで適用する | ホストの作業文脈に差分が載り、実装者とレビュー担当の独立性が崩れる |
 | `launch-cli.sh` に「ホストなら起動しない」分岐を入れる | ホストは適用担当として起動しうる。分岐はランタイム名だけで行う |
 | `--scope` を省く | 提案が発散し、Pull Request が肥大する |
+| `--dry-run` の出力を実行結果と混同する | 確認用なので git も状態ファイルも触らない。進行は 1 歩も進まない |
 | 複数の改善項目を 1 コミットにまとめる | 取り消し範囲が項目単位で決まらなくなる。適用結果の検証で失敗になる |
 | レビューの指摘に項目 ID を付けない | 同上。差し戻して再レビューになる |
 | `git push --force` / `--no-verify` を使う | 他者の作業を消す。検証を飛ばす |

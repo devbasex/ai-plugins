@@ -58,7 +58,7 @@ def _args(tmp_path, **over):
     base = {
         "pr": 130, "scope": ["src"], "host": "claude",
         "max_outer_rounds": 3, "max_fix_rounds": 3, "max_items_per_round": 5,
-        "severity_threshold": "minor", "model": None, "baseline_test": None,
+        "severity_threshold": "minor", "model": None, "baseline_test": "true",
         "worktree_root": str(tmp_path / "rf130"),
     }
     base.update(over)
@@ -147,10 +147,15 @@ def test_init_refuses_to_start_when_the_baseline_test_fails(run_init, tmp_path):
         run_init(_args(tmp_path, baseline_test="false"))
 
 
-def test_init_without_baseline_test_records_unknown(run_init, tmp_path):
-    run_init(_args(tmp_path))
-    _, state = _state_of(tmp_path)
-    assert state["baseline_test"]["status"] == "unknown"
+def test_baseline_test_is_required(refactor, monkeypatch):
+    """振る舞い不変を示す手段が無い書き換えは構造改善ではないため、必須にする。"""
+    monkeypatch.setattr(
+        refactor.sys, "argv",
+        ["refactor.py", "init", "130", "--scope", "src", "--host", "claude"],
+    )
+    with pytest.raises(SystemExit) as e:
+        refactor.main()
+    assert e.value.code == 2  # argparse の引数エラー
 
 
 def test_init_is_idempotent(run_init, tmp_path, capsys):

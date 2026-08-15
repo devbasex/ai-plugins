@@ -364,6 +364,23 @@ def verify_commit_trailers(commit: dict[str, Any]) -> Optional[str]:
     return None
 
 
+def verify_fix_commit(commit: dict[str, Any]) -> Optional[str]:
+    """修正コミットを適用と同じ基準で検証する。問題があれば理由を返す。
+
+    適用側だけ厳しくして修正側を素通しにすると、**レビュー指摘への対応という
+    名目で手順を外れた変更が入り、そのまま収束済みになる**。
+    """
+    problem = verify_commit_trailers(commit)
+    if problem:
+        return problem
+    if commit.get("test_status") != "pass":
+        return (
+            f"コミット {commit.get('sha', '?')} でテストが成功していません "
+            f"({commit.get('test_status')})"
+        )
+    return None
+
+
 def verify_apply_item(
     reported: dict[str, Any], item: dict[str, Any]
 ) -> Optional[str]:
@@ -618,18 +635,13 @@ def _is_registered_worktree(path: pathlib.Path) -> bool:
     return any(line == f"worktree {target}" for line in out.splitlines())
 
 
-def _run_baseline_test(command: Optional[str], work: pathlib.Path) -> dict[str, Any]:
+def _run_baseline_test(command: str, work: pathlib.Path) -> dict[str, Any]:
     """着手前のテストを実行して記録する。
 
     失敗している状態で構造改善に入ると、**壊したのか元から壊れていたのか**
-    区別できない。未指定のときは `unknown` として記録し、以後の検証で警告する。
+    区別できない。そもそも振る舞いが変わっていないことを示す手段が無い書き換えは
+    構造改善ではないため、テストコマンドは必須にしている。
     """
-    if not command:
-        info(
-            "⚠ --baseline-test が未指定です。着手前のテスト成功を確認できないため、"
-            "振る舞い不変の担保が 1 段弱くなります"
-        )
-        return {"command": None, "status": "unknown", "checked_at": statefile.now()}
     r = subprocess.run(command, shell=True, cwd=str(work), capture_output=True, text=True)
     status = "green" if r.returncode == 0 else "red"
     if status == "red":
@@ -792,12 +804,20 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
 
     _record_observed_model(entry, "impl", impl, state, "apply", args.round)
 
+    # 着手前のテストが**成功と確認できていない限り**適用結果を採らない。
+    # `red` だけでなく `unknown`（確認していない）も拒否する。確認していない状態を
+    # 通すと、「壊したのか元から壊れていたのか」を判別する手段が無いまま進む。
     baseline = state.get("baseline_test") or {}
-    if baseline.get("status") == "red":
+    if baseline.get("status") != "green":
         for item_id in entry["items"]:
             _find_item(state, item_id)["status"] = "blocked"
-        statefile.save(path, state)
-        die("着手前のテストが失敗しているため、適用へ着手しません（全項目を blocked）", code=2)
+        if not args.dry_run:
+            statefile.save(path, state)
+        die(
+            f"着手前のテストが成功と確認できていません（status={baseline.get('status')}）。"
+            "適用へ着手しません（全項目を blocked）",
+            code=2,
+        )
 
     reported = {r.get("item_id"): r for r in payload.get("items", []) if isinstance(r, dict)}
     applied: list[str] = []
@@ -839,10 +859,16 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
     }
     entry.setdefault("durations", {})["apply"] = payload.get("elapsed_seconds") or 0
     state["phase"] = "review" if applied else "propose"
-    statefile.save(path, state)
 
-    if reverted and not args.dry_run:
-        _push_head(state)
+    # `--dry-run` では git も状態ファイルも触らない。片方だけ進むと、確認の
+    # つもりで実行した利用者の進行が壊れる。
+    if args.dry_run:
+        info("（dry-run）状態ファイルは更新していません")
+    else:
+        # 保存してから push する。push が失敗しても、記録とローカルの git が食い違わない。
+        statefile.save(path, state)
+        if reverted:
+            _push_head(state)
 
     if not applied:
         info("全項目が失敗したため、このラウンドのレビューは行いません")
@@ -976,11 +1002,14 @@ def cmd_abandon_items(args: argparse.Namespace) -> None:
         })
         info(f"↩ {item_id} を取り消しました（{count} コミット）")
 
-    if not args.dry_run:
-        _push_head(state)
     entry["abandoned"] = targets
     state["phase"] = "propose"
+    if args.dry_run:
+        info("（dry-run）状態ファイルは更新していません")
+        return
+    # 保存してから push する。push が失敗しても、記録とローカルの git が食い違わない。
     statefile.save(path, state)
+    _push_head(state)
 
 
 def cmd_merge_fix(args: argparse.Namespace) -> None:
@@ -1005,19 +1034,33 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         for thread_id in sorted(claimed - actual):
             info(f"⚠ {thread_id} は解決済みと申告されましたが、GitHub では未解決です")
 
-    for review in entry["reviews"]:
-        for finding in review["findings"]:
-            if finding.get("thread_id") in resolved:
-                finding["resolved"] = True
-
+    # 修正コミットも適用と同じ基準で検証する。トレーラー欠落やテスト失敗を
+    # 警告で済ませると、**手順を満たさない変更が収束済みになれてしまう**。
+    invalid_items: set[str] = set()
     for commit in payload.get("commits", []):
-        problem = verify_commit_trailers(commit)
-        if problem:
-            info(f"⚠ 修正コミットのトレーラーが不足しています: {problem}")
         item_id = (commit.get("trailers") or {}).get("Item-Id")
+        problem = verify_fix_commit(commit)
+        if problem:
+            info(f"❌ 修正コミットが手順を満たしていません: {problem}")
+            invalid_items.add(item_id)
+            continue
         item = _find_item(state, item_id, required=False)
         if item is not None and commit.get("sha"):
             item.setdefault("commits", []).append(commit["sha"])
+
+    for review in entry["reviews"]:
+        for finding in review["findings"]:
+            if finding.get("thread_id") not in resolved:
+                continue
+            if finding.get("item_id") in invalid_items:
+                # 修正そのものが手順を満たしていないので、解決したことにしない。
+                # 修正ラウンドの上限に達すればこの項目は取り消される。
+                info(
+                    f"⚠ {finding['item_id']} は修正コミットが手順を満たしていないため、"
+                    "解決済みにしません"
+                )
+                continue
+            finding["resolved"] = True
 
     entry["fix_rounds"] += 1
     entry.setdefault("durations", {})["fix"] = (
@@ -1345,8 +1388,9 @@ def main() -> None:
                       choices=[s for s in SEVERITY_ORDER if s != "unknown"])
     init.add_argument("--model", action="append", metavar="RUNTIME=MODEL",
                       help="ランタイムごとのモデル指定。繰り返し指定できる")
-    init.add_argument("--baseline-test", default=None,
-                      help="着手前に実行するテストコマンド")
+    init.add_argument("--baseline-test", required=True,
+                      help="着手前と各コミットで実行するテストコマンド。"
+                           "振る舞い不変を示す手段が無い書き換えは構造改善ではないため必須")
     init.add_argument("--worktree-root", default=None)
     init.set_defaults(func=cmd_init)
 

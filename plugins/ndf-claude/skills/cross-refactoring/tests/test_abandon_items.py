@@ -49,12 +49,12 @@ def _state(tmp_path, findings, item_ids=("R1-001", "R1-002")):
     )
 
 
-def _args(dry_run=True):
+def _args(dry_run=False):
     return type("A", (), {"id": 130, "round": 1, "dry_run": dry_run})()
 
 
 def test_only_items_with_unresolved_findings_are_abandoned(
-    refactor, tmp_path, env_tmp_dir
+    refactor, tmp_path, env_tmp_dir, no_git
 ):
     state_path = _state(tmp_path, [_finding("R1-001")])
     env_tmp_dir(state_path)
@@ -68,7 +68,7 @@ def test_only_items_with_unresolved_findings_are_abandoned(
     assert [d["item_id"] for d in state["deferred_items"]] == ["R1-001"]
 
 
-def test_resolved_findings_do_not_abandon(refactor, tmp_path, env_tmp_dir):
+def test_resolved_findings_do_not_abandon(refactor, tmp_path, env_tmp_dir, no_git):
     state_path = _state(tmp_path, [_finding("R1-001", resolved=True)])
     env_tmp_dir(state_path)
     refactor.cmd_abandon_items(_args())
@@ -77,7 +77,7 @@ def test_resolved_findings_do_not_abandon(refactor, tmp_path, env_tmp_dir):
     assert state["deferred_items"] == []
 
 
-def test_null_item_id_abandons_the_whole_round(refactor, tmp_path, env_tmp_dir):
+def test_null_item_id_abandons_the_whole_round(refactor, tmp_path, env_tmp_dir, no_git):
     """どの項目にも紐づかない指摘が残ったら、そのラウンドの適用を全件取り消す。"""
     state_path = _state(tmp_path, [_finding(None)])
     env_tmp_dir(state_path)
@@ -87,7 +87,7 @@ def test_null_item_id_abandons_the_whole_round(refactor, tmp_path, env_tmp_dir):
     assert len(state["deferred_items"]) == 2
 
 
-def test_deferred_entry_records_the_reason(refactor, tmp_path, env_tmp_dir):
+def test_deferred_entry_records_the_reason(refactor, tmp_path, env_tmp_dir, no_git):
     state_path = _state(tmp_path, [_finding("R1-001")])
     env_tmp_dir(state_path)
     refactor.cmd_abandon_items(_args())
@@ -156,7 +156,18 @@ def test_push_never_uses_force(refactor, tmp_path, env_tmp_dir, monkeypatch):
 
 # ---------- 修正の取り込み ----------
 
-def _prepare_fix(refactor, tmp_path, env_tmp_dir, claimed, thread="PRRT_a"):
+def _fix_commit(**over):
+    base = {
+        "sha": "fix111", "test_status": "pass",
+        "trailers": {"Item-Id": "R1-001", "Round": "1",
+                     "Impl-Runtime": "codex", "Impl-Model": "gpt-5.5"},
+    }
+    base.update(over)
+    return base
+
+
+def _prepare_fix(refactor, tmp_path, env_tmp_dir, claimed, thread="PRRT_a",
+                 commits=None):
     state_path = _state(tmp_path, [_finding("R1-001", thread=thread)])
     state = read_state(state_path)
     state["rounds"][0]["fix_rounds"] = 0
@@ -165,9 +176,7 @@ def _prepare_fix(refactor, tmp_path, env_tmp_dir, claimed, thread="PRRT_a"):
     write_result(state_path, "codex-fix-r1", {
         "resolved_thread_ids": claimed,
         "elapsed_seconds": 12,
-        "commits": [{"sha": "fix111", "trailers": {
-            "Item-Id": "R1-001", "Round": "1",
-            "Impl-Runtime": "codex", "Impl-Model": "gpt-5.5"}}],
+        "commits": [_fix_commit()] if commits is None else commits,
     })
     return state_path
 
@@ -192,6 +201,39 @@ def test_merge_fix_rejects_unverified_resolution_claims(
     """解決 API に失敗・未実行でも「解決済み」と書けてしまうため、突き合わせる。"""
     state_path = _prepare_fix(refactor, tmp_path, env_tmp_dir, ["PRRT_a"])
     monkeypatch.setattr(refactor, "resolved_threads_on_github", lambda repo, pr: set())
+    refactor.cmd_merge_fix(type("A", (), {"id": 130, "round": 1})())
+
+    state = read_state(state_path)
+    assert state["rounds"][0]["reviews"][0]["findings"][0]["resolved"] is False
+
+
+def test_merge_fix_rejects_commits_that_skip_the_procedure(
+    refactor, tmp_path, env_tmp_dir, monkeypatch
+):
+    """修正側だけ素通しにすると、手順を外れた変更がそのまま収束済みになる。"""
+    state_path = _prepare_fix(
+        refactor, tmp_path, env_tmp_dir, ["PRRT_a"],
+        commits=[_fix_commit(test_status="fail")],
+    )
+    monkeypatch.setattr(refactor, "resolved_threads_on_github",
+                        lambda repo, pr: {"PRRT_a"})
+    refactor.cmd_merge_fix(type("A", (), {"id": 130, "round": 1})())
+
+    state = read_state(state_path)
+    assert state["rounds"][0]["reviews"][0]["findings"][0]["resolved"] is False
+    assert "fix111" not in state["items"][0]["commits"]
+
+
+def test_merge_fix_rejects_commits_missing_trailers(
+    refactor, tmp_path, env_tmp_dir, monkeypatch
+):
+    commit = _fix_commit()
+    del commit["trailers"]["Impl-Model"]
+    state_path = _prepare_fix(
+        refactor, tmp_path, env_tmp_dir, ["PRRT_a"], commits=[commit]
+    )
+    monkeypatch.setattr(refactor, "resolved_threads_on_github",
+                        lambda repo, pr: {"PRRT_a"})
     refactor.cmd_merge_fix(type("A", (), {"id": 130, "round": 1})())
 
     state = read_state(state_path)

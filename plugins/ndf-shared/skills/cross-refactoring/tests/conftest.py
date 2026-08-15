@@ -114,6 +114,26 @@ def write_result(state_path: pathlib.Path, stem: str, payload: Any) -> pathlib.P
 
 
 @pytest.fixture
+def no_git(refactor, monkeypatch):
+    """git / gh を呼ばせず、実行されたコマンドを記録する。
+
+    外部プロセスを呼ばないという方針を保ちつつ、取り消しと push の**順序と引数**を
+    検証できるようにする。
+    """
+    import subprocess
+
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(refactor.subprocess, "run", fake_run)
+    monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: calls.append(list(cmd)) or "")
+    return calls
+
+
+@pytest.fixture
 def env_tmp_dir(monkeypatch):
     """`CROSS_REFACTORING_TMP_DIR` を差し替えるヘルパ。"""
     def _set(state_path: pathlib.Path) -> None:
