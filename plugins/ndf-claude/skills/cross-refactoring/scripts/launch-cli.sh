@@ -67,6 +67,8 @@ esac
 
 # Skill の配置先はランタイムで違う。**プロンプトに明示パスを必ず書く**ため、
 # ここで解決して雛形へ渡す。kiro は配置しただけでは SKILL.md 本文を読まない。
+# `set -u` 下で未定義参照にならないよう、分岐の前に必ず初期化する。
+SKILL_BASE=
 case "$RUNTIME" in
   claude) SKILL_BASE=.claude/skills ;;
   codex)  SKILL_BASE=.agents/skills ;;
@@ -74,6 +76,7 @@ case "$RUNTIME" in
   # gemini は NDF の配布先ではないが、**語彙を読ませないと提案が全件降格する**ため
   # 同じ形の場所へ配置し、明示パスで読ませる。
   gemini) SKILL_BASE=.gemini/skills ;;
+  *)      echo "未知のランタイムです: $RUNTIME" >&2; exit 1 ;;
 esac
 
 PROMPT=$STEM-prompt.md

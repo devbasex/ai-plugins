@@ -354,9 +354,19 @@ def duplicate_rate(
 
 
 # ---------------- 適用結果の検証 ----------------
+#
+# **結果ファイルの申告は検証の材料にしない。** 実装担当は自分の成果を報告する側なので、
+# トレーラーもテスト結果も差分行数も、JSON の値を書き換えるだけで検査を通せてしまう。
+# ここで使う事実（コミットの実在 / トレーラー / 差分行数 / テストの成否）は、すべて
+# **git と実際のテスト実行**から取る。結果ファイルから使うのは「どのコミットが
+# どの項目のものか」という対応付けの手がかりだけである。
 
 def verify_commit_trailers(commit: dict[str, Any]) -> Optional[str]:
-    """コミットのトレーラーが 4 つ揃っているか。欠けていれば理由を返す。"""
+    """コミットのトレーラーが 4 つ揃っているか。欠けていれば理由を返す。
+
+    `commit` は **git から取った事実**（`collect_commit_facts()` の戻り値）である。
+    結果ファイルの `trailers` を渡してはならない。
+    """
     trailers = commit.get("trailers") or {}
     missing = [k for k in REQUIRED_TRAILERS if not str(trailers.get(k) or "").strip()]
     if missing:
@@ -370,6 +380,8 @@ def verify_fix_commit(commit: dict[str, Any]) -> Optional[str]:
     適用側だけ厳しくして修正側を素通しにすると、**レビュー指摘への対応という
     名目で手順を外れた変更が入り、そのまま収束済みになる**。
     """
+    if not commit.get("exists", True):
+        return f"コミット {commit.get('sha', '?')} が対象の範囲に存在しません"
     problem = verify_commit_trailers(commit)
     if problem:
         return problem
@@ -382,18 +394,23 @@ def verify_fix_commit(commit: dict[str, Any]) -> Optional[str]:
 
 
 def verify_apply_item(
-    reported: dict[str, Any], item: dict[str, Any]
+    item: dict[str, Any], facts: list[dict[str, Any]]
 ) -> Optional[str]:
     """1 項目の適用結果を検証する。問題があれば失敗理由を返す。
 
-    振る舞い不変は機械的には確かめられないが、**手順が守られたかは結果から
+    `facts` は `collect_commit_facts()` が git と実際のテスト実行から作る。
+    振る舞い不変そのものは機械的に確かめられないが、**手順が守られたかは結果から
     確かめられる**。読ませ方の不確実性に対する最後の砦としてここを厚くする。
     """
-    commits = reported.get("commits") or []
-    if not commits:
+    if not facts:
         return "コミットが 1 件もありません（1 手 1 コミットの前提を満たしていません）"
 
-    for commit in commits:
+    for commit in facts:
+        if not commit.get("exists", True):
+            return (
+                f"コミット {commit.get('sha', '?')} が base..head の範囲にありません"
+                "（申告だけで実体がありません）"
+            )
         problem = verify_commit_trailers(commit)
         if problem:
             return problem
@@ -411,15 +428,17 @@ def verify_apply_item(
             )
 
     if item.get("test_gap"):
-        # テストが乏しいと申告された項目は、**現状固定テストの追加が先行**していること。
+        # テストが乏しいと申告された項目は、現状固定テストの追加が先行していること。
         # 実測では同じ課題で固定テストの追加数が 17 本 / 1 メソッド / 0 本と揃わなかった。
-        if not commits[0].get("characterization_test"):
+        # 「テストを足した」かどうかは、そのコミットがテストの置き場所を触ったかで見る。
+        if not facts[0].get("touches_tests"):
             return (
                 "テストが乏しい項目なのに、現状固定テストの追加コミットが先行していません"
+                f"（先頭コミット {facts[0].get('sha', '?')} がテストを触っていません）"
             )
 
     budget = int(item.get("estimated_diff_lines") or 0) * DIFF_BUDGET_FACTOR
-    actual = int(reported.get("diff_lines") or 0)
+    actual = sum(int(c.get("diff_lines") or 0) for c in facts)
     if budget and actual > budget:
         return f"実差分 {actual} 行が差分予算 {budget} 行を超えました（範囲の逸脱）"
     return None
@@ -819,6 +838,14 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
             code=2,
         )
 
+    # 検証の材料は git から取る。結果ファイルから使うのは
+    # 「どのコミットがどの項目のものか」という対応付けだけ。
+    work = state["worktrees"]["work"]
+    head_branch = state["head_branch"]
+    test_command = baseline["command"]
+    head_sha = _git_out(work, ["rev-parse", "HEAD"]) or ""
+    in_range = commits_in_range(work, payload.get("base_sha"), head_sha)
+
     reported = {r.get("item_id"): r for r in payload.get("items", []) if isinstance(r, dict)}
     applied: list[str] = []
     failed: list[str] = []
@@ -828,8 +855,13 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
         got = reported.get(item_id)
         if got is None:
             problem = "適用結果に項目がありません"
+            facts: list[dict[str, Any]] = []
         else:
-            problem = verify_apply_item(got, item)
+            shas = [c.get("sha") for c in got.get("commits", []) if c.get("sha")]
+            facts = collect_commit_facts(
+                work, shas, in_range, test_command, head_branch
+            )
+            problem = verify_apply_item(item, facts)
         if problem:
             item["status"] = "abandoned"
             item["failure_reason"] = problem
@@ -1034,10 +1066,19 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         for thread_id in sorted(claimed - actual):
             info(f"⚠ {thread_id} は解決済みと申告されましたが、GitHub では未解決です")
 
-    # 修正コミットも適用と同じ基準で検証する。トレーラー欠落やテスト失敗を
-    # 警告で済ませると、**手順を満たさない変更が収束済みになれてしまう**。
+    # 修正コミットも適用と同じ基準で、**git と実際のテスト実行から**検証する。
+    # 結果ファイルの申告で済ませると、手順を満たさない変更が収束済みになれてしまう。
+    work = state["worktrees"]["work"]
+    baseline = state.get("baseline_test") or {}
+    facts = collect_commit_facts(
+        work,
+        [c.get("sha") for c in payload.get("commits", []) if c.get("sha")],
+        set(),                       # 修正は範囲を限定せず、実在だけを見る
+        baseline.get("command") or "true",
+        state["head_branch"],
+    )
     invalid_items: set[str] = set()
-    for commit in payload.get("commits", []):
+    for commit in facts:
         item_id = (commit.get("trailers") or {}).get("Item-Id")
         problem = verify_fix_commit(commit)
         if problem:
@@ -1045,7 +1086,7 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
             invalid_items.add(item_id)
             continue
         item = _find_item(state, item_id, required=False)
-        if item is not None and commit.get("sha"):
+        if item is not None:
             item.setdefault("commits", []).append(commit["sha"])
 
     for review in entry["reviews"]:
@@ -1206,6 +1247,121 @@ def _item_table(state: dict[str, Any]) -> str:
 
 # ---------------- 補助 ----------------
 
+# ---------------- git から事実を取る ----------------
+#
+# 実装担当は自分の成果を報告する側なので、結果ファイルの値をそのまま検査に使うと
+# 「JSON を書き換えるだけで通る」検査になる。ここは git だけを情報源にする。
+
+# テストの置き場所。現状固定テストが先行しているかの判定に使う。
+TEST_PATH_MARKERS = ("/test/", "/tests/", "/spec/", "/specs/", "__tests__/")
+TEST_NAME_MARKERS = (".test.", ".spec.", "_test.", "_spec.", "test_", "spec_")
+
+
+def _git_out(work: str, args: list[str]) -> Optional[str]:
+    """`git` を実行して標準出力を返す。失敗したら `None`。"""
+    r = subprocess.run(["git", *args], cwd=work, capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+def commits_in_range(work: str, base: Optional[str], head: str) -> set[str]:
+    """`base..head` に含まれるコミットの完全な SHA。取得できなければ空集合。
+
+    申告されたコミットが**実在し、このラウンドの範囲にある**ことを確かめるために使う。
+    """
+    if not base:
+        return set()
+    out = _git_out(work, ["rev-list", f"{base}..{head}"])
+    return set(out.split()) if out else set()
+
+
+def commit_trailers(work: str, sha: str) -> dict[str, str]:
+    """コミットメッセージのトレーラーを git から読む。
+
+    **結果ファイルの `trailers` は使わない。** JSON 上は仕様どおりでも、実際の
+    `git commit` でトレーラーを書き忘れていれば集計に使えない。
+    """
+    out = _git_out(work, ["log", "-1", "--format=%(trailers:only,unfold)", sha])
+    trailers: dict[str, str] = {}
+    for line in (out or "").splitlines():
+        key, sep, value = line.partition(":")
+        if sep:
+            trailers[key.strip()] = value.strip()
+    return trailers
+
+
+def commit_diff_lines(work: str, sha: str) -> int:
+    """コミットの追加 + 削除行数を git から数える。"""
+    out = _git_out(work, ["show", "--numstat", "--format=", sha])
+    total = 0
+    for line in (out or "").splitlines():
+        parts = line.split("\t")
+        if len(parts) < 3:
+            continue
+        for n in parts[:2]:
+            if n.isdigit():          # バイナリは `-` になるので数えない
+                total += int(n)
+    return total
+
+
+def commit_touches_tests(work: str, sha: str) -> bool:
+    """コミットがテストの置き場所を触っているか。"""
+    out = _git_out(work, ["show", "--name-only", "--format=", sha])
+    for path in (out or "").splitlines():
+        lowered = f"/{path.lower()}"
+        name = lowered.rsplit("/", 1)[-1]
+        if any(m in lowered for m in TEST_PATH_MARKERS):
+            return True
+        if any(m in name for m in TEST_NAME_MARKERS):
+            return True
+    return False
+
+
+def run_test_at(work: str, sha: str, command: str, head_branch: str) -> str:
+    """指定コミットを取り出してテストを実行し `pass` / `fail` を返す。
+
+    **各コミットでテストが通ったかは、実際に走らせないと分からない。**
+    結果ファイルの `test_status` は実装担当の申告にすぎず、検査の根拠にできない。
+    実行後は必ず元のブランチへ戻す。
+    """
+    if _git_out(work, ["checkout", "--detach", sha]) is None:
+        return "missing"
+    try:
+        r = subprocess.run(
+            command, shell=True, cwd=work, capture_output=True, text=True
+        )
+        return "pass" if r.returncode == 0 else "fail"
+    finally:
+        subprocess.run(
+            ["git", "checkout", head_branch], cwd=work, capture_output=True, text=True
+        )
+
+
+def collect_commit_facts(
+    work: str, shas: list[str], in_range: set[str], test_command: str,
+    head_branch: str,
+) -> list[dict[str, Any]]:
+    """申告されたコミットについて、git と実際のテスト実行から事実を集める。
+
+    範囲に存在しないコミットは、そこで打ち切って `exists=False` を返す。
+    実体が無いものにテストを走らせても意味がないためである。
+    """
+    facts: list[dict[str, Any]] = []
+    for sha in shas:
+        full = _git_out(work, ["rev-parse", "--verify", f"{sha}^{{commit}}"])
+        if full is None or (in_range and full not in in_range):
+            facts.append({"sha": sha, "exists": False})
+            continue
+        facts.append({
+            "sha": sha,
+            "exists": True,
+            "trailers": commit_trailers(work, full),
+            "diff_lines": commit_diff_lines(work, full),
+            "touches_tests": commit_touches_tests(work, full),
+            "test_status": run_test_at(work, full, test_command, head_branch),
+        })
+    return facts
+
+
 _REVIEW_THREADS_QUERY = """
 query($owner: String!, $repo: String!, $pr: Int!, $cursor: String) {
   repository(owner: $owner, name: $repo) {
@@ -1276,10 +1432,15 @@ def _revert_item_commits(
     """
     work = state["worktrees"]["work"]
     shas = [s for s in (item.get("commits") or []) if s]
-    for sha in reversed(shas):
-        if dry_run:
+    if dry_run:
+        for sha in reversed(shas):
             info(f"（dry-run）git revert --no-edit {sha}")
-            continue
+        return len(shas)
+
+    # 途中で失敗したら**着手前の HEAD まで戻す**。1 項目が複数のコミットを持つとき、
+    # 先行して成功した取り消しだけが履歴に残ると、再実行で不整合になって進めなくなる。
+    before = _git_out(work, ["rev-parse", "HEAD"])
+    for sha in reversed(shas):
         r = subprocess.run(
             ["git", "revert", "--no-edit", sha],
             cwd=work, capture_output=True, text=True,
@@ -1287,9 +1448,13 @@ def _revert_item_commits(
         if r.returncode != 0:
             subprocess.run(["git", "revert", "--abort"], cwd=work,
                            capture_output=True, text=True)
+            if before:
+                subprocess.run(["git", "reset", "--hard", before], cwd=work,
+                               capture_output=True, text=True)
             die(
                 f"{item['item_id']} のコミット {sha} を取り消せませんでした: "
                 f"{r.stderr.strip()[:400]}"
+                f"（HEAD を {before} へ戻しました）"
             )
     return len(shas)
 

@@ -136,6 +136,35 @@ def test_revert_failure_aborts_and_stops(refactor, tmp_path, env_tmp_dir, monkey
     assert ["git", "revert", "--abort"] in calls
 
 
+def test_revert_failure_rolls_back_to_the_starting_head(
+    refactor, tmp_path, env_tmp_dir, monkeypatch
+):
+    """複数コミットの途中で失敗したとき、成功済みの取り消しも巻き戻すこと。
+
+    先行して成功した取り消しだけが履歴に残ると、再実行で不整合になって進めなくなる。
+    """
+    state_path = _state(tmp_path, [_finding("R1-001")], item_ids=("R1-001",))
+    state = read_state(state_path)
+    state["items"][0]["commits"] = ["old111", "new222"]
+    state_path.write_text(__import__("json").dumps(state), encoding="utf-8")
+    env_tmp_dir(state_path)
+
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        # 2 件目（古い方）の取り消しで失敗させる
+        failing = cmd[:2] == ["git", "revert"] and cmd[-1] == "old111"
+        return subprocess.CompletedProcess(cmd, 1 if failing else 0, "", "conflict")
+
+    monkeypatch.setattr(refactor, "_git_out", lambda work, args: "HEAD_BEFORE")
+    monkeypatch.setattr(refactor.subprocess, "run", fake_run)
+    with pytest.raises(SystemExit):
+        refactor.cmd_abandon_items(_args(dry_run=False))
+
+    assert ["git", "reset", "--hard", "HEAD_BEFORE"] in calls
+
+
 def test_push_never_uses_force(refactor, tmp_path, env_tmp_dir, monkeypatch):
     """`--force` は使わない。他者の作業を消す事故を起こさないため。"""
     state_path = _state(tmp_path, [_finding("R1-001")], item_ids=("R1-001",))
@@ -157,8 +186,10 @@ def test_push_never_uses_force(refactor, tmp_path, env_tmp_dir, monkeypatch):
 # ---------- 修正の取り込み ----------
 
 def _fix_commit(**over):
+    """`collect_commit_facts()` が git から作る事実。"""
     base = {
-        "sha": "fix111", "test_status": "pass",
+        "sha": "fix111", "exists": True, "test_status": "pass",
+        "touches_tests": False, "diff_lines": 10,
         "trailers": {"Item-Id": "R1-001", "Round": "1",
                      "Impl-Runtime": "codex", "Impl-Model": "gpt-5.5"},
     }
@@ -166,17 +197,23 @@ def _fix_commit(**over):
     return base
 
 
-def _prepare_fix(refactor, tmp_path, env_tmp_dir, claimed, thread="PRRT_a",
-                 commits=None):
+def _prepare_fix(refactor, tmp_path, env_tmp_dir, monkeypatch, claimed,
+                 thread="PRRT_a", facts=None):
     state_path = _state(tmp_path, [_finding("R1-001", thread=thread)])
     state = read_state(state_path)
     state["rounds"][0]["fix_rounds"] = 0
     state_path.write_text(__import__("json").dumps(state), encoding="utf-8")
     env_tmp_dir(state_path)
+    resolved_facts = [_fix_commit()] if facts is None else facts
+    # 検証の材料は git から取る。テストでは git 由来の事実だけを差し替える。
+    monkeypatch.setattr(
+        refactor, "collect_commit_facts",
+        lambda work, shas, rng, cmd, branch: resolved_facts,
+    )
     write_result(state_path, "codex-fix-r1", {
         "resolved_thread_ids": claimed,
         "elapsed_seconds": 12,
-        "commits": [_fix_commit()] if commits is None else commits,
+        "commits": [{"sha": f["sha"]} for f in resolved_facts],
     })
     return state_path
 
@@ -184,7 +221,7 @@ def _prepare_fix(refactor, tmp_path, env_tmp_dir, claimed, thread="PRRT_a",
 def test_merge_fix_resolves_threads_and_counts_rounds(
     refactor, tmp_path, env_tmp_dir, monkeypatch
 ):
-    state_path = _prepare_fix(refactor, tmp_path, env_tmp_dir, ["PRRT_a"])
+    state_path = _prepare_fix(refactor, tmp_path, env_tmp_dir, monkeypatch, ["PRRT_a"])
     monkeypatch.setattr(refactor, "resolved_threads_on_github",
                         lambda repo, pr: {"PRRT_a"})
     refactor.cmd_merge_fix(type("A", (), {"id": 130, "round": 1})())
@@ -199,7 +236,7 @@ def test_merge_fix_rejects_unverified_resolution_claims(
     refactor, tmp_path, env_tmp_dir, monkeypatch
 ):
     """解決 API に失敗・未実行でも「解決済み」と書けてしまうため、突き合わせる。"""
-    state_path = _prepare_fix(refactor, tmp_path, env_tmp_dir, ["PRRT_a"])
+    state_path = _prepare_fix(refactor, tmp_path, env_tmp_dir, monkeypatch, ["PRRT_a"])
     monkeypatch.setattr(refactor, "resolved_threads_on_github", lambda repo, pr: set())
     refactor.cmd_merge_fix(type("A", (), {"id": 130, "round": 1})())
 
@@ -212,8 +249,8 @@ def test_merge_fix_rejects_commits_that_skip_the_procedure(
 ):
     """修正側だけ素通しにすると、手順を外れた変更がそのまま収束済みになる。"""
     state_path = _prepare_fix(
-        refactor, tmp_path, env_tmp_dir, ["PRRT_a"],
-        commits=[_fix_commit(test_status="fail")],
+        refactor, tmp_path, env_tmp_dir, monkeypatch, ["PRRT_a"],
+        facts=[_fix_commit(test_status="fail")],
     )
     monkeypatch.setattr(refactor, "resolved_threads_on_github",
                         lambda repo, pr: {"PRRT_a"})
@@ -230,7 +267,7 @@ def test_merge_fix_rejects_commits_missing_trailers(
     commit = _fix_commit()
     del commit["trailers"]["Impl-Model"]
     state_path = _prepare_fix(
-        refactor, tmp_path, env_tmp_dir, ["PRRT_a"], commits=[commit]
+        refactor, tmp_path, env_tmp_dir, monkeypatch, ["PRRT_a"], facts=[commit]
     )
     monkeypatch.setattr(refactor, "resolved_threads_on_github",
                         lambda repo, pr: {"PRRT_a"})
@@ -244,7 +281,7 @@ def test_merge_fix_treats_unreachable_github_as_unresolved(
     refactor, tmp_path, env_tmp_dir, monkeypatch
 ):
     """取得できないことと「解決済みが 0 件」を混同しない。安全側に倒す。"""
-    state_path = _prepare_fix(refactor, tmp_path, env_tmp_dir, ["PRRT_a"])
+    state_path = _prepare_fix(refactor, tmp_path, env_tmp_dir, monkeypatch, ["PRRT_a"])
     monkeypatch.setattr(refactor, "resolved_threads_on_github", lambda repo, pr: None)
     refactor.cmd_merge_fix(type("A", (), {"id": 130, "round": 1})())
 
