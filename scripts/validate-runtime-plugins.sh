@@ -85,8 +85,10 @@ for plugin in codex_marketplace.get("plugins", []):
 # 生成対象ではなく、古い値が残っても JSON としては妥当なため他の検査に掛からない。
 # 実際に版数と Skill 数の取り残しが繰り返し起きたので、Claude 版 plugin.json を基準に突き合わせる。
 VERSION_IN_DESCRIPTION = re.compile(r"\(v(\d+\.\d+\.\d+)\)")
-# 版数（8.0.0）や製品名（E2E）の数字を拾わないよう、前後が英数字・ドットでない整数だけを見る。
-STANDALONE_NUMBER = re.compile(r"(?<![\w.])\d+(?![\w.])")
+# `<数> ... skills` の形で書く規約。版数（8.0.0）や製品名（E2E）の数字を拾わないよう前後が
+# 英数字・ドットでない整数だけを見て、さらに `skills` との間に挟める語を 3 語までに絞る。
+# こうしないと離れた位置にある無関係な数（`8 specialized agents` など）を Skill 数と誤認する。
+DESCRIBED_SKILL_COUNT = re.compile(r"(?<![\w.])(\d+)(?![\w.])(?:\s+[\w/()-]+){0,3}\s+skills\b")
 
 
 def manifest_skill_count(family: str, runtime: str):
@@ -101,12 +103,8 @@ def manifest_skill_count(family: str, runtime: str):
 
 
 def described_skill_count(description: str):
-    # `<数> ... skills` の形で書く規約。`skills` の直前にある最後の整数を Skill 数とみなす。
-    head = re.split(r"\bskills\b", description, maxsplit=1)
-    if len(head) < 2:
-        return None
-    numbers = STANDALONE_NUMBER.findall(head[0])
-    return int(numbers[-1]) if numbers else None
+    found = DESCRIBED_SKILL_COUNT.findall(description)
+    return int(found[-1]) if found else None
 
 
 def check_description(label: str, description, version: str, family: str, runtime: str) -> None:
@@ -121,8 +119,17 @@ def check_description(label: str, description, version: str, family: str, runtim
             f"（description: v{found.group(1)} / {family}-claude の plugin.json: v{version}）"
         )
     expected = manifest_skill_count(family, runtime)
+    if expected is None:
+        return
+    # 抽出できないこと自体をエラーにする。素通りさせると、Skill 数の記述を消すか書式を変える
+    # だけでこの検査を無効化できてしまう。
     described = described_skill_count(description)
-    if expected is not None and described is not None and described != expected:
+    if described is None:
+        errors.append(
+            f"{label} の description から Skill 数を読み取れない"
+            f"（`<数> ... skills` の形で書く。{runtime}-skills.txt: {expected}）"
+        )
+    elif described != expected:
         errors.append(
             f"{label} の description の Skill 数が manifest と食い違う"
             f"（description: {described} / {runtime}-skills.txt: {expected}）"
