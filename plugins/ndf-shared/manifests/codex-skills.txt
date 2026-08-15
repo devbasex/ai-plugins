@@ -1,4 +1,3 @@
-analyzable-coding
 cherry-pick-pr
 cross-review
 deploy
@@ -20,6 +19,6 @@ pr-tests
 problem-solving
 qa-security-scan
 quality-gates
+refactoring
 requirements-design
-safe-refactoring
 tdd-cycle

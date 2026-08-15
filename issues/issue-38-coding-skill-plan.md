@@ -433,6 +433,61 @@ PHP の列で重要なのは 2 点。**first-class callable 構文と backed enu
 - [OpenTelemetry Semantic conventions for events](https://opentelemetry.io/docs/specs/semconv/general/events/)
 - [Event Sourcing — Martin Fowler](https://martinfowler.com/eaaDev/EventSourcing.html)
 
+
+---
+
+# 第 4 部: 独立 Skill から `refactoring` への統合
+
+## 4.1 独立 Skill にしなかった理由
+
+`analyzable-coding` を単独の Skill として配ると、**発動条件を書けない**。他の Skill は発動する
+瞬間を指している（完了報告の直前、バグ修正時、調査レポートを書くとき）のに対し、この内容の
+発動条件は「コードを書くとき」以外に書きようがなく、常に該当するトリガは発動判定として
+働かない。加えて、読んだエージェントが何を出力し何をもって適用完了とするかも規定できて
+いなかった。
+
+内容の重複も判定を裏づけた。既存のコードスメル 14 件のうち 4 件（マジックナンバー・文字列 /
+設定の散在 / 深いネスト / 例外の飲み込み / 条件分岐の連鎖）と重なっており、棚卸台帳の
+判断基準「機能が他 Skill と重複するものは統合の対象とし、内容は統合先へ残す」に該当する。
+
+## 4.2 決定
+
+`safe-refactoring` を **`refactoring`** へ改名し、観点を統合する。発動点は「リファクタリングを
+始めるとき」に定まり、既存の手順（テストで守る・1 手ずつ）に観点が組み込まれる。
+
+| 変更 | 内容 |
+| --- | --- |
+| 改名 | `safe-refactoring` → `refactoring`（公開コマンドの非互換変更） |
+| 版 | v7.1.0 → **v8.0.0** |
+| Skill 数 | 31 → **30**（Claude 26 / Codex 24 / Kiro 25） |
+| 移行対応表 | `ndf-policies` に追加（v9.0.0 で削除）。v7.0.0 の対応表は予告どおり削除 |
+
+## 4.3 統合先の配置
+
+| 追加先 | 内容 |
+| --- | --- |
+| `references/code-smells.md` | スメル 3 件追加 — 業務ルールの埋め込み / 一件ずつの反復 / 検証のない外部化 |
+| `references/refactoring-catalog.md` | 手法 2 件追加 — 対応表への置き換え / 一括処理への置き換え |
+| `references/data-representation.md`（新規） | 判定 3 表、手を付けないもの、改善にならない置き換え、外部化してよい条件、判断の記録 |
+| `references/language-notes.md`（移設） | Python / JavaScript / TypeScript / PHP での手段 |
+| `SKILL.md` | 手順 3 に「何にどう置き換えるかは data-representation.md で決める」を追加 |
+
+MUST / SHOULD / MAY の 3 段構成は、リファクタリングの文脈では「手を付けないもの」「改善に
+ならない置き換え」「外部化してよい条件」として再配置した。規範の宣言ではなく、スメルを
+見つけたあとの判断材料として働く。
+
+## 4.4 受け入れ条件の読み替え
+
+第 2 部の受け入れ条件のうち、独立 Skill を前提とするものは次のとおり読み替える。
+
+| 条件 | 読み替え |
+| --- | --- |
+| AC-1 / AC-5（新規 Skill の追加と配布） | `refactoring` の改名と配布で満たす |
+| AC-2（MUST / SHOULD / MAY の 3 段） | 4.3 のとおり再配置。3 段の見出しとしては残さない |
+| AC-3（判定表 3 種） | `data-representation.md` に収録 |
+| AC-9（言語非依存） | `data-representation.md` 本文と `code-smells.md` / `refactoring-catalog.md` に言語固有語を持ち込まない。言語固有は `language-notes.md` のみ |
+| AC-7（個数表記） | 31 → 30、Claude 27 → 26 / Codex 25 → 24 / Kiro 26 → 25 |
+
 ---
 
 # 第 3 部: 実装と検証の記録

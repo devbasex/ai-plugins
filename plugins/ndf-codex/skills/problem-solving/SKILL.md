@@ -57,7 +57,7 @@ description: "Fix bugs and data inconsistencies upstream at the root cause. Use 
 
 対象にテストがほとんどない場合、再現テストを書く前に**現状の振る舞いを固定するテスト**を
 置く。副作用を分離できず再現テストが書けない状態で修正すると、直したい振る舞い以外を
-壊しても気づけない。手順は `safe-refactoring` の現状固定テストに従う。
+壊しても気づけない。手順は `refactoring` の現状固定テストに従う。
 
 ```text
 1. 変更対象の入口と副作用を洗い出す

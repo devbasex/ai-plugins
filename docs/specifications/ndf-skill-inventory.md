@@ -425,30 +425,40 @@ superpowers は 28 個で NDF と同規模ながら frontmatter が 1/2.7 だっ
 `description` が `Use when …` の 1 文だけで、トリガ語の列挙・引用符・追加フィールドを持たない。
 v7.0.0 の書式はこの方針に寄せたものである。
 
-## v7.1.0 での追加（analyzable-coding）
+## v8.0.0 での統合と改名（refactoring）
 
-Skill を 30 個から **31 個**へ増やした。起動実績をまだ持たないため、判定は次回の測定まで
-保留する。統合・削除の対象ではない。
+`safe-refactoring` を **`refactoring`** へ改名し、分岐・反復・定数の表現を決める観点を統合した。
+Skill 数は 30 個で変わらない。
 
-| Skill | 配布 | 役割 | 判定 |
+統合の根拠は本書「判断基準」節の「機能が他 Skill と重複するものは、統合の対象とし、内容は
+統合先へ残す」である。観点を独立 Skill として置くと、発動条件が「コードを書くとき」以外に
+書けず、常に該当するトリガは発動判定として働かない。構造改善の起点である
+`safe-refactoring` の観点へ寄せることで、発動点が「リファクタリングを始めるとき」に定まる。
+
+| Skill | 配布 | 変更 | 判定 |
 | --- | --- | --- | --- |
-| `analyzable-coding` | CXK | 分岐・反復・定数を検査可能なデータとして表現し、判断を記録可能にする規範 | 未測定 |
+| `refactoring` | CXK | `safe-refactoring` から改名。コードスメルに 3 件追加、参照資料を 2 件追加 | 改名前の実測を引き継ぐ |
 
-`description` を言語非依存にしてある（言語名をトリガ語に入れていない）。対象言語の
-Python / TypeScript / PHP は `references/language-notes.md` にのみ現れ、規範本文は
-判定基準だけで構成する。言語を増やしても本文は変わらない。
+追加した観点と参照資料:
 
-予算への影響は次のとおり（`python3 scripts/check-skill-frontmatter.py --report`）。
+| 追加物 | 内容 |
+| --- | --- |
+| コードスメル 3 件 | 業務ルールの埋め込み / 一件ずつの反復 / 検証のない外部化 |
+| 手法 2 件 | 対応表への置き換え / 一括処理への置き換え |
+| `references/data-representation.md` | 分岐・反復・定数の判定表、外部化してよい条件、判断の記録 |
+| `references/language-notes.md` | Python / JavaScript / TypeScript / PHP での手段 |
 
-| 指標 | v7.0.0（全 family 合計） | v7.1.0（全 family 合計） | 運用値 |
+改名は公開コマンドの非互換変更にあたるため、対応表を `ndf-policies` へ置いた（v9.0.0 で削除）。
+あわせて v7.0.0 の対応表（playwright 系の分離）を予告どおり削除した。
+
+予算への影響（`python3 scripts/check-skill-frontmatter.py --report`）:
+
+| 指標 | v7.0.0 | v8.0.0 | 運用値 |
 | --- | ---: | ---: | ---: |
-| Skill 数（ndf 単独） | 30 | 31 | — |
-| Claude Code 初期一覧 | 5,807 | 6,041 | 8,000 |
-| Codex 初期一覧 | 5,395 | 5,629 | 8,000 |
-| frontmatter 合計 | 10,559 | 10,782 | 11,200 |
-
-`description` は 184 文字で、v7.0.0 の平均 148 文字より長い。判定表を持つ Skill であり
-用途文を削ると発動が落ちるため、この長さを許容する。運用値には余裕がある。
+| Skill 数（ndf 単独） | 30 | 30 | — |
+| Claude Code 初期一覧 | 5,807 | 5,855 | 8,000 |
+| Codex 初期一覧 | 5,395 | 5,443 | 8,000 |
+| frontmatter 合計 | 10,559 | 10,612 | 11,200 |
 
 ## 参照
 

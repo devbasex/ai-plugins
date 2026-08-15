@@ -18,33 +18,17 @@ user-invocable: false
 4. **マージ済みブランチには push しない。** 既存 PR の状態を確認し、マージ済みなら新ブランチ + 新 PR を作る（サフィックス `-v2`, `-v3`）
 5. **revert を連鎖させない。** 最終的なあるべき状態を直接コミットする方が履歴上の意図が明確になり、後の cherry-pick も簡単になる
 
-## v7.0.0 で移動した Skill（v8.0.0 で削除）
+## v8.0.0 で改名した Skill（v9.0.0 で削除）
 
-ブラウザ自動テストの 4 Skill を **`playwright-kit` プラグイン**へ分離した。**Skill 名は
-変わらない**ため、`/playwright-` まで打てば従来どおり候補に出る。
+構造改善の Skill を **`/ndf:refactoring`** へ改名し、分岐・反復・定数の表現を決める観点を
+統合した。引数と手順は変わらない。
 
 | 旧コマンド | 移行先 |
 | --- | --- |
-| `/ndf:playwright-planning` | `/playwright-kit:playwright-planning` |
-| `/ndf:playwright-authoring` | `/playwright-kit:playwright-authoring` |
-| `/ndf:playwright-evidence` | `/playwright-kit:playwright-evidence` |
-| `/ndf:playwright-kit-ops` | `/playwright-kit:playwright-kit-ops` |
+| `/ndf:safe-refactoring` | `/ndf:refactoring` |
 
-利用するにはプラグインを別途インストールする。
+`safe-` を外したのは、`/refactoring` で一意に決まり、入力が短くなるためである。統合した観点は
+`references/data-representation.md` にあり、スメル一覧からも参照される。
 
-```bash
-# Claude Code
-/plugin install playwright-kit@ai-plugins
-# Codex
-codex plugin add playwright-kit@ai-plugins
-# Kiro CLI
-bash plugins/playwright-kit-kiro/install.sh
-```
-
-分離したのは、Skill の `name` と `description` が起動時の一覧として常時注入され、その予算が
-プラグイン横断で共有されるためである。ブラウザ自動テストは使う場面が限られる一方で MCP
-ツールを多用するため frontmatter が大きく（4 個で約 2,400 文字）、全利用者へ常時注入する
-取り分に見合わなかった。
-
-v6.0.0 の対応表（`/ndf:review` → `/ndf:pr-review`）は、予告どおり本バージョンで削除した。
-v6.0.0 以前から移行する場合は v6.1.0 の `ndf-policies` を参照する。
+v7.0.0 の対応表（playwright 系 4 Skill の `playwright-kit` プラグインへの分離）は、予告どおり
+本バージョンで削除した。v7.0.0 以前から移行する場合は v7.1.0 の `ndf-policies` を参照する。

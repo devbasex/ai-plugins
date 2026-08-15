@@ -47,7 +47,7 @@ NULL 許容列の追加）は `standard` として扱う。判定に迷う場合
 ```text
 mode: standard
 根拠: 注文確定の振る舞いを変更する。公開 API とスキーマは変えない
-必須工程: requirements-design → implementation-plan → tdd-cycle → safe-refactoring（必要な場合）
+必須工程: requirements-design → implementation-plan → tdd-cycle → refactoring（必要な場合）
   → pr-review → quality-gates → plan-to-spec（仕様が変わった場合）
 ```
 
@@ -70,8 +70,8 @@ mode: standard
 | 要求と受け入れ条件 | — | `requirements-design` | `requirements-design` | — |
 | 設計 | — | `implementation-plan` に代替案と採否を記録 | ドメインモデリングと設計レビュー（Release 2 で有効化） | `implementation-plan` に代替案と採否を記録 |
 | 計画 | — | `implementation-plan` | `implementation-plan` | `implementation-plan` |
-| 実装 | 直接編集 | `tdd-cycle` | `tdd-cycle` | `safe-refactoring` |
-| 構造改善 | — | `safe-refactoring`（必要な場合） | `safe-refactoring`（必要な場合） | `safe-refactoring` |
+| 実装 | 直接編集 | `tdd-cycle` | `tdd-cycle` | `refactoring` |
+| 構造改善 | — | `refactoring`（必要な場合） | `refactoring`（必要な場合） | `refactoring` |
 | レビュー | — | `pr-review` | `cross-review` | `pr-review` |
 | 完了判定 | `quality-gates` | `quality-gates` | `quality-gates` | `quality-gates` |
 | 確定仕様化 | — | `plan-to-spec`（仕様が変わった場合） | `plan-to-spec` | — |
@@ -82,9 +82,6 @@ mode: standard
 
 レビュー段階は**明示的に呼ぶ**。自然文で「レビューして」と依頼すると、Claude Code では
 組み込みの `code-review` が起動して判定の投稿経路が変わる。
-
-`analyzable-coding` は**工程ではなく判断基準**であり、この表に行を持たない。実装と構造改善の
-段でコードの表現（分岐・反復・定数）を選ぶときに参照する。モードによる出し分けはしない。
 
 ## 標準フロー
 

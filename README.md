@@ -6,13 +6,13 @@ Claude Code / Codex / Kiro CLI向けのスキル・MCP設定を共有するた�
 
 このマーケットプレイスは、チーム全体でAI開発ツール（Claude Code / Codex / Kiro CLI）の導入を加速するための事前設定されたプラグインを提供します。
 
-**NDFプラグイン v7.1.0** は、同じ `ndf@ai-plugins` という名前で Claude Code / Codex / Kiro CLI へ配布されるランタイム別プラグインです。共通ソースは `plugins/ndf-shared/` に集約し、利用者が install する配布物は `plugins/ndf-claude/` / `plugins/ndf-codex/` / `plugins/ndf-kiro/` に分かれています。
+**NDFプラグイン v8.0.0** は、同じ `ndf@ai-plugins` という名前で Claude Code / Codex / Kiro CLI へ配布されるランタイム別プラグインです。共通ソースは `plugins/ndf-shared/` に集約し、利用者が install する配布物は `plugins/ndf-claude/` / `plugins/ndf-codex/` / `plugins/ndf-kiro/` に分かれています。
 
-- **公開Skills**: Claude Code向け core 27個、Kiro向け core 26個、Codex向け core 25個に分離。
-- **元Skills（31個）**:
+- **公開Skills**: Claude Code向け core 26個、Kiro向け core 25個、Codex向け core 24個に分離。
+- **元Skills（30個）**:
   - PR/レビューワークフロー (7): pr, pr-tests, fix, pr-review, cherry-pick-pr, deploy, merged
-  - 開発方法論 (5): development-workflow, requirements-design, tdd-cycle, safe-refactoring, quality-gates
-  - 原則・ガイドライン (10): ndf-policies, implementation-plan, plan-to-spec, investigation-rules, problem-solving, logging-guidelines, markdown-writing, issue-plan-strategy, ml-model-structure, analyzable-coding
+  - 開発方法論 (5): development-workflow, requirements-design, tdd-cycle, refactoring, quality-gates
+  - 原則・ガイドライン (9): ndf-policies, implementation-plan, plan-to-spec, investigation-rules, problem-solving, logging-guidelines, markdown-writing, issue-plan-strategy, ml-model-structure
   - データ分析・品質・環境 (4): qa-security-scan, docker-container-access, google-auth, official-skills-autoloader
   - 外部サービス連携 (1): google-drive
   - AIクロスレビュー (2): cross-review, external-ai
@@ -102,26 +102,36 @@ kiro-cli chat --agent ndf
 
 | プラグイン名 | バージョン | 説明 | 詳細 |
 |------------|----------|------|------|
-| **ndf** | 7.1.0 | Claude Code / Codex / Kiro CLI 向けに runtime 別配布物を提供する NDF プラグイン。8個の専門エージェント（Claude版）、公開Skills（Claude Code向け core 27個、Kiro向け core 26個、Codex向け core 25個）、Claude SessionStart/Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:external-ai` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [Claude](./plugins/ndf-claude/README.md) / [Codex](./plugins/ndf-codex/README.md) / [Kiro](./plugins/ndf-kiro/README.md) |
+| **ndf** | 8.0.0 | Claude Code / Codex / Kiro CLI 向けに runtime 別配布物を提供する NDF プラグイン。8個の専門エージェント（Claude版）、公開Skills（Claude Code向け core 26個、Kiro向け core 25個、Codex向け core 24個）、Claude SessionStart/Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:external-ai` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [Claude](./plugins/ndf-claude/README.md) / [Codex](./plugins/ndf-codex/README.md) / [Kiro](./plugins/ndf-kiro/README.md) |
 | **playwright-kit** | 1.0.0 | Playwright による E2E テストの計画・実装・証跡管理を提供するプラグイン。ページ役割からのテスト計画、動画 / trace 付きスクリプト実装、レポート生成と Drive 保管、playwright_kit ランタイム（init、a11y / CWV スキャン）の 4 Skill。NDF v7.0.0 で分離。 | [Claude](./plugins/playwright-kit-claude/README.md) |
 
-### NDF v7.1.0 の主な変更
+### NDF v8.0.0 の主な変更（非互換）
 
-**分析可能なコードのための Skill を 1 個追加しました。** 既存のコマンド名・引数・挙動は
-変わりません。
+**構造改善の Skill を `/ndf:refactoring` へ改名しました。** 引数と手順は変わりません。
 
-| 追加した Skill | 役割 |
+| 旧コマンド | 移行先 |
 |---|---|
-| `/ndf:analyzable-coding` | 分岐・反復・定数を検査可能なデータとして表現し、判断の理由を記録可能にする判断基準 |
+| `/ndf:safe-refactoring` | `/ndf:refactoring` |
 
-判断基準は言語に依存しません。「`if` を使うな」「ループを使うな」という禁止規則ではなく、
-**変化する知識をデータへ、安定した機構と不変条件をコードへ**という切り分けを MUST /
-SHOULD / MAY で示します。単純なガード節、静的に網羅性を検査できる分岐、逐次依存のループ、
-閉じた状態集合の列挙型は、いずれも MAY として「そのままでよい」と明示しています。
+`safe-` を外したのは、`/refactoring` で一意に決まり、入力が短くなるためです。対応表は
+`ndf-policies` にあり、v9.0.0 で削除します。
 
-Python / TypeScript / PHP での具体的な手段は
-[references/language-notes.md](./plugins/ndf-shared/skills/analyzable-coding/references/language-notes.md)
-に分離しているため、記載のない言語でも判断基準はそのまま使えます。
+**あわせて、分岐・反復・定数の表現を決める観点を統合しました。** リファクタリングの起点となる
+兆候（コードスメル）に 3 件を追加し、判断材料を参照資料として持たせています。
+
+| 追加した観点 | 置き換え先 |
+|---|---|
+| 業務ルールの埋め込み（料率・区分・しきい値が制御構文に埋まっている） | 対応表への置き換え |
+| 一件ずつの反復（往復回数や実行時間が件数に比例する） | 一括処理への置き換え |
+| 検証のない外部化（設定・マスタにスキーマ・版・検証がない） | スキーマと版を与え、読み込み境界で検証する |
+
+判断材料は
+[references/data-representation.md](./plugins/ndf-shared/skills/refactoring/references/data-representation.md)
+にあります。「分岐が多いから表にする」ではなく**変化するから表にする**、という切り分けを置き、
+ガード節・静的に網羅性を検査できる分岐・逐次依存のループ・閉じた状態集合の列挙型は「そのままで
+よい」ものとして明示しています。Python / JavaScript / TypeScript / PHP での具体的な手段は
+[references/language-notes.md](./plugins/ndf-shared/skills/refactoring/references/language-notes.md)
+に分離しているため、記載のない言語でも判断材料はそのまま使えます。
 
 ### NDF v7.0.0 の主な変更（非互換）
 
@@ -177,7 +187,7 @@ Skill の `name` と `description` は起動時の一覧としてコンテキス
 | `/ndf:development-workflow` | 変更を 4 モード（`light` / `standard` / `architecture` / `legacy-refactor`）へ分類し、必要な工程だけへ振り分ける |
 | `/ndf:requirements-design` | 曖昧な要求を、観測可能で検証できる受け入れ条件へ変換する |
 | `/ndf:tdd-cycle` | 「失敗するテスト → 通す最小実装 → 整理」のサイクルを定義する |
-| `/ndf:safe-refactoring` | コードスメル起点の構造改善と、テストが乏しい既存コード向けの現状固定テスト |
+| `/ndf:refactoring` | コードスメル起点の構造改善と、テストが乏しい既存コード向けの現状固定テスト（v6.1.0 当時の名称は `/ndf:safe-refactoring`） |
 | `/ndf:quality-gates` | 完了宣言の前に、実行コマンド・終了コード・実行時刻・対象範囲を証跡として要求する |
 
 全変更にフル工程を課さないことを設計の中心に置いています。文言修正や設定変更は
