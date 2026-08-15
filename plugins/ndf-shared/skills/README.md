@@ -286,6 +286,26 @@ Codex の 5,440 文字を基準に考える。
 Claude Code 側は `skillListingBudgetFraction` 設定または `SLASH_COMMAND_TOOL_CHAR_BUDGET`
 環境変数で予算を引き上げられるが、**配布先の環境に依存する設定に頼らない**。
 
+### 一覧に載るものはランタイムで違う
+
+| ランタイム | `name` | `description` | `when_to_use` | ファイルパス |
+| --- | :-: | :-: | :-: | :-: |
+| Claude Code | ○ | ○ | ○（`description` と合算して 1,536 文字で切り詰め） | **×** |
+| Codex | ○ | ○ | × | **○** |
+| Kiro | ○ | ○ | × | 規定なし（多い側で見積もる） |
+
+パスを載せるのは Codex だけである（*"In Codex, the initial list also includes each skill's
+file path."*）。Claude Code の公式記述は *"a listing of skill names and descriptions"* で
+パスに触れていない。**パスは 1 Skill あたり 30 文字前後あり、30 個なら 900 文字に達する**ので、
+どちらで数えるかで結論が変わる。
+
+### 予算は plugin family をまたいだ合計で判定する
+
+利用者の環境には複数のプラグインが同時に入るため、family 単位で見ると超過を見逃す。
+ただし片方しか入れない利用者もいるので、`--report` は family 別の内訳も出す。
+Skill ごとの実測値は [`issues/skill-frontmatter-by-runtime.csv`](../../../issues/skill-frontmatter-by-runtime.csv)
+にある。
+
 運用目標の 300 文字は仕様上限より厳しい。全 Skill 分の `description` が常時注入されるため、
 仕様上限は 1 個で使い切ってよい量ではない。
 

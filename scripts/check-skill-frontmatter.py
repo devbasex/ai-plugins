@@ -74,6 +74,12 @@ CODEX_LISTING_LEVEL = "warn"
 #   比率の規定が無い以上、憶測で基準を置かない。計測だけ行い判定はしない。
 KIRO_LISTING_MAX = None
 
+# 一覧に何が載るかはランタイムごとに違う。**パスを含むのは Codex だけ**である。
+#   Claude Code: "loads a listing of skill names and descriptions into context"
+#   Codex:       "In Codex, the initial list also includes each skill's file path."
+# Kiro は一覧の構成も公式に記述が無いため、多い側（パスを含む）で見積もる。
+LISTING_INCLUDES_PATH = {"claude": False, "codex": True, "kiro": True}
+
 # 全 Skill の frontmatter 合計。**plugin family をまたいで合計する**（利用者の環境では
 # 複数のプラグインが同時に入るため、family 内だけ見ても実際の注入量にならない）。
 # ランタイムが課す制約ではなく、Skill を無制限に増やさないための独自の目安であるため
@@ -442,7 +448,10 @@ def measure_aggregate(skills: list[dict], skills_dir: pathlib.Path) -> dict:
             else:
                 # Codex / Kiro は when_to_use を一覧へ載せない。
                 d = desc
-            listings[runtime] += len(name) + len(d) + len(rel)
+            item = len(name) + len(d)
+            if LISTING_INCLUDES_PATH.get(runtime, True):
+                item += len(rel)
+            listings[runtime] += item
 
     return {"listings": listings, "frontmatter_total": fm_total}
 
@@ -603,9 +612,19 @@ def main() -> int:
                   f"{len(unquote(fm.get('description', ''))):>5} "
                   f"{len(unquote(fm.get('when_to_use', ''))):>5}  {','.join(flags)}")
         print(f"\nSkill 数: {len(skills)}")
+        # 予算は plugin family をまたいだ合計で判定するが、利用者が片方しか入れない
+        # 場合もあるため family 別の内訳も出す。
+        limits = {"claude": CLAUDE_LISTING_MAX, "codex": CODEX_LISTING_MAX,
+                  "kiro": KIRO_LISTING_MAX}
+        names = [d.parent.name.replace("-shared", "") for d, _ in per_family]
+        print(f"\n{'runtime':8} {'合計':>7} {'上限':>7}  " +
+              "  ".join(f"{n:>14}" for n in names))
         for runtime, total in sorted(metrics["listings"].items()):
-            print(f"{runtime} の初期一覧の合計: {total} 文字")
-        print(f"frontmatter 合計: {metrics['frontmatter_total']} 文字 (上限 {FRONTMATTER_TOTAL_MAX})")
+            limit = limits.get(runtime)
+            cells = "  ".join(f"{m['listings'].get(runtime, 0):>14}" for _, m in per_family)
+            print(f"{runtime:8} {total:>7} {(limit or '—'):>7}  {cells}")
+        print(f"\nfrontmatter 合計: {metrics['frontmatter_total']} 文字 "
+              f"(目安 {FRONTMATTER_TOTAL_MAX})")
         return 0
 
     errors = [f for f in findings if f.level == "error"]
