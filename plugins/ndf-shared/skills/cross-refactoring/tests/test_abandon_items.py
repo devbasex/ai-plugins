@@ -694,3 +694,33 @@ def test_merge_fix_is_idempotent_after_a_revert(
 
     assert read_state(state_path)["rounds"][0]["fix_rounds"] == 1, "二重に数えている"
     assert [c for c in calls if c[:2] == ["git", "revert"]] == []
+
+
+def test_merge_fix_saves_before_pushing(refactor, tmp_path, env_tmp_dir, monkeypatch):
+    """push が失敗しても、取り消しと起点の更新が食い違わないこと。
+
+    先に push すると、取り消しコミットはローカルに残るのに起点の更新が保存されず、
+    叩き直しで二重に取り消してしまう。
+    """
+    state_path = _prepare_fix(
+        refactor, tmp_path, env_tmp_dir, monkeypatch, ["PRRT_a"],
+        facts=[_fix_commit(test_status="fail")],
+    )
+    monkeypatch.setattr(refactor, "resolved_threads_on_github",
+                        lambda repo, pr: {"PRRT_a"})
+    monkeypatch.setattr(
+        refactor.subprocess, "run",
+        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "", ""),
+    )
+    saved_at_push: list[bool] = []
+
+    def fake_sh(cmd, **kw):
+        if cmd[:2] == ["git", "push"]:
+            entry = read_state(state_path)["rounds"][0]
+            saved_at_push.append(entry.get("fix_base_sha") != "FIX_BASE")
+        return ""
+
+    monkeypatch.setattr(refactor, "_sh", fake_sh)
+    refactor.cmd_merge_fix(type("A", (), {"id": 130, "round": 1})())
+
+    assert saved_at_push == [True], "push の前に起点の更新が保存されていない"

@@ -190,12 +190,14 @@ def test_repeated_invalid_reviews_degrade_to_changes(refactor, tmp_path, env_tmp
     """
     state_path = _state(tmp_path)
     env_tmp_dir(state_path)
-    write_result(state_path, "gemini-review-r1",
-                 review("REQUEST_CHANGES", [finding("R9-999")]))
-    write_result(state_path, "kiro-review-r1", review())
     args = type("A", (), {"id": 130, "round": 1})()
 
-    for expected in (3, 2):
+    # 差し戻すたびに再レビューが走るので、結果ファイルは毎回書き直される
+    for attempt, expected in enumerate((3, 2)):
+        write_result(state_path, "gemini-review-r1",
+                     review("REQUEST_CHANGES",
+                            [finding("R9-999", summary=f"再レビュー {attempt}")]))
+        write_result(state_path, "kiro-review-r1", review())
         with pytest.raises(SystemExit) as e:
             refactor.cmd_judge_review(args)
         assert e.value.code == expected
@@ -289,14 +291,56 @@ def test_judge_command_advances_the_fix_attempt(
     """
     state_path = _state(tmp_path)
     env_tmp_dir(state_path)
+    args = type("A", (), {"id": 130, "round": 1})()
+
+    for attempt in (1, 2):
+        write_result(state_path, "gemini-review-r1",
+                     review("REQUEST_CHANGES", [finding(summary=f"{attempt} 回目")]))
+        write_result(state_path, "kiro-review-r1", review())
+        with pytest.raises(SystemExit):
+            refactor.cmd_judge_review(args)
+        assert read_state(state_path)["rounds"][0]["fix_attempts"] == attempt
+
+
+def test_judge_command_is_idempotent_for_the_same_reviews(
+    refactor, tmp_path, env_tmp_dir, no_git
+):
+    """同じレビュー結果で叩き直しても、記録も起点も試行番号も動かさないこと。
+
+    動かすと、同じ修正結果を別の試行として再処理したり、修正コミットを
+    検証範囲の外へ追い出したりできてしまう。
+    """
+    state_path = _state(tmp_path)
+    env_tmp_dir(state_path)
     write_result(state_path, "gemini-review-r1", review("REQUEST_CHANGES", [finding()]))
     write_result(state_path, "kiro-review-r1", review())
     args = type("A", (), {"id": 130, "round": 1})()
 
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit) as first:
         refactor.cmd_judge_review(args)
-    assert read_state(state_path)["rounds"][0]["fix_attempts"] == 1
+    before = read_state(state_path)["rounds"][0]
 
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit) as second:
         refactor.cmd_judge_review(args)
-    assert read_state(state_path)["rounds"][0]["fix_attempts"] == 2
+    after = read_state(state_path)["rounds"][0]
+
+    assert first.value.code == second.value.code == 2
+    assert len(after["reviews"]) == 1, "レビュー記録が増えている"
+    assert after["fix_attempts"] == before["fix_attempts"] == 1
+    assert after["fix_base_sha"] == before["fix_base_sha"]
+
+
+def test_judge_command_replays_the_approval(refactor, tmp_path, env_tmp_dir):
+    """承認で終わったラウンドを叩き直しても、記録を増やさず正常終了すること。"""
+    state_path = _state(tmp_path)
+    env_tmp_dir(state_path)
+    for r in REVIEWERS:
+        write_result(state_path, f"{r}-review-r1", review())
+    args = type("A", (), {"id": 130, "round": 1})()
+
+    refactor.cmd_judge_review(args)
+    refactor.cmd_judge_review(args)
+
+    state = read_state(state_path)
+    assert len(state["rounds"][0]["reviews"]) == 1
+    assert all(i["status"] == "done" for i in state["items"])

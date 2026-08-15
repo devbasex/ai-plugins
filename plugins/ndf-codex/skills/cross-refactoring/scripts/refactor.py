@@ -1120,16 +1120,30 @@ def cmd_judge_review(args: argparse.Namespace) -> None:
     reviewers = entry["reviewers"]
 
     reviews: dict[str, dict[str, Any]] = {}
+    digest = hashlib.sha256()
     for name in reviewers:
         result = _result_path(state, name, stem_for(name, "review", state["id"], args.round))
+        digest.update(name.encode("utf-8"))
         if not result.exists():
             info(f"⚠ {name} のレビュー結果がありません: {result}")
             continue
+        digest.update(result.read_bytes())
         try:
             reviews[name] = json.loads(result.read_text(encoding="utf-8"))
         except json.JSONDecodeError as e:
             info(f"⚠ {name} のレビュー結果が JSON として読めません: {e}")
         _record_observed_model(entry, "reviewer", name, state, "review", args.round)
+
+    # **同じレビュー結果で叩き直しても、記録も起点も試行番号も動かさない。**
+    # 動かすと、同じ修正結果を別の試行として再処理したり、修正コミットを検証範囲の
+    # 外へ追い出したりできてしまう。前回の終了コードだけを再現する。
+    review_key = digest.hexdigest()
+    for seen in entry.get("review_merged", []):
+        if seen.get("key") == review_key:
+            info(f"↻ このレビュー結果は判定済みです（前回の終了コード {seen['exit']}）")
+            if seen["exit"]:
+                sys.exit(seen["exit"])
+            return
 
     verdict, problems = judge(reviews, reviewers, entry["items"])
 
@@ -1162,6 +1176,11 @@ def cmd_judge_review(args: argparse.Namespace) -> None:
     entry.setdefault("durations", {})["review"] = sum(per_reviewer.values())
     statefile.save(path, state)
 
+    def _remember(exit_code: int) -> None:
+        entry.setdefault("review_merged", []).append(
+            {"key": review_key, "exit": exit_code}
+        )
+
     if verdict == "invalid":
         for p in problems:
             info(f"❌ {p}")
@@ -1180,9 +1199,11 @@ def cmd_judge_review(args: argparse.Namespace) -> None:
                 ),
                 "resolved": False,
             })
+            _remember(2)
             statefile.save(path, state)
             info("差し戻しの上限に達したため、変更要求として扱います")
             sys.exit(2)
+        _remember(3)
         statefile.save(path, state)
         info("レビュー結果を差し戻します。指摘には必ず改善項目 ID を付けてください")
         sys.exit(3)
@@ -1190,6 +1211,7 @@ def cmd_judge_review(args: argparse.Namespace) -> None:
         for item_id in entry["apply"]["applied"]:
             _find_item(state, item_id)["status"] = "done"
         state["phase"] = "propose"
+        _remember(0)
         statefile.save(path, state)
         info("✅ レビュー担当 2 者とも承認しました")
         return
@@ -1198,6 +1220,7 @@ def cmd_judge_review(args: argparse.Namespace) -> None:
     entry["fix_base_sha"] = _git_out(state["worktrees"]["work"], ["rev-parse", "HEAD"])
     # 試行番号。`merge-fix` が「叩き直し」と「次のラウンド」を区別するのに使う。
     entry["fix_attempts"] = entry.get("fix_attempts", 0) + 1
+    _remember(2)
     statefile.save(path, state)
     open_findings = sum(1 for f in record["findings"] if not f["resolved"])
     info(f"変更要求があります（未解決の指摘 {open_findings} 件）")
@@ -1367,6 +1390,7 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     # 適用フェーズの未割当コミットと同じ扱いにする。
     problems: list[str] = []
     accepted: list[tuple[str, str]] = []      # (item_id, sha)
+    needs_push = False
     for commit in facts:
         item_id = (commit.get("trailers") or {}).get("Item-Id")
         problem = verify_fix_commit(commit)
@@ -1394,7 +1418,9 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         )
         # 取り消し後の状態を新しい起点にする（叩き直しでの二重取り消しを防ぐ）。
         entry["fix_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
-        _push_head(state)
+        # **push は保存のあと。** ここで push して失敗すると、取り消しコミットは
+        # ローカルに残るのに起点の更新が保存されず、叩き直しで二重に取り消してしまう。
+        needs_push = True
         info("⚠ 修正を取り消したため、解決の申告は採用しません")
         resolved = set()
     else:
@@ -1411,11 +1437,14 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
 
     merged_keys.append(merge_key)
     entry["fix_rounds"] += 1
+
     entry.setdefault("durations", {})["fix"] = (
         entry.get("durations", {}).get("fix", 0)
         + _safe_int(payload.get("elapsed_seconds"))
     )
     statefile.save(path, state)
+    if needs_push:
+        _push_head(state)
     info(f"修正を取り込みました（解決 {len(resolved)} スレッド / 修正ラウンド {entry['fix_rounds']}）")
 
 
