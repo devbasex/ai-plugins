@@ -101,12 +101,19 @@ provision_skill() {
     echo "preexisting"
     return
   fi
+  # **SKILL.md が無いだけで既存の中身を消さない。** 利用者が作りかけている Skill や
+  # 補助ファイルを失う。空でないディレクトリがあれば触らず、衝突として報告する。
+  if [ -e "$dest" ] && [ -n "$(ls -A "$dest" 2>/dev/null)" ]; then
+    echo "conflict"
+    return
+  fi
   if [ ! -f "$src/SKILL.md" ]; then
     echo "missing"
     return
   fi
   mkdir -p "$(dirname "$dest")"
   # シンボリックリンクにはしない。作業ディレクトリを消せば残らない状態にする。
+  # ここで消えるのは空ディレクトリか、存在しないパスだけである。
   rm -rf "$dest"
   cp -R "$src" "$dest"
   ignore_dir "$dest"
@@ -150,12 +157,14 @@ done
 # 配置結果を状態ファイルへ記録する。黙って劣化した状態で走らせない。
 RECORD='{}'
 MISSING=()
+CONFLICT=()
 
 for rt in "${RUNTIMES[@]}"; do
   entry='{}'
   for name in "${REQUIRED_SKILLS[@]}"; do
     status=$(provision_skill "$ROOT/$rt" "$rt" "$name")
     [ "$status" = "missing" ] && MISSING+=("$rt/$name")
+    [ "$status" = "conflict" ] && CONFLICT+=("$rt/$name")
     entry=$(jq --arg n "$name" --arg s "$status" '. + {($n): $s}' <<<"$entry")
   done
   RECORD=$(jq --arg rt "$rt" --argjson e "$entry" '. + {($rt): $e}' <<<"$RECORD")
@@ -167,6 +176,7 @@ for rt in claude codex kiro; do
   for name in "${REQUIRED_SKILLS[@]}"; do
     status=$(provision_skill "$WORK" "$rt" "$name")
     [ "$status" = "missing" ] && MISSING+=("work/$rt/$name")
+    [ "$status" = "conflict" ] && CONFLICT+=("work/$rt/$name")
     entry=$(jq --arg n "$name" --arg s "$status" '. + {($n): $s}' <<<"$entry")
   done
   RECORD=$(jq --arg rt "work.$rt" --argjson e "$entry" '. + {($rt): $e}' <<<"$RECORD")
@@ -186,6 +196,13 @@ jq --argjson r "$RECORD" '
         then "provisioned" else $s.value end)))
 ' "$STATE" > "$TMP_STATE"
 mv "$TMP_STATE" "$STATE"
+
+if [ ${#CONFLICT[@]} -gt 0 ]; then
+  echo "❌ 配置先に SKILL.md の無い既存の中身があります: ${CONFLICT[*]}" >&2
+  echo "   利用者の作りかけを消さないため、触らずに中断します。" >&2
+  echo "   内容を確認のうえ、退避または削除してから再実行してください" >&2
+  exit 1
+fi
 
 if [ ${#MISSING[@]} -gt 0 ]; then
   echo "❌ ホスト側にも見つからない Skill があります: ${MISSING[*]}" >&2

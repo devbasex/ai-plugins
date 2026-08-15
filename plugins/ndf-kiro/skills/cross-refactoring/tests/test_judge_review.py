@@ -153,7 +153,9 @@ def test_judge_command_marks_items_done_on_approval(refactor, tmp_path, env_tmp_
     assert state["phase"] == "propose"
 
 
-def test_judge_command_exits_2_on_changes(refactor, tmp_path, env_tmp_dir):
+def test_judge_command_exits_2_on_changes(
+    refactor, tmp_path, env_tmp_dir, no_git
+):
     state_path = _state(tmp_path)
     env_tmp_dir(state_path)
     write_result(state_path, "gemini-review-r1", review("REQUEST_CHANGES", [finding()]))
@@ -248,3 +250,31 @@ def test_review_result_that_is_not_an_object_is_invalid(refactor):
     )
     assert verdict == "invalid"
     assert any("JSON オブジェクトではありません" in p for p in problems)
+
+
+def test_judge_command_survives_broken_review_json(refactor, tmp_path, env_tmp_dir):
+    """`judge()` が invalid と判定する入力でも、記録生成で落ちないこと。"""
+    state_path = _state(tmp_path)
+    env_tmp_dir(state_path)
+    write_result(state_path, "gemini-review-r1", "オブジェクトですらない")
+    write_result(state_path, "kiro-review-r1",
+                 {"verdict": "APPROVE", "findings": ["壊れた指摘"]})
+
+    with pytest.raises(SystemExit) as e:
+        refactor.cmd_judge_review(type("A", (), {"id": 130, "round": 1})())
+    assert e.value.code == 3
+    record = read_state(state_path)["rounds"][0]["reviews"][0]
+    assert record["findings"] == []
+
+
+def test_judge_command_records_the_fix_base(refactor, tmp_path, env_tmp_dir, monkeypatch):
+    """修正コミットの実在を確かめるため、変更要求の時点の HEAD を残すこと。"""
+    state_path = _state(tmp_path)
+    env_tmp_dir(state_path)
+    monkeypatch.setattr(refactor, "_git_out", lambda work, args: "FIX_BASE")
+    write_result(state_path, "gemini-review-r1", review("REQUEST_CHANGES", [finding()]))
+    write_result(state_path, "kiro-review-r1", review())
+
+    with pytest.raises(SystemExit):
+        refactor.cmd_judge_review(type("A", (), {"id": 130, "round": 1})())
+    assert read_state(state_path)["rounds"][0]["fix_base_sha"] == "FIX_BASE"

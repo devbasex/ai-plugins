@@ -218,3 +218,35 @@ def test_sync_moves_readonly_worktrees_to_a_sha(repo):
     for rt in RUNTIMES:
         head = _git("rev-parse", "HEAD", cwd=repo["root"] / rt).stdout.strip()
         assert head == sha
+
+
+def test_non_empty_destination_is_not_deleted(repo):
+    """SKILL.md が無いだけで既存の中身を消さない。
+
+    利用者が作りかけている Skill や補助ファイルを失う。作業ディレクトリを作った
+    あとに置かれた場合を再現するため、1 度目の実行後に作りかけを置く。
+    """
+    _run(repo)
+    dest = repo["root"] / "codex" / ".agents" / "skills" / "refactoring"
+    shutil.rmtree(dest)
+    (dest / "references").mkdir(parents=True)
+    (dest / "references" / "draft.md").write_text("作りかけ", encoding="utf-8")
+
+    r = _run(repo, expect_ok=False)
+
+    assert r.returncode != 0, "衝突しているのに続行している"
+    assert "codex/refactoring" in r.stderr
+    assert (dest / "references" / "draft.md").read_text() == "作りかけ"
+    assert not (dest / "SKILL.md").exists(), "上書きされている"
+    skills = json.loads(repo["state"].read_text())["skills"]
+    assert skills["codex"]["refactoring"] == "conflict"
+
+
+def test_empty_destination_is_provisioned(repo):
+    """空ディレクトリは配置してよい。消えて困るものが無い。"""
+    _run(repo)
+    dest = repo["root"] / "codex" / ".agents" / "skills" / "refactoring"
+    shutil.rmtree(dest)
+    dest.mkdir()
+    _run(repo)
+    assert (dest / "SKILL.md").is_file()

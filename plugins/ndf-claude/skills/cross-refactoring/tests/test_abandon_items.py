@@ -202,9 +202,15 @@ def _prepare_fix(refactor, tmp_path, env_tmp_dir, monkeypatch, claimed,
     state_path = _state(tmp_path, [_finding("R1-001", thread=thread)])
     state = read_state(state_path)
     state["rounds"][0]["fix_rounds"] = 0
+    state["rounds"][0]["fix_base_sha"] = "FIX_BASE"
     state_path.write_text(__import__("json").dumps(state), encoding="utf-8")
     env_tmp_dir(state_path)
     resolved_facts = [_fix_commit()] if facts is None else facts
+    monkeypatch.setattr(refactor, "_git_out", lambda work, args: "HEAD_NOW")
+    monkeypatch.setattr(
+        refactor, "commits_in_range",
+        lambda work, base, head: [f["sha"] for f in resolved_facts],
+    )
     # 検証の材料は git から取る。テストでは git 由来の事実だけを差し替える。
     monkeypatch.setattr(
         refactor, "collect_commit_facts",
@@ -331,20 +337,67 @@ def test_resolved_threads_follows_pagination(refactor, monkeypatch):
     assert any("cursor=C1" in "".join(c) for c in calls)
 
 
+@pytest.mark.parametrize("broken_ids", ["文字列", 123, True, {"a": 1}])
 def test_broken_fix_result_does_not_crash(
-    refactor, tmp_path, env_tmp_dir, monkeypatch
+    refactor, tmp_path, env_tmp_dir, monkeypatch, broken_ids
 ):
-    """`commits` や `resolved_thread_ids` が壊れていてもクラッシュしない。"""
+    """`commits` や `resolved_thread_ids` が壊れていてもクラッシュしない。
+
+    文字列は 1 文字ずつに分解され、数値や真偽値は反復できずに落ちる。
+    **反復できない値まで含めて**確かめる。
+    """
     state_path = _state(tmp_path, [_finding("R1-001")])
     env_tmp_dir(state_path)
     write_result(state_path, "codex-fix-r1", {
-        "resolved_thread_ids": "文字列",
+        "resolved_thread_ids": broken_ids,
         "commits": {"sha": "辞書ではあるが配列でない"},
     })
     monkeypatch.setattr(refactor, "resolved_threads_on_github", lambda repo, pr: set())
+    monkeypatch.setattr(refactor, "commits_in_range", lambda work, base, head: [])
+    monkeypatch.setattr(refactor, "_git_out", lambda work, args: "HEAD")
     monkeypatch.setattr(
         refactor, "collect_commit_facts",
         lambda work, shas, rng, cmd, branch: [],
     )
     refactor.cmd_merge_fix(type("A", (), {"id": 130, "round": 1})())
-    assert read_state(state_path)["rounds"][0]["fix_rounds"] == 4
+    state = read_state(state_path)
+    assert state["rounds"][0]["fix_rounds"] == 4
+    # 壊れた申告は採用されない
+    assert state["rounds"][0]["reviews"][0]["findings"][0]["resolved"] is False
+
+
+def test_merge_fix_uses_the_recorded_range(refactor, tmp_path, env_tmp_dir, monkeypatch):
+    """修正の範囲も、オーケストレータが記録した起点から取ること。
+
+    空集合を渡すと全ての修正コミットが「範囲外」になって必ず不正扱いになる。
+    """
+    state_path = _prepare_fix(refactor, tmp_path, env_tmp_dir, monkeypatch, ["PRRT_a"])
+    state = read_state(state_path)
+    state["rounds"][0]["fix_base_sha"] = "FIX_BASE"
+    state_path.write_text(__import__("json").dumps(state), encoding="utf-8")
+
+    seen: list = []
+    monkeypatch.setattr(
+        refactor, "commits_in_range",
+        lambda work, base, head: seen.append((base, head)) or ["fix111"],
+    )
+    monkeypatch.setattr(refactor, "_git_out", lambda work, args: "HEAD_NOW")
+    monkeypatch.setattr(refactor, "resolved_threads_on_github",
+                        lambda repo, pr: {"PRRT_a"})
+    refactor.cmd_merge_fix(type("A", (), {"id": 130, "round": 1})())
+
+    assert seen == [("FIX_BASE", "HEAD_NOW")]
+    assert read_state(state_path)["rounds"][0]["reviews"][0]["findings"][0]["resolved"]
+
+
+def test_merge_fix_fails_when_the_range_cannot_be_determined(
+    refactor, tmp_path, env_tmp_dir, monkeypatch
+):
+    state_path = _prepare_fix(refactor, tmp_path, env_tmp_dir, monkeypatch, ["PRRT_a"])
+    monkeypatch.setattr(refactor, "commits_in_range", lambda work, base, head: None)
+    monkeypatch.setattr(refactor, "_git_out", lambda work, args: "HEAD_NOW")
+    monkeypatch.setattr(refactor, "resolved_threads_on_github",
+                        lambda repo, pr: {"PRRT_a"})
+    with pytest.raises(SystemExit) as e:
+        refactor.cmd_merge_fix(type("A", (), {"id": 130, "round": 1})())
+    assert e.value.code == 2

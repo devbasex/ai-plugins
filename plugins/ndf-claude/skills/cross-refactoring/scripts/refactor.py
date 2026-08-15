@@ -886,7 +886,11 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
     round_items = set(entry["items"])
     reported: dict[str, dict[str, Any]] = {}
     unknown_ids: list[str] = []
-    for r in payload.get("items", []):
+    raw_items = payload.get("items")
+    if not isinstance(raw_items, list):
+        info(f"⚠ 適用結果の items が配列ではありません（{type(raw_items).__name__}）")
+        raw_items = []
+    for r in raw_items:
         if not isinstance(r, dict):
             continue
         item_id = r.get("item_id")
@@ -1029,10 +1033,17 @@ def cmd_judge_review(args: argparse.Namespace) -> None:
 
     verdict, problems = judge(reviews, reviewers, entry["items"])
 
+    # 記録も**型検査済みの値だけ**で作る。`judge()` が invalid と判定した入力でも
+    # ここを通るため、無条件に `.get()` を呼ぶと差し戻す前に落ちる。
     record: dict[str, Any] = {"round": len(entry["reviews"]) + 1, "findings": []}
     for name in reviewers:
-        record[name] = (reviews.get(name) or {}).get("verdict")
-        for finding in (reviews.get(name) or {}).get("findings") or []:
+        review = reviews.get(name)
+        review = review if isinstance(review, dict) else {}
+        record[name] = review.get("verdict")
+        findings = review.get("findings")
+        for finding in findings if isinstance(findings, list) else []:
+            if not isinstance(finding, dict):
+                continue
             record["findings"].append({
                 "reviewer": name,
                 "item_id": finding.get("item_id"),
@@ -1045,8 +1056,10 @@ def cmd_judge_review(args: argparse.Namespace) -> None:
     # 2 者分を両方に数えることになり、担当同士の比較が成り立たない。
     per_reviewer = entry.setdefault("reviewer_seconds", {})
     for name in reviewers:
-        per_reviewer[name] = per_reviewer.get(name, 0) + int(
-            (reviews.get(name) or {}).get("elapsed_seconds") or 0
+        review = reviews.get(name)
+        elapsed = review.get("elapsed_seconds") if isinstance(review, dict) else 0
+        per_reviewer[name] = per_reviewer.get(name, 0) + (
+            int(elapsed) if isinstance(elapsed, (int, float)) else 0
         )
     entry.setdefault("durations", {})["review"] = sum(per_reviewer.values())
     statefile.save(path, state)
@@ -1082,6 +1095,10 @@ def cmd_judge_review(args: argparse.Namespace) -> None:
         statefile.save(path, state)
         info("✅ レビュー担当 2 者とも承認しました")
         return
+    # 修正フェーズの範囲の起点。ここを記録しておかないと、修正コミットが
+    # 実在するかを確かめられない。
+    entry["fix_base_sha"] = _git_out(state["worktrees"]["work"], ["rev-parse", "HEAD"])
+    statefile.save(path, state)
     open_findings = sum(1 for f in record["findings"] if not f["resolved"])
     info(f"変更要求があります（未解決の指摘 {open_findings} 件）")
     sys.exit(2)
@@ -1154,10 +1171,16 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     # 自己申告をそのまま信じない。解決 API に失敗・未実行でも「解決済み」と
     # 書けてしまい、未解決の指摘が取り消し対象から外れる。GitHub 側の
     # `isResolved` と突き合わせ、**両方が解決と言っているものだけ**を反映する。
+    raw_claimed = payload.get("resolved_thread_ids")
+    # 文字列は 1 文字ずつに分解され、数値や真偽値は反復できずに落ちる。
+    # **配列であることを先に確かめる。**
     claimed = {
-        t for t in (payload.get("resolved_thread_ids") or [])
+        t for t in (raw_claimed if isinstance(raw_claimed, list) else [])
         if isinstance(t, str) and t.strip()
     }
+    if raw_claimed is not None and not isinstance(raw_claimed, list):
+        info(f"⚠ resolved_thread_ids が配列ではありません（{type(raw_claimed).__name__}）。"
+             "解決の申告は無かったものとして扱います")
     actual = resolved_threads_on_github(state["repo"], state["current_pr"])
     if actual is None:
         info("⚠ レビュースレッドの解決状態を取得できませんでした。"
@@ -1172,10 +1195,21 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     # 結果ファイルの申告で済ませると、手順を満たさない変更が収束済みになれてしまう。
     work = state["worktrees"]["work"]
     baseline = state.get("baseline_test") or {}
+    # 修正の範囲も**オーケストレータが記録した起点**から取る。起点は
+    # `judge-review` が変更要求を返したときの HEAD である。
+    head_sha = _git_out(work, ["rev-parse", "HEAD"]) or ""
+    ordered_range = commits_in_range(work, entry.get("fix_base_sha"), head_sha)
+    if ordered_range is None:
+        die(
+            "修正の範囲を確定できませんでした"
+            f"（起点 {entry.get('fix_base_sha')} / HEAD {head_sha}）。"
+            "検証できない修正は採りません",
+            code=2,
+        )
     facts = collect_commit_facts(
         work,
         _reported_shas(payload),
-        set(),                       # 修正は範囲を限定せず、実在だけを見る
+        set(ordered_range),
         baseline.get("command") or "true",
         state["head_branch"],
     )
