@@ -61,6 +61,10 @@ done
 
 状態ファイルに全ての状態が入るため、どこで落ちても同じコマンド列を叩き直せば再開できる。
 
+`monitor.py` と `launch-cli.sh` の実体は `cross-review` 配下の共有層にあり、本 Skill の
+`scripts/` からはそこを読む。範囲と理由は
+[09-cross-review-alignment.md](09-cross-review-alignment.md) を参照。
+
 ## 2. 振る舞い不変の担保
 
 適用のプロンプトは `refactoring` Skill の手順をそのまま踏ませる。状態管理スクリプト側では

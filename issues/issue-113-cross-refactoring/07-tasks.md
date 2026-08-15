@@ -22,10 +22,15 @@ plugins/ndf-shared/skills/cross-refactoring/
 
 ## 2. 変更する既存ファイル
 
-- `plugins/ndf-shared/skills/cross-review/scripts/monitor.py` — 汎用化（作業単位 9）
-- `plugins/ndf-shared/skills/cross-review/scripts/_gemini-env.sh` — 新規に切り出す。
+- `plugins/ndf-shared/skills/cross-review/scripts/lib/` — 新規。両 Skill が共有する層。
+  監視・一時ディレクトリ解決・CLI 起動・作業ディレクトリ準備・担当の決定・モデルの記録・
+  計測の集計を置く。範囲と置き場所の理由は
+  [09-cross-review-alignment.md](09-cross-review-alignment.md)
+- `plugins/ndf-shared/skills/cross-review/scripts/monitor.py` — 汎用化して `lib/` へ移し、
+  既存パスからは移設先を読む（作業単位 9）
+- `plugins/ndf-shared/skills/cross-review/scripts/lib/_gemini-env.sh` — 新規に切り出す。
   `launch-gemini.sh` の信頼済みディレクトリ設定と設定ファイル無害化を分離し、
-  本 Skill の `launch-cli.sh` から読み込む
+  共通の起動スクリプトから読み込む
 - `plugins/ndf-shared/skills/external-ai/references/cli-kiro.md` — 新規。Kiro CLI の
   非対話実行手順を `external-ai` の補助ファイル体系に載せる
 - `plugins/ndf-shared/skills/external-ai/references/cli-claude.md` — 新規。`claude -p` の
@@ -198,6 +203,9 @@ plugins/ndf-shared/skills/cross-refactoring/
 
   **既存テストを 1 つも変更せずに通す**ことを完了条件とする。
 
+  この汎用化は、両 Skill が使う共通層を切り出す作業（[09-cross-review-alignment.md](09-cross-review-alignment.md)
+  の作業単位 13）と同時に行う。監視スクリプトは共通層の最初の住人になる。
+
 ### 10. SKILL.md と docs
 
 - **対象:** `SKILL.md`, `docs/01-state-and-propose.md`, `docs/02-apply-and-review.md`
@@ -251,3 +259,15 @@ plugins/ndf-shared/skills/cross-refactoring/
   `--check` / `scripts/validate-runtime-plugins.sh` / `python3 scripts/check-markdown-links.py` /
   `claude plugin validate` を通す。Skill 数の記述（30 → 31、Claude Code 26 → 27 /
   Codex 24 → 25 / Kiro 25 → 26）を更新し、版数を `8.1.0` に上げる。
+
+## 5. 続く作業単位
+
+13 以降は `cross-review` への展開である。内容と進め方は
+[09-cross-review-alignment.md](09-cross-review-alignment.md) を参照。
+
+| 番号 | 内容 | 着手時期 |
+| --- | --- | --- |
+| 13 | 共通層の切り出し | 作業単位 9 と同時 |
+| 14 | `cross-review` の担当制 | 本 Skill が一周してから |
+| 15 | `cross-review` の修正を CLI 駆動にする | 14 の後 |
+| 16 | `cross-review` の計測 | 15 の後 |

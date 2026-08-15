@@ -14,6 +14,7 @@ Skill `/ndf:cross-refactoring` の実施計画である。読む順序は次の�
 | [06-schema.md](06-schema.md) | 実行の骨組み、状態ファイル、提出形式、レビュー観点 |
 | [07-tasks.md](07-tasks.md) | 変更するファイルと 12 個の作業単位 |
 | [08-acceptance-and-risks.md](08-acceptance-and-risks.md) | 受け入れ条件、リスク、対象外 |
+| [09-cross-review-alignment.md](09-cross-review-alignment.md) | `cross-review` への展開と、共有するコードの置き方 |
 
 ## 関連リンク
 
