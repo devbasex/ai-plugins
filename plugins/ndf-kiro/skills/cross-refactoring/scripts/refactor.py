@@ -668,10 +668,18 @@ def _sync_work_worktree(work: pathlib.Path, head_branch: str) -> None:
     **古い HEAD に対して提案・適用**してしまう。早送りできない（履歴が分かれた）
     ときは、どちらが正しいかを機械が決められないので中断する。
     """
-    subprocess.run(
+    fetched = subprocess.run(
         ["git", "fetch", "origin", head_branch],
         cwd=str(work), capture_output=True, text=True,
     )
+    if fetched.returncode != 0:
+        # 取得できないまま古い `origin/<head>` へ早送りすると、同期したつもりで
+        # **古い HEAD のまま**進んでしまう。通信・認証の失敗はここで止める。
+        die(
+            f"origin/{head_branch} を取得できませんでした: "
+            f"{fetched.stderr.strip()[:300]}。"
+            "古い HEAD のまま進めないため中断します"
+        )
     r = subprocess.run(
         ["git", "merge", "--ff-only", f"origin/{head_branch}"],
         cwd=str(work), capture_output=True, text=True,
@@ -1013,11 +1021,11 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
             it["status"] = "abandoned"
             it["failure_reason"] = reason
         # 範囲全体を取り消す。どのコミットが安全かを決められない以上、
-        # 起点まで戻すのが最も確実である。`_revert_item_commits` は渡した順の
-        # 逆から戻すので、**古い順**で渡して新しいコミットから取り消させる。
+        # 起点まで戻すのが最も確実である。順序は `_revert_item_commits` が
+        # git の履歴から決め直す。
         whole_round = {
             "item_id": f"R{entry['round']}-range",
-            "commits": list(reversed(ordered_range)),
+            "commits": list(ordered_range),
         }
         _revert_item_commits(state, whole_round, args.dry_run)
         if not args.dry_run:
@@ -1271,11 +1279,13 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     # **叩き直しても二重に取り込まない。** 修正は同じラウンドで何度も回るため、
     # 「このラウンドで処理済みか」では判定できない。**入力が前回と同じか**で見る。
     # 次の修正ラウンドでは結果ファイルが上書きされ、HEAD も進むので鍵が変わる。
+    # 鍵は**結果ファイルの内容だけ**から作る。HEAD を混ぜると、検証に失敗して
+    # 取り消した後は HEAD が変わるため鍵が一致せず、同じ申告を再処理してしまう。
+    # 次の修正ラウンドでは `launch-cli.sh` が結果ファイルを消して書き直すので、
+    # 内容だけでも取り違えない。
     work = state["worktrees"]["work"]
     head_now = _git_out(work, ["rev-parse", "HEAD"]) or ""
-    merge_key = hashlib.sha256(
-        result.read_bytes() + head_now.encode("utf-8")
-    ).hexdigest()
+    merge_key = hashlib.sha256(result.read_bytes()).hexdigest()
     merged_keys = entry.setdefault("fix_merged_keys", [])
     if merge_key in merged_keys:
         info(
@@ -1365,7 +1375,7 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         _revert_item_commits(
             state,
             {"item_id": f"R{entry['round']}-fix{entry['fix_rounds'] + 1}",
-             "commits": list(reversed(ordered_range))},
+             "commits": list(ordered_range)},
             dry_run=False,
         )
         # 取り消し後の状態を新しい起点にする（叩き直しでの二重取り消しを防ぐ）。
@@ -1765,16 +1775,18 @@ def _revert_item_commits(
         return 0
 
     work = state["worktrees"]["work"]
-    shas = [s for s in (item.get("commits") or []) if isinstance(s, str) and s]
+    shas = _order_newest_first(
+        work, [s for s in (item.get("commits") or []) if isinstance(s, str) and s]
+    )
     if dry_run:
-        for sha in reversed(shas):
+        for sha in shas:
             info(f"（dry-run）git revert --no-edit {sha}")
         return len(shas)
 
     # 途中で失敗したら**着手前の HEAD まで戻す**。1 項目が複数のコミットを持つとき、
     # 先行して成功した取り消しだけが履歴に残ると、再実行で不整合になって進めなくなる。
     before = _git_out(work, ["rev-parse", "HEAD"])
-    for sha in reversed(shas):
+    for sha in shas:
         r = subprocess.run(
             ["git", "revert", "--no-edit", sha],
             cwd=work, capture_output=True, text=True,
@@ -1792,6 +1804,25 @@ def _revert_item_commits(
             )
     item["reverted"] = True
     return len(shas)
+
+
+def _order_newest_first(work: str, shas: list[str]) -> list[str]:
+    """コミットを **git の履歴順（新しい順）** に並べ替える。
+
+    申告された順序を信じない。古いコミットから取り消すと、後続の取り消しが
+    競合して進めなくなる。履歴に無いものは順序を決められないので末尾へ置く。
+    """
+    if len(shas) < 2:
+        return list(shas)
+    history = _git_out(work, ["rev-list", "HEAD"])
+    if history is None:
+        return list(shas)
+    rank = {sha: i for i, sha in enumerate(history.split())}   # 0 が最も新しい
+    resolved = {
+        s: (_git_out(work, ["rev-parse", "--verify", f"{s}^{{commit}}"]) or s)
+        for s in shas
+    }
+    return sorted(shas, key=lambda s: rank.get(resolved[s], len(rank)))
 
 
 def _push_head(state: dict[str, Any]) -> None:

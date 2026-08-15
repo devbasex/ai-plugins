@@ -127,3 +127,37 @@ def test_fix_commits_pass_verification_through_real_git(refactor, work):
         str(work), [sha], set(ordered), "true", "main"
     )
     assert refactor.verify_fix_commit(facts[0]) is None
+
+
+def test_revert_order_comes_from_history_not_from_the_claim(refactor, work):
+    """申告の順序ではなく、実際の履歴で新しい順に並べること。"""
+    first = _commit(work, "one", {"src/a.py": "a = 1\n"})
+    second = _commit(work, "two", {"src/a.py": "a = 2\n"})
+    third = _commit(work, "three", {"src/a.py": "a = 3\n"})
+
+    # わざと順不同で渡す
+    ordered = refactor._order_newest_first(str(work), [first, third, second])
+    assert ordered == [third, second, first]
+
+
+def test_revert_order_tolerates_unknown_shas(refactor, work):
+    known = _commit(work, "one", {"src/a.py": "a = 1\n"})
+    ordered = refactor._order_newest_first(str(work), ["deadbeef", known])
+    assert ordered[0] == known, "履歴にあるものを先に戻す"
+
+
+def test_reverting_in_history_order_succeeds(refactor, work):
+    """履歴順に戻せば、同じファイルを触る連続コミットでも競合しない。"""
+    base = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
+    first = _commit(work, "one", {"src/a.py": "a = 1\n"})
+    second = _commit(work, "two", {"src/a.py": "a = 2\n"})
+
+    state = {"worktrees": {"work": str(work)}}
+    item = {"item_id": "R1-001", "commits": [first, second]}   # 古い順の申告
+    assert refactor._revert_item_commits(state, item) == 2
+    assert item["reverted"] is True
+
+    # 取り消し後は着手前の状態へ戻る（このファイルは base に存在しない）
+    assert not (work / "src" / "a.py").exists()
+    diff = _git("diff", "--name-only", base, "HEAD", cwd=work).stdout.strip()
+    assert diff == "", f"着手前との差分が残っている: {diff}"

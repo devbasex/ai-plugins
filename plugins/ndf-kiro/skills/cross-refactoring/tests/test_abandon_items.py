@@ -96,13 +96,34 @@ def test_deferred_entry_records_the_reason(refactor, tmp_path, env_tmp_dir, no_g
     assert "修正ラウンドの上限" in entry["defer_reason"]
 
 
-def test_revert_runs_newest_commit_first(refactor, tmp_path, env_tmp_dir, monkeypatch):
-    """新しいコミットから順に戻す。逆順にすると後続の取り消しが競合する。"""
+def _history(refactor, monkeypatch, newest_first):
+    """`git rev-list HEAD` の結果（新しい順）と SHA 解決を差し替える。"""
+    def fake_git_out(work, args):
+        if args[:1] == ["rev-list"]:
+            return "\n".join(newest_first)
+        if args[:2] == ["rev-parse", "--verify"]:
+            return args[-1].replace("^{commit}", "")
+        return "HEAD_BEFORE"
+    monkeypatch.setattr(refactor, "_git_out", fake_git_out)
+
+
+@pytest.mark.parametrize("claimed", [
+    ["old111", "new222"],      # 古い順の申告
+    ["new222", "old111"],      # 新しい順の申告
+])
+def test_revert_runs_newest_commit_first(
+    refactor, tmp_path, env_tmp_dir, monkeypatch, claimed
+):
+    """新しいコミットから順に戻す。逆順にすると後続の取り消しが競合する。
+
+    **申告の順序は信用しない。** git の履歴から並べ直す。
+    """
     state_path = _state(tmp_path, [_finding("R1-001")], item_ids=("R1-001",))
     state = read_state(state_path)
-    state["items"][0]["commits"] = ["old111", "new222"]
+    state["items"][0]["commits"] = claimed
     state_path.write_text(__import__("json").dumps(state), encoding="utf-8")
     env_tmp_dir(state_path)
+    _history(refactor, monkeypatch, ["new222", "old111"])
 
     calls: list[list[str]] = []
 
@@ -157,7 +178,7 @@ def test_revert_failure_rolls_back_to_the_starting_head(
         failing = cmd[:2] == ["git", "revert"] and cmd[-1] == "old111"
         return subprocess.CompletedProcess(cmd, 1 if failing else 0, "", "conflict")
 
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args: "HEAD_BEFORE")
+    _history(refactor, monkeypatch, ["new222", "old111"])
     monkeypatch.setattr(refactor.subprocess, "run", fake_run)
     with pytest.raises(SystemExit):
         refactor.cmd_abandon_items(_args(dry_run=False))
@@ -603,3 +624,34 @@ def test_merge_fix_counts_a_new_result_as_a_new_round(
     refactor.cmd_merge_fix(args)
 
     assert read_state(state_path)["rounds"][0]["fix_rounds"] == 2
+
+
+def test_merge_fix_is_idempotent_after_a_revert(
+    refactor, tmp_path, env_tmp_dir, monkeypatch
+):
+    """検証に失敗して取り消したあと、同じ結果ファイルで叩き直しても再処理しないこと。
+
+    取り消しで HEAD が変わるため、鍵に HEAD を混ぜると一致しなくなる。
+    """
+    state_path = _prepare_fix(
+        refactor, tmp_path, env_tmp_dir, monkeypatch, ["PRRT_a"],
+        facts=[_fix_commit(test_status="fail")],
+    )
+    monkeypatch.setattr(refactor, "resolved_threads_on_github",
+                        lambda repo, pr: {"PRRT_a"})
+    calls = _no_git(refactor, monkeypatch)
+    args = type("A", (), {"id": 130, "round": 1})()
+    refactor.cmd_merge_fix(args)
+    assert read_state(state_path)["rounds"][0]["fix_rounds"] == 1
+
+    # 取り消しで HEAD が進んだ状況を模す
+    calls.clear()
+    monkeypatch.setattr(
+        refactor, "_git_out",
+        lambda work, args: ("HEAD_AFTER_REVERT" if args[:1] == ["rev-parse"]
+                            else args[-1].replace("^{commit}", "")),
+    )
+    refactor.cmd_merge_fix(args)
+
+    assert read_state(state_path)["rounds"][0]["fix_rounds"] == 1, "二重に数えている"
+    assert [c for c in calls if c[:2] == ["git", "revert"]] == []

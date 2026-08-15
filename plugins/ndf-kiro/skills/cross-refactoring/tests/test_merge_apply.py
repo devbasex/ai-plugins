@@ -414,6 +414,12 @@ def test_failed_item_commits_are_reverted(
     )
     pushes: list[list[str]] = []
     monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: pushes.append(cmd) or "")
+    # git の履歴は bad222 が最も新しい
+    monkeypatch.setattr(
+        refactor, "_git_out",
+        lambda work, args: ("bad222\nbad111\nok111" if args[:1] == ["rev-list"]
+                            else args[-1].replace("^{commit}", "")),
+    )
 
     refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
 
