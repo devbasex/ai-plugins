@@ -305,9 +305,10 @@ SCRIPTS="$PLUGIN_ROOT/skills/cross-refactoring/scripts"
 
 # init が host を確定し、RUNTIMES（提案・レビュー = ホストを除く 3 つ）と RUNTIMES_CSV、
 # IMPL_POOL（実装 = gemini を除く 3 つ）を eval で返す。
+# --model は runtime=model を繰り返し渡せる（未指定のランタイムは CLI の既定モデル）。
 eval "$("$SCRIPTS/refactor.py" init "$PR" --scope "$SCOPE" ${HOST:+--host "$HOST"} \
           --max-outer-rounds "$MAX_OUTER" --max-fix-rounds "$MAX_FIX" \
-          --max-items-per-round "$MAX_ITEMS")"
+          --max-items-per-round "$MAX_ITEMS" ${MODEL_ARGS:+$MODEL_ARGS})"
 export CROSS_REFACTORING_TMP_DIR="$TMP_DIR"
 "$SCRIPTS/prepare-worktrees.sh" "$PR"
 
@@ -362,6 +363,7 @@ state.json に全状態が入るため、どこで落ちても同じコマンド
 | 着手前にテストが green | `baseline_test` を state に記録。red ならラウンドの適用に着手せず全 item を `blocked` にする |
 | テストが無い経路は先に現状固定テスト | `test_gap=true` の item は、固定テスト追加コミットが先行しているかを `git log` で確認 |
 | 1 手 1 コミット | 適用結果 JSON の `commits[]` が 1 件以上、かつ各コミットでテスト実行結果が green |
+| 実行主体の明記 | 各コミットに `Item-Id` / `Round` / `Impl-Runtime` / `Impl-Model` の trailer が揃っている（§10-2） |
 | 差分予算 | `estimated_diff_lines` の 2 倍を超えたら失敗（scope creep 検知） |
 | 機能変更の混入なし | レビュー観点で判定（機械判定は不可能なため reviewer に委ねる） |
 
@@ -389,10 +391,129 @@ item ごとに 1 手 1 コミットへ分け、`items[].commits` にコミット
 - Step 0 で base ブランチから `refactor/<slug>` を切り、**Draft PR** を作成する（`/ndf:pr` を利用）。
   最初のコミットは空コミットまたは最初の現状固定テストとする。
 - コミットメッセージは `Refactor: <手法> — <対象>` に統一し、1 手 1 コミットを保つ。
+  **本文末尾に §10 の trailer（実行主体のランタイムとモデル）を必ず付ける。**
 - 完了時に Draft を解除する。
 - PR ローテーションは **v1 では対象外**とする。`--max-items-per-round`（既定 5）と
   `--max-outer-rounds` で総量を抑える方針を先に採り、実運用で PR が肥大した場合に
   cross-review の `rotate-pr.sh` 再利用を検討する。
+
+### 10. モデル指定と計測（ランタイム／モデルの比較）
+
+本 Skill は「複数のランタイムに同じ土俵で同じ作業をさせる」構造なので、**どのランタイムの
+どのモデルが実装者・レビュアーとして優れているかを測る器**にもなる。
+「codex の gpt-5.5 と claude の opus-5 では実装者としてどちらが優秀か」を比べられるよう、
+**モデルを指定できること**と、**成果物に実行主体が必ず残ること**を要件に加える。
+
+#### 10-1. 起動時のモデル選択
+
+```
+/ndf:cross-refactoring <PR> --scope <path>... --model codex=gpt-5.5 --model claude=opus-5
+```
+
+- `--model <runtime>=<model>` を**繰り返し指定**できる。省略したランタイムは CLI の既定モデル。
+- 指定値は `init` 時に state.json の `models` へ記録し、**全ラウンドで固定**する
+  （途中で変えると比較が成立しないため、再開時も不変）。
+- 各 CLI へは次のフラグで渡す。**4 CLI すべてで実在を確認済み**（2026-08-15 実測）。
+  モデル名の妥当性は CLI 側の検証に委ねる（`init` では綴りを検査しない）。
+
+  | runtime | フラグ | 候補の確認 |
+  |---|---|---|
+  | claude | `--model <model>` | `claude --help`。エイリアス（`opus` / `sonnet` / `fable`）とフルネームの両方を受ける |
+  | codex | `-m, --model <MODEL>` | `codex --help` |
+  | gemini | `-m, --model <MODEL>` | `gemini --help` |
+  | kiro | `--model <MODEL>` | `kiro-cli chat --list-models`（`-f json` 可） |
+
+- **既定モデルのまま走らせた場合も「既定を使った」と記録する。** 何が動いたか分からない
+  実行は比較に使えないため、`report` は既定使用のラウンドを明示する。
+  実際に使われたモデル名を出力から取れるランタイム（claude は `--output-format json` の
+  `modelUsage`）は**実測値も併記**し、指定値と食い違ったら警告する。
+
+#### 10-1-b. ランタイムとモデルは直交する（比較設計上の要点）
+
+kiro-cli 2.18.0 の `--list-models` は、**claude 系と gpt 系の両方**を提供する。
+
+```console
+$ kiro-cli chat --list-models
+Available models (* = default):
+* auto                 1.00x credits   Models chosen by task for optimal usage and consistent quality
+  claude-opus-5        2.20x credits   ...
+  claude-sonnet-5      1.30x credits   ...
+  gpt-5.6-sol          2.40x credits   ...
+  gpt-5.6-terra        1.00x credits   ...
+  ...
+```
+
+つまり **「ランタイム（ハーネス）」と「モデル」は独立に選べる**。
+「codex の gpt-5.5 と claude の opus-5 のどちらが実装者として優秀か」を比べるとき、
+差がハーネス由来かモデル由来か切り分けられないと結論が濁る。`report --metrics` は
+**ランタイム × モデルの組**で集計し、次の 2 通りの読み方ができるようにする。
+
+| 比べたいもの | 揃えるもの | 例 |
+|---|---|---|
+| **モデル差** | ランタイムを固定 | `kiro:claude-opus-5` と `kiro:gpt-5.6-sol` |
+| **ハーネス差** | モデルを固定 | `kiro:claude-opus-5` と `claude:opus-5` |
+
+> ⚠ **kiro の既定モデルは `auto`（タスクに応じて自動選択）である。** 既定のまま走らせると
+> ラウンドごとに違うモデルが動きうるため、**計測目的の実行では `--model kiro=<name>` を
+> 明示する**。`report` は `auto` のラウンドを「モデル未確定」として集計から分離する。
+
+#### 10-2. commit への明記（機械集計できる形式で）
+
+適用・修正フェーズのコミットメッセージ本文の末尾に、**git trailer 形式**で実行主体を残す。
+
+```
+Refactor: extract_method — scripts/state.py#cmd_merge_fix
+
+（変更の説明）
+
+Item-Id: R1-003
+Round: 1
+Impl-Runtime: codex
+Impl-Model: gpt-5.5
+```
+
+- trailer 形式にするのは、`git log --format='%(trailers:key=Impl-Model,valueonly)'` で
+  **集計できる**ため。自由文で「codex が実装」と書かせると集計に使えない。
+- `merge-apply` / `merge-fix` は**この 4 つの trailer が揃っているかを検証**し、
+  欠けているコミットがあれば当該 item を失敗として扱う（プロンプトに書くだけでは守られない）。
+- `Impl-Model` には**実際に使ったモデル名**を入れさせる。既定モデルで走った場合も、
+  CLI が報告するモデル名を書かせる（不明なら `default` とし、`report` で区別する）。
+
+#### 10-3. PR への明記
+
+- **レビューコメント**は先頭に `Reviewer: <runtime> / <model>` を可視の形で書かせ、
+  併せて `<!-- cross-refactoring reviewer=<runtime> model=<model> round=<N> -->` を埋める
+  （可視部分は人間向け、HTML コメントは集計向け）。
+- **PR 本文**は `report` が毎ラウンド更新し、ラウンド表を載せる。
+
+  | R | impl | model | reviewers | models | 採用 | 適用 | 放棄 | fix | 初回 APPROVE |
+  |---|---|---|---|---|---|---|---|---|---|
+  | 1 | codex | gpt-5.5 | gemini / kiro | 既定 / 既定 | 5 | 4 | 1 | 1 | いいえ |
+
+#### 10-4. 集計指標
+
+`refactor.py report --metrics` が state.json から次を出す。**新しい計測機構は作らず、
+既に state に入っている値の集計だけで済ませる**。
+
+| 役割 | 指標 |
+|---|---|
+| 実装者 | 担当ラウンド数 / 適用成功 item 数 / 放棄 item 数 / **初回レビューで APPROVE を得た率** / 平均 fix ラウンド数 / 差分予算超過率 / テスト red 発生率 / 所要時間 |
+| レビュアー | レビュー回数 / 指摘件数 / **指摘が修正に至った率** / もう 1 人のレビュアーとの判定一致率 / 所要時間 |
+
+#### 10-5. 比較として読むときの限界（docs に明記する）
+
+**この数値は厳密なベンチマークではない。** 次を報告に添えて誤読を防ぐ。
+
+- **item の難易度が揃わない。** 輪番はラウンド単位なので、たまたま重い item 群を引いた
+  ランタイムは不利になる。ラウンド数が少ないほど差は偶然に支配される。
+- **提案と実装の相性がある。** 自分が提案した item を自分が実装するラウンドでは有利になりうる。
+- **レビュアーの厳しさは指標に直結する。** 指摘件数が多いことは「優秀」とも
+  「過剰」とも読めるため、**指摘が修正に至った率**と併せて見る。
+- **ハーネスとモデルの交絡**（§10-1-b）。ランタイムを跨いだ比較は、モデルを揃えない限り
+  「どちらのモデルが優秀か」の答えにならない。
+- **kiro の既定 `auto` は比較に使えない。** ラウンドごとに違うモデルが動きうる。
+- 公平に比べたいなら、**同じ対象・同じ scope で `--model` だけ変えて複数回走らせる**のが
+  最も素直な方法である（1 回の実行内での比較は参考値にとどめる）。
 
 ## state.json スキーマ
 
@@ -413,6 +534,7 @@ item ごとに 1 手 1 コミットへ分け、`items[].commits` にコミット
   "host_detection": "env",
   "runtimes": ["codex", "gemini", "kiro"],
   "impl_capable": ["claude", "codex", "kiro"],
+  "models": {"claude": "opus-5", "codex": "gpt-5.5", "gemini": null, "kiro": null},
   "max_outer_rounds": 3,
   "max_fix_rounds": 3,
   "max_items_per_round": 5,
@@ -424,12 +546,16 @@ item ごとに 1 手 1 コミットへ分け、`items[].commits` にコミット
     {
       "round": 1,
       "impl": "codex",
+      "impl_model": {"requested": "gpt-5.5", "observed": "gpt-5.5"},
       "reviewers": ["gemini", "kiro"],
+      "reviewer_models": {"gemini": {"requested": null, "observed": null},
+                          "kiro": {"requested": null, "observed": null}},
       "proposed": {"codex": 9, "gemini": 7, "kiro": 8},
       "merged": 14, "adopted": 5, "deferred": 9,
       "items": ["R1-001", "R1-002"],
       "apply": {"applied": ["R1-001", "R1-002"], "failed": [], "base_sha": "aaa1111", "head_sha": "ccc3333"},
       "fix_rounds": 1,
+      "durations": {"propose": 182, "apply": 461, "review": 205, "fix": 133},
       "reviews": [
         {"round": 1, "gemini": "REQUEST_CHANGES", "kiro": "APPROVE",
          "findings": [{"item_id": "R1-002", "thread_id": "PRRT_x", "resolved": false}]},
@@ -464,6 +590,11 @@ item ごとに 1 手 1 コミットへ分け、`items[].commits` にコミット
 **実装の母集合**（全ランタイム − gemini）で、**両者は別物**である。上の例はホストが
 `claude` のケースで、`claude` は `runtimes` に居ないが `impl_capable` には居る。
 `impl_capable` はホスト非依存で常に `["claude", "codex", "kiro"]` になる。
+
+`models` は `init` で確定する**指定値**（未指定は `null` = CLI の既定モデル）で、全ラウンド
+不変。`rounds[].impl_model` / `reviewer_models` は `requested`（指定値）と `observed`
+（出力から取れた実測値。取れなければ `null`）を分けて持ち、食い違いを `report` が警告できる
+ようにする。`durations` は計測用の秒数で、`monitor.py` が持つ開始・終了時刻から求める。
 
 `items[]` は **impl / reviewers / fix_rounds / reviews を持たない**。これらはラウンド単位の
 属性になったため `rounds[]` に置く。`items[].commits` は放棄時の revert 範囲を決めるために
@@ -586,7 +717,9 @@ Skill がランタイム中立になったためである。最終ゲートで�
   （輪番はラウンド単位のため、item ごとに割り当てを引く `next-item` は不要）。`init` は PR 番号・
   対象スコープ・各上限値を受け取り、リポジトリ情報と `baseline_test` を記録して state.json を
   生成する。**`runtimes`（全 − ホスト）と `impl_capable`（全 − gemini）を別々に確定**し、
-  `impl == host` のラウンドでレビュアーが 3 候補になる場合の絞り込み（§2 の式）もここに置く。tmp ディレクトリ解決は cross-review の `_tmp_dir()` と同じ優先順
+  `impl == host` のラウンドでレビュアーが 3 候補になる場合の絞り込み（§2 の式）もここに置く。
+  **`--model <runtime>=<model>` を繰り返し受け取り `models` に記録する**（§10-1）。
+  未指定は `null`（CLI 既定）とし、以後のラウンドで変更しない。tmp ディレクトリ解決は cross-review の `_tmp_dir()` と同じ優先順
   （env `CROSS_REFACTORING_TMP_DIR` > `<work worktree>/.cross_refactoring/`）にする。
   cross-review の `state.py` を読み、同じ「eval で KEY=VALUE を取り込む」呼び出し規約に揃える。
 
@@ -650,6 +783,9 @@ Skill がランタイム中立になったためである。最終ゲートで�
   ただし `launch-cli.sh` は **ホストと同一ランタイムを起動しうる**（impl 担当時）ので、
   「ホストなら起動しない」といった分岐を入れてはならない。
   対象スコープ（`--scope PATH...`）を渡し、提案が無制限に広がらないようにする。
+- **モデル指定:** `launch-cli.sh` は state.json の `models[<runtime>]` が非 null なら
+  各 CLI のモデルフラグ（§10-1 の表）を付ける。null なら付けずに CLI の既定へ委ねる。
+  分岐はランタイム名ごとにフラグ名が違うだけで、値の検証は CLI に任せる。
 
 ### Task 5: 適用フェーズ
 
@@ -663,6 +799,10 @@ Skill がランタイム中立になったためである。最終ゲートで�
 - **要点:** プロンプトに **item ごとに 1 手 1 コミットへ分けること**を必須要件として書く。
   放棄時の revert 範囲が item 単位で決まらなくなるため、複数 item を 1 コミットに
   まとめた場合は失敗として扱う。
+- **trailer の検証:** 各コミットに `Item-Id` / `Round` / `Impl-Runtime` / `Impl-Model` の
+  trailer が揃っていることを `merge-apply` が `git log --format=%(trailers)` で検証し、
+  欠けていれば当該 item を失敗として扱う（§10-2）。`Impl-Model` は CLI が報告する
+  実際のモデル名を書かせ、取得できないランタイムでは `default` を許容する。
 
 ### Task 6: レビューフェーズ
 
@@ -678,6 +818,10 @@ Skill がランタイム中立になったためである。最終ゲートで�
   行うために必要であり、`rounds[].items` に無い ID や欠落は**差し戻して再レビューさせる**。
   ラウンド全体に対する指摘（item に紐づけられないもの）は `item_id: null` を明示させ、
   放棄時はラウンド全件 revert の対象として扱う。
+- **実行主体の明記:** レビューコメントの先頭に `Reviewer: <runtime> / <model>` を可視で書かせ、
+  `<!-- cross-refactoring reviewer=<runtime> model=<model> round=<N> -->` を併記させる
+  （§10-3）。レビュー結果 JSON にも `runtime` / `model` を持たせ、
+  `judge-review` が `rounds[].reviewer_models.observed` に記録する。
 
 ### Task 7: 内側ループの収束と放棄
 
@@ -701,6 +845,11 @@ Skill がランタイム中立になったためである。最終ゲートで�
   PR 全体を codex + gemini の APPROVE 収束にかけ（内側レビューはラウンド単位のため、
   ラウンドをまたいだ整合はここで見る）、Draft を解除して、ラウンド表・item 表・放棄 item・
   残 deferred 提案を報告する。
+- **計測:** `report` は毎ラウンド PR 本文のラウンド表（impl / model / reviewers / models /
+  採用・適用・放棄件数 / fix 回数 / 初回 APPROVE）を更新する。`report --metrics` は
+  §10-4 の指標をランタイム × モデルで集計し、**既定モデルで走ったラウンドを区別**して出す。
+  `requested` と `observed` が食い違うラウンドは警告として併記する。
+  集計結果には §10-5 の「比較として読むときの限界」を必ず添える。
 
 ### Task 9: `monitor.py` の汎用化
 
@@ -735,6 +884,10 @@ Skill がランタイム中立になったためである。最終ゲートで�
   `plugins/ndf-shared/skills/README.md` の規約に従い、`description` の 1 文目にトリガ語を置く。
   `python3 scripts/check-skill-frontmatter.py` を通す（`FRONTMATTER_TOTAL_MAX` の予算に
   収まらない場合は、予算値の見直しか既存 `description` の圧縮を同 PR で行う）。
+- **引数表に `--model <runtime>=<model>`（繰り返し可）を載せる。** `argument-hint` は
+  予算が厳しいので `<pr> [--scope <path>...] [--model <rt>=<name>]` 程度に短く保つ。
+- **`docs/02-apply-and-review.md` に §10 を反映する。** commit trailer の形式、
+  レビューコメントの署名形式、`report --metrics` の読み方と §10-5 の限界を書く。
 
 ### Task 11: テスト
 
@@ -758,6 +911,12 @@ Skill がランタイム中立になったためである。最終ゲートで�
     `item_id: null` の未解決指摘があればラウンド全件を対象にする
   - `should-abandon` が `max_fix_rounds` 到達時のみ真を返す
   - 外側収束の 3 条件
+  - **`--model <rt>=<name>` の解析**（繰り返し指定 / 未指定は `null` / 未知ランタイム名は
+    エラー）と、`models` が全ラウンドで不変であること
+  - **commit trailer の検証**: 4 つの trailer が揃うコミットは通り、1 つでも欠ければ
+    当該 item が失敗になる
+  - **`report --metrics` の集計**: ランタイム × モデルの指標が state.json から正しく出る。
+    既定モデル（`null`）のラウンドが区別され、`requested` != `observed` が警告になる
   - `start-round` の再開冪等性（同一ラウンドの再実行で impl / reviewers が変わらない）
 
 ### Task 12: 配布物同期とドキュメント更新
@@ -793,6 +952,14 @@ Skill がランタイム中立になったためである。最終ゲートで�
       **同ラウンドで合意済みの item は revert されずに残る**
 - [ ] 適用に失敗した item がラウンドを止めず、その item だけ `abandoned` になる
 - [ ] 提案が尽きる（または上限到達）で外側ループが終了し、`/ndf:cross-review` で最終収束する
+- [ ] `--model <runtime>=<model>` で各 CLI のモデルを指定でき、指定値が state.json に
+      記録されて全ラウンド不変である
+- [ ] **全コミットに `Item-Id` / `Round` / `Impl-Runtime` / `Impl-Model` の trailer が付き**、
+      `git log --format='%(trailers:key=Impl-Model,valueonly)'` で集計できる
+- [ ] 全レビューコメントにレビュアーのランタイムとモデルが明記される
+- [ ] PR 本文のラウンド表に impl / reviewer のランタイムとモデルが載る
+- [ ] `report --metrics` がランタイム × モデルで §10-4 の指標を出し、既定モデルの
+      ラウンドを区別し、比較の限界（§10-5）を添える
 - [ ] ホストセッションの context に diff / レビュー本文 / エラーログが載らない
 - [ ] `monitor.py` の既存テストが無変更で通る
 - [ ] `claude plugin validate` / `build-runtime-plugins.sh --check` /
@@ -813,7 +980,10 @@ Skill がランタイム中立になったためである。最終ゲートで�
 | claude 参加時の実行コスト | 単純な 3 ターンで $0.26。**レビューをラウンド単位にしたことで 1 ラウンドの起動回数を 33 → 9 に抑えた**（採用 5 件・fix 1 回の場合、§1）。それでも 1 ラウンド最低 6 回は走るため、上限値（`--max-items-per-round` / `--max-outer-rounds`）の既定は保守的に置く |
 | **ラウンド単位レビューで指摘と item の対応が崩れる** | レビュー結果の finding に `item_id` を必須にし、未知 ID / 欠落は差し戻して再レビュー。紐づかない指摘は `item_id: null` を明示させ、放棄時はラウンド全件 revert の対象にする |
 | **1 ラウンドの実装者が 1 者に固定され、モデルの癖が偏る** | 輪番の単位をラウンドにしているため、ラウンドを重ねれば実装者は分散する。`--max-outer-rounds` を 1 にしない |
-| frontmatter 予算の逼迫 | 残余 588 文字に対し cross-review 相当で 407 文字。`argument-hint` を短く保ち、超える場合は Task 12 で上限見直しか既存 `description` 圧縮を行う |
+| frontmatter 予算の逼迫 | 残余 588 文字に対し cross-review 相当で 407 文字。**`--model` 追加で `argument-hint` がさらに伸びる**ため `<pr> [--scope <path>...] [--model <rt>=<name>]` 程度に切り詰める。超える場合は Task 12 で上限見直しか既存 `description` 圧縮を行う |
+| **モデル比較の数値が誤読される** | item の難易度・提案との相性・レビュアーの厳しさで簡単に揺れる。`report --metrics` の出力に §10-5 の限界を必ず添え、厳密に比べるなら「同じ scope で `--model` だけ変えて複数回走らせる」ことを案内する |
+| **AI が commit trailer を書き忘れて計測できない** | プロンプトの指示だけに頼らず、`merge-apply` / `merge-fix` が trailer の有無を検証して失敗にする |
+| **指定したモデルと実際に動いたモデルが違う** | 取得できるランタイムでは `observed` を記録して `requested` と突き合わせ、食い違いを `report` の警告にする。取得できないランタイムは `default` として集計から区別する |
 | ~~Kiro の agent 定義が worktree で検出されない~~ | **該当しなくなった**。専用 agent JSON を生成せず、承認は `--trust-tools` フラグで与えるため、agent 定義の検出に依存しない |
 | `agent set-default` でユーザのマシン全体設定を奪う | 呼ばない。受け入れ条件に含める。`agent create` も `$EDITOR` を開いて非対話実行が止まるため呼ばない |
 | 提案が発散して PR が肥大する | `--scope` 必須化、`--max-items-per-round`（既定 5）、`--max-outer-rounds`（既定 3） |

@@ -378,3 +378,46 @@ frontmatter 合計: 10612 文字 (上限 11200)
 **方針**: `argument-hint` を短く保ち、`allowed-tools` は必要最小限に絞る。
 それでも超える場合は Task 12 で `FRONTMATTER_TOTAL_MAX` の引き上げか、既存 `description` の
 圧縮を同 PR で行う（計画 Task 10 に記載済みの分岐）。
+
+## 7. モデル指定フラグ（4 CLI 実測）
+
+ランタイム／モデルの比較を可能にするため（計画 §10）、各 CLI のモデル指定手段を確認した。
+**4 CLI すべてにモデル指定オプションがある。**
+
+| runtime | フラグ | 備考 |
+| --- | --- | --- |
+| claude | `--model <model>` | エイリアス（`opus` / `sonnet` / `fable`）とフルネームの両方を受ける |
+| codex | `-m, --model <MODEL>` | `-c model="o3"` の設定経由でも指定できる |
+| gemini | `-m, --model <MODEL>` | |
+| kiro | `--model <MODEL>` | `--list-models` で候補を列挙。`-f json` / `-f json-pretty` も可 |
+
+### 7-1. kiro はランタイムとモデルが直交する（設計上の要点）
+
+kiro-cli 2.18.0 の `--list-models` は **claude 系と gpt 系の両方**を提供する。
+
+```console
+$ kiro-cli chat --list-models
+Available models (* = default):
+* auto                 1.00x credits      Models chosen by task for optimal usage and consistent quality
+  claude-opus-5        2.20x credits      Experimental preview of Claude Opus 5 model with 1M context window
+  claude-sonnet-5      1.30x credits      Claude Sonnet 5 model with 1M context window
+  claude-opus-4.8      2.20x credits      Claude Opus 4.8 model with 1M context window
+  gpt-5.6-sol          2.40x credits      Experimental preview of OpenAI GPT 5.6 Sol with 272k context window
+  gpt-5.6-terra        1.00x credits      Experimental preview of OpenAI GPT 5.6 Terra with 272k context window
+  gpt-5.6-luna         0.10x credits      Experimental preview of OpenAI GPT 5.6 Luna with 272k context window
+  claude-opus-4.7 / claude-opus-4.6 / claude-sonnet-4.6 / claude-opus-4.5 / claude-sonnet-4.5
+```
+
+**帰結**: 「ランタイム（ハーネス）」と「モデル」は独立に選べるため、ランタイムを跨いだ
+比較はモデルを揃えないと交絡する。`kiro:claude-opus-5` と `claude:opus-5` を比べれば
+**ハーネス差**、`kiro:claude-opus-5` と `kiro:gpt-5.6-sol` を比べれば**モデル差**が見える。
+
+### 7-2. kiro の既定は `auto` — 計測時は明示指定が必須
+
+既定モデルは `auto` で、「タスクに応じて最適なモデルを選ぶ」と説明されている。
+**ラウンドごとに違うモデルが動きうるため、計測目的の実行では `--model kiro=<name>` を
+明示する**。指定しなかった場合、`report` は当該ラウンドを「モデル未確定」として
+集計から分離する必要がある。
+
+credits 倍率がモデルごとに違う点（`gpt-5.6-luna` 0.10x 〜 `gpt-5.6-sol` 2.40x）も、
+コスト比較の際に効く。
