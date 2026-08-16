@@ -1400,6 +1400,32 @@ def _verified_resolved_threads(
     return claimed & actual
 
 
+def _collect_fix_facts(
+    state: dict[str, Any],
+    entry: dict[str, Any],
+    payload: dict[str, Any],
+    head_now: str,
+) -> tuple[list[str], list[dict[str, Any]], list[str]]:
+    work = state["worktrees"]["work"]
+    ordered_range = commits_in_range(work, entry.get("fix_base_sha"), head_now)
+    if ordered_range is None:
+        die(
+            "修正の範囲を確定できませんでした"
+            f"（起点 {entry.get('fix_base_sha')} / HEAD {head_now}）。"
+            "検証できない修正は採りません",
+            code=2,
+        )
+    reported_shas = _reported_shas(payload)
+    unassigned = _find_unassigned_commits(work, reported_shas, ordered_range)
+    baseline = state.get("baseline_test") or {}
+    facts = collect_commit_facts(
+        work, reported_shas, set(ordered_range),
+        baseline.get("command") or "true", state["head_branch"],
+        _safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT),
+    )
+    return ordered_range, facts, unassigned
+
+
 def cmd_merge_fix(args: argparse.Namespace) -> None:
     """Step 6 — 修正結果を取り込み、修正ラウンドを 1 つ進める。"""
     path, state = _load(args.id)
@@ -1446,27 +1472,8 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
 
     # 修正コミットも適用と同じ基準で、**git と実際のテスト実行から**検証する。
     # 結果ファイルの申告で済ませると、手順を満たさない変更が収束済みになれてしまう。
-    baseline = state.get("baseline_test") or {}
-    # 修正の範囲も**オーケストレータが記録した起点**から取る。起点は
-    # `judge-review` が変更要求を返したときの HEAD である。
-    ordered_range = commits_in_range(work, entry.get("fix_base_sha"), head_now)
-    if ordered_range is None:
-        die(
-            "修正の範囲を確定できませんでした"
-            f"（起点 {entry.get('fix_base_sha')} / HEAD {head_now}）。"
-            "検証できない修正は採りません",
-            code=2,
-        )
-    reported_shas = _reported_shas(payload)
-
-    # 適用と同じく、**範囲のコミットは全て申告されていること**を求める。
-    # 申告から漏れた修正コミットは検証を受けないまま Pull Request に残る。
-    unassigned = _find_unassigned_commits(work, reported_shas, ordered_range)
-
-    facts = collect_commit_facts(
-        work, reported_shas, set(ordered_range),
-        baseline.get("command") or "true", state["head_branch"],
-        _safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT),
+    ordered_range, facts, unassigned = _collect_fix_facts(
+        state, entry, payload, head_now
     )
 
     # **不正なコミットが 1 件でもあれば、修正ラウンドの範囲ごと取り消す。**
