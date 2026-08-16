@@ -82,6 +82,50 @@ def _aggregate_impl_round(
         bucket["first_review_approved"] += 1 if approved_first else 0
 
 
+def _aggregate_reviewer_round(
+    entry: dict[str, Any],
+    reviews: list[dict[str, Any]],
+    reviewer: dict[str, dict[str, Any]],
+    unmeasured: list[str],
+) -> None:
+    round_no = entry.get("round")
+    reviewer_models = entry.get("reviewer_models") or {}
+    for name in entry.get("reviewers", []):
+        spec = reviewer_models.get(name) or {}
+        requested = spec.get("requested")
+        observed = spec.get("observed")
+        warning = _models.mismatch_warning(name, requested, observed)
+        if warning:
+            unmeasured.append(f"round {round_no}: {warning}")
+        if not _models.is_measurable(name, requested):
+            unmeasured.append(
+                f"round {round_no}: {name} が既定モデル（auto）で動いたため、"
+                "レビュー担当の集計から分離する"
+            )
+        bucket = reviewer.setdefault(_key(name, requested), _new_reviewer_bucket())
+        bucket["seconds"] += float((entry.get("reviewer_seconds") or {}).get(name, 0))
+        for review in reviews:
+            if _verdict(review, name) is None:
+                continue
+            bucket["reviews"] += 1
+            findings = [
+                finding for finding in review.get("findings", [])
+                if isinstance(finding, dict) and finding.get("reviewer") == name
+            ]
+            bucket["findings"] += len(findings)
+            bucket["findings_resolved"] += sum(
+                1 for finding in findings if finding.get("resolved")
+            )
+            for other in (r for r in entry.get("reviewers", []) if r != name):
+                other_verdict = _verdict(review, other)
+                if other_verdict is None:
+                    continue
+                bucket["verdict_pairs"] += 1
+                bucket["verdict_agreements"] += (
+                    1 if other_verdict == _verdict(review, name) else 0
+                )
+
+
 def aggregate(state: dict[str, Any]) -> dict[str, Any]:
     """状態ファイルから実装担当・レビュー担当それぞれの指標を出す。
 
@@ -95,49 +139,13 @@ def aggregate(state: dict[str, Any]) -> dict[str, Any]:
     unmeasured: list[str] = []
 
     for entry in state.get("rounds", []):
-        round_no = entry.get("round")
         impl_runtime = entry.get("impl")
         if not impl_runtime:
             continue
         _aggregate_impl_round(entry, items_by_id, impl, unmeasured)
 
         reviews = _round_reviews(entry)
-        reviewer_models = entry.get("reviewer_models") or {}
-        for name in entry.get("reviewers", []):
-            spec = reviewer_models.get(name) or {}
-            r_requested = spec.get("requested")
-            r_observed = spec.get("observed")
-            r_warning = _models.mismatch_warning(name, r_requested, r_observed)
-            if r_warning:
-                unmeasured.append(f"round {round_no}: {r_warning}")
-            if not _models.is_measurable(name, r_requested):
-                unmeasured.append(
-                    f"round {round_no}: {name} が既定モデル（auto）で動いたため、"
-                    "レビュー担当の集計から分離する"
-                )
-            rb = reviewer.setdefault(_key(name, r_requested), _new_reviewer_bucket())
-            # 担当ごとの所要時間があればそれを使う。無ければ 0 のままにする。
-            # ラウンドの合計を配ると 2 者分を両方に数えてしまい、比較が成り立たない。
-            rb["seconds"] += float((entry.get("reviewer_seconds") or {}).get(name, 0))
-            for review in reviews:
-                if _verdict(review, name) is None:
-                    continue
-                rb["reviews"] += 1
-                findings = [
-                    f for f in review.get("findings", [])
-                    if isinstance(f, dict) and f.get("reviewer") == name
-                ]
-                rb["findings"] += len(findings)
-                rb["findings_resolved"] += sum(1 for f in findings if f.get("resolved"))
-                others = [o for o in entry.get("reviewers", []) if o != name]
-                for other in others:
-                    other_verdict = _verdict(review, other)
-                    if other_verdict is None:
-                        continue
-                    rb["verdict_pairs"] += 1
-                    rb["verdict_agreements"] += (
-                        1 if other_verdict == _verdict(review, name) else 0
-                    )
+        _aggregate_reviewer_round(entry, reviews, reviewer, unmeasured)
 
     return {
         "impl": {k: _finish_impl(v) for k, v in sorted(impl.items())},
