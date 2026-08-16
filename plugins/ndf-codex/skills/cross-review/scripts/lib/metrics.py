@@ -39,6 +39,41 @@ def _verdict(review: dict[str, Any], reviewer: str) -> Optional[str]:
     return value if isinstance(value, str) else None
 
 
+def _aggregate_impl_round(
+    entry: dict[str, Any],
+    items_by_id: dict[str, dict[str, Any]],
+    impl: dict[str, dict[str, Any]],
+    unmeasured: list[str],
+) -> dict[str, Any]:
+    round_no = entry.get("round")
+    impl_runtime = entry["impl"]
+    impl_model = entry.get("impl_model") or {}
+    requested = impl_model.get("requested")
+    observed = impl_model.get("observed")
+
+    warning = _models.mismatch_warning(impl_runtime, requested, observed)
+    if warning:
+        unmeasured.append(f"round {round_no}: {warning}")
+    if not _models.is_measurable(impl_runtime, requested):
+        unmeasured.append(
+            f"round {round_no}: {impl_runtime} が既定モデル（auto）で動いたため、"
+            "実装担当の集計から分離する"
+        )
+
+    bucket = impl.setdefault(_key(impl_runtime, requested), _new_impl_bucket())
+    bucket["rounds"] += 1
+    bucket["seconds"] += _duration(entry, ("apply", "fix"))
+    round_items = [items_by_id[i] for i in entry.get("items", []) if i in items_by_id]
+    bucket["applied"] += sum(1 for i in round_items if i.get("status") == "done")
+    bucket["abandoned"] += sum(
+        1 for i in round_items if i.get("status") in {"abandoned", "blocked"}
+    )
+    bucket["budget_exceeded"] += sum(1 for i in round_items if i.get("budget_exceeded"))
+    bucket["test_failed"] += sum(1 for i in round_items if i.get("test_failed"))
+    bucket["fix_rounds"] += int(entry.get("fix_rounds") or 0)
+    return bucket
+
+
 def aggregate(state: dict[str, Any]) -> dict[str, Any]:
     """状態ファイルから実装担当・レビュー担当それぞれの指標を出す。
 
@@ -56,33 +91,7 @@ def aggregate(state: dict[str, Any]) -> dict[str, Any]:
         impl_runtime = entry.get("impl")
         if not impl_runtime:
             continue
-        impl_model = (entry.get("impl_model") or {})
-        requested = impl_model.get("requested")
-        observed = impl_model.get("observed")
-
-        warning = _models.mismatch_warning(impl_runtime, requested, observed)
-        if warning:
-            unmeasured.append(f"round {round_no}: {warning}")
-        if not _models.is_measurable(impl_runtime, requested):
-            unmeasured.append(
-                f"round {round_no}: {impl_runtime} が既定モデル（auto）で動いたため、"
-                "実装担当の集計から分離する"
-            )
-
-        bucket = impl.setdefault(_key(impl_runtime, requested), _new_impl_bucket())
-        bucket["rounds"] += 1
-        bucket["seconds"] += _duration(entry, ("apply", "fix"))
-
-        round_items = [items_by_id[i] for i in entry.get("items", []) if i in items_by_id]
-        bucket["applied"] += sum(1 for i in round_items if i.get("status") == "done")
-        bucket["abandoned"] += sum(
-            1 for i in round_items if i.get("status") in {"abandoned", "blocked"}
-        )
-        bucket["budget_exceeded"] += sum(
-            1 for i in round_items if i.get("budget_exceeded")
-        )
-        bucket["test_failed"] += sum(1 for i in round_items if i.get("test_failed"))
-        bucket["fix_rounds"] += int(entry.get("fix_rounds") or 0)
+        bucket = _aggregate_impl_round(entry, items_by_id, impl, unmeasured)
 
         reviews = _round_reviews(entry)
         if reviews:
