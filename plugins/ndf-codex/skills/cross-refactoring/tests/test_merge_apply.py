@@ -414,7 +414,7 @@ def _drop_env(refactor, monkeypatch, revert_rc=0, pick_rc=0, sync_dirty=False):
             if picked:
                 return f"new-{picked[-1]}"
             return "REVERTED_HEAD" if reverted else "HEAD_BEFORE"
-        if args[:1] == ["status"]:
+        if "status" in args:
             # 同期の前後で 2 回呼ばれる。1 回目が同期前、2 回目以降が同期後。
             # 既定は「同期前も後も差分なし」
             statuses.append(len(statuses))
@@ -1482,3 +1482,40 @@ def test_whole_round_failure_also_defers_items(
     deferred = {d["item_id"]: d for d in state["deferred_items"]}
     assert list(deferred) == ["R1-001"]
     assert "割り当てられていない" in deferred["R1-001"]["defer_reason"]
+
+
+def test_sync_failure_discards_what_it_produced(
+    refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
+):
+    """同期が途中で失敗したら、作った差分を捨てて再開できる状態にすること。
+
+    残すと次の実行は清浄性の検査で必ず止まり、`pending_push` の再試行が
+    永久に進まなくなる。
+    """
+    _sync_state(tmp_path, env_tmp_dir, git_facts)
+    calls, pushes = _drop_env(refactor, monkeypatch, sync_dirty=("", " M generated/a.py"))
+    monkeypatch.setattr(
+        refactor, "_run_with_timeout",
+        lambda command, cwd, timeout, grace=5.0: (1, False),
+    )
+    with pytest.raises(SystemExit) as e:
+        refactor.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+        )
+    assert e.value.code == refactor.ABORT
+    assert ["git", "checkout", "--", "."] in calls, "同期の差分を戻していない"
+    assert ["git", "clean", "-fd"] in calls, "同期が作ったファイルを消していない"
+    # 無視されたファイル（制御用ディレクトリ）まで消さない
+    assert not any("-x" in c for c in calls if c[:2] == ["git", "clean"])
+    assert [c for c in pushes if c[:2] == ["git", "push"]] == []
+
+
+def test_status_disables_path_quoting(refactor, monkeypatch):
+    """`core.quotePath` の既定では非 ASCII のパスがエスケープされて `git add` が失敗する。"""
+    seen: list[list[str]] = []
+    monkeypatch.setattr(
+        refactor, "_git_out",
+        lambda work, args: seen.append(list(args)) or " M plugins/日本語/a.py",
+    )
+    assert refactor._worktree_changes("/w") == {"plugins/日本語/a.py": " M"}
+    assert seen[0][:2] == ["-c", "core.quotePath=false"]

@@ -2521,7 +2521,11 @@ def _worktree_changes(work: str) -> dict[str, str]:
     無視されているファイルは現れない（`--porcelain` の既定）。改名は移動先の
     パスだけを見る。
     """
-    out = _git_out(work, ["status", "--porcelain", "-uall"])
+    # `core.quotePath` の既定（true）では、非 ASCII を含むパスが `"` で囲まれ
+    # `\343` の形へエスケープされる。そのまま `git add` へ渡すと見つからない。
+    out = _git_out(
+        work, ["-c", "core.quotePath=false", "status", "--porcelain", "-uall"]
+    )
     changes: dict[str, str] = {}
     for line in (out or "").splitlines():
         if len(line) < 4:
@@ -2559,6 +2563,16 @@ def _dirty_paths(state: dict[str, Any], work: str) -> list[str]:
         path for path in _worktree_changes(work)
         if not (control and path.startswith(control))
     )
+
+
+def _discard_worktree_changes(work: str) -> None:
+    """作業ツリーの未コミット変更を捨てる。**着手前が綺麗なときだけ呼ぶ。**
+
+    無視されたファイル（制御用ディレクトリを含む）は消さない（`git clean` に
+    `-x` を付けない）。
+    """
+    for args in (["checkout", "--", "."], ["clean", "-fd"]):
+        subprocess.run(["git", *args], cwd=work, capture_output=True, text=True)
 
 
 def _require_clean_worktree(state: dict[str, Any], work: str) -> None:
@@ -2612,9 +2626,15 @@ def _sync_generated(state: dict[str, Any]) -> None:
         command, work, _safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT)
     )
     if timed_out or code != 0:
+        # **途中まで書き換えた差分を残さない。** 残すと次の実行は
+        # `_require_clean_worktree` で必ず止まり、`pending_push` の再試行が
+        # 永久に進まなくなる。着手前が綺麗だったことは確認済みなので、
+        # ここにある変更は全て同期が作ったものだと分かる。
+        _discard_worktree_changes(work)
         die(
             f"生成物の同期に失敗しました（{command}）: "
             + ("打ち切りました" if timed_out else f"終了コード {code}")
+            + "。同期が作った差分は破棄したので、原因を直せばそのまま再開できます"
         )
     produced = _dirty_paths(state, work)
     if not produced:
