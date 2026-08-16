@@ -899,6 +899,20 @@ def cmd_merge_proposals(args: argparse.Namespace) -> None:
         sys.exit(2)
 
 
+def _find_unassigned_commits(
+    work: str,
+    reported_shas: list[str],
+    ordered_range: list[str],
+) -> list[str]:
+    reported_full = {
+        full for full in (
+            _git_out(work, ["rev-parse", "--verify", f"{sha}^{{commit}}"])
+            for sha in reported_shas
+        ) if full
+    }
+    return sorted(set(ordered_range) - reported_full)
+
+
 def verify_commit_assignment(
     work: str,
     entry: dict[str, Any],
@@ -919,7 +933,13 @@ def verify_commit_assignment(
                 duplicated.append(full)
             owner_of.setdefault(full, item_id)
 
-    return sorted(in_range - set(owner_of)), duplicated
+    reported_shas = [
+        sha
+        for result in reported.values()
+        for sha in _reported_shas(result)
+    ]
+    unassigned = _find_unassigned_commits(work, reported_shas, list(in_range))
+    return unassigned, duplicated
 
 
 def _abandon_round(
@@ -1435,13 +1455,7 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
 
     # 適用と同じく、**範囲のコミットは全て申告されていること**を求める。
     # 申告から漏れた修正コミットは検証を受けないまま Pull Request に残る。
-    reported_full = {
-        full for full in (
-            _git_out(work, ["rev-parse", "--verify", f"{s}^{{commit}}"])
-            for s in reported_shas
-        ) if full
-    }
-    unassigned = sorted(set(ordered_range) - reported_full)
+    unassigned = _find_unassigned_commits(work, reported_shas, ordered_range)
 
     facts = collect_commit_facts(
         work, reported_shas, set(ordered_range),
