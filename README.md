@@ -6,9 +6,9 @@ Claude Code / Codex / Kiro CLI向けのスキル・MCP設定を共有するた�
 
 このマーケットプレイスは、チーム全体でAI開発ツール（Claude Code / Codex / Kiro CLI）の導入を加速するための事前設定されたプラグインを提供します。
 
-**NDFプラグイン v8.0.0** は、同じ `ndf@ai-plugins` という名前で Claude Code / Codex / Kiro CLI へ配布されるランタイム別プラグインです。共通ソースは `plugins/ndf-shared/` に集約し、利用者が install する配布物は `plugins/ndf-claude/` / `plugins/ndf-codex/` / `plugins/ndf-kiro/` に分かれています。
+**NDFプラグイン v8.1.0** は、同じ `ndf@ai-plugins` という名前で Claude Code / Codex / Kiro CLI へ配布されるランタイム別プラグインです。共通ソースは `plugins/ndf-shared/` に集約し、利用者が install する配布物は `plugins/ndf-claude/` / `plugins/ndf-codex/` / `plugins/ndf-kiro/` に分かれています。
 
-- **公開Skills**: Claude Code向け core 26個、Kiro向け core 25個、Codex向け core 24個に分離。
+- **公開Skills**: Claude Code向け core 27個、Kiro向け core 26個、Codex向け core 25個に分離。
 - **元Skills（30個）**:
   - PR/レビューワークフロー (7): pr, pr-tests, fix, pr-review, cherry-pick-pr, deploy, merged
   - 開発方法論 (5): development-workflow, requirements-design, tdd-cycle, refactoring, quality-gates
@@ -102,8 +102,41 @@ kiro-cli chat --agent ndf
 
 | プラグイン名 | バージョン | 説明 | 詳細 |
 |------------|----------|------|------|
-| **ndf** | 8.0.0 | Claude Code / Codex / Kiro CLI 向けに runtime 別配布物を提供する NDF プラグイン。8個の専門エージェント（Claude版）、公開Skills（Claude Code向け core 26個、Kiro向け core 25個、Codex向け core 24個）、Claude SessionStart/Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:external-ai` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [Claude](./plugins/ndf-claude/README.md) / [Codex](./plugins/ndf-codex/README.md) / [Kiro](./plugins/ndf-kiro/README.md) |
+| **ndf** | 8.1.0 | Claude Code / Codex / Kiro CLI 向けに runtime 別配布物を提供する NDF プラグイン。8個の専門エージェント（Claude版）、公開Skills（Claude Code向け core 27個、Kiro向け core 26個、Codex向け core 25個）、Claude SessionStart/Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:external-ai` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [Claude](./plugins/ndf-claude/README.md) / [Codex](./plugins/ndf-codex/README.md) / [Kiro](./plugins/ndf-kiro/README.md) |
 | **playwright-kit** | 1.0.0 | Playwright による E2E テストの計画・実装・証跡管理を提供するプラグイン。ページ役割からのテスト計画、動画 / trace 付きスクリプト実装、レポート生成と Drive 保管、playwright_kit ランタイム（init、a11y / CWV スキャン）の 4 Skill。NDF v7.0.0 で分離。 | [Claude](./plugins/playwright-kit-claude/README.md) |
+
+### NDF v8.1.0 の主な変更
+
+**多ランタイム・リファクタリング収束ループ `/ndf:cross-refactoring` を追加しました。**
+
+`/ndf:cross-review` がレビューを収束させるのと同じ発想で、リファクタリングを収束させます。
+`refactoring` Skill が持っていなかった 2 つ — **何を直すかの発見**と**直した結果の他者検証** —
+を、複数の CLI へ役割を分けることで補います。
+
+```bash
+/ndf:cross-refactoring 130 --scope src/services --baseline-test "pytest -q"
+```
+
+| 役割 | 担当 |
+|---|---|
+| 提案・レビュー | 全ランタイム − ホストの 3 者 |
+| 適用 | 全ランタイム − gemini の 3 者（claude / codex / kiro）から輪番で 1 者 |
+
+- ホストは提案とレビューに参加しないため、**実装した者と評価する者が同一モデルになりません**
+- ホストと同じランタイムが適用担当になる場合も、サブエージェントではなく **CLI プロセス**として
+  起動します。ホストセッションの作業文脈に差分やレビュー本文が載りません
+- レビューは**提案ラウンドの差分全体**に対して 1 回だけ回します。改善項目ごとに回すと CLI の
+  起動回数が採用件数に比例して膨らむためです（1 ラウンド 33 回 → 9 回）
+- 収束しない改善項目は**項目単位で取り消します**。同じラウンドで合意済みの項目は残ります
+- `--model <ランタイム>=<モデル>` でモデルを固定でき、実行主体はコミットのトレーラーと
+  レビューコメントに残ります。`report --metrics` がランタイム × モデルで集計します
+
+あわせて、収束ループの共通層を
+[`plugins/ndf-shared/skills/cross-review/scripts/lib/`](./plugins/ndf-shared/skills/cross-review/scripts/lib/README.md)
+へ切り出しました。`/ndf:cross-review` の挙動と既存テストは変わりません。
+
+`/ndf:external-ai` は Kiro CLI と `claude -p` の非対話実行手順を追加し、対象 CLI が 4 つに
+なりました。
 
 ### NDF v8.0.0 の主な変更（非互換）
 

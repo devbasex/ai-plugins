@@ -19,6 +19,8 @@ ROUND=${2:?ROUND required}
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=_tmpdir.sh
 . "$SCRIPT_DIR/_tmpdir.sh"
+# shellcheck source=lib/_gemini-env.sh
+. "$SCRIPT_DIR/lib/_gemini-env.sh"
 TMP_DIR=$(tmpdir)
 
 STATE=$TMP_DIR/cross-review-pr$STATE_PR-state.json
@@ -142,36 +144,17 @@ cd "$WORKTREE"
 # 起動時に `Error in: mcpServers.<name>` 警告を err.log に出す。文字列としては
 # `Error: ...` ではなく `Error in: ...` だが、monitor.py 旧版が誤検知して
 # プロセスを kill する原因になっていた (REPORT01 参照)。
-# launcher 側でも sanitize して警告自体を抑制する: `disabled` キーを再帰的に
-# 削除した settings.json を起動時のみ差し込み、gemini が読み終わったら復元する。
-SETTINGS=$WORKTREE/.gemini/settings.json
-SETTINGS_BACKUP=
-
+# 無害化の手順は cross-refactoring と共有するため lib/_gemini-env.sh にある。
+#
 # trap で EXIT / INT / TERM / HUP のいずれでも必ず settings.json を復元する。
 # sleep 2 中や復元前に Ctrl-C / SIGTERM / シェル終了で止まっても、sanitize 済み
 # settings.json が worktree に残らないようにするため。冪等に書いてあるので
 # 多重実行されても安全。
-restore_settings() {
-  # SETTINGS_BACKUP が未設定 or バックアップ不在なら何もしない
-  if [ -n "${SETTINGS_BACKUP:-}" ] && [ -f "$SETTINGS_BACKUP" ]; then
-    mv -f "$SETTINGS_BACKUP" "$SETTINGS" 2>/dev/null || true
-    SETTINGS_BACKUP=
-  fi
-}
-trap restore_settings EXIT INT TERM HUP
+trap gemini_restore_settings EXIT INT TERM HUP
 
-if [ -f "$SETTINGS" ] && command -v jq >/dev/null 2>&1; then
-  SETTINGS_BACKUP=$TMP_DIR/gemini-review-pr$STATE_PR-settings-backup.json
-  cp "$SETTINGS" "$SETTINGS_BACKUP"
-  SANITIZED=$TMP_DIR/gemini-review-pr$STATE_PR-settings-sanitized.json
-  if jq 'walk(if type == "object" then del(.disabled) else . end)' "$SETTINGS_BACKUP" > "$SANITIZED" 2>/dev/null; then
-    cp "$SANITIZED" "$SETTINGS"
-  else
-    # jq が失敗したら sanitize を諦め、バックアップも破棄して元のまま起動
-    rm -f "$SETTINGS_BACKUP"
-    SETTINGS_BACKUP=
-  fi
-fi
+gemini_sanitize_settings "$WORKTREE" \
+  "$TMP_DIR/gemini-review-pr$STATE_PR-settings-backup.json" \
+  "$TMP_DIR/gemini-review-pr$STATE_PR-settings-sanitized.json"
 
 # ⚠ --skip-trust と GEMINI_CLI_TRUST_WORKSPACE=true は両方必須
 GEMINI_CLI_TRUST_WORKSPACE=true nohup gemini --yolo --skip-trust --output-format text \
@@ -184,10 +167,10 @@ disown
 
 # gemini は起動時に 1 度 settings.json を読む。読み込み完了を待ってから元の
 # ファイルを復元する (worktree を dirty なままにしないため)。
-# sleep 中に signal が来ても trap restore_settings が必ず復元するため安全。
-if [ -n "$SETTINGS_BACKUP" ] && [ -f "$SETTINGS_BACKUP" ]; then
+# sleep 中に signal が来ても trap gemini_restore_settings が必ず復元するため安全。
+if [ -n "${GEMINI_SETTINGS_BACKUP:-}" ] && [ -f "$GEMINI_SETTINGS_BACKUP" ]; then
   sleep 2
-  restore_settings
+  gemini_restore_settings
 fi
 
 echo "🚀 gemini launched (pid=$GEMINI_PID)" >&2
