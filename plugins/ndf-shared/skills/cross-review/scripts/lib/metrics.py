@@ -44,7 +44,7 @@ def _aggregate_impl_round(
     items_by_id: dict[str, dict[str, Any]],
     impl: dict[str, dict[str, Any]],
     unmeasured: list[str],
-) -> dict[str, Any]:
+) -> None:
     round_no = entry.get("round")
     impl_runtime = entry["impl"]
     impl_model = entry.get("impl_model") or {}
@@ -71,7 +71,15 @@ def _aggregate_impl_round(
     bucket["budget_exceeded"] += sum(1 for i in round_items if i.get("budget_exceeded"))
     bucket["test_failed"] += sum(1 for i in round_items if i.get("test_failed"))
     bucket["fix_rounds"] += int(entry.get("fix_rounds") or 0)
-    return bucket
+    reviews = _round_reviews(entry)
+    if reviews:
+        first = reviews[0]
+        approved_first = all(
+            _verdict(first, reviewer) == "APPROVE"
+            for reviewer in entry.get("reviewers", [])
+        )
+        bucket["first_review_total"] += 1
+        bucket["first_review_approved"] += 1 if approved_first else 0
 
 
 def aggregate(state: dict[str, Any]) -> dict[str, Any]:
@@ -91,17 +99,9 @@ def aggregate(state: dict[str, Any]) -> dict[str, Any]:
         impl_runtime = entry.get("impl")
         if not impl_runtime:
             continue
-        bucket = _aggregate_impl_round(entry, items_by_id, impl, unmeasured)
+        _aggregate_impl_round(entry, items_by_id, impl, unmeasured)
 
         reviews = _round_reviews(entry)
-        if reviews:
-            first = reviews[0]
-            approved_first = all(
-                _verdict(first, r) == "APPROVE" for r in entry.get("reviewers", [])
-            )
-            bucket["first_review_total"] += 1
-            bucket["first_review_approved"] += 1 if approved_first else 0
-
         reviewer_models = entry.get("reviewer_models") or {}
         for name in entry.get("reviewers", []):
             spec = reviewer_models.get(name) or {}
