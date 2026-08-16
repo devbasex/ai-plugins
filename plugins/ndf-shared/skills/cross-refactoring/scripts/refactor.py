@@ -1659,6 +1659,39 @@ def cmd_abandon_items(args: argparse.Namespace) -> None:
     statefile.save(path, state)
 
 
+def _validate_fix_commits(
+    work: str,
+    ordered_range: list[str],
+    reported_shas: list[str],
+    scope: list[str],
+    test_command: str,
+    head_branch: str,
+    timeout: int,
+) -> tuple[list[tuple[str, str]], list[str], list[str]]:
+    """修正コミットの申告漏れと手順適合を検証する。"""
+    reported_full = {
+        full for full in (
+            _git_out(work, ["rev-parse", "--verify", f"{sha}^{{commit}}"])
+            for sha in reported_shas
+        ) if full
+    }
+    unassigned = sorted(set(ordered_range) - reported_full)
+    facts = collect_commit_facts(
+        work, reported_shas, set(ordered_range), test_command, head_branch, timeout,
+    )
+    accepted: list[tuple[str, str]] = []
+    problems: list[str] = []
+    for commit in facts:
+        item_id = (commit.get("trailers") or {}).get("Item-Id")
+        problem = verify_fix_commit(commit, scope)
+        if problem:
+            problems.append(problem)
+            info(f"❌ 修正コミットが手順を満たしていません: {problem}")
+            continue
+        accepted.append((item_id, commit["sha"]))
+    return accepted, unassigned, problems
+
+
 def cmd_merge_fix(args: argparse.Namespace) -> None:
     """Step 6 — 修正結果を取り込み、修正ラウンドを 1 つ進める。"""
     path, state = _load(args.id)
@@ -1738,35 +1771,16 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
 
     # 適用と同じく、**範囲のコミットは全て申告されていること**を求める。
     # 申告から漏れた修正コミットは検証を受けないまま Pull Request に残る。
-    reported_full = {
-        full for full in (
-            _git_out(work, ["rev-parse", "--verify", f"{s}^{{commit}}"])
-            for s in reported_shas
-        ) if full
-    }
-    unassigned = sorted(set(ordered_range) - reported_full)
-
-    facts = collect_commit_facts(
-        work, reported_shas, set(ordered_range),
-        baseline.get("command") or "true", state["head_branch"],
-        _safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT),
-    )
-
     # **不正なコミットが 1 件でもあれば、修正ラウンドの範囲ごと取り消す。**
     # 状態を記録しないだけでは、未検証の変更が Pull Request に残り続ける
     # （見送りの対象にもならない）。どのコミットが安全かは決められないので、
     # 適用フェーズの未割当コミットと同じ扱いにする。
-    problems: list[str] = []
-    accepted: list[tuple[str, str]] = []      # (item_id, sha)
     needs_push = False
-    for commit in facts:
-        item_id = (commit.get("trailers") or {}).get("Item-Id")
-        problem = verify_fix_commit(commit, state.get("target_scope") or [])
-        if problem:
-            problems.append(problem)
-            info(f"❌ 修正コミットが手順を満たしていません: {problem}")
-            continue
-        accepted.append((item_id, commit["sha"]))
+    accepted, unassigned, problems = _validate_fix_commits(
+        work, ordered_range, reported_shas, state.get("target_scope") or [],
+        baseline.get("command") or "true", state["head_branch"],
+        _safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT),
+    )
 
     if unassigned:
         info(
