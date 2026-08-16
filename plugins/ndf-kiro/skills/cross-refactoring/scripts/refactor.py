@@ -476,7 +476,7 @@ def verify_scope(commit: dict[str, Any], scope: Iterable[str]) -> Optional[str]:
     more = f" ほか {len(outside) - 5} 件" if len(outside) > 5 else ""
     return (
         f"コミット {commit.get('sha', '?')} が対象範囲の外を変更しています"
-        f"（{shown}{more}）。生成物の同期は進行側が収束後にまとめて行います。"
+        f"（{shown}{more}）。生成物の同期は進行側が公開の直前に行います。"
         "現状固定テストの置き場所が範囲外なら、`--scope` に含めてから実行してください"
     )
 
