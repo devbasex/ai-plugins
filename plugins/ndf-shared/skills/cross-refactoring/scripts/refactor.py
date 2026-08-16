@@ -899,6 +899,29 @@ def cmd_merge_proposals(args: argparse.Namespace) -> None:
         sys.exit(2)
 
 
+def verify_commit_assignment(
+    work: str,
+    entry: dict[str, Any],
+    reported: dict[str, dict[str, Any]],
+    in_range: set[str],
+) -> tuple[list[str], list[str]]:
+    owner_of: dict[str, str] = {}
+    duplicated: list[str] = []
+    for item_id in entry["items"]:
+        result = reported.get(item_id)
+        if result is None:
+            continue
+        for sha in _reported_shas(result):
+            full = _git_out(work, ["rev-parse", "--verify", f"{sha}^{{commit}}"])
+            if full is None:
+                continue
+            if full in owner_of and owner_of[full] != item_id:
+                duplicated.append(full)
+            owner_of.setdefault(full, item_id)
+
+    return sorted(in_range - set(owner_of)), duplicated
+
+
 def cmd_merge_apply(args: argparse.Namespace) -> None:
     """Step 4 — 適用結果を検証して取り込む。
 
@@ -997,18 +1020,7 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
     #
     # 判定は**完全な SHA へ正規化してから**行う。申告の文字列をそのまま鍵にすると、
     # 一方が完全 SHA、他方が短縮 SHA で同じコミットを指したときに重複を見逃す。
-    owner_of: dict[str, str] = {}
-    duplicated: list[str] = []
-    for item_id, r in reported.items():
-        for sha in _reported_shas(r):
-            full = _git_out(work, ["rev-parse", "--verify", f"{sha}^{{commit}}"])
-            if full is None:
-                continue          # 実在しない申告は項目ごとの検証で落ちる
-            if full in owner_of and owner_of[full] != item_id:
-                duplicated.append(full)
-            owner_of.setdefault(full, item_id)
-
-    unassigned = sorted(in_range - set(owner_of))
+    unassigned, duplicated = verify_commit_assignment(work, entry, reported, in_range)
     if unassigned or unknown_ids or duplicated:
         causes = []
         if unassigned:
