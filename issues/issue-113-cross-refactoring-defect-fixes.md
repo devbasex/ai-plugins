@@ -41,12 +41,12 @@
 
 - [ ] 1. 取り消し対象より新しい別項目のコミットがあっても、**変更が独立していれば**
       項目単位で取り消せる（`test_drop_older_item_keeps_the_newer_one`）
-- [ ] 2. 積み直しが競合したときは、着手前の状態まで戻してラウンド全件を取り消し、
-      半端な履歴を残さない（`test_adjacent_changes_fall_back_to_the_whole_round`）
+- [ ] 2. 積み直しが競合したときは、取り消しが済んだ地点へ戻してラウンド全件を
+      取り消し、半端な履歴を残さない（`test_adjacent_changes_fall_back_to_the_whole_round`）
 - [ ] 3. 取り消しに失敗したら終了コード 4 で中断する。進行スクリプトは
       終了コード 2（全件失敗）と 4（中断）を区別する
 - [ ] 4. 検証の途中で中断しても、そこまでの判定が状態ファイルへ残る
-      （`items[].status` と `rounds[].apply.progress`）
+      （`items[].status` と `rounds[].apply_progress`）
 - [ ] 5. 取り消しの push が完了するまで `pending_push` が立ち、
       次の実行が処理済み判定より先に再送信する（取り消し着手**前**に立てる）
 - [ ] 6. `target_scope` の外を触ったコミットを含む項目は失敗になる
@@ -117,7 +117,7 @@
 | --- | --- | --- |
 | `refactor.py` の終了コード | 中断を 4 として追加 | 追加のみ。0 / 2 / 3 の意味は変えない |
 | 提案の結果ファイル名 | `-r<ラウンド>` を追加 | 破る。進行スクリプトと `--stem-template` を同時に変更する |
-| 状態ファイル | `vocabulary` / `auth` / `apply.progress` を追加 | 追加のみ。欠けていても読める |
+| 状態ファイル | `vocabulary` / `auth` / `apply_progress` / `drops` / `pending_drop` を追加 | 追加のみ。欠けていても読める |
 | `--scope` の意味 | 検証にも使う | 破る（これまで検証に反映されていなかった）。手順書に明記する |
 
 ## 修正対象
@@ -143,7 +143,7 @@ plugins/ndf-{claude,codex,kiro}/skills/...   # 配布物（生成）
 - **対象ファイル:** `scripts/refactor.py`、`tests/test_abandon_items.py`、`tests/test_merge_apply.py`
 - **変更内容:** `_drop_items()` を追加する。範囲を新しい順に全て `git revert` し、
   残す項目のコミットを古い順に `git cherry-pick` で積み直す。積み直しが競合したら
-  着手前 HEAD へ戻し、ラウンド全件の取り消しへ退避する。
+  取り消しが済んだ地点へ戻し、ラウンド全件の取り消しへ退避する。
   `cmd_merge_apply` と `cmd_abandon_items` を `_drop_items()` 経由に置き換える
 - **満たす受け入れ条件:** 1, 2
 - **進め方:** 競合する履歴を模す失敗テスト → 実装 → 既存の取り消しテストを新形へ移す
@@ -153,7 +153,10 @@ plugins/ndf-{claude,codex,kiro}/skills/...   # 配布物（生成）
 - **対象ファイル:** `scripts/refactor.py`、`SKILL.md`、`docs/02-apply-and-review.md`
 - **変更内容:** 中断を終了コード 4 に統一する（`die` の既定値）。`cmd_merge_apply` は
   項目ごとの判定を**その都度**状態ファイルへ保存する。取り消しへ着手する**前**に
-  `pending_push` を立てる。進行スクリプトは 2 と 4 を区別し、4 では `exit` する
+  `pending_drop` と `pending_push` を立て、取り消しが済んだ時点で `apply.merged_at` を
+  立ててから push する。進行スクリプトは 2 と 4 を区別し、4 では `exit` する
+  （出力を `eval` する呼び出しは `rf_eval` を使う。コマンド置換のサブシェルでは
+  `exit` が親へ伝わらない）
 - **満たす受け入れ条件:** 3, 4, 5
 - **進め方:** 中断時の状態を確かめる失敗テスト → 実装 → 手順書の更新
 
