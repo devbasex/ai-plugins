@@ -1708,57 +1708,6 @@ def _validate_fix_commits(
     return accepted, unassigned, problems
 
 
-def _merge_fix_verify_and_reconcile(
-    path: pathlib.Path,
-    state: dict[str, Any],
-    entry: dict[str, Any],
-    work: str,
-    head_now: str,
-    payload: dict[str, Any],
-) -> tuple[bool, set[str]]:
-    """修正コミット範囲の確定・検証・不正時の取り消し。
-
-    Returns:
-        (needs_push, resolved): needs_push が True なら呼び出し側が push する。
-        resolved が渡された resolved_threads を返す（失敗時は空集合にリセット）。
-    """
-    baseline = state.get("baseline_test") or {}
-    ordered_range = commits_in_range(work, entry.get("fix_base_sha"), head_now)
-    if ordered_range is None:
-        die(
-            "修正の範囲を確定できませんでした"
-            f"（起点 {entry.get('fix_base_sha')} / HEAD {head_now}）。"
-            "検証できない修正は採りません",
-            code=2,
-        )
-    reported_shas = _reported_shas(payload)
-
-    accepted, unassigned, problems = _validate_fix_commits(
-        work, ordered_range, reported_shas, state.get("target_scope") or [],
-        baseline.get("command") or "true", state["head_branch"],
-        _safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT),
-    )
-
-    if unassigned:
-        info(
-            f"❌ どの申告にも含まれていない修正コミットが {len(unassigned)} 件あります"
-            f"（{', '.join(s[:7] for s in unassigned[:5])}）"
-        )
-
-    if unassigned or problems:
-        info("検証を通らない変更を残さないため、この修正ラウンドの範囲を取り消します")
-        _revert_range_with_recovery(
-            path, state, entry, work, ordered_range, "fix_base_sha",
-        )
-        return True, set()
-    else:
-        for item_id, sha in accepted:
-            item = _find_item(state, item_id, required=False)
-            if item is not None:
-                item.setdefault("commits", []).append(sha)
-        return False, set()  # sentinel — resolved is not reset here
-
-
 def _merge_fix_resolve_threads(
     payload: dict[str, Any],
     repo: str,
@@ -1843,14 +1792,59 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     # スレッド解決の照合
     resolved = _merge_fix_resolve_threads(payload, state["repo"], state["current_pr"])
 
-    # 修正コミットの検証と取り消し
-    needs_push, reset_resolved = _merge_fix_verify_and_reconcile(
-        path, state, entry, work, head_now, payload,
+    # 修正コミットも適用と同じ基準で、**git と実際のテスト実行から**検証する。
+    # 結果ファイルの申告で済ませると、手順を満たさない変更が収束済みになれてしまう。
+    baseline = state.get("baseline_test") or {}
+    # 修正の範囲も**オーケストレータが記録した起点**から取る。起点は
+    # `judge-review` が変更要求を返したときの HEAD である。
+    ordered_range = commits_in_range(work, entry.get("fix_base_sha"), head_now)
+    if ordered_range is None:
+        die(
+            "修正の範囲を確定できませんでした"
+            f"（起点 {entry.get('fix_base_sha')} / HEAD {head_now}）。"
+            "検証できない修正は採りません",
+            code=2,
+        )
+    reported_shas = _reported_shas(payload)
+
+    # 適用と同じく、**範囲のコミットは全て申告されていること**を求める。
+    # 申告から漏れた修正コミットは検証を受けないまま Pull Request に残る。
+    # **不正なコミットが 1 件でもあれば、修正ラウンドの範囲ごと取り消す。**
+    # 状態を記録しないだけでは、未検証の変更が Pull Request に残り続ける
+    # （見送りの対象にもならない）。どのコミットが安全かは決められないので、
+    # 適用フェーズの未割当コミットと同じ扱いにする。
+    needs_push = False
+    accepted, unassigned, problems = _validate_fix_commits(
+        work, ordered_range, reported_shas, state.get("target_scope") or [],
+        baseline.get("command") or "true", state["head_branch"],
+        _safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT),
     )
-    if reset_resolved is not None and needs_push:
-        # 検証失敗: 解決の申告は採用しない
+
+    if unassigned:
+        info(
+            f"❌ どの申告にも含まれていない修正コミットが {len(unassigned)} 件あります"
+            f"（{', '.join(s[:7] for s in unassigned[:5])}）"
+        )
+
+    if unassigned or problems:
+        # **状態へ記録する前に取り消す。** 先に記録すると、取り消し済みのコミットが
+        # 状態ファイルに残り、後の見送り処理が同じコミットをもう一度取り消そうとする。
+        info("検証を通らない変更を残さないため、この修正ラウンドの範囲を取り消します")
+        # **取り消しへ着手する前に印を立てる。** 取り消しは済んだのに push できずに
+        # 終わると、未検証の変更が Pull Request に残ったままになる。
+        _revert_range_with_recovery(
+            path, state, entry, work, ordered_range, "fix_base_sha",
+        )
+        # **push は保存のあと。** ここで push して失敗すると、取り消しコミットは
+        # ローカルに残るのに起点の更新が保存されず、叩き直しで二重に取り消してしまう。
+        needs_push = True
         info("⚠ 修正を取り消したため、解決の申告は採用しません")
         resolved = set()
+    else:
+        for item_id, sha in accepted:
+            item = _find_item(state, item_id, required=False)
+            if item is not None:
+                item.setdefault("commits", []).append(sha)
 
     for review in entry["reviews"]:
         for finding in review["findings"]:
