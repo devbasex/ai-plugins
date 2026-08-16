@@ -870,3 +870,59 @@ def test_abandon_marks_pending_push_before_reverting(
 
     assert marks and marks[0] is True
     assert read_state(state_path)["rounds"][0]["pending_push"] is False
+
+
+def test_abandon_saves_the_drop_result_before_pushing(
+    refactor, tmp_path, env_tmp_dir, monkeypatch
+):
+    """取り消しの結果を push より先に保存すること。
+
+    保存しないまま落ちると、積み直しで変わった SHA と取り消し済みの印が失われ、
+    次の実行が**履歴に無い SHA を相手に**取り消しをやり直す。
+    """
+    state_path = _range_state(tmp_path, [_finding("R1-001")])
+    env_tmp_dir(state_path)
+    _range_env(refactor, monkeypatch, ["sha-R1-002", "sha-R1-001"])
+    seen: list[dict] = []
+    monkeypatch.setattr(
+        refactor, "_sh",
+        lambda cmd, **k: seen.append(read_state(state_path)) or "",
+    )
+    refactor.cmd_abandon_items(_args())
+
+    assert seen, "push が実行されていない"
+    at_push = seen[0]
+    by_id = {i["item_id"]: i for i in at_push["items"]}
+    assert by_id["R1-002"]["commits"] == ["new-sha-R1-002"], "SHA の追従が保存前"
+    assert by_id["R1-001"]["reverted"] is True
+    assert at_push["rounds"][0]["pending_drop"] == []
+
+
+def test_abandon_retries_the_drop_before_resending_the_push(
+    refactor, tmp_path, env_tmp_dir, monkeypatch
+):
+    """やり残した取り消しは、push の再送より先に片づけること。
+
+    先に push すると、取り消しが途中の HEAD をそのまま公開してしまう。
+    """
+    state_path = _range_state(tmp_path, [_finding("R1-001")])
+    state = read_state(state_path)
+    state["rounds"][0]["pending_drop"] = ["R1-001"]
+    state["rounds"][0]["pending_push"] = True
+    state_path.write_text(__import__("json").dumps(state), encoding="utf-8")
+    env_tmp_dir(state_path)
+
+    order: list[str] = []
+    calls = _range_env(refactor, monkeypatch, ["sha-R1-002", "sha-R1-001"])
+    real_run = refactor.subprocess.run
+    monkeypatch.setattr(
+        refactor.subprocess, "run",
+        lambda cmd, **kw: (order.append(cmd[1]) if cmd[:1] == ["git"] else None)
+        or real_run(cmd, **kw),
+    )
+    monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: order.append("push") or "")
+    refactor.cmd_abandon_items(_args())
+
+    assert "revert" in order and "push" in order
+    assert order.index("revert") < order.index("push"), "取り消しより先に push している"
+    assert read_state(state_path)["rounds"][0]["pending_push"] is False

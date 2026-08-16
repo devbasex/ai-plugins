@@ -1331,6 +1331,28 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
         sys.exit(2)
 
 
+def _run_drop(
+    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any],
+    targets: list[str],
+) -> dict[str, Any]:
+    """取り消しを、中断しても再開できる形で実行する。
+
+    `pending_drop` と `pending_push` を立ててから入り、**戻ったらすぐ保存する**。
+    保存しないまま落ちると、積み直しで変わった SHA と取り消し済みの印が失われ、
+    次の実行は**履歴に無い SHA を相手に**取り消しをやり直すことになる。
+
+    印はここでは消さない。**呼び出し側が完了の記録と同じ保存で消す。** 先に消すと、
+    完了を記録する前に落ちたときに、次の実行が「取り消し済みだが未完了」の状態を
+    見分けられなくなる。
+    """
+    entry["pending_drop"] = list(targets)
+    entry["pending_push"] = True
+    statefile.save(path, state)
+    result = _drop_items(state, entry, list(targets))
+    statefile.save(path, state)
+    return result
+
+
 def _apply_drop(
     path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any],
     failed: list[str],
@@ -1351,13 +1373,7 @@ def _apply_drop(
     取り消しと積み直しのコミットを「未割当」と判定してラウンドごと巻き込む。
     """
     work = state["worktrees"]["work"]
-    entry["pending_drop"] = list(failed)
-    # 取り消しへ着手する**前に**再送信の印も立てる。取り消しは済んだのに push
-    # できずに終わると、未検証の変更が Pull Request に残ったままになる。
-    entry["pending_push"] = True
-    statefile.save(path, state)
-
-    result = _drop_items(state, entry, list(failed))
+    result = _run_drop(path, state, entry, failed)
     applied = list(entry["apply"].get("applied") or [])
     if result["mode"] == "round":
         # 積み直せなかった。合意済みの項目も含めて全件捨てる。
@@ -1375,11 +1391,11 @@ def _apply_drop(
         entry["apply_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
         state["phase"] = "propose"
 
+    # **取り消しが済んだことを push より先に、印の解除と同じ保存で永続化する。**
+    # 保存せずに push して失敗すると、次の実行が適用の検証をやり直し、取り消しと
+    # 積み直しのコミットを「未割当」と判定してラウンドごと巻き込んでしまう。
+    # `pending_push` は残るので、次の実行は push の再送だけを行う。
     entry["pending_drop"] = []
-    # **取り消しが済んだことを push より先に永続化する。** 保存せずに push して
-    # 失敗すると、次の実行が適用の検証をやり直し、取り消しと積み直しのコミットを
-    # 「未割当」と判定してラウンドごと巻き込んでしまう。`pending_push` は残るので
-    # 次の実行は push の再送だけを行う。
     entry["apply"]["merged_at"] = statefile.now()
     statefile.save(path, state)
     _push_head(state)
@@ -1547,7 +1563,13 @@ def cmd_abandon_items(args: argparse.Namespace) -> None:
     path, state = _load(args.id)
     entry = _round(state, args.round)
     if not args.dry_run:
-        _flush_pending_push(path, state, entry)
+        # **やり残した取り消しを push の再送より先に片づける。** 先に push すると、
+        # 取り消しが途中の HEAD をそのまま Pull Request へ反映してしまう。
+        if entry.get("pending_drop"):
+            info("↻ 前回終わらなかった取り消しを再実行します")
+            _run_drop(path, state, entry, list(entry["pending_drop"]))
+        else:
+            _flush_pending_push(path, state, entry)
 
     # 取り消し自体は `reverted` で冪等だが、見送りの記録は重複しうる。
     if entry.get("abandoned") is not None:
@@ -1573,11 +1595,7 @@ def cmd_abandon_items(args: argparse.Namespace) -> None:
         info("（dry-run）状態ファイルは更新していません")
         return
 
-    # **取り消しへ着手する前に印を立てる。** 取り消しは済んだのに push できずに
-    # 終わると、Pull Request 側には未検証の差分が残ったままになる。
-    entry["pending_push"] = True
-    statefile.save(path, state)
-    result = _drop_items(state, entry, targets)
+    result = _run_drop(path, state, entry, targets)
     if result["mode"] == "round":
         info("積み直せなかったため、このラウンドで適用した項目を全件見送ります")
         targets = list(entry["apply"].get("applied") or targets)
@@ -1597,9 +1615,11 @@ def cmd_abandon_items(args: argparse.Namespace) -> None:
         })
         info(f"↩ {item_id} を見送りました")
 
+    # 見送りの記録と印の解除を**同じ保存で**行う。保存してから push するので、
+    # push が失敗しても記録とローカルの git が食い違わない。
     entry["abandoned"] = targets
+    entry["pending_drop"] = []
     state["phase"] = "propose"
-    # 保存してから push する。push が失敗しても、記録とローカルの git が食い違わない。
     statefile.save(path, state)
     _push_head(state)
     entry["pending_push"] = False
@@ -1735,8 +1755,11 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
              "commits": list(ordered_range)},
             dry_run=False,
         )
-        # 取り消し後の状態を新しい起点にする（叩き直しでの二重取り消しを防ぐ）。
+        # 取り消し後の状態を新しい起点にし、**その場で保存する**。ここで保存せずに
+        # 落ちると、次の実行は古い起点から範囲を取り直して取り消しコミット自体を
+        # 「未申告」と判定し、**取り消しを取り消して**しまう。
         entry["fix_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
+        statefile.save(path, state)
         # **push は保存のあと。** ここで push して失敗すると、取り消しコミットは
         # ローカルに残るのに起点の更新が保存されず、叩き直しで二重に取り消してしまう。
         needs_push = True
