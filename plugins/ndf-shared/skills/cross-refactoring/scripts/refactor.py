@@ -1088,31 +1088,6 @@ def _resolve_reported_to_full(work: str, reported_shas: list[str]) -> set[str]:
     }
 
 
-def _revert_range_with_recovery(
-    path: pathlib.Path,
-    state: dict[str, Any],
-    entry: dict[str, Any],
-    work: str,
-    ordered_range: list[str],
-    base_sha_key: str,
-    dry_run: bool = False,
-) -> None:
-    """範囲を取り消し、中断復帰用の push 印と新しい起点を保存する。"""
-    if base_sha_key == "apply_base_sha":
-        item_id = f"R{entry['round']}-range"
-    else:
-        item_id = f"R{entry['round']}-fix{entry['fix_rounds'] + 1}"
-    if not dry_run:
-        entry["pending_push"] = True
-        statefile.save(path, state)
-    _revert_item_commits(
-        state, {"item_id": item_id, "commits": list(ordered_range)}, dry_run=dry_run,
-    )
-    if not dry_run:
-        entry[base_sha_key] = _git_out(work, ["rev-parse", "HEAD"])
-        statefile.save(path, state)
-
-
 def _validate_commit_ownership(
     work: str,
     ordered_range: list[str],
@@ -1319,9 +1294,20 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
         # 範囲全体を取り消す。どのコミットが安全かを決められない以上、
         # 起点まで戻すのが最も確実である。順序は `_revert_item_commits` が
         # git の履歴から決め直す。
-        _revert_range_with_recovery(
-            path, state, entry, work, ordered_range, "apply_base_sha", args.dry_run,
-        )
+        whole_round = {
+            "item_id": f"R{entry['round']}-range",
+            "commits": list(ordered_range),
+        }
+        if not args.dry_run:
+            # **取り消しへ着手する前に印を立てる。** 取り消しは済んだのに push
+            # できずに終わると、未検証の変更が Pull Request に残ったままになる。
+            entry["pending_push"] = True
+            statefile.save(path, state)
+        _revert_item_commits(state, whole_round, args.dry_run)
+        if not args.dry_run:
+            # 取り消し後の状態を新しい起点にする。叩き直しても範囲が空になり、
+            # 取り消しコミット自体を「未割当」として再び戻すことがない。
+            entry["apply_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
         entry["apply"] = {
             "applied": [], "failed": list(entry["items"]),
             "base_sha": entry.get("apply_base_sha"), "head_sha": head_sha,
@@ -1708,6 +1694,28 @@ def _validate_fix_commits(
     return accepted, unassigned, problems
 
 
+def _revert_fix_range(
+    path: pathlib.Path,
+    state: dict[str, Any],
+    entry: dict[str, Any],
+    ordered_range: list[str],
+    work: str,
+) -> None:
+    """検証失敗した修正範囲を戻し、次の起点を記録する。"""
+    entry["pending_push"] = True
+    statefile.save(path, state)
+    _revert_item_commits(
+        state,
+        {
+            "item_id": f"R{entry['round']}-fix{entry['fix_rounds'] + 1}",
+            "commits": list(ordered_range),
+        },
+        dry_run=False,
+    )
+    entry["fix_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
+    statefile.save(path, state)
+
+
 def cmd_merge_fix(args: argparse.Namespace) -> None:
     """Step 6 — 修正結果を取り込み、修正ラウンドを 1 つ進める。"""
     path, state = _load(args.id)
@@ -1810,9 +1818,7 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         info("検証を通らない変更を残さないため、この修正ラウンドの範囲を取り消します")
         # **取り消しへ着手する前に印を立てる。** 取り消しは済んだのに push できずに
         # 終わると、未検証の変更が Pull Request に残ったままになる。
-        _revert_range_with_recovery(
-            path, state, entry, work, ordered_range, "fix_base_sha",
-        )
+        _revert_fix_range(path, state, entry, ordered_range, work)
         # **push は保存のあと。** ここで push して失敗すると、取り消しコミットは
         # ローカルに残るのに起点の更新が保存されず、叩き直しで二重に取り消してしまう。
         needs_push = True
