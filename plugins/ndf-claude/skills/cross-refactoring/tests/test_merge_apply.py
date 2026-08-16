@@ -1062,3 +1062,80 @@ def test_merge_apply_dry_run_leaves_no_processed_marker(
     })
     refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": True})())
     assert not (read_state(state_path)["rounds"][0]["apply"] or {}).get("merged_at")
+
+
+def test_revert_failure_keeps_the_round_retryable(
+    refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
+):
+    """取り消しに失敗したら、処理済みの印を立てないこと。
+
+    先に `merged_at` を立てると、次の実行は処理済みガードで素通りし、
+    **取り消しを再試行できないまま**未検証の変更が Pull Request に残り続ける。
+    """
+    state_path = _two_item_apply(tmp_path, env_tmp_dir, git_facts)
+    _drop_env(refactor, monkeypatch, revert_rc=1)
+
+    with pytest.raises(SystemExit) as e:
+        refactor.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+        )
+    assert e.value.code == refactor.ABORT
+
+    entry = read_state(state_path)["rounds"][0]
+    assert entry["apply"]["merged_at"] is None, "処理済みの印が立っている"
+    assert entry["pending_drop"] == ["R1-002"], "再実行の対象が残っていない"
+
+
+def test_pending_drop_is_retried_before_the_processed_guard(
+    refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
+):
+    """やり残した取り消しは、処理済みの判定より先に再実行すること。"""
+    state_path = _two_item_apply(tmp_path, env_tmp_dir, git_facts)
+    _drop_env(refactor, monkeypatch, revert_rc=1)
+    with pytest.raises(SystemExit):
+        refactor.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+        )
+
+    # 2 回目は取り消しが通る状況を模す
+    calls, pushes = _drop_env(refactor, monkeypatch)
+    refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
+
+    assert [c[-1] for c in calls if c[:2] == ["git", "revert"]] == [
+        "bad222", "bad111", "ok111"], "取り消しを再実行していない"
+    entry = read_state(state_path)["rounds"][0]
+    assert entry["pending_drop"] == []
+    assert entry["pending_push"] is False
+    assert entry["apply"]["merged_at"] is not None
+    assert pushes, "再実行後に push していない"
+
+
+def test_push_precedes_nothing_when_the_drop_is_unfinished(
+    refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
+):
+    """取り消しをやり残したまま push だけ先に流さないこと。
+
+    未検証の HEAD をそのまま Pull Request へ反映してしまう。
+    """
+    state_path = _two_item_apply(tmp_path, env_tmp_dir, git_facts)
+    _drop_env(refactor, monkeypatch, revert_rc=1)
+    with pytest.raises(SystemExit):
+        refactor.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+        )
+
+    order: list[str] = []
+    calls, _ = _drop_env(refactor, monkeypatch)
+    real_run = refactor.subprocess.run
+    monkeypatch.setattr(
+        refactor.subprocess, "run",
+        lambda cmd, **kw: (order.append(cmd[1]) if cmd[:1] == ["git"] else None)
+        or real_run(cmd, **kw),
+    )
+    monkeypatch.setattr(
+        refactor, "_sh", lambda cmd, **k: order.append("push") or "")
+    refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
+
+    assert "push" in order
+    assert order.index("revert") < order.index("push"), "取り消しより先に push している"
+    assert read_state(state_path)["rounds"][0]["apply"]["merged_at"] is not None

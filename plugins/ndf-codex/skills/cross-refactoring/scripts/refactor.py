@@ -1079,7 +1079,7 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
     path, state = _load(args.id)
     entry = _round(state, args.round)
     if not args.dry_run:
-        _flush_pending_push(path, state, entry)
+        _resume_incomplete_apply(path, state, entry)
 
     # **叩き直しても同じ判定を返す。** 取り込み済みで再実行すると、前回作った
     # 取り消しコミットが「未割当」と判定され、成功した項目まで巻き込んで
@@ -1292,8 +1292,10 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
         # 起点はオーケストレータが記録したもの。申告は記録にも残さない。
         "base_sha": entry.get("apply_base_sha"),
         "head_sha": head_sha,
-        # 取り込み済みの印。叩き直しでの二重処理を防ぐ。
-        "merged_at": None if args.dry_run else statefile.now(),
+        # **取り込み済みの印は最後に立てる。** 取り消しより先に立てると、取り消しに
+        # 失敗して中断したときに、次の実行が処理済みガードで素通りしてしまい、
+        # 検証を通っていない変更が Pull Request に残り続ける。
+        "merged_at": None,
     }
     entry.setdefault("durations", {})["apply"] = _safe_int(
         payload.get("elapsed_seconds")
@@ -1306,40 +1308,78 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
         if failed:
             _drop_items(state, entry, failed, dry_run=True)
         info("（dry-run）状態ファイルは更新していません")
-    elif failed:
-        # **取り消しへ着手する前に印を立てる。** 取り消しは済んだのに push できずに
-        # 終わると、検証を通っていない変更が Pull Request に残り、次の実行は
-        # 処理済みガードで素通りしてしまう。
-        entry["pending_push"] = True
-        statefile.save(path, state)
-        result = _drop_items(state, entry, failed)
-        if result["mode"] == "round":
-            # 積み直せなかった。合意済みの項目も含めて全件捨てる。
-            for item_id in entry["items"]:
-                it = _find_item(state, item_id)
-                it["status"] = "abandoned"
-                it.setdefault(
-                    "failure_reason",
-                    "残す項目を積み直せなかったため、ラウンドごと取り消した",
-                )
-            applied, failed = [], list(entry["items"])
-            entry["apply"]["applied"] = applied
-            entry["apply"]["failed"] = failed
-            # 取り消し後の状態を新しい起点にする（叩き直しでの二重取り消しを防ぐ）。
-            entry["apply_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
-            state["phase"] = "propose"
-        # 保存してから push する。push が失敗しても、記録とローカルの git が
-        # 食い違わない。
-        statefile.save(path, state)
-        _push_head(state)
-        entry["pending_push"] = False
-        statefile.save(path, state)
+        applied = list(entry["apply"]["applied"])
     else:
+        if failed:
+            applied = _apply_drop(path, state, entry, failed)
+        entry["apply"]["merged_at"] = statefile.now()
         statefile.save(path, state)
 
     if not applied:
         info("全項目が失敗したため、このラウンドのレビューは行いません")
         sys.exit(2)
+
+
+def _apply_drop(
+    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any],
+    failed: list[str],
+) -> list[str]:
+    """検証に失敗した項目を取り消し、採用として残る項目 ID を返す。
+
+    **中断しても再開できる形で記録する。** `pending_drop` を立ててから取り消しへ入り、
+    push まで終わってから消す。取り消しに失敗して中断すると印が残るので、次の実行は
+    処理済みの判定より先にここへ戻ってくる。印を立てずに `merged_at` を先に立てると、
+    次の実行は素通りして**取り消しを再試行できない**。
+    """
+    work = state["worktrees"]["work"]
+    entry["pending_drop"] = list(failed)
+    # 取り消しへ着手する**前に**再送信の印も立てる。取り消しは済んだのに push
+    # できずに終わると、未検証の変更が Pull Request に残ったままになる。
+    entry["pending_push"] = True
+    statefile.save(path, state)
+
+    result = _drop_items(state, entry, list(failed))
+    applied = list(entry["apply"].get("applied") or [])
+    if result["mode"] == "round":
+        # 積み直せなかった。合意済みの項目も含めて全件捨てる。
+        for item_id in entry["items"]:
+            it = _find_item(state, item_id)
+            it["status"] = "abandoned"
+            it.setdefault(
+                "failure_reason",
+                "残す項目を積み直せなかったため、ラウンドごと取り消した",
+            )
+        applied = []
+        entry["apply"]["applied"] = []
+        entry["apply"]["failed"] = list(entry["items"])
+        # 取り消し後の状態を新しい起点にする（叩き直しでの二重取り消しを防ぐ）。
+        entry["apply_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
+        state["phase"] = "propose"
+
+    entry["pending_drop"] = []
+    # 保存してから push する。push が失敗しても、記録とローカルの git が食い違わない。
+    statefile.save(path, state)
+    _push_head(state)
+    entry["pending_push"] = False
+    statefile.save(path, state)
+    return applied
+
+
+def _resume_incomplete_apply(
+    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any]
+) -> None:
+    """前回終わらなかった取り消しと push を、処理済みの判定より**先に**片づける。
+
+    取り消しをやり残したまま push だけ先に流すと、検証を通っていない HEAD が
+    Pull Request へ反映されてしまう。**取り消しの再実行を先に行う。**
+    """
+    if entry.get("pending_drop"):
+        info("↻ 前回終わらなかった取り消しを再実行します")
+        _apply_drop(path, state, entry, list(entry["pending_drop"]))
+        entry["apply"]["merged_at"] = statefile.now()
+        statefile.save(path, state)
+        return
+    _flush_pending_push(path, state, entry)
 
 
 def cmd_judge_review(args: argparse.Namespace) -> None:

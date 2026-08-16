@@ -166,15 +166,30 @@ rf() {
   return $rc
 }
 
-eval "$(rf init "$PR" --scope $SCOPE \
-          --baseline-test "$BASELINE" ${HOST:+--host "$HOST"} \
-          --max-outer-rounds "$MAX_OUTER" --max-fix-rounds "$MAX_FIX" \
-          --max-items-per-round "$MAX_ITEMS" $MODEL_ARGS)"
+# 出力を `eval` する呼び出しは**別の関数にする**。`eval "$(rf ...)"` と書くと `rf` は
+# コマンド置換のサブシェルで動くため、`exit 4` はサブシェルしか終わらせない。
+# 外側の `eval` は空文字を評価して成功し、**中断したはずの進行がそのまま続く**。
+# 出力と終了コードを親シェルで受け取ってから判定する。
+rf_eval() {
+  local out rc
+  out=$("$SCRIPTS/refactor.py" "$@"); rc=$?
+  if [ $rc -eq 4 ]; then
+    echo "❌ cross-refactoring を中断しました（refactor.py $1）" >&2
+    exit 4
+  fi
+  eval "$out"
+  return $rc
+}
+
+rf_eval init "$PR" --scope $SCOPE \
+        --baseline-test "$BASELINE" ${HOST:+--host "$HOST"} \
+        --max-outer-rounds "$MAX_OUTER" --max-fix-rounds "$MAX_FIX" \
+        --max-items-per-round "$MAX_ITEMS" $MODEL_ARGS
 export CROSS_REFACTORING_TMP_DIR="$TMP_DIR"
 "$SCRIPTS/prepare-worktrees.sh" "$ID"
 
 while :; do                                   # 提案ラウンドの繰り返し
-  eval "$(rf start-round "$ID")" || break     # 終了コード 1 = 繰り返し終了
+  rf_eval start-round "$ID" || break          # 終了コード 1 = 繰り返し終了
   for a in $RUNTIMES; do
     "$SCRIPTS/launch-cli.sh" "$a" propose "$ID" "$ROUND"
   done
@@ -226,6 +241,11 @@ done
 | 2 | 判定の結果（採用 0 件 / 全件失敗 / 変更要求 など） | 各コマンドの表に従う |
 | 3 | レビュー結果の形式不正 | 差し戻して再レビュー |
 | **4** | **中断**（取り消しの失敗、認証切れ、範囲を確定できないなど） | **進行ごと止める** |
+
+出力を `eval` する呼び出し（`init` / `start-round`）は `rf_eval` を使う。
+`eval "$(rf ...)"` と書くと `rf` はコマンド置換のサブシェルで動くため、`exit 4` は
+サブシェルしか終わらせず、外側の `eval` は空文字を評価して成功する。
+**中断したはずの進行がそのまま続く**ので、出力と終了コードは親シェルで受け取る。
 
 続けて **Step 7** で `/ndf:cross-review <PR>` を実行する。レビューはラウンド単位なので、
 **ラウンドを跨いだ整合はここで見る**。収束したら Draft を解除し、
