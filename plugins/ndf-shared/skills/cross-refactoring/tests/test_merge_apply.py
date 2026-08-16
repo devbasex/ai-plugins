@@ -248,15 +248,13 @@ def test_run_test_at_restores_branch_even_when_the_test_raises(refactor, monkeyp
 
 def test_collect_facts_marks_unknown_sha_as_missing(refactor, monkeypatch):
     monkeypatch.setattr(refactor, "_git_out", lambda work, args: None)
-    ctx = refactor.VerifyContext(work="/w", scope=[], test_command="true", head_branch="main", timeout=300)
-    facts = refactor.collect_commit_facts(ctx, ["ghost"], {"aaa"})
+    facts = refactor.collect_commit_facts("/w", ["ghost"], {"aaa"}, "true", "main")
     assert facts == [{"sha": "ghost", "exists": False}]
 
 
 def test_collect_facts_marks_out_of_range_sha_as_missing(refactor, monkeypatch):
     monkeypatch.setattr(refactor, "_git_out", lambda work, args: "zzz")
-    ctx = refactor.VerifyContext(work="/w", scope=[], test_command="true", head_branch="main", timeout=300)
-    facts = refactor.collect_commit_facts(ctx, ["zzz"], {"aaa"})
+    facts = refactor.collect_commit_facts("/w", ["zzz"], {"aaa"}, "true", "main")
     assert facts[0]["exists"] is False
 
 
@@ -295,7 +293,7 @@ def git_facts(refactor, monkeypatch):
         )
         monkeypatch.setattr(
             refactor, "collect_commit_facts",
-            lambda ctx, shas, rng: [
+            lambda work, shas, rng, cmd, branch, timeout=None: [
                 mapping.get(s, {"sha": s, "exists": False}) for s in shas
             ],
         )
@@ -995,7 +993,7 @@ def test_short_and_full_sha_are_seen_as_the_same_commit(
     )
     monkeypatch.setattr(
         refactor, "collect_commit_facts",
-        lambda ctx, shas, rng: [fact(sha=s) for s in shas],
+        lambda work, shas, rng, cmd, branch, timeout=None: [fact(sha=s) for s in shas],
     )
     write_result(state_path, "codex-apply-r1", {
         "items": [

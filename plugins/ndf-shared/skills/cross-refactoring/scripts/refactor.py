@@ -36,7 +36,6 @@ import subprocess
 import sys
 import time
 from typing import Any, Iterable, Optional
-from dataclasses import dataclass
 
 sys.path.insert(
     0,
@@ -442,20 +441,6 @@ def path_in_scope(path: str, scope: Iterable[str]) -> bool:
         if path == prefix or path.startswith(prefix + "/"):
             return True
     return False
-
-
-@dataclass
-class VerifyContext:
-    """検証の共通パラメータをまとめる。
-
-    _verify_and_record_items, _validate_fix_commits, collect_commit_facts が
-    同じ 5 パラメータを受け渡すため、1 つのオブジェクトに集約する。
-    """
-    work: str
-    scope: list[str]
-    test_command: str
-    head_branch: str
-    timeout: int
 
 
 def out_of_scope_files(commit: dict[str, Any], scope: Iterable[str]) -> list[str]:
@@ -1166,9 +1151,13 @@ def _verify_and_record_items(
     path: pathlib.Path,
     state: dict[str, Any],
     entry: dict[str, Any],
-    ctx: VerifyContext,
+    work: str,
     reported: dict[str, dict[str, Any]],
     in_range: set[str],
+    scope: list[str],
+    test_command: str,
+    head_branch: str,
+    timeout: int,
     dry_run: bool,
 ) -> tuple[list[str], list[str]]:
     """適用項目を検証し、項目と進捗に判定を記録する。"""
@@ -1183,8 +1172,10 @@ def _verify_and_record_items(
             problem = "適用結果に項目がありません"
             facts: list[dict[str, Any]] = []
         else:
-            facts = collect_commit_facts(ctx, _reported_shas(got), in_range)
-            problem = verify_apply_item(item, facts, ctx.scope)
+            facts = collect_commit_facts(
+                work, _reported_shas(got), in_range, test_command, head_branch, timeout,
+            )
+            problem = verify_apply_item(item, facts, scope)
         if problem:
             item["status"] = "abandoned"
             item["failure_reason"] = problem
@@ -1402,17 +1393,13 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
     reported, owner_of, in_range = ownership_result
 
     scope = state.get("target_scope") or []
-    ctx = VerifyContext(
-        work=work, scope=scope, test_command=test_command,
-        head_branch=head_branch,
-        timeout=_safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT),
-    )
     # **判定はその都度残す。** まとめて最後に保存すると、取り消しの途中で中断した
     # ときに適用の記録が一切残らず、どのコミットが検証を通ったのかを状態から
     # 復元できなくなる。再開可能性は収束ループの前提なので、ここが崩れると
     # 中断からの復帰手段が無くなる。
     applied, failed = _verify_and_record_items(
-        path, state, entry, ctx, reported, in_range, args.dry_run,
+        path, state, entry, work, reported, in_range, scope, test_command, head_branch,
+        _safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT), args.dry_run,
     )
 
     # 状態構築と失敗項目の取り消し
@@ -1717,19 +1704,25 @@ def cmd_abandon_items(args: argparse.Namespace) -> None:
 
 
 def _validate_fix_commits(
-    ctx: VerifyContext,
+    work: str,
     ordered_range: list[str],
     reported_shas: list[str],
+    scope: list[str],
+    test_command: str,
+    head_branch: str,
+    timeout: int,
 ) -> tuple[list[tuple[str, str]], list[str], list[str]]:
     """修正コミットの申告漏れと手順適合を検証する。"""
-    reported_full = _resolve_reported_to_full(ctx.work, reported_shas)
+    reported_full = _resolve_reported_to_full(work, reported_shas)
     unassigned = sorted(set(ordered_range) - reported_full)
-    facts = collect_commit_facts(ctx, reported_shas, set(ordered_range))
+    facts = collect_commit_facts(
+        work, reported_shas, set(ordered_range), test_command, head_branch, timeout,
+    )
     accepted: list[tuple[str, str]] = []
     problems: list[str] = []
     for commit in facts:
         item_id = (commit.get("trailers") or {}).get("Item-Id")
-        problem = verify_fix_commit(commit, ctx.scope)
+        problem = verify_fix_commit(commit, scope)
         if problem:
             problems.append(problem)
             info(f"❌ 修正コミットが手順を満たしていません: {problem}")
@@ -1793,14 +1786,10 @@ def _merge_fix_verify_and_reconcile(
         )
     reported_shas = _reported_shas(payload)
 
-    ctx = VerifyContext(
-        work=work, scope=state.get("target_scope") or [],
-        test_command=baseline.get("command") or "true",
-        head_branch=state["head_branch"],
-        timeout=_safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT),
-    )
     accepted, unassigned, problems = _validate_fix_commits(
-        ctx, ordered_range, reported_shas,
+        work, ordered_range, reported_shas, state.get("target_scope") or [],
+        baseline.get("command") or "true", state["head_branch"],
+        _safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT),
     )
 
     if unassigned:
@@ -2278,7 +2267,8 @@ def run_test_at(
 
 
 def collect_commit_facts(
-    ctx: VerifyContext, shas: list[str], in_range: set[str],
+    work: str, shas: list[str], in_range: set[str], test_command: str,
+    head_branch: str, test_timeout: int = DEFAULT_TEST_TIMEOUT,
 ) -> list[dict[str, Any]]:
     """申告されたコミットについて、git と実際のテスト実行から事実を集める。
 
@@ -2287,19 +2277,19 @@ def collect_commit_facts(
     """
     facts: list[dict[str, Any]] = []
     for sha in shas:
-        full = _git_out(ctx.work, ["rev-parse", "--verify", f"{sha}^{{commit}}"])
+        full = _git_out(work, ["rev-parse", "--verify", f"{sha}^{{commit}}"])
         if full is None or full not in in_range:
             facts.append({"sha": sha, "exists": False})
             continue
         facts.append({
             "sha": sha,
             "exists": True,
-            "trailers": commit_trailers(ctx.work, full),
-            "diff_lines": commit_diff_lines(ctx.work, full),
-            "files": commit_files(ctx.work, full),
-            "touches_tests": commit_touches_tests(ctx.work, full),
+            "trailers": commit_trailers(work, full),
+            "diff_lines": commit_diff_lines(work, full),
+            "files": commit_files(work, full),
+            "touches_tests": commit_touches_tests(work, full),
             "test_status": run_test_at(
-                ctx.work, full, ctx.test_command, ctx.head_branch, ctx.timeout,
+                work, full, test_command, head_branch, test_timeout
             ),
         })
     return facts
