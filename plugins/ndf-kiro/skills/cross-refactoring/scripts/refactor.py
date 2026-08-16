@@ -1426,6 +1426,22 @@ def _collect_fix_facts(
     return ordered_range, facts, unassigned
 
 
+def _partition_fix_facts(
+    facts: list[dict[str, Any]],
+) -> tuple[list[tuple[str, str]], list[str]]:
+    accepted: list[tuple[str, str]] = []
+    problems: list[str] = []
+    for commit in facts:
+        item_id = (commit.get("trailers") or {}).get("Item-Id")
+        problem = verify_fix_commit(commit)
+        if problem:
+            problems.append(problem)
+            info(f"❌ 修正コミットが手順を満たしていません: {problem}")
+            continue
+        accepted.append((item_id, commit["sha"]))
+    return accepted, problems
+
+
 def cmd_merge_fix(args: argparse.Namespace) -> None:
     """Step 6 — 修正結果を取り込み、修正ラウンドを 1 つ進める。"""
     path, state = _load(args.id)
@@ -1480,17 +1496,8 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     # 状態を記録しないだけでは、未検証の変更が Pull Request に残り続ける
     # （見送りの対象にもならない）。どのコミットが安全かは決められないので、
     # 適用フェーズの未割当コミットと同じ扱いにする。
-    problems: list[str] = []
-    accepted: list[tuple[str, str]] = []      # (item_id, sha)
+    accepted, problems = _partition_fix_facts(facts)
     needs_push = False
-    for commit in facts:
-        item_id = (commit.get("trailers") or {}).get("Item-Id")
-        problem = verify_fix_commit(commit)
-        if problem:
-            problems.append(problem)
-            info(f"❌ 修正コミットが手順を満たしていません: {problem}")
-            continue
-        accepted.append((item_id, commit["sha"]))
 
     if unassigned:
         info(
