@@ -1078,6 +1078,45 @@ def cmd_merge_proposals(args: argparse.Namespace) -> None:
         sys.exit(2)
 
 
+def _validate_commit_ownership(
+    work: str,
+    ordered_range: list[str],
+    payload: dict[str, Any],
+    round_items: set[str],
+) -> tuple[
+    dict[str, dict[str, Any]], dict[str, str], list[str], list[str], list[str]
+]:
+    """申告されたコミットがラウンド内で一意に所有されているか調べる。"""
+    reported: dict[str, dict[str, Any]] = {}
+    unknown_ids: list[str] = []
+    raw_items = payload.get("items")
+    if not isinstance(raw_items, list):
+        info(f"⚠ 適用結果の items が配列ではありません（{type(raw_items).__name__}）")
+        raw_items = []
+    for reported_item in raw_items:
+        if not isinstance(reported_item, dict):
+            continue
+        item_id = reported_item.get("item_id")
+        if item_id in round_items:
+            reported[item_id] = reported_item
+        elif item_id is not None:
+            unknown_ids.append(str(item_id))
+
+    owner_of: dict[str, str] = {}
+    duplicated: list[str] = []
+    for item_id, reported_item in reported.items():
+        for sha in _reported_shas(reported_item):
+            full = _git_out(work, ["rev-parse", "--verify", f"{sha}^{{commit}}"])
+            if full is None:
+                continue
+            if full in owner_of and owner_of[full] != item_id:
+                duplicated.append(full)
+            owner_of.setdefault(full, item_id)
+
+    unassigned = sorted(set(ordered_range) - set(owner_of))
+    return reported, owner_of, unassigned, unknown_ids, duplicated
+
+
 def cmd_merge_apply(args: argparse.Namespace) -> None:
     """Step 4 — 適用結果を検証して取り込む。
 
@@ -1152,21 +1191,6 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
     # コミットを数に入れると、割り当て済みに見えるのに項目別の検証にも入らず、
     # そのまま Pull Request に残せてしまう。
     round_items = set(entry["items"])
-    reported: dict[str, dict[str, Any]] = {}
-    unknown_ids: list[str] = []
-    raw_items = payload.get("items")
-    if not isinstance(raw_items, list):
-        info(f"⚠ 適用結果の items が配列ではありません（{type(raw_items).__name__}）")
-        raw_items = []
-    for r in raw_items:
-        if not isinstance(r, dict):
-            continue
-        item_id = r.get("item_id")
-        if item_id in round_items:
-            reported[item_id] = r
-        elif item_id is not None:
-            unknown_ids.append(str(item_id))
-
     # **範囲のコミットは全て、いずれかの改善項目に割り当てられていること。**
     # 申告から漏れたコミットはテストもトレーラーも差分予算も検査されず、そのまま
     # Pull Request に残る。都合の悪い変更を申告しないだけで検査を回避できてしまう。
@@ -1176,18 +1200,9 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
     #
     # 判定は**完全な SHA へ正規化してから**行う。申告の文字列をそのまま鍵にすると、
     # 一方が完全 SHA、他方が短縮 SHA で同じコミットを指したときに重複を見逃す。
-    owner_of: dict[str, str] = {}
-    duplicated: list[str] = []
-    for item_id, r in reported.items():
-        for sha in _reported_shas(r):
-            full = _git_out(work, ["rev-parse", "--verify", f"{sha}^{{commit}}"])
-            if full is None:
-                continue          # 実在しない申告は項目ごとの検証で落ちる
-            if full in owner_of and owner_of[full] != item_id:
-                duplicated.append(full)
-            owner_of.setdefault(full, item_id)
-
-    unassigned = sorted(in_range - set(owner_of))
+    reported, owner_of, unassigned, unknown_ids, duplicated = (
+        _validate_commit_ownership(work, ordered_range, payload, round_items)
+    )
     if unassigned or unknown_ids or duplicated:
         causes = []
         if unassigned:
