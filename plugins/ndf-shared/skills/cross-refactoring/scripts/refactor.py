@@ -1692,28 +1692,6 @@ def _validate_fix_commits(
     return accepted, unassigned, problems
 
 
-def _revert_fix_range(
-    path: pathlib.Path,
-    state: dict[str, Any],
-    entry: dict[str, Any],
-    ordered_range: list[str],
-    work: str,
-) -> None:
-    """検証失敗した修正範囲を戻し、次の起点を記録する。"""
-    entry["pending_push"] = True
-    statefile.save(path, state)
-    _revert_item_commits(
-        state,
-        {
-            "item_id": f"R{entry['round']}-fix{entry['fix_rounds'] + 1}",
-            "commits": list(ordered_range),
-        },
-        dry_run=False,
-    )
-    entry["fix_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
-    statefile.save(path, state)
-
-
 def cmd_merge_fix(args: argparse.Namespace) -> None:
     """Step 6 — 修正結果を取り込み、修正ラウンドを 1 つ進める。"""
     path, state = _load(args.id)
@@ -1816,7 +1794,19 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         info("検証を通らない変更を残さないため、この修正ラウンドの範囲を取り消します")
         # **取り消しへ着手する前に印を立てる。** 取り消しは済んだのに push できずに
         # 終わると、未検証の変更が Pull Request に残ったままになる。
-        _revert_fix_range(path, state, entry, ordered_range, work)
+        entry["pending_push"] = True
+        statefile.save(path, state)
+        _revert_item_commits(
+            state,
+            {"item_id": f"R{entry['round']}-fix{entry['fix_rounds'] + 1}",
+             "commits": list(ordered_range)},
+            dry_run=False,
+        )
+        # 取り消し後の状態を新しい起点にし、**その場で保存する**。ここで保存せずに
+        # 落ちると、次の実行は古い起点から範囲を取り直して取り消しコミット自体を
+        # 「未申告」と判定し、**取り消しを取り消して**しまう。
+        entry["fix_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
+        statefile.save(path, state)
         # **push は保存のあと。** ここで push して失敗すると、取り消しコミットは
         # ローカルに残るのに起点の更新が保存されず、叩き直しで二重に取り消してしまう。
         needs_push = True
