@@ -6,7 +6,7 @@ Claude Code / Codex / Kiro CLI向けのスキル・MCP設定を共有するた�
 
 このマーケットプレイスは、チーム全体でAI開発ツール（Claude Code / Codex / Kiro CLI）の導入を加速するための事前設定されたプラグインを提供します。
 
-**NDFプラグイン v8.1.0** は、同じ `ndf@ai-plugins` という名前で Claude Code / Codex / Kiro CLI へ配布されるランタイム別プラグインです。共通ソースは `plugins/ndf-shared/` に集約し、利用者が install する配布物は `plugins/ndf-claude/` / `plugins/ndf-codex/` / `plugins/ndf-kiro/` に分かれています。
+**NDFプラグイン v8.2.0** は、同じ `ndf@ai-plugins` という名前で Claude Code / Codex / Kiro CLI へ配布されるランタイム別プラグインです。共通ソースは `plugins/ndf-shared/` に集約し、利用者が install する配布物は `plugins/ndf-claude/` / `plugins/ndf-codex/` / `plugins/ndf-kiro/` に分かれています。
 
 - **公開Skills**: Claude Code向け core 27個、Kiro向け core 26個、Codex向け core 25個に分離。
 - **元Skills（30個）**:
@@ -102,8 +102,29 @@ kiro-cli chat --agent ndf
 
 | プラグイン名 | バージョン | 説明 | 詳細 |
 |------------|----------|------|------|
-| **ndf** | 8.1.0 | Claude Code / Codex / Kiro CLI 向けに runtime 別配布物を提供する NDF プラグイン。8個の専門エージェント（Claude版）、公開Skills（Claude Code向け core 27個、Kiro向け core 26個、Codex向け core 25個）、Claude SessionStart/Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:external-ai` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [Claude](./plugins/ndf-claude/README.md) / [Codex](./plugins/ndf-codex/README.md) / [Kiro](./plugins/ndf-kiro/README.md) |
+| **ndf** | 8.2.0 | Claude Code / Codex / Kiro CLI 向けに runtime 別配布物を提供する NDF プラグイン。8個の専門エージェント（Claude版）、公開Skills（Claude Code向け core 27個、Kiro向け core 26個、Codex向け core 25個）、Claude SessionStart/Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:external-ai` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [Claude](./plugins/ndf-claude/README.md) / [Codex](./plugins/ndf-codex/README.md) / [Kiro](./plugins/ndf-kiro/README.md) |
 | **playwright-kit** | 1.0.0 | Playwright による E2E テストの計画・実装・証跡管理を提供するプラグイン。ページ役割からのテスト計画、動画 / trace 付きスクリプト実装、レポート生成と Drive 保管、playwright_kit ランタイム（init、a11y / CWV スキャン）の 4 Skill。NDF v7.0.0 で分離。 | [Claude](./plugins/playwright-kit-claude/README.md) |
+
+### NDF v8.2.0 の主な変更
+
+**`/ndf:cross-refactoring` を実機検証で見つかった 9 件の不具合について修正しました。**
+提案フェーズは設計どおり動いていましたが、適用結果の検証で失敗した項目を取り消す経路が
+破綻し、進行を続行できない状態でした。
+
+| 直したこと | 変更 |
+| --- | --- |
+| 取り消しが他項目のコミットと競合する | 範囲を新しい順に全て戻し、残す項目を積み直す。分離できない位置関係のときはラウンド全件へ退避する |
+| 取り消し失敗を握り潰して進行する | 中断を**終了コード 4** で表し、「全件失敗」（2）と区別する |
+| 適用結果が状態に残らない | 項目ごとの判定を**その都度**保存する（`rounds[].apply_progress`） |
+| 未検証の変更が公開されたまま残る | 取り消しへ着手する**前**に `pending_push` を立て、次の実行で再送信する |
+| 範囲外の変更を検証しない | `--scope` を適用・修正の検証にも効かせる。生成物の同期は**進行側の責務**へ分離 |
+| 提案の記録が次ラウンドで上書きされる | 提案の結果ファイル名にもラウンド番号を入れる |
+| gemini が配置した手順書を読めない | 作業ディレクトリへ読み取り除外を無効にする設定を置く |
+| 語彙の許容値をプロンプトが列挙しない | 検証側が持つ語彙集合をプロンプトへ機械的に列挙する |
+| 初期化が CLI の認証を確認しない | `init` が参加 CLI の認証状態を確認し、未認証なら中断する |
+
+**互換性**: 提案の結果ファイル名が `<ランタイム>-propose-rf<ID>-r<ラウンド>-result.json` へ
+変わります。`--scope` には**現状固定テストの置き場所も含めてください**（検証に効くため）。
 
 ### NDF v8.1.0 の主な変更
 

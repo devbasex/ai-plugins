@@ -383,24 +383,56 @@ def test_self_reported_values_cannot_pass_the_check(
     assert "テストが成功していません" in state["items"][0]["failure_reason"]
 
 
-def test_failed_item_commits_are_reverted(
-    refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
-):
-    """検証に失敗した項目のコミットを Pull Request に残さない。
+def _drop_env(refactor, monkeypatch, revert_rc=0, pick_rc=0):
+    """取り消しと積み直しを実際には走らせず、順序と引数を記録する。
 
-    実装担当は項目ごとに push しているため、状態を `abandoned` にするだけでは
-    差分が残り、以後のレビュー対象にも混入する。
+    `git rev-parse HEAD` は**直前に積み直したコミット**に応じた値を返す。
+    積み直しで SHA が変わることを、状態の更新まで含めて確かめられるようにする。
     """
+    calls: list[list[str]] = []
+    picked: list[str] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        rc = 0
+        if cmd[:2] == ["git", "revert"] and "--abort" not in cmd:
+            rc = revert_rc
+        if cmd[:2] == ["git", "cherry-pick"] and "--abort" not in cmd:
+            rc = pick_rc
+            if rc == 0:
+                picked.append(cmd[-1])
+        return subprocess.CompletedProcess(cmd, rc, "", "conflict" if rc else "")
+
+    def fake_git_out(work, args):
+        if args[:2] == ["rev-parse", "--verify"]:
+            return args[-1].replace("^{commit}", "")
+        if args == ["rev-parse", "HEAD"]:
+            return f"new-{picked[-1]}" if picked else "HEAD_BEFORE"
+        return "HEAD_BEFORE"
+
+    monkeypatch.setattr(refactor.subprocess, "run", fake_run)
+    monkeypatch.setattr(refactor, "_git_out", fake_git_out)
+    pushes: list[list[str]] = []
+    monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: pushes.append(list(cmd)) or "")
+    return calls, pushes
+
+
+def _two_item_apply(tmp_path, env_tmp_dir, git_facts):
+    """1 件成功・1 件失敗の適用結果を用意する。失敗するのは R1-002。"""
     items = [item(item_id="R1-001"), item(item_id="R1-002")]
     state_path = _state_with_items(tmp_path, items)
     env_tmp_dir(state_path)
-    git_facts({
-        "ok111": fact(sha="ok111"),
-        "bad111": fact(sha="bad111", diff_lines=400,
-                       trailers=trailers(item_id="R1-002")),
-        "bad222": fact(sha="bad222", diff_lines=400,
-                       trailers=trailers(item_id="R1-002")),
-    })
+    git_facts(
+        {
+            "ok111": fact(sha="ok111"),
+            "bad111": fact(sha="bad111", diff_lines=400,
+                           trailers=trailers(item_id="R1-002")),
+            "bad222": fact(sha="bad222", diff_lines=400,
+                           trailers=trailers(item_id="R1-002")),
+        },
+        # 履歴は bad222 が最も新しい
+        in_range=["bad222", "bad111", "ok111"],
+    )
     write_result(state_path, "codex-apply-r1", {
         "base_sha": "aaa",
         "items": [
@@ -409,36 +441,181 @@ def test_failed_item_commits_are_reverted(
             {"item_id": "R1-002", "commits": [{"sha": "bad111"}, {"sha": "bad222"}]},
         ],
     })
+    return state_path
 
-    calls: list[list[str]] = []
-    monkeypatch.setattr(
-        refactor.subprocess, "run",
-        lambda cmd, **kw: calls.append(list(cmd))
-        or subprocess.CompletedProcess(cmd, 0, "", ""),
-    )
-    pushes: list[list[str]] = []
-    monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: pushes.append(cmd) or "")
-    # git の履歴は bad222 が最も新しい
-    monkeypatch.setattr(
-        refactor, "_git_out",
-        lambda work, args: ("bad222\nbad111\nok111" if args[:1] == ["rev-list"]
-                            else args[-1].replace("^{commit}", "")),
-    )
+
+def test_dropping_an_item_replays_the_kept_items(
+    refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
+):
+    """範囲を新しい順に全て戻し、残す項目を古い順に積み直すこと。
+
+    失敗した項目のコミット**だけ**を戻すと、あとから同じ箇所を触った別項目の
+    コミットと必ず競合する。範囲全体の巻き戻しは履歴の逆再生なので競合しない。
+    """
+    state_path = _two_item_apply(tmp_path, env_tmp_dir, git_facts)
+    calls, pushes = _drop_env(refactor, monkeypatch)
 
     refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
 
-    reverts = [c for c in calls if c[:2] == ["git", "revert"]]
-    # 新しいコミットから順に戻す
-    assert [c[-1] for c in reverts] == ["bad222", "bad111"]
+    reverts = [c[-1] for c in calls if c[:2] == ["git", "revert"]]
+    picks = [c[-1] for c in calls if c[:2] == ["git", "cherry-pick"]]
+    assert reverts == ["bad222", "bad111", "ok111"], "範囲を新しい順に全て戻していない"
+    assert picks == ["ok111"], "残す項目だけを積み直していない"
     assert pushes, "取り消し後に push していない"
     for cmd in pushes:
-        assert "--force" not in cmd
+        assert "--force" not in cmd and "--no-verify" not in cmd
 
     state = read_state(state_path)
     by_id = {i["item_id"]: i for i in state["items"]}
     assert by_id["R1-001"]["status"] == "reviewing"
     assert by_id["R1-002"]["status"] == "abandoned"
-    assert by_id["R1-002"]["commits"] == ["bad111", "bad222"]
+    assert by_id["R1-002"]["reverted"] is True
+    # 積み直しで SHA が変わるので、記録も追従すること
+    assert by_id["R1-001"]["commits"] == ["new-ok111"]
+
+
+def test_replay_conflict_falls_back_to_whole_round(
+    refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
+):
+    """積み直せないときはラウンド全件の取り消しへ退避すること。
+
+    どの項目を残せるか決められない以上、半端な履歴を残すより全件捨てる方が安全。
+    """
+    state_path = _two_item_apply(tmp_path, env_tmp_dir, git_facts)
+    calls, _ = _drop_env(refactor, monkeypatch, pick_rc=1)
+
+    with pytest.raises(SystemExit) as e:
+        refactor.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+        )
+    assert e.value.code == 2, "全件失敗として次の提案ラウンドへ進むこと"
+
+    assert ["git", "cherry-pick", "--abort"] in calls
+    assert ["git", "reset", "--hard", "HEAD_BEFORE"] in calls
+    state = read_state(state_path)
+    assert all(i["status"] == "abandoned" for i in state["items"])
+    assert state["rounds"][0]["apply"]["applied"] == []
+    assert state["rounds"][0]["drops"][-1]["mode"] == "round"
+
+
+def test_revert_failure_aborts_with_the_abort_code(
+    refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
+):
+    """取り消しに失敗したら「全件失敗」ではなく**中断**として終わること。
+
+    2（全件失敗）と同じ扱いにすると、検証を通っていない変更を Pull Request に
+    残したまま次の提案ラウンドが始まる。
+    """
+    _two_item_apply(tmp_path, env_tmp_dir, git_facts)
+    calls, _ = _drop_env(refactor, monkeypatch, revert_rc=1)
+
+    with pytest.raises(SystemExit) as e:
+        refactor.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+        )
+    assert e.value.code == refactor.ABORT == 4
+    assert ["git", "revert", "--abort"] in calls
+    assert ["git", "reset", "--hard", "HEAD_BEFORE"] in calls
+
+
+def test_progress_is_recorded_before_reverting(
+    refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
+):
+    """取り消しの前に判定を残すこと。中断しても到達点が状態から読める。"""
+    state_path = _two_item_apply(tmp_path, env_tmp_dir, git_facts)
+    seen: list[list[dict]] = []
+
+    calls, _ = _drop_env(refactor, monkeypatch, revert_rc=1)
+    real_run = refactor.subprocess.run
+
+    def spying_run(cmd, **kwargs):
+        if cmd[:2] == ["git", "revert"]:
+            seen.append(read_state(state_path)["rounds"][0].get("apply_progress"))
+        return real_run(cmd, **kwargs)
+
+    monkeypatch.setattr(refactor.subprocess, "run", spying_run)
+    with pytest.raises(SystemExit):
+        refactor.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+        )
+
+    assert seen, "取り消しが走っていない"
+    recorded = {p["item_id"]: p["result"] for p in seen[0]}
+    assert recorded == {"R1-001": "ok", "R1-002": "failed"}
+
+
+def test_pending_push_is_marked_before_reverting(
+    refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
+):
+    """取り消しへ着手する前に再送信の印を立てること。
+
+    取り消しは済んだのに push できずに終わると、検証を通っていない変更が
+    Pull Request に残り、次の実行は処理済みガードで素通りする。
+    """
+    state_path = _two_item_apply(tmp_path, env_tmp_dir, git_facts)
+    marks: list[bool] = []
+
+    calls, _ = _drop_env(refactor, monkeypatch, revert_rc=1)
+    real_run = refactor.subprocess.run
+
+    def spying_run(cmd, **kwargs):
+        if cmd[:2] == ["git", "revert"]:
+            marks.append(read_state(state_path)["rounds"][0].get("pending_push"))
+        return real_run(cmd, **kwargs)
+
+    monkeypatch.setattr(refactor.subprocess, "run", spying_run)
+    with pytest.raises(SystemExit):
+        refactor.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+        )
+    assert marks and marks[0] is True
+
+
+def test_pending_push_is_cleared_after_a_successful_push(
+    refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
+):
+    state_path = _two_item_apply(tmp_path, env_tmp_dir, git_facts)
+    _drop_env(refactor, monkeypatch)
+    refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
+    assert read_state(state_path)["rounds"][0]["pending_push"] is False
+
+
+def test_out_of_scope_commit_fails_the_item(
+    refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
+):
+    """指定した範囲の外を触ったコミットを検証で捕まえること。
+
+    範囲を必須にした目的（提案の発散と変更の肥大を防ぐ）を、検証へ反映する。
+    """
+    items = [item(item_id="R1-001")]
+    state_path = _state_with_items(tmp_path, items)
+    env_tmp_dir(state_path)
+    git_facts({"out111": fact(
+        sha="out111", files=["src/foo.py", "dist/foo.py"],
+    )})
+    write_result(state_path, "codex-apply-r1", {
+        "base_sha": "aaa",
+        "items": [{"item_id": "R1-001", "commits": [{"sha": "out111"}]}],
+    })
+    _drop_env(refactor, monkeypatch)
+
+    with pytest.raises(SystemExit) as e:
+        refactor.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+        )
+    assert e.value.code == 2
+    state = read_state(state_path)
+    assert state["items"][0]["out_of_scope"] is True
+    assert "dist/foo.py" in state["items"][0]["failure_reason"]
+
+
+def test_scope_check_matches_only_on_path_prefix(refactor):
+    assert refactor.path_in_scope("src/foo.py", ["src"])
+    assert refactor.path_in_scope("src", ["src"])
+    assert not refactor.path_in_scope("src2/foo.py", ["src"]), "前方一致の取りこぼし"
+    assert not refactor.path_in_scope("dist/foo.py", ["src"])
+    # 範囲が空なら検査しない（指定が無いのに全件落とさない）
+    assert refactor.out_of_scope_files({"files": ["any.py"]}, []) == []
 
 
 def test_no_push_when_nothing_was_reverted(

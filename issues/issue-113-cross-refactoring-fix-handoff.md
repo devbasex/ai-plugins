@@ -1,5 +1,16 @@
 # cross-refactoring 不具合修正の引継ぎ
 
+> **対応済み（NDF v8.2.0）。** 9 件すべてを修正した。設計判断と結果は
+> [issue-113-cross-refactoring-defect-fixes.md](issue-113-cross-refactoring-defect-fixes.md)
+> にある。以下は着手時点のメモとして残す。着手前と変わった点は 2 つ。
+>
+> - **不具合 7 の回避は編集元へ反映済み**（`prepare-worktrees.sh`）。
+>   プラグインキャッシュへの手当ては不要になった
+> - **取り消しは項目単位を保てないことがある。** 同一ファイルの隣接行を触る項目どうしは
+>   git だけでは分離できず、そのラウンドは全件取り消しへ退避する（実測で確認）
+>
+> 「未検証の範囲」（レビューフェーズ以降）は**依然として未検証**である。
+
 実機検証で見つかった 9 件を修正するための作業メモ。
 不具合の内容・エビデンス・修正の方向は
 [issue-113-cross-refactoring-trial-report.md](issue-113-cross-refactoring-trial-report.md) にある。
@@ -72,16 +83,17 @@ uv run --with pytest python -m pytest \
   plugins/ndf-shared/skills/cross-refactoring/tests \
   plugins/ndf-shared/skills/cross-review/tests -q
 
-# 実機
+# 実機（`--scope` には現状固定テストの置き場所も含める。範囲は検証にも効く）
 /ndf:cross-refactoring <PR番号> \
   --scope plugins/ndf-shared/skills/cross-refactoring/scripts \
+          plugins/ndf-shared/skills/cross-refactoring/tests \
           plugins/ndf-shared/skills/cross-review/scripts/lib \
   --baseline-test "<上のテストコマンド>"
 ```
 
 実行前に確認すること。
 
-- `kiro-cli whoami` が認証済みを返す（不具合 9 が直るまでは手で確認する）
+- 認証は `init` が確認する（不具合 9 は対応済み）。手で確認する必要は無くなった
 - 進行を駆動する作業ディレクトリが対象ブランチを掴んでいない
   （同じブランチを 2 か所へ展開できないため初期化に失敗する）
 
