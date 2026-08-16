@@ -1078,6 +1078,16 @@ def cmd_merge_proposals(args: argparse.Namespace) -> None:
         sys.exit(2)
 
 
+def _resolve_reported_to_full(work: str, reported_shas: list[str]) -> set[str]:
+    """申告 SHA のうち実在するコミットを完全 SHA に正規化する。"""
+    return {
+        full for full in (
+            _git_out(work, ["rev-parse", "--verify", f"{sha}^{{commit}}"])
+            for sha in reported_shas
+        ) if full
+    }
+
+
 def _validate_commit_ownership(
     work: str,
     ordered_range: list[str],
@@ -1105,10 +1115,7 @@ def _validate_commit_ownership(
     owner_of: dict[str, str] = {}
     duplicated: list[str] = []
     for item_id, reported_item in reported.items():
-        for sha in _reported_shas(reported_item):
-            full = _git_out(work, ["rev-parse", "--verify", f"{sha}^{{commit}}"])
-            if full is None:
-                continue
+        for full in _resolve_reported_to_full(work, _reported_shas(reported_item)):
             if full in owner_of and owner_of[full] != item_id:
                 duplicated.append(full)
             owner_of.setdefault(full, item_id)
@@ -1669,12 +1676,7 @@ def _validate_fix_commits(
     timeout: int,
 ) -> tuple[list[tuple[str, str]], list[str], list[str]]:
     """修正コミットの申告漏れと手順適合を検証する。"""
-    reported_full = {
-        full for full in (
-            _git_out(work, ["rev-parse", "--verify", f"{sha}^{{commit}}"])
-            for sha in reported_shas
-        ) if full
-    }
+    reported_full = _resolve_reported_to_full(work, reported_shas)
     unassigned = sorted(set(ordered_range) - reported_full)
     facts = collect_commit_facts(
         work, reported_shas, set(ordered_range), test_command, head_branch, timeout,
