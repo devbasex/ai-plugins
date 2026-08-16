@@ -423,11 +423,21 @@ def path_in_scope(path: str, scope: Iterable[str]) -> bool:
 
     除外規則を足さない。規則を書けるようにすると、規則を 1 行足すだけで
     範囲の検査を骨抜きにできてしまう。
+
+    突き合わせる前に `./` を落とす。シェルの補完で `--scope ./src` の形になることが
+    多い一方、git が出すのは `src/foo.py` なので、**そのまま比べると全てのコミットが
+    範囲外**になり、適用が必ず失敗する。`.` と `./` はリポジトリ全体を指す。
     """
     for entry in scope:
-        prefix = str(entry).strip().rstrip("/")
-        if not prefix:
+        raw = str(entry).strip()
+        if not raw:
             continue
+        prefix = raw
+        while prefix.startswith("./"):
+            prefix = prefix[2:]
+        prefix = prefix.rstrip("/")
+        if prefix in {"", "."}:
+            return True
         if path == prefix or path.startswith(prefix + "/"):
             return True
     return False

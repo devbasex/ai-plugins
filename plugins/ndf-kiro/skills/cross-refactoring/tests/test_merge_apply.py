@@ -627,6 +627,26 @@ def test_scope_check_matches_only_on_path_prefix(refactor):
     assert refactor.out_of_scope_files({"files": ["any.py"]}, []) == []
 
 
+@pytest.mark.parametrize("scope", [["./src"], ["src/"], ["./src/"], ["  ./src  "]])
+def test_scope_accepts_shell_completed_paths(refactor, scope):
+    """`--scope ./src` は補完で頻出する。git は `src/foo.py` と出すので正規化する。
+
+    正規化しないと**全てのコミットが範囲外**になり、適用が必ず失敗する。
+    """
+    assert refactor.path_in_scope("src/foo.py", scope)
+    assert not refactor.path_in_scope("dist/foo.py", scope)
+
+
+@pytest.mark.parametrize("scope", [["."], ["./"], [".//"]])
+def test_scope_dot_means_the_whole_repository(refactor, scope):
+    assert refactor.path_in_scope("anywhere/deep/foo.py", scope)
+
+
+def test_blank_scope_entry_is_ignored(refactor):
+    """空の指定で全許可にしない。指定の書き損じで検査が骨抜きになる。"""
+    assert not refactor.path_in_scope("dist/foo.py", ["", "  ", "src"])
+
+
 def test_no_push_when_nothing_was_reverted(
     refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
 ):
