@@ -1254,6 +1254,9 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
         if args.dry_run:
             info("（dry-run）状態ファイルは更新していません")
         else:
+            # 項目別の失敗と同じく、**ここで取り消した項目も「対象外」に残す**。
+            # 残さないと同じ提案が次のラウンドで再び採用される。
+            _defer_abandoned_items(state, entry)
             statefile.save(path, state)
             _push_head(state)
             entry["pending_push"] = False
@@ -2512,6 +2515,43 @@ def _order_newest_first(work: str, shas: list[str]) -> list[str]:
     return sorted(shas, key=lambda s: rank.get(resolved[s], len(rank)))
 
 
+def _worktree_changes(work: str) -> dict[str, str]:
+    """作業ツリーの変更を `パス → 状態` で返す。同期の前後を比べるために使う。
+
+    無視されているファイルは現れない（`--porcelain` の既定）。改名は移動先の
+    パスだけを見る。
+    """
+    out = _git_out(work, ["status", "--porcelain", "-uall"])
+    changes: dict[str, str] = {}
+    for line in (out or "").splitlines():
+        if len(line) < 4:
+            continue
+        path = line[3:]
+        if " -> " in path:            # 改名。移動先だけを対象にする
+            path = path.split(" -> ", 1)[1]
+        changes[path.strip('"')] = line[:2]
+    return changes
+
+
+def _control_prefix(state: dict[str, Any], work: str) -> Optional[str]:
+    """作業ディレクトリから見た制御用ディレクトリの相対パス。外にあれば `None`。
+
+    状態ファイル・プロンプト・結果・ログの置き場所で、**同期コミットへ入れない**。
+    `prepare-worktrees.sh` が無視の設定を置くが、置き場所を環境変数で移した場合や
+    配置前に同期が走った場合に備えて、ここでも明示的に外す。
+    """
+    tmp_dir = str(state.get("tmp_dir") or "")
+    if not tmp_dir:
+        return None
+    try:
+        relative = pathlib.Path(tmp_dir).resolve().relative_to(
+            pathlib.Path(work).resolve()
+        )
+    except ValueError:
+        return None
+    return f"{relative}/"
+
+
 def _sync_generated(state: dict[str, Any]) -> None:
     """push の直前に生成物を同期し、差分があれば進行側のコミットとして積む。
 
@@ -2530,6 +2570,10 @@ def _sync_generated(state: dict[str, Any]) -> None:
     if not command:
         return
     work = state["worktrees"]["work"]
+    # **同期コマンドが作った差分だけを拾う。** `git add -A` にすると、同期の前から
+    # あった未追跡・変更済みファイルまで巻き込む。同期コミットは項目の検証を通らない
+    # ので、そこへ紛れ込んだ変更は**検査を一切受けずに Pull Request へ入る**。
+    before = _worktree_changes(work)
     code, timed_out = _run_with_timeout(
         command, work, _safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT)
     )
@@ -2538,11 +2582,17 @@ def _sync_generated(state: dict[str, Any]) -> None:
             f"生成物の同期に失敗しました（{command}）: "
             + ("打ち切りました" if timed_out else f"終了コード {code}")
         )
-    if not _git_out(work, ["status", "--porcelain"]):
+    control = _control_prefix(state, work)
+    produced = sorted(
+        path for path, status in _worktree_changes(work).items()
+        if before.get(path) != status
+        and not (control and path.startswith(control))
+    )
+    if not produced:
         return
-    _sh(["git", "add", "-A"], cwd=work)
+    _sh(["git", "add", "--", *produced], cwd=work)
     _sh(["git", "commit", "-m", SYNC_COMMIT_MESSAGE], cwd=work)
-    info(f"🔧 生成物を同期しました（{command}）")
+    info(f"🔧 生成物を同期しました（{command} / {len(produced)} ファイル）")
 
 
 def _push_head(state: dict[str, Any]) -> None:

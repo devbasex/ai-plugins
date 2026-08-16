@@ -392,6 +392,7 @@ def _drop_env(refactor, monkeypatch, revert_rc=0, pick_rc=0, sync_dirty=False):
     calls: list[list[str]] = []
     picked: list[str] = []
     reverted: list[str] = []
+    statuses: list[int] = []
 
     def fake_run(cmd, **kwargs):
         calls.append(list(cmd))
@@ -414,8 +415,13 @@ def _drop_env(refactor, monkeypatch, revert_rc=0, pick_rc=0, sync_dirty=False):
                 return f"new-{picked[-1]}"
             return "REVERTED_HEAD" if reverted else "HEAD_BEFORE"
         if args[:1] == ["status"]:
-            # 同期で差分が出たかどうか。既定は「差分なし」
-            return "?? generated/a.py" if sync_dirty else ""
+            # 同期の前後で 2 回呼ばれる。1 回目が同期前、2 回目以降が同期後。
+            # 既定は「同期前も後も差分なし」
+            statuses.append(len(statuses))
+            if sync_dirty is False:
+                return ""
+            before, after = sync_dirty
+            return before if len(statuses) == 1 else after
         return "HEAD_BEFORE"
 
     monkeypatch.setattr(refactor.subprocess, "run", fake_run)
@@ -1267,7 +1273,8 @@ def test_push_syncs_generated_files_first(
     """
     _sync_state(tmp_path, env_tmp_dir, git_facts)
     order: list[str] = []
-    _drop_env(refactor, monkeypatch, sync_dirty=True)
+    _drop_env(refactor, monkeypatch,
+              sync_dirty=("", "?? plugins/generated/a.py"))
     monkeypatch.setattr(
         refactor, "_sh",
         lambda cmd, **k: order.append("push" if cmd[:2] == ["git", "push"] else cmd[1])
@@ -1343,3 +1350,111 @@ def test_merge_apply_pushes_even_when_every_item_passes(
     entry = read_state(state_path)["rounds"][0]
     assert entry["pending_push"] is False
     assert entry["apply"]["applied"] == ["R1-001"]
+
+
+def test_sync_stages_only_what_the_command_produced(
+    refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
+):
+    """同期コマンドが作った差分だけを stage すること。
+
+    `git add -A` にすると、同期の前からあった未追跡・変更済みファイルまで巻き込む。
+    同期コミットは項目の検証を通らないので、紛れ込んだ変更は**検査を一切受けずに**
+    Pull Request へ入る。
+    """
+    _sync_state(tmp_path, env_tmp_dir, git_facts)
+    staged: list[list[str]] = []
+    _drop_env(
+        refactor, monkeypatch,
+        sync_dirty=(
+            "?? leftover.txt\n M src/edited.py",
+            "?? leftover.txt\n M src/edited.py\n M plugins/generated/a.py",
+        ),
+    )
+    monkeypatch.setattr(
+        refactor, "_sh",
+        lambda cmd, **k: staged.append(list(cmd)) or "",
+    )
+    monkeypatch.setattr(
+        refactor, "_run_with_timeout",
+        lambda command, cwd, timeout, grace=5.0: (0, False),
+    )
+    refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
+
+    adds = [c for c in staged if c[:2] == ["git", "add"]]
+    assert adds, "同期の差分を stage していない"
+    assert adds[0] == ["git", "add", "--", "plugins/generated/a.py"]
+    assert "leftover.txt" not in adds[0], "同期前からあった未追跡ファイルを巻き込んでいる"
+    assert "src/edited.py" not in adds[0], "同期前からあった変更を巻き込んでいる"
+
+
+def test_sync_excludes_the_control_directory(
+    refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
+):
+    """状態ファイル・結果・ログの置き場所を同期コミットへ入れないこと。"""
+    state_path = _sync_state(tmp_path, env_tmp_dir, git_facts)
+    # 既定の配置では制御用ディレクトリが作業ディレクトリの中にある
+    state = read_state(state_path)
+    state["worktrees"]["work"] = str(state_path.parent.parent)
+    state_path.write_text(__import__("json").dumps(state), encoding="utf-8")
+    control = state_path.parent.name          # `.cross_refactoring`
+    staged: list[list[str]] = []
+    _drop_env(
+        refactor, monkeypatch,
+        sync_dirty=("", f"?? {control}/codex-apply-r1-result.json\n M generated/a.py"),
+    )
+    monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: staged.append(list(cmd)) or "")
+    monkeypatch.setattr(
+        refactor, "_run_with_timeout",
+        lambda command, cwd, timeout, grace=5.0: (0, False),
+    )
+    refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
+
+    adds = [c for c in staged if c[:2] == ["git", "add"]]
+    assert adds == [["git", "add", "--", "generated/a.py"]]
+
+
+def test_sync_without_changes_makes_no_commit(
+    refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
+):
+    """同期しても差分が出なければ、空のコミットを積まないこと。"""
+    _sync_state(tmp_path, env_tmp_dir, git_facts)
+    staged: list[list[str]] = []
+    _drop_env(refactor, monkeypatch, sync_dirty=("", ""))
+    monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: staged.append(list(cmd)) or "")
+    monkeypatch.setattr(
+        refactor, "_run_with_timeout",
+        lambda command, cwd, timeout, grace=5.0: (0, False),
+    )
+    refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
+
+    assert [c for c in staged if c[:2] == ["git", "commit"]] == []
+    assert [c for c in staged if c[:2] == ["git", "push"]], "push はすること"
+
+
+def test_whole_round_failure_also_defers_items(
+    refactor, tmp_path, env_tmp_dir, no_git, git_facts
+):
+    """ラウンドごと取り消す経路でも「対象外」として記録すること。
+
+    項目別の失敗だけを記録すると、未割当コミットで落ちた提案が次のラウンドで
+    再び採用される。
+    """
+    items = [item(item_id="R1-001")]
+    state_path = _state_with_items(tmp_path, items)
+    env_tmp_dir(state_path)
+    # 範囲に 2 件あるが、申告は 1 件だけ（未割当コミットあり）
+    git_facts({"ok111": fact(sha="ok111")}, in_range=["sneaky", "ok111"])
+    write_result(state_path, "codex-apply-r1", {
+        "base_sha": "aaa",
+        "items": [{"item_id": "R1-001", "commits": [{"sha": "ok111"}]}],
+    })
+    with pytest.raises(SystemExit) as e:
+        refactor.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+        )
+    assert e.value.code == 2
+
+    state = read_state(state_path)
+    deferred = {d["item_id"]: d for d in state["deferred_items"]}
+    assert list(deferred) == ["R1-001"]
+    assert "割り当てられていない" in deferred["R1-001"]["defer_reason"]
