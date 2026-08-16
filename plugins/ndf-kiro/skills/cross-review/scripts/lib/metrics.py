@@ -39,6 +39,93 @@ def _verdict(review: dict[str, Any], reviewer: str) -> Optional[str]:
     return value if isinstance(value, str) else None
 
 
+def _update_impl_metrics(
+    entry: dict[str, Any],
+    items_by_id: dict[str, dict[str, Any]],
+    impl: dict[str, dict[str, Any]],
+    unmeasured: list[str],
+) -> None:
+    """ラウンドの実装担当指標とモデル警告を更新する。"""
+    round_no = entry.get("round")
+    impl_runtime = entry["impl"]
+    impl_model = entry.get("impl_model") or {}
+    requested = impl_model.get("requested")
+    observed = impl_model.get("observed")
+
+    warning = _models.mismatch_warning(impl_runtime, requested, observed)
+    if warning:
+        unmeasured.append(f"round {round_no}: {warning}")
+    if not _models.is_measurable(impl_runtime, requested):
+        unmeasured.append(
+            f"round {round_no}: {impl_runtime} が既定モデル（auto）で動いたため、"
+            "実装担当の集計から分離する"
+        )
+
+    bucket = impl.setdefault(_key(impl_runtime, requested), _new_impl_bucket())
+    bucket["rounds"] += 1
+    bucket["seconds"] += _duration(entry, ("apply", "fix"))
+    round_items = [items_by_id[i] for i in entry.get("items", []) if i in items_by_id]
+    bucket["applied"] += sum(1 for i in round_items if i.get("status") == "done")
+    bucket["abandoned"] += sum(
+        1 for i in round_items if i.get("status") in {"abandoned", "blocked"}
+    )
+    bucket["budget_exceeded"] += sum(1 for i in round_items if i.get("budget_exceeded"))
+    bucket["test_failed"] += sum(1 for i in round_items if i.get("test_failed"))
+    bucket["fix_rounds"] += int(entry.get("fix_rounds") or 0)
+
+    reviews = _round_reviews(entry)
+    if reviews:
+        approved_first = all(
+            _verdict(reviews[0], reviewer) == "APPROVE"
+            for reviewer in entry.get("reviewers", [])
+        )
+        bucket["first_review_total"] += 1
+        bucket["first_review_approved"] += 1 if approved_first else 0
+
+
+def _update_reviewer_metrics(
+    entry: dict[str, Any],
+    name: str,
+    reviews: list[dict[str, Any]],
+    reviewer: dict[str, dict[str, Any]],
+    unmeasured: list[str],
+) -> None:
+    """ラウンドのレビュー担当 1 名分の指標と警告を更新する。"""
+    spec = (entry.get("reviewer_models") or {}).get(name) or {}
+    requested = spec.get("requested")
+    observed = spec.get("observed")
+    warning = _models.mismatch_warning(name, requested, observed)
+    if warning:
+        unmeasured.append(f"round {entry.get('round')}: {warning}")
+    if not _models.is_measurable(name, requested):
+        unmeasured.append(
+            f"round {entry.get('round')}: {name} が既定モデル（auto）で動いたため、"
+            "レビュー担当の集計から分離する"
+        )
+    bucket = reviewer.setdefault(_key(name, requested), _new_reviewer_bucket())
+    bucket["seconds"] += float((entry.get("reviewer_seconds") or {}).get(name, 0))
+    for review in reviews:
+        if _verdict(review, name) is None:
+            continue
+        bucket["reviews"] += 1
+        findings = [
+            finding for finding in review.get("findings", [])
+            if isinstance(finding, dict) and finding.get("reviewer") == name
+        ]
+        bucket["findings"] += len(findings)
+        bucket["findings_resolved"] += sum(
+            1 for finding in findings if finding.get("resolved")
+        )
+        for other in (candidate for candidate in entry.get("reviewers", []) if candidate != name):
+            other_verdict = _verdict(review, other)
+            if other_verdict is None:
+                continue
+            bucket["verdict_pairs"] += 1
+            bucket["verdict_agreements"] += int(
+                other_verdict == _verdict(review, name)
+            )
+
+
 def aggregate(state: dict[str, Any]) -> dict[str, Any]:
     """状態ファイルから実装担当・レビュー担当それぞれの指標を出す。
 
@@ -52,83 +139,14 @@ def aggregate(state: dict[str, Any]) -> dict[str, Any]:
     unmeasured: list[str] = []
 
     for entry in state.get("rounds", []):
-        round_no = entry.get("round")
         impl_runtime = entry.get("impl")
         if not impl_runtime:
             continue
-        impl_model = (entry.get("impl_model") or {})
-        requested = impl_model.get("requested")
-        observed = impl_model.get("observed")
-
-        warning = _models.mismatch_warning(impl_runtime, requested, observed)
-        if warning:
-            unmeasured.append(f"round {round_no}: {warning}")
-        if not _models.is_measurable(impl_runtime, requested):
-            unmeasured.append(
-                f"round {round_no}: {impl_runtime} が既定モデル（auto）で動いたため、"
-                "実装担当の集計から分離する"
-            )
-
-        bucket = impl.setdefault(_key(impl_runtime, requested), _new_impl_bucket())
-        bucket["rounds"] += 1
-        bucket["seconds"] += _duration(entry, ("apply", "fix"))
-
-        round_items = [items_by_id[i] for i in entry.get("items", []) if i in items_by_id]
-        bucket["applied"] += sum(1 for i in round_items if i.get("status") == "done")
-        bucket["abandoned"] += sum(
-            1 for i in round_items if i.get("status") in {"abandoned", "blocked"}
-        )
-        bucket["budget_exceeded"] += sum(
-            1 for i in round_items if i.get("budget_exceeded")
-        )
-        bucket["test_failed"] += sum(1 for i in round_items if i.get("test_failed"))
-        bucket["fix_rounds"] += int(entry.get("fix_rounds") or 0)
+        _update_impl_metrics(entry, items_by_id, impl, unmeasured)
 
         reviews = _round_reviews(entry)
-        if reviews:
-            first = reviews[0]
-            approved_first = all(
-                _verdict(first, r) == "APPROVE" for r in entry.get("reviewers", [])
-            )
-            bucket["first_review_total"] += 1
-            bucket["first_review_approved"] += 1 if approved_first else 0
-
-        reviewer_models = entry.get("reviewer_models") or {}
         for name in entry.get("reviewers", []):
-            spec = reviewer_models.get(name) or {}
-            r_requested = spec.get("requested")
-            r_observed = spec.get("observed")
-            r_warning = _models.mismatch_warning(name, r_requested, r_observed)
-            if r_warning:
-                unmeasured.append(f"round {round_no}: {r_warning}")
-            if not _models.is_measurable(name, r_requested):
-                unmeasured.append(
-                    f"round {round_no}: {name} が既定モデル（auto）で動いたため、"
-                    "レビュー担当の集計から分離する"
-                )
-            rb = reviewer.setdefault(_key(name, r_requested), _new_reviewer_bucket())
-            # 担当ごとの所要時間があればそれを使う。無ければ 0 のままにする。
-            # ラウンドの合計を配ると 2 者分を両方に数えてしまい、比較が成り立たない。
-            rb["seconds"] += float((entry.get("reviewer_seconds") or {}).get(name, 0))
-            for review in reviews:
-                if _verdict(review, name) is None:
-                    continue
-                rb["reviews"] += 1
-                findings = [
-                    f for f in review.get("findings", [])
-                    if isinstance(f, dict) and f.get("reviewer") == name
-                ]
-                rb["findings"] += len(findings)
-                rb["findings_resolved"] += sum(1 for f in findings if f.get("resolved"))
-                others = [o for o in entry.get("reviewers", []) if o != name]
-                for other in others:
-                    other_verdict = _verdict(review, other)
-                    if other_verdict is None:
-                        continue
-                    rb["verdict_pairs"] += 1
-                    rb["verdict_agreements"] += (
-                        1 if other_verdict == _verdict(review, name) else 0
-                    )
+            _update_reviewer_metrics(entry, name, reviews, reviewer, unmeasured)
 
     return {
         "impl": {k: _finish_impl(v) for k, v in sorted(impl.items())},
