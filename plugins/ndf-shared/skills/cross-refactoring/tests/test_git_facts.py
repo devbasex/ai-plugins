@@ -60,7 +60,8 @@ def test_facts_come_from_a_real_repository(refactor, work):
     assert ordered == [second, first], "新しい順で返っていない"
 
     facts = refactor.collect_commit_facts(
-        str(work), [first, second], set(ordered), "true", "main"
+        refactor.VerifyContext(work=str(work), scope=[], test_command="true", head_branch="main", timeout=300),
+        [first, second], set(ordered),
     )
     assert [f["sha"] for f in facts] == [first, second]
     assert all(f["exists"] for f in facts)
@@ -81,7 +82,8 @@ def test_missing_trailers_are_seen_as_missing(refactor, work):
     base = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
     sha = _commit(work, "Refactor: トレーラーなし", {"src/foo.py": "def f():\n    return 2\n"})
     facts = refactor.collect_commit_facts(
-        str(work), [sha], {sha}, "true", "main"
+        refactor.VerifyContext(work=str(work), scope=[], test_command="true", head_branch="main", timeout=300),
+        [sha], {sha},
     )
     problem = refactor.verify_commit_trailers(facts[0])
     assert problem is not None and "Item-Id" in problem
@@ -97,7 +99,8 @@ def test_commit_outside_the_range_is_rejected(refactor, work):
     ordered = refactor.commits_in_range(str(work), base, "HEAD")
     assert ordered == [new]
     facts = refactor.collect_commit_facts(
-        str(work), [old], set(ordered), "true", "main"
+        refactor.VerifyContext(work=str(work), scope=[], test_command="true", head_branch="main", timeout=300),
+        [old], set(ordered),
     )
     assert facts[0]["exists"] is False
 
@@ -107,7 +110,8 @@ def test_failing_test_is_detected_by_running_it(refactor, work):
     base = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
     sha = _commit(work, "Refactor: 壊した" + TRAILERS, {"src/foo.py": "def f():\n    return 9\n"})
     facts = refactor.collect_commit_facts(
-        str(work), [sha], {sha}, "false", "main"
+        refactor.VerifyContext(work=str(work), scope=[], test_command="false", head_branch="main", timeout=300),
+        [sha], {sha},
     )
     assert facts[0]["test_status"] == "fail"
     assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=work).stdout.strip() == "main"
@@ -124,7 +128,8 @@ def test_fix_commits_pass_verification_through_real_git(refactor, work):
                   {"src/foo.py": "def f():\n    return 1  # 直した\n"})
     ordered = refactor.commits_in_range(str(work), base, "HEAD")
     facts = refactor.collect_commit_facts(
-        str(work), [sha], set(ordered), "true", "main"
+        refactor.VerifyContext(work=str(work), scope=[], test_command="true", head_branch="main", timeout=300),
+        [sha], set(ordered),
     )
     assert refactor.verify_fix_commit(facts[0]) is None
 

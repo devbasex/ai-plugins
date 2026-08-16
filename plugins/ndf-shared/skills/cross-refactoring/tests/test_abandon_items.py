@@ -242,7 +242,7 @@ def _prepare_fix(refactor, tmp_path, env_tmp_dir, monkeypatch, claimed,
     # 検証の材料は git から取る。テストでは git 由来の事実だけを差し替える。
     monkeypatch.setattr(
         refactor, "collect_commit_facts",
-        lambda work, shas, rng, cmd, branch, timeout=None: resolved_facts,
+        lambda ctx, shas, rng: resolved_facts,
     )
     write_result(state_path, "codex-fix-r1", {
         "resolved_thread_ids": claimed,
@@ -405,7 +405,7 @@ def test_broken_fix_result_does_not_crash(
     monkeypatch.setattr(refactor, "_git_out", lambda work, args: "HEAD")
     monkeypatch.setattr(
         refactor, "collect_commit_facts",
-        lambda work, shas, rng, cmd, branch, timeout=None: [],
+        lambda ctx, shas, rng: [],
     )
     refactor.cmd_merge_fix(type("A", (), {"id": 130, "round": 1})())
     state = read_state(state_path)
