@@ -613,6 +613,36 @@ def _tail_last_nonempty_line(path: pathlib.Path, limit: int = 4096) -> str:
     return ""
 
 
+def _check_early_error(
+    pid: int,
+    paths: AgentPaths,
+    status: AgentStatus,
+    agent: str,
+    alive: bool,
+) -> Optional[AgentStatus]:
+    """err.log (claude は stdout.log も) に致命パターンがあれば EARLY_ERROR を返す。
+
+    明確な致命 (FATAL) のみ kill する。曖昧パターン (生 Error: / Traceback) は
+    この関数では扱わない（呼び出し側で WARN として警告ログのみ出す）。
+    """
+    fatal_err = _scan_early_fatal(paths.err_log)
+    fatal_source = "err.log"
+    if not fatal_err and agent == "claude":
+        # claude は承認失敗・実行失敗を標準出力の JSON に載せる。
+        fatal_err = _scan_claude_stdout_fatal(paths.stdout_log)
+        fatal_source = "stdout.log"
+    if not fatal_err:
+        return None
+    if alive:
+        _kill_pid(pid)
+    status.status = "EARLY_ERROR"
+    status.exit_code = 4
+    status.detail = (
+        f"early error (fatal) in {fatal_source}: {fatal_err[:200]}"
+    )
+    return status
+
+
 def _check_result_age_fallback(
     pid: int,
     paths: AgentPaths,
@@ -780,28 +810,11 @@ def monitor_agent(
             return status
 
         # 3. early error
-        # 明確な致命 (FATAL) のみ kill する。曖昧パターン (生 Error: / Traceback) は
-        # WARN として警告ログのみ。codex がレビュー対象 diff の test コード片を
-        # echo するケースや gemini の config validation 警告で誤 kill されるのを防ぐ。
         if not no_early_error:
-            fatal_err = _scan_early_fatal(paths.err_log)
-            fatal_source = "err.log"
-            if not fatal_err and agent == "claude":
-                # claude は承認失敗・実行失敗を標準出力の JSON に載せる。
-                fatal_err = _scan_claude_stdout_fatal(paths.stdout_log)
-                fatal_source = "stdout.log"
-            if fatal_err:
-                if alive:
-                    _kill_pid(pid)
-                status.status = "EARLY_ERROR"
-                status.exit_code = 4
-                # 検知元を書く。err.log と決め打ちすると、標準出力から検知したときに
-                # 存在しない行を探させることになる。
-                status.detail = (
-                    f"early error (fatal) in {fatal_source}: {fatal_err[:200]}"
-                )
-                _emit_log(log_prefix, agent, status)
-                return status
+            result = _check_early_error(pid, paths, status, agent, alive)
+            if result is not None:
+                _emit_log(log_prefix, agent, result)
+                return result
 
             if not warned_early_error:
                 warn_err = _scan_early_warn(paths.err_log)
