@@ -1203,6 +1203,48 @@ def _verify_and_record_items(
     return applied, failed
 
 
+def _merge_apply_build_state_and_finalize(
+    path: pathlib.Path,
+    state: dict[str, Any],
+    entry: dict[str, Any],
+    applied: list[str],
+    failed: list[str],
+    head_sha: str,
+    payload: dict[str, Any],
+    dry_run: bool,
+) -> None:
+    """apply 状態の構築と、失敗項目の取り消し・保存。
+
+    dry-run / 部分失敗 / 全成功で分岐し、適切に終了する。
+    """
+    entry["apply"] = {
+        "applied": applied,
+        "failed": failed,
+        "base_sha": entry.get("apply_base_sha"),
+        "head_sha": head_sha,
+        "merged_at": None,
+    }
+    entry.setdefault("durations", {})["apply"] = _safe_int(
+        payload.get("elapsed_seconds")
+    )
+    state["phase"] = "review" if applied else "propose"
+
+    if dry_run:
+        if failed:
+            _drop_items(state, entry, failed, dry_run=True)
+        info("（dry-run）状態ファイルは更新していません")
+        applied = list(entry["apply"]["applied"])
+    elif failed:
+        applied = _apply_drop(path, state, entry, failed)
+    else:
+        entry["apply"]["merged_at"] = statefile.now()
+        statefile.save(path, state)
+
+    if not applied:
+        info("全項目が失敗したため、このラウンドのレビューは行いません")
+        sys.exit(2)
+
+
 def _merge_apply_validate_ownership(
     path: pathlib.Path,
     state: dict[str, Any],
@@ -1362,39 +1404,10 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
         _safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT), args.dry_run,
     )
 
-    entry["apply"] = {
-        "applied": applied,
-        "failed": failed,
-        # 起点はオーケストレータが記録したもの。申告は記録にも残さない。
-        "base_sha": entry.get("apply_base_sha"),
-        "head_sha": head_sha,
-        # **取り込み済みの印は最後に立てる。** 取り消しより先に立てると、取り消しに
-        # 失敗して中断したときに、次の実行が処理済みガードで素通りしてしまい、
-        # 検証を通っていない変更が Pull Request に残り続ける。
-        "merged_at": None,
-    }
-    entry.setdefault("durations", {})["apply"] = _safe_int(
-        payload.get("elapsed_seconds")
+    # 状態構築と失敗項目の取り消し
+    _merge_apply_build_state_and_finalize(
+        path, state, entry, applied, failed, head_sha, payload, args.dry_run,
     )
-    state["phase"] = "review" if applied else "propose"
-
-    # `--dry-run` では git も状態ファイルも触らない。片方だけ進むと、確認の
-    # つもりで実行した利用者の進行が壊れる。
-    if args.dry_run:
-        if failed:
-            _drop_items(state, entry, failed, dry_run=True)
-        info("（dry-run）状態ファイルは更新していません")
-        applied = list(entry["apply"]["applied"])
-    elif failed:
-        # `merged_at` は `_apply_drop` が取り消しの完了時点で立てる。
-        applied = _apply_drop(path, state, entry, failed)
-    else:
-        entry["apply"]["merged_at"] = statefile.now()
-        statefile.save(path, state)
-
-    if not applied:
-        info("全項目が失敗したため、このラウンドのレビューは行いません")
-        sys.exit(2)
 
 
 def _run_drop(
