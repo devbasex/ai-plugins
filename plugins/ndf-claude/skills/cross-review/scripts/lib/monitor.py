@@ -636,6 +636,41 @@ def _check_sentinel_completion(
     return True
 
 
+def _check_result_age_completion(
+    pid: int,
+    paths: AgentPaths,
+    status: AgentStatus,
+    started_wall: float,
+    cmdline_validated: bool,
+) -> bool:
+    if not (
+        _pid_alive(pid)
+        and not status.sentinel_seen
+        and cmdline_validated
+        and paths.result.exists()
+        and paths.result.stat().st_size > 0
+    ):
+        return False
+
+    result_mtime = paths.result.stat().st_mtime
+    if result_mtime < started_wall:
+        return False
+
+    result_age = time.time() - result_mtime
+    if result_age < RESULT_AGE_GRACE:
+        return False
+
+    _kill_pid(pid)
+    status.result_exists = True
+    status.status = "OK"
+    status.exit_code = 0
+    status.detail = (
+        f"result.json exists for {result_age:.0f}s without process exit; "
+        f"killed lingering pid {pid}"
+    )
+    return True
+
+
 def monitor_agent(
     agent: str,
     pr: int,
@@ -710,27 +745,11 @@ def monitor_agent(
         # 安全条件:
         #   - cmdline_validated: PID 再利用でない (または検証不能環境) ことを確認済み
         #   - mtime >= started_wall: 前 round の stale result.json を拾わない
-        if (
-            alive
-            and not status.sentinel_seen
-            and cmdline_validated
-            and paths.result.exists()
-            and paths.result.stat().st_size > 0
+        if _check_result_age_completion(
+            pid, paths, status, started_wall, cmdline_validated
         ):
-            result_mtime = paths.result.stat().st_mtime
-            if result_mtime >= started_wall:
-                result_age = time.time() - result_mtime
-                if result_age >= RESULT_AGE_GRACE:
-                    _kill_pid(pid)
-                    status.result_exists = True
-                    status.status = "OK"
-                    status.exit_code = 0
-                    status.detail = (
-                        f"result.json exists for {result_age:.0f}s without process exit; "
-                        f"killed lingering pid {pid}"
-                    )
-                    _emit_log(log_prefix, agent, status)
-                    return status
+            _emit_log(log_prefix, agent, status)
+            return status
 
         if alive and not cmdline_validated:
             # cmdline 検証は alive 確認後に 1 回だけ。生きていない瞬間に proc/<pid> を読むと
