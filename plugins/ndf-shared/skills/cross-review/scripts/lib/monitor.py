@@ -613,47 +613,6 @@ def _tail_last_nonempty_line(path: pathlib.Path, limit: int = 4096) -> str:
     return ""
 
 
-def _check_result_age_fallback(
-    pid: int,
-    paths: AgentPaths,
-    status: AgentStatus,
-    started_wall: float,
-    cmdline_validated: bool,
-) -> Optional[AgentStatus]:
-    """result.json の age fallback で完了判定する。
-
-    sentinel 機構を持たない agent (gemini) 向け。result.json が書かれた後も
-    プロセスがハングするケース (MCP サーバー切断待ち等で exit しない) の
-    fallback: result.json の mtime が RESULT_AGE_GRACE 秒以上前であれば
-    完了とみなし、プロセスを kill → OK。
-
-    安全条件:
-      - cmdline_validated: PID 再利用でない (または検証不能環境) ことを確認済み
-      - mtime >= started_wall: 前 round の stale result.json を拾わない
-    """
-    if status.sentinel_seen:
-        return None
-    if not cmdline_validated:
-        return None
-    if not (paths.result.exists() and paths.result.stat().st_size > 0):
-        return None
-    result_mtime = paths.result.stat().st_mtime
-    if result_mtime < started_wall:
-        return None
-    result_age = time.time() - result_mtime
-    if result_age < RESULT_AGE_GRACE:
-        return None
-    _kill_pid(pid)
-    status.result_exists = True
-    status.status = "OK"
-    status.exit_code = 0
-    status.detail = (
-        f"result.json exists for {result_age:.0f}s without process exit; "
-        f"killed lingering pid {pid}"
-    )
-    return status
-
-
 def _check_codex_sentinel_complete(
     pid: int,
     paths: AgentPaths,
@@ -748,12 +707,34 @@ def monitor_agent(
                 _emit_log(log_prefix, agent, result)
                 return result
 
-            result = _check_result_age_fallback(
-                pid, paths, status, started_wall, cmdline_validated,
-            )
-            if result is not None:
-                _emit_log(log_prefix, agent, result)
-                return result
+        # result.json が書かれた後もプロセスがハング��るケース (gemini で観測:
+        # MCP サーバー切断待ち等��� exit しない)。sentinel 機構を持たない agent 向け
+        # の fallback: result.json の mtime が RESULT_AGE_GRACE 秒以上前であれば
+        # 完了とみなし、プロセスを kill → OK。
+        # 安全条件:
+        #   - cmdline_validated: PID 再利用でない (または検証不能環境) ことを確認済み
+        #   - mtime >= started_wall: 前 round の stale result.json を拾わない
+        if (
+            alive
+            and not status.sentinel_seen
+            and cmdline_validated
+            and paths.result.exists()
+            and paths.result.stat().st_size > 0
+        ):
+            result_mtime = paths.result.stat().st_mtime
+            if result_mtime >= started_wall:
+                result_age = time.time() - result_mtime
+                if result_age >= RESULT_AGE_GRACE:
+                    _kill_pid(pid)
+                    status.result_exists = True
+                    status.status = "OK"
+                    status.exit_code = 0
+                    status.detail = (
+                        f"result.json exists for {result_age:.0f}s without process exit; "
+                        f"killed lingering pid {pid}"
+                    )
+                    _emit_log(log_prefix, agent, status)
+                    return status
 
         if alive and not cmdline_validated:
             # cmdline 検証は alive 確認後に 1 回だけ。生きていない瞬間に proc/<pid> を読むと
