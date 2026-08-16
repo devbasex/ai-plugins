@@ -944,6 +944,50 @@ def _abandon_round(
     state["phase"] = "propose"
 
 
+def _verify_and_settle_items(
+    state: dict[str, Any],
+    entry: dict[str, Any],
+    reported: dict[str, dict[str, Any]],
+    in_range: set[str],
+    test_command: str,
+    head_branch: str,
+    timeout: int,
+    dry_run: bool,
+) -> tuple[list[str], list[str], int]:
+    work = state["worktrees"]["work"]
+    applied: list[str] = []
+    failed: list[str] = []
+    reverted = 0
+    for item_id in entry["items"]:
+        item = _find_item(state, item_id)
+        got = reported.get(item_id)
+        if got is None:
+            problem = "適用結果に項目がありません"
+            facts: list[dict[str, Any]] = []
+        else:
+            facts = collect_commit_facts(
+                work, _reported_shas(got), in_range, test_command, head_branch,
+                timeout,
+            )
+            problem = verify_apply_item(item, facts)
+        if problem:
+            item["status"] = "abandoned"
+            item["failure_reason"] = problem
+            item["test_failed"] = bool(got and "テストが成功していません" in problem)
+            item["budget_exceeded"] = bool(got and "差分予算" in problem)
+            item["commits"] = _reported_shas(got)
+            reverted += _revert_item_commits(state, item, dry_run)
+            failed.append(item_id)
+            info(f"❌ {item_id}: {problem}")
+            continue
+        item["status"] = "reviewing"
+        item["commits"] = _reported_shas(got)
+        item["diff_lines"] = sum(_safe_int(c.get("diff_lines")) for c in facts)
+        applied.append(item_id)
+        info(f"✅ {item_id}: {len(item['commits'])} コミット / {item['diff_lines']} 行")
+    return applied, failed, reverted
+
+
 def cmd_merge_apply(args: argparse.Namespace) -> None:
     """Step 4 — 適用結果を検証して取り込む。
 
@@ -1084,39 +1128,16 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
             _push_with_retry_marker(path, state, entry)
         sys.exit(2)
 
-    applied: list[str] = []
-    failed: list[str] = []
-    reverted = 0
-    for item_id in entry["items"]:
-        item = _find_item(state, item_id)
-        got = reported.get(item_id)
-        if got is None:
-            problem = "適用結果に項目がありません"
-            facts: list[dict[str, Any]] = []
-        else:
-            facts = collect_commit_facts(
-                work, _reported_shas(got), in_range, test_command, head_branch,
-                _safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT),
-            )
-            problem = verify_apply_item(item, facts)
-        if problem:
-            item["status"] = "abandoned"
-            item["failure_reason"] = problem
-            item["test_failed"] = bool(got and "テストが成功していません" in problem)
-            item["budget_exceeded"] = bool(got and "差分予算" in problem)
-            # **検証に失敗した項目のコミットを Pull Request に残さない。**
-            # 実装担当は項目ごとに push しているため、状態を `abandoned` にする
-            # だけでは差分が残り、以後のレビュー対象にも混入する。
-            item["commits"] = _reported_shas(got)
-            reverted += _revert_item_commits(state, item, args.dry_run)
-            failed.append(item_id)
-            info(f"❌ {item_id}: {problem}")
-            continue
-        item["status"] = "reviewing"
-        item["commits"] = _reported_shas(got)
-        item["diff_lines"] = sum(_safe_int(c.get("diff_lines")) for c in facts)
-        applied.append(item_id)
-        info(f"✅ {item_id}: {len(item['commits'])} コミット / {item['diff_lines']} 行")
+    applied, failed, reverted = _verify_and_settle_items(
+        state,
+        entry,
+        reported,
+        in_range,
+        test_command,
+        head_branch,
+        _safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT),
+        args.dry_run,
+    )
 
     entry["apply"] = {
         "applied": applied,
