@@ -1708,18 +1708,32 @@ def _validate_fix_commits(
     return accepted, unassigned, problems
 
 
-def _merge_fix_load_and_check_idempotent(
-    path: pathlib.Path,
-    state: dict[str, Any],
-    entry: dict[str, Any],
-    result: pathlib.Path,
-    payload: dict[str, Any],
-) -> Optional[str]:
-    """修正結果の読込と merge_key による再実行判定。
+def cmd_merge_fix(args: argparse.Namespace) -> None:
+    """Step 6 — 修正結果を取り込み、修正ラウンドを 1 つ進める。"""
+    path, state = _load(args.id)
+    entry = _round(state, args.round)
+    _flush_pending_push(path, state, entry)
+    impl = entry["impl"]
+    result = _result_path(state, impl, stem_for(impl, "fix", state["id"], args.round))
+    payload = _read_result(result, impl)
 
-    取り込み済みなら merge_key を返す（呼び出し側は return する）。
-    新規なら None を返す。
-    """
+    # **叩き直しても二重に取り込まない。** 修正は同じラウンドで何度も回るため、
+    # 「このラウンドで処理済みか」では判定できない。**入力が前回と同じか**で見る。
+    # 次の修正ラウンドでは結果ファイルが上書きされ、HEAD も進むので鍵が変わる。
+    # 鍵は**試行番号と結果ファイルの内容**から作る。
+    #
+    # - HEAD は混ぜない。検証に失敗して取り消すと HEAD が変わるため、鍵が一致せず
+    #   同じ申告を再処理してしまう。
+    # - 内容だけでも足りない。次の修正ラウンドが同じ JSON（コミットなし・同じ
+    #   未解決 ID など）を返すと過去のラウンドと衝突し、`fix_rounds` が進まないまま
+    #   同じ修正を起動し続ける。
+    # - ファイルの更新時刻も使わない。粒度が環境によって違い、書き直しても同じ値に
+    #   なりうる。
+    #
+    # 修正の前には必ず `judge-review` が走るので、そこで進めた試行番号が
+    # **実行単位の識別子**になる。叩き直しただけなら番号は変わらない。
+    work = state["worktrees"]["work"]
+    head_now = _git_out(work, ["rev-parse", "HEAD"]) or ""
     attempt = entry.get("fix_attempts", 0)
     merge_key = (
         f"{attempt}:"
@@ -1731,31 +1745,7 @@ def _merge_fix_load_and_check_idempotent(
             f"↻ この修正結果は取り込み済みです"
             f"（修正ラウンド {entry['fix_rounds']}）"
         )
-        return merge_key
-    return None
-
-
-def cmd_merge_fix(args: argparse.Namespace) -> None:
-    """Step 6 — 修正結果を取り込み、修正ラウンドを 1 つ進める。"""
-    path, state = _load(args.id)
-    entry = _round(state, args.round)
-    _flush_pending_push(path, state, entry)
-    impl = entry["impl"]
-    result = _result_path(state, impl, stem_for(impl, "fix", state["id"], args.round))
-    payload = _read_result(result, impl)
-
-    # 冪等性チェック
-    if _merge_fix_load_and_check_idempotent(path, state, entry, result, payload) is not None:
         return
-
-    work = state["worktrees"]["work"]
-    head_now = _git_out(work, ["rev-parse", "HEAD"]) or ""
-    attempt = entry.get("fix_attempts", 0)
-    merge_key = (
-        f"{attempt}:"
-        + hashlib.sha256(result.read_bytes()).hexdigest()
-    )
-    merged_keys = entry.setdefault("fix_merged_keys", [])
 
     # 自己申告をそのまま信じない。解決 API に失敗・未実行でも「解決済み」と
     # 書けてしまい、未解決の指摘が取り消し対象から外れる。GitHub 側の
