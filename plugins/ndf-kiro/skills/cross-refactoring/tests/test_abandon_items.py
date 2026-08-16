@@ -244,6 +244,8 @@ def _prepare_fix(refactor, tmp_path, env_tmp_dir, monkeypatch, claimed,
         refactor, "collect_commit_facts",
         lambda work, shas, rng, cmd, branch, timeout=None: resolved_facts,
     )
+    # 修正の取り込みは取り消しの有無に関わらず push する。既定では実行させない
+    monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: "")
     write_result(state_path, "codex-fix-r1", {
         "resolved_thread_ids": claimed,
         "elapsed_seconds": 12,
@@ -396,6 +398,8 @@ def test_broken_fix_result_does_not_crash(
     """
     state_path = _state(tmp_path, [_finding("R1-001")])
     env_tmp_dir(state_path)
+    # 修正の取り込みは取り消しの有無に関わらず push する。既定では実行させない
+    monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: "")
     write_result(state_path, "codex-fix-r1", {
         "resolved_thread_ids": broken_ids,
         "commits": {"sha": "辞書ではあるが配列でない"},

@@ -383,7 +383,7 @@ def test_self_reported_values_cannot_pass_the_check(
     assert "テストが成功していません" in state["items"][0]["failure_reason"]
 
 
-def _drop_env(refactor, monkeypatch, revert_rc=0, pick_rc=0):
+def _drop_env(refactor, monkeypatch, revert_rc=0, pick_rc=0, sync_dirty=False):
     """取り消しと積み直しを実際には走らせず、順序と引数を記録する。
 
     `git rev-parse HEAD` は**直前に積み直したコミット**に応じた値を返す。
@@ -413,6 +413,9 @@ def _drop_env(refactor, monkeypatch, revert_rc=0, pick_rc=0):
             if picked:
                 return f"new-{picked[-1]}"
             return "REVERTED_HEAD" if reverted else "HEAD_BEFORE"
+        if args[:1] == ["status"]:
+            # 同期で差分が出たかどうか。既定は「差分なし」
+            return "?? generated/a.py" if sync_dirty else ""
         return "HEAD_BEFORE"
 
     monkeypatch.setattr(refactor.subprocess, "run", fake_run)
@@ -647,10 +650,13 @@ def test_blank_scope_entry_is_ignored(refactor):
     assert not refactor.path_in_scope("dist/foo.py", ["", "  ", "src"])
 
 
-def test_no_push_when_nothing_was_reverted(
+def test_push_happens_once_per_merge_apply(
     refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
 ):
-    """全項目が通ったときに余計な push をしない。"""
+    """全項目が通ったときも公開するが、push は 1 回だけにすること。
+
+    公開するのは進行側だけである（実装担当は push しない）。
+    """
     items = [item(item_id="R1-001")]
     state_path = _state_with_items(tmp_path, items)
     env_tmp_dir(state_path)
@@ -666,7 +672,7 @@ def test_no_push_when_nothing_was_reverted(
         lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "", ""),
     )
     refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
-    assert pushes == []
+    assert len([c for c in pushes if c[:2] == ["git", "push"]]) == 1
 
 
 def test_dry_run_touches_neither_git_nor_state(
@@ -1202,6 +1208,138 @@ def test_push_failure_after_a_successful_drop_only_retries_the_push(
     assert [c for c in calls if c[:2] == ["git", "revert"]] == [], "取り消しを繰り返している"
     assert [c for c in calls if c[:2] == ["git", "cherry-pick"]] == []
     assert [c for c in pushes if c[:2] == ["git", "push"]], "push を再送していない"
+    entry = read_state(state_path)["rounds"][0]
+    assert entry["pending_push"] is False
+    assert entry["apply"]["applied"] == ["R1-001"]
+
+
+# ---------- 適用で失敗した項目を「対象外」へ ----------
+
+def test_failed_items_are_deferred(
+    refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
+):
+    """適用の検証で失敗した項目を「対象外」として記録すること。
+
+    記録しないと**同じ提案が次のラウンドで再び採用され、同じ理由で失敗する**。
+    実測では 3 ランタイム全員から再提案され、合意数が最大になって最優先で採用された。
+    """
+    state_path = _two_item_apply(tmp_path, env_tmp_dir, git_facts)
+    _drop_env(refactor, monkeypatch)
+    refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
+
+    state = read_state(state_path)
+    deferred = {d["item_id"]: d for d in state["deferred_items"]}
+    assert list(deferred) == ["R1-002"], "失敗した項目だけを対象外にすること"
+    entry = deferred["R1-002"]
+    # 次ラウンドの除外は path + symbol + smell の組で行われる
+    assert (entry["path"], entry["symbol"], entry["smell"]) == (
+        "src/foo.py", "Foo.handle", "long_method")
+    assert "差分予算" in entry["defer_reason"]
+
+
+def test_deferring_is_idempotent(refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts):
+    """叩き直しても対象外の記録を重複させないこと。"""
+    state_path = _two_item_apply(tmp_path, env_tmp_dir, git_facts)
+    _drop_env(refactor, monkeypatch)
+    args = type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+    refactor.cmd_merge_apply(args)
+    refactor.cmd_merge_apply(args)
+    assert [d["item_id"] for d in read_state(state_path)["deferred_items"]] == ["R1-002"]
+
+
+# ---------- push の直前に生成物を同期する ----------
+
+def _sync_state(tmp_path, env_tmp_dir, git_facts, command="make build"):
+    state_path = _two_item_apply(tmp_path, env_tmp_dir, git_facts)
+    state = read_state(state_path)
+    state["sync_command"] = command
+    state_path.write_text(__import__("json").dumps(state), encoding="utf-8")
+    return state_path
+
+
+def test_push_syncs_generated_files_first(
+    refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
+):
+    """push の直前に同期し、差分があれば進行側のコミットとして積むこと。
+
+    同期を実装担当にさせると範囲外の変更になり、範囲の検査で全件失敗する。
+    かといって同期しないと、同期を検査する pre-push では push が通らない。
+    """
+    _sync_state(tmp_path, env_tmp_dir, git_facts)
+    order: list[str] = []
+    _drop_env(refactor, monkeypatch, sync_dirty=True)
+    monkeypatch.setattr(
+        refactor, "_sh",
+        lambda cmd, **k: order.append("push" if cmd[:2] == ["git", "push"] else cmd[1])
+        or "",
+    )
+    ran: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        refactor, "_run_with_timeout",
+        lambda command, cwd, timeout, grace=5.0: ran.append((command, cwd)) or (0, False),
+    )
+    refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
+
+    assert ran and ran[0][0] == "make build", "同期コマンドを実行していない"
+    assert "add" in order and "commit" in order, "同期の差分をコミットしていない"
+    assert order.index("commit") < order.index("push"), "コミットより先に push している"
+
+
+def test_sync_failure_aborts_without_pushing(
+    refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
+):
+    """同期に失敗したら中断する。黙って push しない。"""
+    _sync_state(tmp_path, env_tmp_dir, git_facts)
+    calls, pushes = _drop_env(refactor, monkeypatch)
+    monkeypatch.setattr(
+        refactor, "_run_with_timeout",
+        lambda command, cwd, timeout, grace=5.0: (1, False),
+    )
+    with pytest.raises(SystemExit) as e:
+        refactor.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+        )
+    assert e.value.code == refactor.ABORT
+    assert [c for c in pushes if c[:2] == ["git", "push"]] == []
+
+
+def test_no_sync_command_runs_nothing(
+    refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
+):
+    """`--sync-command` 未指定なら同期は走らない（既存の利用者に影響しない）。"""
+    _two_item_apply(tmp_path, env_tmp_dir, git_facts)
+    _drop_env(refactor, monkeypatch)
+    ran: list = []
+    monkeypatch.setattr(
+        refactor, "_run_with_timeout",
+        lambda command, cwd, timeout, grace=5.0: ran.append(command) or (0, False),
+    )
+    refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
+    assert ran == []
+
+
+def test_merge_apply_pushes_even_when_every_item_passes(
+    refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
+):
+    """全項目が通ったときも進行側が push すること。
+
+    実装担当が push しなくなったため、ここで公開しないとレビュー担当が
+    Pull Request 上の差分へ指摘を書けない。
+    """
+    items = [item(item_id="R1-001")]
+    state_path = _state_with_items(tmp_path, items)
+    env_tmp_dir(state_path)
+    git_facts({"ok111": fact(sha="ok111")})
+    write_result(state_path, "codex-apply-r1", {
+        "base_sha": "aaa",
+        "items": [{"item_id": "R1-001", "commits": [{"sha": "ok111"}]}],
+    })
+    calls, pushes = _drop_env(refactor, monkeypatch)
+    refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
+
+    assert [c for c in pushes if c[:2] == ["git", "push"]], "push していない"
+    for cmd in pushes:
+        assert "--force" not in cmd and "--no-verify" not in cmd
     entry = read_state(state_path)["rounds"][0]
     assert entry["pending_push"] is False
     assert entry["apply"]["applied"] == ["R1-001"]
