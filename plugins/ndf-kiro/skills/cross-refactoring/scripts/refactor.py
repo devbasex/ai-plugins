@@ -1309,9 +1309,10 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
             _drop_items(state, entry, failed, dry_run=True)
         info("（dry-run）状態ファイルは更新していません")
         applied = list(entry["apply"]["applied"])
+    elif failed:
+        # `merged_at` は `_apply_drop` が取り消しの完了時点で立てる。
+        applied = _apply_drop(path, state, entry, failed)
     else:
-        if failed:
-            applied = _apply_drop(path, state, entry, failed)
         entry["apply"]["merged_at"] = statefile.now()
         statefile.save(path, state)
 
@@ -1326,10 +1327,18 @@ def _apply_drop(
 ) -> list[str]:
     """検証に失敗した項目を取り消し、採用として残る項目 ID を返す。
 
-    **中断しても再開できる形で記録する。** `pending_drop` を立ててから取り消しへ入り、
-    push まで終わってから消す。取り消しに失敗して中断すると印が残るので、次の実行は
-    処理済みの判定より先にここへ戻ってくる。印を立てずに `merged_at` を先に立てると、
-    次の実行は素通りして**取り消しを再試行できない**。
+    **中断しても再開できる形で記録する。** 失敗の位置で必要な再開が変わるため、
+    印は次の順で切り替える。
+
+    | 中断した位置 | 残る印 | 次の実行がすること |
+    | --- | --- | --- |
+    | 取り消しの途中 | `pending_drop` あり / `merged_at` なし | 取り消しをやり直す |
+    | 取り消し後・push 前 | `pending_drop` なし / `merged_at` あり / `pending_push` あり | **push の再送だけ** |
+
+    取り消しより先に `merged_at` を立てると、取り消しに失敗したときに次の実行が
+    処理済みガードで素通りし、**再試行できない**。逆に push まで終えるまで
+    `merged_at` を立てないと、push だけ失敗したときに次の実行が適用の検証をやり直し、
+    取り消しと積み直しのコミットを「未割当」と判定してラウンドごと巻き込む。
     """
     work = state["worktrees"]["work"]
     entry["pending_drop"] = list(failed)
@@ -1357,7 +1366,11 @@ def _apply_drop(
         state["phase"] = "propose"
 
     entry["pending_drop"] = []
-    # 保存してから push する。push が失敗しても、記録とローカルの git が食い違わない。
+    # **取り消しが済んだことを push より先に永続化する。** 保存せずに push して
+    # 失敗すると、次の実行が適用の検証をやり直し、取り消しと積み直しのコミットを
+    # 「未割当」と判定してラウンドごと巻き込んでしまう。`pending_push` は残るので
+    # 次の実行は push の再送だけを行う。
+    entry["apply"]["merged_at"] = statefile.now()
     statefile.save(path, state)
     _push_head(state)
     entry["pending_push"] = False
@@ -1376,8 +1389,6 @@ def _resume_incomplete_apply(
     if entry.get("pending_drop"):
         info("↻ 前回終わらなかった取り消しを再実行します")
         _apply_drop(path, state, entry, list(entry["pending_drop"]))
-        entry["apply"]["merged_at"] = statefile.now()
-        statefile.save(path, state)
         return
     _flush_pending_push(path, state, entry)
 
@@ -2373,12 +2384,15 @@ def _drop_items(
                 "reverted": len(ordered), "replayed": len(replay)}
 
     _revert_range(work, ordered, head)
+    # 取り消しが済んだ地点。積み直しに失敗したらここへ戻せばよい。
+    reverted_head = _git_out(work, ["rev-parse", "HEAD"])
     mapping = _replay_commits(work, replay)
     mode = "item"
     if mapping is None:
         info("⚠ 残す項目を積み直せませんでした。このラウンドは全件取り消します")
-        _reset_hard(work, head)
-        _revert_range(work, ordered, head)
+        # **着手前まで戻して取り消しをやり直さない。** 同じ範囲に対する取り消しが
+        # 2 組できて履歴が無駄に汚れる。積み直す前の地点へ戻すだけでよい。
+        _reset_hard(work, reverted_head)
         mapping, mode = {}, "round"
 
     dropped = list(entry["items"]) if mode == "round" else pending

@@ -391,12 +391,15 @@ def _drop_env(refactor, monkeypatch, revert_rc=0, pick_rc=0):
     """
     calls: list[list[str]] = []
     picked: list[str] = []
+    reverted: list[str] = []
 
     def fake_run(cmd, **kwargs):
         calls.append(list(cmd))
         rc = 0
         if cmd[:2] == ["git", "revert"] and "--abort" not in cmd:
             rc = revert_rc
+            if rc == 0:
+                reverted.append(cmd[-1])
         if cmd[:2] == ["git", "cherry-pick"] and "--abort" not in cmd:
             rc = pick_rc
             if rc == 0:
@@ -407,7 +410,9 @@ def _drop_env(refactor, monkeypatch, revert_rc=0, pick_rc=0):
         if args[:2] == ["rev-parse", "--verify"]:
             return args[-1].replace("^{commit}", "")
         if args == ["rev-parse", "HEAD"]:
-            return f"new-{picked[-1]}" if picked else "HEAD_BEFORE"
+            if picked:
+                return f"new-{picked[-1]}"
+            return "REVERTED_HEAD" if reverted else "HEAD_BEFORE"
         return "HEAD_BEFORE"
 
     monkeypatch.setattr(refactor.subprocess, "run", fake_run)
@@ -491,7 +496,11 @@ def test_replay_conflict_falls_back_to_whole_round(
     assert e.value.code == 2, "全件失敗として次の提案ラウンドへ進むこと"
 
     assert ["git", "cherry-pick", "--abort"] in calls
-    assert ["git", "reset", "--hard", "HEAD_BEFORE"] in calls
+    # 取り消しが済んだ地点へ戻すだけ。着手前まで戻して取り消しをやり直すと、
+    # 同じ範囲の revert コミットが 2 組できて履歴が汚れる
+    assert ["git", "reset", "--hard", "REVERTED_HEAD"] in calls
+    reverts = [c[-1] for c in calls if c[:2] == ["git", "revert"]]
+    assert reverts == ["bad222", "bad111", "ok111"], "取り消しを 2 度走らせている"
     state = read_state(state_path)
     assert all(i["status"] == "abandoned" for i in state["items"])
     assert state["rounds"][0]["apply"]["applied"] == []
@@ -1139,3 +1148,40 @@ def test_push_precedes_nothing_when_the_drop_is_unfinished(
     assert "push" in order
     assert order.index("revert") < order.index("push"), "取り消しより先に push している"
     assert read_state(state_path)["rounds"][0]["apply"]["merged_at"] is not None
+
+
+def test_push_failure_after_a_successful_drop_only_retries_the_push(
+    refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
+):
+    """取り消しが済んだあとに push だけ失敗したら、次は push の再送だけを行うこと。
+
+    取り消しの完了を push より先に永続化しないと、次の実行が適用の検証をやり直し、
+    取り消しと積み直しのコミットを「未割当」と判定してラウンドごと巻き込む。
+    """
+    state_path = _two_item_apply(tmp_path, env_tmp_dir, git_facts)
+    _drop_env(refactor, monkeypatch)
+    monkeypatch.setattr(
+        refactor, "_sh",
+        lambda cmd, **k: (_ for _ in ()).throw(SystemExit(4))
+        if cmd[:2] == ["git", "push"] else "",
+    )
+    with pytest.raises(SystemExit):
+        refactor.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+        )
+
+    entry = read_state(state_path)["rounds"][0]
+    assert entry["pending_drop"] == [], "取り消しは済んでいるのに再実行の対象が残っている"
+    assert entry["apply"]["merged_at"] is not None, "取り消しの完了が保存されていない"
+    assert entry["pending_push"] is True
+
+    # 2 回目: push が通る。取り消しは繰り返さない
+    calls, pushes = _drop_env(refactor, monkeypatch)
+    refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
+
+    assert [c for c in calls if c[:2] == ["git", "revert"]] == [], "取り消しを繰り返している"
+    assert [c for c in calls if c[:2] == ["git", "cherry-pick"]] == []
+    assert [c for c in pushes if c[:2] == ["git", "push"]], "push を再送していない"
+    entry = read_state(state_path)["rounds"][0]
+    assert entry["pending_push"] is False
+    assert entry["apply"]["applied"] == ["R1-001"]

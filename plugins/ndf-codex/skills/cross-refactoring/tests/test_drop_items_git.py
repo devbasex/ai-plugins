@@ -189,12 +189,18 @@ def test_adjacent_changes_fall_back_to_the_whole_round(refactor, adjacent_repo):
     半端な履歴を残すより、決定的な状態へ落とす方が安全である。
     """
     state, entry = _state(adjacent_repo)
+    before = int(_git("rev-list", "--count", "HEAD",
+                      cwd=adjacent_repo["repo"]).stdout.strip())
     result = refactor._drop_items(state, entry, ["R1-001"])
 
     assert result["mode"] == "round"
     assert _content(adjacent_repo) == "".join(LINES), "着手前の内容へ戻っていない"
     assert all(i["reverted"] for i in state["items"])
     assert entry["drops"][-1]["mode"] == "round"
+    # 取り消しは 1 組だけ。着手前まで戻してやり直すと 2 組できて履歴が汚れる
+    after = int(_git("rev-list", "--count", "HEAD",
+                     cwd=adjacent_repo["repo"]).stdout.strip())
+    assert after - before == 2, f"取り消しコミットが余分にある（{after - before} 件）"
 
 
 def test_dropping_every_item_returns_to_the_base_tree(refactor, distant_repo):
