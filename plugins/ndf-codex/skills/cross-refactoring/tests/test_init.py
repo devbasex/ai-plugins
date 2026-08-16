@@ -86,6 +86,9 @@ def run_init(refactor, origin_repo, monkeypatch):
         monkeypatch.setattr(refactor, "_sh", fake_sh)
         monkeypatch.chdir(origin_repo)
         monkeypatch.delenv("CROSS_REFACTORING_TMP_DIR", raising=False)
+        # 認証確認は実際の CLI を起動する。ここでは対象外なので飛ばす
+        # （確認そのものは `test_init_checks_cli_authentication` で見る）。
+        monkeypatch.setenv("NDF_SKIP_AUTH_CHECK", "1")
         refactor.cmd_init(args)
     return _run
 
@@ -234,3 +237,94 @@ def test_diverged_worktree_stops_the_run(run_init, tmp_path):
 
     with pytest.raises(SystemExit):
         run_init(_args(tmp_path))
+
+
+# ---------- 語彙と認証 ----------
+
+def test_init_records_the_vocabulary_for_the_prompt(run_init, tmp_path, refactor):
+    """許容値をプロンプトへ列挙できるよう、語彙集合を状態へ残すこと。
+
+    手順書の見出しは日本語なので、「語彙に限定する」とだけ書くと読んだ側が
+    日本語を語彙と解釈する（実測で gemini の提案 4 件が全件見送りになった）。
+    """
+    run_init(_args(tmp_path))
+    _, state = _state_of(tmp_path)
+    assert state["vocabulary"]["smells"]["long_method"] == "長すぎるメソッド"
+    assert "extract_method" in state["vocabulary"]["techniques"]
+    assert state["vocabulary"]["severities"] == ["minor", "major", "critical"]
+    # 定義は検証側の 1 箇所だけに置く
+    assert state["vocabulary"]["smells"] == refactor.SMELLS
+
+
+def _probe_result(refactor, monkeypatch, outcomes):
+    """認証確認コマンドの結果を差し替える。`{ランタイム: (rc, 出力)}`。"""
+    def fake_run(cmd, **kwargs):
+        for runtime, probe in refactor.AUTH_PROBES.items():
+            if list(cmd) == list(probe):
+                rc, out = outcomes.get(runtime, (0, "ok"))
+                return subprocess.CompletedProcess(cmd, rc, out, "")
+        raise AssertionError(f"想定外の呼び出し: {cmd}")
+    monkeypatch.setattr(refactor.subprocess, "run", fake_run)
+
+
+def test_check_auth_passes_when_every_cli_is_logged_in(refactor, monkeypatch):
+    monkeypatch.delenv("NDF_SKIP_AUTH_CHECK", raising=False)
+    _probe_result(refactor, monkeypatch, {})
+    results = refactor.check_auth(["claude", "codex", "gemini", "kiro"])
+    assert all(r["ok"] for r in results.values())
+
+
+def test_check_auth_fails_on_a_non_zero_exit(refactor, monkeypatch):
+    monkeypatch.delenv("NDF_SKIP_AUTH_CHECK", raising=False)
+    _probe_result(refactor, monkeypatch, {"kiro": (1, "")})
+    with pytest.raises(SystemExit) as e:
+        refactor.check_auth(["claude", "codex", "gemini", "kiro"])
+    assert e.value.code == refactor.ABORT
+
+
+def test_check_auth_fails_when_the_output_says_not_logged_in(refactor, monkeypatch):
+    """終了コード 0 でも未認証を示すことがある（kiro は成否を終了コードで表さない）。"""
+    monkeypatch.delenv("NDF_SKIP_AUTH_CHECK", raising=False)
+    _probe_result(refactor, monkeypatch, {"kiro": (0, "Not logged in")})
+    with pytest.raises(SystemExit):
+        refactor.check_auth(["claude", "codex", "gemini", "kiro"])
+
+
+def test_check_auth_fails_when_the_cli_is_missing(refactor, monkeypatch):
+    monkeypatch.delenv("NDF_SKIP_AUTH_CHECK", raising=False)
+
+    def missing(cmd, **kwargs):
+        raise FileNotFoundError(cmd[0])
+
+    monkeypatch.setattr(refactor.subprocess, "run", missing)
+    with pytest.raises(SystemExit):
+        refactor.check_auth(["codex"])
+
+
+def test_check_auth_can_be_skipped_explicitly(refactor, monkeypatch):
+    """確認コマンドは CLI の版で変わる。飛ばせる逃げ道を残す。"""
+    monkeypatch.setenv("NDF_SKIP_AUTH_CHECK", "1")
+
+    def never(cmd, **kwargs):
+        raise AssertionError("認証確認を実行してはいけない")
+
+    monkeypatch.setattr(refactor.subprocess, "run", never)
+    assert refactor.check_auth(["codex", "gemini"]) == {}
+
+
+def test_init_checks_cli_authentication(refactor, origin_repo, monkeypatch, tmp_path):
+    """未認証の CLI があれば初期化ごと中断すること。
+
+    参加者が 1 人欠けた構成のまま進むと、その者の提案とレビューが無いまま収束する。
+    """
+    monkeypatch.delenv("NDF_SKIP_AUTH_CHECK", raising=False)
+    monkeypatch.chdir(origin_repo)
+    monkeypatch.delenv("CROSS_REFACTORING_TMP_DIR", raising=False)
+    _probe_result(refactor, monkeypatch, {"gemini": (1, "Authentication failed")})
+    monkeypatch.setattr(
+        refactor, "_sh",
+        lambda cmd, **k: pytest.fail("認証確認より前に gh を呼んでいる"),
+    )
+    with pytest.raises(SystemExit) as e:
+        refactor.cmd_init(_args(tmp_path))
+    assert e.value.code == refactor.ABORT

@@ -185,9 +185,9 @@ def test_merge_proposals_command_creates_items(
         "durations": {}, "reviews": [],
     }])
     env_tmp_dir(state_path)
-    write_result(state_path, "codex-propose-rf130", {"items": [proposal()]})
-    write_result(state_path, "gemini-propose-rf130", {"items": [proposal()]})
-    write_result(state_path, "kiro-propose-rf130", {"items": []})
+    write_result(state_path, "codex-propose-rf130-r1", {"items": [proposal()]})
+    write_result(state_path, "gemini-propose-rf130-r1", {"items": [proposal()]})
+    write_result(state_path, "kiro-propose-rf130-r1", {"items": []})
 
     refactor.cmd_merge_proposals(type("A", (), {"id": 130})())
 
@@ -210,7 +210,7 @@ def test_merge_proposals_command_exits_2_when_nothing_adopted(
     }])
     env_tmp_dir(state_path)
     for rt in ("codex", "gemini", "kiro"):
-        write_result(state_path, f"{rt}-propose-rf130", {"items": []})
+        write_result(state_path, f"{rt}-propose-rf130-r1", {"items": []})
 
     with pytest.raises(SystemExit) as e:
         refactor.cmd_merge_proposals(type("A", (), {"id": 130})())
@@ -234,9 +234,9 @@ def test_non_object_proposal_result_is_treated_as_empty(
         "durations": {}, "reviews": [],
     }])
     env_tmp_dir(state_path)
-    write_result(state_path, "codex-propose-rf130", ["配列で返ってきた"])
-    write_result(state_path, "gemini-propose-rf130", {"items": [proposal()]})
-    write_result(state_path, "kiro-propose-rf130", {"items": [proposal()]})
+    write_result(state_path, "codex-propose-rf130-r1", ["配列で返ってきた"])
+    write_result(state_path, "gemini-propose-rf130-r1", {"items": [proposal()]})
+    write_result(state_path, "kiro-propose-rf130-r1", {"items": [proposal()]})
 
     refactor.cmd_merge_proposals(type("A", (), {"id": 130})())
 
@@ -259,7 +259,7 @@ def test_merge_proposals_is_idempotent(refactor, tmp_path, env_tmp_dir, no_git):
     }])
     env_tmp_dir(state_path)
     for rt in ("codex", "gemini", "kiro"):
-        write_result(state_path, f"{rt}-propose-rf130", {"items": [proposal()]})
+        write_result(state_path, f"{rt}-propose-rf130-r1", {"items": [proposal()]})
 
     args = type("A", (), {"id": 130})()
     refactor.cmd_merge_proposals(args)
@@ -285,7 +285,7 @@ def test_merge_proposals_replays_the_converged_exit_code(
     }])
     env_tmp_dir(state_path)
     for rt in ("codex", "gemini", "kiro"):
-        write_result(state_path, f"{rt}-propose-rf130", {"items": []})
+        write_result(state_path, f"{rt}-propose-rf130-r1", {"items": []})
 
     args = type("A", (), {"id": 130})()
     for _ in range(2):

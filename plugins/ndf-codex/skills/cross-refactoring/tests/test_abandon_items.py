@@ -767,3 +767,162 @@ def test_pending_push_is_retried_on_the_next_run(
 
     assert [c for c in pushes if c[:2] == ["git", "push"]], "再試行していない"
     assert read_state(state_path)["rounds"][0]["pending_push"] is False
+
+
+# ---------- 巻き戻して積み直す取り消し ----------
+
+def _range_state(tmp_path, findings, item_ids=("R1-001", "R1-002")):
+    """適用の起点を記録した状態。**積み直しの経路**を通る。"""
+    import json as _json
+    state_path = _state(tmp_path, findings, item_ids=item_ids)
+    state = read_state(state_path)
+    state["rounds"][0]["apply_base_sha"] = "BASE"
+    state_path.write_text(_json.dumps(state, ensure_ascii=False), encoding="utf-8")
+    return state_path
+
+
+def _range_env(refactor, monkeypatch, ordered, pick_rc=0):
+    """範囲と git 操作を差し替える。`ordered` は新しい順。"""
+    calls: list[list[str]] = []
+    picked: list[str] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        rc = 0
+        if cmd[:2] == ["git", "cherry-pick"] and "--abort" not in cmd:
+            rc = pick_rc
+            if rc == 0:
+                picked.append(cmd[-1])
+        return subprocess.CompletedProcess(cmd, rc, "", "conflict" if rc else "")
+
+    def fake_git_out(work, args):
+        if args[:2] == ["rev-parse", "--verify"]:
+            return args[-1].replace("^{commit}", "")
+        if args == ["rev-parse", "HEAD"]:
+            return f"new-{picked[-1]}" if picked else "HEAD_BEFORE"
+        return "HEAD_BEFORE"
+
+    monkeypatch.setattr(refactor.subprocess, "run", fake_run)
+    monkeypatch.setattr(refactor, "_git_out", fake_git_out)
+    monkeypatch.setattr(refactor, "commits_in_range",
+                        lambda work, base, head: list(ordered))
+    monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: "")
+    return calls
+
+
+def test_abandon_replays_the_items_that_stay(
+    refactor, tmp_path, env_tmp_dir, monkeypatch
+):
+    """見送る項目より新しいコミットがあっても競合しないこと。
+
+    範囲を新しい順に全て戻してから、残す項目を古い順に積み直す。
+    """
+    state_path = _range_state(tmp_path, [_finding("R1-001")])
+    env_tmp_dir(state_path)
+    # 履歴は R1-002 のコミットが新しい
+    calls = _range_env(refactor, monkeypatch, ["sha-R1-002", "sha-R1-001"])
+
+    refactor.cmd_abandon_items(_args())
+
+    assert [c[-1] for c in calls if c[:2] == ["git", "revert"]] == [
+        "sha-R1-002", "sha-R1-001"]
+    assert [c[-1] for c in calls if c[:2] == ["git", "cherry-pick"]] == ["sha-R1-002"]
+
+    state = read_state(state_path)
+    by_id = {i["item_id"]: i for i in state["items"]}
+    assert by_id["R1-001"]["status"] == "abandoned"
+    assert by_id["R1-002"]["status"] == "reviewing"
+    assert by_id["R1-002"]["commits"] == ["new-sha-R1-002"]
+
+
+def test_abandon_falls_back_to_the_whole_round_on_a_replay_conflict(
+    refactor, tmp_path, env_tmp_dir, monkeypatch
+):
+    state_path = _range_state(tmp_path, [_finding("R1-001")])
+    env_tmp_dir(state_path)
+    calls = _range_env(refactor, monkeypatch, ["sha-R1-002", "sha-R1-001"], pick_rc=1)
+
+    refactor.cmd_abandon_items(_args())
+
+    assert ["git", "cherry-pick", "--abort"] in calls
+    state = read_state(state_path)
+    assert all(i["status"] == "abandoned" for i in state["items"])
+    assert sorted(d["item_id"] for d in state["deferred_items"]) == ["R1-001", "R1-002"]
+    assert state["rounds"][0]["drops"][-1]["mode"] == "round"
+
+
+def test_abandon_marks_pending_push_before_reverting(
+    refactor, tmp_path, env_tmp_dir, monkeypatch
+):
+    state_path = _range_state(tmp_path, [_finding("R1-001")])
+    env_tmp_dir(state_path)
+    marks: list[bool] = []
+    _range_env(refactor, monkeypatch, ["sha-R1-002", "sha-R1-001"])
+    real_run = refactor.subprocess.run
+
+    def spying_run(cmd, **kwargs):
+        if cmd[:2] == ["git", "revert"]:
+            marks.append(read_state(state_path)["rounds"][0].get("pending_push"))
+        return real_run(cmd, **kwargs)
+
+    monkeypatch.setattr(refactor.subprocess, "run", spying_run)
+    refactor.cmd_abandon_items(_args())
+
+    assert marks and marks[0] is True
+    assert read_state(state_path)["rounds"][0]["pending_push"] is False
+
+
+def test_abandon_saves_the_drop_result_before_pushing(
+    refactor, tmp_path, env_tmp_dir, monkeypatch
+):
+    """取り消しの結果を push より先に保存すること。
+
+    保存しないまま落ちると、積み直しで変わった SHA と取り消し済みの印が失われ、
+    次の実行が**履歴に無い SHA を相手に**取り消しをやり直す。
+    """
+    state_path = _range_state(tmp_path, [_finding("R1-001")])
+    env_tmp_dir(state_path)
+    _range_env(refactor, monkeypatch, ["sha-R1-002", "sha-R1-001"])
+    seen: list[dict] = []
+    monkeypatch.setattr(
+        refactor, "_sh",
+        lambda cmd, **k: seen.append(read_state(state_path)) or "",
+    )
+    refactor.cmd_abandon_items(_args())
+
+    assert seen, "push が実行されていない"
+    at_push = seen[0]
+    by_id = {i["item_id"]: i for i in at_push["items"]}
+    assert by_id["R1-002"]["commits"] == ["new-sha-R1-002"], "SHA の追従が保存前"
+    assert by_id["R1-001"]["reverted"] is True
+    assert at_push["rounds"][0]["pending_drop"] == []
+
+
+def test_abandon_retries_the_drop_before_resending_the_push(
+    refactor, tmp_path, env_tmp_dir, monkeypatch
+):
+    """やり残した取り消しは、push の再送より先に片づけること。
+
+    先に push すると、取り消しが途中の HEAD をそのまま公開してしまう。
+    """
+    state_path = _range_state(tmp_path, [_finding("R1-001")])
+    state = read_state(state_path)
+    state["rounds"][0]["pending_drop"] = ["R1-001"]
+    state["rounds"][0]["pending_push"] = True
+    state_path.write_text(__import__("json").dumps(state), encoding="utf-8")
+    env_tmp_dir(state_path)
+
+    order: list[str] = []
+    calls = _range_env(refactor, monkeypatch, ["sha-R1-002", "sha-R1-001"])
+    real_run = refactor.subprocess.run
+    monkeypatch.setattr(
+        refactor.subprocess, "run",
+        lambda cmd, **kw: (order.append(cmd[1]) if cmd[:1] == ["git"] else None)
+        or real_run(cmd, **kw),
+    )
+    monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: order.append("push") or "")
+    refactor.cmd_abandon_items(_args())
+
+    assert "revert" in order and "push" in order
+    assert order.index("revert") < order.index("push"), "取り消しより先に push している"
+    assert read_state(state_path)["rounds"][0]["pending_push"] is False

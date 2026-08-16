@@ -45,7 +45,10 @@ MAX_ITEMS=$(jq -r '.max_items_per_round' "$STATE")
 
 case "$PHASE" in
   propose)
-    STEM=$TMP_DIR/$RUNTIME-propose-rf$ID
+    # **提案にもラウンド番号を入れる。** 起動時に同名の結果ファイルを消すため、
+    # 番号が無いと 2 巡目の提案が 1 巡目の内容を消してしまう。
+    [ "$ROUND" -ge 1 ] 2>/dev/null || { echo "propose には ROUND が必要です" >&2; exit 1; }
+    STEM=$TMP_DIR/$RUNTIME-propose-rf$ID-r$ROUND
     WORKDIR=$ROOT/$RUNTIME
     ;;
   apply|fix)
@@ -112,7 +115,21 @@ export RF_MODEL=${MODEL:-default} RF_WORKDIR=$WORKDIR RF_STEM=$STEM
 export RF_SCOPE=$SCOPE RF_HEAD_BRANCH=$HEAD_BRANCH RF_BASE_BRANCH=$BASE_BRANCH
 export RF_BASELINE_TEST=$BASELINE_TEST RF_MAX_ITEMS=$MAX_ITEMS
 export RF_SKILL_BLOCK=$SKILL_BLOCK RF_EXCLUDED=$EXCLUDED
+
+# 語彙の許容値。**手順書を読ませるだけでは足りない。** 手順書の見出しは日本語なので、
+# 「語彙に限定する」とだけ書くと読んだ側が日本語を語彙と解釈し、語彙外の降格規則で
+# 全件が見送りになる（実測）。検証側が持つ集合を状態ファイル経由で受け取り、
+# **許容値をそのまま列挙する**。
+VOCAB_SMELLS=$(jq -r '(.vocabulary.smells // {}) | to_entries[] | "- `\(.key)` — \(.value)"' "$STATE")
+VOCAB_TECHNIQUES=$(jq -r '(.vocabulary.techniques // {}) | to_entries[] | "- `\(.key)` — \(.value)"' "$STATE")
+VOCAB_SEVERITIES=$(jq -r '(.vocabulary.severities // []) | map("`" + . + "`") | join(" / ")' "$STATE")
+[ -n "$VOCAB_SMELLS" ] || VOCAB_SMELLS="（状態ファイルに語彙がありません。手順書の語彙に従うこと）"
+[ -n "$VOCAB_TECHNIQUES" ] || VOCAB_TECHNIQUES="（同上）"
+[ -n "$VOCAB_SEVERITIES" ] || VOCAB_SEVERITIES="\`critical\` / \`major\` / \`minor\`"
+
 export RF_ITEMS=$ITEMS_JSON RF_TMP_DIR=$TMP_DIR
+export RF_VOCAB_SMELLS=$VOCAB_SMELLS RF_VOCAB_TECHNIQUES=$VOCAB_TECHNIQUES
+export RF_VOCAB_SEVERITIES=$VOCAB_SEVERITIES
 
 # 雛形は `${RF_*}` を展開するだけの素の Markdown。コマンド置換は展開しない
 # （プロンプト本文に `$(...)` や backtick が現れても実行させないため）。

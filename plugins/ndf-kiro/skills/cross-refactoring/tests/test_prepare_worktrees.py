@@ -250,3 +250,35 @@ def test_empty_destination_is_provisioned(repo):
     dest.mkdir()
     _run(repo)
     assert (dest / "SKILL.md").is_file()
+
+
+# ---------- gemini の読み取り除外 ----------
+
+def test_gemini_gets_a_setting_that_allows_reading_the_provisioned_skills(repo):
+    """gemini は除外設定を**読み取りにも**適用するため、無効にする設定を置く。
+
+    置かないと、配置した手順書を `read_file` で一切開けず、
+    語彙を読めないまま提案が語彙外になって全件降格する。
+    """
+    _run(repo)
+    settings = repo["root"] / "gemini" / ".gemini" / "settings.json"
+    assert settings.is_file(), "gemini の設定が置かれていない"
+    conf = json.loads(settings.read_text(encoding="utf-8"))
+    # 項目名は gemini の版で変わる。新旧どちらの形式でも書く
+    assert conf["context"]["fileFiltering"]["respectGitIgnore"] is False
+    assert conf["context"]["fileFiltering"]["respectGeminiIgnore"] is False
+    assert conf["fileFiltering"]["respectGitIgnore"] is False
+    assert conf["fileFiltering"]["respectGeminiIgnore"] is False
+
+
+def test_gemini_settings_are_not_in_the_diff(repo):
+    _run(repo)
+    status = _git("status", "--short", cwd=repo["root"] / "gemini")
+    assert status.stdout.strip() == "", f"差分に現れている: {status.stdout}"
+
+
+def test_only_gemini_gets_the_reading_setting(repo):
+    """他のランタイムの設定は触らない。"""
+    _run(repo)
+    for rt in ("codex", "kiro"):
+        assert not (repo["root"] / rt / ".gemini").exists()

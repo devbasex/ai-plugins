@@ -29,7 +29,7 @@ skills/     → 実行可能なワークフロー
 
 詳細は `docs/specifications/ndf-knowledge-and-kiro.md` を参照。
 
-## NDF v8.1.0 の Skill 構成
+## NDF v8.2.0 の Skill 構成
 
 Skill は 31 個で、配布は `plugins/ndf-shared/manifests/` が唯一の基準（Claude Code 27 / Codex 25 / Kiro 26）。ブラウザ自動テストの 4 個は `playwright-kit` プラグインへ分離した（`plugins/playwright-kit-shared/`）。frontmatter の書き方は `plugins/ndf-shared/skills/README.md` の規約に従い、`python3 scripts/check-skill-frontmatter.py` で検査する。利用実績と維持・統合・削除の判定は `docs/specifications/ndf-skill-inventory.md` に記録する。
 
@@ -40,6 +40,8 @@ v7.0.0 で playwright 系 4 個を `playwright-kit` プラグインへ分離し�
 v8.0.0 で `safe-refactoring` を `refactoring` へ改名し、分岐・反復・定数の表現を決める観点を統合した。観点は `references/data-representation.md` に置き、言語固有の手段は `references/lang-<言語>.md` に 1 言語 1 ファイルで置く。SKILL.md が対象言語のファイルだけを読ませるため、他言語の内容はコンテキストに載らない。言語を追加するときも他のファイルは変更しない。対応表は `ndf-policies` にある（v9.0.0 で削除）。
 
 v8.1.0 で `cross-refactoring` を追加した。あわせて収束ループの共通層を `plugins/ndf-shared/skills/cross-review/scripts/lib/` へ切り出し、`monitor.py` は同ディレクトリへ移設して既存パスをシムにした。`cross-review` の挙動と既存テストは変えていない。
+
+v8.2.0 で `cross-refactoring` の実機検証（PR #118）で見つかった 9 件の不具合を直した。`cross-review` と共通層は変更していない。詳細は `issues/issue-113-cross-refactoring-defect-fixes.md`。
 
 v6.0.0 の対応表（`review` → `pr-review`）は予告どおり削除済み。v6.0.0 以前から移行する場合は v6.1.0 の `ndf-policies` を参照する。
 
@@ -52,10 +54,12 @@ v6.0.0 の対応表（`review` → `pr-review`）は予告どおり削除済み�
 /ndf:cross-refactoring 130 --scope src --model codex=gpt-5.5 --model claude=opus-5
 ```
 
-- `--scope` は必須。提案が発散して PR が肥大するのを防ぐ
+- `--scope` は必須。提案が発散して PR が肥大するのを防ぐ。**検証にも効く**ので、現状固定テストの置き場所も含める
 - ホストと同じランタイムが適用担当になる場合も、サブエージェントではなく **CLI プロセス**として起動する
 - モデルを比べるなら `--model kiro=<name>` を必ず指定する（既定 `auto` は実際に動いたモデルを取得できない）
-- 収束しない改善項目は **項目単位で取り消す**。合意済みの項目は PR に残る
+- 収束しない改善項目は **項目単位で取り消す**。合意済みの項目は PR に残る。ただし同一ファイルの隣接行を触る項目どうしは git だけでは分離できないため、そのラウンドは全件取り消しへ退避する
+- 生成物・配布物の同期は **進行側の責務**。実装担当にはさせない（範囲外の変更になる）
+- `init` が参加 CLI の認証状態を確認する。誤検知するときは `NDF_SKIP_AUTH_CHECK=1`
 
 ## cross-review
 
