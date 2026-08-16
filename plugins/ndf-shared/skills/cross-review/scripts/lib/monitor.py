@@ -663,94 +663,6 @@ def _check_early_completion(
     return None
 
 
-def _check_termination_conditions(
-    agent: str,
-    paths: AgentPaths,
-    status: AgentStatus,
-    pid: int,
-    alive: bool,
-    elapsed: float,
-    timeout: int,
-    stall_timeout: int,
-    last_progress: float,
-    last_progress_size: int,
-    no_early_error: bool,
-    warned_early_error: bool,
-    require_result: bool,
-    log_prefix: str,
-) -> tuple[Optional[AgentStatus], bool, float, int]:
-    """タイムアウト、異常、終了、停滞の順で終了条件を判定する。"""
-    if elapsed >= timeout:
-        if alive:
-            _kill_pid(pid)
-        status.status = "TIMEOUT"
-        status.exit_code = 2
-        status.detail = f"hard timeout {timeout}s reached (pid {pid})"
-        _emit_log(log_prefix, agent, status)
-        return status, warned_early_error, last_progress, last_progress_size
-
-    if not no_early_error:
-        fatal_err = _scan_early_fatal(paths.err_log)
-        fatal_source = "err.log"
-        if not fatal_err and agent == "claude":
-            fatal_err = _scan_claude_stdout_fatal(paths.stdout_log)
-            fatal_source = "stdout.log"
-        if fatal_err:
-            if alive:
-                _kill_pid(pid)
-            status.status = "EARLY_ERROR"
-            status.exit_code = 4
-            status.detail = f"early error (fatal) in {fatal_source}: {fatal_err[:200]}"
-            _emit_log(log_prefix, agent, status)
-            return status, warned_early_error, last_progress, last_progress_size
-        if not warned_early_error:
-            warn_err = _scan_early_warn(paths.err_log)
-            if warn_err:
-                print(
-                    f"{log_prefix}⚠️  {agent} early-error WARN "
-                    f"(non-fatal, not killing): {warn_err[:200]}",
-                    file=sys.stderr, flush=True,
-                )
-                warned_early_error = True
-
-    if not alive:
-        status.result_exists = paths.result.exists() and paths.result.stat().st_size > 0
-        if status.result_exists or not require_result:
-            status.status = "OK"
-            status.exit_code = 0
-            status.detail = (
-                f"process exited; sentinel={status.sentinel_seen}; "
-                f"result_exists={status.result_exists}"
-            )
-        else:
-            status.status = "NO_RESULT"
-            status.exit_code = 3
-            status.detail = f"process exited but result.json missing: {paths.result}"
-        _emit_log(log_prefix, agent, status)
-        return status, warned_early_error, last_progress, last_progress_size
-
-    status.err_log_size = _safe_size(paths.err_log)
-    status.stdout_log_size = _safe_size(paths.stdout_log)
-    status.progress_log_size = _safe_size(paths.progress_log)
-    status.progress_tail = _tail_last_nonempty_line(paths.progress_log)
-    progress_size = status.err_log_size + status.stdout_log_size + status.progress_log_size
-    if progress_size != last_progress_size:
-        last_progress_size = progress_size
-        last_progress = time.monotonic()
-    status.idle_seconds = time.monotonic() - last_progress
-    if status.idle_seconds >= stall_timeout:
-        _kill_pid(pid)
-        status.status = "STALLED"
-        status.exit_code = 5
-        status.detail = (
-            f"no log progress for {stall_timeout}s "
-            f"(pid {pid}, last size {last_progress_size}B)"
-        )
-        _emit_log(log_prefix, agent, status)
-        return status, warned_early_error, last_progress, last_progress_size
-    return None, warned_early_error, last_progress, last_progress_size
-
-
 def monitor_agent(
     agent: str,
     pr: int,
@@ -841,15 +753,93 @@ def monitor_agent(
             if cmdline_ok is True:
                 cmdline_validated = True
 
-        terminated, warned_early_error, last_progress, last_progress_size = (
-            _check_termination_conditions(
-                agent, paths, status, pid, alive, elapsed, timeout, stall_timeout,
-                last_progress, last_progress_size, no_early_error,
-                warned_early_error, require_result, log_prefix,
-            )
+        # 2. hard timeout
+        if elapsed >= timeout:
+            if alive:
+                _kill_pid(pid)
+            status.status = "TIMEOUT"
+            status.exit_code = 2
+            status.detail = f"hard timeout {timeout}s reached (pid {pid})"
+            _emit_log(log_prefix, agent, status)
+            return status
+
+        # 3. early error
+        # 明確な致命 (FATAL) のみ kill する。曖昧パターン (生 Error: / Traceback) は
+        # WARN として警告ログのみ。codex がレビュー対象 diff の test コード片を
+        # echo するケースや gemini の config validation 警告で誤 kill されるのを防ぐ。
+        if not no_early_error:
+            fatal_err = _scan_early_fatal(paths.err_log)
+            fatal_source = "err.log"
+            if not fatal_err and agent == "claude":
+                # claude は承認失敗・実行失敗を標準出力の JSON に載せる。
+                fatal_err = _scan_claude_stdout_fatal(paths.stdout_log)
+                fatal_source = "stdout.log"
+            if fatal_err:
+                if alive:
+                    _kill_pid(pid)
+                status.status = "EARLY_ERROR"
+                status.exit_code = 4
+                # 検知元を書く。err.log と決め打ちすると、標準出力から検知したときに
+                # 存在しない行を探させることになる。
+                status.detail = (
+                    f"early error (fatal) in {fatal_source}: {fatal_err[:200]}"
+                )
+                _emit_log(log_prefix, agent, status)
+                return status
+
+            if not warned_early_error:
+                warn_err = _scan_early_warn(paths.err_log)
+                if warn_err:
+                    print(
+                        f"{log_prefix}⚠️  {agent} early-error WARN "
+                        f"(non-fatal, not killing): {warn_err[:200]}",
+                        file=sys.stderr, flush=True,
+                    )
+                    warned_early_error = True
+
+        if not alive:
+            # プロセス終了 — result.json を確認
+            status.result_exists = paths.result.exists() and paths.result.stat().st_size > 0
+            if status.result_exists or not require_result:
+                status.status = "OK"
+                status.exit_code = 0
+                status.detail = (
+                    f"process exited; sentinel={status.sentinel_seen}; "
+                    f"result_exists={status.result_exists}"
+                )
+            else:
+                status.status = "NO_RESULT"
+                status.exit_code = 3
+                status.detail = f"process exited but result.json missing: {paths.result}"
+            _emit_log(log_prefix, agent, status)
+            return status
+
+        # 4. stall detection (err.log / stdout.log / progress.log をモニタ。
+        # gemini は stdout 側だけ進捗が出るケースがあり、progress.log には
+        # launcher が要求した短いフェーズマーカーが出るため、いずれかが
+        # 更新されれば progress として扱う)
+        status.err_log_size = _safe_size(paths.err_log)
+        status.stdout_log_size = _safe_size(paths.stdout_log)
+        status.progress_log_size = _safe_size(paths.progress_log)
+        status.progress_tail = _tail_last_nonempty_line(paths.progress_log)
+        progress_size = (
+            status.err_log_size + status.stdout_log_size + status.progress_log_size
         )
-        if terminated is not None:
-            return terminated
+        if progress_size != last_progress_size:
+            last_progress_size = progress_size
+            last_progress = time.monotonic()
+        status.idle_seconds = time.monotonic() - last_progress
+        if status.idle_seconds >= stall_timeout:
+            if alive:
+                _kill_pid(pid)
+            status.status = "STALLED"
+            status.exit_code = 5
+            status.detail = (
+                f"no log progress for {stall_timeout}s "
+                f"(pid {pid}, last size {last_progress_size}B)"
+            )
+            _emit_log(log_prefix, agent, status)
+            return status
 
         # poll 中の進捗ログ
         _emit_progress(log_prefix, agent, status)
