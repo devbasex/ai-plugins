@@ -137,6 +137,14 @@ REQUIRED_TRAILERS = ("Item-Id", "Round", "Impl-Runtime", "Impl-Model")
 # 適用で必ず配置する Skill。ここに無いものは配らない。
 REQUIRED_SKILLS = ("refactoring", "tdd-cycle", "quality-gates")
 
+# 生成物を同期したコミットのメッセージ。**どの改善項目にも属さない**ことが分かる形にする。
+SYNC_COMMIT_MESSAGE = (
+    "Chore: 生成物を同期する（cross-refactoring 進行側）\n\n"
+    "実装担当は対象範囲だけを変更するため、生成物が同期されない。\n"
+    "同期を検査する pre-push を持つリポジトリでも push できるよう、\n"
+    "公開の直前に進行側がまとめて生成する。"
+)
+
 # 実差分行数が見積りのこの倍数を超えたら範囲の逸脱とみなす。
 DIFF_BUDGET_FACTOR = 2
 
@@ -468,7 +476,7 @@ def verify_scope(commit: dict[str, Any], scope: Iterable[str]) -> Optional[str]:
     more = f" ほか {len(outside) - 5} 件" if len(outside) > 5 else ""
     return (
         f"コミット {commit.get('sha', '?')} が対象範囲の外を変更しています"
-        f"（{shown}{more}）。生成物の同期は進行側が収束後にまとめて行います。"
+        f"（{shown}{more}）。生成物の同期は進行側が公開の直前に行います。"
         "現状固定テストの置き場所が範囲外なら、`--scope` に含めてから実行してください"
     )
 
@@ -779,6 +787,8 @@ def cmd_init(args: argparse.Namespace) -> None:
         "max_items_per_round": args.max_items_per_round,
         "severity_threshold": args.severity_threshold,
         "baseline_test": baseline,
+        # 生成物の同期は**進行側の責務**。push の直前に実行する。
+        "sync_command": args.sync_command,
         "test_timeout": args.test_timeout,
         "outer_round": 0,
         "phase": "init",
@@ -1244,6 +1254,9 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
         if args.dry_run:
             info("（dry-run）状態ファイルは更新していません")
         else:
+            # 項目別の失敗と同じく、**ここで取り消した項目も「対象外」に残す**。
+            # 残さないと同じ提案が次のラウンドで再び採用される。
+            _defer_abandoned_items(state, entry)
             statefile.save(path, state)
             _push_head(state)
             entry["pending_push"] = False
@@ -1323,12 +1336,41 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
         # `merged_at` は `_apply_drop` が取り消しの完了時点で立てる。
         applied = _apply_drop(path, state, entry, failed)
     else:
+        # **全項目が通ったときも進行側が公開する。** 実装担当は push しないため、
+        # ここで公開しないとレビュー担当が Pull Request 上の差分へ指摘を書けない。
         entry["apply"]["merged_at"] = statefile.now()
+        entry["pending_push"] = True
+        statefile.save(path, state)
+        _push_head(state)
+        entry["pending_push"] = False
         statefile.save(path, state)
 
     if not applied:
         info("全項目が失敗したため、このラウンドのレビューは行いません")
         sys.exit(2)
+
+
+def _defer_abandoned_items(state: dict[str, Any], entry: dict[str, Any]) -> None:
+    """このラウンドで取り消した項目を「対象外」として記録する。
+
+    記録しないと、**同じ提案が次のラウンドで再び採用され、同じ理由で失敗する**。
+    実測では適用で失敗した項目が 3 ランタイム全員から再提案され、合意数が最大に
+    なって最優先で採用された。手順書が「同じ提案が毎ラウンド出続けて収束しない」
+    として禁じている状態そのものである。
+
+    除外の鍵は `path` + `symbol` + `smell` なので、その 3 つを必ず残す。
+    """
+    already = {d.get("item_id") for d in state["deferred_items"]}
+    for item_id in entry["items"]:
+        item = _find_item(state, item_id, required=False)
+        if item is None or item.get("status") != "abandoned" or item_id in already:
+            continue
+        state["deferred_items"].append({
+            "item_id": item_id,
+            "path": item["path"], "symbol": item["symbol"], "smell": item["smell"],
+            "round": entry["round"],
+            "defer_reason": item.get("failure_reason") or "適用結果の検証を通らなかった",
+        })
 
 
 def _run_drop(
@@ -1391,6 +1433,9 @@ def _apply_drop(
         entry["apply_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
         state["phase"] = "propose"
 
+    # 取り消した項目は「対象外」として残す。次のラウンドで同じ提案が採用され、
+    # 同じ理由で失敗するのを防ぐ。
+    _defer_abandoned_items(state, entry)
     # **取り消しが済んだことを push より先に、印の解除と同じ保存で永続化する。**
     # 保存せずに push して失敗すると、次の実行が適用の検証をやり直し、取り消しと
     # 積み直しのコミットを「未割当」と判定してラウンドごと巻き込んでしまう。
@@ -1725,7 +1770,6 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     # 適用フェーズの未割当コミットと同じ扱いにする。
     problems: list[str] = []
     accepted: list[tuple[str, str]] = []      # (item_id, sha)
-    needs_push = False
     for commit in facts:
         item_id = (commit.get("trailers") or {}).get("Item-Id")
         problem = verify_fix_commit(commit, state.get("target_scope") or [])
@@ -1762,7 +1806,6 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         statefile.save(path, state)
         # **push は保存のあと。** ここで push して失敗すると、取り消しコミットは
         # ローカルに残るのに起点の更新が保存されず、叩き直しで二重に取り消してしまう。
-        needs_push = True
         info("⚠ 修正を取り消したため、解決の申告は採用しません")
         resolved = set()
     else:
@@ -1785,8 +1828,9 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         + _safe_int(payload.get("elapsed_seconds"))
     )
     statefile.save(path, state)
-    if needs_push:
-        _push_with_retry_marker(path, state, entry)
+    # **取り消したかどうかに関わらず公開する。** 実装担当は push しないため、
+    # ここで公開しないと再レビューが Pull Request 上の差分を見られない。
+    _push_with_retry_marker(path, state, entry)
     info(f"修正を取り込みました（解決 {len(resolved)} スレッド / 修正ラウンド {entry['fix_rounds']}）")
 
 
@@ -2471,8 +2515,146 @@ def _order_newest_first(work: str, shas: list[str]) -> list[str]:
     return sorted(shas, key=lambda s: rank.get(resolved[s], len(rank)))
 
 
+def _worktree_changes(work: str) -> dict[str, str]:
+    """作業ツリーの変更を `パス → 状態` で返す。同期の前後を比べるために使う。
+
+    無視されているファイルは現れない（`--porcelain` の既定）。改名は移動先の
+    パスだけを見る。
+    """
+    # `core.quotePath` の既定（true）では、非 ASCII を含むパスが `"` で囲まれ
+    # `\343` の形へエスケープされる。そのまま `git add` へ渡すと見つからない。
+    out = _git_out(
+        work, ["-c", "core.quotePath=false", "status", "--porcelain", "-uall"]
+    )
+    changes: dict[str, str] = {}
+    for line in (out or "").splitlines():
+        if len(line) < 4:
+            continue
+        path = line[3:]
+        if " -> " in path:            # 改名。移動先だけを対象にする
+            path = path.split(" -> ", 1)[1]
+        changes[path.strip('"')] = line[:2]
+    return changes
+
+
+def _control_prefix(state: dict[str, Any], work: str) -> Optional[str]:
+    """作業ディレクトリから見た制御用ディレクトリの相対パス。外にあれば `None`。
+
+    状態ファイル・プロンプト・結果・ログの置き場所で、**同期コミットへ入れない**。
+    `prepare-worktrees.sh` が無視の設定を置くが、置き場所を環境変数で移した場合や
+    配置前に同期が走った場合に備えて、ここでも明示的に外す。
+    """
+    tmp_dir = str(state.get("tmp_dir") or "")
+    if not tmp_dir:
+        return None
+    try:
+        relative = pathlib.Path(tmp_dir).resolve().relative_to(
+            pathlib.Path(work).resolve()
+        )
+    except ValueError:
+        return None
+    return f"{relative}/"
+
+
+def _dirty_paths(state: dict[str, Any], work: str) -> list[str]:
+    """作業ツリーの未コミット変更のパス。制御用ディレクトリは除く。"""
+    control = _control_prefix(state, work)
+    return sorted(
+        path for path in _worktree_changes(work)
+        if not (control and path.startswith(control))
+    )
+
+
+def _discard_worktree_changes(work: str) -> None:
+    """作業ツリーと index の未コミット変更を捨てる。**着手前が綺麗なときだけ呼ぶ。**
+
+    **index も戻す。** `git checkout -- .` は staged された差分を戻さないため、
+    同期コマンドが `git add` してから失敗すると清浄性の検査が通らないままになり、
+    `pending_push` の再試行が永久に進まない。
+
+    無視されたファイル（制御用ディレクトリを含む）は消さない（`git clean` に
+    `-x` を付けない）。
+    """
+    for args in (["reset", "--hard", "HEAD"], ["clean", "-fd"]):
+        subprocess.run(["git", *args], cwd=work, capture_output=True, text=True)
+
+
+def _require_clean_worktree(state: dict[str, Any], work: str) -> None:
+    """同期の前に作業ツリーが綺麗であることを求める。汚れていたら中断する。
+
+    汚れたまま同期すると、**同期が作った差分と元からあった差分を区別できない**。
+    区別しようと状態コードを比べても足りず、次の 2 つを取りこぼす。
+
+    - 元から ` M` のファイルを同期がさらに書き換えても、状態コードは ` M` のままで
+      検知できない。その変更がコミットされず、**push がまた落ちる**
+    - `git commit` は index の内容を全て含めるため、`git add` の対象を絞っても
+      **先に staged だった変更が検証を受けないまま Pull Request へ入る**
+
+    無視されたファイルはここに現れない。生成物やキャッシュを `.gitignore` へ
+    入れてあれば止まらない。
+    """
+    dirty = _dirty_paths(state, work)
+    if not dirty:
+        return
+    shown = ", ".join(dirty[:5])
+    more = f" ほか {len(dirty) - 5} 件" if len(dirty) > 5 else ""
+    die(
+        f"生成物を同期する前に、作業ツリーへ未コミットの変更があります（{shown}{more}）。"
+        "同期が作った差分と区別できず、検証を受けていない変更を公開しかねないため"
+        "中断します。コミットするか `.gitignore` へ入れてから再実行してください"
+    )
+
+
+def _sync_generated(state: dict[str, Any]) -> None:
+    """push の直前に生成物を同期し、差分があれば進行側のコミットとして積む。
+
+    同期を**実装担当の責務にすると範囲外の変更が生まれ**、範囲の検査で全件失敗する
+    （実測ではラウンドの採用 5 件が全て範囲外で落ちた）。かといって同期しないと、
+    生成物の同期を検査する pre-push を持つリポジトリでは push そのものが通らず、
+    取り消しを Pull Request へ反映できない。そこで**進行側が push の直前に同期する**。
+
+    このコミットはどの改善項目にも属さない。取り消しでは積み直されないが、
+    次の push で作り直されるので失われても問題にならない。
+
+    同期に失敗したら中断する。**黙って push しない。** 同期できない状態を公開すると、
+    利用者のリポジトリの検査を壊したまま進むことになる。
+    """
+    command = str(state.get("sync_command") or "").strip()
+    if not command:
+        return
+    work = state["worktrees"]["work"]
+    # **同期の前に作業ツリーが綺麗であることを求める。** 汚れたまま同期すると、
+    # 同期が作った差分と元からあった差分を区別できない。
+    _require_clean_worktree(state, work)
+    code, timed_out = _run_with_timeout(
+        command, work, _safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT)
+    )
+    if timed_out or code != 0:
+        # **途中まで書き換えた差分を残さない。** 残すと次の実行は
+        # `_require_clean_worktree` で必ず止まり、`pending_push` の再試行が
+        # 永久に進まなくなる。着手前が綺麗だったことは確認済みなので、
+        # ここにある変更は全て同期が作ったものだと分かる。
+        _discard_worktree_changes(work)
+        die(
+            f"生成物の同期に失敗しました（{command}）: "
+            + ("打ち切りました" if timed_out else f"終了コード {code}")
+            + "。同期が作った差分は破棄したので、原因を直せばそのまま再開できます"
+        )
+    produced = _dirty_paths(state, work)
+    if not produced:
+        return
+    _sh(["git", "add", "--", *produced], cwd=work)
+    _sh(["git", "commit", "-m", SYNC_COMMIT_MESSAGE], cwd=work)
+    info(f"🔧 生成物を同期しました（{command} / {len(produced)} ファイル）")
+
+
 def _push_head(state: dict[str, Any]) -> None:
-    """head ブランチへ push する。**`--force` は使わない。**"""
+    """head ブランチへ push する。**`--force` は使わない。**
+
+    **公開するのは進行側だけである。** 実装担当に push させると、検証を通る前に
+    変更が Pull Request へ現れ、取り消しの反映漏れがそのまま残る。
+    """
+    _sync_generated(state)
     _sh(
         ["git", "push", "origin", f"HEAD:{state['head_branch']}"],
         cwd=state["worktrees"]["work"],
@@ -2607,6 +2789,10 @@ def main() -> None:
     init.add_argument("--test-timeout", type=int, default=DEFAULT_TEST_TIMEOUT,
                       help="テスト 1 回あたりの上限秒数。超えたら失敗として扱う "
                            f"(default: {DEFAULT_TEST_TIMEOUT})")
+    init.add_argument("--sync-command", default=None,
+                      help="生成物を同期するコマンド。**push の直前**に進行側が実行し、"
+                           "差分があれば進行側のコミットとして積む。"
+                           "同期を実装担当にさせると範囲外の変更になるため分離している")
     init.add_argument("--baseline-test", required=True,
                       help="着手前と各コミットで実行するテストコマンド。"
                            "振る舞い不変を示す手段が無い書き換えは構造改善ではないため必須")

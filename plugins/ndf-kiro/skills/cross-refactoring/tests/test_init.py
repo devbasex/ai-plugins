@@ -59,6 +59,7 @@ def _args(tmp_path, **over):
         "pr": 130, "scope": ["src"], "host": "claude",
         "max_outer_rounds": 3, "max_fix_rounds": 3, "max_items_per_round": 5,
         "severity_threshold": "minor", "model": None, "baseline_test": "true",
+        "sync_command": None,
         "test_timeout": 60,
         "worktree_root": str(tmp_path / "rf130"),
     }
