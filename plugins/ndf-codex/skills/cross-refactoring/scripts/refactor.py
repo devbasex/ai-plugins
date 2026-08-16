@@ -1708,36 +1708,6 @@ def _validate_fix_commits(
     return accepted, unassigned, problems
 
 
-def _merge_fix_finalize(
-    path: pathlib.Path,
-    state: dict[str, Any],
-    entry: dict[str, Any],
-    resolved: set[str],
-    merge_key: str,
-    payload: dict[str, Any],
-    needs_push: bool,
-) -> None:
-    """レビュー解決状態の反映・ラウンド計数・保存・push。"""
-    for review in entry["reviews"]:
-        for finding in review["findings"]:
-            if finding.get("thread_id") not in resolved:
-                continue
-            finding["resolved"] = True
-
-    merged_keys = entry.setdefault("fix_merged_keys", [])
-    merged_keys.append(merge_key)
-    entry["fix_rounds"] += 1
-
-    entry.setdefault("durations", {})["fix"] = (
-        entry.get("durations", {}).get("fix", 0)
-        + _safe_int(payload.get("elapsed_seconds"))
-    )
-    statefile.save(path, state)
-    if needs_push:
-        _push_with_retry_marker(path, state, entry)
-    info(f"修正を取り込みました（解決 {len(resolved)} スレッド / 修正ラウンド {entry['fix_rounds']}）")
-
-
 def _merge_fix_verify_and_reconcile(
     path: pathlib.Path,
     state: dict[str, Any],
@@ -1868,6 +1838,7 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         f"{attempt}:"
         + hashlib.sha256(result.read_bytes()).hexdigest()
     )
+    merged_keys = entry.setdefault("fix_merged_keys", [])
 
     # スレッド解決の照合
     resolved = _merge_fix_resolve_threads(payload, state["repo"], state["current_pr"])
@@ -1881,8 +1852,23 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         info("⚠ 修正を取り消したため、解決の申告は採用しません")
         resolved = set()
 
-    # 状態保存と push
-    _merge_fix_finalize(path, state, entry, resolved, merge_key, payload, needs_push)
+    for review in entry["reviews"]:
+        for finding in review["findings"]:
+            if finding.get("thread_id") not in resolved:
+                continue
+            finding["resolved"] = True
+
+    merged_keys.append(merge_key)
+    entry["fix_rounds"] += 1
+
+    entry.setdefault("durations", {})["fix"] = (
+        entry.get("durations", {}).get("fix", 0)
+        + _safe_int(payload.get("elapsed_seconds"))
+    )
+    statefile.save(path, state)
+    if needs_push:
+        _push_with_retry_marker(path, state, entry)
+    info(f"修正を取り込みました（解決 {len(resolved)} スレッド / 修正ラウンド {entry['fix_rounds']}）")
 
 
 def cmd_advance(args: argparse.Namespace) -> None:
