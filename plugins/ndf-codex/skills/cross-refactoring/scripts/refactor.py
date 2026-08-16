@@ -2566,12 +2566,16 @@ def _dirty_paths(state: dict[str, Any], work: str) -> list[str]:
 
 
 def _discard_worktree_changes(work: str) -> None:
-    """作業ツリーの未コミット変更を捨てる。**着手前が綺麗なときだけ呼ぶ。**
+    """作業ツリーと index の未コミット変更を捨てる。**着手前が綺麗なときだけ呼ぶ。**
+
+    **index も戻す。** `git checkout -- .` は staged された差分を戻さないため、
+    同期コマンドが `git add` してから失敗すると清浄性の検査が通らないままになり、
+    `pending_push` の再試行が永久に進まない。
 
     無視されたファイル（制御用ディレクトリを含む）は消さない（`git clean` に
     `-x` を付けない）。
     """
-    for args in (["checkout", "--", "."], ["clean", "-fd"]):
+    for args in (["reset", "--hard", "HEAD"], ["clean", "-fd"]):
         subprocess.run(["git", *args], cwd=work, capture_output=True, text=True)
 
 

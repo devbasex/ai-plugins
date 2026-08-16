@@ -1503,7 +1503,9 @@ def test_sync_failure_discards_what_it_produced(
             type("A", (), {"id": 130, "round": 1, "dry_run": False})()
         )
     assert e.value.code == refactor.ABORT
-    assert ["git", "checkout", "--", "."] in calls, "同期の差分を戻していない"
+    # index も戻す。`git checkout -- .` では staged された差分が残り、
+    # 清浄性の検査が通らないままになる
+    assert ["git", "reset", "--hard", "HEAD"] in calls, "index を戻していない"
     assert ["git", "clean", "-fd"] in calls, "同期が作ったファイルを消していない"
     # 無視されたファイル（制御用ディレクトリ）まで消さない
     assert not any("-x" in c for c in calls if c[:2] == ["git", "clean"])
@@ -1519,3 +1521,26 @@ def test_status_disables_path_quoting(refactor, monkeypatch):
     )
     assert refactor._worktree_changes("/w") == {"plugins/日本語/a.py": " M"}
     assert seen[0][:2] == ["-c", "core.quotePath=false"]
+
+
+def test_sync_failure_also_resets_the_index(
+    refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
+):
+    """同期が `git add` してから失敗しても、次の実行が再開できること。
+
+    `git checkout -- .` は staged された差分を戻さないため、index も戻さないと
+    清浄性の検査が通らないままになる。
+    """
+    _sync_state(tmp_path, env_tmp_dir, git_facts)
+    # 同期が index へ追加してから失敗した状況（`M ` は staged）
+    calls, pushes = _drop_env(refactor, monkeypatch, sync_dirty=("", "M  generated/a.py"))
+    monkeypatch.setattr(
+        refactor, "_run_with_timeout",
+        lambda command, cwd, timeout, grace=5.0: (1, False),
+    )
+    with pytest.raises(SystemExit):
+        refactor.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+        )
+    assert ["git", "reset", "--hard", "HEAD"] in calls
+    assert [c for c in pushes if c[:2] == ["git", "push"]] == []
