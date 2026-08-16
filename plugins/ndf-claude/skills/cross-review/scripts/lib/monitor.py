@@ -613,6 +613,29 @@ def _tail_last_nonempty_line(path: pathlib.Path, limit: int = 4096) -> str:
     return ""
 
 
+def _check_sentinel_completion(
+    agent: str,
+    pid: int,
+    paths: AgentPaths,
+    status: AgentStatus,
+) -> bool:
+    if not (
+        agent == "codex"
+        and _pid_alive(pid)
+        and status.sentinel_seen
+        and paths.result.exists()
+        and paths.result.stat().st_size > 0
+    ):
+        return False
+
+    _kill_pid(pid)
+    status.result_exists = True
+    status.status = "OK"
+    status.exit_code = 0
+    status.detail = f"codex sentinel + result.json detected; killed lingering pid {pid}"
+    return True
+
+
 def monitor_agent(
     agent: str,
     pr: int,
@@ -676,20 +699,7 @@ def monitor_agent(
         # ケースがある (実機で観測)。result.json は正常に書かれているのに alive=True の
         # まま stall_timeout に達して STALLED 化してしまう。sentinel + result.json が
         # 揃った瞬間に対象プロセスを kill して OK 判定で返す。
-        if (
-            agent == "codex"
-            and alive
-            and status.sentinel_seen
-            and paths.result.exists()
-            and paths.result.stat().st_size > 0
-        ):
-            _kill_pid(pid)
-            status.result_exists = True
-            status.status = "OK"
-            status.exit_code = 0
-            status.detail = (
-                f"codex sentinel + result.json detected; killed lingering pid {pid}"
-            )
+        if _check_sentinel_completion(agent, pid, paths, status):
             _emit_log(log_prefix, agent, status)
             return status
 
