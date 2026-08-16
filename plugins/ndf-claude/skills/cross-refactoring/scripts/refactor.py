@@ -1203,6 +1203,77 @@ def _verify_and_record_items(
     return applied, failed
 
 
+def _merge_apply_validate_ownership(
+    path: pathlib.Path,
+    state: dict[str, Any],
+    entry: dict[str, Any],
+    work: str,
+    ordered_range: list[str],
+    payload: dict[str, Any],
+    head_sha: str,
+    dry_run: bool,
+) -> Optional[tuple[dict[str, list[str]], dict[str, str], set[str]]]:
+    """所有権検証。不正時はラウンドを取り消して sys.exit(2) する。
+
+    Returns:
+        正常時は (reported, owner_of, in_range) のタプル。
+        不正時はこの関数内で sys.exit(2) し、返らない。
+    """
+    round_items = set(entry["items"])
+    reported, owner_of, unassigned, unknown_ids, duplicated = (
+        _validate_commit_ownership(work, ordered_range, payload, round_items)
+    )
+    if not (unassigned or unknown_ids or duplicated):
+        return reported, owner_of, set(ordered_range)
+
+    causes = []
+    if unassigned:
+        causes.append(
+            f"どの改善項目にも割り当てられていないコミットが {len(unassigned)} 件"
+            f"（{', '.join(s[:7] for s in unassigned[:5])}）"
+        )
+    if unknown_ids:
+        causes.append(
+            f"このラウンドに無い改善項目 ID の申告"
+            f"（{', '.join(unknown_ids[:5])}）"
+        )
+    if duplicated:
+        causes.append(
+            f"複数の項目が同じコミットを申告しています"
+            f"（{', '.join(s[:7] for s in duplicated[:5])}）"
+        )
+    reason = (
+        "、".join(causes)
+        + "。検証を回避した変更や、状態と実差分の食い違いを Pull Request に"
+          "残さないため、ラウンドごと取り消します"
+    )
+    info(f"❌ {reason}")
+    for item_id in entry["items"]:
+        it = _find_item(state, item_id)
+        it["status"] = "abandoned"
+        it["failure_reason"] = reason
+    _revert_range_with_recovery(
+        path, state, entry, work, ordered_range, "apply_base_sha", dry_run,
+    )
+    entry["apply"] = {
+        "applied": [], "failed": list(entry["items"]),
+        "base_sha": entry.get("apply_base_sha"), "head_sha": head_sha,
+        "unassigned_commits": unassigned,
+        "unknown_item_ids": unknown_ids,
+        "duplicated_commits": duplicated,
+        "merged_at": statefile.now(),
+    }
+    state["phase"] = "propose"
+    if dry_run:
+        info("（dry-run）状態ファイルは更新していません")
+    else:
+        statefile.save(path, state)
+        _push_head(state)
+        entry["pending_push"] = False
+        statefile.save(path, state)
+    sys.exit(2)
+
+
 def cmd_merge_apply(args: argparse.Namespace) -> None:
     """Step 4 — 適用結果を検証して取り込む。
 
@@ -1273,72 +1344,13 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
             code=2,
         )
 
-    # 申告は**このラウンドの改善項目のものだけ**を採る。架空の項目 ID へ割り当てられた
-    # コミットを数に入れると、割り当て済みに見えるのに項目別の検証にも入らず、
-    # そのまま Pull Request に残せてしまう。
-    round_items = set(entry["items"])
-    # **範囲のコミットは全て、いずれかの改善項目に割り当てられていること。**
-    # 申告から漏れたコミットはテストもトレーラーも差分予算も検査されず、そのまま
-    # Pull Request に残る。都合の悪い変更を申告しないだけで検査を回避できてしまう。
-    # **1 コミットの所有項目は 1 つだけ。** 同じコミットを 2 つの項目が申告すると、
-    # 片方が失敗して取り消したときに、もう片方は成功のまま残る。状態ファイルと
-    # 実際の差分が食い違い、どちらが正しいか決められなくなる。
-    #
-    # 判定は**完全な SHA へ正規化してから**行う。申告の文字列をそのまま鍵にすると、
-    # 一方が完全 SHA、他方が短縮 SHA で同じコミットを指したときに重複を見逃す。
-    reported, owner_of, unassigned, unknown_ids, duplicated = (
-        _validate_commit_ownership(work, ordered_range, payload, round_items)
+    # 申告は**このラウンドの改善項目のものだけ**を採る。
+    ownership_result = _merge_apply_validate_ownership(
+        path, state, entry, work, ordered_range, payload, head_sha, args.dry_run,
     )
-    if unassigned or unknown_ids or duplicated:
-        causes = []
-        if unassigned:
-            causes.append(
-                f"どの改善項目にも割り当てられていないコミットが {len(unassigned)} 件"
-                f"（{', '.join(s[:7] for s in unassigned[:5])}）"
-            )
-        if unknown_ids:
-            causes.append(
-                f"このラウンドに無い改善項目 ID の申告"
-                f"（{', '.join(unknown_ids[:5])}）"
-            )
-        if duplicated:
-            causes.append(
-                f"複数の項目が同じコミットを申告しています"
-                f"（{', '.join(s[:7] for s in duplicated[:5])}）"
-            )
-        reason = (
-            "、".join(causes)
-            + "。検証を回避した変更や、状態と実差分の食い違いを Pull Request に"
-              "残さないため、ラウンドごと取り消します"
-        )
-        info(f"❌ {reason}")
-        for item_id in entry["items"]:
-            it = _find_item(state, item_id)
-            it["status"] = "abandoned"
-            it["failure_reason"] = reason
-        # 範囲全体を取り消す。どのコミットが安全かを決められない以上、
-        # 起点まで戻すのが最も確実である。順序は `_revert_item_commits` が
-        # git の履歴から決め直す。
-        _revert_range_with_recovery(
-            path, state, entry, work, ordered_range, "apply_base_sha", args.dry_run,
-        )
-        entry["apply"] = {
-            "applied": [], "failed": list(entry["items"]),
-            "base_sha": entry.get("apply_base_sha"), "head_sha": head_sha,
-            "unassigned_commits": unassigned,
-            "unknown_item_ids": unknown_ids,
-            "duplicated_commits": duplicated,
-            "merged_at": statefile.now(),
-        }
-        state["phase"] = "propose"
-        if args.dry_run:
-            info("（dry-run）状態ファイルは更新していません")
-        else:
-            statefile.save(path, state)
-            _push_head(state)
-            entry["pending_push"] = False
-            statefile.save(path, state)
-        sys.exit(2)
+    # 不正時は _merge_apply_validate_ownership 内で sys.exit(2) するので、
+    # ここに到達した時点で正常。
+    reported, owner_of, in_range = ownership_result
 
     scope = state.get("target_scope") or []
     # **判定はその都度残す。** まとめて最後に保存すると、取り消しの途中で中断した
