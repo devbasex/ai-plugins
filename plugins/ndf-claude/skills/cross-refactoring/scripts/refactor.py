@@ -2552,6 +2552,41 @@ def _control_prefix(state: dict[str, Any], work: str) -> Optional[str]:
     return f"{relative}/"
 
 
+def _dirty_paths(state: dict[str, Any], work: str) -> list[str]:
+    """作業ツリーの未コミット変更のパス。制御用ディレクトリは除く。"""
+    control = _control_prefix(state, work)
+    return sorted(
+        path for path in _worktree_changes(work)
+        if not (control and path.startswith(control))
+    )
+
+
+def _require_clean_worktree(state: dict[str, Any], work: str) -> None:
+    """同期の前に作業ツリーが綺麗であることを求める。汚れていたら中断する。
+
+    汚れたまま同期すると、**同期が作った差分と元からあった差分を区別できない**。
+    区別しようと状態コードを比べても足りず、次の 2 つを取りこぼす。
+
+    - 元から ` M` のファイルを同期がさらに書き換えても、状態コードは ` M` のままで
+      検知できない。その変更がコミットされず、**push がまた落ちる**
+    - `git commit` は index の内容を全て含めるため、`git add` の対象を絞っても
+      **先に staged だった変更が検証を受けないまま Pull Request へ入る**
+
+    無視されたファイルはここに現れない。生成物やキャッシュを `.gitignore` へ
+    入れてあれば止まらない。
+    """
+    dirty = _dirty_paths(state, work)
+    if not dirty:
+        return
+    shown = ", ".join(dirty[:5])
+    more = f" ほか {len(dirty) - 5} 件" if len(dirty) > 5 else ""
+    die(
+        f"生成物を同期する前に、作業ツリーへ未コミットの変更があります（{shown}{more}）。"
+        "同期が作った差分と区別できず、検証を受けていない変更を公開しかねないため"
+        "中断します。コミットするか `.gitignore` へ入れてから再実行してください"
+    )
+
+
 def _sync_generated(state: dict[str, Any]) -> None:
     """push の直前に生成物を同期し、差分があれば進行側のコミットとして積む。
 
@@ -2570,10 +2605,9 @@ def _sync_generated(state: dict[str, Any]) -> None:
     if not command:
         return
     work = state["worktrees"]["work"]
-    # **同期コマンドが作った差分だけを拾う。** `git add -A` にすると、同期の前から
-    # あった未追跡・変更済みファイルまで巻き込む。同期コミットは項目の検証を通らない
-    # ので、そこへ紛れ込んだ変更は**検査を一切受けずに Pull Request へ入る**。
-    before = _worktree_changes(work)
+    # **同期の前に作業ツリーが綺麗であることを求める。** 汚れたまま同期すると、
+    # 同期が作った差分と元からあった差分を区別できない。
+    _require_clean_worktree(state, work)
     code, timed_out = _run_with_timeout(
         command, work, _safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT)
     )
@@ -2582,12 +2616,7 @@ def _sync_generated(state: dict[str, Any]) -> None:
             f"生成物の同期に失敗しました（{command}）: "
             + ("打ち切りました" if timed_out else f"終了コード {code}")
         )
-    control = _control_prefix(state, work)
-    produced = sorted(
-        path for path, status in _worktree_changes(work).items()
-        if before.get(path) != status
-        and not (control and path.startswith(control))
-    )
+    produced = _dirty_paths(state, work)
     if not produced:
         return
     _sh(["git", "add", "--", *produced], cwd=work)

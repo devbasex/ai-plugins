@@ -1352,39 +1352,63 @@ def test_merge_apply_pushes_even_when_every_item_passes(
     assert entry["apply"]["applied"] == ["R1-001"]
 
 
-def test_sync_stages_only_what_the_command_produced(
+def test_sync_aborts_when_the_worktree_is_dirty(
     refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
 ):
-    """同期コマンドが作った差分だけを stage すること。
+    """同期の前に作業ツリーが汚れていたら中断すること。
 
-    `git add -A` にすると、同期の前からあった未追跡・変更済みファイルまで巻き込む。
-    同期コミットは項目の検証を通らないので、紛れ込んだ変更は**検査を一切受けずに**
-    Pull Request へ入る。
+    汚れたまま同期すると、同期が作った差分と元からあった差分を区別できない。
+    状態コードを比べても、元から ` M` のファイルを同期がさらに書き換えた場合を
+    取りこぼす。`git commit` は index を丸ごと含めるため、staged 済みの変更も
+    検証を受けないまま公開される。
     """
     _sync_state(tmp_path, env_tmp_dir, git_facts)
     staged: list[list[str]] = []
     _drop_env(
         refactor, monkeypatch,
-        sync_dirty=(
-            "?? leftover.txt\n M src/edited.py",
-            "?? leftover.txt\n M src/edited.py\n M plugins/generated/a.py",
-        ),
+        sync_dirty=(" M src/edited.py", " M src/edited.py"),
     )
+    monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: staged.append(list(cmd)) or "")
+    ran: list = []
     monkeypatch.setattr(
-        refactor, "_sh",
-        lambda cmd, **k: staged.append(list(cmd)) or "",
+        refactor, "_run_with_timeout",
+        lambda command, cwd, timeout, grace=5.0: ran.append(command) or (0, False),
     )
+    with pytest.raises(SystemExit) as e:
+        refactor.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+        )
+    assert e.value.code == refactor.ABORT
+    assert ran == [], "汚れたまま同期を走らせている"
+    assert [c for c in staged if c[:2] == ["git", "push"]] == []
+
+
+def test_dirt_inside_the_control_directory_does_not_abort(
+    refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
+):
+    """制御用ディレクトリの中は汚れていても止めないこと。
+
+    状態ファイル・結果・ログは常にそこへ書かれる。
+    """
+    state_path = _sync_state(tmp_path, env_tmp_dir, git_facts)
+    state = read_state(state_path)
+    state["worktrees"]["work"] = str(state_path.parent.parent)
+    state_path.write_text(__import__("json").dumps(state), encoding="utf-8")
+    control = state_path.parent.name
+    staged: list[list[str]] = []
+    _drop_env(
+        refactor, monkeypatch,
+        sync_dirty=(f"?? {control}/codex-apply-r1-result.json",
+                    f"?? {control}/codex-apply-r1-result.json\n M generated/a.py"),
+    )
+    monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: staged.append(list(cmd)) or "")
     monkeypatch.setattr(
         refactor, "_run_with_timeout",
         lambda command, cwd, timeout, grace=5.0: (0, False),
     )
     refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
-
-    adds = [c for c in staged if c[:2] == ["git", "add"]]
-    assert adds, "同期の差分を stage していない"
-    assert adds[0] == ["git", "add", "--", "plugins/generated/a.py"]
-    assert "leftover.txt" not in adds[0], "同期前からあった未追跡ファイルを巻き込んでいる"
-    assert "src/edited.py" not in adds[0], "同期前からあった変更を巻き込んでいる"
+    assert [c for c in staged if c[:2] == ["git", "add"]] == [
+        ["git", "add", "--", "generated/a.py"]]
 
 
 def test_sync_excludes_the_control_directory(
