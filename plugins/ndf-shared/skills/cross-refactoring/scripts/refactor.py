@@ -922,6 +922,28 @@ def verify_commit_assignment(
     return sorted(in_range - set(owner_of)), duplicated
 
 
+def _abandon_round(
+    state: dict[str, Any],
+    entry: dict[str, Any],
+    ordered_range: list[str],
+    reason: str,
+    dry_run: bool,
+) -> None:
+    for item_id in entry["items"]:
+        item = _find_item(state, item_id)
+        item["status"] = "abandoned"
+        item["failure_reason"] = reason
+    whole_round = {
+        "item_id": f"R{entry['round']}-range",
+        "commits": list(ordered_range),
+    }
+    _revert_item_commits(state, whole_round, dry_run)
+    if not dry_run:
+        work = state["worktrees"]["work"]
+        entry["apply_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
+    state["phase"] = "propose"
+
+
 def cmd_merge_apply(args: argparse.Namespace) -> None:
     """Step 4 — 適用結果を検証して取り込む。
 
@@ -1044,22 +1066,10 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
               "残さないため、ラウンドごと取り消します"
         )
         info(f"❌ {reason}")
-        for item_id in entry["items"]:
-            it = _find_item(state, item_id)
-            it["status"] = "abandoned"
-            it["failure_reason"] = reason
         # 範囲全体を取り消す。どのコミットが安全かを決められない以上、
         # 起点まで戻すのが最も確実である。順序は `_revert_item_commits` が
         # git の履歴から決め直す。
-        whole_round = {
-            "item_id": f"R{entry['round']}-range",
-            "commits": list(ordered_range),
-        }
-        _revert_item_commits(state, whole_round, args.dry_run)
-        if not args.dry_run:
-            # 取り消し後の状態を新しい起点にする。叩き直しても範囲が空になり、
-            # 取り消しコミット自体を「未割当」として再び戻すことがない。
-            entry["apply_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
+        _abandon_round(state, entry, ordered_range, reason, args.dry_run)
         entry["apply"] = {
             "applied": [], "failed": list(entry["items"]),
             "base_sha": entry.get("apply_base_sha"), "head_sha": head_sha,
@@ -1068,7 +1078,6 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
             "duplicated_commits": duplicated,
             "merged_at": statefile.now(),
         }
-        state["phase"] = "propose"
         if args.dry_run:
             info("（dry-run）状態ファイルは更新していません")
         else:
