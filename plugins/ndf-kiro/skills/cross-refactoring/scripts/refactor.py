@@ -1442,6 +1442,41 @@ def _partition_fix_facts(
     return accepted, problems
 
 
+def _settle_fix_commits(
+    state: dict[str, Any],
+    entry: dict[str, Any],
+    ordered_range: list[str],
+    unassigned: list[str],
+    problems: list[str],
+    accepted: list[tuple[str, str]],
+    resolved: set[str],
+) -> tuple[bool, set[str]]:
+    if unassigned:
+        info(
+            f"❌ どの申告にも含まれていない修正コミットが {len(unassigned)} 件あります"
+            f"（{', '.join(s[:7] for s in unassigned[:5])}）"
+        )
+
+    if unassigned or problems:
+        info("検証を通らない変更を残さないため、この修正ラウンドの範囲を取り消します")
+        _revert_item_commits(
+            state,
+            {"item_id": f"R{entry['round']}-fix{entry['fix_rounds'] + 1}",
+             "commits": list(ordered_range)},
+            dry_run=False,
+        )
+        work = state["worktrees"]["work"]
+        entry["fix_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
+        info("⚠ 修正を取り消したため、解決の申告は採用しません")
+        return True, set()
+
+    for item_id, sha in accepted:
+        item = _find_item(state, item_id, required=False)
+        if item is not None:
+            item.setdefault("commits", []).append(sha)
+    return False, resolved
+
+
 def cmd_merge_fix(args: argparse.Namespace) -> None:
     """Step 6 — 修正結果を取り込み、修正ラウンドを 1 つ進める。"""
     path, state = _load(args.id)
@@ -1497,36 +1532,9 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     # （見送りの対象にもならない）。どのコミットが安全かは決められないので、
     # 適用フェーズの未割当コミットと同じ扱いにする。
     accepted, problems = _partition_fix_facts(facts)
-    needs_push = False
-
-    if unassigned:
-        info(
-            f"❌ どの申告にも含まれていない修正コミットが {len(unassigned)} 件あります"
-            f"（{', '.join(s[:7] for s in unassigned[:5])}）"
-        )
-
-    if unassigned or problems:
-        # **状態へ記録する前に取り消す。** 先に記録すると、取り消し済みのコミットが
-        # 状態ファイルに残り、後の見送り処理が同じコミットをもう一度取り消そうとする。
-        info("検証を通らない変更を残さないため、この修正ラウンドの範囲を取り消します")
-        _revert_item_commits(
-            state,
-            {"item_id": f"R{entry['round']}-fix{entry['fix_rounds'] + 1}",
-             "commits": list(ordered_range)},
-            dry_run=False,
-        )
-        # 取り消し後の状態を新しい起点にする（叩き直しでの二重取り消しを防ぐ）。
-        entry["fix_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
-        # **push は保存のあと。** ここで push して失敗すると、取り消しコミットは
-        # ローカルに残るのに起点の更新が保存されず、叩き直しで二重に取り消してしまう。
-        needs_push = True
-        info("⚠ 修正を取り消したため、解決の申告は採用しません")
-        resolved = set()
-    else:
-        for item_id, sha in accepted:
-            item = _find_item(state, item_id, required=False)
-            if item is not None:
-                item.setdefault("commits", []).append(sha)
+    needs_push, resolved = _settle_fix_commits(
+        state, entry, ordered_range, unassigned, problems, accepted, resolved
+    )
 
     for review in entry["reviews"]:
         for finding in review["findings"]:
