@@ -29,7 +29,7 @@ skills/     → 実行可能なワークフロー
 
 詳細は `docs/specifications/ndf-knowledge-and-kiro.md` を参照。
 
-## NDF v8.2.0 の Skill 構成
+## NDF v8.3.0 の Skill 構成
 
 Skill は 31 個で、配布は `plugins/ndf-shared/manifests/` が唯一の基準（Claude Code 27 / Codex 25 / Kiro 26）。ブラウザ自動テストの 4 個は `playwright-kit` プラグインへ分離した（`plugins/playwright-kit-shared/`）。frontmatter の書き方は `plugins/ndf-shared/skills/README.md` の規約に従い、`python3 scripts/check-skill-frontmatter.py` で検査する。利用実績と維持・統合・削除の判定は `docs/specifications/ndf-skill-inventory.md` に記録する。
 
@@ -42,6 +42,8 @@ v8.0.0 で `safe-refactoring` を `refactoring` へ改名し、分岐・反復�
 v8.1.0 で `cross-refactoring` を追加した。あわせて収束ループの共通層を `plugins/ndf-shared/skills/cross-review/scripts/lib/` へ切り出し、`monitor.py` は同ディレクトリへ移設して既存パスをシムにした。`cross-review` の挙動と既存テストは変えていない。
 
 v8.2.0 で `cross-refactoring` の実機検証（PR #118）で見つかった 9 件の不具合を直した。`cross-review` と共通層は変更していない。詳細は `issues/issue-113-cross-refactoring-defect-fixes.md`。
+
+v8.3.0 で `cross-refactoring` の公開の責務を進行側へ一本化した（**破壊的**）。実装担当は push せず、進行側が検証を通してから push する。あわせて `--sync-command` を新設し、適用で失敗した項目を対象外へ記録するようにした。詳細は `issues/issue-113-cross-refactoring-push-ownership.md`。
 
 v6.0.0 の対応表（`review` → `pr-review`）は予告どおり削除済み。v6.0.0 以前から移行する場合は v6.1.0 の `ndf-policies` を参照する。
 
@@ -58,7 +60,8 @@ v6.0.0 の対応表（`review` → `pr-review`）は予告どおり削除済み�
 - ホストと同じランタイムが適用担当になる場合も、サブエージェントではなく **CLI プロセス**として起動する
 - モデルを比べるなら `--model kiro=<name>` を必ず指定する（既定 `auto` は実際に動いたモデルを取得できない）
 - 収束しない改善項目は **項目単位で取り消す**。合意済みの項目は PR に残る。ただし同一ファイルの隣接行を触る項目どうしは git だけでは分離できないため、そのラウンドは全件取り消しへ退避する
-- 生成物・配布物の同期は **進行側の責務**。実装担当にはさせない（範囲外の変更になる）
+- 生成物・配布物の同期は **進行側の責務**。実装担当にはさせない（範囲外の変更になる）。同期の手順は `--sync-command "bash scripts/build-runtime-plugins.sh"` のように渡す
+- 公開するのは **進行側だけ**。実装担当は push しない。進行側が検証を通した後に push するので、未検証の変更が公開されない
 - `init` が参加 CLI の認証状態を確認する。誤検知するときは `NDF_SKIP_AUTH_CHECK=1`
 
 ## cross-review

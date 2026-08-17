@@ -113,20 +113,10 @@ export PLUGIN_ROOT=/work/ai-plugins/plugins/ndf-claude
 
 ## 別件で残っているタスク
 
-再々検証とは独立に、次の 2 つが未対応である。
+再々検証とは独立に、次の 1 つが未対応である。
+（バージョンは **v8.3.0** へ更新済み。#121 の破壊的変更を反映した）
 
-### 1. バージョンが更新されていない
-
-**#121 は公開インタフェースを変えたのに v8.2.0 のままである。**
-
-- `--sync-command` の新設（追加）
-- 実装担当が push しない、`merge-apply` / `merge-fix` が常に push する（**破壊的**）
-
-`plugins/ndf-claude/.claude-plugin/plugin.json` ほか、README・AGENTS.md・CLAUDE.md・
-marketplace.json・`plugins/ndf-kiro/VERSION` を **v8.3.0** へ揃える必要がある
-（更新箇所は #119 のコミットが参考になる）。
-
-### 2. cross-review が投稿の成否を突き合わせていない
+### cross-review が投稿の成否を突き合わせていない
 
 `cross-review` は「AI 自身が `gh api` で投稿する」設計だが、**投稿が失敗しても
 結果ファイルの申告だけで判定が進む**。#121 のラウンド 3 で実際に起きた
