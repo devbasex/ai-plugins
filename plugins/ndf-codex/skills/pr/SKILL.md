@@ -63,7 +63,7 @@ push と PR 作成は外部（GitHub）への書き込みで、取り消しに�
 - 既にPRが存在しOPEN状態なら:
   - `git add` → `git commit`（日本語メッセージ）→ **「push / PR 作成前の同意取得」に従って提示** → `git push`
   - **既存PR説明を更新** する（「PR説明の更新」節を参照）
-  - 終了報告
+  - **手順 6 の完了報告を行う**（PR を更新しただけの場合も省略しない）
 - PRがない、またはmerge/close済みなら次へ
 
 ### 1. ブランチ確認・切り替え
@@ -118,6 +118,35 @@ EOF
 
 `DRAFT_FLAG` は `--draft` 指定時のみ `--draft`、それ以外は空。
 
+### 6. 完了報告
+
+**PR を作成・更新しただけでは完了ではない。この手順まで実行して完了とする。**
+既存 PR を更新しただけの場合（手順 0 の経路）も同じ報告を行う。
+
+値を取得する:
+
+```bash
+gh pr view <number> --json number,title,url,isDraft,baseRefName,headRefName
+git log origin/<base>..HEAD --oneline
+git diff origin/<base>..HEAD --stat | tail -1
+```
+
+次の形で報告する:
+
+```
+PR #<番号> <タイトル>
+URL: <gh pr view で取得した url をそのまま>
+
+- ベース / ソース: <base> ← <head>（ドラフト: あり / なし）
+- 変更量: <コミット数> コミット / <ファイル数> ファイル / +<追加> -<削除>
+- コミット履歴:
+  - <hash> <メッセージ>
+- PR 本文: Summary の要点 1 行 / Test plan <項目数> 件（実行済み <n> 件）
+```
+
+**URL は生の URL をそのまま書く。** `[#124](https://…)` のような Markdown リンクにすると、
+利用者の画面では番号しか表示されず、URL を取り出せない。
+
 ## PR説明の更新（既存PRがある場合）
 
 既存PRがある場合、以下の手順でPR説明を更新する:
@@ -163,16 +192,6 @@ feature/xxx ──PR──→ qa/staging   ← ❌ qa/staging をmergeするとm
 ### 正しい手順
 
 `/ndf:cherry-pick-pr <base-branch>` を使う（自動化済み）。原則と手順は `/ndf:cherry-pick-pr` に記載のとおり。
-
-## 作業完了報告（必須）
-
-PR作成/更新完了後、以下を報告:
-
-- 基本情報（PRタイトル、ベース/ソースブランチ、PR番号、ドラフト有無）
-- 変更サマリー（コミット数、変更ファイル数、変更行数、主な変更内容）
-- コミット履歴
-- PR本文の概要（Summary、Test plan）
-- PR URL
 
 ## 関連
 
