@@ -126,7 +126,7 @@ EOF
 値を取得する:
 
 ```bash
-gh pr view <number> --json number,title,url,isDraft,baseRefName,headRefName
+gh pr view <number> --json number,title,url,isDraft,baseRefName,headRefName,body
 git rev-list --count origin/<base>..HEAD
 git diff origin/<base>..HEAD --stat | tail -1
 ```
