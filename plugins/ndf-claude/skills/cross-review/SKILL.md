@@ -353,6 +353,12 @@ body 先頭に必ず以下を入れる:
 コメント本文は `[重要度 / カテゴリ] 修正提案` の 1 文で完結させ、
 コード引用ブロック（``` ... ```）や現状説明だけのコメントは作らない。
 
+**インラインは PR の差分に含まれる行にしか付かない。** 差分外の行を指定すると GitHub が
+`HTTP 422 Line could not be resolved` を返し、**インラインだけでなくレビュー本体も投稿
+されない**（指摘が丸ごと失われ、PR 上には何も残らない）。差分に無い箇所を指摘するときは
+body に「ファイル名:行 + 指摘」の形で書く。422 が返ったら該当インラインを body へ移して
+再投稿する。
+
 ### 3. body（総評）に書かないこと
 
 - ❌ **「良い点」/「Strengths」/「Positives」/「評価できる点」セクション** — 一切書かない
@@ -403,6 +409,7 @@ pint / larastan / test / build などは **中断** を原則とする。
 - ❌ **`gemini --yolo` だけで起動** — trusted directory で YOLO 無効化。`--skip-trust` 併用
 - ❌ **`pgrep -fa <prompt>` で完了判定** — gemini は long prompt が引数に乗り検知失敗。pidfile 必須
 - ❌ **sentinel 単独で完了判定** — codex がクラッシュすると永遠に出ない。`monitor.py` の多軸判定 (pidfile / sentinel / 早期エラー / stall / hard timeout / result.json) を使うこと
+- ❌ **投稿に失敗したまま result.json を書かずに終了する** — 収束ループは前ラウンドの結果を読むか、結果なしで止まる。エラー時ほど `post_error` 付きの result.json が要る（launcher が起動時に前ラウンドの result / payload を消すため、書かれなければ「結果なし」として扱われる）
 - ❌ **タイムアウトなしで wait** — ハング検知不能。`monitor.py` の hard timeout (30 分既定) + stall timeout (10 分既定) を必ず効かせる
 - ❌ **EARLY_ERROR の曖昧パターンで kill する** — 行頭の生 `Error:` / `Traceback` は codex がレビュー対象 diff の test コード片を echo するケースで誤検知する。明確な致命 (auth / quota / sandbox / HTTP 401-403-429 / gemini の YOLO 降格) **のみ** kill 対象とし、曖昧パターンは警告ログに留める。誤検知が再発する場合は `--no-early-error` / `MONITOR_NO_EARLY_ERROR=1` で検知自体を無効化する (sentinel / result.json / timeout で十分判定可能)
 

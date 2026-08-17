@@ -39,6 +39,13 @@ EXTRA_REVIEW_INSTRUCTIONS=$(jq -r '.review_instructions // .extra_review_instruc
 PR=$(jq -r '.current_pr' "$STATE")
 SHA=$(gh pr view "$PR" --json headRefOid -q .headRefOid)
 
+# 前ラウンドの結果を残さない。投稿失敗などで今ラウンドの result.json が
+# 書かれなかったとき、state.py read-result が**前ラウンドの結果を読んで**
+# 同じ判定を繰り返す事故を防ぐ。
+rm -f "$TMP_DIR/codex-review-pr$STATE_PR-result.json" \
+      "$TMP_DIR/codex-review-pr$STATE_PR-round$ROUND-payload.json" \
+      "$TMP_DIR/codex-review-pr$STATE_PR-round$ROUND-api-payload.json"
+
 PROMPT=$TMP_DIR/codex-review-pr$STATE_PR-prompt.md
 EXISTING=$TMP_DIR/cross-review-pr$STATE_PR-existing-comments.txt
 EXTRA_REVIEW_BLOCK=
@@ -96,6 +103,28 @@ $EXTRA_REVIEW_BLOCK
 - 設計レベル・PR 横断の **修正提案のみ** 書く
 - 書くことが無ければ prefix 行 + 1 行サマリだけで良い (褒め言葉や評価文は不要)
 
+
+### インラインコメントを付けられる行（422 対策・必須）
+- インラインコメントは **この PR の差分に含まれる行にしか付けられない**。差分外の行を
+  指定すると GitHub が \`HTTP 422 Line could not be resolved\` を返し、**インラインだけで
+  なくレビュー本体も投稿されない**（指摘が丸ごと失われる）
+- 差分に無い箇所を指摘したいときは、インラインにせず **body に「ファイル名:行 + 指摘」
+  の形で書く**
+- それでも 422 が返ったときは、**該当インラインを body へ移して再投稿する**。
+  投稿を諦めない
+
+### 投稿できなかった場合（必須）
+- gh api がエラーを返したら、err.log に詳細を残したうえで **result.json を必ず書いて
+  から終了する**。\`event\` は本来の intent、\`comments_count\` は 0、
+  \`"post_error"\` に失敗理由（HTTP status とメッセージ）を入れる:
+  \`\`\`json
+  {"event": "REQUEST_CHANGES", "posted_as": "COMMENT", "comments_count": 0,
+   "review_url": "", "by_severity": {"critical": 0, "major": 0, "minor": 0, "nit": 0},
+   "post_error": "422 Line could not be resolved"}
+  \`\`\`
+- result.json を書かずに終了すると、収束ループは**前ラウンドの結果を使うか、結果なしで
+  停止する**。エラー時ほど result.json が要る
+
 - 投稿後、サマリを **$TMP_DIR/codex-review-pr$STATE_PR-result.json** に書く:
   \`\`\`json
   {
@@ -112,7 +141,7 @@ $EXTRA_REVIEW_BLOCK
 ## 守るべきこと
 - リポジトリ編集は行わない（コード修正は別ステップ）
 - worktree 外のパスは触らない
-- gh api 失敗時は err.log にエラー詳細を残して即時終了
+- gh api 失敗時は err.log にエラー詳細を残し、**result.json を書いてから**終了する
 EOF
 
 cd "$WORKTREE"

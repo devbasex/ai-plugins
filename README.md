@@ -125,6 +125,14 @@ kiro-cli chat --agent ndf
 | 報告の形 | 埋めるだけのテンプレートと、値の取得コマンド（`gh pr view --json …` / `git log` / `git diff --stat`）を提示 |
 | PR URL | **生の URL をそのまま書く**。Markdown リンクにすると番号しか表示されず、URL を取り出せない |
 
+**`/ndf:cross-review` の実行で見つかった 3 件も直しました。**
+
+| 直したこと | 変更 |
+| --- | --- |
+| 差分外の行を指すインラインで指摘が丸ごと消える | 422 (`Line could not be resolved`) はレビュー本体ごと落とす。差分外は body に書き、422 時はインラインを body へ移して再投稿する |
+| 投稿に失敗すると前ラウンドの結果で判定が続く | launcher が起動時に前ラウンドの result / payload を削除し、投稿失敗時も `post_error` 付きの result.json を書かせる |
+| `monitor.py` が実行権限を持たない | 実体 (`lib/monitor.py`) へのシムに実行権限を付与。`wait-review.sh` 経由も含めて `Permission denied` で止まらなくなった |
+
 ### NDF v8.3.0 の主な変更
 
 **`/ndf:cross-refactoring` の公開（push）の責務を進行側へ一本化しました。**
