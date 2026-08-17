@@ -127,7 +127,7 @@ EOF
 
 ```bash
 gh pr view <number> --json number,title,url,isDraft,baseRefName,headRefName
-git log origin/<base>..HEAD --oneline
+git rev-list --count origin/<base>..HEAD
 git diff origin/<base>..HEAD --stat | tail -1
 ```
 
@@ -135,17 +135,20 @@ git diff origin/<base>..HEAD --stat | tail -1
 
 ```
 PR #<番号> <タイトル>
-URL: <gh pr view で取得した url をそのまま>
 
 - ベース / ソース: <base> ← <head>（ドラフト: あり / なし）
 - 変更量: <コミット数> コミット / <ファイル数> ファイル / +<追加> -<削除>
-- コミット履歴:
-  - <hash> <メッセージ>
+- 主な変更: <1〜3 行>
 - PR 本文: Summary の要点 1 行 / Test plan <項目数> 件（実行済み <n> 件）
+
+URL: <gh pr view で取得した url をそのまま>
 ```
 
-**URL は生の URL をそのまま書く。** `[#124](https://…)` のような Markdown リンクにすると、
-利用者の画面では番号しか表示されず、URL を取り出せない。
+**URL は報告の最終行に、生の URL のまま置く。** 途中の行に混ぜると探すことになり、
+`[#124](https://…)` のような Markdown リンクにすると利用者の画面では番号しか表示されず、
+URL を取り出せない。
+
+コミット履歴は報告に含めない。PR ページで読めるため、報告で重ねて示す必要はない。
 
 ## PR説明の更新（既存PRがある場合）
 
