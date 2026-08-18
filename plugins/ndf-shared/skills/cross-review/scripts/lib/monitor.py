@@ -389,6 +389,17 @@ class AgentStatus:
     sentinel_seen: bool = False
 
 
+@dataclass
+class MonitorConfig:
+    timeout: int
+    stall_timeout: int
+    poll: int
+    require_result: bool
+    no_early_error: bool = False
+    log_prefix: str = ""
+    stem_template: str = DEFAULT_STEM_TEMPLATE
+
+
 # ---------- 監視ロジック ----------
 
 def _read_pidfile(p: pathlib.Path) -> Optional[int]:
@@ -798,19 +809,40 @@ def update_progress_and_check_stall(
 def monitor_agent(
     agent: str,
     pr: int,
-    timeout: int,
-    stall_timeout: int,
-    poll: int,
-    require_result: bool,
+    timeout: Optional[int] = None,
+    stall_timeout: Optional[int] = None,
+    poll: Optional[int] = None,
+    require_result: Optional[bool] = None,
     no_early_error: bool = False,
     log_prefix: str = "",
     stem_template: str = DEFAULT_STEM_TEMPLATE,
+    config: Optional[MonitorConfig] = None,
 ) -> AgentStatus:
     """1 agent を監視する。
 
     `no_early_error=True` のとき、EARLY_ERROR 検知 (FATAL/WARN とも) を完全に無効化し、
     hard timeout / stall / sentinel / result.json のみで判定する。
     """
+    if config is None:
+        if timeout is None or stall_timeout is None or poll is None or require_result is None:
+            raise TypeError("timeout, stall_timeout, poll, require_result are required")
+        config = MonitorConfig(
+            timeout=timeout,
+            stall_timeout=stall_timeout,
+            poll=poll,
+            require_result=require_result,
+            no_early_error=no_early_error,
+            log_prefix=log_prefix,
+            stem_template=stem_template,
+        )
+    timeout = config.timeout
+    stall_timeout = config.stall_timeout
+    poll = config.poll
+    require_result = config.require_result
+    no_early_error = config.no_early_error
+    log_prefix = config.log_prefix
+    stem_template = config.stem_template
+
     paths = AgentPaths.for_(agent, pr, stem_template)
     started = time.monotonic()
 
@@ -1006,11 +1038,15 @@ def main() -> None:
             else _agent_stall_default(agent)
         results[agent] = monitor_agent(
             agent=agent, pr=args.pr,
-            timeout=args.timeout, stall_timeout=stall,
-            poll=args.poll, require_result=require_result,
-            no_early_error=args.no_early_error,
-            log_prefix=f"[{agent}] ",
-            stem_template=args.stem_template,
+            config=MonitorConfig(
+                timeout=args.timeout,
+                stall_timeout=stall,
+                poll=args.poll,
+                require_result=require_result,
+                no_early_error=args.no_early_error,
+                log_prefix=f"[{agent}] ",
+                stem_template=args.stem_template,
+            ),
         )
 
     threads = [threading.Thread(target=run, args=(a,), daemon=False) for a in agents]
