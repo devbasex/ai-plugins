@@ -273,7 +273,7 @@ def test_judge_command_records_the_fix_base(refactor, tmp_path, env_tmp_dir, mon
     """修正コミットの実在を確かめるため、変更要求の時点の HEAD を残すこと。"""
     state_path = _state(tmp_path)
     env_tmp_dir(state_path)
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args: "FIX_BASE")
+    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **_kw: "FIX_BASE")
     write_result(state_path, "gemini-review-r1", review("REQUEST_CHANGES", [finding()]))
     write_result(state_path, "kiro-review-r1", review())
 

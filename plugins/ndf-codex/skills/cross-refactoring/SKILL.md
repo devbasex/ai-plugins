@@ -193,11 +193,17 @@ export CROSS_REFACTORING_TMP_DIR="$TMP_DIR"
 
 while :; do                                   # 提案ラウンドの繰り返し
   rf_eval start-round "$ID" || break          # 終了コード 1 = 繰り返し終了
+  # **提案の直前に読み取り用を同期する。** 前ラウンドの取り消しで HEAD が進んで
+  # いるため、同期しないと**消えたコードに対する提案**が返る（実測: 取り消しで
+  # 消えた関数へ 2 件）。HEAD が変わっていなければ何も起きない。
+  "$SCRIPTS/prepare-worktrees.sh" "$ID" sync "$(git -C "$WORK" rev-parse HEAD)"
   for a in $RUNTIMES; do
     "$SCRIPTS/launch-cli.sh" "$a" propose "$ID" "$ROUND"
   done
+  # 提案の所要は参加ランタイムと回線状況で振れる（実測 90〜285 秒）。既定の
+  # 打ち切りに任せず、明示する。
   "$LIB/monitor.py" "$ID" --agents "$RUNTIMES_CSV" --tmp-dir "$TMP_DIR" \
-      --stem-template "{agent}-propose-rf{id}-r$ROUND"
+      --stem-template "{agent}-propose-rf{id}-r$ROUND" --timeout 900
   rf merge-proposals "$ID" || break            # 終了コード 2 = 採用 0 件
 
   "$SCRIPTS/launch-cli.sh" "$IMPL" apply "$ID" "$ROUND"
@@ -213,7 +219,7 @@ while :; do                                   # 提案ラウンドの繰り返�
       "$SCRIPTS/launch-cli.sh" "$r" review "$ID" "$ROUND"
     done
     "$LIB/monitor.py" "$ID" --agents "$REVIEWERS_CSV" --tmp-dir "$TMP_DIR" \
-        --stem-template "{agent}-review-r$ROUND"
+        --stem-template "{agent}-review-r$ROUND" --timeout 900
     rf judge-review "$ID" "$ROUND"; rc=$?
     [ $rc -eq 0 ] && break                    # 2 者とも承認
     [ $rc -eq 3 ] && continue                 # 形式不正 — 差し戻して再レビュー
@@ -271,6 +277,7 @@ done
 | 結果ファイルの申告を検証の材料にする | 実装担当は報告する側。JSON を書き換えるだけで通る検査は機械検証ではない |
 | レビューの指摘に項目 ID を付けない | 同上。差し戻して再レビューになる |
 | `git push --force` / `--no-verify` を使う | 他者の作業を消す。検証を飛ばす |
+| 実装担当のコミットでフックの通し方を決めない | 生成物の同期を検査するリポジトリでは、同期の禁止と両立せずコミットを作れなくなる。迂回してよい手段を 1 つ定める |
 | 提案とレビューにホストを混ぜる | 実装者と評価者が同一モデルになりうる。初期化時に検査して失敗させている |
 | kiro を既定モデルのまま計測する | `auto` は実際に選ばれたモデルを取得できない |
 | 提案フェーズでコードを直す | 提案は読むだけ。直すのは実装担当 1 者に集約する |

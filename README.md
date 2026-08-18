@@ -6,7 +6,7 @@ Claude Code / Codex / Kiro CLI向けのスキル・MCP設定を共有するた�
 
 このマーケットプレイスは、チーム全体でAI開発ツール（Claude Code / Codex / Kiro CLI）の導入を加速するための事前設定されたプラグインを提供します。
 
-**NDFプラグイン v8.4.0** は、同じ `ndf@ai-plugins` という名前で Claude Code / Codex / Kiro CLI へ配布されるランタイム別プラグインです。共通ソースは `plugins/ndf-shared/` に集約し、利用者が install する配布物は `plugins/ndf-claude/` / `plugins/ndf-codex/` / `plugins/ndf-kiro/` に分かれています。
+**NDFプラグイン v8.5.0** は、同じ `ndf@ai-plugins` という名前で Claude Code / Codex / Kiro CLI へ配布されるランタイム別プラグインです。共通ソースは `plugins/ndf-shared/` に集約し、利用者が install する配布物は `plugins/ndf-claude/` / `plugins/ndf-codex/` / `plugins/ndf-kiro/` に分かれています。
 
 - **公開Skills**: Claude Code向け core 27個、Kiro向け core 26個、Codex向け core 25個に分離。
 - **元Skills（30個）**:
@@ -102,8 +102,16 @@ kiro-cli chat --agent ndf
 
 | プラグイン名 | バージョン | 説明 | 詳細 |
 |------------|----------|------|------|
-| **ndf** | 8.4.0 | Claude Code / Codex / Kiro CLI 向けに runtime 別配布物を提供する NDF プラグイン。8個の専門エージェント（Claude版）、公開Skills（Claude Code向け core 27個、Kiro向け core 26個、Codex向け core 25個）、Claude SessionStart/Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:external-ai` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [Claude](./plugins/ndf-claude/README.md) / [Codex](./plugins/ndf-codex/README.md) / [Kiro](./plugins/ndf-kiro/README.md) |
+| **ndf** | 8.5.0 | Claude Code / Codex / Kiro CLI 向けに runtime 別配布物を提供する NDF プラグイン。8個の専門エージェント（Claude版）、公開Skills（Claude Code向け core 27個、Kiro向け core 26個、Codex向け core 25個）、Claude SessionStart/Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:external-ai` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [Claude](./plugins/ndf-claude/README.md) / [Codex](./plugins/ndf-codex/README.md) / [Kiro](./plugins/ndf-kiro/README.md) |
 | **playwright-kit** | 1.0.0 | Playwright による E2E テストの計画・実装・証跡管理を提供するプラグイン。ページ役割からのテスト計画、動画 / trace 付きスクリプト実装、レポート生成と Drive 保管、playwright_kit ランタイム（init、a11y / CWV スキャン）の 4 Skill。NDF v7.0.0 で分離。 | [Claude](./plugins/playwright-kit-claude/README.md) |
+
+### NDF v8.5.0 の主な変更
+
+- **生成物の同期が止まる不具合を修正**: `git status --porcelain` を固定幅で読む箇所が出力全体を `strip()` していたため、変更パスの先頭 1 文字が欠けて `git add` が失敗していた
+- **実装担当の置き土産を捨ててから取り込む**: コミットされなかった変更は検証を受けていないため、`merge-apply` / `merge-fix` が取り込みの前に捨てる
+- **実装担当のコミットとフックの関係を明示**: 生成物の同期を検査するリポジトリでも、そのコミットだけフックを外してよいことを手順書に定めた
+- **提案の直前に読み取り用を同期**: 取り消しで進んだ HEAD が届かず、消えたコードへの提案が返る問題を解消
+- **cross-review が投稿の成否を確認**: 申告されたコメント数を GitHub 側の実数と突き合わせ、届いていなければ中断する
 
 ### NDF v8.4.0 の主な変更
 

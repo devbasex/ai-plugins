@@ -41,6 +41,7 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 | 観点 | 方針 |
 |---|---|
 | レビュー投稿 | **AI 自身が `gh api` で PR に直接投稿**。メインはペイロードを保持しない |
+| 投稿の確認 | **申告されたコメント数を GitHub 側と突き合わせる**。投稿が届いていなければ中断する（取得できない場合は申告を採用） |
 | 修正 | **必ずサブエージェント (`general-purpose`) で実行**。メイン context に diff は載せない |
 | ユーザ問い合わせ | 自動判断を最大化（`critical`/`major`/`minor` は自動修正、ループ中の `nit` は deferred） |
 | 取りこぼし防止 | **ループ終了時（approved / max_rounds / oscillation / error いずれも）に最終スイープを必須実行**。`/ndf:fix` を再実行し、残った open review thread（最終 APPROVE ラウンドの minor/nit インラインコメント含む）を **全て解消**。修正可能なものは修正 + push、判断保留 nit も reply + resolveReviewThread して **open thread 0 で終了** |
@@ -394,6 +395,8 @@ pint / larastan / test / build などは **中断** を原則とする。
 
 - ❌ **修正をメインセッション内で行う** — context が一気に膨れる。必ずサブエージェント
 - ❌ **AI に Markdown だけ返させる** — メインがパース・投稿する設計は禁物。AI 直接投稿
+- ❌ **result.json の申告だけで判定を進める** — 投稿が失敗しても件数は残る。GitHub 側の
+  実数と突き合わせないと、修正担当が読むべき指摘が存在しないまま収束する
 - ❌ **nit を都度ユーザに問う** — ループ中は deferred 記録のみ。最終スイープ (Step 7.5) で Resolve
 - ❌ **未解決スレッドを残したまま終了する** — approved/max_rounds 等いずれの終了経路でも
   Step 7.5 の最終スイープを必ず実行し、open review thread 0 で終える。特に **最終 APPROVE
