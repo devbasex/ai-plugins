@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import pathlib
 import subprocess
 
 import pytest
@@ -149,7 +150,7 @@ def test_commit_trailers_are_read_from_git(refactor, monkeypatch):
     """結果ファイルではなく実際のコミットメッセージから読む。"""
     monkeypatch.setattr(
         refactor, "_git_out",
-        lambda work, args: "Item-Id: R1-001\nRound: 1\n"
+        lambda work, args, **_kw: "Item-Id: R1-001\nRound: 1\n"
                            "Impl-Runtime: codex\nImpl-Model: gpt-5.5",
     )
     assert refactor.commit_trailers("/w", "abc") == {
@@ -159,31 +160,31 @@ def test_commit_trailers_are_read_from_git(refactor, monkeypatch):
 
 
 def test_commit_trailers_are_empty_when_git_fails(refactor, monkeypatch):
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args: None)
+    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **_kw: None)
     assert refactor.commit_trailers("/w", "abc") == {}
 
 
 def test_diff_lines_come_from_numstat(refactor, monkeypatch):
     monkeypatch.setattr(
         refactor, "_git_out",
-        lambda work, args: "10\t5\tsrc/a.py\n3\t2\tsrc/b.py\n-\t-\tbin.png",
+        lambda work, args, **_kw: "10\t5\tsrc/a.py\n3\t2\tsrc/b.py\n-\t-\tbin.png",
     )
     assert refactor.commit_diff_lines("/w", "abc") == 20
 
 
 def test_touches_tests_detects_test_paths(refactor, monkeypatch):
     monkeypatch.setattr(refactor, "_git_out",
-                        lambda work, args: "src/a.py\ntests/test_a.py")
+                        lambda work, args, **_kw: "src/a.py\ntests/test_a.py")
     assert refactor.commit_touches_tests("/w", "abc") is True
 
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args: "src/a.py")
+    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **_kw: "src/a.py")
     assert refactor.commit_touches_tests("/w", "abc") is False
 
 
 def test_commits_in_range_uses_rev_list(refactor, monkeypatch):
     calls = []
 
-    def fake(work, args):
+    def fake(work, args, **_kw):
         calls.append(args)
         return "aaa\nbbb"
 
@@ -198,7 +199,7 @@ def test_commits_in_range_is_none_without_base(refactor):
 
 
 def test_commits_in_range_is_none_when_git_fails(refactor, monkeypatch):
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args: None)
+    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **_kw: None)
     assert refactor.commits_in_range("/w", "base", "head") is None
 
 
@@ -206,7 +207,7 @@ def test_run_test_at_checks_out_and_restores(refactor, monkeypatch):
     """テストは実際に走らせる。実行後は必ず元のブランチへ戻す。"""
     git_calls = []
     monkeypatch.setattr(
-        refactor, "_git_out", lambda work, args: git_calls.append(args) or "")
+        refactor, "_git_out", lambda work, args, **_kw: git_calls.append(args) or "")
     monkeypatch.setattr(
         refactor.subprocess, "run",
         lambda *a, **kw: (git_calls.append(a[0]) if isinstance(a[0], list) else None)
@@ -220,7 +221,7 @@ def test_run_test_at_checks_out_and_restores(refactor, monkeypatch):
 
 
 def test_run_test_at_reports_failure(refactor, monkeypatch):
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args: "")
+    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **_kw: "")
     monkeypatch.setattr(
         refactor.subprocess, "run",
         lambda *a, **kw: subprocess.CompletedProcess(a[0], 0, "", ""),
@@ -239,7 +240,7 @@ def test_run_test_at_restores_branch_even_when_the_test_raises(refactor, monkeyp
             return subprocess.CompletedProcess(cmd, 0, "", "")
         raise OSError("テスト実行が壊れた")
 
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args: "")
+    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **_kw: "")
     monkeypatch.setattr(refactor.subprocess, "run", fake_run)
     with pytest.raises(OSError):
         refactor.run_test_at("/w", "abc", "pytest -q", "main")
@@ -247,13 +248,13 @@ def test_run_test_at_restores_branch_even_when_the_test_raises(refactor, monkeyp
 
 
 def test_collect_facts_marks_unknown_sha_as_missing(refactor, monkeypatch):
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args: None)
+    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **_kw: None)
     facts = refactor.collect_commit_facts("/w", ["ghost"], {"aaa"}, "true", "main")
     assert facts == [{"sha": "ghost", "exists": False}]
 
 
 def test_collect_facts_marks_out_of_range_sha_as_missing(refactor, monkeypatch):
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args: "zzz")
+    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **_kw: "zzz")
     facts = refactor.collect_commit_facts("/w", ["zzz"], {"aaa"}, "true", "main")
     assert facts[0]["exists"] is False
 
@@ -289,7 +290,7 @@ def git_facts(refactor, monkeypatch):
         # SHA をそのまま返す形にしておく
         monkeypatch.setattr(
             refactor, "_git_out",
-            lambda work, args: args[-1].replace("^{commit}", ""),
+            lambda work, args, **_kw: args[-1].replace("^{commit}", ""),
         )
         monkeypatch.setattr(
             refactor, "collect_commit_facts",
@@ -383,11 +384,21 @@ def test_self_reported_values_cannot_pass_the_check(
     assert "テストが成功していません" in state["items"][0]["failure_reason"]
 
 
-def _drop_env(refactor, monkeypatch, revert_rc=0, pick_rc=0, sync_dirty=False):
+def _drop_env(refactor, monkeypatch, revert_rc=0, pick_rc=0, sync_dirty=False,
+              leftover=""):
     """取り消しと積み直しを実際には走らせず、順序と引数を記録する。
 
     `git rev-parse HEAD` は**直前に積み直したコミット**に応じた値を返す。
     積み直しで SHA が変わることを、状態の更新まで含めて確かめられるようにする。
+
+    作業ツリーの状態は 3 段階で返す。取り込みの前に実装担当の置き土産を捨てる
+    ため、同期の前後だけでは足りない。
+
+    | 呼ばれる場面 | 返す値 |
+    | --- | --- |
+    | 取り込みの前（置き土産の確認） | `leftover` |
+    | 同期の前（清浄性の検査） | `sync_dirty[0]` |
+    | 同期の後（生成された差分） | `sync_dirty[1]` |
     """
     calls: list[list[str]] = []
     picked: list[str] = []
@@ -407,7 +418,7 @@ def _drop_env(refactor, monkeypatch, revert_rc=0, pick_rc=0, sync_dirty=False):
                 picked.append(cmd[-1])
         return subprocess.CompletedProcess(cmd, rc, "", "conflict" if rc else "")
 
-    def fake_git_out(work, args):
+    def fake_git_out(work, args, **_kw):
         if args[:2] == ["rev-parse", "--verify"]:
             return args[-1].replace("^{commit}", "")
         if args == ["rev-parse", "HEAD"]:
@@ -415,13 +426,13 @@ def _drop_env(refactor, monkeypatch, revert_rc=0, pick_rc=0, sync_dirty=False):
                 return f"new-{picked[-1]}"
             return "REVERTED_HEAD" if reverted else "HEAD_BEFORE"
         if "status" in args:
-            # 同期の前後で 2 回呼ばれる。1 回目が同期前、2 回目以降が同期後。
-            # 既定は「同期前も後も差分なし」
             statuses.append(len(statuses))
+            if len(statuses) == 1:
+                return leftover
             if sync_dirty is False:
                 return ""
             before, after = sync_dirty
-            return before if len(statuses) == 1 else after
+            return before if len(statuses) == 2 else after
         return "HEAD_BEFORE"
 
     monkeypatch.setattr(refactor.subprocess, "run", fake_run)
@@ -842,7 +853,7 @@ def test_apply_base_is_recorded_by_the_orchestrator(
         "durations": {}, "reviews": [],
     }])
     env_tmp_dir(state_path)
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args: "BASE_HEAD")
+    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **_kw: "BASE_HEAD")
     for rt in ("codex", "gemini", "kiro"):
         write_result(state_path, f"{rt}-propose-rf130", {"items": []})
     with pytest.raises(SystemExit):
@@ -1001,7 +1012,7 @@ def test_short_and_full_sha_are_seen_as_the_same_commit(
     # 短縮 SHA も完全 SHA も同じコミットへ解決される
     monkeypatch.setattr(
         refactor, "_git_out",
-        lambda work, args: full if args[:2] == ["rev-parse", "--verify"] else "HEAD",
+        lambda work, args, **_kw: full if args[:2] == ["rev-parse", "--verify"] else "HEAD",
     )
     monkeypatch.setattr(
         refactor, "collect_commit_facts",
@@ -1256,9 +1267,16 @@ def test_deferring_is_idempotent(refactor, tmp_path, env_tmp_dir, monkeypatch, g
 # ---------- push の直前に生成物を同期する ----------
 
 def _sync_state(tmp_path, env_tmp_dir, git_facts, command="make build"):
+    """同期コマンドを持つ状態を作る。
+
+    書き込み用の作業ディレクトリを実在させる。取り込みの前に置き土産を確認する
+    経路は、ディレクトリが無ければ何もせずに戻るため、実在しないと
+    `_drop_env` の 3 段階（置き土産 / 同期前 / 同期後）が 1 つずれる。
+    """
     state_path = _two_item_apply(tmp_path, env_tmp_dir, git_facts)
     state = read_state(state_path)
     state["sync_command"] = command
+    pathlib.Path(state["worktrees"]["work"]).mkdir(parents=True, exist_ok=True)
     state_path.write_text(__import__("json").dumps(state), encoding="utf-8")
     return state_path
 
@@ -1517,7 +1535,7 @@ def test_status_disables_path_quoting(refactor, monkeypatch):
     seen: list[list[str]] = []
     monkeypatch.setattr(
         refactor, "_git_out",
-        lambda work, args: seen.append(list(args)) or " M plugins/日本語/a.py",
+        lambda work, args, **_kw: seen.append(list(args)) or " M plugins/日本語/a.py",
     )
     assert refactor._worktree_changes("/w") == {"plugins/日本語/a.py": " M"}
     assert seen[0][:2] == ["-c", "core.quotePath=false"]

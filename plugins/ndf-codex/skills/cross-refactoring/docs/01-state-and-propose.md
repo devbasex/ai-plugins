@@ -182,11 +182,12 @@ claude 17 本 / codex 1 メソッド / kiro 0 本と揃わなかった。最後�
 ## Step 2: 提案
 
 ```bash
+"$SCRIPTS/prepare-worktrees.sh" "$ID" sync "$(git -C "$WORK" rev-parse HEAD)"
 for a in $RUNTIMES; do
   "$SCRIPTS/launch-cli.sh" "$a" propose "$ID" "$ROUND"
 done
 "$LIB/monitor.py" "$ID" --agents "$RUNTIMES_CSV" --tmp-dir "$TMP_DIR" \
-    --stem-template "{agent}-propose-rf{id}-r$ROUND"
+    --stem-template "{agent}-propose-rf{id}-r$ROUND" --timeout 900
 ```
 
 3 CLI を並列で起動し、同一のプロンプトで提案させる。**提案フェーズにホストは現れない**
@@ -194,6 +195,24 @@ done
 （適用担当のとき）ので、「ホストなら起動しない」といった分岐を入れてはならない。
 
 提出形式は [prompts/propose.md](../prompts/propose.md) にある。
+
+### 提案の直前に読み取り用を同期する
+
+**同期が要るのは HEAD が進んだときであって、特定のフェーズの後ではない。**
+適用と修正の直後だけを同期していると、取り消しで進んだ HEAD が読み取り用へ
+届かない。実測では、ラウンドを全件取り消した次の提案で、**取り消しによって
+消えた関数**に対する提案が 2 件返った。統合は対象の実在を検査しないため、
+そのまま採用され、適用で必ず失敗する。
+
+提案の直前に同期しておけば、どのフェーズを経ていても読み取り用は最新になる。
+HEAD が変わっていなければ何も起きないので、重ねて呼んでも無駄がない。
+
+### 打ち切りまでの時間を明示する
+
+提案の所要はランタイムと回線状況で振れる（実測 90〜285 秒）。既定の打ち切りに
+任せると、分析そのものは進んでいるのに時間切れで結果を捨てることがある。
+結果ファイルには `idle_seconds` が残るので、**止まっていたのか間に合わなかったのか**は
+後から読める。
 
 ### 結果ファイル名にラウンド番号を入れる
 

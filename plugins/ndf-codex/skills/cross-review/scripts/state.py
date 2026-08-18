@@ -29,6 +29,7 @@ import datetime as _dt
 import json
 import os
 import pathlib
+import re
 import shlex
 import subprocess
 import sys
@@ -967,6 +968,44 @@ def cmd_start_round(args: argparse.Namespace) -> None:
     print(f"ROTATE_AFTER={st['rotate_after']}")
 
 
+def _as_count(value: object) -> int:
+    """申告された件数を整数として読む。読めない値は 0 として扱う。
+
+    相手は LLM なので、文字列や `null` が入ることがある。読めない申告を
+    「件数あり」と見なすと、突き合わせる相手が決まらないまま中断してしまう。
+    """
+    try:
+        return max(0, int(value))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0
+
+
+def _posted_comment_count(repo: str, pr: int, review_url: str | None) -> int | None:
+    """レビューに実際にぶら下がっているインラインコメントの数。
+
+    取得できなければ `None` を返す。**「取得できなかった」と「0 件」を区別する。**
+    取得の失敗で中断すると、GitHub 側の一時的な不調でループが止まる。
+
+    投稿は AI 自身が `gh api` で行うため、失敗しても結果ファイルの申告だけは残る。
+    数え直す先は、申告された `review_url` の末尾にある識別子から決める。
+    """
+    if not repo or not review_url:
+        return None
+    m = re.search(r"pullrequestreview-(\d+)", str(review_url))
+    if not m:
+        return None
+    try:
+        out = _sh(
+            ["gh", "api", f"repos/{repo}/pulls/{pr}/reviews/{m.group(1)}/comments",
+             "--paginate", "--jq", "length"],
+            check=False,
+        )
+    except Exception:
+        return None
+    counts = [int(line) for line in str(out).split() if line.strip().isdigit()]
+    return sum(counts) if counts else None
+
+
 def cmd_read_result(args: argparse.Namespace) -> None:
     """Step 2.5 — codex/gemini の result.json を state にマージ。"""
     agent = args.agent
@@ -1007,6 +1046,25 @@ def cmd_read_result(args: argparse.Namespace) -> None:
     st = _load(pr)
     if not st.get("rounds"):
         die(f"{agent}: state.rounds が空。`state.py start-round` を先に呼んでください")
+
+    # **申告を GitHub 側と突き合わせる。** 投稿は AI 自身が行うので、失敗しても
+    # 結果ファイルには件数が残る。申告のまま進むと、修正担当が読むべき指摘が
+    # GitHub 上に存在しないまま収束判定まで走る（実測: 申告 2 件に対しスレッド 0）。
+    declared = _as_count(comments)
+    if declared > 0:
+        actual = _posted_comment_count(str(st.get("repo") or ""), pr, r.get("review_url"))
+        if actual is None:
+            info(
+                f"⚠ {agent}: 投稿されたコメント数を確認できませんでした。"
+                f"申告（{declared} 件）をそのまま採用します"
+            )
+        elif actual < declared:
+            die(
+                f"{agent}: インラインコメントの申告 {declared} 件に対し、"
+                f"GitHub 上には {actual} 件しかありません。投稿が届いていないため"
+                "中断します。レビューを投稿し直してから再実行してください"
+            )
+
     st["rounds"][-1][agent] = {
         "intent": intent,
         "posted_as": posted_as,

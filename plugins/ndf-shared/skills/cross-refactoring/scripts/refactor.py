@@ -1099,6 +1099,7 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
     path, state = _load(args.id)
     entry = _round(state, args.round)
     if not args.dry_run:
+        _discard_impl_leftovers(state, state["worktrees"]["work"])
         _resume_incomplete_apply(path, state, entry)
 
     # **叩き直しても同じ判定を返す。** 取り込み済みで再実行すると、前回作った
@@ -1675,6 +1676,7 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     """Step 6 — 修正結果を取り込み、修正ラウンドを 1 つ進める。"""
     path, state = _load(args.id)
     entry = _round(state, args.round)
+    _discard_impl_leftovers(state, state["worktrees"]["work"])
     _flush_pending_push(path, state, entry)
     impl = entry["impl"]
     result = _result_path(state, impl, stem_for(impl, "fix", state["id"], args.round))
@@ -2018,10 +2020,18 @@ def _reported_shas(reported: Any) -> list[str]:
     return shas
 
 
-def _git_out(work: str, args: list[str]) -> Optional[str]:
-    """`git` を実行して標準出力を返す。失敗したら `None`。"""
+def _git_out(work: str, args: list[str], strip: bool = True) -> Optional[str]:
+    """`git` を実行して標準出力を返す。失敗したら `None`。
+
+    **固定幅で読む出力には `strip=False` を渡す。** `git status --porcelain` の
+    状態コードは未 stage の変更で ` M` と先頭が空白になるため、`strip()` すると
+    1 行目だけ 1 文字ずれ、切り出したパスの先頭が欠ける。欠けたパスは
+    `git add` で `pathspec ... did not match any files` になり、同期が止まる。
+    """
     r = subprocess.run(["git", *args], cwd=work, capture_output=True, text=True)
-    return r.stdout.strip() if r.returncode == 0 else None
+    if r.returncode != 0:
+        return None
+    return r.stdout.strip() if strip else r.stdout.rstrip("\n")
 
 
 def commits_in_range(work: str, base: Optional[str], head: str) -> Optional[list[str]]:
@@ -2524,7 +2534,8 @@ def _worktree_changes(work: str) -> dict[str, str]:
     # `core.quotePath` の既定（true）では、非 ASCII を含むパスが `"` で囲まれ
     # `\343` の形へエスケープされる。そのまま `git add` へ渡すと見つからない。
     out = _git_out(
-        work, ["-c", "core.quotePath=false", "status", "--porcelain", "-uall"]
+        work, ["-c", "core.quotePath=false", "status", "--porcelain", "-uall"],
+        strip=False,
     )
     changes: dict[str, str] = {}
     for line in (out or "").splitlines():
@@ -2577,6 +2588,33 @@ def _discard_worktree_changes(work: str) -> None:
     """
     for args in (["reset", "--hard", "HEAD"], ["clean", "-fd"]):
         subprocess.run(["git", *args], cwd=work, capture_output=True, text=True)
+
+
+def _discard_impl_leftovers(state: dict[str, Any], work: str) -> None:
+    """実装担当が残した未コミットの変更を捨てる。取り込みの前に呼ぶ。
+
+    **公開は進行側が検証を通してから行う**ので、コミットされなかった変更は
+    どの検証も受けていない。Pull Request へ出す道が無い以上、残す意味がない。
+
+    残したまま進むと、push の直前の清浄性の検査で中断する。実測では、修正
+    フェーズでコミットを作れなかった実装担当が直しかけの差分を置いたまま終え、
+    続く `merge-fix` が「修正 0 件」として先へ進むこともできなくなった。
+
+    制御用ディレクトリ（状態・結果・ログ）は無視の設定で守られており、
+    `git clean` に `-x` を付けないため消えない。
+    """
+    if not pathlib.Path(work).is_dir():
+        return
+    dirty = _dirty_paths(state, work)
+    if not dirty:
+        return
+    shown = "、".join(dirty[:5])
+    more = f" ほか {len(dirty) - 5} 件" if len(dirty) > 5 else ""
+    _discard_worktree_changes(work)
+    info(
+        f"🧹 コミットされなかった変更を捨てました（{shown}{more}）。"
+        "検証を受けていないため公開しません"
+    )
 
 
 def _require_clean_worktree(state: dict[str, Any], work: str) -> None:
@@ -2643,8 +2681,17 @@ def _sync_generated(state: dict[str, Any]) -> None:
     produced = _dirty_paths(state, work)
     if not produced:
         return
-    _sh(["git", "add", "--", *produced], cwd=work)
-    _sh(["git", "commit", "-m", SYNC_COMMIT_MESSAGE], cwd=work)
+    # **後段で落ちたときも差分を残さない。** `git add` / `git commit` の失敗で
+    # 作業ツリーを汚したまま中断すると、次の実行は `_require_clean_worktree` で
+    # 必ず止まり、`pending_push` の再試行が永久に進まない。捨ててよい根拠は
+    # 同期コマンド自身が失敗したときと同じで、着手前が綺麗だったことを
+    # 確認済みだからである。
+    try:
+        _sh(["git", "add", "--", *produced], cwd=work)
+        _sh(["git", "commit", "-m", SYNC_COMMIT_MESSAGE], cwd=work)
+    except SystemExit:
+        _discard_worktree_changes(work)
+        raise
     info(f"🔧 生成物を同期しました（{command} / {len(produced)} ファイル）")
 
 

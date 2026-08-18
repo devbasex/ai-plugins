@@ -98,7 +98,7 @@ def test_deferred_entry_records_the_reason(refactor, tmp_path, env_tmp_dir, no_g
 
 def _history(refactor, monkeypatch, newest_first):
     """`git rev-list HEAD` の結果（新しい順）と SHA 解決を差し替える。"""
-    def fake_git_out(work, args):
+    def fake_git_out(work, args, **_kw):
         if args[:1] == ["rev-list"]:
             return "\n".join(newest_first)
         if args[:2] == ["rev-parse", "--verify"]:
@@ -232,7 +232,7 @@ def _prepare_fix(refactor, tmp_path, env_tmp_dir, monkeypatch, claimed,
     # 未申告コミットの判定がこの解決を通るため。
     monkeypatch.setattr(
         refactor, "_git_out",
-        lambda work, args: (args[-1].replace("^{commit}", "")
+        lambda work, args, **_kw: (args[-1].replace("^{commit}", "")
                             if args[:2] == ["rev-parse", "--verify"] else "HEAD_NOW"),
     )
     monkeypatch.setattr(
@@ -406,7 +406,7 @@ def test_broken_fix_result_does_not_crash(
     })
     monkeypatch.setattr(refactor, "resolved_threads_on_github", lambda repo, pr: set())
     monkeypatch.setattr(refactor, "commits_in_range", lambda work, base, head: [])
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args: "HEAD")
+    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **_kw: "HEAD")
     monkeypatch.setattr(
         refactor, "collect_commit_facts",
         lambda work, shas, rng, cmd, branch, timeout=None: [],
@@ -436,7 +436,7 @@ def test_merge_fix_uses_the_recorded_range(refactor, tmp_path, env_tmp_dir, monk
     )
     monkeypatch.setattr(
         refactor, "_git_out",
-        lambda work, args: (args[-1].replace("^{commit}", "")
+        lambda work, args, **_kw: (args[-1].replace("^{commit}", "")
                             if args[:2] == ["rev-parse", "--verify"] else "HEAD_NOW"),
     )
     monkeypatch.setattr(refactor, "resolved_threads_on_github",
@@ -452,7 +452,7 @@ def test_merge_fix_fails_when_the_range_cannot_be_determined(
 ):
     state_path = _prepare_fix(refactor, tmp_path, env_tmp_dir, monkeypatch, ["PRRT_a"])
     monkeypatch.setattr(refactor, "commits_in_range", lambda work, base, head: None)
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args: "HEAD_NOW")
+    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **_kw: "HEAD_NOW")
     monkeypatch.setattr(refactor, "resolved_threads_on_github",
                         lambda repo, pr: {"PRRT_a"})
     with pytest.raises(SystemExit) as e:
@@ -470,7 +470,7 @@ def test_merge_fix_rejects_unreported_commits(
         refactor, "commits_in_range", lambda work, base, head: ["sneaky", "fix111"])
     monkeypatch.setattr(
         refactor, "_git_out",
-        lambda work, args: args[-1].replace("^{commit}", "") if args[0] == "rev-parse"
+        lambda work, args, **_kw: args[-1].replace("^{commit}", "") if args[0] == "rev-parse"
         else "HEAD_NOW",
     )
     monkeypatch.setattr(refactor, "resolved_threads_on_github",
@@ -691,7 +691,7 @@ def test_merge_fix_is_idempotent_after_a_revert(
     calls.clear()
     monkeypatch.setattr(
         refactor, "_git_out",
-        lambda work, args: ("HEAD_AFTER_REVERT" if args[:1] == ["rev-parse"]
+        lambda work, args, **_kw: ("HEAD_AFTER_REVERT" if args[:1] == ["rev-parse"]
                             else args[-1].replace("^{commit}", "")),
     )
     refactor.cmd_merge_fix(args)
@@ -799,7 +799,7 @@ def _range_env(refactor, monkeypatch, ordered, pick_rc=0):
                 picked.append(cmd[-1])
         return subprocess.CompletedProcess(cmd, rc, "", "conflict" if rc else "")
 
-    def fake_git_out(work, args):
+    def fake_git_out(work, args, **_kw):
         if args[:2] == ["rev-parse", "--verify"]:
             return args[-1].replace("^{commit}", "")
         if args == ["rev-parse", "HEAD"]:
