@@ -1342,7 +1342,7 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
     # ときに適用の記録が一切残らず、どのコミットが検証を通ったのかを状態から
     # 復元できなくなる。再開可能性は収束ループの前提なので、ここが崩れると
     # 中断からの復帰手段が無くなる。
-    applied, failed, _ = _verify_items(
+    applied, failed, progress = _verify_items(
         path, state, entry, reported, in_range, scope, test_command, head_branch,
         _safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT), args.dry_run,
     )
