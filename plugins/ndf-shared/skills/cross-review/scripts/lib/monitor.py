@@ -693,47 +693,6 @@ def try_complete_lingering_process(
     return None
 
 
-def check_early_error(
-    agent: str,
-    paths: AgentPaths,
-    status: AgentStatus,
-    pid: int,
-    alive: bool,
-    warned_early_error: bool,
-    log_prefix: str,
-) -> tuple[Optional[AgentStatus], bool]:
-    """early error の fatal/warn を判定し、fatal 時は終了 status を返す。"""
-    fatal_err = _scan_early_fatal(paths.err_log)
-    fatal_source = "err.log"
-    if not fatal_err and agent == "claude":
-        # claude は承認失敗・実行失敗を標準出力の JSON に載せる。
-        fatal_err = _scan_claude_stdout_fatal(paths.stdout_log)
-        fatal_source = "stdout.log"
-    if fatal_err:
-        if alive:
-            _kill_pid(pid)
-        status.status = "EARLY_ERROR"
-        status.exit_code = 4
-        # 検知元を書く。err.log と決め打ちすると、標準出力から検知したときに
-        # 存在しない行を探させることになる。
-        status.detail = (
-            f"early error (fatal) in {fatal_source}: {fatal_err[:200]}"
-        )
-        _emit_log(log_prefix, agent, status)
-        return status, warned_early_error
-
-    if not warned_early_error:
-        warn_err = _scan_early_warn(paths.err_log)
-        if warn_err:
-            print(
-                f"{log_prefix}⚠️  {agent} early-error WARN "
-                f"(non-fatal, not killing): {warn_err[:200]}",
-                file=sys.stderr, flush=True,
-            )
-            warned_early_error = True
-    return None, warned_early_error
-
-
 def monitor_agent(
     agent: str,
     pr: int,
@@ -836,11 +795,34 @@ def monitor_agent(
         # WARN として警告ログのみ。codex がレビュー対象 diff の test コード片を
         # echo するケースや gemini の config validation 警告で誤 kill されるのを防ぐ。
         if not no_early_error:
-            early_status, warned_early_error = check_early_error(
-                agent, paths, status, pid, alive, warned_early_error, log_prefix,
-            )
-            if early_status is not None:
-                return early_status
+            fatal_err = _scan_early_fatal(paths.err_log)
+            fatal_source = "err.log"
+            if not fatal_err and agent == "claude":
+                # claude は承認失敗・実行失敗を標準出力の JSON に載せる。
+                fatal_err = _scan_claude_stdout_fatal(paths.stdout_log)
+                fatal_source = "stdout.log"
+            if fatal_err:
+                if alive:
+                    _kill_pid(pid)
+                status.status = "EARLY_ERROR"
+                status.exit_code = 4
+                # 検知元を書く。err.log と決め打ちすると、標準出力から検知したときに
+                # 存在しない行を探させることになる。
+                status.detail = (
+                    f"early error (fatal) in {fatal_source}: {fatal_err[:200]}"
+                )
+                _emit_log(log_prefix, agent, status)
+                return status
+
+            if not warned_early_error:
+                warn_err = _scan_early_warn(paths.err_log)
+                if warn_err:
+                    print(
+                        f"{log_prefix}⚠️  {agent} early-error WARN "
+                        f"(non-fatal, not killing): {warn_err[:200]}",
+                        file=sys.stderr, flush=True,
+                    )
+                    warned_early_error = True
 
         if not alive:
             # プロセス終了 — result.json を確認
