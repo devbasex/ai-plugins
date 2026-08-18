@@ -1833,21 +1833,6 @@ def evaluate_fix_commits(
     return problems, accepted
 
 
-def reject_fix_range(
-    path: pathlib.Path,
-    state: dict[str, Any],
-    entry: dict[str, Any],
-    ordered_range: list[str],
-) -> None:
-    """検証を通らない修正範囲を取り消し、次回用の起点を保存する。"""
-    _revert_unverified_range(
-        state, entry, ordered_range,
-        "検証を通らない変更を残さないため、この修正ラウンドの範囲を取り消します",
-        path,
-        item_id=f"R{entry['round']}-fix{entry['fix_rounds'] + 1}",
-    )
-
-
 def cmd_merge_fix(args: argparse.Namespace) -> None:
     """Step 6 — 修正結果を取り込み、修正ラウンドを 1 つ進める。"""
     path, state = _load(args.id)
@@ -1916,7 +1901,12 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     if unassigned or problems:
         # **状態へ記録する前に取り消す。** 先に記録すると、取り消し済みのコミットが
         # 状態ファイルに残り、後の見送り処理が同じコミットをもう一度取り消そうとする。
-        reject_fix_range(path, state, entry, ordered_range)
+        _revert_unverified_range(
+            state, entry, ordered_range,
+            "検証を通らない変更を残さないため、この修正ラウンドの範囲を取り消します",
+            path,
+            item_id=f"R{entry['round']}-fix{entry['fix_rounds'] + 1}",
+        )
         # 取り消し後の状態を新しい起点にし、**その場で保存する**。ここで保存せずに
         # 落ちると、次の実行は古い起点から範囲を取り直して取り消しコミット自体を
         # 「未申告」と判定し、**取り消しを取り消して**しまう。
