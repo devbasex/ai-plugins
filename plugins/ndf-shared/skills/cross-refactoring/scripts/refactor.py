@@ -1259,9 +1259,7 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
             # 残さないと同じ提案が次のラウンドで再び採用される。
             _defer_abandoned_items(state, entry)
             statefile.save(path, state)
-            _push_head(state)
-            entry["pending_push"] = False
-            statefile.save(path, state)
+            _push_with_retry_marker(path, state, entry)
         sys.exit(2)
 
     applied: list[str] = []
@@ -1340,11 +1338,7 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
         # **全項目が通ったときも進行側が公開する。** 実装担当は push しないため、
         # ここで公開しないとレビュー担当が Pull Request 上の差分へ指摘を書けない。
         entry["apply"]["merged_at"] = statefile.now()
-        entry["pending_push"] = True
-        statefile.save(path, state)
-        _push_head(state)
-        entry["pending_push"] = False
-        statefile.save(path, state)
+        _push_with_retry_marker(path, state, entry)
 
     if not applied:
         info("全項目が失敗したため、このラウンドのレビューは行いません")
@@ -1444,9 +1438,7 @@ def _apply_drop(
     entry["pending_drop"] = []
     entry["apply"]["merged_at"] = statefile.now()
     statefile.save(path, state)
-    _push_head(state)
-    entry["pending_push"] = False
-    statefile.save(path, state)
+    _push_with_retry_marker(path, state, entry)
     return applied
 
 
@@ -1667,9 +1659,7 @@ def cmd_abandon_items(args: argparse.Namespace) -> None:
     entry["pending_drop"] = []
     state["phase"] = "propose"
     statefile.save(path, state)
-    _push_head(state)
-    entry["pending_push"] = False
-    statefile.save(path, state)
+    _push_with_retry_marker(path, state, entry)
 
 
 def cmd_merge_fix(args: argparse.Namespace) -> None:
