@@ -1750,6 +1750,16 @@ def cmd_abandon_items(args: argparse.Namespace) -> None:
     statefile.save(path, state)
 
 
+def build_fix_merge_key(result: pathlib.Path, attempt: int) -> str:
+    """修正結果の冪等キーを試行番号と結果ファイル内容から作る。"""
+    return f"{attempt}:" + hashlib.sha256(result.read_bytes()).hexdigest()
+
+
+def already_merged_fix(entry: dict[str, Any], merge_key: str) -> bool:
+    """同じ修正結果がすでに取り込み済みかを返す。"""
+    return merge_key in entry.setdefault("fix_merged_keys", [])
+
+
 def cmd_merge_fix(args: argparse.Namespace) -> None:
     """Step 6 — 修正結果を取り込み、修正ラウンドを 1 つ進める。"""
     path, state = _load(args.id)
@@ -1777,12 +1787,9 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     work = state["worktrees"]["work"]
     head_now = _git_out(work, ["rev-parse", "HEAD"]) or ""
     attempt = entry.get("fix_attempts", 0)
-    merge_key = (
-        f"{attempt}:"
-        + hashlib.sha256(result.read_bytes()).hexdigest()
-    )
+    merge_key = build_fix_merge_key(result, attempt)
     merged_keys = entry.setdefault("fix_merged_keys", [])
-    if merge_key in merged_keys:
+    if already_merged_fix(entry, merge_key):
         info(
             f"↻ この修正結果は取り込み済みです"
             f"（修正ラウンド {entry['fix_rounds']}）"
