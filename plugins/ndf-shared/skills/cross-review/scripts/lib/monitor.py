@@ -613,6 +613,31 @@ def _tail_last_nonempty_line(path: pathlib.Path, limit: int = 4096) -> str:
     return ""
 
 
+def read_started_agent(
+    agent: str,
+    paths: AgentPaths,
+    started: float,
+    log_prefix: str,
+) -> Optional[AgentStatus]:
+    """pidfile を待ち、監視開始に必要な AgentStatus を返す。"""
+    status = AgentStatus(agent=agent)
+    grace_end = started + 30
+    while time.monotonic() < grace_end:
+        if paths.pidfile.exists():
+            break
+        time.sleep(2)
+    pid = _read_pidfile(paths.pidfile)
+    if pid is None:
+        status.status = "PIDFILE_BAD"
+        status.exit_code = 6
+        status.detail = f"pidfile not found: {paths.pidfile}"
+        _emit_log(log_prefix, agent, status)
+        return None
+
+    status.pid = pid
+    return status
+
+
 def monitor_agent(
     agent: str,
     pr: int,
@@ -630,21 +655,20 @@ def monitor_agent(
     hard timeout / stall / sentinel / result.json のみで判定する。
     """
     paths = AgentPaths.for_(agent, pr, stem_template)
-    status = AgentStatus(agent=agent)
     started = time.monotonic()
 
     # 起動チェック: 30 秒待っても pidfile が無ければ起動失敗
-    grace_end = started + 30
-    while time.monotonic() < grace_end:
-        if paths.pidfile.exists():
-            break
-        time.sleep(2)
-    pid = _read_pidfile(paths.pidfile)
+    status = read_started_agent(agent, paths, started, log_prefix)
+    if status is None:
+        return AgentStatus(
+            agent=agent,
+            status="PIDFILE_BAD",
+            exit_code=6,
+            detail=f"pidfile not found: {paths.pidfile}",
+        )
+
+    pid = status.pid
     if pid is None:
-        status.status = "PIDFILE_BAD"
-        status.exit_code = 6
-        status.detail = f"pidfile not found: {paths.pidfile}"
-        _emit_log(log_prefix, agent, status)
         return status
 
     status.pid = pid
