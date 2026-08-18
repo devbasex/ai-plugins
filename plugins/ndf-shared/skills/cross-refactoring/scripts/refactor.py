@@ -1088,6 +1088,68 @@ def cmd_merge_proposals(args: argparse.Namespace) -> None:
         sys.exit(2)
 
 
+def _verify_ownership(
+    entry: dict[str, Any],
+    reported: dict[str, dict[str, Any]],
+    ordered_range: list[str],
+    work: str,
+    state: dict[str, Any],
+) -> Optional[str]:
+    """適用範囲の各コミットが、ちょうど 1 項目に所有されているか検証する。"""
+    in_range = set(ordered_range or [])
+    round_items = set(entry["items"])
+    unknown_ids: list[str] = []
+    raw_items = ((state.get("_merge_apply_payload") or {}).get("items"))
+    if not isinstance(raw_items, list):
+        raw_items = []
+    for r in raw_items:
+        if not isinstance(r, dict):
+            continue
+        item_id = r.get("item_id")
+        if item_id is not None and item_id not in round_items:
+            unknown_ids.append(str(item_id))
+
+    owner_of: dict[str, str] = {}
+    duplicated: list[str] = []
+    for item_id, r in reported.items():
+        for sha in _reported_shas(r):
+            full = _git_out(work, ["rev-parse", "--verify", f"{sha}^{{commit}}"])
+            if full is None:
+                continue          # 実在しない申告は項目ごとの検証で落ちる
+            if full in owner_of and owner_of[full] != item_id:
+                duplicated.append(full)
+            owner_of.setdefault(full, item_id)
+
+    unassigned = sorted(in_range - set(owner_of))
+    entry["_ownership_unassigned"] = unassigned
+    entry["_ownership_unknown_ids"] = unknown_ids
+    entry["_ownership_duplicated"] = duplicated
+    if not (unassigned or unknown_ids or duplicated):
+        return None
+
+    causes = []
+    if unassigned:
+        causes.append(
+            f"どの改善項目にも割り当てられていないコミットが {len(unassigned)} 件"
+            f"（{', '.join(s[:7] for s in unassigned[:5])}）"
+        )
+    if unknown_ids:
+        causes.append(
+            f"このラウンドに無い改善項目 ID の申告"
+            f"（{', '.join(unknown_ids[:5])}）"
+        )
+    if duplicated:
+        causes.append(
+            f"複数の項目が同じコミットを申告しています"
+            f"（{', '.join(s[:7] for s in duplicated[:5])}）"
+        )
+    return (
+        "、".join(causes)
+        + "。検証を回避した変更や、状態と実差分の食い違いを Pull Request に"
+          "残さないため、ラウンドごと取り消します"
+    )
+
+
 def cmd_merge_apply(args: argparse.Namespace) -> None:
     """Step 4 — 適用結果を検証して取り込む。
 
@@ -1163,7 +1225,6 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
     # そのまま Pull Request に残せてしまう。
     round_items = set(entry["items"])
     reported: dict[str, dict[str, Any]] = {}
-    unknown_ids: list[str] = []
     raw_items = payload.get("items")
     if not isinstance(raw_items, list):
         info(f"⚠ 適用結果の items が配列ではありません（{type(raw_items).__name__}）")
@@ -1174,8 +1235,6 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
         item_id = r.get("item_id")
         if item_id in round_items:
             reported[item_id] = r
-        elif item_id is not None:
-            unknown_ids.append(str(item_id))
 
     # **範囲のコミットは全て、いずれかの改善項目に割り当てられていること。**
     # 申告から漏れたコミットはテストもトレーラーも差分予算も検査されず、そのまま
@@ -1186,40 +1245,13 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
     #
     # 判定は**完全な SHA へ正規化してから**行う。申告の文字列をそのまま鍵にすると、
     # 一方が完全 SHA、他方が短縮 SHA で同じコミットを指したときに重複を見逃す。
-    owner_of: dict[str, str] = {}
-    duplicated: list[str] = []
-    for item_id, r in reported.items():
-        for sha in _reported_shas(r):
-            full = _git_out(work, ["rev-parse", "--verify", f"{sha}^{{commit}}"])
-            if full is None:
-                continue          # 実在しない申告は項目ごとの検証で落ちる
-            if full in owner_of and owner_of[full] != item_id:
-                duplicated.append(full)
-            owner_of.setdefault(full, item_id)
-
-    unassigned = sorted(in_range - set(owner_of))
-    if unassigned or unknown_ids or duplicated:
-        causes = []
-        if unassigned:
-            causes.append(
-                f"どの改善項目にも割り当てられていないコミットが {len(unassigned)} 件"
-                f"（{', '.join(s[:7] for s in unassigned[:5])}）"
-            )
-        if unknown_ids:
-            causes.append(
-                f"このラウンドに無い改善項目 ID の申告"
-                f"（{', '.join(unknown_ids[:5])}）"
-            )
-        if duplicated:
-            causes.append(
-                f"複数の項目が同じコミットを申告しています"
-                f"（{', '.join(s[:7] for s in duplicated[:5])}）"
-            )
-        reason = (
-            "、".join(causes)
-            + "。検証を回避した変更や、状態と実差分の食い違いを Pull Request に"
-              "残さないため、ラウンドごと取り消します"
-        )
+    state["_merge_apply_payload"] = payload
+    reason = _verify_ownership(entry, reported, ordered_range, work, state)
+    state.pop("_merge_apply_payload", None)
+    unassigned = entry.pop("_ownership_unassigned", [])
+    unknown_ids = entry.pop("_ownership_unknown_ids", [])
+    duplicated = entry.pop("_ownership_duplicated", [])
+    if reason:
         info(f"❌ {reason}")
         for item_id in entry["items"]:
             it = _find_item(state, item_id)
