@@ -1304,7 +1304,12 @@ def _accumulate_reviewer_durations(
     reviewers: list[str],
 ) -> None:
     """レビュー担当ごとの所要時間を累積し、合計を durations に反映する。"""
-    _accumulate_reviewer_durations(entry, reviews, reviewers)
+    per_reviewer = entry.setdefault("reviewer_seconds", {})
+    for name in reviewers:
+        review = reviews.get(name)
+        elapsed = review.get("elapsed_seconds") if isinstance(review, dict) else 0
+        per_reviewer[name] = per_reviewer.get(name, 0) + _safe_int(elapsed)
+    entry.setdefault("durations", {})["review"] = sum(per_reviewer.values())
 
 
 def cmd_merge_apply(args: argparse.Namespace) -> None:
@@ -1625,12 +1630,7 @@ def cmd_judge_review(args: argparse.Namespace) -> None:
     entry["reviews"].append(record)
     # レビュー担当ごとの所要時間は**別々に**持つ。ラウンドの合計を各担当へ配ると、
     # 2 者分を両方に数えることになり、担当同士の比較が成り立たない。
-    per_reviewer = entry.setdefault("reviewer_seconds", {})
-    for name in reviewers:
-        review = reviews.get(name)
-        elapsed = review.get("elapsed_seconds") if isinstance(review, dict) else 0
-        per_reviewer[name] = per_reviewer.get(name, 0) + _safe_int(elapsed)
-    entry.setdefault("durations", {})["review"] = sum(per_reviewer.values())
+    _accumulate_reviewer_durations(entry, reviews, reviewers)
     statefile.save(path, state)
 
     def _remember(exit_code: int) -> None:
