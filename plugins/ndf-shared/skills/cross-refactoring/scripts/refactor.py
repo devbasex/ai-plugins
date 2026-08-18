@@ -1162,74 +1162,6 @@ def _verify_items(
     return applied, failed, progress
 
 
-def _reject_unassigned_range(
-    path: pathlib.Path,
-    state: dict[str, Any],
-    entry: dict[str, Any],
-    ordered_range: list[str],
-    head_sha: str,
-    unassigned: list[str],
-    unknown_ids: list[str],
-    duplicated: list[str],
-    dry_run: bool,
-) -> None:
-    """検証できない適用範囲をラウンド単位で取り消す。"""
-    work = state["worktrees"]["work"]
-    causes = []
-    if unassigned:
-        causes.append(
-            f"どの改善項目にも割り当てられていないコミットが {len(unassigned)} 件"
-            f"（{', '.join(s[:7] for s in unassigned[:5])}）"
-        )
-    if unknown_ids:
-        causes.append(
-            f"このラウンドに無い改善項目 ID の申告"
-            f"（{', '.join(unknown_ids[:5])}）"
-        )
-    if duplicated:
-        causes.append(
-            f"複数の項目が同じコミットを申告しています"
-            f"（{', '.join(s[:7] for s in duplicated[:5])}）"
-        )
-    reason = (
-        "、".join(causes)
-        + "。検証を回避した変更や、状態と実差分の食い違いを Pull Request に"
-          "残さないため、ラウンドごと取り消します"
-    )
-    info(f"❌ {reason}")
-    for item_id in entry["items"]:
-        it = _find_item(state, item_id)
-        it["status"] = "abandoned"
-        it["failure_reason"] = reason
-    whole_round = {
-        "item_id": f"R{entry['round']}-range",
-        "commits": list(ordered_range),
-    }
-    if not dry_run:
-        entry["pending_push"] = True
-        statefile.save(path, state)
-    _revert_item_commits(state, whole_round, dry_run)
-    if not dry_run:
-        entry["apply_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
-    entry["apply"] = {
-        "applied": [], "failed": list(entry["items"]),
-        "base_sha": entry.get("apply_base_sha"), "head_sha": head_sha,
-        "unassigned_commits": unassigned,
-        "unknown_item_ids": unknown_ids,
-        "duplicated_commits": duplicated,
-        "merged_at": statefile.now(),
-    }
-    state["phase"] = "propose"
-    if dry_run:
-        info("（dry-run）状態ファイルは更新していません")
-        return
-    _defer_abandoned_items(state, entry)
-    statefile.save(path, state)
-    _push_head(state)
-    entry["pending_push"] = False
-    statefile.save(path, state)
-
-
 def cmd_merge_apply(args: argparse.Namespace) -> None:
     """Step 4 — 適用結果を検証して取り込む。
 
@@ -1331,10 +1263,68 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
     # 一方が完全 SHA、他方が短縮 SHA で同じコミットを指したときに重複を見逃す。
     _, unassigned, duplicated = _validate_range_ownership(work, in_range, reported)
     if unassigned or unknown_ids or duplicated:
-        _reject_unassigned_range(
-            path, state, entry, ordered_range, head_sha,
-            unassigned, unknown_ids, duplicated, args.dry_run,
+        causes = []
+        if unassigned:
+            causes.append(
+                f"どの改善項目にも割り当てられていないコミットが {len(unassigned)} 件"
+                f"（{', '.join(s[:7] for s in unassigned[:5])}）"
+            )
+        if unknown_ids:
+            causes.append(
+                f"このラウンドに無い改善項目 ID の申告"
+                f"（{', '.join(unknown_ids[:5])}）"
+            )
+        if duplicated:
+            causes.append(
+                f"複数の項目が同じコミットを申告しています"
+                f"（{', '.join(s[:7] for s in duplicated[:5])}）"
+            )
+        reason = (
+            "、".join(causes)
+            + "。検証を回避した変更や、状態と実差分の食い違いを Pull Request に"
+              "残さないため、ラウンドごと取り消します"
         )
+        info(f"❌ {reason}")
+        for item_id in entry["items"]:
+            it = _find_item(state, item_id)
+            it["status"] = "abandoned"
+            it["failure_reason"] = reason
+        # 範囲全体を取り消す。どのコミットが安全かを決められない以上、
+        # 起点まで戻すのが最も確実である。順序は `_revert_item_commits` が
+        # git の履歴から決め直す。
+        whole_round = {
+            "item_id": f"R{entry['round']}-range",
+            "commits": list(ordered_range),
+        }
+        if not args.dry_run:
+            # **取り消しへ着手する前に印を立てる。** 取り消しは済んだのに push
+            # できずに終わると、未検証の変更が Pull Request に残ったままになる。
+            entry["pending_push"] = True
+            statefile.save(path, state)
+        _revert_item_commits(state, whole_round, args.dry_run)
+        if not args.dry_run:
+            # 取り消し後の状態を新しい起点にする。叩き直しても範囲が空になり、
+            # 取り消しコミット自体を「未割当」として再び戻すことがない。
+            entry["apply_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
+        entry["apply"] = {
+            "applied": [], "failed": list(entry["items"]),
+            "base_sha": entry.get("apply_base_sha"), "head_sha": head_sha,
+            "unassigned_commits": unassigned,
+            "unknown_item_ids": unknown_ids,
+            "duplicated_commits": duplicated,
+            "merged_at": statefile.now(),
+        }
+        state["phase"] = "propose"
+        if args.dry_run:
+            info("（dry-run）状態ファイルは更新していません")
+        else:
+            # 項目別の失敗と同じく、**ここで取り消した項目も「対象外」に残す**。
+            # 残さないと同じ提案が次のラウンドで再び採用される。
+            _defer_abandoned_items(state, entry)
+            statefile.save(path, state)
+            _push_head(state)
+            entry["pending_push"] = False
+            statefile.save(path, state)
         sys.exit(2)
 
     scope = state.get("target_scope") or []
