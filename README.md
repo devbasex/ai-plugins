@@ -6,7 +6,7 @@ Claude Code / Codex / Kiro CLI向けのスキル・MCP設定を共有するた�
 
 このマーケットプレイスは、チーム全体でAI開発ツール（Claude Code / Codex / Kiro CLI）の導入を加速するための事前設定されたプラグインを提供します。
 
-**NDFプラグイン v8.3.0** は、同じ `ndf@ai-plugins` という名前で Claude Code / Codex / Kiro CLI へ配布されるランタイム別プラグインです。共通ソースは `plugins/ndf-shared/` に集約し、利用者が install する配布物は `plugins/ndf-claude/` / `plugins/ndf-codex/` / `plugins/ndf-kiro/` に分かれています。
+**NDFプラグイン v8.4.0** は、同じ `ndf@ai-plugins` という名前で Claude Code / Codex / Kiro CLI へ配布されるランタイム別プラグインです。共通ソースは `plugins/ndf-shared/` に集約し、利用者が install する配布物は `plugins/ndf-claude/` / `plugins/ndf-codex/` / `plugins/ndf-kiro/` に分かれています。
 
 - **公開Skills**: Claude Code向け core 27個、Kiro向け core 26個、Codex向け core 25個に分離。
 - **元Skills（30個）**:
@@ -102,8 +102,36 @@ kiro-cli chat --agent ndf
 
 | プラグイン名 | バージョン | 説明 | 詳細 |
 |------------|----------|------|------|
-| **ndf** | 8.3.0 | Claude Code / Codex / Kiro CLI 向けに runtime 別配布物を提供する NDF プラグイン。8個の専門エージェント（Claude版）、公開Skills（Claude Code向け core 27個、Kiro向け core 26個、Codex向け core 25個）、Claude SessionStart/Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:external-ai` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [Claude](./plugins/ndf-claude/README.md) / [Codex](./plugins/ndf-codex/README.md) / [Kiro](./plugins/ndf-kiro/README.md) |
+| **ndf** | 8.4.0 | Claude Code / Codex / Kiro CLI 向けに runtime 別配布物を提供する NDF プラグイン。8個の専門エージェント（Claude版）、公開Skills（Claude Code向け core 27個、Kiro向け core 26個、Codex向け core 25個）、Claude SessionStart/Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:external-ai` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [Claude](./plugins/ndf-claude/README.md) / [Codex](./plugins/ndf-codex/README.md) / [Kiro](./plugins/ndf-kiro/README.md) |
 | **playwright-kit** | 1.0.0 | Playwright による E2E テストの計画・実装・証跡管理を提供するプラグイン。ページ役割からのテスト計画、動画 / trace 付きスクリプト実装、レポート生成と Drive 保管、playwright_kit ランタイム（init、a11y / CWV スキャン）の 4 Skill。NDF v7.0.0 で分離。 | [Claude](./plugins/playwright-kit-claude/README.md) |
+
+### NDF v8.4.0 の主な変更
+
+**`/ndf:markdown-writing` に敬意ある表現のルールを追加し、図表ガイドを読む位置を明示しました。**
+
+| 変えたこと | 内容 |
+| --- | --- |
+| 表現のルール（新ルール 4） | 文書は関係者本人が読む前提で書く。**強い否定語・過剰な装飾語・根拠の曖昧な断定**を、対象物の状態と次にやること・数値・エビデンスへ置き換える |
+| セルフチェック | 上記 3 種を検出する grep をチェック手順へ追加 |
+| 図表ガイドの参照位置 | `01-diagram-guide.md` を図表ルールの冒頭で**手順として読ませる**。記法と横幅の上限は SKILL.md へ書かず、ガイドだけが持つ構成にした |
+
+**あわせて `/ndf:pr` の完了報告を手順へ組み込みました。** 報告が手順の外（末尾の独立節）に
+あり、既存 PR を更新する経路からは「終了報告」の一語しか導線がなかったため、報告が省略され
+たり、PR URL が Markdown リンクになって画面に番号しか出ない状態になっていました。
+
+| 変えたこと | 内容 |
+| --- | --- |
+| 報告の位置 | `### 6. 完了報告` として手順に組み込み、末尾の独立節は削除。既存 PR を更新しただけの経路からも参照する |
+| 報告の形 | 埋めるだけのテンプレートと、値の取得コマンド（`gh pr view --json …` / `git log` / `git diff --stat`）を提示 |
+| PR URL | **生の URL をそのまま書く**。Markdown リンクにすると番号しか表示されず、URL を取り出せない |
+
+**`/ndf:cross-review` の実行で見つかった 3 件も直しました。**
+
+| 直したこと | 変更 |
+| --- | --- |
+| 差分外の行を指すインラインで指摘が丸ごと消える | 422 (`Line could not be resolved`) はレビュー本体ごと落とす。差分外は body に書き、422 時はインラインを body へ移して再投稿する |
+| 投稿に失敗すると前ラウンドの結果で判定が続く | launcher が起動時に前ラウンドの result / payload を削除し、投稿失敗時も `post_error` 付きの result.json を書かせる |
+| `monitor.py` が実行権限を持たない | 実体 (`lib/monitor.py`) へのシムに実行権限を付与。`wait-review.sh` 経由も含めて `Permission denied` で止まらなくなった |
 
 ### NDF v8.3.0 の主な変更
 
