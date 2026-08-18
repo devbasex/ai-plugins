@@ -1255,6 +1255,24 @@ def _reconcile_resolved_threads(
     return resolved
 
 
+def _validate_fix_commits(
+    facts: list[dict[str, Any]],
+    scope: list[str],
+) -> tuple[list[tuple[str, str]], list[str]]:
+    """修正コミットが手順を満たしているか検証する。"""
+    problems: list[str] = []
+    accepted: list[tuple[str, str]] = []
+    for commit in facts:
+        item_id = (commit.get("trailers") or {}).get("Item-Id")
+        problem = verify_fix_commit(commit, scope)
+        if problem:
+            problems.append(problem)
+            info(f"❌ 修正コミットが手順を満たしていません: {problem}")
+            continue
+        accepted.append((item_id, commit["sha"]))
+    return accepted, problems
+
+
 def cmd_merge_apply(args: argparse.Namespace) -> None:
     """Step 4 — 適用結果を検証して取り込む。
 
@@ -1814,16 +1832,7 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     # 状態を記録しないだけでは、未検証の変更が Pull Request に残り続ける
     # （見送りの対象にもならない）。どのコミットが安全かは決められないので、
     # 適用フェーズの未割当コミットと同じ扱いにする。
-    problems: list[str] = []
-    accepted: list[tuple[str, str]] = []      # (item_id, sha)
-    for commit in facts:
-        item_id = (commit.get("trailers") or {}).get("Item-Id")
-        problem = verify_fix_commit(commit, state.get("target_scope") or [])
-        if problem:
-            problems.append(problem)
-            info(f"❌ 修正コミットが手順を満たしていません: {problem}")
-            continue
-        accepted.append((item_id, commit["sha"]))
+    accepted, problems = _validate_fix_commits(facts, state.get("target_scope") or [])
 
     if unassigned:
         info(
