@@ -1815,24 +1815,6 @@ def collect_fix_range_report(
     return ordered_range, unassigned, facts
 
 
-def evaluate_fix_commits(
-    facts: list[dict[str, Any]],
-    scope: list[str],
-) -> tuple[list[str], list[tuple[str, str]]]:
-    """修正コミット facts を検証し、問題と採用コミットを返す。"""
-    problems: list[str] = []
-    accepted: list[tuple[str, str]] = []
-    for commit in facts:
-        item_id = (commit.get("trailers") or {}).get("Item-Id")
-        problem = verify_fix_commit(commit, scope)
-        if problem:
-            problems.append(problem)
-            info(f"❌ 修正コミットが手順を満たしていません: {problem}")
-            continue
-        accepted.append((item_id, commit["sha"]))
-    return problems, accepted
-
-
 def cmd_merge_fix(args: argparse.Namespace) -> None:
     """Step 6 — 修正結果を取り込み、修正ラウンドを 1 つ進める。"""
     path, state = _load(args.id)
@@ -1890,7 +1872,16 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     # 状態を記録しないだけでは、未検証の変更が Pull Request に残り続ける
     # （見送りの対象にもならない）。どのコミットが安全かは決められないので、
     # 適用フェーズの未割当コミットと同じ扱いにする。
-    problems, accepted = evaluate_fix_commits(facts, state.get("target_scope") or [])
+    problems: list[str] = []
+    accepted: list[tuple[str, str]] = []      # (item_id, sha)
+    for commit in facts:
+        item_id = (commit.get("trailers") or {}).get("Item-Id")
+        problem = verify_fix_commit(commit, state.get("target_scope") or [])
+        if problem:
+            problems.append(problem)
+            info(f"❌ 修正コミットが手順を満たしていません: {problem}")
+            continue
+        accepted.append((item_id, commit["sha"]))
 
     if unassigned:
         info(
