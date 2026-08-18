@@ -638,61 +638,6 @@ def read_started_agent(
     return status
 
 
-def try_complete_lingering_process(
-    agent: str,
-    paths: AgentPaths,
-    status: AgentStatus,
-    pid: int,
-    alive: bool,
-    cmdline_validated: bool,
-    started_wall: float,
-    log_prefix: str,
-) -> Optional[AgentStatus]:
-    """result.json を出したまま残ったプロセスを完了扱いにできるか判定する。"""
-    if agent == "codex":
-        status.sentinel_seen = _scan_codex_sentinel(paths.err_log)
-
-    if (
-        agent == "codex"
-        and alive
-        and status.sentinel_seen
-        and paths.result.exists()
-        and paths.result.stat().st_size > 0
-    ):
-        _kill_pid(pid)
-        status.result_exists = True
-        status.status = "OK"
-        status.exit_code = 0
-        status.detail = (
-            f"codex sentinel + result.json detected; killed lingering pid {pid}"
-        )
-        _emit_log(log_prefix, agent, status)
-        return status
-
-    if (
-        alive
-        and not status.sentinel_seen
-        and cmdline_validated
-        and paths.result.exists()
-        and paths.result.stat().st_size > 0
-    ):
-        result_mtime = paths.result.stat().st_mtime
-        if result_mtime >= started_wall:
-            result_age = time.time() - result_mtime
-            if result_age >= RESULT_AGE_GRACE:
-                _kill_pid(pid)
-                status.result_exists = True
-                status.status = "OK"
-                status.exit_code = 0
-                status.detail = (
-                    f"result.json exists for {result_age:.0f}s without process exit; "
-                    f"killed lingering pid {pid}"
-                )
-                _emit_log(log_prefix, agent, status)
-                return status
-    return None
-
-
 def monitor_agent(
     agent: str,
     pr: int,
@@ -748,16 +693,29 @@ def monitor_agent(
 
         # 1. プロセス生存確認 → 死んでいたら最終判定へ (result.json 存在をチェック)
         alive = _pid_alive(pid)
+        if agent == "codex":
+            status.sentinel_seen = _scan_codex_sentinel(paths.err_log)
 
         # codex は `tokens used` sentinel を出した後もプロセスが exit せず常駐し続ける
         # ケースがある (実機で観測)。result.json は正常に書かれているのに alive=True の
         # まま stall_timeout に達して STALLED 化してしまう。sentinel + result.json が
         # 揃った瞬間に対象プロセスを kill して OK 判定で返す。
-        completed = try_complete_lingering_process(
-            agent, paths, status, pid, alive, cmdline_validated, started_wall, log_prefix,
-        )
-        if completed is not None:
-            return completed
+        if (
+            agent == "codex"
+            and alive
+            and status.sentinel_seen
+            and paths.result.exists()
+            and paths.result.stat().st_size > 0
+        ):
+            _kill_pid(pid)
+            status.result_exists = True
+            status.status = "OK"
+            status.exit_code = 0
+            status.detail = (
+                f"codex sentinel + result.json detected; killed lingering pid {pid}"
+            )
+            _emit_log(log_prefix, agent, status)
+            return status
 
         # result.json が書かれた後もプロセスがハング��るケース (gemini で観測:
         # MCP サーバー切断待ち等��� exit しない)。sentinel 機構を持たない agent 向け
@@ -766,6 +724,28 @@ def monitor_agent(
         # 安全条件:
         #   - cmdline_validated: PID 再利用でない (または検証不能環境) ことを確認済み
         #   - mtime >= started_wall: 前 round の stale result.json を拾わない
+        if (
+            alive
+            and not status.sentinel_seen
+            and cmdline_validated
+            and paths.result.exists()
+            and paths.result.stat().st_size > 0
+        ):
+            result_mtime = paths.result.stat().st_mtime
+            if result_mtime >= started_wall:
+                result_age = time.time() - result_mtime
+                if result_age >= RESULT_AGE_GRACE:
+                    _kill_pid(pid)
+                    status.result_exists = True
+                    status.status = "OK"
+                    status.exit_code = 0
+                    status.detail = (
+                        f"result.json exists for {result_age:.0f}s without process exit; "
+                        f"killed lingering pid {pid}"
+                    )
+                    _emit_log(log_prefix, agent, status)
+                    return status
+
         if alive and not cmdline_validated:
             # cmdline 検証は alive 確認後に 1 回だけ。生きていない瞬間に proc/<pid> を読むと
             # ファイル不在で None 扱いになり判定不能のため。
