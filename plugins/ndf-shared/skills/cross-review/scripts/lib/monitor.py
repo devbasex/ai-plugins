@@ -623,7 +623,12 @@ def _check_lingering_with_result(
     started_wall: float,
     log_prefix: str,
 ) -> Optional[AgentStatus]:
-    """result.json があるまま残っているプロセスを完了扱いで止める。"""
+    """result.json があるまま残っているプロセスを完了扱いで止める。
+
+    codex は `tokens used` sentinel と result.json が揃ったら完了とみなす。
+    sentinel 機構を持たない agent は、PID 再利用でないことを確認済みで、
+    かつ stale でない result.json が一定時間残っていれば完了扱いにする。
+    """
     if (
         agent == "codex"
         and alive
@@ -761,23 +766,12 @@ def monitor_agent(
         if agent == "codex":
             status.sentinel_seen = _scan_codex_sentinel(paths.err_log)
 
-        # codex は `tokens used` sentinel を出した後もプロセスが exit せず常駐し続ける
-        # ケースがある (実機で観測)。result.json は正常に書かれているのに alive=True の
-        # まま stall_timeout に達して STALLED 化してしまう。sentinel + result.json が
-        # 揃った瞬間に対象プロセスを kill して OK 判定で返す。
         lingering_status = _check_lingering_with_result(
             agent, pid, paths, status, alive, cmdline_validated, started_wall, log_prefix,
         )
         if lingering_status is not None:
             return lingering_status
 
-        # result.json が書かれた後もプロセスがハング��るケース (gemini で観測:
-        # MCP サーバー切断待ち等��� exit しない)。sentinel 機構を持たない agent 向け
-        # の fallback: result.json の mtime が RESULT_AGE_GRACE 秒以上前であれば
-        # 完了とみなし、プロセスを kill → OK。
-        # 安全条件:
-        #   - cmdline_validated: PID 再利用でない (または検証不能環境) ことを確認済み
-        #   - mtime >= started_wall: 前 round の stale result.json を拾わない
         if alive and not cmdline_validated:
             # cmdline 検証は alive 確認後に 1 回だけ。生きていない瞬間に proc/<pid> を読むと
             # ファイル不在で None 扱いになり判定不能のため。
