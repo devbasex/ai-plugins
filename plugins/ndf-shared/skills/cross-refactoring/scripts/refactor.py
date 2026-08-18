@@ -1208,36 +1208,6 @@ def _verify_and_classify_items(
     return applied, failed
 
 
-def _revert_unverified_range(
-    state: dict[str, Any],
-    entry: dict[str, Any],
-    ordered_range: list[str],
-    reason: str,
-    path: pathlib.Path,
-    *,
-    dry_run: bool = False,
-    base_key: str = "fix_base_sha",
-    item_id: Optional[str] = None,
-) -> Optional[str]:
-    """検証できない範囲を取り消し、再実行用の起点 SHA を更新する。"""
-    if reason:
-        info(reason)
-    whole_range = {
-        "item_id": item_id or f"R{entry['round']}-range",
-        "commits": list(ordered_range),
-    }
-    if not dry_run:
-        entry["pending_push"] = True
-        statefile.save(path, state)
-    _revert_item_commits(state, whole_range, dry_run)
-    new_base = None
-    if not dry_run:
-        new_base = _git_out(state["worktrees"]["work"], ["rev-parse", "HEAD"])
-        entry[base_key] = new_base
-        statefile.save(path, state)
-    return new_base
-
-
 def cmd_merge_apply(args: argparse.Namespace) -> None:
     """Step 4 — 適用結果を検証して取り込む。
 
@@ -1348,11 +1318,20 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
         # 範囲全体を取り消す。どのコミットが安全かを決められない以上、
         # 起点まで戻すのが最も確実である。順序は `_revert_item_commits` が
         # git の履歴から決め直す。
-        _revert_unverified_range(
-            state, entry, ordered_range, "",
-            path, dry_run=args.dry_run, base_key="apply_base_sha",
-            item_id=f"R{entry['round']}-range",
-        )
+        whole_round = {
+            "item_id": f"R{entry['round']}-range",
+            "commits": list(ordered_range),
+        }
+        if not args.dry_run:
+            # **取り消しへ着手する前に印を立てる。** 取り消しは済んだのに push
+            # できずに終わると、未検証の変更が Pull Request に残ったままになる。
+            entry["pending_push"] = True
+            statefile.save(path, state)
+        _revert_item_commits(state, whole_round, args.dry_run)
+        if not args.dry_run:
+            # 取り消し後の状態を新しい起点にする。叩き直しても範囲が空になり、
+            # 取り消しコミット自体を「未割当」として再び戻すことがない。
+            entry["apply_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
         entry["apply"] = {
             "applied": [], "failed": list(entry["items"]),
             "base_sha": entry.get("apply_base_sha"), "head_sha": head_sha,
@@ -1867,15 +1846,22 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     if unassigned or problems:
         # **状態へ記録する前に取り消す。** 先に記録すると、取り消し済みのコミットが
         # 状態ファイルに残り、後の見送り処理が同じコミットをもう一度取り消そうとする。
-        _revert_unverified_range(
-            state, entry, ordered_range,
-            "検証を通らない変更を残さないため、この修正ラウンドの範囲を取り消します",
-            path,
-            item_id=f"R{entry['round']}-fix{entry['fix_rounds'] + 1}",
+        info("検証を通らない変更を残さないため、この修正ラウンドの範囲を取り消します")
+        # **取り消しへ着手する前に印を立てる。** 取り消しは済んだのに push できずに
+        # 終わると、未検証の変更が Pull Request に残ったままになる。
+        entry["pending_push"] = True
+        statefile.save(path, state)
+        _revert_item_commits(
+            state,
+            {"item_id": f"R{entry['round']}-fix{entry['fix_rounds'] + 1}",
+             "commits": list(ordered_range)},
+            dry_run=False,
         )
         # 取り消し後の状態を新しい起点にし、**その場で保存する**。ここで保存せずに
         # 落ちると、次の実行は古い起点から範囲を取り直して取り消しコミット自体を
         # 「未申告」と判定し、**取り消しを取り消して**しまう。
+        entry["fix_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
+        statefile.save(path, state)
         # **push は保存のあと。** ここで push して失敗すると、取り消しコミットは
         # ローカルに残るのに起点の更新が保存されず、叩き直しで二重に取り消してしまう。
         info("⚠ 修正を取り消したため、解決の申告は採用しません")
