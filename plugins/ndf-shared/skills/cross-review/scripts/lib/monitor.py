@@ -613,58 +613,6 @@ def _tail_last_nonempty_line(path: pathlib.Path, limit: int = 4096) -> str:
     return ""
 
 
-def _check_lingering_with_result(
-    agent: str,
-    pid: int,
-    paths: AgentPaths,
-    status: AgentStatus,
-    alive: bool,
-    cmdline_validated: bool,
-    started_wall: float,
-    log_prefix: str,
-) -> Optional[AgentStatus]:
-    """result.json があるまま残っているプロセスを完了扱いで止める。"""
-    if (
-        agent == "codex"
-        and alive
-        and status.sentinel_seen
-        and paths.result.exists()
-        and paths.result.stat().st_size > 0
-    ):
-        _kill_pid(pid)
-        status.result_exists = True
-        status.status = "OK"
-        status.exit_code = 0
-        status.detail = (
-            f"codex sentinel + result.json detected; killed lingering pid {pid}"
-        )
-        _emit_log(log_prefix, agent, status)
-        return status
-
-    if (
-        alive
-        and not status.sentinel_seen
-        and cmdline_validated
-        and paths.result.exists()
-        and paths.result.stat().st_size > 0
-    ):
-        result_mtime = paths.result.stat().st_mtime
-        if result_mtime >= started_wall:
-            result_age = time.time() - result_mtime
-            if result_age >= RESULT_AGE_GRACE:
-                _kill_pid(pid)
-                status.result_exists = True
-                status.status = "OK"
-                status.exit_code = 0
-                status.detail = (
-                    f"result.json exists for {result_age:.0f}s without process exit; "
-                    f"killed lingering pid {pid}"
-                )
-                _emit_log(log_prefix, agent, status)
-                return status
-    return None
-
-
 def monitor_agent(
     agent: str,
     pr: int,
@@ -728,11 +676,22 @@ def monitor_agent(
         # ケースがある (実機で観測)。result.json は正常に書かれているのに alive=True の
         # まま stall_timeout に達して STALLED 化してしまう。sentinel + result.json が
         # 揃った瞬間に対象プロセスを kill して OK 判定で返す。
-        lingering_status = _check_lingering_with_result(
-            agent, pid, paths, status, alive, cmdline_validated, started_wall, log_prefix,
-        )
-        if lingering_status is not None:
-            return lingering_status
+        if (
+            agent == "codex"
+            and alive
+            and status.sentinel_seen
+            and paths.result.exists()
+            and paths.result.stat().st_size > 0
+        ):
+            _kill_pid(pid)
+            status.result_exists = True
+            status.status = "OK"
+            status.exit_code = 0
+            status.detail = (
+                f"codex sentinel + result.json detected; killed lingering pid {pid}"
+            )
+            _emit_log(log_prefix, agent, status)
+            return status
 
         # result.json が書かれた後もプロセスがハング��るケース (gemini で観測:
         # MCP サーバー切断待ち等��� exit しない)。sentinel 機構を持たない agent 向け
@@ -741,6 +700,28 @@ def monitor_agent(
         # 安全条件:
         #   - cmdline_validated: PID 再利用でない (または検証不能環境) ことを確認済み
         #   - mtime >= started_wall: 前 round の stale result.json を拾わない
+        if (
+            alive
+            and not status.sentinel_seen
+            and cmdline_validated
+            and paths.result.exists()
+            and paths.result.stat().st_size > 0
+        ):
+            result_mtime = paths.result.stat().st_mtime
+            if result_mtime >= started_wall:
+                result_age = time.time() - result_mtime
+                if result_age >= RESULT_AGE_GRACE:
+                    _kill_pid(pid)
+                    status.result_exists = True
+                    status.status = "OK"
+                    status.exit_code = 0
+                    status.detail = (
+                        f"result.json exists for {result_age:.0f}s without process exit; "
+                        f"killed lingering pid {pid}"
+                    )
+                    _emit_log(log_prefix, agent, status)
+                    return status
+
         if alive and not cmdline_validated:
             # cmdline 検証は alive 確認後に 1 回だけ。生きていない瞬間に proc/<pid> を読むと
             # ファイル不在で None 扱いになり判定不能のため。
