@@ -473,6 +473,44 @@ def _pid_cmdline_matches(pid: int, expected: str) -> Optional[bool]:
         return None
 
 
+def _read_log_tail_text(path: pathlib.Path) -> Optional[str]:
+    """err.log の末尾 200KB を読み、ANSI を除去したテキストを返す。
+
+    ファイルが存在しない・読めない場合は None。
+    """
+    if not path.exists():
+        return None
+    try:
+        sz = path.stat().st_size
+        with path.open("rb") as f:
+            if sz > 200 * 1024:
+                f.seek(sz - 200 * 1024)
+            data = f.read().decode("utf-8", errors="replace")
+    except OSError:
+        return None
+    return _strip_ansi(data)
+
+
+def _matched_line(data: str, m: re.Match[str]) -> tuple[str, int]:
+    """マッチ位置から行全体を切り出し、(行テキスト, 行の開始オフセット) を返す。"""
+    line_start = data.rfind("\n", 0, m.start()) + 1
+    line_end = data.find("\n", m.end())
+    line_end = line_end if line_end != -1 else len(data)
+    return data[line_start:line_end], line_start
+
+
+def _is_benign_match(
+    line: str, match_start_in_line: int, match_end_in_line: int,
+    benign_patterns: list[re.Pattern[str]],
+) -> bool:
+    """マッチが benign（誤検知）かどうかを判定する。"""
+    if any(b.search(line) for b in benign_patterns):
+        return True
+    if _match_is_quoted(line, match_start_in_line, match_end_in_line):
+        return True
+    return False
+
+
 def _scan_patterns(
     path: pathlib.Path,
     patterns: list[re.Pattern[str]],
@@ -492,32 +530,23 @@ def _scan_patterns(
     扱いしてしまった (例: `Error in: mcpServers.serena\\n...\\nTraceback ...` で
     Traceback が誤抑制された)。
     """
-    if not path.exists():
+    data = _read_log_tail_text(path)
+    if data is None:
         return None
-    try:
-        sz = path.stat().st_size
-        with path.open("rb") as f:
-            if sz > 200 * 1024:
-                f.seek(sz - 200 * 1024)
-            data = f.read().decode("utf-8", errors="replace")
-    except OSError:
-        return None
-    data = _strip_ansi(data)
     benign_patterns = EARLY_ERROR_BENIGN if benign is None else benign
 
     for pat in patterns:
         for m in pat.finditer(data):
-            line_start = data.rfind("\n", 0, m.start()) + 1
-            line_end = data.find("\n", m.end())
-            line_end = line_end if line_end != -1 else len(data)
-            line = data[line_start:line_end]
+            line, line_start = _matched_line(data, m)
             # benign パターンはマッチ行そのものに当てる。markdown 引用や
             # `Error in: mcpServers.X` のような行単位パターンは「その行」だけを
             # 評価すれば判定可能で、文脈窓を広げると誤判定の原因になる。
-            if any(b.search(line) for b in benign_patterns):
-                continue
-            # マッチ部位が backtick / 日本語「」 で引用されている場合も benign。
-            if _match_is_quoted(line, m.start() - line_start, m.end() - line_start):
+            if _is_benign_match(
+                line,
+                m.start() - line_start,
+                m.end() - line_start,
+                benign_patterns,
+            ):
                 continue
             return line.strip()
     return None

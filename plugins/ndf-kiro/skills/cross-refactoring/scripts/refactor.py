@@ -976,6 +976,28 @@ def cmd_start_round(args: argparse.Namespace) -> None:
     )
 
 
+def _load_proposals(
+    state: dict[str, Any], entry: dict[str, Any]
+) -> dict[str, list[dict[str, Any]]]:
+    """各ランタイムの提案結果を読み込み、ランタイム→項目リストの辞書で返す。"""
+    proposals: dict[str, list[dict[str, Any]]] = {}
+    for runtime in state["runtimes"]:
+        result = _result_path(
+            state, runtime,
+            stem_for(runtime, "propose", state["id"], entry["round"]),
+        )
+        payload = _read_result_lenient(result, runtime)
+        if payload is None:
+            proposals[runtime] = []
+            entry["proposed"][runtime] = 0
+            continue
+        items = payload.get("items")
+        proposals[runtime] = [i for i in items if isinstance(i, dict)] \
+            if isinstance(items, list) else []
+        entry["proposed"][runtime] = len(proposals[runtime])
+    return proposals
+
+
 def cmd_merge_proposals(args: argparse.Namespace) -> None:
     """Step 3 — 提案をマージして改善項目を作る。
 
@@ -1000,34 +1022,7 @@ def cmd_merge_proposals(args: argparse.Namespace) -> None:
             sys.exit(2)
         return
 
-    proposals: dict[str, list[dict[str, Any]]] = {}
-    for runtime in state["runtimes"]:
-        result = _result_path(
-            state, runtime,
-            stem_for(runtime, "propose", state["id"], entry["round"]),
-        )
-        if not result.exists():
-            info(f"⚠ {runtime} の提案結果がありません: {result}")
-            continue
-        try:
-            payload = json.loads(result.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as e:
-            info(f"⚠ {runtime} の提案結果が JSON として読めません: {e}")
-            continue
-        if not isinstance(payload, dict):
-            # 配列や数値のまま `payload.get(...)` を呼ぶと落ちる。
-            # 提案は無かったものとして続ける（1 者の不調で全体を止めない）。
-            info(
-                f"⚠ {runtime} の提案結果が JSON オブジェクトではありません"
-                f"（{type(payload).__name__}）。提案なしとして扱います"
-            )
-            proposals[runtime] = []
-            entry["proposed"][runtime] = 0
-            continue
-        items = payload.get("items")
-        proposals[runtime] = [i for i in items if isinstance(i, dict)] \
-            if isinstance(items, list) else []
-        entry["proposed"][runtime] = len(proposals[runtime])
+    proposals = _load_proposals(state, entry)
 
     excluded = {
         (d["path"], d["symbol"], d["smell"]) for d in state["deferred_items"]
@@ -1259,9 +1254,7 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
             # 残さないと同じ提案が次のラウンドで再び採用される。
             _defer_abandoned_items(state, entry)
             statefile.save(path, state)
-            _push_head(state)
-            entry["pending_push"] = False
-            statefile.save(path, state)
+            _push_with_retry_marker(path, state, entry)
         sys.exit(2)
 
     applied: list[str] = []
@@ -1340,11 +1333,7 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
         # **全項目が通ったときも進行側が公開する。** 実装担当は push しないため、
         # ここで公開しないとレビュー担当が Pull Request 上の差分へ指摘を書けない。
         entry["apply"]["merged_at"] = statefile.now()
-        entry["pending_push"] = True
-        statefile.save(path, state)
-        _push_head(state)
-        entry["pending_push"] = False
-        statefile.save(path, state)
+        _push_with_retry_marker(path, state, entry)
 
     if not applied:
         info("全項目が失敗したため、このラウンドのレビューは行いません")
@@ -1444,9 +1433,7 @@ def _apply_drop(
     entry["pending_drop"] = []
     entry["apply"]["merged_at"] = statefile.now()
     statefile.save(path, state)
-    _push_head(state)
-    entry["pending_push"] = False
-    statefile.save(path, state)
+    _push_with_retry_marker(path, state, entry)
     return applied
 
 
@@ -1667,9 +1654,7 @@ def cmd_abandon_items(args: argparse.Namespace) -> None:
     entry["pending_drop"] = []
     state["phase"] = "propose"
     statefile.save(path, state)
-    _push_head(state)
-    entry["pending_push"] = False
-    statefile.save(path, state)
+    _push_with_retry_marker(path, state, entry)
 
 
 def cmd_merge_fix(args: argparse.Namespace) -> None:
@@ -2758,6 +2743,29 @@ def _find_item(
     if required:
         die(f"改善項目 {item_id} がありません")
     return None
+
+
+def _read_result_lenient(path: pathlib.Path, runtime: str) -> Optional[dict[str, Any]]:
+    """結果ファイルを読む。不在・壊れ・非オブジェクトの場合は None を返す。
+
+    1 者の不調で全体を止めたくない箇所（提案のマージなど）向け。致命的な箇所には
+    `_read_result` を使う。
+    """
+    if not path.exists():
+        info(f"⚠ {runtime} の提案結果がありません: {path}")
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        info(f"⚠ {runtime} の提案結果が JSON として読めません: {e}")
+        return None
+    if not isinstance(payload, dict):
+        info(
+            f"⚠ {runtime} の提案結果が JSON オブジェクトではありません"
+            f"（{type(payload).__name__}）。提案なしとして扱います"
+        )
+        return None
+    return payload
 
 
 def _read_result(path: pathlib.Path, runtime: str) -> dict[str, Any]:
