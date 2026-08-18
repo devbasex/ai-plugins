@@ -1088,6 +1088,26 @@ def cmd_merge_proposals(args: argparse.Namespace) -> None:
         sys.exit(2)
 
 
+def _validate_range_ownership(
+    work: str,
+    in_range: set[str],
+    reported: dict[str, dict[str, Any]],
+) -> tuple[dict[str, str], list[str], list[str]]:
+    """適用範囲のコミット所有者を申告から復元する。"""
+    owner_of: dict[str, str] = {}
+    duplicated: list[str] = []
+    for item_id, r in reported.items():
+        for sha in _reported_shas(r):
+            full = _git_out(work, ["rev-parse", "--verify", f"{sha}^{{commit}}"])
+            if full is None:
+                continue          # 実在しない申告は項目ごとの検証で落ちる
+            if full in owner_of and owner_of[full] != item_id:
+                duplicated.append(full)
+            owner_of.setdefault(full, item_id)
+    unassigned = sorted(in_range - set(owner_of))
+    return owner_of, unassigned, duplicated
+
+
 def cmd_merge_apply(args: argparse.Namespace) -> None:
     """Step 4 — 適用結果を検証して取り込む。
 
@@ -1187,18 +1207,7 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
     #
     # 判定は**完全な SHA へ正規化してから**行う。申告の文字列をそのまま鍵にすると、
     # 一方が完全 SHA、他方が短縮 SHA で同じコミットを指したときに重複を見逃す。
-    owner_of: dict[str, str] = {}
-    duplicated: list[str] = []
-    for item_id, r in reported.items():
-        for sha in _reported_shas(r):
-            full = _git_out(work, ["rev-parse", "--verify", f"{sha}^{{commit}}"])
-            if full is None:
-                continue          # 実在しない申告は項目ごとの検証で落ちる
-            if full in owner_of and owner_of[full] != item_id:
-                duplicated.append(full)
-            owner_of.setdefault(full, item_id)
-
-    unassigned = sorted(in_range - set(owner_of))
+    _, unassigned, duplicated = _validate_range_ownership(work, in_range, reported)
     if unassigned or unknown_ids or duplicated:
         causes = []
         if unassigned:
