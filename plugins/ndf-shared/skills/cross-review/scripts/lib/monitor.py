@@ -734,30 +734,6 @@ def check_early_error(
     return None, warned_early_error
 
 
-def finish_exited_process(
-    agent: str,
-    paths: AgentPaths,
-    status: AgentStatus,
-    require_result: bool,
-    log_prefix: str,
-) -> AgentStatus:
-    """終了済みプロセスの result.json 有無から最終 status を作る。"""
-    status.result_exists = paths.result.exists() and paths.result.stat().st_size > 0
-    if status.result_exists or not require_result:
-        status.status = "OK"
-        status.exit_code = 0
-        status.detail = (
-            f"process exited; sentinel={status.sentinel_seen}; "
-            f"result_exists={status.result_exists}"
-        )
-    else:
-        status.status = "NO_RESULT"
-        status.exit_code = 3
-        status.detail = f"process exited but result.json missing: {paths.result}"
-    _emit_log(log_prefix, agent, status)
-    return status
-
-
 def monitor_agent(
     agent: str,
     pr: int,
@@ -868,7 +844,20 @@ def monitor_agent(
 
         if not alive:
             # プロセス終了 — result.json を確認
-            return finish_exited_process(agent, paths, status, require_result, log_prefix)
+            status.result_exists = paths.result.exists() and paths.result.stat().st_size > 0
+            if status.result_exists or not require_result:
+                status.status = "OK"
+                status.exit_code = 0
+                status.detail = (
+                    f"process exited; sentinel={status.sentinel_seen}; "
+                    f"result_exists={status.result_exists}"
+                )
+            else:
+                status.status = "NO_RESULT"
+                status.exit_code = 3
+                status.detail = f"process exited but result.json missing: {paths.result}"
+            _emit_log(log_prefix, agent, status)
+            return status
 
         # 4. stall detection (err.log / stdout.log / progress.log をモニタ。
         # gemini は stdout 側だけ進捗が出るケースがあり、progress.log には
