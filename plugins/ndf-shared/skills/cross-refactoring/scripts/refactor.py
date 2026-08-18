@@ -1150,64 +1150,6 @@ def _verify_ownership(
     )
 
 
-def _verify_and_classify_items(
-    entry: dict[str, Any],
-    state: dict[str, Any],
-    reported: dict[str, dict[str, Any]],
-    in_range: set[str],
-    test_command: str,
-    head_branch: str,
-    timeout: int,
-    scope: list[str],
-) -> tuple[list[str], list[str]]:
-    """各改善項目のコミット facts を検証し、採用候補と失敗へ分類する。"""
-    applied: list[str] = []
-    failed: list[str] = []
-    work = state["worktrees"]["work"]
-    progress: list[dict[str, Any]] = []
-    entry["apply_progress"] = progress
-    for item_id in entry["items"]:
-        item = _find_item(state, item_id)
-        got = reported.get(item_id)
-        if got is None:
-            problem = "適用結果に項目がありません"
-            facts: list[dict[str, Any]] = []
-        else:
-            facts = collect_commit_facts(
-                work, _reported_shas(got), in_range, test_command, head_branch, timeout,
-            )
-            problem = verify_apply_item(item, facts, scope)
-        if problem:
-            item["status"] = "abandoned"
-            item["failure_reason"] = problem
-            item["test_failed"] = bool(got and "テストが成功していません" in problem)
-            item["budget_exceeded"] = bool(got and "差分予算" in problem)
-            item["out_of_scope"] = bool(got and "対象範囲の外" in problem)
-            # 取り消しは全項目の判定が出そろってから**まとめて**行う。項目ごとに
-            # その場で戻すと、まだ判定していない項目のコミットと競合する。
-            item["commits"] = _reported_shas(got)
-            failed.append(item_id)
-            info(f"❌ {item_id}: {problem}")
-        else:
-            item["status"] = "reviewing"
-            item["commits"] = _reported_shas(got)
-            item["diff_lines"] = sum(_safe_int(c.get("diff_lines")) for c in facts)
-            applied.append(item_id)
-            info(f"✅ {item_id}: {len(item['commits'])} コミット / {item['diff_lines']} 行")
-        progress.append({
-            "item_id": item_id, "at": statefile.now(),
-            "result": "failed" if problem else "ok",
-            "reason": problem, "commits": list(item.get("commits") or []),
-        })
-        if not state.get("_merge_apply_dry_run"):
-            state_path = state.pop("_merge_apply_path")
-            dry_run = state.pop("_merge_apply_dry_run", None)
-            statefile.save(state_path, state)
-            state["_merge_apply_path"] = state_path
-            state["_merge_apply_dry_run"] = dry_run
-    return applied, failed
-
-
 def cmd_merge_apply(args: argparse.Namespace) -> None:
     """Step 4 — 適用結果を検証して取り込む。
 
@@ -1353,19 +1295,51 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
             statefile.save(path, state)
         sys.exit(2)
 
+    applied: list[str] = []
+    failed: list[str] = []
     scope = state.get("target_scope") or []
     # **判定はその都度残す。** まとめて最後に保存すると、取り消しの途中で中断した
     # ときに適用の記録が一切残らず、どのコミットが検証を通ったのかを状態から
     # 復元できなくなる。再開可能性は収束ループの前提なので、ここが崩れると
     # 中断からの復帰手段が無くなる。
-    state["_merge_apply_path"] = path
-    state["_merge_apply_dry_run"] = args.dry_run
-    applied, failed = _verify_and_classify_items(
-        entry, state, reported, in_range, test_command, head_branch,
-        _safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT), scope,
-    )
-    state.pop("_merge_apply_path", None)
-    state.pop("_merge_apply_dry_run", None)
+    progress: list[dict[str, Any]] = []
+    entry["apply_progress"] = progress
+    for item_id in entry["items"]:
+        item = _find_item(state, item_id)
+        got = reported.get(item_id)
+        if got is None:
+            problem = "適用結果に項目がありません"
+            facts: list[dict[str, Any]] = []
+        else:
+            facts = collect_commit_facts(
+                work, _reported_shas(got), in_range, test_command, head_branch,
+                _safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT),
+            )
+            problem = verify_apply_item(item, facts, scope)
+        if problem:
+            item["status"] = "abandoned"
+            item["failure_reason"] = problem
+            item["test_failed"] = bool(got and "テストが成功していません" in problem)
+            item["budget_exceeded"] = bool(got and "差分予算" in problem)
+            item["out_of_scope"] = bool(got and "対象範囲の外" in problem)
+            # 取り消しは全項目の判定が出そろってから**まとめて**行う。項目ごとに
+            # その場で戻すと、まだ判定していない項目のコミットと競合する。
+            item["commits"] = _reported_shas(got)
+            failed.append(item_id)
+            info(f"❌ {item_id}: {problem}")
+        else:
+            item["status"] = "reviewing"
+            item["commits"] = _reported_shas(got)
+            item["diff_lines"] = sum(_safe_int(c.get("diff_lines")) for c in facts)
+            applied.append(item_id)
+            info(f"✅ {item_id}: {len(item['commits'])} コミット / {item['diff_lines']} 行")
+        progress.append({
+            "item_id": item_id, "at": statefile.now(),
+            "result": "failed" if problem else "ok",
+            "reason": problem, "commits": list(item.get("commits") or []),
+        })
+        if not args.dry_run:
+            statefile.save(path, state)
 
     entry["apply"] = {
         "applied": applied,
