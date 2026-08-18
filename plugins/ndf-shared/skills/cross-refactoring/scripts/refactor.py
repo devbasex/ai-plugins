@@ -976,6 +976,28 @@ def cmd_start_round(args: argparse.Namespace) -> None:
     )
 
 
+def _load_proposals(
+    state: dict[str, Any], entry: dict[str, Any]
+) -> dict[str, list[dict[str, Any]]]:
+    """各ランタイムの提案結果を読み込み、ランタイム→項目リストの辞書で返す。"""
+    proposals: dict[str, list[dict[str, Any]]] = {}
+    for runtime in state["runtimes"]:
+        result = _result_path(
+            state, runtime,
+            stem_for(runtime, "propose", state["id"], entry["round"]),
+        )
+        payload = _read_result_lenient(result, runtime)
+        if payload is None:
+            proposals[runtime] = []
+            entry["proposed"][runtime] = 0
+            continue
+        items = payload.get("items")
+        proposals[runtime] = [i for i in items if isinstance(i, dict)] \
+            if isinstance(items, list) else []
+        entry["proposed"][runtime] = len(proposals[runtime])
+    return proposals
+
+
 def cmd_merge_proposals(args: argparse.Namespace) -> None:
     """Step 3 — 提案をマージして改善項目を作る。
 
@@ -1000,21 +1022,7 @@ def cmd_merge_proposals(args: argparse.Namespace) -> None:
             sys.exit(2)
         return
 
-    proposals: dict[str, list[dict[str, Any]]] = {}
-    for runtime in state["runtimes"]:
-        result = _result_path(
-            state, runtime,
-            stem_for(runtime, "propose", state["id"], entry["round"]),
-        )
-        payload = _read_result_lenient(result, runtime)
-        if payload is None:
-            proposals[runtime] = []
-            entry["proposed"][runtime] = 0
-            continue
-        items = payload.get("items")
-        proposals[runtime] = [i for i in items if isinstance(i, dict)] \
-            if isinstance(items, list) else []
-        entry["proposed"][runtime] = len(proposals[runtime])
+    proposals = _load_proposals(state, entry)
 
     excluded = {
         (d["path"], d["symbol"], d["smell"]) for d in state["deferred_items"]
