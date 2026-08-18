@@ -389,6 +389,17 @@ class AgentStatus:
     sentinel_seen: bool = False
 
 
+@dataclass
+class MonitorConfig:
+    timeout: int
+    stall_timeout: int
+    poll: int
+    require_result: bool
+    no_early_error: bool = False
+    log_prefix: str = ""
+    stem_template: str = DEFAULT_STEM_TEMPLATE
+
+
 # ---------- 監視ロジック ----------
 
 def _read_pidfile(p: pathlib.Path) -> Optional[int]:
@@ -492,15 +503,8 @@ def _scan_patterns(
     扱いしてしまった (例: `Error in: mcpServers.serena\\n...\\nTraceback ...` で
     Traceback が誤抑制された)。
     """
-    if not path.exists():
-        return None
-    try:
-        sz = path.stat().st_size
-        with path.open("rb") as f:
-            if sz > 200 * 1024:
-                f.seek(sz - 200 * 1024)
-            data = f.read().decode("utf-8", errors="replace")
-    except OSError:
+    data = _read_tail(path, 200 * 1024)
+    if data is None:
         return None
     data = _strip_ansi(data)
     benign_patterns = EARLY_ERROR_BENIGN if benign is None else benign
@@ -549,16 +553,10 @@ def _scan_claude_stdout_fatal(path: pathlib.Path) -> Optional[str]:
     行うが、JSON は 1 行に多数の引用符を含むため、パリティ判定が「引用の内側」を
     誤って真にして致命を取りこぼす。
     """
-    if not path.exists():
+    data = _read_tail(path, 200 * 1024)
+    if data is None:
         return None
-    try:
-        sz = path.stat().st_size
-        with path.open("rb") as f:
-            if sz > 200 * 1024:
-                f.seek(sz - 200 * 1024)
-            data = _strip_ansi(f.read().decode("utf-8", errors="replace"))
-    except OSError:
-        return None
+    data = _strip_ansi(data)
     for pat in CLAUDE_STDOUT_FATAL:
         m = pat.search(data)
         if m:
@@ -566,17 +564,24 @@ def _scan_claude_stdout_fatal(path: pathlib.Path) -> Optional[str]:
     return None
 
 
-def _scan_codex_sentinel(path: pathlib.Path) -> bool:
+def _read_tail(path: pathlib.Path, limit: int) -> Optional[str]:
+    """ファイル末尾を安全に読み、壊れた UTF-8 は置換して返す。"""
     if not path.exists():
-        return False
+        return None
     try:
-        # 末尾 64KB を読む（sentinel は最後の方に出る）
         sz = path.stat().st_size
         with path.open("rb") as f:
-            if sz > 64 * 1024:
-                f.seek(sz - 64 * 1024)
-            tail = f.read().decode("utf-8", errors="replace")
+            if sz > limit:
+                f.seek(sz - limit)
+            return f.read().decode("utf-8", errors="replace")
     except OSError:
+        return None
+
+
+def _scan_codex_sentinel(path: pathlib.Path) -> bool:
+    # 末尾 64KB を読む（sentinel は最後の方に出る）
+    tail = _read_tail(path, 64 * 1024)
+    if tail is None:
         return False
     return bool(CODEX_SENTINEL.search(tail))
 
@@ -594,17 +599,10 @@ def _tail_last_nonempty_line(path: pathlib.Path, limit: int = 4096) -> str:
     Gemini に書かせるのは短いフェーズマーカーだけなので、末尾数 KB で十分。
     壊れた UTF-8 や読み取り競合があっても monitor 自体は落とさない。
     """
-    if not path.exists():
+    data = _read_tail(path, limit)
+    if data is None:
         return ""
-    try:
-        sz = path.stat().st_size
-        with path.open("rb") as f:
-            if sz > limit:
-                f.seek(sz - limit)
-            data = f.read().decode("utf-8", errors="replace")
-    except OSError:
-        return ""
-    if sz > limit and "\n" in data:
+    if _safe_size(path) > limit and "\n" in data:
         data = data.split("\n", 1)[1]
     for line in reversed(data.splitlines()):
         stripped = line.strip()
@@ -616,19 +614,40 @@ def _tail_last_nonempty_line(path: pathlib.Path, limit: int = 4096) -> str:
 def monitor_agent(
     agent: str,
     pr: int,
-    timeout: int,
-    stall_timeout: int,
-    poll: int,
-    require_result: bool,
+    timeout: Optional[int] = None,
+    stall_timeout: Optional[int] = None,
+    poll: Optional[int] = None,
+    require_result: Optional[bool] = None,
     no_early_error: bool = False,
     log_prefix: str = "",
     stem_template: str = DEFAULT_STEM_TEMPLATE,
+    config: Optional[MonitorConfig] = None,
 ) -> AgentStatus:
     """1 agent を監視する。
 
     `no_early_error=True` のとき、EARLY_ERROR 検知 (FATAL/WARN とも) を完全に無効化し、
     hard timeout / stall / sentinel / result.json のみで判定する。
     """
+    if config is None:
+        if timeout is None or stall_timeout is None or poll is None or require_result is None:
+            raise TypeError("timeout, stall_timeout, poll, require_result are required")
+        config = MonitorConfig(
+            timeout=timeout,
+            stall_timeout=stall_timeout,
+            poll=poll,
+            require_result=require_result,
+            no_early_error=no_early_error,
+            log_prefix=log_prefix,
+            stem_template=stem_template,
+        )
+    timeout = config.timeout
+    stall_timeout = config.stall_timeout
+    poll = config.poll
+    require_result = config.require_result
+    no_early_error = config.no_early_error
+    log_prefix = config.log_prefix
+    stem_template = config.stem_template
+
     paths = AgentPaths.for_(agent, pr, stem_template)
     status = AgentStatus(agent=agent)
     started = time.monotonic()
@@ -912,11 +931,15 @@ def main() -> None:
             else _agent_stall_default(agent)
         results[agent] = monitor_agent(
             agent=agent, pr=args.pr,
-            timeout=args.timeout, stall_timeout=stall,
-            poll=args.poll, require_result=require_result,
-            no_early_error=args.no_early_error,
-            log_prefix=f"[{agent}] ",
-            stem_template=args.stem_template,
+            config=MonitorConfig(
+                timeout=args.timeout,
+                stall_timeout=stall,
+                poll=args.poll,
+                require_result=require_result,
+                no_early_error=args.no_early_error,
+                log_prefix=f"[{agent}] ",
+                stem_template=args.stem_template,
+            ),
         )
 
     threads = [threading.Thread(target=run, args=(a,), daemon=False) for a in agents]
