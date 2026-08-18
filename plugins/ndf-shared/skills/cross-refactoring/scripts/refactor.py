@@ -1006,21 +1006,8 @@ def cmd_merge_proposals(args: argparse.Namespace) -> None:
             state, runtime,
             stem_for(runtime, "propose", state["id"], entry["round"]),
         )
-        if not result.exists():
-            info(f"⚠ {runtime} の提案結果がありません: {result}")
-            continue
-        try:
-            payload = json.loads(result.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as e:
-            info(f"⚠ {runtime} の提案結果が JSON として読めません: {e}")
-            continue
-        if not isinstance(payload, dict):
-            # 配列や数値のまま `payload.get(...)` を呼ぶと落ちる。
-            # 提案は無かったものとして続ける（1 者の不調で全体を止めない）。
-            info(
-                f"⚠ {runtime} の提案結果が JSON オブジェクトではありません"
-                f"（{type(payload).__name__}）。提案なしとして扱います"
-            )
+        payload = _read_result_lenient(result, runtime)
+        if payload is None:
             proposals[runtime] = []
             entry["proposed"][runtime] = 0
             continue
@@ -2748,6 +2735,29 @@ def _find_item(
     if required:
         die(f"改善項目 {item_id} がありません")
     return None
+
+
+def _read_result_lenient(path: pathlib.Path, runtime: str) -> Optional[dict[str, Any]]:
+    """結果ファイルを読む。不在・壊れ・非オブジェクトの場合は None を返す。
+
+    1 者の不調で全体を止めたくない箇所（提案のマージなど）向け。致命的な箇所には
+    `_read_result` を使う。
+    """
+    if not path.exists():
+        info(f"⚠ {runtime} の提案結果がありません: {path}")
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        info(f"⚠ {runtime} の提案結果が JSON として読めません: {e}")
+        return None
+    if not isinstance(payload, dict):
+        info(
+            f"⚠ {runtime} の提案結果が JSON オブジェクトではありません"
+            f"（{type(payload).__name__}）。提案なしとして扱います"
+        )
+        return None
+    return payload
 
 
 def _read_result(path: pathlib.Path, runtime: str) -> dict[str, Any]:
