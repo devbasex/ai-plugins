@@ -1273,31 +1273,6 @@ def _validate_fix_commits(
     return accepted, problems
 
 
-def _build_review_record(
-    reviews: dict[str, dict[str, Any]],
-    reviewers: list[str],
-    round_no: int,
-) -> dict[str, Any]:
-    """LLM レビュー結果から状態ファイル用の正規化 record を作る。"""
-    record: dict[str, Any] = {"round": round_no, "findings": []}
-    for name in reviewers:
-        review = reviews.get(name)
-        review = review if isinstance(review, dict) else {}
-        record[name] = review.get("verdict")
-        findings = review.get("findings")
-        for finding in findings if isinstance(findings, list) else []:
-            if not isinstance(finding, dict):
-                continue
-            record["findings"].append({
-                "reviewer": name,
-                "item_id": finding.get("item_id"),
-                "thread_id": finding.get("thread_id"),
-                "summary": finding.get("summary"),
-                "resolved": bool(finding.get("resolved")),
-            })
-    return record
-
-
 def cmd_merge_apply(args: argparse.Namespace) -> None:
     """Step 4 — 適用結果を検証して取り込む。
 
@@ -1612,7 +1587,22 @@ def cmd_judge_review(args: argparse.Namespace) -> None:
 
     # 記録も**型検査済みの値だけ**で作る。`judge()` が invalid と判定した入力でも
     # ここを通るため、無条件に `.get()` を呼ぶと差し戻す前に落ちる。
-    record = _build_review_record(reviews, reviewers, len(entry["reviews"]) + 1)
+    record: dict[str, Any] = {"round": len(entry["reviews"]) + 1, "findings": []}
+    for name in reviewers:
+        review = reviews.get(name)
+        review = review if isinstance(review, dict) else {}
+        record[name] = review.get("verdict")
+        findings = review.get("findings")
+        for finding in findings if isinstance(findings, list) else []:
+            if not isinstance(finding, dict):
+                continue
+            record["findings"].append({
+                "reviewer": name,
+                "item_id": finding.get("item_id"),
+                "thread_id": finding.get("thread_id"),
+                "summary": finding.get("summary"),
+                "resolved": bool(finding.get("resolved")),
+            })
     entry["reviews"].append(record)
     # レビュー担当ごとの所要時間は**別々に**持つ。ラウンドの合計を各担当へ配ると、
     # 2 者分を両方に数えることになり、担当同士の比較が成り立たない。
