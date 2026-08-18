@@ -1822,7 +1822,6 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     }
     unassigned = sorted(set(ordered_range) - reported_full)
 
-    scope = state.get("target_scope") or []
     facts = collect_commit_facts(
         work, reported_shas, set(ordered_range),
         baseline.get("command") or "true", state["head_branch"],
@@ -1833,7 +1832,7 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     # 状態を記録しないだけでは、未検証の変更が Pull Request に残り続ける
     # （見送りの対象にもならない）。どのコミットが安全かは決められないので、
     # 適用フェーズの未割当コミットと同じ扱いにする。
-    accepted, problems = _validate_fix_commits(facts, scope)
+    accepted, problems = _validate_fix_commits(facts, state.get("target_scope") or [])
 
     if unassigned:
         info(
