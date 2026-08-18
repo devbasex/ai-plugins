@@ -1298,15 +1298,6 @@ def _build_review_record(
     return record
 
 
-def _accumulate_reviewer_durations(
-    entry: dict[str, Any],
-    reviews: dict[str, dict[str, Any]],
-    reviewers: list[str],
-) -> None:
-    """レビュー担当ごとの所要時間を累積し、合計を durations に反映する。"""
-    _accumulate_reviewer_durations(entry, reviews, reviewers)
-
-
 def cmd_merge_apply(args: argparse.Namespace) -> None:
     """Step 4 — 適用結果を検証して取り込む。
 
