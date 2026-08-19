@@ -1,7 +1,7 @@
 # cross-refactoring 4 回目の実機試行の結果
 
 Pull Request #127（NDF v8.5.0）で直した 5 件を実機で確かめた記録である。
-対象は Pull Request #128（Draft のまま）。
+対象は Pull Request #128（Draft のまま閉じた）。
 
 経緯は次の 3 つにある。
 
