@@ -1465,6 +1465,21 @@ def _resume_incomplete_apply(
     _flush_pending_push(path, state, entry)
 
 
+def _prepare_fix_phase(state: dict[str, Any], entry: dict[str, Any]) -> None:
+    """変更要求を返す前に、修正フェーズが要る記録を残す。
+
+    **変更要求の出口は 2 つある**（通常の判定と、差し戻し上限からの落ちこみ）。
+    どちらも同じ記録が要るため、書き漏らしが起きないよう 1 箇所へ集める。
+
+    - `fix_base_sha`: 修正の範囲の起点。無いと `merge-fix` が範囲を確定できず、
+      `fix_rounds` が進まないまま修正と再レビューを往復し続ける
+    - `fix_attempts`: 試行番号。`merge-fix` が「叩き直し」と「次のラウンド」を
+      区別するのに使う
+    """
+    entry["fix_base_sha"] = _git_out(state["worktrees"]["work"], ["rev-parse", "HEAD"])
+    entry["fix_attempts"] = entry.get("fix_attempts", 0) + 1
+
+
 def cmd_judge_review(args: argparse.Namespace) -> None:
     """Step 5 — レビュー 2 者の判定を取り込む。
 
@@ -1544,6 +1559,19 @@ def cmd_judge_review(args: argparse.Namespace) -> None:
             info(f"❌ {p}")
         entry["invalid_reviews"] = entry.get("invalid_reviews", 0) + 1
         if entry["invalid_reviews"] > MAX_INVALID_REVIEWS:
+            # **結果が無いことと、形が違うことを分ける。** 結果を残さなかったのは
+            # レビュー担当のプロセスが仕事をしなかったということで、実装担当が
+            # 直せる指摘ではない。変更要求へ落とすと、直しようのない指摘を渡された
+            # 実装担当が空回りし、承認済みの項目まで見送りへ進む。
+            missing = [name for name in reviewers if name not in reviews]
+            if missing:
+                _remember(ABORT)
+                statefile.save(path, state)
+                die(
+                    f"レビュー担当 {' / '.join(missing)} が結果を残しませんでした。"
+                    "実装担当への指摘ではないため、進行を中断します。"
+                    "原因を直して同じコマンド列を叩き直せば再開できます"
+                )
             # 差し戻しを無限に繰り返さない。形式を満たせないレビューが続く以上、
             # このラウンドの成果は検証されていないものとして扱い、変更要求へ落とす。
             # 紐づけ先が決まらないので、取り消しはラウンド全件が対象になる。
@@ -1557,6 +1585,11 @@ def cmd_judge_review(args: argparse.Namespace) -> None:
                 ),
                 "resolved": False,
             })
+            # **この出口も修正フェーズの起点を記録する。** 記録せずに変更要求を
+            # 返すと `merge-fix` が範囲を確定できずに弾かれ、`fix_rounds` が
+            # 進まない。`should-abandon` は `fix_rounds` で見送りを決めるため、
+            # 上限へ永久に到達せず修正と再レビューを往復し続ける。
+            _prepare_fix_phase(state, entry)
             _remember(2)
             statefile.save(path, state)
             info("差し戻しの上限に達したため、変更要求として扱います")
@@ -1573,11 +1606,7 @@ def cmd_judge_review(args: argparse.Namespace) -> None:
         statefile.save(path, state)
         info("✅ レビュー担当 2 者とも承認しました")
         return
-    # 修正フェーズの範囲の起点。ここを記録しておかないと、修正コミットが
-    # 実在するかを確かめられない。
-    entry["fix_base_sha"] = _git_out(state["worktrees"]["work"], ["rev-parse", "HEAD"])
-    # 試行番号。`merge-fix` が「叩き直し」と「次のラウンド」を区別するのに使う。
-    entry["fix_attempts"] = entry.get("fix_attempts", 0) + 1
+    _prepare_fix_phase(state, entry)
     _remember(2)
     statefile.save(path, state)
     open_findings = sum(1 for f in record["findings"] if not f["resolved"])
@@ -1742,6 +1771,12 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     # `judge-review` が変更要求を返したときの HEAD である。
     ordered_range = commits_in_range(work, entry.get("fix_base_sha"), head_now)
     if ordered_range is None:
+        # **修正ラウンドは進める。** 進めないと `should-abandon` が見送りへ移る
+        # 条件（`fix_rounds` が上限に達する）を永久に満たさず、修正フェーズと
+        # 再レビューを無限に往復する。この修正は採らないので、範囲外の記録は
+        # 何も足さない。
+        entry["fix_rounds"] += 1
+        statefile.save(path, state)
         die(
             "修正の範囲を確定できませんでした"
             f"（起点 {entry.get('fix_base_sha')} / HEAD {head_now}）。"
