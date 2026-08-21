@@ -473,18 +473,29 @@ def _pid_cmdline_matches(pid: int, expected: str) -> Optional[bool]:
         return None
 
 
-def _read_tail(path: pathlib.Path, max_bytes: int) -> Optional[str]:
-    """ファイル末尾 max_bytes を読んで文字列で返す。存在しないか読めなければ None。"""
+def _read_tail_ex(path: pathlib.Path, max_bytes: int) -> tuple[Optional[str], bool]:
+    """ファイル末尾 max_bytes を読み (data, truncated) を返す。
+
+    truncated は実際のファイルサイズが max_bytes を超えていた場合に True。
+    存在しないか読めなければ (None, False)。
+    """
     if not path.exists():
-        return None
+        return None, False
     try:
         sz = path.stat().st_size
         with path.open("rb") as f:
             if sz > max_bytes:
                 f.seek(sz - max_bytes)
-            return f.read().decode("utf-8", errors="replace")
+                return f.read().decode("utf-8", errors="replace"), True
+            return f.read().decode("utf-8", errors="replace"), False
     except OSError:
-        return None
+        return None, False
+
+
+def _read_tail(path: pathlib.Path, max_bytes: int) -> Optional[str]:
+    """ファイル末尾 max_bytes を読んで文字列で返す。存在しないか読めなければ None。"""
+    data, _ = _read_tail_ex(path, max_bytes)
+    return data
 
 
 def _scan_patterns(
@@ -588,12 +599,11 @@ def _tail_last_nonempty_line(path: pathlib.Path, limit: int = 4096) -> str:
     Gemini に書かせるのは短いフェーズマーカーだけなので、末尾数 KB で十分。
     壊れた UTF-8 や読み取り競合があっても monitor 自体は落とさない。
     """
-    data = _read_tail(path, limit)
+    data, truncated = _read_tail_ex(path, limit)
     if data is None:
         return ""
     # ファイルが limit より大きい場合、先頭の不完全行を捨てる
-    sz = _safe_size(path)
-    if sz > limit and "\n" in data:
+    if truncated and "\n" in data:
         data = data.split("\n", 1)[1]
     for line in reversed(data.splitlines()):
         stripped = line.strip()
