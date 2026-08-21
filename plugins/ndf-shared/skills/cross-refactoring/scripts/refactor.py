@@ -1164,6 +1164,33 @@ def collect_apply_commit_owners(
     return owner_of, duplicated
 
 
+def format_apply_range_problem(
+    unassigned: list[str], unknown_ids: list[str], duplicated: list[str]
+) -> str:
+    """未割当/不明ID/重複コミットから失敗理由の文を組み立てる。"""
+    causes: list[str] = []
+    if unassigned:
+        causes.append(
+            f"どの改善項目にも割り当てられていないコミットが {len(unassigned)} 件"
+            f"（{', '.join(s[:7] for s in unassigned[:5])}）"
+        )
+    if unknown_ids:
+        causes.append(
+            f"このラウンドに無い改善項目 ID の申告"
+            f"（{', '.join(unknown_ids[:5])}）"
+        )
+    if duplicated:
+        causes.append(
+            f"複数の項目が同じコミットを申告しています"
+            f"（{', '.join(s[:7] for s in duplicated[:5])}）"
+        )
+    return (
+        "、".join(causes)
+        + "。検証を回避した変更や、状態と実差分の食い違いを Pull Request に"
+          "残さないため、ラウンドごと取り消します"
+    )
+
+
 def _validate_apply_range(
     path: pathlib.Path,
     state: dict[str, Any],
@@ -1182,27 +1209,7 @@ def _validate_apply_range(
 
     unassigned = sorted(in_range - set(owner_of))
     if unassigned or unknown_ids or duplicated:
-        causes = []
-        if unassigned:
-            causes.append(
-                f"どの改善項目にも割り当てられていないコミットが {len(unassigned)} 件"
-                f"（{', '.join(s[:7] for s in unassigned[:5])}）"
-            )
-        if unknown_ids:
-            causes.append(
-                f"このラウンドに無い改善項目 ID の申告"
-                f"（{', '.join(unknown_ids[:5])}）"
-            )
-        if duplicated:
-            causes.append(
-                f"複数の項目が同じコミットを申告しています"
-                f"（{', '.join(s[:7] for s in duplicated[:5])}）"
-            )
-        reason = (
-            "、".join(causes)
-            + "。検証を回避した変更や、状態と実差分の食い違いを Pull Request に"
-              "残さないため、ラウンドごと取り消します"
-        )
+        reason = format_apply_range_problem(unassigned, unknown_ids, duplicated)
         info(f"❌ {reason}")
         for item_id in entry["items"]:
             it = _find_item(state, item_id)
