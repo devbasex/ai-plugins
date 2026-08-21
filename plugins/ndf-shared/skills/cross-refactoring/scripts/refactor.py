@@ -1854,6 +1854,36 @@ def cmd_abandon_items(args: argparse.Namespace) -> None:
     statefile.save(path, state)
 
 
+def collect_verified_resolved_threads(
+    payload: dict[str, Any], repo: str, pr: int
+) -> set[str]:
+    """resolved_thread_ids の型検証と GitHub 側 isResolved との照合を行う。
+
+    自己申告をそのまま信じない。解決 API に失敗・未実行でも「解決済み」と
+    書けてしまい、未解決の指摘が取り消し対象から外れる。GitHub 側の
+    `isResolved` と突き合わせ、**両方が解決と言っているものだけ**を反映する。
+    """
+    raw_claimed = payload.get("resolved_thread_ids")
+    # 文字列は 1 文字ずつに分解され、数値や真偽値は反復できずに落ちる。
+    # **配列であることを先に確かめる。**
+    claimed = {
+        t for t in (raw_claimed if isinstance(raw_claimed, list) else [])
+        if isinstance(t, str) and t.strip()
+    }
+    if raw_claimed is not None and not isinstance(raw_claimed, list):
+        info(f"⚠ resolved_thread_ids が配列ではありません（{type(raw_claimed).__name__}）。"
+             "解決の申告は無かったものとして扱います")
+    actual = resolved_threads_on_github(repo, pr)
+    if actual is None:
+        info("⚠ レビュースレッドの解決状態を取得できませんでした。"
+             "自己申告は採用せず、未解決のまま扱います")
+        return set()
+    resolved = claimed & actual
+    for thread_id in sorted(claimed - actual):
+        info(f"⚠ {thread_id} は解決済みと申告されましたが、GitHub では未解決です")
+    return resolved
+
+
 def ensure_unmerged_fix_result(
     entry: dict[str, Any], result: pathlib.Path
 ) -> tuple[list[str], str]:
@@ -1899,28 +1929,7 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         )
         return
 
-    # 自己申告をそのまま信じない。解決 API に失敗・未実行でも「解決済み」と
-    # 書けてしまい、未解決の指摘が取り消し対象から外れる。GitHub 側の
-    # `isResolved` と突き合わせ、**両方が解決と言っているものだけ**を反映する。
-    raw_claimed = payload.get("resolved_thread_ids")
-    # 文字列は 1 文字ずつに分解され、数値や真偽値は反復できずに落ちる。
-    # **配列であることを先に確かめる。**
-    claimed = {
-        t for t in (raw_claimed if isinstance(raw_claimed, list) else [])
-        if isinstance(t, str) and t.strip()
-    }
-    if raw_claimed is not None and not isinstance(raw_claimed, list):
-        info(f"⚠ resolved_thread_ids が配列ではありません（{type(raw_claimed).__name__}）。"
-             "解決の申告は無かったものとして扱います")
-    actual = resolved_threads_on_github(state["repo"], state["current_pr"])
-    if actual is None:
-        info("⚠ レビュースレッドの解決状態を取得できませんでした。"
-             "自己申告は採用せず、未解決のまま扱います")
-        resolved: set[str] = set()
-    else:
-        resolved = claimed & actual
-        for thread_id in sorted(claimed - actual):
-            info(f"⚠ {thread_id} は解決済みと申告されましたが、GitHub では未解決です")
+    resolved = collect_verified_resolved_threads(payload, state["repo"], state["current_pr"])
 
     # 修正コミットも適用と同じ基準で、**git と実際のテスト実行から**検証する。
     # 結果ファイルの申告で済ませると、手順を満たさない変更が収束済みになれてしまう。
