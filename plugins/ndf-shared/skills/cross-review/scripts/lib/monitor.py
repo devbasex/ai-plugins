@@ -731,44 +731,6 @@ def _check_early_error(
     return None, warned_early_error
 
 
-def _check_stall(
-    pid: int,
-    alive: bool,
-    paths: AgentPaths,
-    status: AgentStatus,
-    stall_timeout: int,
-    last_progress: float,
-    last_progress_size: int,
-    agent: str,
-    log_prefix: str,
-) -> tuple[AgentStatus | None, float, int]:
-    # err.log / stdout.log / progress.log のいずれかが更新されれば進捗として扱う。
-    status.err_log_size = _safe_size(paths.err_log)
-    status.stdout_log_size = _safe_size(paths.stdout_log)
-    status.progress_log_size = _safe_size(paths.progress_log)
-    status.progress_tail = _tail_last_nonempty_line(paths.progress_log)
-    progress_size = (
-        status.err_log_size + status.stdout_log_size + status.progress_log_size
-    )
-    if progress_size != last_progress_size:
-        last_progress_size = progress_size
-        last_progress = time.monotonic()
-    status.idle_seconds = time.monotonic() - last_progress
-    if status.idle_seconds < stall_timeout:
-        return None, last_progress, last_progress_size
-
-    if alive:
-        _kill_pid(pid)
-    status.status = "STALLED"
-    status.exit_code = 5
-    status.detail = (
-        f"no log progress for {stall_timeout}s "
-        f"(pid {pid}, last size {last_progress_size}B)"
-    )
-    _emit_log(log_prefix, agent, status)
-    return status, last_progress, last_progress_size
-
-
 def monitor_agent(
     agent: str,
     pr: int,
@@ -896,12 +858,32 @@ def monitor_agent(
             _emit_log(log_prefix, agent, status)
             return status
 
-        stall_status, last_progress, last_progress_size = _check_stall(
-            pid, alive, paths, status, stall_timeout,
-            last_progress, last_progress_size, agent, log_prefix
+        # 4. stall detection (err.log / stdout.log / progress.log をモニタ。
+        # gemini は stdout 側だけ進捗が出るケースがあり、progress.log には
+        # launcher が要求した短いフェーズマーカーが出るため、いずれかが
+        # 更新されれば progress として扱う)
+        status.err_log_size = _safe_size(paths.err_log)
+        status.stdout_log_size = _safe_size(paths.stdout_log)
+        status.progress_log_size = _safe_size(paths.progress_log)
+        status.progress_tail = _tail_last_nonempty_line(paths.progress_log)
+        progress_size = (
+            status.err_log_size + status.stdout_log_size + status.progress_log_size
         )
-        if stall_status is not None:
-            return stall_status
+        if progress_size != last_progress_size:
+            last_progress_size = progress_size
+            last_progress = time.monotonic()
+        status.idle_seconds = time.monotonic() - last_progress
+        if status.idle_seconds >= stall_timeout:
+            if alive:
+                _kill_pid(pid)
+            status.status = "STALLED"
+            status.exit_code = 5
+            status.detail = (
+                f"no log progress for {stall_timeout}s "
+                f"(pid {pid}, last size {last_progress_size}B)"
+            )
+            _emit_log(log_prefix, agent, status)
+            return status
 
         # poll 中の進捗ログ
         _emit_progress(log_prefix, agent, status)
