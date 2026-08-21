@@ -494,14 +494,10 @@ def verify_commit_trailers(commit: dict[str, Any]) -> Optional[str]:
     return None
 
 
-def verify_fix_commit(
+def _verify_single_commit(
     commit: dict[str, Any], scope: Optional[Iterable[str]] = None
 ) -> Optional[str]:
-    """修正コミットを適用と同じ基準で検証する。問題があれば理由を返す。
-
-    適用側だけ厳しくして修正側を素通しにすると、**レビュー指摘への対応という
-    名目で手順を外れた変更が入り、そのまま収束済みになる**。
-    """
+    """単一コミットの共通検証: 存在・トレーラー・スコープ・テスト結果。"""
     if not commit.get("exists", True):
         return f"コミット {commit.get('sha', '?')} が対象の範囲に存在しません"
     problem = verify_commit_trailers(commit)
@@ -518,6 +514,17 @@ def verify_fix_commit(
     return None
 
 
+def verify_fix_commit(
+    commit: dict[str, Any], scope: Optional[Iterable[str]] = None
+) -> Optional[str]:
+    """修正コミットを適用と同じ基準で検証する。問題があれば理由を返す。
+
+    適用側だけ厳しくして修正側を素通しにすると、**レビュー指摘への対応という
+    名目で手順を外れた変更が入り、そのまま収束済みになる**。
+    """
+    return _verify_single_commit(commit, scope)
+
+
 def verify_apply_item(
     item: dict[str, Any], facts: list[dict[str, Any]],
     scope: Optional[Iterable[str]] = None,
@@ -532,22 +539,15 @@ def verify_apply_item(
         return "コミットが 1 件もありません（1 手 1 コミットの前提を満たしていません）"
 
     for commit in facts:
-        if not commit.get("exists", True):
-            return (
-                f"コミット {commit.get('sha', '?')} が base..head の範囲にありません"
-                "（申告だけで実体がありません）"
-            )
-        problem = verify_commit_trailers(commit)
+        problem = _verify_single_commit(commit, scope)
         if problem:
+            # 存在チェックのメッセージを apply 固有の表現に差し替える
+            if not commit.get("exists", True):
+                return (
+                    f"コミット {commit.get('sha', '?')} が base..head の範囲にありません"
+                    "（申告だけで実体がありません）"
+                )
             return problem
-        problem = verify_scope(commit, scope or [])
-        if problem:
-            return problem
-        if commit.get("test_status") != "pass":
-            return (
-                f"コミット {commit.get('sha', '?')} でテストが成功していません "
-                f"({commit.get('test_status')})"
-            )
         item_id = (commit.get("trailers") or {}).get("Item-Id")
         if item_id != item["item_id"]:
             return (
@@ -557,9 +557,6 @@ def verify_apply_item(
             )
 
     if item.get("test_gap"):
-        # テストが乏しいと申告された項目は、現状固定テストの追加が先行していること。
-        # 実測では同じ課題で固定テストの追加数が 17 本 / 1 メソッド / 0 本と揃わなかった。
-        # 「テストを足した」かどうかは、そのコミットがテストの置き場所を触ったかで見る。
         if not facts[0].get("touches_tests"):
             return (
                 "テストが乏しい項目なのに、現状固定テストの追加コミットが先行していません"
@@ -976,30 +973,10 @@ def cmd_start_round(args: argparse.Namespace) -> None:
     )
 
 
-def cmd_merge_proposals(args: argparse.Namespace) -> None:
-    """Step 3 — 提案をマージして改善項目を作る。
-
-    終了コード: 0 = 採用あり / 2 = 採用 0 件（提案ラウンドの繰り返しを終える）。
-
-    **同じラウンドで叩き直しても二重に項目を作らない。** 進行を止めても再開できる
-    ことが前提なので、統合済みなら前回と同じ結果をそのまま返す。
-    """
-    path, state = _load(args.id)
-    entry = _current_round(state)
-
-    if entry.get("proposal_keys") is not None:
-        info(
-            f"↻ 提案ラウンド {entry['round']} は統合済みです"
-            f"（採用 {entry.get('adopted', 0)} 件 / 見送り {entry.get('deferred', 0)} 件）"
-        )
-        for item_id in entry.get("items", []):
-            item = _find_item(state, item_id, required=False)
-            if item is not None:
-                info(f"  {item_id} [{item['severity']}] {item['path']}#{item['symbol']}")
-        if not entry.get("adopted"):
-            sys.exit(2)
-        return
-
+def collect_round_proposals(
+    state: dict[str, Any], entry: dict[str, Any]
+) -> dict[str, list[dict[str, Any]]]:
+    """ランタイム別の提案結果 JSON を読み込み、entry['proposed'] を更新する。"""
     proposals: dict[str, list[dict[str, Any]]] = {}
     for runtime in state["runtimes"]:
         result = _result_path(
@@ -1028,17 +1005,16 @@ def cmd_merge_proposals(args: argparse.Namespace) -> None:
         proposals[runtime] = [i for i in items if isinstance(i, dict)] \
             if isinstance(items, list) else []
         entry["proposed"][runtime] = len(proposals[runtime])
+    return proposals
 
-    excluded = {
-        (d["path"], d["symbol"], d["smell"]) for d in state["deferred_items"]
-    }
-    adopted, deferred = merge_proposals(
-        proposals,
-        threshold=state["severity_threshold"],
-        max_items=state["max_items_per_round"],
-        excluded_keys=excluded,
-    )
 
+def record_merged_proposals(
+    state: dict[str, Any],
+    entry: dict[str, Any],
+    adopted: list[dict[str, Any]],
+    deferred: list[dict[str, Any]],
+) -> None:
+    """マージ結果を state/entry に記録し、改善項目を作成する。"""
     # 収束判定に使う「前ラウンドとの重複率」。見送りも含めた提案全体で測る。
     current_keys = [(i["path"], i["symbol"], i["smell"]) for i in adopted + deferred]
     entry["proposal_keys"] = [list(k) for k in current_keys]
@@ -1060,6 +1036,56 @@ def cmd_merge_proposals(args: argparse.Namespace) -> None:
     for item in deferred:
         state["deferred_items"].append({**item, "round": round_no})
 
+
+def finalize_empty_proposal_round(
+    path: pathlib.Path, state: dict[str, Any]
+) -> None:
+    """採用 0 件時の終了理由を確定し、状態を保存する。"""
+    # 呼び出し側は終了コード 2 で繰り返しを抜けるため、`advance` を通らない。
+    # 終了理由をここで確定させないと、報告が「未終了」のままになる。
+    state["final"] = "no_more_proposals"
+    state["ended_at"] = statefile.now()
+    statefile.save(path, state)
+
+
+def cmd_merge_proposals(args: argparse.Namespace) -> None:
+    """Step 3 — 提案をマージして改善項目を作る。
+
+    終了コード: 0 = 採用あり / 2 = 採用 0 件（提案ラウンドの繰り返しを終える）。
+
+    **同じラウンドで叩き直しても二重に項目を作らない。** 進行を止めても再開できる
+    ことが前提なので、統合済みなら前回と同じ結果をそのまま返す。
+    """
+    path, state = _load(args.id)
+    entry = _current_round(state)
+
+    if entry.get("proposal_keys") is not None:
+        info(
+            f"↻ 提案ラウンド {entry['round']} は統合済みです"
+            f"（採用 {entry.get('adopted', 0)} 件 / 見送り {entry.get('deferred', 0)} 件）"
+        )
+        for item_id in entry.get("items", []):
+            item = _find_item(state, item_id, required=False)
+            if item is not None:
+                info(f"  {item_id} [{item['severity']}] {item['path']}#{item['symbol']}")
+        if not entry.get("adopted"):
+            sys.exit(2)
+        return
+
+    proposals = collect_round_proposals(state, entry)
+
+    excluded = {
+        (d["path"], d["symbol"], d["smell"]) for d in state["deferred_items"]
+    }
+    adopted, deferred = merge_proposals(
+        proposals,
+        threshold=state["severity_threshold"],
+        max_items=state["max_items_per_round"],
+        excluded_keys=excluded,
+    )
+
+    record_merged_proposals(state, entry, adopted, deferred)
+
     # 適用の起点は**オーケストレータ側で**確定させる。実装担当の申告に委ねると、
     # 欠落・不正時に範囲検査が無効になり、過去の任意のコミットが実在扱いになる。
     # 提案は読むだけなので、この時点の HEAD が着手前の状態である。
@@ -1067,11 +1093,9 @@ def cmd_merge_proposals(args: argparse.Namespace) -> None:
 
     state["phase"] = "apply" if adopted else "converged"
     if not adopted:
-        # 呼び出し側は終了コード 2 で繰り返しを抜けるため、`advance` を通らない。
-        # 終了理由をここで確定させないと、報告が「未終了」のままになる。
-        state["final"] = "no_more_proposals"
-        state["ended_at"] = statefile.now()
-    statefile.save(path, state)
+        finalize_empty_proposal_round(path, state)
+    else:
+        statefile.save(path, state)
     info(
         f"提案 {sum(entry['proposed'].values())} 件 → 統合 {entry['merged']} 件 → "
         f"採用 {entry['adopted']} 件 / 見送り {entry['deferred']} 件"
@@ -1088,21 +1112,15 @@ def cmd_merge_proposals(args: argparse.Namespace) -> None:
         sys.exit(2)
 
 
-def _validate_apply_range(
-    path: pathlib.Path,
-    state: dict[str, Any],
-    entry: dict[str, Any],
-    work: pathlib.Path,
-    payload: dict[str, Any],
-    ordered_range: list[str],
-    in_range: set[str],
-    head_sha: str,
-    dry_run: bool,
-) -> tuple[dict[str, str], dict[str, dict[str, Any]], list[str], list[str], list[str]]:
-    # 申告は**このラウンドの改善項目のものだけ**を採る。架空の項目 ID へ割り当てられた
-    # コミットを数に入れると、割り当て済みに見えるのに項目別の検証にも入らず、
-    # そのまま Pull Request に残せてしまう。
-    round_items = set(entry["items"])
+def collect_reported_apply_items(
+    payload: dict[str, Any], round_items: set[str]
+) -> tuple[dict[str, dict[str, Any]], list[str]]:
+    """適用結果 payload からこのラウンドの申告と不明 ID を収集する。
+
+    申告は**このラウンドの改善項目のものだけ**を採る。架空の項目 ID へ割り当てられた
+    コミットを数に入れると、割り当て済みに見えるのに項目別の検証にも入らず、
+    そのまま Pull Request に残せてしまう。
+    """
     reported: dict[str, dict[str, Any]] = {}
     unknown_ids: list[str] = []
     raw_items = payload.get("items")
@@ -1117,16 +1135,19 @@ def _validate_apply_range(
             reported[item_id] = r
         elif item_id is not None:
             unknown_ids.append(str(item_id))
+    return reported, unknown_ids
 
-    # **範囲のコミットは全て、いずれかの改善項目に割り当てられていること。**
-    # 申告から漏れたコミットはテストもトレーラーも差分予算も検査されず、そのまま
-    # Pull Request に残る。都合の悪い変更を申告しないだけで検査を回避できてしまう。
-    # **1 コミットの所有項目は 1 つだけ。** 同じコミットを 2 つの項目が申告すると、
-    # 片方が失敗して取り消したときに、もう片方は成功のまま残る。状態ファイルと
-    # 実際の差分が食い違い、どちらが正しいか決められなくなる。
-    #
-    # 判定は**完全な SHA へ正規化してから**行う。申告の文字列をそのまま鍵にすると、
-    # 一方が完全 SHA、他方が短縮 SHA で同じコミットを指したときに重複を見逃す。
+
+def collect_apply_commit_owners(
+    reported: dict[str, dict[str, Any]], work: pathlib.Path
+) -> tuple[dict[str, str], list[str]]:
+    """申告されたコミットを完全SHAへ正規化し、所有者と重複を返す。
+
+    **範囲のコミットは全て、いずれかの改善項目に割り当てられていること。**
+    **1 コミットの所有項目は 1 つだけ。**
+    判定は**完全な SHA へ正規化してから**行う。申告の文字列をそのまま鍵にすると、
+    一方が完全 SHA、他方が短縮 SHA で同じコミットを指したときに重複を見逃す。
+    """
     owner_of: dict[str, str] = {}
     duplicated: list[str] = []
     for item_id, r in reported.items():
@@ -1137,30 +1158,55 @@ def _validate_apply_range(
             if full in owner_of and owner_of[full] != item_id:
                 duplicated.append(full)
             owner_of.setdefault(full, item_id)
+    return owner_of, duplicated
+
+
+def format_apply_range_problem(
+    unassigned: list[str], unknown_ids: list[str], duplicated: list[str]
+) -> str:
+    """未割当/不明ID/重複コミットから失敗理由の文を組み立てる。"""
+    causes: list[str] = []
+    if unassigned:
+        causes.append(
+            f"どの改善項目にも割り当てられていないコミットが {len(unassigned)} 件"
+            f"（{', '.join(s[:7] for s in unassigned[:5])}）"
+        )
+    if unknown_ids:
+        causes.append(
+            f"このラウンドに無い改善項目 ID の申告"
+            f"（{', '.join(unknown_ids[:5])}）"
+        )
+    if duplicated:
+        causes.append(
+            f"複数の項目が同じコミットを申告しています"
+            f"（{', '.join(s[:7] for s in duplicated[:5])}）"
+        )
+    return (
+        "、".join(causes)
+        + "。検証を回避した変更や、状態と実差分の食い違いを Pull Request に"
+          "残さないため、ラウンドごと取り消します"
+    )
+
+
+def _validate_apply_range(
+    path: pathlib.Path,
+    state: dict[str, Any],
+    entry: dict[str, Any],
+    work: pathlib.Path,
+    payload: dict[str, Any],
+    ordered_range: list[str],
+    in_range: set[str],
+    head_sha: str,
+    dry_run: bool,
+) -> tuple[dict[str, str], dict[str, dict[str, Any]], list[str], list[str], list[str]]:
+    round_items = set(entry["items"])
+    reported, unknown_ids = collect_reported_apply_items(payload, round_items)
+
+    owner_of, duplicated = collect_apply_commit_owners(reported, work)
 
     unassigned = sorted(in_range - set(owner_of))
     if unassigned or unknown_ids or duplicated:
-        causes = []
-        if unassigned:
-            causes.append(
-                f"どの改善項目にも割り当てられていないコミットが {len(unassigned)} 件"
-                f"（{', '.join(s[:7] for s in unassigned[:5])}）"
-            )
-        if unknown_ids:
-            causes.append(
-                f"このラウンドに無い改善項目 ID の申告"
-                f"（{', '.join(unknown_ids[:5])}）"
-            )
-        if duplicated:
-            causes.append(
-                f"複数の項目が同じコミットを申告しています"
-                f"（{', '.join(s[:7] for s in duplicated[:5])}）"
-            )
-        reason = (
-            "、".join(causes)
-            + "。検証を回避した変更や、状態と実差分の食い違いを Pull Request に"
-              "残さないため、ラウンドごと取り消します"
-        )
+        reason = format_apply_range_problem(unassigned, unknown_ids, duplicated)
         info(f"❌ {reason}")
         for item_id in entry["items"]:
             it = _find_item(state, item_id)
@@ -1805,49 +1851,15 @@ def cmd_abandon_items(args: argparse.Namespace) -> None:
     statefile.save(path, state)
 
 
-def cmd_merge_fix(args: argparse.Namespace) -> None:
-    """Step 6 — 修正結果を取り込み、修正ラウンドを 1 つ進める。"""
-    path, state = _load(args.id)
-    entry = _round(state, args.round)
-    _discard_impl_leftovers(state, state["worktrees"]["work"])
-    _flush_pending_push(path, state, entry)
-    impl = entry["impl"]
-    result = _result_path(state, impl, stem_for(impl, "fix", state["id"], args.round))
-    payload = _read_result(result, impl)
+def collect_verified_resolved_threads(
+    payload: dict[str, Any], repo: str, pr: int
+) -> set[str]:
+    """resolved_thread_ids の型検証と GitHub 側 isResolved との照合を行う。
 
-    # **叩き直しても二重に取り込まない。** 修正は同じラウンドで何度も回るため、
-    # 「このラウンドで処理済みか」では判定できない。**入力が前回と同じか**で見る。
-    # 次の修正ラウンドでは結果ファイルが上書きされ、HEAD も進むので鍵が変わる。
-    # 鍵は**試行番号と結果ファイルの内容**から作る。
-    #
-    # - HEAD は混ぜない。検証に失敗して取り消すと HEAD が変わるため、鍵が一致せず
-    #   同じ申告を再処理してしまう。
-    # - 内容だけでも足りない。次の修正ラウンドが同じ JSON（コミットなし・同じ
-    #   未解決 ID など）を返すと過去のラウンドと衝突し、`fix_rounds` が進まないまま
-    #   同じ修正を起動し続ける。
-    # - ファイルの更新時刻も使わない。粒度が環境によって違い、書き直しても同じ値に
-    #   なりうる。
-    #
-    # 修正の前には必ず `judge-review` が走るので、そこで進めた試行番号が
-    # **実行単位の識別子**になる。叩き直しただけなら番号は変わらない。
-    work = state["worktrees"]["work"]
-    head_now = _git_out(work, ["rev-parse", "HEAD"]) or ""
-    attempt = entry.get("fix_attempts", 0)
-    merge_key = (
-        f"{attempt}:"
-        + hashlib.sha256(result.read_bytes()).hexdigest()
-    )
-    merged_keys = entry.setdefault("fix_merged_keys", [])
-    if merge_key in merged_keys:
-        info(
-            f"↻ この修正結果は取り込み済みです"
-            f"（修正ラウンド {entry['fix_rounds']}）"
-        )
-        return
-
-    # 自己申告をそのまま信じない。解決 API に失敗・未実行でも「解決済み」と
-    # 書けてしまい、未解決の指摘が取り消し対象から外れる。GitHub 側の
-    # `isResolved` と突き合わせ、**両方が解決と言っているものだけ**を反映する。
+    自己申告をそのまま信じない。解決 API に失敗・未実行でも「解決済み」と
+    書けてしまい、未解決の指摘が取り消し対象から外れる。GitHub 側の
+    `isResolved` と突き合わせ、**両方が解決と言っているものだけ**を反映する。
+    """
     raw_claimed = payload.get("resolved_thread_ids")
     # 文字列は 1 文字ずつに分解され、数値や真偽値は反復できずに落ちる。
     # **配列であることを先に確かめる。**
@@ -1858,15 +1870,104 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     if raw_claimed is not None and not isinstance(raw_claimed, list):
         info(f"⚠ resolved_thread_ids が配列ではありません（{type(raw_claimed).__name__}）。"
              "解決の申告は無かったものとして扱います")
-    actual = resolved_threads_on_github(state["repo"], state["current_pr"])
+    actual = resolved_threads_on_github(repo, pr)
     if actual is None:
         info("⚠ レビュースレッドの解決状態を取得できませんでした。"
              "自己申告は採用せず、未解決のまま扱います")
-        resolved: set[str] = set()
-    else:
-        resolved = claimed & actual
-        for thread_id in sorted(claimed - actual):
-            info(f"⚠ {thread_id} は解決済みと申告されましたが、GitHub では未解決です")
+        return set()
+    resolved = claimed & actual
+    for thread_id in sorted(claimed - actual):
+        info(f"⚠ {thread_id} は解決済みと申告されましたが、GitHub では未解決です")
+    return resolved
+
+
+def verify_or_revert_fix_range(
+    path: pathlib.Path,
+    state: dict[str, Any],
+    entry: dict[str, Any],
+    work: str,
+    reported_shas: list[str],
+    ordered_range: list[str],
+    baseline: dict[str, Any],
+) -> bool:
+    """修正コミットを検証し、不正があれば範囲ごと取り消す。取り消したら True を返す。
+
+    **不正なコミットが 1 件でもあれば、修正ラウンドの範囲ごと取り消す。**
+    状態を記録しないだけでは、未検証の変更が Pull Request に残り続ける。
+    """
+    problems, accepted, unassigned = _verify_fix_range(
+        state, entry, work, reported_shas, ordered_range, baseline
+    )
+
+    if unassigned or problems:
+        # **状態へ記録する前に取り消す。** 先に記録すると、取り消し済みのコミットが
+        # 状態ファイルに残り、後の見送り処理が同じコミットをもう一度取り消そうとする。
+        info("検証を通らない変更を残さないため、この修正ラウンドの範囲を取り消します")
+        _revert_range_and_mark(
+            path,
+            state,
+            entry,
+            {"item_id": f"R{entry['round']}-fix{entry['fix_rounds'] + 1}",
+             "commits": list(ordered_range)},
+            "fix_base_sha",
+            dry_run=False,
+        )
+        info("⚠ 修正を取り消したため、解決の申告は採用しません")
+        return True
+
+    for item_id, sha in accepted:
+        item = _find_item(state, item_id, required=False)
+        if item is not None:
+            item.setdefault("commits", []).append(sha)
+    return False
+
+
+def ensure_unmerged_fix_result(
+    entry: dict[str, Any], result: pathlib.Path
+) -> tuple[list[str], str]:
+    """冪等キーを計算し、取り込み済みかを判定する。(キーリスト, 今回のキー)を返す。
+
+    **叩き直しても二重に取り込まない。** 修正は同じラウンドで何度も回るため、
+    「このラウンドで処理済みか」では判定できない。**入力が前回と同じか**で見る。
+    鍵は**試行番号と結果ファイルの内容**から作る。
+
+    - HEAD は混ぜない。検証に失敗して取り消すと HEAD が変わるため、鍵が一致せず
+      同じ申告を再処理してしまう。
+    - 内容だけでも足りない。次の修正ラウンドが同じ JSON を返すと過去のラウンドと
+      衝突する。
+    - ファイルの更新時刻も使わない。粒度が環境によって違い、書き直しても同じ値に
+      なりうる。
+    """
+    attempt = entry.get("fix_attempts", 0)
+    merge_key = (
+        f"{attempt}:"
+        + hashlib.sha256(result.read_bytes()).hexdigest()
+    )
+    merged_keys = entry.setdefault("fix_merged_keys", [])
+    return merged_keys, merge_key
+
+
+def cmd_merge_fix(args: argparse.Namespace) -> None:
+    """Step 6 — 修正結果を取り込み、修正ラウンドを 1 つ進める。"""
+    path, state = _load(args.id)
+    entry = _round(state, args.round)
+    _discard_impl_leftovers(state, state["worktrees"]["work"])
+    _flush_pending_push(path, state, entry)
+    impl = entry["impl"]
+    result = _result_path(state, impl, stem_for(impl, "fix", state["id"], args.round))
+    payload = _read_result(result, impl)
+
+    work = state["worktrees"]["work"]
+    head_now = _git_out(work, ["rev-parse", "HEAD"]) or ""
+    merged_keys, merge_key = ensure_unmerged_fix_result(entry, result)
+    if merge_key in merged_keys:
+        info(
+            f"↻ この修正結果は取り込み済みです"
+            f"（修正ラウンド {entry['fix_rounds']}）"
+        )
+        return
+
+    resolved = collect_verified_resolved_threads(payload, state["repo"], state["current_pr"])
 
     # 修正コミットも適用と同じ基準で、**git と実際のテスト実行から**検証する。
     # 結果ファイルの申告で済ませると、手順を満たさない変更が収束済みになれてしまう。
@@ -1889,36 +1990,11 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         )
     reported_shas = _reported_shas(payload)
 
-    # **不正なコミットが 1 件でもあれば、修正ラウンドの範囲ごと取り消す。**
-    # 状態を記録しないだけでは、未検証の変更が Pull Request に残り続ける
-    # （見送りの対象にもならない）。どのコミットが安全かは決められないので、
-    # 適用フェーズの未割当コミットと同じ扱いにする。
-    problems, accepted, unassigned = _verify_fix_range(
-        state, entry, work, reported_shas, ordered_range, baseline
+    reverted = verify_or_revert_fix_range(
+        path, state, entry, work, reported_shas, ordered_range, baseline
     )
-
-    if unassigned or problems:
-        # **状態へ記録する前に取り消す。** 先に記録すると、取り消し済みのコミットが
-        # 状態ファイルに残り、後の見送り処理が同じコミットをもう一度取り消そうとする。
-        info("検証を通らない変更を残さないため、この修正ラウンドの範囲を取り消します")
-        _revert_range_and_mark(
-            path,
-            state,
-            entry,
-            {"item_id": f"R{entry['round']}-fix{entry['fix_rounds'] + 1}",
-             "commits": list(ordered_range)},
-            "fix_base_sha",
-            dry_run=False,
-        )
-        # **push は保存のあと。** ここで push して失敗すると、取り消しコミットは
-        # ローカルに残るのに起点の更新が保存されず、叩き直しで二重に取り消してしまう。
-        info("⚠ 修正を取り消したため、解決の申告は採用しません")
+    if reverted:
         resolved = set()
-    else:
-        for item_id, sha in accepted:
-            item = _find_item(state, item_id, required=False)
-            if item is not None:
-                item.setdefault("commits", []).append(sha)
 
     _resolve_threads(entry, resolved)
 
