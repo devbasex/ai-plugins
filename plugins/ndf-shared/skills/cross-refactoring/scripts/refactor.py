@@ -707,6 +707,17 @@ def check_auth(runtimes: Iterable[str]) -> dict[str, dict[str, Any]]:
     return results
 
 
+def _load_pr_repository_info(pr: int) -> tuple[str, str, str]:
+    repo = _sh(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
+    head_branch = _sh(
+        ["gh", "pr", "view", str(pr), "--json", "headRefName", "--jq", ".headRefName"]
+    )
+    base_branch = _sh(
+        ["gh", "pr", "view", str(pr), "--json", "baseRefName", "--jq", ".baseRefName"]
+    )
+    return repo, head_branch, base_branch
+
+
 def cmd_init(args: argparse.Namespace) -> None:
     """Step 0 — ホストと母集合を確定し、作業ディレクトリ root と状態を用意する。
 
@@ -733,13 +744,7 @@ def cmd_init(args: argparse.Namespace) -> None:
     # 参加者が欠けた構成のまま最後まで走り切ってしまう。
     auth = check_auth(sorted(set(runtimes) | set(impl_capable)))
 
-    repo = _sh(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
-    head_branch = _sh(
-        ["gh", "pr", "view", str(args.pr), "--json", "headRefName", "--jq", ".headRefName"]
-    )
-    base_branch = _sh(
-        ["gh", "pr", "view", str(args.pr), "--json", "baseRefName", "--jq", ".baseRefName"]
-    )
+    repo, head_branch, base_branch = _load_pr_repository_info(args.pr)
 
     root = (
         pathlib.Path(args.worktree_root).resolve() if args.worktree_root
