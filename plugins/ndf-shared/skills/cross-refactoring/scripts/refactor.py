@@ -1389,6 +1389,50 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
         sys.exit(2)
 
 
+def _verify_fix_range(
+    state: dict[str, Any],
+    entry: dict[str, Any],
+    work: pathlib.Path,
+    reported_shas: list[str],
+    ordered_range: list[str],
+    baseline: dict[str, Any],
+) -> tuple[list[str], list[tuple[str, str]], list[str]]:
+    # 適用と同じく、**範囲のコミットは全て申告されていること**を求める。
+    # 申告から漏れた修正コミットは検証を受けないまま Pull Request に残る。
+    reported_full = {
+        full for full in (
+            _git_out(work, ["rev-parse", "--verify", f"{s}^{{commit}}"])
+            for s in reported_shas
+        ) if full
+    }
+    unassigned = sorted(set(ordered_range) - reported_full)
+
+    facts = collect_commit_facts(
+        work, reported_shas, set(ordered_range),
+        baseline.get("command") or "true", state["head_branch"],
+        _safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT),
+    )
+
+    problems: list[str] = []
+    accepted: list[tuple[str, str]] = []      # (item_id, sha)
+    for commit in facts:
+        item_id = (commit.get("trailers") or {}).get("Item-Id")
+        problem = verify_fix_commit(commit, state.get("target_scope") or [])
+        if problem:
+            problems.append(problem)
+            info(f"❌ 修正コミットが手順を満たしていません: {problem}")
+            continue
+        accepted.append((item_id, commit["sha"]))
+
+    if unassigned:
+        info(
+            f"❌ どの申告にも含まれていない修正コミットが {len(unassigned)} 件あります"
+            f"（{', '.join(s[:7] for s in unassigned[:5])}）"
+        )
+
+    return problems, accepted, unassigned
+
+
 def _defer_abandoned_items(state: dict[str, Any], entry: dict[str, Any]) -> None:
     """このラウンドで取り消した項目を「対象外」として記録する。
 
@@ -1823,42 +1867,13 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         )
     reported_shas = _reported_shas(payload)
 
-    # 適用と同じく、**範囲のコミットは全て申告されていること**を求める。
-    # 申告から漏れた修正コミットは検証を受けないまま Pull Request に残る。
-    reported_full = {
-        full for full in (
-            _git_out(work, ["rev-parse", "--verify", f"{s}^{{commit}}"])
-            for s in reported_shas
-        ) if full
-    }
-    unassigned = sorted(set(ordered_range) - reported_full)
-
-    facts = collect_commit_facts(
-        work, reported_shas, set(ordered_range),
-        baseline.get("command") or "true", state["head_branch"],
-        _safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT),
-    )
-
     # **不正なコミットが 1 件でもあれば、修正ラウンドの範囲ごと取り消す。**
     # 状態を記録しないだけでは、未検証の変更が Pull Request に残り続ける
     # （見送りの対象にもならない）。どのコミットが安全かは決められないので、
     # 適用フェーズの未割当コミットと同じ扱いにする。
-    problems: list[str] = []
-    accepted: list[tuple[str, str]] = []      # (item_id, sha)
-    for commit in facts:
-        item_id = (commit.get("trailers") or {}).get("Item-Id")
-        problem = verify_fix_commit(commit, state.get("target_scope") or [])
-        if problem:
-            problems.append(problem)
-            info(f"❌ 修正コミットが手順を満たしていません: {problem}")
-            continue
-        accepted.append((item_id, commit["sha"]))
-
-    if unassigned:
-        info(
-            f"❌ どの申告にも含まれていない修正コミットが {len(unassigned)} 件あります"
-            f"（{', '.join(s[:7] for s in unassigned[:5])}）"
-        )
+    problems, accepted, unassigned = _verify_fix_range(
+        state, entry, work, reported_shas, ordered_range, baseline
+    )
 
     if unassigned or problems:
         # **状態へ記録する前に取り消す。** 先に記録すると、取り消し済みのコミットが
