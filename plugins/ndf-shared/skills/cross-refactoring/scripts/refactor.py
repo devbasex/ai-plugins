@@ -718,6 +718,60 @@ def _load_pr_repository_info(pr: int) -> tuple[str, str, str]:
     return repo, head_branch, base_branch
 
 
+def _build_initial_state(
+    args: argparse.Namespace,
+    host: str,
+    detection: str,
+    runtimes: list[str],
+    impl_capable: list[str],
+    model_spec: dict[str, Any],
+    auth: dict[str, dict[str, Any]],
+    repo: str,
+    head_branch: str,
+    base_branch: str,
+    root: pathlib.Path,
+    work: pathlib.Path,
+    tmp_dir: pathlib.Path,
+    baseline: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "id": args.pr,
+        "started_at": statefile.now(),
+        "repo": repo,
+        "current_pr": args.pr,
+        "base_branch": base_branch,
+        "head_branch": head_branch,
+        "worktree_root": str(root),
+        "worktrees": {"work": str(work), **{r: str(root / r) for r in runtimes}},
+        "tmp_dir": str(tmp_dir),
+        "target_scope": list(args.scope),
+        "host": host,
+        "host_detection": detection,
+        "runtimes": runtimes,
+        "impl_capable": impl_capable,
+        "models": model_spec,
+        "auth": auth,
+        # 提案プロンプトへ許容値をそのまま列挙するために持たせる。
+        # 定義は検証側（この CLI）にあり、状態ファイル経由で起動側へ渡す。
+        "vocabulary": vocabulary(),
+        "skills": {"required": list(REQUIRED_SKILLS)},
+        "max_outer_rounds": args.max_outer_rounds,
+        "max_fix_rounds": args.max_fix_rounds,
+        "max_items_per_round": args.max_items_per_round,
+        "severity_threshold": args.severity_threshold,
+        "baseline_test": baseline,
+        # 生成物の同期は**進行側の責務**。push の直前に実行する。
+        "sync_command": args.sync_command,
+        "test_timeout": args.test_timeout,
+        "outer_round": 0,
+        "phase": "init",
+        "rounds": [],
+        "items": [],
+        "deferred_items": [],
+        "final": None,
+    }
+
+
 def cmd_init(args: argparse.Namespace) -> None:
     """Step 0 — ホストと母集合を確定し、作業ディレクトリ root と状態を用意する。
 
@@ -766,42 +820,10 @@ def cmd_init(args: argparse.Namespace) -> None:
 
     baseline = _run_baseline_test(args.baseline_test, work, args.test_timeout)
 
-    state: dict[str, Any] = {
-        "id": args.pr,
-        "started_at": statefile.now(),
-        "repo": repo,
-        "current_pr": args.pr,
-        "base_branch": base_branch,
-        "head_branch": head_branch,
-        "worktree_root": str(root),
-        "worktrees": {"work": str(work), **{r: str(root / r) for r in runtimes}},
-        "tmp_dir": str(tmp_dir),
-        "target_scope": list(args.scope),
-        "host": host,
-        "host_detection": detection,
-        "runtimes": runtimes,
-        "impl_capable": impl_capable,
-        "models": model_spec,
-        "auth": auth,
-        # 提案プロンプトへ許容値をそのまま列挙するために持たせる。
-        # 定義は検証側（この CLI）にあり、状態ファイル経由で起動側へ渡す。
-        "vocabulary": vocabulary(),
-        "skills": {"required": list(REQUIRED_SKILLS)},
-        "max_outer_rounds": args.max_outer_rounds,
-        "max_fix_rounds": args.max_fix_rounds,
-        "max_items_per_round": args.max_items_per_round,
-        "severity_threshold": args.severity_threshold,
-        "baseline_test": baseline,
-        # 生成物の同期は**進行側の責務**。push の直前に実行する。
-        "sync_command": args.sync_command,
-        "test_timeout": args.test_timeout,
-        "outer_round": 0,
-        "phase": "init",
-        "rounds": [],
-        "items": [],
-        "deferred_items": [],
-        "final": None,
-    }
+    state = _build_initial_state(
+        args, host, detection, runtimes, impl_capable, model_spec, auth,
+        repo, head_branch, base_branch, root, work, tmp_dir, baseline
+    )
     statefile.save(state_file, state)
     info(f"✅ 状態を初期化しました: {state_file}")
     info(f"   ホスト: {host}（{detection}）")
