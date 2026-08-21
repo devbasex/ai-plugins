@@ -645,45 +645,6 @@ def _check_codex_sentinel_exit(
     return status
 
 
-def _check_result_age_exit(
-    pid: int,
-    alive: bool,
-    paths: AgentPaths,
-    status: AgentStatus,
-    started_wall: float,
-    cmdline_validated: bool,
-    agent: str,
-    log_prefix: str,
-) -> AgentStatus | None:
-    # result.json が書かれた後もプロセスがハングするケース向けの fallback。
-    if not (
-        alive
-        and not status.sentinel_seen
-        and cmdline_validated
-        and paths.result.exists()
-        and paths.result.stat().st_size > 0
-    ):
-        return None
-
-    result_mtime = paths.result.stat().st_mtime
-    if result_mtime < started_wall:
-        return None
-    result_age = time.time() - result_mtime
-    if result_age < RESULT_AGE_GRACE:
-        return None
-
-    _kill_pid(pid)
-    status.result_exists = True
-    status.status = "OK"
-    status.exit_code = 0
-    status.detail = (
-        f"result.json exists for {result_age:.0f}s without process exit; "
-        f"killed lingering pid {pid}"
-    )
-    _emit_log(log_prefix, agent, status)
-    return status
-
-
 def monitor_agent(
     agent: str,
     pr: int,
@@ -756,12 +717,27 @@ def monitor_agent(
         # 安全条件:
         #   - cmdline_validated: PID 再利用でない (または検証不能環境) ことを確認済み
         #   - mtime >= started_wall: 前 round の stale result.json を拾わない
-        result_age_exit = _check_result_age_exit(
-            pid, alive, paths, status, started_wall,
-            cmdline_validated, agent, log_prefix
-        )
-        if result_age_exit is not None:
-            return result_age_exit
+        if (
+            alive
+            and not status.sentinel_seen
+            and cmdline_validated
+            and paths.result.exists()
+            and paths.result.stat().st_size > 0
+        ):
+            result_mtime = paths.result.stat().st_mtime
+            if result_mtime >= started_wall:
+                result_age = time.time() - result_mtime
+                if result_age >= RESULT_AGE_GRACE:
+                    _kill_pid(pid)
+                    status.result_exists = True
+                    status.status = "OK"
+                    status.exit_code = 0
+                    status.detail = (
+                        f"result.json exists for {result_age:.0f}s without process exit; "
+                        f"killed lingering pid {pid}"
+                    )
+                    _emit_log(log_prefix, agent, status)
+                    return status
 
         if alive and not cmdline_validated:
             # cmdline 検証は alive 確認後に 1 回だけ。生きていない瞬間に proc/<pid> を読むと
