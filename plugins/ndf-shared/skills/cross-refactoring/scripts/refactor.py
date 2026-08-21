@@ -1433,6 +1433,14 @@ def _verify_fix_range(
     return problems, accepted, unassigned
 
 
+def _resolve_threads(entry: dict[str, Any], resolved: set[str]) -> None:
+    for review in entry["reviews"]:
+        for finding in review["findings"]:
+            if finding.get("thread_id") not in resolved:
+                continue
+            finding["resolved"] = True
+
+
 def _defer_abandoned_items(state: dict[str, Any], entry: dict[str, Any]) -> None:
     """このラウンドで取り消した項目を「対象外」として記録する。
 
@@ -1904,11 +1912,7 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
             if item is not None:
                 item.setdefault("commits", []).append(sha)
 
-    for review in entry["reviews"]:
-        for finding in review["findings"]:
-            if finding.get("thread_id") not in resolved:
-                continue
-            finding["resolved"] = True
+    _resolve_threads(entry, resolved)
 
     merged_keys.append(merge_key)
     entry["fix_rounds"] += 1
