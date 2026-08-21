@@ -1141,6 +1141,29 @@ def collect_reported_apply_items(
     return reported, unknown_ids
 
 
+def collect_apply_commit_owners(
+    reported: dict[str, dict[str, Any]], work: pathlib.Path
+) -> tuple[dict[str, str], list[str]]:
+    """申告されたコミットを完全SHAへ正規化し、所有者と重複を返す。
+
+    **範囲のコミットは全て、いずれかの改善項目に割り当てられていること。**
+    **1 コミットの所有項目は 1 つだけ。**
+    判定は**完全な SHA へ正規化してから**行う。申告の文字列をそのまま鍵にすると、
+    一方が完全 SHA、他方が短縮 SHA で同じコミットを指したときに重複を見逃す。
+    """
+    owner_of: dict[str, str] = {}
+    duplicated: list[str] = []
+    for item_id, r in reported.items():
+        for sha in _reported_shas(r):
+            full = _git_out(work, ["rev-parse", "--verify", f"{sha}^{{commit}}"])
+            if full is None:
+                continue          # 実在しない申告は項目ごとの検証で落ちる
+            if full in owner_of and owner_of[full] != item_id:
+                duplicated.append(full)
+            owner_of.setdefault(full, item_id)
+    return owner_of, duplicated
+
+
 def _validate_apply_range(
     path: pathlib.Path,
     state: dict[str, Any],
@@ -1155,25 +1178,7 @@ def _validate_apply_range(
     round_items = set(entry["items"])
     reported, unknown_ids = collect_reported_apply_items(payload, round_items)
 
-    # **範囲のコミットは全て、いずれかの改善項目に割り当てられていること。**
-    # 申告から漏れたコミットはテストもトレーラーも差分予算も検査されず、そのまま
-    # Pull Request に残る。都合の悪い変更を申告しないだけで検査を回避できてしまう。
-    # **1 コミットの所有項目は 1 つだけ。** 同じコミットを 2 つの項目が申告すると、
-    # 片方が失敗して取り消したときに、もう片方は成功のまま残る。状態ファイルと
-    # 実際の差分が食い違い、どちらが正しいか決められなくなる。
-    #
-    # 判定は**完全な SHA へ正規化してから**行う。申告の文字列をそのまま鍵にすると、
-    # 一方が完全 SHA、他方が短縮 SHA で同じコミットを指したときに重複を見逃す。
-    owner_of: dict[str, str] = {}
-    duplicated: list[str] = []
-    for item_id, r in reported.items():
-        for sha in _reported_shas(r):
-            full = _git_out(work, ["rev-parse", "--verify", f"{sha}^{{commit}}"])
-            if full is None:
-                continue          # 実在しない申告は項目ごとの検証で落ちる
-            if full in owner_of and owner_of[full] != item_id:
-                duplicated.append(full)
-            owner_of.setdefault(full, item_id)
+    owner_of, duplicated = collect_apply_commit_owners(reported, work)
 
     unassigned = sorted(in_range - set(owner_of))
     if unassigned or unknown_ids or duplicated:
