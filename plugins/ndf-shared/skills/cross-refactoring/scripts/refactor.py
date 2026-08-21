@@ -494,14 +494,10 @@ def verify_commit_trailers(commit: dict[str, Any]) -> Optional[str]:
     return None
 
 
-def verify_fix_commit(
+def _verify_single_commit(
     commit: dict[str, Any], scope: Optional[Iterable[str]] = None
 ) -> Optional[str]:
-    """修正コミットを適用と同じ基準で検証する。問題があれば理由を返す。
-
-    適用側だけ厳しくして修正側を素通しにすると、**レビュー指摘への対応という
-    名目で手順を外れた変更が入り、そのまま収束済みになる**。
-    """
+    """単一コミットの共通検証: 存在・トレーラー・スコープ・テスト結果。"""
     if not commit.get("exists", True):
         return f"コミット {commit.get('sha', '?')} が対象の範囲に存在しません"
     problem = verify_commit_trailers(commit)
@@ -518,6 +514,17 @@ def verify_fix_commit(
     return None
 
 
+def verify_fix_commit(
+    commit: dict[str, Any], scope: Optional[Iterable[str]] = None
+) -> Optional[str]:
+    """修正コミットを適用と同じ基準で検証する。問題があれば理由を返す。
+
+    適用側だけ厳しくして修正側を素通しにすると、**レビュー指摘への対応という
+    名目で手順を外れた変更が入り、そのまま収束済みになる**。
+    """
+    return _verify_single_commit(commit, scope)
+
+
 def verify_apply_item(
     item: dict[str, Any], facts: list[dict[str, Any]],
     scope: Optional[Iterable[str]] = None,
@@ -532,22 +539,15 @@ def verify_apply_item(
         return "コミットが 1 件もありません（1 手 1 コミットの前提を満たしていません）"
 
     for commit in facts:
-        if not commit.get("exists", True):
-            return (
-                f"コミット {commit.get('sha', '?')} が base..head の範囲にありません"
-                "（申告だけで実体がありません）"
-            )
-        problem = verify_commit_trailers(commit)
+        problem = _verify_single_commit(commit, scope)
         if problem:
+            # 存在チェックのメッセージを apply 固有の表現に差し替える
+            if not commit.get("exists", True):
+                return (
+                    f"コミット {commit.get('sha', '?')} が base..head の範囲にありません"
+                    "（申告だけで実体がありません）"
+                )
             return problem
-        problem = verify_scope(commit, scope or [])
-        if problem:
-            return problem
-        if commit.get("test_status") != "pass":
-            return (
-                f"コミット {commit.get('sha', '?')} でテストが成功していません "
-                f"({commit.get('test_status')})"
-            )
         item_id = (commit.get("trailers") or {}).get("Item-Id")
         if item_id != item["item_id"]:
             return (
@@ -557,9 +557,6 @@ def verify_apply_item(
             )
 
     if item.get("test_gap"):
-        # テストが乏しいと申告された項目は、現状固定テストの追加が先行していること。
-        # 実測では同じ課題で固定テストの追加数が 17 本 / 1 メソッド / 0 本と揃わなかった。
-        # 「テストを足した」かどうかは、そのコミットがテストの置き場所を触ったかで見る。
         if not facts[0].get("touches_tests"):
             return (
                 "テストが乏しい項目なのに、現状固定テストの追加コミットが先行していません"
