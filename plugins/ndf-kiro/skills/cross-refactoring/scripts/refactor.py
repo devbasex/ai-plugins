@@ -1088,77 +1088,17 @@ def cmd_merge_proposals(args: argparse.Namespace) -> None:
         sys.exit(2)
 
 
-def cmd_merge_apply(args: argparse.Namespace) -> None:
-    """Step 4 — 適用結果を検証して取り込む。
-
-    終了コード: 0 = 1 件以上成功 / 2 = 全件失敗（次の提案ラウンドへ進む）。
-
-    **1 件の失敗でラウンドを止めない。** 失敗した項目だけを見送りにして、
-    残りは採用する。
-    """
-    path, state = _load(args.id)
-    entry = _round(state, args.round)
-    if not args.dry_run:
-        _discard_impl_leftovers(state, state["worktrees"]["work"])
-        _resume_incomplete_apply(path, state, entry)
-
-    # **叩き直しても同じ判定を返す。** 取り込み済みで再実行すると、前回作った
-    # 取り消しコミットが「未割当」と判定され、成功した項目まで巻き込んで
-    # ラウンド全体を取り消してしまう。
-    if (entry.get("apply") or {}).get("merged_at"):
-        applied_before = entry["apply"].get("applied") or []
-        info(
-            f"↻ ラウンド {args.round} の適用は取り込み済みです"
-            f"（採用 {len(applied_before)} 件 / 失敗 "
-            f"{len(entry['apply'].get('failed') or [])} 件）"
-        )
-        if not applied_before:
-            sys.exit(2)
-        return
-
-    impl = entry["impl"]
-    result = _result_path(state, impl, stem_for(impl, "apply", state["id"], args.round))
-    payload = _read_result(result, impl)
-
-    _record_observed_model(entry, "impl", impl, state, "apply", args.round)
-
-    # 着手前のテストが**成功と確認できていない限り**適用結果を採らない。
-    # `red` だけでなく `unknown`（確認していない）も拒否する。確認していない状態を
-    # 通すと、「壊したのか元から壊れていたのか」を判別する手段が無いまま進む。
-    baseline = state.get("baseline_test") or {}
-    if baseline.get("status") != "green":
-        for item_id in entry["items"]:
-            _find_item(state, item_id)["status"] = "blocked"
-        if not args.dry_run:
-            statefile.save(path, state)
-        die(
-            f"着手前のテストが成功と確認できていません（status={baseline.get('status')}）。"
-            "適用へ着手しません（全項目を blocked）",
-            code=2,
-        )
-
-    # 検証の材料は git から取る。結果ファイルから使うのは
-    # 「どのコミットがどの項目のものか」という対応付けだけ。
-    work = state["worktrees"]["work"]
-    head_branch = state["head_branch"]
-    test_command = baseline["command"]
-    head_sha = _git_out(work, ["rev-parse", "HEAD"]) or ""
-    # 起点は `merge-proposals` が記録したもの。**実装担当の申告は使わない。**
-    ordered_range = commits_in_range(work, entry.get("apply_base_sha"), head_sha)
-    in_range = set(ordered_range or [])
-    if ordered_range is None:
-        # 範囲を確定できないなら、何も検証できない。素通しにせず失敗させる。
-        for item_id in entry["items"]:
-            _find_item(state, item_id)["status"] = "blocked"
-        if not args.dry_run:
-            statefile.save(path, state)
-        die(
-            "適用の範囲を確定できませんでした"
-            f"（起点 {entry.get('apply_base_sha')} / HEAD {head_sha}）。"
-            "検証できない適用は採りません",
-            code=2,
-        )
-
+def _validate_apply_range(
+    path: pathlib.Path,
+    state: dict[str, Any],
+    entry: dict[str, Any],
+    work: pathlib.Path,
+    payload: dict[str, Any],
+    ordered_range: list[str],
+    in_range: set[str],
+    head_sha: str,
+    dry_run: bool,
+) -> tuple[dict[str, str], dict[str, dict[str, Any]], list[str], list[str], list[str]]:
     # 申告は**このラウンドの改善項目のものだけ**を採る。架空の項目 ID へ割り当てられた
     # コミットを数に入れると、割り当て済みに見えるのに項目別の検証にも入らず、
     # そのまま Pull Request に残せてしまう。
@@ -1233,16 +1173,9 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
             "item_id": f"R{entry['round']}-range",
             "commits": list(ordered_range),
         }
-        if not args.dry_run:
-            # **取り消しへ着手する前に印を立てる。** 取り消しは済んだのに push
-            # できずに終わると、未検証の変更が Pull Request に残ったままになる。
-            entry["pending_push"] = True
-            statefile.save(path, state)
-        _revert_item_commits(state, whole_round, args.dry_run)
-        if not args.dry_run:
-            # 取り消し後の状態を新しい起点にする。叩き直しても範囲が空になり、
-            # 取り消しコミット自体を「未割当」として再び戻すことがない。
-            entry["apply_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
+        _revert_range_and_mark(
+            path, state, entry, whole_round, "apply_base_sha", dry_run
+        )
         entry["apply"] = {
             "applied": [], "failed": list(entry["items"]),
             "base_sha": entry.get("apply_base_sha"), "head_sha": head_sha,
@@ -1252,7 +1185,7 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
             "merged_at": statefile.now(),
         }
         state["phase"] = "propose"
-        if args.dry_run:
+        if dry_run:
             info("（dry-run）状態ファイルは更新していません")
         else:
             # 項目別の失敗と同じく、**ここで取り消した項目も「対象外」に残す**。
@@ -1264,9 +1197,44 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
             statefile.save(path, state)
         sys.exit(2)
 
+    return owner_of, reported, unassigned, unknown_ids, duplicated
+
+
+def _revert_range_and_mark(
+    path: pathlib.Path,
+    state: dict[str, Any],
+    entry: dict[str, Any],
+    range_item: dict[str, Any],
+    base_sha_key: str,
+    dry_run: bool,
+) -> None:
+    if not dry_run:
+        # **取り消しへ着手する前に印を立てる。** 取り消しは済んだのに push
+        # できずに終わると、未検証の変更が Pull Request に残ったままになる。
+        entry["pending_push"] = True
+        statefile.save(path, state)
+    _revert_item_commits(state, range_item, dry_run)
+    if not dry_run:
+        # 取り消し後の状態を新しい起点にする。叩き直しても範囲が空になり、
+        # 取り消しコミット自体を「未申告」として再び戻すことがない。
+        entry[base_sha_key] = _git_out(state["worktrees"]["work"], ["rev-parse", "HEAD"])
+        statefile.save(path, state)
+
+
+def _verify_and_record_items(
+    path: pathlib.Path,
+    state: dict[str, Any],
+    entry: dict[str, Any],
+    reported: dict[str, dict[str, Any]],
+    in_range: set[str],
+    work: pathlib.Path,
+    test_command: str,
+    head_branch: str,
+    scope: list[str],
+    dry_run: bool,
+) -> tuple[list[str], list[str]]:
     applied: list[str] = []
     failed: list[str] = []
-    scope = state.get("target_scope") or []
     # **判定はその都度残す。** まとめて最後に保存すると、取り消しの途中で中断した
     # ときに適用の記録が一切残らず、どのコミットが検証を通ったのかを状態から
     # 復元できなくなる。再開可能性は収束ループの前提なので、ここが崩れると
@@ -1307,8 +1275,92 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
             "result": "failed" if problem else "ok",
             "reason": problem, "commits": list(item.get("commits") or []),
         })
+        if not dry_run:
+            statefile.save(path, state)
+
+    return applied, failed
+
+
+def cmd_merge_apply(args: argparse.Namespace) -> None:
+    """Step 4 — 適用結果を検証して取り込む。
+
+    終了コード: 0 = 1 件以上成功 / 2 = 全件失敗（次の提案ラウンドへ進む）。
+
+    **1 件の失敗でラウンドを止めない。** 失敗した項目だけを見送りにして、
+    残りは採用する。
+    """
+    path, state = _load(args.id)
+    entry = _round(state, args.round)
+    if not args.dry_run:
+        _discard_impl_leftovers(state, state["worktrees"]["work"])
+        _resume_incomplete_apply(path, state, entry)
+
+    # **叩き直しても同じ判定を返す。** 取り込み済みで再実行すると、前回作った
+    # 取り消しコミットが「未割当」と判定され、成功した項目まで巻き込んで
+    # ラウンド全体を取り消してしまう。
+    if (entry.get("apply") or {}).get("merged_at"):
+        applied_before = entry["apply"].get("applied") or []
+        info(
+            f"↻ ラウンド {args.round} の適用は取り込み済みです"
+            f"（採用 {len(applied_before)} 件 / 失敗 "
+            f"{len(entry['apply'].get('failed') or [])} 件）"
+        )
+        if not applied_before:
+            sys.exit(2)
+        return
+
+    impl = entry["impl"]
+    result = _result_path(state, impl, stem_for(impl, "apply", state["id"], args.round))
+    payload = _read_result(result, impl)
+
+    _record_observed_model(entry, "impl", impl, state, "apply", args.round)
+
+    # 着手前のテストが**成功と確認できていない限り**適用結果を採らない。
+    # `red` だけでなく `unknown`（確認していない）も拒否する。確認していない状態を
+    # 通すと、「壊したのか元から壊れていたのか」を判別する手段が無いまま進む。
+    baseline = state.get("baseline_test") or {}
+    if baseline.get("status") != "green":
+        for item_id in entry["items"]:
+            _find_item(state, item_id)["status"] = "blocked"
         if not args.dry_run:
             statefile.save(path, state)
+        die(
+            f"着手前のテストが成功と確認できていません（status={baseline.get('status')}）。"
+            "適用へ着手しません（全項目を blocked）",
+            code=2,
+        )
+
+    # 検証の材料は git から取る。結果ファイルから使うのは
+    # 「どのコミットがどの項目のものか」という対応付けだけ。
+    work = state["worktrees"]["work"]
+    head_branch = state["head_branch"]
+    test_command = baseline["command"]
+    head_sha = _git_out(work, ["rev-parse", "HEAD"]) or ""
+    # 起点は `merge-proposals` が記録したもの。**実装担当の申告は使わない。**
+    ordered_range = commits_in_range(work, entry.get("apply_base_sha"), head_sha)
+    in_range = set(ordered_range or [])
+    if ordered_range is None:
+        # 範囲を確定できないなら、何も検証できない。素通しにせず失敗させる。
+        for item_id in entry["items"]:
+            _find_item(state, item_id)["status"] = "blocked"
+        if not args.dry_run:
+            statefile.save(path, state)
+        die(
+            "適用の範囲を確定できませんでした"
+            f"（起点 {entry.get('apply_base_sha')} / HEAD {head_sha}）。"
+            "検証できない適用は採りません",
+            code=2,
+        )
+
+    _, reported, _, _, _ = _validate_apply_range(
+        path, state, entry, work, payload, ordered_range, in_range, head_sha, args.dry_run
+    )
+
+    scope = state.get("target_scope") or []
+    applied, failed = _verify_and_record_items(
+        path, state, entry, reported, in_range, work, test_command,
+        head_branch, scope, args.dry_run
+    )
 
     entry["apply"] = {
         "applied": applied,
@@ -1349,6 +1401,58 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
     if not applied:
         info("全項目が失敗したため、このラウンドのレビューは行いません")
         sys.exit(2)
+
+
+def _verify_fix_range(
+    state: dict[str, Any],
+    entry: dict[str, Any],
+    work: pathlib.Path,
+    reported_shas: list[str],
+    ordered_range: list[str],
+    baseline: dict[str, Any],
+) -> tuple[list[str], list[tuple[str, str]], list[str]]:
+    # 適用と同じく、**範囲のコミットは全て申告されていること**を求める。
+    # 申告から漏れた修正コミットは検証を受けないまま Pull Request に残る。
+    reported_full = {
+        full for full in (
+            _git_out(work, ["rev-parse", "--verify", f"{s}^{{commit}}"])
+            for s in reported_shas
+        ) if full
+    }
+    unassigned = sorted(set(ordered_range) - reported_full)
+
+    facts = collect_commit_facts(
+        work, reported_shas, set(ordered_range),
+        baseline.get("command") or "true", state["head_branch"],
+        _safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT),
+    )
+
+    problems: list[str] = []
+    accepted: list[tuple[str, str]] = []      # (item_id, sha)
+    for commit in facts:
+        item_id = (commit.get("trailers") or {}).get("Item-Id")
+        problem = verify_fix_commit(commit, state.get("target_scope") or [])
+        if problem:
+            problems.append(problem)
+            info(f"❌ 修正コミットが手順を満たしていません: {problem}")
+            continue
+        accepted.append((item_id, commit["sha"]))
+
+    if unassigned:
+        info(
+            f"❌ どの申告にも含まれていない修正コミットが {len(unassigned)} 件あります"
+            f"（{', '.join(s[:7] for s in unassigned[:5])}）"
+        )
+
+    return problems, accepted, unassigned
+
+
+def _resolve_threads(entry: dict[str, Any], resolved: set[str]) -> None:
+    for review in entry["reviews"]:
+        for finding in review["findings"]:
+            if finding.get("thread_id") not in resolved:
+                continue
+            finding["resolved"] = True
 
 
 def _defer_abandoned_items(state: dict[str, Any], entry: dict[str, Any]) -> None:
@@ -1785,62 +1889,27 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         )
     reported_shas = _reported_shas(payload)
 
-    # 適用と同じく、**範囲のコミットは全て申告されていること**を求める。
-    # 申告から漏れた修正コミットは検証を受けないまま Pull Request に残る。
-    reported_full = {
-        full for full in (
-            _git_out(work, ["rev-parse", "--verify", f"{s}^{{commit}}"])
-            for s in reported_shas
-        ) if full
-    }
-    unassigned = sorted(set(ordered_range) - reported_full)
-
-    facts = collect_commit_facts(
-        work, reported_shas, set(ordered_range),
-        baseline.get("command") or "true", state["head_branch"],
-        _safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT),
-    )
-
     # **不正なコミットが 1 件でもあれば、修正ラウンドの範囲ごと取り消す。**
     # 状態を記録しないだけでは、未検証の変更が Pull Request に残り続ける
     # （見送りの対象にもならない）。どのコミットが安全かは決められないので、
     # 適用フェーズの未割当コミットと同じ扱いにする。
-    problems: list[str] = []
-    accepted: list[tuple[str, str]] = []      # (item_id, sha)
-    for commit in facts:
-        item_id = (commit.get("trailers") or {}).get("Item-Id")
-        problem = verify_fix_commit(commit, state.get("target_scope") or [])
-        if problem:
-            problems.append(problem)
-            info(f"❌ 修正コミットが手順を満たしていません: {problem}")
-            continue
-        accepted.append((item_id, commit["sha"]))
-
-    if unassigned:
-        info(
-            f"❌ どの申告にも含まれていない修正コミットが {len(unassigned)} 件あります"
-            f"（{', '.join(s[:7] for s in unassigned[:5])}）"
-        )
+    problems, accepted, unassigned = _verify_fix_range(
+        state, entry, work, reported_shas, ordered_range, baseline
+    )
 
     if unassigned or problems:
         # **状態へ記録する前に取り消す。** 先に記録すると、取り消し済みのコミットが
         # 状態ファイルに残り、後の見送り処理が同じコミットをもう一度取り消そうとする。
         info("検証を通らない変更を残さないため、この修正ラウンドの範囲を取り消します")
-        # **取り消しへ着手する前に印を立てる。** 取り消しは済んだのに push できずに
-        # 終わると、未検証の変更が Pull Request に残ったままになる。
-        entry["pending_push"] = True
-        statefile.save(path, state)
-        _revert_item_commits(
+        _revert_range_and_mark(
+            path,
             state,
+            entry,
             {"item_id": f"R{entry['round']}-fix{entry['fix_rounds'] + 1}",
              "commits": list(ordered_range)},
+            "fix_base_sha",
             dry_run=False,
         )
-        # 取り消し後の状態を新しい起点にし、**その場で保存する**。ここで保存せずに
-        # 落ちると、次の実行は古い起点から範囲を取り直して取り消しコミット自体を
-        # 「未申告」と判定し、**取り消しを取り消して**しまう。
-        entry["fix_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
-        statefile.save(path, state)
         # **push は保存のあと。** ここで push して失敗すると、取り消しコミットは
         # ローカルに残るのに起点の更新が保存されず、叩き直しで二重に取り消してしまう。
         info("⚠ 修正を取り消したため、解決の申告は採用しません")
@@ -1851,11 +1920,7 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
             if item is not None:
                 item.setdefault("commits", []).append(sha)
 
-    for review in entry["reviews"]:
-        for finding in review["findings"]:
-            if finding.get("thread_id") not in resolved:
-                continue
-            finding["resolved"] = True
+    _resolve_threads(entry, resolved)
 
     merged_keys.append(merge_key)
     entry["fix_rounds"] += 1
