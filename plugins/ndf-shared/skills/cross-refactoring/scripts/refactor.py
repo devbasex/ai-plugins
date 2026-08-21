@@ -1040,6 +1040,17 @@ def record_merged_proposals(
         state["deferred_items"].append({**item, "round": round_no})
 
 
+def finalize_empty_proposal_round(
+    path: pathlib.Path, state: dict[str, Any]
+) -> None:
+    """採用 0 件時の終了理由を確定し、状態を保存する。"""
+    # 呼び出し側は終了コード 2 で繰り返しを抜けるため、`advance` を通らない。
+    # 終了理由をここで確定させないと、報告が「未終了」のままになる。
+    state["final"] = "no_more_proposals"
+    state["ended_at"] = statefile.now()
+    statefile.save(path, state)
+
+
 def cmd_merge_proposals(args: argparse.Namespace) -> None:
     """Step 3 — 提案をマージして改善項目を作る。
 
@@ -1085,11 +1096,9 @@ def cmd_merge_proposals(args: argparse.Namespace) -> None:
 
     state["phase"] = "apply" if adopted else "converged"
     if not adopted:
-        # 呼び出し側は終了コード 2 で繰り返しを抜けるため、`advance` を通らない。
-        # 終了理由をここで確定させないと、報告が「未終了」のままになる。
-        state["final"] = "no_more_proposals"
-        state["ended_at"] = statefile.now()
-    statefile.save(path, state)
+        finalize_empty_proposal_round(path, state)
+    else:
+        statefile.save(path, state)
     info(
         f"提案 {sum(entry['proposed'].values())} 件 → 統合 {entry['merged']} 件 → "
         f"採用 {entry['adopted']} 件 / 見送り {entry['deferred']} 件"
