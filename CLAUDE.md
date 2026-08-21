@@ -29,7 +29,7 @@ skills/     → 実行可能なワークフロー
 
 詳細は `docs/specifications/ndf-knowledge-and-kiro.md` を参照。
 
-## NDF v8.5.0 の Skill 構成
+## NDF v8.5.1 の Skill 構成
 
 Skill は 31 個で、配布は `plugins/ndf-shared/manifests/` が唯一の基準（Claude Code 27 / Codex 25 / Kiro 26）。ブラウザ自動テストの 4 個は `playwright-kit` プラグインへ分離した（`plugins/playwright-kit-shared/`）。frontmatter の書き方は `plugins/ndf-shared/skills/README.md` の規約に従い、`python3 scripts/check-skill-frontmatter.py` で検査する。利用実績と維持・統合・削除の判定は `docs/specifications/ndf-skill-inventory.md` に記録する。
 
@@ -48,6 +48,8 @@ v8.3.0 で `cross-refactoring` の公開の責務を進行側へ一本化した�
 v8.4.0 で `markdown-writing` に「敬意と節度のある表現で書く」（ルール 4）を追加し、以降のルール番号を 1 つ繰り下げた。強い否定語・過剰な装飾語・根拠の曖昧な断定の 3 種を扱い、セルフチェックの grep も 3 種に分けた。あわせて `01-diagram-guide.md` を図表ルールの冒頭から手順として読ませ、上限値や記法は SKILL.md へ書かずガイド側に置く構成にした（実測で読み込み挙動を確認した結果）。`pr` は完了報告を `### 6. 完了報告` として手順に組み込み、テンプレートと PR URL の書き方（生の URL を書く）を定めた。
 
 v8.5.0 で `cross-refactoring` の再々検証（PR #125）で見つかった不具合 4 件と、`cross-review` の投稿確認を直した。進行を止めていたのは生成物の同期で、`git status --porcelain` を固定幅で読む箇所が出力全体を `strip()` していたため、変更パスの先頭 1 文字が欠けていた。あわせて実装担当が残した未コミット変更を取り込みの前に捨てるようにし、提案の直前に読み取り用の作業ディレクトリを同期するようにした。`cross-review` は申告されたコメント数を GitHub 側の実数と突き合わせる。詳細は `issues/issue-113-cross-refactoring-re-retrial.md`。
+
+v8.5.1 で `cross-refactoring` の収束ループが終わらない不具合を直した。`judge-review` の変更要求の出口は 2 つあり、差し戻し上限から落ちる側だけが修正フェーズの起点（`fix_base_sha`）を記録していなかった。起点が無いと `merge-fix` が範囲を確定できずに弾かれ、`fix_rounds` が進まないため `should-abandon` の上限へ永久に到達しない。起点の記録を 1 箇所へ集め、範囲を確定できないときも修正ラウンドを進めるようにした。あわせて、レビュー結果を残さなかった担当がいるときは変更要求にせず中断する（実装担当が直せる指摘ではないため）。詳細は `issues/issue-113-cross-refactoring-4th-trial-report.md`。
 
 v6.0.0 の対応表（`review` → `pr-review`）は予告どおり削除済み。v6.0.0 以前から移行する場合は v6.1.0 の `ndf-policies` を参照する。
 

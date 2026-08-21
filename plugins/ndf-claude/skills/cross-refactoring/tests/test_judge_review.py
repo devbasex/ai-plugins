@@ -183,7 +183,9 @@ def test_judge_command_exits_3_on_invalid_finding(refactor, tmp_path, env_tmp_di
     assert all(i["status"] == "reviewing" for i in read_state(state_path)["items"])
 
 
-def test_repeated_invalid_reviews_degrade_to_changes(refactor, tmp_path, env_tmp_dir):
+def test_repeated_invalid_reviews_degrade_to_changes(
+    refactor, tmp_path, env_tmp_dir, no_git
+):
     """差し戻しを無限に繰り返さない。上限を超えたら変更要求として扱う。
 
     紐づけ先が決まらないため、取り消しはラウンド全件が対象になる。
@@ -375,3 +377,56 @@ def test_same_review_after_a_fix_is_a_new_generation(
     entry = read_state(state_path)["rounds"][0]
     assert entry["fix_attempts"] == 2, "同じ指摘文でも別の世代として扱う"
     assert len(entry["reviews"]) == 2
+
+
+# ---------- レビュー結果の欠落 ----------
+
+def test_missing_result_at_the_limit_aborts(refactor, tmp_path, env_tmp_dir):
+    """結果が欠けたまま上限に達したら、変更要求にせず中断すること。
+
+    レビュー担当が結果を残さなかったのは**進行側の問題**であり、実装担当が直せる
+    指摘ではない。変更要求へ落とすと、直しようのない指摘を渡された実装担当が
+    空回りし、承認済みの項目まで見送りへ進む。
+    """
+    state_path = _state(tmp_path)
+    env_tmp_dir(state_path)
+    args = type("A", (), {"id": 130, "round": 1})()
+
+    # 1 回目は差し戻し、2 回目で上限に達する。kiro は毎回結果を残さない。
+    # 叩き直しと区別させるため、gemini の結果は毎回違う内容にする
+    for attempt, expected in enumerate((3, refactor.ABORT)):
+        write_result(state_path, "gemini-review-r1",
+                     {"verdict": "APPROVE", "findings": [], "elapsed_seconds": attempt})
+        with pytest.raises(SystemExit) as e:
+            refactor.cmd_judge_review(args)
+        assert e.value.code == expected
+
+    entry = read_state(state_path)["rounds"][0]
+    assert entry["fix_rounds"] == 0, "中断したのに修正ラウンドが進んでいる"
+
+
+def test_invalid_format_at_the_limit_records_the_fix_base(
+    refactor, tmp_path, env_tmp_dir, no_git, monkeypatch
+):
+    """形式不正で上限に達したときも、修正の範囲の起点を記録すること。
+
+    記録しないと `merge-fix` が範囲を確定できずに弾かれ、`fix_rounds` が進まない。
+    `should-abandon` は `fix_rounds` で見送りを決めるため、上限へ永久に到達しない。
+    """
+    state_path = _state(tmp_path)
+    env_tmp_dir(state_path)
+    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **k: "cafe123")
+    args = type("A", (), {"id": 130, "round": 1})()
+
+    for attempt, expected in enumerate((3, 2)):
+        write_result(state_path, "gemini-review-r1",
+                     review("REQUEST_CHANGES",
+                            [finding("R9-999", summary=f"存在しない ID {attempt}")]))
+        write_result(state_path, "kiro-review-r1", review())
+        with pytest.raises(SystemExit) as e:
+            refactor.cmd_judge_review(args)
+        assert e.value.code == expected
+
+    entry = read_state(state_path)["rounds"][0]
+    assert entry.get("fix_base_sha") == "cafe123", "修正の範囲の起点が記録されていない"
+    assert entry.get("fix_attempts") == 1

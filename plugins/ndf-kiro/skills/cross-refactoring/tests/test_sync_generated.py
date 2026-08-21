@@ -221,3 +221,50 @@ def test_merge_fix_continues_when_impl_left_changes(
 
     assert _git("status", "--porcelain", cwd=work).stdout == ""
     assert read_state(state_path)["rounds"][0]["fix_rounds"] == 1
+
+
+def test_merge_fix_advances_when_the_range_is_undeterminable(
+    refactor, tmp_path, env_tmp_dir, monkeypatch
+):
+    """修正の範囲を確定できなくても、修正ラウンドは進めること。
+
+    進めないと `should-abandon` が見送りへ移る条件（`fix_rounds` が上限に達する）を
+    永久に満たさず、修正フェーズと再レビューを無限に往復する。
+    """
+    work = _make_work(tmp_path)
+    head = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
+    state_path = make_state(
+        tmp_path,
+        worktrees={"work": str(work), "codex": str(tmp_path / "codex"),
+                   "gemini": str(tmp_path / "gemini"), "kiro": str(tmp_path / "kiro")},
+        rounds=[{
+            "round": 1, "impl": "codex", "impl_model": None,
+            "reviewers": ["gemini", "kiro"], "reviewer_models": {},
+            "items": ["R1-001"], "adopted": 1, "proposed": 1, "merged": 1,
+            "apply": {"merged_at": "2026-08-18T00:00:00", "applied": ["R1-001"],
+                      "failed": []},
+            "apply_base_sha": head, "apply_progress": [], "drops": [],
+            "reviews": [], "fix_rounds": 0, "fix_attempts": 1,
+            # **起点が無い**状態。判定が起点を記録しない出口を通ると生じる
+            "fix_base_sha": None, "deferred": [], "durations": {},
+            "proposal_keys": [], "pending_drop": [], "pending_push": False,
+            "started_at": "2026-08-18T00:00:00",
+        }],
+        items=[{"item_id": "R1-001", "round": 1, "path": "src.py",
+                "symbol": "f", "smell": "long_method", "technique": "extract_method",
+                "severity": "major", "rationale": "", "plan": "", "test_gap": False,
+                "estimated_diff_lines": 10, "proposed_by": ["codex"],
+                "status": "applied", "commits": []}],
+    )
+    env_tmp_dir(state_path)
+    monkeypatch.setattr(refactor, "_push_head", lambda state: None)
+    write_result(state_path, "codex-fix-r1",
+                 {"resolved_thread_ids": [], "unresolved": [], "commits": []})
+
+    with pytest.raises(SystemExit) as e:
+        refactor.cmd_merge_fix(type("A", (), {"id": 130, "round": 1})())
+
+    assert e.value.code == 2
+    assert read_state(state_path)["rounds"][0]["fix_rounds"] == 1, (
+        "範囲を確定できなかったのに修正ラウンドが進んでいない（無限ループになる）"
+    )
