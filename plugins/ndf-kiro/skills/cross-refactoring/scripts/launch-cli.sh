@@ -131,6 +131,12 @@ export RF_ITEMS=$ITEMS_JSON RF_TMP_DIR=$TMP_DIR
 export RF_VOCAB_SMELLS=$VOCAB_SMELLS RF_VOCAB_TECHNIQUES=$VOCAB_TECHNIQUES
 export RF_VOCAB_SEVERITIES=$VOCAB_SEVERITIES
 
+# 投稿の event の指示。自分の Pull Request では GitHub が APPROVE と
+# REQUEST_CHANGES を拒むため、検証側が組み立てた文面をそのまま渡す。
+RF_POST_EVENT_NOTE=$(jq -r '.review_post_note // ""' "$STATE")
+[ -n "$RF_POST_EVENT_NOTE" ] || RF_POST_EVENT_NOTE="投稿の \`-f event=\` には判定をそのまま渡してください。"
+export RF_POST_EVENT_NOTE
+
 # 雛形は `${RF_*}` を展開するだけの素の Markdown。コマンド置換は展開しない
 # （プロンプト本文に `$(...)` や backtick が現れても実行させないため）。
 python3 - "$TEMPLATE" > "$PROMPT" <<'PY'

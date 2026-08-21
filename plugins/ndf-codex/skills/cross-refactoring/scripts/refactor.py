@@ -707,6 +707,27 @@ def check_auth(runtimes: Iterable[str]) -> dict[str, dict[str, Any]]:
     return results
 
 
+def _review_post_note(is_own_pr: bool) -> str:
+    """レビュープロンプトへ渡す投稿の event の指示を組み立てる。
+
+    定義を検証側（この CLI）に置き、状態ファイル経由で起動側へ渡す。
+    語彙の受け渡しと同じ形にして、文面の分岐が起動シェルへ散らないようにする。
+    """
+    if is_own_pr:
+        return (
+            "この Pull Request の作成者はあなたを動かしている利用者本人です。"
+            "GitHub は自分の Pull Request への `APPROVE` と `REQUEST_CHANGES` を "
+            "`HTTP 422` で拒むため、**投稿は必ず `-f event=COMMENT` で行ってください**。"
+            "判定そのものは本文の先頭行と結果ファイルへ `APPROVE` / `REQUEST_CHANGES` "
+            "のまま残します。収束判定は結果ファイルの判定を見るので、"
+            "投稿を倒しても評価は変わりません。"
+        )
+    return (
+        "投稿の `-f event=` には判定をそのまま渡してください"
+        "（`APPROVE` または `REQUEST_CHANGES`）。"
+    )
+
+
 def cmd_init(args: argparse.Namespace) -> None:
     """Step 0 — ホストと母集合を確定し、作業ディレクトリ root と状態を用意する。
 
@@ -734,6 +755,13 @@ def cmd_init(args: argparse.Namespace) -> None:
     auth = check_auth(sorted(set(runtimes) | set(impl_capable)))
 
     repo = _sh(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
+    viewer = _sh(["gh", "api", "user", "--jq", ".login"])
+    author = _sh(
+        ["gh", "pr", "view", str(args.pr), "--json", "author", "--jq", ".author.login"]
+    )
+    is_own_pr = bool(viewer) and viewer == author
+    if is_own_pr:
+        info(f"⚠ 自分の Pull Request です（作成者 {author}）— 投稿は COMMENT へ倒します")
     head_branch = _sh(
         ["gh", "pr", "view", str(args.pr), "--json", "headRefName", "--jq", ".headRefName"]
     )
@@ -768,6 +796,12 @@ def cmd_init(args: argparse.Namespace) -> None:
         "current_pr": args.pr,
         "base_branch": base_branch,
         "head_branch": head_branch,
+        # GitHub は自分の Pull Request への `APPROVE` と `REQUEST_CHANGES` を
+        # `HTTP 422` で拒む。判定はそのまま結果ファイルへ残し、**投稿の event だけ**
+        # を倒す。収束判定は結果ファイルの判定を見るので、倒しても進行は変わらない。
+        "is_own_pr": is_own_pr,
+        "event_downgrade": is_own_pr,
+        "review_post_note": _review_post_note(is_own_pr),
         "worktree_root": str(root),
         "worktrees": {"work": str(work), **{r: str(root / r) for r in runtimes}},
         "tmp_dir": str(tmp_dir),
