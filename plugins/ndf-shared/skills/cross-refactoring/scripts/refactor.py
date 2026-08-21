@@ -1011,6 +1011,35 @@ def collect_round_proposals(
     return proposals
 
 
+def record_merged_proposals(
+    state: dict[str, Any],
+    entry: dict[str, Any],
+    adopted: list[dict[str, Any]],
+    deferred: list[dict[str, Any]],
+) -> None:
+    """マージ結果を state/entry に記録し、改善項目を作成する。"""
+    # 収束判定に使う「前ラウンドとの重複率」。見送りも含めた提案全体で測る。
+    current_keys = [(i["path"], i["symbol"], i["smell"]) for i in adopted + deferred]
+    entry["proposal_keys"] = [list(k) for k in current_keys]
+    entry["merged"] = len(current_keys)
+    entry["adopted"] = len(adopted)
+    entry["deferred"] = len(deferred)
+
+    round_no = entry["round"]
+    for n, item in enumerate(adopted, start=1):
+        item_id = f"R{round_no}-{n:03d}"
+        state["items"].append({
+            "item_id": item_id,
+            "round": round_no,
+            **item,
+            "status": "pending",
+            "commits": [],
+        })
+        entry["items"].append(item_id)
+    for item in deferred:
+        state["deferred_items"].append({**item, "round": round_no})
+
+
 def cmd_merge_proposals(args: argparse.Namespace) -> None:
     """Step 3 — 提案をマージして改善項目を作る。
 
@@ -1047,26 +1076,7 @@ def cmd_merge_proposals(args: argparse.Namespace) -> None:
         excluded_keys=excluded,
     )
 
-    # 収束判定に使う「前ラウンドとの重複率」。見送りも含めた提案全体で測る。
-    current_keys = [(i["path"], i["symbol"], i["smell"]) for i in adopted + deferred]
-    entry["proposal_keys"] = [list(k) for k in current_keys]
-    entry["merged"] = len(current_keys)
-    entry["adopted"] = len(adopted)
-    entry["deferred"] = len(deferred)
-
-    round_no = entry["round"]
-    for n, item in enumerate(adopted, start=1):
-        item_id = f"R{round_no}-{n:03d}"
-        state["items"].append({
-            "item_id": item_id,
-            "round": round_no,
-            **item,
-            "status": "pending",
-            "commits": [],
-        })
-        entry["items"].append(item_id)
-    for item in deferred:
-        state["deferred_items"].append({**item, "round": round_no})
+    record_merged_proposals(state, entry, adopted, deferred)
 
     # 適用の起点は**オーケストレータ側で**確定させる。実装担当の申告に委ねると、
     # 欠落・不正時に範囲検査が無効になり、過去の任意のコミットが実在扱いになる。
