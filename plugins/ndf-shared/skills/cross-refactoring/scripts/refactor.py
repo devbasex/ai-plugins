@@ -1200,16 +1200,9 @@ def _validate_apply_range(
             "item_id": f"R{entry['round']}-range",
             "commits": list(ordered_range),
         }
-        if not dry_run:
-            # **取り消しへ着手する前に印を立てる。** 取り消しは済んだのに push
-            # できずに終わると、未検証の変更が Pull Request に残ったままになる。
-            entry["pending_push"] = True
-            statefile.save(path, state)
-        _revert_item_commits(state, whole_round, dry_run)
-        if not dry_run:
-            # 取り消し後の状態を新しい起点にする。叩き直しても範囲が空になり、
-            # 取り消しコミット自体を「未割当」として再び戻すことがない。
-            entry["apply_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
+        _revert_range_and_mark(
+            path, state, entry, whole_round, "apply_base_sha", dry_run
+        )
         entry["apply"] = {
             "applied": [], "failed": list(entry["items"]),
             "base_sha": entry.get("apply_base_sha"), "head_sha": head_sha,
@@ -1232,6 +1225,27 @@ def _validate_apply_range(
         sys.exit(2)
 
     return owner_of, reported, unassigned, unknown_ids, duplicated
+
+
+def _revert_range_and_mark(
+    path: pathlib.Path,
+    state: dict[str, Any],
+    entry: dict[str, Any],
+    range_item: dict[str, Any],
+    base_sha_key: str,
+    dry_run: bool,
+) -> None:
+    if not dry_run:
+        # **取り消しへ着手する前に印を立てる。** 取り消しは済んだのに push
+        # できずに終わると、未検証の変更が Pull Request に残ったままになる。
+        entry["pending_push"] = True
+        statefile.save(path, state)
+    _revert_item_commits(state, range_item, dry_run)
+    if not dry_run:
+        # 取り消し後の状態を新しい起点にする。叩き直しても範囲が空になり、
+        # 取り消しコミット自体を「未申告」として再び戻すことがない。
+        entry[base_sha_key] = _git_out(state["worktrees"]["work"], ["rev-parse", "HEAD"])
+        statefile.save(path, state)
 
 
 def _verify_and_record_items(
@@ -1914,21 +1928,15 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         # **状態へ記録する前に取り消す。** 先に記録すると、取り消し済みのコミットが
         # 状態ファイルに残り、後の見送り処理が同じコミットをもう一度取り消そうとする。
         info("検証を通らない変更を残さないため、この修正ラウンドの範囲を取り消します")
-        # **取り消しへ着手する前に印を立てる。** 取り消しは済んだのに push できずに
-        # 終わると、未検証の変更が Pull Request に残ったままになる。
-        entry["pending_push"] = True
-        statefile.save(path, state)
-        _revert_item_commits(
+        _revert_range_and_mark(
+            path,
             state,
+            entry,
             {"item_id": f"R{entry['round']}-fix{entry['fix_rounds'] + 1}",
              "commits": list(ordered_range)},
+            "fix_base_sha",
             dry_run=False,
         )
-        # 取り消し後の状態を新しい起点にし、**その場で保存する**。ここで保存せずに
-        # 落ちると、次の実行は古い起点から範囲を取り直して取り消しコミット自体を
-        # 「未申告」と判定し、**取り消しを取り消して**しまう。
-        entry["fix_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
-        statefile.save(path, state)
         # **push は保存のあと。** ここで push して失敗すると、取り消しコミットは
         # ローカルに残るのに起点の更新が保存されず、叩き直しで二重に取り消してしまう。
         info("⚠ 修正を取り消したため、解決の申告は採用しません")
