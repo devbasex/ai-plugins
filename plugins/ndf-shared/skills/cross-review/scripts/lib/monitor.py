@@ -613,38 +613,6 @@ def _tail_last_nonempty_line(path: pathlib.Path, limit: int = 4096) -> str:
     return ""
 
 
-def _check_codex_sentinel_exit(
-    agent: str,
-    pid: int,
-    alive: bool,
-    paths: AgentPaths,
-    status: AgentStatus,
-    log_prefix: str,
-) -> AgentStatus | None:
-    # codex は `tokens used` sentinel を出した後もプロセスが exit せず常駐し続ける
-    # ケースがある (実機で観測)。result.json は正常に書かれているのに alive=True の
-    # まま stall_timeout に達して STALLED 化してしまう。sentinel + result.json が
-    # 揃った瞬間に対象プロセスを kill して OK 判定で返す。
-    if not (
-        agent == "codex"
-        and alive
-        and status.sentinel_seen
-        and paths.result.exists()
-        and paths.result.stat().st_size > 0
-    ):
-        return None
-
-    _kill_pid(pid)
-    status.result_exists = True
-    status.status = "OK"
-    status.exit_code = 0
-    status.detail = (
-        f"codex sentinel + result.json detected; killed lingering pid {pid}"
-    )
-    _emit_log(log_prefix, agent, status)
-    return status
-
-
 def monitor_agent(
     agent: str,
     pr: int,
@@ -704,11 +672,26 @@ def monitor_agent(
         if agent == "codex":
             status.sentinel_seen = _scan_codex_sentinel(paths.err_log)
 
-        sentinel_exit = _check_codex_sentinel_exit(
-            agent, pid, alive, paths, status, log_prefix
-        )
-        if sentinel_exit is not None:
-            return sentinel_exit
+        # codex は `tokens used` sentinel を出した後もプロセスが exit せず常駐し続ける
+        # ケースがある (実機で観測)。result.json は正常に書かれているのに alive=True の
+        # まま stall_timeout に達して STALLED 化してしまう。sentinel + result.json が
+        # 揃った瞬間に対象プロセスを kill して OK 判定で返す。
+        if (
+            agent == "codex"
+            and alive
+            and status.sentinel_seen
+            and paths.result.exists()
+            and paths.result.stat().st_size > 0
+        ):
+            _kill_pid(pid)
+            status.result_exists = True
+            status.status = "OK"
+            status.exit_code = 0
+            status.detail = (
+                f"codex sentinel + result.json detected; killed lingering pid {pid}"
+            )
+            _emit_log(log_prefix, agent, status)
+            return status
 
         # result.json が書かれた後もプロセスがハング��るケース (gemini で観測:
         # MCP サーバー切断待ち等��� exit しない)。sentinel 機構を持たない agent 向け
