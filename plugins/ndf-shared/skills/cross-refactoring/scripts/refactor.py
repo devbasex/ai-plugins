@@ -1884,6 +1884,47 @@ def collect_verified_resolved_threads(
     return resolved
 
 
+def verify_or_revert_fix_range(
+    path: pathlib.Path,
+    state: dict[str, Any],
+    entry: dict[str, Any],
+    work: str,
+    reported_shas: list[str],
+    ordered_range: list[str],
+    baseline: dict[str, Any],
+) -> bool:
+    """修正コミットを検証し、不正があれば範囲ごと取り消す。取り消したら True を返す。
+
+    **不正なコミットが 1 件でもあれば、修正ラウンドの範囲ごと取り消す。**
+    状態を記録しないだけでは、未検証の変更が Pull Request に残り続ける。
+    """
+    problems, accepted, unassigned = _verify_fix_range(
+        state, entry, work, reported_shas, ordered_range, baseline
+    )
+
+    if unassigned or problems:
+        # **状態へ記録する前に取り消す。** 先に記録すると、取り消し済みのコミットが
+        # 状態ファイルに残り、後の見送り処理が同じコミットをもう一度取り消そうとする。
+        info("検証を通らない変更を残さないため、この修正ラウンドの範囲を取り消します")
+        _revert_range_and_mark(
+            path,
+            state,
+            entry,
+            {"item_id": f"R{entry['round']}-fix{entry['fix_rounds'] + 1}",
+             "commits": list(ordered_range)},
+            "fix_base_sha",
+            dry_run=False,
+        )
+        info("⚠ 修正を取り消したため、解決の申告は採用しません")
+        return True
+
+    for item_id, sha in accepted:
+        item = _find_item(state, item_id, required=False)
+        if item is not None:
+            item.setdefault("commits", []).append(sha)
+    return False
+
+
 def ensure_unmerged_fix_result(
     entry: dict[str, Any], result: pathlib.Path
 ) -> tuple[list[str], str]:
@@ -1952,36 +1993,11 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         )
     reported_shas = _reported_shas(payload)
 
-    # **不正なコミットが 1 件でもあれば、修正ラウンドの範囲ごと取り消す。**
-    # 状態を記録しないだけでは、未検証の変更が Pull Request に残り続ける
-    # （見送りの対象にもならない）。どのコミットが安全かは決められないので、
-    # 適用フェーズの未割当コミットと同じ扱いにする。
-    problems, accepted, unassigned = _verify_fix_range(
-        state, entry, work, reported_shas, ordered_range, baseline
+    reverted = verify_or_revert_fix_range(
+        path, state, entry, work, reported_shas, ordered_range, baseline
     )
-
-    if unassigned or problems:
-        # **状態へ記録する前に取り消す。** 先に記録すると、取り消し済みのコミットが
-        # 状態ファイルに残り、後の見送り処理が同じコミットをもう一度取り消そうとする。
-        info("検証を通らない変更を残さないため、この修正ラウンドの範囲を取り消します")
-        _revert_range_and_mark(
-            path,
-            state,
-            entry,
-            {"item_id": f"R{entry['round']}-fix{entry['fix_rounds'] + 1}",
-             "commits": list(ordered_range)},
-            "fix_base_sha",
-            dry_run=False,
-        )
-        # **push は保存のあと。** ここで push して失敗すると、取り消しコミットは
-        # ローカルに残るのに起点の更新が保存されず、叩き直しで二重に取り消してしまう。
-        info("⚠ 修正を取り消したため、解決の申告は採用しません")
+    if reverted:
         resolved = set()
-    else:
-        for item_id, sha in accepted:
-            item = _find_item(state, item_id, required=False)
-            if item is not None:
-                item.setdefault("commits", []).append(sha)
 
     _resolve_threads(entry, resolved)
 
