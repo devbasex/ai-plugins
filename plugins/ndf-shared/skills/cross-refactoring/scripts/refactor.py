@@ -1115,21 +1115,15 @@ def cmd_merge_proposals(args: argparse.Namespace) -> None:
         sys.exit(2)
 
 
-def _validate_apply_range(
-    path: pathlib.Path,
-    state: dict[str, Any],
-    entry: dict[str, Any],
-    work: pathlib.Path,
-    payload: dict[str, Any],
-    ordered_range: list[str],
-    in_range: set[str],
-    head_sha: str,
-    dry_run: bool,
-) -> tuple[dict[str, str], dict[str, dict[str, Any]], list[str], list[str], list[str]]:
-    # 申告は**このラウンドの改善項目のものだけ**を採る。架空の項目 ID へ割り当てられた
-    # コミットを数に入れると、割り当て済みに見えるのに項目別の検証にも入らず、
-    # そのまま Pull Request に残せてしまう。
-    round_items = set(entry["items"])
+def collect_reported_apply_items(
+    payload: dict[str, Any], round_items: set[str]
+) -> tuple[dict[str, dict[str, Any]], list[str]]:
+    """適用結果 payload からこのラウンドの申告と不明 ID を収集する。
+
+    申告は**このラウンドの改善項目のものだけ**を採る。架空の項目 ID へ割り当てられた
+    コミットを数に入れると、割り当て済みに見えるのに項目別の検証にも入らず、
+    そのまま Pull Request に残せてしまう。
+    """
     reported: dict[str, dict[str, Any]] = {}
     unknown_ids: list[str] = []
     raw_items = payload.get("items")
@@ -1144,6 +1138,22 @@ def _validate_apply_range(
             reported[item_id] = r
         elif item_id is not None:
             unknown_ids.append(str(item_id))
+    return reported, unknown_ids
+
+
+def _validate_apply_range(
+    path: pathlib.Path,
+    state: dict[str, Any],
+    entry: dict[str, Any],
+    work: pathlib.Path,
+    payload: dict[str, Any],
+    ordered_range: list[str],
+    in_range: set[str],
+    head_sha: str,
+    dry_run: bool,
+) -> tuple[dict[str, str], dict[str, dict[str, Any]], list[str], list[str], list[str]]:
+    round_items = set(entry["items"])
+    reported, unknown_ids = collect_reported_apply_items(payload, round_items)
 
     # **範囲のコミットは全て、いずれかの改善項目に割り当てられていること。**
     # 申告から漏れたコミットはテストもトレーラーも差分予算も検査されず、そのまま
