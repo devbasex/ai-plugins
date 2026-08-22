@@ -1870,6 +1870,70 @@ def cmd_judge_review(args: argparse.Namespace) -> None:
     )
 
 
+def _handle_invalid_review_verdict(
+    path: pathlib.Path,
+    state: dict[str, Any],
+    entry: dict[str, Any],
+    reviewers: list[str],
+    reviews: dict[str, dict[str, Any]],
+    unposted: list[str],
+    problems: list[str],
+    record: dict[str, Any],
+    remember: Callable[[int], None],
+) -> None:
+    """形式を満たさないレビュー結果を、差し戻し・中断・変更要求のどれかへ振り分ける。
+
+    この関数から通常の復帰はしない。必ず `sys.exit` か `die` で抜ける。
+    """
+    for p in problems:
+        info(f"❌ {p}")
+    entry["invalid_reviews"] = entry.get("invalid_reviews", 0) + 1
+    if entry["invalid_reviews"] > MAX_INVALID_REVIEWS:
+        # **結果が無いことと、形が違うことを分ける。** 結果を残さなかったのは
+        # レビュー担当のプロセスが仕事をしなかったということで、実装担当が
+        # 直せる指摘ではない。変更要求へ落とすと、直しようのない指摘を渡された
+        # 実装担当が空回りし、承認済みの項目まで見送りへ進む。
+        missing = [name for name in reviewers if name not in reviews]
+        # **投稿できなかった担当も同じ扱いにする。** 判定は残っていても
+        # Pull Request に指摘が無い以上、実装担当が読めるものは存在しない。
+        blocked = missing + [name for name in unposted if name not in missing]
+        if blocked:
+            remember(ABORT)
+            statefile.save(path, state)
+            die(
+                f"レビュー担当 {' / '.join(blocked)} が結果を残せませんでした"
+                "（結果ファイルの欠落、または投稿の失敗）。"
+                "実装担当への指摘ではないため、進行を中断します。"
+                "原因を直して同じコマンド列を叩き直せば再開できます"
+            )
+        # 差し戻しを無限に繰り返さない。形式を満たせないレビューが続く以上、
+        # このラウンドの成果は検証されていないものとして扱い、変更要求へ落とす。
+        # 紐づけ先が決まらないので、取り消しはラウンド全件が対象になる。
+        record["findings"].append({
+            "reviewer": "cross-refactoring",
+            "item_id": None,
+            "thread_id": None,
+            "summary": (
+                f"レビュー結果の形式が {MAX_INVALID_REVIEWS + 1} 回続けて不正だった: "
+                + " / ".join(problems)
+            ),
+            "resolved": False,
+        })
+        # **この出口も修正フェーズの起点を記録する。** 記録せずに変更要求を
+        # 返すと `merge-fix` が範囲を確定できずに弾かれ、`fix_rounds` が
+        # 進まない。`should-abandon` は `fix_rounds` で見送りを決めるため、
+        # 上限へ永久に到達せず修正と再レビューを往復し続ける。
+        _prepare_fix_phase(state, entry)
+        remember(2)
+        statefile.save(path, state)
+        info("差し戻しの上限に達したため、変更要求として扱います")
+        sys.exit(2)
+    remember(3)
+    statefile.save(path, state)
+    info("レビュー結果を差し戻します。指摘には必ず改善項目 ID を付けてください")
+    sys.exit(3)
+
+
 def _handle_review_verdict(
     path: pathlib.Path,
     state: dict[str, Any],
@@ -1883,53 +1947,9 @@ def _handle_review_verdict(
     remember: Callable[[int], None],
 ) -> None:
     if verdict == "invalid":
-        for p in problems:
-            info(f"❌ {p}")
-        entry["invalid_reviews"] = entry.get("invalid_reviews", 0) + 1
-        if entry["invalid_reviews"] > MAX_INVALID_REVIEWS:
-            # **結果が無いことと、形が違うことを分ける。** 結果を残さなかったのは
-            # レビュー担当のプロセスが仕事をしなかったということで、実装担当が
-            # 直せる指摘ではない。変更要求へ落とすと、直しようのない指摘を渡された
-            # 実装担当が空回りし、承認済みの項目まで見送りへ進む。
-            missing = [name for name in reviewers if name not in reviews]
-            # **投稿できなかった担当も同じ扱いにする。** 判定は残っていても
-            # Pull Request に指摘が無い以上、実装担当が読めるものは存在しない。
-            blocked = missing + [name for name in unposted if name not in missing]
-            if blocked:
-                remember(ABORT)
-                statefile.save(path, state)
-                die(
-                    f"レビュー担当 {' / '.join(blocked)} が結果を残せませんでした"
-                    "（結果ファイルの欠落、または投稿の失敗）。"
-                    "実装担当への指摘ではないため、進行を中断します。"
-                    "原因を直して同じコマンド列を叩き直せば再開できます"
-                )
-            # 差し戻しを無限に繰り返さない。形式を満たせないレビューが続く以上、
-            # このラウンドの成果は検証されていないものとして扱い、変更要求へ落とす。
-            # 紐づけ先が決まらないので、取り消しはラウンド全件が対象になる。
-            record["findings"].append({
-                "reviewer": "cross-refactoring",
-                "item_id": None,
-                "thread_id": None,
-                "summary": (
-                    f"レビュー結果の形式が {MAX_INVALID_REVIEWS + 1} 回続けて不正だった: "
-                    + " / ".join(problems)
-                ),
-                "resolved": False,
-            })
-            # **この出口も修正フェーズの起点を記録する。** 記録せずに変更要求を
-            # 返すと `merge-fix` が範囲を確定できずに弾かれ、`fix_rounds` が
-            # 進まない。`should-abandon` は `fix_rounds` で見送りを決めるため、
-            # 上限へ永久に到達せず修正と再レビューを往復し続ける。
-            _prepare_fix_phase(state, entry)
-            remember(2)
-            statefile.save(path, state)
-            info("差し戻しの上限に達したため、変更要求として扱います")
-            sys.exit(2)
-        remember(3)
-        statefile.save(path, state)
-        info("レビュー結果を差し戻します。指摘には必ず改善項目 ID を付けてください")
-        sys.exit(3)
+        _handle_invalid_review_verdict(
+            path, state, entry, reviewers, reviews, unposted, problems, record, remember,
+        )
     if verdict == "approved":
         for item_id in entry["apply"]["applied"]:
             _find_item(state, item_id)["status"] = "done"
