@@ -1300,10 +1300,91 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
 
     reported, unknown_ids = _collect_apply_reports(payload, entry)
 
-    _validate_apply_commit_ownership(
-        path, state, entry, args, reported, unknown_ids, work,
-        ordered_range, in_range, head_sha,
-    )
+    # **範囲のコミットは全て、いずれかの改善項目に割り当てられていること。**
+    # 申告から漏れたコミットはテストもトレーラーも差分予算も検査されず、そのまま
+    # Pull Request に残る。都合の悪い変更を申告しないだけで検査を回避できてしまう。
+    # **1 コミットの所有項目は 1 つだけ。** 同じコミットを 2 つの項目が申告すると、
+    # 片方が失敗して取り消したときに、もう片方は成功のまま残る。状態ファイルと
+    # 実際の差分が食い違い、どちらが正しいか決められなくなる。
+    #
+    # 判定は**完全な SHA へ正規化してから**行う。申告の文字列をそのまま鍵にすると、
+    # 一方が完全 SHA、他方が短縮 SHA で同じコミットを指したときに重複を見逃す。
+    owner_of: dict[str, str] = {}
+    duplicated: list[str] = []
+    for item_id, r in reported.items():
+        for sha in _reported_shas(r):
+            full = _git_out(work, ["rev-parse", "--verify", f"{sha}^{{commit}}"])
+            if full is None:
+                continue          # 実在しない申告は項目ごとの検証で落ちる
+            if full in owner_of and owner_of[full] != item_id:
+                duplicated.append(full)
+            owner_of.setdefault(full, item_id)
+
+    unassigned = sorted(in_range - set(owner_of))
+    if unassigned or unknown_ids or duplicated:
+        causes = []
+        if unassigned:
+            causes.append(
+                f"どの改善項目にも割り当てられていないコミットが {len(unassigned)} 件"
+                f"（{', '.join(s[:7] for s in unassigned[:5])}）"
+            )
+        if unknown_ids:
+            causes.append(
+                f"このラウンドに無い改善項目 ID の申告"
+                f"（{', '.join(unknown_ids[:5])}）"
+            )
+        if duplicated:
+            causes.append(
+                f"複数の項目が同じコミットを申告しています"
+                f"（{', '.join(s[:7] for s in duplicated[:5])}）"
+            )
+        reason = (
+            "、".join(causes)
+            + "。検証を回避した変更や、状態と実差分の食い違いを Pull Request に"
+              "残さないため、ラウンドごと取り消します"
+        )
+        info(f"❌ {reason}")
+        for item_id in entry["items"]:
+            it = _find_item(state, item_id)
+            it["status"] = "abandoned"
+            it["failure_reason"] = reason
+        # 範囲全体を取り消す。どのコミットが安全かを決められない以上、
+        # 起点まで戻すのが最も確実である。順序は `_revert_item_commits` が
+        # git の履歴から決め直す。
+        whole_round = {
+            "item_id": f"R{entry['round']}-range",
+            "commits": list(ordered_range),
+        }
+        if not args.dry_run:
+            # **取り消しへ着手する前に印を立てる。** 取り消しは済んだのに push
+            # できずに終わると、未検証の変更が Pull Request に残ったままになる。
+            entry["pending_push"] = True
+            statefile.save(path, state)
+        _revert_item_commits(state, whole_round, args.dry_run)
+        if not args.dry_run:
+            # 取り消し後の状態を新しい起点にする。叩き直しても範囲が空になり、
+            # 取り消しコミット自体を「未割当」として再び戻すことがない。
+            entry["apply_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
+        entry["apply"] = {
+            "applied": [], "failed": list(entry["items"]),
+            "base_sha": entry.get("apply_base_sha"), "head_sha": head_sha,
+            "unassigned_commits": unassigned,
+            "unknown_item_ids": unknown_ids,
+            "duplicated_commits": duplicated,
+            "merged_at": statefile.now(),
+        }
+        state["phase"] = "propose"
+        if args.dry_run:
+            info("（dry-run）状態ファイルは更新していません")
+        else:
+            # 項目別の失敗と同じく、**ここで取り消した項目も「対象外」に残す**。
+            # 残さないと同じ提案が次のラウンドで再び採用される。
+            _defer_abandoned_items(state, entry)
+            statefile.save(path, state)
+            _push_head(state)
+            entry["pending_push"] = False
+            statefile.save(path, state)
+        sys.exit(2)
 
     applied: list[str] = []
     failed: list[str] = []
@@ -1466,107 +1547,6 @@ def _collect_apply_reports(
         elif item_id is not None:
             unknown_ids.append(str(item_id))
     return reported, unknown_ids
-
-
-def _validate_apply_commit_ownership(
-    path: pathlib.Path,
-    state: dict[str, Any],
-    entry: dict[str, Any],
-    args: argparse.Namespace,
-    reported: dict[str, dict[str, Any]],
-    unknown_ids: list[str],
-    work: pathlib.Path,
-    ordered_range: list[str],
-    in_range: set[str],
-    head_sha: str,
-) -> None:
-    # **範囲のコミットは全て、いずれかの改善項目に割り当てられていること。**
-    # 申告から漏れたコミットはテストもトレーラーも差分予算も検査されず、そのまま
-    # Pull Request に残る。都合の悪い変更を申告しないだけで検査を回避できてしまう。
-    # **1 コミットの所有項目は 1 つだけ。** 同じコミットを 2 つの項目が申告すると、
-    # 片方が失敗して取り消したときに、もう片方は成功のまま残る。状態ファイルと
-    # 実際の差分が食い違い、どちらが正しいか決められなくなる。
-    #
-    # 判定は**完全な SHA へ正規化してから**行う。申告の文字列をそのまま鍵にすると、
-    # 一方が完全 SHA、他方が短縮 SHA で同じコミットを指したときに重複を見逃す。
-    owner_of: dict[str, str] = {}
-    duplicated: list[str] = []
-    for item_id, r in reported.items():
-        for sha in _reported_shas(r):
-            full = _git_out(work, ["rev-parse", "--verify", f"{sha}^{{commit}}"])
-            if full is None:
-                continue          # 実在しない申告は項目ごとの検証で落ちる
-            if full in owner_of and owner_of[full] != item_id:
-                duplicated.append(full)
-            owner_of.setdefault(full, item_id)
-
-    unassigned = sorted(in_range - set(owner_of))
-    if not (unassigned or unknown_ids or duplicated):
-        return
-
-    causes = []
-    if unassigned:
-        causes.append(
-            f"どの改善項目にも割り当てられていないコミットが {len(unassigned)} 件"
-            f"（{', '.join(s[:7] for s in unassigned[:5])}）"
-        )
-    if unknown_ids:
-        causes.append(
-            f"このラウンドに無い改善項目 ID の申告"
-            f"（{', '.join(unknown_ids[:5])}）"
-        )
-    if duplicated:
-        causes.append(
-            f"複数の項目が同じコミットを申告しています"
-            f"（{', '.join(s[:7] for s in duplicated[:5])}）"
-        )
-    reason = (
-        "、".join(causes)
-        + "。検証を回避した変更や、状態と実差分の食い違いを Pull Request に"
-          "残さないため、ラウンドごと取り消します"
-    )
-    info(f"❌ {reason}")
-    for item_id in entry["items"]:
-        it = _find_item(state, item_id)
-        it["status"] = "abandoned"
-        it["failure_reason"] = reason
-    # 範囲全体を取り消す。どのコミットが安全かを決められない以上、
-    # 起点まで戻すのが最も確実である。順序は `_revert_item_commits` が
-    # git の履歴から決め直す。
-    whole_round = {
-        "item_id": f"R{entry['round']}-range",
-        "commits": list(ordered_range),
-    }
-    if not args.dry_run:
-        # **取り消しへ着手する前に印を立てる。** 取り消しは済んだのに push
-        # できずに終わると、未検証の変更が Pull Request に残ったままになる。
-        entry["pending_push"] = True
-        statefile.save(path, state)
-    _revert_item_commits(state, whole_round, args.dry_run)
-    if not args.dry_run:
-        # 取り消し後の状態を新しい起点にする。叩き直しても範囲が空になり、
-        # 取り消しコミット自体を「未割当」として再び戻すことがない。
-        entry["apply_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
-    entry["apply"] = {
-        "applied": [], "failed": list(entry["items"]),
-        "base_sha": entry.get("apply_base_sha"), "head_sha": head_sha,
-        "unassigned_commits": unassigned,
-        "unknown_item_ids": unknown_ids,
-        "duplicated_commits": duplicated,
-        "merged_at": statefile.now(),
-    }
-    state["phase"] = "propose"
-    if args.dry_run:
-        info("（dry-run）状態ファイルは更新していません")
-    else:
-        # 項目別の失敗と同じく、**ここで取り消した項目も「対象外」に残す**。
-        # 残さないと同じ提案が次のラウンドで再び採用される。
-        _defer_abandoned_items(state, entry)
-        statefile.save(path, state)
-        _push_head(state)
-        entry["pending_push"] = False
-        statefile.save(path, state)
-    sys.exit(2)
 
 
 def _defer_abandoned_items(state: dict[str, Any], entry: dict[str, Any]) -> None:
