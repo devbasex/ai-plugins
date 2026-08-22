@@ -85,7 +85,29 @@ def aggregate(state: dict[str, Any]) -> dict[str, Any]:
                     f"round {round_no}: {name} が既定モデル（auto）で動いたため、"
                     "レビュー担当の集計から分離する"
                 )
-            _aggregate_reviewer_round(reviewer, entry, name, r_requested, reviews)
+            rb = reviewer.setdefault(_key(name, r_requested), _new_reviewer_bucket())
+            # 担当ごとの所要時間があればそれを使う。無ければ 0 のままにする。
+            # ラウンドの合計を配ると 2 者分を両方に数えてしまい、比較が成り立たない。
+            rb["seconds"] += float((entry.get("reviewer_seconds") or {}).get(name, 0))
+            for review in reviews:
+                if _verdict(review, name) is None:
+                    continue
+                rb["reviews"] += 1
+                findings = [
+                    f for f in review.get("findings", [])
+                    if isinstance(f, dict) and f.get("reviewer") == name
+                ]
+                rb["findings"] += len(findings)
+                rb["findings_resolved"] += sum(1 for f in findings if f.get("resolved"))
+                others = [o for o in entry.get("reviewers", []) if o != name]
+                for other in others:
+                    other_verdict = _verdict(review, other)
+                    if other_verdict is None:
+                        continue
+                    rb["verdict_pairs"] += 1
+                    rb["verdict_agreements"] += (
+                        1 if other_verdict == _verdict(review, name) else 0
+                    )
 
     return {
         "impl": {k: _finish_impl(v) for k, v in sorted(impl.items())},
@@ -124,38 +146,6 @@ def _aggregate_impl_round(
         )
         bucket["first_review_total"] += 1
         bucket["first_review_approved"] += 1 if approved_first else 0
-
-
-def _aggregate_reviewer_round(
-    reviewer: dict[str, dict[str, Any]],
-    entry: dict[str, Any],
-    name: str,
-    requested: Optional[str],
-    reviews: list[dict[str, Any]],
-) -> None:
-    rb = reviewer.setdefault(_key(name, requested), _new_reviewer_bucket())
-    # 担当ごとの所要時間があればそれを使う。無ければ 0 のままにする。
-    # ラウンドの合計を配ると 2 者分を両方に数えてしまい、比較が成り立たない。
-    rb["seconds"] += float((entry.get("reviewer_seconds") or {}).get(name, 0))
-    for review in reviews:
-        if _verdict(review, name) is None:
-            continue
-        rb["reviews"] += 1
-        findings = [
-            f for f in review.get("findings", [])
-            if isinstance(f, dict) and f.get("reviewer") == name
-        ]
-        rb["findings"] += len(findings)
-        rb["findings_resolved"] += sum(1 for f in findings if f.get("resolved"))
-        others = [o for o in entry.get("reviewers", []) if o != name]
-        for other in others:
-            other_verdict = _verdict(review, other)
-            if other_verdict is None:
-                continue
-            rb["verdict_pairs"] += 1
-            rb["verdict_agreements"] += (
-                1 if other_verdict == _verdict(review, name) else 0
-            )
 
 
 def _duration(entry: dict[str, Any], phases: tuple[str, ...]) -> float:
