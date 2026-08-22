@@ -2854,6 +2854,27 @@ def _pending_drop_item_ids(state: dict[str, Any], drop_ids: list[str]) -> list[s
     ]
 
 
+def _drop_replay_plan(
+    state: dict[str, Any], entry: dict[str, Any], pending: list[str],
+    ordered: list[str],
+) -> tuple[dict[str, str], list[str], list[str]]:
+    """残す項目 (`keep_ids`) と積み直す SHA (`replay`) を求める。
+
+    `ordered` は新しい順なので、積み直しは反転して古い順にする。
+    **どの項目にも属さないコミット（過去の取り消しなど）は積み直さない。**
+    """
+    work = state["worktrees"]["work"]
+    owner = _commit_owner(work, state, entry)
+    drop = set(pending)
+    keep_ids = [
+        i for i in entry["items"]
+        if i not in drop
+        and not (_find_item(state, i, required=False) or {}).get("reverted")
+    ]
+    replay = [s for s in reversed(ordered) if owner.get(s) in keep_ids]
+    return owner, keep_ids, replay
+
+
 def _drop_items(
     state: dict[str, Any], entry: dict[str, Any], drop_ids: list[str],
     dry_run: bool = False,
@@ -2894,16 +2915,7 @@ def _drop_items(
         return {"mode": "item", "dropped": pending,
                 "reverted": reverted, "replayed": 0}
 
-    owner = _commit_owner(work, state, entry)
-    drop = set(pending)
-    keep_ids = [
-        i for i in entry["items"]
-        if i not in drop
-        and not (_find_item(state, i, required=False) or {}).get("reverted")
-    ]
-    # `ordered` は新しい順なので、積み直しは反転して古い順にする。
-    # **どの項目にも属さないコミット（過去の取り消しなど）は積み直さない。**
-    replay = [s for s in reversed(ordered) if owner.get(s) in keep_ids]
+    owner, keep_ids, replay = _drop_replay_plan(state, entry, pending, ordered)
 
     if dry_run:
         for sha in ordered:
