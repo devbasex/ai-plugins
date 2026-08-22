@@ -3165,28 +3165,6 @@ def _run_sync_command(state: dict[str, Any], work: str, command: str) -> None:
     )
 
 
-def _commit_sync_changes(work: str, command: str, produced: list[str]) -> None:
-    """同期が作った差分を進行側のコミットとして積む。差分が無ければ何もしない。
-
-    このコミットはどの改善項目にも属さない。取り消しでは積み直されないが、
-    次の push で作り直されるので失われても問題にならない。
-    """
-    if not produced:
-        return
-    # **後段で落ちたときも差分を残さない。** `git add` / `git commit` の失敗で
-    # 作業ツリーを汚したまま中断すると、次の実行は `_require_clean_worktree` で
-    # 必ず止まり、`pending_push` の再試行が永久に進まない。捨ててよい根拠は
-    # 同期コマンド自身が失敗したときと同じで、着手前が綺麗だったことを
-    # 確認済みだからである。
-    try:
-        _sh(["git", "add", "--", *produced], cwd=work)
-        _sh(["git", "commit", "-m", SYNC_COMMIT_MESSAGE], cwd=work)
-    except SystemExit:
-        _discard_worktree_changes(work)
-        raise
-    info(f"🔧 生成物を同期しました（{command} / {len(produced)} ファイル）")
-
-
 def _sync_generated(state: dict[str, Any]) -> None:
     """push の直前に生成物を同期し、差分があれば進行側のコミットとして積む。
 
@@ -3209,7 +3187,21 @@ def _sync_generated(state: dict[str, Any]) -> None:
     # 同期が作った差分と元からあった差分を区別できない。
     _require_clean_worktree(state, work)
     _run_sync_command(state, work, command)
-    _commit_sync_changes(work, command, _dirty_paths(state, work))
+    produced = _dirty_paths(state, work)
+    if not produced:
+        return
+    # **後段で落ちたときも差分を残さない。** `git add` / `git commit` の失敗で
+    # 作業ツリーを汚したまま中断すると、次の実行は `_require_clean_worktree` で
+    # 必ず止まり、`pending_push` の再試行が永久に進まない。捨ててよい根拠は
+    # 同期コマンド自身が失敗したときと同じで、着手前が綺麗だったことを
+    # 確認済みだからである。
+    try:
+        _sh(["git", "add", "--", *produced], cwd=work)
+        _sh(["git", "commit", "-m", SYNC_COMMIT_MESSAGE], cwd=work)
+    except SystemExit:
+        _discard_worktree_changes(work)
+        raise
+    info(f"🔧 生成物を同期しました（{command} / {len(produced)} ファイル）")
 
 
 def _push_head(state: dict[str, Any]) -> None:
