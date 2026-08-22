@@ -2846,6 +2846,14 @@ def _commit_owner(
     return owner
 
 
+def _pending_drop_item_ids(state: dict[str, Any], drop_ids: list[str]) -> list[str]:
+    """drop_ids から、まだ取り消されていない項目 ID だけを返す。"""
+    return [
+        i for i in drop_ids
+        if not (_find_item(state, i, required=False) or {}).get("reverted")
+    ]
+
+
 def _drop_items(
     state: dict[str, Any], entry: dict[str, Any], drop_ids: list[str],
     dry_run: bool = False,
@@ -2869,10 +2877,7 @@ def _drop_items(
     | `skip` | 取り消すものが無かった（取り消し済み） |
     """
     work = state["worktrees"]["work"]
-    pending = [
-        i for i in drop_ids
-        if not (_find_item(state, i, required=False) or {}).get("reverted")
-    ]
+    pending = _pending_drop_item_ids(state, drop_ids)
     if not pending:
         info("↩ 取り消し対象は取り消し済みです")
         return {"mode": "skip", "dropped": [], "reverted": 0, "replayed": 0}
