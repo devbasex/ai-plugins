@@ -188,3 +188,46 @@ def test_an_empty_plan_file_setting_turns_the_record_off(refactor, tmp_path):
     refactor._sync_generated(state)
 
     assert not (work / "issues").exists()
+
+
+# ---------- 書き出し先の検証 ----------
+
+def test_a_relative_path_is_kept(refactor):
+    assert refactor.normalize_plan_file("issues/plan.md") == "issues/plan.md"
+
+
+def test_a_leading_dot_is_normalized(refactor):
+    """`./issues/plan.md` は git が返すパスと一致しない。正規化して揃える。"""
+    assert refactor.normalize_plan_file("./issues/plan.md") == "issues/plan.md"
+
+
+def test_an_empty_value_stays_empty(refactor):
+    assert refactor.normalize_plan_file("") == ""
+    assert refactor.normalize_plan_file(None) == ""
+
+
+def test_an_absolute_path_is_refused(refactor):
+    """作業ディレクトリの外へ書かせない。進行側は利用者のリポジトリを触る。"""
+    with pytest.raises(SystemExit):
+        refactor.normalize_plan_file("/tmp/out.md")
+
+
+def test_a_parent_traversal_is_refused(refactor):
+    with pytest.raises(SystemExit):
+        refactor.normalize_plan_file("../out.md")
+
+
+def test_a_traversal_in_the_middle_is_refused(refactor):
+    """途中で外へ出る経路も拒む。正規化してから判定する。"""
+    with pytest.raises(SystemExit):
+        refactor.normalize_plan_file("issues/../../out.md")
+
+
+def test_the_written_path_stays_inside_the_work_dir(refactor, tmp_path):
+    work = _make_work(tmp_path)
+    _, state = _state(tmp_path, work=work, plan_file="issues/plan.md")
+
+    refactor._write_plan_file(state, str(work), state["plan_file"])
+
+    assert (work / "issues" / "plan.md").exists()
+    assert not (tmp_path / "plan.md").exists()

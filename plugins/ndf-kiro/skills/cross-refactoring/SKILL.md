@@ -63,7 +63,7 @@ allowed-tools:
 | `--severity-threshold LEVEL` | この重要度未満は採用しない | `minor` |
 | `--test-timeout SEC` | テスト 1 回あたりの上限秒数。超えたら失敗として扱う | `900` |
 | `--sync-command CMD` | 生成物を同期するコマンド。**push の直前**に進行側が実行し、差分があれば進行側のコミットとして積む | なし |
-| `--plan-file PATH` | 改修計画の書き出し先。空文字を渡すと記録しない | `issues/refactoring-plan-rf<PR>.md` |
+| `--plan-file PATH` | 改修計画の書き出し先（**対象リポジトリからの相対パス**）。空文字を渡すと記録しない | `issues/refactoring-plan-rf<PR>.md` |
 
 ```text
 /ndf:cross-refactoring 130 --scope src/services tests/services --baseline-test "pytest -q"

@@ -1082,7 +1082,7 @@ def cmd_init(args: argparse.Namespace) -> None:
         "sync_command": args.sync_command,
         # 改修計画の書き出し先も同じ経路に乗せる。指定が無ければ既定のパスを使い、
         # 空文字なら記録しない。
-        "plan_file": (
+        "plan_file": normalize_plan_file(
             default_plan_file(args.pr) if args.plan_file is None else args.plan_file
         ),
         "test_timeout": args.test_timeout,
@@ -2468,6 +2468,30 @@ def default_plan_file(pr: int) -> str:
     return f"{DEFAULT_PLAN_DIR}/refactoring-plan-rf{pr}.md"
 
 
+def normalize_plan_file(value: Optional[str]) -> str:
+    """改修計画の書き出し先を検証して正規化する。空文字は「記録しない」。
+
+    **作業ディレクトリの外へ書かせない。** 進行側は利用者のリポジトリを触るので、
+    絶対パスと親へ抜ける経路は受け取った時点で拒む。
+
+    正規化するのは、判定に使うパスを git の出力と揃えるためでもある。
+    `./issues/plan.md` のまま持つと、`git status` が返す `issues/plan.md` と
+    一致せず、公開のコミットメッセージが取り違えられる。
+    """
+    rel = str(value or "").strip()
+    if not rel:
+        return ""
+    if os.path.isabs(rel) or (len(rel) > 1 and rel[1] == ":"):
+        die(f"--plan-file には相対パスを指定してください: {rel}", code=4)
+    normalized = os.path.normpath(rel)
+    if normalized == ".." or normalized.startswith(".." + os.sep):
+        die(
+            f"--plan-file が作業ディレクトリの外を指しています: {rel}",
+            code=4,
+        )
+    return normalized
+
+
 def format_plan(state: dict[str, Any]) -> str:
     """改修計画の本文を組み立てる。**同じ状態からは同じ本文が出る。**
 
@@ -3421,7 +3445,9 @@ def _sync_generated(state: dict[str, Any]) -> None:
     利用者のリポジトリの検査を壊したまま進むことになる。
     """
     command = str(state.get("sync_command") or "").strip()
-    plan_rel = str(state.get("plan_file") or "").strip()
+    # 状態ファイルの値も受け取った時点と同じ基準で通す。旧い状態ファイルや
+    # 手で書き換えられた値でも、作業ディレクトリの外へは書き出さない。
+    plan_rel = normalize_plan_file(state.get("plan_file"))
     if not command and not plan_rel:
         return
     work = state["worktrees"]["work"]
