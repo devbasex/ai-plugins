@@ -60,9 +60,14 @@ def aggregate(state: dict[str, Any]) -> dict[str, Any]:
         requested = impl_model.get("requested")
         observed = impl_model.get("observed")
 
-        _append_model_measurement_warnings(
-            unmeasured, round_no, impl_runtime, requested, observed, "実装担当"
-        )
+        warning = _models.mismatch_warning(impl_runtime, requested, observed)
+        if warning:
+            unmeasured.append(f"round {round_no}: {warning}")
+        if not _models.is_measurable(impl_runtime, requested):
+            unmeasured.append(
+                f"round {round_no}: {impl_runtime} が既定モデル（auto）で動いたため、"
+                "実装担当の集計から分離する"
+            )
 
         reviews = _round_reviews(entry)
         _aggregate_impl_round(impl, entry, items_by_id, impl_runtime, requested, reviews)
@@ -72,9 +77,14 @@ def aggregate(state: dict[str, Any]) -> dict[str, Any]:
             spec = reviewer_models.get(name) or {}
             r_requested = spec.get("requested")
             r_observed = spec.get("observed")
-            _append_model_measurement_warnings(
-                unmeasured, round_no, name, r_requested, r_observed, "レビュー担当"
-            )
+            r_warning = _models.mismatch_warning(name, r_requested, r_observed)
+            if r_warning:
+                unmeasured.append(f"round {round_no}: {r_warning}")
+            if not _models.is_measurable(name, r_requested):
+                unmeasured.append(
+                    f"round {round_no}: {name} が既定モデル（auto）で動いたため、"
+                    "レビュー担当の集計から分離する"
+                )
             _aggregate_reviewer_round(reviewer, entry, name, r_requested, reviews)
 
     return {
@@ -146,24 +156,6 @@ def _aggregate_reviewer_round(
             rb["verdict_agreements"] += (
                 1 if other_verdict == _verdict(review, name) else 0
             )
-
-
-def _append_model_measurement_warnings(
-    unmeasured: list[str],
-    round_no: Any,
-    runtime: str,
-    requested: Optional[str],
-    observed: Optional[str],
-    role_label: str,
-) -> None:
-    warning = _models.mismatch_warning(runtime, requested, observed)
-    if warning:
-        unmeasured.append(f"round {round_no}: {warning}")
-    if not _models.is_measurable(runtime, requested):
-        unmeasured.append(
-            f"round {round_no}: {runtime} が既定モデル（auto）で動いたため、"
-            f"{role_label}の集計から分離する"
-        )
 
 
 def _duration(entry: dict[str, Any], phases: tuple[str, ...]) -> float:
