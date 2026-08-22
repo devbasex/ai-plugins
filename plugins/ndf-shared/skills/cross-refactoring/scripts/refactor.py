@@ -2908,6 +2908,42 @@ def _execute_drop_replay(
     return mapping, "item"
 
 
+def _record_drop_result(
+    state: dict[str, Any],
+    entry: dict[str, Any],
+    pending: list[str],
+    keep_ids: list[str],
+    ordered: list[str],
+    replay: list[str],
+    owner: dict[str, str],
+    mapping: dict[str, str],
+    mode: str,
+) -> dict[str, Any]:
+    """item の reverted/commits と entry.drops を更新し、結果を返す。"""
+    dropped = list(entry["items"]) if mode == "round" else pending
+    for item_id in entry["items"]:
+        item = _find_item(state, item_id, required=False)
+        if item is None:
+            continue
+        if mode == "round" or item_id not in keep_ids:
+            item["reverted"] = True
+            continue
+        # **積み直しで SHA が変わる。** 記録を更新しないと、次の取り消しが
+        # 履歴に無い SHA を指してしまう。
+        item["commits"] = [mapping[s] for s in replay if owner.get(s) == item_id]
+
+    entry.setdefault("drops", []).append({
+        "at": statefile.now(), "mode": mode, "dropped": dropped,
+        "reverted": len(ordered), "replayed": len(mapping),
+    })
+    info(
+        f"↩ 取り消し {len(ordered)} コミット / 積み直し {len(mapping)} コミット"
+        f"（{'ラウンド全件へ退避' if mode == 'round' else '項目単位'}）"
+    )
+    return {"mode": mode, "dropped": dropped,
+            "reverted": len(ordered), "replayed": len(mapping)}
+
+
 def _drop_items(
     state: dict[str, Any], entry: dict[str, Any], drop_ids: list[str],
     dry_run: bool = False,
@@ -2955,28 +2991,9 @@ def _drop_items(
 
     mapping, mode = _execute_drop_replay(work, ordered, head, replay)
 
-    dropped = list(entry["items"]) if mode == "round" else pending
-    for item_id in entry["items"]:
-        item = _find_item(state, item_id, required=False)
-        if item is None:
-            continue
-        if mode == "round" or item_id not in keep_ids:
-            item["reverted"] = True
-            continue
-        # **積み直しで SHA が変わる。** 記録を更新しないと、次の取り消しが
-        # 履歴に無い SHA を指してしまう。
-        item["commits"] = [mapping[s] for s in replay if owner.get(s) == item_id]
-
-    entry.setdefault("drops", []).append({
-        "at": statefile.now(), "mode": mode, "dropped": dropped,
-        "reverted": len(ordered), "replayed": len(mapping),
-    })
-    info(
-        f"↩ 取り消し {len(ordered)} コミット / 積み直し {len(mapping)} コミット"
-        f"（{'ラウンド全件へ退避' if mode == 'round' else '項目単位'}）"
+    return _record_drop_result(
+        state, entry, pending, keep_ids, ordered, replay, owner, mapping, mode,
     )
-    return {"mode": mode, "dropped": dropped,
-            "reverted": len(ordered), "replayed": len(mapping)}
 
 
 def _order_newest_first(work: str, shas: list[str]) -> list[str]:
