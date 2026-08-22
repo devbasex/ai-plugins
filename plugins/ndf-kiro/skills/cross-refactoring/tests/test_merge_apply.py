@@ -76,7 +76,7 @@ def test_commit_that_does_not_exist_fails(refactor):
     assert problem is not None and "範囲にありません" in problem
 
 
-# ---------- 1 手 1 コミット ----------
+# ---------- 1 改善項目 = 1 コミット ----------
 
 def test_zero_commits_fails(refactor):
     problem = refactor.verify_apply_item(item(), [])

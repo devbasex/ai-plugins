@@ -145,6 +145,33 @@ SYNC_COMMIT_MESSAGE = (
     "公開の直前に進行側がまとめて生成する。"
 )
 
+# 計画と生成物を 1 つのコミットへまとめたときのメッセージ。
+SYNC_AND_PLAN_COMMIT_MESSAGE = (
+    "Chore: 生成物と改修計画を同期する（cross-refactoring 進行側）\n\n"
+    "実装担当は対象範囲だけを変更するため、生成物が同期されない。\n"
+    "改修計画は提案の時点でしか残らないため、公開の直前に書き出す。\n"
+    "どちらも進行側の責務なので、1 つのコミットにまとめる。"
+)
+
+# 改修計画だけを記録したコミットのメッセージ。
+PLAN_COMMIT_MESSAGE = (
+    "Docs: 改修計画を記録する（cross-refactoring 進行側）\n\n"
+    "なぜ直すのか（理由）とどう直すのか（手順）は提案の時点でしか残らない。\n"
+    "状態ファイルは差分から除外されるため、Pull Request から読める場所へ置く。"
+)
+
+# 改修計画を書き出す既定のディレクトリ。
+DEFAULT_PLAN_DIR = "issues"
+
+# 改善項目の状態を、Pull Request を読む側に通じる語へ置き換える。
+ITEM_STATUS_LABELS = {
+    "pending": "未着手",
+    "reviewing": "レビュー中",
+    "done": "採用",
+    "abandoned": "取り消し",
+    "blocked": "着手せず",
+}
+
 # 実差分行数が見積りのこの倍数を超えたら範囲の逸脱とみなす。
 DIFF_BUDGET_FACTOR = 2
 
@@ -167,6 +194,19 @@ EXTRACTION_TECHNIQUES: frozenset[str] = frozenset({
     "consolidate_duplication",
 })
 EXTRACTION_DIFF_BUDGET_FACTOR = 3
+
+# 1 改善項目が履歴に残せるコミット数。
+#
+# **手順を 1 手ずつ進めることと、その途中経過を履歴に残すことは別である。**
+# 手ごとにテストを回して安全に進めるのは変わらないが、残すのは項目単位の
+# 1 コミットだけにする。刻んだままだと Pull Request を読む側が改善項目と履歴を
+# 1 対 1 で辿れず、取り消しと積み直しのコミットも件数に比例して増える
+# （実測: 採用 12 件に対して適用 34 コミット、取り消しと積み直しで 25 コミット）。
+MAX_COMMITS_PER_ITEM = 1
+
+# 現状固定テストが要る項目だけは 2 コミットを許す。テストと実装を 1 コミットへ
+# 混ぜると、「テストを先に足した」ことを履歴から確かめられなくなる。
+MAX_COMMITS_PER_ITEM_WITH_TEST_GAP = 2
 
 # テスト 1 回あたりの上限（秒）。生成されたコードやテストが無限ループに入ると、
 # 待ち続けて**進行全体が止まる**。打ち切って失敗として扱う。
@@ -579,7 +619,7 @@ def verify_apply_item(
     確かめられる**。読ませ方の不確実性に対する最後の砦としてここを厚くする。
     """
     if not facts:
-        return "コミットが 1 件もありません（1 手 1 コミットの前提を満たしていません）"
+        return "コミットが 1 件もありません（1 改善項目 = 1 コミットの前提を満たしていません）"
 
     for commit in facts:
         problem = _verify_commit_basics(
@@ -617,7 +657,36 @@ def verify_apply_item(
             f"実差分 {actual} 行が差分予算 {budget} 行"
             f"（見積 {estimated} 行 × {factor}）を超えました（範囲の逸脱）"
         )
+
+    # 粒度は最後に見る。トレーラーやテストの問題を粒度の失敗で覆い隠さない。
+    # 数えるのは**実在するコミットの数**である。同じコミットを重ねて申告しただけの
+    # ときに落とすと、食い違いの無い申告を刻みすぎとして扱ってしまう。
+    problem = verify_commit_granularity(item, len({c.get("sha") for c in facts}))
+    if problem:
+        return problem
     return None
+
+
+def commit_limit_for(item: dict[str, Any]) -> int:
+    """その項目が履歴に残せるコミット数。"""
+    if item.get("test_gap"):
+        return MAX_COMMITS_PER_ITEM_WITH_TEST_GAP
+    return MAX_COMMITS_PER_ITEM
+
+
+def verify_commit_granularity(item: dict[str, Any], count: int) -> Optional[str]:
+    """項目のコミット数が上限に収まっているか。超えていれば理由を返す。
+
+    適用（`verify_apply_item`）と修正（`_verify_fix_commits`）で**同じ基準**を使う。
+    適用側だけ揃えると、レビュー指摘への対応という名目で刻んだ履歴が戻ってくる。
+    """
+    limit = commit_limit_for(item)
+    if count <= limit:
+        return None
+    return (
+        f"項目 {item['item_id']} のコミットが {count} 件あります"
+        f"（残すのは 1 項目 = 1 コミット。現状固定テストが要る項目だけ 2 コミットまで）"
+    )
 
 
 # ---------------- レビュー判定 ----------------
@@ -1011,6 +1080,11 @@ def cmd_init(args: argparse.Namespace) -> None:
         "baseline_test": baseline,
         # 生成物の同期は**進行側の責務**。push の直前に実行する。
         "sync_command": args.sync_command,
+        # 改修計画の書き出し先も同じ経路に乗せる。指定が無ければ既定のパスを使い、
+        # 空文字なら記録しない。
+        "plan_file": normalize_plan_file(
+            default_plan_file(args.pr) if args.plan_file is None else args.plan_file
+        ),
         "test_timeout": args.test_timeout,
         "outer_round": 0,
         "phase": "init",
@@ -2018,7 +2092,7 @@ def cmd_abandon_items(args: argparse.Namespace) -> None:
     """Step 6 — 未解決の指摘に紐づく改善項目だけを取り消す。
 
     **合意済みの項目は Pull Request に残す。** これを可能にするために、適用は
-    項目ごとに 1 手 1 コミットへ分け、状態ファイルへコミットを記録している。
+    項目ごとに 1 コミットへまとめ、状態ファイルへコミットを記録している。
     """
     path, state = _load(args.id)
     entry = _round(state, args.round)
@@ -2180,6 +2254,7 @@ def _verify_fix_commits(
     """
     problems: list[str] = []
     accepted: list[tuple[str, str]] = []      # (item_id, sha)
+    seen: dict[str, set[str]] = {}            # item_id -> 実在するコミットの集合
     for commit in facts:
         item_id = (commit.get("trailers") or {}).get("Item-Id")
         problem = verify_fix_commit(commit, scope)
@@ -2187,7 +2262,16 @@ def _verify_fix_commits(
             problems.append(problem)
             info(f"❌ 修正コミットが手順を満たしていません: {problem}")
             continue
+        seen.setdefault(item_id, set()).add(commit["sha"])
         accepted.append((item_id, commit["sha"]))
+
+    # 粒度は 1 件ずつの検証が済んでから見る。壊れたコミットの理由を
+    # 粒度の失敗で覆い隠さない。
+    for item_id, shas in seen.items():
+        problem = verify_commit_granularity({"item_id": item_id}, len(shas))
+        if problem:
+            problems.append(problem)
+            info(f"❌ 修正コミットが手順を満たしていません: {problem}")
     return problems, accepted
 
 
@@ -2377,6 +2461,96 @@ def cmd_status(args: argparse.Namespace) -> None:
     print(f"終了理由: {state.get('final') or '（未終了）'}")
     print()
     print(_round_table(state))
+
+
+def default_plan_file(pr: int) -> str:
+    """改修計画を書き出す既定のパス。"""
+    return f"{DEFAULT_PLAN_DIR}/refactoring-plan-rf{pr}.md"
+
+
+def normalize_plan_file(value: Optional[str]) -> str:
+    """改修計画の書き出し先を検証して正規化する。空文字は「記録しない」。
+
+    **作業ディレクトリの外へ書かせない。** 進行側は利用者のリポジトリを触るので、
+    絶対パスと親へ抜ける経路は受け取った時点で拒む。
+
+    正規化するのは、判定に使うパスを git の出力と揃えるためでもある。
+    `./issues/plan.md` のまま持つと、`git status` が返す `issues/plan.md` と
+    一致せず、公開のコミットメッセージが取り違えられる。
+    """
+    rel = str(value or "").strip()
+    if not rel:
+        return ""
+    if os.path.isabs(rel) or (len(rel) > 1 and rel[1] == ":"):
+        die(f"--plan-file には相対パスを指定してください: {rel}", code=4)
+    normalized = os.path.normpath(rel)
+    if normalized == ".." or normalized.startswith(".." + os.sep):
+        die(
+            f"--plan-file が作業ディレクトリの外を指しています: {rel}",
+            code=4,
+        )
+    return normalized
+
+
+def format_plan(state: dict[str, Any]) -> str:
+    """改修計画の本文を組み立てる。**同じ状態からは同じ本文が出る。**
+
+    提案の理由と手順は状態ファイルにしか残らず、そのディレクトリは差分から
+    除外される。Pull Request を読む側からは、なぜ直したのかも、どう直す計画
+    だったのかも見えない。ここで差分の中へ置く。
+    """
+    baseline = state.get("baseline_test") or {}
+    lines = [
+        f"# 改修計画 — {state['repo']} #{state['current_pr']}",
+        "",
+        "`/ndf:cross-refactoring` が提案し、適用した改善項目の記録である。",
+        "理由と手順は提案の時点でしか残らないため、公開の直前に書き出している。",
+        "",
+        f"- 対象範囲: {', '.join(state.get('target_scope') or []) or '（未指定）'}",
+        f"- 着手前のテスト: {baseline.get('command') or '（未指定）'}",
+        "",
+    ]
+    for entry in state.get("rounds") or []:
+        lines.extend(_plan_round_section(state, entry))
+    if not (state.get("rounds") or []):
+        lines.append("（改善項目なし）")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _plan_round_section(state: dict[str, Any], entry: dict[str, Any]) -> list[str]:
+    """1 ラウンド分の見出しと、そのラウンドの改善項目を並べる。"""
+    reviewers = " / ".join(entry.get("reviewers") or []) or "—"
+    lines = [
+        f"## ラウンド {entry['round']}"
+        f"（実装 {entry.get('impl', '—')} / レビュー {reviewers}）",
+        "",
+    ]
+    items = [i for i in state.get("items") or [] if i.get("round") == entry["round"]]
+    if not items:
+        lines.extend(["（採用した改善項目なし）", ""])
+        return lines
+    for item in items:
+        lines.extend(_plan_item_section(item))
+    return lines
+
+
+def _plan_item_section(item: dict[str, Any]) -> list[str]:
+    """改善項目 1 件の見出し・要約表・理由・手順。"""
+    status = ITEM_STATUS_LABELS.get(item.get("status"), item.get("status") or "—")
+    return [
+        f"### {item['item_id']} — `{item['path']}#{item['symbol']}`",
+        "",
+        "| スメル | 手法 | 重要度 | 提案元 | 状態 | コミット |",
+        "| --- | --- | --- | --- | --- | ---: |",
+        f"| {item['smell']} | {item['technique']} | {item['severity']} | "
+        f"{' / '.join(item.get('proposed_by') or []) or '—'} | {status} | "
+        f"{len(item.get('commits') or [])} |",
+        "",
+        f"**なぜ**: {item.get('rationale') or '（記録なし）'}",
+        "",
+        f"**手順**: {item.get('plan') or '（記録なし）'}",
+        "",
+    ]
 
 
 def cmd_report(args: argparse.Namespace) -> None:
@@ -3206,7 +3380,31 @@ def _run_sync_command(state: dict[str, Any], work: str, command: str) -> None:
     )
 
 
-def _commit_sync_changes(work: str, command: str, produced: list[str]) -> None:
+def _write_plan_file(state: dict[str, Any], work: str, rel: str) -> None:
+    """改修計画を作業ディレクトリの中へ書き出す。
+
+    内容は状態から決まるので、**状態が動いていなければ差分は出ない**。
+    書き出しを毎回行っても、余計なコミットは積まれない。
+    """
+    path = pathlib.Path(work) / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(format_plan(state), encoding="utf-8")
+
+
+def _publish_commit_message(produced: list[str], plan_rel: str) -> str:
+    """公開の直前に積むコミットのメッセージを、中身に合わせて選ぶ。"""
+    has_plan = bool(plan_rel) and plan_rel in produced
+    has_generated = any(p != plan_rel for p in produced)
+    if has_plan and has_generated:
+        return SYNC_AND_PLAN_COMMIT_MESSAGE
+    if has_plan:
+        return PLAN_COMMIT_MESSAGE
+    return SYNC_COMMIT_MESSAGE
+
+
+def _commit_sync_changes(
+    work: str, command: str, produced: list[str], plan_rel: str = ""
+) -> None:
     """同期が作った差分を進行側のコミットとして積む。差分が無ければ何もしない。
 
     このコミットはどの改善項目にも属さない。取り消しでは積み直されないが、
@@ -3221,11 +3419,15 @@ def _commit_sync_changes(work: str, command: str, produced: list[str]) -> None:
     # 確認済みだからである。
     try:
         _sh(["git", "add", "--", *produced], cwd=work)
-        _sh(["git", "commit", "-m", SYNC_COMMIT_MESSAGE], cwd=work)
+        _sh(["git", "commit", "-m", _publish_commit_message(produced, plan_rel)],
+            cwd=work)
     except SystemExit:
         _discard_worktree_changes(work)
         raise
-    info(f"🔧 生成物を同期しました（{command} / {len(produced)} ファイル）")
+    if command:
+        info(f"🔧 生成物を同期しました（{command} / {len(produced)} ファイル）")
+    else:
+        info(f"📝 改修計画を記録しました（{len(produced)} ファイル）")
 
 
 def _sync_generated(state: dict[str, Any]) -> None:
@@ -3243,14 +3445,22 @@ def _sync_generated(state: dict[str, Any]) -> None:
     利用者のリポジトリの検査を壊したまま進むことになる。
     """
     command = str(state.get("sync_command") or "").strip()
-    if not command:
+    # 状態ファイルの値も受け取った時点と同じ基準で通す。旧い状態ファイルや
+    # 手で書き換えられた値でも、作業ディレクトリの外へは書き出さない。
+    plan_rel = normalize_plan_file(state.get("plan_file"))
+    if not command and not plan_rel:
         return
     work = state["worktrees"]["work"]
     # **同期の前に作業ツリーが綺麗であることを求める。** 汚れたまま同期すると、
     # 同期が作った差分と元からあった差分を区別できない。
     _require_clean_worktree(state, work)
-    _run_sync_command(state, work, command)
-    _commit_sync_changes(work, command, _dirty_paths(state, work))
+    # 改修計画も生成物と同じ経路に乗せる。**別のコミットに分けない。**
+    # 分けると、進行側のコミットが公開のたびに 2 つずつ積まれる。
+    if plan_rel:
+        _write_plan_file(state, work, plan_rel)
+    if command:
+        _run_sync_command(state, work, command)
+    _commit_sync_changes(work, command, _dirty_paths(state, work), plan_rel)
 
 
 def _push_head(state: dict[str, Any]) -> None:
@@ -3398,6 +3608,12 @@ def main() -> None:
                       help="生成物を同期するコマンド。**push の直前**に進行側が実行し、"
                            "差分があれば進行側のコミットとして積む。"
                            "同期を実装担当にさせると範囲外の変更になるため分離している")
+    init.add_argument("--plan-file", default=None,
+                      help="改修計画を書き出すパス（対象リポジトリからの相対）。"
+                           "提案の理由と手順は状態ファイルにしか残らず、差分から"
+                           "除外されるため、公開の直前に進行側が書き出す。"
+                           f"既定は {DEFAULT_PLAN_DIR}/refactoring-plan-rf<PR>.md。"
+                           "空文字を渡すと記録しない")
     init.add_argument("--baseline-test", required=True,
                       help="着手前と各コミットで実行するテストコマンド。"
                            "振る舞い不変を示す手段が無い書き換えは構造改善ではないため必須")

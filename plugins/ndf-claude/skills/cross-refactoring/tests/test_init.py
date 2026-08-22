@@ -59,7 +59,7 @@ def _args(tmp_path, **over):
         "pr": 130, "scope": ["src"], "host": "claude",
         "max_outer_rounds": 3, "max_fix_rounds": 3, "max_items_per_round": 5,
         "severity_threshold": "minor", "model": None, "baseline_test": "true",
-        "sync_command": None,
+        "sync_command": None, "plan_file": None,
         "test_timeout": 60,
         "worktree_root": str(tmp_path / "rf130"),
     }
@@ -429,3 +429,25 @@ def test_init_fills_the_posting_event_when_resuming_an_old_state(run_init, tmp_p
     assert resumed["is_own_pr"] is True
     assert resumed["event_downgrade"] is True
     assert "COMMENT" in resumed["review_post_note"]
+
+
+# ---------- 改修計画の書き出し先 ----------
+
+def test_init_records_the_default_plan_file(run_init, tmp_path):
+    """指定が無くても計画を残す。**既定で残らないと、誰も指定しない。**"""
+    run_init(_args(tmp_path))
+    _, state = _state_of(tmp_path)
+    assert state["plan_file"] == "issues/refactoring-plan-rf130.md"
+
+
+def test_init_keeps_an_explicit_plan_file(run_init, tmp_path):
+    run_init(_args(tmp_path, plan_file="docs/plan.md"))
+    _, state = _state_of(tmp_path)
+    assert state["plan_file"] == "docs/plan.md"
+
+
+def test_init_accepts_an_empty_plan_file_as_off(run_init, tmp_path):
+    """計画を差分へ入れたくないリポジトリのために、空文字で無効にできる。"""
+    run_init(_args(tmp_path, plan_file=""))
+    _, state = _state_of(tmp_path)
+    assert state["plan_file"] == ""
