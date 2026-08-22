@@ -684,6 +684,31 @@ def _validate_review_payload(name: str, review: Any) -> Optional[str]:
     return None
 
 
+def _validate_review_verdict_and_posting(name: str, review: dict[str, Any]) -> list[str]:
+    """verdict と review_url/post_error を検証する。
+
+    **投稿できていない判定は採らない。** 投稿が失敗しても結果ファイルの
+    判定だけは残るため、そのまま採ると実装担当が読むべき指摘が
+    Pull Request に無いまま収束する。
+    """
+    problems: list[str] = []
+    verdict = review.get("verdict")
+    if verdict not in {"APPROVE", "REQUEST_CHANGES"}:
+        problems.append(
+            f"{name} の判定 `{verdict}` は APPROVE / REQUEST_CHANGES のいずれかで"
+            "なければなりません（判定に COMMENT は使いません。"
+            "投稿の event とは別物です）"
+        )
+    post_error = review.get("post_error")
+    if post_error:
+        problems.append(f"{name} がレビューを投稿できませんでした: {post_error}")
+    elif not review.get("review_url"):
+        problems.append(
+            f"{name} のレビュー URL がありません（投稿できていない可能性があります）"
+        )
+    return problems
+
+
 def judge(
     reviews: dict[str, dict[str, Any]], reviewers: list[str], round_items: list[str]
 ) -> tuple[str, list[str]]:
@@ -703,23 +728,7 @@ def judge(
         if payload_problem:
             problems.append(payload_problem)
             continue
-        verdict = review.get("verdict")
-        if verdict not in {"APPROVE", "REQUEST_CHANGES"}:
-            problems.append(
-                f"{name} の判定 `{verdict}` は APPROVE / REQUEST_CHANGES のいずれかで"
-                "なければなりません（判定に COMMENT は使いません。"
-                "投稿の event とは別物です）"
-            )
-        # **投稿できていない判定は採らない。** 投稿が失敗しても結果ファイルの
-        # 判定だけは残るため、そのまま採ると実装担当が読むべき指摘が
-        # Pull Request に無いまま収束する。
-        post_error = review.get("post_error")
-        if post_error:
-            problems.append(f"{name} がレビューを投稿できませんでした: {post_error}")
-        elif not review.get("review_url"):
-            problems.append(
-                f"{name} のレビュー URL がありません（投稿できていない可能性があります）"
-            )
+        problems.extend(_validate_review_verdict_and_posting(name, review))
         findings = review.get("findings") or []
         if not isinstance(findings, list):
             problems.append(f"{name} の findings が配列ではありません")
