@@ -514,16 +514,21 @@ def verify_commit_trailers(commit: dict[str, Any]) -> Optional[str]:
     return None
 
 
-def verify_fix_commit(
-    commit: dict[str, Any], scope: Optional[Iterable[str]] = None
+def _verify_commit_basics(
+    commit: dict[str, Any],
+    scope: Optional[Iterable[str]],
+    missing_reason: str,
 ) -> Optional[str]:
-    """修正コミットを適用と同じ基準で検証する。問題があれば理由を返す。
+    """コミット 1 件が手順を満たしているかを検証する。問題があれば理由を返す。
 
-    適用側だけ厳しくして修正側を素通しにすると、**レビュー指摘への対応という
-    名目で手順を外れた変更が入り、そのまま収束済みになる**。
+    適用（`verify_apply_item`）と修正（`verify_fix_commit`）で**同じ基準**を使う。
+    片方だけ直されると基準が食い違い、緩い側から手順を外れた変更が入る。
+
+    実体が無いときの理由文だけは呼び出し側から渡す。範囲の呼び方が適用
+    （base..head）と修正（修正ラウンドの範囲）で違うためである。
     """
     if not commit.get("exists", True):
-        return f"コミット {commit.get('sha', '?')} が対象の範囲に存在しません"
+        return missing_reason
     problem = verify_commit_trailers(commit)
     if problem:
         return problem
@@ -536,6 +541,21 @@ def verify_fix_commit(
             f"({commit.get('test_status')})"
         )
     return None
+
+
+def verify_fix_commit(
+    commit: dict[str, Any], scope: Optional[Iterable[str]] = None
+) -> Optional[str]:
+    """修正コミットを適用と同じ基準で検証する。問題があれば理由を返す。
+
+    適用側だけ厳しくして修正側を素通しにすると、**レビュー指摘への対応という
+    名目で手順を外れた変更が入り、そのまま収束済みになる**。
+    """
+    return _verify_commit_basics(
+        commit,
+        scope,
+        f"コミット {commit.get('sha', '?')} が対象の範囲に存在しません",
+    )
 
 
 def diff_budget_factor(technique: Optional[str]) -> int:
@@ -562,22 +582,14 @@ def verify_apply_item(
         return "コミットが 1 件もありません（1 手 1 コミットの前提を満たしていません）"
 
     for commit in facts:
-        if not commit.get("exists", True):
-            return (
-                f"コミット {commit.get('sha', '?')} が base..head の範囲にありません"
-                "（申告だけで実体がありません）"
-            )
-        problem = verify_commit_trailers(commit)
+        problem = _verify_commit_basics(
+            commit,
+            scope,
+            f"コミット {commit.get('sha', '?')} が base..head の範囲にありません"
+            "（申告だけで実体がありません）",
+        )
         if problem:
             return problem
-        problem = verify_scope(commit, scope or [])
-        if problem:
-            return problem
-        if commit.get("test_status") != "pass":
-            return (
-                f"コミット {commit.get('sha', '?')} でテストが成功していません "
-                f"({commit.get('test_status')})"
-            )
         item_id = (commit.get("trailers") or {}).get("Item-Id")
         if item_id != item["item_id"]:
             return (
