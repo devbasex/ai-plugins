@@ -514,16 +514,21 @@ def verify_commit_trailers(commit: dict[str, Any]) -> Optional[str]:
     return None
 
 
-def verify_fix_commit(
-    commit: dict[str, Any], scope: Optional[Iterable[str]] = None
+def _verify_commit_basics(
+    commit: dict[str, Any],
+    scope: Optional[Iterable[str]],
+    missing_reason: str,
 ) -> Optional[str]:
-    """修正コミットを適用と同じ基準で検証する。問題があれば理由を返す。
+    """コミット 1 件が手順を満たしているかを検証する。問題があれば理由を返す。
 
-    適用側だけ厳しくして修正側を素通しにすると、**レビュー指摘への対応という
-    名目で手順を外れた変更が入り、そのまま収束済みになる**。
+    適用（`verify_apply_item`）と修正（`verify_fix_commit`）で**同じ基準**を使う。
+    片方だけ直されると基準が食い違い、緩い側から手順を外れた変更が入る。
+
+    実体が無いときの理由文だけは呼び出し側から渡す。範囲の呼び方が適用
+    （base..head）と修正（修正ラウンドの範囲）で違うためである。
     """
     if not commit.get("exists", True):
-        return f"コミット {commit.get('sha', '?')} が対象の範囲に存在しません"
+        return missing_reason
     problem = verify_commit_trailers(commit)
     if problem:
         return problem
@@ -536,6 +541,21 @@ def verify_fix_commit(
             f"({commit.get('test_status')})"
         )
     return None
+
+
+def verify_fix_commit(
+    commit: dict[str, Any], scope: Optional[Iterable[str]] = None
+) -> Optional[str]:
+    """修正コミットを適用と同じ基準で検証する。問題があれば理由を返す。
+
+    適用側だけ厳しくして修正側を素通しにすると、**レビュー指摘への対応という
+    名目で手順を外れた変更が入り、そのまま収束済みになる**。
+    """
+    return _verify_commit_basics(
+        commit,
+        scope,
+        f"コミット {commit.get('sha', '?')} が対象の範囲に存在しません",
+    )
 
 
 def diff_budget_factor(technique: Optional[str]) -> int:
@@ -562,22 +582,14 @@ def verify_apply_item(
         return "コミットが 1 件もありません（1 手 1 コミットの前提を満たしていません）"
 
     for commit in facts:
-        if not commit.get("exists", True):
-            return (
-                f"コミット {commit.get('sha', '?')} が base..head の範囲にありません"
-                "（申告だけで実体がありません）"
-            )
-        problem = verify_commit_trailers(commit)
+        problem = _verify_commit_basics(
+            commit,
+            scope,
+            f"コミット {commit.get('sha', '?')} が base..head の範囲にありません"
+            "（申告だけで実体がありません）",
+        )
         if problem:
             return problem
-        problem = verify_scope(commit, scope or [])
-        if problem:
-            return problem
-        if commit.get("test_status") != "pass":
-            return (
-                f"コミット {commit.get('sha', '?')} でテストが成功していません "
-                f"({commit.get('test_status')})"
-            )
         item_id = (commit.get("trailers") or {}).get("Item-Id")
         if item_id != item["item_id"]:
             return (
@@ -895,6 +907,28 @@ def _warn_unmeasurable_models(
         )
 
 
+def _fetch_pr_context(pr: int) -> tuple[str, str, bool, str]:
+    """GitHub から Pull Request のメタデータを取り、自分の Pull Request かを判定する。
+
+    返すのは `(base_branch, head_branch, is_own_pr, author)`。
+    """
+    # **取得に失敗しても止めない。** bot トークン（Actions の `GITHUB_TOKEN` など）は
+    # `/user` を読めず `HTTP 403` を返す。この値は自分の Pull Request かどうかの
+    # 判定にしか使わないので、読めなければ他者の Pull Request として扱えばよい。
+    viewer = _sh(["gh", "api", "user", "--jq", ".login"], check=False)
+    author = _sh(
+        ["gh", "pr", "view", str(pr), "--json", "author", "--jq", ".author.login"]
+    )
+    is_own_pr = bool(viewer) and viewer == author
+    head_branch = _sh(
+        ["gh", "pr", "view", str(pr), "--json", "headRefName", "--jq", ".headRefName"]
+    )
+    base_branch = _sh(
+        ["gh", "pr", "view", str(pr), "--json", "baseRefName", "--jq", ".baseRefName"]
+    )
+    return base_branch, head_branch, is_own_pr, author
+
+
 def cmd_init(args: argparse.Namespace) -> None:
     """Step 0 — ホストと母集合を確定し、作業ディレクトリ root と状態を用意する。
 
@@ -923,22 +957,9 @@ def cmd_init(args: argparse.Namespace) -> None:
     auth = check_auth(sorted(set(runtimes) | set(impl_capable)))
 
     repo = _sh(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
-    # **取得に失敗しても止めない。** bot トークン（Actions の `GITHUB_TOKEN` など）は
-    # `/user` を読めず `HTTP 403` を返す。この値は自分の Pull Request かどうかの
-    # 判定にしか使わないので、読めなければ他者の Pull Request として扱えばよい。
-    viewer = _sh(["gh", "api", "user", "--jq", ".login"], check=False)
-    author = _sh(
-        ["gh", "pr", "view", str(args.pr), "--json", "author", "--jq", ".author.login"]
-    )
-    is_own_pr = bool(viewer) and viewer == author
+    base_branch, head_branch, is_own_pr, author = _fetch_pr_context(args.pr)
     if is_own_pr:
         info(f"⚠ 自分の Pull Request です（作成者 {author}）— 投稿は COMMENT へ倒します")
-    head_branch = _sh(
-        ["gh", "pr", "view", str(args.pr), "--json", "headRefName", "--jq", ".headRefName"]
-    )
-    base_branch = _sh(
-        ["gh", "pr", "view", str(args.pr), "--json", "baseRefName", "--jq", ".baseRefName"]
-    )
 
     root = (
         pathlib.Path(args.worktree_root).resolve() if args.worktree_root
@@ -2170,6 +2191,63 @@ def _verify_fix_commits(
     return problems, accepted
 
 
+def _mark_resolved_fix_findings(entry: dict[str, Any], resolved: set[str]) -> None:
+    """GitHub 側で解決済みになった thread に対応する指摘へ、解決の印を付ける。"""
+    for review in entry["reviews"]:
+        for finding in review["findings"]:
+            if finding.get("thread_id") not in resolved:
+                continue
+            finding["resolved"] = True
+
+
+def _record_accepted_fix_commits(
+    state: dict[str, Any], accepted: list[tuple[str, str]]
+) -> None:
+    """検証を通った修正コミットを、対応する改善項目へ紐づける。
+
+    見送り済みなどで項目が見つからないコミットは、紐づけ先が無いので飛ばす。
+    """
+    for item_id, sha in accepted:
+        item = _find_item(state, item_id, required=False)
+        if item is not None:
+            item.setdefault("commits", []).append(sha)
+
+
+def _revert_invalid_fix_round(
+    path: pathlib.Path,
+    state: dict[str, Any],
+    entry: dict[str, Any],
+    ordered_range: list[str],
+) -> set[str]:
+    """検証を通らない修正ラウンドの範囲を取り消し、採用する解決スレッドを返す。
+
+    取り消した以上、解決の申告も採らないので**常に空集合を返す**。
+    """
+    work = state["worktrees"]["work"]
+    # **状態へ記録する前に取り消す。** 先に記録すると、取り消し済みのコミットが
+    # 状態ファイルに残り、後の見送り処理が同じコミットをもう一度取り消そうとする。
+    info("検証を通らない変更を残さないため、この修正ラウンドの範囲を取り消します")
+    # **取り消しへ着手する前に印を立てる。** 取り消しは済んだのに push できずに
+    # 終わると、未検証の変更が Pull Request に残ったままになる。
+    entry["pending_push"] = True
+    statefile.save(path, state)
+    _revert_item_commits(
+        state,
+        {"item_id": f"R{entry['round']}-fix{entry['fix_rounds'] + 1}",
+         "commits": list(ordered_range)},
+        dry_run=False,
+    )
+    # 取り消し後の状態を新しい起点にし、**その場で保存する**。ここで保存せずに
+    # 落ちると、次の実行は古い起点から範囲を取り直して取り消しコミット自体を
+    # 「未申告」と判定し、**取り消しを取り消して**しまう。
+    entry["fix_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
+    statefile.save(path, state)
+    # **push は保存のあと。** ここで push して失敗すると、取り消しコミットは
+    # ローカルに残るのに起点の更新が保存されず、叩き直しで二重に取り消してしまう。
+    info("⚠ 修正を取り消したため、解決の申告は採用しません")
+    return set()
+
+
 def cmd_merge_fix(args: argparse.Namespace) -> None:
     """Step 6 — 修正結果を取り込み、修正ラウンドを 1 つ進める。"""
     path, state = _load(args.id)
@@ -2226,39 +2304,11 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         )
 
     if unassigned or problems:
-        # **状態へ記録する前に取り消す。** 先に記録すると、取り消し済みのコミットが
-        # 状態ファイルに残り、後の見送り処理が同じコミットをもう一度取り消そうとする。
-        info("検証を通らない変更を残さないため、この修正ラウンドの範囲を取り消します")
-        # **取り消しへ着手する前に印を立てる。** 取り消しは済んだのに push できずに
-        # 終わると、未検証の変更が Pull Request に残ったままになる。
-        entry["pending_push"] = True
-        statefile.save(path, state)
-        _revert_item_commits(
-            state,
-            {"item_id": f"R{entry['round']}-fix{entry['fix_rounds'] + 1}",
-             "commits": list(ordered_range)},
-            dry_run=False,
-        )
-        # 取り消し後の状態を新しい起点にし、**その場で保存する**。ここで保存せずに
-        # 落ちると、次の実行は古い起点から範囲を取り直して取り消しコミット自体を
-        # 「未申告」と判定し、**取り消しを取り消して**しまう。
-        entry["fix_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
-        statefile.save(path, state)
-        # **push は保存のあと。** ここで push して失敗すると、取り消しコミットは
-        # ローカルに残るのに起点の更新が保存されず、叩き直しで二重に取り消してしまう。
-        info("⚠ 修正を取り消したため、解決の申告は採用しません")
-        resolved = set()
+        resolved = _revert_invalid_fix_round(path, state, entry, ordered_range)
     else:
-        for item_id, sha in accepted:
-            item = _find_item(state, item_id, required=False)
-            if item is not None:
-                item.setdefault("commits", []).append(sha)
+        _record_accepted_fix_commits(state, accepted)
 
-    for review in entry["reviews"]:
-        for finding in review["findings"]:
-            if finding.get("thread_id") not in resolved:
-                continue
-            finding["resolved"] = True
+    _mark_resolved_fix_findings(entry, resolved)
 
     merged_keys.append(merge_key)
     entry["fix_rounds"] += 1
@@ -3133,6 +3183,51 @@ def _require_clean_worktree(state: dict[str, Any], work: str) -> None:
     )
 
 
+def _run_sync_command(state: dict[str, Any], work: str, command: str) -> None:
+    """同期コマンドを実行する。失敗したら差分を捨てて中断する。
+
+    **黙って push しない。** 同期できない状態を公開すると、利用者のリポジトリの
+    検査を壊したまま進むことになる。
+    """
+    code, timed_out = _run_with_timeout(
+        command, work, _safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT)
+    )
+    if not (timed_out or code != 0):
+        return
+    # **途中まで書き換えた差分を残さない。** 残すと次の実行は
+    # `_require_clean_worktree` で必ず止まり、`pending_push` の再試行が
+    # 永久に進まなくなる。着手前が綺麗だったことは確認済みなので、
+    # ここにある変更は全て同期が作ったものだと分かる。
+    _discard_worktree_changes(work)
+    die(
+        f"生成物の同期に失敗しました（{command}）: "
+        + ("打ち切りました" if timed_out else f"終了コード {code}")
+        + "。同期が作った差分は破棄したので、原因を直せばそのまま再開できます"
+    )
+
+
+def _commit_sync_changes(work: str, command: str, produced: list[str]) -> None:
+    """同期が作った差分を進行側のコミットとして積む。差分が無ければ何もしない。
+
+    このコミットはどの改善項目にも属さない。取り消しでは積み直されないが、
+    次の push で作り直されるので失われても問題にならない。
+    """
+    if not produced:
+        return
+    # **後段で落ちたときも差分を残さない。** `git add` / `git commit` の失敗で
+    # 作業ツリーを汚したまま中断すると、次の実行は `_require_clean_worktree` で
+    # 必ず止まり、`pending_push` の再試行が永久に進まない。捨ててよい根拠は
+    # 同期コマンド自身が失敗したときと同じで、着手前が綺麗だったことを
+    # 確認済みだからである。
+    try:
+        _sh(["git", "add", "--", *produced], cwd=work)
+        _sh(["git", "commit", "-m", SYNC_COMMIT_MESSAGE], cwd=work)
+    except SystemExit:
+        _discard_worktree_changes(work)
+        raise
+    info(f"🔧 生成物を同期しました（{command} / {len(produced)} ファイル）")
+
+
 def _sync_generated(state: dict[str, Any]) -> None:
     """push の直前に生成物を同期し、差分があれば進行側のコミットとして積む。
 
@@ -3154,35 +3249,8 @@ def _sync_generated(state: dict[str, Any]) -> None:
     # **同期の前に作業ツリーが綺麗であることを求める。** 汚れたまま同期すると、
     # 同期が作った差分と元からあった差分を区別できない。
     _require_clean_worktree(state, work)
-    code, timed_out = _run_with_timeout(
-        command, work, _safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT)
-    )
-    if timed_out or code != 0:
-        # **途中まで書き換えた差分を残さない。** 残すと次の実行は
-        # `_require_clean_worktree` で必ず止まり、`pending_push` の再試行が
-        # 永久に進まなくなる。着手前が綺麗だったことは確認済みなので、
-        # ここにある変更は全て同期が作ったものだと分かる。
-        _discard_worktree_changes(work)
-        die(
-            f"生成物の同期に失敗しました（{command}）: "
-            + ("打ち切りました" if timed_out else f"終了コード {code}")
-            + "。同期が作った差分は破棄したので、原因を直せばそのまま再開できます"
-        )
-    produced = _dirty_paths(state, work)
-    if not produced:
-        return
-    # **後段で落ちたときも差分を残さない。** `git add` / `git commit` の失敗で
-    # 作業ツリーを汚したまま中断すると、次の実行は `_require_clean_worktree` で
-    # 必ず止まり、`pending_push` の再試行が永久に進まない。捨ててよい根拠は
-    # 同期コマンド自身が失敗したときと同じで、着手前が綺麗だったことを
-    # 確認済みだからである。
-    try:
-        _sh(["git", "add", "--", *produced], cwd=work)
-        _sh(["git", "commit", "-m", SYNC_COMMIT_MESSAGE], cwd=work)
-    except SystemExit:
-        _discard_worktree_changes(work)
-        raise
-    info(f"🔧 生成物を同期しました（{command} / {len(produced)} ファイル）")
+    _run_sync_command(state, work, command)
+    _commit_sync_changes(work, command, _dirty_paths(state, work))
 
 
 def _push_head(state: dict[str, Any]) -> None:
