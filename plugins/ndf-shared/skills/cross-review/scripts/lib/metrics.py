@@ -69,29 +69,8 @@ def aggregate(state: dict[str, Any]) -> dict[str, Any]:
                 "実装担当の集計から分離する"
             )
 
-        bucket = impl.setdefault(_key(impl_runtime, requested), _new_impl_bucket())
-        bucket["rounds"] += 1
-        bucket["seconds"] += _duration(entry, ("apply", "fix"))
-
-        round_items = [items_by_id[i] for i in entry.get("items", []) if i in items_by_id]
-        bucket["applied"] += sum(1 for i in round_items if i.get("status") == "done")
-        bucket["abandoned"] += sum(
-            1 for i in round_items if i.get("status") in {"abandoned", "blocked"}
-        )
-        bucket["budget_exceeded"] += sum(
-            1 for i in round_items if i.get("budget_exceeded")
-        )
-        bucket["test_failed"] += sum(1 for i in round_items if i.get("test_failed"))
-        bucket["fix_rounds"] += int(entry.get("fix_rounds") or 0)
-
         reviews = _round_reviews(entry)
-        if reviews:
-            first = reviews[0]
-            approved_first = all(
-                _verdict(first, r) == "APPROVE" for r in entry.get("reviewers", [])
-            )
-            bucket["first_review_total"] += 1
-            bucket["first_review_approved"] += 1 if approved_first else 0
+        _aggregate_impl_round(impl, entry, items_by_id, impl_runtime, requested, reviews)
 
         reviewer_models = entry.get("reviewer_models") or {}
         for name in entry.get("reviewers", []):
@@ -135,6 +114,38 @@ def aggregate(state: dict[str, Any]) -> dict[str, Any]:
         "reviewer": {k: _finish_reviewer(v) for k, v in sorted(reviewer.items())},
         "unmeasured": unmeasured,
     }
+
+
+def _aggregate_impl_round(
+    impl: dict[str, dict[str, Any]],
+    entry: dict[str, Any],
+    items_by_id: dict[str, dict[str, Any]],
+    impl_runtime: str,
+    requested: Optional[str],
+    reviews: list[dict[str, Any]],
+) -> None:
+    bucket = impl.setdefault(_key(impl_runtime, requested), _new_impl_bucket())
+    bucket["rounds"] += 1
+    bucket["seconds"] += _duration(entry, ("apply", "fix"))
+
+    round_items = [items_by_id[i] for i in entry.get("items", []) if i in items_by_id]
+    bucket["applied"] += sum(1 for i in round_items if i.get("status") == "done")
+    bucket["abandoned"] += sum(
+        1 for i in round_items if i.get("status") in {"abandoned", "blocked"}
+    )
+    bucket["budget_exceeded"] += sum(
+        1 for i in round_items if i.get("budget_exceeded")
+    )
+    bucket["test_failed"] += sum(1 for i in round_items if i.get("test_failed"))
+    bucket["fix_rounds"] += int(entry.get("fix_rounds") or 0)
+
+    if reviews:
+        first = reviews[0]
+        approved_first = all(
+            _verdict(first, r) == "APPROVE" for r in entry.get("reviewers", [])
+        )
+        bucket["first_review_total"] += 1
+        bucket["first_review_approved"] += 1 if approved_first else 0
 
 
 def _duration(entry: dict[str, Any], phases: tuple[str, ...]) -> float:
