@@ -709,6 +709,31 @@ def _validate_review_verdict_and_posting(name: str, review: dict[str, Any]) -> l
     return problems
 
 
+def _validate_review_findings(
+    name: str, findings: Any, round_items: list[str]
+) -> list[str]:
+    """findings 配列と各要素の item_id を検証する。"""
+    problems: list[str] = []
+    if not isinstance(findings, list):
+        return [f"{name} の findings が配列ではありません"]
+    for i, finding in enumerate(findings):
+        if not isinstance(finding, dict):
+            problems.append(
+                f"{name} の指摘 {i + 1} が JSON オブジェクトではありません"
+            )
+            continue
+        if "item_id" not in finding:
+            problems.append(f"{name} の指摘 {i + 1} に item_id がありません")
+            continue
+        item_id = finding["item_id"]
+        if item_id is not None and item_id not in round_items:
+            problems.append(
+                f"{name} の指摘 {i + 1} の item_id `{item_id}` は"
+                "このラウンドの改善項目ではありません"
+            )
+    return problems
+
+
 def judge(
     reviews: dict[str, dict[str, Any]], reviewers: list[str], round_items: list[str]
 ) -> tuple[str, list[str]]:
@@ -729,25 +754,9 @@ def judge(
             problems.append(payload_problem)
             continue
         problems.extend(_validate_review_verdict_and_posting(name, review))
-        findings = review.get("findings") or []
-        if not isinstance(findings, list):
-            problems.append(f"{name} の findings が配列ではありません")
-            continue
-        for i, finding in enumerate(findings):
-            if not isinstance(finding, dict):
-                problems.append(
-                    f"{name} の指摘 {i + 1} が JSON オブジェクトではありません"
-                )
-                continue
-            if "item_id" not in finding:
-                problems.append(f"{name} の指摘 {i + 1} に item_id がありません")
-                continue
-            item_id = finding["item_id"]
-            if item_id is not None and item_id not in round_items:
-                problems.append(
-                    f"{name} の指摘 {i + 1} の item_id `{item_id}` は"
-                    "このラウンドの改善項目ではありません"
-                )
+        problems.extend(
+            _validate_review_findings(name, review.get("findings") or [], round_items)
+        )
     if problems:
         return "invalid", problems
     if all((reviews[name] or {}).get("verdict") == "APPROVE" for name in reviewers):
