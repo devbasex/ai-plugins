@@ -1298,24 +1298,7 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
         _load_apply_context(path, state, entry, args)
     )
 
-    # 申告は**このラウンドの改善項目のものだけ**を採る。架空の項目 ID へ割り当てられた
-    # コミットを数に入れると、割り当て済みに見えるのに項目別の検証にも入らず、
-    # そのまま Pull Request に残せてしまう。
-    round_items = set(entry["items"])
-    reported: dict[str, dict[str, Any]] = {}
-    unknown_ids: list[str] = []
-    raw_items = payload.get("items")
-    if not isinstance(raw_items, list):
-        info(f"⚠ 適用結果の items が配列ではありません（{type(raw_items).__name__}）")
-        raw_items = []
-    for r in raw_items:
-        if not isinstance(r, dict):
-            continue
-        item_id = r.get("item_id")
-        if item_id in round_items:
-            reported[item_id] = r
-        elif item_id is not None:
-            unknown_ids.append(str(item_id))
+    reported, unknown_ids = _collect_apply_reports(payload, entry)
 
     # **範囲のコミットは全て、いずれかの改善項目に割り当てられていること。**
     # 申告から漏れたコミットはテストもトレーラーも差分予算も検査されず、そのまま
@@ -1539,6 +1522,31 @@ def _load_apply_context(
             code=2,
         )
     return payload, work, head_branch, test_command, head_sha, ordered_range, in_range
+
+
+def _collect_apply_reports(
+    payload: dict[str, Any],
+    entry: dict[str, Any],
+) -> tuple[dict[str, dict[str, Any]], list[str]]:
+    # 申告は**このラウンドの改善項目のものだけ**を採る。架空の項目 ID へ割り当てられた
+    # コミットを数に入れると、割り当て済みに見えるのに項目別の検証にも入らず、
+    # そのまま Pull Request に残せてしまう。
+    round_items = set(entry["items"])
+    reported: dict[str, dict[str, Any]] = {}
+    unknown_ids: list[str] = []
+    raw_items = payload.get("items")
+    if not isinstance(raw_items, list):
+        info(f"⚠ 適用結果の items が配列ではありません（{type(raw_items).__name__}）")
+        raw_items = []
+    for r in raw_items:
+        if not isinstance(r, dict):
+            continue
+        item_id = r.get("item_id")
+        if item_id in round_items:
+            reported[item_id] = r
+        elif item_id is not None:
+            unknown_ids.append(str(item_id))
+    return reported, unknown_ids
 
 
 def _defer_abandoned_items(state: dict[str, Any], entry: dict[str, Any]) -> None:
