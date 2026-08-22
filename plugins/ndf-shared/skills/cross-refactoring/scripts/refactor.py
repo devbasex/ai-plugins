@@ -2044,6 +2044,23 @@ def _resolved_fix_thread_ids(payload: dict[str, Any], repo: str, pr: int) -> set
     return resolved
 
 
+def _unassigned_fix_commits(
+    work: str, reported_shas: list[str], ordered_range: list[str]
+) -> list[str]:
+    """範囲内のコミットのうち、どの申告にも含まれていないものを返す。
+
+    適用と同じく、**範囲のコミットは全て申告されていること**を求める。
+    申告から漏れた修正コミットは検証を受けないまま Pull Request に残る。
+    """
+    reported_full = {
+        full for full in (
+            _git_out(work, ["rev-parse", "--verify", f"{s}^{{commit}}"])
+            for s in reported_shas
+        ) if full
+    }
+    return sorted(set(ordered_range) - reported_full)
+
+
 def cmd_merge_fix(args: argparse.Namespace) -> None:
     """Step 6 — 修正結果を取り込み、修正ラウンドを 1 つ進める。"""
     path, state = _load(args.id)
@@ -2083,16 +2100,7 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
             code=2,
         )
     reported_shas = _reported_shas(payload)
-
-    # 適用と同じく、**範囲のコミットは全て申告されていること**を求める。
-    # 申告から漏れた修正コミットは検証を受けないまま Pull Request に残る。
-    reported_full = {
-        full for full in (
-            _git_out(work, ["rev-parse", "--verify", f"{s}^{{commit}}"])
-            for s in reported_shas
-        ) if full
-    }
-    unassigned = sorted(set(ordered_range) - reported_full)
+    unassigned = _unassigned_fix_commits(work, reported_shas, ordered_range)
 
     facts = collect_commit_facts(
         work, reported_shas, set(ordered_range),
