@@ -2211,6 +2211,15 @@ def _verify_fix_commits(
     return problems, accepted
 
 
+def _mark_resolved_fix_findings(entry: dict[str, Any], resolved: set[str]) -> None:
+    """GitHub 側で解決済みになった thread に対応する指摘へ、解決の印を付ける。"""
+    for review in entry["reviews"]:
+        for finding in review["findings"]:
+            if finding.get("thread_id") not in resolved:
+                continue
+            finding["resolved"] = True
+
+
 def _record_accepted_fix_commits(
     state: dict[str, Any], accepted: list[tuple[str, str]]
 ) -> None:
@@ -2319,11 +2328,7 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     else:
         _record_accepted_fix_commits(state, accepted)
 
-    for review in entry["reviews"]:
-        for finding in review["findings"]:
-            if finding.get("thread_id") not in resolved:
-                continue
-            finding["resolved"] = True
+    _mark_resolved_fix_findings(entry, resolved)
 
     merged_keys.append(merge_key)
     entry["fix_rounds"] += 1
