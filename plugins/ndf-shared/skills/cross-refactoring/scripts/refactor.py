@@ -1294,9 +1294,48 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
             sys.exit(2)
         return
 
-    payload, work, head_branch, test_command, head_sha, ordered_range, in_range = (
-        _load_apply_context(path, state, entry, args)
-    )
+    impl = entry["impl"]
+    result = _result_path(state, impl, stem_for(impl, "apply", state["id"], args.round))
+    payload = _read_result(result, impl)
+
+    _record_observed_model(entry, "impl", impl, state, "apply", args.round)
+
+    # 着手前のテストが**成功と確認できていない限り**適用結果を採らない。
+    # `red` だけでなく `unknown`（確認していない）も拒否する。確認していない状態を
+    # 通すと、「壊したのか元から壊れていたのか」を判別する手段が無いまま進む。
+    baseline = state.get("baseline_test") or {}
+    if baseline.get("status") != "green":
+        for item_id in entry["items"]:
+            _find_item(state, item_id)["status"] = "blocked"
+        if not args.dry_run:
+            statefile.save(path, state)
+        die(
+            f"着手前のテストが成功と確認できていません（status={baseline.get('status')}）。"
+            "適用へ着手しません（全項目を blocked）",
+            code=2,
+        )
+
+    # 検証の材料は git から取る。結果ファイルから使うのは
+    # 「どのコミットがどの項目のものか」という対応付けだけ。
+    work = state["worktrees"]["work"]
+    head_branch = state["head_branch"]
+    test_command = baseline["command"]
+    head_sha = _git_out(work, ["rev-parse", "HEAD"]) or ""
+    # 起点は `merge-proposals` が記録したもの。**実装担当の申告は使わない。**
+    ordered_range = commits_in_range(work, entry.get("apply_base_sha"), head_sha)
+    in_range = set(ordered_range or [])
+    if ordered_range is None:
+        # 範囲を確定できないなら、何も検証できない。素通しにせず失敗させる。
+        for item_id in entry["items"]:
+            _find_item(state, item_id)["status"] = "blocked"
+        if not args.dry_run:
+            statefile.save(path, state)
+        die(
+            "適用の範囲を確定できませんでした"
+            f"（起点 {entry.get('apply_base_sha')} / HEAD {head_sha}）。"
+            "検証できない適用は採りません",
+            code=2,
+        )
 
     # 申告は**このラウンドの改善項目のものだけ**を採る。架空の項目 ID へ割り当てられた
     # コミットを数に入れると、割り当て済みに見えるのに項目別の検証にも入らず、
@@ -1488,57 +1527,6 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
     if not applied:
         info("全項目が失敗したため、このラウンドのレビューは行いません")
         sys.exit(2)
-
-
-def _load_apply_context(
-    path: pathlib.Path,
-    state: dict[str, Any],
-    entry: dict[str, Any],
-    args: argparse.Namespace,
-) -> tuple[dict[str, Any], pathlib.Path, str, str, str, list[str], set[str]]:
-    impl = entry["impl"]
-    result = _result_path(state, impl, stem_for(impl, "apply", state["id"], args.round))
-    payload = _read_result(result, impl)
-
-    _record_observed_model(entry, "impl", impl, state, "apply", args.round)
-
-    # 着手前のテストが**成功と確認できていない限り**適用結果を採らない。
-    # `red` だけでなく `unknown`（確認していない）も拒否する。確認していない状態を
-    # 通すと、「壊したのか元から壊れていたのか」を判別する手段が無いまま進む。
-    baseline = state.get("baseline_test") or {}
-    if baseline.get("status") != "green":
-        for item_id in entry["items"]:
-            _find_item(state, item_id)["status"] = "blocked"
-        if not args.dry_run:
-            statefile.save(path, state)
-        die(
-            f"着手前のテストが成功と確認できていません（status={baseline.get('status')}）。"
-            "適用へ着手しません（全項目を blocked）",
-            code=2,
-        )
-
-    # 検証の材料は git から取る。結果ファイルから使うのは
-    # 「どのコミットがどの項目のものか」という対応付けだけ。
-    work = state["worktrees"]["work"]
-    head_branch = state["head_branch"]
-    test_command = baseline["command"]
-    head_sha = _git_out(work, ["rev-parse", "HEAD"]) or ""
-    # 起点は `merge-proposals` が記録したもの。**実装担当の申告は使わない。**
-    ordered_range = commits_in_range(work, entry.get("apply_base_sha"), head_sha)
-    in_range = set(ordered_range or [])
-    if ordered_range is None:
-        # 範囲を確定できないなら、何も検証できない。素通しにせず失敗させる。
-        for item_id in entry["items"]:
-            _find_item(state, item_id)["status"] = "blocked"
-        if not args.dry_run:
-            statefile.save(path, state)
-        die(
-            "適用の範囲を確定できませんでした"
-            f"（起点 {entry.get('apply_base_sha')} / HEAD {head_sha}）。"
-            "検証できない適用は採りません",
-            code=2,
-        )
-    return payload, work, head_branch, test_command, head_sha, ordered_range, in_range
 
 
 def _defer_abandoned_items(state: dict[str, Any], entry: dict[str, Any]) -> None:
