@@ -2179,6 +2179,19 @@ def _verify_fix_commits(
     return problems, accepted
 
 
+def _record_accepted_fix_commits(
+    state: dict[str, Any], accepted: list[tuple[str, str]]
+) -> None:
+    """検証を通った修正コミットを、対応する改善項目へ紐づける。
+
+    見送り済みなどで項目が見つからないコミットは、紐づけ先が無いので飛ばす。
+    """
+    for item_id, sha in accepted:
+        item = _find_item(state, item_id, required=False)
+        if item is not None:
+            item.setdefault("commits", []).append(sha)
+
+
 def _revert_invalid_fix_round(
     path: pathlib.Path,
     state: dict[str, Any],
@@ -2272,10 +2285,7 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     if unassigned or problems:
         resolved = _revert_invalid_fix_round(path, state, entry, ordered_range)
     else:
-        for item_id, sha in accepted:
-            item = _find_item(state, item_id, required=False)
-            if item is not None:
-                item.setdefault("commits", []).append(sha)
+        _record_accepted_fix_commits(state, accepted)
 
     for review in entry["reviews"]:
         for finding in review["findings"]:
