@@ -118,20 +118,20 @@ def test_no_test_gap_does_not_require_characterization_test(refactor):
 
 def test_diff_within_budget_passes(refactor):
     assert refactor.verify_apply_item(
-        item(estimated_diff_lines=40), [fact(diff_lines=80)]
+        item(technique="rename", estimated_diff_lines=40), [fact(diff_lines=80)]
     ) is None
 
 
 def test_diff_over_budget_fails(refactor):
     problem = refactor.verify_apply_item(
-        item(estimated_diff_lines=40), [fact(diff_lines=81)]
+        item(technique="rename", estimated_diff_lines=40), [fact(diff_lines=81)]
     )
     assert problem is not None and "差分予算" in problem
 
 
 def test_diff_lines_are_summed_across_commits(refactor):
     problem = refactor.verify_apply_item(
-        item(estimated_diff_lines=40),
+        item(technique="rename", estimated_diff_lines=40),
         [fact(sha="a", diff_lines=50), fact(sha="b", diff_lines=50)],
     )
     assert problem is not None and "100 行" in problem
@@ -142,6 +142,73 @@ def test_zero_estimate_disables_budget_check(refactor):
     assert refactor.verify_apply_item(
         item(estimated_diff_lines=0), [fact(diff_lines=500)]
     ) is None
+
+
+def test_the_budget_message_shows_the_estimate_and_the_factor(refactor):
+    """どの倍率で落ちたかを読めるようにする。倍率が手法で変わるため。"""
+    problem = refactor.verify_apply_item(
+        item(technique="rename", estimated_diff_lines=40), [fact(diff_lines=200)]
+    )
+    assert "見積 40 行 × 2" in problem
+
+
+# ---------- 抽出系の手法は倍率を上げる ----------
+
+EXTRACTIONS = [
+    "extract_method", "extract_strategy", "introduce_parameter_object",
+    "introduce_value_object", "split_into_pipeline", "move_responsibility",
+    "consolidate_duplication",
+]
+
+
+@pytest.mark.parametrize("technique", EXTRACTIONS)
+def test_extraction_techniques_get_a_wider_budget(refactor, technique):
+    """呼び出し側の書き換え・import・引数の受け渡しが固定費として乗るため。"""
+    assert refactor.verify_apply_item(
+        item(technique=technique, estimated_diff_lines=40), [fact(diff_lines=120)]
+    ) is None
+
+
+def test_extraction_over_the_wider_budget_still_fails(refactor):
+    problem = refactor.verify_apply_item(
+        item(technique="extract_method", estimated_diff_lines=40),
+        [fact(diff_lines=121)],
+    )
+    assert problem is not None and "見積 40 行 × 3" in problem
+
+
+@pytest.mark.parametrize(
+    "actual,estimated", [(265, 120), (183, 90), (277, 120), (113, 50)]
+)
+def test_the_measured_overruns_are_no_longer_rejected(refactor, actual, estimated):
+    """実測で落ちた 4 件（`long_method` の抽出。見積の 2.03〜2.31 倍）が通ること。
+
+    いずれも範囲の逸脱ではなく、適用そのものは成立していた。倍率 2 の予算を
+    わずかに超えただけで、ラウンドの成果を捨てていた。
+    """
+    assert refactor.verify_apply_item(
+        item(estimated_diff_lines=estimated), [fact(diff_lines=actual)]
+    ) is None
+
+
+def test_a_scope_escape_still_fails_for_extraction(refactor):
+    """範囲外の 3 系統を触った実測例（見積の 4 倍）は、抽出系でも落ちること。"""
+    problem = refactor.verify_apply_item(
+        item(technique="extract_method", estimated_diff_lines=40),
+        [fact(diff_lines=160)],
+    )
+    assert problem is not None and "差分予算" in problem
+
+
+def test_only_extraction_techniques_get_the_wider_factor(refactor):
+    assert refactor.diff_budget_factor("extract_method") == 3
+    assert refactor.diff_budget_factor("rename") == 2
+    assert refactor.diff_budget_factor(None) == 2
+
+
+def test_the_wider_factor_is_limited_to_the_vocabulary(refactor):
+    """語彙に無い綴りが静かに広い予算を得ないこと。"""
+    assert set(refactor.EXTRACTION_TECHNIQUES) <= set(refactor.TECHNIQUES)
 
 
 # ---------- git から事実を取る ----------
