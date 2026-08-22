@@ -1979,6 +1979,43 @@ def cmd_abandon_items(args: argparse.Namespace) -> None:
     statefile.save(path, state)
 
 
+def _fix_merge_key(entry: dict[str, Any], result: pathlib.Path) -> str:
+    """修正結果の取り込み済み判定に使う鍵を作る。
+
+    **叩き直しても二重に取り込まない。** 修正は同じラウンドで何度も回るため、
+    「このラウンドで処理済みか」では判定できない。**入力が前回と同じか**で見る。
+    次の修正ラウンドでは結果ファイルが上書きされ、HEAD も進むので鍵が変わる。
+    鍵は**試行番号と結果ファイルの内容**から作る。
+
+    - HEAD は混ぜない。検証に失敗して取り消すと HEAD が変わるため、鍵が一致せず
+      同じ申告を再処理してしまう。
+    - 内容だけでも足りない。次の修正ラウンドが同じ JSON（コミットなし・同じ
+      未解決 ID など）を返すと過去のラウンドと衝突し、`fix_rounds` が進まないまま
+      同じ修正を起動し続ける。
+    - ファイルの更新時刻も使わない。粒度が環境によって違い、書き直しても同じ値に
+      なりうる。
+
+    修正の前には必ず `judge-review` が走るので、そこで進めた試行番号が
+    **実行単位の識別子**になる。叩き直しただけなら番号は変わらない。
+    """
+    attempt = entry.get("fix_attempts", 0)
+    return f"{attempt}:" + hashlib.sha256(result.read_bytes()).hexdigest()
+
+
+def _already_merged_fix_result(
+    entry: dict[str, Any], merge_key: str
+) -> bool:
+    """この修正結果を取り込み済みなら真を返し、鍵の一覧を更新する。"""
+    merged_keys = entry.setdefault("fix_merged_keys", [])
+    if merge_key in merged_keys:
+        info(
+            f"↻ この修正結果は取り込み済みです"
+            f"（修正ラウンド {entry['fix_rounds']}）"
+        )
+        return True
+    return False
+
+
 def cmd_merge_fix(args: argparse.Namespace) -> None:
     """Step 6 — 修正結果を取り込み、修正ラウンドを 1 つ進める。"""
     path, state = _load(args.id)
@@ -1989,35 +2026,12 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     result = _result_path(state, impl, stem_for(impl, "fix", state["id"], args.round))
     payload = _read_result(result, impl)
 
-    # **叩き直しても二重に取り込まない。** 修正は同じラウンドで何度も回るため、
-    # 「このラウンドで処理済みか」では判定できない。**入力が前回と同じか**で見る。
-    # 次の修正ラウンドでは結果ファイルが上書きされ、HEAD も進むので鍵が変わる。
-    # 鍵は**試行番号と結果ファイルの内容**から作る。
-    #
-    # - HEAD は混ぜない。検証に失敗して取り消すと HEAD が変わるため、鍵が一致せず
-    #   同じ申告を再処理してしまう。
-    # - 内容だけでも足りない。次の修正ラウンドが同じ JSON（コミットなし・同じ
-    #   未解決 ID など）を返すと過去のラウンドと衝突し、`fix_rounds` が進まないまま
-    #   同じ修正を起動し続ける。
-    # - ファイルの更新時刻も使わない。粒度が環境によって違い、書き直しても同じ値に
-    #   なりうる。
-    #
-    # 修正の前には必ず `judge-review` が走るので、そこで進めた試行番号が
-    # **実行単位の識別子**になる。叩き直しただけなら番号は変わらない。
     work = state["worktrees"]["work"]
     head_now = _git_out(work, ["rev-parse", "HEAD"]) or ""
-    attempt = entry.get("fix_attempts", 0)
-    merge_key = (
-        f"{attempt}:"
-        + hashlib.sha256(result.read_bytes()).hexdigest()
-    )
-    merged_keys = entry.setdefault("fix_merged_keys", [])
-    if merge_key in merged_keys:
-        info(
-            f"↻ この修正結果は取り込み済みです"
-            f"（修正ラウンド {entry['fix_rounds']}）"
-        )
+    merge_key = _fix_merge_key(entry, result)
+    if _already_merged_fix_result(entry, merge_key):
         return
+    merged_keys = entry["fix_merged_keys"]
 
     # 自己申告をそのまま信じない。解決 API に失敗・未実行でも「解決済み」と
     # 書けてしまい、未解決の指摘が取り消し対象から外れる。GitHub 側の
