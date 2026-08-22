@@ -39,8 +39,12 @@ $RF_ITEMS
 
 ## 判定
 
-`APPROVE` / `REQUEST_CHANGES` の 2 値だけを使います。**`COMMENT` は使いません。**
+`APPROVE` / `REQUEST_CHANGES` の 2 値だけを使います。
 リファクタリングは必須の作業ではないため、疑義が残るなら通さない側に倒してください。
+
+### 投稿の event
+
+$RF_POST_EVENT_NOTE
 
 ## 投稿の規約
 

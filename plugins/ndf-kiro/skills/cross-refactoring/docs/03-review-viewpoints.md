@@ -46,7 +46,13 @@
 
 ## 判定
 
-`APPROVE` と `REQUEST_CHANGES` の 2 値だけを使う。**`COMMENT` は使わない。**
+`APPROVE` と `REQUEST_CHANGES` の 2 値だけを使う。
+
+判定と**投稿の event は別物**である。GitHub は自分の Pull Request への `APPROVE` と
+`REQUEST_CHANGES` を `HTTP 422` で拒むため、対象が自分の Pull Request のときは
+投稿の event だけを `COMMENT` へ倒す。判定は本文の先頭行と結果ファイルへそのまま残し、
+収束判定はそちらを見る。`cross-review` の `intent` と `posted_as` の分離と同じ考え方で、
+どちらへ倒すかは `init` が作成者を照合して決め、レビュープロンプトへ指示として渡る。
 
 リファクタリングは必須の作業ではない。疑義が残るなら通さない側に倒してよい。
 修正ラウンドの上限に達した改善項目は自動で取り消されるので、

@@ -69,8 +69,12 @@ def _args(tmp_path, **over):
 
 @pytest.fixture
 def run_init(refactor, origin_repo, monkeypatch):
-    """`gh` 呼び出しだけを差し替えて `init` を走らせる。"""
-    def _run(args):
+    """`gh` 呼び出しだけを差し替えて `init` を走らせる。
+
+    `viewer` は `gh api user` が返すログイン名。Pull Request の作成者は
+    常に `author` なので、両者を一致させると自分の Pull Request になる。
+    """
+    def _run(args, viewer="someone-else"):
         real_sh = refactor._sh
 
         def fake_sh(cmd, cwd=None, check=True):
@@ -81,6 +85,15 @@ def run_init(refactor, origin_repo, monkeypatch):
                     return HEAD_BRANCH
                 if "baseRefName" in cmd:
                     return "main"
+                if cmd[:3] == ["gh", "api", "user"]:
+                    # viewer=None は取得に失敗する環境（bot トークンなど）を表す
+                    if viewer is None:
+                        if check:
+                            refactor.die("コマンドが失敗しました (gh api user): HTTP 403")
+                        return ""
+                    return viewer
+                if "author" in cmd:
+                    return "me"
                 raise AssertionError(f"想定外の gh 呼び出し: {cmd}")
             return real_sh(cmd, cwd=cwd, check=check)
 
@@ -329,3 +342,62 @@ def test_init_checks_cli_authentication(refactor, origin_repo, monkeypatch, tmp_
     with pytest.raises(SystemExit) as e:
         refactor.cmd_init(_args(tmp_path))
     assert e.value.code == refactor.ABORT
+
+
+def test_init_downgrades_the_posting_event_on_own_pull_request(run_init, tmp_path):
+    """自分の Pull Request では投稿の event を `COMMENT` へ倒すこと。
+
+    GitHub は自分の Pull Request への `APPROVE` と `REQUEST_CHANGES` を
+    `HTTP 422` で拒む。倒さないとレビュー担当が投稿に失敗する。
+    """
+    run_init(_args(tmp_path), viewer="me")
+    _, state = _state_of(tmp_path)
+    assert state["is_own_pr"] is True
+    assert state["event_downgrade"] is True
+    assert "COMMENT" in state["review_post_note"]
+
+
+def test_init_keeps_the_posting_event_on_someone_elses_pull_request(run_init, tmp_path):
+    """他者の Pull Request では判定をそのまま投稿すること。"""
+    run_init(_args(tmp_path), viewer="someone-else")
+    _, state = _state_of(tmp_path)
+    assert state["is_own_pr"] is False
+    assert state["event_downgrade"] is False
+    assert "COMMENT" not in state["review_post_note"]
+
+
+def test_init_continues_when_the_viewer_cannot_be_read(run_init, tmp_path):
+    """ログイン名を読めない環境でも `init` を続けること。
+
+    bot トークン（Actions の `GITHUB_TOKEN` など）は `/user` を読めず
+    `HTTP 403` を返す。この値は自分の Pull Request かどうかの判定にしか
+    使わないので、読めなければ他者の Pull Request として扱う。
+    """
+    run_init(_args(tmp_path), viewer=None)
+    _, state = _state_of(tmp_path)
+    assert state["is_own_pr"] is False
+    assert state["event_downgrade"] is False
+
+
+def test_init_fills_the_posting_event_when_resuming_an_old_state(run_init, tmp_path):
+    """この指示が入る前の状態ファイルから再開しても投稿の event を倒すこと。
+
+    再開の分岐は状態ファイルをそのまま使って戻る。項目が無い状態ファイルを
+    そのまま渡すと、起動側は空の指示を読み、自分の Pull Request で
+    `HTTP 422` を踏み続ける。
+    """
+    run_init(_args(tmp_path), viewer="me")
+    path, state = _state_of(tmp_path)
+    # 旧版が書いた状態ファイル（3 項目が無い）を再現する
+    for key in ("is_own_pr", "event_downgrade", "review_post_note"):
+        state.pop(key)
+    state["outer_round"] = 2
+    path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+
+    run_init(_args(tmp_path), viewer="me")
+
+    _, resumed = _state_of(tmp_path)
+    assert resumed["outer_round"] == 2, "再開であって初期化ではないこと"
+    assert resumed["is_own_pr"] is True
+    assert resumed["event_downgrade"] is True
+    assert "COMMENT" in resumed["review_post_note"]

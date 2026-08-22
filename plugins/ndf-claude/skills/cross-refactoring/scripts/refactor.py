@@ -707,6 +707,40 @@ def check_auth(runtimes: Iterable[str]) -> dict[str, dict[str, Any]]:
     return results
 
 
+def _review_post_note(is_own_pr: bool) -> str:
+    """レビュープロンプトへ渡す投稿の event の指示を組み立てる。
+
+    定義を検証側（この CLI）に置き、状態ファイル経由で起動側へ渡す。
+    語彙の受け渡しと同じ形にして、文面の分岐が起動シェルへ散らないようにする。
+    """
+    if is_own_pr:
+        return (
+            "この Pull Request の作成者はあなたを動かしている利用者本人です。"
+            "GitHub は自分の Pull Request への `APPROVE` と `REQUEST_CHANGES` を "
+            "`HTTP 422` で拒むため、**投稿は必ず `-f event=COMMENT` で行ってください**。"
+            "判定そのものは本文の先頭行と結果ファイルへ `APPROVE` / `REQUEST_CHANGES` "
+            "のまま残します。収束判定は結果ファイルの判定を見るので、"
+            "投稿を倒しても評価は変わりません。"
+        )
+    return (
+        "投稿の `-f event=` には判定をそのまま渡してください"
+        "（`APPROVE` または `REQUEST_CHANGES`）。"
+    )
+
+
+def _apply_post_event(state: dict[str, Any], is_own_pr: bool) -> None:
+    """投稿の event に関する項目を状態へ入れる。
+
+    初期化と再開の**両方**から呼ぶ。この指示が入る前の版で作った状態ファイルには
+    項目そのものが無く、無いまま再開すると自分の Pull Request で `HTTP 422` を
+    踏み続ける。値は GitHub 側の照合結果だけで決まるので、再開のたびに入れ直しても
+    判定は変わらない。
+    """
+    state["is_own_pr"] = is_own_pr
+    state["event_downgrade"] = is_own_pr
+    state["review_post_note"] = _review_post_note(is_own_pr)
+
+
 def cmd_init(args: argparse.Namespace) -> None:
     """Step 0 — ホストと母集合を確定し、作業ディレクトリ root と状態を用意する。
 
@@ -734,6 +768,16 @@ def cmd_init(args: argparse.Namespace) -> None:
     auth = check_auth(sorted(set(runtimes) | set(impl_capable)))
 
     repo = _sh(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
+    # **取得に失敗しても止めない。** bot トークン（Actions の `GITHUB_TOKEN` など）は
+    # `/user` を読めず `HTTP 403` を返す。この値は自分の Pull Request かどうかの
+    # 判定にしか使わないので、読めなければ他者の Pull Request として扱えばよい。
+    viewer = _sh(["gh", "api", "user", "--jq", ".login"], check=False)
+    author = _sh(
+        ["gh", "pr", "view", str(args.pr), "--json", "author", "--jq", ".author.login"]
+    )
+    is_own_pr = bool(viewer) and viewer == author
+    if is_own_pr:
+        info(f"⚠ 自分の Pull Request です（作成者 {author}）— 投稿は COMMENT へ倒します")
     head_branch = _sh(
         ["gh", "pr", "view", str(args.pr), "--json", "headRefName", "--jq", ".headRefName"]
     )
@@ -756,6 +800,8 @@ def cmd_init(args: argparse.Namespace) -> None:
         state = statefile.load(state_file)
         if state.get("final") is None:
             info(f"↻ 前回中断した状態から再開します（提案ラウンド {state.get('outer_round', 0)}）")
+            _apply_post_event(state, is_own_pr)
+            statefile.save(state_file, state)
             _emit_init(state)
             return
 
@@ -797,6 +843,10 @@ def cmd_init(args: argparse.Namespace) -> None:
         "deferred_items": [],
         "final": None,
     }
+    # GitHub は自分の Pull Request への `APPROVE` と `REQUEST_CHANGES` を
+    # `HTTP 422` で拒む。判定はそのまま結果ファイルへ残し、**投稿の event だけ**
+    # を倒す。収束判定は結果ファイルの判定を見るので、倒しても進行は変わらない。
+    _apply_post_event(state, is_own_pr)
     statefile.save(state_file, state)
     info(f"✅ 状態を初期化しました: {state_file}")
     info(f"   ホスト: {host}（{detection}）")
