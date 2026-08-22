@@ -86,6 +86,11 @@ def run_init(refactor, origin_repo, monkeypatch):
                 if "baseRefName" in cmd:
                     return "main"
                 if cmd[:3] == ["gh", "api", "user"]:
+                    # viewer=None は取得に失敗する環境（bot トークンなど）を表す
+                    if viewer is None:
+                        if check:
+                            refactor.die("コマンドが失敗しました (gh api user): HTTP 403")
+                        return ""
                     return viewer
                 if "author" in cmd:
                     return "me"
@@ -359,6 +364,19 @@ def test_init_keeps_the_posting_event_on_someone_elses_pull_request(run_init, tm
     assert state["is_own_pr"] is False
     assert state["event_downgrade"] is False
     assert "COMMENT" not in state["review_post_note"]
+
+
+def test_init_continues_when_the_viewer_cannot_be_read(run_init, tmp_path):
+    """ログイン名を読めない環境でも `init` を続けること。
+
+    bot トークン（Actions の `GITHUB_TOKEN` など）は `/user` を読めず
+    `HTTP 403` を返す。この値は自分の Pull Request かどうかの判定にしか
+    使わないので、読めなければ他者の Pull Request として扱う。
+    """
+    run_init(_args(tmp_path), viewer=None)
+    _, state = _state_of(tmp_path)
+    assert state["is_own_pr"] is False
+    assert state["event_downgrade"] is False
 
 
 def test_init_fills_the_posting_event_when_resuming_an_old_state(run_init, tmp_path):

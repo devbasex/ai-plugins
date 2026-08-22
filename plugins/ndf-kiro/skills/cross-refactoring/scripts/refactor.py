@@ -768,7 +768,10 @@ def cmd_init(args: argparse.Namespace) -> None:
     auth = check_auth(sorted(set(runtimes) | set(impl_capable)))
 
     repo = _sh(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
-    viewer = _sh(["gh", "api", "user", "--jq", ".login"])
+    # **取得に失敗しても止めない。** bot トークン（Actions の `GITHUB_TOKEN` など）は
+    # `/user` を読めず `HTTP 403` を返す。この値は自分の Pull Request かどうかの
+    # 判定にしか使わないので、読めなければ他者の Pull Request として扱えばよい。
+    viewer = _sh(["gh", "api", "user", "--jq", ".login"], check=False)
     author = _sh(
         ["gh", "pr", "view", str(args.pr), "--json", "author", "--jq", ".author.login"]
     )
