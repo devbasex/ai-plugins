@@ -1193,6 +1193,49 @@ def _load_runtime_proposals(
     return proposals
 
 
+def _update_state_from_merged_proposals(
+    path: pathlib.Path,
+    state: dict[str, Any],
+    entry: dict[str, Any],
+    adopted: list[dict[str, Any]],
+    deferred: list[dict[str, Any]],
+) -> None:
+    """統合済みの提案から状態オブジェクトを更新し、次回ラウンドの起点を準備する。"""
+    # 収束判定に使う「前ラウンドとの重複率」。見送りも含めた提案全体で測る。
+    current_keys = [(i["path"], i["symbol"], i["smell"]) for i in adopted + deferred]
+    entry["proposal_keys"] = [list(k) for k in current_keys]
+    entry["merged"] = len(current_keys)
+    entry["adopted"] = len(adopted)
+    entry["deferred"] = len(deferred)
+
+    round_no = entry["round"]
+    for n, item in enumerate(adopted, start=1):
+        item_id = f"R{round_no}-{n:03d}"
+        state["items"].append({
+            "item_id": item_id,
+            "round": round_no,
+            **item,
+            "status": "pending",
+            "commits": [],
+        })
+        entry["items"].append(item_id)
+    for item in deferred:
+        state["deferred_items"].append({**item, "round": round_no})
+
+    # 適用の起点は**オーケストレータ側で**確定させる。実装担当の申告に委ねると、
+    # 欠落・不正時に範囲検査が無効になり、過去の任意のコミットが実在扱いになる。
+    # 提案は読むだけなので、この時点の HEAD が着手前の状態である。
+    entry["apply_base_sha"] = _git_out(state["worktrees"]["work"], ["rev-parse", "HEAD"])
+
+    state["phase"] = "apply" if adopted else "converged"
+    if not adopted:
+        # 呼び出し側は終了コード 2 で繰り返しを抜けるため、`advance` を通らない。
+        # 終了理由をここで確定させないと、報告が「未終了」のままになる。
+        state["final"] = "no_more_proposals"
+        state["ended_at"] = statefile.now()
+    statefile.save(path, state)
+
+
 def cmd_merge_proposals(args: argparse.Namespace) -> None:
     """Step 3 — 提案をマージして改善項目を作る。
 
@@ -1229,39 +1272,7 @@ def cmd_merge_proposals(args: argparse.Namespace) -> None:
         excluded_keys=excluded,
     )
 
-    # 収束判定に使う「前ラウンドとの重複率」。見送りも含めた提案全体で測る。
-    current_keys = [(i["path"], i["symbol"], i["smell"]) for i in adopted + deferred]
-    entry["proposal_keys"] = [list(k) for k in current_keys]
-    entry["merged"] = len(current_keys)
-    entry["adopted"] = len(adopted)
-    entry["deferred"] = len(deferred)
-
-    round_no = entry["round"]
-    for n, item in enumerate(adopted, start=1):
-        item_id = f"R{round_no}-{n:03d}"
-        state["items"].append({
-            "item_id": item_id,
-            "round": round_no,
-            **item,
-            "status": "pending",
-            "commits": [],
-        })
-        entry["items"].append(item_id)
-    for item in deferred:
-        state["deferred_items"].append({**item, "round": round_no})
-
-    # 適用の起点は**オーケストレータ側で**確定させる。実装担当の申告に委ねると、
-    # 欠落・不正時に範囲検査が無効になり、過去の任意のコミットが実在扱いになる。
-    # 提案は読むだけなので、この時点の HEAD が着手前の状態である。
-    entry["apply_base_sha"] = _git_out(state["worktrees"]["work"], ["rev-parse", "HEAD"])
-
-    state["phase"] = "apply" if adopted else "converged"
-    if not adopted:
-        # 呼び出し側は終了コード 2 で繰り返しを抜けるため、`advance` を通らない。
-        # 終了理由をここで確定させないと、報告が「未終了」のままになる。
-        state["final"] = "no_more_proposals"
-        state["ended_at"] = statefile.now()
-    statefile.save(path, state)
+    _update_state_from_merged_proposals(path, state, entry, adopted, deferred)
     info(
         f"提案 {sum(entry['proposed'].values())} 件 → 統合 {entry['merged']} 件 → "
         f"採用 {entry['adopted']} 件 / 見送り {entry['deferred']} 件"
