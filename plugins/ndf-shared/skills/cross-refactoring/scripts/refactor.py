@@ -2061,6 +2061,29 @@ def _unassigned_fix_commits(
     return sorted(set(ordered_range) - reported_full)
 
 
+def _verify_fix_commits(
+    facts: list[dict[str, Any]], scope: list[str]
+) -> tuple[list[str], list[tuple[str, str]]]:
+    """修正コミットを検証し、問題点の一覧と受理した (item_id, sha) を返す。
+
+    **不正なコミットが 1 件でもあれば、修正ラウンドの範囲ごと取り消す。**
+    状態を記録しないだけでは、未検証の変更が Pull Request に残り続ける
+    （見送りの対象にもならない）。どのコミットが安全かは決められないので、
+    適用フェーズの未割当コミットと同じ扱いにする。
+    """
+    problems: list[str] = []
+    accepted: list[tuple[str, str]] = []      # (item_id, sha)
+    for commit in facts:
+        item_id = (commit.get("trailers") or {}).get("Item-Id")
+        problem = verify_fix_commit(commit, scope)
+        if problem:
+            problems.append(problem)
+            info(f"❌ 修正コミットが手順を満たしていません: {problem}")
+            continue
+        accepted.append((item_id, commit["sha"]))
+    return problems, accepted
+
+
 def cmd_merge_fix(args: argparse.Namespace) -> None:
     """Step 6 — 修正結果を取り込み、修正ラウンドを 1 つ進める。"""
     path, state = _load(args.id)
@@ -2108,20 +2131,7 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         _safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT),
     )
 
-    # **不正なコミットが 1 件でもあれば、修正ラウンドの範囲ごと取り消す。**
-    # 状態を記録しないだけでは、未検証の変更が Pull Request に残り続ける
-    # （見送りの対象にもならない）。どのコミットが安全かは決められないので、
-    # 適用フェーズの未割当コミットと同じ扱いにする。
-    problems: list[str] = []
-    accepted: list[tuple[str, str]] = []      # (item_id, sha)
-    for commit in facts:
-        item_id = (commit.get("trailers") or {}).get("Item-Id")
-        problem = verify_fix_commit(commit, state.get("target_scope") or [])
-        if problem:
-            problems.append(problem)
-            info(f"❌ 修正コミットが手順を満たしていません: {problem}")
-            continue
-        accepted.append((item_id, commit["sha"]))
+    problems, accepted = _verify_fix_commits(facts, state.get("target_scope") or [])
 
     if unassigned:
         info(
