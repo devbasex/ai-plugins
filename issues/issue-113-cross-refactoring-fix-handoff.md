@@ -1,9 +1,10 @@
 # cross-refactoring 不具合修正の引継ぎ
 
 NDF v8.5.4 時点の状態と、次に触る人が知っておくことをまとめる。
-5 回の実機試行で見つかった不具合は 20 件で、すべて対応済みである。
+6 回の実機試行で見つかった不具合は 20 件で、すべて対応済みである。
+6 回目は提案から Draft 解除までを 1 度も中断せずに通した。
 
-経緯は次の 5 つにある。
+経緯は次の 6 つにある。
 
 | 回 | 記録 | 到達点 |
 | --- | --- | --- |
@@ -12,6 +13,7 @@ NDF v8.5.4 時点の状態と、次に触る人が知っておくことをまと
 | 3 | [re-retrial](issue-113-cross-refactoring-re-retrial.md) | 生成物の同期で停止。不具合 4 件 |
 | 4 | [4th-trial-report](issue-113-cross-refactoring-4th-trial-report.md) | レビューまで。収束ループが終わらない経路を発見 |
 | 5 | [5th-trial-report](issue-113-cross-refactoring-5th-trial-report.md) | 修正フェーズと再レビューまで。投稿の不具合 3 件 |
+| 6 | [6th-trial-report](issue-113-cross-refactoring-6th-trial-report.md) | 全工程を完走。新しい不具合なし |
 
 ## 編集対象
 
@@ -52,7 +54,7 @@ bash scripts/build-runtime-plugins.sh   # 配布物を生成する
 ## 再検証の手順
 
 ```bash
-# 着手前テスト（実測 500 件成功 / 25.8 秒）
+# 着手前テスト（実測 502 件成功 / 26.2 秒）
 uv run --with pytest python -m pytest \
   plugins/ndf-shared/skills/cross-refactoring/tests \
   plugins/ndf-shared/skills/cross-review/tests -q
@@ -63,6 +65,7 @@ uv run --with pytest python -m pytest \
           plugins/ndf-shared/skills/cross-refactoring/tests \
           plugins/ndf-shared/skills/cross-review/scripts/lib \
           plugins/ndf-shared/skills/cross-review/tests \
+  --model kiro=claude-sonnet-5 \
   --sync-command "bash scripts/build-runtime-plugins.sh" \
   --baseline-test "<上のテストコマンド>" \
   --max-outer-rounds 3
@@ -80,7 +83,7 @@ uv run --with pytest python -m pytest \
 
 ## 検証済みの範囲
 
-5 回目までに実機で通ったもの。
+6 回目までに実機で通ったもの。
 
 - 提案の並列実行、重複排除、採否の判定
 - 適用の項目単位のコミットと、差分予算・範囲・テストによる検証
@@ -89,8 +92,10 @@ uv run --with pytest python -m pytest \
 - レビュー担当 2 者の並列実行、指摘の投稿、承認判定
 - 変更要求から修正フェーズへ入り、修正ラウンドが進むこと
 - レビュー結果が 2 回続けて欠けたときの中断
-- 実装担当の輪番（ラウンド単位）
+- 実装担当の輪番（ラウンド単位）。6 回目は 3 者すべてが 1 ラウンドずつ担当した
 - 集計値の出力
+- ラウンド上限による終了と、収束後の `/ndf:cross-review`（Step 7）
+- Draft の解除と完了報告（Step 8）
 
 ## 未検証の範囲
 
@@ -98,11 +103,11 @@ uv run --with pytest python -m pytest \
 
 | 対象 | 内容 |
 | --- | --- |
-| 提案の収束 | 新しい提案が出なくなって `advance` が繰り返しを終えるところ。重複率による判定は未到達 |
+| 提案の収束 | 新しい提案が出なくなって `advance` が繰り返しを終えるところ。重複率による判定も未到達。到達させるには `--max-outer-rounds` を上げるか `--scope` を狭める |
+| 修正フェーズ | 6 回目は 3 ラウンドとも初回で承認され、修正そのものに入っていない。5 回目までに修正ラウンドが進むところまでは確認済み |
 | 修正ラウンドの上限 | `should-abandon` から `abandon-items` へ進み、指摘が残る項目だけを取り消すところ |
-| Step 7 の関門 | 収束後に `/ndf:cross-review` を Pull Request 全体へ実行し、ラウンドを跨いだ整合を見るところ |
-| Draft の解除 | Step 8 の報告と Draft 解除 |
-| 他者の Pull Request | 5 回とも自分の Pull Request を対象にした。投稿の event を倒さない経路は実機で未確認（v8.5.4 で指示の組み立てからプロンプトまでは現状固定テストで固めた） |
+| 投稿の失敗の記録 | 投稿が失敗したときに `post_error` 付きの結果ファイルを残す経路（v8.5.3）。6 回目は投稿がすべて成功した |
+| 他者の Pull Request | 6 回とも自分の Pull Request を対象にした。投稿の event を倒さない経路は実機で未確認（v8.5.4 で指示の組み立てからプロンプトまでは現状固定テストで固めた） |
 
 ## 運用上の傾向
 
@@ -110,6 +115,8 @@ uv run --with pytest python -m pytest \
 
 | 事象 | 内容 |
 | --- | --- |
-| 差分予算の超過 | `long_method` の抽出は見積より膨らみやすい。5 回目のラウンド 1 では 2 件が予算超過で落ちた（277 行 / 240 行、113 行 / 100 行）。**v8.5.4 で抽出系の倍率を 3 へ広げた**ので、同じ倍率（見積の 2.03〜2.31 倍）なら通る |
+| 差分予算の超過 | `long_method` の抽出は見積より膨らみやすい。**v8.5.4 で抽出系の倍率を 3 へ広げた**効果は 6 回目で確かめられ、採用 12 件のうち 5 件が見積の 2.08〜2.91 倍だった。一方で予算を超える外し方も 2 件出ている（抽出系で 3.31 倍、`flatten_conditional` で 3.01 倍）。倍率をさらに広げると範囲外の変更を通すため、次に触るなら見積の精度を上げる側 |
 | kiro の既定モデル | `auto` は実際に選ばれたモデルを取得できず、そのラウンドは集計から分離される。モデルを比べるなら `--model kiro=<name>` を指定する。**v8.5.4 から `init` が着手前に警告する**（進行は止めない） |
 | 1 回の実行内の比較 | 改善項目の難易度が揃わないため、ランタイムの優劣を読む材料にはならない |
+| 提案の偏り | この対象範囲では提案の大半が抽出系の手法になる。6 回目は 14 件中 13 件が抽出系だった |
+| プラグインキャッシュの版 | セッション開始後に `claude plugin update` を実行しても、その会話の Skill 一覧は古い版を指したままになる。`PLUGIN_ROOT` に新しい版のパスを渡せば、スクリプトとプロンプトは新しい版が使われる |
