@@ -718,6 +718,26 @@ def _check_cmdline_stale(
     return None, cmdline_validated
 
 
+def _check_hard_timeout(
+    agent: str,
+    pid: int,
+    status: AgentStatus,
+    alive: bool,
+    elapsed: float,
+    timeout: int,
+    log_prefix: str,
+) -> Optional[AgentStatus]:
+    if elapsed < timeout:
+        return None
+    if alive:
+        _kill_pid(pid)
+    status.status = "TIMEOUT"
+    status.exit_code = 2
+    status.detail = f"hard timeout {timeout}s reached (pid {pid})"
+    _emit_log(log_prefix, agent, status)
+    return status
+
+
 def monitor_agent(
     agent: str,
     pr: int,
@@ -790,15 +810,10 @@ def monitor_agent(
         if done_status:
             return done_status
 
-        # 2. hard timeout
-        if elapsed >= timeout:
-            if alive:
-                _kill_pid(pid)
-            status.status = "TIMEOUT"
-            status.exit_code = 2
-            status.detail = f"hard timeout {timeout}s reached (pid {pid})"
-            _emit_log(log_prefix, agent, status)
-            return status
+        if done_status := _check_hard_timeout(
+            agent, pid, status, alive, elapsed, timeout, log_prefix
+        ):
+            return done_status
 
         # 3. early error
         # 明確な致命 (FATAL) のみ kill する。曖昧パターン (生 Error: / Traceback) は
