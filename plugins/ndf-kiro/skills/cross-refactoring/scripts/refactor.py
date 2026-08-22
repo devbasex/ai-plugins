@@ -148,6 +148,26 @@ SYNC_COMMIT_MESSAGE = (
 # 実差分行数が見積りのこの倍数を超えたら範囲の逸脱とみなす。
 DIFF_BUDGET_FACTOR = 2
 
+# 新しい定義を作って呼び出し側を書き換える手法は、**見積より実差分が膨らむ**。
+# 抽出した本体に加えて、呼び出し側の書き換え・import の追加・引数の受け渡しが
+# 固定費として乗るためで、提案の時点では見えにくい。
+#
+# 実測で予算超過として落ちた 4 件はいずれも `long_method` の抽出で、見積の
+# 2.03〜2.31 倍に収まっていた（4 回目: 265/120 行・183/90 行、5 回目: 277/120 行・
+# 113/50 行）。範囲の逸脱ではなく、倍率 2 の予算をわずかに超えただけである。
+# 一方、範囲外の 3 系統を触った実測例は見積の 4 倍まで膨らんだので、倍率を 3 へ
+# 上げても逸脱は取り逃がさない。
+EXTRACTION_TECHNIQUES: frozenset[str] = frozenset({
+    "extract_method",
+    "extract_strategy",
+    "introduce_parameter_object",
+    "introduce_value_object",
+    "split_into_pipeline",
+    "move_responsibility",
+    "consolidate_duplication",
+})
+EXTRACTION_DIFF_BUDGET_FACTOR = 3
+
 # テスト 1 回あたりの上限（秒）。生成されたコードやテストが無限ループに入ると、
 # 待ち続けて**進行全体が止まる**。打ち切って失敗として扱う。
 DEFAULT_TEST_TIMEOUT = 900
@@ -518,6 +538,16 @@ def verify_fix_commit(
     return None
 
 
+def diff_budget_factor(technique: Optional[str]) -> int:
+    """その手法に許す差分予算の倍率。
+
+    抽出系だけ広げる。全体を広げると、範囲外を触った変更まで通ってしまう。
+    """
+    if technique in EXTRACTION_TECHNIQUES:
+        return EXTRACTION_DIFF_BUDGET_FACTOR
+    return DIFF_BUDGET_FACTOR
+
+
 def verify_apply_item(
     item: dict[str, Any], facts: list[dict[str, Any]],
     scope: Optional[Iterable[str]] = None,
@@ -566,10 +596,15 @@ def verify_apply_item(
                 f"（先頭コミット {facts[0].get('sha', '?')} がテストを触っていません）"
             )
 
-    budget = _safe_int(item.get("estimated_diff_lines")) * DIFF_BUDGET_FACTOR
+    estimated = _safe_int(item.get("estimated_diff_lines"))
+    factor = diff_budget_factor(item.get("technique"))
+    budget = estimated * factor
     actual = sum(int(c.get("diff_lines") or 0) for c in facts)
     if budget and actual > budget:
-        return f"実差分 {actual} 行が差分予算 {budget} 行を超えました（範囲の逸脱）"
+        return (
+            f"実差分 {actual} 行が差分予算 {budget} 行"
+            f"（見積 {estimated} 行 × {factor}）を超えました（範囲の逸脱）"
+        )
     return None
 
 
@@ -813,6 +848,26 @@ def _apply_post_event(state: dict[str, Any], is_own_pr: bool) -> None:
     state["review_post_note"] = _review_post_note(is_own_pr)
 
 
+def _warn_unmeasurable_models(
+    model_spec: dict[str, Optional[str]], participants: Iterable[str]
+) -> None:
+    """実際に動いたモデルを取得できない指定を、**着手前に**知らせる。
+
+    kiro の既定 `auto` はラウンドごとに違うモデルが動きうるため、そのラウンドは
+    集計から分離される。報告まで分からないと、比較のために回した実行が丸ごと
+    無駄になる。止めはしない（比較が目的でない実行もある）。
+    """
+    for runtime in sorted(participants):
+        if models_lib.is_measurable(runtime, model_spec.get(runtime)):
+            continue
+        info(
+            f"⚠ {runtime} のモデルが "
+            f"{models_lib.label(model_spec.get(runtime))} です — "
+            "実際に動いたモデルを取得できないため、そのラウンドは集計から分離されます。"
+            f"比較するなら --model {runtime}=<モデル名> を指定してください"
+        )
+
+
 def cmd_init(args: argparse.Namespace) -> None:
     """Step 0 — ホストと母集合を確定し、作業ディレクトリ root と状態を用意する。
 
@@ -834,6 +889,7 @@ def cmd_init(args: argparse.Namespace) -> None:
     impl_capable = assignment.impl_pool()
     if host in runtimes:
         die(f"提案・レビューの母集合にホスト {host} が含まれています（判定の誤り）")
+    _warn_unmeasurable_models(model_spec, set(runtimes) | set(impl_capable))
 
     # **認証は作業ディレクトリを作る前に確かめる。** 未認証のまま進むと、
     # 参加者が欠けた構成のまま最後まで走り切ってしまう。

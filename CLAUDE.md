@@ -29,7 +29,7 @@ skills/     → 実行可能なワークフロー
 
 詳細は `docs/specifications/ndf-knowledge-and-kiro.md` を参照。
 
-## NDF v8.5.3 の Skill 構成
+## NDF v8.5.4 の Skill 構成
 
 Skill は 31 個で、配布は `plugins/ndf-shared/manifests/` が唯一の基準（Claude Code 27 / Codex 25 / Kiro 26）。ブラウザ自動テストの 4 個は `playwright-kit` プラグインへ分離した（`plugins/playwright-kit-shared/`）。frontmatter の書き方は `plugins/ndf-shared/skills/README.md` の規約に従い、`python3 scripts/check-skill-frontmatter.py` で検査する。利用実績と維持・統合・削除の判定は `docs/specifications/ndf-skill-inventory.md` に記録する。
 
@@ -54,6 +54,8 @@ v8.5.1 で `cross-refactoring` の収束ループが終わらない不具合を�
 v8.5.2 で `cross-refactoring` のレビュー投稿が自分の Pull Request で `HTTP 422` になる不具合を直した。GitHub は自分の Pull Request への `APPROVE` と `REQUEST_CHANGES` をどちらも拒む。`init` が作成者を照合し、自分の Pull Request なら投稿の event だけを `COMMENT` へ倒す指示をレビュープロンプトへ渡す。判定は本文の先頭行と結果ファイルへ `APPROVE` / `REQUEST_CHANGES` のまま残るため、収束判定は変わらない。`cross-review` の `intent` と `posted_as` の分離と同じ形になる。詳細は `issues/issue-113-cross-refactoring-5th-trial-report.md`。
 
 v8.5.3 で `cross-refactoring` の投稿の確認を入れた。投稿は AI 自身が `gh api` で行うため、失敗しても結果ファイルの判定だけは残る。そのまま採ると、実装担当が読むべき指摘が Pull Request に無いまま収束する。`judge-review` が `review_url` を必須とし、URL の識別子から GitHub 側の存在を確かめる。無ければ差し戻し、取得できないときは申告を採用して確認できなかったことを出力へ残す。あわせてレビュープロンプトが、投稿に失敗したときも `post_error` 付きの結果ファイルを書かせる。上限に達したときは投稿できなかった担当も中断の対象へ含める。`cross-review` の投稿確認と同じ考え方になる。詳細は `issues/issue-113-cross-refactoring-5th-trial-report.md`。
+
+v8.5.4 で `cross-refactoring` の差分予算を手法別にした。新しい定義を作って呼び出し側を書き換える手法は、抽出した本体に加えて呼び出し側の書き換え・import の追加・引数の受け渡しが固定費として乗る。実測で予算超過として落ちた 4 件はいずれも `long_method` の抽出で、見積の 2.03〜2.31 倍だった。範囲の逸脱ではなく、倍率 2 の予算をわずかに超えただけである。抽出系の 7 手法だけ倍率を 3 にした（範囲外を触った実測例は見積の 4 倍なので取り逃がさない）。あわせて提案プロンプトの見積の指示へ固定費と現状固定テストを数えることを明記し、`init` が kiro の既定 `auto` を検知して「集計から分離される」ことを着手前に知らせるようにした。詳細は `plugins/ndf-shared/skills/cross-refactoring/docs/02-apply-and-review.md`。
 
 v6.0.0 の対応表（`review` → `pr-review`）は予告どおり削除済み。v6.0.0 以前から移行する場合は v6.1.0 の `ndf-policies` を参照する。
 

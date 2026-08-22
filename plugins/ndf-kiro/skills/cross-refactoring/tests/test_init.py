@@ -142,6 +142,34 @@ def test_init_records_models(run_init, tmp_path):
     }
 
 
+def test_init_warns_that_the_kiro_default_model_cannot_be_measured(
+    run_init, tmp_path, capsys
+):
+    """既定の `auto` は実際に動いたモデルを取得できず、集計から分離される。
+
+    報告まで分からないと、比較のために回した実行が丸ごと無駄になる。
+    止めはしない（比較が目的でない実行もある）。
+    """
+    run_init(_args(tmp_path))
+    warning = capsys.readouterr().err
+    assert "kiro のモデルが default です" in warning
+    assert "--model kiro=<モデル名>" in warning
+    _, state = _state_of(tmp_path)
+    assert state["models"]["kiro"] is None, "警告だけで、指定は書き換えないこと"
+
+
+def test_init_warns_when_kiro_is_given_auto_explicitly(run_init, tmp_path, capsys):
+    run_init(_args(tmp_path, model=["kiro=auto"]))
+    assert "kiro のモデルが auto です" in capsys.readouterr().err
+
+
+def test_init_does_not_warn_when_every_model_can_be_measured(
+    run_init, tmp_path, capsys
+):
+    run_init(_args(tmp_path, model=["kiro=claude-opus-5"]))
+    assert "集計から分離されます" not in capsys.readouterr().err
+
+
 def test_init_rejects_unknown_model_runtime(run_init, tmp_path):
     with pytest.raises(SystemExit):
         run_init(_args(tmp_path, model=["gpt=gpt-5.5"]))
