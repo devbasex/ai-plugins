@@ -692,32 +692,6 @@ def _check_stale_result_done(
     return status
 
 
-def _check_cmdline_stale(
-    agent: str,
-    pid: int,
-    status: AgentStatus,
-    alive: bool,
-    cmdline_validated: bool,
-    log_prefix: str,
-) -> tuple[Optional[AgentStatus], bool]:
-    if not alive or cmdline_validated:
-        return None, cmdline_validated
-
-    # cmdline 検証は alive 確認後に 1 回だけ。生きていない瞬間に proc/<pid> を読むと
-    # ファイル不在で None 扱いになり判定不能のため。
-    cmdline_ok = _pid_cmdline_matches(pid, agent)
-    if cmdline_ok is False:
-        _kill_pid(pid)
-        status.status = "PIDFILE_BAD"
-        status.exit_code = 6
-        status.detail = f"pid {pid} cmdline does not contain '{agent}' (stale pidfile?)"
-        _emit_log(log_prefix, agent, status)
-        return status, cmdline_validated
-    if cmdline_ok is True:
-        return None, True
-    return None, cmdline_validated
-
-
 def monitor_agent(
     agent: str,
     pr: int,
@@ -784,11 +758,19 @@ def monitor_agent(
         ):
             return done_status
 
-        done_status, cmdline_validated = _check_cmdline_stale(
-            agent, pid, status, alive, cmdline_validated, log_prefix
-        )
-        if done_status:
-            return done_status
+        if alive and not cmdline_validated:
+            # cmdline 検証は alive 確認後に 1 回だけ。生きていない瞬間に proc/<pid> を読むと
+            # ファイル不在で None 扱いになり判定不能のため。
+            cmdline_ok = _pid_cmdline_matches(pid, agent)
+            if cmdline_ok is False:
+                _kill_pid(pid)
+                status.status = "PIDFILE_BAD"
+                status.exit_code = 6
+                status.detail = f"pid {pid} cmdline does not contain '{agent}' (stale pidfile?)"
+                _emit_log(log_prefix, agent, status)
+                return status
+            if cmdline_ok is True:
+                cmdline_validated = True
 
         # 2. hard timeout
         if elapsed >= timeout:
