@@ -1759,9 +1759,38 @@ def cmd_judge_review(args: argparse.Namespace) -> None:
                 sys.exit(seen["exit"])
             return
 
-    verdict, problems, record = _aggregate_review_results(
-        entry, reviewers, reviews, post_problems
-    )
+    verdict, problems = judge(reviews, reviewers, entry["items"])
+    if post_problems:
+        verdict = "invalid"
+        problems = problems + post_problems
+
+    # 記録も**型検査済みの値だけ**で作る。`judge()` が invalid と判定した入力でも
+    # ここを通るため、無条件に `.get()` を呼ぶと差し戻す前に落ちる。
+    record: dict[str, Any] = {"round": len(entry["reviews"]) + 1, "findings": []}
+    for name in reviewers:
+        review = reviews.get(name)
+        review = review if isinstance(review, dict) else {}
+        record[name] = review.get("verdict")
+        findings = review.get("findings")
+        for finding in findings if isinstance(findings, list) else []:
+            if not isinstance(finding, dict):
+                continue
+            record["findings"].append({
+                "reviewer": name,
+                "item_id": finding.get("item_id"),
+                "thread_id": finding.get("thread_id"),
+                "summary": finding.get("summary"),
+                "resolved": bool(finding.get("resolved")),
+            })
+    entry["reviews"].append(record)
+    # レビュー担当ごとの所要時間は**別々に**持つ。ラウンドの合計を各担当へ配ると、
+    # 2 者分を両方に数えることになり、担当同士の比較が成り立たない。
+    per_reviewer = entry.setdefault("reviewer_seconds", {})
+    for name in reviewers:
+        review = reviews.get(name)
+        elapsed = review.get("elapsed_seconds") if isinstance(review, dict) else 0
+        per_reviewer[name] = per_reviewer.get(name, 0) + _safe_int(elapsed)
+    entry.setdefault("durations", {})["review"] = sum(per_reviewer.values())
     statefile.save(path, state)
 
     def _remember(exit_code: int) -> None:
@@ -1831,47 +1860,6 @@ def cmd_judge_review(args: argparse.Namespace) -> None:
     open_findings = sum(1 for f in record["findings"] if not f["resolved"])
     info(f"変更要求があります（未解決の指摘 {open_findings} 件）")
     sys.exit(2)
-
-
-def _aggregate_review_results(
-    entry: dict[str, Any],
-    reviewers: list[str],
-    reviews: dict[str, dict[str, Any]],
-    post_problems: list[str],
-) -> tuple[str, list[str], dict[str, Any]]:
-    verdict, problems = judge(reviews, reviewers, entry["items"])
-    if post_problems:
-        verdict = "invalid"
-        problems = problems + post_problems
-
-    # 記録も**型検査済みの値だけ**で作る。`judge()` が invalid と判定した入力でも
-    # ここを通るため、無条件に `.get()` を呼ぶと差し戻す前に落ちる。
-    record: dict[str, Any] = {"round": len(entry["reviews"]) + 1, "findings": []}
-    for name in reviewers:
-        review = reviews.get(name)
-        review = review if isinstance(review, dict) else {}
-        record[name] = review.get("verdict")
-        findings = review.get("findings")
-        for finding in findings if isinstance(findings, list) else []:
-            if not isinstance(finding, dict):
-                continue
-            record["findings"].append({
-                "reviewer": name,
-                "item_id": finding.get("item_id"),
-                "thread_id": finding.get("thread_id"),
-                "summary": finding.get("summary"),
-                "resolved": bool(finding.get("resolved")),
-            })
-    entry["reviews"].append(record)
-    # レビュー担当ごとの所要時間は**別々に**持つ。ラウンドの合計を各担当へ配ると、
-    # 2 者分を両方に数えることになり、担当同士の比較が成り立たない。
-    per_reviewer = entry.setdefault("reviewer_seconds", {})
-    for name in reviewers:
-        review = reviews.get(name)
-        elapsed = review.get("elapsed_seconds") if isinstance(review, dict) else 0
-        per_reviewer[name] = per_reviewer.get(name, 0) + _safe_int(elapsed)
-    entry.setdefault("durations", {})["review"] = sum(per_reviewer.values())
-    return verdict, problems, record
 
 
 def cmd_should_abandon(args: argparse.Namespace) -> None:
