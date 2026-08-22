@@ -1629,6 +1629,12 @@ def cmd_judge_review(args: argparse.Namespace) -> None:
             info(f"⚠ {name} のレビュー結果が JSON として読めません: {e}")
         _record_observed_model(entry, "reviewer", name, state, "review", args.round)
 
+    # **投稿の確認は結果ファイルの内容では決まらない。** GitHub 側の状態なので、
+    # 鍵に入れずに判定を再生すると、投稿が見えるようになった後で叩き直しても
+    # 差し戻しを返し続け、進行が止まる。確認の結果まで同じときだけ再生する。
+    unposted, post_problems = _unposted_reviewers(state, reviews, reviewers)
+    digest.update(("unposted:" + ",".join(sorted(unposted))).encode("utf-8"))
+
     # **同じレビュー結果で叩き直しても、記録も起点も試行番号も動かさない。**
     # 動かすと、同じ修正結果を別の試行として再処理したり、修正コミットを検証範囲の
     # 外へ追い出したりできてしまう。前回の終了コードだけを再現する。
@@ -1641,7 +1647,6 @@ def cmd_judge_review(args: argparse.Namespace) -> None:
             return
 
     verdict, problems = judge(reviews, reviewers, entry["items"])
-    unposted, post_problems = _unposted_reviewers(state, reviews, reviewers)
     if post_problems:
         verdict = "invalid"
         problems = problems + post_problems

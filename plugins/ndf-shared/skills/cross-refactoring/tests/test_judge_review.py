@@ -535,3 +535,30 @@ def test_review_id_is_taken_from_the_url(refactor):
     ) == "4998473405"
     assert refactor._review_id_from_url("https://github.com/acme/demo/pull/130") == ""
     assert refactor._review_id_from_url(None) == ""
+
+
+def test_posting_check_is_redone_when_github_state_changes(
+    refactor, tmp_path, env_tmp_dir, monkeypatch
+):
+    """投稿の確認で差し戻したあと、GitHub 側に見えたら判定し直すこと。
+
+    投稿の有無は結果ファイルの内容では決まらない。判定の鍵に含めないと、
+    反映された後で叩き直しても差し戻しを返し続け、進行が止まる。
+    """
+    state_path = _state(tmp_path)
+    env_tmp_dir(state_path)
+    args = type("A", (), {"id": 130, "round": 1})()
+    for name in REVIEWERS:
+        write_result(state_path, f"{name}-review-r1", review())
+
+    monkeypatch.setattr(refactor, "_posted_review_state", lambda *a, **k: False)
+    with pytest.raises(SystemExit) as first:
+        refactor.cmd_judge_review(args)
+    assert first.value.code == 3
+
+    monkeypatch.setattr(refactor, "_posted_review_state", lambda *a, **k: True)
+    refactor.cmd_judge_review(args)
+
+    state = read_state(state_path)
+    assert all(i["status"] == "done" for i in state["items"]), \
+        "投稿の確認をやり直さず、差し戻しを再生している"
