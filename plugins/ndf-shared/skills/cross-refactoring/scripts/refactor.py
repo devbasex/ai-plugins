@@ -1474,6 +1474,33 @@ def _detect_commit_owners(
     return owner_of, duplicated
 
 
+def _build_ownership_error_reason(
+    unassigned: list[str], unknown_ids: list[str], duplicated: list[str]
+) -> str:
+    """所有権検査の失敗理由を組み立てる。"""
+    causes = []
+    if unassigned:
+        causes.append(
+            f"どの改善項目にも割り当てられていないコミットが {len(unassigned)} 件"
+            f"（{', '.join(s[:7] for s in unassigned[:5])}）"
+        )
+    if unknown_ids:
+        causes.append(
+            f"このラウンドに無い改善項目 ID の申告"
+            f"（{', '.join(unknown_ids[:5])}）"
+        )
+    if duplicated:
+        causes.append(
+            f"複数の項目が同じコミットを申告しています"
+            f"（{', '.join(s[:7] for s in duplicated[:5])}）"
+        )
+    return (
+        "、".join(causes)
+        + "。検証を回避した変更や、状態と実差分の食い違いを Pull Request に"
+          "残さないため、ラウンドごと取り消します"
+    )
+
+
 def _validate_apply_commit_ownership(
     path: pathlib.Path,
     state: dict[str, Any],
@@ -1495,27 +1522,7 @@ def _validate_apply_commit_ownership(
     if not (unassigned or unknown_ids or duplicated):
         return
 
-    causes = []
-    if unassigned:
-        causes.append(
-            f"どの改善項目にも割り当てられていないコミットが {len(unassigned)} 件"
-            f"（{', '.join(s[:7] for s in unassigned[:5])}）"
-        )
-    if unknown_ids:
-        causes.append(
-            f"このラウンドに無い改善項目 ID の申告"
-            f"（{', '.join(unknown_ids[:5])}）"
-        )
-    if duplicated:
-        causes.append(
-            f"複数の項目が同じコミットを申告しています"
-            f"（{', '.join(s[:7] for s in duplicated[:5])}）"
-        )
-    reason = (
-        "、".join(causes)
-        + "。検証を回避した変更や、状態と実差分の食い違いを Pull Request に"
-          "残さないため、ラウンドごと取り消します"
-    )
+    reason = _build_ownership_error_reason(unassigned, unknown_ids, duplicated)
     info(f"❌ {reason}")
     for item_id in entry["items"]:
         it = _find_item(state, item_id)
