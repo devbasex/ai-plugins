@@ -671,6 +671,19 @@ def _unposted_reviewers(
     return names, problems
 
 
+def _validate_review_payload(name: str, review: Any) -> Optional[str]:
+    """review の存在と dict 型を確認する。
+
+    出力の形が崩れていても落ちないようにする。相手は LLM なので、
+    期待した型で返ってこないことがある。崩れていたら差し戻す。
+    """
+    if not review:
+        return f"{name} のレビュー結果がありません"
+    if not isinstance(review, dict):
+        return f"{name} のレビュー結果が JSON オブジェクトではありません"
+    return None
+
+
 def judge(
     reviews: dict[str, dict[str, Any]], reviewers: list[str], round_items: list[str]
 ) -> tuple[str, list[str]]:
@@ -683,16 +696,12 @@ def judge(
     そのラウンドに無い ID や欠落は判定に使えない。ラウンド全体に対する指摘は
     `null` を明示させ、取り消し時はラウンド全件の対象とする。
     """
-    # 出力の形が崩れていても落ちないようにする。相手は LLM なので、
-    # 期待した型で返ってこないことがある。崩れていたら差し戻す。
     problems: list[str] = []
     for name in reviewers:
         review = reviews.get(name)
-        if not review:
-            problems.append(f"{name} のレビュー結果がありません")
-            continue
-        if not isinstance(review, dict):
-            problems.append(f"{name} のレビュー結果が JSON オブジェクトではありません")
+        payload_problem = _validate_review_payload(name, review)
+        if payload_problem:
+            problems.append(payload_problem)
             continue
         verdict = review.get("verdict")
         if verdict not in {"APPROVE", "REQUEST_CHANGES"}:
