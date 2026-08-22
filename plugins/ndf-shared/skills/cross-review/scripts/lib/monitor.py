@@ -785,6 +785,34 @@ def _check_early_error(
     return None, warned_early_error
 
 
+def _check_process_exited(
+    agent: str,
+    paths: AgentPaths,
+    status: AgentStatus,
+    alive: bool,
+    require_result: bool,
+    log_prefix: str,
+) -> Optional[AgentStatus]:
+    if alive:
+        return None
+
+    # プロセス終了 — result.json を確認
+    status.result_exists = paths.result.exists() and paths.result.stat().st_size > 0
+    if status.result_exists or not require_result:
+        status.status = "OK"
+        status.exit_code = 0
+        status.detail = (
+            f"process exited; sentinel={status.sentinel_seen}; "
+            f"result_exists={status.result_exists}"
+        )
+    else:
+        status.status = "NO_RESULT"
+        status.exit_code = 3
+        status.detail = f"process exited but result.json missing: {paths.result}"
+    _emit_log(log_prefix, agent, status)
+    return status
+
+
 def monitor_agent(
     agent: str,
     pr: int,
@@ -868,22 +896,10 @@ def monitor_agent(
         if done_status:
             return done_status
 
-        if not alive:
-            # プロセス終了 — result.json を確認
-            status.result_exists = paths.result.exists() and paths.result.stat().st_size > 0
-            if status.result_exists or not require_result:
-                status.status = "OK"
-                status.exit_code = 0
-                status.detail = (
-                    f"process exited; sentinel={status.sentinel_seen}; "
-                    f"result_exists={status.result_exists}"
-                )
-            else:
-                status.status = "NO_RESULT"
-                status.exit_code = 3
-                status.detail = f"process exited but result.json missing: {paths.result}"
-            _emit_log(log_prefix, agent, status)
-            return status
+        if done_status := _check_process_exited(
+            agent, paths, status, alive, require_result, log_prefix
+        ):
+            return done_status
 
         # 4. stall detection (err.log / stdout.log / progress.log をモニタ。
         # gemini は stdout 側だけ進捗が出るケースがあり、progress.log には
