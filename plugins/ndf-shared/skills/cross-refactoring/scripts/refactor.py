@@ -2887,6 +2887,27 @@ def _dry_run_drop_plan(
             "reverted": len(ordered), "replayed": len(replay)}
 
 
+def _execute_drop_replay(
+    work: str, ordered: list[str], head: Optional[str], replay: list[str],
+) -> tuple[dict[str, str], str]:
+    """範囲を取り消して残す項目を積み直す。積み直しに失敗したら round モードへ退避する。
+
+    戻り値は `(mapping, mode)`。`mapping` は積み直し後の SHA 対応
+    （`round` モードでは空）。
+    """
+    _revert_range(work, ordered, head)
+    # 取り消しが済んだ地点。積み直しに失敗したらここへ戻せばよい。
+    reverted_head = _git_out(work, ["rev-parse", "HEAD"])
+    mapping = _replay_commits(work, replay)
+    if mapping is None:
+        info("⚠ 残す項目を積み直せませんでした。このラウンドは全件取り消します")
+        # **着手前まで戻して取り消しをやり直さない。** 同じ範囲に対する取り消しが
+        # 2 組できて履歴が無駄に汚れる。積み直す前の地点へ戻すだけでよい。
+        _reset_hard(work, reverted_head)
+        return {}, "round"
+    return mapping, "item"
+
+
 def _drop_items(
     state: dict[str, Any], entry: dict[str, Any], drop_ids: list[str],
     dry_run: bool = False,
@@ -2932,17 +2953,7 @@ def _drop_items(
     if dry_run:
         return _dry_run_drop_plan(pending, ordered, replay)
 
-    _revert_range(work, ordered, head)
-    # 取り消しが済んだ地点。積み直しに失敗したらここへ戻せばよい。
-    reverted_head = _git_out(work, ["rev-parse", "HEAD"])
-    mapping = _replay_commits(work, replay)
-    mode = "item"
-    if mapping is None:
-        info("⚠ 残す項目を積み直せませんでした。このラウンドは全件取り消します")
-        # **着手前まで戻して取り消しをやり直さない。** 同じ範囲に対する取り消しが
-        # 2 組できて履歴が無駄に汚れる。積み直す前の地点へ戻すだけでよい。
-        _reset_hard(work, reverted_head)
-        mapping, mode = {}, "round"
+    mapping, mode = _execute_drop_replay(work, ordered, head, replay)
 
     dropped = list(entry["items"]) if mode == "round" else pending
     for item_id in entry["items"]:
