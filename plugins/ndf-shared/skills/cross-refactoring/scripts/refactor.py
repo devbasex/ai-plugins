@@ -2211,41 +2211,6 @@ def _verify_fix_commits(
     return problems, accepted
 
 
-def _revert_invalid_fix_round(
-    path: pathlib.Path,
-    state: dict[str, Any],
-    entry: dict[str, Any],
-    ordered_range: list[str],
-) -> set[str]:
-    """検証を通らない修正ラウンドの範囲を取り消し、採用する解決スレッドを返す。
-
-    取り消した以上、解決の申告も採らないので**常に空集合を返す**。
-    """
-    work = state["worktrees"]["work"]
-    # **状態へ記録する前に取り消す。** 先に記録すると、取り消し済みのコミットが
-    # 状態ファイルに残り、後の見送り処理が同じコミットをもう一度取り消そうとする。
-    info("検証を通らない変更を残さないため、この修正ラウンドの範囲を取り消します")
-    # **取り消しへ着手する前に印を立てる。** 取り消しは済んだのに push できずに
-    # 終わると、未検証の変更が Pull Request に残ったままになる。
-    entry["pending_push"] = True
-    statefile.save(path, state)
-    _revert_item_commits(
-        state,
-        {"item_id": f"R{entry['round']}-fix{entry['fix_rounds'] + 1}",
-         "commits": list(ordered_range)},
-        dry_run=False,
-    )
-    # 取り消し後の状態を新しい起点にし、**その場で保存する**。ここで保存せずに
-    # 落ちると、次の実行は古い起点から範囲を取り直して取り消しコミット自体を
-    # 「未申告」と判定し、**取り消しを取り消して**しまう。
-    entry["fix_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
-    statefile.save(path, state)
-    # **push は保存のあと。** ここで push して失敗すると、取り消しコミットは
-    # ローカルに残るのに起点の更新が保存されず、叩き直しで二重に取り消してしまう。
-    info("⚠ 修正を取り消したため、解決の申告は採用しません")
-    return set()
-
-
 def cmd_merge_fix(args: argparse.Namespace) -> None:
     """Step 6 — 修正結果を取り込み、修正ラウンドを 1 つ進める。"""
     path, state = _load(args.id)
@@ -2302,7 +2267,28 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         )
 
     if unassigned or problems:
-        resolved = _revert_invalid_fix_round(path, state, entry, ordered_range)
+        # **状態へ記録する前に取り消す。** 先に記録すると、取り消し済みのコミットが
+        # 状態ファイルに残り、後の見送り処理が同じコミットをもう一度取り消そうとする。
+        info("検証を通らない変更を残さないため、この修正ラウンドの範囲を取り消します")
+        # **取り消しへ着手する前に印を立てる。** 取り消しは済んだのに push できずに
+        # 終わると、未検証の変更が Pull Request に残ったままになる。
+        entry["pending_push"] = True
+        statefile.save(path, state)
+        _revert_item_commits(
+            state,
+            {"item_id": f"R{entry['round']}-fix{entry['fix_rounds'] + 1}",
+             "commits": list(ordered_range)},
+            dry_run=False,
+        )
+        # 取り消し後の状態を新しい起点にし、**その場で保存する**。ここで保存せずに
+        # 落ちると、次の実行は古い起点から範囲を取り直して取り消しコミット自体を
+        # 「未申告」と判定し、**取り消しを取り消して**しまう。
+        entry["fix_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
+        statefile.save(path, state)
+        # **push は保存のあと。** ここで push して失敗すると、取り消しコミットは
+        # ローカルに残るのに起点の更新が保存されず、叩き直しで二重に取り消してしまう。
+        info("⚠ 修正を取り消したため、解決の申告は採用しません")
+        resolved = set()
     else:
         for item_id, sha in accepted:
             item = _find_item(state, item_id, required=False)
