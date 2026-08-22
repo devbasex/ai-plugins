@@ -895,28 +895,6 @@ def _warn_unmeasurable_models(
         )
 
 
-def _fetch_pr_context(pr: int) -> tuple[str, str, bool, str]:
-    """GitHub から Pull Request のメタデータを取り、自分の Pull Request かを判定する。
-
-    返すのは `(base_branch, head_branch, is_own_pr, author)`。
-    """
-    # **取得に失敗しても止めない。** bot トークン（Actions の `GITHUB_TOKEN` など）は
-    # `/user` を読めず `HTTP 403` を返す。この値は自分の Pull Request かどうかの
-    # 判定にしか使わないので、読めなければ他者の Pull Request として扱えばよい。
-    viewer = _sh(["gh", "api", "user", "--jq", ".login"], check=False)
-    author = _sh(
-        ["gh", "pr", "view", str(pr), "--json", "author", "--jq", ".author.login"]
-    )
-    is_own_pr = bool(viewer) and viewer == author
-    head_branch = _sh(
-        ["gh", "pr", "view", str(pr), "--json", "headRefName", "--jq", ".headRefName"]
-    )
-    base_branch = _sh(
-        ["gh", "pr", "view", str(pr), "--json", "baseRefName", "--jq", ".baseRefName"]
-    )
-    return base_branch, head_branch, is_own_pr, author
-
-
 def cmd_init(args: argparse.Namespace) -> None:
     """Step 0 — ホストと母集合を確定し、作業ディレクトリ root と状態を用意する。
 
@@ -945,9 +923,22 @@ def cmd_init(args: argparse.Namespace) -> None:
     auth = check_auth(sorted(set(runtimes) | set(impl_capable)))
 
     repo = _sh(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
-    base_branch, head_branch, is_own_pr, author = _fetch_pr_context(args.pr)
+    # **取得に失敗しても止めない。** bot トークン（Actions の `GITHUB_TOKEN` など）は
+    # `/user` を読めず `HTTP 403` を返す。この値は自分の Pull Request かどうかの
+    # 判定にしか使わないので、読めなければ他者の Pull Request として扱えばよい。
+    viewer = _sh(["gh", "api", "user", "--jq", ".login"], check=False)
+    author = _sh(
+        ["gh", "pr", "view", str(args.pr), "--json", "author", "--jq", ".author.login"]
+    )
+    is_own_pr = bool(viewer) and viewer == author
     if is_own_pr:
         info(f"⚠ 自分の Pull Request です（作成者 {author}）— 投稿は COMMENT へ倒します")
+    head_branch = _sh(
+        ["gh", "pr", "view", str(args.pr), "--json", "headRefName", "--jq", ".headRefName"]
+    )
+    base_branch = _sh(
+        ["gh", "pr", "view", str(args.pr), "--json", "baseRefName", "--jq", ".baseRefName"]
+    )
 
     root = (
         pathlib.Path(args.worktree_root).resolve() if args.worktree_root
