@@ -13,8 +13,19 @@ REVIEWERS = ["gemini", "kiro"]
 ROUND_ITEMS = ["R1-001", "R1-002"]
 
 
-def review(verdict="APPROVE", findings=None):
-    return {"verdict": verdict, "findings": findings or []}
+REVIEW_URL = "https://github.com/acme/demo/pull/130#pullrequestreview-1"
+
+
+def review(verdict="APPROVE", findings=None, **over):
+    base = {"verdict": verdict, "findings": findings or [], "review_url": REVIEW_URL}
+    base.update(over)
+    return base
+
+
+@pytest.fixture(autouse=True)
+def posted_reviews(refactor, monkeypatch):
+    """既定では投稿済みとして扱う。テストから GitHub へ出さない。"""
+    monkeypatch.setattr(refactor, "_posted_review_state", lambda *a, **k: True)
 
 
 def finding(item_id="R1-001", **over):
@@ -396,7 +407,8 @@ def test_missing_result_at_the_limit_aborts(refactor, tmp_path, env_tmp_dir):
     # 叩き直しと区別させるため、gemini の結果は毎回違う内容にする
     for attempt, expected in enumerate((3, refactor.ABORT)):
         write_result(state_path, "gemini-review-r1",
-                     {"verdict": "APPROVE", "findings": [], "elapsed_seconds": attempt})
+                     {"verdict": "APPROVE", "findings": [], "review_url": REVIEW_URL,
+                      "elapsed_seconds": attempt})
         with pytest.raises(SystemExit) as e:
             refactor.cmd_judge_review(args)
         assert e.value.code == expected
@@ -430,3 +442,96 @@ def test_invalid_format_at_the_limit_records_the_fix_base(
     entry = read_state(state_path)["rounds"][0]
     assert entry.get("fix_base_sha") == "cafe123", "修正の範囲の起点が記録されていない"
     assert entry.get("fix_attempts") == 1
+
+
+# ---------- 投稿の成否 ----------
+
+def test_review_without_a_posted_url_is_invalid(refactor):
+    """投稿されていないレビューは判定に使わないこと。
+
+    投稿が失敗しても結果ファイルの判定だけは残る。そのまま採ると、実装担当が
+    読むべき指摘が Pull Request に無いまま収束する。
+    """
+    verdict, problems = refactor.judge(
+        {"gemini": review(review_url=None), "kiro": review()},
+        REVIEWERS, ROUND_ITEMS,
+    )
+    assert verdict == "invalid"
+    assert any("gemini" in p and "投稿" in p for p in problems)
+
+
+def test_review_that_reports_a_posting_error_is_invalid(refactor):
+    """投稿に失敗したことを申告したレビューは判定に使わないこと。"""
+    verdict, problems = refactor.judge(
+        {"gemini": review(review_url=None, post_error="HTTP 422 Line could not be resolved"),
+         "kiro": review()},
+        REVIEWERS, ROUND_ITEMS,
+    )
+    assert verdict == "invalid"
+    assert any("HTTP 422" in p for p in problems)
+
+
+def test_unposted_review_at_the_limit_aborts(refactor, tmp_path, env_tmp_dir, monkeypatch):
+    """投稿できないまま上限に達したら、変更要求にせず中断すること。
+
+    投稿できなかったのは**進行側の問題**で、実装担当が直せる指摘ではない。
+    """
+    state_path = _state(tmp_path)
+    env_tmp_dir(state_path)
+    monkeypatch.setattr(refactor, "_posted_review_state", lambda *a, **k: None)
+    args = type("A", (), {"id": 130, "round": 1})()
+
+    for attempt, expected in enumerate((3, refactor.ABORT)):
+        write_result(state_path, "gemini-review-r1",
+                     {"verdict": "APPROVE", "findings": [], "review_url": REVIEW_URL,
+                      "elapsed_seconds": attempt})
+        write_result(state_path, "kiro-review-r1",
+                     {"verdict": "APPROVE", "findings": [], "review_url": None,
+                      "post_error": "HTTP 422", "elapsed_seconds": attempt})
+        with pytest.raises(SystemExit) as e:
+            refactor.cmd_judge_review(args)
+        assert e.value.code == expected
+
+    entry = read_state(state_path)["rounds"][0]
+    assert entry["fix_rounds"] == 0, "中断したのに修正ラウンドが進んでいる"
+
+
+def test_review_missing_on_github_is_invalid(refactor, tmp_path, env_tmp_dir, monkeypatch):
+    """申告された URL が GitHub 側に無ければ判定に使わないこと。"""
+    state_path = _state(tmp_path)
+    env_tmp_dir(state_path)
+    monkeypatch.setattr(refactor, "_posted_review_state", lambda *a, **k: False)
+    args = type("A", (), {"id": 130, "round": 1})()
+    for name in ("gemini", "kiro"):
+        write_result(state_path, f"{name}-review-r1",
+                     {"verdict": "APPROVE", "findings": [], "review_url": REVIEW_URL})
+    with pytest.raises(SystemExit) as e:
+        refactor.cmd_judge_review(args)
+    assert e.value.code == 3
+
+
+def test_review_is_accepted_when_github_cannot_be_reached(
+    refactor, tmp_path, env_tmp_dir, monkeypatch
+):
+    """GitHub 側を確かめられないときは申告を採ること。
+
+    一時的な不調で止めると、投稿できているのに進行が進まなくなる。
+    """
+    state_path = _state(tmp_path)
+    env_tmp_dir(state_path)
+    monkeypatch.setattr(refactor, "_posted_review_state", lambda *a, **k: None)
+    args = type("A", (), {"id": 130, "round": 1})()
+    for name in ("gemini", "kiro"):
+        write_result(state_path, f"{name}-review-r1",
+                     {"verdict": "APPROVE", "findings": [], "review_url": REVIEW_URL})
+    refactor.cmd_judge_review(args)
+    assert read_state(state_path)["rounds"][0]["reviews"][0]["gemini"] == "APPROVE"
+
+
+def test_review_id_is_taken_from_the_url(refactor):
+    """レビュー URL から識別子を取り出せること。"""
+    assert refactor._review_id_from_url(
+        "https://github.com/acme/demo/pull/130#pullrequestreview-4998473405"
+    ) == "4998473405"
+    assert refactor._review_id_from_url("https://github.com/acme/demo/pull/130") == ""
+    assert refactor._review_id_from_url(None) == ""

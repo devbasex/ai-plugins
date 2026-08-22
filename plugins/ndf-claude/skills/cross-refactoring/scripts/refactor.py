@@ -575,6 +575,67 @@ def verify_apply_item(
 
 # ---------------- レビュー判定 ----------------
 
+REVIEW_URL_MARKER = "#pullrequestreview-"
+
+
+def _review_id_from_url(url: Optional[str]) -> str:
+    """レビュー URL から識別子を取り出す。取れなければ空文字。"""
+    _, sep, tail = (url or "").partition(REVIEW_URL_MARKER)
+    return tail if sep and tail.isdigit() else ""
+
+
+def _posted_review_state(repo: str, pr: int, review_id: str) -> Optional[bool]:
+    """投稿されたレビューが GitHub 側にあるか。
+
+    `True` = ある / `False` = 無い / `None` = 確かめられない。
+
+    **「無い」と「確かめられない」を区別する。** 取得の失敗で止めると、
+    GitHub 側の一時的な不調で進行が進まなくなる。
+    """
+    r = subprocess.run(
+        ["gh", "api", f"repos/{repo}/pulls/{pr}/reviews/{review_id}", "--jq", ".id"],
+        capture_output=True, text=True,
+    )
+    if r.returncode == 0:
+        return True
+    if "404" in r.stderr or "Not Found" in r.stderr:
+        return False
+    return None
+
+
+def _unposted_reviewers(
+    state: dict[str, Any], reviews: dict[str, Any], reviewers: list[str]
+) -> tuple[list[str], list[str]]:
+    """投稿できていないレビュー担当と、その理由を返す。
+
+    申告された URL の識別子を GitHub 側へ問い合わせて存在を確かめる。
+    取得できないときは申告を採り、確かめられなかったことを出力へ残す。
+    """
+    names: list[str] = []
+    problems: list[str] = []
+    for name in reviewers:
+        review = reviews.get(name)
+        if not isinstance(review, dict):
+            continue
+        url = review.get("review_url")
+        if review.get("post_error") or not url:
+            # 理由は `judge()` が問題として出す。ここでは担当だけ拾う。
+            names.append(name)
+            continue
+        review_id = _review_id_from_url(url)
+        if not review_id:
+            names.append(name)
+            problems.append(f"{name} のレビュー URL の形が違います: {url}")
+            continue
+        posted = _posted_review_state(state["repo"], state["current_pr"], review_id)
+        if posted is False:
+            names.append(name)
+            problems.append(f"{name} のレビューが GitHub 側にありません: {url}")
+        elif posted is None:
+            info(f"⚠ {name} のレビューの存在を確かめられませんでした（申告を採ります）: {url}")
+    return names, problems
+
+
 def judge(
     reviews: dict[str, dict[str, Any]], reviewers: list[str], round_items: list[str]
 ) -> tuple[str, list[str]]:
@@ -602,7 +663,18 @@ def judge(
         if verdict not in {"APPROVE", "REQUEST_CHANGES"}:
             problems.append(
                 f"{name} の判定 `{verdict}` は APPROVE / REQUEST_CHANGES のいずれかで"
-                "なければなりません（COMMENT は使いません）"
+                "なければなりません（判定に COMMENT は使いません。"
+                "投稿の event とは別物です）"
+            )
+        # **投稿できていない判定は採らない。** 投稿が失敗しても結果ファイルの
+        # 判定だけは残るため、そのまま採ると実装担当が読むべき指摘が
+        # Pull Request に無いまま収束する。
+        post_error = review.get("post_error")
+        if post_error:
+            problems.append(f"{name} がレビューを投稿できませんでした: {post_error}")
+        elif not review.get("review_url"):
+            problems.append(
+                f"{name} のレビュー URL がありません（投稿できていない可能性があります）"
             )
         findings = review.get("findings") or []
         if not isinstance(findings, list):
@@ -1569,6 +1641,10 @@ def cmd_judge_review(args: argparse.Namespace) -> None:
             return
 
     verdict, problems = judge(reviews, reviewers, entry["items"])
+    unposted, post_problems = _unposted_reviewers(state, reviews, reviewers)
+    if post_problems:
+        verdict = "invalid"
+        problems = problems + post_problems
 
     # 記録も**型検査済みの値だけ**で作る。`judge()` が invalid と判定した入力でも
     # ここを通るため、無条件に `.get()` を呼ぶと差し戻す前に落ちる。
@@ -1614,11 +1690,15 @@ def cmd_judge_review(args: argparse.Namespace) -> None:
             # 直せる指摘ではない。変更要求へ落とすと、直しようのない指摘を渡された
             # 実装担当が空回りし、承認済みの項目まで見送りへ進む。
             missing = [name for name in reviewers if name not in reviews]
-            if missing:
+            # **投稿できなかった担当も同じ扱いにする。** 判定は残っていても
+            # Pull Request に指摘が無い以上、実装担当が読めるものは存在しない。
+            blocked = missing + [name for name in unposted if name not in missing]
+            if blocked:
                 _remember(ABORT)
                 statefile.save(path, state)
                 die(
-                    f"レビュー担当 {' / '.join(missing)} が結果を残しませんでした。"
+                    f"レビュー担当 {' / '.join(blocked)} が結果を残せませんでした"
+                    "（結果ファイルの欠落、または投稿の失敗）。"
                     "実装担当への指摘ではないため、進行を中断します。"
                     "原因を直して同じコマンド列を叩き直せば再開できます"
                 )
