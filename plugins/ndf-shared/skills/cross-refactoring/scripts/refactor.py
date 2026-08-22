@@ -1501,33 +1501,19 @@ def _build_ownership_error_reason(
     )
 
 
-def _validate_apply_commit_ownership(
+def _revert_unverified_apply_round(
     path: pathlib.Path,
     state: dict[str, Any],
     entry: dict[str, Any],
     args: argparse.Namespace,
-    reported: dict[str, dict[str, Any]],
-    unknown_ids: list[str],
     work: pathlib.Path,
     ordered_range: list[str],
-    in_range: set[str],
+    unassigned: list[str],
+    unknown_ids: list[str],
+    duplicated: list[str],
     head_sha: str,
 ) -> None:
-    # **範囲のコミットは全て、いずれかの改善項目に割り当てられていること。**
-    # 申告から漏れたコミットはテストもトレーラーも差分予算も検査されず、そのまま
-    # Pull Request に残る。都合の悪い変更を申告しないだけで検査を回避できてしまう。
-    owner_of, duplicated = _detect_commit_owners(work, reported)
-
-    unassigned = sorted(in_range - set(owner_of))
-    if not (unassigned or unknown_ids or duplicated):
-        return
-
-    reason = _build_ownership_error_reason(unassigned, unknown_ids, duplicated)
-    info(f"❌ {reason}")
-    for item_id in entry["items"]:
-        it = _find_item(state, item_id)
-        it["status"] = "abandoned"
-        it["failure_reason"] = reason
+    """検証を通らない適用ラウンドの範囲を取り消し、状態と公開を反映する。"""
     # 範囲全体を取り消す。どのコミットが安全かを決められない以上、
     # 起点まで戻すのが最も確実である。順序は `_revert_item_commits` が
     # git の履歴から決め直す。
@@ -1564,6 +1550,39 @@ def _validate_apply_commit_ownership(
         _push_head(state)
         entry["pending_push"] = False
         statefile.save(path, state)
+
+
+def _validate_apply_commit_ownership(
+    path: pathlib.Path,
+    state: dict[str, Any],
+    entry: dict[str, Any],
+    args: argparse.Namespace,
+    reported: dict[str, dict[str, Any]],
+    unknown_ids: list[str],
+    work: pathlib.Path,
+    ordered_range: list[str],
+    in_range: set[str],
+    head_sha: str,
+) -> None:
+    # **範囲のコミットは全て、いずれかの改善項目に割り当てられていること。**
+    # 申告から漏れたコミットはテストもトレーラーも差分予算も検査されず、そのまま
+    # Pull Request に残る。都合の悪い変更を申告しないだけで検査を回避できてしまう。
+    owner_of, duplicated = _detect_commit_owners(work, reported)
+
+    unassigned = sorted(in_range - set(owner_of))
+    if not (unassigned or unknown_ids or duplicated):
+        return
+
+    reason = _build_ownership_error_reason(unassigned, unknown_ids, duplicated)
+    info(f"❌ {reason}")
+    for item_id in entry["items"]:
+        it = _find_item(state, item_id)
+        it["status"] = "abandoned"
+        it["failure_reason"] = reason
+    _revert_unverified_apply_round(
+        path, state, entry, args, work, ordered_range,
+        unassigned, unknown_ids, duplicated, head_sha,
+    )
     sys.exit(2)
 
 
