@@ -35,7 +35,7 @@ import signal
 import subprocess
 import sys
 import time
-from typing import Any, Iterable, Optional
+from typing import Any, Callable, Iterable, Optional
 
 sys.path.insert(
     0,
@@ -1294,6 +1294,68 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
             sys.exit(2)
         return
 
+    payload, work, head_branch, test_command, head_sha, ordered_range, in_range = (
+        _load_apply_context(path, state, entry, args)
+    )
+
+    reported, unknown_ids = _collect_apply_reports(payload, entry)
+
+    _validate_apply_commit_ownership(
+        path, state, entry, args, reported, unknown_ids, work,
+        ordered_range, in_range, head_sha,
+    )
+
+    applied, failed = _verify_apply_items(
+        path, state, entry, args, reported, work, in_range, test_command, head_branch,
+    )
+
+    entry["apply"] = {
+        "applied": applied,
+        "failed": failed,
+        # 起点はオーケストレータが記録したもの。申告は記録にも残さない。
+        "base_sha": entry.get("apply_base_sha"),
+        "head_sha": head_sha,
+        # **取り込み済みの印は最後に立てる。** 取り消しより先に立てると、取り消しに
+        # 失敗して中断したときに、次の実行が処理済みガードで素通りしてしまい、
+        # 検証を通っていない変更が Pull Request に残り続ける。
+        "merged_at": None,
+    }
+    entry.setdefault("durations", {})["apply"] = _safe_int(
+        payload.get("elapsed_seconds")
+    )
+    state["phase"] = "review" if applied else "propose"
+
+    # `--dry-run` では git も状態ファイルも触らない。片方だけ進むと、確認の
+    # つもりで実行した利用者の進行が壊れる。
+    if args.dry_run:
+        if failed:
+            _drop_items(state, entry, failed, dry_run=True)
+        info("（dry-run）状態ファイルは更新していません")
+        applied = list(entry["apply"]["applied"])
+    elif failed:
+        # `merged_at` は `_apply_drop` が取り消しの完了時点で立てる。
+        applied = _apply_drop(path, state, entry, failed)
+    else:
+        # **全項目が通ったときも進行側が公開する。** 実装担当は push しないため、
+        # ここで公開しないとレビュー担当が Pull Request 上の差分へ指摘を書けない。
+        entry["apply"]["merged_at"] = statefile.now()
+        entry["pending_push"] = True
+        statefile.save(path, state)
+        _push_head(state)
+        entry["pending_push"] = False
+        statefile.save(path, state)
+
+    if not applied:
+        info("全項目が失敗したため、このラウンドのレビューは行いません")
+        sys.exit(2)
+
+
+def _load_apply_context(
+    path: pathlib.Path,
+    state: dict[str, Any],
+    entry: dict[str, Any],
+    args: argparse.Namespace,
+) -> tuple[dict[str, Any], pathlib.Path, str, str, str, list[str], set[str]]:
     impl = entry["impl"]
     result = _result_path(state, impl, stem_for(impl, "apply", state["id"], args.round))
     payload = _read_result(result, impl)
@@ -1336,7 +1398,13 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
             "検証できない適用は採りません",
             code=2,
         )
+    return payload, work, head_branch, test_command, head_sha, ordered_range, in_range
 
+
+def _collect_apply_reports(
+    payload: dict[str, Any],
+    entry: dict[str, Any],
+) -> tuple[dict[str, dict[str, Any]], list[str]]:
     # 申告は**このラウンドの改善項目のものだけ**を採る。架空の項目 ID へ割り当てられた
     # コミットを数に入れると、割り当て済みに見えるのに項目別の検証にも入らず、
     # そのまま Pull Request に残せてしまう。
@@ -1355,7 +1423,21 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
             reported[item_id] = r
         elif item_id is not None:
             unknown_ids.append(str(item_id))
+    return reported, unknown_ids
 
+
+def _validate_apply_commit_ownership(
+    path: pathlib.Path,
+    state: dict[str, Any],
+    entry: dict[str, Any],
+    args: argparse.Namespace,
+    reported: dict[str, dict[str, Any]],
+    unknown_ids: list[str],
+    work: pathlib.Path,
+    ordered_range: list[str],
+    in_range: set[str],
+    head_sha: str,
+) -> None:
     # **範囲のコミットは全て、いずれかの改善項目に割り当てられていること。**
     # 申告から漏れたコミットはテストもトレーラーも差分予算も検査されず、そのまま
     # Pull Request に残る。都合の悪い変更を申告しないだけで検査を回避できてしまう。
@@ -1377,71 +1459,85 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
             owner_of.setdefault(full, item_id)
 
     unassigned = sorted(in_range - set(owner_of))
-    if unassigned or unknown_ids or duplicated:
-        causes = []
-        if unassigned:
-            causes.append(
-                f"どの改善項目にも割り当てられていないコミットが {len(unassigned)} 件"
-                f"（{', '.join(s[:7] for s in unassigned[:5])}）"
-            )
-        if unknown_ids:
-            causes.append(
-                f"このラウンドに無い改善項目 ID の申告"
-                f"（{', '.join(unknown_ids[:5])}）"
-            )
-        if duplicated:
-            causes.append(
-                f"複数の項目が同じコミットを申告しています"
-                f"（{', '.join(s[:7] for s in duplicated[:5])}）"
-            )
-        reason = (
-            "、".join(causes)
-            + "。検証を回避した変更や、状態と実差分の食い違いを Pull Request に"
-              "残さないため、ラウンドごと取り消します"
-        )
-        info(f"❌ {reason}")
-        for item_id in entry["items"]:
-            it = _find_item(state, item_id)
-            it["status"] = "abandoned"
-            it["failure_reason"] = reason
-        # 範囲全体を取り消す。どのコミットが安全かを決められない以上、
-        # 起点まで戻すのが最も確実である。順序は `_revert_item_commits` が
-        # git の履歴から決め直す。
-        whole_round = {
-            "item_id": f"R{entry['round']}-range",
-            "commits": list(ordered_range),
-        }
-        if not args.dry_run:
-            # **取り消しへ着手する前に印を立てる。** 取り消しは済んだのに push
-            # できずに終わると、未検証の変更が Pull Request に残ったままになる。
-            entry["pending_push"] = True
-            statefile.save(path, state)
-        _revert_item_commits(state, whole_round, args.dry_run)
-        if not args.dry_run:
-            # 取り消し後の状態を新しい起点にする。叩き直しても範囲が空になり、
-            # 取り消しコミット自体を「未割当」として再び戻すことがない。
-            entry["apply_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
-        entry["apply"] = {
-            "applied": [], "failed": list(entry["items"]),
-            "base_sha": entry.get("apply_base_sha"), "head_sha": head_sha,
-            "unassigned_commits": unassigned,
-            "unknown_item_ids": unknown_ids,
-            "duplicated_commits": duplicated,
-            "merged_at": statefile.now(),
-        }
-        state["phase"] = "propose"
-        if args.dry_run:
-            info("（dry-run）状態ファイルは更新していません")
-        else:
-            # 項目別の失敗と同じく、**ここで取り消した項目も「対象外」に残す**。
-            # 残さないと同じ提案が次のラウンドで再び採用される。
-            _defer_abandoned_items(state, entry)
-            statefile.save(path, state)
-            _push_head(state)
-            entry["pending_push"] = False
-            statefile.save(path, state)
-        sys.exit(2)
+    if not (unassigned or unknown_ids or duplicated):
+        return
 
+    causes = []
+    if unassigned:
+        causes.append(
+            f"どの改善項目にも割り当てられていないコミットが {len(unassigned)} 件"
+            f"（{', '.join(s[:7] for s in unassigned[:5])}）"
+        )
+    if unknown_ids:
+        causes.append(
+            f"このラウンドに無い改善項目 ID の申告"
+            f"（{', '.join(unknown_ids[:5])}）"
+        )
+    if duplicated:
+        causes.append(
+            f"複数の項目が同じコミットを申告しています"
+            f"（{', '.join(s[:7] for s in duplicated[:5])}）"
+        )
+    reason = (
+        "、".join(causes)
+        + "。検証を回避した変更や、状態と実差分の食い違いを Pull Request に"
+          "残さないため、ラウンドごと取り消します"
+    )
+    info(f"❌ {reason}")
+    for item_id in entry["items"]:
+        it = _find_item(state, item_id)
+        it["status"] = "abandoned"
+        it["failure_reason"] = reason
+    # 範囲全体を取り消す。どのコミットが安全かを決められない以上、
+    # 起点まで戻すのが最も確実である。順序は `_revert_item_commits` が
+    # git の履歴から決め直す。
+    whole_round = {
+        "item_id": f"R{entry['round']}-range",
+        "commits": list(ordered_range),
+    }
+    if not args.dry_run:
+        # **取り消しへ着手する前に印を立てる。** 取り消しは済んだのに push
+        # できずに終わると、未検証の変更が Pull Request に残ったままになる。
+        entry["pending_push"] = True
+        statefile.save(path, state)
+    _revert_item_commits(state, whole_round, args.dry_run)
+    if not args.dry_run:
+        # 取り消し後の状態を新しい起点にする。叩き直しても範囲が空になり、
+        # 取り消しコミット自体を「未割当」として再び戻すことがない。
+        entry["apply_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
+    entry["apply"] = {
+        "applied": [], "failed": list(entry["items"]),
+        "base_sha": entry.get("apply_base_sha"), "head_sha": head_sha,
+        "unassigned_commits": unassigned,
+        "unknown_item_ids": unknown_ids,
+        "duplicated_commits": duplicated,
+        "merged_at": statefile.now(),
+    }
+    state["phase"] = "propose"
+    if args.dry_run:
+        info("（dry-run）状態ファイルは更新していません")
+    else:
+        # 項目別の失敗と同じく、**ここで取り消した項目も「対象外」に残す**。
+        # 残さないと同じ提案が次のラウンドで再び採用される。
+        _defer_abandoned_items(state, entry)
+        statefile.save(path, state)
+        _push_head(state)
+        entry["pending_push"] = False
+        statefile.save(path, state)
+    sys.exit(2)
+
+
+def _verify_apply_items(
+    path: pathlib.Path,
+    state: dict[str, Any],
+    entry: dict[str, Any],
+    args: argparse.Namespace,
+    reported: dict[str, dict[str, Any]],
+    work: pathlib.Path,
+    in_range: set[str],
+    test_command: str,
+    head_branch: str,
+) -> tuple[list[str], list[str]]:
     applied: list[str] = []
     failed: list[str] = []
     scope = state.get("target_scope") or []
@@ -1487,46 +1583,7 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
         })
         if not args.dry_run:
             statefile.save(path, state)
-
-    entry["apply"] = {
-        "applied": applied,
-        "failed": failed,
-        # 起点はオーケストレータが記録したもの。申告は記録にも残さない。
-        "base_sha": entry.get("apply_base_sha"),
-        "head_sha": head_sha,
-        # **取り込み済みの印は最後に立てる。** 取り消しより先に立てると、取り消しに
-        # 失敗して中断したときに、次の実行が処理済みガードで素通りしてしまい、
-        # 検証を通っていない変更が Pull Request に残り続ける。
-        "merged_at": None,
-    }
-    entry.setdefault("durations", {})["apply"] = _safe_int(
-        payload.get("elapsed_seconds")
-    )
-    state["phase"] = "review" if applied else "propose"
-
-    # `--dry-run` では git も状態ファイルも触らない。片方だけ進むと、確認の
-    # つもりで実行した利用者の進行が壊れる。
-    if args.dry_run:
-        if failed:
-            _drop_items(state, entry, failed, dry_run=True)
-        info("（dry-run）状態ファイルは更新していません")
-        applied = list(entry["apply"]["applied"])
-    elif failed:
-        # `merged_at` は `_apply_drop` が取り消しの完了時点で立てる。
-        applied = _apply_drop(path, state, entry, failed)
-    else:
-        # **全項目が通ったときも進行側が公開する。** 実装担当は push しないため、
-        # ここで公開しないとレビュー担当が Pull Request 上の差分へ指摘を書けない。
-        entry["apply"]["merged_at"] = statefile.now()
-        entry["pending_push"] = True
-        statefile.save(path, state)
-        _push_head(state)
-        entry["pending_push"] = False
-        statefile.save(path, state)
-
-    if not applied:
-        info("全項目が失敗したため、このラウンドのレビューは行いません")
-        sys.exit(2)
+    return applied, failed
 
 
 def _defer_abandoned_items(state: dict[str, Any], entry: dict[str, Any]) -> None:
@@ -1702,6 +1759,104 @@ def cmd_judge_review(args: argparse.Namespace) -> None:
                 sys.exit(seen["exit"])
             return
 
+    verdict, problems, record = _aggregate_review_results(
+        entry, reviewers, reviews, post_problems
+    )
+    statefile.save(path, state)
+
+    def _remember(exit_code: int) -> None:
+        entry.setdefault("review_merged", []).append(
+            {"key": review_key, "exit": exit_code}
+        )
+
+    _handle_review_verdict(
+        path, state, entry, reviewers, reviews, unposted,
+        verdict, problems, record, _remember,
+    )
+
+
+def _handle_review_verdict(
+    path: pathlib.Path,
+    state: dict[str, Any],
+    entry: dict[str, Any],
+    reviewers: list[str],
+    reviews: dict[str, dict[str, Any]],
+    unposted: list[str],
+    verdict: str,
+    problems: list[str],
+    record: dict[str, Any],
+    remember: Callable[[int], None],
+) -> None:
+    if verdict == "invalid":
+        for p in problems:
+            info(f"❌ {p}")
+        entry["invalid_reviews"] = entry.get("invalid_reviews", 0) + 1
+        if entry["invalid_reviews"] > MAX_INVALID_REVIEWS:
+            # **結果が無いことと、形が違うことを分ける。** 結果を残さなかったのは
+            # レビュー担当のプロセスが仕事をしなかったということで、実装担当が
+            # 直せる指摘ではない。変更要求へ落とすと、直しようのない指摘を渡された
+            # 実装担当が空回りし、承認済みの項目まで見送りへ進む。
+            missing = [name for name in reviewers if name not in reviews]
+            # **投稿できなかった担当も同じ扱いにする。** 判定は残っていても
+            # Pull Request に指摘が無い以上、実装担当が読めるものは存在しない。
+            blocked = missing + [name for name in unposted if name not in missing]
+            if blocked:
+                remember(ABORT)
+                statefile.save(path, state)
+                die(
+                    f"レビュー担当 {' / '.join(blocked)} が結果を残せませんでした"
+                    "（結果ファイルの欠落、または投稿の失敗）。"
+                    "実装担当への指摘ではないため、進行を中断します。"
+                    "原因を直して同じコマンド列を叩き直せば再開できます"
+                )
+            # 差し戻しを無限に繰り返さない。形式を満たせないレビューが続く以上、
+            # このラウンドの成果は検証されていないものとして扱い、変更要求へ落とす。
+            # 紐づけ先が決まらないので、取り消しはラウンド全件が対象になる。
+            record["findings"].append({
+                "reviewer": "cross-refactoring",
+                "item_id": None,
+                "thread_id": None,
+                "summary": (
+                    f"レビュー結果の形式が {MAX_INVALID_REVIEWS + 1} 回続けて不正だった: "
+                    + " / ".join(problems)
+                ),
+                "resolved": False,
+            })
+            # **この出口も修正フェーズの起点を記録する。** 記録せずに変更要求を
+            # 返すと `merge-fix` が範囲を確定できずに弾かれ、`fix_rounds` が
+            # 進まない。`should-abandon` は `fix_rounds` で見送りを決めるため、
+            # 上限へ永久に到達せず修正と再レビューを往復し続ける。
+            _prepare_fix_phase(state, entry)
+            remember(2)
+            statefile.save(path, state)
+            info("差し戻しの上限に達したため、変更要求として扱います")
+            sys.exit(2)
+        remember(3)
+        statefile.save(path, state)
+        info("レビュー結果を差し戻します。指摘には必ず改善項目 ID を付けてください")
+        sys.exit(3)
+    if verdict == "approved":
+        for item_id in entry["apply"]["applied"]:
+            _find_item(state, item_id)["status"] = "done"
+        state["phase"] = "propose"
+        remember(0)
+        statefile.save(path, state)
+        info("✅ レビュー担当 2 者とも承認しました")
+        return
+    _prepare_fix_phase(state, entry)
+    remember(2)
+    statefile.save(path, state)
+    open_findings = sum(1 for f in record["findings"] if not f["resolved"])
+    info(f"変更要求があります（未解決の指摘 {open_findings} 件）")
+    sys.exit(2)
+
+
+def _aggregate_review_results(
+    entry: dict[str, Any],
+    reviewers: list[str],
+    reviews: dict[str, dict[str, Any]],
+    post_problems: list[str],
+) -> tuple[str, list[str], dict[str, Any]]:
     verdict, problems = judge(reviews, reviewers, entry["items"])
     if post_problems:
         verdict = "invalid"
@@ -1734,75 +1889,7 @@ def cmd_judge_review(args: argparse.Namespace) -> None:
         elapsed = review.get("elapsed_seconds") if isinstance(review, dict) else 0
         per_reviewer[name] = per_reviewer.get(name, 0) + _safe_int(elapsed)
     entry.setdefault("durations", {})["review"] = sum(per_reviewer.values())
-    statefile.save(path, state)
-
-    def _remember(exit_code: int) -> None:
-        entry.setdefault("review_merged", []).append(
-            {"key": review_key, "exit": exit_code}
-        )
-
-    if verdict == "invalid":
-        for p in problems:
-            info(f"❌ {p}")
-        entry["invalid_reviews"] = entry.get("invalid_reviews", 0) + 1
-        if entry["invalid_reviews"] > MAX_INVALID_REVIEWS:
-            # **結果が無いことと、形が違うことを分ける。** 結果を残さなかったのは
-            # レビュー担当のプロセスが仕事をしなかったということで、実装担当が
-            # 直せる指摘ではない。変更要求へ落とすと、直しようのない指摘を渡された
-            # 実装担当が空回りし、承認済みの項目まで見送りへ進む。
-            missing = [name for name in reviewers if name not in reviews]
-            # **投稿できなかった担当も同じ扱いにする。** 判定は残っていても
-            # Pull Request に指摘が無い以上、実装担当が読めるものは存在しない。
-            blocked = missing + [name for name in unposted if name not in missing]
-            if blocked:
-                _remember(ABORT)
-                statefile.save(path, state)
-                die(
-                    f"レビュー担当 {' / '.join(blocked)} が結果を残せませんでした"
-                    "（結果ファイルの欠落、または投稿の失敗）。"
-                    "実装担当への指摘ではないため、進行を中断します。"
-                    "原因を直して同じコマンド列を叩き直せば再開できます"
-                )
-            # 差し戻しを無限に繰り返さない。形式を満たせないレビューが続く以上、
-            # このラウンドの成果は検証されていないものとして扱い、変更要求へ落とす。
-            # 紐づけ先が決まらないので、取り消しはラウンド全件が対象になる。
-            record["findings"].append({
-                "reviewer": "cross-refactoring",
-                "item_id": None,
-                "thread_id": None,
-                "summary": (
-                    f"レビュー結果の形式が {MAX_INVALID_REVIEWS + 1} 回続けて不正だった: "
-                    + " / ".join(problems)
-                ),
-                "resolved": False,
-            })
-            # **この出口も修正フェーズの起点を記録する。** 記録せずに変更要求を
-            # 返すと `merge-fix` が範囲を確定できずに弾かれ、`fix_rounds` が
-            # 進まない。`should-abandon` は `fix_rounds` で見送りを決めるため、
-            # 上限へ永久に到達せず修正と再レビューを往復し続ける。
-            _prepare_fix_phase(state, entry)
-            _remember(2)
-            statefile.save(path, state)
-            info("差し戻しの上限に達したため、変更要求として扱います")
-            sys.exit(2)
-        _remember(3)
-        statefile.save(path, state)
-        info("レビュー結果を差し戻します。指摘には必ず改善項目 ID を付けてください")
-        sys.exit(3)
-    if verdict == "approved":
-        for item_id in entry["apply"]["applied"]:
-            _find_item(state, item_id)["status"] = "done"
-        state["phase"] = "propose"
-        _remember(0)
-        statefile.save(path, state)
-        info("✅ レビュー担当 2 者とも承認しました")
-        return
-    _prepare_fix_phase(state, entry)
-    _remember(2)
-    statefile.save(path, state)
-    open_findings = sum(1 for f in record["findings"] if not f["resolved"])
-    info(f"変更要求があります（未解決の指摘 {open_findings} 件）")
-    sys.exit(2)
+    return verdict, problems, record
 
 
 def cmd_should_abandon(args: argparse.Namespace) -> None:
