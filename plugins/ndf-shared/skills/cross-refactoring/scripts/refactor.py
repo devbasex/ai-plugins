@@ -1870,25 +1870,6 @@ def cmd_judge_review(args: argparse.Namespace) -> None:
     )
 
 
-def _blocked_reviewers_without_actionable_findings(
-    reviewers: list[str],
-    reviews: dict[str, dict[str, Any]],
-    unposted: list[str],
-) -> list[str]:
-    """実装担当が読める指摘を残せなかったレビュー担当を挙げる。
-
-    **結果が無いことと、形が違うことを分ける。** 結果を残さなかったのは
-    レビュー担当のプロセスが仕事をしなかったということで、実装担当が
-    直せる指摘ではない。変更要求へ落とすと、直しようのない指摘を渡された
-    実装担当が空回りし、承認済みの項目まで見送りへ進む。
-
-    **投稿できなかった担当も同じ扱いにする。** 判定は残っていても
-    Pull Request に指摘が無い以上、実装担当が読めるものは存在しない。
-    """
-    missing = [name for name in reviewers if name not in reviews]
-    return missing + [name for name in unposted if name not in missing]
-
-
 def _handle_invalid_review_verdict(
     path: pathlib.Path,
     state: dict[str, Any],
@@ -1912,7 +1893,14 @@ def _handle_invalid_review_verdict(
         statefile.save(path, state)
         info("レビュー結果を差し戻します。指摘には必ず改善項目 ID を付けてください")
         sys.exit(3)
-    blocked = _blocked_reviewers_without_actionable_findings(reviewers, reviews, unposted)
+    # **結果が無いことと、形が違うことを分ける。** 結果を残さなかったのは
+    # レビュー担当のプロセスが仕事をしなかったということで、実装担当が
+    # 直せる指摘ではない。変更要求へ落とすと、直しようのない指摘を渡された
+    # 実装担当が空回りし、承認済みの項目まで見送りへ進む。
+    missing = [name for name in reviewers if name not in reviews]
+    # **投稿できなかった担当も同じ扱いにする。** 判定は残っていても
+    # Pull Request に指摘が無い以上、実装担当が読めるものは存在しない。
+    blocked = missing + [name for name in unposted if name not in missing]
     if blocked:
         remember(ABORT)
         statefile.save(path, state)
