@@ -35,7 +35,7 @@ import signal
 import subprocess
 import sys
 import time
-from typing import Any, Callable, Iterable, Optional
+from typing import Any, Iterable, Optional
 
 sys.path.insert(
     0,
@@ -1769,24 +1769,6 @@ def cmd_judge_review(args: argparse.Namespace) -> None:
             {"key": review_key, "exit": exit_code}
         )
 
-    _handle_review_verdict(
-        path, state, entry, reviewers, reviews, unposted,
-        verdict, problems, record, _remember,
-    )
-
-
-def _handle_review_verdict(
-    path: pathlib.Path,
-    state: dict[str, Any],
-    entry: dict[str, Any],
-    reviewers: list[str],
-    reviews: dict[str, dict[str, Any]],
-    unposted: list[str],
-    verdict: str,
-    problems: list[str],
-    record: dict[str, Any],
-    remember: Callable[[int], None],
-) -> None:
     if verdict == "invalid":
         for p in problems:
             info(f"❌ {p}")
@@ -1801,7 +1783,7 @@ def _handle_review_verdict(
             # Pull Request に指摘が無い以上、実装担当が読めるものは存在しない。
             blocked = missing + [name for name in unposted if name not in missing]
             if blocked:
-                remember(ABORT)
+                _remember(ABORT)
                 statefile.save(path, state)
                 die(
                     f"レビュー担当 {' / '.join(blocked)} が結果を残せませんでした"
@@ -1827,11 +1809,11 @@ def _handle_review_verdict(
             # 進まない。`should-abandon` は `fix_rounds` で見送りを決めるため、
             # 上限へ永久に到達せず修正と再レビューを往復し続ける。
             _prepare_fix_phase(state, entry)
-            remember(2)
+            _remember(2)
             statefile.save(path, state)
             info("差し戻しの上限に達したため、変更要求として扱います")
             sys.exit(2)
-        remember(3)
+        _remember(3)
         statefile.save(path, state)
         info("レビュー結果を差し戻します。指摘には必ず改善項目 ID を付けてください")
         sys.exit(3)
@@ -1839,12 +1821,12 @@ def _handle_review_verdict(
         for item_id in entry["apply"]["applied"]:
             _find_item(state, item_id)["status"] = "done"
         state["phase"] = "propose"
-        remember(0)
+        _remember(0)
         statefile.save(path, state)
         info("✅ レビュー担当 2 者とも承認しました")
         return
     _prepare_fix_phase(state, entry)
-    remember(2)
+    _remember(2)
     statefile.save(path, state)
     open_findings = sum(1 for f in record["findings"] if not f["resolved"])
     info(f"変更要求があります（未解決の指摘 {open_findings} 件）")
