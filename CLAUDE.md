@@ -29,7 +29,7 @@ skills/     → 実行可能なワークフロー
 
 詳細は `docs/specifications/ndf-knowledge-and-kiro.md` を参照。
 
-## NDF v8.5.4 の Skill 構成
+## NDF v8.6.0 の Skill 構成
 
 Skill は 31 個で、配布は `plugins/ndf-shared/manifests/` が唯一の基準（Claude Code 27 / Codex 25 / Kiro 26）。ブラウザ自動テストの 4 個は `playwright-kit` プラグインへ分離した（`plugins/playwright-kit-shared/`）。frontmatter の書き方は `plugins/ndf-shared/skills/README.md` の規約に従い、`python3 scripts/check-skill-frontmatter.py` で検査する。利用実績と維持・統合・削除の判定は `docs/specifications/ndf-skill-inventory.md` に記録する。
 
@@ -57,6 +57,8 @@ v8.5.3 で `cross-refactoring` の投稿の確認を入れた。投稿は AI 自
 
 v8.5.4 で `cross-refactoring` の差分予算を手法別にした。新しい定義を作って呼び出し側を書き換える手法は、抽出した本体に加えて呼び出し側の書き換え・import の追加・引数の受け渡しが固定費として乗る。実測で予算超過として落ちた 4 件はいずれも `long_method` の抽出で、見積の 2.03〜2.31 倍だった。範囲の逸脱ではなく、倍率 2 の予算をわずかに超えただけである。抽出系の 7 手法だけ倍率を 3 にした（範囲外を触った実測例は見積の 4 倍なので取り逃がさない）。あわせて提案プロンプトの見積の指示へ固定費と現状固定テストを数えることを明記し、`init` が kiro の既定 `auto` を検知して「集計から分離される」ことを着手前に知らせるようにした。詳細は `plugins/ndf-shared/skills/cross-refactoring/docs/02-apply-and-review.md`。
 
+v8.6.0 で `cross-refactoring` のコミット粒度を 1 改善項目 = 1 コミットに変えた。手順を 1 手ずつ進めることと、その途中経過を履歴に残すことは別である。手ごとにテストを回すのは変わらないが、残すのは項目単位の 1 コミットだけにする（現状固定テストが要る項目のみ 2 コミット）。適用と修正の両方で検証するのは、適用側だけ揃えても指摘への対応という名目で刻んだ履歴が戻ってくるためである。あわせて改修計画（なぜ直すのか・どう直すのか）を `--plan-file`（既定 `issues/refactoring-plan-rf<PR>.md`）へ書き出すようにした。理由と手順は提案の時点でしか残らず、状態ファイルは差分から除外されるため Pull Request からは読めなかった。公開は生成物の同期と同じコミットに乗せる。詳細は `plugins/ndf-shared/skills/cross-refactoring/docs/02-apply-and-review.md`。
+
 v6.0.0 の対応表（`review` → `pr-review`）は予告どおり削除済み。v6.0.0 以前から移行する場合は v6.1.0 の `ndf-policies` を参照する。
 
 ## cross-refactoring
@@ -74,6 +76,8 @@ v6.0.0 の対応表（`review` → `pr-review`）は予告どおり削除済み�
 - 収束しない改善項目は **項目単位で取り消す**。合意済みの項目は PR に残る。ただし同一ファイルの隣接行を触る項目どうしは git だけでは分離できないため、そのラウンドは全件取り消しへ退避する
 - 生成物・配布物の同期は **進行側の責務**。実装担当にはさせない（範囲外の変更になる）。同期の手順は `--sync-command "bash scripts/build-runtime-plugins.sh"` のように渡す
 - 公開するのは **進行側だけ**。実装担当は push しない。進行側が検証を通した後に push するので、未検証の変更が公開されない
+- 履歴に残るのは **1 改善項目 = 1 コミット**。現状固定テストが要る項目だけ 2 コミット
+- 改修計画は `--plan-file`（既定 `issues/refactoring-plan-rf<PR>.md`）へ書き出され、生成物の同期と同じコミットで公開される
 - `init` が参加 CLI の認証状態を確認する。誤検知するときは `NDF_SKIP_AUTH_CHECK=1`
 
 ## cross-review
