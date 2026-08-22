@@ -387,6 +387,54 @@ def test_resolved_threads_follows_pagination(refactor, monkeypatch):
     assert any("cursor=C1" in "".join(c) for c in calls)
 
 
+def test_merge_fix_skips_already_merged_result(
+    refactor, tmp_path, env_tmp_dir, monkeypatch
+):
+    """同じ試行番号・同じ結果ファイルの内容は二重に取り込まない。
+
+    叩き直しても鍵（試行番号 + 結果ファイルのハッシュ）が変わらなければ、
+    fix_rounds を進めず即座に戻る。
+    """
+    state_path = _prepare_fix(refactor, tmp_path, env_tmp_dir, monkeypatch, ["PRRT_a"])
+    state = read_state(state_path)
+    result_path = state_path.parent / "codex-fix-r1-result.json"
+    import hashlib as _hashlib
+    merge_key = "1:" + _hashlib.sha256(result_path.read_bytes()).hexdigest()
+    state["rounds"][0]["fix_merged_keys"] = [merge_key]
+    state_path.write_text(__import__("json").dumps(state), encoding="utf-8")
+    monkeypatch.setattr(refactor, "resolved_threads_on_github",
+                        lambda repo, pr: {"PRRT_a"})
+    refactor.cmd_merge_fix(type("A", (), {"id": 130, "round": 1})())
+
+    after = read_state(state_path)
+    # fix_rounds は進まず、解決も反映されない（早期に戻ったため）
+    assert after["rounds"][0]["fix_rounds"] == 0
+    assert after["rounds"][0]["reviews"][0]["findings"][0]["resolved"] is False
+
+
+def test_merge_fix_rejects_commits_missing_from_the_claim(
+    refactor, tmp_path, env_tmp_dir, monkeypatch
+):
+    """範囲に含まれるが誰の申告にも無いコミットがあれば、範囲ごと取り消す。"""
+    state_path = _prepare_fix(refactor, tmp_path, env_tmp_dir, monkeypatch, ["PRRT_a"])
+    monkeypatch.setattr(refactor, "resolved_threads_on_github",
+                        lambda repo, pr: {"PRRT_a"})
+    # 範囲には fix111 の他に申告されていない stray999 が含まれる
+    monkeypatch.setattr(
+        refactor, "commits_in_range",
+        lambda work, base, head: ["fix111", "stray999"],
+    )
+    calls = _no_git(refactor, monkeypatch)
+    refactor.cmd_merge_fix(type("A", (), {"id": 130, "round": 1})())
+
+    state = read_state(state_path)
+    assert state["rounds"][0]["reviews"][0]["findings"][0]["resolved"] is False
+    assert "fix111" not in state["items"][0]["commits"]
+    reverted = [c[-1] for c in calls if c[:2] == ["git", "revert"]]
+    assert "stray999" in reverted and "fix111" in reverted
+    assert any(c[:2] == ["git", "push"] for c in calls)
+
+
 @pytest.mark.parametrize("broken_ids", ["文字列", 123, True, {"a": 1}])
 def test_broken_fix_result_does_not_crash(
     refactor, tmp_path, env_tmp_dir, monkeypatch, broken_ids
