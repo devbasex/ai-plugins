@@ -3142,29 +3142,6 @@ def _require_clean_worktree(state: dict[str, Any], work: str) -> None:
     )
 
 
-def _run_sync_command(state: dict[str, Any], work: str, command: str) -> None:
-    """同期コマンドを実行する。失敗したら差分を捨てて中断する。
-
-    **黙って push しない。** 同期できない状態を公開すると、利用者のリポジトリの
-    検査を壊したまま進むことになる。
-    """
-    code, timed_out = _run_with_timeout(
-        command, work, _safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT)
-    )
-    if not (timed_out or code != 0):
-        return
-    # **途中まで書き換えた差分を残さない。** 残すと次の実行は
-    # `_require_clean_worktree` で必ず止まり、`pending_push` の再試行が
-    # 永久に進まなくなる。着手前が綺麗だったことは確認済みなので、
-    # ここにある変更は全て同期が作ったものだと分かる。
-    _discard_worktree_changes(work)
-    die(
-        f"生成物の同期に失敗しました（{command}）: "
-        + ("打ち切りました" if timed_out else f"終了コード {code}")
-        + "。同期が作った差分は破棄したので、原因を直せばそのまま再開できます"
-    )
-
-
 def _sync_generated(state: dict[str, Any]) -> None:
     """push の直前に生成物を同期し、差分があれば進行側のコミットとして積む。
 
@@ -3186,7 +3163,20 @@ def _sync_generated(state: dict[str, Any]) -> None:
     # **同期の前に作業ツリーが綺麗であることを求める。** 汚れたまま同期すると、
     # 同期が作った差分と元からあった差分を区別できない。
     _require_clean_worktree(state, work)
-    _run_sync_command(state, work, command)
+    code, timed_out = _run_with_timeout(
+        command, work, _safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT)
+    )
+    if timed_out or code != 0:
+        # **途中まで書き換えた差分を残さない。** 残すと次の実行は
+        # `_require_clean_worktree` で必ず止まり、`pending_push` の再試行が
+        # 永久に進まなくなる。着手前が綺麗だったことは確認済みなので、
+        # ここにある変更は全て同期が作ったものだと分かる。
+        _discard_worktree_changes(work)
+        die(
+            f"生成物の同期に失敗しました（{command}）: "
+            + ("打ち切りました" if timed_out else f"終了コード {code}")
+            + "。同期が作った差分は破棄したので、原因を直せばそのまま再開できます"
+        )
     produced = _dirty_paths(state, work)
     if not produced:
         return
