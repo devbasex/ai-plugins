@@ -359,3 +359,27 @@ def test_init_keeps_the_posting_event_on_someone_elses_pull_request(run_init, tm
     assert state["is_own_pr"] is False
     assert state["event_downgrade"] is False
     assert "COMMENT" not in state["review_post_note"]
+
+
+def test_init_fills_the_posting_event_when_resuming_an_old_state(run_init, tmp_path):
+    """この指示が入る前の状態ファイルから再開しても投稿の event を倒すこと。
+
+    再開の分岐は状態ファイルをそのまま使って戻る。項目が無い状態ファイルを
+    そのまま渡すと、起動側は空の指示を読み、自分の Pull Request で
+    `HTTP 422` を踏み続ける。
+    """
+    run_init(_args(tmp_path), viewer="me")
+    path, state = _state_of(tmp_path)
+    # 旧版が書いた状態ファイル（3 項目が無い）を再現する
+    for key in ("is_own_pr", "event_downgrade", "review_post_note"):
+        state.pop(key)
+    state["outer_round"] = 2
+    path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+
+    run_init(_args(tmp_path), viewer="me")
+
+    _, resumed = _state_of(tmp_path)
+    assert resumed["outer_round"] == 2, "再開であって初期化ではないこと"
+    assert resumed["is_own_pr"] is True
+    assert resumed["event_downgrade"] is True
+    assert "COMMENT" in resumed["review_post_note"]

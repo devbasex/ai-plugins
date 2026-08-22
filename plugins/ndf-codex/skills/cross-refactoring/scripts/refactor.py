@@ -728,6 +728,19 @@ def _review_post_note(is_own_pr: bool) -> str:
     )
 
 
+def _apply_post_event(state: dict[str, Any], is_own_pr: bool) -> None:
+    """投稿の event に関する項目を状態へ入れる。
+
+    初期化と再開の**両方**から呼ぶ。この指示が入る前の版で作った状態ファイルには
+    項目そのものが無く、無いまま再開すると自分の Pull Request で `HTTP 422` を
+    踏み続ける。値は GitHub 側の照合結果だけで決まるので、再開のたびに入れ直しても
+    判定は変わらない。
+    """
+    state["is_own_pr"] = is_own_pr
+    state["event_downgrade"] = is_own_pr
+    state["review_post_note"] = _review_post_note(is_own_pr)
+
+
 def cmd_init(args: argparse.Namespace) -> None:
     """Step 0 — ホストと母集合を確定し、作業ディレクトリ root と状態を用意する。
 
@@ -784,6 +797,8 @@ def cmd_init(args: argparse.Namespace) -> None:
         state = statefile.load(state_file)
         if state.get("final") is None:
             info(f"↻ 前回中断した状態から再開します（提案ラウンド {state.get('outer_round', 0)}）")
+            _apply_post_event(state, is_own_pr)
+            statefile.save(state_file, state)
             _emit_init(state)
             return
 
@@ -796,12 +811,6 @@ def cmd_init(args: argparse.Namespace) -> None:
         "current_pr": args.pr,
         "base_branch": base_branch,
         "head_branch": head_branch,
-        # GitHub は自分の Pull Request への `APPROVE` と `REQUEST_CHANGES` を
-        # `HTTP 422` で拒む。判定はそのまま結果ファイルへ残し、**投稿の event だけ**
-        # を倒す。収束判定は結果ファイルの判定を見るので、倒しても進行は変わらない。
-        "is_own_pr": is_own_pr,
-        "event_downgrade": is_own_pr,
-        "review_post_note": _review_post_note(is_own_pr),
         "worktree_root": str(root),
         "worktrees": {"work": str(work), **{r: str(root / r) for r in runtimes}},
         "tmp_dir": str(tmp_dir),
@@ -831,6 +840,10 @@ def cmd_init(args: argparse.Namespace) -> None:
         "deferred_items": [],
         "final": None,
     }
+    # GitHub は自分の Pull Request への `APPROVE` と `REQUEST_CHANGES` を
+    # `HTTP 422` で拒む。判定はそのまま結果ファイルへ残し、**投稿の event だけ**
+    # を倒す。収束判定は結果ファイルの判定を見るので、倒しても進行は変わらない。
+    _apply_post_event(state, is_own_pr)
     statefile.save(state_file, state)
     info(f"✅ 状態を初期化しました: {state_file}")
     info(f"   ホスト: {host}（{detection}）")
