@@ -1154,30 +1154,14 @@ def cmd_start_round(args: argparse.Namespace) -> None:
     )
 
 
-def cmd_merge_proposals(args: argparse.Namespace) -> None:
-    """Step 3 — 提案をマージして改善項目を作る。
+def _load_runtime_proposals(
+    state: dict[str, Any], entry: dict[str, Any]
+) -> dict[str, list[dict[str, Any]]]:
+    """各ランタイムの提案結果ファイルを読み込み、JSON を解析する。
 
-    終了コード: 0 = 採用あり / 2 = 採用 0 件（提案ラウンドの繰り返しを終える）。
-
-    **同じラウンドで叩き直しても二重に項目を作らない。** 進行を止めても再開できる
-    ことが前提なので、統合済みなら前回と同じ結果をそのまま返す。
+    1 者が結果ファイルを欠かした・壊れた JSON を返した場合も、その者の提案を
+    無かったものとして扱い、全体の統合は続ける。
     """
-    path, state = _load(args.id)
-    entry = _current_round(state)
-
-    if entry.get("proposal_keys") is not None:
-        info(
-            f"↻ 提案ラウンド {entry['round']} は統合済みです"
-            f"（採用 {entry.get('adopted', 0)} 件 / 見送り {entry.get('deferred', 0)} 件）"
-        )
-        for item_id in entry.get("items", []):
-            item = _find_item(state, item_id, required=False)
-            if item is not None:
-                info(f"  {item_id} [{item['severity']}] {item['path']}#{item['symbol']}")
-        if not entry.get("adopted"):
-            sys.exit(2)
-        return
-
     proposals: dict[str, list[dict[str, Any]]] = {}
     for runtime in state["runtimes"]:
         result = _result_path(
@@ -1206,6 +1190,34 @@ def cmd_merge_proposals(args: argparse.Namespace) -> None:
         proposals[runtime] = [i for i in items if isinstance(i, dict)] \
             if isinstance(items, list) else []
         entry["proposed"][runtime] = len(proposals[runtime])
+    return proposals
+
+
+def cmd_merge_proposals(args: argparse.Namespace) -> None:
+    """Step 3 — 提案をマージして改善項目を作る。
+
+    終了コード: 0 = 採用あり / 2 = 採用 0 件（提案ラウンドの繰り返しを終える）。
+
+    **同じラウンドで叩き直しても二重に項目を作らない。** 進行を止めても再開できる
+    ことが前提なので、統合済みなら前回と同じ結果をそのまま返す。
+    """
+    path, state = _load(args.id)
+    entry = _current_round(state)
+
+    if entry.get("proposal_keys") is not None:
+        info(
+            f"↻ 提案ラウンド {entry['round']} は統合済みです"
+            f"（採用 {entry.get('adopted', 0)} 件 / 見送り {entry.get('deferred', 0)} 件）"
+        )
+        for item_id in entry.get("items", []):
+            item = _find_item(state, item_id, required=False)
+            if item is not None:
+                info(f"  {item_id} [{item['severity']}] {item['path']}#{item['symbol']}")
+        if not entry.get("adopted"):
+            sys.exit(2)
+        return
+
+    proposals = _load_runtime_proposals(state, entry)
 
     excluded = {
         (d["path"], d["symbol"], d["smell"]) for d in state["deferred_items"]
