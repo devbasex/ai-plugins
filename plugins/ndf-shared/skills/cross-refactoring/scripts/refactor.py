@@ -2875,6 +2875,18 @@ def _drop_replay_plan(
     return owner, keep_ids, replay
 
 
+def _dry_run_drop_plan(
+    pending: list[str], ordered: list[str], replay: list[str]
+) -> dict[str, Any]:
+    """dry-run 時の出力と戻り値を作る。実際の revert/cherry-pick は行わない。"""
+    for sha in ordered:
+        info(f"（dry-run）git revert --no-edit {sha}")
+    for sha in replay:
+        info(f"（dry-run）git cherry-pick {sha}")
+    return {"mode": "item", "dropped": pending,
+            "reverted": len(ordered), "replayed": len(replay)}
+
+
 def _drop_items(
     state: dict[str, Any], entry: dict[str, Any], drop_ids: list[str],
     dry_run: bool = False,
@@ -2918,12 +2930,7 @@ def _drop_items(
     owner, keep_ids, replay = _drop_replay_plan(state, entry, pending, ordered)
 
     if dry_run:
-        for sha in ordered:
-            info(f"（dry-run）git revert --no-edit {sha}")
-        for sha in replay:
-            info(f"（dry-run）git cherry-pick {sha}")
-        return {"mode": "item", "dropped": pending,
-                "reverted": len(ordered), "replayed": len(replay)}
+        return _dry_run_drop_plan(pending, ordered, replay)
 
     _revert_range(work, ordered, head)
     # 取り消しが済んだ地点。積み直しに失敗したらここへ戻せばよい。
