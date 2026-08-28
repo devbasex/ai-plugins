@@ -193,8 +193,8 @@ flowchart TD
 各ステップの詳細は `docs/` 参照。メインは以下のテンプレートで scripts/ を呼ぶだけ:
 
 ```bash
-PLUGIN_ROOT="${PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}"
-SCRIPTS="$PLUGIN_ROOT/skills/cross-review/scripts"
+# SKILL_DIR と SCRIPTS の決め方は docs/01-state-and-review.md の冒頭にある。
+# 同じ 17 行を先に実行して SCRIPTS を決めてから、以下を続ける。
 
 # STATE_PR は state.json のキー (= 最初に init した PR 番号)。
 # rotation 後も state.json のパスは変わらないため、scripts/ への引数には常に

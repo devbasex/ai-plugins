@@ -35,12 +35,58 @@ NDF plugin の plugin name は全 runtime で `ndf` を維持する。旧 `plugi
 
 `plugins/ndf-shared/manifests/{claude,codex,kiro}-skills.txt` は runtime ごとの配布 Skill 一覧を定義する。`scripts/build-runtime-plugins.sh` はこの manifest を読み、`plugins/ndf-shared/skills` から各 runtime の `skills/` へ同期する。
 
-Codex / Kiro では一部 Skill 内の `${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}` 参照を runtime 用に書き換える。
+Skill 内のパス参照の書き換えは、runtime ごとに次のとおりである。
 
-| runtime | 書き換え |
-|---|---|
-| Codex | `${CODEX_PLUGIN_ROOT}` を含む fallback と `skills/` 配下 script path に変換 |
-| Kiro CLI | `plugins/ndf-kiro` を既定 root とする参照に変換 |
+| runtime | 書き換え | 対象 |
+|---|---|---|
+| Codex | なし | — |
+| Kiro CLI | `plugins/ndf-kiro` を既定 root とする参照に変換 | `statusline` |
+
+`fix` / `cross-review` / `cross-refactoring` はプラグインルート起点をやめ、Skill ディレクトリ
+起点（`$SKILL_DIR/scripts`、隣の Skill へは `$SKILL_DIR/../<Skill 名>/`）で参照する。配布
+ディレクトリの形が runtime ごとに違っても、Skill 直下の `scripts/` の位置は変わらないため
+書き換えが要らない。Kiro CLI が `.kiro/skills/` へ張った symlink 越しでも `..` は解決先を
+経由して届く。Codex 向けの書き換えは対象が 0 になり、生成物が共通編集元と一致する。
+
+`statusline` だけは Skill 直下ではなくプラグインルート直下の `scripts/` を呼ぶ。Claude Code と
+Kiro CLI へ配っており、Kiro にはプラグインルートを示す環境変数が無いため、この 1 個だけ
+書き換えが残る。
+
+### Skill ディレクトリの解決
+
+Skill ディレクトリ起点で書いた Skill は、候補を順に試し、`scripts/` を持つ最初のものを
+絶対パスで採る。
+
+| 順 | 候補 | 当たる runtime |
+|---|---|---|
+| 1 | `${CLAUDE_PLUGIN_ROOT}/skills/<Skill 名>` | Claude Code |
+| 2 | エージェントが `<この Skill のディレクトリ>` を置き換えたパス | Codex |
+| 3 | `.kiro/skills/<Skill 名>` | Kiro CLI（workspace scope） |
+| 4 | `$HOME/.kiro/skills/<Skill 名>` | Kiro CLI（global scope） |
+
+2 は runtime が自動で展開するものではない。SKILL.md のコメントが、実行前にこのプレース
+ホルダを実際のパスへ置き換えるようエージェントへ指示する。置き換えなかった場合はこの候補が
+外れるだけで、別の場所を読むことはない。
+
+2 を `.kiro` より先に見るのは、Kiro の設定を持つリポジトリで Codex や Claude Code を
+動かしたときに、別 runtime の Skill を選ばないためである。
+
+`${CLAUDE_PLUGIN_ROOT}` はシングルクォートで囲んで代入し、値が `$` で始まっていたら
+「置き換えられなかった」と判断して候補から外す。シェルに展開させないため、未定義の変数を
+読まずに済み `set -u` でも落ちない。
+
+採用した候補は `cd … && pwd` で絶対パスへ直す。Kiro CLI の候補は相対パスであり、そのまま
+持ち回ると `cross-review` のように途中で worktree へ移る Skill で参照が外れる。
+
+どれも当たらなければメッセージを出して止める。黙って別の場所を読むことはない。
+
+根拠にした実測（Claude Code 2.1.250 / Codex CLI 0.149.0）は次のとおり。
+
+| runtime | SKILL.md 内の `${CLAUDE_PLUGIN_ROOT}` | シェルの環境変数 | Skill のパスをモデルへ渡すか |
+|---|---|---|---|
+| Claude Code | プラグインルートの絶対パスへ展開する | 置かない | 渡す（絶対パス） |
+| Codex | 展開しない | 置かない | 渡す（絶対パス） |
+| Kiro CLI | 展開しない | 置かない | 渡す（`.kiro/skills/<Skill 名>` の相対パス） |
 
 scripts は `plugins/ndf-shared/scripts` から `plugins/ndf-{runtime}/scripts` へ同期する。
 
