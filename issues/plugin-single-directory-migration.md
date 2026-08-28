@@ -47,12 +47,19 @@
 | 13 | playwright-kit の 3 つの配布物は共通編集元と同一内容 | `diff -rq plugins/playwright-kit-shared/skills plugins/playwright-kit-{claude,codex,kiro}/skills` の差分が未追跡の `.venv` のみ |
 | 14 | ndf の共通編集元には Skill が 31 個あり、配布は Claude Code 27 / Codex 25 / Kiro 26 で、どの manifest にも載らない 4 個がある | `ls plugins/ndf-shared/skills` が `README.md` を除いて 31 件。`cat plugins/ndf-shared/manifests/*.txt \| sort -u \| wc -l` が 27 で、3 つの manifest の和集合は Claude Code の 27 個と一致する。差の 4 個は `google-auth` / `google-drive` / `ml-model-structure` / `skill-stats` |
 | 15 | 利用者は Git リポジトリを直接指して導入し、配布用のアーカイブを作る工程は無い | 導入手順は `/plugin marketplace add https://github.com/devbasex/ai-plugins`、`codex plugin marketplace add https://github.com/devbasex/ai-plugins`、Kiro は `git clone` 後の installer 実行。生成物である現在の配布物も Git で追跡している（`git ls-files plugins/ndf-codex/skills \| wc -l` → 113） |
+| 16 | Codex 用マニフェストの `skills` に配列を書くと、配列に載せた Skill だけが公開される | `skills/` に 3 個（`alpha` / `beta` / `gamma`）を置き、`skills` に `alpha` と `beta` だけを列挙した検証用プラグインを導入。キャッシュには 3 個とも展開されるが、`codex exec` に列挙させると `codexprobe:alpha` と `codexprobe:beta` の 2 個だけが出た |
+| 17 | Codex は Skill ディレクトリに張った symlink を読まない | `.codex-plugin/skills/` に symlink を張り `skills` でそのディレクトリを指した検証用プラグインを導入。キャッシュへ複製する時点で symlink が落ち（複製先のディレクトリが空）、Skill は 1 個も公開されなかった |
+| 18 | Claude Code はマニフェストの `hooks` フィールドからのパス指定を読む | `.claude-plugin/plugin.json` に `"hooks": "./hooks/claude.json"` を書いた検証用プラグインで SessionStart フックが発火。既定パス `hooks/hooks.json` の対照プラグインも同時に発火した |
+| 19 | 3 ランタイムとも、Skill が実行するシェルにプラグインルートの環境変数を置かない | 検証用 Skill から `echo` させ、`CLAUDE_PLUGIN_ROOT` / `CODEX_PLUGIN_ROOT` / `PLUGIN_ROOT` がいずれも空。Agent Plugins 1.0.0 §9.1 が `PLUGIN_ROOT` を義務づけるのは MCP サーバのサブプロセスに対してだけである |
+| 20 | Claude Code は SKILL.md 内の `${CLAUDE_PLUGIN_ROOT}` をプラグインルートの絶対パスへ置き換えてからモデルへ渡す | 同じ検証用 Skill で確認。シングルクォートの中でも置き換わる。`${CLAUDE_PLUGIN_ROOT:-}` の形は置き換わらない |
+| 21 | Codex はモデルへ Skill ディレクトリの絶対パスを渡す | `codex exec` に Skill を読ませ、その SKILL.md が置かれたディレクトリを答えさせて確認 |
 
-Kiro CLI は 2.19.1、Codex CLI は 0.148.0、Claude Code は 2.1.240 で確認した。
+Kiro CLI は 2.19.1、Codex CLI は 0.148.0（事実 16〜21 と 20 は 0.149.0）、Claude Code は 2.1.240
+（事実 18〜21 は 2.1.250）で確認した。
 
 ## 受け入れ条件
 
-- [ ] Skill の実体が、プラグインごとに 1 ディレクトリだけ存在する（`git ls-files` で同名 Skill の重複が出ない）。Task 3 で Codex の `skills` 配列と symlink がどちらも効かないと分かった場合に限り、ndf の Codex 向け 25 個の重複を例外として許す
+- [ ] Skill の実体が、プラグインごとに 1 ディレクトリだけ存在する（`git ls-files` で同名 Skill の重複が出ない）。例外は設けない（Task 3 で Codex の `skills` 配列が効くと分かったため、複製は要らない）
 - [ ] `scripts/build-runtime-plugins.sh` に実行時パスの書き換え処理が残っていない（`rewrite_codex_skill_paths` / `rewrite_kiro_skill_paths` の定義と呼び出しが無い）
 - [ ] Claude Code で `claude plugin validate` が全プラグインとマーケットプレイス定義で成功する
 - [ ] Codex で全プラグインを導入でき、Skill 数が導入前と一致する
@@ -86,7 +93,7 @@ plugins/ndf/
 
 `optional-skills/` には、どの `manifests/*-skills.txt` にも載せない Skill を置く。ndf の共通編集元には Skill が 31 個あるが、3 つの manifest の和集合は 27 個で、`google-auth` / `google-drive` / `ml-model-structure` / `skill-stats` の 4 個はどのランタイムへも配っていない（事実 14）。これらを `skills/` へ置くと、公開されるかどうかがマニフェスト側の絞り込みだけに掛かる。`skills/` を配布 Skill の実体だけに保てば、絞り込みの結果によらず 27 / 25 / 26 が変わらず、`skills/` を全件公開するルートマニフェストを ndf へ置く選択肢も残せる。4 個は残す。`docs/specifications/ndf-skill-inventory.md` の判定がいずれも「維持」で、`skill-stats` は Skill 台帳の測定ツール、`google-auth` は playwright-kit の Drive 連携が参照先として案内している依存だからである。
 
-`hooks/` を `claude.json` と `codex.json` に分ける形は、Claude Code がマニフェストの `hooks` フィールドからのパス指定を読むことを前提としている。この前提は Task 3 で実測し、成り立たない場合は Claude Code 用を `hooks/hooks.json` の固定パスに据え置く。
+`hooks/` を `claude.json` と `codex.json` に分ける形は、Claude Code がマニフェストの `hooks` フィールドからのパス指定を読むことを前提としている。Task 3 で実測し、読むことを確かめた（事実 18）。
 
 ### ルートマニフェストを置く基準
 
@@ -116,7 +123,7 @@ Skill から参照するパスを、プラグインルート起点から Skill �
 | `fix` | `${PLUGIN_ROOT}/skills/fix/scripts/` | Skill ディレクトリ直下の `scripts/` |
 | `cross-review` | `${PLUGIN_ROOT}/skills/cross-review/scripts` | Skill ディレクトリ直下の `scripts/` |
 | `cross-refactoring` | `${PLUGIN_ROOT}/skills/cross-refactoring/scripts` と `${PLUGIN_ROOT}/skills/cross-review/scripts/lib` | Skill ディレクトリ直下の `scripts/` と `../cross-review/scripts/lib` |
-| `statusline` | `${PLUGIN_ROOT}/scripts/statusline-switch.sh` | `${CLAUDE_PLUGIN_ROOT}` のまま（Claude Code 専用の Skill） |
+| `statusline` | `${PLUGIN_ROOT}/scripts/statusline-switch.sh` | `${CLAUDE_PLUGIN_ROOT}` のまま（プラグインルート直下の `scripts/` を呼ぶ。Claude Code と Kiro CLI へ配っており、Kiro 向けの書き換えだけが残る） |
 | `official-skills-autoloader` | `${CLAUDE_PLUGIN_ROOT}/scripts/` | 変更しない（Claude Code 専用の Skill） |
 
 ## 修正対象
@@ -189,17 +196,25 @@ ndf は配布 Skill が Claude Code 27 / Codex 25 と異なり、両ランタイ
   - Codex が Skill ディレクトリに張った symlink を解決して Skill として読むか。事実 6 で確かめたのは Kiro CLI の `.kiro/skills/` だけで、Codex については実測が無い。`skills` 配列が効かなかったときの代替案がこの前提の上に乗るため、同じ機会に確かめる
   - Claude Code がマニフェストの `hooks` フィールドからのパス指定を読むか。現在の `plugins/ndf-claude/.claude-plugin/plugin.json` に `hooks` フィールドは無く、`hooks/hooks.json` の自動探索に依存している
 - **満たす受け入れ条件:** —
-- **進め方:** 結果によって Task 4 の構成を選ぶ。`hooks` フィールドが効かない場合は、Claude Code 用を `hooks/hooks.json` の固定パスに据え置き、Codex 用だけを `hooks/codex.json` として明示参照する。`skills` 配列が効かない場合は、Codex へ配る 25 個を `.codex-plugin/skills/` へ並べて `skills` にそのディレクトリを指定する。並べ方は symlink の実測結果で決める
+- **進め方:** 結果によって Task 4 の構成を選ぶ
 
-`skills` 配列と symlink の実測結果の組み合わせごとに、採る構成を先に決めておく。
+**実測の結果**（事実 16〜18）:
 
-| `skills` 配列 | Codex の symlink 解決 | 採る構成 |
-| --- | --- | --- |
-| 効く | 問う必要なし | `skills/` の 27 個を実体として置き、`.codex-plugin/plugin.json` の `skills` に 25 個を列挙する |
-| 効かない | 解決する | `.codex-plugin/skills/` に 25 個の symlink を張り、`skills` にそのディレクトリを指定する。symlink はビルドで生成し、追跡対象に含める |
-| 効かない | 解決しない | `.codex-plugin/skills/` に 25 個の実体を複製する。複製はビルドで生成し、Git で追跡して `--check` の対象に含める |
+| 問い | 結果 |
+| --- | --- |
+| Codex 用マニフェストの `skills` 配列で絞り込めるか | 効く |
+| Codex は Skill ディレクトリの symlink を読むか | 読まない（キャッシュへの複製で symlink が落ちる） |
+| Claude Code はマニフェストの `hooks` フィールドを読むか | 読む |
 
-3 つ目に落ちた場合、Codex 向けだけは Skill の実体が 2 箇所に並ぶ。複製を `.gitignore` で追跡から外す形は採らない。事実 15 のとおり利用者は Git リポジトリを直接指して導入するため、追跡していない生成物は利用者の手元へ届かず、Codex 版の Skill が丸ごと欠ける。配布時にアーカイブを作る運用も、マーケットプレイスにリポジトリの URL を渡す現在の導入手順を変えることになるため採らない。重複は Git で追跡し、受け入れ条件 1 の例外として扱う。重複するのは Codex 向けの 25 個だけで、いま 3 ランタイム分の配布物として追跡している 342 ファイルよりは小さい。
+**Task 4 で採る構成**: `skills/` に配布 Skill 27 個を実体として置き、`.codex-plugin/plugin.json` の
+`skills` に 25 個を列挙する。Codex 向けの複製も symlink も要らない。受け入れ条件 1 に例外は
+生じない。hook は Claude Code 用を `hooks/claude.json`、Codex 用を `hooks/codex.json` に分け、
+それぞれのマニフェストの `hooks` フィールドから指す。
+
+symlink が使えないことは Task 4 の構成には影響しないが、Codex 向けの複製を避ける道が
+`skills` 配列だけであることを意味する。配列が将来効かなくなった場合、Git で追跡する複製に
+戻すほかない（事実 15 のとおり利用者は Git リポジトリを直接指して導入するため、追跡しない
+生成物は手元へ届かない）。
 
 ### Task 4: ndf を単一ディレクトリへ移す
 
@@ -227,7 +242,7 @@ ndf は配布 Skill が Claude Code 27 / Codex 25 と異なり、両ランタイ
 - **対象ファイル:** `scripts/build-runtime-plugins.sh`、`scripts/validate-runtime-plugins.sh`、`.github/workflows/`
 - **変更内容:** ビルドの役割を「マニフェストの `skills` 配列を `manifests/*-skills.txt` から生成する」ことに絞る。ディレクトリの複製処理と実行時パスの書き換え処理を取り除く。検証スクリプトからは、移行の途中で旧構成を受け付けるために残した分岐を落とす
 - **満たす受け入れ条件:** 2、6
-- **進め方:** 参照パスの追随は Task 1・4・5 で済んでいるため、ここでは縮小だけを行う。生成対象が縮むため、`--check` の対象はマニフェストが中心になる。Task 3 で `skills` 配列が効かないと分かった場合は、生成対象へ Codex 向け Skill ディレクトリの構築（symlink、または Codex が symlink を解決しない場合は実体の複製）が残る。どちらも Git で追跡するため、`--check` の対象にも残す
+- **進め方:** 参照パスの追随は Task 1・4・5 で済んでいるため、ここでは縮小だけを行う。生成対象が縮むため、`--check` の対象はマニフェストが中心になる。Task 3 で `skills` 配列が効くと分かったので、Codex 向け Skill ディレクトリの構築は要らない。`rewrite_codex_skill_paths` は Task 2 で削除済みで、残るのは `statusline` を書き換える `rewrite_kiro_skill_paths` だけである。受け入れ条件 2 を満たすには `statusline` の参照も Skill ディレクトリ起点（`$SKILL_DIR/../../scripts/`）へ変える必要がある
 
 ### Task 8: ドキュメントを更新する
 
@@ -263,12 +278,11 @@ ndf は配布 Skill が Claude Code 27 / Codex 25 と異なり、両ランタイ
 | リスク | 対処 |
 | --- | --- |
 | 実行時パスの変更で、いずれかのランタイムからスクリプトへ到達できなくなる | Task 2 を独立させ、3 ランタイムで到達を確認してから先へ進む |
-| Codex 側で Skill が想定より多く公開される | ルートマニフェストを置く基準を守る。ndf は Codex 用マニフェストの `skills` で絞り込む。絞り込みが効くかを Task 3 で実測し、効かない場合は Codex へ配る 25 個だけを `.codex-plugin/skills/` へ並べる |
-| `.codex-plugin/skills/` へ symlink で並べても、Codex が解決せず Skill を認識しない | symlink の解決も Task 3 で実測する。解決しない場合はビルドで実体を複製し、Git で追跡する。追跡から外すと、リポジトリを直接指して導入する利用者の手元に生成物が届かない。Task 3 の表に 3 通りの結果と採る構成を書いてある |
+| Codex 側で Skill が想定より多く公開される | ルートマニフェストを置く基準を守る。ndf は Codex 用マニフェストの `skills` で絞り込む。絞り込みが効くことを Task 3 で実測した（事実 16） |
 | どの配布先にも載せない 4 個の Skill を `skills/` へ置き、絞り込みが効かずに公開される | `optional-skills/` へ分け、`skills/` を配布 Skill の実体だけにする。Task 4 で移し、4 個を指しているドキュメントとスクリプトの参照も同じコミットで追随させる |
 | 移行の途中で、移動が済んでいないプラグインの Codex 導入経路が切れる | マーケットプレイス定義の統合を Task 6 へ切り出し、それまでは 2 つの定義を保って移し終えたエントリだけを更新する |
 | 移行の途中で、検証スクリプトが消えたディレクトリを探して CI と pre-push が落ちる | 参照パスの追随を移動と同じタスク・同じコミットで行う。移行の途中は新旧どちらの構成も受け付ける形にし、Task 7 で旧構成の分岐を落とす |
-| Claude Code がマニフェストの `hooks` フィールドを読まず、hook が発火しなくなる | Task 3 で実測する。読まない場合は Claude Code 用を `hooks/hooks.json` の固定パスに据え置き、Codex 用だけを `hooks/codex.json` として明示参照する |
+| Claude Code がマニフェストの `hooks` フィールドを読まず、hook が発火しなくなる | Task 3 で実測し、読むことを確かめた（事実 18） |
 | Kiro CLI が Agent Plugins 形式へ対応したとき、ルートマニフェストと installer の両方が働いて Skill が二重に載る | installer に、Kiro 側がプラグインを認識している場合は symlink を張らない判定を入れる |
 | Skill ディレクトリ内の仮想環境が Kiro のファイル監視を圧迫する | `playwright-kit-ops` の実行環境を Skill ディレクトリの外へ出す。Kiro CLI 2.18.0 が同種の事象を修正している |
 | 導入済み環境が古いパスを指したまま残る | 各 README の移行手順に、再インストールの手順を書く |
@@ -285,9 +299,9 @@ ndf は配布 Skill が Claude Code 27 / Codex 25 と異なり、両ランタイ
 | Agent Plugins 形式の `mcp.json` からの MCP サーバ起動 | 未確認。マニフェスト検証までは通っている |
 | Codex のルートマニフェストで hook を載せられるか | 未確認。マニフェストの項目に hook が無いため載らないと見ているが、実行では確かめていない。Codex は hook に承認済みハッシュを要求するため、非対話実行では発火の有無を切り分けられない |
 | Kiro CLI が Agent Plugins 形式へ対応する時期 | 未確認。Kiro IDE 1.0.288 で対応済み、CLI 2.19.1 では未対応 |
-| Codex 用マニフェストの `skills` 配列による Skill の絞り込み | 未確認。現在の配布物はディレクトリ指定だけを使い、絞り込みは物理配置で実現している。Task 3 で実測する |
-| Codex が Skill ディレクトリの symlink を解決するか | 未確認。事実 6 で確かめたのは Kiro CLI の `.kiro/skills/` だけである。Task 3 で実測し、解決しない場合はビルドで実体を複製して Git で追跡する |
-| Claude Code のマニフェスト `hooks` フィールドによるパス指定 | 未確認。現在の Claude Code 用マニフェストに `hooks` フィールドは無く、`hooks/hooks.json` の自動探索に依存している。Task 3 で実測する |
+| Codex 用マニフェストの `skills` 配列による Skill の絞り込み | 確認済み。配列に載せた Skill だけが公開される（事実 16） |
+| Codex が Skill ディレクトリの symlink を解決するか | 確認済み。読まない。キャッシュへの複製で symlink が落ちる（事実 17）。Task 3 の結果から複製も symlink も使わないため、構成には影響しない |
+| Claude Code のマニフェスト `hooks` フィールドによるパス指定 | 確認済み。読む（事実 18） |
 
 ## 完了の定義
 
@@ -295,4 +309,4 @@ ndf は配布 Skill が Claude Code 27 / Codex 25 と異なり、両ランタイ
 - [ ] `bash scripts/validate-runtime-plugins.sh` が、移動を伴う各タスクのコミットで成功する
 - [ ] `bash scripts/runtime-smoke-test.sh` を 3 ランタイムで実行し、成功する
 - [ ] `python3 scripts/check-markdown-links.py` が成功する
-- [ ] 残リスクの 7 項目それぞれについて、確認済みか未確認かが本文に反映されている
+- [ ] 残リスクの 7 項目それぞれについて、確認済みか未確認かが本文に反映されている（Task 3 で 3 項目を確認済みへ更新した）
