@@ -59,7 +59,7 @@ ai-plugins/
 | [docs/plugin-development-guide.md](docs/plugin-development-guide.md) | プラグイン開発ガイド（構造、plugin.json、バージョン管理、検証） |
 | [docs/ndf-plugin-reference.md](docs/ndf-plugin-reference.md) | NDFプラグイン詳細リファレンス |
 | [docs/specifications/](docs/specifications/) | 完了済みplan/issue由来の確定仕様 |
-| [docs/presentations/](docs/presentations/) | 勉強会などで使うスライド資料（Marp形式）とビルド手順 |
+| [docs/presentations/](docs/presentations/) | 勉強会などで使うスライド資料（Marp形式）とビルド手順。**発表日時点の記録で、以後の構成変更には追随しない** |
 | [docs/claude-code-skills-survey.md](docs/claude-code-skills-survey.md) | Claude Code Skills調査レポート |
 | [docs/development-history/](docs/development-history/) | 開発履歴と知見 |
 | [plugins/ndf/README.md](plugins/ndf/README.md) | NDFプラグイン（3ランタイム共通） |

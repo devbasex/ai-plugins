@@ -6,6 +6,23 @@
 
 `main` にマージすると GitHub Pages が更新されます。Pages は `main` ブランチの `docs/` を配信するよう設定されています。Jekyll は無効（`docs/.nojekyll`）で、ファイルはそのまま配信されます。サイトのルート（`docs/index.html`）は資料一覧へ転送します。
 
+## この資料の位置づけ
+
+各スライドは**発表日時点の記録**です。発表後にリポジトリの構成やプラグインの内容が変わっても
+追随させません。日付と、ヘッダに書いた版数の時点の内容として読んでください。
+
+現在の構成・導入手順は次を参照してください。
+
+| 知りたいこと | 参照先 |
+|---|---|
+| 配布構成と導入手順 | [README.md](../../README.md) |
+| プラグインの詳細 | [plugins/ndf/README.md](../../plugins/ndf/README.md) / [plugins/playwright-kit/README.md](../../plugins/playwright-kit/README.md) |
+| 配布の仕様 | [docs/specifications/runtime-plugin-distribution.md](../specifications/runtime-plugin-distribution.md) |
+
+たとえば `2026-08-06-ai-plugins-intro` は NDF v5.0.0 時点のもので、当時の
+`plugins/ndf-shared/` や `plugins/ndf-kiro/install.sh` といったパス、当時の Skill 数を含みます。
+これらは v9.0.0 の単一ディレクトリ構成では別の場所にあります。
+
 ## 資料一覧
 
 | ファイル | 内容 | 想定時間 |
