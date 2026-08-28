@@ -11,12 +11,14 @@ case "$runtime" in
     find "$HOME" -path '*/.claude-plugin/plugin.json' -print | grep -q .
     find "$HOME" -path '*/skills/*/SKILL.md' -print | grep -q .
     find "$HOME" -path '*/agents/*.md' -print | grep -q .
-    find "$HOME" -path '*/hooks/hooks.json' -print | grep -q .
+    # 単一ディレクトリ構成では、同じ hooks/ に runtime ごとの定義が並ぶ。
+    # 読む側が違うので、それぞれ自分の定義が届いていることを見る。
+    find "$HOME" -path '*/hooks/claude.json' -print | grep -q .
     ;;
   codex)
     find "$HOME" -path '*/.codex-plugin/plugin.json' -print | grep -q .
     find "$HOME" -path '*/skills/*/SKILL.md' -print | grep -q .
-    find "$HOME" -path '*/hooks/hooks.json' -print | grep -q .
+    find "$HOME" -path '*/hooks/codex.json' -print | grep -q .
     ;;
   kiro)
     test -f "$PROJECT_DIR/.kiro/agents/ndf.json"
