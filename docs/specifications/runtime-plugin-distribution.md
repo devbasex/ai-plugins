@@ -13,7 +13,7 @@ NDF plugin と playwright-kit plugin は、3 runtime 分をプラグインごと
 | runtime | marketplace / 導入方式 | NDF 配布物 | MCP 配布物 |
 |---|---|---|---|
 | Claude Code | `.claude-plugin/marketplace.json` | `plugins/ndf` | `plugins/mcp/*` |
-| Codex | `.agents/plugins/marketplace.json` | `plugins/ndf` | `plugins/mcp/*` |
+| Codex | `.claude-plugin/marketplace.json` | `plugins/ndf` | `plugins/mcp/*` |
 | Kiro CLI | installer | `plugins/ndf` | `plugins/mcp/*` |
 
 ## NDF Plugin 配布仕様
@@ -105,9 +105,12 @@ NDF installer が生成する agent は `.kiro/agents/ndf.json` であり、MCP 
 
 ## Marketplace
 
-Claude Code marketplace は `.claude-plugin/marketplace.json` で管理する。各 entry の `source` は Claude 用配布ディレクトリを指す。
+marketplace 定義は `.claude-plugin/marketplace.json` の 1 つだけである。各 entry の `source` は
+プラグインの配布ディレクトリを指す。
 
-Codex marketplace は `.agents/plugins/marketplace.json` で管理する。各 entry の `source.path` は Codex 用配布ディレクトリを指す。
+Codex は専用の定義（`.agents/plugins/marketplace.json`）が無ければこの定義へフォールバックする。
+Codex が要求する `policy` / `category` / `interface` は同じ entry に含める。Claude Code はこれらを
+読み込み時に無視し、`claude plugin validate` は warning 付きで通る。
 
 Kiro CLI は repository root の marketplace manifest ではなく、`plugins/ndf/dev.kiro/install.sh` と `plugins/mcp/*/dev.kiro/install.sh` を導入入口とする。
 
