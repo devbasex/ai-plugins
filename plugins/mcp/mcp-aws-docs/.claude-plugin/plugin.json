@@ -1,10 +1,16 @@
 {
   "name": "mcp-aws-docs",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "AWS Documentation MCP server for accessing official AWS documentation",
   "author": {
     "name": "takemi-ohama",
     "url": "https://github.com/takemi-ohama"
   },
-  "keywords": ["mcp", "aws", "documentation", "docs", "cloud"]
+  "keywords": [
+    "mcp",
+    "aws",
+    "documentation",
+    "docs",
+    "cloud"
+  ]
 }

@@ -2,6 +2,14 @@
 
 Serena MCPサーバーを提供するプラグインです。セマンティックコードインテリジェンス機能（シンボル検索、リファレンス検索、安全なリファクタリング）を利用できます。
 
+## v2.0.0 へ更新するとき
+
+配布ディレクトリが `plugins/mcp/{shared,claude,codex,kiro}/mcp-serena/` から
+`plugins/mcp/mcp-serena/` へ変わりました。マーケットプレイスの参照先が変わるため、**導入済みの
+環境では再インストールが要ります**。Kiro CLI の installer は `dev.kiro/install.sh` へ移りました。
+
+MCP サーバの定義（`.mcp.json`）の内容は変えていません。
+
 ## インストール
 
 ### Claude Code

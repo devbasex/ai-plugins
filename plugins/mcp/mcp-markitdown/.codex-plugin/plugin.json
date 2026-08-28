@@ -1,6 +1,6 @@
 {
   "name": "mcp-markitdown",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "MarkItDown MCP server for converting documents (PDF, Office, images, etc.) to Markdown",
   "author": {
     "name": "takemi-ohama",
