@@ -56,13 +56,23 @@ Kiro CLI へ配っており、Kiro にはプラグインルートを示す環境
 
 Skill ディレクトリ起点で書いた Skill は、次の順で `SKILL_DIR` を決める。
 
-1. `${CLAUDE_PLUGIN_ROOT}` が空でなければ `${CLAUDE_PLUGIN_ROOT}/skills/<Skill 名>` を採る
-2. 空なら、runtime が Skill の場所として渡したディレクトリを使う
-3. どちらの場合も `cd … && pwd` で絶対パスへ直してから使う
+候補を順に試し、`scripts/` を持つ最初のものを絶対パスで採る。
 
-1 で見るのは変数が空かどうかであって、ディレクトリの存在ではない。展開されない runtime では
-`${CLAUDE_PLUGIN_ROOT}/skills/<Skill 名>` が `/skills/<Skill 名>` になるため、存在で分岐すると
-実行環境のルートに同名のディレクトリがあったときに誤判定する。
+| 順 | 候補 | 当たる runtime |
+|---|---|---|
+| 1 | `${CLAUDE_PLUGIN_ROOT}/skills/<Skill 名>` | Claude Code |
+| 2 | `.kiro/skills/<Skill 名>` | Kiro CLI（workspace scope） |
+| 3 | `$HOME/.kiro/skills/<Skill 名>` | Kiro CLI（global scope） |
+| 4 | runtime が Skill の場所として渡したディレクトリ | Codex |
+
+`${CLAUDE_PLUGIN_ROOT}` はシングルクォートで囲んで代入し、値が `$` で始まっていたら
+「置き換えられなかった」と判断して候補から外す。シェルに展開させないため、未定義の変数を
+読まずに済み `set -u` でも落ちない。
+
+採用した候補は `cd … && pwd` で絶対パスへ直す。Kiro CLI の候補は相対パスであり、そのまま
+持ち回ると `cross-review` のように途中で worktree へ移る Skill で参照が外れる。
+
+どれも当たらなければメッセージを出して止める。黙って別の場所を読むことはない。
 
 根拠にした実測（Claude Code 2.1.250 / Codex CLI 0.149.0）は次のとおり。
 

@@ -157,20 +157,29 @@ flowchart TD
 進行全体を 1 本の bash で駆動する。参加者が全て CLI なので、途中でホストへ戻る必要がない。
 
 ```bash
-# この Skill のディレクトリを決める。Claude Code は SKILL.md 内の ${CLAUDE_PLUGIN_ROOT} を
-# プラグインルートの絶対パスへ展開するので、そのまま使える。Codex と Kiro CLI は展開せず、
-# プラグインルートを示す環境変数も置かない（実測）。その場合は、ランタイムがこの Skill の
-# 場所として渡したディレクトリを入れる。Kiro CLI は `.kiro/skills/<Skill 名>` の相対パスで
-# 渡すため、作業ディレクトリを移る前に絶対パスへ直しておく。
-SKILL_DIR="${CLAUDE_PLUGIN_ROOT}"
-if [ -n "$SKILL_DIR" ]; then
-  SKILL_DIR="$SKILL_DIR/skills/cross-refactoring"
-else
-  SKILL_DIR="<この Skill のディレクトリ>"
-fi
-SKILL_DIR="$(cd "$SKILL_DIR" 2>/dev/null && pwd)" \
-  || { echo "この Skill のディレクトリを解決できない" >&2; exit 1; }
-[ -d "$SKILL_DIR/scripts" ] || { echo "SKILL_DIR が違う: $SKILL_DIR" >&2; exit 1; }
+# この Skill のディレクトリを決める。候補を順に試し、最初に当たったものを絶対パスで採る。
+# Claude Code は SKILL.md 内の ${CLAUDE_PLUGIN_ROOT} をプラグインルートの絶対パスへ置き換えて
+# から渡す。シングルクォートで囲むのは、置き換えられなかったときにシェルへ展開させないため
+# である（未定義の変数を読まないので `set -u` でも落ちない）。Codex と Kiro CLI は置き換えず、
+# プラグインルートを示す環境変数も置かない（実測）。Kiro は installer が `.kiro/skills/` へ
+# symlink を張るので、その位置を候補に持つ。どれも当たらなければ、ランタイムがこの Skill の
+# 場所として渡したディレクトリを使う。
+SKILL_NAME=cross-refactoring
+PLUGIN_ROOT='${CLAUDE_PLUGIN_ROOT}'
+case "$PLUGIN_ROOT" in '$'*) PLUGIN_ROOT= ;; esac
+SKILL_DIR=
+for candidate in \
+  ${PLUGIN_ROOT:+"$PLUGIN_ROOT/skills/$SKILL_NAME"} \
+  ".kiro/skills/$SKILL_NAME" \
+  "$HOME/.kiro/skills/$SKILL_NAME" \
+  "<この Skill のディレクトリ>"
+do
+  [ -d "$candidate/scripts" ] || continue
+  # 相対パスのまま持ち回ると、この後 worktree へ移ったときに外れる。ここで絶対パスにする。
+  SKILL_DIR="$(cd "$candidate" && pwd)"
+  break
+done
+[ -n "$SKILL_DIR" ] || { echo "この Skill のディレクトリを解決できない" >&2; exit 1; }
 SCRIPTS="$SKILL_DIR/scripts"
 # 収束ループの共通層は cross-review 側にある。`..` は symlink の解決先を経由するため、
 # Kiro CLI が `.kiro/skills/` へ張ったリンクからでもプラグイン内の隣の Skill へ届く。
