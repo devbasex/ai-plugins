@@ -197,18 +197,22 @@ flowchart TD
 # Claude Code は SKILL.md 内の ${CLAUDE_PLUGIN_ROOT} をプラグインルートの絶対パスへ置き換えて
 # から渡す。シングルクォートで囲むのは、置き換えられなかったときにシェルへ展開させないため
 # である（未定義の変数を読まないので `set -u` でも落ちない）。Codex と Kiro CLI は置き換えず、
-# プラグインルートを示す環境変数も置かない（実測）。Kiro は installer が `.kiro/skills/` へ
-# symlink を張るので、その位置を候補に持つ。どれも当たらなければ、ランタイムがこの Skill の
-# 場所として渡したディレクトリを使う。
+# プラグインルートを示す環境変数も置かない（実測）。置き換えない runtime では、
+# **この bash を実行する前に `<この Skill のディレクトリ>` をランタイムから渡された実際の
+# パスへ置き換えること**。置き換えないまま実行しても、その候補が外れるだけで別の場所を
+# 読むことはない。Kiro CLI は installer が `.kiro/skills/` へ symlink を張るため、置き換え
+# なくてもその位置で当たる。
 SKILL_NAME=cross-review
 PLUGIN_ROOT='${CLAUDE_PLUGIN_ROOT}'
 case "$PLUGIN_ROOT" in '$'*) PLUGIN_ROOT= ;; esac
 SKILL_DIR=
+# 明示的に渡されたディレクトリを `.kiro` より先に見る。逆にすると、Kiro の設定を持つ
+# リポジトリで Codex や Claude Code を動かしたときに別 runtime の Skill を選ぶ。
 for candidate in \
   ${PLUGIN_ROOT:+"$PLUGIN_ROOT/skills/$SKILL_NAME"} \
+  "<この Skill のディレクトリ>" \
   ".kiro/skills/$SKILL_NAME" \
-  "$HOME/.kiro/skills/$SKILL_NAME" \
-  "<この Skill のディレクトリ>"
+  "$HOME/.kiro/skills/$SKILL_NAME"
 do
   [ -d "$candidate/scripts" ] || continue
   # 相対パスのまま持ち回ると、この後 worktree へ移ったときに外れる。ここで絶対パスにする。

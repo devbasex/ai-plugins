@@ -54,16 +54,18 @@ Kiro CLI へ配っており、Kiro にはプラグインルートを示す環境
 
 ### Skill ディレクトリの解決
 
-Skill ディレクトリ起点で書いた Skill は、次の順で `SKILL_DIR` を決める。
-
-候補を順に試し、`scripts/` を持つ最初のものを絶対パスで採る。
+Skill ディレクトリ起点で書いた Skill は、候補を順に試し、`scripts/` を持つ最初のものを
+絶対パスで採る。
 
 | 順 | 候補 | 当たる runtime |
 |---|---|---|
 | 1 | `${CLAUDE_PLUGIN_ROOT}/skills/<Skill 名>` | Claude Code |
-| 2 | `.kiro/skills/<Skill 名>` | Kiro CLI（workspace scope） |
-| 3 | `$HOME/.kiro/skills/<Skill 名>` | Kiro CLI（global scope） |
-| 4 | runtime が Skill の場所として渡したディレクトリ | Codex |
+| 2 | runtime が Skill の場所として渡したディレクトリ | Codex |
+| 3 | `.kiro/skills/<Skill 名>` | Kiro CLI（workspace scope） |
+| 4 | `$HOME/.kiro/skills/<Skill 名>` | Kiro CLI（global scope） |
+
+2 を `.kiro` より先に見るのは、Kiro の設定を持つリポジトリで Codex や Claude Code を
+動かしたときに、別 runtime の Skill を選ばないためである。
 
 `${CLAUDE_PLUGIN_ROOT}` はシングルクォートで囲んで代入し、値が `$` で始まっていたら
 「置き換えられなかった」と判断して候補から外す。シェルに展開させないため、未定義の変数を
@@ -81,9 +83,6 @@ Skill ディレクトリ起点で書いた Skill は、次の順で `SKILL_DIR` 
 | Claude Code | プラグインルートの絶対パスへ展開する | 置かない | 渡す（絶対パス） |
 | Codex | 展開しない | 置かない | 渡す（絶対パス） |
 | Kiro CLI | 展開しない | 置かない | 渡す（`.kiro/skills/<Skill 名>` の相対パス） |
-
-3 を挟むのは Kiro CLI のためである。相対パスのまま持ち回ると、`cross-review` のように
-途中で worktree へ移る Skill で参照が外れる。
 
 scripts は `plugins/ndf-shared/scripts` から `plugins/ndf-{runtime}/scripts` へ同期する。
 
