@@ -60,6 +60,6 @@ Codex 連携は MCP サーバではなく `/ndf:external-ai` skill と `corder` 
 
 ## 関連リンク
 
-- [mcp-serena README](../../plugins/mcp/shared/mcp-serena/README.md)
+- [mcp-serena README](../../plugins/mcp/mcp-serena/README.md)
 - [NDF Plugin リファレンス](../ndf-plugin-reference.md)
 - [NDF README](../../plugins/ndf/README.md)

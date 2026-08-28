@@ -12,11 +12,11 @@
 
 | runtime | 配布先 |
 |---|---|
-| Claude Code | `plugins/mcp/claude/mcp-redash` |
-| Codex | `plugins/mcp/codex/mcp-redash` |
-| Kiro CLI | `plugins/mcp/kiro/mcp-redash` |
+| Claude Code | `plugins/mcp/mcp-redash` |
+| Codex | `plugins/mcp/mcp-redash` |
+| Kiro CLI | `plugins/mcp/mcp-redash` |
 
-共通編集元は `plugins/mcp/shared/mcp-redash` とする。runtime 別配布構造は [Runtime Plugin Distribution 仕様](runtime-plugin-distribution.md) に従う。
+配布ディレクトリは `plugins/mcp/mcp-redash` の 1 つとする。配布構造は [Runtime Plugin Distribution 仕様](runtime-plugin-distribution.md) に従う。
 
 ## 仕様
 
@@ -83,7 +83,7 @@ Kiro runtime では、`redash-mcp-config.js` が `.mcp.json` の Redash MCP serv
 
 ## データ・設定
 
-`plugins/mcp/shared/mcp-redash` は次のファイルを持つ。
+`plugins/mcp/mcp-redash` は次のファイルを持つ。
 
 | ファイル | 内容 |
 |---|---|
@@ -140,5 +140,5 @@ Redash への接続可否や API 権限は、利用者が設定した `REDASH_*_
 ## 関連リンク
 
 - [Runtime Plugin Distribution 仕様](runtime-plugin-distribution.md)
-- [mcp-redash shared README](../../plugins/mcp/shared/mcp-redash/README.md)
-- [mcp-redash shared config script](../../plugins/mcp/shared/mcp-redash/scripts/redash-mcp-config.js)
+- [mcp-redash shared README](../../plugins/mcp/mcp-redash/README.md)
+- [mcp-redash shared config script](../../plugins/mcp/mcp-redash/scripts/redash-mcp-config.js)

@@ -71,9 +71,9 @@ NDF の Skill 実装は `plugins/ndf/skills/` にあります。公開セット�
 
 ## MCP Plugins
 
-MCP plugin も runtime 別に配布します。共通編集元は `plugins/mcp/shared/<plugin-name>/`、配布物は `plugins/mcp/claude|codex|kiro/<plugin-name>/` です。
+MCP plugin も `plugins/mcp/<plugin-name>/` の 1 ディレクトリにまとまっています。サーバ定義は `.mcp.json` の 1 箇所だけで、3 runtime が同じファイルを読みます。
 
-Claude Code と Codex は marketplace から同じ plugin 名で install します。Kiro CLI は `plugins/mcp/kiro/<plugin-name>/install.sh` で対象プロジェクトの `.mcp.json` と必要な Kiro agent 設定を更新します。
+Claude Code と Codex は marketplace から同じ plugin 名で install します。Kiro CLI は `plugins/mcp/<plugin-name>/dev.kiro/install.sh` で対象プロジェクトの `.mcp.json` と必要な Kiro agent 設定を更新します。
 
 ## Build / Validation
 

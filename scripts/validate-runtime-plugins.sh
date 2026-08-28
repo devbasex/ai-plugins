@@ -60,7 +60,7 @@ done < <(single_families)
 
 while IFS= read -r mcp_config; do
   run python3 -m json.tool "$mcp_config" >/dev/null
-done < <(find "$ROOT_DIR/plugins/mcp" -name .mcp.json | sort)
+done < <(find "$ROOT_DIR/plugins/mcp" -maxdepth 2 -name .mcp.json | sort)
 
 run python3 - "$ROOT_DIR" "${FAMILIES[@]}" <<'PY'
 import json
@@ -367,18 +367,30 @@ for family, layout in families:
                 "（manifest に無い、またはパスが `./skills/<Skill 名>` の形式でない）"
             )
 
-for mcp in sorted((root / "plugins/mcp/shared").iterdir()):
+# MCP プラグインも 1 ディレクトリにまとめた。runtime ごとの配布物は無く、
+# 3 runtime が同じ .mcp.json を読む。
+for mcp in sorted((root / "plugins/mcp").iterdir()):
     if not mcp.is_dir():
         continue
-    for runtime in ("claude", "codex", "kiro"):
-        runtime_dir = root / "plugins/mcp" / runtime / mcp.name
-        if not runtime_dir.is_dir():
-            errors.append(f"MCP runtime directory missing: plugins/mcp/{runtime}/{mcp.name}")
-            continue
-        if not (runtime_dir / ".mcp.json").is_file():
-            errors.append(f"MCP config missing: plugins/mcp/{runtime}/{mcp.name}/.mcp.json")
-        if runtime == "kiro" and not (runtime_dir / "install.sh").is_file():
-            errors.append(f"Kiro MCP installer missing: plugins/mcp/kiro/{mcp.name}/install.sh")
+    if not (mcp / ".mcp.json").is_file():
+        errors.append(f"MCP config missing: plugins/mcp/{mcp.name}/.mcp.json")
+        continue
+    if not (mcp / ".claude-plugin/plugin.json").is_file():
+        errors.append(f"Claude plugin manifest missing: plugins/mcp/{mcp.name}/.claude-plugin/plugin.json")
+    if not (mcp / ".codex-plugin/plugin.json").is_file():
+        errors.append(f"Codex plugin manifest missing: plugins/mcp/{mcp.name}/.codex-plugin/plugin.json")
+    if not (mcp / "dev.kiro/install.sh").is_file():
+        errors.append(f"Kiro MCP installer missing: plugins/mcp/{mcp.name}/dev.kiro/install.sh")
+    # Codex は .mcp.json を manifest の mcpServers から読む。指定が無いと
+    # サーバが 1 つも登録されない。
+    codex_manifest = mcp / ".codex-plugin/plugin.json"
+    if codex_manifest.is_file():
+        declared = read_json(codex_manifest).get("mcpServers")
+        if declared != "./.mcp.json":
+            errors.append(
+                f"plugins/mcp/{mcp.name}/.codex-plugin/plugin.json の mcpServers が "
+                f"`./.mcp.json` でない（実際: {declared!r}）"
+            )
 
 if errors:
     for error in errors:
@@ -427,7 +439,7 @@ run bash "$ROOT_DIR/plugins/ndf/dev.kiro/install.sh" --dry-run --with-codex >/de
 
 while IFS= read -r installer; do
   run bash "$installer" --dry-run >/dev/null
-done < <(find "$ROOT_DIR/plugins/mcp/kiro" -name install.sh | sort)
+done < <(find "$ROOT_DIR/plugins/mcp" -path '*/dev.kiro/install.sh' | sort)
 
 run python3 "$ROOT_DIR/scripts/check-markdown-links.py" --root "$ROOT_DIR"
 

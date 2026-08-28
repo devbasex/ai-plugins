@@ -35,7 +35,7 @@
       "name": "mcp-playwright",
       "source": {
         "source": "local",
-        "path": "./plugins/mcp/codex/mcp-playwright"
+        "path": "./plugins/mcp/mcp-playwright"
       },
       "policy": {
         "installation": "AVAILABLE",
@@ -50,7 +50,7 @@
       "name": "mcp-chrome-devtools",
       "source": {
         "source": "local",
-        "path": "./plugins/mcp/codex/mcp-chrome-devtools"
+        "path": "./plugins/mcp/mcp-chrome-devtools"
       },
       "policy": {
         "installation": "AVAILABLE",
@@ -65,7 +65,7 @@
       "name": "mcp-bigquery",
       "source": {
         "source": "local",
-        "path": "./plugins/mcp/codex/mcp-bigquery"
+        "path": "./plugins/mcp/mcp-bigquery"
       },
       "policy": {
         "installation": "AVAILABLE",
@@ -80,7 +80,7 @@
       "name": "mcp-aws-docs",
       "source": {
         "source": "local",
-        "path": "./plugins/mcp/codex/mcp-aws-docs"
+        "path": "./plugins/mcp/mcp-aws-docs"
       },
       "policy": {
         "installation": "AVAILABLE",
@@ -95,7 +95,7 @@
       "name": "mcp-dbhub",
       "source": {
         "source": "local",
-        "path": "./plugins/mcp/codex/mcp-dbhub"
+        "path": "./plugins/mcp/mcp-dbhub"
       },
       "policy": {
         "installation": "AVAILABLE",
@@ -110,7 +110,7 @@
       "name": "mcp-notion",
       "source": {
         "source": "local",
-        "path": "./plugins/mcp/codex/mcp-notion"
+        "path": "./plugins/mcp/mcp-notion"
       },
       "policy": {
         "installation": "AVAILABLE",
@@ -125,7 +125,7 @@
       "name": "mcp-devin",
       "source": {
         "source": "local",
-        "path": "./plugins/mcp/codex/mcp-devin"
+        "path": "./plugins/mcp/mcp-devin"
       },
       "policy": {
         "installation": "AVAILABLE",
@@ -140,7 +140,7 @@
       "name": "mcp-redash",
       "source": {
         "source": "local",
-        "path": "./plugins/mcp/codex/mcp-redash"
+        "path": "./plugins/mcp/mcp-redash"
       },
       "policy": {
         "installation": "AVAILABLE",
@@ -155,7 +155,7 @@
       "name": "mcp-markitdown",
       "source": {
         "source": "local",
-        "path": "./plugins/mcp/codex/mcp-markitdown"
+        "path": "./plugins/mcp/mcp-markitdown"
       },
       "policy": {
         "installation": "AVAILABLE",
@@ -170,7 +170,7 @@
       "name": "mcp-serena",
       "source": {
         "source": "local",
-        "path": "./plugins/mcp/codex/mcp-serena"
+        "path": "./plugins/mcp/mcp-serena"
       },
       "policy": {
         "installation": "AVAILABLE",

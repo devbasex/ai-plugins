@@ -12,15 +12,9 @@ NDF plugin と playwright-kit plugin は、3 runtime 分をプラグインごと
 
 | runtime | marketplace / 導入方式 | NDF 配布物 | MCP 配布物 |
 |---|---|---|---|
-| Claude Code | `.claude-plugin/marketplace.json` | `plugins/ndf` | `plugins/mcp/claude/*` |
-| Codex | `.agents/plugins/marketplace.json` | `plugins/ndf` | `plugins/mcp/codex/*` |
-| Kiro CLI | installer | `plugins/ndf` | `plugins/mcp/kiro/*` |
-
-共通編集元:
-
-| 種別 | パス | 用途 |
-|---|---|---|
-| MCP shared | `plugins/mcp/shared/*` | runtime 別 MCP plugin 生成元 |
+| Claude Code | `.claude-plugin/marketplace.json` | `plugins/ndf` | `plugins/mcp/*` |
+| Codex | `.agents/plugins/marketplace.json` | `plugins/ndf` | `plugins/mcp/*` |
+| Kiro CLI | installer | `plugins/ndf` | `plugins/mcp/*` |
 
 ## NDF Plugin 配布仕様
 
@@ -88,13 +82,18 @@ scripts は `plugins/ndf/scripts` に 1 箇所だけ置き、3 runtime が同じ
 
 ## MCP Plugin 配布仕様
 
-MCP plugin は `plugins/mcp/shared/<plugin-name>` を編集元とし、runtime 別に以下へ配布する。
+MCP plugin も `plugins/mcp/<plugin-name>` の 1 ディレクトリにまとめる。サーバ定義は `.mcp.json` の
+1 箇所だけで、3 runtime が同じファイルを読む。
 
-| runtime | 配布先 | 導入方式 |
+| runtime | 読むもの | 導入方式 |
 |---|---|---|
-| Claude Code | `plugins/mcp/claude/<plugin-name>` | Claude marketplace |
-| Codex | `plugins/mcp/codex/<plugin-name>` | Codex marketplace |
-| Kiro CLI | `plugins/mcp/kiro/<plugin-name>` | `install.sh` |
+| Claude Code | `.claude-plugin/plugin.json` と `.mcp.json`（自動探索） | Claude marketplace |
+| Codex | `.codex-plugin/plugin.json` の `mcpServers: "./.mcp.json"` | Codex marketplace |
+| Kiro CLI | `dev.kiro/install.sh` が `.mcp.json` を読んで導入先へ合成する | installer |
+
+ルートの `plugin.json`（Agent Plugins 形式）は置かない。Agent Plugins 1.0.0 の `mcp.json` は
+stdio サーバに `type` / `command` / `args` / `env` / `cwd` しか許さず（`additionalProperties: false`）、
+10 個中 6 個が使っている `envFile` を表現できないためである。
 
 各 runtime で plugin name は同一にする。例: `mcp-bigquery`、`mcp-redash`、`mcp-serena`。
 
@@ -110,7 +109,7 @@ Claude Code marketplace は `.claude-plugin/marketplace.json` で管理する。
 
 Codex marketplace は `.agents/plugins/marketplace.json` で管理する。各 entry の `source.path` は Codex 用配布ディレクトリを指す。
 
-Kiro CLI は repository root の marketplace manifest ではなく、`plugins/ndf/dev.kiro/install.sh` と `plugins/mcp/kiro/*/install.sh` を導入入口とする。
+Kiro CLI は repository root の marketplace manifest ではなく、`plugins/ndf/dev.kiro/install.sh` と `plugins/mcp/*/dev.kiro/install.sh` を導入入口とする。
 
 ## Build / Validation
 
@@ -177,7 +176,7 @@ NDF Skill を変更する場合:
 
 MCP plugin を変更する場合:
 
-1. `plugins/mcp/shared/<plugin-name>/` を編集する。
+1. `plugins/mcp/<plugin-name>/` を編集する。
 2. `bash scripts/build-runtime-plugins.sh` を実行して runtime 配布先へ反映する。
 3. `bash scripts/validate-runtime-plugins.sh` を実行する。
 
