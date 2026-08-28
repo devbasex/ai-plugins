@@ -22,7 +22,10 @@
 }
 ```
 
-Codex 用 marketplace も同じ plugin 名 `ndf` の source に `./plugins/ndf` を指定します。Kiro CLI へは `plugins/ndf/dev.kiro/install.sh` で導入します。
+marketplace 定義はこの 1 つだけです。Codex は専用の定義を持たず、この定義へフォールバックして
+同じ `source` を読みます。Codex が要求する `policy` / `category` / `interface` は同じ entry へ含めます
+（Claude Code はこれらを読み込み時に無視します）。Kiro CLI は marketplace を読まないため、
+`plugins/<プラグイン名>/dev.kiro/install.sh` で導入します。
 
 ## プラグイン構造
 
