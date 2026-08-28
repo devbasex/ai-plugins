@@ -295,7 +295,7 @@ rm .kiro/agents/default.json.bak
 
 `--dry-run` では上記の移行を含め一切の書き込みを行いません（旧設定を検出したことだけ表示します）。
 
-Kiro 用 MCP プラグインの installer（`plugins/mcp/*/install.sh`）は `.kiro/agents/default.json` を更新します。自動移行後に MCP installer を実行すると `default.json` が再び作られるため、`mcpServers` を `.kiro/agents/ndf.json` へ写してください。写し替えは一度だけで済みます。`install.sh` を再実行しても、写した `mcpServers` は保持されます。
+Kiro 用 MCP プラグインの installer（`plugins/mcp/<プラグイン名>/dev.kiro/install.sh`）は `.kiro/agents/default.json` を更新します。自動移行後に MCP installer を実行すると `default.json` が再び作られるため、`mcpServers` を `.kiro/agents/ndf.json` へ写してください。写し替えは一度だけで済みます。`install.sh` を再実行しても、写した `mcpServers` は保持されます。
 
 ### 再インストール時に保持される設定
 

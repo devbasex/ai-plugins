@@ -10,7 +10,7 @@ run() {
 
 run bash "$ROOT_DIR/scripts/build-runtime-plugins.sh" --check
 
-# Skill を配る plugin family を manifests/ の有無から検出する（plugins/mcp/shared は別系統）。
+# Skill を配る plugin family を manifests/ の有無から検出する（plugins/mcp/* は別系統）。
 # 移行の途中は 2 つの構成が混ざるため、どちらも受け付ける。
 #   split  … plugins/<family>-shared（編集元）+ plugins/<family>-{claude,codex,kiro}（生成物）
 #   single … plugins/<family>（配布ディレクトリが 1 つだけ）
