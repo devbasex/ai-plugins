@@ -74,7 +74,7 @@
 - [ ] `scripts/build-runtime-plugins.sh` に実行時パスの書き換え処理が残っていない（`rewrite_codex_skill_paths` / `rewrite_kiro_skill_paths` の定義と呼び出しが無い）
 - [ ] Claude Code で `claude plugin validate` が全プラグインとマーケットプレイス定義で成功する
 - [ ] Codex で全プラグインを導入でき、Skill 数が導入前と一致する
-- [ ] Kiro CLI で installer を実行し、`.kiro/skills/` の symlink 数と `kiro-cli chat` が認識する Skill 数が導入前と一致する
+- [ ] Kiro CLI で installer を実行し、`.kiro/skills/` の symlink 数と `kiro-cli chat` が認識する Skill 数が導入前と一致する（symlink 数は確認済み。`kiro-cli chat` 側は未確認）
 - [ ] `scripts/validate-runtime-plugins.sh` が成功する
 - [ ] 実行時パスを参照する Skill が、Claude Code / Codex / Kiro CLI のいずれでも参照先へ到達できる
 - [ ] どの manifest にも載らない 4 個の Skill が、どのランタイムの公開セットにも現れない（Claude Code 27 / Codex 25 / Kiro 26 が変わらない）
@@ -376,7 +376,7 @@ release ブランチへ取り込んだ。release PR も同じ形で収束させ�
 | 2 | 書き換え処理が残っていない | `grep -c 'rewrite_codex_skill_paths\|rewrite_kiro_skill_paths' scripts/build-runtime-plugins.sh` | 0 件 |
 | 3 | `claude plugin validate` が成功 | 2 プラグイン + マーケットプレイス定義 | 成功（定義は Codex 用項目の warning 付き） |
 | 4 | Codex で全プラグインを導入、Skill 数が一致 | `codex plugin add` ×12 → `codex exec` で列挙 | 12/12 導入、ndf 23 + playwright-kit 4（manifest 25 − 暗黙起動抑止 2） |
-| 5 | Kiro installer の symlink 数が一致 | `dev.kiro/install.sh` ×12 | symlink 34 本、到達できる `SKILL.md` も 34 |
+| 5 | Kiro installer の symlink 数と `kiro-cli chat` が認識する Skill 数が一致 | `dev.kiro/install.sh` ×12 | **部分的に確認**。symlink 34 本と、到達できる `SKILL.md` 34 は確認した。`kiro-cli chat` が認識する数は**未確認**（下記「残っている未確認」） |
 | 6 | `validate-runtime-plugins.sh` が成功 | — | 成功 |
 | 7 | 実行時パスを参照する Skill が到達できる | 3 ランタイムで `state.py` / 隣の Skill の `lib` / `fix` の scripts / `statusline` のプラグインルート scripts | すべて到達 |
 | 8 | 未配布 4 個がどの公開セットにも現れない | 3 ランタイムの列挙と symlink 一覧 | 0 件 |
@@ -413,5 +413,5 @@ release ブランチへ取り込んだ。release PR も同じ形で収束させ�
 
 | 項目 | 状態 |
 | --- | --- |
-| Kiro CLI の `kiro-cli chat` による Skill 認識 | 未確認。作業環境の kiro-cli が未ログインで実行できない。symlink 経由で認識することは事実 6 で確認済みで、symlink の張り方は変えていない |
+| Kiro CLI の `kiro-cli chat` による Skill 認識（受け入れ条件 5 の後半） | 未確認。作業環境の kiro-cli が未ログインで実行できない。symlink 経由で認識することは事実 6 で確認済みで、symlink の張り方は変えていない（変わったのは symlink の指す先だけ）。**受け入れ条件 5 はこの点だけ満たしていない**。ログイン済みの環境で `kiro-cli chat` に Skill を列挙させ、34 個であることを確かめれば閉じられる |
 | Kiro CLI が Skill 実行時のシェルへプラグインルートの環境変数を置くか | 未確認（事実 19）。同じ理由 |
