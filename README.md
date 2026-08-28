@@ -402,11 +402,8 @@ Skill を利用実績にもとづいて棚卸し、**49 個から 29 個へ整�
 
 ```
 ai-plugins/
-├── .agents/
-│   └── plugins/
-│       └── marketplace.json      # Codexマーケットプレイスメタデータ
 ├── .claude-plugin/
-│   └── marketplace.json          # Claude Codeマーケットプレイスメタデータ
+│   └── marketplace.json          # マーケットプレイス定義（3ランタイム共通）
 ├── plugins/
 │   ├── ndf/                      # NDF（3ランタイム共通の単一ディレクトリ）
 │   ├── playwright-kit/           # playwright-kit（3ランタイム共通の単一ディレクトリ）

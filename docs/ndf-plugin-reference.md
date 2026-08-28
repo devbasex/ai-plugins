@@ -7,7 +7,7 @@ NDF は Claude Code / Codex / Kiro CLI 向けの開発支援プラグイン群�
 | ランタイム | 導入方法 | 公開 Skill |
 |---|---|---|
 | Claude Code | `.claude-plugin/marketplace.json` の `ndf` | 27 個 |
-| Codex | `.agents/plugins/marketplace.json` の `ndf` | 25 個 |
+| Codex | `.claude-plugin/marketplace.json` の `ndf` | 25 個 |
 | Kiro CLI | `plugins/ndf/dev.kiro/install.sh` | 26 個 |
 
 Skill の実体は `plugins/ndf/skills/` の 1 箇所だけです。ランタイム別の複製はありません。Skill や

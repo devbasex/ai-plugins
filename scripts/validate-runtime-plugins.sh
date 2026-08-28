@@ -46,7 +46,6 @@ single_families() {
 }
 
 run python3 -m json.tool "$ROOT_DIR/.claude-plugin/marketplace.json" >/dev/null
-run python3 -m json.tool "$ROOT_DIR/.agents/plugins/marketplace.json" >/dev/null
 
 while IFS= read -r manifest; do
   run python3 -m json.tool "$manifest" >/dev/null
@@ -107,28 +106,30 @@ for plugin in claude_marketplace.get("plugins", []):
     if not (plugin_dir / ".claude-plugin/plugin.json").is_file():
         errors.append(f"Claude plugin manifest missing under {source}")
 
-codex_marketplace = read_json(root / ".agents/plugins/marketplace.json")
-for plugin in codex_marketplace.get("plugins", []):
-    source = plugin.get("source", {})
-    source_path = source.get("path") if isinstance(source, dict) else None
-    if not isinstance(source_path, str):
-        errors.append(f"Codex marketplace plugin {plugin.get('name')} has invalid source.path")
+# Codex は専用のマーケットプレイス定義が無ければ .claude-plugin/marketplace.json へ
+# フォールバックする。定義は 1 つに統合したので、同じエントリを Codex 側の要件でも検査する。
+# Codex は plugin.json（Agent Plugins 形式）> .codex-plugin > .claude-plugin の順で採るため、
+# ルートマニフェストか Codex 用マニフェストのどちらかがあれば良い。
+for plugin in claude_marketplace.get("plugins", []):
+    source = plugin.get("source")
+    if not isinstance(source, str):
         continue
-    plugin_dir = (root / source_path).resolve()
+    plugin_dir = (root / source).resolve()
     if not plugin_dir.is_dir():
-        errors.append(f"Codex marketplace source missing: {source_path}")
         continue
-    # Codex は plugin.json（Agent Plugins 形式）> .codex-plugin > .claude-plugin の順で採る。
-    # 単一ディレクトリ構成では絞り込みの要らないプラグインがルートマニフェストだけを持つため、
-    # どちらか一方があれば良い。
     if not (
         (plugin_dir / ".codex-plugin/plugin.json").is_file()
         or (plugin_dir / "plugin.json").is_file()
     ):
         errors.append(
-            f"Codex plugin manifest missing under {source_path}"
+            f"Codex plugin manifest missing under {source}"
             "（.codex-plugin/plugin.json かルートの plugin.json のどちらかが要る）"
         )
+    # Codex は policy / category / interface を要求する。統合した定義から欠けると
+    # Codex 側の一覧に出ない。
+    for key in ("policy", "category", "interface"):
+        if key not in plugin:
+            errors.append(f"marketplace entry {plugin.get('name')} に {key} がない（Codex が要求する）")
 
 # 版数と Skill 数は plugin.json と marketplace の description に重複して書かれている。
 # `.claude-plugin/marketplace.json` と Codex 版 plugin.json は build-runtime-plugins.sh の
