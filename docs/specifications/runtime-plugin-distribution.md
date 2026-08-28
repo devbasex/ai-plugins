@@ -42,6 +42,11 @@ Codex / Kiro では一部 Skill 内の `${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}` �
 | Codex | `${CODEX_PLUGIN_ROOT}` を含む fallback と `skills/` 配下 script path に変換 |
 | Kiro CLI | `plugins/ndf-kiro` を既定 root とする参照に変換 |
 
+対象は `statusline` の 1 個だけである。`fix` / `cross-review` / `cross-refactoring` は
+プラグインルート起点をやめ、Skill ディレクトリ起点（`$SKILL_DIR/scripts`、隣の Skill へは
+`$SKILL_DIR/../<Skill 名>/`）で参照するようにしたため、runtime ごとの書き換えが要らない。
+Kiro CLI が `.kiro/skills/` へ張った symlink 越しでも `..` は解決先を経由して届く。
+
 scripts は `plugins/ndf-shared/scripts` から `plugins/ndf-{runtime}/scripts` へ同期する。
 
 ## MCP Plugin 配布仕様

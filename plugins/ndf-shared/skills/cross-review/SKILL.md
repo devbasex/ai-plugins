@@ -193,8 +193,14 @@ flowchart TD
 各ステップの詳細は `docs/` 参照。メインは以下のテンプレートで scripts/ を呼ぶだけ:
 
 ```bash
-PLUGIN_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}"
-SCRIPTS="$PLUGIN_ROOT/skills/cross-review/scripts"
+# SKILL_DIR は、この Skill のディレクトリ（絶対パス）。ランタイムが Skill を起動するときに
+# 渡す値をそのまま入れる（Claude Code は "Base directory for this skill"、Kiro CLI は
+# `.kiro/skills/<Skill 名>`、Codex は Skill の展開先）。プラグインルート起点にしないのは、
+# 配布ディレクトリの形がランタイムごとに違っても、Skill 直下の scripts/ だけは必ず同じ
+# 位置にあるためである。
+SKILL_DIR=<この Skill のディレクトリ>
+[ -d "$SKILL_DIR/scripts" ] || { echo "SKILL_DIR が違う: $SKILL_DIR" >&2; exit 1; }
+SCRIPTS="$SKILL_DIR/scripts"
 
 # STATE_PR は state.json のキー (= 最初に init した PR 番号)。
 # rotation 後も state.json のパスは変わらないため、scripts/ への引数には常に

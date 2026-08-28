@@ -157,9 +157,17 @@ flowchart TD
 進行全体を 1 本の bash で駆動する。参加者が全て CLI なので、途中でホストへ戻る必要がない。
 
 ```bash
-PLUGIN_ROOT="${PLUGIN_ROOT:-plugins/ndf-kiro}"
-SCRIPTS="$PLUGIN_ROOT/skills/cross-refactoring/scripts"
-LIB="$PLUGIN_ROOT/skills/cross-review/scripts/lib"
+# SKILL_DIR は、この Skill のディレクトリ（絶対パス）。ランタイムが Skill を起動するときに
+# 渡す値をそのまま入れる（Claude Code は "Base directory for this skill"、Kiro CLI は
+# `.kiro/skills/<Skill 名>`、Codex は Skill の展開先）。プラグインルート起点にしないのは、
+# 配布ディレクトリの形がランタイムごとに違っても、Skill 直下の scripts/ だけは必ず同じ
+# 位置にあるためである。
+SKILL_DIR=<この Skill のディレクトリ>
+[ -d "$SKILL_DIR/scripts" ] || { echo "SKILL_DIR が違う: $SKILL_DIR" >&2; exit 1; }
+SCRIPTS="$SKILL_DIR/scripts"
+# 収束ループの共通層は cross-review 側にある。`..` は symlink の解決先を経由するため、
+# Kiro CLI が `.kiro/skills/` へ張ったリンクからでもプラグイン内の隣の Skill へ届く。
+LIB="$SKILL_DIR/../cross-review/scripts/lib"
 
 # **中断（終了コード 4）は握り潰さない。** 取り消しに失敗した状態を「全件失敗」と
 # 同じ扱いにすると、検証を通っていない変更を Pull Request に残したまま次の提案が

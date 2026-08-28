@@ -82,8 +82,14 @@
 ## Step 0: 準備 + 既存 state 引き継ぎ
 
 ```bash
-PLUGIN_ROOT="${PLUGIN_ROOT:-plugins/ndf-kiro}"
-SCRIPTS="$PLUGIN_ROOT/skills/cross-review/scripts"  # or 直接の絶対パス
+# SKILL_DIR は、この Skill のディレクトリ（絶対パス）。ランタイムが Skill を起動するときに
+# 渡す値をそのまま入れる（Claude Code は "Base directory for this skill"、Kiro CLI は
+# `.kiro/skills/<Skill 名>`、Codex は Skill の展開先）。プラグインルート起点にしないのは、
+# 配布ディレクトリの形がランタイムごとに違っても、Skill 直下の scripts/ だけは必ず同じ
+# 位置にあるためである。
+SKILL_DIR=<この Skill のディレクトリ>
+[ -d "$SKILL_DIR/scripts" ] || { echo "SKILL_DIR が違う: $SKILL_DIR" >&2; exit 1; }
+SCRIPTS="$SKILL_DIR/scripts"
 
 # state 初期化 / 再開（プリチェック・worktree 作成・既存コメントスナップショットを内部実行）
 eval "$("$SCRIPTS/state.py" init "$STATE_PR" \

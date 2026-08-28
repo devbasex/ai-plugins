@@ -79,7 +79,14 @@ case " $ARGUMENTS " in *" --defer-nit "*) DEFER_NIT=1 ;; esac
 SEVERITY_MIN=$(printf '%s\n' "$ARGUMENTS" | sed -n 's/.*--severity-min[ =]\([a-z]*\).*/\1/p')
 SEVERITY_MIN="${SEVERITY_MIN:-minor}"
 
-FETCH_SCRIPT="${PLUGIN_ROOT:-plugins/ndf-kiro}/skills/fix/scripts/fetch-pr-comments.sh"
+# SKILL_DIR は、この Skill のディレクトリ（絶対パス）。ランタイムが Skill を起動するときに
+# 渡す値をそのまま入れる（Claude Code は "Base directory for this skill"、Kiro CLI は
+# `.kiro/skills/<Skill 名>`、Codex は Skill の展開先）。プラグインルート起点にしないのは、
+# 配布ディレクトリの形がランタイムごとに違っても、Skill 直下の scripts/ だけは必ず同じ
+# 位置にあるためである。
+SKILL_DIR=<この Skill のディレクトリ>
+[ -d "$SKILL_DIR/scripts" ] || { echo "SKILL_DIR が違う: $SKILL_DIR" >&2; exit 1; }
+FETCH_SCRIPT="$SKILL_DIR/scripts/fetch-pr-comments.sh"
 "$FETCH_SCRIPT" "$(gh repo view --json nameWithOwner -q .nameWithOwner)" "$PR_NUMBER"
 
 # 補助情報
