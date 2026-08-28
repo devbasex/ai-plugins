@@ -80,6 +80,8 @@ plugins/ndf/
 
 `dev.kiro` は Agent Plugins 仕様 §8.2 が定める Kiro のクライアント拡張ディレクトリ名で、Kiro の公式ドキュメントが示す配置に合わせる。
 
+`hooks/` を `claude.json` と `codex.json` に分ける形は、Claude Code がマニフェストの `hooks` フィールドからのパス指定を読むことを前提としている。この前提は Task 3 で実測し、成り立たない場合は Claude Code 用を `hooks/hooks.json` の固定パスに据え置く。
+
 ### ルートマニフェストを置く基準
 
 Agent Plugins 形式のルートマニフェストは `skills/` を全件公開し、hook を持てない。この 2 点が支障にならないプラグインにだけ置く。
@@ -95,7 +97,9 @@ Kiro CLI がルートマニフェストを読むようになった時点で、`d
 
 ### マーケットプレイス定義
 
-`.claude-plugin/marketplace.json` 1 つに統合し、`.agents/plugins/marketplace.json` を削除する。Codex が要求する `policy` / `category` / `interface` は同じ定義へ含める。Claude Code はこれらを読み込み時に無視し、検証は warning で通る。
+最終形は `.claude-plugin/marketplace.json` 1 つで、`.agents/plugins/marketplace.json` は削除する。Codex が要求する `policy` / `category` / `interface` は同じ定義へ含める。Claude Code はこれらを読み込み時に無視し、検証は warning で通る。
+
+統合は全プラグインの移動が終わってから行う（Task 6）。移行の途中では、Codex 用の定義が指す先とプラグインの実体がプラグインごとに食い違うためである。たとえば playwright-kit だけを移した時点で `.agents/plugins/marketplace.json` を消すと、Codex は `.claude-plugin/marketplace.json` へフォールバックし、ndf のエントリは `plugins/ndf-claude` を指したままになる。Codex 利用者には Claude Code 向けの 27 Skill 構成が入り、Codex 用の hook も届かない。移動の途中は両方の定義を保ち、移し終えたプラグインのエントリだけを新しいパスへ向ける。
 
 ## 実行時パス参照の一本化
 
@@ -125,12 +129,12 @@ Skill から参照するパスを、プラグインルート起点から Skill �
 
 ## タスク分解
 
-各タスクの完了時点で、対象プラグインが 3 ランタイムで導入できる状態にする。
+各タスクの完了時点で、対象プラグインが 3 ランタイムで導入できる状態にする。移動が済んでいないプラグインの導入経路も、同じ時点で保つ。
 
 ### Task 1: playwright-kit を単一ディレクトリへ移す
 
 - **対象ファイル:** `plugins/playwright-kit-*/`、`.claude-plugin/marketplace.json`、`.agents/plugins/marketplace.json`
-- **変更内容:** `plugins/playwright-kit/` を作り、共通編集元の `skills/` を実体として置く。ルートマニフェストと Claude Code 用マニフェストを置き、installer を `dev.kiro/install.sh` へ移す。installer はプラグインルートを親ディレクトリとして解決し、版数をルートマニフェストから読む。マーケットプレイス定義を 1 つへ統合する
+- **変更内容:** `plugins/playwright-kit/` を作り、共通編集元の `skills/` を実体として置く。ルートマニフェストと Claude Code 用マニフェストを置き、installer を `dev.kiro/install.sh` へ移す。installer はプラグインルートを親ディレクトリとして解決し、版数をルートマニフェストから読む。2 つのマーケットプレイス定義は保ったまま、playwright-kit のエントリだけを新しいパスへ向ける
 - **満たす受け入れ条件:** 1、3、4、5
 - **進め方:** 移動後に 3 ランタイムで導入検証を行う。Skill の内容は変えない
 
@@ -141,28 +145,46 @@ Skill から参照するパスを、プラグインルート起点から Skill �
 - **満たす受け入れ条件:** 7
 - **進め方:** 書き換え後、3 ランタイムそれぞれで対象スクリプトが起動することを確認してから Task 3 へ進む
 
-### Task 3: ndf を単一ディレクトリへ移す
+### Task 3: ndf の統合が前提とする 2 つの仕様を実測する
 
-- **対象ファイル:** `plugins/ndf-*/`、`.claude-plugin/marketplace.json`
-- **変更内容:** `plugins/ndf/` を作り、`skills/` と `scripts/` を実体として置く。hook 定義を `hooks/claude.json` と `hooks/codex.json` に分け、各マニフェストから参照する。Kiro 用の installer・エージェント定義・プロンプトを `dev.kiro/` へ移す
+ndf は配布 Skill が Claude Code 27 / Codex 25 と異なり、両ランタイムに hook がある。統合すると `skills/` には 27 個の実体が並ぶため、マニフェスト側の絞り込みと hook のパス指定が効くかどうかで構成が変わる。どちらも現在の配布物では使っておらず、前提の事実表にも無い。
+
+- **対象ファイル:** 検証用の一時プラグイン（リポジトリへは残さない）
+- **変更内容:** 次の 2 点を実測し、結果を「前提」の事実表へ追記する
+  - Codex 用マニフェストの `skills` に配列を書いたとき、Codex が配列の Skill だけを公開するか。現在の `plugins/ndf-codex/.codex-plugin/plugin.json` は `"skills": "./skills/"` というディレクトリ指定で、絞り込みは 25 個だけを物理配置することで実現している
+  - Claude Code がマニフェストの `hooks` フィールドからのパス指定を読むか。現在の `plugins/ndf-claude/.claude-plugin/plugin.json` に `hooks` フィールドは無く、`hooks/hooks.json` の自動探索に依存している
+- **満たす受け入れ条件:** —
+- **進め方:** 結果によって Task 4 の構成を選ぶ。`skills` 配列が効かない場合は、Codex へ配る 25 個を `.codex-plugin/skills/` へ symlink で並べ、`skills` にそのディレクトリを指定する。`hooks` フィールドが効かない場合は、Claude Code 用を `hooks/hooks.json` の固定パスに据え置き、Codex 用だけを `hooks/codex.json` として明示参照する
+
+### Task 4: ndf を単一ディレクトリへ移す
+
+- **対象ファイル:** `plugins/ndf-*/`、`.claude-plugin/marketplace.json`、`.agents/plugins/marketplace.json`
+- **変更内容:** `plugins/ndf/` を作り、`skills/` と `scripts/` を実体として置く。hook 定義は Task 3 の結果に従って配置し、各マニフェストから参照する。Kiro 用の installer・エージェント定義・プロンプトを `dev.kiro/` へ移す。2 つのマーケットプレイス定義の ndf のエントリを新しいパスへ向ける
 - **満たす受け入れ条件:** 1、3、4、5
-- **進め方:** Task 2 の完了を前提とする。移動後に 3 ランタイムで導入検証を行う
+- **進め方:** Task 2 と Task 3 の完了を前提とする。移動後に 3 ランタイムで導入検証を行い、Codex 側の Skill 数が 25 のままであることを確かめる
 
-### Task 4: MCP プラグイン 10 個を単一ディレクトリへ移す
+### Task 5: MCP プラグイン 10 個を単一ディレクトリへ移す
 
-- **対象ファイル:** `plugins/mcp/{shared,claude,codex,kiro}/`
-- **変更内容:** `plugins/mcp/<プラグイン名>/` へ統合する。MCP サーバ定義を Agent Plugins 形式の `mcp.json` に一本化し、各マニフェストの `mcpServers` から参照する。hook を持つ 2 つには Codex 用マニフェストを置く
+- **対象ファイル:** `plugins/mcp/{shared,claude,codex,kiro}/`、`.claude-plugin/marketplace.json`、`.agents/plugins/marketplace.json`
+- **変更内容:** `plugins/mcp/<プラグイン名>/` へ統合する。MCP サーバ定義を Agent Plugins 形式の `mcp.json` に一本化し、各マニフェストの `mcpServers` から参照する。hook を持つ 2 つには Codex 用マニフェストを置く。2 つのマーケットプレイス定義の該当エントリを新しいパスへ向ける
 - **満たす受け入れ条件:** 1、3、4、5
 - **進め方:** サーバが実際に起動することを 1 プラグインで確認してから残りへ広げる
 
-### Task 5: ビルドと検証を縮小する
+### Task 6: マーケットプレイス定義を 1 つへ統合する
+
+- **対象ファイル:** `.claude-plugin/marketplace.json`、`.agents/plugins/marketplace.json`（削除）
+- **変更内容:** 全プラグインのエントリを `.claude-plugin/marketplace.json` へまとめ、Codex が要求する `policy` / `category` / `interface` を同じ定義へ含める。`.agents/plugins/marketplace.json` を削除する
+- **満たす受け入れ条件:** 3、4
+- **進め方:** Task 1・Task 4・Task 5 で全プラグインの移動が終わった後に行う。削除の前に、Codex が `.claude-plugin/marketplace.json` へフォールバックして 12 プラグインすべてを導入できることを確かめる
+
+### Task 7: ビルドと検証を縮小する
 
 - **対象ファイル:** `scripts/build-runtime-plugins.sh`、`scripts/validate-runtime-plugins.sh`、`scripts/runtime-smoke-test.sh`、`.github/workflows/`
 - **変更内容:** ビルドの役割を「マニフェストの `skills` 配列を `manifests/*-skills.txt` から生成する」ことに絞る。ディレクトリの複製処理と実行時パスの書き換え処理を取り除く。検証スクリプトとワークフローの参照パスを合わせる
 - **満たす受け入れ条件:** 2、6
-- **進め方:** 生成対象が縮むため、`--check` の対象もマニフェストだけになる
+- **進め方:** 生成対象が縮むため、`--check` の対象もマニフェストだけになる。Task 3 で `skills` 配列が効かないと分かった場合は、生成対象を symlink ディレクトリの構築に置き換える
 
-### Task 6: ドキュメントを更新する
+### Task 8: ドキュメントを更新する
 
 - **対象ファイル:** `docs/specifications/runtime-plugin-distribution.md`、`AGENTS.md`、`CLAUDE.md`、`KIRO.md`、`README.md`、各 README
 - **変更内容:** 配布構成・導入手順・編集手順を新しい構成へ書き換える。Agent Plugins 形式との関係を仕様書へ残す
@@ -175,7 +197,7 @@ Skill から参照するパスを、プラグインルート起点から Skill �
 | --- | --- | --- |
 | プラグイン名 | 変えない | `ndf` / `playwright-kit` / `mcp-*` を維持する |
 | マーケットプレイスの参照先 | `plugins/<名前>-<ランタイム>` から `plugins/<名前>` へ | 導入済みの利用者は再インストールが要る |
-| Codex のマーケットプレイス定義 | `.agents/plugins/marketplace.json` を削除 | `.claude-plugin/marketplace.json` へ自動でフォールバックする |
+| Codex のマーケットプレイス定義 | 全プラグインの移動後に `.agents/plugins/marketplace.json` を削除 | `.claude-plugin/marketplace.json` へ自動でフォールバックする。移動の途中は 2 つの定義を保つ |
 | Kiro CLI の installer パス | `plugins/ndf-kiro/install.sh` から `plugins/ndf/dev.kiro/install.sh` へ | 導入手順の案内を更新する |
 | Skill の名前と数 | 変えない | 配布先ごとの構成は `manifests/*-skills.txt` で維持する |
 
@@ -195,15 +217,17 @@ Skill から参照するパスを、プラグインルート起点から Skill �
 
 | リスク | 対処 |
 | --- | --- |
-| 実行時パスの変更で、いずれかのランタイムからスクリプトへ到達できなくなる | Task 2 を独立させ、3 ランタイムで到達を確認してから Task 3 へ進む |
-| Codex 側で Skill が想定より多く公開される | ルートマニフェストを置く基準を守る。ndf は Codex 用マニフェストで絞り込みを維持する |
+| 実行時パスの変更で、いずれかのランタイムからスクリプトへ到達できなくなる | Task 2 を独立させ、3 ランタイムで到達を確認してから先へ進む |
+| Codex 側で Skill が想定より多く公開される | ルートマニフェストを置く基準を守る。ndf は Codex 用マニフェストの `skills` で絞り込む。絞り込みが効くかを Task 3 で実測し、効かない場合は Codex へ配る 25 個だけを `.codex-plugin/skills/` へ symlink で並べる |
+| 移行の途中で、移動が済んでいないプラグインの Codex 導入経路が切れる | マーケットプレイス定義の統合を Task 6 へ切り出し、それまでは 2 つの定義を保って移し終えたエントリだけを更新する |
+| Claude Code がマニフェストの `hooks` フィールドを読まず、hook が発火しなくなる | Task 3 で実測する。読まない場合は Claude Code 用を `hooks/hooks.json` の固定パスに据え置き、Codex 用だけを `hooks/codex.json` として明示参照する |
 | Kiro CLI が Agent Plugins 形式へ対応したとき、ルートマニフェストと installer の両方が働いて Skill が二重に載る | installer に、Kiro 側がプラグインを認識している場合は symlink を張らない判定を入れる |
 | Skill ディレクトリ内の仮想環境が Kiro のファイル監視を圧迫する | `playwright-kit-ops` の実行環境を Skill ディレクトリの外へ出す。Kiro CLI 2.18.0 が同種の事象を修正している |
 | 導入済み環境が古いパスを指したまま残る | 各 README の移行手順に、再インストールの手順を書く |
 
 ## 切り戻し手順
 
-タスクごとにコミットを分け、プラグイン単位で戻せるようにする。マーケットプレイス定義の統合は Task 1 に含めるため、Task 1 を戻すと参照先も旧パスへ戻る。データの移行を伴わないため、リバートで元の状態に戻せる。
+タスクごとにコミットを分け、プラグイン単位で戻せるようにする。マーケットプレイス定義の統合は Task 6 に切り出したため、移動のタスクを戻したときは、そのタスクが更新したエントリだけが旧パスへ戻る。データの移行を伴わないため、リバートで元の状態に戻せる。
 
 ## 残リスク
 
@@ -213,6 +237,8 @@ Skill から参照するパスを、プラグインルート起点から Skill �
 | Agent Plugins 形式の `mcp.json` からの MCP サーバ起動 | 未確認。マニフェスト検証までは通っている |
 | Codex のルートマニフェストで hook を載せられるか | 未確認。マニフェストの項目に hook が無いため載らないと見ているが、実行では確かめていない。Codex は hook に承認済みハッシュを要求するため、非対話実行では発火の有無を切り分けられない |
 | Kiro CLI が Agent Plugins 形式へ対応する時期 | 未確認。Kiro IDE 1.0.288 で対応済み、CLI 2.19.1 では未対応 |
+| Codex 用マニフェストの `skills` 配列による Skill の絞り込み | 未確認。現在の配布物はディレクトリ指定だけを使い、絞り込みは物理配置で実現している。Task 3 で実測する |
+| Claude Code のマニフェスト `hooks` フィールドによるパス指定 | 未確認。現在の Claude Code 用マニフェストに `hooks` フィールドは無く、`hooks/hooks.json` の自動探索に依存している。Task 3 で実測する |
 
 ## 完了の定義
 
@@ -220,4 +246,4 @@ Skill から参照するパスを、プラグインルート起点から Skill �
 - [ ] `bash scripts/validate-runtime-plugins.sh` が成功する
 - [ ] `bash scripts/runtime-smoke-test.sh` を 3 ランタイムで実行し、成功する
 - [ ] `python3 scripts/check-markdown-links.py` が成功する
-- [ ] 残リスクの 4 項目それぞれについて、確認済みか未確認かが本文に反映されている
+- [ ] 残リスクの 6 項目それぞれについて、確認済みか未確認かが本文に反映されている
