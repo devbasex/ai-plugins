@@ -35,25 +35,22 @@ NDF plugin の plugin name は全 runtime で `ndf` を維持する。旧 `plugi
 
 `plugins/ndf-shared/manifests/{claude,codex,kiro}-skills.txt` は runtime ごとの配布 Skill 一覧を定義する。`scripts/build-runtime-plugins.sh` はこの manifest を読み、`plugins/ndf-shared/skills` から各 runtime の `skills/` へ同期する。
 
-Codex / Kiro では一部 Skill 内の `${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}` 参照を runtime 用に書き換える。
+Skill 内のパス参照の書き換えは、runtime ごとに次のとおりである。
 
-| runtime | 書き換え |
-|---|---|
-| Codex | `${CODEX_PLUGIN_ROOT}` を含む fallback と `skills/` 配下 script path に変換 |
-| Kiro CLI | `plugins/ndf-kiro` を既定 root とする参照に変換 |
-
-残っている書き換え対象は runtime ごとに次のとおりで、Codex は 0 個である。
-
-| runtime | 残る書き換え対象 |
-|---|---|
-| Codex | なし（生成物が共通編集元と一致する） |
-| Kiro CLI | `statusline` のみ |
+| runtime | 書き換え | 対象 |
+|---|---|---|
+| Codex | なし | — |
+| Kiro CLI | `plugins/ndf-kiro` を既定 root とする参照に変換 | `statusline` |
 
 `fix` / `cross-review` / `cross-refactoring` はプラグインルート起点をやめ、Skill ディレクトリ
-起点（`$SKILL_DIR/scripts`、隣の Skill へは `$SKILL_DIR/../<Skill 名>/`）で参照するように
-したため、runtime ごとの書き換えが要らない。Kiro CLI が `.kiro/skills/` へ張った symlink
-越しでも `..` は解決先を経由して届く。`statusline` は Claude Code 専用の Skill で、
-プラグインルート直下の `scripts/` を呼ぶためこの形にできない。
+起点（`$SKILL_DIR/scripts`、隣の Skill へは `$SKILL_DIR/../<Skill 名>/`）で参照する。配布
+ディレクトリの形が runtime ごとに違っても、Skill 直下の `scripts/` の位置は変わらないため
+書き換えが要らない。Kiro CLI が `.kiro/skills/` へ張った symlink 越しでも `..` は解決先を
+経由して届く。Codex 向けの書き換えは対象が 0 になり、生成物が共通編集元と一致する。
+
+`statusline` だけは Skill 直下ではなくプラグインルート直下の `scripts/` を呼ぶ。Claude Code と
+Kiro CLI へ配っており、Kiro にはプラグインルートを示す環境変数が無いため、この 1 個だけ
+書き換えが残る。
 
 scripts は `plugins/ndf-shared/scripts` から `plugins/ndf-{runtime}/scripts` へ同期する。
 

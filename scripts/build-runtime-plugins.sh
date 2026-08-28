@@ -88,37 +88,6 @@ copy_tree() {
   fi
 }
 
-rewrite_codex_skill_paths() {
-  local skills_dir="$1"
-  local script_dir="$2"
-  local file
-
-  for file in \
-    "$skills_dir/fix/SKILL.md"
-  do
-    [ -f "$file" ] || continue
-    sed "s#\${PLUGIN_ROOT:-\${CLAUDE_PLUGIN_ROOT}}/skills/fix/scripts/fetch-pr-comments.sh#\${PLUGIN_ROOT:-\${CODEX_PLUGIN_ROOT:-\${CLAUDE_PLUGIN_ROOT}}}/$script_dir/fix/scripts/fetch-pr-comments.sh#g" \
-      "$file" >"$file.tmp"
-    mv "$file.tmp" "$file"
-  done
-
-  for file in \
-    "$skills_dir/cross-review/SKILL.md" \
-    "$skills_dir/cross-review/docs/01-state-and-review.md" \
-    "$skills_dir/cross-refactoring/SKILL.md" \
-    "$skills_dir/cross-refactoring/docs/01-state-and-propose.md" \
-    "$skills_dir/cross-refactoring/docs/02-apply-and-review.md"
-  do
-    [ -f "$file" ] || continue
-    sed \
-      -e 's#${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}#${PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}#g' \
-      -e "s#skills/cross-review/scripts#$script_dir/cross-review/scripts#g" \
-      -e "s#skills/cross-refactoring/scripts#$script_dir/cross-refactoring/scripts#g" \
-      "$file" >"$file.tmp"
-    mv "$file.tmp" "$file"
-  done
-}
-
 # Codex は Skill ごとの `<Skill 名>/agents/openai.yaml` で暗黙起動を制御する。
 # SKILL.md の frontmatter を読み、`disable-model-invocation: true` を持つ Skill だけへ生成する。
 write_codex_skill_policies() {
@@ -180,6 +149,9 @@ for skill_dir in sorted(p for p in skills_dir.iterdir() if p.is_dir()):
 PY
 }
 
+# Kiro CLI にはプラグインルートを示す環境変数が無い。プラグインルート直下の scripts/ を
+# 呼ぶ Skill だけ、既定の root を Kiro の配布先へ書き換える。Skill 直下の scripts/ を呼ぶ
+# Skill は Skill ディレクトリ起点で書いてあるため、書き換えの対象にならない。
 rewrite_kiro_skill_paths() {
   local skills_dir="$1"
   local family="$2"
@@ -187,21 +159,7 @@ rewrite_kiro_skill_paths() {
   local file
 
   for file in \
-    "$skills_dir/fix/SKILL.md"
-  do
-    [ -f "$file" ] || continue
-    sed "s#\${PLUGIN_ROOT:-\${CLAUDE_PLUGIN_ROOT}}/skills/fix/scripts/fetch-pr-comments.sh#\${PLUGIN_ROOT:-$kiro_root}/skills/fix/scripts/fetch-pr-comments.sh#g" \
-      "$file" >"$file.tmp"
-    mv "$file.tmp" "$file"
-  done
-
-  for file in \
-    "$skills_dir/statusline/SKILL.md" \
-    "$skills_dir/cross-review/SKILL.md" \
-    "$skills_dir/cross-review/docs/01-state-and-review.md" \
-    "$skills_dir/cross-refactoring/SKILL.md" \
-    "$skills_dir/cross-refactoring/docs/01-state-and-propose.md" \
-    "$skills_dir/cross-refactoring/docs/02-apply-and-review.md"
+    "$skills_dir/statusline/SKILL.md"
   do
     [ -f "$file" ] || continue
     sed "s#\${PLUGIN_ROOT:-\${CLAUDE_PLUGIN_ROOT}}#\${PLUGIN_ROOT:-$kiro_root}#g" \
@@ -261,7 +219,6 @@ sync_skills() {
   \) -exec rm -rf {} + 2>/dev/null || true
 
   if [ "$variant" = codex-runtime ]; then
-    rewrite_codex_skill_paths "$tmp_dir" skills
     write_codex_skill_policies "$tmp_dir"
   elif [ "$variant" = kiro-runtime ]; then
     rewrite_kiro_skill_paths "$tmp_dir" "$family"
