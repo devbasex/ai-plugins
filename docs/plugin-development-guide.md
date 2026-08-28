@@ -16,16 +16,32 @@
   "plugins": [
     {
       "name": "ndf",
-      "source": "./plugins/ndf"
+      "source": "./plugins/ndf",
+      "description": "Claude Code plugin (v9.0.0): ... 27 focused NDF skills ...",
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity",
+      "interface": {
+        "displayName": "NDF"
+      }
     }
   ]
 }
 ```
 
 marketplace 定義はこの 1 つだけです。Codex は専用の定義を持たず、この定義へフォールバックして
-同じ `source` を読みます。Codex が要求する `policy` / `category` / `interface` は同じ entry へ含めます
-（Claude Code はこれらを読み込み時に無視します）。Kiro CLI は marketplace を読まないため、
-`plugins/<プラグイン名>/dev.kiro/install.sh` で導入します。
+同じ `source` を読みます。`policy` / `category` / `interface` は Codex が要求する項目で、同じ entry へ
+含めます（Claude Code はこれらを読み込み時に無視し、`claude plugin validate` は warning 付きで通ります）。
+
+Kiro CLI は marketplace を読まないため、installer で導入します。
+
+```bash
+bash plugins/ndf/dev.kiro/install.sh
+bash plugins/playwright-kit/dev.kiro/install.sh
+bash plugins/mcp/<プラグイン名>/dev.kiro/install.sh
+```
 
 ## プラグイン構造
 
