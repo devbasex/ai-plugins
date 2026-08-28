@@ -74,7 +74,7 @@
 - [ ] `scripts/build-runtime-plugins.sh` に実行時パスの書き換え処理が残っていない（`rewrite_codex_skill_paths` / `rewrite_kiro_skill_paths` の定義と呼び出しが無い）
 - [ ] Claude Code で `claude plugin validate` が全プラグインとマーケットプレイス定義で成功する
 - [ ] Codex で全プラグインを導入でき、Skill 数が導入前と一致する
-- [ ] Kiro CLI で installer を実行し、`.kiro/skills/` の symlink 数と `kiro-cli chat` が認識する Skill 数が導入前と一致する
+- [ ] Kiro CLI で installer を実行し、`.kiro/skills/` の symlink 数と `kiro-cli chat` が認識する Skill 数が導入前と一致する（symlink 数は確認済み。`kiro-cli chat` 側は未確認）
 - [ ] `scripts/validate-runtime-plugins.sh` が成功する
 - [ ] 実行時パスを参照する Skill が、Claude Code / Codex / Kiro CLI のいずれでも参照先へ到達できる
 - [ ] どの manifest にも載らない 4 個の Skill が、どのランタイムの公開セットにも現れない（Claude Code 27 / Codex 25 / Kiro 26 が変わらない）
@@ -345,3 +345,91 @@ symlink が使えないことは Task 4 の構成には影響しないが、Code
 - [ ] `bash scripts/runtime-smoke-test.sh` を 3 ランタイムで実行し、成功する
 - [ ] `python3 scripts/check-markdown-links.py` が成功する
 - [ ] 残リスクの 7 項目それぞれについて、確認済みか未確認かが本文に反映されている（Task 3 で 3 項目を確認済みへ更新した）
+
+## 完了サマリ
+
+2026-08-28 に `release/single-dir` を main へマージした（#140）。
+
+**1 点だけ未達がある。** 受け入れ条件 5 の後半（`kiro-cli chat` が認識する Skill 数の一致）を
+確認できていない。作業環境の kiro-cli が未ログインで `kiro-cli chat` を実行できないためである。
+したがって完了の定義 5 項目のうち 1 つ目（受け入れ条件をすべて満たす）も未達で、この計画は
+**閉じていない**。残りの受け入れ条件 7 項目と完了の定義 4 項目は満たしている。
+
+### マージ済み PR
+
+| PR | 内容 |
+| --- | --- |
+| #141 | Task 1: playwright-kit を単一ディレクトリへ移す |
+| #142 | Task 2: 実行時パス参照を Skill 起点へ変える |
+| #143 | Task 3: ndf の統合が前提とする 3 つの仕様を実測する |
+| #145 | Task 4: ndf を単一ディレクトリへ移す |
+| #147 | Task 5: MCP プラグイン 10 個を単一ディレクトリへ移す |
+| #148 | Task 6: マーケットプレイス定義を 1 つへ統合する |
+| #149 | Task 7: ビルドと検証を縮小する |
+| #150 | Task 8: ドキュメントを更新し、版数を繰り上げる |
+| #151 | Fix: container smoke の hook 検査を分割後のファイル名へ合わせる（結合で発見） |
+| #152 | Docs: 開発ガイドの marketplace の説明を統合後の形へ直す（結合レビューで発見） |
+
+個別 PR はすべて `/ndf:cross-review` で codex と gemini の両方が `APPROVE` に収束してから
+release ブランチへ取り込んだ。release PR も同じ形で収束させた。
+
+### 受け入れ条件の検証結果
+
+| # | 条件 | 検証 | 結果 |
+| --- | --- | --- | --- |
+| 1 | Skill の実体が 1 ディレクトリだけ | `git ls-files '*/SKILL.md'` の同名重複 | 0 件 |
+| 2 | 書き換え処理が残っていない | `grep -c 'rewrite_codex_skill_paths\|rewrite_kiro_skill_paths' scripts/build-runtime-plugins.sh` | 0 件 |
+| 3 | `claude plugin validate` が成功 | 2 プラグイン + マーケットプレイス定義 | 成功（定義は Codex 用項目の warning 付き） |
+| 4 | Codex で全プラグインを導入、Skill 数が一致 | `codex plugin add` ×12 → `codex exec` で列挙 | 12/12 導入、ndf 23 + playwright-kit 4（manifest 25 − 暗黙起動抑止 2） |
+| 5 | Kiro installer の symlink 数と `kiro-cli chat` が認識する Skill 数が一致 | `dev.kiro/install.sh` ×12 | **部分的に確認**。symlink 34 本と、到達できる `SKILL.md` 34 は確認した。`kiro-cli chat` が認識する数は**未確認**（下記「残っている未確認」） |
+| 6 | `validate-runtime-plugins.sh` が成功 | — | 成功 |
+| 7 | 実行時パスを参照する Skill が到達できる | 3 ランタイムで `state.py` / 隣の Skill の `lib` / `fix` の scripts / `statusline` のプラグインルート scripts | すべて到達 |
+| 8 | 未配布 4 個がどの公開セットにも現れない | 3 ランタイムの列挙と symlink 一覧 | 0 件 |
+
+### 完了の定義の検証結果
+
+| 項目 | 結果 |
+| --- | --- |
+| 受け入れ条件をすべて満たし、条件ごとに検証コマンドと結果が対応している | **未達**。条件 5 の後半（`kiro-cli chat` が認識する Skill 数）だけ確認できていない。他の 7 項目は上表のとおり |
+| `bash scripts/validate-runtime-plugins.sh` が各タスクのコミットで成功 | 各 PR の Test plan に記録 |
+| `bash scripts/runtime-smoke-test.sh` を 3 ランタイムで実行 | claude / codex / kiro とも `runtime smoke tests passed`。main の CI でも 3 つとも成功 |
+| `python3 scripts/check-markdown-links.py` | 成功 |
+| 残リスクの 7 項目の反映 | 3 項目を Task 3 で確認済みへ更新。Agent Plugins 形式の `mcp.json` からの起動も確認済みへ |
+
+### 実測
+
+| 項目 | 変更前 | 変更後 |
+| --- | --- | --- |
+| `plugins/` の追跡ファイル | 1,043 | 315 |
+| `scripts/build-runtime-plugins.sh` | 792 行 | 316 行 |
+| `scripts/validate-runtime-plugins.sh` | 443 行 | 397 行 |
+| 版数 | ndf 8.6.0 / playwright-kit 1.0.0 / MCP 1.0.x | ndf 9.0.0 / playwright-kit 2.0.0 / MCP 2.0.0 |
+
+### 計画から変えた点
+
+| 項目 | 計画 | 実際 | 理由 |
+| --- | --- | --- | --- |
+| MCP の `mcp.json` | Agent Plugins 形式へ一本化 | 現行の `.mcp.json` を維持 | Agent Plugins のスキーマが `envFile`（10 個中 6 個が使用）と `type: "http"`（2 個）を表現できない（事実 23） |
+| MCP のルートマニフェスト | 8 個に置く | 置かない | 置くと Codex がそちらを優先し `mcp.json` から読むため、上記の設定が欠ける |
+| `statusline` の扱い | 変更しない（Claude Code 専用と誤認） | Skill ディレクトリ起点へ変更（Task 4） | Kiro CLI へも配っており、受け入れ条件 2 を満たすには変更が要る |
+| ビルドの縮小 | Task 7 でまとめて行う | 死にコードになった時点で Task 2・4・5 で落とした | 移行の途中に空振りする処理を残さないため |
+| `skills` 配列の生成 | ビルドの役割に絞る | 生成しない | マニフェストは配列以外にも手で書く項目を持ち、生成物と手書きが混在するため。配列と manifest の一致は検証スクリプトが見る |
+
+### 残っている作業
+
+この計画を閉じるには、ログイン済みの Kiro CLI 環境で次を実行し、Skill が 34 個であることを
+確かめる必要がある。
+
+```bash
+bash plugins/ndf/dev.kiro/install.sh --project <検証用ディレクトリ>
+bash plugins/playwright-kit/dev.kiro/install.sh --project <検証用ディレクトリ>
+for p in plugins/mcp/*/dev.kiro/install.sh; do bash "$p" --project <検証用ディレクトリ>; done
+cd <検証用ディレクトリ> && kiro-cli chat --agent ndf --no-interactive '利用できる Skill を列挙して'
+```
+
+### 残っている未確認
+
+| 項目 | 状態 |
+| --- | --- |
+| Kiro CLI の `kiro-cli chat` による Skill 認識（受け入れ条件 5 の後半） | 未確認。作業環境の kiro-cli が未ログインで実行できない。symlink 経由で認識することは事実 6 で確認済みで、symlink の張り方は変えていない（変わったのは symlink の指す先だけ）。**受け入れ条件 5 はこの点だけ満たしていない**。ログイン済みの環境で `kiro-cli chat` に Skill を列挙させ、34 個であることを確かめれば閉じられる |
+| Kiro CLI が Skill 実行時のシェルへプラグインルートの環境変数を置くか | 未確認（事実 19）。同じ理由 |
