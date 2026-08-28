@@ -348,7 +348,12 @@ symlink が使えないことは Task 4 の構成には影響しないが、Code
 
 ## 完了サマリ
 
-2026-08-28 に `release/single-dir` を main へマージして完了した（#140）。
+2026-08-28 に `release/single-dir` を main へマージした（#140）。
+
+**1 点だけ未達がある。** 受け入れ条件 5 の後半（`kiro-cli chat` が認識する Skill 数の一致）を
+確認できていない。作業環境の kiro-cli が未ログインで `kiro-cli chat` を実行できないためである。
+したがって完了の定義 1（受け入れ条件をすべて満たす）も未達で、この計画は**閉じていない**。
+残りの受け入れ条件 7 項目と完了の定義 3 項目は満たしている。
 
 ### マージ済み PR
 
@@ -385,6 +390,7 @@ release ブランチへ取り込んだ。release PR も同じ形で収束させ�
 
 | 項目 | 結果 |
 | --- | --- |
+| 受け入れ条件をすべて満たし、条件ごとに検証コマンドと結果が対応している | **未達**。条件 5 の後半（`kiro-cli chat` が認識する Skill 数）だけ確認できていない。他の 7 項目は上表のとおり |
 | `bash scripts/validate-runtime-plugins.sh` が各タスクのコミットで成功 | 各 PR の Test plan に記録 |
 | `bash scripts/runtime-smoke-test.sh` を 3 ランタイムで実行 | claude / codex / kiro とも `runtime smoke tests passed`。main の CI でも 3 つとも成功 |
 | `python3 scripts/check-markdown-links.py` | 成功 |
@@ -408,6 +414,18 @@ release ブランチへ取り込んだ。release PR も同じ形で収束させ�
 | `statusline` の扱い | 変更しない（Claude Code 専用と誤認） | Skill ディレクトリ起点へ変更（Task 4） | Kiro CLI へも配っており、受け入れ条件 2 を満たすには変更が要る |
 | ビルドの縮小 | Task 7 でまとめて行う | 死にコードになった時点で Task 2・4・5 で落とした | 移行の途中に空振りする処理を残さないため |
 | `skills` 配列の生成 | ビルドの役割に絞る | 生成しない | マニフェストは配列以外にも手で書く項目を持ち、生成物と手書きが混在するため。配列と manifest の一致は検証スクリプトが見る |
+
+### 残っている作業
+
+この計画を閉じるには、ログイン済みの Kiro CLI 環境で次を実行し、Skill が 34 個であることを
+確かめる必要がある。
+
+```bash
+bash plugins/ndf/dev.kiro/install.sh --project <検証用ディレクトリ>
+bash plugins/playwright-kit/dev.kiro/install.sh --project <検証用ディレクトリ>
+for p in plugins/mcp/*/dev.kiro/install.sh; do bash "$p" --project <検証用ディレクトリ>; done
+cd <検証用ディレクトリ> && kiro-cli chat --agent ndf --no-interactive '利用できる Skill を列挙して'
+```
 
 ### 残っている未確認
 
