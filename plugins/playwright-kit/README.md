@@ -54,6 +54,29 @@ bash plugins/playwright-kit/dev.kiro/install.sh --dry-run
 NDF の installer と違い、エージェント定義・常時指示・プロンプト・フックは扱いません
 （このプラグインは Skill だけを配ります）。
 
+## v2.0.0 へ更新するとき
+
+配布ディレクトリが `plugins/playwright-kit-{shared,claude,codex,kiro}/` から
+`plugins/playwright-kit/` へ変わりました。マーケットプレイスの参照先が変わるため、**導入済みの
+環境では再インストールが要ります**。
+
+```bash
+# Claude Code
+/plugin marketplace update ai-plugins
+/plugin uninstall playwright-kit@ai-plugins
+/plugin install playwright-kit@ai-plugins
+
+# Codex
+codex plugin marketplace remove ai-plugins
+codex plugin marketplace add https://github.com/devbasex/ai-plugins
+codex plugin add playwright-kit@ai-plugins
+
+# Kiro CLI（installer のパスが変わりました）
+bash plugins/playwright-kit/dev.kiro/install.sh
+```
+
+Skill の名前と数は変えていません（4 個）。
+
 ## NDF との関係
 
 | 用途 | プラグイン |

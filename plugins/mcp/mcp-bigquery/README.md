@@ -38,6 +38,14 @@ BIGQUERY_DATASETS=dataset1,dataset2
 BIGQUERY_KEY_FILE=/path/to/service-account-key.json
 ```
 
+## v2.0.0 へ更新するとき
+
+配布ディレクトリが `plugins/mcp/{shared,claude,codex,kiro}/mcp-bigquery/` から
+`plugins/mcp/mcp-bigquery/` へ変わりました。マーケットプレイスの参照先が変わるため、**導入済みの
+環境では再インストールが要ります**。Kiro CLI の installer は `dev.kiro/install.sh` へ移りました。
+
+MCP サーバの定義（`.mcp.json`）の内容は変えていません。
+
 ## インストール
 
 ### Claude Code

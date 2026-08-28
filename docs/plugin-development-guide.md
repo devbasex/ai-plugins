@@ -143,7 +143,7 @@ plugins/{plugin-name}/
 
 ### Runtime plugin 検証
 
-NDF / MCP の runtime 別配布物を変更した場合は、以下を実行します。
+プラグインを変更した場合は、以下を実行します。
 
 ```bash
 bash scripts/build-runtime-plugins.sh

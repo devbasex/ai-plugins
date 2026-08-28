@@ -2,7 +2,7 @@
 
 ## 概要
 
-`mcp-redash` は、Redash MCP server を Claude Code / Codex / Kiro CLI から利用するための runtime 別 MCP plugin である。
+`mcp-redash` は、Redash MCP server を Claude Code / Codex / Kiro CLI から利用するための MCP plugin である。配布ディレクトリは 1 つで、3 runtime が同じ `.mcp.json` を読む。
 
 単一環境では plugin 同梱の `redash` MCP server だけを使い、複数環境が必要な project では suffix 付きの `redash-*` MCP server を project `.mcp.json` に追加する。これにより、導入直後の MCP 一覧を最小に保ちながら、必要な Redash 環境だけを明示的に増やせる。
 
@@ -90,7 +90,7 @@ Kiro runtime では、`redash-mcp-config.js` が `.mcp.json` の Redash MCP serv
 | `.claude-plugin/plugin.json` | Claude Code plugin manifest |
 | `.mcp.json` | plugin 同梱 `redash` MCP server 定義 |
 | `.env.example` | `REDASH_URL` / `REDASH_API_KEY` と suffix 付き環境変数の例 |
-| `README.md` | runtime 別導入方法、使い方、トラブルシューティング |
+| `README.md` | runtime ごとの導入方法、使い方、トラブルシューティング |
 | `scripts/redash-mcp-config.js` | project `.mcp.json` の追加・削除・一覧・状態確認 |
 | `skills/*/SKILL.md` | `redash-add` / `redash-remove` / `redash-list` / `redash-status` / `redash-guide` |
 

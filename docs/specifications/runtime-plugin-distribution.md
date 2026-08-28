@@ -160,6 +160,39 @@ bash scripts/validate-runtime-plugins.sh
 
 container smoke test の詳細は [Runtime Plugin Container Smoke Test 仕様](runtime-plugin-container-smoke.md) を参照する。
 
+## Agent Plugins 形式との関係
+
+[Agent Plugins](https://github.com/agentplugins/agent-plugins-spec) は Amazon / Cursor / Microsoft /
+OpenAI / Vercel が策定するプラグイン形式である。本リポジトリの配布構成はこの形式を全面採用
+しては**いない**。採った点と採らなかった点を、判断の根拠とともに残す。
+
+### 採った点
+
+| 項目 | 内容 |
+|---|---|
+| ルートマニフェスト（§5） | `playwright-kit` にだけ置く。Skill 4 個を 3 runtime へ同じだけ配り hook を持たないため、絞り込みを持たない形式で足りる |
+| `skills/` の固定位置（§6.1） | 全プラグインが従う。Skill の実体は `skills/` の 1 箇所だけに置く |
+| クライアント拡張ディレクトリ（§8.2） | Kiro CLI 向けのファイルを `dev.kiro/` へ置く。`dev.kiro` は kiro.dev の逆ドメイン |
+
+### 採らなかった点
+
+| 項目 | 理由 |
+|---|---|
+| `ndf` へのルートマニフェスト | 配布 Skill が Claude Code 27 / Codex 25 と異なり、hook も持つ。ルートマニフェストは `skills/` を全件公開して hook を持てない（§6.1、マニフェストは 9 項目のみ） |
+| MCP プラグインへのルートマニフェスト | 下記のとおり `mcp.json` が現行の設定を表現できず、ルートマニフェストを置くと Codex がそちらを優先するため |
+| `mcp.json`（§7.2） | スキーマが stdio サーバに `type` / `command` / `args` / `env` / `cwd` しか許さない（`additionalProperties: false`）。MCP プラグイン 10 個のうち 6 個が使う `envFile` を表現できず、2 個が使う `type: "http"` も無い。かわりに Claude Code 形式の `.mcp.json` を 1 つ置き、Codex は `.codex-plugin/plugin.json` の `mcpServers` から参照する |
+
+### runtime の対応状況（実測）
+
+| runtime | 版数 | ルートマニフェスト |
+|---|---|---|
+| Codex CLI | 0.149.0 | 読む（`plugin.json` > `.codex-plugin` > `.claude-plugin` の順） |
+| Claude Code | 2.1.250 | 読まない（`.claude-plugin/plugin.json` のみ） |
+| Kiro CLI | 2.19.1 | 読まない（CLI にプラグイン機構が無い。Kiro IDE 1.0.288 は対応済み） |
+
+Kiro CLI がルートマニフェストを読むようになった時点で、`dev.kiro/install.sh` の役割は Kiro 側の
+導入コマンドへ移せる。
+
 ## セキュリティ
 
 - 認証情報、API token、secret、private key は repository に含めない。
