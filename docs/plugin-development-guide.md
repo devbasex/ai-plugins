@@ -49,19 +49,35 @@ bash plugins/mcp/<プラグイン名>/dev.kiro/install.sh
 
 ```
 plugins/{plugin-name}/
+├── plugin.json                  # Agent Plugins 形式のルートマニフェスト（条件を満たす場合のみ）
 ├── .claude-plugin/
-│   └── plugin.json              # プラグインメタデータ（必須）
+│   └── plugin.json              # Claude Code のマニフェスト（必須）
+├── .codex-plugin/
+│   └── plugin.json              # Codex のマニフェスト（ルートマニフェストを置かない場合）
 ├── commands/                    # スラッシュコマンド（オプション）
 │   └── *.md
 ├── agents/                      # サブエージェント（オプション）
 │   └── *.md
-├── skills/                      # プロジェクトスキル（オプション）
+├── skills/                      # Skill の実体（オプション）
 │   └── {skill-name}/
 │       └── SKILL.md
-├── hooks/                       # プロジェクトフック（オプション）
-│   └── hooks.json
+├── manifests/                   # ランタイム別の配布 Skill 一覧（Skill を配る場合）
+│   └── {claude,codex,kiro}-skills.txt
+├── hooks/                       # フック（オプション）
+│   ├── claude.json              # Claude Code 用
+│   └── codex.json               # Codex 用
+├── dev.kiro/                    # Kiro CLI 用（installer など）
+│   └── install.sh
 └── README.md                    # プラグイン説明
 ```
+
+3 ランタイムが同じディレクトリを読みます。読む対象はマニフェストと installer が決めるため、
+公開される Skill と hook はランタイムごとに異なります。`dev.kiro` は Agent Plugins 仕様 §8.2 が
+定めるクライアント拡張ディレクトリです。
+
+ルートの `plugin.json`（Agent Plugins 形式）は、`skills/` を全件公開してよく hook も持たない
+プラグインにだけ置きます。判断の基準は
+[Runtime Plugin Distribution 仕様](specifications/runtime-plugin-distribution.md) を参照してください。
 
 ## plugin.json の作成
 
@@ -118,8 +134,11 @@ plugins/{plugin-name}/
 
 2. **ディレクトリ構造を作成**
    ```bash
-   mkdir -p plugins/{plugin-name}/{.claude-plugin,commands,agents,skills}
+   mkdir -p plugins/{plugin-name}/{.claude-plugin,.codex-plugin,commands,agents,skills,manifests,hooks,dev.kiro}
    ```
+
+   使わないディレクトリは作らなくて構いません。Skill を配らないなら `skills/` と
+   `manifests/`、hook が無いなら `hooks/`、Kiro CLI へ配らないなら `dev.kiro/` は不要です。
 
 3. **plugin.jsonを作成** - 必須フィールドをすべて含める
 
