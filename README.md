@@ -103,7 +103,7 @@ kiro-cli chat --agent ndf
 | プラグイン名 | バージョン | 説明 | 詳細 |
 |------------|----------|------|------|
 | **ndf** | 8.6.0 | Claude Code / Codex / Kiro CLI 向けに runtime 別配布物を提供する NDF プラグイン。8個の専門エージェント（Claude版）、公開Skills（Claude Code向け core 27個、Kiro向け core 26個、Codex向け core 25個）、Claude SessionStart/Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:external-ai` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [Claude](./plugins/ndf-claude/README.md) / [Codex](./plugins/ndf-codex/README.md) / [Kiro](./plugins/ndf-kiro/README.md) |
-| **playwright-kit** | 1.0.0 | Playwright による E2E テストの計画・実装・証跡管理を提供するプラグイン。ページ役割からのテスト計画、動画 / trace 付きスクリプト実装、レポート生成と Drive 保管、playwright_kit ランタイム（init、a11y / CWV スキャン）の 4 Skill。NDF v7.0.0 で分離。 | [Claude](./plugins/playwright-kit-claude/README.md) |
+| **playwright-kit** | 1.0.0 | Playwright による E2E テストの計画・実装・証跡管理を提供するプラグイン。ページ役割からのテスト計画、動画 / trace 付きスクリプト実装、レポート生成と Drive 保管、playwright_kit ランタイム（init、a11y / CWV スキャン）の 4 Skill。NDF v7.0.0 で分離。 | [README](./plugins/playwright-kit/README.md) |
 
 ### NDF v8.6.0 の主な変更
 
@@ -285,7 +285,7 @@ SKILL.md が対象言語のファイルだけを読ませます。他言語の�
 | `/ndf:playwright-kit-ops` | `/playwright-kit:playwright-kit-ops` |
 
 利用するには `playwright-kit` を別途インストールしてください（導入手順は
-[playwright-kit の README](./plugins/playwright-kit-claude/README.md) にランタイム別で記載）。
+[playwright-kit の README](./plugins/playwright-kit/README.md) にランタイム別で記載）。
 
 ```bash
 # Claude Code
@@ -293,7 +293,7 @@ SKILL.md が対象言語のファイルだけを読ませます。他言語の�
 # Codex
 codex plugin add playwright-kit@ai-plugins
 # Kiro CLI
-bash plugins/playwright-kit-kiro/install.sh
+bash plugins/playwright-kit/dev.kiro/install.sh
 ```
 
 **Skill の `description` を圧縮しました。** 挙動は変わりません。

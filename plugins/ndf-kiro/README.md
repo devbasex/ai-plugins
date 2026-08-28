@@ -25,7 +25,7 @@ Skill 名は変わらないため `/playwright-` まで打てば従来どおり�
 インストールする必要があります。
 
 ```bash
-bash plugins/playwright-kit-kiro/install.sh
+bash plugins/playwright-kit/dev.kiro/install.sh
 ```
 
 移行先の対応表は予告どおり v8.0.0 で `ndf-policies` から削除したため、`.kiro/steering/ndf-policies.md`

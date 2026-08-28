@@ -20,7 +20,7 @@
       "name": "playwright-kit",
       "source": {
         "source": "local",
-        "path": "./plugins/playwright-kit-codex"
+        "path": "./plugins/playwright-kit"
       },
       "policy": {
         "installation": "AVAILABLE",

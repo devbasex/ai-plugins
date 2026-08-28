@@ -1,6 +1,0 @@
-{
-  "name": "playwright-kit",
-  "version": "1.0.0",
-  "description": "Codex plugin (v1.0.0): 4 Playwright E2E skills — test planning by page role, script authoring with video / trace evidence, report generation with Drive archiving, and the playwright_kit runtime (init, a11y / CWV scans).",
-  "skills": "./skills/"
-}
