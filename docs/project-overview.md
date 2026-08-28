@@ -22,21 +22,13 @@ Claude Code / Codex プラグインマーケットプレイス（内部用）と
 
 ```
 ai-plugins/
-├── .agents/
-│   └── plugins/
-│       └── marketplace.json      # Codexマーケットプレイスメタデータ
 ├── .claude-plugin/
-│   └── marketplace.json          # Claude Codeマーケットプレイスメタデータ
+│   └── marketplace.json          # マーケットプレイス定義（3ランタイム共通）
 ├── plugins/
-│   ├── ndf-shared/               # NDF共通ソース
-│   ├── ndf-claude/               # Claude Code版NDF
-│   ├── ndf-codex/                # Codex版NDF
-│   ├── ndf-kiro/                 # Kiro CLI版NDF
+│   ├── ndf/                      # NDF（3ランタイム共通の単一ディレクトリ）
+│   ├── playwright-kit/           # playwright-kit（3ランタイム共通の単一ディレクトリ）
 │   └── mcp/
-│       ├── shared/               # MCPプラグイン共通ソース
-│       ├── claude/               # Claude Code版MCPプラグイン
-│       ├── codex/                # Codex版MCPプラグイン
-│       └── kiro/                 # Kiro CLI版MCPプラグイン
+│       └── mcp-*/                # MCPプラグイン10個（3ランタイム共通）
 ├── docs/                         # リポジトリ知識
 ├── AGENTS.md                     # 共通エントリポイント
 ├── CLAUDE.md                     # Claude Code固有設定

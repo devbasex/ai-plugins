@@ -8,63 +8,159 @@
   "plugins": [
     {
       "name": "ndf",
-      "source": "./plugins/ndf-claude",
-      "description": "Claude Code plugin (v8.6.0): 8 specialized agents and 27 focused NDF skills for PR/review workflows, cross-review, implementation planning, plan-to-spec, Docker container access, statusline, external AI delegation (Codex/Gemini), transcript retention guard, and optional Slack notifications."
+      "source": "./plugins/ndf",
+      "description": "Claude Code plugin (v9.0.0): 8 specialized agents and 27 focused NDF skills for PR/review workflows, cross-review, implementation planning, plan-to-spec, Docker container access, statusline, external AI delegation (Codex/Gemini), transcript retention guard, and optional Slack notifications.",
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity",
+      "interface": {
+        "displayName": "NDF"
+      }
     },
     {
       "name": "playwright-kit",
-      "source": "./plugins/playwright-kit-claude",
-      "description": "Claude Code plugin (v1.0.0): 4 Playwright E2E skills — test planning by page role, script authoring with video / trace evidence, report generation with Drive archiving, and the playwright_kit runtime (init, a11y / CWV scans)."
+      "source": "./plugins/playwright-kit",
+      "description": "Claude Code plugin (v2.0.0): 4 Playwright E2E skills — test planning by page role, script authoring with video / trace evidence, report generation with Drive archiving, and the playwright_kit runtime (init, a11y / CWV scans).",
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity",
+      "interface": {
+        "displayName": "Playwright Kit"
+      }
     },
     {
       "name": "mcp-playwright",
-      "source": "./plugins/mcp/claude/mcp-playwright",
-      "description": "Playwright MCP auto-setup plugin with Chromium browser installation and configuration"
+      "source": "./plugins/mcp/mcp-playwright",
+      "description": "Playwright MCP auto-setup plugin with Chromium browser installation and configuration",
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity",
+      "interface": {
+        "displayName": "Playwright MCP"
+      }
     },
     {
       "name": "mcp-chrome-devtools",
-      "source": "./plugins/mcp/claude/mcp-chrome-devtools",
-      "description": "Chrome DevTools MCP server for browser automation and testing"
+      "source": "./plugins/mcp/mcp-chrome-devtools",
+      "description": "Chrome DevTools MCP server for browser automation and testing",
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity",
+      "interface": {
+        "displayName": "Chrome DevTools MCP"
+      }
     },
     {
       "name": "mcp-bigquery",
-      "source": "./plugins/mcp/claude/mcp-bigquery",
-      "description": "BigQuery MCP server for data analysis and SQL queries"
+      "source": "./plugins/mcp/mcp-bigquery",
+      "description": "BigQuery MCP server for data analysis and SQL queries",
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity",
+      "interface": {
+        "displayName": "BigQuery MCP"
+      }
     },
     {
       "name": "mcp-aws-docs",
-      "source": "./plugins/mcp/claude/mcp-aws-docs",
-      "description": "AWS Documentation MCP server for accessing official AWS documentation"
+      "source": "./plugins/mcp/mcp-aws-docs",
+      "description": "AWS Documentation MCP server for accessing official AWS documentation",
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity",
+      "interface": {
+        "displayName": "AWS Docs MCP"
+      }
     },
     {
       "name": "mcp-dbhub",
-      "source": "./plugins/mcp/claude/mcp-dbhub",
-      "description": "DBHub MCP server for database operations and SQL queries"
+      "source": "./plugins/mcp/mcp-dbhub",
+      "description": "DBHub MCP server for database operations and SQL queries",
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity",
+      "interface": {
+        "displayName": "DBHub MCP"
+      }
     },
     {
       "name": "mcp-notion",
-      "source": "./plugins/mcp/claude/mcp-notion",
-      "description": "Notion MCP server for note management and knowledge base operations"
+      "source": "./plugins/mcp/mcp-notion",
+      "description": "Notion MCP server for note management and knowledge base operations",
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity",
+      "interface": {
+        "displayName": "Notion MCP"
+      }
     },
     {
       "name": "mcp-devin",
-      "source": "./plugins/mcp/claude/mcp-devin",
-      "description": "Devin MCP server for accessing repository documentation and code knowledge via DeepWiki"
+      "source": "./plugins/mcp/mcp-devin",
+      "description": "Devin MCP server for accessing repository documentation and code knowledge via DeepWiki",
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity",
+      "interface": {
+        "displayName": "Devin MCP"
+      }
     },
     {
       "name": "mcp-redash",
-      "source": "./plugins/mcp/claude/mcp-redash",
-      "description": "Redash MCP server with multi-environment support (arbitrary suffix)"
+      "source": "./plugins/mcp/mcp-redash",
+      "description": "Redash MCP server with multi-environment support (arbitrary suffix)",
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity",
+      "interface": {
+        "displayName": "Redash MCP"
+      }
     },
     {
       "name": "mcp-markitdown",
-      "source": "./plugins/mcp/claude/mcp-markitdown",
-      "description": "MarkItDown MCP server for converting documents (PDF, Office, images, etc.) to Markdown"
+      "source": "./plugins/mcp/mcp-markitdown",
+      "description": "MarkItDown MCP server for converting documents (PDF, Office, images, etc.) to Markdown",
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity",
+      "interface": {
+        "displayName": "MarkItDown MCP"
+      }
     },
     {
       "name": "mcp-serena",
-      "source": "./plugins/mcp/claude/mcp-serena",
-      "description": "Serena MCP server for semantic code intelligence (symbol search, reference search, refactoring)"
+      "source": "./plugins/mcp/mcp-serena",
+      "description": "Serena MCP server for semantic code intelligence (symbol search, reference search, refactoring)",
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity",
+      "interface": {
+        "displayName": "Serena MCP"
+      }
     }
   ]
 }

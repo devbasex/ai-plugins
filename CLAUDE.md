@@ -17,7 +17,7 @@ Serena MCPは**mcp-serena**プラグインとして提供されます（NDFと�
 
 **Serena memoryは使用禁止**。知識は `docs/` に、手順は `skills/` に配置してください。
 
-詳細は `plugins/mcp/shared/mcp-serena/docs/serena-guide.md` を参照。
+詳細は `plugins/mcp/mcp-serena/docs/serena-guide.md` を参照。
 
 ## 知識アーキテクチャ
 
@@ -29,9 +29,9 @@ skills/     → 実行可能なワークフロー
 
 詳細は `docs/specifications/ndf-knowledge-and-kiro.md` を参照。
 
-## NDF v8.6.0 の Skill 構成
+## NDF v9.0.0 の Skill 構成
 
-Skill は 31 個で、配布は `plugins/ndf-shared/manifests/` が唯一の基準（Claude Code 27 / Codex 25 / Kiro 26）。ブラウザ自動テストの 4 個は `playwright-kit` プラグインへ分離した（`plugins/playwright-kit-shared/`）。frontmatter の書き方は `plugins/ndf-shared/skills/README.md` の規約に従い、`python3 scripts/check-skill-frontmatter.py` で検査する。利用実績と維持・統合・削除の判定は `docs/specifications/ndf-skill-inventory.md` に記録する。
+Skill は 31 個で、配布は `plugins/ndf/manifests/` が唯一の基準（Claude Code 27 / Codex 25 / Kiro 26）。ブラウザ自動テストの 4 個は `playwright-kit` プラグインへ分離した（`plugins/playwright-kit/`）。frontmatter の書き方は `plugins/ndf/skills/README.md` の規約に従い、`python3 scripts/check-skill-frontmatter.py` で検査する。利用実績と維持・統合・削除の判定は `docs/specifications/ndf-skill-inventory.md` に記録する。
 
 v6.1.0 で開発方法論レイヤーの 5 個（`development-workflow` / `requirements-design` / `tdd-cycle` / `refactoring`（当時は `safe-refactoring`）/ `quality-gates`）を追加した。モード判定の基準を持つのは `development-workflow` だけで、他の Skill とエージェント定義は判定結果を受け取る側に徹する。
 
@@ -39,7 +39,7 @@ v7.0.0 で playwright 系 4 個を `playwright-kit` プラグインへ分離し�
 
 v8.0.0 で `safe-refactoring` を `refactoring` へ改名し、分岐・反復・定数の表現を決める観点を統合した。観点は `references/data-representation.md` に置き、言語固有の手段は `references/lang-<言語>.md` に 1 言語 1 ファイルで置く。SKILL.md が対象言語のファイルだけを読ませるため、他言語の内容はコンテキストに載らない。言語を追加するときも他のファイルは変更しない。対応表は `ndf-policies` にある（v9.0.0 で削除）。
 
-v8.1.0 で `cross-refactoring` を追加した。あわせて収束ループの共通層を `plugins/ndf-shared/skills/cross-review/scripts/lib/` へ切り出し、`monitor.py` は同ディレクトリへ移設して既存パスをシムにした。`cross-review` の挙動と既存テストは変えていない。
+v8.1.0 で `cross-refactoring` を追加した。あわせて収束ループの共通層を `plugins/ndf/skills/cross-review/scripts/lib/` へ切り出し、`monitor.py` は同ディレクトリへ移設して既存パスをシムにした。`cross-review` の挙動と既存テストは変えていない。
 
 v8.2.0 で `cross-refactoring` の実機検証（PR #118）で見つかった 9 件の不具合を直した。`cross-review` と共通層は変更していない。詳細は `issues/issue-113-cross-refactoring-defect-fixes.md`。
 
@@ -55,9 +55,9 @@ v8.5.2 で `cross-refactoring` のレビュー投稿が自分の Pull Request �
 
 v8.5.3 で `cross-refactoring` の投稿の確認を入れた。投稿は AI 自身が `gh api` で行うため、失敗しても結果ファイルの判定だけは残る。そのまま採ると、実装担当が読むべき指摘が Pull Request に無いまま収束する。`judge-review` が `review_url` を必須とし、URL の識別子から GitHub 側の存在を確かめる。無ければ差し戻し、取得できないときは申告を採用して確認できなかったことを出力へ残す。あわせてレビュープロンプトが、投稿に失敗したときも `post_error` 付きの結果ファイルを書かせる。上限に達したときは投稿できなかった担当も中断の対象へ含める。`cross-review` の投稿確認と同じ考え方になる。詳細は `issues/issue-113-cross-refactoring-5th-trial-report.md`。
 
-v8.5.4 で `cross-refactoring` の差分予算を手法別にした。新しい定義を作って呼び出し側を書き換える手法は、抽出した本体に加えて呼び出し側の書き換え・import の追加・引数の受け渡しが固定費として乗る。実測で予算超過として落ちた 4 件はいずれも `long_method` の抽出で、見積の 2.03〜2.31 倍だった。範囲の逸脱ではなく、倍率 2 の予算をわずかに超えただけである。抽出系の 7 手法だけ倍率を 3 にした（範囲外を触った実測例は見積の 4 倍なので取り逃がさない）。あわせて提案プロンプトの見積の指示へ固定費と現状固定テストを数えることを明記し、`init` が kiro の既定 `auto` を検知して「集計から分離される」ことを着手前に知らせるようにした。詳細は `plugins/ndf-shared/skills/cross-refactoring/docs/02-apply-and-review.md`。
+v8.5.4 で `cross-refactoring` の差分予算を手法別にした。新しい定義を作って呼び出し側を書き換える手法は、抽出した本体に加えて呼び出し側の書き換え・import の追加・引数の受け渡しが固定費として乗る。実測で予算超過として落ちた 4 件はいずれも `long_method` の抽出で、見積の 2.03〜2.31 倍だった。範囲の逸脱ではなく、倍率 2 の予算をわずかに超えただけである。抽出系の 7 手法だけ倍率を 3 にした（範囲外を触った実測例は見積の 4 倍なので取り逃がさない）。あわせて提案プロンプトの見積の指示へ固定費と現状固定テストを数えることを明記し、`init` が kiro の既定 `auto` を検知して「集計から分離される」ことを着手前に知らせるようにした。詳細は `plugins/ndf/skills/cross-refactoring/docs/02-apply-and-review.md`。
 
-v8.6.0 で `cross-refactoring` のコミット粒度を 1 改善項目 = 1 コミットに変えた。手順を 1 手ずつ進めることと、その途中経過を履歴に残すことは別である。手ごとにテストを回すのは変わらないが、残すのは項目単位の 1 コミットだけにする（現状固定テストが要る項目のみ 2 コミット）。適用と修正の両方で検証するのは、適用側だけ揃えても指摘への対応という名目で刻んだ履歴が戻ってくるためである。テストの回数も項目の単位に合わせた。進行側が申告されたコミットごとに実行するため、実装担当にも手ごとの実行を義務づけると同じテストが手数の 2 倍だけ走る（実測 44 手で 88 回）。あわせて改修計画（なぜ直すのか・どう直すのか）を `--plan-file`（既定 `issues/refactoring-plan-rf<PR>.md`）へ書き出すようにした。理由と手順は提案の時点でしか残らず、状態ファイルは差分から除外されるため Pull Request からは読めなかった。公開は生成物の同期と同じコミットに乗せる。詳細は `plugins/ndf-shared/skills/cross-refactoring/docs/02-apply-and-review.md`。
+v8.6.0 で `cross-refactoring` のコミット粒度を 1 改善項目 = 1 コミットに変えた。手順を 1 手ずつ進めることと、その途中経過を履歴に残すことは別である。手ごとにテストを回すのは変わらないが、残すのは項目単位の 1 コミットだけにする（現状固定テストが要る項目のみ 2 コミット）。適用と修正の両方で検証するのは、適用側だけ揃えても指摘への対応という名目で刻んだ履歴が戻ってくるためである。テストの回数も項目の単位に合わせた。進行側が申告されたコミットごとに実行するため、実装担当にも手ごとの実行を義務づけると同じテストが手数の 2 倍だけ走る（実測 44 手で 88 回）。あわせて改修計画（なぜ直すのか・どう直すのか）を `--plan-file`（既定 `issues/refactoring-plan-rf<PR>.md`）へ書き出すようにした。理由と手順は提案の時点でしか残らず、状態ファイルは差分から除外されるため Pull Request からは読めなかった。公開は生成物の同期と同じコミットに乗せる。詳細は `plugins/ndf/skills/cross-refactoring/docs/02-apply-and-review.md`。
 
 v6.0.0 の対応表（`review` → `pr-review`）は予告どおり削除済み。v6.0.0 以前から移行する場合は v6.1.0 の `ndf-policies` を参照する。
 

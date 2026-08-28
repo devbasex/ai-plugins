@@ -13,7 +13,7 @@ run_step "codex install mcp-bigquery" codex plugin add mcp-bigquery@ai-plugins
 run_step "codex plugin list" codex plugin list
 
 "$REPO_ROOT/tests/runtime-smoke/assertions/assert-plugin-files.sh" codex
-"$REPO_ROOT/tests/runtime-smoke/assertions/assert-mcp-config.sh" codex "$REPO_ROOT/plugins/mcp/codex/mcp-bigquery/.mcp.json"
+"$REPO_ROOT/tests/runtime-smoke/assertions/assert-mcp-config.sh" codex "$REPO_ROOT/plugins/mcp/mcp-bigquery/.mcp.json"
 "$REPO_ROOT/tests/runtime-smoke/assertions/assert-hook-fixtures.sh" codex
 "$REPO_ROOT/tests/runtime-smoke/assertions/assert-authenticated-smoke.sh" codex
 "$REPO_ROOT/tests/runtime-smoke/assertions/assert-no-host-contamination.sh" codex

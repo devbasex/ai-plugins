@@ -1,0 +1,16 @@
+{
+  "name": "mcp-playwright",
+  "version": "2.0.0",
+  "description": "Playwright MCPを自動セットアップするプラグイン。Chromiumブラウザの自動インストールとMCP設定を提供します。",
+  "author": {
+    "name": "NDF Team",
+    "url": "https://github.com/devbasex/ai-plugins"
+  },
+  "keywords": [
+    "mcp",
+    "playwright",
+    "browser",
+    "automation",
+    "testing"
+  ]
+}

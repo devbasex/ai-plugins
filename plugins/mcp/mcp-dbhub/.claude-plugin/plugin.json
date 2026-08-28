@@ -1,0 +1,17 @@
+{
+  "name": "mcp-dbhub",
+  "version": "2.0.0",
+  "description": "DBHub MCP server for database operations and SQL queries",
+  "author": {
+    "name": "takemi-ohama",
+    "url": "https://github.com/takemi-ohama"
+  },
+  "keywords": [
+    "mcp",
+    "database",
+    "sql",
+    "dbhub",
+    "mysql",
+    "postgres"
+  ]
+}

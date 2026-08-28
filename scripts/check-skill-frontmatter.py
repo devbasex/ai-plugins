@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Skill の frontmatter が執筆規約に適合しているかを検査する。
 
-規約の本文は plugins/ndf-shared/skills/README.md にある。本スクリプトはそのうち
+規約の本文は plugins/ndf/skills/README.md にある。本スクリプトはそのうち
 機械的に判定できる項目だけを検査し、継続的インテグレーションで実行する。
 
 検査は 3 種類に分かれる。
@@ -19,7 +19,7 @@
 使い方:
 
     python3 scripts/check-skill-frontmatter.py
-    python3 scripts/check-skill-frontmatter.py --skills-dir plugins/ndf-shared/skills
+    python3 scripts/check-skill-frontmatter.py --skills-dir plugins/ndf/skills
     python3 scripts/check-skill-frontmatter.py --strict
     python3 scripts/check-skill-frontmatter.py --report   # 実測値の一覧だけ出す
 """
@@ -33,7 +33,7 @@ import re
 import sys
 
 # --- 規約の上限値 -----------------------------------------------------------
-# 出典は plugins/ndf-shared/skills/README.md「上限値」。
+# 出典は plugins/ndf/skills/README.md「上限値」。
 NAME_MAX = 64                 # Agent Skills 仕様
 DESCRIPTION_SPEC_MAX = 1024   # Agent Skills 仕様
 DESCRIPTION_OPS_MAX = 300     # 運用目標
@@ -681,7 +681,7 @@ def main() -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--skills-dir", action="append", default=None,
                     help="検査対象の Skill ディレクトリ。複数指定できる"
-                         "（既定: plugins/*-shared/skills を全て検査）")
+                         "（既定: manifests/ を持つ plugin family の skills/ を全て検査）")
     ap.add_argument("--strict", action="store_true",
                     help="警告も失敗として扱う")
     ap.add_argument("--report", action="store_true",
@@ -693,12 +693,24 @@ def main() -> int:
     if args.skills_dir:
         skills_dirs = [pathlib.Path(d) for d in args.skills_dir]
     else:
-        # plugin family（<family>-shared）を検出する。初期一覧の予算はプラグイン横断で
-        # 共有されるため、既定では全 family を対象にして合計も出す。
-        skills_dirs = sorted(
-            d / "skills" for d in pathlib.Path("plugins").glob("*-shared")
-            if (d / "skills").is_dir()
-        )
+        # plugin family を manifests/ の有無から検出する。移行の途中は 2 つの構成が
+        # 混ざるため、どちらも拾う。
+        #   split  … plugins/<family>-shared（編集元。生成物は検査しない）
+        #   single … plugins/<family>（配布ディレクトリが 1 つだけ）
+        # 初期一覧の予算はプラグイン横断で共有されるため、既定では全 family を対象に
+        # して合計も出す。
+        found = []
+        for d in sorted(pathlib.Path("plugins").glob("*")):
+            if not (d / "manifests").is_dir() or not (d / "skills").is_dir():
+                continue
+            if d.name.endswith(("-claude", "-codex", "-kiro")):
+                continue
+            found.append(d / "skills")
+            # どの manifest にも載せない Skill も規約の検査は受ける。配らないだけで、
+            # 中身は同じ規約で書く（後で配布へ回すときに書き直しが要らないように）。
+            if (d / "optional-skills").is_dir():
+                found.append(d / "optional-skills")
+        skills_dirs = found
     for d in skills_dirs:
         if not d.is_dir():
             print(f"[check-skill-frontmatter] ディレクトリがない: {d}", file=sys.stderr)
