@@ -50,7 +50,7 @@
 | 16 | Codex 用マニフェストの `skills` に配列を書くと、配列に載せた Skill だけが公開される | `skills/` に 3 個（`alpha` / `beta` / `gamma`）を置き、`skills` に `alpha` と `beta` だけを列挙した検証用プラグインを導入。キャッシュには 3 個とも展開されるが、`codex exec` に列挙させると `codexprobe:alpha` と `codexprobe:beta` の 2 個だけが出た |
 | 17 | Codex は Skill ディレクトリに張った symlink を読まない | `.codex-plugin/skills/` に symlink を張り `skills` でそのディレクトリを指した検証用プラグインを導入。キャッシュへ複製する時点で symlink が落ち（複製先のディレクトリが空）、Skill は 1 個も公開されなかった |
 | 18 | Claude Code はマニフェストの `hooks` フィールドからのパス指定を読む | `.claude-plugin/plugin.json` に `"hooks": "./hooks/claude.json"` を書いた検証用プラグインで SessionStart フックが発火。既定パス `hooks/hooks.json` の対照プラグインも同時に発火した |
-| 19 | Claude Code と Codex は、Skill が実行するシェルにプラグインルートの環境変数を置かない | 検証用 Skill から `echo` させ、`CLAUDE_PLUGIN_ROOT` / `CODEX_PLUGIN_ROOT` / `PLUGIN_ROOT` がいずれも空。Agent Plugins 1.0.0 §9.1 が `PLUGIN_ROOT` を義務づけるのは MCP サーバのサブプロセスに対してだけである。**Kiro CLI は未確認**（この環境の kiro-cli が未ログインで `kiro-cli chat` を実行できない） |
+| 19 | 3 ランタイムとも、Skill が実行するシェルにプラグインルートの環境変数を置かない | 各ランタイムから `echo "CLAUDE=[${CLAUDE_PLUGIN_ROOT}] CODEX=[${CODEX_PLUGIN_ROOT}] PLUGIN=[${PLUGIN_ROOT}]"` を実行させ、3 つともすべて空。Agent Plugins 1.0.0 §9.1 が `PLUGIN_ROOT` を義務づけるのは MCP サーバのサブプロセスに対してだけである |
 | 20 | Claude Code は SKILL.md 内の `${CLAUDE_PLUGIN_ROOT}` をプラグインルートの絶対パスへ置き換えてからモデルへ渡す | 同じ検証用 Skill で確認。シングルクォートの中でも置き換わる。`${CLAUDE_PLUGIN_ROOT:-}` の形は置き換わらない |
 | 21 | Codex はモデルへ Skill ディレクトリの絶対パスを渡す | `codex exec` に Skill を読ませ、その SKILL.md が置かれたディレクトリを答えさせて確認 |
 | 22 | Codex は `.codex-plugin/plugin.json` の `mcpServers` が指すファイルを、`{"mcpServers": {…}}` の形でも読む | 検証用プラグインで `codex mcp list` にサーバが現れることを確認。`envFile` のような仕様外のキーがあっても登録される |
@@ -74,7 +74,7 @@
 - [ ] `scripts/build-runtime-plugins.sh` に実行時パスの書き換え処理が残っていない（`rewrite_codex_skill_paths` / `rewrite_kiro_skill_paths` の定義と呼び出しが無い）
 - [ ] Claude Code で `claude plugin validate` が全プラグインとマーケットプレイス定義で成功する
 - [ ] Codex で全プラグインを導入でき、Skill 数が導入前と一致する
-- [ ] Kiro CLI で installer を実行し、`.kiro/skills/` の symlink 数と `kiro-cli chat` が認識する Skill 数が導入前と一致する（symlink 数は確認済み。`kiro-cli chat` 側は未確認）
+- [ ] Kiro CLI で installer を実行し、`.kiro/skills/` の symlink 数と `kiro-cli chat` が認識する Skill 数が導入前と一致する
 - [ ] `scripts/validate-runtime-plugins.sh` が成功する
 - [ ] 実行時パスを参照する Skill が、Claude Code / Codex / Kiro CLI のいずれでも参照先へ到達できる
 - [ ] どの manifest にも載らない 4 個の Skill が、どのランタイムの公開セットにも現れない（Claude Code 27 / Codex 25 / Kiro 26 が変わらない）
@@ -348,12 +348,12 @@ symlink が使えないことは Task 4 の構成には影響しないが、Code
 
 ## 完了サマリ
 
-2026-08-28 に `release/single-dir` を main へマージした（#140）。
+2026-08-28 に `release/single-dir` を main へマージした（#140）。受け入れ条件 8 項目と
+完了の定義 5 項目をすべて満たし、この計画は**閉じた**。
 
-**1 点だけ未達がある。** 受け入れ条件 5 の後半（`kiro-cli chat` が認識する Skill 数の一致）を
-確認できていない。作業環境の kiro-cli が未ログインで `kiro-cli chat` を実行できないためである。
-したがって完了の定義 5 項目のうち 1 つ目（受け入れ条件をすべて満たす）も未達で、この計画は
-**閉じていない**。残りの受け入れ条件 7 項目と完了の定義 4 項目は満たしている。
+マージ時点では受け入れ条件 5 の後半（`kiro-cli chat` が認識する Skill 数の一致）だけが未確認
+だった。作業環境の kiro-cli が未ログインだったためである。その後ログインして確認し、条件を
+満たすことを確かめた（#154）。
 
 ### マージ済み PR
 
@@ -381,7 +381,7 @@ release ブランチへ取り込んだ。release PR も同じ形で収束させ�
 | 2 | 書き換え処理が残っていない | `grep -c 'rewrite_codex_skill_paths\|rewrite_kiro_skill_paths' scripts/build-runtime-plugins.sh` | 0 件 |
 | 3 | `claude plugin validate` が成功 | 2 プラグイン + マーケットプレイス定義 | 成功（定義は Codex 用項目の warning 付き） |
 | 4 | Codex で全プラグインを導入、Skill 数が一致 | `codex plugin add` ×12 → `codex exec` で列挙 | 12/12 導入、ndf 23 + playwright-kit 4（manifest 25 − 暗黙起動抑止 2） |
-| 5 | Kiro installer の symlink 数と `kiro-cli chat` が認識する Skill 数が一致 | `dev.kiro/install.sh` ×12 | **部分的に確認**。symlink 34 本と、到達できる `SKILL.md` 34 は確認した。`kiro-cli chat` が認識する数は**未確認**（下記「残っている未確認」） |
+| 5 | Kiro installer の symlink 数と `kiro-cli chat` が認識する Skill 数が一致 | `dev.kiro/install.sh` ×12 → `kiro-cli chat --agent ndf` に Skill を列挙させる | symlink 34 本、到達できる `SKILL.md` 34、`kiro-cli chat` が認識した Skill も **34 個で完全に一致**。内訳は ndf 25（kiro manifest 26 − steering へ回す `ndf-policies`）+ playwright-kit 4 + mcp-redash 5 |
 | 6 | `validate-runtime-plugins.sh` が成功 | — | 成功 |
 | 7 | 実行時パスを参照する Skill が到達できる | 3 ランタイムで `state.py` / 隣の Skill の `lib` / `fix` の scripts / `statusline` のプラグインルート scripts | すべて到達 |
 | 8 | 未配布 4 個がどの公開セットにも現れない | 3 ランタイムの列挙と symlink 一覧 | 0 件 |
@@ -390,7 +390,7 @@ release ブランチへ取り込んだ。release PR も同じ形で収束させ�
 
 | 項目 | 結果 |
 | --- | --- |
-| 受け入れ条件をすべて満たし、条件ごとに検証コマンドと結果が対応している | **未達**。条件 5 の後半（`kiro-cli chat` が認識する Skill 数）だけ確認できていない。他の 7 項目は上表のとおり |
+| 受け入れ条件をすべて満たし、条件ごとに検証コマンドと結果が対応している | 8 項目すべて達成。検証コマンドと結果は上表のとおり |
 | `bash scripts/validate-runtime-plugins.sh` が各タスクのコミットで成功 | 各 PR の Test plan に記録 |
 | `bash scripts/runtime-smoke-test.sh` を 3 ランタイムで実行 | claude / codex / kiro とも `runtime smoke tests passed`。main の CI でも 3 つとも成功 |
 | `python3 scripts/check-markdown-links.py` | 成功 |
@@ -415,21 +415,17 @@ release ブランチへ取り込んだ。release PR も同じ形で収束させ�
 | ビルドの縮小 | Task 7 でまとめて行う | 死にコードになった時点で Task 2・4・5 で落とした | 移行の途中に空振りする処理を残さないため |
 | `skills` 配列の生成 | ビルドの役割に絞る | 生成しない | マニフェストは配列以外にも手で書く項目を持ち、生成物と手書きが混在するため。配列と manifest の一致は検証スクリプトが見る |
 
-### 残っている作業
+### 追加で確認したこと（2026-08-28、kiro-cli ログイン後）
 
-この計画を閉じるには、ログイン済みの Kiro CLI 環境で次を実行し、Skill が 34 個であることを
-確かめる必要がある。
+Kiro CLI 2.19.1 にログインしたうえで、検証用プロジェクトへ 12 プラグインすべてを導入して
+確かめた。
 
-```bash
-bash plugins/ndf/dev.kiro/install.sh --project <検証用ディレクトリ>
-bash plugins/playwright-kit/dev.kiro/install.sh --project <検証用ディレクトリ>
-for p in plugins/mcp/*/dev.kiro/install.sh; do bash "$p" --project <検証用ディレクトリ>; done
-cd <検証用ディレクトリ> && kiro-cli chat --agent ndf --no-interactive '利用できる Skill を列挙して'
-```
-
-### 残っている未確認
-
-| 項目 | 状態 |
+| 確認項目 | 結果 |
 | --- | --- |
-| Kiro CLI の `kiro-cli chat` による Skill 認識（受け入れ条件 5 の後半） | 未確認。作業環境の kiro-cli が未ログインで実行できない。symlink 経由で認識することは事実 6 で確認済みで、symlink の張り方は変えていない（変わったのは symlink の指す先だけ）。**受け入れ条件 5 はこの点だけ満たしていない**。ログイン済みの環境で `kiro-cli chat` に Skill を列挙させ、34 個であることを確かめれば閉じられる |
-| Kiro CLI が Skill 実行時のシェルへプラグインルートの環境変数を置くか | 未確認（事実 19）。同じ理由 |
+| `kiro-cli chat` が認識する Skill 数 | 34 個。`.kiro/skills/` の symlink 一覧と完全に一致（受け入れ条件 5） |
+| 未配布 4 個が現れないか | 0 個（受け入れ条件 8） |
+| `ndf-policies` が現れないか | 0 個。steering へ回す設計どおり |
+| Skill ディレクトリ起点の解決 | `cross-review` の SKILL_DIR 解決を `kiro-cli chat` に実行させ、`SCRIPTS` から `state.py --help` が動いた（受け入れ条件 7） |
+| プラグインルートの環境変数 | `CLAUDE_PLUGIN_ROOT` / `CODEX_PLUGIN_ROOT` / `PLUGIN_ROOT` が 3 つとも空（事実 19） |
+
+これで残っていた未確認は無くなった。
