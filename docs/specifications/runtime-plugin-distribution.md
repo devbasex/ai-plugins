@@ -60,9 +60,13 @@ Skill ディレクトリ起点で書いた Skill は、候補を順に試し、`
 | 順 | 候補 | 当たる runtime |
 |---|---|---|
 | 1 | `${CLAUDE_PLUGIN_ROOT}/skills/<Skill 名>` | Claude Code |
-| 2 | runtime が Skill の場所として渡したディレクトリ | Codex |
+| 2 | エージェントが `<この Skill のディレクトリ>` を置き換えたパス | Codex |
 | 3 | `.kiro/skills/<Skill 名>` | Kiro CLI（workspace scope） |
 | 4 | `$HOME/.kiro/skills/<Skill 名>` | Kiro CLI（global scope） |
+
+2 は runtime が自動で展開するものではない。SKILL.md のコメントが、実行前にこのプレース
+ホルダを実際のパスへ置き換えるようエージェントへ指示する。置き換えなかった場合はこの候補が
+外れるだけで、別の場所を読むことはない。
 
 2 を `.kiro` より先に見るのは、Kiro の設定を持つリポジトリで Codex や Claude Code を
 動かしたときに、別 runtime の Skill を選ばないためである。
