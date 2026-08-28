@@ -297,25 +297,49 @@ for family, layout in families:
             "（ルートマニフェストは skills/ を全件公開するため Codex へ配られる）"
         )
 
-# Claude 版の plugin.json は skills を配列で明示する。配列に載っていない Skill は
-# Claude Code から読み込まれないため、manifest と一致していないと配布漏れになる。
-# 生成物のディレクトリだけを見る上の検査では検出できないので、ここで突き合わせる。
+# 単一ディレクトリ構成では skills/ に全 runtime 分の実体が並ぶ。どの manifest にも
+# 載らない Skill をここへ置くと、ルートマニフェストや将来の絞り込み漏れで配られる。
+# 配らない Skill は optional-skills/ へ置く規約なので、その違反を検出する。
 for family, layout in families:
-    claude_manifest = source_dir_of(family, layout) / "manifests/claude-skills.txt"
-    claude_plugin_json = plugin_dir_of(family, layout, "claude") / ".claude-plugin/plugin.json"
-    if not (claude_manifest.is_file() and claude_plugin_json.is_file()):
+    if layout != "single":
+        continue
+    source = source_dir_of(family, layout)
+    listed: set[str] = set()
+    for manifest in sorted((source / "manifests").glob("*-skills.txt")):
+        listed |= {
+            line.split("#", 1)[0].strip()
+            for line in manifest.read_text(encoding="utf-8").splitlines()
+            if line.split("#", 1)[0].strip()
+        }
+    for skill_dir in sorted((source / "skills").iterdir()):
+        if not (skill_dir / "SKILL.md").is_file():
+            continue
+        if skill_dir.name not in listed:
+            errors.append(
+                f"{family} の skills/ にあるがどの manifest にも載っていない: {skill_dir.name}"
+                "（配らない Skill は optional-skills/ へ置く）"
+            )
+
+# マニフェストの skills は配列で明示する。配列に載っていない Skill はランタイムから
+# 読み込まれないため、manifest と一致していないと配布漏れになる。ディレクトリの中身を
+# 見る上の検査では検出できないので、ここで突き合わせる。
+for family, layout in families:
+  for runtime, manifest_key in (("claude", ".claude-plugin"), ("codex", ".codex-plugin")):
+    skills_manifest = source_dir_of(family, layout) / f"manifests/{runtime}-skills.txt"
+    plugin_json = plugin_dir_of(family, layout, runtime) / f"{manifest_key}/plugin.json"
+    if not (skills_manifest.is_file() and plugin_json.is_file()):
         continue
     expected = [
         line.split("#", 1)[0].strip()
-        for line in claude_manifest.read_text(encoding="utf-8").splitlines()
+        for line in skills_manifest.read_text(encoding="utf-8").splitlines()
     ]
     expected_set = {name for name in expected if name}
-    declared = json.loads(claude_plugin_json.read_text(encoding="utf-8")).get("skills")
+    declared = json.loads(plugin_json.read_text(encoding="utf-8")).get("skills")
     if not isinstance(declared, list):
         # 配列以外（ディレクトリ指定・欠落）を許すと、この突き合わせが黙って skip され
-        # 配布漏れの再発を検出できなくなる。Claude 版は配列で明示する形式に固定する。
+        # 配布漏れの再発を検出できなくなる。配列で明示する形式に固定する。
         errors.append(
-            f"{family} の claude plugin.json の skills が配列ではない"
+            f"{family} の {runtime} plugin.json の skills が配列ではない"
             f"（実際: {type(declared).__name__}）。manifest との突き合わせができない"
         )
     else:
@@ -327,19 +351,19 @@ for family, layout in families:
         for entry in declared:
             if not isinstance(entry, str):
                 errors.append(
-                    "claude plugin.json の skills 配列に文字列以外の項目がある"
+                    f"{runtime} plugin.json の skills 配列に文字列以外の項目がある"
                     f"（{type(entry).__name__}）"
                 )
                 continue
             declared_entries.add(entry)
         for missing in sorted(expected_entries - declared_entries):
             errors.append(
-                f"{family} の claude plugin.json の skills 配列に載っていない: {missing}"
+                f"{family} の {runtime} plugin.json の skills 配列に載っていない: {missing}"
                 "（manifest には登録済み）"
             )
         for extra in sorted(declared_entries - expected_entries):
             errors.append(
-                f"{family} の claude plugin.json の skills 配列に余分な項目: {extra}"
+                f"{family} の {runtime} plugin.json の skills 配列に余分な項目: {extra}"
                 "（manifest に無い、またはパスが `./skills/<Skill 名>` の形式でない）"
             )
 
@@ -399,7 +423,7 @@ done
 
 # --with-codex を持つのは NDF の installer だけ（Codex 向け Skill も併せて配置する経路）。
 # family 共通の引数ではないため、ここだけは対象を明示して検査する。
-run bash "$ROOT_DIR/plugins/ndf-kiro/install.sh" --dry-run --with-codex >/dev/null
+run bash "$ROOT_DIR/plugins/ndf/dev.kiro/install.sh" --dry-run --with-codex >/dev/null
 
 while IFS= read -r installer; do
   run bash "$installer" --dry-run >/dev/null

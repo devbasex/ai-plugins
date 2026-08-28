@@ -12,9 +12,9 @@ runtime 分離後の Claude Code / Codex / Kiro 向け plugin 配布物を、ホ
 
 | runtime | 配布物 | adapter |
 |---|---|---|
-| Claude Code | `plugins/ndf-claude`, `plugins/mcp/claude/*` | `tests/runtime-smoke/adapters/claude.sh` |
-| Codex | `plugins/ndf-codex`, `plugins/mcp/codex/*` | `tests/runtime-smoke/adapters/codex.sh` |
-| Kiro CLI | `plugins/ndf-kiro`, `plugins/mcp/kiro/*` | `tests/runtime-smoke/adapters/kiro.sh` |
+| Claude Code | `plugins/ndf`, `plugins/mcp/claude/*` | `tests/runtime-smoke/adapters/claude.sh` |
+| Codex | `plugins/ndf`, `plugins/mcp/codex/*` | `tests/runtime-smoke/adapters/codex.sh` |
+| Kiro CLI | `plugins/ndf`, `plugins/mcp/kiro/*` | `tests/runtime-smoke/adapters/kiro.sh` |
 
 代表 MCP plugin として `mcp-bigquery` を install smoke の対象にする。主要 MCP plugin の manifest / installer 検証は `scripts/validate-runtime-plugins.sh` と PR Test Plan で補完する。
 
@@ -61,7 +61,7 @@ adapter は runtime 固有の CLI 差分を閉じ込める。
 `tests/runtime-smoke/adapters/claude.sh` は以下を実行する。
 
 - `claude --version`
-- `claude plugin validate` による `plugins/ndf-claude` と `.claude-plugin/marketplace.json` の検証
+- `claude plugin validate` による `plugins/ndf` と `.claude-plugin/marketplace.json` の検証
 - local marketplace 追加
 - `ndf@ai-plugins` と `mcp-bigquery@ai-plugins` の install
 - plugin list 取得
@@ -83,7 +83,7 @@ adapter は runtime 固有の CLI 差分を閉じ込める。
 
 Kiro adapter は以下を実行する。
 
-- `plugins/ndf-kiro/install.sh --project /tmp/runtime-project --with-slack`
+- `plugins/ndf/dev.kiro/install.sh --project /tmp/runtime-project --with-slack`
 - NDF installer の idempotency 確認
 - `plugins/mcp/kiro/mcp-bigquery/install.sh --project /tmp/runtime-project`
 - MCP installer の idempotency 確認

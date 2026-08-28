@@ -5,7 +5,7 @@ source /workspace/ai-plugins/tests/runtime-smoke/lib/common.sh
 
 cd "$PROJECT_DIR"
 record_version claude --version
-run_step "claude plugin validate ndf" claude plugin validate "$REPO_ROOT/plugins/ndf-claude"
+run_step "claude plugin validate ndf" claude plugin validate "$REPO_ROOT/plugins/ndf"
 run_step "claude plugin validate playwright-kit" claude plugin validate "$REPO_ROOT/plugins/playwright-kit"
 run_step "claude marketplace validate" claude plugin validate "$REPO_ROOT/.claude-plugin/marketplace.json"
 run_step "claude marketplace add" claude plugin marketplace add "$REPO_ROOT" --scope local

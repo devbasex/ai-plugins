@@ -104,7 +104,7 @@ Drive extra を同期してください。
 
 ```bash
 # <ai-plugins のパス> を clone 先の実パスに置き換える
-export GOOGLE_AUTH_SCRIPTS=<ai-plugins のパス>/plugins/ndf-shared/skills/google-auth/scripts
+export GOOGLE_AUTH_SCRIPTS=<ai-plugins のパス>/plugins/ndf/optional-skills/google-auth/scripts
 uv sync --extra drive
 ```
 

@@ -1,25 +1,25 @@
 # NDF Skill 棚卸台帳
 
 Skill ごとの実測値と、維持・統合・削除・発動改善の判定を記録する。判定の基準そのものは
-[frontmatter 規約](../../plugins/ndf-shared/skills/README.md) ではなく本書の「判断基準」節に置き、
+[frontmatter 規約](../../plugins/ndf/skills/README.md) ではなく本書の「判断基準」節に置き、
 以降の棚卸もこの表を更新する形で行う。
 
 - 測定日: 2026-08-08
 - 測定範囲: 2026-05-20 〜 2026-08-07 の会話ログ 1,943 セッション
-- 測定ツール: `/ndf:skill-stats`（`plugins/ndf-shared/skills/skill-stats/scripts/skill-stats.py`）
+- 測定ツール: `/ndf:skill-stats`（`plugins/ndf/optional-skills/skill-stats/scripts/skill-stats.py`）
 
 再現手順:
 
 ```bash
-python3 plugins/ndf-shared/skills/skill-stats/scripts/skill-stats.py \
-  --plugin-root plugins/ndf-shared --from 2026-05-20 --to 2026-08-07 --format json
+python3 plugins/ndf/optional-skills/skill-stats/scripts/skill-stats.py \
+  --plugin-root plugins/ndf --from 2026-05-20 --to 2026-08-07 --format json
 ```
 
 ## 用語
 
 | 列 | 意味 |
 | --- | --- |
-| 配布 | 配布先ランタイム。`C` = Claude Code / `X` = Codex / `K` = Kiro。`plugins/ndf-shared/manifests/` の内容 |
+| 配布 | 配布先ランタイム。`C` = Claude Code / `X` = Codex / `K` = Kiro。`plugins/ndf/manifests/` の内容 |
 | 行数 | `SKILL.md` の行数。運用上限は 500 行 |
 | desc | `description` の文字数。運用目標は 300 文字以内 |
 | frontmatter 設定 | `明示専用` = `disable-model-invocation: true` / `常時注入` = `user-invocable: false` / `wtu` = `when_to_use` あり / `引数` = `argument-hint` あり / `tools` = `allowed-tools` あり |
@@ -166,7 +166,7 @@ frontmatter 見直し後の確認項目とする。
 ## frontmatter 見直しの結果
 
 [棚卸の計画](../../issues/ndf-development-skills/07-tasks.md) の Task 0-7 で全 29 Skill の
-frontmatter を [規約](../../plugins/ndf-shared/skills/README.md) へ揃えた。台帳の表は測定日
+frontmatter を [規約](../../plugins/ndf/skills/README.md) へ揃えた。台帳の表は測定日
 時点の値であり、以下の変更は表へ反映していない。
 
 ### 発動制御
@@ -471,7 +471,7 @@ Skill 数は v7.0.0 と同じ 30 個に戻るが、初期一覧は 48 文字（f
 ## 参照
 
 - 棚卸の計画: [issues/ndf-development-skills/02-skill-inventory.md](../../issues/ndf-development-skills/02-skill-inventory.md)
-- frontmatter 規約: [plugins/ndf-shared/skills/README.md](../../plugins/ndf-shared/skills/README.md)
+- frontmatter 規約: [plugins/ndf/skills/README.md](../../plugins/ndf/skills/README.md)
 
 ## v8.1.0 での追加（cross-refactoring）
 

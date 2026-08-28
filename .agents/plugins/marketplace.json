@@ -5,7 +5,7 @@
       "name": "ndf",
       "source": {
         "source": "local",
-        "path": "./plugins/ndf-codex"
+        "path": "./plugins/ndf"
       },
       "policy": {
         "installation": "AVAILABLE",

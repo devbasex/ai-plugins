@@ -8,7 +8,8 @@ usage() {
   cat <<'EOF'
 Usage: bash scripts/build-runtime-plugins.sh [--check]
 
-Synchronize runtime plugin generated files from shared plugin sources.
+Generate the tracked build outputs: Codex implicit-invocation policies for
+single-directory plugins, and the runtime copies of MCP plugins.
 
 Options:
   --check   Compare generated output with the working tree and fail on drift.
@@ -27,77 +28,17 @@ done
 
 MCP_SHARED_DIR="$ROOT_DIR/plugins/mcp/shared"
 
-# Skill を配る plugin family を検出する。<family>-shared を編集元に、<family>-<runtime> を
-# 生成物とする規約で、manifests/ を持つものだけを対象にする（plugins/mcp/shared は別系統）。
-# 固定リストを置かないのは、追加時に build と validate の検出がずれて生成物の stale 検出だけ
-# 漏れる経路を作らないためである（scripts/validate-runtime-plugins.sh と同じ規約）。
-detect_plugin_families() {
-  local dir
-  for dir in "$ROOT_DIR"/plugins/*-shared; do
-    [ -d "$dir/manifests" ] || continue
-    basename "$dir" | sed 's/-shared$//'
-  done | sort
-}
-PLUGIN_FAMILIES="$(detect_plugin_families)"
-if [ -z "$PLUGIN_FAMILIES" ]; then
-  echo "ERROR: plugin family が見つからない（plugins/<family>-shared/manifests）" >&2
-  exit 1
-fi
+sync_codex_skill_policies() {
+  local family="$1"
+  local plugin_dir="$ROOT_DIR/plugins/$family"
+  local manifest="$plugin_dir/manifests/codex-skills.txt"
 
-copy_tree() {
-  local source_dir="$1"
-  local dest_dir="$2"
-  local tmp_dir
-  local diff_file
-
-  if [ ! -d "$source_dir" ]; then
-    echo "ERROR: source directory not found: $source_dir" >&2
-    exit 1
-  fi
-
-  tmp_dir="$(mktemp -d)"
-  cp -a "$source_dir/." "$tmp_dir/"
-  find "$tmp_dir" \( \
-    -name .venv -o \
-    -name .pytest_cache -o \
-    -name __pycache__ -o \
-    -name '*.pyc' -o \
-    -name '*.pyo' \
-  \) -exec rm -rf {} + 2>/dev/null || true
-
-  if [ "$CHECK" = true ]; then
-    if [ ! -d "$dest_dir" ]; then
-      echo "Generated directory missing: ${dest_dir#$ROOT_DIR/}" >&2
-      rm -rf "$tmp_dir"
-      return 1
-    fi
-    diff_file="$(mktemp)"
-    if ! diff -ruN "$tmp_dir" "$dest_dir" >"$diff_file"; then
-      echo "Generated directory is out of date: ${dest_dir#$ROOT_DIR/}" >&2
-      cat "$diff_file" >&2
-      rm -f "$diff_file"
-      rm -rf "$tmp_dir"
-      return 1
-    fi
-    rm -f "$diff_file"
-    rm -rf "$tmp_dir"
-  else
-    rm -rf "$dest_dir"
-    mkdir -p "$(dirname "$dest_dir")"
-    mv "$tmp_dir" "$dest_dir"
-  fi
-}
-
-# Codex は Skill ごとの `<Skill 名>/agents/openai.yaml` で暗黙起動を制御する。
-# SKILL.md の frontmatter を読み、`disable-model-invocation: true` を持つ Skill だけへ生成する。
-write_codex_skill_policies() {
-  local skills_dir="$1"
-
-  python3 - "$skills_dir" <<'PY'
+  [ -f "$manifest" ] || return 0
+  python3 - "$plugin_dir/skills" "$manifest" "$CHECK" <<'PY'
 import sys
 from pathlib import Path
 
-skills_dir = Path(sys.argv[1])
+skills_dir, manifest_path, check = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3] == "true"
 
 
 def parse_frontmatter(text: str) -> dict[str, str]:
@@ -108,7 +49,6 @@ def parse_frontmatter(text: str) -> dict[str, str]:
     for line in lines[1:]:
         if line.strip() == "---":
             break
-        # ネストした値（allowed-tools のリストなど）はここでは扱わない
         if not line or line[0].isspace() or ":" not in line:
             continue
         key, _, value = line.partition(":")
@@ -123,149 +63,53 @@ def yaml_double_quoted(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+published = {
+    line.split("#", 1)[0].strip()
+    for line in manifest_path.read_text(encoding="utf-8").splitlines()
+    if line.split("#", 1)[0].strip()
+}
+
+expected: dict[Path, str] = {}
 for skill_dir in sorted(p for p in skills_dir.iterdir() if p.is_dir()):
     skill_md = skill_dir / "SKILL.md"
-    if not skill_md.is_file():
+    if not skill_md.is_file() or skill_dir.name not in published:
         continue
-
-    agents_dir = skill_dir / "agents"
-    policy_path = agents_dir / "openai.yaml"
-    # 前回の生成物を必ず捨ててから作り直す（対象から外れた Skill に残さない）
-    policy_path.unlink(missing_ok=True)
-
     fields = parse_frontmatter(skill_md.read_text(encoding="utf-8"))
     if fields.get("disable-model-invocation") != "true":
-        if agents_dir.is_dir() and not any(agents_dir.iterdir()):
-            agents_dir.rmdir()
         continue
-
     lines = ["policy:", "  allow_implicit_invocation: false"]
     argument_hint = fields.get("argument-hint")
     if argument_hint:
         lines += ["interface:", f"  default_prompt: {yaml_double_quoted(argument_hint)}"]
+    expected[skill_dir / "agents" / "openai.yaml"] = "\n".join(lines) + "\n"
 
-    agents_dir.mkdir(parents=True, exist_ok=True)
-    policy_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+actual = {p for p in skills_dir.glob("*/agents/openai.yaml")}
+stale = actual - set(expected)
+
+failed = False
+for path, content in expected.items():
+    if check:
+        if not path.is_file():
+            print(f"Generated file missing: {path}", file=sys.stderr)
+            failed = True
+        elif path.read_text(encoding="utf-8") != content:
+            print(f"Generated file is out of date: {path}", file=sys.stderr)
+            failed = True
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+for path in sorted(stale):
+    if check:
+        print(f"Generated file is stale: {path}", file=sys.stderr)
+        failed = True
+    else:
+        path.unlink()
+        if not any(path.parent.iterdir()):
+            path.parent.rmdir()
+
+raise SystemExit(1 if failed else 0)
 PY
-}
-
-# Kiro CLI にはプラグインルートを示す環境変数が無い。プラグインルート直下の scripts/ を
-# 呼ぶ Skill だけ、既定の root を Kiro の配布先へ書き換える。Skill 直下の scripts/ を呼ぶ
-# Skill は Skill ディレクトリ起点で書いてあるため、書き換えの対象にならない。
-rewrite_kiro_skill_paths() {
-  local skills_dir="$1"
-  local family="$2"
-  local kiro_root="plugins/$family-kiro"
-  local file
-
-  for file in \
-    "$skills_dir/statusline/SKILL.md"
-  do
-    [ -f "$file" ] || continue
-    sed "s#\${PLUGIN_ROOT:-\${CLAUDE_PLUGIN_ROOT}}#\${PLUGIN_ROOT:-$kiro_root}#g" \
-      "$file" >"$file.tmp"
-    mv "$file.tmp" "$file"
-  done
-}
-
-sync_skills() {
-  local manifest="$1"
-  local source_dir="$2"
-  local dest_dir="$3"
-  local variant="${4:-}"
-  local family="${5:-}"
-  local tmp_dir
-  local diff_file
-  local skill
-
-  if [ ! -f "$manifest" ]; then
-    echo "ERROR: manifest not found: $manifest" >&2
-    exit 1
-  fi
-  if [ ! -d "$source_dir" ]; then
-    echo "ERROR: source directory not found: $source_dir" >&2
-    exit 1
-  fi
-
-  tmp_dir="$(mktemp -d)"
-  while IFS= read -r skill || [ -n "$skill" ]; do
-    skill="${skill%%#*}"
-    skill="${skill#"${skill%%[![:space:]]*}"}"
-    skill="${skill%"${skill##*[![:space:]]}"}"
-    [ -z "$skill" ] && continue
-
-    case "$skill" in
-      */*|*..*|'')
-        echo "ERROR: invalid skill name in ${manifest#$ROOT_DIR/}: $skill" >&2
-        rm -rf "$tmp_dir"
-        exit 1
-        ;;
-    esac
-
-    if [ ! -f "$source_dir/$skill/SKILL.md" ]; then
-      echo "ERROR: missing SKILL.md for $skill in ${source_dir#$ROOT_DIR/}" >&2
-      rm -rf "$tmp_dir"
-      exit 1
-    fi
-    cp -a "$source_dir/$skill" "$tmp_dir/$skill"
-  done < "$manifest"
-
-  find "$tmp_dir" \( \
-    -name .venv -o \
-    -name .pytest_cache -o \
-    -name __pycache__ -o \
-    -name '*.pyc' -o \
-    -name '*.pyo' \
-  \) -exec rm -rf {} + 2>/dev/null || true
-
-  if [ "$variant" = codex-runtime ]; then
-    write_codex_skill_policies "$tmp_dir"
-  elif [ "$variant" = kiro-runtime ]; then
-    rewrite_kiro_skill_paths "$tmp_dir" "$family"
-  fi
-
-  if [ "$CHECK" = true ]; then
-    if [ ! -d "$dest_dir" ]; then
-      echo "Generated directory missing: ${dest_dir#$ROOT_DIR/}" >&2
-      rm -rf "$tmp_dir"
-      return 1
-    fi
-    diff_file="$(mktemp)"
-    if ! diff -ruN "$tmp_dir" "$dest_dir" >"$diff_file"; then
-      echo "Generated directory is out of date: ${dest_dir#$ROOT_DIR/}" >&2
-      cat "$diff_file" >&2
-      rm -f "$diff_file"
-      rm -rf "$tmp_dir"
-      return 1
-    fi
-    rm -f "$diff_file"
-    rm -rf "$tmp_dir"
-  else
-    rm -rf "$dest_dir"
-    mkdir -p "$(dirname "$dest_dir")"
-    mv "$tmp_dir" "$dest_dir"
-  fi
-}
-
-sync_runtime_if_present() {
-  local family="$1"
-  local runtime="$2"
-  local shared_dir="$ROOT_DIR/plugins/$family-shared"
-  local manifest="$shared_dir/manifests/$runtime-skills.txt"
-  local plugin_dir="$ROOT_DIR/plugins/$family-$runtime"
-
-  [ -d "$plugin_dir" ] || return 0
-  if [ "$runtime" = codex ]; then
-    sync_skills "$manifest" "$shared_dir/skills" "$plugin_dir/skills" codex-runtime
-  elif [ "$runtime" = kiro ]; then
-    sync_skills "$manifest" "$shared_dir/skills" "$plugin_dir/skills" kiro-runtime "$family"
-  else
-    sync_skills "$manifest" "$shared_dir/skills" "$plugin_dir/skills"
-  fi
-  # scripts/ を持たない family（playwright-kit など）では同期しない
-  if [ -d "$shared_dir/scripts" ]; then
-    copy_tree "$shared_dir/scripts" "$plugin_dir/scripts"
-  fi
 }
 
 write_codex_mcp_manifest() {
@@ -653,37 +497,16 @@ sync_mcp_plugins() {
 }
 
 # Kiro 配布物は plugin.json を持たないため版数を示す手段がない。
-# Claude 版の plugin.json を唯一の基準として VERSION ファイルへ書き出す。
-sync_kiro_version() {
-  local family="$1"
-  local src="$ROOT_DIR/plugins/$family-claude/.claude-plugin/plugin.json"
-  local dest="$ROOT_DIR/plugins/$family-kiro/VERSION"
-  local version
-
-  [ -f "$src" ] || return 0
-  [ -d "$ROOT_DIR/plugins/$family-kiro" ] || return 0
-  version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$src")"
-
-  if [ "$CHECK" = true ]; then
-    if [ ! -f "$dest" ] || [ "$(cat "$dest")" != "$version" ]; then
-      echo "Generated file is stale: plugins/$family-kiro/VERSION" >&2
-      return 1
-    fi
-    return 0
-  fi
-  printf '%s\n' "$version" > "$dest"
-}
-
-for family in $PLUGIN_FAMILIES; do
-  if [ ! -d "$ROOT_DIR/plugins/$family-shared" ]; then
-    echo "ERROR: shared source not found: plugins/$family-shared" >&2
-    exit 1
-  fi
-  sync_runtime_if_present "$family" claude
-  sync_runtime_if_present "$family" codex
-  sync_runtime_if_present "$family" kiro
-  sync_kiro_version "$family"
+# 生成物を持たないもの）。生成対象は Codex の暗黙起動ポリシーだけである。
+for dir in "$ROOT_DIR"/plugins/*; do
+  [ -d "$dir/manifests" ] || continue
+  family="$(basename "$dir")"
+  case "$family" in
+    *-shared|*-claude|*-codex|*-kiro) continue ;;
+  esac
+  sync_codex_skill_policies "$family"
 done
+
 sync_mcp_plugins
 
 if [ "$CHECK" = true ]; then

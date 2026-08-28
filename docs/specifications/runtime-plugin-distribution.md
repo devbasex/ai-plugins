@@ -4,7 +4,7 @@
 
 AI Plugins marketplace は、Claude Code / Codex / Kiro CLI 向けに runtime 別の plugin 配布物を提供する。
 
-NDF plugin は runtime ごとの manifest、hook、agent、installer 差分を持つため、共通編集元と配布先を分離する。MCP plugin も runtime ごとに Claude Code / Codex / Kiro CLI 用の配布ディレクトリを持ち、同じ plugin 名で導入できる構成にする。
+NDF plugin と playwright-kit plugin は、3 runtime 分をプラグインごとに 1 ディレクトリへまとめる。Skill の実体は `skills/` の 1 箇所だけで、どの runtime へ配るかは `manifests/*-skills.txt` と各 manifest の `skills` 配列が決める。runtime 固有のファイルは名前空間ディレクトリへ分ける。MCP plugin は runtime ごとの配布ディレクトリを持つ構成を当面維持する。
 
 ## 対象範囲
 
@@ -12,45 +12,41 @@ NDF plugin は runtime ごとの manifest、hook、agent、installer 差分を�
 
 | runtime | marketplace / 導入方式 | NDF 配布物 | MCP 配布物 |
 |---|---|---|---|
-| Claude Code | `.claude-plugin/marketplace.json` | `plugins/ndf-claude` | `plugins/mcp/claude/*` |
-| Codex | `.agents/plugins/marketplace.json` | `plugins/ndf-codex` | `plugins/mcp/codex/*` |
-| Kiro CLI | installer | `plugins/ndf-kiro` | `plugins/mcp/kiro/*` |
+| Claude Code | `.claude-plugin/marketplace.json` | `plugins/ndf` | `plugins/mcp/claude/*` |
+| Codex | `.agents/plugins/marketplace.json` | `plugins/ndf` | `plugins/mcp/codex/*` |
+| Kiro CLI | installer | `plugins/ndf` | `plugins/mcp/kiro/*` |
 
 共通編集元:
 
 | 種別 | パス | 用途 |
 |---|---|---|
-| NDF shared | `plugins/ndf-shared` | runtime 配布物へ同期する Skill / scripts / manifest の編集元 |
 | MCP shared | `plugins/mcp/shared/*` | runtime 別 MCP plugin 生成元 |
 
 ## NDF Plugin 配布仕様
 
-NDF plugin の plugin name は全 runtime で `ndf` を維持する。旧 `plugins/ndf` 配布物は廃止し、runtime 別ディレクトリを配布単位とする。
+NDF plugin の plugin name は全 runtime で `ndf` を維持し、配布物は `plugins/ndf` の 1 ディレクトリにまとめる。
 
 | runtime | manifest / installer | 主な内容 |
 |---|---|---|
-| Claude Code | `plugins/ndf-claude/.claude-plugin/plugin.json` | Claude Code agents、hooks、skills、scripts |
-| Codex | `plugins/ndf-codex/.codex-plugin/plugin.json` | Codex 用 skills、hooks、scripts |
-| Kiro CLI | `plugins/ndf-kiro/install.sh` | `.kiro/agents/ndf.json`、`.kiro/steering/ndf-policies.md`、`.kiro/skills/` symlink、prompts、任意 hook |
+| Claude Code | `plugins/ndf/.claude-plugin/plugin.json` | `agents/`、`hooks/claude.json`、`skills` 配列（27 個） |
+| Codex | `plugins/ndf/.codex-plugin/plugin.json` | `hooks/codex.json`、`skills` 配列（25 個） |
+| Kiro CLI | `plugins/ndf/dev.kiro/install.sh` | `.kiro/agents/ndf.json`、`.kiro/steering/ndf-policies.md`、`.kiro/skills/` symlink、prompts、任意 hook |
 
-`plugins/ndf-shared/manifests/{claude,codex,kiro}-skills.txt` は runtime ごとの配布 Skill 一覧を定義する。`scripts/build-runtime-plugins.sh` はこの manifest を読み、`plugins/ndf-shared/skills` から各 runtime の `skills/` へ同期する。
+`plugins/ndf/manifests/{claude,codex,kiro}-skills.txt` が runtime ごとの配布 Skill 一覧を定義する。
+Claude Code と Codex は manifest と同じ内容を各 plugin.json の `skills` 配列へ書き、Kiro CLI は
+installer が `kiro-skills.txt` を読んで symlink を張る。Skill の実体は `plugins/ndf/skills/` だけで、
+runtime ごとの複製は無い。
 
-Skill 内のパス参照の書き換えは、runtime ごとに次のとおりである。
+どの manifest にも載せない Skill は `plugins/ndf/optional-skills/` へ置く。`skills/` を配布 Skill の
+実体だけに保つことで、絞り込みの結果によらず公開数が変わらない。
 
-| runtime | 書き換え | 対象 |
-|---|---|---|
-| Codex | なし | — |
-| Kiro CLI | `plugins/ndf-kiro` を既定 root とする参照に変換 | `statusline` |
+`dev.kiro` は Agent Plugins 1.0.0 §8.2 が定めるクライアント拡張ディレクトリである。
 
-`fix` / `cross-review` / `cross-refactoring` はプラグインルート起点をやめ、Skill ディレクトリ
-起点（`$SKILL_DIR/scripts`、隣の Skill へは `$SKILL_DIR/../<Skill 名>/`）で参照する。配布
-ディレクトリの形が runtime ごとに違っても、Skill 直下の `scripts/` の位置は変わらないため
-書き換えが要らない。Kiro CLI が `.kiro/skills/` へ張った symlink 越しでも `..` は解決先を
-経由して届く。Codex 向けの書き換えは対象が 0 になり、生成物が共通編集元と一致する。
-
-`statusline` だけは Skill 直下ではなくプラグインルート直下の `scripts/` を呼ぶ。Claude Code と
-Kiro CLI へ配っており、Kiro にはプラグインルートを示す環境変数が無いため、この 1 個だけ
-書き換えが残る。
+**Skill 内のパス参照は runtime ごとに書き換えない。** Skill が呼ぶスクリプトは Skill ディレクトリ
+起点（`$SKILL_DIR/scripts`、隣の Skill へは `$SKILL_DIR/../<Skill 名>/`、プラグインルート直下へは
+`$SKILL_DIR/../../scripts/`）で参照する。配布ディレクトリの形が runtime ごとに違っても、Skill
+ディレクトリからの位置は変わらないためである。Kiro CLI が `.kiro/skills/` へ張った symlink 越し
+でも `..` は解決先を経由して届く。
 
 ### Skill ディレクトリの解決
 
@@ -88,7 +84,7 @@ Skill ディレクトリ起点で書いた Skill は、候補を順に試し、`
 | Codex | 展開しない | 置かない | 渡す（絶対パス） |
 | Kiro CLI | 展開しない | 置かない | 渡す（`.kiro/skills/<Skill 名>` の相対パス） |
 
-scripts は `plugins/ndf-shared/scripts` から `plugins/ndf-{runtime}/scripts` へ同期する。
+scripts は `plugins/ndf/scripts` に 1 箇所だけ置き、3 runtime が同じ実体を読む。
 
 ## MCP Plugin 配布仕様
 
@@ -106,7 +102,7 @@ Claude 用配布物は `.claude-plugin/plugin.json` と `.mcp.json` を持つ。
 
 Kiro MCP installer は対象 project の `.mcp.json` へ MCP server 設定を merge する。hooks や skills を持つ MCP plugin では、必要に応じて `.kiro/agents/default.json` や `.kiro/skills/` も更新する。
 
-NDF installer が生成する agent は `.kiro/agents/ndf.json` であり、MCP installer が更新する `.kiro/agents/default.json` とは別である。NDF と Kiro MCP plugin を併用する場合、MCP server 設定は `ndf.json` へ写す必要がある（`plugins/ndf-kiro/README.md`「旧バージョンからの移行」）。MCP installer 側の出力先統一は未対応。
+NDF installer が生成する agent は `.kiro/agents/ndf.json` であり、MCP installer が更新する `.kiro/agents/default.json` とは別である。NDF と Kiro MCP plugin を併用する場合、MCP server 設定は `ndf.json` へ写す必要がある（`plugins/ndf/README.md`「旧バージョンからの移行」）。MCP installer 側の出力先統一は未対応。
 
 ## Marketplace
 
@@ -114,7 +110,7 @@ Claude Code marketplace は `.claude-plugin/marketplace.json` で管理する。
 
 Codex marketplace は `.agents/plugins/marketplace.json` で管理する。各 entry の `source.path` は Codex 用配布ディレクトリを指す。
 
-Kiro CLI は repository root の marketplace manifest ではなく、`plugins/ndf-kiro/install.sh` と `plugins/mcp/kiro/*/install.sh` を導入入口とする。
+Kiro CLI は repository root の marketplace manifest ではなく、`plugins/ndf/dev.kiro/install.sh` と `plugins/mcp/kiro/*/install.sh` を導入入口とする。
 
 ## Build / Validation
 
@@ -174,8 +170,8 @@ container smoke test の詳細は [Runtime Plugin Container Smoke Test 仕様](r
 
 NDF Skill を変更する場合:
 
-1. `plugins/ndf-shared/skills/<skill>/` を編集する。
-2. 必要なら `plugins/ndf-shared/manifests/*-skills.txt` を更新する。
+1. `plugins/ndf/skills/<skill>/` を編集する。
+2. 必要なら `plugins/ndf/manifests/*-skills.txt` と、各 plugin.json の `skills` 配列を更新する。
 3. `bash scripts/build-runtime-plugins.sh` を実行する。
 4. `bash scripts/validate-runtime-plugins.sh` を実行する。
 
@@ -203,7 +199,7 @@ runtime 配布先を直接編集した場合、`build-runtime-plugins.sh --check
 - [Runtime Plugin Container Smoke Test 仕様](runtime-plugin-container-smoke.md)
 - [NDF 知識構造・Kiro CLI 仕様](ndf-knowledge-and-kiro.md)
 - [NDF Plugin リファレンス](../ndf-plugin-reference.md)
-- [NDF Claude README](../../plugins/ndf-claude/README.md)
-- [NDF Codex README](../../plugins/ndf-codex/README.md)
-- [NDF Kiro README](../../plugins/ndf-kiro/README.md)
-- [NDF shared README](../../plugins/ndf-shared/README.md)
+- [NDF Claude README](../../plugins/ndf/README.md)
+- [NDF Codex README](../../plugins/ndf/README.md)
+- [NDF Kiro README](../../plugins/ndf/README.md)
+- [NDF shared README](../../plugins/ndf/README.md)

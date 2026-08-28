@@ -2,7 +2,7 @@
 
 `issues/` 配下に残っていた完了済み issue、plan、report から、現行実装と一致する仕様だけを抽出した確定仕様書群。
 
-`issues/` は作業中の調査、実装計画、依頼文、報告書を含む開発記録として扱う。運用判断では本索引から参照する仕様、`docs/ndf-plugin-reference.md`、`plugins/ndf-claude/README.md`、`docs/ndf-plugin-reference.md` を優先する。
+`issues/` は作業中の調査、実装計画、依頼文、報告書を含む開発記録として扱う。運用判断では本索引から参照する仕様、`docs/ndf-plugin-reference.md`、`plugins/ndf/README.md`、`docs/ndf-plugin-reference.md` を優先する。
 
 Skill の挙動仕様は本ディレクトリでは管理しない。Skill に関する詳細は、対象 Skill の `SKILL.md` を正とする。
 
@@ -32,5 +32,5 @@ Skill に関する完了済み issue / plan / report は、該当 Skill の実�
 - [NDF Plugin リファレンス](../ndf-plugin-reference.md)
 - [プラグイン開発ガイド](../plugin-development-guide.md)
 - [AI Plugins プロジェクト概要](../project-overview.md)
-- [NDF README](../../plugins/ndf-claude/README.md)
+- [NDF README](../../plugins/ndf/README.md)
 - [NDF CHANGELOG](../../docs/ndf-plugin-reference.md)

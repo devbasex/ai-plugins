@@ -8,14 +8,14 @@ runtime="${1:?runtime is required}"
 
 case "$runtime" in
   claude)
-    PLUGIN_ROOT="$REPO_ROOT/plugins/ndf-claude" CLAUDE_PLUGIN_ROOT="$REPO_ROOT/plugins/ndf-claude" \
-      bash "$REPO_ROOT/plugins/ndf-claude/scripts/ensure-retention.sh" < "$REPO_ROOT/tests/runtime-smoke/fixtures/hook-session-start.json"
-    PLUGIN_ROOT="$REPO_ROOT/plugins/ndf-claude" CLAUDE_PLUGIN_ROOT="$REPO_ROOT/plugins/ndf-claude" \
-      node "$REPO_ROOT/plugins/ndf-claude/scripts/slack-notify.js" session_end < "$REPO_ROOT/tests/runtime-smoke/fixtures/hook-stop.json" >/dev/null
+    PLUGIN_ROOT="$REPO_ROOT/plugins/ndf" CLAUDE_PLUGIN_ROOT="$REPO_ROOT/plugins/ndf" \
+      bash "$REPO_ROOT/plugins/ndf/scripts/ensure-retention.sh" < "$REPO_ROOT/tests/runtime-smoke/fixtures/hook-session-start.json"
+    PLUGIN_ROOT="$REPO_ROOT/plugins/ndf" CLAUDE_PLUGIN_ROOT="$REPO_ROOT/plugins/ndf" \
+      node "$REPO_ROOT/plugins/ndf/scripts/slack-notify.js" session_end < "$REPO_ROOT/tests/runtime-smoke/fixtures/hook-stop.json" >/dev/null
     ;;
   codex)
-    PLUGIN_ROOT="$REPO_ROOT/plugins/ndf-codex" \
-      node "$REPO_ROOT/plugins/ndf-codex/scripts/codex-slack-notify.js" < "$REPO_ROOT/tests/runtime-smoke/fixtures/hook-stop.json" >/dev/null
+    PLUGIN_ROOT="$REPO_ROOT/plugins/ndf" \
+      node "$REPO_ROOT/plugins/ndf/scripts/codex-slack-notify.js" < "$REPO_ROOT/tests/runtime-smoke/fixtures/hook-stop.json" >/dev/null
     ;;
   kiro)
     test -f "$PROJECT_DIR/.kiro/agents/ndf.json"
@@ -33,7 +33,7 @@ print(parts[1])
 PY
 )"
     test -f "$stop_script"
-    PLUGIN_ROOT="$REPO_ROOT/plugins/ndf-kiro" \
+    PLUGIN_ROOT="$REPO_ROOT/plugins/ndf" \
       node "$stop_script" session_end < "$REPO_ROOT/tests/runtime-smoke/fixtures/hook-stop.json" >/dev/null
     ;;
   *) echo "unknown runtime: $runtime" >&2; exit 2 ;;
