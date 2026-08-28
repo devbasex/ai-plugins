@@ -162,7 +162,7 @@ flowchart TD
 # `.kiro/skills/<Skill 名>`、Codex は Skill の展開先）。プラグインルート起点にしないのは、
 # 配布ディレクトリの形がランタイムごとに違っても、Skill 直下の scripts/ だけは必ず同じ
 # 位置にあるためである。
-SKILL_DIR=<この Skill のディレクトリ>
+SKILL_DIR="<この Skill のディレクトリ>"
 [ -d "$SKILL_DIR/scripts" ] || { echo "SKILL_DIR が違う: $SKILL_DIR" >&2; exit 1; }
 SCRIPTS="$SKILL_DIR/scripts"
 # 収束ループの共通層は cross-review 側にある。`..` は symlink の解決先を経由するため、

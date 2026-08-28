@@ -84,7 +84,7 @@ SEVERITY_MIN="${SEVERITY_MIN:-minor}"
 # `.kiro/skills/<Skill 名>`、Codex は Skill の展開先）。プラグインルート起点にしないのは、
 # 配布ディレクトリの形がランタイムごとに違っても、Skill 直下の scripts/ だけは必ず同じ
 # 位置にあるためである。
-SKILL_DIR=<この Skill のディレクトリ>
+SKILL_DIR="<この Skill のディレクトリ>"
 [ -d "$SKILL_DIR/scripts" ] || { echo "SKILL_DIR が違う: $SKILL_DIR" >&2; exit 1; }
 FETCH_SCRIPT="$SKILL_DIR/scripts/fetch-pr-comments.sh"
 "$FETCH_SCRIPT" "$(gh repo view --json nameWithOwner -q .nameWithOwner)" "$PR_NUMBER"
