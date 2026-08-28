@@ -115,8 +115,8 @@ Codex MCP サーバは廃止済みです。外部 AI 委譲は `/ndf:external-ai
 
 ## 関連ドキュメント
 
-- [Claude Code版 README](../plugins/ndf-claude/README.md)
-- [Codex版 README](../plugins/ndf-codex/README.md)
-- [Kiro CLI版 README](../plugins/ndf-kiro/README.md)
-- [共通編集元 README](../plugins/ndf-shared/README.md)
+- [Claude Code版 README](../plugins/ndf/README.md)
+- [Codex版 README](../plugins/ndf/README.md)
+- [Kiro CLI版 README](../plugins/ndf/README.md)
+- [共通編集元 README](../plugins/ndf/README.md)
 - [runtime plugin container smoke 仕様](specifications/runtime-plugin-container-smoke.md)

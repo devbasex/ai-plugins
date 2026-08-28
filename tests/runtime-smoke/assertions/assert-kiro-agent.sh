@@ -37,11 +37,12 @@ test -f "$AGENT_FILE"
 test -s "$STEERING_FILE"
 find -L "$KIRO_DIR/skills" -path '*/SKILL.md' -print | grep -q .
 
-# Kiro 配布物は plugin.json を持たないため、版数は VERSION ファイルと導入後の
-# エージェント description でしか確認できない。両者が一致することを検査する。
-VERSION_FILE="$REPO_ROOT/plugins/ndf-kiro/VERSION"
-test -s "$VERSION_FILE"
-ndf_version="$(tr -d '[:space:]' < "$VERSION_FILE")"
+# Kiro には plugin.json を読む仕組みが無いため、版数は installer が埋める
+# エージェント description でしか確認できない。installer が読む Claude 版
+# マニフェストの版数と一致することを検査する。
+MANIFEST_FILE="$REPO_ROOT/plugins/ndf/.claude-plugin/plugin.json"
+test -s "$MANIFEST_FILE"
+ndf_version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$MANIFEST_FILE")"
 # grep だと 5.0.0 の . が任意文字に一致するため、JSON を読んで厳密に照合する。
 python3 - "$AGENT_FILE" "$ndf_version" >> "$LOG" <<'PY'
 import json
@@ -107,7 +108,7 @@ STALE_ROOT="$ARTIFACT_DIR/stale-checkout-$scope/skills/ndf-policies"
 mkdir -p "$STALE_ROOT"
 echo "stale" > "$STALE_ROOT/SKILL.md"
 ln -sfn "$STALE_ROOT" "$KIRO_DIR/skills/ndf-policies"
-bash "$REPO_ROOT/plugins/ndf-kiro/install.sh" "${INSTALL_ARGS[@]}" --with-slack >> "$LOG" 2>&1
+bash "$REPO_ROOT/plugins/ndf/dev.kiro/install.sh" "${INSTALL_ARGS[@]}" --with-slack >> "$LOG" 2>&1
 if [ -e "$KIRO_DIR/skills/ndf-policies" ] || [ -L "$KIRO_DIR/skills/ndf-policies" ]; then
   echo "installer left a stale ndf-policies skill link: $KIRO_DIR/skills/ndf-policies" >&2
   exit 1
@@ -134,7 +135,7 @@ config.setdefault("hooks", {})["userPromptSubmit"] = [{"command": "true"}]
 config["smokeUserKey"] = "keep-me"
 path.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 PY
-bash "$REPO_ROOT/plugins/ndf-kiro/install.sh" --project "$PROJECT_DIR" --with-slack >> "$LOG" 2>&1
+bash "$REPO_ROOT/plugins/ndf/dev.kiro/install.sh" --project "$PROJECT_DIR" --with-slack >> "$LOG" 2>&1
 python3 - "$AGENT_FILE" <<'PY'
 import json
 from pathlib import Path
@@ -215,7 +216,7 @@ JSON
   fi
 }
 install_into() {
-  bash "$REPO_ROOT/plugins/ndf-kiro/install.sh" --project "$1" "${@:2}" >> "$LOG" 2>&1
+  bash "$REPO_ROOT/plugins/ndf/dev.kiro/install.sh" --project "$1" "${@:2}" >> "$LOG" 2>&1
 }
 
 # 1. NDF 生成物 + ndf.json なし → 自動移行し、利用者の mcpServers を引き継ぐ
@@ -362,7 +363,7 @@ trap 'rc=$?; restore_default || rc=1; exit $rc' EXIT
 # kiro-cli はエージェントを cwd / $HOME 配下からのみ検出する。workspace では --project で
 # 別ディレクトリへ導入したときに --set-default が効くことを検査するため、PROJECT_DIR 以外の
 # cwd から実行する。global でも同様に $HOME 以外の cwd から実行して既定切替を検査する。
-(cd "$ARTIFACT_DIR" && bash "$REPO_ROOT/plugins/ndf-kiro/install.sh" "${INSTALL_ARGS[@]}" --with-slack --set-default --yes) >> "$LOG" 2>&1
+(cd "$ARTIFACT_DIR" && bash "$REPO_ROOT/plugins/ndf/dev.kiro/install.sh" "${INSTALL_ARGS[@]}" --with-slack --set-default --yes) >> "$LOG" 2>&1
 after_default="$(current_default)"
 echo "default agent after: ${after_default:-unknown}" >> "$LOG"
 if [ "$after_default" != "$AGENT_NAME" ]; then

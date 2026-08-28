@@ -38,11 +38,9 @@ detect_plugin_families() {
     basename "$dir" | sed 's/-shared$//'
   done | sort
 }
+# 単一ディレクトリへ移した family はここに出てこない（生成する配布物が無い）。
+# 全て移し終えると空になるが、MCP プラグインの同期は続けるためエラーにしない。
 PLUGIN_FAMILIES="$(detect_plugin_families)"
-if [ -z "$PLUGIN_FAMILIES" ]; then
-  echo "ERROR: plugin family が見つからない（plugins/<family>-shared/manifests）" >&2
-  exit 1
-fi
 
 copy_tree() {
   local source_dir="$1"
@@ -152,6 +150,95 @@ PY
 # Kiro CLI にはプラグインルートを示す環境変数が無い。プラグインルート直下の scripts/ を
 # 呼ぶ Skill だけ、既定の root を Kiro の配布先へ書き換える。Skill 直下の scripts/ を呼ぶ
 # Skill は Skill ディレクトリ起点で書いてあるため、書き換えの対象にならない。
+# 単一ディレクトリ構成では skills/ を 3 ランタイムが共有する。Codex の暗黙起動を抑える
+# `<Skill 名>/agents/openai.yaml` は Codex だけが読むため、共有ディレクトリへ置いてよい。
+# 対象は codex 用 manifest に載っていて frontmatter が disable-model-invocation: true の
+# Skill だけ。--check では追跡済みのファイルとの差分を検出する（生成物を Git で追跡し、
+# リポジトリを直接指して導入する利用者へ届ける必要があるため）。
+sync_codex_skill_policies() {
+  local family="$1"
+  local plugin_dir="$ROOT_DIR/plugins/$family"
+  local manifest="$plugin_dir/manifests/codex-skills.txt"
+
+  [ -f "$manifest" ] || return 0
+  python3 - "$plugin_dir/skills" "$manifest" "$CHECK" <<'PY'
+import sys
+from pathlib import Path
+
+skills_dir, manifest_path, check = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3] == "true"
+
+
+def parse_frontmatter(text: str) -> dict[str, str]:
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return {}
+    fields: dict[str, str] = {}
+    for line in lines[1:]:
+        if line.strip() == "---":
+            break
+        if not line or line[0].isspace() or ":" not in line:
+            continue
+        key, _, value = line.partition(":")
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        fields[key.strip()] = value
+    return fields
+
+
+def yaml_double_quoted(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+published = {
+    line.split("#", 1)[0].strip()
+    for line in manifest_path.read_text(encoding="utf-8").splitlines()
+    if line.split("#", 1)[0].strip()
+}
+
+expected: dict[Path, str] = {}
+for skill_dir in sorted(p for p in skills_dir.iterdir() if p.is_dir()):
+    skill_md = skill_dir / "SKILL.md"
+    if not skill_md.is_file() or skill_dir.name not in published:
+        continue
+    fields = parse_frontmatter(skill_md.read_text(encoding="utf-8"))
+    if fields.get("disable-model-invocation") != "true":
+        continue
+    lines = ["policy:", "  allow_implicit_invocation: false"]
+    argument_hint = fields.get("argument-hint")
+    if argument_hint:
+        lines += ["interface:", f"  default_prompt: {yaml_double_quoted(argument_hint)}"]
+    expected[skill_dir / "agents" / "openai.yaml"] = "\n".join(lines) + "\n"
+
+actual = {p for p in skills_dir.glob("*/agents/openai.yaml")}
+stale = actual - set(expected)
+
+failed = False
+for path, content in expected.items():
+    if check:
+        if not path.is_file():
+            print(f"Generated file missing: {path}", file=sys.stderr)
+            failed = True
+        elif path.read_text(encoding="utf-8") != content:
+            print(f"Generated file is out of date: {path}", file=sys.stderr)
+            failed = True
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+for path in sorted(stale):
+    if check:
+        print(f"Generated file is stale: {path}", file=sys.stderr)
+        failed = True
+    else:
+        path.unlink()
+        if not any(path.parent.iterdir()):
+            path.parent.rmdir()
+
+raise SystemExit(1 if failed else 0)
+PY
+}
+
 rewrite_kiro_skill_paths() {
   local skills_dir="$1"
   local family="$2"
@@ -684,6 +771,18 @@ for family in $PLUGIN_FAMILIES; do
   sync_runtime_if_present "$family" kiro
   sync_kiro_version "$family"
 done
+
+# 単一ディレクトリ構成の family（plugins/<family>/manifests を持ち、ランタイム別の
+# 生成物を持たないもの）。生成対象は Codex の暗黙起動ポリシーだけである。
+for dir in "$ROOT_DIR"/plugins/*; do
+  [ -d "$dir/manifests" ] || continue
+  family="$(basename "$dir")"
+  case "$family" in
+    *-shared|*-claude|*-codex|*-kiro) continue ;;
+  esac
+  sync_codex_skill_policies "$family"
+done
+
 sync_mcp_plugins
 
 if [ "$CHECK" = true ]; then

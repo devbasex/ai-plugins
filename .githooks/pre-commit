@@ -5,7 +5,7 @@ ROOT_DIR="$(git rev-parse --show-toplevel)"
 
 bash "$ROOT_DIR/scripts/build-runtime-plugins.sh" --check
 
-generated_paths='^(plugins/ndf-claude|plugins/ndf-codex|plugins/ndf-kiro|plugins/mcp/claude|plugins/mcp/codex|plugins/mcp/kiro)/'
+generated_paths='^(plugins/mcp/claude|plugins/mcp/codex|plugins/mcp/kiro)/'
 unstaged_generated="$(git -C "$ROOT_DIR" diff --name-only | grep -E "$generated_paths" || true)"
 if [ -n "$unstaged_generated" ]; then
   echo "Generated runtime files have unstaged changes. Run build and git add the generated files:" >&2

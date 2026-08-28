@@ -32,5 +32,5 @@ Skill に関する完了済み issue / plan / report は、該当 Skill の実�
 - [NDF Plugin リファレンス](../ndf-plugin-reference.md)
 - [プラグイン開発ガイド](../plugin-development-guide.md)
 - [AI Plugins プロジェクト概要](../project-overview.md)
-- [NDF README](../../plugins/ndf-claude/README.md)
+- [NDF README](../../plugins/ndf/README.md)
 - [NDF CHANGELOG](../../docs/ndf-plugin-reference.md)

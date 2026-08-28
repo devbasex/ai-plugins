@@ -40,10 +40,7 @@ ai-plugins/
 ├── .claude-plugin/
 │   └── marketplace.json          # マーケットプレイス定義（必須）
 ├── plugins/
-│   ├── ndf-shared/               # NDF共通編集元（直接installしない）
-│   ├── ndf-claude/               # Claude Code版NDF
-│   ├── ndf-codex/                # Codex版NDF
-│   ├── ndf-kiro/                 # Kiro CLI版NDF
+│   ├── ndf/                      # NDF（3ランタイム共通の単一ディレクトリ）
 │   ├── playwright-kit/           # playwright-kit（3ランタイム共通の単一ディレクトリ）
 │   └── mcp/
 │       ├── shared/               # MCPプラグイン共通編集元
@@ -68,17 +65,15 @@ ai-plugins/
 | [docs/presentations/](docs/presentations/) | 勉強会などで使うスライド資料（Marp形式）とビルド手順 |
 | [docs/claude-code-skills-survey.md](docs/claude-code-skills-survey.md) | Claude Code Skills調査レポート |
 | [docs/development-history/](docs/development-history/) | 開発履歴と知見 |
-| [plugins/ndf-claude/README.md](plugins/ndf-claude/README.md) | Claude Code版NDFプラグイン |
-| [plugins/ndf-codex/README.md](plugins/ndf-codex/README.md) | Codex版NDFプラグイン |
-| [plugins/ndf-kiro/README.md](plugins/ndf-kiro/README.md) | Kiro CLI版NDF installer |
+| [plugins/ndf/README.md](plugins/ndf/README.md) | NDFプラグイン（3ランタイム共通） |
 
 ## NDFプラグインについて
 
-**NDFプラグイン**は、このマーケットプレイスの主要プラグインです（v8.6.0）。plugin 名は全ランタイムで `ndf` を維持し、配布物は `plugins/ndf-claude` / `plugins/ndf-codex` / `plugins/ndf-kiro` に分離しています。
-- 共通編集元は `plugins/ndf-shared/`
+**NDFプラグイン**は、このマーケットプレイスの主要プラグインです（v8.6.0）。plugin 名は全ランタイムで `ndf` を維持し、配布物は `plugins/ndf/` の1ディレクトリにまとまっています。
+- Skill の実体は `plugins/ndf/skills/` の1箇所。配布先は `plugins/ndf/manifests/*-skills.txt` が決める
 - Claude Code版は 8個の専門サブエージェント、公開Skills、SessionStart/Stopフックを提供
 - Codex版は Codex向け公開Skillsと任意Slack通知hookを提供
-- Kiro版は installer で `.kiro/skills/`、`.kiro/steering/ndf-policies.md`、`.kiro/agents/ndf.json` を生成
+- Kiro版は `plugins/ndf/dev.kiro/install.sh` で `.kiro/skills/`、`.kiro/steering/ndf-policies.md`、`.kiro/agents/ndf.json` を生成
 - 外部AI委譲は `/ndf:external-ai` skill と `corder` エージェント経由で Codex / Gemini CLI を呼び出し（v4.0.0 で Codex MCP サーバは廃止）
 
 詳細は各 runtime README と `docs/ndf-plugin-reference.md` を参照。

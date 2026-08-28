@@ -6,7 +6,7 @@ Claude Code / Codex / Kiro CLI向けのスキル・MCP設定を共有するた�
 
 このマーケットプレイスは、チーム全体でAI開発ツール（Claude Code / Codex / Kiro CLI）の導入を加速するための事前設定されたプラグインを提供します。
 
-**NDFプラグイン v8.6.0** は、同じ `ndf@ai-plugins` という名前で Claude Code / Codex / Kiro CLI へ配布されるランタイム別プラグインです。共通ソースは `plugins/ndf-shared/` に集約し、利用者が install する配布物は `plugins/ndf-claude/` / `plugins/ndf-codex/` / `plugins/ndf-kiro/` に分かれています。
+**NDFプラグイン v8.6.0** は、同じ `ndf@ai-plugins` という名前で Claude Code / Codex / Kiro CLI へ配布されるプラグインです。配布物は `plugins/ndf/` の1ディレクトリにまとまっており、Skill の実体は `plugins/ndf/skills/` の1箇所だけです。どのランタイムへ配るかは `plugins/ndf/manifests/*-skills.txt` が決めます。
 
 - **公開Skills**: Claude Code向け core 27個、Kiro向け core 26個、Codex向け core 25個に分離。
 - **元Skills（30個）**:
@@ -21,7 +21,7 @@ Claude Code / Codex / Kiro CLI向けのスキル・MCP設定を共有するた�
 - **自動フック**: SessionStart (transcript保持期間を最低90日に保つ) + Stop (AI要約生成+Slack通知)
 - **外部AI委譲**: `/ndf:external-ai` skill + `corder` エージェント経由で Codex / Gemini CLI をバックグラウンド実行 (v4.0.0 で Codex MCP サーバは廃止)
 - **AIクロスレビュー強化**: `/ndf:cross-review` は codex/gemini 両方に PR レビューを委譲し、Gemini の進捗 heartbeat、`--focus` / `--extra-instructions-file`、PR 種別別の自動レビュー観点テンプレートに対応
-- **Kiro CLI対応**: `plugins/ndf-kiro/install.sh` によるワンコマンドセットアップ
+- **Kiro CLI対応**: `plugins/ndf/dev.kiro/install.sh` によるワンコマンドセットアップ
 - **MCPプラグイン**: `plugins/mcp/shared/` を編集元とし、Claude / Codex / Kiro 向け配布物を `plugins/mcp/{claude,codex,kiro}/` に生成
 
 ## 利用方法
@@ -68,16 +68,16 @@ cd ai-plugins
 
 ```bash
 # 基本（Skills + agentSpawnフックのみ）
-bash plugins/ndf-kiro/install.sh
+bash plugins/ndf/dev.kiro/install.sh
 
 # Slack通知も有効化
-bash plugins/ndf-kiro/install.sh --with-slack
+bash plugins/ndf/dev.kiro/install.sh --with-slack
 
 # 全部入り（Slack + Codex CLI 連携）
-bash plugins/ndf-kiro/install.sh --with-slack --with-codex
+bash plugins/ndf/dev.kiro/install.sh --with-slack --with-codex
 ```
 
-インストーラーは `plugins/ndf-kiro/skills/` から `.kiro/skills/` への symlink、`.kiro/steering/ndf-policies.md`、`.kiro/agents/ndf.json` を生成します。
+インストーラーは `plugins/ndf/skills/` から `.kiro/skills/` への symlink、`.kiro/steering/ndf-policies.md`、`.kiro/agents/ndf.json` を生成します。
 
 #### 3. Slack通知の設定（オプション）
 
@@ -94,7 +94,7 @@ SLACK_USER_MENTION=<@U0123456789>
 kiro-cli chat --agent ndf
 ```
 
-既定エージェントとして使いたい場合は `bash plugins/ndf-kiro/install.sh --set-default` を実行します。
+既定エージェントとして使いたい場合は `bash plugins/ndf/dev.kiro/install.sh --set-default` を実行します。
 
 詳細は [KIRO.md](./KIRO.md) を参照。
 
@@ -102,7 +102,7 @@ kiro-cli chat --agent ndf
 
 | プラグイン名 | バージョン | 説明 | 詳細 |
 |------------|----------|------|------|
-| **ndf** | 8.6.0 | Claude Code / Codex / Kiro CLI 向けに runtime 別配布物を提供する NDF プラグイン。8個の専門エージェント（Claude版）、公開Skills（Claude Code向け core 27個、Kiro向け core 26個、Codex向け core 25個）、Claude SessionStart/Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:external-ai` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [Claude](./plugins/ndf-claude/README.md) / [Codex](./plugins/ndf-codex/README.md) / [Kiro](./plugins/ndf-kiro/README.md) |
+| **ndf** | 8.6.0 | Claude Code / Codex / Kiro CLI 向けに runtime 別配布物を提供する NDF プラグイン。8個の専門エージェント（Claude版）、公開Skills（Claude Code向け core 27個、Kiro向け core 26個、Codex向け core 25個）、Claude SessionStart/Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:external-ai` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [Claude](./plugins/ndf/README.md) / [Codex](./plugins/ndf/README.md) / [Kiro](./plugins/ndf/README.md) |
 | **playwright-kit** | 1.0.0 | Playwright による E2E テストの計画・実装・証跡管理を提供するプラグイン。ページ役割からのテスト計画、動画 / trace 付きスクリプト実装、レポート生成と Drive 保管、playwright_kit ランタイム（init、a11y / CWV スキャン）の 4 Skill。NDF v7.0.0 で分離。 | [README](./plugins/playwright-kit/README.md) |
 
 ### NDF v8.6.0 の主な変更
@@ -236,7 +236,7 @@ kiro-cli chat --agent ndf
   レビューコメントに残ります。`report --metrics` がランタイム × モデルで集計します
 
 あわせて、収束ループの共通層を
-[`plugins/ndf-shared/skills/cross-review/scripts/lib/`](./plugins/ndf-shared/skills/cross-review/scripts/lib/README.md)
+[`plugins/ndf/skills/cross-review/scripts/lib/`](./plugins/ndf/skills/cross-review/scripts/lib/README.md)
 へ切り出しました。`/ndf:cross-review` の挙動と既存テストは変わりません。
 
 `/ndf:external-ai` は Kiro CLI と `claude -p` の非対話実行手順を追加し、対象 CLI が 4 つに
@@ -263,12 +263,12 @@ kiro-cli chat --agent ndf
 | 検証のない外部化（設定・マスタにスキーマ・版・検証がない） | スキーマと版を与え、読み込み境界で検証する |
 
 判断材料は
-[references/data-representation.md](./plugins/ndf-shared/skills/refactoring/references/data-representation.md)
+[references/data-representation.md](./plugins/ndf/skills/refactoring/references/data-representation.md)
 にあります。「分岐が多いから表にする」ではなく**変化するから表にする**、という切り分けを置き、
 ガード節・静的に網羅性を検査できる分岐・逐次依存のループ・閉じた状態集合の列挙型は「そのままで
 よい」ものとして明示しています。具体的な手段は言語ごとに 1 ファイルへ分けており（`references/lang-python.md` /
 `lang-javascript.md` / `lang-typescript.md` /
-[`lang-php.md`](./plugins/ndf-shared/skills/refactoring/references/lang-php.md)）、
+[`lang-php.md`](./plugins/ndf/skills/refactoring/references/lang-php.md)）、
 SKILL.md が対象言語のファイルだけを読ませます。他言語の内容はコンテキストに載りません。
 記載のない言語でも判断材料はそのまま使えます。
 
@@ -373,9 +373,9 @@ Skill を利用実績にもとづいて棚卸し、**49 個から 29 個へ整�
 - **統合（-11）**: 重複していた Skill を、利用実績の多い側の名前を残して統合しました。`/ndf:review-branch` → `/ndf:review --branch`、`/ndf:review-pr-comments` `/ndf:resolve-pr-comments` → `/ndf:fix`、`/ndf:clean` `/ndf:sync-main` → `/ndf:merged`、`/ndf:branch-fix-strategy` → `/ndf:cherry-pick-pr`、`/ndf:codex` `/ndf:gemini` → `/ndf:external-ai`、ブラウザ自動テスト 9 個 → 4 個。
 - **削除（-9）**: 起動実績がなく、現在のモデルの標準能力か汎用コマンドで足りるものを削除しました（`/ndf:git-gh-operations` `/ndf:python-execution` など）。このうち `/ndf:sync-main` は内容を `/ndf:merged` へ吸収しているため移行先があります。移行先を用意せず消したのは 8 件です。
 - **自然文で発動するようになりました**: `merged` / `pr` / `pr-tests` から明示指示専用の設定を外しました。取り消しの難しい手順の前には対象を提示して確認を取ります。`review` も同じ設定にしましたが、Claude Code では組み込みの `code-review` が同じ用途を持つため自然文では選ばれません。`/ndf:review` で明示的に起動してください。
-- **frontmatter 規約と機械検査**: 発動判定に必要な情報を `description` へ集約し、`scripts/check-skill-frontmatter.py` で CI 検査します（規約は `plugins/ndf-shared/skills/README.md`）。
+- **frontmatter 規約と機械検査**: 発動判定に必要な情報を `description` へ集約し、`scripts/check-skill-frontmatter.py` で CI 検査します（規約は `plugins/ndf/skills/README.md`）。
 - **Kiro CLI**: エージェント名が `default` → `ndf` に変わりました。`install.sh` の再実行が必要です。`--set-default` と `--scope workspace|global` を追加し、常時指示を `.kiro/steering/` へ移しました。
-- **Codex**: 明示指示専用の Skill に `agents/openai.yaml` を生成し、暗黙起動を抑止します。プラグイン配布の Skill は抑止すると `$<skill 名>` も効かないため、起動するには SKILL.md のパスを示します（`plugins/ndf-codex/README.md`）。
+- **Codex**: 明示指示専用の Skill に `agents/openai.yaml` を生成し、暗黙起動を抑止します。プラグイン配布の Skill は抑止すると `$<skill 名>` も効かないため、起動するには SKILL.md のパスを示します（`plugins/ndf/README.md`）。
 
 ### NDF v4.20.1 の主な変更
 
@@ -408,10 +408,8 @@ ai-plugins/
 ├── .claude-plugin/
 │   └── marketplace.json          # Claude Codeマーケットプレイスメタデータ
 ├── plugins/
-│   ├── ndf-shared/               # NDF共通編集元（直接installしない）
-│   ├── ndf-claude/               # Claude Code版NDF配布物
-│   ├── ndf-codex/                # Codex版NDF配布物
-│   ├── ndf-kiro/                 # Kiro CLI版NDF配布物/installer
+│   ├── ndf/                      # NDF（3ランタイム共通の単一ディレクトリ）
+│   ├── playwright-kit/           # playwright-kit（3ランタイム共通の単一ディレクトリ）
 │   └── mcp/
 │       ├── shared/               # MCPプラグイン共通編集元
 │       ├── claude/               # Claude Code版MCP配布物

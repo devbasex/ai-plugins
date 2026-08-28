@@ -1,0 +1,60 @@
+{
+  "name": "ndf",
+  "version": "8.6.0",
+  "description": "Claude Code plugin (v8.6.0): 8 specialized agents and 27 focused NDF skills for PR/review workflows, cross-review, implementation planning, plan-to-spec, Docker container access, statusline, external AI delegation (Codex/Gemini), transcript retention guard, and optional Slack notifications.",
+  "author": {
+    "name": "takemi-ohama",
+    "url": "https://github.com/takemi-ohama"
+  },
+  "keywords": [
+    "mcp",
+    "codex",
+    "workflow",
+    "slack",
+    "notifications",
+    "agents",
+    "skills",
+    "director",
+    "orchestrator"
+  ],
+  "agents": [
+    "./agents/director.md",
+    "./agents/data-analyst.md",
+    "./agents/corder.md",
+    "./agents/researcher.md",
+    "./agents/qa.md",
+    "./agents/debugger.md",
+    "./agents/devops-engineer.md",
+    "./agents/code-reviewer.md"
+  ],
+  "skills": [
+    "./skills/pr",
+    "./skills/pr-tests",
+    "./skills/fix",
+    "./skills/pr-review",
+    "./skills/cross-review",
+    "./skills/cross-refactoring",
+    "./skills/merged",
+    "./skills/ndf-policies",
+    "./skills/markdown-writing",
+    "./skills/docker-container-access",
+    "./skills/implementation-plan",
+    "./skills/investigation-rules",
+    "./skills/problem-solving",
+    "./skills/logging-guidelines",
+    "./skills/cherry-pick-pr",
+    "./skills/deploy",
+    "./skills/external-ai",
+    "./skills/statusline",
+    "./skills/issue-plan-strategy",
+    "./skills/plan-to-spec",
+    "./skills/qa-security-scan",
+    "./skills/official-skills-autoloader",
+    "./skills/development-workflow",
+    "./skills/requirements-design",
+    "./skills/tdd-cycle",
+    "./skills/refactoring",
+    "./skills/quality-gates"
+  ],
+  "hooks": "./hooks/claude.json"
+}

@@ -65,7 +65,7 @@ Drive 連携は optional dependency として扱う。`google-auth` skill はど
 
 ```bash
 # <ai-plugins を clone した先> を実パスに置き換える
-export GOOGLE_AUTH_SCRIPTS=<ai-plugins のパス>/plugins/ndf-shared/skills/google-auth/scripts
+export GOOGLE_AUTH_SCRIPTS=<ai-plugins のパス>/plugins/ndf/optional-skills/google-auth/scripts
 cd scenario-test
 uv sync --extra drive
 ```
