@@ -268,10 +268,16 @@ symlink が使えないことは Task 4 の構成には影響しないが、Code
 
 ### Task 7: ビルドと検証を縮小する
 
-- **対象ファイル:** `scripts/build-runtime-plugins.sh`、`scripts/validate-runtime-plugins.sh`、`.github/workflows/`
-- **変更内容:** ビルドの役割を「マニフェストの `skills` 配列を `manifests/*-skills.txt` から生成する」ことに絞る。ディレクトリの複製処理と実行時パスの書き換え処理を取り除く。検証スクリプトからは、移行の途中で旧構成を受け付けるために残した分岐を落とす
+- **対象ファイル:** `scripts/validate-runtime-plugins.sh`、`.github/workflows/`
+- **変更内容:** 検証スクリプトから、移行の途中で旧構成を受け付けるために残した分岐（`split` / `single` の切り替え）を落とす。CI のパスフィルタから、削除したディレクトリを外す
 - **満たす受け入れ条件:** 2、6
-- **進め方:** 参照パスの追随は Task 1・2・4・5 で済んでいるため、ここでは縮小だけを行う。生成対象が縮むため、`--check` の対象はマニフェストが中心になる。Task 3 で `skills` 配列が効くと分かったので、Codex 向け Skill ディレクトリの構築は要らない。`rewrite_codex_skill_paths` は Task 2 で、`rewrite_kiro_skill_paths` の最後の対象は Task 4 で消えているため、ここでは残った関数と呼び出しを落とすだけになる
+- **進め方:** ビルドスクリプトの縮小は Task 4 と Task 5 で終わっている。`rewrite_codex_skill_paths` は Task 2 で、`rewrite_kiro_skill_paths` は Task 4 で（最後の対象だった `statusline` を Skill 起点へ変えたため）、ランタイム別の複製処理は Task 4・5 で消えた。生成対象は Codex の暗黙起動ポリシーと Kiro の MCP installer だけになっている
+
+ビルドの役割を「マニフェストの `skills` 配列を `manifests/*-skills.txt` から生成する」ことに
+絞る案は採らない。Claude Code と Codex のマニフェストは `skills` 配列以外にも手で書く項目
+（`agents` / `hooks` / `mcpServers` / description）を持つため、配列だけを生成すると 1 つの
+ファイルが生成物と手書きの混在になる。`validate-runtime-plugins.sh` が配列と manifest の
+一致を検査しているので、ずれは検出できる。
 
 ### Task 8: ドキュメントを更新する
 

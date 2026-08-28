@@ -11,39 +11,18 @@ run() {
 run bash "$ROOT_DIR/scripts/build-runtime-plugins.sh" --check
 
 # Skill を配る plugin family を manifests/ の有無から検出する（plugins/mcp/* は別系統）。
-# 移行の途中は 2 つの構成が混ざるため、どちらも受け付ける。
-#   split  … plugins/<family>-shared（編集元）+ plugins/<family>-{claude,codex,kiro}（生成物）
-#   single … plugins/<family>（配布ディレクトリが 1 つだけ）
-# 後段の静的解析（claude plugin validate / Kiro installer の dry-run）もこの一覧で回すため、
-# family を足したときに検査対象から漏れることがない。
+# 固定リストを置かないのは、family を足したときに検査対象から漏れる経路を作らないためである。
+# 後段の静的解析（claude plugin validate / Kiro installer の dry-run）もこの一覧で回す。
 FAMILIES=()
-for shared_dir in "$ROOT_DIR"/plugins/*-shared; do
-  [ -d "$shared_dir/manifests" ] || continue
-  family="$(basename "$shared_dir")"
-  FAMILIES+=("${family%-shared}:split")
-done
 for plugin_dir in "$ROOT_DIR"/plugins/*; do
   [ -d "$plugin_dir/manifests" ] || continue
-  family="$(basename "$plugin_dir")"
-  case "$family" in
-    *-shared|*-claude|*-codex|*-kiro) continue ;;
-  esac
-  FAMILIES+=("$family:single")
+  FAMILIES+=("$(basename "$plugin_dir")")
 done
 if [ "${#FAMILIES[@]}" -eq 0 ]; then
-  echo "ERROR: plugin family が見つからない（plugins/<family>[-shared]/manifests）" >&2
+  echo "ERROR: plugin family が見つからない（plugins/<family>/manifests）" >&2
   exit 1
 fi
 echo "==> plugin families: ${FAMILIES[*]}"
-
-# 単一ディレクトリ構成の family 名だけを取り出す（ルートマニフェストの検査などで使う）。
-single_families() {
-  local entry
-  for entry in "${FAMILIES[@]}"; do
-    [ "${entry#*:}" = single ] || continue
-    printf '%s\n' "${entry%%:*}"
-  done
-}
 
 run python3 -m json.tool "$ROOT_DIR/.claude-plugin/marketplace.json" >/dev/null
 
@@ -51,11 +30,11 @@ while IFS= read -r manifest; do
   run python3 -m json.tool "$manifest" >/dev/null
 done < <(find "$ROOT_DIR/plugins" -path '*/.claude-plugin/plugin.json' -o -path '*/.codex-plugin/plugin.json' | sort)
 
-while IFS= read -r family; do
+for family in "${FAMILIES[@]}"; do
   root_manifest="$ROOT_DIR/plugins/$family/plugin.json"
   [ -f "$root_manifest" ] || continue
   run python3 -m json.tool "$root_manifest" >/dev/null
-done < <(single_families)
+done
 
 while IFS= read -r mcp_config; do
   run python3 -m json.tool "$mcp_config" >/dev/null
@@ -70,22 +49,12 @@ from pathlib import Path
 root = Path(sys.argv[1])
 # 検出済みの plugin family は呼び出し側から受け取る（検出を 2 箇所に持つと、
 # 一方だけが新しい family を拾って検査範囲が食い違う）。
-# 受け取る形は `<family>:<layout>` で、layout は split か single。
-families = [tuple(arg.split(":", 1)) for arg in sys.argv[2:]]
+families = sys.argv[2:]
 
 
-def plugin_dir_of(family: str, layout: str, runtime: str) -> Path:
-    """ランタイム別の配布ディレクトリ。single ではどのランタイムも同じ場所を指す。"""
-    if layout == "single":
-        return root / f"plugins/{family}"
-    return root / f"plugins/{family}-{runtime}"
-
-
-def source_dir_of(family: str, layout: str) -> Path:
-    """Skill と manifests の置き場所（split では編集元、single では配布ディレクトリ）。"""
-    if layout == "single":
-        return root / f"plugins/{family}"
-    return root / f"plugins/{family}-shared"
+def plugin_dir_of(family: str) -> Path:
+    """プラグインの配布ディレクトリ。3 ランタイムとも同じ場所を読む。"""
+    return root / f"plugins/{family}"
 
 def read_json(path: Path):
     with path.open(encoding="utf-8") as fh:
@@ -142,8 +111,8 @@ VERSION_IN_DESCRIPTION = re.compile(r"\(v(\d+\.\d+\.\d+)\)")
 DESCRIBED_SKILL_COUNT = re.compile(r"(?<![\w.])(\d+)(?![\w.])(?:\s+[\w/()-]+){0,3}\s+skills\b")
 
 
-def manifest_skill_count(family: str, layout: str, runtime: str):
-    manifest = source_dir_of(family, layout) / f"manifests/{runtime}-skills.txt"
+def manifest_skill_count(family: str, runtime: str):
+    manifest = plugin_dir_of(family) / f"manifests/{runtime}-skills.txt"
     if not manifest.is_file():
         return None
     return sum(
@@ -153,10 +122,10 @@ def manifest_skill_count(family: str, layout: str, runtime: str):
     )
 
 
-def published_skill_count(family: str, layout: str):
+def published_skill_count(family: str):
     """ルートマニフェストが公開する Skill 数。Agent Plugins 1.0.0 §6.1 が
     `skills/` を固定位置と定めており、絞り込みを持たないため実体の数と一致する。"""
-    skills_dir = source_dir_of(family, layout) / "skills"
+    skills_dir = plugin_dir_of(family) / "skills"
     if not skills_dir.is_dir():
         return None
     return sum(1 for d in skills_dir.iterdir() if (d / "SKILL.md").is_file())
@@ -195,8 +164,8 @@ def check_description(label: str, description, version: str, expected, source: s
         )
 
 
-for family, layout in families:
-    claude_dir = plugin_dir_of(family, layout, "claude")
+for family in families:
+    claude_dir = plugin_dir_of(family)
     claude_plugin_path = claude_dir / ".claude-plugin/plugin.json"
     if not claude_plugin_path.is_file():
         continue
@@ -209,10 +178,10 @@ for family, layout in families:
         str(claude_plugin_path.relative_to(root)),
         claude_plugin.get("description"),
         version,
-        manifest_skill_count(family, layout, "claude"),
+        manifest_skill_count(family, "claude"),
         "claude-skills.txt",
     )
-    codex_plugin_path = plugin_dir_of(family, layout, "codex") / ".codex-plugin/plugin.json"
+    codex_plugin_path = plugin_dir_of(family) / ".codex-plugin/plugin.json"
     if codex_plugin_path.is_file():
         codex_plugin = read_json(codex_plugin_path)
         if codex_plugin.get("version") != version:
@@ -224,13 +193,13 @@ for family, layout in families:
             str(codex_plugin_path.relative_to(root)),
             codex_plugin.get("description"),
             version,
-            manifest_skill_count(family, layout, "codex"),
+            manifest_skill_count(family, "codex"),
             "codex-skills.txt",
         )
     # ルートマニフェスト（Agent Plugins 形式）は絞り込みを持たず `skills/` を全件公開する。
     # description の Skill 数は manifest ではなく実体の数と突き合わせる。
-    root_manifest_path = source_dir_of(family, layout) / "plugin.json"
-    if layout == "single" and root_manifest_path.is_file():
+    root_manifest_path = plugin_dir_of(family) / "plugin.json"
+    if root_manifest_path.is_file():
         root_manifest = read_json(root_manifest_path)
         if root_manifest.get("version") != version:
             errors.append(
@@ -241,7 +210,7 @@ for family, layout in families:
             str(root_manifest_path.relative_to(root)),
             root_manifest.get("description"),
             version,
-            published_skill_count(family, layout),
+            published_skill_count(family),
             "skills/ の実体",
         )
     expected_source = "./" + claude_dir.relative_to(root).as_posix()
@@ -252,15 +221,15 @@ for family, layout in families:
             f".claude-plugin/marketplace.json の {plugin.get('name')}",
             plugin.get("description"),
             version,
-            manifest_skill_count(family, layout, "claude"),
+            manifest_skill_count(family, "claude"),
             "claude-skills.txt",
         )
 
-for family, layout in families:
-    source = source_dir_of(family, layout)
+for family in families:
+    source = plugin_dir_of(family)
     for manifest in sorted((source / "manifests").glob("*-skills.txt")):
         runtime = manifest.name.removesuffix("-skills.txt")
-        runtime_skills = plugin_dir_of(family, layout, runtime) / "skills"
+        runtime_skills = plugin_dir_of(family) / "skills"
         if not runtime_skills.is_dir():
             errors.append(f"runtime skills directory missing: {runtime_skills.relative_to(root)}")
             continue
@@ -279,10 +248,10 @@ for family, layout in families:
 # ルートマニフェストを置く family は `skills/` を全件公開する。Codex はこのマニフェストを
 # 優先して読むため、codex-skills.txt に載らない Skill を `skills/` へ置くと配布先が増える。
 # 実体と codex 用 manifest が一致していることを確かめる。
-for family, layout in families:
-    if layout != "single" or not (source_dir_of(family, layout) / "plugin.json").is_file():
+for family in families:
+    if not (plugin_dir_of(family) / "plugin.json").is_file():
         continue
-    source = source_dir_of(family, layout)
+    source = plugin_dir_of(family)
     manifest = source / "manifests/codex-skills.txt"
     if not manifest.is_file():
         continue
@@ -301,10 +270,8 @@ for family, layout in families:
 # 単一ディレクトリ構成では skills/ に全 runtime 分の実体が並ぶ。どの manifest にも
 # 載らない Skill をここへ置くと、ルートマニフェストや将来の絞り込み漏れで配られる。
 # 配らない Skill は optional-skills/ へ置く規約なので、その違反を検出する。
-for family, layout in families:
-    if layout != "single":
-        continue
-    source = source_dir_of(family, layout)
+for family in families:
+    source = plugin_dir_of(family)
     listed: set[str] = set()
     for manifest in sorted((source / "manifests").glob("*-skills.txt")):
         listed |= {
@@ -324,10 +291,10 @@ for family, layout in families:
 # マニフェストの skills は配列で明示する。配列に載っていない Skill はランタイムから
 # 読み込まれないため、manifest と一致していないと配布漏れになる。ディレクトリの中身を
 # 見る上の検査では検出できないので、ここで突き合わせる。
-for family, layout in families:
+for family in families:
   for runtime, manifest_key in (("claude", ".claude-plugin"), ("codex", ".codex-plugin")):
-    skills_manifest = source_dir_of(family, layout) / f"manifests/{runtime}-skills.txt"
-    plugin_json = plugin_dir_of(family, layout, runtime) / f"{manifest_key}/plugin.json"
+    skills_manifest = plugin_dir_of(family) / f"manifests/{runtime}-skills.txt"
+    plugin_json = plugin_dir_of(family) / f"{manifest_key}/plugin.json"
     if not (skills_manifest.is_file() and plugin_json.is_file()):
         continue
     expected = [
@@ -401,35 +368,18 @@ if errors:
 print("runtime plugin manifests and generated paths are valid")
 PY
 
-# 配布ディレクトリを構成ごとに解決する。single では 3 ランタイムが同じ場所を指す。
-plugin_dir_for() {
-  local entry="$1" runtime="$2"
-  if [ "${entry#*:}" = single ]; then
-    printf '%s\n' "$ROOT_DIR/plugins/${entry%%:*}"
-  else
-    printf '%s\n' "$ROOT_DIR/plugins/${entry%%:*}-$runtime"
-  fi
-}
-
 if command -v claude >/dev/null 2>&1; then
-  for entry in "${FAMILIES[@]}"; do
-    claude_dir="$(plugin_dir_for "$entry" claude)"
-    [ -d "$claude_dir" ] || continue
-    run claude plugin validate "$claude_dir"
+  for family in "${FAMILIES[@]}"; do
+    run claude plugin validate "$ROOT_DIR/plugins/$family"
   done
   run claude plugin validate "$ROOT_DIR/.claude-plugin/marketplace.json"
 else
   echo "==> claude CLI not found; skipped claude plugin validate"
 fi
 
-# Kiro の installer は split では配布ディレクトリ直下、single では Agent Plugins 仕様
-# §8.2 のクライアント拡張ディレクトリ（dev.kiro/）に置く。
-for entry in "${FAMILIES[@]}"; do
-  if [ "${entry#*:}" = single ]; then
-    installer="$ROOT_DIR/plugins/${entry%%:*}/dev.kiro/install.sh"
-  else
-    installer="$ROOT_DIR/plugins/${entry%%:*}-kiro/install.sh"
-  fi
+# Kiro の installer は Agent Plugins 仕様 §8.2 のクライアント拡張ディレクトリに置く。
+for family in "${FAMILIES[@]}"; do
+  installer="$ROOT_DIR/plugins/$family/dev.kiro/install.sh"
   [ -f "$installer" ] || continue
   run bash "$installer" --dry-run >/dev/null
 done
