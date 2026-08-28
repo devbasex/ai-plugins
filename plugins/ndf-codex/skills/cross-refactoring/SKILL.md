@@ -162,8 +162,12 @@ flowchart TD
 # プラグインルートを示す環境変数も置かない（実測）。その場合は、ランタイムがこの Skill の
 # 場所として渡したディレクトリを入れる。Kiro CLI は `.kiro/skills/<Skill 名>` の相対パスで
 # 渡すため、作業ディレクトリを移る前に絶対パスへ直しておく。
-SKILL_DIR="${CLAUDE_PLUGIN_ROOT}/skills/cross-refactoring"
-[ -d "$SKILL_DIR" ] || SKILL_DIR="<この Skill のディレクトリ>"
+SKILL_DIR="${CLAUDE_PLUGIN_ROOT}"
+if [ -n "$SKILL_DIR" ]; then
+  SKILL_DIR="$SKILL_DIR/skills/cross-refactoring"
+else
+  SKILL_DIR="<この Skill のディレクトリ>"
+fi
 SKILL_DIR="$(cd "$SKILL_DIR" 2>/dev/null && pwd)" \
   || { echo "この Skill のディレクトリを解決できない" >&2; exit 1; }
 [ -d "$SKILL_DIR/scripts" ] || { echo "SKILL_DIR が違う: $SKILL_DIR" >&2; exit 1; }
