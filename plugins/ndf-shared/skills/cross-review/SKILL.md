@@ -193,12 +193,15 @@ flowchart TD
 各ステップの詳細は `docs/` 参照。メインは以下のテンプレートで scripts/ を呼ぶだけ:
 
 ```bash
-# SKILL_DIR は、この Skill のディレクトリ（絶対パス）。ランタイムが Skill を起動するときに
-# 渡す値をそのまま入れる（Claude Code は "Base directory for this skill"、Kiro CLI は
-# `.kiro/skills/<Skill 名>`、Codex は Skill の展開先）。プラグインルート起点にしないのは、
-# 配布ディレクトリの形がランタイムごとに違っても、Skill 直下の scripts/ だけは必ず同じ
-# 位置にあるためである。
-SKILL_DIR="<この Skill のディレクトリ>"
+# この Skill のディレクトリを決める。Claude Code は SKILL.md 内の ${CLAUDE_PLUGIN_ROOT} を
+# プラグインルートの絶対パスへ展開するので、そのまま使える。Codex と Kiro CLI は展開せず、
+# プラグインルートを示す環境変数も置かない（実測）。その場合は、ランタイムがこの Skill の
+# 場所として渡したディレクトリを入れる。Kiro CLI は `.kiro/skills/<Skill 名>` の相対パスで
+# 渡すため、作業ディレクトリを移る前に絶対パスへ直しておく。
+SKILL_DIR="${CLAUDE_PLUGIN_ROOT}/skills/cross-review"
+[ -d "$SKILL_DIR" ] || SKILL_DIR="<この Skill のディレクトリ>"
+SKILL_DIR="$(cd "$SKILL_DIR" 2>/dev/null && pwd)" \
+  || { echo "この Skill のディレクトリを解決できない" >&2; exit 1; }
 [ -d "$SKILL_DIR/scripts" ] || { echo "SKILL_DIR が違う: $SKILL_DIR" >&2; exit 1; }
 SCRIPTS="$SKILL_DIR/scripts"
 

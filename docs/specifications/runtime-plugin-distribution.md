@@ -52,6 +52,25 @@ Skill 内のパス参照の書き換えは、runtime ごとに次のとおりで
 Kiro CLI へ配っており、Kiro にはプラグインルートを示す環境変数が無いため、この 1 個だけ
 書き換えが残る。
 
+### Skill ディレクトリの解決
+
+Skill ディレクトリ起点で書いた Skill は、次の順で `SKILL_DIR` を決める。
+
+1. `${CLAUDE_PLUGIN_ROOT}/skills/<Skill 名>` が存在すればそれを採る
+2. 無ければ、runtime が Skill の場所として渡したディレクトリを使う
+3. どちらの場合も `cd … && pwd` で絶対パスへ直してから使う
+
+根拠にした実測（Claude Code 2.1.250 / Codex CLI 0.149.0）は次のとおり。
+
+| runtime | SKILL.md 内の `${CLAUDE_PLUGIN_ROOT}` | シェルの環境変数 | Skill のパスをモデルへ渡すか |
+|---|---|---|---|
+| Claude Code | プラグインルートの絶対パスへ展開する | 置かない | 渡す（絶対パス） |
+| Codex | 展開しない | 置かない | 渡す（絶対パス） |
+| Kiro CLI | 展開しない | 置かない | 渡す（`.kiro/skills/<Skill 名>` の相対パス） |
+
+3 を挟むのは Kiro CLI のためである。相対パスのまま持ち回ると、`cross-review` のように
+途中で worktree へ移る Skill で参照が外れる。
+
 scripts は `plugins/ndf-shared/scripts` から `plugins/ndf-{runtime}/scripts` へ同期する。
 
 ## MCP Plugin 配布仕様
