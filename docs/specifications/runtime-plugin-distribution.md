@@ -56,9 +56,13 @@ Kiro CLI へ配っており、Kiro にはプラグインルートを示す環境
 
 Skill ディレクトリ起点で書いた Skill は、次の順で `SKILL_DIR` を決める。
 
-1. `${CLAUDE_PLUGIN_ROOT}/skills/<Skill 名>` が存在すればそれを採る
-2. 無ければ、runtime が Skill の場所として渡したディレクトリを使う
+1. `${CLAUDE_PLUGIN_ROOT}` が空でなければ `${CLAUDE_PLUGIN_ROOT}/skills/<Skill 名>` を採る
+2. 空なら、runtime が Skill の場所として渡したディレクトリを使う
 3. どちらの場合も `cd … && pwd` で絶対パスへ直してから使う
+
+1 で見るのは変数が空かどうかであって、ディレクトリの存在ではない。展開されない runtime では
+`${CLAUDE_PLUGIN_ROOT}/skills/<Skill 名>` が `/skills/<Skill 名>` になるため、存在で分岐すると
+実行環境のルートに同名のディレクトリがあったときに誤判定する。
 
 根拠にした実測（Claude Code 2.1.250 / Codex CLI 0.149.0）は次のとおり。
 
