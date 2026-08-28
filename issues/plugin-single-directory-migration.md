@@ -60,7 +60,7 @@
 
 | CLI | 版数 | 確認した事実 |
 | --- | --- | --- |
-| Kiro CLI | 2.19.1 | 5〜9 |
+| Kiro CLI | 2.19.1 | 5〜9、19（Kiro CLI 側） |
 | Codex CLI | 0.148.0 | 1〜3 |
 | Codex CLI | 0.149.0 | 16、17、19（Codex 側）、21 |
 | Claude Code | 2.1.240 | 10〜12 |
@@ -70,14 +70,14 @@
 
 ## 受け入れ条件
 
-- [ ] Skill の実体が、プラグインごとに 1 ディレクトリだけ存在する（`git ls-files` で同名 Skill の重複が出ない）。例外は設けない（Task 3 で Codex の `skills` 配列が効くと分かったため、複製は要らない）
-- [ ] `scripts/build-runtime-plugins.sh` に実行時パスの書き換え処理が残っていない（`rewrite_codex_skill_paths` / `rewrite_kiro_skill_paths` の定義と呼び出しが無い）
-- [ ] Claude Code で `claude plugin validate` が全プラグインとマーケットプレイス定義で成功する
-- [ ] Codex で全プラグインを導入でき、Skill 数が導入前と一致する
-- [ ] Kiro CLI で installer を実行し、`.kiro/skills/` の symlink 数と `kiro-cli chat` が認識する Skill 数が導入前と一致する
-- [ ] `scripts/validate-runtime-plugins.sh` が成功する
-- [ ] 実行時パスを参照する Skill が、Claude Code / Codex / Kiro CLI のいずれでも参照先へ到達できる
-- [ ] どの manifest にも載らない 4 個の Skill が、どのランタイムの公開セットにも現れない（Claude Code 27 / Codex 25 / Kiro 26 が変わらない）
+- [x] Skill の実体が、プラグインごとに 1 ディレクトリだけ存在する（`git ls-files` で同名 Skill の重複が出ない）。例外は設けない（Task 3 で Codex の `skills` 配列が効くと分かったため、複製は要らない）
+- [x] `scripts/build-runtime-plugins.sh` に実行時パスの書き換え処理が残っていない（`rewrite_codex_skill_paths` / `rewrite_kiro_skill_paths` の定義と呼び出しが無い）
+- [x] Claude Code で `claude plugin validate` が全プラグインとマーケットプレイス定義で成功する
+- [x] Codex で全プラグインを導入でき、Skill 数が導入前と一致する
+- [x] Kiro CLI で installer を実行し、`.kiro/skills/` の symlink 数と `kiro-cli chat` が認識する Skill 数が導入前と一致する
+- [x] `scripts/validate-runtime-plugins.sh` が成功する
+- [x] 実行時パスを参照する Skill が、Claude Code / Codex / Kiro CLI のいずれでも参照先へ到達できる
+- [x] どの manifest にも載らない 4 個の Skill が、どのランタイムの公開セットにも現れない（Claude Code 27 / Codex 25 / Kiro 26 が変わらない）
 
 ## 採用する構成
 
@@ -340,11 +340,11 @@ symlink が使えないことは Task 4 の構成には影響しないが、Code
 
 ## 完了の定義
 
-- [ ] 受け入れ条件をすべて満たし、条件ごとに検証コマンドと結果が対応している
-- [ ] `bash scripts/validate-runtime-plugins.sh` が、移動を伴う各タスクのコミットで成功する
-- [ ] `bash scripts/runtime-smoke-test.sh` を 3 ランタイムで実行し、成功する
-- [ ] `python3 scripts/check-markdown-links.py` が成功する
-- [ ] 残リスクの 7 項目それぞれについて、確認済みか未確認かが本文に反映されている（Task 3 で 3 項目を確認済みへ更新した）
+- [x] 受け入れ条件をすべて満たし、条件ごとに検証コマンドと結果が対応している
+- [x] `bash scripts/validate-runtime-plugins.sh` が、移動を伴う各タスクのコミットで成功する
+- [x] `bash scripts/runtime-smoke-test.sh` を 3 ランタイムで実行し、成功する
+- [x] `python3 scripts/check-markdown-links.py` が成功する
+- [x] 残リスクの 7 項目それぞれについて、確認済みか未確認かが本文に反映されている（Task 3 で 3 項目を確認済みへ更新した）
 
 ## 完了サマリ
 
