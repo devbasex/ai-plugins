@@ -50,12 +50,21 @@
 | 16 | Codex 用マニフェストの `skills` に配列を書くと、配列に載せた Skill だけが公開される | `skills/` に 3 個（`alpha` / `beta` / `gamma`）を置き、`skills` に `alpha` と `beta` だけを列挙した検証用プラグインを導入。キャッシュには 3 個とも展開されるが、`codex exec` に列挙させると `codexprobe:alpha` と `codexprobe:beta` の 2 個だけが出た |
 | 17 | Codex は Skill ディレクトリに張った symlink を読まない | `.codex-plugin/skills/` に symlink を張り `skills` でそのディレクトリを指した検証用プラグインを導入。キャッシュへ複製する時点で symlink が落ち（複製先のディレクトリが空）、Skill は 1 個も公開されなかった |
 | 18 | Claude Code はマニフェストの `hooks` フィールドからのパス指定を読む | `.claude-plugin/plugin.json` に `"hooks": "./hooks/claude.json"` を書いた検証用プラグインで SessionStart フックが発火。既定パス `hooks/hooks.json` の対照プラグインも同時に発火した |
-| 19 | 3 ランタイムとも、Skill が実行するシェルにプラグインルートの環境変数を置かない | 検証用 Skill から `echo` させ、`CLAUDE_PLUGIN_ROOT` / `CODEX_PLUGIN_ROOT` / `PLUGIN_ROOT` がいずれも空。Agent Plugins 1.0.0 §9.1 が `PLUGIN_ROOT` を義務づけるのは MCP サーバのサブプロセスに対してだけである |
+| 19 | Claude Code と Codex は、Skill が実行するシェルにプラグインルートの環境変数を置かない | 検証用 Skill から `echo` させ、`CLAUDE_PLUGIN_ROOT` / `CODEX_PLUGIN_ROOT` / `PLUGIN_ROOT` がいずれも空。Agent Plugins 1.0.0 §9.1 が `PLUGIN_ROOT` を義務づけるのは MCP サーバのサブプロセスに対してだけである。**Kiro CLI は未確認**（この環境の kiro-cli が未ログインで `kiro-cli chat` を実行できない） |
 | 20 | Claude Code は SKILL.md 内の `${CLAUDE_PLUGIN_ROOT}` をプラグインルートの絶対パスへ置き換えてからモデルへ渡す | 同じ検証用 Skill で確認。シングルクォートの中でも置き換わる。`${CLAUDE_PLUGIN_ROOT:-}` の形は置き換わらない |
 | 21 | Codex はモデルへ Skill ディレクトリの絶対パスを渡す | `codex exec` に Skill を読ませ、その SKILL.md が置かれたディレクトリを答えさせて確認 |
 
-Kiro CLI は 2.19.1、Codex CLI は 0.148.0（事実 16〜21 と 20 は 0.149.0）、Claude Code は 2.1.240
-（事実 18〜21 は 2.1.250）で確認した。
+確認に使った版数は事実ごとに次のとおり。
+
+| CLI | 版数 | 確認した事実 |
+| --- | --- | --- |
+| Kiro CLI | 2.19.1 | 5〜9 |
+| Codex CLI | 0.148.0 | 1〜3 |
+| Codex CLI | 0.149.0 | 16、17、19（Codex 側）、21 |
+| Claude Code | 2.1.240 | 10〜12 |
+| Claude Code | 2.1.250 | 18、19（Claude Code 側）、20 |
+
+事実 4 は Codex バイナリの走査、事実 13〜15 はリポジトリの走査による。
 
 ## 受け入れ条件
 
@@ -123,8 +132,12 @@ Skill から参照するパスを、プラグインルート起点から Skill �
 | `fix` | `${PLUGIN_ROOT}/skills/fix/scripts/` | Skill ディレクトリ直下の `scripts/` |
 | `cross-review` | `${PLUGIN_ROOT}/skills/cross-review/scripts` | Skill ディレクトリ直下の `scripts/` |
 | `cross-refactoring` | `${PLUGIN_ROOT}/skills/cross-refactoring/scripts` と `${PLUGIN_ROOT}/skills/cross-review/scripts/lib` | Skill ディレクトリ直下の `scripts/` と `../cross-review/scripts/lib` |
-| `statusline` | `${PLUGIN_ROOT}/scripts/statusline-switch.sh` | `${CLAUDE_PLUGIN_ROOT}` のまま（プラグインルート直下の `scripts/` を呼ぶ。Claude Code と Kiro CLI へ配っており、Kiro 向けの書き換えだけが残る） |
-| `official-skills-autoloader` | `${CLAUDE_PLUGIN_ROOT}/scripts/` | 変更しない（Claude Code 専用の Skill） |
+| `statusline` | `${PLUGIN_ROOT}/scripts/statusline-switch.sh` | `$SKILL_DIR/../../scripts/statusline-switch.sh`（Task 4 で行う） |
+| `official-skills-autoloader` | `${CLAUDE_PLUGIN_ROOT}/scripts/` | 変更しない（Claude Code だけへ配る Skill で、書き換えの対象にも入っていない） |
+
+`statusline` はプラグインルート直下の `scripts/` を呼ぶ点が他と違う。Claude Code と Kiro CLI の
+両方へ配っており（`manifests/kiro-skills.txt` に載っている）、Kiro 向けの書き換えだけが残るため、
+受け入れ条件 2 を満たすにはこの Skill も Skill ディレクトリ起点へ変える必要がある。
 
 ## 修正対象
 
@@ -182,9 +195,14 @@ PR4 は Task 3 の実測結果で構成が変わるため、PR3 の merge 後に
 ### Task 2: 実行時パス参照を Skill 起点へ変える
 
 - **対象ファイル:** `plugins/ndf-shared/skills/{fix,cross-review,cross-refactoring}/` 配下の SKILL.md と docs
-- **変更内容:** プラグインルート起点の参照を Skill ディレクトリ起点へ書き換える。Claude Code 専用の 2 つは変更しない
+- **変更内容:** プラグインルート起点の参照を Skill ディレクトリ起点へ書き換える
 - **満たす受け入れ条件:** 7
 - **進め方:** 書き換え後、3 ランタイムそれぞれで対象スクリプトが起動することを確認してから Task 3 へ進む
+
+このタスクは Skill 直下の `scripts/` を呼ぶ 3 個を対象に完了した（#142）。`statusline` は
+プラグインルート直下の `scripts/` を呼ぶため参照の形が違い、Task 4 で ndf を移すのと同じ
+コミットで変える。`official-skills-autoloader` は Claude Code だけへ配っており、書き換えの
+対象にも入っていないため変更しない。
 
 ### Task 3: ndf の統合が前提とする 3 つの仕様を実測する
 
@@ -218,9 +236,15 @@ symlink が使えないことは Task 4 の構成には影響しないが、Code
 
 ### Task 4: ndf を単一ディレクトリへ移す
 
-- **対象ファイル:** `plugins/ndf-*/`、`.claude-plugin/marketplace.json`、`.agents/plugins/marketplace.json`、`scripts/validate-runtime-plugins.sh`、`scripts/check-skill-frontmatter.py`、`tests/runtime-smoke/adapters/{claude,codex,kiro}.sh`、`tests/runtime-smoke/assertions/assert-{hook-fixtures,kiro-agent}.sh`、`plugins/playwright-kit/skills/{playwright-kit-ops,playwright-evidence}/`、`docs/specifications/ndf-skill-inventory.md`、`docs/ndf-plugin-reference.md`
+- **対象ファイル:** `plugins/ndf-*/`、`.claude-plugin/marketplace.json`、`.agents/plugins/marketplace.json`、`scripts/validate-runtime-plugins.sh`、`scripts/check-skill-frontmatter.py`、`tests/runtime-smoke/adapters/{claude,codex,kiro}.sh`、`tests/runtime-smoke/assertions/assert-{hook-fixtures,kiro-agent}.sh`、`plugins/ndf-shared/skills/statusline/SKILL.md`、`plugins/playwright-kit/skills/{playwright-kit-ops,playwright-evidence}/`、`docs/specifications/ndf-skill-inventory.md`、`docs/ndf-plugin-reference.md`
 - **変更内容:** `plugins/ndf/` を作り、配布 Skill 27 個を `skills/` の実体として置く。どの manifest にも載らない 4 個（`google-auth` / `google-drive` / `ml-model-structure` / `skill-stats`）は `optional-skills/` へ移し、削除はしない。`scripts/` も実体として置く。hook 定義は Task 3 の結果に従って配置し、各マニフェストから参照する。Kiro 用の installer・エージェント定義・プロンプトを `dev.kiro/` へ移す。2 つのマーケットプレイス定義の ndf のエントリを新しいパスへ向ける。検証スクリプトの ndf 向けの検査と、`plugins/ndf-kiro/install.sh` や `plugins/ndf-claude/scripts/` を直に指している smoke test の参照も同じコミットで新しいパスへ向ける。`optional-skills/` へ移した 4 個を指している参照も同じコミットで追随させる。`scripts/check-skill-frontmatter.py` は既定で `plugins/*-shared/skills` を走査するため、`plugins/*/skills` と `plugins/ndf/optional-skills` を見る形へ変える（走査先が消えると CI の `runtime-plugin-validate` が終了コード 2 で落ちる）。`playwright-kit` の `playwright-kit-ops` と `playwright-evidence` は `google-auth` の置き場所を `plugins/ndf-shared/skills/google-auth/scripts` として案内しており、`docs/specifications/ndf-skill-inventory.md` は `skill-stats` を同じ形で指している
-- **満たす受け入れ条件:** 1、3、4、5、6、8
+あわせて `statusline` の参照を `$SKILL_DIR/../../scripts/statusline-switch.sh` へ変える。
+`plugins/ndf/skills/statusline/../../scripts` は移動後のプラグインルート直下を指し、Kiro CLI が
+`.kiro/skills/` へ張った symlink 越しでも解決先を経由して届く。これで `rewrite_kiro_skill_paths`
+の対象が 0 になり、Task 7 は削除だけで済む。Task 2 で入れた SKILL.md のコメントが Kiro CLI に
+ついて未確認の事実（事実 19）を実測として書いているので、同じコミットで表現を直す。
+
+- **満たす受け入れ条件:** 1、3、4、5、6、7、8
 - **進め方:** Task 2 と Task 3 の完了を前提とする。移動後に 3 ランタイムで導入検証を行い、Skill 数が Claude Code 27 / Codex 25 / Kiro 26 のままで、`optional-skills/` の 4 個がどこにも現れないことを確かめる。`bash scripts/validate-runtime-plugins.sh` が成功することも同じコミットで確かめる
 
 ### Task 5: MCP プラグイン 10 個を単一ディレクトリへ移す
@@ -242,7 +266,7 @@ symlink が使えないことは Task 4 の構成には影響しないが、Code
 - **対象ファイル:** `scripts/build-runtime-plugins.sh`、`scripts/validate-runtime-plugins.sh`、`.github/workflows/`
 - **変更内容:** ビルドの役割を「マニフェストの `skills` 配列を `manifests/*-skills.txt` から生成する」ことに絞る。ディレクトリの複製処理と実行時パスの書き換え処理を取り除く。検証スクリプトからは、移行の途中で旧構成を受け付けるために残した分岐を落とす
 - **満たす受け入れ条件:** 2、6
-- **進め方:** 参照パスの追随は Task 1・4・5 で済んでいるため、ここでは縮小だけを行う。生成対象が縮むため、`--check` の対象はマニフェストが中心になる。Task 3 で `skills` 配列が効くと分かったので、Codex 向け Skill ディレクトリの構築は要らない。`rewrite_codex_skill_paths` は Task 2 で削除済みで、残るのは `statusline` を書き換える `rewrite_kiro_skill_paths` だけである。受け入れ条件 2 を満たすには `statusline` の参照も Skill ディレクトリ起点（`$SKILL_DIR/../../scripts/`）へ変える必要がある
+- **進め方:** 参照パスの追随は Task 1・2・4・5 で済んでいるため、ここでは縮小だけを行う。生成対象が縮むため、`--check` の対象はマニフェストが中心になる。Task 3 で `skills` 配列が効くと分かったので、Codex 向け Skill ディレクトリの構築は要らない。`rewrite_codex_skill_paths` は Task 2 で、`rewrite_kiro_skill_paths` の最後の対象は Task 4 で消えているため、ここでは残った関数と呼び出しを落とすだけになる
 
 ### Task 8: ドキュメントを更新する
 
