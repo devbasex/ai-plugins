@@ -28,10 +28,8 @@ ai-plugins/
 ├── .claude-plugin/
 │   └── marketplace.json          # Claude Codeマーケットプレイスメタデータ
 ├── plugins/
-│   ├── ndf-shared/               # NDF共通ソース
-│   ├── ndf-claude/               # Claude Code版NDF
-│   ├── ndf-codex/                # Codex版NDF
-│   ├── ndf-kiro/                 # Kiro CLI版NDF
+│   ├── ndf/                      # NDF（3ランタイム共通の単一ディレクトリ）
+│   ├── playwright-kit/           # playwright-kit（3ランタイム共通の単一ディレクトリ）
 │   └── mcp/
 │       ├── shared/               # MCPプラグイン共通ソース
 │       ├── claude/               # Claude Code版MCPプラグイン

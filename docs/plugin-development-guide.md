@@ -16,13 +16,13 @@
   "plugins": [
     {
       "name": "ndf",
-      "source": "./plugins/ndf-claude"
+      "source": "./plugins/ndf"
     }
   ]
 }
 ```
 
-Codex 用 marketplace では同じ plugin 名 `ndf` の source を `./plugins/ndf-codex` にします。Kiro CLI 向け配布物は `plugins/ndf-kiro/` で管理します。
+Codex 用 marketplace も同じ plugin 名 `ndf` の source に `./plugins/ndf` を指定します。Kiro CLI へは `plugins/ndf/dev.kiro/install.sh` で導入します。
 
 ## プラグイン構造
 
@@ -93,8 +93,8 @@ plugins/{plugin-name}/
 
 1. **既存プラグインを参考に構造を理解**
    ```bash
-   ls -la plugins/ndf-claude/
-   cat plugins/ndf-claude/.claude-plugin/plugin.json
+   ls -la plugins/ndf/
+   cat plugins/ndf/.claude-plugin/plugin.json
    ```
 
 2. **ディレクトリ構造を作成**

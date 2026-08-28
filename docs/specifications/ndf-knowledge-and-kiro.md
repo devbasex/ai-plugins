@@ -4,11 +4,11 @@
 
 NDF の知識配置、Serena MCP 分離、Kiro CLI 対応に関する確定仕様。
 
-Skill の挙動仕様は本ディレクトリでは管理しない。Skill は `plugins/ndf-shared/skills/*/SKILL.md` を編集元とし、Kiro では build 済みの `plugins/ndf-kiro/skills/*/SKILL.md` を配布物として使う。
+Skill の挙動仕様は本ディレクトリでは管理しない。Skill の実体は `plugins/ndf/skills/*/SKILL.md` の 1 箇所で、Kiro CLI はその symlink を読む。
 
 ## 仕様化の扱い
 
-本仕様は、完了済み issues / plans の内容を統合した現行仕様である。元の `issues/*` ファイルは完了後に削除されるため、マージ後の正は本ファイル、`AGENTS.md`、`KIRO.md`、`plugins/ndf-claude/README.md`、`docs/ndf-plugin-reference.md` とする。過去の検討履歴が必要な場合は、この仕様を追加した commit の git 履歴を参照する。
+本仕様は、完了済み issues / plans の内容を統合した現行仕様である。元の `issues/*` ファイルは完了後に削除されるため、マージ後の正は本ファイル、`AGENTS.md`、`KIRO.md`、`plugins/ndf/README.md`、`docs/ndf-plugin-reference.md` とする。過去の検討履歴が必要な場合は、この仕様を追加した commit の git 履歴を参照する。
 
 ## NDF 知識構造
 
@@ -29,7 +29,7 @@ AI エージェント向けの知識は以下の層で管理する。
 
 Kiro CLI 用設定は `.kiro/agents/ndf.json` で管理する。agent 設定は `AGENTS.md` と `README.md` を `file://` resource として読み込む。`.kiro/skills/**/SKILL.md` の `skill://` 指定は組み込み agent の読み込み対象と重複するため持たない。常時適用したい指示は agent 選択に依存しない `.kiro/steering/ndf-policies.md` へ置く。
 
-Kiro CLI では `plugins/ndf-kiro/install.sh` が `plugins/ndf-kiro/skills/` から `.kiro/skills/` への symlink、`.kiro/steering/ndf-policies.md`、`.kiro/agents/ndf.json` を生成する。`ndf-policies` は steering の生成元としてのみ使い、`.kiro/skills/` へは symlink しない。Kiro は `.kiro/skills/*/SKILL.md` と `.kiro/steering/**/*.md` の両方を文脈へ読み込むため、両方に置くと同じ内容が 2 回注入されるからである。manifest（`plugins/ndf-shared/manifests/kiro-skills.txt`）には steering の生成元として残す。`--scope global` を指定した場合の生成先は `~/.kiro/` 配下になる。生成した agent は既定にならないため、`--set-default` を指定したときだけ `kiro-cli agent set-default ndf` を実行する。`kiro-cli` は workspace agent を cwd 配下の `.kiro/agents/` からのみ検出するため、この呼び出しは導入先（`workspace` なら `--project` のパス、`global` なら `$HOME`）で行い、`agent list` で反映を検証する（`set-default` は agent 未検出でも終了コード 0 を返すため）。`agentSpawn` hook は初期化時の案内に使い、`--with-slack` 指定時のみ `stop` hook 相当の Slack 通知を有効化する。Kiro の stop hook payload に `assistant_response` が含まれる場合、`plugins/ndf-kiro/scripts/slack-notify.js` は transcript よりも `assistant_response` を優先して要約に使う。
+Kiro CLI では `plugins/ndf/dev.kiro/install.sh` が `plugins/ndf/skills/` から `.kiro/skills/` への symlink、`.kiro/steering/ndf-policies.md`、`.kiro/agents/ndf.json` を生成する。`ndf-policies` は steering の生成元としてのみ使い、`.kiro/skills/` へは symlink しない。Kiro は `.kiro/skills/*/SKILL.md` と `.kiro/steering/**/*.md` の両方を文脈へ読み込むため、両方に置くと同じ内容が 2 回注入されるからである。manifest（`plugins/ndf/manifests/kiro-skills.txt`）には steering の生成元として残す。`--scope global` を指定した場合の生成先は `~/.kiro/` 配下になる。生成した agent は既定にならないため、`--set-default` を指定したときだけ `kiro-cli agent set-default ndf` を実行する。`kiro-cli` は workspace agent を cwd 配下の `.kiro/agents/` からのみ検出するため、この呼び出しは導入先（`workspace` なら `--project` のパス、`global` なら `$HOME`）で行い、`agent list` で反映を検証する（`set-default` は agent 未検出でも終了コード 0 を返すため）。`agentSpawn` hook は初期化時の案内に使い、`--with-slack` 指定時のみ `stop` hook 相当の Slack 通知を有効化する。Kiro の stop hook payload に `assistant_response` が含まれる場合、`plugins/ndf/scripts/slack-notify.js` は transcript よりも `assistant_response` を優先して要約に使う。
 
 Codex 連携は MCP サーバではなく `/ndf:external-ai` skill と `corder` エージェント経由の Codex CLI 直接実行を標準とする。Kiro 用 `--with-codex` は Kiro セッションから Codex CLI を扱う場合の補助設定である。
 
