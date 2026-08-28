@@ -137,6 +137,28 @@ Skill から参照するパスを、プラグインルート起点から Skill �
 - `docs/specifications/ndf-skill-inventory.md` / `docs/ndf-plugin-reference.md`（未配布 Skill のパス参照）
 - `AGENTS.md` / `CLAUDE.md` / `KIRO.md` / `README.md`
 
+## PR 分割計画
+
+タスクを 1 つずつ PR に分け、release ブランチへ順に取り込む。個別 PR は `/ndf:cross-review` で
+codex と gemini の両方が `APPROVE` に収束してから merge する。
+
+| PR # | branch 名 | タスク | 依存 | 並行可否 |
+| --- | --- | --- | --- | --- |
+| 1 | `feature/single-dir-playwright-kit` | Task 1: playwright-kit を単一ディレクトリへ | なし | ○ |
+| 2 | `feature/single-dir-runtime-paths` | Task 2: 実行時パス参照を Skill 起点へ | なし | ○ |
+| 3 | `feature/single-dir-probe` | Task 3: ndf の統合が前提とする 3 つの仕様を実測 | なし | ○ |
+| 4 | `feature/single-dir-ndf` | Task 4: ndf を単一ディレクトリへ | PR2、PR3 | × |
+| 5 | `feature/single-dir-mcp` | Task 5: MCP プラグイン 10 個を単一ディレクトリへ | PR1 | × |
+| 6 | `feature/single-dir-marketplace` | Task 6: マーケットプレイス定義を 1 つへ統合 | PR1、PR4、PR5 | × |
+| 7 | `feature/single-dir-build` | Task 7: ビルドと検証を縮小 | PR6 | × |
+| 8 | `feature/single-dir-docs` | Task 8: ドキュメントを更新 | PR7 | × |
+
+release branch: `release/single-dir`
+base branch: `main`
+
+PR4 は Task 3 の実測結果で構成が変わるため、PR3 の merge 後に着手する。PR5 は PR1 が
+検証スクリプトへ入れる新旧両対応の分岐に乗るため、PR1 の merge 後に着手する。
+
 ## タスク分解
 
 各タスクの完了時点で、対象プラグインが 3 ランタイムで導入できる状態にする。移動が済んでいないプラグインの導入経路も、同じ時点で保つ。
