@@ -2,9 +2,9 @@
 
 ## 概要
 
-AI Plugins marketplace は、Claude Code / Codex / Kiro CLI 向けに runtime 別の plugin 配布物を提供する。
+AI Plugins marketplace は、Claude Code / Codex / Kiro CLI へ同じ plugin を配布する。
 
-NDF plugin と playwright-kit plugin は、3 runtime 分をプラグインごとに 1 ディレクトリへまとめる。Skill の実体は `skills/` の 1 箇所だけで、どの runtime へ配るかは `manifests/*-skills.txt` と各 manifest の `skills` 配列が決める。runtime 固有のファイルは名前空間ディレクトリへ分ける。MCP plugin は runtime ごとの配布ディレクトリを持つ構成を当面維持する。
+NDF plugin と playwright-kit plugin は、3 runtime 分をプラグインごとに 1 ディレクトリへまとめる。Skill の実体は `skills/` の 1 箇所だけで、どの runtime へ配るかは `manifests/*-skills.txt` と各 manifest の `skills` 配列が決める。runtime 固有のファイルは名前空間ディレクトリへ分ける。MCP plugin も同じく 1 ディレクトリにまとめ、サーバ定義は `.mcp.json` の 1 箇所だけを持つ。
 
 ## 対象範囲
 
@@ -97,9 +97,10 @@ stdio サーバに `type` / `command` / `args` / `env` / `cwd` しか許さず�
 
 各 runtime で plugin name は同一にする。例: `mcp-bigquery`、`mcp-redash`、`mcp-serena`。
 
-Claude 用配布物は `.claude-plugin/plugin.json` と `.mcp.json` を持つ。Codex 用配布物は `.codex-plugin/plugin.json` と `.mcp.json` を持つ。Kiro 用配布物は `.mcp.json` と `install.sh` を持つ。
+配布ディレクトリは `.claude-plugin/plugin.json`、`.codex-plugin/plugin.json`、`.mcp.json`、
+`dev.kiro/install.sh` を持つ。hook や Skill を持つプラグインは `hooks/` と `skills/` も持つ。
 
-Kiro MCP installer は対象 project の `.mcp.json` へ MCP server 設定を merge する。hooks や skills を持つ MCP plugin では、必要に応じて `.kiro/agents/default.json` や `.kiro/skills/` も更新する。
+Kiro MCP installer は対象 project の `.mcp.json` へ MCP server 設定を merge する。hooks や skills を持つ MCP plugin では、必要に応じて `.kiro/agents/default.json` や `.kiro/skills/` も更新する。hook の command に含まれるプラグインルートのプレースホルダは、installer が張った symlink の絶対パスへ置き換える。
 
 NDF installer が生成する agent は `.kiro/agents/ndf.json` であり、MCP installer が更新する `.kiro/agents/default.json` とは別である。NDF と Kiro MCP plugin を併用する場合、MCP server 設定は `ndf.json` へ写す必要がある（`plugins/ndf/README.md`「旧バージョンからの移行」）。MCP installer 側の出力先統一は未対応。
 
@@ -116,19 +117,26 @@ Kiro CLI は repository root の marketplace manifest ではなく、`plugins/nd
 
 ## Build / Validation
 
-runtime 配布物の同期は `scripts/build-runtime-plugins.sh` で行う。
+生成物の同期は `scripts/build-runtime-plugins.sh` で行う。
 
 ```bash
 bash scripts/build-runtime-plugins.sh
 bash scripts/build-runtime-plugins.sh --check
 ```
 
-`--check` は生成先と shared source の差分を比較し、drift がある場合に非 0 で終了する。
+生成対象は 2 つだけである。
 
-`.claude-plugin/marketplace.json` と `plugins/<family>-codex/.codex-plugin/plugin.json` は生成物では
-なく手で更新する。この 2 つは build の対象外で drift 検査に掛からないため、版数と Skill 数は
-`validate-runtime-plugins.sh` の突き合わせ検査で担保する。description から Skill 数を読み取れない
-場合もエラーとして扱う（記述を消すことで検査が素通りするのを防ぐ）。
+| 生成物 | 対象 | 内容 |
+|---|---|---|
+| `plugins/<family>/skills/<Skill 名>/agents/openai.yaml` | Skill を配るプラグイン | Codex の暗黙起動を抑える policy。codex 用 manifest に載り frontmatter が `disable-model-invocation: true` の Skill だけ |
+| `plugins/mcp/<plugin-name>/dev.kiro/install.sh` | MCP plugin | Kiro CLI 向け installer。内容はプラグイン名に依存しない |
+
+`--check` は生成先との差分を比較し、drift がある場合に非 0 で終了する。
+
+marketplace 定義と各 plugin manifest は生成物ではなく手で更新する。build の対象外で drift 検査に
+掛からないため、版数と Skill 数、`skills` 配列と manifest の一致は `validate-runtime-plugins.sh` の
+突き合わせ検査で担保する。description から Skill 数を読み取れない場合もエラーとして扱う
+（記述を消すことで検査が素通りするのを防ぐ）。
 
 総合検証は `scripts/validate-runtime-plugins.sh` で行う。
 
@@ -142,9 +150,9 @@ bash scripts/validate-runtime-plugins.sh
 |---|---|
 | 生成物 | `build-runtime-plugins.sh --check` |
 | JSON | marketplace、plugin manifest、`.mcp.json` の parse |
-| marketplace | Claude / Codex source path と runtime manifest の存在 |
-| Skill manifest | shared skill と runtime skill の存在 |
-| MCP runtime | shared MCP plugin に対応する claude / codex / kiro 配布先の存在 |
+| marketplace | source path と plugin manifest の存在、Codex が要求する `policy` / `category` / `interface` |
+| Skill manifest | manifest に載る Skill の実在と、`skills/` にあってどの manifest にも載らない Skill の検出 |
+| MCP | `.mcp.json`、両 manifest、`dev.kiro/install.sh` の存在と、Codex manifest の `mcpServers` 指定 |
 | Claude Code | `claude plugin validate` が使える環境では NDF と marketplace を検証 |
 | Kiro CLI | NDF installer と MCP installer の `--dry-run` |
 | 版数・Skill 数 | Claude 版 `plugin.json` の `version` を基準に、Codex 版 `version`、marketplace と両 plugin.json の description 内 `(vX.Y.Z)`、description の Skill 数と `manifests/<runtime>-skills.txt` の実数を突き合わせる |
@@ -152,7 +160,7 @@ bash scripts/validate-runtime-plugins.sh
 
 ## CI
 
-`.github/workflows/runtime-plugin-validate.yml` は runtime 配布物の build check、manifest validation、Markdown link check を実行する。
+`.github/workflows/runtime-plugin-validate.yml` は生成物の build check、Skill frontmatter check、manifest validation、Markdown link check を実行する。
 
 `.github/workflows/runtime-plugin-smoke.yml` は runtime ごとの非認証 container smoke test を実行する。
 
@@ -199,7 +207,7 @@ Kiro CLI がルートマニフェストを読むようになった時点で、`d
 - `.mcp.json` と README では `${ENV_NAME}` placeholder を使い、secret 実値を書かない。
 - runtime smoke test は host の credential directory を mount しない。
 - Kiro installer と MCP installer は project 配下の設定ファイルだけを更新する。
-- Codex / Claude / Kiro の hook script は runtime 別配布物に分離し、payload 差異を混同しない。
+- Codex / Claude の hook 定義は `hooks/codex.json` と `hooks/claude.json` に分け、payload 差異を混同しない。
 
 ## 運用
 
@@ -213,28 +221,28 @@ NDF Skill を変更する場合:
 MCP plugin を変更する場合:
 
 1. `plugins/mcp/<plugin-name>/` を編集する。
-2. `bash scripts/build-runtime-plugins.sh` を実行して runtime 配布先へ反映する。
+2. `bash scripts/build-runtime-plugins.sh` を実行する（Kiro installer の生成）。
 3. `bash scripts/validate-runtime-plugins.sh` を実行する。
 
-runtime 配布先を直接編集した場合、`build-runtime-plugins.sh --check` で shared source との drift として検出される。例外的な runtime 固有ファイルは build script の生成ルールに含める。
+生成物（`agents/openai.yaml` と `dev.kiro/install.sh`）を直接編集した場合、
+`build-runtime-plugins.sh --check` で drift として検出される。
 
 ## テスト観点
 
 | 観点 | 確認方法 |
 |---|---|
-| shared source と runtime 配布物の同期 | `bash scripts/build-runtime-plugins.sh --check` |
+| 生成物の同期 | `bash scripts/build-runtime-plugins.sh --check` |
 | marketplace / manifest / MCP config | `bash scripts/validate-runtime-plugins.sh` |
 | Claude Code install smoke | `bash scripts/runtime-smoke-test.sh --runtime claude` |
 | Codex install smoke | `bash scripts/runtime-smoke-test.sh --runtime codex` |
 | Kiro CLI install smoke | `bash scripts/runtime-smoke-test.sh --runtime kiro` |
-| 旧パス残存 | docs / scripts / plugin 配布物に旧 `plugins/ndf` や `plugins/mcp-*` 配置を案内する参照が残っていないこと |
+| 旧パス残存 | docs / scripts / plugin に `plugins/<family>-{shared,claude,codex,kiro}` や `plugins/mcp/{shared,claude,codex,kiro}` を案内する参照が残っていないこと |
 
 ## 関連リンク
 
 - [Runtime Plugin Container Smoke Test 仕様](runtime-plugin-container-smoke.md)
 - [NDF 知識構造・Kiro CLI 仕様](ndf-knowledge-and-kiro.md)
 - [NDF Plugin リファレンス](../ndf-plugin-reference.md)
-- [NDF Claude README](../../plugins/ndf/README.md)
-- [NDF Codex README](../../plugins/ndf/README.md)
-- [NDF Kiro README](../../plugins/ndf/README.md)
-- [NDF shared README](../../plugins/ndf/README.md)
+- [NDF プラグイン README](../../plugins/ndf/README.md)
+- [playwright-kit プラグイン README](../../plugins/playwright-kit/README.md)
+- [Agent Plugins 仕様](https://github.com/agentplugins/agent-plugins-spec)
