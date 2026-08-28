@@ -53,6 +53,8 @@
 | 19 | Claude Code と Codex は、Skill が実行するシェルにプラグインルートの環境変数を置かない | 検証用 Skill から `echo` させ、`CLAUDE_PLUGIN_ROOT` / `CODEX_PLUGIN_ROOT` / `PLUGIN_ROOT` がいずれも空。Agent Plugins 1.0.0 §9.1 が `PLUGIN_ROOT` を義務づけるのは MCP サーバのサブプロセスに対してだけである。**Kiro CLI は未確認**（この環境の kiro-cli が未ログインで `kiro-cli chat` を実行できない） |
 | 20 | Claude Code は SKILL.md 内の `${CLAUDE_PLUGIN_ROOT}` をプラグインルートの絶対パスへ置き換えてからモデルへ渡す | 同じ検証用 Skill で確認。シングルクォートの中でも置き換わる。`${CLAUDE_PLUGIN_ROOT:-}` の形は置き換わらない |
 | 21 | Codex はモデルへ Skill ディレクトリの絶対パスを渡す | `codex exec` に Skill を読ませ、その SKILL.md が置かれたディレクトリを答えさせて確認 |
+| 22 | Codex は `.codex-plugin/plugin.json` の `mcpServers` が指すファイルを、`{"mcpServers": {…}}` の形でも読む | 検証用プラグインで `codex mcp list` にサーバが現れることを確認。`envFile` のような仕様外のキーがあっても登録される |
+| 23 | Agent Plugins 1.0.0 の `mcp.json` は stdio サーバに `type` / `command` / `args` / `env` / `cwd` しか許さない | スキーマの `additionalProperties: false`。MCP プラグイン 10 個のうち 6 個が使う `envFile` を表現できない |
 
 確認に使った版数は事実ごとに次のとおり。
 
@@ -112,8 +114,11 @@ Agent Plugins 形式のルートマニフェストは `skills/` を全件公開�
 | --- | --- | --- | --- |
 | `playwright-kit` | 置く | 置かない | Skill 4 個を全ランタイムへ配り、hook を持たない |
 | `ndf` | 置かない | 置く | 配布 Skill が Claude Code 27 / Codex 25 と異なり、Codex に完了通知の hook がある |
-| `mcp-serena` / `mcp-playwright` | 置かない | 置く | セッション開始時の hook を持つ |
-| 上記以外の MCP プラグイン 8 個 | 置く | 置かない | MCP サーバ定義だけを配る |
+| MCP プラグイン 10 個 | 置かない | 置く | ルートマニフェストを置くと Codex がそちらを優先し、`mcp.json` から読む。その形式は `envFile` を表現できない（事実 23）ため、6 個でサーバ設定が欠ける |
+
+MCP プラグインは 3 ランタイムとも `.mcp.json` の 1 ファイルを読む。Claude Code は自動探索、Codex は
+`.codex-plugin/plugin.json` の `mcpServers` から参照する（事実 22）。Kiro CLI は installer が読み取って
+導入先へ合成する。
 
 Kiro CLI がルートマニフェストを読むようになった時点で、`dev.kiro/install.sh` の役割は Kiro 側の導入コマンドへ移せる。
 
@@ -250,7 +255,7 @@ symlink が使えないことは Task 4 の構成には影響しないが、Code
 ### Task 5: MCP プラグイン 10 個を単一ディレクトリへ移す
 
 - **対象ファイル:** `plugins/mcp/{shared,claude,codex,kiro}/`、`.claude-plugin/marketplace.json`、`.agents/plugins/marketplace.json`、`scripts/validate-runtime-plugins.sh`、`tests/runtime-smoke/adapters/{claude,codex,kiro}.sh`
-- **変更内容:** `plugins/mcp/<プラグイン名>/` へ統合する。MCP サーバ定義を Agent Plugins 形式の `mcp.json` に一本化し、各マニフェストの `mcpServers` から参照する。hook を持つ 2 つには Codex 用マニフェストを置く。2 つのマーケットプレイス定義の該当エントリを新しいパスへ向ける。検証スクリプトの MCP 向けの検査（ランタイム別ディレクトリと `.mcp.json` の存在、Kiro installer の走査）と、smoke test が指す `plugins/mcp/{claude,codex,kiro}/mcp-bigquery/` も同じコミットで新しいパスへ向ける
+- **変更内容:** `plugins/mcp/<プラグイン名>/` へ統合する。MCP サーバ定義は `.mcp.json` の 1 ファイルへ一本化し、Codex は `.codex-plugin/plugin.json` の `mcpServers` から参照する。**Agent Plugins 形式の `mcp.json` へは移さない**（事実 23 のとおり `envFile` を表現できず、10 個中 6 個でサーバ設定が欠けるため）。ルートマニフェストも置かない。10 個すべてに Codex 用マニフェストを置く。Kiro の installer は `dev.kiro/install.sh` へ移し、hook の command に含まれるプラグインルートのプレースホルダを導入時に実パスへ置き換える。2 つのマーケットプレイス定義の該当エントリを新しいパスへ向ける。検証スクリプトの MCP 向けの検査と、smoke test が指す `plugins/mcp/{claude,codex,kiro}/mcp-bigquery/` も同じコミットで新しいパスへ向ける
 - **満たす受け入れ条件:** 1、3、4、5、6
 - **進め方:** サーバが実際に起動することを 1 プラグインで確認してから残りへ広げる。移す途中は新旧のディレクトリが混ざるため、検証スクリプトはプラグインごとにどちらの構成かを見て検査する。全 10 個を移し終えた時点で、新しい構成だけを受け付ける形へ戻す
 
@@ -320,7 +325,7 @@ symlink が使えないことは Task 4 の構成には影響しないが、Code
 | 項目 | 状態 |
 | --- | --- |
 | Claude Code への実インストール検証 | 未確認。マニフェスト検証までは通っている |
-| Agent Plugins 形式の `mcp.json` からの MCP サーバ起動 | 未確認。マニフェスト検証までは通っている |
+| Agent Plugins 形式の `mcp.json` からの MCP サーバ起動 | 確認済み。検証用プラグインで Codex が登録することを確認した（事実 22 の隣で実測）。ただし本番の MCP プラグインはこの形式を採らない（事実 23） |
 | Codex のルートマニフェストで hook を載せられるか | 未確認。マニフェストの項目に hook が無いため載らないと見ているが、実行では確かめていない。Codex は hook に承認済みハッシュを要求するため、非対話実行では発火の有無を切り分けられない |
 | Kiro CLI が Agent Plugins 形式へ対応する時期 | 未確認。Kiro IDE 1.0.288 で対応済み、CLI 2.19.1 では未対応 |
 | Codex 用マニフェストの `skills` 配列による Skill の絞り込み | 確認済み。配列に載せた Skill だけが公開される（事実 16） |

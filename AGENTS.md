@@ -43,10 +43,7 @@ ai-plugins/
 │   ├── ndf/                      # NDF（3ランタイム共通の単一ディレクトリ）
 │   ├── playwright-kit/           # playwright-kit（3ランタイム共通の単一ディレクトリ）
 │   └── mcp/
-│       ├── shared/               # MCPプラグイン共通編集元
-│       ├── claude/               # Claude Code版MCP配布物
-│       ├── codex/                # Codex版MCP配布物
-│       └── kiro/                 # Kiro CLI版MCP配布物
+│       └── mcp-*/               # MCPプラグイン10個（3ランタイム共通）
 ├── docs/                         # リポジトリ知識
 ├── AGENTS.md                     # 共通エントリポイント
 ├── CLAUDE.md                     # Claude Code固有設定

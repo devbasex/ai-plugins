@@ -71,9 +71,9 @@ NDF の Skill 実装は `plugins/ndf/skills/` にあります。公開セット�
 
 ## MCP Plugins
 
-MCP plugin も runtime 別に配布します。共通編集元は `plugins/mcp/shared/<plugin-name>/`、配布物は `plugins/mcp/claude|codex|kiro/<plugin-name>/` です。
+MCP plugin も `plugins/mcp/<plugin-name>/` の 1 ディレクトリにまとまっています。サーバ定義は `.mcp.json` の 1 箇所だけで、3 runtime が同じファイルを読みます。
 
-Claude Code と Codex は marketplace から同じ plugin 名で install します。Kiro CLI は `plugins/mcp/kiro/<plugin-name>/install.sh` で対象プロジェクトの `.mcp.json` と必要な Kiro agent 設定を更新します。
+Claude Code と Codex は marketplace から同じ plugin 名で install します。Kiro CLI は `plugins/mcp/<plugin-name>/dev.kiro/install.sh` で対象プロジェクトの `.mcp.json` と必要な Kiro agent 設定を更新します。
 
 ## Build / Validation
 
@@ -89,7 +89,7 @@ bash scripts/runtime-smoke-test.sh --runtime codex
 bash scripts/runtime-smoke-test.sh --runtime kiro
 ```
 
-`--check` は `plugins/ndf-*` と `plugins/mcp/claude|codex|kiro` の生成物が共通編集元と同期していることを検証します。`validate-runtime-plugins.sh` は生成物同期、JSON / manifest、marketplace source、Kiro installer、Markdown ローカルリンクをまとめて確認します。
+`--check` は生成物（`plugins/<プラグイン名>/skills/<Skill 名>/agents/openai.yaml` と `plugins/mcp/<プラグイン名>/dev.kiro/install.sh`）が最新であることを検証します。`validate-runtime-plugins.sh` は生成物同期、JSON / manifest、marketplace source、Kiro installer、Markdown ローカルリンクをまとめて確認します。
 
 `runtime-smoke-test.sh` は Docker コンテナ内に repo copy、`/tmp/runtime-home`、`/tmp/runtime-project`、`/tmp/runtime-secrets` を分離して作成し、Claude / Codex / Kiro それぞれで `ndf` と `mcp-bigquery` 相当の実 install、Skill / MCP / hook / agent config の assertion、JUnit / log artifact 出力を確認します。PR CI は `--with-secrets=off` の非認証 smoke のみを実行し、認証付き smoke は `runtime-plugin-authenticated-smoke.yml` の protected workflow で実行します。
 

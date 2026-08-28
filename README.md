@@ -22,7 +22,7 @@ Claude Code / Codex / Kiro CLI向けのスキル・MCP設定を共有するた�
 - **外部AI委譲**: `/ndf:external-ai` skill + `corder` エージェント経由で Codex / Gemini CLI をバックグラウンド実行 (v4.0.0 で Codex MCP サーバは廃止)
 - **AIクロスレビュー強化**: `/ndf:cross-review` は codex/gemini 両方に PR レビューを委譲し、Gemini の進捗 heartbeat、`--focus` / `--extra-instructions-file`、PR 種別別の自動レビュー観点テンプレートに対応
 - **Kiro CLI対応**: `plugins/ndf/dev.kiro/install.sh` によるワンコマンドセットアップ
-- **MCPプラグイン**: `plugins/mcp/shared/` を編集元とし、Claude / Codex / Kiro 向け配布物を `plugins/mcp/{claude,codex,kiro}/` に生成
+- **MCPプラグイン**: `plugins/mcp/<プラグイン名>/` の1ディレクトリで3ランタイムへ配布
 
 ## 利用方法
 
@@ -411,10 +411,7 @@ ai-plugins/
 │   ├── ndf/                      # NDF（3ランタイム共通の単一ディレクトリ）
 │   ├── playwright-kit/           # playwright-kit（3ランタイム共通の単一ディレクトリ）
 │   └── mcp/
-│       ├── shared/               # MCPプラグイン共通編集元
-│       ├── claude/               # Claude Code版MCP配布物
-│       ├── codex/                # Codex版MCP配布物
-│       └── kiro/                 # Kiro CLI版MCP配布物/installer
+│       └── mcp-*/               # MCPプラグイン10個（3ランタイム共通）
 ├── README.md
 └── CLAUDE.md                     # AIエージェント向けガイドライン
 ```

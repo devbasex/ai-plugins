@@ -16,7 +16,7 @@ run_step "claude install mcp-bigquery" claude plugin install mcp-bigquery@ai-plu
 run_step "claude plugin list" claude plugin list
 
 "$REPO_ROOT/tests/runtime-smoke/assertions/assert-plugin-files.sh" claude
-"$REPO_ROOT/tests/runtime-smoke/assertions/assert-mcp-config.sh" claude "$REPO_ROOT/plugins/mcp/claude/mcp-bigquery/.mcp.json"
+"$REPO_ROOT/tests/runtime-smoke/assertions/assert-mcp-config.sh" claude "$REPO_ROOT/plugins/mcp/mcp-bigquery/.mcp.json"
 "$REPO_ROOT/tests/runtime-smoke/assertions/assert-hook-fixtures.sh" claude
 "$REPO_ROOT/tests/runtime-smoke/assertions/assert-authenticated-smoke.sh" claude
 "$REPO_ROOT/tests/runtime-smoke/assertions/assert-no-host-contamination.sh" claude

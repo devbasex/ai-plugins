@@ -12,9 +12,9 @@ runtime 分離後の Claude Code / Codex / Kiro 向け plugin 配布物を、ホ
 
 | runtime | 配布物 | adapter |
 |---|---|---|
-| Claude Code | `plugins/ndf`, `plugins/mcp/claude/*` | `tests/runtime-smoke/adapters/claude.sh` |
-| Codex | `plugins/ndf`, `plugins/mcp/codex/*` | `tests/runtime-smoke/adapters/codex.sh` |
-| Kiro CLI | `plugins/ndf`, `plugins/mcp/kiro/*` | `tests/runtime-smoke/adapters/kiro.sh` |
+| Claude Code | `plugins/ndf`, `plugins/mcp/*` | `tests/runtime-smoke/adapters/claude.sh` |
+| Codex | `plugins/ndf`, `plugins/mcp/*` | `tests/runtime-smoke/adapters/codex.sh` |
+| Kiro CLI | `plugins/ndf`, `plugins/mcp/*` | `tests/runtime-smoke/adapters/kiro.sh` |
 
 代表 MCP plugin として `mcp-bigquery` を install smoke の対象にする。主要 MCP plugin の manifest / installer 検証は `scripts/validate-runtime-plugins.sh` と PR Test Plan で補完する。
 
@@ -85,7 +85,7 @@ Kiro adapter は以下を実行する。
 
 - `plugins/ndf/dev.kiro/install.sh --project /tmp/runtime-project --with-slack`
 - NDF installer の idempotency 確認
-- `plugins/mcp/kiro/mcp-bigquery/install.sh --project /tmp/runtime-project`
+- `plugins/mcp/mcp-bigquery/dev.kiro/install.sh --project /tmp/runtime-project`
 - MCP installer の idempotency 確認
 - plugin files、MCP config、hook fixture、認証付き smoke、host contamination の assertion
 
