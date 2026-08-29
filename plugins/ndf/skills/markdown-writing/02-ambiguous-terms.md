@@ -35,7 +35,7 @@
 FILE=<対象ファイル>
 for w in 環境 エージェント コンテナ モデル セッション タスク トークン ポリシー サービス リソース ジョブ スタック; do
   n=$(grep -o "$w" "$FILE" | wc -l)
-  [ "$n" -ge 5 ] && echo "$w: $n 回"
+  if [ "$n" -ge 5 ]; then echo "$w: $n 回"; fi
 done
 ```
 
@@ -45,7 +45,7 @@ done
 for f in $(find docs/ -name "*.md"); do
   for w in 環境 エージェント コンテナ モデル セッション タスク トークン ポリシー サービス リソース ジョブ スタック; do
     n=$(grep -o "$w" "$f" | wc -l)
-    [ "$n" -ge 5 ] && echo "$f: $w:$n"
+    if [ "$n" -ge 5 ]; then echo "$f: $w:$n"; fi
   done
 done
 ```
