@@ -154,12 +154,19 @@ flowchart TD
 ```bash
 # PATH の先頭に置くラッパー
 #!/usr/bin/env bash
-if [[ "$*" == *"--method POST"* && "$*" == *"/reviews"* ]]; then
-  echo "injected failure" >&2
-  exit 1
-fi
+# メソッドの指定ではなく宛先で判定する。レビュー投稿は AI 自身が組み立てるため、
+# `-X POST` / `--method POST` / `-f` 指定による暗黙の POST のどれで書かれても捕捉する
+for arg in "$@"; do
+  if [[ "$arg" =~ /pulls/[0-9]+/reviews$ ]]; then
+    echo "injected failure" >&2
+    exit 1
+  fi
+done
 exec /usr/bin/gh "$@"
 ```
+
+進行側の確認は `repos/<repo>/pulls/<PR>/reviews/<id>` への GET で、宛先の末尾に
+識別子が付く。上の条件は末尾が `/reviews` のものだけに当たるため、確認は通る。
 
 参加 CLI は進行側の環境変数を引き継いで起動するため、進行側の `PATH` に置けば
 レビュー担当の呼び出しに効く。確かめるのは、投稿に失敗したレビュー担当が `post_error`
