@@ -22,7 +22,7 @@ flowchart TD
 | 誘導の入口 | `plugins/ndf/scripts/worktree-guard.sh` | tool 実行前に呼ばれ、対象パスが保護対象かを判定して案内を返す |
 | 検知と追従の入口 | `plugins/ndf/scripts/worktree-session.sh` | セッション開始時に呼ばれ、逸脱を提示し、主ディレクトリのブランチを追従させる |
 | ローカル環境の入口 | `plugins/ndf/scripts/worktree-localenv.sh` | 設定と依存物の複製、載っているコードの照合、モードの提示 |
-| スタックの入口 | `plugins/ndf/scripts/worktree-stack.sh` | 採番、基準の作成、起動と停止、公開、後片付け |
+| テスト環境の入口 | `plugins/ndf/scripts/worktree-testenv.sh` | 採番、基準の作成、起動と停止、公開、後片付け |
 | 手順書 | `plugins/ndf/skills/worktree/SKILL.md` と `references/` | 人と AI が読む手順。判断の基準を持つ |
 
 **入口のスクリプトは判定を持たない。** 判定はすべて共通ライブラリの関数に置き、入口は入力の受け取りと
@@ -37,7 +37,7 @@ plugins/ndf/
 │   ├── worktree-guard.sh               誘導（tool 実行前）
 │   ├── worktree-session.sh             検知と追従（セッション開始時）
 │   ├── worktree-localenv.sh            ローカル環境
-│   └── worktree-stack.sh               テスト用スタック
+│   └── worktree-testenv.sh             テスト環境の操作
 ├── skills/worktree/
 │   ├── SKILL.md                        手順の入口
 │   ├── references/
@@ -92,7 +92,7 @@ plugins/ndf/
     "branch_probe": "curl -sI http://localhost/ | grep -i x-worktree",
     "isolate_when": ["database/migrations/**", "docker/**", "docker-compose*.yml", "Dockerfile*"]
   },
-  "stack": {
+  "testenv": {
     "port_band": [20000, 29999],
     "port_roles": { "http": 0, "db": 1, "mail": 2, "object": 4, "search": 6 },
     "profiles": { "core": ["app", "mysql"], "browser": ["app", "mysql", "nginx"] },
@@ -121,9 +121,9 @@ plugins/ndf/
 | `localenv.copy_from_main` | 文字列の配列 | 任意 | 作業ツリーへ複製する、追跡されないパス |
 | `localenv.copy_as_real` | 文字列の配列 | 任意 | ハードリンクではなく実体を複製するパス |
 | `localenv.isolate_when` | 文字列の配列 | 任意 | 分離モードを促す変更パスの条件 |
-| `stack.port_band` | 整数 2 個 | `stack` を使うとき必須 | 採番するポートの範囲 |
-| `stack.port_roles` | 文字列から整数 | 同上 | 役割ごとの番号の割り当て |
-| `stack.expose.enabled` | 真偽値 | 任意 | 既定は偽。外部公開は明示的に有効化したときだけ行う |
+| `testenv.port_band` | 整数 2 個 | `testenv` を使うとき必須 | 採番するポートの範囲 |
+| `testenv.port_roles` | 文字列から整数 | 同上 | 役割ごとの番号の割り当て |
+| `testenv.expose.enabled` | 真偽値 | 任意 | 既定は偽。外部公開は明示的に有効化したときだけ行う |
 
 **互換性の規則。** `version` を上げるのは、既存の項目の意味を変えるときに限る。項目の追加は版を
 上げない。読み取り側は知らない項目を無視する。

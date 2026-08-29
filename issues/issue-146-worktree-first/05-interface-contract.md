@@ -146,19 +146,19 @@ flowchart TD
 `verify` の 3 状態は受け入れ条件 23 に対応する。**「未起動」と「不一致」を同じ値にしない。** 環境が
 動いていないことと、別のコードが載っていることは、次の手が違う。
 
-### スタックの操作
+### テスト環境の操作
 
 | 呼び出し | 動作 | 終了コード |
 | --- | --- | --- |
-| `worktree-stack.sh env <作業ツリー>` | スタック名・スロット・ポートを出力し、台帳へ記録する | 0 完了 / 1 空きが無い |
-| `worktree-stack.sh bake --tag <値>` | 基準を作る | 0 完了 / 2 同じ値の基準が既にある |
-| `worktree-stack.sh up <作業ツリー> --profile <名前>` | 起動する | 0 完了 / 1 失敗 |
-| `worktree-stack.sh test <作業ツリー> --kind <種類>` | 宣言の実行コマンドを走らせる | 実行したコマンドの終了コードを返す |
-| `worktree-stack.sh stop <作業ツリー>` | 止める。データは残す | 0 完了 |
-| `worktree-stack.sh down <作業ツリー> [--volumes]` | 破棄し、割り当てを解放する | 0 完了 |
-| `worktree-stack.sh expose <作業ツリー>` | 外部公開する | 0 完了 / 1 条件を満たさず拒否 |
-| `worktree-stack.sh unexpose <作業ツリー>` | 公開を閉じる | 0 完了 |
-| `worktree-stack.sh reap --idle <時間>` | 使われていないスタックを止める | 0 完了 |
+| `worktree-testenv.sh env <作業ツリー>` | 環境名・スロット・ポートを出力し、台帳へ記録する | 0 完了 / 1 空きが無い |
+| `worktree-testenv.sh bake --tag <値>` | 基準を作る | 0 完了 / 2 同じ値の基準が既にある |
+| `worktree-testenv.sh up <作業ツリー> --profile <名前>` | 起動する | 0 完了 / 1 失敗 |
+| `worktree-testenv.sh test <作業ツリー> --kind <種類>` | 宣言の実行コマンドを走らせる | 実行したコマンドの終了コードを返す |
+| `worktree-testenv.sh stop <作業ツリー>` | 止める。データは残す | 0 完了 |
+| `worktree-testenv.sh down <作業ツリー> [--volumes]` | 破棄し、割り当てを解放する | 0 完了 |
+| `worktree-testenv.sh expose <作業ツリー>` | 外部公開する | 0 完了 / 1 条件を満たさず拒否 |
+| `worktree-testenv.sh unexpose <作業ツリー>` | 公開を閉じる | 0 完了 |
+| `worktree-testenv.sh reap --idle <時間>` | 使われていないテスト環境を止める | 0 完了 |
 
 `test` が実行したコマンドの終了コードをそのまま返すのは、**テストの成否を包み隠さないため**である。
 
@@ -166,7 +166,7 @@ flowchart TD
 
 1. 宣言の `expose.enabled` が偽
 2. 載っている基準の識別子が `expose.public_tag` と一致しない
-3. 折り返しを使う公開が既に別のスタックで開いている
+3. 折り返しを使う公開が既に別のテスト環境で開いている
 
 拒否したときは、どの条件に当たったかを標準エラーへ出す。
 
