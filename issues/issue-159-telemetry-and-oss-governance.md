@@ -252,7 +252,7 @@ flowchart TD
 - **満たす受け入れ条件:** 文書 2・3
 - **進め方:** 既存の `AGENTS.md` と重複する内容は参照で済ませる
 
-### Task 5: リポジトリの設定を整える
+### Task 5: リポジトリのテンプレートと担当を置く
 
 - **対象ファイル:** `.github/ISSUE_TEMPLATE/`、`.github/pull_request_template.md`、`.github/CODEOWNERS`、`.github/dependabot.yml`
 - **変更内容:**
@@ -260,9 +260,8 @@ flowchart TD
   - Pull Request テンプレート（`cross-review` の運用と揃える）
   - `CODEOWNERS`（プラグインごとの担当）
   - `dependabot.yml`（GitHub Actions の更新）
-  - `main` のブランチ保護（Pull Request 必須、CI 必須）
-- **満たす受け入れ条件:** 文書 4・5・6
-- **進め方:** ブランチ保護は現在の運用（Pull Request 経由でマージ）を追認する設定から始める
+- **満たす受け入れ条件:** 文書 4・6
+- **進め方:** テンプレートの雛形は既存の Pull Request 本文から起こす
 
 ### Task 6: 自動送信と停止手段を実装する
 
@@ -295,6 +294,20 @@ flowchart TD
   検査を通す。更新の頻度と、公開する列の一覧を文書へ書く
 - **満たす受け入れ条件:** 第 2 段階の 8・9
 - **進め方:** 最初の公開は手動で行い、内容を確認してから定期実行にする
+
+### Task 9: `main` のブランチ保護を設定する
+
+- **対象ファイル:** なし。GitHub のリポジトリ設定を変える作業で、リポジトリ内のファイルでは
+  設定できない
+- **変更内容:** `main` のブランチ保護を有効にする。Pull Request 経由のマージを必須にし、
+  CI のチェックを必須にする。設定は `gh api` で行い、実行したコマンドを Pull Request へ残す
+- **満たす受け入れ条件:** 文書 5
+- **検証方法:** `gh api repos/devbasex/ai-plugins/branches/main/protection` の応答で、
+  `required_pull_request_reviews` と `required_status_checks` が有効になっていることを確かめる。
+  あわせて `main` への直接 push が拒まれることを確かめる
+- **進め方:** 現在の運用（Pull Request 経由でマージ）を追認する設定から始める
+- **備考:** 対象ファイルが無いため他の Task と同じ Pull Request では完了しない。
+  第 1 段階の完了までに、リポジトリの管理権限を持つ人が実施する
 
 ## 影響範囲
 
