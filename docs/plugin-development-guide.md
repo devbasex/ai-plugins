@@ -17,7 +17,7 @@
     {
       "name": "ndf",
       "source": "./plugins/ndf",
-      "description": "Claude Code plugin (v9.0.0): ... 27 focused NDF skills ...",
+      "description": "Claude Code plugin (v9.1.0): ... 27 focused NDF skills ...",
       "policy": {
         "installation": "AVAILABLE",
         "authentication": "ON_INSTALL"
