@@ -63,7 +63,7 @@ def die(msg: str, code: int = ABORT) -> None:
 
 
 # ---------------- 語彙 ----------------
-# スメルと手法の語彙は `refactoring` Skill の references と 1 対 1 で対応させる。
+# 兆候と手法の語彙は `refactoring` Skill の references と 1 対 1 で対応させる。
 # **語彙を固定しないと重複排除が効かない**（同じ箇所への提案が別物として残る）。
 
 SMELLS: dict[str, str] = {
@@ -351,7 +351,7 @@ def _normalize_proposal(raw: dict[str, Any], source: str) -> Optional[dict[str, 
     severity = str(raw.get("severity") or "").strip().lower()
     degraded = False
     if smell not in SMELLS:
-        info(f"⚠ {source}: 語彙外のスメル `{smell}` — unknown へ降格 ({path}#{symbol})")
+        info(f"⚠ {source}: 語彙外の兆候 `{smell}` — unknown へ降格 ({path}#{symbol})")
         smell = "unknown"
         degraded = True
     if technique not in TECHNIQUES:
@@ -382,7 +382,7 @@ def _normalize_proposal(raw: dict[str, Any], source: str) -> Optional[dict[str, 
 
 
 def _dedupe_key(item: dict[str, Any]) -> tuple[str, str, str]:
-    """重複排除の鍵。同じ箇所への同じスメルの指摘を 1 件へまとめる。"""
+    """重複排除の鍵。同じ箇所への同じ兆候の指摘を 1 件へまとめる。"""
     return (item["path"], item["symbol"], item["smell"])
 
 
@@ -2540,7 +2540,7 @@ def _plan_item_section(item: dict[str, Any]) -> list[str]:
     return [
         f"### {item['item_id']} — `{item['path']}#{item['symbol']}`",
         "",
-        "| スメル | 手法 | 重要度 | 提案元 | 状態 | コミット |",
+        "| 兆候 | 手法 | 重要度 | 提案元 | 状態 | コミット |",
         "| --- | --- | --- | --- | --- | ---: |",
         f"| {item['smell']} | {item['technique']} | {item['severity']} | "
         f"{' / '.join(item.get('proposed_by') or []) or '—'} | {status} | "
@@ -2576,7 +2576,7 @@ def cmd_report(args: argparse.Namespace) -> None:
         print()
         print("## 見送った提案")
         print()
-        print("| ラウンド | 対象 | スメル | 理由 |")
+        print("| ラウンド | 対象 | 兆候 | 理由 |")
         print("| --- | --- | --- | --- |")
         for d in state["deferred_items"]:
             print(f"| {d.get('round', '—')} | {d['path']}#{d['symbol']} | "
@@ -2618,7 +2618,7 @@ def _item_table(state: dict[str, Any]) -> str:
     if not state["items"]:
         return "（改善項目なし）"
     lines = [
-        "| ID | 対象 | スメル | 手法 | 重要度 | 提案元 | 状態 | コミット |",
+        "| ID | 対象 | 兆候 | 手法 | 重要度 | 提案元 | 状態 | コミット |",
         "| --- | --- | --- | --- | --- | --- | --- | ---: |",
     ]
     for item in state["items"]:

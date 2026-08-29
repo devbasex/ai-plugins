@@ -28,7 +28,7 @@ user-invocable: false
 | `/ndf:safe-refactoring` | `/ndf:refactoring` |
 
 `safe-` を外したのは、`/refactoring` で一意に決まり、入力が短くなるためである。統合した観点は
-`references/data-representation.md` にあり、スメル一覧からも参照される。
+`references/data-representation.md` にあり、兆候の一覧からも参照される。
 
 v7.0.0 の対応表（playwright 系 4 Skill の `playwright-kit` プラグインへの分離）は、予告どおり
 本バージョンで削除した。v7.0.0 より前から移行する場合は、この対応表を持つ最後の配布版である

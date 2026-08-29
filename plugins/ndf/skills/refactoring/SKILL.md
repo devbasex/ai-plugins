@@ -1,6 +1,6 @@
 ---
 name: refactoring
-description: "Change structure without changing behavior, guarded by tests, judging smells and how decisions are represented. Use when cleaning up code or touching legacy code（リファクタリング・コードスメル・分岐をデータ化・現状固定テスト）."
+description: "Change structure without changing behavior, guarded by tests, judging smells and how decisions are represented. Use when cleaning up code or touching legacy code（リファクタリング・コードの兆候・分岐をデータ化・現状固定テスト）."
 ---
 
 # 安全な構造改善
@@ -43,9 +43,9 @@ description: "Change structure without changing behavior, guarded by tests, judg
 ## テストがある場合
 
 1. **変更前に既存テストを実行する。** ここで落ちているものがあれば、先に報告する
-2. スメルを 1 つ選ぶ（一覧は [references/code-smells.md](references/code-smells.md)）
+2. 兆候を 1 つ選ぶ（一覧は [references/code-smells.md](references/code-smells.md)）
 3. 対応する手法を選ぶ（[references/refactoring-catalog.md](references/refactoring-catalog.md)。
-   スメル一覧で ★ が付いた手法はカタログに項目がなく、一覧の記述だけで進めてよい）。
+   兆候の一覧で ★ が付いた手法はカタログに項目がなく、一覧の記述だけで進めてよい）。
    分岐・反復・定数を**何にどう置き換えるか**は
    [references/data-representation.md](references/data-representation.md) で決める
 4. **1 手だけ適用する**
@@ -53,7 +53,7 @@ description: "Change structure without changing behavior, guarded by tests, judg
 6. 通ったらコミットする（1 手 = 1 コミットを既定とする）
 7. 2 へ戻る
 
-一度に複数のスメルへ手を入れない。落ちたときに原因を切り分けられなくなる。
+一度に複数の兆候へ手を入れない。落ちたときに原因を切り分けられなくなる。
 
 ## テストが乏しい既存コード
 
