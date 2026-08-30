@@ -270,7 +270,7 @@ flowchart TD
 
 同じ入口を `PreToolUse` へ結ぶ。matcher の記法は Claude Code と同じ。環境変数は `PLUGIN_ROOT` を使う。
 
-Codex には `SessionStart` もあるため、逸脱検知も同じ形で結べる。
+`SessionStart` も同じ形で結び、`worktree-session.sh` を実行する。Codex CLI 0.149.0 が `SessionStart` を持つことは実機で確認済みである（[`01-spec-and-plan.md`](01-spec-and-plan.md)）。
 
 ### Kiro CLI
 

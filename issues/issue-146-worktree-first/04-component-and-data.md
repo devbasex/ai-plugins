@@ -50,7 +50,7 @@ plugins/ndf/
 │   └── tests/                          判定ロジックのテスト
 └── hooks/
     ├── claude.json                     PreToolUse / SessionStart を追加
-    └── codex.json                      PreToolUse を追加
+    └── codex.json                      PreToolUse / SessionStart を追加
 ```
 
 対象リポジトリ側に置かれるもの:
@@ -115,19 +115,38 @@ plugins/ndf/
 
 | 項目 | 型 | 必須 | 意味 |
 | --- | --- | --- | --- |
+| `$schema` | 文字列 | 任意 | 編集時の補完に使う定義の位置。読み取り側は参照しない |
 | `version` | 整数 | 必須 | 宣言の版。読み取り側が知らない版なら何もせずに終わる |
 | `guard.allow_paths` | 文字列の配列 | 任意 | 主ディレクトリで編集しても案内を出さないパス。未指定なら組み込みの既定を使う |
 | `localenv.kind` | 文字列 | 必須 | `compose` 以外は未対応として扱う |
 | `localenv.layout` | 文字列 | 必須 | `indirect` / `direct` / `host` のいずれか |
+| `localenv.compose_files` | 文字列の配列 | `kind` が `compose` のとき必須 | 読み込む定義ファイル。並行起動用の定義を後ろへ足す |
+| `localenv.app_service` | 文字列 | 任意 | コードを載せるサービス名。照合と再読み込みの対象 |
 | `localenv.src_target` | 文字列 | `indirect` のとき必須 | コンテナ内でコードが置かれる位置 |
 | `localenv.copy_from_main` | 文字列の配列 | 任意 | 作業ツリーへ複製する、追跡されないパス |
-| `localenv.copy_as_real` | 文字列の配列 | 任意 | ハードリンクではなく実体を複製するパス |
+| `localenv.copy_as_real` | 文字列の配列 | 任意 | ハードリンクではなく実体を複製するパス。`copy_from_main` の内側を指してよい |
+| `localenv.build_before_aim` | 文字列の配列 | 任意 | コードの位置を切り替える前に流す資産のビルドコマンド |
+| `localenv.reload_signal` | オブジェクト | 任意 | 再読み込みの送り先。`process`（文字列）と `signal`（文字列）を持つ |
+| `localenv.branch_probe` | 文字列 | 任意 | 環境に載っているブランチを返すコマンド。照合が使う |
 | `localenv.isolated_services` | 文字列の配列 | 任意 | 分離モードで並行起動するサービス |
 | `localenv.isolate_when` | 文字列の配列 | 任意 | 分離モードを促す変更パスの条件 |
 | `localenv.verify` | 文字列 | 任意 | 動作検証に使うコマンド |
 | `testenv.port_band` | 整数 2 個 | `testenv` を使うとき必須 | 採番するポートの範囲 |
 | `testenv.port_roles` | 文字列から整数 | 同上 | 役割ごとの番号の割り当て |
+| `testenv.profiles` | 文字列からサービス名の配列 | 任意 | 起動する集合の名前付き定義。未指定なら定義の既定の集合を使う |
+| `testenv.shared_network` | 文字列 | 任意 | テスト環境が相乗りするネットワーク名。空文字ならテスト環境ごとに作る |
+| `testenv.golden_tag_paths` | 文字列の配列 | 基準を焼くとき必須 | 基準のタグを計算する資産のパス。内容が同じなら焼き直さない |
+| `testenv.golden_volumes` | 文字列から文字列 | 任意 | 定義上のボリューム名から基準ボリューム名への対応 |
+| `testenv.test_kinds` | 文字列からオブジェクト | 任意 | テストの種類ごとの選別と実行。未指定ならテスト実行の仕組みは何もせずに終わる |
+| `testenv.test_kinds.<種類>.select` | 文字列 | 任意 | その種類に当たるテストを列挙するコマンド |
+| `testenv.test_kinds.<種類>.run` | 文字列 | 任意 | その種類のテストを実行するコマンド |
+| `testenv.test_kinds.<種類>.skip_reset` | 文字列から文字列 | 任意 | 実行時に渡す、初期化を抑止する環境変数 |
+| `testenv.test_kinds.<種類>.base_url_env` | 文字列 | 任意 | 入口の URL を渡す環境変数名 |
+| `testenv.test_kinds.<種類>.out_env` | 文字列 | 任意 | 証跡の出力先を渡す環境変数名 |
 | `testenv.expose.enabled` | 真偽値 | 任意 | 既定は偽。外部公開は明示的に有効化したときだけ行う |
+| `testenv.expose.public_tag` | 文字列 | 公開するとき必須 | 公開を許す基準の識別子。載っている基準と一致しなければ拒否する |
+| `testenv.expose.base_domain` | 文字列 | 公開するとき必須 | 公開するホスト名の基底 |
+| `testenv.expose.ttl` | 文字列 | 任意 | 公開の期限。経過後は同じホスト名が拒否を返す |
 
 **互換性の規則。** `version` を上げるのは、既存の項目の意味を変えるときに限る。項目の追加は版を
 上げない。読み取り側は知らない項目を無視する。

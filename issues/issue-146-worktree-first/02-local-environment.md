@@ -169,14 +169,24 @@ flowchart TD
 
 ```bash
 git -C "$MAIN" worktree add -b feature/x "$WT" origin/main
-for p in $(jq -r '.localenv.copy_from_main[]' "$MAIN/.ndf/localenv.json"); do
+DECL="$MAIN/.ndf/localenv.json"
+for p in $(jq -r '.localenv.copy_from_main[]' "$DECL"); do
   [ -e "$MAIN/$p" ] || continue
   if [ -e "$WT/$p" ] && ! diff -rq "$MAIN/$p" "$WT/$p" >/dev/null 2>&1; then
     echo "中断: $p の内容が主ディレクトリと異なる" >&2; exit 1
   fi
   cp -al "$MAIN/$p" "$WT/$p" 2>/dev/null || cp -a "$MAIN/$p" "$WT/$p"
 done
+# 書き換えられるパスはハードリンクを外し、実体で置き換える
+for p in $(jq -r '.localenv.copy_as_real // [] | .[]' "$DECL"); do
+  [ -e "$MAIN/$p" ] || continue
+  rm -rf "$WT/$p"
+  cp -a "$MAIN/$p" "$WT/$p"
+done
 ```
+
+`copy_as_real` のパスは `copy_from_main` のパスの内側を指す（例では `vendor` の中の
+`vendor/composer`）。このため分岐ではなく後段の置き換えで扱う。
 
 **依存物は複製する。主ディレクトリへの symlink は使わない。** 確認した構成では、読み込み定義が親
 ディレクトリを実体解決するため、リンクにすると作業ツリーで起動した処理が主ディレクトリのコードを
