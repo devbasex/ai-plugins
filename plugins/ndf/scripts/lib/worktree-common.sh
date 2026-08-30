@@ -285,7 +285,8 @@ _wt_tokenize() {
 }
 
 # 展開されるヒアドキュメントの本文を 1 行走査し、コマンド置換の状態を進める。
-# 状態は _WT_SUBST（`$(` の深さ）・_WT_BACKTICK・_WT_QUOTE・_WT_QSTACK で持ち回り、
+# 状態は _WT_SUBST（`$(` の深さ）・_WT_BACKTICK・_WT_ARITH・_WT_QUOTE・_WT_QSTACK で
+# 持ち回り、
 # 走査した行が置換に掛かっていれば _WT_OPENED を 1 にする。呼び出し側
 # (`_wt_strip_heredocs`) がこれらを `local` で宣言するため、グローバルへは残らない。
 #
@@ -294,12 +295,28 @@ _wt_tokenize() {
 # 後ろの `$(` を見落とす。逆に置換の中では引用符が効くため、`$(echo "a )" > f)` の
 # 引用符に囲まれた `)` を閉じ括弧として数えると、置換がそこで終わったことになる。
 _wt_scan_expanded_line() {
-  local line="$1" n=${#1} j=0 c
+  local line="${1:-}" n=${#1} j=0 c
   _WT_OPENED=0
   if [ "$_WT_SUBST" -gt 0 ] || [ "$_WT_BACKTICK" = 1 ]; then _WT_OPENED=1; fi
 
   while [ "$j" -lt "$n" ]; do
     c=${line:j:1}
+
+    # `$((...))` は算術展開で、コマンドは動かない。中の `>` は比較であって
+    # 出力の付け替えではないため、閉じるまで読み飛ばす。
+    if [ "$_WT_ARITH" -gt 0 ]; then
+      case "$c" in
+        '(') _WT_ARITH=$((_WT_ARITH + 1)) ;;
+        ')') _WT_ARITH=$((_WT_ARITH - 1)) ;;
+      esac
+      j=$((j + 1))
+      continue
+    fi
+    if [ "${line:j:3}" = '$((' ]; then
+      _WT_ARITH=2
+      j=$((j + 3))
+      continue
+    fi
 
     # 本文そのもの。展開の対象は `$(`・backtick・`\` だけである。
     if [ "$_WT_SUBST" = 0 ] && [ "$_WT_BACKTICK" = 0 ]; then
@@ -369,7 +386,7 @@ _wt_strip_heredocs() {
   # 展開される本文の中で、コマンド置換が続いているかを行をまたいで持つ。
   # 走査は _wt_scan_expanded_line が行う。`local` で宣言すると、bash の動的
   # スコープにより呼び出し先からも読み書きできる。グローバルへは残らない。
-  local _WT_SUBST=0 _WT_BACKTICK=0 _WT_QUOTE="" _WT_OPENED=0
+  local _WT_SUBST=0 _WT_BACKTICK=0 _WT_QUOTE="" _WT_OPENED=0 _WT_ARITH=0
   local -a _WT_QSTACK=()
 
   _wt_read_lines <<<"$text"
@@ -392,6 +409,7 @@ _wt_strip_heredocs() {
         head=$((head + 1))
         _WT_SUBST=0
         _WT_BACKTICK=0
+        _WT_ARITH=0
         _WT_QUOTE=""
         _WT_QSTACK=()
         continue

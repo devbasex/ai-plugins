@@ -429,3 +429,39 @@ def test_single_quotes_inside_a_substitution_are_honoured() -> None:
     targets, rc = extract(command)
     assert rc == 0, targets
     assert "side-effect.md" in targets, targets
+
+
+def test_an_arithmetic_expansion_is_not_a_substitution() -> None:
+    """`$((...))` は算術展開で、中の `>` は比較である。"""
+    command = (
+        "cat > report.md <<EOS\n"
+        "$((3 > 2))\n"
+        "EOS"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert targets == ["report.md"], targets
+
+
+def test_a_substitution_after_an_arithmetic_expansion_is_found() -> None:
+    """算術展開を読み飛ばしても、同じ行の後ろの置換は拾う。"""
+    command = (
+        "cat > report.md <<EOS\n"
+        "$((3 > 2)) $(echo data > side-effect.md)\n"
+        "EOS"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert "side-effect.md)" in targets, targets
+
+
+def test_a_nested_arithmetic_expansion_is_skipped_to_its_end() -> None:
+    command = (
+        "cat > report.md <<EOS\n"
+        "$(( (3 > 2) ? 1 : 0 ))\n"
+        "受領: <payload>\n"
+        "EOS"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert targets == ["report.md"], targets
