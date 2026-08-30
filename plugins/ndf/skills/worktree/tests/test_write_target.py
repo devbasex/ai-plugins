@@ -381,3 +381,51 @@ def test_a_multi_line_backtick_substitution_is_found() -> None:
     targets, rc = extract(command)
     assert rc == 0, targets
     assert "side-effect.md" in targets, targets
+
+
+def test_a_closing_paren_inside_quotes_does_not_end_the_substitution() -> None:
+    """置換の中では引用符が効く。囲まれた `)` は閉じ括弧ではない。"""
+    command = (
+        "cat > report.md <<EOS\n"
+        '$(echo "a )"\n'
+        "echo data > side-effect.md\n"
+        ")\n"
+        "EOS"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert "side-effect.md" in targets, targets
+
+
+def test_a_quoted_paren_on_the_same_line_keeps_the_write() -> None:
+    command = 'cat > report.md <<EOS\n$(echo "nested )" > side-effect.md)\nEOS'
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert "report.md" in targets, targets
+    assert "side-effect.md)" in targets, targets
+
+
+def test_an_apostrophe_in_the_body_is_not_a_quote() -> None:
+    """本文そのものでは引用符は字面である。後ろの置換を見落とさない。"""
+    command = (
+        "cat > report.md <<EOS\n"
+        "it's fine\n"
+        "$(echo data > side-effect.md)\n"
+        "EOS"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert "side-effect.md)" in targets, targets
+
+
+def test_single_quotes_inside_a_substitution_are_honoured() -> None:
+    command = (
+        "cat > report.md <<EOS\n"
+        "$(echo 'a )'\n"
+        "echo data > side-effect.md\n"
+        ")\n"
+        "EOS"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert "side-effect.md" in targets, targets

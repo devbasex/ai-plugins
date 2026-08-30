@@ -284,6 +284,76 @@ _wt_tokenize() {
   printf '%s\n' "${out[@]+"${out[@]}"}"
 }
 
+# 展開されるヒアドキュメントの本文を 1 行走査し、コマンド置換の状態を進める。
+# 状態は _WT_SUBST（`$(` の深さ）・_WT_BACKTICK・_WT_QUOTE・_WT_QSTACK で持ち回り、
+# 走査した行が置換に掛かっていれば _WT_OPENED を 1 にする。
+#
+# **引用符は置換の中でだけ効く。** 本文そのものでは `$`・backtick・`\` だけが特別で、
+# `'` と `"` は字面である。本文の `it's` を引用符の始まりとして数えると、そこから
+# 後ろの `$(` を見落とす。逆に置換の中では引用符が効くため、`$(echo "a )" > f)` の
+# 引用符に囲まれた `)` を閉じ括弧として数えると、置換がそこで終わったことになる。
+_wt_scan_expanded_line() {
+  local line="$1" n=${#1} j=0 c
+  _WT_OPENED=0
+  if [ "$_WT_SUBST" -gt 0 ] || [ "$_WT_BACKTICK" = 1 ]; then _WT_OPENED=1; fi
+
+  while [ "$j" -lt "$n" ]; do
+    c=${line:j:1}
+
+    # 本文そのもの。展開の対象は `$(`・backtick・`\` だけである。
+    if [ "$_WT_SUBST" = 0 ] && [ "$_WT_BACKTICK" = 0 ]; then
+      case "$c" in
+        '\') j=$((j + 2)); continue ;;
+        '`') _WT_BACKTICK=1; _WT_OPENED=1; j=$((j + 1)); continue ;;
+      esac
+      if [ "${line:j:2}" = '$(' ]; then
+        _WT_QSTACK[$_WT_SUBST]="$_WT_QUOTE"
+        _WT_SUBST=1
+        _WT_QUOTE=""
+        _WT_OPENED=1
+        j=$((j + 2))
+        continue
+      fi
+      j=$((j + 1))
+      continue
+    fi
+
+    # 置換の中。シェルの引用符が効く。
+    if [ "$_WT_QUOTE" = "'" ]; then
+      [ "$c" = "'" ] && _WT_QUOTE=""
+      j=$((j + 1))
+      continue
+    fi
+    case "$c" in
+      '\') j=$((j + 2)); continue ;;
+    esac
+    if [ "${line:j:2}" = '$(' ]; then
+      _WT_QSTACK[$_WT_SUBST]="$_WT_QUOTE"
+      _WT_SUBST=$((_WT_SUBST + 1))
+      _WT_QUOTE=""
+      j=$((j + 2))
+      continue
+    fi
+    if [ "$_WT_QUOTE" = '"' ]; then
+      [ "$c" = '"' ] && _WT_QUOTE=""
+      j=$((j + 1))
+      continue
+    fi
+    case "$c" in
+      "'") _WT_QUOTE="'" ;;
+      '"') _WT_QUOTE='"' ;;
+      ')')
+        if [ "$_WT_SUBST" -gt 0 ]; then
+          _WT_SUBST=$((_WT_SUBST - 1))
+          _WT_QUOTE="${_WT_QSTACK[$_WT_SUBST]:-}"
+        fi
+        ;;
+      '`') if [ "$_WT_BACKTICK" = 1 ]; then _WT_BACKTICK=0; else _WT_BACKTICK=1; fi ;;
+    esac
+    j=$((j + 1))
+  done
+}
+
 # ヒアドキュメントの本文を落とす。本文はコマンドとして実行される部分ではないため、
 # 中の `>` や語を書き込み先として拾わない。引用符の中の `<<` と、行の入力を渡す
 # `<<<` は本文の始まりとして扱わない。
@@ -296,8 +366,12 @@ _wt_strip_heredocs() {
   local -a lines=() delims=() strips=() expands=()
   local line candidate out="" n i c delim strip quoted
   # 展開される本文の中で、コマンド置換が続いているかを行をまたいで持つ。
-  # `$(` は入れ子になるため深さで、backtick は開閉が同じ字なので印で数える。
-  local subst=0 backtick=0 opened j m
+  # 走査は _wt_scan_expanded_line が行う。
+  _WT_SUBST=0
+  _WT_BACKTICK=0
+  _WT_QUOTE=""
+  _WT_QSTACK=()
+  _WT_OPENED=0
 
   _wt_read_lines <<<"$text"
   lines=("${WT_LINES[@]+"${WT_LINES[@]}"}")
@@ -317,34 +391,18 @@ _wt_strip_heredocs() {
       fi
       if [ "$candidate" = "${delims[head]}" ]; then
         head=$((head + 1))
-        subst=0
-        backtick=0
+        _WT_SUBST=0
+        _WT_BACKTICK=0
+        _WT_QUOTE=""
+        _WT_QSTACK=()
         continue
       fi
       # 展開される本文のコマンド置換は実行される。書き込みを見落とさないよう、
       # 置換の始まりから終わりまでを残す。置換は複数行にまたがることがあるため、
       # 深さを行をまたいで持ち越す。
       if [ "${expands[head]}" = 1 ]; then
-        opened=0
-        if [ "$subst" -gt 0 ] || [ "$backtick" = 1 ]; then opened=1; fi
-        j=0
-        m=${#line}
-        while [ "$j" -lt "$m" ]; do
-          if [ "$backtick" = 0 ] && [ "${line:j:2}" = '$(' ]; then
-            subst=$((subst + 1))
-            opened=1
-            j=$((j + 2))
-            continue
-          fi
-          case "${line:j:1}" in
-            ')') [ "$subst" -gt 0 ] && subst=$((subst - 1)) ;;
-            '`')
-              if [ "$backtick" = 0 ]; then backtick=1; opened=1; else backtick=0; fi
-              ;;
-          esac
-          j=$((j + 1))
-        done
-        if [ "$opened" = 1 ]; then out+="$line"$'\n'; fi
+        _wt_scan_expanded_line "$line"
+        if [ "$_WT_OPENED" = 1 ]; then out+="$line"$'\n'; fi
       fi
       continue
     fi
