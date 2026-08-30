@@ -55,10 +55,15 @@ ALLOW_PATHS=()
 
 load_state() {
   [ -n "$STATE_FILE" ] && [ -f "$STATE_FILE" ] || return 1
-  local cached_cwd
+  local cached_cwd cached_stamp
   cached_cwd=$(jq -r '.resolved_from // empty' "$STATE_FILE" 2>/dev/null) || return 1
   [ "$cached_cwd" = "$CWD_NOW" ] || return 1
   MAIN_DIR=$(jq -r '.main_dir // empty' "$STATE_FILE" 2>/dev/null)
+  [ -n "$MAIN_DIR" ] || return 1
+  # 宣言ファイルは後から作られる（`worktree-setup.sh init`）。控えたままにすると、
+  # 作った直後のセッションで案内が出ない。印が変わっていたら作り直す。
+  cached_stamp=$(jq -r '.declaration_stamp // ""' "$STATE_FILE" 2>/dev/null)
+  [ "$cached_stamp" = "$(wt_declaration_stamp "$MAIN_DIR")" ] || return 1
   IN_WORKTREE=$(jq -r 'if .in_worktree then 0 else 1 end' "$STATE_FILE" 2>/dev/null)
   HAS_DECLARATION=$(jq -r 'if .has_declaration then 1 else 0 end' "$STATE_FILE" 2>/dev/null)
   _wt_read_lines < <(jq -r '(.allow_paths // []) | .[]' "$STATE_FILE" 2>/dev/null)
@@ -88,12 +93,13 @@ save_state() {
   jq -n \
     --arg main_dir "$MAIN_DIR" \
     --arg resolved_from "$CWD_NOW" \
+    --arg declaration_stamp "$(wt_declaration_stamp "$MAIN_DIR")" \
     --argjson in_worktree "$([ "$IN_WORKTREE" = 0 ] && echo true || echo false)" \
     --argjson has_declaration "$([ "$HAS_DECLARATION" = 1 ] && echo true || echo false)" \
     --argjson allow_paths "$(printf '%s\n' "${ALLOW_PATHS[@]+"${ALLOW_PATHS[@]}"}" | jq -R . | jq -s 'map(select(. != ""))')" \
     '{main_dir: $main_dir, resolved_from: $resolved_from, in_worktree: $in_worktree,
-      has_declaration: $has_declaration, allow_paths: $allow_paths, notified: [],
-      computed_at: (now | todate)}' >"$tmp" 2>/dev/null || { rm -f "$tmp"; return 0; }
+      has_declaration: $has_declaration, declaration_stamp: $declaration_stamp,
+      allow_paths: $allow_paths, notified: [], computed_at: (now | todate)}' >"$tmp" 2>/dev/null || { rm -f "$tmp"; return 0; }
   mv "$tmp" "$STATE_FILE" 2>/dev/null || rm -f "$tmp"
 }
 

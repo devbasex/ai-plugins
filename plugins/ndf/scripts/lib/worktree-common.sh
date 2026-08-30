@@ -138,6 +138,19 @@ wt_declaration() {
   printf '%s\n' "$json"
 }
 
+# 宣言ファイルの状態を表す印を返す。存在しなければ空文字。
+# 控えの作り直しが要るかを、git を呼ばずに判定するために使う。
+wt_declaration_stamp() {
+  local main_dir="${1:-}" file
+  [ -n "$main_dir" ] || return 1
+  file="$main_dir/.ndf/worktree.json"
+  [ -e "$file" ] || { printf '\n'; return 0; }
+  # 更新時刻の取り方は実装で分かれる。取れないときは毎回作り直す側へ倒す。
+  stat -c %Y "$file" 2>/dev/null && return 0
+  stat -f %m "$file" 2>/dev/null && return 0
+  printf 'unknown\n'
+}
+
 # 案内を出さないパスを 1 行 1 件で出力する。
 # 引数は wt_declaration の出力。空や未指定なら既定を返す。
 wt_allow_paths() {
@@ -531,13 +544,22 @@ wt_extract_patch_target() {
 
 # --- テスト環境の採番と台帳 --------------------------------------------------
 
+# 共通の git ディレクトリの絶対パスを返す。
+# `rev-parse --path-format=absolute` は git 2.31 以降にしかない。素の
+# `--git-common-dir` は呼び出し元からの相対パスを返すことがあるため、そこで
+# 解決する。要求する git の版を上げずに同じ結果を得る。
+wt_common_git_dir() {
+  local dir="${1:-}" common
+  [ -n "$dir" ] || return 1
+  common=$(git -C "$dir" rev-parse --git-common-dir 2>/dev/null) || return 1
+  (cd "$dir" 2>/dev/null && cd "$common" 2>/dev/null && pwd -P) || return 1
+}
+
 # 台帳の位置。共通の git ディレクトリ配下へ置く。作業ツリーの中に置くと、その
 # 作業ツリーを削除した時点で割り当ての記録が消える (詳細設計 06 の決定 7)。
 wt_registry_path() {
-  local main_dir="${1:-}"
-  [ -n "$main_dir" ] || return 1
-  local common
-  common=$(git -C "$main_dir" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 1
+  local main_dir="${1:-}" common
+  common=$(wt_common_git_dir "$main_dir") || return 1
   printf '%s/ndf/worktree-registry.json\n' "$common"
 }
 

@@ -214,7 +214,7 @@ EOF
 
 ```bash
 # 主ディレクトリ (default branch のまま) で
-main_dir=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
+main_dir=$(dirname "$(cd "$(git rev-parse --git-common-dir)" && pwd -P)")
 git worktree add "$main_dir/.worktrees/feature/<PLAN-ID>-schema" feature/<PLAN-ID>-schema
 git worktree add "$main_dir/.worktrees/feature/<PLAN-ID>-ui"     feature/<PLAN-ID>-ui
 

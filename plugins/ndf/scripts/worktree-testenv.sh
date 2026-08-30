@@ -304,7 +304,7 @@ do_down() {
 # リポジトリの .gitignore は触らない。追跡される設定を勝手に増やさないため。
 exclude_evidence() {
   local common exclude
-  common=$(git -C "$TARGET" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 0
+  common=$(wt_common_git_dir "$TARGET") || return 0
   exclude="$common/info/exclude"
   mkdir -p "$(dirname "$exclude")" 2>/dev/null
   grep -qx '.ndf-evidence/' "$exclude" 2>/dev/null && return 0
