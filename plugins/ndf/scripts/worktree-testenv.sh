@@ -62,7 +62,14 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-MAIN_DIR=$(wt_main_dir) || exit 0
+[ -n "$TARGET" ] || TARGET=$(pwd -P)
+TARGET=$(wt_normalize_path "$TARGET" "$(pwd -P)")
+
+# 主ディレクトリは対象から解決する。現在地から解決すると、別のリポジトリから
+# 実行したときに、対象とは違うリポジトリの宣言ファイル・台帳・ポートの帯で動く。
+# 対象がリポジトリの外にあるときは現在地から解決し、対象そのものの誤りは
+# 各サブコマンドの案内に任せる。
+MAIN_DIR=$(wt_main_dir "$TARGET") || MAIN_DIR=$(wt_main_dir) || exit 0
 DECLARATION=$(wt_declaration "$MAIN_DIR") || exit 0
 
 decl_get() { printf '%s' "$DECLARATION" | jq -r "$1" 2>/dev/null; }
@@ -70,9 +77,6 @@ decl_raw() { printf '%s' "$DECLARATION" | jq -c "$1" 2>/dev/null; }
 
 # testenv の宣言が無いリポジトリでは何もしない。
 printf '%s' "$DECLARATION" | jq -e '(.testenv | type) == "object"' >/dev/null 2>&1 || exit 0
-
-[ -n "$TARGET" ] || TARGET=$(pwd -P)
-TARGET=$(wt_normalize_path "$TARGET" "$(pwd -P)")
 
 target_branch() { git -C "$TARGET" symbolic-ref --short -q HEAD 2>/dev/null; }
 registry() { wt_registry_path "$MAIN_DIR"; }
@@ -90,8 +94,15 @@ do_tag() {
   paths=("${WT_LINES[@]+"${WT_LINES[@]}"}")
   [ "${#paths[@]}" -gt 0 ] || return 2
 
-  local digest
-  digest=$(git -C "$TARGET" ls-tree -r HEAD -- "${paths[@]}" 2>/dev/null \
+  # 宣言したパスが実体と違っていても、空の内容に対する値は返る。対象が 1 件も
+  # 無いことと、内容が空であることを区別する。
+  local listing digest
+  listing=$(git -C "$TARGET" ls-tree -r HEAD -- "${paths[@]}" 2>/dev/null)
+  if [ -z "$listing" ]; then
+    printf '%s\n' "golden_tag_paths が指す対象がありません: ${paths[*]}" >&2
+    return 1
+  fi
+  digest=$(printf '%s\n' "$listing" \
     | (sha1sum 2>/dev/null || shasum 2>/dev/null) | cut -c1-12)
   [ -n "$digest" ] || return 1
   printf '%s\n' "$digest"
@@ -213,7 +224,7 @@ compose() {
 # --- bake -------------------------------------------------------------------
 
 do_bake() {
-  [ -n "$TAG" ] || { printf '--tag が要ります\n' >&2; return 1; }
+  [ -n "$TAG" ] || { printf '%s\n' '--tag が要ります' >&2; return 1; }
   has_docker || { printf 'コンテナ実行系が見つかりません\n' >&2; return 1; }
 
   # 足りないものだけを作る。前回の bake が途中で落ちていると、一部だけが
@@ -312,7 +323,7 @@ exclude_evidence() {
 }
 
 do_test() {
-  [ -n "$KIND" ] || { printf '--kind が要ります\n' >&2; return 1; }
+  [ -n "$KIND" ] || { printf '%s\n' '--kind が要ります' >&2; return 1; }
   local run base_url_env out_env
   run=$(printf '%s' "$DECLARATION" | jq -r --arg k "$KIND" '.testenv.test_kinds[$k].run // empty' 2>/dev/null)
   # 種類の宣言が無いリポジトリでは何もしない（受け入れ条件 39）。
@@ -514,11 +525,14 @@ do_reap() {
   }
   has_docker || return 0
 
-  local worktree environment lock
-  while IFS=$'\t' read -r worktree environment; do
+  local worktree environment slot lock
+  while IFS=$'\t' read -r worktree environment slot; do
     [ -n "$worktree" ] || continue
     TARGET="$worktree"
     ENVIRONMENT="$environment"
+    # `compose_env` はスロットも渡す。読まずに `compose` を呼ぶと、未定義の
+    # 変数を参照した時点で終了し（`set -u`）、コンテナが動いたまま残る。
+    SLOT="$slot"
 
     # 実行中の作業ツリーはロックを握っている。握られていれば対象から外す。
     lock=$(inuse_lock "$environment")
@@ -539,7 +553,7 @@ do_reap() {
        | select(.released_at == null)
        | select(((.last_used_at // .assigned_at) | fromdateiso8601) < (now - $idle))]
       | group_by(.worktree) | map(last) | .[]
-      | "\(.worktree)\t\(.environment)"')
+      | "\(.worktree)\t\(.environment)\t\(.slot)"')
 }
 
 # --- 入口 -------------------------------------------------------------------

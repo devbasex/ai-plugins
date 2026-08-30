@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from worktree_helpers import SCRIPTS_DIR, git, write_declaration
+from worktree_helpers import SCRIPTS_DIR, git, init_repo, write_declaration
 
 TESTENV = SCRIPTS_DIR / "worktree-testenv.sh"
 
@@ -1006,3 +1006,117 @@ def test_compose_file_under_a_symlinked_directory_is_refused(
     assert proc.returncode == 1, proc
     assert "作業ツリーの外" in proc.stderr, proc.stderr
     assert not dump.exists(), "定義を読み込まない"
+
+
+# --- issue #173: 実機確認で見つかった事象 -----------------------------------
+
+
+def stub_docker_with_running_container(main_repo: Path, dump: Path) -> Path:
+    """`ps` へ稼働中のコンテナを 1 件返し、それ以外は環境変数と引数を書き出す。"""
+    stub = main_repo.parent / "fake-docker-running"
+    stub.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = "ps" ]; then printf "container-id\\n"; exit 0; fi\n'
+        f'env | grep "^NDF_" | sort > "{dump}"\n'
+        f'printf "%s\\n" "$*" >> "{dump}"\n'
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    stub.chmod(0o755)
+    return stub
+
+
+def test_reap_stops_the_idle_environment_with_its_slot(main_repo: Path, worktree: Path) -> None:
+    """停止の対象を見つけたとき、割り当てのスロットを渡して止める。
+
+    `compose_env` はスロットを読む。読ませずに `compose` を呼ぶと、未定義の
+    変数を参照した時点で終了し、コンテナが動いたまま残る。
+    """
+    (worktree / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+    declare(
+        main_repo,
+        testenv={"port_band": [20000, 29999], "port_roles": {"http": 0}},
+        localenv={"kind": "compose", "compose_files": ["docker-compose.yml"]},
+    )
+    run(["env", str(worktree)], cwd=main_repo)
+    set_last_used(main_repo, worktree, "2020-01-01T00:00:00Z")
+
+    dump = main_repo.parent / "reap-env.txt"
+    env = os.environ.copy()
+    env["WT_DOCKER_COMMAND"] = str(stub_docker_with_running_container(main_repo, dump))
+    proc = subprocess.run(
+        ["bash", str(TESTENV), "reap", "--idle", "45m"],
+        cwd=str(main_repo), env=env, capture_output=True, text=True,
+    )
+
+    assert proc.returncode == 0, proc
+    assert "停止します" in proc.stdout, proc.stdout
+    body = dump.read_text()
+    assert "NDF_SLOT=0" in body, body
+    assert "NDF_PORT_HTTP=20000" in body, body
+    assert body.rstrip().endswith("stop"), body
+
+
+@pytest.mark.parametrize(
+    ("args", "option"),
+    [(["test"], "--kind"), (["bake"], "--tag")],
+)
+def test_a_missing_option_is_reported_as_text(
+    main_repo: Path, worktree: Path, args: list[str], option: str
+) -> None:
+    """案内の本文が `--` で始まっても、書式指定として解釈されない。"""
+    declare(main_repo, testenv={"port_band": [20000, 29999],
+                                "test_kinds": {"pure": {"run": "true"}}})
+    result = run([*args, str(worktree)], cwd=main_repo)
+    assert result["rc"] == 1, result
+    assert option in result["err"], result["err"]
+    assert "invalid option" not in result["err"], result["err"]
+
+
+def test_the_declaration_and_registry_come_from_the_target(
+    tmp_path: Path, main_repo: Path, worktree: Path
+) -> None:
+    """別のリポジトリから実行しても、対象側の宣言・台帳・帯で動く。"""
+    declare(main_repo, testenv={"port_band": [20000, 29999], "port_roles": {"http": 0}})
+    other = init_repo(tmp_path / "other")
+    write_declaration(
+        other,
+        json.dumps({"version": 1,
+                    "testenv": {"port_band": [30000, 30199], "port_roles": {"http": 0}}}),
+    )
+
+    result = run(["env", str(worktree)], cwd=other)
+
+    assert result["rc"] == 0, result
+    payload = json.loads(result["out"])
+    assert payload["ports"]["http"] == 20000, payload
+    assert payload["environment"].startswith("main-wt-feature-x-"), payload
+    assert len(registry(main_repo)["assignments"]) == 1, registry(main_repo)
+    assert not (other / ".git" / "ndf" / "worktree-registry.json").exists(), \
+        "実行位置側の台帳には記録しない"
+
+
+def test_a_target_outside_a_repository_keeps_the_existing_report(
+    main_repo: Path, tmp_path: Path
+) -> None:
+    """対象がリポジトリの外にあるときは、サブコマンド自身の案内で終わる。"""
+    declare(main_repo, testenv={"port_band": [20000, 29999]})
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    result = run(["env", str(outside)], cwd=main_repo)
+
+    assert result["rc"] == 1, result
+    assert "ブランチを取れません" in result["err"], result["err"]
+
+
+def test_tag_refuses_when_the_declared_paths_have_no_match(
+    main_repo: Path, worktree: Path
+) -> None:
+    """宣言したパスが 1 件も見つからないとき、空の内容に対する値を返さない。"""
+    declare(main_repo, testenv={"golden_tag_paths": ["database/migrations"]})
+
+    result = run(["tag", str(worktree)], cwd=main_repo)
+
+    assert result["rc"] == 1, result
+    assert result["out"].strip() == "", result["out"]

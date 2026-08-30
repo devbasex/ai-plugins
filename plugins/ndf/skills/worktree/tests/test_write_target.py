@@ -223,3 +223,270 @@ def test_target_directory_joined_to_the_option(command: str) -> None:
     targets, rc = extract(command)
     assert rc == 0, command
     assert targets == ["plugins/ndf"], (command, targets)
+
+
+# --- issue #173: 実行される部分に絞る ---------------------------------------
+
+
+def test_a_heredoc_body_is_not_a_write_target() -> None:
+    """本文はコマンドとして実行される部分ではない。"""
+    command = (
+        "cat > report.md <<'EOS'\n"
+        "受領: <payload>\n"
+        "判定: <期待: 一致>\n"
+        "EOS"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert targets == ["report.md"], targets
+
+
+def test_a_write_after_a_heredoc_is_still_found() -> None:
+    """本文の終端より後ろは、また実行される部分に戻る。"""
+    command = (
+        "cat <<'EOS' > first.md\n"
+        "本文 > body.md\n"
+        "EOS\n"
+        "echo hi > second.md"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert targets == ["first.md", "second.md"], targets
+
+
+def test_an_indented_heredoc_body_is_dropped() -> None:
+    """`<<-` は終端の語の前の tab を無視する。"""
+    command = (
+        "cat <<-EOS > out.md\n"
+        "\t本文 > body.md\n"
+        "\tEOS\n"
+        "echo hi > after.md"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert targets == ["out.md", "after.md"], targets
+
+
+def test_a_shift_operator_inside_quotes_does_not_hide_later_writes() -> None:
+    """引用符の中の `<<` は本文の始まりではない。"""
+    command = (
+        "echo 'a << b'\n"
+        "echo hi > plugins/ndf/README.md"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert targets == ["plugins/ndf/README.md"], targets
+
+
+def test_a_here_string_has_no_body() -> None:
+    """`<<<` は行の入力を渡す形で、終端の語を持たない。"""
+    command = (
+        "cat <<<'body' > out.md\n"
+        "echo hi > after.md"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert targets == ["out.md", "after.md"], targets
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'cp guard.sh "$SP/wt-test/guard.sh"',
+        "echo hi > $SP/out.md",
+        'echo hi | tee "${OUT}/log.txt"',
+    ],
+)
+def test_words_with_an_unexpanded_variable_are_not_targets(command: str) -> None:
+    """展開前の変数を含む語は、どのパスを指すか決められない。"""
+    targets, rc = extract(command)
+    assert rc == 1, targets
+    assert targets == [], targets
+
+
+def test_a_write_inside_an_expanding_heredoc_is_found() -> None:
+    """終端の語を引用符で囲まない本文は展開され、コマンド置換が実行される。"""
+    command = (
+        "cat > report.md <<EOS\n"
+        "$(echo data > side-effect.md)\n"
+        "EOS"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert "report.md" in targets, targets
+    assert "side-effect.md" in targets, targets
+
+
+def test_an_expanding_heredoc_without_substitution_is_dropped() -> None:
+    """展開される本文でも、コマンド置換が無ければ実行される部分ではない。"""
+    command = (
+        "cat > report.md <<EOS\n"
+        "受領: <payload>\n"
+        "判定: <期待: 一致>\n"
+        "EOS"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert targets == ["report.md"], targets
+
+
+def test_a_quoted_delimiter_keeps_the_body_inert() -> None:
+    """引用符で囲めば本文は展開されない。コマンド置換の字面も実行されない。"""
+    command = (
+        "cat > report.md <<'EOS'\n"
+        "$(echo data > side-effect.md)\n"
+        "EOS"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert targets == ["report.md"], targets
+
+
+def test_a_multi_line_substitution_inside_an_expanding_heredoc_is_found() -> None:
+    """コマンド置換は複数行にまたがる。開いてから閉じるまでを残す。"""
+    command = (
+        "cat > report.md <<EOS\n"
+        "$(\n"
+        "echo data > side-effect.md\n"
+        ")\n"
+        "EOS"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert targets == ["report.md", "side-effect.md"], targets
+
+
+def test_lines_after_a_closed_substitution_are_dropped_again() -> None:
+    """置換が閉じたら、その後ろの本文はまた実行されない部分に戻る。"""
+    command = (
+        "cat > report.md <<EOS\n"
+        "$(echo data > side-effect.md)\n"
+        "受領: <payload>\n"
+        "EOS"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert targets == ["report.md", "side-effect.md"], targets
+
+
+def test_a_multi_line_backtick_substitution_is_found() -> None:
+    """backtick の置換も開閉が行をまたぐ。"""
+    command = (
+        "cat > report.md <<EOS\n"
+        "`\n"
+        "echo data > side-effect.md\n"
+        "`\n"
+        "EOS"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert "side-effect.md" in targets, targets
+
+
+def test_a_closing_paren_inside_quotes_does_not_end_the_substitution() -> None:
+    """置換の中では引用符が効く。囲まれた `)` は閉じ括弧ではない。"""
+    command = (
+        "cat > report.md <<EOS\n"
+        '$(echo "a )"\n'
+        "echo data > side-effect.md\n"
+        ")\n"
+        "EOS"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert "side-effect.md" in targets, targets
+
+
+def test_a_quoted_paren_on_the_same_line_keeps_the_write() -> None:
+    command = 'cat > report.md <<EOS\n$(echo "nested )" > side-effect.md)\nEOS'
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert "report.md" in targets, targets
+    assert "side-effect.md" in targets, targets
+
+
+def test_an_apostrophe_in_the_body_is_not_a_quote() -> None:
+    """本文そのものでは引用符は字面である。後ろの置換を見落とさない。"""
+    command = (
+        "cat > report.md <<EOS\n"
+        "it's fine\n"
+        "$(echo data > side-effect.md)\n"
+        "EOS"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert "side-effect.md" in targets, targets
+
+
+def test_single_quotes_inside_a_substitution_are_honoured() -> None:
+    command = (
+        "cat > report.md <<EOS\n"
+        "$(echo 'a )'\n"
+        "echo data > side-effect.md\n"
+        ")\n"
+        "EOS"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert "side-effect.md" in targets, targets
+
+
+def test_an_arithmetic_expansion_is_not_a_substitution() -> None:
+    """`$((...))` は算術展開で、中の `>` は比較である。"""
+    command = (
+        "cat > report.md <<EOS\n"
+        "$((3 > 2))\n"
+        "EOS"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert targets == ["report.md"], targets
+
+
+def test_a_substitution_after_an_arithmetic_expansion_is_found() -> None:
+    """算術展開を読み飛ばしても、同じ行の後ろの置換は拾う。"""
+    command = (
+        "cat > report.md <<EOS\n"
+        "$((3 > 2)) $(echo data > side-effect.md)\n"
+        "EOS"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert "side-effect.md" in targets, targets
+
+
+def test_a_nested_arithmetic_expansion_is_skipped_to_its_end() -> None:
+    command = (
+        "cat > report.md <<EOS\n"
+        "$(( (3 > 2) ? 1 : 0 ))\n"
+        "受領: <payload>\n"
+        "EOS"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert targets == ["report.md"], targets
+
+
+def test_a_quoted_delimiter_with_a_space_is_recognised() -> None:
+    """終端の語は引用符で空白を含められる。途中で切ると終端を見つけられない。"""
+    command = (
+        'cat > report.md <<"EOF X"\n'
+        "受領: <payload>\n"
+        "EOF X\n"
+        "echo hi > after.md"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert targets == ["report.md", "after.md"], targets
+
+
+def test_the_body_outside_a_substitution_is_not_scanned() -> None:
+    """展開される本文でも、置換の外は実行されない。字面を書き込み先にしない。"""
+    command = (
+        "cat > report.md <<EOS\n"
+        "変換: 入力 > <期待: 一致>  $(echo data > side-effect.md)\n"
+        "EOS"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert targets == ["report.md", "side-effect.md"], targets

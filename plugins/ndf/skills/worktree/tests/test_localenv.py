@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from worktree_helpers import SCRIPTS_DIR, git, write_declaration
+from worktree_helpers import SCRIPTS_DIR, git, init_repo, write_declaration
 
 LOCALENV = SCRIPTS_DIR / "worktree-localenv.sh"
 
@@ -396,3 +396,27 @@ def test_mode_checks_both_sides_of_a_rename(main_repo: Path, worktree: Path) -> 
 
     assert result["rc"] == 1, result
     assert "docker/a.yml" in result["out"], result["out"]
+
+
+# --- issue #173: 主ディレクトリを対象から解決する ---------------------------
+
+
+def test_the_declaration_and_sources_come_from_the_target(
+    tmp_path: Path, main_repo: Path, worktree: Path
+) -> None:
+    """別のリポジトリから実行しても、対象側の主ディレクトリから複製する。"""
+    (main_repo / ".env").write_text("from-main\n", encoding="utf-8")
+    declare(main_repo, localenv={"kind": "compose", "copy_from_main": [".env"]})
+
+    other = init_repo(tmp_path / "other")
+    (other / ".env").write_text("from-other\n", encoding="utf-8")
+    write_declaration(
+        other,
+        json.dumps({"version": 1,
+                    "localenv": {"kind": "compose", "copy_from_main": [".env"]}}),
+    )
+
+    result = run(["setup", str(worktree)], cwd=other)
+
+    assert result["rc"] == 0, result
+    assert (worktree / ".env").read_text(encoding="utf-8") == "from-main\n"
