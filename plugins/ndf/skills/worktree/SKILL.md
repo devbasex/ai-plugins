@@ -193,11 +193,15 @@ Pull Request がマージされた後の削除は `/ndf:merged` が行う。
 
 ```bash
 NDF="$NDF_SCRIPTS/worktree-localenv.sh"
-bash "$NDF" setup "$main_dir/.worktrees/<ブランチ名>"  # 設定と依存物を持ち込む
-bash "$NDF" mode                                       # 相乗り(0) か 分離(1) かを提示
-bash "$NDF" aim "$main_dir/.worktrees/<ブランチ名>"     # 環境が指すコードを向ける
-bash "$NDF" verify; echo $?                            # 0 一致 / 1 不一致 / 2 未起動
+WT="$main_dir/.worktrees/<ブランチ名>"
+bash "$NDF" setup "$WT"       # 設定と依存物を持ち込む
+bash "$NDF" mode "$WT"        # 相乗り(0) か 分離(1) かを提示
+bash "$NDF" aim "$WT"         # 環境が指すコードを向ける
+bash "$NDF" verify "$WT"; echo $?  # 0 一致 / 1 不一致 / 2 未起動
 ```
+
+**対象の作業ツリーを引数で渡す。** 省略すると現在地が対象になるため、主ディレクトリから
+実行すると主ディレクトリを照合してしまう。
 
 **検証の直前に `verify` を通す。** 環境に載っているコードが対象と違っていても、失敗と
 しては現れない。別のコードを検証したことに気づけないまま進む。

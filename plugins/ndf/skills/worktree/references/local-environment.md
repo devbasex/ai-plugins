@@ -29,10 +29,11 @@ flowchart TD
 | 相乗り | 既定。コマンドで完結する検証、1 本だけの画面確認 | 主ディレクトリの 1 セットを共有 | 不要 |
 | 分離 | データの構造を壊す変更、2 本の同時比較、コンテナ定義そのものの変更 | 作業ツリーごとに 1 セット | 並行起動用の定義の追加 |
 
-判定は変更ファイルの一覧を宣言の条件へ当てて提示する。
+判定は変更ファイルの一覧を宣言の条件へ当てて提示する。対象の作業ツリーは引数で渡す
+（省略すると現在地が対象になる）。
 
 ```bash
-bash "$NDF_SCRIPTS/worktree-localenv.sh" mode   # 0 相乗り / 1 分離
+bash "$NDF_SCRIPTS/worktree-localenv.sh" mode "$WT"   # 0 相乗り / 1 分離
 ```
 
 既存の定義の書き換えやコードの中に直接書かれた操作は条件で拾えない。**最終判断は
@@ -118,7 +119,7 @@ bash "$NDF_SCRIPTS/worktree-localenv.sh" aim "$WT"
 ### 切り替えたことを確かめる
 
 ```bash
-bash "$NDF_SCRIPTS/worktree-localenv.sh" verify; echo $?
+bash "$NDF_SCRIPTS/worktree-localenv.sh" verify "$WT"; echo $?
 ```
 
 | 終了コード | 意味 | 次の手 |

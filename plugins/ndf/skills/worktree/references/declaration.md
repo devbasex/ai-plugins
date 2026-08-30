@@ -83,12 +83,16 @@
 ## 確かめる
 
 ```bash
+WT="$main_dir/.worktrees/<ブランチ名>"
+
 # 宣言が読めているか（読めなければ何も出ない）
-bash "$NDF_SCRIPTS/worktree-localenv.sh" mode
+bash "$NDF_SCRIPTS/worktree-localenv.sh" mode "$WT"
 
 # 照合の状態（0 一致 / 1 不一致 / 2 未起動または適用外）
-bash "$NDF_SCRIPTS/worktree-localenv.sh" verify; echo $?
+bash "$NDF_SCRIPTS/worktree-localenv.sh" verify "$WT"; echo $?
 ```
+
+対象の作業ツリーは引数で渡す。省略すると現在地が対象になる。
 
 宣言に誤りがあっても作業は止まらない。読めない宣言は無いものとして扱われ、
 何も出力せずに終わる。誤りに気づけるよう、置いた直後に上のコマンドで確かめる。

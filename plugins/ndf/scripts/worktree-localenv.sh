@@ -215,6 +215,12 @@ do_healthcheck() {
 do_aim() {
   local layout build service src_target project container current_link
   local reload_process reload_signal
+  # 存在しない対象へ向けると、コンテナ内のコード位置が実在しないパスを指す。
+  [ -d "$TARGET" ] || { printf '作業ツリーがありません: %s\n' "$TARGET" >&2; return 1; }
+  git -C "$TARGET" rev-parse --git-dir >/dev/null 2>&1 || {
+    printf '作業ツリーではありません: %s\n' "$TARGET" >&2
+    return 1
+  }
   layout=$(decl_get '.localenv.layout // empty')
   service=$(decl_get '.localenv.app_service // empty')
   src_target=$(decl_get '.localenv.src_target // empty')
@@ -286,8 +292,24 @@ do_mode() {
     return 0
   fi
 
-  _wt_read_lines < <(git -C "$TARGET" status --porcelain --untracked-files=all 2>/dev/null | cut -c4-)
-  for path in "${WT_LINES[@]+"${WT_LINES[@]}"}"; do
+  # `git status --porcelain` は空白や非 ASCII を含むパスを引用符で囲む。
+  # `-z` で null 区切りにして、引用されない生のパスを読む。
+  local entry status skip_next=0
+  local -a changed=()
+  while IFS= read -r -d '' entry; do
+    if [ "$skip_next" = 1 ]; then
+      skip_next=0
+      continue
+    fi
+    status=${entry:0:2}
+    changed+=("${entry:3}")
+    # 改名と複製は、続くレコードに変更前のパスが入る。
+    case "$status" in
+      R*|C*) skip_next=1 ;;
+    esac
+  done < <(git -C "$TARGET" status --porcelain -z --untracked-files=all 2>/dev/null)
+
+  for path in "${changed[@]+"${changed[@]}"}"; do
     [ -n "$path" ] || continue
     for pattern in "${patterns[@]}"; do
       [ -n "$pattern" ] || continue

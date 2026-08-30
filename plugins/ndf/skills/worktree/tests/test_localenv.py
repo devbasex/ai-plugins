@@ -336,3 +336,61 @@ def test_setup_refuses_a_parent_symlink_leaving_the_worktree(main_repo: Path, wo
 
     assert result["rc"] == 1, result
     assert not (outside / "lib.txt").exists(), "外へ書き込まない"
+
+
+def test_aim_requires_an_existing_worktree(main_repo: Path) -> None:
+    """存在しない対象へ向けると、コンテナ内のコード位置が実在しないパスを指す。"""
+    declare(main_repo, {"kind": "compose", "layout": "indirect", "src_target": "/src"})
+    result = run(["aim", str(main_repo / ".worktrees" / "gone")], cwd=main_repo)
+    assert result["rc"] == 1, result
+    assert "作業ツリーがありません" in result["err"], result["err"]
+
+
+def test_aim_requires_a_git_worktree(main_repo: Path, tmp_path: Path) -> None:
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    declare(main_repo, {"kind": "compose", "layout": "indirect", "src_target": "/src"})
+    result = run(["aim", str(plain)], cwd=main_repo)
+    assert result["rc"] == 1, result
+    assert "作業ツリーではありません" in result["err"], result["err"]
+
+
+def test_mode_handles_paths_with_spaces(main_repo: Path, worktree: Path) -> None:
+    """`git status --porcelain` は空白を含むパスを引用符で囲む。生のパスで照合する。"""
+    declare(main_repo, {"kind": "compose", "isolate_when": ["docker/**"]})
+    (worktree / "docker").mkdir()
+    (worktree / "docker" / "my compose.yml").write_text("x\n", encoding="utf-8")
+    git(worktree, "add", "-A")
+
+    result = run(["mode", str(worktree)], cwd=main_repo)
+
+    assert result["rc"] == 1, result
+    assert "docker/my compose.yml" in result["out"], result["out"]
+
+
+def test_mode_handles_non_ascii_paths(main_repo: Path, worktree: Path) -> None:
+    declare(main_repo, {"kind": "compose", "isolate_when": ["docker/**"]})
+    (worktree / "docker").mkdir()
+    (worktree / "docker" / "設定.yml").write_text("x\n", encoding="utf-8")
+    git(worktree, "add", "-A")
+
+    result = run(["mode", str(worktree)], cwd=main_repo)
+
+    assert result["rc"] == 1, result
+    assert "docker/設定.yml" in result["out"], result["out"]
+
+
+def test_mode_skips_the_old_path_of_a_rename(main_repo: Path, worktree: Path) -> None:
+    """改名は続くレコードに変更前のパスが入る。条件へ二重に当てない。"""
+    (worktree / "docker").mkdir()
+    (worktree / "docker" / "a.yml").write_text("x\n", encoding="utf-8")
+    git(worktree, "add", "-A")
+    git(worktree, "commit", "-q", "-m", "add")
+    git(worktree, "mv", "docker/a.yml", "docker/b.yml")
+    declare(main_repo, {"kind": "compose", "isolate_when": ["docker/**"]})
+
+    result = run(["mode", str(worktree)], cwd=main_repo)
+
+    assert result["rc"] == 1, result
+    assert "docker/b.yml" in result["out"], result["out"]
+    assert "docker/a.yml" not in result["out"], result["out"]
