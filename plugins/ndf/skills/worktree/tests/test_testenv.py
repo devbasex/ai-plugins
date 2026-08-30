@@ -244,7 +244,8 @@ def test_expose_records_the_url_and_closing_time(main_repo: Path, worktree: Path
     declare(main_repo, testenv={
         "port_band": [20000, 29999],
         "expose": {"enabled": True, "public_tag": "golden-public",
-                   "base_domain": "example.test", "ttl": "8h"},
+                   "base_domain": "example.test", "ttl": "8h",
+                   "open_command": "true", "close_command": "true"},
     })
     run(["env", str(worktree)], cwd=main_repo)
     # 公開を許す基準が載っている状態を作る。
@@ -266,7 +267,8 @@ def test_expose_records_the_url_and_closing_time(main_repo: Path, worktree: Path
 def test_expose_allows_only_one_at_a_time(main_repo: Path, worktree: Path) -> None:
     declare(main_repo, testenv={
         "port_band": [20000, 29999],
-        "expose": {"enabled": True, "public_tag": "golden-public", "base_domain": "example.test"},
+        "expose": {"enabled": True, "public_tag": "golden-public",
+                   "base_domain": "example.test", "open_command": "true"},
     })
     second = main_repo / ".worktrees" / "fix" / "y"
     git(main_repo, "worktree", "add", "-q", "-b", "fix/y", str(second))
@@ -580,3 +582,93 @@ def test_evidence_inside_the_worktree_is_accepted(main_repo: Path, worktree: Pat
     result = run(["test", str(worktree), "--kind", "browser", "--out", str(out)], cwd=main_repo)
     assert result["rc"] == 0, result
     assert result["out"] == str(out), result
+
+
+def golden(main_repo: Path, worktree: Path) -> None:
+    """公開を許す基準が載っている状態にする。"""
+    path = main_repo / ".git" / "ndf" / "worktree-registry.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    for row in data["assignments"]:
+        row["golden_tag"] = "golden-public"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def test_expose_without_a_command_records_nothing(main_repo: Path, worktree: Path) -> None:
+    """口を開ける手段が無ければ、公開したことにしない。"""
+    declare(main_repo, testenv={
+        "port_band": [20000, 29999],
+        "expose": {"enabled": True, "public_tag": "golden-public",
+                   "base_domain": "example.test"},
+    })
+    run(["env", str(worktree)], cwd=main_repo)
+    golden(main_repo, worktree)
+
+    result = run(["expose", str(worktree)], cwd=main_repo)
+
+    assert result["rc"] == 2, result
+    assert "open_command" in result["err"], result["err"]
+    assert registry(main_repo)["assignments"][0]["expose"] is None
+
+
+def test_expose_runs_the_declared_command(main_repo: Path, worktree: Path) -> None:
+    marker = main_repo / "opened.txt"
+    declare(main_repo, testenv={
+        "port_band": [20000, 29999],
+        "expose": {"enabled": True, "public_tag": "golden-public",
+                   "base_domain": "example.test",
+                   "open_command": f'printf "%s" "$NDF_EXPOSE_URL" > {marker}'},
+    })
+    run(["env", str(worktree)], cwd=main_repo)
+    golden(main_repo, worktree)
+
+    result = run(["expose", str(worktree)], cwd=main_repo)
+
+    assert result["rc"] == 0, result
+    assert marker.read_text() == "https://wt0.example.test"
+
+
+def test_expose_rolls_back_when_the_command_fails(main_repo: Path, worktree: Path) -> None:
+    """口を開けられなければ記録を戻す。残すと次の公開が拒まれ続ける。"""
+    declare(main_repo, testenv={
+        "port_band": [20000, 29999],
+        "expose": {"enabled": True, "public_tag": "golden-public",
+                   "base_domain": "example.test", "open_command": "exit 1"},
+    })
+    run(["env", str(worktree)], cwd=main_repo)
+    golden(main_repo, worktree)
+
+    result = run(["expose", str(worktree)], cwd=main_repo)
+
+    assert result["rc"] == 1, result
+    row = registry(main_repo)["assignments"][0]
+    assert row["expose"]["closed_at"] is not None, "開いたままにしない"
+
+
+def test_unexpose_runs_the_declared_command(main_repo: Path, worktree: Path) -> None:
+    marker = main_repo / "closed.txt"
+    declare(main_repo, testenv={
+        "port_band": [20000, 29999],
+        "expose": {"enabled": True, "public_tag": "golden-public",
+                   "base_domain": "example.test", "open_command": "true",
+                   "close_command": f'printf "%s" "$NDF_EXPOSE_URL" > {marker}'},
+    })
+    run(["env", str(worktree)], cwd=main_repo)
+    golden(main_repo, worktree)
+    run(["expose", str(worktree)], cwd=main_repo)
+
+    run(["unexpose", str(worktree)], cwd=main_repo)
+
+    assert marker.read_text() == "https://wt0.example.test"
+
+
+def test_env_name_keeps_the_digest_for_long_branches(main_repo: Path) -> None:
+    """40 文字で切っても要約値を落とさない。落とすと先頭が同じ名前で衝突する。"""
+    from worktree_helpers import run_lib
+
+    long_a = "feature/" + "a" * 80
+    long_b = "feature/" + "a" * 79 + "b"
+    a = run_lib(f'wt_env_name "{main_repo}" "{long_a}"', cwd=main_repo).stdout.strip()
+    b = run_lib(f'wt_env_name "{main_repo}" "{long_b}"', cwd=main_repo).stdout.strip()
+
+    assert len(a) == 40 and len(b) == 40
+    assert a != b, (a, b)

@@ -321,6 +321,23 @@ do_test() {
 
 # --- expose / unexpose ------------------------------------------------------
 
+do_unexpose() {
+  local close_command url
+  url=$(wt_registry_visible "$(registry)" \
+    | jq -r --arg wt "$TARGET" '[.assignments[] | select(.worktree == $wt and (.expose // {}).closed_at == null)] | last | .expose.url // empty')
+
+  close_command=$(decl_get '.testenv.expose.close_command // empty')
+  if [ -n "$close_command" ] && [ -n "$url" ]; then
+    (cd "$TARGET" && env "NDF_EXPOSE_URL=$url" sh -c "$close_command") || true
+  fi
+
+  wt_registry_update "$(registry)" '
+    .assignments |= map(
+      if .worktree == $wt and .expose != null and .expose.closed_at == null
+      then .expose.closed_at = (now | todate) else . end
+    )' --arg wt "$TARGET"
+}
+
 do_expose() {
   local enabled public_tag base_domain ttl loaded_tag host
   enabled=$(decl_get '.testenv.expose.enabled // false')
@@ -349,6 +366,15 @@ do_expose() {
   ttl=$(decl_get '.testenv.expose.ttl // "8h"')
   host="wt${SLOT}.${base_domain}"
 
+  # 実際に口を開ける手段はリポジトリごとに違う（共有の入口の設定、折り返しの
+  # 中継など）。宣言が無ければ、記録だけ残して公開したことにはしない。
+  local open_command
+  open_command=$(decl_get '.testenv.expose.open_command // empty')
+  if [ -z "$open_command" ]; then
+    printf '%s\n' "公開の手段が宣言されていません（testenv.expose.open_command）" >&2
+    return 2
+  fi
+
   # 折り返しを使う公開は先着 1 本で排他する。**判定を排他区間の中で行う。**
   # 区間の外で数えると、同時に走った 2 本が両方とも通り抜ける。
   wt_registry_update "$(registry)" '
@@ -369,16 +395,19 @@ do_expose() {
     printf '拒否: 別のテスト環境が公開中です（同時に開けるのは 1 本）\n' >&2
     return 1
   fi
+
+  # 記録を先に置くのは、先着 1 本の関門を通ったことを示すため。口を開けられ
+  # なければ記録を戻す。残すと、次の公開が「別が公開中」で拒まれ続ける。
+  if ! (cd "$TARGET" && env "NDF_EXPOSE_URL=$opened" "NDF_EXPOSE_HOST=$host" \
+        "NDF_EXPOSE_ENVIRONMENT=$ENVIRONMENT" "NDF_EXPOSE_SLOT=$SLOT" \
+        sh -c "$open_command"); then
+    do_unexpose >/dev/null 2>&1
+    printf '%s\n' "公開の手段が失敗しました。記録を戻しました" >&2
+    return 1
+  fi
   printf '%s\n' "$opened"
 }
 
-do_unexpose() {
-  wt_registry_update "$(registry)" '
-    .assignments |= map(
-      if .worktree == $wt and .expose != null and .expose.closed_at == null
-      then .expose.closed_at = (now | todate) else . end
-    )' --arg wt "$TARGET"
-}
 
 # --- reap -------------------------------------------------------------------
 

@@ -508,16 +508,31 @@ WT_SLOT_MAX=63
 
 # 環境名を作る。`<リポジトリ>-wt-<ブランチ>-<要約値 6 桁>` を小文字英数と `-` に
 # 揃え、40 文字で切る。同じ作業ツリーには常に同じ値が返る。
+# 名前は 40 文字で切る。**要約値は必ず残す。** 単純に末尾を落とすと、先頭が
+# 同じ長いブランチ名どうしで同じ名前になり、テスト環境が混ざる。
+WT_ENV_NAME_MAX=40
+
+_wt_slug() {
+  printf '%s' "$1" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed -e 's/[^a-z0-9-]/-/g' -e 's/--*/-/g' -e 's/^-//' -e 's/-$//'
+}
+
 wt_env_name() {
-  local main_dir="${1:-}" branch="${2:-}" repo digest name
+  local main_dir="${1:-}" branch="${2:-}" repo digest head room name
   [ -n "$main_dir" ] && [ -n "$branch" ] || return 1
-  repo=$(basename "$main_dir")
   digest=$(printf '%s' "$branch" | (sha1sum 2>/dev/null || shasum 2>/dev/null) | cut -c1-6)
   [ -n "$digest" ] || return 1
-  name=$(printf '%s-wt-%s-%s' "$repo" "$branch" "$digest" \
-    | tr '[:upper:]' '[:lower:]' \
-    | sed -e 's/[^a-z0-9-]/-/g' -e 's/--*/-/g' -e 's/^-//' -e 's/-$//')
-  printf '%s\n' "$(printf '%s' "$name" | cut -c1-40)"
+
+  repo=$(_wt_slug "$(basename "$main_dir")")
+  branch=$(_wt_slug "$branch")
+
+  # 要約値と区切りに 7 文字を残し、その手前を切る。
+  room=$((WT_ENV_NAME_MAX - 7))
+  head=$(printf '%s-wt-%s' "$repo" "$branch" | cut -c "1-$room")
+  head=${head%-}
+  name=$(printf '%s-%s' "$head" "$digest")
+  printf '%s\n' "$(_wt_slug "$name")"
 }
 
 # ポート番号を返す。`<帯の下限> + スロット*20 + 役割番号`。

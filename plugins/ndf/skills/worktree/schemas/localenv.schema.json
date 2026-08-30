@@ -233,6 +233,14 @@
             "ttl": {
               "type": "string",
               "description": "公開の期限"
+            },
+            "open_command": {
+              "type": "string",
+              "description": "公開の口を開けるコマンド。宣言が無ければ公開しない。NDF_EXPOSE_URL / NDF_EXPOSE_HOST / NDF_EXPOSE_ENVIRONMENT / NDF_EXPOSE_SLOT が環境変数で渡る"
+            },
+            "close_command": {
+              "type": "string",
+              "description": "公開の口を閉じるコマンド。NDF_EXPOSE_URL が環境変数で渡る"
             }
           }
         }
