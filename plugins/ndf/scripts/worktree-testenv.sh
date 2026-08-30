@@ -322,13 +322,20 @@ do_test() {
 # --- expose / unexpose ------------------------------------------------------
 
 do_unexpose() {
-  local close_command url
+  local close_command url host
   url=$(wt_registry_visible "$(registry)" \
     | jq -r --arg wt "$TARGET" '[.assignments[] | select(.worktree == $wt and (.expose // {}).closed_at == null)] | last | .expose.url // empty')
 
   close_command=$(decl_get '.testenv.expose.close_command // empty')
   if [ -n "$close_command" ] && [ -n "$url" ]; then
-    (cd "$TARGET" && env "NDF_EXPOSE_URL=$url" sh -c "$close_command") || true
+    # 開けるときと同じ値を渡す。URL だけでは、環境名やスロットを資源の名前に
+    # 使っている構成で後片付けの対象を特定できない。
+    load_assignment || true
+    host=${url#https://}
+    host=${host#http://}
+    (cd "$TARGET" && env "NDF_EXPOSE_URL=$url" "NDF_EXPOSE_HOST=$host" \
+      "NDF_EXPOSE_ENVIRONMENT=${ENVIRONMENT:-}" "NDF_EXPOSE_SLOT=${SLOT:-}" \
+      sh -c "$close_command") || true
   fi
 
   wt_registry_update "$(registry)" '

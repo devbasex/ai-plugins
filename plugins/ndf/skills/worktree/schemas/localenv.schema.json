@@ -240,7 +240,7 @@
             },
             "close_command": {
               "type": "string",
-              "description": "公開の口を閉じるコマンド。NDF_EXPOSE_URL が環境変数で渡る"
+              "description": "公開の口を閉じるコマンド。open_command と同じ環境変数（NDF_EXPOSE_URL / NDF_EXPOSE_HOST / NDF_EXPOSE_ENVIRONMENT / NDF_EXPOSE_SLOT）が渡る"
             }
           }
         }

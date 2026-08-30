@@ -151,8 +151,10 @@ bash "$NDF_SCRIPTS/worktree-testenv.sh" unexpose "$WT"
 
 **口を開ける手段は宣言が持つ。** 共有の入口の設定や折り返しの中継の作り方はリポジトリごとに
 違うため、`testenv.expose.open_command` と `close_command` に書く。宣言が無ければ公開せず、
-終了コード 2 で終わる（記録も残さない）。コマンドには `NDF_EXPOSE_URL` / `NDF_EXPOSE_HOST` /
-`NDF_EXPOSE_ENVIRONMENT` / `NDF_EXPOSE_SLOT` が環境変数で渡る。
+終了コード 2 で終わる（記録も残さない）。どちらのコマンドにも `NDF_EXPOSE_URL` /
+`NDF_EXPOSE_HOST` / `NDF_EXPOSE_ENVIRONMENT` / `NDF_EXPOSE_SLOT` が環境変数で渡る。閉じる側にも
+同じ値を渡すのは、環境名やスロットを資源の名前に使っている構成で、URL だけでは後片付けの対象を
+特定できないためである。
 
 記録を先に置いてからコマンドを実行するのは、先着 1 本の関門を通ったことを示すためである。
 **コマンドが失敗すれば記録を戻す。** 残すと、次の公開が「別が公開中」で拒まれ続ける。

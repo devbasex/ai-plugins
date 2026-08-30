@@ -650,7 +650,9 @@ def test_unexpose_runs_the_declared_command(main_repo: Path, worktree: Path) -> 
         "port_band": [20000, 29999],
         "expose": {"enabled": True, "public_tag": "golden-public",
                    "base_domain": "example.test", "open_command": "true",
-                   "close_command": f'printf "%s" "$NDF_EXPOSE_URL" > {marker}'},
+                   "close_command":
+                       f'printf "%s|%s|%s|%s" "$NDF_EXPOSE_URL" "$NDF_EXPOSE_HOST" '
+                       f'"$NDF_EXPOSE_ENVIRONMENT" "$NDF_EXPOSE_SLOT" > {marker}'},
     })
     run(["env", str(worktree)], cwd=main_repo)
     golden(main_repo, worktree)
@@ -658,7 +660,11 @@ def test_unexpose_runs_the_declared_command(main_repo: Path, worktree: Path) -> 
 
     run(["unexpose", str(worktree)], cwd=main_repo)
 
-    assert marker.read_text() == "https://wt0.example.test"
+    url, host, environment, slot = marker.read_text().split("|")
+    assert url == "https://wt0.example.test"
+    assert host == "wt0.example.test"
+    assert environment.startswith("main-wt-feature-x-"), environment
+    assert slot == "0"
 
 
 def test_env_name_keeps_the_digest_for_long_branches(main_repo: Path) -> None:
