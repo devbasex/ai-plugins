@@ -108,12 +108,12 @@ wt_declaration() {
 # 案内を出さないパスを 1 行 1 件で出力する。
 # 引数は wt_declaration の出力。空や未指定なら既定を返す。
 wt_allow_paths() {
-  local decl="${1:-}" listed=""
-  if [ -n "$decl" ] && command -v jq >/dev/null 2>&1; then
-    listed=$(printf '%s' "$decl" | jq -r '(.guard.allow_paths // []) | .[]' 2>/dev/null)
-  fi
-  if [ -n "$listed" ]; then
-    printf '%s\n' "$listed"
+  local decl="${1:-}"
+  # 空の配列は「何も許可しない」という指定である。出力が空であることと
+  # 項目が無いことを区別するため、既定へ戻すかは配列の有無で決める。
+  if [ -n "$decl" ] && command -v jq >/dev/null 2>&1 &&
+     printf '%s' "$decl" | jq -e '(.guard.allow_paths | type) == "array"' >/dev/null 2>&1; then
+    printf '%s' "$decl" | jq -r '.guard.allow_paths | .[]' 2>/dev/null
     return 0
   fi
   printf '%s\n' "${WT_DEFAULT_ALLOW_PATHS[@]}"

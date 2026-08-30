@@ -83,3 +83,24 @@ def test_allow_paths_uses_declaration_when_present(main_repo: Path) -> None:
         cwd=main_repo,
     )
     assert got.stdout.splitlines() == ["notes/"], got.stdout
+
+
+def test_empty_allow_paths_allows_nothing(main_repo: Path) -> None:
+    """空の配列は「何も許可しない」という指定で、既定へは戻さない。"""
+    write_declaration(main_repo, json.dumps({"version": 1, "guard": {"allow_paths": []}}))
+    got = run_lib(
+        f'decl=$(wt_declaration "{main_repo}"); wt_allow_paths "$decl"; echo rc=$?',
+        cwd=main_repo,
+    )
+    assert got.stdout.strip() == "rc=0", got.stdout
+
+
+def test_allow_paths_of_wrong_type_falls_back(main_repo: Path) -> None:
+    """配列でない値は指定として読まず、既定へ戻す。"""
+    write_declaration(main_repo, json.dumps({"version": 1, "guard": {"allow_paths": "issues/"}}))
+    got = run_lib(
+        f'decl=$(wt_declaration "{main_repo}"); wt_allow_paths "$decl"',
+        cwd=main_repo,
+    )
+    assert "issues/" in got.stdout.splitlines()
+    assert ".gitignore" in got.stdout.splitlines(), got.stdout
