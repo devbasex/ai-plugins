@@ -59,6 +59,33 @@ is_safe_relative() {
   return 0
 }
 
+# 書き込み先が本当に作業ツリーの中かを、実体で確かめる。
+# 字面の検査だけでは、途中に置かれた symlink をたどって外へ書き込めてしまう。
+destination_is_safe() {
+  local rel="$1" to="$TARGET/$1" parent resolved
+
+  # 宛先そのものが symlink のときは、たどらずに断る。
+  if [ -L "$to" ]; then
+    printf '中断: %s は symlink です。たどらずに終わります\n' "$rel" >&2
+    return 1
+  fi
+
+  # 実在する最も近い上位ディレクトリを実体解決し、作業ツリーの中かを見る。
+  parent=$(dirname "$to")
+  while [ ! -d "$parent" ] && [ "$parent" != "/" ] && [ -n "$parent" ]; do
+    parent=$(dirname "$parent")
+  done
+  resolved=$(cd "$parent" 2>/dev/null && pwd -P) || {
+    printf '中断: %s の置き場所を解決できません\n' "$rel" >&2
+    return 1
+  }
+  case "$resolved" in
+    "$TARGET" | "$TARGET"/*) return 0 ;;
+  esac
+  printf '中断: %s の書き込み先が作業ツリーの外（%s）を指します\n' "$rel" "$resolved" >&2
+  return 1
+}
+
 # 既にあるパスの内容が主ディレクトリと食い違うかを見る。
 # 食い違うときは上書きせず中断する。
 differs_from_main() {
@@ -76,6 +103,7 @@ differs_from_main() {
 copy_one() {
   local rel="$1" from="$MAIN_DIR/$1" to="$TARGET/$1"
   [ -e "$from" ] || return 0
+  destination_is_safe "$rel" || return 1
 
   if [ -e "$to" ]; then
     if differs_from_main "$rel"; then
@@ -103,6 +131,7 @@ copy_one() {
 replace_with_real_copy() {
   local rel="$1" from="$MAIN_DIR/$1" to="$TARGET/$1"
   [ -e "$from" ] || return 0
+  destination_is_safe "$rel" || return 1
   # 作業ツリー側で書き換えられていたら、置き換えずに中断する。
   if [ -e "$to" ] && differs_from_main "$rel"; then
     return 1
@@ -184,7 +213,8 @@ do_healthcheck() {
 # 扱わない（詳細設計 06 のテスト設計）。手順の詳細は
 # references/local-environment.md にある。
 do_aim() {
-  local layout build service src_target project container reload_process reload_signal
+  local layout build service src_target project container current_link
+  local reload_process reload_signal
   layout=$(decl_get '.localenv.layout // empty')
   service=$(decl_get '.localenv.app_service // empty')
   src_target=$(decl_get '.localenv.src_target // empty')
@@ -209,10 +239,16 @@ do_aim() {
     indirect)
       [ -n "$src_target" ] || { printf 'localenv.src_target が要ります\n' >&2; return 1; }
       # コードの位置を指しているコンテナだけを張り替える。
+      # 値をシェル文字列へ連結しない。宣言値やパスに引用符が混じると、
+      # コンテナの中で意図しないコマンドが動く。
       for container in $(docker ps --filter "label=com.docker.compose.project=$project" --format '{{.Names}}' 2>/dev/null); do
-        if [ "$(docker exec "$container" sh -lc "readlink '$src_target'" 2>/dev/null)" = "$MAIN_DIR" ]; then
-          docker exec -u root "$container" sh -lc "ln -sfn '$TARGET' '$src_target'" || return 1
-        fi
+        current_link=$(docker exec "$container" readlink -- "$src_target" 2>/dev/null)
+        # 主ディレクトリと、その配下の作業ツリーのどちらを向いていても切り替える。
+        case "$current_link" in
+          "$MAIN_DIR" | "$MAIN_DIR"/*)
+            docker exec -u root "$container" ln -sfn -- "$TARGET" "$src_target" || return 1
+            ;;
+        esac
       done
       ;;
     direct|host)
@@ -230,7 +266,7 @@ do_aim() {
   reload_signal=$(decl_get '.localenv.reload_signal.signal // empty')
   if [ -n "$reload_process" ] && [ -n "$reload_signal" ] && [ -n "$service" ]; then
     for container in $(docker ps --filter "label=com.docker.compose.project=$project" --filter "label=com.docker.compose.service=$service" --format '{{.Names}}' 2>/dev/null); do
-      docker exec -u root "$container" sh -lc "pkill -${reload_signal} -x '${reload_process}'" 2>/dev/null || true
+      docker exec -u root "$container" pkill "-${reload_signal}" -x -- "$reload_process" 2>/dev/null || true
     done
   fi
 

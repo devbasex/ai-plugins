@@ -306,3 +306,33 @@ def test_mode_lists_a_path_once(main_repo: Path, worktree: Path) -> None:
     result = run(["mode", str(worktree)], cwd=main_repo)
     assert result["rc"] == 1, result
     assert result["out"].count("docker-compose.dev.yml") == 1, result["out"]
+
+
+def test_setup_refuses_to_follow_a_symlink_destination(main_repo: Path, worktree: Path, tmp_path: Path) -> None:
+    """宛先が symlink のときはたどらずに断る。"""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (main_repo / ".env").write_text("APP=1\n", encoding="utf-8")
+    (worktree / ".env").symlink_to(outside / "stolen.env")
+    declare(main_repo, {"kind": "compose", "copy_from_main": [".env"]})
+
+    result = run(["setup", str(worktree)], cwd=main_repo)
+
+    assert result["rc"] == 1, result
+    assert "symlink" in result["err"], result["err"]
+    assert not (outside / "stolen.env").exists(), "外へ書き込まない"
+
+
+def test_setup_refuses_a_parent_symlink_leaving_the_worktree(main_repo: Path, worktree: Path, tmp_path: Path) -> None:
+    """途中のディレクトリが作業ツリーの外を指していても書き込まない。"""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (main_repo / "vendor").mkdir()
+    (main_repo / "vendor" / "lib.txt").write_text("x\n", encoding="utf-8")
+    (worktree / "vendor").symlink_to(outside)
+    declare(main_repo, {"kind": "compose", "copy_from_main": ["vendor/lib.txt"]})
+
+    result = run(["setup", str(worktree)], cwd=main_repo)
+
+    assert result["rc"] == 1, result
+    assert not (outside / "lib.txt").exists(), "外へ書き込まない"
