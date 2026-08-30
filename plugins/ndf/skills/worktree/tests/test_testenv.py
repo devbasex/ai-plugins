@@ -852,3 +852,26 @@ def test_role_names_become_upper_case_variables(main_repo: Path, worktree: Path)
     )
 
     assert "NDF_PORT_OBJECT_STORE=20004" in dump.read_text(), dump.read_text()
+
+
+@pytest.mark.parametrize("bad", ["../outside.yml", "/etc/compose.yml", "a/../../outside.yml"])
+def test_compose_files_outside_the_worktree_are_refused(main_repo: Path, worktree: Path, bad: str) -> None:
+    """宣言に `../` が入ると、作業ツリーの外の定義を読み込む。"""
+    declare(
+        main_repo,
+        testenv={"port_band": [20000, 29999]},
+        localenv={"kind": "compose", "compose_files": [bad]},
+    )
+    dump = main_repo.parent / "never.txt"
+    stub = stub_docker(main_repo, dump)
+
+    env = os.environ.copy()
+    env["WT_DOCKER_COMMAND"] = str(stub)
+    proc = subprocess.run(
+        ["bash", str(TESTENV), "up", str(worktree)],
+        cwd=str(main_repo), env=env, capture_output=True, text=True,
+    )
+
+    assert proc.returncode == 1, proc
+    assert "作業ツリーの外" in proc.stderr, proc.stderr
+    assert not dump.exists(), "定義を読み込まない"

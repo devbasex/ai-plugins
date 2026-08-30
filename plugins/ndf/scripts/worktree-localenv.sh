@@ -47,18 +47,6 @@ target_branch() {
 
 # --- setup ------------------------------------------------------------------
 
-# 宣言に書かれた複製対象が、主ディレクトリと作業ツリーの中に収まるかを見る。
-# 宣言の誤りで外側を読み書きしないよう、絶対パスと上位への移動を弾く。
-is_safe_relative() {
-  case "$1" in
-    "" | /*) return 1 ;;
-    "." | "..") return 1 ;;
-    ../* | */.. | */../*) return 1 ;;
-    "~"*) return 1 ;;
-  esac
-  return 0
-}
-
 # 書き込み先が本当に作業ツリーの中かを、実体で確かめる。
 # 字面の検査だけでは、途中に置かれた symlink をたどって外へ書き込めてしまう。
 destination_is_safe() {
@@ -153,7 +141,7 @@ do_setup() {
   _wt_read_lines < <(decl_get '.localenv.copy_from_main // [] | .[]')
   for rel in "${WT_LINES[@]+"${WT_LINES[@]}"}"; do
     [ -n "$rel" ] || continue
-    if ! is_safe_relative "$rel"; then
+    if ! wt_is_safe_relative "$rel"; then
       printf '中断: copy_from_main の %s は作業ツリーの外を指します\n' "$rel" >&2
       return 1
     fi
@@ -164,7 +152,7 @@ do_setup() {
   _wt_read_lines < <(decl_get '.localenv.copy_as_real // [] | .[]')
   for rel in "${WT_LINES[@]+"${WT_LINES[@]}"}"; do
     [ -n "$rel" ] || continue
-    if ! is_safe_relative "$rel"; then
+    if ! wt_is_safe_relative "$rel"; then
       printf '中断: copy_as_real の %s は作業ツリーの外を指します\n' "$rel" >&2
       return 1
     fi

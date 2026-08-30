@@ -183,6 +183,11 @@ compose() {
   local f
   for f in "${WT_LINES[@]+"${WT_LINES[@]}"}"; do
     [ -n "$f" ] || continue
+    # 宣言に `../` が入ると、作業ツリーの外の定義を読み込む。
+    if ! wt_is_safe_relative "$f"; then
+      printf '%s\n' "compose_files の $f は作業ツリーの外を指します" >&2
+      return 1
+    fi
     files+=(-f "$TARGET/$f")
   done
   [ "${#files[@]}" -gt 0 ] || return 2

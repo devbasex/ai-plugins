@@ -178,6 +178,18 @@ wt_is_allowed_path() {
   return 1
 }
 
+# 宣言に書かれた相対パスが、主ディレクトリと作業ツリーの中に収まるかを見る。
+# 宣言の誤りで外側を読み書きしないよう、絶対パスと上位への移動を弾く。
+wt_is_safe_relative() {
+  case "${1:-}" in
+    "" | /*) return 1 ;;
+    "." | "..") return 1 ;;
+    ../* | */.. | */../*) return 1 ;;
+    "~"*) return 1 ;;
+  esac
+  return 0
+}
+
 # 絶対パスを主ディレクトリからの相対パスへ直す。外を指すなら 1 を返す。
 wt_relative_to_main() {
   local path="${1:-}" main_dir="${2:-}"
