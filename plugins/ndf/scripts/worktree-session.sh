@@ -110,8 +110,7 @@ CONTEXT=$(printf '%s\n\n' "${MESSAGES[@]}")
 
 # 出力の形は事象で選ぶ。**平文と JSON を同時に書かない。**
 # 両方を書くと標準出力全体が JSON として読めなくなり、Claude Code は平文と
-# JSON の文字列表現をまとめて 1 つの本文として文脈へ積む（設計 05 は双方へ
-# 書くとしていたが、実装時にこの重複が分かったため事象で分ける形へ改めた）。
+# JSON の文字列表現をまとめて 1 つの本文として文脈へ積む。
 #
 #   SessionStart (Claude Code / Codex CLI) — JSON の additionalContext で渡す
 #   agentSpawn (Kiro CLI) / 事象が読めない場合 — 標準出力へ平文で書く

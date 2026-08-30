@@ -67,7 +67,7 @@ v9.1.2 で適用の範囲をガイドと `SKILL.md` へ明記した。新しく�
 
 v9.2.0 で `worktree` を追加し、開発の変更を作業ツリーの中で行う運用を 3 ランタイムへ結んだ。主ディレクトリの編集は**拒否しない**。誤検知で正当な操作が止まる状態を作らないため、誘導（tool 実行前の hook）・逸脱検知（セッション開始時の hook）・是正（Skill の移送手順）の 3 層で支える。判定はすべて `plugins/ndf/scripts/lib/worktree-common.sh` に集め、入口のスクリプトは入出力の整形だけを行う。**リポジトリ側に `.ndf/worktree.json` があるときだけ動き**、無ければ何も出力せず終了コード 0 で終わる。
 
-実機確認で 2 件の設計の取りこぼしが出た。Codex CLI はファイルの編集を `apply_patch` で渡し、パスは `tool_input.file_path` ではなくパッチ本文の `*** Update File:` 行に入る。セッション開始時の出力は、平文と JSON を同時に書くと標準出力全体が JSON として読めず、Claude Code が両方をまとめて 1 つの本文として積む。設計 05 は双方へ書くとしていたが、事象で分ける形へ改めた。あわせて hook の matcher と判定が別の場所にあったため、`WT_EDIT_TOOLS` / `WT_PATCH_TOOLS` / `WT_SHELL_TOOLS` へ集約し、両者の一致をテストで検査する。詳細は `issues/issue-146-worktree-first/`。
+3 ランタイムの実機確認で、設計が拾えていなかった事実が 2 件出た。Codex CLI はファイルの編集を `apply_patch` で渡し、パスは `tool_input.file_path` ではなくパッチ本文の `*** Update File:` 行に入る。セッション開始時の出力は、平文と JSON を同時に書くと標準出力全体が JSON として読めず、Claude Code が両方をまとめて 1 つの本文として積むため、事象で分けて書く。誘導の対象になる tool 名は `WT_EDIT_TOOLS` / `WT_PATCH_TOOLS` / `WT_SHELL_TOOLS` の 1 箇所が持ち、hook の matcher もそこから作って一致をテストで検査する。詳細は `issues/issue-146-worktree-first/`。
 
 v6.0.0 の対応表（`review` → `pr-review`）は予告どおり削除済み。v6.0.0 以前から移行する場合は v6.1.0 の `ndf-policies` を参照する。
 

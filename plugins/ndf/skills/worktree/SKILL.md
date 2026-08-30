@@ -85,7 +85,7 @@ wt_in_worktree && echo "作業ツリーの中" || echo "主ディレクトリ"
 
 ### 2-1. `superpowers:using-git-worktrees` があれば委譲する
 
-外部 Skill が導入されている環境では、作成の手順をそちらへ渡す。置き場所の既定は
+外部 Skill が導入されているときは、作成の手順をそちらへ渡す。置き場所の既定は
 どちらも `.worktrees/` で一致するため、結果は変わらない。
 
 導入の有無は、利用できる Skill の一覧に `superpowers:using-git-worktrees` が
@@ -219,14 +219,14 @@ NDF="$NDF_SCRIPTS/worktree-localenv.sh"
 WT="$main_dir/.worktrees/<ブランチ名>"
 bash "$NDF" setup "$WT"       # 設定と依存物を持ち込む
 bash "$NDF" mode "$WT"        # 相乗り(0) か 分離(1) かを提示
-bash "$NDF" aim "$WT"         # 環境が指すコードを向ける
+bash "$NDF" aim "$WT"         # ローカル環境が指すコードを向ける
 bash "$NDF" verify "$WT"; echo $?  # 0 一致 / 1 不一致 / 2 未起動
 ```
 
 **対象の作業ツリーを引数で渡す。** 省略すると現在地が対象になるため、主ディレクトリから
 実行すると主ディレクトリを照合してしまう。
 
-**検証の直前に `verify` を通す。** 環境に載っているコードが対象と違っていても、失敗と
+**検証の直前に `verify` を通す。** ローカル環境に載っているコードが対象と違っていても、失敗と
 しては現れない。別のコードを検証したことに気づけないまま進む。
 
 リポジトリごとの差は `.ndf/worktree.json` が持つ。書き方は
