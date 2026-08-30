@@ -18,13 +18,13 @@ PR 運用、レビュー、調査、実装計画、仕様書化、開発方法�
 plugins/ndf/
 ├── .claude-plugin/plugin.json   # Claude Code のマニフェスト
 ├── .codex-plugin/plugin.json    # Codex のマニフェスト
-├── skills/                      # 配布 Skill の唯一の実体（27 個）
+├── skills/                      # 配布 Skill の唯一の実体（28 個）
 ├── skills/README.md             # Skill 執筆の規約
 ├── optional-skills/             # どの配布先にも載せない Skill（4 個）
 ├── manifests/                   # ランタイム別の配布 Skill 一覧
 ├── agents/                      # Claude Code のサブエージェント定義（8 個）
-├── hooks/claude.json            # Claude Code の SessionStart / Stop hook
-├── hooks/codex.json             # Codex の Stop hook
+├── hooks/claude.json            # Claude Code の PreToolUse / SessionStart / Stop hook
+├── hooks/codex.json             # Codex の PreToolUse / SessionStart / Stop hook
 ├── scripts/                     # hook と Skill から呼ぶスクリプト
 ├── dev.kiro/                    # Kiro CLI の installer・エージェント定義・プロンプト
 └── README.md
@@ -127,7 +127,43 @@ bash plugins/playwright-kit/dev.kiro/install.sh
 
 ## Hooks
 
-Claude Code の SessionStart hook（`hooks/claude.json`）は次を行います。
+### 作業ツリー運用（3 ランタイム共通）
+
+開発の変更を、リポジトリを clone したディレクトリ（主ディレクトリ）ではなく `.worktrees/` の
+作業ツリーの中で行う運用を支えます。**編集は止めません。** 案内が出ても操作は成立します。
+
+| 起きること | 担う hook | Claude Code | Codex | Kiro CLI |
+| --- | --- | --- | --- | --- |
+| 主ディレクトリの保護対象パスを編集しようとすると案内が出る | tool 実行前 | `PreToolUse` | `PreToolUse` | — |
+| 作業ツリーで作業する旨の案内がプロンプトごとに出る | プロンプト送信時 | — | — | `userPromptSubmit` |
+| 主ディレクトリに残った未コミット変更が提示される | セッション開始時 | `SessionStart` | `SessionStart` | `agentSpawn` |
+| 主ディレクトリのブランチが稼働中の作業ツリーへ追従する | セッション開始時 | `SessionStart` | `SessionStart` | `agentSpawn` |
+
+Kiro CLI に tool 実行前の案内が無いのは、この事象でモデルへ案内を渡す手段が終了コード 2 に
+限られ、それが tool の実行を拒否するためです。拒否しない方針のもとでは置けないため、パスを
+見ない案内をプロンプト送信時の hook が担います。
+
+**この仕組みはリポジトリ側の宣言ファイル `.ndf/localenv.json` があるときだけ動きます。**
+宣言が無いリポジトリでは、いずれの hook も何も出力せず終了コード 0 で終わります。
+
+```json
+{
+  "version": 1,
+  "guard": {
+    "allow_paths": ["issues/", "docs/", ".claude/", ".codex/", ".kiro/", ".ndf/", ".gitignore"]
+  }
+}
+```
+
+`guard.allow_paths` は、主ディレクトリで編集しても案内を出さないパスです。省略すると
+組み込みの既定（上記と同じ一覧に `.agents/` `.gemini/` `.serena/` を加えたもの）を使います。
+空の配列を書くと「何も許可しない」という指定になります。
+
+手順は `/ndf:worktree` にあります。
+
+### その他
+
+Claude Code の SessionStart hook（`hooks/claude.json`）は上記に加えて次を行います。
 
 - `~/.claude/settings.json` の `cleanupPeriodDays` を 90 日以上に保つ
 - statusline 未設定時に NDF 標準 statusline を設定する
@@ -136,9 +172,9 @@ Claude Code の Stop hook は終了時に Slack 通知スクリプトを実行�
 未設定の場合は送信せず終了します。
 
 Codex の Stop hook（`hooks/codex.json`）は `NDF_CODEX_SLACK_NOTIFY=true` が設定されている
-場合だけ Slack 通知を送ります。Codex の hook は初回実行前に Codex 側の hooks trust 設定が
-必要になる場合があります。`/hooks` で対象 hook を確認し、利用するプロジェクトで明示的に
-有効化してください。
+場合だけ Slack 通知を送ります。**Codex の hook は Codex 側で明示的に有効化するまで実行され
+ません。** `~/.codex/config.toml` の `[hooks.state]` に対象 hook の `enabled = true` が要ります。
+`/hooks` で対象 hook を確認し、利用するプロジェクトで有効化してください。
 
 Kiro CLI では installer が `.kiro/agents/ndf.json` の `hooks` を生成します。
 
