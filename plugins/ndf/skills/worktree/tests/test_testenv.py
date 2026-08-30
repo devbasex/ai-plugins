@@ -717,3 +717,56 @@ def test_next_expose_is_refused_while_a_close_failed(main_repo: Path, worktree: 
 
     blocked = run(["expose", str(second)], cwd=main_repo)
     assert blocked["rc"] == 1, blocked
+
+
+def test_expose_is_idempotent(main_repo: Path, worktree: Path) -> None:
+    """既に開いているなら、開ける手段を再実行しない。"""
+    counter = main_repo / "opens.txt"
+    declare(main_repo, testenv={
+        "port_band": [20000, 29999],
+        "expose": {"enabled": True, "public_tag": "golden-public",
+                   "base_domain": "example.test",
+                   "open_command": f'printf "x" >> {counter}'},
+    })
+    run(["env", str(worktree)], cwd=main_repo)
+    golden(main_repo, worktree)
+
+    first = run(["expose", str(worktree)], cwd=main_repo)
+    second = run(["expose", str(worktree)], cwd=main_repo)
+
+    assert first["rc"] == 0 and second["rc"] == 0
+    assert first["out"] == second["out"]
+    assert counter.read_text() == "x", "2 度目は開ける手段を呼ばない"
+
+
+def test_unexpose_after_down_still_knows_the_environment(main_repo: Path, worktree: Path) -> None:
+    """`down` で割り当てを解放した後でも、閉じる対象を特定できる。"""
+    marker = main_repo / "closed2.txt"
+    declare(main_repo, testenv={
+        "port_band": [20000, 29999],
+        "expose": {"enabled": True, "public_tag": "golden-public",
+                   "base_domain": "example.test", "open_command": "true",
+                   "close_command":
+                       f'printf "%s|%s" "$NDF_EXPOSE_ENVIRONMENT" "$NDF_EXPOSE_SLOT" > {marker}'},
+    })
+    run(["env", str(worktree)], cwd=main_repo)
+    golden(main_repo, worktree)
+    run(["expose", str(worktree)], cwd=main_repo)
+    run(["down", str(worktree)], cwd=main_repo)
+
+    result = run(["unexpose", str(worktree)], cwd=main_repo)
+
+    assert result["rc"] == 0, result
+    environment, slot = marker.read_text().split("|")
+    assert environment.startswith("main-wt-feature-x-"), environment
+    assert slot == "0"
+
+
+def test_normalize_does_not_expand_globs(tmp_path: Path) -> None:
+    """`*` や `?` を含むパスが、実在するファイルの名前へ化けない。"""
+    from worktree_helpers import run_lib
+
+    (tmp_path / "aaa").write_text("x", encoding="utf-8")
+    (tmp_path / "bbb").write_text("x", encoding="utf-8")
+    got = run_lib(f'wt_normalize_path "*" "{tmp_path}"')
+    assert got.stdout.strip() == f"{tmp_path}/*", got.stdout

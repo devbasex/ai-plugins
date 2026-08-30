@@ -333,10 +333,15 @@ wt_extract_write_target() {
 # 存在しないパスでは `..` が残ってしまう。残ると、前方一致での「配下か」の
 # 判定をすり抜ける（`<対象>/a/../../外` が `<対象>/` で始まって見える）。
 _wt_lexical_normalize() {
-  local path="$1" part out=""
+  local path="$1" part out="" glob_was_off=0
+  # 分割のための展開でパス名展開が走らないようにする。`*` や `?` を含む
+  # パスが、実在するファイルの名前へ化けてしまう。
+  case "$-" in *f*) glob_was_off=1 ;; esac
+  set -f
   local IFS=/
   # shellcheck disable=SC2086
   set -- $path
+  [ "$glob_was_off" = 1 ] || set +f
   for part in "$@"; do
     case "$part" in
       ""|.) continue ;;

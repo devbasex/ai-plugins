@@ -202,10 +202,14 @@ flowchart TD
 | `worktree-testenv.sh stop <作業ツリー>` | 止める。データは残す | 0 完了 |
 | `worktree-testenv.sh down <作業ツリー> [--volumes]` | 破棄し、割り当てを解放する | 0 完了 |
 | `worktree-testenv.sh expose <作業ツリー>` | 外部公開する | 0 完了 / 1 条件を満たさず拒否 |
-| `worktree-testenv.sh unexpose <作業ツリー>` | 公開を閉じる | 0 完了 |
+| `worktree-testenv.sh unexpose <作業ツリー>` | 公開を閉じる | 0 完了 / 1 閉じる手段が失敗（台帳は閉じない） |
 | `worktree-testenv.sh reap --idle <時間>` | 使われていないテスト環境を止める | 0 完了 |
 
 `test` が実行したコマンドの終了コードをそのまま返すのは、**テストの成否を包み隠さないため**である。
+
+`unexpose` が失敗を返すのは、実装時に分かった事象への対応である。閉じる手段が失敗したのに
+台帳だけ閉じると、口が開いたままで次の公開が先着の関門を通ってしまう。失敗したときは台帳を
+閉じず、終了コード 1 を返す。
 
 `expose` が拒否する条件は次のとおり。1 つでも該当すれば公開しない。
 

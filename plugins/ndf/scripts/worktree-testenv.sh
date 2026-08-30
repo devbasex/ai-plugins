@@ -322,19 +322,28 @@ do_test() {
 # --- expose / unexpose ------------------------------------------------------
 
 do_unexpose() {
-  local close_command url host
-  url=$(wt_registry_visible "$(registry)" \
-    | jq -r --arg wt "$TARGET" '[.assignments[] | select(.worktree == $wt and (.expose // {}).closed_at == null)] | last | .expose.url // empty')
+  local close_command row url host environment slot
+  # 公開の記録は、割り当てを解放した後にも残る。`down` の後で閉じることが
+  # あるため、稼働中の割り当てを見る load_assignment には頼らない。
+  row=$(wt_registry_visible "$(registry)" \
+    | jq -c --arg wt "$TARGET" '[.assignments[] | select(.worktree == $wt and (.expose // {}).closed_at == null and .expose != null)] | last' 2>/dev/null)
+  url=""
+  environment=""
+  slot=""
+  if [ -n "$row" ] && [ "$row" != "null" ]; then
+    url=$(printf '%s' "$row" | jq -r '.expose.url // empty')
+    environment=$(printf '%s' "$row" | jq -r '.environment // empty')
+    slot=$(printf '%s' "$row" | jq -r '.slot // empty')
+  fi
 
   close_command=$(decl_get '.testenv.expose.close_command // empty')
   if [ -n "$close_command" ] && [ -n "$url" ]; then
     # 開けるときと同じ値を渡す。URL だけでは、環境名やスロットを資源の名前に
     # 使っている構成で後片付けの対象を特定できない。
-    load_assignment || true
     host=${url#https://}
     host=${host#http://}
     if ! (cd "$TARGET" && env "NDF_EXPOSE_URL=$url" "NDF_EXPOSE_HOST=$host" \
-      "NDF_EXPOSE_ENVIRONMENT=${ENVIRONMENT:-}" "NDF_EXPOSE_SLOT=${SLOT:-}" \
+      "NDF_EXPOSE_ENVIRONMENT=$environment" "NDF_EXPOSE_SLOT=$slot" \
       sh -c "$close_command"); then
       # 閉じられていないのに台帳だけ閉じると、口が開いたまま次の公開が通る。
       printf '%s\n' "公開を閉じる手段が失敗しました。台帳は閉じていません: $url" >&2
@@ -370,6 +379,16 @@ do_expose() {
   fi
 
   load_assignment || { printf '拒否: 割り当てがありません\n' >&2; return 1; }
+
+  # 既に開いているなら、開ける手段を再実行しない。再実行が失敗すると、口が
+  # 開いたままで台帳だけ閉じることになる。
+  local already
+  already=$(wt_registry_visible "$(registry)" \
+    | jq -r --arg wt "$TARGET" '[.assignments[] | select(.released_at == null and .worktree == $wt and .expose != null and .expose.closed_at == null)] | last | .expose.url // empty')
+  if [ -n "$already" ]; then
+    printf '%s\n' "$already"
+    return 0
+  fi
 
   loaded_tag=$(wt_registry_visible "$(registry)" \
     | jq -r --arg wt "$TARGET" '[.assignments[] | select(.released_at == null and .worktree == $wt)] | last | .golden_tag // empty')
