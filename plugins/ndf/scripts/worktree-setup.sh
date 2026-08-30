@@ -30,6 +30,8 @@ while [ "$#" -gt 0 ]; do
 done
 
 command -v git >/dev/null 2>&1 || { printf '%s\n' "git が要ります" >&2; exit 1; }
+# 宣言の読み取りは jq を使う。無いと、書いた後の確認も status の判定もできない。
+command -v jq >/dev/null 2>&1 || { printf '%s\n' "jq が要ります" >&2; exit 1; }
 
 MAIN_DIR=$(wt_main_dir) || { printf '%s\n' "git のリポジトリの中で実行してください" >&2; exit 1; }
 DECLARATION_FILE="$MAIN_DIR/.ndf/localenv.json"
@@ -38,19 +40,43 @@ SCHEMA_URL="https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/n
 
 # --- init -------------------------------------------------------------------
 
+# 書き先が symlink なら断る。たどると、リポジトリの外を指した状態で --force を
+# 実行したときに外のファイルを書き換えてしまう。
+refuse_symlink() {
+  local ndf_dir="$MAIN_DIR/.ndf"
+  if [ -L "$ndf_dir" ]; then
+    printf '%s\n' ".ndf が symlink です。たどらずに終わります" >&2
+    return 1
+  fi
+  if [ -L "$DECLARATION_FILE" ]; then
+    printf '%s\n' "宣言ファイルが symlink です。たどらずに終わります" >&2
+    return 1
+  fi
+  return 0
+}
+
 # 最小の宣言を書く。案内を出さないパスは組み込みの既定を使うため、ここでは
 # 書かない。差し替えるときだけ guard.allow_paths を足す（declaration.md）。
+#
+# 同じディレクトリの一時ファイルへ書いてから名前を付け替える。書いている途中で
+# 落ちても、中途半端な宣言が残らない。
 write_declaration() {
-  mkdir -p "$(dirname "$DECLARATION_FILE")" 2>/dev/null || return 1
-  cat >"$DECLARATION_FILE" <<JSON
+  local dir tmp
+  dir=$(dirname "$DECLARATION_FILE")
+  mkdir -p "$dir" 2>/dev/null || return 1
+  tmp=$(mktemp "$dir/.localenv.json.XXXXXX" 2>/dev/null) || return 1
+  cat >"$tmp" <<JSON
 {
   "\$schema": "$SCHEMA_URL",
   "version": 1
 }
 JSON
+  mv "$tmp" "$DECLARATION_FILE" 2>/dev/null || { rm -f "$tmp"; return 1; }
 }
 
 do_init() {
+  refuse_symlink || return 1
+
   if [ -e "$DECLARATION_FILE" ] && [ "$FORCE" = 0 ]; then
     # **上書きしない。** 書き加えた内容を消さないため。
     printf '宣言ファイルは既にあります: %s\n' "${DECLARATION_FILE#"$MAIN_DIR"/}"

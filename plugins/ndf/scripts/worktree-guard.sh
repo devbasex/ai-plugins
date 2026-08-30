@@ -127,6 +127,8 @@ esac
 # 対象の一覧は共通ライブラリの WT_EDIT_TOOLS / WT_PATCH_TOOLS / WT_SHELL_TOOLS が
 # 持ち、hook の matcher も同じ一覧から作る。
 targets=()
+# 相対パスの起点。tool が実行ディレクトリを指定していればそちらを使う。
+BASE_DIR="$CWD_NOW"
 if [[ "$TOOL" =~ ^($WT_PATCH_TOOLS)$ ]]; then
   # Codex CLI はファイルの編集をパッチ本文で渡す。パスは本文の中にある。
   patch_text=$(
@@ -152,6 +154,18 @@ elif [[ "$TOOL" =~ ^($WT_SHELL_TOOLS)$ ]]; then
             else empty end'
   )
   [ -n "$command_text" ] || exit 0
+  # コマンドの実行ディレクトリを別に指定できるランタイムがある
+  # （Gemini CLI の run_shell_command は tool_input.dir_path）。
+  # 指定があれば、相対パスの起点をそちらへ合わせる。
+  command_cwd=$(
+    jq_get 'if (.tool_input.dir_path | type) == "string" then .tool_input.dir_path
+            elif (.tool_input.cwd | type) == "string" then .tool_input.cwd
+            elif (.tool_input.workdir | type) == "string" then .tool_input.workdir
+            else empty end'
+  )
+  if [ -n "$command_cwd" ]; then
+    BASE_DIR=$(wt_normalize_path "$command_cwd" "$CWD_NOW")
+  fi
   _wt_read_lines < <(wt_extract_write_target "$command_text")
   targets=("${WT_LINES[@]+"${WT_LINES[@]}"}")
 else
@@ -164,7 +178,7 @@ fi
 flagged=()
 for raw in "${targets[@]}"; do
   [ -n "$raw" ] || continue
-  abs=$(wt_normalize_path "$raw" "$CWD_NOW") || continue
+  abs=$(wt_normalize_path "$raw" "$BASE_DIR") || continue
   rel=$(wt_relative_to_main "$abs" "$MAIN_DIR") || continue
   [ "$rel" = "." ] && continue
   # 作業ツリーそのものへの書き込みは対象外。

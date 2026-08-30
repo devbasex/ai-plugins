@@ -128,3 +128,34 @@ def test_status_reports_the_gitignore_registration(main_repo: Path) -> None:
 
     result = run(["status"], cwd=main_repo)
     assert ".worktrees/ の登録: あり" in result["out"], result["out"]
+
+
+def test_init_refuses_a_symlinked_declaration(main_repo: Path, tmp_path: Path) -> None:
+    """symlink をたどると、リポジトリの外のファイルを書き換えてしまう。"""
+    outside = tmp_path / "outside.json"
+    outside.write_text('{"keep": true}', encoding="utf-8")
+    (main_repo / ".ndf").mkdir()
+    (main_repo / ".ndf" / "localenv.json").symlink_to(outside)
+
+    result = run(["init", "--force"], cwd=main_repo)
+
+    assert result["rc"] == 1, result
+    assert "symlink" in result["err"], result["err"]
+    assert outside.read_text() == '{"keep": true}', "外を書き換えない"
+
+
+def test_init_refuses_a_symlinked_ndf_directory(main_repo: Path, tmp_path: Path) -> None:
+    outside = tmp_path / "outside-dir"
+    outside.mkdir()
+    (main_repo / ".ndf").symlink_to(outside)
+
+    result = run(["init", "--force"], cwd=main_repo)
+
+    assert result["rc"] == 1, result
+    assert not (outside / "localenv.json").exists(), "外へ書かない"
+
+
+def test_init_leaves_no_temporary_file(main_repo: Path) -> None:
+    run(["init"], cwd=main_repo)
+    leftovers = [p.name for p in (main_repo / ".ndf").iterdir() if p.name != "localenv.json"]
+    assert leftovers == [], leftovers

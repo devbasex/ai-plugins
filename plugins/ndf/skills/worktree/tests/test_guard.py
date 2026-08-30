@@ -252,3 +252,35 @@ def test_codex_apply_patch_on_allowed_path_is_silent(main_repo: Path) -> None:
     }
     result = run_guard(payload, cwd=main_repo)
     assert result["out"].strip() == "", result["out"]
+
+
+def test_shell_working_directory_is_honoured(main_repo: Path, worktree: Path) -> None:
+    """コマンドの実行ディレクトリを別に指定できるランタイムがある。
+
+    Gemini CLI の `run_shell_command` は `tool_input.dir_path` を持つ。指定が
+    あれば相対パスの起点をそちらへ合わせる。
+    """
+    declared(main_repo)
+    payload = {
+        "session_id": "d1",
+        "cwd": str(main_repo),
+        "hook_event_name": "PreToolUse",
+        "tool_name": "run_shell_command",
+        "tool_input": {"command": "echo x > README.md", "dir_path": str(main_repo / "plugins")},
+    }
+    result = run_guard(payload, cwd=main_repo)
+    assert "plugins/README.md" in context_of(result), result["out"]
+
+
+def test_shell_working_directory_can_move_outside(main_repo: Path, worktree: Path) -> None:
+    """実行ディレクトリが作業ツリーの中なら、案内は出ない。"""
+    declared(main_repo)
+    payload = {
+        "session_id": "d2",
+        "cwd": str(main_repo),
+        "hook_event_name": "PreToolUse",
+        "tool_name": "run_shell_command",
+        "tool_input": {"command": "echo x > plugins/ndf/README.md", "dir_path": str(worktree)},
+    }
+    result = run_guard(payload, cwd=main_repo)
+    assert result["out"].strip() == "", result["out"]
