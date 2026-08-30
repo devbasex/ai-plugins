@@ -99,10 +99,16 @@ AI へ渡す手段が終了コード 2 しかなく、これは拒否を伴う�
 ### 判定
 
 ```text
+入力の hook_event_name がプロンプト送信時（userPromptSubmit）→ パスを見ない誘導を標準出力へ書く
 入力の tool_name が編集系（Edit / Write / NotebookEdit / fs_write）→ tool_input からパスを取る
 入力の tool_name が Bash → tool_input.command から書き込み先を推定する
 それ以外 → 何も出力せず終了コード 0
 ```
+
+**プロンプト送信時の分岐は Kiro CLI のためにある。** この事象は編集先を持たないため、パスを見る判定は
+行わない。現在地が作業ツリーの中である場合と宣言ファイルが無い場合を除き、作業ツリーで作業する旨を
+毎回書き出す。終了コードは 0 とする。同じスクリプトを 2 つの事象へ結ぶのは、判定の実装を 1 つに
+保つためである。
 
 パスが定まったら次を順に見る。1 つでも該当すれば案内を出さない。
 
@@ -198,8 +204,8 @@ flowchart TD
 
 `expose` が拒否する条件は次のとおり。1 つでも該当すれば公開しない。
 
-1. 宣言の `expose.enabled` が偽
-2. 載っている基準の識別子が `expose.public_tag` と一致しない
+1. 宣言の `testenv.expose.enabled` が偽
+2. 載っている基準の識別子が `testenv.expose.public_tag` と一致しない
 3. 折り返しを使う公開が既に別のテスト環境で開いている
 
 拒否したときは、どの条件に当たったかを標準エラーへ出す。
@@ -273,7 +279,7 @@ Claude Code / Codex とは構造が異なる。
 
 ```json
 "hooks": {
-  "agentSpawn": [ { "command": "..." } ],
+  "agentSpawn": [ { "command": "bash <プラグイン>/scripts/worktree-session.sh" } ],
   "userPromptSubmit": [ { "command": "bash <プラグイン>/scripts/worktree-guard.sh" } ]
 }
 ```

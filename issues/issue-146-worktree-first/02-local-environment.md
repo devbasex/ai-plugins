@@ -169,7 +169,7 @@ flowchart TD
 
 ```bash
 git -C "$MAIN" worktree add -b feature/x "$WT" origin/main
-for p in $(jq -r '.copy_from_main[]' "$MAIN/.ndf/localenv.json"); do
+for p in $(jq -r '.localenv.copy_from_main[]' "$MAIN/.ndf/localenv.json"); do
   [ -e "$MAIN/$p" ] || continue
   if [ -e "$WT/$p" ] && ! diff -rq "$MAIN/$p" "$WT/$p" >/dev/null 2>&1; then
     echo "中断: $p の内容が主ディレクトリと異なる" >&2; exit 1
@@ -195,27 +195,36 @@ done
 
 ```json
 {
-  "kind": "compose",
-  "layout": "indirect",
-  "compose_files": ["docker-compose.dev.yml", "docker-compose.worktree.yml"],
-  "app_service": "app",
-  "src_target": "/src",
-  "copy_from_main": ["vendor", "node_modules", "public/build", ".env"],
-  "copy_as_real": ["vendor/composer"],
-  "build_before_aim": ["<資産のビルドコマンド>"],
-  "reload_signal": { "process": "<プロセス名>", "signal": "USR2" },
-  "branch_probe": "<切り替えを確かめるコマンド>",
-  "isolated_services": ["<並行起動するサービス名>"],
-  "port_assign": { "<変数名>": 0 },
-  "port_band": [20000, 29999],
-  "isolate_when": ["<分離モードを促す変更パスの条件>"],
-  "golden_volumes": { "<ボリューム名>": "<基準ボリューム名>" },
-  "verify": "<検証コマンド>"
+  "version": 1,
+  "localenv": {
+    "kind": "compose",
+    "layout": "indirect",
+    "compose_files": ["docker-compose.dev.yml", "docker-compose.worktree.yml"],
+    "app_service": "app",
+    "src_target": "/src",
+    "copy_from_main": ["vendor", "node_modules", "public/build", ".env"],
+    "copy_as_real": ["vendor/composer"],
+    "build_before_aim": ["<資産のビルドコマンド>"],
+    "reload_signal": { "process": "<プロセス名>", "signal": "USR2" },
+    "branch_probe": "<切り替えを確かめるコマンド>",
+    "isolated_services": ["<並行起動するサービス名>"],
+    "isolate_when": ["<分離モードを促す変更パスの条件>"],
+    "verify": "<検証コマンド>"
+  },
+  "testenv": {
+    "port_band": [20000, 29999],
+    "port_roles": { "<役割名>": 0 },
+    "golden_volumes": { "<ボリューム名>": "<基準ボリューム名>" }
+  }
 }
 ```
 
-`layout` は前々節で判定した型（`indirect` / `direct` / `host`）を記録する。`kind` が `compose` 以外、
-または宣言が無い場合、この仕組みは適用されない。
+この節が使う項目は `localenv` 配下に置く。分離モードで採る番号と基準ボリュームは
+[`03-test-execution.md`](03-test-execution.md) のテスト実行と共有するため `testenv` 配下に置く。
+全体の構造と各項目の定義は [`04-component-and-data.md`](04-component-and-data.md) にある。
+
+`localenv.layout` は前々節で判定した型（`indirect` / `direct` / `host`）を記録する。
+`localenv.kind` が `compose` 以外、または宣言が無い場合、この仕組みは適用されない。
 
 ### 受け入れ条件の追加
 

@@ -52,9 +52,11 @@ flowchart TD
 判定は、依存を持ち込む記述の有無で行う。判定コマンドは宣言ファイルが持ち、リポジトリごとに書く。
 
 ```json
-"test_kinds": {
-  "pure": { "select": "<外部依存を持たないテストを列挙するコマンド>" },
-  "stateful": { "select": "<データ保存先を要するテストを列挙するコマンド>" }
+"testenv": {
+  "test_kinds": {
+    "pure": { "select": "<外部依存を持たないテストを列挙するコマンド>" },
+    "stateful": { "select": "<データ保存先を要するテストを列挙するコマンド>" }
+  }
 }
 ```
 
@@ -85,7 +87,7 @@ flowchart TD
    同じ内容なら焼き直しは発生しない。
 
    ```bash
-   TAG=$(git -C "$MAIN" ls-tree -r HEAD -- $(jq -r '.golden_tag_paths|join(" ")' "$MAIN/.ndf/localenv.json") \
+   TAG=$(git -C "$MAIN" ls-tree -r HEAD -- $(jq -r '.testenv.golden_tag_paths|join(" ")' "$MAIN/.ndf/localenv.json") \
          | sha1sum | cut -c1-12)
    worktree-testenv bake --tag "$TAG"
    ```
@@ -171,12 +173,12 @@ flowchart TD
 
 ### 後片付け
 
-- 作業を止めるときは `worktree-testenv stop`。メモリは返し、データは残す。再開はデータ領域の再構築を
-  伴わない
+- 作業を止めるときは `worktree-testenv stop "$WT"`。メモリは返し、データは残す。再開はデータ領域の
+  再構築を伴わない
 - 一定時間使われていないテスト環境は `worktree-testenv reap --idle 45m` が停止する。使用中は実行側が
   ロックを保持して対象から外れる
-- 公開は `worktree-testenv unexpose` で閉じる。期限切れでも自動で閉じ、台帳から消える
-- **作業ツリーを消す前に `worktree-testenv down --volumes` を実行する。** データ領域（確認した構成では
+- 公開は `worktree-testenv unexpose "$WT"` で閉じる。期限切れでも自動で閉じ、台帳から消える
+- **作業ツリーを消す前に `worktree-testenv down "$WT" --volumes` を実行する。** データ領域（確認した構成では
   テスト環境 1 つあたり約 400 MB）とスロットを返してから作業ツリーを削除する。順序を逆にすると台帳から
   実体を引けなくなる
 - 依存物のハードリンク複製は作業ツリーの削除で消える。実体は主ディレクトリ側に残る
@@ -187,19 +189,24 @@ flowchart TD
 
 ```json
 {
-  "test_kinds": {
-    "pure":      { "select": "<外部依存なしを列挙>", "run": "<実行コマンド>" },
-    "stateful":  { "select": "<保存先を要するものを列挙>", "run": "<実行コマンド>", "skip_reset": { "<変数名>": "true" } },
-    "browser":   { "run": "<実行コマンド>", "base_url_env": "<接続先の変数名>", "out_env": "<出力先の変数名>" }
-  },
-  "golden_tag_paths": ["<データ構造を定める資産のパス>"],
-  "testenv_profiles": { "core": ["<サービス名>"], "browser": ["<サービス名>"] },
-  "shared_network": "<共有ネットワーク名。無ければ作る>",
-  "expose": { "enabled": false, "public_tag": "golden-public", "base_domain": "<公開の基底名>", "ttl": "8h" }
+  "testenv": {
+    "test_kinds": {
+      "pure":      { "select": "<外部依存なしを列挙>", "run": "<実行コマンド>" },
+      "stateful":  { "select": "<保存先を要するものを列挙>", "run": "<実行コマンド>", "skip_reset": { "<変数名>": "true" } },
+      "browser":   { "run": "<実行コマンド>", "base_url_env": "<接続先の変数名>", "out_env": "<出力先の変数名>" }
+    },
+    "golden_tag_paths": ["<データ構造を定める資産のパス>"],
+    "profiles": { "core": ["<サービス名>"], "browser": ["<サービス名>"] },
+    "shared_network": "<共有ネットワーク名。無ければ作る>",
+    "expose": { "enabled": false, "public_tag": "golden-public", "base_domain": "<公開の基底名>", "ttl": "8h" }
+  }
 }
 ```
 
-`expose.enabled` の既定は無効とする。外部公開は、マスク済みデータが整い、利用者が明示的に有効化した
+テスト実行の項目は `testenv` 配下に置く。全体の構造と各項目の定義は
+[`04-component-and-data.md`](04-component-and-data.md) にある。
+
+`testenv.expose.enabled` の既定は無効とする。外部公開は、マスク済みデータが整い、利用者が明示的に有効化した
 リポジトリでのみ行う。
 
 ### 受け入れ条件の追加

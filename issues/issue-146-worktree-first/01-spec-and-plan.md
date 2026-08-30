@@ -249,7 +249,7 @@ main_dir=$(dirname "$git_common")
 | ランタイム | 追加する hook | 実行するもの |
 | --- | --- | --- |
 | Claude Code | `PreToolUse`（`Edit\|Write\|NotebookEdit` と `Bash`）、`SessionStart` | 共通スクリプト |
-| Codex CLI | `PreToolUse` | 同じ共通スクリプト |
+| Codex CLI | `PreToolUse`、`SessionStart` | 同じ共通スクリプト |
 | Kiro CLI | `userPromptSubmit`、`agentSpawn` | 同じ共通スクリプト（導入スクリプトがエージェント定義へ書き込む） |
 
 hook スクリプトは `plugins/ndf/scripts/` に置き、3 ランタイムで共有する。既存の hook スクリプトと同じく、依存コマンドが無い場合は終了コード 0 で抜けて作業を妨げない。
@@ -321,7 +321,7 @@ plugins/ndf/scripts/worktree-testenv.sh          テスト環境の採番・起�
 
 ```text
 plugins/ndf/hooks/claude.json                  PreToolUse / SessionStart の追加
-plugins/ndf/hooks/codex.json                   PreToolUse の追加
+plugins/ndf/hooks/codex.json                   PreToolUse / SessionStart の追加
 plugins/ndf/dev.kiro/install.sh                userPromptSubmit / agentSpawn の生成
 plugins/ndf/manifests/claude-skills.txt        worktree の追加
 plugins/ndf/manifests/codex-skills.txt         同上
@@ -373,11 +373,11 @@ CLAUDE.md / AGENTS.md / KIRO.md                作業ツリー運用の明記
 - **対象ファイル:** `plugins/ndf/scripts/worktree-session.sh`、`plugins/ndf/skills/worktree/SKILL.md`
 - **変更内容:** セッション開始時に主ディレクトリの未コミット変更を調べ、あればファイル数とパスを提示する。移送手順を Skill に書く
 - **満たす受け入れ条件:** 9、10
-- **進め方:** 変更あり / なしの状態を作って出力を確かめる。移送手順は実際に変更を作って作業ツリーへ移し、両側の状態を確認する
+- **進め方:** 変更あり / なしの状態を作って出力を確かめる。検知はセッション開始時の hook を持つ Claude Code と Codex CLI、および `agentSpawn` を持つ Kiro CLI の 3 ランタイムで動かす。移送手順は実際に変更を作って作業ツリーへ移し、両側の状態を確認する
 
 ### Task 6: 主ディレクトリのブランチを追従させる
 
-- **対象ファイル:** `plugins/ndf/scripts/worktree-session.sh`、`plugins/ndf/hooks/claude.json`
+- **対象ファイル:** `plugins/ndf/scripts/worktree-session.sh`、`plugins/ndf/hooks/claude.json`、`plugins/ndf/hooks/codex.json`
 - **変更内容:** `.worktrees/` 配下の作業ツリーを数え、1 つなら detached HEAD で追従し、0 個または複数なら既定ブランチへ合わせる。未コミット変更があるときは追従しない
 - **満たす受け入れ条件:** 11、12、13、14、15
 - **進め方:** 作業ツリーの一覧と未コミット変更の有無を入力とする判定関数に切り出し、6 通りの組み合わせのテストを先に書く
@@ -475,7 +475,7 @@ hook の追加は `plugins/ndf/hooks/*.json` の該当項目を外せば元に�
 
 ## 完了の定義
 
-- [ ] 受け入れ条件 20 件をすべて満たし、条件ごとに検証手段と結果が対応している
+- [ ] 受け入れ条件 36 件（01 の 1〜20、[`02`](02-local-environment.md) の 21〜27、[`03`](03-test-execution.md) の 31〜39）をすべて満たし、条件ごとに検証手段と結果が対応している
 - [ ] 判定ロジックの単体テストが通る
 - [ ] 相互レビュー・相互リファクタリング・ステータス表示の既存テストが通る
 - [ ] frontmatter 検査、配布物の同期確認、文書内リンク検査、プラグイン定義の検証が通る

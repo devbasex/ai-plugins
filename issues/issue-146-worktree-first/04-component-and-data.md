@@ -12,7 +12,7 @@ flowchart TD
     A[3 ランタイムの hook] --> B[判定の入口<br/>guard / session]
     B --> C[共通ライブラリ<br/>位置の判定・宣言の読み取り]
     C --> D[(宣言ファイル<br/>台帳<br/>セッション状態)]
-    E[worktree Skill] --> F[操作の入口<br/>localenv / stack]
+    E[worktree Skill] --> F[操作の入口<br/>localenv / testenv]
     F --> C
 ```
 
@@ -90,7 +90,9 @@ plugins/ndf/
     "build_before_aim": ["npm ci", "npm run build"],
     "reload_signal": { "process": "php-fpm", "signal": "USR2" },
     "branch_probe": "curl -sI http://localhost/ | grep -i x-worktree",
-    "isolate_when": ["database/migrations/**", "docker/**", "docker-compose*.yml", "Dockerfile*"]
+    "isolated_services": ["app", "nginx"],
+    "isolate_when": ["database/migrations/**", "docker/**", "docker-compose*.yml", "Dockerfile*"],
+    "verify": "curl -sf http://localhost/health"
   },
   "testenv": {
     "port_band": [20000, 29999],
@@ -120,7 +122,9 @@ plugins/ndf/
 | `localenv.src_target` | 文字列 | `indirect` のとき必須 | コンテナ内でコードが置かれる位置 |
 | `localenv.copy_from_main` | 文字列の配列 | 任意 | 作業ツリーへ複製する、追跡されないパス |
 | `localenv.copy_as_real` | 文字列の配列 | 任意 | ハードリンクではなく実体を複製するパス |
+| `localenv.isolated_services` | 文字列の配列 | 任意 | 分離モードで並行起動するサービス |
 | `localenv.isolate_when` | 文字列の配列 | 任意 | 分離モードを促す変更パスの条件 |
+| `localenv.verify` | 文字列 | 任意 | 動作検証に使うコマンド |
 | `testenv.port_band` | 整数 2 個 | `testenv` を使うとき必須 | 採番するポートの範囲 |
 | `testenv.port_roles` | 文字列から整数 | 同上 | 役割ごとの番号の割り当て |
 | `testenv.expose.enabled` | 真偽値 | 任意 | 既定は偽。外部公開は明示的に有効化したときだけ行う |
@@ -140,7 +144,7 @@ plugins/ndf/
       "id": "01JD3K...",
       "worktree": "/path/to/.worktrees/feature/x",
       "branch": "feature/x",
-      "stack": "ai-plugins-wt-feature-x-a1b2c3",
+      "environment": "ai-plugins-wt-feature-x-a1b2c3",
       "slot": 0,
       "ports": { "http": 20000, "db": 20001 },
       "assigned_at": "2026-08-29T10:00:00Z",
