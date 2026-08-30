@@ -30,6 +30,23 @@ WT_DECLARATION_VERSION=1
 # 開発用の作業ツリーを置くディレクトリ (主ディレクトリからの相対)。
 WT_WORKTREE_DIR=".worktrees"
 
+# 逸脱検知でパスを並べる上限。超えた分は件数へ丸める。
+WT_DIRTY_LIST_MAX=20
+
+# 誘導の対象になる tool 名。ランタイムごとに名乗りが違うため、ここで 1 箇所に
+# まとめる。hook の matcher もこの一覧から作る（両方に書くと片方が古くなる）。
+#   編集系 — Claude Code は Edit / Write、Kiro CLI は fs_write、Gemini CLI は replace
+#   パッチ系 — Codex CLI はパッチ本文で編集先を渡す
+#   シェル系 — 書き込みを伴うコマンドの形から編集先を推定する
+WT_EDIT_TOOLS="Edit|MultiEdit|Write|NotebookEdit|fs_write|edit_file|write_file|str_replace_editor|replace"
+WT_PATCH_TOOLS="apply_patch"
+WT_SHELL_TOOLS="Bash|shell|execute_bash|local_shell|run_command|run_shell_command"
+
+# hook の matcher に書く正規表現を出力する。
+wt_tool_matcher() {
+  printf '%s|%s|%s\n' "$WT_EDIT_TOOLS" "$WT_PATCH_TOOLS" "$WT_SHELL_TOOLS"
+}
+
 # --- 位置の解決 -------------------------------------------------------------
 
 # 相対パスを実体の絶対パスへ直す。存在しなければ 1 を返す。

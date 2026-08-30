@@ -163,3 +163,53 @@ def test_broken_stdin_does_not_fail(main_repo: Path) -> None:
         text=True,
     )
     assert proc.returncode == 0
+
+
+# --- 出力の形（事象ごとに 1 つだけ書く） ------------------------------------
+
+
+def run_session_event(cwd: Path, event: str) -> dict:
+    env = os.environ.copy()
+    env["LC_ALL"] = "C"
+    payload = {"session_id": "e1", "cwd": str(cwd), "hook_event_name": event}
+    proc = subprocess.run(
+        ["bash", str(SESSION)],
+        input=json.dumps(payload),
+        cwd=str(cwd), env=env, capture_output=True, text=True,
+    )
+    return {"rc": proc.returncode, "out": proc.stdout}
+
+
+def test_session_start_emits_json_only(main_repo: Path) -> None:
+    """平文と JSON を同時に書くと、標準出力全体が JSON として読めなくなる。"""
+    declared(main_repo)
+    (main_repo / "README.md").write_text("changed\n", encoding="utf-8")
+    result = run_session_event(main_repo, "SessionStart")
+    payload = json.loads(result["out"])
+    assert "README.md" in payload["hookSpecificOutput"]["additionalContext"]
+
+
+def test_agent_spawn_emits_plain_text_only(main_repo: Path) -> None:
+    """Kiro CLI は標準出力をそのまま文脈へ入れる。"""
+    declared(main_repo)
+    (main_repo / "README.md").write_text("changed\n", encoding="utf-8")
+    result = run_session_event(main_repo, "agentSpawn")
+    assert "README.md" in result["out"]
+    assert "hookSpecificOutput" not in result["out"], result["out"]
+
+
+def test_many_changes_are_rounded(main_repo: Path) -> None:
+    """変更が多いときは先頭だけを見せ、残りは件数へ丸める。"""
+    declared(main_repo)
+    for i in range(25):
+        path = main_repo / f"f{i:02d}.txt"
+        path.write_text("x\n", encoding="utf-8")
+    git(main_repo, "add", "-A")
+    git(main_repo, "commit", "-q", "-m", "add files")
+    for i in range(25):
+        (main_repo / f"f{i:02d}.txt").write_text("y\n", encoding="utf-8")
+
+    result = run_session(main_repo)
+    text = context_of(result)
+    assert "25 件" in text, text
+    assert "他 5 件" in text, text

@@ -20,9 +20,11 @@ command -v git >/dev/null 2>&1 || exit 0
 
 PAYLOAD=$(cat 2>/dev/null || true)
 CWD=""
+EVENT=""
 if [ -n "$PAYLOAD" ] && command -v jq >/dev/null 2>&1; then
   if printf '%s' "$PAYLOAD" | jq -e . >/dev/null 2>&1; then
     CWD=$(printf '%s' "$PAYLOAD" | jq -r '.cwd // empty' 2>/dev/null)
+    EVENT=$(printf '%s' "$PAYLOAD" | jq -r '.hook_event_name // empty' 2>/dev/null)
   fi
 fi
 if [ -n "$CWD" ] && [ -d "$CWD" ]; then
@@ -51,7 +53,13 @@ MESSAGES=()
 # --- 逸脱検知 ---------------------------------------------------------------
 
 if [ "$DIRTY_COUNT" -gt 0 ]; then
-  list=$(printf '%s\n' "$DIRTY" | sed 's/^/  /')
+  # 変更が多いときに一覧をそのまま渡すと、引数の長さの上限に触れ、文脈も
+  # 埋めてしまう。先頭だけを見せて残りは件数で丸める。
+  list=$(printf '%s\n' "$DIRTY" | head -n "$WT_DIRTY_LIST_MAX" | sed 's/^/  /')
+  if [ "$DIRTY_COUNT" -gt "$WT_DIRTY_LIST_MAX" ]; then
+    list="$list
+  ... 他 $((DIRTY_COUNT - WT_DIRTY_LIST_MAX)) 件"
+  fi
   MESSAGES+=("主ディレクトリに追跡対象の未コミット変更が ${DIRTY_COUNT} 件あります。
 
 $list
@@ -100,11 +108,24 @@ esac
 
 CONTEXT=$(printf '%s\n\n' "${MESSAGES[@]}")
 
-# この事象では、Claude Code は素の標準出力も文脈へ加える。additionalContext を
-# 持たないランタイムへも内容が届くよう、双方へ同じ内容を書く。
-printf '%s\n' "$CONTEXT"
-if command -v jq >/dev/null 2>&1; then
-  jq -n --arg context "$CONTEXT" \
-    '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $context}}'
-fi
+# 出力の形は事象で選ぶ。**平文と JSON を同時に書かない。**
+# 両方を書くと標準出力全体が JSON として読めなくなり、Claude Code は平文と
+# JSON の文字列表現をまとめて 1 つの本文として文脈へ積む（設計 05 は双方へ
+# 書くとしていたが、実装時にこの重複が分かったため事象で分ける形へ改めた）。
+#
+#   SessionStart (Claude Code / Codex CLI) — JSON の additionalContext で渡す
+#   agentSpawn (Kiro CLI) / 事象が読めない場合 — 標準出力へ平文で書く
+case "$EVENT" in
+  SessionStart|session_start)
+    if command -v jq >/dev/null 2>&1; then
+      jq -n --arg context "$CONTEXT" \
+        '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $context}}'
+    else
+      printf '%s\n' "$CONTEXT"
+    fi
+    ;;
+  *)
+    printf '%s\n' "$CONTEXT"
+    ;;
+esac
 exit 0
