@@ -329,10 +329,34 @@ wt_extract_write_target() {
 
 # tool から渡されたパスを絶対パスへ直す。まだ存在しないパスでも、実在する
 # 最も近い上位ディレクトリまでを実体解決してから残りを継ぎ足す。
+# `.` と `..` を字面で畳む。実体解決は上位ディレクトリの存在を要するため、
+# 存在しないパスでは `..` が残ってしまう。残ると、前方一致での「配下か」の
+# 判定をすり抜ける（`<対象>/a/../../外` が `<対象>/` で始まって見える）。
+_wt_lexical_normalize() {
+  local path="$1" part out="" glob_was_off=0
+  # 分割のための展開でパス名展開が走らないようにする。`*` や `?` を含む
+  # パスが、実在するファイルの名前へ化けてしまう。
+  case "$-" in *f*) glob_was_off=1 ;; esac
+  set -f
+  local IFS=/
+  # shellcheck disable=SC2086
+  set -- $path
+  [ "$glob_was_off" = 1 ] || set +f
+  for part in "$@"; do
+    case "$part" in
+      ""|.) continue ;;
+      ..) out=${out%/*} ;;
+      *) out="$out/$part" ;;
+    esac
+  done
+  printf '%s\n' "${out:-/}"
+}
+
 wt_normalize_path() {
   local path="${1:-}" cwd="${2:-$PWD}" suffix="" dir abs
   [ -n "$path" ] || return 1
   case "$path" in /*) ;; *) path="$cwd/$path" ;; esac
+  path=$(_wt_lexical_normalize "$path")
   dir="$path"
   while [ -n "$dir" ] && [ "$dir" != "/" ]; do
     if abs=$(_wt_abs "$dir"); then
@@ -466,4 +490,296 @@ wt_extract_patch_target() {
     fi
   done <<<"$patch"
   [ "$found" = 1 ] || return 1
+}
+
+# --- テスト環境の採番と台帳 --------------------------------------------------
+
+# 台帳の位置。共通の git ディレクトリ配下へ置く。作業ツリーの中に置くと、その
+# 作業ツリーを削除した時点で割り当ての記録が消える (詳細設計 06 の決定 7)。
+wt_registry_path() {
+  local main_dir="${1:-}"
+  [ -n "$main_dir" ] || return 1
+  local common
+  common=$(git -C "$main_dir" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 1
+  printf '%s/ndf/worktree-registry.json\n' "$common"
+}
+
+# 割り当てを解放しても行を消さないため、解放済みの行は増え続ける。
+# 1 年を超えた解放済みの行は読み取り時に無視する。**削除はしない。**
+WT_REGISTRY_KEEP_DAYS=365
+
+# 空きスロットの上限。0 から数えるため 64 個。
+WT_SLOT_MAX=63
+
+# 環境名を作る。`<リポジトリ>-wt-<ブランチ>-<要約値 6 桁>` を小文字英数と `-` に
+# 揃え、40 文字で切る。同じ作業ツリーには常に同じ値が返る。
+# 名前は 40 文字で切る。**要約値は必ず残す。** 単純に末尾を落とすと、先頭が
+# 同じ長いブランチ名どうしで同じ名前になり、テスト環境が混ざる。
+WT_ENV_NAME_MAX=40
+
+_wt_slug() {
+  printf '%s' "$1" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed -e 's/[^a-z0-9-]/-/g' -e 's/--*/-/g' -e 's/^-//' -e 's/-$//'
+}
+
+wt_env_name() {
+  local main_dir="${1:-}" branch="${2:-}" repo digest head room name
+  [ -n "$main_dir" ] && [ -n "$branch" ] || return 1
+  digest=$(printf '%s' "$branch" | (sha1sum 2>/dev/null || shasum 2>/dev/null) | cut -c1-6)
+  [ -n "$digest" ] || return 1
+
+  repo=$(_wt_slug "$(basename "$main_dir")")
+  branch=$(_wt_slug "$branch")
+
+  # 要約値と区切りに 7 文字を残し、その手前を切る。
+  room=$((WT_ENV_NAME_MAX - 7))
+  head=$(printf '%s-wt-%s' "$repo" "$branch" | cut -c "1-$room")
+  head=${head%-}
+  name=$(printf '%s-%s' "$head" "$digest")
+  printf '%s\n' "$(_wt_slug "$name")"
+}
+
+# ポート番号を返す。`<帯の下限> + スロット*20 + 役割番号`。
+# 判定だけを行い、宣言の読み取りは呼び出し側が持つ（テストのため）。
+wt_port_for() {
+  local band_low="${1:-}" slot="${2:-}" role_number="${3:-}"
+  case "$band_low$slot$role_number" in
+    *[!0-9]*|"") return 1 ;;
+  esac
+  printf '%s\n' "$((band_low + slot * 20 + role_number))"
+}
+
+# 期間の表記を秒へ直す。`90` / `90s` / `45m` / `2h` / `1d` を受ける。
+wt_duration_seconds() {
+  local value="${1:-}" number unit
+  [ -n "$value" ] || return 1
+  number=${value%[smhd]}
+  case "$number" in ""|*[!0-9]*) return 1 ;; esac
+  unit=${value#"$number"}
+  case "$unit" in
+    ""|s) printf '%s\n' "$number" ;;
+    m) printf '%s\n' "$((number * 60))" ;;
+    h) printf '%s\n' "$((number * 3600))" ;;
+    d) printf '%s\n' "$((number * 86400))" ;;
+    *) return 1 ;;
+  esac
+}
+
+# 台帳を読む。無ければ空の台帳を返す。
+wt_registry_read() {
+  local path="${1:-}"
+  if [ -s "$path" ] && jq -e . "$path" >/dev/null 2>&1; then
+    cat "$path"
+    return 0
+  fi
+  printf '{"version":1,"assignments":[]}\n'
+}
+
+# 読み取り時に無視する行を落とした台帳を返す。
+# 解放から WT_REGISTRY_KEEP_DAYS を超えた行は数にも一覧にも入れない。
+# **ファイルからは消さない。**
+wt_registry_visible() {
+  local path="${1:-}"
+  wt_registry_read "$path" | jq --argjson keep "$WT_REGISTRY_KEEP_DAYS" '
+    .assignments |= map(
+      select(.released_at == null
+             or ((.released_at | fromdateiso8601) > (now - ($keep * 86400))))
+    )' 2>/dev/null
+}
+
+_wt_registry_write() {
+  local path="$1" content="$2" tmp
+  mkdir -p "$(dirname "$path")" 2>/dev/null
+  tmp=$(mktemp "${path}.XXXXXX" 2>/dev/null) || return 1
+  printf '%s\n' "$content" >"$tmp" || { rm -f "$tmp"; return 1; }
+  mv "$tmp" "$path" 2>/dev/null || { rm -f "$tmp"; return 1; }
+}
+
+# --- 排他 -------------------------------------------------------------------
+#
+# `flock` が無い環境がある。`mkdir` は同じ名前で同時に成功するのが 1 つだけなので、
+# ディレクトリの作成そのものを排他の手段として使う。
+
+# 待ちの刻み。小数を受けない sleep がある環境では 1 秒へ落ちる。
+_wt_lock_sleep() {
+  sleep 0.1 2>/dev/null || sleep 1
+}
+
+# 持ち主が消えたまま残るロックを捨ててよいと見なすまでの分数。
+# `mkdir` に成功した直後、印を書く前に落ちた持ち主を救うために使う。
+WT_LOCK_STALE_MINUTES=5
+
+# 判定したものと同じロックであることを確かめてから取り除く。
+# 名前の付け替えは 1 つのプロセスだけが成功するため、これを関門に使う。
+# 単に `rm -rf` すると、先に捨てて取り直した別のプロセスのロックを壊す。
+_wt_lock_discard() {
+  local dir="$1" seen="$2" token="$3" stale="$1.stale.$3"
+  mv "$dir" "$stale" 2>/dev/null || return 1
+  if [ "$(cat "$stale/token" 2>/dev/null)" = "$seen" ]; then
+    rm -rf "$stale" 2>/dev/null
+    return 0
+  fi
+  # 別物だった。戻せなければ、取り直した側が既に持っているので捨てる。
+  mv "$stale" "$dir" 2>/dev/null || rm -rf "$stale" 2>/dev/null
+  return 1
+}
+
+# ロックが捨ててよい状態かを見る。
+_wt_lock_is_stale() {
+  local dir="$1" owner
+  owner=$(cat "$dir/pid" 2>/dev/null)
+  if [ -n "$owner" ]; then
+    kill -0 "$owner" 2>/dev/null && return 1
+    return 0
+  fi
+  # 印が無いロックは、作った直後に落ちた可能性がある。古ければ捨ててよい。
+  find "$dir" -maxdepth 0 -mmin "+$WT_LOCK_STALE_MINUTES" 2>/dev/null | grep -q . && return 0
+  return 1
+}
+
+# ロックを取る。取れなければ 1 を返す。
+#
+# `flock` は使わない。使える環境と使えない環境が混じると、同じ資源に対して
+# 別々の仕組みが動き、互いを見落とす。どこでも同じ `mkdir` に揃える。
+wt_lock_acquire() {
+  local dir="${1:-}" timeout="${2:-5}" waited=0 limit token seen
+  [ -n "$dir" ] || return 1
+  # ロックの位置にディレクトリ以外があれば、ロックとして成立しない。取り除く。
+  if [ -e "$dir" ] && [ ! -d "$dir" ]; then
+    rm -f "$dir" 2>/dev/null
+  fi
+  token="$$-$(date +%s 2>/dev/null)-${RANDOM:-0}"
+  limit=$((timeout * 10))
+  while ! mkdir "$dir" 2>/dev/null; do
+    seen=$(cat "$dir/token" 2>/dev/null)
+    if _wt_lock_is_stale "$dir"; then
+      _wt_lock_discard "$dir" "$seen" "$token"
+      continue
+    fi
+    waited=$((waited + 1))
+    [ "$waited" -ge "$limit" ] && return 1
+    _wt_lock_sleep
+  done
+  printf '%s\n' "$token" >"$dir/token" 2>/dev/null
+  printf '%s\n' "$$" >"$dir/pid" 2>/dev/null
+  return 0
+}
+
+wt_lock_release() {
+  [ -n "${1:-}" ] || return 0
+  rm -rf "$1" 2>/dev/null
+  return 0
+}
+
+# 生きている持ち主がロックを握っていれば 0 を返す。
+wt_lock_is_held() {
+  local dir="${1:-}" owner
+  [ -n "$dir" ] && [ -d "$dir" ] || return 1
+  owner=$(cat "$dir/pid" 2>/dev/null)
+  [ -n "$owner" ] || return 0
+  kill -0 "$owner" 2>/dev/null
+}
+
+_wt_registry_apply() {
+  local content updated
+  content=$(wt_registry_read "$_WT_REGISTRY_TARGET")
+  updated=$(printf '%s' "$content" | jq "${_WT_REGISTRY_ARGS[@]+"${_WT_REGISTRY_ARGS[@]}"}" \
+    "$_WT_REGISTRY_PROGRAM" 2>/dev/null) || return 1
+  _wt_registry_write "$_WT_REGISTRY_TARGET" "$updated"
+}
+
+# 台帳の更新を排他のもとで行う。**読み込み・変更・書き出しを 1 つの区間にまとめる。**
+# 判定も jq のプログラムの中で行うこと。区間の外で読んで中で書くと、同時に走った
+# 別のプロセスと同じ番号を割り当ててしまう。
+#
+# 使い方: wt_registry_update <台帳> <jq プログラム> [jq の引数...]
+# 値は jq の引数として渡す。プログラムの文字列へ埋め込むと、引用符を含む
+# ブランチ名やパスで壊れる。
+wt_registry_update() {
+  _WT_REGISTRY_TARGET="${1:-}"
+  _WT_REGISTRY_PROGRAM="${2:-}"
+  [ -n "$_WT_REGISTRY_TARGET" ] && [ -n "$_WT_REGISTRY_PROGRAM" ] || return 1
+  shift 2
+  _WT_REGISTRY_ARGS=("$@")
+  mkdir -p "$(dirname "$_WT_REGISTRY_TARGET")" 2>/dev/null
+
+  # 排他の手段は 1 つに揃える。`flock` の有無で使うロックが分かれると、
+  # 同じ台帳を別の場所から同時に触ったときに互いを見落とす。
+  local lock="${_WT_REGISTRY_TARGET}.lockdir" rc
+  wt_lock_acquire "$lock" 5 || return 1
+  _wt_registry_apply
+  rc=$?
+  wt_lock_release "$lock"
+  return "$rc"
+}
+
+# 作業ツリーへ割り当てられているスロットを返す。無ければ 1 を返す。
+wt_slot_of() {
+  local main_dir="${1:-}" worktree="${2:-}" path slot
+  path=$(wt_registry_path "$main_dir") || return 1
+  slot=$(wt_registry_visible "$path" \
+    | jq -r --arg wt "$worktree" \
+      '[.assignments[] | select(.released_at == null and .worktree == $wt)] | last | .slot // empty' 2>/dev/null)
+  [ -n "$slot" ] || return 1
+  printf '%s\n' "$slot"
+}
+
+# 作業ツリーへスロットを割り当てる。既に割り当てがあれば同じ番号を返す。
+# 空きが無ければ 1 を返す。
+#
+# **空きの判定と行の追加を 1 つの jq プログラムで行う。** 排他区間の外で空きを
+# 読むと、同時に走った別のプロセスと同じ番号を掴む。
+wt_slot_acquire() {
+  local main_dir="${1:-}" worktree="${2:-}" branch="${3:-}" environment="${4:-}"
+  local path
+  path=$(wt_registry_path "$main_dir") || return 1
+
+  wt_registry_update "$path" '
+    ([.assignments[] | select(.released_at == null)]) as $active
+    | if ($active | map(select(.worktree == $wt)) | length) > 0 then .
+      else
+        ([$active[] | .slot]) as $used
+        | ([range(0; $max + 1)] - $used | first) as $slot
+        | if $slot == null then .
+          else
+            .assignments += [{
+              id: $id, worktree: $wt, branch: $branch, environment: $environment,
+              slot: $slot, ports: {}, assigned_at: (now | todate),
+              last_used_at: (now | todate), released_at: null, expose: null
+            }]
+          end
+      end'     --arg wt "$worktree" --arg branch "$branch" --arg environment "$environment"     --arg id "$(date -u +%Y%m%dT%H%M%SZ)-$$" --argjson max "$WT_SLOT_MAX" || return 1
+
+  wt_slot_of "$main_dir" "$worktree"
+}
+
+# 割り当てを解放する。**行は消さず、解放の時刻を書き込む。**
+wt_slot_release() {
+  local main_dir="${1:-}" worktree="${2:-}" path
+  path=$(wt_registry_path "$main_dir") || return 1
+  wt_registry_update "$path" '
+    .assignments |= map(
+      if .worktree == $wt and .released_at == null then .released_at = (now | todate) else . end
+    )' --arg wt "$worktree"
+}
+
+# 割り当てへポートを記録する。
+wt_slot_set_ports() {
+  local main_dir="${1:-}" worktree="${2:-}" ports_json="${3:-}" path
+  path=$(wt_registry_path "$main_dir") || return 1
+  wt_registry_update "$path" '
+    .assignments |= map(
+      if .worktree == $wt and .released_at == null then .ports = $ports else . end
+    )' --arg wt "$worktree" --argjson ports "$ports_json"
+}
+
+# 最後に使った時刻を記録する。reap の判定が読む。
+wt_slot_touch() {
+  local main_dir="${1:-}" worktree="${2:-}" path
+  path=$(wt_registry_path "$main_dir") || return 1
+  wt_registry_update "$path" '
+    .assignments |= map(
+      if .worktree == $wt and .released_at == null then .last_used_at = (now | todate) else . end
+    )' --arg wt "$worktree"
 }

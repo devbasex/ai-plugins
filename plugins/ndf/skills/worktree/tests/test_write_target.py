@@ -142,3 +142,23 @@ def test_target_directory_form_is_the_destination(command: str) -> None:
     targets, rc = extract(command)
     assert rc == 0, command
     assert targets == ["plugins/ndf"], (command, targets)
+
+
+# --- パスの正規化 -----------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("given", "expected"),
+    [
+        ("a/b", "/base/a/b"),
+        ("./a/./b", "/base/a/b"),
+        ("a/../b", "/base/b"),
+        ("a/../../outside", "/outside"),
+        ("/abs/path", "/abs/path"),
+        ("/abs/../other", "/other"),
+    ],
+)
+def test_lexical_normalization(given: str, expected: str) -> None:
+    """`.` と `..` を字面で畳む。残ると「配下か」の判定をすり抜ける。"""
+    got = run_lib(f'wt_normalize_path "{given}" "/base"')
+    assert got.stdout.strip() == expected, got.stderr

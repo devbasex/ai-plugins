@@ -80,6 +80,50 @@
 環境に載っているコードを判定する。値を返せないとき（環境が動いていない、仕掛けが
 入っていない）は「未起動または適用外」として扱われ、「不一致」とは区別される。
 
+## テスト実行を分けるリポジトリ
+
+作業ツリーごとにテスト環境を立てるなら、`testenv` を足す。
+
+```json
+{
+  "version": 1,
+  "testenv": {
+    "port_band": [20000, 29999],
+    "port_roles": { "http": 0, "db": 1, "mail": 2, "object": 4, "search": 6 },
+    "profiles": { "core": ["app", "mysql"], "browser": ["app", "mysql", "nginx"] },
+    "shared_network": "",
+    "golden_tag_paths": ["database/migrations", "database/seeders"],
+    "golden_volumes": { "sail-mysql": "ndf-golden-mysql" },
+    "test_kinds": {
+      "pure":     { "select": "...", "run": "..." },
+      "stateful": { "select": "...", "run": "...", "skip_reset": { "TEST_SKIP_MIGRATE_FRESH": "true" } },
+      "browser":  { "run": "...", "base_url_env": "PWK_BASE_URL", "port_role": "http", "out_env": "PWK_OUT_DIR" }
+    },
+    "expose": {
+      "enabled": false,
+      "public_tag": "golden-public",
+      "base_domain": "",
+      "ttl": "8h",
+      "open_command": "<公開の口を開けるコマンド>",
+      "close_command": "<公開の口を閉じるコマンド>"
+    }
+  }
+}
+```
+
+| 項目 | 決め方 |
+| --- | --- |
+| `port_band` | 他の用途と重ならない帯。スロット 1 つあたり 20 番を使う |
+| `port_roles` | 役割ごとの番号。ポートは `帯の下限 + スロット*20 + 役割番号` |
+| `golden_tag_paths` | データ構造を定める資産。**内容が同じなら基準を焼き直さない** |
+| `test_kinds` | 種類ごとの選別と実行。**書かなければテスト実行の仕組みは何もせずに終わる** |
+| `skip_reset` | 初期化を抑止する環境変数。渡さないと最初のテストが全体を作り直す構成がある |
+| `port_role` | 入口の URL を組み立てるときに使う `port_roles` の役割名。既定は `http` |
+| `expose.enabled` | **既定は無効。** マスク済みデータが整い、明示的に有効化したときだけ公開する |
+| `expose.open_command` | 公開の口を開けるコマンド。**宣言が無ければ公開しない。** `NDF_EXPOSE_URL` / `NDF_EXPOSE_HOST` / `NDF_EXPOSE_ENVIRONMENT` / `NDF_EXPOSE_SLOT` が渡る |
+
+台帳の定義は [`../schemas/registry.schema.json`](../schemas/registry.schema.json) にある。
+
 ## 確かめる
 
 ```bash

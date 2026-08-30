@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/ndf/skills/worktree/schemas/registry.schema.json",
+  "title": "NDF worktree 台帳",
+  "description": "テスト環境の割り当ての記録。共通の git ディレクトリ配下（.git/ndf/worktree-registry.json）に置く。解放しても行を消さず、解放の時刻を書き込む。",
+  "type": "object",
+  "required": ["version", "assignments"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "type": "integer", "enum": [1] },
+    "assignments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["worktree", "slot", "assigned_at"],
+        "additionalProperties": true,
+        "properties": {
+          "id": { "type": "string", "description": "行の識別子" },
+          "worktree": { "type": "string", "description": "作業ツリーの絶対パス" },
+          "branch": { "type": "string" },
+          "environment": {
+            "type": "string",
+            "description": "環境名。<リポジトリ>-wt-<ブランチ>-<要約値 6 桁> を 40 文字で切ったもの"
+          },
+          "slot": {
+            "type": "integer",
+            "description": "0〜63 の番号。ポートの採番に使う",
+            "minimum": 0,
+            "maximum": 63
+          },
+          "ports": {
+            "type": "object",
+            "description": "役割名からポート番号への対応",
+            "additionalProperties": { "type": "integer" }
+          },
+          "golden_tag": {
+            "type": "string",
+            "description": "載っている基準の識別子。公開の可否の照合に使う"
+          },
+          "assigned_at": { "type": "string", "description": "割り当ての時刻（UTC）" },
+          "released_at": {
+            "type": ["string", "null"],
+            "description": "解放の時刻。空きの判定はこれが null の行だけを見る"
+          },
+          "expose": {
+            "type": ["object", "null"],
+            "description": "外部公開の記録。閉じても URL は残す",
+            "additionalProperties": true,
+            "properties": {
+              "url": { "type": "string" },
+              "ttl": { "type": "string" },
+              "opened_at": { "type": "string" },
+              "closed_at": { "type": ["string", "null"] }
+            }
+          }
+        }
+      }
+    }
+  }
+}
