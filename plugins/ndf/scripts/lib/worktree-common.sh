@@ -69,7 +69,7 @@ _wt_read_lines() {
 # `git -C <dir> rev-parse` が返すパスは <dir> からの相対になるため、現在地を
 # 起点にすると解決できない。
 _wt_abs_in() {
-  local base="$1" path="$2"
+  local base="${1:-}" path="${2:-}"
   [ -n "$path" ] || return 1
   (cd "$base" 2>/dev/null && cd "$path" 2>/dev/null && pwd -P) || return 1
 }
@@ -286,7 +286,8 @@ _wt_tokenize() {
 
 # 展開されるヒアドキュメントの本文を 1 行走査し、コマンド置換の状態を進める。
 # 状態は _WT_SUBST（`$(` の深さ）・_WT_BACKTICK・_WT_QUOTE・_WT_QSTACK で持ち回り、
-# 走査した行が置換に掛かっていれば _WT_OPENED を 1 にする。
+# 走査した行が置換に掛かっていれば _WT_OPENED を 1 にする。呼び出し側
+# (`_wt_strip_heredocs`) がこれらを `local` で宣言するため、グローバルへは残らない。
 #
 # **引用符は置換の中でだけ効く。** 本文そのものでは `$`・backtick・`\` だけが特別で、
 # `'` と `"` は字面である。本文の `it's` を引用符の始まりとして数えると、そこから
@@ -366,12 +367,10 @@ _wt_strip_heredocs() {
   local -a lines=() delims=() strips=() expands=()
   local line candidate out="" n i c delim strip quoted
   # 展開される本文の中で、コマンド置換が続いているかを行をまたいで持つ。
-  # 走査は _wt_scan_expanded_line が行う。
-  _WT_SUBST=0
-  _WT_BACKTICK=0
-  _WT_QUOTE=""
-  _WT_QSTACK=()
-  _WT_OPENED=0
+  # 走査は _wt_scan_expanded_line が行う。`local` で宣言すると、bash の動的
+  # スコープにより呼び出し先からも読み書きできる。グローバルへは残らない。
+  local _WT_SUBST=0 _WT_BACKTICK=0 _WT_QUOTE="" _WT_OPENED=0
+  local -a _WT_QSTACK=()
 
   _wt_read_lines <<<"$text"
   lines=("${WT_LINES[@]+"${WT_LINES[@]}"}")
