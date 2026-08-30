@@ -126,3 +126,19 @@ def test_sed_long_option_takes_a_separate_argument() -> None:
     assert targets == ["plugins/ndf/README.md"], targets
     targets, _ = extract("sed -i -e 's/a/b/' --expression 's/c/d/' plugins/ndf/README.md")
     assert targets == ["plugins/ndf/README.md"], targets
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cp -t plugins/ndf docs/a.md",
+        "cp --target-directory=plugins/ndf docs/a.md",
+        "cp --target-directory plugins/ndf docs/a.md",
+        "mv -t plugins/ndf docs/a.md docs/b.md",
+    ],
+)
+def test_target_directory_form_is_the_destination(command: str) -> None:
+    """`-t <ディレクトリ>` を付けると宛先が先に来て、後ろの被演算子は複製元になる。"""
+    targets, rc = extract(command)
+    assert rc == 0, command
+    assert targets == ["plugins/ndf"], (command, targets)

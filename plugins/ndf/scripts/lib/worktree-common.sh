@@ -264,14 +264,24 @@ wt_extract_write_target() {
         fi
         ;;
       cp|mv)
-        local dest=""
+        # 既定では最後の被演算子が宛先だが、`-t <ディレクトリ>` を付けると
+        # 宛先が先に来て、後ろの被演算子はすべて複製元になる。
+        local dest="" target_dir="" take_next=0
         for ((j = i + 1; j < n; j++)); do
+          if [ "$take_next" = 1 ]; then
+            target_dir=${words[j]}
+            take_next=0
+            continue
+          fi
           case "${words[j]}" in
-            -*) continue ;;
             __WT_*|"|"|"&&"|";") break ;;
+            -t|--target-directory) take_next=1 ;;
+            --target-directory=*) target_dir=${words[j]#--target-directory=} ;;
+            -*) continue ;;
             *) dest=${words[j]} ;;
           esac
         done
+        [ -n "$target_dir" ] && dest=$target_dir
         _emit "$dest"
         ;;
     esac
