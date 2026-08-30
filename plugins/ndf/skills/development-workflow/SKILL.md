@@ -67,6 +67,7 @@ mode: standard
 
 | 工程 | `light` | `standard` | `architecture` | `legacy-refactor` |
 | --- | --- | --- | --- | --- |
+| 作業場所の用意 | `worktree`（主ディレクトリで編集してよいパスだけなら不要） | `worktree` | `worktree` | `worktree` |
 | 要求と受け入れ条件 | — | `requirements-design` | `requirements-design` | — |
 | 設計 | — | `implementation-plan` に代替案と採否を記録 | ドメインモデリングと設計レビュー（Release 2 で有効化） | `implementation-plan` に代替案と採否を記録 |
 | 計画 | — | `implementation-plan` | `implementation-plan` | `implementation-plan` |
@@ -74,7 +75,18 @@ mode: standard
 | 構造改善 | — | `refactoring` | `refactoring` | `refactoring` |
 | レビュー | — | `pr-review` | `cross-review` | `pr-review` |
 | 完了判定 | `quality-gates` | `quality-gates` | `quality-gates` | `quality-gates` |
+| Pull Request | `pr` | `pr` | `pr` | `pr` |
 | 確定仕様化 | — | `plan-to-spec`（仕様が変わった場合） | `plan-to-spec` | — |
+| 後片付け | `merged` | `merged` | `merged` | `merged` |
+
+**作業場所の用意は、要求を整理する前に済ませる。** 開発の変更は clone したディレクトリではなく
+`.worktrees/<ブランチ名>` の作業ツリーの中で行う。後から移すと、主ディレクトリに変更が残った
+まま並行作業が始まる。`light` でも、本番コードの文言やテストを触るなら作業ツリーを使う。
+`issues/` `docs/` と各ランタイムの設定だけで収まる変更は、主ディレクトリのままでよい。
+
+**後片付けは工程の一部である。** マージした作業ツリーとブランチが残ると、次の作業で
+どれが生きているのか分からなくなる。`merged` は取り消しが難しい操作を含むため、削除の対象を
+一覧で示して同意を取ってから消す。
 
 「設計」行の `standard` と `legacy-refactor` は**専用の設計 Skill を起動しない**。設計と代替案の
 検討そのものは行い、結果を `implementation-plan` の中に残す。そのため「モードと必須工程」表では
@@ -97,7 +109,8 @@ mode: standard
 
 ```mermaid
 flowchart TD
-    A[調査] --> B[要求と受け入れ条件]
+    S[作業場所の用意] --> A[調査]
+    A --> B[要求と受け入れ条件]
     B --> C[設計と代替案の検討]
     C --> D{ドメイン<br/>モデリングが要るか}
     D -->|要る| E[ドメインモデリング]
@@ -112,20 +125,23 @@ flowchart TD
     K --> N[全体テスト → ビルド・結合テスト]
     N --> L[プルリクエスト作成]
     L --> M[確定仕様化]
+    M --> P[マージ後の後片付け]
     C -.->|standard| G
     A -.->|legacy-refactor| C
     A -.->|light| K
     K -.->|light| L
+    L -.->|light / legacy-refactor| P
 ```
 
 - `standard` は A → B → C から破線で G へ抜け、**D・E・F（ドメインモデリングと専用 Skill による
   設計レビュー）を通らない**。C の設計と代替案の検討は行うが、専用 Skill は使わず
   `implementation-plan`（G）に代替案と採否として書く
-- `light` は破線の経路（A → K → L）のみを通る。**N の全体テストと結合テストは通らない**
+- すべてのモードが S（作業場所の用意）から始まり、P（マージ後の後片付け）で終わる
+- `light` は破線の経路（S → A → K → L → P）のみを通る。**N の全体テストと結合テストは通らない**
   （K は変更箇所を 1 度実行する限定的な検証と静的解析だけを指す。依存パッケージの版更新だけは
   例外として既存テスト一式を実行する — [references/workflow-modes.md](references/workflow-modes.md)）
 - `legacy-refactor` は A から C へ抜けて `standard` と同じ経路をたどり、**B（要求と受け入れ条件）と
-  M（確定仕様化）は通らない**。H は「現状固定テスト」、R は「段階的改善」、I は「本番の振る舞いが
+  M（確定仕様化）は通らない**（L から P へ抜ける）。H は「現状固定テスト」、R は「段階的改善」、I は「本番の振る舞いが
 
   変わっていないことの確認」として読む
 
@@ -142,8 +158,8 @@ flowchart TD
 | 契約・結合テスト | `tdd-cycle` の階層の使い分けに従う |
 | 相互レビュー | `cross-review` |
 
-3 Skill の導入後にこの節を差し替える。**判定基準の側は変更しない**（モードの定義は今回
-確定させ、振り分け先だけを後から埋める）。
+3 Skill の導入後にこの節を差し替える。**判定基準の側は変えない**。モードの定義は確定して
+おり、振り分け先だけを後から埋める。
 
 ## 途中でモードが変わったとき
 
