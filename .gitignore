@@ -51,3 +51,6 @@ ${SERENA_HOME}/
 .serena/logs/
 .serena/cache/
 .cross_review_pr22_diff.patch
+
+# 開発用の作業ツリー
+.worktrees/

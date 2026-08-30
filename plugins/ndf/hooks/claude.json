@@ -1,5 +1,21 @@
 {
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|MultiEdit|Write|NotebookEdit|Bash",
+        "description": "Guide development edits into a worktree when the cloned directory is being edited",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/worktree-guard.sh",
+            "description": "NDF: notify when the main directory is edited",
+            "timeout": 5,
+            "continueOnError": true,
+            "suppressOutput": false
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "matcher": "startup",
