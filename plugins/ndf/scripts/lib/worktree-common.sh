@@ -308,6 +308,9 @@ wt_extract_write_target() {
             --in-place|--in-place=*) has_inplace=1 ;;
             -e|-f|--expression|--file) seen_script=1; skip_next=1 ;;
             --expression=*|--file=*) seen_script=1 ;;
+            # `-es/a/b/` のように空白を挟まずスクリプトを続ける形もある。
+            # 見落とすと、最初のファイルをスクリプトと取り違える。
+            -e*|-f*) seen_script=1 ;;
             --) ;;
             -*)
               if [[ ${words[j]} =~ ^-[a-zA-Z]*i([a-zA-Z]*|\..*)$ ]]; then
@@ -343,6 +346,8 @@ wt_extract_write_target() {
             __WT_*|"|"|"&&"|";") break ;;
             -t|--target-directory) take_next=1 ;;
             --target-directory=*) target_dir=${words[j]#--target-directory=} ;;
+            # `-t<ディレクトリ>` のように空白を挟まない形もある。
+            -t*) target_dir=${words[j]#-t} ;;
             -*) continue ;;
             *) dest=${words[j]} ;;
           esac

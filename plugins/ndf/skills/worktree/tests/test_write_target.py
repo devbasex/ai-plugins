@@ -197,3 +197,29 @@ def test_separator_inside_quotes_is_not_a_break() -> None:
 def test_newline_does_not_become_a_target() -> None:
     targets, rc = extract("echo hi >\nplugins/ndf/README.md")
     assert rc == 1, targets
+
+
+# --- 空白を挟まないオプション ------------------------------------------------
+
+
+def test_sed_script_joined_to_the_option() -> None:
+    """`-es/a/b/` のように空白を挟まない形。見落とすと最初のファイルを取り違える。"""
+    targets, rc = extract("sed -i -es/a/b/ one.md two.md")
+    assert rc == 0, targets
+    assert targets == ["one.md", "two.md"], targets
+
+
+def test_sed_file_option_joined() -> None:
+    targets, _ = extract("sed -i -fscript.sed one.md two.md")
+    assert targets == ["one.md", "two.md"], targets
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["cp -tplugins/ndf docs/a.md", "mv -tplugins/ndf docs/a.md docs/b.md"],
+)
+def test_target_directory_joined_to_the_option(command: str) -> None:
+    """`-t<ディレクトリ>` のように空白を挟まない形。"""
+    targets, rc = extract(command)
+    assert rc == 0, command
+    assert targets == ["plugins/ndf"], (command, targets)

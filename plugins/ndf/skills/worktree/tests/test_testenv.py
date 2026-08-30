@@ -978,3 +978,31 @@ def test_lock_timeout_is_measured_in_real_time(tmp_path: Path) -> None:
 
     assert "rc=1" in got.stdout, got.stdout
     assert elapsed < 6, f"上限 2 秒の待ちに {elapsed:.1f} 秒かかった"
+
+
+def test_compose_file_under_a_symlinked_directory_is_refused(
+    main_repo: Path, worktree: Path, tmp_path: Path
+) -> None:
+    """途中のディレクトリが symlink で外を指していても読み込ませない。"""
+    outside = tmp_path / "outside-compose"
+    outside.mkdir()
+    (outside / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+    (worktree / "compose").symlink_to(outside)
+    declare(
+        main_repo,
+        testenv={"port_band": [20000, 29999]},
+        localenv={"kind": "compose", "compose_files": ["compose/docker-compose.yml"]},
+    )
+    dump = main_repo.parent / "never3.txt"
+    stub = stub_docker(main_repo, dump)
+
+    env = os.environ.copy()
+    env["WT_DOCKER_COMMAND"] = str(stub)
+    proc = subprocess.run(
+        ["bash", str(TESTENV), "up", str(worktree)],
+        cwd=str(main_repo), env=env, capture_output=True, text=True,
+    )
+
+    assert proc.returncode == 1, proc
+    assert "作業ツリーの外" in proc.stderr, proc.stderr
+    assert not dump.exists(), "定義を読み込まない"
