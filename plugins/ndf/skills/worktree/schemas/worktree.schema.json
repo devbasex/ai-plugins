@@ -107,7 +107,7 @@
         },
         "branch_probe": {
           "type": "string",
-          "description": "環境に載っているブランチ名を出力するコマンド。照合が使う"
+          "description": "ローカル環境に載っているブランチ名を出力するコマンド。照合が使う"
         },
         "isolated_services": {
           "type": "array",
