@@ -333,11 +333,20 @@ do_unexpose() {
     load_assignment || true
     host=${url#https://}
     host=${host#http://}
-    (cd "$TARGET" && env "NDF_EXPOSE_URL=$url" "NDF_EXPOSE_HOST=$host" \
+    if ! (cd "$TARGET" && env "NDF_EXPOSE_URL=$url" "NDF_EXPOSE_HOST=$host" \
       "NDF_EXPOSE_ENVIRONMENT=${ENVIRONMENT:-}" "NDF_EXPOSE_SLOT=${SLOT:-}" \
-      sh -c "$close_command") || true
+      sh -c "$close_command"); then
+      # 閉じられていないのに台帳だけ閉じると、口が開いたまま次の公開が通る。
+      printf '%s\n' "公開を閉じる手段が失敗しました。台帳は閉じていません: $url" >&2
+      return 1
+    fi
   fi
 
+  _close_record
+}
+
+# 台帳の公開の記録だけを閉じる。口を開けられなかったときの巻き戻しに使う。
+_close_record() {
   wt_registry_update "$(registry)" '
     .assignments |= map(
       if .worktree == $wt and .expose != null and .expose.closed_at == null
@@ -408,7 +417,8 @@ do_expose() {
   if ! (cd "$TARGET" && env "NDF_EXPOSE_URL=$opened" "NDF_EXPOSE_HOST=$host" \
         "NDF_EXPOSE_ENVIRONMENT=$ENVIRONMENT" "NDF_EXPOSE_SLOT=$SLOT" \
         sh -c "$open_command"); then
-    do_unexpose >/dev/null 2>&1
+    # 口は開いていないので、閉じる手段は呼ばずに記録だけ戻す。
+    _close_record
     printf '%s\n' "公開の手段が失敗しました。記録を戻しました" >&2
     return 1
   fi

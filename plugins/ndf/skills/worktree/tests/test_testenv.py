@@ -678,3 +678,42 @@ def test_env_name_keeps_the_digest_for_long_branches(main_repo: Path) -> None:
 
     assert len(a) == 40 and len(b) == 40
     assert a != b, (a, b)
+
+
+def test_unexpose_keeps_the_record_when_closing_fails(main_repo: Path, worktree: Path) -> None:
+    """閉じられていないのに台帳だけ閉じると、口が開いたまま次の公開が通る。"""
+    declare(main_repo, testenv={
+        "port_band": [20000, 29999],
+        "expose": {"enabled": True, "public_tag": "golden-public",
+                   "base_domain": "example.test",
+                   "open_command": "true", "close_command": "exit 1"},
+    })
+    run(["env", str(worktree)], cwd=main_repo)
+    golden(main_repo, worktree)
+    assert run(["expose", str(worktree)], cwd=main_repo)["rc"] == 0
+
+    result = run(["unexpose", str(worktree)], cwd=main_repo)
+
+    assert result["rc"] == 1, result
+    assert registry(main_repo)["assignments"][0]["expose"]["closed_at"] is None
+
+
+def test_next_expose_is_refused_while_a_close_failed(main_repo: Path, worktree: Path) -> None:
+    """閉じられていない公開が残っている間は、次の公開を通さない。"""
+    declare(main_repo, testenv={
+        "port_band": [20000, 29999],
+        "expose": {"enabled": True, "public_tag": "golden-public",
+                   "base_domain": "example.test",
+                   "open_command": "true", "close_command": "exit 1"},
+    })
+    second = main_repo / ".worktrees" / "fix" / "y"
+    git(main_repo, "worktree", "add", "-q", "-b", "fix/y", str(second))
+    run(["env", str(worktree)], cwd=main_repo)
+    run(["env", str(second)], cwd=main_repo)
+    golden(main_repo, worktree)
+
+    assert run(["expose", str(worktree)], cwd=main_repo)["rc"] == 0
+    assert run(["unexpose", str(worktree)], cwd=main_repo)["rc"] == 1
+
+    blocked = run(["expose", str(second)], cwd=main_repo)
+    assert blocked["rc"] == 1, blocked
