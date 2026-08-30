@@ -314,7 +314,7 @@ def test_a_write_inside_an_expanding_heredoc_is_found() -> None:
     targets, rc = extract(command)
     assert rc == 0, targets
     assert "report.md" in targets, targets
-    assert "side-effect.md)" in targets, targets
+    assert "side-effect.md" in targets, targets
 
 
 def test_an_expanding_heredoc_without_substitution_is_dropped() -> None:
@@ -366,7 +366,7 @@ def test_lines_after_a_closed_substitution_are_dropped_again() -> None:
     )
     targets, rc = extract(command)
     assert rc == 0, targets
-    assert targets == ["report.md", "side-effect.md)"], targets
+    assert targets == ["report.md", "side-effect.md"], targets
 
 
 def test_a_multi_line_backtick_substitution_is_found() -> None:
@@ -402,7 +402,7 @@ def test_a_quoted_paren_on_the_same_line_keeps_the_write() -> None:
     targets, rc = extract(command)
     assert rc == 0, targets
     assert "report.md" in targets, targets
-    assert "side-effect.md)" in targets, targets
+    assert "side-effect.md" in targets, targets
 
 
 def test_an_apostrophe_in_the_body_is_not_a_quote() -> None:
@@ -415,7 +415,7 @@ def test_an_apostrophe_in_the_body_is_not_a_quote() -> None:
     )
     targets, rc = extract(command)
     assert rc == 0, targets
-    assert "side-effect.md)" in targets, targets
+    assert "side-effect.md" in targets, targets
 
 
 def test_single_quotes_inside_a_substitution_are_honoured() -> None:
@@ -452,7 +452,7 @@ def test_a_substitution_after_an_arithmetic_expansion_is_found() -> None:
     )
     targets, rc = extract(command)
     assert rc == 0, targets
-    assert "side-effect.md)" in targets, targets
+    assert "side-effect.md" in targets, targets
 
 
 def test_a_nested_arithmetic_expansion_is_skipped_to_its_end() -> None:
@@ -465,3 +465,28 @@ def test_a_nested_arithmetic_expansion_is_skipped_to_its_end() -> None:
     targets, rc = extract(command)
     assert rc == 0, targets
     assert targets == ["report.md"], targets
+
+
+def test_a_quoted_delimiter_with_a_space_is_recognised() -> None:
+    """終端の語は引用符で空白を含められる。途中で切ると終端を見つけられない。"""
+    command = (
+        'cat > report.md <<"EOF X"\n'
+        "受領: <payload>\n"
+        "EOF X\n"
+        "echo hi > after.md"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert targets == ["report.md", "after.md"], targets
+
+
+def test_the_body_outside_a_substitution_is_not_scanned() -> None:
+    """展開される本文でも、置換の外は実行されない。字面を書き込み先にしない。"""
+    command = (
+        "cat > report.md <<EOS\n"
+        "変換: 入力 > <期待: 一致>  $(echo data > side-effect.md)\n"
+        "EOS"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert targets == ["report.md", "side-effect.md"], targets

@@ -257,7 +257,8 @@ wt_relative_to_main() {
 # `sed -i 's/a b/c/' f` のように引用符の中へ空白を含む形を 1 語として扱うため、
 # 単純な空白区切りでは足りない。
 _wt_tokenize() {
-  local s="${1:-}" n=${#1} i c quote="" cur=""
+  local s="${1:-}" n i c quote="" cur=""
+  n=${#s}
   local -a out=()
   for ((i = 0; i < n; i++)); do
     c=${s:i:1}
@@ -284,89 +285,111 @@ _wt_tokenize() {
   printf '%s\n' "${out[@]+"${out[@]}"}"
 }
 
-# 展開されるヒアドキュメントの本文を 1 行走査し、コマンド置換の状態を進める。
+# 展開されるヒアドキュメントの本文を 1 行走査し、実行される断片だけを取り出す。
+# 結果は _WT_SANITIZED に入り、コマンド置換の外は空白へ置き換わる。置換の境界
+# （`$(` と対応する `)`、backtick）も空白にするため、閉じ括弧が書き込み先の語へ
+# くっつかない。走査した行が置換に掛かっていれば _WT_OPENED を 1 にする。
+#
 # 状態は _WT_SUBST（`$(` の深さ）・_WT_BACKTICK・_WT_ARITH・_WT_QUOTE・_WT_QSTACK で
-# 持ち回り、
-# 走査した行が置換に掛かっていれば _WT_OPENED を 1 にする。呼び出し側
-# (`_wt_strip_heredocs`) がこれらを `local` で宣言するため、グローバルへは残らない。
+# 持ち回る。呼び出し側 (`_wt_strip_heredocs`) がこれらを `local` で宣言するため、
+# グローバルへは残らない。
 #
 # **引用符は置換の中でだけ効く。** 本文そのものでは `$`・backtick・`\` だけが特別で、
 # `'` と `"` は字面である。本文の `it's` を引用符の始まりとして数えると、そこから
 # 後ろの `$(` を見落とす。逆に置換の中では引用符が効くため、`$(echo "a )" > f)` の
 # 引用符に囲まれた `)` を閉じ括弧として数えると、置換がそこで終わったことになる。
+#
+# `$((...))` は算術展開で、コマンドは動かない。中の `>` は比較であって出力の
+# 付け替えではないため、閉じるまで空白へ置き換える。
 _wt_scan_expanded_line() {
-  local line="${1:-}" n=${#1} j=0 c
+  local line="${1:-}" n j c
+  n=${#line}
+  j=0
   _WT_OPENED=0
+  _WT_SANITIZED=""
   if [ "$_WT_SUBST" -gt 0 ] || [ "$_WT_BACKTICK" = 1 ]; then _WT_OPENED=1; fi
 
   while [ "$j" -lt "$n" ]; do
     c=${line:j:1}
 
-    # `$((...))` は算術展開で、コマンドは動かない。中の `>` は比較であって
-    # 出力の付け替えではないため、閉じるまで読み飛ばす。
     if [ "$_WT_ARITH" -gt 0 ]; then
       case "$c" in
         '(') _WT_ARITH=$((_WT_ARITH + 1)) ;;
         ')') _WT_ARITH=$((_WT_ARITH - 1)) ;;
       esac
+      _WT_SANITIZED+=" "
       j=$((j + 1))
       continue
     fi
     if [ "${line:j:3}" = '$((' ]; then
       _WT_ARITH=2
+      _WT_SANITIZED+="   "
       j=$((j + 3))
       continue
     fi
 
-    # 本文そのもの。展開の対象は `$(`・backtick・`\` だけである。
+    # 本文そのもの。実行されないため、字面は残さない。
     if [ "$_WT_SUBST" = 0 ] && [ "$_WT_BACKTICK" = 0 ]; then
       case "$c" in
-        '\') j=$((j + 2)); continue ;;
-        '`') _WT_BACKTICK=1; _WT_OPENED=1; j=$((j + 1)); continue ;;
+        '\') _WT_SANITIZED+="  "; j=$((j + 2)); continue ;;
+        '`') _WT_BACKTICK=1; _WT_OPENED=1; _WT_SANITIZED+=" "; j=$((j + 1)); continue ;;
       esac
       if [ "${line:j:2}" = '$(' ]; then
         _WT_QSTACK[$_WT_SUBST]="$_WT_QUOTE"
         _WT_SUBST=1
         _WT_QUOTE=""
         _WT_OPENED=1
+        _WT_SANITIZED+="  "
         j=$((j + 2))
         continue
       fi
+      _WT_SANITIZED+=" "
       j=$((j + 1))
       continue
     fi
 
-    # 置換の中。シェルの引用符が効く。
+    # 置換の中。シェルの引用符が効く。実行される部分なので字面を残す。
     if [ "$_WT_QUOTE" = "'" ]; then
       [ "$c" = "'" ] && _WT_QUOTE=""
+      _WT_SANITIZED+="$c"
       j=$((j + 1))
       continue
     fi
-    case "$c" in
-      '\') j=$((j + 2)); continue ;;
-    esac
+    if [ "$c" = '\' ]; then
+      _WT_SANITIZED+="${line:j:2}"
+      j=$((j + 2))
+      continue
+    fi
     if [ "${line:j:2}" = '$(' ]; then
       _WT_QSTACK[$_WT_SUBST]="$_WT_QUOTE"
       _WT_SUBST=$((_WT_SUBST + 1))
       _WT_QUOTE=""
+      _WT_SANITIZED+="  "
       j=$((j + 2))
       continue
     fi
     if [ "$_WT_QUOTE" = '"' ]; then
       [ "$c" = '"' ] && _WT_QUOTE=""
+      _WT_SANITIZED+="$c"
       j=$((j + 1))
       continue
     fi
     case "$c" in
-      "'") _WT_QUOTE="'" ;;
-      '"') _WT_QUOTE='"' ;;
+      "'"|'"') _WT_QUOTE="$c"; _WT_SANITIZED+="$c" ;;
       ')')
         if [ "$_WT_SUBST" -gt 0 ]; then
           _WT_SUBST=$((_WT_SUBST - 1))
           _WT_QUOTE="${_WT_QSTACK[$_WT_SUBST]:-}"
+          _WT_SANITIZED+=" "
+        else
+          _WT_SANITIZED+="$c"
         fi
         ;;
-      '`') if [ "$_WT_BACKTICK" = 1 ]; then _WT_BACKTICK=0; else _WT_BACKTICK=1; fi ;;
+      '`')
+        if [ "$_WT_BACKTICK" = 1 ]; then _WT_BACKTICK=0; else _WT_BACKTICK=1; fi
+        _WT_SANITIZED+=" "
+        ;;
+      *) _WT_SANITIZED+="$c" ;;
     esac
     j=$((j + 1))
   done
@@ -382,11 +405,12 @@ _wt_scan_expanded_line() {
 _wt_strip_heredocs() {
   local text="${1:-}"
   local -a lines=() delims=() strips=() expands=()
-  local line candidate out="" n i c delim strip quoted
+  local line candidate out="" n i c delim strip quoted dq
   # 展開される本文の中で、コマンド置換が続いているかを行をまたいで持つ。
   # 走査は _wt_scan_expanded_line が行う。`local` で宣言すると、bash の動的
   # スコープにより呼び出し先からも読み書きできる。グローバルへは残らない。
   local _WT_SUBST=0 _WT_BACKTICK=0 _WT_QUOTE="" _WT_OPENED=0 _WT_ARITH=0
+  local _WT_SANITIZED=""
   local -a _WT_QSTACK=()
 
   _wt_read_lines <<<"$text"
@@ -419,7 +443,7 @@ _wt_strip_heredocs() {
       # 深さを行をまたいで持ち越す。
       if [ "${expands[head]}" = 1 ]; then
         _wt_scan_expanded_line "$line"
-        if [ "$_WT_OPENED" = 1 ]; then out+="$line"$'\n'; fi
+        if [ "$_WT_OPENED" = 1 ]; then out+="$_WT_SANITIZED"$'\n'; fi
       fi
       continue
     fi
@@ -451,13 +475,22 @@ _wt_strip_heredocs() {
       while [ "${line:i:1}" = " " ] || [ "${line:i:1}" = $'\t' ]; do i=$((i + 1)); done
       # 終端の語。引用符は書き方の違いで、語そのものには含まれない。
       # 引用符を 1 つでも使えば、本文は展開されない。
+      # **引用符の中では区切りで切らない。** `<<"EOF X"` のように空白や記号を
+      # 含む語を、途中で切ると終端を見つけられない。
       delim=""
       quoted=0
+      dq=""
       while [ "$i" -lt "$n" ]; do
         c=${line:i:1}
+        if [ -n "$dq" ]; then
+          if [ "$c" = "$dq" ]; then dq=""; else delim+="$c"; fi
+          i=$((i + 1))
+          continue
+        fi
         case "$c" in
           " "|$'\t'|";"|"|"|"&"|">"|"<") break ;;
-          "'"|'"'|'\') quoted=1 ;;
+          "'"|'"') dq="$c"; quoted=1 ;;
+          '\') quoted=1 ;;
           *) delim+="$c" ;;
         esac
         i=$((i + 1))
