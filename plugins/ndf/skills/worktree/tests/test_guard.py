@@ -216,3 +216,39 @@ def test_gemini_run_shell_command_is_normalized(main_repo: Path) -> None:
     }
     result = run_guard(payload, cwd=main_repo)
     assert "plugins/ndf/README.md" in context_of(result)
+
+
+def test_codex_apply_patch_is_normalized(main_repo: Path) -> None:
+    """Codex CLI は `apply_patch` の本文でパスを渡す（実機で確認した形）。"""
+    declared(main_repo)
+    payload = {
+        "session_id": "c1",
+        "cwd": str(main_repo),
+        "hook_event_name": "PreToolUse",
+        "tool_name": "apply_patch",
+        "tool_input": {
+            "command": (
+                "*** Begin Patch\n"
+                "*** Update File: plugins/ndf/README.md\n"
+                "@@\n-# sample\n+# sample edited\n"
+                "*** End Patch\n"
+            )
+        },
+    }
+    result = run_guard(payload, cwd=main_repo)
+    assert "plugins/ndf/README.md" in context_of(result)
+
+
+def test_codex_apply_patch_on_allowed_path_is_silent(main_repo: Path) -> None:
+    declared(main_repo)
+    payload = {
+        "session_id": "c2",
+        "cwd": str(main_repo),
+        "hook_event_name": "PreToolUse",
+        "tool_name": "apply_patch",
+        "tool_input": {
+            "command": "*** Begin Patch\n*** Update File: issues/note.md\n@@\n+x\n*** End Patch\n"
+        },
+    }
+    result = run_guard(payload, cwd=main_repo)
+    assert result["out"].strip() == "", result["out"]

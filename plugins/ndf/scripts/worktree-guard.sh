@@ -122,31 +122,36 @@ esac
 # --- tool 実行前 ------------------------------------------------------------
 
 # ツール名はランタイムごとに違う。判定を 1 つに保つため、ここで種別へ正規化する。
-# 結線しているランタイム (Claude Code / Codex CLI / Kiro CLI) の名前に加えて、
-# 委譲先として動きうる CLI の名前も併記する。取りこぼすと案内が出ないだけで、
-# 余分に並べても該当しなければ何も起きない。
+# 対象の一覧は共通ライブラリの WT_EDIT_TOOLS / WT_PATCH_TOOLS / WT_SHELL_TOOLS が
+# 持ち、hook の matcher も同じ一覧から作る。
 targets=()
-case "$TOOL" in
-  Edit|MultiEdit|Write|NotebookEdit|fs_write|edit_file|write_file|apply_patch|str_replace_editor|replace)
-    mapfile -t targets < <(
-      jq_get '[.tool_input.file_path?, .tool_input.path?, .tool_input.notebook_path?,
-               (.tool_input.edits[]?.file_path?), (.tool_input.operations[]?.path?)]
-              | map(select(type == "string" and . != "")) | unique | .[]'
-    )
-    ;;
-  Bash|shell|execute_bash|local_shell|run_command|run_shell_command)
-    command_text=$(
-      jq_get 'if (.tool_input.command | type) == "array" then (.tool_input.command | join(" "))
-              elif (.tool_input.command | type) == "string" then .tool_input.command
-              else empty end'
-    )
-    [ -n "$command_text" ] || exit 0
-    mapfile -t targets < <(wt_extract_write_target "$command_text")
-    ;;
-  *)
-    exit 0
-    ;;
-esac
+if [[ "$TOOL" =~ ^($WT_PATCH_TOOLS)$ ]]; then
+  # Codex CLI はファイルの編集をパッチ本文で渡す。パスは本文の中にある。
+  patch_text=$(
+    jq_get 'if (.tool_input.command | type) == "string" then .tool_input.command
+            elif (.tool_input.patch | type) == "string" then .tool_input.patch
+            elif (.tool_input.input | type) == "string" then .tool_input.input
+            else empty end'
+  )
+  [ -n "$patch_text" ] || exit 0
+  mapfile -t targets < <(wt_extract_patch_target "$patch_text")
+elif [[ "$TOOL" =~ ^($WT_EDIT_TOOLS)$ ]]; then
+  mapfile -t targets < <(
+    jq_get '[.tool_input.file_path?, .tool_input.path?, .tool_input.notebook_path?,
+             (.tool_input.edits[]?.file_path?), (.tool_input.operations[]?.path?)]
+            | map(select(type == "string" and . != "")) | unique | .[]'
+  )
+elif [[ "$TOOL" =~ ^($WT_SHELL_TOOLS)$ ]]; then
+  command_text=$(
+    jq_get 'if (.tool_input.command | type) == "array" then (.tool_input.command | join(" "))
+            elif (.tool_input.command | type) == "string" then .tool_input.command
+            else empty end'
+  )
+  [ -n "$command_text" ] || exit 0
+  mapfile -t targets < <(wt_extract_write_target "$command_text")
+else
+  exit 0
+fi
 
 [ "${#targets[@]}" -gt 0 ] || exit 0
 

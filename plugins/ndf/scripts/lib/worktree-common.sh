@@ -30,6 +30,23 @@ WT_DECLARATION_VERSION=1
 # 開発用の作業ツリーを置くディレクトリ (主ディレクトリからの相対)。
 WT_WORKTREE_DIR=".worktrees"
 
+# 逸脱検知でパスを並べる上限。超えた分は件数へ丸める。
+WT_DIRTY_LIST_MAX=20
+
+# 誘導の対象になる tool 名。ランタイムごとに名乗りが違うため、ここで 1 箇所に
+# まとめる。hook の matcher もこの一覧から作る（両方に書くと片方が古くなる）。
+#   編集系 — Claude Code は Edit / Write、Kiro CLI は fs_write、Gemini CLI は replace
+#   パッチ系 — Codex CLI はパッチ本文で編集先を渡す
+#   シェル系 — 書き込みを伴うコマンドの形から編集先を推定する
+WT_EDIT_TOOLS="Edit|MultiEdit|Write|NotebookEdit|fs_write|edit_file|write_file|str_replace_editor|replace"
+WT_PATCH_TOOLS="apply_patch"
+WT_SHELL_TOOLS="Bash|shell|execute_bash|local_shell|run_command|run_shell_command"
+
+# hook の matcher に書く正規表現を出力する。
+wt_tool_matcher() {
+  printf '%s|%s|%s\n' "$WT_EDIT_TOOLS" "$WT_PATCH_TOOLS" "$WT_SHELL_TOOLS"
+}
+
 # --- 位置の解決 -------------------------------------------------------------
 
 # 相対パスを実体の絶対パスへ直す。存在しなければ 1 を返す。
@@ -317,4 +334,119 @@ wt_normalize_path() {
     dir=$(dirname "$dir")
   done
   printf '%s\n' "$path"
+}
+
+# --- 作業ツリーの一覧と追従先の判定 -----------------------------------------
+
+# 開発用の作業ツリーを `<パス><タブ><ブランチ名>` の形で 1 行 1 件で出力する。
+# 対象は主ディレクトリ直下の .worktrees/ 配下に限る。レビュー用の作業ツリーは
+# 非永続領域に置かれるため、この一覧には入らない。
+wt_dev_worktrees() {
+  local main_dir="${1:-}" prefix path branch
+  [ -n "$main_dir" ] || return 1
+  prefix="$main_dir/$WT_WORKTREE_DIR/"
+  path=""
+  branch=""
+  while IFS= read -r line; do
+    case "$line" in
+      "worktree "*)
+        path=${line#worktree }
+        branch=""
+        ;;
+      "branch "*)
+        branch=${line#branch }
+        branch=${branch#refs/heads/}
+        ;;
+      "")
+        case "$path" in
+          "$prefix"*) printf '%s\t%s\n' "$path" "$branch" ;;
+        esac
+        path=""
+        branch=""
+        ;;
+    esac
+  done < <(git -C "$main_dir" worktree list --porcelain 2>/dev/null)
+  # 最後の項目は空行で終わらないことがある。
+  case "$path" in
+    "$prefix"*) printf '%s\t%s\n' "$path" "$branch" ;;
+  esac
+}
+
+# 主ディレクトリの追従先を決める。git は呼ばず、引数だけで判定する。
+# 使い方: wt_follow_target "<一覧>" "<未コミット変更があれば 1>"
+# 出力: `detach <ブランチ名>` / `default` / `skip`
+wt_follow_target() {
+  local listing="${1:-}" dirty="${2:-0}" line branch count=0 single=""
+  if [ "$dirty" = "1" ]; then
+    printf 'skip\n'
+    return 0
+  fi
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    branch=${line#*$'\t'}
+    # ブランチを持たない作業ツリー (detached) は追従先にしない。
+    [ -n "$branch" ] || continue
+    count=$((count + 1))
+    single=$branch
+  done <<<"$listing"
+
+  if [ "$count" = 1 ]; then
+    printf 'detach %s\n' "$single"
+  else
+    printf 'default\n'
+  fi
+}
+
+# 主ディレクトリの既定ブランチ名を出力する。origin の HEAD が指す先を優先し、
+# 取れなければ main / master の順で存在するものを返す。
+wt_default_branch() {
+  local main_dir="${1:-}" ref candidate
+  [ -n "$main_dir" ] || return 1
+  ref=$(git -C "$main_dir" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)
+  if [ -n "$ref" ]; then
+    printf '%s\n' "${ref#origin/}"
+    return 0
+  fi
+  for candidate in main master; do
+    if git -C "$main_dir" show-ref --verify --quiet "refs/heads/$candidate"; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# 主ディレクトリの追跡対象の未コミット変更を `<状態> <パス>` で 1 行 1 件出力する。
+# 追跡されていないファイルは含めない。
+wt_dirty_paths() {
+  local main_dir="${1:-}"
+  [ -n "$main_dir" ] || return 1
+  git -C "$main_dir" status --porcelain --untracked-files=no 2>/dev/null
+}
+
+# --- パッチ本文からの書き込み先の推定 ---------------------------------------
+
+# `apply_patch` の本文から書き込み先を 1 行 1 件で出力する。
+# Codex CLI はファイルの編集をこの形で渡し、パスは tool_input.command の中の
+# `*** Update File: <パス>` などの行に入る。推定できなければ 1 を返す。
+wt_extract_patch_target() {
+  local patch="${1:-}" line target found=0
+  [ -n "$patch" ] || return 1
+  while IFS= read -r line; do
+    case "$line" in
+      '*** Update File: '*) target=${line#'*** Update File: '} ;;
+      '*** Add File: '*) target=${line#'*** Add File: '} ;;
+      '*** Delete File: '*) target=${line#'*** Delete File: '} ;;
+      '*** Move to: '*) target=${line#'*** Move to: '} ;;
+      *) continue ;;
+    esac
+    # 前後の空白を落とす。
+    target=${target#"${target%%[![:space:]]*}"}
+    target=${target%"${target##*[![:space:]]}"}
+    if [ -n "$target" ]; then
+      printf '%s\n' "$target"
+      found=1
+    fi
+  done <<<"$patch"
+  [ "$found" = 1 ] || return 1
 }
