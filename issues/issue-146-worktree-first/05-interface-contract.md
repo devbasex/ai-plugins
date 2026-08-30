@@ -11,12 +11,12 @@ hook と各コマンドの入出力を確定させる。実装しながら形が
 
 | 項目 | Claude Code | Codex CLI | Kiro CLI |
 | --- | --- | --- | --- |
-| `session_id` | あり | あり | 未確認 |
-| `cwd` | あり | あり | 未確認 |
-| `hook_event_name` | あり | あり | 未確認 |
-| `tool_name` | あり | あり | 実行ファイルに `tool_name` / `toolName` の双方が含まれる |
-| `tool_input` | あり | あり | 未確認 |
-| `permission_mode` | あり | あり | 未確認 |
+| `session_id` | あり | あり | 標準入力には無い。環境変数 `KIRO_SESSION_ID` で渡る |
+| `cwd` | あり | あり | あり |
+| `hook_event_name` | あり | あり | あり |
+| `tool_name` | あり | あり | あり |
+| `tool_input` | あり | あり | あり |
+| `permission_mode` | あり | あり | なし |
 
 Claude Code だけが持つもの: `prompt_id` / `effort` / `agent_id` / `agent_type`。
 Codex だけが持つもの: `turn_id`。
@@ -24,26 +24,58 @@ Codex だけが持つもの: `turn_id`。
 **判定に使うのは `tool_name` と `tool_input` と `cwd` だけとする。** どのランタイムでも取れる項目に
 限ることで、判定の実装を 1 つに保つ。
 
+ただし `tool_name` の値と `tool_input` の構造はランタイムごとに異なる。Kiro CLI で読み取りは
+`fs_read`、書き込みは `fs_write` を名乗り、編集先のパスは書き込みで `tool_input.path`、読み取りで
+`tool_input.operations[].path` に入る。判定へ渡す前に、ランタイム別の読み替えでツール種別と
+パスの一覧へ正規化する。判定そのものは正規化した値だけを見るため、実装は 1 つで足りる。
+
+Kiro CLI の tool 実行前の hook が受け取る標準入力は次の形である（`fs_write` の実測）。
+
+```json
+{
+  "hook_event_name": "preToolUse",
+  "cwd": "/path/to/proj",
+  "tool_name": "fs_write",
+  "tool_input": {
+    "command": "create",
+    "path": "/path/to/proj/out.txt",
+    "file_text": "...",
+    "summary": "..."
+  }
+}
+```
+
 ### 出力（ランタイム差がある）
 
 | 手段 | Claude Code | Codex CLI | Kiro CLI |
 | --- | --- | --- | --- |
-| `permissionDecision`（`allow` / `deny`） | あり | あり | 実行ファイルに `allow` / `deny` / `block` の語が含まれる。形式は未確認 |
-| `permissionDecisionReason` | あり | あり | 未確認 |
-| `systemMessage`（利用者へ表示） | あり | あり | 未確認 |
-| `additionalContext`（モデルへ渡す） | あり | **なし** | 未確認 |
-| プレーンな標準出力 | この事象では文脈に入らない | 無視される | 未確認 |
+| `permissionDecision`（`allow` / `deny`） | あり | あり | なし。終了コード 2 が拒否に当たる |
+| `permissionDecisionReason` | あり | あり | なし。標準エラー出力が理由として渡る |
+| `systemMessage`（利用者へ表示） | あり | あり | なし |
+| `additionalContext`（モデルへ渡す） | あり | あり | なし |
+| プレーンな標準出力 | この事象では文脈に入らない | 無視される | 無視される |
+
+Kiro CLI は終了コードで振る舞いが変わる。
+
+| 終了コード | tool の実行 | 標準出力 | 標準エラー出力 |
+| --- | --- | --- | --- |
+| 0 | 続行する | 捨てられる | 捨てられる |
+| 2 | **拒否する** | 捨てられる | **モデルへ渡り、利用者にも表示される** |
+| その他 | 続行する | 捨てられる | 利用者へ警告として表示される |
 
 **この差が責務の分担を決める。**
 
 | 担い手 | 届く相手 | 使う手段 |
 | --- | --- | --- |
-| hook | 利用者 | `systemMessage`（3 ランタイム共通） |
-| hook | AI（Claude Code のみ） | `additionalContext` |
+| tool 実行前の hook | AI（Claude Code / Codex CLI） | `additionalContext` |
+| セッション開始時・プロンプト送信時の hook | AI（3 ランタイム共通） | `additionalContext`（Kiro CLI は標準出力） |
+| hook | 利用者 | `systemMessage`（Claude Code / Codex CLI） |
 | Skill の記述 | AI（3 ランタイム共通） | 手順書そのもの |
 
-AI を作業ツリーへ向かわせる役目は **Skill の記述が主で、hook は補助**とする。hook に頼ると
-Claude Code だけが誘導される状態になる。
+**編集先のパスを見た誘導を、拒否せずに AI へ渡せるのは Claude Code と Codex CLI だけである。**
+Kiro CLI は tool 実行前の hook から AI へ渡す手段が終了コード 2 しかなく、これは拒否を伴う。
+Kiro CLI では、パスを見ない誘導をプロンプト送信時の hook が毎回渡し、パスを見た判定は
+利用者への表示にも回せないため置かない。3 ランタイムに同じ内容が届く手段は Skill の記述だけである。
 
 ### 出力の形
 
@@ -51,21 +83,23 @@ Claude Code だけが誘導される状態になる。
 
 ```json
 {
+  "systemMessage": "主ディレクトリを編集しています。開発は .worktrees/<ブランチ名> で行ってください（/ndf:worktree）",
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
-    "systemMessage": "主ディレクトリを編集しています。開発は .worktrees/<ブランチ名> で行ってください（/ndf:worktree）",
     "additionalContext": "この編集先は clone 元のディレクトリです。開発用の変更は作業ツリーの中で行います。..."
   }
 }
 ```
 
-`additionalContext` は Claude Code でのみ解釈される。他のランタイムは未知の項目として無視する。
+`systemMessage` は最上位に置き、`additionalContext` は `hookSpecificOutput` の中に置く。
+この形は Claude Code と Codex CLI が解釈する。Kiro CLI はこの事象で標準出力を読まないため、
+同じスクリプトを結んでも出力は捨てられ、作業は妨げられない。
 **両方を常に出力し、ランタイムごとに出し分けない。**
 
 ### 判定
 
 ```text
-入力の tool_name が編集系（Edit / Write / NotebookEdit）→ tool_input からパスを取る
+入力の tool_name が編集系（Edit / Write / NotebookEdit / fs_write）→ tool_input からパスを取る
 入力の tool_name が Bash → tool_input.command から書き込み先を推定する
 それ以外 → 何も出力せず終了コード 0
 ```
@@ -234,19 +268,24 @@ Codex には `SessionStart` もあるため、逸脱検知も同じ形で結べ�
 
 ### Kiro CLI
 
-導入スクリプトがエージェント定義へ書き込む。既存の記述は `command` と `timeout_ms` だけを持つ形で、
+導入スクリプトがエージェント定義へ書き込む。記述は `command` と `matcher` と `timeout_ms` を持つ形で、
 Claude Code / Codex とは構造が異なる。
 
 ```json
 "hooks": {
   "agentSpawn": [ { "command": "..." } ],
-  "preToolUse": [ { "command": "bash <プラグイン>/scripts/worktree-guard.sh" } ]
+  "userPromptSubmit": [ { "command": "bash <プラグイン>/scripts/worktree-guard.sh" } ]
 }
 ```
 
-**Kiro の入出力の形式は未確認である。** 実行ファイルに `matcher` / `tool_name` / `toolName` /
-`allow` / `deny` / `block` の語が含まれることまでを確認した。導入前に実機で確かめ、差があれば
-Kiro だけ出力の整形を変える。判定の実装は共有したままにする。
+**結ぶのはプロンプト送信時の hook である。** この hook は標準出力がそのまま AI の文脈へ入り、
+プロンプトごとに実行される。tool 実行前の hook は、拒否せずに AI へ渡す手段を持たない
+（前掲の終了コードの表）。同じスクリプトを tool 実行前の hook にも結べるが、出力は捨てられる。
+
+出力は約 10 KB で切り詰められ、超えた分は警告なく捨てられる。上限は hook ごとの
+`max_output_size` で変更できる。案内は 10 KB に収める。
+
+`matcher` はツール名で絞り込む。読み取りは `fs_read`、書き込みは `fs_write` を名乗る。
 
 ## 実行時間
 

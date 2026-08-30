@@ -105,10 +105,13 @@
 | ランタイム | 版 | hook 種別 | 確認方法 |
 | --- | --- | --- | --- |
 | Claude Code | — | `PreToolUse`（ブロック可） | 公式ドキュメントの hook 一覧 |
-| Codex CLI | 0.149.0 | `PreToolUse` | `~/.codex/hooks.json` に設定実例が存在する |
-| Kiro CLI | 2.19.1 | `preToolUse` / `postToolUse` / `agentSpawn` / `userPromptSubmit` | 実行ファイルに文字列として含まれる（`grep -ao`） |
+| Codex CLI | 0.149.0 | `PreToolUse` / `PostToolUse` / `SessionStart` / `UserPromptSubmit` | 実機で hook を設定し、標準入力と出力の扱いを確認 |
+| Kiro CLI | 2.19.1 | `preToolUse` / `postToolUse` / `agentSpawn` / `userPromptSubmit` | 実機で hook を設定し、標準入力と出力の扱いを確認 |
 
-伝達手段が 3 ランタイムで揃うため、Claude Code だけが強制され他が誘導のみ、という差は生じない。
+tool 実行前の hook は 3 ランタイムとも持つ。ただしその hook からモデルへ案内を渡せるのは
+Claude Code と Codex CLI で、Kiro CLI が持つ経路は tool の実行を拒否する。Kiro CLI へは
+プロンプト送信時の hook が案内を渡す。手段の対応は
+[`05-interface-contract.md`](05-interface-contract.md) にある。
 
 ### 作業ツリーの新規作成先はランタイムごとに固定される
 
@@ -202,7 +205,8 @@ flowchart TD
 | 層 | 担当 | 働くタイミング |
 | --- | --- | --- |
 | 誘導 | 新設する Skill | 開発の依頼を受けた時点 |
-| 誘導（補助） | tool 実行前の hook | 主ディレクトリの保護対象パスを編集しようとした時点 |
+| 誘導（補助） | tool 実行前の hook（Claude Code / Codex CLI） | 主ディレクトリの保護対象パスを編集しようとした時点 |
+| 誘導（補助） | プロンプト送信時の hook（Kiro CLI） | 主ディレクトリで作業している時点 |
 | 逸脱検知 | セッション開始時の hook | 主ディレクトリに未コミット変更が残っている時点 |
 | 是正 | 新設する Skill の手順 | 逸脱検知の後 |
 
@@ -246,11 +250,11 @@ main_dir=$(dirname "$git_common")
 | --- | --- | --- |
 | Claude Code | `PreToolUse`（`Edit\|Write\|NotebookEdit` と `Bash`）、`SessionStart` | 共通スクリプト |
 | Codex CLI | `PreToolUse` | 同じ共通スクリプト |
-| Kiro CLI | `preToolUse`、`agentSpawn` | 同じ共通スクリプト（導入スクリプトがエージェント定義へ書き込む） |
+| Kiro CLI | `userPromptSubmit`、`agentSpawn` | 同じ共通スクリプト（導入スクリプトがエージェント定義へ書き込む） |
 
 hook スクリプトは `plugins/ndf/scripts/` に置き、3 ランタイムで共有する。既存の hook スクリプトと同じく、依存コマンドが無い場合は終了コード 0 で抜けて作業を妨げない。
 
-tool 実行前の hook は案内を返すだけで、拒否の判定は返さない。案内は Claude Code では `additionalContext`、他ランタイムでは標準出力に載せる。
+tool 実行前の hook は案内を返すだけで、拒否の判定は返さない。案内は Claude Code と Codex CLI では `additionalContext` に載せる。Kiro CLI はこの事象で標準出力を読まないため、プロンプト送信時の hook の標準出力に載せる。
 
 ### 案内を出さないパス
 
@@ -318,7 +322,7 @@ plugins/ndf/scripts/worktree-testenv.sh          テスト環境の採番・起�
 ```text
 plugins/ndf/hooks/claude.json                  PreToolUse / SessionStart の追加
 plugins/ndf/hooks/codex.json                   PreToolUse の追加
-plugins/ndf/dev.kiro/install.sh                preToolUse / agentSpawn の生成
+plugins/ndf/dev.kiro/install.sh                userPromptSubmit / agentSpawn の生成
 plugins/ndf/manifests/claude-skills.txt        worktree の追加
 plugins/ndf/manifests/codex-skills.txt         同上
 plugins/ndf/manifests/kiro-skills.txt          同上
@@ -360,7 +364,7 @@ CLAUDE.md / AGENTS.md / KIRO.md                作業ツリー運用の明記
 ### Task 4: 案内を 3 ランタイムへ広げる
 
 - **対象ファイル:** `plugins/ndf/hooks/codex.json`、`plugins/ndf/dev.kiro/install.sh`
-- **変更内容:** Codex CLI と Kiro CLI の tool 実行前 hook から同じスクリプトを呼ぶ。Kiro はエージェント定義へ生成する形になる
+- **変更内容:** Codex CLI は tool 実行前の hook、Kiro CLI はプロンプト送信時の hook から同じスクリプトを呼ぶ。Kiro はエージェント定義へ生成する形になる
 - **満たす受け入れ条件:** 6、7、8（各ランタイム）
 - **進め方:** 各ランタイムを実際に起動し、案内が出ることと作業が止まらないことを確認する
 
@@ -414,7 +418,7 @@ CLAUDE.md / AGENTS.md / KIRO.md                作業ツリー運用の明記
 | 対象 | 影響 |
 | --- | --- |
 | 公開インタフェース | Skill が 1 つ増える（27 → 28、Codex は 25 → 26、Kiro は 26 → 27）。既存 Skill の削除・改名はない |
-| hook | tool 実行前とセッション開始時の hook が増える。いずれも案内と提示のみで、作業を止めない |
+| hook | tool 実行前・プロンプト送信時・セッション開始時の hook が増える。いずれも案内と提示のみで、作業を止めない |
 | 既存の振る舞い | 既存 Skill 5 個の手順が作業ツリー起点になる。相互レビューと相互リファクタリングの動作は変わらない |
 | データ | なし |
 
@@ -459,7 +463,7 @@ CLAUDE.md / AGENTS.md / KIRO.md                作業ツリー運用の明記
 | tool 実行前の hook が毎回の編集で走り、応答が遅くなる | 判定を文字列比較だけで済ませ、git コマンドの実行はセッションあたり 1 回に留めてキャッシュする |
 | セッション開始時のブランチ追従が、主ディレクトリで意図的に作業していた利用者の状態を変える | 未コミット変更があるときは追従しない（受け入れ条件 14）。追従は detached HEAD なのでブランチは動かない |
 | 案内が頻繁に出て、内容が読まれなくなる | 案内を出さないパスへ `issues/` `docs/` 設定類を含める。同一セッション内で同じ案内を繰り返さない |
-| Kiro CLI の tool 実行前 hook の出力仕様が他 2 者と異なる | Task 4 で実機確認する。差がある場合は Kiro だけ出力の載せ方を変え、判定スクリプトは共有したままにする |
+| Kiro CLI は tool 実行前の hook からモデルへ案内を渡せない | プロンプト送信時の hook が案内を毎回渡す。編集先のパスを見た判定は Claude Code と Codex CLI が担う。判定スクリプトは 3 ランタイムで共有したままにする |
 | 作業ツリーが増えて領域を消費する | Pull Request のマージ後に `merged` Skill が削除する。一覧提示の手順を Skill に持たせ、残存を見つけられるようにする |
 | `.worktrees/` を `.gitignore` へ登録し忘れた状態で作業ツリーを作る | 作成前に登録状態を確認し、未登録なら先に登録する（受け入れ条件 2） |
 | テスト用の環境を複数立てるとホストのメモリが尽きる | テスト環境 1 つの中核サービスが約 753 MiB を使う実測がある。測定時のホストは退避領域が 85% 使用済みで、確保できる量の側で見れば 3 本は収まるが余力は再利用可能な控えに依る。各サービスへ上限を置き、同時稼働数の上限を設ける。詳細は [`03-test-execution.md`](03-test-execution.md) の残リスク |

@@ -47,12 +47,18 @@ detached HEAD ではコミットしてもブランチが動かないため、主
 
 ### 決定 5: AI への誘導は Skill が担い、hook は補助に留める
 
-**結論。** 作業ツリーで作業させる誘導は Skill の記述が主たる手段とし、hook は利用者への提示を担う。
+**結論。** 作業ツリーで作業させる誘導は Skill の記述を主たる手段とし、hook はランタイムが持つ
+手段の範囲で補助する。
 
-**理由。** モデルへ文脈を渡す手段がランタイムで揃わない。Claude Code は tool 実行前の hook で
-モデルへ文脈を渡せるが、Codex CLI は同じ事象でその手段を持たず、プレーンな標準出力も無視される
-（[`05-interface-contract.md`](05-interface-contract.md) の実測表）。hook に誘導を頼ると、
-1 ランタイムだけが誘導される状態になる。Skill の記述は 3 ランタイムとも読む。
+**理由。** 編集先のパスを見た誘導を、拒否せずにモデルへ渡せるランタイムが揃わない。Claude Code と
+Codex CLI は tool 実行前の hook で `additionalContext` を渡せる。Kiro CLI はこの事象で標準出力を
+読まず、モデルへ渡す手段は終了コード 2 に限られ、これは tool の実行を拒否する
+（[`05-interface-contract.md`](05-interface-contract.md) の実測表）。拒否しない方針（決定 1）の
+もとでは、Kiro CLI へ渡せるのはパスを見ない案内だけになり、プロンプト送信時の hook が担う。
+3 ランタイムへ同じ内容が届く手段は Skill の記述だけである。
+
+利用者への提示も揃わない。`systemMessage` を解釈するのは Claude Code と Codex CLI で、
+Kiro CLI はこの事象で利用者へ提示する手段を持たない。
 
 **採らなかった案。** hook を主たる誘導手段とする形。
 
@@ -178,8 +184,6 @@ plugins/ndf/skills/worktree/tests/
 
 ## 未確認のまま残ること
 
-- Kiro CLI の tool 実行前 hook の入出力形式。実行ファイルに `matcher` / `tool_name` / `toolName` /
-  `allow` / `deny` / `block` の語が含まれることまでを確認した。導入前に実機で確かめる
-- Codex CLI のセッション開始時の hook が、モデルへ文脈を渡せるか
+- Kiro CLI の hook が受け取る標準入力の項目のうち、tool 実行前の事象以外で確かめていないもの
 - 起動を伴う検証は行っていない。範囲は [`02-local-environment.md`](02-local-environment.md) と
   [`03-test-execution.md`](03-test-execution.md) の残リスクにある
