@@ -145,6 +145,12 @@ Kiro CLI に tool 実行前の案内が無いのは、この事象でモデル�
 **この仕組みはリポジトリ側の宣言ファイル `.ndf/localenv.json` があるときだけ動きます。**
 宣言が無いリポジトリでは、いずれの hook も何も出力せず終了コード 0 で終わります。
 
+宣言ファイルは `/ndf:worktree` を起動すると手順 0 で作られます。手で作るなら次を実行します。
+
+```bash
+bash <プラグインのパス>/scripts/worktree-setup.sh init
+```
+
 ```json
 {
   "version": 1,

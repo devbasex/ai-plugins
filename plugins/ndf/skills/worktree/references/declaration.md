@@ -6,9 +6,17 @@
 定義は [`../schemas/localenv.schema.json`](../schemas/localenv.schema.json) にある。
 `$schema` を書いておくと編集時に補完が効く。読み取り側はこの項目を参照しない。
 
+## 作る
+
+```bash
+bash "$NDF_SCRIPTS/worktree-setup.sh" init
+```
+
+`/ndf:worktree` を起動すると、手順 0 としてこれが走る。既にあるファイルは上書きしない。
+
 ## 最小の宣言
 
-編集時の案内だけを使うなら、これで足りる。
+編集時の案内だけを使うなら、これで足りる。手で書くなら次の内容になる。
 
 ```json
 {
