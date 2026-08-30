@@ -20,6 +20,7 @@ WT_DEFAULT_ALLOW_PATHS=(
   ".agents/"
   ".gemini/"
   ".serena/"
+  ".ndf/"
   ".gitignore"
 )
 

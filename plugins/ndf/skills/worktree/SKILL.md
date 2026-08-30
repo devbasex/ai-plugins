@@ -34,6 +34,7 @@ allowed-tools:
 | `docs/` | リポジトリ知識 |
 | `.claude/` `.codex/` `.kiro/` `.agents/` `.gemini/` | 各ランタイムの設定 |
 | `.serena/` | コードインテリジェンスの設定と索引 |
+| `.ndf/` | この仕組みの宣言ファイル |
 | `.gitignore` | 作業ツリーの登録そのものに必要 |
 
 リポジトリ側で `.ndf/localenv.json` の `guard.allow_paths` を書けば、この一覧を差し替えられる。
@@ -95,11 +96,18 @@ fi
 ```bash
 branch="feature/<name>"
 git -C "$main_dir" fetch origin
-git -C "$main_dir" worktree add -b "$branch" "$main_dir/.worktrees/$branch" origin/main
+# 既定ブランチはリポジトリごとに違う。origin の HEAD が指す先から取る
+default=$(git -C "$main_dir" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)
+default=${default:-origin/main}
+git -C "$main_dir" worktree add -b "$branch" "$main_dir/.worktrees/$branch" "$default"
 cd "$main_dir/.worktrees/$branch"
 ```
 
 既存のブランチで作業を続けるなら `-b` を外す。
+
+起点は `origin` の HEAD が指すブランチから取る。`main` を字面で書くと、既定ブランチが
+`master` などのリポジトリで失敗する。`origin/HEAD` が設定されていない場合は
+`git -C "$main_dir" remote set-head origin -a` で設定できる。
 
 Claude Code の作業ツリー作成ツールは新規作成先が固定されているため、`.worktrees/` を
 使う場合は `git worktree add` で作成してからパスを指定して入る。既存の作業ツリーへ
