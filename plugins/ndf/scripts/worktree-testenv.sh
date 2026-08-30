@@ -269,11 +269,15 @@ do_down() {
 
 # --- test -------------------------------------------------------------------
 
-# 証跡の置き場所を、その作業ツリー限りの除外設定へ登録する。
+# 証跡の置き場所を、追跡対象から外す設定へ登録する。
+#
+# **共通の git ディレクトリの info/exclude へ書く。** 作業ツリー固有の
+# `.git/worktrees/<名前>/info/exclude` は git が読まない（実測で確認した）。
+# リポジトリの .gitignore は触らない。追跡される設定を勝手に増やさないため。
 exclude_evidence() {
-  local git_dir exclude
-  git_dir=$(git -C "$TARGET" rev-parse --absolute-git-dir 2>/dev/null) || return 0
-  exclude="$git_dir/info/exclude"
+  local common exclude
+  common=$(git -C "$TARGET" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 0
+  exclude="$common/info/exclude"
   mkdir -p "$(dirname "$exclude")" 2>/dev/null
   grep -qx '.ndf-evidence/' "$exclude" 2>/dev/null && return 0
   printf '.ndf-evidence/\n' >>"$exclude" 2>/dev/null || true

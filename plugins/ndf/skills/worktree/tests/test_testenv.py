@@ -430,17 +430,36 @@ def test_port_inside_the_band_is_accepted(main_repo: Path, worktree: Path) -> No
 
 
 def test_evidence_directory_is_excluded_from_tracking(main_repo: Path, worktree: Path) -> None:
-    """証跡が追跡対象に入ると差分が埋まる。作業ツリー限りの除外へ登録する。"""
+    """証跡が追跡対象に入ると差分が埋まる。除外の設定へ登録する。
+
+    git は空のディレクトリを追跡しない。証跡を実際に書いたうえで確かめる。
+    """
     declare(main_repo, testenv={
         "port_band": [20000, 29999],
-        "test_kinds": {"browser": {"run": "true", "out_env": "OUT"}},
+        "test_kinds": {"browser": {"run": 'printf "x" > "$OUT/evidence.txt"', "out_env": "OUT"}},
     })
-    run(["test", str(worktree), "--kind", "browser"], cwd=main_repo)
+    result = run(["test", str(worktree), "--kind", "browser"], cwd=main_repo)
+    assert result["rc"] == 0, result
+
+    written = list((worktree / ".ndf-evidence").rglob("evidence.txt"))
+    assert written, "証跡が書かれていること（書かれないと除外の検査にならない）"
 
     status = subprocess.run(
         ["git", "status", "--porcelain"], cwd=str(worktree), capture_output=True, text=True,
     )
     assert ".ndf-evidence" not in status.stdout, status.stdout
+
+
+def test_evidence_exclusion_is_written_to_the_common_git_dir(main_repo: Path, worktree: Path) -> None:
+    """作業ツリー固有の info/exclude は git が読まない。共通の側へ書く。"""
+    declare(main_repo, testenv={
+        "port_band": [20000, 29999],
+        "test_kinds": {"browser": {"run": 'printf "x" > "$OUT/evidence.txt"', "out_env": "OUT"}},
+    })
+    run(["test", str(worktree), "--kind", "browser"], cwd=main_repo)
+
+    common = main_repo / ".git" / "info" / "exclude"
+    assert ".ndf-evidence/" in common.read_text(encoding="utf-8"), common.read_text()
 
 
 # --- 排他 -------------------------------------------------------------------
