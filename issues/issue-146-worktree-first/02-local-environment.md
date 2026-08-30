@@ -169,7 +169,7 @@ flowchart TD
 
 ```bash
 git -C "$MAIN" worktree add -b feature/x "$WT" origin/main
-DECL="$MAIN/.ndf/localenv.json"
+DECL="$MAIN/.ndf/worktree.json"
 for p in $(jq -r '.localenv.copy_from_main // [] | .[]' "$DECL"); do
   [ -e "$MAIN/$p" ] || continue
   if [ -e "$WT/$p" ] && ! diff -rq "$MAIN/$p" "$WT/$p" >/dev/null 2>&1; then
@@ -200,7 +200,7 @@ done
 
 ### 宣言ファイル
 
-リポジトリごとの差は `.ndf/localenv.json` が持ち、NDF 側は仕組みだけを配る。このファイルが無い
+リポジトリごとの差は `.ndf/worktree.json` が持ち、NDF 側は仕組みだけを配る。このファイルが無い
 リポジトリでは、この節の仕組みは何もせずに終わる。
 
 ```json

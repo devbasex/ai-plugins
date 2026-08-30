@@ -47,41 +47,52 @@ NULL 許容列の追加）は `standard` として扱う。判定に迷う場合
 ```text
 mode: standard
 根拠: 注文確定の振る舞いを変更する。公開 API とスキーマは変えない
-必須工程: requirements-design → implementation-plan → tdd-cycle → refactoring
-  → pr-review → quality-gates → plan-to-spec（仕様が変わった場合）
+必須工程: worktree → requirements-design → implementation-plan → tdd-cycle
+  → refactoring → cross-review → quality-gates → pr
+  → plan-to-spec（仕様が変わった場合） → merged
 ```
+
+工程の並びは「モードごとに起動する Skill」の表から読む。この例は出力の形を示すもので、
+基準ではない。
 
 判定基準の本文を出力へ貼らない。呼び出し側が基準を写し取ると、この Skill が唯一の
 置き場所である前提が崩れる。
-
-## モードと必須工程
-
-| モード | 対象 | 必須工程 |
-| --- | --- | --- |
-| `light` | 文言、ドキュメント、設定、テストの追加など、本番の振る舞いも本番コードの構造も変えない局所変更 | 成功条件の確認、対象範囲の確定、限定的な検証と静的解析 |
-| `standard` | 一般的な機能追加・バグ修正、テストが十分にある構造改善 | 仕様、計画、テスト駆動、構造改善、レビュー、全体検証 |
-| `architecture` | 公開インタフェース、移行を伴うスキーマ変更、認証、複数モジュール、重要なドメイン変更 | ドメインモデリング、設計判断の記録、設計レビュー、テスト駆動、構造改善、契約テストと結合テスト、相互レビュー |
-| `legacy-refactor` | テストが少ない既存コードの振る舞い維持型改善 | 構造分析、計画、現状固定テスト、段階的改善、レビュー、退行検証 |
 
 ## モードごとに起動する Skill
 
 | 工程 | `light` | `standard` | `architecture` | `legacy-refactor` |
 | --- | --- | --- | --- | --- |
+| 作業場所の用意 | `worktree`（主ディレクトリで編集してよいパスだけなら不要） | `worktree` | `worktree` | `worktree` |
 | 要求と受け入れ条件 | — | `requirements-design` | `requirements-design` | — |
 | 設計 | — | `implementation-plan` に代替案と採否を記録 | ドメインモデリングと設計レビュー（Release 2 で有効化） | `implementation-plan` に代替案と採否を記録 |
 | 計画 | — | `implementation-plan` | `implementation-plan` | `implementation-plan` |
 | 実装 | 直接編集 | `tdd-cycle` | `tdd-cycle` | `refactoring` |
 | 構造改善 | — | `refactoring` | `refactoring` | `refactoring` |
-| レビュー | — | `pr-review` | `cross-review` | `pr-review` |
+| レビュー | — | `cross-review` | `cross-review` | `pr-review` |
 | 完了判定 | `quality-gates` | `quality-gates` | `quality-gates` | `quality-gates` |
+| Pull Request | `pr` | `pr` | `pr` | `pr` |
 | 確定仕様化 | — | `plan-to-spec`（仕様が変わった場合） | `plan-to-spec` | — |
+| 後片付け | `merged` | `merged` | `merged` | `merged` |
+
+**作業場所の用意は、要求を整理する前に済ませる。** 開発の変更は clone したディレクトリではなく
+`.worktrees/<ブランチ名>` の作業ツリーの中で行う。後から移すと、主ディレクトリに変更が残った
+まま並行作業が始まる。`light` でも、本番コードの文言やテストを触るなら作業ツリーを使う。
+`issues/` `docs/` と各ランタイムの設定だけで収まる変更は、主ディレクトリのままでよい。
+
+**後片付けは工程の一部である。** マージした作業ツリーとブランチが残ると、次の作業で
+どれが生きているのか分からなくなる。`merged` は取り消しが難しい操作を含むため、削除の対象を
+一覧で示して同意を取ってから消す。
 
 「設計」行の `standard` と `legacy-refactor` は**専用の設計 Skill を起動しない**。設計と代替案の
-検討そのものは行い、結果を `implementation-plan` の中に残す。そのため「モードと必須工程」表では
-「計画」に含めて数えている。
+検討そのものは行い、結果を `implementation-plan` の中に残す。
 
 レビュー段階は**明示的に呼ぶ**。自然文で「レビューして」と依頼すると、Claude Code では
 組み込みの `code-review` が起動して判定の投稿経路が変わる。
+
+`standard` と `architecture` は `cross-review` を使う。**片側 1 回の判定では取りこぼしが残る**。
+`cross-review` は 2 つの外部 AI が同じ差分を見て、両方が承認するまで修正を回す。
+`legacy-refactor` が `pr-review` なのは、振る舞いを変えないことの確認が主で、判定の軸が
+この工程で先に置く現状固定テストの通過に寄るためである。
 
 構造改善は**レビューと同じく、通す工程であって任意ではない**。動くコードが出た時点では整理が
 済んでいないことを前提に置き、見つけた兆候は直す。対象は書き換えた行だけでなく、**その
@@ -97,7 +108,8 @@ mode: standard
 
 ```mermaid
 flowchart TD
-    A[調査] --> B[要求と受け入れ条件]
+    S[作業場所の用意] --> A[調査]
+    A --> B[要求と受け入れ条件]
     B --> C[設計と代替案の検討]
     C --> D{ドメイン<br/>モデリングが要るか}
     D -->|要る| E[ドメインモデリング]
@@ -112,22 +124,24 @@ flowchart TD
     K --> N[全体テスト → ビルド・結合テスト]
     N --> L[プルリクエスト作成]
     L --> M[確定仕様化]
+    M --> P[マージ後の後片付け]
     C -.->|standard| G
     A -.->|legacy-refactor| C
     A -.->|light| K
     K -.->|light| L
+    L -.->|light / legacy-refactor| P
 ```
 
 - `standard` は A → B → C から破線で G へ抜け、**D・E・F（ドメインモデリングと専用 Skill による
   設計レビュー）を通らない**。C の設計と代替案の検討は行うが、専用 Skill は使わず
   `implementation-plan`（G）に代替案と採否として書く
-- `light` は破線の経路（A → K → L）のみを通る。**N の全体テストと結合テストは通らない**
+- すべてのモードが S（作業場所の用意）から始まり、P（マージ後の後片付け）で終わる
+- `light` は破線の経路（S → A → K → L → P）のみを通る。**N の全体テストと結合テストは通らない**
   （K は変更箇所を 1 度実行する限定的な検証と静的解析だけを指す。依存パッケージの版更新だけは
   例外として既存テスト一式を実行する — [references/workflow-modes.md](references/workflow-modes.md)）
 - `legacy-refactor` は A から C へ抜けて `standard` と同じ経路をたどり、**B（要求と受け入れ条件）と
-  M（確定仕様化）は通らない**。H は「現状固定テスト」、R は「段階的改善」、I は「本番の振る舞いが
-
-  変わっていないことの確認」として読む
+  M（確定仕様化）は通らない**（L から P へ抜ける）。H は「現状固定テスト」、R は「段階的改善」、
+  I は「本番の振る舞いが変わっていないことの確認」として読む
 
 ## `architecture` モードの現状
 
@@ -140,10 +154,9 @@ flowchart TD
 | 設計判断の記録 | `implementation-plan` に代替案と採否の理由を書く |
 | 設計レビュー | 専用 Skill なし。実装前に `cross-review` 相当の観点で自己点検する |
 | 契約・結合テスト | `tdd-cycle` の階層の使い分けに従う |
-| 相互レビュー | `cross-review` |
 
-3 Skill の導入後にこの節を差し替える。**判定基準の側は変更しない**（モードの定義は今回
-確定させ、振り分け先だけを後から埋める）。
+3 Skill の導入後にこの節を差し替える。**判定基準の側は変えない**。モードの定義は確定して
+おり、振り分け先だけを後から埋める。
 
 ## 途中でモードが変わったとき
 

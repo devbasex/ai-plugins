@@ -1,5 +1,30 @@
 {
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|MultiEdit|Write|NotebookEdit|fs_write|edit_file|write_file|str_replace_editor|replace|apply_patch|Bash|shell|execute_bash|local_shell|run_command|run_shell_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'if [ -n \"$PLUGIN_ROOT\" ]; then bash \"$PLUGIN_ROOT/scripts/worktree-guard.sh\"; fi; exit 0'",
+            "timeout": 5,
+            "statusMessage": "Checking the edit target against the main directory"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'if [ -n \"$PLUGIN_ROOT\" ]; then bash \"$PLUGIN_ROOT/scripts/worktree-session.sh\"; fi; exit 0'",
+            "timeout": 10,
+            "statusMessage": "Checking the main directory for stray changes"
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [

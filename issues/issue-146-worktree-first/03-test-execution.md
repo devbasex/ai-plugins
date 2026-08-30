@@ -87,7 +87,7 @@ flowchart TD
    同じ内容なら焼き直しは発生しない。
 
    ```bash
-   TAG=$(git -C "$MAIN" ls-tree -r HEAD -- $(jq -r '.testenv.golden_tag_paths|join(" ")' "$MAIN/.ndf/localenv.json") \
+   TAG=$(git -C "$MAIN" ls-tree -r HEAD -- $(jq -r '.testenv.golden_tag_paths|join(" ")' "$MAIN/.ndf/worktree.json") \
          | sha1sum | cut -c1-12)
    worktree-testenv bake --tag "$TAG"
    ```

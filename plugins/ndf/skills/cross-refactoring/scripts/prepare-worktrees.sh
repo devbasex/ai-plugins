@@ -41,8 +41,20 @@ STATE=$TMP_DIR/cross-refactoring-rf$ID-state.json
 ROOT=$(jq -r '.worktree_root' "$STATE")
 WORK=$(jq -r '.worktrees.work' "$STATE")
 HEAD_BRANCH=$(jq -r '.head_branch' "$STATE")
-mapfile -t RUNTIMES < <(jq -r '.runtimes[]' "$STATE")
-mapfile -t REQUIRED_SKILLS < <(jq -r '.skills.required[]' "$STATE")
+# `mapfile` は bash 4 以降にしかない。macOS が標準で持つ bash は 3.2 で、そこでは
+# 127 を返して読み込みが空になる。読み込みは while ループで行う。
+read_lines() {
+  LINES=()
+  local line
+  while IFS= read -r line || [ -n "$line" ]; do
+    LINES+=("$line")
+  done
+}
+
+read_lines < <(jq -r '.runtimes[]' "$STATE")
+RUNTIMES=("${LINES[@]+"${LINES[@]}"}")
+read_lines < <(jq -r '.skills.required[]' "$STATE")
+REQUIRED_SKILLS=("${LINES[@]+"${LINES[@]}"}")
 
 # ランタイム標準の配置先。**利用者のホームと対象リポジトリ本体には一切書き込まない。**
 #

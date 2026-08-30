@@ -16,7 +16,7 @@ import subprocess
 
 import pytest
 
-from conftest import make_state
+from crossref_helpers import make_state
 
 LAUNCH = pathlib.Path(__file__).resolve().parent.parent / "scripts" / "launch-cli.sh"
 RUNTIME = "codex"

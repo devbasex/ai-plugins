@@ -1,0 +1,250 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/ndf/skills/worktree/schemas/worktree.schema.json",
+  "title": "NDF worktree 宣言ファイル",
+  "description": "リポジトリごとの差を持つ宣言。このファイルが無いリポジトリでは、作業ツリー運用の仕組みは何もせずに終わる。",
+  "type": "object",
+  "required": [
+    "version"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "編集時の補完に使う定義の位置。読み取り側は参照しない"
+    },
+    "version": {
+      "type": "integer",
+      "description": "宣言の版。読み取り側が知らない版なら何もせずに終わる",
+      "enum": [
+        1
+      ]
+    },
+    "guard": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "allow_paths": {
+          "type": "array",
+          "description": "主ディレクトリで編集しても案内を出さないパス。末尾が / の項目は前方一致、それ以外は完全一致とその配下。空の配列は「何も許可しない」を意味する。未指定なら組み込みの既定を使う",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "localenv": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "description": "compose 以外は未対応として扱う",
+          "enum": [
+            "compose"
+          ]
+        },
+        "layout": {
+          "type": "string",
+          "description": "コンテナ内のコードの置かれ方。indirect は symlink、direct はマウントの到達点、host はホストのプロセスが直接読む",
+          "enum": [
+            "indirect",
+            "direct",
+            "host"
+          ]
+        },
+        "compose_files": {
+          "type": "array",
+          "description": "読み込む定義ファイル。並行起動用の定義を後ろへ足す",
+          "items": {
+            "type": "string"
+          }
+        },
+        "app_service": {
+          "type": "string",
+          "description": "コードを載せるサービス名。照合と再読み込みの対象"
+        },
+        "src_target": {
+          "type": "string",
+          "description": "コンテナ内でコードが置かれる位置。layout が indirect のとき必須"
+        },
+        "copy_from_main": {
+          "type": "array",
+          "description": "作業ツリーへ複製する、追跡されないパス",
+          "items": {
+            "type": "string"
+          }
+        },
+        "copy_as_real": {
+          "type": "array",
+          "description": "ハードリンクではなく実体を複製するパス。copy_from_main の内側を指してよい",
+          "items": {
+            "type": "string"
+          }
+        },
+        "build_before_aim": {
+          "type": "array",
+          "description": "コードの位置を切り替える前に流す資産のビルドコマンド",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reload_signal": {
+          "type": "object",
+          "description": "再読み込みの送り先",
+          "additionalProperties": false,
+          "properties": {
+            "process": {
+              "type": "string"
+            },
+            "signal": {
+              "type": "string"
+            }
+          }
+        },
+        "branch_probe": {
+          "type": "string",
+          "description": "ローカル環境に載っているブランチ名を出力するコマンド。照合が使う"
+        },
+        "isolated_services": {
+          "type": "array",
+          "description": "分離モードで並行起動するサービス",
+          "items": {
+            "type": "string"
+          }
+        },
+        "isolate_when": {
+          "type": "array",
+          "description": "分離モードを促す変更パスの条件。シェルのパターンで書く",
+          "items": {
+            "type": "string"
+          }
+        },
+        "healthcheck": {
+          "type": "string",
+          "description": "動作確認に使うコマンド。照合が通ったときだけ実行する"
+        }
+      }
+    },
+    "testenv": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "port_band": {
+          "type": "array",
+          "description": "採番するポートの範囲（下限と上限）",
+          "items": {
+            "type": "integer"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "port_roles": {
+          "type": "object",
+          "description": "役割ごとの番号。ポートは 帯の下限 + スロット*20 + 役割番号 で決まる",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        },
+        "profiles": {
+          "type": "object",
+          "description": "起動する集合の名前付き定義。未指定なら定義の既定の集合を使う",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "shared_network": {
+          "type": "string",
+          "description": "テスト環境が相乗りするネットワーク名。空文字ならテスト環境ごとに作る"
+        },
+        "golden_tag_paths": {
+          "type": "array",
+          "description": "基準のタグを計算する資産のパス。内容が同じなら焼き直さない",
+          "items": {
+            "type": "string"
+          }
+        },
+        "golden_volumes": {
+          "type": "object",
+          "description": "定義上のボリューム名から基準ボリューム名への対応",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "test_kinds": {
+          "type": "object",
+          "description": "テストの種類ごとの選別と実行。未指定ならテスト実行の仕組みは何もせずに終わる",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "select": {
+                "type": "string",
+                "description": "その種類に当たるテストを列挙するコマンド"
+              },
+              "run": {
+                "type": "string",
+                "description": "その種類のテストを実行するコマンド"
+              },
+              "skip_reset": {
+                "type": "object",
+                "description": "実行時に渡す、初期化を抑止する環境変数",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "base_url_env": {
+                "type": "string",
+                "description": "入口の URL を渡す環境変数名。URL は port_role（既定 http）の採番したポートから組み立てる"
+              },
+              "out_env": {
+                "type": "string",
+                "description": "証跡の出力先を渡す環境変数名"
+              },
+              "port_role": {
+                "type": "string",
+                "description": "入口の URL を組み立てるときに使う port_roles の役割名。既定は http"
+              }
+            }
+          }
+        },
+        "expose": {
+          "type": "object",
+          "description": "外部公開。既定は無効で、明示的に有効化したときだけ行う",
+          "additionalProperties": true,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "public_tag": {
+              "type": "string",
+              "description": "公開を許す基準の識別子。載っている基準と一致しなければ拒否する"
+            },
+            "base_domain": {
+              "type": "string",
+              "description": "公開するホスト名の基底"
+            },
+            "ttl": {
+              "type": "string",
+              "description": "公開の期限"
+            },
+            "open_command": {
+              "type": "string",
+              "description": "公開の口を開けるコマンド。宣言が無ければ公開しない。NDF_EXPOSE_URL / NDF_EXPOSE_HOST / NDF_EXPOSE_ENVIRONMENT / NDF_EXPOSE_SLOT が環境変数で渡る"
+            },
+            "close_command": {
+              "type": "string",
+              "description": "公開の口を閉じるコマンド。open_command と同じ環境変数（NDF_EXPOSE_URL / NDF_EXPOSE_HOST / NDF_EXPOSE_ENVIRONMENT / NDF_EXPOSE_SLOT）が渡る"
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -14,7 +14,7 @@
 ### インストール
 
 ```bash
-# 基本（Skills + agentSpawnフックのみ）
+# 基本（Skills + agentSpawn / userPromptSubmit フック）
 bash plugins/ndf/dev.kiro/install.sh
 
 # Slack通知も有効化
@@ -28,6 +28,17 @@ bash plugins/ndf/dev.kiro/install.sh --with-slack --with-codex
 ```
 
 インストーラーは `plugins/ndf/skills/` から `.kiro/skills/` への symlink、`.kiro/steering/ndf-policies.md`、`.kiro/agents/ndf.json` を生成します。リンクする Skill は `plugins/ndf/manifests/kiro-skills.txt` が決めます。`ndf-policies` だけは steering の生成元として使い、`.kiro/skills/` へは symlink しません（Skill と steering の二重注入を避けるため）。
+
+`.kiro/agents/ndf.json` の `hooks` には作業ツリー運用の 2 つが入ります。
+
+| hook | 実行するもの | 起きること |
+|---|---|---|
+| `agentSpawn` | `scripts/worktree-session.sh` | 主ディレクトリに残った未コミット変更の提示と、ブランチの追従 |
+| `userPromptSubmit` | `scripts/worktree-guard.sh` | 作業ツリーで作業する旨の案内 |
+
+Kiro CLI では tool 実行前の hook を使いません。この事象でモデルへ案内を渡す手段が終了コード 2 に限られ、それが tool の実行を拒否するためです。拒否しない方針のもとでは置けないため、パスを見ない案内をプロンプト送信時の hook が担います。
+
+**どちらもリポジトリ側に `.ndf/worktree.json` があるときだけ動きます。** 無ければ何も出力せず終了コード 0 で終わります。書き方は `plugins/ndf/README.md` の「Hooks」節にあります。
 
 ### Slack通知の設定（オプション）
 
