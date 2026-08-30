@@ -567,26 +567,62 @@ _wt_lock_sleep() {
   sleep 0.1 2>/dev/null || sleep 1
 }
 
+# 持ち主が消えたまま残るロックを捨ててよいと見なすまでの分数。
+# `mkdir` に成功した直後、印を書く前に落ちた持ち主を救うために使う。
+WT_LOCK_STALE_MINUTES=5
+
+# 判定したものと同じロックであることを確かめてから取り除く。
+# 名前の付け替えは 1 つのプロセスだけが成功するため、これを関門に使う。
+# 単に `rm -rf` すると、先に捨てて取り直した別のプロセスのロックを壊す。
+_wt_lock_discard() {
+  local dir="$1" seen="$2" token="$3" stale="$1.stale.$3"
+  mv "$dir" "$stale" 2>/dev/null || return 1
+  if [ "$(cat "$stale/token" 2>/dev/null)" = "$seen" ]; then
+    rm -rf "$stale" 2>/dev/null
+    return 0
+  fi
+  # 別物だった。戻せなければ、取り直した側が既に持っているので捨てる。
+  mv "$stale" "$dir" 2>/dev/null || rm -rf "$stale" 2>/dev/null
+  return 1
+}
+
+# ロックが捨ててよい状態かを見る。
+_wt_lock_is_stale() {
+  local dir="$1" owner
+  owner=$(cat "$dir/pid" 2>/dev/null)
+  if [ -n "$owner" ]; then
+    kill -0 "$owner" 2>/dev/null && return 1
+    return 0
+  fi
+  # 印が無いロックは、作った直後に落ちた可能性がある。古ければ捨ててよい。
+  find "$dir" -maxdepth 0 -mmin "+$WT_LOCK_STALE_MINUTES" 2>/dev/null | grep -q . && return 0
+  return 1
+}
+
 # ロックを取る。取れなければ 1 を返す。
+#
+# `flock` は使わない。使える環境と使えない環境が混じると、同じ資源に対して
+# 別々の仕組みが動き、互いを見落とす。どこでも同じ `mkdir` に揃える。
 wt_lock_acquire() {
-  local dir="${1:-}" timeout="${2:-5}" waited=0 limit owner
+  local dir="${1:-}" timeout="${2:-5}" waited=0 limit token seen
   [ -n "$dir" ] || return 1
   # ロックの位置にディレクトリ以外があれば、ロックとして成立しない。取り除く。
   if [ -e "$dir" ] && [ ! -d "$dir" ]; then
     rm -f "$dir" 2>/dev/null
   fi
+  token="$$-$(date +%s 2>/dev/null)-${RANDOM:-0}"
   limit=$((timeout * 10))
   while ! mkdir "$dir" 2>/dev/null; do
-    # 持ち主が消えているロックは奪う。
-    owner=$(cat "$dir/pid" 2>/dev/null)
-    if [ -n "$owner" ] && ! kill -0 "$owner" 2>/dev/null; then
-      rm -rf "$dir" 2>/dev/null
+    seen=$(cat "$dir/token" 2>/dev/null)
+    if _wt_lock_is_stale "$dir"; then
+      _wt_lock_discard "$dir" "$seen" "$token"
       continue
     fi
     waited=$((waited + 1))
     [ "$waited" -ge "$limit" ] && return 1
     _wt_lock_sleep
   done
+  printf '%s\n' "$token" >"$dir/token" 2>/dev/null
   printf '%s\n' "$$" >"$dir/pid" 2>/dev/null
   return 0
 }

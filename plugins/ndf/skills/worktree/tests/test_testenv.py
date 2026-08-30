@@ -516,3 +516,44 @@ def test_lock_replaces_a_plain_file(tmp_path: Path) -> None:
     lock.write_text("stale\n", encoding="utf-8")
     got = run_lib(f'wt_lock_acquire "{lock}" 1; echo rc=$?')
     assert "rc=0" in got.stdout, got.stdout
+
+
+def test_lock_without_a_pid_is_not_taken_immediately(tmp_path: Path) -> None:
+    """印が無いロックは、作った直後の可能性がある。すぐには奪わない。"""
+    from worktree_helpers import run_lib
+
+    lock = tmp_path / "f.lock"
+    lock.mkdir()
+    got = run_lib(f'wt_lock_acquire "{lock}" 1; echo rc=$?')
+    assert "rc=1" in got.stdout, got.stdout
+
+
+def test_old_lock_without_a_pid_is_taken(tmp_path: Path) -> None:
+    """印が無いまま古くなったロックは捨ててよい。"""
+    import os
+    import time
+    from worktree_helpers import run_lib
+
+    lock = tmp_path / "g.lock"
+    lock.mkdir()
+    old = time.time() - 3600
+    os.utime(lock, (old, old))
+    got = run_lib(f'wt_lock_acquire "{lock}" 1; echo rc=$?')
+    assert "rc=0" in got.stdout, got.stdout
+
+
+def test_takeover_does_not_break_a_fresh_lock(tmp_path: Path) -> None:
+    """判定したものと違うロックになっていたら、取り除かない。"""
+    from worktree_helpers import run_lib
+
+    lock = tmp_path / "h.lock"
+    lock.mkdir()
+    (lock / "pid").write_text("999999\n", encoding="utf-8")
+    (lock / "token").write_text("old-token\n", encoding="utf-8")
+
+    # 判定に使う印だけを古い値にして、実体は新しいものへ差し替える。
+    got = run_lib(
+        f'_wt_lock_discard "{lock}" "seen-but-different" "tok"; echo rc=$?'
+    )
+    assert "rc=1" in got.stdout, got.stdout
+    assert lock.is_dir(), "戻すか、取り直した側が持っている"
