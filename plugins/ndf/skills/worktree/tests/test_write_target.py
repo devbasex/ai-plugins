@@ -12,7 +12,13 @@ from worktree_helpers import run_lib
 
 
 def extract(command: str) -> tuple[list[str], int]:
-    got = run_lib(f"wt_extract_write_target {command!r}; echo rc=$?")
+    # 改行を含むコマンドも渡せるよう、ヒアドキュメントで受け渡す。
+    # 引数へ埋めると、改行が字面の `\n` になって 1 行に潰れる。
+    snippet = (
+        "cmd=$(cat <<'WT_EOF'\n" + command + "\nWT_EOF\n)\n"
+        'wt_extract_write_target "$cmd"; echo rc=$?'
+    )
+    got = run_lib(snippet)
     lines = [ln for ln in got.stdout.splitlines() if ln]
     rc = int(lines.pop().removeprefix("rc="))
     return lines, rc
@@ -162,3 +168,32 @@ def test_lexical_normalization(given: str, expected: str) -> None:
     """`.` と `..` を字面で畳む。残ると「配下か」の判定をすり抜ける。"""
     got = run_lib(f'wt_normalize_path "{given}" "/base"')
     assert got.stdout.strip() == expected, got.stderr
+
+
+# --- コマンドの区切り --------------------------------------------------------
+
+
+def test_newline_separates_commands() -> None:
+    """改行を空白として捨てると、次の行の語を前のコマンドの対象と取り違える。"""
+    targets, _ = extract("cp a.txt b.txt\necho c")
+    assert targets == ["b.txt"], targets
+
+
+def test_semicolon_separates_commands() -> None:
+    targets, _ = extract("cp a.txt b.txt ; echo c")
+    assert targets == ["b.txt"], targets
+
+
+def test_multiline_reports_each_command() -> None:
+    targets, _ = extract("cp a.txt one.txt\nmv b.txt two.txt\necho done")
+    assert targets == ["one.txt", "two.txt"], targets
+
+
+def test_separator_inside_quotes_is_not_a_break() -> None:
+    targets, _ = extract("sed -i 's/a;b/c/' plugins/ndf/README.md")
+    assert targets == ["plugins/ndf/README.md"], targets
+
+
+def test_newline_does_not_become_a_target() -> None:
+    targets, rc = extract("echo hi >\nplugins/ndf/README.md")
+    assert rc == 1, targets

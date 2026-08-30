@@ -205,7 +205,14 @@ _wt_tokenize() {
     fi
     case "$c" in
       "'"|'"') quote="$c" ;;
-      " "|$'\t'|$'\n')
+      # 改行と `;` はコマンドの区切りである。空白として捨てると、次の行の語を
+      # 前のコマンドの対象と取り違える（`cp a b` の次の行の `echo c` の `c` を
+      # 複製先として拾うなど）。区切りの印を独立した語として出す。
+      $'\n'|";")
+        if [ -n "$cur" ]; then out+=("$cur"); cur=""; fi
+        out+=("__WT_SEP__")
+        ;;
+      " "|$'\t')
         if [ -n "$cur" ]; then out+=("$cur"); cur=""; fi
         ;;
       *) cur+="$c" ;;
@@ -220,7 +227,7 @@ _wt_is_not_target() {
   local s="$1"
   case "$s" in
     ""|"&"*|"|"*|"&&"|";"|"/dev/null"|"/dev/stdout"|"/dev/stderr") return 0 ;;
-    __WT_REDIR__|__WT_APPEND__) return 0 ;;
+    __WT_*) return 0 ;;
   esac
   return 1
 }
