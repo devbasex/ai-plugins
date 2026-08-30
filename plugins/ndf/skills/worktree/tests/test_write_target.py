@@ -340,3 +340,44 @@ def test_a_quoted_delimiter_keeps_the_body_inert() -> None:
     targets, rc = extract(command)
     assert rc == 0, targets
     assert targets == ["report.md"], targets
+
+
+def test_a_multi_line_substitution_inside_an_expanding_heredoc_is_found() -> None:
+    """コマンド置換は複数行にまたがる。開いてから閉じるまでを残す。"""
+    command = (
+        "cat > report.md <<EOS\n"
+        "$(\n"
+        "echo data > side-effect.md\n"
+        ")\n"
+        "EOS"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert targets == ["report.md", "side-effect.md"], targets
+
+
+def test_lines_after_a_closed_substitution_are_dropped_again() -> None:
+    """置換が閉じたら、その後ろの本文はまた実行されない部分に戻る。"""
+    command = (
+        "cat > report.md <<EOS\n"
+        "$(echo data > side-effect.md)\n"
+        "受領: <payload>\n"
+        "EOS"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert targets == ["report.md", "side-effect.md)"], targets
+
+
+def test_a_multi_line_backtick_substitution_is_found() -> None:
+    """backtick の置換も開閉が行をまたぐ。"""
+    command = (
+        "cat > report.md <<EOS\n"
+        "`\n"
+        "echo data > side-effect.md\n"
+        "`\n"
+        "EOS"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert "side-effect.md" in targets, targets

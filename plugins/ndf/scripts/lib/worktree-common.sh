@@ -295,6 +295,9 @@ _wt_strip_heredocs() {
   local text="${1:-}"
   local -a lines=() delims=() strips=() expands=()
   local line candidate out="" n i c delim strip quoted
+  # 展開される本文の中で、コマンド置換が続いているかを行をまたいで持つ。
+  # `$(` は入れ子になるため深さで、backtick は開閉が同じ字なので印で数える。
+  local subst=0 backtick=0 opened j m
 
   _wt_read_lines <<<"$text"
   lines=("${WT_LINES[@]+"${WT_LINES[@]}"}")
@@ -314,13 +317,34 @@ _wt_strip_heredocs() {
       fi
       if [ "$candidate" = "${delims[head]}" ]; then
         head=$((head + 1))
+        subst=0
+        backtick=0
         continue
       fi
-      # 展開される本文のコマンド置換は実行される。書き込みを見落とさないよう残す。
+      # 展開される本文のコマンド置換は実行される。書き込みを見落とさないよう、
+      # 置換の始まりから終わりまでを残す。置換は複数行にまたがることがあるため、
+      # 深さを行をまたいで持ち越す。
       if [ "${expands[head]}" = 1 ]; then
-        case "$line" in
-          *'$('* | *'`'*) out+="$line"$'\n' ;;
-        esac
+        opened=0
+        if [ "$subst" -gt 0 ] || [ "$backtick" = 1 ]; then opened=1; fi
+        j=0
+        m=${#line}
+        while [ "$j" -lt "$m" ]; do
+          if [ "$backtick" = 0 ] && [ "${line:j:2}" = '$(' ]; then
+            subst=$((subst + 1))
+            opened=1
+            j=$((j + 2))
+            continue
+          fi
+          case "${line:j:1}" in
+            ')') [ "$subst" -gt 0 ] && subst=$((subst - 1)) ;;
+            '`')
+              if [ "$backtick" = 0 ]; then backtick=1; opened=1; else backtick=0; fi
+              ;;
+          esac
+          j=$((j + 1))
+        done
+        if [ "$opened" = 1 ]; then out+="$line"$'\n'; fi
       fi
       continue
     fi
