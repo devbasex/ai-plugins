@@ -180,11 +180,16 @@ flowchart TD
 | --- | --- | --- |
 | `worktree-localenv.sh setup <作業ツリー>` | 宣言に従って設定と依存物を複製する | 0 完了 / 1 内容が食い違って中断 |
 | `worktree-localenv.sh verify [作業ツリー]` | 環境へ載っているコードと対象が一致するかを照合する | **0 一致 / 1 不一致 / 2 未起動または適用外** |
+| `worktree-localenv.sh healthcheck [作業ツリー]` | 照合し、一致したときだけ宣言の `localenv.healthcheck` を実行する | 1 不一致 / 2 未起動または適用外 / それ以外は実行したコマンドの終了コード |
 | `worktree-localenv.sh aim <作業ツリー>` | 環境が指すコードを対象へ向ける | 0 完了 / 1 失敗 |
 | `worktree-localenv.sh mode [作業ツリー]` | 変更の一覧から相乗りと分離のどちらかを提示する | 0 相乗り / 1 分離 |
 
 `verify` の 3 状態は受け入れ条件 23 に対応する。**「未起動」と「不一致」を同じ値にしない。** 環境が
 動いていないことと、別のコードが載っていることは、次の手が違う。
+
+照合そのものを行うのが `verify`、宣言の動作確認コマンドを実行するのが `healthcheck` である。
+`healthcheck` が照合を先に行うのは、受け入れ条件 23 の「検証コマンドを実行する前に照合が走る」を
+満たすためである。照合の結果だけが要るときは `verify` を使う。
 
 ### テスト環境の操作
 
@@ -193,7 +198,7 @@ flowchart TD
 | `worktree-testenv.sh env <作業ツリー>` | 環境名・スロット・ポートを出力し、台帳へ記録する | 0 完了 / 1 空きが無い |
 | `worktree-testenv.sh bake --tag <値>` | 基準を作る | 0 完了 / 2 同じ値の基準が既にある |
 | `worktree-testenv.sh up <作業ツリー> --profile <名前>` | 起動する | 0 完了 / 1 失敗 |
-| `worktree-testenv.sh test <作業ツリー> --kind <種類>` | 宣言の実行コマンドを走らせる | 実行したコマンドの終了コードを返す |
+| `worktree-testenv.sh test <作業ツリー> --kind <種類> [--out <パス>]` | 宣言の実行コマンドを走らせる。`--out` は証跡の出力先を渡す | 実行したコマンドの終了コードを返す |
 | `worktree-testenv.sh stop <作業ツリー>` | 止める。データは残す | 0 完了 |
 | `worktree-testenv.sh down <作業ツリー> [--volumes]` | 破棄し、割り当てを解放する | 0 完了 |
 | `worktree-testenv.sh expose <作業ツリー>` | 外部公開する | 0 完了 / 1 条件を満たさず拒否 |
@@ -274,8 +279,8 @@ flowchart TD
 
 ### Kiro CLI
 
-導入スクリプトがエージェント定義へ書き込む。記述は `command` と `matcher` と `timeout_ms` を持つ形で、
-Claude Code / Codex とは構造が異なる。
+導入スクリプトがエージェント定義へ書き込む。記述は `command` と `timeout_ms`、ツール実行前の hook
+では `matcher` も持つ形で、Claude Code / Codex とは構造が異なる。
 
 ```json
 "hooks": {
@@ -291,7 +296,9 @@ Claude Code / Codex とは構造が異なる。
 出力は約 10 KB で切り詰められ、超えた分は警告なく捨てられる。上限は hook ごとの
 `max_output_size` で変更できる。案内は 10 KB に収める。
 
-`matcher` はツール名で絞り込む。読み取りは `fs_read`、書き込みは `fs_write` を名乗る。
+`matcher` はツール実行前の hook でツール名を絞り込むための項目である（読み取りは `fs_read`、
+書き込みは `fs_write` を名乗る）。プロンプト送信時の hook はツール名を受け取らないため、
+ここでは `matcher` を書かない。
 
 ## 実行時間
 

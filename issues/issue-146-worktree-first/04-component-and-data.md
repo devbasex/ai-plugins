@@ -92,7 +92,7 @@ plugins/ndf/
     "branch_probe": "curl -sI http://localhost/ | grep -i x-worktree",
     "isolated_services": ["app", "nginx"],
     "isolate_when": ["database/migrations/**", "docker/**", "docker-compose*.yml", "Dockerfile*"],
-    "verify": "curl -sf http://localhost/health"
+    "healthcheck": "curl -sf http://localhost/health"
   },
   "testenv": {
     "port_band": [20000, 29999],
@@ -130,7 +130,7 @@ plugins/ndf/
 | `localenv.branch_probe` | 文字列 | 任意 | 環境に載っているブランチを返すコマンド。照合が使う |
 | `localenv.isolated_services` | 文字列の配列 | 任意 | 分離モードで並行起動するサービス |
 | `localenv.isolate_when` | 文字列の配列 | 任意 | 分離モードを促す変更パスの条件 |
-| `localenv.verify` | 文字列 | 任意 | 動作検証に使うコマンド |
+| `localenv.healthcheck` | 文字列 | 任意 | 動作確認に使うコマンド。`worktree-localenv.sh healthcheck` が照合の後に実行する |
 | `testenv.port_band` | 整数 2 個 | `testenv` を使うとき必須 | 採番するポートの範囲 |
 | `testenv.port_roles` | 文字列から整数 | 同上 | 役割ごとの番号の割り当て |
 | `testenv.profiles` | 文字列からサービス名の配列 | 任意 | 起動する集合の名前付き定義。未指定なら定義の既定の集合を使う |
@@ -229,12 +229,14 @@ Kiro CLI は標準入力に持たず、環境変数 `KIRO_SESSION_ID` で渡す�
 
 宣言ファイルと台帳は JSON Schema で定義し、`schemas/` に置く。読み取り側は次の順で扱う。
 
-1. ファイルが無ければ、何もせず終了コード 0 で終わる
-2. JSON として読めなければ、その旨を出力して終了コード 0 で終わる（作業は妨げない）
-3. `version` が未対応なら、その旨を出力して終了コード 0 で終わる
+1. ファイルが無ければ、何も出力せず終了コード 0 で終わる
+2. JSON として読めなければ、何も出力せず終了コード 0 で終わる
+3. `version` が未対応なら、何も出力せず終了コード 0 で終わる
 4. 定義に反する項目があれば、その項目だけを無視する
 
-**どの段階でも作業を止めない。** 宣言の誤りで編集や検証ができなくなる状態を作らない。
+**どの段階でも作業を止めず、何も出力しない。** 宣言の誤りで編集や検証ができなくなる状態を作らない。
+出力しないのは [`06-decisions-and-tests.md`](06-decisions-and-tests.md) の決定 9 に従う。この仕組みは
+多くのリポジトリへ配布されるため、読み取れない宣言が作業のたびに警告として現れる形を避ける。
 
 検査そのものは開発時に行う。定義に対する検査を継続的インテグレーションへ加え、
 `scripts/check-skill-frontmatter.py` などと同じ扱いにする。

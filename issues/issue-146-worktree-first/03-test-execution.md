@@ -177,7 +177,8 @@ flowchart TD
   再構築を伴わない
 - 一定時間使われていないテスト環境は `worktree-testenv reap --idle 45m` が停止する。使用中は実行側が
   ロックを保持して対象から外れる
-- 公開は `worktree-testenv unexpose "$WT"` で閉じる。期限切れでも自動で閉じ、台帳から消える
+- 公開は `worktree-testenv unexpose "$WT"` で閉じる。期限切れでも自動で閉じる。台帳の行は残り、
+  `expose.closed_at` に終了の時刻が入る
 - **作業ツリーを消す前に `worktree-testenv down "$WT" --volumes` を実行する。** データ領域（確認した構成では
   テスト環境 1 つあたり約 400 MB）とスロットを返してから作業ツリーを削除する。順序を逆にすると台帳から
   実体を引けなくなる

@@ -219,7 +219,7 @@ done
     "branch_probe": "<切り替えを確かめるコマンド>",
     "isolated_services": ["<並行起動するサービス名>"],
     "isolate_when": ["<分離モードを促す変更パスの条件>"],
-    "verify": "<検証コマンド>"
+    "healthcheck": "<動作確認のコマンド>"
   },
   "testenv": {
     "port_band": [20000, 29999],
