@@ -170,7 +170,7 @@ flowchart TD
 ```bash
 git -C "$MAIN" worktree add -b feature/x "$WT" origin/main
 DECL="$MAIN/.ndf/localenv.json"
-for p in $(jq -r '.localenv.copy_from_main[]' "$DECL"); do
+for p in $(jq -r '.localenv.copy_from_main // [] | .[]' "$DECL"); do
   [ -e "$MAIN/$p" ] || continue
   if [ -e "$WT/$p" ] && ! diff -rq "$MAIN/$p" "$WT/$p" >/dev/null 2>&1; then
     echo "中断: $p の内容が主ディレクトリと異なる" >&2; exit 1
