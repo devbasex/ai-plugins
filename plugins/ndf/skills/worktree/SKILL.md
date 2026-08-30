@@ -75,12 +75,17 @@ wt_in_worktree && echo "作業ツリーの中" || echo "主ディレクトリ"
 
 ```bash
 main_dir=$(wt_main_dir)
-if ! git -C "$main_dir" check-ignore -q .worktrees 2>/dev/null; then
+if ! git -C "$main_dir" check-ignore -q .worktrees/ 2>/dev/null; then
   printf '\n# 開発用の作業ツリー\n.worktrees/\n' >> "$main_dir/.gitignore"
   git -C "$main_dir" add .gitignore
   git -C "$main_dir" commit -m "Chore: .worktrees/ を追跡対象から外す"
 fi
 ```
+
+**末尾の `/` を省かない。** `.gitignore` の `.worktrees/` はディレクトリだけに当たる
+記法で、まだディレクトリが無い状態で `check-ignore .worktrees` を実行すると、登録済み
+でも「登録されていない」と判定される（実測：ディレクトリ不在時、スラッシュなしは 1、
+スラッシュありは 0）。
 
 ### 2-3. 作成して移る
 
@@ -115,13 +120,18 @@ git -C "$main_dir" status --short
 # 2. 差分を取り出す（追跡対象。`git add` 済みの変更も含める）
 git -C "$main_dir" diff HEAD > /tmp/ndf-stray.patch
 
-# 3. 作業ツリーへ当てる
-git -C "$target" apply /tmp/ndf-stray.patch
+# 3. 作業ツリーへ当てる（追跡対象の変更が無ければパッチは空になる）
+if [ -s /tmp/ndf-stray.patch ]; then
+  git -C "$target" apply /tmp/ndf-stray.patch
+fi
 
 # 4. 当たったことを確かめてから、主ディレクトリ側を元へ戻す
 git -C "$target" status --short
 git -C "$main_dir" reset --hard HEAD
 ```
+
+手順 3 で空かどうかを見るのは、変更が未追跡ファイルだけのときにパッチが空になり、
+`git apply` が入力なしとして失敗するためである。
 
 手順 2 で `git diff` ではなく `git diff HEAD` を使う。`git diff` は `git add` 済みの
 変更を差分に含めないため、取り込み済みの変更があるとパッチが空になる。手順 4 が
