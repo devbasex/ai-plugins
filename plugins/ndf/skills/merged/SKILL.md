@@ -47,7 +47,14 @@ worktree 削除・ローカルブランチ削除・リモートブランチ削�
 1. **マージ確認**: 引数の（引数がなければ自身が作成した最新の）PR が main に merge されていることを github mcp で確認。merge されていなければクリーンアップは実施せず終了
 2. **作業ツリー退避**: `git branch --show-current` で**退避元のブランチ名を記録**し、`git status` を確認して変更があれば `git stash`
 3. **main 更新**: `git checkout main` → `git pull`
-4. **worktree クリーンアップ**: `git worktree list` で当該 PR 番号に対応する worktree (`pr<PR番号>`) を探し、**「削除前の同意取得」に従ってパスと未コミット変更の有無を提示し、同意を得てから** `git worktree remove <path>` で削除（worktree 内の `.cross_review/` も一緒に消える）
+4. **worktree クリーンアップ**: `git worktree list` で当該 PR に対応する作業ツリーを探し、**「削除前の同意取得」に従ってパスと未コミット変更の有無を提示し、同意を得てから** `git worktree remove <path>` で削除する。探す先は 2 つある
+
+   | 置き場所 | 作られ方 | 名前 |
+   |---|---|---|
+   | `<主ディレクトリ>/.worktrees/<ブランチ名>` | 開発用。`/ndf:worktree` が作る | ブランチ名がそのままパスになる |
+   | システムの一時ディレクトリ配下 | レビュー用。`cross-review` / `cross-refactoring` が作る | `pr<PR番号>` |
+
+   開発用はブランチ名で、レビュー用は PR 番号で探す。レビュー用は削除すると中の `.cross_review/` も一緒に消える。空になった `.worktrees/` の中間ディレクトリ（`feature/` など）も削除する
 5. **ブランチ削除**: 削除するブランチ名を提示して同意を得てから `git branch -d <feature-branch>`
 6. **マージ済みブランチの整理**: 下記の手順で残存ブランチをまとめて削除
 7. **復元**: 手順 2 で stash していれば、**退避元のブランチへ戻してから**復元する

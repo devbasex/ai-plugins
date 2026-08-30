@@ -69,6 +69,10 @@ git log --oneline main..HEAD
 
 ### 4. 短命ブランチ作成
 
+**実行する場所は、cherry-pick 元のコミットを持つ作業ディレクトリである。** 開発を
+`.worktrees/<ブランチ名>` の作業ツリーで行っている場合は、その中で実行する。短命
+ブランチはその作業ディレクトリで作られ、push した後に削除する。
+
 ```bash
 git fetch origin <base-branch>
 git checkout -b <current-branch>-for-<base-short-name> origin/<base-branch>

@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "guard": {
+    "allow_paths": [
+      "issues/",
+      "docs/",
+      ".claude/",
+      ".codex/",
+      ".kiro/",
+      ".agents/",
+      ".gemini/",
+      ".serena/",
+      ".ndf/",
+      ".gitignore"
+    ]
+  }
+}
