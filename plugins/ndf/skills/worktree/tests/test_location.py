@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from conftest import git, init_repo, run_lib
+from worktree_helpers import git, init_repo, run_lib
 
 
 def test_main_dir_is_not_worktree(main_repo: Path) -> None:

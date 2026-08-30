@@ -10,7 +10,7 @@ import subprocess
 
 import pytest
 
-from conftest import make_state, read_state, write_result
+from crossref_helpers import make_state, read_state, write_result
 
 
 def trailers(item_id="R1-001", round_no="1", runtime="codex", model="gpt-5.5"):

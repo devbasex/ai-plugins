@@ -10,7 +10,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from conftest import SESSION, git, write_declaration
+from worktree_helpers import SESSION, git, write_declaration
 
 
 def run_session(cwd: Path, session: str = "s1", tmpdir: Path | None = None) -> dict:

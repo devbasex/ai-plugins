@@ -5,7 +5,7 @@ Codex CLI はファイルの編集を `apply_patch` で渡し、パスは `tool_
 """
 from __future__ import annotations
 
-from conftest import run_lib
+from worktree_helpers import run_lib
 
 CODEX_PATCH = """*** Begin Patch
 *** Update File: plugins/ndf/README.md

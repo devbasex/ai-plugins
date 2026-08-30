@@ -11,7 +11,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from conftest import GUARD, write_declaration
+from worktree_helpers import GUARD, write_declaration
 
 
 def run_guard(payload: dict, cwd: Path, session: str | None = None, tmpdir: Path | None = None) -> dict:

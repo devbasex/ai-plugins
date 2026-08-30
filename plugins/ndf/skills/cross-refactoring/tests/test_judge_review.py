@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from conftest import make_state, read_state, write_result
+from crossref_helpers import make_state, read_state, write_result
 
 REVIEWERS = ["gemini", "kiro"]
 ROUND_ITEMS = ["R1-001", "R1-002"]

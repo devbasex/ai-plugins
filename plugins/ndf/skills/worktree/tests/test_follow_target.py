@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import git, run_lib
+from worktree_helpers import git, run_lib
 
 ONE = "/repo/.worktrees/feature/x\tfeature/x"
 TWO = "/repo/.worktrees/feature/x\tfeature/x\n/repo/.worktrees/fix/y\tfix/y"

@@ -11,7 +11,7 @@ import subprocess
 
 import pytest
 
-from conftest import make_state, read_state
+from crossref_helpers import make_state, read_state
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git が必要")
 
