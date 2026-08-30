@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/ndf/skills/worktree/schemas/localenv.schema.json",
+  "title": "NDF worktree 宣言ファイル",
+  "description": "リポジトリごとの差を持つ宣言。このファイルが無いリポジトリでは、作業ツリー運用の仕組みは何もせずに終わる。",
+  "type": "object",
+  "required": ["version"],
+  "additionalProperties": true,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "編集時の補完に使う定義の位置。読み取り側は参照しない"
+    },
+    "version": {
+      "type": "integer",
+      "description": "宣言の版。読み取り側が知らない版なら何もせずに終わる",
+      "enum": [1]
+    },
+    "guard": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "allow_paths": {
+          "type": "array",
+          "description": "主ディレクトリで編集しても案内を出さないパス。末尾が / の項目は前方一致、それ以外は完全一致とその配下。空の配列は「何も許可しない」を意味する。未指定なら組み込みの既定を使う",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "localenv": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "description": "compose 以外は未対応として扱う",
+          "enum": ["compose"]
+        },
+        "layout": {
+          "type": "string",
+          "description": "コンテナ内のコードの置かれ方。indirect は symlink、direct はマウントの到達点、host はホストのプロセスが直接読む",
+          "enum": ["indirect", "direct", "host"]
+        },
+        "compose_files": {
+          "type": "array",
+          "description": "読み込む定義ファイル。並行起動用の定義を後ろへ足す",
+          "items": { "type": "string" }
+        },
+        "app_service": {
+          "type": "string",
+          "description": "コードを載せるサービス名。照合と再読み込みの対象"
+        },
+        "src_target": {
+          "type": "string",
+          "description": "コンテナ内でコードが置かれる位置。layout が indirect のとき必須"
+        },
+        "copy_from_main": {
+          "type": "array",
+          "description": "作業ツリーへ複製する、追跡されないパス",
+          "items": { "type": "string" }
+        },
+        "copy_as_real": {
+          "type": "array",
+          "description": "ハードリンクではなく実体を複製するパス。copy_from_main の内側を指してよい",
+          "items": { "type": "string" }
+        },
+        "build_before_aim": {
+          "type": "array",
+          "description": "コードの位置を切り替える前に流す資産のビルドコマンド",
+          "items": { "type": "string" }
+        },
+        "reload_signal": {
+          "type": "object",
+          "description": "再読み込みの送り先",
+          "additionalProperties": false,
+          "properties": {
+            "process": { "type": "string" },
+            "signal": { "type": "string" }
+          }
+        },
+        "branch_probe": {
+          "type": "string",
+          "description": "環境に載っているブランチ名を出力するコマンド。照合が使う"
+        },
+        "isolated_services": {
+          "type": "array",
+          "description": "分離モードで並行起動するサービス",
+          "items": { "type": "string" }
+        },
+        "isolate_when": {
+          "type": "array",
+          "description": "分離モードを促す変更パスの条件。シェルのパターンで書く",
+          "items": { "type": "string" }
+        },
+        "healthcheck": {
+          "type": "string",
+          "description": "動作確認に使うコマンド。照合が通ったときだけ実行する"
+        }
+      }
+    }
+  }
+}

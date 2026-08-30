@@ -185,6 +185,27 @@ Pull Request がマージされた後の削除は `/ndf:merged` が行う。
 
 主ディレクトリに未コミットの変更があるときは追従せず、変更がある事実だけを伝える。
 
+## ローカル環境での動作検証
+
+画面を触って動作を確かめるサービス一式を持つリポジトリでは、作業ツリーを作っただけでは
+動かない。作業ツリーは追跡されているファイルしか持たないため、依存物も環境ファイルも
+無い。手順は [references/local-environment.md](references/local-environment.md) にある。
+
+```bash
+NDF="$NDF_SCRIPTS/worktree-localenv.sh"
+bash "$NDF" setup "$main_dir/.worktrees/<ブランチ名>"  # 設定と依存物を持ち込む
+bash "$NDF" mode                                       # 相乗り(0) か 分離(1) かを提示
+bash "$NDF" aim "$main_dir/.worktrees/<ブランチ名>"     # 環境が指すコードを向ける
+bash "$NDF" verify; echo $?                            # 0 一致 / 1 不一致 / 2 未起動
+```
+
+**検証の直前に `verify` を通す。** 環境に載っているコードが対象と違っていても、失敗と
+しては現れない。別のコードを検証したことに気づけないまま進む。
+
+リポジトリごとの差は `.ndf/localenv.json` が持つ。書き方は
+[references/declaration.md](references/declaration.md) にある。**この宣言が無い
+リポジトリでは、これらのコマンドは何も出力せず終了コード 0 で終わる。**
+
 ## 関連
 
 - `/ndf:merged` — マージ後の作業ツリーとブランチの削除
