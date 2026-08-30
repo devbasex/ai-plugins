@@ -47,21 +47,16 @@ NULL 許容列の追加）は `standard` として扱う。判定に迷う場合
 ```text
 mode: standard
 根拠: 注文確定の振る舞いを変更する。公開 API とスキーマは変えない
-必須工程: requirements-design → implementation-plan → tdd-cycle → refactoring
-  → pr-review → quality-gates → plan-to-spec（仕様が変わった場合）
+必須工程: worktree → requirements-design → implementation-plan → tdd-cycle
+  → refactoring → pr-review → quality-gates → pr
+  → plan-to-spec（仕様が変わった場合） → merged
 ```
+
+工程の並びは「モードごとに起動する Skill」の表から読む。この例は出力の形を示すもので、
+基準ではない。
 
 判定基準の本文を出力へ貼らない。呼び出し側が基準を写し取ると、この Skill が唯一の
 置き場所である前提が崩れる。
-
-## モードと必須工程
-
-| モード | 対象 | 必須工程 |
-| --- | --- | --- |
-| `light` | 文言、ドキュメント、設定、テストの追加など、本番の振る舞いも本番コードの構造も変えない局所変更 | 成功条件の確認、対象範囲の確定、限定的な検証と静的解析 |
-| `standard` | 一般的な機能追加・バグ修正、テストが十分にある構造改善 | 仕様、計画、テスト駆動、構造改善、レビュー、全体検証 |
-| `architecture` | 公開インタフェース、移行を伴うスキーマ変更、認証、複数モジュール、重要なドメイン変更 | ドメインモデリング、設計判断の記録、設計レビュー、テスト駆動、構造改善、契約テストと結合テスト、相互レビュー |
-| `legacy-refactor` | テストが少ない既存コードの振る舞い維持型改善 | 構造分析、計画、現状固定テスト、段階的改善、レビュー、退行検証 |
 
 ## モードごとに起動する Skill
 
@@ -89,8 +84,7 @@ mode: standard
 一覧で示して同意を取ってから消す。
 
 「設計」行の `standard` と `legacy-refactor` は**専用の設計 Skill を起動しない**。設計と代替案の
-検討そのものは行い、結果を `implementation-plan` の中に残す。そのため「モードと必須工程」表では
-「計画」に含めて数えている。
+検討そのものは行い、結果を `implementation-plan` の中に残す。
 
 レビュー段階は**明示的に呼ぶ**。自然文で「レビューして」と依頼すると、Claude Code では
 組み込みの `code-review` が起動して判定の投稿経路が変わる。
@@ -141,9 +135,8 @@ flowchart TD
   （K は変更箇所を 1 度実行する限定的な検証と静的解析だけを指す。依存パッケージの版更新だけは
   例外として既存テスト一式を実行する — [references/workflow-modes.md](references/workflow-modes.md)）
 - `legacy-refactor` は A から C へ抜けて `standard` と同じ経路をたどり、**B（要求と受け入れ条件）と
-  M（確定仕様化）は通らない**（L から P へ抜ける）。H は「現状固定テスト」、R は「段階的改善」、I は「本番の振る舞いが
-
-  変わっていないことの確認」として読む
+  M（確定仕様化）は通らない**（L から P へ抜ける）。H は「現状固定テスト」、R は「段階的改善」、
+  I は「本番の振る舞いが変わっていないことの確認」として読む
 
 ## `architecture` モードの現状
 
@@ -156,7 +149,6 @@ flowchart TD
 | 設計判断の記録 | `implementation-plan` に代替案と採否の理由を書く |
 | 設計レビュー | 専用 Skill なし。実装前に `cross-review` 相当の観点で自己点検する |
 | 契約・結合テスト | `tdd-cycle` の階層の使い分けに従う |
-| 相互レビュー | `cross-review` |
 
 3 Skill の導入後にこの節を差し替える。**判定基準の側は変えない**。モードの定義は確定して
 おり、振り分け先だけを後から埋める。
