@@ -78,7 +78,7 @@ target_branch() { git -C "$TARGET" symbolic-ref --short -q HEAD 2>/dev/null; }
 registry() { wt_registry_path "$MAIN_DIR"; }
 
 # 実行中の作業ツリーが握るロックの位置。
-inuse_lock() { printf '%s/%s.inuse\n' "$(dirname "$(registry)")" "$1"; }
+inuse_lock() { printf '%s/%s.inuse.d\n' "$(dirname "$(registry)")" "$1"; }
 
 # --- tag --------------------------------------------------------------------
 
@@ -105,6 +105,10 @@ do_env() {
   [ -n "$branch" ] || { printf '作業ツリーのブランチを取れません: %s\n' "$TARGET" >&2; return 1; }
 
   environment=$(wt_env_name "$MAIN_DIR" "$branch") || return 1
+  # この呼び出しで新しく取ったかを覚えておく。採番に失敗したときに、
+  # 元からあった割り当てまで解放しないため。
+  local had_slot=0
+  wt_slot_of "$MAIN_DIR" "$TARGET" >/dev/null 2>&1 && had_slot=1
   slot=$(wt_slot_acquire "$MAIN_DIR" "$TARGET" "$branch" "$environment") || {
     printf '空きスロットがありません（上限 %s）\n' "$((WT_SLOT_MAX + 1))" >&2
     return 1
@@ -120,6 +124,8 @@ do_env() {
       # 帯を出た番号は、他の用途と衝突する。黙って使わない。
       if [ -n "$band_high" ] && [ "$port" -gt "$band_high" ]; then
         printf '%s\n' "採番が帯を超えました（役割 $role のポート $port が上限 $band_high を超える）" >&2
+        # 失敗した呼び出しがスロットを握ったままにしない。
+        [ "$had_slot" = 0 ] && wt_slot_release "$MAIN_DIR" "$TARGET"
         return 1
       fi
       ports=$(printf '%s' "$ports" | jq --arg r "$role" --argjson p "$port" '. + {($r): $p}')

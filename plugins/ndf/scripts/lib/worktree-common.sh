@@ -562,10 +562,20 @@ _wt_registry_write() {
 # `flock` が無い環境がある。`mkdir` は同じ名前で同時に成功するのが 1 つだけなので、
 # ディレクトリの作成そのものを排他の手段として使う。
 
+# 待ちの刻み。小数を受けない sleep がある環境では 1 秒へ落ちる。
+_wt_lock_sleep() {
+  sleep 0.1 2>/dev/null || sleep 1
+}
+
 # ロックを取る。取れなければ 1 を返す。
 wt_lock_acquire() {
-  local dir="${1:-}" timeout="${2:-5}" waited=0 owner
+  local dir="${1:-}" timeout="${2:-5}" waited=0 limit owner
   [ -n "$dir" ] || return 1
+  # ロックの位置にディレクトリ以外があれば、ロックとして成立しない。取り除く。
+  if [ -e "$dir" ] && [ ! -d "$dir" ]; then
+    rm -f "$dir" 2>/dev/null
+  fi
+  limit=$((timeout * 10))
   while ! mkdir "$dir" 2>/dev/null; do
     # 持ち主が消えているロックは奪う。
     owner=$(cat "$dir/pid" 2>/dev/null)
@@ -574,8 +584,8 @@ wt_lock_acquire() {
       continue
     fi
     waited=$((waited + 1))
-    [ "$waited" -ge "$timeout" ] && return 1
-    sleep 1
+    [ "$waited" -ge "$limit" ] && return 1
+    _wt_lock_sleep
   done
   printf '%s\n' "$$" >"$dir/pid" 2>/dev/null
   return 0
@@ -619,15 +629,8 @@ wt_registry_update() {
   _WT_REGISTRY_ARGS=("$@")
   mkdir -p "$(dirname "$_WT_REGISTRY_TARGET")" 2>/dev/null
 
-  if command -v flock >/dev/null 2>&1; then
-    (
-      flock -x -w 5 200 || exit 1
-      _wt_registry_apply
-    ) 200>"${_WT_REGISTRY_TARGET}.lock"
-    return $?
-  fi
-
-  # flock が無い環境では、ディレクトリの作成を排他の手段に使う。
+  # 排他の手段は 1 つに揃える。`flock` の有無で使うロックが分かれると、
+  # 同じ台帳を別の場所から同時に触ったときに互いを見落とす。
   local lock="${_WT_REGISTRY_TARGET}.lockdir" rc
   wt_lock_acquire "$lock" 5 || return 1
   _wt_registry_apply

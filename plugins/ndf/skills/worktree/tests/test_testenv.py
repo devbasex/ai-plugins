@@ -485,3 +485,34 @@ def test_held_lock_is_reported(tmp_path: Path) -> None:
     lock = tmp_path / "d.lock"
     got = run_lib(f'wt_lock_acquire "{lock}" 1; wt_lock_is_held "{lock}"; echo held=$?')
     assert "held=0" in got.stdout, got.stdout
+
+
+def test_failed_env_does_not_hold_a_slot(main_repo: Path, worktree: Path) -> None:
+    """採番に失敗した呼び出しが、台帳に有効な行を残さない。"""
+    declare(main_repo, testenv={"port_band": [20000, 20005], "port_roles": {"far": 9}})
+    assert run(["env", str(worktree)], cwd=main_repo)["rc"] == 1
+
+    rows = registry(main_repo)["assignments"]
+    assert all(row["released_at"] is not None for row in rows), rows
+
+
+def test_failed_env_keeps_an_existing_assignment(main_repo: Path, worktree: Path) -> None:
+    """元からあった割り当てまで解放しない。"""
+    declare(main_repo, testenv={"port_band": [20000, 29999], "port_roles": {"http": 0}})
+    run(["env", str(worktree)], cwd=main_repo)
+
+    declare(main_repo, testenv={"port_band": [20000, 20005], "port_roles": {"far": 9}})
+    assert run(["env", str(worktree)], cwd=main_repo)["rc"] == 1
+
+    rows = [r for r in registry(main_repo)["assignments"] if r["released_at"] is None]
+    assert len(rows) == 1, rows
+
+
+def test_lock_replaces_a_plain_file(tmp_path: Path) -> None:
+    """ロックの位置にディレクトリ以外があれば、ロックとして成立しない。"""
+    from worktree_helpers import run_lib
+
+    lock = tmp_path / "e.lock"
+    lock.write_text("stale\n", encoding="utf-8")
+    got = run_lib(f'wt_lock_acquire "{lock}" 1; echo rc=$?')
+    assert "rc=0" in got.stdout, got.stdout
