@@ -1,0 +1,18 @@
+{
+  "$schema": "https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/ndf/skills/worktree/schemas/localenv.schema.json",
+  "version": 1,
+  "guard": {
+    "allow_paths": [
+      "issues/",
+      "docs/",
+      ".claude/",
+      ".codex/",
+      ".kiro/",
+      ".agents/",
+      ".gemini/",
+      ".serena/",
+      ".ndf/",
+      ".gitignore"
+    ]
+  }
+}
