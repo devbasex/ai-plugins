@@ -62,6 +62,11 @@ fi
 
 ### 4. deployブランチ作成 + main取り込み
 
+**実行する場所は、対象の feature ブランチを持つ作業ディレクトリである。** 開発を
+`.worktrees/<ブランチ名>` の作業ツリーで行っている場合は、その中で実行する。同じ
+ブランチを 2 つの作業ディレクトリへ checkout できないため、主ディレクトリから
+feature ブランチへ切り替えようとすると拒否される。
+
 ```bash
 git fetch origin main
 git checkout -b "$DEPLOY_BRANCH"
