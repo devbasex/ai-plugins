@@ -140,15 +140,26 @@ wt_declaration() {
 
 # 宣言ファイルの状態を表す印を返す。存在しなければ空文字。
 # 控えの作り直しが要るかを、git を呼ばずに判定するために使う。
+#
+# **内容から作る。** 更新時刻は秒までしか持たない実装があり、同じ秒のうちに
+# 書き換えると印が変わらない。長さの変わらない書き換え（許可パスの入れ替えなど）は
+# 大きさでも捉えられない。`cksum` は POSIX にあり、実測で 1 ミリ秒未満で終わる。
 wt_declaration_stamp() {
   local main_dir="${1:-}" file
   [ -n "$main_dir" ] || return 1
   file="$main_dir/.ndf/worktree.json"
   [ -e "$file" ] || { printf '\n'; return 0; }
-  # 更新時刻の取り方は実装で分かれる。取れないときは毎回作り直す側へ倒す。
-  stat -c %Y "$file" 2>/dev/null && return 0
-  stat -f %m "$file" 2>/dev/null && return 0
-  printf 'unknown\n'
+
+  if command -v cksum >/dev/null 2>&1; then
+    cksum <"$file" 2>/dev/null && return 0
+  fi
+  # `cksum` が無い場合の退避。取り方は実装で分かれる。
+  stat -c '%.9Y %s' "$file" 2>/dev/null && return 0
+  stat -f '%Fm %z' "$file" 2>/dev/null && return 0
+  stat -c '%Y %s' "$file" 2>/dev/null && return 0
+  stat -f '%m %z' "$file" 2>/dev/null && return 0
+  # どれも使えないときは毎回作り直す側へ倒す。
+  printf 'unknown-%s\n' "$(date +%s%N 2>/dev/null || date +%s)"
 }
 
 # 案内を出さないパスを 1 行 1 件で出力する。

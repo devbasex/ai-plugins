@@ -322,18 +322,22 @@ def test_declaration_removed_mid_session_takes_effect(main_repo: Path, tmp_path:
 
 
 def test_declaration_edited_mid_session_takes_effect(main_repo: Path, tmp_path: Path) -> None:
-    """許可パスを書き換えたら、そのセッションで判定が変わる。"""
-    import time
+    """許可パスを書き換えたら、そのセッションで判定が変わる。
 
+    書き換えの前後で**長さが同じ**で、**同じ秒のうち**に書き換える。更新時刻や
+    大きさで印を作ると、この形が捉えられない。
+    """
     state = tmp_path / "state"
     state.mkdir()
-    write_declaration(main_repo, json.dumps({"version": 1, "guard": {"allow_paths": ["plugins/"]}}))
-    payload = claude_edit(main_repo / "plugins" / "ndf" / "README.md")
+    before_body = json.dumps({"version": 1, "guard": {"allow_paths": ["plugins/"]}})
+    after_body = json.dumps({"version": 1, "guard": {"allow_paths": ["docsxxx/"]}})
+    assert len(before_body) == len(after_body), "長さを揃えた比較にする"
 
+    write_declaration(main_repo, before_body)
+    payload = claude_edit(main_repo / "plugins" / "ndf" / "README.md")
     assert run_guard(payload, cwd=main_repo, tmpdir=state)["out"].strip() == ""
 
-    time.sleep(1.1)  # 更新時刻は秒単位で持つ
-    write_declaration(main_repo, json.dumps({"version": 1, "guard": {"allow_paths": ["docs/"]}}))
+    write_declaration(main_repo, after_body)
 
     after = run_guard(payload, cwd=main_repo, tmpdir=state)
     assert "plugins/ndf/README.md" in context_of(after), after["out"]
