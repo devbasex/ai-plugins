@@ -481,7 +481,7 @@ wt_registry_path() {
 }
 
 # 割り当てを解放しても行を消さないため、解放済みの行は増え続ける。
-# 1 年を超えた解放済みの行は読み取り時に無視する。削除はしない。
+# 1 年を超えた解放済みの行は読み取り時に無視する。**削除はしない。**
 WT_REGISTRY_KEEP_DAYS=365
 
 # 空きスロットの上限。0 から数えるため 64 個。
@@ -511,6 +511,22 @@ wt_port_for() {
   printf '%s\n' "$((band_low + slot * 20 + role_number))"
 }
 
+# 期間の表記を秒へ直す。`90` / `90s` / `45m` / `2h` / `1d` を受ける。
+wt_duration_seconds() {
+  local value="${1:-}" number unit
+  [ -n "$value" ] || return 1
+  number=${value%[smhd]}
+  case "$number" in ""|*[!0-9]*) return 1 ;; esac
+  unit=${value#"$number"}
+  case "$unit" in
+    ""|s) printf '%s\n' "$number" ;;
+    m) printf '%s\n' "$((number * 60))" ;;
+    h) printf '%s\n' "$((number * 3600))" ;;
+    d) printf '%s\n' "$((number * 86400))" ;;
+    *) return 1 ;;
+  esac
+}
+
 # 台帳を読む。無ければ空の台帳を返す。
 wt_registry_read() {
   local path="${1:-}"
@@ -521,8 +537,18 @@ wt_registry_read() {
   printf '{"version":1,"assignments":[]}\n'
 }
 
-# 台帳を書き換える。読み込み・変更・書き出しを 1 つの区間にまとめる。
-# 排他の仕組みが使えない環境では、一時ファイルへ書いてから名前を付け替える。
+# 読み取り時に無視する行を落とした台帳を返す。
+# 解放から WT_REGISTRY_KEEP_DAYS を超えた行は数にも一覧にも入れない。
+# **ファイルからは消さない。**
+wt_registry_visible() {
+  local path="${1:-}"
+  wt_registry_read "$path" | jq --argjson keep "$WT_REGISTRY_KEEP_DAYS" '
+    .assignments |= map(
+      select(.released_at == null
+             or ((.released_at | fromdateiso8601) > (now - ($keep * 86400))))
+    )' 2>/dev/null
+}
+
 _wt_registry_write() {
   local path="$1" content="$2" tmp
   mkdir -p "$(dirname "$path")" 2>/dev/null
@@ -531,38 +557,44 @@ _wt_registry_write() {
   mv "$tmp" "$path" 2>/dev/null || { rm -f "$tmp"; return 1; }
 }
 
-# 台帳の更新を排他のもとで行う。第 2 引数は jq のプログラム。
-wt_registry_update() {
-  local path="${1:-}" program="${2:-}" content updated
-  [ -n "$path" ] && [ -n "$program" ] || return 1
-  mkdir -p "$(dirname "$path")" 2>/dev/null
+_wt_registry_apply() {
+  local content updated
+  content=$(wt_registry_read "$_WT_REGISTRY_TARGET")
+  updated=$(printf '%s' "$content" | jq "${_WT_REGISTRY_ARGS[@]+"${_WT_REGISTRY_ARGS[@]}"}" \
+    "$_WT_REGISTRY_PROGRAM" 2>/dev/null) || return 1
+  _wt_registry_write "$_WT_REGISTRY_TARGET" "$updated"
+}
 
-  _apply() {
-    content=$(wt_registry_read "$path")
-    updated=$(printf '%s' "$content" | jq "$program" 2>/dev/null) || return 1
-    _wt_registry_write "$path" "$updated"
-  }
+# 台帳の更新を排他のもとで行う。**読み込み・変更・書き出しを 1 つの区間にまとめる。**
+# 判定も jq のプログラムの中で行うこと。区間の外で読んで中で書くと、同時に走った
+# 別のプロセスと同じ番号を割り当ててしまう。
+#
+# 使い方: wt_registry_update <台帳> <jq プログラム> [jq の引数...]
+# 値は jq の引数として渡す。プログラムの文字列へ埋め込むと、引用符を含む
+# ブランチ名やパスで壊れる。
+wt_registry_update() {
+  _WT_REGISTRY_TARGET="${1:-}"
+  _WT_REGISTRY_PROGRAM="${2:-}"
+  [ -n "$_WT_REGISTRY_TARGET" ] && [ -n "$_WT_REGISTRY_PROGRAM" ] || return 1
+  shift 2
+  _WT_REGISTRY_ARGS=("$@")
+  mkdir -p "$(dirname "$_WT_REGISTRY_TARGET")" 2>/dev/null
 
   if command -v flock >/dev/null 2>&1; then
     (
       flock -x -w 5 200 || exit 1
-      _apply
-    ) 200>"${path}.lock"
+      _wt_registry_apply
+    ) 200>"${_WT_REGISTRY_TARGET}.lock"
     return $?
   fi
-  _apply
-}
-
-# 有効な割り当て（解放されておらず、古すぎない行）だけを返す jq の式。
-_wt_registry_active_filter() {
-  printf '[.assignments[] | select(.released_at == null)]'
+  _wt_registry_apply
 }
 
 # 作業ツリーへ割り当てられているスロットを返す。無ければ 1 を返す。
 wt_slot_of() {
   local main_dir="${1:-}" worktree="${2:-}" path slot
   path=$(wt_registry_path "$main_dir") || return 1
-  slot=$(wt_registry_read "$path" \
+  slot=$(wt_registry_visible "$path" \
     | jq -r --arg wt "$worktree" \
       '[.assignments[] | select(.released_at == null and .worktree == $wt)] | last | .slot // empty' 2>/dev/null)
   [ -n "$slot" ] || return 1
@@ -571,50 +603,59 @@ wt_slot_of() {
 
 # 作業ツリーへスロットを割り当てる。既に割り当てがあれば同じ番号を返す。
 # 空きが無ければ 1 を返す。
+#
+# **空きの判定と行の追加を 1 つの jq プログラムで行う。** 排他区間の外で空きを
+# 読むと、同時に走った別のプロセスと同じ番号を掴む。
 wt_slot_acquire() {
   local main_dir="${1:-}" worktree="${2:-}" branch="${3:-}" environment="${4:-}"
-  local path slot used candidate
+  local path
   path=$(wt_registry_path "$main_dir") || return 1
 
-  if slot=$(wt_slot_of "$main_dir" "$worktree"); then
-    printf '%s\n' "$slot"
-    return 0
-  fi
+  wt_registry_update "$path" '
+    ([.assignments[] | select(.released_at == null)]) as $active
+    | if ($active | map(select(.worktree == $wt)) | length) > 0 then .
+      else
+        ([$active[] | .slot]) as $used
+        | ([range(0; $max + 1)] - $used | first) as $slot
+        | if $slot == null then .
+          else
+            .assignments += [{
+              id: $id, worktree: $wt, branch: $branch, environment: $environment,
+              slot: $slot, ports: {}, assigned_at: (now | todate),
+              last_used_at: (now | todate), released_at: null, expose: null
+            }]
+          end
+      end'     --arg wt "$worktree" --arg branch "$branch" --arg environment "$environment"     --arg id "$(date -u +%Y%m%dT%H%M%SZ)-$$" --argjson max "$WT_SLOT_MAX" || return 1
 
-  used=$(wt_registry_read "$path" \
-    | jq -r '[.assignments[] | select(.released_at == null) | .slot] | .[]' 2>/dev/null)
-  slot=""
-  for ((candidate = 0; candidate <= WT_SLOT_MAX; candidate++)); do
-    case "
-$used
-" in
-      *"
-$candidate
-"*) continue ;;
-    esac
-    slot=$candidate
-    break
-  done
-  [ -n "$slot" ] || return 1
-
-  wt_registry_update "$path" \
-    "$(printf '.assignments += [{id: "%s", worktree: "%s", branch: "%s", environment: "%s", slot: %s, ports: {}, assigned_at: (now | todate), released_at: null, expose: null}]' \
-      "$(date -u +%Y%m%dT%H%M%SZ)-$$" "$worktree" "$branch" "$environment" "$slot")" || return 1
-  printf '%s\n' "$slot"
+  wt_slot_of "$main_dir" "$worktree"
 }
 
 # 割り当てを解放する。**行は消さず、解放の時刻を書き込む。**
 wt_slot_release() {
   local main_dir="${1:-}" worktree="${2:-}" path
   path=$(wt_registry_path "$main_dir") || return 1
-  wt_registry_update "$path" \
-    "$(printf '.assignments |= map(if .worktree == "%s" and .released_at == null then .released_at = (now | todate) else . end)' "$worktree")"
+  wt_registry_update "$path" '
+    .assignments |= map(
+      if .worktree == $wt and .released_at == null then .released_at = (now | todate) else . end
+    )' --arg wt "$worktree"
 }
 
 # 割り当てへポートを記録する。
 wt_slot_set_ports() {
   local main_dir="${1:-}" worktree="${2:-}" ports_json="${3:-}" path
   path=$(wt_registry_path "$main_dir") || return 1
-  wt_registry_update "$path" \
-    "$(printf '.assignments |= map(if .worktree == "%s" and .released_at == null then .ports = %s else . end)' "$worktree" "$ports_json")"
+  wt_registry_update "$path" '
+    .assignments |= map(
+      if .worktree == $wt and .released_at == null then .ports = $ports else . end
+    )' --arg wt "$worktree" --argjson ports "$ports_json"
+}
+
+# 最後に使った時刻を記録する。reap の判定が読む。
+wt_slot_touch() {
+  local main_dir="${1:-}" worktree="${2:-}" path
+  path=$(wt_registry_path "$main_dir") || return 1
+  wt_registry_update "$path" '
+    .assignments |= map(
+      if .worktree == $wt and .released_at == null then .last_used_at = (now | todate) else . end
+    )' --arg wt "$worktree"
 }

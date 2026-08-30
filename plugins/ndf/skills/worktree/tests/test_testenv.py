@@ -292,3 +292,95 @@ def test_down_releases_the_slot(main_repo: Path, worktree: Path) -> None:
     assert result["rc"] == 0, result
     rows = registry(main_repo)["assignments"]
     assert rows[0]["released_at"] is not None
+
+
+def test_base_url_uses_the_declared_port_role(main_repo: Path, worktree: Path) -> None:
+    """入口の役割名は宣言で決める。`http` 以外の名前を使うリポジトリがある。"""
+    declare(main_repo, testenv={
+        "port_band": [20000, 29999],
+        "port_roles": {"web": 3},
+        "test_kinds": {"browser": {"run": "printf '%s' \"$BASE\"",
+                                   "base_url_env": "BASE", "port_role": "web"}},
+    })
+    run(["env", str(worktree)], cwd=main_repo)
+    result = run(["test", str(worktree), "--kind", "browser"], cwd=main_repo)
+    assert result["out"] == "http://localhost:20003", result
+
+
+def test_quote_in_a_kind_name_does_not_break_the_lookup(main_repo: Path, worktree: Path) -> None:
+    """種類名やプロファイル名を jq の式へ埋め込まない。"""
+    declare(main_repo, testenv={"port_band": [20000, 29999],
+                                "test_kinds": {'weird"name': {"run": "exit 4"}}})
+    result = run(["test", str(worktree), "--kind", 'weird"name'], cwd=main_repo)
+    assert result["rc"] == 4, result
+
+
+def test_quote_in_a_branch_name_does_not_break_the_registry(main_repo: Path) -> None:
+    """ブランチ名やパスを jq のプログラムへ埋め込まない。"""
+    target = main_repo / ".worktrees" / 'quote"branch'
+    git(main_repo, "worktree", "add", "-q", "-b", 'quote"branch', str(target))
+    declare(main_repo, testenv={"port_band": [20000, 29999], "port_roles": {"http": 0}})
+
+    result = run(["env", str(target)], cwd=main_repo)
+
+    assert result["rc"] == 0, result
+    payload = json.loads(result["out"])
+    assert payload["branch"] == 'quote"branch'
+    assert payload["slot"] == 0
+
+
+# --- reap -------------------------------------------------------------------
+
+
+def set_last_used(main_repo: Path, worktree: Path, iso: str) -> None:
+    path = main_repo / ".git" / "ndf" / "worktree-registry.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    for row in data["assignments"]:
+        if row["worktree"] == str(worktree):
+            row["last_used_at"] = iso
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def test_reap_requires_a_duration(main_repo: Path, worktree: Path) -> None:
+    declare(main_repo, testenv={"port_band": [20000, 29999]})
+    result = run(["reap"], cwd=main_repo)
+    assert result["rc"] == 1, result
+    assert "--idle" in result["err"], result["err"]
+
+
+@pytest.mark.parametrize("bad", ["soon", "45x", "-5m"])
+def test_reap_rejects_a_bad_duration(main_repo: Path, bad: str) -> None:
+    declare(main_repo, testenv={"port_band": [20000, 29999]})
+    result = run(["reap", "--idle", bad], cwd=main_repo)
+    assert result["rc"] == 1, result
+
+
+def test_reap_leaves_recently_used_environments(main_repo: Path, worktree: Path) -> None:
+    declare(main_repo, testenv={"port_band": [20000, 29999]})
+    run(["env", str(worktree)], cwd=main_repo)
+    result = run(["reap", "--idle", "45m"], cwd=main_repo)
+    assert result["rc"] == 0, result
+    assert "停止します" not in result["out"], result["out"]
+
+
+def test_reap_targets_idle_environments(main_repo: Path, worktree: Path) -> None:
+    """`--idle` を超えて使われていないものだけを対象にする。"""
+    declare(main_repo, testenv={"port_band": [20000, 29999]})
+    run(["env", str(worktree)], cwd=main_repo)
+    set_last_used(main_repo, worktree, "2020-01-01T00:00:00Z")
+
+    result = run(["reap", "--idle", "45m"], cwd=main_repo)
+
+    assert result["rc"] == 0, result
+    # コンテナ実行系が無い環境ではここで終わる。あれば起動していないため止めない。
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [("90", "90"), ("90s", "90"), ("45m", "2700"), ("2h", "7200"), ("1d", "86400")],
+)
+def test_duration_parsing(value: str, expected: str) -> None:
+    from worktree_helpers import run_lib
+
+    got = run_lib(f'wt_duration_seconds "{value}"')
+    assert got.stdout.strip() == expected, got.stderr

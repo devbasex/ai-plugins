@@ -118,7 +118,7 @@ load_assignment() {
   ENVIRONMENT=""
   SLOT=""
   local row
-  row=$(wt_registry_read "$(registry)" \
+  row=$(wt_registry_visible "$(registry)" \
     | jq -c --arg wt "$TARGET" \
       '[.assignments[] | select(.released_at == null and .worktree == $wt)] | last' 2>/dev/null)
   [ -n "$row" ] && [ "$row" != "null" ] || return 1
@@ -170,15 +170,18 @@ do_up() {
 
   [ -n "$TAG" ] || TAG=$(do_tag) || TAG=""
   if [ -n "$TAG" ]; then
-    wt_registry_update "$(registry)" \
-      "$(printf '.assignments |= map(if .worktree == "%s" and .released_at == null then .golden_tag = "%s" else . end)' "$TARGET" "$TAG")"
+    wt_registry_update "$(registry)" '
+      .assignments |= map(
+        if .worktree == $wt and .released_at == null then .golden_tag = $tag else . end
+      )' --arg wt "$TARGET" --arg tag "$TAG"
   fi
 
   local -a services=()
   if [ -n "$PROFILE" ]; then
-    _wt_read_lines < <(decl_get ".testenv.profiles.\"$PROFILE\" // [] | .[]")
+    _wt_read_lines < <(printf '%s' "$DECLARATION" | jq -r --arg p "$PROFILE" '.testenv.profiles[$p] // [] | .[]' 2>/dev/null)
     services=("${WT_LINES[@]+"${WT_LINES[@]}"}")
   fi
+  wt_slot_touch "$MAIN_DIR" "$TARGET"
   # 定義に無いコンテナを削除する指定は付けない。稼働中のプロジェクトに定義外の
   # コンテナが属していることがあり、付けると削除される。
   compose up -d "${services[@]+"${services[@]}"}"
@@ -207,7 +210,7 @@ do_down() {
 do_test() {
   [ -n "$KIND" ] || { printf '--kind が要ります\n' >&2; return 1; }
   local run base_url_env out_env
-  run=$(decl_get ".testenv.test_kinds.\"$KIND\".run // empty")
+  run=$(printf '%s' "$DECLARATION" | jq -r --arg k "$KIND" '.testenv.test_kinds[$k].run // empty' 2>/dev/null)
   # 種類の宣言が無いリポジトリでは何もしない（受け入れ条件 39）。
   [ -n "$run" ] || return 0
 
@@ -219,17 +222,21 @@ do_test() {
   while IFS=$'\t' read -r key value; do
     [ -n "$key" ] || continue
     env_pairs+=("$key=$value")
-  done < <(decl_get ".testenv.test_kinds.\"$KIND\".skip_reset // {} | to_entries[] | \"\(.key)\t\(.value)\"")
+  done < <(printf '%s' "$DECLARATION" | jq -r --arg k "$KIND" \
+    '.testenv.test_kinds[$k].skip_reset // {} | to_entries[] | "\(.key)\t\(.value)"' 2>/dev/null)
 
-  base_url_env=$(decl_get ".testenv.test_kinds.\"$KIND\".base_url_env // empty")
+  base_url_env=$(printf '%s' "$DECLARATION" | jq -r --arg k "$KIND" '.testenv.test_kinds[$k].base_url_env // empty' 2>/dev/null)
   if [ -n "$base_url_env" ]; then
-    local http_port
-    http_port=$(wt_registry_read "$(registry)" \
-      | jq -r --arg wt "$TARGET" '[.assignments[] | select(.released_at == null and .worktree == $wt)] | last | .ports.http // empty')
+    # 入口の役割名は宣言で決める。`http` 以外の名前を使うリポジトリがある。
+    local port_role http_port
+    port_role=$(printf '%s' "$DECLARATION" | jq -r --arg k "$KIND" '.testenv.test_kinds[$k].port_role // "http"' 2>/dev/null)
+    http_port=$(wt_registry_visible "$(registry)" \
+      | jq -r --arg wt "$TARGET" --arg role "$port_role" \
+        '[.assignments[] | select(.released_at == null and .worktree == $wt)] | last | .ports[$role] // empty')
     [ -n "$http_port" ] && env_pairs+=("$base_url_env=http://localhost:$http_port")
   fi
 
-  out_env=$(decl_get ".testenv.test_kinds.\"$KIND\".out_env // empty")
+  out_env=$(printf '%s' "$DECLARATION" | jq -r --arg k "$KIND" '.testenv.test_kinds[$k].out_env // empty' 2>/dev/null)
   if [ -n "$out_env" ]; then
     # 証跡は作業ツリー配下へ固定する。共有の保管先へは送らない。
     [ -n "$OUT" ] || OUT="$TARGET/.ndf-evidence/$ENVIRONMENT-$(date -u +%Y%m%dT%H%M%SZ)"
@@ -237,7 +244,24 @@ do_test() {
     env_pairs+=("$out_env=$OUT")
   fi
 
-  (cd "$TARGET" && env "${env_pairs[@]+"${env_pairs[@]}"}" sh -c "$run")
+  wt_slot_touch "$MAIN_DIR" "$TARGET"
+
+  # 実行中は reap の対象から外れるよう、ロックを握ったまま走らせる。
+  local lock rc
+  lock="$(dirname "$(registry)")/$ENVIRONMENT.inuse"
+  mkdir -p "$(dirname "$lock")" 2>/dev/null
+  if command -v flock >/dev/null 2>&1; then
+    (
+      flock -x 9
+      cd "$TARGET" && env "${env_pairs[@]+"${env_pairs[@]}"}" sh -c "$run"
+    ) 9>>"$lock"
+    rc=$?
+  else
+    (cd "$TARGET" && env "${env_pairs[@]+"${env_pairs[@]}"}" sh -c "$run")
+    rc=$?
+  fi
+  wt_slot_touch "$MAIN_DIR" "$TARGET"
+  return "$rc"
 }
 
 # --- expose / unexpose ------------------------------------------------------
@@ -259,7 +283,7 @@ do_expose() {
 
   load_assignment || { printf '拒否: 割り当てがありません\n' >&2; return 1; }
 
-  loaded_tag=$(wt_registry_read "$(registry)" \
+  loaded_tag=$(wt_registry_visible "$(registry)" \
     | jq -r --arg wt "$TARGET" '[.assignments[] | select(.released_at == null and .worktree == $wt)] | last | .golden_tag // empty')
   if [ "$loaded_tag" != "$public_tag" ]; then
     printf '拒否: 載っている基準（%s）が公開を許す基準（%s）と一致しません\n' \
@@ -267,48 +291,83 @@ do_expose() {
     return 1
   fi
 
-  # 折り返しを使う公開は先着 1 本で排他する。
-  local open_count
-  open_count=$(wt_registry_read "$(registry)" \
-    | jq -r --arg wt "$TARGET" '[.assignments[] | select(.expose != null and .expose.closed_at == null and .worktree != $wt)] | length')
-  if [ "${open_count:-0}" -gt 0 ]; then
+  ttl=$(decl_get '.testenv.expose.ttl // "8h"')
+  host="wt${SLOT}.${base_domain}"
+
+  # 折り返しを使う公開は先着 1 本で排他する。**判定を排他区間の中で行う。**
+  # 区間の外で数えると、同時に走った 2 本が両方とも通り抜ける。
+  wt_registry_update "$(registry)" '
+    if ([.assignments[] | select(.expose != null and .expose.closed_at == null and .worktree != $wt)] | length) > 0
+    then .
+    else
+      .assignments |= map(
+        if .worktree == $wt and .released_at == null then
+          .expose = {url: $url, ttl: $ttl, opened_at: (now | todate), closed_at: null}
+        else . end
+      )
+    end' --arg wt "$TARGET" --arg url "https://$host" --arg ttl "$ttl" || return 1
+
+  local opened
+  opened=$(wt_registry_visible "$(registry)" \
+    | jq -r --arg wt "$TARGET" '[.assignments[] | select(.released_at == null and .worktree == $wt)] | last | .expose.url // empty')
+  if [ -z "$opened" ]; then
     printf '拒否: 別のテスト環境が公開中です（同時に開けるのは 1 本）\n' >&2
     return 1
   fi
-
-  ttl=$(decl_get '.testenv.expose.ttl // "8h"')
-  host="wt${SLOT}.${base_domain}"
-  wt_registry_update "$(registry)" \
-    "$(printf '.assignments |= map(if .worktree == "%s" and .released_at == null then .expose = {url: "https://%s", ttl: "%s", opened_at: (now | todate), closed_at: null} else . end)' \
-      "$TARGET" "$host" "$ttl")" || return 1
-  printf 'https://%s\n' "$host"
+  printf '%s\n' "$opened"
 }
 
 do_unexpose() {
-  wt_registry_update "$(registry)" \
-    "$(printf '.assignments |= map(if .worktree == "%s" and .expose != null and .expose.closed_at == null then .expose.closed_at = (now | todate) else . end)' "$TARGET")"
+  wt_registry_update "$(registry)" '
+    .assignments |= map(
+      if .worktree == $wt and .expose != null and .expose.closed_at == null
+      then .expose.closed_at = (now | todate) else . end
+    )' --arg wt "$TARGET"
 }
 
 # --- reap -------------------------------------------------------------------
 
+# 実行中の作業ツリーが握るロックの位置。
+inuse_lock() {
+  printf '%s/%s.inuse\n' "$(dirname "$(registry)")" "$1"
+}
+
 do_reap() {
-  [ -n "$IDLE" ] || { printf '--idle が要ります\n' >&2; return 1; }
+  local idle_seconds
+  idle_seconds=$(wt_duration_seconds "$IDLE") || {
+    printf '%s\n' '--idle に期間を指定してください（例: 45m）' >&2
+    return 1
+  }
   command -v docker >/dev/null 2>&1 || return 0
 
-  local worktree
-  while IFS= read -r worktree; do
+  local worktree environment lock
+  while IFS=$'\t' read -r worktree environment; do
     [ -n "$worktree" ] || continue
-    # 使用中の作業ツリーは対象から外す。
-    [ -d "$worktree" ] || continue
     TARGET="$worktree"
-    load_assignment || continue
-    if [ -z "$(docker ps -q --filter "label=com.docker.compose.project=$ENVIRONMENT" 2>/dev/null)" ]; then
+    ENVIRONMENT="$environment"
+
+    # 実行中の作業ツリーはロックを握っている。取れなければ対象から外す。
+    lock=$(inuse_lock "$environment")
+    if command -v flock >/dev/null 2>&1 && [ -e "$lock" ]; then
+      if ! (flock -n 9 || exit 1) 9>>"$lock" 2>/dev/null; then
+        continue
+      fi
+    fi
+
+    # 起動していないものは止める必要がない。
+    if [ -z "$(docker ps -q --filter "label=com.docker.compose.project=$environment" 2>/dev/null)" ]; then
       continue
     fi
-    printf '停止します: %s（%s）\n' "$ENVIRONMENT" "$worktree"
+
+    printf '停止します: %s（%s）\n' "$environment" "$worktree"
     compose stop
-  done < <(wt_registry_read "$(registry)" \
-    | jq -r '[.assignments[] | select(.released_at == null) | .worktree] | unique | .[]')
+  done < <(wt_registry_visible "$(registry)" \
+    | jq -r --argjson idle "$idle_seconds" '
+      [.assignments[]
+       | select(.released_at == null)
+       | select(((.last_used_at // .assigned_at) | fromdateiso8601) < (now - $idle))]
+      | group_by(.worktree) | map(last) | .[]
+      | "\(.worktree)\t\(.environment)"')
 }
 
 # --- 入口 -------------------------------------------------------------------

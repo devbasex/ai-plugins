@@ -201,11 +201,15 @@
               },
               "base_url_env": {
                 "type": "string",
-                "description": "入口の URL を渡す環境変数名"
+                "description": "入口の URL を渡す環境変数名。URL は port_role（既定 http）の採番したポートから組み立てる"
               },
               "out_env": {
                 "type": "string",
                 "description": "証跡の出力先を渡す環境変数名"
+              },
+              "port_role": {
+                "type": "string",
+                "description": "入口の URL を組み立てるときに使う port_roles の役割名。既定は http"
               }
             }
           }

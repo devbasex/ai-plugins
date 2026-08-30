@@ -119,7 +119,8 @@ bash "$NDF_SCRIPTS/worktree-testenv.sh" env "$WT"
 4. **ブラウザは実行ごとに起動する構成を選ぶ。** 常駐しているブラウザへ接続する構成は、
    接続先が 1 つで既存のタブをそのまま操作するため、2 本の実行が同じタブを奪い合う
 
-5. 接続先と出力先は環境変数で外から与える（`base_url_env` / `out_env`）
+5. 接続先と出力先は環境変数で外から与える（`base_url_env` / `out_env`）。入口の役割名は
+   `port_role` で指定する（既定は `http`）
 
    ```bash
    bash "$NDF_SCRIPTS/worktree-testenv.sh" test "$WT" --kind browser
@@ -173,6 +174,9 @@ bash "$NDF_SCRIPTS/worktree-testenv.sh" unexpose "$WT"
 | 使われていないものを止める | `reap --idle 45m` | 同上 |
 | 公開を閉じる | `unexpose "$WT"` | 台帳の行と URL（`expose.closed_at` に終了の時刻） |
 | 破棄する | `down "$WT" --volumes` | 台帳の行（`released_at` に解放の時刻） |
+
+`reap` は、最後に使った時刻が `--idle` の期間より古い割り当てだけを対象にする。時刻は
+`up` と `test` が台帳へ記録する。**実行中の作業ツリーはロックを握るため対象から外れる。**
 
 **作業ツリーを消す前に `down "$WT" --volumes` を実行する。** データ領域（実測でテスト環境
 1 つあたり約 400 MB）とスロットを返してから作業ツリーを削除する。順序を逆にすると台帳から

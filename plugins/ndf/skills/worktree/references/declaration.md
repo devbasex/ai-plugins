@@ -97,7 +97,7 @@
     "test_kinds": {
       "pure":     { "select": "...", "run": "..." },
       "stateful": { "select": "...", "run": "...", "skip_reset": { "TEST_SKIP_MIGRATE_FRESH": "true" } },
-      "browser":  { "run": "...", "base_url_env": "PWK_BASE_URL", "out_env": "PWK_OUT_DIR" }
+      "browser":  { "run": "...", "base_url_env": "PWK_BASE_URL", "port_role": "http", "out_env": "PWK_OUT_DIR" }
     },
     "expose": { "enabled": false, "public_tag": "golden-public", "base_domain": "", "ttl": "8h" }
   }
@@ -111,6 +111,7 @@
 | `golden_tag_paths` | データ構造を定める資産。**内容が同じなら基準を焼き直さない** |
 | `test_kinds` | 種類ごとの選別と実行。**書かなければテスト実行の仕組みは何もせずに終わる** |
 | `skip_reset` | 初期化を抑止する環境変数。渡さないと最初のテストが全体を作り直す構成がある |
+| `port_role` | 入口の URL を組み立てるときに使う `port_roles` の役割名。既定は `http` |
 | `expose.enabled` | **既定は無効。** マスク済みデータが整い、明示的に有効化したときだけ公開する |
 
 台帳の定義は [`../schemas/registry.schema.json`](../schemas/registry.schema.json) にある。
