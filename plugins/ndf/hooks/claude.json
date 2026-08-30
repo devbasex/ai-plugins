@@ -34,6 +34,13 @@
             "description": "NDF: set default statusline when none is configured",
             "continueOnError": true,
             "suppressOutput": false
+          },
+          {
+            "type": "command",
+            "command": "bash ${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/worktree-session.sh",
+            "description": "NDF: report stray changes in the main directory and follow the active worktree branch",
+            "continueOnError": true,
+            "suppressOutput": false
           }
         ]
       }

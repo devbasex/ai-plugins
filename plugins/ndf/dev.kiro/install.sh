@@ -357,10 +357,30 @@ config["description"] = config["description"].replace("{{VERSION}}", ndf_version
 
 # installer が上書きする範囲
 managed_keys = set(config) | {"mcpServers"}
-managed_hooks = set(config.get("hooks") or {}) | {"stop"}
+managed_hooks = set(config.get("hooks") or {}) | {"stop", "userPromptSubmit"}
 managed_servers = {"codex"}
 
 hooks = config.setdefault("hooks", {})
+
+# 作業ツリー運用の hook。判定は 3 ランタイム共通のスクリプトが持つ。
+# Kiro CLI は tool 実行前の hook からモデルへ案内を渡す手段が終了コード 2 に
+# 限られ、これは tool の実行を拒否する。拒否しない方針のもとでは置けないため、
+# パスを見ない案内をプロンプト送信時の hook が担う（詳細設計 06 の決定 5）。
+guard_script = Path(plugin_dir) / "scripts" / "worktree-guard.sh"
+session_script = Path(plugin_dir) / "scripts" / "worktree-session.sh"
+hooks.setdefault("agentSpawn", []).append(
+    {
+        "command": f"bash {shlex.quote(str(session_script))}",
+        "timeout_ms": 10000,
+    }
+)
+hooks["userPromptSubmit"] = [
+    {
+        "command": f"bash {shlex.quote(str(guard_script))}",
+        "timeout_ms": 5000,
+    }
+]
+
 if with_slack == "true":
     slack_script = Path(plugin_dir) / "scripts" / "slack-notify.js"
     hooks["stop"] = [

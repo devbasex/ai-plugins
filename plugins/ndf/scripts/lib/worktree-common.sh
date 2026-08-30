@@ -318,3 +318,91 @@ wt_normalize_path() {
   done
   printf '%s\n' "$path"
 }
+
+# --- 作業ツリーの一覧と追従先の判定 -----------------------------------------
+
+# 開発用の作業ツリーを `<パス><タブ><ブランチ名>` の形で 1 行 1 件で出力する。
+# 対象は主ディレクトリ直下の .worktrees/ 配下に限る。レビュー用の作業ツリーは
+# 非永続領域に置かれるため、この一覧には入らない。
+wt_dev_worktrees() {
+  local main_dir="${1:-}" prefix path branch
+  [ -n "$main_dir" ] || return 1
+  prefix="$main_dir/$WT_WORKTREE_DIR/"
+  path=""
+  branch=""
+  while IFS= read -r line; do
+    case "$line" in
+      "worktree "*)
+        path=${line#worktree }
+        branch=""
+        ;;
+      "branch "*)
+        branch=${line#branch }
+        branch=${branch#refs/heads/}
+        ;;
+      "")
+        case "$path" in
+          "$prefix"*) printf '%s\t%s\n' "$path" "$branch" ;;
+        esac
+        path=""
+        branch=""
+        ;;
+    esac
+  done < <(git -C "$main_dir" worktree list --porcelain 2>/dev/null)
+  # 最後の項目は空行で終わらないことがある。
+  case "$path" in
+    "$prefix"*) printf '%s\t%s\n' "$path" "$branch" ;;
+  esac
+}
+
+# 主ディレクトリの追従先を決める。git は呼ばず、引数だけで判定する。
+# 使い方: wt_follow_target "<一覧>" "<未コミット変更があれば 1>"
+# 出力: `detach <ブランチ名>` / `default` / `skip`
+wt_follow_target() {
+  local listing="${1:-}" dirty="${2:-0}" line branch count=0 single=""
+  if [ "$dirty" = "1" ]; then
+    printf 'skip\n'
+    return 0
+  fi
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    branch=${line#*$'\t'}
+    # ブランチを持たない作業ツリー (detached) は追従先にしない。
+    [ -n "$branch" ] || continue
+    count=$((count + 1))
+    single=$branch
+  done <<<"$listing"
+
+  if [ "$count" = 1 ]; then
+    printf 'detach %s\n' "$single"
+  else
+    printf 'default\n'
+  fi
+}
+
+# 主ディレクトリの既定ブランチ名を出力する。origin の HEAD が指す先を優先し、
+# 取れなければ main / master の順で存在するものを返す。
+wt_default_branch() {
+  local main_dir="${1:-}" ref candidate
+  [ -n "$main_dir" ] || return 1
+  ref=$(git -C "$main_dir" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)
+  if [ -n "$ref" ]; then
+    printf '%s\n' "${ref#origin/}"
+    return 0
+  fi
+  for candidate in main master; do
+    if git -C "$main_dir" show-ref --verify --quiet "refs/heads/$candidate"; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# 主ディレクトリの追跡対象の未コミット変更を `<状態> <パス>` で 1 行 1 件出力する。
+# 追跡されていないファイルは含めない。
+wt_dirty_paths() {
+  local main_dir="${1:-}"
+  [ -n "$main_dir" ] || return 1
+  git -C "$main_dir" status --porcelain --untracked-files=no 2>/dev/null
+}
