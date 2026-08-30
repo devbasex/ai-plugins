@@ -106,3 +106,23 @@ def test_quoted_path_with_space() -> None:
 def test_read_only_sed_with_multiple_files() -> None:
     targets, rc = extract("sed -n '1p' one.md two.md")
     assert rc == 1, targets
+
+
+def test_tee_reports_every_file() -> None:
+    """tee は並べたファイルすべてへ書き込む。"""
+    targets, rc = extract("echo hi | tee one.md two.md")
+    assert rc == 0
+    assert targets == ["one.md", "two.md"], targets
+
+
+def test_tee_with_option_and_multiple_files() -> None:
+    targets, _ = extract("echo hi | tee -a one.md two.md")
+    assert targets == ["one.md", "two.md"], targets
+
+
+def test_sed_long_option_takes_a_separate_argument() -> None:
+    """`--expression` / `--file` が `=` なしで引数を取る形でも、script をファイルと取り違えない。"""
+    targets, _ = extract("sed -i --expression 's/a/b/' plugins/ndf/README.md")
+    assert targets == ["plugins/ndf/README.md"], targets
+    targets, _ = extract("sed -i -e 's/a/b/' --expression 's/c/d/' plugins/ndf/README.md")
+    assert targets == ["plugins/ndf/README.md"], targets

@@ -217,11 +217,12 @@ wt_extract_write_target() {
         _emit "${words[i + 1]:-}"
         ;;
       tee)
+        # tee は並べたファイルすべてへ書き込む。1 件目で止めない。
         for ((j = i + 1; j < n; j++)); do
           case "${words[j]}" in
-            -*) continue ;;
             __WT_*|"|"|"&&"|";") break ;;
-            *) _emit "${words[j]}"; break ;;
+            -*) continue ;;
+            *) _emit "${words[j]}" ;;
           esac
         done
         ;;
@@ -235,7 +236,7 @@ wt_extract_write_target() {
           case "${words[j]}" in
             __WT_*|"|"|"&&"|";") break ;;
             --in-place|--in-place=*) has_inplace=1 ;;
-            -e|-f) seen_script=1; skip_next=1 ;;
+            -e|-f|--expression|--file) seen_script=1; skip_next=1 ;;
             --expression=*|--file=*) seen_script=1 ;;
             --) ;;
             -*)
