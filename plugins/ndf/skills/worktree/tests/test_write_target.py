@@ -302,3 +302,41 @@ def test_words_with_an_unexpanded_variable_are_not_targets(command: str) -> None
     targets, rc = extract(command)
     assert rc == 1, targets
     assert targets == [], targets
+
+
+def test_a_write_inside_an_expanding_heredoc_is_found() -> None:
+    """終端の語を引用符で囲まない本文は展開され、コマンド置換が実行される。"""
+    command = (
+        "cat > report.md <<EOS\n"
+        "$(echo data > side-effect.md)\n"
+        "EOS"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert "report.md" in targets, targets
+    assert "side-effect.md)" in targets, targets
+
+
+def test_an_expanding_heredoc_without_substitution_is_dropped() -> None:
+    """展開される本文でも、コマンド置換が無ければ実行される部分ではない。"""
+    command = (
+        "cat > report.md <<EOS\n"
+        "受領: <payload>\n"
+        "判定: <期待: 一致>\n"
+        "EOS"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert targets == ["report.md"], targets
+
+
+def test_a_quoted_delimiter_keeps_the_body_inert() -> None:
+    """引用符で囲めば本文は展開されない。コマンド置換の字面も実行されない。"""
+    command = (
+        "cat > report.md <<'EOS'\n"
+        "$(echo data > side-effect.md)\n"
+        "EOS"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert targets == ["report.md"], targets

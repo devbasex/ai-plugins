@@ -287,10 +287,14 @@ _wt_tokenize() {
 # ヒアドキュメントの本文を落とす。本文はコマンドとして実行される部分ではないため、
 # 中の `>` や語を書き込み先として拾わない。引用符の中の `<<` と、行の入力を渡す
 # `<<<` は本文の始まりとして扱わない。
+#
+# **終端の語を引用符で囲まない形は本文を落とさない。** この形の本文はシェルが展開し、
+# 中のコマンド置換が実行される（`$(echo data > out.txt)` は out.txt を作る）。
+# 展開される本文のうち、コマンド置換を含む行だけを残す。
 _wt_strip_heredocs() {
   local text="${1:-}"
-  local -a lines=() delims=() strips=()
-  local line candidate out="" n i c delim strip
+  local -a lines=() delims=() strips=() expands=()
+  local line candidate out="" n i c delim strip quoted
 
   _wt_read_lines <<<"$text"
   lines=("${WT_LINES[@]+"${WT_LINES[@]}"}")
@@ -308,7 +312,16 @@ _wt_strip_heredocs() {
       if [ "${strips[head]}" = 1 ]; then
         while [ "${candidate#	}" != "$candidate" ]; do candidate="${candidate#	}"; done
       fi
-      [ "$candidate" = "${delims[head]}" ] && head=$((head + 1))
+      if [ "$candidate" = "${delims[head]}" ]; then
+        head=$((head + 1))
+        continue
+      fi
+      # 展開される本文のコマンド置換は実行される。書き込みを見落とさないよう残す。
+      if [ "${expands[head]}" = 1 ]; then
+        case "$line" in
+          *'$('* | *'`'*) out+="$line"$'\n' ;;
+        esac
+      fi
       continue
     fi
 
@@ -338,12 +351,14 @@ _wt_strip_heredocs() {
       if [ "${line:i:1}" = "-" ]; then strip=1; i=$((i + 1)); fi
       while [ "${line:i:1}" = " " ] || [ "${line:i:1}" = $'\t' ]; do i=$((i + 1)); done
       # 終端の語。引用符は書き方の違いで、語そのものには含まれない。
+      # 引用符を 1 つでも使えば、本文は展開されない。
       delim=""
+      quoted=0
       while [ "$i" -lt "$n" ]; do
         c=${line:i:1}
         case "$c" in
           " "|$'\t'|";"|"|"|"&"|">"|"<") break ;;
-          "'"|'"'|'\') ;;
+          "'"|'"'|'\') quoted=1 ;;
           *) delim+="$c" ;;
         esac
         i=$((i + 1))
@@ -351,6 +366,7 @@ _wt_strip_heredocs() {
       if [ -n "$delim" ]; then
         delims+=("$delim")
         strips+=("$strip")
+        expands+=("$((1 - quoted))")
       fi
     done
     out+="$line"$'\n'
