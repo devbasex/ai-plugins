@@ -67,29 +67,6 @@ def init_repo(path: Path) -> Path:
     return path
 
 
-def git(repo: Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["git", *args],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-
-
-def init_repo(path: Path) -> Path:
-    """コミットを 1 つ持つリポジトリを作る。"""
-    path.mkdir(parents=True, exist_ok=True)
-    git(path, "init", "-q", "-b", "main")
-    git(path, "config", "user.email", "test@example.com")
-    git(path, "config", "user.name", "test")
-    git(path, "config", "commit.gpgsign", "false")
-    (path / "README.md").write_text("# test\n", encoding="utf-8")
-    git(path, "add", "README.md")
-    git(path, "commit", "-q", "-m", "init")
-    return path
-
-
 def write_declaration(main_repo: Path, body: str) -> Path:
     """`.ndf/localenv.json` を書く。"""
     ndf = main_repo / ".ndf"

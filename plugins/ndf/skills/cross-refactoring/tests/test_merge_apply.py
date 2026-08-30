@@ -910,7 +910,7 @@ def test_apply_base_is_recorded_by_the_orchestrator(
     refactor, tmp_path, env_tmp_dir, monkeypatch
 ):
     """起点を実装担当の申告に委ねない。"""
-    from conftest import make_state as _make_state
+    from crossref_helpers import make_state as _make_state
 
     state_path = _make_state(tmp_path, rounds=[{
         "round": 1, "impl": "codex", "reviewers": ["gemini", "kiro"],

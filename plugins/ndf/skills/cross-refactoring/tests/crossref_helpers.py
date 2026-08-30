@@ -6,13 +6,9 @@ conftest.py へ置くと、複数の Skill のテストを同時に実行した�
 """
 from __future__ import annotations
 
-import importlib.util
 import json
 import pathlib
-import sys
-import types
 from typing import Any
-import pytest
 
 
 def make_state(tmp_path: pathlib.Path, **overrides: Any) -> pathlib.Path:
