@@ -329,10 +329,29 @@ wt_extract_write_target() {
 
 # tool から渡されたパスを絶対パスへ直す。まだ存在しないパスでも、実在する
 # 最も近い上位ディレクトリまでを実体解決してから残りを継ぎ足す。
+# `.` と `..` を字面で畳む。実体解決は上位ディレクトリの存在を要するため、
+# 存在しないパスでは `..` が残ってしまう。残ると、前方一致での「配下か」の
+# 判定をすり抜ける（`<対象>/a/../../外` が `<対象>/` で始まって見える）。
+_wt_lexical_normalize() {
+  local path="$1" part out=""
+  local IFS=/
+  # shellcheck disable=SC2086
+  set -- $path
+  for part in "$@"; do
+    case "$part" in
+      ""|.) continue ;;
+      ..) out=${out%/*} ;;
+      *) out="$out/$part" ;;
+    esac
+  done
+  printf '%s\n' "${out:-/}"
+}
+
 wt_normalize_path() {
   local path="${1:-}" cwd="${2:-$PWD}" suffix="" dir abs
   [ -n "$path" ] || return 1
   case "$path" in /*) ;; *) path="$cwd/$path" ;; esac
+  path=$(_wt_lexical_normalize "$path")
   dir="$path"
   while [ -n "$dir" ] && [ "$dir" != "/" ]; do
     if abs=$(_wt_abs "$dir"); then

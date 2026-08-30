@@ -557,3 +557,26 @@ def test_takeover_does_not_break_a_fresh_lock(tmp_path: Path) -> None:
     )
     assert "rc=1" in got.stdout, got.stdout
     assert lock.is_dir(), "戻すか、取り直した側が持っている"
+
+
+@pytest.mark.parametrize("bad", ["/tmp/elsewhere", "../outside", "evidence/../../outside"])
+def test_evidence_outside_the_worktree_is_refused(main_repo: Path, worktree: Path, bad: str) -> None:
+    """外から渡された置き場所も、作業ツリーの中に収まるかを確かめる。"""
+    declare(main_repo, testenv={
+        "port_band": [20000, 29999],
+        "test_kinds": {"browser": {"run": "true", "out_env": "OUT"}},
+    })
+    result = run(["test", str(worktree), "--kind", "browser", "--out", bad], cwd=main_repo)
+    assert result["rc"] == 1, result
+    assert "作業ツリーの外" in result["err"], result["err"]
+
+
+def test_evidence_inside_the_worktree_is_accepted(main_repo: Path, worktree: Path) -> None:
+    declare(main_repo, testenv={
+        "port_band": [20000, 29999],
+        "test_kinds": {"browser": {"run": "printf '%s' \"$OUT\"", "out_env": "OUT"}},
+    })
+    out = worktree / "evidence" / "run1"
+    result = run(["test", str(worktree), "--kind", "browser", "--out", str(out)], cwd=main_repo)
+    assert result["rc"] == 0, result
+    assert result["out"] == str(out), result

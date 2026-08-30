@@ -179,8 +179,14 @@ do_bake() {
       continue
     fi
     docker volume create "${golden}-${TAG}" >/dev/null || return 1
-    docker run --rm -v "${source_volume}:/from:ro" -v "${golden}-${TAG}:/to" \
-      alpine sh -c 'cd /from && cp -a . /to' || return 1
+    # 途中で落ちると中身が空のまま残り、次回は「既にある」として飛ばされる。
+    # 失敗したら作りかけを消す。
+    if ! docker run --rm -v "${source_volume}:/from:ro" -v "${golden}-${TAG}:/to" \
+      alpine sh -c 'cd /from && cp -a . /to'; then
+      docker volume rm "${golden}-${TAG}" >/dev/null 2>&1
+      printf '%s\n' "基準を作れませんでした: ${golden}-${TAG}" >&2
+      return 1
+    fi
     printf '基準を作りました: %s\n' "${golden}-${TAG}"
     created=$((created + 1))
   done < <(decl_get '.testenv.golden_volumes // {} | to_entries[] | "\(.key)\t\(.value)"')
@@ -278,7 +284,16 @@ do_test() {
   out_env=$(printf '%s' "$DECLARATION" | jq -r --arg k "$KIND" '.testenv.test_kinds[$k].out_env // empty' 2>/dev/null)
   if [ -n "$out_env" ]; then
     # 証跡は作業ツリー配下へ固定する。共有の保管先へは送らない。
+    # 外から渡された置き場所も、作業ツリーの中に収まるかを実体で確かめる。
     [ -n "$OUT" ] || OUT="$TARGET/.ndf-evidence/$ENVIRONMENT-$(date -u +%Y%m%dT%H%M%SZ)"
+    OUT=$(wt_normalize_path "$OUT" "$TARGET")
+    case "$OUT" in
+      "$TARGET"/*) ;;
+      *)
+        printf '%s\n' "証跡の置き場所が作業ツリーの外を指します: $OUT" >&2
+        return 1
+        ;;
+    esac
     mkdir -p "$OUT" 2>/dev/null
     # 追跡対象に入ると差分が埋まる。その作業ツリー限りの除外へ登録する
     # （リポジトリの .gitignore は触らない）。
