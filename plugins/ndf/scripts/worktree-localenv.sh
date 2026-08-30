@@ -121,6 +121,9 @@ copy_one() {
   elif cp -al "$from" "$to" 2>/dev/null; then
     return 0
   fi
+  # ハードリンクが途中で失敗すると、作りかけのディレクトリが残る。そのまま
+  # `cp -a` すると、上書きではなくその中へ複製されて階層が二重になる。
+  rm -rf "$to" 2>/dev/null
   cp -a "$from" "$to" 2>/dev/null || {
     printf '複製できませんでした: %s\n' "$rel" >&2
     return 1
@@ -294,18 +297,21 @@ do_mode() {
 
   # `git status --porcelain` は空白や非 ASCII を含むパスを引用符で囲む。
   # `-z` で null 区切りにして、引用されない生のパスを読む。
-  local entry status skip_next=0
+  local entry status take_raw=0
   local -a changed=()
   while IFS= read -r -d '' entry; do
-    if [ "$skip_next" = 1 ]; then
-      skip_next=0
+    if [ "$take_raw" = 1 ]; then
+      # 改名と複製の続くレコードは、状態を持たない変更前のパスである。
+      # 条件の対象から外さない。対象のディレクトリから外へ移す変更を
+      # 見落とさないため、変更前の位置でも判定する。
+      take_raw=0
+      changed+=("$entry")
       continue
     fi
     status=${entry:0:2}
     changed+=("${entry:3}")
-    # 改名と複製は、続くレコードに変更前のパスが入る。
     case "$status" in
-      R*|C*) skip_next=1 ;;
+      R*|C*) take_raw=1 ;;
     esac
   done < <(git -C "$TARGET" status --porcelain -z --untracked-files=all 2>/dev/null)
 
