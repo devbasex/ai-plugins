@@ -136,7 +136,7 @@ plugins/ndf/skills/external-ai/SKILL.md             → モデル:8 タスク:13
 - [x] `bash scripts/validate-runtime-plugins.sh` が成功で終わる（配布物の差分が残らない）
 - [x] `plugins/ndf/.claude-plugin/plugin.json` の版数が 9.1.0 へ繰り上がっている
 - [x] `CLAUDE.md` に v9.1.0 の変更内容が追記されている
-- [ ] 配布された Skill を Claude Code から読み込み、ルール 2 と `02-ambiguous-terms.md` を参照できる
+- [x] 配布された Skill を Claude Code から読み込み、ルール 2 と `02-ambiguous-terms.md` を参照できる
 
 ## 影響
 
@@ -256,7 +256,23 @@ Skill の実体は Markdown であり、実行して失敗するテストを先�
 
 ## 完了の定義
 
-- [ ] 受け入れ条件 15 件をすべて満たし、条件ごとに検証手段と結果が対応している
+- [x] 受け入れ条件 15 件をすべて満たし、条件ごとに検証手段と結果が対応している
 - [x] `bash scripts/validate-runtime-plugins.sh` が成功で終わる
-- [ ] Pull Request を作成し、レビューを通してマージする
-- [ ] マージ後の配布物で `markdown-writing` を読み込み、ルール 2 とガイドを参照できる
+- [x] Pull Request を作成し、レビューを通してマージする
+- [x] マージ後の配布物で `markdown-writing` を読み込み、ルール 2 とガイドを参照できる
+
+## 実施結果
+
+| 版 | Pull Request | 内容 |
+| --- | --- | --- |
+| v9.1.0 | #164 | ルール 2 と `02-ambiguous-terms.md` の追加 |
+| v9.1.1 | #165 | セルフチェックが候補なしで終了コード 1 を返す問題の修正 |
+| v9.1.2 | #166 | 適用の範囲（既存文書を一括で直さない）の明記 |
+
+確定した仕様は `plugins/ndf/skills/markdown-writing/SKILL.md` と
+`02-ambiguous-terms.md` にある。Skill の挙動は `SKILL.md` を正とするため、
+`docs/specifications/` には仕様書を置かない（`docs/specifications/issues-derived-specifications.md`
+の方針）。
+
+配布物 (`ndf@ai-plugins`) で、ルール 2 とガイドを参照できること、セルフチェックの
+コマンドが候補の有無にかかわらず終了コード 0 で終わることを確認した。
