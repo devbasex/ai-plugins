@@ -12,11 +12,15 @@ import pytest
 
 from worktree_helpers import SCRIPTS_DIR
 
-TARGETS = [
-    SCRIPTS_DIR / "lib" / "worktree-common.sh",
-    SCRIPTS_DIR / "worktree-guard.sh",
-    SCRIPTS_DIR / "worktree-session.sh",
-]
+# 対象は hook から呼ばれるスクリプトと、Skill が呼ぶシェルスクリプト全体。
+# 配布先の環境は選べないため、bash 3.2 で動くことを前提に置く。
+_PLUGIN_ROOT = SCRIPTS_DIR.parent
+TARGETS = sorted(
+    set(_PLUGIN_ROOT.glob("scripts/*.sh"))
+    | set(_PLUGIN_ROOT.glob("scripts/lib/*.sh"))
+    | set(_PLUGIN_ROOT.glob("skills/*/scripts/*.sh"))
+    | set(_PLUGIN_ROOT.glob("skills/*/scripts/lib/*.sh"))
+)
 
 # 行頭から見て、コメントではない箇所に現れるものだけを対象にする。
 BASH4_ONLY = {
