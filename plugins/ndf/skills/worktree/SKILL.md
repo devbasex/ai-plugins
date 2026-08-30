@@ -112,15 +112,24 @@ target="$main_dir/.worktrees/<ブランチ名>"
 # 1. 移す対象を確かめる
 git -C "$main_dir" status --short
 
-# 2. 差分を取り出す（追跡対象）
-git -C "$main_dir" diff > /tmp/ndf-stray.patch
+# 2. 差分を取り出す（追跡対象。`git add` 済みの変更も含める）
+git -C "$main_dir" diff HEAD > /tmp/ndf-stray.patch
 
 # 3. 作業ツリーへ当てる
 git -C "$target" apply /tmp/ndf-stray.patch
 
-# 4. 主ディレクトリ側を元へ戻す
-git -C "$main_dir" checkout -- .
+# 4. 当たったことを確かめてから、主ディレクトリ側を元へ戻す
+git -C "$target" status --short
+git -C "$main_dir" reset --hard HEAD
 ```
+
+手順 2 で `git diff` ではなく `git diff HEAD` を使う。`git diff` は `git add` 済みの
+変更を差分に含めないため、取り込み済みの変更があるとパッチが空になる。手順 4 が
+`git checkout -- .` ではなく `git reset --hard HEAD` なのも同じ理由で、前者は取り込み
+済みの変更を戻さない。
+
+**手順 4 は主ディレクトリの変更を捨てる。** 手順 3 が成功し、作業ツリー側に変更が
+載っていることを確かめてから実行する。
 
 追跡されていないファイルは差分に含まれない。`git -C "$main_dir" status --short` の
 `??` 行を見て、必要なものを作業ツリーへ複製してから主ディレクトリ側を削除する。
