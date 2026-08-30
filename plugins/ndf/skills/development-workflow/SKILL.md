@@ -48,7 +48,7 @@ NULL 許容列の追加）は `standard` として扱う。判定に迷う場合
 mode: standard
 根拠: 注文確定の振る舞いを変更する。公開 API とスキーマは変えない
 必須工程: worktree → requirements-design → implementation-plan → tdd-cycle
-  → refactoring → pr-review → quality-gates → pr
+  → refactoring → cross-review → quality-gates → pr
   → plan-to-spec（仕様が変わった場合） → merged
 ```
 
@@ -68,7 +68,7 @@ mode: standard
 | 計画 | — | `implementation-plan` | `implementation-plan` | `implementation-plan` |
 | 実装 | 直接編集 | `tdd-cycle` | `tdd-cycle` | `refactoring` |
 | 構造改善 | — | `refactoring` | `refactoring` | `refactoring` |
-| レビュー | — | `pr-review` | `cross-review` | `pr-review` |
+| レビュー | — | `cross-review` | `cross-review` | `pr-review` |
 | 完了判定 | `quality-gates` | `quality-gates` | `quality-gates` | `quality-gates` |
 | Pull Request | `pr` | `pr` | `pr` | `pr` |
 | 確定仕様化 | — | `plan-to-spec`（仕様が変わった場合） | `plan-to-spec` | — |
@@ -88,6 +88,11 @@ mode: standard
 
 レビュー段階は**明示的に呼ぶ**。自然文で「レビューして」と依頼すると、Claude Code では
 組み込みの `code-review` が起動して判定の投稿経路が変わる。
+
+`standard` と `architecture` は `cross-review` を使う。**片側 1 回の判定では取りこぼしが残る**。
+`cross-review` は 2 つの外部 AI が同じ差分を見て、両方が承認するまで修正を回す。
+`legacy-refactor` が `pr-review` なのは、振る舞いを変えないことの確認が主で、判定の軸が
+既存テストの通過に寄るためである。
 
 構造改善は**レビューと同じく、通す工程であって任意ではない**。動くコードが出た時点では整理が
 済んでいないことを前提に置き、見つけた兆候は直す。対象は書き換えた行だけでなく、**その
