@@ -215,7 +215,10 @@ do_aim() {
   layout=$(decl_get '.localenv.layout // empty')
   service=$(decl_get '.localenv.app_service // empty')
   src_target=$(decl_get '.localenv.src_target // empty')
-  project=$(basename "$MAIN_DIR")
+  project=$(wt_compose_project "$(basename "$MAIN_DIR")") || {
+    printf '%s\n' "コンテナのプロジェクト名を決められません" >&2
+    return 1
+  }
 
   command -v docker >/dev/null 2>&1 || {
     printf 'コンテナ実行系が見つかりません\n' >&2

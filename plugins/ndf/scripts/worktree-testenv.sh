@@ -188,6 +188,21 @@ compose() {
       printf '%s\n' "compose_files の $f は作業ツリーの外を指します" >&2
       return 1
     fi
+    # 字面だけでは足りない。作業ツリーの中に置かれた symlink が外を指していると、
+    # 実行系はその先を読む。symlink はたどらずに断る。
+    if [ -L "$TARGET/$f" ]; then
+      printf '%s\n' "compose_files の $f は symlink です。たどらずに終わります" >&2
+      return 1
+    fi
+    local resolved
+    resolved=$(wt_normalize_path "$TARGET/$f" "$TARGET")
+    case "$resolved" in
+      "$TARGET"/*) ;;
+      *)
+        printf '%s\n' "compose_files の $f の実体が作業ツリーの外（$resolved）にあります" >&2
+        return 1
+        ;;
+    esac
     files+=(-f "$TARGET/$f")
   done
   [ "${#files[@]}" -gt 0 ] || return 2
@@ -263,10 +278,18 @@ do_stop() {
 do_down() {
   load_assignment || return 0
   if has_docker; then
+    local rc
     if [ "$WITH_VOLUMES" = 1 ]; then
       compose down --volumes
     else
       compose down
+    fi
+    rc=$?
+    # 破棄に失敗したままスロットを返すと、コンテナとポートが残ったまま同じ
+    # 番号が別の作業ツリーへ渡る。
+    if [ "$rc" != 0 ] && [ "$rc" != 2 ]; then
+      printf '%s\n' "破棄に失敗しました。スロットは解放していません: $ENVIRONMENT" >&2
+      return 1
     fi
   fi
   wt_slot_release "$MAIN_DIR" "$TARGET"

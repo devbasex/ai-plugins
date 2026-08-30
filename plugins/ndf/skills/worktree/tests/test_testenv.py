@@ -875,3 +875,106 @@ def test_compose_files_outside_the_worktree_are_refused(main_repo: Path, worktre
     assert proc.returncode == 1, proc
     assert "作業ツリーの外" in proc.stderr, proc.stderr
     assert not dump.exists(), "定義を読み込まない"
+
+
+def test_compose_file_symlink_is_refused(main_repo: Path, worktree: Path, tmp_path: Path) -> None:
+    """作業ツリーの中の symlink が外を指していると、実行系はその先を読む。"""
+    outside = tmp_path / "outside-compose.yml"
+    outside.write_text("services: {}\n", encoding="utf-8")
+    (worktree / "docker-compose.yml").symlink_to(outside)
+    declare(
+        main_repo,
+        testenv={"port_band": [20000, 29999]},
+        localenv={"kind": "compose", "compose_files": ["docker-compose.yml"]},
+    )
+    dump = main_repo.parent / "never2.txt"
+    stub = stub_docker(main_repo, dump)
+
+    env = os.environ.copy()
+    env["WT_DOCKER_COMMAND"] = str(stub)
+    proc = subprocess.run(
+        ["bash", str(TESTENV), "up", str(worktree)],
+        cwd=str(main_repo), env=env, capture_output=True, text=True,
+    )
+
+    assert proc.returncode == 1, proc
+    assert "symlink" in proc.stderr, proc.stderr
+    assert not dump.exists(), "定義を読み込まない"
+
+
+def test_down_keeps_the_slot_when_it_fails(main_repo: Path, worktree: Path) -> None:
+    """破棄に失敗したままスロットを返すと、資源が残ったまま同じ番号が渡る。"""
+    (worktree / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+    declare(
+        main_repo,
+        testenv={"port_band": [20000, 29999], "port_roles": {"http": 0}},
+        localenv={"kind": "compose", "compose_files": ["docker-compose.yml"]},
+    )
+    run(["env", str(worktree)], cwd=main_repo)
+
+    failing = main_repo.parent / "failing-docker"
+    failing.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    failing.chmod(0o755)
+    env = os.environ.copy()
+    env["WT_DOCKER_COMMAND"] = str(failing)
+    proc = subprocess.run(
+        ["bash", str(TESTENV), "down", str(worktree)],
+        cwd=str(main_repo), env=env, capture_output=True, text=True,
+    )
+
+    assert proc.returncode == 1, proc
+    rows = registry(main_repo)["assignments"]
+    assert rows[0]["released_at"] is None, "解放しない"
+
+
+def test_down_releases_the_slot_when_it_succeeds(main_repo: Path, worktree: Path) -> None:
+    (worktree / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+    declare(
+        main_repo,
+        testenv={"port_band": [20000, 29999], "port_roles": {"http": 0}},
+        localenv={"kind": "compose", "compose_files": ["docker-compose.yml"]},
+    )
+    run(["env", str(worktree)], cwd=main_repo)
+
+    dump = main_repo.parent / "down-env.txt"
+    stub = stub_docker(main_repo, dump)
+    env = os.environ.copy()
+    env["WT_DOCKER_COMMAND"] = str(stub)
+    proc = subprocess.run(
+        ["bash", str(TESTENV), "down", str(worktree)],
+        cwd=str(main_repo), env=env, capture_output=True, text=True,
+    )
+
+    assert proc.returncode == 0, proc
+    assert registry(main_repo)["assignments"][0]["released_at"] is not None
+
+
+@pytest.mark.parametrize(
+    ("given", "expected"),
+    [("ai-plugins", "ai-plugins"), ("My_Repo", "my_repo"),
+     ("Carmo System!", "carmosystem"), ("___x", "x")],
+)
+def test_compose_project_normalization(given: str, expected: str) -> None:
+    """実行系は名前を小文字へ揃え、`a-z0-9_-` 以外を落としてから使う。"""
+    from worktree_helpers import run_lib
+
+    got = run_lib(f'wt_compose_project "{given}"')
+    assert got.stdout.strip() == expected, got.stderr
+
+
+def test_lock_timeout_is_measured_in_real_time(tmp_path: Path) -> None:
+    """刻みが 0.1 秒か 1 秒かで待ち時間が 10 倍変わらない。"""
+    import time
+    from worktree_helpers import run_lib
+
+    lock = tmp_path / "t.lock"
+    lock.mkdir()
+    (lock / "pid").write_text(f"{os.getpid()}\n", encoding="utf-8")
+    (lock / "token").write_text("held\n", encoding="utf-8")
+
+    started = time.monotonic()
+    got = run_lib(f'wt_lock_acquire "{lock}" 2; echo rc=$?')
+    elapsed = time.monotonic() - started
+
+    assert "rc=1" in got.stdout, got.stdout
+    assert elapsed < 6, f"上限 2 秒の待ちに {elapsed:.1f} 秒かかった"

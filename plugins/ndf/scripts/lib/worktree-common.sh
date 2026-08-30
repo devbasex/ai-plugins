@@ -190,6 +190,19 @@ wt_is_safe_relative() {
   return 0
 }
 
+# Compose のプロジェクト名を作る。実行系は名前を小文字へ揃え、`a-z0-9_-` 以外を
+# 落としてから使う。基のディレクトリ名をそのまま渡すと、大文字や記号を含むとき
+# 稼働中のコンテナを見つけられない。
+wt_compose_project() {
+  local name="${1:-}"
+  [ -n "$name" ] || return 1
+  name=$(printf '%s' "$name" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed -e 's/[^a-z0-9_-]//g' -e 's/^[-_]*//')
+  [ -n "$name" ] || return 1
+  printf '%s\n' "$name"
+}
+
 # 絶対パスを主ディレクトリからの相対パスへ直す。外を指すなら 1 を返す。
 wt_relative_to_main() {
   local path="${1:-}" main_dir="${2:-}"
@@ -662,22 +675,24 @@ _wt_lock_is_stale() {
 # `flock` は使わない。使える環境と使えない環境が混じると、同じ資源に対して
 # 別々の仕組みが動き、互いを見落とす。どこでも同じ `mkdir` に揃える。
 wt_lock_acquire() {
-  local dir="${1:-}" timeout="${2:-5}" waited=0 limit token seen
+  local dir="${1:-}" timeout="${2:-5}" token seen
   [ -n "$dir" ] || return 1
   # ロックの位置にディレクトリ以外があれば、ロックとして成立しない。取り除く。
   if [ -e "$dir" ] && [ ! -d "$dir" ]; then
     rm -f "$dir" 2>/dev/null
   fi
   token="$$-$(date +%s 2>/dev/null)-${RANDOM:-0}"
-  limit=$((timeout * 10))
+  # 上限は実時間で測る。刻みが 0.1 秒か 1 秒かで待ち時間が 10 倍変わるため、
+  # 回数で数えない。
+  local deadline
+  deadline=$(( $(date +%s) + timeout ))
   while ! mkdir "$dir" 2>/dev/null; do
     seen=$(cat "$dir/token" 2>/dev/null)
     if _wt_lock_is_stale "$dir"; then
       _wt_lock_discard "$dir" "$seen" "$token"
       continue
     fi
-    waited=$((waited + 1))
-    [ "$waited" -ge "$limit" ] && return 1
+    [ "$(date +%s)" -ge "$deadline" ] && return 1
     _wt_lock_sleep
   done
   printf '%s\n' "$token" >"$dir/token" 2>/dev/null
