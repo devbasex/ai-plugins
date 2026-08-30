@@ -19,7 +19,7 @@ Claude Code / Codex / Kiro CLI向けのスキル・MCP設定を共有するた�
   - 開発環境 (1): worktree
   - 運用 (2): skill-stats, statusline
 - **8つの専門エージェント**: director, data-analyst, corder, researcher, qa, debugger, devops-engineer, code-reviewer
-- **自動フック**: SessionStart (transcript保持期間を最低90日に保つ) + Stop (AI要約生成+Slack通知)
+- **自動フック**: 作業ツリー運用（Claude Code / Codex は PreToolUse + SessionStart、Kiro CLI は userPromptSubmit + agentSpawn。リポジトリに `.ndf/localenv.json` があるときだけ動く）、SessionStart (transcript保持期間を最低90日に保つ)、Stop (AI要約生成+Slack通知)
 - **外部AI委譲**: `/ndf:external-ai` skill + `corder` エージェント経由で Codex / Gemini CLI をバックグラウンド実行 (v4.0.0 で Codex MCP サーバは廃止)
 - **AIクロスレビュー強化**: `/ndf:cross-review` は codex/gemini 両方に PR レビューを委譲し、Gemini の進捗 heartbeat、`--focus` / `--extra-instructions-file`、PR 種別別の自動レビュー観点テンプレートに対応
 - **Kiro CLI対応**: `plugins/ndf/dev.kiro/install.sh` によるワンコマンドセットアップ

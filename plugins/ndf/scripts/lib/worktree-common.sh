@@ -47,6 +47,22 @@ wt_tool_matcher() {
   printf '%s|%s|%s\n' "$WT_EDIT_TOOLS" "$WT_PATCH_TOOLS" "$WT_SHELL_TOOLS"
 }
 
+# --- 補助 -------------------------------------------------------------------
+
+# 標準入力を 1 行 1 要素で配列 WT_LINES へ読み込む。
+# `mapfile` / `readarray` は bash 4 以降にしかない。macOS が標準で持つ bash は
+# 3.2 で、そこで呼ぶと 127 を返して読み込みが空になる。hook は失敗しても黙って
+# 終わるため、案内が出ない形で壊れる。
+#
+# 使い方: _wt_read_lines < <(コマンド); arr=("${WT_LINES[@]+"${WT_LINES[@]}"}")
+_wt_read_lines() {
+  WT_LINES=()
+  local line
+  while IFS= read -r line || [ -n "$line" ]; do
+    WT_LINES+=("$line")
+  done
+}
+
 # --- 位置の解決 -------------------------------------------------------------
 
 # 相対パスを実体の絶対パスへ直す。存在しなければ 1 を返す。
@@ -221,7 +237,8 @@ wt_extract_write_target() {
   spaced=${spaced//>/ __WT_REDIR__ }
 
   local -a words=()
-  mapfile -t words < <(_wt_tokenize "$spaced")
+  _wt_read_lines < <(_wt_tokenize "$spaced")
+  words=("${WT_LINES[@]+"${WT_LINES[@]}"}")
 
   local n=${#words[@]} i j w target found=0
   _emit() {
