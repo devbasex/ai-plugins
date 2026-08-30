@@ -8,14 +8,15 @@ Claude Code / Codex / Kiro CLI向けのスキル・MCP設定を共有するた�
 
 **NDFプラグイン v9.2.0** は、同じ `ndf@ai-plugins` という名前で Claude Code / Codex / Kiro CLI へ配布されるプラグインです。配布物は `plugins/ndf/` の1ディレクトリにまとまっており、Skill の実体は `plugins/ndf/skills/` の1箇所だけです。どのランタイムへ配るかは `plugins/ndf/manifests/*-skills.txt` が決めます。
 
-- **公開Skills**: Claude Code向け core 27個、Kiro向け core 26個、Codex向け core 25個に分離。
-- **元Skills（30個）**:
+- **公開Skills**: Claude Code向け core 28個、Kiro向け core 27個、Codex向け core 26個に分離。
+- **元Skills（32個）**:
   - PR/レビューワークフロー (7): pr, pr-tests, fix, pr-review, cherry-pick-pr, deploy, merged
   - 開発方法論 (5): development-workflow, requirements-design, tdd-cycle, refactoring, quality-gates
   - 原則・ガイドライン (9): ndf-policies, implementation-plan, plan-to-spec, investigation-rules, problem-solving, logging-guidelines, markdown-writing, issue-plan-strategy, ml-model-structure
   - データ分析・品質・環境 (4): qa-security-scan, docker-container-access, google-auth, official-skills-autoloader
   - 外部サービス連携 (1): google-drive
-  - AIクロスレビュー (2): cross-review, external-ai
+  - AIクロスレビュー (3): cross-review, cross-refactoring, external-ai
+  - 開発環境 (1): worktree
   - 運用 (2): skill-stats, statusline
 - **8つの専門エージェント**: director, data-analyst, corder, researcher, qa, debugger, devops-engineer, code-reviewer
 - **自動フック**: SessionStart (transcript保持期間を最低90日に保つ) + Stop (AI要約生成+Slack通知)

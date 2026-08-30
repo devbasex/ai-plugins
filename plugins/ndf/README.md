@@ -93,8 +93,8 @@ python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['descript
 /plugin install ndf@ai-plugins
 
 # Codex
-codex plugin marketplace update ai-plugins
-codex plugin install ndf@ai-plugins
+codex plugin marketplace upgrade ai-plugins
+codex plugin add ndf@ai-plugins
 
 # Kiro CLI
 bash <プラグインのパス>/dev.kiro/install.sh
