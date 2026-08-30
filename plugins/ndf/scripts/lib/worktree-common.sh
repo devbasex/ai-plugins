@@ -130,6 +130,9 @@ wt_is_allowed_path() {
     [ -n "$entry" ] || continue
     case "$entry" in
       */)
+        # ディレクトリそのものを指す形も許可する。`cp x docs/` の書き込み先は
+        # 正規化の途中で末尾のスラッシュが落ち、`docs` として渡ってくる。
+        [ "$rel" = "${entry%/}" ] && return 0
         case "$rel" in "$entry"*) return 0 ;; esac
         ;;
       *)

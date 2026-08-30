@@ -62,3 +62,14 @@ def test_file_entry_matches_exactly() -> None:
 def test_empty_allow_list_notifies_everything() -> None:
     got = run_lib('wt_is_allowed_path "issues/a.md"; echo $?')
     assert got.stdout.strip() == "1", got.stderr
+
+
+def test_directory_entry_matches_the_directory_itself() -> None:
+    """`cp x docs/` の書き込み先は正規化で末尾のスラッシュが落ちて `docs` になる。"""
+    got = run_lib('wt_is_allowed_path "docs" "docs/"; echo $?')
+    assert got.stdout.strip() == "0", got.stderr
+
+
+def test_directory_entry_still_stops_at_a_separator() -> None:
+    got = run_lib('wt_is_allowed_path "docs-internal" "docs/"; echo $?')
+    assert got.stdout.strip() == "1", got.stderr
