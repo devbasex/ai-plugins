@@ -223,3 +223,82 @@ def test_target_directory_joined_to_the_option(command: str) -> None:
     targets, rc = extract(command)
     assert rc == 0, command
     assert targets == ["plugins/ndf"], (command, targets)
+
+
+# --- issue #173: 実行される部分に絞る ---------------------------------------
+
+
+def test_a_heredoc_body_is_not_a_write_target() -> None:
+    """本文はコマンドとして実行される部分ではない。"""
+    command = (
+        "cat > report.md <<'EOS'\n"
+        "受領: <payload>\n"
+        "判定: <期待: 一致>\n"
+        "EOS"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert targets == ["report.md"], targets
+
+
+def test_a_write_after_a_heredoc_is_still_found() -> None:
+    """本文の終端より後ろは、また実行される部分に戻る。"""
+    command = (
+        "cat <<'EOS' > first.md\n"
+        "本文 > body.md\n"
+        "EOS\n"
+        "echo hi > second.md"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert targets == ["first.md", "second.md"], targets
+
+
+def test_an_indented_heredoc_body_is_dropped() -> None:
+    """`<<-` は終端の語の前の tab を無視する。"""
+    command = (
+        "cat <<-EOS > out.md\n"
+        "\t本文 > body.md\n"
+        "\tEOS\n"
+        "echo hi > after.md"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert targets == ["out.md", "after.md"], targets
+
+
+def test_a_shift_operator_inside_quotes_does_not_hide_later_writes() -> None:
+    """引用符の中の `<<` は本文の始まりではない。"""
+    command = (
+        "echo 'a << b'\n"
+        "echo hi > plugins/ndf/README.md"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert targets == ["plugins/ndf/README.md"], targets
+
+
+def test_a_here_string_has_no_body() -> None:
+    """`<<<` は行の入力を渡す形で、終端の語を持たない。"""
+    command = (
+        "cat <<<'body' > out.md\n"
+        "echo hi > after.md"
+    )
+    targets, rc = extract(command)
+    assert rc == 0, targets
+    assert targets == ["out.md", "after.md"], targets
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'cp guard.sh "$SP/wt-test/guard.sh"',
+        "echo hi > $SP/out.md",
+        'echo hi | tee "${OUT}/log.txt"',
+    ],
+)
+def test_words_with_an_unexpanded_variable_are_not_targets(command: str) -> None:
+    """展開前の変数を含む語は、どのパスを指すか決められない。"""
+    targets, rc = extract(command)
+    assert rc == 1, targets
+    assert targets == [], targets

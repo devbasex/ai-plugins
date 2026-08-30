@@ -26,7 +26,15 @@ TARGET="${2:-}"
 command -v jq >/dev/null 2>&1 || exit 0
 command -v git >/dev/null 2>&1 || exit 0
 
-MAIN_DIR=$(wt_main_dir) || exit 0
+# 対象の作業ツリー。省略時は現在地を使う。
+[ -n "$TARGET" ] || TARGET=$(pwd -P)
+TARGET=$(wt_normalize_path "$TARGET" "$(pwd -P)")
+
+# 主ディレクトリは対象から解決する。現在地から解決すると、別のリポジトリから
+# 実行したときに、対象とは違うリポジトリの宣言ファイルと複製元で動く。
+# 対象がリポジトリの外にあるときは現在地から解決し、対象そのものの誤りは
+# 各サブコマンドの案内に任せる。
+MAIN_DIR=$(wt_main_dir "$TARGET") || MAIN_DIR=$(wt_main_dir) || exit 0
 DECLARATION=$(wt_declaration "$MAIN_DIR") || exit 0
 
 decl_get() { printf '%s' "$DECLARATION" | jq -r "$1" 2>/dev/null; }
@@ -34,12 +42,6 @@ decl_get() { printf '%s' "$DECLARATION" | jq -r "$1" 2>/dev/null; }
 # compose 以外の実行系は未対応として扱う。
 KIND=$(decl_get '.localenv.kind // empty')
 [ "$KIND" = "compose" ] || exit 0
-
-# 対象の作業ツリー。省略時は現在地を使う。
-if [ -z "$TARGET" ]; then
-  TARGET=$(pwd -P)
-fi
-TARGET=$(wt_normalize_path "$TARGET" "$(pwd -P)")
 
 target_branch() {
   git -C "$TARGET" symbolic-ref --short -q HEAD 2>/dev/null

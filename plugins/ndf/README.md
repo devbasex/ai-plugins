@@ -79,13 +79,15 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v9.2.0）
+# => NDF統合開発エージェント（Kiro CLI用 / v9.2.1）
 ```
 
-## v9.2.0 へ更新するとき
+## v9.2.1 へ更新するとき
 
-**Skill `worktree` と、作業ツリー運用の hook が増えます。** 導入済みの環境では
-マーケットプレイスの更新とプラグインの再インストールを行ってください。
+**作業ツリー運用の不具合の修正です。** テスト環境の停止・案内の表示・宣言ファイルと
+台帳の解決先が直ります（#173）。v9.2.0 より前から更新する場合は、Skill `worktree` と
+作業ツリー運用の hook も増えます。導入済みの環境ではマーケットプレイスの更新と
+プラグインの再インストールを行ってください。
 
 ```bash
 # Claude Code
@@ -241,7 +243,7 @@ gemini
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/9.2.0/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/9.2.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -263,14 +265,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/9.2.0/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/9.2.1/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  9.2.0  <path>
+# => ndf@ai-plugins  installed, enabled  9.2.1  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。

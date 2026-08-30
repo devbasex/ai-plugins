@@ -65,35 +65,44 @@ _wt_read_lines() {
 
 # --- 位置の解決 -------------------------------------------------------------
 
-# 相対パスを実体の絶対パスへ直す。存在しなければ 1 を返す。
-_wt_abs() {
-  local path="$1"
+# `base` を起点に相対パスを実体の絶対パスへ直す。存在しなければ 1 を返す。
+# `git -C <dir> rev-parse` が返すパスは <dir> からの相対になるため、現在地を
+# 起点にすると解決できない。
+_wt_abs_in() {
+  local base="$1" path="$2"
   [ -n "$path" ] || return 1
-  (cd "$path" 2>/dev/null && pwd -P) || return 1
+  (cd "$base" 2>/dev/null && cd "$path" 2>/dev/null && pwd -P) || return 1
 }
 
-# git への問い合わせを 1 セッション 1 回に留めるための控え。
+# 相対パスを実体の絶対パスへ直す。存在しなければ 1 を返す。
+_wt_abs() {
+  _wt_abs_in "$PWD" "${1:-}"
+}
+
+# git への問い合わせを、同じディレクトリについて 1 回に留めるための控え。
 # 呼び出しは `git rev-parse --git-dir --git-common-dir` と
 # `git rev-parse --show-superproject-working-tree` の 2 回まで。
+# 引数を省くと現在地を解決する。控えは解決したディレクトリを鍵にする。
 _wt_resolve() {
-  [ "${_WT_RESOLVED:-}" = "1" ] && return "${_WT_RESOLVE_RC:-0}"
-  _WT_RESOLVED=1
+  local dir="${1:-$PWD}"
+  [ "${_WT_RESOLVED_DIR:-}" = "$dir" ] && return "${_WT_RESOLVE_RC:-0}"
+  _WT_RESOLVED_DIR="$dir"
   _WT_RESOLVE_RC=1
   _WT_MAIN_DIR=""
   _WT_IN_WORKTREE=1
 
   local dirs git_dir git_common super
-  dirs=$(git rev-parse --git-dir --git-common-dir 2>/dev/null) || return 1
+  dirs=$(git -C "$dir" rev-parse --git-dir --git-common-dir 2>/dev/null) || return 1
   git_dir=$(printf '%s\n' "$dirs" | sed -n '1p')
   git_common=$(printf '%s\n' "$dirs" | sed -n '2p')
-  git_dir=$(_wt_abs "$git_dir") || return 1
-  git_common=$(_wt_abs "$git_common") || return 1
+  git_dir=$(_wt_abs_in "$dir" "$git_dir") || return 1
+  git_common=$(_wt_abs_in "$dir" "$git_common") || return 1
 
   # サブモジュールの中でも 2 つの git ディレクトリは異なる。作業ツリーと
   # 取り違えないよう、上位リポジトリを持つ場合は通常のリポジトリとして扱う。
-  super=$(git rev-parse --show-superproject-working-tree 2>/dev/null)
+  super=$(git -C "$dir" rev-parse --show-superproject-working-tree 2>/dev/null)
   if [ -n "$super" ]; then
-    _WT_MAIN_DIR=$(git rev-parse --show-toplevel 2>/dev/null) || return 1
+    _WT_MAIN_DIR=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) || return 1
     _WT_MAIN_DIR=$(_wt_abs "$_WT_MAIN_DIR") || return 1
     _WT_IN_WORKTREE=1
     _WT_RESOLVE_RC=0
@@ -109,15 +118,19 @@ _wt_resolve() {
 }
 
 # 主ディレクトリの絶対パスを出力する。リポジトリの外では 1 を返す。
+# 引数を省くと現在地から解決する。**対象を引数で受けるコマンドは対象を渡す。**
+# 現在地から解決すると、別のリポジトリから実行したときに、対象とは違う
+# リポジトリの宣言ファイル・台帳・ポートの帯で動く。
 wt_main_dir() {
-  _wt_resolve || return 1
+  _wt_resolve "${1:-$PWD}" || return 1
   [ -n "$_WT_MAIN_DIR" ] || return 1
   printf '%s\n' "$_WT_MAIN_DIR"
 }
 
 # 作業ツリーの中なら 0、主ディレクトリとサブモジュールの中なら 1 を返す。
+# 引数を省くと現在地から解決する。
 wt_in_worktree() {
-  _wt_resolve || return 1
+  _wt_resolve "${1:-$PWD}" || return 1
   return "$_WT_IN_WORKTREE"
 }
 
@@ -271,12 +284,90 @@ _wt_tokenize() {
   printf '%s\n' "${out[@]+"${out[@]}"}"
 }
 
+# ヒアドキュメントの本文を落とす。本文はコマンドとして実行される部分ではないため、
+# 中の `>` や語を書き込み先として拾わない。引用符の中の `<<` と、行の入力を渡す
+# `<<<` は本文の始まりとして扱わない。
+_wt_strip_heredocs() {
+  local text="${1:-}"
+  local -a lines=() delims=() strips=()
+  local line candidate out="" n i c delim strip
+
+  _wt_read_lines <<<"$text"
+  lines=("${WT_LINES[@]+"${WT_LINES[@]}"}")
+
+  # 読み終えた終端の語は、配列から外さずに添字で進める。空になった配列の
+  # 展開は bash の版で扱いが分かれる。
+  local head=0
+  # 引用符の状態は行をまたいで続く。行ごとに初期化すると、複数行にわたる
+  # 引用符の中の `<<` を本文の始まりとして数えてしまう。
+  local quote=""
+  for line in "${lines[@]+"${lines[@]}"}"; do
+    # 本文の中では、終端の語が現れるまで読み飛ばす。
+    if [ "$head" -lt "${#delims[@]}" ]; then
+      candidate="$line"
+      if [ "${strips[head]}" = 1 ]; then
+        while [ "${candidate#	}" != "$candidate" ]; do candidate="${candidate#	}"; done
+      fi
+      [ "$candidate" = "${delims[head]}" ] && head=$((head + 1))
+      continue
+    fi
+
+    n=${#line}
+    i=0
+    while [ "$i" -lt "$n" ]; do
+      c=${line:i:1}
+      if [ -n "$quote" ]; then
+        [ "$c" = "$quote" ] && quote=""
+        i=$((i + 1))
+        continue
+      fi
+      case "$c" in
+        "'"|'"') quote="$c"; i=$((i + 1)); continue ;;
+        '\') i=$((i + 2)); continue ;;
+      esac
+      if [ "${line:i:3}" = "<<<" ]; then
+        i=$((i + 3))
+        continue
+      fi
+      if [ "${line:i:2}" != "<<" ]; then
+        i=$((i + 1))
+        continue
+      fi
+      i=$((i + 2))
+      strip=0
+      if [ "${line:i:1}" = "-" ]; then strip=1; i=$((i + 1)); fi
+      while [ "${line:i:1}" = " " ] || [ "${line:i:1}" = $'\t' ]; do i=$((i + 1)); done
+      # 終端の語。引用符は書き方の違いで、語そのものには含まれない。
+      delim=""
+      while [ "$i" -lt "$n" ]; do
+        c=${line:i:1}
+        case "$c" in
+          " "|$'\t'|";"|"|"|"&"|">"|"<") break ;;
+          "'"|'"'|'\') ;;
+          *) delim+="$c" ;;
+        esac
+        i=$((i + 1))
+      done
+      if [ -n "$delim" ]; then
+        delims+=("$delim")
+        strips+=("$strip")
+      fi
+    done
+    out+="$line"$'\n'
+  done
+
+  printf '%s' "$out"
+}
+
 # 書き込み先として採らない語かを判定する。
 _wt_is_not_target() {
   local s="$1"
   case "$s" in
     ""|"&"*|"|"*|"&&"|";"|"/dev/null"|"/dev/stdout"|"/dev/stderr") return 0 ;;
     __WT_*) return 0 ;;
+    # 展開前の変数を含む語は、どのパスを指すかを決められない。字面のまま案内
+    # すると、実在しない位置を書き込み先として示すことになる。
+    *'$'*) return 0 ;;
   esac
   return 1
 }
@@ -287,6 +378,10 @@ _wt_is_not_target() {
 wt_extract_write_target() {
   local cmd="${1:-}"
   [ -n "$cmd" ] || return 1
+
+  # ヒアドキュメントの本文を先に落とす。落とす前に印を挟むと、本文の中の `>` が
+  # 出力の付け替えとして数えられる。
+  cmd=$(_wt_strip_heredocs "$cmd")
 
   # `>path` のように空白の無い形を語へ分けるため、先に印を挟む。
   local spaced=${cmd//>>/ __WT_APPEND__ }
@@ -563,7 +658,7 @@ wt_common_git_dir() {
   local dir="${1:-}" common
   [ -n "$dir" ] || return 1
   common=$(git -C "$dir" rev-parse --git-common-dir 2>/dev/null) || return 1
-  (cd "$dir" 2>/dev/null && cd "$common" 2>/dev/null && pwd -P) || return 1
+  _wt_abs_in "$dir" "$common"
 }
 
 # 台帳の位置。共通の git ディレクトリ配下へ置く。作業ツリーの中に置くと、その
