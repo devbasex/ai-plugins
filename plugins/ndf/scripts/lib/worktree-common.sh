@@ -406,3 +406,30 @@ wt_dirty_paths() {
   [ -n "$main_dir" ] || return 1
   git -C "$main_dir" status --porcelain --untracked-files=no 2>/dev/null
 }
+
+# --- パッチ本文からの書き込み先の推定 ---------------------------------------
+
+# `apply_patch` の本文から書き込み先を 1 行 1 件で出力する。
+# Codex CLI はファイルの編集をこの形で渡し、パスは tool_input.command の中の
+# `*** Update File: <パス>` などの行に入る。推定できなければ 1 を返す。
+wt_extract_patch_target() {
+  local patch="${1:-}" line target found=0
+  [ -n "$patch" ] || return 1
+  while IFS= read -r line; do
+    case "$line" in
+      '*** Update File: '*) target=${line#'*** Update File: '} ;;
+      '*** Add File: '*) target=${line#'*** Add File: '} ;;
+      '*** Delete File: '*) target=${line#'*** Delete File: '} ;;
+      '*** Move to: '*) target=${line#'*** Move to: '} ;;
+      *) continue ;;
+    esac
+    # 前後の空白を落とす。
+    target=${target#"${target%%[![:space:]]*}"}
+    target=${target%"${target##*[![:space:]]}"}
+    if [ -n "$target" ]; then
+      printf '%s\n' "$target"
+      found=1
+    fi
+  done <<<"$patch"
+  [ "$found" = 1 ] || return 1
+}

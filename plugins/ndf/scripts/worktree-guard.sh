@@ -127,7 +127,18 @@ esac
 # 余分に並べても該当しなければ何も起きない。
 targets=()
 case "$TOOL" in
-  Edit|MultiEdit|Write|NotebookEdit|fs_write|edit_file|write_file|apply_patch|str_replace_editor|replace)
+  apply_patch)
+    # Codex CLI はファイルの編集をパッチ本文で渡す。パスは本文の中にある。
+    patch_text=$(
+      jq_get 'if (.tool_input.command | type) == "string" then .tool_input.command
+              elif (.tool_input.patch | type) == "string" then .tool_input.patch
+              elif (.tool_input.input | type) == "string" then .tool_input.input
+              else empty end'
+    )
+    [ -n "$patch_text" ] || exit 0
+    mapfile -t targets < <(wt_extract_patch_target "$patch_text")
+    ;;
+  Edit|MultiEdit|Write|NotebookEdit|fs_write|edit_file|write_file|str_replace_editor|replace)
     mapfile -t targets < <(
       jq_get '[.tool_input.file_path?, .tool_input.path?, .tool_input.notebook_path?,
                (.tool_input.edits[]?.file_path?), (.tool_input.operations[]?.path?)]
