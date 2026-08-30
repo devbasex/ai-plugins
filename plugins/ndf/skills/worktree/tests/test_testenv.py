@@ -770,3 +770,66 @@ def test_normalize_does_not_expand_globs(tmp_path: Path) -> None:
     (tmp_path / "bbb").write_text("x", encoding="utf-8")
     got = run_lib(f'wt_normalize_path "*" "{tmp_path}"')
     assert got.stdout.strip() == f"{tmp_path}/*", got.stdout
+
+
+def stub_docker(main_repo: Path, dump: Path) -> Path:
+    """環境変数と引数を書き出すだけの偽のコンテナ実行系。"""
+    stub = main_repo.parent / "fake-docker"
+    stub.write_text(
+        "#!/bin/sh\n"
+        f'env | grep "^NDF_" | sort > "{dump}"\n'
+        f'printf "%s\\n" "$*" >> "{dump}"\n'
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    stub.chmod(0o755)
+    return stub
+
+
+def test_up_passes_the_numbered_values_to_compose(main_repo: Path, worktree: Path) -> None:
+    """採番した値を定義へ渡す。渡さないと作業ツリーごとの分離が効かない。"""
+    (worktree / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+    declare(
+        main_repo,
+        testenv={"port_band": [20000, 29999], "port_roles": {"http": 0, "db": 1},
+                 "shared_network": "ndf-shared"},
+        localenv={"kind": "compose", "compose_files": ["docker-compose.yml"]},
+    )
+    dump = main_repo.parent / "compose-env.txt"
+    stub = stub_docker(main_repo, dump)
+
+    env = os.environ.copy()
+    env["WT_DOCKER_COMMAND"] = str(stub)
+    proc = subprocess.run(
+        ["bash", str(TESTENV), "up", str(worktree)],
+        cwd=str(main_repo), env=env, capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc
+
+    body = dump.read_text()
+    assert "NDF_PORT_HTTP=20000" in body, body
+    assert "NDF_PORT_DB=20001" in body, body
+    assert "NDF_SLOT=0" in body, body
+    assert "NDF_SHARED_NETWORK=ndf-shared" in body, body
+    assert "NDF_ENVIRONMENT=main-wt-feature-x-" in body, body
+    assert "compose -p main-wt-feature-x-" in body, body
+
+
+def test_role_names_become_upper_case_variables(main_repo: Path, worktree: Path) -> None:
+    (worktree / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+    declare(
+        main_repo,
+        testenv={"port_band": [20000, 29999], "port_roles": {"object-store": 4}},
+        localenv={"kind": "compose", "compose_files": ["docker-compose.yml"]},
+    )
+    dump = main_repo.parent / "compose-env2.txt"
+    stub = stub_docker(main_repo, dump)
+
+    env = os.environ.copy()
+    env["WT_DOCKER_COMMAND"] = str(stub)
+    subprocess.run(
+        ["bash", str(TESTENV), "up", str(worktree)],
+        cwd=str(main_repo), env=env, capture_output=True, text=True,
+    )
+
+    assert "NDF_PORT_OBJECT_STORE=20004" in dump.read_text(), dump.read_text()

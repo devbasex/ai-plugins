@@ -90,6 +90,24 @@ bash "$NDF_SCRIPTS/worktree-testenv.sh" env "$WT"
    公開しない。**定義に無いコンテナを削除する指定を付けない**（稼働中のプロジェクトに定義外の
    コンテナが属していることがある）
 
+   起動時に採番した値が環境変数で定義へ渡る。**定義側がこれを参照しないと分離は効かない。**
+
+   | 変数 | 値 |
+   | --- | --- |
+   | `NDF_ENVIRONMENT` | 環境名（compose のプロジェクト名にも使う） |
+   | `NDF_SLOT` | スロット番号 |
+   | `NDF_WORKTREE` | 作業ツリーの絶対パス |
+   | `NDF_SHARED_NETWORK` | 宣言の `shared_network` |
+   | `NDF_PORT_<役割名>` | 採番したポート。役割名は大文字にし、英数以外は `_` へ置き換える |
+
+   ```yaml
+   # docker-compose.worktree.yml の例
+   services:
+     nginx:
+       ports:
+         - "${NDF_PORT_HTTP}:80"
+   ```
+
 6. **差分を当てる** — ブランチがデータ構造の変更を追加していれば、更新を 1 回だけ流す
 
 7. **実行する** — 初期化を抑止する指定は宣言の `skip_reset` が持ち、実行時に渡る。渡らないと

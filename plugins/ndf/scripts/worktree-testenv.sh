@@ -151,6 +151,32 @@ load_assignment() {
   SLOT=$(printf '%s' "$row" | jq -r '.slot')
 }
 
+# コンテナ実行系のコマンド。テストから差し替えられるようにしておく。
+docker_command() { printf '%s\n' "${WT_DOCKER_COMMAND:-docker}"; }
+has_docker() { command -v "$(docker_command)" >/dev/null 2>&1; }
+
+# 採番した値を定義へ渡す。定義側は ${NDF_PORT_HTTP} のように参照して、
+# 作業ツリーごとにポートとネットワークを分ける。渡さないと分離が効かない。
+compose_env() {
+  local role port network
+  COMPOSE_ENV=(
+    "NDF_ENVIRONMENT=$ENVIRONMENT"
+    "NDF_SLOT=$SLOT"
+    "NDF_WORKTREE=$TARGET"
+  )
+  network=$(decl_get '.testenv.shared_network // empty')
+  COMPOSE_ENV+=("NDF_SHARED_NETWORK=$network")
+
+  while IFS=$'\t' read -r role port; do
+    [ -n "$role" ] || continue
+    role=$(printf '%s' "$role" | tr '[:lower:]' '[:upper:]' | sed 's/[^A-Z0-9]/_/g')
+    COMPOSE_ENV+=("NDF_PORT_${role}=$port")
+  done < <(wt_registry_visible "$(registry)" \
+    | jq -r --arg wt "$TARGET" \
+      '[.assignments[] | select(.released_at == null and .worktree == $wt)] | last
+       | (.ports // {}) | to_entries[] | "\(.key)\t\(.value)"' 2>/dev/null)
+}
+
 compose() {
   local -a files=()
   _wt_read_lines < <(decl_get '.localenv.compose_files // [] | .[]')
@@ -160,30 +186,31 @@ compose() {
     files+=(-f "$TARGET/$f")
   done
   [ "${#files[@]}" -gt 0 ] || return 2
-  docker compose -p "$ENVIRONMENT" "${files[@]}" "$@"
+  compose_env
+  env "${COMPOSE_ENV[@]}" "$(docker_command)" compose -p "$ENVIRONMENT" "${files[@]}" "$@"
 }
 
 # --- bake -------------------------------------------------------------------
 
 do_bake() {
   [ -n "$TAG" ] || { printf '--tag が要ります\n' >&2; return 1; }
-  command -v docker >/dev/null 2>&1 || { printf 'コンテナ実行系が見つかりません\n' >&2; return 1; }
+  has_docker || { printf 'コンテナ実行系が見つかりません\n' >&2; return 1; }
 
   # 足りないものだけを作る。前回の bake が途中で落ちていると、一部だけが
   # 存在する。1 件目の存在で打ち切ると、残りが作られないまま先へ進む。
   local source_volume golden created=0 existing=0
   while IFS=$'\t' read -r source_volume golden; do
     [ -n "$source_volume" ] || continue
-    if docker volume inspect "${golden}-${TAG}" >/dev/null 2>&1; then
+    if "$(docker_command)" volume inspect "${golden}-${TAG}" >/dev/null 2>&1; then
       existing=$((existing + 1))
       continue
     fi
-    docker volume create "${golden}-${TAG}" >/dev/null || return 1
+    "$(docker_command)" volume create "${golden}-${TAG}" >/dev/null || return 1
     # 途中で落ちると中身が空のまま残り、次回は「既にある」として飛ばされる。
     # 失敗したら作りかけを消す。
-    if ! docker run --rm -v "${source_volume}:/from:ro" -v "${golden}-${TAG}:/to" \
+    if ! "$(docker_command)" run --rm -v "${source_volume}:/from:ro" -v "${golden}-${TAG}:/to" \
       alpine sh -c 'cd /from && cp -a . /to'; then
-      docker volume rm "${golden}-${TAG}" >/dev/null 2>&1
+      "$(docker_command)" volume rm "${golden}-${TAG}" >/dev/null 2>&1
       printf '%s\n' "基準を作れませんでした: ${golden}-${TAG}" >&2
       return 1
     fi
@@ -201,7 +228,7 @@ do_bake() {
 
 do_up() {
   load_assignment || { do_env >/dev/null || return 1; load_assignment || return 1; }
-  command -v docker >/dev/null 2>&1 || { printf 'コンテナ実行系が見つかりません\n' >&2; return 1; }
+  has_docker || { printf 'コンテナ実行系が見つかりません\n' >&2; return 1; }
 
   [ -n "$TAG" ] || TAG=$(do_tag) || TAG=""
   if [ -n "$TAG" ]; then
@@ -224,13 +251,13 @@ do_up() {
 
 do_stop() {
   load_assignment || return 0
-  command -v docker >/dev/null 2>&1 || return 0
+  has_docker || return 0
   compose stop
 }
 
 do_down() {
   load_assignment || return 0
-  if command -v docker >/dev/null 2>&1; then
+  if has_docker; then
     if [ "$WITH_VOLUMES" = 1 ]; then
       compose down --volumes
     else
@@ -453,7 +480,7 @@ do_reap() {
     printf '%s\n' '--idle に期間を指定してください（例: 45m）' >&2
     return 1
   }
-  command -v docker >/dev/null 2>&1 || return 0
+  has_docker || return 0
 
   local worktree environment lock
   while IFS=$'\t' read -r worktree environment; do
@@ -468,7 +495,7 @@ do_reap() {
     fi
 
     # 起動していないものは止める必要がない。
-    if [ -z "$(docker ps -q --filter "label=com.docker.compose.project=$environment" 2>/dev/null)" ]; then
+    if [ -z "$("$(docker_command)" ps -q --filter "label=com.docker.compose.project=$environment" 2>/dev/null)" ]; then
       continue
     fi
 
