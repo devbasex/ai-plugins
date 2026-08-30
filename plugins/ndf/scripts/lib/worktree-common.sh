@@ -557,6 +557,45 @@ _wt_registry_write() {
   mv "$tmp" "$path" 2>/dev/null || { rm -f "$tmp"; return 1; }
 }
 
+# --- 排他 -------------------------------------------------------------------
+#
+# `flock` が無い環境がある。`mkdir` は同じ名前で同時に成功するのが 1 つだけなので、
+# ディレクトリの作成そのものを排他の手段として使う。
+
+# ロックを取る。取れなければ 1 を返す。
+wt_lock_acquire() {
+  local dir="${1:-}" timeout="${2:-5}" waited=0 owner
+  [ -n "$dir" ] || return 1
+  while ! mkdir "$dir" 2>/dev/null; do
+    # 持ち主が消えているロックは奪う。
+    owner=$(cat "$dir/pid" 2>/dev/null)
+    if [ -n "$owner" ] && ! kill -0 "$owner" 2>/dev/null; then
+      rm -rf "$dir" 2>/dev/null
+      continue
+    fi
+    waited=$((waited + 1))
+    [ "$waited" -ge "$timeout" ] && return 1
+    sleep 1
+  done
+  printf '%s\n' "$$" >"$dir/pid" 2>/dev/null
+  return 0
+}
+
+wt_lock_release() {
+  [ -n "${1:-}" ] || return 0
+  rm -rf "$1" 2>/dev/null
+  return 0
+}
+
+# 生きている持ち主がロックを握っていれば 0 を返す。
+wt_lock_is_held() {
+  local dir="${1:-}" owner
+  [ -n "$dir" ] && [ -d "$dir" ] || return 1
+  owner=$(cat "$dir/pid" 2>/dev/null)
+  [ -n "$owner" ] || return 0
+  kill -0 "$owner" 2>/dev/null
+}
+
 _wt_registry_apply() {
   local content updated
   content=$(wt_registry_read "$_WT_REGISTRY_TARGET")
@@ -587,7 +626,14 @@ wt_registry_update() {
     ) 200>"${_WT_REGISTRY_TARGET}.lock"
     return $?
   fi
+
+  # flock が無い環境では、ディレクトリの作成を排他の手段に使う。
+  local lock="${_WT_REGISTRY_TARGET}.lockdir" rc
+  wt_lock_acquire "$lock" 5 || return 1
   _wt_registry_apply
+  rc=$?
+  wt_lock_release "$lock"
+  return "$rc"
 }
 
 # 作業ツリーへ割り当てられているスロットを返す。無ければ 1 を返す。

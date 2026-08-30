@@ -384,3 +384,104 @@ def test_duration_parsing(value: str, expected: str) -> None:
 
     got = run_lib(f'wt_duration_seconds "{value}"')
     assert got.stdout.strip() == expected, got.stderr
+
+
+# --- 引数の扱い -------------------------------------------------------------
+
+
+def test_target_argument_is_used(main_repo: Path, worktree: Path) -> None:
+    """対象を渡した呼び出しは、現在地ではなくその作業ツリーを使う。"""
+    declare(main_repo, testenv={"port_band": [20000, 29999], "port_roles": {"http": 0}})
+    result = run(["env", str(worktree)], cwd=main_repo)
+    payload = json.loads(result["out"])
+    assert payload["worktree"] == str(worktree.resolve()), payload
+    assert payload["branch"] == "feature/x"
+
+
+@pytest.mark.parametrize("option", ["--profile", "--kind", "--out", "--tag", "--idle"])
+def test_option_without_a_value_fails(main_repo: Path, worktree: Path, option: str) -> None:
+    """値を要するオプションが末尾に来ても、同じ引数を読み続けない。"""
+    declare(main_repo, testenv={"port_band": [20000, 29999]})
+    result = run(["env", str(worktree), option], cwd=main_repo)
+    assert result["rc"] == 1, result
+    assert "値が要ります" in result["err"], result["err"]
+
+
+# --- ポートの帯 -------------------------------------------------------------
+
+
+def test_port_beyond_the_band_is_refused(main_repo: Path, worktree: Path) -> None:
+    """帯を出た番号は他の用途と衝突する。黙って使わない。"""
+    declare(main_repo, testenv={"port_band": [20000, 20005], "port_roles": {"http": 0, "far": 9}})
+    result = run(["env", str(worktree)], cwd=main_repo)
+    assert result["rc"] == 1, result
+    assert "帯を超えました" in result["err"], result["err"]
+
+
+def test_port_inside_the_band_is_accepted(main_repo: Path, worktree: Path) -> None:
+    declare(main_repo, testenv={"port_band": [20000, 20005], "port_roles": {"http": 0}})
+    result = run(["env", str(worktree)], cwd=main_repo)
+    assert result["rc"] == 0, result
+
+
+# --- 証跡の置き場所 ---------------------------------------------------------
+
+
+def test_evidence_directory_is_excluded_from_tracking(main_repo: Path, worktree: Path) -> None:
+    """証跡が追跡対象に入ると差分が埋まる。作業ツリー限りの除外へ登録する。"""
+    declare(main_repo, testenv={
+        "port_band": [20000, 29999],
+        "test_kinds": {"browser": {"run": "true", "out_env": "OUT"}},
+    })
+    run(["test", str(worktree), "--kind", "browser"], cwd=main_repo)
+
+    status = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=str(worktree), capture_output=True, text=True,
+    )
+    assert ".ndf-evidence" not in status.stdout, status.stdout
+
+
+# --- 排他 -------------------------------------------------------------------
+
+
+def test_lock_helpers_are_exclusive(tmp_path: Path) -> None:
+    """`flock` が無い環境でも、ディレクトリの作成で排他できる。"""
+    from worktree_helpers import run_lib
+
+    lock = tmp_path / "a.lock"
+    got = run_lib(
+        f'wt_lock_acquire "{lock}" 1; echo first=$?; wt_lock_acquire "{lock}" 1; echo second=$?'
+    )
+    lines = got.stdout.split()
+    assert lines[0] == "first=0", got.stdout
+    assert lines[1] == "second=1", "同じロックは 2 度取れない"
+
+
+def test_lock_is_released(tmp_path: Path) -> None:
+    from worktree_helpers import run_lib
+
+    lock = tmp_path / "b.lock"
+    got = run_lib(
+        f'wt_lock_acquire "{lock}" 1 && wt_lock_release "{lock}"; '
+        f'wt_lock_acquire "{lock}" 1; echo again=$?'
+    )
+    assert "again=0" in got.stdout, got.stdout
+
+
+def test_stale_lock_is_taken_over(tmp_path: Path) -> None:
+    """持ち主が消えているロックは奪う。"""
+    from worktree_helpers import run_lib
+
+    lock = tmp_path / "c.lock"
+    lock.mkdir()
+    (lock / "pid").write_text("999999\n", encoding="utf-8")
+    got = run_lib(f'wt_lock_acquire "{lock}" 2; echo rc=$?')
+    assert "rc=0" in got.stdout, got.stdout
+
+
+def test_held_lock_is_reported(tmp_path: Path) -> None:
+    from worktree_helpers import run_lib
+
+    lock = tmp_path / "d.lock"
+    got = run_lib(f'wt_lock_acquire "{lock}" 1; wt_lock_is_held "{lock}"; echo held=$?')
+    assert "held=0" in got.stdout, got.stdout
