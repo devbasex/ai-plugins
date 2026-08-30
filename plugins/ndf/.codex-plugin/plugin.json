@@ -1,7 +1,7 @@
 {
   "name": "ndf",
-  "version": "9.1.1",
-  "description": "Codex plugin (v9.1.1): 25 focused NDF skills for PR/review workflows, cross-review, implementation planning, plan-to-spec, Docker container access, external AI delegation (Codex/Gemini), and optional Slack completion notifications.",
+  "version": "9.1.2",
+  "description": "Codex plugin (v9.1.2): 25 focused NDF skills for PR/review workflows, cross-review, implementation planning, plan-to-spec, Docker container access, external AI delegation (Codex/Gemini), and optional Slack completion notifications.",
   "skills": [
     "./skills/cherry-pick-pr",
     "./skills/cross-refactoring",
