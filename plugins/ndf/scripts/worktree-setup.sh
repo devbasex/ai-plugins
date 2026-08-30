@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # NDF plugin: 作業ツリー運用をこのリポジトリへ導入する。
 #
-#   init [--force]   宣言ファイル (.ndf/localenv.json) を作る
+#   init [--force]   宣言ファイル (.ndf/worktree.json) を作る
 #   status           導入の状態を出す
 #
 # 作業ツリー運用の仕組みは、リポジトリ側に宣言ファイルがあるときだけ動く。
@@ -34,9 +34,9 @@ command -v git >/dev/null 2>&1 || { printf '%s\n' "git が要ります" >&2; exi
 command -v jq >/dev/null 2>&1 || { printf '%s\n' "jq が要ります" >&2; exit 1; }
 
 MAIN_DIR=$(wt_main_dir) || { printf '%s\n' "git のリポジトリの中で実行してください" >&2; exit 1; }
-DECLARATION_FILE="$MAIN_DIR/.ndf/localenv.json"
+DECLARATION_FILE="$MAIN_DIR/.ndf/worktree.json"
 
-SCHEMA_URL="https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/ndf/skills/worktree/schemas/localenv.schema.json"
+SCHEMA_URL="https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/ndf/skills/worktree/schemas/worktree.schema.json"
 
 # --- init -------------------------------------------------------------------
 
@@ -64,7 +64,7 @@ write_declaration() {
   local dir tmp
   dir=$(dirname "$DECLARATION_FILE")
   mkdir -p "$dir" 2>/dev/null || return 1
-  tmp=$(mktemp "$dir/.localenv.json.XXXXXX" 2>/dev/null) || return 1
+  tmp=$(mktemp "$dir/.worktree.json.XXXXXX" 2>/dev/null) || return 1
   cat >"$tmp" <<JSON
 {
   "\$schema": "$SCHEMA_URL",

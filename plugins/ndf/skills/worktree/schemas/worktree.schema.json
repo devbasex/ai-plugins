@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/ndf/skills/worktree/schemas/localenv.schema.json",
+  "$id": "https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/ndf/skills/worktree/schemas/worktree.schema.json",
   "title": "NDF worktree 宣言ファイル",
   "description": "リポジトリごとの差を持つ宣言。このファイルが無いリポジトリでは、作業ツリー運用の仕組みは何もせずに終わる。",
   "type": "object",

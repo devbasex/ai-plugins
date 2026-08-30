@@ -37,7 +37,7 @@ allowed-tools:
 | `.ndf/` | この仕組みの宣言ファイル |
 | `.gitignore` | 作業ツリーの登録そのものに必要 |
 
-リポジトリ側で `.ndf/localenv.json` の `guard.allow_paths` を書けば、この一覧を差し替えられる。
+リポジトリ側で `.ndf/worktree.json` の `guard.allow_paths` を書けば、この一覧を差し替えられる。
 
 主ディレクトリの編集は拒否しない。編集の直前に案内が出て、セッション開始時に残った変更が
 提示される。案内が出ても操作は成立するため、意図した編集であればそのまま続けてよい。
@@ -50,7 +50,7 @@ allowed-tools:
 bash "$NDF_SCRIPTS/worktree-setup.sh" init
 ```
 
-作業ツリー運用の仕組みは、リポジトリ側に `.ndf/localenv.json` があるときだけ動く。
+作業ツリー運用の仕組みは、リポジトリ側に `.ndf/worktree.json` があるときだけ動く。
 無ければ hook もコマンドも何も出力せず終了コード 0 で終わる。**このコマンドがその
 入口を作る。**
 
@@ -229,7 +229,7 @@ bash "$NDF" verify "$WT"; echo $?  # 0 一致 / 1 不一致 / 2 未起動
 **検証の直前に `verify` を通す。** 環境に載っているコードが対象と違っていても、失敗と
 しては現れない。別のコードを検証したことに気づけないまま進む。
 
-リポジトリごとの差は `.ndf/localenv.json` が持つ。書き方は
+リポジトリごとの差は `.ndf/worktree.json` が持つ。書き方は
 [references/declaration.md](references/declaration.md) にある。**この宣言が無い
 リポジトリでは、これらのコマンドは何も出力せず終了コード 0 で終わる。**
 

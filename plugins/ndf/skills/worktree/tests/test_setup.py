@@ -26,7 +26,7 @@ def run(args: list[str], cwd: Path) -> dict:
 
 
 def declaration(main_repo: Path) -> Path:
-    return main_repo / ".ndf" / "localenv.json"
+    return main_repo / ".ndf" / "worktree.json"
 
 
 def test_init_creates_a_readable_declaration(main_repo: Path) -> None:
@@ -35,7 +35,7 @@ def test_init_creates_a_readable_declaration(main_repo: Path) -> None:
     assert result["rc"] == 0, result
     body = json.loads(declaration(main_repo).read_text(encoding="utf-8"))
     assert body["version"] == 1
-    assert body["$schema"].endswith("localenv.schema.json")
+    assert body["$schema"].endswith("worktree.schema.json")
 
 
 def test_init_makes_the_guard_active(main_repo: Path) -> None:
@@ -89,7 +89,7 @@ def test_init_runs_from_inside_a_worktree(main_repo: Path, worktree: Path) -> No
 
     assert result["rc"] == 0, result
     assert declaration(main_repo).exists()
-    assert not (worktree / ".ndf" / "localenv.json").exists()
+    assert not (worktree / ".ndf" / "worktree.json").exists()
 
 
 def test_init_outside_a_repository_fails(tmp_path: Path) -> None:
@@ -135,7 +135,7 @@ def test_init_refuses_a_symlinked_declaration(main_repo: Path, tmp_path: Path) -
     outside = tmp_path / "outside.json"
     outside.write_text('{"keep": true}', encoding="utf-8")
     (main_repo / ".ndf").mkdir()
-    (main_repo / ".ndf" / "localenv.json").symlink_to(outside)
+    (main_repo / ".ndf" / "worktree.json").symlink_to(outside)
 
     result = run(["init", "--force"], cwd=main_repo)
 
@@ -152,10 +152,10 @@ def test_init_refuses_a_symlinked_ndf_directory(main_repo: Path, tmp_path: Path)
     result = run(["init", "--force"], cwd=main_repo)
 
     assert result["rc"] == 1, result
-    assert not (outside / "localenv.json").exists(), "外へ書かない"
+    assert not (outside / "worktree.json").exists(), "外へ書かない"
 
 
 def test_init_leaves_no_temporary_file(main_repo: Path) -> None:
     run(["init"], cwd=main_repo)
-    leftovers = [p.name for p in (main_repo / ".ndf").iterdir() if p.name != "localenv.json"]
+    leftovers = [p.name for p in (main_repo / ".ndf").iterdir() if p.name != "worktree.json"]
     assert leftovers == [], leftovers

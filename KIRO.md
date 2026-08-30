@@ -38,7 +38,7 @@ bash plugins/ndf/dev.kiro/install.sh --with-slack --with-codex
 
 Kiro CLI では tool 実行前の hook を使いません。この事象でモデルへ案内を渡す手段が終了コード 2 に限られ、それが tool の実行を拒否するためです。拒否しない方針のもとでは置けないため、パスを見ない案内をプロンプト送信時の hook が担います。
 
-**どちらもリポジトリ側に `.ndf/localenv.json` があるときだけ動きます。** 無ければ何も出力せず終了コード 0 で終わります。書き方は `plugins/ndf/README.md` の「Hooks」節にあります。
+**どちらもリポジトリ側に `.ndf/worktree.json` があるときだけ動きます。** 無ければ何も出力せず終了コード 0 で終わります。書き方は `plugins/ndf/README.md` の「Hooks」節にあります。
 
 ### Slack通知の設定（オプション）
 

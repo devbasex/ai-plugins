@@ -123,12 +123,12 @@ wt_in_worktree() {
 
 # --- 宣言ファイル -----------------------------------------------------------
 
-# 主ディレクトリの .ndf/localenv.json を 1 行の JSON として出力する。
+# 主ディレクトリの .ndf/worktree.json を 1 行の JSON として出力する。
 # ファイルが無い / JSON として読めない / 版が未対応のいずれでも、何も出力せず 1 を返す。
 wt_declaration() {
   local main_dir="${1:-}" file json version
   [ -n "$main_dir" ] || return 1
-  file="$main_dir/.ndf/localenv.json"
+  file="$main_dir/.ndf/worktree.json"
   [ -f "$file" ] || return 1
   command -v jq >/dev/null 2>&1 || return 1
   json=$(jq -c '.' "$file" 2>/dev/null) || return 1

@@ -45,7 +45,7 @@ plugins/ndf/
 │   │   ├── test-execution.md           テスト実行の手順
 │   │   └── declaration.md              宣言ファイルの書き方
 │   ├── schemas/
-│   │   ├── localenv.schema.json        宣言ファイルの定義
+│   │   ├── worktree.schema.json        宣言ファイルの定義
 │   │   └── registry.schema.json        台帳の定義
 │   └── tests/                          判定ロジックのテスト
 └── hooks/
@@ -58,7 +58,7 @@ plugins/ndf/
 ```text
 <主ディレクトリ>/
 ├── .worktrees/<ブランチ名>/            開発用の作業ツリー
-├── .ndf/localenv.json                  宣言ファイル（任意。無ければ機能しない）
+├── .ndf/worktree.json                  宣言ファイル（任意。無ければ機能しない）
 └── .git/ndf/                           共通の git ディレクトリ配下
     ├── worktree-registry.json          台帳
     └── slot<番号>.env                  スロット固有の設定（所有者のみ読み書き）
@@ -72,9 +72,14 @@ plugins/ndf/
 
 対象リポジトリごとの差を吸収する。**このファイルが無いリポジトリでは、すべての機能が何もせずに終わる。**
 
+置き場所は `.ndf/worktree.json` である。設計時は `.ndf/localenv.json` としていたが、この
+ファイルは `guard`（編集時の案内）・`localenv`・`testenv` の 3 つを賄う。多くのリポジトリが
+使うのは `guard` だけで、`localenv` を持たない。名前が中身の一部だけを指していると、何のための
+ファイルか読めない。実装の時点で改名した。
+
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/ndf/skills/worktree/schemas/localenv.schema.json",
+  "$schema": "https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/ndf/skills/worktree/schemas/worktree.schema.json",
   "version": 1,
   "guard": {
     "allow_paths": ["issues/", "docs/", ".claude/", ".codex/", ".kiro/", ".agents/", ".gemini/", ".serena/", ".gitignore"]

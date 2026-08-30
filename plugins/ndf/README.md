@@ -100,7 +100,7 @@ codex plugin add ndf@ai-plugins
 bash <プラグインのパス>/dev.kiro/install.sh
 ```
 
-hook は**リポジトリ側に `.ndf/localenv.json` があるときだけ動きます**。置かなければ
+hook は**リポジトリ側に `.ndf/worktree.json` があるときだけ動きます**。置かなければ
 これまでと同じ挙動のままです。書き方は上の「Hooks」節にあります。
 
 Codex では、hook の初回実行前に `~/.codex/config.toml` の `[hooks.state]` で対象 hook を
@@ -142,7 +142,7 @@ Kiro CLI に tool 実行前の案内が無いのは、この事象でモデル�
 限られ、それが tool の実行を拒否するためです。拒否しない方針のもとでは置けないため、パスを
 見ない案内をプロンプト送信時の hook が担います。
 
-**この仕組みはリポジトリ側の宣言ファイル `.ndf/localenv.json` があるときだけ動きます。**
+**この仕組みはリポジトリ側の宣言ファイル `.ndf/worktree.json` があるときだけ動きます。**
 宣言が無いリポジトリでは、いずれの hook も何も出力せず終了コード 0 で終わります。
 
 宣言ファイルは `/ndf:worktree` を起動すると手順 0 で作られます。手で作るなら次を実行します。

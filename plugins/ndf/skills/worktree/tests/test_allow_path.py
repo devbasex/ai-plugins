@@ -23,7 +23,7 @@ DEFAULTS = '"${WT_DEFAULT_ALLOW_PATHS[@]}"'
         ".agents/skills/pr/SKILL.md",
         ".gemini/settings.json",
         ".serena/project.yml",
-        ".ndf/localenv.json",
+        ".ndf/worktree.json",
         ".gitignore",
     ],
 )

@@ -1,9 +1,9 @@
 # 宣言ファイルの書き方
 
-作業ツリー運用の仕組みは、リポジトリごとの差を `.ndf/localenv.json` から読む。
+作業ツリー運用の仕組みは、リポジトリごとの差を `.ndf/worktree.json` から読む。
 **このファイルが無いリポジトリでは、すべての仕組みが何もせずに終わる。**
 
-定義は [`../schemas/localenv.schema.json`](../schemas/localenv.schema.json) にある。
+定義は [`../schemas/worktree.schema.json`](../schemas/worktree.schema.json) にある。
 `$schema` を書いておくと編集時に補完が効く。読み取り側はこの項目を参照しない。
 
 ## 作る
@@ -20,7 +20,7 @@ bash "$NDF_SCRIPTS/worktree-setup.sh" init
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/ndf/skills/worktree/schemas/localenv.schema.json",
+  "$schema": "https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/ndf/skills/worktree/schemas/worktree.schema.json",
   "version": 1
 }
 ```

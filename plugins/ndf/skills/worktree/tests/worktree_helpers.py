@@ -68,9 +68,9 @@ def init_repo(path: Path) -> Path:
 
 
 def write_declaration(main_repo: Path, body: str) -> Path:
-    """`.ndf/localenv.json` を書く。"""
+    """`.ndf/worktree.json` を書く。"""
     ndf = main_repo / ".ndf"
     ndf.mkdir(parents=True, exist_ok=True)
-    path = ndf / "localenv.json"
+    path = ndf / "worktree.json"
     path.write_text(body, encoding="utf-8")
     return path
