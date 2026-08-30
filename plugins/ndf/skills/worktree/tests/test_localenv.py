@@ -259,3 +259,50 @@ def test_mode_without_conditions_is_sharing(main_repo: Path, worktree: Path) -> 
     git(worktree, "add", "-A")
     result = run(["mode", str(worktree)], cwd=main_repo)
     assert result["rc"] == 0, result
+
+
+# --- 宣言の誤りで作業ツリーの外を触らない ------------------------------------
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ["/etc/passwd", "../outside", "vendor/../../outside", "..", "~/secrets"],
+)
+def test_setup_rejects_paths_outside_the_worktree(main_repo: Path, worktree: Path, bad: str) -> None:
+    declare(main_repo, {"kind": "compose", "copy_from_main": [bad]})
+    result = run(["setup", str(worktree)], cwd=main_repo)
+    assert result["rc"] == 1, result
+    assert "外を指します" in result["err"], result["err"]
+
+
+@pytest.mark.parametrize("bad", ["/etc/passwd", "../outside"])
+def test_setup_rejects_unsafe_copy_as_real(main_repo: Path, worktree: Path, bad: str) -> None:
+    declare(main_repo, {"kind": "compose", "copy_as_real": [bad]})
+    result = run(["setup", str(worktree)], cwd=main_repo)
+    assert result["rc"] == 1, result
+    assert "外を指します" in result["err"], result["err"]
+
+
+def test_copy_as_real_does_not_discard_local_edits(main_repo: Path, worktree: Path) -> None:
+    """作業ツリー側で書き換えられていたら、置き換えずに中断する。"""
+    (main_repo / "vendor").mkdir()
+    (main_repo / "vendor" / "map.txt").write_text("a\n", encoding="utf-8")
+    (worktree / "vendor").mkdir()
+    (worktree / "vendor" / "map.txt").write_text("編集済み\n", encoding="utf-8")
+    declare(main_repo, {"kind": "compose", "copy_as_real": ["vendor"]})
+
+    result = run(["setup", str(worktree)], cwd=main_repo)
+
+    assert result["rc"] == 1, result
+    assert (worktree / "vendor" / "map.txt").read_text() == "編集済み\n", "消さない"
+
+
+def test_mode_lists_a_path_once(main_repo: Path, worktree: Path) -> None:
+    """1 つのパスが複数の条件に当たっても、一覧へは 1 度だけ載せる。"""
+    declare(main_repo, {"kind": "compose",
+                        "isolate_when": ["docker-compose*.yml", "*.yml"]})
+    (worktree / "docker-compose.dev.yml").write_text("x\n", encoding="utf-8")
+    git(worktree, "add", "-A")
+    result = run(["mode", str(worktree)], cwd=main_repo)
+    assert result["rc"] == 1, result
+    assert result["out"].count("docker-compose.dev.yml") == 1, result["out"]

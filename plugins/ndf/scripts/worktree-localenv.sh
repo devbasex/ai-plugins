@@ -47,6 +47,30 @@ target_branch() {
 
 # --- setup ------------------------------------------------------------------
 
+# 宣言に書かれた複製対象が、主ディレクトリと作業ツリーの中に収まるかを見る。
+# 宣言の誤りで外側を読み書きしないよう、絶対パスと上位への移動を弾く。
+is_safe_relative() {
+  case "$1" in
+    "" | /*) return 1 ;;
+    "." | "..") return 1 ;;
+    ../* | */.. | */../*) return 1 ;;
+    "~"*) return 1 ;;
+  esac
+  return 0
+}
+
+# 既にあるパスの内容が主ディレクトリと食い違うかを見る。
+# 食い違うときは上書きせず中断する。
+differs_from_main() {
+  local rel="$1"
+  [ -e "$TARGET/$rel" ] || return 1
+  if diff -rq "$MAIN_DIR/$rel" "$TARGET/$rel" >/dev/null 2>&1; then
+    return 1
+  fi
+  printf '中断: %s の内容が主ディレクトリと異なります。手で確かめてください\n' "$rel" >&2
+  return 0
+}
+
 # 1 つのパスを主ディレクトリから作業ツリーへ複製する。
 # ハードリンクを試し、使えない配置ではファイル複製へ退避する。
 copy_one() {
@@ -54,11 +78,10 @@ copy_one() {
   [ -e "$from" ] || return 0
 
   if [ -e "$to" ]; then
-    if diff -rq "$from" "$to" >/dev/null 2>&1; then
-      return 0
+    if differs_from_main "$rel"; then
+      return 1
     fi
-    printf '中断: %s の内容が主ディレクトリと異なります。手で確かめてください\n' "$rel" >&2
-    return 1
+    return 0
   fi
 
   mkdir -p "$(dirname "$to")" 2>/dev/null
@@ -80,6 +103,10 @@ copy_one() {
 replace_with_real_copy() {
   local rel="$1" from="$MAIN_DIR/$1" to="$TARGET/$1"
   [ -e "$from" ] || return 0
+  # 作業ツリー側で書き換えられていたら、置き換えずに中断する。
+  if [ -e "$to" ] && differs_from_main "$rel"; then
+    return 1
+  fi
   rm -rf "$to" 2>/dev/null
   mkdir -p "$(dirname "$to")" 2>/dev/null
   cp -a "$from" "$to" 2>/dev/null || {
@@ -94,6 +121,10 @@ do_setup() {
   _wt_read_lines < <(decl_get '.localenv.copy_from_main // [] | .[]')
   for rel in "${WT_LINES[@]+"${WT_LINES[@]}"}"; do
     [ -n "$rel" ] || continue
+    if ! is_safe_relative "$rel"; then
+      printf '中断: copy_from_main の %s は作業ツリーの外を指します\n' "$rel" >&2
+      return 1
+    fi
     copy_one "$rel" || rc=1
   done
   [ "$rc" = 0 ] || return 1
@@ -101,6 +132,10 @@ do_setup() {
   _wt_read_lines < <(decl_get '.localenv.copy_as_real // [] | .[]')
   for rel in "${WT_LINES[@]+"${WT_LINES[@]}"}"; do
     [ -n "$rel" ] || continue
+    if ! is_safe_relative "$rel"; then
+      printf '中断: copy_as_real の %s は作業ツリーの外を指します\n' "$rel" >&2
+      return 1
+    fi
     replace_with_real_copy "$rel" || rc=1
   done
   return "$rc"
@@ -222,8 +257,12 @@ do_mode() {
       [ -n "$pattern" ] || continue
       # shellcheck disable=SC2254
       case "$path" in
-        $pattern) matched="$matched  - $path（$pattern）
-" ;;
+        $pattern)
+          # 1 つのパスが複数の条件に当たっても、一覧へは 1 度だけ載せる。
+          matched="$matched  - $path（$pattern）
+"
+          break
+          ;;
       esac
     done
   done
