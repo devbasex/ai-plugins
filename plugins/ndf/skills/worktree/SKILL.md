@@ -210,6 +210,27 @@ bash "$NDF" verify "$WT"; echo $?  # 0 一致 / 1 不一致 / 2 未起動
 [references/declaration.md](references/declaration.md) にある。**この宣言が無い
 リポジトリでは、これらのコマンドは何も出力せず終了コード 0 で終わる。**
 
+## テスト実行の分離
+
+同じ保存先を使うテストは、同時に走らせると互いのデータを壊す。作業ツリーごとにテスト環境を
+立てて分ける。手順は [references/test-execution.md](references/test-execution.md) にある。
+
+```bash
+TE="$NDF_SCRIPTS/worktree-testenv.sh"
+bash "$TE" env "$WT"                        # 環境名・スロット・ポートを採番し台帳へ記録
+bash "$TE" bake --tag "$(bash "$TE" tag "$WT")"  # 基準を作る（内容が同じなら焼き直さない）
+bash "$TE" up "$WT" --profile core          # 起動する
+bash "$TE" test "$WT" --kind stateful       # 実行したコマンドの終了コードがそのまま返る
+bash "$TE" down "$WT" --volumes             # 破棄し、割り当てを解放する
+```
+
+**作業ツリーを消す前に `down --volumes` を実行する。** 順序を逆にすると台帳から実体を
+引けなくなる。
+
+台帳は共通の git ディレクトリ配下（`.git/ndf/worktree-registry.json`）に置く。作業ツリーの
+中に置くと、削除した時点で割り当ての記録が消える。**解放しても行は消さず、解放の時刻を
+書き込む。**
+
 ## 関連
 
 - `/ndf:merged` — マージ後の作業ツリーとブランチの削除

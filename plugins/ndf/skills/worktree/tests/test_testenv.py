@@ -1,0 +1,294 @@
+"""テスト環境の採番・実行・公開の入口を検証する（受け入れ条件 39 ほか）。
+
+起動を伴う検証は単体テストへ持ち込まない（詳細設計 06）。コンテナの起動と
+外部公開の実物は手動確認が担う。ここで確かめるのは採番・タグの計算・
+テスト実行の受け渡し・公開の拒否条件までである。
+"""
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from worktree_helpers import SCRIPTS_DIR, git, write_declaration
+
+TESTENV = SCRIPTS_DIR / "worktree-testenv.sh"
+
+
+def run(args: list[str], cwd: Path) -> dict:
+    env = os.environ.copy()
+    env["LC_ALL"] = "C"
+    proc = subprocess.run(
+        ["bash", str(TESTENV), *args],
+        cwd=str(cwd), env=env, capture_output=True, text=True,
+    )
+    return {"rc": proc.returncode, "out": proc.stdout, "err": proc.stderr}
+
+
+def declare(main_repo: Path, testenv: dict | None = None, localenv: dict | None = None) -> None:
+    body: dict = {"version": 1}
+    if localenv is not None:
+        body["localenv"] = localenv
+    if testenv is not None:
+        body["testenv"] = testenv
+    write_declaration(main_repo, json.dumps(body))
+
+
+def registry(main_repo: Path) -> dict:
+    path = main_repo / ".git" / "ndf" / "worktree-registry.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+# --- 受け入れ条件 39: 宣言が無いリポジトリでは何もしない --------------------
+
+
+@pytest.mark.parametrize("args", [["env"], ["tag"], ["stop"], ["unexpose"]])
+def test_no_declaration_is_silent(main_repo: Path, worktree: Path, args: list[str]) -> None:
+    result = run([*args, str(worktree)], cwd=main_repo)
+    assert result["rc"] == 0, result
+    assert result["out"].strip() == "", result["out"]
+
+
+def test_no_testenv_section_is_silent(main_repo: Path, worktree: Path) -> None:
+    declare(main_repo, localenv={"kind": "compose"})
+    result = run(["env", str(worktree)], cwd=main_repo)
+    assert result["rc"] == 0, result
+    assert result["out"].strip() == "", result["out"]
+
+
+def test_missing_test_kind_is_silent(main_repo: Path, worktree: Path) -> None:
+    """種類の宣言が無いリポジトリでは、テスト実行の仕組みが何もせずに終わる。"""
+    declare(main_repo, testenv={"port_band": [20000, 29999]})
+    result = run(["test", str(worktree), "--kind", "stateful"], cwd=main_repo)
+    assert result["rc"] == 0, result
+    assert result["out"].strip() == "", result["out"]
+
+
+# --- 採番 -------------------------------------------------------------------
+
+
+def test_env_outputs_name_slot_and_ports(main_repo: Path, worktree: Path) -> None:
+    declare(main_repo, testenv={"port_band": [20000, 29999],
+                                "port_roles": {"http": 0, "db": 1}})
+    result = run(["env", str(worktree)], cwd=main_repo)
+    assert result["rc"] == 0, result
+    payload = json.loads(result["out"])
+    assert payload["slot"] == 0
+    assert payload["branch"] == "feature/x"
+    assert payload["environment"].startswith("main-wt-feature-x-")
+    assert payload["ports"] == {"http": 20000, "db": 20001}
+
+
+def test_env_is_stable_for_the_same_worktree(main_repo: Path, worktree: Path) -> None:
+    declare(main_repo, testenv={"port_band": [20000, 29999], "port_roles": {"http": 0}})
+    first = json.loads(run(["env", str(worktree)], cwd=main_repo)["out"])
+    second = json.loads(run(["env", str(worktree)], cwd=main_repo)["out"])
+    assert first == second
+
+
+def test_env_records_ports_in_the_registry(main_repo: Path, worktree: Path) -> None:
+    declare(main_repo, testenv={"port_band": [20000, 29999], "port_roles": {"http": 0}})
+    run(["env", str(worktree)], cwd=main_repo)
+    assert registry(main_repo)["assignments"][0]["ports"] == {"http": 20000}
+
+
+def test_two_worktrees_get_different_ports(main_repo: Path, worktree: Path) -> None:
+    declare(main_repo, testenv={"port_band": [20000, 29999], "port_roles": {"http": 0}})
+    second = main_repo / ".worktrees" / "fix" / "y"
+    git(main_repo, "worktree", "add", "-q", "-b", "fix/y", str(second))
+
+    a = json.loads(run(["env", str(worktree)], cwd=main_repo)["out"])
+    b = json.loads(run(["env", str(second)], cwd=main_repo)["out"])
+
+    assert a["slot"] != b["slot"]
+    assert a["ports"]["http"] != b["ports"]["http"]
+    assert a["environment"] != b["environment"]
+
+
+# --- 基準のタグ -------------------------------------------------------------
+
+
+def test_tag_is_derived_from_the_declared_paths(main_repo: Path, worktree: Path) -> None:
+    (worktree / "database" / "migrations").mkdir(parents=True)
+    (worktree / "database" / "migrations" / "001.sql").write_text("a\n", encoding="utf-8")
+    git(worktree, "add", "-A")
+    git(worktree, "commit", "-q", "-m", "add migration")
+    declare(main_repo, testenv={"golden_tag_paths": ["database/migrations"]})
+
+    first = run(["tag", str(worktree)], cwd=main_repo)
+    assert first["rc"] == 0, first
+    assert len(first["out"].strip()) == 12
+
+    second = run(["tag", str(worktree)], cwd=main_repo)
+    assert second["out"] == first["out"], "同じ内容なら同じ値"
+
+
+def test_tag_changes_with_the_content(main_repo: Path, worktree: Path) -> None:
+    (worktree / "database" / "migrations").mkdir(parents=True)
+    (worktree / "database" / "migrations" / "001.sql").write_text("a\n", encoding="utf-8")
+    git(worktree, "add", "-A")
+    git(worktree, "commit", "-q", "-m", "add migration")
+    declare(main_repo, testenv={"golden_tag_paths": ["database/migrations"]})
+    before = run(["tag", str(worktree)], cwd=main_repo)["out"]
+
+    (worktree / "database" / "migrations" / "002.sql").write_text("b\n", encoding="utf-8")
+    git(worktree, "add", "-A")
+    git(worktree, "commit", "-q", "-m", "add another")
+    after = run(["tag", str(worktree)], cwd=main_repo)["out"]
+
+    assert before != after
+
+
+def test_tag_is_out_of_scope_without_declared_paths(main_repo: Path, worktree: Path) -> None:
+    declare(main_repo, testenv={"port_band": [20000, 29999]})
+    result = run(["tag", str(worktree)], cwd=main_repo)
+    assert result["rc"] == 2, result
+
+
+# --- テストの実行 -----------------------------------------------------------
+
+
+def test_test_returns_the_command_exit_code(main_repo: Path, worktree: Path) -> None:
+    """テストの成否を包み隠さない。"""
+    declare(main_repo, testenv={"port_band": [20000, 29999],
+                                "test_kinds": {"pure": {"run": "exit 3"}}})
+    result = run(["test", str(worktree), "--kind", "pure"], cwd=main_repo)
+    assert result["rc"] == 3, result
+
+
+def test_test_passes_the_skip_reset_variables(main_repo: Path, worktree: Path) -> None:
+    declare(main_repo, testenv={
+        "port_band": [20000, 29999],
+        "test_kinds": {"stateful": {"run": "printf '%s' \"$TEST_SKIP_MIGRATE_FRESH\"",
+                                    "skip_reset": {"TEST_SKIP_MIGRATE_FRESH": "true"}}},
+    })
+    result = run(["test", str(worktree), "--kind", "stateful"], cwd=main_repo)
+    assert result["out"] == "true", result
+
+
+def test_test_passes_the_base_url(main_repo: Path, worktree: Path) -> None:
+    declare(main_repo, testenv={
+        "port_band": [20000, 29999],
+        "port_roles": {"http": 0},
+        "test_kinds": {"browser": {"run": "printf '%s' \"$PWK_BASE_URL\"",
+                                   "base_url_env": "PWK_BASE_URL"}},
+    })
+    run(["env", str(worktree)], cwd=main_repo)
+    result = run(["test", str(worktree), "--kind", "browser"], cwd=main_repo)
+    assert result["out"] == "http://localhost:20000", result
+
+
+def test_evidence_goes_under_the_worktree(main_repo: Path, worktree: Path) -> None:
+    """証跡は作業ツリー配下へ固定する。共有の保管先へは送らない。"""
+    declare(main_repo, testenv={
+        "port_band": [20000, 29999],
+        "test_kinds": {"browser": {"run": "printf '%s' \"$PWK_OUT_DIR\"",
+                                   "out_env": "PWK_OUT_DIR"}},
+    })
+    result = run(["test", str(worktree), "--kind", "browser"], cwd=main_repo)
+    assert result["out"].startswith(str(worktree)), result
+
+
+def test_evidence_path_can_be_given(main_repo: Path, worktree: Path) -> None:
+    declare(main_repo, testenv={
+        "port_band": [20000, 29999],
+        "test_kinds": {"browser": {"run": "printf '%s' \"$PWK_OUT_DIR\"",
+                                   "out_env": "PWK_OUT_DIR"}},
+    })
+    out = worktree / "evidence" / "run1"
+    result = run(["test", str(worktree), "--kind", "browser", "--out", str(out)], cwd=main_repo)
+    assert result["out"] == str(out), result
+    assert out.is_dir()
+
+
+def test_test_runs_in_the_worktree(main_repo: Path, worktree: Path) -> None:
+    declare(main_repo, testenv={"port_band": [20000, 29999],
+                                "test_kinds": {"pure": {"run": "pwd -P"}}})
+    result = run(["test", str(worktree), "--kind", "pure"], cwd=main_repo)
+    assert result["out"].strip() == str(worktree.resolve()), result
+
+
+# --- 外部公開の拒否 ---------------------------------------------------------
+
+
+def test_expose_is_refused_when_disabled(main_repo: Path, worktree: Path) -> None:
+    declare(main_repo, testenv={"port_band": [20000, 29999],
+                                "expose": {"enabled": False}})
+    result = run(["expose", str(worktree)], cwd=main_repo)
+    assert result["rc"] == 1, result
+    assert "enabled" in result["err"], result["err"]
+
+
+def test_expose_is_refused_by_default(main_repo: Path, worktree: Path) -> None:
+    """`expose` の宣言そのものが無ければ公開しない。"""
+    declare(main_repo, testenv={"port_band": [20000, 29999]})
+    result = run(["expose", str(worktree)], cwd=main_repo)
+    assert result["rc"] == 1, result
+
+
+def test_expose_is_refused_when_the_golden_tag_differs(main_repo: Path, worktree: Path) -> None:
+    declare(main_repo, testenv={
+        "port_band": [20000, 29999],
+        "expose": {"enabled": True, "public_tag": "golden-public", "base_domain": "example.test"},
+    })
+    run(["env", str(worktree)], cwd=main_repo)
+    result = run(["expose", str(worktree)], cwd=main_repo)
+    assert result["rc"] == 1, result
+    assert "一致しません" in result["err"], result["err"]
+
+
+def test_expose_records_the_url_and_closing_time(main_repo: Path, worktree: Path) -> None:
+    declare(main_repo, testenv={
+        "port_band": [20000, 29999],
+        "expose": {"enabled": True, "public_tag": "golden-public",
+                   "base_domain": "example.test", "ttl": "8h"},
+    })
+    run(["env", str(worktree)], cwd=main_repo)
+    # 公開を許す基準が載っている状態を作る。
+    path = main_repo / ".git" / "ndf" / "worktree-registry.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["assignments"][0]["golden_tag"] = "golden-public"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    result = run(["expose", str(worktree)], cwd=main_repo)
+    assert result["rc"] == 0, result
+    assert result["out"].strip() == "https://wt0.example.test", result["out"]
+
+    run(["unexpose", str(worktree)], cwd=main_repo)
+    row = registry(main_repo)["assignments"][0]
+    assert row["expose"]["url"] == "https://wt0.example.test", "URL は残す"
+    assert row["expose"]["closed_at"] is not None
+
+
+def test_expose_allows_only_one_at_a_time(main_repo: Path, worktree: Path) -> None:
+    declare(main_repo, testenv={
+        "port_band": [20000, 29999],
+        "expose": {"enabled": True, "public_tag": "golden-public", "base_domain": "example.test"},
+    })
+    second = main_repo / ".worktrees" / "fix" / "y"
+    git(main_repo, "worktree", "add", "-q", "-b", "fix/y", str(second))
+    run(["env", str(worktree)], cwd=main_repo)
+    run(["env", str(second)], cwd=main_repo)
+
+    path = main_repo / ".git" / "ndf" / "worktree-registry.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    for row in data["assignments"]:
+        row["golden_tag"] = "golden-public"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    assert run(["expose", str(worktree)], cwd=main_repo)["rc"] == 0
+    blocked = run(["expose", str(second)], cwd=main_repo)
+    assert blocked["rc"] == 1, blocked
+    assert "公開中" in blocked["err"], blocked["err"]
+
+
+def test_down_releases_the_slot(main_repo: Path, worktree: Path) -> None:
+    declare(main_repo, testenv={"port_band": [20000, 29999], "port_roles": {"http": 0}})
+    run(["env", str(worktree)], cwd=main_repo)
+    result = run(["down", str(worktree)], cwd=main_repo)
+    assert result["rc"] == 0, result
+    rows = registry(main_repo)["assignments"]
+    assert rows[0]["released_at"] is not None

@@ -1,0 +1,331 @@
+#!/usr/bin/env bash
+# NDF plugin: 作業ツリーごとにテスト環境を分けて立てる。
+#
+#   env <作業ツリー>                       環境名・スロット・ポートを出力し、台帳へ記録する
+#   tag [作業ツリー]                       基準のタグを、データ構造を定める資産の内容から計算する
+#   bake --tag <値>                        基準を作る
+#   up <作業ツリー> [--profile <名前>] [--tag <値>]  起動する
+#   test <作業ツリー> --kind <種類> [--out <パス>]   宣言の実行コマンドを走らせる
+#   stop <作業ツリー>                      止める。データは残す
+#   down <作業ツリー> [--volumes]          破棄し、割り当てを解放する
+#   expose <作業ツリー>                    外部公開する
+#   unexpose <作業ツリー>                  公開を閉じる
+#   reap --idle <時間>                     使われていないテスト環境を止める
+#
+# 終了コードは 0 を「処理が完了した」、1 を「処理できなかった」、2 を「対象外」に
+# 割り当てる。`test` だけは実行したコマンドの終了コードをそのまま返す。
+# **テストの成否を包み隠さないため**である。
+#
+# 宣言ファイル (.ndf/localenv.json) が無い、または testenv の宣言が無いリポジトリ
+# では、すべてのサブコマンドが何も出力せず終了コード 0 で終わる。
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/worktree-common.sh
+. "$SCRIPT_DIR/lib/worktree-common.sh" 2>/dev/null || exit 0
+
+command -v jq >/dev/null 2>&1 || exit 0
+command -v git >/dev/null 2>&1 || exit 0
+
+SUBCOMMAND="${1:-}"
+shift 2>/dev/null || true
+
+TARGET=""
+PROFILE=""
+KIND=""
+OUT=""
+TAG=""
+IDLE=""
+WITH_VOLUMES=0
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --profile) PROFILE="${2:-}"; shift 2 ;;
+    --kind) KIND="${2:-}"; shift 2 ;;
+    --out) OUT="${2:-}"; shift 2 ;;
+    --tag) TAG="${2:-}"; shift 2 ;;
+    --idle) IDLE="${2:-}"; shift 2 ;;
+    --volumes) WITH_VOLUMES=1; shift ;;
+    --) shift ;;
+    -*) printf '知らないオプションです: %s\n' "$1" >&2; exit 1 ;;
+    *) [ -n "$TARGET" ] || TARGET="$1"; shift ;;
+  esac
+done
+
+MAIN_DIR=$(wt_main_dir) || exit 0
+DECLARATION=$(wt_declaration "$MAIN_DIR") || exit 0
+
+decl_get() { printf '%s' "$DECLARATION" | jq -r "$1" 2>/dev/null; }
+decl_raw() { printf '%s' "$DECLARATION" | jq -c "$1" 2>/dev/null; }
+
+# testenv の宣言が無いリポジトリでは何もしない。
+printf '%s' "$DECLARATION" | jq -e '(.testenv | type) == "object"' >/dev/null 2>&1 || exit 0
+
+[ -n "$TARGET" ] || TARGET=$(pwd -P)
+TARGET=$(wt_normalize_path "$TARGET" "$(pwd -P)")
+
+target_branch() { git -C "$TARGET" symbolic-ref --short -q HEAD 2>/dev/null; }
+registry() { wt_registry_path "$MAIN_DIR"; }
+
+# --- tag --------------------------------------------------------------------
+
+# 基準のタグは、データ構造を定める資産の内容から決める。
+# 同じ内容なら同じ値になるため、焼き直しが要るかを内容で判定できる。
+do_tag() {
+  local -a paths=()
+  _wt_read_lines < <(decl_get '.testenv.golden_tag_paths // [] | .[]')
+  paths=("${WT_LINES[@]+"${WT_LINES[@]}"}")
+  [ "${#paths[@]}" -gt 0 ] || return 2
+
+  local digest
+  digest=$(git -C "$TARGET" ls-tree -r HEAD -- "${paths[@]}" 2>/dev/null \
+    | (sha1sum 2>/dev/null || shasum 2>/dev/null) | cut -c1-12)
+  [ -n "$digest" ] || return 1
+  printf '%s\n' "$digest"
+}
+
+# --- env --------------------------------------------------------------------
+
+do_env() {
+  local branch environment slot band_low ports role role_number port
+  branch=$(target_branch) || true
+  [ -n "$branch" ] || { printf '作業ツリーのブランチを取れません: %s\n' "$TARGET" >&2; return 1; }
+
+  environment=$(wt_env_name "$MAIN_DIR" "$branch") || return 1
+  slot=$(wt_slot_acquire "$MAIN_DIR" "$TARGET" "$branch" "$environment") || {
+    printf '空きスロットがありません（上限 %s）\n' "$((WT_SLOT_MAX + 1))" >&2
+    return 1
+  }
+
+  band_low=$(decl_get '.testenv.port_band[0] // empty')
+  ports="{}"
+  if [ -n "$band_low" ]; then
+    while IFS=$'\t' read -r role role_number; do
+      [ -n "$role" ] || continue
+      port=$(wt_port_for "$band_low" "$slot" "$role_number") || continue
+      ports=$(printf '%s' "$ports" | jq --arg r "$role" --argjson p "$port" '. + {($r): $p}')
+    done < <(decl_get '.testenv.port_roles // {} | to_entries[] | "\(.key)\t\(.value)"')
+    wt_slot_set_ports "$MAIN_DIR" "$TARGET" "$ports"
+  fi
+
+  jq -n --arg environment "$environment" --argjson slot "$slot" \
+        --arg worktree "$TARGET" --arg branch "$branch" --argjson ports "$ports" \
+    '{environment: $environment, slot: $slot, worktree: $worktree, branch: $branch, ports: $ports}'
+}
+
+# 起動と停止で使う共通の値を変数へ入れる。
+load_assignment() {
+  ENVIRONMENT=""
+  SLOT=""
+  local row
+  row=$(wt_registry_read "$(registry)" \
+    | jq -c --arg wt "$TARGET" \
+      '[.assignments[] | select(.released_at == null and .worktree == $wt)] | last' 2>/dev/null)
+  [ -n "$row" ] && [ "$row" != "null" ] || return 1
+  ENVIRONMENT=$(printf '%s' "$row" | jq -r '.environment')
+  SLOT=$(printf '%s' "$row" | jq -r '.slot')
+}
+
+compose() {
+  local -a files=()
+  _wt_read_lines < <(decl_get '.localenv.compose_files // [] | .[]')
+  local f
+  for f in "${WT_LINES[@]+"${WT_LINES[@]}"}"; do
+    [ -n "$f" ] || continue
+    files+=(-f "$TARGET/$f")
+  done
+  [ "${#files[@]}" -gt 0 ] || return 2
+  docker compose -p "$ENVIRONMENT" "${files[@]}" "$@"
+}
+
+# --- bake -------------------------------------------------------------------
+
+do_bake() {
+  [ -n "$TAG" ] || { printf '--tag が要ります\n' >&2; return 1; }
+  command -v docker >/dev/null 2>&1 || { printf 'コンテナ実行系が見つかりません\n' >&2; return 1; }
+
+  local source_volume golden
+  while IFS=$'\t' read -r source_volume golden; do
+    [ -n "$source_volume" ] || continue
+    if docker volume inspect "${golden}-${TAG}" >/dev/null 2>&1; then
+      printf '同じタグの基準が既にあります: %s\n' "${golden}-${TAG}"
+      return 2
+    fi
+  done < <(decl_get '.testenv.golden_volumes // {} | to_entries[] | "\(.key)\t\(.value)"')
+
+  while IFS=$'\t' read -r source_volume golden; do
+    [ -n "$source_volume" ] || continue
+    docker volume create "${golden}-${TAG}" >/dev/null || return 1
+    docker run --rm -v "${source_volume}:/from:ro" -v "${golden}-${TAG}:/to" \
+      alpine sh -c 'cd /from && cp -a . /to' || return 1
+    printf '基準を作りました: %s\n' "${golden}-${TAG}"
+  done < <(decl_get '.testenv.golden_volumes // {} | to_entries[] | "\(.key)\t\(.value)"')
+}
+
+# --- up / stop / down -------------------------------------------------------
+
+do_up() {
+  load_assignment || { do_env >/dev/null || return 1; load_assignment || return 1; }
+  command -v docker >/dev/null 2>&1 || { printf 'コンテナ実行系が見つかりません\n' >&2; return 1; }
+
+  [ -n "$TAG" ] || TAG=$(do_tag) || TAG=""
+  if [ -n "$TAG" ]; then
+    wt_registry_update "$(registry)" \
+      "$(printf '.assignments |= map(if .worktree == "%s" and .released_at == null then .golden_tag = "%s" else . end)' "$TARGET" "$TAG")"
+  fi
+
+  local -a services=()
+  if [ -n "$PROFILE" ]; then
+    _wt_read_lines < <(decl_get ".testenv.profiles.\"$PROFILE\" // [] | .[]")
+    services=("${WT_LINES[@]+"${WT_LINES[@]}"}")
+  fi
+  # 定義に無いコンテナを削除する指定は付けない。稼働中のプロジェクトに定義外の
+  # コンテナが属していることがあり、付けると削除される。
+  compose up -d "${services[@]+"${services[@]}"}"
+}
+
+do_stop() {
+  load_assignment || return 0
+  command -v docker >/dev/null 2>&1 || return 0
+  compose stop
+}
+
+do_down() {
+  load_assignment || return 0
+  if command -v docker >/dev/null 2>&1; then
+    if [ "$WITH_VOLUMES" = 1 ]; then
+      compose down --volumes
+    else
+      compose down
+    fi
+  fi
+  wt_slot_release "$MAIN_DIR" "$TARGET"
+}
+
+# --- test -------------------------------------------------------------------
+
+do_test() {
+  [ -n "$KIND" ] || { printf '--kind が要ります\n' >&2; return 1; }
+  local run base_url_env out_env
+  run=$(decl_get ".testenv.test_kinds.\"$KIND\".run // empty")
+  # 種類の宣言が無いリポジトリでは何もしない（受け入れ条件 39）。
+  [ -n "$run" ] || return 0
+
+  load_assignment || { do_env >/dev/null || return 1; load_assignment || return 1; }
+
+  local -a env_pairs=()
+  # 初期化を抑止する指定を渡す。渡さないと最初のテストが全体を作り直す構成がある。
+  local key value
+  while IFS=$'\t' read -r key value; do
+    [ -n "$key" ] || continue
+    env_pairs+=("$key=$value")
+  done < <(decl_get ".testenv.test_kinds.\"$KIND\".skip_reset // {} | to_entries[] | \"\(.key)\t\(.value)\"")
+
+  base_url_env=$(decl_get ".testenv.test_kinds.\"$KIND\".base_url_env // empty")
+  if [ -n "$base_url_env" ]; then
+    local http_port
+    http_port=$(wt_registry_read "$(registry)" \
+      | jq -r --arg wt "$TARGET" '[.assignments[] | select(.released_at == null and .worktree == $wt)] | last | .ports.http // empty')
+    [ -n "$http_port" ] && env_pairs+=("$base_url_env=http://localhost:$http_port")
+  fi
+
+  out_env=$(decl_get ".testenv.test_kinds.\"$KIND\".out_env // empty")
+  if [ -n "$out_env" ]; then
+    # 証跡は作業ツリー配下へ固定する。共有の保管先へは送らない。
+    [ -n "$OUT" ] || OUT="$TARGET/.ndf-evidence/$ENVIRONMENT-$(date -u +%Y%m%dT%H%M%SZ)"
+    mkdir -p "$OUT" 2>/dev/null
+    env_pairs+=("$out_env=$OUT")
+  fi
+
+  (cd "$TARGET" && env "${env_pairs[@]+"${env_pairs[@]}"}" sh -c "$run")
+}
+
+# --- expose / unexpose ------------------------------------------------------
+
+do_expose() {
+  local enabled public_tag base_domain ttl loaded_tag host
+  enabled=$(decl_get '.testenv.expose.enabled // false')
+  if [ "$enabled" != "true" ]; then
+    printf '拒否: testenv.expose.enabled が有効ではありません\n' >&2
+    return 1
+  fi
+
+  public_tag=$(decl_get '.testenv.expose.public_tag // empty')
+  base_domain=$(decl_get '.testenv.expose.base_domain // empty')
+  if [ -z "$public_tag" ] || [ -z "$base_domain" ]; then
+    printf '拒否: testenv.expose.public_tag と base_domain が要ります\n' >&2
+    return 1
+  fi
+
+  load_assignment || { printf '拒否: 割り当てがありません\n' >&2; return 1; }
+
+  loaded_tag=$(wt_registry_read "$(registry)" \
+    | jq -r --arg wt "$TARGET" '[.assignments[] | select(.released_at == null and .worktree == $wt)] | last | .golden_tag // empty')
+  if [ "$loaded_tag" != "$public_tag" ]; then
+    printf '拒否: 載っている基準（%s）が公開を許す基準（%s）と一致しません\n' \
+      "${loaded_tag:-なし}" "$public_tag" >&2
+    return 1
+  fi
+
+  # 折り返しを使う公開は先着 1 本で排他する。
+  local open_count
+  open_count=$(wt_registry_read "$(registry)" \
+    | jq -r --arg wt "$TARGET" '[.assignments[] | select(.expose != null and .expose.closed_at == null and .worktree != $wt)] | length')
+  if [ "${open_count:-0}" -gt 0 ]; then
+    printf '拒否: 別のテスト環境が公開中です（同時に開けるのは 1 本）\n' >&2
+    return 1
+  fi
+
+  ttl=$(decl_get '.testenv.expose.ttl // "8h"')
+  host="wt${SLOT}.${base_domain}"
+  wt_registry_update "$(registry)" \
+    "$(printf '.assignments |= map(if .worktree == "%s" and .released_at == null then .expose = {url: "https://%s", ttl: "%s", opened_at: (now | todate), closed_at: null} else . end)' \
+      "$TARGET" "$host" "$ttl")" || return 1
+  printf 'https://%s\n' "$host"
+}
+
+do_unexpose() {
+  wt_registry_update "$(registry)" \
+    "$(printf '.assignments |= map(if .worktree == "%s" and .expose != null and .expose.closed_at == null then .expose.closed_at = (now | todate) else . end)' "$TARGET")"
+}
+
+# --- reap -------------------------------------------------------------------
+
+do_reap() {
+  [ -n "$IDLE" ] || { printf '--idle が要ります\n' >&2; return 1; }
+  command -v docker >/dev/null 2>&1 || return 0
+
+  local worktree
+  while IFS= read -r worktree; do
+    [ -n "$worktree" ] || continue
+    # 使用中の作業ツリーは対象から外す。
+    [ -d "$worktree" ] || continue
+    TARGET="$worktree"
+    load_assignment || continue
+    if [ -z "$(docker ps -q --filter "label=com.docker.compose.project=$ENVIRONMENT" 2>/dev/null)" ]; then
+      continue
+    fi
+    printf '停止します: %s（%s）\n' "$ENVIRONMENT" "$worktree"
+    compose stop
+  done < <(wt_registry_read "$(registry)" \
+    | jq -r '[.assignments[] | select(.released_at == null) | .worktree] | unique | .[]')
+}
+
+# --- 入口 -------------------------------------------------------------------
+
+case "$SUBCOMMAND" in
+  env) do_env ;;
+  tag) do_tag ;;
+  bake) do_bake ;;
+  up) do_up ;;
+  test) do_test ;;
+  stop) do_stop ;;
+  down) do_down ;;
+  expose) do_expose ;;
+  unexpose) do_unexpose ;;
+  reap) do_reap ;;
+  *)
+    printf '使い方: worktree-testenv.sh <env|tag|bake|up|test|stop|down|expose|unexpose|reap> [対象] [オプション]\n' >&2
+    exit 1
+    ;;
+esac
