@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-from conftest import make_state, read_state
+from crossref_helpers import make_state, read_state
 
 
 # ---------- モデル指定の解析 ----------

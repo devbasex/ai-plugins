@@ -29,9 +29,9 @@ skills/     → 実行可能なワークフロー
 
 詳細は `docs/specifications/ndf-knowledge-and-kiro.md` を参照。
 
-## NDF v9.1.2 の Skill 構成
+## NDF v9.2.0 の Skill 構成
 
-Skill は 31 個で、配布は `plugins/ndf/manifests/` が唯一の基準（Claude Code 27 / Codex 25 / Kiro 26）。ブラウザ自動テストの 4 個は `playwright-kit` プラグインへ分離した（`plugins/playwright-kit/`）。frontmatter の書き方は `plugins/ndf/skills/README.md` の規約に従い、`python3 scripts/check-skill-frontmatter.py` で検査する。利用実績と維持・統合・削除の判定は `docs/specifications/ndf-skill-inventory.md` に記録する。
+Skill は 32 個で、配布は `plugins/ndf/manifests/` が唯一の基準（Claude Code 28 / Codex 26 / Kiro 27）。ブラウザ自動テストの 4 個は `playwright-kit` プラグインへ分離した（`plugins/playwright-kit/`）。frontmatter の書き方は `plugins/ndf/skills/README.md` の規約に従い、`python3 scripts/check-skill-frontmatter.py` で検査する。利用実績と維持・統合・削除の判定は `docs/specifications/ndf-skill-inventory.md` に記録する。
 
 v6.1.0 で開発方法論レイヤーの 5 個（`development-workflow` / `requirements-design` / `tdd-cycle` / `refactoring`（当時は `safe-refactoring`）/ `quality-gates`）を追加した。モード判定の基準を持つのは `development-workflow` だけで、他の Skill とエージェント定義は判定結果を受け取る側に徹する。
 
@@ -64,6 +64,10 @@ v9.1.0 で `markdown-writing` に「指す対象が文脈で変わる語に、�
 v9.1.1 で多義語のセルフチェックを `if` 文へ直した。`[ 条件 ] && echo` の形は、候補が 1 つも出ないときにループ最後の判定が偽になり、終了コードが 1 になる。候補が無いことは正常な結果であり、失敗と読める値を返さないようにした。
 
 v9.1.2 で適用の範囲をガイドと `SKILL.md` へ明記した。新しく書く文書と改訂する文書に適用し、既存の文書を一括で直す必要はない。一括版のコマンドは改訂の対象を選ぶために使うもので、出力されたファイルはその場で直す対象の一覧ではない。
+
+v9.2.0 で `worktree` を追加し、開発の変更を作業ツリーの中で行う運用を 3 ランタイムへ結んだ。主ディレクトリの編集は**拒否しない**。誤検知で正当な操作が止まる状態を作らないため、誘導（tool 実行前の hook）・逸脱検知（セッション開始時の hook）・是正（Skill の移送手順）の 3 層で支える。判定はすべて `plugins/ndf/scripts/lib/worktree-common.sh` に集め、入口のスクリプトは入出力の整形だけを行う。**リポジトリ側に `.ndf/localenv.json` があるときだけ動き**、無ければ何も出力せず終了コード 0 で終わる。
+
+実機確認で 2 件の設計の取りこぼしが出た。Codex CLI はファイルの編集を `apply_patch` で渡し、パスは `tool_input.file_path` ではなくパッチ本文の `*** Update File:` 行に入る。セッション開始時の出力は、平文と JSON を同時に書くと標準出力全体が JSON として読めず、Claude Code が両方をまとめて 1 つの本文として積む。設計 05 は双方へ書くとしていたが、事象で分ける形へ改めた。あわせて hook の matcher と判定が別の場所にあったため、`WT_EDIT_TOOLS` / `WT_PATCH_TOOLS` / `WT_SHELL_TOOLS` へ集約し、両者の一致をテストで検査する。詳細は `issues/issue-146-worktree-first/`。
 
 v6.0.0 の対応表（`review` → `pr-review`）は予告どおり削除済み。v6.0.0 以前から移行する場合は v6.1.0 の `ndf-policies` を参照する。
 

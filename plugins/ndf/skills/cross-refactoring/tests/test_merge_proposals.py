@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from conftest import make_state, read_state, write_result
+from crossref_helpers import make_state, read_state, write_result
 
 
 def proposal(**over):

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from conftest import run_lib
+from worktree_helpers import run_lib
 
 DEFAULTS = '"${WT_DEFAULT_ALLOW_PATHS[@]}"'
 

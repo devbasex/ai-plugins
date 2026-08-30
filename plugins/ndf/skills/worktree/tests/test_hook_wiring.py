@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import SCRIPTS_DIR, run_lib
+from worktree_helpers import SCRIPTS_DIR, run_lib
 
 HOOKS_DIR = SCRIPTS_DIR.parent / "hooks"
 INSTALL_SH = SCRIPTS_DIR.parent / "dev.kiro" / "install.sh"

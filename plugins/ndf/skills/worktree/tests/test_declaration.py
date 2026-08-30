@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from conftest import run_lib, write_declaration
+from worktree_helpers import run_lib, write_declaration
 
 
 def read_declaration(main_repo: Path) -> tuple[str, int]:

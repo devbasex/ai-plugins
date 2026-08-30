@@ -14,6 +14,9 @@
 
 ### Git運用ルール
 - **mainブランチへの直接コミット/プッシュ禁止**
+- **開発の変更は `.worktrees/<ブランチ名>` の作業ツリーの中で行う**（`/ndf:worktree`）。clone したディレクトリ（主ディレクトリ）は編集対象から外す
+  - `issues/` `docs/` と各ランタイムの設定は主ディレクトリで編集してよい
+  - 主ディレクトリの編集は拒否されない。案内が出ても操作は成立する
 - 必ずfeatureブランチを作成して作業
 - Pull Requestを通じてレビュー・マージ
 - ユーザーの許可なくPRを承認しない
@@ -66,9 +69,9 @@ ai-plugins/
 
 ## NDFプラグインについて
 
-**NDFプラグイン**は、このマーケットプレイスの主要プラグインです（v9.1.2）。plugin 名は全ランタイムで `ndf` を維持し、配布物は `plugins/ndf/` の1ディレクトリにまとまっています。
+**NDFプラグイン**は、このマーケットプレイスの主要プラグインです（v9.2.0）。plugin 名は全ランタイムで `ndf` を維持し、配布物は `plugins/ndf/` の1ディレクトリにまとまっています。
 - Skill の実体は `plugins/ndf/skills/` の1箇所。配布先は `plugins/ndf/manifests/*-skills.txt` が決める
-- Claude Code版は 8個の専門サブエージェント、公開Skills、SessionStart/Stopフックを提供
+- Claude Code版は 8個の専門サブエージェント、公開Skills、PreToolUse/SessionStart/Stopフックを提供
 - Codex版は Codex向け公開Skillsと任意Slack通知hookを提供
 - Kiro版は `plugins/ndf/dev.kiro/install.sh` で `.kiro/skills/`、`.kiro/steering/ndf-policies.md`、`.kiro/agents/ndf.json` を生成
 - 外部AI委譲は `/ndf:external-ai` skill と `corder` エージェント経由で Codex / Gemini CLI を呼び出し（v4.0.0 で Codex MCP サーバは廃止）

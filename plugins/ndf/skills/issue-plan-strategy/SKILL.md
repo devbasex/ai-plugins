@@ -122,6 +122,9 @@ git checkout -b release/<PLAN-ID> origin/<default-branch>
 git push -u origin release/<PLAN-ID>
 ```
 
+release ブランチは統合先であって作業場所ではないため、主ディレクトリで作ってよい。
+**実装を載せる個別 PR ブランチは Step 5 の作業ツリーで開く** (`/ndf:worktree`)。
+
 ### レビュアー視点の原則 (release PR body の大前提)
 
 個別 PR は AI による収束レビュー (`/ndf:cross-review` 等) で merge される。**人間のレビュアーが見るのは release PR だけ**であり、個別 PR の存在をレビュアーに意識させてはならない。したがって:
@@ -205,21 +208,28 @@ EOF
 
 ## Step 5: git worktree で並行開発
 
-並行可能 (依存なし or mock で先行可) な PR は **git worktree** で同時に開く:
+並行可能 (依存なし or mock で先行可) な PR は **git worktree** で同時に開く。置き場所は
+`<主ディレクトリ>/.worktrees/<ブランチ名>` で、ブランチ名がそのままパスになる
+(`/ndf:worktree`)。
 
 ```bash
-# repo ルート (default branch のまま) で
-git worktree add ../<repo>-<PLAN-ID>-schema feature/<PLAN-ID>-schema
-git worktree add ../<repo>-<PLAN-ID>-ui     feature/<PLAN-ID>-ui
+# 主ディレクトリ (default branch のまま) で
+main_dir=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
+git worktree add "$main_dir/.worktrees/feature/<PLAN-ID>-schema" feature/<PLAN-ID>-schema
+git worktree add "$main_dir/.worktrees/feature/<PLAN-ID>-ui"     feature/<PLAN-ID>-ui
 
 # それぞれの worktree で別ターミナル / 別エージェントを起動
 ```
+
+`.worktrees/` が `.gitignore` に登録されていないと、作業ツリーの中身が追跡対象に入る。
+**作成より先に登録する** (手順は `/ndf:worktree`)。
 
 ガイドライン:
 
 - **依存のある PR は順次着手**する (PR1 merge → PR2 開始)
 - 並行 PR 間で同じファイルを触る場合は事前にレビュー観点で分担を明確化する
-- 終わった worktree は `git worktree remove <path>` で片付ける
+- 終わった worktree は `git worktree remove <path>` で片付ける。マージ後の後片付けは
+  `/ndf:merged` が扱う
 - Claude Code から並行開発を指示する場合、Agent tool の `isolation: "worktree"` も検討する
 
 ## Step 6: 個別 PR のレビュー

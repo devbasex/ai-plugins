@@ -61,7 +61,8 @@ load_state() {
   MAIN_DIR=$(jq -r '.main_dir // empty' "$STATE_FILE" 2>/dev/null)
   IN_WORKTREE=$(jq -r 'if .in_worktree then 0 else 1 end' "$STATE_FILE" 2>/dev/null)
   HAS_DECLARATION=$(jq -r 'if .has_declaration then 1 else 0 end' "$STATE_FILE" 2>/dev/null)
-  mapfile -t ALLOW_PATHS < <(jq -r '(.allow_paths // []) | .[]' "$STATE_FILE" 2>/dev/null)
+  _wt_read_lines < <(jq -r '(.allow_paths // []) | .[]' "$STATE_FILE" 2>/dev/null)
+  ALLOW_PATHS=("${WT_LINES[@]+"${WT_LINES[@]}"}")
   [ -n "$MAIN_DIR" ]
 }
 
@@ -75,7 +76,8 @@ compute_state() {
     HAS_DECLARATION=0
     decl=""
   fi
-  mapfile -t ALLOW_PATHS < <(wt_allow_paths "$decl")
+  _wt_read_lines < <(wt_allow_paths "$decl")
+  ALLOW_PATHS=("${WT_LINES[@]+"${WT_LINES[@]}"}")
   return 0
 }
 
@@ -134,13 +136,15 @@ if [[ "$TOOL" =~ ^($WT_PATCH_TOOLS)$ ]]; then
             else empty end'
   )
   [ -n "$patch_text" ] || exit 0
-  mapfile -t targets < <(wt_extract_patch_target "$patch_text")
+  _wt_read_lines < <(wt_extract_patch_target "$patch_text")
+  targets=("${WT_LINES[@]+"${WT_LINES[@]}"}")
 elif [[ "$TOOL" =~ ^($WT_EDIT_TOOLS)$ ]]; then
-  mapfile -t targets < <(
+  _wt_read_lines < <(
     jq_get '[.tool_input.file_path?, .tool_input.path?, .tool_input.notebook_path?,
              (.tool_input.edits[]?.file_path?), (.tool_input.operations[]?.path?)]
             | map(select(type == "string" and . != "")) | unique | .[]'
   )
+  targets=("${WT_LINES[@]+"${WT_LINES[@]}"}")
 elif [[ "$TOOL" =~ ^($WT_SHELL_TOOLS)$ ]]; then
   command_text=$(
     jq_get 'if (.tool_input.command | type) == "array" then (.tool_input.command | join(" "))
@@ -148,7 +152,8 @@ elif [[ "$TOOL" =~ ^($WT_SHELL_TOOLS)$ ]]; then
             else empty end'
   )
   [ -n "$command_text" ] || exit 0
-  mapfile -t targets < <(wt_extract_write_target "$command_text")
+  _wt_read_lines < <(wt_extract_write_target "$command_text")
+  targets=("${WT_LINES[@]+"${WT_LINES[@]}"}")
 else
   exit 0
 fi
