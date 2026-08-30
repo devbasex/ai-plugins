@@ -73,3 +73,36 @@ def test_compound_command_reports_each_target() -> None:
 def test_devnull_is_ignored() -> None:
     targets, rc = extract("command -v jq > /dev/null 2>&1")
     assert rc == 1, targets
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        ("sed -i 's/a/b/' one.md two.md", ["one.md", "two.md"]),
+        ("sed -i -e 's/a/b/' one.md two.md", ["one.md", "two.md"]),
+        ("sed -i --expression='s/a/b/' one.md two.md", ["one.md", "two.md"]),
+        ("sed -i 's/a b/c d/' one.md two.md", ["one.md", "two.md"]),
+    ],
+)
+def test_inplace_sed_reports_every_file(command: str, expected: list[str]) -> None:
+    """複数ファイルを編集する in-place sed は、全ファイルを書き込み先として返す。"""
+    targets, rc = extract(command)
+    assert rc == 0, command
+    assert targets == expected, (command, targets)
+
+
+def test_sed_script_with_spaces_is_one_word() -> None:
+    """引用符の中の空白でスクリプトが分かれ、ファイル名と取り違えられない。"""
+    targets, _ = extract("sed -i 's/foo bar/baz/' plugins/ndf/README.md")
+    assert targets == ["plugins/ndf/README.md"], targets
+
+
+def test_quoted_path_with_space() -> None:
+    targets, rc = extract('echo hi > "docs/my notes.md"')
+    assert rc == 0
+    assert targets == ["docs/my notes.md"], targets
+
+
+def test_read_only_sed_with_multiple_files() -> None:
+    targets, rc = extract("sed -n '1p' one.md two.md")
+    assert rc == 1, targets

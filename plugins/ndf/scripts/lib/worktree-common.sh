@@ -154,14 +154,28 @@ wt_relative_to_main() {
 
 # --- シェルコマンドからの書き込み先の推定 -----------------------------------
 
-# 前後の引用符を外す。
-_wt_unquote() {
-  local s="$1"
-  case "$s" in
-    \"*\") s=${s#\"}; s=${s%\"} ;;
-    \'*\') s=${s#\'}; s=${s%\'} ;;
-  esac
-  printf '%s' "$s"
+# シェルの語分割を、引用符を解釈しながら行う。1 行 1 語で出力する。
+# `sed -i 's/a b/c/' f` のように引用符の中へ空白を含む形を 1 語として扱うため、
+# 単純な空白区切りでは足りない。
+_wt_tokenize() {
+  local s="${1:-}" n=${#1} i c quote="" cur=""
+  local -a out=()
+  for ((i = 0; i < n; i++)); do
+    c=${s:i:1}
+    if [ -n "$quote" ]; then
+      if [ "$c" = "$quote" ]; then quote=""; else cur+="$c"; fi
+      continue
+    fi
+    case "$c" in
+      "'"|'"') quote="$c" ;;
+      " "|$'\t'|$'\n')
+        if [ -n "$cur" ]; then out+=("$cur"); cur=""; fi
+        ;;
+      *) cur+="$c" ;;
+    esac
+  done
+  [ -n "$cur" ] && out+=("$cur")
+  printf '%s\n' "${out[@]+"${out[@]}"}"
 }
 
 # 書き込み先として採らない語かを判定する。
@@ -186,55 +200,62 @@ wt_extract_write_target() {
   spaced=${spaced//>/ __WT_REDIR__ }
 
   local -a words=()
-  read -r -a words <<<"$spaced"
+  mapfile -t words < <(_wt_tokenize "$spaced")
 
   local n=${#words[@]} i j w target found=0
+  _emit() {
+    if ! _wt_is_not_target "$1"; then
+      printf '%s\n' "$1"
+      found=1
+    fi
+  }
+
   for ((i = 0; i < n; i++)); do
     w=${words[i]}
     case "$w" in
       __WT_REDIR__|__WT_APPEND__)
-        target=$(_wt_unquote "${words[i + 1]:-}")
-        if ! _wt_is_not_target "$target"; then
-          printf '%s\n' "$target"
-          found=1
-        fi
+        _emit "${words[i + 1]:-}"
         ;;
       tee)
         for ((j = i + 1; j < n; j++)); do
           case "${words[j]}" in
             -*) continue ;;
             __WT_*|"|"|"&&"|";") break ;;
-            *)
-              target=$(_wt_unquote "${words[j]}")
-              if ! _wt_is_not_target "$target"; then
-                printf '%s\n' "$target"
-                found=1
-              fi
-              break
-              ;;
+            *) _emit "${words[j]}"; break ;;
           esac
         done
         ;;
       sed)
-        local has_inplace=0 last=""
+        # in-place の指定があるとき、操作対象のファイルをすべて拾う。
+        # `-e` / `-f` が現れなければ、最初の被演算子がスクリプトで残りがファイル。
+        local has_inplace=0 seen_script=0 skip_next=0
+        local -a files=()
         for ((j = i + 1; j < n; j++)); do
+          if [ "$skip_next" = 1 ]; then skip_next=0; continue; fi
           case "${words[j]}" in
+            __WT_*|"|"|"&&"|";") break ;;
             --in-place|--in-place=*) has_inplace=1 ;;
+            -e|-f) seen_script=1; skip_next=1 ;;
+            --expression=*|--file=*) seen_script=1 ;;
+            --) ;;
             -*)
               if [[ ${words[j]} =~ ^-[a-zA-Z]*i([a-zA-Z]*|\..*)$ ]]; then
                 has_inplace=1
               fi
               ;;
-            __WT_*|"|"|"&&"|";") break ;;
-            *) last=${words[j]} ;;
+            *)
+              if [ "$seen_script" = 0 ]; then
+                seen_script=1
+              else
+                files+=("${words[j]}")
+              fi
+              ;;
           esac
         done
         if [ "$has_inplace" = 1 ]; then
-          target=$(_wt_unquote "$last")
-          if ! _wt_is_not_target "$target"; then
-            printf '%s\n' "$target"
-            found=1
-          fi
+          for target in "${files[@]+"${files[@]}"}"; do
+            _emit "$target"
+          done
         fi
         ;;
       cp|mv)
@@ -246,15 +267,12 @@ wt_extract_write_target() {
             *) dest=${words[j]} ;;
           esac
         done
-        target=$(_wt_unquote "$dest")
-        if ! _wt_is_not_target "$target"; then
-          printf '%s\n' "$target"
-          found=1
-        fi
+        _emit "$dest"
         ;;
     esac
   done
 
+  unset -f _emit
   [ "$found" = 1 ] || return 1
 }
 
