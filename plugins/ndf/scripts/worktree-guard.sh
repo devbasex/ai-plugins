@@ -121,16 +121,20 @@ esac
 
 # --- tool 実行前 ------------------------------------------------------------
 
+# ツール名はランタイムごとに違う。判定を 1 つに保つため、ここで種別へ正規化する。
+# 結線しているランタイム (Claude Code / Codex CLI / Kiro CLI) の名前に加えて、
+# 委譲先として動きうる CLI の名前も併記する。取りこぼすと案内が出ないだけで、
+# 余分に並べても該当しなければ何も起きない。
 targets=()
 case "$TOOL" in
-  Edit|MultiEdit|Write|NotebookEdit|fs_write|edit_file|write_file|apply_patch|str_replace_editor)
+  Edit|MultiEdit|Write|NotebookEdit|fs_write|edit_file|write_file|apply_patch|str_replace_editor|replace)
     mapfile -t targets < <(
       jq_get '[.tool_input.file_path?, .tool_input.path?, .tool_input.notebook_path?,
                (.tool_input.edits[]?.file_path?), (.tool_input.operations[]?.path?)]
               | map(select(type == "string" and . != "")) | unique | .[]'
     )
     ;;
-  Bash|shell|execute_bash|local_shell|run_command)
+  Bash|shell|execute_bash|local_shell|run_command|run_shell_command)
     command_text=$(
       jq_get 'if (.tool_input.command | type) == "array" then (.tool_input.command | join(" "))
               elif (.tool_input.command | type) == "string" then .tool_input.command

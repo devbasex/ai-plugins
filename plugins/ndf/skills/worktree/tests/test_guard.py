@@ -190,3 +190,29 @@ def test_broken_stdin_does_not_fail(main_repo: Path) -> None:
     )
     assert proc.returncode == 0
     assert proc.stdout.strip() == ""
+
+
+def test_gemini_replace_is_normalized(main_repo: Path) -> None:
+    """Gemini CLI の部分書き換えツールは `replace` を名乗る。"""
+    declared(main_repo)
+    payload = {
+        "session_id": "g1",
+        "hook_event_name": "PreToolUse",
+        "tool_name": "replace",
+        "tool_input": {"file_path": str(main_repo / "plugins" / "ndf" / "README.md")},
+    }
+    result = run_guard(payload, cwd=main_repo)
+    assert "plugins/ndf/README.md" in context_of(result)
+
+
+def test_gemini_run_shell_command_is_normalized(main_repo: Path) -> None:
+    """Gemini CLI のシェル実行ツールは `run_shell_command` を名乗る。"""
+    declared(main_repo)
+    payload = {
+        "session_id": "g2",
+        "hook_event_name": "PreToolUse",
+        "tool_name": "run_shell_command",
+        "tool_input": {"command": "echo x > plugins/ndf/README.md"},
+    }
+    result = run_guard(payload, cwd=main_repo)
+    assert "plugins/ndf/README.md" in context_of(result)
