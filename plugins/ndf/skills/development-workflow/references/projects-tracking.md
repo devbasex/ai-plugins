@@ -81,14 +81,20 @@ Pull Request が出る場合も、既定の `Linked pull requests` に並ぶた�
 ## 呼び方
 
 ```bash
-bash "$SCRIPTS/projects-sync.sh" <issue番号> <キー> <値>
+bash "$SCRIPTS/projects-sync.sh" <issue番号> <キー> "<値>"
 ```
 
+**値は引用符で囲む。** スクリプトは引数をちょうど 3 つ受け取る。引用を落とすと、空白を含む値が
+シェルの側で分割され、4 つ目の引数になる。上の対応表の `Pull Request` がこれにあたり、
+引用せずに呼ぶと引数の検査で終了コード 2 になり、盤面には何も書き込まれない。空白を含まない値も
+同じ形で書き、呼び方を 1 つに揃える。
+
 ```bash
-bash "$SCRIPTS/projects-sync.sh" 186 stage レビュー
-bash "$SCRIPTS/projects-sync.sh" 186 mode standard
-bash "$SCRIPTS/projects-sync.sh" 186 worktree .worktrees/fix/issue-186
-bash "$SCRIPTS/projects-sync.sh" 186 plan issues/issue-186.md
+bash "$SCRIPTS/projects-sync.sh" 186 stage "レビュー"
+bash "$SCRIPTS/projects-sync.sh" 186 stage "Pull Request"
+bash "$SCRIPTS/projects-sync.sh" 186 mode "standard"
+bash "$SCRIPTS/projects-sync.sh" 186 worktree ".worktrees/fix/issue-186"
+bash "$SCRIPTS/projects-sync.sh" 186 plan "issues/issue-186.md"
 ```
 
 ### `$SCRIPTS` を決める
@@ -126,6 +132,7 @@ done
 - 盤面への問い合わせや更新が失敗した（権限不足を含む。`project` スコープが要る）
 
 **呼び出し側の誤りだけは 2 を返す。** 知らないキー・工程表に無い値・引数の不足がこれにあたる。
+引用を落として空白を含む値が分割された場合も、引数の数が合わなくなるためここへ入る。
 黙って進むと、綴りの違う値が盤面へ入るか、書き込んだつもりの値が入らない。
 
 ## 既知の制約

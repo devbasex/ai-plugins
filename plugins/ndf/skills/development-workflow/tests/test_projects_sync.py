@@ -117,3 +117,26 @@ def test_text_key_reaches_gh(repo, tmp_path) -> None:
     got = run_sync("186", "plan", "issues/issue-186.md", cwd=repo, env=fake_gh(tmp_path, log))
     assert got.returncode == 0
     assert log.exists()
+
+
+def test_stage_with_a_space_reaches_gh(repo, tmp_path) -> None:
+    """空白を含む工程名も 1 つの値として通る。
+
+    `Pull Request` は工程表で唯一の空白を含む行名である。呼び出し側が引用を落とすと
+    4 引数になり、引数の検査で終了コード 2 になる。スクリプトは 1 つの値として渡され
+    さえすれば扱えることを、この経路で確かめる。
+    """
+    write_declaration(repo, VALID)
+    log = tmp_path / "gh.log"
+    got = run_sync("186", "stage", "Pull Request", cwd=repo, env=fake_gh(tmp_path, log))
+    assert got.returncode == 0, got.stderr
+    assert log.exists(), "gh が呼ばれていない"
+
+
+def test_stage_split_by_a_space_is_an_error(repo, tmp_path) -> None:
+    """引用を落として 4 引数になった呼び方は、呼び出し側の誤りとして 2 を返す。"""
+    write_declaration(repo, VALID)
+    log = tmp_path / "gh.log"
+    got = run_sync("186", "stage", "Pull", "Request", cwd=repo, env=fake_gh(tmp_path, log))
+    assert got.returncode == 2
+    assert not log.exists(), "誤った呼び方で gh を呼んでいる"

@@ -154,5 +154,5 @@ E   ImportError: cannot import name 'validate'   ← 期待と違う。先にこ
 - `/ndf:out-of-scope` — 対象の外で見つけた課題の起票
 
 進行を盤面へ記録する場合は、[references/projects-tracking.md](../development-workflow/references/projects-tracking.md) の「`$SCRIPTS` を決める」でパスを解決してから
-`bash "$SCRIPTS/projects-sync.sh" <issue番号> stage 実装` を実行する（`.ndf/projects.json` が無いリポジトリでは何も起きない）。
+`bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "実装"` を実行する（`.ndf/projects.json` が無いリポジトリでは何も起きない）。
 
