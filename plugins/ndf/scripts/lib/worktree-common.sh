@@ -596,6 +596,13 @@ wt_extract_write_target() {
   # `{` で開くまとまりは必ず走るため、この積み上げの対象にしない。
   local -a block_cds=()
   local block_depth=0 cds=0
+  # `&` の復元先は、背景実行にまとめられるひとまとまりの入口である。まとまりの
+  # 境目は `;` / 改行 / `&` だが、複合コマンド (`{ }` / `( )` / `if` / `while` …)
+  # の**中**の `;` は、外側のまとまりを切らない。切ると `{ cd x; } & …` の `&` の
+  # 復元先が `x` になり、後続の相対パスを作業ツリー側と取り違えて案内を出さない
+  # （検知漏れになる）。入口を入れ子の段ごとに積み、閉じるときに戻す。
+  local -a group_cwd=() group_known=()
+  local group_depth=0
 
   # ヒアドキュメントの本文を先に落とす。落とす前に印を挟むと、本文の中の `>` が
   # 出力の付け替えとして数えられる。
@@ -610,6 +617,19 @@ wt_extract_write_target() {
   words=("${WT_LINES[@]+"${WT_LINES[@]}"}")
 
   local n=${#words[@]} i j w target found=0 prev="" at_cmd=0 dest="" k cmd_prefix=0
+  # 複合コマンドの入口で `&` の復元先を積み、出口で戻す。
+  _push_group() {
+    group_cwd[group_depth]="$job_cwd"
+    group_known[group_depth]="$job_known"
+    group_depth=$((group_depth + 1))
+    job_cwd="$cwd"; job_known="$cwd_known"
+  }
+  _pop_group() {
+    [ "$group_depth" -gt 0 ] || return 0
+    group_depth=$((group_depth - 1))
+    job_cwd="${group_cwd[group_depth]}"
+    job_known="${group_known[group_depth]}"
+  }
   _emit() {
     _wt_is_not_target "$1" && return
     if [ -z "$base" ]; then
@@ -725,7 +745,25 @@ wt_extract_write_target() {
         if [ "$at_cmd" = 1 ]; then
           block_cds[block_depth]=$cds
           block_depth=$((block_depth + 1))
+          _push_group
         fi
+        continue
+        ;;
+      "{"|"(")
+        # 部分シェル (`(`) と、同じシェルで走るまとまり (`{`) の入口。どちらも
+        # 中の `;` が外側のまとまりを切らない点は同じで、`&` の復元先だけを積む。
+        # `(` を命令の位置として数えない扱いは変えない。
+        [ "$at_cmd" = 1 ] && _push_group
+        continue
+        ;;
+      "}")
+        # `}` は予約語で、命令の位置にしか置けない。`echo }` の `}` は語である。
+        [ "$at_cmd" = 1 ] && _pop_group
+        continue
+        ;;
+      ")")
+        # 部分シェルの終わり。命令の位置には現れないため、位置では絞れない。
+        _pop_group
         continue
         ;;
       else|elif)
@@ -742,6 +780,7 @@ wt_extract_write_target() {
         if [ "$at_cmd" = 1 ] && [ "$block_depth" -gt 0 ]; then
           block_depth=$((block_depth - 1))
           [ "$cds" -gt "${block_cds[block_depth]}" ] && cwd_known=0
+          _pop_group
         fi
         continue
         ;;
@@ -843,7 +882,7 @@ wt_extract_write_target() {
     esac
   done
 
-  unset -f _emit
+  unset -f _emit _push_group _pop_group
   [ "$found" = 1 ] || return 1
 }
 

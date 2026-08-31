@@ -621,6 +621,57 @@ def test_cd_does_not_reach_past_a_pipe_or_background(command: str, expected: str
 @pytest.mark.parametrize(
     ("command", "expected"),
     [
+        # まとまりごと背景実行したときも、`cd` は親のシェルの位置を変えない。
+        # 中の `;` で `&` の復元先を引き直すと、まとまりの中の移動が外へ漏れる。
+        ("{ cd .worktrees/x; } & sed -i 's/a/b/' README.md", "/base/README.md"),
+        ("{ cd .worktrees/x; cd y; } & sed -i 's/a/b/' README.md", "/base/README.md"),
+        ("if true; then cd .worktrees/x; fi & sed -i 's/a/b/' README.md",
+         "/base/README.md"),
+        ("while read f; do cd .worktrees/x; done & sed -i 's/a/b/' README.md",
+         "/base/README.md"),
+        ("for f in a b; do cd .worktrees/x; done & sed -i 's/a/b/' README.md",
+         "/base/README.md"),
+        ("( cd .worktrees/x; cd y ) & sed -i 's/a/b/' README.md", "/base/README.md"),
+        # 入れ子でも、外側のまとまりの入口まで戻す。
+        ("{ if true; then cd .worktrees/x; fi; } & sed -i 's/a/b/' README.md",
+         "/base/README.md"),
+    ],
+)
+def test_a_backgrounded_group_does_not_move_the_parent(
+    command: str, expected: str
+) -> None:
+    """複合コマンドごと `&` で背景実行しても、中の `cd` は後続へ残らない。
+
+    残ると、主ディレクトリへの書き込みを作業ツリー側と取り違えて案内を出さない
+    （検知漏れになる）。
+    """
+    targets, rc = extract_at(command, "/base")
+    assert rc == 0, (command, targets)
+    assert targets == [expected], command
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # まとまりの中では、`cd` の効果はそのまま後続へ及ぶ。
+        ("{ cd .worktrees/x; sed -i 's/a/b/' README.md; } & echo done",
+         "/base/.worktrees/x/README.md"),
+        # まとまりの中の `&` は、その中のひとまとまりの入口へ戻す。
+        ("{ cd .worktrees/x; cd y & sed -i 's/a/b/' README.md; }",
+         "/base/.worktrees/x/README.md"),
+    ],
+)
+def test_a_group_still_carries_cd_inside_itself(command: str, expected: str) -> None:
+    """まとまりの内側の位置は変えない。外へ漏らさないことだけを直す。"""
+    targets, rc = extract_at(command, "/base")
+    assert rc == 0, (command, targets)
+    assert targets == [expected], command
+
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
         # `||` の右辺は左辺が失敗したときに走る。直前の `cd` が唯一の命令なら、
         # 失敗したのはその `cd` であり、右辺の現在地は移動前になる。
         ("cd .worktrees/x || sed -i 's/a/b/' README.md", "/base/README.md"),
