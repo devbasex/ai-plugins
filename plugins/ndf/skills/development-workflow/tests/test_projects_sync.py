@@ -142,19 +142,34 @@ def test_stage_split_by_a_space_is_an_error(repo, tmp_path) -> None:
     assert not log.exists(), "誤った呼び方で gh を呼んでいる"
 
 
-def scripted_gh(tmp_path, items: list[int]) -> dict:
+HOST_REPO = "devbasex/ai-plugins"
+OTHER_REPO = "devbasex/devbase"
+
+
+def scripted_gh(tmp_path, items, repo: str = HOST_REPO, total_count: int | None = None) -> dict:
     """盤面の応答を返す `gh` を PATH の先頭へ置く。
 
-    `item-list` が返すアイテムの並びだけをテストごとに差し替える。取得の上限に達した
-    ことは、返ってきた件数が上限と等しいかどうかで判断される。
+    `items` はアイテムの並びで、要素は issue 番号か `(リポジトリ, 番号)` である。番号だけの
+    要素は `repo` に属するものとして扱う。`repo` は `gh repo view` が返す、いま開いている
+    リポジトリである。`total_count` は盤面の総数で、省略すると並びの長さになる。
+
+    呼ばれた引数は `tmp_path/gh.log` へ残る。どのアイテムを更新したかはここから読む。
     """
+    entries = [(repo, n) if isinstance(n, int) else n for n in items]
     bindir = tmp_path / "bin"
     bindir.mkdir(exist_ok=True)
     data = tmp_path / "gh-data"
     data.mkdir(exist_ok=True)
+    log = tmp_path / "gh.log"
     (data / "view.json").write_text(json.dumps({"id": "PVT_1"}), encoding="utf-8")
     (data / "items.json").write_text(
-        json.dumps({"items": [{"id": f"IT_{n}", "content": {"number": n}} for n in items]}),
+        json.dumps({
+            "items": [
+                {"id": item_id(r, n), "content": {"number": n, "repository": r}}
+                for r, n in entries
+            ],
+            "totalCount": len(entries) if total_count is None else total_count,
+        }),
         encoding="utf-8",
     )
     (data / "fields.json").write_text(
@@ -167,7 +182,9 @@ def scripted_gh(tmp_path, items: list[int]) -> dict:
     gh = bindir / "gh"
     gh.write_text(
         "#!/usr/bin/env bash\n"
+        f'printf "%s\\n" "$*" >> "{log}"\n'
         'case "$1 $2" in\n'
+        f'  "repo view") printf "%s\\n" {repo!r} ;;\n'
         f'  "project view") cat "{data}/view.json" ;;\n'
         f'  "project item-list") cat "{data}/items.json" ;;\n'
         f'  "project field-list") cat "{data}/fields.json" ;;\n'
@@ -178,6 +195,11 @@ def scripted_gh(tmp_path, items: list[int]) -> dict:
     )
     gh.chmod(gh.stat().st_mode | stat.S_IEXEC)
     return {"PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}"}
+
+
+def item_id(repo: str, number: int) -> str:
+    """リポジトリごとに区別できるアイテムの識別子。"""
+    return f"IT_{repo.split('/')[-1]}_{number}"
 
 
 def test_item_below_the_limit_is_updated(repo, tmp_path) -> None:
@@ -199,16 +221,54 @@ def test_missing_item_below_the_limit_is_silent(repo, tmp_path) -> None:
     assert got.stdout == "" and got.stderr == ""
 
 
-def test_missing_item_at_the_limit_is_reported(repo, tmp_path) -> None:
-    """取得が上限に達したときは知らせる。登録していない場合と区別できないためである。
+def test_another_repository_with_the_same_number_is_not_updated(repo, tmp_path) -> None:
+    """同じ番号のアイテムが 2 つのリポジトリ分あるとき、いま開いている側だけを選ぶ。
+
+    盤面は組織単位で、issue 番号はリポジトリごとに独立している。番号だけで選ぶと、
+    並び順によっては別のリポジトリのアイテムを書き換える。
+    """
+    write_declaration(repo, VALID)
+    # 別のリポジトリのアイテムを先に置く。番号だけで選ぶ実装ならこちらが当たる。
+    env = scripted_gh(tmp_path, [(OTHER_REPO, 186), (HOST_REPO, 186)])
+    got = run_sync("186", "stage", "レビュー", cwd=repo, env=env)
+    assert got.returncode == 0, got.stderr
+    assert "#186 進行 = レビュー" in got.stdout
+    log = (tmp_path / "gh.log").read_text(encoding="utf-8")
+    assert item_id(HOST_REPO, 186) in log
+    assert item_id(OTHER_REPO, 186) not in log, "別のリポジトリのアイテムを更新している"
+
+
+def test_only_another_repository_has_the_number_is_silent(repo, tmp_path) -> None:
+    """同じ番号が別のリポジトリにしか無いときは、何もせず 0 で終わる。"""
+    write_declaration(repo, VALID)
+    env = scripted_gh(tmp_path, [(OTHER_REPO, 186)])
+    got = run_sync("186", "stage", "レビュー", cwd=repo, env=env)
+    assert got.returncode == 0
+    assert got.stdout == "" and got.stderr == ""
+    log = (tmp_path / "gh.log").read_text(encoding="utf-8")
+    assert "item-edit" not in log, "別のリポジトリのアイテムを更新している"
+
+
+def test_missing_item_beyond_the_limit_is_reported(repo, tmp_path) -> None:
+    """総数が上限を超えるときは知らせる。登録していない場合と区別できないためである。
 
     終了コードは 0 のままにする。進行管理が理由で工程を止めない。
     """
     write_declaration(repo, VALID)
-    # 1000 件ちょうどを返し、その中に #186 は含めない。
-    env = scripted_gh(tmp_path, list(range(1000, 2000)))
+    # 1000 件を返し、盤面の総数は 1200 件だと申告する。その中に #186 は含めない。
+    env = scripted_gh(tmp_path, list(range(1000, 2000)), total_count=1200)
     got = run_sync("186", "stage", "レビュー", cwd=repo, env=env)
     assert got.returncode == 0
     assert got.stdout == ""
     assert "上限 1000" in got.stderr
+    assert "1200" in got.stderr
     assert "#186" in got.stderr
+
+
+def test_missing_item_exactly_at_the_limit_is_silent(repo, tmp_path) -> None:
+    """総数がちょうど上限のときは切れていない。知らせると誤った警告になる。"""
+    write_declaration(repo, VALID)
+    env = scripted_gh(tmp_path, list(range(1000, 2000)), total_count=1000)
+    got = run_sync("186", "stage", "レビュー", cwd=repo, env=env)
+    assert got.returncode == 0
+    assert got.stdout == "" and got.stderr == ""

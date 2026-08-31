@@ -73,6 +73,23 @@ def link_kiro(project: Path, plugin: Path) -> Path:
     return project
 
 
+def make_foreign_plugin(root: Path) -> Path:
+    """NDF ではないプラグインの配布物を作る。`scripts/projects-sync.sh` を持たない。"""
+    skill = root / "skills" / "another-skill"
+    skill.mkdir(parents=True, exist_ok=True)
+    (skill / "SKILL.md").write_text("# another-skill\n", encoding="utf-8")
+    return root
+
+
+def link_skill(project: Path, src: Path) -> Path:
+    """`.kiro/skills/<Skill名>` を 1 つだけ張る。"""
+    skills = project / ".kiro" / "skills"
+    skills.mkdir(parents=True, exist_ok=True)
+    link = skills / src.name
+    link.symlink_to(src, target_is_directory=True)
+    return link
+
+
 def make_codex(home: Path, marketplace: str = "ai-plugins") -> Path:
     """Codex がマーケットプレイスのスナップショットへ展開した配置を作る。"""
     root = home / ".codex" / ".tmp" / "marketplaces" / marketplace / "plugins" / "ndf"
@@ -125,6 +142,38 @@ def test_kiro_skills_parent_is_not_the_plugin(tmp_path, home) -> None:
     plugin = make_plugin(tmp_path / "kiro-plugin" / "plugins" / "ndf")
     project = link_kiro(tmp_path / "project", plugin)
     assert not (project / ".kiro" / "scripts").exists()
+    assert resolve(project, home) == str(plugin / "scripts")
+
+
+def test_kiro_skips_another_plugins_symlink(tmp_path, home) -> None:
+    """別プラグインの symlink が先に並んでも、NDF のリンクを見つけるまで調べ続ける。
+
+    インストーラが消すのは NDF 配下を指すリンクだけで、他のプラグインのリンクは残る。
+    最初のリンクで打ち切ると、配布物を持たない別プラグインを採ってしまう。
+    """
+    foreign = make_foreign_plugin(tmp_path / "other-plugin" / "plugins" / "other")
+    plugin = make_plugin(tmp_path / "kiro-plugin" / "plugins" / "ndf")
+    project = tmp_path / "project"
+    link_kiro(project, plugin)
+    link_skill(project, foreign / "skills" / "another-skill")
+    names = sorted(p.name for p in (project / ".kiro" / "skills").iterdir())
+    assert names[0] == "another-skill", "別プラグインのリンクが先に並んでいない"
+    assert resolve(project, home) == str(plugin / "scripts")
+
+
+def test_kiro_relative_symlink(tmp_path, home) -> None:
+    """相対パスで張られた symlink からもプラグインへ戻れる。
+
+    `readlink` は指す先をそのまま返す。相対パスのときはリンクのある位置から組み立てる。
+    """
+    plugin = make_plugin(tmp_path / "kiro-plugin" / "plugins" / "ndf")
+    project = tmp_path / "project"
+    skills = project / ".kiro" / "skills"
+    skills.mkdir(parents=True)
+    src = plugin / "skills" / "development-workflow"
+    (skills / src.name).symlink_to(
+        os.path.relpath(src, start=skills), target_is_directory=True
+    )
     assert resolve(project, home) == str(plugin / "scripts")
 
 

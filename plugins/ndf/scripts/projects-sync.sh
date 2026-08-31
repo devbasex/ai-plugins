@@ -64,23 +64,33 @@ ITEM_LIMIT=1000
 
 # ここから先は外部への問い合わせである。どこで失敗しても 0 で抜ける。
 update() {
-  local project_id item_id field_id option_id item_count
+  local project_id item_id field_id option_id total_count repo
   local project_json items_json fields_json
 
   project_json=$(gh project view "$NUMBER" --owner "$OWNER" --format json 2>/dev/null) || return 1
   project_id=$(printf '%s' "$project_json" | jq -r '.id // empty' 2>/dev/null) || return 1
   [ -n "$project_id" ] || return 1
 
+  # 盤面は組織単位で持てるため、同じ組織の複数のリポジトリのアイテムが並ぶ。issue 番号は
+  # リポジトリごとに独立しているので、番号だけでは対象を一意に決められない。いま開いている
+  # リポジトリを取得し、アイテムの所属と一致するものだけを選ぶ。取得できないときは
+  # 何も更新しない。別のリポジトリのアイテムを書き換えるより、何もしないほうが安全である。
+  repo=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null) || return 1
+  [ -n "$repo" ] || return 1
+
   items_json=$(gh project item-list "$NUMBER" --owner "$OWNER" --limit "$ITEM_LIMIT" --format json 2>/dev/null) || return 1
-  item_id=$(printf '%s' "$items_json" | jq -r --argjson n "$ISSUE" \
-    'first(.items[]? | select(.content.number == $n) | .id) // empty' 2>/dev/null) || return 1
+  item_id=$(printf '%s' "$items_json" | jq -r --argjson n "$ISSUE" --arg repo "$repo" \
+    'first(.items[]? | select(.content.number == $n and .content.repository == $repo) | .id) // empty' 2>/dev/null) || return 1
   if [ -z "$item_id" ]; then
     # 見つからない理由は 2 つある。盤面へ登録していないか、取得が上限で切れたかである。
-    # 黙って抜けると両者を区別できないため、上限に達したときだけ知らせる。
-    item_count=$(printf '%s' "$items_json" | jq -r '(.items? // []) | length' 2>/dev/null) || item_count=0
-    if [ "$item_count" = "$ITEM_LIMIT" ]; then
-      printf 'NOTE: 盤面のアイテムの取得が上限 %s に達しました。#%s が見つからないのは取り漏れの可能性があります\n' \
-        "$ITEM_LIMIT" "$ISSUE" >&2
+    # 黙って抜けると両者を区別できないため、上限で切れたときだけ知らせる。盤面の総数は
+    # `.totalCount` が持ち、`--limit` に左右されない。取得した件数ではなく総数と上限を
+    # 比べるので、ちょうど上限と同じ件数の盤面で誤って知らせることがない。
+    total_count=$(printf '%s' "$items_json" | jq -r '.totalCount // ((.items? // []) | length)' 2>/dev/null) || total_count=0
+    case "$total_count" in ''|*[!0-9]*) total_count=0 ;; esac
+    if [ "$total_count" -gt "$ITEM_LIMIT" ]; then
+      printf 'NOTE: 盤面のアイテムは %s 件あり、取得の上限 %s を超えています。#%s が見つからないのは取り漏れの可能性があります\n' \
+        "$total_count" "$ITEM_LIMIT" "$ISSUE" >&2
     fi
     return 1
   fi
