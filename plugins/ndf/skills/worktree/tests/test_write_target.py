@@ -833,9 +833,6 @@ def test_a_conditional_block_still_reports_absolute_targets() -> None:
          "/base/.worktrees/x/README.md"),
         ("( cd .worktrees/x ); sed -i 's/a/b/' README.md", "/base/README.md"),
         ("( cd .worktrees/x ) && sed -i 's/a/b/' README.md", "/base/README.md"),
-        # 中の相対パスは外側の位置で解決する。案内が余計に出ることはあっても、
-        # 主ディレクトリへの書き込みを見落とすことはない。
-        ("( cd .worktrees/x; sed -i 's/a/b/' README.md )", "/base/README.md"),
     ],
 )
 def test_a_subshell_does_not_move_the_parent(command: str, expected: str) -> None:
@@ -858,10 +855,7 @@ def test_a_subshell_does_not_move_the_parent(command: str, expected: str) -> Non
          "/base/.worktrees/x/README.md"),
         # 入れ子でも同じ。
         ("( ( true; cd .worktrees/x ) ); sed -i 's/a/b/' README.md", "/base/README.md"),
-        # 部分シェルの中の相対パスは、外側の位置で解決する（案内は多めに出る）。
-        ("( true; cd .worktrees/x; sed -i 's/a/b/' README.md )", "/base/README.md"),
-        # 空白を挟まない形では `(` が語として切れない。移動先の語が `)` で
-        # 終わることを手がかりに、この `cd` も親の位置を変えないものとして扱う。
+        # 空白を挟まない形でも同じ。`(` と `)` は語として切り出す。
         ("(cd .worktrees/x; cd y); sed -i 's/a/b/' README.md", "/base/README.md"),
         ("(cd .worktrees/x); sed -i 's/a/b/' README.md", "/base/README.md"),
     ],
@@ -875,6 +869,71 @@ def test_a_subshell_hides_every_cd_inside_it(command: str, expected: str) -> Non
     targets, rc = extract_at(command, "/base")
     assert rc == 0, (command, targets)
     assert targets == [expected], command
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # 部分シェルの中の相対パスは、その中で走った `cd` の後の位置で解決する。
+        # 外側の位置で解決すると、作業ツリー側への書き込みを主ディレクトリへの
+        # 書き込みとして案内することになる。
+        ("( cd .worktrees/x; sed -i 's/a/b/' README.md )",
+         ["/base/.worktrees/x/README.md"]),
+        ("( true; cd .worktrees/x; sed -i 's/a/b/' README.md )",
+         ["/base/.worktrees/x/README.md"]),
+        # 空白を挟まない形でも同じ。`(` と `)` を語として切り出す。
+        ("(cd .worktrees/x; sed -i 's/a/b/' README.md)",
+         ["/base/.worktrees/x/README.md"]),
+        ("(cd .worktrees/x && echo hi > README.md)",
+         ["/base/.worktrees/x/README.md"]),
+        # 入れ子でも、その段の位置で解決する。
+        ("( cd .worktrees; ( cd x; sed -i 's/a/b/' README.md ) )",
+         ["/base/.worktrees/x/README.md"]),
+        # 内側の部分シェルを抜けたら、外側の段の位置へ戻る。
+        ("( cd .worktrees; ( cd x ); sed -i 's/a/b/' README.md )",
+         ["/base/.worktrees/README.md"]),
+        # 中の書き込みと、抜けた後の書き込みは、それぞれの位置で解決する。
+        ("( cd .worktrees/x; echo hi > IN.md ); cp a.txt OUT.md",
+         ["/base/.worktrees/x/IN.md", "/base/OUT.md"]),
+        # `$(` は展開であって部分シェルの入口ではない。その閉じ括弧を部分シェルの
+        # 終わりとして数えると、後続の相対パスが外側の位置へ戻ってしまう。
+        ('( cd .worktrees/x; echo "$(date)" > README.md )',
+         ["/base/.worktrees/x/README.md"]),
+        ('( cd .worktrees/x; echo "$(date)" > IN.md ); cp a.txt OUT.md',
+         ["/base/.worktrees/x/IN.md", "/base/OUT.md"]),
+    ],
+)
+def test_a_subshell_resolves_relative_paths_at_its_own_cwd(
+    command: str, expected: list[str]
+) -> None:
+    """部分シェルの中の `cd` は、その中の相対パスには効く。
+
+    効かせないと、作業ツリーへ移ってから書き換えたものを主ディレクトリへの
+    書き込みとして案内する（誤検知になる）。抜けた後は親の位置へ戻す。
+    """
+    targets, rc = extract_at(command, "/base")
+    assert rc == 0, (command, targets)
+    assert targets == expected, command
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # `case` の見出しの `)` は部分シェルの終わりではない。語の一部として残す。
+        ("case $x in a) cp p.txt q.txt;; esac", ["q.txt"]),
+        # 関数定義の `()` も部分シェルではない。
+        ("f() { cp a.txt b.txt; }", ["b.txt"]),
+        # `$(` の中の `)` も語の一部である。
+        ("cp a.txt $(basename b).txt", ["b).txt"]),
+    ],
+)
+def test_parentheses_outside_a_subshell_stay_in_the_word(
+    command: str, expected: list[str]
+) -> None:
+    """部分シェルを開いていない `(` と `)` は、語として切り出さない。"""
+    targets, rc = extract(command)
+    assert rc == 0, command
+    assert targets == expected, command
 
 
 @pytest.mark.parametrize(

@@ -260,6 +260,14 @@ _wt_tokenize() {
   local s="${1:-}" n i c quote="" cur="" op last
   n=${#s}
   local -a out=()
+  # 部分シェルの入口として切り出した `(` のうち、まだ閉じていない数。
+  # `)` を語として切り出してよいのは、この数が残っているときだけである。
+  local subshells=0
+  # 語の途中に現れた `(` のうち、まだ閉じていない数。`$(` の展開・`$((` の
+  # 算術・関数定義の `f()`・配列の代入 `a=(` はいずれも部分シェルの入口では
+  # ない。ここで数えておかないと、その閉じ括弧を部分シェルの終わりとして
+  # 切り出してしまい、後続の相対パスの起点が入口の位置へ戻る。
+  local inword=0
   for ((i = 0; i < n; i++)); do
     c=${s:i:1}
     if [ -n "$quote" ]; then
@@ -303,6 +311,35 @@ _wt_tokenize() {
         if [ -n "$cur" ]; then out+=("$cur"); cur=""; fi
         out+=("$op")
         i=$((i + ${#op} - 1))
+        ;;
+      # `(` は部分シェルを開く。語の頭にあるときだけ入口として切り出す。
+      # 途中に現れる `(` は展開・関数定義・配列の代入の一部で、部分シェルでは
+      # ない。字面のまま語へ残し、対応する `)` も切り出さないよう数える。
+      "(")
+        if [ -n "$cur" ] || [ "$inword" -gt 0 ]; then
+          inword=$((inword + 1))
+          cur+="$c"
+          continue
+        fi
+        out+=("$c")
+        subshells=$((subshells + 1))
+        ;;
+      # `)` は、切り出した `(` が残っているときだけ部分シェルの終わりである。
+      # `case` の見出し (`a)`) のように対応する `(` が無いものは語の一部で、
+      # 切り出すと存在しない位置を書き込み先として示すことになる。
+      ")")
+        if [ "$inword" -gt 0 ]; then
+          inword=$((inword - 1))
+          cur+="$c"
+          continue
+        fi
+        if [ "$subshells" -le 0 ]; then
+          cur+="$c"
+          continue
+        fi
+        if [ -n "$cur" ]; then out+=("$cur"); cur=""; fi
+        out+=("$c")
+        subshells=$((subshells - 1))
         ;;
       *) cur+="$c" ;;
     esac
@@ -592,14 +629,16 @@ wt_extract_write_target() {
   # 走ったものとして扱えるが (`cd a && cd b`)、そうでなければ (`cmd && cd b`)
   # リストを抜けた後の現在地を決められない。跨いだかどうかを控える。
   local list_and_uncertain=0 list_cond_cd=0
-  # 部分シェル (`( ... )`) の中の `cd` は、親のシェルの位置を変えない。入口の
-  # 直後だけでなく、中の `;` や改行の後ろにある `cd` も同じである。深さを数え、
-  # 0 でない間は現在地を動かさない。中の相対パスは外側の位置で解決するため、
-  # 案内が余計に出ることはあっても、主ディレクトリへの書き込みは見落とさない。
-  # **空白を挟まない `(cd a)` は、字句解析が `(` を語として切らないためこの
-  # 数えの対象にならない。** 入口の直後の `cd` は `(cd` という語になって命令
-  # として拾えず、中の 2 つ目以降は移動先の語が `)` で終わる。どちらも位置を
-  # 動かさないので、多めに案内が出る側へ倒れる。
+  # 部分シェル (`( ... )`) の中の `cd` は、**その中の相対パスには効くが**、閉じた
+  # 後の親のシェルの位置は変えない。中で解決しないと、作業ツリーへ移ってから
+  # 書き換えたものを主ディレクトリへの書き込みとして案内する（誤検知になる）。
+  # 逆に親へ漏らすと、抜けた後の主ディレクトリへの書き込みを作業ツリー側と
+  # 取り違えて案内を出さない（検知漏れになる）。入口で追跡の状態を積み、出口で
+  # 戻すことで、両方を満たす。入れ子にも耐えるよう深さごとに積む。
+  local -a sub_cwd=() sub_known=() sub_cds=() sub_list_cds=() sub_cd_is_last=()
+  local -a sub_list_or=() sub_and_unc=() sub_cond_cd=()
+  local -a sub_list_cwd=() sub_list_known=()
+  local -a sub_pipe_cwd=() sub_pipe_known=() sub_pipe_cds=()
   local subshell_depth=0
   # 条件分岐 (`if`) と繰り返し (`while` / `until` / `for` / `select`) の本体は、
   # 走るかどうかが実行時に決まる。中で `cd` を追ったときは、閉じた後の現在地を
@@ -642,6 +681,45 @@ wt_extract_write_target() {
     group_depth=$((group_depth - 1))
     job_cwd="${group_cwd[group_depth]}"
     job_known="${group_known[group_depth]}"
+  }
+  # 部分シェルの入口で親の追跡状態を積み、中は新しいコマンドの並びとして始める。
+  _push_subshell() {
+    sub_cwd[subshell_depth]="$cwd"
+    sub_known[subshell_depth]="$cwd_known"
+    sub_cds[subshell_depth]="$cds"
+    sub_list_cds[subshell_depth]="$list_cds"
+    sub_cd_is_last[subshell_depth]="$cd_is_last"
+    sub_list_or[subshell_depth]="$list_or"
+    sub_and_unc[subshell_depth]="$list_and_uncertain"
+    sub_cond_cd[subshell_depth]="$list_cond_cd"
+    sub_list_cwd[subshell_depth]="$list_cwd"
+    sub_list_known[subshell_depth]="$list_known"
+    sub_pipe_cwd[subshell_depth]="$pipe_cwd"
+    sub_pipe_known[subshell_depth]="$pipe_known"
+    sub_pipe_cds[subshell_depth]="$pipe_cds"
+    subshell_depth=$((subshell_depth + 1))
+    list_cwd="$cwd"; list_known="$cwd_known"; list_cds=0; list_or=0
+    list_and_uncertain=0; list_cond_cd=0; cd_is_last=0
+    pipe_cwd="$cwd"; pipe_known="$cwd_known"; pipe_cds=0
+  }
+  # 出口で親の追跡状態へ戻す。中で数えた `cd` も戻すため、部分シェルは外側の
+  # 判定（`||` の右辺・複合コマンドを閉じるときの比較）から見えなくなる。
+  _pop_subshell() {
+    [ "$subshell_depth" -gt 0 ] || return 0
+    subshell_depth=$((subshell_depth - 1))
+    cwd="${sub_cwd[subshell_depth]}"
+    cwd_known="${sub_known[subshell_depth]}"
+    cds="${sub_cds[subshell_depth]}"
+    list_cds="${sub_list_cds[subshell_depth]}"
+    cd_is_last="${sub_cd_is_last[subshell_depth]}"
+    list_or="${sub_list_or[subshell_depth]}"
+    list_and_uncertain="${sub_and_unc[subshell_depth]}"
+    list_cond_cd="${sub_cond_cd[subshell_depth]}"
+    list_cwd="${sub_list_cwd[subshell_depth]}"
+    list_known="${sub_list_known[subshell_depth]}"
+    pipe_cwd="${sub_pipe_cwd[subshell_depth]}"
+    pipe_known="${sub_pipe_known[subshell_depth]}"
+    pipe_cds="${sub_pipe_cds[subshell_depth]}"
   }
   _emit() {
     _wt_is_not_target "$1" && return
@@ -773,7 +851,7 @@ wt_extract_write_target() {
         # 中の `;` が外側のまとまりを切らないため、`&` の復元先を積む。
         if [ "$at_cmd" = 1 ]; then
           _push_group
-          [ "$w" = "(" ] && subshell_depth=$((subshell_depth + 1))
+          [ "$w" = "(" ] && _push_subshell
         fi
         continue
         ;;
@@ -784,10 +862,11 @@ wt_extract_write_target() {
         ;;
       ")")
         # 部分シェルの終わり。命令の位置には現れないため、位置では絞れない。
-        # 対応する `(` を数え損ねていても、深さは 0 で止める。深さが残る側は
-        # 移動を抑える向き、つまり案内が多めに出る側で、見落としにはならない。
+        # 対応する `(` を数え損ねていても、深さは 0 で止める（`_pop_subshell` が
+        # 深さ 0 で何もしない）。戻さなければ入口の位置のままで、案内が多めに
+        # 出る側へ倒れる。
         _pop_group
-        [ "$subshell_depth" -gt 0 ] && subshell_depth=$((subshell_depth - 1))
+        _pop_subshell
         continue
         ;;
       else|elif)
@@ -810,8 +889,8 @@ wt_extract_write_target() {
         ;;
       cd)
         [ "$at_cmd" = 1 ] && [ -n "$base" ] || continue
-        # 部分シェルの中の移動は親のシェルへ及ばない。数えも含めて何もしない。
-        [ "$subshell_depth" = 0 ] || continue
+        # 部分シェルの中でも移動は追う。中の相対パスはここで解決する。親の位置は
+        # `)` で `_pop_subshell` が戻すため、この移動は外へ漏れない。
         dest=""
         for ((k = i + 1; k < n; k++)); do
           if _wt_is_separator "${words[k]}"; then break; fi
@@ -821,9 +900,6 @@ wt_extract_write_target() {
             *) dest=${words[k]}; break ;;
           esac
         done
-        # 空白を挟まない `(cd a; cd b)` では、閉じ括弧が移動先の語の末尾に付く。
-        # ここで部分シェルが閉じるため、この `cd` も親の位置を変えない。
-        case "$dest" in *")") continue ;; esac
         # `||` の右辺で戻せるかどうかの判定に使う。
         list_cds=$((list_cds + 1)); cd_is_last=1
         # `&&` を跨いだ先の `cd` は、走ったかどうかが左辺の成否で決まる。
@@ -913,7 +989,7 @@ wt_extract_write_target() {
     esac
   done
 
-  unset -f _emit _push_group _pop_group
+  unset -f _emit _push_group _pop_group _push_subshell _pop_subshell
   [ "$found" = 1 ] || return 1
 }
 
