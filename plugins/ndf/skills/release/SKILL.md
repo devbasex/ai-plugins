@@ -75,12 +75,26 @@ CURRENT=$(python3 -c "import json;print(json.load(open('plugins/ndf/.claude-plug
 # どちらでも決まらなければ、比較へ進まずここで止める
 [ -n "$BASE" ] || { echo "起点を決められない。運用者に確認する" >&2; exit 1; }
 
-git diff --stat "$BASE"..HEAD -- plugins/ | tail -1
+# 比較の対象は、いま版を上げるプラグインの配布物のパスに絞る
+git diff --stat "$BASE"..HEAD -- plugins/ndf/ | tail -1
 ```
 
 版数を持つファイルと配布物の置き場所、タグの付け方はリポジトリごとに違う。上の
-`plugins/ndf/.claude-plugin/plugin.json`（版数）と `plugins/`（配布物）と `ndf-v*`
+`plugins/ndf/.claude-plugin/plugin.json`（版数）と `plugins/ndf/`（配布物）と `ndf-v*`
 （タグ）は、対象のリポジトリのものへ読み替える。
+
+**配布物のパスは、いま版を上げるプラグインのものを指定する。** 1 つのリポジトリで複数の
+プラグインを配布していると、それらをまとめて置く上位のディレクトリ（この例では `plugins/`）
+には対象外のプラグインの変更も入る。それを数えると、対象の配布物が動いていないのに版を
+上げることになる。`--match` でタグを絞るのと同じ理由である。
+
+**まとまりで複数のプラグインの版を上げるときは、プラグインごとに確かめる。** 版はプラグイン
+ごとに独立しているため、起点も大小の判断もプラグインごとに分かれる。次は 2 つの配布物を
+1 度に数える書き方で、起点が同じときだけ使える。
+
+```bash
+git diff --stat "$BASE"..HEAD -- plugins/ndf/ plugins/playwright-kit/ | tail -1
+```
 
 **`--match` を省いて直前のタグを採らない。** 1 つのリポジトリで複数のプラグインへ別々に
 タグを打つ運用では、対象外のプラグインのタグが直前になることがある。そのタグを起点にすると、
