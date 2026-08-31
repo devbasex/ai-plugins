@@ -257,7 +257,7 @@ wt_relative_to_main() {
 # `sed -i 's/a b/c/' f` のように引用符の中へ空白を含む形を 1 語として扱うため、
 # 単純な空白区切りでは足りない。
 _wt_tokenize() {
-  local s="${1:-}" n i c quote="" cur=""
+  local s="${1:-}" n i c quote="" cur="" op last
   n=${#s}
   local -a out=()
   for ((i = 0; i < n; i++)); do
@@ -277,6 +277,32 @@ _wt_tokenize() {
         ;;
       " "|$'\t')
         if [ -n "$cur" ]; then out+=("$cur"); cur=""; fi
+        ;;
+      # 演算子は空白で囲まれているとは限らない。切り出さないと
+      # `cp a b||echo c` の `b||echo` が 1 語になり、区切りとして見えない
+      # （次のコマンドの `c` を複製先として拾う）。`>` と `>>` は呼び出し側が
+      # 印へ置き換えるため、ここには現れない。
+      "|"|"&")
+        last=""
+        ((${#out[@]} > 0)) && last=${out[${#out[@]} - 1]}
+        # `>&2` `2>&1` `3<&0` の `&` はファイル記述子の複製であって、背景実行の
+        # 演算子ではない。切ると後続が別のコマンドに見え、`cd` の効果を落とす。
+        # 直前が `<` か、`>` の置き換えの印のときは字面のまま繋げる。
+        if [ "$c" = "&" ] && { [ "${cur: -1}" = "<" ] ||
+          { [ -z "$cur" ] &&
+            { [ "$last" = "__WT_REDIR__" ] || [ "$last" = "__WT_APPEND__" ]; }; }; }; then
+          cur+="$c"
+          continue
+        fi
+        # 長い演算子を先に見る。`&&` を `&` 2 つに割ると、同じシェルで続く並びが
+        # 背景実行 2 つになって意味が変わる。
+        op="$c"
+        case "${s:i:2}" in
+          "&&"|"||"|"|&") op=${s:i:2} ;;
+        esac
+        if [ -n "$cur" ]; then out+=("$cur"); cur=""; fi
+        out+=("$op")
+        i=$((i + ${#op} - 1))
         ;;
       *) cur+="$c" ;;
     esac
@@ -583,7 +609,7 @@ wt_extract_write_target() {
   _wt_read_lines < <(_wt_tokenize "$spaced")
   words=("${WT_LINES[@]+"${WT_LINES[@]}"}")
 
-  local n=${#words[@]} i j w target found=0 prev="" at_cmd=0 dest="" k
+  local n=${#words[@]} i j w target found=0 prev="" at_cmd=0 dest="" k cmd_prefix=0
   _emit() {
     _wt_is_not_target "$1" && return
     if [ -z "$base" ]; then
@@ -625,6 +651,16 @@ wt_extract_write_target() {
         # は名前や語の並び、`;;` の後ろは case の見出しで、いずれも `cd` を置ける
         # 位置ではない。どれも命令の位置として数えない。
       esac
+    fi
+    # 命令の前には変数代入を並べられる。`FOO=bar cd x` の `cd` を命令として
+    # 数えないと、移動が書き込み先の起点へ反映されない。`echo a=b cd x` の
+    # `cd` は単なる引数なので、命令の位置から代入だけが途切れずに続いている
+    # 間だけ、次の語も命令の位置とみなす。
+    if [ "$at_cmd" = 0 ] && [ "$cmd_prefix" = 1 ]; then at_cmd=1; fi
+    if [ "$at_cmd" = 1 ] && [[ $w =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
+      cmd_prefix=1
+    else
+      cmd_prefix=0
     fi
     if [ "$at_cmd" = 1 ]; then
       case "$w" in

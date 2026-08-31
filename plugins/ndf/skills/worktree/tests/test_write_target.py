@@ -808,3 +808,104 @@ def test_a_closing_paren_stops_the_operand_scan(command: str, expected: list[str
     targets, rc = extract(command)
     assert rc == 0, command
     assert targets == expected, command
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # 空白を詰めて書いた演算子も、区切りとして見えなければならない。
+        # 1 語のままだと `b.txt||echo` が被演算子に見え、次のコマンドの `c` を
+        # 複製先として拾う。
+        ("cp a.txt b.txt||echo c", ["b.txt"]),
+        ("mv a.txt b.txt&&echo c", ["b.txt"]),
+        ("cp a.txt b.txt&echo c", ["b.txt"]),
+        ("cp a.txt b.txt|cat", ["b.txt"]),
+        ("sed -i 's/a/b/' x.md|&cat", ["x.md"]),
+        ("sed -i 's/a/b/' x.md||echo hi", ["x.md"]),
+        ("echo hi|tee x.md||echo done", ["x.md"]),
+        # 区切りを跨いだ先の書き込みは、それ自体として拾う。
+        ("cp a.txt b.txt||echo c>d.txt", ["b.txt", "d.txt"]),
+    ],
+)
+def test_operators_without_spaces_still_separate(command: str, expected: list[str]) -> None:
+    """演算子は空白で囲まれているとは限らない。字句解析の側で切り出す。"""
+    targets, rc = extract(command)
+    assert rc == 0, command
+    assert targets == expected, command
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # 引用符の中の演算子は字面であって、区切りではない。
+        ("sed -i 's/a|b/c/' x.md", ["x.md"]),
+        ("sed -i 's/a&&b/c/' x.md", ["x.md"]),
+        ('cp "a&b.txt" c.txt', ["c.txt"]),
+        ('cp a.txt "b|c.txt"', ["b|c.txt"]),
+    ],
+)
+def test_operators_inside_quotes_are_not_separators(command: str, expected: list[str]) -> None:
+    targets, rc = extract(command)
+    assert rc == 0, command
+    assert targets == expected, command
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # `>&2` の `&` はファイル記述子の複製で、背景実行の演算子ではない。
+        # 区切りとして切ると、後続が別のコマンドに見える。
+        ("cd .worktrees/x 2>&1\nsed -i 's/a/b/' README.md", "/base/.worktrees/x/README.md"),
+        ("cd .worktrees/x >/dev/null 2>&1\ncp a.txt README.md", "/base/.worktrees/x/README.md"),
+        ("cd .worktrees/x 2>&1 && echo hi > README.md", "/base/.worktrees/x/README.md"),
+    ],
+)
+def test_file_descriptor_duplication_is_not_a_separator(command: str, expected: str) -> None:
+    """`&` を無条件に切ると、`2>&1` の後ろが別のコマンドとして扱われる。"""
+    targets, rc = extract_at(command, "/base")
+    assert rc == 0, (command, targets)
+    assert targets == [expected], command
+
+
+def test_stderr_redirection_alone_is_not_a_write_target() -> None:
+    """`>&2` は既存のファイルへの書き込みではないため、案内の対象にしない。"""
+    targets, rc = extract("echo hi >&2")
+    assert rc == 1
+    assert targets == []
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # 空白を詰めた `&&` の後ろでも、`cd` の効果は残る。
+        ("cd .worktrees/x&&sed -i 's/a/b/' README.md", "/base/.worktrees/x/README.md"),
+        # パイプの区画は部分シェルで、空白の有無で扱いは変わらない。
+        ("cd .worktrees/x|sed -i 's/a/b/' README.md", "/base/README.md"),
+        ("cd .worktrees/x&sed -i 's/a/b/' README.md", "/base/README.md"),
+    ],
+)
+def test_cd_tracking_handles_operators_without_spaces(command: str, expected: str) -> None:
+    targets, rc = extract_at(command, "/base")
+    assert rc == 0, (command, targets)
+    assert targets == [expected], command
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # 変数代入は命令の前に置ける。間に挟まっても `cd` は移動である。
+        ("FOO=bar cd .worktrees/x\nsed -i 's/a/b/' README.md", "/base/.worktrees/x/README.md"),
+        ("FOO=bar BAZ=qux cd .worktrees/x\ncp a.txt README.md", "/base/.worktrees/x/README.md"),
+        ("cd .worktrees && FOO=1 cd x\necho hi > README.md", "/base/.worktrees/x/README.md"),
+        # 代入に見える語でも、命令の位置から続いていなければ単なる引数である。
+        ("echo a=b cd x\nsed -i 's/a/b/' README.md", "/base/README.md"),
+        ("echo hi a=b cd /elsewhere\ncp a.txt README.md", "/base/README.md"),
+    ],
+)
+def test_assignments_before_a_command_keep_the_command_position(
+    command: str, expected: str
+) -> None:
+    """`FOO=bar cd x` の `cd` を命令として数えないと、移動が起点へ反映されない。"""
+    targets, rc = extract_at(command, "/base")
+    assert rc == 0, (command, targets)
+    assert targets == [expected], command
