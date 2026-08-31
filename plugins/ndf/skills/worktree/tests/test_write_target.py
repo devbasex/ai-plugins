@@ -490,3 +490,102 @@ def test_the_body_outside_a_substitution_is_not_scanned() -> None:
     targets, rc = extract(command)
     assert rc == 0, targets
     assert targets == ["report.md", "side-effect.md"], targets
+
+
+def extract_at(command: str, base: str) -> tuple[list[str], int]:
+    """相対パスの起点を渡して書き込み先を推定する。
+
+    起点を渡した場合、出力は絶対パスになる。同じコマンドの中で先に実行される
+    `cd` を反映するため、字面のままでは解決できない。
+    """
+    snippet = (
+        "cmd=$(cat <<'WT_EOF'\n" + command + "\nWT_EOF\n)\n"
+        f'wt_extract_write_target "$cmd" "{base}"; echo rc=$?'
+    )
+    got = run_lib(snippet)
+    lines = [ln for ln in got.stdout.splitlines() if ln]
+    rc = int(lines.pop().removeprefix("rc="))
+    return lines, rc
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # 同じコマンドの中の `cd` は、後続の相対パスの起点になる。
+        ("cd /base/.worktrees/x\nsed -i 's/a/b/' README.md", "/base/.worktrees/x/README.md"),
+        ("cd /base/.worktrees/x && sed -i 's/a/b/' README.md", "/base/.worktrees/x/README.md"),
+        ("cd .worktrees/x; echo hi > README.md", "/base/.worktrees/x/README.md"),
+        ("cd .worktrees/x\ncp a.txt README.md", "/base/.worktrees/x/README.md"),
+        ("cd .worktrees/x\necho hi | tee README.md", "/base/.worktrees/x/README.md"),
+        # `cd` を跨がない書き込みは、渡された起点のままになる。
+        ("echo hi > README.md", "/base/README.md"),
+        # 絶対パスは `cd` の影響を受けない。
+        ("cd /elsewhere\nsed -i 's/a/b/' /base/README.md", "/base/README.md"),
+        # 連続した `cd` は積み上がる。
+        ("cd .worktrees\ncd x\nsed -i 's/a/b/' README.md", "/base/.worktrees/x/README.md"),
+    ],
+)
+def test_cd_moves_the_base_of_relative_targets(command: str, expected: str) -> None:
+    targets, rc = extract_at(command, "/base")
+    assert rc == 0, command
+    assert targets == [expected], command
+
+
+def test_write_before_cd_keeps_the_original_base() -> None:
+    """`cd` より前の書き込みは、移動前の位置を指す。"""
+    targets, rc = extract_at("echo hi > README.md\ncd .worktrees/x", "/base")
+    assert rc == 0
+    assert targets == ["/base/README.md"]
+
+
+def test_cd_argument_position_is_not_a_move() -> None:
+    """コマンドの位置に無い `cd` は移動として数えない。"""
+    targets, rc = extract_at("echo cd > README.md", "/base")
+    assert rc == 0
+    assert targets == ["/base/README.md"]
+
+
+def test_unresolvable_cd_suppresses_relative_targets() -> None:
+    """移動先を決められないときは、相対パスの書き込み先を出さない。
+
+    字面のまま起点へ継ぎ足すと、実際には触っていない位置を案内することになる。
+    案内は操作を止めないため、黙るほうを選ぶ。
+    """
+    targets, rc = extract_at('cd "$TARGET"\nsed -i \'s/a/b/\' README.md', "/base")
+    assert rc == 1
+    assert targets == []
+
+
+def test_unresolvable_cd_still_reports_absolute_targets() -> None:
+    """移動先が不明でも、絶対パスの書き込み先は位置が決まる。"""
+    targets, rc = extract_at('cd "$TARGET"\nsed -i \'s/a/b/\' /base/README.md', "/base")
+    assert rc == 0
+    assert targets == ["/base/README.md"]
+
+
+def test_base_dir_is_optional() -> None:
+    """起点を渡さない呼び方では、字面のまま返す（既存の呼び出し元との互換）。"""
+    targets, rc = extract("cd /elsewhere\nsed -i 's/a/b/' README.md")
+    assert rc == 0
+    assert targets == ["README.md"]
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # `||` と `&` はコマンドの区切りである。跨いで走査すると、次のコマンドの
+        # 語を書き込み先と取り違える。
+        ("cp a.txt b.txt || echo c", ["b.txt"]),
+        ("mv a.txt b.txt || echo c", ["b.txt"]),
+        ("sed -i 's/a/b/' x.md || echo hi", ["x.md"]),
+        ("echo hi | tee x.md || echo done", ["x.md"]),
+        ("cp a.txt b.txt & echo c", ["b.txt"]),
+        ("sed -i 's/a/b/' x.md & echo hi", ["x.md"]),
+        # 区切りを跨いだ先の書き込みは、それ自体として拾う。
+        ("cp a.txt b.txt || echo c > d.txt", ["b.txt", "d.txt"]),
+    ],
+)
+def test_separators_stop_the_operand_scan(command: str, expected: list[str]) -> None:
+    targets, rc = extract(command)
+    assert rc == 0, command
+    assert targets == expected, command

@@ -507,6 +507,17 @@ _wt_strip_heredocs() {
   printf '%s' "$out"
 }
 
+# コマンドの区切りにあたる語かを判定する。被演算子の走査は、ここで止める。
+# 跨いで走査すると、次のコマンドの語を書き込み先と取り違える
+# （`cp a b || echo c` の `c` を複製先として拾うなど）。
+# `;` と改行は字句解析が `__WT_SEP__` へ置き換えるため、この一覧には現れない。
+_wt_is_separator() {
+  case "$1" in
+    __WT_*|"|"|"&&"|"||"|"&") return 0 ;;
+  esac
+  return 1
+}
+
 # 書き込み先として採らない語かを判定する。
 _wt_is_not_target() {
   local s="$1"
@@ -523,9 +534,19 @@ _wt_is_not_target() {
 # シェルコマンドの文字列から書き込み先を 1 行 1 件で出力する。
 # 対象は直接の書き換え (sed -i)・出力の付け替え (> / >>)・標準入力からの
 # 書き出し (tee)・複製と移動 (cp / mv) の 4 形式に限る。推定できなければ 1 を返す。
+#
+# 第 2 引数に相対パスの起点を渡すと、出力は絶対パスになる。**同じコマンドの中で
+# 先に実行される `cd` を反映する。** 反映しないと、作業ツリーへ移ってから相対パスで
+# 書き換えたときに、移動前の位置を指した案内が出る。移動先を決められない形
+# (`cd` 単独・`cd -`・展開前の変数) では、相対パスの書き込み先を出さない。
+# 字面のまま起点へ継ぎ足すと、実際には触っていない位置を案内することになる。
+# 起点を渡さない呼び方では字面のまま返す。
 wt_extract_write_target() {
-  local cmd="${1:-}"
+  local cmd="${1:-}" base="${2:-}"
   [ -n "$cmd" ] || return 1
+
+  # `cd` を追った現在地と、それが確かかどうか。起点を渡されない限り使わない。
+  local cwd="$base" cwd_known=1
 
   # ヒアドキュメントの本文を先に落とす。落とす前に印を挟むと、本文の中の `>` が
   # 出力の付け替えとして数えられる。
@@ -539,25 +560,64 @@ wt_extract_write_target() {
   _wt_read_lines < <(_wt_tokenize "$spaced")
   words=("${WT_LINES[@]+"${WT_LINES[@]}"}")
 
-  local n=${#words[@]} i j w target found=0
+  local n=${#words[@]} i j w target found=0 prev="" at_cmd=0 dest="" k
   _emit() {
-    if ! _wt_is_not_target "$1"; then
+    _wt_is_not_target "$1" && return
+    if [ -z "$base" ]; then
       printf '%s\n' "$1"
       found=1
+      return
     fi
+    case "$1" in
+      /*) ;;
+      # 現在地が定まらない間の相対パスは、どこを指すか決められない。
+      *) [ "$cwd_known" = 1 ] || return ;;
+    esac
+    printf '%s\n' "$(wt_normalize_path "$1" "$cwd")"
+    found=1
   }
 
   for ((i = 0; i < n; i++)); do
     w=${words[i]}
+    # コマンドの位置にある語だけを命令として扱う。`echo cd > f` の `cd` を
+    # 移動として数えると、書き込み先の起点がずれる。
+    at_cmd=0
+    if [ "$i" = 0 ]; then
+      at_cmd=1
+    else
+      case "$prev" in __WT_SEP__|"&&"|"||"|"|"|"&") at_cmd=1 ;; esac
+    fi
+    prev="$w"
     case "$w" in
+      cd)
+        [ "$at_cmd" = 1 ] && [ -n "$base" ] || continue
+        dest=""
+        for ((k = i + 1; k < n; k++)); do
+          if _wt_is_separator "${words[k]}"; then break; fi
+          case "${words[k]}" in
+            # `cd -` は直前の位置で、コマンドの字面からは追えない。
+            -*) continue ;;
+            *) dest=${words[k]}; break ;;
+          esac
+        done
+        if [ -z "$dest" ] || [ "$dest" != "${dest//\$/}" ]; then
+          # 引数なし (ホーム)・`cd -`・展開前の変数。現在地を決められない。
+          cwd_known=0
+        else
+          case "$dest" in
+            /*) cwd=$(wt_normalize_path "$dest" "/"); cwd_known=1 ;;
+            *) [ "$cwd_known" = 1 ] && cwd=$(wt_normalize_path "$dest" "$cwd") ;;
+          esac
+        fi
+        ;;
       __WT_REDIR__|__WT_APPEND__)
         _emit "${words[i + 1]:-}"
         ;;
       tee)
         # tee は並べたファイルすべてへ書き込む。1 件目で止めない。
         for ((j = i + 1; j < n; j++)); do
+          if _wt_is_separator "${words[j]}"; then break; fi
           case "${words[j]}" in
-            __WT_*|"|"|"&&"|";") break ;;
             -*) continue ;;
             *) _emit "${words[j]}" ;;
           esac
@@ -570,8 +630,8 @@ wt_extract_write_target() {
         local -a files=()
         for ((j = i + 1; j < n; j++)); do
           if [ "$skip_next" = 1 ]; then skip_next=0; continue; fi
+          if _wt_is_separator "${words[j]}"; then break; fi
           case "${words[j]}" in
-            __WT_*|"|"|"&&"|";") break ;;
             --in-place|--in-place=*) has_inplace=1 ;;
             -e|-f|--expression|--file) seen_script=1; skip_next=1 ;;
             --expression=*|--file=*) seen_script=1 ;;
@@ -609,8 +669,8 @@ wt_extract_write_target() {
             take_next=0
             continue
           fi
+          if _wt_is_separator "${words[j]}"; then break; fi
           case "${words[j]}" in
-            __WT_*|"|"|"&&"|";") break ;;
             -t|--target-directory) take_next=1 ;;
             --target-directory=*) target_dir=${words[j]#--target-directory=} ;;
             # `-t<ディレクトリ>` のように空白を挟まない形もある。
