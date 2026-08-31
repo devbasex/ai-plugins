@@ -1,0 +1,12 @@
+TOK: ( cwd: /base pipe: /base job: /base list: /base
+TOK: echo cwd: /base pipe: /base job: /base list: /base
+TOK: x cwd: /base pipe: /base job: /base list: /base
+TOK: __WT_SEP__ cwd: /base pipe: /base job: /base list: /base
+TOK: cd cwd: /base pipe: /base job: /base list: /base
+TOK: .worktrees/x cwd: /base/.worktrees/x pipe: /base job: /base list: /base
+TOK: __WT_SUBSHELL_END__ cwd: /base/.worktrees/x pipe: /base job: /base list: /base
+TOK: __WT_SEP__ cwd: /base pipe: /base job: /base list: /base
+TOK: sed cwd: /base pipe: /base job: /base list: /base
+TOK: -i cwd: /base pipe: /base job: /base list: /base
+TOK: s/a/b/ cwd: /base pipe: /base job: /base list: /base
+TOK: README.md cwd: /base pipe: /base job: /base list: /base

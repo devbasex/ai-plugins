@@ -1,0 +1,12 @@
+TOK: ( prev: ( at_cmd: 1 cwd: /base
+TOK: echo prev: echo at_cmd: 1 cwd: /base
+TOK: x prev: x at_cmd: 0 cwd: /base
+TOK: __WT_SEP__ prev: __WT_SEP__ at_cmd: 0 cwd: /base
+TOK: cd prev: cd at_cmd: 1 cwd: /base
+TOK: .worktrees/x prev: .worktrees/x at_cmd: 0 cwd: /base/.worktrees/x
+TOK: __WT_SUBSHELL_END__ prev: __WT_SUBSHELL_END__ at_cmd: 0 cwd: /base/.worktrees/x
+TOK: __WT_SEP__ prev: __WT_SEP__ at_cmd: 0 cwd: /base
+TOK: sed prev: sed at_cmd: 1 cwd: /base
+TOK: -i prev: -i at_cmd: 0 cwd: /base
+TOK: s/a/b/ prev: s/a/b/ at_cmd: 0 cwd: /base
+TOK: README.md prev: README.md at_cmd: 0 cwd: /base

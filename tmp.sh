@@ -827,7 +827,7 @@ wt_extract_write_target() {
   _wt_read_lines < <(_wt_tokenize "$spaced")
   words=("${WT_LINES[@]+"${WT_LINES[@]}"}")
 
-  local n=${#words[@]} i j w target found=0 prev="" at_cmd=0 dest="" k cmd_prefix=0 cd_end_of_options=0
+  local n=${#words[@]} i j w target found=0 prev="" at_cmd=0 dest="" k cmd_prefix=0
   # `command` / `builtin` の被演算子を命令の位置として数えている間だけ 1。
   local cmd_wrapper=0 or_next=""
   # `||` の右辺のブレースグループが必ず後続へ進まないと判ったときに積む。まとまり
@@ -1110,6 +1110,7 @@ wt_extract_write_target() {
       esac
     fi
     prev="$w"
+    echo "TOK: $w prev: $prev at_cmd: $at_cmd cwd: $cwd" >&2
     case "$w" in
       "|"|"|&")
         # パイプの各区画は部分シェルで動く。入口の位置へ戻す。
@@ -1302,7 +1303,6 @@ wt_extract_write_target() {
         # ディレクトリ側への書き込みを作業ツリー側と取り違えて案内を出さない
         # （検知漏れになる）。まだ `cwd` を更新していないここで解決する。
         dest=""
-        cd_end_of_options=0
         for ((k = i + 1; k < n; k++)); do
           case "${words[k]}" in
             __WT_REDIR__|__WT_APPEND__)
@@ -1314,16 +1314,12 @@ wt_extract_write_target() {
           esac
           if _wt_is_separator "${words[k]}"; then break; fi
           case "${words[k]}" in
-            # `--` 以降はオプションの解釈を止める。`cd -- -dir` の `-dir` は
-            # 移動先であって `cd -` ではない。止めないと読み飛ばして、後続の
-            # 相対パスを抑止する。
-            --) [ "$cd_end_of_options" = 1 ] || { cd_end_of_options=1; continue; } ;;
             # `cd -` は直前の位置で、コマンドの字面からは追えない。
-            -*) [ "$cd_end_of_options" = 1 ] || continue ;;
+            -*) continue ;;
+            # 移動先は最初の被演算子である。リダイレクトを拾い切るため、
+            # 見つけても区切りまで走査を続ける。
+            *) [ -n "$dest" ] || dest=${words[k]} ;;
           esac
-          # 移動先は最初の被演算子である。リダイレクトを拾い切るため、
-          # 見つけても区切りまで走査を続ける。
-          [ -n "$dest" ] || dest=${words[k]}
         done
         # 走査が届いた位置を控える。`__WT_REDIR__` の枝が同じ語を二度拾わない。
         resolved_redir_end=$k

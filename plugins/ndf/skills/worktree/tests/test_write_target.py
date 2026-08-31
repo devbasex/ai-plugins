@@ -1614,3 +1614,34 @@ def test_a_redirect_after_an_unlocatable_failure_is_not_resolved() -> None:
     targets, rc = extract_at("cd a && cd b || exit > fail.log", "/base")
     assert rc == 1, targets
     assert targets == [], targets
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # `--` 以降はオプションの解釈が止まる。`-dir` は移動先であって `cd -` ではない。
+        ("cd -- -dir\nsed -i 's/a/b/' README.md", "/base/-dir/README.md"),
+        ("cd -P -- -dir\nsed -i 's/a/b/' README.md", "/base/-dir/README.md"),
+        ("cd -- .worktrees/x\nsed -i 's/a/b/' README.md", "/base/.worktrees/x/README.md"),
+        # `--` が 2 つ並ぶと、2 つ目は移動先そのものになる。
+        ("cd -- --\nsed -i 's/a/b/' README.md", "/base/--/README.md"),
+    ],
+)
+def test_end_of_options_stops_reading_dashes_as_options(command: str, expected: str) -> None:
+    targets, rc = extract_at(command, "/base")
+    assert rc == 0, command
+    assert targets == [expected], command
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # `--` の無い `cd -` は直前の位置で、字面からは追えない。
+        "cd -\nsed -i 's/a/b/' README.md",
+        "cd -P -\nsed -i 's/a/b/' README.md",
+    ],
+)
+def test_a_bare_dash_still_cannot_be_followed(command: str) -> None:
+    targets, rc = extract_at(command, "/base")
+    assert rc == 1, command
+    assert targets == []
