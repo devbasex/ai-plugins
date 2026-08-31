@@ -71,6 +71,9 @@ BASE=$(git describe --tags --abbrev=0 2>/dev/null)
 CURRENT=$(python3 -c "import json;print(json.load(open('plugins/ndf/.claude-plugin/plugin.json'))['version'])")
 [ -n "$BASE" ] || BASE=$(git log -1 --format=%H -S"\"version\": \"$CURRENT\"" -- plugins/ndf/.claude-plugin/plugin.json)
 
+# どちらでも決まらなければ、比較へ進まずここで止める
+[ -n "$BASE" ] || { echo "起点を決められない。運用者に確認する" >&2; exit 1; }
+
 git diff --stat "$BASE"..HEAD -- plugins/ | tail -1
 ```
 
@@ -81,6 +84,10 @@ git diff --stat "$BASE"..HEAD -- plugins/ | tail -1
 **`BASE` が空のままなら、起点を推測せず運用者に確認する。** 版数を書き込んだコミットが
 見つからない場合と、まとまりの範囲が履歴から読み取れない場合がこれにあたる。誤った起点で
 比べると、配布済みの変更を未配布として数える。
+
+空の `BASE` を止めるのは、`git diff` が失敗しないためである。空の起点は `HEAD..HEAD` として
+受け取られ、終了コード 0 と空の出力が返る。差分が無いときと見分けがつかないため、配布物が
+変わっていてもこの工程を飛ばすことになる。
 
 差分が無ければ、この工程は飛ばす。飛ばしたことを完了報告へ残す。
 
