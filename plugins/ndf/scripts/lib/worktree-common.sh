@@ -1020,6 +1020,21 @@ wt_extract_write_target() {
     cwd="$saved_cwd"; cwd_known="$saved_known"
   }
   _emit() {
+    # 印の置換は引用符を見ずに行うため、引用符の中の `>` まで印へ変わる。
+    # `cp a "b>c"` の `b>c` は書き込み先そのもので、`>` は字面である。
+    # **印のまま出すと、案内の文字列へ内部の印が漏れる。** 字面へ戻す。
+    #
+    # 引用符の外の `>` は語として切り出されるため、ここへは届かない。届くのは
+    # 引用符の中に収まったものだけである。置換は印の両側へ空白を足すため、
+    # 空白ごと戻す。元からあった空白は残る（`"b > c"` は `b > c` のまま）。
+    local _emit_word=$1
+    _emit_word=${_emit_word// __WT_APPEND__ />>}
+    _emit_word=${_emit_word// __WT_REDIR__ />}
+    _emit_word=${_emit_word// __WT_ANDAND__ /&&}
+    _emit_word=${_emit_word//__WT_APPEND__/>>}
+    _emit_word=${_emit_word//__WT_REDIR__/>}
+    _emit_word=${_emit_word//__WT_ANDAND__/&&}
+    set -- "$_emit_word"
     _wt_is_not_target "$1" && return
     if [ -z "$base" ]; then
       printf '%s\n' "$1"

@@ -1650,3 +1650,34 @@ def test_a_bare_dash_still_cannot_be_followed(command: str) -> None:
     targets, rc = extract_at(command, "/base")
     assert rc == 1, command
     assert targets == []
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # 引用符の中の `>` は書き込み先の字面である。印へ置き換える前処理は
+        # 引用符を見ないため、印のまま出すと案内の文字列へ内部の印が漏れる。
+        ('cp a "b>c"', "/base/b>c"),
+        ('cp a "b>>c"', "/base/b>>c"),
+        ('sed -i \'s/a/b/\' "x>y.md"', "/base/x>y.md"),
+        ("cp a 'b>c'", "/base/b>c"),
+        # 元からあった空白は残す。足された空白だけを消す。
+        ('cp a "b > c"', "/base/b > c"),
+        # `&&` の印も同じく戻す。
+        ('cp a "b&&c"', "/base/b&&c"),
+        # 引用符の外の `>` は従来どおり出力の付け替えである。
+        ("echo hi > out.txt", "/base/out.txt"),
+        ("echo hi >> out.txt", "/base/out.txt"),
+    ],
+)
+def test_markers_inside_quotes_are_restored(command: str, expected: str) -> None:
+    targets, rc = extract_at(command, "/base")
+    assert rc == 0, command
+    assert targets == [expected], command
+
+
+def test_markers_are_restored_without_a_base() -> None:
+    """起点を渡さない呼び方でも印を残さない。"""
+    targets, rc = extract("cp a \"b>c\"")
+    assert rc == 0
+    assert targets == ["b>c"]
