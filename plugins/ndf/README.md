@@ -79,16 +79,22 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v9.3.0）
+# => NDF統合開発エージェント（Kiro CLI用 / v9.4.0）
 ```
 
-## v9.3.0 へ更新するとき
+## v9.4.0 へ更新するとき
 
-**Skill が 3 個増えます。** マージ後の工程として `release-verification`（リリース後テスト）と
-`retrospective`（振り返り）が加わり、範囲外の課題をその場で issue にする `out-of-scope` が
-加わります（#175）。既存の Skill の手順は変わりません。v9.2.0 より前から更新する場合は、
-Skill `worktree` と作業ツリー運用の hook も増えます。**導入済みの環境では、追加された Skill を
-読み込むためにマーケットプレイスの更新とプラグインの再インストールが要ります。**
+**Skill の数は変わりません（31 / 29 / 30）。** `cross-review` の収束判定が変わります（#33 / #37）。
+
+中断したレビューを再開したとき、その時点で Resolve されていない指摘は、修正の工程を 1 度
+通すまで収束しません。これまでは再開したラウンドで両者が承認すると、前のラウンドの指摘を
+修正の工程へ通さないまま収束し、最後の一括処理だけが受け皿になっていました。
+
+あわせて、手順を飛ばして次のラウンドへ進めなくなります。前のラウンドが修正必須の判定だった
+のに修正の記録が無い場合と、対象の指摘が未解決のまま残っている場合は、次のラウンドの開始が
+終了コード 5 で止まります。**増えるラウンドは最大 1 回**で、残りはこれまでどおりです。
+
+`fix` は、そのラウンドの投稿数ではなく Pull Request 上の未解決の指摘を数え直します。
 
 ```bash
 # Claude Code
@@ -244,7 +250,7 @@ gemini
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/9.3.0/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/9.4.0/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -266,14 +272,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/9.3.0/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/9.4.0/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  9.3.0  <path>
+# => ndf@ai-plugins  installed, enabled  9.4.0  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
