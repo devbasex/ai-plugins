@@ -198,7 +198,43 @@ Skill を 3 個増やすと、各ランタイムの初期一覧に載る `descri
 
 ## 完了の定義
 
-- [ ] 受け入れ条件 1〜15 をすべて満たし、条件ごとに検証手段と結果が対応している
-- [ ] `architecture` モードの検証の段階 1〜4 を通す（詳細は `quality-gates`）
-- [ ] 版の配布後にリリース後テストを実施し、結果を記録する
-- [ ] 振り返りを `docs/development-history/` へ残す
+- [x] 受け入れ条件 1〜15 をすべて満たし、条件ごとに検証手段と結果が対応している
+- [x] `architecture` モードの検証の段階 1〜4 を通す（詳細は `quality-gates`）
+- [x] 版の配布後にリリース後テストを実施し、結果を記録する
+- [x] 振り返りを `docs/development-history/` へ残す（[04-2026-08-31.md](../docs/development-history/04-2026-08-31.md)）
+
+## リリース後テスト
+
+対象の版: NDF v9.4.0（2026-08-31 配布。3 Skill は v9.3.0 で追加し、v9.4.0 に含まれる）
+導入経路: 利用者が行うのと同じ再取得を 3 ランタイムで実施した
+
+| ランタイム | 実行したこと | 実行時刻 | 結果 |
+| --- | --- | --- | --- |
+| Claude Code | `claude plugin marketplace update ai-plugins` → `claude plugin update ndf@ai-plugins` | 2026-08-31 08:24 | 合格 / 9.3.0 → 9.4.0 |
+| Codex | `codex plugin marketplace upgrade ai-plugins` → `codex plugin list` | 2026-08-31 08:24 | 合格 / 9.4.0 |
+| Kiro | `bash plugins/ndf/dev.kiro/install.sh --project <検証用> --yes` | 2026-08-31 08:23 | 合格 / 9.4.0・Skill 29 + steering 1 |
+
+受け入れ条件は、開発の作業ツリーではなく導入済みの
+`~/.claude/plugins/cache/ai-plugins/ndf/9.4.0` を対象に確かめた。
+
+| 受け入れ条件 | 実行したこと | 実行時刻 | 結果 |
+| --- | --- | --- | --- |
+| 1〜3. 3 Skill の `SKILL.md` と必須の節 | 導入側の `skills/<名前>/SKILL.md` に開始条件・出力物・記録先・3 択があることを確認 | 2026-08-31 08:24 | 合格 |
+| 4. モードの条件表を持たない | 3 Skill いずれもモードの条件表の行数 0 | 2026-08-31 08:24 | 合格 |
+| 5〜7. `development-workflow` の工程表・図・詳細 | 工程表に 2 行、図に 2 工程と起票への破線 4 本、`workflow-modes.md` に 7 箇所 | 2026-08-31 08:24 | 合格 |
+| 8. `quality-gates` の境界と引き継ぎ先 | `release-verification` への言及 3 箇所、「未検証の項目」4 箇所 | 2026-08-31 08:24 | 合格 |
+| 9. 呼び出し元 6 Skill の案内 | 6 Skill すべてに `out-of-scope` への案内がある | 2026-08-31 08:24 | 合格 |
+| 10. `manifests/` の 3 ファイルすべてに載る | 3 Skill × 3 ファイルの 9 組すべてで掲載を確認 | 2026-08-31 08:24 | 合格 |
+| 11〜14. 検査スクリプトとテスト | `check-skill-frontmatter.py` / `check-markdown-links.py` / `validate-runtime-plugins.sh` が exit 0、`pytest scripts/tests plugins/ndf -q` が 1000 passed | 2026-08-31 08:10 | 合格 |
+| 15. 版と Skill 数の一致 | 導入側の `plugin.json` が 9.4.0。`check-doc-staleness.py` が exit 0 | 2026-08-31 08:24 | 合格 |
+
+合否: **合格**（15 件すべてを実施、保留なし）
+
+### 検証で見つかった事実
+
+| # | 事実 | 3 択の判断 |
+| --- | --- | --- |
+| 1 | 検証の開始時点で、Claude Code の導入済みの版は 9.3.0、Codex のマーケットプレイスは 2026-08-22 の revision だった。版を配布しても、利用者が再取得を実行するまで届かない | **範囲内へ入れる**（担当 B / #188）。#188 は版を上げる担い手と時期を扱う。「利用者が取得する」段はその延長にあり、別に起票すると同じ工程の話が 2 件に分かれる |
+| 2 | `codex plugin marketplace upgrade` の後も `~/.codex/config.toml` の `last_updated` / `last_revision` が古いまま残る。プラグインの実体は 9.4.0 に入れ替わっている | **起票しない**。Codex CLI 側のメタデータの扱いであり、NDF の配布物では直せない |
+
+起票したもの: なし（事実 1 は #188 の範囲へ入れた）
