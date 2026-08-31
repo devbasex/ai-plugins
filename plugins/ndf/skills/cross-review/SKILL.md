@@ -294,7 +294,8 @@ done
 
 # Step 7.5 後段: 最終スイープの結果を GitHub 側の実数で検証する (必須)
 #   exit 0 = 未解決の指摘なし / exit 6 = 残っている (件数と理由を完了報告へ含めて続行)
-"$SCRIPTS/state.py" verify-sweep "$STATE_PR" || [ $? -eq 6 ]
+#   それ以外の終了コードは検証そのものの失敗。報告へ進まずここで止める。
+"$SCRIPTS/state.py" verify-sweep "$STATE_PR" || { RC=$?; [ "$RC" -eq 6 ] || exit "$RC"; }
 
 # Step 8: 終了処理 (deferred nit + ラウンドサマリ + スイープ結果)
 "$SCRIPTS/state.py" report "$STATE_PR"

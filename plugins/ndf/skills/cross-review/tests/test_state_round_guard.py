@@ -171,6 +171,32 @@ def test_no_claimed_identifier_skips_the_check(tmp_dir, state_mod, monkeypatch):
     assert len(_read(tmp_dir)["rounds"]) == 2
 
 
+def test_the_check_queries_the_pull_request_the_claim_belongs_to(tmp_dir, state_mod, monkeypatch):
+    """ローテーション後でも、申告が行われた Pull Request のスレッドを見る。
+
+    Step 6 の `set-current-pr` は次の `start-round` より先に走るため、この時点の
+    `current_pr` は新しい Pull Request を指す。そちらへ問い合わせると、旧 Pull Request の
+    未解決スレッドが一覧に現れず、検査が素通りする。
+    """
+    asked: list[int] = []
+
+    def _fetch(repo, pr):
+        asked.append(pr)
+        # 新しい Pull Request 側には申告された識別子が存在しない。
+        return [] if pr != PR else [{"id": "PRRT_a", "path": "src/foo.py", "line": "42"}]
+
+    monkeypatch.setattr(state_mod, "_fetch_unresolved_threads", _fetch)
+    prev = _round(1, fix={"commit": "abc1234", "resolved_thread_ids": ["PRRT_a"]})
+    _write(tmp_dir, _state([prev], current_pr=PR + 1))
+
+    with pytest.raises(SystemExit) as e:
+        state_mod.cmd_start_round(argparse.Namespace(pr=PR))
+
+    assert asked == [PR]
+    assert e.value.code == 5
+    assert len(_read(tmp_dir)["rounds"]) == 1
+
+
 def test_unavailable_count_does_not_stop_the_round(tmp_dir, state_mod, unresolved, capsys):
     """取得できないときはループを止めず、確認できなかったことを残す。"""
     unresolved(None)

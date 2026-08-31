@@ -984,6 +984,11 @@ def _guard_previous_round(st: dict[str, Any], prev: dict[str, Any]) -> None:
 
     未解決の指摘を取得できないときは検査を行わず、確認できなかったことを残して進む。
     取得の失敗で止めると、GitHub 側の一時的な不調でループが進まなくなる。
+
+    スレッドの状態は、申告が行われた Pull Request（`prev["pr"]`）へ問い合わせる。
+    ローテーションを挟んだラウンドでは Step 6 の `set-current-pr` が先に走るため、
+    `current_pr` は既に新しい Pull Request を指している。そちらへ問い合わせると、
+    旧 Pull Request のスレッドが未解決のままでも一覧に現れず検査が素通りする。
     """
     round_no = prev.get("round")
     verdict = prev.get("verdict")
@@ -1003,7 +1008,8 @@ def _guard_previous_round(st: dict[str, Any], prev: dict[str, Any]) -> None:
     claimed = (fix or {}).get("resolved_thread_ids") or []
     if not claimed:
         return
-    threads = _fetch_unresolved_threads(str(st.get("repo") or ""), int(st.get("current_pr") or 0))
+    claimed_pr = int(prev.get("pr") or st.get("current_pr") or 0)
+    threads = _fetch_unresolved_threads(str(st.get("repo") or ""), claimed_pr)
     if threads is None:
         info(
             f"⚠ round {round_no} で Resolve したと申告されたスレッドの状態を確認できません"

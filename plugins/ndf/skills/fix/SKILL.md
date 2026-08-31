@@ -316,8 +316,13 @@ gh api graphql -f query='
 
 ```bash
 # UNRESOLVED_COUNT / UNRESOLVED_THREAD_IDS を取り込む（exit 1 = 取得できなかった）
-eval "$("$SKILL_DIR/../cross-review/scripts/state.py" unresolved-threads "$STATE_PR")"
+UNRESOLVED_VARS=$("$SKILL_DIR/../cross-review/scripts/state.py" unresolved-threads "$STATE_PR") || exit $?
+eval "$UNRESOLVED_VARS"
 ```
+
+コマンド置換を直接 `eval` に渡さない。取得に失敗して stdout が空になると、
+`eval` 自身の終了コードが 0 になり、スクリプトの `exit 1` が消える。未解決の件数を
+取得できていないのに 0 件と読んで、対象が無いものとして先へ進むことになる。
 
 返信と Resolve を終えたら、**同じ query をもう一度実行して残数を確認する**。
 deferred / rejected として意図的に残したもの以外が残っていれば、対応が漏れている。
