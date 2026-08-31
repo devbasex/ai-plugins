@@ -1511,3 +1511,106 @@ def test_command_and_builtin_wrappers_keep_the_command_position(
     targets, rc = extract_at(command, "/base")
     assert rc == 0, (command, targets)
     assert targets == [expected], command
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # `"` の中の `\"` は文字列を閉じない。閉じたと読むと、残りがまるごと
+        # 1 つの語へ吸い込まれ、後続の `cd` も書き込みも見えなくなる（検知漏れ）。
+        ('cd .worktrees/x; echo "a\\"" ; cd ../.. ; cp a.txt README.md',
+         "/base/README.md"),
+        # 引用符の外の `\ ` は区切りにならない。区切ると語の後半だけを書き込み先
+        # として拾い、実在しない位置を案内する。
+        ("cp a.txt my\\ file.md", "/base/my file.md"),
+        # 引用符の外の `\)` は部分シェルの終わりではない。終わりと読むと、まだ
+        # 中にある `cd` を親のものとして数える（誤検知）。
+        ("cd .worktrees/x; ( echo a\\) ; cd ../.. ; true ) ; cp a.txt README.md",
+         "/base/.worktrees/x/README.md"),
+        # `\` + 改行は行継続で、両方が消える。命令の区切りにもならない。
+        ("cp a.txt \\\nREADME.md", "/base/README.md"),
+        # `'` の中では `\` は字面で、閉じる `'` を隠さない。
+        ("cd .worktrees/x; echo 'a\\' ; cd ../.. ; cp a.txt README.md",
+         "/base/README.md"),
+        # `"` の中で `\` がエスケープとして働くのは `$` `` ` `` `"` `\` と改行に
+        # 限られる。それ以外の前では `\` が文字として残る。
+        ('cp a.txt "a\\nb.md"', "/base/a\\nb.md"),
+        ('cp a.txt "a\\\\b.md"', "/base/a\\b.md"),
+        ('cp a.txt "a\\"b.md"', '/base/a"b.md'),
+    ],
+)
+def test_backslash_escapes_are_honoured(command: str, expected: str) -> None:
+    """`\\` の次の 1 文字はエスケープされる。**シングルクォートの中を除く。**
+
+    期待値は bash に同じコマンドを走らせ、実際に作られたファイルで確かめた。
+    """
+    targets, rc = extract_at(command, "/base")
+    assert rc == 0, (command, targets)
+    assert targets == [expected], command
+
+
+def test_backslash_does_not_hide_a_heredoc_start() -> None:
+    """`\\"` を閉じ引用符と読むと、その後の `<<` を本文の始まりとして数えない。
+
+    本文が残ると、実行されない行の語を書き込み先として拾う（誤検知になる）。
+    """
+    command = 'echo "a\\"" ; cat <<EOF\ncp a.txt README.md\nEOF'
+    targets, rc = extract_at(command, "/base")
+    assert rc == 1, targets
+    assert targets == [], targets
+
+
+def test_backslash_inside_a_quoted_heredoc_delimiter() -> None:
+    """終端の語の `"` の中の `\\"` も引用を閉じない。
+
+    終端を取り違えると本文の終わりを見つけられず、後続の命令まで本文として
+    落としてしまう（検知漏れになる）。
+    """
+    command = 'cat <<"E\\"F"\ncp a.txt README.md\nE"F\ncp b.txt OUT.md'
+    targets, rc = extract_at(command, "/base")
+    assert rc == 0, targets
+    assert targets == ["/base/OUT.md"], targets
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # 右辺のリダイレクトは、左辺が失敗したとき＝**移動前の位置**で開かれる。
+        ("cd dir || exit > fail.log", ["/base/fail.log"]),
+        ("cd dir || exit 1 >> fail.log", ["/base/fail.log"]),
+        ("cd dir || return > fail.log", ["/base/fail.log"]),
+        ("cd dir || break > fail.log", ["/base/fail.log"]),
+        ("cd dir || continue > fail.log", ["/base/fail.log"]),
+        # 続きが走るのは移動した後の位置だけである。両方を別々に解決する。
+        ("cd dir || exit > fail.log\ncp a.txt README.md",
+         ["/base/fail.log", "/base/dir/README.md"]),
+        # 失敗した `cd` を特定できるなら、その手前の位置で開かれる。
+        ("cd a; cd b || exit > fail.log", ["/base/a/fail.log"]),
+        ("cd a; cd b || exit > fail.log\ncp a.txt README.md",
+         ["/base/a/fail.log", "/base/a/b/README.md"]),
+        # ブレースグループの形は従来どおり、中を失敗時の位置で解決する。
+        ("cd dir || { exit > fail.log; }", ["/base/fail.log"]),
+    ],
+)
+def test_a_redirect_on_the_non_continuing_right_side_opens_before_the_move(
+    command: str, expected: list[str]
+) -> None:
+    """`cd dir || exit > fail.log` の `fail.log` は移動前の位置で開かれる。
+
+    移動後の位置で解決すると、主ディレクトリ側への書き込みを作業ツリー側と
+    取り違えて案内を出さない（検知漏れになる）。期待値は bash に同じコマンドを
+    走らせ、実際に作られたファイルで確かめた。
+    """
+    targets, rc = extract_at(command, "/base")
+    assert rc == 0, (command, targets)
+    assert targets == expected, command
+
+
+def test_a_redirect_after_an_unlocatable_failure_is_not_resolved() -> None:
+    """左辺の `cd` が複数あると、どこで失敗したかで位置が変わる。
+
+    決められないものとして相対パスを抑止する。
+    """
+    targets, rc = extract_at("cd a && cd b || exit > fail.log", "/base")
+    assert rc == 1, targets
+    assert targets == [], targets

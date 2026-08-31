@@ -257,7 +257,7 @@ wt_relative_to_main() {
 # `sed -i 's/a b/c/' f` のように引用符の中へ空白を含む形を 1 語として扱うため、
 # 単純な空白区切りでは足りない。
 _wt_tokenize() {
-  local s="${1:-}" n i c quote="" cur="" op last rest
+  local s="${1:-}" n i c quote="" cur="" op last rest esc
   n=${#s}
   local -a out=()
   # 部分シェルの入口として切り出した `(` のうち、まだ閉じていない数。
@@ -314,6 +314,36 @@ _wt_tokenize() {
   }
   for ((i = 0; i < n; i++)); do
     c=${s:i:1}
+    # `\` は次の 1 文字をエスケープする。**シングルクォートの中を除く。** 中では
+    # `\` も字面で、閉じる `'` を隠さない (`'a\'` は `a\`)。実測で確かめた。
+    #
+    # 見なければ `"` の中の `\"` を閉じ引用符と読み、残りをまるごと 1 語へ吸い
+    # 込む（検知漏れ）。引用符の外では `\ ` を区切り、`\)` を部分シェルの終わり
+    # と読む（語の取り違えと誤検知）。
+    if [ "$c" = '\' ] && [ "$quote" != "'" ]; then
+      esc=${s:i+1:1}
+      # 文字列の末尾の `\` はエスケープする相手がいない。字面のまま残す。
+      if [ -z "$esc" ]; then cur+="$c"; continue; fi
+      # `\` + 改行は行継続で、両方が消える。命令の区切りにもならない。
+      if [ "$esc" = $'\n' ]; then i=$((i + 1)); continue; fi
+      if [ -n "$quote" ]; then
+        # **`"` の中で `\` がエスケープとして働く相手は限られる。** `$` `` ` ``
+        # `"` `\` と改行だけで、それ以外の前では `\` が文字として残る
+        # (`"a\nb"` は `a\nb`、`"a\\b"` は `a\b`。実測で確かめた)。語の
+        # 区切りは変わらないが、語そのものが書き込み先のパスになるため、
+        # 落とす `\` と残す `\` を分けないと実在しない位置を案内する。
+        case "$esc" in
+          '$'|'`'|'"'|'\') cur+="$esc" ;;
+          *) cur+="$c$esc" ;;
+        esac
+      else
+        # 引用符の外では次の 1 文字がそのまま語の一部になる。`\ ` の空白は
+        # 区切りにならず、`\(` `\)` は部分シェルの入口・終わりにならない。
+        cur+="$esc"
+      fi
+      i=$((i + 1))
+      continue
+    fi
     if [ -n "$quote" ]; then
       if [ "$c" = "$quote" ]; then quote=""; else cur+="$c"; fi
       continue
@@ -597,6 +627,15 @@ _wt_strip_heredocs() {
     i=0
     while [ "$i" -lt "$n" ]; do
       c=${line:i:1}
+      # `\` は次の 1 文字をエスケープする。**シングルクォートの中を除く。**
+      # 引用符の中でも効くため、`quote` を見る前に読み飛ばす。見なければ
+      # `"` の中の `\"` を閉じ引用符と読み、その後の `<<` を本文の始まりとして
+      # 数えない（本文が残り、実行されない行の語を書き込み先として拾う）。
+      #
+      # ここは位置だけを見る走査なので、`"` の中でエスケープが効く相手が
+      # `$` `` ` `` `"` `\` と改行に限られることは結果を変えない。隠れる 1 文字が
+      # 引用符でも `<` でもなければ、読み飛ばしても読み進めても同じである。
+      if [ "$c" = '\' ] && [ "$quote" != "'" ]; then i=$((i + 2)); continue; fi
       if [ -n "$quote" ]; then
         [ "$c" = "$quote" ] && quote=""
         i=$((i + 1))
@@ -604,7 +643,6 @@ _wt_strip_heredocs() {
       fi
       case "$c" in
         "'"|'"') quote="$c"; i=$((i + 1)); continue ;;
-        '\') i=$((i + 2)); continue ;;
       esac
       if [ "${line:i:3}" = "<<<" ]; then
         i=$((i + 3))
@@ -628,6 +666,18 @@ _wt_strip_heredocs() {
       while [ "$i" -lt "$n" ]; do
         c=${line:i:1}
         if [ -n "$dq" ]; then
+          # `"` の中の `\"` は引用を閉じない。閉じたと読むと終端の語を取り違え、
+          # 本文の終わりを見つけられない（後続の命令まで本文として落とす）。
+          # 落とす `\` と残す `\` の別は `_wt_tokenize` と同じ。
+          # `'` の中では `\` は字面で、エスケープにならない。
+          if [ "$dq" = '"' ] && [ "$c" = '\' ] && [ -n "${line:i+1:1}" ]; then
+            case "${line:i+1:1}" in
+              '$'|'`'|'"'|'\') delim+="${line:i+1:1}" ;;
+              *) delim+="$c${line:i+1:1}" ;;
+            esac
+            i=$((i + 2))
+            continue
+          fi
           if [ "$c" = "$dq" ]; then dq=""; else delim+="$c"; fi
           i=$((i + 1))
           continue
@@ -635,7 +685,12 @@ _wt_strip_heredocs() {
         case "$c" in
           " "|$'\t'|";"|"|"|"&"|">"|"<") break ;;
           "'"|'"') dq="$c"; quoted=1 ;;
-          '\') quoted=1 ;;
+          # 引用符の外の `\` は次の 1 文字を字面にする。終端の語には `\` を
+          # 含めない (`<<E\OF` の終端は `EOF`)。展開は止まるため `quoted` を立てる。
+          '\')
+            quoted=1
+            if [ -n "${line:i+1:1}" ]; then delim+="${line:i+1:1}"; i=$((i + 1)); fi
+            ;;
           *) delim+="$c" ;;
         esac
         i=$((i + 1))
@@ -782,9 +837,10 @@ wt_extract_write_target() {
   local or_depth=0
   # `_or_group_exits` が返す、まとまりを閉じる `}` の添字。
   local _WT_GROUP_END=0
-  # `cd` の枝が、その命令に付いたリダイレクトを移動前の位置で解決し終えた語の
-  # 位置。ここより手前の `__WT_REDIR__` / `__WT_APPEND__` を二度拾わない。
-  local cd_redir_end=0
+  # 移動前の位置で解決し終えたリダイレクトの、走査が届いた語の位置。`cd` の枝と
+  # `||` の右辺の枝が書き込む。ここより手前の `__WT_REDIR__` / `__WT_APPEND__` を
+  # 二度拾わない。
+  local resolved_redir_end=0
   # `_redir_target` の結果。書き込み先の語と、読み進めた最後の語の位置。
   local _WT_REDIR_DEST="" _WT_REDIR_END=0
   # 印 (`__WT_REDIR__` / `__WT_APPEND__`) の後ろの語から、実際に開かれる
@@ -929,6 +985,39 @@ wt_extract_write_target() {
       pw="$tw"
     done
     return 1
+  }
+  # `||` の右辺の非継続命令 (`exit` / `return` / `break` / `continue`) に付いた
+  # リダイレクトを、**左辺が失敗した位置**で解決する。右辺へ到達したのは左辺が
+  # 失敗したときだけで、そのとき `cd` は効いていない。移動した後の位置で解決すると
+  # 主ディレクトリ側への書き込みを作業ツリー側と取り違えて案内を出さない
+  # （検知漏れになる）。`cd` 自身に付いたリダイレクトと同じ考え方である。
+  #
+  # 失敗した命令を字面から特定できるのは、リストの中の `cd` がちょうど 1 つで、
+  # それが直前の命令のときだけである。特定できない形では相対パスを出さない。
+  # 判定は下の失敗時の扱いと同じで、あちらは右辺そのものが走る位置を決めるのに
+  # 対し、ここはリダイレクトが開かれる位置を決める（どちらも同じ位置になる）。
+  _or_exit_redirs() {
+    local p="$1" j2 saved_cwd="$cwd" saved_known="$cwd_known"
+    if [ "$list_cds" = 1 ] && [ "$cd_is_last" = 1 ]; then
+      cwd="$list_cwd"; cwd_known="$list_known"
+    elif [ "$list_cds" != 0 ]; then
+      cwd_known=0
+    fi
+    # リダイレクトの印は `_wt_is_separator` にも当たるため、先に見る。
+    for ((j2 = p; j2 < n; j2++)); do
+      case "${words[j2]}" in
+        __WT_REDIR__|__WT_APPEND__)
+          _redir_target "$j2"
+          _emit "$_WT_REDIR_DEST"
+          j2=$_WT_REDIR_END
+          continue
+          ;;
+      esac
+      if _wt_is_separator "${words[j2]}"; then break; fi
+    done
+    # 走査が届いた位置を控える。`__WT_REDIR__` の枝が同じ語を二度拾わない。
+    resolved_redir_end=$j2
+    cwd="$saved_cwd"; cwd_known="$saved_known"
   }
   _emit() {
     _wt_is_not_target "$1" && return
@@ -1075,6 +1164,9 @@ wt_extract_write_target() {
         if [ "$list_or" = 0 ]; then
           case "$or_next" in
             exit|return|break|continue)
+              # 右辺に付いたリダイレクトは、左辺が失敗した位置で開かれる。
+              # 位置を持ち替える前に解決する。
+              _or_exit_redirs "$((i + 1))"
               # 左辺が成功した位置をそのまま持つ。判定に使う値は引き直す。
               list_cwd="$cwd"; list_known="$cwd_known"; list_cds=0
               list_and_uncertain=0; list_cond_cd=0; cd_is_last=0
@@ -1229,7 +1321,7 @@ wt_extract_write_target() {
           esac
         done
         # 走査が届いた位置を控える。`__WT_REDIR__` の枝が同じ語を二度拾わない。
-        cd_redir_end=$k
+        resolved_redir_end=$k
         # `||` の右辺で戻せるかどうかの判定に使う。
         list_cds=$((list_cds + 1)); cd_is_last=1
         # `&&` を跨いだ先の `cd` は、走ったかどうかが左辺の成否で決まる。
@@ -1245,8 +1337,8 @@ wt_extract_write_target() {
         esac
         ;;
       __WT_REDIR__|__WT_APPEND__)
-        # `cd` に付いたリダイレクトは、その枝が移動前の位置で解決済みである。
-        if [ "$i" -lt "$cd_redir_end" ]; then continue; fi
+        # 移動前の位置で解決済みのリダイレクトは、その枝が拾い終えている。
+        if [ "$i" -lt "$resolved_redir_end" ]; then continue; fi
         _redir_target "$i"
         _emit "$_WT_REDIR_DEST"
         ;;
@@ -1322,7 +1414,7 @@ wt_extract_write_target() {
     esac
   done
 
-  unset -f _emit _push_group _pop_group _push_subshell _pop_subshell _or_group_exits
+  unset -f _emit _push_group _pop_group _push_subshell _pop_subshell _or_group_exits _or_exit_redirs
   [ "$found" = 1 ] || return 1
 }
 
