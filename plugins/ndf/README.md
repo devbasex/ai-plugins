@@ -84,7 +84,7 @@ python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['descript
 
 ## v9.4.0 へ更新するとき
 
-**Skill の数は v9.3.0 から変わっていません。** 現在の公開 Skill 数は冒頭の表にあります。
+**v9.4.0 では Skill の数は変わりませんでした（v9.3.0 と同じ 31 / 29 / 30）。**
 `cross-review` の収束判定が変わります（#33 / #37）。
 
 中断したレビューを再開したとき、その時点で Resolve されていない指摘は、修正の工程を 1 度

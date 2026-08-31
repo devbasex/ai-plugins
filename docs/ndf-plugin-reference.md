@@ -37,8 +37,8 @@ plugin install 時に build を実行する必要はありません。
 
 | Runtime | 読むもの |
 |---|---|
-| Claude Code | `.claude-plugin/plugin.json`（`agents/` 8 個、`hooks/claude.json`、`skills` 配列 27 個）、`scripts/` |
-| Codex | `.codex-plugin/plugin.json`（`hooks/codex.json`、`skills` 配列 25 個）、`scripts/` |
+| Claude Code | `.claude-plugin/plugin.json`（`agents/` 8 個、`hooks/claude.json`、`skills` 配列 32 個）、`scripts/` |
+| Codex | `.codex-plugin/plugin.json`（`hooks/codex.json`、`skills` 配列 30 個）、`scripts/` |
 | Kiro CLI | `dev.kiro/`（installer・agent config template・workflow prompts）、`manifests/kiro-skills.txt`、`skills/`、`scripts/` |
 
 同じディレクトリを 3 ランタイムが共有しますが、読む対象はマニフェストと installer が決めるため、
@@ -61,13 +61,20 @@ NDF の Skill 実装は `plugins/ndf/skills/` にあります。公開セット�
 主な Skill 領域:
 
 - PR / review workflow: `pr`, `pr-tests`, `fix`, `pr-review`, `cross-review`, `cross-refactoring`
-- branch / release workflow: `deploy`, `cherry-pick-pr`, `merged`
-- planning / documentation: `implementation-plan`, `issue-plan-strategy`, `plan-to-spec`, `markdown-writing`
-- development methodology: `development-workflow`, `requirements-design`, `tdd-cycle`, `refactoring`, `quality-gates`
+- branch / release workflow: `worktree`, `deploy`, `cherry-pick-pr`, `merged`, `release`,
+  `release-verification`
+- planning / documentation: `implementation-plan`, `issue-plan-strategy`, `plan-to-spec`,
+  `markdown-writing`, `investigation-rules`
+- development methodology: `development-workflow`, `requirements-design`, `tdd-cycle`,
+  `refactoring`, `quality-gates`, `retrospective`, `out-of-scope`
 - quality / execution: `docker-container-access`, `qa-security-scan`
   （Playwright による E2E テストは v7.0.0 で `playwright-kit` プラグインへ分離）
-- external services: `google-drive`
+- external services: `external-ai`, `official-skills-autoloader`（Claude Code のみ）
+- runtime 設定: `statusline`（Claude Code と Kiro CLI のみ）
 - policy: `ndf-policies`, `problem-solving`, `logging-guidelines`
+
+`optional-skills/` に置く `google-auth` / `google-drive` / `ml-model-structure` / `skill-stats`
+はどの manifest にも載らないため、この一覧には含めていません。
 
 ## MCP Plugins
 
