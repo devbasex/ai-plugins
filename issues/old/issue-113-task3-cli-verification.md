@@ -382,7 +382,7 @@ kiro        5625       —            4808             817
 > かつては `FRONTMATTER_TOTAL_MAX`（全 Skill の frontmatter 合計 11,200 文字）を
 > 主たる制約として扱っていたが、これはランタイムが課すものではなくリポジトリ独自の目安で
 > ある。実際の制約は初期一覧の予算であり、そちらはトークンで効く。詳細は
-> [`plugins/ndf-shared/skills/README.md`](../plugins/ndf-shared/skills/README.md)「上限値」。
+> [`plugins/ndf-shared/skills/README.md`](../../plugins/ndf/skills/README.md)「上限値」。
 
 ## 7. モデル指定フラグ（4 CLI 実測）
 

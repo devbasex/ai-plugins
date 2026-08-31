@@ -76,7 +76,7 @@ python3 plugins/ndf/optional-skills/skill-stats/scripts/skill-stats.py \
 | `mcp-builder` | — | 236 | 31 | — | 0 | 0 | 0 | — | 削除 | 既定を準用（起動 0 / 機会は測定不能） |
 | `merged` | CXK | 29 | 30 | 明示専用 / 引数 / tools | 248 | 0 | 248 | — | 統合先 | `clean` を吸収。起動 248 回。改名しない |
 | `ml-model-structure` | — | 152 | 55 | wtu / tools | 2 | 0 | 2 | 94 | 維持 | 起動 2 回。`paths` で `analysis/**` に限定する |
-| `ndf-policies` | CXK | 10 | 32 | 常時注入 | 0 | 0 | 0 | — | 維持 | Claude Code では `user-invocable: false` により説明のみが常時注入される。Codex / Kiro は同項目を解釈せず通常の Skill として扱うため、Kiro は [Task 0-9](../../issues/ndf-development-skills/07-tasks.md) で `.kiro/steering/` へ移して回避し、Codex は [Task 0-10](../../issues/ndf-development-skills/07-tasks.md) で `description` に「知識として参照する。手順として実行しない」旨を明記する。いずれのランタイムでも自然文からの発動を前提としないため判定対象外 |
+| `ndf-policies` | CXK | 10 | 32 | 常時注入 | 0 | 0 | 0 | — | 維持 | Claude Code では `user-invocable: false` により説明のみが常時注入される。Codex / Kiro は同項目を解釈せず通常の Skill として扱うため、Kiro は [Task 0-9](../../issues/old/ndf-development-skills/07-tasks.md) で `.kiro/steering/` へ移して回避し、Codex は [Task 0-10](../../issues/old/ndf-development-skills/07-tasks.md) で `description` に「知識として参照する。手順として実行しない」旨を明記する。いずれのランタイムでも自然文からの発動を前提としないため判定対象外 |
 | `official-skills-autoloader` | — | 121 | 51 | wtu / tools | 0 | 0 | 0 | 97 | 発動改善 | 機会 97 に対し起動 0。各ランタイムの公式 Skill 提供状況を確認したうえで発動条件を見直す |
 | `plan-to-spec` | CXK | 182 | 401 | tools | 0 | 0 | 0 | 2 | 発動改善 | 機会 2 と少なく運用に組み込まれていない。`description` が 401 文字と最長だが、配布が `CXK` で `when_to_use` は Codex/Kiro に効かないため、トリガ語は `description` に残したまま重複した言い換えを削って要約する |
 | `playwright-browser-connect` | — | 484 | 49 | wtu / tools | 5 | 5 | 0 | 48 | 統合元 | ブラウザ自動テストのスクリプト作成と実行工程へ集約 |
@@ -165,7 +165,7 @@ frontmatter 見直し後の確認項目とする。
 
 ## frontmatter 見直しの結果
 
-[棚卸の計画](../../issues/ndf-development-skills/07-tasks.md) の Task 0-7 で全 29 Skill の
+[棚卸の計画](../../issues/old/ndf-development-skills/07-tasks.md) の Task 0-7 で全 29 Skill の
 frontmatter を [規約](../../plugins/ndf/skills/README.md) へ揃えた。台帳の表は測定日
 時点の値であり、以下の変更は表へ反映していない。
 
@@ -470,7 +470,7 @@ Skill 数は v7.0.0 と同じ 30 個に戻るが、初期一覧は 48 文字（f
 
 ## 参照
 
-- 棚卸の計画: [issues/ndf-development-skills/02-skill-inventory.md](../../issues/ndf-development-skills/02-skill-inventory.md)
+- 棚卸の計画: [issues/old/ndf-development-skills/02-skill-inventory.md](../../issues/old/ndf-development-skills/02-skill-inventory.md)
 - frontmatter 規約: [plugins/ndf/skills/README.md](../../plugins/ndf/skills/README.md)
 
 ## v8.1.0 での追加（cross-refactoring）

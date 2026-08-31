@@ -113,5 +113,5 @@ uv run --with pytest pytest <テストのパス> -q
 
 ## 参照
 
-- [issues/issue-175-release-verification-retrospective.md](../issue-175-release-verification-retrospective.md) — 直前の版で追加した工程
+- [issues/issue-175-release-verification-retrospective.md](../../issue-175-release-verification-retrospective.md) — 直前の版で追加した工程
 - `plugins/ndf/skills/development-workflow/SKILL.md` — 工程の振り分けの基準
