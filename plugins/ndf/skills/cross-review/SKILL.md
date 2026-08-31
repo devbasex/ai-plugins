@@ -376,6 +376,9 @@ body に書くのは **設計レベル・PR 横断の修正提案** のみ。
 - `REQUEST_CHANGES` — critical / major の指摘あり
 - `COMMENT` — **基本使わない**。雑感だけの投稿は禁止
 
+指摘をこの PR の範囲外と判断したときは、`/ndf:out-of-scope` で起票し、番号を返信へ
+書いてから resolve する。番号の無い resolve は、指摘した側からは無視と区別できない。
+
 ## CI failure の分類（誤中断防止）
 
 「CI 失敗 → 即 `final=error`」は乱暴。`scripts/state.py merge-fix` が
@@ -483,3 +486,4 @@ pint / larastan / test / build などは **中断** を原則とする。
   `/ndf:pr-review` 単発や Claude Code の `code-reviewer` は代替にせず、release ブランチへ merge する前に
   codex + gemini の APPROVE 収束を確認する (Step 6)
 - `general-purpose` エージェント — fix 実行用サブエージェント
+- `/ndf:out-of-scope` — 範囲外と判断した指摘の起票

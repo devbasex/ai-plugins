@@ -35,6 +35,9 @@ description: "Fix bugs and data inconsistencies upstream at the root cause. Use 
 8. 修正後にデータ修復（パイプライン再実行）
 ```
 
+根本原因がこの変更の範囲の外にあった場合は、`/ndf:out-of-scope` を起動して起票する。
+上流で直すことと、この変更で直すことは別である。
+
 ### 再現テストを先に書く（必須）
 
 **修正の前に、不具合を再現する失敗テストを追加する。** 再現できないまま修正すると、
@@ -193,3 +196,4 @@ SQLクエリ結果をそのまま貼り、「コードを読んだ推測」と�
 - `/ndf:investigation-rules` — 調査レポート作成時のエビデンス主義
 - `/ndf:cherry-pick-pr` — 複数ブランチへの修正適用戦略
 - `/ndf:logging-guidelines` — ログ設計（原因特定を容易にする）
+- `/ndf:out-of-scope` — 根本原因が今回の範囲の外にあったときの起票
