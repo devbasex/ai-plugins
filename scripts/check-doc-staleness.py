@@ -19,6 +19,7 @@ import argparse
 import json
 import re
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 
 # 説明文書に数と版数を書いているのは NDF プラグインだけである。他の family が同じ書き方を
@@ -48,22 +49,69 @@ TABLE_ROW = re.compile(r"^\|\s*(Claude Code|Codex|Kiro CLI)\s*\|\s*(\d+)\s*個\s
 LAYOUT_SKILLS = re.compile(r"唯一の実体（\s*(\d+)\s*個\s*）")
 LAYOUT_OPTIONAL = re.compile(r"どの配布先にも載せない Skill（\s*(\d+)\s*個\s*）")
 UPGRADE_HEADING = re.compile(r"^##\s+v(\d+\.\d+\.\d+)\s+へ更新するとき\s*$", re.MULTILINE)
+NAME_SEPARATOR = re.compile(r"[,、]")
 
 
+@dataclass
 class Report:
     """食い違いを集めて、最後にまとめて出す。
 
     最初の 1 件で止めると、版を上げたときに残った古い記載を 1 つずつしか直せない。
     """
 
-    def __init__(self) -> None:
-        self.errors: list[str] = []
+    errors: list[str] = field(default_factory=list)
 
     def add(self, path: str, message: str) -> None:
         self.errors.append(f"{path}: {message}")
 
     def add_source(self, message: str) -> None:
+        """突き合わせ先そのものが欠けていることを記録する。"""
         self.errors.append(message)
+
+
+@dataclass(frozen=True)
+class Claim:
+    """説明文書に書かれた 1 種類の数と、その突き合わせ先。
+
+    「どのファイルのどの記載が、どの値と食い違ったか」を出力するために要る 5 つを 1 つに
+    まとめる。記載ごとに判定の書き方が分かれていると、失敗の出力の形も分かれてしまう。
+    """
+
+    path: str
+    """説明文書のパス。"""
+    subject: str
+    """記載の識別。「公開Skills の Claude Code の数」のように、読み手が本文中から探せる語句。"""
+    wording: str
+    """期待する書き方。読み取れなかったときに案内する。"""
+    described: list[int]
+    """説明文書から読み取れた数。同じ記載が複数箇所にあれば並ぶ。"""
+    expected: int | None
+    """突き合わせ先の値。数える相手が無いときは None。"""
+    source: str
+    """突き合わせ先の名前。"""
+
+
+def verify(claim: Claim, report: Report) -> None:
+    """記載が無いことと、値が食い違うことの両方を失敗として扱う。"""
+    if not claim.described:
+        report.add(
+            claim.path,
+            f"{claim.subject}を読み取れない"
+            f"（`{claim.wording}` の形で書く。{claim.source}: {claim.expected}）",
+        )
+        return
+    if claim.expected is None:
+        return
+    for value in claim.described:
+        if value != claim.expected:
+            report.add(
+                claim.path,
+                f"{claim.subject}が食い違う"
+                f"（記載: {value} / {claim.source}: {claim.expected}）",
+            )
+
+
+# --- 突き合わせ先を数える ---
 
 
 def manifest_skill_count(root: Path, runtime: str, report: Report) -> int | None:
@@ -83,7 +131,7 @@ def manifest_skill_count(root: Path, runtime: str, report: Report) -> int | None
 
 
 def skill_dir_count(root: Path, relative: str, report: Report) -> int | None:
-    """`SKILL.md` を持つディレクトリの数。README.md などのファイルは数えない。"""
+    """`SKILL.md` を持つディレクトリの数。`README.md` などのファイルは数えない。"""
     directory = root / relative
     if not directory.is_dir():
         report.add_source(f"{relative} が無い（Skill の実体を数える相手）")
@@ -111,32 +159,20 @@ def read_document(root: Path, relative: str, report: Report) -> str | None:
     return path.read_text(encoding="utf-8")
 
 
-def check_runtime_counts(body: str, counts: dict[str, int | None], report: Report) -> None:
-    """`README.md` の「<ランタイム>向け core N 個」を、マニフェストの行数と突き合わせる（A）。
+# --- 説明文書から数を読み取る ---
 
-    同じ書き方が概要と一覧表の 2 箇所にある。どちらも対象にするため、出現をすべて見る。
-    """
-    found: dict[str, list[int]] = {label: [] for label in ROOT_README_RUNTIMES}
-    for label, number in RUNTIME_COUNT.findall(body):
-        found[label].append(int(number))
-    for label, runtime in ROOT_README_RUNTIMES.items():
-        expected = counts.get(runtime)
-        if not found[label]:
-            report.add(
-                ROOT_README,
-                f"公開Skills の {label} の数が読み取れない"
-                f"（`{label}向け core <数>個` の形で書く。{manifest_path(runtime)}: {expected}）",
-            )
-            continue
-        if expected is None:
-            continue
-        for described in found[label]:
-            if described != expected:
-                report.add(
-                    ROOT_README,
-                    f"公開Skills の {label} の数が食い違う"
-                    f"（記載: {described} / {manifest_path(runtime)}: {expected}）",
-                )
+
+def numbers_of(pattern: re.Pattern[str], body: str) -> list[int]:
+    return [int(value) for value in pattern.findall(body)]
+
+
+def labelled_numbers(pattern: re.Pattern[str], body: str, labels: dict[str, str]) -> dict[str, list[int]]:
+    """ランタイム名で対応づけた数。同じ書き方が複数箇所にあればすべて拾う。"""
+    found: dict[str, list[int]] = {label: [] for label in labels}
+    for line in body.splitlines():
+        for label, value in pattern.findall(line):
+            found[label].append(int(value))
+    return found
 
 
 def category_lines(body: str) -> list[re.Match[str]] | None:
@@ -157,99 +193,106 @@ def category_lines(body: str) -> list[re.Match[str]] | None:
     return matched
 
 
-def check_source_counts(body: str, total: int | None, detail: str, report: Report) -> None:
-    """`README.md` の元 Skill 数（B）とカテゴリ内訳（C）を突き合わせる。"""
-    described = SOURCE_COUNT.findall(body)
-    if not described:
-        report.add(
-            ROOT_README,
-            f"元Skills の数が読み取れない（`元Skills（<数>個）` の形で書く。{detail}）",
-        )
-    elif total is not None:
-        for value in described:
-            if int(value) != total:
-                report.add(
-                    ROOT_README,
-                    f"元Skills の数が食い違う（記載: {value} / {detail}）",
-                )
+# --- 説明文書ごとの検査 ---
 
-    matched = category_lines(body)
-    if not matched:
-        report.add(
-            ROOT_README,
-            "元Skills のカテゴリ内訳が読み取れない"
-            f"（`  - <分類> (<数>): <Skill 名>, ...` の形で元Skills の行の直後に並べる。{detail}）",
+
+def check_root_readme(
+    body: str, counts: dict[str, int | None], total: int | None, source: str, report: Report
+) -> None:
+    """`README.md` のランタイム別の数（A）・元 Skill 数（B）・カテゴリ内訳（C）を見る。"""
+    found = labelled_numbers(RUNTIME_COUNT, body, ROOT_README_RUNTIMES)
+    for label, runtime in ROOT_README_RUNTIMES.items():
+        verify(
+            Claim(
+                path=ROOT_README,
+                subject=f"公開Skills の {label} の数",
+                wording=f"{label}向け core <数>個",
+                described=found[label],
+                expected=counts.get(runtime),
+                source=manifest_path(runtime),
+            ),
+            report,
         )
-        return
+    verify(
+        Claim(
+            path=ROOT_README,
+            subject="元Skills の数",
+            wording="元Skills（<数>個）",
+            described=numbers_of(SOURCE_COUNT, body),
+            expected=total,
+            source=source,
+        ),
+        report,
+    )
+    check_category_breakdown(body, total, source, report)
+
+
+def check_category_breakdown(body: str, total: int | None, source: str, report: Report) -> None:
+    """カテゴリ内訳の合計と、1 行ごとの宣言と並ぶ Skill 名の数を突き合わせる（C）。"""
+    matched = category_lines(body)
+    if matched is None:
+        matched = []
     for found in matched:
         label = found.group("label")
         declared = int(found.group("count"))
-        listed = [name for name in re.split(r"[,、]", found.group("names")) if name.strip()]
+        listed = [name for name in NAME_SEPARATOR.split(found.group("names")) if name.strip()]
         if declared != len(listed):
             report.add(
                 ROOT_README,
                 f"カテゴリ内訳「{label}」の数が、並ぶ Skill 名の数と食い違う"
                 f"（宣言: {declared} / 並ぶ名前: {len(listed)}）",
             )
-    if total is not None:
-        summed = sum(int(found.group("count")) for found in matched)
-        if summed != total:
-            report.add(
-                ROOT_README,
-                f"カテゴリ内訳の合計が食い違う（合計: {summed} / {detail}）",
-            )
+    verify(
+        Claim(
+            path=ROOT_README,
+            subject="元Skills のカテゴリ内訳の合計",
+            wording="  - <分類> (<数>): <Skill 名>, ...（元Skills の行の直後に並べる）",
+            described=[sum(int(found.group("count")) for found in matched)] if matched else [],
+            expected=total,
+            source=source,
+        ),
+        report,
+    )
 
 
-def check_distribution_table(body: str, counts: dict[str, int | None], report: Report) -> None:
-    """`plugins/ndf/README.md` の配布先の表を、マニフェストの行数と突き合わせる（D）。"""
-    found: dict[str, list[int]] = {label: [] for label in PLUGIN_README_RUNTIMES}
-    for line in body.splitlines():
-        row = TABLE_ROW.match(line)
-        if row:
-            found[row.group(1)].append(int(row.group(2)))
-    for label, runtime in PLUGIN_README_RUNTIMES.items():
-        expected = counts.get(runtime)
-        if not found[label]:
-            report.add(
-                PLUGIN_README,
-                f"配布先の表に {label} の行が無い"
-                f"（`| {label} | <数> 個 | ... |` の形で書く。{manifest_path(runtime)}: {expected}）",
-            )
-            continue
-        if expected is None:
-            continue
-        for described in found[label]:
-            if described != expected:
-                report.add(
-                    PLUGIN_README,
-                    f"配布先の表の {label} の数が食い違う"
-                    f"（記載: {described} / {manifest_path(runtime)}: {expected}）",
-                )
-
-
-def check_layout_counts(
-    body: str, skills: int | None, optional: int | None, report: Report
+def check_plugin_readme(
+    body: str,
+    counts: dict[str, int | None],
+    skills: int | None,
+    optional: int | None,
+    version: str | None,
+    report: Report,
 ) -> None:
-    """`plugins/ndf/README.md` のレイアウト図に書かれた 2 つの数を突き合わせる（E）。"""
+    """`plugins/ndf/README.md` の配布先の表（D）・レイアウト図（E）・更新案内（F）を見る。"""
+    found = labelled_numbers(TABLE_ROW, body, PLUGIN_README_RUNTIMES)
+    for label, runtime in PLUGIN_README_RUNTIMES.items():
+        verify(
+            Claim(
+                path=PLUGIN_README,
+                subject=f"配布先の表の {label} の数",
+                wording=f"| {label} | <数> 個 | ... |",
+                described=found[label],
+                expected=counts.get(runtime),
+                source=manifest_path(runtime),
+            ),
+            report,
+        )
     for pattern, expected, wording, source in (
         (LAYOUT_SKILLS, skills, "唯一の実体（<数> 個）", f"{SKILLS_DIR}/ の実体"),
         (LAYOUT_OPTIONAL, optional, "どの配布先にも載せない Skill（<数> 個）", f"{OPTIONAL_DIR}/ の実体"),
     ):
-        described = pattern.findall(body)
-        if not described:
-            report.add(
-                PLUGIN_README,
-                f"レイアウト図の数が読み取れない（`{wording}` の形で書く。{source}: {expected}）",
-            )
-            continue
-        if expected is None:
-            continue
-        for value in described:
-            if int(value) != expected:
-                report.add(
-                    PLUGIN_README,
-                    f"レイアウト図の数が食い違う（記載: {value} / {source}: {expected}）",
-                )
+        verify(
+            Claim(
+                path=PLUGIN_README,
+                subject="レイアウト図の数",
+                wording=wording,
+                described=numbers_of(pattern, body),
+                expected=expected,
+                source=source,
+            ),
+            report,
+        )
+    check_upgrade_heading(body, version, report)
 
 
 def check_upgrade_heading(body: str, version: str | None, report: Report) -> None:
@@ -296,18 +339,15 @@ def main() -> int:
     version = plugin_version(root, report)
 
     total = None if skills is None or optional is None else skills + optional
-    detail = f"{SKILLS_DIR}/ の実体 {skills} + {OPTIONAL_DIR}/ の {optional} = {total}"
+    source = f"{SKILLS_DIR}/ の実体 {skills} + {OPTIONAL_DIR}/ の {optional} = {total}"
 
     root_body = read_document(root, ROOT_README, report)
     if root_body is not None:
-        check_runtime_counts(root_body, counts, report)
-        check_source_counts(root_body, total, detail, report)
+        check_root_readme(root_body, counts, total, source, report)
 
     plugin_body = read_document(root, PLUGIN_README, report)
     if plugin_body is not None:
-        check_distribution_table(plugin_body, counts, report)
-        check_layout_counts(plugin_body, skills, optional, report)
-        check_upgrade_heading(plugin_body, version, report)
+        check_plugin_readme(plugin_body, counts, skills, optional, version, report)
 
     if report.errors:
         for error in report.errors:
