@@ -54,28 +54,31 @@ bash plugins/playwright-kit/dev.kiro/install.sh --dry-run
 NDF の installer と違い、エージェント定義・常時指示・プロンプト・フックは扱いません
 （このプラグインは Skill だけを配ります）。
 
-## v2.0.0 へ更新するとき
+## v2.0.1 へ更新するとき
 
-配布ディレクトリが `plugins/playwright-kit-{shared,claude,codex,kiro}/` から
-`plugins/playwright-kit/` へ変わりました。マーケットプレイスの参照先が変わるため、**導入済みの
-環境では再インストールが要ります**。
+**証跡リンクの置換が働かない状態を直しました（#81）。** テストの報告書を共有ストレージ上の
+文書へ変換するとき、報告書に書かれた証跡のファイル位置が URL へ書き換わらず、変換した文書から
+証跡へたどり着けませんでした。
+
+拾う対象を、行頭の `- trace: ` / `- HAR: ` に続くコード表記と、リンク記法のリンク先の 2 つに
+しました。ケースのディレクトリ名が `TC-` で始まる必要はありません。共有ストレージ側の一覧に
+載っている位置だけを書き換えるため、テストの失敗メッセージに現れるファイル位置や外部の URL は
+そのまま残ります。
+
+報告書を作る側の出力は変えていません。Skill の名前と数も変えていません（4 個）。
 
 ```bash
 # Claude Code
 /plugin marketplace update ai-plugins
-/plugin uninstall playwright-kit@ai-plugins
 /plugin install playwright-kit@ai-plugins
 
 # Codex
-codex plugin marketplace remove ai-plugins
-codex plugin marketplace add https://github.com/devbasex/ai-plugins
+codex plugin marketplace upgrade ai-plugins
 codex plugin add playwright-kit@ai-plugins
 
-# Kiro CLI（installer のパスが変わりました）
+# Kiro CLI
 bash plugins/playwright-kit/dev.kiro/install.sh
 ```
-
-Skill の名前と数は変えていません（4 個）。
 
 ## NDF との関係
 
