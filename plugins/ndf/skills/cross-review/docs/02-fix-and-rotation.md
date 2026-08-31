@@ -11,7 +11,9 @@
 | (Agent) | Step 6b — light モードのみ。新 PR の title/body を再生成して `rotate-pr<STATE_PR>-newtext.json` に書き出し |
 | `scripts/rotate-pr.sh execute` | Step 6c — 旧 PR close + 新 PR 作成 (light は同ブランチ / squash は新ブランチ) |
 | `scripts/state.py set-current-pr` | Step 6 — rotation 後の state 更新 |
-| `scripts/state.py report` | Step 8 — deferred nit + ラウンドサマリ |
+| (Agent) | Step 7.5 — 最終スイープ（残った未解決の指摘の片づけ） |
+| `scripts/state.py verify-sweep` | Step 7.5 後段 — 未解決の指摘が 0 件かを GitHub 側で確認 |
+| `scripts/state.py report` | Step 8 — deferred nit + ラウンドサマリ + スイープ結果 |
 
 ## Step 5: 修正 — **必ずサブエージェント経由**
 
@@ -60,6 +62,11 @@ worktree 外を触ると競合します。
   - gemini review: {GEMINI_REVIEW_URL}
     (intent={GEMINI_INTENT}, posted_as={GEMINI_POSTED_AS}, {GEMINI_COMMENT_COUNT}件)
 - 既存コメントスナップショット: $TMP_DIR/cross-review-pr{PR}-existing-comments.txt
+
+⚠ 上の件数は **そのラウンドで新しく投稿された件数** であり、PR 上に残っている未解決の
+指摘の数ではない。前のラウンドの分や、再開の前に投稿された分がこの数の外にある。
+**対応の対象は GraphQL の `reviewThreads` を数え直して決めること**（手順 1 の
+コメント取得と、下の Resolve 用 query を使う）。この件数だけを対応すると取りこぼす。
 
 ## ポリシー
 - 重要度ラベルは **AI agent の付与を鵜呑みにせず**、コードを読んで独自に再判定する
@@ -182,7 +189,8 @@ fi
 ```bash
 if "$SCRIPTS/state.py" should-rotate "$STATE_PR"; then
   # Step 6a: 旧 PR の素材 dump (title / body / isDraft / git log / git diff --stat)
-  eval "$("$SCRIPTS/rotate-pr.sh" prepare "$STATE_PR")"
+  PREPARE_VARS=$("$SCRIPTS/rotate-pr.sh" prepare "$STATE_PR") || exit $?
+  eval "$PREPARE_VARS"
 
   # Step 6b: light モードのみ。Agent(subagent_type="general-purpose") で
   # 現状の差分・実装を反映した新 title/body を生成し、
@@ -190,7 +198,8 @@ if "$SCRIPTS/state.py" should-rotate "$STATE_PR"; then
   # (squash モードでは Step 6b は不要)
 
   # Step 6c: 実行 (NEW_PR / NEW_PR_URL / NEW_BRANCH を取り込む)
-  eval "$("$SCRIPTS/rotate-pr.sh" execute "$STATE_PR" --mode "$ROTATE_MODE")"
+  ROTATE_VARS=$("$SCRIPTS/rotate-pr.sh" execute "$STATE_PR" --mode "$ROTATE_MODE") || exit $?
+  eval "$ROTATE_VARS"
 
   "$SCRIPTS/state.py" set-current-pr "$STATE_PR" "$NEW_PR"
   # NOTE: STATE_PR は **絶対に変えない**。次ループの scripts も $STATE_PR で呼ぶ。
@@ -335,6 +344,13 @@ while ループ脱出後にメインが以下のプロンプトでサブエー�
 
 > **対象 PR**: `<current_pr>`（state.json の `current_pr`。rotation していれば最新 PR）
 > **worktree**: state.json の `worktree_path`
+> **結果ファイル**: `$TMP_DIR/sweep-pr<STATE_PR>-result.json`（`<STATE_PR>` は最初に
+> init した PR 番号。rotation しても変えない。後段の `verify-sweep` はこの名前で探すため、
+> 対象 PR が `<current_pr>` へ移っていてもファイル名は `<STATE_PR>` のままにする）
+>
+> ⚠ **各ラウンドの投稿数（`comments_count`）を対象の数として使わないこと。** それは
+> そのラウンドで新しく投稿された件数であり、PR 上に残っている未解決の指摘の数ではない。
+> **GraphQL の `reviewThreads` を `isResolved == false` で数え直して対象を決める。**
 >
 > PR の **全 open review thread**（インライン / レビュー body / PR レベルコメント）を
 > `gh api` で洗い出し、cross-review の codex/gemini が残したものを中心に **すべて解消**せよ:
@@ -344,10 +360,42 @@ while ループ脱出後にメインが以下のプロンプトでサブエー�
 >    reply した上で **Resolve まで実行**（スレッドを open のまま残さない）。
 > 3. bot 誤指摘 → 却下理由を reply して Resolve。
 > 修正で push した場合は `claude plugin validate` を通すこと。
-> 完了後、`$TMP_DIR/sweep-pr<PR>-result.json` に
+> 完了後、上の**結果ファイル**（`$TMP_DIR/sweep-pr<STATE_PR>-result.json`）に
 > `{"resolved": N, "fixed_in_sweep": M, "commit": "<SHA|null>", "remaining_open": K,
->   "items": ["<1行要約>", ...]}` を書き出し、最終メッセージで内訳を日本語報告せよ。
-> **`remaining_open` は 0 を目標**とし、0 にできない場合は理由を明記すること。
+>   "remaining_reason": "<K>0 のときの理由|null>", "items": ["<1行要約>", ...]}` を
+> 書き出し、最終メッセージで内訳を日本語報告せよ。
+> **`remaining_open` は 0 とする。** 0 にできない場合は `remaining_reason` に理由を書く。
+> この値は申告であり、次の `verify-sweep` が GitHub 側の実数と突き合わせる。
+
+### Step 7.5 後段: 最終スイープの結果を検証する（必須）
+
+申告のまま完了報告へ進むと、未解決の指摘が残ったまま「0 件」と報告される。
+GitHub 側の実数で数え直してから Step 8 へ進む。
+
+```bash
+if "$SCRIPTS/state.py" verify-sweep "$STATE_PR"; then
+  : # exit 0 = 未解決の指摘なし
+else
+  RC=$?
+  # exit 6 = 残っている。件数と理由を完了報告に含めて続行する。
+  # それ以外は検証そのものの失敗なので、報告へ進まずここで止める。
+  [ "$RC" -eq 6 ] || exit "$RC"
+fi
+```
+
+`|| [ $? -eq 6 ]` の形では書かない。この手順の bash には `set -e` が無いため、
+結果ファイルの不在や JSON の不正で `verify-sweep` が exit 1 を返しても、その行が
+失敗のステータスを返すだけで次の `report` が実行される。最終検証を通していない
+まま完了報告へ進むことになる。
+
+| 申告 | GitHub 側 | 記録する残件数 | exit |
+|---|---|---|---|
+| 0 件 | 0 件 | 0 | 0 |
+| 0 件 | 2 件 | 2 | 6 |
+| 1 件 | 1 件 | 1 | 6（件数と理由を完了報告へ） |
+| 0 件 | 取得できない | 0（申告のまま） | 0（確認できなかったことを stderr へ） |
+
+結果は state.json の `sweep` に残り、`state.py report` が完了報告へ折り込む。
 
 > ⚠ 最終スイープは「修正の追加」ではなく **後始末**。新しい設計変更や大きな
 > リファクタは行わない（行う必要があれば deferred として report に残す）。
@@ -356,7 +404,7 @@ while ループ脱出後にメインが以下のプロンプトでサブエー�
 
 ### 再開性
 
-sweep 中にメインが落ちても、`sweep-pr<PR>-result.json` が無ければ Step 7.5 から
+sweep 中にメインが落ちても、`sweep-pr<STATE_PR>-result.json` が無ければ Step 7.5 から
 再実行すれば良い（Resolve は冪等。既 Resolve スレッドは skip される）。
 
 ## Step 8: 終了処理 — ラウンドサマリ + 残 deferred の参考列挙
@@ -374,8 +422,9 @@ sweep 中にメインが落ちても、`sweep-pr<PR>-result.json` が無けれ�
 - ラウンドサマリ表
 - 残 deferred nit 一覧
 
-メインは `report` の出力に **Step 7.5 の sweep 結果**（`sweep-pr<PR>-result.json` の
-`resolved` / `fixed_in_sweep` / `remaining_open`）を折り込んで最終報告する。
+`verify-sweep` を通していれば、`report` の出力に「## 最終スイープ」の節が入り、
+GitHub 側で数え直した残件数と、0 件にできなかった場合の理由が含まれる。
+メインはこれに `sweep-pr<STATE_PR>-result.json` の `resolved` / `fixed_in_sweep` を添えて最終報告する。
 
 > **方針変更（v4.11.0）**: 従来は deferred nit を「AskUserQuestion で 1 回問い合わせ」て
 > いたが、未解決スレッドを残さない方針に変更。**Step 7.5 で nit も含め全 open thread を

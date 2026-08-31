@@ -13,11 +13,13 @@ Subcommands:
   init           Step 0  state 初期化 or 再開（プリチェック込み）
   start-round    Step 1  round 開始判定 (ROUND/ROUND_IN_PR/PR を stdout に出す)
   read-result    Step 2.5 codex/gemini の result.json を state にマージ
+  unresolved-threads     PR 上の未解決の指摘を数える (exit 0=数えられた, 1=取得できず)
   judge          Step 3  intent ベース pass 判定 (exit 0=approved, 2=continue)
   check-oscillation Step 4 path:line 重複率を計算
   merge-fix      Step 5 post  fix サブエージェント戻り値を state にマージ + CI 分類
   should-rotate  Step 6  rotate_after 到達判定 (exit 0=rotate, 2=keep)
   set-current-pr        PR ローテーション後の current_pr 更新
+  verify-sweep   Step 7.5 後段 最終スイープ後の未解決の指摘を検証 (exit 0=残なし, 6=残あり)
   report         Step 8  deferred nit + ラウンドサマリ表示
 
 すべての出力は人間可読 + KEY=VALUE 形式（eval / read で取り回し可能）。
@@ -831,6 +833,9 @@ def cmd_init(args: argparse.Namespace) -> None:
             if st.get("review_instructions") != combined:
                 st["review_instructions"] = combined
                 state_changed = True
+            # 再開した時点で残っている未解決の指摘を引き継ぎとして記録する。
+            if _record_carried_over(st, st.get("repo") or repo, st.get("current_pr") or pr):
+                state_changed = True
             if state_changed:
                 resume_state_file.write_text(
                     json.dumps(st, indent=2, ensure_ascii=False),
@@ -849,6 +854,7 @@ def cmd_init(args: argparse.Namespace) -> None:
             print(f"IS_OWN_PR={'1' if st.get('is_own_pr') else '0'}")
             print(f"EVENT_DOWNGRADE={'1' if st.get('event_downgrade') else '0'}")
             print(f"HAS_EXTRA_REVIEW_INSTRUCTIONS={'1' if st.get('review_instructions') else '0'}")
+            print(f"CARRIED_OVER_THREADS={(st.get('carried_over') or {}).get('count', 0)}")
             print(f"RESUMED=1")
             return
 
@@ -921,6 +927,8 @@ def cmd_init(args: argparse.Namespace) -> None:
         "pr_history": [{"pr": pr, "opened_at": _now(), "closed_at": None, "rounds": 0}],
         "rounds": [],
         "deferred_nits": [],
+        # 引き継いだ指摘は再開の時点で決まる。新規の開始では空にする。
+        "carried_over": None,
         "final": None,
     }
     state_file.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -934,7 +942,88 @@ def cmd_init(args: argparse.Namespace) -> None:
     print(f"IS_OWN_PR={'1' if is_own else '0'}")
     print(f"EVENT_DOWNGRADE={'1' if event_downgrade else '0'}")
     print(f"HAS_EXTRA_REVIEW_INSTRUCTIONS={'1' if review_instructions else '0'}")
+    print("CARRIED_OVER_THREADS=0")
     print("RESUMED=0")
+
+
+def _is_pass(intent: str | None, severity: dict[str, int] | None) -> bool:
+    """1 者分の判定が pass かどうか。
+
+    `APPROVE` / `SKIP` は pass。`COMMENT` は重大な指摘が無いときだけ pass とする。
+    """
+    if intent in ("APPROVE", "SKIP"):
+        return True
+    if intent == "COMMENT":
+        sev = severity or {}
+        return sev.get("critical", 0) == 0 and sev.get("major", 0) == 0
+    return False
+
+
+def _round_passes(round_entry: dict[str, Any], only: str | None) -> bool:
+    """そのラウンドで新しく投稿された指摘だけを見た pass 判定。
+
+    引き継いだ指摘はここでは見ない（`cmd_judge` が別に扱う）。
+    """
+    codex = round_entry.get("codex") or {}
+    gemini = round_entry.get("gemini") or {}
+    codex_pass = (only == "gemini") or _is_pass(codex.get("intent", "SKIP"), codex.get("by_severity"))
+    gemini_pass = (only == "codex") or _is_pass(gemini.get("intent", "SKIP"), gemini.get("by_severity"))
+    return codex_pass and gemini_pass
+
+
+def _guard_previous_round(st: dict[str, Any], prev: dict[str, Any]) -> None:
+    """前のラウンドの後始末が終わっているかを確かめる。
+
+    進行側が手で修正して次のラウンドへ進めると、修正の工程（Step 5）が担う返信と
+    Resolve が飛ばされる。飛ばされたまま進むと、未解決の指摘が残ったまま承認へ到達する。
+
+    止めるのは次の 2 つ。
+
+    1. 前のラウンドが修正必須の判定なのに、修正の記録が無い
+    2. 前のラウンドで Resolve したと申告されたスレッドが、GitHub 側で未解決のまま
+
+    未解決の指摘を取得できないときは検査を行わず、確認できなかったことを残して進む。
+    取得の失敗で止めると、GitHub 側の一時的な不調でループが進まなくなる。
+
+    スレッドの状態は、申告が行われた Pull Request（`prev["pr"]`）へ問い合わせる。
+    ローテーションを挟んだラウンドでは Step 6 の `set-current-pr` が先に走るため、
+    `current_pr` は既に新しい Pull Request を指している。そちらへ問い合わせると、
+    旧 Pull Request のスレッドが未解決のままでも一覧に現れず検査が素通りする。
+    """
+    round_no = prev.get("round")
+    verdict = prev.get("verdict")
+    if verdict is None:
+        # 判定の結果を持たない古い状態ファイルは、保存された重要度から判定し直す。
+        verdict = "approved" if _round_passes(prev, st.get("only")) else "changes_requested"
+    fix = prev.get("fix")
+    if verdict == "changes_requested" and not fix:
+        die(
+            f"round {round_no} は修正必須の判定でしたが、修正の記録がありません。"
+            " 返信と Resolve が飛ばされている可能性があります。"
+            " `/ndf:fix` を実行して戻り値ファイルを作り、`merge-fix` を通してから"
+            " 次のラウンドを開始してください",
+            code=5,
+        )
+
+    claimed = (fix or {}).get("resolved_thread_ids") or []
+    if not claimed:
+        return
+    claimed_pr = int(prev.get("pr") or st.get("current_pr") or 0)
+    threads = _fetch_unresolved_threads(str(st.get("repo") or ""), claimed_pr)
+    if threads is None:
+        info(
+            f"⚠ round {round_no} で Resolve したと申告されたスレッドの状態を確認できません"
+            " — 検査を飛ばして続行します"
+        )
+        return
+    open_ids = {t["id"] for t in threads}
+    still_open = [i for i in claimed if i in open_ids]
+    if still_open:
+        die(
+            f"round {round_no} で Resolve したと申告されたスレッドが未解決のまま残っています: "
+            f"{' '.join(still_open)}。返信と Resolve を済ませてから次のラウンドを開始してください",
+            code=5,
+        )
 
 
 def cmd_start_round(args: argparse.Namespace) -> None:
@@ -947,6 +1036,9 @@ def cmd_start_round(args: argparse.Namespace) -> None:
         st["ended_at"] = _now()
         _save(args.pr, st)
         die(f"max_rounds={max_r} 到達。中断。", code=1)
+    # 上限に達していれば、そこでループが終わる。後始末の検査はその後で意味を持たない。
+    if total > 0:
+        _guard_previous_round(st, st["rounds"][-1])
 
     pr = st["current_pr"]
     round_no = total + 1
@@ -1004,6 +1096,175 @@ def _posted_comment_count(repo: str, pr: int, review_url: str | None) -> int | N
         return None
     counts = [int(line) for line in str(out).split() if line.strip().isdigit()]
     return sum(counts) if counts else None
+
+
+# Pull Request 上の未解決の指摘（Resolve されていない review thread）を数えるための問い合わせ。
+# `--paginate` に載せるため、カーソルと `pageInfo` を持たせる。
+_UNRESOLVED_THREADS_QUERY = """
+query($owner: String!, $name: String!, $pr: Int!, $endCursor: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $pr) {
+      reviewThreads(first: 100, after: $endCursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes { id isResolved path line }
+      }
+    }
+  }
+}
+"""
+
+_UNRESOLVED_THREADS_JQ = (
+    ".data.repository.pullRequest.reviewThreads.nodes[]"
+    " | select(.isResolved == false)"
+    ' | [.id, (.path // ""), (.line // "" | tostring)] | @tsv'
+)
+
+
+def _gh_output(cmd: list[str]) -> str | None:
+    """`gh` を実行して標準出力を返す。実行に失敗したときは `None` を返す。
+
+    **「取得できなかった」と「0 件」を区別する。** 失敗を空の出力として返すと、
+    GitHub 側の一時的な不調が「未解決の指摘は無い」と読まれてしまう。
+    """
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True)
+    except OSError as exc:
+        info(f"⚠ gh の実行に失敗: {exc}")
+        return None
+    if r.returncode != 0:
+        info(f"⚠ gh が失敗 (exit={r.returncode}): {r.stderr.strip()[:200]}")
+        return None
+    return r.stdout
+
+
+def _fetch_unresolved_threads(repo: str, pr: int) -> list[dict[str, Any]] | None:
+    """Pull Request 上の未解決の指摘を GraphQL で数え、識別子つきで返す。
+
+    **投稿数とは別のものを数えている。** 投稿数はそのラウンドで外部の AI が新しく
+    投稿した件数で、ここで数えるのは前のラウンドの分も含む Pull Request 上の総数である。
+
+    Returns:
+      未解決の指摘の一覧（`{"id", "path", "line"}`）。0 件なら空の一覧。
+      取得できなければ `None`。
+    """
+    owner, sep, name = str(repo or "").partition("/")
+    if not (owner and sep and name):
+        return None
+    out = _gh_output([
+        "gh", "api", "graphql", "--paginate",
+        "-F", f"owner={owner}", "-F", f"name={name}", "-F", f"pr={int(pr)}",
+        "-f", f"query={_UNRESOLVED_THREADS_QUERY}",
+        "--jq", _UNRESOLVED_THREADS_JQ,
+    ])
+    if out is None:
+        return None
+    threads: list[dict[str, Any]] = []
+    for line in out.splitlines():
+        if not line.strip():
+            continue
+        cols = line.split("\t")
+        threads.append({
+            "id": cols[0],
+            "path": cols[1] if len(cols) > 1 else "",
+            "line": cols[2] if len(cols) > 2 else "",
+        })
+    return threads
+
+
+def _thread_ids(value: Any) -> list[str]:
+    """fix の戻り値から、Resolve したと申告されたスレッドの識別子を取り出す。
+
+    正は dict の list だが、件数(int) や単一 dict で返ることがある。識別子を
+    取り出せない形は空の一覧として扱い、後段の検査を行わない。
+    """
+    items = value if isinstance(value, list) else [value] if isinstance(value, dict) else []
+    return [
+        str(d["thread_id"]) for d in items
+        if isinstance(d, dict) and d.get("thread_id")
+    ]
+
+
+def _record_carried_over(st: dict[str, Any], repo: str, pr: int) -> bool:
+    """再開した時点で残っている未解決の指摘を「引き継いだ指摘」として記録する。
+
+    記録があり、修正の工程を通したラウンドが未記録のあいだは収束させない
+    （`cmd_judge`）。中断の前に受けた修正必須の指摘が、修正の工程を 1 度も
+    通らないまま収束する経路を塞ぐ。
+
+    取得できなかったときは記録を変更しない。0 件として扱うと、GitHub 側の
+    一時的な不調で引き継ぎが消える。
+
+    修正の工程を 1 度通した後も、deferred / rejected と最終スイープ待ちの指摘は
+    Resolve されないまま残る。これを再開のたびに未処理として数え直すと、収束は
+    再開のたびに 1 ラウンドずつ先送りされる。**通した後に新しい指摘が出ていない
+    あいだは、通したラウンドの記録をそのまま残す**。新しい指摘が出たときだけ、
+    それを含めて数え直し、もう 1 度修正の工程へ通す。
+
+    Returns:
+      記録を書き換えたかどうか。
+    """
+    before = st.get("carried_over")
+    threads = _fetch_unresolved_threads(str(repo or ""), int(pr))
+    if threads is None:
+        info("⚠ 未解決の指摘を取得できませんでした — 引き継ぎの記録は変更しません")
+        return False
+    if not threads:
+        st["carried_over"] = None
+        return before is not None
+    prev = before if isinstance(before, dict) else {}
+    prev_fixed = prev.get("fixed_in_round")
+    prev_ids = set(prev.get("thread_ids") or [])
+    ids = [t["id"] for t in threads]
+    new_ids = [i for i in ids if i not in prev_ids]
+    if prev_fixed is not None and not new_ids:
+        info(
+            f"↻ 残っている {len(ids)} 件は round {prev_fixed} の修正の工程を通した後の"
+            " 分です — 収束は抑止しません（最終スイープが受け持ちます）"
+        )
+        return False
+    st["carried_over"] = {
+        "detected_at": _now(),
+        "count": len(ids),
+        "thread_ids": ids,
+        "fixed_in_round": None,
+    }
+    info(
+        f"⚠ 引き継いだ指摘が {len(ids)} 件残っています"
+        " — 修正の工程を 1 度通すまで収束させません"
+    )
+    return True
+
+
+def _carried_over_pending(st: dict[str, Any]) -> dict[str, Any] | None:
+    """修正の工程をまだ通していない引き継いだ指摘があれば、その記録を返す。"""
+    carried = st.get("carried_over")
+    if not isinstance(carried, dict):
+        return None
+    if not (carried.get("thread_ids") or carried.get("count")):
+        return None
+    if carried.get("fixed_in_round") is not None:
+        return None
+    return carried
+
+
+def cmd_unresolved_threads(args: argparse.Namespace) -> None:
+    """Pull Request 上の未解決の指摘を数えて出力する。
+
+    Exit code: 0=数えられた（0 件を含む）, 1=取得できなかった
+    """
+    st = _load(args.pr)
+    repo = str(st.get("repo") or "")
+    pr = int(st.get("current_pr") or args.pr)
+    threads = _fetch_unresolved_threads(repo, pr)
+    if threads is None:
+        die(
+            f"未解決の指摘を取得できませんでした (repo={repo or '不明'}, PR #{pr})。"
+            " 0 件として扱わず、取得し直してください"
+        )
+    print(f"UNRESOLVED_COUNT={len(threads)}")
+    print(f"UNRESOLVED_THREAD_IDS={shlex.quote(' '.join(t['id'] for t in threads))}")
+    for t in threads:
+        info(f"- {t['id']} {t.get('path', '')}:{t.get('line', '')}")
 
 
 def cmd_read_result(args: argparse.Namespace) -> None:
@@ -1088,33 +1349,34 @@ def cmd_judge(args: argparse.Namespace) -> None:
     last = st["rounds"][-1]
     only = st.get("only")
 
-    def is_pass(intent: str | None, severity: dict[str, int] | None) -> bool:
-        if intent in ("APPROVE", "SKIP"):
-            return True
-        if intent == "COMMENT":
-            sev = severity or {}
-            return (sev.get("critical", 0) == 0 and sev.get("major", 0) == 0)
-        return False
-
     codex_intent = (last.get("codex") or {}).get("intent", "SKIP")
     gemini_intent = (last.get("gemini") or {}).get("intent", "SKIP")
-    codex_sev = (last.get("codex") or {}).get("by_severity")
-    gemini_sev = (last.get("gemini") or {}).get("by_severity")
+    round_passes = _round_passes(last, only)
 
-    codex_pass = (only == "gemini") or is_pass(codex_intent, codex_sev)
-    gemini_pass = (only == "codex") or is_pass(gemini_intent, gemini_sev)
+    carried = _carried_over_pending(st)
+    carried_count = (st.get("carried_over") or {}).get("count", 0)
 
     print(f"CODEX_INTENT={codex_intent}")
     print(f"GEMINI_INTENT={gemini_intent}")
+    print(f"CARRIED_OVER_THREADS={carried_count}")
 
-    if codex_pass and gemini_pass:
+    if round_passes and carried is None:
+        last["verdict"] = "approved"
         st["final"] = "approved"
         st["ended_at"] = _now()
         _save(pr, st)
         info("✅ 両方 APPROVE。収束。")
         sys.exit(0)
 
-    info(f"→ codex={codex_intent} gemini={gemini_intent}。修正へ。")
+    last["verdict"] = "changes_requested"
+    _save(pr, st)
+    if round_passes:
+        info(
+            f"→ 引き継いだ指摘が {carried_count} 件残っている。"
+            "修正の工程を 1 度通すまで収束させない。"
+        )
+    else:
+        info(f"→ codex={codex_intent} gemini={gemini_intent}。修正へ。")
     sys.exit(2)
 
 
@@ -1337,12 +1599,20 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         "deferred": _deferred_count,
         "rejected": _count(fix.get("rejected")),
         "resolved_threads": _count(fix.get("resolved_threads")),
+        # 次のラウンドの開始時に、申告どおり Resolve されたかを突き合わせる。
+        "resolved_thread_ids": _thread_ids(fix.get("resolved_threads")),
         "ci": fix.get("ci_status"),
         "ci_failed_checks": fix.get("ci_failed_checks", []) or [],
         "ci_note": fix.get("ci_note"),
         "by_severity": fix.get("by_severity", {}),
     }
     st["rounds"][-1]["ended_at"] = _now()
+    # 引き継いだ指摘は、修正の工程を 1 度通した時点で収束の抑止から外す。
+    # 残りは最終スイープ (Step 7.5) が受け持つ。
+    carried = _carried_over_pending(st)
+    if carried is not None:
+        carried["fixed_in_round"] = round_no
+        info(f"↻ 引き継いだ指摘を round {round_no} の修正の工程へ通しました")
     for d in _deferred_nits:
         st["deferred_nits"].append({**d, "pr": pr, "round": round_no})
     _save(pr, st)
@@ -1427,6 +1697,74 @@ def cmd_set_current_pr(args: argparse.Namespace) -> None:
     info(f"✅ current_pr: {old_pr} → {new_pr}")
 
 
+def _read_sweep_result(pr: int, file: str | None) -> dict[str, Any]:
+    """最終スイープの結果ファイルを読む。読めない形はすべて中断する。
+
+    結果が無いまま完了報告へ進むと、最終スイープを実行したかどうかが残らない。
+    """
+    path = pathlib.Path(file) if file else _resolve_tmp_dir(pr) / f"sweep-pr{pr}-result.json"
+    if not (path.exists() and path.stat().st_size > 0):
+        die(
+            f"最終スイープの結果ファイルがありません ({path})。"
+            " Step 7.5 を実行してから完了報告へ進んでください"
+        )
+    try:
+        sweep = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        die(f"最終スイープの結果ファイルを読めません ({path}): {exc}")
+    if not isinstance(sweep, dict):
+        die(f"最終スイープの結果ファイルが dict ではありません ({path})")
+    return sweep
+
+
+def cmd_verify_sweep(args: argparse.Namespace) -> None:
+    """Step 7.5 後段 — 最終スイープの後に未解決の指摘が残っていないかを確かめる。
+
+    結果ファイルに書かれた残件数は申告であり、GitHub 側の実数とは別のものである。
+    申告のまま完了報告へ進むと、未解決の指摘が残ったまま「0 件」と報告される。
+
+    Exit code: 0=残っていない, 6=残っている（件数と理由を完了報告へ入れる）, 1=エラー
+    """
+    pr = args.pr
+    st = _load(pr)
+    sweep = _read_sweep_result(pr, args.file)
+
+    declared = _as_count(sweep.get("remaining_open"))
+    current_pr = int(st.get("current_pr") or pr)
+    threads = _fetch_unresolved_threads(str(st.get("repo") or ""), current_pr)
+    if threads is None:
+        info(
+            "⚠ 未解決の指摘を確認できません — 申告された残件数"
+            f"（{declared} 件）をそのまま採用します"
+        )
+        remaining, verified = declared, False
+    else:
+        remaining, verified = len(threads), True
+
+    reason = sweep.get("remaining_reason") or sweep.get("reason")
+    if remaining > 0 and not reason:
+        reason = "理由の記載なし"
+    st["sweep"] = {
+        "declared_remaining_open": declared,
+        "remaining_open": remaining,
+        "remaining_reason": reason if remaining > 0 else None,
+        "verified": verified,
+        "resolved": sweep.get("resolved"),
+        "fixed_in_sweep": sweep.get("fixed_in_sweep"),
+        "commit": sweep.get("commit"),
+        "checked_at": _now(),
+    }
+    _save(pr, st)
+
+    print(f"REMAINING_OPEN={remaining}")
+    print(f"SWEEP_VERIFIED={'1' if verified else '0'}")
+    if remaining == 0:
+        info("✅ 未解決の指摘は残っていません")
+        sys.exit(0)
+    info(f"⚠ 未解決の指摘が {remaining} 件残っています（理由: {reason}）")
+    sys.exit(6)
+
+
 def cmd_report(args: argparse.Namespace) -> None:
     """Step 8 — deferred nit + ラウンドサマリ表示。"""
     pr = args.pr
@@ -1459,6 +1797,19 @@ def cmd_report(args: argparse.Namespace) -> None:
         ci_s = fix.get("ci") or "-"
         print(f"| {r['round']} | #{r['pr']} | {codex_s} | {gemini_s} | {fix_s} | {ci_s} |")
     print()
+
+    sweep = st.get("sweep")
+    if isinstance(sweep, dict):
+        source = "GitHub 側で確認済み" if sweep.get("verified") else "申告のまま（確認できず）"
+        print("## 最終スイープ")
+        print(f"- 未解決の指摘: {sweep.get('remaining_open', 0)} 件（{source}）")
+        if sweep.get("remaining_open"):
+            print(f"- 残った理由: {sweep.get('remaining_reason') or '理由の記載なし'}")
+        print()
+    else:
+        print("## 最終スイープ: 未検証")
+        print("`state.py verify-sweep <PR>` を実行してから完了報告へ進んでください。")
+        print()
 
     nits = st.get("deferred_nits") or []
     if nits:
@@ -1505,6 +1856,13 @@ def main() -> None:
     sp.add_argument("--file", default=None)
     sp.set_defaults(func=cmd_read_result)
 
+    sp = sub.add_parser(
+        "unresolved-threads",
+        help="PR 上の未解決の指摘を数える (0=数えられた/1=取得できなかった)",
+    )
+    sp.add_argument("pr", type=int)
+    sp.set_defaults(func=cmd_unresolved_threads)
+
     sp = sub.add_parser("judge", help="Step 3 — intent ベース pass 判定 (0=approved/2=continue)")
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_judge)
@@ -1526,6 +1884,14 @@ def main() -> None:
     sp.add_argument("pr", type=int, help="state file の元 PR")
     sp.add_argument("new_pr", type=int)
     sp.set_defaults(func=cmd_set_current_pr)
+
+    sp = sub.add_parser(
+        "verify-sweep",
+        help="Step 7.5 後段 — 最終スイープ後の未解決の指摘を検証 (0=残なし/6=残あり)",
+    )
+    sp.add_argument("pr", type=int)
+    sp.add_argument("--file", default=None)
+    sp.set_defaults(func=cmd_verify_sweep)
 
     sp = sub.add_parser("report", help="Step 8 — deferred nit + サマリ表示")
     sp.add_argument("pr", type=int)

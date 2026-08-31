@@ -44,7 +44,8 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 | 投稿の確認 | **申告されたコメント数を GitHub 側と突き合わせる**。投稿が届いていなければ中断する（取得できない場合は申告を採用） |
 | 修正 | **必ずサブエージェント (`general-purpose`) で実行**。メイン context に diff は載せない |
 | ユーザ問い合わせ | 自動判断を最大化（`critical`/`major`/`minor` は自動修正、ループ中の `nit` は deferred） |
-| 取りこぼし防止 | **ループ終了時（approved / max_rounds / oscillation / error いずれも）に最終スイープを必須実行**。`/ndf:fix` を再実行し、残った open review thread（最終 APPROVE ラウンドの minor/nit インラインコメント含む）を **全て解消**。修正可能なものは修正 + push、判断保留 nit も reply + resolveReviewThread して **open thread 0 で終了** |
+| 取りこぼし防止 | **ループ終了時（approved / max_rounds / oscillation / error いずれも）に最終スイープを必須実行**。`/ndf:fix` を再実行し、残った open review thread（最終 APPROVE ラウンドの minor/nit インラインコメント含む）を **全て解消**。修正可能なものは修正 + push、判断保留 nit も reply + resolveReviewThread して **open thread 0 で終了**。件数は `state.py verify-sweep` が GitHub 側の実数で確認する |
+| 再開時の引き継ぎ | 再開の時点で残っていた未解決の指摘は `carried_over` に記録し、**修正の工程を 1 度通すまで収束させない**。増えるラウンドは最大 1 回。通した後の再開では、新しい指摘が出ていなければ抑止しない |
 | 状態の永続化 | `<worktree>/.cross_review/cross-review-pr<番号>-state.json` に集約。中断・再開可能 |
 | 長尺PR対策 | **`--rotate-after` ラウンドで PR をローテーション**（default=light: 同ブランチで PR 巻き直し / squash: 新ブランチ + squash 統合） |
 | 振動検知 | 同じ指摘が 2 round で 50%以上重複したら中断 |
@@ -206,18 +207,21 @@ STATE_PR=$INITIAL_PR
 ROTATE_MODE=${ROTATE_MODE:-light}
 
 # Step 0: state 初期化 / 再開
-eval "$("$SCRIPTS/state.py" init "$STATE_PR" \
+# ⚠ eval はコマンド置換の終了コードを潰す。変数で受けてから eval する（docs/01 参照）
+INIT_VARS=$("$SCRIPTS/state.py" init "$STATE_PR" \
           --max-rounds "$MAX_ROUNDS" --rotate-after "$ROTATE_AFTER" \
           ${ONLY:+--only "$ONLY"} \
           ${FOCUS:+--focus "$FOCUS"} \
-          ${EXTRA_INSTRUCTIONS_FILE:+--extra-instructions-file "$EXTRA_INSTRUCTIONS_FILE"})"
+          ${EXTRA_INSTRUCTIONS_FILE:+--extra-instructions-file "$EXTRA_INSTRUCTIONS_FILE"}) || exit $?
+eval "$INIT_VARS"
 # eval で TMP_DIR がセットされる。後続スクリプトに env として伝播させる。
 export CROSS_REVIEW_TMP_DIR="$TMP_DIR"
 cd "$WORKTREE"
 
 while :; do
-  # Step 1: round 開始判定 (max_rounds 到達で exit 1)
-  eval "$("$SCRIPTS/state.py" start-round "$STATE_PR")"
+  # Step 1: round 開始判定 (exit 1=max_rounds 到達でループを抜ける / 5=後始末が未了で中断)
+  ROUND_VARS=$("$SCRIPTS/state.py" start-round "$STATE_PR") || { RC=$?; [ "$RC" -eq 1 ] && break; exit "$RC"; }
+  eval "$ROUND_VARS"
 
   # Step 2: 並列レビュー
   [ "$ONLY" != "gemini" ] && "$SCRIPTS/launch-codex.sh"  "$STATE_PR" "$ROUND"
@@ -228,7 +232,8 @@ while :; do
   [ "$ONLY" != "gemini" ] && "$SCRIPTS/state.py" read-result "$STATE_PR" codex
   [ "$ONLY" != "codex"  ] && "$SCRIPTS/state.py" read-result "$STATE_PR" gemini
 
-  # Step 3: 判定 (0=approved/2=continue)
+  # Step 3: 判定 (0=approved/2=continue)。引き継いだ指摘が残っていれば、
+  #   両者が承認しても 2 を返して修正の工程へ回す。
   if "$SCRIPTS/state.py" judge "$STATE_PR"; then break; fi
 
   # Step 4: 振動検知 (4=oscillation)
@@ -243,7 +248,7 @@ while :; do
   # Step 6: PR ローテーション判定 (0=rotate/2=keep)。state.json の current_pr を内部更新。
   if "$SCRIPTS/state.py" should-rotate "$STATE_PR"; then
     # Step 6a: 旧 PR の素材 (title/body/isDraft + git log/diff stat) を dump
-    eval "$("$SCRIPTS/rotate-pr.sh" prepare "$STATE_PR")"
+    PREPARE_VARS=$("$SCRIPTS/rotate-pr.sh" prepare "$STATE_PR") || exit $?; eval "$PREPARE_VARS"
 
     # Step 6b: light モードのみ。**メインセッション側で Agent(subagent_type="general-purpose") を起動して**
     #   prepare.json を読ませ、現状の差分・実装を反映した title/body を
@@ -270,7 +275,7 @@ while :; do
     fi
 
     # Step 6c: 実行。NEW_PR / NEW_PR_URL / NEW_BRANCH を eval で取り込む。
-    eval "$("$SCRIPTS/rotate-pr.sh" execute "$STATE_PR" --mode "$ROTATE_MODE")"
+    ROTATE_VARS=$("$SCRIPTS/rotate-pr.sh" execute "$STATE_PR" --mode "$ROTATE_MODE") || exit $?; eval "$ROTATE_VARS"
 
     "$SCRIPTS/state.py" set-current-pr "$STATE_PR" "$NEW_PR"
     # NOTE: STATE_PR は変えない。次ループの scripts も $STATE_PR を渡す。
@@ -287,7 +292,12 @@ done
 #   経由しないため、ここで拾わないと PR 上に未解決スレッドが残る。
 #   sweep 結果 (sweep-pr$STATE_PR-result.json) はメインが Step 8 の報告に折り込む。
 
-# Step 8: 終了処理 (deferred nit + ラウンドサマリ)
+# Step 7.5 後段: 最終スイープの結果を GitHub 側の実数で検証する (必須)
+#   exit 0 = 未解決の指摘なし / exit 6 = 残っている (件数と理由を完了報告へ含めて続行)
+#   それ以外の終了コードは検証そのものの失敗。報告へ進まずここで止める。
+"$SCRIPTS/state.py" verify-sweep "$STATE_PR" || { RC=$?; [ "$RC" -eq 6 ] || exit "$RC"; }
+
+# Step 8: 終了処理 (deferred nit + ラウンドサマリ + スイープ結果)
 "$SCRIPTS/state.py" report "$STATE_PR"
 ```
 
@@ -310,7 +320,7 @@ bash ループは Agent tool を呼べないため、light モードでは Step 
 3. **Step 6c (execute) を直接呼ぶ** — メインが bash で以下を実行:
 
     ```bash
-    eval "$("$SCRIPTS/rotate-pr.sh" execute "$STATE_PR" --mode light)"
+    ROTATE_VARS=$("$SCRIPTS/rotate-pr.sh" execute "$STATE_PR" --mode light) || exit $?; eval "$ROTATE_VARS"
     "$SCRIPTS/state.py" set-current-pr "$STATE_PR" "$NEW_PR"
     ```
 
@@ -467,7 +477,7 @@ pint / larastan / test / build などは **中断** を原則とする。
   | 2 | #123 | REQ (2) | APP | def456 (2 fixed) | ✅ |
   | 3 | #145 | APP | APP | — | — |
 
-- **最終スイープ結果** (Step 7.5): `sweep-pr<PR>-result.json` の `resolved` /
+- **最終スイープ結果** (Step 7.5): `sweep-pr<STATE_PR>-result.json` の `resolved` /
   `fixed_in_sweep` / `remaining_open`。**`remaining_open` は 0 が正常**（残 open
   thread あり = 取りこぼし）。0 にできなかった場合は理由を明記
 - **残 deferred nit リスト**（Step 7.5 で Resolve 済み。再対応が要るものがあれば参考列挙）
