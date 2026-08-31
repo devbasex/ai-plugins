@@ -512,9 +512,11 @@ _wt_strip_heredocs() {
 # （`cp a b || echo c` の `c` を複製先として拾うなど）。
 # `|&` は標準エラー出力も渡すパイプで、これも区切りにあたる。
 # `;` と改行は字句解析が `__WT_SEP__` へ置き換えるため、この一覧には現れない。
+# `)` は部分シェルの終わりで、ここでも命令が切れる。区切りとして扱わないと
+# `( sed -i 's/a/b/' x.md )` の `)` を書き込み先として拾い、実在しない位置を示す。
 _wt_is_separator() {
   case "$1" in
-    __WT_*|"|"|"|&"|"&&"|"||"|"&") return 0 ;;
+    __WT_*|"|"|"|&"|"&&"|"||"|"&"|")") return 0 ;;
   esac
   return 1
 }
@@ -560,6 +562,14 @@ wt_extract_write_target() {
   # 条件が要る。左辺のどこで失敗したかによって位置が変わるためである。
   # 判定に使う値を and-or リスト (`;` / 改行 / `&` で切れる並び) ごとに控える。
   local list_cwd="$base" list_known=1 list_cds=0 list_or=0 cd_is_last=0
+  # 条件分岐 (`if`) と繰り返し (`while` / `until` / `for` / `select`) の本体は、
+  # 走るかどうかが実行時に決まる。中で `cd` を追ったときは、閉じた後の現在地を
+  # 字面からは決められない。開いた時点の `cd` の回数を積んでおき、閉じるときに
+  # 比べる。`else` / `elif` の手前でも比べる（条件の中の `cd` が失敗したときに
+  # そちらへ来るため、その `cd` は効いていない）。
+  # `{` で開くまとまりは必ず走るため、この積み上げの対象にしない。
+  local -a block_cds=()
+  local block_depth=0 cds=0
 
   # ヒアドキュメントの本文を先に落とす。落とす前に印を挟むと、本文の中の `>` が
   # 出力の付け替えとして数えられる。
@@ -598,7 +608,23 @@ wt_extract_write_target() {
     if [ "$i" = 0 ]; then
       at_cmd=1
     else
-      case "$prev" in __WT_SEP__|"&&"|"||"|"|"|"|&"|"&") at_cmd=1 ;; esac
+      case "$prev" in
+        __WT_SEP__|"&&"|"||"|"|"|"|&"|"&") at_cmd=1 ;;
+        # 予約語の後ろも命令の位置である。ここに挙げるのは、続きを**同じシェル**
+        # で走らせる語だけである。中の `cd` の効果は後続へ残るため、書き込み先の
+        # 起点に反映しなければ移動前の位置を指した案内が出る。
+        if|elif|then|else|while|until|do|"{"|"!"|time) at_cmd=1 ;;
+        # **`(` と `coproc` は意図して外す。** これらは部分シェルを開くため、中の
+        # `cd` は親のシェルの現在地を変えない。命令の位置として数えると移動を親へ
+        # 持ち越し、`)` を抜けた後の起点がずれる（検知漏れになる）。入口と出口を
+        # 対にして位置を退避する仕組みを持たない限り、外したままにする。中の相対
+        # パスは外側の位置で解決するので、案内が余計に出ることはあっても主
+        # ディレクトリへの書き込みを見落とすことはない。
+        # `fi` / `done` / `esac` / `}` / `)` は複合コマンドの終わりで、後ろに続く
+        # のは区切りであって命令ではない。`for` / `select` / `case` / `in` の後ろ
+        # は名前や語の並び、`;;` の後ろは case の見出しで、いずれも `cd` を置ける
+        # 位置ではない。どれも命令の位置として数えない。
+      esac
     fi
     if [ "$at_cmd" = 1 ]; then
       case "$w" in
@@ -658,10 +684,37 @@ wt_extract_write_target() {
         cd_is_last=0
         continue
         ;;
+      if|while|until|for|select|case)
+        # 複合コマンドの入口。中で `cd` を追ったかを、閉じるときに比べるため控える。
+        if [ "$at_cmd" = 1 ]; then
+          block_cds[block_depth]=$cds
+          block_depth=$((block_depth + 1))
+        fi
+        continue
+        ;;
+      else|elif)
+        # 条件が偽のときに走る。条件の中の `cd` は効いていない。
+        if [ "$at_cmd" = 1 ] && [ "$block_depth" -gt 0 ] &&
+          [ "$cds" -gt "${block_cds[block_depth - 1]}" ]; then
+          cwd_known=0
+        fi
+        continue
+        ;;
+      fi|done|esac)
+        # 本体が走ったかどうかは実行時に決まる。中で移動していたなら、閉じた後の
+        # 現在地を決められない。
+        if [ "$at_cmd" = 1 ] && [ "$block_depth" -gt 0 ]; then
+          block_depth=$((block_depth - 1))
+          [ "$cds" -gt "${block_cds[block_depth]}" ] && cwd_known=0
+        fi
+        continue
+        ;;
       cd)
         [ "$at_cmd" = 1 ] && [ -n "$base" ] || continue
         # `||` の右辺で戻せるかどうかの判定に使う。
         list_cds=$((list_cds + 1)); cd_is_last=1
+        # 複合コマンドを閉じるときの比較に使う。
+        cds=$((cds + 1))
         dest=""
         for ((k = i + 1; k < n; k++)); do
           if _wt_is_separator "${words[k]}"; then break; fi

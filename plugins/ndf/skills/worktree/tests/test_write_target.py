@@ -704,3 +704,107 @@ def test_a_stderr_pipe_stops_the_operand_scan(command: str, expected: list[str])
     targets, rc = extract(command)
     assert rc == 0, command
     assert targets == expected, command
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # `then` の後ろは命令の位置である。条件の中で移動した場合も含む。
+        ("if true; then cd .worktrees/x; sed -i 's/a/b/' README.md; fi",
+         "/base/.worktrees/x/README.md"),
+        ("if cd .worktrees/x; then sed -i 's/a/b/' README.md; fi",
+         "/base/.worktrees/x/README.md"),
+        # `else` / `elif` の後ろも同じシェルで続く。
+        ("if false; then true; else cd .worktrees/x; sed -i 's/a/b/' README.md; fi",
+         "/base/.worktrees/x/README.md"),
+        ("if false; then true; elif cd .worktrees/x; then sed -i 's/a/b/' README.md; fi",
+         "/base/.worktrees/x/README.md"),
+        # `{` で開くまとまりは、部分シェルではなく同じシェルで動く。
+        ("{ cd .worktrees/x; sed -i 's/a/b/' README.md; }", "/base/.worktrees/x/README.md"),
+        # `do` の後ろも命令の位置である。
+        ("while read f; do cd .worktrees/x; sed -i 's/a/b/' README.md; done",
+         "/base/.worktrees/x/README.md"),
+        ("until false; do cd .worktrees/x; sed -i 's/a/b/' README.md; done",
+         "/base/.worktrees/x/README.md"),
+        ("for f in a b; do cd .worktrees/x; sed -i 's/a/b/' README.md; done",
+         "/base/.worktrees/x/README.md"),
+        # `!` と `time` は同じシェルで続きを走らせる。
+        ("! cd .worktrees/x\nsed -i 's/a/b/' README.md", "/base/.worktrees/x/README.md"),
+        ("time cd .worktrees/x\nsed -i 's/a/b/' README.md", "/base/.worktrees/x/README.md"),
+        # まとまりを閉じた後も、`{` の中の移動は残る（必ず走るため）。
+        ("{ cd .worktrees/x; }\nsed -i 's/a/b/' README.md", "/base/.worktrees/x/README.md"),
+    ],
+)
+def test_reserved_words_open_a_command_position(command: str, expected: str) -> None:
+    """同じシェルで続きを走らせる予約語の後ろの `cd` は、起点に反映する。
+
+    反映しないと、作業ツリーへ移ってから相対パスで書き換えたときに移動前の位置を
+    指した案内が出る（#186 の誤検知）。
+    """
+    targets, rc = extract_at(command, "/base")
+    assert rc == 0, (command, targets)
+    assert targets == [expected], command
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # 本体が走ったかどうかは実行時に決まる。閉じた後の現在地は決められない。
+        "if true; then cd .worktrees/x; fi\nsed -i 's/a/b/' README.md",
+        "while read f; do cd .worktrees/x; done\nsed -i 's/a/b/' README.md",
+        "for f in a b; do cd .worktrees/x; done\nsed -i 's/a/b/' README.md",
+        # 条件の中の `cd` が失敗したときに `else` / `elif` へ来る。効いていない。
+        "if cd .worktrees/x; then true; else sed -i 's/a/b/' README.md; fi",
+        "if cd .worktrees/x; then true; elif true; then sed -i 's/a/b/' README.md; fi",
+    ],
+)
+def test_a_conditional_block_leaves_the_position_undecidable(command: str) -> None:
+    """走ったかどうかが決まらない `cd` の後は、相対パスの書き込み先を出さない。"""
+    targets, rc = extract_at(command, "/base")
+    assert rc == 1, (command, targets)
+    assert targets == [], command
+
+
+def test_a_conditional_block_still_reports_absolute_targets() -> None:
+    """位置が決められなくても、絶対パスの書き込み先は変わらない。"""
+    targets, rc = extract_at(
+        "if true; then cd .worktrees/x; fi\nsed -i 's/a/b/' /base/README.md", "/base"
+    )
+    assert rc == 0, targets
+    assert targets == ["/base/README.md"]
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # 部分シェルの中の `cd` は親のシェルの現在地を変えない。抜けた後は元のまま。
+        ("cd .worktrees/x; ( cd y ); sed -i 's/a/b/' README.md",
+         "/base/.worktrees/x/README.md"),
+        ("( cd .worktrees/x ); sed -i 's/a/b/' README.md", "/base/README.md"),
+        ("( cd .worktrees/x ) && sed -i 's/a/b/' README.md", "/base/README.md"),
+        # 中の相対パスは外側の位置で解決する。案内が余計に出ることはあっても、
+        # 主ディレクトリへの書き込みを見落とすことはない。
+        ("( cd .worktrees/x; sed -i 's/a/b/' README.md )", "/base/README.md"),
+    ],
+)
+def test_a_subshell_does_not_move_the_parent(command: str, expected: str) -> None:
+    """`(` は命令の位置として数えない。数えると閉じた後の現在地がずれる。"""
+    targets, rc = extract_at(command, "/base")
+    assert rc == 0, (command, targets)
+    assert targets == [expected], command
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # `)` は複合コマンドの終わりで、被演算子の走査はここで止まる。
+        ("( sed -i 's/a/b/' x.md )", ["x.md"]),
+        ("( cp a.txt b.txt )", ["b.txt"]),
+        ("( echo hi | tee x.md )", ["x.md"]),
+    ],
+)
+def test_a_closing_paren_stops_the_operand_scan(command: str, expected: list[str]) -> None:
+    """閉じ括弧を被演算子として拾うと、実在しない位置を書き込み先として示す。"""
+    targets, rc = extract(command)
+    assert rc == 0, command
+    assert targets == expected, command
