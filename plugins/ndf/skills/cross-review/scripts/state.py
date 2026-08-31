@@ -834,9 +834,7 @@ def cmd_init(args: argparse.Namespace) -> None:
                 st["review_instructions"] = combined
                 state_changed = True
             # 再開した時点で残っている未解決の指摘を引き継ぎとして記録する。
-            carried_before = json.dumps(st.get("carried_over"), sort_keys=True)
-            _record_carried_over(st, st.get("repo") or repo, st.get("current_pr") or pr)
-            if json.dumps(st.get("carried_over"), sort_keys=True) != carried_before:
+            if _record_carried_over(st, st.get("repo") or repo, st.get("current_pr") or pr):
                 state_changed = True
             if state_changed:
                 resume_state_file.write_text(
@@ -1180,7 +1178,7 @@ def _thread_ids(value: Any) -> list[str]:
     ]
 
 
-def _record_carried_over(st: dict[str, Any], repo: str, pr: int) -> None:
+def _record_carried_over(st: dict[str, Any], repo: str, pr: int) -> bool:
     """再開した時点で残っている未解決の指摘を「引き継いだ指摘」として記録する。
 
     記録があり、修正の工程を通したラウンドが未記録のあいだは収束させない
@@ -1189,14 +1187,18 @@ def _record_carried_over(st: dict[str, Any], repo: str, pr: int) -> None:
 
     取得できなかったときは記録を変更しない。0 件として扱うと、GitHub 側の
     一時的な不調で引き継ぎが消える。
+
+    Returns:
+      記録を書き換えたかどうか。
     """
+    before = st.get("carried_over")
     threads = _fetch_unresolved_threads(str(repo or ""), int(pr))
     if threads is None:
         info("⚠ 未解決の指摘を取得できませんでした — 引き継ぎの記録は変更しません")
-        return
+        return False
     if not threads:
         st["carried_over"] = None
-        return
+        return before is not None
     st["carried_over"] = {
         "detected_at": _now(),
         "count": len(threads),
@@ -1207,6 +1209,7 @@ def _record_carried_over(st: dict[str, Any], repo: str, pr: int) -> None:
         f"⚠ 引き継いだ指摘が {len(threads)} 件残っています"
         " — 修正の工程を 1 度通すまで収束させません"
     )
+    return True
 
 
 def _carried_over_pending(st: dict[str, Any]) -> dict[str, Any] | None:
