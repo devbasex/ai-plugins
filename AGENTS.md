@@ -23,10 +23,23 @@
 
 ### 版の付け方と開発版の配布
 
-**利用者へ届く版は `main` に載ったものだけである。** マーケットプレイスはこのリポジトリを
-clone して `main` を読むため、ref やブランチを指定して別の版を配る手段は無い
-（`claude plugin marketplace add` に ref の指定は無く、`claude plugin install` に版の指定も
-無い。実機で確認）。**開発版も `main` へ出す。区別は版数で伝える。**
+**いま利用者へ届いている版は `main` に載ったものである。** 現在の登録は既定ブランチを
+追いかける形になっている。**当面は開発版も `main` へ出し、区別は版数で伝える。**
+
+ただし**別の配り方が公式に用意されている**。採否は未決である。
+
+- `claude plugin marketplace add owner/repo@ref` / `git-url#ref` で**ブランチやタグへ固定できる**
+  （`--help` には出ないが [公式ドキュメント](https://code.claude.com/docs/en/plugin-marketplaces)
+  に記載。実機で確認）。Codex は `--ref`、Kiro には該当する手段が無い
+- 公式に **「Set up release channels」** の節があり、同一リポジトリの別 ref を指す 2 つの
+  マーケットプレイスで stable と latest を分ける形が示されている
+- `claude plugin install` に版を指定する手段は無い（これは確定）
+
+**接尾辞は人が読むための印である。** Claude Code の直接インストール経路は版数を
+**キャッシュキーとしての文字列一致**でしか見ず、`-dev` や `-rc` を prerelease として
+扱わない。Codex と Kiro も同様で、Agent Plugins Specification には解釈の規定が無い。
+semver の順序で除外されるのは、プラグイン間の依存解決（`dependencies`）の経路だけである。
+それでも接尾辞を付けるのは、**入れたくない利用者が版数を見て判断できるようにする**ためである。
 
 | 版 | 形 | 意味 |
 | --- | --- | --- |
@@ -56,11 +69,22 @@ clone して `main` を読むため、ref やブランチを指定して別の�
 **開発版の公開は `release` の「検証への配布」にあたる。** 正式版の公開が「本番への配布」で、
 そちらは承認が要る（`/ndf:release`）。
 
-**ローカルのディレクトリをマーケットプレイスとして追加しない。** `marketplace.json` の `name`
-が同じであるため、`claude plugin marketplace add <ローカルパス>` は `--scope local` を指定しても
-**利用者のグローバルな取得元を上書きする**。続けて `marketplace remove` すると clone と導入記録
-まで消える（実機で踏んだ）。手元での確認は Kiro の installer（`--project <検証用ディレクトリ>`）
-か、開発版を `main` へ出してから通常の取得経路で行う。
+**ローカルのディレクトリを同じ名前でマーケットプレイスとして追加しない。** 登録の鍵は取得元では
+なく `marketplace.json` の `name` で、**1 つの名前につき 1 つしか登録できない**（公式ドキュメントに
+"Each user can register only one marketplace per name" とある）。そのため
+`claude plugin marketplace add <ローカルパス>` は `--scope local` を指定しても**利用者の取得元を
+置き換える**。続けて `marketplace remove` すると clone と導入記録まで消える（実機で踏んだ）。
+
+名前が違えば併存できるが、**同名のプラグインが両方とも有効になる**ため、どちらが使われるかが
+定まらず検証の手段にならない。手元での確認は次のどちらかで行う。どちらも取得元を書き換えない。
+
+```bash
+bash plugins/ndf/dev.kiro/install.sh --project <検証用ディレクトリ> --yes   # Kiro
+claude --plugin-dir plugins/ndf                                             # Claude Code
+```
+
+**サードパーティのマーケットプレイスは自動更新が既定で無効である。** `main` へ出した版が
+即座に全利用者へ届くわけではなく、利用者が `marketplace update` を実行した時点で届く。
 
 ### セキュリティ要件
 
