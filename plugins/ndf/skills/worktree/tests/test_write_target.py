@@ -811,6 +811,7 @@ def test_reserved_words_open_a_command_position(command: str, expected: str) -> 
         # 後ろの現在地は決められない。
         "case $x in a) cd .worktrees/x ;; esac\nsed -i 's/a/b/' README.md",
         "case $x in a) cd .worktrees/x ;; esac; echo hi > README.md",
+        "case $x in a ) cd .worktrees/x ;; esac; echo hi > README.md",
         "case $x in a) true ;; b) cd .worktrees/x ;; esac\ncp a.txt README.md",
     ],
 )
@@ -939,6 +940,58 @@ def test_parentheses_outside_a_subshell_stay_in_the_word(
     targets, rc = extract(command)
     assert rc == 0, command
     assert targets == expected, command
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # 配列の代入の `)`。空白を挟むと語から離れる。
+        ("( a=( 1 2 ); cd .worktrees/x ); echo hi > README.md", "/base/README.md"),
+        # `case` の見出しの `)`。部分シェルの中では対応する `(` が残っているため、
+        # 数だけでは語の一部と区別できない。
+        ("( case $y in a) true ;; esac; cd .worktrees/x ); cp a.txt README.md",
+         "/base/README.md"),
+        ("( case $y in a ) true ;; esac; cd .worktrees/x ); cp a.txt README.md",
+         "/base/README.md"),
+        # 関数定義の `()`。空白を挟む書き方もある。
+        ("( f () { :; }; cd .worktrees/x ); cp a.txt README.md", "/base/README.md"),
+    ],
+)
+def test_a_parenthesis_inside_a_subshell_does_not_end_it(
+    command: str, expected: str
+) -> None:
+    """部分シェルの中の `)` を終わりとして数えると、中の `cd` が親へ漏れる。
+
+    漏れると、抜けた後の主ディレクトリへの書き込みを作業ツリー側と取り違えて
+    案内を出さない（検知漏れになる）。
+    """
+    targets, rc = extract_at(command, "/base")
+    assert rc == 0, (command, targets)
+    assert targets == [expected], command
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        ("( cd .worktrees/x; a=( 1 ); sed -i 's/a/b/' README.md )",
+         "/base/.worktrees/x/README.md"),
+        ("( cd .worktrees/x; case $y in a) sed -i 's/a/b/' README.md ;; esac )",
+         "/base/.worktrees/x/README.md"),
+        ("( cd .worktrees/x; f () { :; }; cp a.txt README.md )",
+         "/base/.worktrees/x/README.md"),
+    ],
+)
+def test_a_parenthesis_inside_a_subshell_keeps_the_inner_cwd(
+    command: str, expected: str
+) -> None:
+    """語の一部の `)` で段を戻すと、中の相対パスが外側の位置で解決される。
+
+    戻すと、作業ツリーへ移ってから書き換えたものを主ディレクトリへの書き込みと
+    して案内する（誤検知になる）。
+    """
+    targets, rc = extract_at(command, "/base")
+    assert rc == 0, (command, targets)
+    assert targets == [expected], command
 
 
 @pytest.mark.parametrize(
@@ -1138,6 +1191,11 @@ def test_a_redirection_on_cd_itself_opens_before_moving(
          "/base/README.md"),
         # 入れ子の `case` でも、内側の枝の入口は内側の `case` の位置である。
         ("case $x in a) cd .worktrees/x; case $y in b) cp a.txt README.md ;; esac ;; esac",
+         "/base/.worktrees/x/README.md"),
+        # 見出しは `)` の前に空白を置けるほか、先頭に `(` を添える書き方もある。
+        ("case $x in a ) cd .worktrees/x; cp a.txt README.md ;; esac",
+         "/base/.worktrees/x/README.md"),
+        ("case $x in (a) cd .worktrees/x; cp a.txt README.md ;; esac",
          "/base/.worktrees/x/README.md"),
     ],
 )

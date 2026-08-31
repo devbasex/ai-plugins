@@ -257,17 +257,55 @@ wt_relative_to_main() {
 # `sed -i 's/a b/c/' f` のように引用符の中へ空白を含む形を 1 語として扱うため、
 # 単純な空白区切りでは足りない。
 _wt_tokenize() {
-  local s="${1:-}" n i c quote="" cur="" op last
+  local s="${1:-}" n i c quote="" cur="" op last rest
   n=${#s}
   local -a out=()
   # 部分シェルの入口として切り出した `(` のうち、まだ閉じていない数。
-  # `)` を語として切り出してよいのは、この数が残っているときだけである。
   local subshells=0
   # 語の途中に現れた `(` のうち、まだ閉じていない数。`$(` の展開・`$((` の
   # 算術・関数定義の `f()`・配列の代入 `a=(` はいずれも部分シェルの入口では
   # ない。ここで数えておかないと、その閉じ括弧を部分シェルの終わりとして
   # 切り出してしまい、後続の相対パスの起点が入口の位置へ戻る。
   local inword=0
+  # `case ... in` から `esac` までの入れ子の数と、その段が見出しを待っているか。
+  # 見出しを閉じる `)` は部分シェルの終わりではない。数だけで決めると、部分
+  # シェルの中の見出し (`( case $x in a) ... )`) で親の段を戻してしまう。
+  local case_depth=0
+  local -a case_state=()
+  # 見出しの位置にいるか。`)` と `(` の役割はここで決まる。
+  _tok_in_pattern() {
+    [ "$case_depth" -gt 0 ] || return 1
+    [ "${case_state[case_depth - 1]}" = want_pattern ] || return 1
+    return 0
+  }
+  # 語を 1 つ出力し、`case` の段を進める。`case` と `esac` を数えるのは命令の
+  # 位置にあるときだけで、`echo case` の `case` は入口として数えない。
+  _tok_emit() {
+    local w="$1" prev_out=""
+    ((${#out[@]} > 0)) && prev_out=${out[${#out[@]} - 1]}
+    case "$w" in
+      case|esac)
+        case "$prev_out" in
+          ""|__WT_SEP__|__WT_SUBSHELL_END__|__WT_CASE_END__|"|"|"|&"|"&"|"&&"|"||"|"("|"{")
+            if [ "$w" = case ]; then
+              case_state[case_depth]=want_in
+              case_depth=$((case_depth + 1))
+            elif [ "$case_depth" -gt 0 ]; then
+              case_depth=$((case_depth - 1))
+            fi
+            ;;
+        esac
+        ;;
+      in)
+        # `case` の対象の後ろの `in` だけが見出しの位置を開く。枝の中の
+        # `for x in ...` の `in` は、その段が既に見出しを通っているため効かない。
+        if [ "$case_depth" -gt 0 ] && [ "${case_state[case_depth - 1]}" = want_in ]; then
+          case_state[case_depth - 1]=want_pattern
+        fi
+        ;;
+    esac
+    out+=("$w")
+  }
   for ((i = 0; i < n; i++)); do
     c=${s:i:1}
     if [ -n "$quote" ]; then
@@ -280,7 +318,13 @@ _wt_tokenize() {
       # 前のコマンドの対象と取り違える（`cp a b` の次の行の `echo c` の `c` を
       # 複製先として拾うなど）。区切りの印を独立した語として出す。
       $'\n'|";")
-        if [ -n "$cur" ]; then out+=("$cur"); cur=""; fi
+        if [ -n "$cur" ]; then _tok_emit "$cur"; cur=""; fi
+        # `;;` `;&` `;;&` は `case` の枝の終わりで、次に来るのは見出しである。
+        if [ "$c" = ";" ] && [ "$case_depth" -gt 0 ]; then
+          case "${s:i+1:1}" in
+            ";"|"&") case_state[case_depth - 1]=want_pattern ;;
+          esac
+        fi
         out+=("__WT_SEP__")
         ;;
       " "|$'\t')
@@ -295,7 +339,7 @@ _wt_tokenize() {
             __WT_REDIR__|__WT_APPEND__) continue ;;
           esac
         fi
-        if [ -n "$cur" ]; then out+=("$cur"); cur=""; fi
+        if [ -n "$cur" ]; then _tok_emit "$cur"; cur=""; fi
         ;;
       # 演算子は空白で囲まれているとは限らない。切り出さないと
       # `cp a b||echo c` の `b||echo` が 1 語になり、区切りとして見えない
@@ -319,7 +363,7 @@ _wt_tokenize() {
         case "${s:i:2}" in
           "&&"|"||"|"|&") op=${s:i:2} ;;
         esac
-        if [ -n "$cur" ]; then out+=("$cur"); cur=""; fi
+        if [ -n "$cur" ]; then _tok_emit "$cur"; cur=""; fi
         out+=("$op")
         i=$((i + ${#op} - 1))
         ;;
@@ -328,6 +372,18 @@ _wt_tokenize() {
       # ない。字面のまま語へ残し、対応する `)` も切り出さないよう数える。
       "(")
         if [ -n "$cur" ] || [ "$inword" -gt 0 ]; then
+          inword=$((inword + 1))
+          cur+="$c"
+          continue
+        fi
+        # 見出しの位置の `(` は飾りで、部分シェルの入口ではない
+        # （`case $x in (a) ...`）。語の一部として残す。
+        if _tok_in_pattern; then cur+="$c"; continue; fi
+        # 中身の無い `()` は関数定義の目印で、部分シェルの入口ではない。`f ()`
+        # のように空白を挟む書き方があるため、語の途中かどうかでは見分けられない。
+        rest=${s:i+1}
+        rest=${rest#"${rest%%[!$' \t']*}"}
+        if [ "${rest:0:1}" = ")" ]; then
           inword=$((inword + 1))
           cur+="$c"
           continue
@@ -344,18 +400,27 @@ _wt_tokenize() {
           cur+="$c"
           continue
         fi
+        # 見出しを閉じる `)`。枝の本体が始まることを印で伝える。見出しの語と
+        # くっついているか (`a)`) 離れているか (`a )`) で扱いを変えない。
+        if _tok_in_pattern; then
+          if [ -n "$cur" ]; then _tok_emit "$cur"; cur=""; fi
+          case_state[case_depth - 1]=body
+          out+=("__WT_CASE_END__")
+          continue
+        fi
         if [ "$subshells" -le 0 ]; then
           cur+="$c"
           continue
         fi
-        if [ -n "$cur" ]; then out+=("$cur"); cur=""; fi
-        out+=("$c")
+        if [ -n "$cur" ]; then _tok_emit "$cur"; cur=""; fi
+        out+=("__WT_SUBSHELL_END__")
         subshells=$((subshells - 1))
         ;;
       *) cur+="$c" ;;
     esac
   done
-  [ -n "$cur" ] && out+=("$cur")
+  [ -n "$cur" ] && _tok_emit "$cur"
+  unset -f _tok_in_pattern _tok_emit
   printf '%s\n' "${out[@]+"${out[@]}"}"
 }
 
@@ -827,17 +892,13 @@ wt_extract_write_target() {
         # ためである。**`coproc` は意図して外す。** 同じく部分シェルを開くが、
         # 語として切れる形が一定でないため深さを数えられない。
         "(") at_cmd=1 ;;
-        # `case` の見出し (`a)` `*)` `"a")`) の後ろは、その枝の本体が始まる位置
-        # である。数えないと枝の中の `cd` が追跡から漏れ、作業ツリーへ移ってから
-        # 書き換えたものを主ディレクトリへの書き込みとして案内する（誤検知になる）。
-        # 見出しの `)` は対応する `(` を持たないため語の一部として残り、部分シェル
-        # の終わりとして切り出される `)` だけの語とは区別できる。`case` の中でだけ
-        # 見るのは、`$(...)` を含む語のように `)` で終わる語が他にもあるためである。
-        # **`(a)` と書く見出しは対象外。** 先頭の `(` を部分シェルの入口として
-        # 切り出すため、`)` も語から離れる。追えないぶん移動前の位置を案内する側
-        # （誤検知）へ倒れ、検知漏れにはならない。
-        *")")
-          if [ "$case_depth" -gt 0 ] && [ "$prev" != ")" ]; then
+        # `case` の見出し (`a)` `*)` `"a")` `(a)`) の後ろは、その枝の本体が始まる
+        # 位置である。数えないと枝の中の `cd` が追跡から漏れ、作業ツリーへ移って
+        # から書き換えたものを主ディレクトリへの書き込みとして案内する（誤検知に
+        # なる）。見出しを閉じた `)` かどうかは字句解析が決め、`__WT_CASE_END__`
+        # として渡す。ここでは印だけを見る。
+        __WT_CASE_END__)
+          if [ "$case_depth" -gt 0 ]; then
             at_cmd=1
             # 枝の入口は `case` を開いた位置である。前の枝の `cd` は走っていない。
             cwd="${case_cwd[case_depth - 1]}"
@@ -848,10 +909,10 @@ wt_extract_write_target() {
             list_and_uncertain=0; list_cond_cd=0
           fi
           ;;
-        # `fi` / `done` / `esac` / `}` / `)` は複合コマンドの終わりで、後ろに続く
-        # のは区切りであって命令ではない。`for` / `select` / `case` / `in` の後ろ
-        # は名前や語の並びで、いずれも `cd` を置ける位置ではない。命令の位置として
-        # 数えない。
+        # `fi` / `done` / `esac` / `}` / `__WT_SUBSHELL_END__` は複合コマンドの
+        # 終わりで、後ろに続くのは区切りであって命令ではない。`for` / `select` /
+        # `case` / `in` の後ろは名前や語の並びで、いずれも `cd` を置ける位置では
+        # ない。命令の位置として数えない。
       esac
     fi
     # 命令の前には変数代入を並べられる。`FOO=bar cd x` の `cd` を命令として
@@ -963,8 +1024,10 @@ wt_extract_write_target() {
         [ "$at_cmd" = 1 ] && _pop_group
         continue
         ;;
-      ")")
-        # 部分シェルの終わり。命令の位置には現れないため、位置では絞れない。
+      __WT_SUBSHELL_END__)
+        # 部分シェルの終わり。字句解析が切り出した `(` に対応するものだけが
+        # この印になる。配列の代入 `a=( 1 )`・`case` の見出し・関数定義の `()`
+        # の `)` は語の一部で、ここへは来ない（来ると親の段まで戻ってしまう）。
         # 対応する `(` を数え損ねていても、深さは 0 で止める（`_pop_subshell` が
         # 深さ 0 で何もしない）。戻さなければ入口の位置のままで、案内が多めに
         # 出る側へ倒れる。
