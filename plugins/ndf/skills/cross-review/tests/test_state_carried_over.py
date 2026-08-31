@@ -215,3 +215,51 @@ def test_merge_fix_keeps_the_first_round_that_handled_it(tmp_dir, state_mod):
     state_mod.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
 
     assert _read(tmp_dir)["carried_over"]["fixed_in_round"] == 1
+
+
+# ---------------- 通した後の再開 ----------------
+
+def test_resume_after_the_fix_step_keeps_the_record(state_mod, unresolved):
+    """通した後に残る指摘だけなら、通したラウンドの記録を残す。
+
+    deferred / rejected と最終スイープ待ちの指摘は Resolve されないまま残る。
+    再開のたびに未処理として数え直すと、収束が再開のたびに 1 ラウンド先送りされる。
+    """
+    unresolved(_threads("PRRT_a", "PRRT_b"))
+    st = _state(carried_over={
+        "count": 2, "thread_ids": ["PRRT_a", "PRRT_b"], "fixed_in_round": 1,
+    })
+
+    changed = state_mod._record_carried_over(st, REPO, PR)
+
+    assert changed is False
+    assert st["carried_over"]["fixed_in_round"] == 1
+    assert state_mod._carried_over_pending(st) is None
+
+
+def test_resume_after_the_fix_step_with_a_new_thread_forces_one_more_round(state_mod, unresolved):
+    """通した後に新しい指摘が出たときは、それを含めてもう 1 度通す。"""
+    unresolved(_threads("PRRT_a", "PRRT_new"))
+    st = _state(carried_over={
+        "count": 1, "thread_ids": ["PRRT_a"], "fixed_in_round": 1,
+    })
+
+    changed = state_mod._record_carried_over(st, REPO, PR)
+
+    assert changed is True
+    assert st["carried_over"]["thread_ids"] == ["PRRT_a", "PRRT_new"]
+    assert st["carried_over"]["fixed_in_round"] is None
+    assert state_mod._carried_over_pending(st) is not None
+
+
+def test_resume_before_the_fix_step_still_counts_again(state_mod, unresolved):
+    """まだ通していないあいだは、これまでどおり数え直して収束を抑止する。"""
+    unresolved(_threads("PRRT_a"))
+    st = _state(carried_over={
+        "count": 1, "thread_ids": ["PRRT_a"], "fixed_in_round": None,
+    })
+
+    changed = state_mod._record_carried_over(st, REPO, PR)
+
+    assert changed is True
+    assert st["carried_over"]["fixed_in_round"] is None

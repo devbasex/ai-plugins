@@ -1188,6 +1188,12 @@ def _record_carried_over(st: dict[str, Any], repo: str, pr: int) -> bool:
     取得できなかったときは記録を変更しない。0 件として扱うと、GitHub 側の
     一時的な不調で引き継ぎが消える。
 
+    修正の工程を 1 度通した後も、deferred / rejected と最終スイープ待ちの指摘は
+    Resolve されないまま残る。これを再開のたびに未処理として数え直すと、収束は
+    再開のたびに 1 ラウンドずつ先送りされる。**通した後に新しい指摘が出ていない
+    あいだは、通したラウンドの記録をそのまま残す**。新しい指摘が出たときだけ、
+    それを含めて数え直し、もう 1 度修正の工程へ通す。
+
     Returns:
       記録を書き換えたかどうか。
     """
@@ -1199,14 +1205,25 @@ def _record_carried_over(st: dict[str, Any], repo: str, pr: int) -> bool:
     if not threads:
         st["carried_over"] = None
         return before is not None
+    prev = before if isinstance(before, dict) else {}
+    prev_fixed = prev.get("fixed_in_round")
+    prev_ids = set(prev.get("thread_ids") or [])
+    ids = [t["id"] for t in threads]
+    new_ids = [i for i in ids if i not in prev_ids]
+    if prev_fixed is not None and not new_ids:
+        info(
+            f"↻ 残っている {len(ids)} 件は round {prev_fixed} の修正の工程を通した後の"
+            " 分です — 収束は抑止しません（最終スイープが受け持ちます）"
+        )
+        return False
     st["carried_over"] = {
         "detected_at": _now(),
-        "count": len(threads),
-        "thread_ids": [t["id"] for t in threads],
+        "count": len(ids),
+        "thread_ids": ids,
         "fixed_in_round": None,
     }
     info(
-        f"⚠ 引き継いだ指摘が {len(threads)} 件残っています"
+        f"⚠ 引き継いだ指摘が {len(ids)} 件残っています"
         " — 修正の工程を 1 度通すまで収束させません"
     )
     return True

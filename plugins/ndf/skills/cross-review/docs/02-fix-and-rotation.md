@@ -189,7 +189,8 @@ fi
 ```bash
 if "$SCRIPTS/state.py" should-rotate "$STATE_PR"; then
   # Step 6a: 旧 PR の素材 dump (title / body / isDraft / git log / git diff --stat)
-  eval "$("$SCRIPTS/rotate-pr.sh" prepare "$STATE_PR")"
+  PREPARE_VARS=$("$SCRIPTS/rotate-pr.sh" prepare "$STATE_PR") || exit $?
+  eval "$PREPARE_VARS"
 
   # Step 6b: light モードのみ。Agent(subagent_type="general-purpose") で
   # 現状の差分・実装を反映した新 title/body を生成し、
@@ -197,7 +198,8 @@ if "$SCRIPTS/state.py" should-rotate "$STATE_PR"; then
   # (squash モードでは Step 6b は不要)
 
   # Step 6c: 実行 (NEW_PR / NEW_PR_URL / NEW_BRANCH を取り込む)
-  eval "$("$SCRIPTS/rotate-pr.sh" execute "$STATE_PR" --mode "$ROTATE_MODE")"
+  ROTATE_VARS=$("$SCRIPTS/rotate-pr.sh" execute "$STATE_PR" --mode "$ROTATE_MODE") || exit $?
+  eval "$ROTATE_VARS"
 
   "$SCRIPTS/state.py" set-current-pr "$STATE_PR" "$NEW_PR"
   # NOTE: STATE_PR は **絶対に変えない**。次ループの scripts も $STATE_PR で呼ぶ。

@@ -136,11 +136,15 @@ done
 SCRIPTS="$SKILL_DIR/scripts"
 
 # state 初期化 / 再開（プリチェック・worktree 作成・既存コメントスナップショットを内部実行）
-eval "$("$SCRIPTS/state.py" init "$STATE_PR" \
+# ⚠ `eval "$(スクリプト)"` は、スクリプトが異常終了しても出力が空なら終了コード 0 に
+# なる。コマンド置換の終了コードは eval 自身の終了コードにならないため、止まるべき
+# 場面で止まらない。**必ず変数で受け、終了コードを見てから eval する。**
+INIT_VARS=$("$SCRIPTS/state.py" init "$STATE_PR" \
           --max-rounds "$MAX_ROUNDS" --rotate-after "$ROTATE_AFTER" \
           ${ONLY:+--only "$ONLY"} \
           ${FOCUS:+--focus "$FOCUS"} \
-          ${EXTRA_INSTRUCTIONS_FILE:+--extra-instructions-file "$EXTRA_INSTRUCTIONS_FILE"})"
+          ${EXTRA_INSTRUCTIONS_FILE:+--extra-instructions-file "$EXTRA_INSTRUCTIONS_FILE"}) || exit $?
+eval "$INIT_VARS"
 
 # eval で取り込まれる変数: PR, WORKTREE, REPO, HEAD_BRANCH, BASE_BRANCH,
 #                        IS_OWN_PR, EVENT_DOWNGRADE, CARRIED_OVER_THREADS, RESUMED
@@ -162,7 +166,12 @@ cd "$WORKTREE"
 ## Step 1: Round 開始判定
 
 ```bash
-eval "$("$SCRIPTS/state.py" start-round "$STATE_PR")"
+ROUND_VARS=$("$SCRIPTS/state.py" start-round "$STATE_PR") || {
+  RC=$?
+  [ "$RC" -eq 1 ] && break   # max_rounds 到達 → ループを抜けて最終スイープへ
+  exit "$RC"                 # 5=後始末が未了 など。その場で止める
+}
+eval "$ROUND_VARS"
 # eval で取り込まれる変数: ROUND, ROUND_IN_PR, PR, MAX_ROUNDS, ROTATE_AFTER
 ```
 
@@ -349,10 +358,17 @@ intent が `REQUEST_CHANGES` なら継続する。
 新規に開始したレビューでは記録しない。引き継ぎは**再開の時点**で決まる。
 未解決の指摘を取得できなかったときは記録を書き換えない（0 件として扱わない）。
 
+修正の工程を通した後にもう一度再開したときは、**そのとき残っている指摘が前回の記録に
+無い識別子を含むかどうか**で分ける。含まなければ deferred / rejected と最終スイープ待ちの
+残りなので、`fixed_in_round` をそのまま残して収束を抑止しない。含むなら再開の後に増えた
+指摘があるため、それを含めて数え直し、もう 1 度修正の工程へ通す。前者を未処理として
+数え直すと、収束が再開のたびに 1 ラウンドずつ先送りされる。
+
 ### 未解決の指摘を単独で数える
 
 ```bash
-eval "$("$SCRIPTS/state.py" unresolved-threads "$STATE_PR")"
+UNRESOLVED_VARS=$("$SCRIPTS/state.py" unresolved-threads "$STATE_PR") || exit $?
+eval "$UNRESOLVED_VARS"
 # UNRESOLVED_COUNT / UNRESOLVED_THREAD_IDS を取り込む。
 # exit 1 = 取得できなかった（0 件と区別する）
 ```
