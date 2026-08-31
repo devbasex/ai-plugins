@@ -1674,6 +1674,26 @@ def cmd_set_current_pr(args: argparse.Namespace) -> None:
     info(f"✅ current_pr: {old_pr} → {new_pr}")
 
 
+def _read_sweep_result(pr: int, file: str | None) -> dict[str, Any]:
+    """最終スイープの結果ファイルを読む。読めない形はすべて中断する。
+
+    結果が無いまま完了報告へ進むと、最終スイープを実行したかどうかが残らない。
+    """
+    path = pathlib.Path(file) if file else _resolve_tmp_dir(pr) / f"sweep-pr{pr}-result.json"
+    if not (path.exists() and path.stat().st_size > 0):
+        die(
+            f"最終スイープの結果ファイルがありません ({path})。"
+            " Step 7.5 を実行してから完了報告へ進んでください"
+        )
+    try:
+        sweep = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        die(f"最終スイープの結果ファイルを読めません ({path}): {exc}")
+    if not isinstance(sweep, dict):
+        die(f"最終スイープの結果ファイルが dict ではありません ({path})")
+    return sweep
+
+
 def cmd_verify_sweep(args: argparse.Namespace) -> None:
     """Step 7.5 後段 — 最終スイープの後に未解決の指摘が残っていないかを確かめる。
 
@@ -1684,18 +1704,7 @@ def cmd_verify_sweep(args: argparse.Namespace) -> None:
     """
     pr = args.pr
     st = _load(pr)
-    sfile = pathlib.Path(args.file) if args.file else _resolve_tmp_dir(pr) / f"sweep-pr{pr}-result.json"
-    if not (sfile.exists() and sfile.stat().st_size > 0):
-        die(
-            f"最終スイープの結果ファイルがありません ({sfile})。"
-            " Step 7.5 を実行してから完了報告へ進んでください"
-        )
-    try:
-        sweep = json.loads(sfile.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        die(f"最終スイープの結果ファイルを読めません ({sfile}): {exc}")
-    if not isinstance(sweep, dict):
-        die(f"最終スイープの結果ファイルが dict ではありません ({sfile})")
+    sweep = _read_sweep_result(pr, args.file)
 
     declared = _as_count(sweep.get("remaining_open"))
     current_pr = int(st.get("current_pr") or pr)
