@@ -48,6 +48,8 @@
 - 配布 Skill の数そのものを動かすこと（`manifests/*-skills.txt` と `skills/` の増減）
 - `plugins/ndf/skills/` 配下と `plugins/playwright-kit/` 配下の変更。並行して進む他の 2 件が
   同じ場所を書き換えている
+- `pytest` のテストを CI で実行すること。`.github/` は書き換えてよいパスに含まれない。
+  範囲外として #182 に起票した
 
 ## 前提
 
@@ -61,40 +63,52 @@
 
 ## 受け入れ条件
 
-記号は指示書の表に合わせる。
+記号は指示書の表に合わせる。検証手段は `scripts/tests/` のテスト名で示す
+（`uv run pytest scripts/tests -q` / 31 passed / exit=0）。
 
-- [ ] A: `README.md` の「Claude Code 向け core N 個 / Kiro 向け core N 個 / Codex 向け core N 個」
+- [x] A: `README.md` の「Claude Code 向け core N 個 / Kiro 向け core N 個 / Codex 向け core N 個」
       が、対応するマニフェストの行数と食い違うと検査が失敗する
-- [ ] A': `README.md` から上記 3 つのランタイムのいずれかの記載が消えると検査が失敗する
-- [ ] B: `README.md` の「元 Skills（N 個）」が、実体の数と任意 Skill の数の和と食い違うと
-      検査が失敗する
-- [ ] B': `README.md` から元 Skills の記載が消えると検査が失敗する
-- [ ] C: `README.md` のカテゴリ内訳の合計が、実体の数と任意 Skill の数の和と食い違うと
-      検査が失敗する
-- [ ] C': カテゴリ内訳の 1 行について、宣言された数とその行に並ぶ Skill 名の数が食い違うと
-      検査が失敗する
-- [ ] C'': カテゴリ内訳が 1 行も無いと検査が失敗する
-- [ ] D: `plugins/ndf/README.md` の配布先の表の 3 行が、対応するマニフェストの行数と食い違うと
-      検査が失敗する
-- [ ] D': 配布先の表から 3 つのランタイムのいずれかの行が消えると検査が失敗する
-- [ ] E: `plugins/ndf/README.md` のレイアウト図に書かれた実体の数（`skills/`）と任意 Skill の
+      → `test_runtime_skill_count_mismatch_fails`（3 ランタイム分）
+- [x] A': `README.md` から上記 3 つのランタイムのいずれかの記載が消えると検査が失敗する
+      → `test_runtime_skill_count_removed_fails`（3 ランタイム分）
+- [x] B: `README.md` の「元 Skills（N 個）」が、実体の数と任意 Skill の数の和と食い違うと
+      検査が失敗する → `test_source_skill_count_mismatch_fails`
+- [x] B': `README.md` から元 Skills の記載が消えると検査が失敗する
+      → `test_source_skill_count_removed_fails`
+- [x] C: `README.md` のカテゴリ内訳の合計が、実体の数と任意 Skill の数の和と食い違うと
+      検査が失敗する → `test_category_total_mismatch_fails`
+- [x] C': カテゴリ内訳の 1 行について、宣言された数とその行に並ぶ Skill 名の数が食い違うと
+      検査が失敗する → `test_category_line_count_mismatch_fails`
+- [x] C'': カテゴリ内訳が 1 行も無いと検査が失敗する
+      → `test_category_breakdown_removed_fails`
+- [x] D: `plugins/ndf/README.md` の配布先の表の 3 行が、対応するマニフェストの行数と食い違うと
+      検査が失敗する → `test_distribution_table_mismatch_fails`（3 行分）
+- [x] D': 配布先の表から 3 つのランタイムのいずれかの行が消えると検査が失敗する
+      → `test_distribution_table_row_removed_fails`（3 行分）
+- [x] E: `plugins/ndf/README.md` のレイアウト図に書かれた実体の数（`skills/`）と任意 Skill の
       数（`optional-skills/`）が、実際のディレクトリの数と食い違うと検査が失敗する
-- [ ] F: 更新案内の見出しの版数が `plugins/ndf/.claude-plugin/plugin.json` の版と食い違うと
-      検査が失敗する
-- [ ] F': 更新案内の見出しが無いと検査が失敗する
-- [ ] 検査の失敗時の出力に、ファイルのパス・記載の識別（どの行の何か）・突き合わせた 2 つの値が
-      含まれる
-- [ ] 現在のリポジトリの内容では `bash scripts/validate-runtime-plugins.sh` が終了コード 0 で
-      終わる
-- [ ] `claude plugin validate` が通る
-- [ ] 上記のすべてに対応する自動テストが `scripts/tests/` にあり、`uv run pytest scripts/tests -q`
-      が通る
-- [ ] `docs/plugin-development-guide.md` のバージョン管理の節に、更新案内の本文を読み直す項目が
-      加わっている
-- [ ] 起きてはいけないこと: 実物の `README.md` と `plugins/ndf/README.md` を書き換えるテストを
-      置かない。テストは一時ディレクトリに作った説明文書へ対して行う
-- [ ] 起きてはいけないこと: `plugins/ndf/manifests/*-skills.txt` の行と `plugins/ndf/skills/` の
+      → `test_layout_skill_count_mismatch_fails` / `test_layout_optional_count_mismatch_fails`
+      / `test_layout_counts_removed_fails`
+- [x] F: 更新案内の見出しの版数が `plugins/ndf/.claude-plugin/plugin.json` の版と食い違うと
+      検査が失敗する → `test_upgrade_heading_version_stale_fails`
+- [x] F': 更新案内の見出しが無いと検査が失敗する → `test_upgrade_heading_removed_fails`。
+      見出しが 2 つある場合も失敗する（`test_upgrade_heading_duplicated_fails`）
+- [x] 検査の失敗時の出力に、ファイルのパス・記載の識別（どの行の何か）・突き合わせた 2 つの値が
+      含まれる → `test_failure_output_names_file_label_and_both_values`。実物を崩した出力は
+      Pull Request 本文に載せた
+- [x] 現在のリポジトリの内容では `bash scripts/validate-runtime-plugins.sh` が終了コード 0 で
+      終わる → 実行して exit=0
+- [x] `claude plugin validate` が通る → `claude plugin validate plugins/ndf` が exit=0
+- [x] 上記のすべてに対応する自動テストが `scripts/tests/` にあり、`uv run pytest scripts/tests -q`
+      が通る → 31 passed / exit=0
+- [x] `docs/plugin-development-guide.md` のバージョン管理の節に、更新案内の本文を読み直す項目が
+      加わっている → 手順 3 として追加
+- [x] 起きてはいけないこと: 実物の `README.md` と `plugins/ndf/README.md` を書き換えるテストを
+      置かない → テストは `tmp_path` に作った木だけを崩す（`doc_staleness_helpers.build_tree`）。
+      実物に対しては読み取りのみ（`test_real_repository_passes`）
+- [x] 起きてはいけないこと: `plugins/ndf/manifests/*-skills.txt` の行と `plugins/ndf/skills/` の
       ディレクトリが増減していない
+      → `git diff --stat origin/main -- plugins/ndf/manifests plugins/ndf/skills` が差分なし
 
 ## 代替案と採否
 
