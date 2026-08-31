@@ -655,6 +655,12 @@ wt_extract_write_target() {
   # （検知漏れになる）。入口を入れ子の段ごとに積み、閉じるときに戻す。
   local -a group_cwd=() group_known=()
   local group_depth=0
+  # `case` の枝どうしは排他で、見出し (`a)`) の間に走る命令は無い。枝の入口の
+  # 位置は `case` を開いた時点の位置そのものである。次の見出しで戻さないと、
+  # 前の枝の `cd` を引きずり、走っていない移動を書き込み先の起点に使う。
+  # 見出しを命令の位置として数えるかどうかの判定にも使うため、深さを持つ。
+  local -a case_cwd=() case_known=()
+  local case_depth=0
 
   # ヒアドキュメントの本文を先に落とす。落とす前に印を挟むと、本文の中の `>` が
   # 出力の付け替えとして数えられる。
@@ -669,6 +675,9 @@ wt_extract_write_target() {
   words=("${WT_LINES[@]+"${WT_LINES[@]}"}")
 
   local n=${#words[@]} i j w target found=0 prev="" at_cmd=0 dest="" k cmd_prefix=0
+  # `cd` の枝が、その命令に付いたリダイレクトを移動前の位置で解決し終えた語の
+  # 位置。ここより手前の `__WT_REDIR__` / `__WT_APPEND__` を二度拾わない。
+  local cd_redir_end=0
   # 複合コマンドの入口で `&` の復元先を積み、出口で戻す。
   _push_group() {
     group_cwd[group_depth]="$job_cwd"
@@ -757,10 +766,31 @@ wt_extract_write_target() {
         # ためである。**`coproc` は意図して外す。** 同じく部分シェルを開くが、
         # 語として切れる形が一定でないため深さを数えられない。
         "(") at_cmd=1 ;;
+        # `case` の見出し (`a)` `*)` `"a")`) の後ろは、その枝の本体が始まる位置
+        # である。数えないと枝の中の `cd` が追跡から漏れ、作業ツリーへ移ってから
+        # 書き換えたものを主ディレクトリへの書き込みとして案内する（誤検知になる）。
+        # 見出しの `)` は対応する `(` を持たないため語の一部として残り、部分シェル
+        # の終わりとして切り出される `)` だけの語とは区別できる。`case` の中でだけ
+        # 見るのは、`$(...)` を含む語のように `)` で終わる語が他にもあるためである。
+        # **`(a)` と書く見出しは対象外。** 先頭の `(` を部分シェルの入口として
+        # 切り出すため、`)` も語から離れる。追えないぶん移動前の位置を案内する側
+        # （誤検知）へ倒れ、検知漏れにはならない。
+        *")")
+          if [ "$case_depth" -gt 0 ] && [ "$prev" != ")" ]; then
+            at_cmd=1
+            # 枝の入口は `case` を開いた位置である。前の枝の `cd` は走っていない。
+            cwd="${case_cwd[case_depth - 1]}"
+            cwd_known="${case_known[case_depth - 1]}"
+            pipe_cwd="$cwd"; pipe_known="$cwd_known"; pipe_cds=0
+            job_cwd="$cwd"; job_known="$cwd_known"
+            list_cwd="$cwd"; list_known="$cwd_known"; list_cds=0; list_or=0
+            list_and_uncertain=0; list_cond_cd=0
+          fi
+          ;;
         # `fi` / `done` / `esac` / `}` / `)` は複合コマンドの終わりで、後ろに続く
         # のは区切りであって命令ではない。`for` / `select` / `case` / `in` の後ろ
-        # は名前や語の並び、`;;` の後ろは case の見出しで、いずれも `cd` を置ける
-        # 位置ではない。どれも命令の位置として数えない。
+        # は名前や語の並びで、いずれも `cd` を置ける位置ではない。命令の位置として
+        # 数えない。
       esac
     fi
     # 命令の前には変数代入を並べられる。`FOO=bar cd x` の `cd` を命令として
@@ -843,6 +873,11 @@ wt_extract_write_target() {
           block_cds[block_depth]=$cds
           block_depth=$((block_depth + 1))
           _push_group
+          if [ "$w" = case ]; then
+            case_cwd[case_depth]="$cwd"
+            case_known[case_depth]="$cwd_known"
+            case_depth=$((case_depth + 1))
+          fi
         fi
         continue
         ;;
@@ -884,6 +919,9 @@ wt_extract_write_target() {
           block_depth=$((block_depth - 1))
           [ "$cds" -gt "${block_cds[block_depth]}" ] && cwd_known=0
           _pop_group
+          if [ "$w" = esac ] && [ "$case_depth" -gt 0 ]; then
+            case_depth=$((case_depth - 1))
+          fi
         fi
         continue
         ;;
@@ -891,15 +929,31 @@ wt_extract_write_target() {
         [ "$at_cmd" = 1 ] && [ -n "$base" ] || continue
         # 部分シェルの中でも移動は追う。中の相対パスはここで解決する。親の位置は
         # `)` で `_pop_subshell` が戻すため、この移動は外へ漏れない。
+        # 移動先の語と、この `cd` に付いたリダイレクトを 1 回の走査で拾う。
+        # **リダイレクト先は移動する前の位置で開かれる。** シェルはリダイレクトを
+        # 開いてから命令を実行するためである。移動後の位置で解決すると、主
+        # ディレクトリ側への書き込みを作業ツリー側と取り違えて案内を出さない
+        # （検知漏れになる）。まだ `cwd` を更新していないここで解決する。
         dest=""
         for ((k = i + 1; k < n; k++)); do
+          case "${words[k]}" in
+            __WT_REDIR__|__WT_APPEND__)
+              _emit "${words[k + 1]:-}"
+              k=$((k + 1))
+              continue
+              ;;
+          esac
           if _wt_is_separator "${words[k]}"; then break; fi
           case "${words[k]}" in
             # `cd -` は直前の位置で、コマンドの字面からは追えない。
             -*) continue ;;
-            *) dest=${words[k]}; break ;;
+            # 移動先は最初の被演算子である。リダイレクトを拾い切るため、
+            # 見つけても区切りまで走査を続ける。
+            *) [ -n "$dest" ] || dest=${words[k]} ;;
           esac
         done
+        # 走査が届いた位置を控える。`__WT_REDIR__` の枝が同じ語を二度拾わない。
+        cd_redir_end=$k
         # `||` の右辺で戻せるかどうかの判定に使う。
         list_cds=$((list_cds + 1)); cd_is_last=1
         # `&&` を跨いだ先の `cd` は、走ったかどうかが左辺の成否で決まる。
@@ -915,6 +969,8 @@ wt_extract_write_target() {
         esac
         ;;
       __WT_REDIR__|__WT_APPEND__)
+        # `cd` に付いたリダイレクトは、その枝が移動前の位置で解決済みである。
+        if [ "$i" -lt "$cd_redir_end" ]; then continue; fi
         _emit "${words[i + 1]:-}"
         ;;
       tee)

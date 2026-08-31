@@ -807,6 +807,11 @@ def test_reserved_words_open_a_command_position(command: str, expected: str) -> 
         # 条件の中の `cd` が失敗したときに `else` / `elif` へ来る。効いていない。
         "if cd .worktrees/x; then true; else sed -i 's/a/b/' README.md; fi",
         "if cd .worktrees/x; then true; elif true; then sed -i 's/a/b/' README.md; fi",
+        # `case` も同じである。どの枝が走ったかは実行時に決まるため、`esac` の
+        # 後ろの現在地は決められない。
+        "case $x in a) cd .worktrees/x ;; esac\nsed -i 's/a/b/' README.md",
+        "case $x in a) cd .worktrees/x ;; esac; echo hi > README.md",
+        "case $x in a) true ;; b) cd .worktrees/x ;; esac\ncp a.txt README.md",
     ],
 )
 def test_a_conditional_block_leaves_the_position_undecidable(command: str) -> None:
@@ -1084,6 +1089,64 @@ def test_assignments_before_a_command_keep_the_command_position(
     command: str, expected: str
 ) -> None:
     """`FOO=bar cd x` の `cd` を命令として数えないと、移動が起点へ反映されない。"""
+    targets, rc = extract_at(command, "/base")
+    assert rc == 0, (command, targets)
+    assert targets == [expected], command
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # `cd` 自身に付いたリダイレクトは、移動する**前**の位置で開かれる。
+        ("cd .worktrees/x > README.md", ["/base/README.md"]),
+        ("cd .worktrees/x >> README.md", ["/base/README.md"]),
+        ("cd .worktrees/x >README.md", ["/base/README.md"]),
+        # 移動そのものは後続へ効く。移動前の位置になるのはリダイレクトだけである。
+        ("cd .worktrees/x > log.txt\nsed -i 's/a/b/' README.md",
+         ["/base/log.txt", "/base/.worktrees/x/README.md"]),
+        # 移動先を決められない `cd` でも、リダイレクトは移動前の位置で開かれる。
+        ("cd $HOME > README.md", ["/base/README.md"]),
+    ],
+)
+def test_a_redirection_on_cd_itself_opens_before_moving(
+    command: str, expected: list[str]
+) -> None:
+    """`cd x > f` の `f` は移動前の位置で開かれる。
+
+    移動後の位置で解決すると、主ディレクトリ側への書き込みを作業ツリー側と
+    取り違えて案内を出さない（検知漏れになる）。
+    """
+    targets, rc = extract_at(command, "/base")
+    assert rc == 0, (command, targets)
+    assert targets == expected, command
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # 見出し (`a)`) の後ろは、その枝の本体が始まる位置である。中の `cd` は追う。
+        ("case $x in a) cd .worktrees/x; sed -i 's/a/b/' README.md ;; esac",
+         "/base/.worktrees/x/README.md"),
+        ("case $x in a|b) cd .worktrees/x; echo hi > README.md ;; esac",
+         "/base/.worktrees/x/README.md"),
+        ("case $x in *) cd .worktrees/x; cp a.txt README.md ;; esac",
+         "/base/.worktrees/x/README.md"),
+        ('case $x in "a") cd .worktrees/x; echo hi | tee README.md ;; esac',
+         "/base/.worktrees/x/README.md"),
+        # 枝どうしは排他である。前の枝の `cd` を次の枝へ持ち越さない。
+        ("case $x in a) cd .worktrees/x ;; b) sed -i 's/a/b/' README.md ;; esac",
+         "/base/README.md"),
+        # 入れ子の `case` でも、内側の枝の入口は内側の `case` の位置である。
+        ("case $x in a) cd .worktrees/x; case $y in b) cp a.txt README.md ;; esac ;; esac",
+         "/base/.worktrees/x/README.md"),
+    ],
+)
+def test_a_case_branch_opens_a_command_position(command: str, expected: str) -> None:
+    """`case` の見出しの後ろを命令の位置として数えないと、枝の中の `cd` が漏れる。
+
+    漏らすと、作業ツリーへ移ってから書き換えたものを主ディレクトリへの書き込みと
+    して案内する（誤検知になる）。
+    """
     targets, rc = extract_at(command, "/base")
     assert rc == 0, (command, targets)
     assert targets == [expected], command
