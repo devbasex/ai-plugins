@@ -1,4 +1,4 @@
-"""report.md の相対リンクを Google Drive URL に置換し、Google Docs として再アップロードする。
+"""report.md の証跡の位置を Google Drive URL に置換し、Google Docs として再アップロードする。
 
 事前に対象ディレクトリを Drive にアップロード済みである前提。
 このスクリプトは:
@@ -25,7 +25,7 @@ DOC_MIME = "application/vnd.google-apps.document"
 #   リンク記法 [文言](<パス>)
 # 前後にバッククォートが続く並び (``x``) は、置換すると入れ子のリンクになって
 # 読めなくなるため対象にしない。
-LINK_PATTERN = re.compile(r"(?<!`)`([^`\n]+)`(?!`)|\(([^()\s]+)\)")
+EVIDENCE_PATTERN = re.compile(r"(?<!`)`([^`\n]+)`(?!`)|\(([^()\s]+)\)")
 
 
 def list_folder_files(service, folder_id: str, prefix: str = "") -> dict[str, str]:
@@ -114,7 +114,7 @@ def rewrite_links(md: str, mapping: dict[str, str]) -> tuple[str, int]:
             return f"[{code_span}]({url})"
         return f"({url})"
 
-    return LINK_PATTERN.sub(rep, md), replaced
+    return EVIDENCE_PATTERN.sub(rep, md), replaced
 
 
 def main() -> int:
