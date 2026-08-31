@@ -113,8 +113,15 @@ plugins/{plugin-name}/
 **バージョン更新時の手順**:
 1. `plugin.json`のバージョンをインクリメント
 2. 変更内容をドキュメント化
-3. 破壊的変更がある場合は明示
-4. テストを実行
+3. `plugins/ndf/README.md` の「v&lt;版&gt; へ更新するとき」の節を開き、**本文をその版の変更内容へ書き直す**。見出しの版数だけを置き換えて、本文を前の版の説明のまま残さない
+4. Skill の数が増減した場合は、`README.md` と `plugins/ndf/README.md` に書かれた数を書き直す
+5. 破壊的変更がある場合は明示
+6. テストを実行
+
+`scripts/validate-runtime-plugins.sh` が突き合わせるのは、説明文書に書かれた Skill の数と、
+更新案内の**見出しの版数**までです。見出しの版数が `plugin.json` の版から遅れると検査が
+落ちるため、版を上げるときは必ずこの節へ触ることになります。ただし本文がその版の変更内容を
+説明しているかは機械では判定できません。手順 3 が、その本文を人が読み直す機会にあたります。
 
 ## ドキュメント要件
 
@@ -187,6 +194,16 @@ plugins/{plugin-name}/
 bash scripts/build-runtime-plugins.sh
 bash scripts/validate-runtime-plugins.sh
 ```
+
+`scripts/` 自体を変更した場合は、その検査のテストも実行します。
+
+```bash
+uv run --with pytest pytest scripts/tests -q
+```
+
+`--with pytest` を省くと `Failed to spawn: pytest` で終わります。リポジトリの根に uv の
+対象プロジェクト（`pyproject.toml`）が無く、`pytest` が環境にも入っていないためです。
+`plugins/ndf/skills/*/tests/` の既存のテストも同じ形で実行します。
 
 ローカル hook は任意で導入できます。
 
