@@ -589,3 +589,61 @@ def test_separators_stop_the_operand_scan(command: str, expected: list[str]) -> 
     targets, rc = extract(command)
     assert rc == 0, command
     assert targets == expected, command
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # パイプの各区画は部分シェルで動く。`cd` の効果は後続へ残らない。
+        ("cd .worktrees/x | sed -i 's/a/b/' README.md", "/base/README.md"),
+        ("cd .worktrees/x |& sed -i 's/a/b/' README.md", "/base/README.md"),
+        # 背景実行も同じで、`cd` は現在のシェルの位置を変えない。
+        ("cd .worktrees/x & sed -i 's/a/b/' README.md", "/base/README.md"),
+        # `&&` は同じシェルで続くため、効果は残る。
+        ("cd .worktrees/x && cd y | sed -i 's/a/b/' README.md", "/base/.worktrees/x/README.md"),
+        # 部分シェルの中の `cd` は、パイプが終わった後にも残らない。
+        ("cd .worktrees/x | cat\nsed -i 's/a/b/' README.md", "/base/README.md"),
+        # 背景実行にまとめられた `cd` も、後続の位置を変えない。
+        ("cd .worktrees/x && cd y & sed -i 's/a/b/' README.md", "/base/README.md"),
+    ],
+)
+def test_cd_does_not_reach_past_a_pipe_or_background(command: str, expected: str) -> None:
+    """`cd` の効果を引き継ぐのは `;` / 改行 / `&&` / `||` の後だけである。
+
+    引き継いでしまうと、主ディレクトリへの書き込みを作業ツリー側と取り違えて
+    案内を出さない（検知漏れになる）。
+    """
+    targets, rc = extract_at(command, "/base")
+    assert rc == 0, command
+    assert targets == [expected], command
+
+
+def test_a_tilde_cd_suppresses_relative_targets() -> None:
+    """チルダ展開の結果は字面から決められない。相対パスの書き込み先を出さない。"""
+    targets, rc = extract_at("cd ~/dir\nsed -i 's/a/b/' README.md", "/base")
+    assert rc == 1, targets
+    assert targets == []
+
+
+def test_a_tilde_cd_still_reports_absolute_targets() -> None:
+    """移動先が不明でも、絶対パスの書き込み先は位置が決まる。"""
+    targets, rc = extract_at("cd ~/dir\nsed -i 's/a/b/' /base/README.md", "/base")
+    assert rc == 0, targets
+    assert targets == ["/base/README.md"]
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # `|&` は標準エラー出力も渡すパイプで、これも区切りである。
+        ("cp a.txt b.txt |& echo c", ["b.txt"]),
+        ("mv a.txt b.txt |& echo c", ["b.txt"]),
+        ("sed -i 's/a/b/' x.md |& echo hi", ["x.md"]),
+        ("echo hi | tee x.md |& echo done", ["x.md"]),
+        ("cp a.txt b.txt |& echo c > d.txt", ["b.txt", "d.txt"]),
+    ],
+)
+def test_a_stderr_pipe_stops_the_operand_scan(command: str, expected: list[str]) -> None:
+    targets, rc = extract(command)
+    assert rc == 0, command
+    assert targets == expected, command

@@ -510,10 +510,11 @@ _wt_strip_heredocs() {
 # コマンドの区切りにあたる語かを判定する。被演算子の走査は、ここで止める。
 # 跨いで走査すると、次のコマンドの語を書き込み先と取り違える
 # （`cp a b || echo c` の `c` を複製先として拾うなど）。
+# `|&` は標準エラー出力も渡すパイプで、これも区切りにあたる。
 # `;` と改行は字句解析が `__WT_SEP__` へ置き換えるため、この一覧には現れない。
 _wt_is_separator() {
   case "$1" in
-    __WT_*|"|"|"&&"|"||"|"&") return 0 ;;
+    __WT_*|"|"|"|&"|"&&"|"||"|"&") return 0 ;;
   esac
   return 1
 }
@@ -547,6 +548,12 @@ wt_extract_write_target() {
 
   # `cd` を追った現在地と、それが確かかどうか。起点を渡されない限り使わない。
   local cwd="$base" cwd_known=1
+  # `cd` の効果が及ぶ範囲は、それが動くシェルの中に限られる。パイプの各区画と
+  # 背景実行は部分シェルで動くため、後続のコマンドは移動前の位置のままになる。
+  # 引き継いでしまうと、主ディレクトリへの書き込みを作業ツリー側と取り違えて
+  # 案内を出さない。区画の入口の位置を 2 段で控え、`|` / `|&` ではパイプの入口へ、
+  # `&` では処理のまとまりの入口へ戻す。
+  local pipe_cwd="$base" pipe_known=1 job_cwd="$base" job_known=1
 
   # ヒアドキュメントの本文を先に落とす。落とす前に印を挟むと、本文の中の `>` が
   # 出力の付け替えとして数えられる。
@@ -585,10 +592,32 @@ wt_extract_write_target() {
     if [ "$i" = 0 ]; then
       at_cmd=1
     else
-      case "$prev" in __WT_SEP__|"&&"|"||"|"|"|"&") at_cmd=1 ;; esac
+      case "$prev" in __WT_SEP__|"&&"|"||"|"|"|"|&"|"&") at_cmd=1 ;; esac
     fi
     prev="$w"
     case "$w" in
+      "|"|"|&")
+        # パイプの各区画は部分シェルで動く。入口の位置へ戻す。
+        cwd="$pipe_cwd"; cwd_known="$pipe_known"
+        continue
+        ;;
+      "&")
+        # 背景実行は処理のまとまりごと部分シェルへ入る。入口の位置へ戻す。
+        cwd="$job_cwd"; cwd_known="$job_known"
+        pipe_cwd="$cwd"; pipe_known="$cwd_known"
+        continue
+        ;;
+      "&&"|"||")
+        # 同じシェルで続く。移動の効果は残るが、パイプの入口は引き直す。
+        pipe_cwd="$cwd"; pipe_known="$cwd_known"
+        continue
+        ;;
+      __WT_SEP__)
+        # `;` と改行でも同じシェルが続く。両方の入口を引き直す。
+        pipe_cwd="$cwd"; pipe_known="$cwd_known"
+        job_cwd="$cwd"; job_known="$cwd_known"
+        continue
+        ;;
       cd)
         [ "$at_cmd" = 1 ] && [ -n "$base" ] || continue
         dest=""
@@ -600,15 +629,13 @@ wt_extract_write_target() {
             *) dest=${words[k]}; break ;;
           esac
         done
-        if [ -z "$dest" ] || [ "$dest" != "${dest//\$/}" ]; then
-          # 引数なし (ホーム)・`cd -`・展開前の変数。現在地を決められない。
-          cwd_known=0
-        else
-          case "$dest" in
-            /*) cwd=$(wt_normalize_path "$dest" "/"); cwd_known=1 ;;
-            *) [ "$cwd_known" = 1 ] && cwd=$(wt_normalize_path "$dest" "$cwd") ;;
-          esac
-        fi
+        case "$dest" in
+          # 引数なし (ホーム)・`cd -`・展開前の変数・チルダ展開。いずれも
+          # コマンドの字面からは移動先を決められない。
+          ""|*'$'*|"~"*) cwd_known=0 ;;
+          /*) cwd=$(wt_normalize_path "$dest" "/"); cwd_known=1 ;;
+          *) [ "$cwd_known" = 1 ] && cwd=$(wt_normalize_path "$dest" "$cwd") ;;
+        esac
         ;;
       __WT_REDIR__|__WT_APPEND__)
         _emit "${words[i + 1]:-}"
