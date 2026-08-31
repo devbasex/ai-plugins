@@ -153,6 +153,6 @@ E   ImportError: cannot import name 'validate'   ← 期待と違う。先にこ
 - [references/testing-levels.md](references/testing-levels.md) — 単体・結合・契約・端から端までの使い分け
 - `/ndf:out-of-scope` — 対象の外で見つけた課題の起票
 
-進行を盤面へ記録する場合は `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage 実装` を
-実行する（`.ndf/projects.json` が無いリポジトリでは何も起きない。詳細は [references/projects-tracking.md](../development-workflow/references/projects-tracking.md)）。
+進行を盤面へ記録する場合は、[references/projects-tracking.md](../development-workflow/references/projects-tracking.md) の「`$SCRIPTS` を決める」でパスを解決してから
+`bash "$SCRIPTS/projects-sync.sh" <issue番号> stage 実装` を実行する（`.ndf/projects.json` が無いリポジトリでは何も起きない）。
 
