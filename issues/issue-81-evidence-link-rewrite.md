@@ -289,3 +289,72 @@ $ grep -rn "rewrite_links\|build_gdoc_with_drive_links" --include=* . | grep -v 
 - [ ] `uv run pytest plugins/playwright-kit/skills/playwright-kit-ops/tests -q` が終了コード 0 で終わる
 - [ ] `bash scripts/build-runtime-plugins.sh --check` が終了コード 0 で終わる
 - [ ] `claude plugin validate` が通る
+
+---
+
+# 完了判定
+
+## 検証結果
+
+| 段階 | コマンド | 対象範囲 | 実行時刻 | 結果 |
+| --- | --- | --- | --- | --- |
+| 限定的な検証 | `uv run pytest tests/test_build_gdoc_with_drive_links.py tests/test_pytest_report.py -q` | 置換と報告書生成 | 2026-08-31 02:49:30 | 28 passed / exit=0 |
+| 全体テスト | `uv run pytest tests` | `playwright-kit-ops` の全テスト | 2026-08-31 02:49:34 | 176 passed / exit=0 |
+| 構文検査 | `uv run python -m py_compile scripts/build_gdoc_with_drive_links.py tests/test_build_gdoc_with_drive_links.py` | 変更した 2 ファイル | 2026-08-31 02:49:45 | exit=0 |
+| 生成物の同期 | `bash scripts/build-runtime-plugins.sh --check` | リポジトリ全体 | 2026-08-31 02:49:52 | up to date / exit=0 |
+| 配布物の検査 | `bash scripts/validate-runtime-plugins.sh` | リポジトリ全体 | 2026-08-31 02:49:56 | passed / exit=0 |
+| 配布物の検査 | `claude plugin validate .` | リポジトリ全体 | 2026-08-31 02:50:05 | passed with warnings / exit=0 |
+
+テストの実行は `plugins/playwright-kit/skills/playwright-kit-ops` を作業ディレクトリにして行う。
+リポジトリの根には `uv` の対象プロジェクトが無く、根から `uv run pytest <パス>` を実行すると
+`Failed to spawn: pytest` で終わる。この結果は変更のない clone 側でも同じである。
+根から実行する場合は `uv run --project plugins/playwright-kit/skills/playwright-kit-ops pytest
+plugins/playwright-kit/skills/playwright-kit-ops/tests -q` を使う。
+
+静的解析・型検査・カバレッジの設定は `pyproject.toml` にも `.ruff.toml` / `ruff.toml` /
+`setup.cfg` / `.flake8` にも無い。閾値の記載が無いため、これらの判定は行わない。
+
+## 受け入れ条件ごとの合否
+
+- [x] 報告書が出すコード表記の証跡が、一覧に載っていれば共有ストレージの URL を持つリンク記法へ書き換わる
+      → `TestReportRegression::test_code_span_evidence_is_rewritten` / `::test_code_span_becomes_a_link_keeping_the_original_path`
+- [x] ケースのディレクトリ名が `TC-` で始まらない場合も書き換わる
+      → `TestReportRegression::test_case_dir_not_starting_with_tc_is_rewritten`
+- [x] 既存のリンク記法の証跡が、引き続き共有ストレージの URL へ書き換わる
+      → `TestExistingLinkNotation::test_relative_link_is_rewritten`
+- [x] 報告書が書く位置が実行環境の根からの絶対位置でも、一覧のキーと末尾がそろえば書き換わる
+      → `TestReportRegression::test_absolute_path_matches_listing_key_by_suffix` / `TestSuffixMatching::test_longest_matching_key_wins` / `::test_partial_component_is_not_matched`
+- [x] 一覧に無い文字列は書き換わらない
+      → `TestReportRegression::test_nodeid_code_span_is_left_untouched` / `::test_report_is_unchanged_when_listing_is_empty`
+- [x] コード表記の中の外部の URL は書き換わらない
+      → `TestNonEvidenceIsPreserved::test_external_url_in_code_span_is_left_untouched` / `::test_external_url_in_link_notation_is_left_untouched`
+- [x] 画面の画像は画像を直接表示する URL へ、それ以外は閲覧用の URL へ書き換わる
+      → `TestExistingLinkNotation::test_png_uses_the_direct_image_url` / `test_relative_link_is_rewritten`
+- [x] 置換の件数が実行結果の標準出力に出る
+      → `rewrite_links` が件数を返し、`main` が `Replaced links: <件数> matches` を出す。件数は上記の各検査が確認する
+- [x] 報告書を作る処理の出力が変わっていない
+      → `tests/test_pytest_report.py` の 15 件が通る。`playwright_kit/pytest_report.py` に差分は無い
+- [x] 回帰検査は、報告書を作る処理を実際に呼んで得た文字列を入力にしている
+      → `_report_markdown()` が `render_markdown` を呼ぶ
+- [x] 回帰検査は共有ストレージへ問い合わせず、一覧を引数で受け取る
+      → 検査は `rewrite_links(md, mapping)` だけを呼ぶ。`_drive_auth` と共有ストレージの読み込みは `main` の中へ移した
+- [x] テストが終了コード 0 で終わる
+      → 176 passed / exit=0
+
+受け入れ条件: 12/12 満たす
+
+## 未検証の項目
+
+- 共有ストレージへ実接続して文書を作る経路。資格情報がこの作業環境に無いため実行していない。
+  `release-verification` で、資格情報を持つ利用者が配布後に確認する
+
+## 既存の失敗
+
+- なし
+
+## 範囲外と判断したもの
+
+- 証跡を共有ストレージへ保管する手順（`plugins/playwright-kit/skills/playwright-evidence/SKILL.md`）が、
+  置換の対象を `TC-` 始まりのリンク記法に限って説明している → #181 として起票した
+- リポジトリの根から `uv run pytest <パス>` が動かない件は起票しない。リポジトリ側の文書に
+  この書き方は無く、直す対象がリポジトリに存在しないため
