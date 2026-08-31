@@ -3,9 +3,9 @@
 事前に対象ディレクトリを Drive にアップロード済みである前提。
 このスクリプトは:
   1. Drive 上の <run-id> フォルダから {相対パス: file_id} mapping を構築
-  2. report.md 中の証跡の位置を Drive URL に書き換え。対象はコード表記
-     (`位置`) とリンク記法 ([文言](位置)) の 2 つで、mapping に載っている
-     位置だけを書き換える。case ディレクトリ名は限定しない
+  2. report.md 中の証跡の位置を Drive URL に書き換え。対象は証跡フィールド
+     (- trace: `位置`) とリンク記法 ([文言](位置)) の 2 つで、mapping に
+     載っている位置だけを書き換える。case ディレクトリ名は限定しない
   3. text/markdown としてアップロードし mimeType=Google Docs 指定で自動変換
 """
 
@@ -22,14 +22,22 @@ FOLDER_MIME = "application/vnd.google-apps.folder"
 DOC_MIME = "application/vnd.google-apps.document"
 # 証跡の位置は report.md に 2 通りの書き方で載る。以下の `位置` `文言` は、
 # その場所に入る文字列を指す差し込み語であって、書き方の一部ではない。
-#   コード表記 `位置`  … pytest_report.py が出す形 (- trace: `位置`)
-#   リンク記法 [文言](位置)
-# 前後にバッククォートが続く並び (``x``) は、置換すると入れ子のリンクになって
-# 読めなくなるため対象にしない。
+#   証跡フィールド … pytest_report.py が出す行 (- trace: `位置` / - HAR: `位置`)
+#   リンク記法     … [文言](位置)
+# 候補はこの 2 つに限る。証跡フィールド以外のコード表記と、リンク記法ではない
+# 丸括弧の中身は拾わない。FAIL の詳細に載る失敗メッセージはテストが出した文字列を
+# そのまま囲うため、その中のコード片やコード例 (`case-a/trace.zip`,
+# open(case-a/trace.zip)) が mapping のキーと一致すると、証跡ではない本文まで
+# 書き換わり、失敗の内容が読めなくなる。
+# 証跡フィールドの後ろにバッククォートが続く並び (``x``) は、置換すると入れ子の
+# リンクになって読めなくなるため対象にしない。
 # リンク先を山括弧で囲む書き方 ([文言](<位置>)) は対象にしない。報告書を作る
 # playwright_kit/pytest_report.py はこの書き方を出さない。囲まれた候補は
 # mapping のキーと一致しないため、置換されず原文のまま残る。
-EVIDENCE_PATTERN = re.compile(r"(?<!`)`([^`\n]+)`(?!`)|\(([^()\s]+)\)")
+EVIDENCE_PATTERN = re.compile(
+    r"(?m)^(?P<field>- (?:trace|HAR): )`(?P<code>[^`\n]+)`(?!`)"
+    r"|(?<=\]\()(?P<target>[^()\s]+)(?=\))"
+)
 
 
 def list_folder_files(service, folder_id: str, prefix: str = "") -> dict[str, str]:
@@ -99,15 +107,16 @@ def _lookup(candidate: str, mapping: dict[str, str]) -> tuple[str, str] | None:
 def rewrite_links(md: str, mapping: dict[str, str]) -> tuple[str, int]:
     """証跡の位置を Drive URL に置換し、(新md, 置換件数) を返す。
 
-    mapping に載っている位置だけを書き換える。載っていない文字列は原文のまま残す。
-    コード表記はリンク記法へ変え、リンクの文言には report.md が書いた位置を使う。
+    証跡フィールドとリンク記法だけを候補にし、そのうち mapping に載っている位置を
+    書き換える。載っていない文字列は原文のまま残す。証跡フィールドはリンク記法へ
+    変え、リンクの文言には report.md が書いた位置を使う。
     """
     replaced = 0
 
     def rep(m: re.Match[str]) -> str:
         nonlocal replaced
-        code_span, link_target = m.group(1), m.group(2)
-        candidate = code_span if code_span is not None else link_target
+        code_span = m.group("code")
+        candidate = code_span if code_span is not None else m.group("target")
         hit = _lookup(candidate, mapping)
         if hit is None:
             return m.group(0)  # 未マップは原文のまま
@@ -115,8 +124,8 @@ def rewrite_links(md: str, mapping: dict[str, str]) -> tuple[str, int]:
         replaced += 1
         url = _drive_url_for(rel, fid)
         if code_span is not None:
-            return f"[{code_span}]({url})"
-        return f"({url})"
+            return f"{m.group('field')}[{code_span}]({url})"
+        return url
 
     return EVIDENCE_PATTERN.sub(rep, md), replaced
 

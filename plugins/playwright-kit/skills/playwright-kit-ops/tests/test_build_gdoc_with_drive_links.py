@@ -27,7 +27,9 @@ _STARTED = _dt.datetime(2026, 4, 26, 12, 0, 0)
 _FINISHED = _dt.datetime(2026, 4, 26, 12, 0, 5)
 
 
-def _report_markdown(case_dir: str = ABS_CASE_DIR) -> str:
+def _report_markdown(
+    case_dir: str = ABS_CASE_DIR, error_message: str = "AssertionError: boom"
+) -> str:
     """report.md の実出力を得る。証跡 2 件 (trace / HAR) を持つ FAIL 1 件。"""
     return render_markdown(
         [
@@ -36,7 +38,7 @@ def _report_markdown(case_dir: str = ABS_CASE_DIR) -> str:
                 name="test_ok",
                 outcome="failed",
                 duration_s=1.0,
-                error_message="AssertionError: boom",
+                error_message=error_message,
                 trace_path=f"{case_dir}/trace.zip",
                 har_path=f"{case_dir}/request.har",
             )
@@ -163,3 +165,38 @@ class TestSuffixMatching:
         out, replaced = rewrite_links(md, {"case-a/trace.zip": "FID"})
         assert replaced == 0
         assert out == md
+
+
+class TestFailureMessageIsPreserved:
+    """FAIL の詳細に載る失敗メッセージは書き換えない。
+
+    メッセージはテストが出した文字列をそのまま載せる欄で、証跡フィールドではない。
+    中のコード片やコード例が一覧のキーと一致しても置換すると、失敗の内容が読めなく
+    なる (コードブロックの中ではリンク記法がそのまま文字として出る)。
+    """
+
+    # 証跡 2 件に加えて、失敗メッセージが触れる別のケースの証跡も一覧に載っている
+    MAPPING = {
+        f"{CASE_DIR}/trace.zip": "TRACEID",
+        f"{CASE_DIR}/request.har": "HARID",
+        "case-a/trace.zip": "OTHERID",
+    }
+
+    def test_code_span_in_failure_message_is_left_untouched(self):
+        message = "AssertionError: `case-a/trace.zip` が見つからない"
+        out, replaced = rewrite_links(
+            _report_markdown(error_message=message), self.MAPPING
+        )
+        assert replaced == 2  # 証跡フィールドの trace / HAR だけ
+        assert message in out
+        assert "OTHERID" not in out
+
+    def test_parenthesized_path_in_failure_message_is_left_untouched(self):
+        """リンク記法ではない丸括弧の中身は候補にしない。"""
+        message = "AssertionError: open(case-a/trace.zip) failed"
+        out, replaced = rewrite_links(
+            _report_markdown(error_message=message), self.MAPPING
+        )
+        assert replaced == 2
+        assert message in out
+        assert "OTHERID" not in out

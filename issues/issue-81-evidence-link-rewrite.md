@@ -14,6 +14,7 @@
 | 一覧 | 共有ストレージの実行単位フォルダを再帰的に走査して得た、ファイル位置と識別子の対応 |
 | ケースのディレクトリ | 1 つのテスト関数の証跡だけを入れる、実行単位フォルダの直下のディレクトリ |
 | コード表記 | バッククォートで囲んだ書き方 |
+| 証跡フィールド | 報告書が証跡の位置だけを書く行（`- trace: ` / `- HAR: ` で始まる行） |
 | リンク記法 | `[文言](位置)` の書き方 |
 
 ## 依頼（原文）
@@ -128,6 +129,7 @@ print(re.compile(r"\(\.?\/?(TC-[\w-]+/[^\)\s]+)\)").findall(md))'
 - [ ] 既存のリンク記法の証跡が、引き続き共有ストレージの URL へ書き換わる
 - [ ] 報告書が書く位置が実行環境の根からの絶対位置でも、一覧のキーと末尾がそろえば書き換わる
 - [ ] 一覧に無い文字列は書き換わらない（テスト識別子のコード表記が原文のまま残る）
+- [ ] 証跡フィールドとリンク記法の外は書き換わらない（FAIL の詳細の失敗メッセージが原文のまま残る）
 - [ ] コード表記の中の外部の URL は書き換わらない
 - [ ] 画面の画像は画像を直接表示する URL へ、それ以外は閲覧用の URL へ書き換わる
 - [ ] 置換の件数が実行結果の標準出力に出る
@@ -285,7 +287,7 @@ $ grep -rn "rewrite_links\|build_gdoc_with_drive_links" --include=* . | grep -v 
 
 ## 完了の定義
 
-- [ ] 受け入れ条件 12 件をすべて満たし、条件ごとに検証手段と結果が対応している
+- [ ] 受け入れ条件 13 件をすべて満たし、条件ごとに検証手段と結果が対応している
 - [ ] `uv run pytest plugins/playwright-kit/skills/playwright-kit-ops/tests -q` が終了コード 0 で終わる
 - [ ] `bash scripts/build-runtime-plugins.sh --check` が終了コード 0 で終わる
 - [ ] `claude plugin validate` が通る
@@ -304,6 +306,7 @@ $ grep -rn "rewrite_links\|build_gdoc_with_drive_links" --include=* . | grep -v 
 | 生成物の同期 | `bash scripts/build-runtime-plugins.sh --check` | リポジトリ全体 | 2026-08-31 02:49:52 | up to date / exit=0 |
 | 配布物の検査 | `bash scripts/validate-runtime-plugins.sh` | リポジトリ全体 | 2026-08-31 02:49:56 | passed / exit=0 |
 | 配布物の検査 | `claude plugin validate .` | リポジトリ全体 | 2026-08-31 02:50:05 | passed with warnings / exit=0 |
+| 全体テスト（レビュー反映後） | `uv run pytest tests` | `playwright-kit-ops` の全テスト | 2026-08-31 03:12 | 179 collected / exit=0 |
 
 テストの実行は `plugins/playwright-kit/skills/playwright-kit-ops` を作業ディレクトリにして行う。
 リポジトリの根には `uv` の対象プロジェクトが無く、根から `uv run pytest <パス>` を実行すると
@@ -326,6 +329,8 @@ plugins/playwright-kit/skills/playwright-kit-ops/tests -q` を使う。
       → `TestReportRegression::test_absolute_path_matches_listing_key_by_suffix` / `TestSuffixMatching::test_longest_matching_key_wins` / `::test_partial_component_is_not_matched`
 - [x] 一覧に無い文字列は書き換わらない
       → `TestReportRegression::test_nodeid_code_span_is_left_untouched` / `::test_report_is_unchanged_when_listing_is_empty`
+- [x] 証跡フィールドとリンク記法の外は書き換わらない
+      → `TestFailureMessageIsPreserved::test_code_span_in_failure_message_is_left_untouched` / `::test_parenthesized_path_in_failure_message_is_left_untouched`
 - [x] コード表記の中の外部の URL は書き換わらない
       → `TestNonEvidenceIsPreserved::test_external_url_in_code_span_is_left_untouched` / `::test_external_url_in_link_notation_is_left_untouched`
 - [x] 画面の画像は画像を直接表示する URL へ、それ以外は閲覧用の URL へ書き換わる
@@ -341,7 +346,7 @@ plugins/playwright-kit/skills/playwright-kit-ops/tests -q` を使う。
 - [x] テストが終了コード 0 で終わる
       → 176 passed / exit=0
 
-受け入れ条件: 12/12 満たす
+受け入れ条件: 13/13 満たす
 
 ## 未検証の項目
 
