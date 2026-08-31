@@ -848,6 +848,74 @@ def test_a_subshell_does_not_move_the_parent(command: str, expected: str) -> Non
 @pytest.mark.parametrize(
     ("command", "expected"),
     [
+        # 部分シェルの中の `;` や改行の後ろも命令の位置だが、そこにある `cd` も
+        # 親のシェルの位置は変えない。
+        ("( true; cd .worktrees/x ); sed -i 's/a/b/' README.md", "/base/README.md"),
+        ("( cd .worktrees/x; cd y ); sed -i 's/a/b/' README.md", "/base/README.md"),
+        ("( cd a\ncd .worktrees/x ); echo hi > README.md", "/base/README.md"),
+        # 外側で移動していれば、その位置は保つ。
+        ("cd .worktrees/x; ( true; cd y ); sed -i 's/a/b/' README.md",
+         "/base/.worktrees/x/README.md"),
+        # 入れ子でも同じ。
+        ("( ( true; cd .worktrees/x ) ); sed -i 's/a/b/' README.md", "/base/README.md"),
+        # 部分シェルの中の相対パスは、外側の位置で解決する（案内は多めに出る）。
+        ("( true; cd .worktrees/x; sed -i 's/a/b/' README.md )", "/base/README.md"),
+        # 空白を挟まない形では `(` が語として切れない。移動先の語が `)` で
+        # 終わることを手がかりに、この `cd` も親の位置を変えないものとして扱う。
+        ("(cd .worktrees/x; cd y); sed -i 's/a/b/' README.md", "/base/README.md"),
+        ("(cd .worktrees/x); sed -i 's/a/b/' README.md", "/base/README.md"),
+    ],
+)
+def test_a_subshell_hides_every_cd_inside_it(command: str, expected: str) -> None:
+    """部分シェルの中の `cd` は、何番目であっても親のシェルへ漏らさない。
+
+    漏らすと、抜けた後の主ディレクトリへの書き込みを作業ツリー側と取り違えて
+    案内を出さない（検知漏れになる）。
+    """
+    targets, rc = extract_at(command, "/base")
+    assert rc == 0, (command, targets)
+    assert targets == [expected], command
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # `&&` の左辺が `cd` でないとき、右辺の `cd` が走ったかは左辺の成否で決まる。
+        # リストを抜けた後の現在地も決められない。
+        "true && cd .worktrees/x; sed -i 's/a/b/' README.md",
+        "true && cd .worktrees/x\nsed -i 's/a/b/' README.md",
+        "cd a && true && cd .worktrees/x; sed -i 's/a/b/' README.md",
+    ],
+)
+def test_a_conditional_cd_after_and_leaves_the_position_undecidable(command: str) -> None:
+    """`&&` を跨いだ `cd` の後は、相対パスの書き込み先を出さない。"""
+    targets, rc = extract_at(command, "/base")
+    assert rc == 1, (command, targets)
+    assert targets == [], command
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # `cd` 自身が `&&` の左辺なら、走ったものとして扱う（既定の前提）。
+        ("cd .worktrees/x && cd y; sed -i 's/a/b/' README.md",
+         "/base/.worktrees/x/y/README.md"),
+        ("cd .worktrees/x && cd y\nsed -i 's/a/b/' README.md",
+         "/base/.worktrees/x/y/README.md"),
+        # 位置が決められなくても、絶対パスの書き込み先は変わらない。
+        ("true && cd .worktrees/x; sed -i 's/a/b/' /base/README.md", "/base/README.md"),
+    ],
+)
+def test_a_cd_on_the_left_of_and_still_carries(command: str, expected: str) -> None:
+    """`&&` の左辺の `cd` は走ったものとして扱う。抑止するのは右辺の `cd` だけ。"""
+    targets, rc = extract_at(command, "/base")
+    assert rc == 0, (command, targets)
+    assert targets == [expected], command
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
         # `)` は複合コマンドの終わりで、被演算子の走査はここで止まる。
         ("( sed -i 's/a/b/' x.md )", ["x.md"]),
         ("( cp a.txt b.txt )", ["b.txt"]),
