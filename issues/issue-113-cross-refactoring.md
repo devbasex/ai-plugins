@@ -1,10 +1,33 @@
-# cross-refactoring: 進行の設計見直しと不具合 3 件の修正
+# issue #113: cross-refactoring — 進行の設計見直しと不具合 3 件の修正
+
+[issue #113](https://github.com/devbasex/ai-plugins/issues/113) の現行の実装計画である。
+issue #113 に紐づく作業中の文書はこの 1 ファイルだけで、設計の初版・実機試行の記録・
+リリース済みの不具合修正はすべて [old/](old/) にある。
 
 ## 関連リンク
 
-- [issue-113-cross-refactoring-7th-trial-report.md](issue-113-cross-refactoring-7th-trial-report.md) — 実測の出どころ（7 回目の実機試行）
+- [7 回目の実機試行の記録](old/issue-113-cross-refactoring-7th-trial-report.md) — 本計画の実測の出どころ
 - [issue-158-llm-ensemble-for-agentic-development.md](issue-158-llm-ensemble-for-agentic-development.md) — アンサンブル利用の優位性に関する文献調査と実測
+- [不具合修正の引継ぎ](old/issue-113-cross-refactoring-fix-handoff.md) — v8.5.4 時点の状態と編集対象
 - 対象 Skill: `plugins/ndf/skills/cross-refactoring/`
+
+## 経緯
+
+`/ndf:cross-refactoring` は v8.1.0 で追加した。以降は実機試行と不具合修正を繰り返しており、
+本計画はその 7 回目の実測を材料に、進行の骨格そのものを見直すものである。
+
+| 回 | 記録 | 到達点 |
+| --- | --- | --- |
+| 1 | [trial-report](old/issue-113-cross-refactoring-trial-report.md) | 適用フェーズまで。不具合 9 件 |
+| 2 | [retrial](old/issue-113-cross-refactoring-retrial.md) | 公開の責務を進行側へ一本化 |
+| 3 | [re-retrial](old/issue-113-cross-refactoring-re-retrial.md) | 生成物の同期で停止。不具合 4 件 |
+| 4 | [4th-trial-report](old/issue-113-cross-refactoring-4th-trial-report.md) | レビューまで。収束ループが終わらない経路を発見 |
+| 5 | [5th-trial-report](old/issue-113-cross-refactoring-5th-trial-report.md) | 修正フェーズと再レビューまで。投稿の不具合 3 件 |
+| 6 | [6th-trial-report](old/issue-113-cross-refactoring-6th-trial-report.md) | 全工程を完走。新しい不具合なし |
+| 7 | [7th-trial-report](old/issue-113-cross-refactoring-7th-trial-report.md) | devbase リポジトリで完走。所要の実測と不具合 3 件（本計画の起点） |
+
+試行で見つかった不具合は v8.2.0 / v8.3.0 / v8.5.0〜v8.5.4 / v8.6.0 で対応済みで、
+版ごとの内容は `CLAUDE.md` の「NDF v9.4.0 の Skill 構成」に残している。
 
 ## モード
 

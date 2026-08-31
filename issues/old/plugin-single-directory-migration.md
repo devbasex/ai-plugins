@@ -4,7 +4,7 @@
 
 ## 関連リンク
 
-- [Runtime Plugin Distribution 仕様](../docs/specifications/runtime-plugin-distribution.md) — 現行の配布構成
+- [Runtime Plugin Distribution 仕様](../../docs/specifications/runtime-plugin-distribution.md) — 現行の配布構成
 - [Agent Plugins Specification](https://github.com/agentplugins/agent-plugins-spec) — Amazon / Cursor / Microsoft / OpenAI / Vercel が策定するプラグイン形式
 - [Kiro Agent Skills](https://kiro.dev/docs/skills/) — Kiro CLI の Skill 読み込み仕様
 

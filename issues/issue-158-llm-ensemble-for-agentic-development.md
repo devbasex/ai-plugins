@@ -5,7 +5,7 @@
 ブログ記事および論文執筆のための素材である。確定した仕様ではなく、研究テーマ、調査した
 文献、手元の実測データ、検証計画を残す。進捗は
 [issue #158](https://github.com/devbasex/ai-plugins/issues/158) で追跡する。設計へ反映した結果は
-[issue-113-cross-refactoring-round-time-and-defects.md](issue-113-cross-refactoring-round-time-and-defects.md) にある。
+[issue-113-cross-refactoring.md](issue-113-cross-refactoring.md) にある。
 
 作成日: 2026-08-29
 

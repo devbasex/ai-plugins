@@ -2,8 +2,8 @@
 
 ## 関連リンク
 
-- 棚卸台帳: [docs/specifications/ndf-skill-inventory.md](../docs/specifications/ndf-skill-inventory.md)
-- frontmatter 規約: [plugins/ndf-shared/skills/README.md](../plugins/ndf-shared/skills/README.md)
+- 棚卸台帳: [docs/specifications/ndf-skill-inventory.md](../../docs/specifications/ndf-skill-inventory.md)
+- frontmatter 規約: [plugins/ndf-shared/skills/README.md](../../plugins/ndf/skills/README.md)
 - 直前のリリース: [issues/ndf-development-skills/](ndf-development-skills/)（v6.1.0 で Skill 29 → 34）
 
 ## モード
@@ -32,7 +32,7 @@
 - 前提 2: `Triggers:` の列挙を廃止しても、用途文にトリガ語を残せば Codex / Kiro の暗黙起動は
   維持できる。**これは未検証**であり、Task 1 で実測してから全 Skill へ広げる
 - 前提 3: `allowed-tools` は Agent Skills 仕様で experimental。Kiro は frontmatter 一覧に
-  載せておらず解釈は保証されない（[規約](../plugins/ndf-shared/skills/README.md)）
+  載せておらず解釈は保証されない（[規約](../../plugins/ndf/skills/README.md)）
 
 ## 現状の実測（2026-08-13、v6.1.0 時点）
 

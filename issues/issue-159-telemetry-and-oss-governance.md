@@ -4,7 +4,7 @@
 
 - [issue #159](https://github.com/devbasex/ai-plugins/issues/159) — この計画の追跡先
 - [issue-158-llm-ensemble-for-agentic-development.md](issue-158-llm-ensemble-for-agentic-development.md) — 集めたデータの用途
-- [issue-113-cross-refactoring-round-time-and-defects.md](issue-113-cross-refactoring-round-time-and-defects.md) — データの発生源となる Skill の改修
+- [issue-113-cross-refactoring.md](issue-113-cross-refactoring.md) — データの発生源となる Skill の改修
 
 ## モード
 
