@@ -198,8 +198,12 @@ bash scripts/validate-runtime-plugins.sh
 `scripts/` 自体を変更した場合は、その検査のテストも実行します。
 
 ```bash
-uv run pytest scripts/tests -q
+uv run --with pytest pytest scripts/tests -q
 ```
+
+`--with pytest` を省くと `Failed to spawn: pytest` で終わります。リポジトリの根に uv の
+対象プロジェクト（`pyproject.toml`）が無く、`pytest` が環境にも入っていないためです。
+`plugins/ndf/skills/*/tests/` の既存のテストも同じ形で実行します。
 
 ローカル hook は任意で導入できます。
 

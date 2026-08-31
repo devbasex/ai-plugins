@@ -64,7 +64,7 @@
 ## 受け入れ条件
 
 記号は指示書の表に合わせる。検証手段は `scripts/tests/` のテスト名で示す
-（`uv run pytest scripts/tests -q` / 31 passed / exit=0）。
+（`uv run --with pytest pytest scripts/tests -q` / 31 passed / exit=0）。
 
 - [x] A: `README.md` の「Claude Code 向け core N 個 / Kiro 向け core N 個 / Codex 向け core N 個」
       が、対応するマニフェストの行数と食い違うと検査が失敗する
@@ -99,7 +99,7 @@
 - [x] 現在のリポジトリの内容では `bash scripts/validate-runtime-plugins.sh` が終了コード 0 で
       終わる → 実行して exit=0
 - [x] `claude plugin validate` が通る → `claude plugin validate plugins/ndf` が exit=0
-- [x] 上記のすべてに対応する自動テストが `scripts/tests/` にあり、`uv run pytest scripts/tests -q`
+- [x] 上記のすべてに対応する自動テストが `scripts/tests/` にあり、`uv run --with pytest pytest scripts/tests -q`
       が通る → 31 passed / exit=0
 - [x] `docs/plugin-development-guide.md` のバージョン管理の節に、更新案内の本文を読み直す項目が
       加わっている → 手順 3 として追加
@@ -225,7 +225,7 @@
 ## 完了の定義
 
 - [ ] 受け入れ条件をすべて満たし、条件ごとに検証手段と結果が対応している
-- [ ] `uv run pytest scripts/tests -q` が通る
+- [ ] `uv run --with pytest pytest scripts/tests -q` が通る
 - [ ] `bash scripts/validate-runtime-plugins.sh` が終了コード 0 で終わる
 - [ ] `claude plugin validate` が通る
 - [ ] 指示書の検証手順（実物を崩して戻す）を実行し、出力を Pull Request 本文へ残した
