@@ -214,8 +214,22 @@ Skill を 3 個増やすと、各ランタイムの初期一覧に載る `descri
 | Codex | `codex plugin marketplace upgrade ai-plugins` → `codex plugin list` | 2026-08-31 08:24 | 合格 / 9.4.0 |
 | Kiro | `bash plugins/ndf/dev.kiro/install.sh --project <検証用> --yes` | 2026-08-31 08:23 | 合格 / 9.4.0・Skill 29 + steering 1 |
 
-受け入れ条件は、開発の作業ツリーではなく導入済みの
-`~/.claude/plugins/cache/ai-plugins/ndf/9.4.0` を対象に確かめた。
+受け入れ条件は、開発の作業ツリーではなく導入済みの配布物を対象に確かめた。確かめた範囲は
+ランタイムごとに違う。条件 1〜10 と 15 のすべてを確かめたのは Claude Code の導入物で、
+Codex と Kiro では版と 3 Skill が届いていることを確かめた。
+
+| ランタイム | 確認の対象パス | 確かめたこと |
+| --- | --- | --- |
+| Claude Code | `~/.claude/plugins/cache/ai-plugins/ndf/9.4.0` | 受け入れ条件 1〜10 と 15 のすべて（下の表のとおり） |
+| Codex | `~/.codex/.tmp/marketplaces/ai-plugins/plugins/ndf` | `plugin.json` の版が 9.4.0 であること。3 Skill（`release-verification` / `retrospective` / `out-of-scope`）の `SKILL.md` が存在すること。`codex plugin list` が `installed, enabled 9.4.0` を返すこと |
+| Kiro | 検証用プロジェクトへ `install.sh --project <検証用ディレクトリ> --yes` で生成した `.kiro/skills/` と `.kiro/steering/` | 導入が版 9.4.0 で完了し、Skill 29 個が生成され、3 Skill がすべて存在すること。`kiro-skills.txt` は 30 行だが、`ndf-policies` は `.kiro/steering/ndf-policies.md` へ移る設計のため 29 + 1 で一致すること |
+
+Kiro の検証用ディレクトリは一時領域に作ったもので、すでに残っていない。追試する場合は、
+任意の空ディレクトリに対して同じコマンドを実行する。
+
+次の表は、Claude Code の導入物（`~/.claude/plugins/cache/ai-plugins/ndf/9.4.0`）に対して
+確かめた結果である。条件 11〜14 だけは、導入物ではなく開発の作業ツリーで検査スクリプトと
+テストを実行した結果を指す。
 
 | 受け入れ条件 | 実行したこと | 実行時刻 | 結果 |
 | --- | --- | --- | --- |
