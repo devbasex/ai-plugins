@@ -64,8 +64,9 @@ Pull Request が最後かどうかを判断できない。
 比較の起点は**前のまとまりを配布した時点**である。次の順で決める。
 
 ```bash
-# 版のタグを打つ運用なら、直前のタグが起点になる
-BASE=$(git describe --tags --abbrev=0 2>/dev/null)
+# 版のタグを打つ運用なら、直前のタグが起点になる。--match には対象の版のタグだけに
+# 当たる形を渡す（1 つのリポジトリで複数のプラグインへ別々にタグを打つ運用があるため）
+BASE=$(git describe --tags --abbrev=0 --match 'ndf-v*' 2>/dev/null)
 
 # タグが無いなら、いま入っている版数を書き込んだコミットが起点になる
 CURRENT=$(python3 -c "import json;print(json.load(open('plugins/ndf/.claude-plugin/plugin.json'))['version'])")
@@ -77,9 +78,13 @@ CURRENT=$(python3 -c "import json;print(json.load(open('plugins/ndf/.claude-plug
 git diff --stat "$BASE"..HEAD -- plugins/ | tail -1
 ```
 
-版数を持つファイルと配布物の置き場所はリポジトリごとに違う。上の
-`plugins/ndf/.claude-plugin/plugin.json`（版数）と `plugins/`（配布物）は、対象の
-リポジトリのものへ読み替える。
+版数を持つファイルと配布物の置き場所、タグの付け方はリポジトリごとに違う。上の
+`plugins/ndf/.claude-plugin/plugin.json`（版数）と `plugins/`（配布物）と `ndf-v*`
+（タグ）は、対象のリポジトリのものへ読み替える。
+
+**`--match` を省いて直前のタグを採らない。** 1 つのリポジトリで複数のプラグインへ別々に
+タグを打つ運用では、対象外のプラグインのタグが直前になることがある。そのタグを起点にすると、
+それより前にある対象の差分が比較から消え、配布が要るのに不要と判定する。
 
 **`BASE` が空のままなら、起点を推測せず運用者に確認する。** 版数を書き込んだコミットが
 見つからない場合と、まとまりの範囲が履歴から読み取れない場合がこれにあたる。誤った起点で
@@ -101,6 +106,11 @@ git diff --stat "$BASE"..HEAD -- plugins/ | tail -1
 
 ### 3. 版と説明文書を更新する
 
+**ブランチを切って Pull Request を通す。** 版と説明文書の更新もほかの変更と同じ扱いで、
+既定ブランチを直接編集しない。`merged` が作業ツリーを削除した直後であるため、この工程で
+改めて用意する。この Pull Request は配布の工程の一部であり、マージしてもこの工程を
+もう一度呼ばない。
+
 手順は `docs/plugin-development-guide.md` の「バージョン更新時の手順」にある。機械で
 確かめられない項目が 1 つあるため、そこだけ再掲する。
 
@@ -110,8 +120,8 @@ git diff --stat "$BASE"..HEAD -- plugins/ | tail -1
 
 ### 4. 公開する
 
-同意を得てから実行する。公開の形は対象によって変わる（版のタグ、パッケージの公開、
-既定ブランチへの反映）。
+同意を得てから実行する。**既定ブランチへの反映は、手順 3 の Pull Request をマージして
+行う。** 版のタグやパッケージの公開は、そのマージの後に進める。
 
 ### 5. 取得の手順を示す
 
@@ -120,7 +130,7 @@ git diff --stat "$BASE"..HEAD -- plugins/ | tail -1
 
 ## 完了の判定
 
-- 版が上がり、公開されている
+- 版を上げた Pull Request がマージされ、公開されている
 - 説明文書の記載が新しい版と一致している（`python3 scripts/check-doc-staleness.py` が
   終了コード 0 で終わる。同等の検査があればそれを使う）
 - 利用者が取得する手順が完了報告に書かれている
