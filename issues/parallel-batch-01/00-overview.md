@@ -93,7 +93,7 @@ cd "$main_dir/.worktrees/<ブランチ名>"
 `pytest` が入っていない。
 
 ```bash
-uv run pytest <テストのパス> -q
+uv run --with pytest pytest <テストのパス> -q
 ```
 
 ### レビューを回す

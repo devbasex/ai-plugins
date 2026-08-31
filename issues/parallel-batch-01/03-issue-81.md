@@ -82,8 +82,8 @@ print(p.findall('- trace: \`reports/run-001/test_login/trace.zip\`'))
 - [ ] 外部の URL やコード例など、証跡ではないコード表記が書き換わらない
 - [ ] 置換の件数が実行結果として出力される
 - [ ] 報告書を作る側の出力は変わっていない
-- [ ] 報告書の実出力を入力にした回帰検査があり、`uv run pytest plugins/playwright-kit/skills/playwright-kit-ops/tests -q` が通る
-- [ ] 既存のテスト 15 本が引き続き通る
+- [ ] 報告書の実出力を入力にした回帰検査があり、`cd plugins/playwright-kit/skills/playwright-kit-ops && uv run pytest tests -q` が通る
+- [ ] 既存の 176 件のテストが引き続き通る
 
 ### テストの書き方
 
@@ -95,7 +95,7 @@ print(p.findall('- trace: \`reports/run-001/test_login/trace.zip\`'))
 同じ噛み合わない状態が再び起きる。
 
 ```bash
-uv run pytest plugins/playwright-kit/skills/playwright-kit-ops/tests -q
+cd plugins/playwright-kit/skills/playwright-kit-ops && uv run pytest tests -q
 ```
 
 ## 触らない範囲
