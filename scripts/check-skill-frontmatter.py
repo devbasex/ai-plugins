@@ -97,9 +97,14 @@ CODEX_LISTING_FRACTION = 0.02
 CODEX_LISTING_LEVEL = "error"
 #
 # Kiro: 公式ドキュメント（kiro.dev/docs/skills）に一覧予算の規定が無い。
-#   既定モデル auto のコンテキストは 1,000,000（--list-models で実測）だが、
-#   比率の規定が無い以上、憶測で基準を置かない。計測だけ行い判定はしない。
-KIRO_LISTING_FRACTION = None
+#   既定モデル auto のコンテキストは 1,000,000（--list-models で実測）で、Claude Code の
+#   Opus 5 と同じである。**NDF は Kiro でも 1M コンテキストのモデルだけを対象とする**
+#   （`plugins/ndf/dev.kiro/install.sh` が導入時にこの前提を出力する。モデルの一覧を
+#   取る手段が kiro-cli の版によって変わるため、機械での検査は置いていない）。
+#   規定が無い以上どこかから基準を借りるほかなく、コンテキスト長が同じ Claude Code の
+#   1% を当てる。憶測で独自の値を置くより、同じ土俵の実在する規定へ揃えるほうが根拠が残る。
+KIRO_CONTEXT_TOKENS = 1_000_000
+KIRO_LISTING_FRACTION = CLAUDE_LISTING_FRACTION
 
 # 一覧に何が載るかはランタイムごとに違う。**パスを含むのは Codex だけ**である。
 #   Claude Code: "loads a listing of skill names and descriptions into context"
@@ -445,7 +450,7 @@ def listing_limits() -> dict[str, int | None]:
     for runtime, tokens, frac in (
         ("claude", CLAUDE_CONTEXT_TOKENS, CLAUDE_LISTING_FRACTION),
         ("codex", CODEX_CONTEXT_TOKENS, CODEX_LISTING_FRACTION),
-        ("kiro", None, KIRO_LISTING_FRACTION),
+        ("kiro", KIRO_CONTEXT_TOKENS, KIRO_LISTING_FRACTION),
     ):
         out[runtime] = None if frac is None or tokens is None else int(tokens * frac * cpt)
     return out
