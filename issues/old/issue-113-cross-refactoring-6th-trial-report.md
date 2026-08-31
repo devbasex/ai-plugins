@@ -67,7 +67,7 @@ flowchart TD
 
 | # | 直したこと | 観測 | 判定 |
 | --- | --- | --- | --- |
-| 18 | 自分の Pull Request では投稿の event を `COMMENT` へ倒す | `init` が `⚠ 自分の Pull Request です（作成者 takemi-ohama）— 投稿は COMMENT へ倒します` を出し、レビュー担当 6 者すべてが `HTTP 422` を受けずに投稿した | 成立 |
+| 18 | 自分の Pull Request では投稿の event を `COMMENT` へ倒す | `init` が `⚠ 自分の Pull Request です（作成者 <利用者>）— 投稿は COMMENT へ倒します` を出し、レビュー担当 6 者すべてが `HTTP 422` を受けずに投稿した | 成立 |
 | 19 | 投稿に失敗しても結果ファイルを書く | 投稿の失敗が起きなかったため、この経路は通っていない | 未到達 |
 | 20 | 投稿されたことを GitHub 側で確かめる | 6 件のレビューがいずれも `review_url` を持ち、GitHub 側にも同数が残っている。差し戻しは発生していない | 成立 |
 | 21 | 抽出系の手法の差分予算 | 採用された 12 件のうち 5 件は、実差分が見積の 2 倍を超えている（2.08〜2.91 倍）。倍率 2 のままなら落ちていた項目である | 成立 |
@@ -77,7 +77,7 @@ flowchart TD
 ```bash
 $ gh api repos/devbasex/ai-plugins/pulls/136/reviews \
     --jq '.[] | "\(.user.login) \(.state)"' | sort | uniq -c
-      8 takemi-ohama COMMENTED
+      8 <利用者> COMMENTED
 ```
 
 改善ラウンドの 6 件と Step 7 の 2 件で、判定はいずれも承認である。

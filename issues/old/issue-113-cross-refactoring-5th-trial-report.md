@@ -151,9 +151,9 @@ GitHub 側に残っているレビューは 3 件で、いずれもラウンド 
 ```bash
 $ gh api repos/devbasex/ai-plugins/pulls/131/reviews \
     --jq '.[] | "\(.user.login) \(.state) \(.submitted_at)"'
-takemi-ohama COMMENTED 2026-08-21T04:15:29Z
-takemi-ohama COMMENTED 2026-08-21T04:18:52Z
-takemi-ohama COMMENTED 2026-08-21T04:19:04Z
+<利用者> COMMENTED 2026-08-21T04:15:29Z
+<利用者> COMMENTED 2026-08-21T04:18:52Z
+<利用者> COMMENTED 2026-08-21T04:19:04Z
 ```
 
 ラウンド 1 の承認は Pull Request 上に痕跡が無いまま採用の確定に使われた。`cross-review` は
