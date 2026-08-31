@@ -280,13 +280,19 @@ _wt_tokenize() {
   }
   # 語を 1 つ出力し、`case` の段を進める。`case` と `esac` を数えるのは命令の
   # 位置にあるときだけで、`echo case` の `case` は入口として数えない。
+  #
+  # 命令の位置の一覧には**予約語の後ろも入れる**。`then` / `else` / `do` の直後に
+  # `case` を置く形は普通にあり、数えないと見出しを閉じた `)` が
+  # `__WT_CASE_END__` にならず、枝の中の `cd` が追跡から漏れる。呼び出し側
+  # (`wt_extract_write_target`) の `at_cmd` が同じ予約語を挙げているのと揃える。
   _tok_emit() {
     local w="$1" prev_out=""
     ((${#out[@]} > 0)) && prev_out=${out[${#out[@]} - 1]}
     case "$w" in
       case|esac)
         case "$prev_out" in
-          ""|__WT_SEP__|__WT_SUBSHELL_END__|__WT_CASE_END__|"|"|"|&"|"&"|"&&"|"||"|"("|"{")
+          ""|__WT_SEP__|__WT_SUBSHELL_END__|__WT_CASE_END__|"|"|"|&"|"&"|"&&"|"||"|"("|"{"\
+          |if|elif|then|else|while|until|do|"!"|time)
             if [ "$w" = case ]; then
               case_state[case_depth]=want_in
               case_depth=$((case_depth + 1))
@@ -767,6 +773,8 @@ wt_extract_write_target() {
   words=("${WT_LINES[@]+"${WT_LINES[@]}"}")
 
   local n=${#words[@]} i j w target found=0 prev="" at_cmd=0 dest="" k cmd_prefix=0
+  # `command` / `builtin` の被演算子を命令の位置として数えている間だけ 1。
+  local cmd_wrapper=0 or_next=""
   # `cd` の枝が、その命令に付いたリダイレクトを移動前の位置で解決し終えた語の
   # 位置。ここより手前の `__WT_REDIR__` / `__WT_APPEND__` を二度拾わない。
   local cd_redir_end=0
@@ -918,12 +926,27 @@ wt_extract_write_target() {
     # 命令の前には変数代入を並べられる。`FOO=bar cd x` の `cd` を命令として
     # 数えないと、移動が書き込み先の起点へ反映されない。`echo a=b cd x` の
     # `cd` は単なる引数なので、命令の位置から代入だけが途切れずに続いている
-    # 間だけ、次の語も命令の位置とみなす。
-    if [ "$at_cmd" = 0 ] && [ "$cmd_prefix" = 1 ]; then at_cmd=1; fi
-    if [ "$at_cmd" = 1 ] && [[ $w =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
+    # 間だけ、次の語も命令の位置とみなす。`FOO+=bar` も代入である。
+    #
+    # `command` と `builtin` も後ろの語を命令として走らせる。どちらも `cd` を
+    # 現在のシェルで動かすため、被演算子として読み飛ばすと移動が起点へ反映
+    # されない。オプションが挟まる形 (`command -p cd`) も追う。
+    if [ "$at_cmd" = 0 ] &&
+      { [ "$cmd_prefix" = 1 ] || [ "$cmd_wrapper" = 1 ]; }; then at_cmd=1; fi
+    if [ "$at_cmd" = 1 ] && [[ $w =~ ^[A-Za-z_][A-Za-z0-9_]*\+?= ]]; then
       cmd_prefix=1
     else
       cmd_prefix=0
+    fi
+    if [ "$at_cmd" = 1 ]; then
+      case "$w" in
+        command|builtin) cmd_wrapper=1 ;;
+        # `command` のオプションのうち、`-p` と `--` は後ろに命令が続く。
+        # `-v` / `-V` は名前を表示するだけで走らせないため、ここで打ち切る
+        # （`*` の枝が 0 へ戻す）。`builtin` は `--` だけを受け取る。
+        -p|--) ;;
+        *) cmd_wrapper=0 ;;
+      esac
     fi
     if [ "$at_cmd" = 1 ]; then
       case "$w" in
@@ -965,6 +988,35 @@ wt_extract_write_target() {
         continue
         ;;
       "||")
+        # 右辺が**後続へ進まない命令**なら、そこを過ぎた時点で左辺の成功が確定
+        # している。`cd /main || exit` は主ディレクトリへ移る定番の形で、右辺へ
+        # 到達したときはそのまま終わるため、続きが走るのは移動した後の位置だけ
+        # である。ここを一律に「決められない」と扱うと、正しく移った後の相対
+        # パスの書き込みを案内できない。
+        #
+        # 数えるのは `exit` / `return` / `break` / `continue` の 4 つで、bash の
+        # 実測で確かめた。`exit` は無条件にシェルを終える。`return` は関数と
+        # source した本文の中で、`break` / `continue` はループの中で、それぞれ
+        # 残りの命令へ進まない（外側で使うと bash がエラーを出すため、その形は
+        # そもそも成立しない）。`exec` は外す。命令を伴えば置き換わるが、
+        # `exec 2>log` のようにリダイレクトだけなら後続へ進む。
+        #
+        # 先行する `||` で経路が分かれている (`list_or` が 1) ときは使えない。
+        # 左辺のどちらを通ったかで位置が変わり、右辺の `exit` では絞れない。
+        # 部分シェルの `(exit)` も対象外で、字句解析が `(` を別の語として渡す。
+        or_next=""
+        ((i + 1 < n)) && or_next=${words[i + 1]}
+        if [ "$list_or" = 0 ]; then
+          case "$or_next" in
+            exit|return|break|continue)
+              # 左辺が成功した位置をそのまま持つ。判定に使う値は引き直す。
+              list_cwd="$cwd"; list_known="$cwd_known"; list_cds=0
+              list_and_uncertain=0; list_cond_cd=0; cd_is_last=0
+              pipe_cwd="$cwd"; pipe_known="$cwd_known"; pipe_cds=0
+              continue
+              ;;
+          esac
+        fi
         # 左辺が失敗したときに走る。失敗した命令を字面から特定できるのは、
         # リストの中の `cd` がちょうど 1 つで、それが直前の命令のときだけである。
         # このとき失敗したのはその `cd` なので、右辺はリストの入口の位置で走る。

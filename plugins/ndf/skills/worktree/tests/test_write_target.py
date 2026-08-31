@@ -1300,3 +1300,134 @@ def test_an_or_without_cd_keeps_the_position_before_and() -> None:
     targets, rc = extract_at("echo a || echo b && echo hi > README.md", "/base")
     assert rc == 0, targets
     assert targets == ["/base/README.md"]
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # `||` の右辺が後続へ進まない命令なら、そこを過ぎた時点で左辺の成功が
+        # 確定している。`cd /main || exit` は主ディレクトリへ移る定番の形である。
+        ("cd /main || exit\nsed -i 's/a/b/' README.md", "/main/README.md"),
+        ("cd /main || exit 1\nsed -i 's/a/b/' README.md", "/main/README.md"),
+        ("cd .worktrees/x || exit\ncp a.txt README.md", "/base/.worktrees/x/README.md"),
+        ("cd .worktrees/x || return\ncp a.txt README.md", "/base/.worktrees/x/README.md"),
+        ("cd .worktrees/x || break\ncp a.txt README.md", "/base/.worktrees/x/README.md"),
+        ("cd .worktrees/x || continue\ncp a.txt README.md", "/base/.worktrees/x/README.md"),
+        # `&&` で繋いだ左辺も、抜けた時点ですべて成功している。
+        ("cd .worktrees && cd x || exit\ncp a.txt README.md",
+         "/base/.worktrees/x/README.md"),
+        ("true && cd .worktrees/x || exit\ncp a.txt README.md",
+         "/base/.worktrees/x/README.md"),
+        # 同じリストの中で続けて使う形も、直前の `cd` の成功が確定する。
+        ("cd .worktrees || exit\ncd x || exit\ncp a.txt README.md",
+         "/base/.worktrees/x/README.md"),
+    ],
+)
+def test_an_or_with_a_non_continuing_right_side_keeps_the_move(
+    command: str, expected: str
+) -> None:
+    """`cd x || exit` の後は、`cd` が成功した位置で続きが走る。
+
+    抑止すると、作業ツリーへ移ってから相対パスで書き換えたときに案内が出ない
+    ばかりか、主ディレクトリへ戻ってからの書き込みも案内できなくなる。
+    """
+    targets, rc = extract_at(command, "/base")
+    assert rc == 0, (command, targets)
+    assert targets == [expected], command
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # 部分シェルの `exit` は親のシェルを終わらせない。位置は決められない。
+        "cd .worktrees/x || (exit)\ncp a.txt README.md",
+        # 先行する `||` で経路が分かれていると、右辺の `exit` では絞れない。
+        "true || cd .worktrees/x || exit\ncp a.txt README.md",
+    ],
+)
+def test_a_non_continuing_right_side_does_not_decide_every_form(command: str) -> None:
+    """成功が確定しない形では、相対パスの書き込み先を出さない。"""
+    targets, rc = extract_at(command, "/base")
+    assert rc == 1, (command, targets)
+    assert targets == [], command
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # `FOO+=bar` も命令の前に置ける変数代入である。
+        ("FOO+=bar cd .worktrees/x\ncp a.txt README.md", "/base/.worktrees/x/README.md"),
+        ("FOO=a BAR+=b cd .worktrees/x\ncp a.txt README.md",
+         "/base/.worktrees/x/README.md"),
+        # 命令の位置から続いていなければ、代入に見えても単なる引数である。
+        ("echo a+=b cd /elsewhere\ncp a.txt README.md", "/base/README.md"),
+    ],
+)
+def test_append_assignments_before_a_command_keep_the_command_position(
+    command: str, expected: str
+) -> None:
+    """`FOO+=bar cd x` の `cd` を命令として数えないと、移動が起点へ反映されない。"""
+    targets, rc = extract_at(command, "/base")
+    assert rc == 0, (command, targets)
+    assert targets == [expected], command
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # 予約語の直後の `case` も入口である。数えないと見出しの `)` が枝の始まり
+        # として渡らず、枝の中の `cd` が追跡から漏れる。
+        ("cd .worktrees/x; if true; then case x in x) cd ../..; cp a.txt README.md ;; esac; fi",
+         "/base/README.md"),
+        ("cd .worktrees/x; if false; then true; else case x in x) cd ../..; cp a.txt README.md ;; esac; fi",
+         "/base/README.md"),
+        ("cd .worktrees/x; while true; do case x in x) cd ../..; cp a.txt README.md ;; esac; done",
+         "/base/README.md"),
+        ("cd .worktrees/x; ! case x in x) cd ../..; cp a.txt README.md ;; esac",
+         "/base/README.md"),
+    ],
+)
+def test_a_case_after_a_reserved_word_still_opens(command: str, expected: str) -> None:
+    """`then` / `else` / `do` の直後の `case` を入口として数える。
+
+    数えないと見出しを閉じた `)` が `__WT_CASE_END__` にならず、枝の中の `cd` を
+    見落として主ディレクトリへの書き込みを案内できない（検知漏れになる）。
+    """
+    targets, rc = extract_at(command, "/base")
+    assert rc == 0, (command, targets)
+    assert targets == [expected], command
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # `command` と `builtin` は現在のシェルで `cd` を走らせる。移動は残る。
+        ("cd .worktrees/x; command cd ../..; cp a.txt README.md", "/base/README.md"),
+        ("cd .worktrees/x; builtin cd ../..; cp a.txt README.md", "/base/README.md"),
+        ("cd .worktrees/x; command -p cd ../..; cp a.txt README.md", "/base/README.md"),
+        ("cd .worktrees/x; command -- cd ../..; cp a.txt README.md", "/base/README.md"),
+        ("cd .worktrees/x; builtin -- cd ../..; cp a.txt README.md", "/base/README.md"),
+        ("cd .worktrees/x; command builtin cd ../..; cp a.txt README.md",
+         "/base/README.md"),
+        ("command cd .worktrees/x\ncp a.txt README.md", "/base/.worktrees/x/README.md"),
+        # `-v` / `-V` は名前を表示するだけで走らせない。移動として数えない。
+        ("cd .worktrees/x; command -v cd; cp a.txt README.md",
+         "/base/.worktrees/x/README.md"),
+        ("cd .worktrees/x; command -V cd; cp a.txt README.md",
+         "/base/.worktrees/x/README.md"),
+        # 命令の位置でない `command` は単なる引数である。
+        ("cd .worktrees/x; echo command cd ../..; cp a.txt README.md",
+         "/base/.worktrees/x/README.md"),
+    ],
+)
+def test_command_and_builtin_wrappers_keep_the_command_position(
+    command: str, expected: str
+) -> None:
+    """`command cd` / `builtin cd` の `cd` も移動である。
+
+    被演算子として読み飛ばすと、主ディレクトリへ戻ってからの書き込みを作業ツリー側と
+    取り違えて案内を出さない（検知漏れになる）。
+    """
+    targets, rc = extract_at(command, "/base")
+    assert rc == 0, (command, targets)
+    assert targets == [expected], command
