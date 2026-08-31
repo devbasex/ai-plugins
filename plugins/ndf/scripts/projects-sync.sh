@@ -58,19 +58,32 @@ OWNER=$(pj_owner "$DECL")
 NUMBER=$(pj_number "$DECL")
 FIELD_NAME=$(pj_field_name "$DECL" "$KEY") || exit 0
 
+# 盤面から一度に読むアイテムの上限。長く使う盤面ほど閉じたアイテムが積み上がるため、
+# 想定される総数より広く取る。上限に達したときは対象が見つからなくても黙って抜けない。
+ITEM_LIMIT=1000
+
 # ここから先は外部への問い合わせである。どこで失敗しても 0 で抜ける。
 update() {
-  local project_id item_id field_id option_id
+  local project_id item_id field_id option_id item_count
   local project_json items_json fields_json
 
   project_json=$(gh project view "$NUMBER" --owner "$OWNER" --format json 2>/dev/null) || return 1
   project_id=$(printf '%s' "$project_json" | jq -r '.id // empty' 2>/dev/null) || return 1
   [ -n "$project_id" ] || return 1
 
-  items_json=$(gh project item-list "$NUMBER" --owner "$OWNER" --limit 200 --format json 2>/dev/null) || return 1
+  items_json=$(gh project item-list "$NUMBER" --owner "$OWNER" --limit "$ITEM_LIMIT" --format json 2>/dev/null) || return 1
   item_id=$(printf '%s' "$items_json" | jq -r --argjson n "$ISSUE" \
     'first(.items[]? | select(.content.number == $n) | .id) // empty' 2>/dev/null) || return 1
-  [ -n "$item_id" ] || return 1
+  if [ -z "$item_id" ]; then
+    # 見つからない理由は 2 つある。盤面へ登録していないか、取得が上限で切れたかである。
+    # 黙って抜けると両者を区別できないため、上限に達したときだけ知らせる。
+    item_count=$(printf '%s' "$items_json" | jq -r '(.items? // []) | length' 2>/dev/null) || item_count=0
+    if [ "$item_count" = "$ITEM_LIMIT" ]; then
+      printf 'NOTE: 盤面のアイテムの取得が上限 %s に達しました。#%s が見つからないのは取り漏れの可能性があります\n' \
+        "$ITEM_LIMIT" "$ISSUE" >&2
+    fi
+    return 1
+  fi
 
   fields_json=$(gh project field-list "$NUMBER" --owner "$OWNER" --format json 2>/dev/null) || return 1
   field_id=$(printf '%s' "$fields_json" | jq -r --arg n "$FIELD_NAME" \

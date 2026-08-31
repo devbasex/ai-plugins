@@ -81,15 +81,22 @@ issue が挙げた 3 案には、それぞれ確かめられた難点がある�
 
 **案 D: 工程の切れ目を持つ Skill だけが、共通スクリプトを 1 行呼ぶ。** 判定と API の扱いは
 `plugins/ndf/scripts/lib/projects-common.sh` が持ち、各 `SKILL.md` は呼び出しを 1 行書くだけに
-する。`worktree` と同じ構造であり、対象は 9 個に収まる。
+する。`worktree` と同じ構造であり、対象は 14 個の `SKILL.md` になる。工程表の 14 行のうち
+「設計」だけは専用の Skill を持たないため、書き込む Skill は無い。「レビュー」は
+`cross-review` と `pr-review` の 2 つが書き込む。
 
 | Skill | 書き込む値 |
 | --- | --- |
 | `worktree` | 進行=作業場所の用意、モード、作業ツリー |
+| `requirements-design` | 進行=要求と受け入れ条件 |
 | `implementation-plan` | 進行=計画、計画ファイル |
-| `tdd-cycle` / `refactoring` | 進行=実装 / 構造改善 |
-| `cross-review` / `pr-review` | 進行=レビュー |
+| `tdd-cycle` | 進行=実装 |
+| `refactoring` | 進行=構造改善 |
+| `cross-review` | 進行=レビュー |
+| `pr-review` | 進行=レビュー |
+| `quality-gates` | 進行=完了判定 |
 | `pr` | 進行=Pull Request |
+| `plan-to-spec` | 進行=確定仕様化 |
 | `merged` | 進行=後片付け |
 | `release` | 進行=配布 |
 | `release-verification` | 進行=リリース後テスト |
@@ -123,7 +130,7 @@ issue は「マージ前の文書を他の作業から読めない状態は変�
       入口のスクリプトは入出力の整形だけを行う
 - [ ] 3. 宣言が無い / `gh` が無い / スコープが足りない のいずれでも、終了コード 0 で
       何も出力せずに終わる
-- [ ] 4. 工程の切れ目を持つ 9 個の `SKILL.md` に、進行を書き込む案内が 1 行ずつ入っている
+- [ ] 4. 工程の切れ目を持つ 14 個の `SKILL.md` に、進行を書き込む案内が 1 行ずつ入っている
 - [ ] 5. `development-workflow` に、判定結果（モード）の記録先としての位置づけが書かれている
 - [ ] 6. `issue-plan-strategy` に、1 issue = 1 アイテムで Pull Request を複数ぶら下げる旨がある
 - [ ] 7. 判定のテストが `plugins/ndf/skills/*/tests/` にあり、外部への通信を伴わない

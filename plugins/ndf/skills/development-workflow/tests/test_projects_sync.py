@@ -140,3 +140,75 @@ def test_stage_split_by_a_space_is_an_error(repo, tmp_path) -> None:
     got = run_sync("186", "stage", "Pull", "Request", cwd=repo, env=fake_gh(tmp_path, log))
     assert got.returncode == 2
     assert not log.exists(), "誤った呼び方で gh を呼んでいる"
+
+
+def scripted_gh(tmp_path, items: list[int]) -> dict:
+    """盤面の応答を返す `gh` を PATH の先頭へ置く。
+
+    `item-list` が返すアイテムの並びだけをテストごとに差し替える。取得の上限に達した
+    ことは、返ってきた件数が上限と等しいかどうかで判断される。
+    """
+    bindir = tmp_path / "bin"
+    bindir.mkdir(exist_ok=True)
+    data = tmp_path / "gh-data"
+    data.mkdir(exist_ok=True)
+    (data / "view.json").write_text(json.dumps({"id": "PVT_1"}), encoding="utf-8")
+    (data / "items.json").write_text(
+        json.dumps({"items": [{"id": f"IT_{n}", "content": {"number": n}} for n in items]}),
+        encoding="utf-8",
+    )
+    (data / "fields.json").write_text(
+        json.dumps({"fields": [
+            {"id": "FLD_1", "name": "進行",
+             "options": [{"id": "OPT_1", "name": "レビュー"}]},
+        ]}),
+        encoding="utf-8",
+    )
+    gh = bindir / "gh"
+    gh.write_text(
+        "#!/usr/bin/env bash\n"
+        'case "$1 $2" in\n'
+        f'  "project view") cat "{data}/view.json" ;;\n'
+        f'  "project item-list") cat "{data}/items.json" ;;\n'
+        f'  "project field-list") cat "{data}/fields.json" ;;\n'
+        "  *) : ;;\n"
+        "esac\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    gh.chmod(gh.stat().st_mode | stat.S_IEXEC)
+    return {"PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}"}
+
+
+def test_item_below_the_limit_is_updated(repo, tmp_path) -> None:
+    """上限より少ない盤面では、対象が見つかって更新される。"""
+    write_declaration(repo, VALID)
+    env = scripted_gh(tmp_path, list(range(180, 190)))
+    got = run_sync("186", "stage", "レビュー", cwd=repo, env=env)
+    assert got.returncode == 0, got.stderr
+    assert "#186 進行 = レビュー" in got.stdout
+    assert got.stderr == ""
+
+
+def test_missing_item_below_the_limit_is_silent(repo, tmp_path) -> None:
+    """盤面へ登録していないだけなら黙って抜ける。これは正常な状態である。"""
+    write_declaration(repo, VALID)
+    env = scripted_gh(tmp_path, [1, 2, 3])
+    got = run_sync("186", "stage", "レビュー", cwd=repo, env=env)
+    assert got.returncode == 0
+    assert got.stdout == "" and got.stderr == ""
+
+
+def test_missing_item_at_the_limit_is_reported(repo, tmp_path) -> None:
+    """取得が上限に達したときは知らせる。登録していない場合と区別できないためである。
+
+    終了コードは 0 のままにする。進行管理が理由で工程を止めない。
+    """
+    write_declaration(repo, VALID)
+    # 1000 件ちょうどを返し、その中に #186 は含めない。
+    env = scripted_gh(tmp_path, list(range(1000, 2000)))
+    got = run_sync("186", "stage", "レビュー", cwd=repo, env=env)
+    assert got.returncode == 0
+    assert got.stdout == ""
+    assert "上限 1000" in got.stderr
+    assert "#186" in got.stderr

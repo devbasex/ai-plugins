@@ -99,19 +99,40 @@ bash "$SCRIPTS/projects-sync.sh" 186 plan "issues/issue-186.md"
 
 ### `$SCRIPTS` を決める
 
-プラグインの `scripts/` の位置はランタイムで変わる。候補を順に試し、最初に当たったものを
+プラグインの `scripts/` の位置は 3 ランタイムで別々である。候補を順に試し、最初に当たったものを
 絶対パスで採る。
+
+| ランタイム | 配布物の位置 | 手がかり |
+| --- | --- | --- |
+| Claude Code | `~/.claude/plugins/cache/<マーケットプレイス>/ndf/<版>/scripts` | `SKILL.md` の `${CLAUDE_PLUGIN_ROOT}` が絶対パスへ置き換わる |
+| Kiro CLI | インストーラが指したプラグインの `scripts` | `.kiro/skills/<Skill名>` がプラグインの `skills/<Skill名>` への symlink |
+| Codex | `~/.codex/.tmp/marketplaces/<マーケットプレイス>/plugins/ndf/scripts` | マーケットプレイス名だけが導入元で変わる |
 
 ```bash
 # Claude Code は SKILL.md 内の ${CLAUDE_PLUGIN_ROOT} をプラグインルートの絶対パスへ置き換えて
 # から渡す。シングルクォートで囲むのは、置き換えられなかったときにシェルへ展開させないため
-# である。Codex と Kiro CLI は置き換えない。
+# である。Codex と Kiro CLI は置き換えないため、両者はそれぞれの配置から探す。
 PLUGIN_ROOT='${CLAUDE_PLUGIN_ROOT}'
 case "$PLUGIN_ROOT" in '$'*) PLUGIN_ROOT= ;; esac
+
+# Kiro CLI のインストーラは `.kiro/skills/<Skill名>` を、プラグインの `skills/<Skill名>` への
+# symlink として張る。`.kiro/skills` 自体は実体のディレクトリなので、そこから 1 つ上をたどっても
+# プラグインへは戻れない。symlink の実体を解決し、その 2 つ上をプラグインルートとして採る。
+KIRO_ROOT=
+for link in .kiro/skills/*/ "${HOME:-}/.kiro/skills/"*/; do
+  [ -L "${link%/}" ] || continue
+  KIRO_ROOT="$(readlink -f "${link%/}")/../.."
+  break
+done
+
+# Codex はマーケットプレイスのスナップショットの下へプラグインを展開する。名前は導入元で
+# 変わるため `*` で受ける。
 SCRIPTS=
 for candidate in \
   ${PLUGIN_ROOT:+"$PLUGIN_ROOT/scripts"} \
-  ".kiro/skills/../scripts" \
+  ${KIRO_ROOT:+"$KIRO_ROOT/scripts"} \
+  "${HOME:-}/.codex/.tmp/marketplaces/"*/plugins/ndf/scripts \
+  "${HOME:-}/.codex/marketplaces/"*/plugins/ndf/scripts \
   "plugins/ndf/scripts"
 do
   [ -f "$candidate/projects-sync.sh" ] || continue
@@ -123,6 +144,10 @@ done
 
 見つからない場合は記録を飛ばす。**進行管理が理由で工程を止めない。**
 
+この bash はそのままテストの対象になっている。`development-workflow/tests/test_projects_scripts_lookup.py`
+がこの節の bash のコードブロックを読み出し、3 ランタイムの配置を作った上で実行する。手順の側だけが
+変わって解決が外れる状態にならない。
+
 ## 何もしない条件
 
 次のいずれでも、何も出力せず終了コード 0 で終わる。
@@ -130,12 +155,32 @@ done
 - `.ndf/projects.json` が無い
 - `gh` または `jq` が無い
 - 盤面への問い合わせや更新が失敗した（権限不足を含む。`project` スコープが要る）
+- 盤面に対象のアイテムが無い（取得が上限で切れた場合を除く。下の「既知の制約」）
 
 **呼び出し側の誤りだけは 2 を返す。** 知らないキー・工程表に無い値・引数の不足がこれにあたる。
 引用を落として空白を含む値が分割された場合も、引数の数が合わなくなるためここへ入る。
 黙って進むと、綴りの違う値が盤面へ入るか、書き込んだつもりの値が入らない。
 
 ## 既知の制約
+
+### アイテムの取得は 1000 件で切れる
+
+`projects-sync.sh` は `gh project item-list --limit 1000` で盤面を読む。閉じたアイテムも
+残るため、長く使う盤面では総数がこの上限を超えうる。超えると、盤面に載っている issue でも
+対象が見つからない。
+
+見つからない理由は 2 つあり、盤面へ登録していない場合と、取得が上限で切れた場合である。
+前者は正常な状態なので黙って抜ける。**取得したアイテム数が上限と等しいときだけ、標準エラーへ
+知らせる。** 上限に達したかどうかは取得した件数から分かるため、この 2 つは区別できる。
+
+```console
+NOTE: 盤面のアイテムの取得が上限 1000 に達しました。#186 が見つからないのは取り漏れの可能性があります
+```
+
+**終了コードは 0 のままである。** 進行管理が理由で工程を止めない。上限に達する盤面では、
+`--limit` の値を上げるか、盤面を分けることになる。
+
+### 日本語のフィールド名は読み返しに使えない
 
 `gh project item-list --format json` が返す JSON は、フィールド名を小文字化する際に
 **日本語のフィールド名の先頭 1 文字を壊す**（`進行` が `���行` になる）。値は壊れない。
