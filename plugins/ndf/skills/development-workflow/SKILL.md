@@ -49,7 +49,7 @@ mode: standard
 根拠: 注文確定の振る舞いを変更する。公開 API とスキーマは変えない
 必須工程: worktree → requirements-design → implementation-plan → tdd-cycle
   → refactoring → cross-review → quality-gates → pr
-  → plan-to-spec（仕様が変わった場合） → merged
+  → plan-to-spec（仕様が変わった場合） → merged → release
   → release-verification（マージ前に実施できなかった受け入れ条件がある場合）
   → retrospective
 ```

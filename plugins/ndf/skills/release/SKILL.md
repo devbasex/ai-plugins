@@ -61,9 +61,26 @@ Pull Request が最後かどうかを判断できない。
 
 ### 1. 配布物が変わったかを確かめる
 
+比較の起点は**前のまとまりを配布した時点**である。次の順で決める。
+
 ```bash
-git diff --stat <まとまりのマージ前>..HEAD -- <配布物のパス> | tail -1
+# 版のタグを打つ運用なら、直前のタグが起点になる
+BASE=$(git describe --tags --abbrev=0 2>/dev/null)
+
+# タグが無いなら、いま入っている版数を書き込んだコミットが起点になる
+CURRENT=$(python3 -c "import json;print(json.load(open('plugins/ndf/.claude-plugin/plugin.json'))['version'])")
+[ -n "$BASE" ] || BASE=$(git log -1 --format=%H -S"\"version\": \"$CURRENT\"" -- plugins/ndf/.claude-plugin/plugin.json)
+
+git diff --stat "$BASE"..HEAD -- plugins/ | tail -1
 ```
+
+版数を持つファイルと配布物の置き場所はリポジトリごとに違う。上の
+`plugins/ndf/.claude-plugin/plugin.json`（版数）と `plugins/`（配布物）は、対象の
+リポジトリのものへ読み替える。
+
+**`BASE` が空のままなら、起点を推測せず運用者に確認する。** 版数を書き込んだコミットが
+見つからない場合と、まとまりの範囲が履歴から読み取れない場合がこれにあたる。誤った起点で
+比べると、配布済みの変更を未配布として数える。
 
 差分が無ければ、この工程は飛ばす。飛ばしたことを完了報告へ残す。
 
