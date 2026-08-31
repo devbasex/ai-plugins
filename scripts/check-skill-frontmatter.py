@@ -97,7 +97,10 @@ CODEX_LISTING_FRACTION = 0.02
 CODEX_LISTING_LEVEL = "error"
 #
 # Kiro: 公式ドキュメント（kiro.dev/docs/skills）に一覧予算の規定が無い。
-#   既定モデル auto のコンテキストは 1,000,000（--list-models で実測）で、Claude Code の
+#   既定モデル auto のコンテキストは 1,000,000。**この値は過去の実測の記録である。**
+#   当時は `kiro-cli --list-models` で一覧を取れたが、2.20.1 にそのオプションは無く、
+#   同じ手段では再検証できない（`--list` は認証を要求する）。値を更新するときは、
+#   その時点で一覧を取れる手段を確かめ、この行の出典も書き直すこと。Claude Code の
 #   Opus 5 と同じである。**NDF は Kiro でも 1M コンテキストのモデルだけを対象とする**
 #   （`plugins/ndf/dev.kiro/install.sh` が導入時にこの前提を出力する。モデルの一覧を
 #   取る手段が kiro-cli の版によって変わるため、機械での検査は置いていない）。
