@@ -29,9 +29,9 @@ skills/     → 実行可能なワークフロー
 
 詳細は `docs/specifications/ndf-knowledge-and-kiro.md` を参照。
 
-## NDF v9.2.1 の Skill 構成
+## NDF v9.3.0 の Skill 構成
 
-Skill は 32 個で、配布は `plugins/ndf/manifests/` が唯一の基準（Claude Code 28 / Codex 26 / Kiro 27）。ブラウザ自動テストの 4 個は `playwright-kit` プラグインへ分離した（`plugins/playwright-kit/`）。frontmatter の書き方は `plugins/ndf/skills/README.md` の規約に従い、`python3 scripts/check-skill-frontmatter.py` で検査する。利用実績と維持・統合・削除の判定は `docs/specifications/ndf-skill-inventory.md` に記録する。
+Skill は 35 個で、配布は `plugins/ndf/manifests/` が唯一の基準（Claude Code 31 / Codex 29 / Kiro 30）。ブラウザ自動テストの 4 個は `playwright-kit` プラグインへ分離した（`plugins/playwright-kit/`）。frontmatter の書き方は `plugins/ndf/skills/README.md` の規約に従い、`python3 scripts/check-skill-frontmatter.py` で検査する。利用実績と維持・統合・削除の判定は `docs/specifications/ndf-skill-inventory.md` に記録する。
 
 v6.1.0 で開発方法論レイヤーの 5 個（`development-workflow` / `requirements-design` / `tdd-cycle` / `refactoring`（当時は `safe-refactoring`）/ `quality-gates`）を追加した。モード判定の基準を持つのは `development-workflow` だけで、他の Skill とエージェント定義は判定結果を受け取る側に徹する。
 
@@ -70,6 +70,8 @@ v9.2.0 で `worktree` を追加し、開発の変更を作業ツリーの中で�
 3 ランタイムの実機確認で、設計が拾えていなかった事実が 2 件出た。Codex CLI はファイルの編集を `apply_patch` で渡し、パスは `tool_input.file_path` ではなくパッチ本文の `*** Update File:` 行に入る。セッション開始時の出力は、平文と JSON を同時に書くと標準出力全体が JSON として読めず、Claude Code が両方をまとめて 1 つの本文として積むため、事象で分けて書く。誘導の対象になる tool 名は `WT_EDIT_TOOLS` / `WT_PATCH_TOOLS` / `WT_SHELL_TOOLS` の 1 箇所が持ち、hook の matcher もそこから作って一致をテストで検査する。詳細は `issues/issue-146-worktree-first/`。
 
 v9.2.1 で作業ツリー運用の実機確認（#173）で見つかった 5 件を直した。単体テストが拾えていなかったのは、コンテナの起動と別ディレクトリからの実行を伴う経路である。`reap` は停止の対象ごとに `ENVIRONMENT` だけを入れ替えており、`compose_env` が読む `SLOT` が未定義のまま `compose stop` を呼んでいた。`--kind` と `--tag` の案内は本文が `--` で始まるため、`printf` が書式ではなくオプションとして解釈していた。主ディレクトリは対象ではなく現在地から解決していたため、別のリポジトリから対象を渡すと、そちらの宣言ファイル・台帳・ポートの帯で動いていた。`wt_main_dir` / `wt_in_worktree` が対象のディレクトリを任意で受け取る形にし、入口の 2 本が引数の対象を渡す。解決できないときは現在地へ退避し、対象そのものの誤りは各サブコマンドの案内に任せる。あわせて基準のタグが対象の不在と空の内容を区別するようにし、書き込み先の抽出からヒアドキュメントの本文と展開前の変数を含む語を外した。ただし終端の語を引用符で囲まない本文はシェルが展開し、中のコマンド置換が実行されるため、その形では置換の中だけを残し、外は空白へ置き換える。置換は複数行にまたがり、中では引用符が効くため、囲まれた `)` を閉じとして数えない。`$((...))` は算術展開で、中の `>` は比較であるため読み飛ばす。詳細は `issues/issue-173-worktree-runtime-defects.md`。
+
+v9.3.0 で工程を 2 つ（`release-verification` / `retrospective`）と、順序を持たない横断的な手順を 1 つ（`out-of-scope`）追加した。工程はどちらもマージ後の後片付けの先にあり、リリース後テストの起点は版の配布が終わった後に置く。マージ直後に置くと、配布の過程で壊れるものが対象から外れる。振り返りはレビューの工程を通ったモードで行い、記録は `docs/development-history/` へ残す。範囲外の課題は**見つけたその場で**起票する。発見からマージ後まで時間が空くと、どのファイルのどの行で、なぜ範囲外と判断したのかが記憶に頼ることになる（#174 の 2 件はどちらもこの間に消えた）。判断は 3 択（起票する / 範囲内へ入れる / 起票しない）に限り、3 つ目も理由を 1 行残す。呼び出し元の 6 Skill へ 1 行ずつ案内を置き、あわせて `development-workflow` にも横断の節を持たせた。工程の途中では `development-workflow` を読み直さないため、手元の SKILL.md 側に案内が要る。詳細は `issues/issue-175-release-verification-retrospective.md`。
 
 v6.0.0 の対応表（`review` → `pr-review`）は予告どおり削除済み。v6.0.0 以前から移行する場合は v6.1.0 の `ndf-policies` を参照する。
 

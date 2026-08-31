@@ -114,7 +114,7 @@ LISTING_INCLUDES_PATH = {"claude": False, "codex": True, "kiro": True}
 #
 # 引き上げは Skill を 1 つ増やす判断とあわせて行う。据え置いたまま Skill を足すと
 # 警告が出続け、目安として働かなくなる。
-FRONTMATTER_TOTAL_MAX = 11600
+FRONTMATTER_TOTAL_MAX = 12400
 
 # --- 既知の外部 Skill 名 ----------------------------------------------------
 # ランタイム組み込み・他プラグインの Skill 名のうち、実際に観測できたもの。
