@@ -130,7 +130,12 @@ ls docs/development-history/     # 既存の連番を確かめる
 | 経緯の時系列そのもの | git の履歴と Pull Request に残っている |
 
 進行を盤面へ記録する場合は、[references/projects-tracking.md](../development-workflow/references/projects-tracking.md) の「`$SCRIPTS` を決める」でパスを解決してから
-`bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "振り返り"` を実行する（`.ndf/projects.json` が無いリポジトリでは何も起きない）。この工程で終わるため `status` を `Done` にする。
+次を実行する（`.ndf/projects.json` が無いリポジトリでは何も起きない）。この工程で終わるため `status` も `Done` にする。
+
+```bash
+bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "振り返り"
+bash "$SCRIPTS/projects-sync.sh" <issue番号> status "Done"
+```
 
 ## 関連
 

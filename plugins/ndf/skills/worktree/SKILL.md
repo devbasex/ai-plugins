@@ -255,7 +255,13 @@ bash "$TE" down "$WT" --volumes             # 破棄し、割り当てを解放�
 書き込む。**
 
 進行を盤面へ記録する場合は、[references/projects-tracking.md](../development-workflow/references/projects-tracking.md) の「`$SCRIPTS` を決める」でパスを解決してから
-`bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "作業場所の用意"` を実行する（`.ndf/projects.json` が無いリポジトリでは何も起きない）。判定したモード（`mode`）と作業ツリーのパス（`worktree`）も同じ形で記録する。
+次を実行する（`.ndf/projects.json` が無いリポジトリでは何も起きない）。判定したモード（`mode`）と作業ツリーのパス（`worktree`）も同じ形で記録する。
+
+```bash
+bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "作業場所の用意"
+bash "$SCRIPTS/projects-sync.sh" <issue番号> mode "<モード名>"
+bash "$SCRIPTS/projects-sync.sh" <issue番号> worktree ".worktrees/<ブランチ名>"
+```
 
 ## 関連
 
