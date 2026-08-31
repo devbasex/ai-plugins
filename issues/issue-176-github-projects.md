@@ -126,7 +126,9 @@ issue は「マージ前の文書を他の作業から読めない状態は変�
 - [ ] 4. 工程の切れ目を持つ 9 個の `SKILL.md` に、進行を書き込む案内が 1 行ずつ入っている
 - [ ] 5. `development-workflow` に、判定結果（モード）の記録先としての位置づけが書かれている
 - [ ] 6. `issue-plan-strategy` に、1 issue = 1 アイテムで Pull Request を複数ぶら下げる旨がある
-- [ ] 7. 判定のテストが `plugins/ndf/skills/*/tests/` にあり、外部への通信を伴わない
+- [ ] 7. 判定のテストが `plugins/ndf/skills/development-workflow/tests/` にあり、外部への
+      通信を伴わない。`projects-common.sh` は特定の Skill に属さない共通スクリプトだが、
+      テストは進行の記録という振る舞いの持ち主である `development-workflow` の下へ置く
 - [ ] 8. `python3 scripts/check-skill-frontmatter.py` が終了コード 0 で終わる
 - [ ] 9. `bash scripts/validate-runtime-plugins.sh` が終了コード 0 で終わる
 - [ ] 10. `uv run --with pytest pytest scripts/tests plugins/ndf -q` が通る
