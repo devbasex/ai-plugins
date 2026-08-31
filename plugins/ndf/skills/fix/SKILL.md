@@ -304,6 +304,24 @@ gh api graphql -f query='
   }' -f id="$THREAD_ID"
 ```
 
+### 対応の対象は未解決の指摘を数え直して決める（必須）
+
+**投稿数を対象の数として使わない。** レビュー結果の `comments_count` は
+そのラウンドで新しく投稿された件数であり、PR 上に残っている未解決の指摘の数ではない。
+前のラウンドの分や、中断の前に投稿された分がこの数の外にある。
+
+上の query を `isResolved == false` で絞った結果が対象の全量である。
+`/ndf:cross-review` から呼ばれた場合は、次のコマンドでも同じ数を取れる（引数は state.json の
+キー、つまり最初に `init` した PR 番号を渡す。対象の PR は state.json 側で解決される）。
+
+```bash
+# UNRESOLVED_COUNT / UNRESOLVED_THREAD_IDS を取り込む（exit 1 = 取得できなかった）
+eval "$("$SKILL_DIR/../cross-review/scripts/state.py" unresolved-threads "$STATE_PR")"
+```
+
+返信と Resolve を終えたら、**同じ query をもう一度実行して残数を確認する**。
+deferred / rejected として意図的に残したもの以外が残っていれば、対応が漏れている。
+
 ### PR レベル Summary コメント（必須）
 
 インラインへの返信と Resolve **だけでは不十分**。PR ページの Conversation タブに
@@ -372,6 +390,7 @@ EOMD
 ## 作業完了報告（必須）
 
 - 対応した指摘の件数（重要度別）/ deferred 件数 / rejected 件数（各々理由付き）
+- **返信と Resolve の後に数え直した未解決の指摘の残数**（0 でない場合は残した理由）
 - 対応した CI エラーの一覧（ジョブ名、エラー内容、修正方法）
 - 対応した flaky テストの一覧（PR 範囲外も含む）
 - 修正コミット SHA / 修正ファイル一覧 / 戻り値ファイルパス

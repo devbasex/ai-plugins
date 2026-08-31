@@ -13,7 +13,8 @@
 | `scripts/monitor.py` | Step 2 — codex/gemini プロセス多軸監視 |
 | `scripts/wait-review.sh` | Step 2 — `monitor.py` の薄ラッパ（互換用） |
 | `scripts/state.py read-result` | Step 2.5 — result.json マージ |
-| `scripts/state.py judge` | Step 3 — intent ベース pass 判定 |
+| `scripts/state.py unresolved-threads` | PR 上の未解決の指摘を数える（順序を持たない補助） |
+| `scripts/state.py judge` | Step 3 — intent + 引き継いだ指摘の判定 |
 | `scripts/state.py check-oscillation` | Step 4 — 振動検知 |
 
 このドキュメントは **state.json スキーマと AI への入出力契約** を一次資料として残す。
@@ -40,11 +41,24 @@
   "pr_history": [
     {"pr": 123, "opened_at": "...", "closed_at": null, "rounds": 2}
   ],
+  "carried_over": {
+    "detected_at": "...",
+    "count": 3,
+    "thread_ids": ["PRRT_kwDO..."],
+    "fixed_in_round": null
+  },
+  "sweep": {
+    "declared_remaining_open": 0,
+    "remaining_open": 0,
+    "remaining_reason": null,
+    "verified": true
+  },
   "rounds": [
     {
       "round": 1,
       "pr": 123,
       "started_at": "...",
+      "verdict": "changes_requested",
       "codex":  {"intent": "REQUEST_CHANGES", "posted_as": "COMMENT",
                  "comments": 5, "review_url": "...",
                  "by_severity": {"critical": 0, "major": 3, "minor": 2, "nit": 0}},
@@ -52,7 +66,8 @@
                  "comments": 3, "review_url": "...",
                  "by_severity": {"critical": 0, "major": 2, "minor": 1, "nit": 0}},
       "fix":    {"commit": "abc1234", "fixed": 6, "deferred": 2, "rejected": 0,
-                 "resolved_threads": 4, "ci": "SUCCESS", "ci_note": null},
+                 "resolved_threads": 4, "resolved_thread_ids": ["PRRT_kwDO..."],
+                 "ci": "SUCCESS", "ci_note": null},
       "ended_at": "..."
     }
   ],
@@ -78,6 +93,14 @@
   `state.py merge-fix` が fix結果の list を `len()` して state.json に int で保存する。
   混同して fix結果側に int を書くと過去 `merge-fix` が落ちていたため、現在は int/list 両受理
 - `rounds[].fix.ci_note` — コード無関係の CI 失敗時に「Assignees 未設定」等の理由を残す
+- `rounds[].verdict` — そのラウンドの判定（`approved` / `changes_requested`）。
+  次のラウンドの開始時に、修正の記録の有無を突き合わせるために使う
+- `rounds[].fix.resolved_thread_ids` — 修正サブエージェントが Resolve したと申告した
+  thread ID の一覧。次のラウンドの開始時に GitHub 側の未解決集合と突き合わせる
+- `carried_over` — 再開の時点で残っていた未解決の指摘。`fixed_in_round` が `null` の
+  あいだは、両者が承認しても収束させない（Step 3 参照）
+- `sweep` — 最終スイープ後の検証結果。`remaining_open` は GitHub 側で数え直した実数で、
+  `declared_remaining_open` は結果ファイルの申告値。両者が食い違う場合は実数を採る
 
 ## Step 0: 準備 + 既存 state 引き継ぎ
 
@@ -120,13 +143,14 @@ eval "$("$SCRIPTS/state.py" init "$STATE_PR" \
           ${EXTRA_INSTRUCTIONS_FILE:+--extra-instructions-file "$EXTRA_INSTRUCTIONS_FILE"})"
 
 # eval で取り込まれる変数: PR, WORKTREE, REPO, HEAD_BRANCH, BASE_BRANCH,
-#                        IS_OWN_PR, EVENT_DOWNGRADE, RESUMED
+#                        IS_OWN_PR, EVENT_DOWNGRADE, CARRIED_OVER_THREADS, RESUMED
 cd "$WORKTREE"
 ```
 
 `state.py init` が内部で行う処理:
 
-1. 既存 state.json があり `final == null` なら再開
+1. 既存 state.json があり `final == null` なら再開。**再開のときは PR 上の未解決の指摘を
+   数え、`carried_over` に記録する**（Step 3 の判定へ入る。取得できなければ記録は変えない）
 2. 自分の PR 判定（`gh api user` と `gh pr view --json author` を比較）
 3. worktree 作成（`<worktree-base>/<owner>--<repo>/pr<PR>`。`<worktree-base>` は `NDF_WORKTREE_BASE` env > `<システム tmpdir>/ndf-worktrees` の優先順で解決。既存パスが現リポジトリの登録済み worktree でなければ `.stale-<ts>` に退避して作り直す。実 path は state.json の `worktree_path` を参照）
 4. 既存コメントスナップショット (`fix/scripts/fetch-pr-comments.sh` で 3 ソース一括取得) → `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt`
@@ -144,6 +168,9 @@ eval "$("$SCRIPTS/state.py" start-round "$STATE_PR")"
 
 `state.py start-round` は `max_rounds` 超過なら `final=max_rounds` を書いて exit 1。
 それ以外は新しい round エントリを state.rounds に push して KEY=VALUE を吐く。
+
+前のラウンドの後始末（返信と Resolve）が終わっていなければ **exit 5** で止まる。
+条件は Step 3 の「Step 1 の開始時に行う後始末の検査」にある。
 
 ## Step 2: codex / gemini 並列レビュー（AI 直接投稿）
 
@@ -262,7 +289,7 @@ launcher が生成するプロンプトに以下を強制している:
 **「取得できなかった」と「0 件」を区別する。** 取得の失敗で止めると、GitHub 側の
 一時的な不調でループが進まなくなる。
 
-## Step 3: 判定（intent ベース）
+## Step 3: 判定（intent ベース + 引き継いだ指摘）
 
 ```bash
 if "$SCRIPTS/state.py" judge "$STATE_PR"; then
@@ -274,7 +301,33 @@ else
 fi
 ```
 
-**判定ロジック**:
+### 判定へ入れる対象
+
+判定は 2 つの対象を別々に見る。**投稿数と未解決の指摘の数は一致しない。**
+投稿数はそのラウンドで外部の AI が新しく投稿した件数で、未解決の指摘は前のラウンドの
+分も含む Pull Request 上の総数である。
+
+| 対象 | 判定への入れ方 | 数え方 |
+|---|---|---|
+| そのラウンドで新しく投稿された指摘 | 外部の AI が返した `intent` と重要度で見る | `result.json` の `comments_count` |
+| 引き継いだ指摘（再開の時点で残っていた未解決の指摘） | 修正の工程（Step 5）を 1 度通すまで収束させない | GraphQL の `reviewThreads` を数え直す |
+
+```mermaid
+graph TD
+    A[ラウンドの判定] --> B{新しく投稿された<br/>指摘は通ったか}
+    B -->|通らない| E[修正の工程<br/>Step 5]
+    B -->|通った| C{引き継いだ指摘が<br/>残っているか}
+    C -->|残っている| E
+    C -->|無い| D[収束<br/>final=approved]
+    E --> F[次のラウンド]
+```
+
+すべてのラウンドで未解決の指摘が 0 件になるまで収束させる形は採らない。承認された
+ラウンドに軽微な指摘が乗るのは通常の経路であり、そこを収束の条件にするとラウンドが
+増え続ける。収束を止めるのは修正の工程を 1 度通すまでで、**増えるラウンドは最大 1 回**に
+収まる。1 度通した後に残る指摘は最終スイープ（Step 7.5）が受け持つ。
+
+**判定ロジック**（新しく投稿された指摘の側）:
 
 - `APPROVE` / `SKIP` は pass
 - `COMMENT` は `by_severity.critical == 0 && major == 0` のみ pass（軽微な指摘のみなら通す）
@@ -283,6 +336,41 @@ fi
 
 自分の PR で `REQUEST_CHANGES → COMMENT` にダウングレード投稿していても、
 intent が `REQUEST_CHANGES` なら継続する。
+
+### 引き継いだ指摘の記録と解除
+
+| 段階 | 起きること |
+|---|---|
+| `init` の再開 | 未解決の指摘を数え、`carried_over` に件数と thread ID を記録。出力に `CARRIED_OVER_THREADS=N` |
+| `judge` | `carried_over.fixed_in_round` が `null` のあいだは、両者が承認しても exit 2 |
+| `merge-fix` | 修正の工程を通したラウンド番号を `carried_over.fixed_in_round` に入れる |
+| 以降の `judge` | 引き継ぎは判定から外れ、収束の振る舞いは現行に戻る |
+
+新規に開始したレビューでは記録しない。引き継ぎは**再開の時点**で決まる。
+未解決の指摘を取得できなかったときは記録を書き換えない（0 件として扱わない）。
+
+### 未解決の指摘を単独で数える
+
+```bash
+eval "$("$SCRIPTS/state.py" unresolved-threads "$STATE_PR")"
+# UNRESOLVED_COUNT / UNRESOLVED_THREAD_IDS を取り込む。
+# exit 1 = 取得できなかった（0 件と区別する）
+```
+
+### Step 1 の開始時に行う後始末の検査
+
+`start-round` は、前のラウンドの後始末が終わっているかを次の 2 点で確かめ、
+どちらかに当たれば **exit 5** で止まる。進行側が手で修正して次のラウンドへ進めると、
+Step 5 が担う返信と Resolve が飛ばされるため。
+
+| 状態 | 扱い |
+|---|---|
+| 前のラウンドが修正必須の判定で、`fix` の記録が無い | exit 5 |
+| 前のラウンドで Resolve したと申告された thread が GitHub 側で未解決のまま | exit 5 |
+| 未解決の指摘を取得できない | 検査を飛ばし、確認できなかったことを stderr へ残して続行 |
+
+判定の結果（`rounds[].verdict`）を持たない古い state.json では、保存された `intent` と
+重要度から判定し直して同じ検査へ通す。
 
 ## Step 4: 振動検知
 

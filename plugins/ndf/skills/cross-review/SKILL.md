@@ -44,7 +44,8 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 | 投稿の確認 | **申告されたコメント数を GitHub 側と突き合わせる**。投稿が届いていなければ中断する（取得できない場合は申告を採用） |
 | 修正 | **必ずサブエージェント (`general-purpose`) で実行**。メイン context に diff は載せない |
 | ユーザ問い合わせ | 自動判断を最大化（`critical`/`major`/`minor` は自動修正、ループ中の `nit` は deferred） |
-| 取りこぼし防止 | **ループ終了時（approved / max_rounds / oscillation / error いずれも）に最終スイープを必須実行**。`/ndf:fix` を再実行し、残った open review thread（最終 APPROVE ラウンドの minor/nit インラインコメント含む）を **全て解消**。修正可能なものは修正 + push、判断保留 nit も reply + resolveReviewThread して **open thread 0 で終了** |
+| 取りこぼし防止 | **ループ終了時（approved / max_rounds / oscillation / error いずれも）に最終スイープを必須実行**。`/ndf:fix` を再実行し、残った open review thread（最終 APPROVE ラウンドの minor/nit インラインコメント含む）を **全て解消**。修正可能なものは修正 + push、判断保留 nit も reply + resolveReviewThread して **open thread 0 で終了**。件数は `state.py verify-sweep` が GitHub 側の実数で確認する |
+| 再開時の引き継ぎ | 再開の時点で残っていた未解決の指摘は `carried_over` に記録し、**修正の工程を 1 度通すまで収束させない**。増えるラウンドは最大 1 回 |
 | 状態の永続化 | `<worktree>/.cross_review/cross-review-pr<番号>-state.json` に集約。中断・再開可能 |
 | 長尺PR対策 | **`--rotate-after` ラウンドで PR をローテーション**（default=light: 同ブランチで PR 巻き直し / squash: 新ブランチ + squash 統合） |
 | 振動検知 | 同じ指摘が 2 round で 50%以上重複したら中断 |
@@ -216,7 +217,8 @@ export CROSS_REVIEW_TMP_DIR="$TMP_DIR"
 cd "$WORKTREE"
 
 while :; do
-  # Step 1: round 開始判定 (max_rounds 到達で exit 1)
+  # Step 1: round 開始判定 (max_rounds 到達で exit 1 / 前ラウンドの後始末が
+  #   終わっていなければ exit 5。詳細は docs/01-state-and-review.md)
   eval "$("$SCRIPTS/state.py" start-round "$STATE_PR")"
 
   # Step 2: 並列レビュー
@@ -228,7 +230,8 @@ while :; do
   [ "$ONLY" != "gemini" ] && "$SCRIPTS/state.py" read-result "$STATE_PR" codex
   [ "$ONLY" != "codex"  ] && "$SCRIPTS/state.py" read-result "$STATE_PR" gemini
 
-  # Step 3: 判定 (0=approved/2=continue)
+  # Step 3: 判定 (0=approved/2=continue)。引き継いだ指摘が残っていれば、
+  #   両者が承認しても 2 を返して修正の工程へ回す。
   if "$SCRIPTS/state.py" judge "$STATE_PR"; then break; fi
 
   # Step 4: 振動検知 (4=oscillation)
@@ -287,7 +290,11 @@ done
 #   経由しないため、ここで拾わないと PR 上に未解決スレッドが残る。
 #   sweep 結果 (sweep-pr$STATE_PR-result.json) はメインが Step 8 の報告に折り込む。
 
-# Step 8: 終了処理 (deferred nit + ラウンドサマリ)
+# Step 7.5 後段: 最終スイープの結果を GitHub 側の実数で検証する (必須)
+#   exit 0 = 未解決の指摘なし / exit 6 = 残っている (件数と理由を完了報告へ含めて続行)
+"$SCRIPTS/state.py" verify-sweep "$STATE_PR" || [ $? -eq 6 ]
+
+# Step 8: 終了処理 (deferred nit + ラウンドサマリ + スイープ結果)
 "$SCRIPTS/state.py" report "$STATE_PR"
 ```
 
