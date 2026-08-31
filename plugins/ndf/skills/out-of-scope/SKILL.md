@@ -21,7 +21,7 @@ allowed-tools:
 | --- | --- |
 | 範囲外の課題 | この変更の受け入れ条件にも、直す対象にも含まれない課題 |
 | 起票 | GitHub の issue を新しく作ること |
-| 由来 | その課題を見つけた元の issue / Pull Request / レビューの指摘 |
+| 由来 | その課題を見つけた元。Pull Request がまだ無ければ、起点の issue になる |
 
 ## いつ呼ぶか
 
@@ -70,8 +70,11 @@ gh issue list --state open --search "<課題を表す語 2〜3 個>"
 見つかったら起票せず、そちらへ由来を 1 行足す。
 
 ```bash
-gh issue comment <番号> --body "同じ事象を PR #<番号> の作業中に確認した。"
+gh issue comment <番号> --body "同じ事象を <由来> の作業中に確認した。"
 ```
+
+`<由来>` は `PR #<番号>` か `issue #<番号>` である。**Pull Request を作る前に見つけた課題は、
+起点の issue の番号で書く。** `PR #<番号>` に決め打つと、その課題が後の検索から漏れる。
 
 ### 4. 起票する
 
@@ -91,7 +94,7 @@ gh issue comment <番号> --body "同じ事象を PR #<番号> の作業中に�
 （影響と、その範囲）
 
 ## 由来
-（この issue / Pull Request の番号）
+（この変更の起点。`PR #<番号>` か `issue #<番号>`）
 ```
 
 **起票の前に、本文と付ける label を提示して同意を取る。** issue は外部から見える場所へ
@@ -117,13 +120,18 @@ gh issue create --title "<何が起きるか>" --body-file <本文のファイ�
 gh pr comment <PR番号> --body "範囲外と判断し、#<起票した番号> として残した。"
 ```
 
+Pull Request がまだ無い段階では、起点の issue へ同じ 1 行を足す。
+
 ## 起票した課題の辿り方
 
 由来は**本文の参照だけ**で辿る。label は増やさない。
 
 ```bash
-gh issue list --state all --search "PR #<番号>"
+gh issue list --state all --search "<由来>"      # 例: "PR #177" / "issue #175"
 ```
+
+検索の語は、起票のときに書いた由来と同じ形にする。`PR #<番号>` に決め打つと、
+Pull Request を作る前に起票した課題が漏れる。
 
 **`in:body` で絞らない。** 既存の issue へコメントで由来を足した場合、本文には番号が
 無いため検索から漏れる。漏れた課題は、振り返りで取りこぼしとして扱われる。

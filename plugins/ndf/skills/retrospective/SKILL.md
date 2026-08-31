@@ -40,8 +40,12 @@ allowed-tools:
 
 ```bash
 # その変更から出た課題の一覧（本文とコメントの両方を対象にする）
-gh issue list --state all --search "PR #<番号>"
+gh issue list --state all --search "<由来>"      # 例: "PR #177" / "issue #175"
 ```
+
+`<由来>` は `out-of-scope` が起票のときに書いたものと同じ形にする。Pull Request を作る前に
+見つけた課題は起点の issue の番号で残るため、`PR #<番号>` だけで探すと漏れる。**起点の
+issue と Pull Request の両方で検索する。**
 
 次の 3 か所と突き合わせる。番号が無いものが取りこぼしである。
 

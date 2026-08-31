@@ -84,10 +84,11 @@ python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['descript
 
 ## v9.3.0 へ更新するとき
 
-**作業ツリー運用の不具合の修正です。** テスト環境の停止・案内の表示・宣言ファイルと
-台帳の解決先が直ります（#173）。v9.2.0 より前から更新する場合は、Skill `worktree` と
-作業ツリー運用の hook も増えます。導入済みの環境ではマーケットプレイスの更新と
-プラグインの再インストールを行ってください。
+**Skill が 3 個増えます。** マージ後の工程として `release-verification`（リリース後テスト）と
+`retrospective`（振り返り）が加わり、範囲外の課題をその場で issue にする `out-of-scope` が
+加わります（#175）。既存の Skill の手順は変わりません。v9.2.0 より前から更新する場合は、
+Skill `worktree` と作業ツリー運用の hook も増えます。**導入済みの環境では、追加された Skill を
+読み込むためにマーケットプレイスの更新とプラグインの再インストールが要ります。**
 
 ```bash
 # Claude Code
