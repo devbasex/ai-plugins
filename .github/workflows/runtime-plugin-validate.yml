@@ -16,6 +16,7 @@ on:
   push:
     branches:
       - main
+      - develop
       - "release/**"
     paths:
       - ".claude-plugin/**"

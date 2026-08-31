@@ -13,7 +13,9 @@
 - ドキュメント、コミットメッセージ、PR説明も日本語
 
 ### Git運用ルール
-- **mainブランチへの直接コミット/プッシュ禁止**
+- **`main` / `develop` への直接コミット・プッシュ禁止。** Pull Request の宛先は
+  **`develop`**（開発版チャネル）。`main`（正式版チャネル）へ進めるのは配布の工程だけ
+  （「版の付け方と開発版の配布」）
 - **開発の変更は `.worktrees/<ブランチ名>` の作業ツリーの中で行う**（`/ndf:worktree`）。clone したディレクトリ（主ディレクトリ）は編集対象から外す
   - `issues/` `docs/` と各ランタイムの設定は主ディレクトリで編集してよい
   - 主ディレクトリの編集は拒否されない。案内が出ても操作は成立する
@@ -23,27 +25,33 @@
 
 ### 版の付け方と開発版の配布
 
-**配布のチャネルは 2 つに分ける。`main` が開発版、`stable` ブランチが正式版である。**
-マージは `main` へ行い、正式版として出すときだけ `stable` を `main` の位置へ進める。
-**これにより、マージと配布が別の操作になる。**
+**配布のチャネルは 2 つに分ける。`main` が正式版、`develop` が開発版である。**
+開発の変更は `develop` へマージし、正式版として出すときだけ `main` を `develop` の位置へ
+進める。**これにより、マージと配布が別の操作になる。**
 
-分けない場合、`main` へマージした時点で常用する利用者へ届く。レビューを通った変更であっても、
-利用者の環境で動くかは配布した後にしか分からない。`release` が定めた「検証への配布 →
-本番への配布」の 2 段階が、チャネルが 1 つでは 1 段階に潰れる。
+分けない場合、マージした時点で常用する利用者へ届く。レビューを通った変更であっても、利用者の
+環境で動くかは配布した後にしか分からない。`release` が定めた「検証への配布 → 本番への配布」の
+2 段階が、チャネルが 1 つでは 1 段階に潰れる。
 
 | チャネル | ref | 何が載るか | 誰が登録するか |
 | --- | --- | --- | --- |
-| 開発版 | `main`（既定ブランチ） | マージされた変更がそのまま載る | 開発者と、検証に参加する利用者 |
-| 正式版 | `stable` | 正式版として承認された版だけが載る | 常用する利用者 |
+| 正式版 | `main`（既定ブランチ） | 正式版として承認された版だけが載る | 常用する利用者 |
+| 開発版 | `develop` | マージされた変更がそのまま載る | 開発者と、検証に参加する利用者 |
+
+**正式版を既定ブランチへ載せるのは、利用者の取得手順を変えないためである。** 取得元の登録に
+ref は保存されず（`known_marketplaces.json` は URL だけを持つ）、clone は登録した時点の既定
+ブランチに固定される（fetch の refspec が `+refs/heads/main:refs/remotes/origin/main` だけになる）。
+そのため**既定ブランチを別の名前へ移しても、すでに登録した利用者は `main` を追い続ける**。
+正式版を `main` に置けば、既存の利用者も新しい利用者も登録し直さなくてよい。
 
 ```bash
-# 常用する利用者（正式版）
-claude plugin marketplace add https://github.com/devbasex/ai-plugins.git#stable
-codex plugin marketplace add devbasex/ai-plugins --ref stable
-
-# 検証に参加する利用者（開発版）
-claude plugin marketplace add https://github.com/devbasex/ai-plugins.git
+# 常用する利用者（正式版）— これまでと同じ。ref を指定しない
+claude plugin marketplace add https://github.com/devbasex/ai-plugins
 codex plugin marketplace add devbasex/ai-plugins
+
+# 検証に参加する利用者（開発版）— ref を明示する
+claude plugin marketplace add https://github.com/devbasex/ai-plugins.git#develop
+codex plugin marketplace add devbasex/ai-plugins --ref develop
 ```
 
 ref の書き方は `owner/repo@ref` と `git-url#ref` の 2 つで、
@@ -52,27 +60,26 @@ ref の書き方は `owner/repo@ref` と `git-url#ref` の 2 つで、
 `owner/repo@ref` も受け取る。`claude plugin install` に版を指定する手段は無い（これは確定）。
 
 **Kiro はマーケットプレイスの経路を持たない。** clone した作業ディレクトリから導入するため、
-ref にあたるのは clone の checkout である。
+ref にあたるのは clone の checkout である。clone 直後は既定ブランチ（`main`）なので、正式版を
+使うだけなら追加の操作は要らない。
 
 ```bash
-git -C <clone> checkout stable
+git -C <clone> checkout develop   # 開発版を試すときだけ
 bash plugins/ndf/dev.kiro/install.sh --project <ディレクトリ> --yes
 ```
 
-**`stable` は動くブランチであって、タグではない。** 正式版のたびに `main` の位置へ進める。
-利用者は 1 度登録すれば、以降は `marketplace update` で追える。タグへ固定すると、正式版が
-出るたびに全利用者が登録し直すことになる。
+**`develop` は開発の本流で、`main` は動かした先である。** 正式版のたびに `main` を `develop` の
+位置へ fast-forward する。`main` へ直接コミットしない。
 
-**`stable` を進めるのが `release` の「本番への配布」である。** そちらには承認が要る。`main`
+**Pull Request のベースは `develop` である。** 既定ブランチが `main` であるため、`gh pr create`
+は指定しないと `main` を宛先にする。**`--base develop` を必ず付ける。**
+
+**`main` を進めるのが `release` の「本番への配布」である。** そちらには承認が要る。`develop`
 へのマージは「検証への配布」にあたり、承認なしで進めてよい（`/ndf:release`）。
 
 **1 人の利用者は片方のチャネルしか持てない。** 取得元は名前ごとに 1 つしか登録できないため
-（後述）、開発版と正式版を同時には入れられない。常用する利用者が開発版を試すときは、
-一時的に登録し直すか、`claude --plugin-dir` で読み込む。
-
-**移行のために 1 度だけ登録し直す。** 現在の登録は ref を指定しておらず、既定ブランチ
-（`main`）を追っている。`stable` を最初に作る版の更新案内へ、登録し直しの手順を書く。
-書かなければ、常用する利用者へ開発版が届き続ける。
+（後述）、正式版と開発版を同時には入れられない。常用する利用者が開発版を試すときは、一時的に
+登録し直すか、`claude --plugin-dir` で読み込む。
 
 **接尾辞は人が読むための印である。** Claude Code の直接インストール経路は版数を
 **キャッシュキーとしての文字列一致**でしか見ず、`-dev` や `-rc` を prerelease として
@@ -81,8 +88,8 @@ semver の順序で除外されるのは、プラグイン間の依存解決（`
 それでも接尾辞を付けるのは、**入れたくない利用者が版数を見て判断できるようにする**ためである。
 
 **接尾辞には、チャネルを分けるうえでの役割もある。** 公式ドキュメントは release channel の
-注意として、**2 つのチャネルが同じ版数へ解決されると更新が飛ばされる**と書いている。`main`
-の版数へ接尾辞を付けておけば、`stable` の版数と必ず異なる。
+注意として、**2 つのチャネルが同じ版数へ解決されると更新が飛ばされる**と書いている。
+`develop` の版数へ接尾辞を付けておけば、`main` の版数と必ず異なる。
 
 | 版 | 形 | 意味 |
 | --- | --- | --- |
@@ -195,11 +202,11 @@ ai-plugins/
 - 包括的なドキュメントを提供
 - 変更前にテスト
 - 手順・指示書・README に書くコマンドは、書く前に実行して結果を確かめる
-- featureブランチで作業、PRを通じてマージ
+- featureブランチで作業、`develop` 宛の PR を通じてマージ
 
 ### DON'T（非推奨）
 - ファイル全体を無闇に読み込む
-- mainブランチに直接コミット
+- `main` / `develop` に直接コミット
 - バージョン番号の更新を忘れる
 - ドキュメントをスキップ
 - 機密情報をコミット
