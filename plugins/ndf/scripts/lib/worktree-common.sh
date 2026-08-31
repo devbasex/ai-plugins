@@ -775,6 +775,13 @@ wt_extract_write_target() {
   local n=${#words[@]} i j w target found=0 prev="" at_cmd=0 dest="" k cmd_prefix=0
   # `command` / `builtin` の被演算子を命令の位置として数えている間だけ 1。
   local cmd_wrapper=0 or_next=""
+  # `||` の右辺のブレースグループが必ず後続へ進まないと判ったときに積む。まとまり
+  # を閉じる `}` の添字と、そこで戻す位置を持つ。入れ子は内側が先に閉じるため、
+  # 積んだ順にそのまま取り出せる。
+  local -a or_end=() or_cwd=() or_known=()
+  local or_depth=0
+  # `_or_group_exits` が返す、まとまりを閉じる `}` の添字。
+  local _WT_GROUP_END=0
   # `cd` の枝が、その命令に付いたリダイレクトを移動前の位置で解決し終えた語の
   # 位置。ここより手前の `__WT_REDIR__` / `__WT_APPEND__` を二度拾わない。
   local cd_redir_end=0
@@ -863,6 +870,65 @@ wt_extract_write_target() {
     pipe_cwd="${sub_pipe_cwd[subshell_depth]}"
     pipe_known="${sub_pipe_known[subshell_depth]}"
     pipe_cds="${sub_pipe_cds[subshell_depth]}"
+  }
+  # `||` の右辺のブレースグループ (`{ ... }`) が、必ず後続へ進まないかを見る。
+  # まとまりは同じシェルで走るため、その中の `exit` はスクリプトを終える。
+  # 引数はまとまりを開く `{` の添字で、閉じる `}` の添字を `_WT_GROUP_END` に置く。
+  #
+  # 数えるのは**まとまりの直下にある、条件の付かない非継続命令**だけである。
+  # `{ [ -n "$x" ] && exit; }` や `{ if ...; then exit; fi; }` は、通ったかどうかが
+  # 実行時に決まる。字面では抜けたと言い切れないため数えない。候補にするのは
+  # `depth` が 1 の位置にあり、直前が `{` か `__WT_SEP__` の語だけである。
+  #
+  # 候補は、その命令が終わるところまで見てから確定する (`pend`)。`{ exit 1 & }` の
+  # 背景実行とパイプの区画は部分シェルで走り、親のシェルは続くためである。引数と
+  # リダイレクトは命令の一部なので跨ぎ、`&` `|` `|&` で取り消し、`;`（改行）・
+  # `&&` `||`・閉じる `}` で確定する。
+  #
+  # 予約語として深さを動かすのは命令の位置にある語だけである。`echo done` の
+  # `done` を数えると深さが狂い、後ろの非継続命令が候補から外れる。それでも数え
+  # 損ねたときは、抜けると言い切れない側（従来どおりの抑止）へ倒れる。
+  _or_group_exits() {
+    local p="$1" depth=0 pw="" tw exits=0 pend=0 at_pos j
+    _WT_GROUP_END=0
+    for ((j = p; j < n; j++)); do
+      tw=${words[j]}
+      if [ "$pend" = 1 ]; then
+        case "$tw" in
+          "&"|"|"|"|&") pend=0 ;;
+          __WT_SEP__|"}"|"&&"|"||") exits=1; pend=0 ;;
+        esac
+      fi
+      at_pos=0
+      case "$pw" in
+        ""|"{"|"("|__WT_SEP__|__WT_CASE_END__|__WT_SUBSHELL_END__|"&&"|"||"|"|"|"|&"|"&"\
+        |if|elif|then|else|while|until|do|"!"|time) at_pos=1 ;;
+      esac
+      case "$tw" in
+        "{"|"(") depth=$((depth + 1)) ;;
+        "}"|__WT_SUBSHELL_END__)
+          depth=$((depth - 1))
+          if [ "$depth" -le 0 ]; then
+            _WT_GROUP_END=$j
+            [ "$exits" = 1 ] && return 0
+            return 1
+          fi
+          ;;
+        if|while|until|for|select|case)
+          if [ "$at_pos" = 1 ]; then depth=$((depth + 1)); fi
+          ;;
+        fi|done|esac)
+          if [ "$at_pos" = 1 ]; then depth=$((depth - 1)); fi
+          ;;
+        exit|return|break|continue)
+          if [ "$depth" = 1 ]; then
+            case "$pw" in "{"|__WT_SEP__) pend=1 ;; esac
+          fi
+          ;;
+      esac
+      pw="$tw"
+    done
+    return 1
   }
   _emit() {
     _wt_is_not_target "$1" && return
@@ -1015,6 +1081,21 @@ wt_extract_write_target() {
               pipe_cwd="$cwd"; pipe_known="$cwd_known"; pipe_cds=0
               continue
               ;;
+            "{")
+              # `cd dir || { echo ...; exit 1; }` は `|| exit` より広く使われる。
+              # まとまりの中に条件の付かない非継続命令があれば、抜けた先へは
+              # 進まないため、続きが走るのは移動した後の位置だけである。
+              #
+              # ただし**まとまりの中は左辺が失敗した位置で走る**（`cd` は効いて
+              # いない）。ここで位置を戻すと中の書き込み先を取り違えるため、
+              # 移動した後の位置は閉じる `}` まで預け、下の失敗時の扱いへ落とす。
+              if _or_group_exits "$((i + 1))"; then
+                or_end[or_depth]=$_WT_GROUP_END
+                or_cwd[or_depth]="$cwd"
+                or_known[or_depth]="$cwd_known"
+                or_depth=$((or_depth + 1))
+              fi
+              ;;
           esac
         fi
         # 左辺が失敗したときに走る。失敗した命令を字面から特定できるのは、
@@ -1073,7 +1154,18 @@ wt_extract_write_target() {
         ;;
       "}")
         # `}` は予約語で、命令の位置にしか置けない。`echo }` の `}` は語である。
-        [ "$at_cmd" = 1 ] && _pop_group
+        if [ "$at_cmd" = 1 ]; then
+          _pop_group
+          # 必ず抜けるまとまりを閉じた。ここへ来た経路は左辺が成功した側だけで、
+          # 位置は `||` で預けた移動後のものへ戻る。判定に使う値も引き直す。
+          if [ "$or_depth" -gt 0 ] && [ "$i" = "${or_end[or_depth - 1]}" ]; then
+            or_depth=$((or_depth - 1))
+            cwd="${or_cwd[or_depth]}"; cwd_known="${or_known[or_depth]}"
+            list_cwd="$cwd"; list_known="$cwd_known"; list_cds=0; list_or=0
+            list_and_uncertain=0; list_cond_cd=0; cd_is_last=0
+            pipe_cwd="$cwd"; pipe_known="$cwd_known"; pipe_cds=0
+          fi
+        fi
         continue
         ;;
       __WT_SUBSHELL_END__)
@@ -1230,7 +1322,7 @@ wt_extract_write_target() {
     esac
   done
 
-  unset -f _emit _push_group _pop_group _push_subshell _pop_subshell
+  unset -f _emit _push_group _pop_group _push_subshell _pop_subshell _or_group_exits
   [ "$found" = 1 ] || return 1
 }
 

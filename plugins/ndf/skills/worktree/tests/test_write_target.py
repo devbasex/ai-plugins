@@ -1355,6 +1355,86 @@ def test_a_non_continuing_right_side_does_not_decide_every_form(command: str) ->
 @pytest.mark.parametrize(
     ("command", "expected"),
     [
+        # `cd dir || { echo ...; exit 1; }` は `|| exit` より広く使われる形である。
+        ("cd /main || { echo 'cd failed' >&2; exit 1; }\nsed -i 's/a/b/' README.md",
+         "/main/README.md"),
+        ("cd .worktrees/x || { echo err; exit 1; }\ncp a.txt README.md",
+         "/base/.worktrees/x/README.md"),
+        # まとまりの先頭が非継続命令の形。
+        ("cd .worktrees/x || { exit 1; }\ncp a.txt README.md",
+         "/base/.worktrees/x/README.md"),
+        ("cd .worktrees/x || { echo err; return 1; }\ncp a.txt README.md",
+         "/base/.worktrees/x/README.md"),
+        ("cd .worktrees/x || { echo err; break; }\ncp a.txt README.md",
+         "/base/.worktrees/x/README.md"),
+        ("cd .worktrees/x || { echo err; continue; }\ncp a.txt README.md",
+         "/base/.worktrees/x/README.md"),
+        # 複合コマンドを挟んでも、まとまりの直下に非継続命令があれば必ず抜ける。
+        ("cd .worktrees/x || { if true; then echo err; fi; exit 1; }\ncp a.txt README.md",
+         "/base/.worktrees/x/README.md"),
+        # 改行で区切る形も `;` と同じである。
+        ("cd .worktrees/x || {\n  echo err\n  exit 1\n}\ncp a.txt README.md",
+         "/base/.worktrees/x/README.md"),
+        # 予約語と同じ語を引数へ置いても、深さは動かない。
+        ('cd .worktrees/x || { echo "done"; exit 1; }\ncp a.txt README.md',
+         "/base/.worktrees/x/README.md"),
+    ],
+)
+def test_an_or_with_a_brace_group_that_always_exits_keeps_the_move(
+    command: str, expected: str
+) -> None:
+    """`cd x || { ...; exit 1; }` の後も、`cd` が成功した位置で続きが走る。
+
+    ブレースグループは同じシェルで走るため、その中の `exit` はスクリプトを終える。
+    `|| exit` と同じ扱いにしないと、この定番の形で相対パスの案内が出なくなる。
+    """
+    targets, rc = extract_at(command, "/base")
+    assert rc == 0, (command, targets)
+    assert targets == [expected], command
+
+
+def test_a_brace_group_body_resolves_at_the_failed_position() -> None:
+    """まとまりの中は `cd` が失敗した位置で走る。抜けた後だけが移動後の位置になる。"""
+    targets, rc = extract_at(
+        "cd .worktrees/x || { echo err > fail.log; exit 1; }\ncp a.txt README.md",
+        "/base",
+    )
+    assert rc == 0, targets
+    assert targets == ["/base/fail.log", "/base/.worktrees/x/README.md"]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # 非継続命令が条件付きなら、通ったかどうかは実行時に決まる。
+        'cd .worktrees/x || { [ -n "$FLAG" ] && exit 1; }\ncp a.txt README.md',
+        "cd .worktrees/x || { if [ -n \"$FLAG\" ]; then exit 1; fi; }\ncp a.txt README.md",
+        # 非継続命令がまったく無い形は、抜けた後も走る。
+        "cd .worktrees/x || { echo err; }\ncp a.txt README.md",
+        # 部分シェルの中の `exit` は親のシェルを終わらせない。
+        "cd .worktrees/x || { echo err; ( exit 1 ); }\ncp a.txt README.md",
+        # 先行する `||` で経路が分かれていると、まとまりの `exit` では絞れない。
+        "true || cd .worktrees/x || { echo err; exit 1; }\ncp a.txt README.md",
+    ],
+)
+def test_a_brace_group_that_may_continue_does_not_decide_the_position(command: str) -> None:
+    """まとまりを抜けるかどうかが実行時に決まる形では、書き込み先を出さない。"""
+    targets, rc = extract_at(command, "/base")
+    assert rc == 1, (command, targets)
+    assert targets == [], command
+
+
+def test_a_backgrounded_non_continuing_command_does_not_keep_the_move() -> None:
+    """`{ exit 1 & }` は部分シェルで走り、親のシェルは続く。移動後の位置にはならない。"""
+    targets, _ = extract_at(
+        "cd .worktrees/x || { echo err; exit 1 & }\ncp a.txt README.md", "/base"
+    )
+    assert "/base/.worktrees/x/README.md" not in targets, targets
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
         # `FOO+=bar` も命令の前に置ける変数代入である。
         ("FOO+=bar cd .worktrees/x\ncp a.txt README.md", "/base/.worktrees/x/README.md"),
         ("FOO=a BAR+=b cd .worktrees/x\ncp a.txt README.md",
