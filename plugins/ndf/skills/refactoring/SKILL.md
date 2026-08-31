@@ -149,3 +149,7 @@ flowchart TD
   - [references/lang-php.md](references/lang-php.md)
   - 一覧にない言語は、`data-representation.md` の判定表から自分で対応付ける
 - [references/characterization-tests.md](references/characterization-tests.md) — 現状固定テストの作り方
+
+進行を盤面へ記録する場合は `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage 構造改善` を
+実行する（`.ndf/projects.json` が無いリポジトリでは何も起きない。詳細は [references/projects-tracking.md](../development-workflow/references/projects-tracking.md)）。
+

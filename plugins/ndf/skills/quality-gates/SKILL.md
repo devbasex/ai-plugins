@@ -167,3 +167,7 @@ Skill 側に既定値を持たせると、プロジェクトの方針と食い�
 - [references/definition-of-done.md](references/definition-of-done.md) — モード別の完了の定義
 - `/ndf:release-verification` — 配布された成果物を利用者の環境で確かめる工程
 - `/ndf:out-of-scope` — 範囲外と判断したものの起票
+
+進行を盤面へ記録する場合は `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage 完了判定` を
+実行する（`.ndf/projects.json` が無いリポジトリでは何も起きない。詳細は [references/projects-tracking.md](../development-workflow/references/projects-tracking.md)）。
+

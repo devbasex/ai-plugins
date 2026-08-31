@@ -146,6 +146,20 @@ flowchart TD
 - 迷ったら起票する側へ倒す。後で閉じるほうが、拾い直すより安い
 - `retrospective` は起票された課題の一覧を作り、残っていないものを拾う
 
+## 進行を盤面へ記録する
+
+判定したモードと、いま何番目の工程にいるかは会話の中にしか残らない。セッションが変わると
+引き継がれない。**リポジトリが `.ndf/projects.json` を持つ場合に限り**、これを GitHub Projects の
+盤面へ残す。
+
+- 判定の結果（モード）は、作業場所を用意した時点で記録する
+- 工程の切れ目を持つ Skill が、自分の工程に入った時点で進行を書き込む
+- 盤面の値は**この工程表の行名と一致させる**。工程を足したときは、同じ表から盤面側も更新する
+
+**この仕組みは任意である。** 宣言が無ければ何も起きず、工程はそのまま通る。進行管理が
+理由で開発が止まってはいけない。設定と値の一覧は
+[references/projects-tracking.md](references/projects-tracking.md) にある。
+
 ## 標準フロー
 
 この図は**工程の全体像**を表す。どの Skill を起動するかは前節の表が基準であり、図はその
@@ -231,3 +245,4 @@ flowchart TD
 ## 参照
 
 - [references/workflow-modes.md](references/workflow-modes.md) — 判定の境界事例とモード別の詳細
+- [references/projects-tracking.md](references/projects-tracking.md) — 進行を GitHub Projects へ記録する設定と値の一覧

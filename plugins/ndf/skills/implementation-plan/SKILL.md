@@ -171,3 +171,7 @@ PR作成時に `issues/` にプランファイルが存在しない場合、以�
 - PR body = 「何をやったか」「どうテストするか」のレビュー用サマリ
 
 同じ内容をコピーせず、PR bodyでは「詳細は `issues/xxx.md` 参照」と誘導してもよい。
+
+進行を盤面へ記録する場合は `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage 計画` を
+実行する（`.ndf/projects.json` が無いリポジトリでは何も起きない。詳細は [references/projects-tracking.md](../development-workflow/references/projects-tracking.md)）。計画ファイルのパス（`plan`）も同じ形で記録する。
+

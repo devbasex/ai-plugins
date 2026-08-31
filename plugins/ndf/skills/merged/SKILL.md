@@ -109,6 +109,9 @@ git push origin --delete <branch> # 3. リモートにも残っていれば削�
 
 この Skill は版を上げない。担い手と時期は `release` が持つ。
 
+進行を盤面へ記録する場合は `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage 後片付け` を
+実行する（`.ndf/projects.json` が無いリポジトリでは何も起きない。詳細は [references/projects-tracking.md](../development-workflow/references/projects-tracking.md)）。
+
 ## 関連
 
 - `/ndf:release` — この工程の後に行う配布（版を上げて公開する）
