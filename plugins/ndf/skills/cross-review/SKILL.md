@@ -207,9 +207,7 @@ STATE_PR=$INITIAL_PR
 ROTATE_MODE=${ROTATE_MODE:-light}
 
 # Step 0: state 初期化 / 再開
-# ⚠ `eval "$(スクリプト)"` は、スクリプトが異常終了しても出力が空なら終了コード 0 に
-# なる。コマンド置換の終了コードは eval 自身の終了コードにならないため、止まるべき
-# 場面で止まらない。**必ず変数で受け、終了コードを見てから eval する。**
+# ⚠ eval はコマンド置換の終了コードを潰す。変数で受けてから eval する（docs/01 参照）
 INIT_VARS=$("$SCRIPTS/state.py" init "$STATE_PR" \
           --max-rounds "$MAX_ROUNDS" --rotate-after "$ROTATE_AFTER" \
           ${ONLY:+--only "$ONLY"} \
@@ -221,15 +219,8 @@ export CROSS_REVIEW_TMP_DIR="$TMP_DIR"
 cd "$WORKTREE"
 
 while :; do
-  # Step 1: round 開始判定 (max_rounds 到達で exit 1 / 前ラウンドの後始末が
-  #   終わっていなければ exit 5。詳細は docs/01-state-and-review.md)
-  #   eval で直に受けると異常終了が 0 に潰れ、前のラウンドの $ROUND のまま
-  #   Step 2 へ進んでループが止まらない。変数で受けて終了コードを見る。
-  ROUND_VARS=$("$SCRIPTS/state.py" start-round "$STATE_PR") || {
-    RC=$?
-    [ "$RC" -eq 1 ] && break   # max_rounds 到達 → ループを抜けて最終スイープへ
-    exit "$RC"                 # 5=後始末が未了 など。その場で止める
-  }
+  # Step 1: round 開始判定 (exit 1=max_rounds 到達でループを抜ける / 5=後始末が未了で中断)
+  ROUND_VARS=$("$SCRIPTS/state.py" start-round "$STATE_PR") || { RC=$?; [ "$RC" -eq 1 ] && break; exit "$RC"; }
   eval "$ROUND_VARS"
 
   # Step 2: 並列レビュー
@@ -257,8 +248,7 @@ while :; do
   # Step 6: PR ローテーション判定 (0=rotate/2=keep)。state.json の current_pr を内部更新。
   if "$SCRIPTS/state.py" should-rotate "$STATE_PR"; then
     # Step 6a: 旧 PR の素材 (title/body/isDraft + git log/diff stat) を dump
-    PREPARE_VARS=$("$SCRIPTS/rotate-pr.sh" prepare "$STATE_PR") || exit $?
-    eval "$PREPARE_VARS"
+    PREPARE_VARS=$("$SCRIPTS/rotate-pr.sh" prepare "$STATE_PR") || exit $?; eval "$PREPARE_VARS"
 
     # Step 6b: light モードのみ。**メインセッション側で Agent(subagent_type="general-purpose") を起動して**
     #   prepare.json を読ませ、現状の差分・実装を反映した title/body を
@@ -285,8 +275,7 @@ while :; do
     fi
 
     # Step 6c: 実行。NEW_PR / NEW_PR_URL / NEW_BRANCH を eval で取り込む。
-    ROTATE_VARS=$("$SCRIPTS/rotate-pr.sh" execute "$STATE_PR" --mode "$ROTATE_MODE") || exit $?
-    eval "$ROTATE_VARS"
+    ROTATE_VARS=$("$SCRIPTS/rotate-pr.sh" execute "$STATE_PR" --mode "$ROTATE_MODE") || exit $?; eval "$ROTATE_VARS"
 
     "$SCRIPTS/state.py" set-current-pr "$STATE_PR" "$NEW_PR"
     # NOTE: STATE_PR は変えない。次ループの scripts も $STATE_PR を渡す。
@@ -330,8 +319,7 @@ bash ループは Agent tool を呼べないため、light モードでは Step 
 3. **Step 6c (execute) を直接呼ぶ** — メインが bash で以下を実行:
 
     ```bash
-    ROTATE_VARS=$("$SCRIPTS/rotate-pr.sh" execute "$STATE_PR" --mode light) || exit $?
-    eval "$ROTATE_VARS"
+    ROTATE_VARS=$("$SCRIPTS/rotate-pr.sh" execute "$STATE_PR" --mode light) || exit $?; eval "$ROTATE_VARS"
     "$SCRIPTS/state.py" set-current-pr "$STATE_PR" "$NEW_PR"
     ```
 
