@@ -86,7 +86,7 @@ issue #188 が挙げた 2 つに答える。
 - [ ] 13. `python3 scripts/check-doc-staleness.py` が終了コード 0 で終わる
 - [ ] 14. `bash scripts/validate-runtime-plugins.sh` が終了コード 0 で終わる
 - [ ] 15. `uv run --with pytest pytest scripts/tests plugins/ndf -q` が通る
-- [ ] 16. `README.md` / `plugins/ndf/README.md` / `CLAUDE.md` / `AGENTS.md` の Skill 数が
+- [ ] 16. `README.md` / `plugins/ndf/README.md` / `CLAUDE.md` の Skill 数が
       追加後の数と一致している
 
 ## 版を上げるかどうか
@@ -95,9 +95,30 @@ issue #188 が挙げた 2 つに答える。
 定めるためである。自分の変更で版を上げると、決めたばかりの規則を最初の適用で破ることになる。
 バッチ 02 のマージが終わった後、進行側が新しい `release` の工程で 1 度だけ上げる。
 
-説明文書の Skill 数は 31 → 32 へ書き直す。`check-doc-staleness.py` が突き合わせるのは
-「説明文書の数 と `manifests/` の行数」および「更新案内の見出しの版数 と `plugin.json` の版」の
-2 組であり、数だけを直しても版数の組は崩れない。
+説明文書の Skill 数は、ランタイム別の 3 つと元 Skill の総数をそれぞれ 1 ずつ増やす。
+書き換える箇所は次のとおりで、1 か所でも残ると `check-doc-staleness.py` か
+`validate-runtime-plugins.sh` が落ちる。
+
+| 記載 | 変更 |
+| --- | --- |
+| `README.md` の公開Skills（Claude Code / Kiro / Codex） | 31 → 32 / 30 → 31 / 29 → 30 |
+| `README.md` の元Skills と、カテゴリ内訳の「開発方法論」 | 35 → 36 / 8 → 9 |
+| `README.md` のプラグイン一覧の説明（公開Skills と同じ 3 つを再掲している） | 31 → 32 / 30 → 31 / 29 → 30 |
+| `plugins/ndf/README.md` の配布先の表（Claude Code / Codex / Kiro CLI） | 31 → 32 / 29 → 30 / 30 → 31 |
+| `plugins/ndf/README.md` のレイアウト図 | 31 → 32 |
+| `plugins/ndf/README.md` の更新案内の本文 | 数の再掲をやめ、冒頭の表を指す |
+| `CLAUDE.md` の Skill 構成（総数と 3 ランタイム） | 35 → 36 / 31 → 32 / 29 → 30 / 30 → 31 |
+| `.claude-plugin/marketplace.json` と `plugins/ndf/.claude-plugin/plugin.json` の description | 31 → 32 |
+| `plugins/ndf/.codex-plugin/plugin.json` の description | 29 → 30 |
+
+数を機械で突き合わせるのは `README.md` と `plugins/ndf/README.md`（`check-doc-staleness.py`）、
+`marketplace.json` と 2 つの `plugin.json`（`validate-runtime-plugins.sh`）である。`CLAUDE.md`
+はどちらの検査の対象でもないため、手で確かめる。`AGENTS.md` には Skill 数の記載が無く、
+新しく書き足すと検査の外で古くなるため、対象へ入れない。
+
+`check-doc-staleness.py` は説明文書の数を `manifests/` の行数と突き合わせるほか、更新案内の
+見出しの版数を `plugin.json` の版とも突き合わせる。この Pull Request では版を上げないため、
+数だけを直しても版数の組は崩れない。
 
 ## 修正対象
 
@@ -109,8 +130,9 @@ issue #188 が挙げた 2 つに答える。
 | `plugins/ndf/skills/merged/SKILL.md` | 次の工程への案内 |
 | `plugins/ndf/skills/release-verification/SKILL.md` | 開始条件から `release` を指す |
 | `plugins/ndf/manifests/*-skills.txt` | 3 ファイルへ `release` を追加 |
-| `README.md` / `plugins/ndf/README.md` / `CLAUDE.md` / `AGENTS.md` | Skill 数 |
-| `plugins/ndf/.claude-plugin/plugin.json` | **変更しない**（上の節） |
+| `README.md` / `plugins/ndf/README.md` / `CLAUDE.md` | Skill 数（上の表） |
+| `.claude-plugin/marketplace.json` | description の Skill 数 |
+| `plugins/ndf/.claude-plugin/plugin.json` / `.codex-plugin/plugin.json` | skills の一覧へ `release` を追加、description の Skill 数。**版は上げない**（上の節） |
 
 ## タスク分解
 
@@ -139,8 +161,10 @@ issue #188 が挙げた 2 つに答える。
 ### Task 4: 配布定義と説明文書を合わせる
 
 - **対象:** `manifests/*-skills.txt` 3 ファイル、`README.md`、`plugins/ndf/README.md`、
-  `CLAUDE.md`、`AGENTS.md`
-- **内容:** `release` を 3 ファイルへ追加し、Skill 数を 31 → 32 へ直す
+  `CLAUDE.md`、`.claude-plugin/marketplace.json`、`plugins/ndf/.claude-plugin/plugin.json`、
+  `plugins/ndf/.codex-plugin/plugin.json`
+- **内容:** `release` を `manifests/` の 3 ファイルと 2 つの `plugin.json` の skills へ追加し、
+  Skill 数を「版を上げるかどうか」の表のとおりに直す
 - **進め方:** `bash scripts/build-runtime-plugins.sh` で生成物を同期し、
   `check-doc-staleness.py` と `validate-runtime-plugins.sh` で確かめる
 

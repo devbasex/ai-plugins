@@ -82,7 +82,7 @@ issue #176 の「決めること」8 件のうち、5 件（Projects をどの�
 | 担当 | 書き換えてよいパス | 他の担当が触るため書き換えないパス |
 | --- | --- | --- |
 | A | `plugins/ndf/scripts/lib/worktree-common.sh` / `plugins/ndf/scripts/worktree-guard.sh` / `plugins/ndf/skills/worktree/` | `plugins/ndf/skills/development-workflow/` / `merged/` / `release-verification/` / `manifests/` / `README.md` |
-| B | `plugins/ndf/skills/development-workflow/` / `merged/` / `release-verification/` / `pr/` / 新設する Skill / `manifests/` / `README.md` / `CLAUDE.md` / `AGENTS.md` | `plugins/ndf/scripts/` 配下すべて / `plugins/ndf/skills/worktree/` |
+| B | `plugins/ndf/skills/development-workflow/` / `merged/` / `release-verification/` / `pr/` / 新設する Skill / `manifests/` / `README.md` / `plugins/ndf/README.md` / `CLAUDE.md` / `.claude-plugin/marketplace.json` / 2 つの `plugin.json` | `plugins/ndf/scripts/` 配下すべて / `plugins/ndf/skills/worktree/` |
 | C | `docs/development-history/` / `issues/issue-175-release-verification-retrospective.md` | 上記すべて |
 
 **担当 A は配布 Skill の数を変えない。** 担当 B は 1 個増やすため、`README.md` の公開 Skill 数と
