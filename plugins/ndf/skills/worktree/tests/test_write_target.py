@@ -1639,6 +1639,11 @@ def test_end_of_options_stops_reading_dashes_as_options(command: str, expected: 
         # `--` の無い `cd -` は直前の位置で、字面からは追えない。
         "cd -\nsed -i 's/a/b/' README.md",
         "cd -P -\nsed -i 's/a/b/' README.md",
+        # **`--` の後でも `-` は直前の位置を指す。** bash では `-` がオプション
+        # ではなく被演算子の綴りとして扱われるため、`-` という名前のディレクトリが
+        # あっても `$OLDPWD` へ移る（実測で確認）。
+        "cd -- -\nsed -i 's/a/b/' README.md",
+        "cd -P -- -\nsed -i 's/a/b/' README.md",
     ],
 )
 def test_a_bare_dash_still_cannot_be_followed(command: str) -> None:
