@@ -1150,3 +1150,95 @@ def test_a_case_branch_opens_a_command_position(command: str, expected: str) -> 
     targets, rc = extract_at(command, "/base")
     assert rc == 0, (command, targets)
     assert targets == [expected], command
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # `&>` `&>>` は標準出力と標準エラーをまとめて 1 つのファイルへ向ける形で、
+        # `&` は背景実行の演算子ではない。演算子として読むと現在地がまとまりの
+        # 入口へ戻り、移動前の位置を指した案内が出る。
+        ("cd .worktrees/x && echo hi &> README.md",
+         ["/base/.worktrees/x/README.md"]),
+        ("cd .worktrees/x && echo hi &>> README.md",
+         ["/base/.worktrees/x/README.md"]),
+        # まとまりが切れていないため、後続の命令にも移動が効き続ける。
+        ("cd .worktrees/x && echo hi &> log.txt && cp a.txt README.md",
+         ["/base/.worktrees/x/log.txt", "/base/.worktrees/x/README.md"]),
+        # `>& file` `>&file` は `&>` と同義の古い書き方で、後ろの語がファイルになる。
+        ("cd .worktrees/x && echo hi >& README.md",
+         ["/base/.worktrees/x/README.md"]),
+        ("echo hi >& README.md", ["/base/README.md"]),
+        ("echo hi >&README.md", ["/base/README.md"]),
+        # `cd` 自身に付いたときも、移動する前の位置で開かれる。
+        ("cd .worktrees/x &> README.md", ["/base/README.md"]),
+        ("cd .worktrees/x >& README.md", ["/base/README.md"]),
+        # 記述子の複製と混ざっても、複製の側はファイルを開かない。
+        ("cd .worktrees/x 2>&1 && echo hi &> README.md",
+         ["/base/.worktrees/x/README.md"]),
+    ],
+)
+def test_combined_stdout_stderr_redirection_is_one_redirect(
+    command: str, expected: list[str]
+) -> None:
+    """`&>` `&>>` `>&` の `&` を演算子として読むと、書き込み先の位置がずれる。"""
+    targets, rc = extract_at(command, "/base")
+    assert rc == 0, (command, targets)
+    assert targets == expected, command
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # `2>&1` `>&2` は記述子の複製で、ファイルは開かれない。
+        "echo hi >&2",
+        "echo hi 2>&1",
+        # `>&-` は記述子を閉じる。
+        "echo hi >&-",
+    ],
+)
+def test_file_descriptor_duplication_opens_no_file(command: str) -> None:
+    """複製と閉鎖をまとめて向ける形と取り違えると、実在しない書き込み先を案内する。"""
+    targets, rc = extract_at(command, "/base")
+    assert rc == 1, (command, targets)
+    assert targets == []
+
+
+def test_and_operator_glued_to_a_redirection_is_still_a_list_separator() -> None:
+    """`cmd&&>f` の `&` と `>` は隣り合うが、`&>` ではなく `&&` と `>` である。"""
+    targets, rc = extract_at("cd .worktrees/x&&>README.md", "/base")
+    assert rc == 0, targets
+    assert targets == ["/base/.worktrees/x/README.md"]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # `||` を跨いだリストに `cd` があると、左右どちらの経路を通ったかで
+        # 現在地が変わる。`&&` の右辺の位置も決められない。
+        "cd .worktrees/x || cd .worktrees/y && echo hi > README.md",
+        "cd .worktrees/x || echo b && echo hi > README.md",
+        "cd .worktrees/x || cd .worktrees/y && cp a.txt README.md",
+    ],
+)
+def test_an_undecidable_or_before_and_suppresses_relative_targets(command: str) -> None:
+    """`||` の後の `&&` で判定が抜けると、通っていない経路の相対パスを案内する。"""
+    targets, rc = extract_at(command, "/base")
+    assert rc == 1, (command, targets)
+    assert targets == []
+
+
+def test_an_undecidable_or_before_and_still_reports_absolute_targets() -> None:
+    """絶対パスは現在地に依らないため、案内の対象から外さない。"""
+    targets, rc = extract_at(
+        "cd .worktrees/x || cd .worktrees/y && echo hi > /abs/README.md", "/base"
+    )
+    assert rc == 0, targets
+    assert targets == ["/abs/README.md"]
+
+
+def test_an_or_without_cd_keeps_the_position_before_and() -> None:
+    """`cd` の無い `||` は現在地を変えない。抑止すると検知漏れになる。"""
+    targets, rc = extract_at("echo a || echo b && echo hi > README.md", "/base")
+    assert rc == 0, targets
+    assert targets == ["/base/README.md"]

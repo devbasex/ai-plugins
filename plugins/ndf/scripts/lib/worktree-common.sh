@@ -284,6 +284,17 @@ _wt_tokenize() {
         out+=("__WT_SEP__")
         ;;
       " "|$'\t')
+        # `>& file` の `&` は、標準出力と標準エラーをまとめて 1 つのファイルへ
+        # 向ける形の一部で、後ろの語がそのファイルになる。ここで区切ると `&` が
+        # 単独の語になり、背景実行の演算子として読まれる（現在地がまとまりの
+        # 入口へ戻る）。次の語まで繋げて 1 語にする。
+        if [ "$cur" = "&" ]; then
+          last=""
+          ((${#out[@]} > 0)) && last=${out[${#out[@]} - 1]}
+          case "$last" in
+            __WT_REDIR__|__WT_APPEND__) continue ;;
+          esac
+        fi
         if [ -n "$cur" ]; then out+=("$cur"); cur=""; fi
         ;;
       # 演算子は空白で囲まれているとは限らない。切り出さないと
@@ -667,7 +678,23 @@ wt_extract_write_target() {
   cmd=$(_wt_strip_heredocs "$cmd")
 
   # `>path` のように空白の無い形を語へ分けるため、先に印を挟む。
-  local spaced=${cmd//>>/ __WT_APPEND__ }
+  #
+  # `&>` と `&>>` は、標準出力と標準エラーをまとめて 1 つのファイルへ向ける形
+  # である（`&>>` は追記）。`&` は背景実行の演算子ではない。`>` だけを置き換えると
+  # `&` が演算子として残り、現在地が処理のまとまりの入口へ戻る
+  # （`cd a && echo hi &> f` の `f` を移動前の位置で解決してしまう）。
+  # `>` より先に、まとめて 1 つの印へ置き換える。
+  #
+  # 置き換えの前に `&&` を退避する。`cmd&&>f` は `&&` と `>` だが、字面では `&`
+  # と `>` が隣り合うため、退避しないと `&>` として拾い、残った `&` が背景実行の
+  # 演算子になる。退避は字面をそのまま戻すため、引用符の中の語も変わらない。
+  local spaced=${cmd//&&/__WT_ANDAND__}
+  spaced=${spaced//&>>/ __WT_APPEND__ }
+  spaced=${spaced//&>/ __WT_REDIR__ }
+  # 戻すときは置換の字面を引用符で囲む。bash 5.2 以降は置換文字列の裸の `&` が
+  # 「一致した部分」を指すため、囲まないと `&&` が `__WT_ANDAND__` 2 つへ戻る。
+  spaced=${spaced//__WT_ANDAND__/"&&"}
+  spaced=${spaced//>>/ __WT_APPEND__ }
   spaced=${spaced//>/ __WT_REDIR__ }
 
   local -a words=()
@@ -678,6 +705,40 @@ wt_extract_write_target() {
   # `cd` の枝が、その命令に付いたリダイレクトを移動前の位置で解決し終えた語の
   # 位置。ここより手前の `__WT_REDIR__` / `__WT_APPEND__` を二度拾わない。
   local cd_redir_end=0
+  # `_redir_target` の結果。書き込み先の語と、読み進めた最後の語の位置。
+  local _WT_REDIR_DEST="" _WT_REDIR_END=0
+  # 印 (`__WT_REDIR__` / `__WT_APPEND__`) の後ろの語から、実際に開かれる
+  # ファイルを決める。`>&` には用法が 2 つある。
+  #
+  # - `2>&1` `>&2` `>&-` はファイル記述子の複製と閉鎖で、ファイルは開かない
+  # - `>& file` `>&file` は `&>` と同義で、後ろの語がファイルになる
+  #
+  # 印の後ろが `&` に続く数字か `-` だけなら前者、それ以外なら後者である。
+  # 記述子を指定した `2>&file` は bash が ambiguous redirect として拒む（実測）
+  # ため実際には開かれないが、印へ置き換えた後は `echo 2 >& file` と字面が
+  # 同じになり区別できない。案内が多めに出る側へ倒し、書き込み先として扱う。
+  _redir_target() {
+    local p=$(($1 + 1)) nx rest
+    _WT_REDIR_DEST=""
+    _WT_REDIR_END=$p
+    nx=${words[p]:-}
+    case "$nx" in
+      # `>& file` の `&`。語として切れているときはファイル名が次の語にある。
+      "&") _WT_REDIR_END=$((p + 1)); _WT_REDIR_DEST=${words[p + 1]:-} ;;
+      "&"*)
+        rest=${nx#&}
+        case "$rest" in
+          # `>&-` は記述子を閉じる。
+          "-") ;;
+          # 数字以外を含むならファイル名である。
+          *[!0-9]*) _WT_REDIR_DEST=$rest ;;
+          # 数字だけなら記述子の複製である。
+          *) ;;
+        esac
+        ;;
+      *) _WT_REDIR_DEST=$nx ;;
+    esac
+  }
   # 複合コマンドの入口で `&` の復元先を積み、出口で戻す。
   _push_group() {
     group_cwd[group_depth]="$job_cwd"
@@ -832,6 +893,13 @@ wt_extract_write_target() {
         # 左辺が成功したときに走る。移動の効果は残る。パイプの入口だけ引き直す。
         # 左辺の最後が `cd` でなければ、右辺が走ったかどうかを字面から決められない。
         [ "$cd_is_last" = 1 ] || list_and_uncertain=1
+        # `||` を跨いだリストに `cd` があると、左右どちらの経路を通ったかで現在地
+        # が変わる。右辺はどちらの経路からも走るため、位置を決められない
+        # （`cd a || cd b && echo hi > f` の `f` は `a` 側にも `b` 側にもなる）。
+        # `__WT_SEP__` の枝と同じ判定である。`list_cond_cd` を見ないのは、`&&` の
+        # 右辺は左辺が成功したときにだけ走るためで、跨いだ先の `cd` は走った
+        # ことが確かである。
+        if [ "$list_or" = 1 ] && [ "$list_cds" != 0 ]; then cwd_known=0; fi
         pipe_cwd="$cwd"; pipe_known="$cwd_known"; pipe_cds="$list_cds"
         continue
         ;;
@@ -938,8 +1006,9 @@ wt_extract_write_target() {
         for ((k = i + 1; k < n; k++)); do
           case "${words[k]}" in
             __WT_REDIR__|__WT_APPEND__)
-              _emit "${words[k + 1]:-}"
-              k=$((k + 1))
+              _redir_target "$k"
+              _emit "$_WT_REDIR_DEST"
+              k=$_WT_REDIR_END
               continue
               ;;
           esac
@@ -971,7 +1040,8 @@ wt_extract_write_target() {
       __WT_REDIR__|__WT_APPEND__)
         # `cd` に付いたリダイレクトは、その枝が移動前の位置で解決済みである。
         if [ "$i" -lt "$cd_redir_end" ]; then continue; fi
-        _emit "${words[i + 1]:-}"
+        _redir_target "$i"
+        _emit "$_WT_REDIR_DEST"
         ;;
       tee)
         # tee は並べたファイルすべてへ書き込む。1 件目で止めない。
