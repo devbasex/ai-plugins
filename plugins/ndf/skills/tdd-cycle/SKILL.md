@@ -94,6 +94,9 @@ E   ImportError: cannot import name 'validate'   ← 期待と違う。先にこ
 - 「あとで要るはず」の抽象化（差異が 1 つしかない時点で戦略や生成の仕組みを入れない）
 - 依頼範囲外の整形・改名
 
+対象の外で不具合や不整合に気づいたときは、その場で `/ndf:out-of-scope` を起動して
+起票する。書かない判断だけをして先へ進むと、判断した理由が残らない。
+
 ### 4. 整理する
 
 テストを**通ったまま**保って構造を整える。整理中にテストが落ちたら、整理をいったん戻す。
@@ -148,3 +151,4 @@ E   ImportError: cannot import name 'validate'   ← 期待と違う。先にこ
 
 - [references/test-quality.md](references/test-quality.md) — 脆いテストの例と代替
 - [references/testing-levels.md](references/testing-levels.md) — 単体・結合・契約・端から端までの使い分け
+- `/ndf:out-of-scope` — 対象の外で見つけた課題の起票

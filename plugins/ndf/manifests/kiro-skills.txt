@@ -25,3 +25,6 @@ tdd-cycle
 refactoring
 quality-gates
 worktree
+out-of-scope
+release-verification
+retrospective

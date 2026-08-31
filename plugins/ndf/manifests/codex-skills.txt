@@ -13,6 +13,7 @@ logging-guidelines
 markdown-writing
 merged
 ndf-policies
+out-of-scope
 plan-to-spec
 pr
 pr-review
@@ -21,6 +22,8 @@ problem-solving
 qa-security-scan
 quality-gates
 refactoring
+release-verification
 requirements-design
+retrospective
 tdd-cycle
 worktree

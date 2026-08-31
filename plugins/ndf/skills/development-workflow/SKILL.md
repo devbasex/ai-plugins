@@ -50,6 +50,8 @@ mode: standard
 必須工程: worktree → requirements-design → implementation-plan → tdd-cycle
   → refactoring → cross-review → quality-gates → pr
   → plan-to-spec（仕様が変わった場合） → merged
+  → release-verification（マージ前に実施できなかった受け入れ条件がある場合）
+  → retrospective
 ```
 
 工程の並びは「モードごとに起動する Skill」の表から読む。この例は出力の形を示すもので、
@@ -73,6 +75,11 @@ mode: standard
 | Pull Request | `pr` | `pr` | `pr` | `pr` |
 | 確定仕様化 | — | `plan-to-spec`（仕様が変わった場合） | `plan-to-spec` | — |
 | 後片付け | `merged` | `merged` | `merged` | `merged` |
+| リリース後テスト | — | `release-verification`（マージ前に実施できなかった受け入れ条件があるとき） | `release-verification` | `release-verification` |
+| 振り返り | — | `retrospective` | `retrospective` | `retrospective` |
+
+範囲外の課題の起票（`out-of-scope`）はこの表に載らない。工程ではないため、モードで要否を
+決めない（「範囲外の課題を見つけたとき」を参照）。
 
 **作業場所の用意は、要求を整理する前に済ませる。** 開発の変更は clone したディレクトリではなく
 `.worktrees/<ブランチ名>` の作業ツリーの中で行う。後から移すと、主ディレクトリに変更が残った
@@ -101,6 +108,33 @@ mode: standard
 
 `light` だけが工程ごと対象外である。本番コードの構造を変えない変更に構造改善の判断は要らない。
 
+**リリース後テストは完了判定と重ならない。** `quality-gates` が求めるのは取り込み前の差分に
+対する証跡である。リリース後テストの対象は配布された成果物と、それを受け取った利用者の環境で
+あり、取り込み前には用意できない条件（実物のデータ、サービス一式、導入済みの環境、配布の
+手続きそのもの）を扱う。起点は版の配布が終わった後に置く。
+
+**レビューの工程を通ったら振り返りを行う。** レビューは範囲外の課題が最も出る場である。
+起票そのものはその場で済んでいても、起票し損ねたものが無いかを確かめる場が要る。この基準に
+よって `light` だけが対象外になる。
+
+## 範囲外の課題を見つけたとき
+
+この変更の受け入れ条件にも、直す対象にも含まれない課題は、**見つけたその場で `out-of-scope` が
+issue にする**。順序を持たないため、複数の工程から呼ばれる。
+
+```mermaid
+flowchart TD
+    H[実装] -.-> S[起票]
+    R[構造改善] -.-> S
+    V[レビュー] -.-> S
+    K[完了判定] -.-> S
+    S -.番号.-> T[振り返り]
+```
+
+- 判断は 3 択に限る（起票する / 範囲内へ入れる / 起票しない）。3 つ目も理由を 1 行残す
+- 迷ったら起票する側へ倒す。後で閉じるほうが、拾い直すより安い
+- `retrospective` は起票された課題の一覧を作り、残っていないものを拾う
+
 ## 標準フロー
 
 この図は**工程の全体像**を表す。どの Skill を起動するかは前節の表が基準であり、図はその
@@ -125,17 +159,25 @@ flowchart TD
     N --> L[プルリクエスト作成]
     L --> M[確定仕様化]
     M --> P[マージ後の後片付け]
+    P --> Q[リリース後テスト]
+    Q --> T[振り返り]
+    P -.->|standard / 未検証の項目なし| T
     C -.->|standard| G
     A -.->|legacy-refactor| C
     A -.->|light| K
     K -.->|light| L
     L -.->|light / legacy-refactor| P
+    P -.->|light| Z[終了]
 ```
 
 - `standard` は A → B → C から破線で G へ抜け、**D・E・F（ドメインモデリングと専用 Skill による
   設計レビュー）を通らない**。C の設計と代替案の検討は行うが、専用 Skill は使わず
   `implementation-plan`（G）に代替案と採否として書く
-- すべてのモードが S（作業場所の用意）から始まり、P（マージ後の後片付け）で終わる
+- すべてのモードが S（作業場所の用意）から始まる。終わりは `light` が P（マージ後の後片付け）、
+  他の 3 つが T（振り返り）である
+- Q（リリース後テスト）は `standard` では条件付きで、マージ前に実施できなかった受け入れ条件が
+  あるときに通る。無ければ P から破線で T（振り返り）へ抜ける。`architecture` と
+  `legacy-refactor` は必ず通る
 - `light` は破線の経路（S → A → K → L → P）のみを通る。**N の全体テストと結合テストは通らない**
   （K は変更箇所を 1 度実行する限定的な検証と静的解析だけを指す。依存パッケージの版更新だけは
   例外として既存テスト一式を実行する — [references/workflow-modes.md](references/workflow-modes.md)）
