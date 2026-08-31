@@ -539,7 +539,8 @@ _wt_is_not_target() {
 # 第 2 引数に相対パスの起点を渡すと、出力は絶対パスになる。**同じコマンドの中で
 # 先に実行される `cd` を反映する。** 反映しないと、作業ツリーへ移ってから相対パスで
 # 書き換えたときに、移動前の位置を指した案内が出る。移動先を決められない形
-# (`cd` 単独・`cd -`・展開前の変数) では、相対パスの書き込み先を出さない。
+# (`cd` 単独・`cd -`・展開前の変数) と、`||` の左辺のどこで失敗したのかを
+# 決められない形では、相対パスの書き込み先を出さない。
 # 字面のまま起点へ継ぎ足すと、実際には触っていない位置を案内することになる。
 # 起点を渡さない呼び方では字面のまま返す。
 wt_extract_write_target() {
@@ -553,7 +554,12 @@ wt_extract_write_target() {
   # 引き継いでしまうと、主ディレクトリへの書き込みを作業ツリー側と取り違えて
   # 案内を出さない。区画の入口の位置を 2 段で控え、`|` / `|&` ではパイプの入口へ、
   # `&` では処理のまとまりの入口へ戻す。
-  local pipe_cwd="$base" pipe_known=1 job_cwd="$base" job_known=1
+  local pipe_cwd="$base" pipe_known=1 pipe_cds=0 job_cwd="$base" job_known=1
+  # `||` の右辺は**左辺が失敗したときに**走るため、直前の `cd` は効いていない。
+  # 控えた位置へ戻す仕組みはパイプ・背景実行と同じだが、戻してよいかどうかの
+  # 条件が要る。左辺のどこで失敗したかによって位置が変わるためである。
+  # 判定に使う値を and-or リスト (`;` / 改行 / `&` で切れる並び) ごとに控える。
+  local list_cwd="$base" list_known=1 list_cds=0 list_or=0 cd_is_last=0
 
   # ヒアドキュメントの本文を先に落とす。落とす前に印を挟むと、本文の中の `>` が
   # 出力の付け替えとして数えられる。
@@ -594,32 +600,68 @@ wt_extract_write_target() {
     else
       case "$prev" in __WT_SEP__|"&&"|"||"|"|"|"|&"|"&") at_cmd=1 ;; esac
     fi
+    if [ "$at_cmd" = 1 ]; then
+      case "$w" in
+        "|"|"|&"|"&"|"&&"|"||"|__WT_SEP__) ;;
+        *) cd_is_last=0 ;;
+      esac
+    fi
     prev="$w"
     case "$w" in
       "|"|"|&")
         # パイプの各区画は部分シェルで動く。入口の位置へ戻す。
         cwd="$pipe_cwd"; cwd_known="$pipe_known"
+        # 区画の中の `cd` は親の位置を変えない。`||` の判定に使う回数も戻す。
+        list_cds="$pipe_cds"; cd_is_last=0
         continue
         ;;
       "&")
         # 背景実行は処理のまとまりごと部分シェルへ入る。入口の位置へ戻す。
         cwd="$job_cwd"; cwd_known="$job_known"
-        pipe_cwd="$cwd"; pipe_known="$cwd_known"
+        pipe_cwd="$cwd"; pipe_known="$cwd_known"; pipe_cds=0
+        # `&` は and-or リストの終わりでもある。入口を引き直す。
+        list_cwd="$cwd"; list_known="$cwd_known"; list_cds=0; list_or=0
+        cd_is_last=0
         continue
         ;;
-      "&&"|"||")
-        # 同じシェルで続く。移動の効果は残るが、パイプの入口は引き直す。
-        pipe_cwd="$cwd"; pipe_known="$cwd_known"
+      "&&")
+        # 左辺が成功したときに走る。移動の効果は残る。パイプの入口だけ引き直す。
+        pipe_cwd="$cwd"; pipe_known="$cwd_known"; pipe_cds="$list_cds"
+        continue
+        ;;
+      "||")
+        # 左辺が失敗したときに走る。失敗した命令を字面から特定できるのは、
+        # リストの中の `cd` がちょうど 1 つで、それが直前の命令のときだけである。
+        # このとき失敗したのはその `cd` なので、右辺はリストの入口の位置で走る。
+        # 位置を捨てず案内を出せるほうを選び、特定できない形だけ抑止する。
+        if [ "$list_cds" = 1 ] && [ "$cd_is_last" = 1 ]; then
+          cwd="$list_cwd"; cwd_known="$list_known"
+        elif [ "$list_cds" != 0 ]; then
+          # `cd a && cd b || x` のように左辺に命令が複数あると、どこで失敗した
+          # かで位置が変わる。決められないものとして相対パスを抑止する。
+          cwd_known=0
+        fi
+        list_or=1
+        pipe_cwd="$cwd"; pipe_known="$cwd_known"; pipe_cds="$list_cds"
         continue
         ;;
       __WT_SEP__)
         # `;` と改行でも同じシェルが続く。両方の入口を引き直す。
-        pipe_cwd="$cwd"; pipe_known="$cwd_known"
+        # ただし `||` を跨いだリストに `cd` があると、それが効いたかどうかは
+        # 左辺の成否で決まる。リストを抜けた後の位置も決められない。
+        if [ "$list_or" = 1 ] && [ "$list_cds" != 0 ]; then
+          cwd_known=0
+        fi
+        pipe_cwd="$cwd"; pipe_known="$cwd_known"; pipe_cds=0
         job_cwd="$cwd"; job_known="$cwd_known"
+        list_cwd="$cwd"; list_known="$cwd_known"; list_cds=0; list_or=0
+        cd_is_last=0
         continue
         ;;
       cd)
         [ "$at_cmd" = 1 ] && [ -n "$base" ] || continue
+        # `||` の右辺で戻せるかどうかの判定に使う。
+        list_cds=$((list_cds + 1)); cd_is_last=1
         dest=""
         for ((k = i + 1; k < n; k++)); do
           if _wt_is_separator "${words[k]}"; then break; fi

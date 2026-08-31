@@ -618,6 +618,63 @@ def test_cd_does_not_reach_past_a_pipe_or_background(command: str, expected: str
     assert targets == [expected], command
 
 
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # `||` の右辺は左辺が失敗したときに走る。直前の `cd` が唯一の命令なら、
+        # 失敗したのはその `cd` であり、右辺の現在地は移動前になる。
+        ("cd .worktrees/x || sed -i 's/a/b/' README.md", "/base/README.md"),
+        ("cd .worktrees/x || echo hi > README.md", "/base/README.md"),
+        ("cd .worktrees/x || echo hi | tee README.md", "/base/README.md"),
+        # `cd` を含まない左辺は現在地を変えない。右辺もその位置のままになる。
+        ("echo hi || sed -i 's/a/b/' README.md", "/base/README.md"),
+        ("cd .worktrees/x; echo hi || sed -i 's/a/b/' README.md",
+         "/base/.worktrees/x/README.md"),
+        # 移動先が不明でも、絶対パスの書き込み先は位置が決まる。
+        ("cd .worktrees/x || sed -i 's/a/b/' /other/README.md", "/other/README.md"),
+    ],
+)
+def test_or_runs_at_the_position_before_the_failed_cd(command: str, expected: str) -> None:
+    """`||` の右辺は、直前の `cd` が効いていない位置で走る。
+
+    効いた前提の位置を引き継ぐと、主ディレクトリへの書き込みを作業ツリー側と
+    取り違えて案内を出さない（検知漏れになる）。
+    """
+    targets, rc = extract_at(command, "/base")
+    assert rc == 0, command
+    assert targets == [expected], command
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # 左辺に命令が 2 つ以上あると、どこで失敗したのかを字面から決められない。
+        # `cd .worktrees/x` が失敗したなら `/base`、`cd y` が失敗したなら
+        # `/base/.worktrees/x` で走る。
+        "cd .worktrees/x && cd y || sed -i 's/a/b/' README.md",
+        "cd .worktrees/x && echo hi || sed -i 's/a/b/' README.md",
+        # `||` を挟んだ後の現在地も、左辺が成功したかどうかで変わる。
+        "cd .worktrees/x || true\nsed -i 's/a/b/' README.md",
+        "cd .worktrees/x || cd y\nsed -i 's/a/b/' README.md",
+        "true || cd .worktrees/x\nsed -i 's/a/b/' README.md",
+    ],
+)
+def test_an_undecidable_or_suppresses_relative_targets(command: str) -> None:
+    """どちらの位置で走るか決められないときは、相対パスの書き込み先を出さない。"""
+    targets, rc = extract_at(command, "/base")
+    assert rc == 1, (command, targets)
+    assert targets == [], command
+
+
+def test_an_undecidable_or_still_reports_absolute_targets() -> None:
+    """位置が決められなくても、絶対パスの書き込み先は変わらない。"""
+    targets, rc = extract_at(
+        "cd .worktrees/x && cd y || sed -i 's/a/b/' /base/README.md", "/base"
+    )
+    assert rc == 0, targets
+    assert targets == ["/base/README.md"]
+
+
 def test_a_tilde_cd_suppresses_relative_targets() -> None:
     """チルダ展開の結果は字面から決められない。相対パスの書き込み先を出さない。"""
     targets, rc = extract_at("cd ~/dir\nsed -i 's/a/b/' README.md", "/base")
