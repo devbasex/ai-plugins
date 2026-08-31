@@ -90,9 +90,26 @@ issue #176 の「決めること」8 件のうち、5 件（Projects をどの�
 （`scripts/check-doc-staleness.py`）が互いの Pull Request で落ちる。
 
 担当 D はこの表に入れていない。着手が担当 B のマージ後になり、A / B と同時には動かないためで
-ある。触るパスは `.ndf/projects.json` / `plugins/ndf/scripts/lib/projects-common.sh` /
-`plugins/ndf/scripts/projects-sync.sh` / `plugins/ndf/skills/development-workflow/` で、A と B の
-両方と重なる。
+ある。触るパスは次のとおりで、A と B の両方と重なる（実績は PR #194 の変更ファイル）。
+
+| パス | 用途 |
+| --- | --- |
+| `.ndf/projects.json` | 盤面とフィールドの宣言 |
+| `plugins/ndf/scripts/lib/projects-common.sh` / `plugins/ndf/scripts/projects-sync.sh` | 宣言の読み取り、値の解決、盤面への書き込み |
+| 工程の切れ目を持つ 14 個の `SKILL.md` | 進行を書き込む案内を 1 行ずつ入れる |
+| `plugins/ndf/skills/development-workflow/` | 記録先としての位置づけ、`references/projects-tracking.md`、判定のテスト |
+| `plugins/ndf/skills/issue-plan-strategy/SKILL.md` | 1 issue = 1 アイテムで Pull Request を複数ぶら下げる旨 |
+
+14 個の `SKILL.md` は `worktree` / `requirements-design` / `implementation-plan` /
+`tdd-cycle` / `refactoring` / `cross-review` / `pr-review` / `quality-gates` / `pr` /
+`plan-to-spec` / `merged` / `release` / `release-verification` / `retrospective` である
+（内訳の根拠は [issues/issue-176-github-projects.md](../issue-176-github-projects.md) の
+「案 D」の表）。
+
+この 14 個のうち `worktree` は担当 A が、`development-workflow` / `merged` /
+`release-verification` / `pr` は担当 B が同じバッチの中で触る。`release` は担当 B が新設する
+Skill であり、B のマージ前には存在しない。担当 D を B のマージ後へ置くのは、この重なりを
+順序で避けるためである。
 
 生成物の同期（`bash scripts/build-runtime-plugins.sh`）は各担当が自分の Pull Request の中で
 実行する。
