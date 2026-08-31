@@ -23,23 +23,66 @@
 
 ### 版の付け方と開発版の配布
 
-**いま利用者へ届いている版は `main` に載ったものである。** 現在の登録は既定ブランチを
-追いかける形になっている。**当面は開発版も `main` へ出し、区別は版数で伝える。**
+**配布のチャネルは 2 つに分ける。`main` が開発版、`stable` ブランチが正式版である。**
+マージは `main` へ行い、正式版として出すときだけ `stable` を `main` の位置へ進める。
+**これにより、マージと配布が別の操作になる。**
 
-ただし**別の配り方が公式に用意されている**。採否は未決である。
+分けない場合、`main` へマージした時点で常用する利用者へ届く。レビューを通った変更であっても、
+利用者の環境で動くかは配布した後にしか分からない。`release` が定めた「検証への配布 →
+本番への配布」の 2 段階が、チャネルが 1 つでは 1 段階に潰れる。
 
-- `claude plugin marketplace add owner/repo@ref` / `git-url#ref` で**ブランチやタグへ固定できる**
-  （`--help` には出ないが [公式ドキュメント](https://code.claude.com/docs/en/plugin-marketplaces)
-  に記載。実機で確認）。Codex は `--ref`、Kiro には該当する手段が無い
-- 公式に **「Set up release channels」** の節があり、同一リポジトリの別 ref を指す 2 つの
-  マーケットプレイスで stable と latest を分ける形が示されている
-- `claude plugin install` に版を指定する手段は無い（これは確定）
+| チャネル | ref | 何が載るか | 誰が登録するか |
+| --- | --- | --- | --- |
+| 開発版 | `main`（既定ブランチ） | マージされた変更がそのまま載る | 開発者と、検証に参加する利用者 |
+| 正式版 | `stable` | 正式版として承認された版だけが載る | 常用する利用者 |
+
+```bash
+# 常用する利用者（正式版）
+claude plugin marketplace add https://github.com/devbasex/ai-plugins.git#stable
+codex plugin marketplace add devbasex/ai-plugins --ref stable
+
+# 検証に参加する利用者（開発版）
+claude plugin marketplace add https://github.com/devbasex/ai-plugins.git
+codex plugin marketplace add devbasex/ai-plugins
+```
+
+ref の書き方は `owner/repo@ref` と `git-url#ref` の 2 つで、
+[公式ドキュメント](https://code.claude.com/docs/en/plugin-marketplaces)に記載がある。
+`claude plugin marketplace add --help` には出ないが実機で動く。Codex は `--ref` を持ち、
+`owner/repo@ref` も受け取る。`claude plugin install` に版を指定する手段は無い（これは確定）。
+
+**Kiro はマーケットプレイスの経路を持たない。** clone した作業ディレクトリから導入するため、
+ref にあたるのは clone の checkout である。
+
+```bash
+git -C <clone> checkout stable
+bash plugins/ndf/dev.kiro/install.sh --project <ディレクトリ> --yes
+```
+
+**`stable` は動くブランチであって、タグではない。** 正式版のたびに `main` の位置へ進める。
+利用者は 1 度登録すれば、以降は `marketplace update` で追える。タグへ固定すると、正式版が
+出るたびに全利用者が登録し直すことになる。
+
+**`stable` を進めるのが `release` の「本番への配布」である。** そちらには承認が要る。`main`
+へのマージは「検証への配布」にあたり、承認なしで進めてよい（`/ndf:release`）。
+
+**1 人の利用者は片方のチャネルしか持てない。** 取得元は名前ごとに 1 つしか登録できないため
+（後述）、開発版と正式版を同時には入れられない。常用する利用者が開発版を試すときは、
+一時的に登録し直すか、`claude --plugin-dir` で読み込む。
+
+**移行のために 1 度だけ登録し直す。** 現在の登録は ref を指定しておらず、既定ブランチ
+（`main`）を追っている。`stable` を最初に作る版の更新案内へ、登録し直しの手順を書く。
+書かなければ、常用する利用者へ開発版が届き続ける。
 
 **接尾辞は人が読むための印である。** Claude Code の直接インストール経路は版数を
 **キャッシュキーとしての文字列一致**でしか見ず、`-dev` や `-rc` を prerelease として
 扱わない。Codex と Kiro も同様で、Agent Plugins Specification には解釈の規定が無い。
 semver の順序で除外されるのは、プラグイン間の依存解決（`dependencies`）の経路だけである。
 それでも接尾辞を付けるのは、**入れたくない利用者が版数を見て判断できるようにする**ためである。
+
+**接尾辞には、チャネルを分けるうえでの役割もある。** 公式ドキュメントは release channel の
+注意として、**2 つのチャネルが同じ版数へ解決されると更新が飛ばされる**と書いている。`main`
+の版数へ接尾辞を付けておけば、`stable` の版数と必ず異なる。
 
 | 版 | 形 | 意味 |
 | --- | --- | --- |
@@ -66,8 +109,8 @@ semver の順序で除外されるのは、プラグイン間の依存解決（`
 接尾辞の付いた版でも検査は通る（形式としては妥当な版数のため）。**接尾辞の付け忘れ・外し忘れは
 検査では捕まらない。** 出す前に版数を読み直す。
 
-**開発版の公開は `release` の「検証への配布」にあたる。** 正式版の公開が「本番への配布」で、
-そちらは承認が要る（`/ndf:release`）。
+**版を上げるのは、まとまり単位でマージが終わった後である。** Pull Request ごとには上げない。
+担い手と時期の決まりは `release` にある（`/ndf:release`）。
 
 **ローカルのディレクトリを同じ名前でマーケットプレイスとして追加しない。** 登録の鍵は取得元では
 なく `marketplace.json` の `name` で、**1 つの名前につき 1 つしか登録できない**（公式ドキュメントに
