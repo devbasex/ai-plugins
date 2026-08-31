@@ -477,7 +477,7 @@ pint / larastan / test / build などは **中断** を原則とする。
   | 2 | #123 | REQ (2) | APP | def456 (2 fixed) | ✅ |
   | 3 | #145 | APP | APP | — | — |
 
-- **最終スイープ結果** (Step 7.5): `sweep-pr<PR>-result.json` の `resolved` /
+- **最終スイープ結果** (Step 7.5): `sweep-pr<STATE_PR>-result.json` の `resolved` /
   `fixed_in_sweep` / `remaining_open`。**`remaining_open` は 0 が正常**（残 open
   thread あり = 取りこぼし）。0 にできなかった場合は理由を明記
 - **残 deferred nit リスト**（Step 7.5 で Resolve 済み。再対応が要るものがあれば参考列挙）

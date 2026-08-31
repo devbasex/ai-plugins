@@ -344,6 +344,9 @@ while ループ脱出後にメインが以下のプロンプトでサブエー�
 
 > **対象 PR**: `<current_pr>`（state.json の `current_pr`。rotation していれば最新 PR）
 > **worktree**: state.json の `worktree_path`
+> **結果ファイル**: `$TMP_DIR/sweep-pr<STATE_PR>-result.json`（`<STATE_PR>` は最初に
+> init した PR 番号。rotation しても変えない。後段の `verify-sweep` はこの名前で探すため、
+> 対象 PR が `<current_pr>` へ移っていてもファイル名は `<STATE_PR>` のままにする）
 >
 > ⚠ **各ラウンドの投稿数（`comments_count`）を対象の数として使わないこと。** それは
 > そのラウンドで新しく投稿された件数であり、PR 上に残っている未解決の指摘の数ではない。
@@ -357,7 +360,7 @@ while ループ脱出後にメインが以下のプロンプトでサブエー�
 >    reply した上で **Resolve まで実行**（スレッドを open のまま残さない）。
 > 3. bot 誤指摘 → 却下理由を reply して Resolve。
 > 修正で push した場合は `claude plugin validate` を通すこと。
-> 完了後、`$TMP_DIR/sweep-pr<PR>-result.json` に
+> 完了後、上の**結果ファイル**（`$TMP_DIR/sweep-pr<STATE_PR>-result.json`）に
 > `{"resolved": N, "fixed_in_sweep": M, "commit": "<SHA|null>", "remaining_open": K,
 >   "remaining_reason": "<K>0 のときの理由|null>", "items": ["<1行要約>", ...]}` を
 > 書き出し、最終メッセージで内訳を日本語報告せよ。
@@ -401,7 +404,7 @@ fi
 
 ### 再開性
 
-sweep 中にメインが落ちても、`sweep-pr<PR>-result.json` が無ければ Step 7.5 から
+sweep 中にメインが落ちても、`sweep-pr<STATE_PR>-result.json` が無ければ Step 7.5 から
 再実行すれば良い（Resolve は冪等。既 Resolve スレッドは skip される）。
 
 ## Step 8: 終了処理 — ラウンドサマリ + 残 deferred の参考列挙
@@ -421,7 +424,7 @@ sweep 中にメインが落ちても、`sweep-pr<PR>-result.json` が無けれ�
 
 `verify-sweep` を通していれば、`report` の出力に「## 最終スイープ」の節が入り、
 GitHub 側で数え直した残件数と、0 件にできなかった場合の理由が含まれる。
-メインはこれに `sweep-pr<PR>-result.json` の `resolved` / `fixed_in_sweep` を添えて最終報告する。
+メインはこれに `sweep-pr<STATE_PR>-result.json` の `resolved` / `fixed_in_sweep` を添えて最終報告する。
 
 > **方針変更（v4.11.0）**: 従来は deferred nit を「AskUserQuestion で 1 回問い合わせ」て
 > いたが、未解決スレッドを残さない方針に変更。**Step 7.5 で nit も含め全 open thread を
