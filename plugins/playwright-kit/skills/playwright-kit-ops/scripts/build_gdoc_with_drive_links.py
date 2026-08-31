@@ -3,7 +3,9 @@
 事前に対象ディレクトリを Drive にアップロード済みである前提。
 このスクリプトは:
   1. Drive 上の <run-id> フォルダから {相対パス: file_id} mapping を構築
-  2. report.md 中の `(./TC-XX/foo.ext)` 形式リンクを Drive URL に書き換え
+  2. report.md 中の証跡の位置を Drive URL に書き換え。対象はコード表記
+     (`<パス>`) とリンク記法 ([文言](<パス>)) の 2 つで、mapping に載っている
+     位置だけを書き換える。case ディレクトリ名は限定しない
   3. text/markdown としてアップロードし mimeType=Google Docs 指定で自動変換
 """
 
@@ -15,15 +17,15 @@ import re
 import sys
 from pathlib import Path
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _drive_auth import drive_service  # noqa: E402
-
-from googleapiclient.http import MediaFileUpload  # noqa: E402
-
 SCOPES = ["drive.file", "drive.readonly"]
 FOLDER_MIME = "application/vnd.google-apps.folder"
 DOC_MIME = "application/vnd.google-apps.document"
-LINK_PATTERN = re.compile(r"\(\.?\/?(TC-[\w-]+/[^\)\s]+)\)")
+# 証跡の位置は report.md に 2 通りの書き方で載る。
+#   コード表記 `<パス>`  … pytest_report.py が出す形 (- trace: `<パス>`)
+#   リンク記法 [文言](<パス>)
+# 前後にバッククォートが続く並び (``x``) は、置換すると入れ子のリンクになって
+# 読めなくなるため対象にしない。
+LINK_PATTERN = re.compile(r"(?<!`)`([^`\n]+)`(?!`)|\(([^()\s]+)\)")
 
 
 def list_folder_files(service, folder_id: str, prefix: str = "") -> dict[str, str]:
@@ -70,18 +72,47 @@ def _drive_url_for(rel: str, fid: str) -> str:
     return f"https://drive.google.com/file/d/{fid}/view"
 
 
+def _lookup(candidate: str, mapping: dict[str, str]) -> tuple[str, str] | None:
+    """候補の末尾と一致する mapping のキーを探し、(相対パス, file_id) を返す。
+
+    report.md は評価環境の root からの絶対パスを書くのに対し、mapping のキーは
+    run-id フォルダからの相対パス。先頭の要素を 1 つずつ落としながら突き合わせ、
+    最初に一致した = 最も長いキーを採る。区切りの境界を無視した部分一致は採らない。
+    """
+    if "://" in candidate:  # 外部 URL は証跡ではない
+        return None
+    rel = candidate[2:] if candidate.startswith("./") else candidate
+    rel = rel.lstrip("/")
+    parts = rel.split("/")
+    for i in range(len(parts)):
+        key = "/".join(parts[i:])
+        fid = mapping.get(key)
+        if fid is not None:
+            return key, fid
+    return None
+
+
 def rewrite_links(md: str, mapping: dict[str, str]) -> tuple[str, int]:
-    """`(./TC-XX/foo.ext)` 形式リンクを Drive URL に置換し、(新md, 置換件数) を返す。"""
+    """証跡の位置を Drive URL に置換し、(新md, 置換件数) を返す。
+
+    mapping に載っている位置だけを書き換える。載っていない文字列は原文のまま残す。
+    コード表記はリンク記法へ変え、リンクの文言には report.md が書いた位置を使う。
+    """
     replaced = 0
 
     def rep(m: re.Match[str]) -> str:
         nonlocal replaced
-        rel = m.group(1)
-        fid = mapping.get(rel)
-        if fid is None:
+        code_span, link_target = m.group(1), m.group(2)
+        candidate = code_span if code_span is not None else link_target
+        hit = _lookup(candidate, mapping)
+        if hit is None:
             return m.group(0)  # 未マップは原文のまま
+        rel, fid = hit
         replaced += 1
-        return f"({_drive_url_for(rel, fid)})"
+        url = _drive_url_for(rel, fid)
+        if code_span is not None:
+            return f"[{code_span}]({url})"
+        return f"({url})"
 
     return LINK_PATTERN.sub(rep, md), replaced
 
@@ -95,6 +126,12 @@ def main() -> int:
                    help="Run id subfolder name (= local report dir name)")
     p.add_argument("--name", required=True)
     args = p.parse_args()
+
+    # Drive 連携は optional dependency。rewrite_links を単体で読み込めるよう、
+    # 依存の解決は実行時に行う (scripts/upload_evidence.py と同じ扱い)。
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from _drive_auth import drive_service  # noqa: E402
+    from googleapiclient.http import MediaFileUpload  # noqa: E402
 
     service = drive_service(SCOPES)
     run_folder_id = find_run_folder_id(service, args.folder, args.run_id)
