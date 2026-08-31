@@ -4,7 +4,7 @@
 このスクリプトは:
   1. Drive 上の <run-id> フォルダから {相対パス: file_id} mapping を構築
   2. report.md 中の証跡の位置を Drive URL に書き換え。対象はコード表記
-     (`<パス>`) とリンク記法 ([文言](<パス>)) の 2 つで、mapping に載っている
+     (`位置`) とリンク記法 ([文言](位置)) の 2 つで、mapping に載っている
      位置だけを書き換える。case ディレクトリ名は限定しない
   3. text/markdown としてアップロードし mimeType=Google Docs 指定で自動変換
 """
@@ -20,11 +20,15 @@ from pathlib import Path
 SCOPES = ["drive.file", "drive.readonly"]
 FOLDER_MIME = "application/vnd.google-apps.folder"
 DOC_MIME = "application/vnd.google-apps.document"
-# 証跡の位置は report.md に 2 通りの書き方で載る。
-#   コード表記 `<パス>`  … pytest_report.py が出す形 (- trace: `<パス>`)
-#   リンク記法 [文言](<パス>)
+# 証跡の位置は report.md に 2 通りの書き方で載る。以下の `位置` `文言` は、
+# その場所に入る文字列を指す差し込み語であって、書き方の一部ではない。
+#   コード表記 `位置`  … pytest_report.py が出す形 (- trace: `位置`)
+#   リンク記法 [文言](位置)
 # 前後にバッククォートが続く並び (``x``) は、置換すると入れ子のリンクになって
 # 読めなくなるため対象にしない。
+# リンク先を山括弧で囲む書き方 ([文言](<位置>)) は対象にしない。報告書を作る
+# playwright_kit/pytest_report.py はこの書き方を出さない。囲まれた候補は
+# mapping のキーと一致しないため、置換されず原文のまま残る。
 EVIDENCE_PATTERN = re.compile(r"(?<!`)`([^`\n]+)`(?!`)|\(([^()\s]+)\)")
 
 

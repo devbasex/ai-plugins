@@ -129,6 +129,17 @@ class TestNonEvidenceIsPreserved:
         assert replaced == 0
         assert out == md
 
+    def test_angle_bracket_link_target_is_left_untouched(self):
+        """リンク先を山括弧で囲む書き方は対象にしない (report は出さない書き方)。
+
+        囲まれた候補は mapping のキーと一致しないため、壊れた URL を作らずに
+        原文のまま残る。
+        """
+        md = "証跡: [trace](<./TC-01/trace.zip>)\n"
+        out, replaced = rewrite_links(md, {"TC-01/trace.zip": "FID"})
+        assert replaced == 0
+        assert out == md
+
     def test_double_backtick_reference_is_left_untouched(self):
         """``x`` は入れ子のリンクになると読めなくなるため対象にしない。"""
         md = "詳細は ``body_check.jsonl`` を参照\n"
