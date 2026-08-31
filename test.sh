@@ -1,1 +1,0 @@
-FOO=bar cd foo
