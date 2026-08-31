@@ -394,4 +394,9 @@ done < <(find "$ROOT_DIR/plugins/mcp" -path '*/dev.kiro/install.sh' | sort)
 
 run python3 "$ROOT_DIR/scripts/check-markdown-links.py" --root "$ROOT_DIR"
 
+# 説明文書（README.md / plugins/ndf/README.md）に書かれた Skill 数と更新案内の版数を、
+# マニフェスト・実体・plugin.json と突き合わせる。上の Python ブロックがプラグインの定義
+# ファイルだけを見ているため、利用者が読む側の数は版を上げるたびに古くなっていた。
+run python3 "$ROOT_DIR/scripts/check-doc-staleness.py" --root "$ROOT_DIR"
+
 echo "runtime plugin validation passed"
