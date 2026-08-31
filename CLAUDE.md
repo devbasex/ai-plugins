@@ -31,7 +31,7 @@ skills/     → 実行可能なワークフロー
 
 ## NDF v9.4.0 の Skill 構成
 
-Skill は 35 個で、配布は `plugins/ndf/manifests/` が唯一の基準（Claude Code 31 / Codex 29 / Kiro 30）。ブラウザ自動テストの 4 個は `playwright-kit` プラグインへ分離した（`plugins/playwright-kit/`）。frontmatter の書き方は `plugins/ndf/skills/README.md` の規約に従い、`python3 scripts/check-skill-frontmatter.py` で検査する。利用実績と維持・統合・削除の判定は `docs/specifications/ndf-skill-inventory.md` に記録する。
+Skill は 36 個で、配布は `plugins/ndf/manifests/` が唯一の基準（Claude Code 32 / Codex 30 / Kiro 31）。ブラウザ自動テストの 4 個は `playwright-kit` プラグインへ分離した（`plugins/playwright-kit/`）。frontmatter の書き方は `plugins/ndf/skills/README.md` の規約に従い、`python3 scripts/check-skill-frontmatter.py` で検査する。利用実績と維持・統合・削除の判定は `docs/specifications/ndf-skill-inventory.md` に記録する。
 
 v6.1.0 で開発方法論レイヤーの 5 個（`development-workflow` / `requirements-design` / `tdd-cycle` / `refactoring`（当時は `safe-refactoring`）/ `quality-gates`）を追加した。モード判定の基準を持つのは `development-workflow` だけで、他の Skill とエージェント定義は判定結果を受け取る側に徹する。
 

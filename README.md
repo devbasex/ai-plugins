@@ -8,10 +8,10 @@ Claude Code / Codex / Kiro CLI向けのスキル・MCP設定を共有するた�
 
 **NDFプラグイン v9.4.0** は、同じ `ndf@ai-plugins` という名前で Claude Code / Codex / Kiro CLI へ配布されるプラグインです。配布物は `plugins/ndf/` の1ディレクトリにまとまっており、Skill の実体は `plugins/ndf/skills/` の1箇所だけです。どのランタイムへ配るかは `plugins/ndf/manifests/*-skills.txt` が決めます。
 
-- **公開Skills**: Claude Code向け core 31個、Kiro向け core 30個、Codex向け core 29個に分離。
-- **元Skills（35個）**:
+- **公開Skills**: Claude Code向け core 32個、Kiro向け core 31個、Codex向け core 30個に分離。
+- **元Skills（36個）**:
   - PR/レビューワークフロー (7): pr, pr-tests, fix, pr-review, cherry-pick-pr, deploy, merged
-  - 開発方法論 (8): development-workflow, requirements-design, tdd-cycle, refactoring, quality-gates, release-verification, retrospective, out-of-scope
+  - 開発方法論 (9): development-workflow, requirements-design, tdd-cycle, refactoring, quality-gates, release, release-verification, retrospective, out-of-scope
   - 原則・ガイドライン (9): ndf-policies, implementation-plan, plan-to-spec, investigation-rules, problem-solving, logging-guidelines, markdown-writing, issue-plan-strategy, ml-model-structure
   - データ分析・品質・環境 (4): qa-security-scan, docker-container-access, google-auth, official-skills-autoloader
   - 外部サービス連携 (1): google-drive
@@ -103,7 +103,7 @@ kiro-cli chat --agent ndf
 
 | プラグイン名 | バージョン | 説明 | 詳細 |
 |------------|----------|------|------|
-| **ndf** | 9.4.0 | Claude Code / Codex / Kiro CLI へ 1 ディレクトリから配布する NDF プラグイン。8個の専門エージェント（Claude版）、公開Skills（Claude Code向け core 31個、Kiro向け core 30個、Codex向け core 29個）、3ランタイム共通の作業ツリー運用フック（PreToolUse / SessionStart / userPromptSubmit / agentSpawn）、Claude Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:external-ai` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [README](./plugins/ndf/README.md) |
+| **ndf** | 9.4.0 | Claude Code / Codex / Kiro CLI へ 1 ディレクトリから配布する NDF プラグイン。8個の専門エージェント（Claude版）、公開Skills（Claude Code向け core 32個、Kiro向け core 31個、Codex向け core 30個）、3ランタイム共通の作業ツリー運用フック（PreToolUse / SessionStart / userPromptSubmit / agentSpawn）、Claude Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:external-ai` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [README](./plugins/ndf/README.md) |
 | **playwright-kit** | 2.0.1 | Playwright による E2E テストの計画・実装・証跡管理を提供するプラグイン。ページ役割からのテスト計画、動画 / trace 付きスクリプト実装、レポート生成と Drive 保管、playwright_kit ランタイム（init、a11y / CWV スキャン）の 4 Skill。NDF v7.0.0 で分離。 | [README](./plugins/playwright-kit/README.md) |
 
 ### NDF v9.0.0 の主な変更（非互換）

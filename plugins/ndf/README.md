@@ -8,9 +8,9 @@ PR 運用、レビュー、調査、実装計画、仕様書化、開発方法�
 
 | ランタイム | 公開 Skill | マニフェスト |
 | --- | --- | --- |
-| Claude Code | 31 個 | `.claude-plugin/plugin.json` |
-| Codex | 29 個 | `.codex-plugin/plugin.json` |
-| Kiro CLI | 30 個 | `dev.kiro/install.sh`（プラグイン機構が無いため installer で導入） |
+| Claude Code | 32 個 | `.claude-plugin/plugin.json` |
+| Codex | 30 個 | `.codex-plugin/plugin.json` |
+| Kiro CLI | 31 個 | `dev.kiro/install.sh`（プラグイン機構が無いため installer で導入） |
 
 ## レイアウト
 
@@ -18,7 +18,7 @@ PR 運用、レビュー、調査、実装計画、仕様書化、開発方法�
 plugins/ndf/
 ├── .claude-plugin/plugin.json   # Claude Code のマニフェスト
 ├── .codex-plugin/plugin.json    # Codex のマニフェスト
-├── skills/                      # 配布 Skill の唯一の実体（31 個）
+├── skills/                      # 配布 Skill の唯一の実体（32 個）
 ├── skills/README.md             # Skill 執筆の規約
 ├── optional-skills/             # どの配布先にも載せない Skill（4 個）
 ├── manifests/                   # ランタイム別の配布 Skill 一覧
