@@ -8,10 +8,10 @@ Claude Code / Codex / Kiro CLI向けのスキル・MCP設定を共有するた�
 
 **NDFプラグイン v9.3.0** は、同じ `ndf@ai-plugins` という名前で Claude Code / Codex / Kiro CLI へ配布されるプラグインです。配布物は `plugins/ndf/` の1ディレクトリにまとまっており、Skill の実体は `plugins/ndf/skills/` の1箇所だけです。どのランタイムへ配るかは `plugins/ndf/manifests/*-skills.txt` が決めます。
 
-- **公開Skills**: Claude Code向け core 28個、Kiro向け core 27個、Codex向け core 26個に分離。
-- **元Skills（32個）**:
+- **公開Skills**: Claude Code向け core 31個、Kiro向け core 30個、Codex向け core 29個に分離。
+- **元Skills（35個）**:
   - PR/レビューワークフロー (7): pr, pr-tests, fix, pr-review, cherry-pick-pr, deploy, merged
-  - 開発方法論 (5): development-workflow, requirements-design, tdd-cycle, refactoring, quality-gates
+  - 開発方法論 (8): development-workflow, requirements-design, tdd-cycle, refactoring, quality-gates, release-verification, retrospective, out-of-scope
   - 原則・ガイドライン (9): ndf-policies, implementation-plan, plan-to-spec, investigation-rules, problem-solving, logging-guidelines, markdown-writing, issue-plan-strategy, ml-model-structure
   - データ分析・品質・環境 (4): qa-security-scan, docker-container-access, google-auth, official-skills-autoloader
   - 外部サービス連携 (1): google-drive

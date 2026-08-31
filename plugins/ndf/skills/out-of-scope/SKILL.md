@@ -122,8 +122,11 @@ gh pr comment <PR番号> --body "範囲外と判断し、#<起票した番号> �
 由来は**本文の参照だけ**で辿る。label は増やさない。
 
 ```bash
-gh issue list --state open --search "PR #<番号> in:body"
+gh issue list --state all --search "PR #<番号>"
 ```
+
+**`in:body` で絞らない。** 既存の issue へコメントで由来を足した場合、本文には番号が
+無いため検索から漏れる。漏れた課題は、振り返りで取りこぼしとして扱われる。
 
 `retrospective` はこの検索で、その変更から出た課題の一覧を作る。
 

@@ -161,6 +161,7 @@ flowchart TD
     M --> P[マージ後の後片付け]
     P --> Q[リリース後テスト]
     Q --> T[振り返り]
+    P -.->|standard / 未検証の項目なし| T
     C -.->|standard| G
     A -.->|legacy-refactor| C
     A -.->|light| K
@@ -175,7 +176,8 @@ flowchart TD
 - すべてのモードが S（作業場所の用意）から始まる。終わりは `light` が P（マージ後の後片付け）、
   他の 3 つが T（振り返り）である
 - Q（リリース後テスト）は `standard` では条件付きで、マージ前に実施できなかった受け入れ条件が
-  あるときに通る。`architecture` と `legacy-refactor` は必ず通る
+  あるときに通る。無ければ P から破線で T（振り返り）へ抜ける。`architecture` と
+  `legacy-refactor` は必ず通る
 - `light` は破線の経路（S → A → K → L → P）のみを通る。**N の全体テストと結合テストは通らない**
   （K は変更箇所を 1 度実行する限定的な検証と静的解析だけを指す。依存パッケージの版更新だけは
   例外として既存テスト一式を実行する — [references/workflow-modes.md](references/workflow-modes.md)）
