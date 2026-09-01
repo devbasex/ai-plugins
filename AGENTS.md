@@ -97,25 +97,55 @@ semver の順序で除外されるのは、プラグイン間の依存解決（`
 
 | 版 | 形 | 意味 |
 | --- | --- | --- |
-| 正式版 | `9.5.0` | 利用者が常用してよい |
-| 開発版 | `9.5.0-dev.1` | 検証中。入れたくない利用者は取得を控えられる |
-| 公開前の確認版 | `9.5.0-rc.1` | 正式版の候補。残るのは確認だけ |
+| 正式版 | `9.6.0` | 利用者が常用してよい |
+| 開発版 | `9.6.0-dev.1` | 検証中。入れたくない利用者は取得を控えられる |
+| 公開前の確認版 | `9.6.0-rc.1` | 正式版の候補。残るのは確認だけ |
 
-- 接尾辞は**次に出す正式版の版数へ付ける**。`9.4.0` の次を開発するなら `9.5.0-dev.1`
+- 接尾辞は**次に出す正式版の版数へ付ける**。`9.5.0` の次を開発するなら `9.6.0-dev.1`
 - 連番は開発版を出すたびに増やす。**同じ版数で中身を差し替えない**。差し替えると、利用者の
   手元にある版と `main` の版が同じ番号で別物になり、何を確かめたのかが分からなくなる
-- **正式版を出すときは接尾辞を外す。** `9.5.0-dev.3` の次は `9.5.0`
-- 順序は semver に従い `9.5.0-dev.1` < `9.5.0-rc.1` < `9.5.0` になる
+- **正式版を出すときは接尾辞を外す。** `9.6.0-dev.3` の次は `9.6.0`
+- 順序は semver に従い `9.6.0-dev.1` < `9.6.0-rc.1` < `9.6.0` になる
 
-**版数は 4 箇所にある。すべて揃える。** 揃っていないと `scripts/check-doc-staleness.py` と
-`scripts/validate-runtime-plugins.sh` が落ちる。
+**版数を持つ箇所は 2 種類ある。** 検査が突き合わせる 6 箇所と、**検査に載らず手で直す箇所**である。
+
+### 検査が突き合わせる 6 箇所
+
+揃っていないと `scripts/check-doc-staleness.py` と `scripts/validate-runtime-plugins.sh` が
+落ちる。**2 つの `plugin.json` はどちらも `version` と `description` の両方に版数を持つ**ため、
+片方だけ直すと検査で止まる。
 
 | 箇所 | 何を書くか |
 | --- | --- |
 | `plugins/ndf/.claude-plugin/plugin.json` の `version` | 版数そのもの |
+| `plugins/ndf/.claude-plugin/plugin.json` の `description` | `(vX.Y.Z)` の形で版数 |
+| `plugins/ndf/.codex-plugin/plugin.json` の `version` | 版数そのもの |
 | `plugins/ndf/.codex-plugin/plugin.json` の `description` | `(vX.Y.Z)` の形で版数 |
 | `.claude-plugin/marketplace.json` の該当プラグインの `description` | 同上 |
 | `plugins/ndf/README.md` の更新案内の見出し | `## vX.Y.Z へ更新するとき` |
+
+**版を決めるのは `plugins/ndf/.claude-plugin/plugin.json` の `version` だけである。** 他の
+5 箇所は読み手向けの記載と検査のための突き合わせ先で、取得する版を変えない。
+`.claude-plugin/marketplace.json` に `version` フィールドは置かない。
+
+### 検査に載らず、手で直す箇所
+
+**検査が見るのは説明文書の Skill 数と更新案内の見出しの版数までで、本文中の版数は対象外である。**
+次は現行版を指すため、版を上げるたびに読み直す。**v9.5.0 の配布でここを取りこぼした**（#209）。
+
+| 箇所 | 何を書いているか |
+| --- | --- |
+| `README.md` の概要 | 「NDFプラグイン vX.Y.Z は」 |
+| `README.md` のプラグイン一覧表 | 版数の列 |
+| `AGENTS.md` の「NDFプラグインについて」 | 「主要プラグインです（vX.Y.Z）」 |
+| `AGENTS.md` の接尾辞の例 | 次に開発する版の例 |
+| `plugins/ndf/README.md` の Kiro の確認例 | 期待出力の版数 |
+| `plugins/ndf/README.md` の Codex のパス例 | `~/.codex/plugins/cache/.../ndf/X.Y.Z/` |
+| `plugins/ndf/README.md` の `codex plugin list` の出力例 | 期待出力の版数 |
+
+**すべての版数を機械的に置換しない。** 履歴（`CLAUDE.md` の版ごとの段落、
+`docs/development-history/`）、記録（`issues/`）、意図的に前の版を指す文（取り消しの説明）は
+そのまま残す。現行版を指しているかは文脈で決まる。
 
 接尾辞の付いた版でも検査は通る（形式としては妥当な版数のため）。**接尾辞の付け忘れ・外し忘れは
 検査では捕まらない。** 出す前に版数を読み直す。
@@ -208,7 +238,7 @@ ai-plugins/
 
 ## NDFプラグインについて
 
-**NDFプラグイン**は、このマーケットプレイスの主要プラグインです（v9.4.0）。plugin 名は全ランタイムで `ndf` を維持し、配布物は `plugins/ndf/` の1ディレクトリにまとまっています。
+**NDFプラグイン**は、このマーケットプレイスの主要プラグインです（v9.5.0）。plugin 名は全ランタイムで `ndf` を維持し、配布物は `plugins/ndf/` の1ディレクトリにまとまっています。
 - Skill の実体は `plugins/ndf/skills/` の1箇所。配布先は `plugins/ndf/manifests/*-skills.txt` が決める
 - Claude Code版は 8個の専門サブエージェント、公開Skills、PreToolUse/SessionStart/Stopフックを提供
 - Codex版は Codex向け公開Skillsと任意Slack通知hookを提供
