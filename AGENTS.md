@@ -107,15 +107,22 @@ semver の順序で除外されるのは、プラグイン間の依存解決（`
 - **正式版を出すときは接尾辞を外す。** `9.5.0-dev.3` の次は `9.5.0`
 - 順序は semver に従い `9.5.0-dev.1` < `9.5.0-rc.1` < `9.5.0` になる
 
-**版数は 4 箇所にある。すべて揃える。** 揃っていないと `scripts/check-doc-staleness.py` と
-`scripts/validate-runtime-plugins.sh` が落ちる。
+**版数は 6 箇所にある。すべて揃える。** 揃っていないと `scripts/check-doc-staleness.py` と
+`scripts/validate-runtime-plugins.sh` が落ちる。**2 つの `plugin.json` はどちらも `version` と
+`description` の両方に版数を持つ**ため、片方だけ直すと検査で止まる。
 
 | 箇所 | 何を書くか |
 | --- | --- |
 | `plugins/ndf/.claude-plugin/plugin.json` の `version` | 版数そのもの |
+| `plugins/ndf/.claude-plugin/plugin.json` の `description` | `(vX.Y.Z)` の形で版数 |
+| `plugins/ndf/.codex-plugin/plugin.json` の `version` | 版数そのもの |
 | `plugins/ndf/.codex-plugin/plugin.json` の `description` | `(vX.Y.Z)` の形で版数 |
 | `.claude-plugin/marketplace.json` の該当プラグインの `description` | 同上 |
 | `plugins/ndf/README.md` の更新案内の見出し | `## vX.Y.Z へ更新するとき` |
+
+**版を決めるのは `plugins/ndf/.claude-plugin/plugin.json` の `version` だけである。** 他の
+5 箇所は読み手向けの記載と検査のための突き合わせ先で、取得する版を変えない。
+`.claude-plugin/marketplace.json` に `version` フィールドは置かない。
 
 接尾辞の付いた版でも検査は通る（形式としては妥当な版数のため）。**接尾辞の付け忘れ・外し忘れは
 検査では捕まらない。** 出す前に版数を読み直す。
