@@ -104,9 +104,18 @@ PR 差分、または `--branch` 指定時は現在のブランチの差分を�
 ### 1. 変更の把握
 
 ```bash
-git diff main --name-only          # 変更ファイル一覧
-git diff main --stat               # 差分の統計
-git log main..HEAD --oneline       # コミット履歴
+# 起点は開発の本流であって、既定ブランチとは限らない。宣言（`.ndf/worktree.json` の
+# `base_branch`）が無ければ origin の HEAD が指す先を使う
+dev_base=$(jq -r 'select(.version == 1) | .base_branch | select(type == "string")' \
+  .ndf/worktree.json 2>/dev/null)
+dev_base=${dev_base:-$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')}
+dev_base=${dev_base:-main}
+```
+
+```bash
+git diff "$dev_base" --name-only     # 変更ファイル一覧
+git diff "$dev_base" --stat          # 差分の統計
+git log "$dev_base"..HEAD --oneline  # コミット履歴
 ```
 
 ### 2. 分析

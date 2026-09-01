@@ -33,9 +33,18 @@ allowed-tools:
 ### 1. バリデーション
 
 ```bash
+# 起点は開発の本流であって、既定ブランチとは限らない。宣言（`.ndf/worktree.json` の
+# `base_branch`）が無ければ origin の HEAD が指す先を使う
+dev_base=$(jq -r 'select(.version == 1) | .base_branch | select(type == "string")' \
+  .ndf/worktree.json 2>/dev/null)
+dev_base=${dev_base:-$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')}
+dev_base=${dev_base:-main}
+```
+
+```bash
 CURRENT_BRANCH=$(git branch --show-current)
-[[ "$CURRENT_BRANCH" == "main" || "$CURRENT_BRANCH" == "master" ]] && \
-  echo "❌ Error: デフォルトブランチからデプロイできません" && exit 1
+[[ "$CURRENT_BRANCH" == "$dev_base" ]] && \
+  echo "❌ Error: 起点ブランチからデプロイできません" && exit 1
 ```
 
 ### 2. deployブランチ名の導出
@@ -68,18 +77,9 @@ fi
 feature ブランチへ切り替えようとすると拒否される。
 
 ```bash
-# 起点は開発の本流であって、既定ブランチとは限らない。宣言（`.ndf/worktree.json` の
-# `base_branch`）が無ければ origin の HEAD が指す先を使う
-base=$(jq -r 'select(.version == 1) | .base_branch | select(type == "string")' \
-  .ndf/worktree.json 2>/dev/null)
-base=${base:-$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')}
-base=${base:-main}
-```
-
-```bash
-git fetch origin "$base"
+git fetch origin "$dev_base"
 git checkout -b "$DEPLOY_BRANCH"
-git merge "origin/$base" --no-edit || {
+git merge "origin/$dev_base" --no-edit || {
   echo "❌ 起点ブランチとのmerge conflict。手動解決が必要です"
   git merge --abort
   git checkout "$FEATURE_BRANCH"
@@ -98,7 +98,7 @@ gh pr create --base "$ARGUMENTS" --head "$DEPLOY_BRANCH" \
 ## Summary
 - 環境デプロイ用PR
 - 元ブランチ: $FEATURE_BRANCH
-- main取り込み済み
+- 起点ブランチ取り込み済み
 
 ## Test plan
 - [ ] $ARGUMENTS 環境で動作確認
@@ -116,12 +116,12 @@ git checkout "$FEATURE_BRANCH"
 
 ## 注意事項
 
-- デフォルトブランチからの実行は禁止
-- main取り込みで conflict が出た場合、deployブランチを削除して戻る（featureブランチ側を先に同期すべき）
+- 起点ブランチからの実行は禁止
+- 起点ブランチの取り込みで conflict が出た場合、deployブランチを削除して戻る（featureブランチ側を先に同期すべき）
 - deployブランチは PR マージ後に削除してよい
 - 環境ブランチへの再デプロイは「同じ deployブランチに push」でPRが更新される
 
 ## 関連
 
 - `/ndf:cherry-pick-pr` — 一部コミットだけを環境に届ける場合とブランチ運用戦略の原則
-- `/ndf:merged` — featureブランチに main を取り込む / マージ後のブランチ整理
+- `/ndf:merged` — featureブランチに起点ブランチを取り込む / マージ後のブランチ整理

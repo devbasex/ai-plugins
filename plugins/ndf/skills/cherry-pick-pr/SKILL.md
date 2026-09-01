@@ -22,7 +22,7 @@ featureブランチから指定ベースブランチ（`qa/*`, `staging/*`, `rel
 
 ## なぜ必要か
 
-featureブランチに環境ブランチ(`qa/staging`等)を merge して conflict を解消すると、`feature → main` の PR に環境ブランチ固有のコードが混入する（main汚染）。短命ブランチ + cherry-pick で、必要なコミットだけを対象ブランチに届ける。
+featureブランチに環境ブランチ(`qa/staging`等)を merge して conflict を解消すると、`feature → 起点ブランチ` の PR に環境ブランチ固有のコードが混入する（起点の汚染）。短命ブランチ + cherry-pick で、必要なコミットだけを対象ブランチに届ける。
 
 | 観点 | 正しい順序 | 誤った順序 |
 |------|-----------|-----------|
@@ -44,8 +44,18 @@ featureブランチに環境ブランチ(`qa/staging`等)を merge して confli
 ## 処理フロー
 
 ### 1. 引数・現状確認
-- 引数からベースブランチ名を取得（必須。未指定なら確認）
+- 引数から環境ブランチ名を取得（必須。未指定なら確認）
 - `git branch --show-current` で現在ブランチを取得
+- 開発の起点ブランチを決める。以降の手順はこの値を使う
+
+```bash
+# 起点は開発の本流であって、既定ブランチとは限らない。宣言（`.ndf/worktree.json` の
+# `base_branch`）が無ければ origin の HEAD が指す先を使う
+dev_base=$(jq -r 'select(.version == 1) | .base_branch | select(type == "string")' \
+  .ndf/worktree.json 2>/dev/null)
+dev_base=${dev_base:-$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')}
+dev_base=${dev_base:-main}
+```
 
 ### 2. 既存PRのマージ済みチェック（必須）
 
@@ -62,7 +72,7 @@ gh pr list --head "<current-branch>-for-<base-short-name>" --state merged \
 ### 3. コミット一覧の確認
 
 ```bash
-git log --oneline main..HEAD
+git log --oneline "$dev_base"..HEAD
 ```
 
 ユーザーに cherry-pick 対象コミットを確認（全コミット or 選択）。
@@ -84,17 +94,8 @@ git checkout -b <current-branch>-for-<base-short-name> origin/<base-branch>
 ### 5. 起点ブランチを取り込む（必須）
 
 ```bash
-# 起点は開発の本流であって、既定ブランチとは限らない。宣言（`.ndf/worktree.json` の
-# `base_branch`）が無ければ origin の HEAD が指す先を使う
-base=$(jq -r 'select(.version == 1) | .base_branch | select(type == "string")' \
-  .ndf/worktree.json 2>/dev/null)
-base=${base:-$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')}
-base=${base:-main}
-```
-
-```bash
-git fetch origin "$base"
-git merge "origin/$base" --no-edit
+git fetch origin "$dev_base"
+git merge "origin/$dev_base" --no-edit
 ```
 
 CIで最新の起点必須のWorkflowがあるため、取り込み忘れるとconflictやCIエラーになる。
@@ -137,12 +138,12 @@ git checkout <original-branch>
 ## 注意事項
 
 - 短命ブランチは PR マージ後に削除してよい
-- `feature → main` の PR には影響しない
+- `feature → 起点ブランチ` の PR には影響しない
 - revert の扱いは `ndf-policies`「ブランチ運用の原則」5 に従う
 
 ## 関連
 
 - `ndf-policies` — 環境ブランチへの適用原則とブランチ汚染の回避（本 Skill の前提）
-- `/ndf:pr` — 通常のPR作成（base=main）。非 main ベースは本 Skill に誘導される
-- `/ndf:merged` — マージ後のブランチ整理と、現ブランチへの main 取り込み
+- `/ndf:pr` — 通常のPR作成（宛先は起点ブランチ）。環境ブランチ宛は本 Skill に誘導される
+- `/ndf:merged` — マージ後のブランチ整理と、現ブランチへの起点ブランチの取り込み
 - `/ndf:deploy` — ブランチ全体を環境へデプロイ（cherry-pickとは別用途）

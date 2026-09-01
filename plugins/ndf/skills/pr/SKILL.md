@@ -210,4 +210,4 @@ feature/xxx ──PR──→ qa/staging   ← ❌ qa/staging をmergeするとm
 - `/ndf:deploy` — 環境ブランチへのデプロイPR（ブランチ全体）
 - `/ndf:pr-tests` — Test Plan 自動実行
 - `/ndf:pr-review` — PR単位レビュー
-- `/ndf:merged` — マージ後のブランチ整理 / 現ブランチに main を取り込み
+- `/ndf:merged` — マージ後のブランチ整理 / 現ブランチに起点ブランチを取り込み

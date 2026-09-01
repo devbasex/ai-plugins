@@ -1,8 +1,10 @@
-"""環境ブランチへ届ける手順が、共通ライブラリと同じ起点ブランチを解決することを検証する。
+"""Skill の手順が、共通ライブラリと同じ起点ブランチを解決することを検証する。
 
-3 Skill は作業ツリーの仕組みを前提にしないため、手順には共通ライブラリを読み込まずに
-動く数行を書いている。写しである以上、両者が食い違う経路が残る。同じ入力に対して同じ
-名前を返すことを、ここで突き合わせる（issue #202）。
+起点を扱う Skill は作業ツリーの仕組みを前提にしないため、手順には共通ライブラリを
+読み込まずに動く数行を書いている。写しである以上、両者が食い違う経路が残る。同じ入力に
+対して同じ名前を返すことを、ここで突き合わせる（issue #202）。
+
+あわせて、開発の起点を既定ブランチの字面で書いていないことを見る。
 """
 from __future__ import annotations
 
@@ -19,11 +21,24 @@ LIB = ROOT / "plugins" / "ndf" / "scripts" / "lib" / "worktree-common.sh"
 SKILLS = ROOT / "plugins" / "ndf" / "skills"
 
 # 起点を解決する手順を持つ Skill と、その手順を見分ける目印。
-INLINE_SKILLS = ("cherry-pick-pr", "deploy")
-MARKER = "base=$(jq"
+INLINE_SKILLS = ("cherry-pick-pr", "deploy", "merged", "pr-review")
+MARKER = "dev_base=$(jq"
 
-# 起点を字面で書かない Skill。開発の起点は既定ブランチとは限らない。
-LITERAL_SKILLS = ("ndf-policies", "cherry-pick-pr", "deploy")
+# 開発の起点を扱う Skill。起点は既定ブランチとは限らないため、字面で書かない。
+LITERAL_SKILLS = (
+    "ndf-policies",
+    "cherry-pick-pr",
+    "deploy",
+    "merged",
+    "pr",
+    "pr-review",
+    "problem-solving",
+    "worktree",
+)
+
+# コマンドの引数に現れる既定ブランチの字面。`base=${base:-main}` のような
+# 退避先は対象にしない（origin の HEAD すら取れないときの最後の手段である）。
+COMMAND_LITERAL = re.compile(r"^\s*git\s+\S+[^\n]*\bmain\b")
 
 pytestmark = pytest.mark.skipif(
     any(shutil.which(name) is None for name in ("bash", "jq", "git")),
@@ -75,7 +90,7 @@ def snippet_of(name: str) -> str:
 
 def resolve_inline(name: str, repo: Path) -> str:
     got = subprocess.run(
-        ["bash", "-c", f'set -uo pipefail\n{snippet_of(name)}\nprintf "%s\\n" "$base"\n'],
+        ["bash", "-c", f'set -uo pipefail\n{snippet_of(name)}\nprintf "%s\\n" "$dev_base"\n'],
         cwd=str(repo), capture_output=True, text=True,
     )
     assert got.returncode == 0, got.stderr
@@ -116,8 +131,16 @@ def test_inline_resolution_matches_library(name: str, case: str, repo: Path) -> 
 
 
 @pytest.mark.parametrize("name", LITERAL_SKILLS)
-def test_default_branch_is_not_hardcoded(name: str) -> None:
+def test_remote_default_branch_is_not_hardcoded(name: str) -> None:
     """取り込む先を `origin/main` の字面で書かない。"""
     text = (SKILLS / name / "SKILL.md").read_text(encoding="utf-8")
     hits = [line for line in text.splitlines() if "origin/main" in line]
+    assert hits == [], f"{name}: {hits}"
+
+
+@pytest.mark.parametrize("name", LITERAL_SKILLS)
+def test_commands_do_not_hardcode_default_branch(name: str) -> None:
+    """git のコマンドの引数に `main` を書かない。"""
+    text = (SKILLS / name / "SKILL.md").read_text(encoding="utf-8")
+    hits = [line for line in text.splitlines() if COMMAND_LITERAL.match(line)]
     assert hits == [], f"{name}: {hits}"

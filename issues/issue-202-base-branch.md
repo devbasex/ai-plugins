@@ -46,6 +46,9 @@
 - 宣言に起点を書かないリポジトリの挙動が、現在と変わらない
 - `main` 宛の Pull Request が `develop` 以外から出たとき、検査で落ちる
 
+開発の起点前提は `merged` / `pr` / `pr-review` / `problem-solving` にもある。いずれも
+`develop` を作った後に誤るため、範囲へ含める。
+
 やらないこと:
 
 - **`develop` ブランチを実際に作ること。** この変更は前提を直すもので、チャネルの移行そのものは
@@ -89,8 +92,9 @@
 
 取り込みの対象:
 
-- [ ] `ndf-policies` / `cherry-pick-pr` / `deploy` の手順に `origin/main` の字面が残っていない
-- [ ] 3 Skill の手順に書かれた解決の結果が、共通ライブラリの解決の結果と一致する
+- [ ] 開発の起点を扱う 8 Skill の手順に、`origin/main` の字面が残っていない
+- [ ] 同じ 8 Skill の git のコマンドの引数に、`main` の字面が残っていない
+- [ ] 起点を解決する 4 Skill の手順が示す結果が、共通ライブラリの解決の結果と一致する
 
 Pull Request の宛先の検査:
 
@@ -175,6 +179,10 @@ Pull Request の宛先の検査:
 | `plugins/ndf/skills/ndf-policies/SKILL.md` | ブランチ運用の原則 3 を書き換える |
 | `plugins/ndf/skills/cherry-pick-pr/SKILL.md` | 取り込みの手順と対応表を書き換える |
 | `plugins/ndf/skills/deploy/SKILL.md` | 取り込みの手順と概要を書き換える |
+| `plugins/ndf/skills/merged/SKILL.md` | 更新・整理・取り込みの先を起点ブランチにする |
+| `plugins/ndf/skills/pr-review/SKILL.md` | ブランチ差分の比較元を起点ブランチにする |
+| `plugins/ndf/skills/pr/SKILL.md` | 関連の記載を起点ブランチにする |
+| `plugins/ndf/skills/problem-solving/SKILL.md` | 汚染を避ける対象を起点ブランチにする |
 | `scripts/check-pr-base.sh` | 新規。宛先の判定 |
 | `.github/workflows/pr-base-guard.yml` | 新規。判定を呼ぶ |
 | `plugins/ndf/skills/worktree/tests/test_base_branch.py` | 新規。起点の解決と手順の bash |
@@ -204,12 +212,13 @@ Pull Request の宛先の検査:
 
 ### Task 3: 取り込みの対象を起点ブランチへ向ける
 
-- **対象ファイル:** `plugins/ndf/skills/ndf-policies/SKILL.md`、
-  `plugins/ndf/skills/cherry-pick-pr/SKILL.md`、`plugins/ndf/skills/deploy/SKILL.md`、
-  `plugins/ndf/skills/worktree/tests/test_base_branch.py`
-- **変更内容:** 3 Skill の手順から `origin/main` の字面を外し、起点を解決してから取り込む形にする。
-  3 Skill は作業ツリーの仕組みを前提にしないため、手順には共通ライブラリを読み込まずに動く
-  数行を書き、その結果が共通ライブラリの解決と一致することをテストで確かめる
+- **対象ファイル:** 起点を扱う 8 Skill の `SKILL.md`、
+  `scripts/tests/test_base_branch_consistency.py`
+- **変更内容:** 手順から既定ブランチの字面を外し、起点を解決してから使う形にする。
+  これらの Skill は作業ツリーの仕組みを前提にしないため、手順には共通ライブラリを読み込まずに
+  動く数行を書き、その結果が共通ライブラリの解決と一致することをテストで確かめる。
+  起点を入れる変数は `dev_base` とする。`cherry-pick-pr` が環境ブランチを「ベースブランチ」と
+  呼んでおり、`base` では指す対象が 2 つになる
 - **満たす受け入れ条件:** 取り込みの対象の 2 件
 - **進め方:** 失敗するテスト → 手順の書き換え → 整理
 
