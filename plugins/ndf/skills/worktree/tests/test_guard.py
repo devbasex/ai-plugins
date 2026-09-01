@@ -341,3 +341,88 @@ def test_declaration_edited_mid_session_takes_effect(main_repo: Path, tmp_path: 
 
     after = run_guard(payload, cwd=main_repo, tmpdir=state)
     assert "plugins/ndf/README.md" in context_of(after), after["out"]
+
+
+def bash_command(command: str, session: str) -> dict:
+    return {
+        "session_id": session,
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": command},
+    }
+
+
+def test_cd_into_worktree_then_relative_write_is_silent(
+    main_repo: Path, worktree: Path
+) -> None:
+    """作業ツリーへ移ってから相対パスで書き換えたときに案内を出さない。
+
+    hook は主ディレクトリで実行されるため、同じコマンドの中の `cd` を反映しないと
+    移動前の位置を指す。正しく作業していても案内が出る状態になる（#186）。
+    """
+    declared(main_repo)
+    command = f"cd {worktree}\nsed -i 's/a/b/' plugins/ndf/README.md"
+    result = run_guard(bash_command(command, "s-cd-1"), cwd=main_repo)
+    assert result["out"].strip() == "", result["out"]
+
+
+def test_cd_into_worktree_with_relative_path_is_silent(
+    main_repo: Path, worktree: Path
+) -> None:
+    """移動先を相対パスで書いた場合も同じ。"""
+    declared(main_repo)
+    command = "cd .worktrees/feature/x && echo x > plugins/ndf/README.md"
+    result = run_guard(bash_command(command, "s-cd-2"), cwd=main_repo)
+    assert result["out"].strip() == "", result["out"]
+
+
+def test_write_without_cd_is_still_detected(main_repo: Path, worktree: Path) -> None:
+    """`cd` を伴わない相対パスの書き換えは、これまでどおり案内する。"""
+    declared(main_repo)
+    command = "sed -i 's/a/b/' plugins/ndf/README.md"
+    result = run_guard(bash_command(command, "s-cd-3"), cwd=main_repo)
+    assert "plugins/ndf/README.md" in context_of(result)
+
+
+def test_cd_back_to_main_is_detected(main_repo: Path, worktree: Path) -> None:
+    """作業ツリーから主ディレクトリへ戻ってからの書き換えは案内する。"""
+    declared(main_repo)
+    command = f"cd {worktree}\ncd {main_repo}\nsed -i 's/a/b/' plugins/ndf/README.md"
+    result = run_guard(bash_command(command, "s-cd-4"), cwd=main_repo)
+    assert "plugins/ndf/README.md" in context_of(result)
+
+
+def test_unresolvable_cd_is_silent_for_relative_paths(
+    main_repo: Path, worktree: Path
+) -> None:
+    """移動先を決められないときは、相対パスの書き換えで案内を出さない。"""
+    declared(main_repo)
+    command = 'cd "$TARGET"\nsed -i \'s/a/b/\' plugins/ndf/README.md'
+    result = run_guard(bash_command(command, "s-cd-5"), cwd=main_repo)
+    assert result["out"].strip() == "", result["out"]
+
+
+def test_cd_inside_a_block_is_reflected(main_repo: Path, worktree: Path) -> None:
+    """条件分岐やまとまりの中で作業ツリーへ移った場合も案内を出さない。
+
+    `then` / `do` / `{` の後ろを命令の位置として数えないと、中の `cd` を移動として
+    追えず、移動前の位置を指した案内が出る（#186 の誤検知が残る）。
+    """
+    declared(main_repo)
+    for index, command in enumerate(
+        (
+            f"if true; then cd {worktree}; sed -i 's/a/b/' plugins/ndf/README.md; fi",
+            f"{{ cd {worktree}; sed -i 's/a/b/' plugins/ndf/README.md; }}",
+            f"while read f; do cd {worktree}; sed -i 's/a/b/' plugins/ndf/README.md; done",
+        )
+    ):
+        result = run_guard(bash_command(command, f"s-blk-{index}"), cwd=main_repo)
+        assert result["out"].strip() == "", (command, result["out"])
+
+
+def test_write_inside_a_block_without_cd_is_still_detected(main_repo: Path) -> None:
+    """まとまりの中でも、移動を伴わない相対パスの書き換えは案内する。"""
+    declared(main_repo)
+    command = "if true; then sed -i 's/a/b/' plugins/ndf/README.md; fi"
+    result = run_guard(bash_command(command, "s-blk-x"), cwd=main_repo)
+    assert "plugins/ndf/README.md" in context_of(result)
