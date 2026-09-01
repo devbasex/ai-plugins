@@ -61,7 +61,10 @@
 | 担当 | 触る関数 | 現在の行 |
 | --- | --- | --- |
 | B | `_is_pass` / `_round_passes` / `_guard_previous_round` の再計算部 / `cmd_read_result` / `cmd_judge` | 1005 / 1018 / 1053 / 1326 / 1396 |
-| C | `_sync_worktree` / `_create_worktree` / `cmd_start_round` / `_resolve_head_branch`（新設） | 285 / 229 / 1085 / — |
+| C | `cmd_start_round` / `_sync_worktree` / その周辺へ新設する `HeadRef`・`_resolve_head_ref`・`_fetch_head`・`_sync_exclusions`・`_worktree_changes` | 1085 / 285 / — |
+
+`_create_worktree`（229 行）は担当 C の対象外である。作った直後の作業ツリーは head と
+一致しているため、同期の対象にならない（`03-issue-217.md` の「対象範囲」を参照）。
 
 ### 終了コードの割り当てを分ける
 
