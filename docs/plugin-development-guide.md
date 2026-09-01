@@ -214,8 +214,12 @@ claude plugin tag plugins/ndf --push      # ndf--v<版> を作って origin へ�
 過去のタグへ固定すれば、その時点のプラグインが入ります。
 
 ```bash
-claude plugin marketplace add devbasex/ai-plugins@ndf--v9.3.0
+claude plugin marketplace add devbasex/ai-plugins@<タグ>
 ```
+
+**タグはまだ 1 つもありません**（`git tag -l` が空）。打ち始めるのは次の正式版からで、
+**それより前の版へはタグでは戻せません**。9.4.0 以前へ戻すなら、その版のコミットを調べて
+ref に指定します。
 
 **同じ取得元の他のプラグインも同時に過去の状態になります。** `playwright-kit` や `mcp-*` を
 最新のまま使いたい場合は次の方法を採ります。
@@ -233,7 +237,7 @@ claude plugin marketplace add devbasex/ai-plugins@ndf--v9.3.0
      "source": {"source": "git-subdir",
                 "url": "https://github.com/devbasex/ai-plugins.git",
                 "path": "plugins/ndf",
-                "ref": "ndf--v9.3.0"}}
+                "ref": "<タグ>"}}
   ]
 }
 ```
