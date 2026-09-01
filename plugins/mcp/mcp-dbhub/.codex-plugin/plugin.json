@@ -1,6 +1,6 @@
 {
   "name": "mcp-dbhub",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "DBHub MCP server for database operations and SQL queries",
   "author": {
     "name": "takemi-ohama",
