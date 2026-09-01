@@ -22,7 +22,18 @@ dev_base=$(jq -r 'select(.version == 1) | .base_branch | select(type == "string"
 [ -n "$dev_base" ] || exit 0
 
 # 起点ブランチをまだ作っていない間は、すべての Pull Request を通す。
-git ls-remote --exit-code --heads origin "$dev_base" >/dev/null 2>&1 || exit 0
+#
+# 照合先は `refs/heads/<名前>` と完全な参照名で渡す。`git ls-remote` のパターンは参照名の
+# 末尾に一致するため、`develop` とだけ渡すと `refs/heads/feature/develop` にも一致し、
+# 起点が未作成なのに検査が有効になる（git 2.53.0 で実測）。返った行の参照名とも突き合わせ、
+# 末尾一致で別のブランチを拾わないようにする（`wt_branch_exists` と同じ形）。
+listing=$(GIT_TERMINAL_PROMPT=0 git ls-remote --heads origin "refs/heads/$dev_base" 2>/dev/null) ||
+  exit 0
+found=0
+while IFS= read -r line; do
+  case "$line" in *$'\t'"refs/heads/$dev_base") found=1; break ;; esac
+done <<<"$listing"
+[ "$found" -eq 1 ] || exit 0
 
 [ "$head_ref" = "$dev_base" ] && exit 0
 

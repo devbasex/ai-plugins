@@ -70,11 +70,11 @@ def init_master_only_repo(root: Path) -> Path:
     return main
 
 
-def push_develop(repo: Path) -> None:
-    """origin にだけ `develop` を置く。"""
-    git(repo, "branch", "develop")
-    git(repo, "push", "-q", "origin", "develop")
-    git(repo, "branch", "-D", "develop")
+def push_branch(repo: Path, name: str) -> None:
+    """origin にだけ <name> のブランチを置く。"""
+    git(repo, "branch", name)
+    git(repo, "push", "-q", "origin", name)
+    git(repo, "branch", "-D", name)
 
 
 def drop_remote_tracking(repo: Path, name: str) -> None:

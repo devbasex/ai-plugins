@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from branch_repo_helpers import missing_command, push_develop
+from branch_repo_helpers import missing_command, push_branch
 
 ROOT = Path(__file__).resolve().parents[2]
 GUARD = ROOT / "scripts" / "check-pr-base.sh"
@@ -45,7 +45,7 @@ def test_without_base_branch_passes(origin_repo: Path) -> None:
 
 def test_unsupported_version_passes(origin_repo: Path) -> None:
     declare(origin_repo, {"version": 99, "base_branch": "develop"})
-    push_develop(origin_repo)
+    push_branch(origin_repo, "develop")
     assert guard(origin_repo, "feature/x").returncode == 0
 
 
@@ -55,15 +55,27 @@ def test_absent_base_branch_passes(origin_repo: Path) -> None:
     assert guard(origin_repo, "feature/x").returncode == 0
 
 
+def test_branch_with_matching_tail_does_not_enable_the_guard(origin_repo: Path) -> None:
+    """origin への問い合わせは、完全な参照名で照合する。
+
+    `git ls-remote` のパターンは参照名の末尾に一致するため、`develop` とだけ渡すと
+    `refs/heads/feature/develop` にも一致する（実測）。起点ブランチが未作成のまま
+    検査が有効にならないことを見る。
+    """
+    declare(origin_repo, {"version": 1, "base_branch": "develop"})
+    push_branch(origin_repo, "feature/develop")
+    assert guard(origin_repo, "feature/x").returncode == 0
+
+
 def test_from_base_branch_passes(origin_repo: Path) -> None:
     declare(origin_repo, {"version": 1, "base_branch": "develop"})
-    push_develop(origin_repo)
+    push_branch(origin_repo, "develop")
     assert guard(origin_repo, "develop").returncode == 0
 
 
 def test_from_other_branch_fails(origin_repo: Path) -> None:
     declare(origin_repo, {"version": 1, "base_branch": "develop"})
-    push_develop(origin_repo)
+    push_branch(origin_repo, "develop")
     got = guard(origin_repo, "feature/x")
     assert got.returncode != 0
     message = got.stdout + got.stderr

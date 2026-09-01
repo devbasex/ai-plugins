@@ -20,7 +20,7 @@ from branch_repo_helpers import (
     init_master_only_repo,
     init_origin_repo,
     missing_command,
-    push_develop,
+    push_branch,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -54,7 +54,7 @@ pytestmark = pytest.mark.skipif(missing_command() is not None, reason="bash / jq
 def repo(tmp_path: Path) -> Path:
     """origin を持つリポジトリ。既定ブランチは main、origin に develop がある。"""
     main = init_origin_repo(tmp_path)
-    push_develop(main)
+    push_branch(main, "develop")
     return main
 
 
@@ -68,7 +68,7 @@ def repo_without_develop(tmp_path: Path) -> Path:
 def repo_with_unfetched_develop(tmp_path: Path) -> Path:
     """origin に `develop` があり、その参照をまだ取得していないリポジトリ。"""
     main = init_origin_repo(tmp_path)
-    push_develop(main)
+    push_branch(main, "develop")
     drop_remote_tracking(main, "develop")
     return main
 
@@ -80,7 +80,7 @@ def repo_without_origin_head(tmp_path: Path) -> Path:
     宣言した起点を解決する経路も見るため、origin に `develop` を置いておく。
     """
     repo = init_master_only_repo(tmp_path)
-    push_develop(repo)
+    push_branch(repo, "develop")
     return repo
 
 
