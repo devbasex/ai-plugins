@@ -54,7 +54,9 @@ bash plugins/mcp/mcp-dbhub/dev.kiro/install.sh
 
 ### 方法1: dbhub.toml（複数DB対応・推奨）
 
-プロジェクトルートに `dbhub.toml` を配置すると自動検出されます。
+プロジェクトルート（＝MCP サーバの実行ディレクトリ）に `dbhub.toml` を配置します。
+
+> `.mcp.json` が `--config=dbhub.toml` を渡すことで読み込まれます。**dbhub 本体は `dbhub.toml` を自動検出しません**（`--config` を外すと、設定なしと判定されて起動直後に終了します）。
 
 ```toml
 # 単一データベース
@@ -138,7 +140,7 @@ DSNのホスト名は踏み台から見た内部ホスト名を指定してく�
 
 ### 優先順位
 
-1. `dbhub.toml`（プロジェクトルートに存在すれば自動読み込み）
+1. `dbhub.toml`（`.mcp.json` の `--config=dbhub.toml` で読み込まれる）
 2. `.env`の`DBHUB_DSN`環境変数（tomlが無い場合のフォールバック）
 
 ## 使用例
