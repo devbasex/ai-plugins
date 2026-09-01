@@ -75,3 +75,12 @@ def push_develop(repo: Path) -> None:
     git(repo, "branch", "develop")
     git(repo, "push", "-q", "origin", "develop")
     git(repo, "branch", "-D", "develop")
+
+
+def drop_remote_tracking(repo: Path, name: str) -> None:
+    """origin のブランチを取得していない状態を作る。
+
+    `git push` は送った先の参照 (`refs/remotes/origin/<名前>`) も更新する。origin には
+    あるがまだ取得していない状態は、その参照を消すことで再現する。
+    """
+    git(repo, "update-ref", "-d", f"refs/remotes/origin/{name}")

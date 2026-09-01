@@ -105,16 +105,30 @@ PR 差分、または `--branch` 指定時は現在のブランチの差分を�
 
 ```bash
 # 起点は開発の本流であって、既定ブランチとは限らない。宣言（`.ndf/worktree.json` の
-# `base_branch`）が無ければ origin の HEAD が指す先を使い、それも取れなければ慣例の名前の
-# うちローカルにあるものへ落とす（共通ライブラリ `wt_base_branch` と同じ順序）
+# `base_branch`）を先に読み、その名前が実在することを確かめる。取得済みの参照に無ければ
+# origin へ問い合わせる（取得していないだけの場合を「無い」と読まないため）。実在しなければ
+# 既定ブランチへ落とさずに止まる。宣言が無ければ origin の HEAD が指す先を使い、それも
+# 取れなければ慣例の名前のうちローカルにあるものへ落とす
+# （共通ライブラリ `wt_base_branch` と同じ順序）
 dev_base=$(jq -r 'select(.version == 1) | .base_branch | select(type == "string")' \
   .ndf/worktree.json 2>/dev/null)
-dev_base=${dev_base:-$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')}
-for candidate in main master; do
-  [ -n "$dev_base" ] && break
-  git show-ref --verify --quiet "refs/heads/$candidate" && dev_base=$candidate
-done
-dev_base=${dev_base:-main}
+if [ -n "$dev_base" ]; then
+  git show-ref --verify --quiet "refs/remotes/origin/$dev_base" ||
+    git show-ref --verify --quiet "refs/heads/$dev_base" ||
+    GIT_TERMINAL_PROMPT=0 git ls-remote --heads --exit-code origin \
+      "refs/heads/$dev_base" >/dev/null 2>&1 || {
+    printf 'NOTE: .ndf/worktree.json の base_branch が指す %s は origin にもローカルにもありません\n' \
+      "$dev_base" >&2
+    exit 1
+  }
+else
+  dev_base=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
+  for candidate in main master; do
+    [ -n "$dev_base" ] && break
+    git show-ref --verify --quiet "refs/heads/$candidate" && dev_base=$candidate
+  done
+  dev_base=${dev_base:-main}
+fi
 ```
 
 ```bash

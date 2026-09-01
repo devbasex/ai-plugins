@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from branch_repo_helpers import (
+    drop_remote_tracking,
     init_master_only_repo,
     init_origin_repo,
     missing_command,
@@ -58,6 +59,21 @@ def repo(tmp_path: Path) -> Path:
 
 
 @pytest.fixture()
+def repo_without_develop(tmp_path: Path) -> Path:
+    """origin にもローカルにも `develop` が無いリポジトリ。"""
+    return init_origin_repo(tmp_path)
+
+
+@pytest.fixture()
+def repo_with_unfetched_develop(tmp_path: Path) -> Path:
+    """origin に `develop` があり、その参照をまだ取得していないリポジトリ。"""
+    main = init_origin_repo(tmp_path)
+    push_develop(main)
+    drop_remote_tracking(main, "develop")
+    return main
+
+
+@pytest.fixture()
 def repo_without_origin_head(tmp_path: Path) -> Path:
     """origin の HEAD が無く、ローカルに `master` だけがあるリポジトリ。
 
@@ -80,20 +96,28 @@ def snippet_of(name: str) -> str:
     return blocks[0]
 
 
-def resolve_inline(name: str, repo: Path) -> str:
-    got = subprocess.run(
+def run_inline(name: str, repo: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(
         ["bash", "-c", f'set -uo pipefail\n{snippet_of(name)}\nprintf "%s\\n" "$dev_base"\n'],
         cwd=str(repo), capture_output=True, text=True,
     )
+
+
+def run_library(repo: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["bash", "-c", f'set -uo pipefail\n. "{LIB}"\nwt_base_branch "{repo}"\n'],
+        cwd=str(repo), capture_output=True, text=True,
+    )
+
+
+def resolve_inline(name: str, repo: Path) -> str:
+    got = run_inline(name, repo)
     assert got.returncode == 0, got.stderr
     return got.stdout.strip()
 
 
 def resolve_library(repo: Path) -> str:
-    got = subprocess.run(
-        ["bash", "-c", f'set -uo pipefail\n. "{LIB}"\nwt_base_branch "{repo}"\n'],
-        cwd=str(repo), capture_output=True, text=True,
-    )
+    got = run_library(repo)
     assert got.returncode == 0, got.stderr
     return got.stdout.strip()
 
@@ -140,6 +164,41 @@ def test_inline_resolution_matches_library_without_origin_head(
     assert got == resolve_library(repo_without_origin_head)
     # 宣言が起点を指していない経路は、慣例の名前のうち実在する `master` へ落ちる。
     assert got == ("develop" if case == "起点あり" else "master")
+
+
+@pytest.mark.parametrize("name", INLINE_SKILLS)
+def test_inline_matches_library_when_declared_branch_is_missing(
+    name: str, repo_without_develop: Path
+) -> None:
+    """宣言した名前がどこにも無いとき、手順も共通ライブラリも落とさずに失敗する。
+
+    ここを突き合わせないと、手順だけが実在しない名前をそのまま返す状態が残る。返した名前は
+    この後の `git fetch origin "$dev_base"` で落ちるため、失敗する位置が遠くなるだけで、
+    起点を解決できていないことは変わらない。
+    """
+    write_declaration(repo_without_develop, {"version": 1, "base_branch": "develop"})
+    inline = run_inline(name, repo_without_develop)
+    library = run_library(repo_without_develop)
+    assert inline.returncode != 0, inline.stdout
+    assert library.returncode != 0, library.stdout
+    assert inline.stdout.strip() == ""
+    assert library.stdout.strip() == ""
+    assert "develop" in inline.stderr
+    assert "develop" in library.stderr
+
+
+@pytest.mark.parametrize("name", INLINE_SKILLS)
+def test_inline_matches_library_when_declared_branch_is_unfetched(
+    name: str, repo_with_unfetched_develop: Path
+) -> None:
+    """取得していないだけで origin にあるブランチも、どちらも起点として使う。
+
+    起点を `develop` へ移した直後の作業ディレクトリがこの形になる。取得済みの参照だけを
+    見ると「無い」と読み、`git fetch` を挟むまで解決が失敗し続ける。
+    """
+    write_declaration(repo_with_unfetched_develop, {"version": 1, "base_branch": "develop"})
+    assert resolve_inline(name, repo_with_unfetched_develop) == "develop"
+    assert resolve_library(repo_with_unfetched_develop) == "develop"
 
 
 @pytest.mark.parametrize("name", LITERAL_SKILLS)

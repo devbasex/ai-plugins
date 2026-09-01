@@ -1575,6 +1575,34 @@ wt_default_branch() {
   return 1
 }
 
+# 指定された名前のブランチが origin かローカルに実在するかを判定する。
+#
+# 取得済みの参照 (`refs/remotes/origin/<名前>` と `refs/heads/<名前>`) を先に見て、
+# どちらにも無いときだけ origin へ問い合わせる。取得済みの参照だけで判定すると、
+# **origin には既にあるがまだ取得していないブランチを「無い」と読む**。起点を
+# `develop` へ移した直後の作業ディレクトリがこの状態になり、`git fetch` を挟むまで
+# 起点の解決が失敗し続ける。
+#
+# 問い合わせを後ろへ置くのは、実在する場合に通信を挟まないためである。この関数は
+# セッション開始時の hook からも呼ばれるため、通常の経路で待たせない。認証の入力待ちで
+# 止まらないよう、端末への問い合わせは禁じる。
+#
+# 問い合わせの照合先を `refs/heads/<名前>` と完全な参照名で書くのは、`git ls-remote` の
+# パターンが参照名の末尾に一致するためである。`develop` とだけ渡すと
+# `refs/heads/feature/develop` にも一致する（実測）。
+wt_branch_exists() {
+  local main_dir="${1:-}" name="${2:-}" listing line
+  [ -n "$main_dir" ] && [ -n "$name" ] || return 1
+  git -C "$main_dir" show-ref --verify --quiet "refs/remotes/origin/$name" && return 0
+  git -C "$main_dir" show-ref --verify --quiet "refs/heads/$name" && return 0
+  listing=$(GIT_TERMINAL_PROMPT=0 git -C "$main_dir" ls-remote --heads origin \
+    "refs/heads/$name" 2>/dev/null) || return 1
+  while IFS= read -r line; do
+    case "$line" in *$'\t'"refs/heads/$name") return 0 ;; esac
+  done <<<"$listing"
+  return 1
+}
+
 # 開発の起点ブランチ名を出力する。宣言の base_branch を優先し、指定が無ければ
 # 既定ブランチへ落とす。
 #
@@ -1589,8 +1617,7 @@ wt_base_branch() {
       jq -r 'if (.base_branch|type) == "string" then .base_branch else empty end' 2>/dev/null)
   fi
   if [ -n "$name" ]; then
-    if git -C "$main_dir" show-ref --verify --quiet "refs/remotes/origin/$name" ||
-       git -C "$main_dir" show-ref --verify --quiet "refs/heads/$name"; then
+    if wt_branch_exists "$main_dir" "$name"; then
       printf '%s\n' "$name"
       return 0
     fi

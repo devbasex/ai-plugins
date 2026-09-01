@@ -136,7 +136,9 @@ cd "$main_dir/.worktrees/$branch"
 の `base_branch`）から取り、宣言が無ければ `origin` の HEAD が指すブランチへ落ちる。
 
 宣言した名前が origin にもローカルにも無いときは、`wt_base_branch` が名前を挙げて失敗する。
-既定ブランチへは落ちない。`origin/HEAD` が設定されていない場合は
+既定ブランチへは落ちない。**まだ取得していないだけのブランチは「無い」とは読まない。**
+取得済みの参照に見つからないときは origin へ問い合わせるため、起点を移した直後の作業
+ディレクトリでも、`git fetch` を挟まずに解決できる。`origin/HEAD` が設定されていない場合は
 `git -C "$main_dir" remote set-head origin -a` で設定できる。
 
 Claude Code の作業ツリー作成ツールは新規作成先が固定されているため、`.worktrees/` を

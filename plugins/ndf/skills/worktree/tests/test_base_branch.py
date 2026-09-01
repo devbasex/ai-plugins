@@ -56,6 +56,39 @@ def test_local_only_branch_is_used(main_repo: Path) -> None:
     assert out == "develop"
 
 
+def test_unfetched_remote_branch_is_used(main_repo: Path) -> None:
+    """取得していないだけで origin にあるブランチも起点として使える。
+
+    `git push` は送った先の参照も更新するため、それを消して「origin にはあるが手元では
+    まだ取得していない」状態を作る。起点を `develop` へ移した直後の作業ディレクトリが
+    この形になり、取得済みの参照だけを見ると `git fetch` を挟むまで解決が失敗し続ける。
+    """
+    add_origin(main_repo)
+    push_branch(main_repo, "develop")
+    git(main_repo, "update-ref", "-d", "refs/remotes/origin/develop")
+    write_declaration(main_repo, json.dumps({"version": 1, "base_branch": "develop"}))
+    out, err, rc = resolve(main_repo)
+    assert rc == 0, err
+    assert out == "develop"
+
+
+def test_remote_branch_with_matching_tail_is_not_used(main_repo: Path) -> None:
+    """origin への問い合わせは、完全な参照名で照合する。
+
+    `git ls-remote` のパターンは参照名の末尾に一致するため、`develop` とだけ渡すと
+    `refs/heads/feature/develop` にも一致する（実測）。別のブランチを起点として
+    受け入れないことを見る。
+    """
+    add_origin(main_repo)
+    push_branch(main_repo, "feature/develop")
+    git(main_repo, "update-ref", "-d", "refs/remotes/origin/feature/develop")
+    write_declaration(main_repo, json.dumps({"version": 1, "base_branch": "develop"}))
+    out, err, rc = resolve(main_repo)
+    assert rc == 1
+    assert out == ""
+    assert "develop" in err
+
+
 def test_missing_branch_does_not_fall_back(main_repo: Path) -> None:
     add_origin(main_repo)
     write_declaration(main_repo, json.dumps({"version": 1, "base_branch": "develop"}))
