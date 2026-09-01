@@ -104,9 +104,51 @@ PR 差分、または `--branch` 指定時は現在のブランチの差分を�
 ### 1. 変更の把握
 
 ```bash
-git diff main --name-only          # 変更ファイル一覧
-git diff main --stat               # 差分の統計
-git log main..HEAD --oneline       # コミット履歴
+# 起点は開発の本流であって、既定ブランチとは限らない。宣言（`.ndf/worktree.json` の
+# `base_branch`）を先に読み、その名前が実在することを確かめる。取得済みの参照に無ければ
+# origin へ問い合わせる（取得していないだけの場合を「無い」と読まないため）。実在しなければ
+# 既定ブランチへ落とさずに止まる。宣言が無ければ origin の HEAD が指す先を使い、それも
+# 取れなければ慣例の名前のうちローカルにあるものへ落とす
+# （共通ライブラリ `wt_base_branch` と同じ順序）
+dev_base=$(jq -r 'select(.version == 1) | .base_branch | select(type == "string")' \
+  .ndf/worktree.json 2>/dev/null)
+if [ -n "$dev_base" ]; then
+  dev_base_found=0
+  if git show-ref --verify --quiet "refs/remotes/origin/$dev_base" ||
+     git show-ref --verify --quiet "refs/heads/$dev_base"; then
+    dev_base_found=1
+  else
+    # `git ls-remote` のパターンは参照名の末尾に一致する。問い合わせの成功だけを見ると
+    # `refs/heads/x/refs/heads/develop` のような別のブランチでも「ある」と読むため、
+    # 返った行の参照名そのものを照合する（共通ライブラリ `wt_branch_exists` と同じ形）
+    dev_base_listing=$(GIT_TERMINAL_PROMPT=0 git ls-remote --heads origin \
+      "refs/heads/$dev_base" 2>/dev/null)
+    while IFS= read -r line; do
+      case "$line" in *$'\t'"refs/heads/$dev_base") dev_base_found=1; break ;; esac
+    done <<<"$dev_base_listing"
+  fi
+  [ "$dev_base_found" -eq 1 ] || {
+    printf 'NOTE: .ndf/worktree.json の base_branch が指す %s は origin にもローカルにもありません\n' \
+      "$dev_base" >&2
+    exit 1
+  }
+else
+  dev_base=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
+  for candidate in main master; do
+    [ -n "$dev_base" ] && break
+    git show-ref --verify --quiet "refs/heads/$candidate" && dev_base=$candidate
+  done
+  dev_base=${dev_base:-main}
+fi
+```
+
+```bash
+# 起点はローカルに無いことがある（宣言した名前を clone していない、短命な作業ツリー
+# で作業している等）。取得してからリモート追跡ブランチを比較元にする
+git fetch origin "$dev_base"
+git diff "origin/$dev_base" --name-only     # 変更ファイル一覧
+git diff "origin/$dev_base" --stat          # 差分の統計
+git log "origin/$dev_base"..HEAD --oneline  # コミット履歴
 ```
 
 ### 2. 分析

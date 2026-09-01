@@ -22,7 +22,7 @@ featureブランチから指定ベースブランチ（`qa/*`, `staging/*`, `rel
 
 ## なぜ必要か
 
-featureブランチに環境ブランチ(`qa/staging`等)を merge して conflict を解消すると、`feature → main` の PR に環境ブランチ固有のコードが混入する（main汚染）。短命ブランチ + cherry-pick で、必要なコミットだけを対象ブランチに届ける。
+featureブランチに環境ブランチ(`qa/staging`等)を merge して conflict を解消すると、`feature → 起点ブランチ` の PR に環境ブランチ固有のコードが混入する（起点の汚染）。短命ブランチ + cherry-pick で、必要なコミットだけを対象ブランチに届ける。
 
 | 観点 | 正しい順序 | 誤った順序 |
 |------|-----------|-----------|
@@ -38,14 +38,54 @@ featureブランチに環境ブランチ(`qa/staging`等)を merge して confli
 |------|------------------|
 | feature に先に commit し cherry-pick で届ける | 3・6 |
 | 環境ブランチを feature に merge しない | 「なぜ必要か」 |
-| push 前に `origin/main` を取り込む | 5 |
+| push 前に起点ブランチを取り込む | 5 |
 | マージ済みブランチには push しない | 2 |
 
 ## 処理フロー
 
 ### 1. 引数・現状確認
-- 引数からベースブランチ名を取得（必須。未指定なら確認）
+- 引数から環境ブランチ名を取得（必須。未指定なら確認）
 - `git branch --show-current` で現在ブランチを取得
+- 開発の起点ブランチを決める。以降の手順はこの値を使う
+
+```bash
+# 起点は開発の本流であって、既定ブランチとは限らない。宣言（`.ndf/worktree.json` の
+# `base_branch`）を先に読み、その名前が実在することを確かめる。取得済みの参照に無ければ
+# origin へ問い合わせる（取得していないだけの場合を「無い」と読まないため）。実在しなければ
+# 既定ブランチへ落とさずに止まる。宣言が無ければ origin の HEAD が指す先を使い、それも
+# 取れなければ慣例の名前のうちローカルにあるものへ落とす
+# （共通ライブラリ `wt_base_branch` と同じ順序）
+dev_base=$(jq -r 'select(.version == 1) | .base_branch | select(type == "string")' \
+  .ndf/worktree.json 2>/dev/null)
+if [ -n "$dev_base" ]; then
+  dev_base_found=0
+  if git show-ref --verify --quiet "refs/remotes/origin/$dev_base" ||
+     git show-ref --verify --quiet "refs/heads/$dev_base"; then
+    dev_base_found=1
+  else
+    # `git ls-remote` のパターンは参照名の末尾に一致する。問い合わせの成功だけを見ると
+    # `refs/heads/x/refs/heads/develop` のような別のブランチでも「ある」と読むため、
+    # 返った行の参照名そのものを照合する（共通ライブラリ `wt_branch_exists` と同じ形）
+    dev_base_listing=$(GIT_TERMINAL_PROMPT=0 git ls-remote --heads origin \
+      "refs/heads/$dev_base" 2>/dev/null)
+    while IFS= read -r line; do
+      case "$line" in *$'\t'"refs/heads/$dev_base") dev_base_found=1; break ;; esac
+    done <<<"$dev_base_listing"
+  fi
+  [ "$dev_base_found" -eq 1 ] || {
+    printf 'NOTE: .ndf/worktree.json の base_branch が指す %s は origin にもローカルにもありません\n' \
+      "$dev_base" >&2
+    exit 1
+  }
+else
+  dev_base=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
+  for candidate in main master; do
+    [ -n "$dev_base" ] && break
+    git show-ref --verify --quiet "refs/heads/$candidate" && dev_base=$candidate
+  done
+  dev_base=${dev_base:-main}
+fi
+```
 
 ### 2. 既存PRのマージ済みチェック（必須）
 
@@ -62,7 +102,9 @@ gh pr list --head "<current-branch>-for-<base-short-name>" --state merged \
 ### 3. コミット一覧の確認
 
 ```bash
-git log --oneline main..HEAD
+# 起点はローカルに無いことがある。取得してからリモート追跡ブランチと比べる
+git fetch origin "$dev_base"
+git log --oneline "origin/$dev_base"..HEAD
 ```
 
 ユーザーに cherry-pick 対象コミットを確認（全コミット or 選択）。
@@ -81,14 +123,14 @@ git checkout -b <current-branch>-for-<base-short-name> origin/<base-branch>
 - `<base-short-name>`: ベースブランチのスラッシュ以降（例: `qa/staging` → `staging`）
 - 例: `feature/add-auth-for-staging`
 
-### 5. origin/main を取り込む（必須）
+### 5. 起点ブランチを取り込む（必須）
 
 ```bash
-git fetch origin main
-git merge origin/main --no-edit
+git fetch origin "$dev_base"
+git merge "origin/$dev_base" --no-edit
 ```
 
-CIで最新main必須のWorkflowがあるため、取り込み忘れるとconflictやCIエラーになる。
+CIで最新の起点必須のWorkflowがあるため、取り込み忘れるとconflictやCIエラーになる。
 
 ### 6. cherry-pick 実行
 
@@ -128,12 +170,12 @@ git checkout <original-branch>
 ## 注意事項
 
 - 短命ブランチは PR マージ後に削除してよい
-- `feature → main` の PR には影響しない
+- `feature → 起点ブランチ` の PR には影響しない
 - revert の扱いは `ndf-policies`「ブランチ運用の原則」5 に従う
 
 ## 関連
 
 - `ndf-policies` — 環境ブランチへの適用原則とブランチ汚染の回避（本 Skill の前提）
-- `/ndf:pr` — 通常のPR作成（base=main）。非 main ベースは本 Skill に誘導される
-- `/ndf:merged` — マージ後のブランチ整理と、現ブランチへの main 取り込み
+- `/ndf:pr` — 通常のPR作成（宛先は起点ブランチ）。環境ブランチ宛は本 Skill に誘導される
+- `/ndf:merged` — マージ後のブランチ整理と、現ブランチへの起点ブランチの取り込み
 - `/ndf:deploy` — ブランチ全体を環境へデプロイ（cherry-pickとは別用途）

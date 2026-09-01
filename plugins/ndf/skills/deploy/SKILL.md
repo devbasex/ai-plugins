@@ -10,7 +10,7 @@ allowed-tools:
 
 # 環境デプロイPR作成コマンド
 
-現在のfeatureブランチを指定した環境ブランチへデプロイするためのPRを作成する。`{feature}_to_{env}` という命名のdeployブランチを作成し、最新 origin/main を取り込んでから環境ブランチへPRを出す。
+現在のfeatureブランチを指定した環境ブランチへデプロイするためのPRを作成する。`{feature}_to_{env}` という命名のdeployブランチを作成し、最新の起点ブランチを取り込んでから環境ブランチへPRを出す。
 
 ## 使用方法
 
@@ -25,7 +25,7 @@ allowed-tools:
 |---|---|---|
 | 適用範囲 | featureブランチの**一部コミット**を選択 | featureブランチ**全体**を適用 |
 | ブランチ戦略 | 環境ブランチから短命ブランチ派生 | featureブランチから deploy ブランチ派生 |
-| main取り込み | 必須 | 必須 |
+| 起点ブランチの取り込み | 必須 | 必須 |
 | 用途 | 特定修正のみ検証環境に届けたい | feature機能全体を環境で検証したい |
 
 ## 処理フロー
@@ -33,9 +33,48 @@ allowed-tools:
 ### 1. バリデーション
 
 ```bash
+# 起点は開発の本流であって、既定ブランチとは限らない。宣言（`.ndf/worktree.json` の
+# `base_branch`）を先に読み、その名前が実在することを確かめる。取得済みの参照に無ければ
+# origin へ問い合わせる（取得していないだけの場合を「無い」と読まないため）。実在しなければ
+# 既定ブランチへ落とさずに止まる。宣言が無ければ origin の HEAD が指す先を使い、それも
+# 取れなければ慣例の名前のうちローカルにあるものへ落とす
+# （共通ライブラリ `wt_base_branch` と同じ順序）
+dev_base=$(jq -r 'select(.version == 1) | .base_branch | select(type == "string")' \
+  .ndf/worktree.json 2>/dev/null)
+if [ -n "$dev_base" ]; then
+  dev_base_found=0
+  if git show-ref --verify --quiet "refs/remotes/origin/$dev_base" ||
+     git show-ref --verify --quiet "refs/heads/$dev_base"; then
+    dev_base_found=1
+  else
+    # `git ls-remote` のパターンは参照名の末尾に一致する。問い合わせの成功だけを見ると
+    # `refs/heads/x/refs/heads/develop` のような別のブランチでも「ある」と読むため、
+    # 返った行の参照名そのものを照合する（共通ライブラリ `wt_branch_exists` と同じ形）
+    dev_base_listing=$(GIT_TERMINAL_PROMPT=0 git ls-remote --heads origin \
+      "refs/heads/$dev_base" 2>/dev/null)
+    while IFS= read -r line; do
+      case "$line" in *$'\t'"refs/heads/$dev_base") dev_base_found=1; break ;; esac
+    done <<<"$dev_base_listing"
+  fi
+  [ "$dev_base_found" -eq 1 ] || {
+    printf 'NOTE: .ndf/worktree.json の base_branch が指す %s は origin にもローカルにもありません\n' \
+      "$dev_base" >&2
+    exit 1
+  }
+else
+  dev_base=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
+  for candidate in main master; do
+    [ -n "$dev_base" ] && break
+    git show-ref --verify --quiet "refs/heads/$candidate" && dev_base=$candidate
+  done
+  dev_base=${dev_base:-main}
+fi
+```
+
+```bash
 CURRENT_BRANCH=$(git branch --show-current)
-[[ "$CURRENT_BRANCH" == "main" || "$CURRENT_BRANCH" == "master" ]] && \
-  echo "❌ Error: デフォルトブランチからデプロイできません" && exit 1
+[[ "$CURRENT_BRANCH" == "$dev_base" ]] && \
+  echo "❌ Error: 起点ブランチからデプロイできません" && exit 1
 ```
 
 ### 2. deployブランチ名の導出
@@ -60,7 +99,7 @@ fi
 
 既存PRがあれば更新は「deployブランチにpushする」だけで済むため、再作成しない。
 
-### 4. deployブランチ作成 + main取り込み
+### 4. deployブランチ作成 + 起点ブランチの取り込み
 
 **実行する場所は、対象の feature ブランチを持つ作業ディレクトリである。** 開発を
 `.worktrees/<ブランチ名>` の作業ツリーで行っている場合は、その中で実行する。同じ
@@ -68,10 +107,10 @@ fi
 feature ブランチへ切り替えようとすると拒否される。
 
 ```bash
-git fetch origin main
+git fetch origin "$dev_base"
 git checkout -b "$DEPLOY_BRANCH"
-git merge origin/main --no-edit || {
-  echo "❌ main とのmerge conflict。手動解決が必要です"
+git merge "origin/$dev_base" --no-edit || {
+  echo "❌ 起点ブランチとのmerge conflict。手動解決が必要です"
   git merge --abort
   git checkout "$FEATURE_BRANCH"
   git branch -D "$DEPLOY_BRANCH"
@@ -89,7 +128,7 @@ gh pr create --base "$ARGUMENTS" --head "$DEPLOY_BRANCH" \
 ## Summary
 - 環境デプロイ用PR
 - 元ブランチ: $FEATURE_BRANCH
-- main取り込み済み
+- 起点ブランチ取り込み済み
 
 ## Test plan
 - [ ] $ARGUMENTS 環境で動作確認
@@ -107,12 +146,12 @@ git checkout "$FEATURE_BRANCH"
 
 ## 注意事項
 
-- デフォルトブランチからの実行は禁止
-- main取り込みで conflict が出た場合、deployブランチを削除して戻る（featureブランチ側を先に同期すべき）
+- 起点ブランチからの実行は禁止
+- 起点ブランチの取り込みで conflict が出た場合、deployブランチを削除して戻る（featureブランチ側を先に同期すべき）
 - deployブランチは PR マージ後に削除してよい
 - 環境ブランチへの再デプロイは「同じ deployブランチに push」でPRが更新される
 
 ## 関連
 
 - `/ndf:cherry-pick-pr` — 一部コミットだけを環境に届ける場合とブランチ運用戦略の原則
-- `/ndf:merged` — featureブランチに main を取り込む / マージ後のブランチ整理
+- `/ndf:merged` — featureブランチに起点ブランチを取り込む / マージ後のブランチ整理

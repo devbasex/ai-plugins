@@ -1,6 +1,6 @@
 ---
 name: merged
-description: "Delete merged branches and worktrees after listing them for approval, then update main. Use when a PR was merged（マージ後の後片付け・ブランチを整理・worktreeを削除）."
+description: "Delete merged branches and worktrees after listing them for approval, then update the base branch. Use when a PR was merged（マージ後の後片付け・ブランチを整理・worktreeを削除）."
 argument-hint: "[PR番号]"
 allowed-tools:
   - Bash
@@ -9,7 +9,7 @@ allowed-tools:
 
 # マージ後クリーンアップコマンド
 
-PR マージ後の後始末をまとめて実行する。対象 PR のブランチ削除に加えて、残っているマージ済みブランチの整理と main の取り込みもこの Skill で扱う。
+PR マージ後の後始末をまとめて実行する。対象 PR のブランチ削除に加えて、残っているマージ済みブランチの整理と起点ブランチの取り込みもこの Skill で扱う。
 
 ## 用途の切り分け（最初に判定する）
 
@@ -17,11 +17,11 @@ PR マージ後の後始末をまとめて実行する。対象 PR のブラン�
 |---|---|
 | PR マージ後のクリーンアップ | 「クリーンアップの手順」→ 必要なら「マージ済みブランチの整理」 |
 | マージ済みブランチの整理のみ | 「マージ済みブランチの整理」のみ（クリーンアップの手順は実行しない） |
-| 作業中ブランチへ最新 main を取り込む | 「main の取り込み」のみ（クリーンアップの手順は実行しない） |
+| 作業中ブランチへ最新の起点ブランチを取り込む | 「起点ブランチの取り込み」のみ（クリーンアップの手順は実行しない） |
 
 「クリーンアップの手順」以外を目的とする場合、対象 PR は未マージであるのが通常のため、
 手順 1（PR のマージ確認）を前提条件にしてはならない。「マージ済みブランチの整理」と
-「main の取り込み」はいずれも **単独で実行可能** で、PR のマージ状態に依存しない。
+「起点ブランチの取り込み」はいずれも **単独で実行可能** で、PR のマージ状態に依存しない。
 
 ## 削除前の同意取得（必須）
 
@@ -33,7 +33,7 @@ worktree 削除・ローカルブランチ削除・リモートブランチ削�
 | 操作 | 提示するもの |
 |---|---|
 | worktree 削除 | worktree のパスと、未コミット変更の有無（`git -C <path> status --short`） |
-| ローカルブランチ削除 | ブランチ名と、main へ未マージのコミットがあるか |
+| ローカルブランチ削除 | ブランチ名と、起点ブランチへ未マージのコミットがあるか |
 | リモートブランチ削除 | リモート名とブランチ名。共有ブランチに影響するため、他の削除と分けて同意を取る |
 
 - 「削除してよいか」だけを尋ねるのは確認にならない。**対象そのものを一覧で示す**
@@ -42,11 +42,55 @@ worktree 削除・ローカルブランチ削除・リモートブランチ削�
   その依頼が対象への同意にあたる。それでも一覧の提示は行い、依頼に含まれない対象
   （マージ済みブランチの一括整理、リモート削除）については改めて同意を取る
 
+## 起点ブランチを決める
+
+**取り込む先も、マージ済みかを見る先も、開発の起点である。** 既定ブランチとは限らない。
+以降の手順はこの値を使う。
+
+```bash
+# 起点は開発の本流であって、既定ブランチとは限らない。宣言（`.ndf/worktree.json` の
+# `base_branch`）を先に読み、その名前が実在することを確かめる。取得済みの参照に無ければ
+# origin へ問い合わせる（取得していないだけの場合を「無い」と読まないため）。実在しなければ
+# 既定ブランチへ落とさずに止まる。宣言が無ければ origin の HEAD が指す先を使い、それも
+# 取れなければ慣例の名前のうちローカルにあるものへ落とす
+# （共通ライブラリ `wt_base_branch` と同じ順序）
+dev_base=$(jq -r 'select(.version == 1) | .base_branch | select(type == "string")' \
+  .ndf/worktree.json 2>/dev/null)
+if [ -n "$dev_base" ]; then
+  dev_base_found=0
+  if git show-ref --verify --quiet "refs/remotes/origin/$dev_base" ||
+     git show-ref --verify --quiet "refs/heads/$dev_base"; then
+    dev_base_found=1
+  else
+    # `git ls-remote` のパターンは参照名の末尾に一致する。問い合わせの成功だけを見ると
+    # `refs/heads/x/refs/heads/develop` のような別のブランチでも「ある」と読むため、
+    # 返った行の参照名そのものを照合する（共通ライブラリ `wt_branch_exists` と同じ形）
+    dev_base_listing=$(GIT_TERMINAL_PROMPT=0 git ls-remote --heads origin \
+      "refs/heads/$dev_base" 2>/dev/null)
+    while IFS= read -r line; do
+      case "$line" in *$'\t'"refs/heads/$dev_base") dev_base_found=1; break ;; esac
+    done <<<"$dev_base_listing"
+  fi
+  [ "$dev_base_found" -eq 1 ] || {
+    printf 'NOTE: .ndf/worktree.json の base_branch が指す %s は origin にもローカルにもありません\n' \
+      "$dev_base" >&2
+    exit 1
+  }
+else
+  dev_base=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
+  for candidate in main master; do
+    [ -n "$dev_base" ] && break
+    git show-ref --verify --quiet "refs/heads/$candidate" && dev_base=$candidate
+  done
+  dev_base=${dev_base:-main}
+fi
+```
+
 ## クリーンアップの手順
 
-1. **マージ確認**: 引数の（引数がなければ自身が作成した最新の）PR が main に merge されていることを github mcp で確認。merge されていなければクリーンアップは実施せず終了
+1. **マージ確認**: 引数の（引数がなければ自身が作成した最新の）PR が起点ブランチへ merge されていることを github mcp で確認。merge されていなければクリーンアップは実施せず終了
 2. **作業ツリー退避**: `git branch --show-current` で**退避元のブランチ名を記録**し、`git status` を確認して変更があれば `git stash`
-3. **main 更新**: `git checkout main` → `git pull`
+3. **起点ブランチの更新**: `git checkout "$dev_base"` → `git pull`
 4. **worktree クリーンアップ**: `git worktree list` で当該 PR に対応する作業ツリーを探し、**「削除前の同意取得」に従ってパスと未コミット変更の有無を提示し、同意を得てから** `git worktree remove <path>` で削除する。探す先は 2 つある
 
    | 置き場所 | 作られ方 | 名前 |
@@ -59,7 +103,7 @@ worktree 削除・ローカルブランチ削除・リモートブランチ削�
 6. **マージ済みブランチの整理**: 下記の手順で残存ブランチをまとめて削除
 7. **復元**: 手順 2 で stash していれば、**退避元のブランチへ戻してから**復元する
    - 退避元のブランチが残っている場合: `git checkout <退避元のブランチ>` → `git stash pop`
-   - 退避元のブランチを手順 5 / 6 で削除した場合: **`git stash pop` を実行しない**。手順 3 以降は main に居るため、そのまま pop すると無関係な変更が main の作業ツリーへ展開される。stash は残したまま `git stash list` の該当エントリを作業完了報告に記載し、復元先ブランチの作成か破棄かをユーザーに判断してもらう
+   - 退避元のブランチを手順 5 / 6 で削除した場合: **`git stash pop` を実行しない**。手順 3 以降は起点ブランチに居るため、そのまま pop すると無関係な変更が起点ブランチの作業ツリーへ展開される。stash は残したまま `git stash list` の該当エントリを作業完了報告に記載し、復元先ブランチの作成か破棄かをユーザーに判断してもらう
 
 **注意**: 冪等性保証・エラー時中断・削除済み無視
 
@@ -70,31 +114,34 @@ worktree 削除・ローカルブランチ削除・リモートブランチ削�
 OPEN な PR が残っている状態でも、ブランチ整理だけを目的に実行してよい。
 
 ```bash
-git branch --merged main          # 1. マージ済みブランチを列挙
-git branch -d <branch>            # 2. ローカル削除
-git push origin --delete <branch> # 3. リモートにも残っていれば削除
+# 起点はローカルに無いことがある。この節は単独でも実行するため、ここで取得して
+# からリモート追跡ブランチを判定の先にする
+git fetch origin "$dev_base"             # 1. 起点を取得
+git branch --merged "origin/$dev_base"   # 2. マージ済みブランチを列挙
+git branch -d <branch>                   # 3. ローカル削除
+git push origin --delete <branch>        # 4. リモートにも残っていれば削除
 ```
 
-- main と現在のブランチは必ず除外する
-- **手順 2 の前に削除対象のローカルブランチを一覧で提示し、同意を得てから削除する**
-- **手順 3 のリモート削除は共有ブランチに影響するため、ローカル削除とは分けて対象を提示し、
+- 起点ブランチと現在のブランチは必ず除外する
+- **手順 3 の前に削除対象のローカルブランチを一覧で提示し、同意を得てから削除する**
+- **手順 4 のリモート削除は共有ブランチに影響するため、ローカル削除とは分けて対象を提示し、
   改めて同意を得てから実行する**（「削除前の同意取得」を参照）
 
-## main の取り込み
+## 起点ブランチの取り込み
 
-作業中のブランチへ最新のデフォルトブランチ (main/master) を取り込む場合はこちらを使う。PR のマージ有無は前提条件にしない。
+作業中のブランチへ最新の起点ブランチを取り込む場合はこちらを使う。PR のマージ有無は前提条件にしない。
 
-1. **ブランチ確認**: `git branch --show-current`。デフォルトブランチ自身なら `git pull` のみ実行して終了
+1. **ブランチ確認**: `git branch --show-current`。起点ブランチ自身なら `git pull` のみ実行して終了
 2. **作業ツリー確認**: 未コミット変更があれば `git stash` で退避
-3. **最新取得**: `git fetch origin <default-branch>`
-4. **マージ実行**: `git merge origin/<default-branch> --no-edit`
+3. **最新取得**: `git fetch origin "$dev_base"`
+4. **マージ実行**: `git merge "origin/$dev_base" --no-edit`
    - コンフリクト時は `git diff --name-only --diff-filter=U` で一覧を表示し、**自動解決はしない**。ユーザーに報告し、確認後に作業継続
 5. **後処理**: stash していれば `git stash pop`。コンフリクトがなければ `git push` で反映し、マージ済みコミット数と変更ファイル数を報告
 
 ## 作業完了報告（必須）
 
 - 実行サマリー（PR タイトル、マージコミット、削除したブランチ、現在のブランチ）
-- main ブランチの状態
+- 起点ブランチの状態
 - 復元していない stash が残っている場合はその旨と `git stash list` の該当エントリ
 - **このマージがまとまりの最後だったかどうか**。最後なら次の工程は配布（`/ndf:release`）である。
   判断できないときは、その旨を書いて運用者の回答を待つ

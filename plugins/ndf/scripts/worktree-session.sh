@@ -80,24 +80,62 @@ follow_to() {
   fi
 }
 
+# ブランチ名が指すコミットを出力する。解決できなければ 1 を返す。
+#
+# **名前をそのまま `git rev-parse` へ渡さない。** 解決の順序に
+# `refs/remotes/origin/<名前>` は含まれないため、ローカルに同名のブランチが無いと
+# 名前だけでは解決できない。しかもそのとき `rev-parse` は渡した名前を標準出力へ
+# そのまま書いて失敗するため、出力が空かどうかでは失敗を拾えない。参照名を組み立て、
+# ローカル → 取得済みの追跡参照の順に確かめる。
+resolve_commit() {
+  local name="$1" ref sha
+  for ref in "refs/heads/$name" "refs/remotes/origin/$name"; do
+    sha=$(git -C "$MAIN_DIR" rev-parse --verify --quiet "$ref^{commit}" 2>/dev/null) || continue
+    [ -n "$sha" ] || continue
+    printf '%s\n' "$sha"
+    return 0
+  done
+  return 1
+}
+
+# 起点が指すコミットを出力する。取得済みの参照で解決できないときは origin から取る。
+#
+# `wt_base_branch` は origin にあるだけで取得していないブランチも起点として返す。
+# 起点を移した直後の主ディレクトリがこの状態になり、取得済みの参照だけを見ていると
+# 追従が黙って起きない。この経路は `wt_base_branch` が既に origin へ問い合わせて
+# いるため、通信が増えるのは元から通信していた場合だけである。取得できないときは
+# 追従しない（案内は編集時の hook と作業ツリーの手順の側で出す）。
+resolve_base_commit() {
+  local name="$1" sha
+  sha=$(resolve_commit "$name") && { printf '%s\n' "$sha"; return 0; }
+  GIT_TERMINAL_PROMPT=0 git -C "$MAIN_DIR" fetch -q --no-tags origin \
+    "refs/heads/$name" >/dev/null 2>&1 || return 1
+  sha=$(git -C "$MAIN_DIR" rev-parse --verify --quiet 'FETCH_HEAD^{commit}' 2>/dev/null) || return 1
+  [ -n "$sha" ] || return 1
+  printf '%s\n' "$sha"
+}
+
 case "$DECISION" in
   "detach "*)
     branch=${DECISION#detach }
     current=$(git -C "$MAIN_DIR" rev-parse HEAD 2>/dev/null)
-    wanted=$(git -C "$MAIN_DIR" rev-parse "$branch" 2>/dev/null)
+    wanted=$(resolve_commit "$branch") || wanted=""
     if [ -n "$wanted" ] && [ "$current" != "$wanted" ]; then
-      follow_to "$branch" "作業ツリーのブランチ $branch"
+      follow_to "$wanted" "作業ツリーのブランチ $branch"
     fi
     ;;
   default)
-    default_branch=$(wt_default_branch "$MAIN_DIR") || default_branch=""
-    if [ -n "$default_branch" ]; then
+    # 合わせる先は開発の起点であって、既定ブランチとは限らない。解決できない
+    # ときは追従しない。案内はセッション開始時の出力へ混ぜず、編集時の hook と
+    # 作業ツリーの手順の側で出す。
+    base_branch=$(wt_base_branch "$MAIN_DIR" 2>/dev/null) || base_branch=""
+    if [ -n "$base_branch" ]; then
       current_branch=$(git -C "$MAIN_DIR" symbolic-ref --short -q HEAD 2>/dev/null)
-      if [ "$current_branch" != "$default_branch" ]; then
+      if [ "$current_branch" != "$base_branch" ]; then
         current=$(git -C "$MAIN_DIR" rev-parse HEAD 2>/dev/null)
-        wanted=$(git -C "$MAIN_DIR" rev-parse "$default_branch" 2>/dev/null)
+        wanted=$(resolve_base_commit "$base_branch") || wanted=""
         if [ -n "$wanted" ] && [ "$current" != "$wanted" ]; then
-          follow_to "$default_branch" "既定ブランチ $default_branch"
+          follow_to "$wanted" "起点ブランチ $base_branch"
         fi
       fi
     fi

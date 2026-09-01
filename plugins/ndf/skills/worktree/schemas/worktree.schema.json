@@ -20,6 +20,10 @@
         1
       ]
     },
+    "base_branch": {
+      "type": "string",
+      "description": "開発の起点ブランチ。作業ツリーの分岐元と主ディレクトリの追従先になる。未指定なら origin の HEAD が指すブランチを使う。指定した名前が origin にもローカルにも無いときは既定へ落とさず解決に失敗する"
+    },
     "guard": {
       "type": "object",
       "additionalProperties": true,
