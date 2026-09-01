@@ -201,7 +201,7 @@ Skill を 3 個増やすと、各ランタイムの初期一覧に載る `descri
 - [x] 受け入れ条件 1〜15 をすべて満たし、条件ごとに検証手段と結果が対応している
 - [x] `architecture` モードの検証の段階 1〜4 を通す（詳細は `quality-gates`）
 - [x] 版の配布後にリリース後テストを実施し、結果を記録する
-- [x] 振り返りを `docs/development-history/` へ残す（[04-2026-08-31.md](../docs/development-history/04-2026-08-31.md)）
+- [x] 振り返りを `docs/development-history/` へ残す（[04-2026-08-31.md](../../docs/development-history/04-2026-08-31.md)）
 
 ## リリース後テスト
 

@@ -43,7 +43,7 @@
 | --- | --- | --- |
 | 受け入れ条件 1〜15 | 満たす | 3 Skill が実在し、`manifests/*-skills.txt` の 3 ファイルすべてに載る。呼び出し元 6 Skill に案内がある |
 | `architecture` の検証の段階 1〜4 | 満たす | PR #177 で実施 |
-| リリース後テストの実施と記録 | 満たす | v9.4.0 の導入物を 3 ランタイムで確認。記録は [issues/issue-175-release-verification-retrospective.md](../issue-175-release-verification-retrospective.md) の「リリース後テスト」 |
+| リリース後テストの実施と記録 | 満たす | v9.4.0 の導入物を 3 ランタイムで確認。記録は [issues/old/issue-175-release-verification-retrospective.md](../issue-175-release-verification-retrospective.md) の「リリース後テスト」 |
 | 振り返りを `docs/development-history/` へ残す | 満たす | `04-2026-08-31.md` |
 
 ## #176 を当初は着手対象から外し、後から入れた経緯
@@ -76,7 +76,7 @@ issue #176 の「決めること」8 件のうち、5 件（Projects をどの�
 整ったため、#176 を担当 D としてこのバッチへ入れた。
 
 - 盤面は作成済み: https://github.com/orgs/devbasex/projects/1 （「NDF 開発の進行」）
-- 実装プラン: [issues/issue-176-github-projects.md](../issue-176-github-projects.md)
+- 実装プラン: [issues/old/issue-176-github-projects.md](../issue-176-github-projects.md)
 - 実装: PR #194（`feature/issue-176-github-projects`）
 
 工程表の同じ行を触る点は変わらないため、**担当 B から派生させる**という順序はそのまま残る。
@@ -109,7 +109,7 @@ PR #194 のベースは `main` ではなく `feature/issue-188-release-step`（�
 14 個の `SKILL.md` は `worktree` / `requirements-design` / `implementation-plan` /
 `tdd-cycle` / `refactoring` / `cross-review` / `pr-review` / `quality-gates` / `pr` /
 `plan-to-spec` / `merged` / `release` / `release-verification` / `retrospective` である
-（内訳の根拠は [issues/issue-176-github-projects.md](../issue-176-github-projects.md) の
+（内訳の根拠は [issues/old/issue-176-github-projects.md](../issue-176-github-projects.md) の
 「案 D」の表）。
 
 この 14 個のうち `worktree` は担当 A が、`development-workflow` / `merged` /
@@ -196,6 +196,6 @@ uv run --with pytest pytest scripts/tests plugins/ndf -q
 
 ## 参照
 
-- [issues/old/parallel-batch-01/00-overview.md](../old/parallel-batch-01/00-overview.md) — 前回のバッチ
-- [issues/issue-175-release-verification-retrospective.md](../issue-175-release-verification-retrospective.md) — #175 の実装計画
+- [issues/old/parallel-batch-01/00-overview.md](../parallel-batch-01/00-overview.md) — 前回のバッチ
+- [issues/old/issue-175-release-verification-retrospective.md](../issue-175-release-verification-retrospective.md) — #175 の実装計画
 - `plugins/ndf/skills/development-workflow/SKILL.md` — 工程の振り分けの基準
