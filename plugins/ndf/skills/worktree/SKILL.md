@@ -254,6 +254,15 @@ bash "$TE" down "$WT" --volumes             # 破棄し、割り当てを解放�
 中に置くと、削除した時点で割り当ての記録が消える。**解放しても行は消さず、解放の時刻を
 書き込む。**
 
+進行を盤面へ記録する場合は、[references/projects-tracking.md](../development-workflow/references/projects-tracking.md) の「`$SCRIPTS` を決める」でパスを解決してから
+次を実行する（`.ndf/projects.json` が無いリポジトリでは何も起きない）。
+
+```bash
+bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "作業場所の用意"
+bash "$SCRIPTS/projects-sync.sh" <issue番号> mode "<モード名>"
+bash "$SCRIPTS/projects-sync.sh" <issue番号> worktree ".worktrees/<ブランチ名>"
+```
+
 ## 関連
 
 - `/ndf:merged` — マージ後の作業ツリーとブランチの削除

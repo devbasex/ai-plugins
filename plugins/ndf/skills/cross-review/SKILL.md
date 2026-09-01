@@ -454,13 +454,8 @@ pint / larastan / test / build などは **中断** を原則とする。
 
 ## メイン context 節約の工夫
 
-1. **大きいファイルはメイン context に載せない**: payload / err.log / diff は
-   すべて `$TMP_DIR/` (= `state.py _tmp_dir()` の解決先) に置き、メインは
-   state.json と result.json だけ読む
-2. **サブエージェント分離**: 修正は別 context window で実行
-3. **PR ローテーション**: 1 PR あたりの会話履歴を抑える
-4. **AI 直接投稿**: 中間ペイロードがメインを通らない
-5. **state.json で再開可能**: メインが落ちても次回起動時に続きから
+設計がこの形になっている理由は
+[references/context-budget.md](references/context-budget.md) にある。
 
 ## 作業完了報告（必須）
 
@@ -486,6 +481,9 @@ pint / larastan / test / build などは **中断** を原則とする。
 
 詳細は PR 上のインラインコメントと state.json に残っているため、本報告では
 繰り返さない。
+
+進行を盤面へ記録する場合は、[references/projects-tracking.md](../development-workflow/references/projects-tracking.md) の「`$SCRIPTS` を決める」でパスを解決してから
+`bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "レビュー"` を実行する（`.ndf/projects.json` が無いリポジトリでは何も起きない）。
 
 ## 関連
 
