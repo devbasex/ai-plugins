@@ -83,58 +83,30 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v9.5.0）
+# => NDF統合開発エージェント（Kiro CLI用 / v9.6.0）
 ```
 
-## v9.5.0 へ更新するとき
+## v9.6.0 へ更新するとき
 
-**公開 Skill が 1 個増えます（Claude Code 32 / Codex 30 / Kiro 31）。** 新しいのは `release` で、
-マージした変更を利用者が受け取れる状態にする工程です。
+**公開 Skill が 1 個増えます（Claude Code 33 / Codex 31 / Kiro 32）。** 新しいのは `design` で、
+設計工程で何という文書を作り何を書くかを決める工程です。設計の成果物が担当した AI ごとに
+変わる状態を、モードごとの必須成果物と雛形で揃えます。
 
-工程表の「配布」の行は、マージ後の後片付け（`merged`）とリリース後テスト
-（`release-verification`）の間に入ります。**版を上げる担い手と時期が決まりました。**
-担い手はまとまりの最後のマージを行った側、時期はまとまり単位でマージが終わった後です。
-Pull Request ごとには上げません。
+工程表の「設計」の行の振り分け先が `design` になり、その後ろへ**「設計レビュー」の行が
+入りました**。`standard` と `architecture` では、設計だけを載せた Pull Request を実装より先に
+マージします。新しい Skill は作らず、`pr` → `cross-review` → `merged` を順に呼びます。
+マージした後は `worktree` を実装用のブランチ名で呼び直します。
 
-**配布は 2 段階に分かれます。** 検証への配布は提示して進めてよく、**本番への配布は承認を
-得るまで進みません**。`development-workflow` が自動で進めてよいのは検証への配布までです。
+`design` は**変更が触る領域に対応する参照だけを読ませます**。永続データを持たない変更では
+データ構造の参照を、API と画面を持たない変更では契約の参照を読み込みません
+（`refactoring` の `lang-<言語>.md` と同じ構成）。記述標準（OpenAPI・データ契約・
+Design Tokens）も、対象となる領域を触る変更でだけ求めます。
 
-配布の形（パッケージ・プラグイン / サービス / デスクトップ / モバイル / 手順・設定）ごとの
-手順は `release/references/form-*.md` にあり、**対象の形のファイルだけを読みます**。
-エージェントプラグインの配布（版数ではなく git の ref で取得する版が決まること、チャネルの
-分け方、リリースタグ、取り消しの手段）は `form-package-plugin.md` にあります。
-
-**工程の進行を GitHub Projects の盤面へ記録できるようになりました。** リポジトリ側に
-`.ndf/projects.json` があるときだけ動き、無ければ何も起きません。`worktree` と同じ宣言ファイル
-方式です。
-
-`cross-review` は、**既存の作業ツリーを流用するときに Pull Request の head へ同期します**。
-これまでは前回の実行のものをそのまま使っており、古い差分をレビューさせていました。
-
-`worktree` の書き込み先の判定が、**同じコマンドの中の `cd` を反映します**。作業ツリーへ移って
-から相対パスで編集したときに、主ディレクトリ向けの案内が出なくなります。
-
-```bash
-# Claude Code
-/plugin marketplace update ai-plugins
-/plugin install ndf@ai-plugins
-
-# Codex
-codex plugin marketplace upgrade ai-plugins
-codex plugin add ndf@ai-plugins
-
-# Kiro CLI
-bash <プラグインのパス>/dev.kiro/install.sh
-```
-
-**Kiro CLI で `runtime-smoke` が文脈量の上限で落ちていた問題も直っています。**
-
-hook は**リポジトリ側に `.ndf/worktree.json` があるときだけ動きます**。置かなければ
-これまでと同じ挙動のままです。書き方は下の「Hooks」節にあります。同じく、GitHub Projects への
-記録は `.ndf/projects.json` があるときだけ動きます。
-
-Codex では、hook の初回実行前に `~/.codex/config.toml` の `[hooks.state]` で対象 hook を
-有効化してください（`enabled = true`）。
+**開発の起点ブランチを宣言で決められるようになりました。** `.ndf/worktree.json` に
+`base_branch` を書くと、作業ツリーの起点・主ディレクトリの追従先・Pull Request の宛先の検査が
+その宣言を読みます。書かなければ、これまでどおり既定ブランチのまま動きます。既定ブランチが
+安定版で開発の本流が別にあるリポジトリ（git-flow など）で、作業ツリーの起点が安定版になる
+状態を避けられます。
 
 ## Playwright テストについて
 
@@ -271,7 +243,7 @@ gemini
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/9.5.0/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/9.6.0/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -293,14 +265,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/9.5.0/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/9.6.0/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  9.5.0  <path>
+# => ndf@ai-plugins  installed, enabled  9.6.0  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
