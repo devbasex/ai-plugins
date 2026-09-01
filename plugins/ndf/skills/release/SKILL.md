@@ -26,8 +26,8 @@ allowed-tools:
 | モバイルアプリ | iOS / Android のアプリ | ストアの審査を経て公開される |
 | 手順・設定 | 運用手順 / 設定の変更 | 利用者へ配る |
 
-形ごとの詳細は [references/distribution-forms.md](references/distribution-forms.md) にある。
-**着手したら、対象の形の節を読んでから手順へ入る。** 当てはまる形が無ければ、最も近い形の
+形ごとの詳細は [references/distribution-forms.md](references/distribution-forms.md) の索引から辿る。
+**着手したら、対象の形のファイルだけを読んでから手順へ入る。** 他の形の手順は読まない。 当てはまる形が無ければ、最も近い形の
 考え方を借り、違うところを完了報告へ書く。
 
 **サービスは、反映を誰が起こすかでこの工程の形が変わる。** マージで反映が起きる仕組み
@@ -231,7 +231,9 @@ Pull Request が最後かどうかを判断できない。
 
 ## 関連
 
-- [references/distribution-forms.md](references/distribution-forms.md) — 形ごとの起点・公開・取得・取り消し
+- [references/distribution-forms.md](references/distribution-forms.md) — 形の索引と、形をまたぐ決まり。
+  手順は形ごとのファイル（`form-package-plugin.md` / `form-service.md` / `form-desktop.md` /
+  `form-mobile.md` / `form-procedure.md`）にある
 - `/ndf:merged` — この工程の前に行うマージ後の後片付け
 - `/ndf:release-verification` — この工程の後に行うリリース後テスト
 - `/ndf:deploy` — 環境ブランチへ反映する Pull Request を作る
