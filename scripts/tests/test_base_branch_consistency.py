@@ -10,11 +10,12 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
+
+from branch_repo_helpers import init_origin_repo, missing_command, push_develop
 
 ROOT = Path(__file__).resolve().parents[2]
 LIB = ROOT / "plugins" / "ndf" / "scripts" / "lib" / "worktree-common.sh"
@@ -36,43 +37,18 @@ LITERAL_SKILLS = (
     "worktree",
 )
 
-# コマンドの引数に現れる既定ブランチの字面。`base=${base:-main}` のような
+# コマンドの引数に現れる既定ブランチの字面。`dev_base=${dev_base:-main}` のような
 # 退避先は対象にしない（origin の HEAD すら取れないときの最後の手段である）。
 COMMAND_LITERAL = re.compile(r"^\s*git\s+\S+[^\n]*\bmain\b")
 
-pytestmark = pytest.mark.skipif(
-    any(shutil.which(name) is None for name in ("bash", "jq", "git")),
-    reason="bash / jq / git が要る",
-)
-
-
-def git(repo: Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["git", *args], cwd=str(repo), capture_output=True, text=True, check=True
-    )
+pytestmark = pytest.mark.skipif(missing_command() is not None, reason="bash / jq / git が要る")
 
 
 @pytest.fixture()
 def repo(tmp_path: Path) -> Path:
     """origin を持つリポジトリ。既定ブランチは main、origin に develop がある。"""
-    main = tmp_path / "main"
-    main.mkdir()
-    git(main, "init", "-q", "-b", "main")
-    git(main, "config", "user.email", "test@example.com")
-    git(main, "config", "user.name", "test")
-    git(main, "config", "commit.gpgsign", "false")
-    (main / "README.md").write_text("# test\n", encoding="utf-8")
-    git(main, "add", "README.md")
-    git(main, "commit", "-q", "-m", "init")
-
-    remote = tmp_path / "origin.git"
-    subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True)
-    git(main, "remote", "add", "origin", str(remote))
-    git(main, "push", "-q", "origin", "main")
-    git(main, "remote", "set-head", "origin", "main")
-    git(main, "branch", "develop")
-    git(main, "push", "-q", "origin", "develop")
-    git(main, "branch", "-D", "develop")
+    main = init_origin_repo(tmp_path)
+    push_develop(main)
     return main
 
 

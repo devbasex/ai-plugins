@@ -7,45 +7,17 @@
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
+from branch_repo_helpers import missing_command, push_develop
+
 ROOT = Path(__file__).resolve().parents[2]
 GUARD = ROOT / "scripts" / "check-pr-base.sh"
 
-pytestmark = pytest.mark.skipif(
-    any(shutil.which(name) is None for name in ("bash", "jq", "git")),
-    reason="bash / jq / git が要る",
-)
-
-
-def git(repo: Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["git", *args], cwd=str(repo), capture_output=True, text=True, check=True
-    )
-
-
-@pytest.fixture()
-def repo(tmp_path: Path) -> Path:
-    """origin を持つリポジトリ。origin に develop は無い。"""
-    main = tmp_path / "main"
-    main.mkdir()
-    git(main, "init", "-q", "-b", "main")
-    git(main, "config", "user.email", "test@example.com")
-    git(main, "config", "user.name", "test")
-    git(main, "config", "commit.gpgsign", "false")
-    (main / "README.md").write_text("# test\n", encoding="utf-8")
-    git(main, "add", "README.md")
-    git(main, "commit", "-q", "-m", "init")
-
-    remote = tmp_path / "origin.git"
-    subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True)
-    git(main, "remote", "add", "origin", str(remote))
-    git(main, "push", "-q", "origin", "main")
-    return main
+pytestmark = pytest.mark.skipif(missing_command() is not None, reason="bash / jq / git が要る")
 
 
 def declare(repo: Path, body: dict) -> None:
@@ -54,61 +26,55 @@ def declare(repo: Path, body: dict) -> None:
     (ndf / "worktree.json").write_text(json.dumps(body), encoding="utf-8")
 
 
-def create_develop(repo: Path) -> None:
-    git(repo, "branch", "develop")
-    git(repo, "push", "-q", "origin", "develop")
-    git(repo, "branch", "-D", "develop")
-
-
 def guard(repo: Path, head_ref: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["bash", str(GUARD), head_ref], cwd=str(repo), capture_output=True, text=True
     )
 
 
-def test_without_declaration_passes(repo: Path) -> None:
+def test_without_declaration_passes(origin_repo: Path) -> None:
     """宣言が無いリポジトリでは検査しない。"""
-    assert guard(repo, "feature/x").returncode == 0
+    assert guard(origin_repo, "feature/x").returncode == 0
 
 
-def test_without_base_branch_passes(repo: Path) -> None:
+def test_without_base_branch_passes(origin_repo: Path) -> None:
     """チャネルを分けていないリポジトリでは検査しない。"""
-    declare(repo, {"version": 1})
-    assert guard(repo, "feature/x").returncode == 0
+    declare(origin_repo, {"version": 1})
+    assert guard(origin_repo, "feature/x").returncode == 0
 
 
-def test_unsupported_version_passes(repo: Path) -> None:
-    declare(repo, {"version": 99, "base_branch": "develop"})
-    create_develop(repo)
-    assert guard(repo, "feature/x").returncode == 0
+def test_unsupported_version_passes(origin_repo: Path) -> None:
+    declare(origin_repo, {"version": 99, "base_branch": "develop"})
+    push_develop(origin_repo)
+    assert guard(origin_repo, "feature/x").returncode == 0
 
 
-def test_absent_base_branch_passes(repo: Path) -> None:
+def test_absent_base_branch_passes(origin_repo: Path) -> None:
     """起点ブランチをまだ作っていない間は、すべての Pull Request を通す。"""
-    declare(repo, {"version": 1, "base_branch": "develop"})
-    assert guard(repo, "feature/x").returncode == 0
+    declare(origin_repo, {"version": 1, "base_branch": "develop"})
+    assert guard(origin_repo, "feature/x").returncode == 0
 
 
-def test_from_base_branch_passes(repo: Path) -> None:
-    declare(repo, {"version": 1, "base_branch": "develop"})
-    create_develop(repo)
-    assert guard(repo, "develop").returncode == 0
+def test_from_base_branch_passes(origin_repo: Path) -> None:
+    declare(origin_repo, {"version": 1, "base_branch": "develop"})
+    push_develop(origin_repo)
+    assert guard(origin_repo, "develop").returncode == 0
 
 
-def test_from_other_branch_fails(repo: Path) -> None:
-    declare(repo, {"version": 1, "base_branch": "develop"})
-    create_develop(repo)
-    got = guard(repo, "feature/x")
+def test_from_other_branch_fails(origin_repo: Path) -> None:
+    declare(origin_repo, {"version": 1, "base_branch": "develop"})
+    push_develop(origin_repo)
+    got = guard(origin_repo, "feature/x")
     assert got.returncode != 0
     message = got.stdout + got.stderr
     assert "develop" in message
     assert "--base" in message
 
 
-def test_missing_argument_fails(repo: Path) -> None:
+def test_missing_argument_fails(origin_repo: Path) -> None:
     """分岐元を渡し忘れたときは、通さずに使い方を出す。"""
     got = subprocess.run(
-        ["bash", str(GUARD)], cwd=str(repo), capture_output=True, text=True
+        ["bash", str(GUARD)], cwd=str(origin_repo), capture_output=True, text=True
     )
     assert got.returncode == 2
     assert "使い方" in got.stdout + got.stderr
