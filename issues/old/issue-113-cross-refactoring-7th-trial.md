@@ -179,7 +179,7 @@ exec /usr/bin/gh "$@"
 
 ```bash
 $ gh pr list --state all --limit 30 --json author -q '.[].author.login' | sort -u
-takemi-ohama
+<利用者>
 ```
 
 投稿の event を `APPROVE` / `REQUEST_CHANGES` のまま送る経路は、別の利用者が作成した

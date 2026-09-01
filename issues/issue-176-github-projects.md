@@ -81,9 +81,7 @@ issue が挙げた 3 案には、それぞれ確かめられた難点がある�
 
 **案 D: 工程の切れ目を持つ Skill だけが、共通スクリプトを 1 行呼ぶ。** 判定と API の扱いは
 `plugins/ndf/scripts/lib/projects-common.sh` が持ち、各 `SKILL.md` は呼び出しを 1 行書くだけに
-する。`worktree` と同じ構造であり、対象は 14 個の `SKILL.md` になる。工程表の 14 行のうち
-「設計」だけは専用の Skill を持たないため、書き込む Skill は無い。「レビュー」は
-`cross-review` と `pr-review` の 2 つが書き込む。
+する。`worktree` と同じ構造であり、対象は 14 個に収まる。
 
 | Skill | 書き込む値 |
 | --- | --- |
@@ -101,6 +99,10 @@ issue が挙げた 3 案には、それぞれ確かめられた難点がある�
 | `release` | 進行=配布 |
 | `release-verification` | 進行=リリース後テスト |
 | `retrospective` | 進行=振り返り、Status=Done |
+
+工程表は 14 行あるが、専用の Skill を持つのは 13 行である。「設計」だけは独立した Skill を
+持たず、`implementation-plan` の中で記録する。逆に「レビュー」は `cross-review` と
+`pr-review` の 2 つが同じ値を書くため、Skill の数は 14 個になる。
 
 ### 決めること 7 への答え
 
@@ -133,7 +135,9 @@ issue は「マージ前の文書を他の作業から読めない状態は変�
 - [ ] 4. 工程の切れ目を持つ 14 個の `SKILL.md` に、進行を書き込む案内が 1 行ずつ入っている
 - [ ] 5. `development-workflow` に、判定結果（モード）の記録先としての位置づけが書かれている
 - [ ] 6. `issue-plan-strategy` に、1 issue = 1 アイテムで Pull Request を複数ぶら下げる旨がある
-- [ ] 7. 判定のテストが `plugins/ndf/skills/*/tests/` にあり、外部への通信を伴わない
+- [ ] 7. 判定のテストが `plugins/ndf/skills/development-workflow/tests/` にあり、外部への
+      通信を伴わない。`projects-common.sh` は特定の Skill に属さない共通スクリプトだが、
+      テストは進行の記録という振る舞いの持ち主である `development-workflow` の下へ置く
 - [ ] 8. `python3 scripts/check-skill-frontmatter.py` が終了コード 0 で終わる
 - [ ] 9. `bash scripts/validate-runtime-plugins.sh` が終了コード 0 で終わる
 - [ ] 10. `uv run --with pytest pytest scripts/tests plugins/ndf -q` が通る
