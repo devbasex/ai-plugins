@@ -5,7 +5,8 @@
       "command": "npx",
       "args": [
         "--yes",
-        "@bytebase/dbhub"
+        "@bytebase/dbhub",
+        "--config=dbhub.toml"
       ]
     }
   }
