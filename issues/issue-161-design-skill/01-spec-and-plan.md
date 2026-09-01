@@ -89,7 +89,8 @@ issue #161 の課題（原文）:
       つながるかが書かれている
 - [ ] データ構造の参照に、時系列を保護する手法（二重時間軸・履歴保持型の次元・事象の記録・定期取得）が
       並び、どれを採るかと採らなかった理由を残す形が示されている
-- [ ] 入出力の契約の参照に、API は OpenAPI で書くこと、画面は当面の表と図の形式で書くことが定めてある
+- [ ] 呼び出される約束の参照に、API を OpenAPI で書くことが定めてある
+- [ ] 画面の参照に、当面の表と図の形式が定めてある
 
 ### 開発ループへの結線
 
@@ -97,6 +98,9 @@ issue #161 の課題（原文）:
       3 モードで `design` を指す
 - [ ] 工程表に「設計レビュー」行がある。`standard` と `architecture` で必須、`legacy-refactor` で任意、
       `light` は対象外
+- [ ] 設計 Pull Request の本文に、課題を自動で閉じる語（`Closes` / `Fixes` / `Resolves`）を
+      書かないことが定めてある
+- [ ] 設計 Pull Request をマージした後、実装用の作業ツリーを作り直す手順が定めてある
 - [ ] 「`architecture` モードの現状」節が、縮退運用の記述から導入済みの記述へ差し替わっている
 - [ ] 標準フローの図が、設計と設計レビューを含む形へ更新されている
 - [ ] `references/projects-tracking.md` の対応表に `設計` の記録 Skill として `design` が入り、
@@ -179,11 +183,11 @@ issue #202（`fix/issue-202-base-branch`）が同時に進んでいる。触る�
 | 対象 | 内容 |
 | --- | --- |
 | `skills/design/SKILL.md` | モードごとの必須成果物、手順、参照の読み分け、設計 Pull Request の呼び出し |
-| `references/design-template.md` | 設計文書の雛形と、各節が `implementation-plan` のどこへつながるか |
-| `references/data-structure.md` | データ構造の観点、時系列を保護する手法、分析視点での検査 |
-| `references/interface-contract.md` | API の記述標準、画面の当面の書き方、契約の検査 |
+| `references/design-template.md` | 設計文書の雛形、各節が `implementation-plan` のどこへつながるか、図の水準 |
 | `references/decisions.md` | 決定の記録の書き方と置き場所 |
-| `references/diagrams.md` | 図の水準（どの階層まで求めるか）と `markdown-writing` の図表ルールへの接続 |
+| `references/data-structure.md` | データ構造の観点、時系列を保護する手法、分析視点での検査 |
+| `references/interface-api.md` | 呼び出される約束の記述標準と契約の検査 |
+| `references/interface-ui.md` | 画面の当面の書き方と、見た目の値の記述標準 |
 
 ### タスク 2: 開発ループへの結線
 
@@ -213,8 +217,9 @@ issue #202（`fix/issue-202-base-branch`）が同時に進んでいる。触る�
 この変更自身が、新しく定める工程を通る。
 
 1. 要求仕様と設計文書を書く（タスク 1 の設計まで）
-2. 設計 Pull Request を作り、`cross-review` の承認を得てマージする
-3. 別のブランチで Skill 本体を実装し、2 本目の Pull Request を出す
+2. 設計 Pull Request を作り、`cross-review` の承認を得てマージする。本文に課題を自動で閉じる語を書かない
+3. マージ後に後片付けを行い、実装用の作業ツリーを新しく作る
+4. その作業ツリーで Skill 本体を実装し、2 本目の Pull Request を出す
 
 ## 未決
 
