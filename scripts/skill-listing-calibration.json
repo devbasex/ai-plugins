@@ -1,10 +1,10 @@
 {
-  "measured_at": "2026-08-15",
+  "measured_at": "2026-09-01",
   "runtime": "claude",
   "command": "claude -p /context --output-format json",
-  "matched_skills": 26,
-  "chars": 4364,
-  "tokens": 1570.0,
-  "chars_per_token": 2.78,
+  "matched_skills": 34,
+  "chars": 5893,
+  "tokens": 2110.0,
+  "chars_per_token": 2.79,
   "note": "Skill 単位のトークンを出せるのは Claude Code だけのため、これを基準にする。"
 }

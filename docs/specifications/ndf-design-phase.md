@@ -81,8 +81,9 @@ AI ごとに変わり、文書の分割単位・記載項目・粒度をその�
 
 ## 運用
 
-`FRONTMATTER_TOTAL_MAX`（`scripts/check-skill-frontmatter.py`）は、Skill を 1 つ増やす判断と
-あわせて引き上げる。`design` の追加にあわせて 12400 から 12600 にした。
+`FRONTMATTER_TOTAL_MAX`（`scripts/check-skill-frontmatter.py`）の引き上げは、実測を取り直して
+から行う。手順と根拠は
+[Skill 執筆規約の「上限値」](../../plugins/ndf/skills/README.md#上限値)にある。
 
 ## 関連リンク
 
