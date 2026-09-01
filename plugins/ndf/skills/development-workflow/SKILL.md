@@ -66,7 +66,8 @@ mode: standard
 | --- | --- | --- | --- | --- |
 | 作業場所の用意 | `worktree`（主ディレクトリで編集してよいパスだけなら不要） | `worktree` | `worktree` | `worktree` |
 | 要求と受け入れ条件 | — | `requirements-design` | `requirements-design` | — |
-| 設計 | — | `implementation-plan` に代替案と採否を記録 | ドメインモデリングと設計レビュー（Release 2 で有効化） | `implementation-plan` に代替案と採否を記録 |
+| 設計 | — | `design` | `design` | `design` |
+| 設計レビュー | — | `pr` → `cross-review` → `merged` | `pr` → `cross-review` → `merged` | 任意 |
 | 計画 | — | `implementation-plan` | `implementation-plan` | `implementation-plan` |
 | 実装 | 直接編集 | `tdd-cycle` | `tdd-cycle` | `refactoring` |
 | 構造改善 | — | `refactoring` | `refactoring` | `refactoring` |
@@ -118,8 +119,16 @@ mode: standard
 リリース後テストも段階ごとに行う。検証への配布の後は検証環境で、本番への配布の後は本番で
 確かめる。検証で確かめたことは本番で確かめたことにならない。
 
-「設計」行の `standard` と `legacy-refactor` は**専用の設計 Skill を起動しない**。設計と代替案の
-検討そのものは行い、結果を `implementation-plan` の中に残す。
+設計は 4 モードのうち 3 つで `design` を通る。作る文書と必須の節はモードで変わり、その振り分けは
+`design` が持つ。`light` だけが工程ごと対象外である。
+
+**設計レビューは、設計だけを載せた Pull Request を実装より先にマージする工程である。** 新しい
+Skill は使わず、`pr` → `cross-review` → `merged` の 3 つを順に呼ぶ。実装まで進んでからの指摘は
+設計文書とコードの両方を書き直すことになるため、設計の段階で 1 度レビューへ通す。
+
+マージした後は、実装用の作業ツリーを新しく作る（`merged` が設計のブランチと作業ツリーを消すため)。
+`legacy-refactor` で任意としたのは、このモードが要求と受け入れ条件を通らず、レビューの軸が
+現状固定テストの通過に寄るためである。
 
 レビュー段階は**明示的に呼ぶ**。自然文で「レビューして」と依頼すると、Claude Code では
 組み込みの `code-review` が起動して判定の投稿経路が変わる。
@@ -186,12 +195,10 @@ flowchart TD
 flowchart TD
     S[作業場所の用意] --> A[調査]
     A --> B[要求と受け入れ条件]
-    B --> C[設計と代替案の検討]
-    C --> D{ドメイン<br/>モデリングが要るか}
-    D -->|要る| E[ドメインモデリング]
-    D -->|不要| F[設計レビュー]
-    E --> F
-    F --> G[実装計画]
+    B --> C[設計]
+    C --> F[設計レビュー<br/>PR → 承認 → マージ]
+    F --> W[実装用の作業ツリーを<br/>作り直す]
+    W --> G[実装計画]
     G --> H[失敗するテスト → 最小実装 → 整理]
     H --> R[構造改善]
     R --> I[仕様適合レビュー]
@@ -205,17 +212,17 @@ flowchart TD
     RL --> Q[リリース後テスト]
     Q --> T[振り返り]
     RL -.->|standard / 未検証の項目なし| T
-    C -.->|standard| G
     A -.->|legacy-refactor| C
+    C -.->|legacy-refactor で分けない| G
     A -.->|light| K
     K -.->|light| L
     L -.->|light / legacy-refactor| P
     RL -.->|light| Z[終了]
 ```
 
-- `standard` は A → B → C から破線で G へ抜け、**D・E・F（ドメインモデリングと専用 Skill による
-  設計レビュー）を通らない**。C の設計と代替案の検討は行うが、専用 Skill は使わず
-  `implementation-plan`（G）に代替案と採否として書く
+- C（設計）と F（設計レビュー）は `standard` と `architecture` が必ず通る。設計だけを載せた
+  Pull Request をマージしてから、W で実装用の作業ツリーを作り直して G へ進む
+- `legacy-refactor` は C を通るが、F を分けるかは任意である。分けない場合は破線で G へ抜ける
 - すべてのモードが S（作業場所の用意）から始まる。終わりは `light` が RL（配布）、
   他の 3 つが T（振り返り）である
 - RL（配布）は 4 モードすべてが通る。配布物に差分が無ければ `release` 自身が飛ばすため、
@@ -230,20 +237,19 @@ flowchart TD
   M（確定仕様化）は通らない**（L から P へ抜ける）。H は「現状固定テスト」、R は「段階的改善」、
   I は「本番の振る舞いが変わっていないことの確認」として読む
 
-## `architecture` モードの現状
+## `architecture` モードで作るもの
 
-設計品質の 3 Skill（設計レビュー、ドメインモデリング、クラス設計）は**まだ導入されていない**。
-そのため現時点の `architecture` モードは、次のように縮退した形で動く。
+設計工程は `design` が担う。`architecture` では次を作る。
 
-| 工程 | 現状 |
+| 工程 | 何を作るか |
 | --- | --- |
-| ドメインモデリング | 専用 Skill なし。用語・不変条件を `requirements-design` の仕様へ書く |
-| 設計判断の記録 | `implementation-plan` に代替案と採否の理由を書く |
-| 設計レビュー | 専用 Skill なし。実装前に `cross-review` 相当の観点で自己点検する |
+| 用語と不変条件 | `requirements-design` の仕様へ書く |
+| 設計文書 | `design` が独立したファイルで作る。触る領域に該当する節をすべて埋める |
+| 設計判断の記録 | 設計文書の「決定の記録」の節へ書く |
+| 設計レビュー | 設計だけを載せた Pull Request を `cross-review` へ通し、マージしてから実装へ進む |
 | 契約・結合テスト | `tdd-cycle` の階層の使い分けに従う |
 
-3 Skill の導入後にこの節を差し替える。**判定基準の側は変えない**。モードの定義は確定して
-おり、振り分け先だけを後から埋める。
+**判定基準の側は変えない。** モードの定義は確定しており、この節は振り分け先を示す。
 
 ## 途中でモードが変わったとき
 
