@@ -1575,6 +1575,32 @@ wt_default_branch() {
   return 1
 }
 
+# 開発の起点ブランチ名を出力する。宣言の base_branch を優先し、指定が無ければ
+# 既定ブランチへ落とす。
+#
+# **指定された名前が実在しないときは既定ブランチへ落とさない。** 落とすと、開発の
+# 変更が正式版から分岐したまま進む。origin かローカルのどちらかに同名のブランチが
+# あることを確かめ、無ければ標準エラーへ案内を出して 1 を返す。
+wt_base_branch() {
+  local main_dir="${1:-}" decl name=
+  [ -n "$main_dir" ] || return 1
+  if decl=$(wt_declaration "$main_dir"); then
+    name=$(printf '%s' "$decl" |
+      jq -r 'if (.base_branch|type) == "string" then .base_branch else empty end' 2>/dev/null)
+  fi
+  if [ -n "$name" ]; then
+    if git -C "$main_dir" show-ref --verify --quiet "refs/remotes/origin/$name" ||
+       git -C "$main_dir" show-ref --verify --quiet "refs/heads/$name"; then
+      printf '%s\n' "$name"
+      return 0
+    fi
+    printf 'NOTE: .ndf/worktree.json の base_branch が指す %s は origin にもローカルにもありません\n' \
+      "$name" >&2
+    return 1
+  fi
+  wt_default_branch "$main_dir"
+}
+
 # 主ディレクトリの追跡対象の未コミット変更を `<状態> <パス>` で 1 行 1 件出力する。
 # 追跡されていないファイルは含めない。
 wt_dirty_paths() {
