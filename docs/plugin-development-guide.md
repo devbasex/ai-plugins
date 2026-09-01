@@ -332,5 +332,9 @@ bash scripts/install-dev-hooks.sh
 - パスが正しいか確認（相対パス）
 
 **Q: バージョン更新が反映されない**
-- plugin.jsonとmarketplace.jsonの両方を更新
+- `plugins/<名前>/.claude-plugin/plugin.json` の `version` を更新（**版を持つのはここだけ**。
+  `marketplace.json` に `version` フィールドは置かない）
+- 版数を書いた説明文書の記載（`description` の `(vX.Y.Z)`、更新案内の見出し）を揃える。
+  これは読み手向けの記載で、取得する版は変えない
+- 取得元が自動更新されるとは限らない。利用者側で `claude plugin marketplace update` を実行する
 - Claude Codeを再起動
