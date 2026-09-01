@@ -38,7 +38,7 @@ featureブランチに環境ブランチ(`qa/staging`等)を merge して confli
 |------|------------------|
 | feature に先に commit し cherry-pick で届ける | 3・6 |
 | 環境ブランチを feature に merge しない | 「なぜ必要か」 |
-| push 前に `origin/main` を取り込む | 5 |
+| push 前に起点ブランチを取り込む | 5 |
 | マージ済みブランチには push しない | 2 |
 
 ## 処理フロー
@@ -81,14 +81,23 @@ git checkout -b <current-branch>-for-<base-short-name> origin/<base-branch>
 - `<base-short-name>`: ベースブランチのスラッシュ以降（例: `qa/staging` → `staging`）
 - 例: `feature/add-auth-for-staging`
 
-### 5. origin/main を取り込む（必須）
+### 5. 起点ブランチを取り込む（必須）
 
 ```bash
-git fetch origin main
-git merge origin/main --no-edit
+# 起点は開発の本流であって、既定ブランチとは限らない。宣言（`.ndf/worktree.json` の
+# `base_branch`）が無ければ origin の HEAD が指す先を使う
+base=$(jq -r 'select(.version == 1) | .base_branch | select(type == "string")' \
+  .ndf/worktree.json 2>/dev/null)
+base=${base:-$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')}
+base=${base:-main}
 ```
 
-CIで最新main必須のWorkflowがあるため、取り込み忘れるとconflictやCIエラーになる。
+```bash
+git fetch origin "$base"
+git merge "origin/$base" --no-edit
+```
+
+CIで最新の起点必須のWorkflowがあるため、取り込み忘れるとconflictやCIエラーになる。
 
 ### 6. cherry-pick 実行
 

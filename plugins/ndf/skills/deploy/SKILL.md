@@ -10,7 +10,7 @@ allowed-tools:
 
 # 環境デプロイPR作成コマンド
 
-現在のfeatureブランチを指定した環境ブランチへデプロイするためのPRを作成する。`{feature}_to_{env}` という命名のdeployブランチを作成し、最新 origin/main を取り込んでから環境ブランチへPRを出す。
+現在のfeatureブランチを指定した環境ブランチへデプロイするためのPRを作成する。`{feature}_to_{env}` という命名のdeployブランチを作成し、最新の起点ブランチを取り込んでから環境ブランチへPRを出す。
 
 ## 使用方法
 
@@ -25,7 +25,7 @@ allowed-tools:
 |---|---|---|
 | 適用範囲 | featureブランチの**一部コミット**を選択 | featureブランチ**全体**を適用 |
 | ブランチ戦略 | 環境ブランチから短命ブランチ派生 | featureブランチから deploy ブランチ派生 |
-| main取り込み | 必須 | 必須 |
+| 起点ブランチの取り込み | 必須 | 必須 |
 | 用途 | 特定修正のみ検証環境に届けたい | feature機能全体を環境で検証したい |
 
 ## 処理フロー
@@ -60,7 +60,7 @@ fi
 
 既存PRがあれば更新は「deployブランチにpushする」だけで済むため、再作成しない。
 
-### 4. deployブランチ作成 + main取り込み
+### 4. deployブランチ作成 + 起点ブランチの取り込み
 
 **実行する場所は、対象の feature ブランチを持つ作業ディレクトリである。** 開発を
 `.worktrees/<ブランチ名>` の作業ツリーで行っている場合は、その中で実行する。同じ
@@ -68,10 +68,19 @@ fi
 feature ブランチへ切り替えようとすると拒否される。
 
 ```bash
-git fetch origin main
+# 起点は開発の本流であって、既定ブランチとは限らない。宣言（`.ndf/worktree.json` の
+# `base_branch`）が無ければ origin の HEAD が指す先を使う
+base=$(jq -r 'select(.version == 1) | .base_branch | select(type == "string")' \
+  .ndf/worktree.json 2>/dev/null)
+base=${base:-$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')}
+base=${base:-main}
+```
+
+```bash
+git fetch origin "$base"
 git checkout -b "$DEPLOY_BRANCH"
-git merge origin/main --no-edit || {
-  echo "❌ main とのmerge conflict。手動解決が必要です"
+git merge "origin/$base" --no-edit || {
+  echo "❌ 起点ブランチとのmerge conflict。手動解決が必要です"
   git merge --abort
   git checkout "$FEATURE_BRANCH"
   git branch -D "$DEPLOY_BRANCH"
