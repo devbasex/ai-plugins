@@ -129,6 +129,20 @@ git push origin develop:main   # 正式版として公開する
 4. Skill の数が増減した場合は、`README.md` と `plugins/ndf/README.md` に書かれた数を書き直す
 5. 破壊的変更がある場合は明示
 6. テストを実行
+7. **正式版として `main` を進めた後、リリースタグを打つ**
+
+```bash
+claude plugin tag plugins/ndf --dry-run   # 打つ内容を確認する
+claude plugin tag plugins/ndf --push      # ndf--v<版> を作って origin へ送る
+```
+
+`claude plugin tag` は `{プラグイン名}--v{版}` の形でタグを作り、**`plugin.json` の版と
+マーケットプレイスの項目が食い違っていないか**を打つ前に検査します。タグは利用者が過去の版へ
+戻るときの目印になります（「利用者が過去の版へ戻る」）。
+
+**`.claude-plugin/marketplace.json` に `version` フィールドは置きません。** 版を持つのは
+`plugins/<名前>/.claude-plugin/plugin.json` だけです。マーケットプレイス側の `description`
+に書かれた `(vX.Y.Z)` は読み手向けの記載で、取得する版を決める値ではありません。
 
 `scripts/validate-runtime-plugins.sh` が突き合わせるのは、説明文書に書かれた Skill の数と、
 更新案内の**見出しの版数**までです。見出しの版数が `plugin.json` の版から遅れると検査が
@@ -185,6 +199,53 @@ git push origin develop:main   # 正式版として公開する
 4. ドキュメント更新
 5. テスト
 6. コミット & PR作成
+
+## 利用者が過去の版へ戻る
+
+**版数を書き換えても、過去の版のコードには戻りません。** `plugin.json` の `version` は
+更新の判定に使う識別子で、どのコードを取るかは**取得元の git ref** が決めます。
+`claude plugin install` に版を指定する手段はありません。
+
+戻す手段は 2 つあり、どちらも**利用者の側の操作**です。
+
+### 取得元ごとリリースタグへ固定する
+
+マーケットプレイスの項目は `./plugins/ndf` のような相対パスで実体を指すため、リポジトリを
+過去のタグへ固定すれば、その時点のプラグインが入ります。
+
+```bash
+claude plugin marketplace add devbasex/ai-plugins@ndf--v9.3.0
+```
+
+**同じ取得元の他のプラグインも同時に過去の状態になります。** `playwright-kit` や `mcp-*` を
+最新のまま使いたい場合は次の方法を採ります。
+
+### 対象のプラグインだけを固定する
+
+別名のマーケットプレイスを 1 つ用意し、`git-subdir` で対象のディレクトリと ref を直接指します。
+
+```json
+{
+  "name": "ai-plugins-pinned",
+  "owner": {"name": "takemi-ohama"},
+  "plugins": [
+    {"name": "ndf",
+     "source": {"source": "git-subdir",
+                "url": "https://github.com/devbasex/ai-plugins.git",
+                "path": "plugins/ndf",
+                "ref": "ndf--v9.3.0"}}
+  ]
+}
+```
+
+`ref` はブランチまたはタグ、`sha` は 40 文字のコミット。両方あるときは `sha` が効きます。
+この形が `claude plugin validate` を通ることは確認済みです。
+
+**固定した版と最新版を同時に有効にしないでください。** どちらの `/ndf:*` が使われるかが
+定まりません。切り替えるときは、先に一方を無効にします。
+
+**名前は必ず変えます。** `ai-plugins` のまま追加すると、利用者の取得元が置き換わります
+（AGENTS.md の「版の付け方と開発版の配布」）。
 
 ## 検証とテスト
 

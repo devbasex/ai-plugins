@@ -133,6 +133,26 @@ bash plugins/ndf/dev.kiro/install.sh --project <検証用ディレクトリ> --y
 claude --plugin-dir plugins/ndf                                             # Claude Code
 ```
 
+**正式版を出したらリリースタグを打つ。** 利用者が過去の版へ戻るときの目印になる。
+
+```bash
+claude plugin tag plugins/ndf --dry-run   # 打つ内容を確認する
+claude plugin tag plugins/ndf --push      # ndf--v<版> を作って origin へ送る
+```
+
+`{プラグイン名}--v{版}` の形で作られ、打つ前に `plugin.json` の版とマーケットプレイスの項目が
+食い違っていないかを検査する。
+
+**版を持つのは `plugins/<名前>/.claude-plugin/plugin.json` だけである。**
+`.claude-plugin/marketplace.json` に `version` フィールドは置かない。マーケットプレイス側の
+`description` に書かれた `(vX.Y.Z)` は読み手向けの記載で、取得する版を決める値ではない。
+両方に版を持たせると `plugin.json` が無警告で優先され、食い違いに気づけなくなる。
+
+**取り消しは利用者の側の操作になる。** こちらから前の版へ戻す手段は無い。取得元をタグへ固定
+するか、別名のマーケットプレイスで対象だけを固定する。手順は
+`docs/plugin-development-guide.md` の「利用者が過去の版へ戻る」にある。**配布の完了報告へ
+書く「取り消しの手段」は、この 2 つとその限界を指す。**
+
 **サードパーティのマーケットプレイスは自動更新が既定で無効である。** `main` へ出した版が
 即座に全利用者へ届くわけではなく、利用者が `marketplace update` を実行した時点で届く。
 

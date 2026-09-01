@@ -156,6 +156,22 @@ clone と導入記録まで消えます。
 Pull Request の宛先は **`develop`** です。既定ブランチは `main`（正式版）なので、`gh pr create`
 には `--base develop` を付けます。詳細は [AGENTS.md](./AGENTS.md) を参照してください。
 
+### 過去の版へ戻す
+
+**版数を指定してインストールする手段はありません。** どのコードを取るかは取得元の git ref が
+決めます。正式版には `ndf--v<版>` のタグが付いているので、取得元をそのタグへ固定します。
+
+```bash
+claude plugin marketplace add devbasex/ai-plugins@ndf--v9.3.0
+```
+
+**同じ取得元の他のプラグインも同時に過去の状態になります。** NDF だけを戻したい場合は、別名の
+マーケットプレイスを用意して対象のディレクトリと ref を直接指します。手順は
+[docs/plugin-development-guide.md](./docs/plugin-development-guide.md#利用者が過去の版へ戻る)
+にあります。
+
+固定した版と最新版を同時に有効にしないでください。どちらの `/ndf:*` が使われるかが定まりません。
+
 ### 利用可能なプラグイン
 
 | プラグイン名 | バージョン | 説明 | 詳細 |
