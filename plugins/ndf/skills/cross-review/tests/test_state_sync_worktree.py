@@ -12,11 +12,13 @@ import subprocess
 class _Recorder:
     """subprocess.run を差し替えて、渡されたコマンドを記録する。"""
 
-    def __init__(self, fetch_rc: int = 0, reset_rc: int = 0, checkout_rc: int = 0):
+    def __init__(self, fetch_rc: int = 0, reset_rc: int = 0, checkout_rc: int = 0,
+                 clean_rc: int = 0):
         self.calls: list[tuple[list[str], str | None]] = []
         self.fetch_rc = fetch_rc
         self.reset_rc = reset_rc
         self.checkout_rc = checkout_rc
+        self.clean_rc = clean_rc
 
     def __call__(self, cmd, capture_output=False, text=False, cwd=None, **kwargs):
         self.calls.append((list(cmd), cwd))
@@ -28,6 +30,8 @@ class _Recorder:
             rc = self.reset_rc
         elif cmd[:2] == ["gh", "pr"]:
             rc = self.checkout_rc
+        elif cmd[:2] == ["git", "clean"]:
+            rc = self.clean_rc
         elif cmd[:2] == ["git", "rev-parse"]:
             stdout = "abc1234\n"
         return subprocess.CompletedProcess(cmd, rc, stdout=stdout, stderr="boom")
@@ -77,6 +81,18 @@ def test_falls_back_to_gh_pr_checkout_for_fork(monkeypatch, state_mod):
 def test_dies_when_reset_fails(monkeypatch, state_mod):
     """同期できないまま進めない。古い差分を読ませるより止める。"""
     rec = _Recorder(reset_rc=1)
+    monkeypatch.setattr(state_mod.subprocess, "run", rec)
+    with __import__("pytest").raises(SystemExit):
+        state_mod._sync_worktree("/wt", 42, "feature/x")
+
+
+def test_dies_when_clean_fails(monkeypatch, state_mod):
+    """追跡対象外のファイルを消せないときも止める。
+
+    差分そのものは reset で合っているが、残骸を抱えたまま進むと fix 担当の
+    `git add -A` で Pull Request へ混ざる。
+    """
+    rec = _Recorder(clean_rc=1)
     monkeypatch.setattr(state_mod.subprocess, "run", rec)
     with __import__("pytest").raises(SystemExit):
         state_mod._sync_worktree("/wt", 42, "feature/x")

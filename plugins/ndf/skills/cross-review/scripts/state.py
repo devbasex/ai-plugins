@@ -316,10 +316,14 @@ def _sync_worktree(worktree: str, pr: int, head_branch: str) -> None:
         )
         if checkout.returncode != 0:
             die(f"gh pr checkout --detach #{pr} 失敗: {checkout.stderr.strip()}")
-    subprocess.run(
+    clean = subprocess.run(
         ["git", "clean", "-fd"],
         capture_output=True, text=True, cwd=worktree,
     )
+    if clean.returncode != 0:
+        # 消せないまま進むと、残骸を抱えた作業ツリーで fix 担当が `git add -A` を
+        # 使い、Pull Request へ混ざる。差分そのものは合っていても止める。
+        die(f"追跡対象外のファイルを消せない: {clean.stderr.strip()}")
     head = subprocess.run(
         ["git", "rev-parse", "--short", "HEAD"],
         capture_output=True, text=True, cwd=worktree,
