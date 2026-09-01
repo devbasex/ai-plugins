@@ -151,8 +151,14 @@ API の記述を求めない。
 「`$SCRIPTS` を決める」でパスを解決してから次を実行する（`.ndf/projects.json` が無いリポジトリでは
 何も起きない）。
 
+**実行の契機は 2 つあり、別々の時点で 1 つずつ実行する。** 手順 1 に入るときに前者を、
+手順 4 で設計 Pull Request を作るときに後者を実行する。
+
 ```bash
+# 手順 1（触る領域を数える）に入るとき
 bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "設計"
+
+# 手順 4（設計 Pull Request を出す）に入るとき
 bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "設計レビュー"
 ```
 
