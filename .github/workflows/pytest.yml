@@ -1,0 +1,50 @@
+name: Python tests
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/pytest.yml"
+      - "plugins/**"
+      - "scripts/**"
+  push:
+    branches:
+      - main
+      - develop
+      - "release/**"
+    paths:
+      - ".github/workflows/pytest.yml"
+      - "plugins/**"
+      - "scripts/**"
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Install uv
+        run: python3 -m pip install --upgrade uv
+      # 無いと収集されないまま終了コード 0 で終わるため、先に確かめる
+      - name: Check the commands the tests need
+        run: |
+          for c in bash jq git; do
+            command -v "$c" >/dev/null || { echo "missing command: $c" >&2; exit 1; }
+          done
+      - run: uv run --with pytest pytest . --ignore=plugins/playwright-kit -q
+
+  pytest-playwright-kit:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugins/playwright-kit/skills/playwright-kit-ops
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Install uv
+        run: python3 -m pip install --upgrade uv
+      # 起点をこのディレクトリへ置く。pyproject.toml が対象と表示を決める
+      - run: uv run pytest
