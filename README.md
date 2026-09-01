@@ -8,10 +8,10 @@ Claude Code / Codex / Kiro CLI向けのスキル・MCP設定を共有するた�
 
 **NDFプラグイン v9.4.0** は、同じ `ndf@ai-plugins` という名前で Claude Code / Codex / Kiro CLI へ配布されるプラグインです。配布物は `plugins/ndf/` の1ディレクトリにまとまっており、Skill の実体は `plugins/ndf/skills/` の1箇所だけです。どのランタイムへ配るかは `plugins/ndf/manifests/*-skills.txt` が決めます。
 
-- **公開Skills**: Claude Code向け core 31個、Kiro向け core 30個、Codex向け core 29個に分離。
-- **元Skills（35個）**:
+- **公開Skills**: Claude Code向け core 32個、Kiro向け core 31個、Codex向け core 30個に分離。
+- **元Skills（36個）**:
   - PR/レビューワークフロー (7): pr, pr-tests, fix, pr-review, cherry-pick-pr, deploy, merged
-  - 開発方法論 (8): development-workflow, requirements-design, tdd-cycle, refactoring, quality-gates, release-verification, retrospective, out-of-scope
+  - 開発方法論 (9): development-workflow, requirements-design, tdd-cycle, refactoring, quality-gates, release, release-verification, retrospective, out-of-scope
   - 原則・ガイドライン (9): ndf-policies, implementation-plan, plan-to-spec, investigation-rules, problem-solving, logging-guidelines, markdown-writing, issue-plan-strategy, ml-model-structure
   - データ分析・品質・環境 (4): qa-security-scan, docker-container-access, google-auth, official-skills-autoloader
   - 外部サービス連携 (1): google-drive
@@ -26,6 +26,17 @@ Claude Code / Codex / Kiro CLI向けのスキル・MCP設定を共有するた�
 - **MCPプラグイン**: `plugins/mcp/<プラグイン名>/` の1ディレクトリで3ランタイムへ配布
 
 ## 利用方法
+
+**配布のチャネルは 2 つあります。** 常用する場合は取得元をそのまま登録します（正式版）。
+**手順はこれまでと変わりません。** 開発版を試すときだけ、取得元へ ref を足します。
+
+| チャネル | 何が載るか | 取得元 | 向いている人 |
+| --- | --- | --- | --- |
+| **正式版** | 正式版として承認された版だけ | `https://github.com/devbasex/ai-plugins` | 常用する人 |
+| 開発版 | マージされた変更がそのまま | 同じ URL に `#develop` を足す | 検証に参加する人 |
+
+開発版は検証中の版です。版数に `-dev.<連番>` が付き、壊れていることがあります。手順は
+[開発版を試す](#開発版を試す開発者向け)にあります。
 
 ### Claude Code
 
@@ -49,12 +60,8 @@ codex plugin marketplace add https://github.com/devbasex/ai-plugins
 codex plugin add ndf@ai-plugins
 ```
 
-ローカルで検証する場合:
-
-```bash
-codex plugin marketplace add ./local/path/to/ai-plugins
-codex plugin add ndf@ai-plugins
-```
+開発版を試す場合は[開発版を試す](#開発版を試す開発者向け)を参照してください。**ローカルの
+ディレクトリを同じ名前で追加しないでください。** 取得元が置き換わります。
 
 ### Kiro CLI
 
@@ -99,11 +106,61 @@ kiro-cli chat --agent ndf
 
 詳細は [KIRO.md](./KIRO.md) を参照。
 
+### 開発版を試す（開発者向け）
+
+**開発版は `develop` ブランチに載ります。** `main` へ進めるのは正式版を出すときだけなので、
+`develop` にはマージ済みで未リリースの変更が入っています。
+
+取得元は名前ごとに 1 つしか登録できないため、**正式版と開発版は同時に入れられません。** 常用
+している環境で試すときは、一時的に登録し直すか、取得元を書き換えない手段（後述）を使います。
+
+#### Claude Code
+
+```bash
+claude plugin marketplace add https://github.com/devbasex/ai-plugins.git#develop
+claude plugin install ndf@ai-plugins
+```
+
+#### Codex
+
+```bash
+codex plugin marketplace add devbasex/ai-plugins --ref develop
+codex plugin add ndf@ai-plugins
+```
+
+#### Kiro CLI
+
+clone した作業ディレクトリから導入するため、ref にあたるのは checkout です。
+
+```bash
+git -C <クローン先> checkout develop
+bash plugins/ndf/dev.kiro/install.sh --project <検証用ディレクトリ> --yes
+```
+
+#### 取得元を書き換えずに確かめる
+
+リポジトリを clone してある場合は、取得元の登録に触れずに読み込めます。
+
+```bash
+claude --plugin-dir plugins/ndf                                            # Claude Code
+bash plugins/ndf/dev.kiro/install.sh --project <検証用ディレクトリ> --yes  # Kiro CLI
+```
+
+**ローカルのディレクトリを同じ名前でマーケットプレイスとして追加しないでください。** 登録の鍵は
+取得元ではなく `marketplace.json` の `name` で、1 つの名前につき 1 つしか登録できません。
+`--scope local` を指定しても**利用者の取得元が置き換わり**、続けて `marketplace remove` すると
+clone と導入記録まで消えます。
+
+#### 開発に参加する場合
+
+Pull Request の宛先は **`develop`** です。既定ブランチは `main`（正式版）なので、`gh pr create`
+には `--base develop` を付けます。詳細は [AGENTS.md](./AGENTS.md) を参照してください。
+
 ### 利用可能なプラグイン
 
 | プラグイン名 | バージョン | 説明 | 詳細 |
 |------------|----------|------|------|
-| **ndf** | 9.4.0 | Claude Code / Codex / Kiro CLI へ 1 ディレクトリから配布する NDF プラグイン。8個の専門エージェント（Claude版）、公開Skills（Claude Code向け core 31個、Kiro向け core 30個、Codex向け core 29個）、3ランタイム共通の作業ツリー運用フック（PreToolUse / SessionStart / userPromptSubmit / agentSpawn）、Claude Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:external-ai` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [README](./plugins/ndf/README.md) |
+| **ndf** | 9.4.0 | Claude Code / Codex / Kiro CLI へ 1 ディレクトリから配布する NDF プラグイン。8個の専門エージェント（Claude版）、公開Skills（Claude Code向け core 32個、Kiro向け core 31個、Codex向け core 30個）、3ランタイム共通の作業ツリー運用フック（PreToolUse / SessionStart / userPromptSubmit / agentSpawn）、Claude Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:external-ai` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [README](./plugins/ndf/README.md) |
 | **playwright-kit** | 2.0.1 | Playwright による E2E テストの計画・実装・証跡管理を提供するプラグイン。ページ役割からのテスト計画、動画 / trace 付きスクリプト実装、レポート生成と Drive 保管、playwright_kit ランタイム（init、a11y / CWV スキャン）の 4 Skill。NDF v7.0.0 で分離。 | [README](./plugins/playwright-kit/README.md) |
 
 ### NDF v9.0.0 の主な変更（非互換）

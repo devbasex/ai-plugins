@@ -257,11 +257,93 @@ wt_relative_to_main() {
 # `sed -i 's/a b/c/' f` のように引用符の中へ空白を含む形を 1 語として扱うため、
 # 単純な空白区切りでは足りない。
 _wt_tokenize() {
-  local s="${1:-}" n i c quote="" cur=""
+  local s="${1:-}" n i c quote="" cur="" op last rest esc
   n=${#s}
   local -a out=()
+  # 部分シェルの入口として切り出した `(` のうち、まだ閉じていない数。
+  local subshells=0
+  # 語の途中に現れた `(` のうち、まだ閉じていない数。`$(` の展開・`$((` の
+  # 算術・関数定義の `f()`・配列の代入 `a=(` はいずれも部分シェルの入口では
+  # ない。ここで数えておかないと、その閉じ括弧を部分シェルの終わりとして
+  # 切り出してしまい、後続の相対パスの起点が入口の位置へ戻る。
+  local inword=0
+  # `case ... in` から `esac` までの入れ子の数と、その段が見出しを待っているか。
+  # 見出しを閉じる `)` は部分シェルの終わりではない。数だけで決めると、部分
+  # シェルの中の見出し (`( case $x in a) ... )`) で親の段を戻してしまう。
+  local case_depth=0
+  local -a case_state=()
+  # 見出しの位置にいるか。`)` と `(` の役割はここで決まる。
+  _tok_in_pattern() {
+    [ "$case_depth" -gt 0 ] || return 1
+    [ "${case_state[case_depth - 1]}" = want_pattern ] || return 1
+    return 0
+  }
+  # 語を 1 つ出力し、`case` の段を進める。`case` と `esac` を数えるのは命令の
+  # 位置にあるときだけで、`echo case` の `case` は入口として数えない。
+  #
+  # 命令の位置の一覧には**予約語の後ろも入れる**。`then` / `else` / `do` の直後に
+  # `case` を置く形は普通にあり、数えないと見出しを閉じた `)` が
+  # `__WT_CASE_END__` にならず、枝の中の `cd` が追跡から漏れる。呼び出し側
+  # (`wt_extract_write_target`) の `at_cmd` が同じ予約語を挙げているのと揃える。
+  _tok_emit() {
+    local w="$1" prev_out=""
+    ((${#out[@]} > 0)) && prev_out=${out[${#out[@]} - 1]}
+    case "$w" in
+      case|esac)
+        case "$prev_out" in
+          ""|__WT_SEP__|__WT_SUBSHELL_END__|__WT_CASE_END__|"|"|"|&"|"&"|"&&"|"||"|"("|"{"\
+          |if|elif|then|else|while|until|do|"!"|time)
+            if [ "$w" = case ]; then
+              case_state[case_depth]=want_in
+              case_depth=$((case_depth + 1))
+            elif [ "$case_depth" -gt 0 ]; then
+              case_depth=$((case_depth - 1))
+            fi
+            ;;
+        esac
+        ;;
+      in)
+        # `case` の対象の後ろの `in` だけが見出しの位置を開く。枝の中の
+        # `for x in ...` の `in` は、その段が既に見出しを通っているため効かない。
+        if [ "$case_depth" -gt 0 ] && [ "${case_state[case_depth - 1]}" = want_in ]; then
+          case_state[case_depth - 1]=want_pattern
+        fi
+        ;;
+    esac
+    out+=("$w")
+  }
   for ((i = 0; i < n; i++)); do
     c=${s:i:1}
+    # `\` は次の 1 文字をエスケープする。**シングルクォートの中を除く。** 中では
+    # `\` も字面で、閉じる `'` を隠さない (`'a\'` は `a\`)。実測で確かめた。
+    #
+    # 見なければ `"` の中の `\"` を閉じ引用符と読み、残りをまるごと 1 語へ吸い
+    # 込む（検知漏れ）。引用符の外では `\ ` を区切り、`\)` を部分シェルの終わり
+    # と読む（語の取り違えと誤検知）。
+    if [ "$c" = '\' ] && [ "$quote" != "'" ]; then
+      esc=${s:i+1:1}
+      # 文字列の末尾の `\` はエスケープする相手がいない。字面のまま残す。
+      if [ -z "$esc" ]; then cur+="$c"; continue; fi
+      # `\` + 改行は行継続で、両方が消える。命令の区切りにもならない。
+      if [ "$esc" = $'\n' ]; then i=$((i + 1)); continue; fi
+      if [ -n "$quote" ]; then
+        # **`"` の中で `\` がエスケープとして働く相手は限られる。** `$` `` ` ``
+        # `"` `\` と改行だけで、それ以外の前では `\` が文字として残る
+        # (`"a\nb"` は `a\nb`、`"a\\b"` は `a\b`。実測で確かめた)。語の
+        # 区切りは変わらないが、語そのものが書き込み先のパスになるため、
+        # 落とす `\` と残す `\` を分けないと実在しない位置を案内する。
+        case "$esc" in
+          '$'|'`'|'"'|'\') cur+="$esc" ;;
+          *) cur+="$c$esc" ;;
+        esac
+      else
+        # 引用符の外では次の 1 文字がそのまま語の一部になる。`\ ` の空白は
+        # 区切りにならず、`\(` `\)` は部分シェルの入口・終わりにならない。
+        cur+="$esc"
+      fi
+      i=$((i + 1))
+      continue
+    fi
     if [ -n "$quote" ]; then
       if [ "$c" = "$quote" ]; then quote=""; else cur+="$c"; fi
       continue
@@ -272,16 +354,109 @@ _wt_tokenize() {
       # 前のコマンドの対象と取り違える（`cp a b` の次の行の `echo c` の `c` を
       # 複製先として拾うなど）。区切りの印を独立した語として出す。
       $'\n'|";")
-        if [ -n "$cur" ]; then out+=("$cur"); cur=""; fi
+        if [ -n "$cur" ]; then _tok_emit "$cur"; cur=""; fi
+        # `;;` `;&` `;;&` は `case` の枝の終わりで、次に来るのは見出しである。
+        if [ "$c" = ";" ] && [ "$case_depth" -gt 0 ]; then
+          case "${s:i+1:1}" in
+            ";"|"&") case_state[case_depth - 1]=want_pattern ;;
+          esac
+        fi
         out+=("__WT_SEP__")
         ;;
       " "|$'\t')
-        if [ -n "$cur" ]; then out+=("$cur"); cur=""; fi
+        # `>& file` の `&` は、標準出力と標準エラーをまとめて 1 つのファイルへ
+        # 向ける形の一部で、後ろの語がそのファイルになる。ここで区切ると `&` が
+        # 単独の語になり、背景実行の演算子として読まれる（現在地がまとまりの
+        # 入口へ戻る）。次の語まで繋げて 1 語にする。
+        if [ "$cur" = "&" ]; then
+          last=""
+          ((${#out[@]} > 0)) && last=${out[${#out[@]} - 1]}
+          case "$last" in
+            __WT_REDIR__|__WT_APPEND__) continue ;;
+          esac
+        fi
+        if [ -n "$cur" ]; then _tok_emit "$cur"; cur=""; fi
+        ;;
+      # 演算子は空白で囲まれているとは限らない。切り出さないと
+      # `cp a b||echo c` の `b||echo` が 1 語になり、区切りとして見えない
+      # （次のコマンドの `c` を複製先として拾う）。`>` と `>>` は呼び出し側が
+      # 印へ置き換えるため、ここには現れない。
+      "|"|"&")
+        last=""
+        ((${#out[@]} > 0)) && last=${out[${#out[@]} - 1]}
+        # `>&2` `2>&1` `3<&0` の `&` はファイル記述子の複製であって、背景実行の
+        # 演算子ではない。切ると後続が別のコマンドに見え、`cd` の効果を落とす。
+        # 直前が `<` か、`>` の置き換えの印のときは字面のまま繋げる。
+        if [ "$c" = "&" ] && { [ "${cur: -1}" = "<" ] ||
+          { [ -z "$cur" ] &&
+            { [ "$last" = "__WT_REDIR__" ] || [ "$last" = "__WT_APPEND__" ]; }; }; }; then
+          cur+="$c"
+          continue
+        fi
+        # 長い演算子を先に見る。`&&` を `&` 2 つに割ると、同じシェルで続く並びが
+        # 背景実行 2 つになって意味が変わる。
+        op="$c"
+        case "${s:i:2}" in
+          "&&"|"||"|"|&") op=${s:i:2} ;;
+        esac
+        if [ -n "$cur" ]; then _tok_emit "$cur"; cur=""; fi
+        out+=("$op")
+        i=$((i + ${#op} - 1))
+        ;;
+      # `(` は部分シェルを開く。語の頭にあるときだけ入口として切り出す。
+      # 途中に現れる `(` は展開・関数定義・配列の代入の一部で、部分シェルでは
+      # ない。字面のまま語へ残し、対応する `)` も切り出さないよう数える。
+      "(")
+        if [ -n "$cur" ] || [ "$inword" -gt 0 ]; then
+          inword=$((inword + 1))
+          cur+="$c"
+          continue
+        fi
+        # 見出しの位置の `(` は飾りで、部分シェルの入口ではない
+        # （`case $x in (a) ...`）。語の一部として残す。
+        if _tok_in_pattern; then cur+="$c"; continue; fi
+        # 中身の無い `()` は関数定義の目印で、部分シェルの入口ではない。`f ()`
+        # のように空白を挟む書き方があるため、語の途中かどうかでは見分けられない。
+        rest=${s:i+1}
+        rest=${rest#"${rest%%[!$' \t']*}"}
+        if [ "${rest:0:1}" = ")" ]; then
+          inword=$((inword + 1))
+          cur+="$c"
+          continue
+        fi
+        out+=("$c")
+        subshells=$((subshells + 1))
+        ;;
+      # `)` は、切り出した `(` が残っているときだけ部分シェルの終わりである。
+      # `case` の見出し (`a)`) のように対応する `(` が無いものは語の一部で、
+      # 切り出すと存在しない位置を書き込み先として示すことになる。
+      ")")
+        if [ "$inword" -gt 0 ]; then
+          inword=$((inword - 1))
+          cur+="$c"
+          continue
+        fi
+        # 見出しを閉じる `)`。枝の本体が始まることを印で伝える。見出しの語と
+        # くっついているか (`a)`) 離れているか (`a )`) で扱いを変えない。
+        if _tok_in_pattern; then
+          if [ -n "$cur" ]; then _tok_emit "$cur"; cur=""; fi
+          case_state[case_depth - 1]=body
+          out+=("__WT_CASE_END__")
+          continue
+        fi
+        if [ "$subshells" -le 0 ]; then
+          cur+="$c"
+          continue
+        fi
+        if [ -n "$cur" ]; then _tok_emit "$cur"; cur=""; fi
+        out+=("__WT_SUBSHELL_END__")
+        subshells=$((subshells - 1))
         ;;
       *) cur+="$c" ;;
     esac
   done
-  [ -n "$cur" ] && out+=("$cur")
+  [ -n "$cur" ] && _tok_emit "$cur"
+  unset -f _tok_in_pattern _tok_emit
   printf '%s\n' "${out[@]+"${out[@]}"}"
 }
 
@@ -452,6 +627,15 @@ _wt_strip_heredocs() {
     i=0
     while [ "$i" -lt "$n" ]; do
       c=${line:i:1}
+      # `\` は次の 1 文字をエスケープする。**シングルクォートの中を除く。**
+      # 引用符の中でも効くため、`quote` を見る前に読み飛ばす。見なければ
+      # `"` の中の `\"` を閉じ引用符と読み、その後の `<<` を本文の始まりとして
+      # 数えない（本文が残り、実行されない行の語を書き込み先として拾う）。
+      #
+      # ここは位置だけを見る走査なので、`"` の中でエスケープが効く相手が
+      # `$` `` ` `` `"` `\` と改行に限られることは結果を変えない。隠れる 1 文字が
+      # 引用符でも `<` でもなければ、読み飛ばしても読み進めても同じである。
+      if [ "$c" = '\' ] && [ "$quote" != "'" ]; then i=$((i + 2)); continue; fi
       if [ -n "$quote" ]; then
         [ "$c" = "$quote" ] && quote=""
         i=$((i + 1))
@@ -459,7 +643,6 @@ _wt_strip_heredocs() {
       fi
       case "$c" in
         "'"|'"') quote="$c"; i=$((i + 1)); continue ;;
-        '\') i=$((i + 2)); continue ;;
       esac
       if [ "${line:i:3}" = "<<<" ]; then
         i=$((i + 3))
@@ -483,6 +666,18 @@ _wt_strip_heredocs() {
       while [ "$i" -lt "$n" ]; do
         c=${line:i:1}
         if [ -n "$dq" ]; then
+          # `"` の中の `\"` は引用を閉じない。閉じたと読むと終端の語を取り違え、
+          # 本文の終わりを見つけられない（後続の命令まで本文として落とす）。
+          # 落とす `\` と残す `\` の別は `_wt_tokenize` と同じ。
+          # `'` の中では `\` は字面で、エスケープにならない。
+          if [ "$dq" = '"' ] && [ "$c" = '\' ] && [ -n "${line:i+1:1}" ]; then
+            case "${line:i+1:1}" in
+              '$'|'`'|'"'|'\') delim+="${line:i+1:1}" ;;
+              *) delim+="$c${line:i+1:1}" ;;
+            esac
+            i=$((i + 2))
+            continue
+          fi
           if [ "$c" = "$dq" ]; then dq=""; else delim+="$c"; fi
           i=$((i + 1))
           continue
@@ -490,7 +685,12 @@ _wt_strip_heredocs() {
         case "$c" in
           " "|$'\t'|";"|"|"|"&"|">"|"<") break ;;
           "'"|'"') dq="$c"; quoted=1 ;;
-          '\') quoted=1 ;;
+          # 引用符の外の `\` は次の 1 文字を字面にする。終端の語には `\` を
+          # 含めない (`<<E\OF` の終端は `EOF`)。展開は止まるため `quoted` を立てる。
+          '\')
+            quoted=1
+            if [ -n "${line:i+1:1}" ]; then delim+="${line:i+1:1}"; i=$((i + 1)); fi
+            ;;
           *) delim+="$c" ;;
         esac
         i=$((i + 1))
@@ -505,6 +705,20 @@ _wt_strip_heredocs() {
   done
 
   printf '%s' "$out"
+}
+
+# コマンドの区切りにあたる語かを判定する。被演算子の走査は、ここで止める。
+# 跨いで走査すると、次のコマンドの語を書き込み先と取り違える
+# （`cp a b || echo c` の `c` を複製先として拾うなど）。
+# `|&` は標準エラー出力も渡すパイプで、これも区切りにあたる。
+# `;` と改行は字句解析が `__WT_SEP__` へ置き換えるため、この一覧には現れない。
+# `)` は部分シェルの終わりで、ここでも命令が切れる。区切りとして扱わないと
+# `( sed -i 's/a/b/' x.md )` の `)` を書き込み先として拾い、実在しない位置を示す。
+_wt_is_separator() {
+  case "$1" in
+    __WT_*|"|"|"|&"|"&&"|"||"|"&"|")") return 0 ;;
+  esac
+  return 1
 }
 
 # 書き込み先として採らない語かを判定する。
@@ -523,41 +737,641 @@ _wt_is_not_target() {
 # シェルコマンドの文字列から書き込み先を 1 行 1 件で出力する。
 # 対象は直接の書き換え (sed -i)・出力の付け替え (> / >>)・標準入力からの
 # 書き出し (tee)・複製と移動 (cp / mv) の 4 形式に限る。推定できなければ 1 を返す。
+#
+# 第 2 引数に相対パスの起点を渡すと、出力は絶対パスになる。**同じコマンドの中で
+# 先に実行される `cd` を反映する。** 反映しないと、作業ツリーへ移ってから相対パスで
+# 書き換えたときに、移動前の位置を指した案内が出る。移動先を決められない形
+# (`cd` 単独・`cd -`・展開前の変数) と、`||` の左辺のどこで失敗したのかを
+# 決められない形では、相対パスの書き込み先を出さない。
+# 字面のまま起点へ継ぎ足すと、実際には触っていない位置を案内することになる。
+# 起点を渡さない呼び方では字面のまま返す。
 wt_extract_write_target() {
-  local cmd="${1:-}"
+  local cmd="${1:-}" base="${2:-}"
   [ -n "$cmd" ] || return 1
+
+  # `cd` を追った現在地と、それが確かかどうか。起点を渡されない限り使わない。
+  local cwd="$base" cwd_known=1
+  # `cd` の効果が及ぶ範囲は、それが動くシェルの中に限られる。パイプの各区画と
+  # 背景実行は部分シェルで動くため、後続のコマンドは移動前の位置のままになる。
+  # 引き継いでしまうと、主ディレクトリへの書き込みを作業ツリー側と取り違えて
+  # 案内を出さない。区画の入口の位置を 2 段で控え、`|` / `|&` ではパイプの入口へ、
+  # `&` では処理のまとまりの入口へ戻す。
+  local pipe_cwd="$base" pipe_known=1 pipe_cds=0 job_cwd="$base" job_known=1
+  # `||` の右辺は**左辺が失敗したときに**走るため、直前の `cd` は効いていない。
+  # 控えた位置へ戻す仕組みはパイプ・背景実行と同じだが、戻してよいかどうかの
+  # 条件が要る。左辺のどこで失敗したかによって位置が変わるためである。
+  # 判定に使う値を and-or リスト (`;` / 改行 / `&` で切れる並び) ごとに控える。
+  local list_cwd="$base" list_known=1 list_cds=0 list_or=0 cd_is_last=0
+  # `&&` の右辺の `cd` は、左辺が成功したときだけ走る。左辺の最後が `cd` なら
+  # 走ったものとして扱えるが (`cd a && cd b`)、そうでなければ (`cmd && cd b`)
+  # リストを抜けた後の現在地を決められない。跨いだかどうかを控える。
+  local list_and_uncertain=0 list_cond_cd=0
+  # 部分シェル (`( ... )`) の中の `cd` は、**その中の相対パスには効くが**、閉じた
+  # 後の親のシェルの位置は変えない。中で解決しないと、作業ツリーへ移ってから
+  # 書き換えたものを主ディレクトリへの書き込みとして案内する（誤検知になる）。
+  # 逆に親へ漏らすと、抜けた後の主ディレクトリへの書き込みを作業ツリー側と
+  # 取り違えて案内を出さない（検知漏れになる）。入口で追跡の状態を積み、出口で
+  # 戻すことで、両方を満たす。入れ子にも耐えるよう深さごとに積む。
+  local -a sub_cwd=() sub_known=() sub_cds=() sub_list_cds=() sub_cd_is_last=()
+  local -a sub_list_or=() sub_and_unc=() sub_cond_cd=()
+  local -a sub_list_cwd=() sub_list_known=()
+  local -a sub_pipe_cwd=() sub_pipe_known=() sub_pipe_cds=()
+  local subshell_depth=0
+  # 条件分岐 (`if`) と繰り返し (`while` / `until` / `for` / `select`) の本体は、
+  # 走るかどうかが実行時に決まる。中で `cd` を追ったときは、閉じた後の現在地を
+  # 字面からは決められない。開いた時点の `cd` の回数を積んでおき、閉じるときに
+  # 比べる。`else` / `elif` の手前でも比べる（条件の中の `cd` が失敗したときに
+  # そちらへ来るため、その `cd` は効いていない）。
+  # `{` で開くまとまりは必ず走るため、この積み上げの対象にしない。
+  local -a block_cds=()
+  local block_depth=0 cds=0
+  # `&` の復元先は、背景実行にまとめられるひとまとまりの入口である。まとまりの
+  # 境目は `;` / 改行 / `&` だが、複合コマンド (`{ }` / `( )` / `if` / `while` …)
+  # の**中**の `;` は、外側のまとまりを切らない。切ると `{ cd x; } & …` の `&` の
+  # 復元先が `x` になり、後続の相対パスを作業ツリー側と取り違えて案内を出さない
+  # （検知漏れになる）。入口を入れ子の段ごとに積み、閉じるときに戻す。
+  local -a group_cwd=() group_known=()
+  local group_depth=0
+  # `case` の枝どうしは排他で、見出し (`a)`) の間に走る命令は無い。枝の入口の
+  # 位置は `case` を開いた時点の位置そのものである。次の見出しで戻さないと、
+  # 前の枝の `cd` を引きずり、走っていない移動を書き込み先の起点に使う。
+  # 見出しを命令の位置として数えるかどうかの判定にも使うため、深さを持つ。
+  local -a case_cwd=() case_known=()
+  local case_depth=0
 
   # ヒアドキュメントの本文を先に落とす。落とす前に印を挟むと、本文の中の `>` が
   # 出力の付け替えとして数えられる。
   cmd=$(_wt_strip_heredocs "$cmd")
 
   # `>path` のように空白の無い形を語へ分けるため、先に印を挟む。
-  local spaced=${cmd//>>/ __WT_APPEND__ }
+  #
+  # `&>` と `&>>` は、標準出力と標準エラーをまとめて 1 つのファイルへ向ける形
+  # である（`&>>` は追記）。`&` は背景実行の演算子ではない。`>` だけを置き換えると
+  # `&` が演算子として残り、現在地が処理のまとまりの入口へ戻る
+  # （`cd a && echo hi &> f` の `f` を移動前の位置で解決してしまう）。
+  # `>` より先に、まとめて 1 つの印へ置き換える。
+  #
+  # 置き換えの前に `&&` を退避する。`cmd&&>f` は `&&` と `>` だが、字面では `&`
+  # と `>` が隣り合うため、退避しないと `&>` として拾い、残った `&` が背景実行の
+  # 演算子になる。退避は字面をそのまま戻すため、引用符の中の語も変わらない。
+  local spaced=${cmd//&&/__WT_ANDAND__}
+  spaced=${spaced//&>>/ __WT_APPEND__ }
+  spaced=${spaced//&>/ __WT_REDIR__ }
+  # 戻すときは置換の字面を引用符で囲む。bash 5.2 以降は置換文字列の裸の `&` が
+  # 「一致した部分」を指すため、囲まないと `&&` が `__WT_ANDAND__` 2 つへ戻る。
+  spaced=${spaced//__WT_ANDAND__/"&&"}
+  spaced=${spaced//>>/ __WT_APPEND__ }
   spaced=${spaced//>/ __WT_REDIR__ }
 
   local -a words=()
   _wt_read_lines < <(_wt_tokenize "$spaced")
   words=("${WT_LINES[@]+"${WT_LINES[@]}"}")
 
-  local n=${#words[@]} i j w target found=0
+  local n=${#words[@]} i j w target found=0 prev="" at_cmd=0 dest="" k cmd_prefix=0 cd_end_of_options=0
+  # `command` / `builtin` の被演算子を命令の位置として数えている間だけ 1。
+  local cmd_wrapper=0 or_next=""
+  # `||` の右辺のブレースグループが必ず後続へ進まないと判ったときに積む。まとまり
+  # を閉じる `}` の添字と、そこで戻す位置を持つ。入れ子は内側が先に閉じるため、
+  # 積んだ順にそのまま取り出せる。
+  local -a or_end=() or_cwd=() or_known=()
+  local or_depth=0
+  # `_or_group_exits` が返す、まとまりを閉じる `}` の添字。
+  local _WT_GROUP_END=0
+  # 移動前の位置で解決し終えたリダイレクトの、走査が届いた語の位置。`cd` の枝と
+  # `||` の右辺の枝が書き込む。ここより手前の `__WT_REDIR__` / `__WT_APPEND__` を
+  # 二度拾わない。
+  local resolved_redir_end=0
+  # `_redir_target` の結果。書き込み先の語と、読み進めた最後の語の位置。
+  local _WT_REDIR_DEST="" _WT_REDIR_END=0
+  # 印 (`__WT_REDIR__` / `__WT_APPEND__`) の後ろの語から、実際に開かれる
+  # ファイルを決める。`>&` には用法が 2 つある。
+  #
+  # - `2>&1` `>&2` `>&-` はファイル記述子の複製と閉鎖で、ファイルは開かない
+  # - `>& file` `>&file` は `&>` と同義で、後ろの語がファイルになる
+  #
+  # 印の後ろが `&` に続く数字か `-` だけなら前者、それ以外なら後者である。
+  # 記述子を指定した `2>&file` は bash が ambiguous redirect として拒む（実測）
+  # ため実際には開かれないが、印へ置き換えた後は `echo 2 >& file` と字面が
+  # 同じになり区別できない。案内が多めに出る側へ倒し、書き込み先として扱う。
+  _redir_target() {
+    local p=$(($1 + 1)) nx rest
+    _WT_REDIR_DEST=""
+    _WT_REDIR_END=$p
+    nx=${words[p]:-}
+    case "$nx" in
+      # `>& file` の `&`。語として切れているときはファイル名が次の語にある。
+      "&") _WT_REDIR_END=$((p + 1)); _WT_REDIR_DEST=${words[p + 1]:-} ;;
+      "&"*)
+        rest=${nx#&}
+        case "$rest" in
+          # `>&-` は記述子を閉じる。
+          "-") ;;
+          # 数字以外を含むならファイル名である。
+          *[!0-9]*) _WT_REDIR_DEST=$rest ;;
+          # 数字だけなら記述子の複製である。
+          *) ;;
+        esac
+        ;;
+      *) _WT_REDIR_DEST=$nx ;;
+    esac
+  }
+  # 複合コマンドの入口で `&` の復元先を積み、出口で戻す。
+  _push_group() {
+    group_cwd[group_depth]="$job_cwd"
+    group_known[group_depth]="$job_known"
+    group_depth=$((group_depth + 1))
+    job_cwd="$cwd"; job_known="$cwd_known"
+  }
+  _pop_group() {
+    [ "$group_depth" -gt 0 ] || return 0
+    group_depth=$((group_depth - 1))
+    job_cwd="${group_cwd[group_depth]}"
+    job_known="${group_known[group_depth]}"
+  }
+  # 部分シェルの入口で親の追跡状態を積み、中は新しいコマンドの並びとして始める。
+  _push_subshell() {
+    sub_cwd[subshell_depth]="$cwd"
+    sub_known[subshell_depth]="$cwd_known"
+    sub_cds[subshell_depth]="$cds"
+    sub_list_cds[subshell_depth]="$list_cds"
+    sub_cd_is_last[subshell_depth]="$cd_is_last"
+    sub_list_or[subshell_depth]="$list_or"
+    sub_and_unc[subshell_depth]="$list_and_uncertain"
+    sub_cond_cd[subshell_depth]="$list_cond_cd"
+    sub_list_cwd[subshell_depth]="$list_cwd"
+    sub_list_known[subshell_depth]="$list_known"
+    sub_pipe_cwd[subshell_depth]="$pipe_cwd"
+    sub_pipe_known[subshell_depth]="$pipe_known"
+    sub_pipe_cds[subshell_depth]="$pipe_cds"
+    subshell_depth=$((subshell_depth + 1))
+    list_cwd="$cwd"; list_known="$cwd_known"; list_cds=0; list_or=0
+    list_and_uncertain=0; list_cond_cd=0; cd_is_last=0
+    pipe_cwd="$cwd"; pipe_known="$cwd_known"; pipe_cds=0
+  }
+  # 出口で親の追跡状態へ戻す。中で数えた `cd` も戻すため、部分シェルは外側の
+  # 判定（`||` の右辺・複合コマンドを閉じるときの比較）から見えなくなる。
+  _pop_subshell() {
+    [ "$subshell_depth" -gt 0 ] || return 0
+    subshell_depth=$((subshell_depth - 1))
+    cwd="${sub_cwd[subshell_depth]}"
+    cwd_known="${sub_known[subshell_depth]}"
+    cds="${sub_cds[subshell_depth]}"
+    list_cds="${sub_list_cds[subshell_depth]}"
+    cd_is_last="${sub_cd_is_last[subshell_depth]}"
+    list_or="${sub_list_or[subshell_depth]}"
+    list_and_uncertain="${sub_and_unc[subshell_depth]}"
+    list_cond_cd="${sub_cond_cd[subshell_depth]}"
+    list_cwd="${sub_list_cwd[subshell_depth]}"
+    list_known="${sub_list_known[subshell_depth]}"
+    pipe_cwd="${sub_pipe_cwd[subshell_depth]}"
+    pipe_known="${sub_pipe_known[subshell_depth]}"
+    pipe_cds="${sub_pipe_cds[subshell_depth]}"
+  }
+  # `||` の右辺のブレースグループ (`{ ... }`) が、必ず後続へ進まないかを見る。
+  # まとまりは同じシェルで走るため、その中の `exit` はスクリプトを終える。
+  # 引数はまとまりを開く `{` の添字で、閉じる `}` の添字を `_WT_GROUP_END` に置く。
+  #
+  # 数えるのは**まとまりの直下にある、条件の付かない非継続命令**だけである。
+  # `{ [ -n "$x" ] && exit; }` や `{ if ...; then exit; fi; }` は、通ったかどうかが
+  # 実行時に決まる。字面では抜けたと言い切れないため数えない。候補にするのは
+  # `depth` が 1 の位置にあり、直前が `{` か `__WT_SEP__` の語だけである。
+  #
+  # 候補は、その命令が終わるところまで見てから確定する (`pend`)。`{ exit 1 & }` の
+  # 背景実行とパイプの区画は部分シェルで走り、親のシェルは続くためである。引数と
+  # リダイレクトは命令の一部なので跨ぎ、`&` `|` `|&` で取り消し、`;`（改行）・
+  # `&&` `||`・閉じる `}` で確定する。
+  #
+  # 予約語として深さを動かすのは命令の位置にある語だけである。`echo done` の
+  # `done` を数えると深さが狂い、後ろの非継続命令が候補から外れる。それでも数え
+  # 損ねたときは、抜けると言い切れない側（従来どおりの抑止）へ倒れる。
+  _or_group_exits() {
+    local p="$1" depth=0 pw="" tw exits=0 pend=0 at_pos j
+    _WT_GROUP_END=0
+    for ((j = p; j < n; j++)); do
+      tw=${words[j]}
+      if [ "$pend" = 1 ]; then
+        case "$tw" in
+          "&"|"|"|"|&") pend=0 ;;
+          __WT_SEP__|"}"|"&&"|"||") exits=1; pend=0 ;;
+        esac
+      fi
+      at_pos=0
+      case "$pw" in
+        ""|"{"|"("|__WT_SEP__|__WT_CASE_END__|__WT_SUBSHELL_END__|"&&"|"||"|"|"|"|&"|"&"\
+        |if|elif|then|else|while|until|do|"!"|time) at_pos=1 ;;
+      esac
+      case "$tw" in
+        "{"|"(") depth=$((depth + 1)) ;;
+        "}"|__WT_SUBSHELL_END__)
+          depth=$((depth - 1))
+          if [ "$depth" -le 0 ]; then
+            _WT_GROUP_END=$j
+            [ "$exits" = 1 ] && return 0
+            return 1
+          fi
+          ;;
+        if|while|until|for|select|case)
+          if [ "$at_pos" = 1 ]; then depth=$((depth + 1)); fi
+          ;;
+        fi|done|esac)
+          if [ "$at_pos" = 1 ]; then depth=$((depth - 1)); fi
+          ;;
+        exit|return|break|continue)
+          if [ "$depth" = 1 ]; then
+            case "$pw" in "{"|__WT_SEP__) pend=1 ;; esac
+          fi
+          ;;
+      esac
+      pw="$tw"
+    done
+    return 1
+  }
+  # `||` の右辺の非継続命令 (`exit` / `return` / `break` / `continue`) に付いた
+  # リダイレクトを、**左辺が失敗した位置**で解決する。右辺へ到達したのは左辺が
+  # 失敗したときだけで、そのとき `cd` は効いていない。移動した後の位置で解決すると
+  # 主ディレクトリ側への書き込みを作業ツリー側と取り違えて案内を出さない
+  # （検知漏れになる）。`cd` 自身に付いたリダイレクトと同じ考え方である。
+  #
+  # 失敗した命令を字面から特定できるのは、リストの中の `cd` がちょうど 1 つで、
+  # それが直前の命令のときだけである。特定できない形では相対パスを出さない。
+  # 判定は下の失敗時の扱いと同じで、あちらは右辺そのものが走る位置を決めるのに
+  # 対し、ここはリダイレクトが開かれる位置を決める（どちらも同じ位置になる）。
+  _or_exit_redirs() {
+    local p="$1" j2 saved_cwd="$cwd" saved_known="$cwd_known"
+    if [ "$list_cds" = 1 ] && [ "$cd_is_last" = 1 ]; then
+      cwd="$list_cwd"; cwd_known="$list_known"
+    elif [ "$list_cds" != 0 ]; then
+      cwd_known=0
+    fi
+    # リダイレクトの印は `_wt_is_separator` にも当たるため、先に見る。
+    for ((j2 = p; j2 < n; j2++)); do
+      case "${words[j2]}" in
+        __WT_REDIR__|__WT_APPEND__)
+          _redir_target "$j2"
+          _emit "$_WT_REDIR_DEST"
+          j2=$_WT_REDIR_END
+          continue
+          ;;
+      esac
+      if _wt_is_separator "${words[j2]}"; then break; fi
+    done
+    # 走査が届いた位置を控える。`__WT_REDIR__` の枝が同じ語を二度拾わない。
+    resolved_redir_end=$j2
+    cwd="$saved_cwd"; cwd_known="$saved_known"
+  }
   _emit() {
-    if ! _wt_is_not_target "$1"; then
+    # 印の置換は引用符を見ずに行うため、引用符の中の `>` まで印へ変わる。
+    # `cp a "b>c"` の `b>c` は書き込み先そのもので、`>` は字面である。
+    # **印のまま出すと、案内の文字列へ内部の印が漏れる。** 字面へ戻す。
+    #
+    # 引用符の外の `>` は語として切り出されるため、ここへは届かない。届くのは
+    # 引用符の中に収まったものだけである。置換は印の両側へ空白を足すため、
+    # 空白ごと戻す。元からあった空白は残る（`"b > c"` は `b > c` のまま）。
+    local _emit_word=$1
+    _emit_word=${_emit_word// __WT_APPEND__ />>}
+    _emit_word=${_emit_word// __WT_REDIR__ />}
+    _emit_word=${_emit_word// __WT_ANDAND__ /&&}
+    _emit_word=${_emit_word//__WT_APPEND__/>>}
+    _emit_word=${_emit_word//__WT_REDIR__/>}
+    _emit_word=${_emit_word//__WT_ANDAND__/&&}
+    set -- "$_emit_word"
+    _wt_is_not_target "$1" && return
+    if [ -z "$base" ]; then
       printf '%s\n' "$1"
       found=1
+      return
     fi
+    case "$1" in
+      /*) ;;
+      # 現在地が定まらない間の相対パスは、どこを指すか決められない。
+      *) [ "$cwd_known" = 1 ] || return ;;
+    esac
+    printf '%s\n' "$(wt_normalize_path "$1" "$cwd")"
+    found=1
   }
 
   for ((i = 0; i < n; i++)); do
     w=${words[i]}
+    # コマンドの位置にある語だけを命令として扱う。`echo cd > f` の `cd` を
+    # 移動として数えると、書き込み先の起点がずれる。
+    at_cmd=0
+    if [ "$i" = 0 ]; then
+      at_cmd=1
+    else
+      case "$prev" in
+        __WT_SEP__|"&&"|"||"|"|"|"|&"|"&") at_cmd=1 ;;
+        # 予約語の後ろも命令の位置である。ここに挙げるのは、続きを**同じシェル**
+        # で走らせる語だけである。中の `cd` の効果は後続へ残るため、書き込み先の
+        # 起点に反映しなければ移動前の位置を指した案内が出る。
+        if|elif|then|else|while|until|do|"{"|"!"|time) at_cmd=1 ;;
+        # `(` は部分シェルを開く。中も命令の位置ではあるが、そこの `cd` は親の
+        # 位置を変えないため、深さ (`subshell_depth`) で別に抑える。命令の位置
+        # として数えるのは、入れ子の `( ( ... ) )` で内側の `(` を見落とさない
+        # ためである。**`coproc` は意図して外す。** 同じく部分シェルを開くが、
+        # 語として切れる形が一定でないため深さを数えられない。
+        "(") at_cmd=1 ;;
+        # `case` の見出し (`a)` `*)` `"a")` `(a)`) の後ろは、その枝の本体が始まる
+        # 位置である。数えないと枝の中の `cd` が追跡から漏れ、作業ツリーへ移って
+        # から書き換えたものを主ディレクトリへの書き込みとして案内する（誤検知に
+        # なる）。見出しを閉じた `)` かどうかは字句解析が決め、`__WT_CASE_END__`
+        # として渡す。ここでは印だけを見る。
+        __WT_CASE_END__)
+          if [ "$case_depth" -gt 0 ]; then
+            at_cmd=1
+            # 枝の入口は `case` を開いた位置である。前の枝の `cd` は走っていない。
+            cwd="${case_cwd[case_depth - 1]}"
+            cwd_known="${case_known[case_depth - 1]}"
+            pipe_cwd="$cwd"; pipe_known="$cwd_known"; pipe_cds=0
+            job_cwd="$cwd"; job_known="$cwd_known"
+            list_cwd="$cwd"; list_known="$cwd_known"; list_cds=0; list_or=0
+            list_and_uncertain=0; list_cond_cd=0
+          fi
+          ;;
+        # `fi` / `done` / `esac` / `}` / `__WT_SUBSHELL_END__` は複合コマンドの
+        # 終わりで、後ろに続くのは区切りであって命令ではない。`for` / `select` /
+        # `case` / `in` の後ろは名前や語の並びで、いずれも `cd` を置ける位置では
+        # ない。命令の位置として数えない。
+      esac
+    fi
+    # 命令の前には変数代入を並べられる。`FOO=bar cd x` の `cd` を命令として
+    # 数えないと、移動が書き込み先の起点へ反映されない。`echo a=b cd x` の
+    # `cd` は単なる引数なので、命令の位置から代入だけが途切れずに続いている
+    # 間だけ、次の語も命令の位置とみなす。`FOO+=bar` も代入である。
+    #
+    # `command` と `builtin` も後ろの語を命令として走らせる。どちらも `cd` を
+    # 現在のシェルで動かすため、被演算子として読み飛ばすと移動が起点へ反映
+    # されない。オプションが挟まる形 (`command -p cd`) も追う。
+    if [ "$at_cmd" = 0 ] &&
+      { [ "$cmd_prefix" = 1 ] || [ "$cmd_wrapper" = 1 ]; }; then at_cmd=1; fi
+    if [ "$at_cmd" = 1 ] && [[ $w =~ ^[A-Za-z_][A-Za-z0-9_]*\+?= ]]; then
+      cmd_prefix=1
+    else
+      cmd_prefix=0
+    fi
+    if [ "$at_cmd" = 1 ]; then
+      case "$w" in
+        command|builtin) cmd_wrapper=1 ;;
+        # `command` のオプションのうち、`-p` と `--` は後ろに命令が続く。
+        # `-v` / `-V` は名前を表示するだけで走らせないため、ここで打ち切る
+        # （`*` の枝が 0 へ戻す）。`builtin` は `--` だけを受け取る。
+        -p|--) ;;
+        *) cmd_wrapper=0 ;;
+      esac
+    fi
+    if [ "$at_cmd" = 1 ]; then
+      case "$w" in
+        "|"|"|&"|"&"|"&&"|"||"|__WT_SEP__) ;;
+        *) cd_is_last=0 ;;
+      esac
+    fi
+    prev="$w"
     case "$w" in
+      "|"|"|&")
+        # パイプの各区画は部分シェルで動く。入口の位置へ戻す。
+        cwd="$pipe_cwd"; cwd_known="$pipe_known"
+        # 区画の中の `cd` は親の位置を変えない。`||` の判定に使う回数も戻す。
+        list_cds="$pipe_cds"; cd_is_last=0
+        continue
+        ;;
+      "&")
+        # 背景実行は処理のまとまりごと部分シェルへ入る。入口の位置へ戻す。
+        cwd="$job_cwd"; cwd_known="$job_known"
+        pipe_cwd="$cwd"; pipe_known="$cwd_known"; pipe_cds=0
+        # `&` は and-or リストの終わりでもある。入口を引き直す。
+        list_cwd="$cwd"; list_known="$cwd_known"; list_cds=0; list_or=0
+        list_and_uncertain=0; list_cond_cd=0
+        cd_is_last=0
+        continue
+        ;;
+      "&&")
+        # 左辺が成功したときに走る。移動の効果は残る。パイプの入口だけ引き直す。
+        # 左辺の最後が `cd` でなければ、右辺が走ったかどうかを字面から決められない。
+        [ "$cd_is_last" = 1 ] || list_and_uncertain=1
+        # `||` を跨いだリストに `cd` があると、左右どちらの経路を通ったかで現在地
+        # が変わる。右辺はどちらの経路からも走るため、位置を決められない
+        # （`cd a || cd b && echo hi > f` の `f` は `a` 側にも `b` 側にもなる）。
+        # `__WT_SEP__` の枝と同じ判定である。`list_cond_cd` を見ないのは、`&&` の
+        # 右辺は左辺が成功したときにだけ走るためで、跨いだ先の `cd` は走った
+        # ことが確かである。
+        if [ "$list_or" = 1 ] && [ "$list_cds" != 0 ]; then cwd_known=0; fi
+        pipe_cwd="$cwd"; pipe_known="$cwd_known"; pipe_cds="$list_cds"
+        continue
+        ;;
+      "||")
+        # 右辺が**後続へ進まない命令**なら、そこを過ぎた時点で左辺の成功が確定
+        # している。`cd /main || exit` は主ディレクトリへ移る定番の形で、右辺へ
+        # 到達したときはそのまま終わるため、続きが走るのは移動した後の位置だけ
+        # である。ここを一律に「決められない」と扱うと、正しく移った後の相対
+        # パスの書き込みを案内できない。
+        #
+        # 数えるのは `exit` / `return` / `break` / `continue` の 4 つで、bash の
+        # 実測で確かめた。`exit` は無条件にシェルを終える。`return` は関数と
+        # source した本文の中で、`break` / `continue` はループの中で、それぞれ
+        # 残りの命令へ進まない（外側で使うと bash がエラーを出すため、その形は
+        # そもそも成立しない）。`exec` は外す。命令を伴えば置き換わるが、
+        # `exec 2>log` のようにリダイレクトだけなら後続へ進む。
+        #
+        # 先行する `||` で経路が分かれている (`list_or` が 1) ときは使えない。
+        # 左辺のどちらを通ったかで位置が変わり、右辺の `exit` では絞れない。
+        # 部分シェルの `(exit)` も対象外で、字句解析が `(` を別の語として渡す。
+        or_next=""
+        ((i + 1 < n)) && or_next=${words[i + 1]}
+        if [ "$list_or" = 0 ]; then
+          case "$or_next" in
+            exit|return|break|continue)
+              # 右辺に付いたリダイレクトは、左辺が失敗した位置で開かれる。
+              # 位置を持ち替える前に解決する。
+              _or_exit_redirs "$((i + 1))"
+              # 左辺が成功した位置をそのまま持つ。判定に使う値は引き直す。
+              list_cwd="$cwd"; list_known="$cwd_known"; list_cds=0
+              list_and_uncertain=0; list_cond_cd=0; cd_is_last=0
+              pipe_cwd="$cwd"; pipe_known="$cwd_known"; pipe_cds=0
+              continue
+              ;;
+            "{")
+              # `cd dir || { echo ...; exit 1; }` は `|| exit` より広く使われる。
+              # まとまりの中に条件の付かない非継続命令があれば、抜けた先へは
+              # 進まないため、続きが走るのは移動した後の位置だけである。
+              #
+              # ただし**まとまりの中は左辺が失敗した位置で走る**（`cd` は効いて
+              # いない）。ここで位置を戻すと中の書き込み先を取り違えるため、
+              # 移動した後の位置は閉じる `}` まで預け、下の失敗時の扱いへ落とす。
+              if _or_group_exits "$((i + 1))"; then
+                or_end[or_depth]=$_WT_GROUP_END
+                or_cwd[or_depth]="$cwd"
+                or_known[or_depth]="$cwd_known"
+                or_depth=$((or_depth + 1))
+              fi
+              ;;
+          esac
+        fi
+        # 左辺が失敗したときに走る。失敗した命令を字面から特定できるのは、
+        # リストの中の `cd` がちょうど 1 つで、それが直前の命令のときだけである。
+        # このとき失敗したのはその `cd` なので、右辺はリストの入口の位置で走る。
+        # 位置を捨てず案内を出せるほうを選び、特定できない形だけ抑止する。
+        if [ "$list_cds" = 1 ] && [ "$cd_is_last" = 1 ]; then
+          cwd="$list_cwd"; cwd_known="$list_known"
+        elif [ "$list_cds" != 0 ]; then
+          # `cd a && cd b || x` のように左辺に命令が複数あると、どこで失敗した
+          # かで位置が変わる。決められないものとして相対パスを抑止する。
+          cwd_known=0
+        fi
+        list_or=1
+        pipe_cwd="$cwd"; pipe_known="$cwd_known"; pipe_cds="$list_cds"
+        continue
+        ;;
+      __WT_SEP__)
+        # `;` と改行でも同じシェルが続く。両方の入口を引き直す。
+        # ただし `||` を跨いだリストに `cd` があると、それが効いたかどうかは
+        # 左辺の成否で決まる。リストを抜けた後の位置も決められない。
+        # `&&` を跨いだ先に `cd` があるときも同じで、左辺の成否で位置が変わる。
+        if { [ "$list_or" = 1 ] && [ "$list_cds" != 0 ]; } ||
+          [ "$list_cond_cd" = 1 ]; then
+          cwd_known=0
+        fi
+        pipe_cwd="$cwd"; pipe_known="$cwd_known"; pipe_cds=0
+        job_cwd="$cwd"; job_known="$cwd_known"
+        list_cwd="$cwd"; list_known="$cwd_known"; list_cds=0; list_or=0
+        list_and_uncertain=0; list_cond_cd=0
+        cd_is_last=0
+        continue
+        ;;
+      if|while|until|for|select|case)
+        # 複合コマンドの入口。中で `cd` を追ったかを、閉じるときに比べるため控える。
+        if [ "$at_cmd" = 1 ]; then
+          block_cds[block_depth]=$cds
+          block_depth=$((block_depth + 1))
+          _push_group
+          if [ "$w" = case ]; then
+            case_cwd[case_depth]="$cwd"
+            case_known[case_depth]="$cwd_known"
+            case_depth=$((case_depth + 1))
+          fi
+        fi
+        continue
+        ;;
+      "{"|"(")
+        # 部分シェル (`(`) と、同じシェルで走るまとまり (`{`) の入口。どちらも
+        # 中の `;` が外側のまとまりを切らないため、`&` の復元先を積む。
+        if [ "$at_cmd" = 1 ]; then
+          _push_group
+          [ "$w" = "(" ] && _push_subshell
+        fi
+        continue
+        ;;
+      "}")
+        # `}` は予約語で、命令の位置にしか置けない。`echo }` の `}` は語である。
+        if [ "$at_cmd" = 1 ]; then
+          _pop_group
+          # 必ず抜けるまとまりを閉じた。ここへ来た経路は左辺が成功した側だけで、
+          # 位置は `||` で預けた移動後のものへ戻る。判定に使う値も引き直す。
+          if [ "$or_depth" -gt 0 ] && [ "$i" = "${or_end[or_depth - 1]}" ]; then
+            or_depth=$((or_depth - 1))
+            cwd="${or_cwd[or_depth]}"; cwd_known="${or_known[or_depth]}"
+            list_cwd="$cwd"; list_known="$cwd_known"; list_cds=0; list_or=0
+            list_and_uncertain=0; list_cond_cd=0; cd_is_last=0
+            pipe_cwd="$cwd"; pipe_known="$cwd_known"; pipe_cds=0
+          fi
+        fi
+        continue
+        ;;
+      __WT_SUBSHELL_END__)
+        # 部分シェルの終わり。字句解析が切り出した `(` に対応するものだけが
+        # この印になる。配列の代入 `a=( 1 )`・`case` の見出し・関数定義の `()`
+        # の `)` は語の一部で、ここへは来ない（来ると親の段まで戻ってしまう）。
+        # 対応する `(` を数え損ねていても、深さは 0 で止める（`_pop_subshell` が
+        # 深さ 0 で何もしない）。戻さなければ入口の位置のままで、案内が多めに
+        # 出る側へ倒れる。
+        _pop_group
+        _pop_subshell
+        continue
+        ;;
+      else|elif)
+        # 条件が偽のときに走る。条件の中の `cd` は効いていない。
+        if [ "$at_cmd" = 1 ] && [ "$block_depth" -gt 0 ] &&
+          [ "$cds" -gt "${block_cds[block_depth - 1]}" ]; then
+          cwd_known=0
+        fi
+        continue
+        ;;
+      fi|done|esac)
+        # 本体が走ったかどうかは実行時に決まる。中で移動していたなら、閉じた後の
+        # 現在地を決められない。
+        if [ "$at_cmd" = 1 ] && [ "$block_depth" -gt 0 ]; then
+          block_depth=$((block_depth - 1))
+          [ "$cds" -gt "${block_cds[block_depth]}" ] && cwd_known=0
+          _pop_group
+          if [ "$w" = esac ] && [ "$case_depth" -gt 0 ]; then
+            case_depth=$((case_depth - 1))
+          fi
+        fi
+        continue
+        ;;
+      cd)
+        [ "$at_cmd" = 1 ] && [ -n "$base" ] || continue
+        # 部分シェルの中でも移動は追う。中の相対パスはここで解決する。親の位置は
+        # `)` で `_pop_subshell` が戻すため、この移動は外へ漏れない。
+        # 移動先の語と、この `cd` に付いたリダイレクトを 1 回の走査で拾う。
+        # **リダイレクト先は移動する前の位置で開かれる。** シェルはリダイレクトを
+        # 開いてから命令を実行するためである。移動後の位置で解決すると、主
+        # ディレクトリ側への書き込みを作業ツリー側と取り違えて案内を出さない
+        # （検知漏れになる）。まだ `cwd` を更新していないここで解決する。
+        dest=""
+        cd_end_of_options=0
+        for ((k = i + 1; k < n; k++)); do
+          case "${words[k]}" in
+            __WT_REDIR__|__WT_APPEND__)
+              _redir_target "$k"
+              _emit "$_WT_REDIR_DEST"
+              k=$_WT_REDIR_END
+              continue
+              ;;
+          esac
+          if _wt_is_separator "${words[k]}"; then break; fi
+          case "${words[k]}" in
+            # `--` 以降はオプションの解釈を止める。`cd -- -dir` の `-dir` は
+            # 移動先であって `cd -` ではない。止めないと読み飛ばして、後続の
+            # 相対パスを抑止する。
+            --) [ "$cd_end_of_options" = 1 ] || { cd_end_of_options=1; continue; } ;;
+            # **`-` だけは `--` の後でも直前の位置を指す。** bash では `-` が
+            # オプションではなく被演算子の綴りとして扱われるためで、`-` という
+            # 名前のディレクトリがあっても `$OLDPWD` へ移る（実測で確認）。
+            # 字面からは追えないため、移動先を決めない。
+            -) continue ;;
+            # `cd -` と同じく、オプションは移動先ではない。
+            -*) [ "$cd_end_of_options" = 1 ] || continue ;;
+          esac
+          # 移動先は最初の被演算子である。リダイレクトを拾い切るため、
+          # 見つけても区切りまで走査を続ける。
+          [ -n "$dest" ] || dest=${words[k]}
+        done
+        # 走査が届いた位置を控える。`__WT_REDIR__` の枝が同じ語を二度拾わない。
+        resolved_redir_end=$k
+        # `||` の右辺で戻せるかどうかの判定に使う。
+        list_cds=$((list_cds + 1)); cd_is_last=1
+        # `&&` を跨いだ先の `cd` は、走ったかどうかが左辺の成否で決まる。
+        [ "$list_and_uncertain" = 0 ] || list_cond_cd=1
+        # 複合コマンドを閉じるときの比較に使う。
+        cds=$((cds + 1))
+        case "$dest" in
+          # 引数なし (ホーム)・`cd -`・展開前の変数・チルダ展開。いずれも
+          # コマンドの字面からは移動先を決められない。
+          ""|*'$'*|"~"*) cwd_known=0 ;;
+          /*) cwd=$(wt_normalize_path "$dest" "/"); cwd_known=1 ;;
+          *) [ "$cwd_known" = 1 ] && cwd=$(wt_normalize_path "$dest" "$cwd") ;;
+        esac
+        ;;
       __WT_REDIR__|__WT_APPEND__)
-        _emit "${words[i + 1]:-}"
+        # 移動前の位置で解決済みのリダイレクトは、その枝が拾い終えている。
+        if [ "$i" -lt "$resolved_redir_end" ]; then continue; fi
+        _redir_target "$i"
+        _emit "$_WT_REDIR_DEST"
         ;;
       tee)
         # tee は並べたファイルすべてへ書き込む。1 件目で止めない。
         for ((j = i + 1; j < n; j++)); do
+          if _wt_is_separator "${words[j]}"; then break; fi
           case "${words[j]}" in
-            __WT_*|"|"|"&&"|";") break ;;
             -*) continue ;;
             *) _emit "${words[j]}" ;;
           esac
@@ -570,8 +1384,8 @@ wt_extract_write_target() {
         local -a files=()
         for ((j = i + 1; j < n; j++)); do
           if [ "$skip_next" = 1 ]; then skip_next=0; continue; fi
+          if _wt_is_separator "${words[j]}"; then break; fi
           case "${words[j]}" in
-            __WT_*|"|"|"&&"|";") break ;;
             --in-place|--in-place=*) has_inplace=1 ;;
             -e|-f|--expression|--file) seen_script=1; skip_next=1 ;;
             --expression=*|--file=*) seen_script=1 ;;
@@ -609,8 +1423,8 @@ wt_extract_write_target() {
             take_next=0
             continue
           fi
+          if _wt_is_separator "${words[j]}"; then break; fi
           case "${words[j]}" in
-            __WT_*|"|"|"&&"|";") break ;;
             -t|--target-directory) take_next=1 ;;
             --target-directory=*) target_dir=${words[j]#--target-directory=} ;;
             # `-t<ディレクトリ>` のように空白を挟まない形もある。
@@ -625,7 +1439,7 @@ wt_extract_write_target() {
     esac
   done
 
-  unset -f _emit
+  unset -f _emit _push_group _pop_group _push_subshell _pop_subshell _or_group_exits _or_exit_redirs
   [ "$found" = 1 ] || return 1
 }
 

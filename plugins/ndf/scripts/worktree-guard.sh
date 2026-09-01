@@ -172,7 +172,9 @@ elif [[ "$TOOL" =~ ^($WT_SHELL_TOOLS)$ ]]; then
   if [ -n "$command_cwd" ]; then
     BASE_DIR=$(wt_normalize_path "$command_cwd" "$CWD_NOW")
   fi
-  _wt_read_lines < <(wt_extract_write_target "$command_text")
+  # 起点を渡す。渡さないと、同じコマンドの中の `cd` が反映されず、作業ツリーへ
+  # 移ってからの相対パスが移動前の位置を指す。返る値は絶対パスになる。
+  _wt_read_lines < <(wt_extract_write_target "$command_text" "$BASE_DIR")
   targets=("${WT_LINES[@]+"${WT_LINES[@]}"}")
 else
   exit 0

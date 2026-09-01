@@ -364,3 +364,9 @@ git checkout release/<PLAN-ID>
 - `/ndf:pr-review` / `/ndf:cross-review` — レビュー（`--branch` で PR 前のセルフレビュー）
 - `/ndf:fix` — コメントの分類・修正・返信・Resolve
 - `/playwright-kit:playwright-planning` — release ブランチでの E2E 結合テスト（別プラグイン）
+
+盤面を使うリポジトリでは、**1 つの issue に対して盤面のアイテムを 1 つ**持つ。複数の
+Pull Request を出しても、アイテムは分けない。Pull Request は盤面の `Linked pull requests` に
+並ぶため、対応付けを新しく作らずに済む。進行は最も進んでいない Pull Request の工程に合わせる
+（詳細は [references/projects-tracking.md](../development-workflow/references/projects-tracking.md)）。
+
