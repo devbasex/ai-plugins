@@ -1,0 +1,17 @@
+name: PR base branch guard
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the branch this pull request came from
+        # ブランチ名をそのままシェルの本文へ埋めない。名前に置換の記法を含められる。
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: bash scripts/check-pr-base.sh "$HEAD_REF"
