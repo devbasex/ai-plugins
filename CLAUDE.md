@@ -31,7 +31,7 @@ skills/     → 実行可能なワークフロー
 
 ## NDF の Skill 構成
 
-Skill は 36 個で、配布は `plugins/ndf/manifests/` が唯一の基準（Claude Code 32 / Codex 30 / Kiro 31）。ブラウザ自動テストの 4 個は `playwright-kit` プラグインへ分離した（`plugins/playwright-kit/`）。frontmatter の書き方は `plugins/ndf/skills/README.md` の規約に従い、`python3 scripts/check-skill-frontmatter.py` で検査する。利用実績と維持・統合・削除の判定は `docs/specifications/ndf-skill-inventory.md` に記録する。
+Skill は 37 個で、配布は `plugins/ndf/manifests/` が唯一の基準（Claude Code 33 / Codex 31 / Kiro 32）。ブラウザ自動テストの 4 個は `playwright-kit` プラグインへ分離した（`plugins/playwright-kit/`）。frontmatter の書き方は `plugins/ndf/skills/README.md` の規約に従い、`python3 scripts/check-skill-frontmatter.py` で検査する。利用実績と維持・統合・削除の判定は `docs/specifications/ndf-skill-inventory.md` に記録する。
 
 v6.1.0 で開発方法論レイヤーの 5 個（`development-workflow` / `requirements-design` / `tdd-cycle` / `refactoring`（当時は `safe-refactoring`）/ `quality-gates`）を追加した。モード判定の基準を持つのは `development-workflow` だけで、他の Skill とエージェント定義は判定結果を受け取る側に徹する。
 
@@ -101,6 +101,12 @@ v9.5.0 で配布の工程（`release`）を新設し、版を上げる担い手�
 同じ版で、工程の進行を GitHub Projects の盤面へ記録できるようにした（#176）。リポジトリ側に `.ndf/projects.json` があるときだけ動き、無ければ何も起きない。`worktree` と同じ宣言ファイル方式である。
 
 同じ版で不具合を 3 件直した。`worktree` の書き込み先の判定が同じコマンドの中の `cd` を反映するようになり、作業ツリーで相対パス編集したときに主ディレクトリ向けの案内が出なくなった（#186）。`cross-review` は既存の作業ツリーを流用するときに Pull Request の head へ同期する（#203）。同期していなかったため前回の実行の古い差分をレビューさせており、実測では 8 コミット古い作業ツリーがそのまま使われていた。Kiro の文脈量の上限を外し、`runtime-smoke (kiro)` の予算超過を解消した（#199）。
+
+v9.6.0 で設計工程の Skill（`design`）を新設し、工程表へ「設計」と「設計レビュー」を結んだ（#161）。設計の成果物が担当した AI ごとに変わっていたのは、その工程で何という文書を作り何を書くかの規約が無かったためである。作る文書はモードが決め、読ませる参照は**変更が触る領域**が決める。永続データを持たない変更ではデータ構造の参照を、API と画面を持たない変更では契約の参照を読み込まない（`refactoring` の `lang-<言語>.md` と同じ構成）。記述標準（OpenAPI・データ契約・Design Tokens）も対象がある場合にだけ求める。モードで一律に必須とすると、画面を持たないリポジトリでも画面の節を求めることになる。設計品質の 3 Skill 構想（設計レビュー・ドメインモデリング・クラス設計）は `design` 1 個へ統合した。3 つに分けると起動の時点でどれを使うかの判断が要り、設計の観点の切れ目がモードや領域と一致しない。時系列を保護する手法に既定は置かず、過去を失う構造を選んだときに理由を残すことを求める。決定の理由は `docs/specifications/ndf-design-phase.md` にある。
+
+同じ版で「設計レビュー」の工程を足した。`standard` と `architecture` では、設計だけを載せた Pull Request を実装より先にマージする。**実装まで進んでからの指摘は、設計文書とコードの両方を書き直すことになる。** 新しい Skill は作らず `pr` → `cross-review` → `merged` を順に呼ぶ。設計 Pull Request の本文には課題を自動で閉じる語を書かない。実装が終わっていない段階でマージするため、閉じると残りの工程が追えなくなる。マージした後は `worktree` を実装用のブランチ名で呼び直す（`merged` が設計のブランチと作業ツリーを消すため）。
+
+同じ版で、開発の起点ブランチを `.ndf/worktree.json` の `base_branch` で宣言できるようにした（#202）。作業ツリーの起点・主ディレクトリの追従先・Pull Request の宛先の検査がこの宣言を読む。宣言が無ければ既定ブランチのまま動くため、他のリポジトリは影響を受けない。
 
 v6.0.0 の対応表（`review` → `pr-review`）は予告どおり削除済み。v6.0.0 以前から移行する場合は v6.1.0 の `ndf-policies` を参照する。
 
