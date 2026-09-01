@@ -74,3 +74,21 @@ def write_declaration(main_repo: Path, body: str) -> Path:
     path = ndf / "worktree.json"
     path.write_text(body, encoding="utf-8")
     return path
+
+
+def add_origin(main_repo: Path, name: str = "main") -> Path:
+    """主ディレクトリへ origin を足し、既定ブランチを送る。"""
+    remote = main_repo.parent / "origin.git"
+    subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True)
+    git(main_repo, "remote", "add", "origin", str(remote))
+    git(main_repo, "push", "-q", "origin", name)
+    git(main_repo, "remote", "set-head", "origin", name)
+    return remote
+
+
+def push_branch(main_repo: Path, name: str, *, keep_local: bool = False) -> None:
+    """origin にブランチを送る。`keep_local` が偽ならローカル側は残さない。"""
+    git(main_repo, "branch", name)
+    git(main_repo, "push", "-q", "origin", name)
+    if not keep_local:
+        git(main_repo, "branch", "-D", name)

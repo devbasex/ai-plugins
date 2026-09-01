@@ -90,14 +90,17 @@ case "$DECISION" in
     fi
     ;;
   default)
-    default_branch=$(wt_default_branch "$MAIN_DIR") || default_branch=""
-    if [ -n "$default_branch" ]; then
+    # 合わせる先は開発の起点であって、既定ブランチとは限らない。解決できない
+    # ときは追従しない。案内はセッション開始時の出力へ混ぜず、編集時の hook と
+    # 作業ツリーの手順の側で出す。
+    base_branch=$(wt_base_branch "$MAIN_DIR" 2>/dev/null) || base_branch=""
+    if [ -n "$base_branch" ]; then
       current_branch=$(git -C "$MAIN_DIR" symbolic-ref --short -q HEAD 2>/dev/null)
-      if [ "$current_branch" != "$default_branch" ]; then
+      if [ "$current_branch" != "$base_branch" ]; then
         current=$(git -C "$MAIN_DIR" rev-parse HEAD 2>/dev/null)
-        wanted=$(git -C "$MAIN_DIR" rev-parse "$default_branch" 2>/dev/null)
+        wanted=$(git -C "$MAIN_DIR" rev-parse "$base_branch" 2>/dev/null)
         if [ -n "$wanted" ] && [ "$current" != "$wanted" ]; then
-          follow_to "$default_branch" "既定ブランチ $default_branch"
+          follow_to "$base_branch" "起点ブランチ $base_branch"
         fi
       fi
     fi

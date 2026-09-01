@@ -10,7 +10,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from worktree_helpers import SESSION, git, write_declaration
+from worktree_helpers import SESSION, add_origin, git, write_declaration
 
 
 def run_session(cwd: Path, session: str = "s1", tmpdir: Path | None = None) -> dict:
@@ -213,3 +213,34 @@ def test_many_changes_are_rounded(main_repo: Path) -> None:
     text = context_of(result)
     assert "25 件" in text, text
     assert "他 5 件" in text, text
+
+
+# --- 起点ブランチへの追従（issue #202） -------------------------------------
+
+
+def test_declared_base_branch_is_followed(main_repo: Path) -> None:
+    """稼働中の開発用作業ツリーが無いときは、宣言した起点ブランチへ合わせる。"""
+    add_origin(main_repo)
+    git(main_repo, "checkout", "-q", "-b", "develop")
+    git(main_repo, "commit", "-q", "--allow-empty", "-m", "develop work")
+    expected = head_of(main_repo)
+    git(main_repo, "checkout", "-q", "main")
+    write_declaration(main_repo, json.dumps({"version": 1, "base_branch": "develop"}))
+
+    run_session(main_repo)
+
+    assert head_of(main_repo) == expected
+
+
+def test_unresolvable_base_branch_does_not_follow(main_repo: Path) -> None:
+    """宣言した起点が実在しないときは、既定ブランチへ合わせずそのままにする。"""
+    add_origin(main_repo)
+    start = head_of(main_repo)
+    git(main_repo, "commit", "-q", "--allow-empty", "-m", "more")
+    git(main_repo, "checkout", "-q", "--detach", start)
+    write_declaration(main_repo, json.dumps({"version": 1, "base_branch": "develop"}))
+
+    result = run_session(main_repo)
+
+    assert result["rc"] == 0
+    assert head_of(main_repo) == start

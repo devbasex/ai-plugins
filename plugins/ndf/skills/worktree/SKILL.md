@@ -119,17 +119,24 @@ fi
 ```bash
 branch="feature/<name>"
 git -C "$main_dir" fetch origin
-# 既定ブランチはリポジトリごとに違う。origin の HEAD が指す先から取る
-default=$(git -C "$main_dir" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)
-default=${default:-origin/main}
-git -C "$main_dir" worktree add -b "$branch" "$main_dir/.worktrees/$branch" "$default"
+# 起点は開発の本流であって、既定ブランチとは限らない。宣言の base_branch を
+# 優先し、無ければ origin の HEAD が指す先へ落ちる
+base=$(wt_base_branch "$main_dir") || exit 1
+start="origin/$base"
+git -C "$main_dir" show-ref --verify --quiet "refs/remotes/origin/$base" || start="$base"
+git -C "$main_dir" worktree add -b "$branch" "$main_dir/.worktrees/$branch" "$start"
 cd "$main_dir/.worktrees/$branch"
 ```
 
 既存のブランチで作業を続けるなら `-b` を外す。
 
-起点は `origin` の HEAD が指すブランチから取る。`main` を字面で書くと、既定ブランチが
-`master` などのリポジトリで失敗する。`origin/HEAD` が設定されていない場合は
+**既定ブランチと開発の起点は別物である。** 既定ブランチに正式版を置き、開発の本流を
+`develop` などの別のブランチに置くリポジトリでは、既定ブランチから分岐すると開発中の
+変更が正式版から枝分かれする。起点は宣言（[references/declaration.md](references/declaration.md)
+の `base_branch`）から取り、宣言が無ければ `origin` の HEAD が指すブランチへ落ちる。
+
+宣言した名前が origin にもローカルにも無いときは、`wt_base_branch` が名前を挙げて失敗する。
+既定ブランチへは落ちない。`origin/HEAD` が設定されていない場合は
 `git -C "$main_dir" remote set-head origin -a` で設定できる。
 
 Claude Code の作業ツリー作成ツールは新規作成先が固定されているため、`.worktrees/` を
@@ -204,7 +211,7 @@ Pull Request がマージされた後の削除は `/ndf:merged` が行う。
 | 稼働中の開発用作業ツリー | 主ディレクトリ |
 | --- | --- |
 | 1 つ | そのブランチが指すコミットを detached HEAD で開く |
-| 0 個または複数 | 既定ブランチに合わせる |
+| 0 個または複数 | 起点ブランチに合わせる（宣言が無ければ既定ブランチ） |
 
 主ディレクトリに未コミットの変更があるときは追従せず、変更がある事実だけを伝える。
 

@@ -7,30 +7,12 @@
 from __future__ import annotations
 
 import json
-import subprocess
+import re
 from pathlib import Path
 
 import pytest
 
-from worktree_helpers import git, run_lib, write_declaration
-
-
-def add_origin(main_repo: Path) -> Path:
-    """主ディレクトリへ origin を足し、既定ブランチを送る。"""
-    remote = main_repo.parent / "origin.git"
-    subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True)
-    git(main_repo, "remote", "add", "origin", str(remote))
-    git(main_repo, "push", "-q", "origin", "main")
-    git(main_repo, "remote", "set-head", "origin", "main")
-    return remote
-
-
-def push_branch(main_repo: Path, name: str, *, keep_local: bool = False) -> None:
-    """origin にだけ存在するブランチを作る。"""
-    git(main_repo, "branch", name)
-    git(main_repo, "push", "-q", "origin", name)
-    if not keep_local:
-        git(main_repo, "branch", "-D", name)
+from worktree_helpers import add_origin, git, push_branch, run_lib, write_declaration
 
 
 def resolve(main_repo: Path) -> tuple[str, str, int]:
@@ -108,3 +90,57 @@ def test_without_origin_head_falls_back_to_local_default(main_repo: Path) -> Non
     out, _, rc = resolve(main_repo)
     assert rc == 0
     assert out == "main"
+
+
+# --- 手順が示すコマンド ------------------------------------------------------
+
+SKILL = Path(__file__).resolve().parents[1] / "SKILL.md"
+CREATE_HEADING = "### 2-3. 作成して移る"
+
+
+def create_snippet() -> str:
+    """作業ツリーを作る手順の bash を取り出す。
+
+    手順を写し取ると、写しだけが正しくて配布された手順が外れている状態を作れてしまう。
+    """
+    text = SKILL.read_text(encoding="utf-8")
+    head = text.index(CREATE_HEADING)
+    block = re.search(r"^```bash\n(.*?)^```$", text[head:], re.S | re.M)
+    assert block is not None, f"{SKILL} の「{CREATE_HEADING}」に bash のブロックが無い"
+    return block.group(1)
+
+
+def run_documented_steps(main_repo: Path) -> Path:
+    """手順のとおりに作業ツリーを作り、その位置を返す。"""
+    snippet = create_snippet().replace("feature/<name>", "feature/x")
+    got = run_lib(f'main_dir="{main_repo}"\n{snippet}', cwd=main_repo)
+    assert got.returncode == 0, got.stderr + got.stdout
+    return main_repo / ".worktrees" / "feature" / "x"
+
+
+def head_of(repo: Path) -> str:
+    return git(repo, "rev-parse", "HEAD").stdout.strip()
+
+
+def test_documented_steps_branch_from_declared_base(main_repo: Path) -> None:
+    add_origin(main_repo)
+    git(main_repo, "checkout", "-q", "-b", "develop")
+    git(main_repo, "commit", "-q", "--allow-empty", "-m", "develop work")
+    expected = head_of(main_repo)
+    git(main_repo, "push", "-q", "origin", "develop")
+    git(main_repo, "checkout", "-q", "main")
+    write_declaration(main_repo, json.dumps({"version": 1, "base_branch": "develop"}))
+
+    created = run_documented_steps(main_repo)
+
+    assert head_of(created) == expected
+
+
+def test_documented_steps_fall_back_to_default(main_repo: Path) -> None:
+    """宣言に起点が無いリポジトリでは、これまでどおり既定ブランチから分岐する。"""
+    add_origin(main_repo)
+    expected = head_of(main_repo)
+
+    created = run_documented_steps(main_repo)
+
+    assert head_of(created) == expected
