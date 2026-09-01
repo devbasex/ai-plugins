@@ -51,6 +51,9 @@ issue #161 の課題（原文）:
 
 - `plugins/ndf/skills/design/` の新設（`SKILL.md` と `references/`）
 - `development-workflow` の工程表・標準フローの図・「`architecture` モードの現状」節の差し替え
+- 同じ `SKILL.md` の本文のうち、新しい工程表と食い違う記述の更新（「設計行の `standard` と
+  `legacy-refactor` は専用の設計 Skill を起動しない」の注記、標準フローの図の下の「`standard` は
+  D・E・F を通らない」の解説）
 - 工程表への「設計レビュー」行の追加（設計成果物を Pull Request にして `cross-review` を通す）
 - `references/projects-tracking.md` の工程と値の対応表の更新
 - 3 ランタイムのマニフェスト（`manifests/*-skills.txt`）への追加
@@ -193,7 +196,7 @@ issue #202（`fix/issue-202-base-branch`）が同時に進んでいる。触る�
 
 | 対象 | 内容 |
 | --- | --- |
-| `development-workflow/SKILL.md` | 工程表の設計行の差し替え、設計レビュー行の追加、標準フローの図、`architecture` モードの現状節 |
+| `development-workflow/SKILL.md` | 工程表の設計行の差し替え、設計レビュー行の追加、標準フローの図、`architecture` モードの現状節、図の下の解説と注記 |
 | `development-workflow/references/projects-tracking.md` | 工程と値の対応表 |
 | `requirements-design/SKILL.md` | 設計工程への引き継ぎを 1 行 |
 | `implementation-plan/SKILL.md` | 設計文書を入力に取ることを 1 行 |
