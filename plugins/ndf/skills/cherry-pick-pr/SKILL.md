@@ -50,10 +50,15 @@ featureブランチに環境ブランチ(`qa/staging`等)を merge して confli
 
 ```bash
 # 起点は開発の本流であって、既定ブランチとは限らない。宣言（`.ndf/worktree.json` の
-# `base_branch`）が無ければ origin の HEAD が指す先を使う
+# `base_branch`）が無ければ origin の HEAD が指す先を使い、それも取れなければ慣例の名前の
+# うちローカルにあるものへ落とす（共通ライブラリ `wt_base_branch` と同じ順序）
 dev_base=$(jq -r 'select(.version == 1) | .base_branch | select(type == "string")' \
   .ndf/worktree.json 2>/dev/null)
 dev_base=${dev_base:-$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')}
+for candidate in main master; do
+  [ -n "$dev_base" ] && break
+  git show-ref --verify --quiet "refs/heads/$candidate" && dev_base=$candidate
+done
 dev_base=${dev_base:-main}
 ```
 
@@ -72,7 +77,9 @@ gh pr list --head "<current-branch>-for-<base-short-name>" --state merged \
 ### 3. コミット一覧の確認
 
 ```bash
-git log --oneline "$dev_base"..HEAD
+# 起点はローカルに無いことがある。取得してからリモート追跡ブランチと比べる
+git fetch origin "$dev_base"
+git log --oneline "origin/$dev_base"..HEAD
 ```
 
 ユーザーに cherry-pick 対象コミットを確認（全コミット or 選択）。

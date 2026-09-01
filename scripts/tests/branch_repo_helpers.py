@@ -46,6 +46,30 @@ def init_origin_repo(root: Path) -> Path:
     return main
 
 
+def init_master_only_repo(root: Path) -> Path:
+    """origin の HEAD を持たず、ローカルに `master` だけがあるリポジトリを作る。
+
+    `git init` の既定が `master` のままの古いリポジトリを clone すると、この形になる
+    （`remote set-head` を実行していなければ `refs/remotes/origin/HEAD` は無い）。
+    起点の解決は、この経路で慣例の名前へ落ちる。
+    """
+    main = root / "master-only"
+    main.mkdir(parents=True, exist_ok=True)
+    git(main, "init", "-q", "-b", "master")
+    git(main, "config", "user.email", "test@example.com")
+    git(main, "config", "user.name", "test")
+    git(main, "config", "commit.gpgsign", "false")
+    (main / "README.md").write_text("# test\n", encoding="utf-8")
+    git(main, "add", "README.md")
+    git(main, "commit", "-q", "-m", "init")
+
+    remote = root / "master-only-origin.git"
+    subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True)
+    git(main, "remote", "add", "origin", str(remote))
+    git(main, "push", "-q", "origin", "master")
+    return main
+
+
 def push_develop(repo: Path) -> None:
     """origin にだけ `develop` を置く。"""
     git(repo, "branch", "develop")

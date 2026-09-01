@@ -15,7 +15,12 @@ from pathlib import Path
 
 import pytest
 
-from branch_repo_helpers import init_origin_repo, missing_command, push_develop
+from branch_repo_helpers import (
+    init_master_only_repo,
+    init_origin_repo,
+    missing_command,
+    push_develop,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 LIB = ROOT / "plugins" / "ndf" / "scripts" / "lib" / "worktree-common.sh"
@@ -50,6 +55,17 @@ def repo(tmp_path: Path) -> Path:
     main = init_origin_repo(tmp_path)
     push_develop(main)
     return main
+
+
+@pytest.fixture()
+def repo_without_origin_head(tmp_path: Path) -> Path:
+    """origin の HEAD が無く、ローカルに `master` だけがあるリポジトリ。
+
+    宣言した起点を解決する経路も見るため、origin に `develop` を置いておく。
+    """
+    repo = init_master_only_repo(tmp_path)
+    push_develop(repo)
+    return repo
 
 
 def snippet_of(name: str) -> str:
@@ -104,6 +120,26 @@ def test_inline_resolution_matches_library(name: str, case: str, repo: Path) -> 
     if body is not None:
         write_declaration(repo, body)
     assert resolve_inline(name, repo) == resolve_library(repo)
+
+
+@pytest.mark.parametrize("name", INLINE_SKILLS)
+@pytest.mark.parametrize("case", list(DECLARATIONS))
+def test_inline_resolution_matches_library_without_origin_head(
+    name: str, case: str, repo_without_origin_head: Path
+) -> None:
+    """origin の HEAD が取れないときの落とし先も突き合わせる。
+
+    既定ブランチの解決は `origin の HEAD → main → master` の順で、最後の 1 段は
+    origin の HEAD を持たないリポジトリでしか通らない。main を持つリポジトリだけを
+    見ていると、手順が `master` へ落ちない食い違いを拾えない。
+    """
+    body = DECLARATIONS[case]
+    if body is not None:
+        write_declaration(repo_without_origin_head, body)
+    got = resolve_inline(name, repo_without_origin_head)
+    assert got == resolve_library(repo_without_origin_head)
+    # 宣言が起点を指していない経路は、慣例の名前のうち実在する `master` へ落ちる。
+    assert got == ("develop" if case == "起点あり" else "master")
 
 
 @pytest.mark.parametrize("name", LITERAL_SKILLS)
