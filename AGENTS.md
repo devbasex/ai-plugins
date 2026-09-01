@@ -16,6 +16,9 @@
 - **`main` / `develop` への直接コミット・プッシュ禁止。** Pull Request の宛先は
   **`develop`**（開発版チャネル）。`main`（正式版チャネル）へ進めるのは配布の工程だけ
   （「版の付け方と開発版の配布」）
+  - **`develop` を作るまでは、宛先は `main` である。** この規則は `develop` が
+    存在してから効く。作る前に片付ける項目は #202 にある。移行が済むまで、`develop`
+    宛にしようとすると存在しないブランチを指すことになる
 - **開発の変更は `.worktrees/<ブランチ名>` の作業ツリーの中で行う**（`/ndf:worktree`）。clone したディレクトリ（主ディレクトリ）は編集対象から外す
   - `issues/` `docs/` と各ランタイムの設定は主ディレクトリで編集してよい
   - 主ディレクトリの編集は拒否されない。案内が出ても操作は成立する
@@ -72,7 +75,8 @@ bash plugins/ndf/dev.kiro/install.sh --project <ディレクトリ> --yes
 位置へ fast-forward する。`main` へ直接コミットしない。
 
 **Pull Request のベースは `develop` である。** 既定ブランチが `main` であるため、`gh pr create`
-は指定しないと `main` を宛先にする。**`--base develop` を必ず付ける。**
+は指定しないと `main` を宛先にする。**`--base develop` を必ず付ける。** ただし
+**`develop` を作るまでは宛先が `main` であるため、この指定は付けない**（「Git運用ルール」を参照）。
 
 **`main` を進めるのが `release` の「本番への配布」である。** そちらには承認が要る。`develop`
 へのマージは「検証への配布」にあたり、承認なしで進めてよい（`/ndf:release`）。
@@ -132,6 +136,26 @@ semver の順序で除外されるのは、プラグイン間の依存解決（`
 bash plugins/ndf/dev.kiro/install.sh --project <検証用ディレクトリ> --yes   # Kiro
 claude --plugin-dir plugins/ndf                                             # Claude Code
 ```
+
+**正式版を出したらリリースタグを打つ。** 利用者が過去の版へ戻るときの目印になる。
+
+```bash
+claude plugin tag plugins/ndf --dry-run   # 打つ内容を確認する
+claude plugin tag plugins/ndf --push      # ndf--v<版> を作って origin へ送る
+```
+
+`{プラグイン名}--v{版}` の形で作られ、打つ前に `plugin.json` の版とマーケットプレイスの項目が
+食い違っていないかを検査する。
+
+**版を持つのは `plugins/<名前>/.claude-plugin/plugin.json` だけである。**
+`.claude-plugin/marketplace.json` に `version` フィールドは置かない。マーケットプレイス側の
+`description` に書かれた `(vX.Y.Z)` は読み手向けの記載で、取得する版を決める値ではない。
+両方に版を持たせると `plugin.json` が無警告で優先され、食い違いに気づけなくなる。
+
+**取り消しは利用者の側の操作になる。** こちらから前の版へ戻す手段は無い。取得元をタグへ固定
+するか、別名のマーケットプレイスで対象だけを固定する。手順は
+`docs/plugin-development-guide.md` の「利用者が過去の版へ戻る」にある。**配布の完了報告へ
+書く「取り消しの手段」は、この 2 つとその限界を指す。**
 
 **サードパーティのマーケットプレイスは自動更新が既定で無効である。** `main` へ出した版が
 即座に全利用者へ届くわけではなく、利用者が `marketplace update` を実行した時点で届く。
