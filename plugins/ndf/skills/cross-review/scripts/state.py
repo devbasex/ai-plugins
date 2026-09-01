@@ -282,6 +282,56 @@ def _git_toplevel() -> str | None:
     return None
 
 
+def _sync_worktree(worktree: str, pr: int, head_branch: str) -> None:
+    """既存 worktree を PR の head へ同期する。
+
+    worktree は使い捨ての領域だが、実際には前回の実行のものがそのまま残る。
+    同期せずに流用すると、**レビュー担当は古い差分を読む**。指摘は現在の PR に
+    存在しない行に対して出るか、直したはずの箇所へ再び出る。どちらも投稿されて
+    しまうため、読む側からは見分けが付かない。
+
+    前回の実行が残した追跡対象外のファイルも消す。残したまま fix 担当が
+    `git add -A` を使うと、レビューと無関係なファイルが Pull Request へ混ざる。
+    `.cross_review/` は `.gitignore` に載っているため `git clean -fd`
+    (`-x` 無し) の対象にならず、state.json と result.json は残る。
+    """
+    fetch_result = subprocess.run(
+        ["git", "fetch", "origin", head_branch],
+        capture_output=True, text=True,
+    )
+    if fetch_result.returncode == 0:
+        target = f"origin/{head_branch}"
+        reset = subprocess.run(
+            ["git", "reset", "--hard", target],
+            capture_output=True, text=True, cwd=worktree,
+        )
+        if reset.returncode != 0:
+            die(f"worktree を {target} へ同期できない: {reset.stderr.strip()}")
+    else:
+        # フォーク PR は origin に head branch が無い。作成時と同じ経路で合わせる。
+        info(f"⚠ git fetch origin {head_branch} 失敗 (フォーク PR の可能性) — gh pr checkout でフォールバック")
+        checkout = subprocess.run(
+            ["gh", "pr", "checkout", str(pr), "--detach"],
+            capture_output=True, text=True, cwd=worktree,
+        )
+        if checkout.returncode != 0:
+            die(f"gh pr checkout --detach #{pr} 失敗: {checkout.stderr.strip()}")
+    clean = subprocess.run(
+        ["git", "clean", "-fd"],
+        capture_output=True, text=True, cwd=worktree,
+    )
+    if clean.returncode != 0:
+        # 消せないまま進むと、残骸を抱えた作業ツリーで fix 担当が `git add -A` を
+        # 使い、Pull Request へ混ざる。差分そのものは合っていても止める。
+        die(f"追跡対象外のファイルを消せない: {clean.stderr.strip()}")
+    head = subprocess.run(
+        ["git", "rev-parse", "--short", "HEAD"],
+        capture_output=True, text=True, cwd=worktree,
+    )
+    sha = head.stdout.strip() if head.returncode == 0 else "?"
+    info(f"↻ 既存 worktree を PR #{pr} の head へ同期: {sha}")
+
+
 def _tmp_dir(workspace: str | None = None) -> pathlib.Path:
     """cross-review 用 tmp ディレクトリを決定する。
 
@@ -844,6 +894,11 @@ def cmd_init(args: argparse.Namespace) -> None:
                 info("↻ 追加レビュー観点を state に反映して再開")
             tmp_dir = _tmp_dir(worktree)
             wt = st.get("worktree_path") or ""
+            # 再開でも同期する。中断から再開までの間に head が進んでいることがあり、
+            # そのまま次のラウンドを回すと古い差分をレビューさせる。
+            resume_head = str(st.get("head_branch") or "")
+            if wt and resume_head and _is_registered_worktree(str(wt)):
+                _sync_worktree(str(wt), int(st.get("current_pr") or pr), resume_head)
             info(f"↻ 前回中断 state から再開（round={len(st.get('rounds', []))}）")
             print(f'PR={st["current_pr"]}')
             print(f'WORKTREE={shlex.quote(str(wt))}')
@@ -877,6 +932,7 @@ def cmd_init(args: argparse.Namespace) -> None:
         _create_worktree(worktree, pr, head_branch)
     elif _is_registered_worktree(worktree):
         info(f"↻ 既存 worktree 流用: {worktree}")
+        _sync_worktree(worktree, pr, head_branch)
     else:
         # パスは存在するが現リポジトリの worktree ではない (別リポジトリの残骸等)。
         # 流用すると git 操作が壊れるため退避して作り直す。

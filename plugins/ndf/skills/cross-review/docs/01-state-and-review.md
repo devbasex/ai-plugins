@@ -157,6 +157,21 @@ cd "$WORKTREE"
    数え、`carried_over` に記録する**（Step 3 の判定へ入る。取得できなければ記録は変えない）
 2. 自分の PR 判定（`gh api user` と `gh pr view --json author` を比較）
 3. worktree 作成（`<worktree-base>/<owner>--<repo>/pr<PR>`。`<worktree-base>` は `NDF_WORKTREE_BASE` env > `<システム tmpdir>/ndf-worktrees` の優先順で解決。既存パスが現リポジトリの登録済み worktree でなければ `.stale-<ts>` に退避して作り直す。実 path は state.json の `worktree_path` を参照）
+
+   **既存の worktree を流用するときは、必ず PR の head へ同期する。** `git fetch origin <head>`
+   の後に worktree の中で `git reset --hard origin/<head>` を実行し、`git clean -fd` で前回の
+   実行が残した追跡対象外のファイルを消す。フォーク PR で origin に head branch が無いときは
+   `gh pr checkout <PR> --detach` へ落とす。同期できないときは止める。
+
+   同期しないと、**レビュー担当は前回の実行が残した古い差分を読む**。指摘は現在の Pull Request
+   に無い行へ出るか、直したはずの箇所へ再び出る。どちらも投稿されるため、読む側からは
+   見分けが付かない。実測では 8 コミット古い worktree がそのまま流用された。
+
+   追跡対象外のファイルを消すのは、fix 担当が `git add -A` を使ったときに Pull Request へ
+   混ざるためである。`-x` は付けない。`.cross_review/` は `.gitignore` に載っているため
+   対象にならず、state.json と result.json は残る。
+
+   **再開の経路でも同じ同期を行う。** 中断から再開するまでの間に head が進んでいることがある。
 4. 既存コメントスナップショット (`fix/scripts/fetch-pr-comments.sh` で 3 ソース一括取得) → `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt`
 5. state.json 書き出し
 
