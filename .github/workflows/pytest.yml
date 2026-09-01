@@ -32,6 +32,12 @@ jobs:
           for c in bash jq git; do
             command -v "$c" >/dev/null || { echo "missing command: $c" >&2; exit 1; }
           done
+      # git commit を実行するテストがある。実行環境には身元が設定されていない
+      - name: Configure the git identity the tests need
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
       - run: uv run --with pytest pytest . --ignore=plugins/playwright-kit -q
 
   pytest-playwright-kit:
