@@ -32,13 +32,19 @@
 | [#146](https://github.com/devbasex/ai-plugins/issues/146) | 更新を全て git worktree で行う Skill の作成 | [issue-146-worktree-first/](issue-146-worktree-first/01-spec-and-plan.md) |
 | [#163](https://github.com/devbasex/ai-plugins/issues/163) | 多義語を定義せずに使わないルールの追加 | [issue-163-polysemy-rule.md](issue-163-polysemy-rule.md) |
 | [#173](https://github.com/devbasex/ai-plugins/issues/173) | 作業ツリー運用の実機確認で見つかった不具合 | [issue-173-worktree-runtime-defects.md](issue-173-worktree-runtime-defects.md) |
+| [#175](https://github.com/devbasex/ai-plugins/issues/175) | リリース後テストと振り返りの工程を追加する | [issue-175-release-verification-retrospective.md](issue-175-release-verification-retrospective.md) |
+| [#176](https://github.com/devbasex/ai-plugins/issues/176) | 進行の記録に GitHub Projects を使う | [issue-176-github-projects.md](issue-176-github-projects.md) |
 | [#178](https://github.com/devbasex/ai-plugins/issues/178) | 版を上げるときに古くなる記載を検査の対象へ広げる | [issue-178-doc-staleness-checks.md](issue-178-doc-staleness-checks.md) |
+| [#188](https://github.com/devbasex/ai-plugins/issues/188) | まとめてマージした後の版上げの担い手と時期を決める | [issue-188-release-step.md](issue-188-release-step.md) |
+| [#202](https://github.com/devbasex/ai-plugins/issues/202) | 開発の起点ブランチを `.ndf/worktree.json` で宣言する | [issue-202-base-branch.md](issue-202-base-branch.md) |
 
 ## 計画と調査資料
 
 | ファイル | 内容 |
 | --- | --- |
 | [parallel-batch-01/](parallel-batch-01/00-overview.md) | 並行開発バッチ 01（#178 / #33 / #37 / #81）の指示書 |
+| [parallel-batch-02/](parallel-batch-02/00-overview.md) | 並行開発バッチ 02（#175 / #176 / #186 / #188）の指示書と引き継ぎ |
+| [release-v9.5.0-verification.md](release-v9.5.0-verification.md) | v9.5.0 のリリース後テストの記録 |
 | [ndf-development-skills/](ndf-development-skills/01-overview.md) | 開発方法論レイヤーの導入計画（v6.1.0） |
 | [ndf-skill-footprint.md](ndf-skill-footprint.md) | frontmatter の圧縮と playwright 系の分割（v7.0.0） |
 | [skill-frontmatter-by-runtime.csv](skill-frontmatter-by-runtime.csv) | 上の計画で使った Skill ごとの実測値 |
