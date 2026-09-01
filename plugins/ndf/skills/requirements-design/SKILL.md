@@ -12,6 +12,7 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 | 問い | 担当 |
 | --- | --- |
 | 何を満たすか（受け入れ条件・仕様） | この Skill |
+| どう作るか（データ構造・入出力の契約・決定の理由） | `design` |
 | どう分解するか（タスク・順序・対象ファイル） | `implementation-plan` |
 | どう作るか（失敗するテスト → 実装） | `tdd-cycle` |
 | 満たしたと言えるか（証跡） | `quality-gates` |

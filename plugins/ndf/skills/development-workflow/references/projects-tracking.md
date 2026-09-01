@@ -65,7 +65,8 @@ Pull Request が出る場合も、既定の `Linked pull requests` に並ぶた�
 | --- | --- | --- |
 | 作業場所の用意 | `worktree` | `作業場所の用意` |
 | 要求と受け入れ条件 | `requirements-design` | `要求と受け入れ条件` |
-| 設計 | （専用 Skill なし。`implementation-plan` に記録する） | `設計` |
+| 設計 | `design` | `設計` |
+| 設計レビュー | `design` が `pr` / `cross-review` / `merged` を呼ぶ | `設計レビュー` |
 | 計画 | `implementation-plan` | `計画` |
 | 実装 | `tdd-cycle` | `実装` |
 | 構造改善 | `refactoring` | `構造改善` |

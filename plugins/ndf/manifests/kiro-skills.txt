@@ -21,6 +21,7 @@ plan-to-spec
 qa-security-scan
 development-workflow
 requirements-design
+design
 tdd-cycle
 refactoring
 quality-gates
