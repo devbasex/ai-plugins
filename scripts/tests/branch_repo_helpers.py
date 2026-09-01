@@ -77,6 +77,16 @@ def push_branch(repo: Path, name: str) -> None:
     git(repo, "branch", "-D", name)
 
 
+def push_lookalike_branch(repo: Path, name: str) -> None:
+    """`refs/heads/<名前>` の問い合わせに応えてしまう別のブランチだけを origin に置く。
+
+    `git ls-remote` のパターンは参照名の末尾に一致するため、完全な参照名で問い合わせても
+    `refs/heads/x/refs/heads/develop` が `refs/heads/develop` の結果として返る
+    （git 2.53.0 で実測）。問い合わせの成功だけを見ると、起点が未作成なのに「ある」と読む。
+    """
+    git(repo, "push", "-q", "origin", f"HEAD:refs/heads/x/refs/heads/{name}")
+
+
 def drop_remote_tracking(repo: Path, name: str) -> None:
     """origin のブランチを取得していない状態を作る。
 

@@ -58,10 +58,21 @@ featureブランチに環境ブランチ(`qa/staging`等)を merge して confli
 dev_base=$(jq -r 'select(.version == 1) | .base_branch | select(type == "string")' \
   .ndf/worktree.json 2>/dev/null)
 if [ -n "$dev_base" ]; then
-  git show-ref --verify --quiet "refs/remotes/origin/$dev_base" ||
-    git show-ref --verify --quiet "refs/heads/$dev_base" ||
-    GIT_TERMINAL_PROMPT=0 git ls-remote --heads --exit-code origin \
-      "refs/heads/$dev_base" >/dev/null 2>&1 || {
+  dev_base_found=0
+  if git show-ref --verify --quiet "refs/remotes/origin/$dev_base" ||
+     git show-ref --verify --quiet "refs/heads/$dev_base"; then
+    dev_base_found=1
+  else
+    # `git ls-remote` のパターンは参照名の末尾に一致する。問い合わせの成功だけを見ると
+    # `refs/heads/x/refs/heads/develop` のような別のブランチでも「ある」と読むため、
+    # 返った行の参照名そのものを照合する（共通ライブラリ `wt_branch_exists` と同じ形）
+    dev_base_listing=$(GIT_TERMINAL_PROMPT=0 git ls-remote --heads origin \
+      "refs/heads/$dev_base" 2>/dev/null)
+    while IFS= read -r line; do
+      case "$line" in *$'\t'"refs/heads/$dev_base") dev_base_found=1; break ;; esac
+    done <<<"$dev_base_listing"
+  fi
+  [ "$dev_base_found" -eq 1 ] || {
     printf 'NOTE: .ndf/worktree.json の base_branch が指す %s は origin にもローカルにもありません\n' \
       "$dev_base" >&2
     exit 1

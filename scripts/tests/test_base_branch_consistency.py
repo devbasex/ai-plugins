@@ -21,6 +21,7 @@ from branch_repo_helpers import (
     init_origin_repo,
     missing_command,
     push_branch,
+    push_lookalike_branch,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -70,6 +71,14 @@ def repo_with_unfetched_develop(tmp_path: Path) -> Path:
     main = init_origin_repo(tmp_path)
     push_branch(main, "develop")
     drop_remote_tracking(main, "develop")
+    return main
+
+
+@pytest.fixture()
+def repo_with_lookalike_develop(tmp_path: Path) -> Path:
+    """origin に `refs/heads/x/refs/heads/develop` だけがあるリポジトリ。"""
+    main = init_origin_repo(tmp_path)
+    push_lookalike_branch(main, "develop")
     return main
 
 
@@ -199,6 +208,27 @@ def test_inline_matches_library_when_declared_branch_is_unfetched(
     write_declaration(repo_with_unfetched_develop, {"version": 1, "base_branch": "develop"})
     assert resolve_inline(name, repo_with_unfetched_develop) == "develop"
     assert resolve_library(repo_with_unfetched_develop) == "develop"
+
+
+@pytest.mark.parametrize("name", INLINE_SKILLS)
+def test_inline_matches_library_when_only_a_lookalike_branch_exists(
+    name: str, repo_with_lookalike_develop: Path
+) -> None:
+    """末尾が一致するだけの別のブランチを、どちらも起点として採らない。
+
+    `git ls-remote` のパターンは参照名の末尾に一致するため、完全な参照名で問い合わせても
+    `refs/heads/x/refs/heads/develop` が返る。問い合わせの成功だけを見ると、起点が未作成
+    なのに解決できたことになり、手順だけが実在しない名前を返す。
+    """
+    write_declaration(repo_with_lookalike_develop, {"version": 1, "base_branch": "develop"})
+    inline = run_inline(name, repo_with_lookalike_develop)
+    library = run_library(repo_with_lookalike_develop)
+    assert inline.returncode != 0, inline.stdout
+    assert library.returncode != 0, library.stdout
+    assert inline.stdout.strip() == ""
+    assert library.stdout.strip() == ""
+    assert "develop" in inline.stderr
+    assert "develop" in library.stderr
 
 
 @pytest.mark.parametrize("name", LITERAL_SKILLS)
