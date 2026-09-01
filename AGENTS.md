@@ -107,9 +107,13 @@ semver の順序で除外されるのは、プラグイン間の依存解決（`
 - **正式版を出すときは接尾辞を外す。** `9.6.0-dev.3` の次は `9.6.0`
 - 順序は semver に従い `9.6.0-dev.1` < `9.6.0-rc.1` < `9.6.0` になる
 
-**版数は 6 箇所にある。すべて揃える。** 揃っていないと `scripts/check-doc-staleness.py` と
-`scripts/validate-runtime-plugins.sh` が落ちる。**2 つの `plugin.json` はどちらも `version` と
-`description` の両方に版数を持つ**ため、片方だけ直すと検査で止まる。
+**版数を持つ箇所は 2 種類ある。** 検査が突き合わせる 6 箇所と、**検査に載らず手で直す箇所**である。
+
+### 検査が突き合わせる 6 箇所
+
+揃っていないと `scripts/check-doc-staleness.py` と `scripts/validate-runtime-plugins.sh` が
+落ちる。**2 つの `plugin.json` はどちらも `version` と `description` の両方に版数を持つ**ため、
+片方だけ直すと検査で止まる。
 
 | 箇所 | 何を書くか |
 | --- | --- |
@@ -123,6 +127,25 @@ semver の順序で除外されるのは、プラグイン間の依存解決（`
 **版を決めるのは `plugins/ndf/.claude-plugin/plugin.json` の `version` だけである。** 他の
 5 箇所は読み手向けの記載と検査のための突き合わせ先で、取得する版を変えない。
 `.claude-plugin/marketplace.json` に `version` フィールドは置かない。
+
+### 検査に載らず、手で直す箇所
+
+**検査が見るのは説明文書の Skill 数と更新案内の見出しの版数までで、本文中の版数は対象外である。**
+次は現行版を指すため、版を上げるたびに読み直す。**v9.5.0 の配布でここを取りこぼした**（#209）。
+
+| 箇所 | 何を書いているか |
+| --- | --- |
+| `README.md` の概要 | 「NDFプラグイン vX.Y.Z は」 |
+| `README.md` のプラグイン一覧表 | 版数の列 |
+| `AGENTS.md` の「NDFプラグインについて」 | 「主要プラグインです（vX.Y.Z）」 |
+| `AGENTS.md` の接尾辞の例 | 次に開発する版の例 |
+| `plugins/ndf/README.md` の Kiro の確認例 | 期待出力の版数 |
+| `plugins/ndf/README.md` の Codex のパス例 | `~/.codex/plugins/cache/.../ndf/X.Y.Z/` |
+| `plugins/ndf/README.md` の `codex plugin list` の出力例 | 期待出力の版数 |
+
+**すべての版数を機械的に置換しない。** 履歴（`CLAUDE.md` の版ごとの段落、
+`docs/development-history/`）、記録（`issues/`）、意図的に前の版を指す文（取り消しの説明）は
+そのまま残す。現行版を指しているかは文脈で決まる。
 
 接尾辞の付いた版でも検査は通る（形式としては妥当な版数のため）。**接尾辞の付け忘れ・外し忘れは
 検査では捕まらない。** 出す前に版数を読み直す。
