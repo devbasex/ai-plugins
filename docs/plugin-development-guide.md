@@ -109,6 +109,18 @@ plugins/{plugin-name}/
 - **MAJOR**: 破壊的変更
 - **MINOR**: 後方互換性のある新機能
 - **PATCH**: バグフィックス
+- **接尾辞**: 開発版は `-dev.<連番>`、公開前の確認版は `-rc.<連番>`。付け方と外し方は
+  AGENTS.md の「版の付け方と開発版の配布」にある
+
+**配布のチャネルは 2 つある。** `main` が正式版、`develop` が開発版です。ここに書く手順は
+版数を書き換えるところまでで、**常用する利用者へ届くのは `main` を進めた時点**です。
+
+```bash
+git push origin develop:main   # 正式版として公開する
+```
+
+進める判断と承認は `/ndf:release` が扱います。**承認を得ないまま実行しないでください。**
+`main` へ入った時点で、常用する利用者の `marketplace update` に載ります。
 
 **バージョン更新時の手順**:
 1. `plugin.json`のバージョンをインクリメント
@@ -178,13 +190,25 @@ plugins/{plugin-name}/
 
 ### ローカルテスト
 
-```bash
-# マーケットプレイス追加（Claude Codeで）
-/plugin marketplace add /path/to/ai-plugins
+**ローカルのディレクトリをマーケットプレイスとして追加しない。** `marketplace.json` の `name`
+がリポジトリと同じであるため、追加すると**利用者のグローバルな取得元がそのディレクトリへ
+上書きされる**（`--scope local` を指定しても起きる）。続けて `marketplace remove` すると
+clone と導入記録まで消える。
 
-# プラグインインストール
-/plugin install {plugin-name}@ai-plugins
+手元で確かめる手段は 2 つある。
+
+```bash
+# Kiro CLI: installer が任意のディレクトリへ導入する。取得元を書き換えない
+bash plugins/ndf/dev.kiro/install.sh --project <検証用ディレクトリ> --yes
+
+# Claude Code: 1 つのプラグインをディレクトリから読み込む
+claude --plugin-dir plugins/ndf
 ```
+
+**通常の取得経路で確かめたい場合は、開発版のチャネル（`develop`）へ出す。** 版数へ
+`-dev.<連番>` を付けて公開し、検証に参加する利用者が `#develop` を付けた登録で取得します。
+常用する利用者は `main` を見ているため、この公開では届きません（AGENTS.md の「版の付け方と
+開発版の配布」）。
 
 ### Runtime plugin 検証
 

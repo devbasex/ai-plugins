@@ -29,3 +29,4 @@ worktree
 out-of-scope
 release-verification
 retrospective
+release

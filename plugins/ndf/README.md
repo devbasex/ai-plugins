@@ -8,9 +8,9 @@ PR 運用、レビュー、調査、実装計画、仕様書化、開発方法�
 
 | ランタイム | 公開 Skill | マニフェスト |
 | --- | --- | --- |
-| Claude Code | 31 個 | `.claude-plugin/plugin.json` |
-| Codex | 29 個 | `.codex-plugin/plugin.json` |
-| Kiro CLI | 30 個 | `dev.kiro/install.sh`（プラグイン機構が無いため installer で導入） |
+| Claude Code | 32 個 | `.claude-plugin/plugin.json` |
+| Codex | 30 個 | `.codex-plugin/plugin.json` |
+| Kiro CLI | 31 個 | `dev.kiro/install.sh`（プラグイン機構が無いため installer で導入） |
 
 ## レイアウト
 
@@ -18,7 +18,7 @@ PR 運用、レビュー、調査、実装計画、仕様書化、開発方法�
 plugins/ndf/
 ├── .claude-plugin/plugin.json   # Claude Code のマニフェスト
 ├── .codex-plugin/plugin.json    # Codex のマニフェスト
-├── skills/                      # 配布 Skill の唯一の実体（31 個）
+├── skills/                      # 配布 Skill の唯一の実体（32 個）
 ├── skills/README.md             # Skill 執筆の規約
 ├── optional-skills/             # どの配布先にも載せない Skill（4 個）
 ├── manifests/                   # ランタイム別の配布 Skill 一覧
@@ -37,6 +37,10 @@ plugins/ndf/
 Skill の実体だけに保つことで、マニフェストの絞り込みによらず公開数が変わりません。
 
 ## インストール
+
+**以下は正式版（`main`）の手順です。** 検証中の開発版は `develop` に載ります。取得元へ
+`#develop` を足す形で、手順は
+[リポジトリ README の「開発版を試す」](../../README.md#開発版を試す開発者向け)にあります。
 
 ### Claude Code
 
@@ -84,7 +88,8 @@ python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['descript
 
 ## v9.4.0 へ更新するとき
 
-**Skill の数は変わりません（31 / 29 / 30）。** `cross-review` の収束判定が変わります（#33 / #37）。
+**v9.4.0 では Skill の数は変わりませんでした（v9.3.0 と同じ 31 / 29 / 30）。**
+`cross-review` の収束判定が変わります（#33 / #37）。
 
 中断したレビューを再開したとき、その時点で Resolve されていない指摘は、修正の工程を 1 度
 通すまで収束しません。これまでは再開したラウンドで両者が承認すると、前のラウンドの指摘を
