@@ -45,10 +45,14 @@
 
 | 形 | ファイル |
 | --- | --- |
-| パッケージ・プラグイン | [form-package-plugin.md](form-package-plugin.md) |
+| パッケージ・プラグイン（**エージェントプラグインもここ**。Claude Code / Codex / Kiro） | [form-package-plugin.md](form-package-plugin.md) |
 | サービス（Web アプリ・API・フロントエンド） | [form-service.md](form-service.md) |
 | デスクトップアプリ | [form-desktop.md](form-desktop.md) |
 | モバイルアプリ | [form-mobile.md](form-mobile.md) |
 | 手順・設定の変更 | [form-procedure.md](form-procedure.md) |
+
+**エージェントプラグインをサービスや手順・設定へ分類しない。** 利用者が取得の操作をして
+受け取るため、パッケージ・プラグインにあたる。版数ではなく git の ref で取得する版が
+決まる点が他と違い、その扱いは `form-package-plugin.md` の末尾にある。
 
 形を追加するときも、他のファイルは変更しない。この表へ 1 行足し、ファイルを 1 つ増やす。

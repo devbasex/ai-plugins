@@ -75,7 +75,8 @@ bash plugins/ndf/dev.kiro/install.sh --project <ディレクトリ> --yes
 位置へ fast-forward する。`main` へ直接コミットしない。
 
 **Pull Request のベースは `develop` である。** 既定ブランチが `main` であるため、`gh pr create`
-は指定しないと `main` を宛先にする。**`--base develop` を必ず付ける。**
+は指定しないと `main` を宛先にする。**`--base develop` を必ず付ける。** ただし
+**`develop` を作るまでは宛先が `main` であるため、この指定は付けない**（「Git 運用ルール」の移行の項）。
 
 **`main` を進めるのが `release` の「本番への配布」である。** そちらには承認が要る。`develop`
 へのマージは「検証への配布」にあたり、承認なしで進めてよい（`/ndf:release`）。
