@@ -27,7 +27,7 @@ issue #113 に紐づく作業中の文書はこの 1 ファイルだけで、設
 | 7 | [7th-trial-report](old/issue-113-cross-refactoring-7th-trial-report.md) | devbase リポジトリで完走。所要の実測と不具合 3 件（本計画の起点） |
 
 試行で見つかった不具合は v8.2.0 / v8.3.0 / v8.5.0〜v8.5.4 / v8.6.0 で対応済みで、
-版ごとの内容は `CLAUDE.md` の「NDF v9.4.0 の Skill 構成」に残している。
+版ごとの内容は `CLAUDE.md` の「NDF の Skill 構成」に残している。
 
 ## モード
 

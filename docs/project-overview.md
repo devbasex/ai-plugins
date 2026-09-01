@@ -38,6 +38,9 @@ ai-plugins/
 
 ## インストール方法
 
+**以下は正式版（`main`）の手順です。** 検証中の開発版は `develop` に載ります。手順は
+[リポジトリ README の「開発版を試す」](../README.md#開発版を試す開発者向け)にあります。
+
 ### Codex
 ```bash
 codex plugin marketplace add https://github.com/devbasex/ai-plugins

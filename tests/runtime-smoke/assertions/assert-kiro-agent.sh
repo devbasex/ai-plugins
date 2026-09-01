@@ -67,14 +67,26 @@ if [ -e "$KIRO_DIR/skills/ndf-policies" ]; then
 fi
 
 # エージェント定義と、起動時に読み込まれる文脈量を検査する。
-# 上限は 2026-08-08 / kiro-cli 2.16.1 でのこのフィクスチャの実測 112,404 文字に対する余裕分。
-python3 - "$AGENT_FILE" "$KIRO_DIR" "$PROJECT_DIR" "$STEERING_FILE" 200000 >> "$LOG" <<'PY'
+#
+# **文脈量に上限は置かない。計測して記録するだけにする。**
+# 以前は 200,000 文字で落としていた。根拠は 2026-08-08 / kiro-cli 2.16.1 でのこの
+# フィクスチャの実測 112,404 文字に対する余裕分で、当時のモデルのコンテキスト長を
+# 前提にしていた。NDF は Kiro でも 1M コンテキストのモデルだけを対象とするようになり
+# （既定 `auto` のコンテキストは 1,000,000。過去の実測の記録で、kiro-cli 2.20.1 に
+# `--list-models` は無く同じ手段では再検証できない。出典は
+# `scripts/check-skill-frontmatter.py` の Kiro の節にまとめてある）、
+# これは Claude Code の Opus 5 と同じである。**その Claude Code には、起動時に読み込む
+# 文脈量の上限が無い。** 同じコンテキスト長のランタイムを片方だけ縛る根拠が無いため、
+# 上限を外して Claude Code へ揃える。
+#
+# 数は `$LOG` へ残るため、増え方は後から追える。一覧の予算のほうは
+# `scripts/check-skill-frontmatter.py` が Claude Code と同じ 1% で検査する。
+python3 - "$AGENT_FILE" "$KIRO_DIR" "$PROJECT_DIR" "$STEERING_FILE" >> "$LOG" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-agent_file, kiro_dir, project_dir, steering_file, budget = sys.argv[1:6]
-budget = int(budget)
+agent_file, kiro_dir, project_dir, steering_file = sys.argv[1:5]
 config = json.loads(Path(agent_file).read_text(encoding="utf-8"))
 
 if config.get("name") != "ndf":
@@ -96,9 +108,8 @@ project = Path(project_dir)
 context_files += [p for p in (project / "AGENTS.md", project / "README.md") if p.is_file()]
 context_files.append(Path(steering_file))
 total = sum(len(p.read_text(encoding="utf-8")) for p in context_files)
-print(f"context files: {len(context_files)} / chars: {total} / budget: {budget}")
-if total > budget:
-    raise SystemExit(f"context files exceed the budget: {total} > {budget}")
+# 上限は置かない（上のコメントを参照）。増え方を追えるように記録だけ残す。
+print(f"context files: {len(context_files)} / chars: {total}")
 PY
 
 # 旧 installer が別 checkout から張った .kiro/skills/ndf-policies symlink は、現在の

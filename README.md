@@ -27,6 +27,17 @@ Claude Code / Codex / Kiro CLI向けのスキル・MCP設定を共有するた�
 
 ## 利用方法
 
+**配布のチャネルは 2 つあります。** 常用する場合は取得元をそのまま登録します（正式版）。
+**手順はこれまでと変わりません。** 開発版を試すときだけ、取得元へ ref を足します。
+
+| チャネル | 何が載るか | 取得元 | 向いている人 |
+| --- | --- | --- | --- |
+| **正式版** | 正式版として承認された版だけ | `https://github.com/devbasex/ai-plugins` | 常用する人 |
+| 開発版 | マージされた変更がそのまま | 同じ URL に `#develop` を足す | 検証に参加する人 |
+
+開発版は検証中の版です。版数に `-dev.<連番>` が付き、壊れていることがあります。手順は
+[開発版を試す](#開発版を試す開発者向け)にあります。
+
 ### Claude Code
 
 #### 1. マーケットプレイスの追加
@@ -49,12 +60,8 @@ codex plugin marketplace add https://github.com/devbasex/ai-plugins
 codex plugin add ndf@ai-plugins
 ```
 
-ローカルで検証する場合:
-
-```bash
-codex plugin marketplace add ./local/path/to/ai-plugins
-codex plugin add ndf@ai-plugins
-```
+開発版を試す場合は[開発版を試す](#開発版を試す開発者向け)を参照してください。**ローカルの
+ディレクトリを同じ名前で追加しないでください。** 取得元が置き換わります。
 
 ### Kiro CLI
 
@@ -98,6 +105,56 @@ kiro-cli chat --agent ndf
 既定エージェントとして使いたい場合は `bash plugins/ndf/dev.kiro/install.sh --set-default` を実行します。
 
 詳細は [KIRO.md](./KIRO.md) を参照。
+
+### 開発版を試す（開発者向け）
+
+**開発版は `develop` ブランチに載ります。** `main` へ進めるのは正式版を出すときだけなので、
+`develop` にはマージ済みで未リリースの変更が入っています。
+
+取得元は名前ごとに 1 つしか登録できないため、**正式版と開発版は同時に入れられません。** 常用
+している環境で試すときは、一時的に登録し直すか、取得元を書き換えない手段（後述）を使います。
+
+#### Claude Code
+
+```bash
+claude plugin marketplace add https://github.com/devbasex/ai-plugins.git#develop
+claude plugin install ndf@ai-plugins
+```
+
+#### Codex
+
+```bash
+codex plugin marketplace add devbasex/ai-plugins --ref develop
+codex plugin add ndf@ai-plugins
+```
+
+#### Kiro CLI
+
+clone した作業ディレクトリから導入するため、ref にあたるのは checkout です。
+
+```bash
+git -C <クローン先> checkout develop
+bash plugins/ndf/dev.kiro/install.sh --project <検証用ディレクトリ> --yes
+```
+
+#### 取得元を書き換えずに確かめる
+
+リポジトリを clone してある場合は、取得元の登録に触れずに読み込めます。
+
+```bash
+claude --plugin-dir plugins/ndf                                            # Claude Code
+bash plugins/ndf/dev.kiro/install.sh --project <検証用ディレクトリ> --yes  # Kiro CLI
+```
+
+**ローカルのディレクトリを同じ名前でマーケットプレイスとして追加しないでください。** 登録の鍵は
+取得元ではなく `marketplace.json` の `name` で、1 つの名前につき 1 つしか登録できません。
+`--scope local` を指定しても**利用者の取得元が置き換わり**、続けて `marketplace remove` すると
+clone と導入記録まで消えます。
+
+#### 開発に参加する場合
+
+Pull Request の宛先は **`develop`** です。既定ブランチは `main`（正式版）なので、`gh pr create`
+には `--base develop` を付けます。詳細は [AGENTS.md](./AGENTS.md) を参照してください。
 
 ### 利用可能なプラグイン
 
