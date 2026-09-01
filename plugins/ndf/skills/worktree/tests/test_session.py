@@ -10,7 +10,13 @@ import os
 import subprocess
 from pathlib import Path
 
-from worktree_helpers import SESSION, add_origin, git, write_declaration
+from worktree_helpers import (
+    SESSION,
+    add_origin,
+    drop_remote_tracking,
+    git,
+    write_declaration,
+)
 
 
 def run_session(cwd: Path, session: str = "s1", tmpdir: Path | None = None) -> dict:
@@ -230,6 +236,50 @@ def test_declared_base_branch_is_followed(main_repo: Path) -> None:
     run_session(main_repo)
 
     assert head_of(main_repo) == expected
+
+
+def put_develop_on_origin_only(main_repo: Path) -> str:
+    """origin にだけ `develop` を置き、そのコミットを返す。ローカルにブランチは残さない。
+
+    起点を移した直後の主ディレクトリがこの形になる。既定ブランチとは別のコミットを
+    指させるため、追従したかどうかが HEAD で判別できる。
+    """
+    add_origin(main_repo)
+    git(main_repo, "checkout", "-q", "-b", "develop")
+    git(main_repo, "commit", "-q", "--allow-empty", "-m", "develop work")
+    expected = head_of(main_repo)
+    git(main_repo, "push", "-q", "origin", "develop")
+    git(main_repo, "checkout", "-q", "main")
+    git(main_repo, "branch", "-D", "develop")
+    return expected
+
+
+def test_base_branch_without_local_branch_is_followed(main_repo: Path) -> None:
+    """起点のローカルブランチが無くても、取得済みの追跡参照へ合わせる。
+
+    名前をそのまま `git rev-parse` へ渡すと、`refs/remotes/origin/develop` へは解決されない。
+    しかも失敗時に名前を標準出力へ書くため、空判定では失敗を拾えず、続く checkout が
+    「合わせられませんでした」を毎回出していた。
+    """
+    expected = put_develop_on_origin_only(main_repo)
+    write_declaration(main_repo, json.dumps({"version": 1, "base_branch": "develop"}))
+
+    result = run_session(main_repo)
+
+    assert head_of(main_repo) == expected
+    assert "合わせられませんでした" not in context_of(result), context_of(result)
+
+
+def test_unfetched_base_branch_is_fetched_and_followed(main_repo: Path) -> None:
+    """origin にあるだけで取得していない起点も、取得してから合わせる。"""
+    expected = put_develop_on_origin_only(main_repo)
+    drop_remote_tracking(main_repo, "develop")
+    write_declaration(main_repo, json.dumps({"version": 1, "base_branch": "develop"}))
+
+    result = run_session(main_repo)
+
+    assert head_of(main_repo) == expected
+    assert "合わせられませんでした" not in context_of(result), context_of(result)
 
 
 def test_unresolvable_base_branch_does_not_follow(main_repo: Path) -> None:

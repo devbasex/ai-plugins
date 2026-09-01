@@ -92,3 +92,12 @@ def push_branch(main_repo: Path, name: str, *, keep_local: bool = False) -> None
     git(main_repo, "push", "-q", "origin", name)
     if not keep_local:
         git(main_repo, "branch", "-D", name)
+
+
+def drop_remote_tracking(main_repo: Path, name: str) -> None:
+    """origin のブランチをまだ取得していない状態を作る。
+
+    `git push` は送った先の追跡参照 (`refs/remotes/origin/<名前>`) も更新する。origin には
+    あるが取得していない状態は、その参照を消すことで再現する。
+    """
+    git(main_repo, "update-ref", "-d", f"refs/remotes/origin/{name}")
