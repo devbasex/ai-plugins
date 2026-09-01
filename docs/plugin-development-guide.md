@@ -245,6 +245,17 @@ ref に指定します。
 `ref` はブランチまたはタグ、`sha` は 40 文字のコミット。両方あるときは `sha` が効きます。
 この形が `claude plugin validate` を通ることは確認済みです。
 
+この定義を読み込ませて導入します。**JSON ファイルのパスを直接渡せます**（実機で確認）。
+
+```bash
+claude plugin marketplace add <この JSON のパス> --scope local
+claude plugin install ndf@ai-plugins-pinned
+```
+
+**`--scope local` を付けます。** 固定は一時的な操作なので、利用者全体の設定へ残しません。
+戻すときは `claude plugin marketplace remove ai-plugins-pinned` です。名前が `ai-plugins` と
+違うため、通常の取得元は消えません。
+
 **固定した版と最新版を同時に有効にしないでください。** どちらの `/ndf:*` が使われるかが
 定まりません。切り替えるときは、先に一方を無効にします。
 
