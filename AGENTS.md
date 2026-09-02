@@ -45,20 +45,48 @@
 | 開発版 | `develop` | マージされた変更がそのまま載る | 開発者と、検証に参加する利用者 |
 
 **正式版を既定ブランチへ載せるのは、利用者の取得手順を変えないためである。** 取得元の登録に
-ref は保存されず（`known_marketplaces.json` は URL だけを持つ）、clone は登録した時点の既定
-ブランチに固定される（fetch の refspec が `+refs/heads/main:refs/remotes/origin/main` だけになる）。
-そのため**既定ブランチを別の名前へ移しても、すでに登録した利用者は `main` を追い続ける**。
-正式版を `main` に置けば、既存の利用者も新しい利用者も登録し直さなくてよい。
+ref は保存されず（Claude Code の `known_marketplaces.json` は URL だけを持つ）、登録した時点の
+ref がそのまま基準になる。そのため**既定ブランチを別の名前へ移しても、すでに登録した利用者は
+`main` を追い続ける**。正式版を `main` に置けば、既存の利用者も新しい利用者も登録し直さなくてよい。
+
+**clone が取得する範囲はランタイムで違う。** 結論は同じだが、根拠となる値は別である。
+
+| ランタイム | clone の fetch の refspec | 実測したコマンド |
+| --- | --- | --- |
+| Claude Code | `+refs/heads/main:refs/remotes/origin/main` | `git -C ~/.claude/plugins/marketplaces/ai-plugins config --get remote.origin.fetch` |
+| Codex | `+refs/heads/*:refs/remotes/origin/*` | `git -C ~/.codex/.tmp/marketplaces/ai-plugins config --get remote.origin.fetch` |
+
+Codex は全ブランチを取得するが、登録した ref を基準にするため、clone を手で別のブランチへ
+切り替えても `codex plugin list` の版数は変わらない。
+
+**取得元の登録と、プラグインの導入は別の操作である。** 登録は取得元の一覧を書き換えるだけで、
+導入済みの実体には触れない。実体は版ごとのディレクトリ（`plugins/cache/<取得元>/<名前>/<版>/`）
+に置かれ、導入の記録がそのうち 1 つを指す。**登録を切り替えただけでは、その記録は元の版を
+指したままである。** 版数の表示も変わらないため、切り替わっていないことに気づく手がかりが無い。
+取得元を切り替えたら、続けて導入の操作を実行する。
 
 ```bash
 # 常用する利用者（正式版）— これまでと同じ。ref を指定しない
 claude plugin marketplace add https://github.com/devbasex/ai-plugins
-codex plugin marketplace add devbasex/ai-plugins
+claude plugin install ndf@ai-plugins
 
-# 検証に参加する利用者（開発版）— ref を明示する
-claude plugin marketplace add https://github.com/devbasex/ai-plugins.git#develop
-codex plugin marketplace add devbasex/ai-plugins --ref develop
+codex plugin marketplace add devbasex/ai-plugins
+codex plugin add ndf@ai-plugins
 ```
+
+```bash
+# 検証に参加する利用者（開発版）— ref を明示し、続けて導入する
+claude plugin marketplace add https://github.com/devbasex/ai-plugins.git#develop
+claude plugin install ndf@ai-plugins   # 導入済みなら claude plugin update ndf@ai-plugins
+
+# Codex は同名の取得元の上書きを拒むため、先に外す
+codex plugin marketplace remove ai-plugins
+codex plugin marketplace add devbasex/ai-plugins --ref develop
+codex plugin add ndf@ai-plugins
+```
+
+`claude plugin update` は「restart required to apply」と表示する。実体を入れ替えるだけで、
+動いているセッションには反映されない。
 
 ref の書き方は `owner/repo@ref` と `git-url#ref` の 2 つで、
 [公式ドキュメント](https://code.claude.com/docs/en/plugin-marketplaces)に記載がある。
@@ -177,9 +205,15 @@ semver の順序で除外されるのは、プラグイン間の依存解決（`
 
 **ローカルのディレクトリを同じ名前でマーケットプレイスとして追加しない。** 登録の鍵は取得元では
 なく `marketplace.json` の `name` で、**1 つの名前につき 1 つしか登録できない**（公式ドキュメントに
-"Each user can register only one marketplace per name" とある）。そのため
-`claude plugin marketplace add <ローカルパス>` は `--scope local` を指定しても**利用者の取得元を
-置き換える**。続けて `marketplace remove` すると clone と導入記録まで消える（実機で踏んだ）。
+"Each user can register only one marketplace per name" とある）。
+
+**同名の登録に対する振る舞いはランタイムで違う。** どちらも、いま登録している取得元を
+別のものへ向けることになる。
+
+| ランタイム | 同名で別の取得元を追加したとき | `marketplace remove` が消すもの |
+| --- | --- | --- |
+| Claude Code | `claude plugin marketplace add <ローカルパス>` は `--scope local` を指定しても利用者の取得元を置き換える（実機で踏んだ） | clone と導入記録まで消える（実機で踏んだ） |
+| Codex | `marketplace 'ai-plugins' is already added from a different source; remove it before adding this source` を返して拒む | clone だけを消す。導入の記録（`~/.codex/config.toml` の `[plugins."ndf@ai-plugins"]`）は残るため、`add` し直せば有効な状態に戻る |
 
 名前が違えば併存できるが、**同名のプラグインが両方とも有効になる**ため、どちらが使われるかが
 定まらず検証の手段にならない。手元での確認は次のどちらかで行う。どちらも取得元を書き換えない。
