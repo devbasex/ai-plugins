@@ -45,21 +45,23 @@ def _run_pytest(target: str, *, path: str | None = None, env_extra: dict | None 
     )
 
 
-def _path_without(*names: str) -> str:
-    """指定したコマンドだけを外した `PATH` を、一時ディレクトリの symlink で組み立てる。"""
-    import tempfile
+def _path_without(tmp_path: Path, *names: str) -> str:
+    """指定したコマンドだけを外した `PATH` を、`tmp_path` の symlink で組み立てる。
 
-    tmp = tempfile.mkdtemp(prefix="ndf-path-")
+    置き場所を `tmp_path` にすると、テストが終わったときに pytest が片付ける。
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
     keep = ["python3", sys.executable.rsplit("/", 1)[-1], "bash", "jq", "git", "sh", "env", "uv"]
     for name in keep:
         if name in names:
             continue
         found = shutil.which(name)
         if found:
-            link = Path(tmp) / name
+            link = bin_dir / name
             if not link.exists():
                 link.symlink_to(found)
-    return tmp
+    return str(bin_dir)
 
 
 def test_the_root_conftest_declares_the_plugin() -> None:
@@ -92,17 +94,17 @@ def test_no_bundle_skips_itself_when_a_command_is_missing() -> None:
 
 
 @pytest.mark.skipif(shutil.which("jq") is None, reason="jq を外した PATH を組み立てられない")
-def test_a_missing_command_fails_the_collection() -> None:
+def test_a_missing_command_fails_the_collection(tmp_path: Path) -> None:
     """前提のコマンドが無ければ、読み飛ばさずに 0 以外の終了コードで終わる。"""
-    result = _run_pytest(BUNDLE, path=_path_without("jq"))
+    result = _run_pytest(BUNDLE, path=_path_without(tmp_path, "jq"))
 
     assert result.returncode != 0
     assert "jq" in result.stdout + result.stderr
 
 
 @pytest.mark.skipif(shutil.which("jq") is None, reason="jq を外した PATH を組み立てられない")
-def test_the_failure_names_the_bundle_and_the_command() -> None:
-    result = _run_pytest(BUNDLE, path=_path_without("jq"))
+def test_the_failure_names_the_bundle_and_the_command(tmp_path: Path) -> None:
+    result = _run_pytest(BUNDLE, path=_path_without(tmp_path, "jq"))
     out = result.stdout + result.stderr
 
     assert BUNDLE in out
@@ -110,11 +112,11 @@ def test_the_failure_names_the_bundle_and_the_command() -> None:
 
 
 @pytest.mark.skipif(shutil.which("jq") is None, reason="jq を外した PATH を組み立てられない")
-def test_the_opt_in_skips_instead_of_failing() -> None:
+def test_the_opt_in_skips_instead_of_failing(tmp_path: Path) -> None:
     """指定したときだけ、これまでどおり読み飛ばす。"""
     result = _run_pytest(
         BUNDLE,
-        path=_path_without("jq"),
+        path=_path_without(tmp_path, "jq"),
         env_extra={"NDF_TESTS_ALLOW_MISSING_COMMANDS": "1"},
     )
 
@@ -122,9 +124,9 @@ def test_the_opt_in_skips_instead_of_failing() -> None:
     assert "skipped" in result.stdout
 
 
-def test_a_bundle_outside_the_table_is_not_checked() -> None:
+def test_a_bundle_outside_the_table_is_not_checked(tmp_path: Path) -> None:
     """一覧に無い束だけを収集したときは、前提を確かめない。"""
-    result = _run_pytest("plugins/ndf/skills/cross-review/tests", path=_path_without("jq"))
+    result = _run_pytest("plugins/ndf/skills/cross-review/tests", path=_path_without(tmp_path, "jq"))
 
     assert result.returncode == 0, result.stdout + result.stderr
 
