@@ -22,21 +22,24 @@
 | [#158](https://github.com/devbasex/ai-plugins/issues/158) | モデルのアンサンブル利用の優位性を示す研究 | [issue-158-llm-ensemble-for-agentic-development.md](issue-158-llm-ensemble-for-agentic-development.md) |
 | [#159](https://github.com/devbasex/ai-plugins/issues/159) | 研究データの収集基盤と OSS 運用の整備 | [issue-159-telemetry-and-oss-governance.md](issue-159-telemetry-and-oss-governance.md) |
 | [#181](https://github.com/devbasex/ai-plugins/issues/181) | playwright-evidence の手順が置換対象を狭く説明している | 未作成 |
-| [#182](https://github.com/devbasex/ai-plugins/issues/182) | pytest のテストが CI で実行されていない | 未作成 |
+| [#182](https://github.com/devbasex/ai-plugins/issues/182) | pytest のテストが CI で実行されていない | [parallel-batch-03/01-issue-182.md](parallel-batch-03/01-issue-182.md) |
 | [#193](https://github.com/devbasex/ai-plugins/issues/193) | worktree の手順が参照する `$NDF_SCRIPTS` が定義されていない | 未作成 |
-| [#196](https://github.com/devbasex/ai-plugins/issues/196) | cross-review: 結果を残さずタイムアウトしたとき収束と判定される | 未作成 |
+| [#196](https://github.com/devbasex/ai-plugins/issues/196) | cross-review: 結果を残さずタイムアウトしたとき収束と判定される | [parallel-batch-03/02-issue-196.md](parallel-batch-03/02-issue-196.md) |
 | [#197](https://github.com/devbasex/ai-plugins/issues/197) | `wt_extract_write_target` がファイル記述子の番号を書き込み先に拾う | 未作成 |
 | [#201](https://github.com/devbasex/ai-plugins/issues/201) | `wt_extract_write_target` が関数定義・case・前置リダイレクトで誤る | 未作成 |
-| [#209](https://github.com/devbasex/ai-plugins/issues/209) | 版を上げても説明文書の本文の版数が古いまま残る | 未作成 |
+| [#209](https://github.com/devbasex/ai-plugins/issues/209) | 版を上げても説明文書の本文の版数が古いまま残る | [parallel-batch-03/04-issue-209.md](parallel-batch-03/04-issue-209.md) |
 | [#214](https://github.com/devbasex/ai-plugins/issues/214) | gemini CLI の呼び出しと記述を agy CLI へ置き換える | 未作成 |
 | [#215](https://github.com/devbasex/ai-plugins/issues/215) | 対応ランタイムへ agy CLI を追加し、4 ランタイム構成にする | 未作成 |
 | [#216](https://github.com/devbasex/ai-plugins/issues/216) | cross-refactoring: 参加する 4 CLI を同じ扱いにする | 未作成 |
-| [#217](https://github.com/devbasex/ai-plugins/issues/217) | cross-review のレビュー用作業ツリーが PR の head へ同期されない | 未作成 |
+| [#217](https://github.com/devbasex/ai-plugins/issues/217) | cross-review のレビュー用作業ツリーが PR の head へ同期されない | [parallel-batch-03/03-issue-217.md](parallel-batch-03/03-issue-217.md) |
 | [#221](https://github.com/devbasex/ai-plugins/issues/221) | 工程表にある工程を飛ばしても気づく手立てが無い | 未作成 |
 | [#224](https://github.com/devbasex/ai-plugins/issues/224) | 「書く前に実行して確かめる」の対象に外部コマンドが入っていない | 未作成 |
 
-「未作成」の 16 件は、着手するときに `/ndf:implementation-plan` で
+「未作成」の 12 件は、着手するときに `/ndf:implementation-plan` で
 `issues/issue-<番号>-<内容>.md` を 1 ファイル作る。
+
+並行して進める複数の課題は `parallel-batch-<連番>/` にまとめる。全体指示書（`00-overview.md`）が
+担当どうしの境界とマージの順序を定め、担当ごとの指示書が受け入れ条件と設計を持つ。
 
 ## ファイル名の付け方
 
