@@ -1,0 +1,68 @@
+name: Python tests
+
+# 起動の条件は pytest . の収集範囲に合わせる。テストの置き場所（plugins / scripts /
+# tests）に加えて、収集の仕方そのものを変える根の設定ファイルも対象へ入れる。
+# 根の conftest.py・pytest.ini・pyproject.toml は今は無いが、足した PR でこの
+# ワークフローが起動しないと、収集が減ったことに気づけない
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/pytest.yml"
+      - "plugins/**"
+      - "scripts/**"
+      - "tests/**"
+      - "conftest.py"
+      - "pytest.ini"
+      - "pyproject.toml"
+  push:
+    branches:
+      - main
+      - develop
+      - "release/**"
+    paths:
+      - ".github/workflows/pytest.yml"
+      - "plugins/**"
+      - "scripts/**"
+      - "tests/**"
+      - "conftest.py"
+      - "pytest.ini"
+      - "pyproject.toml"
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Install uv
+        run: python3 -m pip install --upgrade uv
+      # 無いと収集されないまま終了コード 0 で終わるため、先に確かめる
+      - name: Check the commands the tests need
+        run: |
+          for c in bash jq git; do
+            command -v "$c" >/dev/null || { echo "missing command: $c" >&2; exit 1; }
+          done
+      # git commit を実行するテストがある。実行環境には身元が設定されていない
+      - name: Configure the git identity the tests need
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+      - run: uv run --with pytest pytest . --ignore=plugins/playwright-kit -q
+
+  pytest-playwright-kit:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugins/playwright-kit/skills/playwright-kit-ops
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Install uv
+        run: python3 -m pip install --upgrade uv
+      # 起点をこのディレクトリへ置く。pyproject.toml が対象と表示を決める
+      - run: uv run pytest
