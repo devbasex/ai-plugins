@@ -408,6 +408,68 @@ def test_version_section_heading_removed_fails(tree: Path) -> None:
     assert "AGENTS.md" in output_of(result)
 
 
+def test_version_section_stops_at_a_higher_level_heading(tree: Path) -> None:
+    """節の直後が上位の見出し（`## `）でも区間を抜ける。
+
+    自身と同じ深さの見出しだけで区切ると、次が `## ` のときに区間が閉じない。閉じなければ
+    走査は文書の末尾まで続き、変更履歴に並ぶ前の版の版数を現行版と比べてしまう。
+    """
+    edit(agents_md(tree), "### 検査が突き合わせる箇所\n", "## 検査が突き合わせる箇所\n")
+    body = agents_md(tree).read_text(encoding="utf-8")
+    assert "v8.5.4" in body and "8.4.0" in body
+    result = run_check(tree)
+    assert result.returncode == 0, output_of(result)
+
+
+def add_code_fence_to_version_section(tree: Path) -> None:
+    """版の付け方の節の先頭へ、シェルのコメントを含む実行例を置く。"""
+    edit(
+        agents_md(tree),
+        "### 版の付け方と開発版の配布\n",
+        "### 版の付け方と開発版の配布\n"
+        "\n"
+        "```bash\n"
+        "# 常用する利用者（正式版）\n"
+        "claude plugin marketplace add https://example.invalid/fixture\n"
+        "```\n",
+    )
+
+
+def test_code_fence_comment_does_not_close_the_section(tree: Path) -> None:
+    """囲みの中の `# ` 始まりで区間を閉じない（実物の節は実行例を含む）。"""
+    add_code_fence_to_version_section(tree)
+    result = run_check(tree)
+    assert result.returncode == 0, output_of(result)
+
+
+def test_stale_example_after_a_code_fence_is_still_found(tree: Path) -> None:
+    """囲みより後ろも走査の対象に残る。閉じてしまうと後続の版数を見落とす。"""
+    add_code_fence_to_version_section(tree)
+    add_to_version_section(tree, "- 前の版の例。`9.2.1` はもう使わない")
+    result = run_check(tree)
+    assert result.returncode != 0
+    out = output_of(result)
+    assert "9.2.1" in out and "9.3.0" in out
+
+
+# --- 突き合わせ先の版数そのものが読めないとき ---
+
+
+@pytest.mark.parametrize("version", ["1.0", "9.3", "v9.3.0", "９.３.０", ""])
+def test_malformed_plugin_version_is_reported_as_a_failure(tree: Path, version: str) -> None:
+    """`plugin.json` の版数が semver の形でなければ、例外ではなく検査の失敗として出す。
+
+    途中で例外を投げると他の記載の判定まで巻き添えで消える。読めないこと自体を 1 件の
+    食い違いとして数え、他の検査と同じ出力の形で返す。
+    """
+    bump_plugin_version(tree, version)
+    result = run_check(tree)
+    out = output_of(result)
+    assert result.returncode != 0
+    assert "Traceback" not in out
+    assert "plugin.json" in out and "ERROR: " in out
+
+
 def test_versions_outside_the_section_do_not_fail(tree: Path) -> None:
     """変更履歴・履歴の説明にある古い版数を誤検出しない。"""
     body = agents_md(tree).read_text(encoding="utf-8")

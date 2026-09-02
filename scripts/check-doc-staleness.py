@@ -69,6 +69,10 @@ NAME_SEPARATOR = re.compile(r"[,、]")
 
 # 版数は接尾辞まで 1 つの値として拾う。`9.6.0-dev.1` を `9.6.0` と `1` に割らないためである。
 VERSION = r"(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)"
+# 突き合わせ先そのものの形を確かめる。`base_of` は数字 3 つに割れることを前提にしており、
+# `1.0` のような値が来ると例外で検査全体が止まる。読み取りの時点で弾き、他の記載の判定を
+# 巻き添えにせず 1 件の食い違いとして出す。
+VERSION_VALUE = re.compile(VERSION)
 
 # --- 現行版を指す記載（G〜M）---
 #
@@ -83,7 +87,12 @@ CODEX_LIST_OUTPUT = re.compile(FAMILY + r"@ai-plugins\s+installed, enabled\s+" +
 
 # J: 区間の検査。この見出しから次の `### ` の直前までに並ぶ版数を、現行版の基底と比べる。
 VERSION_SECTION_HEADING = "### 版の付け方と開発版の配布"
-SECTION_HEADING = re.compile(r"^###\s")
+# 終端は自身と同じか上位の見出しで取る。`^###` だけで区切ると、次が `## ` のときに区間が
+# 閉じず、そのまま変更履歴まで走査して前の版の版数を現行版と比べてしまう。
+SECTION_HEADING = re.compile(r"^#{1,3}\s")
+# 囲みの中の `# ` 始まりはシェルのコメントであって見出しではない。囲みを跨いで数えると、
+# 節の途中の実行例で区間が切れる。
+CODE_FENCE = re.compile(r"^\s*(?:```|~~~)")
 # 前後を塞ぐのは、`codex-cli 0.146.1` のような他のソフトの版数を半端に拾わないためである。
 SECTION_VERSION = re.compile(r"(?<![\w.])v?" + VERSION + r"(?![\w.])")
 
@@ -199,6 +208,12 @@ def plugin_version(root: Path, report: Report) -> str | None:
     if not isinstance(version, str):
         report.add_source(f"{PLUGIN_JSON} に version がない")
         return None
+    if not VERSION_VALUE.fullmatch(version):
+        report.add_source(
+            f"{PLUGIN_JSON} の version が `<major>.<minor>.<patch>` の形でない"
+            f"（記載: {version}）"
+        )
+        return None
     return version
 
 
@@ -223,6 +238,9 @@ def base_of(version: str) -> tuple[int, int, int]:
 
     整数の組にするのは、桁数によらず順序を揃えるためである。文字列のままだと
     `"9.10.0" < "9.9.0"` が真になり、minor か patch が 10 に達した時点で順序を取り違える。
+
+    渡る値が数字 3 つに割れることは呼び出し側が保証する。文書側の版数は `SECTION_VERSION`
+    が、`plugin.json` の版数は `plugin_version` が形を確かめてから渡す。
     """
     major, minor, patch = version.split("-", 1)[0].split(".")
     return int(major), int(minor), int(patch)
@@ -352,6 +370,8 @@ def check_version_section(body: str, version: str | None, report: Report) -> Non
     **接尾辞は基底を取り出す時点で捨てる。** semver の順序では `9.6.0-dev.1` が `9.6.0`
     より小さいため、接尾辞まで見て比べると節の内容がそのまま失敗になる。接尾辞の
     付け忘れ・外し忘れをここでは見ない（`AGENTS.md` に書かれているとおりである）。
+
+    **区間の終わりは、自身と同じか上位の見出しである。** 囲みの中は見出しとして数えない。
     """
     lines = body.splitlines()
     start = next(
@@ -361,8 +381,11 @@ def check_version_section(body: str, version: str | None, report: Report) -> Non
     values: list[str] = []
     numbers: list[int] = []
     if start is not None:
+        in_fence = False
         for number, line in enumerate(lines[start + 1 :], start + 2):
-            if SECTION_HEADING.match(line):
+            if CODE_FENCE.match(line):
+                in_fence = not in_fence
+            elif not in_fence and SECTION_HEADING.match(line):
                 break
             for found in SECTION_VERSION.finditer(line):
                 values.append(found.group(1))
