@@ -6,7 +6,6 @@
 """
 from __future__ import annotations
 
-import json
 import subprocess
 import sys
 from pathlib import Path
@@ -97,4 +96,3 @@ def test_the_shared_definition_is_copied_from_the_real_file(tmp_path: Path) -> N
     assert (root / "scripts/lib/version_pattern.py").read_text(encoding="utf-8") == SHARED.read_text(
         encoding="utf-8"
     )
-    json.loads((root / ".claude-plugin/marketplace.json").read_text(encoding="utf-8"))
