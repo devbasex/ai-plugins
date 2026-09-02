@@ -16,16 +16,12 @@
 - **`main` / `develop` への直接コミット・プッシュ禁止。** Pull Request の宛先は
   **`develop`**（開発版チャネル）。`main`（正式版チャネル）へ進めるのは配布の工程だけ
   （「版の付け方と開発版の配布」）
-  - **`develop` を作るまでは、宛先は `main` である。** この規則は `develop` が
-    存在してから効く。作る前に片付ける項目は #202 にある。移行が済むまで、`develop`
-    宛にしようとすると存在しないブランチを指すことになる
-  - **`develop` を作るときは `.ndf/worktree.json` に `base_branch` を書く。** 作業ツリーの
-    起点と、主ディレクトリの追従先と、宛先の検査がこの宣言を読む。書かなければどれも
+  - **起点は `.ndf/worktree.json` の `base_branch` が宣言する。** 作業ツリーの起点と、
+    主ディレクトリの追従先と、宛先の検査がこの宣言を読む。宣言が無いリポジトリは
     既定ブランチのまま動く
   - **`--base develop` の付け忘れは継続的統合が塞ぐ。** `main` 宛の Pull Request は
     `develop` から出たものだけを通す（`scripts/check-pr-base.sh`）。判定は宣言に起点が
-    書かれていて、そのブランチが origin にあるときだけ働くため、**作る前に出す Pull Request は
-    そのまま通る**
+    書かれていて、そのブランチが origin にあるときだけ働く
 - **開発の変更は `.worktrees/<ブランチ名>` の作業ツリーの中で行う**（`/ndf:worktree`）。clone したディレクトリ（主ディレクトリ）は編集対象から外す
   - `issues/` `docs/` と各ランタイムの設定は主ディレクトリで編集してよい
   - 主ディレクトリの編集は拒否されない。案内が出ても操作は成立する
@@ -82,8 +78,7 @@ bash plugins/ndf/dev.kiro/install.sh --project <ディレクトリ> --yes
 位置へ fast-forward する。`main` へ直接コミットしない。
 
 **Pull Request のベースは `develop` である。** 既定ブランチが `main` であるため、`gh pr create`
-は指定しないと `main` を宛先にする。**`--base develop` を必ず付ける。** ただし
-**`develop` を作るまでは宛先が `main` であるため、この指定は付けない**（「Git運用ルール」を参照）。
+は指定しないと `main` を宛先にする。**`--base develop` を必ず付ける。**
 
 **`main` を進めるのが `release` の「本番への配布」である。** そちらには承認が要る。`develop`
 へのマージは「検証への配布」にあたり、承認なしで進めてよい（`/ndf:release`）。
