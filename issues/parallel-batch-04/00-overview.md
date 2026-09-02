@@ -29,14 +29,14 @@
 
 | 担当 | 課題 | ブランチ | 指示書 |
 | --- | --- | --- | --- |
-| A | 開発版チャネルの取得手順の記載を実機に合わせる（#263） | `docs/issue-263-install-steps` | 01-issue-263.md |
-| B | 版数の書式を 1 か所へ集め、配線テストの掴み方を直す（#258 / #256） | `fix/issue-258-version-pattern` | 02-issue-258-256.md |
-| C | `cross-review` の判定と巻き直しと振動検知（#261 / #244 / #246 / #245） | `fix/issue-261-cross-review` | 03-issue-261-244-246-245.md |
-| D | テストの収集と実行環境への依存（#232 / #233 / #235） | `fix/issue-232-test-collection` | 04-issue-232-233-235.md |
-| E | 工程の記録と、閉じ忘れる issue（#231 / #259） | `fix/issue-231-workflow-records` | 05-issue-231-259.md |
+| A | 開発版チャネルの取得手順の記載を実機に合わせる（#263） | `docs/issue-263-install-steps` | [01-issue-263.md](01-issue-263.md) |
+| B | 版数の書式を 1 か所へ集め、配線テストの掴み方を直す（#258 / #256） | `fix/issue-258-version-pattern` | [02-issue-258-256.md](02-issue-258-256.md) |
+| C | `cross-review` の判定と巻き直しと振動検知（#261 / #244 / #246 / #245） | `fix/issue-261-cross-review` | [03-issue-261-244-246-245.md](03-issue-261-244-246-245.md) |
+| D | テストの収集と実行環境への依存（#232 / #233 / #235） | `fix/issue-232-test-collection` | [04-issue-232-233-235.md](04-issue-232-233-235.md) |
+| E | 工程の記録と、閉じ忘れる issue（#231 / #259） | `fix/issue-231-workflow-records` | [05-issue-231-259.md](05-issue-231-259.md) |
 
-**担当ごとの指示書は着手時に作る。** 受け入れ条件・設計・決定の記録・テスト設計を書いてから
-実装へ入る（バッチ 03 と同じ進め方）。
+各担当の指示書は受け入れ条件・設計・決定の記録・テスト設計を持つ。実装へ入る前にこの 4 つを
+書き終える（バッチ 03 と同じ進め方）。
 
 ## モードの判定
 
@@ -58,17 +58,19 @@
 | 担当 | 書き換えてよいパス | 触らないパス |
 | --- | --- | --- |
 | A | `AGENTS.md` / `plugins/ndf/README.md` | `scripts/` / `plugins/ndf/skills/` / `.github/` |
-| B | `scripts/check-doc-staleness.py` / `scripts/validate-runtime-plugins.sh` / `scripts/tests/` | `AGENTS.md` / `plugins/` / `.github/` |
+| B | `scripts/check-doc-staleness.py` / `scripts/validate-runtime-plugins.sh` / `scripts/lib/` / `scripts/tests/` | `AGENTS.md` / `plugins/` / `.github/` |
 | C | `plugins/ndf/skills/cross-review/` | `scripts/` / `AGENTS.md` / `.github/` / 他の Skill |
-| D | `.github/workflows/` / `plugins/playwright-kit/skills/playwright-kit-ops/tests/` / `plugins/ndf/skills/cross-refactoring/tests/` | `scripts/` / `AGENTS.md` / `cross-review/` |
-| E | `plugins/ndf/scripts/lib/projects-common.sh` / `plugins/ndf/skills/merged/` / `plugins/ndf/skills/development-workflow/references/` | `scripts/` / `AGENTS.md` / `cross-review/` / `.github/` |
+| D | `.github/workflows/` / リポジトリの根の `conftest.py` / `.gitignore` / `plugins/playwright-kit/skills/playwright-kit-ops/` / `plugins/ndf/skills/cross-refactoring/tests/` / `plugins/ndf/skills/worktree/tests/conftest.py` / `plugins/ndf/skills/development-workflow/tests/conftest.py` / `scripts/tests/` の読み飛ばしの指定（担当 B のマージ後） | `scripts/` の読み飛ばしの指定以外 / `AGENTS.md` / `cross-review/` |
+| E | `plugins/ndf/scripts/lib/projects-common.sh` / `plugins/ndf/skills/merged/` / `plugins/ndf/skills/development-workflow/references/` / `development-workflow/tests/` の新しいファイル | `scripts/` / `AGENTS.md` / `cross-review/` / `.github/` / `development-workflow/tests/conftest.py` |
 
 ### 担当 A と B は `AGENTS.md` で接する
 
 **`AGENTS.md` は担当 A が持つ。** 担当 B の #258（版数の書式の一元化）で `AGENTS.md` の
 「検査が突き合わせる 13 箇所」の記載が古くなる場合は、**担当 A のマージ後に取り込んでから直す**。
 
-**マージの順序は A → B とする。**
+**マージの順序は A → B → D とする。** 担当 D は `scripts/tests/` にある読み飛ばしの指定を
+外すため、担当 B のマージ後に起点を取り込んでから手を付ける。担当 C と E は他の担当と
+接しないため、順序を持たない。
 
 ### 担当 C は `SKILL.md` の行数に注意する
 
