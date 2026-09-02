@@ -1203,12 +1203,20 @@ def cmd_init(args: argparse.Namespace) -> None:
     print("RESUMED=0")
 
 
-def _is_pass(intent: str | None, severity: dict[str, int] | None) -> bool:
-    """1 者分の判定が pass かどうか。
+AGENTS = ("codex", "gemini")
 
-    `APPROVE` / `SKIP` は pass。`COMMENT` は重大な指摘が無いときだけ pass とする。
+NO_RESULT = "NO_RESULT"
+
+
+def _is_pass(intent: str | None, severity: dict[str, int] | None) -> bool:
+    """1 レビュアー分の判定が pass かどうか。
+
+    pass は `APPROVE` と、重大な指摘が無い `COMMENT` だけである。指定によるスキップ
+    （`--only`）は `_round_passes` が短絡して扱うため、ここへは届かない。結果を残さな
+    かったレビュアー（`NO_RESULT`）は pass にしない。レビューが行われていないのに、
+    行われて承認されたのと同じ出口へ進むためである。
     """
-    if intent in ("APPROVE", "SKIP"):
+    if intent == "APPROVE":
         return True
     if intent == "COMMENT":
         sev = severity or {}
@@ -1216,16 +1224,43 @@ def _is_pass(intent: str | None, severity: dict[str, int] | None) -> bool:
     return False
 
 
+def _skipped_by_only(agent: str, only: str | None) -> bool:
+    """`--only` の指定でそのレビュアーを起動しなかったかどうか。"""
+    return bool(only) and only != agent
+
+
+def _agent_intent(round_entry: dict[str, Any], agent: str, only: str | None) -> str:
+    """そのラウンドに記録されたレビュアーの判定を読む。
+
+    記録が無いときの既定値は、指定によるスキップなら `SKIP`、そうでなければ
+    `NO_RESULT` になる。**この 2 つは別の事象である。**
+    """
+    entry = round_entry.get(agent) or {}
+    default = "SKIP" if _skipped_by_only(agent, only) else NO_RESULT
+    return entry.get("intent") or default
+
+
+def _no_result_agents(round_entry: dict[str, Any], only: str | None) -> list[str]:
+    """そのラウンドで、起動したのに使える結果が残らなかったレビュアーを返す。"""
+    return [
+        a
+        for a in AGENTS
+        if not _skipped_by_only(a, only) and _agent_intent(round_entry, a, only) == NO_RESULT
+    ]
+
+
 def _round_passes(round_entry: dict[str, Any], only: str | None) -> bool:
     """そのラウンドで新しく投稿された指摘だけを見た pass 判定。
 
     引き継いだ指摘はここでは見ない（`cmd_judge` が別に扱う）。
     """
-    codex = round_entry.get("codex") or {}
-    gemini = round_entry.get("gemini") or {}
-    codex_pass = (only == "gemini") or _is_pass(codex.get("intent", "SKIP"), codex.get("by_severity"))
-    gemini_pass = (only == "codex") or _is_pass(gemini.get("intent", "SKIP"), gemini.get("by_severity"))
-    return codex_pass and gemini_pass
+    for agent in AGENTS:
+        if _skipped_by_only(agent, only):
+            continue
+        entry = round_entry.get(agent) or {}
+        if not _is_pass(_agent_intent(round_entry, agent, only), entry.get("by_severity")):
+            return False
+    return True
 
 
 def _guard_previous_round(st: dict[str, Any], prev: dict[str, Any]) -> None:
@@ -1251,7 +1286,11 @@ def _guard_previous_round(st: dict[str, Any], prev: dict[str, Any]) -> None:
     verdict = prev.get("verdict")
     if verdict is None:
         # 判定の結果を持たない古い状態ファイルは、保存された重要度から判定し直す。
-        verdict = "approved" if _round_passes(prev, st.get("only")) else "changes_requested"
+        # 項目が欠けたラウンドは結果なしであり、修正の記録を求める対象ではない。
+        if _no_result_agents(prev, st.get("only")):
+            verdict = "no_result"
+        else:
+            verdict = "approved" if _round_passes(prev, st.get("only")) else "changes_requested"
     fix = prev.get("fix")
     if verdict == "changes_requested" and not fix:
         die(
@@ -1554,24 +1593,73 @@ def cmd_unresolved_threads(args: argparse.Namespace) -> None:
         info(f"- {t['id']} {t.get('path', '')}:{t.get('line', '')}")
 
 
+def _record_no_result(pr: int, agent: str, reason: str) -> None:
+    """使える結果が残らなかったことを、そのラウンドへ残す。
+
+    判定（`cmd_judge`）はこの記録を読んで、起動し直しか中断かを決める。記録が無い
+    ラウンドも結果なしとして読むため、ここで書けなかった場合も収束はしない。
+
+    状態ファイルを読めないときとラウンドがまだ無いときは、何も書かずに戻る。呼び出し
+    元はこの直後に die するため、ここで新たに止める理由が無い。
+    """
+    path = _state_path(pr)
+    if not path.exists():
+        return
+    try:
+        st = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    if not isinstance(st, dict) or not st.get("rounds"):
+        return
+    st["rounds"][-1][agent] = {
+        "intent": NO_RESULT,
+        "no_result_reason": reason,
+        "posted_as": None,
+        "comments": None,
+        "review_url": None,
+        "by_severity": {},
+    }
+    _save(pr, st)
+
+
+def _die_no_result(pr: int, agent: str, reason: str, msg: str, code: int = 1) -> None:
+    """結果なしをラウンドへ残してから止める。終了コードは現行のまま変えない。"""
+    _record_no_result(pr, agent, reason)
+    die(msg, code=code)
+
+
 def cmd_read_result(args: argparse.Namespace) -> None:
-    """Step 2.5 — codex/gemini の result.json を state にマージ。"""
+    """Step 2.5 — codex/gemini の result.json を state にマージ。
+
+    使える結果が残らなかったときは、`NO_RESULT` と理由をラウンドへ残してから止める。
+    終了コードは現行のまま（無い・判定の値を持たないときは 1、JSON として読めない
+    ときは 3）で、進む先を決めるのは次の判定である。
+    """
     agent = args.agent
     pr = args.pr
     rfile = pathlib.Path(args.file or _resolve_tmp_dir(pr) / f"{agent}-review-pr{pr}-result.json")
     if not rfile.exists() or rfile.stat().st_size == 0:
-        die(f"{agent}: result 未生成 ({rfile})")
+        _die_no_result(pr, agent, "missing", f"{agent}: result 未生成 ({rfile})")
 
     try:
         r = json.loads(rfile.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        die(f"{agent}: result.json の parse に失敗 ({rfile}): {exc}", code=3)
+        _die_no_result(
+            pr,
+            agent,
+            "unparsable",
+            f"{agent}: result.json の parse に失敗 ({rfile}): {exc}",
+            code=3,
+        )
 
     # gemini round 4 指摘: result.json は本来 dict だが、launcher の出力バグや
     # 別実行の残骸で list / str が入り込むと `r.get(...)` で AttributeError になる。
     # 不正な review result はバグなので即時 die(code=3) で停止させる。
     if not isinstance(r, dict):
-        die(
+        _die_no_result(
+            pr,
+            agent,
+            "unparsable",
             f"{agent}: result.json が dict ではない "
             f"({rfile}, type={type(r).__name__})。review launcher の出力形式不正。",
             code=3,
@@ -1586,9 +1674,12 @@ def cmd_read_result(args: argparse.Namespace) -> None:
         comments = r.get("comment_count")
 
     if intent is None:
-        die(
+        _die_no_result(
+            pr,
+            agent,
+            "no_verdict",
             f"{agent}: result.json に event / intent フィールドが無い ({rfile})。"
-            " launcher prompt のスキーマ違反の可能性。"
+            " launcher prompt のスキーマ違反の可能性。",
         )
 
     st = _load(pr)
@@ -1627,7 +1718,10 @@ def cmd_read_result(args: argparse.Namespace) -> None:
 def cmd_judge(args: argparse.Namespace) -> None:
     """Step 3 — intent ベース pass 判定。
 
-    Exit code: 0=approved, 2=continue, 1=error
+    出口は 4 つある。**結果を取り込めていないラウンドは、収束も修正も決められない。**
+    そのため結果なしの検査を、通ったかどうかの判定より先に置く。
+
+    Exit code: 0=approved, 2=continue, 7=結果なしのため起動し直す, 1=error
     """
     pr = args.pr
     st = _load(pr)
@@ -1636,8 +1730,8 @@ def cmd_judge(args: argparse.Namespace) -> None:
     last = st["rounds"][-1]
     only = st.get("only")
 
-    codex_intent = (last.get("codex") or {}).get("intent", "SKIP")
-    gemini_intent = (last.get("gemini") or {}).get("intent", "SKIP")
+    codex_intent = _agent_intent(last, "codex", only)
+    gemini_intent = _agent_intent(last, "gemini", only)
     round_passes = _round_passes(last, only)
 
     carried = _carried_over_pending(st)
@@ -1646,6 +1740,32 @@ def cmd_judge(args: argparse.Namespace) -> None:
     print(f"CODEX_INTENT={codex_intent}")
     print(f"GEMINI_INTENT={gemini_intent}")
     print(f"CARRIED_OVER_THREADS={carried_count}")
+
+    no_result = _no_result_agents(last, only)
+    if no_result:
+        last["verdict"] = "no_result"
+        relaunched = last.get("relaunched") or []
+        pending = [a for a in no_result if a not in relaunched]
+        if not pending:
+            # 2 度続けて結果が残らないのは、対象や負荷ではなく実行環境の側の事象である。
+            st["final"] = "error"
+            st["ended_at"] = _now()
+            _save(pr, st)
+            die(
+                f"起動し直した後も結果が残りませんでした: {' '.join(no_result)}。"
+                " 実行環境の側の問題として中断します。最終スイープを通してから"
+                "完了報告へ進んでください",
+                code=1,
+            )
+        last["relaunched"] = relaunched + pending
+        _save(pr, st)
+        print(f"RELAUNCH_AGENTS='{' '.join(pending)}'")
+        print(f"RELAUNCH_TARGET={'both' if len(pending) == 2 else pending[0]}")
+        info(
+            f"→ 結果を残さなかったレビュアーがいる: {' '.join(pending)}。"
+            "同じラウンドで 1 度だけ起動し直す。"
+        )
+        sys.exit(7)
 
     if round_passes and carried is None:
         last["verdict"] = "approved"

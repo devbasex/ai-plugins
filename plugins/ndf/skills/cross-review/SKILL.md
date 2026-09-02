@@ -166,7 +166,9 @@ flowchart TD
     Codex --> Decide{"判定 (intent ベース)"}
     Gemini --> Decide
 
-    Decide -->|両方 APPROVE / SKIP| Approved([final = approved]):::ok
+    Decide -->|"結果なし (2 度目は final = error)"| Relaunch["結果を残さなかった側だけ<br/>同じラウンドで 1 度起動し直す"]
+    Relaunch --> Decide
+    Decide -->|"両方 APPROVE / --only で外した側"| Approved([final = approved]):::ok
     Decide -->|一方でも REQUEST_CHANGES| Fix["Agent (general-purpose)<br/>/ndf:fix &lt;PR&gt; --defer-nit を worktree 内で実行<br/>・critical/major/minor 修正 + push<br/>・reply + resolveReviewThread<br/>・deferred/rejected は reply のみ<br/>→ $TMP_DIR/fix-pr&lt;#&gt;-result.json"]
 
     Fix --> Check{収束チェック}
@@ -194,16 +196,13 @@ flowchart TD
 各ステップの詳細は `docs/` 参照。メインは以下のテンプレートで scripts/ を呼ぶだけ:
 
 ```bash
-# SKILL_DIR と SCRIPTS の決め方は docs/01-state-and-review.md の冒頭にある。
-# 同じ 17 行を先に実行して SCRIPTS を決めてから、以下を続ける。
+# SKILL_DIR と SCRIPTS の決め方は docs/01 の冒頭にある。同じ 17 行を先に実行する。
 
-# STATE_PR は state.json のキー (= 最初に init した PR 番号)。
-# rotation 後も state.json のパスは変わらないため、scripts/ への引数には常に
-# STATE_PR を渡す。「現在レビュー中の PR」は state.json の current_pr を内部参照する。
+# STATE_PR は state.json のキー (= 最初に init した PR 番号)。rotation 後もパスは
+# 変わらないため常に STATE_PR を渡す。現在の PR は state.json の current_pr を見る。
 STATE_PR=$INITIAL_PR
 
-# ROTATE_MODE は引数 --rotate-mode (default=light) から取得。light なら Step 6b で
-# Agent (general-purpose) を起動して新 PR の title/body を生成する。
+# ROTATE_MODE は引数 --rotate-mode (default=light)。light は Step 6b で title/body を生成。
 ROTATE_MODE=${ROTATE_MODE:-light}
 
 # Step 0: state 初期化 / 再開
@@ -226,15 +225,22 @@ while :; do
   # Step 2: 並列レビュー
   [ "$ONLY" != "gemini" ] && "$SCRIPTS/launch-codex.sh"  "$STATE_PR" "$ROUND"
   [ "$ONLY" != "codex"  ] && "$SCRIPTS/launch-gemini.sh" "$STATE_PR" "$ROUND"
-  # 監視: 既定 timeout=7 分 / stall=3 分。失敗時は対象プロセスを kill して返す。
-  "$SCRIPTS/monitor.py" "$STATE_PR" "${ONLY:-both}" || handle_review_failure $?
+  # 監視: 既定 timeout=7 分 / stall=3 分。失敗時は対象プロセスを kill して返す。監視と取り込みの
+  #   終了コードは読まない。結果なしは NO_RESULT として state に残り、Step 3 が受け取る（docs/01）。
+  "$SCRIPTS/monitor.py" "$STATE_PR" "${ONLY:-both}" || true
+  [ "$ONLY" != "gemini" ] && "$SCRIPTS/state.py" read-result "$STATE_PR" codex  || true
+  [ "$ONLY" != "codex"  ] && "$SCRIPTS/state.py" read-result "$STATE_PR" gemini || true
 
-  [ "$ONLY" != "gemini" ] && "$SCRIPTS/state.py" read-result "$STATE_PR" codex
-  [ "$ONLY" != "codex"  ] && "$SCRIPTS/state.py" read-result "$STATE_PR" gemini
-
-  # Step 3: 判定 (0=approved/2=continue)。引き継いだ指摘が残っていれば、
-  #   両者が承認しても 2 を返して修正の工程へ回す。
-  if "$SCRIPTS/state.py" judge "$STATE_PR"; then break; fi
+  # Step 3: 判定 (0=収束 / 2=修正へ / 7=結果なし / 1=中断)。引き継いだ指摘が残っていれば、
+  #   両者が承認しても 2 を返して修正の工程へ回す。置換の終了コードは変数で受けてから読む。
+  JUDGE_VARS=$("$SCRIPTS/state.py" judge "$STATE_PR"); JUDGE_RC=$?; eval "$JUDGE_VARS"
+  if [ "$JUDGE_RC" -eq 7 ]; then  # 名前の出た担当だけを、同じラウンドで 1 度起動し直す
+    for a in $RELAUNCH_AGENTS; do "$SCRIPTS/launch-$a.sh" "$STATE_PR" "$ROUND"; done
+    "$SCRIPTS/monitor.py" "$STATE_PR" "$RELAUNCH_TARGET" || true
+    for a in $RELAUNCH_AGENTS; do "$SCRIPTS/state.py" read-result "$STATE_PR" "$a" || true; done
+    JUDGE_VARS=$("$SCRIPTS/state.py" judge "$STATE_PR"); JUDGE_RC=$?; eval "$JUDGE_VARS"
+  fi
+  case $JUDGE_RC in 0) break ;; 2) : ;; *) exit "$JUDGE_RC" ;; esac   # 1=結果なしのまま中断
 
   # Step 4: 振動検知 (4=oscillation)
   "$SCRIPTS/state.py" check-oscillation "$STATE_PR" || [ $? -eq 2 ] || exit 4
@@ -283,14 +289,11 @@ while :; do
 done
 
 # Step 7.5: 最終スイープ (必須) — どの終了経路 (approved / max_rounds / oscillation /
-#   error) でも、ループを抜けた直後に **メインが Agent(general-purpose) を起動** し、
-#   /ndf:fix $STATE_PR を再実行して残った open review thread を全て解消する。
-#   ⚠ bash 単体では Agent ツールを呼べないため、while ループを抜けたらメインが
-#   Step 7.5 の Agent を駆動し、$TMP_DIR/sweep-pr$STATE_PR-result.json を生成させる
-#   (プロンプトテンプレートは docs/02-fix-and-rotation.md Step 7.5)。
-#   最終 APPROVE ラウンドで投稿された minor/nit インラインコメントはループ内 fix を
-#   経由しないため、ここで拾わないと PR 上に未解決スレッドが残る。
-#   sweep 結果 (sweep-pr$STATE_PR-result.json) はメインが Step 8 の報告に折り込む。
+#   error) でも、ループを抜けた直後に **メインが Agent(general-purpose) を起動** して
+#   /ndf:fix $STATE_PR を再実行し、$TMP_DIR/sweep-pr$STATE_PR-result.json を書かせる
+#   (bash 単体では Agent ツールを呼べない。プロンプトは docs/02 の Step 7.5)。
+#   最終 APPROVE ラウンドの minor/nit はループ内 fix を経由しないため、ここで拾わないと
+#   PR 上に未解決スレッドが残る。sweep 結果はメインが Step 8 の報告へ折り込む。
 
 # Step 7.5 後段: 最終スイープの結果を GitHub 側の実数で検証する (必須)
 #   exit 0 = 未解決の指摘なし / exit 6 = 残っている (件数と理由を完了報告へ含めて続行)
