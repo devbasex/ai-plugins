@@ -37,7 +37,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from typing import Any
+from typing import Any, NamedTuple
 
 
 # ---------------- helpers ----------------
@@ -282,7 +282,174 @@ def _git_toplevel() -> str | None:
     return None
 
 
-def _sync_worktree(worktree: str, pr: int, head_branch: str) -> None:
+class HeadRef(NamedTuple):
+    """レビュー対象の Pull Request の head。
+
+    比較の基準は `oid`（`gh pr view --json headRefOid` が返すコミット）で、
+    `origin/<branch>` ではない。フォークの Pull Request では head branch が base の
+    リポジトリに無いため、`origin/<branch>` は解決できない。基準を ref で持つと、
+    未 push のコミットの検出も一致判定も、フォークのときだけ行えなくなる。
+    """
+
+    branch: str
+    oid: str
+    is_fork: bool
+
+
+def _resolve_head_ref(pr: int, code: int = 8) -> HeadRef:
+    """その時点の head を GitHub から取り直す。
+
+    状態ファイルの `head_branch` は `init` が書いた後に更新されない。`squash` の
+    巻き直しは `<branch>-r<HHMMSS>` という新しいブランチを作るため、そのまま使うと
+    **巻き直しの後に巻き直し前のブランチへ戻すことになる**。取れないときは
+    状態ファイルの古い値へ落とさずに止める。落ちた先が誤っていては意味が無い。
+    """
+    r = subprocess.run(
+        ["gh", "pr", "view", str(pr), "--json",
+         "headRefName,headRefOid,isCrossRepository"],
+        capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        die(f"PR #{pr} の head を取得できない: {r.stderr.strip()[:200]}", code=code)
+    try:
+        data = json.loads(r.stdout)
+        branch = str(data["headRefName"])
+        oid = str(data["headRefOid"])
+    except (json.JSONDecodeError, KeyError, TypeError) as exc:
+        die(f"PR #{pr} の head を読み取れない: {exc}", code=code)
+    if not branch or not oid:
+        die(f"PR #{pr} の head が空である", code=code)
+    return HeadRef(branch=branch, oid=oid, is_fork=bool(data.get("isCrossRepository")))
+
+
+def _fetch_head(worktree: str, pr: int, head: HeadRef) -> bool:
+    """基準のコミットを手元へ取り込み、手元にあるかを返す。
+
+    取り込みの宛先だけが Pull Request の種別で変わる。フォークは base のリポジトリ側の
+    `refs/pull/<番号>/head` から引く。取り込みの後に確かめるのは、`gh pr view` と
+    `git fetch` の間に head が動いていると、取り込んだ内容に基準が含まれないためである。
+    """
+    target = f"refs/pull/{pr}/head" if head.is_fork else head.branch
+    subprocess.run(
+        ["git", "fetch", "origin", target],
+        capture_output=True, text=True, cwd=worktree,
+    )
+    have = subprocess.run(
+        ["git", "cat-file", "-e", f"{head.oid}^{{commit}}"],
+        capture_output=True, text=True, cwd=worktree,
+    )
+    return have.returncode == 0
+
+
+def _sync_exclusions(worktree: str) -> list[str]:
+    """掃除（`git clean`）から外すパスを返す。
+
+    状態ファイルと結果ファイルは tmp ディレクトリにある。`.cross_review/` が
+    `.gitignore` に載っているのはこのリポジトリの都合で、レビュー対象のリポジトリで
+    載っている保証は無い。載っていなければ、ラウンドごとの掃除がそれらを消す。
+    消えると次の読み込みで止まり、振動検知は前のラウンドの payload を失う。
+    """
+    names = [".cross_review"]
+    env = os.environ.get("CROSS_REVIEW_TMP_DIR")
+    if env:
+        try:
+            rel = pathlib.Path(env).resolve().relative_to(pathlib.Path(worktree).resolve())
+        except ValueError:
+            rel = None
+        if rel is not None and str(rel) not in ("", ".") and str(rel) not in names:
+            names.append(str(rel))
+    return names
+
+
+def _worktree_changes(
+    worktree: str,
+    exclusions: list[str],
+    code: int = 8,
+) -> tuple[list[str], list[str]]:
+    """作業ツリーの変更を、追跡対象と追跡対象外に分けて返す。
+
+    `git status --porcelain` は先頭 2 文字が状態、3 文字目が空白、4 文字目からがパスである。
+    **行全体を strip しない。** 先頭が空白の状態（` M path` など）でパスが 1 文字ずれる。
+    """
+    r = subprocess.run(
+        ["git", "status", "--porcelain"],
+        capture_output=True, text=True, cwd=worktree,
+    )
+    if r.returncode != 0:
+        die(f"作業ツリーの状態を読み取れない: {r.stderr.strip()[:200]}", code=code)
+    tracked: list[str] = []
+    untracked: list[str] = []
+    for line in r.stdout.splitlines():
+        if len(line) < 4:
+            continue
+        status, path = line[:2], line[3:]
+        if status == "??":
+            if any(path == e or path.startswith(f"{e}/") for e in exclusions):
+                continue
+            untracked.append(path)
+        else:
+            tracked.append(path)
+    return tracked, untracked
+
+
+def _is_synced(
+    worktree: str,
+    pr: int,
+    head: HeadRef,
+    exclusions: list[str],
+    code: int,
+) -> bool:
+    """基準と突き合わせ、書き換えが要らないかを返す。失われるものがあるときは止める。
+
+    **`strict=True` の経路からだけ呼ぶ。** 見つかる変更は、同じループの修正の工程が
+    今まさに残したものである。捨てると修正そのものが失われ、しかも失われたことが
+    誰にも見えない。
+    """
+    tracked, untracked = _worktree_changes(worktree, exclusions, code)
+    if tracked:
+        die(
+            "作業ツリーに未 push の変更が残っています: "
+            f"{' '.join(tracked[:10])}。"
+            " 修正を push してから次のラウンドを開始してください",
+            code=code,
+        )
+    ahead = subprocess.run(
+        ["git", "rev-list", "--count", f"{head.oid}..HEAD"],
+        capture_output=True, text=True, cwd=worktree,
+    )
+    if ahead.returncode != 0:
+        die(
+            f"基準 {head.oid[:7]} からの差を数えられない: {ahead.stderr.strip()[:200]}",
+            code=code,
+        )
+    try:
+        extra = int(ahead.stdout.strip() or "0")
+    except ValueError:
+        # 数えられない値を 0 と読むと、未 push のコミットを見落として捨てることになる。
+        die(f"基準 {head.oid[:7]} からの差を読み取れない: {ahead.stdout.strip()[:80]}", code=code)
+    if extra > 0:
+        die(
+            f"作業ツリーに PR #{pr} の head へ含まれないコミットが {extra} 件あります。"
+            " push してから次のラウンドを開始してください",
+            code=code,
+        )
+    current = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        capture_output=True, text=True, cwd=worktree,
+    )
+    if current.returncode != 0 or current.stdout.strip() != head.oid or untracked:
+        return False
+    info(f"✔ worktree は PR #{pr} の head と同期済み: {head.oid[:7]}")
+    return True
+
+
+def _sync_worktree(
+    worktree: str,
+    pr: int,
+    head: str | HeadRef,
+    *,
+    strict: bool = False,
+) -> None:
     """既存 worktree を PR の head へ同期する。
 
     worktree は使い捨ての領域だが、実際には前回の実行のものがそのまま残る。
@@ -292,43 +459,77 @@ def _sync_worktree(worktree: str, pr: int, head_branch: str) -> None:
 
     前回の実行が残した追跡対象外のファイルも消す。残したまま fix 担当が
     `git add -A` を使うと、レビューと無関係なファイルが Pull Request へ混ざる。
-    `.cross_review/` は `.gitignore` に載っているため `git clean -fd`
-    (`-x` 無し) の対象にならず、state.json と result.json は残る。
+    tmp ディレクトリは `-e` で除外するため、state.json と result.json は残る。
+
+    `strict` は、失われるものの扱いと止めるときの終了コードを切り替える。
+
+    | 観点 | `strict=False`（init / 再開） | `strict=True`（ラウンドの開始） |
+    | --- | --- | --- |
+    | head と一致していて変更が無い | 巻き戻して掃除する | 何もしない |
+    | 追跡対象の変更 / 基準に無いコミット | 捨てる | 止める |
+    | 基準を手元に持てない | `gh pr checkout --detach` へ落とす | 止める |
+    | 止めるときの終了コード | 1 | 8 |
+
+    `init` の側を強くしないのは、そこで見つかる残骸が**前回の実行のもの**だからである。
+    ラウンドの開始時に見つかる変更は、**同じループの修正の工程が今まさに残したもの**で
+    あり、意味が違う。
     """
-    fetch_result = subprocess.run(
-        ["git", "fetch", "origin", head_branch],
-        capture_output=True, text=True,
-    )
-    if fetch_result.returncode == 0:
-        target = f"origin/{head_branch}"
+    code = 8 if strict else 1
+    exclusions = _sync_exclusions(worktree)
+    if isinstance(head, HeadRef):
+        have_base = _fetch_head(worktree, pr, head)
+        target = head.oid
+        label = head.branch
+    else:
+        # 旧来の呼び出し（ブランチ名だけを渡す経路）。基準は `origin/<branch>` になる。
+        fetch = subprocess.run(
+            ["git", "fetch", "origin", head],
+            capture_output=True, text=True,
+        )
+        have_base = fetch.returncode == 0
+        target = f"origin/{head}"
+        label = head
+
+    if have_base:
+        if strict and isinstance(head, HeadRef) and _is_synced(
+                worktree, pr, head, exclusions, code):
+            return
         reset = subprocess.run(
             ["git", "reset", "--hard", target],
             capture_output=True, text=True, cwd=worktree,
         )
         if reset.returncode != 0:
-            die(f"worktree を {target} へ同期できない: {reset.stderr.strip()}")
+            die(f"worktree を {target} へ同期できない: {reset.stderr.strip()}", code=code)
+    elif strict:
+        # HEAD を動かす前に、何が失われるかを数える材料が無い（基準が手元に無いのだから、
+        # 未 push のコミットを数えられない）。判定できない状態でフォールバックしない。
+        die(
+            f"PR #{pr} の基準のコミット {target[:7]} を取り込めない。"
+            " ネットワークか権限を確認してください",
+            code=code,
+        )
     else:
         # フォーク PR は origin に head branch が無い。作成時と同じ経路で合わせる。
-        info(f"⚠ git fetch origin {head_branch} 失敗 (フォーク PR の可能性) — gh pr checkout でフォールバック")
+        info(f"⚠ git fetch origin {label} 失敗 (フォーク PR の可能性) — gh pr checkout でフォールバック")
         checkout = subprocess.run(
             ["gh", "pr", "checkout", str(pr), "--detach"],
             capture_output=True, text=True, cwd=worktree,
         )
         if checkout.returncode != 0:
-            die(f"gh pr checkout --detach #{pr} 失敗: {checkout.stderr.strip()}")
+            die(f"gh pr checkout --detach #{pr} 失敗: {checkout.stderr.strip()}", code=code)
     clean = subprocess.run(
-        ["git", "clean", "-fd"],
+        ["git", "clean", "-fd", *[a for e in exclusions for a in ("-e", e)]],
         capture_output=True, text=True, cwd=worktree,
     )
     if clean.returncode != 0:
         # 消せないまま進むと、残骸を抱えた作業ツリーで fix 担当が `git add -A` を
         # 使い、Pull Request へ混ざる。差分そのものは合っていても止める。
-        die(f"追跡対象外のファイルを消せない: {clean.stderr.strip()}")
-    head = subprocess.run(
+        die(f"追跡対象外のファイルを消せない: {clean.stderr.strip()}", code=code)
+    rev = subprocess.run(
         ["git", "rev-parse", "--short", "HEAD"],
         capture_output=True, text=True, cwd=worktree,
     )
-    sha = head.stdout.strip() if head.returncode == 0 else "?"
+    sha = rev.stdout.strip() if rev.returncode == 0 else "?"
     info(f"↻ 既存 worktree を PR #{pr} の head へ同期: {sha}")
 
 
@@ -1121,6 +1322,34 @@ def _guard_previous_round(st: dict[str, Any], prev: dict[str, Any]) -> None:
         )
 
 
+def _sync_before_round(st: dict[str, Any], pr: int) -> None:
+    """ラウンドを開く前に、レビュー用の作業ツリーを Pull Request の head へ揃える。
+
+    同期は作られるときと再開するときにしか行われていなかった。修正を作業ツリーの外で
+    行って push すると、次のラウンドは 1 つ前の内容をレビューする。**どの経路で push
+    されても同じ差分がレビューされる状態にする**（#217）。
+
+    **ラウンドのエントリを開く前に行う。** 途中で止まったときにラウンドが半端に開かれず、
+    原因を取り除いた後に同じラウンド番号から再開できる。
+
+    「同期の対象が無い」と「同期できない」は分けて扱う。作業ツリーが失われている状態は
+    この後の `launch-codex.sh` / `launch-gemini.sh` が表に出すため、ここで止めても
+    分かることは増えない。
+    """
+    wt = str(st.get("worktree_path") or "")
+    if not wt:
+        info("⚠ state に worktree_path が無い — 作業ツリーの同期を飛ばして続行します")
+        return
+    if not _is_registered_worktree(wt):
+        info(f"⚠ 登録済みの作業ツリーではない ({wt}) — 同期を飛ばして続行します")
+        return
+    head = _resolve_head_ref(pr)
+    _sync_worktree(wt, pr, head, strict=True)
+    # 解決したブランチ名を書き戻す。巻き直しの後は state の値が古いため、再開の経路も
+    # ここで書かれた値を読む。保存はこの後の round エントリの追加と同じ書き込みで済む。
+    st["head_branch"] = head.branch
+
+
 def cmd_start_round(args: argparse.Namespace) -> None:
     """Step 1 — round 開始判定。"""
     st = _load(args.pr)
@@ -1136,6 +1365,8 @@ def cmd_start_round(args: argparse.Namespace) -> None:
         _guard_previous_round(st, st["rounds"][-1])
 
     pr = st["current_pr"]
+    _sync_before_round(st, pr)
+
     round_no = total + 1
     round_in_pr = sum(1 for r in st["rounds"] if r["pr"] == pr) + 1
 

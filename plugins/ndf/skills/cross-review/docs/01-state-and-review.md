@@ -159,19 +159,21 @@ cd "$WORKTREE"
 3. worktree 作成（`<worktree-base>/<owner>--<repo>/pr<PR>`。`<worktree-base>` は `NDF_WORKTREE_BASE` env > `<システム tmpdir>/ndf-worktrees` の優先順で解決。既存パスが現リポジトリの登録済み worktree でなければ `.stale-<ts>` に退避して作り直す。実 path は state.json の `worktree_path` を参照）
 
    **既存の worktree を流用するときは、必ず PR の head へ同期する。** `git fetch origin <head>`
-   の後に worktree の中で `git reset --hard origin/<head>` を実行し、`git clean -fd` で前回の
-   実行が残した追跡対象外のファイルを消す。フォーク PR で origin に head branch が無いときは
-   `gh pr checkout <PR> --detach` へ落とす。同期できないときは止める。
+   の後に worktree の中で `git reset --hard origin/<head>` を実行し、
+   `git clean -fd -e .cross_review` で前回の実行が残した追跡対象外のファイルを消す。
+   フォーク PR で origin に head branch が無いときは `gh pr checkout <PR> --detach` へ
+   落とす。同期できないときは止める。
 
    同期しないと、**レビュー担当は前回の実行が残した古い差分を読む**。指摘は現在の Pull Request
    に無い行へ出るか、直したはずの箇所へ再び出る。どちらも投稿されるため、読む側からは
    見分けが付かない。実測では 8 コミット古い worktree がそのまま流用された。
 
    追跡対象外のファイルを消すのは、fix 担当が `git add -A` を使ったときに Pull Request へ
-   混ざるためである。`-x` は付けない。`.cross_review/` は `.gitignore` に載っているため
-   対象にならず、state.json と result.json は残る。
+   混ざるためである。`-x` は付けず、tmp ディレクトリは `-e` で除外する。`.gitignore` に
+   `.cross_review/` を持たないリポジトリでも、state.json と result.json が残る。
 
    **再開の経路でも同じ同期を行う。** 中断から再開するまでの間に head が進んでいることがある。
+   **ラウンドの開始時（Step 1）にも同期する。** そちらは失われるものがあるときに止める。
 4. 既存コメントスナップショット (`fix/scripts/fetch-pr-comments.sh` で 3 ソース一括取得) → `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt`
 5. state.json 書き出し
 
@@ -184,7 +186,7 @@ cd "$WORKTREE"
 ROUND_VARS=$("$SCRIPTS/state.py" start-round "$STATE_PR") || {
   RC=$?
   [ "$RC" -eq 1 ] && break   # max_rounds 到達 → ループを抜けて最終スイープへ
-  exit "$RC"                 # 5=後始末が未了 など。その場で止める
+  exit "$RC"                 # 5=後始末が未了 / 8=作業ツリーを同期できない。その場で止める
 }
 eval "$ROUND_VARS"
 # eval で取り込まれる変数: ROUND, ROUND_IN_PR, PR, MAX_ROUNDS, ROTATE_AFTER
@@ -195,6 +197,40 @@ eval "$ROUND_VARS"
 
 前のラウンドの後始末（返信と Resolve）が終わっていなければ **exit 5** で止まる。
 条件は Step 3 の「Step 1 の開始時に行う後始末の検査」にある。
+
+### ラウンドの開始時の同期
+
+**round エントリを開く前に、作業ツリーを PR の head へ揃える。** 修正を作業ツリーの外で
+行って push すると、次のラウンドは 1 つ前の内容をレビューする。実測（PR #212）では、
+ラウンド 4 で対応済みの指摘 2 件がラウンド 5 で再び投稿された。エントリを開く前に行うのは、
+途中で止まったときにラウンドが半端に開かれず、原因を取り除いた後に同じ番号から再開できる
+ようにするためである。
+
+| 状態 | 扱い |
+| --- | --- |
+| head より古い | `git fetch` と `git reset --hard <headRefOid>` で揃える |
+| head と一致していて変更が無い | 何もしない。`git clean` も発行しない |
+| 追跡対象のファイルに変更がある | **exit 8** で止める |
+| 基準に含まれないローカルのコミットがある | **exit 8** で止める |
+| 基準を取り込めない / head を解決できない | **exit 8** で止める |
+| `worktree_path` が無い、または登録済みの作業ツリーでない | 同期せず、警告して続ける |
+
+追跡対象の変更と未 push のコミットで止めるのは、それが**修正の工程が push を終えていない
+証拠**だからである。捨てると修正そのものが失われ、しかも失われたことが誰にも見えない。
+`init` の側で同じものを捨てているのは、そこで見つかる残骸が前回の実行のものだからで、
+意味が違う。
+
+**同期の失敗で exit 1 を返さない。** 1 はループを抜ける値であり、返すと同期できない原因が
+残ったまま最終スイープへ進む。
+
+比較の基準は `gh pr view --json headRefOid` が返すコミットで、`origin/<head>` ではない。
+フォークの PR では head branch が base のリポジトリに無く、`origin/<head>` を基準に据えると
+一致判定も未 push のコミットの検出もフォークのときだけ行えない。取り込みの宛先だけを
+`refs/pull/<PR>/head` へ変える。
+
+同期先のブランチ名は毎ラウンド取り直し、`state.json` の `head_branch` へ書き戻す。
+`squash` の巻き直しは `<branch>-r<HHMMSS>` を作るが `head_branch` は更新されないため、
+state の値をそのまま使うと巻き直し前のブランチへ戻すことになる。
 
 ## Step 2: codex / gemini 並列レビュー（AI 直接投稿）
 
