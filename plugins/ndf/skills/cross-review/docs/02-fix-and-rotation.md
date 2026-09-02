@@ -201,7 +201,7 @@ if "$SCRIPTS/state.py" should-rotate "$STATE_PR"; then
   ROTATE_VARS=$("$SCRIPTS/rotate-pr.sh" execute "$STATE_PR" --mode "$ROTATE_MODE") || exit $?
   eval "$ROTATE_VARS"
 
-  "$SCRIPTS/state.py" set-current-pr "$STATE_PR" "$NEW_PR"
+  "$SCRIPTS/state.py" set-current-pr "$STATE_PR" "$NEW_PR" --head-branch "$NEW_BRANCH"
   # NOTE: STATE_PR は **絶対に変えない**。次ループの scripts も $STATE_PR で呼ぶ。
 fi
 ```

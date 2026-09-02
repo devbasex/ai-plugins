@@ -1446,6 +1446,34 @@ _UNRESOLVED_THREADS_JQ = (
 )
 
 
+def _review_exists(repo: str, pr: int, review_url: str | None) -> bool | None:
+    """申告された `review_url` の指すレビューが GitHub 側にあるか。
+
+    取得できなければ `None` を返す。**「取得できなかった」と「無い」を区別する。**
+    取得の失敗で中断すると、GitHub 側の一時的な不調でループが止まる。
+
+    投稿は AI 自身が `gh api` で行うため、失敗しても結果ファイルには判定が残る。
+    判定だけを採ると、修正の担当が読むべき指摘が Pull Request に無いまま修正の工程が
+    起動する（実測: `review_url` が空、重要度別の件数もすべて 0）。
+    """
+    if not repo or not review_url:
+        return False
+    m = re.search(r"pullrequestreview-(\d+)", str(review_url))
+    if not m:
+        return False
+    try:
+        out = _sh(
+            ["gh", "api", f"repos/{repo}/pulls/{pr}/reviews/{m.group(1)}", "--jq", ".id"],
+            check=False,
+        )
+    except Exception:
+        return None
+    text = str(out).strip()
+    if not text:
+        return None
+    return text.split()[0] == m.group(1)
+
+
 def _gh_output(cmd: list[str]) -> str | None:
     """`gh` を実行して標準出力を返す。実行に失敗したときは `None` を返す。
 
@@ -1686,12 +1714,44 @@ def cmd_read_result(args: argparse.Namespace) -> None:
     if not st.get("rounds"):
         die(f"{agent}: state.rounds が空。`state.py start-round` を先に呼んでください")
 
+    repo = str(st.get("repo") or "")
+
+    # **投稿が届いたかを先に確かめる。** 判定だけが残り、指摘の中身が Pull Request に
+    # 無いまま修正の工程へ進む経路を塞ぐ（#261）。届いていないときは結果なしとして
+    # 記録し、判定の側の「同じラウンドで 1 度だけ起動し直す」経路へ乗せる。修正の担当
+    # から見ると、結果が残らなかった場合と、結果はあるが指摘が届いていない場合は同じ
+    # 状態である（読むべき指摘が無い）。
+    post_error = r.get("post_error")
+    if post_error:
+        _die_no_result(
+            pr,
+            agent,
+            "not_posted",
+            f"{agent}: レビューの投稿に失敗しています (post_error={post_error})。"
+            " 指摘が Pull Request に届いていないため、結果なしとして扱います",
+        )
+    exists = _review_exists(repo, pr, r.get("review_url"))
+    if exists is False:
+        _die_no_result(
+            pr,
+            agent,
+            "not_posted",
+            f"{agent}: 投稿されたレビューを確認できません "
+            f"(review_url={r.get('review_url')!r})。"
+            " 指摘が Pull Request に届いていないため、結果なしとして扱います",
+        )
+    if exists is None:
+        info(
+            f"⚠ {agent}: レビューの投稿を確認できませんでした。"
+            "申告をそのまま採用します"
+        )
+
     # **申告を GitHub 側と突き合わせる。** 投稿は AI 自身が行うので、失敗しても
     # 結果ファイルには件数が残る。申告のまま進むと、修正担当が読むべき指摘が
     # GitHub 上に存在しないまま収束判定まで走る（実測: 申告 2 件に対しスレッド 0）。
     declared = _as_count(comments)
     if declared > 0:
-        actual = _posted_comment_count(str(st.get("repo") or ""), pr, r.get("review_url"))
+        actual = _posted_comment_count(repo, pr, r.get("review_url"))
         if actual is None:
             info(
                 f"⚠ {agent}: 投稿されたコメント数を確認できませんでした。"
@@ -1787,11 +1847,40 @@ def cmd_judge(args: argparse.Namespace) -> None:
     sys.exit(2)
 
 
-def cmd_check_oscillation(args: argparse.Namespace) -> None:
-    """Step 4 — path:line 重複率を計算。
+# 指摘の位置がずれても同じ箇所として数える幅。修正で前後にずれる幅として、同じ処理の
+# まとまりの中の移動を拾い、隣の指摘まで巻き込まない値を採る。**この値の根拠となる実測は
+# まだ無い。** 出力へ内訳を出すのは、実測を集めるためである。
+OSCILLATION_NEAR_LINES = 3
+# 本文を比べる長さ。先頭だけを見るのは、末尾の言い回しの揺れで別物にならないようにするため。
+OSCILLATION_BODY_CHARS = 80
+# 正規化で落とすもの。**文字と数字は言語を問わず残す。** 指摘の本文は日本語で書かれるため、
+# ASCII の英数字だけを残すと本文が空になり、別の指摘どうしが一致してしまう。
+_OSCILLATION_DROP = re.compile(r"[^\w]", re.UNICODE)
 
-    前ラウンドと現ラウンドで重複が 50% 以上なら final=oscillation で中断。
+
+def _normalized_body(body: object) -> str:
+    """指摘の本文を、行番号・引用符・記号の違いで別物にならない形へ揃える。"""
+    if not isinstance(body, str):
+        return ""
+    return _OSCILLATION_DROP.sub("", body.lower())[:OSCILLATION_BODY_CHARS]
+
+
+def cmd_check_oscillation(args: argparse.Namespace) -> None:
+    """Step 4 — 同じ箇所の指摘の重なりを計算。
+
+    前ラウンドと現ラウンドで重なりが 50% 以上なら final=oscillation で中断。
     rotation 直後は round_in_pr<2 なのでスキップ。
+
+    同じ箇所かどうかは 3 つの一致で測り、いずれか 1 つで結びつけば同じ箇所として数える。
+    位置の完全一致だけで測ると、指摘の趣旨が同じでも行が 1 行ずれれば別の指摘として
+    数える。レビューを行うのは codex / gemini であり、同じ箇所を指すときに選ぶ行は毎回
+    同じとは限らない。修正で行が前後にずれた場合も一致しない。
+
+    | 一致 | 条件 |
+    | --- | --- |
+    | 位置の一致 | ファイルが同じで、行が同じ |
+    | 近傍の一致 | ファイルが同じで、行の差が `OSCILLATION_NEAR_LINES` 以内 |
+    | 本文の一致 | ファイルが同じで、正規化した本文が同じ |
     """
     pr = args.pr
     st = _load(pr)
@@ -1805,8 +1894,9 @@ def cmd_check_oscillation(args: argparse.Namespace) -> None:
     prev_round_no = same_pr[-2]["round"]
     curr_round_no = same_pr[-1]["round"]
 
-    def collect_keys(round_no: int) -> set[str]:
-        keys: set[str] = set()
+    def collect_keys(round_no: int) -> list[tuple[str, int, str]]:
+        """そのラウンドの指摘を (ファイル, 行, 正規化した本文) の並びで返す。"""
+        keys: list[tuple[str, int, str]] = []
         for agent in ("codex", "gemini"):
             p = _payload_path(agent, pr, round_no)
             if not p.exists():
@@ -1837,7 +1927,10 @@ def cmd_check_oscillation(args: argparse.Namespace) -> None:
                 path = c.get("path")
                 line = c.get("line") or c.get("start_line")
                 if path and line is not None:
-                    keys.add(f"{path}:{line}")
+                    try:
+                        keys.append((str(path), int(line), _normalized_body(c.get("body"))))
+                    except (TypeError, ValueError):
+                        continue
         return keys
 
     prev = collect_keys(prev_round_no)
@@ -1845,9 +1938,22 @@ def cmd_check_oscillation(args: argparse.Namespace) -> None:
     if not curr:
         info("⏭ 現ラウンドの payload なし: 振動検知スキップ")
         sys.exit(2)
-    overlap = prev & curr
-    ratio = len(overlap) / len(curr)
-    info(f"振動検知: overlap={len(overlap)}/{len(curr)} ({ratio:.0%})")
+
+    exact = near = same_body = 0
+    for path, line, body in curr:
+        same_file = [p for p in prev if p[0] == path]
+        if any(line == p[1] for p in same_file):
+            exact += 1
+        elif any(abs(line - p[1]) <= OSCILLATION_NEAR_LINES for p in same_file):
+            near += 1
+        elif body and any(body == p[2] for p in same_file):
+            same_body += 1
+    overlap_count = exact + near + same_body
+    ratio = overlap_count / len(curr)
+    info(
+        f"振動検知: overlap={overlap_count}/{len(curr)} ({ratio:.0%})"
+        f" 位置={exact} 近傍={near} 本文={same_body}"
+    )
 
     if ratio >= 0.5:
         st["final"] = "oscillation"
@@ -2079,6 +2185,17 @@ def cmd_should_rotate(args: argparse.Namespace) -> None:
     sys.exit(2)
 
 
+def _head_branch_of(pr: int) -> str | None:
+    """Pull Request の head branch を取り直す。取れなければ `None` を返す。"""
+    try:
+        out = _sh(["gh", "pr", "view", str(pr), "--json", "headRefName", "-q", ".headRefName"],
+                  check=False)
+    except Exception:
+        return None
+    name = str(out).strip()
+    return name or None
+
+
 def cmd_set_current_pr(args: argparse.Namespace) -> None:
     """PR ローテーション完了後の state 更新。
 
@@ -2100,8 +2217,25 @@ def cmd_set_current_pr(args: argparse.Namespace) -> None:
             break
     st["pr_history"].append({"pr": new_pr, "opened_at": now, "closed_at": None, "rounds": 0})
     st["current_pr"] = new_pr
+
+    # **巻き直しは新しい枝を作ることがある。** `squash` は `<枝名>-r<時刻>` を push する。
+    # 状態ファイルの `head_branch` を更新しないと、巻き直しの直後に再開したときに
+    # 巻き直し前の枝へ作業ツリーを合わせようとする（#244）。
+    #
+    # 枝名は引数で受け取る。巻き直しのスクリプトは light / squash のどちらでも
+    # `NEW_BRANCH=` を出力する。渡されなかったときは新しい Pull Request から取り直し、
+    # それも取れなければ既存の値を残す。**取り直せないことで進行を止めない。**
+    # ラウンドの開始時の同期が毎回取り直すため、次のラウンドで書き戻される。
+    head_branch = getattr(args, "head_branch", None)
+    if not head_branch:
+        head_branch = _head_branch_of(new_pr)
+    if head_branch:
+        st["head_branch"] = head_branch
+    else:
+        info(f"⚠ PR #{new_pr} の head branch を取得できませんでした。前の値を残します")
+
     _save(pr, st)
-    info(f"✅ current_pr: {old_pr} → {new_pr}")
+    info(f"✅ current_pr: {old_pr} → {new_pr} (head_branch={st.get('head_branch')})")
 
 
 def _read_sweep_result(pr: int, file: str | None) -> dict[str, Any]:
@@ -2288,6 +2422,11 @@ def main() -> None:
     sp.set_defaults(func=cmd_should_rotate)
 
     sp = sub.add_parser("set-current-pr", help="rotation 後の current_pr 更新")
+    sp.add_argument(
+        "--head-branch",
+        default=None,
+        help="巻き直しで作られた新しい枝名（rotate-pr.sh の NEW_BRANCH）",
+    )
     sp.add_argument("pr", type=int, help="state file の元 PR")
     sp.add_argument("new_pr", type=int)
     sp.set_defaults(func=cmd_set_current_pr)
