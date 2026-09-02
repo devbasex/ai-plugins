@@ -1,10 +1,10 @@
 """説明文書の検査（`scripts/check-doc-staleness.py`）のテスト補助。
 
-実物の `README.md` と `plugins/ndf/README.md` は書き換えない。代わりに、突き合わせの
-対象になる最小の木を一時ディレクトリへ作り、そこの説明文書だけを崩す。
+実物の `README.md` / `AGENTS.md` / `plugins/ndf/README.md` は書き換えない。代わりに、
+突き合わせの対象になる最小の木を一時ディレクトリへ作り、そこの説明文書だけを崩す。
 
-数は実物（31 / 29 / 30 / 4）と重ならない小さい値にしてある。テストが実物の値へ依存して
-いないことを、値そのもので示すためである。
+数は実物（31 / 29 / 30 / 4）と重ならない小さい値にしてある。版数も実物（9.6.0）とは別の
+値（9.3.0）にしてある。テストが実物の値へ依存していないことを、値そのもので示すためである。
 """
 from __future__ import annotations
 
@@ -17,6 +17,11 @@ CHECKER = REPO_ROOT / "scripts/check-doc-staleness.py"
 
 VERSION = "9.3.0"
 
+# 一覧表の行ごとに、その名前の `plugin.json` と突き合わせることを確かめるための 2 つ目の
+# プラグイン。NDF とは別の版数にしておく。
+OTHER_PLUGIN = "fixture-kit"
+OTHER_VERSION = "1.4.2"
+
 # 実体（`skills/`）5 個と任意 Skill（`optional-skills/`）2 個。元 Skill 数は 7 になる。
 SKILL_DIRS = ["alpha", "bravo", "charlie", "delta", "echo"]
 OPTIONAL_DIRS = ["xray", "yankee"]
@@ -28,6 +33,8 @@ MANIFESTS = {
     "kiro": ["alpha", "bravo", "charlie", "delta"],
 }
 
+# 記号（G〜M）は `issues/parallel-batch-03/04-issue-209.md` の「検査する記載」に対応する。
+# G: 概要の版数 / H: プラグイン一覧表の版数の列
 ROOT_README = """# Fixture Marketplace
 
 **NDFプラグイン v9.3.0** の検査用の最小構成です。
@@ -37,8 +44,47 @@ ROOT_README = """# Fixture Marketplace
   - 第1群 (4): alpha, bravo, charlie, delta
   - 第2群 (3): echo, xray, yankee
 - **8つの専門エージェント**: director
+
+### 利用可能なプラグイン
+
+| プラグイン名 | バージョン | 説明 |
+|------------|----------|------|
+| **ndf** | 9.3.0 | 検査用の最小構成 |
+| **fixture-kit** | 1.4.2 | 一覧表の行ごとの突き合わせを確かめるための 2 つ目 |
+
+### NDF v9.0.0 の主な変更（非互換）
+
+- v4.0.0 で古い経路を廃止しました。それより前の版（8.5.4 以前）には戻せません
 """
 
+# I: 「主要プラグインです（v<版>）」 / J: 版の付け方の節（区間の検査）
+AGENTS_MD = """# Fixture Guidelines
+
+## ポリシー
+
+### 版の付け方と開発版の配布
+
+| 版 | 形 | 意味 |
+| --- | --- | --- |
+| 正式版 | `9.3.0` | 利用者が常用してよい |
+| 開発版 | `9.3.0-dev.1` | 検証中 |
+
+- 接尾辞は次に出す正式版の版数へ付ける。`9.3.0` の次を開発するなら `9.4.0-dev.1`
+
+### 検査が突き合わせる箇所
+
+版数の基準は `plugins/ndf/.claude-plugin/plugin.json` の `version` である。
+
+## NDFプラグインについて
+
+**NDFプラグイン**は、このマーケットプレイスの主要プラグインです（v9.3.0）。
+
+## 変更の履歴
+
+v8.5.4 で古い経路を廃止した。それより前の版（8.4.0 以前）は対象外である。
+"""
+
+# K: Kiro の確認例 / L: Codex のキャッシュパスの例（2 箇所） / M: `codex plugin list` の出力例
 PLUGIN_README = """# NDF Plugin
 
 配布物は 1 ディレクトリにまとまっています。
@@ -61,6 +107,25 @@ plugins/ndf/
 ## v9.3.0 へ更新するとき
 
 **Skill が 1 個増えます。** 既存の Skill の手順は変わりません。
+
+## Kiro CLI で確かめる
+
+```bash
+kiro agent list
+# => NDF統合開発エージェント（Kiro CLI用 / v9.3.0）
+```
+
+## Codex で確かめる
+
+```text
+~/.codex/plugins/cache/ai-plugins/ndf/9.3.0/skills/deploy/SKILL.md を読んでください。
+```
+
+```bash
+codex plugin list
+# => ndf@ai-plugins  installed, enabled  9.3.0  <path>
+# ~/.codex/plugins/cache/ai-plugins/ndf/9.3.0/skills/deploy/SKILL.md
+```
 """
 
 
@@ -72,6 +137,13 @@ def build_tree(base: Path) -> Path:
     (ndf / ".claude-plugin").mkdir(parents=True)
     (ndf / ".claude-plugin/plugin.json").write_text(
         '{\n  "name": "ndf",\n  "version": "%s"\n}\n' % VERSION, encoding="utf-8"
+    )
+
+    other = root / "plugins" / OTHER_PLUGIN / ".claude-plugin"
+    other.mkdir(parents=True)
+    (other / "plugin.json").write_text(
+        '{\n  "name": "%s",\n  "version": "%s"\n}\n' % (OTHER_PLUGIN, OTHER_VERSION),
+        encoding="utf-8",
     )
 
     (ndf / "manifests").mkdir(parents=True)
@@ -90,6 +162,7 @@ def build_tree(base: Path) -> Path:
         (ndf / "optional-skills" / name / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
 
     (root / "README.md").write_text(ROOT_README, encoding="utf-8")
+    (root / "AGENTS.md").write_text(AGENTS_MD, encoding="utf-8")
     (ndf / "README.md").write_text(PLUGIN_README, encoding="utf-8")
     return root
 
@@ -100,6 +173,25 @@ def edit(path: Path, old: str, new: str) -> None:
     if body.count(old) != 1:
         raise AssertionError(f"{path} に {old!r} がちょうど 1 箇所ない（{body.count(old)} 箇所）")
     path.write_text(body.replace(old, new), encoding="utf-8")
+
+
+def edit_all(path: Path, old: str, new: str, expected: int) -> None:
+    """同じ書き方が複数箇所にある記載を、まとめて差し替える。
+
+    箇所の数まで指定させるのは、文書を書き換えたときにテストが黙って対象を減らさない
+    ようにするためである。
+    """
+    body = path.read_text(encoding="utf-8")
+    if body.count(old) != expected:
+        raise AssertionError(f"{path} に {old!r} が {expected} 箇所ない（{body.count(old)} 箇所）")
+    path.write_text(body.replace(old, new), encoding="utf-8")
+
+
+def bump_plugin_version(root: Path, version: str) -> None:
+    """木の `plugin.json` の版だけを上げる。説明文書には触らない。"""
+    (root / "plugins/ndf/.claude-plugin/plugin.json").write_text(
+        '{\n  "name": "ndf",\n  "version": "%s"\n}\n' % version, encoding="utf-8"
+    )
 
 
 def run_check(root: Path) -> subprocess.CompletedProcess[str]:
