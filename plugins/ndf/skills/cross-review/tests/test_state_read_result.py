@@ -3,7 +3,7 @@
 カバー範囲:
   1. 正規スキーマ (`event` / `comments_count`) → state にマージされる
   2. 変則スキーマ (`intent` / `comment_count`) → 同等にマージされる (フォールバック)
-  3. event / intent いずれも欠落 → die(exit 1) で fail + state 不変
+  3. event / intent いずれも欠落 → die(exit 1) で fail + 結果なしがラウンドへ残る
 """
 from __future__ import annotations
 
@@ -93,7 +93,11 @@ def test_alias_schema_intent_and_comment_count(patched_tmp_dir, state_mod):
 
 
 def test_missing_event_and_intent_dies(patched_tmp_dir, state_mod):
-    """event / intent いずれも無ければ exit 1 で fail し state は不変であること。"""
+    """event / intent いずれも無ければ exit 1 で fail し、結果なしが残ること。
+
+    判定はこの記録を読んで、起動し直しか中断かを決める（#196）。判定の値を持たない
+    結果はレビューが行われなかったのと同じであり、収束させない。
+    """
     tmp_dir = patched_tmp_dir
     seeded = _seed_state(tmp_dir)
     result = {"comments_count": 0}
@@ -104,9 +108,9 @@ def test_missing_event_and_intent_dies(patched_tmp_dir, state_mod):
         state_mod.cmd_read_result(_make_args(rfile))
     assert e.value.code == 1
 
-    # state は更新されていない (rounds[-1] に agent エントリが追加されていない)
     st = _read_state(tmp_dir)
-    assert AGENT not in st["rounds"][-1]
+    assert st["rounds"][-1][AGENT]["intent"] == "NO_RESULT"
+    assert st["rounds"][-1][AGENT]["no_result_reason"] == "no_verdict"
     assert st["rounds"][-1]["round"] == seeded["rounds"][-1]["round"]
 
 
@@ -141,9 +145,10 @@ def test_non_dict_result_json_dies(patched_tmp_dir, state_mod, capsys):
     assert e.value.code == 3
     captured = capsys.readouterr()
     assert "dict ではない" in captured.err
-    # state は更新されていない
+    # 使える結果が無いことがラウンドへ残る（#196）
     st = _read_state(tmp_dir)
-    assert AGENT not in st["rounds"][-1]
+    assert st["rounds"][-1][AGENT]["intent"] == "NO_RESULT"
+    assert st["rounds"][-1][AGENT]["no_result_reason"] == "unparsable"
 
 
 def test_invalid_json_result_file_dies(patched_tmp_dir, state_mod, capsys):
