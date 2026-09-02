@@ -8,12 +8,10 @@ from __future__ import annotations
 import json
 import os
 import pathlib
-import shutil
 import subprocess
 
 import pytest
 
-pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git が必要")
 
 HEAD_BRANCH = "refactor/target"
 

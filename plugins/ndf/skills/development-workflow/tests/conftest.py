@@ -9,10 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from projects_helpers import init_repo, missing_command
+from projects_helpers import init_repo
 
-_missing = missing_command()
-collect_ignore_glob = ["test_*.py"] if _missing else []
 
 
 @pytest.fixture()

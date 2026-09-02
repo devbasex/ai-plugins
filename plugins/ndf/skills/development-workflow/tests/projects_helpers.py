@@ -6,19 +6,8 @@ conftest.py へ置くと、複数の Skill のテストを同時に実行した�
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 from pathlib import Path
-
-REQUIRED_COMMANDS = ("bash", "jq", "git")
-
-
-def missing_command() -> str | None:
-    for name in REQUIRED_COMMANDS:
-        if shutil.which(name) is None:
-            return name
-    return None
-
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[3] / "scripts"
 LIB = SCRIPTS_DIR / "lib" / "projects-common.sh"

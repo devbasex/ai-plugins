@@ -7,20 +7,8 @@ conftest.py へ置くと、複数の Skill のテストを同時に実行した�
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 from pathlib import Path
-
-REQUIRED_COMMANDS = ("bash", "jq", "git")
-
-
-def missing_command() -> str | None:
-    """テストの実行に要るコマンドのうち、無いものを 1 つ返す。"""
-    for name in REQUIRED_COMMANDS:
-        if shutil.which(name) is None:
-            return name
-    return None
-
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[3] / "scripts"
 LIB = SCRIPTS_DIR / "lib" / "worktree-common.sh"

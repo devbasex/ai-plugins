@@ -12,12 +12,11 @@ from pathlib import Path
 
 import pytest
 
-from branch_repo_helpers import missing_command, push_branch
+from branch_repo_helpers import push_branch
 
 ROOT = Path(__file__).resolve().parents[2]
 GUARD = ROOT / "scripts" / "check-pr-base.sh"
 
-pytestmark = pytest.mark.skipif(missing_command() is not None, reason="bash / jq / git が要る")
 
 
 def declare(repo: Path, body: dict) -> None:

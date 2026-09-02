@@ -17,10 +17,6 @@ _SCRIPT = _HERE.parent / "scripts" / "prepare-worktrees.sh"
 REQUIRED = ["refactoring", "tdd-cycle", "quality-gates"]
 RUNTIMES = ["codex", "gemini", "kiro"]
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("jq") is None or shutil.which("git") is None,
-    reason="jq と git が必要",
-)
 
 
 def _git(*args, cwd):
