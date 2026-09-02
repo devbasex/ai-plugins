@@ -32,10 +32,6 @@
 | [#224](https://github.com/devbasex/ai-plugins/issues/224) | 「書く前に実行して確かめる」の対象に外部コマンドが入っていない | 未作成 |
 | [#228](https://github.com/devbasex/ai-plugins/issues/228) | release に配備の完了を確かめる手立てが無い | 未作成 |
 | [#229](https://github.com/devbasex/ai-plugins/issues/229) | out-of-scope と retrospective に起票先の判断が無い | 未作成 |
-| [#231](https://github.com/devbasex/ai-plugins/issues/231) | projects-sync が工程「設計レビュー」を受け付けない | [parallel-batch-04/00-overview.md](parallel-batch-04/00-overview.md)（担当 E） |
-| [#232](https://github.com/devbasex/ai-plugins/issues/232) | 起点をリポジトリの根へ置くと playwright-kit-ops のテストが収集されない | [parallel-batch-04/00-overview.md](parallel-batch-04/00-overview.md)（担当 D） |
-| [#233](https://github.com/devbasex/ai-plugins/issues/233) | bash / jq / git が無い環境でテストが実行されないまま終了コード 0 になる | [parallel-batch-04/00-overview.md](parallel-batch-04/00-overview.md)（担当 D） |
-| [#235](https://github.com/devbasex/ai-plugins/issues/235) | cross-refactoring のテストが実行環境の git の身元へ依存している | [parallel-batch-04/00-overview.md](parallel-batch-04/00-overview.md)（担当 D） |
 | [#236](https://github.com/devbasex/ai-plugins/issues/236) | OSS としてメンテナーを募れる状態にリポジトリを整える（親） | 未作成 |
 | [#237](https://github.com/devbasex/ai-plugins/issues/237) | `main` / `develop` を ruleset で保護し、マージの設定とラベルを揃える | 未作成 |
 | [#238](https://github.com/devbasex/ai-plugins/issues/238) | `CONTRIBUTING.md` などのコミュニティ健全性ファイルを置く | 未作成 |
@@ -44,13 +40,12 @@
 | [#241](https://github.com/devbasex/ai-plugins/issues/241) | `GOVERNANCE.md` を置き、メンテナーを募る導線を作る | 未作成 |
 | [#242](https://github.com/devbasex/ai-plugins/issues/242) | 振り返りの記録先を `docs/development-history/` から issue へ移す | 未作成 |
 | [#243](https://github.com/devbasex/ai-plugins/issues/243) | 工程の進行記録を横断的な Skill へ集約し、記録の中身を決める | 未作成 |
-| [#244](https://github.com/devbasex/ai-plugins/issues/244) | 巻き直しの後に state.json の head_branch が古いままになる | [parallel-batch-04/00-overview.md](parallel-batch-04/00-overview.md)（担当 C） |
-| [#245](https://github.com/devbasex/ai-plugins/issues/245) | cross-review の SKILL.md が 500 行の上限に張り付いている | [parallel-batch-04/00-overview.md](parallel-batch-04/00-overview.md)（担当 C） |
-| [#246](https://github.com/devbasex/ai-plugins/issues/246) | 振動検知が path:line の一致だけで測るため同趣旨の指摘を拾えない | [parallel-batch-04/00-overview.md](parallel-batch-04/00-overview.md)（担当 C） |
-| [#263](https://github.com/devbasex/ai-plugins/issues/263) | 開発版チャネルの取得手順の記載が実機と食い違う | [parallel-batch-04/00-overview.md](parallel-batch-04/00-overview.md)（担当 A） |
 | [#266](https://github.com/devbasex/ai-plugins/issues/266) | 設計 Pull Request のマージを Skill の hook で縛る | 未作成 |
+| [#270](https://github.com/devbasex/ai-plugins/issues/270) | GitHub API の 1 時間あたりの上限を引き上げる手段を選ぶ | 未作成 |
+| [#271](https://github.com/devbasex/ai-plugins/issues/271) | cross-review / cross-refactoring の GitHub API 呼び出しを減らす | 未作成 |
+| [#277](https://github.com/devbasex/ai-plugins/issues/277) | 開発版チャネルの取得手順を、利用者の登録を壊さずに確かめる手段が無い | 未作成 |
 
-「未作成」の 23 件は、着手するときに `/ndf:implementation-plan` で
+「未作成」の 26 件は、着手するときに `/ndf:implementation-plan` で
 `issues/issue-<番号>-<内容>.md` を 1 ファイル作る。
 
 並行して進める複数の課題は `parallel-batch-<連番>/` にまとめる。全体指示書（`00-overview.md`）が
