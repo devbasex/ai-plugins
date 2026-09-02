@@ -45,6 +45,12 @@ def patched_tmp_dir(monkeypatch, tmp_path, state_mod):
     return tmp_path
 
 
+@pytest.fixture(autouse=True)
+def review_posted(monkeypatch, state_mod):
+    """投稿の実在確認は届いた前提にする。ここで見るのはスキーマの揺れである。"""
+    monkeypatch.setattr(state_mod, "_review_exists", lambda repo, pr, url: True)
+
+
 def test_canonical_schema(patched_tmp_dir, state_mod):
     tmp_dir = patched_tmp_dir
     _seed_state(tmp_dir)

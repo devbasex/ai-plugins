@@ -66,6 +66,12 @@ def tmp_dir(monkeypatch, tmp_path, state_mod):
     return tmp_path
 
 
+@pytest.fixture(autouse=True)
+def review_posted(monkeypatch, state_mod):
+    """投稿の実在確認は届いた前提にする。件数の突き合わせだけを見るため。"""
+    monkeypatch.setattr(state_mod, "_review_exists", lambda repo, pr, url: True)
+
+
 @pytest.fixture()
 def posted(monkeypatch, state_mod):
     """GitHub 側の件数を差し替える。`None` は取得できなかったことを表す。"""
@@ -145,17 +151,19 @@ def test_unavailable_github_count_keeps_the_declaration(tmp_dir, state_mod, post
     assert _read_state(tmp_dir)["rounds"][-1][AGENT]["comments"] == 2
 
 
-def test_missing_review_url_is_treated_as_unavailable(tmp_dir, state_mod, monkeypatch):
-    """投稿先の参照が無ければ、突き合わせる相手を決められないので申告を採用する。"""
+def test_missing_review_url_is_treated_as_not_posted(tmp_dir, state_mod, monkeypatch):
+    """投稿先の参照が無ければ、レビューが届いていないものとして扱う（#261）。
+
+    件数の突き合わせより前に、投稿そのものが届いたかを見る。
+    """
     _seed_state(tmp_dir)
-    monkeypatch.setattr(
-        state_mod, "_sh",
-        lambda cmd, check=True: pytest.fail("参照が無いのに GitHub を呼んでいる"),
-    )
+    monkeypatch.setattr(state_mod, "_review_exists", lambda repo, pr, url: False)
 
-    state_mod.cmd_read_result(_args(_result(tmp_dir, review_url=None)))
+    with pytest.raises(SystemExit) as e:
+        state_mod.cmd_read_result(_args(_result(tmp_dir, review_url=None)))
 
-    assert _read_state(tmp_dir)["rounds"][-1][AGENT]["comments"] == 2
+    assert e.value.code == 1
+    assert _read_state(tmp_dir)["rounds"][-1][AGENT]["intent"] == "NO_RESULT"
 
 
 # ---------------- 件数の取得 ----------------

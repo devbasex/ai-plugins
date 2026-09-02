@@ -229,8 +229,9 @@ eval "$ROUND_VARS"
 `refs/pull/<PR>/head` へ変える。
 
 同期先のブランチ名は毎ラウンド取り直し、`state.json` の `head_branch` へ書き戻す。
-`squash` の巻き直しは `<branch>-r<HHMMSS>` を作るが `head_branch` は更新されないため、
-state の値をそのまま使うと巻き直し前のブランチへ戻すことになる。
+`squash` の巻き直しは `<branch>-r<HHMMSS>` を作るため、巻き直しの側でも `set-current-pr` が
+`--head-branch` で受け取った値を書き戻す。ラウンドの開始時にも取り直すのは、作業ツリーの
+外で行われた変更に追従するためである。
 
 ## Step 2: codex / gemini 並列レビュー（AI 直接投稿）
 
