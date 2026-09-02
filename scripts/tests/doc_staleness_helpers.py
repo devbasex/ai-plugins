@@ -194,6 +194,46 @@ def bump_plugin_version(root: Path, version: str) -> None:
     )
 
 
+def base_of(version: str) -> str:
+    """接尾辞を捨てた数字 3 つ。`9.7.0-dev.1` の基底は `9.7.0` になる。"""
+    return version.split("-", 1)[0]
+
+
+def next_minor(version: str) -> str:
+    """基底の minor を 1 つ進めた版数。版の付け方の節が置く「次の版」の例に使う。"""
+    major, minor, patch = base_of(version).split(".")
+    return f"{major}.{int(minor) + 1}.{patch}"
+
+
+def retarget_version(root: Path, version: str) -> None:
+    """木の現行版を指す記載を、`plugin.json` ごとまとめて別の版へ揃える。
+
+    `bump_plugin_version` が `plugin.json` だけを動かして食い違いを作るのに対し、こちらは
+    突き合わせ先もすべて動かし、その版で検査が通る状態を作る。接尾辞の付いた版で通ることは、
+    版数を書く箇所がすべて揃った木でしか確かめられない。
+    """
+    old_base, new_base = base_of(VERSION), base_of(version)
+    bump_plugin_version(root, version)
+
+    readme = root / "README.md"
+    edit(readme, f"**NDFプラグイン v{VERSION}**", f"**NDFプラグイン v{version}**")
+    edit(readme, f"| **ndf** | {VERSION} |", f"| **ndf** | {version} |")
+
+    agents = root / "AGENTS.md"
+    edit(agents, f"主要プラグインです（v{VERSION}）", f"主要プラグインです（v{version}）")
+    # 版の付け方の節は基底で比べる。例に並ぶ版数の基底が現行版より古ければ落ちるため、
+    # 現行版の例も次の版の例も、新しい基底へ寄せる。
+    edit_all(agents, f"`{old_base}`", f"`{new_base}`", 2)
+    edit(agents, f"`{old_base}-dev.1`", f"`{new_base}-dev.1`")
+    edit(agents, f"`{next_minor(VERSION)}-dev.1`", f"`{next_minor(version)}-dev.1`")
+
+    plugin_readme = root / "plugins/ndf/README.md"
+    edit(plugin_readme, f"## v{VERSION} へ更新するとき", f"## v{version} へ更新するとき")
+    edit(plugin_readme, f"Kiro CLI用 / v{VERSION}）", f"Kiro CLI用 / v{version}）")
+    edit_all(plugin_readme, f"ndf/{VERSION}/skills/", f"ndf/{version}/skills/", 2)
+    edit(plugin_readme, f"enabled  {VERSION}  <path>", f"enabled  {version}  <path>")
+
+
 def run_check(root: Path) -> subprocess.CompletedProcess[str]:
     """検査を子プロセスとして実行し、終了コードと出力を観測する。"""
     return subprocess.run(

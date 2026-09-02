@@ -64,7 +64,6 @@ CATEGORY_LINE = re.compile(r"^\s+-\s+(?P<label>.+?)\s+\((?P<count>\d+)\)\s*[:：
 TABLE_ROW = re.compile(r"^\|\s*(Claude Code|Codex|Kiro CLI)\s*\|\s*(\d+)\s*個\s*\|")
 LAYOUT_SKILLS = re.compile(r"唯一の実体（\s*(\d+)\s*個\s*）")
 LAYOUT_OPTIONAL = re.compile(r"どの配布先にも載せない Skill（\s*(\d+)\s*個\s*）")
-UPGRADE_HEADING = re.compile(r"^##\s+v(\d+\.\d+\.\d+)\s+へ更新するとき\s*$", re.MULTILINE)
 NAME_SEPARATOR = re.compile(r"[,、]")
 
 # 版数は接尾辞まで 1 つの値として拾う。`9.6.0-dev.1` を `9.6.0` と `1` に割らないためである。
@@ -73,6 +72,11 @@ VERSION = r"(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)"
 # `1.0` のような値が来ると例外で検査全体が止まる。読み取りの時点で弾き、他の記載の判定を
 # 巻き添えにせず 1 件の食い違いとして出す。
 VERSION_VALUE = re.compile(VERSION)
+
+# F: 更新案内の見出し。版数の拾い方は `VERSION` へ揃える。数字 3 つだけで拾うと、接尾辞の
+# 付いた版（`9.7.0-dev.1`）では見出しを読み落とし、接尾辞を外して書けば今度は古いと判定
+# されるため、どちらの書き方でも検査を通せない。
+UPGRADE_HEADING = re.compile(r"^##\s+v" + VERSION + r"\s+へ更新するとき\s*$", re.MULTILINE)
 
 # --- 現行版を指す記載（G〜M）---
 #
