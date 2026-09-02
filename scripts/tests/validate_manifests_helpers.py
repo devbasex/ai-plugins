@@ -17,6 +17,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VALIDATE = REPO_ROOT / "scripts/validate-runtime-plugins.sh"
+VERSION_PATTERN_SOURCE = REPO_ROOT / "scripts/lib/version_pattern.py"
 
 # ヒアドキュメントの開始行と終端。検査の本体はこの 2 行に挟まれている。
 HEREDOC_START = 'run python3 - "$ROOT_DIR" "${FAMILIES[@]}" <<\'PY\''
@@ -63,6 +64,13 @@ def build_tree(base: Path, version: str = VERSION, described: str | None = None)
     described = version if described is None else described
     root = base / "repo"
     ndf = root / f"plugins/{FAMILY}"
+
+    # 検査の本体は根の下の共有の定義から版数の書式を読む。木の側にも同じファイルを置く。
+    # **写しではなく実物を複製する。** テスト用に書式を書き写すと、書式の定義が 2 つに戻る。
+    (root / "scripts/lib").mkdir(parents=True)
+    (root / "scripts/lib/version_pattern.py").write_text(
+        VERSION_PATTERN_SOURCE.read_text(encoding="utf-8"), encoding="utf-8"
+    )
 
     (ndf / "manifests").mkdir(parents=True)
     for runtime, skills in MANIFESTS.items():

@@ -66,12 +66,20 @@ LAYOUT_SKILLS = re.compile(r"唯一の実体（\s*(\d+)\s*個\s*）")
 LAYOUT_OPTIONAL = re.compile(r"どの配布先にも載せない Skill（\s*(\d+)\s*個\s*）")
 NAME_SEPARATOR = re.compile(r"[,、]")
 
-# 版数は接尾辞まで 1 つの値として拾う。`9.6.0-dev.1` を `9.6.0` と `1` に割らないためである。
-VERSION = r"(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)"
-# 突き合わせ先そのものの形を確かめる。`base_of` は数字 3 つに割れることを前提にしており、
-# `1.0` のような値が来ると例外で検査全体が止まる。読み取りの時点で弾き、他の記載の判定を
-# 巻き添えにせず 1 件の食い違いとして出す。
-VERSION_VALUE = re.compile(VERSION)
+# 版数の書式は `scripts/lib/version_pattern.py` が唯一の定義を持つ。定義ファイルの検査
+# （`scripts/validate-runtime-plugins.sh`）も同じ場所から読む。ここへ書き写すと、書式を
+# 変えたときに片方の検査だけが新しい書式を読める状態になる。
+#
+# `VERSION_VALUE` は突き合わせ先そのものの形を確かめる。`base_of` は数字 3 つに割れることを
+# 前提にしており、`1.0` のような値が来ると例外で検査全体が止まる。読み取りの時点で弾き、
+# 他の記載の判定を巻き添えにせず 1 件の食い違いとして出す。
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+try:
+    from version_pattern import VERSION, VERSION_VALUE
+except ImportError as exc:  # pragma: no cover - 読み込めないこと自体が検査の前提の崩れ
+    raise SystemExit(
+        f"版数の書式を読み込めない（scripts/lib/version_pattern.py）: {exc}"
+    )
 
 # F: 更新案内の見出し。版数の拾い方は `VERSION` へ揃える。数字 3 つだけで拾うと、接尾辞の
 # 付いた版（`9.7.0-dev.1`）では見出しを読み落とし、接尾辞を外して書けば今度は古いと判定
