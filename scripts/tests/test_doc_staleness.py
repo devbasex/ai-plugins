@@ -421,6 +421,37 @@ def test_version_section_stops_at_a_higher_level_heading(tree: Path) -> None:
     assert result.returncode == 0, output_of(result)
 
 
+def test_other_software_version_in_the_section_is_ignored(tree: Path) -> None:
+    """節の中の他ソフトの版数を拾わない。
+
+    節は配布の手順を説明するため、CLI の名前と版数を並べて書くことがある。前後の 1 文字だけで
+    位置を決めると、`codex-cli 0.146.1` の `0.146.1` のように空白で区切られた値が走査へ入り、
+    現行版より小さい基底として誤検出になる。
+    """
+    add_to_version_section(tree, "- 確認に使った CLI は `codex-cli 0.146.1` である")
+    result = run_check(tree)
+    assert result.returncode == 0, output_of(result)
+
+
+def test_backticked_stale_prerelease_is_still_found(tree: Path) -> None:
+    """位置を固定しても、接尾辞の付いた版数は従来どおり拾う。"""
+    add_to_version_section(tree, "- 前の版の開発版。`9.2.0-dev.1` はもう使わない")
+    result = run_check(tree)
+    assert result.returncode != 0
+    out = output_of(result)
+    assert "9.2.0-dev.1" in out and "9.3.0" in out
+
+
+def test_backticked_current_versions_pass(tree: Path) -> None:
+    """現行版と、その接尾辞付き・次の版の例は通る（囲みの中でも拾えている）。"""
+    add_to_version_section(
+        tree,
+        "- 例。`9.3.0` と `v9.3.0` と `9.3.0-rc.1` と `9.7.0-dev.1` はいずれも現行版以上",
+    )
+    result = run_check(tree)
+    assert result.returncode == 0, output_of(result)
+
+
 def add_code_fence_to_version_section(tree: Path) -> None:
     """版の付け方の節の先頭へ、シェルのコメントを含む実行例を置く。"""
     edit(

@@ -93,8 +93,11 @@ SECTION_HEADING = re.compile(r"^#{1,3}\s")
 # 囲みの中の `# ` 始まりはシェルのコメントであって見出しではない。囲みを跨いで数えると、
 # 節の途中の実行例で区間が切れる。
 CODE_FENCE = re.compile(r"^\s*(?:```|~~~)")
-# 前後を塞ぐのは、`codex-cli 0.146.1` のような他のソフトの版数を半端に拾わないためである。
-SECTION_VERSION = re.compile(r"(?<![\w.])v?" + VERSION + r"(?![\w.])")
+# 囲みまで含めて位置を固定する。前後の 1 文字を塞ぐだけでは、空白で区切られた
+# `codex-cli 0.146.1` の `0.146.1` が走査へ入り、現行版より小さい基底として誤検出になる。
+# この節の版数はすべて `` `9.6.0` `` の形で書く（節の中の 10 箇所すべてが囲まれていることを
+# 確認済み）。囲まずに書いた版数は走査に入らないため、例を足すときは囲みを付ける。
+SECTION_VERSION = re.compile(r"`v?" + VERSION + r"`")
 
 
 @dataclass
@@ -372,6 +375,9 @@ def check_version_section(body: str, version: str | None, report: Report) -> Non
     付け忘れ・外し忘れをここでは見ない（`AGENTS.md` に書かれているとおりである）。
 
     **区間の終わりは、自身と同じか上位の見出しである。** 囲みの中は見出しとして数えない。
+
+    **拾うのは `` `9.6.0` `` のように囲まれた版数だけである。** 節には配布に使う CLI の名前と
+    版数を並べて書くことがあり、位置を固定しないと他のソフトの版数まで現行版と比べてしまう。
     """
     lines = body.splitlines()
     start = next(
@@ -394,7 +400,8 @@ def check_version_section(body: str, version: str | None, report: Report) -> Non
         report.add(
             AGENTS_MD,
             "版の付け方の節の版数を読み取れない"
-            f"（`{VERSION_SECTION_HEADING}` の節へ版数の例を置く。{PLUGIN_JSON}: {version}）",
+            f"（`{VERSION_SECTION_HEADING}` の節へ版数の例を囲みで置く。"
+            f"{PLUGIN_JSON}: {version}）",
         )
         return
     if version is None:
