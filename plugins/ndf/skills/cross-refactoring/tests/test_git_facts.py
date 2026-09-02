@@ -5,12 +5,10 @@
 """
 from __future__ import annotations
 
-import shutil
 import subprocess
 
 import pytest
 
-pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git が必要")
 
 
 def _git(*args, cwd):

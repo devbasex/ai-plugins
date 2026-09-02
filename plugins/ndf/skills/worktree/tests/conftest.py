@@ -12,12 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from worktree_helpers import git, init_repo, missing_command
+from worktree_helpers import git, init_repo
 
-# bash / jq / git が無い環境ではテストを収集しない。補助モジュールの読み込み時に
-# skip を投げるとテストモジュールの外での skip になるため、収集の側で止める。
-_missing = missing_command()
-collect_ignore_glob = ["test_*.py"] if _missing else []
 
 
 @pytest.fixture()

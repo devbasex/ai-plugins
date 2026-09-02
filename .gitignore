@@ -54,3 +54,6 @@ ${SERENA_HOME}/
 
 # 開発用の作業ツリー
 .worktrees/
+
+# playwright_kit のテストが起点の直下へ作る報告書
+reports/

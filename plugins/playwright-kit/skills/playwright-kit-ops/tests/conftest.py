@@ -13,7 +13,9 @@ from pathlib import Path
 # ``pytester`` fixture (test 内で別 pytest を実行するためのサンドボックス) を有効化。
 # playwright_kit.pytest_plugin の addoption / markers / fixture 動的登録を
 # 隔離環境で検証するために使う。
-pytest_plugins = ["pytester"]
+# `pytest_plugins` はリポジトリの根の conftest.py が宣言する。pytest は最上位以外の
+# conftest.py での宣言を受け付けず、起点をリポジトリの根に置くと収集が中断する。
+# このディレクトリを起点にしたときは pyproject.toml の addopts が `-p pytester` で補う。
 
 _SKILL_ROOT = Path(__file__).resolve().parent.parent
 _SCRIPTS_DIR = _SKILL_ROOT / "scripts"

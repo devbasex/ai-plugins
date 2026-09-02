@@ -11,14 +11,12 @@
 """
 from __future__ import annotations
 
-import shutil
 import subprocess
 
 import pytest
 
 from crossref_helpers import make_state, read_state, write_result
 
-pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git が必要")
 
 
 def _git(*args, cwd):
@@ -28,8 +26,7 @@ def _git(*args, cwd):
 
 def _commit(repo, message):
     _git("add", "-A", cwd=repo)
-    _git("-c", "user.email=t@e.st", "-c", "user.name=test",
-         "commit", "-qm", message, cwd=repo)
+    _git("commit", "-qm", message, cwd=repo)
     return _git("rev-parse", "HEAD", cwd=repo).stdout.strip()
 
 
@@ -38,6 +35,10 @@ def _make_work(tmp_path):
     work = tmp_path / "work"
     (work / "generated").mkdir(parents=True)
     _git("init", "-q", "-b", "main", str(work), cwd=tmp_path)
+    # 検査の対象（`refactor.py`）が自分でコミットする。**身元はテストが用意する。**
+    # 実行した人の全体設定に頼ると、身元の無い実行環境で落ちる（#235）。
+    _git("config", "user.email", "t@e.st", cwd=work)
+    _git("config", "user.name", "test", cwd=work)
     (work / "src.py").write_text("x = 1\n", encoding="utf-8")
     (work / "generated" / "out.py").write_text("x = 1\n", encoding="utf-8")
     _commit(work, "init")

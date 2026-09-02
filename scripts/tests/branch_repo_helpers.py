@@ -5,20 +5,8 @@ conftest.py へ置くと、複数のテストを同時に実行したときに `
 """
 from __future__ import annotations
 
-import shutil
 import subprocess
 from pathlib import Path
-
-REQUIRED_COMMANDS = ("bash", "jq", "git")
-
-
-def missing_command() -> str | None:
-    """テストの実行に要るコマンドのうち、無いものを 1 つ返す。"""
-    for name in REQUIRED_COMMANDS:
-        if shutil.which(name) is None:
-            return name
-    return None
-
 
 def git(repo: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(

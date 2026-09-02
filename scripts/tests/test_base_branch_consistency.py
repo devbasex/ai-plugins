@@ -19,7 +19,6 @@ from branch_repo_helpers import (
     drop_remote_tracking,
     init_master_only_repo,
     init_origin_repo,
-    missing_command,
     push_branch,
     push_lookalike_branch,
 )
@@ -48,7 +47,6 @@ LITERAL_SKILLS = (
 # 退避先は対象にしない（origin の HEAD すら取れないときの最後の手段である）。
 COMMAND_LITERAL = re.compile(r"^\s*git\s+\S+[^\n]*\bmain\b")
 
-pytestmark = pytest.mark.skipif(missing_command() is not None, reason="bash / jq / git が要る")
 
 
 @pytest.fixture()
