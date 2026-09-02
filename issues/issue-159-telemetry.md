@@ -3,6 +3,7 @@
 ## 関連リンク
 
 - [issue #159](https://github.com/devbasex/ai-plugins/issues/159) — この計画の追跡先
+- [issue #236](https://github.com/devbasex/ai-plugins/issues/236) — OSS 運用の整備。この計画から分離した（Task 4 / 5 / 9 の移譲先）
 - [issue-158-llm-ensemble-for-agentic-development.md](issue-158-llm-ensemble-for-agentic-development.md) — 集めたデータの用途
 - [issue-113-cross-refactoring.md](issue-113-cross-refactoring.md) — データの発生源となる Skill の改修
 
@@ -17,7 +18,6 @@
 
 - 複数の利用者・複数のリポジトリから、利用状況と AI の挙動の統計が集まる
 - 集めるデータの範囲が文書で明示され、利用者が止められる
-- 外部の貢献者が参加できる形にリポジトリが整っている
 
 やらないこと:
 
@@ -25,6 +25,7 @@
 - 個人を特定できる情報の収集
 - 収集を必須にすること。止める手段を常に用意する
 - 受け口の実装（第 2 段階に入るまで着手しない。構成は決めてある）
+- OSS 運用の整備（ブランチ保護・テンプレート・行動規範・貢献ガイド）。#236 とその子 issue が扱う
 
 ## 最も重要な制約
 
@@ -150,14 +151,13 @@ flowchart TD
 - [ ] 公開データセットへ出す前に、許可リストの検査を通る
 - [ ] 公開データセットの内容と更新の頻度が文書に書かれている
 
-### 文書とリポジトリ運用
+### 収集にともなう規約
 
 - [ ] `TELEMETRY.md` に、集める項目・集めない項目・止め方・用途が書かれている
 - [ ] `PRIVACY.md` に、保管場所・保管期間・第三者提供の有無・問い合わせ先が書かれている
-- [ ] `CONTRIBUTING.md` / `CODE_OF_CONDUCT.md` / `SECURITY.md` がある
-- [ ] issue / Pull Request のテンプレートがある
-- [ ] `main` へのブランチ保護が設定されている
-- [ ] `CODEOWNERS` がある
+
+`CONTRIBUTING.md` / `CODE_OF_CONDUCT.md` / `SECURITY.md` / テンプレート / `CODEOWNERS` /
+ブランチ保護は #236 の子 issue（#237 / #238 / #239）が扱う。
 
 ## 代替案と採否
 
@@ -209,8 +209,7 @@ flowchart TD
 - `plugins/ndf/skills/cross-refactoring/scripts/refactor.py`（集計の抽出）
 - `plugins/ndf/skills/cross-review/scripts/state.py`（同上）
 - `plugins/ndf/skills/*/`（収集の共通処理の置き場所は Task 1 で決める）
-- `TELEMETRY.md` / `PRIVACY.md` / `CONTRIBUTING.md` / `CODE_OF_CONDUCT.md` / `SECURITY.md`（新規）
-- `.github/ISSUE_TEMPLATE/` / `.github/pull_request_template.md` / `.github/CODEOWNERS`（新規）
+- `TELEMETRY.md` / `PRIVACY.md`（新規）
 - `README.md`（収集していることへの言及）
 - 受け口のリポジトリ（新規。Cloudflare Workers と D1 のスキーマ、エクスポートの処理）
 
@@ -241,27 +240,11 @@ flowchart TD
 - **満たす受け入れ条件:** 第 1 段階の 3
 - **進め方:** 7 回目の集計を例として載せる
 
-### Task 4: OSS としての文書を整える
+### Task 4・Task 5: OSS としての文書とテンプレート（#236 へ移譲）
 
-- **対象ファイル:** `CONTRIBUTING.md`、`CODE_OF_CONDUCT.md`、`SECURITY.md`、`PRIVACY.md`
-- **変更内容:**
-  - `CONTRIBUTING.md`: 開発の進め方、ブランチ戦略、Pull Request の作法、Skill の追加手順
-  - `CODE_OF_CONDUCT.md`: Contributor Covenant を基にする
-  - `SECURITY.md`: 脆弱性の報告先と対応の目安。公開の issue に書かせない
-  - `PRIVACY.md`: 保管場所・期間・第三者提供の有無・問い合わせ先
-- **満たす受け入れ条件:** 文書 2・3
-- **進め方:** 既存の `AGENTS.md` と重複する内容は参照で済ませる
-
-### Task 5: リポジトリのテンプレートと担当を置く
-
-- **対象ファイル:** `.github/ISSUE_TEMPLATE/`、`.github/pull_request_template.md`、`.github/CODEOWNERS`、`.github/dependabot.yml`
-- **変更内容:**
-  - issue テンプレート（不具合・機能要望・Skill の提案）
-  - Pull Request テンプレート（`cross-review` の運用と揃える）
-  - `CODEOWNERS`（プラグインごとの担当）
-  - `dependabot.yml`（GitHub Actions の更新）
-- **満たす受け入れ条件:** 文書 4・6
-- **進め方:** テンプレートの雛形は既存の Pull Request 本文から起こす
+`CONTRIBUTING.md` / `CODE_OF_CONDUCT.md` / `SECURITY.md` と、issue / Pull Request の
+テンプレート・`CODEOWNERS`・`dependabot.yml` は #238 / #239 が扱う。この計画では扱わない。
+`PRIVACY.md` は収集にともなう規約なので Task 3 に含める。
 
 ### Task 6: 自動送信と停止手段を実装する
 
@@ -295,25 +278,14 @@ flowchart TD
 - **満たす受け入れ条件:** 第 2 段階の 8・9
 - **進め方:** 最初の公開は手動で行い、内容を確認してから定期実行にする
 
-### Task 9: `main` のブランチ保護を設定する
+### Task 9: `main` のブランチ保護（#236 へ移譲）
 
-- **対象ファイル:** なし。GitHub のリポジトリ設定を変える作業で、リポジトリ内のファイルでは
-  設定できない
-- **変更内容:** `main` のブランチ保護を有効にする。Pull Request 経由のマージを必須にし、
-  CI のチェックを必須にする。設定は `gh api` で行い、実行したコマンドを Pull Request へ残す
-- **満たす受け入れ条件:** 文書 5
-- **検証方法:** `gh api repos/devbasex/ai-plugins/branches/main/protection` の応答で、
-  `required_pull_request_reviews` と `required_status_checks` が有効になっていることを確かめる。
-  あわせて `main` への直接 push が拒まれることを確かめる
-- **進め方:** 現在の運用（Pull Request 経由でマージ）を追認する設定から始める
-- **備考:** 対象ファイルが無いため他の Task と同じ Pull Request では完了しない。
-  第 1 段階の完了までに、リポジトリの管理権限を持つ人が実施する
+ruleset による `main` / `develop` の保護は #237 が扱う。この計画では扱わない。
 
 ## 影響範囲
 
 - `cross-refactoring` / `cross-review` の実行の最後に出力が 1 つ増える（第 1 段階）
 - 既存の状態ファイルの形式は変えない
-- リポジトリの設定変更（ブランチ保護）は、現在の運用を追認する範囲にとどめる
 
 ## リスクと対処
 
@@ -331,14 +303,13 @@ flowchart TD
 ## 切り戻し手順
 
 第 1 段階は出力を止めるだけで戻る。第 2 段階は送信を止める設定で戻る。
-リポジトリの設定変更は GitHub の設定画面から戻せる。
 
 ## 完了の定義
 
-段階ごとに区切る。第 1 段階と文書・設定の整備をこの計画の完了とし、第 2 段階は
+段階ごとに区切る。第 1 段階と収集にともなう規約の整備をこの計画の完了とし、第 2 段階は
 受け口の判断を経てから着手する。
 
 - [ ] 第 1 段階の受け入れ条件 4 件を満たす
-- [ ] 文書とリポジトリ運用の受け入れ条件 6 件を満たす
+- [ ] 収集にともなう規約の受け入れ条件 2 件を満たす
 - [ ] 7 回目の試行の状態ファイルを入力に、集計へ禁止項目が現れないことを確かめる
 - [ ] 8 回目の実機試行で、集計ファイルが研究に使える形で出力されることを確かめる
