@@ -104,7 +104,10 @@ for plugin in claude_marketplace.get("plugins", []):
 # `.claude-plugin/marketplace.json` と Codex 版 plugin.json は build-runtime-plugins.sh の
 # 生成対象ではなく、古い値が残っても JSON としては妥当なため他の検査に掛からない。
 # 実際に版数と Skill 数の取り残しが繰り返し起きたので、Claude 版 plugin.json を基準に突き合わせる。
-VERSION_IN_DESCRIPTION = re.compile(r"\(v(\d+\.\d+\.\d+)\)")
+# 版数の書式は、説明文書の検査が持つ `VERSION` と同じ形にしてある。開発版の版数には
+# 接尾辞（`-dev.<連番>` / `-rc.<連番>`）が付くため、数字 3 つだけを見る書式では
+# `(v9.7.0-dev.1)` を拾えず、開発版を出すたびにこの検査で止まっていた。
+VERSION_IN_DESCRIPTION = re.compile(r"\(v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)\)")
 # `<数> ... skills` の形で書く規約。版数（8.0.0）や製品名（E2E）の数字を拾わないよう前後が
 # 英数字・ドットでない整数だけを見て、さらに `skills` との間に挟める語を 3 語までに絞る。
 # こうしないと離れた位置にある無関係な数（`8 specialized agents` など）を Skill 数と誤認する。
