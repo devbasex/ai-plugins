@@ -102,7 +102,26 @@ git -C <clone> pull && bash plugins/ndf/dev.kiro/install.sh --project <ディレ
 
 **この版から開発版チャネル（`develop`）が使えます。** 検証に参加する利用者は取得元の ref へ
 `develop` を指定します。正式版と開発版は同時に登録できません（取得元は名前ごとに 1 つしか
-登録できないため）。手順は `AGENTS.md` の「版の付け方と開発版の配布」にあります。
+登録できないため）。
+
+```bash
+# Claude Code — ref を付けて登録し直し、続けてプラグインを入れ替えます
+claude plugin marketplace add https://github.com/devbasex/ai-plugins.git#develop
+claude plugin update ndf@ai-plugins
+
+# Codex — 同名の取得元の上書きを拒むため、先に外します
+codex plugin marketplace remove ai-plugins
+codex plugin marketplace add devbasex/ai-plugins --ref develop
+codex plugin add ndf@ai-plugins
+
+# Kiro — clone の checkout を切り替えてから入れ直します
+git -C <clone> checkout develop
+bash plugins/ndf/dev.kiro/install.sh --project <ディレクトリ> --yes
+```
+
+**取得元を切り替えただけでは、導入済みの版は変わりません。** 実体は版ごとのディレクトリに
+置かれ、導入の記録がそのうち 1 つを指すためです。理由と、ランタイムごとに違う点は
+`AGENTS.md` の「版の付け方と開発版の配布」にあります。
 
 ### `cross-review` が、結果を残さなかったレビューを承認と数えなくなりました
 
