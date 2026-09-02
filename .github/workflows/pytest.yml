@@ -1,11 +1,19 @@
 name: Python tests
 
+# 起動の条件は pytest . の収集範囲に合わせる。テストの置き場所（plugins / scripts /
+# tests）に加えて、収集の仕方そのものを変える根の設定ファイルも対象へ入れる。
+# 根の conftest.py・pytest.ini・pyproject.toml は今は無いが、足した PR でこの
+# ワークフローが起動しないと、収集が減ったことに気づけない
 on:
   pull_request:
     paths:
       - ".github/workflows/pytest.yml"
       - "plugins/**"
       - "scripts/**"
+      - "tests/**"
+      - "conftest.py"
+      - "pytest.ini"
+      - "pyproject.toml"
   push:
     branches:
       - main
@@ -15,6 +23,10 @@ on:
       - ".github/workflows/pytest.yml"
       - "plugins/**"
       - "scripts/**"
+      - "tests/**"
+      - "conftest.py"
+      - "pytest.ini"
+      - "pyproject.toml"
 
 jobs:
   pytest:
