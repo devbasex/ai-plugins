@@ -15,6 +15,7 @@ from doc_staleness_helpers import (
     edit,
     edit_all,
     output_of,
+    retarget_version,
     run_check,
 )
 
@@ -205,6 +206,46 @@ def test_upgrade_heading_removed_fails(tree: Path) -> None:
     result = run_check(tree)
     assert result.returncode != 0
     assert "plugins/ndf/README.md" in output_of(result)
+
+
+@pytest.mark.parametrize("version", ["9.7.0-dev.1", "9.7.0-rc.1", "9.6.0"])
+def test_upgrade_heading_matches_whole_version(tree: Path, version: str) -> None:
+    """見出しの版数を接尾辞まで 1 つの値として読む。
+
+    数字 3 つだけで拾うと、`## v9.7.0-dev.1 へ更新するとき` を見出しとして読めない。
+    接尾辞の無い版も同じ経路で通ることを、同じテストで確かめる。
+    """
+    retarget_version(tree, version)
+    result = run_check(tree)
+    assert result.returncode == 0, output_of(result)
+
+
+def test_upgrade_heading_without_suffix_fails(tree: Path) -> None:
+    """接尾辞を落とした見出しは古い版として弾く。
+
+    見出しを読めない状態を直すだけでは足りない。接尾辞を外して書けば通るようにすると、
+    `plugin.json` と見出しが別の版を指したまま配布できてしまう。
+    """
+    retarget_version(tree, "9.7.0-dev.1")
+    edit(plugin_readme(tree), "## v9.7.0-dev.1 へ更新するとき", "## v9.7.0 へ更新するとき")
+    result = run_check(tree)
+    assert result.returncode != 0
+    out = output_of(result)
+    assert "plugins/ndf/README.md" in out
+    # 「見出しが無い」ではなく「版数が古い」として出す。読めていないのか食い違って
+    # いるのかで、直し方が変わる。
+    assert "見出し: v9.7.0 " in out
+    assert "9.7.0-dev.1" in out
+
+
+def test_upgrade_heading_stale_prerelease_fails(tree: Path) -> None:
+    """接尾辞の連番だけが古い見出しも拾う。"""
+    retarget_version(tree, "9.7.0-dev.2")
+    edit(plugin_readme(tree), "## v9.7.0-dev.2 へ更新するとき", "## v9.7.0-dev.1 へ更新するとき")
+    result = run_check(tree)
+    assert result.returncode != 0
+    out = output_of(result)
+    assert "9.7.0-dev.1" in out and "9.7.0-dev.2" in out
 
 
 def test_upgrade_heading_duplicated_fails(tree: Path) -> None:
