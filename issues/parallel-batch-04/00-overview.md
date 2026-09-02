@@ -60,7 +60,7 @@
 | A | `AGENTS.md` / `plugins/ndf/README.md` | `scripts/` / `plugins/ndf/skills/` / `.github/` |
 | B | `scripts/check-doc-staleness.py` / `scripts/validate-runtime-plugins.sh` / `scripts/lib/` / `scripts/tests/` | `AGENTS.md` / `plugins/` / `.github/` |
 | C | `plugins/ndf/skills/cross-review/` | `scripts/` / `AGENTS.md` / `.github/` / 他の Skill |
-| D | `.github/workflows/` / リポジトリの根の `conftest.py` / `.gitignore` / `plugins/playwright-kit/skills/playwright-kit-ops/` / `plugins/ndf/skills/cross-refactoring/tests/` / `plugins/ndf/skills/worktree/tests/conftest.py` / `plugins/ndf/skills/development-workflow/tests/conftest.py` | `scripts/` / `AGENTS.md` / `cross-review/` |
+| D | `.github/workflows/` / リポジトリの根の `conftest.py` / `.gitignore` / `plugins/playwright-kit/skills/playwright-kit-ops/` / `plugins/ndf/skills/cross-refactoring/tests/` / `plugins/ndf/skills/worktree/tests/conftest.py` / `plugins/ndf/skills/development-workflow/tests/conftest.py` / `scripts/tests/` の読み飛ばしの指定（担当 B のマージ後） | `scripts/` の読み飛ばしの指定以外 / `AGENTS.md` / `cross-review/` |
 | E | `plugins/ndf/scripts/lib/projects-common.sh` / `plugins/ndf/skills/merged/` / `plugins/ndf/skills/development-workflow/references/` / `development-workflow/tests/` の新しいファイル | `scripts/` / `AGENTS.md` / `cross-review/` / `.github/` / `development-workflow/tests/conftest.py` |
 
 ### 担当 A と B は `AGENTS.md` で接する
