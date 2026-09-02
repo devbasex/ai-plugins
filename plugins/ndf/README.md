@@ -83,30 +83,68 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v9.6.0）
+# => NDF統合開発エージェント（Kiro CLI用 / v9.7.0-dev.1）
 ```
 
-## v9.6.0 へ更新するとき
+## v9.7.0-dev.1 へ更新するとき
 
-**公開 Skill が 1 個増えます（Claude Code 33 / Codex 31 / Kiro 32）。** 新しいのは `design` で、
-設計工程で何という文書を作り何を書くかを決める工程です。設計の成果物が担当した AI ごとに
-変わる状態を、モードごとの必須成果物と雛形で揃えます。
+**これは開発版です。** `develop` を取得元の ref に指定した利用者にだけ届きます。正式版
+（`main`）は 9.6.0 のままです。開発版と正式版は同時に登録できません（取得元は名前ごとに 1 つ
+しか登録できないため）。
 
-工程表の「設計」の行の振り分け先が `design` になり、その後ろへ**「設計レビュー」の行が
-入りました**。`standard` と `architecture` では、設計だけを載せた Pull Request を実装より先に
-マージします。新しい Skill は作らず、`pr` → `cross-review` → `merged` を順に呼びます。
-マージした後は `worktree` を実装用のブランチ名で呼び直します。
+```bash
+claude plugin marketplace add https://github.com/devbasex/ai-plugins.git#develop
+codex plugin marketplace add devbasex/ai-plugins --ref develop
+```
 
-`design` は**変更が触る領域に対応する参照だけを読ませます**。永続データを持たない変更では
-データ構造の参照を、API と画面を持たない変更では契約の参照を読み込みません
-（`refactoring` の `lang-<言語>.md` と同じ構成）。記述標準（OpenAPI・データ契約・
-Design Tokens）も、対象となる領域を触る変更でだけ求めます。
+**公開 Skill の数は変わりません（Claude Code 33 / Codex 31 / Kiro 32）。** この版で変わるのは
+`cross-review` の収束の判定と、開発の運用です。
 
-**開発の起点ブランチを宣言で決められるようになりました。** `.ndf/worktree.json` に
-`base_branch` を書くと、作業ツリーの起点・主ディレクトリの追従先・Pull Request の宛先の検査が
-その宣言を読みます。書かなければ、これまでどおり既定ブランチのまま動きます。既定ブランチが
-安定版で開発の本流が別にあるリポジトリ（git-flow など）で、作業ツリーの起点が安定版になる
-状態を避けられます。
+### `cross-review` が、結果を残さなかったレビューを承認と数えなくなりました
+
+レビューが打ち切られて結果を残さなかったとき、これまでは「そのラウンドに記録が無い」ことが
+`SKIP` として扱われ、**もう一方が承認していれば収束していました**。レビューが最も要る場面
+（負荷が高いとき、対象が大きいとき）ほど承認が水増しされます。
+
+結果を残さなかった担当は `NO_RESULT` として区別し、**同じラウンドで 1 度だけ起動し直します**。
+それでも結果が残らなければ中断します（`final = error`）。起動し直しはラウンドの内側で完結する
+ため、ラウンドの数え方と `--max-rounds` の意味は変わりません。
+
+`--only` で外した担当は従来どおり `SKIP` です。**指定によるスキップと、実行して結果を残せな
+かったことを別のものとして扱います。**
+
+### `cross-review` が、ラウンドの開始時に作業ツリーを Pull Request の先端へ揃えます
+
+レビュー用の作業ツリーは、作成時と再開時にだけ同期していました。修正をその作業ツリーの外で
+行って push すると、**次のラウンドは 1 つ前の内容をレビューします**。対応済みの指摘が繰り返し
+出てラウンドが増えます。
+
+ラウンドの開始時に、Pull Request の先端のコミットを取り込んでから揃えます。同期に失敗したときは
+終了コード 8 で止まります（古い差分を読ませるより止めます）。**追跡対象のファイルに変更がある
+とき、未 push のコミットがあるときも止まります。** 修正の工程が push を終えていない証拠であり、
+消すと修正が失われるためです。
+
+比較の基準はブランチ名ではなくコミット（`headRefOid`）です。巻き直しで新しいブランチができても
+追随します。フォーク元の Pull Request では `refs/pull/<番号>/head` から取り込みます。
+
+### pytest が継続的統合で実行されるようになりました
+
+7 箇所・1576 件のテストが、どのジョブからも実行されていませんでした。`.github/workflows/pytest.yml`
+を足し、変更のたびに実行します。`jq` が無い環境ではテストが収集されないまま緑になるため、
+コマンドの存在確認も置いています。
+
+### 説明文書の本文に書かれた版数が、検査の対象に入りました
+
+版を上げても、利用者が読む入口（`README.md` の概要、Codex のキャッシュのパス、`codex plugin list`
+の出力例）の版数が古いまま残り、検査を通っていました。**書かれたとおりに実行すると存在しない
+パスを指す**状態です。
+
+周囲の固定の語で位置を決めた 7 種類を、`plugin.json` の版と突き合わせます。変更履歴や意図的に
+前の版を指す記載は走査に入りません（全文を走査すると 62 件が誤検出になるため）。
+
+**この検査に関わる規約が 1 つ増えました。** `AGENTS.md` の「版の付け方と開発版の配布」の節で、
+現行版を指す版数は `` `9.7.0-dev.1` `` のようにバッククォートで囲んで書きます。囲まない版数は
+走査に入りません。
 
 ## Playwright テストについて
 
@@ -243,7 +281,7 @@ gemini
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/9.6.0/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/9.7.0-dev.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -265,14 +303,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/9.6.0/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/9.7.0-dev.1/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  9.6.0  <path>
+# => ndf@ai-plugins  installed, enabled  9.7.0-dev.1  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
