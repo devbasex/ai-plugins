@@ -83,22 +83,26 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v9.7.0-dev.1）
+# => NDF統合開発エージェント（Kiro CLI用 / v9.7.0）
 ```
 
-## v9.7.0-dev.1 へ更新するとき
-
-**これは開発版です。** `develop` を取得元の ref に指定した利用者にだけ届きます。正式版
-（`main`）は 9.6.0 のままです。開発版と正式版は同時に登録できません（取得元は名前ごとに 1 つ
-しか登録できないため）。
-
-```bash
-claude plugin marketplace add https://github.com/devbasex/ai-plugins.git#develop
-codex plugin marketplace add devbasex/ai-plugins --ref develop
-```
+## v9.7.0 へ更新するとき
 
 **公開 Skill の数は変わりません（Claude Code 33 / Codex 31 / Kiro 32）。** この版で変わるのは
 `cross-review` の収束の判定と、開発の運用です。
+
+更新は取得元を更新してから、プラグインの側も更新します。**取得元の更新だけでは、導入済みの版は
+変わりません。**
+
+```bash
+claude plugin marketplace update ai-plugins && claude plugin update ndf@ai-plugins
+codex plugin marketplace upgrade ai-plugins && codex plugin add ndf@ai-plugins
+git -C <clone> pull && bash plugins/ndf/dev.kiro/install.sh --project <ディレクトリ> --yes
+```
+
+**この版から開発版チャネル（`develop`）が使えます。** 検証に参加する利用者は取得元の ref へ
+`develop` を指定します。正式版と開発版は同時に登録できません（取得元は名前ごとに 1 つしか
+登録できないため）。手順は `AGENTS.md` の「版の付け方と開発版の配布」にあります。
 
 ### `cross-review` が、結果を残さなかったレビューを承認と数えなくなりました
 
@@ -281,7 +285,7 @@ gemini
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/9.7.0-dev.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/9.7.0/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -303,14 +307,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/9.7.0-dev.1/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/9.7.0/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  9.7.0-dev.1  <path>
+# => ndf@ai-plugins  installed, enabled  9.7.0  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
