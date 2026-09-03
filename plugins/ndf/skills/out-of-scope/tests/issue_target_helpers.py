@@ -59,6 +59,38 @@ def table(body: str, heading: str) -> tuple[list[str], list[list[str]]]:
     return header, rows
 
 
+def fenced_blocks(body: str) -> list[str]:
+    """囲みの中身を、本文に現れる順で返す。"""
+    blocks: list[str] = []
+    current: list[str] | None = None
+    for line in body.splitlines():
+        if line.lstrip().startswith("```"):
+            if current is None:
+                current = []
+            else:
+                blocks.append("\n".join(current))
+                current = None
+            continue
+        if current is not None:
+            current.append(line)
+    return blocks
+
+
+def resolution_snippet(body: str) -> str:
+    """段の解決を書いた囲みを返す。
+
+    読み取れないこと自体を失敗として扱う。囲みを消すだけで、解決の形を見る検査を無効に
+    できる形にしない。
+    """
+    found = [
+        block
+        for block in fenced_blocks("\n".join(section(body, RESOLUTION_TABLE_HEADING)))
+        if "SKILL_REPO=" in block
+    ]
+    assert found, "段の解決を書いた囲みが見つからない"
+    return found[0]
+
+
 def headings(body: str, prefix: str) -> list[str]:
     """その深さの見出しを、本文に現れる順で返す。囲みの中は数えない。"""
     found: list[str] = []

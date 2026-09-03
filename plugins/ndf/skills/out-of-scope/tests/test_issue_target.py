@@ -22,6 +22,7 @@ from issue_target_helpers import (
     headings,
     ordered_steps,
     read,
+    resolution_snippet,
     section,
     table,
 )
@@ -53,6 +54,35 @@ def test_the_resolution_table_has_three_stages() -> None:
     assert [row[0] for row in rows] == ["1", "2", "3"], f"段の並びが違う: {rows}"
     assert "NDF_SKILL_REPO" in rows[0][1], f"段 1 が環境変数を見ていない: {rows[0]}"
     assert "remote.origin.url" in rows[1][1], f"段 2 が取得元の clone を見ていない: {rows[1]}"
+
+
+def test_the_second_stage_only_looks_at_clones_that_carry_ndf() -> None:
+    """段 2 は、NDF の実体を持つ clone だけを候補にする。
+
+    取得元の位置には登録したすべての clone が並ぶ。GitHub の取得元であることだけを条件に
+    すると、Slack など配布元ではないリポジトリが候補に入る。
+    """
+    _, rows = table(read(REFERENCE), RESOLUTION_TABLE_HEADING)
+    assert "plugins/ndf" in rows[1][1], f"段 2 が配布元へ絞っていない: {rows[1]}"
+    assert "plugins/ndf" in resolution_snippet(read(REFERENCE)), "解決が配布元へ絞っていない"
+
+
+def test_the_second_stage_does_not_adopt_inside_the_loop() -> None:
+    """候補の採用を、走査の途中で行わない。
+
+    ループの中で決めると、先頭から見て最初に条件へ合った取得元が採られる。並びは名前順で
+    あって、配布元が先に来る保証は無い。複数残るときは段 3 へ倒す。
+    """
+    code = resolution_snippet(read(REFERENCE))
+    assert "for clone" in code and "done" in code, f"取得元の走査が読み取れない: {code}"
+    loop = code[code.index("for clone") : code.index("done")]
+    assert "SKILL_REPO=" not in loop, f"走査の途中で採用している: {loop}"
+
+
+def test_an_unreadable_resolution_snippet_fails() -> None:
+    """解決の囲みを読み取れないことは、素通りではなく失敗になる。"""
+    with pytest.raises(AssertionError):
+        resolution_snippet(f"{RESOLUTION_TABLE_HEADING}\n\n本文だけの節\n")
 
 
 def test_the_reference_covers_the_duplicate_check_and_the_creation() -> None:

@@ -15,8 +15,11 @@ from retrospective_helpers import (
     DECISION_TABLE_HEADING,
     ISSUE_TARGET,
     POST_TARGET_HEADING,
+    RECORD_REPO,
     SKILL,
+    command_lines,
     fenced_blocks,
+    gh_commands,
     line_after_table,
     link_targets,
     read,
@@ -29,6 +32,16 @@ TEMPLATE_HEADINGS = ("## 何が起きたか", "## 次に変えること", "## �
 # 投稿先を決める 3 つの状況。**起点の issue を持たない変更も網羅する。**
 # 置き場所が無いことを理由に工程を飛ばす経路を残さない。
 POST_TARGET_CASES = ("1 件の issue", "複数の issue", "起点の issue を持たない")
+
+# 記録に触る `gh` の下位コマンド。この工程は `merged` の後に来るため、作業ツリーが消えて
+# いる。`--repo` を省くと、いま作業しているディレクトリのリポジトリへ向かう。
+RECORD_COMMANDS = (
+    "gh issue list",
+    "gh issue comment",
+    "gh pr comment",
+    "gh issue view",
+    "gh issue edit",
+)
 
 
 def test_the_record_is_not_a_file_under_development_history() -> None:
@@ -50,6 +63,42 @@ def test_the_posting_commands_are_written_out() -> None:
     body = read(SKILL)
     for command in ("gh issue comment", "gh pr comment"):
         assert command in body, f"投稿の呼び出しが無い: {command}"
+
+
+def test_the_record_repository_is_resolved_once() -> None:
+    """記録の投稿先のリポジトリを、1 か所で決める。
+
+    決める場所が 2 つあると、片方だけを直したときに投稿と追記が別のリポジトリへ向かう。
+    """
+    definitions = [
+        line.strip()
+        for line in command_lines(read(SKILL))
+        if line.strip().startswith(f"{RECORD_REPO}=")
+    ]
+    assert len(definitions) == 1, f"投稿先の変数の定義が 1 か所ではない: {definitions}"
+    assert "gh repo view" in definitions[0], f"変更を行ったリポジトリから引いていない: {definitions[0]}"
+
+
+def test_every_record_call_passes_the_record_repository() -> None:
+    """記録に触る `gh` の呼び出しは、すべて投稿先のリポジトリを受け取る。
+
+    起票先（`out-of-scope`）とは別のものである。起票先は課題の性質で配布元になることが
+    あるが、記録は起点の issue と配布した Pull Request がある場所に残る。
+    """
+    commands = [c for c in gh_commands(read(SKILL)) if c.startswith(RECORD_COMMANDS)]
+    assert commands, "記録に触る `gh` の呼び出しを読み取れない"
+    for command in RECORD_COMMANDS:
+        assert any(c.startswith(command) for c in commands), f"呼び出しが無い: {command}"
+    missing = [c for c in commands if f'--repo "${RECORD_REPO}"' not in c]
+    assert not missing, f"投稿先が渡されていない: {missing}"
+
+
+def test_the_pull_request_lookup_targets_the_record_repository() -> None:
+    """番号を引く `gh api` も、作業ディレクトリではなく投稿先のリポジトリを見る。"""
+    lines = [line for line in command_lines(read(SKILL)) if "commits/" in line and "/pulls" in line]
+    assert lines, "コミットから Pull Request を引く呼び出しが無い"
+    missing = [line for line in lines if f"${RECORD_REPO}" not in line]
+    assert not missing, f"投稿先のリポジトリを見ていない: {missing}"
 
 
 def test_the_back_reference_line_has_a_fixed_form() -> None:

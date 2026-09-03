@@ -20,6 +20,10 @@ POST_TARGET_HEADING = "#### 投稿先を決める"
 CHANGE_TABLE_HEADING = "### 3. 次に変えることを決める"
 DECISION_TABLE_HEADING = "## 判断表"
 
+# 記録の投稿先のリポジトリを持つ変数。**起票先とは別のものである。** 起票先は課題の性質が
+# 決めるため配布元になることがあるが、記録はその変更を行ったリポジトリに残る。
+RECORD_REPO = "RECORD_REPO"
+
 LINK_RE = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
 
 
@@ -92,6 +96,46 @@ def fenced_blocks(body: str) -> list[str]:
         if current is not None:
             current.append(line)
     return blocks
+
+
+def command_lines(body: str) -> list[str]:
+    """囲みの中の行だけを返す。
+
+    実行できる呼び出しかどうかを見るため、本文の説明に出てくる同じ語は数えない。
+    """
+    found: list[str] = []
+    fenced = False
+    for line in body.splitlines():
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+            continue
+        if fenced:
+            found.append(line)
+    return found
+
+
+def gh_commands(body: str) -> list[str]:
+    """囲みの中の `gh` で始まる呼び出しを、行の継続をつないで返す。
+
+    `\\` で折り返した呼び出しは 1 つにまとめる。行ごとに見ると、次の行へ回した
+    `--repo` を渡していないものとして読んでしまう。
+    """
+    joined: list[str] = []
+    buffer = ""
+    for line in command_lines(body):
+        stripped = line.strip()
+        if not buffer and not stripped.startswith("gh "):
+            continue
+        continues = stripped.endswith("\\")
+        if continues:
+            stripped = stripped[:-1].strip()
+        buffer = f"{buffer} {stripped}".strip()
+        if not continues:
+            joined.append(buffer)
+            buffer = ""
+    if buffer:
+        joined.append(buffer)
+    return joined
 
 
 def link_targets(text: str) -> list[str]:

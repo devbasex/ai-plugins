@@ -36,7 +36,7 @@ NDF を使う開発では、関わるリポジトリが 2 つになることが�
 | 段 | 何を見るか | 決まらないとき |
 | --- | --- | --- |
 | 1 | 環境変数 `NDF_SKILL_REPO`（`<所有者>/<リポジトリ>` の形） | 段 2 へ |
-| 2 | 取得元の clone の `remote.origin.url` | 段 3 へ |
+| 2 | `plugins/ndf/` を持つ取得元の clone の `remote.origin.url`。1 つに絞れたときだけ採る | 段 3 へ |
 | 3 | 利用者に聞く | 推測で `--repo` を渡さず止まる |
 
 段 2 の位置はランタイムで違う。
@@ -47,17 +47,46 @@ NDF を使う開発では、関わるリポジトリが 2 つになることが�
 | Codex | `~/.codex/.tmp/marketplaces/<取得元>` |
 | Kiro | clone した作業ディレクトリ |
 
+**取得元は 1 つとは限らない。** この位置には登録したすべての取得元の clone が並ぶ。
+
+```console
+$ ls -d ~/.claude/plugins/marketplaces/*/
+/home/ubuntu/.claude/plugins/marketplaces/ai-plugins/
+/home/ubuntu/.claude/plugins/marketplaces/anthropic-agent-skills/
+/home/ubuntu/.claude/plugins/marketplaces/claude-plugins-official/
+```
+
+**先頭から見て最初の GitHub の取得元を採ると、配布元ではないリポジトリが決まる。** 上の例で
+`anthropic-agent-skills` は `https://github.com/anthropics/skills.git` を指しており、条件を
+GitHub の取得元であることだけに置くと候補になる。並びは名前順であって、配布元が先に来る
+保証は無い。
+
+**NDF の実体を持つ clone だけを候補にする。** `plugins/ndf/` があることが、その clone が
+NDF の配布元であることの直接の証拠になる。取得元の名前や `marketplace.json` の `name` は、
+fork や登録名の変更で変わるうえ、同じ名前を別の取得元が名乗れる。
+
 ```bash
 SKILL_REPO="${NDF_SKILL_REPO:-}"                                  # 段 1
 
-for clone in ~/.claude/plugins/marketplaces/* ~/.codex/.tmp/marketplaces/*; do
-  [ -n "$SKILL_REPO" ] && break                                   # 段 2
-  url="$(git -C "$clone" config --get remote.origin.url 2>/dev/null || true)"
-  case "$url" in
-    *github.com[:/]*) SKILL_REPO="$(printf '%s' "${url%.git}" | sed 's#.*github.com[:/]##')" ;;
-  esac
-done
+if [ -z "$SKILL_REPO" ]; then                                     # 段 2
+  found=""
+  for clone in ~/.claude/plugins/marketplaces/*/ ~/.codex/.tmp/marketplaces/*/; do
+    [ -d "$clone/plugins/ndf" ] || continue                       # NDF の実体を持つ clone だけを見る
+    url="$(git -C "$clone" config --get remote.origin.url 2>/dev/null || true)"
+    case "$url" in
+      *github.com[:/]*) found="$found${url%.git}
+" ;;
+    esac
+  done
+  found="$(printf '%s' "$found" | sed 's#.*github.com[:/]##' | sort -u)"
+  if [ "$(printf '%s' "$found" | grep -c .)" = 1 ]; then          # 1 つに絞れたときだけ採る
+    SKILL_REPO="$found"
+  fi
+fi
 ```
+
+**絞っても複数残るときは段 3 へ倒す。** fork と本家を両方登録した利用者では、どちらも
+`plugins/ndf/` を持つ。同じ名前が 2 つの取得元から出たときも、`sort -u` が 1 つにまとめる。
 
 **版ごとの配置からは読めない。** `~/.claude/plugins/cache/<取得元>/<名前>/<版>/` には `.git`
 が無く、git の作業ツリーではない。

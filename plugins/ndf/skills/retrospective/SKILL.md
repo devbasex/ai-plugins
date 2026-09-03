@@ -34,6 +34,23 @@ allowed-tools:
 
 ## 手順
 
+**先に、記録を残すリポジトリを決める。** 記録を置くのは、その変更を行ったリポジトリである。
+起点の issue と、変更を配布した Pull Request がある場所を指す。以降の `gh` は、すべて
+このリポジトリへ向ける。
+
+```bash
+RECORD_REPO="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
+```
+
+**起票先とは別のものである。** 起票先は課題の性質が決めるため、配布元のリポジトリになる
+ことがある（[out-of-scope の判断表](../out-of-scope/references/issue-target.md)）。記録の
+投稿先は性質で変わらない。範囲外の課題を配布元へ回した変更でも、記録はこちらに残る。
+
+**`--repo` を省かない。** この工程は `merged` の後に来るため、作業ツリーが消えている。
+`gh` は現在の作業ディレクトリからリポジトリを決めるので、省くと起点の issue や配布した
+Pull Request と違う場所へ記録が残り得る。`gh repo view` が別のリポジトリを返す位置に
+いるときは、推測せずに名前を利用者に確かめる。
+
 ### 1. 起票の取りこぼしを拾う
 
 **この工程で新しく起票を集めない。** 起票は見つけたその場で `/ndf:out-of-scope` が行う。
@@ -41,15 +58,16 @@ allowed-tools:
 
 ```bash
 # その変更から出た課題の一覧（本文とコメントの両方を対象にする）
-gh issue list --state all --search "<由来>"      # 例: "PR #177" / "issue #175"
+gh issue list --repo "$RECORD_REPO" --state all --search "<由来>"   # 例: "PR #177" / "issue #175"
 ```
 
 `<由来>` は `out-of-scope` が起票のときに書いたものと同じ形にする。Pull Request を作る前に
 見つけた課題は起点の issue の番号で残るため、`PR #<番号>` だけで探すと漏れる。**起点の
 issue と Pull Request の両方で検索する。**
 
-起票先が 2 つのリポジトリへ分かれた変更では、`--repo` を変えて両方を検索する。配布元へ
-回した課題は、開発している側のリポジトリの検索には出ない。
+起票先が 2 つのリポジトリへ分かれた変更では、`--repo` を配布元へ替えてもう一度検索する。
+配布元へ回した課題は、開発している側のリポジトリの検索には出ない。**替えるのは検索の
+`--repo` だけで、記録の投稿先は変わらない。**
 
 次の 3 か所と突き合わせる。番号が無いものが取りこぼしである。
 
@@ -118,7 +136,7 @@ issue と Pull Request の両方で検索する。**
 
 ```bash
 BASE=develop      # 起点のブランチ。まとまりの配布なら main
-gh api "/repos/{owner}/{repo}/commits/$(git rev-parse "origin/$BASE")/pulls" \
+gh api "/repos/$RECORD_REPO/commits/$(git rev-parse "origin/$BASE")/pulls" \
   --jq '.[] | select(.merged_at) | "#\(.number) \(.base.ref) <- \(.head.ref)"'
 ```
 
@@ -154,8 +172,8 @@ gh api "/repos/{owner}/{repo}/commits/$(git rev-parse "origin/$BASE")/pulls" \
 ```
 
 ```bash
-gh issue comment <issue番号> --body-file <記録のファイル>   # 起点が 1 件の issue
-gh pr comment <PR番号> --body-file <記録のファイル>         # まとまり / 起点の issue を持たない変更
+gh issue comment <issue番号> --repo "$RECORD_REPO" --body-file <記録のファイル>   # 起点が 1 件の issue
+gh pr comment <PR番号> --repo "$RECORD_REPO" --body-file <記録のファイル>         # まとまり / 起点の issue を持たない変更
 ```
 
 #### 辿る経路を作る
@@ -169,9 +187,9 @@ gh pr comment <PR番号> --body-file <記録のファイル>         # まとま
 **`gh issue edit --body` は本文を全文で書き直す。** いまの本文を読み出してから足す。
 
 ```bash
-gh issue view <issue番号> --json body --jq .body > /tmp/issue-body.md
+gh issue view <issue番号> --repo "$RECORD_REPO" --json body --jq .body > /tmp/issue-body.md
 printf '\n振り返り: %s\n' "<コメントの URL>" >> /tmp/issue-body.md
-gh issue edit <issue番号> --body-file /tmp/issue-body.md
+gh issue edit <issue番号> --repo "$RECORD_REPO" --body-file /tmp/issue-body.md
 ```
 
 まとまりでは、対象のすべての issue へ同じ URL の 1 行を足す。起点の issue を持たない変更では
