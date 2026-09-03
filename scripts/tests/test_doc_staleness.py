@@ -49,6 +49,7 @@ def test_real_repository_passes() -> None:
         ("Claude Code向け core 5個", "Claude Code向け core 4個", "5"),
         ("Kiro向け core 4個", "Kiro向け core 3個", "4"),
         ("Codex向け core 3個", "Codex向け core 2個", "3"),
+        ("agy向け core 2個", "agy向け core 1個", "2"),
     ],
 )
 def test_runtime_skill_count_mismatch_fails(tree: Path, before: str, after: str, expected: str) -> None:
@@ -62,7 +63,12 @@ def test_runtime_skill_count_mismatch_fails(tree: Path, before: str, after: str,
 
 @pytest.mark.parametrize(
     "fragment",
-    ["Claude Code向け core 5個、", "Kiro向け core 4個、", "Codex向け core 3個"],
+    [
+        "Claude Code向け core 5個、",
+        "Kiro向け core 4個、",
+        "Codex向け core 3個、",
+        "agy向け core 2個",
+    ],
 )
 def test_runtime_skill_count_removed_fails(tree: Path, fragment: str) -> None:
     """記載を消して検査を通せる状態を作らない。"""
@@ -135,6 +141,7 @@ def test_category_breakdown_removed_fails(tree: Path) -> None:
         ("| Claude Code | 5 個 |", "| Claude Code | 4 個 |", "5"),
         ("| Codex | 3 個 |", "| Codex | 2 個 |", "3"),
         ("| Kiro CLI | 4 個 |", "| Kiro CLI | 9 個 |", "4"),
+        ("| agy | 2 個 |", "| agy | 7 個 |", "2"),
     ],
 )
 def test_distribution_table_mismatch_fails(tree: Path, before: str, after: str, expected: str) -> None:
@@ -152,6 +159,7 @@ def test_distribution_table_mismatch_fails(tree: Path, before: str, after: str, 
         "| Claude Code | 5 個 | `.claude-plugin/plugin.json` |\n",
         "| Codex | 3 個 | `.codex-plugin/plugin.json` |\n",
         "| Kiro CLI | 4 個 | `dev.kiro/install.sh` |\n",
+        "| agy | 2 個 | `dev.agy/plugin.json` |\n",
     ],
 )
 def test_distribution_table_row_removed_fails(tree: Path, row: str) -> None:
