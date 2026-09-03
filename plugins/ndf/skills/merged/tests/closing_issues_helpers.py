@@ -9,16 +9,25 @@ import subprocess
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts/closing-issues.sh"
+DEFAULT_REPO = "devbasex/ai-plugins"
 
 
-def read(body: str) -> subprocess.CompletedProcess:
-    """本文を標準入力から渡して、取り出された番号を返す。"""
+def read(body: str, repo: str | None = DEFAULT_REPO, cwd: Path | None = None) -> subprocess.CompletedProcess:
+    """本文を標準入力から渡して、取り出された閉じる先を返す。"""
+    args = ["bash", str(SCRIPT)]
+    if repo is not None:
+        args += ["--repo", repo]
     return subprocess.run(
-        ["bash", str(SCRIPT)], input=body, capture_output=True, text=True
+        args, input=body, capture_output=True, text=True, cwd=str(cwd) if cwd else None
     )
 
 
-def numbers(body: str) -> list[str]:
-    result = read(body)
+def entries(body: str, repo: str | None = DEFAULT_REPO, cwd: Path | None = None) -> list[tuple[str, str]]:
+    """`<所有者>/<リポジトリ>` と `<番号>` の組を、現れた順に返す。"""
+    result = read(body, repo=repo, cwd=cwd)
     assert result.returncode == 0, result.stderr
-    return result.stdout.split()
+    return [tuple(line.split("\t")) for line in result.stdout.splitlines() if line]
+
+
+def numbers(body: str, repo: str | None = DEFAULT_REPO) -> list[str]:
+    return [number for _repo, number in entries(body, repo=repo)]

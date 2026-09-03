@@ -1,6 +1,13 @@
 ---
 name: development-workflow
 description: "Classify a change into 4 workflow modes and route it to the required steps. Use when deciding how much process a change needs（モード判定・工程の振り分け）."
+hooks:
+  PreToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: "bash ${CLAUDE_SKILL_DIR}/scripts/workflow-guard.sh"
+          timeout: 10
 ---
 
 # 開発ワークフローの振り分け
@@ -130,6 +137,11 @@ Skill は使わず、`pr` → `cross-review` → `merged` の 3 つを順に呼�
 取り込んでよいと判断したことであって、設計として妥当かの判断ではない。`/goal` で工程を続けて
 通しているときの止まり方は「`/goal` の引数として呼ばれたとき」にある。
 
+**設計 Pull Request の head のブランチ名は `design/` で始める。** 見分けの基準を、書き手が
+意図して選べる 1 つの値に置く。この接頭辞が付いた Pull Request のマージは、承認の印
+（ラベル `design-approved`）が付くまで tool 実行前の hook が止める（「工程の飛ばしと
+マージを機械で見る」）。設計ではない Pull Request にこの接頭辞を使わない。
+
 マージした後は、実装用の作業ツリーを新しく作る（`merged` が設計のブランチと作業ツリーを消すため)。
 `legacy-refactor` で任意としたのは、このモードが要求と受け入れ条件を通らず、レビューの軸が
 現状固定テストの通過に寄るためである。
@@ -189,6 +201,27 @@ flowchart TD
 **この仕組みは任意である。** 宣言が無ければ何も起きず、工程はそのまま通る。進行管理が
 理由で開発が止まってはいけない。設定と値の一覧は
 [references/projects-tracking.md](references/projects-tracking.md) にある。
+
+## 工程の飛ばしとマージを機械で見る
+
+この Skill が呼ばれた会話の単位に、tool 実行前の判定が 1 つ登録される（frontmatter の
+`hooks`）。判定は 2 つで、どちらも進行の記録のコマンドとマージのコマンドを読むだけである。
+
+| 何を見るか | 何をするか |
+| --- | --- |
+| 進行の記録のコマンド | 通過工程として積む。配布の記録へ進んだ時点で、記録の無い必須の工程を案内する |
+| 設計 Pull Request のマージ | 承認の印（ラベル `design-approved`）が無ければ拒否する |
+
+**記録の無い工程は拒否しない。** 記録されていないことは、その工程を通っていないことと
+同じではない。記録の側が遅れているだけの状態でマージや配布が止まると、正当な操作が止まる。
+
+**設計 Pull Request のマージだけは拒否へ踏み込む。** 引き金は接頭辞と承認の印の 2 つが
+そろったときに限られ、印が付けば同じコマンドがそのまま通る。編集は続けても元へ戻せるが、
+マージは戻せない。設計を実装より先に確定させる工程は、マージが済んだ時点で意味を失う。
+
+**承認の印がリポジトリに定義されていること自体が、この仕組みの宣言である。** 定義される
+までは拒否が働かない。有効にする操作と控えの読み方は
+[references/stage-completeness.md](references/stage-completeness.md) にある。
 
 ## `/goal` の引数として呼ばれたとき
 
@@ -288,3 +321,4 @@ flowchart TD
 
 - [references/workflow-modes.md](references/workflow-modes.md) — 判定の境界事例とモード別の詳細
 - [references/projects-tracking.md](references/projects-tracking.md) — 進行を GitHub Projects へ記録する設定と値の一覧
+- [references/stage-completeness.md](references/stage-completeness.md) — 通過工程の控えと報告、承認の印の作り方

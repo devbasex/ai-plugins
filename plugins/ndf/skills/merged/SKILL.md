@@ -122,14 +122,14 @@ fi
 # この Skill のスクリプトは、その 1 つ上（プラグインの根）から辿る。
 CLOSING="$SCRIPTS/../skills/merged/scripts/closing-issues.sh"
 
-# 1. 本文から閉じる語が指す番号を取り出す
+# 1. 本文から閉じる語が指す先を取り出す（<所有者>/<リポジトリ> と <番号> をタブ区切りで出す）
 gh pr view <PR番号> --json body -q .body | bash "$CLOSING"
 
 # 2. まだ OPEN のものだけに絞る
-gh issue view <番号> --json state -q .state    # OPEN / CLOSED
+gh issue view <番号> --repo <所有者>/<リポジトリ> --json state -q .state    # OPEN / CLOSED
 
 # 3. 一覧を提示して同意を得てから閉じる
-gh issue close <番号> --comment "PR #<PR番号> でマージしました"
+gh issue close <番号> --repo <所有者>/<リポジトリ> --comment "PR #<PR番号> でマージしました"
 ```
 
 - **閉じる語は番号ごとに要る。** `Fixes #12, #13` は 12 だけが対象で、`#13` は閉じる語を
@@ -141,6 +141,12 @@ gh issue close <番号> --comment "PR #<PR番号> でマージしました"
 - **対象は OPEN のものに限る。** 既定ブランチへマージした場合は GitHub が先に閉じている。
   この手順を二重に実行しても結果は変わらない
 - 閉じる語が 1 つも無ければ何もしない。スクリプトは何も出さずに終了コード 0 で終わる
+- **閉じる先は、リポジトリまで含めて取り出す。** 開発の対象が別のリポジトリのとき、そこへ
+  起票した issue は番号だけでは指せない。`Fixes <所有者>/<リポジトリ>#<番号>` と issue の
+  URL の 2 つも読み、番号だけの形はこれまでどおり実行したリポジトリの issue を指す
+- **`gh issue close` は `owner/repo#番号` を受け取らない。** 位置引数は `{<number> | <url>}`
+  で、リポジトリを渡す口は `--repo` だけである。取り出した 2 つの値をそのまま
+  `gh issue close <番号> --repo <所有者>/<リポジトリ>` の形へ渡す
 
 ## マージ済みブランチの整理
 
@@ -173,9 +179,25 @@ git push origin --delete <branch>        # 4. リモートにも残っていれ�
    - コンフリクト時は `git diff --name-only --diff-filter=U` で一覧を表示し、**自動解決はしない**。ユーザーに報告し、確認後に作業継続
 5. **後処理**: stash していれば `git stash pop`。コンフリクトがなければ `git push` で反映し、マージ済みコミット数と変更ファイル数を報告
 
+## 通過工程を報告に載せる
+
+**記憶から書かない。** 工程を通ったかどうかは会話の中にしか残らず、セッションが変わると
+引き継がれない。スクリプトの出力をそのまま完了報告へ貼る。
+
+```bash
+bash "$SCRIPTS/../skills/development-workflow/scripts/stage-check.sh" report <issue番号>
+```
+
+- 記録が無ければ 1 行だけ返る。**すべての工程を欠落として並べない**
+- 記録の無い必須の工程があれば、その名前と、記録するコマンドが出力に載る
+- 実施済みであれば記録してから先へ進む。実施していなければ、その工程へ戻る
+- 控えの読み方と、記録が無いときの扱いは
+  [references/stage-completeness.md](../development-workflow/references/stage-completeness.md) にある
+
 ## 作業完了報告（必須）
 
 - 実行サマリー（PR タイトル、マージコミット、削除したブランチ、現在のブランチ）
+- **通過工程の報告**（前節の `stage-check.sh report` の出力をそのまま貼る）
 - **閉じた issue の番号**。閉じなかったものがあれば理由（既に CLOSED だった、同意が得られなかった）
 - 起点ブランチの状態
 - 復元していない stash が残っている場合はその旨と `git stash list` の該当エントリ
