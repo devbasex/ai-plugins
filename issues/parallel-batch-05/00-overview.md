@@ -52,7 +52,7 @@
 | 担当 | 書き換えてよいパス | 触らないパス |
 | --- | --- | --- |
 | A | `plugins/ndf/skills/cross-review/` / `cross-refactoring/` / `external-ai/` / `fix/SKILL.md` / `issue-plan-strategy/SKILL.md` / `pr-review/SKILL.md` / `worktree/` の `gemini` の記述 / `plugins/ndf/scripts/lib/worktree-common.sh` / `plugins/ndf/scripts/worktree-guard.sh` / `.ndf/worktree.json` | `scripts/` / 説明文書 / `development-workflow/` / `merged/` / `retrospective/` / `out-of-scope/` / `release/` |
-| B | `plugins/ndf/dev.agy/`（新設） / `plugins/ndf/manifests/` / `.agents/` / `scripts/` / `plugins/ndf/skills/README.md` / 説明文書一式 / `docs/specifications/` / `plugins/ndf/skills/worktree/tests/` の**新しいファイル** | `plugins/ndf/skills/<Skill 名>/` の SKILL.md と参照 / `worktree/tests/` の既存ファイル / `plugins/ndf/scripts/`（担当 A のマージ後に触る） |
+| B | `plugins/ndf/dev.agy/`（新設） / `plugins/ndf/manifests/` / `.agents/` / `scripts/` / `plugins/ndf/skills/README.md` / 説明文書一式 / `docs/specifications/` / `plugins/ndf/skills/worktree/tests/` の**新しいファイル** / 「`$SCRIPTS` を決める」節の候補の一覧（下の例外） | `plugins/ndf/skills/<Skill 名>/` の SKILL.md と参照（例外は候補の一覧の 1 箇所） / `worktree/tests/` の既存ファイル / `plugins/ndf/scripts/`（担当 A のマージ後に触る） |
 | C | `plugins/ndf/skills/development-workflow/` / `plugins/ndf/skills/merged/` | `release/` / `retrospective/` / `out-of-scope/` / `worktree/` / `scripts/` / 説明文書 |
 | D | `plugins/ndf/skills/retrospective/` / `plugins/ndf/skills/out-of-scope/` / `AGENTS.md` のドキュメント表の行 | `development-workflow/` / `release/` / `scripts/` / `AGENTS.md` の他の節 |
 | E | `plugins/ndf/skills/release/` | 他のすべての Skill / `scripts/` / 説明文書 |
@@ -95,6 +95,7 @@ git は自動でマージできるが、**マージの順序は F → A とす�
 | 起動オプションの対応（`--add-dir` / `--dangerously-skip-permissions` など） | 担当 A |
 | 配布先ランタイムとしての `agy`（`plugin.json` / `hooks.json` / manifest） | 担当 B |
 | `worktree-common.sh` の `toolCall.args` からパスを取り出す経路 | 担当 B（担当 A のマージ後） |
+| 「`$SCRIPTS` を決める」節の候補の一覧へ agy の導入先を足す | 担当 B（下の「解決手順の候補への agy の追加は担当 B が持つ」） |
 
 **マージの順序は A → B とする。**
 
@@ -138,6 +139,39 @@ Agent Plugins 1.0.0 §8.2 のクライアント拡張ディレクトリにあた
 担当 F は既存の節をそのまま指す設計を採り、担当 C はその本文を変えない前提で設計している。
 **両者の前提は一致している。** 節の置き場所の見直しは
 [#282](https://github.com/devbasex/ai-plugins/issues/282) が扱う。
+
+### 解決手順の候補への agy の追加は担当 B が持つ
+
+担当 B が agy を配布先ランタイムへ加えるため、`$SCRIPTS` の解決手順が試す候補も 3 ランタイム分の
+ままでは足りない。**agy へ導入した配置から `worktree` の手順を実行しても、候補が 1 つも当たらない。**
+
+`agy plugin install` はプラグインのディレクトリ全体を
+`~/.gemini/config/plugins/<plugin.json の name>/` へ複製し、`dev.agy/scripts` の symlink は実体へ
+解決して複製される（`02-issue-215.md` の実測）。導入先は `~/.gemini/config/plugins/ndf/scripts`
+になる。手元では未導入のため、複製の先のディレクトリだけを確かめた。
+
+```console
+$ agy --version
+1.1.24
+$ ls -ld ~/.gemini/config/plugins
+drwxr-xr-x 2 ubuntu ubuntu 4096 Sep  3 01:33 /home/ubuntu/.gemini/config/plugins
+$ agy plugin list
+No imported plugins.
+```
+
+**この 1 箇所だけは担当 B が持つ。** 節そのものは担当 C の持ち物だが、agy を配布先ランタイムへ
+加えることに伴う変更は担当 B がまとめて持つ（manifest・検査・実機確認と同じ）。導入先を実測した
+のも担当 B である。`scripts/check-skill-frontmatter.py` の 1 項目を担当 C が持つのと、向きが逆の
+同じ例外にあたる。
+
+| ファイル | 担当 B が触る箇所 | 担当 C が触る箇所 |
+| --- | --- | --- |
+| `development-workflow/references/projects-tracking.md` | 「`$SCRIPTS` を決める」節の候補の一覧と、その上の対応表への agy の行 | 触らない（節の本文は動かさない） |
+| `development-workflow/tests/test_projects_scripts_lookup.py` | agy の配置を作る枝 | 他の枝 |
+
+**担当 F の設計は 3 ランタイム前提のままで成立する。** 担当 F が担当 C と突き合わせた 3 つの前提
+（節の位置と見出し・変数名 `SCRIPTS`・決まらないときに空の値を残すこと）は、候補が 1 つ増えても
+崩れない。マージの順序は F → A → B であるため、**担当 B は担当 F のマージ後に候補を足す**。
 
 ### 設計 Pull Request のブランチは `design/` で始める
 
