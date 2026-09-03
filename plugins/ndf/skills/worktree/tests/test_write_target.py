@@ -1805,9 +1805,26 @@ def test_a_case_break_still_isolates_the_branches() -> None:
         ("f() { cd .worktrees/x; }; cp a.txt README.md", "/base/README.md"),
         ("function f { cd .worktrees/x; }; cp a.txt README.md", "/base/README.md"),
         ("f () ( cd .worktrees/x ); cp a.txt README.md", "/base/README.md"),
+        # `function` と `()` を併せた形も bash は定義として受け取る。
+        (
+            "function f () { cd .worktrees/x; }; cp a.txt README.md",
+            "/base/README.md",
+        ),
+        (
+            "function f() { cd .worktrees/x; }; cp a.txt README.md",
+            "/base/README.md",
+        ),
+        (
+            "function f () ( cd .worktrees/x ); cp a.txt README.md",
+            "/base/README.md",
+        ),
         # 先に済ませた移動は、本体の `cd` に上書きされない。
         (
             "cd .worktrees/x; f () { cd ../..; }; cp a.txt README.md",
+            "/base/.worktrees/x/README.md",
+        ),
+        (
+            "cd .worktrees/x; function f () { cd ../..; }; cp a.txt README.md",
             "/base/.worktrees/x/README.md",
         ),
     ],
@@ -1834,17 +1851,28 @@ def test_a_function_body_still_reports_its_writes() -> None:
     assert targets == ["/base/README.md"]
 
 
-def test_calling_a_moving_function_leaves_the_position_undecidable() -> None:
+@pytest.mark.parametrize(
+    "command",
+    [
+        "f () { cd .worktrees/x; }; f; cp a.txt README.md",
+        "f() { cd .worktrees/x; }; f; cp a.txt README.md",
+        "function f { cd .worktrees/x; }; f; cp a.txt README.md",
+        # `function` と `()` を併せた形でも、控える名前は `()` を含まない。
+        "function f () { cd .worktrees/x; }; f; cp a.txt README.md",
+        "function f() { cd .worktrees/x; }; f; cp a.txt README.md",
+    ],
+)
+def test_calling_a_moving_function_leaves_the_position_undecidable(
+    command: str,
+) -> None:
     """本体で移動する関数を呼んだ後の現在地は、字面から決められない。
 
     本体の相対パスは呼び出しの時点の現在地から解決されるため、当てはめるには
     本体をもう一度読み直すことになる（1 パス走査の枠を出る）。
     """
-    targets, rc = extract_at(
-        "f () { cd .worktrees/x; }; f; cp a.txt README.md", "/base"
-    )
-    assert rc == 1
-    assert targets == []
+    targets, rc = extract_at(command, "/base")
+    assert rc == 1, command
+    assert targets == [], command
 
 
 def test_a_brace_group_still_carries_cd_outside_itself() -> None:

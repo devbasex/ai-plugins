@@ -1223,12 +1223,15 @@ wt_extract_write_target() {
     # 関数定義を見分ける（決定 2）。字句解析は `f()` を 1 語に、`f ()` を `f` と
     # `()` の 2 語にまとめるため、直前の語だけで足りる。
     case "$func_stage" in
-      # `function` の次の語が名前である。
-      name) func_name="$w"; func_stage=body ;;
+      # `function` の次の語が名前である。`function f()` は字句解析が 1 語に
+      # まとめるため、末尾の `()` を落として名前だけを控える。付けたままだと
+      # 呼び出しの語 (`f`) と照合できず、決定 3 の隔離が働かない。
+      name) func_name=${w%"()"}; func_stage=body ;;
       # 命令の位置の語の次が `()` なら定義である。そうでなければ普通の命令だった。
       paren) if [ "$w" = "()" ]; then func_stage=body; else func_stage=""; fi ;;
       # 本体を開く語を待つ。改行を挟む書き方 (`f ()` の次の行に `{`) がある。
-      body) case "$w" in "{"|"("|__WT_SEP__) ;; *) func_stage="" ;; esac ;;
+      # `function f () { ...; }` の `()` は名前と本体の間に挟まるため読み飛ばす。
+      body) case "$w" in "{"|"("|"()"|__WT_SEP__) ;; *) func_stage="" ;; esac ;;
     esac
     if [ -z "$func_stage" ] && [ "$at_cmd" = 1 ]; then
       case "$w" in
