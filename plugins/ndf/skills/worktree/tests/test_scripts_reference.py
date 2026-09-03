@@ -244,7 +244,7 @@ def test_lookup_procedure_is_the_only_one() -> None:
     ], f"手順が 1 本ではない: {owners}"
 
 
-# --- 条件 4: 3 ランタイムの配置で解決できる ---------------------------------------
+# --- 条件 4: 4 ランタイムの配置で解決できる ---------------------------------------
 
 
 def test_claude_code_layout_resolves_worktree_setup(tmp_path, elsewhere, home) -> None:
@@ -265,6 +265,17 @@ def test_kiro_layout_resolves_worktree_setup(tmp_path, home) -> None:
 def test_codex_layout_resolves_worktree_setup(elsewhere, home) -> None:
     """Codex: マーケットプレイスのスナップショットの下から見つける。"""
     make_plugin(home / ".codex" / ".tmp" / "marketplaces" / "ai-plugins" / "plugins" / "ndf")
+    scripts = resolve(elsewhere, home)
+    assert Path(scripts, "worktree-setup.sh").is_file()
+
+
+def test_agy_layout_resolves_worktree_setup(elsewhere, home) -> None:
+    """agy: `agy plugin install` が複製した固定の位置から見つける。
+
+    候補を足したのに片方のテストしか直さないと、こちらが前のランタイムの数のまま通り続ける
+    （`00-overview.md` の「`worktree/tests/` は 3 担当が触る」の例外）。
+    """
+    make_plugin(home / ".gemini" / "config" / "plugins" / "ndf")
     scripts = resolve(elsewhere, home)
     assert Path(scripts, "worktree-setup.sh").is_file()
 

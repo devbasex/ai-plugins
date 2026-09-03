@@ -1,4 +1,4 @@
-"""`$SCRIPTS` の解決が 3 ランタイムの配置で当たることを検証する。
+"""`$SCRIPTS` の解決が 4 ランタイムの配置で当たることを検証する。
 
 解決の手順は `references/projects-tracking.md` の bash のコードブロックにしかない。
 テストはそのブロックを読み出して実行する。手順を写し取ると、写しだけが正しくて配布された
@@ -96,6 +96,15 @@ def make_codex(home: Path, marketplace: str = "ai-plugins") -> Path:
     return make_plugin(root)
 
 
+def make_agy(home: Path) -> Path:
+    """agy が `agy plugin install` で複製した配置を作る。
+
+    取得元の登録が無いため位置は固定で、名前は `plugin.json` の `name`（`ndf`）になる。
+    `dev.agy/scripts` の symlink は実体へ解決されて複製されるため、導入先では実体である。
+    """
+    return make_plugin(home / ".gemini" / "config" / "plugins" / "ndf")
+
+
 @pytest.fixture()
 def home(tmp_path: Path) -> Path:
     """手順が実ユーザの導入物を拾わないよう、HOME を空のディレクトリにする。"""
@@ -189,6 +198,12 @@ def test_codex_marketplace_name_is_not_fixed(elsewhere, home) -> None:
     assert resolve(elsewhere, home) == str(plugin / "scripts")
 
 
+def test_agy_install_layout(elsewhere, home) -> None:
+    """agy: 導入先の位置は固定である。作業ディレクトリに依らない。"""
+    plugin = make_agy(home)
+    assert resolve(elsewhere, home) == str(plugin / "scripts")
+
+
 def test_repository_checkout_is_the_last_resort(tmp_path, home) -> None:
     """リポジトリを直接 clone した場合は作業ディレクトリからの相対で当たる。"""
     checkout = tmp_path / "checkout"
@@ -202,3 +217,14 @@ def test_kiro_wins_over_codex(tmp_path, home) -> None:
     plugin = make_plugin(tmp_path / "kiro-plugin" / "plugins" / "ndf")
     project = link_kiro(tmp_path / "project", plugin)
     assert resolve(project, home) == str(plugin / "scripts")
+
+
+def test_agy_is_found_after_codex(elsewhere, home) -> None:
+    """Codex と agy の両方が導入されている機械では、候補の並びのとおり Codex を採る。
+
+    どちらも作業ディレクトリに依らない配置であるため、並びだけが順序を決める。
+    並びを変える判断は #281 が扱う。
+    """
+    codex = make_codex(home)
+    make_agy(home)
+    assert resolve(elsewhere, home) == str(codex / "scripts")
