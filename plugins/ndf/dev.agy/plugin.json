@@ -1,5 +1,5 @@
 {
   "name": "ndf",
-  "version": "9.8.0-dev.1",
-  "description": "Antigravity CLI plugin (v9.8.0-dev.1): 31 focused NDF skills for PR/review workflows, cross-review, implementation planning, plan-to-spec, Docker container access, external AI delegation, and worktree guidance hooks."
+  "version": "10.0.0-dev.1",
+  "description": "Antigravity CLI plugin (v10.0.0-dev.1): 31 focused NDF skills for PR/review workflows, cross-review, implementation planning, plan-to-spec, Docker container access, external AI delegation, and worktree guidance hooks."
 }

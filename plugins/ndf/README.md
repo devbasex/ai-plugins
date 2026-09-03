@@ -90,7 +90,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v9.8.0-dev.1）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.0.0-dev.1）
 ```
 
 ### agy
@@ -110,11 +110,39 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v9.8.0-dev.1 へ更新するとき
+## v10.0.0-dev.1 へ更新するとき
+
+**外部 AI の委譲先が `gemini` から `agy`（Antigravity CLI）へ変わります。破壊的変更です。**
+`/ndf:cross-review` と `/ndf:cross-refactoring` は `agy` を呼びます。`--model gemini=<名前>` は
+受け付けなくなり、`gemini` CLI しか持たない環境では収束ループが動きません。Google が
+Gemini CLI を Antigravity CLI へ移す方針を告知したことによる、計画された移行です
+（[#214](https://github.com/devbasex/ai-plugins/issues/214)）。
 
 **配布先が 1 つ増えます（agy 向け 31 個）。** 既存の 3 つの公開 Skill の数は変わりません
-（Claude Code 33 / Codex 31 / Kiro 32）。この版ではほかに、`cross-review` の判定と巻き直しと
-振動検知、後片付けの工程、そして進行を盤面へ記録できる工程の範囲が変わります。
+（Claude Code 33 / Codex 31 / Kiro 32）。agy 向けの定義は `plugins/ndf/dev.agy/` にあり、
+`agy plugin install` で導入します（[#215](https://github.com/devbasex/ai-plugins/issues/215)）。
+
+**工程の進み方に 2 つの手当てが入ります。** 必須の工程を記録しないまま配布へ進むと、記録の
+無い工程が案内に出ます（[#221](https://github.com/devbasex/ai-plugins/issues/221)）。設計
+Pull Request のマージは、`design-approved` ラベルが無いと止まります
+（[#266](https://github.com/devbasex/ai-plugins/issues/266)）。**このラベルをリポジトリへ
+定義するまで、承認のゲートは働きません。** 定義そのものが有効化の宣言を兼ねます。
+
+```bash
+gh label create design-approved --description "設計レビューを人間が承認した" --color 0e8a16
+```
+
+**振り返りの記録先が変わります。** `docs/development-history/` へファイルを新しく作るのを
+やめ、起点の issue か配布した Pull Request へのコメント 1 件にします。既存の記録は残ります
+（[#242](https://github.com/devbasex/ai-plugins/issues/242)）。あわせて、範囲外の課題を
+どのリポジトリへ起票するかの判断が `out-of-scope` に入りました
+（[#229](https://github.com/devbasex/ai-plugins/issues/229)）。
+
+**配布の完了を確かめる手順が `release` に入ります。** ログの文字列を推測して待つのではなく、
+配布先の状態が変わったことで確かめます（[#228](https://github.com/devbasex/ai-plugins/issues/228)）。
+
+**`worktree` の手順が動くようになります。** 定義の無い `$NDF_SCRIPTS` を参照していた 20 行を、
+解決手順を持つ `$SCRIPTS` へ揃えました（[#193](https://github.com/devbasex/ai-plugins/issues/193)）。
 
 更新は取得元を更新してから、プラグインの側も更新します。**取得元の更新だけでは、導入済みの版は
 変わりません。**
@@ -364,7 +392,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/9.8.0-dev.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.0.0-dev.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -386,14 +414,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/9.8.0-dev.1/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.0.0-dev.1/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  9.8.0-dev.1  <path>
+# => ndf@ai-plugins  installed, enabled  10.0.0-dev.1  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
