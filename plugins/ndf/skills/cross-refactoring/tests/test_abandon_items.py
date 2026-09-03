@@ -11,7 +11,7 @@ import pytest
 
 from crossref_helpers import make_state, read_state, write_result
 
-REVIEWERS = ["gemini", "kiro"]
+REVIEWERS = ["agy", "kiro"]
 
 
 def _item(item_id, commits, status="reviewing"):
@@ -25,7 +25,7 @@ def _item(item_id, commits, status="reviewing"):
 
 
 def _finding(item_id, resolved=False, thread="PRRT_x"):
-    return {"reviewer": "gemini", "item_id": item_id,
+    return {"reviewer": "agy", "item_id": item_id,
             "thread_id": thread, "summary": "x", "resolved": resolved}
 
 
@@ -43,7 +43,7 @@ def _state(tmp_path, findings, item_ids=("R1-001", "R1-002")):
             "items": list(item_ids),
             "apply": {"applied": list(item_ids), "failed": []},
             "fix_rounds": 3, "durations": {},
-            "reviews": [{"round": 1, "gemini": "REQUEST_CHANGES", "kiro": "APPROVE",
+            "reviews": [{"round": 1, "agy": "REQUEST_CHANGES", "kiro": "APPROVE",
                          "findings": findings}],
         }],
     )

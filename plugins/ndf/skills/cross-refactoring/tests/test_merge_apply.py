@@ -333,9 +333,9 @@ def _state_with_items(tmp_path, items, **over):
         tmp_path,
         items=items,
         rounds=[{
-            "round": 1, "impl": "codex", "reviewers": ["gemini", "kiro"],
+            "round": 1, "impl": "codex", "reviewers": ["agy", "kiro"],
             "impl_model": {"requested": "gpt-5.5", "observed": None},
-            "reviewer_models": {"gemini": {"requested": None, "observed": None},
+            "reviewer_models": {"agy": {"requested": None, "observed": None},
                                 "kiro": {"requested": None, "observed": None}},
             "proposed": {}, "merged": 2, "adopted": len(items), "deferred": 0,
             "items": [i["item_id"] for i in items],
@@ -912,7 +912,7 @@ def test_apply_base_is_recorded_by_the_orchestrator(
     """起点を実装担当の申告に委ねない。"""
 
     state_path = make_state(tmp_path, rounds=[{
-        "round": 1, "impl": "codex", "reviewers": ["gemini", "kiro"],
+        "round": 1, "impl": "codex", "reviewers": ["agy", "kiro"],
         "impl_model": {"requested": None, "observed": None},
         "reviewer_models": {}, "proposed": {}, "items": [],
         "apply": {"applied": [], "failed": []}, "fix_rounds": 0,
@@ -920,7 +920,7 @@ def test_apply_base_is_recorded_by_the_orchestrator(
     }])
     env_tmp_dir(state_path)
     monkeypatch.setattr(refactor, "_git_out", lambda work, args, **_kw: "BASE_HEAD")
-    for rt in ("codex", "gemini", "kiro"):
+    for rt in ("codex", "agy", "kiro"):
         write_result(state_path, f"{rt}-propose-rf130", {"items": []})
     with pytest.raises(SystemExit):
         refactor.cmd_merge_proposals(type("A", (), {"id": 130})())

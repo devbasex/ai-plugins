@@ -27,19 +27,19 @@ def proposal(**over):
 def test_same_target_and_smell_is_merged(refactor):
     adopted, _ = refactor.merge_proposals({
         "codex": [proposal()],
-        "gemini": [proposal(rationale="短い")],
+        "agy": [proposal(rationale="短い")],
         "kiro": [proposal(path="src/bar.py")],
     })
     assert len(adopted) == 2
     merged = next(i for i in adopted if i["path"] == "src/foo.py")
-    assert sorted(merged["proposed_by"]) == ["codex", "gemini"]
+    assert sorted(merged["proposed_by"]) == ["agy", "codex"]
 
 
 def test_merged_item_keeps_the_most_specific_text(refactor):
     """`rationale` と `plan` は最も具体的なもの（長い方）を採る。"""
     adopted, _ = refactor.merge_proposals({
         "codex": [proposal(rationale="長い", plan="短")],
-        "gemini": [proposal(rationale="短", plan="とても長い手順の説明")],
+        "agy": [proposal(rationale="短", plan="とても長い手順の説明")],
     })
     assert adopted[0]["rationale"] == "長い"
     assert adopted[0]["plan"] == "とても長い手順の説明"
@@ -49,7 +49,7 @@ def test_merged_item_takes_the_higher_severity_and_larger_estimate(refactor):
     """見積りを楽観側へ倒さない。差分予算の検証が甘くなるため。"""
     adopted, _ = refactor.merge_proposals({
         "codex": [proposal(severity="minor", estimated_diff_lines=10)],
-        "gemini": [proposal(severity="critical", estimated_diff_lines=90)],
+        "agy": [proposal(severity="critical", estimated_diff_lines=90)],
     })
     assert adopted[0]["severity"] == "critical"
     assert adopted[0]["estimated_diff_lines"] == 90
@@ -59,7 +59,7 @@ def test_test_gap_is_sticky(refactor):
     """1 者でもテストが乏しいと申告したら、固定テストの先行を要求する側へ倒す。"""
     adopted, _ = refactor.merge_proposals({
         "codex": [proposal(test_gap=False)],
-        "gemini": [proposal(test_gap=True)],
+        "agy": [proposal(test_gap=True)],
     })
     assert adopted[0]["test_gap"] is True
 
@@ -67,7 +67,7 @@ def test_test_gap_is_sticky(refactor):
 def test_different_smell_on_same_target_is_not_merged(refactor):
     adopted, _ = refactor.merge_proposals({
         "codex": [proposal(smell="long_method")],
-        "gemini": [proposal(smell="deep_nesting", technique="flatten_conditional")],
+        "agy": [proposal(smell="deep_nesting", technique="flatten_conditional")],
     })
     assert len(adopted) == 2
 
@@ -135,7 +135,7 @@ def test_priority_is_agreement_then_severity_then_size(refactor):
             proposal(symbol="B", severity="critical", estimated_diff_lines=200),
             proposal(symbol="C", severity="major", estimated_diff_lines=10),
         ],
-        "gemini": [proposal(symbol="C", severity="major", estimated_diff_lines=10)],
+        "agy": [proposal(symbol="C", severity="major", estimated_diff_lines=10)],
     })
     assert [i["symbol"] for i in adopted] == ["C", "B", "A"]
 
@@ -178,7 +178,7 @@ def test_merge_proposals_command_creates_items(
     refactor, tmp_path, env_tmp_dir, no_git, capsys
 ):
     state_path = make_state(tmp_path, rounds=[{
-        "round": 1, "impl": "codex", "reviewers": ["gemini", "kiro"],
+        "round": 1, "impl": "codex", "reviewers": ["agy", "kiro"],
         "impl_model": {"requested": None, "observed": None},
         "reviewer_models": {}, "proposed": {}, "items": [],
         "apply": {"applied": [], "failed": []}, "fix_rounds": 0,
@@ -186,7 +186,7 @@ def test_merge_proposals_command_creates_items(
     }])
     env_tmp_dir(state_path)
     write_result(state_path, "codex-propose-rf130-r1", {"items": [proposal()]})
-    write_result(state_path, "gemini-propose-rf130-r1", {"items": [proposal()]})
+    write_result(state_path, "agy-propose-rf130-r1", {"items": [proposal()]})
     write_result(state_path, "kiro-propose-rf130-r1", {"items": []})
 
     refactor.cmd_merge_proposals(type("A", (), {"id": 130})())
@@ -194,7 +194,7 @@ def test_merge_proposals_command_creates_items(
     state = read_state(state_path)
     assert [i["item_id"] for i in state["items"]] == ["R1-001"]
     assert state["rounds"][0]["adopted"] == 1
-    assert state["rounds"][0]["proposed"] == {"codex": 1, "gemini": 1, "kiro": 0}
+    assert state["rounds"][0]["proposed"] == {"codex": 1, "agy": 1, "kiro": 0}
     assert state["phase"] == "apply"
 
 
@@ -202,14 +202,14 @@ def test_merge_proposals_command_exits_2_when_nothing_adopted(
     refactor, tmp_path, env_tmp_dir, no_git
 ):
     state_path = make_state(tmp_path, rounds=[{
-        "round": 1, "impl": "codex", "reviewers": ["gemini", "kiro"],
+        "round": 1, "impl": "codex", "reviewers": ["agy", "kiro"],
         "impl_model": {"requested": None, "observed": None},
         "reviewer_models": {}, "proposed": {}, "items": [],
         "apply": {"applied": [], "failed": []}, "fix_rounds": 0,
         "durations": {}, "reviews": [],
     }])
     env_tmp_dir(state_path)
-    for rt in ("codex", "gemini", "kiro"):
+    for rt in ("codex", "agy", "kiro"):
         write_result(state_path, f"{rt}-propose-rf130-r1", {"items": []})
 
     with pytest.raises(SystemExit) as e:
@@ -227,7 +227,7 @@ def test_non_object_proposal_result_is_treated_as_empty(
 ):
     """結果が配列でもクラッシュせず、その 1 者の提案なしとして続けること。"""
     state_path = make_state(tmp_path, rounds=[{
-        "round": 1, "impl": "codex", "reviewers": ["gemini", "kiro"],
+        "round": 1, "impl": "codex", "reviewers": ["agy", "kiro"],
         "impl_model": {"requested": None, "observed": None},
         "reviewer_models": {}, "proposed": {}, "items": [],
         "apply": {"applied": [], "failed": []}, "fix_rounds": 0,
@@ -235,7 +235,7 @@ def test_non_object_proposal_result_is_treated_as_empty(
     }])
     env_tmp_dir(state_path)
     write_result(state_path, "codex-propose-rf130-r1", ["配列で返ってきた"])
-    write_result(state_path, "gemini-propose-rf130-r1", {"items": [proposal()]})
+    write_result(state_path, "agy-propose-rf130-r1", {"items": [proposal()]})
     write_result(state_path, "kiro-propose-rf130-r1", {"items": [proposal()]})
 
     refactor.cmd_merge_proposals(type("A", (), {"id": 130})())
@@ -251,14 +251,14 @@ def test_merge_proposals_is_idempotent(refactor, tmp_path, env_tmp_dir, no_git):
     進行を止めても再開できることが前提なので、統合済みなら前回と同じ結果を返す。
     """
     state_path = make_state(tmp_path, rounds=[{
-        "round": 1, "impl": "codex", "reviewers": ["gemini", "kiro"],
+        "round": 1, "impl": "codex", "reviewers": ["agy", "kiro"],
         "impl_model": {"requested": None, "observed": None},
         "reviewer_models": {}, "proposed": {}, "items": [],
         "apply": {"applied": [], "failed": []}, "fix_rounds": 0,
         "durations": {}, "reviews": [],
     }])
     env_tmp_dir(state_path)
-    for rt in ("codex", "gemini", "kiro"):
+    for rt in ("codex", "agy", "kiro"):
         write_result(state_path, f"{rt}-propose-rf130-r1", {"items": [proposal()]})
 
     args = type("A", (), {"id": 130})()
@@ -277,14 +277,14 @@ def test_merge_proposals_replays_the_converged_exit_code(
 ):
     """採用 0 件で終わったラウンドを叩き直しても、同じ終了コードを返す。"""
     state_path = make_state(tmp_path, rounds=[{
-        "round": 1, "impl": "codex", "reviewers": ["gemini", "kiro"],
+        "round": 1, "impl": "codex", "reviewers": ["agy", "kiro"],
         "impl_model": {"requested": None, "observed": None},
         "reviewer_models": {}, "proposed": {}, "items": [],
         "apply": {"applied": [], "failed": []}, "fix_rounds": 0,
         "durations": {}, "reviews": [],
     }])
     env_tmp_dir(state_path)
-    for rt in ("codex", "gemini", "kiro"):
+    for rt in ("codex", "agy", "kiro"):
         write_result(state_path, f"{rt}-propose-rf130-r1", {"items": []})
 
     args = type("A", (), {"id": 130})()

@@ -1,7 +1,7 @@
 """担当の決定（ホスト判定 / 母集合 / 輪番）のテスト。
 
 **`runtimes` と `impl_capable` を同一視しない**ことがここの主題である。
-前者はホストを除いた 3 者（提案・レビュー）、後者は gemini を除いた 3 者（適用）で、
+前者はホストを除いた 3 者（提案・レビュー）、後者は agy を除いた 3 者（適用）で、
 重なるが一致しない。
 """
 from __future__ import annotations
@@ -18,10 +18,10 @@ def test_explicit_host_wins(assignment):
     assert assignment.detect_host("codex") == ("codex", "explicit")
 
 
-def test_explicit_host_rejects_gemini(assignment):
-    """gemini は NDF の配布先ではないため、ホストになれない。"""
+def test_explicit_host_rejects_agy(assignment):
+    """agy は NDF の配布先ではないため、ホストになれない。"""
     with pytest.raises(assignment.AssignmentError):
-        assignment.detect_host("gemini")
+        assignment.detect_host("agy")
 
 
 def test_host_detected_from_env(assignment):
@@ -51,7 +51,7 @@ def test_review_pool_is_all_minus_host(assignment, host):
 def test_impl_pool_is_host_independent(assignment, host):
     """適用の母集合はホストによらず常に claude / codex / kiro になる。"""
     assert assignment.impl_pool() == ["claude", "codex", "kiro"]
-    assert "gemini" not in assignment.impl_pool()
+    assert "agy" not in assignment.impl_pool()
 
 
 # ---------- 輪番 ----------
@@ -66,10 +66,10 @@ def test_impl_and_reviewers_never_overlap(assignment, host):
 
 
 @pytest.mark.parametrize("host", HOSTS)
-def test_gemini_never_implements(assignment, host):
+def test_agy_never_implements(assignment, host):
     for round_no in range(1, 13):
         impl, _ = assignment.assign(round_no, host)
-        assert impl != "gemini"
+        assert impl != "agy"
 
 
 @pytest.mark.parametrize("host", HOSTS)
@@ -112,3 +112,26 @@ def test_assignment_is_deterministic(assignment, host):
 def test_round_number_must_be_positive(assignment):
     with pytest.raises(assignment.AssignmentError):
         assignment.assign(0, "claude")
+
+
+# ---------- 委譲先を移しても割り当てが変わらないこと（#214） ----------
+
+# `gemini` があった位置へ `agy` を入れた。並べ替えると同じラウンド番号でも担当が
+# 変わり、これまでの記録と突き合わせられなくなる。読み替えた結果を直に置く。
+EXPECTED_FOR_CLAUDE = {
+    1: ("codex", ["agy", "kiro"]),
+    2: ("kiro", ["codex", "agy"]),
+    3: ("claude", ["codex", "kiro"]),
+    4: ("codex", ["agy", "kiro"]),
+    5: ("kiro", ["codex", "agy"]),
+    6: ("claude", ["codex", "agy"]),
+}
+
+
+def test_the_participant_list_keeps_the_replaced_position(assignment):
+    assert assignment.ALL_RUNTIMES == ("claude", "codex", "agy", "kiro")
+
+
+@pytest.mark.parametrize("round_no", sorted(EXPECTED_FOR_CLAUDE))
+def test_the_rotation_matches_the_renamed_result(assignment, round_no):
+    assert assignment.assign(round_no, "claude") == EXPECTED_FOR_CLAUDE[round_no]

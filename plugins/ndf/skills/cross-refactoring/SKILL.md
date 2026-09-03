@@ -34,7 +34,7 @@ allowed-tools:
 | 観点 | 方針 |
 | --- | --- |
 | 参加者 | **全員 CLI プロセス。** ホストのサブエージェント機能は使わない。ホストと同じランタイムが実装担当のラウンドでも別プロセスで起動する |
-| 役割の分離 | 提案・レビューは**ホストを除く 3 者**、適用は**gemini を除く 3 者**。両者は重なるが一致しない |
+| 役割の分離 | 提案・レビューは**ホストを除く 3 者**、適用は**agy を除く 3 者**。両者は重なるが一致しない |
 | レビューの単位 | **提案ラウンドの差分全体**に対して 1 回。項目ごとに回すと CLI 起動回数が採用件数に比例して膨らむ |
 | 収束しない項目 | **捨てる。** リファクタリングは任意の作業なので、揉める提案を Pull Request に残さない |
 | コミットの単位 | **1 改善項目 = 1 コミット。** テストも項目の単位で 1 回だけ求める（現状固定テストが要る項目のみ 2 コミット） |
@@ -84,9 +84,9 @@ allowed-tools:
 | 母集合 | 定義 | 中身 |
 | --- | --- | --- |
 | 提案・レビュー（`runtimes`） | 全ランタイム − ホスト | 常に 3 者 |
-| 適用（`impl_capable`） | 全ランタイム − gemini | 常に claude / codex / kiro |
+| 適用（`impl_capable`） | 全ランタイム − agy | 常に claude / codex / kiro |
 
-- **gemini は適用に参加しない。** NDF Skill を配布していないランタイムであり、
+- **agy は適用に参加しない。** NDF Skill を配布していないランタイムであり、
   `refactoring` Skill の手順を踏ませる適用には向かない。提案とレビューには常に参加する
 - **ホストは適用にだけ参加する。** 提案とレビューから外れているので、
   「実装した者と評価する者が同一モデルにならない」構造は保たれる
@@ -104,7 +104,7 @@ allowed-tools:
   | --- | --- |
   | claude | `claude auth status` |
   | codex | `codex login status` |
-  | gemini | `gemini --skip-trust -p ping --output-format text` |
+  | agy | `agy models` |
   | kiro | `kiro-cli whoami` |
 
   確認コマンドは CLI の版で変わりうる。誤検知するときは `NDF_SKIP_AUTH_CHECK=1` で
@@ -114,9 +114,9 @@ allowed-tools:
 
   | ホスト | 必要な CLI |
   | --- | --- |
-  | Claude Code | `codex` / `gemini` / `kiro-cli` |
-  | Codex | `claude` / `gemini` / `kiro-cli` |
-  | Kiro CLI | `claude` / `codex` / `gemini` |
+  | Claude Code | `codex` / `agy` / `kiro-cli` |
+  | Codex | `claude` / `agy` / `kiro-cli` |
+  | Kiro CLI | `claude` / `codex` / `agy` |
 
 - 対象の Pull Request が Draft で開いている（未作成なら `/ndf:pr` で先に作る）
 

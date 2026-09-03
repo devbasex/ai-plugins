@@ -15,7 +15,7 @@ import pytest
 _HERE = pathlib.Path(__file__).resolve().parent
 _SCRIPT = _HERE.parent / "scripts" / "prepare-worktrees.sh"
 REQUIRED = ["refactoring", "tdd-cycle", "quality-gates"]
-RUNTIMES = ["codex", "gemini", "kiro"]
+RUNTIMES = ["codex", "agy", "kiro"]
 
 
 
@@ -61,7 +61,7 @@ def repo(tmp_path):
         "tmp_dir": str(tmp_dir), "target_scope": ["src"],
         "host": "claude", "host_detection": "explicit",
         "runtimes": RUNTIMES, "impl_capable": ["claude", "codex", "kiro"],
-        "models": {r: None for r in ["claude", "codex", "gemini", "kiro"]},
+        "models": {r: None for r in ["claude", "codex", "agy", "kiro"]},
         "skills": {"required": REQUIRED},
         "max_outer_rounds": 3, "max_fix_rounds": 3, "max_items_per_round": 5,
         "severity_threshold": "minor",
@@ -103,7 +103,7 @@ def test_work_is_the_only_checked_out_branch(repo):
 def test_skills_are_provisioned_into_runtime_locations(repo):
     _run(repo)
     layout = {
-        "codex": ".agents/skills", "gemini": ".gemini/skills", "kiro": ".kiro/skills",
+        "codex": ".agents/skills", "agy": ".agents/skills", "kiro": ".kiro/skills",
     }
     for rt, rel in layout.items():
         for name in REQUIRED:
@@ -248,33 +248,21 @@ def test_empty_destination_is_provisioned(repo):
     assert (dest / "SKILL.md").is_file()
 
 
-# ---------- gemini の読み取り除外 ----------
+# ---------- 起動前の設定整形は要らない（#214） ----------
 
-def test_gemini_gets_a_setting_that_allows_reading_the_provisioned_skills(repo):
-    """gemini は除外設定を**読み取りにも**適用するため、無効にする設定を置く。
-
-    置かないと、配置した手順書を `read_file` で一切開けず、
-    語彙を読めないまま提案が語彙外になって全件降格する。
-    """
+def test_the_worktree_keeps_its_diff_clean(repo):
     _run(repo)
-    settings = repo["root"] / "gemini" / ".gemini" / "settings.json"
-    assert settings.is_file(), "gemini の設定が置かれていない"
-    conf = json.loads(settings.read_text(encoding="utf-8"))
-    # 項目名は gemini の版で変わる。新旧どちらの形式でも書く
-    assert conf["context"]["fileFiltering"]["respectGitIgnore"] is False
-    assert conf["context"]["fileFiltering"]["respectGeminiIgnore"] is False
-    assert conf["fileFiltering"]["respectGitIgnore"] is False
-    assert conf["fileFiltering"]["respectGeminiIgnore"] is False
-
-
-def test_gemini_settings_are_not_in_the_diff(repo):
-    _run(repo)
-    status = _git("status", "--short", cwd=repo["root"] / "gemini")
+    status = _git("status", "--short", cwd=repo["root"] / "agy")
     assert status.stdout.strip() == "", f"差分に現れている: {status.stdout}"
 
 
-def test_only_gemini_gets_the_reading_setting(repo):
-    """他のランタイムの設定は触らない。"""
+def test_no_settings_file_is_written_for_the_delegate(repo):
+    """除外設定の中に置いた手順書を agy が読めることは実測で確かめた。
+
+    読み取り側の除外を無効にする設定を書いていたのは、前の委譲先が除外を
+    読み取りにも適用したためである。作業ディレクトリへ設定を書かない。
+    """
     _run(repo)
-    for rt in ("codex", "kiro"):
+    for rt in ("codex", "agy", "kiro"):
         assert not (repo["root"] / rt / ".gemini").exists()
+        assert not (repo["root"] / rt / ".agy").exists()
