@@ -11,6 +11,16 @@
 ホストの種類・言語・フレームワークには依存しない。リポジトリごとの差は
 [`declaration.md`](declaration.md) の宣言ファイルが持つ。
 
+## この文書が受け取る値
+
+| 変数 | 値 | 決め方 |
+| --- | --- | --- |
+| `$SCRIPTS` | プラグインの `scripts/` の絶対パス | [SKILL.md](../SKILL.md) の手順 0。シェルが変わったら決め直す |
+| `$APP_SERVICE` | アプリのサービス名 | 宣言の `localenv.app_service` |
+| `$SRC_TARGET` | コンテナ内のコードの位置 | 宣言の `localenv.src_target` |
+
+**続けて実行するときは 1 つの bash ブロックへまとめる。** 先頭で 1 度決めれば、後続のコマンドは決め直さずに済む（推奨であり、1 コマンドずつ実行してもよい）。
+
 ## 2 つのモード
 
 ```mermaid
@@ -33,7 +43,7 @@ flowchart TD
 （省略すると現在地が対象になる）。
 
 ```bash
-bash "$NDF_SCRIPTS/worktree-localenv.sh" mode "$WT"   # 0 相乗り / 1 分離
+bash "$SCRIPTS/worktree-localenv.sh" mode "$WT"   # 0 相乗り / 1 分離
 ```
 
 既存の定義の書き換えやコードの中に直接書かれた操作は条件で拾えない。**最終判断は
@@ -69,7 +79,7 @@ docker exec "$APP" sh -lc "readlink '$SRC_TARGET' || echo 'symlink ではない'
 作った直後に、追跡されない設定と依存物を持ち込む。
 
 ```bash
-bash "$NDF_SCRIPTS/worktree-localenv.sh" setup "$MAIN/.worktrees/feature/x"
+bash "$SCRIPTS/worktree-localenv.sh" setup "$MAIN/.worktrees/feature/x"
 ```
 
 複製対象は宣言の `copy_from_main` と `copy_as_real` が持つ。
@@ -102,7 +112,7 @@ docker exec -w "$WT" "$APP" <検証コマンド>
 コードが画面に出ない。**
 
 ```bash
-bash "$NDF_SCRIPTS/worktree-localenv.sh" aim "$WT"
+bash "$SCRIPTS/worktree-localenv.sh" aim "$WT"
 ```
 
 このコマンドは宣言に従って、資産のビルド → コードの位置の切り替え → 再読み込みの
@@ -119,7 +129,7 @@ bash "$NDF_SCRIPTS/worktree-localenv.sh" aim "$WT"
 ### 切り替えたことを確かめる
 
 ```bash
-bash "$NDF_SCRIPTS/worktree-localenv.sh" verify "$WT"; echo $?
+bash "$SCRIPTS/worktree-localenv.sh" verify "$WT"; echo $?
 ```
 
 | 終了コード | 意味 | 次の手 |

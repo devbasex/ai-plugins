@@ -6,10 +6,19 @@
 定義は [`../schemas/worktree.schema.json`](../schemas/worktree.schema.json) にある。
 `$schema` を書いておくと編集時に補完が効く。読み取り側はこの項目を参照しない。
 
+## この文書が受け取る値
+
+| 変数 | 値 | 決め方 |
+| --- | --- | --- |
+| `$SCRIPTS` | プラグインの `scripts/` の絶対パス | [SKILL.md](../SKILL.md) の手順 0。シェルが変わったら決め直す |
+| `$main_dir` | 主ディレクトリの絶対パス | `wt_main_dir`（[SKILL.md](../SKILL.md) の手順 1） |
+
+**続けて実行するときは 1 つの bash ブロックへまとめる。** 先頭で 1 度決めれば、後続のコマンドは決め直さずに済む（推奨であり、1 コマンドずつ実行してもよい）。
+
 ## 作る
 
 ```bash
-bash "$NDF_SCRIPTS/worktree-setup.sh" init
+bash "$SCRIPTS/worktree-setup.sh" init
 ```
 
 `/ndf:worktree` を起動すると、手順 0 としてこれが走る。既にあるファイルは上書きしない。
@@ -154,10 +163,10 @@ origin にもローカルにも無いときは、既定ブランチへは落ち�
 WT="$main_dir/.worktrees/<ブランチ名>"
 
 # 宣言が読めているか（読めなければ何も出ない）
-bash "$NDF_SCRIPTS/worktree-localenv.sh" mode "$WT"
+bash "$SCRIPTS/worktree-localenv.sh" mode "$WT"
 
 # 照合の状態（0 一致 / 1 不一致 / 2 未起動または適用外）
-bash "$NDF_SCRIPTS/worktree-localenv.sh" verify "$WT"; echo $?
+bash "$SCRIPTS/worktree-localenv.sh" verify "$WT"; echo $?
 ```
 
 対象の作業ツリーは引数で渡す。省略すると現在地が対象になる。

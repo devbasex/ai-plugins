@@ -4,6 +4,15 @@
 外部依存が無ければ作業ツリーのファイルだけ、データ保存先へ書くならその実体ごと、画面を
 開くならアプリ一式、外から到達させるなら公開の口を分ける。
 
+## この文書が受け取る値
+
+| 変数 | 値 | 決め方 |
+| --- | --- | --- |
+| `$SCRIPTS` | プラグインの `scripts/` の絶対パス | [SKILL.md](../SKILL.md) の手順 0。シェルが変わったら決め直す |
+| `$WT` | 対象の作業ツリーの絶対パス | 呼び出し側が決める |
+
+**続けて実行するときは 1 つの bash ブロックへまとめる。** 先頭で 1 度決めれば、後続のコマンドは決め直さずに済む（推奨であり、1 コマンドずつ実行してもよい）。
+
 ## この文書での「テスト環境」
 
 **1 つの作業ツリーに対応して立ち上げる、テスト実行に必要なサービスの一式**を指す。
@@ -41,7 +50,7 @@ flowchart TD
 ## 採番
 
 ```bash
-bash "$NDF_SCRIPTS/worktree-testenv.sh" env "$WT"
+bash "$SCRIPTS/worktree-testenv.sh" env "$WT"
 ```
 
 環境名・スロット・ポートを出力し、台帳へ記録する。**同じ作業ツリーには常に同じ値が返る。**
@@ -82,8 +91,8 @@ bash "$NDF_SCRIPTS/worktree-testenv.sh" env "$WT"
    決まる。同じ内容なら焼き直しは発生しない
 
    ```bash
-   TAG=$(bash "$NDF_SCRIPTS/worktree-testenv.sh" tag "$WT")
-   bash "$NDF_SCRIPTS/worktree-testenv.sh" bake --tag "$TAG"   # 2 なら同じタグの基準が既にある
+   TAG=$(bash "$SCRIPTS/worktree-testenv.sh" tag "$WT")
+   bash "$SCRIPTS/worktree-testenv.sh" bake --tag "$TAG"   # 2 なら同じタグの基準が既にある
    ```
 
 5. **復元して起動する** — `worktree-testenv.sh up "$WT" --profile core`。ホストポートは
@@ -114,7 +123,7 @@ bash "$NDF_SCRIPTS/worktree-testenv.sh" env "$WT"
    最初のテストが全体を作り直す構成がある（実測では 1,790 本の定義を流し直した）
 
    ```bash
-   bash "$NDF_SCRIPTS/worktree-testenv.sh" test "$WT" --kind stateful
+   bash "$SCRIPTS/worktree-testenv.sh" test "$WT" --kind stateful
    ```
 
 `test` は**実行したコマンドの終了コードをそのまま返す**。テストの成否を包み隠さないためである。
@@ -141,7 +150,7 @@ bash "$NDF_SCRIPTS/worktree-testenv.sh" env "$WT"
    `port_role` で指定する（既定は `http`）
 
    ```bash
-   bash "$NDF_SCRIPTS/worktree-testenv.sh" test "$WT" --kind browser
+   bash "$SCRIPTS/worktree-testenv.sh" test "$WT" --kind browser
    ```
 
 証跡の置き場所は、その作業ツリー限りの除外設定（`.git/info/exclude`）へ自動で登録される。
@@ -156,8 +165,8 @@ bash "$NDF_SCRIPTS/worktree-testenv.sh" env "$WT"
 **公開するのは、マスク済みデータで焼いた基準を載せたテスト環境だけとする。**
 
 ```bash
-bash "$NDF_SCRIPTS/worktree-testenv.sh" expose "$WT"     # 0 完了 / 1 条件を満たさず拒否
-bash "$NDF_SCRIPTS/worktree-testenv.sh" unexpose "$WT"
+bash "$SCRIPTS/worktree-testenv.sh" expose "$WT"     # 0 完了 / 1 条件を満たさず拒否
+bash "$SCRIPTS/worktree-testenv.sh" unexpose "$WT"
 ```
 
 拒否する条件は次の 3 つで、1 つでも該当すれば公開しない（終了コード 1）。どれに当たったかは
