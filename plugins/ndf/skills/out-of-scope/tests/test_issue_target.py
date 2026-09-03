@@ -8,16 +8,21 @@
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from issue_target_helpers import (
+    CROSS_REPOSITORY_HEADING,
     DECISION_TABLE_HEADING,
     REFERENCE,
     RESOLUTION_TABLE_HEADING,
     SKILL,
-    command_lines,
+    gh_issue_commands,
     headings,
+    ordered_steps,
     read,
+    section,
     table,
 )
 
@@ -50,13 +55,24 @@ def test_the_resolution_table_has_three_stages() -> None:
     assert "remote.origin.url" in rows[1][1], f"段 2 が取得元の clone を見ていない: {rows[1]}"
 
 
-def test_the_reference_passes_the_target_to_gh() -> None:
-    """重複の確認と起票が、決めた起票先に対して行われる。"""
-    lines = command_lines(read(REFERENCE))
-    for command in ("gh issue list", "gh issue create"):
-        found = [line for line in lines if command in line]
-        assert found, f"呼び出しが無い: {command}"
-        assert all("--repo" in line for line in found), f"起票先が渡されていない: {found}"
+def test_the_reference_covers_the_duplicate_check_and_the_creation() -> None:
+    """重複の確認と起票と、既存の issue への追記が呼び出しとして載っている。"""
+    commands = gh_issue_commands(read(REFERENCE))
+    for command in ("gh issue list", "gh issue create", "gh issue comment"):
+        assert any(line.startswith(command) for line in commands), f"呼び出しが無い: {command}"
+
+
+@pytest.mark.parametrize("path", [REFERENCE, SKILL], ids=["reference", "skill"])
+def test_every_gh_issue_call_passes_the_target(path: Path) -> None:
+    """`gh issue` の呼び出しは、どのファイルのどの下位コマンドでも起票先を受け取る。
+
+    `--repo` を省くと、いま作業しているリポジトリへ向かう。片方のファイルだけを見ると、
+    もう片方から `--repo` が抜けたことに気づけない。
+    """
+    commands = gh_issue_commands(read(path))
+    assert commands, f"`gh issue` の呼び出しを読み取れない: {path}"
+    missing = [line for line in commands if "--repo" not in line]
+    assert not missing, f"起票先が渡されていない: {missing}"
 
 
 def test_the_steps_keep_their_order() -> None:
@@ -81,3 +97,44 @@ def test_an_unreadable_table_fails(heading: str) -> None:
     """表を読み取れないことは、素通りではなく失敗になる。"""
     with pytest.raises(AssertionError):
         table("見出しの無い本文", heading)
+
+
+def test_the_cross_repository_steps_start_from_the_skill_repository() -> None:
+    """両方にまたがる課題は、配布元を先に起票する。
+
+    番号が先に決まれば、開発対象の側の本文へその番号を書ける。逆順にすると、どちらの
+    本文にも相手の番号が無い状態が一度できる。
+    """
+    steps = ordered_steps(read(REFERENCE), CROSS_REPOSITORY_HEADING)
+    assert len(steps) == 3, f"手順の数が 3 ではない: {steps}"
+    assert "配布元" in steps[0] and "起票" in steps[0], f"最初が配布元への起票ではない: {steps[0]}"
+    assert "開発対象" in steps[1], f"2 番目が開発対象への起票ではない: {steps[1]}"
+
+
+def test_the_cross_repository_steps_link_both_numbers() -> None:
+    """双方の番号が互いから辿れる。開発対象の本文に配布元の番号、配布元にコメントで開発対象の番号。"""
+    steps = ordered_steps(read(REFERENCE), CROSS_REPOSITORY_HEADING)
+    assert "本文" in steps[1] and "配布元の番号" in steps[1], f"本文へ配布元の番号を書いていない: {steps[1]}"
+    assert "配布元" in steps[2], f"3 番目が配布元への追記ではない: {steps[2]}"
+    assert "開発対象の番号" in steps[2] and "コメント" in steps[2], f"開発対象の番号を残していない: {steps[2]}"
+
+
+def test_the_cross_repository_comment_is_executable() -> None:
+    """配布元へ番号を戻す追記が、起票先を受け取る呼び出しとして載っている。"""
+    body = "\n".join(section(read(REFERENCE), CROSS_REPOSITORY_HEADING))
+    commands = gh_issue_commands(body)
+    found = [line for line in commands if line.startswith("gh issue comment")]
+    assert found, f"追記の呼び出しが無い: {commands}"
+    assert all("--repo" in line for line in found), f"起票先が渡されていない: {found}"
+
+
+def test_the_skill_points_at_the_cross_repository_section() -> None:
+    """手順が、両方にまたがる場合の節を名前で指している。"""
+    assert CROSS_REPOSITORY_HEADING.lstrip("# ") in read(SKILL)
+
+
+@pytest.mark.parametrize("heading", [CROSS_REPOSITORY_HEADING])
+def test_an_unreadable_section_fails(heading: str) -> None:
+    """節を読み取れないことは、素通りではなく失敗になる。"""
+    with pytest.raises(AssertionError):
+        ordered_steps("見出しの無い本文", heading)

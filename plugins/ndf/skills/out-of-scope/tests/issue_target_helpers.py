@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 SKILL_DIR = Path(__file__).resolve().parents[1]
@@ -18,6 +19,7 @@ REFERENCE = SKILL_DIR / "references" / "issue-target.md"
 
 DECISION_TABLE_HEADING = "## 判断表"
 RESOLUTION_TABLE_HEADING = "## 起票先のリポジトリを決める"
+CROSS_REPOSITORY_HEADING = "## 両方にまたがる課題"
 
 
 def read(path: Path) -> str:
@@ -86,3 +88,73 @@ def command_lines(body: str) -> list[str]:
         if fenced:
             found.append(line)
     return found
+
+
+def section(body: str, heading: str) -> list[str]:
+    """見出しから、次の同じ深さ以上の見出しまでの行を返す。
+
+    読み取れないこと自体を失敗として扱う。見出しを消すか節を空にするだけで、この節を
+    見る検査を無効にできる形にしない。囲みの中の `#` は見出しとして数えない。
+    """
+    depth = len(heading) - len(heading.lstrip("#"))
+    lines = body.splitlines()
+    try:
+        start = next(i for i, line in enumerate(lines) if line.strip() == heading)
+    except StopIteration:
+        raise AssertionError(f"見出しが見つからない: {heading}")
+    found: list[str] = []
+    fenced = False
+    for line in lines[start + 1 :]:
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            fenced = not fenced
+            found.append(line)
+            continue
+        if not fenced and stripped.startswith("#"):
+            level = len(stripped) - len(stripped.lstrip("#"))
+            if level <= depth:
+                break
+        found.append(line)
+    assert any(line.strip() for line in found), f"節の本文が空である: {heading}"
+    return found
+
+
+def ordered_steps(body: str, heading: str) -> list[str]:
+    """節の中の番号付きの手順を、本文に現れる順で返す。囲みの中は数えない。"""
+    steps: list[str] = []
+    fenced = False
+    for line in section(body, heading):
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        matched = re.match(r"^(\d+)\.\s+(.*)$", line.strip())
+        if matched:
+            steps.append(matched.group(2).strip())
+    assert steps, f"番号付きの手順を読み取れない: {heading}"
+    return steps
+
+
+def gh_issue_commands(body: str) -> list[str]:
+    """囲みの中の `gh issue` で始まる呼び出しを、行の継続をつないで返す。
+
+    `\\` で折り返した呼び出しは 1 つにまとめる。行ごとに見ると、次の行へ回した
+    `--repo` を渡していないものとして読んでしまう。
+    """
+    joined: list[str] = []
+    buffer = ""
+    for line in command_lines(body):
+        stripped = line.strip()
+        if not buffer and not stripped.startswith("gh issue"):
+            continue
+        continues = stripped.endswith("\\")
+        if continues:
+            stripped = stripped[:-1].strip()
+        buffer = f"{buffer} {stripped}".strip()
+        if not continues:
+            joined.append(buffer)
+            buffer = ""
+    if buffer:
+        joined.append(buffer)
+    return joined
