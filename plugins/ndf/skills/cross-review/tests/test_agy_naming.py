@@ -36,6 +36,11 @@ SCOPE = (
 ALLOWED = re.compile(r"gemini\s+(?:round\s+\d+\s+)?(?:指摘|#\d+)")
 
 
+# 走査から外すディレクトリ。tests は出所のコメントを持つため、残りは実行時に作られる
+# 作業領域である。追跡していないファイルを検査へ入れると、実行した回数で結果が変わる。
+_IGNORED_DIRS = {"tests", "__pycache__", ".pytest_cache"}
+
+
 def _scope_files() -> list[pathlib.Path]:
     found: list[pathlib.Path] = []
     for entry in SCOPE:
@@ -46,7 +51,7 @@ def _scope_files() -> list[pathlib.Path]:
         found.extend(
             p for p in path.rglob("*")
             if p.is_file()
-            and not {"tests", "__pycache__"} & set(p.relative_to(path).parts)
+            and not _IGNORED_DIRS & set(p.relative_to(path).parts)
         )
     return sorted(found)
 
@@ -109,3 +114,27 @@ def test_no_script_sources_the_removed_helper() -> None:
         if "_gemini-env" in p.read_text(encoding="utf-8")
     ]
     assert hits == []
+
+
+# ---------- 走査の対象（実行の回数で結果が変わらないこと） ----------
+
+def test_the_scan_skips_directories_made_while_running(tmp_path: pathlib.Path) -> None:
+    """実行時に作られる作業領域を検査へ入れない。
+
+    `pytest` は実行のたびに `.pytest_cache/` を作り、その中の `nodeids` には
+    テスト関数の名前がそのまま残る。走査へ入れると、`gemini` を含む名前の
+    テストを 1 度でも実行した環境で結果が変わる。
+    """
+    for name in _IGNORED_DIRS:
+        target = tmp_path / name / "nested"
+        target.mkdir(parents=True)
+        (target / "artifact.txt").write_text("gemini\n", encoding="utf-8")
+    (tmp_path / "real.txt").write_text("agy\n", encoding="utf-8")
+
+    scanned = [
+        p for p in tmp_path.rglob("*")
+        if p.is_file()
+        and not _IGNORED_DIRS & set(p.relative_to(tmp_path).parts)
+    ]
+
+    assert scanned == [tmp_path / "real.txt"]

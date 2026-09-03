@@ -52,6 +52,9 @@ ${SERENA_HOME}/
 .serena/cache/
 .cross_review_pr22_diff.patch
 
+# pytest が実行のたびに作る作業領域
+.pytest_cache/
+
 # 開発用の作業ツリー
 .worktrees/
 
