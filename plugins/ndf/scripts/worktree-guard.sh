@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 # NDF plugin: 主ディレクトリを編集しようとしたときに、作業ツリーで作業する旨を伝える。
 #
-# 結線先は 2 つある。
+# 結線先は 3 つある。
 #   - tool 実行前の hook (Claude Code / Codex CLI): 編集先のパスを見た案内を
 #     additionalContext でモデルへ渡す
 #   - プロンプト送信時の hook (Kiro CLI): パスを見ない案内を標準出力へ書く
+#   - tool 実行前の hook (agy): 案内をセッションの控えへ積み、次のモデル呼び出しの前に
+#     worktree-session.sh が injectSteps で渡す。agy がこの事象でモデルへ文言を返す口は
+#     拒否のときにしか働かないためである (詳細設計 #215 の決定 4)
 #
-# このスクリプトは 3 ランタイム分の入力を 1 つの判定へ正規化する。実際に hook として
-# 結ばれているランタイムは hooks/*.json と dev.kiro/install.sh の側が決める。
+# このスクリプトは 4 ランタイム分の入力を 1 つの判定へ正規化する。実際に hook として
+# 結ばれているランタイムは hooks/*.json と dev.kiro/install.sh と dev.agy/hooks.json の
+# 側が決める。
 #
 # 拒否の判定は返さない (詳細設計 06 の決定 1)。判定はすべて共通ライブラリが持ち、
 # この入口は入力の受け取りと出力の整形だけを行う (同 決定 8)。
@@ -32,6 +36,20 @@ EVENT=$(jq_get '.hook_event_name // empty')
 TOOL=$(jq_get '.tool_name // empty')
 CWD=$(jq_get '.cwd // empty')
 SESSION=$(jq_get '.session_id // empty')
+
+# agy は事象名を持たず、tool の名前と引数を toolCall へ入れる。作業ディレクトリは
+# workspacePaths の先頭、セッションの識別子は conversationId にある。項目の名前が
+# 他の 3 ランタイムと重ならないため、tool の名前がどちらに入っているかで判別できる。
+AGY=0
+if [ -z "$TOOL" ]; then
+  agy_tool=$(jq_get '.toolCall.name // empty')
+  if [ -n "$agy_tool" ]; then
+    AGY=1
+    TOOL="$agy_tool"
+    [ -n "$CWD" ] || CWD=$(jq_get '.workspacePaths[0] // empty')
+  fi
+fi
+[ -n "$SESSION" ] || SESSION=$(jq_get '.conversationId // empty')
 [ -n "$SESSION" ] || SESSION="${KIRO_SESSION_ID:-}"
 
 if [ -n "$CWD" ] && [ -d "$CWD" ]; then
@@ -99,7 +117,7 @@ save_state() {
     --argjson allow_paths "$(printf '%s\n' "${ALLOW_PATHS[@]+"${ALLOW_PATHS[@]}"}" | jq -R . | jq -s 'map(select(. != ""))')" \
     '{main_dir: $main_dir, resolved_from: $resolved_from, in_worktree: $in_worktree,
       has_declaration: $has_declaration, declaration_stamp: $declaration_stamp,
-      allow_paths: $allow_paths, notified: [], computed_at: (now | todate)}' >"$tmp" 2>/dev/null || { rm -f "$tmp"; return 0; }
+      allow_paths: $allow_paths, notified: [], pending: [], computed_at: (now | todate)}' >"$tmp" 2>/dev/null || { rm -f "$tmp"; return 0; }
   mv "$tmp" "$STATE_FILE" 2>/dev/null || rm -f "$tmp"
 }
 
@@ -149,7 +167,8 @@ if [[ "$TOOL" =~ ^($WT_PATCH_TOOLS)$ ]]; then
 elif [[ "$TOOL" =~ ^($WT_EDIT_TOOLS)$ ]]; then
   _wt_read_lines < <(
     jq_get '[.tool_input.file_path?, .tool_input.path?, .tool_input.notebook_path?,
-             (.tool_input.edits[]?.file_path?), (.tool_input.operations[]?.path?)]
+             (.tool_input.edits[]?.file_path?), (.tool_input.operations[]?.path?),
+             .toolCall.args.TargetFile?]
             | map(select(type == "string" and . != "")) | unique | .[]'
   )
   targets=("${WT_LINES[@]+"${WT_LINES[@]}"}")
@@ -157,6 +176,7 @@ elif [[ "$TOOL" =~ ^($WT_SHELL_TOOLS)$ ]]; then
   command_text=$(
     jq_get 'if (.tool_input.command | type) == "array" then (.tool_input.command | join(" "))
             elif (.tool_input.command | type) == "string" then .tool_input.command
+            elif (.toolCall.args.CommandLine | type) == "string" then .toolCall.args.CommandLine
             else empty end'
   )
   [ -n "$command_text" ] || exit 0
@@ -167,6 +187,7 @@ elif [[ "$TOOL" =~ ^($WT_SHELL_TOOLS)$ ]]; then
     jq_get 'if (.tool_input.dir_path | type) == "string" then .tool_input.dir_path
             elif (.tool_input.cwd | type) == "string" then .tool_input.cwd
             elif (.tool_input.workdir | type) == "string" then .tool_input.workdir
+            elif (.toolCall.args.Cwd | type) == "string" then .toolCall.args.Cwd
             else empty end'
   )
   if [ -n "$command_cwd" ]; then
@@ -236,6 +257,25 @@ ${WT_WORKTREE_DIR}/<ブランチ名> に作り、そこへ移ってから編集�
 この編集を止めてはいません。意図した操作であればそのまま続けてください。
 EOS
 )
+
+# agy はこの事象でモデルへ文言を返せない。案内は控えへ積み、次のモデル呼び出しの前に
+# worktree-session.sh が取り出して渡す。ここで返すのは操作を止めない判定だけである。
+# 控えを作れないとき (セッションの識別子が無いとき) は案内を落とす。案内が届かなくても
+# 操作は成立し、逸脱は開始時の提示と作業ツリーの手順の側で拾える。
+if [ "$AGY" = 1 ]; then
+  if [ -n "$STATE_FILE" ] && [ -f "$STATE_FILE" ]; then
+    tmp=$(mktemp "${STATE_FILE}.XXXXXX" 2>/dev/null)
+    if [ -n "$tmp" ]; then
+      if jq --arg add "$context" '.pending = ((.pending // []) + [$add])' "$STATE_FILE" >"$tmp" 2>/dev/null; then
+        mv "$tmp" "$STATE_FILE" 2>/dev/null || rm -f "$tmp"
+      else
+        rm -f "$tmp"
+      fi
+    fi
+  fi
+  printf '%s\n' '{"decision": "allow"}'
+  exit 0
+fi
 
 jq -n --arg summary "$summary" --arg context "$context" \
   '{systemMessage: $summary,

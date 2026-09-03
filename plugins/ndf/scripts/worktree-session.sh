@@ -2,8 +2,14 @@
 # NDF plugin: セッション開始時に、主ディレクトリの逸脱を提示してブランチを追従させる。
 #
 # 結線先はセッション開始時の hook (Claude Code / Codex CLI の SessionStart、
-# Kiro CLI の agentSpawn)。判定はすべて共通ライブラリが持ち、この入口は入力の
-# 受け取りと出力の整形だけを行う (詳細設計 06 の決定 8)。
+# Kiro CLI の agentSpawn) と、agy のモデル呼び出し前の hook (PreInvocation)。判定は
+# すべて共通ライブラリが持ち、この入口は入力の受け取りと出力の整形だけを行う
+# (詳細設計 06 の決定 8)。
+#
+# **agy にはセッション開始時にあたる事象が無い。** PreInvocation はモデル呼び出しの
+# たびに発火するため、通し番号 (invocationNum) が 0 のときだけ開始時の処理を行う
+# (詳細設計 #215 の決定 5)。あわせて、tool 実行前の hook が控えへ積んだ案内をここで
+# 取り出して渡す。agy はその事象でモデルへ文言を返せないためである (同 決定 4)。
 #
 # 追従は detached HEAD で行う (同 決定 4)。同じブランチを 2 つの作業ディレクトリへ
 # checkout できないためで、detached HEAD ではコミットしてもブランチが動かない。
@@ -21,31 +27,83 @@ command -v git >/dev/null 2>&1 || exit 0
 PAYLOAD=$(cat 2>/dev/null || true)
 CWD=""
 EVENT=""
+AGY=0
+INVOCATION=""
+SESSION=""
 if [ -n "$PAYLOAD" ] && command -v jq >/dev/null 2>&1; then
   if printf '%s' "$PAYLOAD" | jq -e . >/dev/null 2>&1; then
     CWD=$(printf '%s' "$PAYLOAD" | jq -r '.cwd // empty' 2>/dev/null)
     EVENT=$(printf '%s' "$PAYLOAD" | jq -r '.hook_event_name // empty' 2>/dev/null)
+    # agy は事象名を持たない。通し番号があることで PreInvocation だと判別できる。
+    INVOCATION=$(printf '%s' "$PAYLOAD" \
+      | jq -r 'if (.invocationNum | type) == "number" then .invocationNum else empty end' 2>/dev/null)
+    if [ -n "$INVOCATION" ]; then
+      AGY=1
+      SESSION=$(printf '%s' "$PAYLOAD" | jq -r '.conversationId // empty' 2>/dev/null)
+      [ -n "$CWD" ] || CWD=$(printf '%s' "$PAYLOAD" | jq -r '.workspacePaths[0] // empty' 2>/dev/null)
+    fi
   fi
 fi
 if [ -n "$CWD" ] && [ -d "$CWD" ]; then
   cd "$CWD" 2>/dev/null || true
 fi
 
-MAIN_DIR=$(wt_main_dir) || exit 0
-# 作業ツリーの中では何もしない。逸脱も追従も主ディレクトリの話である。
-wt_in_worktree && exit 0
+# 案内が無いときの出口。agy は返す形が決まっているため空の JSON を書く。
+# **宣言を持たないリポジトリでは何も書かない** (詳細設計 06 の決定 9)。
+emit_nothing() {
+  [ "$AGY" = 1 ] && [ "${DECLARED:-0}" = 1 ] && printf '%s\n' '{}'
+  exit 0
+}
+
+DECLARED=0
+MAIN_DIR=$(wt_main_dir) || emit_nothing
 # 宣言が無いリポジトリでは何もしない (詳細設計 06 の決定 9)。
-DECLARATION=$(wt_declaration "$MAIN_DIR") || exit 0
+DECLARATION=$(wt_declaration "$MAIN_DIR") || emit_nothing
+DECLARED=1
+# 作業ツリーの中では何もしない。逸脱も追従も主ディレクトリの話である。
+wt_in_worktree && emit_nothing
 
-DIRTY=$(wt_dirty_paths "$MAIN_DIR")
+# tool 実行前の hook が積んだ案内を取り出し、控えを空にする。取り出した案内を残すと、
+# モデル呼び出しのたびに同じ案内を渡すことになる。
+STATE_FILE=""
+if [ "$AGY" = 1 ] && [ -n "$SESSION" ]; then
+  STATE_FILE="${TMPDIR:-/tmp}/ndf-worktree-$(printf '%s' "$SESSION" | tr -c 'A-Za-z0-9._-' '_').json"
+fi
+
+drain_pending() {
+  [ -n "$STATE_FILE" ] && [ -f "$STATE_FILE" ] || return 0
+  local text tmp
+  text=$(jq -r '(.pending // []) | join("\n\n")' "$STATE_FILE" 2>/dev/null) || return 0
+  [ -n "$text" ] || return 0
+  tmp=$(mktemp "${STATE_FILE}.XXXXXX" 2>/dev/null)
+  if [ -n "$tmp" ]; then
+    if jq '.pending = []' "$STATE_FILE" >"$tmp" 2>/dev/null; then
+      mv "$tmp" "$STATE_FILE" 2>/dev/null || rm -f "$tmp"
+    else
+      rm -f "$tmp"
+    fi
+  fi
+  printf '%s' "$text"
+}
+
+# 開始時にあたるかどうか。agy はモデル呼び出しのたびに発火するため、通し番号が 0 の
+# ときだけ開始時の処理を行う。他の 3 ランタイムは開始時にしか発火しない。
+AT_START=1
+[ "$AGY" = 1 ] && [ "$INVOCATION" != 0 ] && AT_START=0
+
 DIRTY_COUNT=0
-[ -n "$DIRTY" ] && DIRTY_COUNT=$(printf '%s\n' "$DIRTY" | grep -c '^' )
+DIRTY=""
+DECISION=""
+if [ "$AT_START" = 1 ]; then
+  DIRTY=$(wt_dirty_paths "$MAIN_DIR")
+  [ -n "$DIRTY" ] && DIRTY_COUNT=$(printf '%s\n' "$DIRTY" | grep -c '^' )
 
-LISTING=$(wt_dev_worktrees "$MAIN_DIR")
-if [ "$DIRTY_COUNT" -gt 0 ]; then
-  DECISION=$(wt_follow_target "$LISTING" 1)
-else
-  DECISION=$(wt_follow_target "$LISTING" 0)
+  LISTING=$(wt_dev_worktrees "$MAIN_DIR")
+  if [ "$DIRTY_COUNT" -gt 0 ]; then
+    DECISION=$(wt_follow_target "$LISTING" 1)
+  else
+    DECISION=$(wt_follow_target "$LISTING" 0)
+  fi
 fi
 
 MESSAGES=()
@@ -142,7 +200,14 @@ case "$DECISION" in
     ;;
 esac
 
-[ "${#MESSAGES[@]}" -gt 0 ] || exit 0
+# 控えへ積まれた案内を最後に足す。開始時の提示より後ろへ置くのは、直前の操作への案内が
+# 読み手にとって新しい情報だからである。
+if [ "$AGY" = 1 ]; then
+  PENDING=$(drain_pending)
+  [ -n "$PENDING" ] && MESSAGES+=("$PENDING")
+fi
+
+[ "${#MESSAGES[@]}" -gt 0 ] || emit_nothing
 
 CONTEXT=$(printf '%s\n\n' "${MESSAGES[@]}")
 
@@ -152,6 +217,12 @@ CONTEXT=$(printf '%s\n\n' "${MESSAGES[@]}")
 #
 #   SessionStart (Claude Code / Codex CLI) — JSON の additionalContext で渡す
 #   agentSpawn (Kiro CLI) / 事象が読めない場合 — 標準出力へ平文で書く
+#   PreInvocation (agy) — injectSteps の userMessage で渡す
+if [ "$AGY" = 1 ]; then
+  jq -n --arg context "$CONTEXT" '{injectSteps: [{userMessage: $context}]}'
+  exit 0
+fi
+
 case "$EVENT" in
   SessionStart|session_start)
     if command -v jq >/dev/null 2>&1; then
