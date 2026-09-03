@@ -325,14 +325,80 @@ def test_a_lock_that_changed_hands_is_never_moved_out(
     (lock / "pid").write_text("999999\n", encoding="utf-8")
     (lock / "token").write_text("new-owner\n", encoding="utf-8")
     parent_before = holder.stat().st_mtime_ns
-    lock_before = lock.stat().st_ctime_ns
 
     got = _run_lock_lib(lib, f'{prefix}_lock_discard "{lock}" "old-owner" "tok"; echo rc=$?')
 
     assert "rc=1" in got.stdout, got.stdout
     assert lock.is_dir(), "判定と違うロックを取り除いた"
+    # 名前の付け替えは、外へ出す側も戻す側も親のディレクトリの更新時刻を動かす。
+    # ロックの中へ関門を置く手は動かさないため、外へ出したことだけを拾える。
     assert holder.stat().st_mtime_ns == parent_before, "外へ出した跡が親のディレクトリに残った"
-    assert lock.stat().st_ctime_ns == lock_before, "外へ出した跡がロックそのものに残った"
+    assert (lock / "held").exists(), "持ち主の握りの印が失われた"
+    assert (lock / "token").read_text(encoding="utf-8").strip() == "new-owner"
+    assert (lock / "pid").read_text(encoding="utf-8").strip() == "999999"
+
+
+# 確かめてから取り除くまでの間へ割り込むための `cat`。1 度目の呼び出しが返った直後に、
+# 同じ陳腐化を判定した別の担当が取り除いて取り直す様子を作る。取り直しに成功したら
+# `rival` を残す。**割り込む側は本物の `cat` で動かす**（PATH を戻して起動する）。
+LOCK_CAT_SHIM = """#!/usr/bin/env bash
+REAL_CAT "$@"
+rc=$?
+if [ ! -e "$SHIM_STATE/first" ]; then
+  : >"$SHIM_STATE/first"
+  if PATH="$SHIM_PATH" bash -c '
+      set -uo pipefail
+      . "$1"
+      "$2" "$4" "old-owner" "rival" || exit 1
+      "$3" "$4" 1
+    ' _ "$SHIM_LIB" "$SHIM_DISCARD" "$SHIM_ACQUIRE" "$SHIM_LOCK" >/dev/null 2>&1
+  then
+    : >"$SHIM_STATE/rival"
+  fi
+fi
+exit $rc
+"""
+
+
+@pytest.mark.parametrize(("lib", "prefix"), LOCK_HELPERS)
+def test_a_discard_shuts_out_another_discard_of_the_same_lock(
+    tmp_path: Path, lib: Path, prefix: str
+) -> None:
+    """#297-1 / 2: 確かめてから取り除くまでの間に、別の担当が取り直せない。
+
+    確かめることと取り除くことが別々だと、その間に別の担当が同じロックを捨てて取り直す。
+    取り除く側は、確かめたものとは別の、**持ち主が臨界区間にいるロック**を取り除く。
+    取り除きにも関門を置き、同じロックの取り除きを 1 つに限ることで塞ぐ。
+    """
+    shim_dir = tmp_path / "bin"
+    shim_dir.mkdir()
+    state = tmp_path / "state"
+    state.mkdir()
+    lock = tmp_path / "stale.lock"
+    lock.mkdir()
+    (lock / "held").touch()
+    (lock / "token").write_text("old-owner\n", encoding="utf-8")
+    real_cat = shutil.which("cat")
+    assert real_cat is not None
+    (shim_dir / "cat").write_text(
+        LOCK_CAT_SHIM.replace("REAL_CAT", real_cat), encoding="utf-8"
+    )
+    (shim_dir / "cat").chmod(0o755)
+
+    acquire = f"{prefix[1:]}_lock_acquire"
+    got = _run_lock_lib(
+        lib,
+        f'export SHIM_STATE="{state}" SHIM_LOCK="{lock}" SHIM_LIB="{lib}"\n'
+        f'export SHIM_DISCARD="{prefix}_lock_discard" SHIM_ACQUIRE="{acquire}"\n'
+        f'export SHIM_PATH="$PATH"\n'
+        f'export PATH="{shim_dir}:$PATH"\n'
+        f'{prefix}_lock_discard "{lock}" "old-owner" "tok"; echo rc=$?',
+    )
+
+    assert (state / "first").exists(), f"割り込みが起きていない: {got.stdout} {got.stderr}"
+    assert not (state / "rival").exists(), "取り除きの最中に、別の担当が同じロックを取り直した"
+    assert "rc=0" in got.stdout, got.stdout
+    assert not lock.exists(), "判定したロックが残った"
 
 
 def test_six_registrations_at_once_all_survive(main_repo: Path, tmp_path: Path) -> None:

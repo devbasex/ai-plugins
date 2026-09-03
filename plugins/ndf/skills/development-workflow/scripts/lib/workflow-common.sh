@@ -247,16 +247,22 @@ WF_LOCK_TIMEOUT="${NDF_STAGE_LOCK_TIMEOUT:-5}"
 _wf_lock_sleep() { sleep 0.1 2>/dev/null || sleep 1; }
 
 # 判定したものと同じロックであることを確かめてから取り除く。
-# **確かめるのは外へ出す前である。** 理由は写し元の同じ関数に書いてある。
+# **確かめることと取り除くことを 1 つの関門の中で行う。** 理由は写し元の同じ関数に
+# 書いてある。名前の付け替えで外へ出してから確かめる形は採らない。
 _wf_lock_discard() {
-  local dir="$1" seen="$2" token="$3" stale="$1.stale.$3"
-  [ "$(cat "$dir/token" 2>/dev/null)" = "$seen" ] || return 1
-  mv "$dir" "$stale" 2>/dev/null || return 1
-  if [ "$(cat "$stale/token" 2>/dev/null)" = "$seen" ]; then
-    rm -rf "$stale" 2>/dev/null
+  local dir="$1" seen="$2" mark="$1/discard"
+  if ! ( set -C; : >"$mark" ) 2>/dev/null; then
+    # 取り除きの途中で落ちた担当が残した関門は、古ければ捨てる。
+    find "$mark" -maxdepth 0 -mmin "+$WF_LOCK_STALE_MINUTES" 2>/dev/null | grep -q . \
+      && rm -f "$mark" 2>/dev/null
+    return 1
+  fi
+  if [ "$(cat "$dir/token" 2>/dev/null)" = "$seen" ]; then
+    rm -rf "$dir" 2>/dev/null
     return 0
   fi
-  mv "$stale" "$dir" 2>/dev/null || rm -rf "$stale" 2>/dev/null
+  # 別物だった。取り除かず、関門だけを外す。
+  rm -f "$mark" 2>/dev/null
   return 1
 }
 
@@ -297,8 +303,8 @@ wf_lock_acquire() {
       # 競り負けた。**ロックは消さない。** 相手が持っているため、待つ側へ回る。
     fi
     seen=$(cat "$dir/token" 2>/dev/null)
-    if _wf_lock_is_stale "$dir" "$seen"; then
-      _wf_lock_discard "$dir" "$seen" "$token"
+    # **取り除けたときだけ、間を置かずに取りに戻る。** 理由は写し元の同じ関数に書いてある。
+    if _wf_lock_is_stale "$dir" "$seen" && _wf_lock_discard "$dir" "$seen"; then
       continue
     fi
     [ "$(date +%s)" -ge "$deadline" ] && return 1

@@ -1799,23 +1799,33 @@ _wt_lock_sleep() {
 WT_LOCK_STALE_MINUTES=5
 
 # 判定したものと同じロックであることを確かめてから取り除く。
-# 名前の付け替えは 1 つのプロセスだけが成功するため、これを関門に使う。
 # 単に `rm -rf` すると、先に捨てて取り直した別のプロセスのロックを壊す。
 #
-# **確かめるのは外へ出す前である。** 出してから確かめると、別物だったときには
-# 生きているロックを既に外している。外している間はロックの名前が空くため、持ち主が
-# 臨界区間にいるまま別の担当が関門を通る。戻すより先に取られると戻せず、持ち主の
-# ロックはそのまま捨てられる（#297）。
+# **確かめることと取り除くことを 1 つの関門の中で行う。** 確かめた後に別の担当が同じ
+# ロックを捨てて取り直せると、取り除く側は確かめたものとは別の、持ち主が臨界区間に
+# いるロックを取り除く。取り除きの関門を通れるのは 1 つだけで、持ち主は既に消えていて
+# 自ら離すこともないため、関門の中ではロックが入れ替わらない（#297）。
+#
+# **名前の付け替えで外へ出してから確かめる形は採らない。** 外へ出している間はロックの
+# 名前が空くため、持ち主が臨界区間にいるまま別の担当が関門を通る。戻すより先に取られると
+# 戻せず、持ち主のロックはそのまま捨てられる（#297）。
+#
+# 関門はロックの中に置く。取り除きに成功すればロックごと消えるため、跡が残らない。
 _wt_lock_discard() {
-  local dir="$1" seen="$2" token="$3" stale="$1.stale.$3"
-  [ "$(cat "$dir/token" 2>/dev/null)" = "$seen" ] || return 1
-  mv "$dir" "$stale" 2>/dev/null || return 1
-  if [ "$(cat "$stale/token" 2>/dev/null)" = "$seen" ]; then
-    rm -rf "$stale" 2>/dev/null
+  local dir="$1" seen="$2" mark="$1/discard"
+  if ! ( set -C; : >"$mark" ) 2>/dev/null; then
+    # 取り除きの途中で落ちた担当が残した関門は、古ければ捨てる。残したままにすると、
+    # そのロックはだれにも取り除けなくなる。
+    find "$mark" -maxdepth 0 -mmin "+$WT_LOCK_STALE_MINUTES" 2>/dev/null | grep -q . \
+      && rm -f "$mark" 2>/dev/null
+    return 1
+  fi
+  if [ "$(cat "$dir/token" 2>/dev/null)" = "$seen" ]; then
+    rm -rf "$dir" 2>/dev/null
     return 0
   fi
-  # 別物だった。戻せなければ、取り直した側が既に持っているので捨てる。
-  mv "$stale" "$dir" 2>/dev/null || rm -rf "$stale" 2>/dev/null
+  # 別物だった。取り除かず、関門だけを外す。
+  rm -f "$mark" 2>/dev/null
   return 1
 }
 
@@ -1867,8 +1877,10 @@ wt_lock_acquire() {
       # 競り負けた。**ロックは消さない。** 相手が持っているため、待つ側へ回る。
     fi
     seen=$(cat "$dir/token" 2>/dev/null)
-    if _wt_lock_is_stale "$dir" "$seen"; then
-      _wt_lock_discard "$dir" "$seen" "$token"
+    # **取り除けたときだけ、間を置かずに取りに戻る。** 取り除けなかったときも戻すと、
+    # 上限の判定に着かないまま回り続ける。取り除きの関門は他の担当が持っていることが
+    # あり、その間は待つ側へ回る。
+    if _wt_lock_is_stale "$dir" "$seen" && _wt_lock_discard "$dir" "$seen"; then
       continue
     fi
     [ "$(date +%s)" -ge "$deadline" ] && return 1
