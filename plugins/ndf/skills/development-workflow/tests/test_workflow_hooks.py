@@ -21,16 +21,25 @@ MERGED = SKILL_DIR.parent / "merged/SKILL.md"
 # `skills/<名前>/` にある。
 PLUGIN_ROOT = SKILL_DIR.parents[1]
 
-# **Skill の hook のコマンドで置き換わる変数はこれだけである。** 実行ファイルは、
-# 一覧の外の変数を見つけると次の文言で拒む（Claude Code 2.1.259 の実測）。
+# **この hook が書いてよい `${...}` は `${CLAUDE_PLUGIN_ROOT}` だけである。**
 #
-#     Hook command references ${...} but only ${CLAUDE_PLUGIN_ROOT} is available for
-#     skill hooks (${CLAUDE_PLUGIN_DATA} is plugin-only).
+# 実行ファイルの実体（Claude Code 2.1.259）を読んで確かめた。Skill の hook で
+# `${CLAUDE_PLUGIN_DATA}` を書くと、次の文言を出して実行そのものを拒む。
 #
-# `${CLAUDE_PROJECT_DIR}` は hook の環境変数として渡るため、シェル形式でも展開される。
-# `${CLAUDE_SKILL_DIR}` は SKILL.md の本文では使えるが、**hook のコマンドでは渡らない**。
-# 空へ展開されるだけで拒否も警告も出ないため、発火しないことに気づく手がかりが無い（#304）。
-ALLOWED_HOOK_VARIABLES = frozenset({"CLAUDE_PLUGIN_ROOT", "CLAUDE_PROJECT_DIR"})
+#     Hook command references ${CLAUDE_PLUGIN_DATA} but only ${CLAUDE_PLUGIN_ROOT} is
+#     available for skill hooks (${CLAUDE_PLUGIN_DATA} is plugin-only).
+#
+# **拒否の検査が見るのはこの 2 つだけである。** `${CLAUDE_PROJECT_DIR}` はブレースを
+# 付けても捕捉されず、値にもなる（シェル形式では hook の環境変数として、`args` を持つ
+# 形では実行ファイルの置き換えとして届く）。**それでも一覧へは入れない。** この hook が
+# 起動する判定のスクリプトはプラグインの下にあり、主ディレクトリの位置に依存させない。
+# シェルの環境変数として展開させたいときは、ブレースを付けずに `$CLAUDE_PROJECT_DIR` と
+# 書く。**下の正規表現はブレース付きだけを拾うため、書き分けがそのまま意図の表明になる。**
+#
+# 一覧の外の変数は、シェル形式では**空へ展開されるだけで拒否も警告も出ない**。
+# `${CLAUDE_SKILL_DIR}` は SKILL.md の本文では使えるため、hook へ書いても誤りに見えない。
+# 発火しないことに気づく手がかりが無い（#304）。
+ALLOWED_HOOK_VARIABLES = frozenset({"CLAUDE_PLUGIN_ROOT"})
 
 # 実行ファイルが変数を取り出す正規表現と同じもの。
 VARIABLE = re.compile(r"\$\{([a-zA-Z_][a-zA-Z0-9_.]*)\}")
@@ -69,19 +78,23 @@ def test_the_hook_points_at_the_guard_in_this_skill() -> None:
     assert "${CLAUDE_PLUGIN_ROOT}/skills/development-workflow/scripts/workflow-guard.sh" in body
 
 
-def test_the_hook_command_only_uses_variables_available_to_skill_hooks() -> None:
+def test_the_hook_command_only_uses_the_plugin_root_variable() -> None:
     """一覧の外の変数は使わない。**空へ展開されるだけで、拒否も警告も出ない**（#304）。
 
     文字列の一致だけを見ると、同じ間違いが戻ったときに気づけない。`${CLAUDE_SKILL_DIR}`
     は SKILL.md の本文では使えるため、hook へ書いても誤りに見えない。
+
+    `${CLAUDE_PROJECT_DIR}` も落とす。**値にはなるが、この hook を主ディレクトリの位置へ
+    依存させない。** シェルの展開を意図して書くなら、ブレースを付けずに
+    `$CLAUDE_PROJECT_DIR` と書く。この検査はブレース付きだけを拾う。
     """
     used = set(VARIABLE.findall(hook_command()))
 
     assert used, f"hook のコマンドが変数を持たない: {hook_command()}"
     forbidden = sorted(used - ALLOWED_HOOK_VARIABLES)
     assert not forbidden, (
-        f"Skill の hook で置き換わらない変数を使っている: {forbidden}。"
-        f"使えるのは {sorted(ALLOWED_HOOK_VARIABLES)} だけである"
+        f"この hook が使ってよい変数の外を書いている: {forbidden}。"
+        f"書けるのは {sorted(ALLOWED_HOOK_VARIABLES)} だけである"
     )
 
 
