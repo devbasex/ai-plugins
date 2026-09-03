@@ -282,7 +282,7 @@ bash <プラグインのパス>/scripts/worktree-setup.sh init
 ```
 
 `guard.allow_paths` は、主ディレクトリで編集しても案内を出さないパスです。省略すると
-組み込みの既定（上記と同じ一覧に `.agents/` `.gemini/` `.serena/` を加えたもの）を使います。
+組み込みの既定（上記と同じ一覧に `.agents/` `.serena/` を加えたもの）を使います。
 空の配列を書くと「何も許可しない」という指定になります。
 
 手順は `/ndf:worktree` にあります。
