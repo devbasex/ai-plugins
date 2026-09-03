@@ -15,7 +15,7 @@ import pytest
 
 
 PR = 4242
-AGENT = "gemini"
+AGENT = "agy"
 
 
 def _seed_state(tmp_dir: pathlib.Path) -> dict:
@@ -76,7 +76,7 @@ def test_canonical_schema(patched_tmp_dir, state_mod):
 
 
 def test_alias_schema_intent_and_comment_count(patched_tmp_dir, state_mod):
-    """gemini が `intent` / `comment_count` で書き出すパターンも受理する。"""
+    """agy が `intent` / `comment_count` で書き出すパターンも受理する。"""
     tmp_dir = patched_tmp_dir
     _seed_state(tmp_dir)
     result = {

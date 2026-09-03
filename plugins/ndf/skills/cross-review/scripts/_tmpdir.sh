@@ -11,7 +11,7 @@
 #
 # 優先順位:
 #   1. 環境変数 CROSS_REVIEW_TMP_DIR (明示)
-#   2. <worktree-root>/.cross_review/ (worktree 内。gemini の workspace 制約を根本回避)
+#   2. <worktree-root>/.cross_review/ (worktree 内。作業領域を 1 つに保つため)
 
 # shellcheck source=lib/_tmpdir.sh
 . "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/lib/_tmpdir.sh"

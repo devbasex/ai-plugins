@@ -52,7 +52,7 @@ def test_import_succeeds_with_non_numeric_monitor_stall(monkeypatch):
     assert mod.DEFAULT_STALL == 180
     # 呼び出し時の解決も builtin にフォールバック (既存 round 4 挙動と同じ)
     assert mod._agent_stall_default("codex") == 180
-    assert mod._agent_stall_default("gemini") == 480
+    assert mod._agent_stall_default("agy") == 480
 
 
 def test_import_succeeds_with_non_numeric_monitor_timeout(monkeypatch):

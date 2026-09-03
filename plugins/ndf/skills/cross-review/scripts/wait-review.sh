@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Wait for codex / gemini review processes — monitor.py の薄いラッパ。
+# Wait for codex / agy review processes — monitor.py の薄いラッパ。
 #
-# Usage: wait-review.sh <PR> [codex|gemini|both] [--timeout SEC] [--stall-timeout SEC]
+# Usage: wait-review.sh <PR> [codex|agy|both] [--timeout SEC] [--stall-timeout SEC]
 #
 # 既定値:
 #   timeout       1800s (= 30 min)   env MONITOR_TIMEOUT で上書き
@@ -17,7 +17,7 @@
 #   5  STALLED (err.log 進捗なし)
 #   6  PIDFILE_BAD (pidfile 不正 / プロセス未起動)
 #
-# 旧 wait_codex / wait_gemini (sentinel + pidfile のみ) は信頼性が低かったため
+# 旧 wait_codex / wait_agent (sentinel + pidfile のみ) は信頼性が低かったため
 # Python 側に多軸監視を集約した。本ラッパは既存呼び出し互換のために残す。
 
 set -euo pipefail

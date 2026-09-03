@@ -5,9 +5,9 @@
 | 母集合 | 定義 | 中身 |
 | --- | --- | --- |
 | 提案・レビュー | 全ランタイム − ホスト | 常に 3 者 |
-| 適用 | 全ランタイム − gemini | 常に claude / codex / kiro |
+| 適用 | 全ランタイム − agy | 常に claude / codex / kiro |
 
-gemini はどの配布先でもないためホストになれず、NDF Skill を持たないため適用にも
+agy はどの配布先でもないためホストになれず、NDF Skill を持たないため適用にも
 参加しない。この 2 つが噛み合うので、どのホストでも提案・レビューは 3 者、
 適用候補も 3 者で揃い、輪番の式が全ホストで同じ形になる。
 """
@@ -17,14 +17,14 @@ import os
 from typing import Mapping, Optional
 
 # 固定順。輪番の再現性を保つため並べ替えない。
-ALL_RUNTIMES: tuple[str, ...] = ("claude", "codex", "gemini", "kiro")
+ALL_RUNTIMES: tuple[str, ...] = ("claude", "codex", "agy", "kiro")
 
-# ホストになりうるランタイム（NDF の配布先）。gemini は配布先ではない。
+# ホストになりうるランタイム（NDF の配布先）。agy は配布先ではない。
 HOST_RUNTIMES: tuple[str, ...] = ("claude", "codex", "kiro")
 
 # 適用に参加できないランタイム。NDF Skill を配布しておらず、
 # `refactoring` Skill の手順を踏ませる適用には向かない。
-IMPL_EXCLUDED: tuple[str, ...] = ("gemini",)
+IMPL_EXCLUDED: tuple[str, ...] = ("agy",)
 
 # ホスト推定に使う環境変数。値の中身は見ず、**存在するかどうか**だけで判定する。
 HOST_ENV_HINTS: tuple[tuple[str, str], ...] = (
@@ -78,7 +78,7 @@ def review_pool(host: str) -> list[str]:
 
 
 def impl_pool() -> list[str]:
-    """適用の母集合（全ランタイム − gemini）。ホストによらず常に同じ。"""
+    """適用の母集合（全ランタイム − agy）。ホストによらず常に同じ。"""
     return [r for r in ALL_RUNTIMES if r not in IMPL_EXCLUDED]
 
 

@@ -25,7 +25,7 @@ def test_pid_alive_returns_false_for_zombie(monitor_mod):
 
 def test_pid_alive_returns_true_for_running(monitor_mod):
     """State: S (sleeping) のプロセスに対して True を返す。"""
-    proc_status = "Name:\tgemini\nState:\tS (sleeping)\nTgid:\t12345\nPid:\t12345\n"
+    proc_status = "Name:\tagy\nState:\tS (sleeping)\nTgid:\t12345\nPid:\t12345\n"
 
     with (
         mock.patch("os.kill", return_value=None),
@@ -38,7 +38,7 @@ def test_pid_alive_returns_true_for_running(monitor_mod):
 
 def test_pid_alive_returns_true_for_running_state_r(monitor_mod):
     """State: R (running) のプロセスに対して True を返す。"""
-    proc_status = "Name:\tgemini\nState:\tR (running)\nTgid:\t12345\nPid:\t12345\n"
+    proc_status = "Name:\tagy\nState:\tR (running)\nTgid:\t12345\nPid:\t12345\n"
 
     with (
         mock.patch("os.kill", return_value=None),
@@ -69,7 +69,7 @@ def test_pid_alive_proc_unreadable_falls_back_to_alive(monitor_mod):
 def test_is_zombie_helper(monitor_mod):
     """_is_zombie() ヘルパーの動作確認。"""
     zombie_status = "Name:\tbash\nState:\tZ (zombie)\nTgid:\t1\nPid:\t1\n"
-    alive_status = "Name:\tgemini\nState:\tS (sleeping)\nTgid:\t1\nPid:\t1\n"
+    alive_status = "Name:\tagy\nState:\tS (sleeping)\nTgid:\t1\nPid:\t1\n"
 
     with mock.patch.object(pathlib.Path, "read_text", return_value=zombie_status):
         assert monitor_mod._is_zombie(1) is True

@@ -12,7 +12,7 @@ deferred nit レポート）を 1 つの CLI に集約する。
 Subcommands:
   init           Step 0  state 初期化 or 再開（プリチェック込み）
   start-round    Step 1  round 開始判定 (ROUND/ROUND_IN_PR/PR を stdout に出す)
-  read-result    Step 2.5 codex/gemini の result.json を state にマージ
+  read-result    Step 2.5 codex/agy の result.json を state にマージ
   unresolved-threads     PR 上の未解決の指摘を数える (exit 0=数えられた, 1=取得できず)
   judge          Step 3  intent ベース pass 判定 (exit 0=approved, 2=continue)
   check-oscillation Step 4 path:line 重複率を計算
@@ -538,7 +538,7 @@ def _tmp_dir(workspace: str | None = None) -> pathlib.Path:
 
     優先順位:
       1. 環境変数 `CROSS_REVIEW_TMP_DIR` (明示)
-      2. `<workspace>/.cross_review/` (worktree 内。gemini の workspace 制約を根本回避)
+      2. `<workspace>/.cross_review/` (worktree 内。作業領域を 1 つに保つため)
 
     `workspace` 未指定なら `git rev-parse --show-toplevel` で worktree root を
     取得する。サブディレクトリから実行してもパス不一致が発生しない。
@@ -1041,7 +1041,7 @@ def cmd_init(args: argparse.Namespace) -> None:
     pr = args.pr
     manual_extra_review = _extra_review_instructions(args)
     # worktree path を先に解決してから tmp_dir を決定する。
-    # tmp_dir は <worktree>/.cross_review/ に配置し、gemini の workspace 制約を根本回避。
+    # tmp_dir は <worktree>/.cross_review/ に配置し、作業領域を 1 つに保つ。
     # path には repo slug を含め、他リポジトリの同一 PR 番号と衝突しないようにする。
     repo = _sh(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
     worktree = str(pathlib.Path(args.worktree).resolve()) if args.worktree else str(
@@ -1203,7 +1203,7 @@ def cmd_init(args: argparse.Namespace) -> None:
     print("RESUMED=0")
 
 
-AGENTS = ("codex", "gemini")
+AGENTS = ("codex", "agy")
 
 NO_RESULT = "NO_RESULT"
 
@@ -1333,7 +1333,7 @@ def _sync_before_round(st: dict[str, Any], pr: int) -> None:
     原因を取り除いた後に同じラウンド番号から再開できる。
 
     「同期の対象が無い」と「同期できない」は分けて扱う。作業ツリーが失われている状態は
-    この後の `launch-codex.sh` / `launch-gemini.sh` が表に出すため、ここで止めても
+    この後の `launch-codex.sh` / `launch-agy.sh` が表に出すため、ここで止めても
     分かることは増えない。
     """
     wt = str(st.get("worktree_path") or "")
@@ -1657,7 +1657,7 @@ def _die_no_result(pr: int, agent: str, reason: str, msg: str, code: int = 1) ->
 
 
 def cmd_read_result(args: argparse.Namespace) -> None:
-    """Step 2.5 — codex/gemini の result.json を state にマージ。
+    """Step 2.5 — codex/agy の result.json を state にマージ。
 
     使える結果が残らなかったときは、`NO_RESULT` と理由をラウンドへ残してから止める。
     終了コードは現行のまま（無い・判定の値を持たないときは 1、JSON として読めない
@@ -1693,7 +1693,7 @@ def cmd_read_result(args: argparse.Namespace) -> None:
             code=3,
         )
 
-    # 別名フィールドへのフォールバック (gemini が `intent` / `comment_count` を使う変則 JSON を
+    # 別名フィールドへのフォールバック (`intent` / `comment_count` を使う変則 JSON を
     # 書き出す既知のケースに対応する。仕様としては `event` / `comments_count` が正)
     intent = r.get("event") or r.get("intent")
     posted_as = r.get("posted_as") or intent
@@ -1791,14 +1791,14 @@ def cmd_judge(args: argparse.Namespace) -> None:
     only = st.get("only")
 
     codex_intent = _agent_intent(last, "codex", only)
-    gemini_intent = _agent_intent(last, "gemini", only)
+    agy_intent = _agent_intent(last, "agy", only)
     round_passes = _round_passes(last, only)
 
     carried = _carried_over_pending(st)
     carried_count = (st.get("carried_over") or {}).get("count", 0)
 
     print(f"CODEX_INTENT={codex_intent}")
-    print(f"GEMINI_INTENT={gemini_intent}")
+    print(f"AGY_INTENT={agy_intent}")
     print(f"CARRIED_OVER_THREADS={carried_count}")
 
     no_result = _no_result_agents(last, only)
@@ -1843,7 +1843,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
             "修正の工程を 1 度通すまで収束させない。"
         )
     else:
-        info(f"→ codex={codex_intent} gemini={gemini_intent}。修正へ。")
+        info(f"→ codex={codex_intent} agy={agy_intent}。修正へ。")
     sys.exit(2)
 
 
@@ -1873,7 +1873,7 @@ def cmd_check_oscillation(args: argparse.Namespace) -> None:
 
     同じ箇所かどうかは 3 つの一致で測り、いずれか 1 つで結びつけば同じ箇所として数える。
     位置の完全一致だけで測ると、指摘の趣旨が同じでも行が 1 行ずれれば別の指摘として
-    数える。レビューを行うのは codex / gemini であり、同じ箇所を指すときに選ぶ行は毎回
+    数える。レビューを行うのは codex / agy であり、同じ箇所を指すときに選ぶ行は毎回
     同じとは限らない。修正で行が前後にずれた場合も一致しない。
 
     | 一致 | 条件 |
@@ -1897,7 +1897,7 @@ def cmd_check_oscillation(args: argparse.Namespace) -> None:
     def collect_keys(round_no: int) -> list[tuple[str, int, str]]:
         """そのラウンドの指摘を (ファイル, 行, 正規化した本文) の並びで返す。"""
         keys: list[tuple[str, int, str]] = []
-        for agent in ("codex", "gemini"):
+        for agent in ("codex", "agy"):
             p = _payload_path(agent, pr, round_no)
             if not p.exists():
                 continue
@@ -2324,19 +2324,19 @@ def cmd_report(args: argparse.Namespace) -> None:
         print(f"- #{h['pr']} ({state_str}, {h.get('rounds', 0)} rounds)")
     print()
     print("## ラウンドサマリ")
-    print("| round | PR | codex | gemini | fix | CI |")
+    print("| round | PR | codex | agy | fix | CI |")
     print("|---|---|---|---|---|---|")
     for r in st["rounds"]:
         codex = r.get("codex") or {}
-        gemini = r.get("gemini") or {}
+        agy = r.get("agy") or {}
         fix = r.get("fix") or {}
         codex_s = f"{codex.get('intent', '-')} ({codex.get('comments', '-')})" if codex else "-"
-        gemini_s = f"{gemini.get('intent', '-')} ({gemini.get('comments', '-')})" if gemini else "-"
+        agy_s = f"{agy.get('intent', '-')} ({agy.get('comments', '-')})" if agy else "-"
         fix_s = "-"
         if fix:
             fix_s = f"{(fix.get('commit') or '')[:7]} ({fix.get('fixed', 0)} fixed, {fix.get('deferred', 0)} deferred)"
         ci_s = fix.get("ci") or "-"
-        print(f"| {r['round']} | #{r['pr']} | {codex_s} | {gemini_s} | {fix_s} | {ci_s} |")
+        print(f"| {r['round']} | #{r['pr']} | {codex_s} | {agy_s} | {fix_s} | {ci_s} |")
     print()
 
     sweep = st.get("sweep")
@@ -2373,7 +2373,7 @@ def main() -> None:
     sp.add_argument("pr", type=int)
     sp.add_argument("--max-rounds", type=int, default=12)
     sp.add_argument("--rotate-after", type=int, default=8)
-    sp.add_argument("--only", choices=["codex", "gemini"], default=None)
+    sp.add_argument("--only", choices=["codex", "agy"], default=None)
     sp.add_argument("--worktree", default=None)
     sp.add_argument(
         "--focus",
@@ -2393,7 +2393,7 @@ def main() -> None:
 
     sp = sub.add_parser("read-result", help="Step 2.5 — review result を state にマージ")
     sp.add_argument("pr", type=int)
-    sp.add_argument("agent", choices=["codex", "gemini"])
+    sp.add_argument("agent", choices=["codex", "agy"])
     sp.add_argument("--file", default=None)
     sp.set_defaults(func=cmd_read_result)
 

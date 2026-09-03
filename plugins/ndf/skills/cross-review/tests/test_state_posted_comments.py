@@ -24,7 +24,7 @@ import pathlib
 import pytest
 
 PR = 4242
-AGENT = "gemini"
+AGENT = "agy"
 REVIEW_URL = f"https://github.com/o/r/pull/{PR}#pullrequestreview-4961230016"
 
 

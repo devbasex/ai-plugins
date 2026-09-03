@@ -9,8 +9,8 @@
 |---|---|
 | `scripts/state.py init` | Step 0 — state 初期化 / 再開 + プリチェック |
 | `scripts/state.py start-round` | Step 1 — round 開始判定 |
-| `scripts/launch-codex.sh` / `scripts/launch-gemini.sh` | Step 2 — review launcher |
-| `scripts/monitor.py` | Step 2 — codex/gemini プロセス多軸監視 |
+| `scripts/launch-codex.sh` / `scripts/launch-agy.sh` | Step 2 — review launcher |
+| `scripts/monitor.py` | Step 2 — codex/agy プロセス多軸監視 |
 | `scripts/wait-review.sh` | Step 2 — `monitor.py` の薄ラッパ（互換用） |
 | `scripts/state.py read-result` | Step 2.5 — result.json マージ |
 | `scripts/state.py unresolved-threads` | PR 上の未解決の指摘を数える（順序を持たない補助） |
@@ -62,7 +62,7 @@
       "codex":  {"intent": "REQUEST_CHANGES", "posted_as": "COMMENT",
                  "comments": 5, "review_url": "...",
                  "by_severity": {"critical": 0, "major": 3, "minor": 2, "nit": 0}},
-      "gemini": {"intent": "REQUEST_CHANGES", "posted_as": "COMMENT",
+      "agy": {"intent": "REQUEST_CHANGES", "posted_as": "COMMENT",
                  "comments": 3, "review_url": "...",
                  "by_severity": {"critical": 0, "major": 2, "minor": 1, "nit": 0}},
       "fix":    {"commit": "abc1234", "fixed": 6, "deferred": 2, "rejected": 0,
@@ -233,7 +233,7 @@ eval "$ROUND_VARS"
 `--head-branch` で受け取った値を書き戻す。ラウンドの開始時にも取り直すのは、作業ツリーの
 外で行われた変更に追従するためである。
 
-## Step 2: codex / gemini 並列レビュー（AI 直接投稿）
+## Step 2: codex / agy 並列レビュー（AI 直接投稿）
 
 **要点**: メインは launcher を **並列バックグラウンド** で起動するだけ。
 各 AI が `gh api` で投稿し `$TMP_DIR/<agent>-review-pr<PR>-result.json` に
@@ -242,8 +242,8 @@ eval "$ROUND_VARS"
 ### 2.1 launcher 起動 + monitor
 
 ```bash
-[ "$ONLY" != "gemini" ] && "$SCRIPTS/launch-codex.sh"  "$STATE_PR" "$ROUND"
-[ "$ONLY" != "codex"  ] && "$SCRIPTS/launch-gemini.sh" "$STATE_PR" "$ROUND"
+[ "$ONLY" != "agy" ] && "$SCRIPTS/launch-codex.sh"  "$STATE_PR" "$ROUND"
+[ "$ONLY" != "codex"  ] && "$SCRIPTS/launch-agy.sh" "$STATE_PR" "$ROUND"
 
 # monitor.py が多軸で完了判定。exit code で失敗種別を分岐。
 if ! "$SCRIPTS/monitor.py" "$STATE_PR" "${ONLY:-both}"; then
@@ -265,18 +265,18 @@ fi
 | pidfile + `kill -0` | プロセス生存確認。alive 確認後に `/proc/<pid>/cmdline` で agent 名一致も検証 (PID 再利用対策)。**プロセスが既に死んでいる場合は result.json の有無のみで OK 判定**する (死亡直後 cmdline 不一致で誤検知しないため) |
 | codex sentinel | err.log に `^tokens used$` 出現で正常完了マーク |
 | early-error | **行頭限定** で `^Error:` / `^FATAL:` / `^panic:` / `^Traceback ` / `^HTTP/1.1 401\|403\|429` / `^Approval mode overridden to "default"` / `^Authentication failed` / 「quota exceeded」「rate limit exceeded」「API key not found/missing/invalid」「sandbox error」を含む行を検出 (diff/doc 引用文中の同語句は誤検知しないよう anchor + benign フィルタ併用) |
-| stall timeout | err.log + stdout.log + progress.log の合計サイズが一定時間変化しなければ STALLED で中断。既定は **agent 別** (codex=**180s** / gemini=**480s**)。gemini は err.log がほぼ無音のため大きめに取る。codex 側既定は不変。上書き方法: CLI `--stall-timeout` (明示優先) > env `MONITOR_STALL_<AGENT>` (per-agent) > env `MONITOR_STALL` (両 agent 共通) > agent 別ビルトイン |
+| stall timeout | err.log + stdout.log + progress.log の合計サイズが一定時間変化しなければ STALLED で中断。既定は **agent 別** (codex=**180s** / agy=**480s**)。agy は err.log がほぼ無音のため大きめに取る。codex 側既定は不変。上書き方法: CLI `--stall-timeout` (明示優先) > env `MONITOR_STALL_<AGENT>` (per-agent) > env `MONITOR_STALL` (両 agent 共通) > agent 別ビルトイン |
 | hard timeout | 既定 **7 分**。`--timeout` or `MONITOR_TIMEOUT` env で上書き |
 | progress.log heartbeat | launcher が任意で `<agent>-review-pr<PR>-progress.log` への短いフェーズマーカー出力を要求し、monitor が最終行を stderr の heartbeat に表示する。内部推論ではなく `scan` / `analyze` / `post` / `done` などの監視用ステータスだけを出す |
 | result.json 存在 | プロセス終了後、result.json が無ければ NO_RESULT (exit 3) |
-| **result.json + age fallback** | sentinel を持たない agent (gemini) 向け。プロセスが alive のまま result.json の mtime が **30 秒以上前**なら完了とみなし kill → OK。gemini が MCP 切断待ち等でハングするケースに対応 (codex は sentinel チェックが先に発火するため影響なし) |
+| **result.json + age fallback** | sentinel を持たない agent (agy) 向け。プロセスが alive のまま result.json の mtime が **30 秒以上前**なら完了とみなし kill → OK。結果を書いた後にプロセスが終わらないケースに対応 (codex は sentinel チェックが先に発火するため影響なし) |
 | **失敗時 kill** | TIMEOUT / STALLED / EARLY_ERROR / PIDFILE_BAD で返るときは対象プロセスに SIGTERM → 3 秒後 SIGKILL。残存プロセスが後から `gh api` 投稿や result.json 書き込みを行うのを防ぐ |
 
 > ⚠ **罠**: `nohup ... &` でラッパーシェルは即終了し、ハーネスから
 > 「タスク完了」通知が飛んでくる。これに惑わされず、`monitor.py` で
 > 実プロセスの完了を pidfile / sentinel で確認すること。
 >
-> ⚠ **`pgrep -fa <prompt>` で完了判定しない**: gemini は long `-p` プロンプトを
+> ⚠ **`pgrep -fa <prompt>` で完了判定しない**: agy は long `-p` プロンプトを
 > 引数に持つため、`grep` のキーワード選定で誤検知する。**pidfile 必須**。
 >
 > ⚠ **sentinel 単独で完了判定しない**: codex がクラッシュすると `tokens used` が
@@ -296,8 +296,8 @@ launcher が生成するプロンプトに以下を強制している:
 - **event ダウングレード警告**: `event_downgrade=true` のときは payload の `event` を `COMMENT` に
 - **既存コメント差分**: `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt` を読んで重複指摘禁止
 - **自動レビュー観点**: GitHub API の `pulls/<PR>/files --paginate` で変更ファイルを全件取得して分類し、`common` / `docs_only` / `code` / `db_migration` / `test` / `dependency` / `config_ci` / `api_contract` / `auth_security` / `frontend` / `performance` / `deletion_rename` / `generated` / `i18n` / `infra` の該当テンプレートを state.json の `auto_review_instructions` に保存する
-- **手動追加レビュー観点**: `--focus` / `--extra-instructions-file` が指定されていれば state.json の `manual_extra_review_instructions` に保存し、自動テンプレートの後ろに連結した `review_instructions` を codex / gemini 両 launcher が同じ「追加レビュー観点」セクションとしてプロンプトに差し込む
-- **進捗マーカー**: Gemini には `$TMP_DIR/gemini-review-pr<PR>-progress.log` へ短いフェーズ名を追記させ、monitor の heartbeat で表示する。内部推論や長文説明は書かせない
+- **手動追加レビュー観点**: `--focus` / `--extra-instructions-file` が指定されていれば state.json の `manual_extra_review_instructions` に保存し、自動テンプレートの後ろに連結した `review_instructions` を codex / agy 両 launcher が同じ「追加レビュー観点」セクションとしてプロンプトに差し込む
+- **進捗マーカー**: agy には `$TMP_DIR/agy-review-pr<PR>-progress.log` へ短いフェーズ名を追記させ、monitor の heartbeat で表示する。内部推論や長文説明は書かせない
 - **review body 先頭 prefix**:
   ```
   ## 🤖 cross-review | round <N> | <agent> | <event(intent)>
@@ -325,8 +325,8 @@ launcher が生成するプロンプトに以下を強制している:
 ### 2.4 result.json を state にマージ
 
 ```bash
-[ "$ONLY" != "gemini" ] && "$SCRIPTS/state.py" read-result "$STATE_PR" codex
-[ "$ONLY" != "codex"  ] && "$SCRIPTS/state.py" read-result "$STATE_PR" gemini
+[ "$ONLY" != "agy" ] && "$SCRIPTS/state.py" read-result "$STATE_PR" codex
+[ "$ONLY" != "codex"  ] && "$SCRIPTS/state.py" read-result "$STATE_PR" agy
 ```
 
 `state.rounds[-1].<agent>` に `intent / posted_as / comments / review_url / by_severity` を分離保存する。
@@ -399,11 +399,11 @@ eval "$JUDGE_VARS"
 記録する。**2 度目の判定は記録を見て中断へ回る。**
 
 ```text
-RELAUNCH_AGENTS='gemini'
-RELAUNCH_TARGET=gemini
+RELAUNCH_AGENTS='agy'
+RELAUNCH_TARGET=agy
 ```
 
-`RELAUNCH_TARGET` は `codex` / `gemini` / `both` のいずれかで、`monitor.py` へそのまま
+`RELAUNCH_TARGET` は `codex` / `agy` / `both` のいずれかで、`monitor.py` へそのまま
 渡せる値である。起動し直しはラウンドの中で完結するため、**ラウンドの数え方と上限の
 意味は変わらない。** 回数を 1 度に限るのは、待ち時間の上限をラウンドあたり 2 回分に
 収めるためである。

@@ -10,8 +10,7 @@
 | ファイル | 役割 |
 | --- | --- |
 | [monitor.py](monitor.py) | CLI プロセスの多軸監視。対象と命名規則を引数で受ける |
-| [launch-cli.sh](launch-cli.sh) | claude / codex / gemini / kiro をランタイム名で分岐して背景起動する |
-| [_gemini-env.sh](_gemini-env.sh) | gemini の信頼済みディレクトリ設定と設定ファイルの無害化 |
+| [launch-cli.sh](launch-cli.sh) | claude / codex / agy / kiro をランタイム名で分岐して背景起動する |
 | [_tmpdir.sh](_tmpdir.sh) | 一時ディレクトリの解決。環境変数名とディレクトリ名を引数で受ける |
 | [statefile.py](statefile.py) | 状態ファイルの読み書きと KEY=VALUE 出力 |
 | [assignment.py](assignment.py) | ホスト判定、役割ごとの母集合の確定、担当の輪番 |
@@ -44,8 +43,7 @@
 | --- | --- | --- |
 | `monitor.py` | `lib/` を直接使う | `scripts/monitor.py` が移設シムとして `lib/` を読む |
 | `_tmpdir.sh` | `lib/` を直接使う | `scripts/_tmpdir.sh` が固有の名前を束ねて `lib/` を読む |
-| `_gemini-env.sh` | `lib/launch-cli.sh` 経由 | `scripts/launch-gemini.sh` が読む |
-| `launch-cli.sh` | 使う | 未移行（作業単位 15 で移す） |
+| `launch-cli.sh` | 使う | `launch-agy.sh` が委譲する。`launch-codex.sh` は未移行 |
 | `assignment.py` / `models.py` / `metrics.py` | 使う | 未移行（作業単位 14〜16 で使う） |
 | `statefile.py` | 使う | 未移行（作業単位 13 の残り） |
 

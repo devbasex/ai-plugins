@@ -59,8 +59,8 @@ def test_non_dict_payload_dies(patched_tmp_dir, state_mod, capsys):
     # round 1 / round 2 の codex payload を dict で置く (正常 = 比較ベース)
     _write_payload(tmp_dir, "codex", 1, {"comments": [{"path": "a.py", "line": 1}]})
     _write_payload(tmp_dir, "codex", 2, {"comments": [{"path": "a.py", "line": 1}]})
-    # round 2 の gemini payload は不正 (list)
-    _write_payload(tmp_dir, "gemini", 2, [{"comments": "should_be_ignored"}])
+    # round 2 の agy payload は不正 (list)
+    _write_payload(tmp_dir, "agy", 2, [{"comments": "should_be_ignored"}])
 
     with pytest.raises(SystemExit) as e:
         state_mod.cmd_check_oscillation(_make_args())

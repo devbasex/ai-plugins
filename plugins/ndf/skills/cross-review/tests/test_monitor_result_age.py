@@ -1,6 +1,6 @@
 """monitor.py の result.json + age fallback (RESULT_AGE_GRACE) テスト。
 
-gemini がレビュー完了後にプロセスがハングするケースで、result.json の
+agy がレビュー完了後にプロセスがハングするケースで、result.json の
 mtime が RESULT_AGE_GRACE 秒以上前なら OK 判定する fallback の検証。
 """
 from __future__ import annotations
@@ -17,10 +17,10 @@ def test_result_age_grace_constant(monitor_mod):
     assert monitor_mod.RESULT_AGE_GRACE == 30
 
 
-def test_gemini_result_age_fallback_triggers_ok(monitor_mod, tmp_path):
+def test_agy_result_age_fallback_triggers_ok(monitor_mod, tmp_path):
     """result.json が RESULT_AGE_GRACE 秒以上前に書かれていれば OK で返る。"""
     pr = 999
-    agent = "gemini"
+    agent = "agy"
     base = tmp_path / f"{agent}-review-pr{pr}"
 
     pidfile = pathlib.Path(f"{base}.pid")
@@ -82,10 +82,10 @@ def test_gemini_result_age_fallback_triggers_ok(monitor_mod, tmp_path):
     assert 12345 in kill_called
 
 
-def test_gemini_result_age_too_young_continues(monitor_mod, tmp_path):
+def test_agy_result_age_too_young_continues(monitor_mod, tmp_path):
     """result.json が書かれたばかり (age < RESULT_AGE_GRACE) なら fallback しない。"""
     pr = 998
-    agent = "gemini"
+    agent = "agy"
     base = tmp_path / f"{agent}-review-pr{pr}"
 
     pidfile = pathlib.Path(f"{base}.pid")
@@ -133,7 +133,7 @@ def test_gemini_result_age_too_young_continues(monitor_mod, tmp_path):
 def test_fresh_but_young_result_continues_monitoring(monitor_mod, tmp_path):
     """started_wall 後に書かれたが age < RESULT_AGE_GRACE なら fallback せず監視継続。"""
     pr = 994
-    agent = "gemini"
+    agent = "agy"
     base = tmp_path / f"{agent}-review-pr{pr}"
 
     pidfile = pathlib.Path(f"{base}.pid")
@@ -238,7 +238,7 @@ def test_codex_sentinel_takes_priority(monitor_mod, tmp_path):
 def test_stale_result_json_from_previous_round_ignored(monitor_mod, tmp_path):
     """前 round の古い result.json (mtime < started_wall) は fallback しない。"""
     pr = 996
-    agent = "gemini"
+    agent = "agy"
     base = tmp_path / f"{agent}-review-pr{pr}"
 
     pidfile = pathlib.Path(f"{base}.pid")
@@ -285,7 +285,7 @@ def test_stale_result_json_from_previous_round_ignored(monitor_mod, tmp_path):
 def test_cmdline_not_validated_skips_fallback(monitor_mod, tmp_path):
     """cmdline 未検証 (None) だと age fallback は発火しない。"""
     pr = 995
-    agent = "gemini"
+    agent = "agy"
     base = tmp_path / f"{agent}-review-pr{pr}"
 
     pidfile = pathlib.Path(f"{base}.pid")
