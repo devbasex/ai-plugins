@@ -26,6 +26,8 @@
 - 参加 CLI としての agy（#214、担当 A）
 - `rules/AGENTS.md` による常時注入（設計の決定 3）
 - agy 向けの取得元の登録（登録の手段が無い）
+- `README.md` の「開発に参加する場合」が `develop` はまだ無いと書いている点（範囲外。
+  [#300](https://github.com/devbasex/ai-plugins/issues/300) として残した）
 
 ## 前提
 
