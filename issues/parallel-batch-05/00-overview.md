@@ -52,7 +52,7 @@
 | 担当 | 書き換えてよいパス | 触らないパス |
 | --- | --- | --- |
 | A | `plugins/ndf/skills/cross-review/` / `cross-refactoring/` / `external-ai/` / `fix/SKILL.md` / `issue-plan-strategy/SKILL.md` / `pr-review/SKILL.md` / `worktree/` の `gemini` の記述 / `plugins/ndf/scripts/lib/worktree-common.sh` / `plugins/ndf/scripts/worktree-guard.sh` / `.ndf/worktree.json` | `scripts/` / 説明文書 / `development-workflow/` / `merged/` / `retrospective/` / `out-of-scope/` / `release/` |
-| B | `plugins/ndf/dev.agy/`（新設） / `plugins/ndf/manifests/` / `.agents/` / `scripts/` / `plugins/ndf/skills/README.md` / 説明文書一式 / `docs/specifications/` / `plugins/ndf/skills/worktree/tests/` の**新しいファイル** / 「`$SCRIPTS` を決める」節の候補の一覧（下の例外） | `plugins/ndf/skills/<Skill 名>/` の SKILL.md と参照（例外は候補の一覧の 1 箇所） / `worktree/tests/` の既存ファイル / `plugins/ndf/scripts/`（担当 A のマージ後に触る） |
+| B | `plugins/ndf/dev.agy/`（新設） / `plugins/ndf/manifests/` / `.agents/` / `scripts/` / `plugins/ndf/skills/README.md` / 説明文書一式 / `docs/specifications/` / `plugins/ndf/skills/worktree/tests/` の**新しいファイル** / 「`$SCRIPTS` を決める」節の候補の一覧（下の例外） / `worktree/tests/test_scripts_reference.py` への agy の配置の追記（下の例外） | `plugins/ndf/skills/<Skill 名>/` の SKILL.md と参照（例外は候補の一覧の 1 箇所） / `worktree/tests/` の既存ファイル（例外は `test_scripts_reference.py`） / `plugins/ndf/scripts/`（担当 A のマージ後に触る） |
 | C | `plugins/ndf/skills/development-workflow/` / `plugins/ndf/skills/merged/` | `release/` / `retrospective/` / `out-of-scope/` / `worktree/` / `scripts/` / 説明文書 |
 | D | `plugins/ndf/skills/retrospective/` / `plugins/ndf/skills/out-of-scope/` / `AGENTS.md` のドキュメント表の行 | `development-workflow/` / `release/` / `scripts/` / `AGENTS.md` の他の節 |
 | E | `plugins/ndf/skills/release/` | 他のすべての Skill / `scripts/` / 説明文書 |
@@ -194,6 +194,12 @@ No imported plugins.
 | F | `test_scripts_reference.py`（新設） | 手順書と解決手順の対応 |
 
 **既存のファイルは担当 A が持つ。** 担当 B と F は新しいファイルだけを足す。
+
+**例外が 1 つある。担当 B は `test_scripts_reference.py` へも追記する。** 担当 B が解決手順の
+候補へ agy の導入先を足すため、その候補を検査する側にも agy の配置が要る。**候補だけを足して
+テストを直さないと、テストが 3 ランタイム分のまま通り続ける。** マージの順序が F → A → B で
+あるため、担当 B が触る時点でこのファイルは起点に入っている。担当 F と同時に書き換えることは
+無い。
 
 ### `plugins/ndf/scripts/worktree-guard.sh` は担当 A と B が触る
 
