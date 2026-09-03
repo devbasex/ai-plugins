@@ -36,6 +36,14 @@ for family in "${FAMILIES[@]}"; do
   run python3 -m json.tool "$root_manifest" >/dev/null
 done
 
+for family in "${FAMILIES[@]}"; do
+  for agy_manifest in "$ROOT_DIR/plugins/$family/dev.agy/plugin.json" \
+                      "$ROOT_DIR/plugins/$family/dev.agy/hooks.json"; do
+    [ -f "$agy_manifest" ] || continue
+    run python3 -m json.tool "$agy_manifest" >/dev/null
+  done
+done
+
 while IFS= read -r mcp_config; do
   run python3 -m json.tool "$mcp_config" >/dev/null
 done < <(find "$ROOT_DIR/plugins/mcp" -maxdepth 2 -name .mcp.json | sort)
@@ -208,6 +216,25 @@ for family in families:
         )
     # ルートマニフェスト（Agent Plugins 形式）は絞り込みを持たず `skills/` を全件公開する。
     # description の Skill 数は manifest ではなく実体の数と突き合わせる。
+    # agy 向けの定義はクライアント拡張ディレクトリ（Agent Plugins 1.0.0 §8.2）へ置く。
+    # ルート直下へ置くと Codex がそちらを優先して読み、配布 Skill が codex-skills.txt では
+    # なく skills/ の実体になる。agy には取得元の登録が無く `agy plugin list` も版数を出さない
+    # ため、利用者が版を判断できる手がかりは clone した中身の版数だけである。
+    agy_manifest_path = plugin_dir_of(family) / "dev.agy/plugin.json"
+    if agy_manifest_path.is_file():
+        agy_manifest = read_json(agy_manifest_path)
+        if agy_manifest.get("version") != version:
+            errors.append(
+                f"{agy_manifest_path.relative_to(root)} の version が claude 版と"
+                f"食い違う（agy: {agy_manifest.get('version')} / claude: {version}）"
+            )
+        check_description(
+            str(agy_manifest_path.relative_to(root)),
+            agy_manifest.get("description"),
+            version,
+            manifest_skill_count(family, "agy"),
+            "agy-skills.txt",
+        )
     root_manifest_path = plugin_dir_of(family) / "plugin.json"
     if root_manifest_path.is_file():
         root_manifest = read_json(root_manifest_path)
@@ -385,6 +412,17 @@ if command -v claude >/dev/null 2>&1; then
   run claude plugin validate "$ROOT_DIR/.claude-plugin/marketplace.json"
 else
   echo "==> claude CLI not found; skipped claude plugin validate"
+fi
+
+# agy はクライアント拡張ディレクトリを 1 つのプラグインとして読む。CLI が無い環境では
+# 読み飛ばす（claude plugin validate と同じ扱い）。
+if command -v agy >/dev/null 2>&1; then
+  for family in "${FAMILIES[@]}"; do
+    [ -f "$ROOT_DIR/plugins/$family/dev.agy/plugin.json" ] || continue
+    run agy plugin validate "$ROOT_DIR/plugins/$family/dev.agy"
+  done
+else
+  echo "==> agy CLI not found; skipped agy plugin validate"
 fi
 
 # Kiro の installer は Agent Plugins 仕様 §8.2 のクライアント拡張ディレクトリに置く。

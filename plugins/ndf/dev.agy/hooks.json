@@ -1,0 +1,23 @@
+{
+  "ndf-worktree": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|MultiEdit|Write|NotebookEdit|fs_write|edit_file|write_file|str_replace_editor|replace|apply_patch|Bash|shell|execute_bash|local_shell|run_command|run_shell_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ./scripts/worktree-guard.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "bash ./scripts/worktree-session.sh",
+        "timeout": 10
+      }
+    ]
+  }
+}
