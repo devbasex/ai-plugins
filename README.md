@@ -1,14 +1,14 @@
 # AI Plugins
 
-Claude Code / Codex / Kiro CLI向けのスキル・MCP設定を共有するための内部マーケットプレイスです。
+Claude Code / Codex / Kiro CLI / agy 向けのスキル・MCP設定を共有するための内部マーケットプレイスです。
 
 ## 概要
 
-このマーケットプレイスは、チーム全体でAI開発ツール（Claude Code / Codex / Kiro CLI）の導入を加速するための事前設定されたプラグインを提供します。
+このマーケットプレイスは、チーム全体でAI開発ツール（Claude Code / Codex / Kiro CLI / agy）の導入を加速するための事前設定されたプラグインを提供します。
 
-**NDFプラグイン v9.8.0-dev.1** は、同じ `ndf@ai-plugins` という名前で Claude Code / Codex / Kiro CLI へ配布されるプラグインです。配布物は `plugins/ndf/` の1ディレクトリにまとまっており、Skill の実体は `plugins/ndf/skills/` の1箇所だけです。どのランタイムへ配るかは `plugins/ndf/manifests/*-skills.txt` が決めます。
+**NDFプラグイン v9.8.0-dev.1** は、同じ `ndf@ai-plugins` という名前で Claude Code / Codex / Kiro CLI / agy へ配布されるプラグインです。配布物は `plugins/ndf/` の1ディレクトリにまとまっており、Skill の実体は `plugins/ndf/skills/` の1箇所だけです。どのランタイムへ配るかは `plugins/ndf/manifests/*-skills.txt` が決めます。
 
-- **公開Skills**: Claude Code向け core 33個、Kiro向け core 32個、Codex向け core 31個に分離。
+- **公開Skills**: Claude Code向け core 33個、Kiro向け core 32個、Codex向け core 31個、agy向け core 31個に分離。
 - **元Skills（37個）**:
   - PR/レビューワークフロー (7): pr, pr-tests, fix, pr-review, cherry-pick-pr, deploy, merged
   - 開発方法論 (10): development-workflow, requirements-design, design, tdd-cycle, refactoring, quality-gates, release, release-verification, retrospective, out-of-scope
@@ -19,11 +19,12 @@ Claude Code / Codex / Kiro CLI向けのスキル・MCP設定を共有するた�
   - 開発環境 (1): worktree
   - 運用 (2): skill-stats, statusline
 - **8つの専門エージェント**: director, data-analyst, corder, researcher, qa, debugger, devops-engineer, code-reviewer
-- **自動フック**: 作業ツリー運用（Claude Code / Codex は PreToolUse + SessionStart、Kiro CLI は userPromptSubmit + agentSpawn。リポジトリに `.ndf/worktree.json` があるときだけ動く）、SessionStart (transcript保持期間を最低90日に保つ)、Stop (AI要約生成+Slack通知)
-- **外部AI委譲**: `/ndf:external-ai` skill + `corder` エージェント経由で Codex / Gemini CLI をバックグラウンド実行 (v4.0.0 で Codex MCP サーバは廃止)
-- **AIクロスレビュー強化**: `/ndf:cross-review` は codex/gemini 両方に PR レビューを委譲し、Gemini の進捗 heartbeat、`--focus` / `--extra-instructions-file`、PR 種別別の自動レビュー観点テンプレートに対応
+- **自動フック**: 作業ツリー運用（Claude Code / Codex は PreToolUse + SessionStart、Kiro CLI は userPromptSubmit + agentSpawn、agy は PreToolUse + PreInvocation。リポジトリに `.ndf/worktree.json` があるときだけ動く）、SessionStart (transcript保持期間を最低90日に保つ)、Stop (AI要約生成+Slack通知)
+- **外部AI委譲**: `/ndf:external-ai` skill + `corder` エージェント経由で Codex / agy をバックグラウンド実行 (v4.0.0 で Codex MCP サーバは廃止)
+- **AIクロスレビュー強化**: `/ndf:cross-review` は codex/agy 両方に PR レビューを委譲し、agy の進捗 heartbeat、`--focus` / `--extra-instructions-file`、PR 種別別の自動レビュー観点テンプレートに対応
 - **Kiro CLI対応**: `plugins/ndf/dev.kiro/install.sh` によるワンコマンドセットアップ
-- **MCPプラグイン**: `plugins/mcp/<プラグイン名>/` の1ディレクトリで3ランタイムへ配布
+- **agy 対応**: `plugins/ndf/dev.agy/` を `agy plugin install` で導入
+- **MCPプラグイン**: `plugins/mcp/<プラグイン名>/` の1ディレクトリで3ランタイムへ配布（agy は対象外）
 
 ## 利用方法
 
@@ -106,6 +107,37 @@ kiro-cli chat --agent ndf
 
 詳細は [KIRO.md](./KIRO.md) を参照。
 
+### agy
+
+**agy はマーケットプレイスの経路を持ちません。** clone したディレクトリから
+`plugins/ndf/dev.agy` を直接導入します。
+
+#### 1. リポジトリをクローン
+
+```bash
+git clone https://github.com/devbasex/ai-plugins.git
+cd ai-plugins
+```
+
+#### 2. プラグインの導入
+
+```bash
+agy plugin install plugins/ndf/dev.agy
+```
+
+導入すると Skill 31 個・エージェント 8 個・hook 1 個が
+`~/.gemini/config/plugins/ndf/` へ複製されます。リポジトリ側の symlink は実体へ解決されるため、
+clone を消しても導入した内容は残ります。
+
+#### 3. 確認
+
+```bash
+agy plugin list
+# => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
+```
+
+**新しい版へ入れ替える手段は `uninstall` と `install` の組み合わせです**（[#289](https://github.com/devbasex/ai-plugins/issues/289)）。
+
 ### 開発版を試す（開発者向け）
 
 **開発版は `develop` ブランチに載ります。** `main` へ進めるのは正式版を出すときだけなので、
@@ -137,6 +169,15 @@ git -C <クローン先> checkout develop
 bash plugins/ndf/dev.kiro/install.sh --project <検証用ディレクトリ> --yes
 ```
 
+#### agy
+
+Kiro CLI と同じく、ref にあたるのは clone の checkout です。
+
+```bash
+git -C <クローン先> checkout develop
+agy plugin install <クローン先>/plugins/ndf/dev.agy
+```
+
 #### 取得元を書き換えずに確かめる
 
 リポジトリを clone してある場合は、取得元の登録に触れずに読み込めます。
@@ -144,6 +185,7 @@ bash plugins/ndf/dev.kiro/install.sh --project <検証用ディレクトリ> --y
 ```bash
 claude --plugin-dir plugins/ndf                                            # Claude Code
 bash plugins/ndf/dev.kiro/install.sh --project <検証用ディレクトリ> --yes  # Kiro CLI
+agy plugin validate plugins/ndf/dev.agy                                    # agy（読み込みの確認）
 ```
 
 **ローカルのディレクトリを同じ名前でマーケットプレイスとして追加しないでください。** 登録の鍵は
@@ -184,7 +226,7 @@ claude plugin marketplace add devbasex/ai-plugins@<タグ>
 
 | プラグイン名 | バージョン | 説明 | 詳細 |
 |------------|----------|------|------|
-| **ndf** | 9.8.0-dev.1 | Claude Code / Codex / Kiro CLI へ 1 ディレクトリから配布する NDF プラグイン。8個の専門エージェント（Claude版）、公開Skills（Claude Code向け core 33個、Kiro向け core 32個、Codex向け core 31個）、3ランタイム共通の作業ツリー運用フック（PreToolUse / SessionStart / userPromptSubmit / agentSpawn）、Claude Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:external-ai` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [README](./plugins/ndf/README.md) |
+| **ndf** | 9.8.0-dev.1 | Claude Code / Codex / Kiro CLI / agy へ 1 ディレクトリから配布する NDF プラグイン。8個の専門エージェント（Claude版）、公開Skills（Claude Code向け core 33個、Kiro向け core 32個、Codex向け core 31個、agy向け core 31個）、4ランタイム共通の作業ツリー運用フック（PreToolUse / SessionStart / userPromptSubmit / agentSpawn / PreInvocation）、Claude Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:external-ai` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [README](./plugins/ndf/README.md) |
 | **playwright-kit** | 2.0.1 | Playwright による E2E テストの計画・実装・証跡管理を提供するプラグイン。ページ役割からのテスト計画、動画 / trace 付きスクリプト実装、レポート生成と Drive 保管、playwright_kit ランタイム（init、a11y / CWV スキャン）の 4 Skill。NDF v7.0.0 で分離。 | [README](./plugins/playwright-kit/README.md) |
 
 ### NDF v9.0.0 の主な変更（非互換）
@@ -297,7 +339,7 @@ claude plugin marketplace add devbasex/ai-plugins@<タグ>
 | 未検証の変更が公開されたまま残る | 取り消しへ着手する**前**に `pending_push` を立て、次の実行で再送信する |
 | 範囲外の変更を検証しない | `--scope` を適用・修正の検証にも効かせる。生成物の同期は**進行側の責務**へ分離 |
 | 提案の記録が次ラウンドで上書きされる | 提案の結果ファイル名にもラウンド番号を入れる |
-| gemini が配置した手順書を読めない | 作業ディレクトリへ読み取り除外を無効にする設定を置く |
+| 委譲先の CLI が配置した手順書を読めない | 作業ディレクトリへ読み取り除外を無効にする設定を置く |
 | 語彙の許容値をプロンプトが列挙しない | 検証側が持つ語彙集合をプロンプトへ機械的に列挙する |
 | 初期化が CLI の認証を確認しない | `init` が参加 CLI の認証状態を確認し、未認証なら中断する |
 
@@ -319,7 +361,7 @@ claude plugin marketplace add devbasex/ai-plugins@<タグ>
 | 役割 | 担当 |
 |---|---|
 | 提案・レビュー | 全ランタイム − ホストの 3 者 |
-| 適用 | 全ランタイム − gemini の 3 者（claude / codex / kiro）から輪番で 1 者 |
+| 適用 | 全ランタイム − agy の 3 者（claude / codex / kiro）から輪番で 1 者 |
 
 - ホストは提案とレビューに参加しないため、**実装した者と評価する者が同一モデルになりません**
 - ホストと同じランタイムが適用担当になる場合も、サブエージェントではなく **CLI プロセス**として
@@ -498,9 +540,9 @@ Skill を利用実績にもとづいて棚卸し、**49 個から 29 個へ整�
 ```
 ai-plugins/
 ├── .claude-plugin/
-│   └── marketplace.json          # マーケットプレイス定義（3ランタイム共通）
+│   └── marketplace.json          # マーケットプレイス定義（Claude Code / Codex 共通）
 ├── plugins/
-│   ├── ndf/                      # NDF（3ランタイム共通の単一ディレクトリ）
+│   ├── ndf/                      # NDF（4ランタイム共通の単一ディレクトリ）
 │   ├── playwright-kit/           # playwright-kit（3ランタイム共通の単一ディレクトリ）
 │   └── mcp/
 │       └── mcp-*/               # MCPプラグイン10個（3ランタイム共通）

@@ -2,9 +2,9 @@
 
 ## 概要
 
-AI Plugins marketplace は、Claude Code / Codex / Kiro CLI へ同じ plugin を配布する。
+AI Plugins marketplace は、Claude Code / Codex / Kiro CLI / agy へ同じ plugin を配布する。
 
-NDF plugin と playwright-kit plugin は、3 runtime 分をプラグインごとに 1 ディレクトリへまとめる。Skill の実体は `skills/` の 1 箇所だけで、どの runtime へ配るかは `manifests/*-skills.txt` と各 manifest の `skills` 配列が決める。runtime 固有のファイルは名前空間ディレクトリへ分ける。MCP plugin も同じく 1 ディレクトリにまとめ、サーバ定義は `.mcp.json` の 1 箇所だけを持つ。
+NDF plugin と playwright-kit plugin は、runtime 分をプラグインごとに 1 ディレクトリへまとめる（NDF は 4 runtime、playwright-kit は 3 runtime）。Skill の実体は `skills/` の 1 箇所だけで、どの runtime へ配るかは `manifests/*-skills.txt` と各 manifest の `skills` 配列が決める。runtime 固有のファイルは名前空間ディレクトリへ分ける。MCP plugin も同じく 1 ディレクトリにまとめ、サーバ定義は `.mcp.json` の 1 箇所だけを持つ。
 
 ## 対象範囲
 
@@ -15,6 +15,7 @@ NDF plugin と playwright-kit plugin は、3 runtime 分をプラグインごと
 | Claude Code | `.claude-plugin/marketplace.json` | `plugins/ndf` | `plugins/mcp/*` |
 | Codex | `.claude-plugin/marketplace.json` | `plugins/ndf` | `plugins/mcp/*` |
 | Kiro CLI | installer | `plugins/ndf` | `plugins/mcp/*` |
+| agy | `agy plugin install <clone>/plugins/ndf/dev.agy` | `plugins/ndf` | — |
 
 ## NDF Plugin 配布仕様
 
@@ -25,11 +26,19 @@ NDF plugin の plugin name は全 runtime で `ndf` を維持し、配布物は 
 | Claude Code | `plugins/ndf/.claude-plugin/plugin.json` | `agents/`、`hooks/claude.json`、`skills` 配列（27 個） |
 | Codex | `plugins/ndf/.codex-plugin/plugin.json` | `hooks/codex.json`、`skills` 配列（25 個） |
 | Kiro CLI | `plugins/ndf/dev.kiro/install.sh` | `.kiro/agents/ndf.json`、`.kiro/steering/ndf-policies.md`、`.kiro/skills/` symlink、prompts、任意 hook |
+| agy | `plugins/ndf/dev.agy/plugin.json` | `dev.agy/hooks.json`、`dev.agy/skills/` の symlink、`agents` と `scripts` への symlink |
 
-`plugins/ndf/manifests/{claude,codex,kiro}-skills.txt` が runtime ごとの配布 Skill 一覧を定義する。
-Claude Code と Codex は manifest と同じ内容を各 plugin.json の `skills` 配列へ書き、Kiro CLI は
-installer が `kiro-skills.txt` を読んで symlink を張る。Skill の実体は `plugins/ndf/skills/` だけで、
-runtime ごとの複製は無い。
+`plugins/ndf/manifests/{claude,codex,kiro,agy}-skills.txt` が runtime ごとの配布 Skill 一覧を
+定義する。Claude Code と Codex は manifest と同じ内容を各 plugin.json の `skills` 配列へ書き、
+Kiro CLI は installer が `kiro-skills.txt` を読んで symlink を張る。agy は Skill を絞る手段を
+利用者側の設定にしか持たないため、`scripts/build-runtime-plugins.sh` が `agy-skills.txt` から
+`dev.agy/skills/` の symlink を生成する。Skill の実体は `plugins/ndf/skills/` だけで、runtime
+ごとの複製は無い。
+
+**ルート直下の `plugin.json` は置かない。** 置くと Codex が `.codex-plugin/plugin.json` より
+優先して読み、`skills` 配列ではなく `skills/` の実体を全件配る（`plugins/ndf` で実測）。agy の
+プラグインの目印はディレクトリ直下の `plugin.json` であるため、agy 向けの定義は
+`dev.agy/plugin.json` へ置く。
 
 どの manifest にも載せない Skill は `plugins/ndf/optional-skills/` へ置く。`skills/` を配布 Skill の
 実体だけに保つことで、絞り込みの結果によらず公開数が変わらない。

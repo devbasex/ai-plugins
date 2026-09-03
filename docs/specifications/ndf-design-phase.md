@@ -74,10 +74,10 @@ AI ごとに変わり、文書の分割単位・記載項目・粒度をその�
 | 観点 | 確かめ方 |
 | --- | --- |
 | frontmatter が執筆規約を満たす | `python3 scripts/check-skill-frontmatter.py` |
-| 3 ランタイムのマニフェストと配布物が一致する | `bash scripts/build-runtime-plugins.sh --check` / `bash scripts/validate-runtime-plugins.sh` |
+| 4 ランタイムのマニフェストと配布物が一致する | `bash scripts/build-runtime-plugins.sh --check` / `bash scripts/validate-runtime-plugins.sh` |
 | 説明文書の Skill 数が実体と一致する | `python3 scripts/check-doc-staleness.py` |
 | 参照のリンクが解決できる | `python3 scripts/check-markdown-links.py` |
-| 3 ランタイムで Skill が読み込める | `bash scripts/runtime-smoke-test.sh` |
+| 4 ランタイムで Skill が読み込める | `bash scripts/runtime-smoke-test.sh` |
 
 ## 運用
 
