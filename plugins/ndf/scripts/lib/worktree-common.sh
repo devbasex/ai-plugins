@@ -293,8 +293,8 @@ _wt_tokenize() {
     case "$w" in
       case|esac)
         case "$prev_out" in
-          ""|__WT_SEP__|__WT_SUBSHELL_END__|__WT_CASE_END__|"|"|"|&"|"&"|"&&"|"||"|"("|"{"\
-          |if|elif|then|else|while|until|do|"!"|time)
+          ""|__WT_SEP__|__WT_CASE_FALL__|__WT_SUBSHELL_END__|__WT_CASE_END__|"|"|"|&"|"&"\
+          |"&&"|"||"|"("|"{"|if|elif|then|else|while|until|do|"!"|time)
             if [ "$w" = case ]; then
               case_state[case_depth]=want_in
               case_depth=$((case_depth + 1))
@@ -358,9 +358,30 @@ _wt_tokenize() {
       $'\n'|";")
         if [ -n "$cur" ]; then _tok_emit "$cur"; cur=""; fi
         # `;;` `;&` `;;&` は `case` の枝の終わりで、次に来るのは見出しである。
+        #
+        # **`;&` と `;;&` は 1 つの印にする。** どちらも次の枝の本体を前の枝の
+        # 出口から始めるが、`__WT_SEP__` と `&` の 2 語へ割ると、後者が背景実行の
+        # 演算子として読まれて現在地がまとまりの入口へ戻る。走査の側でフォール
+        # スルーと背景実行を見分けられるよう、専用の印を出す。
         if [ "$c" = ";" ] && [ "$case_depth" -gt 0 ]; then
+          case "${s:i+1:2}" in
+            # `;;&`。見出しを試し直すが、見出しの評価では命令が走らないため
+            # 本体の始まる位置は `;&` と同じである。
+            ";&")
+              case_state[case_depth - 1]=want_pattern
+              out+=("__WT_CASE_FALL__")
+              i=$((i + 2))
+              continue
+              ;;
+          esac
           case "${s:i+1:1}" in
-            ";"|"&") case_state[case_depth - 1]=want_pattern ;;
+            "&")
+              case_state[case_depth - 1]=want_pattern
+              out+=("__WT_CASE_FALL__")
+              i=$((i + 1))
+              continue
+              ;;
+            ";") case_state[case_depth - 1]=want_pattern ;;
           esac
         fi
         out+=("__WT_SEP__")
@@ -798,8 +819,26 @@ wt_extract_write_target() {
   # 位置は `case` を開いた時点の位置そのものである。次の見出しで戻さないと、
   # 前の枝の `cd` を引きずり、走っていない移動を書き込み先の起点に使う。
   # 見出しを命令の位置として数えるかどうかの判定にも使うため、深さを持つ。
-  local -a case_cwd=() case_known=()
+  # ただし `;&` `;;&` で落ちた枝は例外で、前の枝の出口から始まる。落ちてきたか
+  # どうかを段ごとに控え、次の見出しで入口へ戻すかどうかを決める。
+  local -a case_cwd=() case_known=() case_fall=()
   local case_depth=0
+  # 関数定義の本体は、定義した時点では走らない。中の `cd` を数えると、後続の
+  # 相対パスの起点が動く。本体は部分シェルと同じ隔離で扱い、中の書き込み先は
+  # これまでどおり出したまま、移動だけを外へ漏らさない。
+  #
+  # `func_stage` は定義の見分けの途中経過を持つ。`name` は `function` の次の語を
+  # 待っている状態、`paren` は命令の位置の語の次が `()` かを待っている状態、
+  # `body` は本体を開く `{` か `(` を待っている状態である。
+  local func_stage="" func_name=""
+  # 本体を開いた複合コマンドの深さ・入口の `cd` の回数・定義した名前と、その本体を
+  # `{` で開いたか。閉じる語がどれかを深さで見分け、`{` の本体だけ出口で
+  # `_pop_subshell` を呼ぶ（`(` の本体は既存の部分シェルの経路が戻す）。
+  local -a func_group=() func_cds=() func_names=() func_brace=()
+  local func_depth=0
+  # 本体で移動した関数の名前。呼び出しの時点の現在地は字面から決められない
+  # ため、命令の位置にこの名前が現れたら相対パスを出さない（決定 3）。
+  local func_moving="|"
 
   # ヒアドキュメントの本文を先に落とす。落とす前に印を挟むと、本文の中の `>` が
   # 出力の付け替えとして数えられる。
@@ -829,6 +868,32 @@ wt_extract_write_target() {
   _wt_read_lines < <(_wt_tokenize "$spaced")
   words=("${WT_LINES[@]+"${WT_LINES[@]}"}")
 
+  # リダイレクトの印の直前にある、すべて数字の語を並びから外す。`2>&1` の `2` は
+  # ファイル記述子の番号であって、開かれるファイルの名前ではない。残すと番号を
+  # 書き込み先として案内するうえ、`cp` / `mv` は最後の被演算子を宛先とするため、
+  # 本来の宛先がその位置を奪われて出なくなる。
+  #
+  # **落とすのは語へ切り分けた後である。** 印への置き換えは引用符を見ないため、
+  # その前に数字を落とすと引用符の中の字面まで書き換わる（`cp a "x 2>&1"` の
+  # 宛先は `x 2>&1` という名前のファイルで、番号は名前の一部である）。
+  #
+  # すべて数字の語だけを落とす。`cat file2>log` の `file2` は語であって番号では
+  # なく、bash も `log` だけを開く（実測）。逆に `cp a 2 >f` の `2` は名前が
+  # すべて数字のファイルだが、印への置き換えが番号と `>` の間の空白を消すため
+  # 見分けられない。取り逃がす側へ倒す。
+  local -a kept=()
+  local wi
+  for ((wi = 0; wi < ${#words[@]}; wi++)); do
+    case "${words[wi]}" in
+      *[!0-9]*|"") kept+=("${words[wi]}"); continue ;;
+    esac
+    case "${words[wi + 1]:-}" in
+      __WT_REDIR__|__WT_APPEND__) continue ;;
+    esac
+    kept+=("${words[wi]}")
+  done
+  words=("${kept[@]+"${kept[@]}"}")
+
   local n=${#words[@]} i j w target found=0 prev="" at_cmd=0 dest="" k cmd_prefix=0 cd_end_of_options=0
   # `command` / `builtin` の被演算子を命令の位置として数えている間だけ 1。
   local cmd_wrapper=0 or_next=""
@@ -843,6 +908,12 @@ wt_extract_write_target() {
   # `||` の右辺の枝が書き込む。ここより手前の `__WT_REDIR__` / `__WT_APPEND__` を
   # 二度拾わない。
   local resolved_redir_end=0
+  # 命令の位置で読んだリダイレクトが、被演算子を読み終えた次の語の位置。シェルは
+  # リダイレクトを開いてから命令を実行するため、その次の語が命令名である。控え
+  # ないと `>/dev/null cd ../..` の `cd` を被演算子として読み飛ばし、移動が
+  # 起点へ反映されない。変数代入と `command` / `builtin` が命令の位置を延ばすのと
+  # 同じ形で、判定の場所は 1 か所のままにする。
+  local cmd_after_redir=-1
   # `_redir_target` の結果。書き込み先の語と、読み進めた最後の語の位置。
   local _WT_REDIR_DEST="" _WT_REDIR_END=0
   # 印 (`__WT_REDIR__` / `__WT_APPEND__`) の後ろの語から、実際に開かれる
@@ -929,6 +1000,20 @@ wt_extract_write_target() {
     pipe_known="${sub_pipe_known[subshell_depth]}"
     pipe_cds="${sub_pipe_cds[subshell_depth]}"
   }
+  # 関数定義の本体を閉じる。閉じる語が本体のものかは複合コマンドの深さで見分ける。
+  # 中で `cd` を追っていたら、その名前を控える（決定 3）。比べるのは追跡の状態を
+  # 戻す前で、`_pop_subshell` が `cds` を入口の値へ戻してしまうためである。
+  _close_function_body() {
+    [ "$func_depth" -gt 0 ] || return 0
+    [ "${func_group[func_depth - 1]}" = "$group_depth" ] || return 0
+    func_depth=$((func_depth - 1))
+    if [ "$cds" -gt "${func_cds[func_depth]}" ] && [ -n "${func_names[func_depth]}" ]; then
+      func_moving="${func_moving}${func_names[func_depth]}|"
+    fi
+    # `(` で開いた本体は、部分シェルの終わりの印が既に戻す。
+    [ "${func_brace[func_depth]}" = 1 ] && _pop_subshell
+    return 0
+  }
   # `||` の右辺のブレースグループ (`{ ... }`) が、必ず後続へ進まないかを見る。
   # まとまりは同じシェルで走るため、その中の `exit` はスクリプトを終える。
   # 引数はまとまりを開く `{` の添字で、閉じる `}` の添字を `_WT_GROUP_END` に置く。
@@ -954,13 +1039,13 @@ wt_extract_write_target() {
       if [ "$pend" = 1 ]; then
         case "$tw" in
           "&"|"|"|"|&") pend=0 ;;
-          __WT_SEP__|"}"|"&&"|"||") exits=1; pend=0 ;;
+          __WT_SEP__|__WT_CASE_FALL__|"}"|"&&"|"||") exits=1; pend=0 ;;
         esac
       fi
       at_pos=0
       case "$pw" in
-        ""|"{"|"("|__WT_SEP__|__WT_CASE_END__|__WT_SUBSHELL_END__|"&&"|"||"|"|"|"|&"|"&"\
-        |if|elif|then|else|while|until|do|"!"|time) at_pos=1 ;;
+        ""|"{"|"("|__WT_SEP__|__WT_CASE_FALL__|__WT_CASE_END__|__WT_SUBSHELL_END__|"&&"\
+        |"||"|"|"|"|&"|"&"|if|elif|then|else|while|until|do|"!"|time) at_pos=1 ;;
       esac
       case "$tw" in
         "{"|"(") depth=$((depth + 1)) ;;
@@ -1061,7 +1146,7 @@ wt_extract_write_target() {
       at_cmd=1
     else
       case "$prev" in
-        __WT_SEP__|"&&"|"||"|"|"|"|&"|"&") at_cmd=1 ;;
+        __WT_SEP__|__WT_CASE_FALL__|"&&"|"||"|"|"|"|&"|"&") at_cmd=1 ;;
         # 予約語の後ろも命令の位置である。ここに挙げるのは、続きを**同じシェル**
         # で走らせる語だけである。中の `cd` の効果は後続へ残るため、書き込み先の
         # 起点に反映しなければ移動前の位置を指した案内が出る。
@@ -1081,8 +1166,15 @@ wt_extract_write_target() {
           if [ "$case_depth" -gt 0 ]; then
             at_cmd=1
             # 枝の入口は `case` を開いた位置である。前の枝の `cd` は走っていない。
-            cwd="${case_cwd[case_depth - 1]}"
-            cwd_known="${case_known[case_depth - 1]}"
+            # **`;&` `;;&` で落ちてきたときだけは、前の枝の出口が入口になる。**
+            # 戻すと、前の枝で作業ツリーへ移った後の書き込みを主ディレクトリ側の
+            # ものとして案内する（誤検知になる）。
+            if [ "${case_fall[case_depth - 1]}" = 1 ]; then
+              case_fall[case_depth - 1]=0
+            else
+              cwd="${case_cwd[case_depth - 1]}"
+              cwd_known="${case_known[case_depth - 1]}"
+            fi
             pipe_cwd="$cwd"; pipe_known="$cwd_known"; pipe_cds=0
             job_cwd="$cwd"; job_known="$cwd_known"
             list_cwd="$cwd"; list_known="$cwd_known"; list_cds=0; list_or=0
@@ -1105,6 +1197,8 @@ wt_extract_write_target() {
     # されない。オプションが挟まる形 (`command -p cd`) も追う。
     if [ "$at_cmd" = 0 ] &&
       { [ "$cmd_prefix" = 1 ] || [ "$cmd_wrapper" = 1 ]; }; then at_cmd=1; fi
+    # 命令名より前に置いたリダイレクトを読み終えた次の語も、命令の位置である。
+    if [ "$at_cmd" = 0 ] && [ "$i" = "$cmd_after_redir" ]; then at_cmd=1; fi
     if [ "$at_cmd" = 1 ] && [[ $w =~ ^[A-Za-z_][A-Za-z0-9_]*\+?= ]]; then
       cmd_prefix=1
     else
@@ -1125,6 +1219,29 @@ wt_extract_write_target() {
         "|"|"|&"|"&"|"&&"|"||"|__WT_SEP__) ;;
         *) cd_is_last=0 ;;
       esac
+    fi
+    # 関数定義を見分ける（決定 2）。字句解析は `f()` を 1 語に、`f ()` を `f` と
+    # `()` の 2 語にまとめるため、直前の語だけで足りる。
+    case "$func_stage" in
+      # `function` の次の語が名前である。
+      name) func_name="$w"; func_stage=body ;;
+      # 命令の位置の語の次が `()` なら定義である。そうでなければ普通の命令だった。
+      paren) if [ "$w" = "()" ]; then func_stage=body; else func_stage=""; fi ;;
+      # 本体を開く語を待つ。改行を挟む書き方 (`f ()` の次の行に `{`) がある。
+      body) case "$w" in "{"|"("|__WT_SEP__) ;; *) func_stage="" ;; esac ;;
+    esac
+    if [ -z "$func_stage" ] && [ "$at_cmd" = 1 ]; then
+      case "$w" in
+        function) func_stage=name; func_name="" ;;
+        # 演算子と印は名前ではない。`()` だけの語も定義の目印であって名前ではない。
+        "()"|__WT_*|"|"|"|&"|"&"|"&&"|"||"|"{"|"("|"}") ;;
+        *"()") func_stage=body; func_name=${w%"()"} ;;
+        *) func_stage=paren; func_name="$w" ;;
+      esac
+    fi
+    # 本体で移動する関数を呼んだ後の現在地は、字面から決められない（決定 3）。
+    if [ "$at_cmd" = 1 ] && [ -n "$base" ]; then
+      case "$func_moving" in *"|$w|"*) cwd_known=0 ;; esac
     fi
     prev="$w"
     case "$w" in
@@ -1222,11 +1339,19 @@ wt_extract_write_target() {
         pipe_cwd="$cwd"; pipe_known="$cwd_known"; pipe_cds="$list_cds"
         continue
         ;;
-      __WT_SEP__)
+      __WT_SEP__|__WT_CASE_FALL__)
         # `;` と改行でも同じシェルが続く。両方の入口を引き直す。
         # ただし `||` を跨いだリストに `cd` があると、それが効いたかどうかは
         # 左辺の成否で決まる。リストを抜けた後の位置も決められない。
         # `&&` を跨いだ先に `cd` があるときも同じで、左辺の成否で位置が変わる。
+        #
+        # `;&` `;;&` (`__WT_CASE_FALL__`) は `case` の枝の終わりだが、**現在地は
+        # そのまま次の枝の本体へ引き継がれる**。and-or リストとパイプの入口を
+        # 引き直す後始末は `;` と同じで、加えて落ちてきたことを段へ控える。次の
+        # 見出しがこれを見て、枝の入口へ戻すかどうかを決める。
+        if [ "$w" = __WT_CASE_FALL__ ] && [ "$case_depth" -gt 0 ]; then
+          case_fall[case_depth - 1]=1
+        fi
         if { [ "$list_or" = 1 ] && [ "$list_cds" != 0 ]; } ||
           [ "$list_cond_cd" = 1 ]; then
           cwd_known=0
@@ -1247,6 +1372,7 @@ wt_extract_write_target() {
           if [ "$w" = case ]; then
             case_cwd[case_depth]="$cwd"
             case_known[case_depth]="$cwd_known"
+            case_fall[case_depth]=0
             case_depth=$((case_depth + 1))
           fi
         fi
@@ -1255,15 +1381,33 @@ wt_extract_write_target() {
       "{"|"(")
         # 部分シェル (`(`) と、同じシェルで走るまとまり (`{`) の入口。どちらも
         # 中の `;` が外側のまとまりを切らないため、`&` の復元先を積む。
-        if [ "$at_cmd" = 1 ]; then
+        #
+        # 関数定義の本体は、命令の位置に無くてもここで開く（直前は `()` か
+        # 定義した名前である）。本体の `cd` を外へ漏らさないよう、`{` で開いた
+        # ものも部分シェルと同じく追跡の状態を積む。
+        if [ "$at_cmd" = 1 ] || [ "$func_stage" = body ]; then
           _push_group
           [ "$w" = "(" ] && _push_subshell
+          if [ "$func_stage" = body ]; then
+            if [ "$w" = "{" ]; then
+              _push_subshell
+              func_brace[func_depth]=1
+            else
+              func_brace[func_depth]=0
+            fi
+            func_group[func_depth]="$group_depth"
+            func_cds[func_depth]="$cds"
+            func_names[func_depth]="$func_name"
+            func_depth=$((func_depth + 1))
+            func_stage=""
+          fi
         fi
         continue
         ;;
       "}")
         # `}` は予約語で、命令の位置にしか置けない。`echo }` の `}` は語である。
         if [ "$at_cmd" = 1 ]; then
+          _close_function_body
           _pop_group
           # 必ず抜けるまとまりを閉じた。ここへ来た経路は左辺が成功した側だけで、
           # 位置は `||` で預けた移動後のものへ戻る。判定に使う値も引き直す。
@@ -1284,6 +1428,7 @@ wt_extract_write_target() {
         # 対応する `(` を数え損ねていても、深さは 0 で止める（`_pop_subshell` が
         # 深さ 0 で何もしない）。戻さなければ入口の位置のままで、案内が多めに
         # 出る側へ倒れる。
+        _close_function_body
         _pop_group
         _pop_subshell
         continue
@@ -1368,6 +1513,8 @@ wt_extract_write_target() {
         if [ "$i" -lt "$resolved_redir_end" ]; then continue; fi
         _redir_target "$i"
         _emit "$_WT_REDIR_DEST"
+        # 命令の位置で読んだなら、被演算子の次に命令名が続く。
+        [ "$at_cmd" = 1 ] && cmd_after_redir=$((_WT_REDIR_END + 1))
         ;;
       tee)
         # tee は並べたファイルすべてへ書き込む。1 件目で止めない。
@@ -1441,7 +1588,8 @@ wt_extract_write_target() {
     esac
   done
 
-  unset -f _emit _push_group _pop_group _push_subshell _pop_subshell _or_group_exits _or_exit_redirs
+  unset -f _emit _push_group _pop_group _push_subshell _pop_subshell _or_group_exits \
+    _or_exit_redirs _close_function_body
   [ "$found" = 1 ] || return 1
 }
 

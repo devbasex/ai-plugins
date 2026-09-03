@@ -1681,3 +1681,174 @@ def test_markers_are_restored_without_a_base() -> None:
     targets, rc = extract("cp a \"b>c\"")
     assert rc == 0
     assert targets == ["b>c"]
+
+
+@pytest.mark.parametrize(
+    ("command", "base", "expected"),
+    [
+        # 起点を渡さない呼び方。番号が書き込み先として並ぶ。
+        ("sed -i 's/a/b/' x.md 2>&1", None, ["x.md"]),
+        # `cp` と `mv` は最後の被演算子を宛先とするため、番号が宛先の位置を奪う。
+        ("cp a b 2>&1", "/base", ["/base/b"]),
+        ("mv a b 2>>log", "/base", ["/base/b", "/base/log"]),
+        ("tee out.txt 2>&1", "/base", ["/base/out.txt"]),
+    ],
+)
+def test_a_file_descriptor_number_is_not_a_write_target(
+    command: str, base: str | None, expected: list[str]
+) -> None:
+    """`2>&1` の `2` は記述子の番号で、開かれるファイルの名前ではない。
+
+    番号を書き込み先として拾うと、実在しない位置を案内するうえ、`cp` / `mv` では
+    本来の宛先がその位置を奪われて出なくなる。
+    """
+    targets, rc = extract(command) if base is None else extract_at(command, base)
+    assert rc == 0, command
+    assert targets == expected, command
+
+
+def test_a_digit_inside_a_word_is_not_a_file_descriptor() -> None:
+    """`cat file2>log` の `file2` は語であって、記述子の番号ではない。
+
+    すべて数字の語だけを番号として落とす。落としすぎると、名前が数字で終わる
+    ファイルの読み書きを取り違える。
+    """
+    targets, rc = extract_at("cat file2>log", "/base")
+    assert rc == 0
+    assert targets == ["/base/log"]
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # 前置したリダイレクトの後ろの `cd` は命令であって、被演算子ではない。
+        (
+            "cd .worktrees/x; >/dev/null cd ../..; cp a README.md",
+            ["/base/README.md"],
+        ),
+        (
+            ">/dev/null cd .worktrees/x; cp a README.md",
+            ["/base/.worktrees/x/README.md"],
+        ),
+        # 記述子の番号を添えた前置も同じ形である。
+        (
+            "2>&1 cd .worktrees/x; cp a README.md",
+            ["/base/.worktrees/x/README.md"],
+        ),
+        # 前置したリダイレクト自身の書き込み先は、移動前の位置で開かれる。
+        (
+            ">log cd .worktrees/x; cp a README.md",
+            ["/base/log", "/base/.worktrees/x/README.md"],
+        ),
+    ],
+)
+def test_a_redirection_before_the_command_keeps_the_command_position(
+    command: str, expected: list[str]
+) -> None:
+    """命令名より前に置いたリダイレクトは、後ろの語を被演算子にしない。
+
+    読み飛ばすと `cd` を移動として数えられず、後続の相対パスの起点が移動前の
+    位置のままになる（案内が出ない、または移動していない位置を案内する）。
+    """
+    targets, rc = extract_at(command, "/base")
+    assert rc == 0, command
+    assert targets == expected, command
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # `;&` で落ちた枝は、前の枝の出口の位置から始まる。
+        (
+            "case x in x) cd .worktrees/x ;& y) cd ../..; cp a README.md ;; esac",
+            "/base/README.md",
+        ),
+        (
+            "case x in x) cd .worktrees/x ;& y) cp a README.md ;; esac",
+            "/base/.worktrees/x/README.md",
+        ),
+        # `;;&` は次の見出しを試し直すが、見出しの評価では命令が走らない。
+        # 枝の本体が始まる位置は `;&` と同じく前の枝の出口である。
+        (
+            "case x in x) cd .worktrees/x ;;& y) cp a README.md ;; esac",
+            "/base/.worktrees/x/README.md",
+        ),
+    ],
+)
+def test_a_case_fallthrough_carries_the_previous_branch(
+    command: str, expected: str
+) -> None:
+    """`;&` と `;;&` の後ろの枝は、前の枝の `cd` を引き継ぐ。
+
+    引き継がないと、前の枝で作業ツリーへ移った後の書き込みを主ディレクトリ側の
+    ものとして案内する（誤検知になる）。
+    """
+    targets, rc = extract_at(command, "/base")
+    assert rc == 0, command
+    assert targets == [expected], command
+
+
+def test_a_case_break_still_isolates_the_branches() -> None:
+    """`;;` で終わる枝どうしは排他で、前の枝の `cd` を引き継がない。"""
+    targets, rc = extract_at(
+        "case x in x) cd .worktrees/x ;; y) cd ../..; cp a README.md ;; esac", "/base"
+    )
+    assert rc == 0
+    assert targets == ["/README.md"]
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # 定義の 4 つの形。いずれも本体は定義した時点では走らない。
+        ("f () { cd .worktrees/x; }; cp a.txt README.md", "/base/README.md"),
+        ("f() { cd .worktrees/x; }; cp a.txt README.md", "/base/README.md"),
+        ("function f { cd .worktrees/x; }; cp a.txt README.md", "/base/README.md"),
+        ("f () ( cd .worktrees/x ); cp a.txt README.md", "/base/README.md"),
+        # 先に済ませた移動は、本体の `cd` に上書きされない。
+        (
+            "cd .worktrees/x; f () { cd ../..; }; cp a.txt README.md",
+            "/base/.worktrees/x/README.md",
+        ),
+    ],
+)
+def test_a_function_body_does_not_move_the_definer(command: str, expected: str) -> None:
+    """関数定義の本体の `cd` は、定義した側の現在地を変えない。
+
+    定義した時点で走ったものとして数えると、後続の相対パスの起点が動き、
+    案内が出ない（検知漏れ）か、移っていない位置を案内する（誤検知）。
+    """
+    targets, rc = extract_at(command, "/base")
+    assert rc == 0, command
+    assert targets == [expected], command
+
+
+def test_a_function_body_still_reports_its_writes() -> None:
+    """本体の中の書き込み先は出す。
+
+    定義しただけの本体は走らないが、同じコマンドの中で呼ぶ形があるため、
+    出さないと案内の機会を失う。`if` の本体・`case` の枝と同じ扱いである。
+    """
+    targets, rc = extract_at("f () { cp a.txt README.md; }", "/base")
+    assert rc == 0
+    assert targets == ["/base/README.md"]
+
+
+def test_calling_a_moving_function_leaves_the_position_undecidable() -> None:
+    """本体で移動する関数を呼んだ後の現在地は、字面から決められない。
+
+    本体の相対パスは呼び出しの時点の現在地から解決されるため、当てはめるには
+    本体をもう一度読み直すことになる（1 パス走査の枠を出る）。
+    """
+    targets, rc = extract_at(
+        "f () { cd .worktrees/x; }; f; cp a.txt README.md", "/base"
+    )
+    assert rc == 1
+    assert targets == []
+
+
+def test_a_brace_group_still_carries_cd_outside_itself() -> None:
+    """関数定義ではないまとまりは同じシェルで走り、移動は後続へ残る。"""
+    targets, rc = extract_at("{ cd .worktrees/x; }; cp a.txt README.md", "/base")
+    assert rc == 0
+    assert targets == ["/base/.worktrees/x/README.md"]
