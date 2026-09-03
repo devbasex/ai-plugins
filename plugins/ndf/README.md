@@ -11,6 +11,7 @@ PR 運用、レビュー、調査、実装計画、仕様書化、開発方法�
 | Claude Code | 33 個 | `.claude-plugin/plugin.json` |
 | Codex | 31 個 | `.codex-plugin/plugin.json` |
 | Kiro CLI | 32 個 | `dev.kiro/install.sh`（プラグイン機構が無いため installer で導入） |
+| agy | 31 個 | `dev.agy/plugin.json`（取得元の登録が無いため clone から導入） |
 
 ## レイアウト
 
@@ -27,10 +28,16 @@ plugins/ndf/
 ├── hooks/codex.json             # Codex の PreToolUse / SessionStart / Stop hook
 ├── scripts/                     # hook と Skill から呼ぶスクリプト
 ├── dev.kiro/                    # Kiro CLI の installer・エージェント定義・プロンプト
+├── dev.agy/                     # agy のマニフェスト・hook 定義・配布 Skill への symlink
 └── README.md
 ```
 
-`dev.kiro` は Agent Plugins 仕様 §8.2 が定めるクライアント拡張ディレクトリです。
+`dev.kiro` と `dev.agy` は Agent Plugins 仕様 §8.2 が定めるクライアント拡張ディレクトリです。
+
+`dev.agy/skills/` は `manifests/agy-skills.txt` から生成する symlink です
+（`scripts/build-runtime-plugins.sh`）。`dev.agy/agents` と `dev.agy/scripts` は
+`agents/` と `scripts/` を指し、実体を 4 ランタイムで共有します。**agy は配る Skill を絞る
+手段を利用者側の設定にしか持たない**ため、絞り込みはここへ何を並べるかで表します。
 
 `optional-skills/` には、どの `manifests/*-skills.txt` にも載せない Skill を置きます
 （`google-auth` / `google-drive` / `ml-model-structure` / `skill-stats`）。`skills/` を配布
@@ -86,11 +93,28 @@ python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['descript
 # => NDF統合開発エージェント（Kiro CLI用 / v9.8.0-dev.1）
 ```
 
+### agy
+
+agy にも取得元の登録がありません。clone したディレクトリの `dev.agy` を直接導入します。
+
+```bash
+agy plugin install plugins/ndf/dev.agy
+```
+
+導入すると `manifests/agy-skills.txt` に載る Skill 31 個と、エージェント 8 個、hook 1 個が
+`~/.gemini/config/plugins/ndf/` へ複製されます。symlink は実体へ解決されて複製されるため、
+clone を消しても導入した内容は残ります。
+
+```bash
+agy plugin list
+# => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
+```
+
 ## v9.8.0-dev.1 へ更新するとき
 
-**公開 Skill の数は変わりません（Claude Code 33 / Codex 31 / Kiro 32）。** この版で変わるのは
-`cross-review` の判定と巻き直しと振動検知、後片付けの工程、そして進行を盤面へ記録できる工程の
-範囲です。
+**配布先が 1 つ増えます（agy 向け 31 個）。** 既存の 3 つの公開 Skill の数は変わりません
+（Claude Code 33 / Codex 31 / Kiro 32）。この版ではほかに、`cross-review` の判定と巻き直しと
+振動検知、後片付けの工程、そして進行を盤面へ記録できる工程の範囲が変わります。
 
 更新は取得元を更新してから、プラグインの側も更新します。**取得元の更新だけでは、導入済みの版は
 変わりません。**
@@ -99,7 +123,11 @@ python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['descript
 claude plugin marketplace update ai-plugins && claude plugin update ndf@ai-plugins
 codex plugin marketplace upgrade ai-plugins && codex plugin add ndf@ai-plugins
 git -C <clone> pull && bash plugins/ndf/dev.kiro/install.sh --project <ディレクトリ> --yes
+git -C <clone> pull && agy plugin uninstall ndf && agy plugin install <clone>/plugins/ndf/dev.agy
 ```
+
+**agy には入れ替えの操作がありません。** 導入済みの実体を新しくするには、外してから入れ直します
+（[#289](https://github.com/devbasex/ai-plugins/issues/289)）。
 
 **この版は開発版です。** 版数に `-dev.1` が付いており、開発版チャネル（`develop`）にだけ
 載ります。検証に参加する利用者は取得元の ref へ `develop` を指定します。正式版と開発版は
@@ -118,6 +146,10 @@ codex plugin add ndf@ai-plugins
 # Kiro — clone の checkout を切り替えてから入れ直します
 git -C <clone> checkout develop
 bash plugins/ndf/dev.kiro/install.sh --project <ディレクトリ> --yes
+
+# agy — Kiro と同じく clone の checkout が ref にあたります
+git -C <clone> checkout develop
+agy plugin uninstall ndf && agy plugin install <clone>/plugins/ndf/dev.agy
 ```
 
 **取得元を切り替えただけでは、導入済みの版は変わりません。** 実体は版ごとのディレクトリに
@@ -138,7 +170,7 @@ GitHub 側へ問い合わせできないときは申告を採用し、確認で�
 ### `cross-review` が、同じ趣旨の指摘を別の行に出されても振動として拾います
 
 振動の検知は、指摘のファイルと行の組が一致するかだけで測っていました。**趣旨が同じでも行が
-1 行ずれれば別の指摘として数えます**。レビューを行うのは codex / gemini で、同じ箇所を指すときに
+1 行ずれれば別の指摘として数えます**。レビューを行うのは codex / agy で、同じ箇所を指すときに
 選ぶ行は毎回同じとは限りません。修正で行が前後にずれた場合も一致しません。
 
 一致を 3 つに広げました。位置（ファイルと行が同じ）、近傍（行の差が 3 以内）、本文（正規化した
@@ -210,21 +242,26 @@ bash plugins/playwright-kit/dev.kiro/install.sh
 
 ## Hooks
 
-### 作業ツリー運用（3 ランタイム共通）
+### 作業ツリー運用（4 ランタイム共通）
 
 開発の変更を、リポジトリを clone したディレクトリ（主ディレクトリ）ではなく `.worktrees/` の
 作業ツリーの中で行う運用を支えます。**編集は止めません。** 案内が出ても操作は成立します。
 
-| 起きること | 担う hook | Claude Code | Codex | Kiro CLI |
-| --- | --- | --- | --- | --- |
-| 主ディレクトリの保護対象パスを編集しようとすると案内が出る | tool 実行前 | `PreToolUse` | `PreToolUse` | — |
-| 作業ツリーで作業する旨の案内がプロンプトごとに出る | プロンプト送信時 | — | — | `userPromptSubmit` |
-| 主ディレクトリに残った未コミット変更が提示される | セッション開始時 | `SessionStart` | `SessionStart` | `agentSpawn` |
-| 主ディレクトリのブランチが稼働中の作業ツリーへ追従する | セッション開始時 | `SessionStart` | `SessionStart` | `agentSpawn` |
+| 起きること | 担う hook | Claude Code | Codex | Kiro CLI | agy |
+| --- | --- | --- | --- | --- | --- |
+| 主ディレクトリの保護対象パスを編集しようとすると案内が出る | tool 実行前 | `PreToolUse` | `PreToolUse` | — | `PreToolUse` |
+| 作業ツリーで作業する旨の案内がプロンプトごとに出る | プロンプト送信時 | — | — | `userPromptSubmit` | — |
+| 主ディレクトリに残った未コミット変更が提示される | セッション開始時 | `SessionStart` | `SessionStart` | `agentSpawn` | `PreInvocation` |
+| 主ディレクトリのブランチが稼働中の作業ツリーへ追従する | セッション開始時 | `SessionStart` | `SessionStart` | `agentSpawn` | `PreInvocation` |
 
 Kiro CLI に tool 実行前の案内が無いのは、この事象でモデルへ案内を渡す手段が終了コード 2 に
 限られ、それが tool の実行を拒否するためです。拒否しない方針のもとでは置けないため、パスを
 見ない案内をプロンプト送信時の hook が担います。
+
+**agy は案内を作る時点と渡せる時点が離れています。** tool 実行前の hook がモデルへ文言を返す
+口は拒否のときにしか働かないため、案内はセッションの控えへ積み、次のモデル呼び出しの前に
+`injectSteps` で渡します。セッション開始時にあたる事象も持たないため、モデル呼び出しの通し番号が
+0 のときを開始時として扱います。
 
 **この仕組みはリポジトリ側の宣言ファイル `.ndf/worktree.json` があるときだけ動きます。**
 宣言が無いリポジトリでは、いずれの hook も何も出力せず終了コード 0 で終わります。
@@ -245,7 +282,7 @@ bash <プラグインのパス>/scripts/worktree-setup.sh init
 ```
 
 `guard.allow_paths` は、主ディレクトリで編集しても案内を出さないパスです。省略すると
-組み込みの既定（上記と同じ一覧に `.agents/` `.gemini/` `.serena/` を加えたもの）を使います。
+組み込みの既定（上記と同じ一覧に `.agents/` `.serena/` を加えたもの）を使います。
 空の配列を書くと「何も許可しない」という指定になります。
 
 手順は `/ndf:worktree` にあります。
@@ -292,12 +329,14 @@ npm install -g @openai/codex
 codex login
 ```
 
-`/ndf:pr-review <PR番号> gemini` や `/ndf:cross-review` で Gemini 委譲を使う場合は、利用環境に
-Gemini CLI をインストールしてログインします。
+`/ndf:pr-review <PR番号> agy` や `/ndf:cross-review` で agy 委譲を使う場合は、利用環境に
+Antigravity CLI をインストールしてログインします。ログインの手順は初回の対話起動にあり、
+`agy models` が終了コード 0 で終われば認証済みです。
 
 ```bash
-npm install -g @google/gemini-cli
-gemini
+curl -fsSL https://antigravity.google/cli/install.sh | bash
+agy          # 初回だけ。ブラウザでログインする
+agy models   # 認証の確認
 ```
 
 ## Codex の暗黙起動抑止

@@ -2,7 +2,7 @@
 
 ## プロジェクト概要
 
-**Claude Code / Codex / Kiro CLI 向けプラグインマーケットプレイス**の開発プロジェクトです。チーム全体で AI 開発ツールの導入を加速するための事前設定されたプラグインを提供します。
+**Claude Code / Codex / Kiro CLI / agy 向けプラグインマーケットプレイス**の開発プロジェクトです。チーム全体で AI 開発ツールの導入を加速するための事前設定されたプラグインを提供します。
 
 **リポジトリ**: https://github.com/devbasex/ai-plugins
 
@@ -93,14 +93,17 @@ ref の書き方は `owner/repo@ref` と `git-url#ref` の 2 つで、
 `claude plugin marketplace add --help` には出ないが実機で動く。Codex は `--ref` を持ち、
 `owner/repo@ref` も受け取る。`claude plugin install` に版を指定する手段は無い（これは確定）。
 
-**Kiro はマーケットプレイスの経路を持たない。** clone した作業ディレクトリから導入するため、
-ref にあたるのは clone の checkout である。clone 直後は既定ブランチ（`main`）なので、正式版を
-使うだけなら追加の操作は要らない。
+**Kiro と agy はマーケットプレイスの経路を持たない。** clone した作業ディレクトリから
+導入するため、ref にあたるのは clone の checkout である。clone 直後は既定ブランチ（`main`）
+なので、正式版を使うだけなら追加の操作は要らない。
 
 ```bash
 git -C <clone> checkout develop   # 開発版を試すときだけ
 bash plugins/ndf/dev.kiro/install.sh --project <ディレクトリ> --yes
+agy plugin uninstall ndf && agy plugin install <clone>/plugins/ndf/dev.agy
 ```
+
+**agy には入れ替えの操作が無い。** 導入済みの実体を新しくするには、外してから入れ直す。
 
 **`develop` は開発の本流で、`main` は動かした先である。** 正式版のたびに `main` を `develop` の
 位置へ fast-forward する。`main` へ直接コミットしない。
@@ -137,15 +140,15 @@ semver の順序で除外されるのは、プラグイン間の依存解決（`
 - **正式版を出すときは接尾辞を外す。** `9.8.0-dev.3` の次は `9.8.0`
 - 順序は semver に従い `9.8.0-dev.1` < `9.8.0-rc.1` < `9.8.0` になる
 
-**版数を持つ箇所は 2 種類ある。** 検査が突き合わせる 13 箇所と、**検査に載らず手で直す箇所**である。
+**版数を持つ箇所は 2 種類ある。** 検査が突き合わせる 15 箇所と、**検査に載らず手で直す箇所**である。
 
-### 検査が突き合わせる 13 箇所
+### 検査が突き合わせる 15 箇所
 
 揃っていないと `scripts/check-doc-staleness.py` と `scripts/validate-runtime-plugins.sh` が
 落ちる。**記載を消しても検査は通らない。** 位置を決める語が見つからなければ、読み取れない
 こととして落ちる。
 
-**定義ファイルと更新案内の見出しが 6 箇所である。** 2 つの `plugin.json` はどちらも
+**定義ファイルと更新案内の見出しが 8 箇所である。** 3 つの `plugin.json` はいずれも
 `version` と `description` の両方に版数を持つため、片方だけ直すと検査で止まる。
 
 | 箇所 | 何を書くか |
@@ -154,6 +157,8 @@ semver の順序で除外されるのは、プラグイン間の依存解決（`
 | `plugins/ndf/.claude-plugin/plugin.json` の `description` | `(vX.Y.Z)` の形で版数 |
 | `plugins/ndf/.codex-plugin/plugin.json` の `version` | 版数そのもの |
 | `plugins/ndf/.codex-plugin/plugin.json` の `description` | `(vX.Y.Z)` の形で版数 |
+| `plugins/ndf/dev.agy/plugin.json` の `version` | 版数そのもの |
+| `plugins/ndf/dev.agy/plugin.json` の `description` | `(vX.Y.Z)` の形で版数 |
 | `.claude-plugin/marketplace.json` の該当プラグインの `description` | 同上 |
 | `plugins/ndf/README.md` の更新案内の見出し | `## vX.Y.Z へ更新するとき` |
 
@@ -179,7 +184,7 @@ semver の順序で除外されるのは、プラグイン間の依存解決（`
 他のソフトの版数まで現行版と比べると誤検出になる。囲まずに書いた版数は走査に入らない。
 
 **版を決めるのは `plugins/ndf/.claude-plugin/plugin.json` の `version` だけである。** 他の
-12 箇所は読み手向けの記載と検査のための突き合わせ先で、取得する版を変えない。
+14 箇所は読み手向けの記載と検査のための突き合わせ先で、取得する版を変えない。
 `.claude-plugin/marketplace.json` に `version` フィールドは置かない。
 
 ### 検査に載らず、手で直す箇所
@@ -221,6 +226,7 @@ semver の順序で除外されるのは、プラグイン間の依存解決（`
 ```bash
 bash plugins/ndf/dev.kiro/install.sh --project <検証用ディレクトリ> --yes   # Kiro
 claude --plugin-dir plugins/ndf                                             # Claude Code
+agy plugin validate plugins/ndf/dev.agy                                     # agy（読み込みの確認）
 ```
 
 **正式版を出したらリリースタグを打つ。** 利用者が過去の版へ戻るときの目印になる。
@@ -268,7 +274,7 @@ ai-plugins/
 ├── .claude-plugin/
 │   └── marketplace.json          # マーケットプレイス定義（必須）
 ├── plugins/
-│   ├── ndf/                      # NDF（3ランタイム共通の単一ディレクトリ）
+│   ├── ndf/                      # NDF（4ランタイム共通の単一ディレクトリ）
 │   ├── playwright-kit/           # playwright-kit（3ランタイム共通の単一ディレクトリ）
 │   └── mcp/
 │       └── mcp-*/               # MCPプラグイン10個（3ランタイム共通）
@@ -290,7 +296,7 @@ ai-plugins/
 | [docs/presentations/](docs/presentations/) | 勉強会などで使うスライド資料（Marp形式）とビルド手順。**発表日時点の記録で、以後の構成変更には追随しない** |
 | [docs/claude-code-skills-survey.md](docs/claude-code-skills-survey.md) | Claude Code Skills調査レポート |
 | [docs/development-history/](docs/development-history/) | 開発履歴と知見 |
-| [plugins/ndf/README.md](plugins/ndf/README.md) | NDFプラグイン（3ランタイム共通） |
+| [plugins/ndf/README.md](plugins/ndf/README.md) | NDFプラグイン（4ランタイム共通） |
 
 ## NDFプラグインについて
 
@@ -299,7 +305,8 @@ ai-plugins/
 - Claude Code版は 8個の専門サブエージェント、公開Skills、PreToolUse/SessionStart/Stopフックを提供
 - Codex版は Codex向け公開Skillsと任意Slack通知hookを提供
 - Kiro版は `plugins/ndf/dev.kiro/install.sh` で `.kiro/skills/`、`.kiro/steering/ndf-policies.md`、`.kiro/agents/ndf.json` を生成
-- 外部AI委譲は `/ndf:external-ai` skill と `corder` エージェント経由で Codex / Gemini CLI を呼び出し（v4.0.0 で Codex MCP サーバは廃止）
+- agy版は `plugins/ndf/dev.agy/` を `agy plugin install` で導入し、公開Skills・エージェント定義・PreToolUse/PreInvocationフックを提供
+- 外部AI委譲は `/ndf:external-ai` skill と `corder` エージェント経由で Codex / agy を呼び出し（v4.0.0 で Codex MCP サーバは廃止）
 
 詳細は各 runtime README と `docs/ndf-plugin-reference.md` を参照。
 

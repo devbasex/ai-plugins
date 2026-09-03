@@ -27,6 +27,12 @@ pytest_plugins = ["pytester"]
 
 ROOT = Path(__file__).resolve().parent
 
+# `plugins/<family>/dev.agy/skills/` は配布 Skill への symlink である。実体は
+# `plugins/<family>/skills/` にあり、そちらを収集する。両方をたどると同じテストが 2 度
+# 数えられ、件数が実際の 2 倍近くになる（agy を配布先へ加えた時点で 1569 件が 2974 件へ
+# 増えた）。**生成物は収集の対象から外す。**
+collect_ignore_glob = ["plugins/*/dev.agy"]
+
 # 束ごとに要る外部コマンド。**束によって前提が違う**ため、一覧は 1 か所に置きつつ
 # 収集した束にだけ適用する。全体へ課すと、必要のないコマンドを求めることになる。
 REQUIRED_COMMANDS: dict[str, tuple[str, ...]] = {

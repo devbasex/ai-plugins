@@ -3,7 +3,7 @@
 実物の `README.md` / `AGENTS.md` / `plugins/ndf/README.md` は書き換えない。代わりに、
 突き合わせの対象になる最小の木を一時ディレクトリへ作り、そこの説明文書だけを崩す。
 
-数は実物（31 / 29 / 30 / 4）と重ならない小さい値にしてある。版数も実物（9.6.0）とは別の
+数は実物（33 / 31 / 32 / 31）と重ならない小さい値にしてある。版数も実物とは別の
 値（9.3.0）にしてある。テストが実物の値へ依存していないことを、値そのもので示すためである。
 """
 from __future__ import annotations
@@ -26,11 +26,12 @@ OTHER_VERSION = "1.4.2"
 SKILL_DIRS = ["alpha", "bravo", "charlie", "delta", "echo"]
 OPTIONAL_DIRS = ["xray", "yankee"]
 
-# ランタイムごとの配布 Skill 数。3 つとも別の値にして、取り違えを検出できるようにする。
+# ランタイムごとの配布 Skill 数。4 つとも別の値にして、取り違えを検出できるようにする。
 MANIFESTS = {
     "claude": ["alpha", "bravo", "charlie", "delta", "echo"],
     "codex": ["alpha", "bravo", "charlie"],
     "kiro": ["alpha", "bravo", "charlie", "delta"],
+    "agy": ["alpha", "bravo"],
 }
 
 # 記号（G〜M）は `issues/parallel-batch-03/04-issue-209.md` の「検査する記載」に対応する。
@@ -39,7 +40,7 @@ ROOT_README = """# Fixture Marketplace
 
 **NDFプラグイン v9.3.0** の検査用の最小構成です。
 
-- **公開Skills**: Claude Code向け core 5個、Kiro向け core 4個、Codex向け core 3個に分離。
+- **公開Skills**: Claude Code向け core 5個、Kiro向け core 4個、Codex向け core 3個、agy向け core 2個に分離。
 - **元Skills（7個）**:
   - 第1群 (4): alpha, bravo, charlie, delta
   - 第2群 (3): echo, xray, yankee
@@ -94,6 +95,7 @@ PLUGIN_README = """# NDF Plugin
 | Claude Code | 5 個 | `.claude-plugin/plugin.json` |
 | Codex | 3 個 | `.codex-plugin/plugin.json` |
 | Kiro CLI | 4 個 | `dev.kiro/install.sh` |
+| agy | 2 個 | `dev.agy/plugin.json` |
 
 ## レイアウト
 

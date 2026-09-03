@@ -100,7 +100,7 @@ bash "$SCRIPTS/projects-sync.sh" 186 plan "issues/issue-186.md"
 
 ### `$SCRIPTS` を決める
 
-プラグインの `scripts/` の位置は 3 ランタイムで別々である。候補を順に試し、最初に当たったものを
+プラグインの `scripts/` の位置は 4 ランタイムで別々である。候補を順に試し、最初に当たったものを
 絶対パスで採る。
 
 | ランタイム | 配布物の位置 | 手がかり |
@@ -108,6 +108,7 @@ bash "$SCRIPTS/projects-sync.sh" 186 plan "issues/issue-186.md"
 | Claude Code | `~/.claude/plugins/cache/<マーケットプレイス>/ndf/<版>/scripts` | `SKILL.md` の `${CLAUDE_PLUGIN_ROOT}` が絶対パスへ置き換わる |
 | Kiro CLI | インストーラが指したプラグインの `scripts` | `.kiro/skills/<Skill名>` がプラグインの `skills/<Skill名>` への symlink |
 | Codex | `~/.codex/.tmp/marketplaces/<マーケットプレイス>/plugins/ndf/scripts` | マーケットプレイス名だけが導入元で変わる |
+| agy | `~/.gemini/config/plugins/ndf/scripts` | 導入時にプラグインのディレクトリ全体をここへ複製する。取得元の登録が無いため位置は固定 |
 
 ```bash
 # Claude Code は SKILL.md 内の ${CLAUDE_PLUGIN_ROOT} をプラグインルートの絶対パスへ置き換えて
@@ -142,12 +143,17 @@ done
 
 # Codex はマーケットプレイスのスナップショットの下へプラグインを展開する。名前は導入元で
 # 変わるため `*` で受ける。
+#
+# agy は取得元の登録を持たず、`agy plugin install` がプラグインのディレクトリ全体を
+# `~/.gemini/config/plugins/<plugin.json の name>/` へ複製する。名前は `ndf` で固定であり、
+# `dev.agy/scripts` の symlink は実体へ解決されて複製される。
 SCRIPTS=
 for candidate in \
   ${PLUGIN_ROOT:+"$PLUGIN_ROOT/scripts"} \
   ${KIRO_ROOT:+"$KIRO_ROOT/scripts"} \
   "${HOME:-}/.codex/.tmp/marketplaces/"*/plugins/ndf/scripts \
   "${HOME:-}/.codex/marketplaces/"*/plugins/ndf/scripts \
+  "${HOME:-}/.gemini/config/plugins/ndf/scripts" \
   "plugins/ndf/scripts"
 do
   [ -f "$candidate/projects-sync.sh" ] || continue
@@ -160,8 +166,10 @@ done
 見つからない場合は記録を飛ばす。**進行管理が理由で工程を止めない。**
 
 この bash はそのままテストの対象になっている。`development-workflow/tests/test_projects_scripts_lookup.py`
-がこの節の bash のコードブロックを読み出し、3 ランタイムの配置を作った上で実行する。手順の側だけが
-変わって解決が外れる状態にならない。
+と `worktree/tests/test_scripts_reference.py` がこの節の bash のコードブロックを読み出し、
+4 ランタイムの配置を作った上で実行する。手順の側だけが変わって解決が外れる状態にならない。
+**候補を足すときは両方のテストへ配置を足す。** 片方だけを直すと、もう片方が前のランタイムの
+数のまま通り続ける。
 
 ## 対象のアイテムの選び方
 

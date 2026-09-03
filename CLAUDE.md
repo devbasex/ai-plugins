@@ -31,7 +31,7 @@ skills/     → 実行可能なワークフロー
 
 ## NDF の Skill 構成
 
-Skill は 37 個で、配布は `plugins/ndf/manifests/` が唯一の基準（Claude Code 33 / Codex 31 / Kiro 32）。ブラウザ自動テストの 4 個は `playwright-kit` プラグインへ分離した（`plugins/playwright-kit/`）。frontmatter の書き方は `plugins/ndf/skills/README.md` の規約に従い、`python3 scripts/check-skill-frontmatter.py` で検査する。利用実績と維持・統合・削除の判定は `docs/specifications/ndf-skill-inventory.md` に記録する。
+Skill は 37 個で、配布は `plugins/ndf/manifests/` が唯一の基準（Claude Code 33 / Codex 31 / Kiro 32 / agy 31）。ブラウザ自動テストの 4 個は `playwright-kit` プラグインへ分離した（`plugins/playwright-kit/`）。frontmatter の書き方は `plugins/ndf/skills/README.md` の規約に従い、`python3 scripts/check-skill-frontmatter.py` で検査する。利用実績と維持・統合・削除の判定は `docs/specifications/ndf-skill-inventory.md` に記録する。
 
 v6.1.0 で開発方法論レイヤーの 5 個（`development-workflow` / `requirements-design` / `tdd-cycle` / `refactoring`（当時は `safe-refactoring`）/ `quality-gates`）を追加した。モード判定の基準を持つのは `development-workflow` だけで、他の Skill とエージェント定義は判定結果を受け取る側に徹する。
 
@@ -144,7 +144,7 @@ v6.0.0 の対応表（`review` → `pr-review`）は予告どおり削除済み�
 
 ## cross-refactoring
 
-`/ndf:cross-refactoring` は codex / gemini / kiro / claude のうち **ホストを除く 3 者**に構造改善を提案させ、**gemini を除く 3 者**から輪番で選んだ 1 者が適用し、残り 2 者がレビューする。新しい提案が出なくなるまで繰り返す。
+`/ndf:cross-refactoring` は codex / agy / kiro / claude のうち **ホストを除く 3 者**に構造改善を提案させ、**agy を除く 3 者**から輪番で選んだ 1 者が適用し、残り 2 者がレビューする。新しい提案が出なくなるまで繰り返す。
 
 ```bash
 /ndf:cross-refactoring 130 --scope src/services --baseline-test "pytest -q"
@@ -163,7 +163,7 @@ v6.0.0 の対応表（`review` → `pr-review`）は予告どおり削除済み�
 
 ## cross-review
 
-`/ndf:cross-review` は codex / gemini の両方に PR レビューを委譲し、両者が `APPROVE` するまで修正ループを回す。Gemini の progress log を heartbeat に表示するため、無言に見える時間でも `scan` / `analyze` / `post` / `done` などの作業段階を確認できる。
+`/ndf:cross-review` は codex / agy の両方に PR レビューを委譲し、両者が `APPROVE` するまで修正ループを回す。agy の progress log を heartbeat に表示するため、無言に見える時間でも `scan` / `analyze` / `post` / `done` などの作業段階を確認できる。
 
 追加レビュー観点は以下のどちらかで渡す:
 
@@ -172,7 +172,7 @@ v6.0.0 の対応表（`review` → `pr-review`）は予告どおり削除済み�
 /ndf:cross-review 123 --extra-instructions-file /tmp/review-focus.md
 ```
 
-PR の変更ファイルから docs only / code / DB migration / test / dependency / CI設定 / API契約 / 認証認可 / frontend / performance / deletion / generated / i18n / infra を自動分類し、該当するレビュー観点テンプレートも codex / gemini 両方に渡す。
+PR の変更ファイルから docs only / code / DB migration / test / dependency / CI設定 / API契約 / 認証認可 / frontend / performance / deletion / generated / i18n / infra を自動分類し、該当するレビュー観点テンプレートも codex / agy 両方に渡す。
 
 ## 検証
 

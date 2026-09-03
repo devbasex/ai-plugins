@@ -34,11 +34,13 @@ WT_DIRTY_LIST_MAX=20
 
 # 誘導の対象になる tool 名。ランタイムごとに名乗りが違うため、ここで 1 箇所に
 # まとめる。hook の matcher もこの一覧から作る（両方に書くと片方が古くなる）。
-#   編集系 — Claude Code は Edit / Write、Kiro CLI は fs_write。ほかのランタイムが
-#            名乗る write_file / replace なども同じ一覧へ並べる
+#   編集系 — Claude Code は Edit / Write、Kiro CLI は fs_write、agy は write_to_file と
+#            replace_file_content。ほかのランタイムが名乗る write_file / replace なども
+#            同じ一覧へ並べる。**agy の `write_file` は権限の名前であって tool の名前では
+#            ない。** hook が受け取る `toolCall.name` は `write_to_file` である（実測）
 #   パッチ系 — Codex CLI はパッチ本文で編集先を渡す
 #   シェル系 — 書き込みを伴うコマンドの形から編集先を推定する
-WT_EDIT_TOOLS="Edit|MultiEdit|Write|NotebookEdit|fs_write|edit_file|write_file|str_replace_editor|replace"
+WT_EDIT_TOOLS="Edit|MultiEdit|Write|NotebookEdit|fs_write|edit_file|write_file|str_replace_editor|replace|write_to_file|replace_file_content"
 WT_PATCH_TOOLS="apply_patch"
 WT_SHELL_TOOLS="Bash|shell|execute_bash|local_shell|run_command|run_shell_command"
 

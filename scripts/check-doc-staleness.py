@@ -52,16 +52,22 @@ def plugin_json_path(name: str) -> str:
     return f"plugins/{name}/.claude-plugin/plugin.json"
 
 
-# `README.md` はランタイムを Claude Code / Kiro / Codex の順、`plugins/ndf/README.md` は
-# Claude Code / Codex / Kiro の順で書いている。位置ではなく名前で対応づける。表記も
-# 2 本で違う（`Kiro` と `Kiro CLI`）ため、対応表を文書ごとに持つ。
-ROOT_README_RUNTIMES = {"Claude Code": "claude", "Kiro": "kiro", "Codex": "codex"}
-PLUGIN_README_RUNTIMES = {"Claude Code": "claude", "Codex": "codex", "Kiro CLI": "kiro"}
+# `README.md` はランタイムを Claude Code / Kiro / Codex / agy の順、`plugins/ndf/README.md` は
+# Claude Code / Codex / Kiro CLI / agy の順で書いている。位置ではなく名前で対応づける。表記も
+# 2 本で違う（`Kiro` と `Kiro CLI`）ため、対応表を文書ごとに持つ。**agy はどちらも同じ表記で
+# ある。** コマンド名がそのまま配布先の名前であり、製品名で言い換えると読み手が結び付けられない。
+ROOT_README_RUNTIMES = {"Claude Code": "claude", "Kiro": "kiro", "Codex": "codex", "agy": "agy"}
+PLUGIN_README_RUNTIMES = {
+    "Claude Code": "claude",
+    "Codex": "codex",
+    "Kiro CLI": "kiro",
+    "agy": "agy",
+}
 
-RUNTIME_COUNT = re.compile(r"(Claude Code|Kiro|Codex)向け core\s*(\d+)\s*個")
+RUNTIME_COUNT = re.compile(r"(Claude Code|Kiro|Codex|agy)向け core\s*(\d+)\s*個")
 SOURCE_COUNT = re.compile(r"元Skills（\s*(\d+)\s*個\s*）")
 CATEGORY_LINE = re.compile(r"^\s+-\s+(?P<label>.+?)\s+\((?P<count>\d+)\)\s*[:：]\s*(?P<names>.+)$")
-TABLE_ROW = re.compile(r"^\|\s*(Claude Code|Codex|Kiro CLI)\s*\|\s*(\d+)\s*個\s*\|")
+TABLE_ROW = re.compile(r"^\|\s*(Claude Code|Codex|Kiro CLI|agy)\s*\|\s*(\d+)\s*個\s*\|")
 LAYOUT_SKILLS = re.compile(r"唯一の実体（\s*(\d+)\s*個\s*）")
 LAYOUT_OPTIONAL = re.compile(r"どの配布先にも載せない Skill（\s*(\d+)\s*個\s*）")
 NAME_SEPARATOR = re.compile(r"[,、]")
@@ -613,7 +619,7 @@ def main() -> int:
     report = Report()
     counts = {
         runtime: manifest_skill_count(root, runtime, report)
-        for runtime in ("claude", "codex", "kiro")
+        for runtime in ("claude", "codex", "kiro", "agy")
     }
     skills = skill_dir_count(root, SKILLS_DIR, report)
     optional = skill_dir_count(root, OPTIONAL_DIR, report)

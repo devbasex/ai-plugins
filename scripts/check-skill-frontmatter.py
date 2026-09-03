@@ -7,7 +7,8 @@
 検査は 3 種類に分かれる。
 
 - **individual** — Skill 単位。仕様準拠・安全性・可搬性・運用
-- **aggregate**  — 配布先ごとの初期一覧予算（Claude Code / Codex）と frontmatter 総量。
+- **aggregate**  — 配布先ごとの初期一覧予算（Claude Code / Codex / Kiro CLI / agy）と
+  frontmatter 総量。
   予算は検査対象の plugin family すべての合計に対して判定する
 - **cross**      — Skill 間。トリガ語の重複と、既知の外部 Skill 名との衝突
 
@@ -108,12 +109,24 @@ CODEX_LISTING_LEVEL = "error"
 #   1% を当てる。憶測で独自の値を置くより、同じ土俵の実在する規定へ揃えるほうが根拠が残る。
 KIRO_CONTEXT_TOKENS = 1_000_000
 KIRO_LISTING_FRACTION = CLAUDE_LISTING_FRACTION
+#
+# agy（Antigravity CLI）: 公式ドキュメント（antigravity.google/docs/skills）に一覧予算の
+#   規定が無い。既定のモデルは Gemini 3.x Flash 系（`agy models` の先頭が
+#   `gemini-3.8-flash-high`。1.1.25 で実測）で、コンテキスト長を出す手段は見当たらない
+#   （`agy models` は名前と表示名だけを返し、`/context` にあたるコマンドも無い）。
+#   **この 2 つの値は Claude Code から借りたものである。** Gemini 3.x Flash の
+#   コンテキスト長 1,000,000 は Claude Code の Opus 5 と同じであり、規定が無い以上
+#   どこかから基準を借りるほかない。憶測で独自の値を置くより、同じコンテキスト長を持つ
+#   実在する規定へ揃えるほうが根拠が残る（Kiro CLI と同じ扱い）。
+AGY_CONTEXT_TOKENS = 1_000_000
+AGY_LISTING_FRACTION = CLAUDE_LISTING_FRACTION
 
-# 一覧に何が載るかはランタイムごとに違う。**パスを含むのは Codex だけ**である。
+# 一覧に何が載るかはランタイムごとに違う。**公式に記述があるのは Claude Code と Codex
+# だけ**である。
 #   Claude Code: "loads a listing of skill names and descriptions into context"
 #   Codex:       "In Codex, the initial list also includes each skill's file path."
-# Kiro は一覧の構成も公式に記述が無いため、多い側（パスを含む）で見積もる。
-LISTING_INCLUDES_PATH = {"claude": False, "codex": True, "kiro": True}
+# Kiro CLI と agy は一覧の構成も公式に記述が無いため、多い側（パスを含む）で見積もる。
+LISTING_INCLUDES_PATH = {"claude": False, "codex": True, "kiro": True, "agy": True}
 
 # 全 Skill の frontmatter 合計。**plugin family をまたいで合計する**（利用者の環境では
 # 複数のプラグインが同時に入るため、family 内だけ見ても実際の注入量にならない）。
@@ -474,6 +487,7 @@ def listing_limits() -> dict[str, int | None]:
         ("claude", CLAUDE_CONTEXT_TOKENS, CLAUDE_LISTING_FRACTION),
         ("codex", CODEX_CONTEXT_TOKENS, CODEX_LISTING_FRACTION),
         ("kiro", KIRO_CONTEXT_TOKENS, KIRO_LISTING_FRACTION),
+        ("agy", AGY_CONTEXT_TOKENS, AGY_LISTING_FRACTION),
     ):
         out[runtime] = None if frac is None or tokens is None else int(tokens * frac * cpt)
     return out
@@ -488,7 +502,7 @@ def load_manifests(skills_dir: pathlib.Path) -> dict[str, set[str]]:
     """
     man_dir = skills_dir.parent / "manifests"
     out: dict[str, set[str]] = {}
-    for runtime in ("claude", "codex", "kiro"):
+    for runtime in ("claude", "codex", "kiro", "agy"):
         f = man_dir / f"{runtime}-skills.txt"
         if not f.exists():
             continue
@@ -548,7 +562,8 @@ def check_budget(metrics: dict) -> list[Finding]:
     """
     out: list[Finding] = []
     limits = listing_limits()
-    levels = {"claude": "error", "codex": CODEX_LISTING_LEVEL, "kiro": "error"}
+    levels = {"claude": "error", "codex": CODEX_LISTING_LEVEL, "kiro": "error",
+              "agy": "error"}
     for runtime, total in sorted(metrics["listings"].items()):
         limit = limits.get(runtime)
         if limit is not None and total > limit:

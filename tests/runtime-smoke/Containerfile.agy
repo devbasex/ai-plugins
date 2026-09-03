@@ -1,0 +1,6 @@
+FROM ai-plugins-runtime-smoke-base
+
+# agy はマーケットプレイスの経路を持たないため、CLI そのものを公式のインストーラで入れる。
+# 取得に失敗しても容器の作成は止めない（Kiro CLI と同じ扱い）。アダプタが CLI の不在を見て
+# 手順を読み飛ばす。
+RUN curl -fsSL https://antigravity.google/cli/install.sh | bash || true

@@ -59,6 +59,17 @@ case "$runtime" in
     fi
     run_bigquery_secret_check || true
     ;;
+  agy)
+    # agy の認証は CLI が持つ。API キーの環境変数を取らないため、`agy models` の成否で
+    # 認証済みかを判定する。Skill 一覧の取得は認証を要するので、ここへ置く。
+    if command -v agy >/dev/null 2>&1 && timeout 60s agy models >> "$log" 2>&1; then
+      timeout 120s agy --output-format text --dangerously-skip-permissions \
+        -p="読み込めている Skill の名前を、1 行に 1 つだけ列挙して。説明は書かないで。" \
+        >> "$log" 2>&1 || true
+      auth_ran=true
+    fi
+    run_bigquery_secret_check || true
+    ;;
   *) echo "unknown runtime: $runtime" >&2; exit 2 ;;
 esac
 

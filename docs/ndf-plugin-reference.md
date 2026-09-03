@@ -40,8 +40,9 @@ plugin install 時に build を実行する必要はありません。
 | Claude Code | `.claude-plugin/plugin.json`（`agents/` 8 個、`hooks/claude.json`、`skills` 配列 32 個）、`scripts/` |
 | Codex | `.codex-plugin/plugin.json`（`hooks/codex.json`、`skills` 配列 30 個）、`scripts/` |
 | Kiro CLI | `dev.kiro/`（installer・agent config template・workflow prompts）、`manifests/kiro-skills.txt`、`skills/`、`scripts/` |
+| agy | `dev.agy/`（マニフェスト・`hooks.json`・`skills/` の symlink・`agents` と `scripts` への symlink） |
 
-同じディレクトリを 3 ランタイムが共有しますが、読む対象はマニフェストと installer が決めるため、
+同じディレクトリを 4 ランタイムが共有しますが、読む対象はマニフェストと installer が決めるため、
 公開される Skill と hook はランタイムごとに異なります。Claude Code 専用の agents / statusline /
 transcript retention hook は Codex の `skills` 配列と `hooks/codex.json` には入りません。
 
@@ -104,7 +105,7 @@ bash scripts/runtime-smoke-test.sh --runtime kiro
 
 ## 外部 AI 委譲
 
-Codex MCP サーバは廃止済みです。外部 AI 委譲は `/ndf:external-ai` Skill と Claude Code 版の `corder` エージェントから Codex / Gemini CLI を直接呼び出す方式を標準とします。
+Codex MCP サーバは廃止済みです。外部 AI 委譲は `/ndf:external-ai` Skill と Claude Code 版の `corder` エージェントから Codex / agy を直接呼び出す方式を標準とします。
 
 ## Slack 通知
 

@@ -25,7 +25,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runtime: [claude, codex, kiro]
+        runtime: [claude, codex, kiro, agy]
     steps:
       - uses: actions/checkout@v4
       - name: Run unauthenticated runtime smoke

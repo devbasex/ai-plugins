@@ -68,12 +68,19 @@ plugins/{plugin-name}/
 │   └── codex.json               # Codex 用
 ├── dev.kiro/                    # Kiro CLI 用（installer など）
 │   └── install.sh
+├── dev.agy/                     # agy 用（マニフェスト・hooks.json・symlink）
+│   ├── plugin.json
+│   └── hooks.json
 └── README.md                    # プラグイン説明
 ```
 
-3 ランタイムが同じディレクトリを読みます。読む対象はマニフェストと installer が決めるため、
-公開される Skill と hook はランタイムごとに異なります。`dev.kiro` は Agent Plugins 仕様 §8.2 が
-定めるクライアント拡張ディレクトリです。
+4 ランタイムが同じディレクトリを読みます。読む対象はマニフェストと installer が決めるため、
+公開される Skill と hook はランタイムごとに異なります。`dev.kiro` と `dev.agy` は Agent Plugins
+仕様 §8.2 が定めるクライアント拡張ディレクトリです。
+
+**ルート直下の `plugin.json` は、agy へ配るためには置きません。** 置くと Codex がそちらを
+優先して読み、`skills/` の実体を全件配ってしまいます（`plugins/ndf` で実測）。agy 向けの
+定義は `dev.agy/plugin.json` へ置きます。
 
 ルートの `plugin.json`（Agent Plugins 形式）は、`skills/` を全件公開してよく hook も持たない
 プラグインにだけ置きます。判断の基準は

@@ -18,7 +18,7 @@ for path in "$REPO_ROOT/.claude" "$REPO_ROOT/.codex" "$REPO_ROOT/.kiro" "$REPO_R
     exit 1
   fi
 done
-for forbidden in /root/.claude /root/.codex /root/.kiro /root/.config /root/.aws /root/.ssh; do
+for forbidden in /root/.claude /root/.codex /root/.kiro /root/.gemini /root/.config /root/.aws /root/.ssh; do
   if [ -e "$forbidden" ]; then
     echo "$runtime: runtime touched forbidden host-like path: $forbidden" >&2
     exit 1
