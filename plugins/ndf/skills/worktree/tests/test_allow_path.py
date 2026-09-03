@@ -21,7 +21,6 @@ DEFAULTS = '"${WT_DEFAULT_ALLOW_PATHS[@]}"'
         ".codex/config.toml",
         ".kiro/steering/ndf-policies.md",
         ".agents/skills/pr/SKILL.md",
-        ".gemini/settings.json",
         ".serena/project.yml",
         ".ndf/worktree.json",
         ".gitignore",

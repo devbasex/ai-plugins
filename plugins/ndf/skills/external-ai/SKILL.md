@@ -1,13 +1,13 @@
 ---
 name: external-ai
-description: "Delegate coding, review, or research to the codex, gemini, kiro-cli, or claude CLI. Use when a second opinion or an offloaded investigation is wanted（codexで調査・geminiレビュー・外部AIに投げて）."
+description: "Delegate coding, review, or research to the codex, agy, kiro-cli, or claude CLI. Use when a second opinion or an offloaded investigation is wanted（codexで調査・agyレビュー・外部AIに投げて）."
 ---
 
-# 外部 AI 委譲スキル (Codex / Gemini / Kiro / Claude)
+# 外部 AI 委譲スキル (Codex / agy / Kiro / Claude)
 
 ## 概要
 
-`codex` CLI（OpenAI Codex）、`gemini` CLI（Google Gemini）、`kiro-cli`（Kiro CLI）、
+`codex` CLI（OpenAI Codex）、`agy` CLI（Google Antigravity）、`kiro-cli`（Kiro CLI）、
 `claude` CLI（Claude Code のヘッドレス実行）をローカルから直接起動し、
 コード生成・独立第二意見レビュー・大規模コードベース調査を外部 AI に委譲する。
 
@@ -17,7 +17,7 @@ description: "Delegate coding, review, or research to the codex, gemini, kiro-cl
 | 補助ファイル | 内容 |
 |---|---|
 | [references/cli-codex.md](references/cli-codex.md) | Codex CLI のインストール、サンドボックス制約、`codex exec` の起動、sentinel 完了検知、最終 message 欠落対策 |
-| [references/cli-gemini.md](references/cli-gemini.md) | Gemini CLI のインストール、承認モード、`--output-format` の使い分け、プロセス終了による完了検知 |
+| [references/cli-agy.md](references/cli-agy.md) | agy CLI のインストール、作業領域の宣言、`-p=<本文>` の渡し方、実行時間の上限、プロセス終了による完了検知 |
 | [references/cli-kiro.md](references/cli-kiro.md) | Kiro CLI の非対話実行、**終了コードが成否を表さない**こと、ANSI エスケープ除去、ツール絞り込みを使わない理由、Skill 本文を読ませる明示指定 |
 | [references/cli-claude.md](references/cli-claude.md) | `claude -p` のヘッドレス実行、root 実行での権限モード制約、`--output-format json` による完了検知と実測モデルの取得 |
 
@@ -28,10 +28,10 @@ description: "Delegate coding, review, or research to the codex, gemini, kiro-cl
 ## NDF との関係
 
 - Claude Code 版の `corder` エージェントは本スキルの手順で Codex CLI を呼び出す
-- `/ndf:pr-review <PR番号> codex` / `/ndf:pr-review <PR番号> gemini` の委譲先として利用される
-- `/ndf:cross-review` は codex / gemini を**並列に起動**して両者の APPROVE 収束を待つ
+- `/ndf:pr-review <PR番号> codex` / `/ndf:pr-review <PR番号> agy` の委譲先として利用される
+- `/ndf:cross-review` は codex / agy を**並列に起動**して両者の APPROVE 収束を待つ
 - v4.0.0 で Codex MCP サーバは廃止。`mcp__codex__*` ツールは存在しない
-- Gemini 専用エージェントは未整備。委譲時はメインエージェントから本スキルを参照して直接 CLI を起動する
+- agy 専用エージェントは未整備。委譲時はメインエージェントから本スキルを参照して直接 CLI を起動する
 
 ## いつ使うか
 
@@ -52,26 +52,26 @@ description: "Delegate coding, review, or research to the codex, gemini, kiro-cl
 
 ## どの CLI を選ぶか
 
-| 観点 | Codex | Gemini | Kiro | Claude |
+| 観点 | Codex | agy | Kiro | Claude |
 |---|---|---|---|---|
 | stdout の信頼性 | 最終 message が落ちることがある（ファイル書き出し必須） | stdout に response が直接出る | ANSI エスケープが必ず混ざる | `--output-format json` で構造化される |
-| 承認の与え方 | `--dangerously-bypass-approvals-and-sandbox` | `GEMINI_CLI_TRUST_WORKSPACE=true` + `--skip-trust` が**両方**必須 | `--trust-all-tools`（**絞り込みは防御にならない**） | `--permission-mode acceptEdits` + `--allowed-tools` |
-| 非対話実行 | `codex exec` で完結。プロンプトは**標準入力必須** | `--yolo` に加えて trust 解除が必須 | `chat --no-interactive` | `-p` |
+| 承認の与え方 | `--dangerously-bypass-approvals-and-sandbox` | `--dangerously-skip-permissions`（**作業領域の外への書き込みは止まらない**） | `--trust-all-tools`（**絞り込みは防御にならない**） | `--permission-mode acceptEdits` + `--allowed-tools` |
+| 非対話実行 | `codex exec` で完結。プロンプトは**標準入力必須** | `-p=<本文>` で渡す。**標準入力は受け取らない** | `chat --no-interactive` | `-p` |
 | 完了判定 | stderr の `^tokens used$` sentinel | プロセス終了（`kill -0` / `wait`） | **終了コードは使えない。** 結果ファイルと stderr の照合 | JSON の `is_error` / `subtype` |
 | 実測モデルの取得 | できない | できない | **できない**（既定 `auto` は特に不可） | `modelUsage` から取れる |
 | 典型実行時間 | 5〜10 分 | 数十秒〜5 分 | 数分 | 数分（29 ターンで 218 秒の実測） |
-| 強み | コード逐語照合、長時間の深い調査 | 横断調査、長文生成、軽量タスク | claude 系 / gpt 系のモデルを同じハーネスで選べる | 手順書（Skill）への追従が最も安定 |
+| 強み | コード逐語照合、長時間の深い調査 | 横断調査、長文生成、軽量タスク。作業領域を明示的に区切れる | claude 系 / gpt 系のモデルを同じハーネスで選べる | 手順書（Skill）への追従が最も安定 |
 | 弱み | セットアップ・運用が煩雑 | 高難度コード解析でやや浅くなることがある | **Skill を配置しても本文を読まない**（明示パスが必須） | 実行コストが高い（1 件 1.42 ドルの実測） |
 
 **指針**:
 
 - 行番号・件数の逐語確認が要る → Codex
-- 短時間で済む独立レビュー、横断調査、長文生成 → Gemini
+- 短時間で済む独立レビュー、横断調査、長文生成 → agy
 - 手順書どおりに直させたい → Claude（追従が最も安定。ただしコストが高い）
 - ハーネスを固定してモデルだけ比べたい → Kiro（claude 系と gpt 系の両方を提供する）
 - 第二意見を確実に取りたい → 複数を走らせてクロスチェック（`/ndf:cross-review` と
   `/ndf:cross-refactoring` が自動化している）
-- Codex がレート制限・サンドボックス制約に当たった → Gemini へ代替
+- Codex がレート制限・サンドボックス制約に当たった → agy へ代替
 
 `corder` エージェントとの使い分けは次のとおり。
 
@@ -93,7 +93,7 @@ CLI 固有のコマンドラインは補助ファイルを参照し、流れは�
 
 ```bash
 which codex    && codex --version
-which gemini   && gemini --version
+which agy      && agy --version
 which kiro-cli && kiro-cli --version
 which claude   && claude --version
 ```
@@ -138,7 +138,7 @@ stderr には思考ログや警告が出る。Codex では数千行になるた�
 | CLI | 脱出条件 |
 |---|---|
 | Codex | stderr に `^tokens used$` が現れる（[references/cli-codex.md](references/cli-codex.md)） |
-| Gemini | プロセスが終了する（[references/cli-gemini.md](references/cli-gemini.md)） |
+| agy | プロセスが終了する（[references/cli-agy.md](references/cli-agy.md)） |
 | Kiro | **結果ファイルが書かれる。** 終了コードは成否を表さない（[references/cli-kiro.md](references/cli-kiro.md)） |
 | Claude | プロセスが終了し、JSON の `is_error` が偽（[references/cli-claude.md](references/cli-claude.md)） |
 
@@ -156,7 +156,7 @@ OUTPUT_FILE=/tmp/external-ai-output-pr13734-review.md
 
 # PRIMARY / SECONDARY は CLI ごとに下表の順で割り当てる
 PRIMARY="$OUTPUT_FILE"; SECONDARY="$STDOUT"   # Codex の場合
-# PRIMARY="$STDOUT"; SECONDARY="$OUTPUT_FILE" # Gemini の場合
+# PRIMARY="$STDOUT"; SECONDARY="$OUTPUT_FILE" # agy の場合
 
 if [ -s "$PRIMARY" ]; then
     cp "$PRIMARY" ./result.md
@@ -171,12 +171,12 @@ fi
 | CLI | 優先 (`PRIMARY`) | 次点 (`SECONDARY`) | 最後の手段 |
 |---|---|---|---|
 | Codex | `OUTPUT_FILE` | `STDOUT` | stderr 末尾 |
-| Gemini | `STDOUT` | `OUTPUT_FILE` | stderr |
+| agy | `STDOUT` | `OUTPUT_FILE` | stderr |
 | Kiro | `OUTPUT_FILE` | `STDOUT` | stderr 末尾（**ANSI 除去後**） |
 | Claude | `OUTPUT_FILE` | `STDOUT`（JSON の `result`） | stderr |
 
 Codex は最終 assistant message を返さずにセッションを終える既知挙動があるため、
-ファイルを優先する。Gemini は stdout が信頼できるため stdout を優先する。
+ファイルを優先する。agy は stdout が信頼できるため stdout を優先する。
 Kiro は終了コードが使えないので、**ファイルが書かれたことが唯一の確実な完了の証拠**になる。
 
 ### 6. 待機間隔のチューニング
@@ -188,7 +188,7 @@ Kiro は終了コードが使えないので、**ファイルが書かれたこ�
 - **長い間隔**: 1200 秒以上（1 回のキャッシュミスを長時間で償却）
 - **避ける**: 300 秒前後（キャッシュミス + 短時間待機の最悪の組み合わせ）
 
-Codex（5〜10 分）は 270 秒ポーリングか 1200 秒一括待ち、Gemini（数十秒〜5 分）は
+Codex（5〜10 分）は 270 秒ポーリングか 1200 秒一括待ち、agy（数十秒〜5 分）は
 60〜270 秒ポーリングでよい。
 
 ## プロンプト設計
@@ -201,7 +201,7 @@ Codex（5〜10 分）は 270 秒ポーリングか 1200 秒一括待ち、Gemini
 4. **スコープ外の明示**（脱線防止）
 5. **出力サイズの目安**（例: 400〜500 行）
 6. **最終出力先ファイルの指定**: `/tmp/<cli>-output-タスク名.md` のような明示パスへ書き出させる。
-   Codex は `apply_patch`、Gemini は `write_file` を使う。**stdout のみへの出力は不可**
+   Codex は `apply_patch`、agy は `write_to_file` を使う。**stdout のみへの出力は不可**
 7. **assistant message の強制**: 「tool 呼び出しのみで終了せず、最後に必ず 1 回出力すること」
 
 ### レビュー依頼テンプレート
@@ -287,18 +287,18 @@ CLI 固有の症状（サンドボックス失敗、承認モードによるハ�
 3. **API コスト**: トークン従量課金。1 セッションで数千〜数万トークン消費することがあり、短時間で済むタスクには使わない
 4. **機密情報**: コードが外部 API へ送信される。社外秘コードの扱いは組織ポリシーに従う
 5. **モデル選択**: 既定モデルは時期により変動する。安定性が要るときは明示指定する
-6. **サンドボックス無効化フラグ**: Codex の `--dangerously-bypass-approvals-and-sandbox` と Gemini の
-   `--yolo` は、任意のシェル実行とファイル編集を無確認で許可する。**Docker / devcontainer / VM /
+6. **サンドボックス無効化フラグ**: Codex の `--dangerously-bypass-approvals-and-sandbox` と agy の
+   `--dangerously-skip-permissions` は、任意のシェル実行とファイル編集を無確認で許可する。**Docker / devcontainer / VM /
    CI ランナー / 隔離 worktree などの外部隔離環境内でのみ使用**し、ホスト直接実行や本番リポジトリでは使わない
 
 ## 関連
 
 - [references/cli-codex.md](references/cli-codex.md) — Codex CLI 固有の手順
-- [references/cli-gemini.md](references/cli-gemini.md) — Gemini CLI 固有の手順
+- [references/cli-agy.md](references/cli-agy.md) — agy CLI 固有の手順
 - [references/cli-kiro.md](references/cli-kiro.md) — Kiro CLI 固有の手順
 - [references/cli-claude.md](references/cli-claude.md) — `claude -p` 固有の手順
-- `/ndf:cross-review` — codex / gemini 両方を並列起動して APPROVE 収束まで回す
+- `/ndf:cross-review` — codex / agy 両方を並列起動して APPROVE 収束まで回す
 - `/ndf:cross-refactoring` — 4 CLI を役割ごとに分担させ、リファクタリングを収束させる
-- `/ndf:pr-review` — 第二引数に `codex` / `gemini` を指定すると本スキルの手順へ委譲する
+- `/ndf:pr-review` — 第二引数に `codex` / `agy` を指定すると本スキルの手順へ委譲する
 - Claude Code 版 `corder` エージェント — 本スキルの手順で Codex CLI を呼び出す独立レビュー担当
 - 他の AI CLI（`claude`, `ollama` 等）も同じパターンで利用できる

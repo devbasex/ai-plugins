@@ -161,7 +161,7 @@ elif [[ "$TOOL" =~ ^($WT_SHELL_TOOLS)$ ]]; then
   )
   [ -n "$command_text" ] || exit 0
   # コマンドの実行ディレクトリを別に指定できるランタイムがある
-  # （Gemini CLI の run_shell_command は tool_input.dir_path）。
+  # （`run_shell_command` は tool_input.dir_path で渡す）。
   # 指定があれば、相対パスの起点をそちらへ合わせる。
   command_cwd=$(
     jq_get 'if (.tool_input.dir_path | type) == "string" then .tool_input.dir_path

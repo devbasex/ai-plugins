@@ -18,7 +18,6 @@ WT_DEFAULT_ALLOW_PATHS=(
   ".codex/"
   ".kiro/"
   ".agents/"
-  ".gemini/"
   ".serena/"
   ".ndf/"
   ".gitignore"
@@ -35,7 +34,8 @@ WT_DIRTY_LIST_MAX=20
 
 # 誘導の対象になる tool 名。ランタイムごとに名乗りが違うため、ここで 1 箇所に
 # まとめる。hook の matcher もこの一覧から作る（両方に書くと片方が古くなる）。
-#   編集系 — Claude Code は Edit / Write、Kiro CLI は fs_write、Gemini CLI は replace
+#   編集系 — Claude Code は Edit / Write、Kiro CLI は fs_write。ほかのランタイムが
+#            名乗る write_file / replace なども同じ一覧へ並べる
 #   パッチ系 — Codex CLI はパッチ本文で編集先を渡す
 #   シェル系 — 書き込みを伴うコマンドの形から編集先を推定する
 WT_EDIT_TOOLS="Edit|MultiEdit|Write|NotebookEdit|fs_write|edit_file|write_file|str_replace_editor|replace"

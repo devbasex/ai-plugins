@@ -40,7 +40,7 @@ bash "$SCRIPTS/worktree-setup.sh" init
 | --- | --- |
 | `issues/` | 計画と仕様の草案 |
 | `docs/` | リポジトリ知識 |
-| `.claude/` `.codex/` `.kiro/` `.agents/` `.gemini/` | 各ランタイムの設定 |
+| `.claude/` `.codex/` `.kiro/` `.agents/` | 各ランタイムの設定 |
 | `.serena/` | コードインテリジェンスの設定と索引 |
 | `.ndf/` | この宣言ファイル |
 | `.gitignore` | 作業ツリーの登録そのものに必要 |
