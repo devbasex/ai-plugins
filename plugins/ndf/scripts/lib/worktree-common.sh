@@ -1801,8 +1801,14 @@ WT_LOCK_STALE_MINUTES=5
 # 判定したものと同じロックであることを確かめてから取り除く。
 # 名前の付け替えは 1 つのプロセスだけが成功するため、これを関門に使う。
 # 単に `rm -rf` すると、先に捨てて取り直した別のプロセスのロックを壊す。
+#
+# **確かめるのは外へ出す前である。** 出してから確かめると、別物だったときには
+# 生きているロックを既に外している。外している間はロックの名前が空くため、持ち主が
+# 臨界区間にいるまま別の担当が関門を通る。戻すより先に取られると戻せず、持ち主の
+# ロックはそのまま捨てられる（#297）。
 _wt_lock_discard() {
   local dir="$1" seen="$2" token="$3" stale="$1.stale.$3"
+  [ "$(cat "$dir/token" 2>/dev/null)" = "$seen" ] || return 1
   mv "$dir" "$stale" 2>/dev/null || return 1
   if [ "$(cat "$stale/token" 2>/dev/null)" = "$seen" ]; then
     rm -rf "$stale" 2>/dev/null
@@ -1813,12 +1819,19 @@ _wt_lock_discard() {
   return 1
 }
 
-# ロックが捨ててよい状態かを見る。
+# ロックが捨ててよい状態かを見る。**判定は 1 つのロックについて行う。**
+# 見始めたときの印を `seen` で受け取り、判定の間に持ち主が替わっていれば捨てない。
+#
+# **`kill -0` が偽になるのは、持ち主が離れたときにも起きる。** 離れた後に別の担当が
+# 取り直していれば、いま置かれているのは別のロックである。番号だけを見て捨ててよいと
+# 読むと、生きているロックを外すことになる（#297）。
 _wt_lock_is_stale() {
-  local dir="$1" owner
+  local dir="$1" seen="${2-}" owner
   owner=$(cat "$dir/pid" 2>/dev/null)
   if [ -n "$owner" ]; then
     kill -0 "$owner" 2>/dev/null && return 1
+    [ "$(cat "$dir/token" 2>/dev/null)" = "$seen" ] || return 1
+    [ "$(cat "$dir/pid" 2>/dev/null)" = "$owner" ] || return 1
     return 0
   fi
   # 印が無いロックは、作った直後に落ちた可能性がある。古ければ捨ててよい。
@@ -1854,7 +1867,7 @@ wt_lock_acquire() {
       # 競り負けた。**ロックは消さない。** 相手が持っているため、待つ側へ回る。
     fi
     seen=$(cat "$dir/token" 2>/dev/null)
-    if _wt_lock_is_stale "$dir"; then
+    if _wt_lock_is_stale "$dir" "$seen"; then
       _wt_lock_discard "$dir" "$seen" "$token"
       continue
     fi

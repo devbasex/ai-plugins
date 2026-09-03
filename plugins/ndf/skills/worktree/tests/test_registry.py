@@ -271,6 +271,70 @@ def test_the_lock_does_not_leave_noclobber_on_the_caller(
         assert "C" not in line.split("=", 1)[1], f"{line} に noclobber が残った"
 
 
+def _run_lock_lib(lib: Path, snippet: str) -> subprocess.CompletedProcess:
+    """`lib` を読み込んだうえで `snippet` を bash で実行する。写しの側も同じ検査にかける。"""
+    return subprocess.run(
+        ["bash", "-c", f'set -uo pipefail\n. "{lib}"\n{snippet}\n'],
+        capture_output=True, text=True,
+    )
+
+
+# 判定と取り除きは接頭辞だけが違う。両方の写しへ同じ検査をかける。
+LOCK_HELPERS = [
+    pytest.param(LIB, "_wt", id="worktree"),
+    pytest.param(WF_LIB, "_wf", id="workflow"),
+]
+
+
+@pytest.mark.parametrize(("lib", "prefix"), LOCK_HELPERS)
+def test_a_lock_that_changed_hands_is_not_judged_stale(
+    tmp_path: Path, lib: Path, prefix: str
+) -> None:
+    """#297-1 / 2: 判定の間に持ち主が替わったロックを、陳腐化と読まない。
+
+    `kill -0` が偽になるのは、見始めたときの持ち主が離れたときにも起きる。離れた後に
+    別の担当が取り直していれば、いま置かれているのは別のロックであり、捨ててよいもの
+    ではない。番号だけを見て捨ててよいと読むと、生きているロックを外すことになる。
+    """
+    lock = tmp_path / "handover.lock"
+    lock.mkdir()
+    (lock / "held").touch()
+    (lock / "pid").write_text("999999\n", encoding="utf-8")
+    (lock / "token").write_text("new-owner\n", encoding="utf-8")
+
+    got = _run_lock_lib(lib, f'{prefix}_lock_is_stale "{lock}" "old-owner"; echo rc=$?')
+
+    assert "rc=1" in got.stdout, got.stdout
+
+
+@pytest.mark.parametrize(("lib", "prefix"), LOCK_HELPERS)
+def test_a_lock_that_changed_hands_is_never_moved_out(
+    tmp_path: Path, lib: Path, prefix: str
+) -> None:
+    """#297-1 / 2: 判定と違うロックは、いっとき外へ出すこともしない。
+
+    外へ出している間はロックの名前が空く。持ち主が臨界区間にいるまま、別の担当が
+    関門を通れてしまう。**戻せば済むという扱いにはできない。** 戻すより先に取られると
+    戻せず、持ち主のロックは捨てられる。
+    """
+    holder = tmp_path / "holder"
+    holder.mkdir()
+    lock = holder / "live.lock"
+    lock.mkdir()
+    (lock / "held").touch()
+    (lock / "pid").write_text("999999\n", encoding="utf-8")
+    (lock / "token").write_text("new-owner\n", encoding="utf-8")
+    parent_before = holder.stat().st_mtime_ns
+    lock_before = lock.stat().st_ctime_ns
+
+    got = _run_lock_lib(lib, f'{prefix}_lock_discard "{lock}" "old-owner" "tok"; echo rc=$?')
+
+    assert "rc=1" in got.stdout, got.stdout
+    assert lock.is_dir(), "判定と違うロックを取り除いた"
+    assert holder.stat().st_mtime_ns == parent_before, "外へ出した跡が親のディレクトリに残った"
+    assert lock.stat().st_ctime_ns == lock_before, "外へ出した跡がロックそのものに残った"
+
+
 def test_six_registrations_at_once_all_survive(main_repo: Path, tmp_path: Path) -> None:
     """#297-4: 同時に登録しても行が欠けず、同じ番号が 2 つへ配られない。"""
     worker = tmp_path / "slot-worker.sh"
@@ -326,9 +390,17 @@ def _lock_body(path: Path, name: str) -> str:
     body = "\n".join(kept)
     # 2 つの写しで違ってよいのは、接頭辞と上限の既定値だけである。
     body = re.sub(r'timeout="\$\{2:-[^}]*\}"', 'timeout=DEFAULT', body)
+    body = re.sub(r"\bW[TF]_LOCK_", "LOCK_", body)
     return body.replace("_wt_", "_lock_").replace("_wf_", "_lock_")
 
 
-def test_the_two_lock_implementations_share_one_procedure() -> None:
-    """#297-6: 片方だけに残る手を作らない（#293 で 1 つへ寄せるまでの担保）。"""
-    assert _lock_body(LIB, "wt_lock_acquire") == _lock_body(WF_LIB, "wf_lock_acquire")
+@pytest.mark.parametrize("name", ["lock_acquire", "lock_is_stale", "lock_discard"])
+def test_the_two_lock_implementations_share_one_procedure(name: str) -> None:
+    """#297-6: 片方だけに残る手を作らない（#293 で 1 つへ寄せるまでの担保）。
+
+    取得の本体だけでなく、判定と取り除きも突き合わせる。持ち主を決める手順は
+    3 つに分かれており、どれか 1 つが片方だけ古いと、同じ症状が片側にだけ残る。
+    """
+    wt = "wt_" + name if name == "lock_acquire" else "_wt_" + name
+    wf = "wf_" + name if name == "lock_acquire" else "_wf_" + name
+    assert _lock_body(LIB, wt) == _lock_body(WF_LIB, wf)

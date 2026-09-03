@@ -247,8 +247,10 @@ WF_LOCK_TIMEOUT="${NDF_STAGE_LOCK_TIMEOUT:-5}"
 _wf_lock_sleep() { sleep 0.1 2>/dev/null || sleep 1; }
 
 # 判定したものと同じロックであることを確かめてから取り除く。
+# **確かめるのは外へ出す前である。** 理由は写し元の同じ関数に書いてある。
 _wf_lock_discard() {
   local dir="$1" seen="$2" token="$3" stale="$1.stale.$3"
+  [ "$(cat "$dir/token" 2>/dev/null)" = "$seen" ] || return 1
   mv "$dir" "$stale" 2>/dev/null || return 1
   if [ "$(cat "$stale/token" 2>/dev/null)" = "$seen" ]; then
     rm -rf "$stale" 2>/dev/null
@@ -258,11 +260,15 @@ _wf_lock_discard() {
   return 1
 }
 
+# ロックが捨ててよい状態かを見る。**判定は 1 つのロックについて行う。**
+# 見始めたときの印を `seen` で受け取る。理由は写し元の同じ関数に書いてある。
 _wf_lock_is_stale() {
-  local dir="$1" owner
+  local dir="$1" seen="${2-}" owner
   owner=$(cat "$dir/pid" 2>/dev/null)
   if [ -n "$owner" ]; then
     kill -0 "$owner" 2>/dev/null && return 1
+    [ "$(cat "$dir/token" 2>/dev/null)" = "$seen" ] || return 1
+    [ "$(cat "$dir/pid" 2>/dev/null)" = "$owner" ] || return 1
     return 0
   fi
   find "$dir" -maxdepth 0 -mmin "+$WF_LOCK_STALE_MINUTES" 2>/dev/null | grep -q . && return 0
@@ -291,7 +297,7 @@ wf_lock_acquire() {
       # 競り負けた。**ロックは消さない。** 相手が持っているため、待つ側へ回る。
     fi
     seen=$(cat "$dir/token" 2>/dev/null)
-    if _wf_lock_is_stale "$dir"; then
+    if _wf_lock_is_stale "$dir" "$seen"; then
       _wf_lock_discard "$dir" "$seen" "$token"
       continue
     fi
