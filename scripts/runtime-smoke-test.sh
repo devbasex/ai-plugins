@@ -12,7 +12,7 @@ usage() {
 Usage: bash scripts/runtime-smoke-test.sh [OPTIONS]
 
 Options:
-  --runtime claude|codex|kiro|all  runtime to test (default: all)
+  --runtime claude|codex|kiro|agy|all  runtime to test (default: all)
   --with-secrets off|auto|required secret handling mode (default: off)
   --secret-file KEY=PATH           inject an allowlisted file secret
   --keep-container                 keep the container for local debugging
@@ -39,7 +39,7 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
-case "$RUNTIME" in claude|codex|kiro|all) ;; *) echo "ERROR: invalid --runtime: $RUNTIME" >&2; exit 2 ;; esac
+case "$RUNTIME" in claude|codex|kiro|agy|all) ;; *) echo "ERROR: invalid --runtime: $RUNTIME" >&2; exit 2 ;; esac
 case "$WITH_SECRETS" in off|auto|required) ;; *) echo "ERROR: invalid --with-secrets: $WITH_SECRETS" >&2; exit 2 ;; esac
 if [ "$KEEP_CONTAINER" = true ] && [ "$WITH_SECRETS" != off ]; then
   echo "ERROR: --keep-container cannot be used with --with-secrets=$WITH_SECRETS" >&2
@@ -51,7 +51,7 @@ mkdir -p "$ARTIFACT_DIR"
 ARTIFACT_DIR="$(cd "$ARTIFACT_DIR" && pwd)"
 
 RUNTIMES=("$RUNTIME")
-[ "$RUNTIME" = all ] && RUNTIMES=(claude codex kiro)
+[ "$RUNTIME" = all ] && RUNTIMES=(claude codex kiro agy)
 
 RAW_SECRET_NAMES=(
   ANTHROPIC_API_KEY
@@ -165,6 +165,7 @@ run_runtime() {
     --exclude=.claude \
     --exclude=.codex \
     --exclude=.kiro \
+    --exclude=.gemini \
     --exclude=tmp \
     -C "$ROOT_DIR" -cf - . |
     docker exec -i "$cid" tar -C /workspace/ai-plugins -xf -
