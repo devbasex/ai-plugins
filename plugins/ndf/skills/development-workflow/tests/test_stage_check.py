@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -203,7 +204,9 @@ def test_a_record_that_cannot_take_the_lock_changes_nothing(repo: Path, state: P
     before = path.read_bytes()
     lock = Path(str(path) + ".lockdir")
     lock.mkdir()
-    (lock / "pid").write_text("1\n", encoding="utf-8")   # PID 1 は生きている
+    # **持ち主はこのテスト自身にする。** PID 1 を持ち主にすると、その利用者が signal を
+    # 送れない環境で「持ち主が消えた」と判定され、ロックが捨てられて記録が通る。
+    (lock / "pid").write_text(f"{os.getpid()}\n", encoding="utf-8")
 
     result = record(repo, state, 221, "stage", "計画")
 
