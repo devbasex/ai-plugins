@@ -176,6 +176,9 @@ SPEC_KEYS = {"name", "description", "license", "compatibility", "metadata", "all
 CLAUDE_KEYS = {
     "when_to_use", "argument-hint", "arguments", "disable-model-invocation",
     "user-invocable", "paths", "effort", "context", "background", "agent", "model",
+    # Skill が呼ばれた会話の単位へ hook を登録する（公式ドキュメント "Hooks in skills
+    # and agents"）。書式は settings.json の hooks と同じで、入れ子で書く。
+    "hooks",
 }
 ALLOWED_KEYS = SPEC_KEYS | CLAUDE_KEYS
 
