@@ -235,9 +235,11 @@ wf_state_file() {
 # --- 排他 -------------------------------------------------------------------
 # **`plugins/ndf/scripts/lib/worktree-common.sh` の `wt_lock_acquire` の写しである。**
 # 切り出して両方から source する形は採らない。切り出し先が担当 C の境界の外にあり、
-# 配布の後の相対の位置がランタイムごとに違うためである（#293 で扱う）。
+# 配布の後の相対の位置がランタイムごとに違うためである（#293 で扱う）。**本体は写し元と
+# 1 行ずつ同じにする**（`worktree/tests/test_registry.py` が突き合わせる）。
 #
 # `flock` は使わない。持たないホストがあり、有無で仕組みが分かれると互いを見落とす。
+# 関門が 2 段である理由は写し元の同じ節に書いてある。
 
 WF_LOCK_STALE_MINUTES=5
 WF_LOCK_TIMEOUT="${NDF_STAGE_LOCK_TIMEOUT:-5}"
@@ -270,18 +272,19 @@ _wf_lock_is_stale() {
 wf_lock_acquire() {
   local dir="${1:-}" timeout="${2:-$WF_LOCK_TIMEOUT}" token seen deadline
   [ -n "$dir" ] || return 1
+  # ロックの位置にディレクトリ以外があれば、ロックとして成立しない。取り除く。
   if [ -e "$dir" ] && [ ! -d "$dir" ]; then rm -f "$dir" 2>/dev/null; fi
-  token="$$-$(date +%s 2>/dev/null)-${RANDOM:-0}-$(od -An -N4 -tu4 /dev/urandom 2>/dev/null | tr -dc '0-9')"
+  # 印は識別のためだけに使う。持ち主の決定には使わないため、桁をそろえる必要はない。
+  token="$$-$(date +%s 2>/dev/null)-${RANDOM:-0}"
+  # 上限は実時間で測る。刻みが 0.1 秒か 1 秒かで待ち時間が 10 倍変わるため、
+  # 回数で数えない。
   deadline=$(( $(date +%s) + timeout ))
   while :; do
     if mkdir "$dir" 2>/dev/null; then
-      # **`mkdir` の成功だけでは持ち主を 1 つに絞れない。** 実測した overlayfs では、
-      # 同時に走らせた 6 つのうち 2 つが同じ名前の作成に成功した。印を書いてから読み
-      # 直し、自分の印が残っているときだけ持ち主とする。読み直しの前に間を置くのは、
-      # 相手の書き込みを先に届かせるためである。最後に書いた 1 つだけが残る。
-      printf '%s\n' "$token" >"$dir/token" 2>/dev/null
-      _wf_lock_sleep
-      if [ "$(cat "$dir/token" 2>/dev/null)" = "$token" ]; then
+      # 2 段目の関門。**`set -C` は部分シェルの中だけで張る。** 裸で書くと呼び出し側の
+      # シェルの `$-` に `C` が残り、以後の上書きの向き先が変わる。
+      if ( set -C; : >"$dir/held" ) 2>/dev/null; then
+        printf '%s\n' "$token" >"$dir/token" 2>/dev/null
         printf '%s\n' "$$" >"$dir/pid" 2>/dev/null
         return 0
       fi

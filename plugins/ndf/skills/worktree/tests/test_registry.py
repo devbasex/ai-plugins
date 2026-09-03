@@ -6,11 +6,14 @@
 from __future__ import annotations
 
 import json
+import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
 
-from worktree_helpers import run_lib
+from worktree_helpers import LIB, run_lib
 
 
 def registry_path(main_repo: Path) -> Path:
@@ -155,3 +158,177 @@ def test_broken_registry_is_treated_as_empty(main_repo: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("{ not json", encoding="utf-8")
     assert acquire(main_repo, "/wt/a") == "0"
+
+
+# --- 排他（#297 / #308） ----------------------------------------------------
+#
+# 同時に走らせたときの振る舞いは、繰り返したうえで件数で見る。1 回の実行では、
+# 取りこぼしがあっても通ることがある。受け入れ条件が求める試行数（30 回 / 20 回）は
+# 完了判定として手元で回し、テストへ入れるのは 1 件あたり数秒に収まる回数にする。
+
+WF_LIB = Path(__file__).resolve().parents[3] / "skills/development-workflow/scripts/lib/workflow-common.sh"
+
+# 排他の実装は 2 箇所にある（#293 で 1 つへ寄せるまで）。**両方へ同じ検査をかける。**
+LOCK_LIBS = [
+    pytest.param(LIB, "wt_lock_acquire", "wt_lock_release", id="worktree"),
+    pytest.param(WF_LIB, "wf_lock_acquire", "wf_lock_release", id="workflow"),
+]
+
+# 担当ごとに別のプロセスにする。同じシェルの部分シェルでは `$$` が親の番号を返し、
+# 見張りのファイルが 1 つにまとまってしまう。
+LOCK_WORKER = """#!/usr/bin/env bash
+# $1 読み込むライブラリ / $2 取得の関数 / $3 解放の関数 / $4 置き場所 / $5 上限
+set -uo pipefail
+. "$1"
+while [ ! -e "$4/go" ]; do :; done
+if "$2" "$4/lock" "$5"; then
+  : >"$4/in.$$"
+  if [ "$(ls "$4"/in.* 2>/dev/null | wc -l)" -gt 1 ]; then : >"$4/over.$$"; fi
+  sleep 0.02
+  rm -f "$4/in.$$"
+  "$3" "$4/lock"
+else
+  : >"$4/miss.$$"
+fi
+exit 0
+"""
+
+
+def _run_lock_race(
+    tmp_path: Path, lib: Path, acquire: str, release: str, parallel: int, trials: int,
+    timeout: int = 6,
+) -> dict:
+    """同じロックを `parallel` 個のプロセスで取りに行く試行を `trials` 回行う。
+
+    臨界区間が重なった試行・上限に達して取れなかった回数・持ち主の決まらない
+    ロックが残った試行を数えて返す。
+    """
+    worker = tmp_path / "lock-worker.sh"
+    worker.write_text(LOCK_WORKER, encoding="utf-8")
+    base = tmp_path / "race"
+    base.mkdir(exist_ok=True)
+    lock = base / "lock"
+    result = {"overlap": 0, "miss": 0, "ownerless": 0}
+
+    for _ in range(trials):
+        for stray in base.iterdir():
+            if stray.is_dir():
+                shutil.rmtree(stray, ignore_errors=True)
+            else:
+                stray.unlink()
+        procs = [
+            subprocess.Popen(
+                ["bash", str(worker), str(lib), acquire, release, str(base), str(timeout)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            for _ in range(parallel)
+        ]
+        (base / "go").touch()
+        for proc in procs:
+            proc.wait()
+        if any(base.glob("over.*")):
+            result["overlap"] += 1
+        result["miss"] += len(list(base.glob("miss.*")))
+        # 誰も持ち主にならないまま残ったロックは、以後だれも取れない（#308）。
+        if lock.is_dir():
+            owner = lock / "pid"
+            if not owner.is_file() or not owner.read_text(encoding="utf-8").strip():
+                result["ownerless"] += 1
+    return result
+
+
+@pytest.mark.parametrize(("parallel", "trials"), [(6, 7), (12, 3)])
+@pytest.mark.parametrize(("lib", "acquire", "release"), LOCK_LIBS)
+def test_many_at_once_never_share_the_critical_section(
+    tmp_path: Path, lib: Path, acquire: str, release: str, parallel: int, trials: int
+) -> None:
+    """#297-1 / 2 / 3 と #308-5 を 1 つの測定で見る。
+
+    並列数を 6 と 12 で変えても結果が変わらないことが、持ち主の決定が時間に依らない
+    ことの担保になる。
+    """
+    got = _run_lock_race(tmp_path, lib, acquire, release, parallel=parallel, trials=trials)
+
+    assert got["overlap"] == 0, f"臨界区間が重なった試行 {got['overlap']} 件"
+    assert got["miss"] == 0, f"上限に達して取れなかった回数 {got['miss']} 回"
+    assert got["ownerless"] == 0, f"持ち主の決まらないロックが残った試行 {got['ownerless']} 件"
+
+
+@pytest.mark.parametrize(("lib", "acquire", "release"), LOCK_LIBS)
+def test_the_lock_does_not_leave_noclobber_on_the_caller(
+    tmp_path: Path, lib: Path, acquire: str, release: str
+) -> None:
+    """#297-7: 取得の成否のどちらでも、呼び出し側のシェルの `$-` に `C` を残さない。"""
+    lock = tmp_path / "flag.lock"
+    script = (
+        f'set -uo pipefail\n. "{lib}"\n'
+        f'{acquire} "{lock}" 1; echo taken=$-\n'
+        f'{acquire} "{lock}" 1; echo missed=$-\n'
+    )
+    got = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+
+    for line in got.stdout.split():
+        assert "C" not in line.split("=", 1)[1], f"{line} に noclobber が残った"
+
+
+def test_six_registrations_at_once_all_survive(main_repo: Path, tmp_path: Path) -> None:
+    """#297-4: 同時に登録しても行が欠けず、同じ番号が 2 つへ配られない。"""
+    worker = tmp_path / "slot-worker.sh"
+    worker.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -uo pipefail\n"
+        '. "$1"\n'
+        'while [ ! -e "$3/go" ]; do :; done\n'
+        'wt_slot_acquire "$2" "/wt/$4" "feature/$4" "env-$4" >/dev/null 2>&1\n'
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    base = tmp_path / "slots"
+    base.mkdir()
+    path = registry_path(main_repo)
+
+    short = 0
+    duplicated = 0
+    for _ in range(5):
+        path.unlink(missing_ok=True)
+        (base / "go").unlink(missing_ok=True)
+        procs = [
+            subprocess.Popen(
+                ["bash", str(worker), str(LIB), str(main_repo), str(base), str(i)],
+                cwd=str(main_repo), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            for i in range(6)
+        ]
+        (base / "go").touch()
+        for proc in procs:
+            proc.wait()
+
+        rows = [r for r in read_registry(main_repo)["assignments"] if r["released_at"] is None]
+        if len(rows) != 6:
+            short += 1
+        if len({r["slot"] for r in rows}) != len(rows):
+            duplicated += 1
+
+    assert short == 0, f"有効な行が 6 件そろわなかった試行 {short} 件"
+    assert duplicated == 0, f"同じ番号が 2 つ以上へ配られた試行 {duplicated} 件"
+
+
+def _lock_body(path: Path, name: str) -> str:
+    """関数の本体から、コメントと空行と余分な空白を除いた文字列を返す。"""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    start = lines.index(f"{name}() {{")
+    end = lines.index("}", start)
+    kept = [
+        " ".join(line.split())
+        for line in lines[start + 1:end]
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    body = "\n".join(kept)
+    # 2 つの写しで違ってよいのは、接頭辞と上限の既定値だけである。
+    body = re.sub(r'timeout="\$\{2:-[^}]*\}"', 'timeout=DEFAULT', body)
+    return body.replace("_wt_", "_lock_").replace("_wf_", "_lock_")
+
+
+def test_the_two_lock_implementations_share_one_procedure() -> None:
+    """#297-6: 片方だけに残る手を作らない（#293 で 1 つへ寄せるまでの担保）。"""
+    assert _lock_body(LIB, "wt_lock_acquire") == _lock_body(WF_LIB, "wf_lock_acquire")

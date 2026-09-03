@@ -1780,8 +1780,14 @@ _wt_registry_write() {
 
 # --- 排他 -------------------------------------------------------------------
 #
-# `flock` を持たないホストがある。`mkdir` は同じ名前で同時に成功するのが 1 つだけなので、
-# ディレクトリの作成そのものを排他の手段として使う。
+# `flock` を持たないホストがある。`flock` は使わない。使えるホストと使えないホストが
+# 混じると、同じ資源に対して別々の仕組みが動き、互いを見落とす。
+#
+# **関門は 2 段である。** 1 段目のディレクトリの作成はロックの位置を押さえるだけで、
+# 持ち主を 1 つに決めない。`mkdir` コマンドは同じ名前で同時に成功することがある
+# （uutils coreutils 0.8.0 の実測。overlayfs と ext4 の両方で出る）。持ち主を決めるのは
+# 2 段目の `( set -C; : >"$dir/held" )` で、シェル自身の `open(O_CREAT|O_EXCL)` が
+# 関門になる。外部コマンドを起動しないため、`mkdir` の実装に左右されない（#297）。
 
 # 待ちの刻み。小数を受けない sleep のホストでは 1 秒へ落ちる。
 _wt_lock_sleep() {
@@ -1822,21 +1828,31 @@ _wt_lock_is_stale() {
 
 # ロックを取る。取れなければ 1 を返す。
 #
-# `flock` は使わない。使えるホストと使えないホストが混じると、同じ資源に対して
-# 別々の仕組みが動き、互いを見落とす。どこでも同じ `mkdir` に揃える。
+# **`mkdir` の成功だけでは持ち主を 1 つに絞れない。** 2 段目の関門を通った 1 つだけが
+# 印と持ち主の番号を書く。印を書いてから読み直す手は採らない。長さの違う印が同じ
+# ファイルへ同時に書かれると、どの担当のものとも一致しない値が残り、作成に成功した
+# 全員が競り負ける（#308）。
 wt_lock_acquire() {
-  local dir="${1:-}" timeout="${2:-5}" token seen
+  local dir="${1:-}" timeout="${2:-5}" token seen deadline
   [ -n "$dir" ] || return 1
   # ロックの位置にディレクトリ以外があれば、ロックとして成立しない。取り除く。
-  if [ -e "$dir" ] && [ ! -d "$dir" ]; then
-    rm -f "$dir" 2>/dev/null
-  fi
+  if [ -e "$dir" ] && [ ! -d "$dir" ]; then rm -f "$dir" 2>/dev/null; fi
+  # 印は識別のためだけに使う。持ち主の決定には使わないため、桁をそろえる必要はない。
   token="$$-$(date +%s 2>/dev/null)-${RANDOM:-0}"
   # 上限は実時間で測る。刻みが 0.1 秒か 1 秒かで待ち時間が 10 倍変わるため、
   # 回数で数えない。
-  local deadline
   deadline=$(( $(date +%s) + timeout ))
-  while ! mkdir "$dir" 2>/dev/null; do
+  while :; do
+    if mkdir "$dir" 2>/dev/null; then
+      # 2 段目の関門。**`set -C` は部分シェルの中だけで張る。** 裸で書くと呼び出し側の
+      # シェルの `$-` に `C` が残り、以後の上書きの向き先が変わる。
+      if ( set -C; : >"$dir/held" ) 2>/dev/null; then
+        printf '%s\n' "$token" >"$dir/token" 2>/dev/null
+        printf '%s\n' "$$" >"$dir/pid" 2>/dev/null
+        return 0
+      fi
+      # 競り負けた。**ロックは消さない。** 相手が持っているため、待つ側へ回る。
+    fi
     seen=$(cat "$dir/token" 2>/dev/null)
     if _wt_lock_is_stale "$dir"; then
       _wt_lock_discard "$dir" "$seen" "$token"
@@ -1845,9 +1861,6 @@ wt_lock_acquire() {
     [ "$(date +%s)" -ge "$deadline" ] && return 1
     _wt_lock_sleep
   done
-  printf '%s\n' "$token" >"$dir/token" 2>/dev/null
-  printf '%s\n' "$$" >"$dir/pid" 2>/dev/null
-  return 0
 }
 
 wt_lock_release() {
