@@ -13,6 +13,19 @@
 # 拾う形は 2 つある。`gh pr merge`（番号あり・番号なし・Pull Request の URL）と、
 # REST の経路（`…/pulls/<番号>/merge`）である。マージそのものが REST で行われることが
 # あるため、両方を判定の対象にする。
+#
+# **`gh` と `pr` の間に置かれたグローバルオプションを読み飛ばす。**
+# `gh -R devbasex/ai-plugins pr merge 268` は日常的な書き方で、飛ばさないと語の並びが
+# `gh` → `pr` にならず、判定そのものへ入れない。実機（gh 2.98.0）で確かめた受け付ける形は
+# 次のとおりである。
+#
+#   - 値を別の語で取る:   `-R <slug>` / `--repo <slug>`
+#   - 値を同じ語に含む:   `-R=<slug>` / `--repo=<slug>` / `-R<slug>`
+#   - 値を取らない:       `--help`
+#
+# `-h` と `--version` は `pr` の前に置くと `gh` が拒む。知らないオプションも拒まれるため、
+# 値を別の語で取るのは `-R` / `--repo` の 2 つに限られる。**それ以外の `-` で始まる語は
+# その語だけを飛ばす。** 値まで飛ばすと、続く語が `pr` であっても見落とす。
 wf_merge_target() {
   local cmd="${1:-}" tok num="" state=0 found=1 rest
   while IFS= read -r tok; do
@@ -29,7 +42,15 @@ wf_merge_target() {
     esac
     case "$state" in
       0) [ "$tok" = "gh" ] && state=1 ;;
-      1) if [ "$tok" = "pr" ]; then state=2; elif [ "$tok" != "gh" ]; then state=0; fi ;;
+      1)
+        case "$tok" in
+          pr) state=2 ;;
+          gh) ;;
+          -R|--repo) state=4 ;;
+          -*) ;;
+          *) state=0 ;;
+        esac
+        ;;
       2) if [ "$tok" = "merge" ]; then state=3; found=0; else state=0; fi ;;
       3)
         [ -n "$num" ] && continue
@@ -47,6 +68,8 @@ wf_merge_target() {
           *) num="$tok" ;;
         esac
         ;;
+      # `-R` / `--repo` が別の語で取る値。読み飛ばして `gh` の直後へ戻る。
+      4) state=1 ;;
     esac
   done < <(wf_split "$cmd")
   [ "$found" -eq 0 ] || return 1
@@ -54,10 +77,13 @@ wf_merge_target() {
   return 0
 }
 
-# jq で読み解けない入力のための、粗い見分け。**判定の対象を広く採る側へ倒す。**
+# jq や awk で読み解けない入力のための、粗い見分け。**判定の対象を広く採る側へ倒す。**
 # hook の matcher が `Bash` に限っているため、ここへ来る本文はコマンドである。
+#
+# `gh` と `pr` の間にはグローバルオプションが入りうるので、語を挟んだ形も拾う。命令の
+# 区切り（`|` `;` `&`）を越えたものは別のコマンドなので、そこで打ち切る。
 wf_looks_like_merge_text() {
-  grep -qE 'gh[[:space:]]+pr[[:space:]]+merge|pulls/[0-9]+/merge' <<<"${1:-}"
+  grep -qE 'gh[[:space:]]+([^|;&]*[[:space:]])?pr[[:space:]]+merge|pulls/[0-9]+/merge' <<<"${1:-}"
 }
 
 wf_deny_missing_label() {

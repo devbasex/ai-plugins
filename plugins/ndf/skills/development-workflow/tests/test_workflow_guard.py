@@ -109,6 +109,39 @@ def test_every_way_of_merging_with_a_number_is_judged(repo: Path, state: Path, t
     assert decision(result)["permissionDecision"] == "deny"
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        "gh -R devbasex/ai-plugins pr merge 268 --squash",
+        "gh --repo devbasex/ai-plugins pr merge 268 --squash",
+        "gh -R=devbasex/ai-plugins pr merge 268 --squash",
+        "gh --repo=devbasex/ai-plugins pr merge 268 --squash",
+        "gh -Rdevbasex/ai-plugins pr merge 268 --squash",
+    ],
+)
+def test_a_global_option_before_pr_is_judged(repo: Path, state: Path, tmp_path: Path, command: str) -> None:
+    """#266-2: `gh` と `pr` の間のグローバルオプションで判定が抜けない。
+
+    `-R` / `--repo` は値を別の語で取る形と、同じ語に含む形（`=` 付き・連結）がある。
+    gh 2.98.0 で 5 つとも受け付けられることを確かめた。
+    """
+    result = guard(repo, state, command, tmp_path=tmp_path,
+                   responses={"pulls/268": DESIGN_PR, "labels/design-approved": LABEL_DEFINED})
+
+    assert decision(result)["permissionDecision"] == "deny"
+    assert "268" in decision(result)["permissionDecisionReason"]
+
+
+def test_a_global_option_with_a_value_does_not_hide_pr(repo: Path, state: Path, tmp_path: Path) -> None:
+    """値を読み飛ばすのは `-R` / `--repo` に限る。知らないオプションは語だけを飛ばす。"""
+    checkout(repo, "design/parallel-batch-05")
+
+    result = guard(repo, state, "gh --help pr merge --squash", tmp_path=tmp_path,
+                   responses={"pulls?head=": BY_BRANCH, "labels/design-approved": LABEL_DEFINED})
+
+    assert decision(result)["permissionDecision"] == "deny"
+
+
 def test_a_merge_without_a_number_is_looked_up_by_branch(repo: Path, state: Path, tmp_path: Path) -> None:
     """#266-2 の後半: ブランチ名から番号とラベルを 1 回の応答で引く。"""
     checkout(repo, "design/parallel-batch-05")
@@ -176,6 +209,27 @@ def test_a_missing_jq_is_denied(repo: Path, state: Path, tmp_path: Path) -> None
     """入力を読み解けなくても、マージらしい本文は止める。"""
     result = guard(repo, state, "gh pr merge 268 --squash",
                    extra={"PATH": path_with(tmp_path / "bin", without=("jq",))})
+
+    assert decision(result)["permissionDecision"] == "deny"
+
+
+def test_a_missing_awk_is_denied(repo: Path, state: Path, tmp_path: Path) -> None:
+    """語の分割に要る awk が無くても、マージらしい本文は止める。
+
+    awk が無いと `wf_split` が何も出さず、`wf_merge_target` は「マージではない」と
+    読める 1 を返す。そのまま通すと拒否の判定へ一度も入らない fail-open になる。
+    """
+    result = guard(repo, state, "gh pr merge 268 --squash",
+                   extra={"PATH": path_with(tmp_path / "bin", without=("awk",))})
+
+    assert decision(result)["permissionDecision"] == "deny"
+    assert "awk" in decision(result)["permissionDecisionReason"]
+
+
+def test_a_missing_awk_with_a_global_option_is_denied(repo: Path, state: Path, tmp_path: Path) -> None:
+    """粗い見分けも `gh` と `pr` の間のグローバルオプションを越える。"""
+    result = guard(repo, state, "gh -R devbasex/ai-plugins pr merge 268 --squash",
+                   extra={"PATH": path_with(tmp_path / "bin", without=("awk",))})
 
     assert decision(result)["permissionDecision"] == "deny"
 

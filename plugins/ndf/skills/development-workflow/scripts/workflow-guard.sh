@@ -18,11 +18,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PAYLOAD=$(cat 2>/dev/null || true)
 [ -n "$PAYLOAD" ] || exit 0
 
-# **jq が無くても、マージらしい本文は止める。** 入力を読み解けないことを通す理由に
-# しない（決定 8）。#221 の報告はここで諦める（通す側へ倒す）。
-if ! command -v jq >/dev/null 2>&1; then
+# **jq や awk が無くても、マージらしい本文は止める。** 入力を読み解けないことを通す
+# 理由にしない（決定 8）。#221 の報告はここで諦める（通す側へ倒す）。
+#
+# awk を条件へ入れるのは、`wf_split` が語の分割を awk で行うためである。awk が無いと
+# 分割の結果が空になり、`wf_merge_target` は何も見つけられないまま 1 を返す。呼び出し元の
+# `wf_check_merge` はそれを「マージではない」と読んで 0（許可）を返すため、拒否の判定へ
+# 一度も入らない。ここで grep による粗い見分けへ倒し、fail-closed を保つ。
+if ! command -v jq >/dev/null 2>&1 || ! command -v awk >/dev/null 2>&1; then
   if wf_looks_like_merge_text "$PAYLOAD"; then
-    reason=$(wf_deny_undetermined "" '承認の印（判定に要る jq が無い）')
+    reason=$(wf_deny_undetermined "" '承認の印（判定に要る jq または awk が無い）')
     wf_emit_deny "$reason"
   fi
   exit 0
