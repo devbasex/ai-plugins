@@ -3,6 +3,7 @@ name: out-of-scope
 description: "Capture a finding outside the current scope as an issue at the moment it is found. Use when a defect or improvement appears outside what this change fixes（範囲外の課題・その場で起票・対象外と判断した指摘）."
 allowed-tools:
   - Bash(gh *)
+  - Bash(git *)
   - Read
   - Grep
 ---
@@ -22,6 +23,7 @@ allowed-tools:
 | 範囲外の課題 | この変更の受け入れ条件にも、直す対象にも含まれない課題 |
 | 起票 | GitHub の issue を新しく作ること |
 | 由来 | その課題を見つけた元。Pull Request がまだ無ければ、起点の issue になる |
+| 起票先 | `gh issue create` が issue を作るリポジトリ |
 
 ## いつ呼ぶか
 
@@ -59,24 +61,39 @@ allowed-tools:
 3 つ目も理由を残す。理由が残っていないと、後から指摘されたときに「判断した」のか
 「気づかなかった」のかを区別できない。
 
-### 3. 重複を確かめる
+### 3. 起票先を決める
+
+**「起票する」を選んだときだけ行う。** 残る 2 つの判断には起票先が要らない。
+
+NDF を使う開発では、Skill の実体を持つリポジトリと、開発している側のリポジトリが別に
+なることがある。**どちらへ起票するかは課題の性質が決める。** 判断表と、リポジトリの名前を
+解決する 3 段は [references/issue-target.md](references/issue-target.md) にある。
+
+決まらないときは推測で起票せず、そこで止まって利用者に聞く。以降の手順の `gh` は、
+ここで決めた起票先に対して実行する。
+
+```bash
+ISSUE_REPO=<所有者>/<リポジトリ>          # 判断表と 3 段で決めたもの
+```
+
+### 4. 重複を確かめる
 
 同じ課題が既に open で残っていることがある。**検索は 1 回でよい。**
 
 ```bash
-gh issue list --state open --search "<課題を表す語 2〜3 個>"
+gh issue list --repo "$ISSUE_REPO" --state open --search "<課題を表す語 2〜3 個>"
 ```
 
 見つかったら起票せず、そちらへ由来を 1 行足す。
 
 ```bash
-gh issue comment <番号> --body "同じ事象を <由来> の作業中に確認した。"
+gh issue comment <番号> --repo "$ISSUE_REPO" --body "同じ事象を <由来> の作業中に確認した。"
 ```
 
 `<由来>` は `PR #<番号>` か `issue #<番号>` である。**Pull Request を作る前に見つけた課題は、
 起点の issue の番号で書く。** `PR #<番号>` に決め打つと、その課題が後の検索から漏れる。
 
-### 4. 起票する
+### 5. 起票する
 
 本文は次の 5 項目で書く。項目を省かない。
 
@@ -97,14 +114,18 @@ gh issue comment <番号> --body "同じ事象を <由来> の作業中に確認
 （この変更の起点。`PR #<番号>` か `issue #<番号>`）
 ```
 
-**起票の前に、本文と付ける label を提示して同意を取る。** issue は外部から見える場所へ
-書き込まれる。書式は `markdown-writing` に従う。
+**起票の前に、起票先・本文・付ける label を提示して同意を取る。** issue は外部から見える
+場所へ書き込まれる。起票先を含めるのは、解決した名前が実際の配布元と違うときに、書き込む
+前に気づけるようにするためである。書式は `markdown-writing` に従う。
 
 ```bash
-gh issue create --title "<何が起きるか>" --body-file <本文のファイル>
+gh issue create --repo "$ISSUE_REPO" --title "<何が起きるか>" --body-file <本文のファイル>
 ```
 
-### 5. 由来を残す
+両方にまたがる課題では 2 件になる。順序と、互いの番号の結び方は
+[references/issue-target.md](references/issue-target.md) の「両方にまたがる課題」にある。
+
+### 6. 由来を残す
 
 起票した番号を、元の場所へ戻す。**番号を書かずに閉じない。**
 
@@ -127,11 +148,14 @@ Pull Request がまだ無い段階では、起点の issue へ同じ 1 行を足
 由来は**本文の参照だけ**で辿る。label は増やさない。
 
 ```bash
-gh issue list --state all --search "<由来>"      # 例: "PR #177" / "issue #175"
+gh issue list --repo "$ISSUE_REPO" --state all --search "<由来>"   # 例: "PR #177" / "issue #175"
 ```
 
 検索の語は、起票のときに書いた由来と同じ形にする。`PR #<番号>` に決め打つと、
 Pull Request を作る前に起票した課題が漏れる。
+
+**起票先が 2 つに分かれた変更では、両方のリポジトリを検索する。** 片方だけを見ると、
+配布元へ回した課題が辿れない。
 
 **`in:body` で絞らない。** 既存の issue へコメントで由来を足した場合、本文には番号が
 無いため検索から漏れる。漏れた課題は、振り返りで取りこぼしとして扱われる。

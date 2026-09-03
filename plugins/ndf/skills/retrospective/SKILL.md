@@ -3,6 +3,7 @@ name: retrospective
 description: "Record what to change in how the work was done, and pick up findings that were never filed. Use when a change has been released and verified（振り返り・進め方の見直し・起票の取りこぼしを拾う）."
 allowed-tools:
   - Bash(gh *)
+  - Bash(git *)
   - Read
   - Write
   - Grep
@@ -33,6 +34,23 @@ allowed-tools:
 
 ## 手順
 
+**先に、記録を残すリポジトリを決める。** 記録を置くのは、その変更を行ったリポジトリである。
+起点の issue と、変更を配布した Pull Request がある場所を指す。以降の `gh` は、すべて
+このリポジトリへ向ける。
+
+```bash
+RECORD_REPO="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
+```
+
+**起票先とは別のものである。** 起票先は課題の性質が決めるため、配布元のリポジトリになる
+ことがある（[out-of-scope の判断表](../out-of-scope/references/issue-target.md)）。記録の
+投稿先は性質で変わらない。範囲外の課題を配布元へ回した変更でも、記録はこちらに残る。
+
+**`--repo` を省かない。** この工程は `merged` の後に来るため、作業ツリーが消えている。
+`gh` は現在の作業ディレクトリからリポジトリを決めるので、省くと起点の issue や配布した
+Pull Request と違う場所へ記録が残り得る。`gh repo view` が別のリポジトリを返す位置に
+いるときは、推測せずに名前を利用者に確かめる。
+
 ### 1. 起票の取りこぼしを拾う
 
 **この工程で新しく起票を集めない。** 起票は見つけたその場で `/ndf:out-of-scope` が行う。
@@ -40,12 +58,16 @@ allowed-tools:
 
 ```bash
 # その変更から出た課題の一覧（本文とコメントの両方を対象にする）
-gh issue list --state all --search "<由来>"      # 例: "PR #177" / "issue #175"
+gh issue list --repo "$RECORD_REPO" --state all --search "<由来>"   # 例: "PR #177" / "issue #175"
 ```
 
 `<由来>` は `out-of-scope` が起票のときに書いたものと同じ形にする。Pull Request を作る前に
 見つけた課題は起点の issue の番号で残るため、`PR #<番号>` だけで探すと漏れる。**起点の
 issue と Pull Request の両方で検索する。**
+
+起票先が 2 つのリポジトリへ分かれた変更では、`--repo` を配布元へ替えてもう一度検索する。
+配布元へ回した課題は、開発している側のリポジトリの検索には出ない。**替えるのは検索の
+`--repo` だけで、記録の投稿先は変わらない。**
 
 次の 3 か所と突き合わせる。番号が無いものが取りこぼしである。
 
@@ -83,20 +105,51 @@ issue と Pull Request の両方で検索する。**
 | プロジェクトの取り決めの変更 | `AGENTS.md` / `CLAUDE.md` の記述 |
 | 次の変更で試すこと | 起票して残す |
 
+起票して残す先は、[out-of-scope の判断表](../out-of-scope/references/issue-target.md)が決める。
+
 ### 4. 記録を残す
 
-`docs/development-history/` へ連番のファイルとして置く。
+**記録の本体はコメント 1 件である。** 同じ内容を複数の場所へ投稿しない。後から直したときに
+片方が古くなる。
+
+#### 投稿先を決める
+
+| 起点 | 記録の本体を置く場所 | 辿る経路 |
+| --- | --- | --- |
+| 1 件の issue | その issue へのコメント | その issue の本文末尾へ 1 行 |
+| 複数の issue（まとまり） | そのまとまりを配布した Pull Request へのコメント | 対象のすべての issue の本文末尾へ 1 行 |
+| 起点の issue を持たない変更 | その変更の Pull Request へのコメント | 追加の 1 行は要らない |
+
+**閉じた issue にもコメントは投稿できる。** GitHub が拒むのは locked のときだけである。
+投稿が失敗したときは、別の場所へ回さずに止めて利用者に伝える。
+
+#### Pull Request の番号を特定する
+
+起点が 1 件の issue なら、番号はそのまま使える。**残る 2 つの場合だけ番号を引く。**
+この工程は `merged` の後に来るため、ブランチも作業ツリーも残っていない。番号はマージ先の
+先頭のコミットから引く。
+
+| 場合 | 起点にするコミット |
+| --- | --- |
+| 起点の issue を持たない変更 | その変更をマージした先のブランチ（起点。`.ndf/worktree.json` の `base_branch`）の先頭 |
+| まとまり | そのまとまりを配布した先（`main`）の先頭 |
 
 ```bash
-ls docs/development-history/     # 既存の連番を確かめる
+BASE=develop      # 起点のブランチ。まとまりの配布なら main
+gh api "/repos/$RECORD_REPO/commits/$(git rev-parse "origin/$BASE")/pulls" \
+  --jq '.[] | select(.merged_at) | "#\(.number) \(.base.ref) <- \(.head.ref)"'
 ```
 
-ファイル名は `<連番 2 桁>-<YYYY-MM-DD>.md`。書式は `markdown-writing` に従う。
+**マージ済みを表す `merged_at` を持つものへ絞る。** そのコミットを含む未マージの枝の Pull Request も返るため、
+絞らないと 2 件以上になる。絞った結果が 1 件でないときは、推測で投稿せず番号を利用者に聞く。
+
+#### 投稿する
+
+書式は `markdown-writing` に従う。本文の雛形は次のとおりである。
 
 ```markdown
-# 開発履歴と知見 (2026-08-31)
+## 振り返り（<YYYY-MM-DD>）
 
-**期間**: 2026-08-30 〜 2026-08-31
 **対象**: [issue #NNN](...) / [PR #NNN](...)
 
 （この変更で何を作ったか。1〜2 段落）
@@ -117,6 +170,30 @@ ls docs/development-history/     # 既存の連番を確かめる
 | --- | --- | --- |
 | #NNN | ... | 実装中 / レビュー中 |
 ```
+
+```bash
+gh issue comment <issue番号> --repo "$RECORD_REPO" --body-file <記録のファイル>   # 起点が 1 件の issue
+gh pr comment <PR番号> --repo "$RECORD_REPO" --body-file <記録のファイル>         # まとまり / 起点の issue を持たない変更
+```
+
+#### 辿る経路を作る
+
+対象の issue の本文末尾へ、投稿したコメントの URL を 1 行足す。
+
+```text
+振り返り: https://github.com/<所有者>/<リポジトリ>/issues/<番号>#issuecomment-<識別子>
+```
+
+**`gh issue edit --body` は本文を全文で書き直す。** いまの本文を読み出してから足す。
+
+```bash
+gh issue view <issue番号> --repo "$RECORD_REPO" --json body --jq .body > /tmp/issue-body.md
+printf '\n振り返り: %s\n' "<コメントの URL>" >> /tmp/issue-body.md
+gh issue edit <issue番号> --repo "$RECORD_REPO" --body-file /tmp/issue-body.md
+```
+
+まとまりでは、対象のすべての issue へ同じ URL の 1 行を足す。起点の issue を持たない変更では
+この手順が要らない。記録は Pull Request 自身に付いている。
 
 **設計判断の理由と実測の結果を残す。** Skill の挙動そのものは各 `SKILL.md` が正であり、
 ここに書き写さない。書くのは、そこに書かない理由と、判断の材料になった実測である。
