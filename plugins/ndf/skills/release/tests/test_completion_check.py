@@ -17,11 +17,13 @@
 失敗させる（`scripts/check-doc-staleness.py` と同じ扱い）。読み取りの関数を文字列に対して
 呼べる形にしてあるのは、記載を取り除いた文字列で落ちることを同じ検査で確かめるためである。
 
-`bash -n` だけは外部コマンドを使う。リポジトリの根の `conftest.py` の必須コマンドの一覧は
-この Skill の担当の境界の外にあるため、見つからないことをこのファイルの中で失敗として扱う。
+`bash` だけは外部コマンドを使う。雛形は構文の検査だけでなく、実際に実行して抜けた理由を
+確かめる（#295 の指摘）。リポジトリの根の `conftest.py` の必須コマンドの一覧はこの Skill の
+担当の境界の外にあるため、見つからないことをこのファイルの中で失敗として扱う。
 """
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -227,17 +229,99 @@ def test_the_limit_section_states_the_minimum_interval() -> None:
     assert "必須" in body
 
 
-def test_the_template_is_valid_bash() -> None:
+def template() -> str:
+    """雛形の bash を返す。"""
     blocks = fenced_blocks(section(read(COMPLETION_CHECK), TEMPLATE_SECTION), "bash")
     assert len(blocks) == 1, f"雛形の bash が 1 つでない: {len(blocks)} 個"
-    assert "sleep" in blocks[0], "照会のループに待機が無い"
-    bash = shutil.which("bash")
-    assert bash, "bash が見つからない。雛形を確かめられない"
+    return blocks[0]
+
+
+def bash_path() -> str:
+    found = shutil.which("bash")
+    assert found, "bash が見つからない。雛形を確かめられない"
+    return found
+
+
+def run_template(work: str, **variables: str) -> subprocess.CompletedProcess[str]:
+    """雛形をそのまま実行する。上限と間隔に 0 を渡すと待機せずに抜ける。"""
+    script = Path(work) / "template.sh"
+    script.write_text(template(), encoding="utf-8")
+    return subprocess.run(
+        [bash_path(), str(script)],
+        capture_output=True,
+        text=True,
+        cwd=work,
+        env={"PATH": os.environ.get("PATH", ""), **variables},
+        timeout=60,
+    )
+
+
+def watch(work: str, log_body: str | None, **overrides: str) -> subprocess.CompletedProcess[str]:
+    """ログを用意して雛形を実行する。`None` を渡すとログを作らない。"""
+    log = Path(work) / "run.log"
+    if log_body is not None:
+        log.write_text(log_body, encoding="utf-8")
+    variables = {
+        "LOG": str(log),
+        "DONE": "[done]",
+        "FAIL": "[fail]",
+        "IDLE": "0",
+        "LIMIT": "0",
+        **overrides,
+    }
+    return run_template(work, **variables)
+
+
+def test_the_template_is_valid_bash() -> None:
+    assert "sleep" in template(), "照会のループに待機が無い"
     with tempfile.NamedTemporaryFile("w", suffix=".sh", encoding="utf-8") as handle:
-        handle.write(blocks[0])
+        handle.write(template())
         handle.flush()
-        done = subprocess.run([bash, "-n", handle.name], capture_output=True, text=True)
+        done = subprocess.run(
+            [bash_path(), "-n", handle.name], capture_output=True, text=True
+        )
     assert done.returncode == 0, done.stderr
+
+
+def test_the_template_leaves_on_the_word_it_was_given() -> None:
+    with tempfile.TemporaryDirectory() as work:
+        done = watch(work, "publishing\n[done] ok\n")
+    assert done.stdout.split() == ["done"], done.stdout
+
+
+def test_the_template_leaves_on_the_failure_word() -> None:
+    with tempfile.TemporaryDirectory() as work:
+        done = watch(work, "publishing\n[fail] rejected\n")
+    assert done.stdout.split() == ["fail"], done.stdout
+
+
+def test_the_word_is_matched_as_a_fixed_string() -> None:
+    """`[done]` を正規表現として渡すと `d` だけの行に一致する（#295 の指摘）。"""
+    with tempfile.TemporaryDirectory() as work:
+        done = watch(work, "starting d job\n")
+    assert done.stdout.split() == ["idle"], f"完了の語が誤って一致した: {done.stdout}"
+
+
+def test_a_word_starting_with_a_hyphen_is_not_read_as_an_option() -> None:
+    with tempfile.TemporaryDirectory() as work:
+        done = watch(work, "x --done y\n", DONE="--done")
+    assert done.stdout.split() == ["done"], done.stdout
+    assert not done.stderr, done.stderr
+
+
+def test_the_template_starts_before_the_log_exists() -> None:
+    """対象がログを作る前にループへ入っても、読み取りの誤りを出さない（#295 の指摘）。"""
+    with tempfile.TemporaryDirectory() as work:
+        done = watch(work, None)
+    assert done.stdout.split() == ["idle"], done.stdout
+    assert not done.stderr, done.stderr
+
+
+def test_an_unset_variable_stops_before_the_loop() -> None:
+    with tempfile.TemporaryDirectory() as work:
+        done = run_template(work, LOG=str(Path(work) / "run.log"), DONE="[done]")
+    assert done.returncode != 0, "未設定の変数のまま進んだ"
+    assert not done.stdout.split(), done.stdout
 
 
 # --- 条件 4〜6: 工程への結び付け ----------------------------------------------------

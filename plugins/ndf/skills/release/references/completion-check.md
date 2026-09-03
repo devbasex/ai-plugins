@@ -37,18 +37,26 @@
 
 ```bash
 # $LOG は追記されるログ、$DONE と $FAIL は先に流して確かめた語、$IDLE と $LIMIT は秒
-start=$SECONDS; last=$SECONDS; size=0
-while :; do
-  now=$(wc -c <"$LOG")
-  [ "$now" -ne "$size" ] && { size=$now; last=$SECONDS; }
-  grep -q "$DONE" "$LOG" && { echo done;  break; }
-  grep -q "$FAIL" "$LOG" && { echo fail;  break; }
-  [ $((SECONDS - last))  -ge "$IDLE"  ] && { echo idle;  break; }
-  [ $((SECONDS - start)) -ge "$LIMIT" ] && { echo limit; break; }
-  sleep 5
-done
+# 未設定の変数と作れないログはここで止める。空の値のまま進むと比較が構文誤りを出し続ける
+if : "${LOG:?}" "${DONE:?}" "${FAIL:?}" "${IDLE:?}" "${LIMIT:?}" && touch "$LOG"; then
+  start=$SECONDS; last=$SECONDS; size=0
+  while :; do
+    now=$(wc -c <"$LOG")
+    [ "$now" -ne "$size" ] && { size=$now; last=$SECONDS; }
+    grep -Fq -- "$DONE" "$LOG" && { echo done;  break; }
+    grep -Fq -- "$FAIL" "$LOG" && { echo fail;  break; }
+    [ $((SECONDS - last))  -ge "$IDLE"  ] && { echo idle;  break; }
+    [ $((SECONDS - start)) -ge "$LIMIT" ] && { echo limit; break; }
+    sleep 5
+  done
+fi
 # どの語で抜けても成否は決めない。この後に、その形の完了の事実を照会する
 ```
+
+**語は固定文字列として照合し、ログはループの前に作る。** `$DONE` と `$FAIL` は先に流して
+確かめた語そのものであり、正規表現ではない。`grep -q` に渡すと `[done]` が `d` に一致し、
+`-` で始まる語はオプションとして読まれるため、`-F` と `--` を付ける。対象がログを作る前に
+ループへ入った場合は `wc` が読めず、`now` が空になって比較が構文誤りを出し続ける。
 
 抜けた理由（`done` / `fail` / `idle` / `limit`）を完了報告へ残す。どの軸で待ちが終わったかが
 分かると、次に配布する人が上限と間隔を決められる。
