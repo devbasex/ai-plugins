@@ -51,7 +51,7 @@
 
 | 担当 | 書き換えてよいパス | 触らないパス |
 | --- | --- | --- |
-| A | `plugins/ndf/skills/cross-review/` / `cross-refactoring/` / `external-ai/` / `fix/SKILL.md` / `issue-plan-strategy/SKILL.md` / `pr-review/SKILL.md` / `worktree/` の `gemini` の記述 / `plugins/ndf/scripts/lib/worktree-common.sh` / `.ndf/worktree.json` | `scripts/` / 説明文書 / `development-workflow/` / `merged/` / `retrospective/` / `out-of-scope/` / `release/` |
+| A | `plugins/ndf/skills/cross-review/` / `cross-refactoring/` / `external-ai/` / `fix/SKILL.md` / `issue-plan-strategy/SKILL.md` / `pr-review/SKILL.md` / `worktree/` の `gemini` の記述 / `plugins/ndf/scripts/lib/worktree-common.sh` / `plugins/ndf/scripts/worktree-guard.sh` / `.ndf/worktree.json` | `scripts/` / 説明文書 / `development-workflow/` / `merged/` / `retrospective/` / `out-of-scope/` / `release/` |
 | B | `plugins/ndf/dev.agy/`（新設） / `plugins/ndf/manifests/` / `.agents/` / `scripts/` / `plugins/ndf/skills/README.md` / 説明文書一式 / `docs/specifications/` / `plugins/ndf/skills/worktree/tests/` の**新しいファイル** | `plugins/ndf/skills/<Skill 名>/` の SKILL.md と参照 / `worktree/tests/` の既存ファイル / `plugins/ndf/scripts/`（担当 A のマージ後に触る） |
 | C | `plugins/ndf/skills/development-workflow/` / `plugins/ndf/skills/merged/` | `release/` / `retrospective/` / `out-of-scope/` / `worktree/` / `scripts/` / 説明文書 |
 | D | `plugins/ndf/skills/retrospective/` / `plugins/ndf/skills/out-of-scope/` / `AGENTS.md` のドキュメント表の行 | `development-workflow/` / `release/` / `scripts/` / `AGENTS.md` の他の節 |
@@ -83,8 +83,9 @@ git は自動でマージできるが、**マージの順序は F → A とす�
 
 `$SCRIPTS` の解決手順の本体は
 `plugins/ndf/skills/development-workflow/references/projects-tracking.md` にある（#193 の
-「検討の材料」が指しているもの）。**この参照は担当 C が持つ。** 担当 F が共通の置き場所へ
-切り出す場合は、担当 C の設計と突き合わせてから決める。設計 Pull Request の時点で調整する。
+「検討の材料」が指しているもの）。**この参照は担当 C が持つ。** 突き合わせた結果、担当 F は
+この節を動かさず、そのまま指す設計を採る（後段の「「`$SCRIPTS` を決める」節は動かさない」）。
+担当 C はこの節の本文を変えない。
 
 ### 担当 A と B は `agy` の扱いで接する
 
