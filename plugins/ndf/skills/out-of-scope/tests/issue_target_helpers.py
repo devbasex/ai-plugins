@@ -10,12 +10,17 @@
 """
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 from pathlib import Path
 
 SKILL_DIR = Path(__file__).resolve().parents[1]
 SKILL = SKILL_DIR / "SKILL.md"
 REFERENCE = SKILL_DIR / "references" / "issue-target.md"
+
+REMOTE = "https://github.com/devbasex/ai-plugins.git"
+SLUG = "devbasex/ai-plugins"
 
 DECISION_TABLE_HEADING = "## 判断表"
 RESOLUTION_TABLE_HEADING = "## 起票先のリポジトリを決める"
@@ -190,3 +195,66 @@ def gh_issue_commands(body: str) -> list[str]:
     if buffer:
         joined.append(buffer)
     return joined
+
+
+# 段 2 が見る位置を、ランタイムごとに作る。**手順書の表が挙げる位置と同じものを作る。**
+# 手順は「1 つに絞れたときだけ採る」ため、どのランタイムでも配置は 1 つにする。
+RUNTIME_LAYOUTS = {
+    "claude": ".claude/plugins/marketplaces/ai-plugins",
+    # 取得元を持たない。clone した作業ディレクトリそのものを見る。agy も同じ位置になるため、
+    # 配置としては 1 つで足りる。
+    "kiro": None,
+    "codex": ".codex/.tmp/marketplaces/ai-plugins",
+}
+
+
+def make_clone(path: Path, url: str | None = REMOTE, *, carries_ndf: bool = True) -> Path:
+    """origin を持つ clone を作る。通信はしない。
+
+    `carries_ndf` を偽にすると `plugins/ndf/` を持たない clone になる。配布元へ絞る
+    条件が働いているかを確かめるために使う。
+    """
+    path.mkdir(parents=True, exist_ok=True)
+
+    def run(*args: str) -> None:
+        subprocess.run(["git", "-C", str(path), *args], check=True, capture_output=True)
+
+    run("init", "-q")
+    if url:
+        run("remote", "add", "origin", url)
+    if carries_ndf:
+        (path / "plugins" / "ndf").mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def runtime_layout(root: Path, runtime: str, url: str | None = REMOTE) -> tuple[Path, Path]:
+    """そのランタイムの配置を作り、`(HOME, 実行する現在地)` を返す。"""
+    home = root / "home"
+    home.mkdir(parents=True, exist_ok=True)
+    relative = RUNTIME_LAYOUTS[runtime]
+    if relative is None:
+        return home, make_clone(root / "clone", url)
+    make_clone(home / relative, url)
+    work = root / "work"
+    work.mkdir(parents=True, exist_ok=True)
+    return home, work
+
+
+def run_resolution(body: str, *, home: Path, cwd: Path) -> str:
+    """段の解決の囲みをそのまま実行し、決まった名前を返す。
+
+    **手順書に書いてある本文を動かす。** 写し取った別の実装を試すと、手順書が誤ったまま
+    でも検査は通る。
+
+    厳しい設定（`set -euo pipefail`）の下で動かす。未定義の変数とパイプの途中の失敗を
+    拾うためで、手順書の囲みは呼び出す側の設定を選べない。
+    """
+    script = f'set -euo pipefail\n{resolution_snippet(body)}\nprintf "%s" "$SKILL_REPO"\n'
+    env = os.environ.copy()
+    env.pop("NDF_SKILL_REPO", None)
+    env.update({"HOME": str(home), "LC_ALL": "C.UTF-8"})
+    done = subprocess.run(
+        ["bash", "-c", script], cwd=str(cwd), env=env, capture_output=True, text=True,
+    )
+    assert done.returncode == 0, f"解決が落ちた: {done.stderr}"
+    return done.stdout.strip()
