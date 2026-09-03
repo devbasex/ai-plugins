@@ -17,11 +17,40 @@ TRACKING = SKILL_DIR / "references/projects-tracking.md"
 COMPLETENESS = SKILL_DIR / "references/stage-completeness.md"
 MERGED = SKILL_DIR.parent / "merged/SKILL.md"
 
+# プラグインの根。`${CLAUDE_PLUGIN_ROOT}` が指す先で、Skill の実体はこの下の
+# `skills/<名前>/` にある。
+PLUGIN_ROOT = SKILL_DIR.parents[1]
+
+# **Skill の hook のコマンドで置き換わる変数はこれだけである。** 実行ファイルは、
+# 一覧の外の変数を見つけると次の文言で拒む（Claude Code 2.1.259 の実測）。
+#
+#     Hook command references ${...} but only ${CLAUDE_PLUGIN_ROOT} is available for
+#     skill hooks (${CLAUDE_PLUGIN_DATA} is plugin-only).
+#
+# `${CLAUDE_PROJECT_DIR}` は hook の環境変数として渡るため、シェル形式でも展開される。
+# `${CLAUDE_SKILL_DIR}` は SKILL.md の本文では使えるが、**hook のコマンドでは渡らない**。
+# 空へ展開されるだけで拒否も警告も出ないため、発火しないことに気づく手がかりが無い（#304）。
+ALLOWED_HOOK_VARIABLES = frozenset({"CLAUDE_PLUGIN_ROOT", "CLAUDE_PROJECT_DIR"})
+
+# 実行ファイルが変数を取り出す正規表現と同じもの。
+VARIABLE = re.compile(r"\$\{([a-zA-Z_][a-zA-Z0-9_.]*)\}")
+
 
 def frontmatter() -> str:
     body = SKILL.read_text(encoding="utf-8")
     found = re.match(r"\A---\s*\n(.*?)\n---\s*\n", body, re.DOTALL)
     assert found, "frontmatter を読み取れない"
+    return found.group(1)
+
+
+def hook_command() -> str:
+    """frontmatter が登録する hook のコマンドを返す。
+
+    読み取れないこと自体を失敗として扱う。行が消えるだけで、コマンドを見る検査が
+    素通りになる形にしない。
+    """
+    found = re.search(r"^\s*command:\s*\"(.+)\"\s*$", frontmatter(), re.MULTILINE)
+    assert found, f"hook のコマンドを読み取れない: {frontmatter()}"
     return found.group(1)
 
 
@@ -34,10 +63,39 @@ def test_the_frontmatter_registers_a_pre_tool_use_hook() -> None:
 
 
 def test_the_hook_points_at_the_guard_in_this_skill() -> None:
-    """`${CLAUDE_SKILL_DIR}` は SKILL.md の置き場所を指す。作業ディレクトリに依存しない。"""
+    """`${CLAUDE_PLUGIN_ROOT}` はプラグインの根を指す。作業ディレクトリに依存しない。"""
     body = frontmatter()
 
-    assert "${CLAUDE_SKILL_DIR}/scripts/workflow-guard.sh" in body
+    assert "${CLAUDE_PLUGIN_ROOT}/skills/development-workflow/scripts/workflow-guard.sh" in body
+
+
+def test_the_hook_command_only_uses_variables_available_to_skill_hooks() -> None:
+    """一覧の外の変数は使わない。**空へ展開されるだけで、拒否も警告も出ない**（#304）。
+
+    文字列の一致だけを見ると、同じ間違いが戻ったときに気づけない。`${CLAUDE_SKILL_DIR}`
+    は SKILL.md の本文では使えるため、hook へ書いても誤りに見えない。
+    """
+    used = set(VARIABLE.findall(hook_command()))
+
+    assert used, f"hook のコマンドが変数を持たない: {hook_command()}"
+    forbidden = sorted(used - ALLOWED_HOOK_VARIABLES)
+    assert not forbidden, (
+        f"Skill の hook で置き換わらない変数を使っている: {forbidden}。"
+        f"使えるのは {sorted(ALLOWED_HOOK_VARIABLES)} だけである"
+    )
+
+
+def test_the_hook_command_resolves_to_the_guard_under_the_plugin_root() -> None:
+    """`${CLAUDE_PLUGIN_ROOT}` を実体の根へ置き換えると、判定のスクリプトへ届く。
+
+    変数の名前だけを見ると、その先の道筋が誤っていても通る。**置き換えた結果を実体と
+    突き合わせる。**
+    """
+    resolved = hook_command().replace("${CLAUDE_PLUGIN_ROOT}", str(PLUGIN_ROOT))
+    path = resolved.split()[-1]
+
+    assert path == str(GUARD), f"判定のスクリプトを指していない: {path}"
+    assert GUARD.is_file(), GUARD
 
 
 def test_the_hook_is_not_removed_after_the_first_run() -> None:
