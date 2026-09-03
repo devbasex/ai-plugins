@@ -6,7 +6,9 @@ hook が実際に登録されることは会話の単位を起こさないと確
 """
 from __future__ import annotations
 
+import json
 import re
+import shlex
 
 import pytest
 
@@ -44,6 +46,9 @@ ALLOWED_HOOK_VARIABLES = frozenset({"CLAUDE_PLUGIN_ROOT"})
 # 実行ファイルが変数を取り出す正規表現と同じもの。
 VARIABLE = re.compile(r"\$\{([a-zA-Z_][a-zA-Z0-9_.]*)\}")
 
+# 空白を含むプラグインの根。**実在させない。** 見るのは語の切れ目だけである。
+ROOT_WITH_SPACE = "/tmp/with space/ndf"
+
 
 def frontmatter() -> str:
     body = SKILL.read_text(encoding="utf-8")
@@ -53,14 +58,19 @@ def frontmatter() -> str:
 
 
 def hook_command() -> str:
-    """frontmatter が登録する hook のコマンドを返す。
+    """frontmatter が登録する hook のコマンドを、YAML の引用を解いて返す。
 
     読み取れないこと自体を失敗として扱う。行が消えるだけで、コマンドを見る検査が
     素通りになる形にしない。
+
+    **引用を解いてから返す。** この行は YAML の二重引用の並びで、経路を囲む引用符は
+    エスケープされた文字として書かれている。解かずに返すと、後段がエスケープの記号を
+    経路の一部として読む。二重引用の並びのエスケープの規則は JSON の文字列と同じもの
+    であるため、外部のライブラリを増やさずに `json` で解ける。
     """
-    found = re.search(r"^\s*command:\s*\"(.+)\"\s*$", frontmatter(), re.MULTILINE)
+    found = re.search(r"^\s*command:\s*(\".+\")\s*$", frontmatter(), re.MULTILINE)
     assert found, f"hook のコマンドを読み取れない: {frontmatter()}"
-    return found.group(1)
+    return json.loads(found.group(1))
 
 
 def test_the_frontmatter_registers_a_pre_tool_use_hook() -> None:
@@ -103,12 +113,37 @@ def test_the_hook_command_resolves_to_the_guard_under_the_plugin_root() -> None:
 
     変数の名前だけを見ると、その先の道筋が誤っていても通る。**置き換えた結果を実体と
     突き合わせる。**
+
+    **語の切り分けは `shlex` に任せる。** `str.split` は空白だけで切るため、この
+    リポジトリを空白を含む位置へ置いた利用者の手元では、置き換えた経路が途中で切れて
+    落ちる。`shlex` はシェルと同じ規則で切るため、引用で囲まれた経路が 1 語のまま残る。
+    部分一致で確かめる手もあるが、それでは経路の後ろに別の語が続いていても通ってしまう。
     """
     resolved = hook_command().replace("${CLAUDE_PLUGIN_ROOT}", str(PLUGIN_ROOT))
-    path = resolved.split()[-1]
+    path = shlex.split(resolved)[-1]
 
     assert path == str(GUARD), f"判定のスクリプトを指していない: {path}"
     assert GUARD.is_file(), GUARD
+
+
+def test_the_hook_command_keeps_a_plugin_root_with_a_space_in_one_word() -> None:
+    """空白を含む位置へ導入されても、経路が 1 語のまま `bash` へ渡る（#307）。
+
+    置き換えは実行ファイルによる文字列の差し替えで、その結果をシェルが読む。経路を
+    引用で囲まないと、空白のところで語が切れて `bash` が別のファイルを探す。**実機で
+    確かめたときは hook が拒否も案内も出さないまま素通りした。** 止めるはずの操作が
+    通るため、気づく手がかりが無い。
+
+    上の検査は実体の位置を使うため、空白を含まない環境では引用を外しても通る。ここは
+    空白を含む位置を作って、引用そのものを見る。
+    """
+    resolved = hook_command().replace("${CLAUDE_PLUGIN_ROOT}", ROOT_WITH_SPACE)
+    words = shlex.split(resolved)
+
+    assert words == [
+        "bash",
+        f"{ROOT_WITH_SPACE}/skills/development-workflow/scripts/workflow-guard.sh",
+    ], f"空白のところで語が切れている: {words}"
 
 
 def test_the_hook_is_not_removed_after_the_first_run() -> None:
