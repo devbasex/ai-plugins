@@ -6,7 +6,7 @@ hooks:
     - matcher: "Bash"
       hooks:
         - type: command
-          command: "bash ${CLAUDE_SKILL_DIR}/scripts/workflow-guard.sh"
+          command: "bash \"${CLAUDE_PLUGIN_ROOT}/skills/development-workflow/scripts/workflow-guard.sh\""
           timeout: 10
 ---
 

@@ -45,7 +45,7 @@ NDF を使う開発では、関わるリポジトリが 2 つになることが�
 | --- | --- |
 | Claude Code | `~/.claude/plugins/marketplaces/<取得元>` |
 | Codex | `~/.codex/.tmp/marketplaces/<取得元>` |
-| Kiro | clone した作業ディレクトリ |
+| Kiro / agy | clone した作業ディレクトリ |
 
 **取得元は 1 つとは限らない。** この位置には登録したすべての取得元の clone が並ぶ。
 
@@ -65,12 +65,23 @@ GitHub の取得元であることだけに置くと候補になる。並びは�
 NDF の配布元であることの直接の証拠になる。取得元の名前や `marketplace.json` の `name` は、
 fork や登録名の変更で変わるうえ、同じ名前を別の取得元が名乗れる。
 
+**取得元を持たないランタイムでは、現在地の clone が候補になる。** Kiro と agy は clone した
+作業ディレクトリから導入するため、決まった置き場所が無い。**現在地は clone の根とは限らない**
+ため、`git rev-parse --show-toplevel` で根へ戻してから見る。
+
+**現在地にも同じ絞り込みを掛ける。** いま開いているリポジトリが配布元とは限らない。無条件に
+採ると、開発対象のリポジトリが配布元として決まる。
+
 ```bash
 SKILL_REPO="${NDF_SKILL_REPO:-}"                                  # 段 1
 
 if [ -z "$SKILL_REPO" ]; then                                     # 段 2
   found=""
-  for clone in ~/.claude/plugins/marketplaces/*/ ~/.codex/.tmp/marketplaces/*/; do
+  candidates=(~/.claude/plugins/marketplaces/*/ ~/.codex/.tmp/marketplaces/*/)
+  here="$(git rev-parse --show-toplevel 2>/dev/null || true)"     # Kiro / agy は現在地の clone
+  if [ -n "$here" ]; then candidates+=("$here"); fi
+
+  for clone in "${candidates[@]}"; do
     [ -d "$clone/plugins/ndf" ] || continue                       # NDF の実体を持つ clone だけを見る
     url="$(git -C "$clone" config --get remote.origin.url 2>/dev/null || true)"
     case "$url" in

@@ -6,7 +6,9 @@ hook が実際に登録されることは会話の単位を起こさないと確
 """
 from __future__ import annotations
 
+import json
 import re
+import shlex
 
 import pytest
 
@@ -17,12 +19,58 @@ TRACKING = SKILL_DIR / "references/projects-tracking.md"
 COMPLETENESS = SKILL_DIR / "references/stage-completeness.md"
 MERGED = SKILL_DIR.parent / "merged/SKILL.md"
 
+# プラグインの根。`${CLAUDE_PLUGIN_ROOT}` が指す先で、Skill の実体はこの下の
+# `skills/<名前>/` にある。
+PLUGIN_ROOT = SKILL_DIR.parents[1]
+
+# **この hook が書いてよい `${...}` は `${CLAUDE_PLUGIN_ROOT}` だけである。**
+#
+# 実行ファイルの実体（Claude Code 2.1.259）を読んで確かめた。Skill の hook で
+# `${CLAUDE_PLUGIN_DATA}` を書くと、次の文言を出して実行そのものを拒む。
+#
+#     Hook command references ${CLAUDE_PLUGIN_DATA} but only ${CLAUDE_PLUGIN_ROOT} is
+#     available for skill hooks (${CLAUDE_PLUGIN_DATA} is plugin-only).
+#
+# **拒否の検査が見るのはこの 2 つだけである。** `${CLAUDE_PROJECT_DIR}` はブレースを
+# 付けても捕捉されず、値にもなる（シェル形式では hook の環境変数として、`args` を持つ
+# 形では実行ファイルの置き換えとして届く）。**それでも一覧へは入れない。** この hook が
+# 起動する判定のスクリプトはプラグインの下にあり、主ディレクトリの位置に依存させない。
+# シェルの環境変数として展開させたいときは、ブレースを付けずに `$CLAUDE_PROJECT_DIR` と
+# 書く。**下の正規表現はブレース付きだけを拾うため、書き分けがそのまま意図の表明になる。**
+#
+# 一覧の外の変数は、シェル形式では**空へ展開されるだけで拒否も警告も出ない**。
+# `${CLAUDE_SKILL_DIR}` は SKILL.md の本文では使えるため、hook へ書いても誤りに見えない。
+# 発火しないことに気づく手がかりが無い（#304）。
+ALLOWED_HOOK_VARIABLES = frozenset({"CLAUDE_PLUGIN_ROOT"})
+
+# 実行ファイルが変数を取り出す正規表現と同じもの。
+VARIABLE = re.compile(r"\$\{([a-zA-Z_][a-zA-Z0-9_.]*)\}")
+
+# 空白を含むプラグインの根。**実在させない。** 見るのは語の切れ目だけである。
+ROOT_WITH_SPACE = "/tmp/with space/ndf"
+
 
 def frontmatter() -> str:
     body = SKILL.read_text(encoding="utf-8")
     found = re.match(r"\A---\s*\n(.*?)\n---\s*\n", body, re.DOTALL)
     assert found, "frontmatter を読み取れない"
     return found.group(1)
+
+
+def hook_command() -> str:
+    """frontmatter が登録する hook のコマンドを、YAML の引用を解いて返す。
+
+    読み取れないこと自体を失敗として扱う。行が消えるだけで、コマンドを見る検査が
+    素通りになる形にしない。
+
+    **引用を解いてから返す。** この行は YAML の二重引用の並びで、経路を囲む引用符は
+    エスケープされた文字として書かれている。解かずに返すと、後段がエスケープの記号を
+    経路の一部として読む。二重引用の並びのエスケープの規則は JSON の文字列と同じもの
+    であるため、外部のライブラリを増やさずに `json` で解ける。
+    """
+    found = re.search(r"^\s*command:\s*(\".+\")\s*$", frontmatter(), re.MULTILINE)
+    assert found, f"hook のコマンドを読み取れない: {frontmatter()}"
+    return json.loads(found.group(1))
 
 
 def test_the_frontmatter_registers_a_pre_tool_use_hook() -> None:
@@ -34,10 +82,68 @@ def test_the_frontmatter_registers_a_pre_tool_use_hook() -> None:
 
 
 def test_the_hook_points_at_the_guard_in_this_skill() -> None:
-    """`${CLAUDE_SKILL_DIR}` は SKILL.md の置き場所を指す。作業ディレクトリに依存しない。"""
+    """`${CLAUDE_PLUGIN_ROOT}` はプラグインの根を指す。作業ディレクトリに依存しない。"""
     body = frontmatter()
 
-    assert "${CLAUDE_SKILL_DIR}/scripts/workflow-guard.sh" in body
+    assert "${CLAUDE_PLUGIN_ROOT}/skills/development-workflow/scripts/workflow-guard.sh" in body
+
+
+def test_the_hook_command_only_uses_the_plugin_root_variable() -> None:
+    """一覧の外の変数は使わない。**空へ展開されるだけで、拒否も警告も出ない**（#304）。
+
+    文字列の一致だけを見ると、同じ間違いが戻ったときに気づけない。`${CLAUDE_SKILL_DIR}`
+    は SKILL.md の本文では使えるため、hook へ書いても誤りに見えない。
+
+    `${CLAUDE_PROJECT_DIR}` も落とす。**値にはなるが、この hook を主ディレクトリの位置へ
+    依存させない。** シェルの展開を意図して書くなら、ブレースを付けずに
+    `$CLAUDE_PROJECT_DIR` と書く。この検査はブレース付きだけを拾う。
+    """
+    used = set(VARIABLE.findall(hook_command()))
+
+    assert used, f"hook のコマンドが変数を持たない: {hook_command()}"
+    forbidden = sorted(used - ALLOWED_HOOK_VARIABLES)
+    assert not forbidden, (
+        f"この hook が使ってよい変数の外を書いている: {forbidden}。"
+        f"書けるのは {sorted(ALLOWED_HOOK_VARIABLES)} だけである"
+    )
+
+
+def test_the_hook_command_resolves_to_the_guard_under_the_plugin_root() -> None:
+    """`${CLAUDE_PLUGIN_ROOT}` を実体の根へ置き換えると、判定のスクリプトへ届く。
+
+    変数の名前だけを見ると、その先の道筋が誤っていても通る。**置き換えた結果を実体と
+    突き合わせる。**
+
+    **語の切り分けは `shlex` に任せる。** `str.split` は空白だけで切るため、この
+    リポジトリを空白を含む位置へ置いた利用者の手元では、置き換えた経路が途中で切れて
+    落ちる。`shlex` はシェルと同じ規則で切るため、引用で囲まれた経路が 1 語のまま残る。
+    部分一致で確かめる手もあるが、それでは経路の後ろに別の語が続いていても通ってしまう。
+    """
+    resolved = hook_command().replace("${CLAUDE_PLUGIN_ROOT}", str(PLUGIN_ROOT))
+    path = shlex.split(resolved)[-1]
+
+    assert path == str(GUARD), f"判定のスクリプトを指していない: {path}"
+    assert GUARD.is_file(), GUARD
+
+
+def test_the_hook_command_keeps_a_plugin_root_with_a_space_in_one_word() -> None:
+    """空白を含む位置へ導入されても、経路が 1 語のまま `bash` へ渡る（#307）。
+
+    置き換えは実行ファイルによる文字列の差し替えで、その結果をシェルが読む。経路を
+    引用で囲まないと、空白のところで語が切れて `bash` が別のファイルを探す。**実機で
+    確かめたときは hook が拒否も案内も出さないまま素通りした。** 止めるはずの操作が
+    通るため、気づく手がかりが無い。
+
+    上の検査は実体の位置を使うため、空白を含まない環境では引用を外しても通る。ここは
+    空白を含む位置を作って、引用そのものを見る。
+    """
+    resolved = hook_command().replace("${CLAUDE_PLUGIN_ROOT}", ROOT_WITH_SPACE)
+    words = shlex.split(resolved)
+
+    assert words == [
+        "bash",
+        f"{ROOT_WITH_SPACE}/skills/development-workflow/scripts/workflow-guard.sh",
+    ], f"空白のところで語が切れている: {words}"
 
 
 def test_the_hook_is_not_removed_after_the_first_run() -> None:
