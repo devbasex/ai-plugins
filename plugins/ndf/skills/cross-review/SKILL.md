@@ -1,7 +1,7 @@
 ---
 name: cross-review
-description: "Review a PR with both Codex and Gemini, looping fixes until both APPROVE. Use when a converging two-AI review is wanted（クロスレビュー・両AIレビュー・収束レビュー）."
-argument-hint: "[PR番号] [--max-rounds N] [--rotate-after K] [--rotate-mode light|squash] [--only codex|gemini] [--focus TEXT] [--extra-instructions-file PATH]"
+description: "Review a PR with both the codex and agy CLIs, looping fixes until both APPROVE. Use when a converging two-AI review is wanted（クロスレビュー・両AIレビュー・収束レビュー）."
+argument-hint: "[PR番号] [--max-rounds N] [--rotate-after K] [--rotate-mode light|squash] [--only codex|agy] [--focus TEXT] [--extra-instructions-file PATH]"
 allowed-tools:
   - Bash
   - Read
@@ -13,11 +13,11 @@ allowed-tools:
 
 # クロスレビュー収束ループ
 
-PR を **codex / gemini 両方** にレビューさせ、両者が `APPROVE` を返すまで
+PR を **codex / agy 両方** にレビューさせ、両者が `APPROVE` を返すまで
 `/ndf:pr-review` と `/ndf:fix` を自動で回す。
 
-/goalの引数として呼ばれた場合は、codex / gemini が`APPROVE` になるまで/cross-reviewを繰り返す。
-  * codex / geminiのいずれかが不具合などで実行できなくなった場合は異常終了とする
+/goalの引数として呼ばれた場合は、codex / agy が`APPROVE` になるまで/cross-reviewを繰り返す。
+  * codex / agyのいずれかが不具合などで実行できなくなった場合は異常終了とする
    * /goalで呼ばれた場合はPR ローテーションは実施しなくてよい。
    * 振動検知した場合はAIが判断して正しい状態を決める。
 
@@ -27,8 +27,8 @@ PR を **codex / gemini 両方** にレビューさせ、両者が `APPROVE` を
 - [docs/02-fix-and-rotation.md](docs/02-fix-and-rotation.md) — Step 5〜8 (サブエージェント修正 / PR ローテーション / 終了処理)
 - [docs/03-review-output.md](docs/03-review-output.md) — レビュー出力の制約 / CI failure の分類 / アンチパターン / monitor.py の誤検知
 - [scripts/state.py](scripts/state.py) — state.json 操作（uv 自己完結スクリプト、stdlib のみ）
-- [scripts/launch-codex.sh](scripts/launch-codex.sh) / [scripts/launch-gemini.sh](scripts/launch-gemini.sh) — レビューランチャ
-- [scripts/monitor.py](scripts/monitor.py) — codex/gemini プロセス多軸監視 (sentinel / pidfile / 早期エラー / stall / hard timeout / result.json)
+- [scripts/launch-codex.sh](scripts/launch-codex.sh) / [scripts/launch-agy.sh](scripts/launch-agy.sh) — レビューランチャ
+- [scripts/monitor.py](scripts/monitor.py) — codex/agy プロセス多軸監視 (sentinel / pidfile / 早期エラー / stall / hard timeout / result.json)
 - [scripts/wait-review.sh](scripts/wait-review.sh) — `monitor.py` の薄ラッパ（互換用）
 - [scripts/rotate-pr.sh](scripts/rotate-pr.sh) — PR ローテーション
 
@@ -59,9 +59,9 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 | `--max-rounds N` | 全体最大ラウンド数（PR ローテーションを含む通算） | `12` |
 | `--rotate-after K` | この round 数で未収束なら PR ローテーション | `8` |
 | `--rotate-mode light\|squash` | ローテーション方式。`light`: 同ブランチで旧 PR を close → 新 PR (title/body は現状の差分・実装から再生成)。`squash`: squash 統合 + 新ブランチ + `(rotated)` suffix | `light` |
-| `--only codex` / `--only gemini` | 片方だけで回す（デバッグ用） | 両方 |
-| `--focus TEXT` | 自動レビュー観点に上乗せして codex / gemini 両方に渡す追加観点。短い重点チェック向け | なし |
-| `--extra-instructions-file PATH` | 自動レビュー観点に上乗せして codex / gemini 両方に渡す追加観点を UTF-8 テキストファイルから読む。長いチェックリスト向け | なし |
+| `--only codex` / `--only agy` | 片方だけで回す（デバッグ用） | 両方 |
+| `--focus TEXT` | 自動レビュー観点に上乗せして codex / agy 両方に渡す追加観点。短い重点チェック向け | なし |
+| `--extra-instructions-file PATH` | 自動レビュー観点に上乗せして codex / agy 両方に渡す追加観点を UTF-8 テキストファイルから読む。長いチェックリスト向け | なし |
 
 例:
 
@@ -77,7 +77,7 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 ### 自動レビュー観点テンプレート
 
 `state.py init` は GitHub API の `pulls/<PR>/files --paginate` で変更ファイルを全件取得して分類し、
-codex / gemini 両 launcher に同じ追加観点を渡す。`--focus` /
+codex / agy 両 launcher に同じ追加観点を渡す。`--focus` /
 `--extra-instructions-file` は、この自動テンプレートの後ろに上乗せされる。
 
 自動カテゴリ:
@@ -107,7 +107,7 @@ codex / gemini 両 launcher に同じ追加観点を渡す。`--focus` /
 
 - `/ndf:pr-review` が **AI 直接投稿**（外部 AI 自身が `gh api` で投稿）に対応
 - `/ndf:fix` が **サブエージェント起動 + 重要度ベース自動修正 + Resolve Conversation** に対応
-- `codex` / `gemini` CLI が動作し、`gh` CLI が認証済み
+- `codex` / `agy` CLI が動作し、`gh` CLI が認証済み
 - `Agent(subagent_type="general-purpose", ...)` でサブエージェントを起動可能
 
 ## 事前確認（`state.py init` が自動実施）
@@ -119,8 +119,8 @@ codex / gemini 両 launcher に同じ追加観点を渡す。`--focus` /
 |---|---|---|
 | 1 | 自分の PR 判定（422 回避） | `gh api user` と `gh pr view --json author` を比較し `is_own_pr` / `event_downgrade` を state.json に書く |
 | 2 | worktree 分離 | `git worktree add <worktree-base>/<owner>--<repo>/pr<PR> <head>` を冪等実行（`<worktree-base>` は `NDF_WORKTREE_BASE` env > `<システム tmpdir>/ndf-worktrees` の優先順で解決）。パスが存在しても現リポジトリの登録済み worktree でなければ `.stale-<ts>` に退避して作り直す。**流用するときは PR の head へ揃える**（前回の実行の残りをレビューさせない。再開の経路も同じ）。`gh pr view --json headRefName,headRefOid,isCrossRepository` で取った基準のコミットへ hard reset し、追跡対象外のファイルを消す（tmp ディレクトリは `-e` で除外。フォーク PR は `refs/pull/<PR>/head` から取り込む）。**同じ同期を `start-round` がラウンドごとに行う。** 作成時と再開時だけでは、修正を作業ツリーの外で行って push したときに 1 つ前の内容をレビューする。head と一致していて変更が無ければ何も発行せず、追跡対象の変更・未 push のコミット・基準を取り込めないときは **exit 8** で止める（1 はループを抜ける値なので使わない）。解決した head branch は `state.json` へ書き戻す（巻き直しで古くなるため）。条件と理由は `docs/01-state-and-review.md` の「ラウンドの開始時の同期」にある |
-| 3 | gemini trusted directory | `launch-gemini.sh` が `GEMINI_CLI_TRUST_WORKSPACE=true` + `--skip-trust` を必ず併用。**tmp dir は `<worktree>/.cross_review/`** を採用し、gemini の workspace 制約 (workspace 外の `write_file` がブロックされる) を根本回避 |
-| 4 | 既存コメント差分 | `fix/scripts/fetch-pr-comments.sh` で 3 ソース (インラインコメント / レビュー body / PR レベルコメント) を一括取得し `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt` に保存。gemini プロンプトには **内容をインライン埋め込み**、codex プロンプトには path を渡す |
+| 3 | agy の作業領域 | `launch-agy.sh` が `--add-dir` で作業ツリーを宣言する。**tmp dir は `<worktree>/.cross_review/`** を採用し、宣言する作業領域を 1 つに保つ |
+| 4 | 既存コメント差分 | `fix/scripts/fetch-pr-comments.sh` で 3 ソース (インラインコメント / レビュー body / PR レベルコメント) を一括取得し `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt` に保存。agy プロンプトには **内容をインライン埋め込み**、codex プロンプトには path を渡す |
 
 ### `<worktree-base>` の解決順
 
@@ -162,10 +162,10 @@ flowchart TD
     Init --> Round["Round N start<br/>current_pr = PR#"]:::phase
 
     Round -.並列バックグラウンド.-> Codex["/ndf:pr-review &lt;PR&gt; codex<br/>(AI が gh api で直接投稿)<br/>body 先頭: cross-review / round N / codex / intent<br/>→ result.json (intent + posted_as)"]
-    Round -.並列バックグラウンド.-> Gemini["/ndf:pr-review &lt;PR&gt; gemini<br/>--skip-trust 必須<br/>body 先頭: cross-review / round N / gemini / intent<br/>→ result.json (intent + posted_as)"]
+    Round -.並列バックグラウンド.-> Agy["/ndf:pr-review &lt;PR&gt; agy<br/>--add-dir で作業領域を宣言<br/>body 先頭: cross-review / round N / agy / intent<br/>→ result.json (intent + posted_as)"]
 
     Codex --> Decide{"判定 (intent ベース)"}
-    Gemini --> Decide
+    Agy --> Decide
 
     Decide -->|"結果なし (2 度目は final = error)"| Relaunch["結果を残さなかった側だけ<br/>同じラウンドで 1 度起動し直す"]
     Relaunch --> Decide
@@ -224,13 +224,13 @@ while :; do
   eval "$ROUND_VARS"
 
   # Step 2: 並列レビュー
-  [ "$ONLY" != "gemini" ] && "$SCRIPTS/launch-codex.sh"  "$STATE_PR" "$ROUND"
-  [ "$ONLY" != "codex"  ] && "$SCRIPTS/launch-gemini.sh" "$STATE_PR" "$ROUND"
+  [ "$ONLY" != "agy" ] && "$SCRIPTS/launch-codex.sh"  "$STATE_PR" "$ROUND"
+  [ "$ONLY" != "codex"  ] && "$SCRIPTS/launch-agy.sh" "$STATE_PR" "$ROUND"
   # 監視: 既定 timeout=7 分 / stall=3 分。失敗時は対象プロセスを kill して返す。監視と取り込みの
   #   終了コードは読まない。結果なしは NO_RESULT として state に残り、Step 3 が受け取る（docs/01）。
   "$SCRIPTS/monitor.py" "$STATE_PR" "${ONLY:-both}" || true
-  [ "$ONLY" != "gemini" ] && "$SCRIPTS/state.py" read-result "$STATE_PR" codex  || true
-  [ "$ONLY" != "codex"  ] && "$SCRIPTS/state.py" read-result "$STATE_PR" gemini || true
+  [ "$ONLY" != "agy" ] && "$SCRIPTS/state.py" read-result "$STATE_PR" codex  || true
+  [ "$ONLY" != "codex"  ] && "$SCRIPTS/state.py" read-result "$STATE_PR" agy || true
 
   # Step 3: 判定 (0=収束 / 2=修正へ / 7=結果なし / 1=中断)。引き継いだ指摘が残っていれば、
   #   両者が承認しても 2 を返して修正の工程へ回す。置換の終了コードは変数で受けてから読む。
@@ -360,7 +360,7 @@ bash ループは Agent tool を呼べないため、light モードでは Step 
 - **PR 履歴**: 各 PR 番号 + closed/open 状態 + round 数
 - **各ラウンドのサマリ表**:
 
-  | round | PR | codex | gemini | fix | CI |
+  | round | PR | codex | agy | fix | CI |
   |---|---|---|---|---|---|
   | 1 | #123 | REQ (5) | REQ (3) | abc123 (5 fixed, 2 deferred) | ✅ |
   | 2 | #123 | REQ (2) | APP | def456 (2 fixed) | ✅ |
@@ -383,9 +383,9 @@ bash ループは Agent tool を呼べないため、light モードでは Step 
 
 - `/ndf:pr-review` — 単発レビュー（AI 直接投稿対応）
 - `/ndf:fix` — 指摘の分類・修正・返信・Resolve（サブエージェント起動対応）
-- `/ndf:external-ai` — codex / gemini CLI 呼び出し手順（CLI 別の差分は `references/cli-codex.md` / `references/cli-gemini.md`）
+- `/ndf:external-ai` — codex / agy CLI 呼び出し手順（CLI 別の差分は `references/cli-codex.md` / `references/cli-agy.md`）
 - `/ndf:issue-plan-strategy` — multi-PR ワークフローでは **個別 PR ごとに本 cross-review が原則必須**。
   `/ndf:pr-review` 単発や Claude Code の `code-reviewer` は代替にせず、release ブランチへ merge する前に
-  codex + gemini の APPROVE 収束を確認する (Step 6)
+  codex + agy の APPROVE 収束を確認する (Step 6)
 - `general-purpose` エージェント — fix 実行用サブエージェント
 - `/ndf:out-of-scope` — 範囲外と判断した指摘の起票

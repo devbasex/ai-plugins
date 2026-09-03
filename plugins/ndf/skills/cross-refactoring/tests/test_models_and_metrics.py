@@ -22,7 +22,7 @@ def test_repeated_model_args(models):
 
 def test_unspecified_runtime_is_none(models):
     spec = models.parse_model_args(["codex=gpt-5.5"])
-    assert spec["gemini"] is None and spec["kiro"] is None
+    assert spec["agy"] is None and spec["kiro"] is None
 
 
 def test_no_args_gives_all_none(models):
@@ -53,7 +53,7 @@ def test_duplicate_runtime_is_an_error(models):
 # ---------- フラグ生成 ----------
 
 def test_model_flag_for_each_runtime(models):
-    for runtime in ("claude", "codex", "gemini", "kiro"):
+    for runtime in ("claude", "codex", "agy", "kiro"):
         assert models.model_flag(runtime, "m") == ["--model", "m"]
 
 
@@ -126,21 +126,21 @@ def _state_with_history():
             {
                 "round": 1, "impl": "codex",
                 "impl_model": {"requested": "gpt-5.5", "observed": None},
-                "reviewers": ["gemini", "kiro"],
-                "reviewer_models": {"gemini": {"requested": None, "observed": None},
+                "reviewers": ["agy", "kiro"],
+                "reviewer_models": {"agy": {"requested": None, "observed": None},
                                     "kiro": {"requested": "claude-opus-5",
                                              "observed": None}},
                 "items": ["R1-001", "R1-002"],
                 "fix_rounds": 1,
                 "durations": {"apply": 100, "review": 50, "fix": 20},
-                "reviewer_seconds": {"gemini": 30, "kiro": 20},
+                "reviewer_seconds": {"agy": 30, "kiro": 20},
                 "reviews": [
-                    {"round": 1, "gemini": "REQUEST_CHANGES", "kiro": "APPROVE",
+                    {"round": 1, "agy": "REQUEST_CHANGES", "kiro": "APPROVE",
                      "findings": [
-                         {"reviewer": "gemini", "item_id": "R1-002", "resolved": True},
-                         {"reviewer": "gemini", "item_id": "R1-001", "resolved": False},
+                         {"reviewer": "agy", "item_id": "R1-002", "resolved": True},
+                         {"reviewer": "agy", "item_id": "R1-001", "resolved": False},
                      ]},
-                    {"round": 2, "gemini": "APPROVE", "kiro": "APPROVE",
+                    {"round": 2, "agy": "APPROVE", "kiro": "APPROVE",
                      "findings": []},
                 ],
             },
@@ -166,7 +166,7 @@ def test_metrics_group_by_runtime_and_model(metrics):
     agg = metrics.aggregate(_state_with_history())
     assert "codex / gpt-5.5" in agg["impl"]
     assert "claude / opus-5" in agg["impl"]
-    assert "gemini / default" in agg["reviewer"]
+    assert "agy / default" in agg["reviewer"]
     assert "kiro / claude-opus-5" in agg["reviewer"]
 
 
@@ -189,18 +189,18 @@ def test_first_review_approval_rate(metrics):
 
 def test_reviewer_metrics_resolution_and_agreement(metrics):
     agg = metrics.aggregate(_state_with_history())
-    gemini = agg["reviewer"]["gemini / default"]
-    assert gemini["reviews"] == 2
-    assert gemini["findings"] == 2
-    assert gemini["resolution_rate"] == 0.5
+    agy = agg["reviewer"]["agy / default"]
+    assert agy["reviews"] == 2
+    assert agy["findings"] == 2
+    assert agy["resolution_rate"] == 0.5
     # 1 回目は不一致、2 回目は一致
-    assert gemini["agreement_rate"] == 0.5
+    assert agy["agreement_rate"] == 0.5
 
 
 def test_reviewer_seconds_are_not_shared_between_reviewers(metrics):
     """ラウンドの合計を各担当へ配ると 2 者分を両方に数えてしまう。"""
     agg = metrics.aggregate(_state_with_history())
-    assert agg["reviewer"]["gemini / default"]["seconds"] == 30
+    assert agg["reviewer"]["agy / default"]["seconds"] == 30
     assert agg["reviewer"]["kiro / claude-opus-5"]["seconds"] == 20
 
 
@@ -236,7 +236,7 @@ def test_models_are_fixed_across_rounds(refactor, tmp_path, env_tmp_dir):
     """`start-round` が状態ファイルの指定値をそのままラウンドへ写すこと。"""
     state_path = make_state(
         tmp_path,
-        models={"claude": "opus-5", "codex": "gpt-5.5", "gemini": None,
+        models={"claude": "opus-5", "codex": "gpt-5.5", "agy": None,
                 "kiro": "claude-opus-5"},
     )
     env_tmp_dir(state_path)

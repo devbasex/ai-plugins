@@ -18,7 +18,7 @@ def make_state(tmp_path: pathlib.Path, **overrides: Any) -> pathlib.Path:
     """
     state_id = overrides.pop("id", 130)
     host = overrides.pop("host", "claude")
-    runtimes = overrides.pop("runtimes", ["codex", "gemini", "kiro"])
+    runtimes = overrides.pop("runtimes", ["codex", "agy", "kiro"])
     tmp_dir = tmp_path / ".cross_refactoring"
     tmp_dir.mkdir(parents=True, exist_ok=True)
     state = {
@@ -37,7 +37,7 @@ def make_state(tmp_path: pathlib.Path, **overrides: Any) -> pathlib.Path:
         "host_detection": "explicit",
         "runtimes": runtimes,
         "impl_capable": ["claude", "codex", "kiro"],
-        "models": {"claude": None, "codex": None, "gemini": None, "kiro": None},
+        "models": {"claude": None, "codex": None, "agy": None, "kiro": None},
         "skills": {"required": ["refactoring", "tdd-cycle", "quality-gates"]},
         "max_outer_rounds": 3,
         "max_fix_rounds": 3,

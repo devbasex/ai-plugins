@@ -3,7 +3,7 @@
 #
 # Usage: launch-cli.sh <runtime> <phase> <ID> [ROUND]
 #
-#   runtime  claude | codex | gemini | kiro
+#   runtime  claude | codex | agy | kiro
 #   phase    propose | apply | review | fix
 #   ID       状態ファイルの鍵（最初に初期化した Pull Request 番号）
 #   ROUND    propose 以外で必須
@@ -43,6 +43,8 @@ MAX_ITEMS=$(jq -r '.max_items_per_round' "$STATE")
 # ラウンド番号は表示と項目の絞り込みに使う。未指定なら開いている最新ラウンドを採る。
 [ -n "$ROUND" ] || ROUND=$(jq -r '.rounds | length' "$STATE")
 
+# CLI 側の実行時間の上限。**フェーズごとの監視の上限に合わせる。** 短いと CLI が
+# 先に打ち切り、結果ファイルが残らなかった場合と区別が付かなくなる。
 case "$PHASE" in
   propose)
     # **提案にもラウンド番号を入れる。** 起動時に同名の結果ファイルを消すため、
@@ -50,17 +52,20 @@ case "$PHASE" in
     [ "$ROUND" -ge 1 ] 2>/dev/null || { echo "propose には ROUND が必要です" >&2; exit 1; }
     STEM=$TMP_DIR/$RUNTIME-propose-rf$ID-r$ROUND
     WORKDIR=$ROOT/$RUNTIME
+    PRINT_TIMEOUT=900
     ;;
   apply|fix)
     [ "$ROUND" -ge 1 ] 2>/dev/null || { echo "$PHASE には ROUND が必要です" >&2; exit 1; }
     STEM=$TMP_DIR/$RUNTIME-$PHASE-r$ROUND
     # 適用と修正は常に work/ の中だけで行う。並列適用はしない。
     WORKDIR=$WORK
+    PRINT_TIMEOUT=3600
     ;;
   review)
     [ "$ROUND" -ge 1 ] 2>/dev/null || { echo "review には ROUND が必要です" >&2; exit 1; }
     STEM=$TMP_DIR/$RUNTIME-review-r$ROUND
     WORKDIR=$ROOT/$RUNTIME
+    PRINT_TIMEOUT=900
     ;;
   *)
     echo "未知のフェーズです: $PHASE" >&2
@@ -76,9 +81,9 @@ case "$RUNTIME" in
   claude) SKILL_BASE=.claude/skills ;;
   codex)  SKILL_BASE=.agents/skills ;;
   kiro)   SKILL_BASE=.kiro/skills ;;
-  # gemini は NDF の配布先ではないが、**語彙を読ませないと提案が全件降格する**ため
-  # 同じ形の場所へ配置し、明示パスで読ませる。
-  gemini) SKILL_BASE=.gemini/skills ;;
+  # agy は NDF の配布先ではないが、**語彙を読ませないと提案が全件降格する**ため
+  # 作業領域の中で読む場所へ配置し、明示パスで読ませる。
+  agy)    SKILL_BASE=.agents/skills ;;
   *)      echo "未知のランタイムです: $RUNTIME" >&2; exit 1 ;;
 esac
 
@@ -148,9 +153,10 @@ template = string.Template(open(sys.argv[1], encoding="utf-8").read())
 sys.stdout.write(template.safe_substitute(os.environ))
 PY
 
-# gemini は作業領域の外への書き込みが拒否される。結果ファイルの置き場所は
-# 全ランタイム共通の一時ディレクトリなので、作業領域へ明示的に追加する。
+# agy は現在地を作業領域にしない。結果ファイルの置き場所は全ランタイム共通の
+# 一時ディレクトリなので、作業領域へ明示的に追加する。
 EXTRA_DIR=
-[ "$RUNTIME" = "gemini" ] && EXTRA_DIR=$TMP_DIR
+[ "$RUNTIME" = "agy" ] && EXTRA_DIR=$TMP_DIR
 
-"$LIB/launch-cli.sh" "$RUNTIME" "$WORKDIR" "$PROMPT" "$STEM" "$MODEL" "$EXTRA_DIR"
+"$LIB/launch-cli.sh" "$RUNTIME" "$WORKDIR" "$PROMPT" "$STEM" "$MODEL" "$EXTRA_DIR" \
+  "$PRINT_TIMEOUT"

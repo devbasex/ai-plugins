@@ -404,4 +404,4 @@ EOMD
 ## 関連
 
 - `/ndf:pr-review` — PR / ブランチのレビュー（Approve / Request Changes 判定）
-- `/ndf:cross-review` — codex + gemini の収束レビュー。内部からこの Skill を呼ぶ
+- `/ndf:cross-review` — codex + agy の収束レビュー。内部からこの Skill を呼ぶ

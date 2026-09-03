@@ -16,11 +16,11 @@ from typing import Any, Iterable, Optional
 from assignment import ALL_RUNTIMES
 
 # モデルを渡すフラグ。4 CLI すべてで実在を確認済み
-# （codex / gemini は `-m` の別名も持つが、長い方で統一する）。
+# （codex は `-m` の別名も持つが、長い方で統一する）。
 MODEL_FLAGS: dict[str, str] = {
     "claude": "--model",
     "codex": "--model",
-    "gemini": "--model",
+    "agy": "--model",
     "kiro": "--model",
 }
 
@@ -102,7 +102,7 @@ def observed_model(runtime: str, stdout_text: str) -> Optional[str]:
     """CLI の出力から**実際に使われたモデル名**を取り出す。取れなければ `None`。
 
     現状取れるのは claude だけである（`--output-format json` の `modelUsage`）。
-    codex / gemini / kiro は実行したモデルを機械可読な形で出さない。
+    codex / agy / kiro は実行したモデルを機械可読な形で出さない。
     """
     if runtime != "claude" or not stdout_text:
         return None

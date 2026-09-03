@@ -19,7 +19,7 @@
 # 読み取り専用でも作業ディレクトリを分ける理由は 3 つ。
 #   1. レビュー担当がテストを実行して振る舞い不変を確認するため、書き込める領域が要る
 #   2. テスト実行が生む生成物（キャッシュ / 依存 / ビルド出力）が競合しない
-#   3. gemini の作業領域制約を、各自のディレクトリ内で完結させて回避できる
+#   3. 各担当へ渡す作業領域を、各自のディレクトリ 1 つに収められる
 
 set -euo pipefail
 
@@ -58,15 +58,16 @@ REQUIRED_SKILLS=("${LINES[@]+"${LINES[@]}"}")
 
 # ランタイム標準の配置先。**利用者のホームと対象リポジトリ本体には一切書き込まない。**
 #
-# gemini だけは NDF の配布先ではないため「標準の配置先」が無い。それでも
+# agy だけは NDF の配布先ではないため「標準の配置先」が無い。それでも
 # **スメルと手法の語彙を読ませないと提案が語彙外になり全件降格する**ので、
-# 同じ形の場所へ置き、プロンプトの明示パスで読ませる（kiro と同じ扱い）。
+# agy が作業領域の中で読む `.agents/skills` へ置き、プロンプトの明示パスで
+# 読ませる（kiro と同じ扱い）。
 skill_dir_for() {
   case "$1" in
     claude) echo ".claude/skills" ;;
     codex)  echo ".agents/skills" ;;
     kiro)   echo ".kiro/skills" ;;
-    gemini) echo ".gemini/skills" ;;
+    agy)    echo ".agents/skills" ;;
     *)      echo ""; return 1 ;;
   esac
 }
@@ -147,36 +148,8 @@ ignore_dir() {
   printf '*\n' > "$1/.gitignore"
 }
 
-# gemini は**除外設定を読み取りにも適用する**。上の全件無視をそのまま効かせると、
-# 配置した手順書を `read_file` で一切開けない。
-#
-#   Error executing tool read_file: File path '.../.gemini/skills/refactoring/SKILL.md'
-#   is ignored by configured ignore patterns.
-#
-# 手順書自身が「兆候と手法の語彙を読ませないと提案が語彙外になって全件降格する」と
-# 書いている前提が崩れるため、**作業ディレクトリ限定で**読み取り側の除外を無効にする。
-# 設定の項目名は gemini の版で変わるので、新旧どちらの形式でも書く（0.55.1 で確認）。
-configure_gemini_reading() {
-  local base=$1
-  local dir="$base/.gemini"
-  mkdir -p "$dir"
-  cat > "$dir/settings.json" <<'GEMINI_SETTINGS_EOF'
-{
-  "context": {
-    "fileFiltering": {
-      "respectGitIgnore": false,
-      "respectGeminiIgnore": false
-    }
-  },
-  "fileFiltering": {
-    "respectGitIgnore": false,
-    "respectGeminiIgnore": false
-  }
-}
-GEMINI_SETTINGS_EOF
-  # 設定そのものも差分に出さない。`.gemini/` ごと無視する。
-  printf '*\n' > "$dir/.gitignore"
-}
+# 除外設定の中に置いた手順書を agy が読めることは実測で確かめた。読み取り側の
+# 除外を無効にする設定は要らない。
 
 
 HEAD_SHA=$(git rev-parse "origin/$HEAD_BRANCH" 2>/dev/null || git -C "$WORK" rev-parse HEAD)
@@ -204,9 +177,6 @@ MISSING=()
 CONFLICT=()
 
 for rt in "${RUNTIMES[@]}"; do
-  # 配置より先に置く。gemini は起動時に 1 度だけ設定を読むため、
-  # 手順書を配ってから設定を書いても間に合う保証がない。
-  [ "$rt" = "gemini" ] && configure_gemini_reading "$ROOT/$rt"
   entry='{}'
   for name in "${REQUIRED_SKILLS[@]}"; do
     status=$(provision_skill "$ROOT/$rt" "$rt" "$name")

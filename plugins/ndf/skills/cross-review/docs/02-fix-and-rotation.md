@@ -59,8 +59,8 @@ worktree 外を触ると競合します。
 - 前ラウンドのレビュー結果:
   - codex review: {CODEX_REVIEW_URL}
     (intent={CODEX_INTENT}, posted_as={CODEX_POSTED_AS}, {CODEX_COMMENT_COUNT}件)
-  - gemini review: {GEMINI_REVIEW_URL}
-    (intent={GEMINI_INTENT}, posted_as={GEMINI_POSTED_AS}, {GEMINI_COMMENT_COUNT}件)
+  - agy review: {AGY_REVIEW_URL}
+    (intent={AGY_INTENT}, posted_as={AGY_POSTED_AS}, {AGY_COMMENT_COUNT}件)
 - 既存コメントスナップショット: $TMP_DIR/cross-review-pr{PR}-existing-comments.txt
 
 ⚠ 上の件数は **そのラウンドで新しく投稿された件数** であり、PR 上に残っている未解決の
@@ -75,7 +75,7 @@ worktree 外を触ると競合します。
   （特にトータル行数が減る方向は積極実施 / +30 行を超えそうなら deferred + ユーザ問い合わせ）
 - それ以外の nit は deferred として記録のみ（修正しない、Resolve しない）
 - bot 指摘が誤読していたら修正せず reply で説明（rejected として記録、Resolve しない）
-- **重複指摘（codex/gemini が同じ箇所を別 thread で指摘）は全 thread に reply + Resolve**
+- **重複指摘（codex/agy が同じ箇所を別 thread で指摘）は全 thread に reply + Resolve**
 - PR テスト範囲外の **flaky テストも見つけ次第このループで修正**（放置はリポジトリ品質を劣化させる）
 
 ## 必須実行手順（順序厳守）
@@ -280,7 +280,7 @@ PR を読む人は cross-review の存在を意識しないため、最終 PR �
 )
 ````
 
-> ⚠ `rotate-pr.sh` 内部から `claude` / `codex` / `gemini` CLI を直接呼んで生成
+> ⚠ `rotate-pr.sh` 内部から `claude` / `codex` / `agy` CLI を直接呼んで生成
 > させてはならない (環境依存・コスト管理外)。**メイン側の Agent tool で行う**。
 
 ### Step 6c: `rotate-pr.sh execute <STATE_PR> --mode light|squash`
@@ -353,7 +353,7 @@ while ループ脱出後にメインが以下のプロンプトでサブエー�
 > **GraphQL の `reviewThreads` を `isResolved == false` で数え直して対象を決める。**
 >
 > PR の **全 open review thread**（インライン / レビュー body / PR レベルコメント）を
-> `gh api` で洗い出し、cross-review の codex/gemini が残したものを中心に **すべて解消**せよ:
+> `gh api` で洗い出し、cross-review の codex/agy が残したものを中心に **すべて解消**せよ:
 > 1. 修正可能な `minor`/`nit` → コード修正 + push（同ブランチ、main へは push しない）し、
 >    reply + GraphQL `resolveReviewThread` で Resolve。
 > 2. 修正しない（好み・判断保留）`nit` → 「[deferred / nit] 対応見送り: <理由>」を日本語で

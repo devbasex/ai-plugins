@@ -2,7 +2,7 @@
 
 
 def test_tail_last_nonempty_line_returns_latest_marker(tmp_path, monitor_mod):
-    log = tmp_path / "gemini-review-pr1-progress.log"
+    log = tmp_path / "agy-review-pr1-progress.log"
     log.write_text("start: review PR #1\n\nscan: diff\n  \npost: submit review\n")
 
     assert monitor_mod._tail_last_nonempty_line(log) == "post: submit review"
@@ -17,7 +17,7 @@ def test_safe_size_handles_missing_file(tmp_path, monitor_mod):
 
 
 def test_tail_last_nonempty_line_drops_partial_first_line(tmp_path, monitor_mod):
-    log = tmp_path / "gemini-review-pr1-progress.log"
+    log = tmp_path / "agy-review-pr1-progress.log"
     log.write_text("partial line without beginning\npost: submit review\n", encoding="utf-8")
 
     assert monitor_mod._tail_last_nonempty_line(log, limit=28) == "post: submit review"

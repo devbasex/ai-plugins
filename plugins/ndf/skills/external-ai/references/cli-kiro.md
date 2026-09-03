@@ -68,7 +68,7 @@ sed -r 's/\x1b\[[0-9;?]*[ -\/]*[@-~]//g' /tmp/kiro-err.log
 
 防御力を持たないまま事故のリスクだけが残るので、`--trust-all-tools` を使い、
 **セキュリティ境界は作業ディレクトリの隔離に一本化する**。codex の
-`--dangerously-bypass-approvals-and-sandbox` / gemini の `--skip-trust` と同じ整理である。
+`--dangerously-bypass-approvals-and-sandbox` / agy の `--dangerously-skip-permissions` と同じ整理である。
 
 ツール名は内部名（`execute_bash` / `fs_read` / `fs_write`）と表示名（`shell` / `write`）の
 どちらでも受け付けるが、上記の理由で使わない。

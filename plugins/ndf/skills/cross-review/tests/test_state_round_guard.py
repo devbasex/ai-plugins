@@ -29,7 +29,7 @@ def _round(no: int, **over) -> dict:
         "pr": PR,
         "started_at": "2026-08-31T00:00:00+00:00",
         "codex": {"intent": "REQUEST_CHANGES", "by_severity": {"major": 2}},
-        "gemini": {"intent": "APPROVE", "by_severity": {}},
+        "agy": {"intent": "APPROVE", "by_severity": {}},
         "verdict": "changes_requested",
     }
     entry.update(over)

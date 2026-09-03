@@ -119,7 +119,7 @@ def vocabulary() -> dict[str, Any]:
     """提案プロンプトへ**そのまま列挙する**ための語彙集合。
 
     手順書の見出しは日本語なので、「語彙に限定する」とだけ書くと読んだ側が
-    日本語を語彙と解釈する（実測では gemini の提案 4 件が全て日本語で返り、
+    日本語を語彙と解釈する（実測では提案 4 件が全て日本語で返り、
     語彙外の降格規則により全件見送りになった）。**検証側が持つ集合をそのまま
     渡す**ことで、許容値の定義を 1 箇所に保ったまま列挙できる。
     """
@@ -225,9 +225,9 @@ MAX_INVALID_REVIEWS = 1
 AUTH_PROBES: dict[str, tuple[str, ...]] = {
     "claude": ("claude", "auth", "status"),
     "codex": ("codex", "login", "status"),
-    # gemini には認証確認の副コマンドが無い。最小のプロンプトで疎通を見る。
-    # 作業ディレクトリの信頼判定に引っ掛からないよう `--skip-trust` を付ける。
-    "gemini": ("gemini", "--skip-trust", "-p", "ping", "--output-format", "text"),
+    # agy は認証を通ったときだけモデルの一覧を返す。プロンプトを投げる形より
+    # 短く終わり、モデルの呼び出しを 1 回消費しない。
+    "agy": ("agy", "models"),
     "kiro": ("kiro-cli", "whoami"),
 }
 AUTH_PROBE_TIMEOUT = 120
@@ -311,9 +311,8 @@ def _sh(cmd: list[str], cwd: Optional[str] = None, check: bool = True) -> str:
 def _result_path(state: dict[str, Any], runtime: str, stem: str) -> pathlib.Path:
     """CLI が結果を書き出すパス。
 
-    gemini だけは作業領域の外への書き込みが拒否されるため、起動時に一時
-    ディレクトリを作業領域へ追加している（`--include-directories`）。
-    したがって置き場所は全ランタイムで共通でよい。
+    agy だけは現在地を作業領域にしないため、起動時に一時ディレクトリを作業領域へ
+    追加している（`--add-dir`）。したがって置き場所は全ランタイムで共通でよい。
     """
     return pathlib.Path(state["tmp_dir"]) / f"{stem}-result.json"
 
@@ -892,13 +891,9 @@ def check_auth(runtimes: Iterable[str]) -> dict[str, dict[str, Any]]:
         probe = AUTH_PROBES.get(runtime)
         if probe is None:
             continue
-        env = dict(os.environ)
-        if runtime == "gemini":
-            # 新規パスは untrusted と判定されるため、確認でも信頼を明示する。
-            env["GEMINI_CLI_TRUST_WORKSPACE"] = "true"
         try:
             r = subprocess.run(list(probe), capture_output=True, text=True,
-                               timeout=AUTH_PROBE_TIMEOUT, env=env)
+                               timeout=AUTH_PROBE_TIMEOUT)
             merged = f"{r.stdout}\n{r.stderr}".lower()
             ok = r.returncode == 0 and not any(
                 m in merged for m in UNAUTHENTICATED_MARKERS
@@ -1001,7 +996,7 @@ def _fetch_pr_context(pr: int) -> tuple[str, str, bool, str]:
 def cmd_init(args: argparse.Namespace) -> None:
     """Step 0 — ホストと母集合を確定し、作業ディレクトリ root と状態を用意する。
 
-    **提案・レビューの母集合（全 − ホスト）と適用の母集合（全 − gemini）を
+    **提案・レビューの母集合（全 − ホスト）と適用の母集合（全 − agy）を
     別々に確定する。** 両者は重なるが一致しない。
     """
     try:

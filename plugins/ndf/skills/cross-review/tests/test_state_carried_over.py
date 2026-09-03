@@ -42,7 +42,7 @@ def _state(**over) -> dict:
             "pr": PR,
             "started_at": "2026-08-31T00:00:00+00:00",
             "codex": {"intent": "APPROVE", "by_severity": {}},
-            "gemini": {"intent": "APPROVE", "by_severity": {}},
+            "agy": {"intent": "APPROVE", "by_severity": {}},
         }],
         "deferred_nits": [],
         "final": None,

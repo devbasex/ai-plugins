@@ -5,18 +5,18 @@
 # ///
 """CLI プロセス監視 CLI（収束ループ共通層）。
 
-`launch-codex.sh` / `launch-gemini.sh` / `lib/launch-cli.sh` で起動した
+`launch-codex.sh` / `launch-agy.sh` / `lib/launch-cli.sh` で起動した
 バックグラウンドプロセスを **複数の根拠で多重監視** し、失敗パターン
 (sentinel 不在 / 早期エラー / ハング / pidfile stale / result.json 不在) を
 構造化して扱う。
 
-対象ランタイムは codex / gemini / claude / kiro の 4 つで、監視対象の一時ファイル名は
+対象ランタイムは codex / agy / claude / kiro の 4 つで、監視対象の一時ファイル名は
 `--stem-template` で決まる（既定は cross-review の `{agent}-review-pr{id}`）。
 cross-refactoring は `{agent}-propose-rf{id}` のような別の命名を渡す。
 
 監視軸:
   1. **pidfile** + `kill -0` でプロセス生存確認
-     - 可能なら `/proc/<pid>/cmdline` で codex/gemini であることを再確認 (PID 再利用対策)
+     - 可能なら `/proc/<pid>/cmdline` で codex/agy であることを再確認 (PID 再利用対策)
   2. **sentinel** (codex のみ): err.log に `^tokens used$` 出現
   3. **early-error pattern**: err.log に既知の致命的キーワードが出たら即中断
      - **FATAL** (auth/quota/sandbox 等の明確な致命): 検知時に kill
@@ -26,18 +26,18 @@ cross-refactoring は `{agent}-propose-rf{id}` のような別の命名を渡す
      生成されていなければ失敗扱い
   5. **hard timeout**: 既定 7 分。`--timeout` または `MONITOR_TIMEOUT` で上書き可
   6. **stall timeout**: err.log + stdout.log の合計サイズが一定時間変化しなければ
-     STALLED として中断。既定は agent 別 (codex=180s, gemini=480s。gemini は err.log
+     STALLED として中断。既定は agent 別 (codex=180s, agy=480s。agy は err.log
      にほぼ進捗を出さないため大きめ)。`--stall-timeout` で CLI 明示、
      `MONITOR_STALL_<AGENT>` env で per-agent 上書き、`MONITOR_STALL` env で共通上書き可
   7. **progress.log heartbeat**: agent が任意で書く短いフェーズマーカーを stderr に表示。
-     Gemini の stdout/stderr が静かな時間でも、内部推論ではなく監視用の作業段階を確認できる
-  8. **result.json + age fallback**: sentinel を持たない agent (gemini) 向け。
+     stdout/stderr が静かな時間でも、内部推論ではなく監視用の作業段階を確認できる
+  8. **result.json + age fallback**: sentinel を持たない agent (agy) 向け。
      result.json の mtime が 30 秒以上前なら完了とみなし kill → OK
   9. **失敗時 kill**: TIMEOUT / STALLED / EARLY_ERROR (FATAL のみ) / PIDFILE_BAD で
      返るとき、対象プロセスを SIGTERM (3 秒後に SIGKILL) で停止する
 
 Usage:
-  monitor.py <PR> <target>          target ∈ {codex, gemini, both}
+  monitor.py <PR> <target>          target ∈ {codex, agy, both}
   monitor.py <PR> both --timeout 1200 --stall-timeout 600
   monitor.py <PR> both --no-early-error    # EARLY_ERROR 検知を完全無効化
   monitor.py <ID> --agents claude,kiro --tmp-dir DIR \
@@ -82,11 +82,11 @@ DEFAULT_TIMEOUT = 420    # 7 min — `--timeout` / env `MONITOR_TIMEOUT` で上�
 # 既定 stall timeout (後方互換のため env MONITOR_STALL は残す)。
 # 両 agent 共通のデフォルトとして引き続き受け付ける (解釈は `_agent_stall_default()` 内)。
 DEFAULT_STALL = 180       # 3 min no progress
-# per-agent 上書き: gemini は err.log がほぼ無音なため大きめに取る。
+# per-agent 上書き: agy は err.log がほぼ無音なため大きめに取る。
 # 解決順は `_agent_stall_default()` 参照。
 DEFAULT_STALL_AGENT_BUILTIN = {
     "codex": 180,    # 推論ログを逐次出すので 3 min で十分
-    "gemini": 480,   # err.log が静かなため 8 min まで許容
+    "agy": 480,      # err.log が静かなため 8 min まで許容
     # `claude -p --output-format json` は **完了まで 1 バイトも出さない**。
     # 進捗を見て打ち切ると必ず誤検知になるため、ログ無進捗の許容を最も長く取る。
     "claude": 900,
@@ -94,7 +94,7 @@ DEFAULT_STALL_AGENT_BUILTIN = {
     "kiro": 480,
 }
 DEFAULT_POLL = 15          # 15 sec — env `MONITOR_POLL` で上書き可
-# result.json が書き込まれた後もプロセスがハングするケース (gemini で観測) の
+# result.json が書き込まれた後もプロセスがハングするケース (実測) の
 # fallback: mtime から RESULT_AGE_GRACE 秒以上経過していれば完了とみなす。
 RESULT_AGE_GRACE = 30
 # `MONITOR_NO_EARLY_ERROR=1` で EARLY_ERROR 検知を無効化 (escape hatch)
@@ -103,13 +103,11 @@ DEFAULT_NO_EARLY_ERROR = os.environ.get("MONITOR_NO_EARLY_ERROR", "").lower() in
 }
 
 # err.log の行頭に近い形で出る **明確な致命** パターン (kill 対象)。
-# auth / quota / sandbox / HTTP 401-403-429 / gemini の YOLO 降格など、
+# auth / quota / sandbox / HTTP 401-403-429 など、
 # プロセスが続行しても result を生成できないと判明しているケースだけを入れる。
 EARLY_ERROR_FATAL = [
     # HTTP エラーステータス行 (`HTTP/1.1 401 Unauthorized` 等)
     re.compile(r"^HTTP/\d\S* (?:401|403|429) ", re.MULTILINE),
-    # gemini 固有: untrusted directory で YOLO が降格される
-    re.compile(r'^Approval mode overridden to "default"', re.MULTILINE),
     # 認証 / 権限系（行頭限定）
     re.compile(r"^(?:Authentication failed|Permission denied)", re.MULTILINE),
     # quota / rate limit （`m.start()` をキーワード位置に合わせるため `^.*` を付けない。
@@ -137,7 +135,6 @@ EARLY_ERROR_FATAL_WARNING_SHAPED = [
 ]
 
 # 行頭の生 `Error:` / `Traceback` 系は **kill しない警告のみ** に降格。
-# - gemini-cli の `Error in: mcpServers.<name>` 警告 (起動時の config 検証)
 # - codex がレビュー対象 diff の test コード片を echo して `Traceback` が混入するケース
 # など、続行可能な誤検知が頻発するため。プロセスは sentinel / result.json / timeout
 # で別途判定する。
@@ -148,10 +145,6 @@ EARLY_ERROR_WARN = [
 # 文脈に含まれていたら benign（doc 引用 / コードレビューコメント等）と見なし誤検知扱い。
 # FATAL / WARN 双方のスキャンに適用される。
 EARLY_ERROR_BENIGN = [
-    # gemini-cli の config validation 警告 (`Error in: mcpServers.<name>` / `Error in: ...`):
-    # 設定の Unrecognized キーを通知するだけで、gemini 本体は起動継続する。
-    re.compile(r"^Error in: mcpServers\.", re.MULTILINE),
-    re.compile(r"^Error in: \S+\s*$", re.MULTILINE),
     # diff のコンテキスト行 (` `, `+`, `-` で始まり、その後 markdown 表記が来る)
     re.compile(r"^[ +-].*[\|`]", re.MULTILINE),
     # markdown のリスト / 引用
@@ -276,7 +269,7 @@ def _agent_stall_default(agent: str) -> int:
     解決順:
       1. env `MONITOR_STALL_<AGENT>` (per-agent 明示)
       2. env `MONITOR_STALL` (両 agent 共通)
-      3. `DEFAULT_STALL_AGENT_BUILTIN[agent]` (codex=180, gemini=480)
+      3. `DEFAULT_STALL_AGENT_BUILTIN[agent]` (codex=180, agy=480)
       4. `DEFAULT_STALL` (フォールバック)
 
     Note (codex round 3 指摘): 2 は **呼び出し時** に `os.environ["MONITOR_STALL"]`
@@ -312,7 +305,7 @@ def _tmp_dir() -> pathlib.Path:
     state.py の `_tmp_dir()` と同じロジック。優先:
       1. `--tmp-dir` の明示指定
       2. `CROSS_REVIEW_TMP_DIR` / `CROSS_REFACTORING_TMP_DIR` env
-      3. `<worktree-root>/.cross_review/` (worktree 内。gemini の workspace 制約を根本回避)
+      3. `<worktree-root>/.cross_review/` (worktree 内。作業領域を 1 つに保つため)
 
     worktree root は `git rev-parse --show-toplevel` で取得する。
     サブディレクトリから起動した場合でも一貫したパスを返す。
@@ -481,7 +474,7 @@ def _scan_patterns(
     """err.log を末尾 200KB だけ読み、`patterns` の最初の **non-benign** ヒット行を返す。
 
     BENIGN フィルタは **マッチ行そのもの** に対して適用し、誤検知 (markdown 引用 /
-    diff body / gemini の config validation 警告) を除外する。
+    diff body / 引用された警告) を除外する。
 
     重要 1: `pat.search()` ではなく `pat.finditer()` を使い、benign で除外された場合も
     後続の一致を継続して走査する。これにより benign な先行ヒットの後ろにある本物の
@@ -591,7 +584,7 @@ def _safe_size(path: pathlib.Path) -> int:
 def _tail_last_nonempty_line(path: pathlib.Path, limit: int = 4096) -> str:
     """監視用 progress.log の末尾 1 行を安全に読む。
 
-    Gemini に書かせるのは短いフェーズマーカーだけなので、末尾数 KB で十分。
+    委譲先に書かせるのは短いフェーズマーカーだけなので、末尾数 KB で十分。
     壊れた UTF-8 や読み取り競合があっても monitor 自体は落とさない。
     """
     if not path.exists():
@@ -693,7 +686,7 @@ def monitor_agent(
             _emit_log(log_prefix, agent, status)
             return status
 
-        # result.json が書かれた後もプロセスがハング��るケース (gemini で観測:
+        # result.json が書かれた後もプロセスがハングするケース (実測:
         # MCP サーバー切断待ち等��� exit しない)。sentinel 機構を持たない agent 向け
         # の fallback: result.json の mtime が RESULT_AGE_GRACE 秒以上前であれば
         # 完了とみなし、プロセスを kill → OK。
@@ -749,7 +742,7 @@ def monitor_agent(
         # 3. early error
         # 明確な致命 (FATAL) のみ kill する。曖昧パターン (生 Error: / Traceback) は
         # WARN として警告ログのみ。codex がレビュー対象 diff の test コード片を
-        # echo するケースや gemini の config validation 警告で誤 kill されるのを防ぐ。
+        # echo するケースで誤 kill されるのを防ぐ。
         if not no_early_error:
             fatal_err = _scan_early_fatal(paths.err_log)
             fatal_source = "err.log"
@@ -798,7 +791,7 @@ def monitor_agent(
             return status
 
         # 4. stall detection (err.log / stdout.log / progress.log をモニタ。
-        # gemini は stdout 側だけ進捗が出るケースがあり、progress.log には
+        # agy は stdout 側だけ進捗が出るケースがあり、progress.log には
         # launcher が要求した短いフェーズマーカーが出るため、いずれかが
         # 更新されれば progress として扱う)
         status.err_log_size = _safe_size(paths.err_log)
@@ -857,9 +850,9 @@ def _emit_log(prefix: str, agent: str, st: AgentStatus) -> None:
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("pr", type=int)
-    # 後方互換: cross-review は位置引数 `target` で codex / gemini / both を渡す。
+    # 後方互換: cross-review は位置引数 `target` で codex / agy / both を渡す。
     # 4 ランタイム任意の組み合わせは `--agents` で渡す（どちらか一方だけを使う）。
-    p.add_argument("target", nargs="?", choices=["codex", "gemini", "both"])
+    p.add_argument("target", nargs="?", choices=["codex", "agy", "both"])
     p.add_argument("--agents", default=None,
                    help="監視対象をカンマ区切りで指定 (例: claude,kiro)。"
                         "位置引数 target の代わりに使う")
@@ -877,7 +870,7 @@ def main() -> None:
                    help=f"hard timeout in seconds (default: {timeout_default})")
     p.add_argument("--stall-timeout", type=int, default=None,
                    help="stall timeout (err.log no progress) in seconds. "
-                        "未指定時は agent 別既定 (codex=180, gemini=480) または "
+                        "未指定時は agent 別既定 (codex=180, agy=480) または "
                         "env MONITOR_STALL_<AGENT> / MONITOR_STALL を参照")
     p.add_argument("--poll", type=int, default=poll_default,
                    help=f"poll interval in seconds (default: {poll_default})")
@@ -895,7 +888,7 @@ def main() -> None:
         if not agents:
             p.error("--agents が空です")
     elif args.target:
-        agents = ["codex", "gemini"] if args.target == "both" else [args.target]
+        agents = ["codex", "agy"] if args.target == "both" else [args.target]
     else:
         p.error("target か --agents のどちらかを指定してください")
 

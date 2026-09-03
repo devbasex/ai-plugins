@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# cross-review gemini launcher (trusted directory 対策込み).
+# cross-review agy launcher.
 #
-# Usage: launch-gemini.sh <STATE_PR> <ROUND>
+# Usage: launch-agy.sh <STATE_PR> <ROUND>
 #
 # 引数 STATE_PR は state.json の key (= 最初に init した PR 番号)。
 # レビュー対象の PR は state.json の `current_pr` を読む。
 #
 # 注意:
-#   - worktree のような新規パスは untrusted 判定で --yolo が "default" に降格する。
-#     `--skip-trust` と `GEMINI_CLI_TRUST_WORKSPACE=true` を **両方** 必須とする。
-#   - 完了判定は monitor.py が pidfile + sentinel + result.json で多軸判定する。
+#   - 起動そのものは共通層の lib/launch-cli.sh へ委譲する。作業領域の宣言・
+#     プロンプトの渡し方・実行時間の上限は、そちらが 1 箇所で持つ。
+#   - 完了判定は monitor.py が pidfile + result.json で多軸判定する。
 
 set -euo pipefail
 
@@ -19,8 +19,6 @@ ROUND=${2:?ROUND required}
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=_tmpdir.sh
 . "$SCRIPT_DIR/_tmpdir.sh"
-# shellcheck source=lib/_gemini-env.sh
-. "$SCRIPT_DIR/lib/_gemini-env.sh"
 TMP_DIR=$(tmpdir)
 
 STATE=$TMP_DIR/cross-review-pr$STATE_PR-state.json
@@ -38,14 +36,15 @@ SHA=$(gh pr view "$PR" --json headRefOid -q .headRefOid)
 # 前ラウンドの結果を残さない。投稿失敗などで今ラウンドの result.json が
 # 書かれなかったとき、state.py read-result が**前ラウンドの結果を読んで**
 # 同じ判定を繰り返す事故を防ぐ。
-rm -f "$TMP_DIR/gemini-review-pr$STATE_PR-result.json" \
-      "$TMP_DIR/gemini-review-pr$STATE_PR-round$ROUND-payload.json" \
-      "$TMP_DIR/gemini-review-pr$STATE_PR-round$ROUND-api-payload.json"
+rm -f "$TMP_DIR/agy-review-pr$STATE_PR-result.json" \
+      "$TMP_DIR/agy-review-pr$STATE_PR-round$ROUND-payload.json" \
+      "$TMP_DIR/agy-review-pr$STATE_PR-round$ROUND-api-payload.json"
 
-PROMPT=$TMP_DIR/gemini-review-pr$STATE_PR-prompt.md
+STEM=$TMP_DIR/agy-review-pr$STATE_PR
+PROMPT=$STEM-prompt.md
 # 既存コメントは **プロンプトにインライン埋め込み** する。
-# tmp dir は `<worktree>/.cross_review/` を使うが、念のため
-# プロンプト埋め込み方式も維持 (gemini が read_file を呼ばずに済むので確実)。
+# tmp dir は `<worktree>/.cross_review/` を使うが、埋め込みなら読み取りの往復が
+# 要らないので確実である。
 EXISTING_FILE=$TMP_DIR/cross-review-pr$STATE_PR-existing-comments.txt
 if [ -s "$EXISTING_FILE" ]; then
   EXISTING_INLINE=$(cat "$EXISTING_FILE")
@@ -68,9 +67,9 @@ EXTRA_EOF
 fi
 
 cat > "$PROMPT" <<EOF
-# /ndf:pr-review 実行 (cross-review gemini / round $ROUND)
+# /ndf:pr-review 実行 (cross-review agy / round $ROUND)
 
-PR #$PR を **gemini の観点でレビューし、gh api で直接 PR に投稿** してください。
+PR #$PR を **agy の観点でレビューし、gh api で直接 PR に投稿** してください。
 
 ## 必須コンテキスト
 - repo: $REPO
@@ -92,7 +91,7 @@ $EXTRA_REVIEW_BLOCK
 ## 出力契約
 - review body の **先頭行** に必ず以下を入れる:
   \`\`\`
-  ## 🤖 cross-review | round $ROUND | gemini | <event(intent)>
+  ## 🤖 cross-review | round $ROUND | agy | <event(intent)>
   \`\`\`
   - \`<event>\` は **本来の intent** (REQUEST_CHANGES / APPROVE / COMMENT)
 
@@ -114,7 +113,7 @@ $EXTRA_REVIEW_BLOCK
 
 ### 進捗マーカー（監視用）
 - 無言ハングと区別できるよう、作業フェーズが進むたびに
-  **$TMP_DIR/gemini-review-pr$STATE_PR-progress.log** へ短い 1 行を追記すること
+  **$STEM-progress.log** へ短い 1 行を追記すること
 - 内部の推論や長い説明は書かず、以下のようなフェーズ名 + 対象だけを書く:
   - \`start: review PR #$PR round $ROUND\`
   - \`scan: diff and existing comments\`
@@ -144,7 +143,7 @@ $EXTRA_REVIEW_BLOCK
 - result.json を書かずに終了すると、収束ループは**前ラウンドの結果を使うか、結果なしで
   停止する**。エラー時ほど result.json が要る
 
-- 投稿後、サマリを **$TMP_DIR/gemini-review-pr$STATE_PR-result.json** に
+- 投稿後、サマリを **$STEM-result.json** に
   **必ず以下のキーで** 書く:
   \`\`\`json
   {
@@ -158,7 +157,7 @@ $EXTRA_REVIEW_BLOCK
   - \`intent\` / \`comment_count\` 等の別名は使わないこと
   - \`event\` の値は \`APPROVE\` / \`REQUEST_CHANGES\` / \`COMMENT\` のいずれか
   - \`event_downgrade=true\` のとき \`posted_as\` は \`COMMENT\` にダウングレード可
-- payload は **$TMP_DIR/gemini-review-pr$STATE_PR-round$ROUND-payload.json** に保存
+- payload は **$STEM-round$ROUND-payload.json** に保存
   （振動検知用、\`{ "comments": [{path, line, body, severity}, ...] }\` 形式）
 
 ## 守るべきこと
@@ -167,39 +166,19 @@ $EXTRA_REVIEW_BLOCK
 - gh api 失敗時は err.log にエラー詳細を残し、**result.json を書いてから**終了する
 EOF
 
-cd "$WORKTREE"
+# 結果ファイルの置き場所が作業ツリーの外にあるときだけ、作業領域へ足す。
+# `<worktree>/.cross_review/` を使う既定の配置では足さない。
+WORKTREE_ABS=$(cd "$WORKTREE" && pwd -P)
+TMP_ABS=$(cd "$TMP_DIR" && pwd -P)
+EXTRA_DIR=
+case "$TMP_ABS/" in
+  "$WORKTREE_ABS"/*) ;;
+  *) EXTRA_DIR=$TMP_ABS ;;
+esac
 
-# gemini-cli 最新版は mcpServers エントリの `disabled` キーを Unrecognized 扱いし、
-# 起動時に `Error in: mcpServers.<name>` 警告を err.log に出す。文字列としては
-# `Error: ...` ではなく `Error in: ...` だが、monitor.py 旧版が誤検知して
-# プロセスを kill する原因になっていた (REPORT01 参照)。
-# 無害化の手順は cross-refactoring と共有するため lib/_gemini-env.sh にある。
-#
-# trap で EXIT / INT / TERM / HUP のいずれでも必ず settings.json を復元する。
-# sleep 2 中や復元前に Ctrl-C / SIGTERM / シェル終了で止まっても、sanitize 済み
-# settings.json が worktree に残らないようにするため。冪等に書いてあるので
-# 多重実行されても安全。
-trap gemini_restore_settings EXIT INT TERM HUP
+# 実行時間の上限。監視の hard timeout (既定 420 秒) より長く取り、打ち切りの判断を
+# 監視の側へ一本化する。
+PRINT_TIMEOUT=600
 
-gemini_sanitize_settings "$WORKTREE" \
-  "$TMP_DIR/gemini-review-pr$STATE_PR-settings-backup.json" \
-  "$TMP_DIR/gemini-review-pr$STATE_PR-settings-sanitized.json"
-
-# ⚠ --skip-trust と GEMINI_CLI_TRUST_WORKSPACE=true は両方必須
-GEMINI_CLI_TRUST_WORKSPACE=true nohup gemini --yolo --skip-trust --output-format text \
-  -p "" \
-  > $TMP_DIR/gemini-review-pr$STATE_PR-stdout.log \
-  2> $TMP_DIR/gemini-review-pr$STATE_PR-err.log < "$PROMPT" &
-GEMINI_PID=$!
-echo $GEMINI_PID > $TMP_DIR/gemini-review-pr$STATE_PR.pid
-disown
-
-# gemini は起動時に 1 度 settings.json を読む。読み込み完了を待ってから元の
-# ファイルを復元する (worktree を dirty なままにしないため)。
-# sleep 中に signal が来ても trap gemini_restore_settings が必ず復元するため安全。
-if [ -n "${GEMINI_SETTINGS_BACKUP:-}" ] && [ -f "$GEMINI_SETTINGS_BACKUP" ]; then
-  sleep 2
-  gemini_restore_settings
-fi
-
-echo "🚀 gemini launched (pid=$GEMINI_PID)" >&2
+"$SCRIPT_DIR/lib/launch-cli.sh" agy "$WORKTREE_ABS" "$PROMPT" "$STEM" "" \
+  "$EXTRA_DIR" "$PRINT_TIMEOUT"

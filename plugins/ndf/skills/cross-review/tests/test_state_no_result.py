@@ -12,7 +12,7 @@
 | それ以外 | 修正へ | 2 |
 
 用語は `issues/parallel-batch-03/02-issue-196.md` に従う。レビュアーは codex と
-gemini の 2 つを指す。
+agy の 2 つを指す。
 """
 from __future__ import annotations
 
@@ -107,18 +107,18 @@ def test_the_output_separates_a_requested_skip_from_a_missing_result(
     _write(tmp_dir, _state([_round(codex=_approve())], only="codex"))
     with pytest.raises(SystemExit):
         state_mod.cmd_judge(argparse.Namespace(pr=PR))
-    assert "GEMINI_INTENT=SKIP" in capsys.readouterr().out
+    assert "AGY_INTENT=SKIP" in capsys.readouterr().out
 
     _write(tmp_dir, _state([_round(codex=_approve())]))
     with pytest.raises(SystemExit):
         state_mod.cmd_judge(argparse.Namespace(pr=PR))
-    assert "GEMINI_INTENT=NO_RESULT" in capsys.readouterr().out
+    assert "AGY_INTENT=NO_RESULT" in capsys.readouterr().out
 
 
 # ---------------- 受け入れ条件 4: 結果なしをラウンドへ残す ----------------
 
 
-def _read_result(state_mod, rfile: pathlib.Path, agent: str = "gemini") -> int:
+def _read_result(state_mod, rfile: pathlib.Path, agent: str = "agy") -> int:
     with pytest.raises(SystemExit) as e:
         state_mod.cmd_read_result(
             argparse.Namespace(pr=PR, agent=agent, file=str(rfile))
@@ -133,7 +133,7 @@ def test_a_missing_result_file_is_recorded_on_the_round(tmp_dir, state_mod):
 
     assert _read_result(state_mod, rfile) == 1
 
-    entry = _read(tmp_dir)["rounds"][-1]["gemini"]
+    entry = _read(tmp_dir)["rounds"][-1]["agy"]
     assert entry["intent"] == "NO_RESULT"
     assert entry["no_result_reason"] == "missing"
 
@@ -145,12 +145,12 @@ def test_an_unreadable_result_file_is_recorded_on_the_round(tmp_dir, state_mod):
 
     rfile.write_text("{ not json")
     assert _read_result(state_mod, rfile) == 3
-    assert _read(tmp_dir)["rounds"][-1]["gemini"]["no_result_reason"] == "unparsable"
+    assert _read(tmp_dir)["rounds"][-1]["agy"]["no_result_reason"] == "unparsable"
 
     _write(tmp_dir, _state([_round()]))
     rfile.write_text(json.dumps([{"event": "APPROVE"}]))
     assert _read_result(state_mod, rfile) == 3
-    assert _read(tmp_dir)["rounds"][-1]["gemini"]["no_result_reason"] == "unparsable"
+    assert _read(tmp_dir)["rounds"][-1]["agy"]["no_result_reason"] == "unparsable"
 
 
 def test_a_result_without_a_verdict_is_recorded_on_the_round(tmp_dir, state_mod):
@@ -161,7 +161,7 @@ def test_a_result_without_a_verdict_is_recorded_on_the_round(tmp_dir, state_mod)
 
     assert _read_result(state_mod, rfile) == 1
 
-    entry = _read(tmp_dir)["rounds"][-1]["gemini"]
+    entry = _read(tmp_dir)["rounds"][-1]["agy"]
     assert entry["intent"] == "NO_RESULT"
     assert entry["no_result_reason"] == "no_verdict"
 
@@ -178,9 +178,9 @@ def test_the_first_missing_result_asks_for_one_relaunch(tmp_dir, state_mod, caps
 
     assert e.value.code == 7
     out = capsys.readouterr().out
-    assert "RELAUNCH_AGENTS='gemini'" in out
-    assert "RELAUNCH_TARGET=gemini" in out
-    assert _read(tmp_dir)["rounds"][-1]["relaunched"] == ["gemini"]
+    assert "RELAUNCH_AGENTS='agy'" in out
+    assert "RELAUNCH_TARGET=agy" in out
+    assert _read(tmp_dir)["rounds"][-1]["relaunched"] == ["agy"]
 
 
 def test_both_missing_results_ask_for_both(tmp_dir, state_mod, capsys):
@@ -192,16 +192,16 @@ def test_both_missing_results_ask_for_both(tmp_dir, state_mod, capsys):
 
     assert e.value.code == 7
     out = capsys.readouterr().out
-    assert "RELAUNCH_AGENTS='codex gemini'" in out
+    assert "RELAUNCH_AGENTS='codex agy'" in out
     assert "RELAUNCH_TARGET=both" in out
-    assert _read(tmp_dir)["rounds"][-1]["relaunched"] == ["codex", "gemini"]
+    assert _read(tmp_dir)["rounds"][-1]["relaunched"] == ["codex", "agy"]
 
 
 def test_a_missing_result_after_the_relaunch_stops_the_review(tmp_dir, state_mod):
     """起動し直した後も結果が残らなければ、`final = error` で中断する。"""
     _write(
         tmp_dir,
-        _state([_round(codex=_approve(), relaunched=["gemini"])]),
+        _state([_round(codex=_approve(), relaunched=["agy"])]),
     )
 
     with pytest.raises(SystemExit) as e:
@@ -233,7 +233,7 @@ def test_a_no_result_round_needs_no_fix_record(tmp_dir, state_mod):
     """結果なしのラウンドの次を開始するとき、修正の記録を求められない。"""
     _write(
         tmp_dir,
-        _state([_round(codex=_approve(), relaunched=["gemini"], verdict="no_result")]),
+        _state([_round(codex=_approve(), relaunched=["agy"], verdict="no_result")]),
     )
 
     state_mod.cmd_start_round(argparse.Namespace(pr=PR))
@@ -263,7 +263,7 @@ def test_the_round_summary_shows_the_missing_result(tmp_dir, state_mod, capsys):
             [
                 _round(
                     codex=_approve(),
-                    gemini={"intent": "NO_RESULT", "no_result_reason": "missing"},
+                    agy={"intent": "NO_RESULT", "no_result_reason": "missing"},
                     verdict="no_result",
                 )
             ]

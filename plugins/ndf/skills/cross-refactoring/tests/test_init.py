@@ -125,7 +125,7 @@ def test_init_records_cohorts_separately(run_init, tmp_path):
     """提案・レビューと適用の母集合は別物である。"""
     run_init(_args(tmp_path))
     _, state = _state_of(tmp_path)
-    assert state["runtimes"] == ["codex", "gemini", "kiro"]
+    assert state["runtimes"] == ["codex", "agy", "kiro"]
     assert state["impl_capable"] == ["claude", "codex", "kiro"]
     assert state["host"] == "claude"
     assert state["host_detection"] == "explicit"
@@ -136,7 +136,7 @@ def test_init_records_models(run_init, tmp_path):
     run_init(_args(tmp_path, model=["codex=gpt-5.5", "kiro=claude-opus-5"]))
     _, state = _state_of(tmp_path)
     assert state["models"] == {
-        "claude": None, "codex": "gpt-5.5", "gemini": None, "kiro": "claude-opus-5",
+        "claude": None, "codex": "gpt-5.5", "agy": None, "kiro": "claude-opus-5",
     }
 
 
@@ -173,9 +173,9 @@ def test_init_rejects_unknown_model_runtime(run_init, tmp_path):
         run_init(_args(tmp_path, model=["gpt=gpt-5.5"]))
 
 
-def test_init_rejects_gemini_as_host(run_init, tmp_path):
+def test_init_rejects_agy_as_host(run_init, tmp_path):
     with pytest.raises(SystemExit):
-        run_init(_args(tmp_path, host="gemini"))
+        run_init(_args(tmp_path, host="agy"))
 
 
 def test_init_runs_the_baseline_test(run_init, tmp_path):
@@ -218,9 +218,9 @@ def test_init_is_idempotent(run_init, tmp_path, capsys):
 def test_init_emits_shell_assignments(run_init, tmp_path, capsys):
     run_init(_args(tmp_path))
     out = capsys.readouterr().out
-    assert "RUNTIMES_CSV=codex,gemini,kiro" in out
+    assert "RUNTIMES_CSV=codex,agy,kiro" in out
     # 空白を含む値は必ず引用する。引用しないと呼び出し側の eval で語が割れる。
-    assert "RUNTIMES='codex gemini kiro'" in out
+    assert "RUNTIMES='codex agy kiro'" in out
     assert "IMPL_POOL='claude codex kiro'" in out
     assert "TMP_DIR=" in out and "WORK=" in out
 
@@ -285,7 +285,7 @@ def test_init_records_the_vocabulary_for_the_prompt(run_init, tmp_path, refactor
     """許容値をプロンプトへ列挙できるよう、語彙集合を状態へ残すこと。
 
     手順書の見出しは日本語なので、「語彙に限定する」とだけ書くと読んだ側が
-    日本語を語彙と解釈する（実測で gemini の提案 4 件が全件見送りになった）。
+    日本語を語彙と解釈する（実測で agy の提案 4 件が全件見送りになった）。
     """
     run_init(_args(tmp_path))
     _, state = _state_of(tmp_path)
@@ -310,7 +310,7 @@ def _probe_result(refactor, monkeypatch, outcomes):
 def test_check_auth_passes_when_every_cli_is_logged_in(refactor, monkeypatch):
     monkeypatch.delenv("NDF_SKIP_AUTH_CHECK", raising=False)
     _probe_result(refactor, monkeypatch, {})
-    results = refactor.check_auth(["claude", "codex", "gemini", "kiro"])
+    results = refactor.check_auth(["claude", "codex", "agy", "kiro"])
     assert all(r["ok"] for r in results.values())
 
 
@@ -318,7 +318,7 @@ def test_check_auth_fails_on_a_non_zero_exit(refactor, monkeypatch):
     monkeypatch.delenv("NDF_SKIP_AUTH_CHECK", raising=False)
     _probe_result(refactor, monkeypatch, {"kiro": (1, "")})
     with pytest.raises(SystemExit) as e:
-        refactor.check_auth(["claude", "codex", "gemini", "kiro"])
+        refactor.check_auth(["claude", "codex", "agy", "kiro"])
     assert e.value.code == refactor.ABORT
 
 
@@ -327,7 +327,7 @@ def test_check_auth_fails_when_the_output_says_not_logged_in(refactor, monkeypat
     monkeypatch.delenv("NDF_SKIP_AUTH_CHECK", raising=False)
     _probe_result(refactor, monkeypatch, {"kiro": (0, "Not logged in")})
     with pytest.raises(SystemExit):
-        refactor.check_auth(["claude", "codex", "gemini", "kiro"])
+        refactor.check_auth(["claude", "codex", "agy", "kiro"])
 
 
 def test_check_auth_fails_when_the_cli_is_missing(refactor, monkeypatch):
@@ -349,7 +349,7 @@ def test_check_auth_can_be_skipped_explicitly(refactor, monkeypatch):
         raise AssertionError("認証確認を実行してはいけない")
 
     monkeypatch.setattr(refactor.subprocess, "run", never)
-    assert refactor.check_auth(["codex", "gemini"]) == {}
+    assert refactor.check_auth(["codex", "agy"]) == {}
 
 
 def test_init_checks_cli_authentication(refactor, origin_repo, monkeypatch, tmp_path):
@@ -360,7 +360,7 @@ def test_init_checks_cli_authentication(refactor, origin_repo, monkeypatch, tmp_
     monkeypatch.delenv("NDF_SKIP_AUTH_CHECK", raising=False)
     monkeypatch.chdir(origin_repo)
     monkeypatch.delenv("CROSS_REFACTORING_TMP_DIR", raising=False)
-    _probe_result(refactor, monkeypatch, {"gemini": (1, "Authentication failed")})
+    _probe_result(refactor, monkeypatch, {"agy": (1, "Authentication failed")})
     monkeypatch.setattr(
         refactor, "_sh",
         lambda cmd, **k: pytest.fail("認証確認より前に gh を呼んでいる"),

@@ -45,7 +45,7 @@ def _item(**over):
         "rationale": "1 関数が 6 段の処理を通しで行っている",
         "plan": "1. 範囲の確定を切り出す 2. 検証を切り出す",
         "test_gap": False, "estimated_diff_lines": 40,
-        "proposed_by": ["codex", "gemini"], "status": "done", "commits": ["abc1234"],
+        "proposed_by": ["codex", "agy"], "status": "done", "commits": ["abc1234"],
     }
     base.update(over)
     return base
@@ -53,12 +53,12 @@ def _item(**over):
 
 def _state(tmp_path, work=None, **over):
     rounds = over.pop("rounds", [{
-        "round": 1, "impl": "codex", "reviewers": ["gemini", "kiro"],
+        "round": 1, "impl": "codex", "reviewers": ["agy", "kiro"],
         "items": ["R1-001"], "reviews": [], "fix_rounds": 0,
     }])
     items = over.pop("items", [_item()])
     worktrees = {"work": str(work or tmp_path / "work")}
-    for r in ("codex", "gemini", "kiro"):
+    for r in ("codex", "agy", "kiro"):
         worktrees[r] = str(tmp_path / r)
     path = make_state(tmp_path, rounds=rounds, items=items,
                       worktrees=worktrees, **over)
@@ -101,9 +101,9 @@ def test_plan_marks_an_abandoned_item(refactor, tmp_path):
 
 def test_plan_groups_items_by_round(refactor, tmp_path):
     rounds = [
-        {"round": 1, "impl": "codex", "reviewers": ["gemini", "kiro"],
+        {"round": 1, "impl": "codex", "reviewers": ["agy", "kiro"],
          "items": ["R1-001"], "reviews": [], "fix_rounds": 0},
-        {"round": 2, "impl": "kiro", "reviewers": ["codex", "gemini"],
+        {"round": 2, "impl": "kiro", "reviewers": ["codex", "agy"],
          "items": ["R2-001"], "reviews": [], "fix_rounds": 0},
     ]
     items = [_item(), _item(item_id="R2-001", round=2)]

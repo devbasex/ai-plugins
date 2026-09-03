@@ -9,7 +9,7 @@
 #
 # tmp ディレクトリは `_tmpdir.sh` の `tmpdir()` 関数で決定:
 #   CROSS_REVIEW_TMP_DIR env → $PWD/.cross_review/
-# worktree 内に配置することで gemini の workspace 制約を根本回避。
+# worktree 内に配置することで、宣言する作業領域を 1 つに保つ。
 # codex は --dangerously-bypass-approvals-and-sandbox を維持
 # (-s workspace-write は bwrap 非対応環境で失敗するため)。
 #

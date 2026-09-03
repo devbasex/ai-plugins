@@ -1,7 +1,7 @@
 ---
 name: pr-review
 description: "Review a PR diff, or the branch diff with --branch, and post an approve or request-changes verdict. Use when reviewing a PR（PRレビュー・マージ前チェック・セルフレビュー）."
-argument-hint: "[PR番号 | --branch] [AIエージェント(codex|gemini)] [--focus AREA]"
+argument-hint: "[PR番号 | --branch] [AIエージェント(codex|agy)] [--focus AREA]"
 effort: high
 allowed-tools:
   - Bash
@@ -20,7 +20,7 @@ PR 差分、または `--branch` 指定時は現在のブランチの差分を�
 |---|---|---|
 | `[PR番号]` | レビュー対象の PR | 直前の PR |
 | `--branch` | PR ではなく **ローカルブランチの差分**をレビューする（PR 作成前のセルフレビュー） | OFF |
-| `[AIエージェント]` | `codex` / `gemini` に委譲。省略時は Claude 自身 | Claude |
+| `[AIエージェント]` | `codex` / `agy` に委譲。省略時は Claude 自身 | Claude |
 | `--focus AREA` | 重点観点（`security` / `performance` / `tests` / 任意の文字列） | なし |
 
 ```
@@ -306,7 +306,7 @@ gh api -X POST "repos/$OWNER_REPO/pulls/$PR/comments" \
 内容を **レビュー指示プロンプト** として組み立て、指定された CLI に渡す。
 
 呼び出し手順の詳細は、利用 runtime に `/ndf:external-ai` skill が同梱されている場合は
-その skill の `references/cli-codex.md` / `references/cli-gemini.md` に従う。
+その skill の `references/cli-codex.md` / `references/cli-agy.md` に従う。
 同梱されていない runtime では以下の要点に従う。
 
 **`codex` 指定時**
@@ -322,17 +322,18 @@ gh api -X POST "repos/$OWNER_REPO/pulls/$PR/comments" \
 > 外部隔離環境内** でのみ使用すること。ホスト直接実行や本番リポジトリでは使わない。
 > 背景・代替策は `/ndf:external-ai` skill の `references/cli-codex.md`「サンドボックス制約」節を参照。
 
-**`gemini` 指定時**
+**`agy` 指定時**
 
-- プロンプトを `/tmp/gemini-review-pr<番号>-prompt.md` に書き出し
-- **AI 直接投稿フローでは `--yolo` 必須**（`gh api -X POST` がシェル実行のため、`plan` / `auto_edit` だとブロックされる）
+- プロンプトを `/tmp/agy-review-pr<番号>-prompt.md` に書き出し
+- **AI 直接投稿フローでは `--dangerously-skip-permissions` 必須**（`gh api -X POST` がシェル実行のため、`--mode plan` だとブロックされる）
 - プロンプト側で **「リポジトリ内ファイルを編集してはならない。`gh api` で投稿するだけ」** を強く明示する
-- `gemini --yolo --output-format text -p "$(cat prompt.md)" > stdout 2> err &` でバックグラウンド起動
+- `agy --dangerously-skip-permissions --output-format text --add-dir <作業ツリー> -p="$(cat prompt.md)" > stdout 2> err &` でバックグラウンド起動
 - `kill -0 $PID` ポーリングで完了検知（codex と異なり sentinel 不要 / プロセス exit を見る）
-- 成果物は stdout サマリ + `/tmp/gemini-review-pr<番号>-result.json` で回収
+- 成果物は stdout サマリ + `/tmp/agy-review-pr<番号>-result.json` で回収
 
-> ⚠️ `--yolo` も同様に外部隔離環境内でのみ実行する。プロンプトでの「リポジトリ編集禁止」明示は必須だが、
-> sandbox の代替にはならない。詳細は `/ndf:external-ai` skill の `references/cli-gemini.md` を参照。
+> ⚠️ `--dangerously-skip-permissions` も同様に外部隔離環境内でのみ実行する。プロンプトでの
+> 「リポジトリ編集禁止」明示は必須だが、隔離の代替にはならない。詳細は `/ndf:external-ai` skill の
+> `references/cli-agy.md` を参照。
 
 ### プロンプト組み立て
 
@@ -397,7 +398,7 @@ GitHub は **自分の PR には `REQUEST_CHANGES` で投稿できない**
 メインエージェントの責務は **結果サマリの読み込みと検証のみ**。
 
 ```bash
-AGENT=codex   # or gemini
+AGENT=codex   # or agy
 RESULT=/tmp/$AGENT-review-pr$PR-result.json
 
 if [ ! -s "$RESULT" ]; then
@@ -421,7 +422,7 @@ fi
 
 PR モードではレビュー結果が **PR 上に投稿済み** であることが前提。報告は以下に絞る。
 
-- 利用エージェント（claude / codex / gemini）
+- 利用エージェント（claude / codex / agy）
 - 投稿結果（review URL、event）
 - 件数サマリ（インラインコメント数、重要度別内訳）
 - 総評の要約 / PR URL
@@ -435,6 +436,6 @@ PR モードではレビュー結果が **PR 上に投稿済み** であるこ�
 ## 関連
 
 - `/ndf:fix` — レビュー指摘の分類と修正対応
-- `/ndf:cross-review` — codex + gemini の収束レビュー
-- `/ndf:external-ai` — Codex / Gemini CLI の呼び出し手順（同梱 runtime のみ）
+- `/ndf:cross-review` — codex + agy の収束レビュー
+- `/ndf:external-ai` — Codex / agy CLI の呼び出し手順（同梱 runtime のみ）
 - `/ndf:logging-guidelines` — ログ設計

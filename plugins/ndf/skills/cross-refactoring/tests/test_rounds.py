@@ -14,7 +14,7 @@ def _args(state_id=130):
 
 def _round(round_no, **over):
     base = {
-        "round": round_no, "impl": "codex", "reviewers": ["gemini", "kiro"],
+        "round": round_no, "impl": "codex", "reviewers": ["agy", "kiro"],
         "impl_model": {"requested": None, "observed": None},
         "reviewer_models": {}, "proposed": {}, "merged": 1, "adopted": 1, "deferred": 0,
         "items": [], "apply": {"applied": [], "failed": []},
@@ -36,7 +36,7 @@ def test_start_round_opens_and_records_assignment(refactor, tmp_path, env_tmp_di
     assert len(state["rounds"]) == 1
     entry = state["rounds"][0]
     assert entry["impl"] == "codex"
-    assert entry["reviewers"] == ["gemini", "kiro"]
+    assert entry["reviewers"] == ["agy", "kiro"]
     assert entry["impl"] not in entry["reviewers"]
     assert state["phase"] == "propose"
 
@@ -136,11 +136,11 @@ def test_report_renders_tables(refactor, tmp_path, env_tmp_dir, capsys):
     state_path = make_state(
         tmp_path,
         rounds=[_round(1, items=["R1-001"], apply={"applied": ["R1-001"], "failed": []},
-                       reviews=[{"round": 1, "gemini": "APPROVE", "kiro": "APPROVE",
+                       reviews=[{"round": 1, "agy": "APPROVE", "kiro": "APPROVE",
                                  "findings": []}])],
         items=[{"item_id": "R1-001", "round": 1, "path": "src/a.py", "symbol": "A",
                 "smell": "long_method", "technique": "extract_method",
-                "severity": "major", "proposed_by": ["codex", "gemini"],
+                "severity": "major", "proposed_by": ["codex", "agy"],
                 "status": "done", "commits": ["abc"]}],
         deferred_items=[{"path": "src/z.py", "symbol": "Z", "smell": "duplication",
                          "round": 1, "defer_reason": "しきい値未満"}],
@@ -161,5 +161,5 @@ def test_status_reports_cohorts(refactor, tmp_path, env_tmp_dir, capsys):
     env_tmp_dir(state_path)
     refactor.cmd_status(_args())
     out = capsys.readouterr().out
-    assert "提案・レビュー: codex / gemini / kiro" in out
+    assert "提案・レビュー: codex / agy / kiro" in out
     assert "適用の母集合: claude / codex / kiro" in out

@@ -192,8 +192,8 @@ def test_broken_stdin_does_not_fail(main_repo: Path) -> None:
     assert proc.stdout.strip() == ""
 
 
-def test_gemini_replace_is_normalized(main_repo: Path) -> None:
-    """Gemini CLI の部分書き換えツールは `replace` を名乗る。"""
+def test_partial_replace_tool_is_normalized(main_repo: Path) -> None:
+    """部分書き換えを `replace` と名乗るランタイムがある。"""
     declared(main_repo)
     payload = {
         "session_id": "g1",
@@ -205,8 +205,8 @@ def test_gemini_replace_is_normalized(main_repo: Path) -> None:
     assert "plugins/ndf/README.md" in context_of(result)
 
 
-def test_gemini_run_shell_command_is_normalized(main_repo: Path) -> None:
-    """Gemini CLI のシェル実行ツールは `run_shell_command` を名乗る。"""
+def test_run_shell_command_is_normalized(main_repo: Path) -> None:
+    """シェル実行を `run_shell_command` と名乗るランタイムがある。"""
     declared(main_repo)
     payload = {
         "session_id": "g2",

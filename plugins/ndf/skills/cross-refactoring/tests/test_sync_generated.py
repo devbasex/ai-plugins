@@ -49,7 +49,7 @@ def _state_with_sync(tmp_path, work, command="true"):
     return make_state(
         tmp_path,
         worktrees={"work": str(work), "codex": str(tmp_path / "codex"),
-                   "gemini": str(tmp_path / "gemini"), "kiro": str(tmp_path / "kiro")},
+                   "agy": str(tmp_path / "agy"), "kiro": str(tmp_path / "kiro")},
         sync_command=command,
     )
 
@@ -193,10 +193,10 @@ def test_merge_fix_continues_when_impl_left_changes(
     state_path = make_state(
         tmp_path,
         worktrees={"work": str(work), "codex": str(tmp_path / "codex"),
-                   "gemini": str(tmp_path / "gemini"), "kiro": str(tmp_path / "kiro")},
+                   "agy": str(tmp_path / "agy"), "kiro": str(tmp_path / "kiro")},
         rounds=[{
             "round": 1, "impl": "codex", "impl_model": None,
-            "reviewers": ["gemini", "kiro"], "reviewer_models": {},
+            "reviewers": ["agy", "kiro"], "reviewer_models": {},
             "items": ["R1-001"], "adopted": 1, "proposed": 1, "merged": 1,
             "apply": {"merged_at": "2026-08-18T00:00:00", "applied": ["R1-001"],
                       "failed": []},
@@ -237,10 +237,10 @@ def test_merge_fix_advances_when_the_range_is_undeterminable(
     state_path = make_state(
         tmp_path,
         worktrees={"work": str(work), "codex": str(tmp_path / "codex"),
-                   "gemini": str(tmp_path / "gemini"), "kiro": str(tmp_path / "kiro")},
+                   "agy": str(tmp_path / "agy"), "kiro": str(tmp_path / "kiro")},
         rounds=[{
             "round": 1, "impl": "codex", "impl_model": None,
-            "reviewers": ["gemini", "kiro"], "reviewer_models": {},
+            "reviewers": ["agy", "kiro"], "reviewer_models": {},
             "items": ["R1-001"], "adopted": 1, "proposed": 1, "merged": 1,
             "apply": {"merged_at": "2026-08-18T00:00:00", "applied": ["R1-001"],
                       "failed": []},

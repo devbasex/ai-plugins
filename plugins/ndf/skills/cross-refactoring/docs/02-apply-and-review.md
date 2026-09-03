@@ -415,8 +415,8 @@ claude が参加する構成では実際のリファクタリング 1 件で 1.4
 先頭に人が読む形と集計用の印を両方入れる。
 
 ```text
-## 🤖 cross-refactoring | round 1 | Reviewer: gemini / default | REQUEST_CHANGES
-<!-- cross-refactoring reviewer=gemini model=default round=1 -->
+## 🤖 cross-refactoring | round 1 | Reviewer: agy / default | REQUEST_CHANGES
+<!-- cross-refactoring reviewer=agy model=default round=1 -->
 ```
 
 インラインコメントの本文冒頭には **`Item-Id: R1-001`** を必ず書かせる。

@@ -9,7 +9,7 @@ import pytest
 
 from crossref_helpers import make_state, read_state, write_result
 
-REVIEWERS = ["gemini", "kiro"]
+REVIEWERS = ["agy", "kiro"]
 ROUND_ITEMS = ["R1-001", "R1-002"]
 
 
@@ -38,21 +38,21 @@ def finding(item_id="R1-001", **over):
 
 def test_both_approve(refactor):
     verdict, problems = refactor.judge(
-        {"gemini": review(), "kiro": review()}, REVIEWERS, ROUND_ITEMS
+        {"agy": review(), "kiro": review()}, REVIEWERS, ROUND_ITEMS
     )
     assert (verdict, problems) == ("approved", [])
 
 
 def test_one_request_changes(refactor):
     verdict, _ = refactor.judge(
-        {"gemini": review("REQUEST_CHANGES", [finding()]), "kiro": review()},
+        {"agy": review("REQUEST_CHANGES", [finding()]), "kiro": review()},
         REVIEWERS, ROUND_ITEMS,
     )
     assert verdict == "changes"
 
 
 def test_missing_result_is_invalid(refactor):
-    verdict, problems = refactor.judge({"gemini": review()}, REVIEWERS, ROUND_ITEMS)
+    verdict, problems = refactor.judge({"agy": review()}, REVIEWERS, ROUND_ITEMS)
     assert verdict == "invalid"
     assert any("kiro" in p for p in problems)
 
@@ -60,7 +60,7 @@ def test_missing_result_is_invalid(refactor):
 def test_comment_verdict_is_invalid(refactor):
     """判定は 2 値。疑義が残るなら通さない側に倒すため COMMENT は使わない。"""
     verdict, problems = refactor.judge(
-        {"gemini": review("COMMENT"), "kiro": review()}, REVIEWERS, ROUND_ITEMS
+        {"agy": review("COMMENT"), "kiro": review()}, REVIEWERS, ROUND_ITEMS
     )
     assert verdict == "invalid"
     assert any("COMMENT" in p for p in problems)
@@ -70,7 +70,7 @@ def test_comment_verdict_is_invalid(refactor):
 
 def test_finding_without_item_id_is_invalid(refactor):
     verdict, problems = refactor.judge(
-        {"gemini": review("REQUEST_CHANGES", [{"thread_id": "t"}]), "kiro": review()},
+        {"agy": review("REQUEST_CHANGES", [{"thread_id": "t"}]), "kiro": review()},
         REVIEWERS, ROUND_ITEMS,
     )
     assert verdict == "invalid"
@@ -79,7 +79,7 @@ def test_finding_without_item_id_is_invalid(refactor):
 
 def test_finding_with_unknown_item_id_is_invalid(refactor):
     verdict, problems = refactor.judge(
-        {"gemini": review("REQUEST_CHANGES", [finding("R9-999")]), "kiro": review()},
+        {"agy": review("REQUEST_CHANGES", [finding("R9-999")]), "kiro": review()},
         REVIEWERS, ROUND_ITEMS,
     )
     assert verdict == "invalid"
@@ -89,7 +89,7 @@ def test_finding_with_unknown_item_id_is_invalid(refactor):
 def test_null_item_id_is_accepted(refactor):
     """ラウンド全体に対する指摘は null を明示させる。"""
     verdict, problems = refactor.judge(
-        {"gemini": review("REQUEST_CHANGES", [finding(None)]), "kiro": review()},
+        {"agy": review("REQUEST_CHANGES", [finding(None)]), "kiro": review()},
         REVIEWERS, ROUND_ITEMS,
     )
     assert (verdict, problems) == ("changes", [])
@@ -160,7 +160,7 @@ def test_judge_command_marks_items_done_on_approval(refactor, tmp_path, env_tmp_
 
     state = read_state(state_path)
     assert all(i["status"] == "done" for i in state["items"])
-    assert state["rounds"][0]["reviews"][0]["gemini"] == "APPROVE"
+    assert state["rounds"][0]["reviews"][0]["agy"] == "APPROVE"
     assert state["phase"] == "propose"
 
 
@@ -169,14 +169,14 @@ def test_judge_command_exits_2_on_changes(
 ):
     state_path = _state(tmp_path)
     env_tmp_dir(state_path)
-    write_result(state_path, "gemini-review-r1", review("REQUEST_CHANGES", [finding()]))
+    write_result(state_path, "agy-review-r1", review("REQUEST_CHANGES", [finding()]))
     write_result(state_path, "kiro-review-r1", review())
 
     with pytest.raises(SystemExit) as e:
         refactor.cmd_judge_review(type("A", (), {"id": 130, "round": 1})())
     assert e.value.code == 2
     record = read_state(state_path)["rounds"][0]["reviews"][0]
-    assert record["findings"][0]["reviewer"] == "gemini"
+    assert record["findings"][0]["reviewer"] == "agy"
     assert record["findings"][0]["item_id"] == "R1-001"
 
 
@@ -184,7 +184,7 @@ def test_judge_command_exits_3_on_invalid_finding(refactor, tmp_path, env_tmp_di
     """未知の ID や欠落は差し戻して再レビューさせる。"""
     state_path = _state(tmp_path)
     env_tmp_dir(state_path)
-    write_result(state_path, "gemini-review-r1",
+    write_result(state_path, "agy-review-r1",
                  review("REQUEST_CHANGES", [finding("R9-999")]))
     write_result(state_path, "kiro-review-r1", review())
 
@@ -207,7 +207,7 @@ def test_repeated_invalid_reviews_degrade_to_changes(
 
     # 差し戻すたびに再レビューが走るので、結果ファイルは毎回書き直される
     for attempt, expected in enumerate((3, 2)):
-        write_result(state_path, "gemini-review-r1",
+        write_result(state_path, "agy-review-r1",
                      review("REQUEST_CHANGES",
                             [finding("R9-999", summary=f"再レビュー {attempt}")]))
         write_result(state_path, "kiro-review-r1", review())
@@ -241,7 +241,7 @@ def test_should_abandon_only_at_the_limit(refactor, tmp_path, env_tmp_dir):
 def test_finding_that_is_not_an_object_is_invalid(refactor):
     """LLM が文字列を返しても落ちず、差し戻し扱いにする。"""
     verdict, problems = refactor.judge(
-        {"gemini": review("REQUEST_CHANGES", ["item_id を含む文字列"]),
+        {"agy": review("REQUEST_CHANGES", ["item_id を含む文字列"]),
          "kiro": review()},
         REVIEWERS, ROUND_ITEMS,
     )
@@ -251,7 +251,7 @@ def test_finding_that_is_not_an_object_is_invalid(refactor):
 
 def test_findings_that_is_not_a_list_is_invalid(refactor):
     verdict, problems = refactor.judge(
-        {"gemini": {"verdict": "REQUEST_CHANGES", "findings": "なにか"},
+        {"agy": {"verdict": "REQUEST_CHANGES", "findings": "なにか"},
          "kiro": review()},
         REVIEWERS, ROUND_ITEMS,
     )
@@ -261,7 +261,7 @@ def test_findings_that_is_not_a_list_is_invalid(refactor):
 
 def test_review_result_that_is_not_an_object_is_invalid(refactor):
     verdict, problems = refactor.judge(
-        {"gemini": "APPROVE", "kiro": review()}, REVIEWERS, ROUND_ITEMS
+        {"agy": "APPROVE", "kiro": review()}, REVIEWERS, ROUND_ITEMS
     )
     assert verdict == "invalid"
     assert any("JSON オブジェクトではありません" in p for p in problems)
@@ -271,7 +271,7 @@ def test_judge_command_survives_broken_review_json(refactor, tmp_path, env_tmp_d
     """`judge()` が invalid と判定する入力でも、記録生成で落ちないこと。"""
     state_path = _state(tmp_path)
     env_tmp_dir(state_path)
-    write_result(state_path, "gemini-review-r1", "オブジェクトですらない")
+    write_result(state_path, "agy-review-r1", "オブジェクトですらない")
     write_result(state_path, "kiro-review-r1",
                  {"verdict": "APPROVE", "findings": ["壊れた指摘"]})
 
@@ -287,7 +287,7 @@ def test_judge_command_records_the_fix_base(refactor, tmp_path, env_tmp_dir, mon
     state_path = _state(tmp_path)
     env_tmp_dir(state_path)
     monkeypatch.setattr(refactor, "_git_out", lambda work, args, **_kw: "FIX_BASE")
-    write_result(state_path, "gemini-review-r1", review("REQUEST_CHANGES", [finding()]))
+    write_result(state_path, "agy-review-r1", review("REQUEST_CHANGES", [finding()]))
     write_result(state_path, "kiro-review-r1", review())
 
     with pytest.raises(SystemExit):
@@ -307,7 +307,7 @@ def test_judge_command_advances_the_fix_attempt(
     args = type("A", (), {"id": 130, "round": 1})()
 
     for attempt in (1, 2):
-        write_result(state_path, "gemini-review-r1",
+        write_result(state_path, "agy-review-r1",
                      review("REQUEST_CHANGES", [finding(summary=f"{attempt} 回目")]))
         write_result(state_path, "kiro-review-r1", review())
         with pytest.raises(SystemExit):
@@ -325,7 +325,7 @@ def test_judge_command_is_idempotent_for_the_same_reviews(
     """
     state_path = _state(tmp_path)
     env_tmp_dir(state_path)
-    write_result(state_path, "gemini-review-r1", review("REQUEST_CHANGES", [finding()]))
+    write_result(state_path, "agy-review-r1", review("REQUEST_CHANGES", [finding()]))
     write_result(state_path, "kiro-review-r1", review())
     args = type("A", (), {"id": 130, "round": 1})()
 
@@ -369,7 +369,7 @@ def test_same_review_after_a_fix_is_a_new_generation(
     """
     state_path = _state(tmp_path)
     env_tmp_dir(state_path)
-    write_result(state_path, "gemini-review-r1", review("REQUEST_CHANGES", [finding()]))
+    write_result(state_path, "agy-review-r1", review("REQUEST_CHANGES", [finding()]))
     write_result(state_path, "kiro-review-r1", review())
     args = type("A", (), {"id": 130, "round": 1})()
 
@@ -404,9 +404,9 @@ def test_missing_result_at_the_limit_aborts(refactor, tmp_path, env_tmp_dir):
     args = type("A", (), {"id": 130, "round": 1})()
 
     # 1 回目は差し戻し、2 回目で上限に達する。kiro は毎回結果を残さない。
-    # 叩き直しと区別させるため、gemini の結果は毎回違う内容にする
+    # 叩き直しと区別させるため、agy の結果は毎回違う内容にする
     for attempt, expected in enumerate((3, refactor.ABORT)):
-        write_result(state_path, "gemini-review-r1",
+        write_result(state_path, "agy-review-r1",
                      {"verdict": "APPROVE", "findings": [], "review_url": REVIEW_URL,
                       "elapsed_seconds": attempt})
         with pytest.raises(SystemExit) as e:
@@ -431,7 +431,7 @@ def test_invalid_format_at_the_limit_records_the_fix_base(
     args = type("A", (), {"id": 130, "round": 1})()
 
     for attempt, expected in enumerate((3, 2)):
-        write_result(state_path, "gemini-review-r1",
+        write_result(state_path, "agy-review-r1",
                      review("REQUEST_CHANGES",
                             [finding("R9-999", summary=f"存在しない ID {attempt}")]))
         write_result(state_path, "kiro-review-r1", review())
@@ -453,17 +453,17 @@ def test_review_without_a_posted_url_is_invalid(refactor):
     読むべき指摘が Pull Request に無いまま収束する。
     """
     verdict, problems = refactor.judge(
-        {"gemini": review(review_url=None), "kiro": review()},
+        {"agy": review(review_url=None), "kiro": review()},
         REVIEWERS, ROUND_ITEMS,
     )
     assert verdict == "invalid"
-    assert any("gemini" in p and "投稿" in p for p in problems)
+    assert any("agy" in p and "投稿" in p for p in problems)
 
 
 def test_review_that_reports_a_posting_error_is_invalid(refactor):
     """投稿に失敗したことを申告したレビューは判定に使わないこと。"""
     verdict, problems = refactor.judge(
-        {"gemini": review(review_url=None, post_error="HTTP 422 Line could not be resolved"),
+        {"agy": review(review_url=None, post_error="HTTP 422 Line could not be resolved"),
          "kiro": review()},
         REVIEWERS, ROUND_ITEMS,
     )
@@ -482,7 +482,7 @@ def test_unposted_review_at_the_limit_aborts(refactor, tmp_path, env_tmp_dir, mo
     args = type("A", (), {"id": 130, "round": 1})()
 
     for attempt, expected in enumerate((3, refactor.ABORT)):
-        write_result(state_path, "gemini-review-r1",
+        write_result(state_path, "agy-review-r1",
                      {"verdict": "APPROVE", "findings": [], "review_url": REVIEW_URL,
                       "elapsed_seconds": attempt})
         write_result(state_path, "kiro-review-r1",
@@ -502,7 +502,7 @@ def test_review_missing_on_github_is_invalid(refactor, tmp_path, env_tmp_dir, mo
     env_tmp_dir(state_path)
     monkeypatch.setattr(refactor, "_posted_review_state", lambda *a, **k: False)
     args = type("A", (), {"id": 130, "round": 1})()
-    for name in ("gemini", "kiro"):
+    for name in ("agy", "kiro"):
         write_result(state_path, f"{name}-review-r1",
                      {"verdict": "APPROVE", "findings": [], "review_url": REVIEW_URL})
     with pytest.raises(SystemExit) as e:
@@ -521,11 +521,11 @@ def test_review_is_accepted_when_github_cannot_be_reached(
     env_tmp_dir(state_path)
     monkeypatch.setattr(refactor, "_posted_review_state", lambda *a, **k: None)
     args = type("A", (), {"id": 130, "round": 1})()
-    for name in ("gemini", "kiro"):
+    for name in ("agy", "kiro"):
         write_result(state_path, f"{name}-review-r1",
                      {"verdict": "APPROVE", "findings": [], "review_url": REVIEW_URL})
     refactor.cmd_judge_review(args)
-    assert read_state(state_path)["rounds"][0]["reviews"][0]["gemini"] == "APPROVE"
+    assert read_state(state_path)["rounds"][0]["reviews"][0]["agy"] == "APPROVE"
 
 
 def test_review_id_is_taken_from_the_url(refactor):
