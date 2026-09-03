@@ -52,11 +52,11 @@
 | 担当 | 書き換えてよいパス | 触らないパス |
 | --- | --- | --- |
 | A | `plugins/ndf/skills/cross-review/` / `cross-refactoring/` / `external-ai/` / `fix/SKILL.md` / `issue-plan-strategy/SKILL.md` / `pr-review/SKILL.md` / `worktree/` の `gemini` の記述 / `plugins/ndf/scripts/lib/worktree-common.sh` / `.ndf/worktree.json` | `scripts/` / 説明文書 / `development-workflow/` / `merged/` / `retrospective/` / `out-of-scope/` / `release/` |
-| B | `plugins/ndf/plugin.json`（新設） / `plugins/ndf/hooks.json`（新設） / `plugins/ndf/manifests/` / `.agents/` / `scripts/` / `plugins/ndf/skills/README.md` / 説明文書一式 / `docs/specifications/ndf-skill-inventory.md` | `plugins/ndf/skills/<Skill 名>/` の中身 / `plugins/ndf/scripts/lib/worktree-common.sh`（担当 A のマージ後に触る） |
+| B | `plugins/ndf/dev.agy/`（新設） / `plugins/ndf/manifests/` / `.agents/` / `scripts/` / `plugins/ndf/skills/README.md` / 説明文書一式 / `docs/specifications/` / `plugins/ndf/skills/worktree/tests/` の**新しいファイル** | `plugins/ndf/skills/<Skill 名>/` の SKILL.md と参照 / `worktree/tests/` の既存ファイル / `plugins/ndf/scripts/`（担当 A のマージ後に触る） |
 | C | `plugins/ndf/skills/development-workflow/` / `plugins/ndf/skills/merged/` | `release/` / `retrospective/` / `out-of-scope/` / `worktree/` / `scripts/` / 説明文書 |
 | D | `plugins/ndf/skills/retrospective/` / `plugins/ndf/skills/out-of-scope/` / `AGENTS.md` のドキュメント表の行 | `development-workflow/` / `release/` / `scripts/` / `AGENTS.md` の他の節 |
 | E | `plugins/ndf/skills/release/` | 他のすべての Skill / `scripts/` / 説明文書 |
-| F | `plugins/ndf/skills/worktree/` の `$NDF_SCRIPTS` の行 / 参照の共通化の置き場所 | `worktree/` の `gemini` の記述（担当 A が持つ） / `merged/`（担当 C が持つ） / `development-workflow/references/projects-tracking.md`（担当 C が持つ） |
+| F | `plugins/ndf/skills/worktree/` の `$NDF_SCRIPTS` の行 / `worktree/tests/test_scripts_reference.py`（新設） | `worktree/` の `gemini` の記述（担当 A が持つ） / `merged/`（担当 C が持つ） / `development-workflow/references/projects-tracking.md`（担当 C が持つ） |
 
 ### 説明文書は担当 B が独占する
 
@@ -146,6 +146,24 @@ Agent Plugins 1.0.0 §8.2 のクライアント拡張ディレクトリにあた
 
 承認の印はラベル `design-approved` で、**ラベルがリポジトリに定義されていること自体が
 有効化の宣言になる**。定義されるまでは拒否が働かない。
+
+### `worktree/tests/` は 3 担当が触る
+
+設計を突き合わせた結果、3 担当が同じディレクトリへ手を入れることが分かった。**ファイルが
+違うため、新設と既存で分ける。**
+
+| 担当 | 触るファイル | 内容 |
+| --- | --- | --- |
+| A | `test_allow_path.py` / `test_guard.py`（既存） | `gemini` の記述に対応する期待値 |
+| B | 新しいファイル（新設） | agy の `PreToolUse` / `PreInvocation` の経路 |
+| F | `test_scripts_reference.py`（新設） | 手順書と解決手順の対応 |
+
+**既存のファイルは担当 A が持つ。** 担当 B と F は新しいファイルだけを足す。
+
+### `plugins/ndf/scripts/worktree-guard.sh` は担当 A と B が触る
+
+担当 A が `gemini` の記述を、担当 B が agy の `PreToolUse` の経路を足す。
+**マージの順序（A → B）で解決する。** 担当 B は起点を取り込んでから手を付ける。
 
 ### 担当 B と D は `AGENTS.md` で接する
 
