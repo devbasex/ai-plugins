@@ -42,12 +42,22 @@ allowed-tools:
 主ディレクトリの編集は拒否しない。編集の直前に案内が出て、セッション開始時に残った変更が
 提示される。案内が出ても操作は成立するため、意図した編集であればそのまま続けてよい。
 
+## この文書が受け取る値
+
+| 変数 | 値 | 決め方 |
+| --- | --- | --- |
+| `$SCRIPTS` | プラグインの `scripts/` の絶対パス | [projects-tracking.md](../development-workflow/references/projects-tracking.md) の「`$SCRIPTS` を決める」。シェルが変わったら決め直す |
+
+**続けて実行するときは 1 つの bash ブロックへまとめる。** 先頭で 1 度決めれば、後続のコマンドは決め直さずに済む（推奨であり、1 コマンドずつ実行してもよい）。
+
 ## 0. 宣言ファイルを用意する
 
 **この Skill を起動したら、まずこれを実行する。**
 
 ```bash
-bash "$NDF_SCRIPTS/worktree-setup.sh" init
+# 「$SCRIPTS を決める」の手順でパスを決めてから実行する。
+[ -n "${SCRIPTS:-}" ] || { echo "NDF の scripts/ を解決できない" >&2; exit 1; }
+bash "$SCRIPTS/worktree-setup.sh" init
 ```
 
 作業ツリー運用の仕組みは、リポジトリ側に `.ndf/worktree.json` があるときだけ動く。
@@ -71,13 +81,13 @@ bash "$NDF_SCRIPTS/worktree-setup.sh" init
 指すには共通の git ディレクトリの親を使う。
 
 ```bash
-bash "$NDF_SCRIPTS/lib/worktree-common.sh" >/dev/null 2>&1  # 読み込みの確認のみ
-. "$NDF_SCRIPTS/lib/worktree-common.sh"
+bash "$SCRIPTS/lib/worktree-common.sh" >/dev/null 2>&1  # 読み込みの確認のみ
+. "$SCRIPTS/lib/worktree-common.sh"
 wt_main_dir          # 主ディレクトリの絶対パス
 wt_in_worktree && echo "作業ツリーの中" || echo "主ディレクトリ"
 ```
 
-`$NDF_SCRIPTS` は `plugins/ndf/scripts`（配布後は各ランタイムのプラグイン配下）を指す。
+`$SCRIPTS` は手順 0 で決めた値である。**シェルが変わったら決め直す。**
 
 **既に作業ツリーの中にいるなら、ここで終わる。** 入れ子の作業ツリーは作らない。
 
@@ -224,7 +234,7 @@ Pull Request がマージされた後の削除は `/ndf:merged` が行う。
 無い。手順は [references/local-environment.md](references/local-environment.md) にある。
 
 ```bash
-NDF="$NDF_SCRIPTS/worktree-localenv.sh"
+NDF="$SCRIPTS/worktree-localenv.sh"
 WT="$main_dir/.worktrees/<ブランチ名>"
 bash "$NDF" setup "$WT"       # 設定と依存物を持ち込む
 bash "$NDF" mode "$WT"        # 相乗り(0) か 分離(1) かを提示
@@ -248,7 +258,7 @@ bash "$NDF" verify "$WT"; echo $?  # 0 一致 / 1 不一致 / 2 未起動
 立てて分ける。手順は [references/test-execution.md](references/test-execution.md) にある。
 
 ```bash
-TE="$NDF_SCRIPTS/worktree-testenv.sh"
+TE="$SCRIPTS/worktree-testenv.sh"
 bash "$TE" env "$WT"                        # 環境名・スロット・ポートを採番し台帳へ記録
 bash "$TE" bake --tag "$(bash "$TE" tag "$WT")"  # 基準を作る（内容が同じなら焼き直さない）
 bash "$TE" up "$WT" --profile core          # 起動する
