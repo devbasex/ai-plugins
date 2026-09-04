@@ -25,6 +25,7 @@
 | [assignment.py](assignment.py) | ホスト判定、役割ごとの母集合の確定、担当の輪番 | 同上 |
 | [models.py](models.py) | `--model` の解析、フラグ生成、実測値の突き合わせ | 同上 |
 | [metrics.py](metrics.py) | 担当ごとの指標算出と報告の整形 | 同上 |
+| [post_queue.py](post_queue.py) | 上限のときに投稿を積む待ち行列と、上限の見分け（#291） | 同上 |
 
 ## 置いてよいもの・いけないもの
 
@@ -81,3 +82,4 @@ Skill の下に共通層を置くと、その Skill を配らない配布先で�
 | `launch-cli.sh` | 使う | `launch-agy.sh` が委譲する。`launch-codex.sh` は未移行 |
 | `assignment.py` / `models.py` / `metrics.py` | 使う | 未移行 |
 | `statefile.py` | 使う | 未移行 |
+| `post_queue.py` | 未移行 | 使う |
