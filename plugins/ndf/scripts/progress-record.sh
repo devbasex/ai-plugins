@@ -89,7 +89,10 @@ done: dict[str, str] = {}
 mode = os.environ.get("MODE", "")
 worktree = os.environ.get("WORKTREE", "")
 plan = os.environ.get("PLAN", "")
-start = body.find(heading)
+# **見出しは行頭の単独の行として探す。** 部分一致で探すと、本文中の「## 進行状況」や
+# 引用の中の同じ語に当たり、そこから次の見出しまでを節として差し替えてしまう。
+found = re.search(r"^" + re.escape(heading) + r"[ \t]*$", body, re.M)
+start = found.start() if found else -1
 if start != -1:
     rest = body[start + len(heading):]
     m = re.search(r"^## ", rest, re.M)

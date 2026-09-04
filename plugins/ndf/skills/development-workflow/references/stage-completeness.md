@@ -79,7 +79,7 @@ ${TMPDIR:-/tmp}/ndf-stages/              # どちらも作れないとき
 bash "$SCRIPTS/../skills/development-workflow/scripts/stage-check.sh" report <課題番号>
 ```
 
-`$SCRIPTS` の決め方は [projects-tracking.md](projects-tracking.md) の「`$SCRIPTS` を決める」に
+`$SCRIPTS` の決め方は [scripts-lookup.md](scripts-lookup.md) に
 ある。この Skill のスクリプトは、その 1 つ上（プラグインの根）から辿る。
 
 | 呼び方 | 出力 | 終了コード |

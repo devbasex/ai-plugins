@@ -147,6 +147,26 @@ update() {
   fi
 
   fields_json=$(gh project field-list "$NUMBER" --owner "$OWNER" --format json 2>/dev/null) || return 1
+
+  # 控えの識別子が古くなることがある（盤面からアイテムを消した、盤面を作り直した）。
+  # **書き込みに失敗したら控えを捨て、1 度だけ全件の解決へ落ちる。** 捨てないと、
+  # 以後の記録が同じ識別子を使い続けて永久に反映されない。
+  if [ -n "$CACHED_ITEM_ID" ] && [ "$item_id" = "$CACHED_ITEM_ID" ]; then
+    if ! write_field "$project_id" "$item_id" "$fields_json"; then
+      [ -n "$CACHE" ] && rm -f "$CACHE"
+      CACHED_PROJECT_ID= CACHED_ITEM_ID=
+      printf 'NOTE: 控えの識別子で書き込めませんでした。盤面を読み直します\n' >&2
+      update
+      return $?
+    fi
+    return 0
+  fi
+  write_field "$project_id" "$item_id" "$fields_json"
+}
+
+# フィールドへ値を書く。単一選択は選択肢の識別子へ、文字列はそのまま。
+write_field() {
+  local project_id="$1" item_id="$2" fields_json="$3" field_id option_id
   field_id=$(printf '%s' "$fields_json" | jq -r --arg n "$FIELD_NAME" \
     'first(.fields[]? | select(.name == $n) | .id) // empty' 2>/dev/null) || return 1
   [ -n "$field_id" ] || return 1

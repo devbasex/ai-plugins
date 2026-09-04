@@ -16,6 +16,7 @@ from workflow_helpers import GUARD, SKILL_DIR, STAGE_CHECK
 
 SKILL = SKILL_DIR / "SKILL.md"
 TRACKING = SKILL_DIR / "references/projects-tracking.md"
+LOOKUP = SKILL_DIR / "references/scripts-lookup.md"
 COMPLETENESS = SKILL_DIR / "references/stage-completeness.md"
 MERGED = SKILL_DIR.parent / "merged/SKILL.md"
 
@@ -189,10 +190,13 @@ def test_the_reference_is_linked_from_the_skill() -> None:
 
 
 def test_the_scripts_lookup_section_is_unchanged() -> None:
-    """#221-6: 進行の記録を書く手順は変わらない。"""
-    body = TRACKING.read_text(encoding="utf-8")
+    """#221-6: 進行の記録を書く手順は変わらない。
 
-    assert "### `$SCRIPTS` を決める" in body
+    `$SCRIPTS` の解決は `scripts-lookup.md` へ移した（#282）。盤面の記録だけが使う値では
+    ないためである。呼び方の側は `projects-tracking.md` に残る。
+    """
+    assert "## 候補の並び" in LOOKUP.read_text(encoding="utf-8")
+    body = TRACKING.read_text(encoding="utf-8")
     assert 'bash "$SCRIPTS/projects-sync.sh" <issue番号> <キー> "<値>"' in body
 
 

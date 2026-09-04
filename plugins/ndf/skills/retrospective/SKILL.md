@@ -271,7 +271,7 @@ gh issue edit <issue番号> --repo "$RECORD_REPO" --body-file /tmp/issue-body.md
 | 成果物の良し悪し | レビューの工程が扱う |
 | 経緯の時系列そのもの | git の履歴と Pull Request に残っている |
 
-この工程に入ったら `/ndf:progress-tracking <issue番号> "振り返り"` を呼ぶ（記録の手順はその Skill が持つ）。 この工程で終わるため、あわせて `status` を `Done` にする。
+この工程に入ったら `/ndf:progress-tracking <issue番号> "振り返り"` を呼ぶ（記録の手順はその Skill が持つ）。 この工程で終わるため、あわせて盤面の `status` を `Done` にする（手段は progress-tracking の「呼び方」にある）。
 
 
 ## 関連

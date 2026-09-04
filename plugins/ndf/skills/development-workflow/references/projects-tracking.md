@@ -100,76 +100,8 @@ bash "$SCRIPTS/projects-sync.sh" 186 plan "issues/issue-186.md"
 
 ### `$SCRIPTS` を決める
 
-プラグインの `scripts/` の位置は 4 ランタイムで別々である。候補を順に試し、最初に当たったものを
-絶対パスで採る。
-
-| ランタイム | 配布物の位置 | 手がかり |
-| --- | --- | --- |
-| Claude Code | `~/.claude/plugins/cache/<マーケットプレイス>/ndf/<版>/scripts` | `SKILL.md` の `${CLAUDE_PLUGIN_ROOT}` が絶対パスへ置き換わる |
-| Kiro CLI | インストーラが指したプラグインの `scripts` | `.kiro/skills/<Skill名>` がプラグインの `skills/<Skill名>` への symlink |
-| Codex | `~/.codex/.tmp/marketplaces/<マーケットプレイス>/plugins/ndf/scripts` | マーケットプレイス名だけが導入元で変わる |
-| agy | `~/.gemini/config/plugins/ndf/scripts` | 導入時にプラグインのディレクトリ全体をここへ複製する。取得元の登録が無いため位置は固定 |
-
-```bash
-# Claude Code は SKILL.md 内の ${CLAUDE_PLUGIN_ROOT} をプラグインルートの絶対パスへ置き換えて
-# から渡す。シングルクォートで囲むのは、置き換えられなかったときにシェルへ展開させないため
-# である。Codex と Kiro CLI は置き換えないため、両者はそれぞれの配置から探す。
-PLUGIN_ROOT='${CLAUDE_PLUGIN_ROOT}'
-case "$PLUGIN_ROOT" in '$'*) PLUGIN_ROOT= ;; esac
-
-# Kiro CLI のインストーラは `.kiro/skills/<Skill名>` を、プラグインの `skills/<Skill名>` への
-# symlink として張る。`.kiro/skills` 自体は実体のディレクトリなので、そこから 1 つ上をたどっても
-# プラグインへは戻れない。symlink の指す先を読み、その 2 つ上をプラグインルートとして採る。
-#
-# 同じ `skills` に別のプラグインの symlink が並ぶことがある。インストーラが消すのは NDF 配下を
-# 指すリンクだけで、他は残す。最初のリンクで打ち切ると、その別のプラグインを採ってしまうため、
-# 指す先の 2 つ上に `scripts/projects-sync.sh` があるまで候補を調べ続ける。
-#
-# `readlink -f` は使わない。BSD 系（macOS）の `readlink` の `-f` は書式の指定であり、続く語を
-# 書式として読む。指す先を読むだけの `readlink <パス>` は GNU と BSD の両方で同じに働く。
-# 相対パスで張られたリンクのために、リンクのある位置からの相対として組み立てる。
-KIRO_ROOT=
-for link in .kiro/skills/*/ "${HOME:-}/.kiro/skills/"*/; do
-  [ -L "${link%/}" ] || continue
-  target=$(readlink "${link%/}") || continue
-  case "$target" in
-    /*) ;;
-    *) target="$(dirname "${link%/}")/$target" ;;
-  esac
-  [ -f "$target/../../scripts/projects-sync.sh" ] || continue
-  KIRO_ROOT="$target/../.."
-  break
-done
-
-# Codex はマーケットプレイスのスナップショットの下へプラグインを展開する。名前は導入元で
-# 変わるため `*` で受ける。
-#
-# agy は取得元の登録を持たず、`agy plugin install` がプラグインのディレクトリ全体を
-# `~/.gemini/config/plugins/<plugin.json の name>/` へ複製する。名前は `ndf` で固定であり、
-# `dev.agy/scripts` の symlink は実体へ解決されて複製される。
-SCRIPTS=
-for candidate in \
-  ${PLUGIN_ROOT:+"$PLUGIN_ROOT/scripts"} \
-  ${KIRO_ROOT:+"$KIRO_ROOT/scripts"} \
-  "${HOME:-}/.codex/.tmp/marketplaces/"*/plugins/ndf/scripts \
-  "${HOME:-}/.codex/marketplaces/"*/plugins/ndf/scripts \
-  "${HOME:-}/.gemini/config/plugins/ndf/scripts" \
-  "plugins/ndf/scripts"
-do
-  [ -f "$candidate/projects-sync.sh" ] || continue
-  SCRIPTS="$(cd "$candidate" && pwd)"
-  break
-done
-[ -n "$SCRIPTS" ] || SCRIPTS=  # 見つからなければ記録を飛ばす
-```
-
-見つからない場合は記録を飛ばす。**進行管理が理由で工程を止めない。**
-
-この bash はそのままテストの対象になっている。`development-workflow/tests/test_projects_scripts_lookup.py`
-と `worktree/tests/test_scripts_reference.py` がこの節の bash のコードブロックを読み出し、
-4 ランタイムの配置を作った上で実行する。手順の側だけが変わって解決が外れる状態にならない。
-**候補を足すときは両方のテストへ配置を足す。** 片方だけを直すと、もう片方が前のランタイムの
-数のまま通り続ける。
+手順は [scripts-lookup.md](scripts-lookup.md) にある。**盤面の記録だけが使う値ではない**
+ため、独立した参照に置く（`worktree` は 3 本のスクリプトを呼ぶ）。
 
 ## 対象のアイテムの選び方
 

@@ -131,3 +131,20 @@ def test_missing_gh_is_not_an_error(tmp_path):
     )
     assert out.returncode == 0
     assert out.stdout == ""
+
+
+def test_a_similar_heading_is_not_mistaken_for_the_section(fake_gh):
+    """`## 進行状況` のような別の見出しを節と取り違えない。
+
+    部分一致で探すと、そこから次の見出しまでを節として差し替え、**本文を壊す**。
+    """
+    fake_gh.body.write_text(
+        "# 課題\n\n## 進行状況の調査\n\nこれは残る\n\n## 別の節\n\n本文\n",
+        encoding="utf-8",
+    )
+    run(fake_gh, "123", "設計")
+    written = fake_gh.written.read_text(encoding="utf-8")
+    assert "## 進行状況の調査\n\nこれは残る" in written
+    assert "## 別の節\n\n本文" in written
+    # 節は末尾へ足される
+    assert written.index("## 進行\n") > written.index("## 別の節")

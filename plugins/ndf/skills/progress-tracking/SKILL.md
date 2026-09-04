@@ -53,6 +53,14 @@ bash "$SCRIPTS/projects-sync.sh" 186 stage "設計"
 bash "$SCRIPTS/projects-sync.sh" 186 mode "standard"
 ```
 
+**工程が終わりのものなら `status` も書く。** 振り返り（最後の工程）の後は盤面の
+`Status` を `Done` にする。issue の側は工程のチェックリストが埋まることで表せるため、
+この値は盤面にだけ書く。
+
+```bash
+bash "$SCRIPTS/projects-sync.sh" <issue番号> status "Done"
+```
+
 **工程名の一覧は工程表が持つ。** この Skill は一覧を持たない
 （`development-workflow` の「モードごとに起動する Skill」の表が唯一の基準である）。一覧に
 無い値を渡すと、どちらのコマンドも終了コード 2 で弾く。

@@ -118,7 +118,7 @@ fi
 拾ってしまう残骸**である。後片付けの工程で拾う。
 
 ```bash
-# $SCRIPTS の決め方は references/projects-tracking.md の「`$SCRIPTS` を決める」にある。
+# $SCRIPTS の決め方は development-workflow の references/scripts-lookup.md にある。
 # この Skill のスクリプトは、その 1 つ上（プラグインの根）から辿る。
 CLOSING="$SCRIPTS/../skills/merged/scripts/closing-issues.sh"
 

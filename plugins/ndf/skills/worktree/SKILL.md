@@ -46,7 +46,7 @@ allowed-tools:
 
 | 変数 | 値 | 決め方 |
 | --- | --- | --- |
-| `$SCRIPTS` | プラグインの `scripts/` の絶対パス | [projects-tracking.md](../development-workflow/references/projects-tracking.md) の「`$SCRIPTS` を決める」。シェルが変わったら決め直す |
+| `$SCRIPTS` | プラグインの `scripts/` の絶対パス | [scripts-lookup.md](../development-workflow/references/scripts-lookup.md)。シェルが変わったら決め直す |
 
 **続けて実行するときは 1 つの bash ブロックへまとめる。** 先頭で 1 度決めれば、後続のコマンドは決め直さずに済む（推奨であり、1 コマンドずつ実行してもよい）。
 
