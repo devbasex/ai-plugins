@@ -1313,6 +1313,13 @@ def _confirm_flushed(pr: int, item: dict[str, Any]) -> None:
 
     #261 は「投稿が届いたことを確かめてから収束する」ことを求めている。待ち行列は
     確かめる時点を投稿の直後から**流した直後**へ移すだけで、決まりそのものは変えない。
+
+    **送った項目と、既に届いていた項目を分けない。** 送信に成功した直後に中断すると、
+    GitHub 側には投稿があるのに項目は残る。次に流すと冪等の照会で見つかって送らずに
+    消えるため、ここを通さないと `queued` が解除されず `review_url` も戻らないまま
+    待ち行列が空になる。**待ち行列が空で `queued` のままの状態は、収束を止める側にも
+    確認を促す側にも働かない**（判定は `queued` を見て照会を飛ばす）。共通層が
+    見つけた投稿を `response` として渡すため、どちらも同じ経路で確かめられる。
     """
     if item.get("kind") != "review-post":
         return
@@ -1367,7 +1374,7 @@ def _auto_flush(pr: int) -> None:
     if not q.count():
         return
     result = q.flush()
-    for item in result.sent:
+    for item in result.sent + result.skipped:
         _confirm_flushed(pr, item)
     if result.sent or result.skipped:
         info(
@@ -1385,7 +1392,7 @@ def cmd_flush(args: argparse.Namespace) -> None:
     q = _queue(pr)
     before = q.count()
     result = q.flush()
-    for item in result.sent:
+    for item in result.sent + result.skipped:
         _confirm_flushed(pr, item)
     print(f"PENDING_BEFORE={before}")
     print(f"PENDING_SENT={len(result.sent)}")

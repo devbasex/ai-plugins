@@ -125,6 +125,44 @@ def test_the_review_is_confirmed_once_right_after_it_is_flushed(
     assert _state(tmp_dir)["rounds"][0]["codex"]["queued"] is False
 
 
+def test_a_review_that_was_already_there_is_confirmed_too(
+        state_mod, queue_mod, fake_gh, tmp_dir, monkeypatch) -> None:
+    """既に届いていた項目も確認を通す。**送った項目だけを通さない。**
+
+    送信に成功した直後に中断すると、GitHub 側には投稿があるのに項目は残る。次に流すと
+    冪等の照会で見つかって送らずに消えるため、確認を通さないと `queued` が解除されず
+    `review_url` も戻らないまま待ち行列が空になる。判定は `queued` を見て照会を飛ばす
+    ため、届いたことを一度も確かめないまま収束する（#261 の前提が崩れる）。
+    """
+    _seed(tmp_dir)
+    queue_mod.enqueue(
+        queue_mod.Queue(tmp_dir / "pending"), "review-post", REPO, PR,
+        {"body": "指摘の本文", "event": "REQUEST_CHANGES"},
+        actor="me", extra={"agent": "codex", "round": 1})
+    fake_gh.set_rules([
+        # 冪等の照会が、前回の中断で届いていた投稿を見つける。
+        {"match": f"pulls/{PR}/reviews?", "stdout": json.dumps([
+            {"id": 4961230016, "html_url": REVIEW_URL, "user": {"login": "me"},
+             "state": "CHANGES_REQUESTED", "body": "指摘の本文"}])},
+    ])
+    calls: list = []
+
+    def _exists(repo, pr, url):
+        calls.append(url)
+        return True
+
+    monkeypatch.setattr(state_mod, "_review_exists", _exists)
+
+    state_mod.cmd_flush(argparse.Namespace(pr=PR))
+
+    assert calls == [REVIEW_URL]
+    assert _state(tmp_dir)["rounds"][0]["codex"]["review_url"] == REVIEW_URL
+    assert _state(tmp_dir)["rounds"][0]["codex"]["queued"] is False
+    assert queue_mod.Queue(tmp_dir / "pending").count() == 0
+    # 送り直していない。冪等の照会が効いていることを、同じテストで見る。
+    assert [c for c in fake_gh.joined() if "--method POST" in c] == []
+
+
 def test_a_review_that_did_not_arrive_is_recorded_as_no_result(
         state_mod, queue_mod, fake_gh, tmp_dir, monkeypatch) -> None:
     """流した直後の確認で無ければ、#261 の決まりどおり結果なしにする。"""

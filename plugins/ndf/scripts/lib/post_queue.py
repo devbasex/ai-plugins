@@ -313,43 +313,58 @@ def _by_actor(row: dict[str, Any], actor: str | None) -> bool:
     return str((row.get("user") or {}).get("login") or "") == actor
 
 
-def already_posted(item: dict[str, Any]) -> bool | None:
-    """同じ内容が既に GitHub 側にあるか。確かめられなければ `None`。
+def posted_match(item: dict[str, Any]) -> tuple[bool | None, dict[str, Any] | None]:
+    """同じ内容が既に GitHub 側にあるか。あるときは、その投稿そのものも返す。
 
-    **確かめられないときは送る側へ倒す。** 送らないと項目が永久に残る。確かめられない
-    のは GitHub へ届いていないときであり、そのまま送っても同じ失敗で積まれ直す。
+    **確かめられないときは送る側へ倒す**（`(None, None)`）。送らないと項目が永久に
+    残る。確かめられないのは GitHub へ届いていないときであり、そのまま送っても同じ
+    失敗で積まれ直す。
+
+    **見つけた投稿を返すのは、流す側が送ったときと同じ形を作れるようにするためである。**
+    送信に成功した直後に中断すると、GitHub 側には投稿があるのに項目は残る。次に流すと
+    ここで見つかって送らずに消えるため、送った応答が呼び出し側へ渡らない。応答が無いと、
+    呼び出し側は届いたことを確かめられないまま待ち行列を空にする（#261 の前提が崩れる）。
+    照会で見つけた行を応答の代わりに渡すことで、送った場合と同じ経路に乗せる。
+
+    照会の形が行を返さない種別（`thread-resolve`）は、あることだけを返す。
     """
     kind, repo, pr = item["kind"], item["repo"], int(item["pr"])
     match, actor = item.get("match") or {}, item.get("actor")
+
+    def _first(rows: list[dict[str, Any]] | None, pred) -> tuple[bool | None, dict | None]:
+        if rows is None:
+            return None, None
+        found = next((r for r in rows if pred(r)), None)
+        return (found is not None), found
+
     if kind == "pr-comment":
-        rows = _list_all(f"repos/{repo}/issues/{pr}/comments")
-        if rows is None:
-            return None
-        return any(_by_actor(r, actor) and r.get("body") == match.get("body")
-                   for r in rows)
+        return _first(
+            _list_all(f"repos/{repo}/issues/{pr}/comments"),
+            lambda r: _by_actor(r, actor) and r.get("body") == match.get("body"))
     if kind == "review-post":
-        rows = _list_all(f"repos/{repo}/pulls/{pr}/reviews")
-        if rows is None:
-            return None
         want = _REVIEW_STATE.get(str(match.get("event") or ""), "")
         head = str(match.get("body") or "")[:BODY_MATCH_CHARS]
-        return any(
-            _by_actor(r, actor)
-            and str(r.get("state") or "") == want
-            and str(r.get("body") or "")[:BODY_MATCH_CHARS] == head
-            for r in rows)
+        return _first(
+            _list_all(f"repos/{repo}/pulls/{pr}/reviews"),
+            lambda r: (_by_actor(r, actor)
+                       and str(r.get("state") or "") == want
+                       and str(r.get("body") or "")[:BODY_MATCH_CHARS] == head))
     if kind == "review-reply":
-        rows = _list_all(f"repos/{repo}/pulls/{pr}/comments")
-        if rows is None:
-            return None
-        return any(str(r.get("in_reply_to_id") or "") == str(match.get("in_reply_to"))
-                   and r.get("body") == match.get("body") for r in rows)
+        return _first(
+            _list_all(f"repos/{repo}/pulls/{pr}/comments"),
+            lambda r: (str(r.get("in_reply_to_id") or "") == str(match.get("in_reply_to"))
+                       and r.get("body") == match.get("body")))
     if kind == "thread-resolve":
         ids = unresolved_thread_ids(repo, pr)
         if ids is None:
-            return None
-        return str(match.get("thread_id")) not in ids
-    return None
+            return None, None
+        return (str(match.get("thread_id")) not in ids), None
+    return None, None
+
+
+def already_posted(item: dict[str, Any]) -> bool | None:
+    """同じ内容が既に GitHub 側にあるか。確かめられなければ `None`。"""
+    return posted_match(item)[0]
 
 
 # ---------------- 待ち行列 ----------------
@@ -427,7 +442,12 @@ class Queue:
         failed: dict[str, Any] | None = None
         rate_limited = False
         for path, item in self.items():
-            if already_posted(item) is True:
+            found, row = posted_match(item)
+            if found is True:
+                # **送った場合と同じ形で返す。** 呼び出し側は届いたことを応答から
+                # 確かめるため、既に届いていた項目にも見つけた投稿を積んで渡す。
+                if row is not None:
+                    item["response"] = row
                 path.unlink(missing_ok=True)
                 skipped.append(item)
                 continue

@@ -94,6 +94,10 @@ def test_a_review_already_on_github_is_not_posted_again(
 
     assert len(result.skipped) == 1
     assert _posted(fake_gh.joined()) == []
+    # **送った場合と同じ形で返す。** 呼び出し側は届いたことを応答から確かめるため、
+    # 照会で見つけた投稿を応答の代わりに積む。無いと `queued` を解除できない。
+    assert result.skipped[0]["response"]["html_url"] == \
+        "https://x/#pullrequestreview-4961230016"
 
 
 def test_a_review_with_a_different_verdict_is_not_the_same(
