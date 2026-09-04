@@ -241,3 +241,36 @@ def test_a_record_without_jq_does_not_fail(repo: Path, state: Path, tmp_path: Pa
     result = run_stage_check("record", "221", "stage", "設計", cwd=repo, env=env)
 
     assert result.returncode == 0
+
+
+def test_records_at_once_never_skip_a_stage(repo: Path, state: Path) -> None:
+    """#308-2 / 3: 同時の記録を繰り返しても工程が欠けず、飛ばした記録も出ない。
+
+    1 回の実行では取りこぼしがあっても通ることがあるため、繰り返して件数で見る。
+    受け入れ条件が求める 60 回は完了判定として手元で回す。
+    """
+    stages = ("設計", "計画", "実装", "レビュー")
+    env = base_env(state, {"NDF_STAGE_LOCK_TIMEOUT": "20"})
+    script = str(Path(__file__).resolve().parents[1] / "scripts/stage-check.sh")
+
+    short = []
+    skipped = 0
+    for trial in range(8):
+        issue = 3080 + trial
+        procs = [
+            subprocess.Popen(
+                ["bash", script, "record", str(issue), "stage", stage],
+                cwd=str(repo), env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            )
+            for stage in stages
+        ]
+        for proc in procs:
+            skipped += proc.communicate()[1].count("控えが使用中")
+
+        path = state_file(state, issue)
+        saved = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {"stages": []}
+        if sorted(saved["stages"]) != sorted(stages):
+            short.append(saved["stages"])
+
+    assert short == [], f"工程がそろわなかった試行 {len(short)} 件: {short}"
+    assert skipped == 0, f"控えが使用中で飛ばした記録 {skipped} 件"

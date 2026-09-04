@@ -235,9 +235,11 @@ wf_state_file() {
 # --- 排他 -------------------------------------------------------------------
 # **`plugins/ndf/scripts/lib/worktree-common.sh` の `wt_lock_acquire` の写しである。**
 # 切り出して両方から source する形は採らない。切り出し先が担当 C の境界の外にあり、
-# 配布の後の相対の位置がランタイムごとに違うためである（#293 で扱う）。
+# 配布の後の相対の位置がランタイムごとに違うためである（#293 で扱う）。**本体は写し元と
+# 1 行ずつ同じにする**（`worktree/tests/test_registry.py` が突き合わせる）。
 #
 # `flock` は使わない。持たないホストがあり、有無で仕組みが分かれると互いを見落とす。
+# 関門が 2 段である理由は写し元の同じ節に書いてある。
 
 WF_LOCK_STALE_MINUTES=5
 WF_LOCK_TIMEOUT="${NDF_STAGE_LOCK_TIMEOUT:-5}"
@@ -245,22 +247,34 @@ WF_LOCK_TIMEOUT="${NDF_STAGE_LOCK_TIMEOUT:-5}"
 _wf_lock_sleep() { sleep 0.1 2>/dev/null || sleep 1; }
 
 # 判定したものと同じロックであることを確かめてから取り除く。
+# **確かめることと取り除くことを 1 つの関門の中で行う。** 理由は写し元の同じ関数に
+# 書いてある。名前の付け替えで外へ出してから確かめる形は採らない。
 _wf_lock_discard() {
-  local dir="$1" seen="$2" token="$3" stale="$1.stale.$3"
-  mv "$dir" "$stale" 2>/dev/null || return 1
-  if [ "$(cat "$stale/token" 2>/dev/null)" = "$seen" ]; then
-    rm -rf "$stale" 2>/dev/null
+  local dir="$1" seen="$2" mark="$1/discard"
+  if ! ( set -C; : >"$mark" ) 2>/dev/null; then
+    # 取り除きの途中で落ちた担当が残した関門は、古ければ捨てる。
+    find "$mark" -maxdepth 0 -mmin "+$WF_LOCK_STALE_MINUTES" 2>/dev/null | grep -q . \
+      && rm -f "$mark" 2>/dev/null
+    return 1
+  fi
+  if [ "$(cat "$dir/token" 2>/dev/null)" = "$seen" ]; then
+    rm -rf "$dir" 2>/dev/null
     return 0
   fi
-  mv "$stale" "$dir" 2>/dev/null || rm -rf "$stale" 2>/dev/null
+  # 別物だった。取り除かず、関門だけを外す。
+  rm -f "$mark" 2>/dev/null
   return 1
 }
 
+# ロックが捨ててよい状態かを見る。**判定は 1 つのロックについて行う。**
+# 見始めたときの印を `seen` で受け取る。理由は写し元の同じ関数に書いてある。
 _wf_lock_is_stale() {
-  local dir="$1" owner
+  local dir="$1" seen="${2-}" owner
   owner=$(cat "$dir/pid" 2>/dev/null)
   if [ -n "$owner" ]; then
     kill -0 "$owner" 2>/dev/null && return 1
+    [ "$(cat "$dir/token" 2>/dev/null)" = "$seen" ] || return 1
+    [ "$(cat "$dir/pid" 2>/dev/null)" = "$owner" ] || return 1
     return 0
   fi
   find "$dir" -maxdepth 0 -mmin "+$WF_LOCK_STALE_MINUTES" 2>/dev/null | grep -q . && return 0
@@ -270,26 +284,27 @@ _wf_lock_is_stale() {
 wf_lock_acquire() {
   local dir="${1:-}" timeout="${2:-$WF_LOCK_TIMEOUT}" token seen deadline
   [ -n "$dir" ] || return 1
+  # ロックの位置にディレクトリ以外があれば、ロックとして成立しない。取り除く。
   if [ -e "$dir" ] && [ ! -d "$dir" ]; then rm -f "$dir" 2>/dev/null; fi
-  token="$$-$(date +%s 2>/dev/null)-${RANDOM:-0}-$(od -An -N4 -tu4 /dev/urandom 2>/dev/null | tr -dc '0-9')"
+  # 印は識別のためだけに使う。持ち主の決定には使わないため、桁をそろえる必要はない。
+  token="$$-$(date +%s 2>/dev/null)-${RANDOM:-0}"
+  # 上限は実時間で測る。刻みが 0.1 秒か 1 秒かで待ち時間が 10 倍変わるため、
+  # 回数で数えない。
   deadline=$(( $(date +%s) + timeout ))
   while :; do
     if mkdir "$dir" 2>/dev/null; then
-      # **`mkdir` の成功だけでは持ち主を 1 つに絞れない。** 実測した overlayfs では、
-      # 同時に走らせた 6 つのうち 2 つが同じ名前の作成に成功した。印を書いてから読み
-      # 直し、自分の印が残っているときだけ持ち主とする。読み直しの前に間を置くのは、
-      # 相手の書き込みを先に届かせるためである。最後に書いた 1 つだけが残る。
-      printf '%s\n' "$token" >"$dir/token" 2>/dev/null
-      _wf_lock_sleep
-      if [ "$(cat "$dir/token" 2>/dev/null)" = "$token" ]; then
+      # 2 段目の関門。**`set -C` は部分シェルの中だけで張る。** 裸で書くと呼び出し側の
+      # シェルの `$-` に `C` が残り、以後の上書きの向き先が変わる。
+      if ( set -C; : >"$dir/held" ) 2>/dev/null; then
+        printf '%s\n' "$token" >"$dir/token" 2>/dev/null
         printf '%s\n' "$$" >"$dir/pid" 2>/dev/null
         return 0
       fi
       # 競り負けた。**ロックは消さない。** 相手が持っているため、待つ側へ回る。
     fi
     seen=$(cat "$dir/token" 2>/dev/null)
-    if _wf_lock_is_stale "$dir"; then
-      _wf_lock_discard "$dir" "$seen" "$token"
+    # **取り除けたときだけ、間を置かずに取りに戻る。** 理由は写し元の同じ関数に書いてある。
+    if _wf_lock_is_stale "$dir" "$seen" && _wf_lock_discard "$dir" "$seen"; then
       continue
     fi
     [ "$(date +%s)" -ge "$deadline" ] && return 1
