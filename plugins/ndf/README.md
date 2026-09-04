@@ -90,7 +90,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.2.0-dev.1）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.2.0）
 ```
 
 ### agy
@@ -110,10 +110,7 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.2.0-dev.1 へ更新するとき
-
-**この版は開発版です。** 開発版チャネル（`develop`）に載ります。正式版チャネル（`main`）を
-登録している利用者には届きません。試すときの取得元の切り替えは、この節の末尾にあります。
+## v10.2.0 へ更新するとき
 
 この版が直すのは、複数の CLI でレビューと構造改善を回す 2 つの Skill（`cross-review` /
 `cross-refactoring`）を支える基盤です。**利用者から見た破壊的変更はありません。** 共通層の
@@ -176,31 +173,33 @@ GitHub の呼び出しの上限に達すると、レビューの投稿がその�
 
 ### 更新の手順
 
-**開発版は取得元を `develop` へ向けた利用者にだけ届きます。** 取得元を切り替えたら、続けて
-プラグインの側も更新します。**取得元の登録だけでは、導入済みの版は変わりません。**
+**サードパーティのマーケットプレイスは自動更新が既定で無効です。** この版は、利用者が
+更新の操作を実行した時点で届きます。
 
 ```bash
-# Claude Code — 取得元を develop へ向けてから入れ替えます
-claude plugin marketplace add https://github.com/devbasex/ai-plugins.git#develop
+# Claude Code
+claude plugin marketplace update ai-plugins
 claude plugin update ndf@ai-plugins
 
-# Codex — 同名の取得元の上書きを拒むため、先に外します
-codex plugin marketplace remove ai-plugins
-codex plugin marketplace add devbasex/ai-plugins --ref develop
+# Codex
+codex plugin marketplace update ai-plugins
 codex plugin add ndf@ai-plugins
 
-# Kiro — clone を develop へ切り替えてから入れ直します
-git -C <clone> fetch && git -C <clone> checkout develop && git -C <clone> pull
+# Kiro — clone を更新してから入れ直します
+git -C <clone> pull
 bash plugins/ndf/dev.kiro/install.sh --project <ディレクトリ> --yes
 
 # agy — 入れ替えの操作が無いため、外してから入れ直します
-git -C <clone> fetch && git -C <clone> checkout develop && git -C <clone> pull
+git -C <clone> pull
 agy plugin uninstall ndf && agy plugin install <clone>/plugins/ndf/dev.agy
 ```
 
-**1 人の利用者は片方のチャネルしか持てません。** 取得元は名前ごとに 1 つしか登録できないため、
-正式版へ戻すときは取得元を登録し直します。理由と、ランタイムごとに違う点は `AGENTS.md` の
-「版の付け方と開発版の配布」にあります。
+`claude plugin update` は「restart required to apply」と表示します。実体を入れ替えるだけで、
+動いているセッションには反映されません。
+
+**前の版へ戻す手段は利用者の側にあります。** 取得元をタグ（`ndf--v10.1.0`）へ固定するか、
+別名のマーケットプレイスで対象だけを固定します。手順は
+`docs/plugin-development-guide.md` の「利用者が過去の版へ戻る」にあります。
 
 ## Playwright テストについて
 
@@ -344,7 +343,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.2.0-dev.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.2.0/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -366,14 +365,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.2.0-dev.1/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.2.0/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.2.0-dev.1  <path>
+# => ndf@ai-plugins  installed, enabled  10.2.0  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
