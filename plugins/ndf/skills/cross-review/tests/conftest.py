@@ -41,6 +41,17 @@ def _load_monitor_module() -> types.ModuleType:
 # （Python は `parents[3]` から解決する。ここは tests/ なので 1 つ浅い）。
 _POST_QUEUE = _HERE.parents[2] / "scripts" / "lib" / "post_queue.py"
 
+# ホストの推定に使う環境変数（共通層の `assignment.HOST_ENV_HINTS` と同じ並び）。
+# ここで写しているのは、共通層を読み込む前に環境を整える必要があるためである。
+_HOST_ENV_HINTS = (
+    ("CLAUDE_PLUGIN_ROOT", "claude"),
+    ("CLAUDECODE", "claude"),
+    ("CODEX_PLUGIN_ROOT", "codex"),
+    ("CODEX_HOME", "codex"),
+    ("KIRO_PLUGIN_ROOT", "kiro"),
+    ("KIRO_AGENT", "kiro"),
+)
+
 
 import pytest
 
@@ -61,6 +72,19 @@ def state_mod() -> types.ModuleType:
 @pytest.fixture(scope="session")
 def monitor_mod() -> types.ModuleType:
     return _load_monitor_module()
+
+
+@pytest.fixture(autouse=True)
+def _default_host(monkeypatch) -> None:
+    """テストの既定のホストを固定する。**環境に依存させない。**
+
+    `init` はホストを環境変数から推定する。手元の Claude Code には手掛かりがあるが、
+    継続的統合の実行環境には無い。固定しないと、同じテストが場所によって通ったり
+    落ちたりする。推定できない場合を確かめるテストは、この設定を自分で外す。
+    """
+    for key, _ in _HOST_ENV_HINTS:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("CLAUDECODE", "1")
 
 
 @pytest.fixture(autouse=True)
