@@ -428,5 +428,5 @@ PR モードではレビュー結果が **PR 上に投稿済み** であるこ�
 
 - `/ndf:fix` — レビュー指摘の分類と修正対応
 - `/ndf:cross-review` — codex + agy の収束レビュー
-- `/ndf:external-ai` — Codex / agy CLI の呼び出し手順（同梱 runtime のみ）
+- `/ndf:external-ai` — Codex / agy CLI の呼び出し手順（起動の約束の正本）
 - `/ndf:logging-guidelines` — ログ設計
