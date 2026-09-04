@@ -18,7 +18,7 @@ import pytest
 
 _HERE = pathlib.Path(__file__).resolve().parent
 _SCRIPT = _HERE.parent / "scripts" / "refactor.py"
-_LIB = _HERE.parent.parent / "cross-review" / "scripts" / "lib"
+_LIB = _HERE.parents[2] / "scripts" / "lib"
 
 def _load_module(name: str, path: pathlib.Path) -> types.ModuleType:
     spec = importlib.util.spec_from_file_location(name, path)

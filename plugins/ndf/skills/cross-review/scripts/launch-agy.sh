@@ -7,7 +7,7 @@
 # レビュー対象の PR は state.json の `current_pr` を読む。
 #
 # 注意:
-#   - 起動そのものは共通層の lib/launch-cli.sh へ委譲する。作業領域の宣言・
+#   - 起動そのものは共通層の ../../../scripts/lib/launch-cli.sh へ委譲する。作業領域の宣言・
 #     プロンプトの渡し方・実行時間の上限は、そちらが 1 箇所で持つ。
 #   - 完了判定は monitor.py が pidfile + result.json で多軸判定する。
 
@@ -180,5 +180,5 @@ esac
 # 監視の側へ一本化する。
 PRINT_TIMEOUT=600
 
-"$SCRIPT_DIR/lib/launch-cli.sh" agy "$WORKTREE_ABS" "$PROMPT" "$STEM" "" \
+"$SCRIPT_DIR/../../../scripts/lib/launch-cli.sh" agy "$WORKTREE_ABS" "$PROMPT" "$STEM" "" \
   "$EXTRA_DIR" "$PRINT_TIMEOUT"

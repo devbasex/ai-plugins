@@ -10,7 +10,7 @@
 #
 # **ホストか否かで分岐しない。** ランタイム名だけで分岐する。ホストと同じランタイムが
 # 実装担当になるラウンドでも、ホストのサブエージェント機能は使わず別プロセスの CLI と
-# して起動する。起動そのものは共通層の [lib/launch-cli.sh] に委譲する。
+# して起動する。起動そのものは共通層の [../../../scripts/lib/launch-cli.sh] に委譲する。
 
 set -euo pipefail
 
@@ -20,7 +20,9 @@ ID=${3:?ID required}
 ROUND=${4:-}
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-LIB=$(cd -- "$SCRIPT_DIR/../../cross-review/scripts/lib" && pwd)
+# **`cd` で登らない。** `cd` は `..` を字句で畳むため、Kiro CLI が `.kiro/skills/` へ張った
+# symlink の手前へ戻る。文字列のまま渡してカーネルに解決させる（バッチ 06 の契約）。
+LIB=$SCRIPT_DIR/../../../scripts/lib
 PROMPTS=$SCRIPT_DIR/../prompts
 
 command -v jq >/dev/null 2>&1 || { echo "jq が必要です" >&2; exit 1; }

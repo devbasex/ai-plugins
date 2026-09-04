@@ -27,7 +27,7 @@ SCOPE = (
     "plugins/ndf/skills/pr-review/SKILL.md",
     "plugins/ndf/skills/worktree/SKILL.md",
     "plugins/ndf/skills/worktree/references",
-    "plugins/ndf/scripts/lib/worktree-common.sh",
+    "plugins/ndf/scripts/lib",
     "plugins/ndf/scripts/worktree-guard.sh",
     ".ndf/worktree.json",
 )
@@ -105,7 +105,8 @@ def test_only_the_provenance_comments_keep_the_old_name(path: pathlib.Path) -> N
 # ---------- 受け入れ条件 14（共通層の削除） ----------
 
 def test_the_gemini_environment_helper_is_gone() -> None:
-    assert not (SKILLS / "cross-review/scripts/lib/_gemini-env.sh").exists()
+    assert not (SKILLS.parent / "scripts/lib/_gemini-env.sh").exists()
+    assert not (SKILLS / "cross-review/scripts/lib").exists()
 
 
 def test_no_script_sources_the_removed_helper() -> None:

@@ -128,8 +128,9 @@ wait $PID
 echo "exit=$?"
 ```
 
-`/ndf:cross-review` の `scripts/launch-agy.sh` と `scripts/lib/launch-cli.sh` が同じ
-組み合わせで起動し、完了判定は `scripts/lib/monitor.py` が pidfile と結果ファイルで行う。
+`/ndf:cross-review` の `skills/cross-review/scripts/launch-agy.sh` と共通層の
+`scripts/lib/launch-cli.sh` が同じ組み合わせで起動し、完了判定は共通層の
+`scripts/lib/monitor.py` が pidfile と結果ファイルで行う（どちらもプラグインルート直下）。
 
 ## 起動前の設定整形は要らない
 

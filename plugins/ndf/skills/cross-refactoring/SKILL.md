@@ -27,7 +27,7 @@ allowed-tools:
 - [scripts/refactor.py](scripts/refactor.py) — 状態管理（uv 自己完結、標準ライブラリのみ）
 - [scripts/prepare-worktrees.sh](scripts/prepare-worktrees.sh) — 作業ディレクトリ準備と Skill 配置
 - [scripts/launch-cli.sh](scripts/launch-cli.sh) — フェーズごとのプロンプト組み立てと CLI 起動
-- 監視と CLI 起動の実体は `../cross-review/scripts/lib/`（収束ループ共通層）
+- 監視と CLI 起動の実体は `../../scripts/lib/`（プラグインルート直下の収束ループ共通層）
 
 ## 設計方針
 
@@ -186,9 +186,9 @@ do
 done
 [ -n "$SKILL_DIR" ] || { echo "この Skill のディレクトリを解決できない" >&2; exit 1; }
 SCRIPTS="$SKILL_DIR/scripts"
-# 収束ループの共通層は cross-review 側にある。`..` は symlink の解決先を経由するため、
-# Kiro CLI が `.kiro/skills/` へ張ったリンクからでもプラグイン内の隣の Skill へ届く。
-LIB="$SKILL_DIR/../cross-review/scripts/lib"
+# 収束ループの共通層はプラグインルート直下にある。`..` は文字列のまま渡してカーネルに
+# 解決させるため、Kiro CLI が `.kiro/skills/` へ張ったリンクからでも実体側へ届く。
+LIB="$SKILL_DIR/../../scripts/lib"
 
 # **中断（終了コード 4）は握り潰さない。** 取り消しに失敗した状態を「全件失敗」と
 # 同じ扱いにすると、検証を通っていない変更を Pull Request に残したまま次の提案が
