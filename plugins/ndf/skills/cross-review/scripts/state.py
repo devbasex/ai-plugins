@@ -26,6 +26,13 @@ import tempfile
 import time
 from typing import Any, NamedTuple
 
+# 待ち行列は共通層に置く。指し方の契約は `plugins/ndf/scripts/lib/README.md` にある。
+# **モジュール名を `queue` にしない。** 標準ライブラリに同じ名前があり、共通層を
+# `sys.path` の先頭へ入れるとプロセス全体で標準ライブラリ側が隠れる。
+sys.path.insert(
+    0, str(pathlib.Path(__file__).resolve().parents[3] / "scripts" / "lib"))
+import post_queue  # noqa: E402
+
 
 # ---------------- helpers ----------------
 
@@ -357,6 +364,33 @@ def _git_remote_url() -> str:
     except OSError:
         return ""
     return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def _repo_from_resume(pr: int, worktree: str | None) -> str | None:
+    """控えの状態ファイルから `owner/repo` を読む。**GitHub へは問い合わせない。**
+
+    `origin` が無い、または URL を読めない環境では、リポジトリ名の解決が
+    `gh repo view` へ落ちる。上限に達しているとそこで止まるため、再開できる控えが
+    残っていても再開の経路へ入れない。**#291 が塞ごうとしている状態そのものである。**
+
+    読めるのは、置き場所がリポジトリ名抜きで決まるときだけである。既定の作業ツリーの
+    位置は名前を含むため、環境変数も明示された作業ツリーも無ければ `None` を返す。
+    """
+    env_tmp = os.environ.get("CROSS_REVIEW_TMP_DIR")
+    if env_tmp:
+        base = pathlib.Path(env_tmp).resolve()
+    elif worktree:
+        base = pathlib.Path(worktree).resolve() / ".cross_review"
+    else:
+        return None
+    try:
+        st = json.loads(
+            (base / f"cross-review-pr{pr}-state.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(st, dict):
+        return None
+    return str(st.get("repo") or "") or None
 
 
 def _repo_from_git() -> str | None:
@@ -1273,6 +1307,138 @@ def info(msg: str) -> None:
 
 # ---------------- subcommands ----------------
 
+# ---------------- 待ち行列（#291） ----------------
+#
+# **GitHub が使えない間も収束ループを進める。** 上限に達したときだけ投稿する内容を
+# ローカルへ積み、回復した後に順に流す。積む・流す・上限を見分けるところは共通層
+# （`post_queue`）が持ち、ここが持つのは置き場所の解決と、流した直後の確認と、
+# 収束の判定への結び付けだけである。
+#
+# **止めるのは `final = approved` を出すところだけである。** レビューも修正もローカルで
+# 進み、判定も記録される。未反映のまま「両方が承認した」と記録しないことが、この課題で
+# 守る一線である。
+
+
+def _queue(pr: int) -> post_queue.Queue:
+    """この Pull Request の待ち行列。状態ファイルと同じ親の下に置く。
+
+    作業ツリーの中へ置くのは、巻き直しで作業ツリーを捨てるときに待ち行列も一緒に
+    捨てられるようにするためである。**捨ててよいのは、巻き直しが close と create を
+    積まないためである**（積む対象はその Pull Request 宛のコメントだけで、Pull Request
+    ごと捨てるなら宛先も無くなる）。
+    """
+    return post_queue.Queue(_resolve_tmp_dir(pr) / post_queue.QUEUE_DIRNAME)
+
+
+def _pending_posts(pr: int) -> int:
+    """まだ届いていない投稿の件数。**照会は行わない**（ファイルを数えるだけ）。"""
+    return _queue(pr).count()
+
+
+def _confirm_flushed(pr: int, item: dict[str, Any]) -> None:
+    """流した直後に、投稿が届いたことを 1 度だけ確かめる。
+
+    #261 は「投稿が届いたことを確かめてから収束する」ことを求めている。待ち行列は
+    確かめる時点を投稿の直後から**流した直後**へ移すだけで、決まりそのものは変えない。
+
+    **送った項目と、既に届いていた項目を分けない。** 送信に成功した直後に中断すると、
+    GitHub 側には投稿があるのに項目は残る。次に流すと冪等の照会で見つかって送らずに
+    消えるため、ここを通さないと `queued` が解除されず `review_url` も戻らないまま
+    待ち行列が空になる。**待ち行列が空で `queued` のままの状態は、収束を止める側にも
+    確認を促す側にも働かない**（判定は `queued` を見て照会を飛ばす）。共通層が
+    見つけた投稿を `response` として渡すため、どちらも同じ経路で確かめられる。
+    """
+    if item.get("kind") != "review-post":
+        return
+    extra = item.get("extra") or {}
+    agent, round_no = extra.get("agent"), extra.get("round")
+    if not (agent and round_no):
+        return
+    resp = item.get("response") if isinstance(item.get("response"), dict) else {}
+    url = str(resp.get("html_url") or "")
+    if not url and resp.get("id"):
+        url = f"#pullrequestreview-{resp['id']}"
+    st = _load(pr)
+    # **書き戻す先は、その項目が属するラウンドである。** 積んだラウンドと流した
+    # ラウンドが同じとは限らないため、最後のラウンドへ書かない。
+    target = next(
+        (e for e in st.get("rounds", [])
+         if e.get("round") == round_no and isinstance(e.get(agent), dict)),
+        None,
+    )
+    if target is None:
+        return
+    exists = _review_exists(str(st.get("repo") or ""),
+                            int(st.get("current_pr") or pr), url)
+    if exists is False:
+        # #261 の決まり。届いていない投稿は結果なしとして扱い、起動し直しの経路へ乗せる。
+        target[agent] = {
+            "intent": NO_RESULT,
+            "no_result_reason": "not_posted",
+            "posted_as": None,
+            "comments": None,
+            "review_url": None,
+            "by_severity": {},
+        }
+        info(
+            f"⚠ {agent}: 流した後も投稿を確認できません (review_url={url!r})。"
+            " 結果なしとして記録します"
+        )
+    else:
+        target[agent]["review_url"] = url
+        target[agent]["queued"] = False
+    _save(pr, st)
+
+
+def _auto_flush(pr: int) -> None:
+    """進行側の各コマンドの入口で待ち行列を流す。
+
+    **自動だけにも明示だけにもしない。** 自動だけだと、回復を待つあいだ何もコマンドを
+    実行していない場合に流れない。明示だけだと、進行側が忘れたときに待ち行列が残った
+    まま収束の判定へ進む。流せなくても工程は止めない。
+
+    **入口は、書き戻し先が揃っている場所だけである。** 取り込み（`read-result`）の
+    入口では、そのラウンドの担当のエントリがまだ無い。詳細は `cmd_read_result` にある。
+    """
+    q = _queue(pr)
+    if not q.count():
+        return
+    result = q.flush()
+    for item in result.sent + result.skipped:
+        _confirm_flushed(pr, item)
+    if result.sent or result.skipped:
+        info(
+            f"↻ 待ち行列を流しました: 送った {len(result.sent)} 件 /"
+            f" 既に届いていた {len(result.skipped)} 件"
+        )
+    if result.remaining:
+        reason = (result.failed or {}).get("last_error", "")
+        info(f"⏳ 待ち行列に {result.remaining} 件残っています: {reason}")
+
+
+def cmd_flush(args: argparse.Namespace) -> None:
+    """待ち行列に積んだ投稿を流す。**終了コードは常に 0**（工程を止めない）。"""
+    pr = args.pr
+    q = _queue(pr)
+    before = q.count()
+    result = q.flush()
+    for item in result.sent + result.skipped:
+        _confirm_flushed(pr, item)
+    print(f"PENDING_BEFORE={before}")
+    print(f"PENDING_SENT={len(result.sent)}")
+    print(f"PENDING_SKIPPED={len(result.skipped)}")
+    print(f"PENDING_REMAINING={result.remaining}")
+    if result.remaining:
+        reason = (result.failed or {}).get("last_error", "")
+        info(
+            f"⏳ 待ち行列に {result.remaining} 件残っています"
+            f"{'（まだ上限です）' if result.rate_limited else ''}"
+            f"{f': {reason}' if reason and not result.rate_limited else ''}"
+        )
+    else:
+        info(f"✅ 待ち行列は空です（送った {len(result.sent)} 件）")
+
+
 def cmd_init(args: argparse.Namespace) -> None:
     """Step 0 — state 初期化 or 既存 state 引き継ぎ + プリチェック。"""
     pr = args.pr
@@ -1282,7 +1448,9 @@ def cmd_init(args: argparse.Namespace) -> None:
     # path には repo slug を含め、他リポジトリの同一 PR 番号と衝突しないようにする。
     # リポジトリ名は git の設定から求める。GraphQL を 1 点使わずに済み、誤りは
     # この後の REST の応答が検証する（`_fetch_pr_metadata`）。
-    repo = _repo_from_git() or _sh(
+    # **控えを GitHub より先に読む。** git から求まらないときの落とし先が `gh` だけだと、
+    # 上限に達している環境では再開の経路へ入る前に止まる（#291）。
+    repo = _repo_from_git() or _repo_from_resume(pr, args.worktree) or _sh(
         ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
     worktree = str(pathlib.Path(args.worktree).resolve()) if args.worktree else str(
         _default_worktree_base() / _repo_slug(repo) / f"pr{pr}")
@@ -1333,6 +1501,14 @@ def cmd_init(args: argparse.Namespace) -> None:
                     encoding="utf-8",
                 )
                 info("↻ 追加レビュー観点を state に反映して再開")
+            # 待ち行列を流すのは、手元の `st` を書き戻した**後**である。流した結果
+            # （`queued` の解除と、届かなかった投稿の結果なし）は `_confirm_flushed` が
+            # 状態ファイルへ直接書く。先に流すと、この関数がその後に書き戻す古い `st` が
+            # それらを消す。再開の入口で流すこと自体は変えないため、回復した後の
+            # 1 本目のコマンドで届く。
+            # 渡すのは状態ファイルの鍵（`args.pr`）で、`current_pr` ではない。待ち行列も
+            # 状態ファイルも鍵で引くため、巻き直しの後に `current_pr` を渡すと引けない。
+            _auto_flush(pr)
             tmp_dir = _tmp_dir(worktree)
             wt = st.get("worktree_path") or ""
             # 再開でも同期する。中断から再開までの間に head が進んでいることがあり、
@@ -1425,6 +1601,9 @@ def cmd_init(args: argparse.Namespace) -> None:
         "head_branch": head_branch,
         "base_branch": base_branch,
         "pr_author": author,
+        # 自分のログイン名は変わらない値である。一度取って持ち、以降は読まない。
+        # 待ち行列の冪等の照合が「投稿者が自分か」を見るために使う。
+        "viewer_login": me,
         "is_own_pr": is_own,
         "event_downgrade": event_downgrade,
         "changed_files": changed_files,
@@ -1606,6 +1785,7 @@ def _sync_before_round(st: dict[str, Any], pr: int) -> HeadRef | None:
 
 def cmd_start_round(args: argparse.Namespace) -> None:
     """Step 1 — round 開始判定。"""
+    _auto_flush(args.pr)
     st = _load(args.pr)
     total = len(st["rounds"])
     max_r = st["max_rounds"]
@@ -1920,6 +2100,13 @@ def cmd_read_result(args: argparse.Namespace) -> None:
     使える結果が残らなかったときは、`NO_RESULT` と理由をラウンドへ残してから止める。
     終了コードは現行のまま（無い・判定の値を持たないときは 1、JSON として読めない
     ときは 3）で、進む先を決めるのは次の判定である。
+
+    **ここでは待ち行列を流さない。** 流すと `review-post` の書き戻し先（そのラウンドの
+    担当のエントリ）がまだ無い時点で項目が消える。`_confirm_flushed` は書き戻せず、
+    この後の取り込みが `queued: true` だけを保存するため、待ち行列が空で `queued` の
+    ままの状態ができる。判定はその状態で収束してしまい、投稿の存在も参照も確かめない。
+    **両方の担当を取り込んだ後に流す**（`judge` の入口）。取り込みは判定の直前に
+    しかないため、流す時期が遅れるのは 1 コマンド分である。
     """
     agent = args.agent
     pr = args.pr
@@ -1979,7 +2166,16 @@ def cmd_read_result(args: argparse.Namespace) -> None:
     # 記録し、判定の側の「同じラウンドで 1 度だけ起動し直す」経路へ乗せる。修正の担当
     # から見ると、結果が残らなかった場合と、結果はあるが指摘が届いていない場合は同じ
     # 状態である（読むべき指摘が無い）。
-    post_error = r.get("post_error")
+    # **待ち行列へ積んだ投稿は、積んだ時点では届いていない。** ここで照会すると
+    # 結果なしになり、起動し直しで同じ内容が二重に積まれる。届いたことは流した直後に
+    # 1 度だけ確かめる（`_confirm_flushed`）。
+    queued = bool(r.get("queued"))
+    if queued:
+        info(
+            f"⚠ {agent}: 投稿を待ち行列へ積んでいます。"
+            "届いたことの確認は流した直後に行います"
+        )
+    post_error = None if queued else r.get("post_error")
     if post_error:
         _die_no_result(
             pr,
@@ -1988,7 +2184,7 @@ def cmd_read_result(args: argparse.Namespace) -> None:
             f"{agent}: レビューの投稿に失敗しています (post_error={post_error})。"
             " 指摘が Pull Request に届いていないため、結果なしとして扱います",
         )
-    exists = _review_exists(repo, pr, r.get("review_url"))
+    exists = None if queued else _review_exists(repo, pr, r.get("review_url"))
     if exists is False:
         _die_no_result(
             pr,
@@ -1998,7 +2194,7 @@ def cmd_read_result(args: argparse.Namespace) -> None:
             f"(review_url={r.get('review_url')!r})。"
             " 指摘が Pull Request に届いていないため、結果なしとして扱います",
         )
-    if exists is None:
+    if exists is None and not queued:
         info(
             f"⚠ {agent}: レビューの投稿を確認できませんでした。"
             "申告をそのまま採用します"
@@ -2008,7 +2204,7 @@ def cmd_read_result(args: argparse.Namespace) -> None:
     # 結果ファイルには件数が残る。申告のまま進むと、修正担当が読むべき指摘が
     # GitHub 上に存在しないまま収束判定まで走る（実測: 申告 2 件に対しスレッド 0）。
     declared = _as_count(comments)
-    if declared > 0:
+    if declared > 0 and not queued:
         actual = _posted_comment_count(repo, pr, r.get("review_url"))
         if actual is None:
             info(
@@ -2028,6 +2224,7 @@ def cmd_read_result(args: argparse.Namespace) -> None:
         "comments": comments,
         "review_url": r.get("review_url"),
         "by_severity": r.get("by_severity", {}),
+        "queued": queued,
     }
     _save(pr, st)
     info(f"✅ {agent}: intent={intent} posted_as={posted_as} comments={comments}")
@@ -2083,9 +2280,11 @@ def cmd_judge(args: argparse.Namespace) -> None:
     収束の直前は修正の機会が残っている段であり、そこで中断すると直せる失敗まで
     人手へ戻すことになる。中断は上限のラウンド数・振動の検知・`merge-fix` が受け持つ。
 
-    Exit code: 0=approved, 2=continue, 7=結果なしのため起動し直す, 1=error
+    Exit code: 0=approved, 2=continue, 7=結果なしのため起動し直す,
+               8=待ち行列に投稿が残っている, 1=error
     """
     pr = args.pr
+    _auto_flush(pr)
     st = _load(pr)
     if not st.get("rounds"):
         die("state.rounds が空。`state.py start-round` を先に呼んでください")
@@ -2102,6 +2301,8 @@ def cmd_judge(args: argparse.Namespace) -> None:
     print(f"CODEX_INTENT={codex_intent}")
     print(f"AGY_INTENT={agy_intent}")
     print(f"CARRIED_OVER_THREADS={carried_count}")
+    pending_posts = _pending_posts(pr)
+    print(f"PENDING_POSTS={pending_posts}")
 
     no_result = _no_result_agents(last, only)
     if no_result:
@@ -2128,6 +2329,17 @@ def cmd_judge(args: argparse.Namespace) -> None:
             "同じラウンドで 1 度だけ起動し直す。"
         )
         sys.exit(7)
+
+    if round_passes and carried is None and pending_posts:
+        # **届いていない投稿があるあいだは収束させない。** 修正するものは無いので
+        # 修正の工程（2）へは回さず、流し直す先（8）へ分ける。
+        last["verdict"] = "queued"
+        _save(pr, st)
+        info(
+            f"→ 待ち行列に {pending_posts} 件残っている。"
+            "流し切るまで収束させない（`state.py flush` で流す）。"
+        )
+        sys.exit(8)
 
     if round_passes and carried is None:
         ci = _round_ci(st, last, pr)
@@ -2725,9 +2937,14 @@ def main() -> None:
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_unresolved_threads)
 
+    sp = sub.add_parser("flush", help="待ち行列に積んだ投稿を流す (常に 0)")
+    sp.add_argument("pr", type=int)
+    sp.set_defaults(func=cmd_flush)
+
     sp = sub.add_parser(
         "judge",
-        help="Step 3 — intent ベース pass 判定 (0=approved/2=continue/7=起動し直し)",
+        help="Step 3 — intent ベース pass 判定 "
+             "(0=approved/2=continue/7=起動し直し/8=待ち行列に残あり)",
     )
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_judge)

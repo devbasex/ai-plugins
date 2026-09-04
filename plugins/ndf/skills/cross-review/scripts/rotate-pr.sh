@@ -31,6 +31,28 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=_tmpdir.sh
 . "$SCRIPT_DIR/_tmpdir.sh"
 TMP_DIR=$(tmpdir)
+# 待ち行列は共通層に置く。指し方の契約は plugins/ndf/scripts/lib/README.md にある。
+# cd で登ると Kiro CLI の symlink の手前へ戻るため、文字列のまま渡す。
+QUEUE_PY="$SCRIPT_DIR/../../../scripts/lib/post_queue.py"
+
+# 上限のときの扱いは投稿の種類で分かれる。
+#
+#   コメント : 待ち行列へ積んで先へ進む。宛先は決まっており、後から送れる
+#   巻き直し : 回復を待って再実行する。作成が終わるまで新しい番号が決まらず、
+#              番号が決まらないと以降のすべての項目の宛先が決まらない
+#
+# 待つあいだラウンドは進まないが、巻き直しは 8 ラウンドに 1 度しか起きない。
+gh_retry() {
+  "$QUEUE_PY" retry -- "$@"
+}
+
+# 旧 PR へ残すコメント。上限のときは積み、終了コード 0 で先へ進む。
+post_pr_comment() {
+  local pr=$1 body=$2
+  printf '%s' "$body" | "$QUEUE_PY" post \
+    --dir "$TMP_DIR/pending" --kind pr-comment \
+    --repo "$REPO" --pr "$pr" --body-file - --actor "$VIEWER" >/dev/null
+}
 
 usage() {
   cat >&2 <<'USAGE'
@@ -50,7 +72,7 @@ reopen_old_pr_on_failure() {
   local exit_code=$?
   echo "⚠ 新 PR 作成系処理に失敗 (exit=$exit_code) — 旧 PR #${OLD_PR:-?} を reopen します" >&2
   if [ -n "${OLD_PR:-}" ]; then
-    gh pr reopen "$OLD_PR" >&2 || echo "⚠ 旧 PR #$OLD_PR の reopen にも失敗しました。手動で確認してください。" >&2
+    gh_retry gh pr reopen "$OLD_PR" >&2 || echo "⚠ 旧 PR #$OLD_PR の reopen にも失敗しました。手動で確認してください。" >&2
   fi
 }
 
@@ -62,6 +84,9 @@ load_state() {
   [ -s "$STATE_FILE" ] || { echo "state.json not found: $STATE_FILE" >&2; exit 1; }
   WORKTREE=$(jq -r '.worktree_path' "$STATE_FILE")
   OLD_PR=$(jq -r '.current_pr' "$STATE_FILE")
+  # 待ち行列の宛先と、冪等の照合に使う投稿者。どちらも state の控えから読む。
+  REPO=$(jq -r '.repo // ""' "$STATE_FILE")
+  VIEWER=$(jq -r '.viewer_login // ""' "$STATE_FILE")
   ROUND_IN_PR=$(jq --argjson p "$OLD_PR" '[.rounds[] | select(.pr == $p)] | length' "$STATE_FILE")
 }
 
@@ -159,8 +184,8 @@ execute_light() {
   git push origin HEAD:"$head_branch"
 
   # 2. 旧 PR を close (コメント残し)
-  gh pr comment "$OLD_PR" --body "ℹ️ レビューコメント履歴整理のため本 PR を一度 close し、同じブランチ \`$head_branch\` で新 PR を作り直します。ブランチの内容・base は変えません。"
-  gh pr close "$OLD_PR"
+  post_pr_comment "$OLD_PR" "ℹ️ レビューコメント履歴整理のため本 PR を一度 close し、同じブランチ \`$head_branch\` で新 PR を作り直します。ブランチの内容・base は変えません。"
+  gh_retry gh pr close "$OLD_PR"
 
   # close 後に create が失敗した場合は旧 PR を reopen して rotation の途中停止を回避する
   # (関数定義は file 冒頭で共通化, gemini round 6 指摘)
@@ -173,7 +198,7 @@ execute_light() {
     create_args+=(--draft)
   fi
   local new_pr_url
-  new_pr_url=$(printf '%s' "$new_body" | gh pr create "${create_args[@]}")
+  new_pr_url=$(printf '%s' "$new_body" | gh_retry gh pr create "${create_args[@]}")
 
   # gh pr create 成功直後に trap を解除し、後続の URL parse / echo 等が失敗しても
   # 新旧 PR が重複して開く事態を避ける (gemini round 6 指摘)。
@@ -259,8 +284,8 @@ execute_squash() {
   git push -u origin "$new_branch"
 
   # 2. 旧 PR を close (コメント残し)
-  gh pr comment "$OLD_PR" --body "🔄 cross-review ループ進行中のため、本 PR を close し新規 PR に巻き直します。 round_in_pr=$ROUND_IN_PR で長尺化を回避。"
-  gh pr close "$OLD_PR"
+  post_pr_comment "$OLD_PR" "🔄 cross-review ループ進行中のため、本 PR を close し新規 PR に巻き直します。 round_in_pr=$ROUND_IN_PR で長尺化を回避。"
+  gh_retry gh pr close "$OLD_PR"
 
   # close 後に create が失敗した場合は旧 PR を reopen して rotation の途中停止を回避する
   # (関数定義は file 冒頭で共通化, gemini round 6 指摘)
@@ -280,7 +305,7 @@ execute_squash() {
 EOF
 )
   local new_pr_url
-  new_pr_url=$(printf '%s' "$new_body" | gh pr create --base "$base" --title "$new_title" --body-file -)
+  new_pr_url=$(printf '%s' "$new_body" | gh_retry gh pr create --base "$base" --title "$new_title" --body-file -)
 
   # gh pr create 成功直後に trap を解除し、後続の URL parse / echo 等が失敗しても
   # 新旧 PR が重複して開く事態を避ける (gemini round 6 指摘)。

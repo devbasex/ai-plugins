@@ -83,6 +83,11 @@
   thread ID の一覧。次のラウンドの開始時に GitHub 側の未解決集合と突き合わせる
 - `carried_over` — 再開の時点で残っていた未解決の指摘。`fixed_in_round` が `null` の
   あいだは、両者が承認しても収束させない（[01-state-and-review.md](01-state-and-review.md) の Step 3 参照）
+- `viewer_login` — 自分のログイン名。一度取って持つ控えで、待ち行列の冪等の照合が
+  「投稿者が自分か」を見るために使う
+- `rounds[].codex.queued` — その結果の投稿を待ち行列へ積んだかどうか。真のあいだは
+  届いたことの照会を飛ばす（[01-state-and-review.md](01-state-and-review.md) の待ち行列の節参照）
+- `rounds[].verdict` の `queued` — 通ったが待ち行列に投稿が残っているラウンド。収束させない
 - `sweep` — 最終スイープ後の検証結果。`remaining_open` は GitHub 側で数え直した実数で、
   `declared_remaining_open` は結果ファイルの申告値。両者が食い違う場合は実数を採る
 

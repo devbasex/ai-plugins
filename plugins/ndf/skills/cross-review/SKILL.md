@@ -233,7 +233,7 @@ while :; do
   [ "$ONLY" != "agy" ] && "$SCRIPTS/state.py" read-result "$STATE_PR" codex  || true
   [ "$ONLY" != "codex"  ] && "$SCRIPTS/state.py" read-result "$STATE_PR" agy || true
 
-  # Step 3: 判定 (0=収束 / 2=修正へ / 7=結果なし / 1=中断)。引き継いだ指摘が残っていれば、
+  # Step 3: 判定 (0=収束 / 2=修正へ / 7=結果なし / 8=待ち行列に残あり / 1=中断)。引き継いだ指摘が残っていれば、
   #   両者が承認しても 2 を返して修正の工程へ回す。置換の終了コードは変数で受けてから読む。
   JUDGE_VARS=$("$SCRIPTS/state.py" judge "$STATE_PR"); JUDGE_RC=$?; eval "$JUDGE_VARS"
   if [ "$JUDGE_RC" -eq 7 ]; then  # 名前の出た担当だけを、同じラウンドで 1 度起動し直す
@@ -242,7 +242,12 @@ while :; do
     for a in $RELAUNCH_AGENTS; do "$SCRIPTS/state.py" read-result "$STATE_PR" "$a" || true; done
     JUDGE_VARS=$("$SCRIPTS/state.py" judge "$STATE_PR"); JUDGE_RC=$?; eval "$JUDGE_VARS"
   fi
+  if [ "$JUDGE_RC" -eq 8 ]; then  # 上限で積んだ投稿が残っている。流してから判定し直す
+    "$SCRIPTS/state.py" flush "$STATE_PR"
+    JUDGE_VARS=$("$SCRIPTS/state.py" judge "$STATE_PR"); JUDGE_RC=$?; eval "$JUDGE_VARS"
+  fi
   case $JUDGE_RC in 0) break ;; 2) : ;; *) exit "$JUDGE_RC" ;; esac   # 1=結果なしのまま中断
+  # 8 のまま残るのは上限が続いているとき。state は残るので、回復後に同じ引数で再開する。
 
   # Step 4: 振動検知 (4=oscillation)
   "$SCRIPTS/state.py" check-oscillation "$STATE_PR" || [ $? -eq 2 ] || exit 4
