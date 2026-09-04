@@ -26,6 +26,7 @@ PR を **codex / agy 両方** にレビューさせ、両者が `APPROVE` を返
 - [docs/01-state-and-review.md](docs/01-state-and-review.md) — Step 0〜4 (state init / round / 並列レビュー / 判定 / 振動検知)
 - [docs/02-fix-and-rotation.md](docs/02-fix-and-rotation.md) — Step 5〜8 (サブエージェント修正 / PR ローテーション / 終了処理)
 - [docs/03-review-output.md](docs/03-review-output.md) — レビュー出力の制約 / CI failure の分類 / アンチパターン / monitor.py の誤検知
+- [docs/04-contracts.md](docs/04-contracts.md) — 状態ファイルの形式と AI への入出力の契約（手順の途中では読まない）
 - [scripts/state.py](scripts/state.py) — state.json 操作（uv 自己完結スクリプト、stdlib のみ）
 - [scripts/launch-codex.sh](scripts/launch-codex.sh) / [scripts/launch-agy.sh](scripts/launch-agy.sh) — レビューランチャ
 - [scripts/monitor.py](scripts/monitor.py) — codex/agy プロセス多軸監視 (sentinel / pidfile / 早期エラー / stall / hard timeout / result.json)
@@ -49,7 +50,7 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 | 再開時の引き継ぎ | 再開の時点で残っていた未解決の指摘は `carried_over` に記録し、**修正の工程を 1 度通すまで収束させない**。増えるラウンドは最大 1 回。通した後の再開では、新しい指摘が出ていなければ抑止しない |
 | 状態の永続化 | `<worktree>/.cross_review/cross-review-pr<番号>-state.json` に集約。中断・再開可能 |
 | 長尺PR対策 | **`--rotate-after` ラウンドで PR をローテーション**（default=light: 同ブランチで PR 巻き直し / squash: 新ブランチ + squash 統合） |
-| 振動検知 | 同じ指摘が 2 round で 50%以上重複したら中断 |
+| 振動検知 | 前のラウンドと**同じ箇所を指す指摘**が 50% 以上なら中断（測り方は `docs/01` の Step 4） |
 
 ## 引数
 
@@ -309,6 +310,7 @@ done
 
 - Step 0〜4 — [docs/01-state-and-review.md](docs/01-state-and-review.md)
 - Step 5〜8 (最終スイープ Step 7.5 含む) — [docs/02-fix-and-rotation.md](docs/02-fix-and-rotation.md)
+- 状態ファイルと入出力の契約 — [docs/04-contracts.md](docs/04-contracts.md)
 
 ## light モード rotation の再開プロトコル (exit 10 を観測した時)
 
@@ -372,6 +374,8 @@ bash ループは Agent tool を呼べないため、light モードでは Step 
 - **残 deferred nit リスト**（Step 7.5 で Resolve 済み。再対応が要るものがあれば参考列挙）
 - **rejected 件数**（bot 誤指摘で却下したもの）
 - **最終 PR URL**
+- **検証**（`verification`）: 最終スイープの後に実行した検証コマンドと終了コード。
+  実行しなかった場合はその理由（レビューが収束していても、検証を通していない変更は残る）
 
 詳細は PR 上のインラインコメントと state.json に残っているため、本報告では
 繰り返さない。
