@@ -88,9 +88,13 @@ worktree 外を触ると競合します。
    `conclusion` が `failure` のものだけを修正対象に取り込む）
 
    ```bash
-   gh api "repos/{OWNER_REPO}/commits/{HEAD_OID}/check-runs" \
+   gh api "repos/{OWNER_REPO}/commits/{HEAD_OID}/check-runs?per_page=100" \
      --jq '[.check_runs[] | select(.status == "completed" and .conclusion == "failure") | .name]'
    ```
+
+   **`per_page=100` を付ける。** 既定は 30 件で、31 件目以降に失敗があると
+   失敗が無いものとして読む。`total_count` が 100 を超えるリポジトリでは
+   `&page=2` 以降も読み、`total_count` に届くまで足す。
 
    **`commits/{HEAD_OID}/status` は使わない。** GitHub Actions は検査ジョブを記録し
    commit の状態を記録しないため、すべて成功した commit でも `state: "pending"` /

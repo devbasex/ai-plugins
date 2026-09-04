@@ -456,6 +456,13 @@ CI_META_PATTERNS = ("check_pr_requirements", "assignees", "reviewers", "labels",
 # は失敗にしない。
 CI_FAILED_CONCLUSIONS = ("failure", "timed_out", "action_required", "startup_failure")
 
+# 検査ジョブの一覧は 1 ページ 100 件（REST の上限）で読む。**既定の 30 件のままにしない。**
+# 31 件目以降に code-related の失敗があるリポジトリでは、失敗を見ないまま収束する。
+CHECK_RUNS_PER_PAGE = 100
+# 読むページ数の上限。100 件で収まるリポジトリは 1 回のままである（このリポジトリは 9 件）。
+# 上限に達しても止めず、読めた範囲で判定する。**進行を止めない側へ倒す。**
+CHECK_RUNS_MAX_PAGES = 10
+
 
 class CiClassification(NamedTuple):
     """検査ジョブを、修正の要る失敗・コードと無関係な失敗・未完了へ分けた結果。"""
@@ -496,20 +503,35 @@ def _fetch_check_runs(repo: str, sha: str) -> list[dict[str, Any]] | None:
     **「照会できなかった」と「すべて成功」を区別する。** `HTTP 422`（GitHub 側に
     無い commit）も `total_count` が 0 のリポジトリも、失敗が無いことの根拠に
     ならない。どちらも `None` を返し、呼び出し側は収束を止めずに理由を残す。
+
+    **`total_count` に届くまでページを読む。** 1 ページの上限は 100 件で、
+    `total_count` はページの件数ではなく全体の件数を返す。読み切らないまま
+    `_classify_ci` へ渡すと、後ろのページにある失敗が無いものとして扱われる。
+    100 件で収まるリポジトリは 1 回で終わり、呼び出し回数は変わらない。
     """
     if not repo or not sha:
         return None
-    resp = _gh_rest(f"repos/{repo}/commits/{sha}/check-runs")
-    if resp is None or not isinstance(resp.body, dict):
-        return None
-    try:
-        total = int(resp.body.get("total_count") or 0)
-    except (TypeError, ValueError):
-        return None
-    runs = resp.body.get("check_runs")
-    if total <= 0 or not isinstance(runs, list) or not runs:
-        return None
-    return [r for r in runs if isinstance(r, dict)]
+    base = f"repos/{repo}/commits/{sha}/check-runs?per_page={CHECK_RUNS_PER_PAGE}"
+    runs: list[dict[str, Any]] = []
+    total: int | None = None
+    for page in range(1, CHECK_RUNS_MAX_PAGES + 1):
+        resp = _gh_rest(f"{base}&page={page}")
+        if resp is None or not isinstance(resp.body, dict):
+            return None
+        if total is None:
+            try:
+                total = int(resp.body.get("total_count") or 0)
+            except (TypeError, ValueError):
+                return None
+            if total <= 0:
+                return None
+        chunk = resp.body.get("check_runs")
+        if not isinstance(chunk, list) or not chunk:
+            break
+        runs.extend(r for r in chunk if isinstance(r, dict))
+        if len(runs) >= total:
+            break
+    return runs or None
 
 
 class HeadRef(NamedTuple):

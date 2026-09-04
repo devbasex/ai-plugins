@@ -147,3 +147,78 @@ def test_a_failed_call_returns_nothing(state_mod, monkeypatch):
     )
 
     assert state_mod._gh_rest("repos/o/r/commits/x/check-runs") is None
+
+
+# ---------------- 検査ジョブの一覧はページを読み切る ----------------
+
+def _check_run(name: str) -> dict:
+    return {"name": name, "status": "completed", "conclusion": "success"}
+
+
+def _check_runs_response(state_mod, total: int, names: list[str]):
+    return state_mod.RestResponse(
+        headers={}, body={"total_count": total, "check_runs": [_check_run(n) for n in names]},
+        rate_remaining=None, rate_reset=None,
+    )
+
+
+def test_check_runs_are_read_one_hundred_at_a_time(state_mod, real_github, monkeypatch):
+    """既定の 30 件のままにしない。31 件目以降の失敗を見ないまま収束するため。"""
+    paths = []
+
+    def _rest(path):
+        paths.append(path)
+        return _check_runs_response(state_mod, 9, [f"job{i}" for i in range(9)])
+
+    monkeypatch.setattr(state_mod, "_gh_rest", _rest)
+
+    runs = state_mod._fetch_check_runs(REPO, "b87b3ae")
+
+    assert len(runs) == 9
+    assert paths == [f"repos/{REPO}/commits/b87b3ae/check-runs?per_page=100&page=1"]
+
+
+def test_check_runs_beyond_one_page_are_followed(state_mod, real_github, monkeypatch):
+    """`total_count` は全体の件数を返す。届くまで後続のページを読む。"""
+    pages = {
+        1: [f"job{i}" for i in range(100)],
+        2: [f"late{i}" for i in range(20)],
+    }
+    seen = []
+
+    def _rest(path):
+        page = int(path.rsplit("page=", 1)[1])
+        seen.append(page)
+        return _check_runs_response(state_mod, 120, pages[page])
+
+    monkeypatch.setattr(state_mod, "_gh_rest", _rest)
+
+    runs = state_mod._fetch_check_runs(REPO, "b87b3ae")
+
+    assert seen == [1, 2]
+    assert len(runs) == 120
+    assert runs[-1]["name"] == "late19"
+
+
+def test_a_failing_later_page_gives_nothing(state_mod, real_github, monkeypatch):
+    """途中のページを取れないときは「確かめられなかった」に倒す。"""
+    def _rest(path):
+        if path.endswith("page=1"):
+            return _check_runs_response(state_mod, 120, [f"job{i}" for i in range(100)])
+        return None
+
+    monkeypatch.setattr(state_mod, "_gh_rest", _rest)
+
+    assert state_mod._fetch_check_runs(REPO, "b87b3ae") is None
+
+
+def test_reading_stops_at_the_page_limit(state_mod, real_github, monkeypatch):
+    """上限に達しても止めず、読めた範囲で判定する。"""
+    monkeypatch.setattr(
+        state_mod, "_gh_rest",
+        lambda path: _check_runs_response(state_mod, 10_000, [f"job{i}" for i in range(100)]),
+    )
+
+    runs = state_mod._fetch_check_runs(REPO, "b87b3ae")
+
+    assert len(runs) == 100 * state_mod.CHECK_RUNS_MAX_PAGES
