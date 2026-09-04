@@ -155,6 +155,40 @@ def test_invalid_verdict_does_not_narrow_targets(
     assert "REVIEW_TARGETS='agy kiro'" in capsys.readouterr().out
 
 
+def test_invalid_after_a_fix_round_restores_both(
+    refactor, tmp_path, env_tmp_dir, no_git, capsys
+):
+    """再レビューが差し戻しになったら、絞り込みを解いて 2 者へ戻す。
+
+    変更要求で絞った後に形式の誤りが出た場合、絞ったままだと差し戻しの再レビューが
+    1 者だけで行われる。**差し戻しは修正の成否と別である。**
+    """
+    state_path = _state(tmp_path)
+    env_tmp_dir(state_path)
+    write_result(state_path, "agy-review-r1", review("REQUEST_CHANGES", [finding()]))
+    write_result(state_path, "kiro-review-r1", review())
+
+    with pytest.raises(SystemExit):
+        refactor.cmd_judge_review(_args())
+    assert read_state(state_path)["rounds"][0]["fix_reviewers"] == ["agy"]
+
+    # 修正の後の再レビューで、絞った担当が形式の誤りを返す。
+    state = read_state(state_path)
+    state["rounds"][0]["fix_rounds"] = 1
+    state_path.write_text(__import__("json").dumps(state), encoding="utf-8")
+    write_result(state_path, "agy-review-r1",
+                 review("REQUEST_CHANGES", [finding("R9-999")]))
+
+    with pytest.raises(SystemExit) as e:
+        refactor.cmd_judge_review(_args())
+    assert e.value.code == 3
+    assert "fix_reviewers" not in read_state(state_path)["rounds"][0]
+
+    capsys.readouterr()
+    refactor.cmd_review_targets(_args())
+    assert "REVIEW_TARGETS='agy kiro'" in capsys.readouterr().out
+
+
 # ---------- 進めない状態 ----------
 
 def test_empty_targets_fail(refactor, tmp_path, env_tmp_dir):

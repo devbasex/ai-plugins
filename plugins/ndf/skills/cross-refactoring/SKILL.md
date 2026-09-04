@@ -262,10 +262,12 @@ while :; do                                   # 提案ラウンドの繰り返�
   "$SCRIPTS/prepare-worktrees.sh" "$ID" sync "$(git -C "$WORK" rev-parse HEAD)"
 
   while :; do                                 # レビュー収束の繰り返し
-    for r in $REVIEWERS; do
+    # 起動する担当は状態が決める。初回は 2 者、修正の後は変更要求を出した担当だけになる
+    rf_eval review-targets "$ID" "$ROUND"
+    for r in $REVIEW_TARGETS; do
       "$SCRIPTS/launch-cli.sh" "$r" review "$ID" "$ROUND"
     done
-    "$LIB/monitor.py" "$ID" --agents "$REVIEWERS_CSV" --tmp-dir "$TMP_DIR" \
+    "$LIB/monitor.py" "$ID" --agents "$REVIEW_TARGETS_CSV" --tmp-dir "$TMP_DIR" \
         --stem-template "{agent}-review-r$ROUND" --timeout 900
     rf judge-review "$ID" "$ROUND"; rc=$?
     [ $rc -eq 0 ] && break                    # 2 者とも承認
@@ -297,7 +299,7 @@ done
 | 3 | レビュー結果の形式不正 | 差し戻して再レビュー |
 | **4** | **中断**（取り消しの失敗、認証切れ、範囲を確定できない、レビュー結果が無いまま差し戻し上限に達したなど） | **進行ごと止める** |
 
-出力を `eval` する呼び出し（`init` / `start-round`）は `rf_eval` を使う。
+出力を `eval` する呼び出し（`init` / `start-round` / `review-targets`）は `rf_eval` を使う。
 `eval "$(rf ...)"` と書くと `rf` はコマンド置換のサブシェルで動くため、`exit 4` は
 サブシェルしか終わらせず、外側の `eval` は空文字を評価して成功する。
 **中断したはずの進行がそのまま続く**ので、出力と終了コードは親シェルで受け取る。

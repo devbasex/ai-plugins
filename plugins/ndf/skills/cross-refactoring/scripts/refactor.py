@@ -1967,7 +1967,7 @@ def cmd_review_targets(args: argparse.Namespace) -> None:
     差し戻し（`invalid`）はこのキーを書かないため、2 者へ戻る。結果の形が判定に使えない
     状態は修正の成否とは別で、承認した担当の結果も読めていない可能性がある。
 
-    終了コード: 0 = 対象を返した / 1 = ラウンドが無い、または対象が 0 人。
+    終了コード: 0 = 対象を返した / 4（`ABORT`）= ラウンドが無い、または対象が 0 人。
     """
     _, state = _load(args.id)
     entry = _round(state, args.round)
@@ -2058,6 +2058,10 @@ def _handle_review_verdict(
     if verdict == "invalid":
         for p in problems:
             info(f"❌ {p}")
+        # **差し戻しは絞り込みを解く。** 変更要求で絞った後に形式の誤りが出た場合、
+        # 絞ったままだと差し戻しの再レビューが 1 者だけで行われる。結果の形が判定に
+        # 使えない状態は修正の成否とは別である。
+        entry.pop("fix_reviewers", None)
         entry["invalid_reviews"] = entry.get("invalid_reviews", 0) + 1
         if entry["invalid_reviews"] > MAX_INVALID_REVIEWS:
             # **結果が無いことと、形が違うことを分ける。** 結果を残さなかったのは
@@ -2090,6 +2094,8 @@ def _handle_review_verdict(
                 ),
                 "resolved": False,
             })
+            # 絞り込みは上で解いたままにする。合成した指摘は誰が出したものでもなく、
+            # 再レビューの対象が決まらない。
             # **この出口も修正フェーズの起点を記録する。** 記録せずに変更要求を
             # 返すと `merge-fix` が範囲を確定できずに弾かれ、`fix_rounds` が
             # 進まない。`should-abandon` は `fix_rounds` で見送りを決めるため、
