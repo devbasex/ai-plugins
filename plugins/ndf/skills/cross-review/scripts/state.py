@@ -9,19 +9,6 @@
 ループ判定（round 開始 / 収束 / 振動 / PR ローテーション要否 / fix 結果マージ /
 deferred nit レポート）を 1 つの CLI に集約する。
 
-Subcommands:
-  init           Step 0  state 初期化 or 再開（プリチェック込み）
-  start-round    Step 1  round 開始判定 (ROUND/ROUND_IN_PR/PR を stdout に出す)
-  read-result    Step 2.5 codex/agy の result.json を state にマージ
-  unresolved-threads     PR 上の未解決の指摘を数える (exit 0=数えられた, 1=取得できず)
-  judge          Step 3  intent ベース pass 判定 (exit 0=approved, 2=continue)
-  check-oscillation Step 4 path:line 重複率を計算
-  merge-fix      Step 5 post  fix サブエージェント戻り値を state にマージ + CI 分類
-  should-rotate  Step 6  rotate_after 到達判定 (exit 0=rotate, 2=keep)
-  set-current-pr        PR ローテーション後の current_pr 更新
-  verify-sweep   Step 7.5 後段 最終スイープ後の未解決の指摘を検証 (exit 0=残なし, 6=残あり)
-  report         Step 8  deferred nit + ラウンドサマリ表示
-
 すべての出力は人間可読 + KEY=VALUE 形式（eval / read で取り回し可能）。
 """
 from __future__ import annotations
@@ -2366,6 +2353,9 @@ def cmd_report(args: argparse.Namespace) -> None:
 # ---------------- main ----------------
 
 def main() -> None:
+    # 副コマンドの説明はここ（`help`）だけが持つ。**モジュールの docstring へ写さない。**
+    # 2 か所へ書くと片方だけが実装から離れる。振動の検知の基準は実装が 3 つの一致へ
+    # 変わった後も、docstring 側が古い基準を出し続けていた（#329）。
     p = argparse.ArgumentParser(description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -2387,7 +2377,10 @@ def main() -> None:
     )
     sp.set_defaults(func=cmd_init)
 
-    sp = sub.add_parser("start-round", help="Step 1 — round 開始判定")
+    sp = sub.add_parser(
+        "start-round",
+        help="Step 1 — round 開始判定 (1=上限到達/5=後始末の未了/8=同期できない)",
+    )
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_start_round)
 
@@ -2404,11 +2397,17 @@ def main() -> None:
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_unresolved_threads)
 
-    sp = sub.add_parser("judge", help="Step 3 — intent ベース pass 判定 (0=approved/2=continue)")
+    sp = sub.add_parser(
+        "judge",
+        help="Step 3 — intent ベース pass 判定 (0=approved/2=continue/7=起動し直し)",
+    )
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_judge)
 
-    sp = sub.add_parser("check-oscillation", help="Step 4 — path:line 重複率を計算")
+    sp = sub.add_parser(
+        "check-oscillation",
+        help="Step 4 — 同じ箇所を指す指摘の割合を計算 (2=続行/4=振動で中断)",
+    )
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_check_oscillation)
 
