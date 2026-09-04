@@ -28,7 +28,7 @@ LIB = ROOT / "plugins" / "ndf" / "scripts" / "lib" / "worktree-common.sh"
 SKILLS = ROOT / "plugins" / "ndf" / "skills"
 
 # 起点を解決する手順を持つ Skill と、その手順を見分ける目印。
-INLINE_SKILLS = ("cherry-pick-pr", "deploy", "merged", "pr-review")
+INLINE_SKILLS = ("cherry-pick-pr", "deploy", "merged", "pr-review", "retrospective")
 MARKER = "dev_base=$(jq"
 
 # 開発の起点を扱う Skill。起点は既定ブランチとは限らないため、字面で書かない。
@@ -40,6 +40,7 @@ LITERAL_SKILLS = (
     "pr",
     "pr-review",
     "problem-solving",
+    "retrospective",
     "worktree",
 )
 
