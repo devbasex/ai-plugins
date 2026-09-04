@@ -122,3 +122,19 @@ def test_the_cache_lives_outside_the_worktree(tmp_path, repo):
     body = cache[0].read_text(encoding="utf-8")
     assert "project_id=PVT_x" in body
     assert "item_id=PVTI_x" in body
+
+
+def test_the_id_from_item_add_is_used_without_listing_again(repo):
+    """追加の戻り値の識別子をそのまま使い、盤面を読み直さない。
+
+    追加した直後の読み直しは、この変更が減らそうとした問い合わせである。索引の反映が
+    遅れていると、追加したばかりのアイテムが見つからずに記録が飛ぶ余地も残る。
+    """
+    repo.items.write_text(json.dumps({"items": [], "totalCount": 0}), encoding="utf-8")
+    out = run(repo)
+    assert out.returncode == 0
+    calls = repo.calls.read_text(encoding="utf-8").splitlines()
+    listed = [c for c in calls if c.startswith("project item-list")]
+    # 1 回目（無いことの確認）だけで、追加の後には読み直さない
+    assert len(listed) == 1, calls
+    assert any(c.startswith("project item-edit") for c in calls), calls

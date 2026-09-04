@@ -82,6 +82,9 @@ add_item() {
   local url out
   url=$(gh issue view "$ISSUE" --json url -q .url 2>/dev/null) || return 1
   [ -n "$url" ] || return 1
+  # **戻り値のアイテムの識別子をそのまま使う。** 追加した直後に全件を読み直すと、
+  # この PR が減らそうとした問い合わせをそこで使う。索引の反映が遅れていると、
+  # 追加したばかりのアイテムが見つからずに記録が飛ぶ余地も残る。
   out=$(gh project item-add "$NUMBER" --owner "$OWNER" --url "$url" 2>&1) || {
     if pj_is_rate_limited "$out"; then
       printf 'NOTE: #%s を盤面へ追加できません（問い合わせの上限に達している可能性があります）: %s\n' \
@@ -92,6 +95,10 @@ add_item() {
     return 1
   }
   printf 'NOTE: #%s を盤面へ追加しました\n' "$ISSUE" >&2
+  # 出力の最後の行が識別子である。形が違えば空を返し、呼び出し側が読み直す。
+  case "$out" in
+    *PVTI_*) printf '%s\n' "$out" | grep -o 'PVTI_[A-Za-z0-9_-]*' | tail -1 ;;
+  esac
   return 0
 }
 
@@ -135,10 +142,12 @@ update() {
           "$total_count" "$ITEM_LIMIT" "$ISSUE" >&2
         return 1
       fi
-      # 登録していないだけなら、載せてから読み直す。1 度だけ試す。
+      # 登録していないだけなら載せる。1 度だけ試す。
       [ "$added" -eq 0 ] || return 1
       added=1
-      add_item || return 1
+      item_id=$(add_item) || return 1
+      # 識別子を受け取れたらそのまま使い、読み直さない。取れなければ次の回で読む。
+      [ -n "$item_id" ] && break
     done
   fi
 
