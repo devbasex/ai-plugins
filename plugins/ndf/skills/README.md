@@ -2,7 +2,9 @@
 
 `plugins/ndf/skills/` は 4 ランタイム（Claude Code / Codex / Kiro / agy）へ配布する Skill の
 編集元である。ここでは frontmatter の書き方を規約として定める。本文の書き方は各 `SKILL.md`
-に委ね、規約は発動と配布に関わる部分だけを扱う。
+に委ねるが、**本文のうち、実行先のリポジトリに依存する部分は規約が扱う**（「対象リポジトリを
+仮定しない」）。手順の中身が正しいかと、その手順が ai-plugins でしか成立しないかは別の問題で、
+後者は Skill を書く人ごとに判断が分かれるためである。
 
 本規約のうち機械的に判定できる項目は `scripts/check-skill-frontmatter.py` が検査し、
 継続的インテグレーションで実行する（`scripts/build-runtime-plugins.sh --check` /
@@ -11,6 +13,14 @@
 ```bash
 python3 scripts/check-skill-frontmatter.py           # 検査
 python3 scripts/check-skill-frontmatter.py --report  # 実測値の一覧
+```
+
+本文については `scripts/check-skill-repo-assumptions.py` が「対象リポジトリを仮定しない」の
+うち機械的に判定できる部分（ai-plugins に固有の語が本文へ現れていないか）だけを検査する。
+
+```bash
+python3 scripts/check-skill-repo-assumptions.py           # 検査
+python3 scripts/check-skill-repo-assumptions.py --report  # 走査の規模とヒットの一覧
 ```
 
 判定が本質的に近似になる項目（`description` 先頭のトリガ語、`when_to_use` の追加トリガ、
@@ -437,6 +447,43 @@ Claude Code のコンパクション後は、呼び出し済み Skill の先頭 
 `paths` は Claude Code 独自である。仕様準拠のランタイムは未知の項目を無視するが、claude.ai への
 アップロードや Skills API 経由では `Unexpected key(s) in SKILL.md frontmatter` のエラーになる。
 現在の配布先 3 種では問題にならないが、配布先を広げる際の制約として記録する。
+
+## 対象リポジトリを仮定しない
+
+**Skill は任意のリポジトリに対して実行される。** 対象リポジトリが ai-plugins であるときに
+だけ成立する操作・パス・値を、条件を付けずに実行させない。成立しないリポジトリでは、担当した
+AI が自分の判断で別のものへ振り替える。**振り替えた事実は完了報告に残らない**ため、何を
+確かめたのかが後から分からなくなる（#292）。
+
+| 項目 | 内容 |
+| --- | --- |
+| 適用対象 | 公開する Skill の本文（`SKILL.md` と、そこから読ませる `docs/` `references/` `prompts/`）が、対象リポジトリに対して実行を指示する記述 |
+| 求めること | **対象リポジトリに無い場合の振る舞いを、コマンドとセットで書く** |
+| 書き方 | 探して決める、または形で分岐する（下記） |
+| 適用外 | 記述の主題が NDF 自身の配置・配布であるもの |
+
+**書き方は 2 つある。**
+
+- **探して決める。** 見つけ方と、見つからないときの振る舞いを書く。見つけ方は**順序ではなく
+  一覧**で示す。順序を固定すると、上位の候補を持たないリポジトリで下位を取り逃がす。既存の形は
+  `tdd-cycle`（テスト手段を対象リポジトリから確定させる）と `quality-gates`（閾値は対象
+  プロジェクトの設定を唯一の基準とする）にある
+- **形で分岐する。** その形のときだけ読む参照へ置く。既存の形は
+  `release/references/form-*.md`（配布物の形ごとに 1 ファイル）と
+  `refactoring/references/lang-*.md`（言語ごとに 1 ファイル）にある
+
+**「利用者のリポジトリで動くか」ではなく「対象リポジトリを指しているか」で分ける。**
+`out-of-scope` の起票先の解決は利用者のリポジトリで動くが、`marketplace.json` を見る箇所が
+指しているのは NDF の clone であって対象リポジトリではない。これは適用外である。
+
+機械の検査は `scripts/check-skill-repo-assumptions.py` が行う。除外はファイルと理由の対で
+同スクリプトが宣言し、**宣言した対象が走査の範囲に実在しないときは検査自体が失敗する**。
+検知するのは語の有無だけで、書き方が正しいかは判定しない。
+
+**除外のファイルは `--skills-dir` に渡すのと同じ書き方（plugin family を含むパス）で書く。**
+`--skills-dir` は family を 1 つだけ指定でき、実在の検査は**指定した family に属する宣言
+だけ**へ掛かる。Skill ディレクトリからの相対パスで書くと、どの family の宣言かが判別できず、
+指定しなかった family の宣言まで「実在しない」と読んで検査を落とす。
 
 ## 参照
 

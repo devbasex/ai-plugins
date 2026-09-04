@@ -386,13 +386,44 @@ while ループ脱出後にメインが以下のプロンプトでサブエー�
 > 2. 修正しない（好み・判断保留）`nit` → 「[deferred / nit] 対応見送り: <理由>」を日本語で
 >    reply した上で **Resolve まで実行**（スレッドを open のまま残さない）。
 > 3. bot 誤指摘 → 却下理由を reply して Resolve。
-> 修正で push した場合は `claude plugin validate` を通すこと。
+>
+> **修正で push した場合は、対象リポジトリの検証を 1 度通すこと。** 何を実行するかは
+> 対象リポジトリを見て決める。**コマンドを推測して組み立てない。**
+>
+> 1. 実行手段を探す。`Makefile` の `test` / `lint` / `check` ターゲット、`package.json` の
+>    `scripts`、`pyproject.toml` の `[tool.pytest.ini_options]`、`composer.json` の
+>    `scripts`、継続的統合の定義（`.github/workflows/*.yml`）が実行しているコマンド。
+>    **順序ではなく一覧である。** どれが最も強い検証かはリポジトリで変わるため、
+>    上から順に 1 つ見つけて打ち切らない
+> 2. 見つかったもののうち、**変更したファイルに掛かるもの**を実行する
+> 3. 1 つも見つからないときは実行しない
+>
+> **終了コードが 0 でない実行を残したまま完了としない。** その修正が原因なら直して
+> push し直し、もう一度実行して 0 を確かめる。修正の前から落ちていたなら直さず、
+> 何が落ちているかを最終メッセージへ書く（この工程の範囲外である）。どちらの場合も
+> `commands` には**最後に実行した結果**を残す。
+>
+> 実行したコマンドと終了コード、実行しなかった場合はその理由を、結果ファイルの
+> `verification` へ書く。0 でない終了コードが残るときは、直せなかった理由も最終
+> メッセージへ書く。
+>
 > 完了後、上の**結果ファイル**（`$TMP_DIR/sweep-pr<STATE_PR>-result.json`）に
 > `{"resolved": N, "fixed_in_sweep": M, "commit": "<SHA|null>", "remaining_open": K,
->   "remaining_reason": "<K>0 のときの理由|null>", "items": ["<1行要約>", ...]}` を
+>   "remaining_reason": "<K>0 のときの理由|null>", "items": ["<1行要約>", ...],
+>   "verification": {"commands": [{"command": "<実行したコマンド>", "exit": <終了コード>}],
+>                    "skipped_reason": "<実行しなかった理由|null>"}}` を
 > 書き出し、最終メッセージで内訳を日本語報告せよ。
+> 検証を実行したときは `commands` に実行順で並べ、`skipped_reason` を `null` にする。
+> 実行手段が見つからなかったときは `commands` を空にし、`skipped_reason` に**何を探して
+> 見つからなかったか**を書く。push しなかったラウンドも `commands` を空にし、
+> `skipped_reason` に「push なし」と書く。
 > **`remaining_open` は 0 とする。** 0 にできない場合は `remaining_reason` に理由を書く。
 > この値は申告であり、次の `verify-sweep` が GitHub 側の実数と突き合わせる。
+
+**`verification` は突き合わせる相手を持たない。** `verify-sweep` が結果ファイルから
+取り出すのは `remaining_open` / `remaining_reason` / `resolved` / `fixed_in_sweep` /
+`commit` の 5 つだけで、この項目は読まない。記録は結果ファイルとサブエージェントの
+最終メッセージに残り、メインが Step 8 の完了報告へ書き写す。
 
 ### Step 7.5 後段: 最終スイープの結果を検証する（必須）
 
@@ -451,7 +482,9 @@ sweep 中にメインが落ちても、`sweep-pr<STATE_PR>-result.json` が無�
 
 `verify-sweep` を通していれば、`report` の出力に「## 最終スイープ」の節が入り、
 GitHub 側で数え直した残件数と、0 件にできなかった場合の理由が含まれる。
-メインはこれに `sweep-pr<STATE_PR>-result.json` の `resolved` / `fixed_in_sweep` を添えて最終報告する。
+メインはこれに `sweep-pr<STATE_PR>-result.json` の `resolved` / `fixed_in_sweep` /
+`verification`（実行した検証コマンドと終了コード、実行しなかった場合はその理由）を
+添えて最終報告する。
 
 > **方針変更（v4.11.0）**: 従来は deferred nit を「AskUserQuestion で 1 回問い合わせ」て
 > いたが、未解決スレッドを残さない方針に変更。**Step 7.5 で nit も含め全 open thread を

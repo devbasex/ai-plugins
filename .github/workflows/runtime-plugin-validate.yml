@@ -52,6 +52,15 @@ jobs:
           python-version: "3.x"
       - run: python3 scripts/check-skill-frontmatter.py
 
+  skill-repo-assumptions-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - run: python3 scripts/check-skill-repo-assumptions.py
+
   runtime-plugin-validate:
     runs-on: ubuntu-latest
     steps:

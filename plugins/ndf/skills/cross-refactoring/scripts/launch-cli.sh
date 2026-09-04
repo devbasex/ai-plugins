@@ -83,8 +83,8 @@ case "$RUNTIME" in
   claude) SKILL_BASE=.claude/skills ;;
   codex)  SKILL_BASE=.agents/skills ;;
   kiro)   SKILL_BASE=.kiro/skills ;;
-  # agy は NDF の配布先ではないが、**語彙を読ませないと提案が全件降格する**ため
-  # 作業領域の中で読む場所へ配置し、明示パスで読ませる。
+  # agy は codex と同じ `.agents/skills` を読む。配置先は 4 者とも担当ごとの
+  # 作業ツリーの中で、**語彙を読ませないと提案が全件降格する**ため明示パスで読ませる。
   agy)    SKILL_BASE=.agents/skills ;;
   *)      echo "未知のランタイムです: $RUNTIME" >&2; exit 1 ;;
 esac
