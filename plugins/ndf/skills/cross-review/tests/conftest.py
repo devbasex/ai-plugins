@@ -7,6 +7,8 @@ importlib.util で source loader 経由で読み込む。
 from __future__ import annotations
 
 import importlib.util
+import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -33,6 +35,11 @@ def _load_state_module() -> types.ModuleType:
 
 def _load_monitor_module() -> types.ModuleType:
     return _load_module("cross_review_monitor", _MONITOR)
+
+
+# 待ち行列は共通層に置く。指し方は `plugins/ndf/scripts/lib/README.md` の契約に従う
+# （Python は `parents[3]` から解決する。ここは tests/ なので 1 つ浅い）。
+_POST_QUEUE = _HERE.parents[2] / "scripts" / "lib" / "post_queue.py"
 
 
 import pytest
@@ -92,3 +99,121 @@ def real_github(monkeypatch, state_mod):
     """
     for name in _GITHUB_LOOKUPS:
         monkeypatch.setattr(state_mod, name, _REAL[name])
+
+
+# ---- 模した `gh` を PATH の先頭へ置く（#291） ----
+#
+# 待ち行列は上限の応答の形（終了コード・標準出力の `message`・標準エラーの
+# `(HTTP <番号>)`）で判断する。差し替えを関数の単位で行うと、その形そのものを
+# 検査できない。**実物の `subprocess.run` で、模した `gh` を起動する。**
+#
+# 上の見張り（`_no_github`）は `subprocess.run` を差し替えて `gh` の実行を落とす。
+# ここで素の実装へ戻すため、**この fixture を使うテストだけ**が見張りの外に出る。
+
+# 見張りが入る前の実装を、import の時点で押さえる。
+_REAL_RUN = subprocess.run
+
+_FAKE_GH = '''#!/usr/bin/env python3
+"""テスト用の `gh`。呼び出しを記録し、規則に沿った応答を返す。"""
+import json, os, sys
+
+argv = sys.argv[1:]
+joined = " ".join(argv)
+try:
+    stdin = "" if sys.stdin is None or sys.stdin.isatty() else sys.stdin.read()
+except Exception:
+    stdin = ""
+
+log = os.environ.get("GH_FAKE_LOG")
+if log:
+    with open(log, "a", encoding="utf-8") as f:
+        f.write(json.dumps({"argv": argv, "stdin": stdin}, ensure_ascii=False) + "\\n")
+
+rules_file = os.environ.get("GH_FAKE_RULES")
+rules = json.load(open(rules_file, encoding="utf-8")) if rules_file else []
+for rule in rules:
+    if rule.get("match", "") in joined:
+        sys.stdout.write(rule.get("stdout", ""))
+        sys.stderr.write(rule.get("stderr", ""))
+        sys.exit(int(rule.get("exit", 0)))
+
+# 上限とほかの失敗を模す。形は実測に合わせた（gh 2.100.0）。
+mode = os.environ.get("GH_FAKE_MODE", "ok")
+SHAPES = {
+    "rate_limit": (
+        '{"message":"API rate limit exceeded for user ID 10234200.","status":"403"}',
+        "gh: API rate limit exceeded for user ID 10234200. (HTTP 403)", 1),
+    "secondary": (
+        '{"message":"You have exceeded a secondary rate limit.","status":"403"}',
+        "gh: You have exceeded a secondary rate limit. (HTTP 403)", 1),
+    "forbidden": (
+        '{"message":"Resource not accessible by integration","status":"403"}',
+        "gh: Resource not accessible by integration (HTTP 403)", 1),
+    "not_found": (
+        '{"message":"Not Found","status":"404"}',
+        "gh: Not Found (HTTP 404)", 1),
+}
+if mode in SHAPES:
+    out, err, code = SHAPES[mode]
+    sys.stdout.write(out)
+    sys.stderr.write(err + "\\n")
+    sys.exit(code)
+
+sys.stdout.write("[]")
+'''
+
+
+class FakeGh:
+    """模した `gh` の置き場所と、記録された呼び出しの読み出し。"""
+
+    def __init__(self, directory: pathlib.Path, log: pathlib.Path,
+                 rules: pathlib.Path, monkeypatch) -> None:
+        self.dir = directory
+        self.log = log
+        self.rules_file = rules
+        self._monkeypatch = monkeypatch
+
+    def set_rules(self, rules: list[dict]) -> None:
+        """先に当たった規則の応答を返す。`match` は引数を空白で連ねた文字列の部分一致。"""
+        self.rules_file.write_text(json.dumps(rules), encoding="utf-8")
+        self._monkeypatch.setenv("GH_FAKE_RULES", str(self.rules_file))
+
+    def set_mode(self, mode: str) -> None:
+        self._monkeypatch.setenv("GH_FAKE_MODE", mode)
+
+    def calls(self) -> list[dict]:
+        if not self.log.exists():
+            return []
+        return [json.loads(line) for line in
+                self.log.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+    def argv(self) -> list[list[str]]:
+        return [c["argv"] for c in self.calls()]
+
+    def joined(self) -> list[str]:
+        return [" ".join(c["argv"]) for c in self.calls()]
+
+
+@pytest.fixture()
+def fake_gh(monkeypatch, tmp_path) -> FakeGh:
+    import json as _json  # noqa: F401  (FakeGh が使う)
+
+    bindir = tmp_path / "fake-bin"
+    bindir.mkdir(exist_ok=True)
+    script = bindir / "gh"
+    script.write_text(_FAKE_GH, encoding="utf-8")
+    script.chmod(0o755)
+    log = tmp_path / "gh-calls.log"
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("GH_FAKE_LOG", str(log))
+    monkeypatch.delenv("GH_FAKE_RULES", raising=False)
+    monkeypatch.delenv("GH_FAKE_MODE", raising=False)
+    # 見張りを外す。この fixture を使うテストだけが実物の `subprocess.run` を通る。
+    monkeypatch.setattr(subprocess, "run", _REAL_RUN)
+    return FakeGh(bindir, log, tmp_path / "gh-rules.json", monkeypatch)
+
+
+@pytest.fixture(scope="session")
+def queue_mod() -> types.ModuleType:
+    """共通層の待ち行列モジュール（#291）。"""
+    return _load_module("ndf_post_queue", _POST_QUEUE)
