@@ -161,10 +161,21 @@ def test_init_warns_when_kiro_is_given_auto_explicitly(run_init, tmp_path, capsy
     assert "kiro のモデルが auto です" in capsys.readouterr().err
 
 
+def test_init_warns_when_codex_or_agy_has_no_model(run_init, tmp_path, capsys):
+    """実測できないランタイムで指定が無いラウンドも、kiro の auto と同じく分離される。"""
+    run_init(_args(tmp_path, model=["kiro=claude-opus-5"]))
+    warning = capsys.readouterr().err
+    assert "codex のモデルが default です" in warning
+    assert "agy のモデルが default です" in warning
+
+
 def test_init_does_not_warn_when_every_model_can_be_measured(
     run_init, tmp_path, capsys
 ):
-    run_init(_args(tmp_path, model=["kiro=claude-opus-5"]))
+    """claude だけは指定が無くても実測できるため、警告の対象にならない。"""
+    run_init(_args(tmp_path, model=[
+        "codex=gpt-5.5", "agy=gemini-3.8", "kiro=claude-opus-5",
+    ]))
     assert "集計から分離されます" not in capsys.readouterr().err
 
 

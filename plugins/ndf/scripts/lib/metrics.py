@@ -21,6 +21,8 @@ COMPARISON_CAVEATS = [
     "ハーネスとモデルが交絡する。ランタイムを跨いだ比較は、モデルを揃えない限り"
     "「どちらのモデルが優秀か」の答えにならない",
     "kiro の既定 auto は比較に使えない。ラウンドごとに違うモデルが動きうる",
+    "実際に動いたモデルを取得できるのは claude だけである。残る 3 者は指定値を"
+    "信じて数えているので、CLI が別のモデルへ切り替えても気付けない",
     "公平に比べたいなら、同じ対象・同じ範囲で --model だけ変えて複数回走らせる。"
     "1 回の実行内での比較は参考値にとどまる",
 ]
@@ -42,14 +44,17 @@ def _verdict(review: dict[str, Any], reviewer: str) -> Optional[str]:
 def aggregate(state: dict[str, Any]) -> dict[str, Any]:
     """状態ファイルから実装担当・レビュー担当それぞれの指標を出す。
 
-    戻り値は `{"impl": {キー: 指標}, "reviewer": {キー: 指標}, "unmeasured": [...]}`。
-    `unmeasured` には「何が動いたか分からない」ラウンド（kiro の既定 `auto`）と、
-    指定値と実測値が食い違ったラウンドの警告が入る。
+    戻り値は
+    `{"impl": {キー: 指標}, "reviewer": {キー: 指標}, "unmeasured": [...], "assumed": [...]}`。
+    `unmeasured` には「何が動いたか分からない」ラウンド（指定が無く実測もできない、
+    または kiro の `auto`）と、指定値と実測値が食い違ったラウンドの警告が入る。
+    `assumed` には集計へ入れたが実測で裏付けていないラウンドの注記が入る。
     """
     items_by_id = {i["item_id"]: i for i in state.get("items", []) if "item_id" in i}
     impl: dict[str, dict[str, Any]] = {}
     reviewer: dict[str, dict[str, Any]] = {}
     unmeasured: list[str] = []
+    assumed: list[str] = []
 
     for entry in state.get("rounds", []):
         round_no = entry.get("round")
@@ -61,7 +66,7 @@ def aggregate(state: dict[str, Any]) -> dict[str, Any]:
         observed = impl_model.get("observed")
 
         _append_model_measurement_warnings(
-            unmeasured, round_no, impl_runtime, requested, observed, "実装担当"
+            unmeasured, assumed, round_no, impl_runtime, requested, observed, "実装担当"
         )
 
         reviews = _round_reviews(entry)
@@ -73,7 +78,8 @@ def aggregate(state: dict[str, Any]) -> dict[str, Any]:
             r_requested = spec.get("requested")
             r_observed = spec.get("observed")
             _append_model_measurement_warnings(
-                unmeasured, round_no, name, r_requested, r_observed, "レビュー担当"
+                unmeasured, assumed, round_no, name, r_requested, r_observed,
+                "レビュー担当"
             )
             _aggregate_reviewer_round(reviewer, entry, name, r_requested, reviews)
 
@@ -81,6 +87,7 @@ def aggregate(state: dict[str, Any]) -> dict[str, Any]:
         "impl": {k: _finish_impl(v) for k, v in sorted(impl.items())},
         "reviewer": {k: _finish_reviewer(v) for k, v in sorted(reviewer.items())},
         "unmeasured": unmeasured,
+        "assumed": assumed,
     }
 
 
@@ -150,6 +157,7 @@ def _aggregate_reviewer_round(
 
 def _append_model_measurement_warnings(
     unmeasured: list[str],
+    assumed: list[str],
     round_no: Any,
     runtime: str,
     requested: Optional[str],
@@ -159,11 +167,15 @@ def _append_model_measurement_warnings(
     warning = _models.mismatch_warning(runtime, requested, observed)
     if warning:
         unmeasured.append(f"round {round_no}: {warning}")
-    if not _models.is_measurable(runtime, requested):
+    # 分離するかと、その理由はランタイムごとに違う。判断も文言も models.py が持つ。
+    reason = _models.separation_reason(runtime, requested)
+    if reason:
         unmeasured.append(
-            f"round {round_no}: {runtime} が既定モデル（auto）で動いたため、"
-            f"{role_label}の集計から分離する"
+            f"round {round_no}: {reason}ため、{role_label}の集計から分離する"
         )
+    note = _models.assumption_note(runtime, requested)
+    if note:
+        assumed.append(f"round {round_no}: {note}（{role_label}）")
 
 
 def _duration(entry: dict[str, Any], phases: tuple[str, ...]) -> float:
@@ -256,6 +268,10 @@ def format_report(metrics: dict[str, Any]) -> str:
     if metrics["unmeasured"]:
         lines += ["", "## 集計から分離したラウンド", ""]
         lines += [f"- {w}" for w in dict.fromkeys(metrics["unmeasured"])]
+
+    if metrics.get("assumed"):
+        lines += ["", "## 指定値で代用したラウンド", ""]
+        lines += [f"- {w}" for w in dict.fromkeys(metrics["assumed"])]
 
     lines += ["", "## 比較として読むときの限界", ""]
     lines += [f"- {c}" for c in COMPARISON_CAVEATS]
