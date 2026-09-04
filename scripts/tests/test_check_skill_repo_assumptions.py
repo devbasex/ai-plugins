@@ -172,3 +172,43 @@ def test_report_shows_scan_size() -> None:
     out = output_of(result)
     assert "33" in out, f"公開する Skill の数が出ていない: {out}"
     assert "89" in out, f"走査した本数が出ていない: {out}"
+
+
+# --- T7: manifest に載る Skill を走査できないと検査が成立しない ---
+
+
+def rewrite_manifest(skills_dir: Path, names: list[str]) -> None:
+    """テスト用の木の manifest を書き直す。"""
+    manifest = skills_dir.parent / "manifests" / "claude-skills.txt"
+    manifest.write_text("".join(f"{name}\n" for name in names), encoding="utf-8")
+
+
+def test_missing_skill_directory_fails_the_check(tmp_path: Path) -> None:
+    """manifest に載る Skill のディレクトリが無いと、検査自体が失敗する。"""
+    skills = build_tree(tmp_path, listed=CLEAN_BODY, unlisted=CLEAN_BODY)
+    rewrite_manifest(skills, [LISTED_SKILL, "delta"])
+    result = run_check(skills, {}, tmp_path)
+    assert result.returncode == 2, output_of(result)
+    assert "delta" in output_of(result)
+
+
+def test_skill_directory_without_scannable_markdown_fails_the_check(tmp_path: Path) -> None:
+    """ディレクトリがあっても走査できる本文が無ければ、同じく検査自体が失敗する。"""
+    skills = build_tree(tmp_path, listed=CLEAN_BODY, unlisted=CLEAN_BODY)
+    rewrite_manifest(skills, [LISTED_SKILL, "echo"])
+    (skills / "echo" / "tests").mkdir(parents=True)
+    (skills / "echo" / "tests" / "fixture.md").write_text(CLEAN_BODY, encoding="utf-8")
+    result = run_check(skills, {}, tmp_path)
+    assert result.returncode == 2, output_of(result)
+    assert "echo" in output_of(result)
+
+
+def test_unscanned_skill_outranks_a_hit(tmp_path: Path) -> None:
+    """ヒットがあっても、走査の範囲が欠けていれば 1 ではなく 2 で終わる。
+
+    範囲が欠けた結果は、ヒットの有無そのものの根拠にならない。
+    """
+    skills = build_tree(tmp_path, listed=ASSUMING_BODY, unlisted=CLEAN_BODY)
+    rewrite_manifest(skills, [LISTED_SKILL, "delta"])
+    result = run_check(skills, {}, tmp_path)
+    assert result.returncode == 2, output_of(result)

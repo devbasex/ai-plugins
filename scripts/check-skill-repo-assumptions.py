@@ -11,7 +11,9 @@ NDF の Skill は任意のリポジトリに対して実行される。本文が
 いるか）は判定しない。
 
 走査するのは `manifests/*-skills.txt` の和集合が指す Skill の Markdown である。配らない
-Skill と `tests/` の下は対象にしない。
+Skill と `tests/` の下は対象にしない。**manifest に載っていながら走査できる本文を 1 本も
+持たない Skill があるときは、検査自体を失敗させる**。読み飛ばすと、公開する Skill の本文が
+丸ごと未走査のまま検査が成功する。
 
 除外は EXCLUSIONS がファイルと理由の対で宣言する。**宣言した対象が走査の対象として
 実在しないときは、ヒットの有無に関わらず検査自体を失敗させる**。ファイルを消したり
@@ -27,7 +29,7 @@ Skill と `tests/` の下は対象にしない。
 
     0  除外の外にヒットが無い
     1  除外の外にヒットがある
-    2  除外の宣言か引数が誤っている（検査そのものが成立しない）
+    2  除外の宣言・引数・走査の範囲が誤っている（検査そのものが成立しない）
 """
 from __future__ import annotations
 
@@ -110,19 +112,29 @@ def load_manifest_union(skills_dir: pathlib.Path) -> set[str]:
     return names
 
 
-def collect_documents(skills_dir: pathlib.Path) -> list[str]:
-    """走査する Markdown を、Skill ディレクトリからの相対パスで返す。"""
+def collect_documents(skills_dir: pathlib.Path) -> tuple[list[str], list[str]]:
+    """走査する Markdown を、Skill ディレクトリからの相対パスで返す。
+
+    第 2 の戻り値は、manifest に載っていながら走査できる本文を 1 本も持たない Skill 名で
+    ある。ディレクトリが無い場合と、あっても対象の Markdown が無い場合のどちらも入る。
+    **呼び出し側はこれを検査成立不可として扱う**。読み飛ばすと、公開する Skill の本文が
+    丸ごと未走査のまま検査が成功する。
+    """
     docs: list[str] = []
+    unscanned: list[str] = []
     for name in sorted(load_manifest_union(skills_dir)):
         root = skills_dir / name
-        if not root.is_dir():
-            continue
-        for path in sorted(root.rglob("*.md")):
-            rel = path.relative_to(skills_dir)
-            if "tests" in rel.parts:
-                continue
-            docs.append(rel.as_posix())
-    return docs
+        found = 0
+        if root.is_dir():
+            for path in sorted(root.rglob("*.md")):
+                rel = path.relative_to(skills_dir)
+                if "tests" in rel.parts:
+                    continue
+                docs.append(rel.as_posix())
+                found += 1
+        if found == 0:
+            unscanned.append(name)
+    return docs, unscanned
 
 
 def scan(skills_dir: pathlib.Path, docs: list[str]) -> list[Hit]:
@@ -198,14 +210,27 @@ def main() -> int:
     scanned: set[str] = set()
     all_hits: list[Hit] = []
     report_lines: list[str] = []
+    unscanned: list[pathlib.Path] = []
     for skills_dir in skills_dirs:
-        docs = collect_documents(skills_dir)
+        docs, missing = collect_documents(skills_dir)
+        unscanned.extend(skills_dir / name for name in missing)
         scanned.update(docs)
         hits = scan(skills_dir, docs)
         all_hits.extend(hits)
         report_lines.append(
             f"{skills_dir}: 公開する Skill {len(load_manifest_union(skills_dir))} 個 / "
             f"Markdown {len(docs)} 本 / ヒット {len(hits)} 行")
+
+    # 走査の範囲が欠けたままの結果は、ヒットが 0 でも「無い」ことの根拠にならない。
+    # 除外の宣言より先に見る。範囲が欠けていると、除外の実在の判定も当てにならない。
+    if unscanned:
+        print("[check-skill-repo-assumptions] manifest に載る Skill の本文を走査できない:",
+              file=sys.stderr)
+        for path in unscanned:
+            print(f"  - {path}（ディレクトリか、走査の対象になる Markdown が無い）",
+                  file=sys.stderr)
+        print("\n配らなくなったなら manifests/*-skills.txt からも外す。", file=sys.stderr)
+        return 2
 
     problems = validate_exclusions(exclusions, scanned)
     if problems:
