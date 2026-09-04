@@ -190,13 +190,13 @@ def test_stall_defaults_cover_claude_and_kiro(monitor_mod, monkeypatch):
 # ---------- 6. 移設シム ----------
 
 def test_shim_exposes_implementation_namespace():
-    """`scripts/monitor.py` が `lib/monitor.py` の名前空間をそのまま持つこと。
+    """`scripts/monitor.py` が共通層の `monitor.py` の名前空間をそのまま持つこと。
 
     差し替え可能でなければ既存テストの `mock.patch.object` が届かない。
     """
     here = pathlib.Path(__file__).resolve().parent
     shim = here.parent / "scripts" / "monitor.py"
-    impl = here.parent / "scripts" / "lib" / "monitor.py"
+    impl = here.parents[2] / "scripts" / "lib" / "monitor.py"
     assert shim.is_file() and impl.is_file()
 
     name = "cross_review_monitor_shim_probe"

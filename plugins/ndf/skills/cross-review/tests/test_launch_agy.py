@@ -18,7 +18,7 @@ import time
 
 import pytest
 
-LIB = pathlib.Path(__file__).resolve().parent.parent / "scripts" / "lib"
+LIB = pathlib.Path(__file__).resolve().parents[3] / "scripts" / "lib"
 LAUNCH = LIB / "launch-cli.sh"
 
 # この束（`cross-review/tests`）は外部コマンドを前提にしない一覧に入っている。

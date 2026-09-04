@@ -37,10 +37,12 @@ import sys
 import time
 from typing import Any, Callable, Iterable, Optional
 
+# 共通層はプラグインルート直下にある。**`.resolve()` を通す。** Kiro CLI は
+# `.kiro/skills/<名前>` を symlink にするため、解かずに `parents[]` を数えると
+# `.kiro` で止まってプラグインルートへ届かない。
 sys.path.insert(
     0,
-    str(pathlib.Path(__file__).resolve().parent.parent.parent
-        / "cross-review" / "scripts" / "lib"),
+    str(pathlib.Path(__file__).resolve().parents[3] / "scripts" / "lib"),
 )
 
 import assignment  # noqa: E402

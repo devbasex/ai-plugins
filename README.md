@@ -372,9 +372,10 @@ claude plugin marketplace add devbasex/ai-plugins@<タグ>
 - `--model <ランタイム>=<モデル>` でモデルを固定でき、実行主体はコミットのトレーラーと
   レビューコメントに残ります。`report --metrics` がランタイム × モデルで集計します
 
-あわせて、収束ループの共通層を
-[`plugins/ndf/skills/cross-review/scripts/lib/`](./plugins/ndf/skills/cross-review/scripts/lib/README.md)
-へ切り出しました。`/ndf:cross-review` の挙動と既存テストは変わりません。
+あわせて、収束ループの共通層を切り出しました。切り出した先は `cross-review` の下でしたが、
+のちにプラグインルート直下の
+[`plugins/ndf/scripts/lib/`](./plugins/ndf/scripts/lib/README.md) へ移しています。
+`/ndf:cross-review` の挙動と既存テストは変わりません。
 
 `/ndf:external-ai` は Kiro CLI と `claude -p` の非対話実行手順を追加し、対象 CLI が 4 つに
 なりました。

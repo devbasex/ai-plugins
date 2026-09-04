@@ -9,7 +9,7 @@ import pathlib
 import subprocess
 import sys
 
-MONITOR = pathlib.Path(__file__).resolve().parent.parent / "scripts" / "lib" / "monitor.py"
+MONITOR = pathlib.Path(__file__).resolve().parents[3] / "scripts" / "lib" / "monitor.py"
 
 
 def _run(*args: str) -> subprocess.CompletedProcess[str]:
