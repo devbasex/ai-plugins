@@ -959,9 +959,10 @@ def _warn_unmeasurable_models(
 ) -> None:
     """実際に動いたモデルを取得できない指定を、**着手前に**知らせる。
 
-    kiro の既定 `auto` はラウンドごとに違うモデルが動きうるため、そのラウンドは
-    集計から分離される。報告まで分からないと、比較のために回した実行が丸ごと
-    無駄になる。止めはしない（比較が目的でない実行もある）。
+    分離の対象は 2 つある。kiro の既定 `auto` はラウンドごとに違うモデルが動きうる。
+    実測モデル名を取れないランタイム（claude 以外）で `--model` を渡さないラウンドも、
+    何が動いたかを後から確かめる手段が無い。報告まで分からないと、比較のために
+    回した実行が丸ごと無駄になる。止めはしない（比較が目的でない実行もある）。
     """
     for runtime in sorted(participants):
         if models_lib.is_measurable(runtime, model_spec.get(runtime)):
@@ -3638,7 +3639,10 @@ def main() -> None:
                       help="対象範囲。提案が無制限に広がらないよう必須にしている")
     init.add_argument("--host", choices=list(assignment.HOST_RUNTIMES), default=None,
                       help="ホストの明示指定。未指定時は環境変数から推定する")
-    init.add_argument("--max-outer-rounds", type=int, default=3)
+    # 既定は輪番の 1 周（適用の母集合の大きさ）。3 のままだと `ALL_RUNTIMES` の
+    # 先頭にある claude の順番（ラウンド 4）へ届かない。
+    init.add_argument("--max-outer-rounds", type=int,
+                      default=len(assignment.ALL_RUNTIMES))
     init.add_argument("--max-fix-rounds", type=int, default=3)
     init.add_argument("--max-items-per-round", type=int, default=5)
     init.add_argument("--severity-threshold", default=DEFAULT_SEVERITY_THRESHOLD,

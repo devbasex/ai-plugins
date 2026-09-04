@@ -31,6 +31,16 @@ DEFAULT_MODEL_LABEL = "default"
 # 計測目的の実行では必ず `--model kiro=<name>` を指定する。
 KIRO_AUTO_MODEL = "auto"
 
+# 実際に動いた言語モデルの名前を、**公開された出力から**読み取れるランタイム。
+# claude だけが `--output-format json` の `modelUsage` を持つ。
+#
+# agy は会話の記録（利用者のホーム配下に置かれる SQLite ファイル）にモデル名を
+# 残すが、表の構造も値の形式も公開されていない。版が上がって形が変われば誤った値を
+# 実測値として記録することになり、**指定どおりに動いた実行を食い違いとして警告する**。
+# 取得できないことより害が大きいため採らない。公開された手段が出た時点でここへ足せば、
+# 判定も報告も追随する。
+OBSERVABLE_RUNTIMES: tuple[str, ...] = ("claude",)
+
 
 class ModelSpecError(ValueError):
     """`--model` の指定が不正。呼び出し側は初期化ごと失敗させる。"""
@@ -82,17 +92,43 @@ def label(model: Optional[str]) -> str:
     return model or DEFAULT_MODEL_LABEL
 
 
-def is_measurable(runtime: str, model: Optional[str]) -> bool:
-    """そのラウンドを計測に使えるか。
+def separation_reason(runtime: str, model: Optional[str]) -> Optional[str]:
+    """集計から分離する理由。分離しないなら `None`。
 
-    kiro の既定 `auto` は「タスクに応じて最適なモデルを選ぶ」ため、実際に
-    どのモデルが動いたかを取得できない（標準出力にもセッション一覧にも出ず、
-    消費単位の倍率も 1.0 固定で逆算もできない）。ラウンドごとに違うモデルが
-    動きうるので、集計から分離する。
+    分離するのは**何が動いたか分からない**ラウンドである。2 通りある。
+
+    | 状態 | 条件 |
+    | --- | --- |
+    | 既定が `auto` | kiro。「タスクに応じて最適なモデルを選ぶ」ため、標準出力にも
+      セッション一覧にも出ず、消費単位の倍率も 1.0 固定で逆算もできない |
+    | 指定が無く実測もできない | `OBSERVABLE_RUNTIMES` の外で `--model` が無い |
+
+    **理由をランタイムごとに書き分ける。** 文言を 1 つにすると、報告を読む側は
+    codex と agy の行を「指定したモデルの成績」として読める。
     """
-    if model is None:
-        return runtime != "kiro"
-    return not (runtime == "kiro" and model == KIRO_AUTO_MODEL)
+    if runtime == "kiro" and model in (None, KIRO_AUTO_MODEL):
+        return f"kiro の {KIRO_AUTO_MODEL} はラウンドごとに違うモデルが動きうる"
+    if model is None and runtime not in OBSERVABLE_RUNTIMES:
+        return f"{runtime} はモデルを指定しておらず、実際に動いたモデルも取得できない"
+    return None
+
+
+def assumption_note(runtime: str, model: Optional[str]) -> Optional[str]:
+    """指定値で代用したことを報告へ残す注記。代用でないなら `None`。
+
+    分離ではない。指定があれば何を渡したかは分かるため集計へ入れるが、
+    実測で裏付けたわけではないことを読み手が知る必要がある。
+    """
+    if not model or runtime in OBSERVABLE_RUNTIMES:
+        return None
+    if separation_reason(runtime, model):
+        return None
+    return f"{runtime} は指定した {model} で動いた前提で数える（実測不可）"
+
+
+def is_measurable(runtime: str, model: Optional[str]) -> bool:
+    """そのラウンドを計測に使えるか。分離の理由が無いことと同じである。"""
+    return separation_reason(runtime, model) is None
 
 
 _CLAUDE_MODEL_USAGE = re.compile(r'"modelUsage"\s*:\s*\{')
@@ -101,10 +137,11 @@ _CLAUDE_MODEL_USAGE = re.compile(r'"modelUsage"\s*:\s*\{')
 def observed_model(runtime: str, stdout_text: str) -> Optional[str]:
     """CLI の出力から**実際に使われたモデル名**を取り出す。取れなければ `None`。
 
-    現状取れるのは claude だけである（`--output-format json` の `modelUsage`）。
-    codex / agy / kiro は実行したモデルを機械可読な形で出さない。
+    取れるのは `OBSERVABLE_RUNTIMES` に挙げた claude だけである
+    （`--output-format json` の `modelUsage`）。codex / agy / kiro は実行した
+    モデルを公開された機械可読な形で出さない。
     """
-    if runtime != "claude" or not stdout_text:
+    if runtime not in OBSERVABLE_RUNTIMES or not stdout_text:
         return None
     if not _CLAUDE_MODEL_USAGE.search(stdout_text):
         return None

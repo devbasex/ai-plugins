@@ -63,6 +63,11 @@ def test_no_flag_when_unspecified(models):
 
 # ---------- 計測に使えるかの判定 ----------
 
+def test_only_claude_reports_the_model_that_actually_ran(models):
+    """実測モデル名を取得できるランタイムを 1 箇所で宣言する。"""
+    assert models.OBSERVABLE_RUNTIMES == ("claude",)
+
+
 def test_kiro_default_is_not_measurable(models):
     """kiro の既定 auto は実際に選ばれたモデルを取得できない。"""
     assert models.is_measurable("kiro", None) is False
@@ -70,8 +75,52 @@ def test_kiro_default_is_not_measurable(models):
     assert models.is_measurable("kiro", "claude-opus-5") is True
 
 
-def test_other_runtimes_default_is_measurable(models):
-    assert models.is_measurable("codex", None) is True
+@pytest.mark.parametrize(
+    ("runtime", "model", "measurable"),
+    [
+        # 実測できる。指定が無くても実際に動いたモデルを読み取れる
+        ("claude", None, True),
+        ("claude", "opus-5", True),
+        # 指定値で代用する。実測はできないが、何を渡したかは分かる
+        ("codex", "gpt-5.5", True),
+        ("agy", "gemini-3.8", True),
+        ("kiro", "claude-opus-5", True),
+        # 何が動いたか分からない。指定が無く、実測もできない
+        ("codex", None, False),
+        ("agy", None, False),
+        ("kiro", None, False),
+        ("kiro", "auto", False),
+    ],
+)
+def test_measurability_covers_every_participant(models, runtime, model, measurable):
+    assert models.is_measurable(runtime, model) is measurable
+
+
+def test_separation_reason_differs_by_runtime(models):
+    """分離の理由は「既定モデル（auto）」に固定せず、ランタイムごとに書き分ける。"""
+    assert models.separation_reason("kiro", None) == (
+        "kiro の auto はラウンドごとに違うモデルが動きうる"
+    )
+    assert models.separation_reason("kiro", "auto") == (
+        "kiro の auto はラウンドごとに違うモデルが動きうる"
+    )
+    assert models.separation_reason("codex", None) == (
+        "codex はモデルを指定しておらず、実際に動いたモデルも取得できない"
+    )
+    assert models.separation_reason("agy", None) == (
+        "agy はモデルを指定しておらず、実際に動いたモデルも取得できない"
+    )
+    assert models.separation_reason("claude", None) is None
+    assert models.separation_reason("codex", "gpt-5.5") is None
+
+
+def test_assumption_note_marks_rounds_counted_on_trust(models):
+    """指定があり実測できないラウンドは分離しないが、前提を報告へ残す。"""
+    assert models.assumption_note("codex", "gpt-5.5") == (
+        "codex は指定した gpt-5.5 で動いた前提で数える（実測不可）"
+    )
+    assert models.assumption_note("claude", "opus-5") is None
+    assert models.assumption_note("codex", None) is None
 
 
 def test_label_marks_default_rounds(models):
@@ -127,7 +176,8 @@ def _state_with_history():
                 "round": 1, "impl": "codex",
                 "impl_model": {"requested": "gpt-5.5", "observed": None},
                 "reviewers": ["agy", "kiro"],
-                "reviewer_models": {"agy": {"requested": None, "observed": None},
+                "reviewer_models": {"agy": {"requested": "gemini-3.8",
+                                             "observed": None},
                                     "kiro": {"requested": "claude-opus-5",
                                              "observed": None}},
                 "items": ["R1-001", "R1-002"],
@@ -166,7 +216,7 @@ def test_metrics_group_by_runtime_and_model(metrics):
     agg = metrics.aggregate(_state_with_history())
     assert "codex / gpt-5.5" in agg["impl"]
     assert "claude / opus-5" in agg["impl"]
-    assert "agy / default" in agg["reviewer"]
+    assert "agy / gemini-3.8" in agg["reviewer"]
     assert "kiro / claude-opus-5" in agg["reviewer"]
 
 
@@ -189,7 +239,7 @@ def test_first_review_approval_rate(metrics):
 
 def test_reviewer_metrics_resolution_and_agreement(metrics):
     agg = metrics.aggregate(_state_with_history())
-    agy = agg["reviewer"]["agy / default"]
+    agy = agg["reviewer"]["agy / gemini-3.8"]
     assert agy["reviews"] == 2
     assert agy["findings"] == 2
     assert agy["resolution_rate"] == 0.5
@@ -200,7 +250,7 @@ def test_reviewer_metrics_resolution_and_agreement(metrics):
 def test_reviewer_seconds_are_not_shared_between_reviewers(metrics):
     """ラウンドの合計を各担当へ配ると 2 者分を両方に数えてしまう。"""
     agg = metrics.aggregate(_state_with_history())
-    assert agg["reviewer"]["agy / default"]["seconds"] == 30
+    assert agg["reviewer"]["agy / gemini-3.8"]["seconds"] == 30
     assert agg["reviewer"]["kiro / claude-opus-5"]["seconds"] == 20
 
 
@@ -208,7 +258,51 @@ def test_kiro_default_rounds_are_separated(metrics):
     state = _state_with_history()
     state["rounds"][0]["reviewer_models"]["kiro"] = {"requested": None, "observed": None}
     agg = metrics.aggregate(state)
-    assert any("既定モデル" in w for w in agg["unmeasured"])
+    assert any("kiro の auto" in w for w in agg["unmeasured"])
+    # 分離したラウンドは表にも入れない。ラウンド 2 の kiro は指定があるので残る。
+    assert "kiro / default" not in agg["reviewer"]
+    assert agg["reviewer"]["kiro / claude-opus-5"]["reviews"] == 1
+
+
+def test_unspecified_rounds_are_separated_per_runtime(metrics):
+    """指定なしと実測不可を書き分ける。文言が 1 つだと codex の行を読み違える。"""
+    state = _state_with_history()
+    state["rounds"][0]["impl_model"] = {"requested": None, "observed": None}
+    state["rounds"][0]["impl"] = "codex"
+    agg = metrics.aggregate(state)
+    assert any(
+        "codex はモデルを指定しておらず" in w for w in agg["unmeasured"]
+    ), agg["unmeasured"]
+    text = metrics.format_report(agg)
+    assert "集計から分離したラウンド" in text
+
+
+def test_separated_rounds_are_left_out_of_the_tables(metrics):
+    """分離すると報告したラウンドを集計表へ残さない。
+
+    両方に出すと、読む側は分離したはずの行を「そのモデルの成績」として読む。
+    分離は担当ごとに決まるため、実装担当を分離してもレビュー担当は残る。
+    """
+    state = _state_with_history()
+    state["rounds"][0]["impl_model"] = {"requested": None, "observed": None}
+    agg = metrics.aggregate(state)
+    assert "codex / default" not in agg["impl"]
+    assert "codex / gpt-5.5" not in agg["impl"]
+    # 同じラウンドのレビュー担当は指定があるため集計に残る
+    assert agg["reviewer"]["agy / gemini-3.8"]["reviews"] == 2
+
+
+def test_assumed_rounds_are_reported_without_being_separated(metrics):
+    """指定があり実測できないラウンドは集計へ入れたうえで、前提を報告へ残す。"""
+    agg = metrics.aggregate(_state_with_history())
+    assert any("実測不可" in w for w in agg["assumed"]), agg["assumed"]
+    assert not any("実測不可" in w for w in agg["unmeasured"])
+    assert "指定値で代用したラウンド" in metrics.format_report(agg)
+
+
+def test_caveats_state_that_only_claude_is_observable(metrics):
+    joined = "".join(metrics.COMPARISON_CAVEATS)
+    assert "実際に動いたモデルを取得できるのは claude だけ" in joined
 
 
 def test_model_mismatch_becomes_a_warning(metrics):

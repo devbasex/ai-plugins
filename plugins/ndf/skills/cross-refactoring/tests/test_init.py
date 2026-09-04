@@ -130,7 +130,7 @@ def test_init_records_cohorts_separately(run_init, tmp_path):
     run_init(_args(tmp_path))
     _, state = _state_of(tmp_path)
     assert state["runtimes"] == ["codex", "agy", "kiro"]
-    assert state["impl_capable"] == ["claude", "codex", "kiro"]
+    assert state["impl_capable"] == ["claude", "codex", "agy", "kiro"]
     assert state["host"] == "claude"
     assert state["host_detection"] == "explicit"
     assert state["host"] not in state["runtimes"]
@@ -165,10 +165,21 @@ def test_init_warns_when_kiro_is_given_auto_explicitly(run_init, tmp_path, capsy
     assert "kiro のモデルが auto です" in capsys.readouterr().err
 
 
+def test_init_warns_when_codex_or_agy_has_no_model(run_init, tmp_path, capsys):
+    """実測できないランタイムで指定が無いラウンドも、kiro の auto と同じく分離される。"""
+    run_init(_args(tmp_path, model=["kiro=claude-opus-5"]))
+    warning = capsys.readouterr().err
+    assert "codex のモデルが default です" in warning
+    assert "agy のモデルが default です" in warning
+
+
 def test_init_does_not_warn_when_every_model_can_be_measured(
     run_init, tmp_path, capsys
 ):
-    run_init(_args(tmp_path, model=["kiro=claude-opus-5"]))
+    """claude だけは指定が無くても実測できるため、警告の対象にならない。"""
+    run_init(_args(tmp_path, model=[
+        "codex=gpt-5.5", "agy=gemini-3.8", "kiro=claude-opus-5",
+    ]))
     assert "集計から分離されます" not in capsys.readouterr().err
 
 
@@ -177,9 +188,13 @@ def test_init_rejects_unknown_model_runtime(run_init, tmp_path):
         run_init(_args(tmp_path, model=["gpt=gpt-5.5"]))
 
 
-def test_init_rejects_agy_as_host(run_init, tmp_path):
-    with pytest.raises(SystemExit):
-        run_init(_args(tmp_path, host="agy"))
+def test_init_accepts_agy_as_host(run_init, tmp_path):
+    """agy も NDF の配布先であるため、ホストになれる。"""
+    run_init(_args(tmp_path, host="agy"))
+    _, state = _state_of(tmp_path)
+    assert state["host"] == "agy"
+    assert state["runtimes"] == ["claude", "codex", "kiro"]
+    assert state["impl_capable"] == ["claude", "codex", "agy", "kiro"]
 
 
 def test_init_runs_the_baseline_test(run_init, tmp_path):
@@ -193,6 +208,23 @@ def test_init_refuses_to_start_when_the_baseline_test_fails(run_init, tmp_path):
     """壊れた状態から始めると、壊したのか元から壊れていたのか区別できない。"""
     with pytest.raises(SystemExit):
         run_init(_args(tmp_path, baseline_test="false"))
+
+
+def test_max_outer_rounds_defaults_to_the_rotation_length(refactor, monkeypatch):
+    """既定の上限が輪番の 1 周（4 ラウンド）に届くこと。
+
+    上限 3 のままだと、`ALL_RUNTIMES` の先頭にある claude の順番（ラウンド 4）へ
+    到達しない。除外を外したのに 1 者が適用担当にならない状態が残る。
+    """
+    captured = {}
+    monkeypatch.setattr(refactor, "cmd_init", lambda args: captured.update(vars(args)))
+    monkeypatch.setattr(
+        refactor.sys, "argv",
+        ["refactor.py", "init", "130", "--scope", "src", "--host", "claude",
+         "--baseline-test", "true"],
+    )
+    refactor.main()
+    assert captured["max_outer_rounds"] == 4
 
 
 def test_baseline_test_is_required(refactor, monkeypatch):
@@ -225,7 +257,7 @@ def test_init_emits_shell_assignments(run_init, tmp_path, capsys):
     assert "RUNTIMES_CSV=codex,agy,kiro" in out
     # 空白を含む値は必ず引用する。引用しないと呼び出し側の eval で語が割れる。
     assert "RUNTIMES='codex agy kiro'" in out
-    assert "IMPL_POOL='claude codex kiro'" in out
+    assert "IMPL_POOL='claude codex agy kiro'" in out
     assert "TMP_DIR=" in out and "WORK=" in out
 
 
