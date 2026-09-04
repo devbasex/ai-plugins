@@ -193,3 +193,47 @@ def test_a_normal_result_still_checks_the_arrival(state_mod, tmp_dir,
                                                  file=str(rfile)))
 
     assert len(called) == 1
+
+
+# ---- 流した結果を、再開の入口の書き戻しが消さない ----
+
+
+def test_the_resume_keeps_what_the_flush_wrote_to_the_state(
+        state_mod, queue_mod, fake_gh, tmp_dir, monkeypatch) -> None:
+    """`init` の再開が手元の古い `st` で流した結果を上書きしない。
+
+    `_confirm_flushed` は状態ファイルへ直接書く。**手元の `st` はその書き込みを
+    知らない。** 流してから書き戻すと、`queued` の解除と結果なしの記録が消え、
+    届いていない投稿を承認として数えることになる。
+    """
+    _seed(tmp_dir,
+          auto_review_instructions="コードの観点",
+          review_instructions="コードの観点",
+          rounds=[{
+              "round": 1, "pr": PR, "started_at": "2026-09-03T00:00:00+00:00",
+              "codex": {"intent": "APPROVE", "queued": True, "by_severity": {}},
+              "agy": {"intent": "APPROVE", "by_severity": {}},
+          }])
+    queue_mod.enqueue(
+        queue_mod.Queue(tmp_dir / "pending"), "review-post", REPO, PR,
+        {"body": "指摘の本文", "event": "APPROVE"},
+        actor="me", extra={"agent": "codex", "round": 1})
+    fake_gh.set_rules([
+        {"match": f"pulls/{PR}/reviews?", "stdout": "[]"},   # 冪等の照会
+        {"match": "graphql", "stdout": ""},                  # 未解決スレッドは 0 件
+        {"match": "", "stdout": json.dumps(
+            {"id": 4961230016, "html_url": REVIEW_URL})},
+    ])
+    monkeypatch.setattr(state_mod, "_review_exists", lambda repo, pr, url: True)
+
+    # `--focus` を渡し、手元の `st` を書き戻す経路（`state_changed`）を通す。
+    state_mod.cmd_init(argparse.Namespace(
+        pr=PR, max_rounds=12, rotate_after=8, only=None, worktree=None,
+        focus="重点観点", extra_instructions_file=None))
+
+    saved = _state(tmp_dir)
+    assert saved["rounds"][0]["codex"]["queued"] is False
+    assert saved["rounds"][0]["codex"]["review_url"] == REVIEW_URL
+    # 書き戻す側の変更も残る。どちらか一方だけが残る直し方にしない。
+    assert saved["manual_extra_review_instructions"] == "重点観点"
+    assert queue_mod.Queue(tmp_dir / "pending").count() == 0

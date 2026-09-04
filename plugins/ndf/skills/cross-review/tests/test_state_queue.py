@@ -207,3 +207,36 @@ def test_the_judge_drains_the_queue_at_its_entry(state_mod, queue_mod, fake_gh,
         state_mod.cmd_judge(argparse.Namespace(pr=PR))
 
     assert queue_mod.Queue(tmp_path / "pending").count() == 0
+
+
+# ---- 積んでから流すまでに head が進んでも、投稿先の commit は動かない ----
+
+
+def test_a_queued_review_pins_the_commit_it_read(queue_mod) -> None:
+    """`review-post` は読んだ commit を `commit_id` として持つ。
+
+    Reviews API は `commit_id` を省くと**流した時点の head** へ付ける。積んでから
+    流すまでに head が進むと、レビューが読んでいない commit に付き、行を指す
+    `comments` はその差分で解決されるためずれる。
+    """
+    built = queue_mod.request_for("review-post", REPO, PR, {
+        "body": "本文", "event": "APPROVE", "commit_id": "abc1234"})
+
+    assert built["request"]["fields"]["commit_id"] == "abc1234"
+
+
+def test_a_review_without_a_commit_leaves_the_field_out(queue_mod) -> None:
+    """渡されなければ付けない。GitHub の既定（流した時点の head）へ戻る。"""
+    built = queue_mod.request_for("review-post", REPO, PR,
+                                  {"body": "本文", "event": "APPROVE"})
+
+    assert "commit_id" not in built["request"]["fields"]
+
+
+def test_the_commit_is_not_part_of_the_idempotency_match(queue_mod) -> None:
+    """冪等の照合は投稿者・判定・本文で行う。commit を条件へ入れると、head が
+    進んだ後の照会で同じレビューを別物と読み、二重に投稿する。"""
+    built = queue_mod.request_for("review-post", REPO, PR, {
+        "body": "本文", "event": "APPROVE", "commit_id": "abc1234"})
+
+    assert "commit_id" not in built["match"]

@@ -224,6 +224,13 @@ def request_for(kind: str, repo: str, pr: int, fields: dict[str, Any]) -> dict[s
         }
     if kind == "review-post":
         body = {"body": fields.get("body", ""), "event": fields["event"]}
+        # **投稿先の commit は積んだ時点で決める。** Reviews API は `commit_id` を
+        # 省くと送った時点の head へ付けるため、積んでから流すまでに head が進むと、
+        # レビューが読んでいない commit に付く。行を指す `comments` はその commit の
+        # 差分で解決されるため、位置がずれるか 422 で落ちる。ラウンド開始時に読んだ
+        # `rounds[-1].head_sha` を呼び出し側が渡す。
+        if fields.get("commit_id"):
+            body["commit_id"] = fields["commit_id"]
         if fields.get("comments"):
             body["comments"] = fields["comments"]
         return {

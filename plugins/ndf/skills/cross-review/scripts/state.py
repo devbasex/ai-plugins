@@ -1454,15 +1454,20 @@ def cmd_init(args: argparse.Namespace) -> None:
             # 再開した時点で残っている未解決の指摘を引き継ぎとして記録する。
             if _record_carried_over(st, st.get("repo") or repo, st.get("current_pr") or pr):
                 state_changed = True
-            # 待ち行列は状態ファイルより先に読む。再開の入口で流しておくと、
-            # 回復した後の 1 本目のコマンドで届く。
-            _auto_flush(int(st.get("current_pr") or pr))
             if state_changed:
                 resume_state_file.write_text(
                     json.dumps(st, indent=2, ensure_ascii=False),
                     encoding="utf-8",
                 )
                 info("↻ 追加レビュー観点を state に反映して再開")
+            # 待ち行列を流すのは、手元の `st` を書き戻した**後**である。流した結果
+            # （`queued` の解除と、届かなかった投稿の結果なし）は `_confirm_flushed` が
+            # 状態ファイルへ直接書く。先に流すと、この関数がその後に書き戻す古い `st` が
+            # それらを消す。再開の入口で流すこと自体は変えないため、回復した後の
+            # 1 本目のコマンドで届く。
+            # 渡すのは状態ファイルの鍵（`args.pr`）で、`current_pr` ではない。待ち行列も
+            # 状態ファイルも鍵で引くため、巻き直しの後に `current_pr` を渡すと引けない。
+            _auto_flush(pr)
             tmp_dir = _tmp_dir(worktree)
             wt = st.get("worktree_path") or ""
             # 再開でも同期する。中断から再開までの間に head が進んでいることがあり、
