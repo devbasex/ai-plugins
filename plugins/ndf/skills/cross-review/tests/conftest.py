@@ -39,7 +39,7 @@ import pytest
 
 
 # 既定で差し替える、GitHub を読みに行く関数。実物は `_REAL` へ退避する。
-_GITHUB_LOOKUPS = ("_fetch_pr_metadata",)
+_GITHUB_LOOKUPS = ("_fetch_check_runs", "_fetch_pr_metadata")
 _REAL: dict[str, object] = {}
 
 
@@ -77,7 +77,9 @@ def _no_github(monkeypatch, state_mod) -> None:
         return real(cmd, *args, **kwargs)
 
     monkeypatch.setattr(subprocess, "run", _guard)
-    # 取得は既定で「確かめられなかった」に倒す。
+    # 照会は既定で「確かめられなかった」に倒す。判定は収束を止めない側へ倒すため、
+    # 検査ジョブを見ない既存のテストは期待値を変えずに通る。
+    monkeypatch.setattr(state_mod, "_fetch_check_runs", lambda repo, sha: None)
     monkeypatch.setattr(state_mod, "_fetch_pr_metadata", lambda pr, repo=None: None)
 
 

@@ -442,6 +442,76 @@ def _fetch_pr_metadata(pr: int, repo: str | None = None) -> PrMetadata | None:
     return _pr_metadata_of(resolved, resp) if resp is not None else None
 
 
+# 継続的統合の照会は `commits/{sha}/check-runs` の 1 回だけにする。
+# **併記された状態（`commits/{sha}/status`）は使わない。** GitHub Actions は検査ジョブを
+# 記録し commit の状態を記録しないため、9 件すべてが成功した commit でも
+# `state: "pending"` / `total_count: 0` を返す（実測）。保留として読むと、承認された
+# ラウンドが収束しなくなる。
+
+# 失敗した検査ジョブの名前の振り分け。**一覧に無い名前は code-related へ倒す。**
+CI_CODE_PATTERNS = ("pint", "larastan", "phpstan", "test", "lint", "type",
+                    "build", "ruff", "eslint", "tsc", "mypy")
+CI_META_PATTERNS = ("check_pr_requirements", "assignees", "reviewers", "labels", "meta")
+# 完了した検査ジョブのうち、失敗として数える結論。`cancelled` / `skipped` / `neutral`
+# は失敗にしない。
+CI_FAILED_CONCLUSIONS = ("failure", "timed_out", "action_required", "startup_failure")
+
+
+class CiClassification(NamedTuple):
+    """検査ジョブを、修正の要る失敗・コードと無関係な失敗・未完了へ分けた結果。"""
+
+    code_failed: list[str]
+    meta_failed: list[str]
+    pending: list[str]
+
+
+def _classify_ci(runs: list[dict[str, Any]]) -> CiClassification:
+    """検査ジョブを振り分ける。`cmd_judge` と `cmd_merge_fix` が同じ実装を呼ぶ。
+
+    **`status` が `completed` 以外の検査ジョブは失敗にしない。** 完了を待たずに
+    未完了として別に返し、呼び出し側が「未完了のまま収束した」ことを残す。
+    """
+    code_failed: list[str] = []
+    meta_failed: list[str] = []
+    pending: list[str] = []
+    for run in runs:
+        name = str(run.get("name") or "")
+        if str(run.get("status") or "completed").lower() != "completed":
+            pending.append(name)
+            continue
+        if str(run.get("conclusion") or "").lower() not in CI_FAILED_CONCLUSIONS:
+            continue
+        low = name.lower()
+        if any(p in low for p in CI_META_PATTERNS):
+            meta_failed.append(name)
+        else:
+            # 一覧に無い名前も含めて code-related へ倒す（保守的）。
+            code_failed.append(name)
+    return CiClassification(code_failed, meta_failed, pending)
+
+
+def _fetch_check_runs(repo: str, sha: str) -> list[dict[str, Any]] | None:
+    """head の commit に対する検査ジョブの一覧を返す。照会できなければ `None`。
+
+    **「照会できなかった」と「すべて成功」を区別する。** `HTTP 422`（GitHub 側に
+    無い commit）も `total_count` が 0 のリポジトリも、失敗が無いことの根拠に
+    ならない。どちらも `None` を返し、呼び出し側は収束を止めずに理由を残す。
+    """
+    if not repo or not sha:
+        return None
+    resp = _gh_rest(f"repos/{repo}/commits/{sha}/check-runs")
+    if resp is None or not isinstance(resp.body, dict):
+        return None
+    try:
+        total = int(resp.body.get("total_count") or 0)
+    except (TypeError, ValueError):
+        return None
+    runs = resp.body.get("check_runs")
+    if total <= 0 or not isinstance(runs, list) or not runs:
+        return None
+    return [r for r in runs if isinstance(r, dict)]
+
+
 class HeadRef(NamedTuple):
     """レビュー対象の Pull Request の head。
 
@@ -1949,11 +2019,55 @@ def cmd_read_result(args: argparse.Namespace) -> None:
     info(f"✅ {agent}: intent={intent} posted_as={posted_as} comments={comments}")
 
 
+def _round_ci(st: dict[str, Any], last: dict[str, Any], pr: int) -> dict[str, Any]:
+    """収束の直前に検査ジョブを 1 度だけ照会し、判定に使う記録を返す。
+
+    head の commit は `rounds[-1].head_sha` から読む。承認したレビューが読んだ commit と
+    同じ値であり、追加の呼び出しが要らない。値が無いときだけ REST を 1 回投げる。
+
+    **照会できないことは、承認されたラウンドを差し戻す理由にならない。** `gh` の失敗・
+    `HTTP 422`・検査ジョブ 0 件はいずれも `unverified` として収束させ、確かめられ
+    なかったことを記録に残す。
+    """
+    repo = str(st.get("repo") or "")
+    sha = str(last.get("head_sha") or "")
+    if not sha:
+        meta = _fetch_pr_metadata(pr, repo or None)
+        if meta is not None:
+            sha = meta.head_sha
+            repo = repo or meta.repo
+    if not repo or not sha:
+        return {"verdict": "unverified", "reason": "head のコミットを特定できない"}
+    runs = _fetch_check_runs(repo, sha)
+    if runs is None:
+        return {
+            "verdict": "unverified",
+            "reason": "検査ジョブを照会できない（未 push・権限・検査ジョブ 0 件のいずれか）",
+            "sha": sha,
+        }
+    c = _classify_ci(runs)
+    if c.code_failed:
+        return {"verdict": "code_failure", "sha": sha, "failed": c.code_failed,
+                "meta_failed": c.meta_failed, "pending": c.pending}
+    if c.meta_failed:
+        return {"verdict": "meta_only", "sha": sha, "meta_failed": c.meta_failed,
+                "pending": c.pending,
+                "note": f"メタチェックのみ失敗: {c.meta_failed} — コードと無関係のため収束"}
+    if c.pending:
+        return {"verdict": "pending", "sha": sha, "pending": c.pending}
+    return {"verdict": "success", "sha": sha}
+
+
 def cmd_judge(args: argparse.Namespace) -> None:
     """Step 3 — intent ベース pass 判定。
 
-    出口は 4 つある。**結果を取り込めていないラウンドは、収束も修正も決められない。**
+    出口は 5 つある。**結果を取り込めていないラウンドは、収束も修正も決められない。**
     そのため結果なしの検査を、通ったかどうかの判定より先に置く。
+
+    収束の枝に入る直前で、継続的統合の検査ジョブを 1 度だけ照会する（#327）。
+    code-related の失敗があれば**中断せず**終了コード 2 で修正のラウンドへ回す。
+    収束の直前は修正の機会が残っている段であり、そこで中断すると直せる失敗まで
+    人手へ戻すことになる。中断は上限のラウンド数・振動の検知・`merge-fix` が受け持つ。
 
     Exit code: 0=approved, 2=continue, 7=結果なしのため起動し直す, 1=error
     """
@@ -2002,10 +2116,30 @@ def cmd_judge(args: argparse.Namespace) -> None:
         sys.exit(7)
 
     if round_passes and carried is None:
+        ci = _round_ci(st, last, pr)
+        last["ci"] = ci
+        print(f"CI_VERDICT={ci['verdict']}")
+        if ci["verdict"] == "code_failure":
+            last["verdict"] = "changes_requested"
+            _save(pr, st)
+            info(
+                f"→ 両方 APPROVE だが継続的統合が失敗している: {' '.join(ci['failed'])}。"
+                "修正へ。"
+            )
+            sys.exit(2)
         last["verdict"] = "approved"
         st["final"] = "approved"
         st["ended_at"] = _now()
         _save(pr, st)
+        if ci["verdict"] == "meta_only":
+            info(f"⚠ {ci['note']}")
+        elif ci["verdict"] == "pending":
+            info(
+                f"⚠ 未完了の検査ジョブが残ったまま収束する: {' '.join(ci['pending'])}。"
+                "完了は待たない"
+            )
+        elif ci["verdict"] == "unverified":
+            info(f"⚠ 継続的統合を確かめられないまま収束する: {ci['reason']}")
         info("✅ 両方 APPROVE。収束。")
         sys.exit(0)
 
@@ -2309,21 +2443,14 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         info(f"✅ fix マージ完了 (commit={fix_commit} fixed={fixed_count})")
         return
 
-    code_patterns = ("pint", "larastan", "phpstan", "test", "lint", "type",
-                     "build", "ruff", "eslint", "tsc", "mypy")
-    meta_patterns = ("check_pr_requirements", "assignees", "reviewers", "labels", "meta")
+    # 振り分けは `_classify_ci` が 1 か所で持つ。ここが読むのは修正の担当が申告した
+    # 失敗の名前で、進行側が照会し直す段ではない。申告は完了した失敗として渡す。
     failed = fix.get("ci_failed_checks") or []
-    code_fail = False
-    for name in failed:
-        low = name.lower()
-        if any(p in low for p in meta_patterns):
-            continue
-        elif any(p in low for p in code_patterns):
-            code_fail = True
-        else:
-            code_fail = True  # 不明は code-fail（保守的）
+    classified = _classify_ci(
+        [{"name": str(n), "status": "completed", "conclusion": "failure"} for n in failed]
+    )
 
-    if code_fail:
+    if classified.code_failed:
         st["final"] = "error"
         st["ended_at"] = _now()
         _save(pr, st)

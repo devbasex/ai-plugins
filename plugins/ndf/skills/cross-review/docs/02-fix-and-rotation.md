@@ -193,6 +193,13 @@ fi
 **例**: `check_pr_requirements`（Assignees 未設定）はループ継続、
 `laravel/pint` や `phpstan` の失敗は即中断してユーザ判断。
 
+**収束の判定（Step 3）も同じ振り分けを使う**（#327）。両方の AI が承認したラウンドは、
+収束を返す前に `commits/{HEAD_OID}/check-runs` を **1 度だけ** 照会する。code-related の
+失敗があれば**中断せず**終了コード 2 で修正のラウンドへ回す。収束の直前は修正の機会が
+残っている段であり、そこで中断すると直せる失敗まで人手へ戻すことになる。照会できない
+とき（`gh` の失敗 / `HTTP 422` / 検査ジョブ 0 件）は収束させ、`rounds[-1].ci.verdict` へ
+`unverified` と理由を残す。**進行を止めない側へ倒す。**
+
 ## Step 6: PR ローテーション (prepare → Agent → execute の 3 段)
 
 `rotate-pr.sh` は **light モード (default) と squash モード (opt-in)** を持つ。
