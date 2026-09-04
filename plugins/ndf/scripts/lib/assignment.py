@@ -7,6 +7,10 @@
 | 提案・レビュー | 全ランタイム − ホスト | 常に 3 者 |
 | 適用 | 全ランタイム | 常に 4 者 |
 
+**担当の選び方は、適用の役があるかどうかで分かれる。** `assign()` は実装担当を先に決めて
+から残りを絞り、`review_assign()` は母集合から直接 2 者を選ぶ。どちらも返すレビュー担当は
+2 者である。
+
 参加する 4 者はいずれも NDF の配布先であるため、**適用から外す者はいない**。
 ホストは提案・レビューから外れるが適用には入るため、2 つの母集合は重なるが
 一致しない。輪番の式はホストによらず同じ形になる。
@@ -86,6 +90,25 @@ def impl_pool() -> list[str]:
     （適用はホストを含み、提案・レビューは含まない）。
     """
     return list(ALL_RUNTIMES)
+
+
+def review_assign(round_no: int, host: str) -> list[str]:
+    """ラウンド番号から**レビュー担当 2 者**を決める。適用の役を持たない工程が使う。
+
+    母集合は `review_pool(host)` の 3 者で、外す 1 者をラウンドごとに回す。
+
+        レビュー担当 = 母集合 − 母集合[(ラウンド番号 - 1) % 3]
+
+    `assign()` と分けているのは、**適用の役があるかどうかで選び方が変わる**ためである。
+    `assign()` は先に実装担当を決めてから残りを絞るが、この工程には適用が無く、母集合から
+    直接 2 者を選ぶ。3 者すべてを毎ラウンド起動しないのは、起動回数が 1.5 倍になるためで、
+    ラウンドを重ねれば 3 者とも差分を見る。
+    """
+    if round_no < 1:
+        raise AssignmentError(f"ラウンド番号は 1 以上です: {round_no}")
+    pool = review_pool(host)
+    dropped = (round_no - 1) % len(pool)
+    return [r for i, r in enumerate(pool) if i != dropped]
 
 
 def assign(round_no: int, host: str) -> tuple[str, list[str]]:

@@ -48,6 +48,7 @@ sys.path.insert(
 )
 
 import assignment  # noqa: E402
+import auth  # noqa: E402
 import metrics as metrics_lib  # noqa: E402
 import models as models_lib  # noqa: E402
 import statefile  # noqa: E402
@@ -222,26 +223,6 @@ DUPLICATE_RATE_THRESHOLD = 0.7
 # レビュー結果の形式不正で差し戻せる回数。超えたら変更要求として扱う。
 # 差し戻しを無限に繰り返すと、形式を満たせないランタイムでループが止まらなくなる。
 MAX_INVALID_REVIEWS = 1
-
-# 認証状態の確認コマンド。**CLI の存在確認だけでは足りない。** 未認証の CLI は
-# 起動から 15 秒で終わり、結果ファイルを残さないまま担当から脱落する（実測）。
-# それでも初期化は成功として扱われるため、参加者が 1 人欠けた構成のまま進行する。
-AUTH_PROBES: dict[str, tuple[str, ...]] = {
-    "claude": ("claude", "auth", "status"),
-    "codex": ("codex", "login", "status"),
-    # agy は認証を通ったときだけモデルの一覧を返す。プロンプトを投げる形より
-    # 短く終わり、モデルの呼び出しを 1 回消費しない。
-    "agy": ("agy", "models"),
-    "kiro": ("kiro-cli", "whoami"),
-}
-AUTH_PROBE_TIMEOUT = 120
-
-# **終了コード 0 でも未認証を示すことがある。** kiro は成否を終了コードで表さない。
-UNAUTHENTICATED_MARKERS = (
-    "not logged in", "not authenticated", "authentication failed",
-    "login required", "unauthorized", "please log in",
-)
-
 
 # ---------------- パス解決 ----------------
 
@@ -893,47 +874,10 @@ def unresolved_item_ids(
 def check_auth(runtimes: Iterable[str]) -> dict[str, dict[str, Any]]:
     """参加する CLI の認証状態を確かめる。1 つでも欠けたら初期化を中断する。
 
-    存在確認だけでは足りない。未認証の CLI は起動から 15 秒で終わり、結果ファイルを
-    残さないまま提案・レビューの担当から脱落するが、**初期化は成功として扱われる**
-    ため、参加者が 1 人欠けた構成のまま最後まで進んでしまう。
-
-    確認コマンドは CLI の版で変わりうるので、`NDF_SKIP_AUTH_CHECK` で飛ばせるように
-    しておく。飛ばしたことは必ず出力へ残す（黙って劣化させない）。
+    実装は共通層（`lib/auth.py`）にある。**この工程の中断は終了コード 4 である**ため、
+    出力と中断の手段をここから渡す。
     """
-    if os.environ.get("NDF_SKIP_AUTH_CHECK"):
-        info("⚠ NDF_SKIP_AUTH_CHECK が設定されているため認証確認を飛ばしました")
-        return {}
-
-    results: dict[str, dict[str, Any]] = {}
-    failed: list[str] = []
-    for runtime in runtimes:
-        probe = AUTH_PROBES.get(runtime)
-        if probe is None:
-            continue
-        try:
-            r = subprocess.run(list(probe), capture_output=True, text=True,
-                               timeout=AUTH_PROBE_TIMEOUT)
-            merged = f"{r.stdout}\n{r.stderr}".lower()
-            ok = r.returncode == 0 and not any(
-                m in merged for m in UNAUTHENTICATED_MARKERS
-            )
-            detail = (r.stderr.strip() or r.stdout.strip())[:200]
-        except FileNotFoundError:
-            ok, detail = False, "コマンドが見つかりません"
-        except subprocess.TimeoutExpired:
-            ok, detail = False, f"{AUTH_PROBE_TIMEOUT} 秒で応答しませんでした"
-        results[runtime] = {"command": " ".join(probe), "ok": ok, "detail": detail}
-        info(f"{'✅' if ok else '❌'} {runtime}: {' '.join(probe)}")
-        if not ok:
-            failed.append(f"{runtime}（{detail}）")
-
-    if failed:
-        die(
-            "認証されていない CLI があります: " + " / ".join(failed) + "。"
-            "参加者が欠けたまま進むと、その者の提案とレビューが無いまま収束します。"
-            "各 CLI でログインしてから再実行してください"
-        )
-    return results
+    return auth.check_auth(runtimes, info=info, die=die)
 
 
 def _review_post_note(is_own_pr: bool) -> str:

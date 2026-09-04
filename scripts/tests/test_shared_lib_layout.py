@@ -47,7 +47,7 @@ MOVED = (
 # 共通層を指す 3 本の起動スクリプト。
 LAUNCHERS = (
     SKILLS / "cross-review" / "scripts" / "wait-review.sh",
-    SKILLS / "cross-review" / "scripts" / "launch-agy.sh",
+    SKILLS / "cross-review" / "scripts" / "launch-reviewer.sh",
     SKILLS / "cross-refactoring" / "scripts" / "launch-cli.sh",
 )
 
@@ -171,7 +171,7 @@ def test_the_python_form_without_resolve_misses_the_shared_layer(tmp_path) -> No
     "path",
     [
         SKILLS / "cross-review" / "scripts" / "_tmpdir.sh",
-        SKILLS / "cross-review" / "scripts" / "launch-agy.sh",
+        SKILLS / "cross-review" / "scripts" / "launch-reviewer.sh",
         SKILLS / "cross-refactoring" / "scripts" / "launch-cli.sh",
     ],
     ids=lambda p: p.name,
@@ -245,6 +245,7 @@ def test_the_wait_wrapper_starts_the_moved_monitor() -> None:
 
 
 def test_the_agy_launcher_gets_past_the_shared_layer(tmp_path) -> None:
+    """互換のために残した名前から呼んでも、委譲先が共通層まで届くこと。"""
     out = subprocess.run(
         ["bash", str(SKILLS / "cross-review" / "scripts" / "launch-agy.sh"), "1", "1"],
         capture_output=True, text=True, timeout=120,

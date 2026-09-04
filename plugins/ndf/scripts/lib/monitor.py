@@ -852,7 +852,11 @@ def main() -> None:
     p.add_argument("pr", type=int)
     # 後方互換: cross-review は位置引数 `target` で codex / agy / both を渡す。
     # 4 ランタイム任意の組み合わせは `--agents` で渡す（どちらか一方だけを使う）。
-    p.add_argument("target", nargs="?", choices=["codex", "agy", "both"])
+    # **担当は 4 つの名前を取りうる。** `both` はこれまでの 2 者を指す省略形として残す
+    # （既存の呼び出し側が使い続けられるようにする）。3 者以上を監視するときは
+    # `--agents` を使う。
+    p.add_argument("target", nargs="?",
+                   choices=["claude", "codex", "agy", "kiro", "both"])
     p.add_argument("--agents", default=None,
                    help="監視対象をカンマ区切りで指定 (例: claude,kiro)。"
                         "位置引数 target の代わりに使う")

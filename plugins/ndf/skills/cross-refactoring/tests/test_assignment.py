@@ -171,3 +171,37 @@ def test_host_runtimes_covers_every_participant(assignment):
 @pytest.mark.parametrize("round_no", sorted(EXPECTED_FOR_CLAUDE))
 def test_the_rotation_matches_the_renamed_result(assignment, round_no):
     assert assignment.assign(round_no, "claude") == EXPECTED_FOR_CLAUDE[round_no]
+
+
+# ---------- レビューだけの輪番（cross-review が使う） ----------
+
+def test_review_assign_excludes_the_host(assignment):
+    """母集合はホストを除く 3 者で、返るのは常に 2 者である。"""
+    for host in assignment.HOST_RUNTIMES:
+        for round_no in range(1, 10):
+            picked = assignment.review_assign(round_no, host)
+            assert len(picked) == 2
+            assert host not in picked
+            assert set(picked) <= set(assignment.review_pool(host))
+
+
+def test_review_assign_rotates_the_excluded_one(assignment):
+    """外す 1 者はラウンドごとに回り、3 ラウンドで 1 周する。"""
+    host = "claude"
+    pool = assignment.review_pool(host)
+    dropped = [
+        set(pool) - set(assignment.review_assign(r, host)) for r in (1, 2, 3)
+    ]
+    assert [next(iter(d)) for d in dropped] == pool
+    # 4 ラウンド目は 1 ラウンド目と同じ担当へ戻る
+    assert assignment.review_assign(4, host) == assignment.review_assign(1, host)
+
+
+def test_review_assign_rejects_a_bad_round(assignment):
+    with pytest.raises(assignment.AssignmentError):
+        assignment.review_assign(0, "claude")
+
+
+def test_review_assign_rejects_an_unknown_host(assignment):
+    with pytest.raises(assignment.AssignmentError):
+        assignment.review_assign(1, "gemini")

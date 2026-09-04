@@ -40,6 +40,7 @@ def _load_monitor_module() -> types.ModuleType:
 # 待ち行列は共通層に置く。指し方は `plugins/ndf/scripts/lib/README.md` の契約に従う
 # （Python は `parents[3]` から解決する。ここは tests/ なので 1 つ浅い）。
 _POST_QUEUE = _HERE.parents[2] / "scripts" / "lib" / "post_queue.py"
+_ASSIGNMENT = _HERE.parents[2] / "scripts" / "lib" / "assignment.py"
 
 
 import pytest
@@ -61,6 +62,23 @@ def state_mod() -> types.ModuleType:
 @pytest.fixture(scope="session")
 def monitor_mod() -> types.ModuleType:
     return _load_monitor_module()
+
+
+@pytest.fixture(autouse=True)
+def _default_host(monkeypatch) -> None:
+    """テストの既定のホストを固定する。**環境に依存させない。**
+
+    `init` はホストを環境変数から推定する。手元の Claude Code には手掛かりがあるが、
+    継続的統合の実行環境には無い。固定しないと、同じテストが場所によって通ったり
+    落ちたりする。推定できない場合を確かめるテストは、この設定を自分で外す。
+
+    **手掛かりの一覧は共通層から読む。** ここへ写すと、共通層が増やしたときにテスト
+    だけが古い一覧で環境を整え続ける。
+    """
+    hints = _load_module("cross_review_tests_assignment", _ASSIGNMENT).HOST_ENV_HINTS
+    for key, _ in hints:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("CLAUDECODE", "1")
 
 
 @pytest.fixture(autouse=True)
