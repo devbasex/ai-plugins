@@ -9,7 +9,7 @@
 |---|---|
 | `scripts/state.py init` | Step 0 — state 初期化 / 再開 + プリチェック |
 | `scripts/state.py start-round` | Step 1 — round 開始判定 |
-| `scripts/launch-codex.sh` / `scripts/launch-agy.sh` | Step 2 — review launcher |
+| `scripts/launch-reviewer.sh` | Step 2 — レビュワー起動の入口（4 ランタイム共通） |
 | `scripts/monitor.py` | Step 2 — codex/agy プロセス多軸監視 |
 | `scripts/wait-review.sh` | Step 2 — `monitor.py` の薄ラッパ（互換用） |
 | `scripts/state.py read-result` | Step 2.5 — result.json マージ |
@@ -151,7 +151,7 @@ eval "$ROUND_VARS"
 `--head-branch` で受け取った値を書き戻す。ラウンドの開始時にも取り直すのは、作業ツリーの
 外で行われた変更に追従するためである。
 
-## Step 2: codex / agy 並列レビュー（AI 直接投稿）
+## Step 2: レビュー担当 2 者の並列レビュー（AI 直接投稿）
 
 **要点**: メインは launcher を **並列バックグラウンド** で起動するだけ。
 各 AI が `gh api` で投稿し `$TMP_DIR/<agent>-review-pr<PR>-result.json` に
@@ -236,7 +236,10 @@ AI への入出力の契約（2.2）と、AI が書き出すファイルの契�
 **「取得できなかった」と「0 件」を区別する。** 取得の失敗で止めると、GitHub 側の
 一時的な不調でループが進まなくなる。
 
-## Step 3: 判定（intent ベース + 引き継いだ指摘 + 結果なし）
+**誰がレビューし、いつ止めるかは [05-pool-and-convergence.md](05-pool-and-convergence.md)
+にある。** 母集合・担当の輪番・認証の確認と、終了基準の 3 つの層をそこで定める。
+
+## Step 3: 判定（新規の指摘 + 引き継いだ指摘 + 結果なし）
 
 ```bash
 JUDGE_VARS=$("$SCRIPTS/state.py" judge "$STATE_PR"); JUDGE_RC=$?

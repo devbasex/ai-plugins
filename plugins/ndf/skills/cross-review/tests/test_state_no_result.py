@@ -107,12 +107,12 @@ def test_the_output_separates_a_requested_skip_from_a_missing_result(
     _write(tmp_dir, _state([_round(codex=_approve())], only="codex"))
     with pytest.raises(SystemExit):
         state_mod.cmd_judge(argparse.Namespace(pr=PR))
-    assert "AGY_INTENT=SKIP" in capsys.readouterr().out
+    assert "agy=SKIP" in capsys.readouterr().out
 
     _write(tmp_dir, _state([_round(codex=_approve())]))
     with pytest.raises(SystemExit):
         state_mod.cmd_judge(argparse.Namespace(pr=PR))
-    assert "AGY_INTENT=NO_RESULT" in capsys.readouterr().out
+    assert "agy=NO_RESULT" in capsys.readouterr().out
 
 
 # ---------------- 受け入れ条件 4: 結果なしをラウンドへ残す ----------------

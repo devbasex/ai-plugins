@@ -1,7 +1,7 @@
 ---
 name: cross-review
-description: "Review a PR with both the codex and agy CLIs, looping fixes until both APPROVE. Use when a converging two-AI review is wanted（クロスレビュー・両AIレビュー・収束レビュー）."
-argument-hint: "[PR番号] [--max-rounds N] [--rotate-after K] [--rotate-mode light|squash] [--only codex|agy] [--focus TEXT] [--extra-instructions-file PATH]"
+description: "Review a PR with two CLIs picked from the runtimes other than the host, looping fixes until no new finding appears. Use when a converging multi-AI review is wanted（クロスレビュー・両AIレビュー・収束レビュー）."
+argument-hint: "[PR番号] [--host claude|codex|agy|kiro] [--max-rounds N] [--rotate-after K] [--rotate-mode light|squash] [--only RUNTIME] [--focus TEXT] [--extra-instructions-file PATH]"
 allowed-tools:
   - Bash
   - Read
@@ -13,11 +13,15 @@ allowed-tools:
 
 # クロスレビュー収束ループ
 
-PR を **codex / agy 両方** にレビューさせ、両者が `APPROVE` を返すまで
+PR を**ホストを除く 3 者から選んだ 2 者**にレビューさせ、**新しい指摘が出なくなるまで**
 `/ndf:pr-review` と `/ndf:fix` を自動で回す。
 
-/goalの引数として呼ばれた場合は、codex / agy が`APPROVE` になるまで/cross-reviewを繰り返す。
-  * codex / agyのいずれかが不具合などで実行できなくなった場合は異常終了とする
+母集合は「全ランタイム − ホスト」で、担当はラウンドごとの輪番で決まる（`cross-refactoring`
+と同じ決め方で、実装は共通層の `lib/assignment.py` にある）。**ホストを名指しで固定しない**
+のは、固定するとホストが `codex` か `agy` のときに自分自身をレビュワーへ含めるためである。
+
+/goalの引数として呼ばれた場合は、新しい指摘が出なくなるまで/cross-reviewを繰り返す。
+  * 担当のいずれかが不具合などで実行できなくなった場合は異常終了とする
    * /goalで呼ばれた場合はPR ローテーションは実施しなくてよい。
    * 振動検知した場合はAIが判断して正しい状態を決める。
 
@@ -27,8 +31,9 @@ PR を **codex / agy 両方** にレビューさせ、両者が `APPROVE` を返
 - [docs/02-fix-and-rotation.md](docs/02-fix-and-rotation.md) — Step 5〜8 (サブエージェント修正 / PR ローテーション / 終了処理)
 - [docs/03-review-output.md](docs/03-review-output.md) — レビュー出力の制約 / CI failure の分類 / アンチパターン / monitor.py の誤検知
 - [docs/04-contracts.md](docs/04-contracts.md) — 状態ファイルの形式と AI への入出力の契約（手順の途中では読まない）
+- [docs/05-pool-and-convergence.md](docs/05-pool-and-convergence.md) — 誰がレビューし、いつ止めるか（母集合・担当の輪番・認証・終了基準の 3 層）
 - [scripts/state.py](scripts/state.py) — state.json 操作（uv 自己完結スクリプト、stdlib のみ）
-- [scripts/launch-codex.sh](scripts/launch-codex.sh) / [scripts/launch-agy.sh](scripts/launch-agy.sh) — レビューランチャ
+- [scripts/launch-reviewer.sh](scripts/launch-reviewer.sh) — レビュワー起動の入口（4 ランタイム共通）。`launch-codex.sh` / `launch-agy.sh` はここへの薄い委譲
 - [scripts/monitor.py](scripts/monitor.py) — codex/agy プロセス多軸監視 (sentinel / pidfile / 早期エラー / stall / hard timeout / result.json)
 - [scripts/wait-review.sh](scripts/wait-review.sh) — `monitor.py` の薄ラッパ（互換用）
 - [scripts/rotate-pr.sh](scripts/rotate-pr.sh) — PR ローテーション
@@ -51,6 +56,8 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 | 状態の永続化 | `<worktree>/.cross_review/cross-review-pr<番号>-state.json` に集約。中断・再開可能 |
 | 長尺PR対策 | **`--rotate-after` ラウンドで PR をローテーション**（default=light: 同ブランチで PR 巻き直し / squash: 新ブランチ + squash 統合） |
 | 振動検知 | 前のラウンドと**同じ箇所を指す指摘**が 50% 以上なら中断（測り方は `docs/01` の Step 4） |
+| 終了基準 | **新しい指摘が出なくなったら収束**。全員 `APPROVE` は最も止まらない参加者に律速される。3 つの層の順序は `docs/01` の「終了基準」 |
+| レビュワーの母集合 | **全ランタイム − ホスト**の 3 者から、輪番で 2 者。認証は `init` が起動前に確かめる |
 
 ## 引数
 
@@ -60,7 +67,8 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 | `--max-rounds N` | 全体最大ラウンド数（PR ローテーションを含む通算） | `12` |
 | `--rotate-after K` | この round 数で未収束なら PR ローテーション | `8` |
 | `--rotate-mode light\|squash` | ローテーション方式。`light`: 同ブランチで旧 PR を close → 新 PR (title/body は現状の差分・実装から再生成)。`squash`: squash 統合 + 新ブランチ + `(rotated)` suffix | `light` |
-| `--only codex` / `--only agy` | 片方だけで回す（デバッグ用） | 両方 |
+| `--host claude\|codex\|agy\|kiro` | この収束ループを起動している CLI。母集合から外れる | 環境変数から推定。**推定できなければ失敗する** |
+| `--only RUNTIME` | 1 者だけで回す（デバッグ用） | 担当 2 者 |
 | `--focus TEXT` | 自動レビュー観点に上乗せして codex / agy 両方に渡す追加観点。短い重点チェック向け | なし |
 | `--extra-instructions-file PATH` | 自動レビュー観点に上乗せして codex / agy 両方に渡す追加観点を UTF-8 テキストファイルから読む。長いチェックリスト向け | なし |
 
@@ -108,7 +116,7 @@ codex / agy 両 launcher に同じ追加観点を渡す。`--focus` /
 
 - `/ndf:pr-review` が **AI 直接投稿**（外部 AI 自身が `gh api` で投稿）に対応
 - `/ndf:fix` が **サブエージェント起動 + 重要度ベース自動修正 + Resolve Conversation** に対応
-- `codex` / `agy` CLI が動作し、`gh` CLI が認証済み
+- 担当になる CLI が動作し、`gh` CLI が認証済み（`init` が起動前に確かめる。誤検知するときは `NDF_SKIP_AUTH_CHECK=1`）
 - `Agent(subagent_type="general-purpose", ...)` でサブエージェントを起動可能
 
 ## 事前確認（`state.py init` が自動実施）
@@ -211,6 +219,7 @@ ROTATE_MODE=${ROTATE_MODE:-light}
 # ⚠ eval はコマンド置換の終了コードを潰す。変数で受けてから eval する（docs/01 参照）
 INIT_VARS=$("$SCRIPTS/state.py" init "$STATE_PR" \
           --max-rounds "$MAX_ROUNDS" --rotate-after "$ROTATE_AFTER" \
+          ${HOST:+--host "$HOST"} \
           ${ONLY:+--only "$ONLY"} \
           ${FOCUS:+--focus "$FOCUS"} \
           ${EXTRA_INSTRUCTIONS_FILE:+--extra-instructions-file "$EXTRA_INSTRUCTIONS_FILE"}) || exit $?
@@ -224,14 +233,18 @@ while :; do
   ROUND_VARS=$("$SCRIPTS/state.py" start-round "$STATE_PR") || { RC=$?; [ "$RC" -eq 1 ] && break; exit "$RC"; }
   eval "$ROUND_VARS"
 
-  # Step 2: 並列レビュー
-  [ "$ONLY" != "agy" ] && "$SCRIPTS/launch-codex.sh"  "$STATE_PR" "$ROUND"
-  [ "$ONLY" != "codex"  ] && "$SCRIPTS/launch-agy.sh" "$STATE_PR" "$ROUND"
+  # Step 2: 並列レビュー（担当は start-round が REVIEWERS / REVIEWERS_CSV で返す）
+  for r in $REVIEWERS; do
+    [ -z "$ONLY" ] || [ "$ONLY" = "$r" ] || continue
+    "$SCRIPTS/launch-reviewer.sh" "$r" "$STATE_PR" "$ROUND"
+  done
   # 監視: 既定 timeout=7 分 / stall=3 分。失敗時は対象プロセスを kill して返す。監視と取り込みの
   #   終了コードは読まない。結果なしは NO_RESULT として state に残り、Step 3 が受け取る（docs/01）。
   "$SCRIPTS/monitor.py" "$STATE_PR" "${ONLY:-both}" || true
-  [ "$ONLY" != "agy" ] && "$SCRIPTS/state.py" read-result "$STATE_PR" codex  || true
-  [ "$ONLY" != "codex"  ] && "$SCRIPTS/state.py" read-result "$STATE_PR" agy || true
+  for r in $REVIEWERS; do
+    [ -z "$ONLY" ] || [ "$ONLY" = "$r" ] || continue
+    "$SCRIPTS/state.py" read-result "$STATE_PR" "$r" || true
+  done
 
   # Step 3: 判定 (0=収束 / 2=修正へ / 7=結果なし / 8=待ち行列に残あり / 1=中断)。引き継いだ指摘が残っていれば、
   #   両者が承認しても 2 を返して修正の工程へ回す。置換の終了コードは変数で受けてから読む。

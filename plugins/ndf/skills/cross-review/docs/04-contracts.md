@@ -67,9 +67,15 @@
 
 ### 重要なフィールド
 
+- `host` — 確定したホスト名（`claude` / `codex` / `agy` / `kiro`）。母集合から外れる
+- `host_source` — `explicit`（`--host`）または `env`（環境変数からの推定）
+- `rounds[].reviewers` — そのラウンドのレビュー担当 2 者。**ラウンドを開くときに決めて残す**
 - `worktree_path` — 並行セッションとの分離。サブエージェントへの cwd 指示にも使う
 - `is_own_pr` / `event_downgrade` — 自分の PR の場合 `REQUEST_CHANGES → COMMENT` 強制ダウングレード
-- `rounds[].codex.intent` — AI の本来判定。**ループ判定はこれを見る**
+- `rounds[].<担当>.intent` — AI の本来判定。**ループ判定はこれを見る**。担当ごとのキーの
+  名前は担当名で、取りうる名前は 4 つ（`codex` / `agy` / `claude` / `kiro`）
+- `rounds[].codex.intent` — 上の形の例。`host` を持たない状態ファイルでは `codex` / `agy`
+  の 2 つだけが現れる
 - `rounds[].codex.posted_as` — GitHub に実際に送った event。`is_own_pr=true` なら `COMMENT` になる
 - `rounds[].fix.resolved_threads` — `resolveReviewThread` で resolve した**件数(int)**。
   ここ (state.json 側) は int だが、fix サブエージェントが返す戻り値ファイル

@@ -31,6 +31,8 @@ from typing import Any, NamedTuple
 # `sys.path` の先頭へ入れるとプロセス全体で標準ライブラリ側が隠れる。
 sys.path.insert(
     0, str(pathlib.Path(__file__).resolve().parents[3] / "scripts" / "lib"))
+import assignment  # noqa: E402
+import auth  # noqa: E402
 import post_queue  # noqa: E402
 
 
@@ -1589,8 +1591,22 @@ def cmd_init(args: argparse.Namespace) -> None:
     else:
         die(f"既存コメント取得失敗 (重複検出無効のため中断): {r.stderr.strip()[:200]}")
 
+    # **ホストを先に確定する。** 誤ると母集合が狂い、ホストが自分自身をレビューする。
+    # 推定できないときに既定を置かない（間違ったまま一周してしまう）。
+    try:
+        host, host_source = assignment.detect_host(getattr(args, "host", None))
+    except assignment.AssignmentError as e:
+        die(str(e))
+        raise
+    reviewers = assignment.review_pool(host)
+    info(f"ホスト: {host}（{host_source}） / レビュワーの母集合: {' / '.join(reviewers)}")
+    # 未認証の CLI は起動から短時間で終わり、結果を残さないまま担当から欠ける。
+    auth.check_auth(reviewers, info=info, die=lambda m: die(m))
+
     state = {
         "started_at": _now(),
+        "host": host,
+        "host_source": host_source,
         "max_rounds": args.max_rounds,
         "rotate_after": args.rotate_after,
         "only": args.only,
@@ -1635,9 +1651,35 @@ def cmd_init(args: argparse.Namespace) -> None:
     print("RESUMED=0")
 
 
-AGENTS = ("codex", "agy")
+# **母集合を広げる前からある 2 者。** `host` を持たない状態ファイル（このリポジトリの
+# 版が上がる前に始めた実行）は、この 2 者を担当として読む。中断した実行を再開したときに
+# 担当が入れ替わると、前のラウンドの記録と突き合わせられなくなる。
+LEGACY_AGENTS = ("codex", "agy")
+# 互換のための別名。既存の呼び出し側はこの名前を使い続けてよい。
+AGENTS = LEGACY_AGENTS
 
 NO_RESULT = "NO_RESULT"
+
+
+def _round_reviewers(st: dict[str, Any], round_no: int) -> list[str]:
+    """そのラウンドのレビュー担当を返す。
+
+    **先に当たったものを採る。** ラウンドに記録があればそれを、無ければホストからの
+    輪番を、ホストも無ければこれまでの 2 者を返す。
+
+    | 状態 | 返る担当 |
+    | --- | --- |
+    | ラウンドに `reviewers` がある | その値 |
+    | 状態ファイルに `host` がある | `assignment.review_assign(round_no, host)` |
+    | どちらも無い（古い状態ファイル） | `LEGACY_AGENTS` |
+    """
+    for entry in st.get("rounds") or []:
+        if entry.get("round") == round_no and entry.get("reviewers"):
+            return list(entry["reviewers"])
+    host = st.get("host")
+    if host:
+        return assignment.review_assign(max(round_no, 1), host)
+    return list(LEGACY_AGENTS)
 
 
 def _is_pass(intent: str | None, severity: dict[str, int] | None) -> bool:
@@ -1672,21 +1714,27 @@ def _agent_intent(round_entry: dict[str, Any], agent: str, only: str | None) -> 
     return entry.get("intent") or default
 
 
-def _no_result_agents(round_entry: dict[str, Any], only: str | None) -> list[str]:
+def _no_result_agents(
+    round_entry: dict[str, Any], only: str | None,
+    reviewers: list[str] | None = None,
+) -> list[str]:
     """そのラウンドで、起動したのに使える結果が残らなかったレビュアーを返す。"""
     return [
         a
-        for a in AGENTS
+        for a in (reviewers or AGENTS)
         if not _skipped_by_only(a, only) and _agent_intent(round_entry, a, only) == NO_RESULT
     ]
 
 
-def _round_passes(round_entry: dict[str, Any], only: str | None) -> bool:
+def _round_passes(
+    round_entry: dict[str, Any], only: str | None,
+    reviewers: list[str] | None = None,
+) -> bool:
     """そのラウンドで新しく投稿された指摘だけを見た pass 判定。
 
     引き継いだ指摘はここでは見ない（`cmd_judge` が別に扱う）。
     """
-    for agent in AGENTS:
+    for agent in (reviewers or AGENTS):
         if _skipped_by_only(agent, only):
             continue
         entry = round_entry.get(agent) or {}
@@ -1806,18 +1854,25 @@ def cmd_start_round(args: argparse.Namespace) -> None:
 
     # round エントリを開く。head の commit を記録するのは、起動スクリプト 2 本と
     # 収束の判定が同じ値を読むためである。**2 本が同じ値を別々に取っていた分が 0 になる。**
+    # **担当はラウンドを開くときに決めて残す。** 後から輪番を引き直すと、状態ファイルの
+    # 記録と実際に起動した担当がずれる。
+    reviewers = _round_reviewers(st, round_no)
     entry: dict[str, Any] = {
         "round": round_no,
         "pr": pr,
         "started_at": _now(),
+        "reviewers": reviewers,
     }
     if head is not None:
         entry["head_sha"] = head.oid
     st["rounds"].append(entry)
     _save(args.pr, st)
 
-    info(f"=== Round {round_no} / {max_r} (PR #{pr}, round_in_pr={round_in_pr}) ===")
+    info(f"=== Round {round_no} / {max_r} (PR #{pr}, round_in_pr={round_in_pr}"
+         f", レビュー: {' + '.join(reviewers)}) ===")
     print(f"ROUND={round_no}")
+    print(f"REVIEWERS='{' '.join(reviewers)}'")
+    print(f"REVIEWERS_CSV={','.join(reviewers)}")
     print(f"ROUND_IN_PR={round_in_pr}")
     print(f"PR={pr}")
     print(f"MAX_ROUNDS={max_r}")
@@ -2291,20 +2346,22 @@ def cmd_judge(args: argparse.Namespace) -> None:
     last = st["rounds"][-1]
     only = st.get("only")
 
-    codex_intent = _agent_intent(last, "codex", only)
-    agy_intent = _agent_intent(last, "agy", only)
-    round_passes = _round_passes(last, only)
+    reviewers = _round_reviewers(st, last.get("round", 1))
+    intents = {a: _agent_intent(last, a, only) for a in reviewers}
+    round_passes = _round_passes(last, only, reviewers)
 
     carried = _carried_over_pending(st)
     carried_count = (st.get("carried_over") or {}).get("count", 0)
+    new_findings, findings_measurable = _new_finding_count(st, pr)
 
-    print(f"CODEX_INTENT={codex_intent}")
-    print(f"AGY_INTENT={agy_intent}")
+    print("REVIEWER_INTENTS='" + " ".join(
+        f"{a}={intents[a]}" for a in reviewers) + "'")
+    print(f"NEW_FINDINGS={new_findings if findings_measurable else '-'}")
     print(f"CARRIED_OVER_THREADS={carried_count}")
     pending_posts = _pending_posts(pr)
     print(f"PENDING_POSTS={pending_posts}")
 
-    no_result = _no_result_agents(last, only)
+    no_result = _no_result_agents(last, only, reviewers)
     if no_result:
         last["verdict"] = "no_result"
         relaunched = last.get("relaunched") or []
@@ -2330,7 +2387,13 @@ def cmd_judge(args: argparse.Namespace) -> None:
         )
         sys.exit(7)
 
-    if round_passes and carried is None and pending_posts:
+    # **新規の指摘が 0 件なら収束する。** 全員 `APPROVE` は最も止まらない参加者に
+    # 律速される。同じ論点の再提出では止まり、新しい観点が出るあいだは回る。
+    converged = carried is None and (
+        round_passes or (findings_measurable and new_findings == 0)
+    )
+
+    if converged and pending_posts:
         # **届いていない投稿があるあいだは収束させない。** 修正するものは無いので
         # 修正の工程（2）へは回さず、流し直す先（8）へ分ける。
         last["verdict"] = "queued"
@@ -2341,7 +2404,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
         )
         sys.exit(8)
 
-    if round_passes and carried is None:
+    if converged:
         ci = _round_ci(st, last, pr)
         last["ci"] = ci
         print(f"CI_VERDICT={ci['verdict']}")
@@ -2366,18 +2429,25 @@ def cmd_judge(args: argparse.Namespace) -> None:
             )
         elif ci["verdict"] == "unverified":
             info(f"⚠ 継続的統合を確かめられないまま収束する: {ci['reason']}")
-        info("✅ 両方 APPROVE。収束。")
+        info(
+            "✅ 新しい指摘が出なくなった。収束。" if findings_measurable
+            else "✅ 全員が承認した。収束。"
+        )
         sys.exit(0)
 
     last["verdict"] = "changes_requested"
     _save(pr, st)
-    if round_passes:
+    if carried is not None:
         info(
             f"→ 引き継いだ指摘が {carried_count} 件残っている。"
             "修正の工程を 1 度通すまで収束させない。"
         )
     else:
-        info(f"→ codex={codex_intent} agy={agy_intent}。修正へ。")
+        info(
+            "→ " + " ".join(f"{a}={intents[a]}" for a in reviewers)
+            + (f"（新しい指摘 {new_findings} 件）" if findings_measurable else "")
+            + "。修正へ。"
+        )
     sys.exit(2)
 
 
@@ -2397,6 +2467,93 @@ def _normalized_body(body: object) -> str:
     if not isinstance(body, str):
         return ""
     return _OSCILLATION_DROP.sub("", body.lower())[:OSCILLATION_BODY_CHARS]
+
+
+def _finding_keys(
+    st: dict[str, Any], pr: int, round_no: int
+) -> list[tuple[str, int, str]]:
+    """そのラウンドの指摘を (ファイル, 行, 正規化した本文) の並びで返す。
+
+    **新規性の判定と振動の検知が同じ形を使う。** どちらも「前のラウンドと同じ指摘か」を
+    別の目的で見る。判定を 2 つ持つと、片方だけが更新されたときに、収束はするのに振動と
+    して中断する状態が作れてしまう。
+    """
+    keys: list[tuple[str, int, str]] = []
+    for agent in _round_reviewers(st, round_no):
+        p = _payload_path(agent, pr, round_no)
+        if not p.exists():
+            continue
+        try:
+            payload = json.loads(p.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+        # gemini round 4 指摘: payload は本来 dict (comments: [...]) だが、
+        # launcher のバグで list / str が入り込むと `payload.get(...)` で
+        # AttributeError になる。不正な review payload はバグなので
+        # 即時 die(code=3) で停止させる。
+        if not isinstance(payload, dict):
+            die(
+                f"{agent}: payload.json が dict ではない "
+                f"({p}, type={type(payload).__name__})。"
+                " review launcher の出力形式不正。",
+                code=3,
+            )
+        for c in payload.get("comments", []):
+            if not isinstance(c, dict):
+                # comments エントリが dict でない場合も同様に致命扱い
+                die(
+                    f"{agent}: payload.comments のエントリが dict ではない "
+                    f"({p}, type={type(c).__name__})。",
+                    code=3,
+                )
+            path = c.get("path")
+            line = c.get("line") or c.get("start_line")
+            if path and line is not None:
+                try:
+                    keys.append((str(path), int(line), _normalized_body(c.get("body"))))
+                except (TypeError, ValueError):
+                    continue
+    return keys
+
+
+def _new_finding_count(st: dict[str, Any], pr: int) -> tuple[int, bool]:
+    """最後のラウンドの新しい指摘の `(件数, 測れたかどうか)` を返す。
+
+    **一致の判定は振動の検知と同じである**（位置・近傍・本文のいずれかで結び付く）。
+
+    **測れないことと、新規が 0 件であることは別である。** 指摘の記録（payload）が
+    残っていないラウンドでは中身を読めない。これを 0 件として扱うと、修正必須の指摘が
+    出ているラウンドまで収束させてしまう。測れないときは呼び出し側が従来の判定
+    （全員が pass か）に従う。
+
+    | 状態 | 返る値 |
+    | --- | --- |
+    | ラウンドが無い | `(0, False)` |
+    | 指摘の記録を読めない | `(0, False)` |
+    | 前のラウンドが無い（初回・巻き直しの直後） | `(件数, True)`。すべて新規 |
+    | 前のラウンドがある | `(一致しない件数, True)` |
+    """
+    rounds = st.get("rounds") or []
+    same_pr = [r for r in rounds if r.get("pr") == st.get("current_pr")]
+    if not same_pr:
+        return 0, False
+    curr = _finding_keys(st, pr, same_pr[-1]["round"])
+    if not curr:
+        return 0, False
+    if len(same_pr) < 2:
+        return len(curr), True
+    prev = _finding_keys(st, pr, same_pr[-2]["round"])
+    new = 0
+    for path, line, body in curr:
+        same_file = [q for q in prev if q[0] == path]
+        matched = (
+            any(line == q[1] for q in same_file)
+            or any(abs(line - q[1]) <= OSCILLATION_NEAR_LINES for q in same_file)
+            or (body and any(body == q[2] for q in same_file))
+        )
+        if not matched:
+            new += 1
+    return new, True
 
 
 def cmd_check_oscillation(args: argparse.Namespace) -> None:
@@ -2430,42 +2587,7 @@ def cmd_check_oscillation(args: argparse.Namespace) -> None:
 
     def collect_keys(round_no: int) -> list[tuple[str, int, str]]:
         """そのラウンドの指摘を (ファイル, 行, 正規化した本文) の並びで返す。"""
-        keys: list[tuple[str, int, str]] = []
-        for agent in ("codex", "agy"):
-            p = _payload_path(agent, pr, round_no)
-            if not p.exists():
-                continue
-            try:
-                payload = json.loads(p.read_text(encoding="utf-8"))
-            except json.JSONDecodeError:
-                continue
-            # gemini round 4 指摘: payload は本来 dict (comments: [...]) だが、
-            # launcher のバグで list / str が入り込むと `payload.get(...)` で
-            # AttributeError になる。不正な review payload はバグなので
-            # 即時 die(code=3) で停止させる。
-            if not isinstance(payload, dict):
-                die(
-                    f"{agent}: payload.json が dict ではない "
-                    f"({p}, type={type(payload).__name__})。"
-                    " review launcher の出力形式不正。",
-                    code=3,
-                )
-            for c in payload.get("comments", []):
-                if not isinstance(c, dict):
-                    # comments エントリが dict でない場合も同様に致命扱い
-                    die(
-                        f"{agent}: payload.comments のエントリが dict ではない "
-                        f"({p}, type={type(c).__name__})。",
-                        code=3,
-                    )
-                path = c.get("path")
-                line = c.get("line") or c.get("start_line")
-                if path and line is not None:
-                    try:
-                        keys.append((str(path), int(line), _normalized_body(c.get("body"))))
-                    except (TypeError, ValueError):
-                        continue
-        return keys
+        return _finding_keys(st, pr, round_no)
 
     prev = collect_keys(prev_round_no)
     curr = collect_keys(curr_round_no)
@@ -2903,7 +3025,12 @@ def main() -> None:
     sp.add_argument("pr", type=int)
     sp.add_argument("--max-rounds", type=int, default=12)
     sp.add_argument("--rotate-after", type=int, default=8)
-    sp.add_argument("--only", choices=["codex", "agy"], default=None)
+    sp.add_argument(
+        "--only", choices=list(assignment.ALL_RUNTIMES), default=None,
+        help="片方だけで回す（デバッグ用）")
+    sp.add_argument(
+        "--host", choices=list(assignment.HOST_RUNTIMES), default=None,
+        help="この収束ループを起動している CLI。省略時は環境変数から推定する")
     sp.add_argument("--worktree", default=None)
     sp.add_argument(
         "--focus",

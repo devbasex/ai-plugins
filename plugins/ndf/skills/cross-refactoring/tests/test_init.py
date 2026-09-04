@@ -335,12 +335,12 @@ def test_init_records_the_vocabulary_for_the_prompt(run_init, tmp_path, refactor
 def _probe_result(refactor, monkeypatch, outcomes):
     """認証確認コマンドの結果を差し替える。`{ランタイム: (rc, 出力)}`。"""
     def fake_run(cmd, **kwargs):
-        for runtime, probe in refactor.AUTH_PROBES.items():
+        for runtime, probe in refactor.auth.AUTH_PROBES.items():
             if list(cmd) == list(probe):
                 rc, out = outcomes.get(runtime, (0, "ok"))
                 return subprocess.CompletedProcess(cmd, rc, out, "")
         raise AssertionError(f"想定外の呼び出し: {cmd}")
-    monkeypatch.setattr(refactor.subprocess, "run", fake_run)
+    monkeypatch.setattr(refactor.auth.subprocess, "run", fake_run)
 
 
 def test_check_auth_passes_when_every_cli_is_logged_in(refactor, monkeypatch):
@@ -372,7 +372,7 @@ def test_check_auth_fails_when_the_cli_is_missing(refactor, monkeypatch):
     def missing(cmd, **kwargs):
         raise FileNotFoundError(cmd[0])
 
-    monkeypatch.setattr(refactor.subprocess, "run", missing)
+    monkeypatch.setattr(refactor.auth.subprocess, "run", missing)
     with pytest.raises(SystemExit):
         refactor.check_auth(["codex"])
 
@@ -384,7 +384,7 @@ def test_check_auth_can_be_skipped_explicitly(refactor, monkeypatch):
     def never(cmd, **kwargs):
         raise AssertionError("認証確認を実行してはいけない")
 
-    monkeypatch.setattr(refactor.subprocess, "run", never)
+    monkeypatch.setattr(refactor.auth.subprocess, "run", never)
     assert refactor.check_auth(["codex", "agy"]) == {}
 
 
