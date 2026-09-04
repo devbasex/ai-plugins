@@ -174,11 +174,6 @@ PR作成時に `issues/` にプランファイルが存在しない場合、以�
 
 同じ内容をコピーせず、PR bodyでは「詳細は `issues/xxx.md` 参照」と誘導してもよい。
 
-進行を盤面へ記録する場合は、[references/projects-tracking.md](../development-workflow/references/projects-tracking.md) の「`$SCRIPTS` を決める」でパスを解決してから
-次を実行する（`.ndf/projects.json` が無いリポジトリでは何も起きない）。
+この工程に入ったら `/ndf:progress-tracking <issue番号> "計画"` を呼ぶ（記録の手順はその Skill が持つ）。
 
-```bash
-bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "計画"
-bash "$SCRIPTS/projects-sync.sh" <issue番号> plan "issues/<ファイル名>"
-```
 

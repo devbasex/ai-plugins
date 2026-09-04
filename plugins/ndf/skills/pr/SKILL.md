@@ -201,8 +201,7 @@ feature/xxx ──PR──→ qa/staging   ← ❌ qa/staging をmergeするとm
 
 `/ndf:cherry-pick-pr <base-branch>` を使う（自動化済み）。原則と手順は `/ndf:cherry-pick-pr` に記載のとおり。
 
-進行を盤面へ記録する場合は、[references/projects-tracking.md](../development-workflow/references/projects-tracking.md) の「`$SCRIPTS` を決める」でパスを解決してから
-`bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "Pull Request"` を実行する（`.ndf/projects.json` が無いリポジトリでは何も起きない）。
+この工程に入ったら `/ndf:progress-tracking <issue番号> "Pull Request"` を呼ぶ（記録の手順はその Skill が持つ）。
 
 ## 関連
 

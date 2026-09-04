@@ -244,8 +244,7 @@ Pull Request が最後かどうかを判断できない。
 
 範囲外の課題が見つかったときは `/ndf:out-of-scope` で起票する。
 
-進行を盤面へ記録する場合は、[references/projects-tracking.md](../development-workflow/references/projects-tracking.md) の「`$SCRIPTS` を決める」でパスを解決してから
-`bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "配布"` を実行する（`.ndf/projects.json` が無いリポジトリでは何も起きない）。
+この工程に入ったら `/ndf:progress-tracking <issue番号> "配布"` を呼ぶ（記録の手順はその Skill が持つ）。
 
 ## 関連
 

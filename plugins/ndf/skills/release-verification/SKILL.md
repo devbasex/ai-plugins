@@ -123,8 +123,7 @@ Pull Request のコメント）とする。
 要否を決めるのは `development-workflow` である。この Skill は判定結果を受け取って実行する。
 呼ばれた時点で、この工程が要ると判定されている。
 
-進行を盤面へ記録する場合は、[references/projects-tracking.md](../development-workflow/references/projects-tracking.md) の「`$SCRIPTS` を決める」でパスを解決してから
-`bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "リリース後テスト"` を実行する（`.ndf/projects.json` が無いリポジトリでは何も起きない）。
+この工程に入ったら `/ndf:progress-tracking <issue番号> "リリース後テスト"` を呼ぶ（記録の手順はその Skill が持つ）。
 
 ## 関連
 

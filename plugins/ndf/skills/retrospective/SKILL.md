@@ -271,13 +271,8 @@ gh issue edit <issue番号> --repo "$RECORD_REPO" --body-file /tmp/issue-body.md
 | 成果物の良し悪し | レビューの工程が扱う |
 | 経緯の時系列そのもの | git の履歴と Pull Request に残っている |
 
-進行を盤面へ記録する場合は、[references/projects-tracking.md](../development-workflow/references/projects-tracking.md) の「`$SCRIPTS` を決める」でパスを解決してから
-次を実行する（`.ndf/projects.json` が無いリポジトリでは何も起きない）。この工程で終わるため `status` も `Done` にする。
+この工程に入ったら `/ndf:progress-tracking <issue番号> "振り返り"` を呼ぶ（記録の手順はその Skill が持つ）。 この工程で終わるため、あわせて `status` を `Done` にする。
 
-```bash
-bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "振り返り"
-bash "$SCRIPTS/projects-sync.sh" <issue番号> status "Done"
-```
 
 ## 関連
 

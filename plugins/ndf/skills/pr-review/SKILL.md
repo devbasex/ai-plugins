@@ -421,8 +421,7 @@ PR モードではレビュー結果が **PR 上に投稿済み** であるこ�
 詳細な指摘内容は PR 上のインラインコメントに残っているため、報告では繰り返さない。
 `--branch` モードでは投稿先がないため、上記「報告」の書式でセッション上に出力する。
 
-進行を盤面へ記録する場合は、[references/projects-tracking.md](../development-workflow/references/projects-tracking.md) の「`$SCRIPTS` を決める」でパスを解決してから
-`bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "レビュー"` を実行する（`.ndf/projects.json` が無いリポジトリでは何も起きない）。
+この工程に入ったら `/ndf:progress-tracking <issue番号> "レビュー"` を呼ぶ（記録の手順はその Skill が持つ）。
 
 ## 関連
 

@@ -33,7 +33,7 @@ MANIFEST_DIR = PLUGIN_DIR / "manifests"
 
 # 配布数は課題ごとに変わりうるが、**agy を足したことで他の 3 つが変わらない**ことは
 # #215 の受け入れ条件（A12）である。値を書いて固定する。
-EXPECTED_COUNTS = {"claude": 33, "codex": 31, "kiro": 32, "agy": 31}
+EXPECTED_COUNTS = {"claude": 34, "codex": 32, "kiro": 33, "agy": 32}
 
 
 def manifest_names(runtime: str) -> list[str]:
