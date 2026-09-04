@@ -168,7 +168,8 @@ def test_broken_registry_is_treated_as_empty(main_repo: Path) -> None:
 
 WF_LIB = Path(__file__).resolve().parents[3] / "skills/development-workflow/scripts/lib/workflow-common.sh"
 
-# 排他の実装は 2 箇所にある（#293 で 1 つへ寄せるまで）。**両方へ同じ検査をかける。**
+# 実装は `scripts/lib/lock-common.sh` の 1 箇所にあり、2 つの読み込む側が既存の名前へ
+# 結んでいる（#293）。**両方の読み込む側へ同じ検査をかける。**
 LOCK_LIBS = [
     pytest.param(LIB, "wt_lock_acquire", "wt_lock_release", id="worktree"),
     pytest.param(WF_LIB, "wf_lock_acquire", "wf_lock_release", id="workflow"),
@@ -272,14 +273,14 @@ def test_the_lock_does_not_leave_noclobber_on_the_caller(
 
 
 def _run_lock_lib(lib: Path, snippet: str) -> subprocess.CompletedProcess:
-    """`lib` を読み込んだうえで `snippet` を bash で実行する。写しの側も同じ検査にかける。"""
+    """`lib` を読み込んだうえで `snippet` を bash で実行する。2 つの読み込む側へ同じ検査をかける。"""
     return subprocess.run(
         ["bash", "-c", f'set -uo pipefail\n. "{lib}"\n{snippet}\n'],
         capture_output=True, text=True,
     )
 
 
-# 判定と取り除きは接頭辞だけが違う。両方の写しへ同じ検査をかける。
+# 判定と取り除きは接頭辞だけが違う。両方の読み込む側へ同じ検査をかける。
 LOCK_HELPERS = [
     pytest.param(LIB, "_wt", id="worktree"),
     pytest.param(WF_LIB, "_wf", id="workflow"),
@@ -454,7 +455,7 @@ def _lock_body(path: Path, name: str) -> str:
         if line.strip() and not line.strip().startswith("#")
     ]
     body = "\n".join(kept)
-    # 2 つの写しで違ってよいのは、接頭辞と上限の既定値だけである。
+    # 2 つの読み込む側で違ってよいのは、接頭辞と上限の既定値だけである。
     body = re.sub(r'timeout="\$\{2:-[^}]*\}"', 'timeout=DEFAULT', body)
     body = re.sub(r"\bW[TF]_LOCK_", "LOCK_", body)
     return body.replace("_wt_", "_lock_").replace("_wf_", "_lock_")
@@ -462,10 +463,13 @@ def _lock_body(path: Path, name: str) -> str:
 
 @pytest.mark.parametrize("name", ["lock_acquire", "lock_is_stale", "lock_discard"])
 def test_the_two_lock_implementations_share_one_procedure(name: str) -> None:
-    """#297-6: 片方だけに残る手を作らない（#293 で 1 つへ寄せるまでの担保）。
+    """#297-6: 片方だけに残る手を作らない。
 
     取得の本体だけでなく、判定と取り除きも突き合わせる。持ち主を決める手順は
     3 つに分かれており、どれか 1 つが片方だけ古いと、同じ症状が片側にだけ残る。
+
+    #293 で本体を `lock-common.sh` へ寄せた後は、2 つの読み込む側が同じ形の委譲で
+    あることを見る。**片方だけが共通ファイルを迂回して手を持ち直すと落ちる。**
     """
     wt = "wt_" + name if name == "lock_acquire" else "_wt_" + name
     wf = "wf_" + name if name == "lock_acquire" else "_wf_" + name
