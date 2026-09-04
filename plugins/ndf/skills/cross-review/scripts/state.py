@@ -3011,19 +3011,26 @@ def cmd_report(args: argparse.Namespace) -> None:
         print(f"- #{h['pr']} ({state_str}, {h.get('rounds', 0)} rounds)")
     print()
     print("## ラウンドサマリ")
-    print("| round | PR | codex | agy | fix | CI |")
-    print("|---|---|---|---|---|---|")
+    # **担当は 4 つの名前を取りうる。** 2 者を列にした表では、`claude` / `kiro` が
+    # 担当したラウンドの結果が読めない。担当と判定を 1 つの列へまとめる。
+    print("| round | PR | レビュー | fix | CI |")
+    print("|---|---|---|---|---|")
     for r in st["rounds"]:
-        codex = r.get("codex") or {}
-        agy = r.get("agy") or {}
+        reviewers = r.get("reviewers") or list(LEGACY_AGENTS)
+        parts = []
+        for name in reviewers:
+            entry = r.get(name) or {}
+            if entry:
+                parts.append(f"{name}={entry.get('intent', '-')} ({entry.get('comments', '-')})")
+            else:
+                parts.append(f"{name}=-")
+        review_s = " / ".join(parts)
         fix = r.get("fix") or {}
-        codex_s = f"{codex.get('intent', '-')} ({codex.get('comments', '-')})" if codex else "-"
-        agy_s = f"{agy.get('intent', '-')} ({agy.get('comments', '-')})" if agy else "-"
         fix_s = "-"
         if fix:
             fix_s = f"{(fix.get('commit') or '')[:7]} ({fix.get('fixed', 0)} fixed, {fix.get('deferred', 0)} deferred)"
         ci_s = fix.get("ci") or "-"
-        print(f"| {r['round']} | #{r['pr']} | {codex_s} | {agy_s} | {fix_s} | {ci_s} |")
+        print(f"| {r['round']} | #{r['pr']} | {review_s} | {fix_s} | {ci_s} |")
     print()
 
     sweep = st.get("sweep")

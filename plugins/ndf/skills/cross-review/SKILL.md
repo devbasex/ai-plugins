@@ -69,8 +69,8 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 | `--rotate-mode light\|squash` | ローテーション方式。`light`: 同ブランチで旧 PR を close → 新 PR (title/body は現状の差分・実装から再生成)。`squash`: squash 統合 + 新ブランチ + `(rotated)` suffix | `light` |
 | `--host claude\|codex\|agy\|kiro` | この収束ループを起動している CLI。母集合から外れる | 環境変数から推定。**推定できなければ失敗する** |
 | `--only RUNTIME` | 1 者だけで回す（デバッグ用）。**そのラウンドの担当を 1 者へ絞る。** 母集合の外を指定したら `init` が弾く | 担当 2 者 |
-| `--focus TEXT` | 自動レビュー観点に上乗せして codex / agy 両方に渡す追加観点。短い重点チェック向け | なし |
-| `--extra-instructions-file PATH` | 自動レビュー観点に上乗せして codex / agy 両方に渡す追加観点を UTF-8 テキストファイルから読む。長いチェックリスト向け | なし |
+| `--focus TEXT` | 自動レビュー観点に上乗せして**そのラウンドのレビュー担当 2 者**に渡す追加観点。短い重点チェック向け | なし |
+| `--extra-instructions-file PATH` | 自動レビュー観点に上乗せして**そのラウンドのレビュー担当 2 者**に渡す追加観点を UTF-8 テキストファイルから読む。長いチェックリスト向け | なし |
 
 例:
 
@@ -86,7 +86,7 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 ### 自動レビュー観点テンプレート
 
 `state.py init` は GitHub API の `pulls/<PR>/files --paginate` で変更ファイルを全件取得して分類し、
-codex / agy 両 launcher に同じ追加観点を渡す。`--focus` /
+そのラウンドのレビュー担当に同じ追加観点を渡す。`--focus` /
 `--extra-instructions-file` は、この自動テンプレートの後ろに上乗せされる。
 
 自動カテゴリ:
@@ -382,11 +382,14 @@ bash ループは Agent tool を呼べないため、light モードでは Step 
 - **PR 履歴**: 各 PR 番号 + closed/open 状態 + round 数
 - **各ラウンドのサマリ表**:
 
-  | round | PR | codex | agy | fix | CI |
-  |---|---|---|---|---|---|
-  | 1 | #123 | REQ (5) | REQ (3) | abc123 (5 fixed, 2 deferred) | ✅ |
-  | 2 | #123 | REQ (2) | APP | def456 (2 fixed) | ✅ |
-  | 3 | #145 | APP | APP | — | — |
+  | round | PR | レビュー | fix | CI |
+  |---|---|---|---|---|
+  | 1 | #123 | agy=REQUEST_CHANGES (5) / kiro=REQUEST_CHANGES (3) | abc123 (5 fixed, 2 deferred) | ✅ |
+  | 2 | #123 | codex=REQUEST_CHANGES (2) / kiro=APPROVE (0) | def456 (2 fixed) | ✅ |
+  | 3 | #145 | codex=APPROVE (0) / agy=APPROVE (0) | — | — |
+
+  **担当はラウンドごとに変わる。** 4 つの名前を取りうるため、担当と判定を 1 つの列へ
+  まとめる。
 
 - **最終スイープ結果** (Step 7.5): `sweep-pr<STATE_PR>-result.json` の `resolved` /
   `fixed_in_sweep` / `remaining_open`。**`remaining_open` は 0 が正常**（残 open

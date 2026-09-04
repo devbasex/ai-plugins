@@ -286,3 +286,20 @@ def test_init_fails_when_the_host_cannot_be_guessed(state_mod, monkeypatch):
         monkeypatch.delenv(key, raising=False)
     with pytest.raises(state_mod.assignment.AssignmentError):
         state_mod.assignment.detect_host(None, env={})
+
+
+def test_report_shows_every_reviewer_that_took_part(state_mod, tmp_path, capsys):
+    """完了報告は、実際に参加した担当の判定を出す。
+
+    2 者を固定した表のままだと、`claude` / `kiro` が担当したラウンドの結果が読めない。
+    **利用者が結果を確認できないまま収束する。**
+    """
+    _state(tmp_path, host="codex", final="approved", rounds=[
+        _round(1, ["claude", "kiro"], {"claude": "APPROVE", "kiro": "REQUEST_CHANGES"}),
+        _round(2, ["agy", "claude"], {"agy": "APPROVE", "claude": "APPROVE"}),
+    ])
+    state_mod.cmd_report(type("A", (), {"pr": 500})())
+    out = capsys.readouterr().out
+    assert "claude=APPROVE" in out
+    assert "kiro=REQUEST_CHANGES" in out
+    assert "agy=APPROVE" in out
