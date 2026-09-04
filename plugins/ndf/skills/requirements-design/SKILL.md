@@ -134,6 +134,5 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 - [references/acceptance-criteria.md](references/acceptance-criteria.md) — 受け入れ条件の形式と性質
 - [references/spec-template.md](references/spec-template.md) — 仕様の雛形
 
-進行を盤面へ記録する場合は、[references/projects-tracking.md](../development-workflow/references/projects-tracking.md) の「`$SCRIPTS` を決める」でパスを解決してから
-`bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "要求と受け入れ条件"` を実行する（`.ndf/projects.json` が無いリポジトリでは何も起きない）。
+この工程に入ったら `/ndf:progress-tracking <issue番号> "要求と受け入れ条件"` を呼ぶ（記録の手順はその Skill が持つ）。
 

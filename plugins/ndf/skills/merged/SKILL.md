@@ -118,7 +118,7 @@ fi
 拾ってしまう残骸**である。後片付けの工程で拾う。
 
 ```bash
-# $SCRIPTS の決め方は references/projects-tracking.md の「`$SCRIPTS` を決める」にある。
+# $SCRIPTS の決め方は development-workflow の references/scripts-lookup.md にある。
 # この Skill のスクリプトは、その 1 つ上（プラグインの根）から辿る。
 CLOSING="$SCRIPTS/../skills/merged/scripts/closing-issues.sh"
 
@@ -219,8 +219,7 @@ bash "$SCRIPTS/../skills/development-workflow/scripts/stage-check.sh" report <is
 
 この Skill は版を上げない。担い手と時期は `release` が持つ。
 
-進行を盤面へ記録する場合は、[references/projects-tracking.md](../development-workflow/references/projects-tracking.md) の「`$SCRIPTS` を決める」でパスを解決してから
-`bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "後片付け"` を実行する（`.ndf/projects.json` が無いリポジトリでは何も起きない）。
+この工程に入ったら `/ndf:progress-tracking <issue番号> "後片付け"` を呼ぶ（記録の手順はその Skill が持つ）。
 
 ## 関連
 

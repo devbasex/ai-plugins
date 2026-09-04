@@ -208,6 +208,5 @@ plan に次の項目がある場合は、**削除せず確定仕様へ引き継�
 
 残課題がある場合は、仕様書に曖昧な記述を残さず、完了報告の補足に明確に分離する。
 
-進行を盤面へ記録する場合は、[references/projects-tracking.md](../development-workflow/references/projects-tracking.md) の「`$SCRIPTS` を決める」でパスを解決してから
-`bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "確定仕様化"` を実行する（`.ndf/projects.json` が無いリポジトリでは何も起きない）。
+この工程に入ったら `/ndf:progress-tracking <issue番号> "確定仕様化"` を呼ぶ（記録の手順はその Skill が持つ）。
 

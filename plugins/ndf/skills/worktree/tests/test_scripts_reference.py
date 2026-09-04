@@ -1,7 +1,7 @@
 """手順書が使う変数と、`$SCRIPTS` の解決手順の対応を検査する（#193）。
 
 `worktree` の手順書は、プラグイン配下のスクリプトを変数経由で呼ぶ。その変数を決める
-手順は `development-workflow/references/projects-tracking.md` の「`$SCRIPTS` を決める」
+手順は `development-workflow/references/scripts-lookup.md` の「候補の並び」
 節にしかない。**このテストは解決手順の写しを持たず、その節の bash を読み出して実行する。**
 写しを持つと、写しだけが正しくて配布された手順が外れている状態を作れてしまう。
 
@@ -19,9 +19,9 @@ import pytest
 SKILL_DIR = Path(__file__).resolve().parents[1]
 SKILLS_ROOT = SKILL_DIR.parent
 LOOKUP_REFERENCE = (
-    SKILLS_ROOT / "development-workflow" / "references" / "projects-tracking.md"
+    SKILLS_ROOT / "development-workflow" / "references" / "scripts-lookup.md"
 )
-LOOKUP_HEADING = "### `$SCRIPTS` を決める"
+LOOKUP_HEADING = "## 候補の並び"
 # Claude Code が SKILL.md の中で置き換える語。テストでも同じ置き換えを行う。
 PLUGIN_ROOT_TOKEN = "'${CLAUDE_PLUGIN_ROOT}'"
 
@@ -240,7 +240,7 @@ def test_lookup_procedure_is_the_only_one() -> None:
         if LOOKUP_HEADING in path.read_text(encoding="utf-8")
     ]
     assert owners == [
-        "development-workflow/references/projects-tracking.md"
+        "development-workflow/references/scripts-lookup.md"
     ], f"手順が 1 本ではない: {owners}"
 
 

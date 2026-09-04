@@ -1,6 +1,6 @@
 """`$SCRIPTS` の解決が 4 ランタイムの配置で当たることを検証する。
 
-解決の手順は `references/projects-tracking.md` の bash のコードブロックにしかない。
+解決の手順は `references/scripts-lookup.md` の bash のコードブロックにしかない。
 テストはそのブロックを読み出して実行する。手順を写し取ると、写しだけが正しくて配布された
 手順が外れている状態を作れてしまう。
 
@@ -16,9 +16,9 @@ from pathlib import Path
 import pytest
 
 REFERENCE = (
-    Path(__file__).resolve().parents[1] / "references" / "projects-tracking.md"
+    Path(__file__).resolve().parents[1] / "references" / "scripts-lookup.md"
 )
-HEADING = "### `$SCRIPTS` を決める"
+HEADING = "## 候補の並び"
 # Claude Code が SKILL.md の中で置き換える語。テストでも同じ置き換えを行う。
 PLUGIN_ROOT_TOKEN = "'${CLAUDE_PLUGIN_ROOT}'"
 

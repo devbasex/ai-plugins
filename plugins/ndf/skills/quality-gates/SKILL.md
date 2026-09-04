@@ -168,6 +168,5 @@ Skill 側に既定値を持たせると、プロジェクトの方針と食い�
 - `/ndf:release-verification` — 配布された成果物を利用者の環境で確かめる工程
 - `/ndf:out-of-scope` — 範囲外と判断したものの起票
 
-進行を盤面へ記録する場合は、[references/projects-tracking.md](../development-workflow/references/projects-tracking.md) の「`$SCRIPTS` を決める」でパスを解決してから
-`bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "完了判定"` を実行する（`.ndf/projects.json` が無いリポジトリでは何も起きない）。
+この工程に入ったら `/ndf:progress-tracking <issue番号> "完了判定"` を呼ぶ（記録の手順はその Skill が持つ）。
 

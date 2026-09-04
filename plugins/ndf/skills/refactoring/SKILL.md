@@ -155,6 +155,5 @@ flowchart TD
   工程表は `architecture` と `legacy-refactor` の構造改善にそちらを置く。適用を担う側は
   この Skill を手順として読む
 
-進行を盤面へ記録する場合は、[references/projects-tracking.md](../development-workflow/references/projects-tracking.md) の「`$SCRIPTS` を決める」でパスを解決してから
-`bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "構造改善"` を実行する（`.ndf/projects.json` が無いリポジトリでは何も起きない）。
+この工程に入ったら `/ndf:progress-tracking <issue番号> "構造改善"` を呼ぶ（記録の手順はその Skill が持つ）。
 

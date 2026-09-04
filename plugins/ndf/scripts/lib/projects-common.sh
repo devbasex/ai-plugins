@@ -90,3 +90,38 @@ pj_is_valid_value() {
     *) return 1 ;;
   esac
 }
+
+# 解決した識別子の控え。**記録のたびに盤面の全件を読まない。**
+#
+# `gh project item-list --limit 1000` は GraphQL で、取得の点数が REST とは別の上限を
+# 持つ（#271）。2026-09-04 の実測では、10 件の課題へ 2 つのキーを書こうとした時点で
+# 上限に達し、以後の記録がすべて捨てられた（終了コードは 0 のまま、出力も無い）。
+#
+# 置き場所は共通の git ディレクトリの下である。**作業ツリーでは `.git` がファイルで
+# あるため**、`.git/ndf/` を作ろうとすると失敗する。共通の git ディレクトリなら、
+# 作業ツリーを消しても控えが残り、同じリポジトリの複数の作業ツリーで共有できる。
+pj_cache_dir() {
+  local dir git_dir
+  git_dir=$(git rev-parse --git-common-dir 2>/dev/null) || return 1
+  case "$git_dir" in
+    /*) dir="$git_dir/ndf" ;;
+    *) dir="$(git rev-parse --show-toplevel 2>/dev/null)/$git_dir/ndf" ;;
+  esac
+  mkdir -p "$dir" 2>/dev/null || return 1
+  printf '%s\n' "$dir"
+}
+
+# 控えのファイル。盤面と課題の組で決まる（工程が進んでも変わらない）。
+pj_cache_file() {
+  local dir owner="${1:-}" number="${2:-}" issue="${3:-}"
+  dir=$(pj_cache_dir) || return 1
+  printf '%s/projects-%s-%s-%s.env\n' "$dir" "$owner" "$number" "$issue"
+}
+
+# 上限に達したことを示す応答か。**「無い」と「読めない」を区別する。**
+pj_is_rate_limited() {
+  case "${1:-}" in
+    *"rate limit"*|*"RATE_LIMIT"*|*"unknown owner type"*) return 0 ;;
+  esac
+  return 1
+}
