@@ -1,0 +1,242 @@
+#!/usr/bin/env python3
+"""公開する Skill の本文に「対象リポジトリ = ai-plugins 自身」の前提が無いかを検査する。
+
+NDF の Skill は任意のリポジトリに対して実行される。本文が ai-plugins にしか無い操作・
+パス・値を条件なしで実行させると、他のリポジトリでは成立せず、担当した AI が自分の判断で
+別のものへ振り替える。振り替えた事実は記録に残らない。
+
+規約の本文は plugins/ndf/skills/README.md「対象リポジトリを仮定しない」にある。本
+スクリプトはそのうち機械的に判定できる部分、すなわち **ai-plugins に固有の語が本文へ
+現れていないか**だけを検査する。書き方が正しいか（探し方を書いているか、形で分岐して
+いるか）は判定しない。
+
+走査するのは `manifests/*-skills.txt` の和集合が指す Skill の Markdown である。配らない
+Skill と `tests/` の下は対象にしない。
+
+除外は EXCLUSIONS がファイルと理由の対で宣言する。**宣言した対象が走査の対象として
+実在しないときは、ヒットの有無に関わらず検査自体を失敗させる**。ファイルを消したり
+移したりしたときに、宣言だけが残り続けることを防ぐ。
+
+使い方:
+
+    python3 scripts/check-skill-repo-assumptions.py
+    python3 scripts/check-skill-repo-assumptions.py --skills-dir plugins/ndf/skills
+    python3 scripts/check-skill-repo-assumptions.py --report   # 走査の規模とヒットの一覧
+
+終了コード:
+
+    0  除外の外にヒットが無い
+    1  除外の外にヒットがある
+    2  除外の宣言か引数が誤っている（検査そのものが成立しない）
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import pathlib
+import re
+import sys
+
+# --- 検知する語 -------------------------------------------------------------
+# ai-plugins にしか無い操作・ディレクトリ・ファイルを指す語。issue #292 の棚卸しで
+# 見つかった形から作った。**網羅ではない**。新しい形が見つかったらここへ足す。
+PATTERNS: tuple[str, ...] = (
+    r"claude plugin ",
+    r"codex plugin ",
+    r"agy plugin ",
+    r"build-runtime-plugins",
+    r"check-skill-frontmatter",
+    r"check-doc-staleness",
+    r"check-markdown-links",
+    r"validate-runtime-plugins",
+    r"runtime-smoke-test",
+    r"\.claude-plugin",
+    r"\.codex-plugin",
+    r"marketplace\.json",
+    r"manifests/",
+)
+PATTERN_RE = re.compile("|".join(PATTERNS))
+
+# --- 除外 -------------------------------------------------------------------
+# キーは Skill ディレクトリからの相対パス、値は除外する理由である。**理由は必須**で、
+# 空にすると検査自体が失敗する。
+#
+# 除外の基準は「記述の主題が NDF 自身の配置・配布であること」と「配布物の形で分岐した
+# 先の参照であること」の 2 つに限る。対象リポジトリへの指示は除外しない。
+EXCLUSIONS: dict[str, str] = {
+    "release/references/form-package-plugin.md":
+        "配布物の形がプラグインのときだけ読む参照。形で分岐済み",
+    "development-workflow/references/projects-tracking.md":
+        "agy が NDF 自身を複製する位置の説明。対象リポジトリを指していない",
+    "official-skills-autoloader/SKILL.md":
+        "NDF 自身の配布先の指定。対象リポジトリを指していない",
+    "out-of-scope/references/issue-target.md":
+        "NDF の実体を持つ clone を見分ける手順。対象リポジトリを指していない",
+}
+
+RUNTIMES = ("claude", "codex", "kiro", "agy")
+
+
+class Hit:
+    """本文の 1 行に現れたヒット。"""
+
+    def __init__(self, skills_dir: pathlib.Path, rel: str, lineno: int, word: str, line: str) -> None:
+        self.skills_dir = skills_dir
+        self.rel = rel
+        self.lineno = lineno
+        self.word = word
+        self.line = line
+
+    def __str__(self) -> str:
+        return f"{self.skills_dir / self.rel}:{self.lineno}: {self.word!r} — {self.line.strip()}"
+
+
+def load_manifest_union(skills_dir: pathlib.Path) -> set[str]:
+    """`manifests/(runtime)-skills.txt` の和集合を返す。
+
+    行末の `#` 以降はコメントとして落とす（`scripts/build-runtime-plugins.sh` と
+    `scripts/check-skill-frontmatter.py` の manifest 解釈に揃える）。
+    """
+    man_dir = skills_dir.parent / "manifests"
+    names: set[str] = set()
+    for runtime in RUNTIMES:
+        f = man_dir / f"{runtime}-skills.txt"
+        if not f.exists():
+            continue
+        for line in f.read_text(encoding="utf-8").splitlines():
+            name = line.split("#", 1)[0].strip()
+            if name:
+                names.add(name)
+    return names
+
+
+def collect_documents(skills_dir: pathlib.Path) -> list[str]:
+    """走査する Markdown を、Skill ディレクトリからの相対パスで返す。"""
+    docs: list[str] = []
+    for name in sorted(load_manifest_union(skills_dir)):
+        root = skills_dir / name
+        if not root.is_dir():
+            continue
+        for path in sorted(root.rglob("*.md")):
+            rel = path.relative_to(skills_dir)
+            if "tests" in rel.parts:
+                continue
+            docs.append(rel.as_posix())
+    return docs
+
+
+def scan(skills_dir: pathlib.Path, docs: list[str]) -> list[Hit]:
+    """走査対象の本文からヒットを集める。"""
+    hits: list[Hit] = []
+    for rel in docs:
+        text = (skills_dir / rel).read_text(encoding="utf-8")
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            for m in PATTERN_RE.finditer(line):
+                hits.append(Hit(skills_dir, rel, lineno, m.group(0), line))
+    return hits
+
+
+def validate_exclusions(exclusions: dict[str, str], scanned: set[str]) -> list[str]:
+    """除外の宣言が成立しているかを確かめ、成立しない理由を返す。"""
+    problems: list[str] = []
+    for rel, reason in sorted(exclusions.items()):
+        if not isinstance(reason, str) or not reason.strip():
+            problems.append(f"除外の理由が空である: {rel}")
+        if rel not in scanned:
+            problems.append(
+                f"除外の対象が走査の範囲に実在しない: {rel}"
+                "（消したか移したなら、除外の宣言も外す）")
+    return problems
+
+
+def resolve_skills_dirs(given: list[str] | None) -> list[pathlib.Path]:
+    """検査対象の Skill ディレクトリを決める。"""
+    if given:
+        return [pathlib.Path(d) for d in given]
+    found = []
+    for d in sorted(pathlib.Path("plugins").glob("*")):
+        if (d / "manifests").is_dir() and (d / "skills").is_dir():
+            found.append(d / "skills")
+    return found
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--skills-dir", action="append", default=None,
+                    help="検査対象の Skill ディレクトリ。複数指定できる"
+                         "（既定: manifests/ を持つ plugin family の skills/ を全て検査）")
+    ap.add_argument("--exclusions", default=None,
+                    help="除外の宣言を JSON（{相対パス: 理由}）で差し替える"
+                         "（既定: 本スクリプトの EXCLUSIONS）")
+    ap.add_argument("--report", action="store_true",
+                    help="走査した本数とヒット数を出す")
+    args = ap.parse_args()
+
+    skills_dirs = resolve_skills_dirs(args.skills_dir)
+    if not skills_dirs:
+        print("[check-skill-repo-assumptions] 検査対象が見つからない", file=sys.stderr)
+        return 2
+    for d in skills_dirs:
+        if not d.is_dir():
+            print(f"[check-skill-repo-assumptions] ディレクトリがない: {d}", file=sys.stderr)
+            return 2
+
+    exclusions = EXCLUSIONS
+    if args.exclusions is not None:
+        try:
+            loaded = json.loads(pathlib.Path(args.exclusions).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            print(f"[check-skill-repo-assumptions] 除外の宣言を読めない: {e}", file=sys.stderr)
+            return 2
+        if not isinstance(loaded, dict):
+            print("[check-skill-repo-assumptions] 除外の宣言は {相対パス: 理由} の対で書く",
+                  file=sys.stderr)
+            return 2
+        exclusions = loaded
+
+    scanned: set[str] = set()
+    all_hits: list[Hit] = []
+    report_lines: list[str] = []
+    for skills_dir in skills_dirs:
+        docs = collect_documents(skills_dir)
+        scanned.update(docs)
+        hits = scan(skills_dir, docs)
+        all_hits.extend(hits)
+        report_lines.append(
+            f"{skills_dir}: 公開する Skill {len(load_manifest_union(skills_dir))} 個 / "
+            f"Markdown {len(docs)} 本 / ヒット {len(hits)} 行")
+
+    problems = validate_exclusions(exclusions, scanned)
+    if problems:
+        print("[check-skill-repo-assumptions] 除外の宣言が成立していない:", file=sys.stderr)
+        for p in problems:
+            print(f"  - {p}", file=sys.stderr)
+        return 2
+
+    outside = [h for h in all_hits if h.rel not in exclusions]
+
+    if args.report:
+        for line in report_lines:
+            print(line)
+        print(f"除外の宣言 {len(exclusions)} 件 / ヒット {len(all_hits)} 行 "
+              f"（うち除外の外 {len(outside)} 行）")
+        for h in all_hits:
+            mark = "除外" if h.rel in exclusions else "検知"
+            print(f"  [{mark}] {h}")
+        return 0
+
+    if outside:
+        print("[check-skill-repo-assumptions] 対象リポジトリを仮定した記述がある:", file=sys.stderr)
+        for h in outside:
+            print(f"  {h}", file=sys.stderr)
+        print("\n対象リポジトリに無い場合の振る舞いを、コマンドとセットで書く。"
+              "書き方は plugins/ndf/skills/README.md「対象リポジトリを仮定しない」にある。",
+              file=sys.stderr)
+        return 1
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
