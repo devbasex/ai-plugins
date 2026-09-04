@@ -27,6 +27,7 @@ refactoring
 quality-gates
 worktree
 out-of-scope
+issue-upkeep
 progress-tracking
 release-verification
 retrospective

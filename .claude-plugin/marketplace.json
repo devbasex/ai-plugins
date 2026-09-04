@@ -9,7 +9,7 @@
     {
       "name": "ndf",
       "source": "./plugins/ndf",
-      "description": "Claude Code plugin (v10.2.0): 8 specialized agents and 34 focused NDF skills for PR/review workflows, cross-review, implementation planning, plan-to-spec, Docker container access, statusline, external AI delegation (Codex/agy), transcript retention guard, and optional Slack notifications.",
+      "description": "Claude Code plugin (v10.2.0): 8 specialized agents and 35 focused NDF skills for PR/review workflows, cross-review, implementation planning, plan-to-spec, Docker container access, statusline, external AI delegation (Codex/agy), transcript retention guard, and optional Slack notifications.",
       "policy": {
         "installation": "AVAILABLE",
         "authentication": "ON_INSTALL"
