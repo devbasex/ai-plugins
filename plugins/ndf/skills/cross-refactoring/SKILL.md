@@ -1,7 +1,7 @@
 ---
 name: cross-refactoring
 description: "Let several CLIs propose, apply, and review refactorings on a PR until no new proposal appears. Use when structural improvement should converge across runtimes（クロスリファクタリング・多AIリファクタリング・収束リファクタリング）."
-argument-hint: "[PR番号] --scope PATH... [--host claude|codex|kiro] [--model RT=MODEL] [--baseline-test CMD] [--max-outer-rounds N] [--max-fix-rounds N] [--max-items-per-round N]"
+argument-hint: "[PR番号] --scope PATH... [--host claude|codex|agy|kiro] [--model RT=MODEL] [--baseline-test CMD] [--max-outer-rounds N] [--max-fix-rounds N] [--max-items-per-round N]"
 allowed-tools:
   - Bash
   - Read
@@ -34,7 +34,7 @@ allowed-tools:
 | 観点 | 方針 |
 | --- | --- |
 | 参加者 | **全員 CLI プロセス。** ホストのサブエージェント機能は使わない。ホストと同じランタイムが実装担当のラウンドでも別プロセスで起動する |
-| 役割の分離 | 提案・レビューは**ホストを除く 3 者**、適用は**agy を除く 3 者**。両者は重なるが一致しない |
+| 役割の分離 | 提案・レビューは**ホストを除く 3 者**、適用は**参加する 4 者すべて**。両者は重なるが一致しない |
 | レビューの単位 | **提案ラウンドの差分全体**に対して 1 回。項目ごとに回すと CLI 起動回数が採用件数に比例して膨らむ |
 | 収束しない項目 | **捨てる。** リファクタリングは任意の作業なので、揉める提案を Pull Request に残さない |
 | コミットの単位 | **1 改善項目 = 1 コミット。** テストも項目の単位で 1 回だけ求める（現状固定テストが要る項目のみ 2 コミット） |
@@ -54,7 +54,7 @@ allowed-tools:
 | --- | --- | --- |
 | `[PR番号]` | 対象の Pull Request | 必須 |
 | `--scope PATH...` | 対象範囲。**提案が無制限に広がらないよう必須。** 検証にも効くので、現状固定テストの置き場所も含める | 必須 |
-| `--host claude\|codex\|kiro` | ホストの明示指定。未指定時は環境変数から推定 | 推定 |
+| `--host claude\|codex\|agy\|kiro` | ホストの明示指定。未指定時は環境変数から推定（agy は推定できないため明示する） | 推定 |
 | `--model RT=MODEL` | ランタイムごとのモデル。繰り返し指定できる | CLI の既定 |
 | `--baseline-test CMD` | 着手前と各コミットで実行するテスト。**振る舞い不変を示す手段が無い書き換えは構造改善ではないため必須** | 必須 |
 | `--max-outer-rounds N` | 提案ラウンドの上限 | `3` |
@@ -72,8 +72,10 @@ allowed-tools:
 /ndf:cross-refactoring 130 --scope src --host codex --max-outer-rounds 1
 ```
 
-**モデルを比べたいなら `--model kiro=<name>` を必ず指定する。** kiro の既定 `auto` は
-実際に選ばれたモデルを取得できず、そのラウンドは集計から分離される。
+**モデルを比べたいなら `--model <ランタイム>=<name>` を 4 つとも指定する。**
+実際に動いたモデルを取得できるのは claude だけで、残る 3 者は指定値で代用する。
+指定が無いラウンドは何が動いたか分からないため、集計から分離される
+（kiro の既定 `auto` も同じ扱いになる）。
 
 ## 担当の決め方
 
@@ -84,12 +86,14 @@ allowed-tools:
 | 母集合 | 定義 | 中身 |
 | --- | --- | --- |
 | 提案・レビュー（`runtimes`） | 全ランタイム − ホスト | 常に 3 者 |
-| 適用（`impl_capable`） | 全ランタイム − agy | 常に claude / codex / kiro |
+| 適用（`impl_capable`） | 全ランタイム | 常に claude / codex / agy / kiro |
 
-- **agy は適用に参加しない。** NDF Skill を配布していないランタイムであり、
-  `refactoring` Skill の手順を踏ませる適用には向かない。提案とレビューには常に参加する
+- **適用から外す者はいない。** 4 者はいずれも NDF の配布先で、適用で読ませる
+  `refactoring` / `tdd-cycle` / `quality-gates` を配っている
 - **ホストは適用にだけ参加する。** 提案とレビューから外れているので、
   「実装した者と評価する者が同一モデルにならない」構造は保たれる
+- **適用担当は 4 ラウンドで 1 周する。** `--max-outer-rounds` の既定を 4 にしているのは、
+  上限 3 では 4 者目（claude）の順番へ届かないためである
 
 割り当ては `refactor.py start-round` が返し、状態ファイルへ記録する。**再開しても変わらない。**
 
@@ -116,7 +120,11 @@ allowed-tools:
   | --- | --- |
   | Claude Code | `codex` / `agy` / `kiro-cli` |
   | Codex | `claude` / `agy` / `kiro-cli` |
+  | agy | `claude` / `codex` / `kiro-cli` |
   | Kiro CLI | `claude` / `codex` / `agy` |
+
+  適用にはホスト自身も参加するため、ホストのコマンドも起動できる必要がある。
+  **agy がホストのときは `--host agy` を明示する**（環境変数からは推定しない）
 
 - 対象の Pull Request が Draft で開いている（未作成なら `/ndf:pr` で先に作る）
 
