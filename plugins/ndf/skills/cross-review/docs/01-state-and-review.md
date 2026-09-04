@@ -10,7 +10,7 @@
 | `scripts/state.py init` | Step 0 — state 初期化 / 再開 + プリチェック |
 | `scripts/state.py start-round` | Step 1 — round 開始判定 |
 | `scripts/launch-reviewer.sh` | Step 2 — レビュワー起動の入口（4 ランタイム共通） |
-| `scripts/monitor.py` | Step 2 — codex/agy プロセス多軸監視 |
+| `scripts/monitor.py` | Step 2 — レビュワーのプロセス多軸監視（`--agents` で担当を渡す） |
 | `scripts/wait-review.sh` | Step 2 — `monitor.py` の薄ラッパ（互換用） |
 | `scripts/state.py read-result` | Step 2.5 — result.json マージ |
 | `scripts/state.py unresolved-threads` | PR 上の未解決の指摘を数える（順序を持たない補助） |
@@ -160,11 +160,15 @@ eval "$ROUND_VARS"
 ### 2.1 launcher 起動 + monitor
 
 ```bash
-[ "$ONLY" != "agy" ] && "$SCRIPTS/launch-codex.sh"  "$STATE_PR" "$ROUND"
-[ "$ONLY" != "codex"  ] && "$SCRIPTS/launch-agy.sh" "$STATE_PR" "$ROUND"
+# 担当は `start-round` が $REVIEWERS / $REVIEWERS_CSV で返す。**名前で分岐しない。**
+for r in $REVIEWERS; do
+  [ -z "$ONLY" ] || [ "$ONLY" = "$r" ] || continue
+  "$SCRIPTS/launch-reviewer.sh" "$r" "$STATE_PR" "$ROUND"
+done
 
 # monitor.py が多軸で完了判定。exit code で失敗種別を分岐。
-if ! "$SCRIPTS/monitor.py" "$STATE_PR" "${ONLY:-both}"; then
+# ⚠ 位置引数の `both` は codex / agy の 2 者だけを指す。担当の一覧は `--agents` で渡す。
+if ! "$SCRIPTS/monitor.py" "$STATE_PR" --agents "${ONLY:-$REVIEWERS_CSV}"; then
   case $? in
     2) echo "❌ timeout"      ;;  # hard timeout 超過
     3) echo "❌ no result"    ;;  # プロセス終了したが result.json 未生成
@@ -211,8 +215,10 @@ AI への入出力の契約（2.2）と、AI が書き出すファイルの契�
 ### 2.4 result.json を state にマージ
 
 ```bash
-[ "$ONLY" != "agy" ] && "$SCRIPTS/state.py" read-result "$STATE_PR" codex
-[ "$ONLY" != "codex"  ] && "$SCRIPTS/state.py" read-result "$STATE_PR" agy
+for r in $REVIEWERS; do
+  [ -z "$ONLY" ] || [ "$ONLY" = "$r" ] || continue
+  "$SCRIPTS/state.py" read-result "$STATE_PR" "$r"
+done
 ```
 
 `state.rounds[-1].<agent>` に `intent / posted_as / comments / review_url / by_severity` を分離保存する。

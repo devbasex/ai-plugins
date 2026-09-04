@@ -211,3 +211,16 @@ def test_start_round_records_the_reviewers(state_mod, tmp_path, capsys, monkeypa
     out = capsys.readouterr().out
     assert "REVIEWERS='agy kiro'" in out
     assert "REVIEWERS_CSV=agy,kiro" in out
+
+
+def test_read_result_accepts_every_runtime(state_mod):
+    """`read-result` は母集合の 4 者すべてを受け取る。
+
+    実機で `kiro` が結果を書いたのに `invalid choice` で弾かれた。担当が 4 つの名前を
+    取りうる以上、副コマンドの引数も同じ母集合を持たなければ、結果を残した担当が
+    「結果なし」として扱われる。
+    """
+    parser = state_mod.build_parser()
+    for runtime in ("codex", "agy", "claude", "kiro"):
+        args = parser.parse_args(["read-result", "500", runtime])
+        assert args.agent == runtime

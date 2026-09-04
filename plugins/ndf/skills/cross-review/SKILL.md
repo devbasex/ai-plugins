@@ -240,7 +240,9 @@ while :; do
   done
   # 監視: 既定 timeout=7 分 / stall=3 分。失敗時は対象プロセスを kill して返す。監視と取り込みの
   #   終了コードは読まない。結果なしは NO_RESULT として state に残り、Step 3 が受け取る（docs/01）。
-  "$SCRIPTS/monitor.py" "$STATE_PR" "${ONLY:-both}" || true
+  # ⚠ 位置引数の `both` は codex / agy の 2 者だけを指す。担当は 4 つの名前を取りうるため、
+  #   `start-round` が返した一覧を `--agents` で渡す。
+  "$SCRIPTS/monitor.py" "$STATE_PR" --agents "${ONLY:-$REVIEWERS_CSV}" || true
   for r in $REVIEWERS; do
     [ -z "$ONLY" ] || [ "$ONLY" = "$r" ] || continue
     "$SCRIPTS/state.py" read-result "$STATE_PR" "$r" || true

@@ -3014,7 +3014,13 @@ def cmd_report(args: argparse.Namespace) -> None:
 
 # ---------------- main ----------------
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
+    """副コマンドの引数を組み立てる。**テストが選択肢を検査できるように分ける。**
+
+    実機で `kiro` の結果が `invalid choice` で弾かれた。担当が 4 つの名前を取りうる
+    以上、副コマンドの引数も同じ母集合を持たなければ、結果を残した担当が「結果なし」
+    として扱われる。
+    """
     # 副コマンドの説明はここ（`help`）だけが持つ。**モジュールの docstring へ写さない。**
     # 2 か所へ書くと片方だけが実装から離れる。振動の検知の基準は実装が 3 つの一致へ
     # 変わった後も、docstring 側が古い基準を出し続けていた（#329）。
@@ -3053,7 +3059,7 @@ def main() -> None:
 
     sp = sub.add_parser("read-result", help="Step 2.5 — review result を state にマージ")
     sp.add_argument("pr", type=int)
-    sp.add_argument("agent", choices=["codex", "agy"])
+    sp.add_argument("agent", choices=list(assignment.ALL_RUNTIMES))
     sp.add_argument("--file", default=None)
     sp.set_defaults(func=cmd_read_result)
 
@@ -3113,8 +3119,11 @@ def main() -> None:
     sp = sub.add_parser("report", help="Step 8 — deferred nit + サマリ表示")
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_report)
+    return p
 
-    args = p.parse_args()
+
+def main() -> None:
+    args = build_parser().parse_args()
     args.func(args)
 
 
