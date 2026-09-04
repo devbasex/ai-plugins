@@ -1325,20 +1325,35 @@ def _confirm_flushed(pr: int, item: dict[str, Any]) -> None:
     if not url and resp.get("id"):
         url = f"#pullrequestreview-{resp['id']}"
     st = _load(pr)
-    for entry in st.get("rounds", []):
-        if entry.get("round") != round_no or not isinstance(entry.get(agent), dict):
-            continue
-        entry[agent]["review_url"] = url
-        entry[agent]["queued"] = False
-        _save(pr, st)
-        break
-    if _review_exists(str(st.get("repo") or ""), int(st.get("current_pr") or pr),
-                      url) is False:
-        _record_no_result(pr, agent, "not_posted")
+    # **書き戻す先は、その項目が属するラウンドである。** 積んだラウンドと流した
+    # ラウンドが同じとは限らないため、最後のラウンドへ書かない。
+    target = next(
+        (e for e in st.get("rounds", [])
+         if e.get("round") == round_no and isinstance(e.get(agent), dict)),
+        None,
+    )
+    if target is None:
+        return
+    exists = _review_exists(str(st.get("repo") or ""),
+                            int(st.get("current_pr") or pr), url)
+    if exists is False:
+        # #261 の決まり。届いていない投稿は結果なしとして扱い、起動し直しの経路へ乗せる。
+        target[agent] = {
+            "intent": NO_RESULT,
+            "no_result_reason": "not_posted",
+            "posted_as": None,
+            "comments": None,
+            "review_url": None,
+            "by_severity": {},
+        }
         info(
             f"⚠ {agent}: 流した後も投稿を確認できません (review_url={url!r})。"
             " 結果なしとして記録します"
         )
+    else:
+        target[agent]["review_url"] = url
+        target[agent]["queued"] = False
+    _save(pr, st)
 
 
 def _auto_flush(pr: int) -> None:
