@@ -305,35 +305,26 @@ gh api -X POST "repos/$OWNER_REPO/pulls/$PR/comments" \
 第二引数が指定された場合、上記「観点」「具体的なチェックポイント」「PR モードの手順」の
 内容を **レビュー指示プロンプト** として組み立て、指定された CLI に渡す。
 
-呼び出し手順の詳細は、利用 runtime に `/ndf:external-ai` skill が同梱されている場合は
-その skill の `references/cli-codex.md` / `references/cli-agy.md` に従う。
-同梱されていない runtime では以下の要点に従う。
+外部 CLI の**起動の約束**（フラグの並び・完了の検知・成果物の回収）は
+`/ndf:external-ai` skill が正本を持つ。その skill の「共通の実行手順」と
+`references/cli-codex.md` / `references/cli-agy.md` に従って起動する。**ここには写さない。**
+2 か所に置くと片方だけが実装から離れる（`--print-timeout` が実際に食い違っていた）。
 
-**`codex` 指定時**
+レビューという仕事に固有なのは、ファイル名の割り当てと出力の形式だけである。
 
-- プロンプトを `/tmp/codex-review-pr<番号>-prompt.md` に書き出し
-- 出力先ファイルを `/tmp/codex-output-review-pr<番号>.md` として **プロンプト内で `apply_patch` 書き出しを必須化**
-- `codex exec --dangerously-bypass-approvals-and-sandbox --config reasoning.effort=medium -C "$PWD" < prompt > stdout 2> err &` でバックグラウンド起動
-- `grep -q '^tokens used$' err` で完了検知
-- 「ファイル → stdout → stderr」三段フォールバックで成果物を回収
+| CLI | プロンプト | 成果物 |
+|---|---|---|
+| codex | `/tmp/codex-review-pr<番号>-prompt.md` | `/tmp/codex-output-review-pr<番号>.md`（プロンプト内で `apply_patch` 書き出しを必須化） |
+| agy | `/tmp/agy-review-pr<番号>-prompt.md` | `/tmp/agy-review-pr<番号>-result.json`（stdout のサマリと併せて回収） |
 
-> ⚠️ `--dangerously-bypass-approvals-and-sandbox` は codex のサンドボックスを完全に無効化し、
-> 任意のシェル実行・ファイル編集を無確認で許可する。**必ず Docker / devcontainer / VM / CI ランナー等の
-> 外部隔離環境内** でのみ使用すること。ホスト直接実行や本番リポジトリでは使わない。
-> 背景・代替策は `/ndf:external-ai` skill の `references/cli-codex.md`「サンドボックス制約」節を参照。
+agy にはプロンプト側で **「リポジトリ内ファイルを編集してはならない。`gh api` で投稿する
+だけ」** を強く明示する。AI 直接投稿フローは `gh api -X POST` がシェル実行にあたるため、
+承認を飛ばすフラグを外すとブロックされる。
 
-**`agy` 指定時**
-
-- プロンプトを `/tmp/agy-review-pr<番号>-prompt.md` に書き出し
-- **AI 直接投稿フローでは `--dangerously-skip-permissions` 必須**（`gh api -X POST` がシェル実行のため、`--mode plan` だとブロックされる）
-- プロンプト側で **「リポジトリ内ファイルを編集してはならない。`gh api` で投稿するだけ」** を強く明示する
-- `agy --dangerously-skip-permissions --output-format text --add-dir <作業ツリー> -p="$(cat prompt.md)" > stdout 2> err &` でバックグラウンド起動
-- `kill -0 $PID` ポーリングで完了検知（codex と異なり sentinel 不要 / プロセス exit を見る）
-- 成果物は stdout サマリ + `/tmp/agy-review-pr<番号>-result.json` で回収
-
-> ⚠️ `--dangerously-skip-permissions` も同様に外部隔離環境内でのみ実行する。プロンプトでの
-> 「リポジトリ編集禁止」明示は必須だが、隔離の代替にはならない。詳細は `/ndf:external-ai` skill の
-> `references/cli-agy.md` を参照。
+> ⚠️ 承認・サンドボックスを飛ばすフラグは、**Docker / devcontainer / VM / CI ランナー等の
+> 外部隔離環境内でのみ**使う。プロンプトでの「編集禁止」明示は隔離の代替にならない。背景と
+> 代替策は `/ndf:external-ai` skill の `references/cli-codex.md`「サンドボックス制約」節と
+> `references/cli-agy.md` にある。
 
 ### プロンプト組み立て
 
