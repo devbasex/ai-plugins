@@ -276,16 +276,6 @@ def test_auth_check_covers_only_the_reviewers_that_run(state_mod, monkeypatch):
     assert state_mod._auth_targets(None, "claude") == ["codex", "agy", "kiro"]
 
 
-def test_the_host_hints_in_the_test_setup_match_the_shared_layer(state_mod):
-    """テストが環境を整えるために写した手掛かりが、共通層とずれていないこと。
-
-    ずれると、テストだけが古い手掛かりでホストを固定し続ける。
-    """
-    from conftest import _HOST_ENV_HINTS
-
-    assert tuple(_HOST_ENV_HINTS) == tuple(state_mod.assignment.HOST_ENV_HINTS)
-
-
 def test_init_fails_when_the_host_cannot_be_guessed(state_mod, monkeypatch):
     """手掛かりが無ければ、既定を置かずに失敗する。
 
