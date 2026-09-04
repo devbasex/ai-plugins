@@ -3591,7 +3591,10 @@ def main() -> None:
                       help="対象範囲。提案が無制限に広がらないよう必須にしている")
     init.add_argument("--host", choices=list(assignment.HOST_RUNTIMES), default=None,
                       help="ホストの明示指定。未指定時は環境変数から推定する")
-    init.add_argument("--max-outer-rounds", type=int, default=3)
+    # 既定は輪番の 1 周（適用の母集合の大きさ）。3 のままだと `ALL_RUNTIMES` の
+    # 先頭にある claude の順番（ラウンド 4）へ届かない。
+    init.add_argument("--max-outer-rounds", type=int,
+                      default=len(assignment.ALL_RUNTIMES))
     init.add_argument("--max-fix-rounds", type=int, default=3)
     init.add_argument("--max-items-per-round", type=int, default=5)
     init.add_argument("--severity-threshold", default=DEFAULT_SEVERITY_THRESHOLD,

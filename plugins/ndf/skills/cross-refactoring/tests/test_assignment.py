@@ -1,7 +1,7 @@
 """担当の決定（ホスト判定 / 母集合 / 輪番）のテスト。
 
 **`runtimes` と `impl_capable` を同一視しない**ことがここの主題である。
-前者はホストを除いた 3 者（提案・レビュー）、後者は agy を除いた 3 者（適用）で、
+前者はホストを除いた 3 者（提案・レビュー）、後者は参加する 4 者すべて（適用）で、
 重なるが一致しない。
 """
 from __future__ import annotations
@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 
-HOSTS = ["claude", "codex", "kiro"]
+HOSTS = ["claude", "codex", "agy", "kiro"]
 
 
 # ---------- ホスト判定 ----------
@@ -18,10 +18,15 @@ def test_explicit_host_wins(assignment):
     assert assignment.detect_host("codex") == ("codex", "explicit")
 
 
-def test_explicit_host_rejects_agy(assignment):
-    """agy は NDF の配布先ではないため、ホストになれない。"""
+@pytest.mark.parametrize("host", HOSTS)
+def test_every_participant_can_host(assignment, host):
+    """4 者とも NDF の配布先であるため、4 者ともホストになれる。"""
+    assert assignment.detect_host(host) == (host, "explicit")
+
+
+def test_unknown_runtime_cannot_host(assignment):
     with pytest.raises(assignment.AssignmentError):
-        assignment.detect_host("agy")
+        assignment.detect_host("gemini")
 
 
 def test_host_detected_from_env(assignment):
@@ -29,6 +34,15 @@ def test_host_detected_from_env(assignment):
     assert (host, detection) == ("claude", "env")
     host, detection = assignment.detect_host(None, {"KIRO_AGENT": "ndf"})
     assert (host, detection) == ("kiro", "env")
+
+
+def test_agy_is_not_detected_from_env(assignment):
+    """agy が子プロセスへ環境変数を渡すかを確かめていないため、推定へ入れない。
+
+    誤った推定は提案・レビューの母集合を狂わせる。agy がホストのときは
+    `--host agy` を明示する。
+    """
+    assert "agy" not in dict(assignment.HOST_ENV_HINTS).values()
 
 
 def test_host_detection_fails_loudly_when_unknown(assignment):
@@ -49,16 +63,23 @@ def test_review_pool_is_all_minus_host(assignment, host):
 
 @pytest.mark.parametrize("host", HOSTS)
 def test_impl_pool_is_host_independent(assignment, host):
-    """適用の母集合はホストによらず常に claude / codex / kiro になる。"""
-    assert assignment.impl_pool() == ["claude", "codex", "kiro"]
-    assert "agy" not in assignment.impl_pool()
+    """適用の母集合はホストによらず参加する 4 者すべてになる。"""
+    assert assignment.impl_pool() == ["claude", "codex", "agy", "kiro"]
+
+
+def test_no_runtime_is_excluded_from_applying(assignment):
+    """除外を表す定数は残さない。
+
+    空の除外一覧を残すと、理由を書かないまま値を足せる置き場所だけが残る。
+    """
+    assert not hasattr(assignment, "IMPL_EXCLUDED")
 
 
 # ---------- 輪番 ----------
 
 @pytest.mark.parametrize("host", HOSTS)
 def test_impl_and_reviewers_never_overlap(assignment, host):
-    for round_no in range(1, 13):
+    for round_no in range(1, 17):
         impl, reviewers = assignment.assign(round_no, host)
         assert impl not in reviewers, f"round {round_no} で実装担当がレビューにも入っている"
         assert len(reviewers) == 2, f"round {round_no} のレビュー担当が 2 者でない"
@@ -66,16 +87,17 @@ def test_impl_and_reviewers_never_overlap(assignment, host):
 
 
 @pytest.mark.parametrize("host", HOSTS)
-def test_agy_never_implements(assignment, host):
-    for round_no in range(1, 13):
-        impl, _ = assignment.assign(round_no, host)
-        assert impl != "agy"
+def test_every_participant_implements_within_four_rounds(assignment, host):
+    """4 ラウンドで 4 者が 1 度ずつ適用担当になる（`--max-outer-rounds` の既定と揃う）。"""
+    impls = [assignment.assign(r, host)[0] for r in range(1, 5)]
+    assert set(impls) == set(assignment.ALL_RUNTIMES)
+    assert len(set(impls)) == len(impls), f"同じ担当が 2 度入っている: {impls}"
 
 
 @pytest.mark.parametrize("host", HOSTS)
 def test_host_takes_impl_turn_at_least_once(assignment, host):
-    """ホストは適用にだけ参加する。3 ラウンド回れば必ず 1 度は担当する。"""
-    impls = {assignment.assign(r, host)[0] for r in range(1, 4)}
+    """ホストは適用にだけ参加する。4 ラウンド回れば必ず 1 度は担当する。"""
+    impls = {assignment.assign(r, host)[0] for r in range(1, 5)}
     assert host in impls
 
 
@@ -114,22 +136,36 @@ def test_round_number_must_be_positive(assignment):
         assignment.assign(0, "claude")
 
 
-# ---------- 委譲先を移しても割り当てが変わらないこと（#214） ----------
+# ---------- 割り当てを直に固定する（#214 / #216） ----------
 
-# `gemini` があった位置へ `agy` を入れた。並べ替えると同じラウンド番号でも担当が
-# 変わり、これまでの記録と突き合わせられなくなる。読み替えた結果を直に置く。
+# `gemini` があった位置へ `agy` を入れた（#214）。並べ替えると同じラウンド番号でも
+# 担当が変わり、これまでの記録と突き合わせられなくなる。
+# 適用の母集合を 4 者にしたため（#216）、ラウンド 2 以降の担当が 1 つずつずれる。
+# 適用担当は 4 ラウンドで 1 周し、レビュー担当は適用担当がホストと重なるラウンドで
+# 1 者を落とすため 12 ラウンドで 1 周する。読み替えた結果を直に置く。
 EXPECTED_FOR_CLAUDE = {
     1: ("codex", ["agy", "kiro"]),
-    2: ("kiro", ["codex", "agy"]),
-    3: ("claude", ["codex", "kiro"]),
-    4: ("codex", ["agy", "kiro"]),
-    5: ("kiro", ["codex", "agy"]),
-    6: ("claude", ["codex", "agy"]),
+    2: ("agy", ["codex", "kiro"]),
+    3: ("kiro", ["codex", "agy"]),
+    4: ("claude", ["codex", "kiro"]),
+    5: ("codex", ["agy", "kiro"]),
+    6: ("agy", ["codex", "kiro"]),
+    7: ("kiro", ["codex", "agy"]),
+    8: ("claude", ["codex", "agy"]),
+    9: ("codex", ["agy", "kiro"]),
+    10: ("agy", ["codex", "kiro"]),
+    11: ("kiro", ["codex", "agy"]),
+    12: ("claude", ["agy", "kiro"]),
 }
 
 
 def test_the_participant_list_keeps_the_replaced_position(assignment):
     assert assignment.ALL_RUNTIMES == ("claude", "codex", "agy", "kiro")
+
+
+def test_host_runtimes_covers_every_participant(assignment):
+    """「ホストになれるか」と「参加できるか」は別の問いだが、いまは同じ答えになる。"""
+    assert assignment.HOST_RUNTIMES == assignment.ALL_RUNTIMES
 
 
 @pytest.mark.parametrize("round_no", sorted(EXPECTED_FOR_CLAUDE))

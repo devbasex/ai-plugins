@@ -5,11 +5,11 @@
 | 母集合 | 定義 | 中身 |
 | --- | --- | --- |
 | 提案・レビュー | 全ランタイム − ホスト | 常に 3 者 |
-| 適用 | 全ランタイム − agy | 常に claude / codex / kiro |
+| 適用 | 全ランタイム | 常に 4 者 |
 
-agy はどの配布先でもないためホストになれず、NDF Skill を持たないため適用にも
-参加しない。この 2 つが噛み合うので、どのホストでも提案・レビューは 3 者、
-適用候補も 3 者で揃い、輪番の式が全ホストで同じ形になる。
+参加する 4 者はいずれも NDF の配布先であるため、**適用から外す者はいない**。
+ホストは提案・レビューから外れるが適用には入るため、2 つの母集合は重なるが
+一致しない。輪番の式はホストによらず同じ形になる。
 """
 from __future__ import annotations
 
@@ -19,12 +19,10 @@ from typing import Mapping, Optional
 # 固定順。輪番の再現性を保つため並べ替えない。
 ALL_RUNTIMES: tuple[str, ...] = ("claude", "codex", "agy", "kiro")
 
-# ホストになりうるランタイム（NDF の配布先）。agy は配布先ではない。
-HOST_RUNTIMES: tuple[str, ...] = ("claude", "codex", "kiro")
-
-# 適用に参加できないランタイム。NDF Skill を配布しておらず、
-# `refactoring` Skill の手順を踏ませる適用には向かない。
-IMPL_EXCLUDED: tuple[str, ...] = ("agy",)
+# ホストになりうるランタイム。4 者とも NDF の配布先であるため全員がなれる。
+# **名前は `ALL_RUNTIMES` へ寄せない。**「ホストになれるか」と「参加できるか」は
+# 別の問いで、配布先でない CLI が参加 CLI に加わると 2 つは再び分かれる。
+HOST_RUNTIMES: tuple[str, ...] = ALL_RUNTIMES
 
 # ホスト推定に使う環境変数。値の中身は見ず、**存在するかどうか**だけで判定する。
 HOST_ENV_HINTS: tuple[tuple[str, str], ...] = (
@@ -35,6 +33,8 @@ HOST_ENV_HINTS: tuple[tuple[str, str], ...] = (
     ("KIRO_PLUGIN_ROOT", "kiro"),
     ("KIRO_AGENT", "kiro"),
 )
+# agy の手掛かりは置かない。agy が子プロセスへ環境変数を渡すかを確かめていないため、
+# 推定へ入れると母集合を狂わせうる。agy がホストのときは `--host agy` を明示する。
 
 
 class AssignmentError(ValueError):
@@ -66,7 +66,8 @@ def detect_host(
         if environ.get(key):
             return runtime, "env"
     raise AssignmentError(
-        "ホストを推定できませんでした。`--host claude|codex|kiro` で明示してください"
+        "ホストを推定できませんでした。"
+        f"`--host {'|'.join(HOST_RUNTIMES)}` で明示してください"
     )
 
 
@@ -78,8 +79,13 @@ def review_pool(host: str) -> list[str]:
 
 
 def impl_pool() -> list[str]:
-    """適用の母集合（全ランタイム − agy）。ホストによらず常に同じ。"""
-    return [r for r in ALL_RUNTIMES if r not in IMPL_EXCLUDED]
+    """適用の母集合（全ランタイム）。ホストによらず常に同じ。
+
+    **関数として残す。** 呼び出し側が提案・レビューの母集合と適用の母集合を
+    別々に確定する構造を保つためである。両者は依然として一致しない
+    （適用はホストを含み、提案・レビューは含まない）。
+    """
+    return list(ALL_RUNTIMES)
 
 
 def assign(round_no: int, host: str) -> tuple[str, list[str]]:
@@ -88,10 +94,10 @@ def assign(round_no: int, host: str) -> tuple[str, list[str]]:
     輪番の単位は**ラウンド**である。1 ラウンドの適用を 1 者へ集約することで、
     レビュー担当を「実装担当以外」から機械的に決められる。
 
-        実装担当   = 適用候補[ラウンド番号 % 3]
+        実装担当   = 適用候補[ラウンド番号 % 4]
         候補       = 提案・レビュー − 実装担当
         レビュー担当 = 候補が 2 者ならそのまま
-                     3 者なら 候補[(ラウンド番号 // 3) % 3] を除いた 2 者
+                     3 者なら 候補[(ラウンド番号 // 4) % 3] を除いた 2 者
 
     実装担当がホストと同じランタイムのとき、その者は提案・レビューの母集合に
     含まれないため候補が 3 者残る。**レビュー担当は常に 2 者**とし（起動回数を
