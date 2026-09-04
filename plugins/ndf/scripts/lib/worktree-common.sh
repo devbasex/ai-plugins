@@ -1931,127 +1931,49 @@ _wt_registry_write() {
 
 # --- 排他 -------------------------------------------------------------------
 #
-# `flock` を持たないホストがある。`flock` は使わない。使えるホストと使えないホストが
-# 混じると、同じ資源に対して別々の仕組みが動き、互いを見落とす。
+# **実装は `lock-common.sh` の 1 箇所にある**（#293）。ここに置くのは、既存の名前で
+# 呼べるようにするための委譲だけである。`flock` を使わない理由・関門が 2 段である
+# 理由・陳腐化の判定・`set -C` を部分シェルの中だけで張る理由は、いずれも共通ファイルの
+# 同じ節にある。
 #
-# **関門は 2 段である。** 1 段目のディレクトリの作成はロックの位置を押さえるだけで、
-# 持ち主を 1 つに決めない。`mkdir` コマンドは同じ名前で同時に成功することがある
-# （uutils coreutils 0.8.0 の実測。overlayfs と ext4 の両方で出る）。持ち主を決めるのは
-# 2 段目の `( set -C; : >"$dir/held" )` で、シェル自身の `open(O_CREAT|O_EXCL)` が
-# 関門になる。外部コマンドを起動しないため、`mkdir` の実装に左右されない（#297）。
+# **共通ファイルは自分の位置からの相対で指す。** `cd` で戻ってから `pwd` を取る形は
+# 採らない。`cd` は `..` を論理パスに対して字句で畳むため、Skill だけを複製する
+# Kiro CLI の配置では symlink の手前へ戻り、プラグインルートを外す（#293 の実測）。
+#
+# **読み込めないときは、常に取得できないものとして定義する。** 排他を取れないことと、
+# 排他なしで共有ファイルへ書くことは別である。呼び出し元はいずれも「取得できなかった」
+# ときの分岐を持ち、そこでは共有ファイルへ書かない。
+# shellcheck source=lock-common.sh
+if ! . "$(dirname "${BASH_SOURCE[0]}")/lock-common.sh" 2>/dev/null; then
+  ndf_lock_acquire() { return 1; }
+  ndf_lock_release() { [ -n "${1:-}" ] || return 0; rm -rf "$1" 2>/dev/null; return 0; }
+  ndf_lock_is_held() { return 1; }
+fi
 
-# 待ちの刻み。小数を受けない sleep のホストでは 1 秒へ落ちる。
-_wt_lock_sleep() {
-  sleep 0.1 2>/dev/null || sleep 1
-}
+# 捨ててよいと見なすまでの分数。共通ファイルの値を、既存の名前でも引けるようにする。
+WT_LOCK_STALE_MINUTES="${NDF_LOCK_STALE_MINUTES:-5}"
 
-# 持ち主が消えたまま残るロックを捨ててよいと見なすまでの分数。
-# `mkdir` に成功した直後、印を書く前に落ちた持ち主を救うために使う。
-WT_LOCK_STALE_MINUTES=5
-
-# 判定したものと同じロックであることを確かめてから取り除く。
-# 単に `rm -rf` すると、先に捨てて取り直した別のプロセスのロックを壊す。
-#
-# **確かめることと取り除くことを 1 つの関門の中で行う。** 確かめた後に別の担当が同じ
-# ロックを捨てて取り直せると、取り除く側は確かめたものとは別の、持ち主が臨界区間に
-# いるロックを取り除く。取り除きの関門を通れるのは 1 つだけで、持ち主は既に消えていて
-# 自ら離すこともないため、関門の中ではロックが入れ替わらない（#297）。
-#
-# **名前の付け替えで外へ出してから確かめる形は採らない。** 外へ出している間はロックの
-# 名前が空くため、持ち主が臨界区間にいるまま別の担当が関門を通る。戻すより先に取られると
-# 戻せず、持ち主のロックはそのまま捨てられる（#297）。
-#
-# 関門はロックの中に置く。取り除きに成功すればロックごと消えるため、跡が残らない。
-_wt_lock_discard() {
-  local dir="$1" seen="$2" mark="$1/discard"
-  if ! ( set -C; : >"$mark" ) 2>/dev/null; then
-    # 取り除きの途中で落ちた担当が残した関門は、古ければ捨てる。残したままにすると、
-    # そのロックはだれにも取り除けなくなる。
-    find "$mark" -maxdepth 0 -mmin "+$WT_LOCK_STALE_MINUTES" 2>/dev/null | grep -q . \
-      && rm -f "$mark" 2>/dev/null
-    return 1
-  fi
-  if [ "$(cat "$dir/token" 2>/dev/null)" = "$seen" ]; then
-    rm -rf "$dir" 2>/dev/null
-    return 0
-  fi
-  # 別物だった。取り除かず、関門だけを外す。
-  rm -f "$mark" 2>/dev/null
-  return 1
-}
-
-# ロックが捨ててよい状態かを見る。**判定は 1 つのロックについて行う。**
-# 見始めたときの印を `seen` で受け取り、判定の間に持ち主が替わっていれば捨てない。
-#
-# **`kill -0` が偽になるのは、持ち主が離れたときにも起きる。** 離れた後に別の担当が
-# 取り直していれば、いま置かれているのは別のロックである。番号だけを見て捨ててよいと
-# 読むと、生きているロックを外すことになる（#297）。
-_wt_lock_is_stale() {
-  local dir="$1" seen="${2-}" owner
-  owner=$(cat "$dir/pid" 2>/dev/null)
-  if [ -n "$owner" ]; then
-    kill -0 "$owner" 2>/dev/null && return 1
-    [ "$(cat "$dir/token" 2>/dev/null)" = "$seen" ] || return 1
-    [ "$(cat "$dir/pid" 2>/dev/null)" = "$owner" ] || return 1
-    return 0
-  fi
-  # 印が無いロックは、作った直後に落ちた可能性がある。古ければ捨ててよい。
-  find "$dir" -maxdepth 0 -mmin "+$WT_LOCK_STALE_MINUTES" 2>/dev/null | grep -q . && return 0
-  return 1
-}
-
-# ロックを取る。取れなければ 1 を返す。
-#
-# **`mkdir` の成功だけでは持ち主を 1 つに絞れない。** 2 段目の関門を通った 1 つだけが
-# 印と持ち主の番号を書く。印を書いてから読み直す手は採らない。長さの違う印が同じ
-# ファイルへ同時に書かれると、どの担当のものとも一致しない値が残り、作成に成功した
-# 全員が競り負ける（#308）。
+# 待ちの上限の既定は 5 秒である。**この既定に環境変数の上書きは置かない。**
+# 上書きは工程の控えの側（`NDF_STAGE_LOCK_TIMEOUT`）だけが持つ。
 wt_lock_acquire() {
-  local dir="${1:-}" timeout="${2:-5}" token seen deadline
-  [ -n "$dir" ] || return 1
-  # ロックの位置にディレクトリ以外があれば、ロックとして成立しない。取り除く。
-  if [ -e "$dir" ] && [ ! -d "$dir" ]; then rm -f "$dir" 2>/dev/null; fi
-  # 印は識別のためだけに使う。持ち主の決定には使わないため、桁をそろえる必要はない。
-  token="$$-$(date +%s 2>/dev/null)-${RANDOM:-0}"
-  # 上限は実時間で測る。刻みが 0.1 秒か 1 秒かで待ち時間が 10 倍変わるため、
-  # 回数で数えない。
-  deadline=$(( $(date +%s) + timeout ))
-  while :; do
-    if mkdir "$dir" 2>/dev/null; then
-      # 2 段目の関門。**`set -C` は部分シェルの中だけで張る。** 裸で書くと呼び出し側の
-      # シェルの `$-` に `C` が残り、以後の上書きの向き先が変わる。
-      if ( set -C; : >"$dir/held" ) 2>/dev/null; then
-        printf '%s\n' "$token" >"$dir/token" 2>/dev/null
-        printf '%s\n' "$$" >"$dir/pid" 2>/dev/null
-        return 0
-      fi
-      # 競り負けた。**ロックは消さない。** 相手が持っているため、待つ側へ回る。
-    fi
-    seen=$(cat "$dir/token" 2>/dev/null)
-    # **取り除けたときだけ、間を置かずに取りに戻る。** 取り除けなかったときも戻すと、
-    # 上限の判定に着かないまま回り続ける。取り除きの関門は他の担当が持っていることが
-    # あり、その間は待つ側へ回る。
-    if _wt_lock_is_stale "$dir" "$seen" && _wt_lock_discard "$dir" "$seen"; then
-      continue
-    fi
-    [ "$(date +%s)" -ge "$deadline" ] && return 1
-    _wt_lock_sleep
-  done
+  local dir="${1:-}" timeout="${2:-5}"
+  ndf_lock_acquire "$dir" "$timeout"
 }
 
 wt_lock_release() {
-  [ -n "${1:-}" ] || return 0
-  rm -rf "$1" 2>/dev/null
-  return 0
+  ndf_lock_release "$@"
 }
 
-# 生きている持ち主がロックを握っていれば 0 を返す。
 wt_lock_is_held() {
-  local dir="${1:-}" owner
-  [ -n "$dir" ] && [ -d "$dir" ] || return 1
-  owner=$(cat "$dir/pid" 2>/dev/null)
-  [ -n "$owner" ] || return 0
-  kill -0 "$owner" 2>/dev/null
+  ndf_lock_is_held "$@"
+}
+
+_wt_lock_discard() {
+  _ndf_lock_discard "$@"
+}
+
+_wt_lock_is_stale() {
+  _ndf_lock_is_stale "$@"
 }
 
 _wt_registry_apply() {
