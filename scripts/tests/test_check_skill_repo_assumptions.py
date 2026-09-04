@@ -212,6 +212,21 @@ def test_report_shows_scan_size() -> None:
     assert "89" in out, f"走査した本数が出ていない: {out}"
 
 
+def test_report_still_fails_on_a_hit(tmp_path: Path) -> None:
+    """`--report` は出力を足すだけで、除外の外にヒットがあれば 1 を返す。
+
+    レポートを常に 0 で返すと、README がこのコマンドを検査の一覧として載せている以上、
+    利用者と自動処理が違反を成功として扱う。
+    """
+    skills = build_tree(tmp_path, listed=ASSUMING_BODY, unlisted=CLEAN_BODY)
+    result = subprocess.run(
+        [sys.executable, str(CHECKER), "--skills-dir", str(skills), "--report"],
+        capture_output=True, text=True, cwd=REPO_ROOT)
+    assert result.returncode == 1, output_of(result)
+    # 判定を足しても、レポートの出力そのものは残る。
+    assert "[検知]" in result.stdout, output_of(result)
+
+
 # --- T7: manifest に載る Skill を走査できないと検査が成立しない ---
 
 

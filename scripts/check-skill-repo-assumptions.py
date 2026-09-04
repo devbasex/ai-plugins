@@ -37,6 +37,9 @@ Skill と `tests/` の下は対象にしない。**manifest に載っていな�
     0  除外の外にヒットが無い
     1  除外の外にヒットがある
     2  除外の宣言・引数・走査の範囲が誤っている（検査そのものが成立しない）
+
+**`--report` は出力を足すだけで、終了コードは上表のまま**である。レポートを常に 0 で
+返すと、同じ検査を一覧として実行した利用者と自動処理が違反を成功として扱う。
 """
 from __future__ import annotations
 
@@ -288,6 +291,9 @@ def main() -> int:
     excluded_keys = {canon(key) for key in exclusions}
     outside = [h for h in all_hits if h.key not in excluded_keys]
 
+    # `--report` は出力を足すだけで、判定は変えない。走査の範囲と除外の宣言の誤り
+    # （rc=2）はこの手前で落としており、ヒットだけを 0 で返すと同じ実行の中で終了
+    # コードの意味が 2 通りになる。README はこのコマンドを検査の一覧として載せる。
     if args.report:
         for line in report_lines:
             print(line)
@@ -296,7 +302,6 @@ def main() -> int:
         for h in all_hits:
             mark = "除外" if h.key in excluded_keys else "検知"
             print(f"  [{mark}] {h}")
-        return 0
 
     if outside:
         print("[check-skill-repo-assumptions] 対象リポジトリを仮定した記述がある:", file=sys.stderr)
