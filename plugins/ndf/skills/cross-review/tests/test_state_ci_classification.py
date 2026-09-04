@@ -65,6 +65,28 @@ def test_a_meta_name_is_separated_from_a_code_name(state_mod):
     assert got.meta_failed == ["check_pr_requirements"]
 
 
+def test_a_code_name_that_starts_with_a_meta_word_is_not_meta(state_mod):
+    """`meta` を含むだけの名前を meta-only にしない。
+
+    部分一致で拾うと `metabase tests` / `metadata lint` のようなコード検査が
+    meta-only になり、失敗したまま収束する。一覧に無い名前は code-related へ倒す。
+    """
+    got = state_mod._classify_ci([_run("metabase tests"), _run("metadata lint")])
+
+    assert got.code_failed == ["metabase tests", "metadata lint"]
+    assert got.meta_failed == []
+
+
+def test_a_meta_word_between_separators_is_still_meta(state_mod):
+    """区切りで挟まれた語は meta-only のままにする。"""
+    got = state_mod._classify_ci([
+        _run("meta"), _run("meta / labels"), _run("pr-meta"), _run("check_pr_requirements"),
+    ])
+
+    assert got.meta_failed == ["meta", "meta / labels", "pr-meta", "check_pr_requirements"]
+    assert got.code_failed == []
+
+
 def test_a_run_that_has_not_completed_is_neither(state_mod):
     got = state_mod._classify_ci([
         _run("pytest", status="in_progress", conclusion=""),

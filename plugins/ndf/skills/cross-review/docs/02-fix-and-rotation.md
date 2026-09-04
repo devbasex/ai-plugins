@@ -194,6 +194,10 @@ fi
    - meta-only (`check_pr_requirements` / `assignees` / `reviewers` / `labels` / `meta`): `ci_note` に記録して継続
    - 不明: 保守的に code-fail 扱い
 
+meta-only の語は**区切りで挟まれた語として**一致したときだけ拾う。部分一致にすると
+`metabase tests` や `metadata lint` のようなコード検査まで meta-only になり、失敗した
+まま収束する。
+
 **例**: `check_pr_requirements`（Assignees 未設定）はループ継続、
 `laravel/pint` や `phpstan` の失敗は即中断してユーザ判断。
 

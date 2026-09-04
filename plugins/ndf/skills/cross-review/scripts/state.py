@@ -452,6 +452,12 @@ def _fetch_pr_metadata(pr: int, repo: str | None = None) -> PrMetadata | None:
 CI_CODE_PATTERNS = ("pint", "larastan", "phpstan", "test", "lint", "type",
                     "build", "ruff", "eslint", "tsc", "mypy")
 CI_META_PATTERNS = ("check_pr_requirements", "assignees", "reviewers", "labels", "meta")
+# メタ検査の名前は**語として**一致したときだけ meta-only にする。部分一致で拾うと
+# `metabase tests` や `metadata lint` のようなコード検査まで meta-only になり、失敗した
+# まま収束する。前後が英数字でないことを求めるため、区切り（空白・`_`・`-`・`/`）で
+# 挟まれた語だけが一致する。**一覧に無い名前を code-related へ倒す既定は変わらない。**
+_CI_META_RE = re.compile(
+    "(?<![0-9a-z])(?:" + "|".join(re.escape(p) for p in CI_META_PATTERNS) + ")(?![0-9a-z])")
 # 完了した検査ジョブのうち、失敗として数える結論。`cancelled` / `skipped` / `neutral`
 # は失敗にしない。
 CI_FAILED_CONCLUSIONS = ("failure", "timed_out", "action_required", "startup_failure")
@@ -488,8 +494,7 @@ def _classify_ci(runs: list[dict[str, Any]]) -> CiClassification:
             continue
         if str(run.get("conclusion") or "").lower() not in CI_FAILED_CONCLUSIONS:
             continue
-        low = name.lower()
-        if any(p in low for p in CI_META_PATTERNS):
+        if _CI_META_RE.search(name.lower()):
             meta_failed.append(name)
         else:
             # 一覧に無い名前も含めて code-related へ倒す（保守的）。
