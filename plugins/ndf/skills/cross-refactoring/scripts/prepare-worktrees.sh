@@ -188,15 +188,27 @@ for rt in "${RUNTIMES[@]}"; do
   RECORD=$(jq --arg rt "$rt" --argjson e "$entry" '. + {($rt): $e}' <<<"$RECORD")
 done
 
-# **実装担当はラウンドごとに変わる**ため、work/ には 3 ランタイム分すべての配置先を作る。
-for rt in claude codex kiro; do
-  entry='{}'
-  for name in "${REQUIRED_SKILLS[@]}"; do
-    status=$(provision_skill "$WORK" "$rt" "$name")
-    [ "$status" = "missing" ] && MISSING+=("work/$rt/$name")
-    [ "$status" = "conflict" ] && CONFLICT+=("work/$rt/$name")
-    entry=$(jq --arg n "$name" --arg s "$status" '. + {($n): $s}' <<<"$entry")
-  done
+# **実装担当はラウンドごとに変わる**ため、work/ には 4 ランタイム分すべての配置先を作る。
+#
+# **配置先は 4 者で 3 つしかない**（agy は codex と同じ `.agents/skills` を読む）。
+# 同じ配置先を 2 度たどると、1 度目に自分が置いたものを 2 度目が「元からある」と
+# 読み、`preexisting` を記録する。配置先ごとに 1 度だけたどり、共有する者へは
+# その結果をそのまま記録する。
+WORK_BY_DIR='{}'
+for rt in claude codex agy kiro; do
+  rel=$(skill_dir_for "$rt")
+  entry=$(jq -c --arg d "$rel" '.[$d] // empty' <<<"$WORK_BY_DIR")
+  if [ -z "$entry" ]; then
+    entry='{}'
+    for name in "${REQUIRED_SKILLS[@]}"; do
+      status=$(provision_skill "$WORK" "$rt" "$name")
+      [ "$status" = "missing" ] && MISSING+=("work/$rt/$name")
+      [ "$status" = "conflict" ] && CONFLICT+=("work/$rt/$name")
+      entry=$(jq --arg n "$name" --arg s "$status" '. + {($n): $s}' <<<"$entry")
+    done
+    WORK_BY_DIR=$(jq -c --arg d "$rel" --argjson e "$entry" \
+      '. + {($d): $e}' <<<"$WORK_BY_DIR")
+  fi
   RECORD=$(jq --arg rt "work.$rt" --argjson e "$entry" '. + {($rt): $e}' <<<"$RECORD")
 done
 

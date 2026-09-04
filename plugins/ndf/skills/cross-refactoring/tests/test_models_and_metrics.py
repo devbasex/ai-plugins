@@ -176,7 +176,8 @@ def _state_with_history():
                 "round": 1, "impl": "codex",
                 "impl_model": {"requested": "gpt-5.5", "observed": None},
                 "reviewers": ["agy", "kiro"],
-                "reviewer_models": {"agy": {"requested": None, "observed": None},
+                "reviewer_models": {"agy": {"requested": "gemini-3.8",
+                                             "observed": None},
                                     "kiro": {"requested": "claude-opus-5",
                                              "observed": None}},
                 "items": ["R1-001", "R1-002"],
@@ -215,7 +216,7 @@ def test_metrics_group_by_runtime_and_model(metrics):
     agg = metrics.aggregate(_state_with_history())
     assert "codex / gpt-5.5" in agg["impl"]
     assert "claude / opus-5" in agg["impl"]
-    assert "agy / default" in agg["reviewer"]
+    assert "agy / gemini-3.8" in agg["reviewer"]
     assert "kiro / claude-opus-5" in agg["reviewer"]
 
 
@@ -238,7 +239,7 @@ def test_first_review_approval_rate(metrics):
 
 def test_reviewer_metrics_resolution_and_agreement(metrics):
     agg = metrics.aggregate(_state_with_history())
-    agy = agg["reviewer"]["agy / default"]
+    agy = agg["reviewer"]["agy / gemini-3.8"]
     assert agy["reviews"] == 2
     assert agy["findings"] == 2
     assert agy["resolution_rate"] == 0.5
@@ -249,7 +250,7 @@ def test_reviewer_metrics_resolution_and_agreement(metrics):
 def test_reviewer_seconds_are_not_shared_between_reviewers(metrics):
     """ラウンドの合計を各担当へ配ると 2 者分を両方に数えてしまう。"""
     agg = metrics.aggregate(_state_with_history())
-    assert agg["reviewer"]["agy / default"]["seconds"] == 30
+    assert agg["reviewer"]["agy / gemini-3.8"]["seconds"] == 30
     assert agg["reviewer"]["kiro / claude-opus-5"]["seconds"] == 20
 
 
@@ -258,6 +259,9 @@ def test_kiro_default_rounds_are_separated(metrics):
     state["rounds"][0]["reviewer_models"]["kiro"] = {"requested": None, "observed": None}
     agg = metrics.aggregate(state)
     assert any("kiro の auto" in w for w in agg["unmeasured"])
+    # 分離したラウンドは表にも入れない。ラウンド 2 の kiro は指定があるので残る。
+    assert "kiro / default" not in agg["reviewer"]
+    assert agg["reviewer"]["kiro / claude-opus-5"]["reviews"] == 1
 
 
 def test_unspecified_rounds_are_separated_per_runtime(metrics):
@@ -271,6 +275,21 @@ def test_unspecified_rounds_are_separated_per_runtime(metrics):
     ), agg["unmeasured"]
     text = metrics.format_report(agg)
     assert "集計から分離したラウンド" in text
+
+
+def test_separated_rounds_are_left_out_of_the_tables(metrics):
+    """分離すると報告したラウンドを集計表へ残さない。
+
+    両方に出すと、読む側は分離したはずの行を「そのモデルの成績」として読む。
+    分離は担当ごとに決まるため、実装担当を分離してもレビュー担当は残る。
+    """
+    state = _state_with_history()
+    state["rounds"][0]["impl_model"] = {"requested": None, "observed": None}
+    agg = metrics.aggregate(state)
+    assert "codex / default" not in agg["impl"]
+    assert "codex / gpt-5.5" not in agg["impl"]
+    # 同じラウンドのレビュー担当は指定があるため集計に残る
+    assert agg["reviewer"]["agy / gemini-3.8"]["reviews"] == 2
 
 
 def test_assumed_rounds_are_reported_without_being_separated(metrics):

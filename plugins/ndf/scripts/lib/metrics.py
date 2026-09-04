@@ -49,6 +49,10 @@ def aggregate(state: dict[str, Any]) -> dict[str, Any]:
     `unmeasured` には「何が動いたか分からない」ラウンド（指定が無く実測もできない、
     または kiro の `auto`）と、指定値と実測値が食い違ったラウンドの警告が入る。
     `assumed` には集計へ入れたが実測で裏付けていないラウンドの注記が入る。
+
+    **分離したラウンドは `impl` / `reviewer` の表に入れない。** 分離すると報告した
+    ラウンドを表にも残すと、読む側はその行を「そのモデルの成績」として読む。
+    分離は担当ごとに決まるため、実装担当を分離してもレビュー担当は残る（逆も同じ）。
     """
     items_by_id = {i["item_id"]: i for i in state.get("items", []) if "item_id" in i}
     impl: dict[str, dict[str, Any]] = {}
@@ -70,7 +74,10 @@ def aggregate(state: dict[str, Any]) -> dict[str, Any]:
         )
 
         reviews = _round_reviews(entry)
-        _aggregate_impl_round(impl, entry, items_by_id, impl_runtime, requested, reviews)
+        if _models.is_measurable(impl_runtime, requested):
+            _aggregate_impl_round(
+                impl, entry, items_by_id, impl_runtime, requested, reviews
+            )
 
         reviewer_models = entry.get("reviewer_models") or {}
         for name in entry.get("reviewers", []):
@@ -81,7 +88,8 @@ def aggregate(state: dict[str, Any]) -> dict[str, Any]:
                 unmeasured, assumed, round_no, name, r_requested, r_observed,
                 "レビュー担当"
             )
-            _aggregate_reviewer_round(reviewer, entry, name, r_requested, reviews)
+            if _models.is_measurable(name, r_requested):
+                _aggregate_reviewer_round(reviewer, entry, name, r_requested, reviews)
 
     return {
         "impl": {k: _finish_impl(v) for k, v in sorted(impl.items())},

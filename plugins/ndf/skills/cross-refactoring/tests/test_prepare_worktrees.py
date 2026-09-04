@@ -167,7 +167,9 @@ def test_results_are_recorded_in_the_state_file(repo):
     skills = json.loads(repo["state"].read_text())["skills"]
     for rt in RUNTIMES:
         assert skills[rt] == {n: "provisioned" for n in REQUIRED}
-    for rt in ("claude", "codex", "kiro"):
+    # 適用担当になりうる 4 者すべてを記録する。agy は codex と同じ配置先を読むため、
+    # 配置は 1 度で済むが、記録は「元からある」ではなく置いた結果を共有する。
+    for rt in ("claude", "codex", "agy", "kiro"):
         assert skills[f"work.{rt}"] == {n: "provisioned" for n in REQUIRED}
 
 

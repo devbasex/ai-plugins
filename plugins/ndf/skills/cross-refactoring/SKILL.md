@@ -57,7 +57,7 @@ allowed-tools:
 | `--host claude\|codex\|agy\|kiro` | ホストの明示指定。未指定時は環境変数から推定（agy は推定できないため明示する） | 推定 |
 | `--model RT=MODEL` | ランタイムごとのモデル。繰り返し指定できる | CLI の既定 |
 | `--baseline-test CMD` | 着手前と各コミットで実行するテスト。**振る舞い不変を示す手段が無い書き換えは構造改善ではないため必須** | 必須 |
-| `--max-outer-rounds N` | 提案ラウンドの上限 | `3` |
+| `--max-outer-rounds N` | 提案ラウンドの上限 | `4` |
 | `--max-fix-rounds N` | 1 ラウンドあたりの修正の上限 | `3` |
 | `--max-items-per-round N` | 1 ラウンドの採用上限 | `5` |
 | `--severity-threshold LEVEL` | この重要度未満は採用しない | `minor` |
