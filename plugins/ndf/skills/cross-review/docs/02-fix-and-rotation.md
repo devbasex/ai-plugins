@@ -82,7 +82,23 @@ worktree 外を触ると競合します。
 
 1. PR コメント取得 (3 ソース): `fix/scripts/fetch-pr-comments.sh {OWNER_REPO} {PR}` でインラインコメント / レビュー body / PR レベルコメントを一括取得
 2. 重要度を独自再判定（AI agent のラベルは参考値）
-3. CI 状態スナップショット: `gh pr checks {PR} --json name,state` （**完了待ちはしない**、PENDING は無視して FAILURE のみ修正対象に取り込む）
+3. CI 状態スナップショット: `gh api repos/{OWNER_REPO}/commits/{HEAD_OID}/check-runs`
+   （**REST の 1 回だけ**。`gh pr checks` は同じ判断へ GraphQL を 4 リクエスト使う。
+   **完了待ちはしない** — `status` が `completed` でないものは対象から外し、
+   `conclusion` が `failure` のものだけを修正対象に取り込む）
+
+   ```bash
+   gh api "repos/{OWNER_REPO}/commits/{HEAD_OID}/check-runs?per_page=100" \
+     --jq '[.check_runs[] | select(.status == "completed" and .conclusion == "failure") | .name]'
+   ```
+
+   **`per_page=100` を付ける。** 既定は 30 件で、31 件目以降に失敗があると
+   失敗が無いものとして読む。`total_count` が 100 を超えるリポジトリでは
+   `&page=2` 以降も読み、`total_count` に届くまで足す。
+
+   **`commits/{HEAD_OID}/status` は使わない。** GitHub Actions は検査ジョブを記録し
+   commit の状態を記録しないため、すべて成功した commit でも `state: "pending"` /
+   `total_count: 0` を返す（実測）。保留として読むと、承認されたラウンドが収束しない。
 4. critical/major + 該当 minor/nit の修正コミット（worktree 内のみ）
 5. `./pint-changed.sh && ./larastan-changed.sh` 等の品質チェック
 6. push: `git push origin {HEAD_BRANCH}` （--force / --no-verify 禁止）
@@ -178,8 +194,19 @@ fi
    - meta-only (`check_pr_requirements` / `assignees` / `reviewers` / `labels` / `meta`): `ci_note` に記録して継続
    - 不明: 保守的に code-fail 扱い
 
+meta-only の語は**区切りで挟まれた語として**一致したときだけ拾う。部分一致にすると
+`metabase tests` や `metadata lint` のようなコード検査まで meta-only になり、失敗した
+まま収束する。
+
 **例**: `check_pr_requirements`（Assignees 未設定）はループ継続、
 `laravel/pint` や `phpstan` の失敗は即中断してユーザ判断。
+
+**収束の判定（Step 3）も同じ振り分けを使う**（#327）。両方の AI が承認したラウンドは、
+収束を返す前に `commits/{HEAD_OID}/check-runs` を **1 度だけ** 照会する。code-related の
+失敗があれば**中断せず**終了コード 2 で修正のラウンドへ回す。収束の直前は修正の機会が
+残っている段であり、そこで中断すると直せる失敗まで人手へ戻すことになる。照会できない
+とき（`gh` の失敗 / `HTTP 422` / 検査ジョブ 0 件）は収束させ、`rounds[-1].ci.verdict` へ
+`unverified` と理由を残す。**進行を止めない側へ倒す。**
 
 ## Step 6: PR ローテーション (prepare → Agent → execute の 3 段)
 

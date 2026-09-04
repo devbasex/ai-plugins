@@ -28,6 +28,29 @@ OID = "a" * 40
 OLD_OID = "b" * 40
 
 
+def _rest(head_branch: str = BRANCH, oid: str = OID, fork: bool = False) -> str:
+    """`gh api -i repos/<repo>/pulls/<PR>` の応答（実測の形）。
+
+    状態行だけが `\r` を持たず、以降のヘッダは `\r\n` で終わる。
+    """
+    body = {
+        "number": PR,
+        "user": {"login": "someone"},
+        "head": {
+            "ref": head_branch, "sha": oid,
+            "repo": {"full_name": ("fork/r" if fork else REPO)},
+        },
+        "base": {"ref": "develop"},
+    }
+    return (
+        "HTTP/2.0 200 OK\n"
+        "Content-Type: application/json; charset=utf-8\r\n"
+        "X-Ratelimit-Remaining: 4972\r\n"
+        "\r\n"
+        + json.dumps(body)
+    )
+
+
 class _Recorder:
     """subprocess.run を差し替えて、渡されたコマンドを記録する。
 
@@ -49,11 +72,8 @@ class _Recorder:
     ):
         self.calls: list[tuple[list[str], str | None]] = []
         self.view_rc = view_rc
-        self.view_stdout = view_stdout if view_stdout is not None else json.dumps({
-            "headRefName": BRANCH,
-            "headRefOid": OID,
-            "isCrossRepository": False,
-        })
+        # head の取得は REST の 1 回になった（#271）。GraphQL へは投げない。
+        self.view_stdout = view_stdout if view_stdout is not None else _rest()
         self.fetch_rc = fetch_rc
         self.base_present = base_present
         self.head_oid = head_oid
@@ -66,7 +86,7 @@ class _Recorder:
         self.calls.append((list(cmd), cwd))
         rc = 0
         stdout = ""
-        if cmd[:3] == ["gh", "pr", "view"]:
+        if cmd[:3] == ["gh", "api", "-i"]:
             rc, stdout = self.view_rc, self.view_stdout
         elif cmd[:2] == ["git", "fetch"]:
             rc = self.fetch_rc
@@ -119,7 +139,7 @@ def _read(tmp_dir: pathlib.Path) -> dict:
 
 
 @pytest.fixture()
-def tmp_dir(monkeypatch, tmp_path, state_mod):
+def tmp_dir(monkeypatch, tmp_path, state_mod, real_github):
     monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
     monkeypatch.setattr(state_mod, "_is_registered_worktree", lambda path: True)
     return tmp_path
@@ -228,10 +248,9 @@ def test_head_ref_comes_from_github(tmp_dir, state_mod, run):
 
     state_mod.cmd_start_round(argparse.Namespace(pr=PR))
 
-    assert [
-        "gh", "pr", "view", str(PR),
-        "--json", "headRefName,headRefOid,isCrossRepository",
-    ] in rec.commands()
+    assert ["gh", "api", "-i", f"repos/{REPO}/pulls/{PR}"] in rec.commands()
+    # GraphQL 側の枠は使わない。
+    assert not rec.issued(["gh", "pr", "view"])
     assert not any("fix/stale" in " ".join(c) for c in rec.commands())
 
 
@@ -262,11 +281,7 @@ def test_fetches_the_pull_ref_for_a_fork(tmp_dir, state_mod, run):
 
     head branch は base のリポジトリに無いため、`origin/<head branch>` は解決できない。
     """
-    rec = run(_Recorder(view_stdout=json.dumps({
-        "headRefName": BRANCH,
-        "headRefOid": OID,
-        "isCrossRepository": True,
-    })))
+    rec = run(_Recorder(view_stdout=_rest(fork=True)))
     _write(tmp_dir, _state())
 
     state_mod.cmd_start_round(argparse.Namespace(pr=PR))

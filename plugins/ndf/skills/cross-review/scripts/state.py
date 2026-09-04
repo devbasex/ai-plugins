@@ -269,6 +269,263 @@ def _git_toplevel() -> str | None:
     return None
 
 
+# ---------------- GitHub の呼び出し ----------------
+#
+# **尽きるのは GraphQL 側である**（#271）。`gh pr view` は項目を増やしても
+# 1 リクエストのままだが、REST 側は上限 5,000 のうち大半が残ったまま進行が止まる。
+# 項目をまとめる先を REST にして、GraphQL の消費を実行ごと・ラウンドごとに 0 点へ寄せる。
+
+
+class RestResponse(NamedTuple):
+    """`gh api -i` の 1 回の応答。ヘッダと本文を組で持つ。
+
+    残量（`x-ratelimit-remaining`）は**通常の要求の応答ヘッダからしか読めない**。
+    `gh api rate_limit` は同じ時刻でも消費を反映しない（実測）。読むためだけの
+    呼び出しを置かず、毎回の応答から拾う。
+    """
+
+    headers: dict[str, str]
+    body: Any
+    rate_remaining: int | None
+    rate_reset: str | None
+
+
+def _parse_rest_headers(text: str) -> tuple[dict[str, str], str]:
+    """`gh api -i` の出力を、ヘッダの辞書と本文へ分ける。
+
+    状態行だけが `\r` を持たず、以降のヘッダは `\r\n` で終わる（実測）。行末の
+    違いで分けられなくなるため、空行そのものを区切りとして読む。
+    """
+    headers: dict[str, str] = {}
+    lines = text.splitlines(keepends=True)
+    body_at = len(lines)
+    for i, line in enumerate(lines):
+        if not line.strip():
+            body_at = i + 1
+            break
+        name, sep, value = line.partition(":")
+        if sep:
+            headers[name.strip().lower()] = value.strip()
+    return headers, "".join(lines[body_at:])
+
+
+def _gh_rest(path: str) -> RestResponse | None:
+    """REST の 1 回の要求を投げ、ヘッダと本文を返す。失敗は `None`。
+
+    **例外を投げず、進行を止めない側へ倒す**（#291 の待ち行列を挟む位置）。
+    呼び出し側は `None` を「確かめられなかった」として扱う。積む・待つ・流すは
+    ここではなく呼び出し側が持つ。
+    """
+    try:
+        r = subprocess.run(["gh", "api", "-i", path], capture_output=True, text=True)
+    except OSError as exc:
+        info(f"⚠ gh の実行に失敗 ({path}): {exc}")
+        return None
+    if r.returncode != 0:
+        info(f"⚠ REST が失敗 ({path}, exit={r.returncode}): {r.stderr.strip()[:200]}")
+        return None
+    headers, raw = _parse_rest_headers(r.stdout)
+    try:
+        body = json.loads(raw) if raw.strip() else None
+    except json.JSONDecodeError as exc:
+        info(f"⚠ REST の応答を読み取れない ({path}): {exc}")
+        return None
+    remaining = headers.get("x-ratelimit-remaining")
+    try:
+        rate_remaining = int(remaining) if remaining is not None else None
+    except ValueError:
+        rate_remaining = None
+    return RestResponse(
+        headers=headers,
+        body=body,
+        rate_remaining=rate_remaining,
+        rate_reset=headers.get("x-ratelimit-reset"),
+    )
+
+
+_REPO_URL = re.compile(
+    r"(?:github\.com[:/])(?P<owner>[^/]+)/(?P<name>[^/]+?)(?:\.git)?/?$"
+)
+
+
+def _git_remote_url() -> str:
+    """`origin` の取得元を返す。読めなければ空文字。"""
+    try:
+        r = subprocess.run(
+            ["git", "remote", "get-url", "origin"], capture_output=True, text=True,
+        )
+    except OSError:
+        return ""
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def _repo_from_git() -> str | None:
+    """git の設定から `owner/repo` を求める。求まらなければ `None`。
+
+    **求めた名前はそのまま使わない。** `repos/{owner}/{repo}/pulls/{PR}` の応答が
+    そのまま検証になるため、誤った名前は失敗として現れる（`_fetch_pr_metadata`）。
+    """
+    m = _REPO_URL.search(_git_remote_url())
+    return f"{m.group('owner')}/{m.group('name')}" if m else None
+
+
+class PrMetadata(NamedTuple):
+    """REST の 1 回の応答から取れる、Pull Request のメタデータ。"""
+
+    repo: str
+    author: str
+    head_branch: str
+    head_sha: str
+    base_branch: str
+    is_fork: bool
+    rate_remaining: int | None
+    rate_reset: str | None
+
+
+def _pr_metadata_of(repo: str, resp: RestResponse) -> PrMetadata | None:
+    body = resp.body
+    if not isinstance(body, dict) or not body.get("number"):
+        return None
+    head = body.get("head") or {}
+    base = body.get("base") or {}
+    head_repo = (head.get("repo") or {}).get("full_name") or ""
+    return PrMetadata(
+        repo=repo,
+        author=str((body.get("user") or {}).get("login") or ""),
+        head_branch=str(head.get("ref") or ""),
+        head_sha=str(head.get("sha") or ""),
+        base_branch=str(base.get("ref") or ""),
+        is_fork=bool(head_repo) and head_repo != repo,
+        rate_remaining=resp.rate_remaining,
+        rate_reset=resp.rate_reset,
+    )
+
+
+def _fetch_pr_metadata(pr: int, repo: str | None = None) -> PrMetadata | None:
+    """作成者・head・base・head の commit を REST の 1 回で取る。
+
+    リポジトリ名は渡された値、無ければ git の設定から求める。**その名前が誤って
+    いれば応答が失敗するため、そのときだけ `gh repo view` で解決し直す。**
+    確かめる手段が同じ呼び出しに含まれるので、追加の消費なしで誤りを塞げる。
+    """
+    tried: list[str] = []
+    for candidate in (repo, _repo_from_git()):
+        if not candidate or candidate in tried:
+            continue
+        tried.append(candidate)
+        resp = _gh_rest(f"repos/{candidate}/pulls/{int(pr)}")
+        if resp is None:
+            continue
+        meta = _pr_metadata_of(candidate, resp)
+        if meta is not None:
+            return meta
+    resolved = _sh(
+        ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
+        check=False,
+    )
+    if not resolved or resolved in tried:
+        return None
+    resp = _gh_rest(f"repos/{resolved}/pulls/{int(pr)}")
+    return _pr_metadata_of(resolved, resp) if resp is not None else None
+
+
+# 継続的統合の照会は `commits/{sha}/check-runs` の 1 回だけにする。
+# **併記された状態（`commits/{sha}/status`）は使わない。** GitHub Actions は検査ジョブを
+# 記録し commit の状態を記録しないため、9 件すべてが成功した commit でも
+# `state: "pending"` / `total_count: 0` を返す（実測）。保留として読むと、承認された
+# ラウンドが収束しなくなる。
+
+# 失敗した検査ジョブの名前の振り分け。**一覧に無い名前は code-related へ倒す。**
+CI_CODE_PATTERNS = ("pint", "larastan", "phpstan", "test", "lint", "type",
+                    "build", "ruff", "eslint", "tsc", "mypy")
+CI_META_PATTERNS = ("check_pr_requirements", "assignees", "reviewers", "labels", "meta")
+# メタ検査の名前は**語として**一致したときだけ meta-only にする。部分一致で拾うと
+# `metabase tests` や `metadata lint` のようなコード検査まで meta-only になり、失敗した
+# まま収束する。前後が英数字でないことを求めるため、区切り（空白・`_`・`-`・`/`）で
+# 挟まれた語だけが一致する。**一覧に無い名前を code-related へ倒す既定は変わらない。**
+_CI_META_RE = re.compile(
+    "(?<![0-9a-z])(?:" + "|".join(re.escape(p) for p in CI_META_PATTERNS) + ")(?![0-9a-z])")
+# 完了した検査ジョブのうち、失敗として数える結論。`cancelled` / `skipped` / `neutral`
+# は失敗にしない。
+CI_FAILED_CONCLUSIONS = ("failure", "timed_out", "action_required", "startup_failure")
+
+# 検査ジョブの一覧は 1 ページ 100 件（REST の上限）で読む。**既定の 30 件のままにしない。**
+# 31 件目以降に code-related の失敗があるリポジトリでは、失敗を見ないまま収束する。
+CHECK_RUNS_PER_PAGE = 100
+# 読むページ数の上限。100 件で収まるリポジトリは 1 回のままである（このリポジトリは 9 件）。
+# 上限に達しても止めず、読めた範囲で判定する。**進行を止めない側へ倒す。**
+CHECK_RUNS_MAX_PAGES = 10
+
+
+class CiClassification(NamedTuple):
+    """検査ジョブを、修正の要る失敗・コードと無関係な失敗・未完了へ分けた結果。"""
+
+    code_failed: list[str]
+    meta_failed: list[str]
+    pending: list[str]
+
+
+def _classify_ci(runs: list[dict[str, Any]]) -> CiClassification:
+    """検査ジョブを振り分ける。`cmd_judge` と `cmd_merge_fix` が同じ実装を呼ぶ。
+
+    **`status` が `completed` 以外の検査ジョブは失敗にしない。** 完了を待たずに
+    未完了として別に返し、呼び出し側が「未完了のまま収束した」ことを残す。
+    """
+    code_failed: list[str] = []
+    meta_failed: list[str] = []
+    pending: list[str] = []
+    for run in runs:
+        name = str(run.get("name") or "")
+        if str(run.get("status") or "completed").lower() != "completed":
+            pending.append(name)
+            continue
+        if str(run.get("conclusion") or "").lower() not in CI_FAILED_CONCLUSIONS:
+            continue
+        if _CI_META_RE.search(name.lower()):
+            meta_failed.append(name)
+        else:
+            # 一覧に無い名前も含めて code-related へ倒す（保守的）。
+            code_failed.append(name)
+    return CiClassification(code_failed, meta_failed, pending)
+
+
+def _fetch_check_runs(repo: str, sha: str) -> list[dict[str, Any]] | None:
+    """head の commit に対する検査ジョブの一覧を返す。照会できなければ `None`。
+
+    **「照会できなかった」と「すべて成功」を区別する。** `HTTP 422`（GitHub 側に
+    無い commit）も `total_count` が 0 のリポジトリも、失敗が無いことの根拠に
+    ならない。どちらも `None` を返し、呼び出し側は収束を止めずに理由を残す。
+
+    **`total_count` に届くまでページを読む。** 1 ページの上限は 100 件で、
+    `total_count` はページの件数ではなく全体の件数を返す。読み切らないまま
+    `_classify_ci` へ渡すと、後ろのページにある失敗が無いものとして扱われる。
+    100 件で収まるリポジトリは 1 回で終わり、呼び出し回数は変わらない。
+    """
+    if not repo or not sha:
+        return None
+    base = f"repos/{repo}/commits/{sha}/check-runs?per_page={CHECK_RUNS_PER_PAGE}"
+    runs: list[dict[str, Any]] = []
+    total: int | None = None
+    for page in range(1, CHECK_RUNS_MAX_PAGES + 1):
+        resp = _gh_rest(f"{base}&page={page}")
+        if resp is None or not isinstance(resp.body, dict):
+            return None
+        if total is None:
+            try:
+                total = int(resp.body.get("total_count") or 0)
+            except (TypeError, ValueError):
+                return None
+            if total <= 0:
+                return None
+        chunk = resp.body.get("check_runs")
+        if not isinstance(chunk, list) or not chunk:
+            break
+        runs.extend(r for r in chunk if isinstance(r, dict))
+        if len(runs) >= total:
+            break
+    return runs or None
+
+
 class HeadRef(NamedTuple):
     """レビュー対象の Pull Request の head。
 
@@ -283,30 +540,23 @@ class HeadRef(NamedTuple):
     is_fork: bool
 
 
-def _resolve_head_ref(pr: int, code: int = 8) -> HeadRef:
+def _resolve_head_ref(pr: int, code: int = 8, repo: str | None = None) -> HeadRef:
     """その時点の head を GitHub から取り直す。
 
     状態ファイルの `head_branch` は `init` が書いた後に更新されない。`squash` の
     巻き直しは `<branch>-r<HHMMSS>` という新しいブランチを作るため、そのまま使うと
     **巻き直しの後に巻き直し前のブランチへ戻すことになる**。取れないときは
     状態ファイルの古い値へ落とさずに止める。落ちた先が誤っていては意味が無い。
+
+    照会は REST の 1 回で、ブランチ名・commit・フォークの別が同じ応答から取れる。
     """
-    r = subprocess.run(
-        ["gh", "pr", "view", str(pr), "--json",
-         "headRefName,headRefOid,isCrossRepository"],
-        capture_output=True, text=True,
-    )
-    if r.returncode != 0:
-        die(f"PR #{pr} の head を取得できない: {r.stderr.strip()[:200]}", code=code)
-    try:
-        data = json.loads(r.stdout)
-        branch = str(data["headRefName"])
-        oid = str(data["headRefOid"])
-    except (json.JSONDecodeError, KeyError, TypeError) as exc:
-        die(f"PR #{pr} の head を読み取れない: {exc}", code=code)
-    if not branch or not oid:
+    meta = _fetch_pr_metadata(pr, repo)
+    if meta is None:
+        die(f"PR #{pr} の head を取得できない", code=code)
+        raise SystemExit(code)  # die は戻らないが、型のために置く
+    if not meta.head_branch or not meta.head_sha:
         die(f"PR #{pr} の head が空である", code=code)
-    return HeadRef(branch=branch, oid=oid, is_fork=bool(data.get("isCrossRepository")))
+    return HeadRef(branch=meta.head_branch, oid=meta.head_sha, is_fork=meta.is_fork)
 
 
 def _fetch_head(worktree: str, pr: int, head: HeadRef) -> bool:
@@ -1030,7 +1280,10 @@ def cmd_init(args: argparse.Namespace) -> None:
     # worktree path を先に解決してから tmp_dir を決定する。
     # tmp_dir は <worktree>/.cross_review/ に配置し、作業領域を 1 つに保つ。
     # path には repo slug を含め、他リポジトリの同一 PR 番号と衝突しないようにする。
-    repo = _sh(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
+    # リポジトリ名は git の設定から求める。GraphQL を 1 点使わずに済み、誤りは
+    # この後の REST の応答が検証する（`_fetch_pr_metadata`）。
+    repo = _repo_from_git() or _sh(
+        ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
     worktree = str(pathlib.Path(args.worktree).resolve()) if args.worktree else str(
         _default_worktree_base() / _repo_slug(repo) / f"pr{pr}")
 
@@ -1101,17 +1354,30 @@ def cmd_init(args: argparse.Namespace) -> None:
             print(f"RESUMED=1")
             return
 
-    # 新規 init: プリチェック
+    # 新規 init: プリチェック。
+    # **作成者・head・base は REST の 1 回でまとめて取る。** 項目ごとに `gh pr view` を
+    # 投げていた分（GraphQL 3 点）と、リポジトリ名の解決（同 1 点）が 0 点になる。
+    meta = _fetch_pr_metadata(pr, repo)
+    if meta is None:
+        die(f"PR #{pr} のメタデータを取得できません（リポジトリ名: {repo}）")
+        return
+    if meta.repo != repo:
+        repo = meta.repo
+        if not args.worktree:
+            worktree = str(_default_worktree_base() / _repo_slug(repo) / f"pr{pr}")
+    if meta.rate_remaining is not None:
+        info(f"ℹ GitHub REST の残量: {meta.rate_remaining}")
+
     me = _sh(["gh", "api", "user", "--jq", ".login"])
-    author = _sh(["gh", "pr", "view", str(pr), "--json", "author", "--jq", ".author.login"])
+    author = meta.author
     is_own = (me == author)
     event_downgrade = is_own
     if is_own:
         info(f"⚠ 自分の PR (author={me}) — REQUEST_CHANGES → COMMENT 強制ダウングレード")
 
     # worktree 分離 — _tmp_dir() より先に worktree を作成/確認する
-    head_branch = _sh(["gh", "pr", "view", str(pr), "--json", "headRefName", "--jq", ".headRefName"])
-    base_branch = _sh(["gh", "pr", "view", str(pr), "--json", "baseRefName", "--jq", ".baseRefName"])
+    head_branch = meta.head_branch
+    base_branch = meta.base_branch
     changed_files = _fetch_changed_files(pr, repo)
     auto_review_categories = _classify_changed_files(changed_files)
     auto_review = _auto_review_instructions(auto_review_categories)
@@ -1309,7 +1575,7 @@ def _guard_previous_round(st: dict[str, Any], prev: dict[str, Any]) -> None:
         )
 
 
-def _sync_before_round(st: dict[str, Any], pr: int) -> None:
+def _sync_before_round(st: dict[str, Any], pr: int) -> HeadRef | None:
     """ラウンドを開く前に、レビュー用の作業ツリーを Pull Request の head へ揃える。
 
     同期は作られるときと再開するときにしか行われていなかった。修正を作業ツリーの外で
@@ -1326,15 +1592,16 @@ def _sync_before_round(st: dict[str, Any], pr: int) -> None:
     wt = str(st.get("worktree_path") or "")
     if not wt:
         info("⚠ state に worktree_path が無い — 作業ツリーの同期を飛ばして続行します")
-        return
+        return None
     if not _is_registered_worktree(wt):
         info(f"⚠ 登録済みの作業ツリーではない ({wt}) — 同期を飛ばして続行します")
-        return
-    head = _resolve_head_ref(pr)
+        return None
+    head = _resolve_head_ref(pr, repo=str(st.get("repo") or "") or None)
     _sync_worktree(wt, pr, head, strict=True)
     # 解決したブランチ名を書き戻す。巻き直しの後は state の値が古いため、再開の経路も
     # ここで書かれた値を読む。保存はこの後の round エントリの追加と同じ書き込みで済む。
     st["head_branch"] = head.branch
+    return head
 
 
 def cmd_start_round(args: argparse.Namespace) -> None:
@@ -1352,17 +1619,21 @@ def cmd_start_round(args: argparse.Namespace) -> None:
         _guard_previous_round(st, st["rounds"][-1])
 
     pr = st["current_pr"]
-    _sync_before_round(st, pr)
+    head = _sync_before_round(st, pr)
 
     round_no = total + 1
     round_in_pr = sum(1 for r in st["rounds"] if r["pr"] == pr) + 1
 
-    # round エントリを開く
-    st["rounds"].append({
+    # round エントリを開く。head の commit を記録するのは、起動スクリプト 2 本と
+    # 収束の判定が同じ値を読むためである。**2 本が同じ値を別々に取っていた分が 0 になる。**
+    entry: dict[str, Any] = {
         "round": round_no,
         "pr": pr,
         "started_at": _now(),
-    })
+    }
+    if head is not None:
+        entry["head_sha"] = head.oid
+    st["rounds"].append(entry)
     _save(args.pr, st)
 
     info(f"=== Round {round_no} / {max_r} (PR #{pr}, round_in_pr={round_in_pr}) ===")
@@ -1762,11 +2033,55 @@ def cmd_read_result(args: argparse.Namespace) -> None:
     info(f"✅ {agent}: intent={intent} posted_as={posted_as} comments={comments}")
 
 
+def _round_ci(st: dict[str, Any], last: dict[str, Any], pr: int) -> dict[str, Any]:
+    """収束の直前に検査ジョブを 1 度だけ照会し、判定に使う記録を返す。
+
+    head の commit は `rounds[-1].head_sha` から読む。承認したレビューが読んだ commit と
+    同じ値であり、追加の呼び出しが要らない。値が無いときだけ REST を 1 回投げる。
+
+    **照会できないことは、承認されたラウンドを差し戻す理由にならない。** `gh` の失敗・
+    `HTTP 422`・検査ジョブ 0 件はいずれも `unverified` として収束させ、確かめられ
+    なかったことを記録に残す。
+    """
+    repo = str(st.get("repo") or "")
+    sha = str(last.get("head_sha") or "")
+    if not sha:
+        meta = _fetch_pr_metadata(pr, repo or None)
+        if meta is not None:
+            sha = meta.head_sha
+            repo = repo or meta.repo
+    if not repo or not sha:
+        return {"verdict": "unverified", "reason": "head のコミットを特定できない"}
+    runs = _fetch_check_runs(repo, sha)
+    if runs is None:
+        return {
+            "verdict": "unverified",
+            "reason": "検査ジョブを照会できない（未 push・権限・検査ジョブ 0 件のいずれか）",
+            "sha": sha,
+        }
+    c = _classify_ci(runs)
+    if c.code_failed:
+        return {"verdict": "code_failure", "sha": sha, "failed": c.code_failed,
+                "meta_failed": c.meta_failed, "pending": c.pending}
+    if c.meta_failed:
+        return {"verdict": "meta_only", "sha": sha, "meta_failed": c.meta_failed,
+                "pending": c.pending,
+                "note": f"メタチェックのみ失敗: {c.meta_failed} — コードと無関係のため収束"}
+    if c.pending:
+        return {"verdict": "pending", "sha": sha, "pending": c.pending}
+    return {"verdict": "success", "sha": sha}
+
+
 def cmd_judge(args: argparse.Namespace) -> None:
     """Step 3 — intent ベース pass 判定。
 
-    出口は 4 つある。**結果を取り込めていないラウンドは、収束も修正も決められない。**
+    出口は 5 つある。**結果を取り込めていないラウンドは、収束も修正も決められない。**
     そのため結果なしの検査を、通ったかどうかの判定より先に置く。
+
+    収束の枝に入る直前で、継続的統合の検査ジョブを 1 度だけ照会する（#327）。
+    code-related の失敗があれば**中断せず**終了コード 2 で修正のラウンドへ回す。
+    収束の直前は修正の機会が残っている段であり、そこで中断すると直せる失敗まで
+    人手へ戻すことになる。中断は上限のラウンド数・振動の検知・`merge-fix` が受け持つ。
 
     Exit code: 0=approved, 2=continue, 7=結果なしのため起動し直す, 1=error
     """
@@ -1815,10 +2130,30 @@ def cmd_judge(args: argparse.Namespace) -> None:
         sys.exit(7)
 
     if round_passes and carried is None:
+        ci = _round_ci(st, last, pr)
+        last["ci"] = ci
+        print(f"CI_VERDICT={ci['verdict']}")
+        if ci["verdict"] == "code_failure":
+            last["verdict"] = "changes_requested"
+            _save(pr, st)
+            info(
+                f"→ 両方 APPROVE だが継続的統合が失敗している: {' '.join(ci['failed'])}。"
+                "修正へ。"
+            )
+            sys.exit(2)
         last["verdict"] = "approved"
         st["final"] = "approved"
         st["ended_at"] = _now()
         _save(pr, st)
+        if ci["verdict"] == "meta_only":
+            info(f"⚠ {ci['note']}")
+        elif ci["verdict"] == "pending":
+            info(
+                f"⚠ 未完了の検査ジョブが残ったまま収束する: {' '.join(ci['pending'])}。"
+                "完了は待たない"
+            )
+        elif ci["verdict"] == "unverified":
+            info(f"⚠ 継続的統合を確かめられないまま収束する: {ci['reason']}")
         info("✅ 両方 APPROVE。収束。")
         sys.exit(0)
 
@@ -2122,21 +2457,14 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         info(f"✅ fix マージ完了 (commit={fix_commit} fixed={fixed_count})")
         return
 
-    code_patterns = ("pint", "larastan", "phpstan", "test", "lint", "type",
-                     "build", "ruff", "eslint", "tsc", "mypy")
-    meta_patterns = ("check_pr_requirements", "assignees", "reviewers", "labels", "meta")
+    # 振り分けは `_classify_ci` が 1 か所で持つ。ここが読むのは修正の担当が申告した
+    # 失敗の名前で、進行側が照会し直す段ではない。申告は完了した失敗として渡す。
     failed = fix.get("ci_failed_checks") or []
-    code_fail = False
-    for name in failed:
-        low = name.lower()
-        if any(p in low for p in meta_patterns):
-            continue
-        elif any(p in low for p in code_patterns):
-            code_fail = True
-        else:
-            code_fail = True  # 不明は code-fail（保守的）
+    classified = _classify_ci(
+        [{"name": str(n), "status": "completed", "conclusion": "failure"} for n in failed]
+    )
 
-    if code_fail:
+    if classified.code_failed:
         st["final"] = "error"
         st["ended_at"] = _now()
         _save(pr, st)

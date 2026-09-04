@@ -74,7 +74,7 @@ fix 戻り値ファイル (`$TMP_DIR/fix-pr<PR>-result.json`) を受け取った
 | 分類 | パターン | 振る舞い |
 |---|---|---|
 | code-fail | `pint` / `larastan` / `phpstan` / `test` / `lint` / `type` / `build` / `ruff` / `eslint` / `tsc` / `mypy` | `final=error` で中断 (exit 3) |
-| meta-only | `check_pr_requirements` / `assignees` / `reviewers` / `labels` / `meta` | `ci_note` に記録して継続 |
+| meta-only | `check_pr_requirements` / `assignees` / `reviewers` / `labels` / `meta`（区切りで挟まれた語として一致したときだけ） | `ci_note` に記録して継続 |
 | 不明 | 上記以外 | 保守的に **code-fail 扱い** |
 
 PR メタデータ系の check（Assignees / Reviewers / Labels）は **継続**、

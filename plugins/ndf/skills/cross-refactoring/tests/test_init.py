@@ -79,10 +79,6 @@ def run_init(refactor, origin_repo, monkeypatch):
             if cmd[0] == "gh":
                 if "nameWithOwner" in cmd:
                     return "acme/demo"
-                if "headRefName" in cmd:
-                    return HEAD_BRANCH
-                if "baseRefName" in cmd:
-                    return "main"
                 if cmd[:3] == ["gh", "api", "user"]:
                     # viewer=None は取得に失敗する環境（bot トークンなど）を表す
                     if viewer is None:
@@ -90,8 +86,16 @@ def run_init(refactor, origin_repo, monkeypatch):
                             refactor.die("コマンドが失敗しました (gh api user): HTTP 403")
                         return ""
                     return viewer
-                if "author" in cmd:
-                    return "me"
+                # 作成者・head・base は REST の 1 回でまとめて返る（#271）。
+                if len(cmd) == 3 and cmd[:2] == ["gh", "api"] and cmd[2].startswith("repos/"):
+                    if cmd[2] != f"repos/acme/demo/pulls/{args.pr}":
+                        return ""
+                    return json.dumps({
+                        "number": args.pr,
+                        "user": {"login": "me"},
+                        "head": {"ref": HEAD_BRANCH, "repo": {"full_name": "acme/demo"}},
+                        "base": {"ref": "main"},
+                    })
                 raise AssertionError(f"想定外の gh 呼び出し: {cmd}")
             return real_sh(cmd, cwd=cwd, check=check)
 
