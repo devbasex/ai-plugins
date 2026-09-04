@@ -1602,7 +1602,9 @@ def cmd_init(args: argparse.Namespace) -> None:
     info(f"ホスト: {host}（{host_source}） / レビュワーの母集合: {' / '.join(reviewers)}")
     _validate_only(args.only, host)
     # 未認証の CLI は起動から短時間で終わり、結果を残さないまま担当から欠ける。
-    auth.check_auth(reviewers, info=info, die=lambda m: die(m))
+    # **確かめるのは実際に起動する担当だけである。** `--only` で 1 者へ絞ったとき、
+    # 母集合の全員を確かめると、そのラウンドで起動しない CLI の未認証で初期化が失敗する。
+    auth.check_auth(_auth_targets(args.only, host), info=info, die=lambda m: die(m))
 
     state = {
         "started_at": _now(),
@@ -1687,6 +1689,15 @@ def _round_reviewers(st: dict[str, Any], round_no: int) -> list[str]:
     if host:
         return assignment.review_assign(max(round_no, 1), host)
     return list(LEGACY_AGENTS)
+
+
+def _auth_targets(only: str | None, host: str) -> list[str]:
+    """認証を確かめる相手。**実際に起動する担当だけを返す。**
+
+    `--only` で 1 者へ絞ったときに母集合の全員を確かめると、そのラウンドで起動しない
+    CLI の未認証で初期化が失敗する。
+    """
+    return [only] if only else assignment.review_pool(host)
 
 
 def _validate_only(only: str | None, host: str) -> str | None:

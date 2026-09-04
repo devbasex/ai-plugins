@@ -261,3 +261,16 @@ def test_judge_returns_the_relaunch_targets_as_a_list(state_mod, tmp_path, capsy
     out = capsys.readouterr().out
     assert "RELAUNCH_AGENTS='kiro'" in out
     assert "RELAUNCH_AGENTS_CSV=kiro" in out
+
+
+def test_auth_check_covers_only_the_reviewers_that_run(state_mod, monkeypatch):
+    """`--only` を指定したときは、実際に起動する 1 者だけを確かめる。
+
+    母集合の全員を確かめると、そのラウンドで起動しない CLI の未認証で `init` が
+    失敗する。デバッグのために 1 者へ絞った意味が無くなる。
+    """
+    checked: list[list[str]] = []
+    monkeypatch.setattr(state_mod.auth, "check_auth",
+                        lambda rs, **k: checked.append(list(rs)) or {})
+    assert state_mod._auth_targets("kiro", "claude") == ["kiro"]
+    assert state_mod._auth_targets(None, "claude") == ["codex", "agy", "kiro"]
