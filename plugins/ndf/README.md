@@ -90,7 +90,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.1.0）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.2.0-dev.1）
 ```
 
 ### agy
@@ -110,119 +110,97 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.1.0 へ更新するとき
+## v10.2.0-dev.1 へ更新するとき
 
-**この版は正式版です。** 正式版チャネル（`main`）に載ります。常用する利用者は、これまでと
-同じ更新の操作で受け取れます。手順はこの節の末尾にあります。
+**この版は開発版です。** 開発版チャネル（`develop`）に載ります。正式版チャネル（`main`）を
+登録している利用者には届きません。試すときの取得元の切り替えは、この節の末尾にあります。
 
-この版は、作業ツリー運用（`worktree`）を支える 2 つの仕組みを直します。ロックの持ち主を
-決める排他と、主ディレクトリの編集に案内を出すための書き込み先の推定です。
+この版が直すのは、複数の CLI でレビューと構造改善を回す 2 つの Skill（`cross-review` /
+`cross-refactoring`）を支える基盤です。**利用者から見た破壊的変更はありません。** 共通層の
+移動はプラグインの中の構造で、Skill を通した使い方は変わりません。
 
-### 排他が、ロックの持ち主を 1 つに決めるようになりました
+### 収束ループの共通層が 1 つの場所に集まりました
 
-作業ツリーの割り当てを記録する台帳と、工程の通過を記録する控えは、どちらもロックの
-ディレクトリを作れたプロセスを持ち主としていました。**`mkdir` コマンドは、同時に走らせると
-複数のプロセスが成功します。** 同じ名前へ 6 プロセスが同時に作る試行を 200 回行うと、
-overlayfs で 34 件、ext4 で 6 件の複数成功が出ました。`os.mkdir`（システムコール）を直接
-呼ぶ経路では、どちらのファイルシステムでも 0 件です。**条件はファイルシステムではなく、
-`mkdir` コマンドの実装（uutils coreutils 0.8.0）にあります**
-（[#297](https://github.com/devbasex/ai-plugins/issues/297)）。
+ラウンドを回す仕組み（監視・状態の保存・結果の読み取り）は `cross-review` の中に置かれ、
+`cross-refactoring` がそこを指していました。片方の Skill を配らない配布先では、もう片方から
+読めません。共通層を `plugins/ndf/scripts/lib/` へ移しました
+（[#285](https://github.com/devbasex/ai-plugins/issues/285) /
+[#280](https://github.com/devbasex/ai-plugins/issues/280)）。
 
-関門を 2 段にしました。1 段目はこれまでどおりディレクトリの作成で、ロックの位置を押さえ、
-陳腐化の判定がこの段に乗ります。2 段目は部分シェルで `set -C`（noclobber）を有効にした
-`held` ファイルの作成で、ここを通れた 1 つが持ち主になります。シェル自身の
-`open(O_CREAT|O_EXCL)` が関門になるため、外部コマンドの実装に左右されません。同じ条件で
-測ると複数成功は 0 件です。
+`monitor.py` は**移すだけ**です。2 つの工程が同じ形で使えるところまでを共通にし、工程ごとに
+違う判断を 1 つの抽象へまとめる書き換えはしていません。
 
-**識別のための印（`token`）を書いてから読み直す手は採りません。** 印のファイルは書き込みの
-前に長さを 0 へ戻すため、長さの違う印を同時に書くと、短い書き込みの後ろに長い書き込みの尾が
-残ります。残った値はどのプロセスの印とも一致せず、作成に成功した全員が競り負けます。持ち主の
-いないロックは陳腐化の判定にも当たらないため、5 分のあいだだれにも取れなくなります
-（[#308](https://github.com/devbasex/ai-plugins/issues/308)）。印は識別のためだけに残り、
-書くのは持ち主に決まった 1 つだけになります。
+### GitHub の呼び出しが REST に寄りました
 
-あわせて、陳腐化したロックの判定と取り除きを同じロックの中で行うようにしました。
+進行側が使う GraphQL を、初期化で 4 点から 0 点へ、ラウンドごとに 7 点から 0 点へ減らしました
+（[#271](https://github.com/devbasex/ai-plugins/issues/271) /
+[#327](https://github.com/devbasex/ai-plugins/issues/327)）。GraphQL は取得の点数が独自の
+上限を持ち、REST とは別に枯れます。呼び出しを 1 つの経路へ寄せると、残りの余裕を 1 つの
+数字で読めます。
 
-### 主ディレクトリの編集の案内が、書き込み先を取り違えなくなりました
+あわせて、収束の判定が**継続的統合の失敗**を見るようになりました。読むのは `check-runs` の
+1 回だけです。`status` は GitHub Actions では常に `pending` を返すため使いません。
 
-tool 実行前の hook は、コマンドの文字列から書き込み先を推定して案内の要否を決めます。次の
-4 つの形で、推定した位置が実際の書き込み先と食い違っていました
-（[#201](https://github.com/devbasex/ai-plugins/issues/201) /
-[#197](https://github.com/devbasex/ai-plugins/issues/197)）。
+### 上限に達している間も、収束ループが止まらなくなりました
 
-| 形 | 何が食い違うか |
-| --- | --- |
-| 関数定義 | 本体に書いた `cd` を、定義した時点で実行されたものとして数える |
-| `case` のフォールスルー | `;&` `;;&` で次の枝へ落ちたとき、前の枝の移動を引き継がない |
-| 前置リダイレクト | 命令名より前に置いたリダイレクトの後ろの `cd` を読み飛ばす |
-| ファイル記述子 | リダイレクトの左に添えた番号を、書き込み先のファイル名として拾う |
+GitHub の呼び出しの上限に達すると、レビューの投稿がその場で落ちていました。投稿は待ち行列へ
+積み、回復した後に順に流します（[#291](https://github.com/devbasex/ai-plugins/issues/291)）。
+**待ち行列が空になるまで収束させません。** 届いていない指摘を数えたまま終わらないためです。
 
-**食い違いは両方向に現れます。** 主ディレクトリへ書くのに案内が出ない形と、作業ツリーの
-中で書いているのに主ディレクトリ向けの案内が出る形の両方を、bash で実際の書き込み先を
-確かめて特定しました。記述子を拾う形では本来の宛先も落ちます（`cp a b 2>&1` の宛先が `b`
-ではなく `2` になります）。
+### Skill の本文から、このリポジトリ固有の前提が外れました
 
-4 つとも、コマンドの文字列を 1 度読み通す形を保ったまま直しています。
+手順書が検証のコマンドをこのリポジトリの名前で書いていたため、他のリポジトリでは書かれた
+とおりに実行できませんでした。コマンドを名指しせず、**探す先を一覧で示す**形にしました
+（[#292](https://github.com/devbasex/ai-plugins/issues/292)）。再発を防ぐ規約と、機械の検査
+（`scripts/check-skill-repo-assumptions.py`）を新しく置いています。
 
-### 排他の実装が 1 つのファイルに集まりました
+### cross-refactoring の適用担当が 4 CLI すべてになりました
 
-同じ手順の排他が台帳の側と控えの側の 2 箇所にありました。片方だけを直すと、もう片方が
-古い手順のまま残ります。2 段の関門・陳腐化の判定・待ちの上限を
-`plugins/ndf/scripts/lib/lock-common.sh` へ寄せ、**既存の関数名は薄い委譲として残しました**
-（[#293](https://github.com/devbasex/ai-plugins/issues/293)）。呼び出し側の書き換えは要りません。
+適用を任せる母集合に入らない CLI がありました。4 つすべてを対象にし、
+`--max-outer-rounds` の既定を 3 から 4 へ変えました
+（[#216](https://github.com/devbasex/ai-plugins/issues/216) /
+[#284](https://github.com/devbasex/ai-plugins/issues/284)）。上限が 3 のままだと、輪番が
+4 者目の順番へ届きません。
 
-共通ファイルは 4 つの配布先ランタイムすべてから相対でたどれます。読み込みは
-`. "$DIR/../../../../scripts/lib/<名前>"` の形に固定しました。`cd` で解決すると Kiro CLI の
-symlink の手前へ戻り、共通ファイルに届かないためです。読み込めないときは、控えへの書き込みを
-行わずに終了コード 0 で工程を続けます。
+あわせて、**実際に動いたモデル名を取得できるのは claude だけである**という事実を集計へ
+入れました。取得できない 3 者は、取得できなかったこととして記録されます。
 
-### 既知の制約
+### cross-review の手順書と説明が実装に合いました
 
-agy では、主ディレクトリを編集したときの誘導が届きません
-（[#305](https://github.com/devbasex/ai-plugins/issues/305)）。agy がプラグインの
-`hooks.json` を読み込まないためで、他の 3 ランタイムには影響しません。案内が出ないだけで、
-編集そのものは成立します。
+手順書を分け、契約（受け渡す値と結果ファイルの形）を `docs/04-contracts.md` へ移しました
+（[#330](https://github.com/devbasex/ai-plugins/issues/330)）。副コマンドの説明を実装の
+挙動へ合わせ（[#329](https://github.com/devbasex/ai-plugins/issues/329)）、`pr-review` の
+起動の約束を `external-ai` へ一本化しました
+（[#286](https://github.com/devbasex/ai-plugins/issues/286)）。同じ約束が 2 箇所にあると、
+片方だけが更新されます。
 
 ### 更新の手順
 
-取得元を更新してから、プラグインの側も更新します。**取得元の更新だけでは、導入済みの版は
-変わりません。**
+**開発版は取得元を `develop` へ向けた利用者にだけ届きます。** 取得元を切り替えたら、続けて
+プラグインの側も更新します。**取得元の登録だけでは、導入済みの版は変わりません。**
 
 ```bash
-claude plugin marketplace update ai-plugins && claude plugin update ndf@ai-plugins
-codex plugin marketplace upgrade ai-plugins && codex plugin add ndf@ai-plugins
-git -C <clone> pull && bash plugins/ndf/dev.kiro/install.sh --project <ディレクトリ> --yes
-git -C <clone> pull && agy plugin uninstall ndf && agy plugin install <clone>/plugins/ndf/dev.agy
-```
-
-**agy には入れ替えの操作がありません。** 導入済みの実体を新しくするには、外してから入れ直します
-（[#289](https://github.com/devbasex/ai-plugins/issues/289)）。
-
-**サードパーティのマーケットプレイスは自動更新が既定で無効です。** この版を出しても、利用者が
-更新の操作を実行した時点で届きます。
-
-```bash
-# Claude Code — 取得元の一覧を更新してから入れ替えます
-claude plugin marketplace update ai-plugins
+# Claude Code — 取得元を develop へ向けてから入れ替えます
+claude plugin marketplace add https://github.com/devbasex/ai-plugins.git#develop
 claude plugin update ndf@ai-plugins
 
-# Codex
-codex plugin marketplace update ai-plugins
+# Codex — 同名の取得元の上書きを拒むため、先に外します
+codex plugin marketplace remove ai-plugins
+codex plugin marketplace add devbasex/ai-plugins --ref develop
 codex plugin add ndf@ai-plugins
 
-# Kiro — clone を更新してから入れ直します
-git -C <clone> pull
+# Kiro — clone を develop へ切り替えてから入れ直します
+git -C <clone> fetch && git -C <clone> checkout develop && git -C <clone> pull
 bash plugins/ndf/dev.kiro/install.sh --project <ディレクトリ> --yes
 
 # agy — 入れ替えの操作が無いため、外してから入れ直します
-git -C <clone> pull
+git -C <clone> fetch && git -C <clone> checkout develop && git -C <clone> pull
 agy plugin uninstall ndf && agy plugin install <clone>/plugins/ndf/dev.agy
 ```
 
-**取得元を更新しただけでは、導入済みの版は変わりません。** 実体は版ごとのディレクトリに
-置かれ、導入の記録がそのうち 1 つを指すためです。理由と、ランタイムごとに違う点は
-`AGENTS.md` の「版の付け方と開発版の配布」にあります。開発版チャネル（`develop`）の登録手順も
-そちらにあります。
+**1 人の利用者は片方のチャネルしか持てません。** 取得元は名前ごとに 1 つしか登録できないため、
+正式版へ戻すときは取得元を登録し直します。理由と、ランタイムごとに違う点は `AGENTS.md` の
+「版の付け方と開発版の配布」にあります。
 
 ## Playwright テストについて
 
@@ -366,7 +344,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.1.0/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.2.0-dev.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -388,14 +366,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.1.0/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.2.0-dev.1/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.1.0  <path>
+# => ndf@ai-plugins  installed, enabled  10.2.0-dev.1  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
