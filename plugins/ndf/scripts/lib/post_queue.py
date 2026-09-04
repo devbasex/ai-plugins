@@ -510,13 +510,12 @@ def retry(cmd: list[str], max_wait: float = 900.0, interval: float = 30.0,
         attempt = run(cmd, stdin=stdin)
         if attempt.ok or not is_rate_limited(attempt):
             return attempt
-        if waited >= max_wait:
+        if interval <= 0 or waited + interval > max_wait:
             return attempt
-        wait = min(interval, max_wait - waited) if interval > 0 else 0.0
-        print(f"⏳ 上限のため {wait:.0f} 秒待って再実行します: {' '.join(cmd)}",
+        print(f"⏳ 上限のため {interval:g} 秒待って再実行します: {' '.join(cmd)}",
               file=sys.stderr)
-        sleep(wait)
-        waited += max(wait, 1.0) if interval > 0 else max_wait + 1.0
+        sleep(interval)
+        waited += interval
 
 
 # ---------------- CLI ----------------

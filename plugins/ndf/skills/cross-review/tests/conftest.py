@@ -131,7 +131,14 @@ if log:
 
 rules_file = os.environ.get("GH_FAKE_RULES")
 rules = json.load(open(rules_file, encoding="utf-8")) if rules_file else []
+prior = 0
+if log and os.path.exists(log):
+    with open(log, encoding="utf-8") as f:
+        prior = sum(1 for line in f if line.strip()) - 1
 for rule in rules:
+    # `calls_lt` は「先頭から数えて何回目までこの規則を当てるか」。回復を模す。
+    if "calls_lt" in rule and prior >= int(rule["calls_lt"]):
+        continue
     if rule.get("match", "") in joined:
         sys.stdout.write(rule.get("stdout", ""))
         sys.stderr.write(rule.get("stderr", ""))
