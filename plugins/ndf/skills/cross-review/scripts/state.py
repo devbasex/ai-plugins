@@ -282,6 +282,166 @@ def _git_toplevel() -> str | None:
     return None
 
 
+# ---------------- GitHub の呼び出し ----------------
+#
+# **尽きるのは GraphQL 側である**（#271）。`gh pr view` は項目を増やしても
+# 1 リクエストのままだが、REST 側は上限 5,000 のうち大半が残ったまま進行が止まる。
+# 項目をまとめる先を REST にして、GraphQL の消費を実行ごと・ラウンドごとに 0 点へ寄せる。
+
+
+class RestResponse(NamedTuple):
+    """`gh api -i` の 1 回の応答。ヘッダと本文を組で持つ。
+
+    残量（`x-ratelimit-remaining`）は**通常の要求の応答ヘッダからしか読めない**。
+    `gh api rate_limit` は同じ時刻でも消費を反映しない（実測）。読むためだけの
+    呼び出しを置かず、毎回の応答から拾う。
+    """
+
+    headers: dict[str, str]
+    body: Any
+    rate_remaining: int | None
+    rate_reset: str | None
+
+
+def _parse_rest_headers(text: str) -> tuple[dict[str, str], str]:
+    """`gh api -i` の出力を、ヘッダの辞書と本文へ分ける。
+
+    状態行だけが `\r` を持たず、以降のヘッダは `\r\n` で終わる（実測）。行末の
+    違いで分けられなくなるため、空行そのものを区切りとして読む。
+    """
+    headers: dict[str, str] = {}
+    lines = text.splitlines(keepends=True)
+    body_at = len(lines)
+    for i, line in enumerate(lines):
+        if not line.strip():
+            body_at = i + 1
+            break
+        name, sep, value = line.partition(":")
+        if sep:
+            headers[name.strip().lower()] = value.strip()
+    return headers, "".join(lines[body_at:])
+
+
+def _gh_rest(path: str) -> RestResponse | None:
+    """REST の 1 回の要求を投げ、ヘッダと本文を返す。失敗は `None`。
+
+    **例外を投げず、進行を止めない側へ倒す**（#291 の待ち行列を挟む位置）。
+    呼び出し側は `None` を「確かめられなかった」として扱う。積む・待つ・流すは
+    ここではなく呼び出し側が持つ。
+    """
+    try:
+        r = subprocess.run(["gh", "api", "-i", path], capture_output=True, text=True)
+    except OSError as exc:
+        info(f"⚠ gh の実行に失敗 ({path}): {exc}")
+        return None
+    if r.returncode != 0:
+        info(f"⚠ REST が失敗 ({path}, exit={r.returncode}): {r.stderr.strip()[:200]}")
+        return None
+    headers, raw = _parse_rest_headers(r.stdout)
+    try:
+        body = json.loads(raw) if raw.strip() else None
+    except json.JSONDecodeError as exc:
+        info(f"⚠ REST の応答を読み取れない ({path}): {exc}")
+        return None
+    remaining = headers.get("x-ratelimit-remaining")
+    try:
+        rate_remaining = int(remaining) if remaining is not None else None
+    except ValueError:
+        rate_remaining = None
+    return RestResponse(
+        headers=headers,
+        body=body,
+        rate_remaining=rate_remaining,
+        rate_reset=headers.get("x-ratelimit-reset"),
+    )
+
+
+_REPO_URL = re.compile(
+    r"(?:github\.com[:/])(?P<owner>[^/]+)/(?P<name>[^/]+?)(?:\.git)?/?$"
+)
+
+
+def _git_remote_url() -> str:
+    """`origin` の取得元を返す。読めなければ空文字。"""
+    try:
+        r = subprocess.run(
+            ["git", "remote", "get-url", "origin"], capture_output=True, text=True,
+        )
+    except OSError:
+        return ""
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def _repo_from_git() -> str | None:
+    """git の設定から `owner/repo` を求める。求まらなければ `None`。
+
+    **求めた名前はそのまま使わない。** `repos/{owner}/{repo}/pulls/{PR}` の応答が
+    そのまま検証になるため、誤った名前は失敗として現れる（`_fetch_pr_metadata`）。
+    """
+    m = _REPO_URL.search(_git_remote_url())
+    return f"{m.group('owner')}/{m.group('name')}" if m else None
+
+
+class PrMetadata(NamedTuple):
+    """REST の 1 回の応答から取れる、Pull Request のメタデータ。"""
+
+    repo: str
+    author: str
+    head_branch: str
+    head_sha: str
+    base_branch: str
+    is_fork: bool
+    rate_remaining: int | None
+    rate_reset: str | None
+
+
+def _pr_metadata_of(repo: str, resp: RestResponse) -> PrMetadata | None:
+    body = resp.body
+    if not isinstance(body, dict) or not body.get("number"):
+        return None
+    head = body.get("head") or {}
+    base = body.get("base") or {}
+    head_repo = (head.get("repo") or {}).get("full_name") or ""
+    return PrMetadata(
+        repo=repo,
+        author=str((body.get("user") or {}).get("login") or ""),
+        head_branch=str(head.get("ref") or ""),
+        head_sha=str(head.get("sha") or ""),
+        base_branch=str(base.get("ref") or ""),
+        is_fork=bool(head_repo) and head_repo != repo,
+        rate_remaining=resp.rate_remaining,
+        rate_reset=resp.rate_reset,
+    )
+
+
+def _fetch_pr_metadata(pr: int, repo: str | None = None) -> PrMetadata | None:
+    """作成者・head・base・head の commit を REST の 1 回で取る。
+
+    リポジトリ名は渡された値、無ければ git の設定から求める。**その名前が誤って
+    いれば応答が失敗するため、そのときだけ `gh repo view` で解決し直す。**
+    確かめる手段が同じ呼び出しに含まれるので、追加の消費なしで誤りを塞げる。
+    """
+    tried: list[str] = []
+    for candidate in (repo, _repo_from_git()):
+        if not candidate or candidate in tried:
+            continue
+        tried.append(candidate)
+        resp = _gh_rest(f"repos/{candidate}/pulls/{int(pr)}")
+        if resp is None:
+            continue
+        meta = _pr_metadata_of(candidate, resp)
+        if meta is not None:
+            return meta
+    resolved = _sh(
+        ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
+        check=False,
+    )
+    if not resolved or resolved in tried:
+        return None
+    resp = _gh_rest(f"repos/{resolved}/pulls/{int(pr)}")
+    return _pr_metadata_of(resolved, resp) if resp is not None else None
+
+
 class HeadRef(NamedTuple):
     """レビュー対象の Pull Request の head。
 
@@ -296,30 +456,23 @@ class HeadRef(NamedTuple):
     is_fork: bool
 
 
-def _resolve_head_ref(pr: int, code: int = 8) -> HeadRef:
+def _resolve_head_ref(pr: int, code: int = 8, repo: str | None = None) -> HeadRef:
     """その時点の head を GitHub から取り直す。
 
     状態ファイルの `head_branch` は `init` が書いた後に更新されない。`squash` の
     巻き直しは `<branch>-r<HHMMSS>` という新しいブランチを作るため、そのまま使うと
     **巻き直しの後に巻き直し前のブランチへ戻すことになる**。取れないときは
     状態ファイルの古い値へ落とさずに止める。落ちた先が誤っていては意味が無い。
+
+    照会は REST の 1 回で、ブランチ名・commit・フォークの別が同じ応答から取れる。
     """
-    r = subprocess.run(
-        ["gh", "pr", "view", str(pr), "--json",
-         "headRefName,headRefOid,isCrossRepository"],
-        capture_output=True, text=True,
-    )
-    if r.returncode != 0:
-        die(f"PR #{pr} の head を取得できない: {r.stderr.strip()[:200]}", code=code)
-    try:
-        data = json.loads(r.stdout)
-        branch = str(data["headRefName"])
-        oid = str(data["headRefOid"])
-    except (json.JSONDecodeError, KeyError, TypeError) as exc:
-        die(f"PR #{pr} の head を読み取れない: {exc}", code=code)
-    if not branch or not oid:
+    meta = _fetch_pr_metadata(pr, repo)
+    if meta is None:
+        die(f"PR #{pr} の head を取得できない", code=code)
+        raise SystemExit(code)  # die は戻らないが、型のために置く
+    if not meta.head_branch or not meta.head_sha:
         die(f"PR #{pr} の head が空である", code=code)
-    return HeadRef(branch=branch, oid=oid, is_fork=bool(data.get("isCrossRepository")))
+    return HeadRef(branch=meta.head_branch, oid=meta.head_sha, is_fork=meta.is_fork)
 
 
 def _fetch_head(worktree: str, pr: int, head: HeadRef) -> bool:
@@ -1043,7 +1196,10 @@ def cmd_init(args: argparse.Namespace) -> None:
     # worktree path を先に解決してから tmp_dir を決定する。
     # tmp_dir は <worktree>/.cross_review/ に配置し、作業領域を 1 つに保つ。
     # path には repo slug を含め、他リポジトリの同一 PR 番号と衝突しないようにする。
-    repo = _sh(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
+    # リポジトリ名は git の設定から求める。GraphQL を 1 点使わずに済み、誤りは
+    # この後の REST の応答が検証する（`_fetch_pr_metadata`）。
+    repo = _repo_from_git() or _sh(
+        ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
     worktree = str(pathlib.Path(args.worktree).resolve()) if args.worktree else str(
         _default_worktree_base() / _repo_slug(repo) / f"pr{pr}")
 
@@ -1114,17 +1270,30 @@ def cmd_init(args: argparse.Namespace) -> None:
             print(f"RESUMED=1")
             return
 
-    # 新規 init: プリチェック
+    # 新規 init: プリチェック。
+    # **作成者・head・base は REST の 1 回でまとめて取る。** 項目ごとに `gh pr view` を
+    # 投げていた分（GraphQL 3 点）と、リポジトリ名の解決（同 1 点）が 0 点になる。
+    meta = _fetch_pr_metadata(pr, repo)
+    if meta is None:
+        die(f"PR #{pr} のメタデータを取得できません（リポジトリ名: {repo}）")
+        return
+    if meta.repo != repo:
+        repo = meta.repo
+        if not args.worktree:
+            worktree = str(_default_worktree_base() / _repo_slug(repo) / f"pr{pr}")
+    if meta.rate_remaining is not None:
+        info(f"ℹ GitHub REST の残量: {meta.rate_remaining}")
+
     me = _sh(["gh", "api", "user", "--jq", ".login"])
-    author = _sh(["gh", "pr", "view", str(pr), "--json", "author", "--jq", ".author.login"])
+    author = meta.author
     is_own = (me == author)
     event_downgrade = is_own
     if is_own:
         info(f"⚠ 自分の PR (author={me}) — REQUEST_CHANGES → COMMENT 強制ダウングレード")
 
     # worktree 分離 — _tmp_dir() より先に worktree を作成/確認する
-    head_branch = _sh(["gh", "pr", "view", str(pr), "--json", "headRefName", "--jq", ".headRefName"])
-    base_branch = _sh(["gh", "pr", "view", str(pr), "--json", "baseRefName", "--jq", ".baseRefName"])
+    head_branch = meta.head_branch
+    base_branch = meta.base_branch
     changed_files = _fetch_changed_files(pr, repo)
     auto_review_categories = _classify_changed_files(changed_files)
     auto_review = _auto_review_instructions(auto_review_categories)
@@ -1322,7 +1491,7 @@ def _guard_previous_round(st: dict[str, Any], prev: dict[str, Any]) -> None:
         )
 
 
-def _sync_before_round(st: dict[str, Any], pr: int) -> None:
+def _sync_before_round(st: dict[str, Any], pr: int) -> HeadRef | None:
     """ラウンドを開く前に、レビュー用の作業ツリーを Pull Request の head へ揃える。
 
     同期は作られるときと再開するときにしか行われていなかった。修正を作業ツリーの外で
@@ -1339,15 +1508,16 @@ def _sync_before_round(st: dict[str, Any], pr: int) -> None:
     wt = str(st.get("worktree_path") or "")
     if not wt:
         info("⚠ state に worktree_path が無い — 作業ツリーの同期を飛ばして続行します")
-        return
+        return None
     if not _is_registered_worktree(wt):
         info(f"⚠ 登録済みの作業ツリーではない ({wt}) — 同期を飛ばして続行します")
-        return
-    head = _resolve_head_ref(pr)
+        return None
+    head = _resolve_head_ref(pr, repo=str(st.get("repo") or "") or None)
     _sync_worktree(wt, pr, head, strict=True)
     # 解決したブランチ名を書き戻す。巻き直しの後は state の値が古いため、再開の経路も
     # ここで書かれた値を読む。保存はこの後の round エントリの追加と同じ書き込みで済む。
     st["head_branch"] = head.branch
+    return head
 
 
 def cmd_start_round(args: argparse.Namespace) -> None:
@@ -1365,17 +1535,21 @@ def cmd_start_round(args: argparse.Namespace) -> None:
         _guard_previous_round(st, st["rounds"][-1])
 
     pr = st["current_pr"]
-    _sync_before_round(st, pr)
+    head = _sync_before_round(st, pr)
 
     round_no = total + 1
     round_in_pr = sum(1 for r in st["rounds"] if r["pr"] == pr) + 1
 
-    # round エントリを開く
-    st["rounds"].append({
+    # round エントリを開く。head の commit を記録するのは、起動スクリプト 2 本と
+    # 収束の判定が同じ値を読むためである。**2 本が同じ値を別々に取っていた分が 0 になる。**
+    entry: dict[str, Any] = {
         "round": round_no,
         "pr": pr,
         "started_at": _now(),
-    })
+    }
+    if head is not None:
+        entry["head_sha"] = head.oid
+    st["rounds"].append(entry)
     _save(args.pr, st)
 
     info(f"=== Round {round_no} / {max_r} (PR #{pr}, round_in_pr={round_in_pr}) ===")

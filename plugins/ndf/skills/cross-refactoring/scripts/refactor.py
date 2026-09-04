@@ -31,6 +31,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import signal
 import subprocess
 import sys
@@ -971,26 +972,72 @@ def _warn_unmeasurable_models(
         )
 
 
-def _fetch_pr_context(pr: int) -> tuple[str, str, bool, str]:
+_REPO_URL = re.compile(
+    r"(?:github\.com[:/])(?P<owner>[^/]+)/(?P<name>[^/]+?)(?:\.git)?/?$"
+)
+
+
+def _repo_from_git() -> Optional[str]:
+    """git の設定から `owner/repo` を求める。求まらなければ `None`。
+
+    **求めた名前はそのまま使わない。** `repos/{owner}/{repo}/pulls/{PR}` の応答が
+    そのまま検証になるため、誤った名前は失敗として現れる（`_fetch_pr_context`）。
+    """
+    m = _REPO_URL.search(_sh(["git", "remote", "get-url", "origin"], check=False))
+    return f"{m.group('owner')}/{m.group('name')}" if m else None
+
+
+def _pr_payload(repo: str, pr: int) -> Optional[dict[str, Any]]:
+    """`repos/{repo}/pulls/{pr}` の応答を返す。読めなければ `None`。"""
+    out = _sh(["gh", "api", f"repos/{repo}/pulls/{int(pr)}"], check=False)
+    if not out:
+        return None
+    try:
+        body = json.loads(out)
+    except json.JSONDecodeError:
+        return None
+    return body if isinstance(body, dict) and body.get("number") else None
+
+
+def _fetch_pr_context(pr: int, repo: Optional[str] = None) -> tuple[str, str, str, bool, str]:
     """GitHub から Pull Request のメタデータを取り、自分の Pull Request かを判定する。
 
-    返すのは `(base_branch, head_branch, is_own_pr, author)`。
+    返すのは `(repo, base_branch, head_branch, is_own_pr, author)`。
+
+    **作成者・head・base は REST の 1 回でまとめて取る**（#271）。項目ごとに
+    `gh pr view` を投げると、同じ Pull Request へ GraphQL を 3 点使う。尽きるのは
+    GraphQL 側であり、REST 側は上限 5,000 のうち大半が残ったまま進行が止まる。
     """
+    tried: list[str] = []
+    body: Optional[dict[str, Any]] = None
+    resolved = ""
+    for candidate in (repo, _repo_from_git()):
+        if not candidate or candidate in tried:
+            continue
+        tried.append(candidate)
+        body = _pr_payload(candidate, pr)
+        if body is not None:
+            resolved = candidate
+            break
+    if body is None:
+        # 求めた名前が誤っていたときだけ、GraphQL で解決し直す。
+        fallback = _sh(
+            ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
+        body = _pr_payload(fallback, pr)
+        if body is None:
+            die(f"Pull Request #{pr} のメタデータを取得できません（リポジトリ名: {fallback}）")
+            raise SystemExit(ABORT)
+        resolved = fallback
+
     # **取得に失敗しても止めない。** bot トークン（Actions の `GITHUB_TOKEN` など）は
     # `/user` を読めず `HTTP 403` を返す。この値は自分の Pull Request かどうかの
     # 判定にしか使わないので、読めなければ他者の Pull Request として扱えばよい。
     viewer = _sh(["gh", "api", "user", "--jq", ".login"], check=False)
-    author = _sh(
-        ["gh", "pr", "view", str(pr), "--json", "author", "--jq", ".author.login"]
-    )
+    author = str((body.get("user") or {}).get("login") or "")
     is_own_pr = bool(viewer) and viewer == author
-    head_branch = _sh(
-        ["gh", "pr", "view", str(pr), "--json", "headRefName", "--jq", ".headRefName"]
-    )
-    base_branch = _sh(
-        ["gh", "pr", "view", str(pr), "--json", "baseRefName", "--jq", ".baseRefName"]
-    )
-    return base_branch, head_branch, is_own_pr, author
+    head_branch = str((body.get("head") or {}).get("ref") or "")
+    base_branch = str((body.get("base") or {}).get("ref") or "")
+    return resolved, base_branch, head_branch, is_own_pr, author
 
 
 def cmd_init(args: argparse.Namespace) -> None:
@@ -1020,8 +1067,8 @@ def cmd_init(args: argparse.Namespace) -> None:
     # 参加者が欠けた構成のまま最後まで走り切ってしまう。
     auth = check_auth(sorted(set(runtimes) | set(impl_capable)))
 
-    repo = _sh(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
-    base_branch, head_branch, is_own_pr, author = _fetch_pr_context(args.pr)
+    # リポジトリ名は git の設定から求め、Pull Request の応答で確かめる（#271）。
+    repo, base_branch, head_branch, is_own_pr, author = _fetch_pr_context(args.pr)
     if is_own_pr:
         info(f"⚠ 自分の Pull Request です（作成者 {author}）— 投稿は COMMENT へ倒します")
 

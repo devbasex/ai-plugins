@@ -31,7 +31,11 @@ EXTRA_REVIEW_INSTRUCTIONS=$(jq -r '.review_instructions // .extra_review_instruc
 # PR (=current_pr) は gh コマンドのレビュー対象 PR 番号として使う。
 # tmp パス側は STATE_PR で固定 (monitor.py / state.py との読み書き整合のため)。
 PR=$(jq -r '.current_pr' "$STATE")
-SHA=$(gh pr view "$PR" --json headRefOid -q .headRefOid)
+# head のコミットは state.json から読む（#271）。`start-round` が同期のときに解決した
+# 値をラウンドへ記録しており、codex と agy が同じ値を別々に取る必要が無い。
+# 前の版の state.json から再開したときだけ、従来の `gh pr view` へ落ちる。
+SHA=$(jq -r '(.rounds[-1].head_sha // "")' "$STATE")
+[ -n "$SHA" ] || SHA=$(gh pr view "$PR" --json headRefOid -q .headRefOid)
 
 # 前ラウンドの結果を残さない。投稿失敗などで今ラウンドの result.json が
 # 書かれなかったとき、state.py read-result が**前ラウンドの結果を読んで**

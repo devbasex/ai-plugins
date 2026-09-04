@@ -82,7 +82,19 @@ worktree 外を触ると競合します。
 
 1. PR コメント取得 (3 ソース): `fix/scripts/fetch-pr-comments.sh {OWNER_REPO} {PR}` でインラインコメント / レビュー body / PR レベルコメントを一括取得
 2. 重要度を独自再判定（AI agent のラベルは参考値）
-3. CI 状態スナップショット: `gh pr checks {PR} --json name,state` （**完了待ちはしない**、PENDING は無視して FAILURE のみ修正対象に取り込む）
+3. CI 状態スナップショット: `gh api repos/{OWNER_REPO}/commits/{HEAD_OID}/check-runs`
+   （**REST の 1 回だけ**。`gh pr checks` は同じ判断へ GraphQL を 4 リクエスト使う。
+   **完了待ちはしない** — `status` が `completed` でないものは対象から外し、
+   `conclusion` が `failure` のものだけを修正対象に取り込む）
+
+   ```bash
+   gh api "repos/{OWNER_REPO}/commits/{HEAD_OID}/check-runs" \
+     --jq '[.check_runs[] | select(.status == "completed" and .conclusion == "failure") | .name]'
+   ```
+
+   **`commits/{HEAD_OID}/status` は使わない。** GitHub Actions は検査ジョブを記録し
+   commit の状態を記録しないため、すべて成功した commit でも `state: "pending"` /
+   `total_count: 0` を返す（実測）。保留として読むと、承認されたラウンドが収束しない。
 4. critical/major + 該当 minor/nit の修正コミット（worktree 内のみ）
 5. `./pint-changed.sh && ./larastan-changed.sh` 等の品質チェック
 6. push: `git push origin {HEAD_BRANCH}` （--force / --no-verify 禁止）

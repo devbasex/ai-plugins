@@ -37,7 +37,11 @@ EXTRA_REVIEW_INSTRUCTIONS=$(jq -r '.review_instructions // .extra_review_instruc
 # tmp パス側は STATE_PR で固定 (monitor.py / state.py が同じ STATE_PR 起点で
 # 読みに来るため、ここを揃えないと PR rotation 後に読み書きパスが食い違う)。
 PR=$(jq -r '.current_pr' "$STATE")
-SHA=$(gh pr view "$PR" --json headRefOid -q .headRefOid)
+# head のコミットは state.json から読む（#271）。`start-round` が同期のときに解決した
+# 値をラウンドへ記録しており、codex と agy が同じ値を別々に取る必要が無い。
+# 前の版の state.json から再開したときだけ、従来の `gh pr view` へ落ちる。
+SHA=$(jq -r '(.rounds[-1].head_sha // "")' "$STATE")
+[ -n "$SHA" ] || SHA=$(gh pr view "$PR" --json headRefOid -q .headRefOid)
 
 # 前ラウンドの結果を残さない。投稿失敗などで今ラウンドの result.json が
 # 書かれなかったとき、state.py read-result が**前ラウンドの結果を読んで**
