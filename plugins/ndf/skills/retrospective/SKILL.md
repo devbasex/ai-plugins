@@ -132,11 +132,76 @@ issue と Pull Request の両方で検索する。**
 | 場合 | 起点にするコミット |
 | --- | --- |
 | 起点の issue を持たない変更 | その変更をマージした先のブランチ（起点。`.ndf/worktree.json` の `base_branch`）の先頭 |
-| まとまり | そのまとまりを配布した先（`main`）の先頭 |
+| まとまり | そのまとまりを配布した先（正式版のチャネルのブランチ）の先頭 |
+
+**起点のブランチは対象リポジトリが決める。** 字面で書かず、`merged` / `deploy` /
+`pr-review` / `cherry-pick-pr` と同じ解決を使う。
 
 ```bash
-BASE=develop      # 起点のブランチ。まとまりの配布なら main
-gh api "/repos/$RECORD_REPO/commits/$(git rev-parse "origin/$BASE")/pulls" \
+# 起点は開発の本流であって、既定ブランチとは限らない。宣言（`.ndf/worktree.json` の
+# `base_branch`）を先に読み、その名前が実在することを確かめる。取得済みの参照に無ければ
+# origin へ問い合わせる（取得していないだけの場合を「無い」と読まないため）。実在しなければ
+# 既定ブランチへ落とさずに止まる。宣言が無ければ origin の HEAD が指す先を使い、それも
+# 取れなければ慣例の名前のうちローカルにあるものへ落とす
+# （共通ライブラリ `wt_base_branch` と同じ順序）
+dev_base=$(jq -r 'select(.version == 1) | .base_branch | select(type == "string")' \
+  .ndf/worktree.json 2>/dev/null)
+if [ -n "$dev_base" ]; then
+  dev_base_found=0
+  if git show-ref --verify --quiet "refs/remotes/origin/$dev_base" ||
+     git show-ref --verify --quiet "refs/heads/$dev_base"; then
+    dev_base_found=1
+  else
+    # `git ls-remote` のパターンは参照名の末尾に一致する。問い合わせの成功だけを見ると
+    # `refs/heads/x/refs/heads/develop` のような別のブランチでも「ある」と読むため、
+    # 返った行の参照名そのものを照合する（共通ライブラリ `wt_branch_exists` と同じ形）
+    dev_base_listing=$(GIT_TERMINAL_PROMPT=0 git ls-remote --heads origin \
+      "refs/heads/$dev_base" 2>/dev/null)
+    while IFS= read -r line; do
+      case "$line" in *$'\t'"refs/heads/$dev_base") dev_base_found=1; break ;; esac
+    done <<<"$dev_base_listing"
+  fi
+  [ "$dev_base_found" -eq 1 ] || {
+    printf 'NOTE: .ndf/worktree.json の base_branch が指す %s は origin にもローカルにもありません\n' \
+      "$dev_base" >&2
+    exit 1
+  }
+else
+  dev_base=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
+  for candidate in main master; do
+    [ -n "$dev_base" ] && break
+    git show-ref --verify --quiet "refs/heads/$candidate" && dev_base=$candidate
+  done
+  dev_base=${dev_base:-main}
+fi
+```
+
+**まとまりを対象にする場合は、`$dev_base` ではなくそのまとまりを配布した先を使う。**
+`$dev_base` は開発の起点であり、配布した先とは限らない。開発の起点と配布の先が別の
+ブランチであるリポジトリで `$dev_base` のまま引くと、配布の Pull Request ではなく起点の
+先頭に関連付いた別の Pull Request を選び、誤った番号へ記録を投稿する。
+
+```bash
+# 起点の issue を持たない変更 — 開発の起点をそのまま使う
+record_base=$dev_base
+```
+
+```bash
+# まとまり — 配布した先を使う。**配布した先は対象リポジトリが決める。** 開発の起点を
+# そのまま配布に使っているリポジトリでは `$dev_base` と同じ値になり、正式版のチャネルを
+# 分けているリポジトリでは別の値になる。字面で書かず、既定ブランチ（origin の HEAD が
+# 指す先）で確かめる。取れないときは推測せず番号を利用者に聞く
+record_base=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
+[ -n "$record_base" ] || {
+  printf 'NOTE: まとまりを配布した先のブランチを判別できません。番号を利用者に聞いてください\n' >&2
+  exit 1
+}
+```
+
+決めた `$record_base` で番号を引く。
+
+```bash
+gh api "/repos/$RECORD_REPO/commits/$(git rev-parse "origin/$record_base")/pulls" \
   --jq '.[] | select(.merged_at) | "#\(.number) \(.base.ref) <- \(.head.ref)"'
 ```
 
