@@ -51,16 +51,26 @@ def build_tree(tmp_path: Path, *, listed: str, unlisted: str) -> Path:
     return skills
 
 
-def run_check(skills_dir: Path, exclusions: dict[str, str] | None = None,
+def run_check(skills_dir: Path | None, exclusions: dict[str, str] | None = None,
               tmp_path: Path | None = None) -> subprocess.CompletedProcess[str]:
-    """検査を起動する。`exclusions` を省くと、検査が持つ既定の宣言を使う。"""
-    argv = [sys.executable, str(CHECKER), "--skills-dir", str(skills_dir)]
+    """検査を起動する。`exclusions` を省くと、検査が持つ既定の宣言を使う。
+
+    `skills_dir` を None にすると `--skills-dir` を渡さず、family をすべて見る走査になる。
+    """
+    argv = [sys.executable, str(CHECKER)]
+    if skills_dir is not None:
+        argv += ["--skills-dir", str(skills_dir)]
     if exclusions is not None:
         assert tmp_path is not None, "除外を差し替えるときは書き出す先が要る"
         path = tmp_path / "exclusions.json"
         path.write_text(json.dumps(exclusions, ensure_ascii=False), encoding="utf-8")
         argv += ["--exclusions", str(path)]
     return subprocess.run(argv, capture_output=True, text=True, cwd=REPO_ROOT)
+
+
+def key_for(skills_dir: Path, rel: str) -> str:
+    """除外の宣言に書くキー。`--skills-dir` に渡すのと同じ書き方である。"""
+    return (skills_dir / rel).as_posix()
 
 
 def output_of(result: subprocess.CompletedProcess[str]) -> str:
@@ -94,7 +104,9 @@ def test_clean_tree_passes(tmp_path: Path) -> None:
 def test_excluded_file_passes(tmp_path: Path) -> None:
     """同じ本文でも、除外に載せたファイルなら終了コード 0 で終わる。"""
     skills = build_tree(tmp_path, listed=ASSUMING_BODY, unlisted=CLEAN_BODY)
-    result = run_check(skills, {f"{LISTED_SKILL}/SKILL.md": "この文書の主題は NDF 自身である"}, tmp_path)
+    result = run_check(
+        skills, {key_for(skills, f"{LISTED_SKILL}/SKILL.md"): "この文書の主題は NDF 自身である"},
+        tmp_path)
     assert result.returncode == 0, output_of(result)
 
 
@@ -105,7 +117,7 @@ def test_excluded_file_passes(tmp_path: Path) -> None:
 def test_exclusion_without_reason_fails_the_check(tmp_path: Path, reason: str) -> None:
     """理由の無い除外は、ヒットの有無に関わらず検査自体を失敗させる。"""
     skills = build_tree(tmp_path, listed=CLEAN_BODY, unlisted=CLEAN_BODY)
-    result = run_check(skills, {f"{LISTED_SKILL}/SKILL.md": reason}, tmp_path)
+    result = run_check(skills, {key_for(skills, f"{LISTED_SKILL}/SKILL.md"): reason}, tmp_path)
     assert result.returncode == 2, output_of(result)
     assert "理由" in output_of(result)
 
@@ -116,7 +128,7 @@ def test_exclusion_without_reason_fails_the_check(tmp_path: Path, reason: str) -
 def test_exclusion_pointing_at_missing_file_fails_the_check(tmp_path: Path) -> None:
     """実在しないファイルを除外に載せると、検査自体が失敗する。"""
     skills = build_tree(tmp_path, listed=CLEAN_BODY, unlisted=CLEAN_BODY)
-    result = run_check(skills, {"charlie/SKILL.md": "消えた文書"}, tmp_path)
+    result = run_check(skills, {key_for(skills, "charlie/SKILL.md"): "消えた文書"}, tmp_path)
     assert result.returncode == 2, output_of(result)
     out = output_of(result)
     assert "charlie/SKILL.md" in out
@@ -125,9 +137,35 @@ def test_exclusion_pointing_at_missing_file_fails_the_check(tmp_path: Path) -> N
 def test_exclusion_outside_scan_scope_fails_the_check(tmp_path: Path) -> None:
     """実在しても走査の範囲外なら、除外として成立しないので失敗させる。"""
     skills = build_tree(tmp_path, listed=CLEAN_BODY, unlisted=CLEAN_BODY)
-    result = run_check(skills, {f"{UNLISTED_SKILL}/SKILL.md": "配らない Skill"}, tmp_path)
+    result = run_check(
+        skills, {key_for(skills, f"{UNLISTED_SKILL}/SKILL.md"): "配らない Skill"}, tmp_path)
     assert result.returncode == 2, output_of(result)
     assert f"{UNLISTED_SKILL}/SKILL.md" in output_of(result)
+
+
+def test_exclusion_of_another_family_is_not_validated(tmp_path: Path) -> None:
+    """検査していない plugin family の除外は、実在の検査に掛けない。
+
+    `--skills-dir` は family を 1 つだけ指定できる。走査していないものを「実在しない」と
+    読むと、正しい宣言のまま検査が落ちる。
+    """
+    skills = build_tree(tmp_path, listed=CLEAN_BODY, unlisted=CLEAN_BODY)
+    other = tmp_path / "plugins" / "other" / "skills"
+    result = run_check(skills, {key_for(other, "delta/SKILL.md"): "別 family の宣言"}, tmp_path)
+    assert result.returncode == 0, output_of(result)
+
+
+def test_real_exclusions_do_not_break_a_single_family_scan() -> None:
+    """検査が持つ既定の宣言のまま、NDF 以外の family だけを検査しても通る。"""
+    result = run_check(REPO_ROOT / "plugins/playwright-kit/skills")
+    assert result.returncode == 0, output_of(result)
+
+
+def test_default_scan_rejects_an_exclusion_outside_every_family(tmp_path: Path) -> None:
+    """family をすべて見る走査では、どの family にも属さない宣言を陳腐化として落とす。"""
+    result = run_check(None, {"plugins/gone/skills/delta/SKILL.md": "消えた family"}, tmp_path)
+    assert result.returncode == 2, output_of(result)
+    assert "plugins/gone/skills/delta/SKILL.md" in output_of(result)
 
 
 # --- T5: 走査の範囲 ---

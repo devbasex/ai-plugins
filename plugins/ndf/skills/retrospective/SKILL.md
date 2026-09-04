@@ -176,10 +176,32 @@ else
 fi
 ```
 
-まとまりを対象にする場合は、この値ではなくそのまとまりを配布した先を使う。
+**まとまりを対象にする場合は、`$dev_base` ではなくそのまとまりを配布した先を使う。**
+`$dev_base` は開発の起点であり、配布した先とは限らない。開発の起点と配布の先が別の
+ブランチであるリポジトリで `$dev_base` のまま引くと、配布の Pull Request ではなく起点の
+先頭に関連付いた別の Pull Request を選び、誤った番号へ記録を投稿する。
 
 ```bash
-gh api "/repos/$RECORD_REPO/commits/$(git rev-parse "origin/$dev_base")/pulls" \
+# 起点の issue を持たない変更 — 開発の起点をそのまま使う
+record_base=$dev_base
+```
+
+```bash
+# まとまり — 配布した先を使う。**配布した先は対象リポジトリが決める。** 開発の起点を
+# そのまま配布に使っているリポジトリでは `$dev_base` と同じ値になり、正式版のチャネルを
+# 分けているリポジトリでは別の値になる。字面で書かず、既定ブランチ（origin の HEAD が
+# 指す先）で確かめる。取れないときは推測せず番号を利用者に聞く
+record_base=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
+[ -n "$record_base" ] || {
+  printf 'NOTE: まとまりを配布した先のブランチを判別できません。番号を利用者に聞いてください\n' >&2
+  exit 1
+}
+```
+
+決めた `$record_base` で番号を引く。
+
+```bash
+gh api "/repos/$RECORD_REPO/commits/$(git rev-parse "origin/$record_base")/pulls" \
   --jq '.[] | select(.merged_at) | "#\(.number) \(.base.ref) <- \(.head.ref)"'
 ```
 

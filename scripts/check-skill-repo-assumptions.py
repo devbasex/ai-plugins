@@ -19,6 +19,13 @@ Skill と `tests/` の下は対象にしない。**manifest に載っていな�
 実在しないときは、ヒットの有無に関わらず検査自体を失敗させる**。ファイルを消したり
 移したりしたときに、宣言だけが残り続けることを防ぐ。
 
+**ファイルは `--skills-dir` に渡すのと同じ書き方（Skill ディレクトリを含むパス）で書く。**
+`--skills-dir` は plugin family を 1 つだけ指定でき、その family の外にある宣言は走査の
+対象にならない。Skill ディレクトリからの相対パスで書くと、どの family の宣言かが判別
+できず、指定しなかった family の宣言まで「実在しない」と読んで検査を落とす。実在の検査は
+**指定した family に属する宣言だけ**へ掛ける。`--skills-dir` を省いた走査（family を
+すべて見る）では、どの family にも属さない宣言も陳腐化として落とす。
+
 使い方:
 
     python3 scripts/check-skill-repo-assumptions.py
@@ -52,6 +59,7 @@ PATTERNS: tuple[str, ...] = (
     r"check-markdown-links",
     r"validate-runtime-plugins",
     r"runtime-smoke-test",
+    r"check-pr-base",
     r"\.claude-plugin",
     r"\.codex-plugin",
     r"marketplace\.json",
@@ -60,23 +68,32 @@ PATTERNS: tuple[str, ...] = (
 PATTERN_RE = re.compile("|".join(PATTERNS))
 
 # --- 除外 -------------------------------------------------------------------
-# キーは Skill ディレクトリからの相対パス、値は除外する理由である。**理由は必須**で、
-# 空にすると検査自体が失敗する。
+# キーは Skill ディレクトリを含むパス（`--skills-dir` に渡すのと同じ書き方）、値は除外
+# する理由である。**理由は必須**で、空にすると検査自体が失敗する。
 #
 # 除外の基準は「記述の主題が NDF 自身の配置・配布であること」と「配布物の形で分岐した
 # 先の参照であること」の 2 つに限る。対象リポジトリへの指示は除外しない。
 EXCLUSIONS: dict[str, str] = {
-    "release/references/form-package-plugin.md":
+    "plugins/ndf/skills/release/references/form-package-plugin.md":
         "配布物の形がプラグインのときだけ読む参照。形で分岐済み",
-    "development-workflow/references/projects-tracking.md":
+    "plugins/ndf/skills/development-workflow/references/projects-tracking.md":
         "agy が NDF 自身を複製する位置の説明。対象リポジトリを指していない",
-    "official-skills-autoloader/SKILL.md":
+    "plugins/ndf/skills/official-skills-autoloader/SKILL.md":
         "NDF 自身の配布先の指定。対象リポジトリを指していない",
-    "out-of-scope/references/issue-target.md":
+    "plugins/ndf/skills/out-of-scope/references/issue-target.md":
         "NDF の実体を持つ clone を見分ける手順。対象リポジトリを指していない",
 }
 
 RUNTIMES = ("claude", "codex", "kiro", "agy")
+
+
+def canon(path: pathlib.Path | str) -> str:
+    """除外の宣言と走査対象を突き合わせるための正規形。
+
+    宣言は相対でも絶対でも書ける（`--skills-dir` と同じ）。どちらで書かれても同じ
+    ファイルを同じ値にするため、絶対パスへ解決してから比べる。表示には使わない。
+    """
+    return pathlib.Path(path).resolve().as_posix()
 
 
 class Hit:
@@ -88,6 +105,9 @@ class Hit:
         self.lineno = lineno
         self.word = word
         self.line = line
+        # 除外の宣言と突き合わせるキー。family をまたいで同じ相対パスがあっても、
+        # 別のファイルとして区別する
+        self.key = canon(skills_dir / rel)
 
     def __str__(self) -> str:
         return f"{self.skills_dir / self.rel}:{self.lineno}: {self.word!r} — {self.line.strip()}"
@@ -148,15 +168,40 @@ def scan(skills_dir: pathlib.Path, docs: list[str]) -> list[Hit]:
     return hits
 
 
-def validate_exclusions(exclusions: dict[str, str], scanned: set[str]) -> list[str]:
-    """除外の宣言が成立しているかを確かめ、成立しない理由を返す。"""
+def owning_skills_dir(key: str, skills_dirs: list[pathlib.Path]) -> pathlib.Path | None:
+    """除外の宣言がどの Skill ディレクトリに属するかを返す。属さなければ None。"""
+    for d in skills_dirs:
+        if key.startswith(canon(d) + "/"):
+            return d
+    return None
+
+
+def validate_exclusions(exclusions: dict[str, str], scanned: set[str],
+                        skills_dirs: list[pathlib.Path], exhaustive: bool) -> list[str]:
+    """除外の宣言が成立しているかを確かめ、成立しない理由を返す。
+
+    実在の検査は、**検査した Skill ディレクトリに属する宣言だけ**へ掛ける。`--skills-dir`
+    は plugin family を 1 つだけ指定でき、そのとき他の family の宣言は走査の対象にならない。
+    走査していないものを「実在しない」と読むと、正しい宣言のまま検査が落ちる。
+
+    `exhaustive` は family をすべて見た走査（`--skills-dir` を省いた既定）であることを表す。
+    このときはどの family にも属さない宣言も陳腐化として挙げる。指定を省いた走査で見逃すと、
+    消えたファイルの宣言が残り続ける。
+    """
     problems: list[str] = []
-    for rel, reason in sorted(exclusions.items()):
+    for key, reason in sorted(exclusions.items()):
         if not isinstance(reason, str) or not reason.strip():
-            problems.append(f"除外の理由が空である: {rel}")
-        if rel not in scanned:
+            problems.append(f"除外の理由が空である: {key}")
+        owner = owning_skills_dir(canon(key), skills_dirs)
+        if owner is None:
+            if exhaustive:
+                problems.append(
+                    f"除外の対象がどの Skill ディレクトリにも属さない: {key}"
+                    "（消したか移したなら、除外の宣言も外す）")
+            continue
+        if canon(key) not in scanned:
             problems.append(
-                f"除外の対象が走査の範囲に実在しない: {rel}"
+                f"除外の対象が走査の範囲に実在しない: {key}"
                 "（消したか移したなら、除外の宣言も外す）")
     return problems
 
@@ -214,7 +259,7 @@ def main() -> int:
     for skills_dir in skills_dirs:
         docs, missing = collect_documents(skills_dir)
         unscanned.extend(skills_dir / name for name in missing)
-        scanned.update(docs)
+        scanned.update(canon(skills_dir / rel) for rel in docs)
         hits = scan(skills_dir, docs)
         all_hits.extend(hits)
         report_lines.append(
@@ -232,14 +277,16 @@ def main() -> int:
         print("\n配らなくなったなら manifests/*-skills.txt からも外す。", file=sys.stderr)
         return 2
 
-    problems = validate_exclusions(exclusions, scanned)
+    problems = validate_exclusions(exclusions, scanned, skills_dirs,
+                                   exhaustive=args.skills_dir is None)
     if problems:
         print("[check-skill-repo-assumptions] 除外の宣言が成立していない:", file=sys.stderr)
         for p in problems:
             print(f"  - {p}", file=sys.stderr)
         return 2
 
-    outside = [h for h in all_hits if h.rel not in exclusions]
+    excluded_keys = {canon(key) for key in exclusions}
+    outside = [h for h in all_hits if h.key not in excluded_keys]
 
     if args.report:
         for line in report_lines:
@@ -247,7 +294,7 @@ def main() -> int:
         print(f"除外の宣言 {len(exclusions)} 件 / ヒット {len(all_hits)} 行 "
               f"（うち除外の外 {len(outside)} 行）")
         for h in all_hits:
-            mark = "除外" if h.rel in exclusions else "検知"
+            mark = "除外" if h.key in excluded_keys else "検知"
             print(f"  [{mark}] {h}")
         return 0
 
