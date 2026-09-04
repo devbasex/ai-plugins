@@ -66,7 +66,8 @@ ITEM_LIMIT=1000
 CACHE=$(pj_cache_file "$OWNER" "$NUMBER" "$ISSUE" 2>/dev/null) || CACHE=
 CACHED_PROJECT_ID= CACHED_ITEM_ID=
 if [ -n "$CACHE" ] && [ -f "$CACHE" ]; then
-  # 控えは KEY=VALUE の 2 行だけである。読み込みは値の形を確かめてから行う。
+  # 控えは KEY=VALUE の 2 行だけである。**キー名を絞ってから読み込む。**
+  # 値が古くなっていた場合は、書き込みに失敗した時点で控えを捨てる（下記）。
   while IFS='=' read -r k v; do
     case "$k" in
       project_id) CACHED_PROJECT_ID=$v ;;

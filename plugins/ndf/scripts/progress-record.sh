@@ -111,10 +111,15 @@ if start != -1:
 else:
     end = None
 
-marks = [f"{stamp}"]
-if os.environ.get("NOTE"):
-    marks.append(os.environ["NOTE"])
-done[stage] = " / ".join(marks)
+# **記録するのは「工程に入った時点」である。** 同じ工程を再び呼んでも時刻を書き換えない。
+# 書き換えると、途中で止まった実行を再開したときに最初に入った時刻が失われる。
+# 付随情報（`--note`）を新しく渡したときだけ、その分を足す。
+note = os.environ.get("NOTE", "")
+if stage in done and done[stage]:
+    if note and note not in done[stage]:
+        done[stage] = f"{done[stage]} / {note}"
+else:
+    done[stage] = " / ".join([stamp] + ([note] if note else []))
 
 meta_parts = [f"モード: {mode or '—'}"]
 if worktree:

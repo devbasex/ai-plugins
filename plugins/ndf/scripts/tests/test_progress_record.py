@@ -148,3 +148,25 @@ def test_a_similar_heading_is_not_mistaken_for_the_section(fake_gh):
     assert "## 別の節\n\n本文" in written
     # 節は末尾へ足される
     assert written.index("## 進行\n") > written.index("## 別の節")
+
+
+def test_the_time_a_stage_was_entered_is_not_overwritten(fake_gh):
+    """同じ工程を再び呼んでも、最初に入った時刻を書き換えない。
+
+    書き換えると、途中で止まった実行を再開したときに「いつ入ったか」が失われる。
+    """
+    fake_gh.body.write_text(
+        "## 進行\n\nモード: —\n\n- [x] 設計 — 2026-01-01 00:00\n", encoding="utf-8")
+    run(fake_gh, "123", "設計")
+    written = fake_gh.written.read_text(encoding="utf-8") if fake_gh.written.exists() else ""
+    if written:
+        assert "2026-01-01 00:00" in written
+
+
+def test_a_new_note_is_appended_to_the_existing_record(fake_gh):
+    """付随情報を新しく渡したときは、既存の記録へ足す。"""
+    fake_gh.body.write_text(
+        "## 進行\n\nモード: —\n\n- [x] 設計 — 2026-01-01 00:00\n", encoding="utf-8")
+    run(fake_gh, "123", "設計", "--note", "PR #379")
+    written = fake_gh.written.read_text(encoding="utf-8")
+    assert "- [x] 設計 — 2026-01-01 00:00 / PR #379" in written
