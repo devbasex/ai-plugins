@@ -100,14 +100,20 @@ def test_only_codex_converges_on_a_codex_approval(tmp_dir, state_mod):
     assert _read(tmp_dir)["final"] == "approved"
 
 
-def test_the_output_separates_a_requested_skip_from_a_missing_result(
+def test_only_narrows_the_round_and_a_missing_result_stays_visible(
     tmp_dir, state_mod, capsys
 ):
-    """指定によるスキップは `SKIP`、結果なしは `NO_RESULT` として出力される。"""
+    """`--only` はそのラウンドの担当を 1 者へ絞り、結果なしは `NO_RESULT` で残る。
+
+    **絞った側を担当のまま残さない。** 残すと、指定した 1 者が輪番に含まれない
+    ラウンドで誰も起動されず、全員が「指定によるスキップ」として扱われて収束する。
+    """
     _write(tmp_dir, _state([_round(codex=_approve())], only="codex"))
     with pytest.raises(SystemExit):
         state_mod.cmd_judge(argparse.Namespace(pr=PR))
-    assert "agy=SKIP" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "REVIEWER_INTENTS='codex=APPROVE'" in out
+    assert "agy" not in out
 
     _write(tmp_dir, _state([_round(codex=_approve())]))
     with pytest.raises(SystemExit):

@@ -1600,6 +1600,7 @@ def cmd_init(args: argparse.Namespace) -> None:
         raise
     reviewers = assignment.review_pool(host)
     info(f"ホスト: {host}（{host_source}） / レビュワーの母集合: {' / '.join(reviewers)}")
+    _validate_only(args.only, host)
     # 未認証の CLI は起動から短時間で終わり、結果を残さないまま担当から欠ける。
     auth.check_auth(reviewers, info=info, die=lambda m: die(m))
 
@@ -1673,6 +1674,12 @@ def _round_reviewers(st: dict[str, Any], round_no: int) -> list[str]:
     | 状態ファイルに `host` がある | `assignment.review_assign(round_no, host)` |
     | どちらも無い（古い状態ファイル） | `LEGACY_AGENTS` |
     """
+    # **`--only` は担当そのものを絞る。** 輪番が返す 2 者を担当のまま残すと、指定した
+    # 1 者が含まれないラウンドで誰も起動されない。そのとき全員が「指定によるスキップ」
+    # として扱われ、レビューが行われていないのに収束する。
+    only = st.get("only")
+    if only:
+        return [only]
     for entry in st.get("rounds") or []:
         if entry.get("round") == round_no and entry.get("reviewers"):
             return list(entry["reviewers"])
@@ -1680,6 +1687,23 @@ def _round_reviewers(st: dict[str, Any], round_no: int) -> list[str]:
     if host:
         return assignment.review_assign(max(round_no, 1), host)
     return list(LEGACY_AGENTS)
+
+
+def _validate_only(only: str | None, host: str) -> str | None:
+    """`--only` が母集合に含まれることを確かめる。含まなければ起動する前に弾く。
+
+    ホスト自身や、参加しないランタイムを指定しても、そのラウンドは 1 者も起動しない。
+    **起動してから気づくと、レビューの無いラウンドが記録に残る。**
+    """
+    if only is None:
+        return None
+    pool = assignment.review_pool(host)
+    if only not in pool:
+        die(
+            f"--only に指定できるのはレビュワーの母集合だけです: {' / '.join(pool)}"
+            f"（指定: {only}、ホスト: {host}）"
+        )
+    return only
 
 
 def _is_pass(intent: str | None, severity: dict[str, int] | None) -> bool:
@@ -2380,6 +2404,9 @@ def cmd_judge(args: argparse.Namespace) -> None:
         last["relaunched"] = relaunched + pending
         _save(pr, st)
         print(f"RELAUNCH_AGENTS='{' '.join(pending)}'")
+        print(f"RELAUNCH_AGENTS_CSV={','.join(pending)}")
+        # 互換のために残す。**`both` は codex / agy の 2 者だけを指す語**であるため、
+        # 担当がそれ以外を含むラウンドでは CSV の側を使う。
         print(f"RELAUNCH_TARGET={'both' if len(pending) == 2 else pending[0]}")
         info(
             f"→ 結果を残さなかったレビュアーがいる: {' '.join(pending)}。"

@@ -68,7 +68,7 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 | `--rotate-after K` | この round 数で未収束なら PR ローテーション | `8` |
 | `--rotate-mode light\|squash` | ローテーション方式。`light`: 同ブランチで旧 PR を close → 新 PR (title/body は現状の差分・実装から再生成)。`squash`: squash 統合 + 新ブランチ + `(rotated)` suffix | `light` |
 | `--host claude\|codex\|agy\|kiro` | この収束ループを起動している CLI。母集合から外れる | 環境変数から推定。**推定できなければ失敗する** |
-| `--only RUNTIME` | 1 者だけで回す（デバッグ用） | 担当 2 者 |
+| `--only RUNTIME` | 1 者だけで回す（デバッグ用）。**そのラウンドの担当を 1 者へ絞る。** 母集合の外を指定したら `init` が弾く | 担当 2 者 |
 | `--focus TEXT` | 自動レビュー観点に上乗せして codex / agy 両方に渡す追加観点。短い重点チェック向け | なし |
 | `--extra-instructions-file PATH` | 自動レビュー観点に上乗せして codex / agy 両方に渡す追加観点を UTF-8 テキストファイルから読む。長いチェックリスト向け | なし |
 
@@ -252,8 +252,8 @@ while :; do
   #   両者が承認しても 2 を返して修正の工程へ回す。置換の終了コードは変数で受けてから読む。
   JUDGE_VARS=$("$SCRIPTS/state.py" judge "$STATE_PR"); JUDGE_RC=$?; eval "$JUDGE_VARS"
   if [ "$JUDGE_RC" -eq 7 ]; then  # 名前の出た担当だけを、同じラウンドで 1 度起動し直す
-    for a in $RELAUNCH_AGENTS; do "$SCRIPTS/launch-$a.sh" "$STATE_PR" "$ROUND"; done
-    "$SCRIPTS/monitor.py" "$STATE_PR" "$RELAUNCH_TARGET" || true
+    for a in $RELAUNCH_AGENTS; do "$SCRIPTS/launch-reviewer.sh" "$a" "$STATE_PR" "$ROUND"; done
+    "$SCRIPTS/monitor.py" "$STATE_PR" --agents "$RELAUNCH_AGENTS_CSV" || true
     for a in $RELAUNCH_AGENTS; do "$SCRIPTS/state.py" read-result "$STATE_PR" "$a" || true; done
     JUDGE_VARS=$("$SCRIPTS/state.py" judge "$STATE_PR"); JUDGE_RC=$?; eval "$JUDGE_VARS"
   fi

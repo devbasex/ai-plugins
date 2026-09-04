@@ -224,3 +224,40 @@ def test_read_result_accepts_every_runtime(state_mod):
     for runtime in ("codex", "agy", "claude", "kiro"):
         args = parser.parse_args(["read-result", "500", runtime])
         assert args.agent == runtime
+
+
+# ---------- --only と母集合の相互作用 ----------
+
+def test_only_narrows_the_round_reviewers(state_mod, tmp_path):
+    """`--only` を指定したラウンドの担当は、その 1 者だけになる。
+
+    輪番が返す 2 者を担当のまま残すと、`--only` で絞った側が 1 者も起動されない
+    ラウンドが生まれる。そのとき全員が「指定によるスキップ」として扱われ、**誰も
+    レビューしていないのに収束する。**
+    """
+    path = _state(tmp_path, only="kiro")
+    st = json.loads(path.read_text(encoding="utf-8"))
+    assert state_mod._round_reviewers(st, 1) == ["kiro"]
+
+
+def test_init_rejects_an_only_outside_the_pool(state_mod, tmp_path, monkeypatch):
+    """母集合の外を `--only` に指定したら、起動する前に弾く。
+
+    ホスト自身や、参加しないランタイムを指定しても、そのラウンドは 1 者も起動しない。
+    """
+    with pytest.raises(SystemExit):
+        state_mod._validate_only("claude", "claude")   # ホスト自身
+    assert state_mod._validate_only("codex", "claude") == "codex"
+    assert state_mod._validate_only(None, "claude") is None
+
+
+def test_judge_returns_the_relaunch_targets_as_a_list(state_mod, tmp_path, capsys):
+    """起動し直す担当は名前の一覧で返す。`both` は 2 者だけを指す語である。"""
+    _state(tmp_path, host="codex",
+           rounds=[_round(1, ["claude", "kiro"], {"claude": "APPROVE"})])
+    with pytest.raises(SystemExit) as e:
+        state_mod.cmd_judge(type("A", (), {"pr": 500})())
+    assert e.value.code == 7
+    out = capsys.readouterr().out
+    assert "RELAUNCH_AGENTS='kiro'" in out
+    assert "RELAUNCH_AGENTS_CSV=kiro" in out
