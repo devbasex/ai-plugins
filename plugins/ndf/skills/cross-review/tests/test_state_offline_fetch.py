@@ -144,3 +144,29 @@ def test_the_viewer_login_is_kept_in_the_state(state_mod, tmp_dir, monkeypatch,
     saved = json.loads(
         (tmp_dir / f"cross-review-pr{PR}-state.json").read_text(encoding="utf-8"))
     assert saved["viewer_login"] == "takemi"
+# ---- 控えを GitHub より先に読む ----
+
+
+def test_the_repository_comes_from_the_resume_state_before_github(
+        state_mod, fake_gh, tmp_dir, monkeypatch, capsys) -> None:
+    """`origin` を読めない環境でも、控えの `repo` を先に読む。
+
+    落とし先が `gh repo view` だけだと、上限に達している環境では控えを探す前に
+    止まる。**#291 が塞ごうとしている状態そのものである。**
+    """
+    _seed_resumable(tmp_dir)
+    monkeypatch.setattr(state_mod, "_git_remote_url", lambda: "")
+    fake_gh.set_mode("rate_limit")
+
+    state_mod.cmd_init(_init_args())
+
+    out = capsys.readouterr().out
+    assert "RESUMED=1" in out
+    assert [c for c in fake_gh.joined() if "repo view" in c] == []
+
+
+def test_the_resume_state_is_not_read_without_a_place_to_look(
+        state_mod, monkeypatch) -> None:
+    """既定の作業ツリーの位置はリポジトリ名を含むため、名前抜きでは探せない。"""
+    monkeypatch.delenv("CROSS_REVIEW_TMP_DIR", raising=False)
+    assert state_mod._repo_from_resume(PR, None) is None

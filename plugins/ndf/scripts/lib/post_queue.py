@@ -372,6 +372,19 @@ def already_posted(item: dict[str, Any]) -> bool | None:
 _SEQ_RE = re.compile(r"^(\d{4})-")
 
 
+def _read_item(path: pathlib.Path) -> dict[str, Any] | None:
+    """待ち行列の項目を 1 件読む。読めなければ `None`。
+
+    項目は作成先の JSON ファイルへ直接書かれるため、書き込みの途中で終了すると
+    空または途中までのファイルが残りうる。
+    """
+    try:
+        item = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return item if isinstance(item, dict) else None
+
+
 class FlushResult(NamedTuple):
     """流した結果。"""
 
@@ -398,12 +411,16 @@ class Queue:
         return len(self.paths())
 
     def items(self) -> list[tuple[pathlib.Path, dict[str, Any]]]:
+        """読める項目だけを連番の順に返す。
+
+        **読めない項目をどう扱うかは `flush()` が決める。** ここで落とすのは、
+        件数を数えるだけの呼び出し元に読み取りの失敗を持ち込まないためである。
+        """
         out: list[tuple[pathlib.Path, dict[str, Any]]] = []
         for p in self.paths():
-            try:
-                out.append((p, json.loads(p.read_text(encoding="utf-8"))))
-            except (OSError, json.JSONDecodeError):
-                continue
+            item = _read_item(p)
+            if item is not None:
+                out.append((p, item))
         return out
 
     def _next_seq(self) -> int:
@@ -441,7 +458,18 @@ class Queue:
         skipped: list[dict[str, Any]] = []
         failed: dict[str, Any] | None = None
         rate_limited = False
-        for path, item in self.items():
+        for path in self.paths():
+            item = _read_item(path)
+            if item is None:
+                # **読めない項目を黙って飛ばさない。** `count()` はファイルを数え
+                # 続けるため、飛ばすと送りも失敗の報告もしないまま件数だけが残り、
+                # 判定は終了コード 8 を返し続けて誰も直せない状態になる。ここで
+                # 止めて理由を返せば、その項目を捨てるか直すかを人が選べる。
+                failed = {
+                    "path": str(path),
+                    "last_error": f"待ち行列の項目を読めない ({path.name})",
+                }
+                break
             found, row = posted_match(item)
             if found is True:
                 # **送った場合と同じ形で返す。** 呼び出し側は届いたことを応答から

@@ -366,6 +366,33 @@ def _git_remote_url() -> str:
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
+def _repo_from_resume(pr: int, worktree: str | None) -> str | None:
+    """控えの状態ファイルから `owner/repo` を読む。**GitHub へは問い合わせない。**
+
+    `origin` が無い、または URL を読めない環境では、リポジトリ名の解決が
+    `gh repo view` へ落ちる。上限に達しているとそこで止まるため、再開できる控えが
+    残っていても再開の経路へ入れない。**#291 が塞ごうとしている状態そのものである。**
+
+    読めるのは、置き場所がリポジトリ名抜きで決まるときだけである。既定の作業ツリーの
+    位置は名前を含むため、環境変数も明示された作業ツリーも無ければ `None` を返す。
+    """
+    env_tmp = os.environ.get("CROSS_REVIEW_TMP_DIR")
+    if env_tmp:
+        base = pathlib.Path(env_tmp).resolve()
+    elif worktree:
+        base = pathlib.Path(worktree).resolve() / ".cross_review"
+    else:
+        return None
+    try:
+        st = json.loads(
+            (base / f"cross-review-pr{pr}-state.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(st, dict):
+        return None
+    return str(st.get("repo") or "") or None
+
+
 def _repo_from_git() -> str | None:
     """git の設定から `owner/repo` を求める。求まらなければ `None`。
 
@@ -1369,6 +1396,9 @@ def _auto_flush(pr: int) -> None:
     **自動だけにも明示だけにもしない。** 自動だけだと、回復を待つあいだ何もコマンドを
     実行していない場合に流れない。明示だけだと、進行側が忘れたときに待ち行列が残った
     まま収束の判定へ進む。流せなくても工程は止めない。
+
+    **入口は、書き戻し先が揃っている場所だけである。** 取り込み（`read-result`）の
+    入口では、そのラウンドの担当のエントリがまだ無い。詳細は `cmd_read_result` にある。
     """
     q = _queue(pr)
     if not q.count():
@@ -1399,9 +1429,11 @@ def cmd_flush(args: argparse.Namespace) -> None:
     print(f"PENDING_SKIPPED={len(result.skipped)}")
     print(f"PENDING_REMAINING={result.remaining}")
     if result.remaining:
+        reason = (result.failed or {}).get("last_error", "")
         info(
             f"⏳ 待ち行列に {result.remaining} 件残っています"
             f"{'（まだ上限です）' if result.rate_limited else ''}"
+            f"{f': {reason}' if reason and not result.rate_limited else ''}"
         )
     else:
         info(f"✅ 待ち行列は空です（送った {len(result.sent)} 件）")
@@ -1416,7 +1448,9 @@ def cmd_init(args: argparse.Namespace) -> None:
     # path には repo slug を含め、他リポジトリの同一 PR 番号と衝突しないようにする。
     # リポジトリ名は git の設定から求める。GraphQL を 1 点使わずに済み、誤りは
     # この後の REST の応答が検証する（`_fetch_pr_metadata`）。
-    repo = _repo_from_git() or _sh(
+    # **控えを GitHub より先に読む。** git から求まらないときの落とし先が `gh` だけだと、
+    # 上限に達している環境では再開の経路へ入る前に止まる（#291）。
+    repo = _repo_from_git() or _repo_from_resume(pr, args.worktree) or _sh(
         ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
     worktree = str(pathlib.Path(args.worktree).resolve()) if args.worktree else str(
         _default_worktree_base() / _repo_slug(repo) / f"pr{pr}")
@@ -2066,10 +2100,16 @@ def cmd_read_result(args: argparse.Namespace) -> None:
     使える結果が残らなかったときは、`NO_RESULT` と理由をラウンドへ残してから止める。
     終了コードは現行のまま（無い・判定の値を持たないときは 1、JSON として読めない
     ときは 3）で、進む先を決めるのは次の判定である。
+
+    **ここでは待ち行列を流さない。** 流すと `review-post` の書き戻し先（そのラウンドの
+    担当のエントリ）がまだ無い時点で項目が消える。`_confirm_flushed` は書き戻せず、
+    この後の取り込みが `queued: true` だけを保存するため、待ち行列が空で `queued` の
+    ままの状態ができる。判定はその状態で収束してしまい、投稿の存在も参照も確かめない。
+    **両方の担当を取り込んだ後に流す**（`judge` の入口）。取り込みは判定の直前に
+    しかないため、流す時期が遅れるのは 1 コマンド分である。
     """
     agent = args.agent
     pr = args.pr
-    _auto_flush(pr)
     rfile = pathlib.Path(args.file or _resolve_tmp_dir(pr) / f"{agent}-review-pr{pr}-result.json")
     if not rfile.exists() or rfile.stat().st_size == 0:
         _die_no_result(pr, agent, "missing", f"{agent}: result 未生成 ({rfile})")

@@ -275,3 +275,107 @@ def test_the_resume_keeps_what_the_flush_wrote_to_the_state(
     # 書き戻す側の変更も残る。どちらか一方だけが残る直し方にしない。
     assert saved["manual_extra_review_instructions"] == "重点観点"
     assert queue_mod.Queue(tmp_dir / "pending").count() == 0
+# ---- 取り込みの前に流さない ----
+
+
+def test_the_read_result_does_not_flush_the_queue(
+        state_mod, queue_mod, fake_gh, tmp_dir) -> None:
+    """取り込みの入口では流さない。**書き戻し先がまだ無い。**
+
+    流すと `_confirm_flushed` は書き戻せないまま項目が消え、この後の取り込みが
+    `queued: true` だけを保存する。待ち行列は空になるため判定は収束させ、投稿の
+    存在も参照も一度も確かめられない。
+    """
+    _seed(tmp_dir, rounds=[{"round": 1, "pr": PR,
+                            "started_at": "2026-09-03T00:00:00+00:00"}])
+    queue_mod.enqueue(
+        queue_mod.Queue(tmp_dir / "pending"), "review-post", REPO, PR,
+        {"body": "指摘の本文", "event": "APPROVE"},
+        actor="me", extra={"agent": "codex", "round": 1})
+    rfile = tmp_dir / "result.json"
+    rfile.write_text(json.dumps({
+        "event": "APPROVE", "comments_count": 0, "review_url": "",
+        "queued": True, "by_severity": {},
+    }), encoding="utf-8")
+
+    state_mod.cmd_read_result(argparse.Namespace(pr=PR, agent="codex",
+                                                 file=str(rfile)))
+
+    assert queue_mod.Queue(tmp_dir / "pending").count() == 1
+    assert fake_gh.joined() == []
+
+
+def test_the_queued_reviews_are_confirmed_once_both_results_are_taken_in(
+        state_mod, queue_mod, fake_gh, tmp_dir, monkeypatch) -> None:
+    """両方を取り込んだ後の判定が流し、両方の担当へ書き戻す。"""
+    _seed(tmp_dir, rounds=[{"round": 1, "pr": PR,
+                            "started_at": "2026-09-03T00:00:00+00:00"}])
+    q = queue_mod.Queue(tmp_dir / "pending")
+    for agent in ("codex", "agy"):
+        queue_mod.enqueue(q, "review-post", REPO, PR,
+                          {"body": f"{agent} の本文", "event": "APPROVE"},
+                          actor="me", extra={"agent": agent, "round": 1})
+    fake_gh.set_rules([
+        {"match": f"pulls/{PR}/reviews?", "stdout": "[]"},
+        {"match": "", "stdout": json.dumps(
+            {"id": 4961230016, "html_url": REVIEW_URL})},
+    ])
+    monkeypatch.setattr(state_mod, "_review_exists", lambda repo, pr, url: True)
+    monkeypatch.setattr(state_mod, "_round_ci", lambda st, last, pr: {
+        "verdict": "unverified", "failed": [], "pending": [], "reason": "テスト"})
+
+    for agent in ("codex", "agy"):
+        rfile = tmp_dir / f"{agent}-result.json"
+        rfile.write_text(json.dumps({
+            "event": "APPROVE", "comments_count": 0, "review_url": "",
+            "queued": True, "by_severity": {},
+        }), encoding="utf-8")
+        state_mod.cmd_read_result(argparse.Namespace(pr=PR, agent=agent,
+                                                     file=str(rfile)))
+
+    with pytest.raises(SystemExit) as e:
+        state_mod.cmd_judge(argparse.Namespace(pr=PR))
+
+    assert e.value.code == 0
+    round1 = _state(tmp_dir)["rounds"][0]
+    for agent in ("codex", "agy"):
+        assert round1[agent]["review_url"] == REVIEW_URL
+        assert round1[agent]["queued"] is False
+
+
+# ---- 読めない項目 ----
+
+
+def test_a_broken_item_is_reported_instead_of_being_skipped(
+        state_mod, tmp_dir, capsys) -> None:
+    """壊れた項目を黙って飛ばさない。
+
+    飛ばすと `flush()` は送りも失敗の報告もしない一方、`count()` はファイルを数え
+    続ける。判定は終了コード 8 を返し続け、理由が出ないため誰も直せない。
+    """
+    _seed(tmp_dir)
+    pending = tmp_dir / "pending"
+    pending.mkdir(parents=True, exist_ok=True)
+    (pending / "0001-review-post-broken.json").write_text(
+        '{"kind": "review-post"', encoding="utf-8")
+
+    with pytest.raises(SystemExit) as e:
+        state_mod.cmd_judge(argparse.Namespace(pr=PR))
+
+    assert e.value.code == 8
+    assert "待ち行列の項目を読めない" in capsys.readouterr().err
+
+
+def test_the_flush_stops_at_a_broken_item(queue_mod, tmp_path) -> None:
+    """後ろの項目まで送らない。**順序が入れ替わる。**"""
+    pending = tmp_path / "pending"
+    pending.mkdir(parents=True, exist_ok=True)
+    (pending / "0001-pr-comment-broken.json").write_text("", encoding="utf-8")
+    queue_mod.enqueue(queue_mod.Queue(pending), "pr-comment", REPO, PR,
+                      {"body": "後ろの本文"})
+
+    result = queue_mod.Queue(pending).flush()
+
+    assert result.sent == [] and result.skipped == []
+    assert result.remaining == 2
+    assert "読めない" in (result.failed or {})["last_error"]
