@@ -149,6 +149,11 @@ flowchart TD
   - [references/lang-php.md](references/lang-php.md)
   - 一覧にない言語は、`data-representation.md` の判定表から自分で対応付ける
 - [references/characterization-tests.md](references/characterization-tests.md) — 現状固定テストの作り方
+- `/ndf:cross-refactoring` — 発見と検証を別のランタイムへ分ける形。**この Skill は
+  「テストで守りながら 1 手ずつ直す」手順を持つが、何を直すかの発見と、直した結果の評価が
+  どちらも作業した AI 自身に閉じる。** その 2 つを補うのが `cross-refactoring` で、
+  工程表は `architecture` と `legacy-refactor` の構造改善にそちらを置く。適用を担う側は
+  この Skill を手順として読む
 
 進行を盤面へ記録する場合は、[references/projects-tracking.md](../development-workflow/references/projects-tracking.md) の「`$SCRIPTS` を決める」でパスを解決してから
 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "構造改善"` を実行する（`.ndf/projects.json` が無いリポジトリでは何も起きない）。

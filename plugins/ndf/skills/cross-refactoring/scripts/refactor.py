@@ -14,7 +14,8 @@
   start-round      Step 2  提案ラウンドを開く。実装担当とレビュー担当を返す
   merge-proposals  Step 3  提案の語彙検証・重複排除・優先度付け・採否
   merge-apply      Step 4  適用結果の検証（差分予算 / テスト / トレーラー / 固定テスト先行）
-  judge-review     Step 5  レビュー 2 者の判定
+  review-targets   Step 5  次に起動するレビュー担当（初回は 2 者、再レビューは変更要求を出した担当）
+  judge-review     Step 5  レビュー担当の判定
   should-abandon   Step 6  修正ラウンド上限の到達判定
   abandon-items    Step 6  未解決の指摘に紐づく項目だけを取り消す
   merge-fix        Step 6  修正結果の取り込み
@@ -817,6 +818,21 @@ def _validate_review_findings(
     return problems
 
 
+def _requested_changes(
+    reviewers: list[str], reviews: dict[str, Any]
+) -> list[str]:
+    """変更要求を出したレビュー担当を返す。修正の後の再レビューの対象になる。
+
+    承認した担当は、指摘への対応だけの差分をもう一度読むことになる。範囲外を触った
+    修正は進行側の機械検証（`--scope` の逸脱・差分予算・テスト）が拾うため、起動を
+    重ねない。
+    """
+    return [
+        name for name in reviewers
+        if (reviews.get(name) or {}).get("verdict") != "APPROVE"
+    ]
+
+
 def judge(
     reviews: dict[str, dict[str, Any]], reviewers: list[str], round_items: list[str]
 ) -> tuple[str, list[str]]:
@@ -842,7 +858,7 @@ def judge(
         )
     if problems:
         return "invalid", problems
-    if all((reviews[name] or {}).get("verdict") == "APPROVE" for name in reviewers):
+    if not _requested_changes(reviewers, reviews):
         return "approved", []
     return "changes", []
 
@@ -1941,8 +1957,34 @@ def _prepare_fix_phase(state: dict[str, Any], entry: dict[str, Any]) -> None:
     entry["fix_attempts"] = entry.get("fix_attempts", 0) + 1
 
 
+def cmd_review_targets(args: argparse.Namespace) -> None:
+    """Step 5 — 次に起動するレビュー担当を返す。
+
+    **初回と再レビューの区別は状態が持つ。** 呼び出し側は同じコマンドを 2 回呼ぶだけで、
+    どちらかを引数で伝えない。ラウンドの記録に `fix_reviewers` があれば再レビュー、
+    無ければ初回である。**このキーを持たない既存の状態ファイルは初回として読む。**
+
+    差し戻し（`invalid`）はこのキーを書かないため、2 者へ戻る。結果の形が判定に使えない
+    状態は修正の成否とは別で、承認した担当の結果も読めていない可能性がある。
+
+    終了コード: 0 = 対象を返した / 1 = ラウンドが無い、または対象が 0 人。
+    """
+    _, state = _load(args.id)
+    entry = _round(state, args.round)
+    targets = entry.get("fix_reviewers")
+    if targets is None:
+        targets = entry["reviewers"]
+    if not targets:
+        die(
+            f"ラウンド {args.round} の再レビューの対象が 0 人です。"
+            "判定できない状態のまま進めません"
+        )
+    print(f"REVIEW_TARGETS='{' '.join(targets)}'")
+    print(f"REVIEW_TARGETS_CSV={','.join(targets)}")
+
+
 def cmd_judge_review(args: argparse.Namespace) -> None:
-    """Step 5 — レビュー 2 者の判定を取り込む。
+    """Step 5 — レビュー担当の判定を取り込む。
 
     終了コード: 0 = 2 者とも承認 / 2 = 修正へ / 3 = 差し戻して再レビュー。
     """
@@ -2069,6 +2111,9 @@ def _handle_review_verdict(
         statefile.save(path, state)
         info("✅ レビュー担当 2 者とも承認しました")
         return
+    # **再レビューの対象を、変更要求を出した担当だけに絞る。** 差し戻し上限からの
+    # 落ちこみでは書かない。合成した指摘は誰が出したものでもなく、対象が決まらない。
+    entry["fix_reviewers"] = _requested_changes(reviewers, reviews)
     _prepare_fix_phase(state, entry)
     remember(2)
     statefile.save(path, state)
@@ -3679,7 +3724,8 @@ def main() -> None:
         sp.set_defaults(func=func)
 
     for name, func, help_ in (
-        ("judge-review", cmd_judge_review, "レビュー 2 者の判定を取り込む"),
+        ("review-targets", cmd_review_targets, "次に起動するレビュー担当を返す"),
+        ("judge-review", cmd_judge_review, "レビュー担当の判定を取り込む"),
         ("should-abandon", cmd_should_abandon, "修正ラウンド上限の到達判定"),
         ("merge-fix", cmd_merge_fix, "修正結果を取り込む"),
     ):

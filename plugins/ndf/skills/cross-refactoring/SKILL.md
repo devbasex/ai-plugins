@@ -18,6 +18,12 @@ allowed-tools:
 
 `refactoring` Skill は「テストで守りながら 1 手ずつ直す」手順を持つが、
 **何を直すかの発見**と**直した結果の他者検証**を持たない。この Skill がその 2 つを補う。
+適用を担う側は `refactoring` を手順として読む。
+
+**工程表では `architecture` と `legacy-refactor` の構造改善がこの Skill を指す。**
+`standard` の既定は `refactoring` 単独である（変更のついでの小さな整理になりやすく、
+4 つの CLI を複数ラウンド動かす費用に見合わない）。前提を満たせないときの退避先は
+`development-workflow` の `references/workflow-modes.md`「構造改善の退避先」にある。
 
 詳細は `docs/` に、コマンドは `scripts/` に分けている。
 
@@ -297,8 +303,9 @@ done
 **中断したはずの進行がそのまま続く**ので、出力と終了コードは親シェルで受け取る。
 
 続けて **Step 7** で `/ndf:cross-review <PR>` を実行する。レビューはラウンド単位なので、
-**ラウンドを跨いだ整合はここで見る**。収束したら Draft を解除し、
-`refactor.py report "$ID" --metrics` の出力を報告する。
+**ラウンドを跨いだ整合はここで見る**。渡す観点の定型は
+[docs/02-apply-and-review.md](docs/02-apply-and-review.md) の Step 7 にある。収束したら
+Draft を解除し、`refactor.py report "$ID" --metrics` の出力を報告する。
 
 状態ファイルに全ての状態が入るため、どこで落ちても同じコマンド列を叩き直せば再開できる。
 
