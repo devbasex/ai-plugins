@@ -1,7 +1,7 @@
 ---
 name: issue-upkeep
-description: "Bring the existing issue list back in line with reality: fix stale bodies, assign milestones, and close what is not worth doing. Use after a change is finished（課題の棚卸・issueの手入れ・やらないと決める）."
-argument-hint: "[--all] [--repo <所有者>/<リポジトリ>]"
+description: "Bring the existing issue list back in line with reality: fix stale bodies, assign milestones, and close what is not worth doing. Use when a change is finished and the issue list has drifted（課題の棚卸をするとき・issueの手入れ・やらないと決める）."
+argument-hint: "[--all] [--repo owner/repo]"
 allowed-tools:
   - Bash
   - Read
