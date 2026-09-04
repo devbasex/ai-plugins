@@ -447,4 +447,8 @@ run python3 "$ROOT_DIR/scripts/check-markdown-links.py" --root "$ROOT_DIR"
 # ファイルだけを見ているため、利用者が読む側の数は版を上げるたびに古くなっていた。
 run python3 "$ROOT_DIR/scripts/check-doc-staleness.py" --root "$ROOT_DIR"
 
+# Skill の境界をまたぐ実行の参照を数える。配る Skill を絞る配布先では、相手を
+# 配らないと解決できない。例外の一覧に無い参照が増えたときに落ちる。
+run python3 "$ROOT_DIR/scripts/check-cross-skill-refs.py" --root "$ROOT_DIR"
+
 echo "runtime plugin validation passed"
