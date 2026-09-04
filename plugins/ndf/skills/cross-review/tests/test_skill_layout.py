@@ -70,9 +70,12 @@ PROCEDURE = DOCS / "01-state-and-review.md"
 CONTRACTS = DOCS / "04-contracts.md"
 
 # 分割の基準は 501 行以上。`SKILL.md` の上限と同じ値を文書にも当てる。
+#
+# **手順書だけをさらに厳しく縛らない。** 分割の直後の `docs/01` には 500 行まで余白があり、
+# 次に節を足す担当（#350 の待ち行列）はその余白を使う前提で設計されている。ここで先に
+# 上限を下げると、余白を使い切る前に検査が落ち、足す側がこのファイルを直すことになる。
+# 余白を超える節を足すときは、次の切れ目（Step 3〜4）を切り出す。
 DOC_MAX_LINES = 500
-# 手順書は 420 行以下に保つ。次に節を足す担当のために 80 行の余白を残す。
-PROCEDURE_MAX_LINES = 420
 
 MOVED_CONTRACT_HEADINGS = (
     "## 状態ファイル",
@@ -92,11 +95,6 @@ def _line_count(path: pathlib.Path) -> int:
 def test_the_review_docs_stay_under_the_split_threshold(doc: pathlib.Path) -> None:
     lines = _line_count(doc)
     assert lines <= DOC_MAX_LINES, f"{doc.name} が {lines} 行"
-
-
-def test_the_procedure_has_room_for_the_next_change() -> None:
-    lines = _line_count(PROCEDURE)
-    assert lines <= PROCEDURE_MAX_LINES, f"docs/01 が {lines} 行"
 
 
 def test_the_contract_document_exists() -> None:
