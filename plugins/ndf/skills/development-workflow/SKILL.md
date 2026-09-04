@@ -77,7 +77,7 @@ mode: standard
 | 設計レビュー | — | `pr` → `cross-review` → `merged` | `pr` → `cross-review` → `merged` | 任意 |
 | 計画 | — | `implementation-plan` | `implementation-plan` | `implementation-plan` |
 | 実装 | 直接編集 | `tdd-cycle` | `tdd-cycle` | `refactoring` |
-| 構造改善 | — | `refactoring` | `refactoring` | `refactoring` |
+| 構造改善 | — | `refactoring` | `cross-refactoring` | `cross-refactoring` |
 | レビュー | — | `cross-review` | `cross-review` | `pr-review` |
 | 完了判定 | `quality-gates` | `quality-gates` | `quality-gates` | `quality-gates` |
 | Pull Request | `pr` | `pr` | `pr` | `pr` |
@@ -158,6 +158,25 @@ Skill は使わず、`pr` → `cross-review` → `merged` の 3 つを順に呼�
 済んでいないことを前提に置き、見つけた兆候は直す。対象は書き換えた行だけでなく、**その
 呼び出し元・呼び出し先と、同じファイル・同じモジュールの関連箇所まで**を含む（範囲と例外は
 `refactoring` の `references/code-smells.md`「手を付ける範囲」）。
+
+**`architecture` と `legacy-refactor` は `cross-refactoring` を通す。** `refactoring` は
+「テストで守りながら 1 手ずつ直す」手順を持つが、**何を直すかの発見と、直した結果の評価が
+どちらも作業した AI 自身に閉じる**。複数モジュールにまたがる変更と、構造改善そのものが目的の
+変更では、発見と検証を別のランタイムへ分ける価値が費用に見合う。`refactoring` は各担当が
+手順として読む側へ回る。
+
+**`standard` の既定は `refactoring` のままである。** このモードの構造改善は変更のついでの
+小さな整理になりやすく、4 つの CLI を複数ラウンド動かす費用に見合わない。選ぶことは禁じない。
+
+**`cross-refactoring` は open な Pull Request の上で回る。** 使うモードでは、工程表で後に
+ある `pr` を構造改善の前に 1 度呼び、Draft で開く。**行は増やさない。** 工程名は工程表・
+盤面の対応表・記録のスクリプト・盤面の設定の 4 箇所が同じ並びを持つ。前提を満たせないときの
+退避先は
+[references/workflow-modes.md](references/workflow-modes.md)「構造改善の退避先」にある。
+
+**この工程で `cross-refactoring` を通したら、次の「レビュー」を重ねて呼ばない。** その Skill は
+最後に Pull Request 全体を `cross-review` にかけるため、レビューの工程が求めるものをそこで
+満たす。構造改善の後に実装の差分が増えた場合だけ、改めて呼ぶ。
 
 `light` だけが工程ごと対象外である。本番コードの構造を変えない変更に構造改善の判断は要らない。
 

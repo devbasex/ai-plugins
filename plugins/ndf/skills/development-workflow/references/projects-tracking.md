@@ -69,7 +69,7 @@ Pull Request が出る場合も、既定の `Linked pull requests` に並ぶた�
 | 設計レビュー | `design` が `pr` / `cross-review` / `merged` を呼ぶ | `設計レビュー` |
 | 計画 | `implementation-plan` | `計画` |
 | 実装 | `tdd-cycle` | `実装` |
-| 構造改善 | `refactoring` | `構造改善` |
+| 構造改善 | `refactoring` / `cross-refactoring` | `構造改善` |
 | レビュー | `cross-review` / `pr-review` | `レビュー` |
 | 完了判定 | `quality-gates` | `完了判定` |
 | Pull Request | `pr` | `Pull Request` |
