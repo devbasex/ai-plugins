@@ -123,6 +123,53 @@ codex plugin marketplace add <owner>/<repo> --ref <ref>
   かが定まらない。手元での確認は取得元を書き換えない手段（`claude --plugin-dir` や installer）
   で行う
 
+### 正式版のチャネルを進める
+
+**保護されたブランチへは直接 push できないことがある。** 正式版のチャネルを既定ブランチに
+置く運用では、そのブランチが保護の対象になっていることが多い。**保護の外し方（bypass）が
+Pull Request のマージだけを通す設定なら、`git push <正式版の ref>` は管理者でも拒まれる。**
+
+```bash
+# 直接 push が拒まれる構成では、開発版のチャネルから正式版のチャネルへ Pull Request を出す
+gh pr create --base <正式版の ref> --head <開発版の ref> --title "Release: v<版>"
+gh pr merge <番号> --merge --admin      # 承認が必須で、承認できる人が自分だけのとき
+git fetch origin
+git diff --stat origin/<開発版の ref> origin/<正式版の ref>   # 空であること
+```
+
+**この経路では正式版の ref に、開発版の ref へ無いマージコミットが 1 つ積まれる。** 正式版が
+開発版の fast-forward ではなくなるが、**配布した版を指すのは正式版の ref の先端であって、
+両者が同じコミットを指していることではない**。一致は差分で確かめる。
+
+**`--admin` を既定にしない。** 承認できる人が複数いる構成では通常の承認を経てマージする。
+自分の Pull Request を自分で承認できないため、承認が必須でメンテナーが 1 人の間だけ、これが
+唯一の経路になる。
+
+### 隔離した設定ディレクトリで取得の経路を確かめる
+
+**取得元の登録から導入までを、利用者の登録を壊さずに通せる。** 配布物を直接読み込む確認
+（`--plugin-dir` や installer）は登録の経路を通らないため、開発版チャネルの取得手順の
+裏付けにはならない。設定ディレクトリを環境変数で差し替えて、隔離した先で同じ手順を実行する。
+
+```bash
+ISO=$(mktemp -d "$HOME/.<名前>-channel-check.XXXXXX"); mkdir -p "$ISO/claude" "$ISO/codex"
+
+CLAUDE_CONFIG_DIR="$ISO/claude" claude plugin marketplace add '<git-url>#<ref>'
+CLAUDE_CONFIG_DIR="$ISO/claude" claude plugin install <名前>@<マーケットプレイス名>
+CLAUDE_CONFIG_DIR="$ISO/claude" claude plugin list
+
+CODEX_HOME="$ISO/codex" codex plugin marketplace add <owner>/<repo> --ref <ref>
+CODEX_HOME="$ISO/codex" codex plugin add <名前>@<マーケットプレイス名>
+CODEX_HOME="$ISO/codex" codex plugin list
+
+rm -rf "$ISO"
+```
+
+- **`CODEX_HOME` は先に作る。** 存在しないパスを渡すと落ちる
+- **隔離先は一時ディレクトリの下に置かない。** Codex が補助バイナリを作れないと警告する
+- 取れたことの裏付けは clone の checkout で見る。ref を指定した登録では、その clone の
+  `remote.origin.fetch` が指定した ref だけを指す
+
 ### リリースタグを打つ
 
 ```bash
@@ -172,3 +219,8 @@ git rev-parse HEAD                            # 送ったコミット
 **サードパーティのマーケットプレイスは自動更新が既定で無効である。** 公開した版が即座に全
 利用者へ届くわけではなく、利用者が更新を実行した時点で届く。完了報告の「届き方」には、
 利用者が実行する更新のコマンドを書く。
+
+**書いた更新のコマンドは、ランタイムごとに実行して確かめる。** 同じ操作の名前がランタイムで
+違うため、1 つで確かめても残りで落ちうる。更新の操作を持たないランタイムもあり、その場合は
+外してから入れ直す 2 手になる。前節の隔離した設定ディレクトリで実行し、**合否は終了コードで
+見る**。隔離しても実行できないものは `--help` で副コマンドの存在を確かめる。

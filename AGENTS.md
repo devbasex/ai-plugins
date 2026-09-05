@@ -32,8 +32,8 @@
 ### 版の付け方と開発版の配布
 
 **配布のチャネルは 2 つに分ける。`main` が正式版、`develop` が開発版である。**
-開発の変更は `develop` へマージし、正式版として出すときだけ `main` を `develop` の位置へ
-進める。**これにより、マージと配布が別の操作になる。**
+開発の変更は `develop` へマージし、正式版として出すときだけ `develop` の内容を `main` へ
+送る。**これにより、マージと配布が別の操作になる。**
 
 分けない場合、マージした時点で常用する利用者へ届く。レビューを通った変更であっても、利用者の
 環境で動くかは配布した後にしか分からない。`release` が定めた「検証への配布 → 本番への配布」の
@@ -103,10 +103,46 @@ bash plugins/ndf/dev.kiro/install.sh --project <ディレクトリ> --yes
 agy plugin uninstall ndf && agy plugin install <clone>/plugins/ndf/dev.agy
 ```
 
-**agy には入れ替えの操作が無い。** 導入済みの実体を新しくするには、外してから入れ直す。
+**agy には入れ替えの操作が無い。** `agy plugin --help` の副コマンドは
+`list` / `import` / `install` / `uninstall` / `enable` / `disable` / `validate` / `link` /
+`help` で、導入済みを新しい版へ入れ替えるものが無い。他の 3 ランタイムは持つ
+（Claude Code は `claude plugin update`、Codex は取得元を更新してから `codex plugin add`、
+Kiro CLI はインストーラの再実行）。
 
-**`develop` は開発の本流で、`main` は動かした先である。** 正式版のたびに `main` を `develop` の
-位置へ fast-forward する。`main` へ直接コミットしない。
+**`install` は既存の導入を拒まず、上書きする。ただし消えたファイルは残る**（agy 1.1.26 /
+2026-09-05 に実測）。同じ名前で導入し直すと `plugin.json` の版数も Skill の中身も入れ替わるが、
+**取得元から取り除いたファイルは実体に残り続ける**。配布物が減る版へ上げると、消したはずの
+Skill が利用者の手元で生き続ける。そのため案内は外してから入れ直す 2 手のままにする。
+
+**`develop` は開発の本流で、`main` は動かした先である。** 正式版のたびに `develop` から `main`
+への Pull Request を作り、管理者の bypass でマージする。`main` へ直接コミットしない。
+
+**`git push origin develop:main` は使えない。** `main` / `develop` を守る ruleset の bypass は
+`pull_request` で作ってあり、**このモードは Pull Request のマージだけを通し、直接 push は
+管理者でも拒む**。必須の検査 11 個は Pull Request で走るため、`develop` の先端のコミットには
+`push` 起動の 1 個しか結果が付いていない。
+
+```console
+$ git push origin develop:main
+remote:
+remote: - 10 of 11 required status checks have not succeeded: .
+remote:
+ ! [remote rejected] develop -> main (push declined due to repository rule violations)
+```
+
+**この手順では `main` に `develop` へ無いマージコミットが 1 つ積まれる。** そのため `main` は
+`develop` の fast-forward ではなくなる。**それでよい。** 配布した版を指すのは `main` の先端で
+あって、両者が同じコミットを指していることではない。中身が一致していることは差分で確かめる。
+
+```bash
+gh pr create --base main --head develop --title "Release: v<版>" --body "..."
+gh pr merge <番号> --merge --admin      # 承認 1 件必須。メンテナーが 1 人の間は bypass で通す
+git fetch origin && git diff --stat origin/develop origin/main   # 空であること
+```
+
+**`--admin` を使うのは、GitHub が自分の Pull Request を自分で承認できないためである。**
+承認 1 件必須のもとでメンテナーが 1 人の間は、これが唯一の経路になる。承認できる人が増えたら
+`--admin` を外し、通常の承認を経てマージする。
 
 **Pull Request のベースは `develop` である。** 既定ブランチが `main` であるため、`gh pr create`
 は指定しないと `main` を宛先にする。**`--base develop` を必ず付ける。**
@@ -222,13 +258,41 @@ semver の順序で除外されるのは、プラグイン間の依存解決（`
 | Codex | `marketplace 'ai-plugins' is already added from a different source; remove it before adding this source` を返して拒む | clone だけを消す。導入の記録（`~/.codex/config.toml` の `[plugins."ndf@ai-plugins"]`）は残るため、`add` し直せば有効な状態に戻る |
 
 名前が違えば併存できるが、**同名のプラグインが両方とも有効になる**ため、どちらが使われるかが
-定まらず検証の手段にならない。手元での確認は次のどちらかで行う。どちらも取得元を書き換えない。
+定まらず検証の手段にならない。手元での確認は次のいずれかで行う。どれも取得元を書き換えない。
 
 ```bash
 bash plugins/ndf/dev.kiro/install.sh --project <検証用ディレクトリ> --yes   # Kiro
 claude --plugin-dir plugins/ndf                                             # Claude Code
 agy plugin validate plugins/ndf/dev.agy                                     # agy（読み込みの確認）
 ```
+
+**取得元の登録そのものを確かめるときは、設定ディレクトリを隔離する。** 上の 3 つは配布物を
+直接読み込む確認で、取得元の登録から導入までの経路は通らない。開発版チャネルの取得手順は
+その経路そのものであるため、別の設定ディレクトリを与えて確かめる。**利用者の登録には触れない**
+（claude 2.1.261 / codex-cli 0.153.2 で実測）。
+
+```bash
+ISO=$(mktemp -d "$HOME/.ndf-channel-check.XXXXXX"); mkdir -p "$ISO/claude" "$ISO/codex"
+
+CLAUDE_CONFIG_DIR="$ISO/claude" claude plugin marketplace add \
+  'https://github.com/devbasex/ai-plugins.git#develop'
+CLAUDE_CONFIG_DIR="$ISO/claude" claude plugin install ndf@ai-plugins
+CLAUDE_CONFIG_DIR="$ISO/claude" claude plugin list          # 版数を見る
+
+CODEX_HOME="$ISO/codex" codex plugin marketplace add devbasex/ai-plugins --ref develop
+CODEX_HOME="$ISO/codex" codex plugin add ndf@ai-plugins
+CODEX_HOME="$ISO/codex" codex plugin list                   # 版数を見る
+
+rm -rf "$ISO"
+```
+
+- **`CODEX_HOME` は先に作っておく。** 存在しないパスを渡すと
+  `CODEX_HOME points to "..." , but that path does not exist` で落ちる
+- **隔離先は `$HOME` の下に置く。** `/tmp` の下に置くと Codex が
+  `Refusing to create helper binaries under temporary dir "/tmp"` を出す（登録と導入は通る）
+- 取れたことの裏付けは clone の checkout で見る。`develop` の ref で登録すると
+  `git -C "$ISO/claude/plugins/marketplaces/ai-plugins" config --get remote.origin.fetch` は
+  `+refs/heads/develop:refs/remotes/origin/develop` を返す（正式版の登録は `main` のまま）
 
 **正式版を出したらリリースタグを打つ。** 利用者が過去の版へ戻るときの目印になる。
 
@@ -369,5 +433,11 @@ Test: テスト追加・修正
 ## 検証
 
 ```bash
-claude plugin validate
+claude plugin validate .
 ```
+
+**`path` は必須の位置引数である。** 省くと `error: missing required argument 'path'` で
+終了コード 1 になる（Claude Code 2.1.261 で実測）。マーケットプレイスの根で `.` を渡すと
+`marketplace.json` と各プラグインの定義を検査し、終了コード 0 で終わる。`policy` と
+`interface` は Claude Code が読み込み時に無視するため未知フィールドの警告が出るが、
+**警告は終了コードを変えない**。合否は出力ではなく終了コードで見る。

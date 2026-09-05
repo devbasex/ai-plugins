@@ -198,8 +198,8 @@ clone と導入記録まで消えます。
 Pull Request の宛先は **`develop`** です。既定ブランチは `main`（正式版）なので、`gh pr create`
 には `--base develop` を付けます。
 
-**`develop` はまだ作られていません。** 作るまでの宛先は `main` で、`--base develop` は付けません。
-詳細は [AGENTS.md](./AGENTS.md) を参照してください。
+`main` 宛の Pull Request は `develop` から出たものだけが継続的統合を通ります
+（`scripts/check-pr-base.sh`）。詳細は [AGENTS.md](./AGENTS.md) を参照してください。
 
 ### 過去の版へ戻す
 

@@ -123,8 +123,15 @@ plugins/{plugin-name}/
 版数を書き換えるところまでで、**常用する利用者へ届くのは `main` を進めた時点**です。
 
 ```bash
-git push origin develop:main   # 正式版として公開する
+gh pr create --base main --head develop --title "Release: v<版>" --body "..."
+gh pr merge <番号> --merge --admin   # 正式版として公開する
 ```
+
+**`git push origin develop:main` は使えません。** ruleset の bypass は `pull_request` で
+作ってあり、直接 push は管理者でも拒まれます。`--admin` を付けるのは、GitHub が自分の
+Pull Request を自分で承認できず、承認 1 件必須のもとでメンテナーが 1 人の間はこれが唯一の
+経路になるためです。理由と、`main` が `develop` の fast-forward ではなくなることは
+AGENTS.md の「版の付け方と開発版の配布」にあります。
 
 進める判断と承認は `/ndf:release` が扱います。**承認を得ないまま実行しないでください。**
 `main` へ入った時点で、常用する利用者の `marketplace update` に載ります。

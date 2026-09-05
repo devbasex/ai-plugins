@@ -95,10 +95,12 @@ python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['descript
 
 ### agy
 
-agy にも取得元の登録がありません。clone したディレクトリの `dev.agy` を直接導入します。
+agy にも取得元の登録がありません。clone した `dev.agy` を直接導入します。**更新の副コマンドが
+無い**ため、新しい版へは入れ直します（`install` は上書きするが、消したファイルは実体に残る）。
 
 ```bash
-agy plugin install plugins/ndf/dev.agy
+agy plugin install plugins/ndf/dev.agy                               # 初回
+agy plugin uninstall ndf && agy plugin install plugins/ndf/dev.agy   # 新しい版へ
 ```
 
 導入すると `manifests/agy-skills.txt` に載る Skill 33 個と、エージェント 8 個、hook 1 個が
