@@ -82,16 +82,16 @@ def test_runtime_skill_count_removed_fails(tree: Path, fragment: str) -> None:
 
 
 def test_source_skill_count_mismatch_fails(tree: Path) -> None:
-    edit(root_readme(tree), "元Skills（7個）", "元Skills（8個）")
+    edit(root_readme(tree), "元Skills（5個）", "元Skills（8個）")
     result = run_check(tree)
     assert result.returncode != 0
     out = output_of(result)
     assert "README.md" in out
-    assert "8" in out and "7" in out
+    assert "8" in out and "5" in out
 
 
 def test_source_skill_count_removed_fails(tree: Path) -> None:
-    edit(root_readme(tree), "- **元Skills（7個）**:\n", "")
+    edit(root_readme(tree), "- **元Skills（5個）**:\n", "")
     result = run_check(tree)
     assert result.returncode != 0
     assert "README.md" in output_of(result)
@@ -104,13 +104,13 @@ def test_category_total_mismatch_fails(tree: Path) -> None:
     """行ごとの数と名前の数が揃っていても、合計が食い違えば失敗する。"""
     edit(
         root_readme(tree),
-        "  - 第2群 (3): echo, xray, yankee\n",
-        "  - 第2群 (4): echo, xray, yankee, foxtrot\n",
+        "  - 第2群 (1): echo\n",
+        "  - 第2群 (2): echo, foxtrot\n",
     )
     result = run_check(tree)
     assert result.returncode != 0
     out = output_of(result)
-    assert "8" in out and "7" in out
+    assert "6" in out and "5" in out
 
 
 def test_category_line_count_mismatch_fails(tree: Path) -> None:
@@ -124,7 +124,7 @@ def test_category_line_count_mismatch_fails(tree: Path) -> None:
 def test_category_breakdown_removed_fails(tree: Path) -> None:
     edit(
         root_readme(tree),
-        "  - 第1群 (4): alpha, bravo, charlie, delta\n  - 第2群 (3): echo, xray, yankee\n",
+        "  - 第1群 (4): alpha, bravo, charlie, delta\n  - 第2群 (1): echo\n",
         "",
     )
     result = run_check(tree)
@@ -179,15 +179,6 @@ def test_layout_skill_count_mismatch_fails(tree: Path) -> None:
     out = output_of(result)
     assert "plugins/ndf/README.md" in out
     assert "6" in out and "5" in out
-
-
-def test_layout_optional_count_mismatch_fails(tree: Path) -> None:
-    edit(plugin_readme(tree), "載せない Skill（2 個）", "載せない Skill（3 個）")
-    result = run_check(tree)
-    assert result.returncode != 0
-    out = output_of(result)
-    assert "plugins/ndf/README.md" in out
-    assert "3" in out and "2" in out
 
 
 def test_layout_counts_removed_fails(tree: Path) -> None:

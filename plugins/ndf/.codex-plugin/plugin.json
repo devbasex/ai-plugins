@@ -1,13 +1,12 @@
 {
   "name": "ndf",
   "version": "10.4.0",
-  "description": "Codex plugin (v10.4.0): 33 focused NDF skills for PR/review workflows, cross-review, implementation planning, plan-to-spec, Docker container access, external AI delegation (Codex/agy), and optional Slack completion notifications.",
+  "description": "Codex plugin (v10.4.0): 38 focused NDF skills for PR/review workflows, cross-review, implementation planning, plan-to-spec, Docker container access, external AI delegation (Codex/agy), and optional Slack completion notifications.",
   "skills": [
     "./skills/cherry-pick-pr",
     "./skills/cross-refactoring",
     "./skills/cross-review",
     "./skills/deploy",
-    "./skills/design",
     "./skills/development-workflow",
     "./skills/docker-container-access",
     "./skills/external-ai",
@@ -17,11 +16,12 @@
     "./skills/issue-plan-strategy",
     "./skills/logging-guidelines",
     "./skills/markdown-writing",
+    "./skills/notion-writing",
     "./skills/merged",
     "./skills/ndf-policies",
+    "./skills/out-of-scope",
     "./skills/issue-upkeep",
     "./skills/progress-tracking",
-    "./skills/out-of-scope",
     "./skills/plan-to-spec",
     "./skills/pr",
     "./skills/pr-review",
@@ -32,10 +32,15 @@
     "./skills/refactoring",
     "./skills/release-verification",
     "./skills/requirements-design",
+    "./skills/design",
     "./skills/retrospective",
     "./skills/tdd-cycle",
     "./skills/worktree",
-    "./skills/release"
+    "./skills/release",
+    "./skills/google-auth",
+    "./skills/google-drive",
+    "./skills/ml-model-structure",
+    "./skills/skill-stats"
   ],
   "hooks": "./hooks/codex.json"
 }

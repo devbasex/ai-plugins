@@ -22,9 +22,9 @@ VERSION = "9.3.0"
 OTHER_PLUGIN = "fixture-kit"
 OTHER_VERSION = "1.4.2"
 
-# 実体（`skills/`）5 個と任意 Skill（`optional-skills/`）2 個。元 Skill 数は 7 になる。
+# 実体（`skills/`）5 個。元 Skill 数はこの数と一致する（配らない Skill の置き場所は
+# v10.5.0 で無くなった。#116）。
 SKILL_DIRS = ["alpha", "bravo", "charlie", "delta", "echo"]
-OPTIONAL_DIRS = ["xray", "yankee"]
 
 # ランタイムごとの配布 Skill 数。4 つとも別の値にして、取り違えを検出できるようにする。
 MANIFESTS = {
@@ -41,9 +41,9 @@ ROOT_README = """# Fixture Marketplace
 **NDFプラグイン v9.3.0** の検査用の最小構成です。
 
 - **公開Skills**: Claude Code向け core 5個、Kiro向け core 4個、Codex向け core 3個、agy向け core 2個に分離。
-- **元Skills（7個）**:
+- **元Skills（5個）**:
   - 第1群 (4): alpha, bravo, charlie, delta
-  - 第2群 (3): echo, xray, yankee
+  - 第2群 (1): echo
 - **8つの専門エージェント**: director
 
 ### 利用可能なプラグイン
@@ -102,7 +102,6 @@ PLUGIN_README = """# NDF Plugin
 ```text
 plugins/ndf/
 ├── skills/                      # 配布 Skill の唯一の実体（5 個）
-├── optional-skills/             # どの配布先にも載せない Skill（2 個）
 └── manifests/                   # ランタイム別の配布 Skill 一覧
 ```
 
@@ -158,10 +157,6 @@ def build_tree(base: Path) -> Path:
         (ndf / "skills" / name / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
     # SKILL.md を持たないディレクトリは実体として数えない。
     (ndf / "skills/README.md").write_text("# 規約\n", encoding="utf-8")
-
-    for name in OPTIONAL_DIRS:
-        (ndf / "optional-skills" / name).mkdir(parents=True)
-        (ndf / "optional-skills" / name / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
 
     (root / "README.md").write_text(ROOT_README, encoding="utf-8")
     (root / "AGENTS.md").write_text(AGENTS_MD, encoding="utf-8")

@@ -19,8 +19,7 @@ Skill の実体は `plugins/ndf/skills/` の 1 箇所だけです。ランタイ
 plugins/ndf/
 ├── .claude-plugin/plugin.json   # Claude Code（agents / hooks / skills 配列）
 ├── .codex-plugin/plugin.json    # Codex（hooks / skills 配列）
-├── skills/                      # 配布 Skill の唯一の実体（27 個）
-├── optional-skills/             # どの配布先にも載せない Skill（4 個）
+├── skills/                      # 配布 Skill の唯一の実体（40 個）
 ├── manifests/                   # ランタイム別の配布 Skill 一覧
 ├── agents/                      # Claude Code のサブエージェント（8 個）
 ├── hooks/claude.json            # Claude Code の SessionStart / Stop hook
@@ -56,8 +55,8 @@ NDF の Skill 実装は `plugins/ndf/skills/` にあります。公開セット�
 | `plugins/ndf/manifests/codex-skills.txt` | `.codex-plugin/plugin.json` の `skills` 配列 |
 | `plugins/ndf/manifests/kiro-skills.txt` | `dev.kiro/install.sh` が張る symlink |
 
-どの manifest にも載せない Skill は `plugins/ndf/optional-skills/` へ置きます。`skills/` を配布 Skill の
-実体だけに保つことで、絞り込みの結果によらず公開数が変わりません。
+**`skills/` に置く Skill は、少なくとも 1 つの manifest へ載せます。** 配らない Skill の置き場所
+（`optional-skills/`）は v10.5.0 で無くしました（#116）。
 
 主な Skill 領域:
 
@@ -74,8 +73,8 @@ NDF の Skill 実装は `plugins/ndf/skills/` にあります。公開セット�
 - runtime 設定: `statusline`（Claude Code と Kiro CLI のみ）
 - policy: `ndf-policies`, `problem-solving`, `logging-guidelines`
 
-`optional-skills/` に置く `google-auth` / `google-drive` / `ml-model-structure` / `skill-stats`
-はどの manifest にも載らないため、この一覧には含めていません。
+- 外部サービスと測定: `google-auth`, `google-drive`, `skill-stats`, `ml-model-structure`,
+  `notion-writing`（v10.5.0 で 4 ランタイムすべてへ配布へ回しました。#116 / #144）
 
 ## MCP Plugins
 

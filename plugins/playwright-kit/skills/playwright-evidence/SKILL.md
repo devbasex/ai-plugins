@@ -16,8 +16,8 @@ allowed-tools:
 
 - テスト実行済みで `reports/<run-id>/` にエビデンスが存在すること (`/playwright-kit:playwright-authoring`)
 - Drive へ保管する場合のみ、`google-auth` skill で OAuth2 認証が完了していること (drive.file スコープ)。
-  同 skill は既定の配布セットに含まれないため、`plugins/ndf/optional-skills/google-auth/` を利用先へ
-  導入するか、`GOOGLE_AUTH_SCRIPTS` 環境変数で認証スクリプトの場所を指す
+  同 skill は NDF プラグインが配るため、NDF を導入していない利用先では
+  `GOOGLE_AUTH_SCRIPTS` 環境変数で認証スクリプトの場所を指す
 
 ## レポート生成
 

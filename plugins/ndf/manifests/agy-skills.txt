@@ -11,6 +11,7 @@ investigation-rules
 issue-plan-strategy
 logging-guidelines
 markdown-writing
+notion-writing
 merged
 ndf-policies
 out-of-scope
@@ -31,3 +32,7 @@ retrospective
 tdd-cycle
 worktree
 release
+google-auth
+google-drive
+ml-model-structure
+skill-stats
