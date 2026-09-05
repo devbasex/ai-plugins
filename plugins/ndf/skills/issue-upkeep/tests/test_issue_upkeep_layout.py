@@ -111,22 +111,22 @@ def test_the_skill_is_distributed(runtime: str) -> None:
 
 # ---------- 対象の範囲 ----------
 
-def test_the_target_is_not_narrowed_by_who_filed_it() -> None:
-    """段 1 の 3 つ目の経路が、起票した主体で絞らないことを明記している。
+def test_the_target_is_not_narrowed_by_who_or_when_it_was_filed() -> None:
+    """段 1 の 3 つ目の経路が、マイルストーンの有無だけで対象を決めることを明記している。
 
-    絞ると、**未設定のまま溜まる課題を誰も見ないことになる**。起票した側は一覧の全体を
-    見る立場に無く、棚卸をする側が自分の分だけを見ると、残りは次の棚卸でも同じ理由で外れる。
+    絞ると、未設定のまま溜まる課題を誰も見ないことになる。
     """
     body = SKILL.read_text(encoding="utf-8")
-    assert "起票した主体を問わない" in body
-    assert "**起票した主体で絞らない。**" in body
+    assert "マイルストーンの付いていない open の課題すべて" in body
+    assert "**起票者は問わない。**" in body
 
 
-def test_the_target_query_does_not_filter_by_author() -> None:
-    """未設定の課題を拾う例が、投稿者で絞っていないこと。"""
+def test_the_target_query_filters_only_by_milestone() -> None:
+    """未設定の課題を拾う例が、マイルストーンの有無だけで絞っていること。"""
     body = SKILL.read_text(encoding="utf-8")
-    block = body[body.index("**起票した主体で絞らない。**"):]
+    block = body[body.index("**起票者は問わない。**"):]
     start = block.index("```bash")
     block = block[start:block.index("```", start + len("```bash")) + 3]
     assert "--author" not in block, "投稿者で絞る例になっている"
+    assert "created:" not in block, "起票の時期で絞る例になっている"
     assert "select(.milestone == null)" in block
