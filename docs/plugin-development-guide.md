@@ -133,12 +133,14 @@ git push origin develop:main   # 正式版として公開する
 1. `plugin.json`のバージョンをインクリメント
 2. 変更内容をドキュメント化
 3. `plugins/ndf/README.md` の「v&lt;版&gt; へ更新するとき」の節を開き、**本文をその版の変更内容へ書き直す**。見出しの版数だけを置き換えて、本文を前の版の説明のまま残さない
-4. Skill の数が増減した場合は、`README.md` と `plugins/ndf/README.md` に書かれた数を書き直す
-5. `python3 scripts/check-doc-staleness.py --root .` を実行し、説明文書に残った古い版数を
+4. `CHANGELOG.md` の先頭へその版の節を足す。書式は Keep a Changelog に従い、変更点を
+   `追加` / `変更` / `修正` / `削除` へ分類して 1〜2 行で書く。判断の理由は `CLAUDE.md` の側に置く
+5. Skill の数が増減した場合は、`README.md` と `plugins/ndf/README.md` に書かれた数を書き直す
+6. `python3 scripts/check-doc-staleness.py --root .` を実行し、説明文書に残った古い版数を
    出力の行番号のとおりに直す
-6. 破壊的変更がある場合は明示
-7. テストを実行
-8. **正式版として `main` を進めた後、リリースタグを打つ**
+7. 破壊的変更がある場合は明示
+8. テストを実行
+9. **正式版として `main` を進めた後、リリースタグを打つ**
 
 ```bash
 claude plugin tag plugins/ndf --dry-run   # 打つ内容を確認する
@@ -154,10 +156,10 @@ claude plugin tag plugins/ndf --push      # ndf--v<版> を作って origin へ�
 に書かれた `(vX.Y.Z)` は読み手向けの記載で、取得する版を決める値ではありません。
 
 `scripts/validate-runtime-plugins.sh` が突き合わせるのは、説明文書に書かれた Skill の数と、
-**版数を書いた 13 箇所**です。定義ファイルと更新案内の見出しが 6 箇所、説明文書の本文が
+**版数を書いた 15 箇所**です。定義ファイルと更新案内の見出しが 8 箇所、説明文書の本文が
 7 箇所あります（`README.md` の概要とプラグイン一覧表、`AGENTS.md` の 2 箇所、
 `plugins/ndf/README.md` の Kiro と Codex の確認例 3 種類）。**記載を消しても検査は通りません。**
-一覧は AGENTS.md の「検査が突き合わせる 13 箇所」にあります。
+一覧は AGENTS.md の「検査が突き合わせる 15 箇所」にあります。
 
 **検査が見るのは版数そのものの一致までで、記載の中身までは見ません。** 更新案内の本文が
 その版の変更内容を説明しているかは機械では判定できません。手順 3 が、その本文を人が
