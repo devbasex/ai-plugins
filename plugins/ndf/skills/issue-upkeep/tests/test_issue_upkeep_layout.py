@@ -107,3 +107,26 @@ def test_the_skill_is_distributed(runtime: str) -> None:
     names = [line.split("#", 1)[0].strip()
              for line in manifest.read_text(encoding="utf-8").splitlines()]
     assert "issue-upkeep" in names
+
+
+# ---------- 対象の範囲 ----------
+
+def test_the_target_is_not_narrowed_by_who_filed_it() -> None:
+    """段 1 の 3 つ目の経路が、起票した主体で絞らないことを明記している。
+
+    絞ると、**未設定のまま溜まる課題を誰も見ないことになる**。起票した側は一覧の全体を
+    見る立場に無く、棚卸をする側が自分の分だけを見ると、残りは次の棚卸でも同じ理由で外れる。
+    """
+    body = SKILL.read_text(encoding="utf-8")
+    assert "起票した主体を問わない" in body
+    assert "**起票した主体で絞らない。**" in body
+
+
+def test_the_target_query_does_not_filter_by_author() -> None:
+    """未設定の課題を拾う例が、投稿者で絞っていないこと。"""
+    body = SKILL.read_text(encoding="utf-8")
+    block = body[body.index("**起票した主体で絞らない。**"):]
+    start = block.index("```bash")
+    block = block[start:block.index("```", start + len("```bash")) + 3]
+    assert "--author" not in block, "投稿者で絞る例になっている"
+    assert "select(.milestone == null)" in block
