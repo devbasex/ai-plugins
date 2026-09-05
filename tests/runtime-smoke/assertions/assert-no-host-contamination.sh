@@ -24,7 +24,8 @@ for forbidden in /root/.claude /root/.codex /root/.kiro /root/.gemini /root/.con
     exit 1
   fi
 done
-if find /tmp/runtime-artifacts -path '/tmp/runtime-artifacts/*runtime-secrets*' -print | grep -q .; then
+leaked="$(find /tmp/runtime-artifacts -path '/tmp/runtime-artifacts/*runtime-secrets*' -print -quit)"
+if [ -n "$leaked" ]; then
   echo "$runtime: secret path included in artifacts" >&2
   exit 1
 fi

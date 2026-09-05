@@ -32,8 +32,10 @@ PLUGIN_DIR = REPO_ROOT / f"plugins/{FAMILY}"
 MANIFEST_DIR = PLUGIN_DIR / "manifests"
 
 # 配布数は課題ごとに変わりうるが、**agy を足したことで他の 3 つが変わらない**ことは
-# #215 の受け入れ条件（A12）である。値を書いて固定する。
-EXPECTED_COUNTS = {"claude": 35, "codex": 33, "kiro": 34, "agy": 33}
+# #215 の受け入れ条件（A12）である。値を書いて固定する。v10.5.0 で 5 個
+# （`optional-skills/` の 4 個と `notion-writing`）を 4 ランタイムすべてへ足したため、
+# 4 つとも同じ 5 だけ増えている（#116 / #144）。
+EXPECTED_COUNTS = {"claude": 40, "codex": 38, "kiro": 39, "agy": 38}
 
 
 def manifest_names(runtime: str) -> list[str]:

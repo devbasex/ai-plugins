@@ -6,12 +6,12 @@ Skill ごとの実測値と、維持・統合・削除・発動改善の判定�
 
 - 測定日: 2026-08-08
 - 測定範囲: 2026-05-20 〜 2026-08-07 の会話ログ 1,943 セッション
-- 測定ツール: `/ndf:skill-stats`（`plugins/ndf/optional-skills/skill-stats/scripts/skill-stats.py`）
+- 測定ツール: `/ndf:skill-stats`（`plugins/ndf/skills/skill-stats/scripts/skill-stats.py`）
 
 再現手順:
 
 ```bash
-python3 plugins/ndf/optional-skills/skill-stats/scripts/skill-stats.py \
+python3 plugins/ndf/skills/skill-stats/scripts/skill-stats.py \
   --plugin-root plugins/ndf --from 2026-05-20 --to 2026-08-07 --format json
 ```
 

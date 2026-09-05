@@ -306,7 +306,8 @@ for family in families:
 
 # 単一ディレクトリ構成では skills/ に全 runtime 分の実体が並ぶ。どの manifest にも
 # 載らない Skill をここへ置くと、ルートマニフェストや将来の絞り込み漏れで配られる。
-# 配らない Skill は optional-skills/ へ置く規約なので、その違反を検出する。
+# skills/ に置く Skill は少なくとも 1 つの manifest へ載せる規約なので、その違反を
+# 検出する（配らない置き場所は v10.5.0 で無くなった。#116）。
 for family in families:
     source = plugin_dir_of(family)
     listed: set[str] = set()
@@ -322,7 +323,7 @@ for family in families:
         if skill_dir.name not in listed:
             errors.append(
                 f"{family} の skills/ にあるがどの manifest にも載っていない: {skill_dir.name}"
-                "（配らない Skill は optional-skills/ へ置く）"
+                "（skills/ に置く Skill は少なくとも 1 つの manifest へ載せる）"
             )
 
 # マニフェストの skills は配列で明示する。配列に載っていない Skill はランタイムから

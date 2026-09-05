@@ -40,8 +40,9 @@ Kiro CLI は installer が `kiro-skills.txt` を読んで symlink を張る。ag
 プラグインの目印はディレクトリ直下の `plugin.json` であるため、agy 向けの定義は
 `dev.agy/plugin.json` へ置く。
 
-どの manifest にも載せない Skill は `plugins/ndf/optional-skills/` へ置く。`skills/` を配布 Skill の
-実体だけに保つことで、絞り込みの結果によらず公開数が変わらない。
+**`skills/` に置く Skill は、少なくとも 1 つの manifest へ載せる。** 配らない Skill の置き場所
+（`optional-skills/`）は v10.5.0 で無くした（#116）。どこからも起動できない Skill を置き続ける
+理由が、公開数を一定に保つことだけだったためである。
 
 `dev.kiro` は Agent Plugins 1.0.0 §8.2 が定めるクライアント拡張ディレクトリである。
 

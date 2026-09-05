@@ -7,6 +7,7 @@ cross-refactoring
 merged
 ndf-policies
 markdown-writing
+notion-writing
 docker-container-access
 implementation-plan
 investigation-rules
@@ -32,3 +33,7 @@ progress-tracking
 release-verification
 retrospective
 release
+google-auth
+google-drive
+ml-model-structure
+skill-stats

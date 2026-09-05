@@ -6,19 +6,43 @@ runtime="${1:?runtime is required}"
 : "${PROJECT_DIR:=/tmp/runtime-project}"
 : "${HOME:=/tmp/runtime-home}"
 
+# `find ... | grep -q .` は使わない。`grep -q` は最初の一致で終わるため、`find` がまだ
+# 書いている間にパイプが閉じ、`find` が SIGPIPE で死ぬ。`set -o pipefail` のもとでは
+# パイプライン全体が 141 を返し、**見つかっているのに失敗になる**。走査するファイルが
+# 増えるほど当たりやすい（配布 Skill を 5 個足した時点で継続的統合が落ちた）。
+# 最初の 1 件で `find` 自身を止め、結果は変数で受ける。
+require_path() {
+  local root="$1" pattern="$2" hit
+  hit="$(find "$root" -path "$pattern" -print -quit)"
+  [ -n "$hit" ] || { echo "not found: $pattern under $root" >&2; exit 1; }
+}
+
+# symlink をたどる版。Kiro CLI は `.kiro/skills/` へ symlink を張る。
+require_path_follow() {
+  local root="$1" pattern="$2" hit
+  hit="$(find -L "$root" -path "$pattern" -print -quit)"
+  [ -n "$hit" ] || { echo "not found: $pattern under $root" >&2; exit 1; }
+}
+
+require_name() {
+  local root="$1" pattern="$2" hit
+  hit="$(find "$root" -name "$pattern" -print -quit)"
+  [ -n "$hit" ] || { echo "not found: $pattern under $root" >&2; exit 1; }
+}
+
 case "$runtime" in
   claude)
-    find "$HOME" -path '*/.claude-plugin/plugin.json' -print | grep -q .
-    find "$HOME" -path '*/skills/*/SKILL.md' -print | grep -q .
-    find "$HOME" -path '*/agents/*.md' -print | grep -q .
+    require_path "$HOME" '*/.claude-plugin/plugin.json'
+    require_path "$HOME" '*/skills/*/SKILL.md'
+    require_path "$HOME" '*/agents/*.md'
     # 単一ディレクトリ構成では、同じ hooks/ に runtime ごとの定義が並ぶ。
     # 読む側が違うので、それぞれ自分の定義が届いていることを見る。
-    find "$HOME" -path '*/hooks/claude.json' -print | grep -q .
+    require_path "$HOME" '*/hooks/claude.json'
     ;;
   codex)
-    find "$HOME" -path '*/.codex-plugin/plugin.json' -print | grep -q .
-    find "$HOME" -path '*/skills/*/SKILL.md' -print | grep -q .
-    find "$HOME" -path '*/hooks/codex.json' -print | grep -q .
+    require_path "$HOME" '*/.codex-plugin/plugin.json'
+    require_path "$HOME" '*/skills/*/SKILL.md'
+    require_path "$HOME" '*/hooks/codex.json'
     ;;
   kiro)
     test -f "$PROJECT_DIR/.kiro/agents/ndf.json"
@@ -31,7 +55,7 @@ tools = config.get("tools")
 if not tools:
     sys.exit("agent config declares no tools: " + sys.argv[1])
 ' "$PROJECT_DIR/.kiro/agents/ndf.json"
-    find -L "$PROJECT_DIR/.kiro/skills" -path '*/SKILL.md' -print | grep -q .
+    require_path_follow "$PROJECT_DIR/.kiro/skills" '*/SKILL.md'
     # playwright-kit は別プラグインとして導入する（NDF の manifest には含まれない）
     test -L "$PROJECT_DIR/.kiro/skills/playwright-planning"
     test -f "$PROJECT_DIR/.kiro/skills/playwright-planning/SKILL.md"
@@ -45,8 +69,8 @@ if not tools:
     plugin_dir="$HOME/.gemini/config/plugins/ndf"
     test -f "$plugin_dir/plugin.json"
     test -f "$plugin_dir/hooks.json"
-    find "$plugin_dir/skills" -path '*/SKILL.md' -print | grep -q .
-    find "$plugin_dir/agents" -name '*.md' -print | grep -q .
+    require_path "$plugin_dir/skills" '*/SKILL.md'
+    require_name "$plugin_dir/agents" '*.md'
     test -f "$plugin_dir/scripts/worktree-guard.sh"
     # 配る Skill の基準は manifest だけが持つ。導入先の並びが基準と一致することを見る。
     python3 - "$REPO_ROOT/plugins/ndf/manifests/agy-skills.txt" "$plugin_dir/skills" <<'AGYPY'
