@@ -90,7 +90,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.2.0）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.3.0）
 ```
 
 ### agy
@@ -110,96 +110,87 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.2.0 へ更新するとき
+## v10.3.0 へ更新するとき
 
-この版が直すのは、複数の CLI でレビューと構造改善を回す 2 つの Skill（`cross-review` /
-`cross-refactoring`）を支える基盤です。**利用者から見た破壊的変更はありません。** 共通層の
-移動はプラグインの中の構造で、Skill を通した使い方は変わりません。
+この版は、**誰がレビューし、いつ止め、進行をどこへ残すか**を決め直します。Skill が 2 個
+増えて 35 個になりました。**手順の呼び方が変わる箇所が 3 つあります**（下記）。
 
-### 収束ループの共通層が 1 つの場所に集まりました
+### レビュワーが「ホストを除く 3 者から輪番で 2 者」になりました
 
-ラウンドを回す仕組み（監視・状態の保存・結果の読み取り）は `cross-review` の中に置かれ、
-`cross-refactoring` がそこを指していました。片方の Skill を配らない配布先では、もう片方から
-読めません。共通層を `plugins/ndf/scripts/lib/` へ移しました
-（[#285](https://github.com/devbasex/ai-plugins/issues/285) /
-[#280](https://github.com/devbasex/ai-plugins/issues/280)）。
+`cross-review` はレビュワーを `codex` / `agy` の名指しで固定していました。この形は、ホストが
+`codex` か `agy` のときに**自分自身をレビュワーへ含めます**。母集合を「全ランタイム − ホスト」
+にし、担当をラウンドごとの輪番で 2 者選ぶようにしました
+（[#371](https://github.com/devbasex/ai-plugins/issues/371)）。
 
-`monitor.py` は**移すだけ**です。2 つの工程が同じ形で使えるところまでを共通にし、工程ごとに
-違う判断を 1 つの抽象へまとめる書き換えはしていません。
+**`--host` が増えました。** 省略すると環境変数から推定し、推定できなければ失敗します。
+既定を置かないのは、誤ると母集合が狂ってホストが自分自身をレビューするためです。**agy から
+呼ぶときは `--host agy` を明示してください**（agy の手掛かりは推定に置いていません）。
 
-### GitHub の呼び出しが REST に寄りました
+参加する CLI の認証は起動前に確かめます。誤検知するときは `NDF_SKIP_AUTH_CHECK=1` です。
 
-進行側が使う GraphQL を、初期化で 4 点から 0 点へ、ラウンドごとに 7 点から 0 点へ減らしました
-（[#271](https://github.com/devbasex/ai-plugins/issues/271) /
-[#327](https://github.com/devbasex/ai-plugins/issues/327)）。GraphQL は取得の点数が独自の
-上限を持ち、REST とは別に枯れます。呼び出しを 1 つの経路へ寄せると、残りの余裕を 1 つの
-数字で読めます。
+### 終了基準が「新しい指摘が出ない」になりました
 
-あわせて、収束の判定が**継続的統合の失敗**を見るようになりました。読むのは `check-runs` の
-1 回だけです。`status` は GitHub Actions では常に `pending` を返すため使いません。
+全員 `APPROVE` を待つ形は、**最も止まらない参加者に律速されます**。同じ論点の再提出では
+止まり、新しい観点が出るあいだは回る形にしました。一致の判定は振動の検知と共有し、
+引き継ぎ → 新規性 → 振動の順に見ます。
 
-### 上限に達している間も、収束ループが止まらなくなりました
+**指摘の記録が残っていないラウンドは「測れない」として扱い**、従来どおり全員が通ったかで
+判定します。0 件として扱うと、修正必須の指摘が出ていても収束してしまうためです。
 
-GitHub の呼び出しの上限に達すると、レビューの投稿がその場で落ちていました。投稿は待ち行列へ
-積み、回復した後に順に流します（[#291](https://github.com/devbasex/ai-plugins/issues/291)）。
-**待ち行列が空になるまで収束させません。** 届いていない指摘を数えたまま終わらないためです。
+### 進行の記録が 1 つの Skill に集まりました
 
-### Skill の本文から、このリポジトリ固有の前提が外れました
+工程の進行を記録する手順が 15 個の `SKILL.md` に散っていました。`progress-tracking` へ集め、
+各工程は「この工程に入ったら呼ぶ」の 1 行だけを持ちます
+（[#243](https://github.com/devbasex/ai-plugins/issues/243)）。
 
-手順書が検証のコマンドをこのリポジトリの名前で書いていたため、他のリポジトリでは書かれた
-とおりに実行できませんでした。コマンドを名指しせず、**探す先を一覧で示す**形にしました
-（[#292](https://github.com/devbasex/ai-plugins/issues/292)）。再発を防ぐ規約と、機械の検査
-（`scripts/check-skill-repo-assumptions.py`）を新しく置いています。
+**盤面（GitHub Projects）の宣言が無いリポジトリでも、issue の本文へ残ります。** 本文の
+`## 進行` の節だけを差し替えるため、人が書いた内容は消えません。
 
-### cross-refactoring の適用担当が 4 CLI すべてになりました
+盤面へ書くときは、解決した識別子を控えて記録のたびの全件取得をやめました。10 件の課題へ
+2 つのキーを書いた時点で GraphQL の上限に達し、以後の記録が黙って捨てられることを実測して
+います（[#287](https://github.com/devbasex/ai-plugins/issues/287)）。
 
-適用を任せる母集合に入らない CLI がありました。4 つすべてを対象にし、
-`--max-outer-rounds` の既定を 3 から 4 へ変えました
-（[#216](https://github.com/devbasex/ai-plugins/issues/216) /
-[#284](https://github.com/devbasex/ai-plugins/issues/284)）。上限が 3 のままだと、輪番が
-4 者目の順番へ届きません。
+### 構造改善の既定が `cross-refactoring` になりました
 
-あわせて、**実際に動いたモデル名を取得できるのは claude だけである**という事実を集計へ
-入れました。取得できない 3 者は、取得できなかったこととして記録されます。
+工程表の「構造改善」は 4 モードとも `refactoring` を指していました。**何を直すかの発見と、
+直した結果の評価が、どちらも作業した AI 自身に閉じます。** `architecture` と
+`legacy-refactor` を `cross-refactoring` へ移しました
+（[#370](https://github.com/devbasex/ai-plugins/issues/370)）。`standard` は `refactoring` の
+ままです（変更のついでの小さな整理に 4 つの CLI を動かす費用に見合わないため）。
 
-### cross-review の手順書と説明が実装に合いました
+**使うモードでは `pr` を構造改善の前に 1 度呼び、Draft で開きます**（`cross-refactoring` は
+open な Pull Request の上で回るため）。前提を満たせないときの退避先は
+`development-workflow` の `references/workflow-modes.md` にあります。
 
-手順書を分け、契約（受け渡す値と結果ファイルの形）を `docs/04-contracts.md` へ移しました
-（[#330](https://github.com/devbasex/ai-plugins/issues/330)）。副コマンドの説明を実装の
-挙動へ合わせ（[#329](https://github.com/devbasex/ai-plugins/issues/329)）、`pr-review` の
-起動の約束を `external-ai` へ一本化しました
-（[#286](https://github.com/devbasex/ai-plugins/issues/286)）。同じ約束が 2 箇所にあると、
-片方だけが更新されます。
+あわせて、修正の後の再レビューを**変更要求を出した担当だけ**にしました
+（[#372](https://github.com/devbasex/ai-plugins/issues/372)）。
 
-### 更新の手順
+### 蓄積した課題を手入れする手順が増えました
 
-**サードパーティのマーケットプレイスは自動更新が既定で無効です。** この版は、利用者が
-更新の操作を実行した時点で届きます。
+`issue-upkeep` を追加しました。open 43 件を実物と突き合わせたところ、**24 件（56%）の本文が
+現状と食い違っていました**（[#331](https://github.com/devbasex/ai-plugins/issues/331)）。
+判定と反映の間に切れ目を置き、「やらない」の判断を再燃の条件付きで行います。振り返りの最後
+（振り返りを通らない変更では配布の後）に呼ばれます。
+
+### 承認を求めるときの提示物が決まりました
+
+設計レビューのマージと本番への配布で承認を求めるとき、**対象の URL と変更量だけでは、
+承認する側は設計文書を最初から読むまで判断できません**。決めたこと・作るもの・満たすこと・
+未確認のまま残ることを、判断に使う層として定めました
+（[#318](https://github.com/devbasex/ai-plugins/issues/318)）。
+
+あわせて、**マージに他者の承認が要るリポジトリ**では、ゴール条件が Pull Request より後の
+工程を含むときに到達点を「提出とレビューの収束」へ置き直します
+（[#321](https://github.com/devbasex/ai-plugins/issues/321)）。待ち続けることも、自分で
+マージすることもしません。
+
+### 手元で確かめる
 
 ```bash
-# Claude Code
-claude plugin marketplace update ai-plugins
-claude plugin update ndf@ai-plugins
-
-# Codex
-codex plugin marketplace update ai-plugins
+claude plugin update ndf@ai-plugins   # 再起動するまで反映されません
 codex plugin add ndf@ai-plugins
-
-# Kiro — clone を更新してから入れ直します
-git -C <clone> pull
-bash plugins/ndf/dev.kiro/install.sh --project <ディレクトリ> --yes
-
-# agy — 入れ替えの操作が無いため、外してから入れ直します
-git -C <clone> pull
-agy plugin uninstall ndf && agy plugin install <clone>/plugins/ndf/dev.agy
 ```
 
-`claude plugin update` は「restart required to apply」と表示します。実体を入れ替えるだけで、
-動いているセッションには反映されません。
-
-**前の版へ戻す手段は利用者の側にあります。** 取得元をタグ（`ndf--v10.1.0`）へ固定するか、
-別名のマーケットプレイスで対象だけを固定します。手順は
-`docs/plugin-development-guide.md` の「利用者が過去の版へ戻る」にあります。
 
 ## Playwright テストについて
 
@@ -343,7 +334,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.2.0/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.3.0/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -365,14 +356,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.2.0/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.3.0/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.2.0  <path>
+# => ndf@ai-plugins  installed, enabled  10.3.0  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
