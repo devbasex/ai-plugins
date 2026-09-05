@@ -90,7 +90,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.3.1）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.4.0）
 ```
 
 ### agy
@@ -110,25 +110,25 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.3.1 へ更新するとき
+## v10.4.0 へ更新するとき
 
-この版が直すのは、v10.3.0 で新設した `issue-upkeep` の手順の記述 1 箇所です。**振る舞いは
-変わりません。**
+この版で配布物が変わるのは Skill 2 本（`release` / `issue-upkeep`）の手順の記述です。
+**引数も副コマンドも変わりません。** 残りはリポジトリ側の整備で、配布物には含まれません。
 
-### 棚卸の対象を、起票した主体で絞らないことを明記しました
+### 版を上げる手順に、変更履歴の更新が入りました
 
-段 1 の 3 つ目の経路「このまとまりで起票した課題」を、実行する側が**自分の起票に限って**
-読めてしまいました。v10.3.0 の棚卸で、人が起票した 3 件が対象から外れ、マイルストーンが
-未設定のまま残っています。
+`release` の「版と説明文書を更新する」へ 1 段落を足しました。**変更履歴の文書を持つ
+リポジトリでは、その版の節を足します。** 版数と日付は機械で確かめられますが、その版で
+何が変わったかは書かないと残りません。
 
-**主体で絞ると、未設定のまま溜まる課題を誰も見ないことになります。** 起票した側は一覧の
-全体を見る立場に無く（`out-of-scope` は見つけたその場で起票する）、棚卸をする側が
-「自分の分だけ」を見ると、残りは次の棚卸でも同じ理由で外れます。
+書くのは変更点の列挙で、判断の理由はリポジトリの知識の側（`CLAUDE.md` など）に置きます。
+**リポジトリ固有のファイル名は手順に書いていません。**
 
-未設定のまま残る条件（`priority: low` で主題が合わない / `priority: medium` で共通の主題が
-1 件しか残らない / 要判断へ倒した）と、報告に件数と理由を残す規定は
-`references/milestones.md` に元からあります。**同じ規定を 2 箇所に置かないため、そちらへは
-足していません。**
+### 課題の手入れの対象を、マイルストーンの有無だけで決めます
+
+`issue-upkeep` の段 1 の 3 つ目の経路を、**マイルストーンが付いていないこと**だけで拾う形に
+しました。v10.3.1 では「起票した主体で絞らない」ところまでを明記していましたが、期間で
+絞る余地が残っていました。
 
 ### 手元で確かめる
 
@@ -136,7 +136,6 @@ agy plugin list
 claude plugin update ndf@ai-plugins   # 再起動するまで反映されません
 codex plugin add ndf@ai-plugins
 ```
-
 
 ## Playwright テストについて
 
@@ -280,7 +279,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.3.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.4.0/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -302,14 +301,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.3.1/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.4.0/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.3.1  <path>
+# => ndf@ai-plugins  installed, enabled  10.4.0  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
