@@ -200,7 +200,7 @@ FRONT_MATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 KEY_RE = re.compile(r"^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$")
 # 廃止した旧書式（`Triggers: 'a', 'b'`）。残っていたら失敗させる。ラベルと引用符の分だけ
 # 長いうえ、実測では description 末尾の列挙は暗黙起動へ届きにくかった
-# （docs/specifications/ndf-skill-inventory.md「トリガ書式の変更の実測」）。
+# （docs/specifications/ndf-skill-inventory/02-frontmatter-and-triggers.md）。
 LEGACY_TRIGGER_RE = re.compile(
     # ラベルの直後に引用符付きの語が続くものだけを旧書式と見なす。
     # 「This will trigger: ...」のような一般名詞としての用法で失敗させないため。

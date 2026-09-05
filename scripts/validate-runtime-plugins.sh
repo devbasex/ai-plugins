@@ -452,4 +452,9 @@ run python3 "$ROOT_DIR/scripts/check-doc-staleness.py" --root "$ROOT_DIR"
 # 配らないと解決できない。例外の一覧に無い参照が増えたときに落ちる。
 run python3 "$ROOT_DIR/scripts/check-cross-skill-refs.py" --root "$ROOT_DIR"
 
+# 説明文書と配布物の Markdown が分割の基準（501 行以上）を超えていないかを見る。
+# `check-skill-frontmatter.py` は SKILL.md の行数しか見ておらず、docs/ と
+# references/ と README.md とリポジトリ直下の文書が対象に入っていなかった。
+run python3 "$ROOT_DIR/scripts/check-doc-line-limit.py" --root "$ROOT_DIR"
+
 echo "runtime plugin validation passed"

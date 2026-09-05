@@ -27,7 +27,7 @@ python3 scripts/check-skill-repo-assumptions.py --report  # 走査の規模と�
 既知の外部 Skill 名との衝突）は警告にとどまり、`--strict` を付けたときだけ失敗する。
 
 利用実績と維持・統合・削除の判定は
-[docs/specifications/ndf-skill-inventory.md](../../../docs/specifications/ndf-skill-inventory.md)
+[docs/specifications/ndf-skill-inventory/](../../../docs/specifications/ndf-skill-inventory/01-ledger-and-criteria.md)
 に記録する。
 
 ## `description` を単一の真実とする
@@ -84,7 +84,7 @@ description: "Delete merged branches and worktrees after listing them for approv
 `merged` 241 → 144 文字）。
 
 書式を変えても暗黙起動は落ちない。実測は
-[docs/specifications/ndf-skill-inventory.md](../../../docs/specifications/ndf-skill-inventory.md)
+[docs/specifications/ndf-skill-inventory/](../../../docs/specifications/ndf-skill-inventory/02-frontmatter-and-triggers.md)
 「トリガ書式の変更の実測」に記録している。
 
 規則:
@@ -100,7 +100,7 @@ description: "Delete merged branches and worktrees after listing them for approv
 **`allowed-tools` は利用制限ではなく、事前承認（確認プロンプトのスキップ）である。**
 
 > Tools Claude can use without asking permission when this skill is active.
-> — [Claude Code 公式リファレンス](../../../docs/claude-code-skills-official-reference.md)
+> — [Claude Code 公式リファレンス](../../../docs/claude-code-skills-official-reference/01-frontmatter-and-description.md)
 
 したがって、外すと「その Skill が使えるツールが減る」のではなく、**Skill の手順の途中で
 利用者に確認を求める回数が増える**。ファイル編集を伴う Skill から `Write` / `Edit` を外すと、
@@ -164,7 +164,7 @@ description: "Delete merged branches and worktrees after listing them for approv
 | 自動発動 + 実行前確認 | 取り消しは難しいが、**日常的に自然文で依頼される**。明示指示専用にすると Skill が使われず、エージェントが独自手順で同じ操作を実行してしまう | 暗黙起動を許し、取り消しの難しい手順の**直前に対象の一覧提示と利用者の同意**を必須手順として `SKILL.md` 本文へ固定する。`description` にも確認を取る旨を書く |
 
 判断材料は
-[棚卸台帳](../../../docs/specifications/ndf-skill-inventory.md)の実測起動数と、
+[棚卸台帳](../../../docs/specifications/ndf-skill-inventory/01-ledger-and-criteria.md)の実測起動数と、
 そのうち明示起動が占める割合である。明示起動がほぼ全数なら前者、自然文の依頼が多い、あるいは
 Skill を使わず独自手順で実行された形跡があるなら後者を選ぶ。
 

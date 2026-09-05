@@ -28,8 +28,9 @@ allowed-tools:
 詳細は `docs/` に、コマンドは `scripts/` に分けている。
 
 - [docs/01-state-and-propose.md](docs/01-state-and-propose.md) — Step 0〜3（初期化 / Skill 配置 / 提案 / マージ）
-- [docs/02-apply-and-review.md](docs/02-apply-and-review.md) — Step 4〜8（適用 / レビュー / 見送り / 報告）
+- [docs/02-apply-and-review.md](docs/02-apply-and-review.md) — Step 4〜5（適用 / レビュー）
 - [docs/03-review-viewpoints.md](docs/03-review-viewpoints.md) — レビュー観点
+- [docs/04-fix-and-report.md](docs/04-fix-and-report.md) — Step 6〜8（修正 / 見送り / 収束 / 報告）
 - [scripts/refactor.py](scripts/refactor.py) — 状態管理（uv 自己完結、標準ライブラリのみ）
 - [scripts/prepare-worktrees.sh](scripts/prepare-worktrees.sh) — 作業ディレクトリ準備と Skill 配置
 - [scripts/launch-cli.sh](scripts/launch-cli.sh) — フェーズごとのプロンプト組み立てと CLI 起動
@@ -306,7 +307,7 @@ done
 
 続けて **Step 7** で `/ndf:cross-review <PR>` を実行する。レビューはラウンド単位なので、
 **ラウンドを跨いだ整合はここで見る**。渡す観点の定型は
-[docs/02-apply-and-review.md](docs/02-apply-and-review.md) の Step 7 にある。収束したら
+[docs/04-fix-and-report.md](docs/04-fix-and-report.md) の Step 7 にある。収束したら
 Draft を解除し、`refactor.py report "$ID" --metrics` の出力を報告する。
 
 状態ファイルに全ての状態が入るため、どこで落ちても同じコマンド列を叩き直せば再開できる。
