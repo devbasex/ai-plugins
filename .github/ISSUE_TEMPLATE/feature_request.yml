@@ -1,0 +1,40 @@
+name: 機能の要望
+description: 足りない機能、既存の手順の改善
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 解決したい状況
+      description: いま何に困っているかを書いてください。機能の形ではなく、状況から書くと検討しやすくなります。
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 案
+      description: どうなると解決するかを書いてください。
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 代替案
+      description: ほかに考えた方法と、それを採らない理由があれば書いてください。
+
+  - type: dropdown
+    id: runtime
+    attributes:
+      label: 影響するランタイム
+      multiple: true
+      options:
+        - Claude Code (claude)
+        - Codex (codex)
+        - Kiro CLI (kiro-cli)
+        - agy (Antigravity CLI)
+        - 4 つすべて
+        - ランタイムに依らない
+    validations:
+      required: true
