@@ -123,6 +123,34 @@ EOF
 
 `DRAFT_FLAG` は `--draft` 指定時のみ `--draft`、それ以外は空。
 
+**Test plan には実行したコマンドと終了コードを書く。** 出力の末尾だけを読むと、落ちていても
+通ったと読める。検査は集計を標準出力へ書きながら判定を終了コードだけで返すことがあるため、
+**「通った」という語ではなく `exit=0` を証跡にする**（判定の規則は `quality-gates` にある）。
+
+**`gh pr create` は GraphQL を呼ぶ。上限に達していると作成そのものが失敗する。**
+
+```console
+$ gh pr create --base develop --title "..." --body "..."
+error checking for existing pull request: GraphQL: API rate limit already exceeded for user ID ...
+```
+
+既存の Pull Request の確認に GraphQL を使うためで、**GraphQL の上限は REST とは別に枯れる**。
+この文言が出たら REST へ退避する。同じ内容の Pull Request が既にないかは REST でも引ける。
+
+```bash
+# 既存の確認（GraphQL を使わない）
+gh api "repos/<所有者>/<リポジトリ>/pulls?head=<所有者>:<枝>&state=open" --jq '.[].number'
+
+# 作成
+jq -n --arg t "<タイトル>" --arg h "<枝>" --arg b "<起点>" --rawfile body /tmp/pr-body.md \
+  '{title:$t, head:$h, base:$b, body:$body}' > /tmp/pr.json
+gh api "repos/<所有者>/<リポジトリ>/pulls" --input /tmp/pr.json --jq '.html_url'
+```
+
+**退避するのは上限で失敗したときだけである。** `gh pr create` はテンプレートの適用と枝の
+push 済みかの確認を持つため、通る間はそちらを使う。`gh pr view` / `gh pr checks` /
+`gh pr merge` も同じ経路を持つため、上限に達している間は同じ形で REST へ退避する。
+
 ### 6. 完了報告
 
 **PR を作成・更新しただけでは完了ではない。この手順まで実行して完了とする。**

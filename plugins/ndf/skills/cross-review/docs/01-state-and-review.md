@@ -12,7 +12,7 @@
 | `scripts/launch-reviewer.sh` | Step 2 — レビュワー起動の入口（4 ランタイム共通） |
 | `scripts/monitor.py` | Step 2 — レビュワーのプロセス多軸監視（`--agents` で担当を渡す） |
 | `scripts/wait-review.sh` | Step 2 — `monitor.py` の薄ラッパ（互換用） |
-| `scripts/state.py read-result` | Step 2.5 — result.json マージ |
+| `scripts/state.py read-result` | Step 2.4 — result.json マージ |
 | `scripts/state.py unresolved-threads` | PR 上の未解決の指摘を数える（順序を持たない補助） |
 | `scripts/state.py judge` | Step 3 — intent + 引き継いだ指摘の判定 |
 | `scripts/state.py check-oscillation` | Step 4 — 振動検知 |

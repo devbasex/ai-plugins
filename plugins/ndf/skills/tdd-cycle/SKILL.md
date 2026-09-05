@@ -95,7 +95,8 @@ E   ImportError: cannot import name 'validate'   ← 期待と違う。先にこ
 - 依頼範囲外の整形・改名
 
 対象の外で不具合や不整合に気づいたときは、その場で `/ndf:out-of-scope` を起動して
-起票する。書かない判断だけをして先へ進むと、判断した理由が残らない。
+起票する。書かない判断だけをして先へ進むと、判断した理由が残らない。**起票先の
+リポジトリはその Skill が決める。** 開発中のリポジトリとは限らない。
 
 ### 4. 整理する
 
@@ -151,7 +152,7 @@ E   ImportError: cannot import name 'validate'   ← 期待と違う。先にこ
 
 - [references/test-quality.md](references/test-quality.md) — 脆いテストの例と代替
 - [references/testing-levels.md](references/testing-levels.md) — 単体・結合・契約・端から端までの使い分け
-- `/ndf:out-of-scope` — 対象の外で見つけた課題の起票
+- `/ndf:out-of-scope` — 対象の外で見つけた課題の起票と、起票先のリポジトリの判断
 
 この工程に入ったら `/ndf:progress-tracking <issue番号> "実装"` を呼ぶ（記録の手順はその Skill が持つ）。
 
