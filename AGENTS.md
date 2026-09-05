@@ -365,7 +365,7 @@ ai-plugins/
 | [docs/ndf-plugin-reference.md](docs/ndf-plugin-reference.md) | NDFプラグイン詳細リファレンス |
 | [docs/specifications/](docs/specifications/) | 完了済みplan/issue由来の確定仕様 |
 | [docs/presentations/](docs/presentations/) | 勉強会などで使うスライド資料（Marp形式）とビルド手順。**発表日時点の記録で、以後の構成変更には追随しない** |
-| [docs/claude-code-skills-survey.md](docs/claude-code-skills-survey.md) | Claude Code Skills調査レポート |
+| [docs/claude-code-skills-survey/](docs/claude-code-skills-survey/01-findings.md) | Claude Code Skills調査レポート（3 本） |
 | [docs/development-history/](docs/development-history/) | 2026-09-02 までの開発履歴と知見。**以降の振り返りは、起点の issue か Pull Request のコメントに残す**（`/ndf:retrospective`） |
 | [plugins/ndf/README.md](plugins/ndf/README.md) | NDFプラグイン（4ランタイム共通） |
 

@@ -75,3 +75,12 @@ jobs:
         with:
           python-version: "3.x"
       - run: python3 scripts/check-markdown-links.py --root .
+
+  doc-line-limit-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - run: python3 scripts/check-doc-line-limit.py --root .

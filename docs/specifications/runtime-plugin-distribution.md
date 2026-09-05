@@ -23,8 +23,8 @@ NDF plugin の plugin name は全 runtime で `ndf` を維持し、配布物は 
 
 | runtime | manifest / installer | 主な内容 |
 |---|---|---|
-| Claude Code | `plugins/ndf/.claude-plugin/plugin.json` | `agents/`、`hooks/claude.json`、`skills` 配列（27 個） |
-| Codex | `plugins/ndf/.codex-plugin/plugin.json` | `hooks/codex.json`、`skills` 配列（25 個） |
+| Claude Code | `plugins/ndf/.claude-plugin/plugin.json` | `agents/`、`hooks/claude.json`、`skills` 配列 |
+| Codex | `plugins/ndf/.codex-plugin/plugin.json` | `hooks/codex.json`、`skills` 配列 |
 | Kiro CLI | `plugins/ndf/dev.kiro/install.sh` | `.kiro/agents/ndf.json`、`.kiro/steering/ndf-policies.md`、`.kiro/skills/` symlink、prompts、任意 hook |
 | agy | `plugins/ndf/dev.agy/plugin.json` | `dev.agy/hooks.json`、`dev.agy/skills/` の symlink、`agents` と `scripts` への symlink |
 
@@ -39,6 +39,10 @@ Kiro CLI は installer が `kiro-skills.txt` を読んで symlink を張る。ag
 優先して読み、`skills` 配列ではなく `skills/` の実体を全件配る（`plugins/ndf` で実測）。agy の
 プラグインの目印はディレクトリ直下の `plugin.json` であるため、agy 向けの定義は
 `dev.agy/plugin.json` へ置く。
+
+**この文書は配布 Skill の数を書かない（#288）。** 数はランタイムごとに違い、版を上げる
+たびに動く。基準を持つのは `plugins/ndf/manifests/*-skills.txt` の行数だけである。確定仕様の
+側に数を写すと、`docs/specifications/` を検査の対象へ広げない限り古いまま残る。
 
 **`skills/` に置く Skill は、少なくとも 1 つの manifest へ載せる。** 配らない Skill の置き場所
 （`optional-skills/`）は v10.5.0 で無くした（#116）。どこからも起動できない Skill を置き続ける
@@ -196,7 +200,7 @@ OpenAI / Vercel が策定するプラグイン形式である。本リポジト�
 
 | 項目 | 理由 |
 |---|---|
-| `ndf` へのルートマニフェスト | 配布 Skill が Claude Code 27 / Codex 25 と異なり、hook も持つ。ルートマニフェストは `skills/` を全件公開して hook を持てない（§6.1、マニフェストは 9 項目のみ） |
+| `ndf` へのルートマニフェスト | 配布 Skill がランタイムごとに違い、hook も持つ。ルートマニフェストは `skills/` を全件公開して hook を持てない（§6.1、マニフェストは 9 項目のみ） |
 | MCP プラグインへのルートマニフェスト | 下記のとおり `mcp.json` が現行の設定を表現できず、ルートマニフェストを置くと Codex がそちらを優先するため |
 | `mcp.json`（§7.2） | スキーマが stdio サーバに `type` / `command` / `args` / `env` / `cwd` しか許さない（`additionalProperties: false`）。MCP プラグイン 10 個のうち 6 個が使う `envFile` を表現できず、2 個が使う `type: "http"` も無い。かわりに Claude Code 形式の `.mcp.json` を 1 つ置き、Codex は `.codex-plugin/plugin.json` の `mcpServers` から参照する |
 
