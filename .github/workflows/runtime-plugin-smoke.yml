@@ -1,13 +1,11 @@
 name: Runtime plugin smoke
 
+# Pull Request では絞り込まずに常に起動する。ブランチの ruleset が必須にする検査は、
+# 変更の種類にかかわらず結果を返す必要がある。GitHub は paths で除外された実行を
+# 「成功」ではなく「実行されていない」として扱うため、絞り込んだままだと対象外の変更で
+# マージ可能にならない。push の側は絞り込みを残す（マージの可否を決めないため）
 on:
   pull_request:
-    paths:
-      - "plugins/**"
-      - "scripts/runtime-smoke-test.sh"
-      - "tests/runtime-smoke/**"
-      - ".github/workflows/runtime-plugin-smoke.yml"
-      - ".github/workflows/runtime-plugin-authenticated-smoke.yml"
   push:
     branches:
       - main
