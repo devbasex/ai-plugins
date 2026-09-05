@@ -447,6 +447,7 @@ git push
 #### プロジェクト内ドキュメント
 
 - [CHANGELOG.md](./CHANGELOG.md) - 版ごとの変更点
+- [GOVERNANCE.md](./GOVERNANCE.md) - 役割・決め方・メンテナーになる道
 - [CONTRIBUTING.md](./CONTRIBUTING.md) - 参加の手引き（開発の進め方・手元での検証）
 - [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) - 行動規範
 - [SECURITY.md](./SECURITY.md) - 脆弱性の報告
@@ -460,6 +461,21 @@ git push
 
 参加の手順・手元での検証・Pull Request の出し方は [CONTRIBUTING.md](./CONTRIBUTING.md) に
 あります。参加するうえで守ることは [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) にあります。
+誰がどう決めているかと、メンテナーになる道は [GOVERNANCE.md](./GOVERNANCE.md) にあります。
+
+### 手伝ってくれる方を探しています
+
+**このリポジトリのメンテナーは 1 人です。** 次の 3 つは特に人手が足りていません。
+
+| 手伝ってほしいこと | 具体的には |
+| --- | --- |
+| Skill の追加・改善 | 手順の誤りの修正、扱っていない工程の追加。実体は `plugins/ndf/skills/` の 1 か所にあります |
+| 実機での検証 | Claude Code / Codex / Kiro CLI / agy の 4 つは挙動が違います。**どれか 1 つの環境があれば参加できます** |
+| 文書の改善と翻訳 | 説明の不足の補い、用語の統一。現在の文書はすべて日本語です |
+
+着手しやすい issue には [`good first issue`](https://github.com/devbasex/ai-plugins/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)、
+実機の環境が要る issue には [`help wanted`](https://github.com/devbasex/ai-plugins/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22)
+を付けています。
 
 ## サポート
 
