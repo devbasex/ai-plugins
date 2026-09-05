@@ -39,7 +39,7 @@ jobs:
           fi
           bash scripts/runtime-smoke-test.sh --runtime "${{ inputs.runtime }}" --with-secrets=auto "${extra_args[@]}"
       - name: Upload smoke artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: runtime-smoke-authenticated
