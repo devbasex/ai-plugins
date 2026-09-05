@@ -25,7 +25,7 @@
 
 **判定したモードと、実際に通った工程の食い違いが、機械で見えるようにする。**
 あわせて Pull Request を出す変更が必ずレビューを通るようにし、事後レビューで出た
-8 件を直す。
+8 件の指摘を直す。指摘 8 件は D1〜D10 の 10 個の受け入れ条件に分かれる（内訳は D の節）。
 
 ## 前提
 
@@ -89,7 +89,11 @@
       `<所有者>/<リポジトリ>` と `<番号>` の組をそのまま控えの名前へ渡し、番号だけへ
       潰さない
 
-### D. 事後レビューの指摘 8 件（#417）
+### D. 事後レビューの指摘（#417）
+
+**指摘は 8 件、条件は 10 個である。** 8 件目（`--uninstall` の前方一致と、非アトミックな
+書き込み）を D8 と D9 の 2 つへ分け、成立しなかった指摘のうち直す対象に残した 1 件
+（スモークの assertion）を D10 として数える。
 
 - [ ] D1: `git ls-files -z` を使い、非 ASCII のファイル名を含む文書が検査される
 - [ ] D2: 除外の後に対象が 0 件のとき、終了コード 2 で失敗する
@@ -109,7 +113,7 @@
 | 条件 | 手段 |
 | --- | --- |
 | A1〜A5, B1〜B3 | `uv run --with pytest pytest plugins/ndf/skills/development-workflow/tests -q` |
-| A6, C1〜C8 | 新しく足すテスト（`plugins/ndf/skills/development-workflow/tests/`） |
+| A6, C1〜C10 | 新しく足すテスト（`plugins/ndf/skills/development-workflow/tests/`） |
 | D1〜D2, D6 | `uv run --with pytest pytest scripts/tests/test_doc_line_limit.py -q` |
 | D3〜D4, D8〜D9 | `uv run --with pytest pytest scripts/tests/test_agy_install_hooks.py -q` |
 | D5 | `python3 scripts/check-markdown-links.py --root .` と目視 |
@@ -125,7 +129,11 @@
 
 - `plugins/ndf/skills/development-workflow/`（`SKILL.md` / `scripts/` / `references/` / `tests/`）
 - `plugins/ndf/scripts/lib/closing-issues.sh`（`merged/scripts/` からの移設先）
-- `plugins/ndf/skills/merged/`（読み込み先を移設先へ向ける変更と そのテスト）
+- `plugins/ndf/skills/merged/`（読み込み先を移設先へ向ける変更と そのテスト）。
+  `SKILL.md` の `CLOSING=` の行を `$SCRIPTS/lib/closing-issues.sh` へ向け直し、直前の
+  「この Skill のスクリプトは、その 1 つ上（プラグインの根）から辿る」の説明も書き換える。
+  `$SCRIPTS` の 1 つ上へ戻ってから `skills/merged/scripts/` へ下りる形が、`$SCRIPTS` の
+  直下の `lib/` になるため、相対パスの深さが変わる
 - `scripts/check-doc-line-limit.py` と そのテスト
 - `plugins/ndf/dev.agy/install-hooks.sh` と そのテスト
 - `plugins/ndf/skills/notion-writing/SKILL.md`
