@@ -2185,7 +2185,7 @@ def _die_no_result(pr: int, agent: str, reason: str, msg: str, code: int = 1) ->
 
 
 def cmd_read_result(args: argparse.Namespace) -> None:
-    """Step 2.5 — codex/agy の result.json を state にマージ。
+    """Step 2.4 — codex/agy の result.json を state にマージ。
 
     使える結果が残らなかったときは、`NO_RESULT` と理由をラウンドへ残してから止める。
     終了コードは現行のまま（無い・判定の値を持たないときは 1、JSON として読めない
@@ -3102,7 +3102,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_start_round)
 
-    sp = sub.add_parser("read-result", help="Step 2.5 — review result を state にマージ")
+    sp = sub.add_parser("read-result", help="Step 2.4 — review result を state にマージ")
     sp.add_argument("pr", type=int)
     sp.add_argument("agent", choices=list(assignment.ALL_RUNTIMES))
     sp.add_argument("--file", default=None)

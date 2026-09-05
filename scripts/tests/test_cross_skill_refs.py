@@ -44,9 +44,14 @@ def _tree(base: pathlib.Path) -> pathlib.Path:
 
 # ---------- A2: 実物の木 ----------
 
-def test_only_the_known_two_references_remain(checker) -> None:
+def test_only_the_known_references_remain(checker) -> None:
+    """例外に無い参照が増えていないこと。
+
+    同じ (ファイル, 相手) が複数行に現れることがあるため、行ではなく組で見る
+    （`gdrive_fetch.py` は候補の一覧と読み込みの 2 行で `google-auth` を指す）。
+    """
     found = checker.find_references(ROOT)
-    assert sorted((rel, name) for rel, _, name, _ in found) == sorted(checker.EXCEPTIONS)
+    assert {(rel, name) for rel, _, name, _ in found} == set(checker.EXCEPTIONS)
 
 
 def test_the_check_passes_on_the_repository(checker) -> None:

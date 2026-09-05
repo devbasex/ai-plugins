@@ -104,9 +104,43 @@ def test_only_the_provenance_comments_keep_the_old_name(path: pathlib.Path) -> N
 
 # ---------- 受け入れ条件 14（共通層の削除） ----------
 
+def _files_left_under(root: pathlib.Path) -> list[str]:
+    """`root` に残っている、読み込みうるファイルの相対パスを返す。
+
+    走査から外すのは実行時に作られる作業領域（`_IGNORED_DIRS`）だけである。
+    """
+    return sorted(
+        str(p.relative_to(root))
+        for p in root.rglob("*")
+        if p.is_file() and not _IGNORED_DIRS & set(p.relative_to(root).parts)
+    )
+
+
 def test_the_gemini_environment_helper_is_gone() -> None:
+    """移設した先から共通層を読み込めないこと（#280 / #285）。
+
+    判定するのは**そこから読み込めるファイルが無いこと**であって、ディレクトリの
+    有無ではない。移設より前に作られた `__pycache__/*.pyc` は `.gitignore` の
+    対象であるため作業ディレクトリに残り、**ディレクトリだけが存在し続ける**
+    （#388）。存在で判定すると、v10.2.0 より前にこのリポジトリでテストを動かした
+    作業ディレクトリでだけ落ちる。
+    """
     assert not (SKILLS.parent / "scripts/lib/_gemini-env.sh").exists()
-    assert not (SKILLS / "cross-review/scripts/lib").exists()
+    assert _files_left_under(SKILLS / "cross-review/scripts/lib") == []
+
+
+def test_leftover_caches_do_not_count_as_a_remaining_layer(
+    tmp_path: pathlib.Path,
+) -> None:
+    """`__pycache__` だけが残った状態を「共通層が残っている」と読まない（#388）。"""
+    cache = tmp_path / "__pycache__"
+    cache.mkdir()
+    (cache / "models.cpython-313.pyc").write_bytes(b"")
+
+    assert _files_left_under(tmp_path) == []
+
+    (tmp_path / "models.py").write_text("", encoding="utf-8")
+    assert _files_left_under(tmp_path) == ["models.py"]
 
 
 def test_no_script_sources_the_removed_helper() -> None:

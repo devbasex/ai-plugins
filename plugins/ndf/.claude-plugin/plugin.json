@@ -1,7 +1,7 @@
 {
   "name": "ndf",
-  "version": "10.4.0",
-  "description": "Claude Code plugin (v10.4.0): 8 specialized agents and 35 focused NDF skills for PR/review workflows, cross-review, implementation planning, plan-to-spec, Docker container access, statusline, external AI delegation (Codex/agy), transcript retention guard, and optional Slack notifications.",
+  "version": "10.5.0",
+  "description": "Claude Code plugin (v10.5.0): 8 specialized agents and 40 focused NDF skills for PR/review workflows, cross-review, implementation planning, plan-to-spec, Docker container access, statusline, external AI delegation (Codex/agy), transcript retention guard, and optional Slack notifications.",
   "author": {
     "name": "takemi-ohama",
     "url": "https://github.com/takemi-ohama"
@@ -37,6 +37,7 @@
     "./skills/merged",
     "./skills/ndf-policies",
     "./skills/markdown-writing",
+    "./skills/notion-writing",
     "./skills/docker-container-access",
     "./skills/implementation-plan",
     "./skills/investigation-rules",
@@ -50,9 +51,9 @@
     "./skills/plan-to-spec",
     "./skills/qa-security-scan",
     "./skills/official-skills-autoloader",
-    "./skills/design",
     "./skills/development-workflow",
     "./skills/requirements-design",
+    "./skills/design",
     "./skills/tdd-cycle",
     "./skills/refactoring",
     "./skills/quality-gates",
@@ -62,7 +63,11 @@
     "./skills/progress-tracking",
     "./skills/release-verification",
     "./skills/retrospective",
-    "./skills/release"
+    "./skills/release",
+    "./skills/google-auth",
+    "./skills/google-drive",
+    "./skills/ml-model-structure",
+    "./skills/skill-stats"
   ],
   "hooks": "./hooks/claude.json"
 }

@@ -41,7 +41,6 @@ AGENTS_MD = "AGENTS.md"
 PLUGIN_README = f"plugins/{FAMILY}/README.md"
 PLUGIN_JSON = f"plugins/{FAMILY}/.claude-plugin/plugin.json"
 SKILLS_DIR = f"plugins/{FAMILY}/skills"
-OPTIONAL_DIR = f"plugins/{FAMILY}/optional-skills"
 
 
 def manifest_path(runtime: str) -> str:
@@ -69,7 +68,6 @@ SOURCE_COUNT = re.compile(r"元Skills（\s*(\d+)\s*個\s*）")
 CATEGORY_LINE = re.compile(r"^\s+-\s+(?P<label>.+?)\s+\((?P<count>\d+)\)\s*[:：]\s*(?P<names>.+)$")
 TABLE_ROW = re.compile(r"^\|\s*(Claude Code|Codex|Kiro CLI|agy)\s*\|\s*(\d+)\s*個\s*\|")
 LAYOUT_SKILLS = re.compile(r"唯一の実体（\s*(\d+)\s*個\s*）")
-LAYOUT_OPTIONAL = re.compile(r"どの配布先にも載せない Skill（\s*(\d+)\s*個\s*）")
 NAME_SEPARATOR = re.compile(r"[,、]")
 
 # 版数の書式は `scripts/lib/version_pattern.py` が唯一の定義を持つ。定義ファイルの検査
@@ -546,7 +544,6 @@ def check_plugin_readme(
     body: str,
     counts: dict[str, int | None],
     skills: int | None,
-    optional: int | None,
     version: str | None,
     report: Report,
 ) -> None:
@@ -564,21 +561,17 @@ def check_plugin_readme(
             ),
             report,
         )
-    for pattern, expected, wording, source in (
-        (LAYOUT_SKILLS, skills, "唯一の実体（<数> 個）", f"{SKILLS_DIR}/ の実体"),
-        (LAYOUT_OPTIONAL, optional, "どの配布先にも載せない Skill（<数> 個）", f"{OPTIONAL_DIR}/ の実体"),
-    ):
-        verify(
-            Claim(
-                path=PLUGIN_README,
-                subject="レイアウト図の数",
-                wording=wording,
-                described=numbers_of(pattern, body),
-                expected=expected,
-                source=source,
-            ),
-            report,
-        )
+    verify(
+        Claim(
+            path=PLUGIN_README,
+            subject="レイアウト図の数",
+            wording="唯一の実体（<数> 個）",
+            described=numbers_of(LAYOUT_SKILLS, body),
+            expected=skills,
+            source=f"{SKILLS_DIR}/ の実体",
+        ),
+        report,
+    )
     check_upgrade_heading(body, version, report)
 
 
@@ -622,11 +615,12 @@ def main() -> int:
         for runtime in ("claude", "codex", "kiro", "agy")
     }
     skills = skill_dir_count(root, SKILLS_DIR, report)
-    optional = skill_dir_count(root, OPTIONAL_DIR, report)
     version = plugin_version(root, report)
 
-    total = None if skills is None or optional is None else skills + optional
-    source = f"{SKILLS_DIR}/ の実体 {skills} + {OPTIONAL_DIR}/ の {optional} = {total}"
+    # 配らない Skill の置き場所（`optional-skills/`）は v10.5.0 で無くなった（#116）。
+    # 元 Skill の数は `skills/` の実体だけで決まる。
+    total = skills
+    source = f"{SKILLS_DIR}/ の実体 {skills}"
 
     root_body = read_document(root, ROOT_README, report)
     if root_body is not None:
@@ -639,7 +633,7 @@ def main() -> int:
 
     plugin_body = read_document(root, PLUGIN_README, report)
     if plugin_body is not None:
-        check_plugin_readme(plugin_body, counts, skills, optional, version, report)
+        check_plugin_readme(plugin_body, counts, skills, version, report)
         check_plugin_readme_versions(plugin_body, version, report)
 
     if report.errors:

@@ -122,7 +122,8 @@ flowchart TD
 残さない。
 
 手を付ける範囲の外に直したい兆候を見つけたときは、範囲を広げる前に
-`/ndf:out-of-scope` を起動する。範囲を広げる判断も、外す判断も、理由を残す。
+`/ndf:out-of-scope` を起動する。範囲を広げる判断も、外す判断も、理由を残す。**起票先の
+リポジトリはその Skill が決める。**
 
 ## 差分の切り方
 
@@ -141,7 +142,7 @@ flowchart TD
 - [references/code-smells.md](references/code-smells.md) — 構造改善の起点になる兆候
 - [references/refactoring-catalog.md](references/refactoring-catalog.md) — 手法と適用条件
 - [references/data-representation.md](references/data-representation.md) — 分岐・反復・定数を何にどう置き換えるか
-- `/ndf:out-of-scope` — 手を付ける範囲の外に見つけた兆候の起票
+- `/ndf:out-of-scope` — 手を付ける範囲の外に見つけた兆候の起票と、起票先のリポジトリの判断
 - 言語ごとの手段 — **対象の言語のファイルだけを読む**
   - [references/lang-python.md](references/lang-python.md)
   - [references/lang-javascript.md](references/lang-javascript.md)

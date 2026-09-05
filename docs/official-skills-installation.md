@@ -131,4 +131,4 @@ cp -r ~/work/anthropic-skills/skills/docx .claude/skills/
 - 公式リポジトリ: https://github.com/anthropics/skills
 - Skills公式ドキュメント: https://docs.claude.com/en/docs/claude-code/skills
 - NDFインストーラ: `plugins/ndf/scripts/install-official-skills.sh`
-- Skillフロントマター仕様: [docs/claude-code-skills-official-reference.md](./claude-code-skills-official-reference.md)
+- Skillフロントマター仕様: [docs/claude-code-skills-official-reference/](./claude-code-skills-official-reference/01-frontmatter-and-description.md)

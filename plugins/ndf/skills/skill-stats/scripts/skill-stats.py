@@ -32,7 +32,7 @@ def plugin_root_default() -> pathlib.Path:
     env = os.environ.get("CLAUDE_PLUGIN_ROOT")
     if env:
         return pathlib.Path(env)
-    # scripts/skill-stats.py -> plugins/ndf/optional-skills/skill-stats/scripts/
+    # scripts/skill-stats.py -> plugins/ndf/skills/skill-stats/scripts/
     return pathlib.Path(__file__).resolve().parents[3]
 
 

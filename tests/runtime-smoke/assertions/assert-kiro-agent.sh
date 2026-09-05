@@ -35,7 +35,9 @@ mkdir -p "$ARTIFACT_DIR"
 
 test -f "$AGENT_FILE"
 test -s "$STEERING_FILE"
-find -L "$KIRO_DIR/skills" -path '*/SKILL.md' -print | grep -q .
+# `| grep -q .` は使わない（SIGPIPE で 141 になる。assert-plugin-files.sh の注記を参照）
+hit="$(find -L "$KIRO_DIR/skills" -path '*/SKILL.md' -print -quit)"
+[ -n "$hit" ] || { echo "not found: SKILL.md under $KIRO_DIR/skills" >&2; exit 1; }
 
 # Kiro には plugin.json を読む仕組みが無いため、版数は installer が埋める
 # エージェント description でしか確認できない。installer が読む Claude 版

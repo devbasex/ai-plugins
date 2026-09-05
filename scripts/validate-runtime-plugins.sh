@@ -306,7 +306,8 @@ for family in families:
 
 # 単一ディレクトリ構成では skills/ に全 runtime 分の実体が並ぶ。どの manifest にも
 # 載らない Skill をここへ置くと、ルートマニフェストや将来の絞り込み漏れで配られる。
-# 配らない Skill は optional-skills/ へ置く規約なので、その違反を検出する。
+# skills/ に置く Skill は少なくとも 1 つの manifest へ載せる規約なので、その違反を
+# 検出する（配らない置き場所は v10.5.0 で無くなった。#116）。
 for family in families:
     source = plugin_dir_of(family)
     listed: set[str] = set()
@@ -322,7 +323,7 @@ for family in families:
         if skill_dir.name not in listed:
             errors.append(
                 f"{family} の skills/ にあるがどの manifest にも載っていない: {skill_dir.name}"
-                "（配らない Skill は optional-skills/ へ置く）"
+                "（skills/ に置く Skill は少なくとも 1 つの manifest へ載せる）"
             )
 
 # マニフェストの skills は配列で明示する。配列に載っていない Skill はランタイムから
@@ -450,5 +451,10 @@ run python3 "$ROOT_DIR/scripts/check-doc-staleness.py" --root "$ROOT_DIR"
 # Skill の境界をまたぐ実行の参照を数える。配る Skill を絞る配布先では、相手を
 # 配らないと解決できない。例外の一覧に無い参照が増えたときに落ちる。
 run python3 "$ROOT_DIR/scripts/check-cross-skill-refs.py" --root "$ROOT_DIR"
+
+# 説明文書と配布物の Markdown が分割の基準（501 行以上）を超えていないかを見る。
+# `check-skill-frontmatter.py` は SKILL.md の行数しか見ておらず、docs/ と
+# references/ と README.md とリポジトリ直下の文書が対象に入っていなかった。
+run python3 "$ROOT_DIR/scripts/check-doc-line-limit.py" --root "$ROOT_DIR"
 
 echo "runtime plugin validation passed"

@@ -36,7 +36,8 @@ description: "Fix bugs and data inconsistencies upstream at the root cause. Use 
 ```
 
 根本原因がこの変更の範囲の外にあった場合は、`/ndf:out-of-scope` を起動して起票する。
-上流で直すことと、この変更で直すことは別である。
+上流で直すことと、この変更で直すことは別である。**起票先のリポジトリもその Skill が
+決める。** 上流の原因は、別のリポジトリの課題であることがある。
 
 ### 再現テストを先に書く（必須）
 
@@ -196,4 +197,4 @@ SQLクエリ結果をそのまま貼り、「コードを読んだ推測」と�
 - `/ndf:investigation-rules` — 調査レポート作成時のエビデンス主義
 - `/ndf:cherry-pick-pr` — 複数ブランチへの修正適用戦略
 - `/ndf:logging-guidelines` — ログ設計（原因特定を容易にする）
-- `/ndf:out-of-scope` — 根本原因が今回の範囲の外にあったときの起票
+- `/ndf:out-of-scope` — 根本原因が今回の範囲の外にあったときの起票と、起票先のリポジトリの判断

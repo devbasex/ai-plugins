@@ -9,19 +9,7 @@
 二段の収束判定（提案ラウンドの繰り返しの中にレビュー収束の繰り返しが入る）を
 1 つの CLI に集約する。
 
-サブコマンド:
-  init             Step 0  ホスト確定 / 母集合の確定 / 作業ディレクトリ root / 状態初期化
-  start-round      Step 2  提案ラウンドを開く。実装担当とレビュー担当を返す
-  merge-proposals  Step 3  提案の語彙検証・重複排除・優先度付け・採否
-  merge-apply      Step 4  適用結果の検証（差分予算 / テスト / トレーラー / 固定テスト先行）
-  review-targets   Step 5  次に起動するレビュー担当（初回は 2 者、再レビューは変更要求を出した担当）
-  judge-review     Step 5  レビュー担当の判定
-  should-abandon   Step 6  修正ラウンド上限の到達判定
-  abandon-items    Step 6  未解決の指摘に紐づく項目だけを取り消す
-  merge-fix        Step 6  修正結果の取り込み
-  advance          Step 7  提案ラウンドの収束判定
-  status                   現在の状態を人が読む形で出す
-  report           Step 8  ラウンド表・項目表・見送り・指標
+サブコマンドの一覧と役割は `--help` が持つ。ここには写さない（片方だけが古くなるため）。
 
 終了コードは呼び出し側の bash が分岐に使う。各サブコマンドの docstring を参照。
 """
@@ -3628,7 +3616,9 @@ def main() -> None:
     )
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    init = sub.add_parser("init", help="状態を初期化する")
+    init = sub.add_parser(
+        "init",
+        help="Step 0 — ホスト確定 / 母集合の確定 / 作業ディレクトリ root / 状態初期化")
     init.add_argument("pr", type=int)
     init.add_argument("--scope", nargs="+", required=True,
                       help="対象範囲。提案が無制限に広がらないよう必須にしている")
@@ -3664,20 +3654,23 @@ def main() -> None:
     init.set_defaults(func=cmd_init)
 
     for name, func, help_ in (
-        ("start-round", cmd_start_round, "提案ラウンドを開く"),
-        ("merge-proposals", cmd_merge_proposals, "提案をマージして改善項目を作る"),
-        ("advance", cmd_advance, "提案ラウンドの収束判定"),
-        ("status", cmd_status, "現在の状態を出す"),
+        ("start-round", cmd_start_round,
+         "Step 2 — 提案ラウンドを開く。実装担当とレビュー担当を返す"),
+        ("merge-proposals", cmd_merge_proposals,
+         "Step 3 — 提案の語彙検証・重複排除・優先度付け・採否"),
+        ("advance", cmd_advance, "Step 7 — 提案ラウンドの収束判定"),
+        ("status", cmd_status, "現在の状態を人が読む形で出す"),
     ):
         sp = sub.add_parser(name, help=help_)
         sp.add_argument("id", type=int)
         sp.set_defaults(func=func)
 
     for name, func, help_ in (
-        ("review-targets", cmd_review_targets, "次に起動するレビュー担当を返す"),
-        ("judge-review", cmd_judge_review, "レビュー担当の判定を取り込む"),
-        ("should-abandon", cmd_should_abandon, "修正ラウンド上限の到達判定"),
-        ("merge-fix", cmd_merge_fix, "修正結果を取り込む"),
+        ("review-targets", cmd_review_targets,
+         "Step 5 — 次に起動するレビュー担当（初回は 2 者、再レビューは変更要求を出した担当）"),
+        ("judge-review", cmd_judge_review, "Step 5 — レビュー担当の判定"),
+        ("should-abandon", cmd_should_abandon, "Step 6 — 修正ラウンド上限の到達判定"),
+        ("merge-fix", cmd_merge_fix, "Step 6 — 修正結果の取り込み"),
     ):
         sp = sub.add_parser(name, help=help_)
         sp.add_argument("id", type=int)
@@ -3686,8 +3679,10 @@ def main() -> None:
 
     # コミットを取り消しうる 2 つは、実行前に何が消えるかを確かめられるようにする。
     for name, func, help_ in (
-        ("merge-apply", cmd_merge_apply, "適用結果を検証して取り込む"),
-        ("abandon-items", cmd_abandon_items, "未解決の指摘に紐づく項目を取り消す"),
+        ("merge-apply", cmd_merge_apply,
+         "Step 4 — 適用結果の検証（差分予算 / テスト / トレーラー / 固定テスト先行）"),
+        ("abandon-items", cmd_abandon_items,
+         "Step 6 — 未解決の指摘に紐づく項目だけを取り消す"),
     ):
         sp = sub.add_parser(name, help=help_)
         sp.add_argument("id", type=int)
@@ -3696,7 +3691,8 @@ def main() -> None:
                         help="取り消すコミットを表示するだけで実行しない")
         sp.set_defaults(func=func)
 
-    rp = sub.add_parser("report", help="実行報告を出す")
+    rp = sub.add_parser(
+        "report", help="Step 8 — ラウンド表・項目表・見送り・指標")
     rp.add_argument("id", type=int)
     rp.add_argument("--metrics", action="store_true",
                     help="ランタイムとモデルの組で指標を集計する")

@@ -16,8 +16,8 @@ allowed-tools:
 
 - テスト実行済みで `reports/<run-id>/` にエビデンスが存在すること (`/playwright-kit:playwright-authoring`)
 - Drive へ保管する場合のみ、`google-auth` skill で OAuth2 認証が完了していること (drive.file スコープ)。
-  同 skill は既定の配布セットに含まれないため、`plugins/ndf/optional-skills/google-auth/` を利用先へ
-  導入するか、`GOOGLE_AUTH_SCRIPTS` 環境変数で認証スクリプトの場所を指す
+  同 skill は NDF プラグインが配るため、NDF を導入していない利用先では
+  `GOOGLE_AUTH_SCRIPTS` 環境変数で認証スクリプトの場所を指す
 
 ## レポート生成
 
@@ -99,8 +99,21 @@ uv run python scripts/build_gdoc_with_drive_links.py --md reports/<run-id>/repor
 - `--public` — anyone/read 権限を付与 (trace viewer URL 生成に必要)
 
 `build_gdoc_with_drive_links.py` は、Drive 上の `<run-id>` フォルダのファイル一覧を取得し、
-`report.md` 内の相対パスリンク (`./TC-XX/trace.zip`) を Drive URL に書き換えてから Docs 化する。
-チームメンバーは Docs 上で report を読みながらエビデンスへのリンクをクリックできる。
+`report.md` 内の証跡の位置を Drive URL に書き換えてから Docs 化する。チームメンバーは
+Docs 上で report を読みながらエビデンスへのリンクをクリックできる。
+
+**書き換わるのは 2 つの書き方だけである。** ケースのディレクトリ名は問わない
+（`TC-` 始まりに限らない）。
+
+```text
+- trace: `case-a/trace.zip`     証跡フィールド。pytest_report.py が出す行
+[trace](./case-a/trace.zip)     リンク記法。報告書に手で書いたリンク
+```
+
+**この 2 つ以外のコード表記と、リンク記法ではない丸括弧の中身は拾わない。** FAIL の詳細に
+載る失敗メッセージには、テストが出したコード片（`open(case-a/trace.zip)` など）がそのまま
+入る。ここまで書き換えると、失敗の内容が読めなくなる。リンク先を山括弧で囲む書き方も
+対象外である。
 
 ## 推奨ワークフロー
 
