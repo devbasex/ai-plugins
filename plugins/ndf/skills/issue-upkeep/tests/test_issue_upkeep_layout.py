@@ -111,7 +111,7 @@ def test_the_skill_is_distributed(runtime: str) -> None:
 
 # ---------- 対象の範囲 ----------
 
-def test_the_target_is_not_narrowed_by_who_or_when_it_was_filed() -> None:
+def test_the_target_is_decided_only_by_the_milestone() -> None:
     """段 1 の 3 つ目の経路が、マイルストーンの有無だけで対象を決めることを明記している。
 
     絞ると、未設定のまま溜まる課題を誰も見ないことになる。
