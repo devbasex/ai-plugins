@@ -266,6 +266,12 @@ claude --plugin-dir plugins/ndf                                             # Cl
 agy plugin validate plugins/ndf/dev.agy                                     # agy（読み込みの確認）
 ```
 
+**agy は導入したプラグインの `hooks.json` を読み込まない。** 読む先は
+`~/.gemini/config/hooks.json` の 1 か所だけで、プラグイン配下とプロジェクト直下のどちらに
+置いても `loaded 1 named hooks from 1 hooks.json file(s)` のまま変わらない（agy 1.1.26 で
+実測）。導入した hook を効かせるには `bash plugins/ndf/dev.agy/install-hooks.sh` を実行して
+その 1 か所へ差し込む。冪等で、他の項目には触れない。
+
 **取得元の登録そのものを確かめるときは、設定ディレクトリを隔離する。** 上の 3 つは配布物を
 直接読み込む確認で、取得元の登録から導入までの経路は通らない。開発版チャネルの取得手順は
 その経路そのものであるため、別の設定ディレクトリを与えて確かめる。**利用者の登録には触れない**
