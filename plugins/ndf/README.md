@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.4.0）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.5.0-dev.1）
 ```
 
 ### agy
@@ -119,40 +119,39 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.4.0 へ更新するとき
+## v10.5.0-dev.1 へ更新するとき
 
-この版で配布物が変わるのは Skill 2 本（`release` / `issue-upkeep`）の手順の記述です。
-**引数も副コマンドも変わりません。** 残りはリポジトリ側の整備で、配布物には含まれません。
+**配布 Skill が 5 個増えて 40 / 39 / 38 / 38 になります。** 既存の Skill の引数と副コマンドは
+変わりません。変更点の一覧は [CHANGELOG.md](../../CHANGELOG.md) にあります。
 
-| Skill | 変わったこと |
+| 変わったこと | 中身 |
 | --- | --- |
-| `release` | 「版と説明文書を更新する」へ変更履歴の更新が入りました。**変更履歴の文書を持つリポジトリでは、その版の節を足します**（版数と日付は機械で確かめられますが、何が変わったかは書かないと残りません）。書くのは変更点の列挙で、判断の理由はリポジトリの知識の側へ置きます |
-| `issue-upkeep` | 手入れの対象を、**マイルストーンが付いていないこと**だけで拾う形にしました。v10.3.1 では起票した主体で絞らないところまでを明記していましたが、期間で絞る余地が残っていました |
+| 配らなかった 4 個を配ります | `google-auth` / `google-drive` / `ml-model-structure` / `skill-stats`。これまではどのランタイムからも起動できませんでした |
+| `notion-writing` を新設しました | Notion のページを書くときの落とし穴。**`<page>` タグを落とすと子ページが削除される**こと、テーブルの列幅、編集の進め方 |
+| agy の hook が届きます | **agy はプラグインの `hooks.json` を読み込みません**（1.1.26 で実測）。`dev.agy/install-hooks.sh` が利用者の設定へ差し込みます |
+| 手順を実装と規約へ揃えました | 合否は終了コードで見る（`quality-gates` / `pr`）、`gh pr create` の REST への退避（`pr`）、更新案内のコマンドを実行して確かめる（`release`）、状態遷移図の記法（`markdown-writing`）ほか |
 
 ### 手元で確かめる
 
 ```bash
 claude plugin update ndf@ai-plugins   # 再起動するまで反映されません
-codex plugin add ndf@ai-plugins
+codex plugin add ndf@ai-plugins       # 取得元を更新してから
+bash <clone>/plugins/ndf/dev.kiro/install.sh --project <ディレクトリ> --yes
+agy plugin uninstall ndf && agy plugin install <clone>/plugins/ndf/dev.agy
+bash <clone>/plugins/ndf/dev.agy/install-hooks.sh   # agy は hook の差し込みが要ります
 ```
 
 ## Playwright テストについて
 
 v7.0.0 で Playwright による E2E テストの 4 Skill を **`playwright-kit` プラグイン**へ分離しました。
-Skill 名は変わらないため `/playwright-` まで打てば従来どおり候補に出ますが、プラグインを別途
-インストールする必要があります。
+Skill 名は変わらないため `/playwright-` まで打てば候補に出ますが、別途インストールが要ります。
+移行の経緯は [README.md](../../README.md) の「NDF v7.0.0 の主な変更（非互換）」にあります。
 
 ```bash
-# Claude Code
-/plugin install playwright-kit@ai-plugins
-# Codex
-codex plugin add playwright-kit@ai-plugins
-# Kiro CLI
-bash plugins/playwright-kit/dev.kiro/install.sh
+/plugin install playwright-kit@ai-plugins             # Claude Code
+codex plugin add playwright-kit@ai-plugins            # Codex
+bash plugins/playwright-kit/dev.kiro/install.sh       # Kiro CLI
 ```
-
-移行先の対応表は予告どおり v8.0.0 で `ndf-policies` から削除しました。リポジトリ root の
-[README.md](../../README.md) の「NDF v7.0.0 の主な変更（非互換）」を参照してください。
 
 ## Hooks
 
@@ -281,7 +280,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.4.0/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.5.0-dev.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -303,14 +302,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.4.0/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.5.0-dev.1/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.4.0  <path>
+# => ndf@ai-plugins  installed, enabled  10.5.0-dev.1  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
