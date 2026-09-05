@@ -1,0 +1,55 @@
+name: Skill の追加提案
+description: 新しい Skill を足す提案
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        既存の Skill の一覧は
+        [plugins/ndf/README.md](https://github.com/devbasex/ai-plugins/blob/main/plugins/ndf/README.md)
+        にあります。執筆の規約は
+        [plugins/ndf/skills/README.md](https://github.com/devbasex/ai-plugins/blob/main/plugins/ndf/skills/README.md)
+        にあります。
+
+  - type: input
+    id: name
+    attributes:
+      label: 提案する Skill 名
+      placeholder: "release-notes"
+    validations:
+      required: true
+
+  - type: textarea
+    id: stage
+    attributes:
+      label: 対象の工程
+      description: 開発のどの工程で使うものかを書いてください。工程表は `development-workflow` にあります。
+    validations:
+      required: true
+
+  - type: textarea
+    id: difference
+    attributes:
+      label: 既存 Skill との違い
+      description: 近い Skill があれば名前を挙げ、そこへ足すのではなく分ける理由を書いてください。
+    validations:
+      required: true
+
+  - type: dropdown
+    id: runtime
+    attributes:
+      label: 配布先のランタイム
+      multiple: true
+      options:
+        - Claude Code (claude)
+        - Codex (codex)
+        - Kiro CLI (kiro-cli)
+        - agy (Antigravity CLI)
+    validations:
+      required: true
+
+  - type: textarea
+    id: outline
+    attributes:
+      label: 手順の骨子
+      description: 何をどの順で行う Skill かを、箇条書きで書いてください。
