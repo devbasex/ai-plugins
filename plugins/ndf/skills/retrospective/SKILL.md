@@ -274,8 +274,16 @@ gh issue edit <issue番号> --repo "$RECORD_REPO" --body-file /tmp/issue-body.md
 この工程に入ったら `/ndf:progress-tracking <issue番号> "振り返り"` を呼ぶ（記録の手順はその Skill が持つ）。 この工程で終わるため、あわせて盤面の `status` を `Done` にする（手段は progress-tracking の「呼び方」にある）。
 
 
+## 蓄積した課題を手入れする
+
+**この工程の最後に `/ndf:issue-upkeep` を呼ぶ。** 振り返りが拾うのは、この変更から出た
+取りこぼしである。**変更をまたいで溜まった課題そのもの**は対象にしていない。
+
+対象が 0 件ならその Skill 自身が飛ばす。
+
 ## 関連
 
 - `/ndf:release-verification` — この工程の前に行うリリース後テスト
 - `/ndf:out-of-scope` — 取りこぼしを見つけたときの起票
 - `/ndf:plan-to-spec` — 決まった仕様の永続化（振り返りとは別の出力物）
+- `/ndf:issue-upkeep` — 蓄積した課題の手入れ（この工程の最後に呼ぶ）

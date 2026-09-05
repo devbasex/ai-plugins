@@ -246,6 +246,13 @@ Pull Request が最後かどうかを判断できない。
 
 この工程に入ったら `/ndf:progress-tracking <issue番号> "配布"` を呼ぶ（記録の手順はその Skill が持つ）。
 
+## 蓄積した課題を手入れする
+
+**振り返りを通らない変更（`light`）では、この工程の後に `/ndf:issue-upkeep` を呼ぶ。**
+振り返りを通る変更では、そちらの最後で呼ばれるためここでは呼ばない。
+
+対象が 0 件ならその Skill 自身が飛ばす。
+
 ## 関連
 
 - [references/distribution-forms.md](references/distribution-forms.md) — 形の索引と、形をまたぐ決まり。

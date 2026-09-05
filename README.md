@@ -8,10 +8,10 @@ Claude Code / Codex / Kiro CLI / agy 向けのスキル・MCP設定を共有す�
 
 **NDFプラグイン v10.2.0** は、同じ `ndf@ai-plugins` という名前で Claude Code / Codex / Kiro CLI / agy へ配布されるプラグインです。配布物は `plugins/ndf/` の1ディレクトリにまとまっており、Skill の実体は `plugins/ndf/skills/` の1箇所だけです。どのランタイムへ配るかは `plugins/ndf/manifests/*-skills.txt` が決めます。
 
-- **公開Skills**: Claude Code向け core 34個、Kiro向け core 33個、Codex向け core 32個、agy向け core 32個に分離。
-- **元Skills（38個）**:
+- **公開Skills**: Claude Code向け core 35個、Kiro向け core 34個、Codex向け core 33個、agy向け core 33個に分離。
+- **元Skills（39個）**:
   - PR/レビューワークフロー (7): pr, pr-tests, fix, pr-review, cherry-pick-pr, deploy, merged
-  - 開発方法論 (11): development-workflow, requirements-design, design, tdd-cycle, refactoring, quality-gates, release, release-verification, retrospective, out-of-scope, progress-tracking
+  - 開発方法論 (12): development-workflow, requirements-design, design, tdd-cycle, refactoring, quality-gates, release, release-verification, retrospective, out-of-scope, progress-tracking, issue-upkeep
   - 原則・ガイドライン (9): ndf-policies, implementation-plan, plan-to-spec, investigation-rules, problem-solving, logging-guidelines, markdown-writing, issue-plan-strategy, ml-model-structure
   - データ分析・品質・環境 (4): qa-security-scan, docker-container-access, google-auth, official-skills-autoloader
   - 外部サービス連携 (1): google-drive
@@ -125,7 +125,7 @@ cd ai-plugins
 agy plugin install plugins/ndf/dev.agy
 ```
 
-導入すると Skill 32 個・エージェント 8 個・hook 1 個が
+導入すると Skill 33 個・エージェント 8 個・hook 1 個が
 `~/.gemini/config/plugins/ndf/` へ複製されます。リポジトリ側の symlink は実体へ解決されるため、
 clone を消しても導入した内容は残ります。
 
@@ -226,7 +226,7 @@ claude plugin marketplace add devbasex/ai-plugins@<タグ>
 
 | プラグイン名 | バージョン | 説明 | 詳細 |
 |------------|----------|------|------|
-| **ndf** | 10.2.0 | Claude Code / Codex / Kiro CLI / agy へ 1 ディレクトリから配布する NDF プラグイン。8個の専門エージェント（Claude版）、公開Skills（Claude Code向け core 34個、Kiro向け core 33個、Codex向け core 32個、agy向け core 32個）、4ランタイム共通の作業ツリー運用フック（PreToolUse / SessionStart / userPromptSubmit / agentSpawn / PreInvocation）、Claude Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:external-ai` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [README](./plugins/ndf/README.md) |
+| **ndf** | 10.2.0 | Claude Code / Codex / Kiro CLI / agy へ 1 ディレクトリから配布する NDF プラグイン。8個の専門エージェント（Claude版）、公開Skills（Claude Code向け core 35個、Kiro向け core 34個、Codex向け core 33個、agy向け core 33個）、4ランタイム共通の作業ツリー運用フック（PreToolUse / SessionStart / userPromptSubmit / agentSpawn / PreInvocation）、Claude Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:external-ai` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [README](./plugins/ndf/README.md) |
 | **playwright-kit** | 2.0.1 | Playwright による E2E テストの計画・実装・証跡管理を提供するプラグイン。ページ役割からのテスト計画、動画 / trace 付きスクリプト実装、レポート生成と Drive 保管、playwright_kit ランタイム（init、a11y / CWV スキャン）の 4 Skill。NDF v7.0.0 で分離。 | [README](./plugins/playwright-kit/README.md) |
 
 ### NDF v9.0.0 の主な変更（非互換）
