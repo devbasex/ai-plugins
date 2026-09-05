@@ -744,6 +744,10 @@ git push
 
 #### プロジェクト内ドキュメント
 
+- [CONTRIBUTING.md](./CONTRIBUTING.md) - 参加の手引き（開発の進め方・手元での検証）
+- [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) - 行動規範
+- [SECURITY.md](./SECURITY.md) - 脆弱性の報告
+- [SUPPORT.md](./SUPPORT.md) - 質問と不具合の報告
 - [CLAUDE.md](./CLAUDE.md) - AIエージェント向けガイドライン（Claude Code）
 - [KIRO.md](./KIRO.md) - AIエージェント向けガイドライン（Kiro CLI）
 - [docs/specifications/](./docs/specifications/) - 完了済みplan/issue由来の確定仕様
@@ -751,18 +755,13 @@ git push
 
 ## コントリビューション
 
-1. このリポジトリをフォーク
-2. 新しいプラグインを作成または既存のものを改善
-3. プルリクエストを送信
-4. 新しいプラグインを追加する場合は `marketplace.json` を更新
+参加の手順・手元での検証・Pull Request の出し方は [CONTRIBUTING.md](./CONTRIBUTING.md) に
+あります。参加するうえで守ることは [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) にあります。
 
 ## サポート
 
-問題が発生した場合：
-1. 各プラグインの README.md を確認
-2. 公式ドキュメントを参照
-3. このリポジトリにイシューを開く
-4. プラグイン作者に連絡（`plugin.json` を参照）
+質問・不具合の報告・要望の出し方は [SUPPORT.md](./SUPPORT.md) にあります。脆弱性の報告は
+[SECURITY.md](./SECURITY.md) の手順に従ってください。**公開の issue には書かないでください。**
 
 ## ライセンス
 
