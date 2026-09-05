@@ -90,7 +90,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.3.0）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.3.1）
 ```
 
 ### agy
@@ -110,79 +110,25 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.3.0 へ更新するとき
+## v10.3.1 へ更新するとき
 
-この版は、**誰がレビューし、いつ止め、進行をどこへ残すか**を決め直します。Skill が 2 個
-増えて 35 個になりました。**手順の呼び方が変わる箇所が 3 つあります**（下記）。
+この版が直すのは、v10.3.0 で新設した `issue-upkeep` の手順の記述 1 箇所です。**振る舞いは
+変わりません。**
 
-### レビュワーが「ホストを除く 3 者から輪番で 2 者」になりました
+### 棚卸の対象を、起票した主体で絞らないことを明記しました
 
-`cross-review` はレビュワーを `codex` / `agy` の名指しで固定していました。この形は、ホストが
-`codex` か `agy` のときに**自分自身をレビュワーへ含めます**。母集合を「全ランタイム − ホスト」
-にし、担当をラウンドごとの輪番で 2 者選ぶようにしました
-（[#371](https://github.com/devbasex/ai-plugins/issues/371)）。
+段 1 の 3 つ目の経路「このまとまりで起票した課題」を、実行する側が**自分の起票に限って**
+読めてしまいました。v10.3.0 の棚卸で、人が起票した 3 件が対象から外れ、マイルストーンが
+未設定のまま残っています。
 
-**`--host` が増えました。** 省略すると環境変数から推定し、推定できなければ失敗します。
-既定を置かないのは、誤ると母集合が狂ってホストが自分自身をレビューするためです。**agy から
-呼ぶときは `--host agy` を明示してください**（agy の手掛かりは推定に置いていません）。
+**主体で絞ると、未設定のまま溜まる課題を誰も見ないことになります。** 起票した側は一覧の
+全体を見る立場に無く（`out-of-scope` は見つけたその場で起票する）、棚卸をする側が
+「自分の分だけ」を見ると、残りは次の棚卸でも同じ理由で外れます。
 
-参加する CLI の認証は起動前に確かめます。誤検知するときは `NDF_SKIP_AUTH_CHECK=1` です。
-
-### 終了基準が「新しい指摘が出ない」になりました
-
-全員 `APPROVE` を待つ形は、**最も止まらない参加者に律速されます**。同じ論点の再提出では
-止まり、新しい観点が出るあいだは回る形にしました。一致の判定は振動の検知と共有し、
-引き継ぎ → 新規性 → 振動の順に見ます。
-
-**指摘の記録が残っていないラウンドは「測れない」として扱い**、従来どおり全員が通ったかで
-判定します。0 件として扱うと、修正必須の指摘が出ていても収束してしまうためです。
-
-### 進行の記録が 1 つの Skill に集まりました
-
-工程の進行を記録する手順が 15 個の `SKILL.md` に散っていました。`progress-tracking` へ集め、
-各工程は「この工程に入ったら呼ぶ」の 1 行だけを持ちます
-（[#243](https://github.com/devbasex/ai-plugins/issues/243)）。
-
-**盤面（GitHub Projects）の宣言が無いリポジトリでも、issue の本文へ残ります。** 本文の
-`## 進行` の節だけを差し替えるため、人が書いた内容は消えません。
-
-盤面へ書くときは、解決した識別子を控えて記録のたびの全件取得をやめました。10 件の課題へ
-2 つのキーを書いた時点で GraphQL の上限に達し、以後の記録が黙って捨てられることを実測して
-います（[#287](https://github.com/devbasex/ai-plugins/issues/287)）。
-
-### 構造改善の既定が `cross-refactoring` になりました
-
-工程表の「構造改善」は 4 モードとも `refactoring` を指していました。**何を直すかの発見と、
-直した結果の評価が、どちらも作業した AI 自身に閉じます。** `architecture` と
-`legacy-refactor` を `cross-refactoring` へ移しました
-（[#370](https://github.com/devbasex/ai-plugins/issues/370)）。`standard` は `refactoring` の
-ままです（変更のついでの小さな整理に 4 つの CLI を動かす費用に見合わないため）。
-
-**使うモードでは `pr` を構造改善の前に 1 度呼び、Draft で開きます**（`cross-refactoring` は
-open な Pull Request の上で回るため）。前提を満たせないときの退避先は
-`development-workflow` の `references/workflow-modes.md` にあります。
-
-あわせて、修正の後の再レビューを**変更要求を出した担当だけ**にしました
-（[#372](https://github.com/devbasex/ai-plugins/issues/372)）。
-
-### 蓄積した課題を手入れする手順が増えました
-
-`issue-upkeep` を追加しました。open 43 件を実物と突き合わせたところ、**24 件（56%）の本文が
-現状と食い違っていました**（[#331](https://github.com/devbasex/ai-plugins/issues/331)）。
-判定と反映の間に切れ目を置き、「やらない」の判断を再燃の条件付きで行います。振り返りの最後
-（振り返りを通らない変更では配布の後）に呼ばれます。
-
-### 承認を求めるときの提示物が決まりました
-
-設計レビューのマージと本番への配布で承認を求めるとき、**対象の URL と変更量だけでは、
-承認する側は設計文書を最初から読むまで判断できません**。決めたこと・作るもの・満たすこと・
-未確認のまま残ることを、判断に使う層として定めました
-（[#318](https://github.com/devbasex/ai-plugins/issues/318)）。
-
-あわせて、**マージに他者の承認が要るリポジトリ**では、ゴール条件が Pull Request より後の
-工程を含むときに到達点を「提出とレビューの収束」へ置き直します
-（[#321](https://github.com/devbasex/ai-plugins/issues/321)）。待ち続けることも、自分で
-マージすることもしません。
+未設定のまま残る条件（`priority: low` で主題が合わない / `priority: medium` で共通の主題が
+1 件しか残らない / 要判断へ倒した）と、報告に件数と理由を残す規定は
+`references/milestones.md` に元からあります。**同じ規定を 2 箇所に置かないため、そちらへは
+足していません。**
 
 ### 手元で確かめる
 
@@ -334,7 +280,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.3.0/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.3.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -356,14 +302,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.3.0/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.3.1/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.3.0  <path>
+# => ndf@ai-plugins  installed, enabled  10.3.1  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
