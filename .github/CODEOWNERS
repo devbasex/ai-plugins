@@ -1,0 +1,19 @@
+# 変更のレビュー担当。パスは後に書いたものが優先される。
+#
+# 当面はすべて同じ 1 人になる。それでも置くのは、ブランチの ruleset が
+# 「CODEOWNERS のレビューを必須にする」設定でこのファイルを前提にすることと、
+# 担当を増やすときの変更が 1 ファイルで済むためである。
+
+*                       @takemi-ohama
+
+/plugins/ndf/           @takemi-ohama
+/plugins/playwright-kit/ @takemi-ohama
+/plugins/mcp/           @takemi-ohama
+
+/scripts/               @takemi-ohama
+/.github/               @takemi-ohama
+
+/docs/                  @takemi-ohama
+/AGENTS.md              @takemi-ohama
+/CLAUDE.md              @takemi-ohama
+/KIRO.md                @takemi-ohama

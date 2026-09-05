@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 使い方の質問
+    url: https://github.com/devbasex/ai-plugins/blob/main/SUPPORT.md
+    about: 質問も issue で受け付けています。先に読む場所と、書いてほしいことをまとめています
+  - name: 脆弱性の報告
+    url: https://github.com/devbasex/ai-plugins/security/advisories/new
+    about: 公開の issue には書かないでください。非公開の報告を受け付けています

@@ -1,0 +1,17 @@
+# Python の依存は uv が解決し、固定した lock ファイルを持たないため対象にしない。
+# 判断が変わったら pip のエコシステムを足す。
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Tokyo"
+    open-pull-requests-limit: 5
+    target-branch: "develop"
+    commit-message:
+      prefix: "Update"
+    labels:
+      - "dependencies"
