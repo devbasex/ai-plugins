@@ -129,6 +129,8 @@ Skill 執筆規約の「上限値」にあります。
 
 ## レビューの流れ
 
+誰が見るか、どう決まるかは [GOVERNANCE.md](./GOVERNANCE.md) にあります。
+
 - 現在のメンテナーは 1 人です。返信までに数日かかることがあります
 - 変更を求めた場合は、その理由と、どう直すと通るかを書きます
 - 議論が長くなりそうなときは、Pull Request ではなく issue で先に方針を決めます
@@ -155,6 +157,7 @@ Skill 執筆規約の「上限値」にあります。
 | 内容 | 参照先 |
 | --- | --- |
 | 参加するうえで守ること | [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) |
+| 役割と決め方 | [GOVERNANCE.md](./GOVERNANCE.md) |
 | 脆弱性の報告 | [SECURITY.md](./SECURITY.md) |
 | 使い方の質問 | [SUPPORT.md](./SUPPORT.md) |
 | ライセンス | [LICENSE](./LICENSE)（MIT） |
