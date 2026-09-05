@@ -1,19 +1,14 @@
 name: Python tests
 
-# 起動の条件は pytest . の収集範囲に合わせる。テストの置き場所（plugins / scripts /
-# tests）に加えて、収集の仕方そのものを変える根の設定ファイルも対象へ入れる。
-# 根の conftest.py は前提のコマンドと git の身元の扱いも決めるため、変えた PR で
-# このワークフローが起動しないと、収集が減ったことに気づけない
+# Pull Request では絞り込まずに常に起動する。ブランチの ruleset が必須にする検査は、
+# 変更の種類にかかわらず結果を返す必要がある。GitHub は paths で除外された実行を
+# 「成功」ではなく「実行されていない」として扱うため、絞り込んだままだと対象外の変更で
+# マージ可能にならない。push の側は絞り込みを残す（マージの可否を決めないため）
+#
+# push の絞り込みは pytest . の収集範囲に合わせる。テストの置き場所（plugins / scripts /
+# tests）に加えて、収集の仕方そのものを変える根の設定ファイルも対象へ入れる
 on:
   pull_request:
-    paths:
-      - ".github/workflows/pytest.yml"
-      - "plugins/**"
-      - "scripts/**"
-      - "tests/**"
-      - "conftest.py"
-      - "pytest.ini"
-      - "pyproject.toml"
   push:
     branches:
       - main

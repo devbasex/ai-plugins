@@ -1,9 +1,10 @@
 name: PR base branch guard
 
+# すべての Pull Request で起動する。ブランチの ruleset が必須にする検査は、変更の種類にも
+# 宛先にもかかわらず結果を返す必要がある。判定そのものは既定ブランチ宛のときだけ行う
+# （開発の起点ブランチ宛の Pull Request には、この判定が当てはまらない）
 on:
   pull_request:
-    branches:
-      - main
 
 jobs:
   guard:
@@ -11,6 +12,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Check the branch this pull request came from
+        # 宛先が既定ブランチでなければ、検査は行わずに成功で終わる。既定ブランチの名前は
+        # ワークフローへ書かず、リポジトリの設定から受け取る
+        if: github.base_ref == github.event.repository.default_branch
         # ブランチ名をそのままシェルの本文へ埋めない。名前に置換の記法を含められる。
         env:
           HEAD_REF: ${{ github.head_ref }}
