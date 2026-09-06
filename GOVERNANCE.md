@@ -32,7 +32,7 @@ Pull Request を出せば、その時点で貢献者である。
 - 割れたときは、その領域を最も見ている人が決める
 - 決めた理由は issue か Pull Request に残す。**決定そのものより、理由のほうが後から効く**
 - 設計に関わる変更は、実装より先に設計だけの Pull Request を出してレビューを通す
-  （`development-workflow` の設計レビューの工程）
+  （`development-workflow` のドキュメントレビューの工程）
 
 方針が定まらない issue には `needs-decision` を付ける。判断を待っている状態が、ラベルから
 分かるようにするためである。

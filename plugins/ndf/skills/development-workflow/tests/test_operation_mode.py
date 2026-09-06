@@ -28,16 +28,18 @@ EXPECTED_MODES = ["light", "operation", "legacy-refactor", "standard"]
 JUDGEMENT_HEADING = "### 2. 上から順に条件を判定する"
 WORKFLOW_TABLE_HEADING = "## モードごとに起動する Skill"
 
-# `operation` 列の期待値。工程表の 15 行すべてに値が入る（受け入れ条件 B3）。
+# `operation` 列の期待値。工程表の全行に値が入る（受け入れ条件 B3）。
+# **行数を書かない。** 工程を足すたびに書き換える記述を残さない。
 EXPECTED_OPERATION_COLUMN = {
     "要求と受け入れ条件": "R",
     "作業場所の用意": "C",
     "設計": "-",
-    "設計レビュー": "-",
+    "ドキュメント再構成": "-",
+    "ドキュメントレビュー": "-",
     "計画": "R",
     "実装": "R",
     "構造改善": "-",
-    "レビュー": "R",
+    "実装レビュー": "R",
     "完了判定": "R",
     "Pull Request": "R",
     "確定仕様化": "C",
@@ -207,7 +209,7 @@ def test_the_workflow_table_gained_a_column_in_height_order() -> None:
 
 
 def test_every_stage_has_a_value_for_the_new_column() -> None:
-    """15 行すべてに必須・条件付き・対象外のいずれかが入る。"""
+    """工程表の全行に必須・条件付き・対象外のいずれかが入る。"""
     for stage, expected in EXPECTED_OPERATION_COLUMN.items():
         result = run_lib(f'wf_stage_class operation "{stage}"')
         assert result.returncode == 0, (stage, result.stderr)

@@ -164,15 +164,41 @@ def test_the_boundary_with_issue_plan_strategy_is_written() -> None:
 
 
 def test_every_stage_says_which_unit_it_moves_in() -> None:
-    """工程表の 15 行それぞれが、どの単位で動くかを持つ。"""
+    """工程表の各行が、どの単位で動くかを持つ。
+
+    **工程の一覧をここへ写さない。** 写すと工程を足したときに片方だけが古くなる。
+    `SKILL.md` の工程表を読み、その行がすべて `parallel-work.md` にあることを見る。
+    """
     body = parallel()
-    stages = [
-        "要求と受け入れ条件", "作業場所の用意", "設計", "設計レビュー", "計画", "実装",
-        "構造改善", "レビュー", "完了判定", "Pull Request", "確定仕様化", "後片付け",
-        "配布", "リリース後テスト", "振り返り",
-    ]
+    stages = _stages_from_the_workflow_table()
+    assert len(stages) >= 15, stages
     for stage in stages:
         assert re.search(rf"^\|\s*{re.escape(stage)}\s*\|", body, re.MULTILINE), stage
+
+
+def _stages_from_the_workflow_table() -> list[str]:
+    """`SKILL.md` の「モードごとに起動する Skill」の表から工程名を読む。"""
+    lines = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8").splitlines()
+    start = next(i for i, ln in enumerate(lines)
+                 if ln.strip() == "## モードごとに起動する Skill")
+    stages: list[str] = []
+    header_seen = False
+    for line in lines[start + 1:]:
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            break
+        if not stripped.startswith("|"):
+            if stages:
+                break
+            continue
+        cells = [c.strip() for c in stripped.strip("|").split("|")]
+        if not header_seen:
+            header_seen = True
+            continue
+        if set("".join(cells)) <= set("-: "):
+            continue
+        stages.append(cells[0])
+    return stages
 
 
 LOWER_BOUNDS = (

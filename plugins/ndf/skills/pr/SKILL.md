@@ -238,7 +238,7 @@ feature/xxx ──PR──→ qa/staging   ← ❌ qa/staging をmergeするとm
 | --- | --- |
 | 開発版・検証環境のチャネル | 要らない |
 | **本番のチャネル** | **要る** |
-| head のブランチ名が `design/` で始まる Pull Request | **チャネルによらず要る**（設計レビューの関門） |
+| head のブランチ名が `design/` で始まる Pull Request | **チャネルによらず要る**（ドキュメントレビューの関門） |
 
 **規則は `/ndf:release` が持つ。** どのブランチが本番のチャネルかはリポジトリが宣言し
 （`.ndf/worktree.json` の `production_branch`）、宣言が無ければ既定ブランチを指す。判定の
