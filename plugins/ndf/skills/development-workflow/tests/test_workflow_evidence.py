@@ -9,6 +9,7 @@ v10.5.0 は判定したモードに対する工程を通さずに配布まで進
 from __future__ import annotations
 
 import json
+import shlex
 import subprocess
 import time
 from pathlib import Path
@@ -88,7 +89,7 @@ def test_the_candidate_filter_still_rejects_unrelated_commands() -> None:
 
 def test_it_reads_the_closing_words_from_the_body(repo: Path) -> None:
     command = create("Closes #417")
-    result = run_lib(f'wf_parse_pr_create {json.dumps(command)}', cwd=repo)
+    result = run_lib(f'wf_parse_pr_create {shlex.quote(command)}', cwd=repo)
     assert result.stdout.strip() == "devbasex/ai-plugins\t417", result.stderr
 
 
@@ -96,7 +97,7 @@ def test_it_reads_the_closing_words_from_a_body_file(repo: Path, tmp_path: Path)
     body = tmp_path / "body.md"
     body.write_text("まとめ\n\nCloses #418\nCloses #420\n", encoding="utf-8")
     command = f'gh pr create --base develop --body-file {body}'
-    result = run_lib(f'wf_parse_pr_create {json.dumps(command)}', cwd=repo)
+    result = run_lib(f'wf_parse_pr_create {shlex.quote(command)}', cwd=repo)
     assert result.stdout.split() == [
         "devbasex/ai-plugins", "418", "devbasex/ai-plugins", "420"
     ], result.stderr
@@ -104,7 +105,7 @@ def test_it_reads_the_closing_words_from_a_body_file(repo: Path, tmp_path: Path)
 
 def test_a_body_without_closing_words_yields_nothing(repo: Path) -> None:
     command = create("ただの説明")
-    result = run_lib(f'wf_parse_pr_create {json.dumps(command)}', cwd=repo)
+    result = run_lib(f'wf_parse_pr_create {shlex.quote(command)}', cwd=repo)
     assert result.stdout.strip() == ""
     assert result.returncode != 0
 
@@ -236,3 +237,48 @@ def test_the_wording_does_not_assert_that_a_stage_was_skipped(repo: Path, state:
     assert "記録の側が遅れている" in out
     for word in ("飛ばしました", "通っていません", "違反"):
         assert word not in out
+
+
+# --- レビューで出た形（#427 の 3 件） ---------------------------------------
+
+
+HEREDOC = """gh pr create --base develop --title "t" --body "$(cat <<'EOF'
+## まとめ
+
+本文の途中に閉じる語がある。
+
+Closes #424
+EOF
+)\""""
+
+
+def test_a_heredoc_body_is_read_to_the_end(repo: Path) -> None:
+    """`pr` が必須と定める形はヒアドキュメントである。
+
+    語の分割は引用符の中の改行を 1 つの語として保つが、**行区切りで受け取ると
+    1 行目だけを本文と読む**。末尾の閉じる語が落ちる。
+    """
+    result = run_lib(f"wf_parse_pr_create {shlex.quote(HEREDOC)}", cwd=repo)
+    assert result.stdout.strip() == "devbasex/ai-plugins\t424", result.stderr
+
+
+def test_a_heredoc_body_reaches_the_guard(repo: Path, state: Path) -> None:
+    seed(repo, state, 424, "standard", ("実装",))
+    out = context(guard(repo, state, HEREDOC))
+    assert "424" in out
+    assert "設計" in out
+
+
+def test_the_repository_option_before_pr_is_skipped(repo: Path) -> None:
+    """`gh -R <所有者>/<リポジトリ> pr create` でも見落とさない。"""
+    command = 'gh -R devbasex/ai-plugins pr create --base develop --body "Closes #424"'
+    result = run_lib(f"wf_parse_pr_create {shlex.quote(command)}", cwd=repo)
+    assert result.stdout.strip() == "devbasex/ai-plugins\t424", result.stderr
+
+
+def test_a_multi_line_body_keeps_every_closing_word(repo: Path) -> None:
+    command = 'gh pr create --body "Closes #418\nCloses #420"'
+    result = run_lib(f"wf_parse_pr_create {shlex.quote(command)}", cwd=repo)
+    assert result.stdout.split() == [
+        "devbasex/ai-plugins", "418", "devbasex/ai-plugins", "420"
+    ], result.stderr

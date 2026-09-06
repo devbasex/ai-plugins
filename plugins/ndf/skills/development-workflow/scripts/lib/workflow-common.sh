@@ -152,6 +152,11 @@ wf_stages_before_pr() {
 # **bash の文字取り出しでは書かない。** tool 実行のたびに走るため、長い本文で費用が
 # 効く。実測では 27KB の本文に 2.4 秒かかり、hook の制限時間に近づいた。同じ処理を
 # awk に置くと 0.02 秒で終わる。
+#
+# **区切りは NUL である。** 引用符の中の改行は語の一部として残るため、行で区切ると
+# 1 つの語が複数に割れる。`pr` が必須と定めるヒアドキュメントの本文はこの形になり、
+# 行区切りで読むと 1 行目だけを本文として扱ってしまう（#427 のレビュー）。
+# 読む側は `read -r -d ""` で受ける。
 wf_split() {
   awk '
     {
@@ -164,15 +169,15 @@ wf_split() {
         }
         if (ch == "\"" || ch == "'"'"'") { quote = ch; continue }
         if (ch == " " || ch == "\t") {
-          if (out != "") { print out; out = "" }
+          if (out != "") { printf "%s%c", out, 0; out = "" }
           continue
         }
         out = out ch
       }
       if (quote != "") { out = out "\n" }
-      else if (out != "") { print out; out = "" }
+      else if (out != "") { printf "%s%c", out, 0; out = "" }
     }
-    END { if (out != "") print out }
+    END { if (out != "") printf "%s%c", out, 0 }
   ' <<<"${1:-}"
 }
 
@@ -189,7 +194,7 @@ wf_is_candidate() {
 wf_parse_sync() {
   local cmd="${1:-}" tok found=1
   local -a args=()
-  while IFS= read -r tok; do
+  while IFS= read -r -d '' tok; do
     if [ "$found" -ne 0 ]; then
       case "$tok" in *projects-sync.sh) found=0 ;; esac
       continue
@@ -215,7 +220,7 @@ WF_CLOSING_ISSUES="$(dirname "${BASH_SOURCE[0]}")/../../../../scripts/lib/closin
 # 本文の渡し方は 2 つある（`--body` と `--body-file`）。**短い形も見る**（`-b` / `-F`）。
 _wf_pr_create_body() {
   local cmd="${1:-}" tok want="" body="" state=0 found=1
-  while IFS= read -r tok; do
+  while IFS= read -r -d '' tok; do
     if [ -n "$want" ]; then
       case "$want" in
         text) body="$tok" ;;
@@ -226,8 +231,19 @@ _wf_pr_create_body() {
     fi
     case "$state" in
       0) [ "$tok" = "gh" ] && state=1 ;;
-      1) case "$tok" in pr) state=2 ;; gh) ;; -*) ;; *) state=0 ;; esac ;;
+      1)
+        # **`gh` と `pr` の間の option を読み飛ばす。** `gh -R <所有者>/<リポジトリ> pr
+        # create` の形では、値の語で 0 へ戻して `create` を見落とす（#427 のレビュー）。
+        case "$tok" in
+          pr) state=2 ;;
+          gh) ;;
+          -R|--repo) state=4 ;;
+          -*) ;;
+          *) state=0 ;;
+        esac
+        ;;
       2) if [ "$tok" = "create" ]; then state=3; found=0; else state=0; fi ;;
+      4) state=1 ;;
     esac
     [ "$found" -eq 0 ] || continue
     case "$tok" in
