@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "playwright-kit",
-  "version": "2.0.2",
-  "description": "Agent Plugins package (v2.0.2): 4 Playwright E2E skills — test planning by page role, script authoring with video / trace evidence, report generation with Drive archiving, and the playwright_kit runtime (init, a11y / CWV scans).",
+  "version": "2.0.3-dev.1",
+  "description": "Agent Plugins package (v2.0.3-dev.1): 4 Playwright E2E skills — test planning by page role, script authoring with video / trace evidence, report generation with Drive archiving, and the playwright_kit runtime (init, a11y / CWV scans).",
   "author": {
     "name": "takemi-ohama",
     "url": "https://github.com/takemi-ohama"
