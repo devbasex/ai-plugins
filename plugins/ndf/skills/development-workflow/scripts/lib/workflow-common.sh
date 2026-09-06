@@ -98,11 +98,11 @@ wf_stage_class() {
   local mode="${1:-}" stage="${2:-}" column line name
   column=$(_wf_mode_column "$mode") || return 1
   while IFS= read -r line; do
-    IFS=$'\t' read -r name c1 c2 c3 c4 <<<"$line"
+    IFS=$'\t' read -r name c1 c2 c3 <<<"$line"
     [ "$name" = "$stage" ] || continue
     case "$column" in
       1) printf '%s\n' "$c1" ;; 2) printf '%s\n' "$c2" ;;
-      3) printf '%s\n' "$c3" ;; 4) printf '%s\n' "$c4" ;;
+      3) printf '%s\n' "$c3" ;;
     esac
     return 0
   done <<<"$WF_STAGE_MATRIX"
