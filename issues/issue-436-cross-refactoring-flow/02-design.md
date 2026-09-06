@@ -53,7 +53,9 @@ flowchart TD
     RE -->|いいえ| Split
     RE -->|はい| Gate{"起動のされ方"}
     Split["適用ラウンドへ割り当てる<br/>書き換えるファイルが重ならない群へ"] --> Apply["適用ラウンド A: 適用（1 コミット）"]
-    Apply --> Test{"テストが通る ?"}
+    Apply --> Applied{"適用が通った ?"}
+    Applied -->|"いいえ（競合・対象が消えている）"| Drop
+    Applied -->|はい| Test{"テストが通る ?"}
     Test -->|いいえ| Fix["修正ラウンド"]
     Fix --> FixCap{"修正の上限 ?"}
     FixCap -->|未達| Test
@@ -247,11 +249,9 @@ flowchart TD
 | 取り消した項目 | **内訳を書かない。** 件数だけ述べ、内訳は改修計画へ譲る |
 | 改修計画の URL | **生の URL を必ず書く。** Markdown のリンクにしない |
 
-**改修計画は Pull Request のコメントである**（決定 6）。URL は永続で、検証の結果・修正の要約・進行の報告のすべてに入れる。
-
-```text
-https://github.com/<所有者>/<リポジトリ>/pull/<PR>#issuecomment-<id>
-```
+**改修計画は Pull Request のコメントである**（決定 6）。URL
+（`https://github.com/<所有者>/<リポジトリ>/pull/<PR>#issuecomment-<id>`）は永続で、
+検証の結果・修正の要約・進行の報告のすべてに入れる。
 
 ## ラウンド上限
 
