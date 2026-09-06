@@ -41,7 +41,7 @@
 | キー | 既定の名前 | 種類 | 値 |
 | --- | --- | --- | --- |
 | `stage` | `進行` | 単一選択 | 工程表の行名（下の対応表） |
-| `mode` | `モード` | 単一選択 | `light` / `legacy-refactor` / `standard` |
+| `mode` | `モード` | 単一選択 | `light` / `operation` / `legacy-refactor` / `standard` |
 | `worktree` | `作業ツリー` | 文字列 | `.worktrees/<ブランチ名>` |
 | `plan` | `計画ファイル` | 文字列 | `issues/<ファイル名>` |
 | `status` | `Status` | 単一選択 | `Todo` / `In Progress` / `Done`（GitHub の既定） |

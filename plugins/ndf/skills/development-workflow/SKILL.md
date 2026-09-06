@@ -1,6 +1,6 @@
 ---
 name: development-workflow
-description: "Classify a change into 3 workflow modes and route it to the required steps. Use when deciding how much process a change needs（モード判定・工程の振り分け）."
+description: "Classify a change into 4 workflow modes and route it to the required steps. Use when deciding how much process a change needs（モード判定・工程の振り分け）."
 hooks:
   PreToolUse:
     - matcher: "Bash"
@@ -12,7 +12,7 @@ hooks:
 
 # 開発ワークフローの振り分け
 
-変更内容を 3 つのモードへ分類し、必要な工程だけを起動する。**全変更にフル工程を課さない。**
+変更内容を 4 つのモードへ分類し、必要な工程だけを起動する。**全変更にフル工程を課さない。**
 
 **判定基準を持つのはこの Skill だけである。** 他の Skill とエージェント定義は判定結果を
 受け取る側に徹する。同じ基準を複数箇所へ書くと、モードを追加・変更したときに片方だけが
@@ -58,12 +58,26 @@ git diff --stat            # 変更済みなら
 
 | 順 | モード | 該当条件（いずれか 1 つで該当） |
 | --- | --- | --- |
-| 1 | `standard` | 公開インタフェース（API・イベント・コマンド）の追加・変更・削除 / 既存データの移行を伴うスキーマ変更（列の削除・改名・型変更など） / 認証・認可の変更 / 複数モジュールにまたがる変更 / 重要なドメインルールの追加・変更 / 本番の振る舞いの追加・変更、バグ修正 / 本番の振る舞いを変えない構造変更で、対象にテストが十分にある |
-| 2 | `legacy-refactor` | 本番の振る舞いを変えず本番コードの構造を変える変更で、対象にテストがない・少ない |
-| 3 | `light` | **本番の振る舞いも本番コードの構造も変えない局所変更**（文言・書式・コメント・ドキュメント・静的な設定値、テストの追加、ログ出力の追加など） |
+| 1 | `operation` | **本番コードも文書も変えず、外部の系の状態だけを変える**（権限や保護の規則の設定、反映先の構成の変更、データの投入・修正、外部サービスへの操作など） |
+| 2 | `standard` | 公開インタフェース（API・イベント・コマンド）の追加・変更・削除 / 既存データの移行を伴うスキーマ変更（列の削除・改名・型変更など） / 認証・認可の変更 / 複数モジュールにまたがる変更 / 重要なドメインルールの追加・変更 / 本番の振る舞いの追加・変更、バグ修正 / 本番の振る舞いを変えない構造変更で、対象にテストが十分にある |
+| 3 | `legacy-refactor` | 本番の振る舞いを変えず本番コードの構造を変える変更で、対象にテストがない・少ない |
+| 4 | `light` | **本番の振る舞いも本番コードの構造も変えない局所変更**（文言・書式・コメント・ドキュメント・静的な設定値、テストの追加、ログ出力の追加など） |
 
-`light` の括弧内は**例示であり限定列挙ではない**。判定の基準は「本番の振る舞いも本番コードの
-構造も変えない」ことであり、例示に無い変更もこの条件を満たせば `light` として扱う。
+`light` と `operation` の括弧内は**例示であり限定列挙ではない**。`light` の判定の基準は
+「本番の振る舞いも本番コードの構造も変えない」ことであり、例示に無い変更もこの条件を
+満たせば `light` として扱う。
+
+**`operation` を 1 番に置く。** 権限の設定の変更は「誰が何をできるか」を変えるため、条件
+だけを見れば `standard` に当たる。しかし変えるのは外部の系の状態であって本番コードでは
+なく、**設計もテスト駆動も当たらない**。重大さは工程ではなく、**実行前の承認**で受ける
+（「人手の承認を求める関門」）。
+
+**判定の根拠に、特定のホスティングやサービスの機能名を使わない。** 使うと、その機能を
+持たない対象では判定が成り立たない。機能名を出すのは例としてだけである。
+
+**判定が見るのは変更の目的物であって、工程が生む記録ではない。** 「本番コードも文書も
+変えず」は、変更しようとしている対象を指す。実行の記録・確定仕様・振り返りは工程の産物で
+あり、これらを書くことで `operation` の条件を外れることはない。
 
 スキーマ変更のうち、既存データの移行が不要な追加（インデックスの追加、既定値付き
 NULL 許容列の追加）は `standard` として扱う。判定に迷う場合と境界事例は
@@ -91,26 +105,31 @@ mode: standard
 
 ## モードごとに起動する Skill
 
-| 工程 | `light` | `legacy-refactor` | `standard` |
-| --- | --- | --- | --- |
-| 要求と受け入れ条件 | `requirements-design` | — | `requirements-design` |
-| 作業場所の用意 | `worktree`（主ディレクトリで編集してよいパスだけなら不要） | `worktree` | `worktree` |
-| 設計 | — | `design` | `design` |
-| 設計レビュー | — | 任意 | `pr` → `cross-review` → `merged` |
-| 計画 | — | `implementation-plan` | `implementation-plan` |
-| 実装 | 直接編集 | `refactoring` | `tdd-cycle` |
-| 構造改善 | — | `cross-refactoring` | `cross-refactoring` |
-| レビュー | `cross-review` | `pr-review` | `cross-review` |
-| 完了判定 | `quality-gates` | `quality-gates` | `quality-gates` |
-| Pull Request | `pr` | `pr` | `pr` |
-| 確定仕様化 | — | — | `plan-to-spec` |
-| 後片付け | `merged` | `merged` | `merged` |
-| 配布 | `release` | `release` | `release` |
-| リリース後テスト | — | `release-verification` | `release-verification` |
-| 振り返り | — | `retrospective` | `retrospective` |
+| 工程 | `light` | `operation` | `legacy-refactor` | `standard` |
+| --- | --- | --- | --- | --- |
+| 要求と受け入れ条件 | `requirements-design` | `requirements-design` | — | `requirements-design` |
+| 作業場所の用意 | `worktree`（主ディレクトリで編集してよいパスだけなら不要） | `worktree`（主ディレクトリで編集してよいパスだけなら不要） | `worktree` | `worktree` |
+| 設計 | — | — | `design` | `design` |
+| 設計レビュー | — | — | 任意 | `pr` → `cross-review` → `merged` |
+| 計画 | — | `implementation-plan` | `implementation-plan` | `implementation-plan` |
+| 実装 | 直接編集 | 実行 → [operation-run.md](references/operation-run.md) | `refactoring` | `tdd-cycle` |
+| 構造改善 | — | — | `cross-refactoring` | `cross-refactoring` |
+| レビュー | `cross-review` | `cross-review` | `pr-review` | `cross-review` |
+| 完了判定 | `quality-gates` | `quality-gates` | `quality-gates` | `quality-gates` |
+| Pull Request | `pr` | `pr` | `pr` | `pr` |
+| 確定仕様化 | — | `plan-to-spec`（実行で決まった設定が以後の判断の前提になる場合） | — | `plan-to-spec` |
+| 後片付け | `merged` | `merged` | `merged` | `merged` |
+| 配布 | `release` | `release` | `release` | `release` |
+| リリース後テスト | — | `release-verification`（実行した経路とは別の経路で確かめられる場合） | `release-verification` | `release-verification` |
+| 振り返り | — | `retrospective`（実行の手順そのものを変えた場合） | `retrospective` | `retrospective` |
 
 範囲外の課題の起票（`out-of-scope`）はこの表に載らない。工程ではないため、モードで要否を
 決めない（「範囲外の課題を見つけたとき」を参照）。
+
+**`operation` の「実装」は実行そのものを指す。** 行は増やさない。呼ぶのは `tdd-cycle` でも
+`refactoring` でもなく、[references/operation-run.md](references/operation-run.md) が定める
+手順である。実行の範囲・記録・失敗したときの止め方はそちらが持つ。**この工程は「本番の系へ
+届く操作」の関門に当たる**（「人手の承認を求める関門」）。
 
 **作業場所の用意は、モードを判定した後に行う。** 要求と受け入れ条件は `issues/` に書く
 ため、主ディレクトリのままで済む。開発の変更は clone したディレクトリではなく
@@ -126,12 +145,12 @@ Skill は使わず `pr` → `cross-review` → `merged` を順に呼ぶ。**こ�
 
 **構造改善とレビューは、通す工程であって任意ではない。** `standard` と `legacy-refactor` の
 構造改善は `cross-refactoring` を通す。
-**レビューは 3 モードとも通す。** Pull Request を出す以上、その差分は誰かがレビューする。
+**レビューは 4 モードとも通す。** Pull Request を出す以上、その差分は誰かがレビューする。
 `light` は「本番の振る舞いも本番コードの構造も変えない」変更だが、**変えないことの確認**が
 要る。レビュー段階は**明示的に呼ぶ**（自然文で「レビューして」と依頼すると、Claude Code では組み込みの
 `code-review` が起動して判定の投稿経路が変わる）。
 
-**マージは取り込みであって配布ではない。** `release` は 3 モードすべてで通す。**自動で進めて
+**マージは取り込みであって配布ではない。** `release` は 4 モードすべてで通す。**自動で進めて
 よいのは検証への配布までで、本番への配布は承認を得るまで進めない。**
 
 工程ごとの理由・条件・例外は
@@ -194,7 +213,7 @@ flowchart TD
 ## 人手の承認を求める関門
 
 **関門は 2 つで、増やさない。** どちらも取り消せない操作である。設計はマージが済んだ時点で
-実装の前提になり、本番への配布は反映した瞬間に利用者へ届く。
+実装の前提になり、本番の系へ届く操作は反映した瞬間に効く。
 
 **増やさないのは、増やすほど「承認したこと」の意味が薄れるためである。** 通過の回数が
 増えると、内容を読まずに通す動きが入る。
@@ -202,7 +221,7 @@ flowchart TD
 | 関門 | いつ | 要否の決まり方 |
 | --- | --- | --- |
 | 設計 Pull Request のマージ | 設計レビューの工程 | **マージ先のチャネルによらず要る** |
-| 本番のチャネルへ届く操作 | 配布の工程 | **マージ先のチャネルが決める** |
+| 本番の系へ届く操作 | 配布の工程、および `operation` の実装の工程 | **届く先が本番の系かどうかで決まる** |
 
 **2 つは要否の決まり方が違う。** 並べて書くと片方に掛かる規則が両方に掛かって読めるため、
 節を分ける。
@@ -218,15 +237,30 @@ flowchart TD
 
 **止める場所を設計レビューに限るのは、そこが後から直す費用の変わり目だからである。**
 
-### 本番のチャネルへ届く操作
+### 本番の系へ届く操作
 
-**要否はマージ先のチャネルが決める。** 検証環境や開発版のチャネルへ入れるマージは
-取り消せるため、承認を求めない。**実装 Pull Request のマージは、それ自体では関門にならない。**
-一律で止めると検証への反映まで止まる。
+**要否は、届く先が本番の系かどうかで決まる。** 本番の系とは、利用者が現に使っている
+配布のチャネル・環境・外部サービスを指す。**配布はその一例であり、`operation` の実行も
+同じ性質を持つ。** どちらも反映した瞬間に効き、取り消しても「その状態を見た人」は戻らない。
+**性質が同じものを別の関門として数えない。**
 
-**規則は `release` が持つ。** 検証への配布は提示して進めてよく、本番への配布は承認を得るまで
-進めない。実装 Pull Request をマージする時点で読むのは `merged` と `pr` であるため、
+| 何が届くか | 何で判定するか |
+| --- | --- |
+| 配布（マージと公開） | マージ先が本番のチャネルか。**チャネルは系の一種である** |
+| `operation` の実行 | 操作する先が本番の系か。検証用の系への操作は承認を求めない |
+
+**検証環境や開発版のチャネルへ入れるマージは取り消せるため、承認を求めない。**
+**実装 Pull Request のマージは、それ自体では関門にならない。** 一律で止めると検証への
+反映まで止まる。
+
+**配布の規則は `release` が持つ。** 検証への配布は提示して進めてよく、本番への配布は承認を
+得るまで進めない。実装 Pull Request をマージする時点で読むのは `merged` と `pr` であるため、
 そちらからこの規則へ辿れるようにしてある。
+
+**`operation` の実行の規則は
+[references/operation-run.md](references/operation-run.md) が持つ。** 承認を求めるのは
+実行の前で、単位ごとの取り消しの手段を添える。**取り消せない単位を含むときは、そのことを
+先に示す。**
 
 **どのブランチが本番のチャネルかは、リポジトリが宣言する。** 読み取りの順序は次の 2 段である。
 
@@ -253,7 +287,8 @@ flowchart TD
 
 - 設計 Pull Request のマージ（`standard`）— 承認を得るまで実装の工程へ
   進まない
-- 本番のチャネルへ届く操作 — 承認を得るまで進めない。**検証への配布までは自動で進めてよい**
+- 本番の系へ届く操作 — 承認を得るまで進めない。**検証への配布までは自動で進めてよい**。
+  `operation` の実行も同じで、本番の系へ届く単位は承認を得るまで実行しない
 
 ### 他者の承認が要るときは、到達点を置き直す
 
@@ -316,16 +351,24 @@ flowchart TD
     RL -.->|standard / 未検証の項目なし| T
     A -.->|legacy-refactor| D
     C -.->|legacy-refactor で分けない| G
+    S -.->|operation| G
+    G -.->|operation| X[外部の系への実行]
+    X -.-> I
     S -.->|light| I
     K -.->|light| L
-    L -.->|light / legacy-refactor| P
-    RL -.->|light| Z[終了]
+    L -.->|light / legacy-refactor / 確定仕様化を通さない operation| P
+    RL -.->|light / 振り返りを通さない operation| Z[終了]
 ```
 
 - すべてのモードが A（調査）から始まり、D（モード判定）を経て S（作業場所の用意）へ進む。
-  B（要求と受け入れ条件）を経るのは `light` と `standard` の 2 つで、
-  `legacy-refactor` は A から D へ抜ける。終わりは `light` が RL（配布）、他の 2 つが
-  T（振り返り）である
+  B（要求と受け入れ条件）を経るのは `light` と `operation` と `standard` の 3 つで、
+  `legacy-refactor` は A から D へ抜ける。終わりは `light` が RL（配布）、
+  `legacy-refactor` と `standard` が T（振り返り）、`operation` は条件に当たれば
+  T、当たらなければ RL である
+- **`operation` は C（設計）・F（設計レビュー）・R（構造改善）を通らない。** S から
+  G（実装計画）へ抜け、X（外部の系への実行）が H の位置に立つ。X の手順は
+  [references/operation-run.md](references/operation-run.md) が持ち、**実行の前に
+  承認を得る**
 - **`light` は破線の経路（A → B → D → S → I → J → K → L → P → RL）を通る。** I と J の
   レビューは通り、K は変更箇所を 1 度実行する限定的な検証と静的解析だけを指す。N の全体
   テストと結合テストは通らない
@@ -356,6 +399,8 @@ flowchart TD
 
 | 状況 | 対応 |
 | --- | --- |
+| `light` のつもりが外部の系を触ると分かった | `operation` へ上げる |
+| `operation` のつもりが本番コードも触ると分かった | `standard` へ上げる。実行と差分を分ける |
 | `light` のつもりが本番の振る舞いを変えると分かった | `standard` へ上げ、受け入れ条件を作り直す |
 | `light` のつもりが本番コードの構造を変えると分かった | テストの有無で `standard` か `legacy-refactor` へ上げる |
 | `legacy-refactor` の途中で公開インタフェースが変わると分かった | `standard` へ上げる。ここまでの差分を分ける |
@@ -371,3 +416,4 @@ flowchart TD
 - [references/stage-completeness.md](references/stage-completeness.md) — 通過工程の控えと報告、承認の印の作り方
 - [references/parallel-work.md](references/parallel-work.md) — 並行開発の 4 つの形、工程が動く単位、任せるうえでの下限
 - [references/approval-request.md](references/approval-request.md) — 承認を求めるときに提示するもの
+- [references/operation-run.md](references/operation-run.md) — `operation` の実行の範囲・記録・失敗したときの扱い

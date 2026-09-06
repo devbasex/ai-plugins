@@ -15,30 +15,34 @@
 #   R = 必須 / C = 条件付き / - = 対象外
 # 表のセルが `—` なら対象外、`任意` か丸括弧で条件を添えたものなら条件付き、
 # それ以外は必須である。食い違いは tests/test_workflow_stage_matrix.py が拾う。
-WF_MODES=$'light\tlegacy-refactor\tstandard'
-WF_STAGE_MATRIX=$'要求と受け入れ条件\tR\t-\tR
-作業場所の用意\tC\tR\tR
-設計\t-\tR\tR
-設計レビュー\t-\tC\tR
-計画\t-\tR\tR
-実装\tR\tR\tR
-構造改善\t-\tR\tR
-レビュー\tR\tR\tR
-完了判定\tR\tR\tR
-Pull Request\tR\tR\tR
-確定仕様化\t-\t-\tR
-後片付け\tR\tR\tR
-配布\tR\tR\tR
-リリース後テスト\t-\tR\tR
-振り返り\t-\tR\tR'
+WF_MODES=$'light\toperation\tlegacy-refactor\tstandard'
+WF_STAGE_MATRIX=$'要求と受け入れ条件\tR\tR\t-\tR
+作業場所の用意\tC\tC\tR\tR
+設計\t-\t-\tR\tR
+設計レビュー\t-\t-\tC\tR
+計画\t-\tR\tR\tR
+実装\tR\tR\tR\tR
+構造改善\t-\t-\tR\tR
+レビュー\tR\tR\tR\tR
+完了判定\tR\tR\tR\tR
+Pull Request\tR\tR\tR\tR
+確定仕様化\t-\tC\t-\tR
+後片付け\tR\tR\tR\tR
+配布\tR\tR\tR\tR
+リリース後テスト\t-\tC\tR\tR
+振り返り\t-\tC\tR\tR'
 
 # モードの高さ。**列の位置からは導かない**（決定 2-b）。`WF_MODES` の並びをそのまま
-# 高さにすると読みやすさのための並びが高さの根拠として読まれる。高さは「判定の手順」の
-# 表の並び（上のモードが勝つ）に合わせる。母集合が変わっても、列とは別に持てば
-# 高さの定義を直さずに済む。
+# 高さにすると読みやすさのための並びが高さの根拠として読まれる。母集合が変わっても、
+# 列とは別に持てば高さの定義を直さずに済む。
+#
+# **列の並びは高さと同じ順である**（決定 10）。表を軽い順に読めるようにするためであって、
+# 導出の根拠ではない。**判定の順序とも別である。** `operation` は判定では 1 番に来るが、
+# 高さは `light` の 1 つ上に置く（工程の重さが `light` と `legacy-refactor` の間にある）。
 WF_MODE_HEIGHT=$'light\t1
-legacy-refactor\t2
-standard\t3'
+operation\t2
+legacy-refactor\t3
+standard\t4'
 
 # 報告の引き金になる工程。ここへ進んだ時点で、記録の無い必須の工程を案内する。
 WF_REPORT_STAGE='配布'
@@ -98,11 +102,11 @@ wf_stage_class() {
   local mode="${1:-}" stage="${2:-}" column line name
   column=$(_wf_mode_column "$mode") || return 1
   while IFS= read -r line; do
-    IFS=$'\t' read -r name c1 c2 c3 <<<"$line"
+    IFS=$'\t' read -r name c1 c2 c3 c4 <<<"$line"
     [ "$name" = "$stage" ] || continue
     case "$column" in
       1) printf '%s\n' "$c1" ;; 2) printf '%s\n' "$c2" ;;
-      3) printf '%s\n' "$c3" ;;
+      3) printf '%s\n' "$c3" ;; 4) printf '%s\n' "$c4" ;;
     esac
     return 0
   done <<<"$WF_STAGE_MATRIX"
