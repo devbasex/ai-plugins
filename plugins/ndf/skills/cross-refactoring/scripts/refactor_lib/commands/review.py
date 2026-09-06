@@ -214,7 +214,7 @@ def _fix_merge_key(entry: dict[str, Any], result: pathlib.Path) -> str:
     - ファイルの更新時刻も使わない。粒度が環境によって違い、書き直しても同じ値に
       なりうる。
 
-    修正の前には必ず `judge-review` が走るので、そこで進めた試行番号が
+    修正の前には必ず `verify-round` が走るので、そこで進めた試行番号が
     **実行単位の識別子**になる。叩き直しただけなら番号は変わらない。
     """
     attempt = entry.get("fix_attempts", 0)
@@ -393,7 +393,7 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     # 結果ファイルの申告で済ませると、手順を満たさない変更が収束済みになれてしまう。
     baseline = state.get("baseline_test") or {}
     # 修正の範囲も**オーケストレータが記録した起点**から取る。起点は
-    # `judge-review` が変更要求を返したときの HEAD である。
+    # `verify-round` がテストの失敗を返したときの HEAD である。
     ordered_range = commits_in_range(work, entry.get("fix_base_sha"), head_now)
     if ordered_range is None:
         # **修正ラウンドは進める。** 進めないと `should-abandon` が見送りへ移る

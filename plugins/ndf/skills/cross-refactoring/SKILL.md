@@ -13,8 +13,9 @@ allowed-tools:
 
 # 多ランタイム・リファクタリング収束ループ
 
-**発見・適用・検証を別々のランタイムへ分担させ、指摘が尽きるまで回す。**
+**発見・適用・検証を別々のランタイムへ分担させ、新しい提案が出なくなるまで回す。**
 `/ndf:cross-review` がレビューを収束させるのと同じ発想で、リファクタリングを収束させる。
+**検証はテストが行う**（Step 5 でレビュー CLI は起動しない）。
 
 `refactoring` Skill は「テストで守りながら 1 手ずつ直す」手順を持つが、
 **何を直すかの発見**と**直した結果の他者検証**を持たない。この Skill がその 2 つを補う。
@@ -27,9 +28,9 @@ allowed-tools:
 詳細は `docs/` に、コマンドは `scripts/` に分けている。
 
 - [docs/01-state-and-propose.md](docs/01-state-and-propose.md) — Step 0〜3（初期化 / Skill 配置 / 提案 / マージ）
-- [docs/02-apply-and-review.md](docs/02-apply-and-review.md) — Step 4〜5（適用 / レビュー）
-- [docs/03-review-viewpoints.md](docs/03-review-viewpoints.md) — レビュー観点
-- [docs/04-fix-and-report.md](docs/04-fix-and-report.md) — Step 6〜8（修正 / 見送り / 収束 / 報告）
+- [docs/02-apply-and-review.md](docs/02-apply-and-review.md) — Step 4〜5（適用 / 検証）
+- [docs/03-review-viewpoints.md](docs/03-review-viewpoints.md) — Step 7 の `cross-review` へ渡すレビュー観点
+- [docs/04-fix-and-report.md](docs/04-fix-and-report.md) — Step 6〜8（修正 / 見送り / 最終ゲート / 報告）
 - [scripts/refactor.py](scripts/refactor.py) — 状態管理（uv 自己完結、標準ライブラリのみ）
 - [scripts/prepare-worktrees.sh](scripts/prepare-worktrees.sh) — 作業ディレクトリ準備と Skill 配置
 - [scripts/launch-cli.sh](scripts/launch-cli.sh) — フェーズごとのプロンプト組み立てと CLI 起動
@@ -60,17 +61,17 @@ allowed-tools:
 | 観点 | 方針 |
 | --- | --- |
 | 参加者 | **全員 CLI プロセス。** ホストのサブエージェント機能は使わない。ホストと同じランタイムが実装担当のラウンドでも別プロセスで起動する |
-| 役割の分離 | 提案・レビューは**ホストを除く 3 者**、適用は**参加する 4 者すべて**。両者は重なるが一致しない |
+| 役割の分離 | 提案は**ホストを除く 3 者**、適用は**参加する 4 者すべて**。両者は重なるが一致しない |
 | 検証の単位 | **適用ラウンド（群）に対して 1 回。** 判定は `--baseline-test` の合否で決まり、レビュー CLI は起動しない |
 | 収束しない項目 | **捨てる。** リファクタリングは任意の作業なので、揉める提案を Pull Request に残さない |
 | コミットの単位 | **1 適用ラウンド = 1 コミット。** テストも適用ラウンドの単位で 1 回だけ求める |
-| 改修計画 | **差分の中へ残す。** 理由と手順は提案の時点でしか残らない。公開の直前に進行側が書き出し、生成物の同期と同じコミットへ入れる |
+| 改修計画 | **Pull Request のコメント 1 件へ残す。** 理由と手順は提案の時点でしか残らない。ラウンドが進むたびに同じコメントを編集する。URL は永続で、マージの後も開ける。`--plan-file` を明示したときだけファイルにする |
 | 取り消しの単位 | **適用ラウンドごと。** 群の範囲を新しい順に全て戻す。既に検証を通った群は Pull Request に残る。**群の中は 1 コミットなので、1 件の失敗が群の全件を巻き込む** |
-| 範囲の扱い | `--scope` は**検証にも効く**。範囲外を触ったコミットを含む項目は失敗になる |
+| 範囲の扱い | `--scope` は**検証にも効く**。範囲外を触ったコミットを含む項目は失敗になる。**テストの置き場所を含めないと `init` が止める** |
 | 公開の責務 | **進行側だけが、検証を通した後に push する。** 実装担当は push しない。生成物の同期は `--sync-command` として push の直前に進行側が実行する |
 | 検証の情報源 | **git と実際のテスト実行。** 結果ファイルの申告は検証に使わない（書き換えるだけで通る検査にしない） |
-| 投稿 | **AI 自身が `gh api` で投稿する。** ホストの作業文脈に差分やレビュー本文を載せない |
-| 投稿の確認 | **申告された URL を GitHub 側と突き合わせる。** 投稿が届いていなければ差し戻す（取得できない場合は申告を採用） |
+| 外へ出す文章 | 項目は **`<ファイル>#<シンボル>` を併記**し、取り消しは**件数だけ**述べ（内訳は改修計画へ譲る）、改修計画は**生の URL**で書く |
+| 最終ゲート | **起動のされ方で変わる。** 単独なら `cross-review`、`development-workflow` の工程なら全体のテスト（`--ci-check` があれば継続的統合の結果） |
 | 状態の永続化 | `<work>/.cross_refactoring/cross-refactoring-rf<番号>-state.json` に集約。中断・再開可能 |
 | 計測 | 起動時にモデルを固定し、コミットのトレーラーとレビューコメントへ実行主体を残す |
 
@@ -92,7 +93,7 @@ allowed-tools:
 | `--severity-threshold LEVEL` | この重要度未満は採用しない | `minor` |
 | `--test-timeout SEC` | テスト 1 回あたりの上限秒数。超えたら失敗として扱う | `900` |
 | `--sync-command CMD` | 生成物を同期するコマンド。**push の直前**に進行側が実行し、差分があれば進行側のコミットとして積む | なし |
-| `--plan-file PATH` | 改修計画の書き出し先（**対象リポジトリからの相対パス**）。空文字を渡すと記録しない | `issues/refactoring-plan-rf<PR>.md` |
+| `--plan-file PATH` | 改修計画を**ファイル**へ書き出す先（**対象リポジトリからの相対パス**）。空文字を渡すと記録しない | Pull Request のコメント 1 件 |
 
 ```text
 /ndf:cross-refactoring 130 --scope src/services tests/services --baseline-test "pytest -q"
@@ -114,13 +115,13 @@ allowed-tools:
 
 | 母集合 | 定義 | 中身 |
 | --- | --- | --- |
-| 提案・レビュー（`runtimes`） | 全ランタイム − ホスト | 常に 3 者 |
+| 提案（`runtimes`） | 全ランタイム − ホスト | 常に 3 者 |
 | 適用（`impl_capable`） | 全ランタイム | 常に claude / codex / agy / kiro |
 
 - **適用から外す者はいない。** 4 者はいずれも NDF の配布先で、適用で読ませる
   `refactoring` / `tdd-cycle` / `quality-gates` を配っている
-- **ホストは適用にだけ参加する。** 提案とレビューから外れているので、
-  「実装した者と評価する者が同一モデルにならない」構造は保たれる
+- **ホストは適用にだけ参加する。** 提案から外れているので、
+  「実装した者と提案した者が同一モデルにならない」構造は保たれる
 - **適用担当は適用ラウンドごとに輪番を進める。** 1 つの提案ラウンドが複数の群を
   持てば、その分だけ輪番も進む。**`--max-outer-rounds` が切るのは提案の回数だけ**で、
   輪番の 1 周とは対応しない
@@ -160,35 +161,55 @@ allowed-tools:
 
 ## 全体フロー
 
+**ラウンドは 4 層である。** テスト整備ラウンドと提案ラウンドは、集める提案の中身が
+違うだけで、その先（適用ラウンド → 検証 → 修正ラウンド）はそのまま共有する。
+
 ```mermaid
 flowchart TD
-    Init([Step 0: 初期化 / 作業ディレクトリ / Skill 配置]):::phase --> Round
-    Round["提案ラウンド R 開始<br/>実装担当 1 : レビュー担当 2 を輪番で決める"]:::phase --> Propose
-    Propose["Step 2: 提案（3 CLI 並列）"]
-    Propose --> Merge["Step 3: 重複排除 / 優先度付け / 採否"]
-    Merge --> Empty{"採用件数 = 0 ?"}
-    Empty -->|はい| Final([提案ラウンドの繰り返しを終了]):::ok
-    Empty -->|いいえ| Apply
-    Apply["Step 4: 適用（実装担当 1 CLI）<br/>1 改善項目 = 1 コミット"]
-    Apply --> Review["Step 5: レビュー（2 CLI 並列）<br/>ラウンドの差分をまとめて 1 回"]
-    Review --> Judge{"2 者とも承認 ?"}
-    Judge -->|いいえ| Fix["Step 6: 指摘修正（実装担当）"]
-    Fix --> FixCap{"修正ラウンド上限 ?"}
-    FixCap -->|未達| Review
-    FixCap -->|到達| Abandon["指摘が残る項目だけ取り消す"]:::stop
-    Judge -->|はい| Done["このラウンドを完了とする"]
-    Abandon --> Round
-    Done --> Round
-    Final --> Gate["Step 7: /ndf:cross-review を PR 全体に実行"]
-    Gate --> Report["Step 8: 報告と Draft 解除"]
+    Init([Step 0〜1: 初期化 / 作業ディレクトリ / Skill 配置]):::phase --> T
+    T["テスト整備ラウンド T<br/>提案（3 CLI）→ 採否"]:::phase --> TE{"採用 0 件 ?"}
+    TE -->|いいえ| Split
+    TE -->|はい| R["提案ラウンド R<br/>提案（3 CLI）→ 採否"]:::phase
+    R --> RE{"採用 0 件 ?"}
+    RE -->|いいえ| Split
+    RE -->|はい| Gate{"Step 7: 起動のされ方"}
+    Split["Step 3: 適用ラウンドへ割り当てる<br/>書き換えるファイルが重ならない群へ"] --> Apply
+    Apply["Step 4: 適用（実装担当 1 CLI）<br/>1 適用ラウンド = 1 コミット"]
+    Apply --> Applied{"適用が通った ?"}
+    Applied -->|"いいえ（競合・対象が消えている）"| Drop
+    Applied -->|はい| Test{"Step 5: テストが通る ?"}
+    Test -->|いいえ| Fix["Step 6: 修正（実装担当）"]
+    Fix --> FixCap{"修正の上限 ?"}
+    FixCap -->|未達| Test
+    FixCap -->|到達| Drop["その適用ラウンドだけ取り消す"]:::stop
+    Test -->|はい| NextA{"残りの適用ラウンド ?"}
+    Drop --> NextA
+    NextA -->|ある| Apply
+    NextA -->|無い| Back{"どちらのラウンドから来たか"}
+    Back -->|テスト整備| TCap{"テスト整備の上限 ?"}
+    TCap -->|未達| T
+    TCap -->|到達| R
+    Back -->|提案| RCap{"提案の上限 ?"}
+    RCap -->|未達| R
+    RCap -->|到達| Gate
+    Gate -->|単独| CR["/ndf:cross-review<br/>（収束は cross-review が持つ）"]
+    Gate -->|工程の 1 つ| Whole["全体のテスト<br/>（--ci-check があれば継続的統合）"]
+    Whole --> Report["Step 8: 報告"]:::ok
+    CR --> Report
 
     classDef phase fill:#eef,stroke:#557
     classDef ok fill:#dfd,stroke:#383
     classDef stop fill:#fdd,stroke:#933
 ```
 
-**提案ラウンドの繰り返しの中にレビュー収束の繰り返しが入る**二段構造が、
-`cross-review` との最大の差である。
+**適用ラウンドと修正ラウンドは 1 組しかない。** 2 つのラウンドが共有するため、
+Step 4 以降の手順は種類によらず同じである。どちらを開くかは状態の `round_kind` が
+持ち、切り替えるのは `advance` である。
+
+**終了条件は収束と上限の 2 つである。** 採用が 0 件にならなくても、テスト整備
+ラウンドが `--max-test-rounds` に達したら提案ラウンドへ進み、提案ラウンドが
+`--max-outer-rounds` に達したら最終ゲートへ抜ける。**上限で抜けたことは報告に残る**
+（収束して終わったのか、歯止めで止まったのかを読み分けるため）。
 
 ## 実行
 
@@ -257,25 +278,33 @@ rf_eval() {
 
 rf_eval init "$PR" --scope $SCOPE \
         --baseline-test "$BASELINE" ${HOST:+--host "$HOST"} \
-        --max-outer-rounds "$MAX_OUTER" --max-fix-rounds "$MAX_FIX" \
-        --max-items-per-round "$MAX_ITEMS" $MODEL_ARGS
+        --max-test-rounds "$MAX_TEST" --max-outer-rounds "$MAX_OUTER" \
+        --max-fix-rounds "$MAX_FIX" --max-items-per-round "$MAX_ITEMS" \
+        ${CI_CHECK:+--ci-check "$CI_CHECK"} ${WORKFLOW_STEP:+--workflow-step} \
+        $MODEL_ARGS
 export CROSS_REFACTORING_TMP_DIR="$TMP_DIR"
 "$SCRIPTS/prepare-worktrees.sh" "$ID"
 
-while :; do                                   # 提案ラウンドの繰り返し
+# **1 つの繰り返しがテスト整備ラウンドと提案ラウンドの両方を回す。** どちらを開くかは
+# `start-round` が `ROUND_KIND` として返し、提案に使う雛形は `PROPOSE_PHASE` が持つ。
+# 切り替えの判定は `advance` が行うので、この繰り返しは種類で分岐しない。
+while :; do
   rf_eval start-round "$ID" || break          # 終了コード 1 = 繰り返し終了
   # **提案の直前に読み取り用を同期する。** 前ラウンドの取り消しで HEAD が進んで
   # いるため、同期しないと**消えたコードに対する提案**が返る（実測: 取り消しで
   # 消えた関数へ 2 件）。HEAD が変わっていなければ何も起きない。
   "$SCRIPTS/prepare-worktrees.sh" "$ID" sync "$(git -C "$WORK" rev-parse HEAD)"
   for a in $RUNTIMES; do
-    "$SCRIPTS/launch-cli.sh" "$a" propose "$ID" "$ROUND"
+    "$SCRIPTS/launch-cli.sh" "$a" "$PROPOSE_PHASE" "$ID" "$ROUND"
   done
   # 提案の所要は参加ランタイムと回線状況で振れる（実測 90〜285 秒）。既定の
-  # 打ち切りに任せず、明示する。
+  # 打ち切りに任せず、明示する。**結果ファイルの名前は種類で変えない**ので、
+  # 監視の雛形はテスト整備ラウンドでもそのまま使える。
   "$LIB/monitor.py" "$ID" --agents "$RUNTIMES_CSV" --tmp-dir "$TMP_DIR" \
       --stem-template "{agent}-propose-rf{id}-r$ROUND" --timeout 900
-  rf merge-proposals "$ID" || break            # 終了コード 2 = 採用 0 件
+  # 終了コード 2 = 構造改善の採用 0 件（繰り返しを終える）。テスト整備の採用 0 件は
+  # 終了ではないので 0 が返り、切り替えは `advance` が決める
+  rf merge-proposals "$ID" || break
   while :; do                                 # 適用ラウンドの繰り返し
     # 群と実装担当は状態が決める。輪番は群ごとに進む
     rf_eval next-apply-round "$ID" "$ROUND" || break   # 終了コード 1 = 群が尽きた
@@ -301,8 +330,23 @@ while :; do                                   # 提案ラウンドの繰り返�
   rf advance "$ID" || break
 done
 
+# Step 7: 最終ゲート。**起動のされ方で判定の相手が変わる。**
+while :; do
+  rf_eval final-gate "$ID"; gate=$?            # FINAL_GATE=... を返す
+  case $gate in
+    0) break ;;                                # 通過（または cross-review を実行する）
+    1) echo "⚠ 最終ゲートが通らないまま修正の上限に達しました" >&2; break ;;
+    2) "$SCRIPTS/launch-cli.sh" "$IMPL" fix "$ID" "$ROUND"
+       "$LIB/monitor.py" "$ID" --agents "$IMPL" --tmp-dir "$TMP_DIR" \
+           --stem-template "{agent}-fix-r$ROUND"
+       rf merge-fix "$ID" "$ROUND" ;;
+    *) exit $gate ;;
+  esac
+done
+# FINAL_GATE=cross-review のときだけ、続けて /ndf:cross-review "$PR" を実行する。
+
 # 生成物の同期は `--sync-command` として push の直前に進行側が実行済み。
-# ここで追加の作業は要らない。
+# 改修計画のコメントも同じ経路で更新済み。ここで追加の作業は要らない。
 ```
 
 ### 終了コード
@@ -312,15 +356,17 @@ done
 | 0 | 正常 | 続ける |
 | 1 | 繰り返しの終了（`start-round` / `advance`） | 抜ける |
 | 2 | 判定の結果（採用 0 件 / 適用ラウンドの取り消し / テストの失敗 など） | 各コマンドの表に従う |
-| **4** | **中断**（取り消しの失敗、認証切れ、範囲を確定できない、レビュー結果が無いまま差し戻し上限に達したなど） | **進行ごと止める** |
+| **4** | **中断**（取り消しの失敗、認証切れ、範囲を確定できない、`--scope` にテストの置き場所が無いなど） | **進行ごと止める** |
 
-出力を `eval` する呼び出し（`init` / `start-round` / `next-apply-round`）は `rf_eval` を使う。
+出力を `eval` する呼び出し（`init` / `start-round` / `next-apply-round` / `final-gate`）は
+`rf_eval` を使う。
 `eval "$(rf ...)"` と書くと `rf` はコマンド置換のサブシェルで動くため、`exit 4` は
 サブシェルしか終わらせず、外側の `eval` は空文字を評価して成功する。
 **中断したはずの進行がそのまま続く**ので、出力と終了コードは親シェルで受け取る。
 
-続けて **Step 7** で `/ndf:cross-review <PR>` を実行する。レビューはラウンド単位なので、
-**ラウンドを跨いだ整合はここで見る**。渡す観点の定型は
+**Step 7 は起動のされ方で分かれる。** `final-gate` が `FINAL_GATE=cross-review` を
+返したとき（単独起動）だけ、続けて `/ndf:cross-review <PR>` を実行する。検証はラウンド
+単位なので、**ラウンドを跨いだ整合はここで見る**。渡す観点の定型は
 [docs/04-fix-and-report.md](docs/04-fix-and-report.md) の Step 7 にある。収束したら
 Draft を解除し、`refactor.py report "$ID" --metrics` の出力を報告する。
 
@@ -330,9 +376,10 @@ Draft を解除し、`refactor.py report "$ID" --metrics` の出力を報告す�
 
 | してはいけないこと | なぜ |
 | --- | --- |
-| ホストのサブエージェントで適用する | ホストの作業文脈に差分が載り、実装者とレビュー担当の独立性が崩れる |
+| ホストのサブエージェントで適用する | ホストの作業文脈に差分が載り、提案した者と実装する者の独立性が崩れる |
 | `launch-cli.sh` に「ホストなら起動しない」分岐を入れる | ホストは適用担当として起動しうる。分岐はランタイム名だけで行う |
-| `--scope` を省く | 提案が発散し、Pull Request が肥大する |
+| `--scope` を省く | 提案が発散し、Pull Request が肥大する。**必須なので `init` が受け付けない** |
+| `--scope` にテストの置き場所を入れない | テスト整備ラウンドが足すテストが範囲外になる。**`init` が止める**（案内だけでは同じ失敗を繰り返す） |
 | 実装担当に生成物を同期させる | 範囲外の変更が生まれ、範囲の検査で全件失敗する。同期は `--sync-command` で進行側が行う |
 | 実装担当に push させる | 検証を通る前に公開され、取り消しの反映漏れが Pull Request に残る |
 | 生成物を同期するリポジトリで `--sync-command` を省く | pre-push の検査で**あらゆる push が落ちる**。実装担当が同期に手を出し、範囲違反で全件失敗する |
@@ -340,21 +387,23 @@ Draft を解除し、`refactor.py report "$ID" --metrics` の出力を報告す�
 | `--dry-run` の出力を実行結果と混同する | 確認用なので git も状態ファイルも触らない。進行は 1 歩も進まない |
 | 1 つの適用ラウンドを複数のコミットへ刻む | 取り消しの単位（適用ラウンド）とコミットの単位が食い違う。適用結果の検証で全件失敗になる |
 | 書き換えるファイルが重なる項目を同じ適用ラウンドへ入れる | 群の中を 1 コミットにできない。割り当ては `merge-proposals` が `path` だけで決める |
+| Step 5 でレビュー CLI を起動する | 判定はテストが行う。レビューは Step 7 か工程表の「レビュー」が 1 度だけ掛ける |
 | 実装担当に手ごとのテストを義務づける | 進行側も検証で回すため、テストの実行回数が膨らむ（実測 44 手で 88 回） |
 | 改修計画を状態ファイルにだけ残す | 状態ファイルは差分から除外される。Pull Request を読む側からは、なぜ直したのかも、どう直す計画だったのかも見えない |
+| 改修計画の URL を Markdown のリンクで書く | 読み手の画面から URL を取り出せない。**生の URL で書く** |
+| 取り消した項目の内訳を Pull Request の文章へ並べる | 同じ一覧が 2 か所になり、片方だけが古くなる。件数だけ述べ、内訳は改修計画へ譲る |
 | 結果ファイルの申告を検証の材料にする | 実装担当は報告する側。JSON を書き換えるだけで通る検査は機械検証ではない |
-| 投稿に失敗したまま結果ファイルを書かずに終了する | 進行側からは「レビュー担当が動かなかった」と区別が付かない。失敗したときほど `post_error` 付きの結果ファイルが要る |
-| レビューの指摘に項目 ID を付けない | 同上。差し戻して再レビューになる |
 | `git push --force` / `--no-verify` を使う | 他者の作業を消す。検証を飛ばす |
 | 実装担当のコミットでフックの通し方を決めない | 生成物の同期を検査するリポジトリでは、同期の禁止と両立せずコミットを作れなくなる。迂回してよい手段を 1 つ定める |
-| 提案とレビューにホストを混ぜる | 実装者と評価者が同一モデルになりうる。初期化時に検査して失敗させている |
+| 提案にホストを混ぜる | 提案した者と進行する者が同一の文脈になる。初期化時に検査して失敗させている |
 | kiro を既定モデルのまま計測する | `auto` は実際に選ばれたモデルを取得できない |
 | 提案フェーズでコードを直す | 提案は読むだけ。直すのは実装担当 1 者に集約する |
 
 ## 完了報告
 
-- ラウンド表（実装担当・レビュー担当とそれぞれのモデル、採用・適用・見送り・修正の件数）
-- 改善項目の表（対象・兆候・手法・提案元・状態・コミット数）
-- 見送った提案と、その理由
+- ラウンド表（種類・実装担当とそのモデル、採用・適用・見送り・修正の件数）
+- 改善項目の表（**`<ファイル>#<シンボル>`**・兆候・手法・提案元・状態・コミット数）
+- 見送った提案の**件数**と、**改修計画の生の URL**（内訳は改修計画にある）
+- **上限で抜けたのか収束して終わったのか**（終了理由とテスト整備の終わり方）
 - `--metrics` の集計と、**比較として読むときの限界**
-- `/ndf:cross-review` の収束結果
+- 最終ゲートの結果（`cross-review` の収束、または全体のテスト／継続的統合の合否）

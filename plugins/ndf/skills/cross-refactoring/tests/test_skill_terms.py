@@ -66,3 +66,45 @@ def test_the_defaults_match_the_implementation(refactor, skill):
         row = next(l for l in skill.splitlines() if l.startswith(f"| `{cap} N`"))
         assert f"`{default}`" in row, f"{cap} の既定が表と実装で食い違う"
     assert refactor.DEFAULT_MAX_TEST_ROUNDS == 2
+
+
+# ---------- 実行のコマンド列（A1 / B6） ----------
+
+def _run_block(text: str) -> str:
+    """「## 実行」の節にある bash のコード塊を返す。"""
+    lines = text.splitlines()
+    start = next(i for i, l in enumerate(lines) if l.startswith("## 実行"))
+    end = next((i for i, l in enumerate(lines[start + 1:], start + 1)
+                if l.startswith("## ")), len(lines))
+    return "\n".join(lines[start:end])
+
+
+def test_the_command_sequence_passes_the_propose_phase(skill):
+    """テスト整備ラウンドは `propose-tests` を起動する。
+
+    `propose` を直に書くと、テスト整備ラウンドでも構造改善のプロンプトが渡り、
+    ラウンドの種類が実行に反映されない。
+    """
+    block = _run_block(skill)
+    assert '"$PROPOSE_PHASE"' in block
+    assert 'launch-cli.sh" "$a" propose ' not in block
+
+
+def test_the_command_sequence_runs_the_final_gate(skill):
+    """B5 / B6 — Step 7 の分岐は `final-gate` が決める。"""
+    block = _run_block(skill)
+    assert "final-gate" in block
+    assert "FINAL_GATE" in block
+
+
+def test_the_command_sequence_passes_the_new_caps(skill):
+    block = _run_block(skill)
+    for flag in ("--max-test-rounds", "--ci-check", "--workflow-step"):
+        assert flag in block, f"実行のコマンド列に {flag} が無い"
+
+
+def test_the_command_sequence_does_not_launch_reviewers(skill):
+    """Step 5 はテストで判定する。**レビュー CLI は起動しない。**"""
+    block = _run_block(skill)
+    assert " review " not in block
+    assert "verify-round" in block

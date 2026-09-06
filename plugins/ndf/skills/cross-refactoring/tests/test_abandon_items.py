@@ -723,7 +723,7 @@ def test_identical_payload_in_a_later_round_still_counts(
     refactor.cmd_merge_fix(args)
 
     # 2 回目の起動。結果ファイルの内容は**まったく同じ**だが、その前に
-    # `judge-review` が走って試行番号が進んでいる
+    # `verify-round` が走って試行番号が進んでいる
     state = read_state(state_path)
     state["rounds"][0]["fix_attempts"] = state["rounds"][0].get("fix_attempts", 1) + 1
     state_path.write_text(__import__("json").dumps(state), encoding="utf-8")
