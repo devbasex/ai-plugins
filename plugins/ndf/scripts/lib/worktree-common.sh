@@ -593,6 +593,123 @@ _wt_scan_expanded_line() {
   done
 }
 
+# 本文の中の 1 行を処理する。終端の語に達したら `head` を進め、展開される本文の
+# コマンド置換だけを `out` へ足す。
+#
+# `head` / `out` / `delims` / `strips` / `expands` と `_WT_*` は呼び出し側
+# (`_wt_strip_heredocs`) の `local` を動的スコープで読み書きする。`_wt_scan_expanded_line`
+# と同じ持ち回り方で、グローバルへは残らない。
+_wt_strip_heredoc_body_line() {
+  local line="${1:-}" candidate="${1:-}"
+  if [ "${strips[head]}" = 1 ]; then
+    while [ "${candidate#	}" != "$candidate" ]; do candidate="${candidate#	}"; done
+  fi
+  if [ "$candidate" = "${delims[head]}" ]; then
+    head=$((head + 1))
+    _WT_SUBST=0
+    _WT_BACKTICK=0
+    _WT_ARITH=0
+    _WT_QUOTE=""
+    _WT_QSTACK=()
+    return 0
+  fi
+  # 展開される本文のコマンド置換は実行される。書き込みを見落とさないよう、
+  # 置換の始まりから終わりまでを残す。置換は複数行にまたがることがあるため、
+  # 深さを行をまたいで持ち越す。
+  if [ "${expands[head]}" = 1 ]; then
+    _wt_scan_expanded_line "$line"
+    if [ "$_WT_OPENED" = 1 ]; then out+="$_WT_SANITIZED"$'\n'; fi
+  fi
+}
+
+# 通常の行から、その行が開くヒアドキュメントの終端の語を集める。見つけた語は
+# `delims` / `strips` / `expands` の 3 つへ同じ添字で積む。
+#
+# 引用符の状態 (`quote`) は行をまたいで続くため、呼び出し側の `local` を動的
+# スコープで読み書きする。行ごとに初期化すると、複数行にわたる引用符の中の `<<` を
+# 本文の始まりとして数えてしまう。
+_wt_collect_heredoc_delims() {
+  local line="${1:-}" n i c delim strip quoted dq
+  n=${#line}
+  i=0
+  while [ "$i" -lt "$n" ]; do
+    c=${line:i:1}
+    # `\` は次の 1 文字をエスケープする。**シングルクォートの中を除く。**
+    # 引用符の中でも効くため、`quote` を見る前に読み飛ばす。見なければ
+    # `"` の中の `\"` を閉じ引用符と読み、その後の `<<` を本文の始まりとして
+    # 数えない（本文が残り、実行されない行の語を書き込み先として拾う）。
+    #
+    # ここは位置だけを見る走査なので、`"` の中でエスケープが効く相手が
+    # `$` `` ` `` `"` `\` と改行に限られることは結果を変えない。隠れる 1 文字が
+    # 引用符でも `<` でもなければ、読み飛ばしても読み進めても同じである。
+    if [ "$c" = '\' ] && [ "$quote" != "'" ]; then i=$((i + 2)); continue; fi
+    if [ -n "$quote" ]; then
+      [ "$c" = "$quote" ] && quote=""
+      i=$((i + 1))
+      continue
+    fi
+    case "$c" in
+      "'"|'"') quote="$c"; i=$((i + 1)); continue ;;
+    esac
+    if [ "${line:i:3}" = "<<<" ]; then
+      i=$((i + 3))
+      continue
+    fi
+    if [ "${line:i:2}" != "<<" ]; then
+      i=$((i + 1))
+      continue
+    fi
+    i=$((i + 2))
+    strip=0
+    if [ "${line:i:1}" = "-" ]; then strip=1; i=$((i + 1)); fi
+    while [ "${line:i:1}" = " " ] || [ "${line:i:1}" = $'\t' ]; do i=$((i + 1)); done
+    # 終端の語。引用符は書き方の違いで、語そのものには含まれない。
+    # 引用符を 1 つでも使えば、本文は展開されない。
+    # **引用符の中では区切りで切らない。** `<<"EOF X"` のように空白や記号を
+    # 含む語を、途中で切ると終端を見つけられない。
+    delim=""
+    quoted=0
+    dq=""
+    while [ "$i" -lt "$n" ]; do
+      c=${line:i:1}
+      if [ -n "$dq" ]; then
+        # `"` の中の `\"` は引用を閉じない。閉じたと読むと終端の語を取り違え、
+        # 本文の終わりを見つけられない（後続の命令まで本文として落とす）。
+        # 落とす `\` と残す `\` の別は `_wt_tokenize` と同じ。
+        # `'` の中では `\` は字面で、エスケープにならない。
+        if [ "$dq" = '"' ] && [ "$c" = '\' ] && [ -n "${line:i+1:1}" ]; then
+          case "${line:i+1:1}" in
+            '$'|'`'|'"'|'\') delim+="${line:i+1:1}" ;;
+            *) delim+="$c${line:i+1:1}" ;;
+          esac
+          i=$((i + 2))
+          continue
+        fi
+        if [ "$c" = "$dq" ]; then dq=""; else delim+="$c"; fi
+        i=$((i + 1))
+        continue
+      fi
+      case "$c" in
+        " "|$'\t'|";"|"|"|"&"|">"|"<") break ;;
+        "'"|'"') dq="$c"; quoted=1 ;;
+        # 引用符の外の `\` は次の 1 文字を字面にする。終端の語には `\` を
+        # 含めない (`<<E\OF` の終端は `EOF`)。展開は止まるため `quoted` を立てる。
+        '\')
+          quoted=1
+          if [ -n "${line:i+1:1}" ]; then delim+="${line:i+1:1}"; i=$((i + 1)); fi
+          ;;
+        *) delim+="$c" ;;
+      esac
+      i=$((i + 1))
+    done
+    if [ -n "$delim" ]; then
+      delims+=("$delim")
+      strips+=("$strip")
+      expands+=("$((1 - quoted))")
+    fi
+  done
+}
+
 # ヒアドキュメントの本文を落とす。本文はコマンドとして実行される部分ではないため、
 # 中の `>` や語を書き込み先として拾わない。引用符の中の `<<` と、行の入力を渡す
 # `<<<` は本文の始まりとして扱わない。
@@ -600,10 +717,14 @@ _wt_scan_expanded_line() {
 # **終端の語を引用符で囲まない形は本文を落とさない。** この形の本文はシェルが展開し、
 # 中のコマンド置換が実行される（`$(echo data > out.txt)` は out.txt を作る）。
 # 展開される本文のうち、コマンド置換を含む行だけを残す。
+#
+# ここが持つのは行の反復と 2 つの段の接続だけで、段の中身は
+# `_wt_strip_heredoc_body_line`（本文の中の 1 行）と
+# `_wt_collect_heredoc_delims`（通常の行からの終端の語の抽出）が持つ。
 _wt_strip_heredocs() {
   local text="${1:-}"
   local -a lines=() delims=() strips=() expands=()
-  local line candidate out="" n i c delim strip quoted dq
+  local line out=""
   # 展開される本文の中で、コマンド置換が続いているかを行をまたいで持つ。
   # 走査は _wt_scan_expanded_line が行う。`local` で宣言すると、bash の動的
   # スコープにより呼び出し先からも読み書きできる。グローバルへは残らない。
@@ -623,107 +744,10 @@ _wt_strip_heredocs() {
   for line in "${lines[@]+"${lines[@]}"}"; do
     # 本文の中では、終端の語が現れるまで読み飛ばす。
     if [ "$head" -lt "${#delims[@]}" ]; then
-      candidate="$line"
-      if [ "${strips[head]}" = 1 ]; then
-        while [ "${candidate#	}" != "$candidate" ]; do candidate="${candidate#	}"; done
-      fi
-      if [ "$candidate" = "${delims[head]}" ]; then
-        head=$((head + 1))
-        _WT_SUBST=0
-        _WT_BACKTICK=0
-        _WT_ARITH=0
-        _WT_QUOTE=""
-        _WT_QSTACK=()
-        continue
-      fi
-      # 展開される本文のコマンド置換は実行される。書き込みを見落とさないよう、
-      # 置換の始まりから終わりまでを残す。置換は複数行にまたがることがあるため、
-      # 深さを行をまたいで持ち越す。
-      if [ "${expands[head]}" = 1 ]; then
-        _wt_scan_expanded_line "$line"
-        if [ "$_WT_OPENED" = 1 ]; then out+="$_WT_SANITIZED"$'\n'; fi
-      fi
+      _wt_strip_heredoc_body_line "$line"
       continue
     fi
-
-    n=${#line}
-    i=0
-    while [ "$i" -lt "$n" ]; do
-      c=${line:i:1}
-      # `\` は次の 1 文字をエスケープする。**シングルクォートの中を除く。**
-      # 引用符の中でも効くため、`quote` を見る前に読み飛ばす。見なければ
-      # `"` の中の `\"` を閉じ引用符と読み、その後の `<<` を本文の始まりとして
-      # 数えない（本文が残り、実行されない行の語を書き込み先として拾う）。
-      #
-      # ここは位置だけを見る走査なので、`"` の中でエスケープが効く相手が
-      # `$` `` ` `` `"` `\` と改行に限られることは結果を変えない。隠れる 1 文字が
-      # 引用符でも `<` でもなければ、読み飛ばしても読み進めても同じである。
-      if [ "$c" = '\' ] && [ "$quote" != "'" ]; then i=$((i + 2)); continue; fi
-      if [ -n "$quote" ]; then
-        [ "$c" = "$quote" ] && quote=""
-        i=$((i + 1))
-        continue
-      fi
-      case "$c" in
-        "'"|'"') quote="$c"; i=$((i + 1)); continue ;;
-      esac
-      if [ "${line:i:3}" = "<<<" ]; then
-        i=$((i + 3))
-        continue
-      fi
-      if [ "${line:i:2}" != "<<" ]; then
-        i=$((i + 1))
-        continue
-      fi
-      i=$((i + 2))
-      strip=0
-      if [ "${line:i:1}" = "-" ]; then strip=1; i=$((i + 1)); fi
-      while [ "${line:i:1}" = " " ] || [ "${line:i:1}" = $'\t' ]; do i=$((i + 1)); done
-      # 終端の語。引用符は書き方の違いで、語そのものには含まれない。
-      # 引用符を 1 つでも使えば、本文は展開されない。
-      # **引用符の中では区切りで切らない。** `<<"EOF X"` のように空白や記号を
-      # 含む語を、途中で切ると終端を見つけられない。
-      delim=""
-      quoted=0
-      dq=""
-      while [ "$i" -lt "$n" ]; do
-        c=${line:i:1}
-        if [ -n "$dq" ]; then
-          # `"` の中の `\"` は引用を閉じない。閉じたと読むと終端の語を取り違え、
-          # 本文の終わりを見つけられない（後続の命令まで本文として落とす）。
-          # 落とす `\` と残す `\` の別は `_wt_tokenize` と同じ。
-          # `'` の中では `\` は字面で、エスケープにならない。
-          if [ "$dq" = '"' ] && [ "$c" = '\' ] && [ -n "${line:i+1:1}" ]; then
-            case "${line:i+1:1}" in
-              '$'|'`'|'"'|'\') delim+="${line:i+1:1}" ;;
-              *) delim+="$c${line:i+1:1}" ;;
-            esac
-            i=$((i + 2))
-            continue
-          fi
-          if [ "$c" = "$dq" ]; then dq=""; else delim+="$c"; fi
-          i=$((i + 1))
-          continue
-        fi
-        case "$c" in
-          " "|$'\t'|";"|"|"|"&"|">"|"<") break ;;
-          "'"|'"') dq="$c"; quoted=1 ;;
-          # 引用符の外の `\` は次の 1 文字を字面にする。終端の語には `\` を
-          # 含めない (`<<E\OF` の終端は `EOF`)。展開は止まるため `quoted` を立てる。
-          '\')
-            quoted=1
-            if [ -n "${line:i+1:1}" ]; then delim+="${line:i+1:1}"; i=$((i + 1)); fi
-            ;;
-          *) delim+="$c" ;;
-        esac
-        i=$((i + 1))
-      done
-      if [ -n "$delim" ]; then
-        delims+=("$delim")
-        strips+=("$strip")
-        expands+=("$((1 - quoted))")
-      fi
-    done
+    _wt_collect_heredoc_delims "$line"
     out+="$line"$'\n'
   done
 
