@@ -101,7 +101,8 @@ flowchart TD
 - [ ] A3. 適用ラウンドの分け方が、提案の時点で分かる情報だけで決まる
 - [ ] A4. 1 件の失敗が、その適用ラウンドの外の項目を取り消さない
 - [ ] A5. コミットの粒度が定まり、取り消しの単位と矛盾しない
-- [ ] A6. `--max-items-per-round` と `--max-outer-rounds` がどちらの単位に掛かるかが定まる
+- [ ] A6. 4 つの上限（`--max-items-per-round` / `--max-outer-rounds` / `--max-test-rounds` /
+      `--max-fix-rounds`）が、それぞれどのラウンドの単位に掛かるかが定まる
 
 ### B. 検証（変更 2 / 3 / 6）
 
