@@ -48,16 +48,12 @@ wf_merge_target() {
       3)
         [ -n "$num" ] && continue
         case "$tok" in
-          *[!0-9]*)
-            case "$tok" in
-              */pull/*)
-                rest=${tok##*/pull/}
-                rest=${rest%%/*}
-                case "$rest" in ''|*[!0-9]*) ;; *) num="$rest" ;; esac
-                ;;
-            esac
+          */pull/*)
+            rest=${tok##*/pull/}
+            rest=${rest%%/*}
+            case "$rest" in ''|*[!0-9]*) ;; *) num="$rest" ;; esac
             ;;
-          '') ;;
+          ''|*[!0-9]*) ;;
           *) num="$tok" ;;
         esac
         ;;
