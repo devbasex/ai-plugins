@@ -255,107 +255,11 @@ wt_relative_to_main() {
 
 # --- シェルコマンドからの書き込み先の推定 -----------------------------------
 
-# `case ... in` の段を進める。命令の位置にある `case` / `esac` だけを数え、
-# `case` の対象の後ろの `in` だけが見出しの位置を開く。`echo case` の `case` は
-# 入口として数えない。
-#
-# 命令の位置の一覧には**予約語の後ろも入れる**。`then` / `else` / `do` の直後に
-# `case` を置く形は普通にあり、数えないと見出しを閉じた `)` が
-# `__WT_CASE_END__` にならず、枝の中の `cd` が追跡から漏れる。呼び出し側
-# (`wt_extract_write_target`) の `at_cmd` が同じ予約語を挙げているのと揃える。
-#
-# `case_depth` / `case_state` は呼び出し側 (`_wt_tokenize`) の `local` を動的
-# スコープで読み書きする。
-_wt_tokenize_case_transition() {
-  local w="$1" prev_out="$2"
-  case "$w" in
-    case|esac)
-      case "$prev_out" in
-        ""|__WT_SEP__|__WT_CASE_FALL__|__WT_SUBSHELL_END__|__WT_CASE_END__|"|"|"|&"|"&"\
-        |"&&"|"||"|"("|"{"|if|elif|then|else|while|until|do|"!"|time)
-          if [ "$w" = case ]; then
-            case_state[case_depth]=want_in
-            case_depth=$((case_depth + 1))
-          elif [ "$case_depth" -gt 0 ]; then
-            case_depth=$((case_depth - 1))
-          fi
-          ;;
-      esac
-      ;;
-    in)
-      # `case` の対象の後ろの `in` だけが見出しの位置を開く。枝の中の
-      # `for x in ...` の `in` は、その段が既に見出しを通っているため効かない。
-      if [ "$case_depth" -gt 0 ] && [ "${case_state[case_depth - 1]}" = want_in ]; then
-        case_state[case_depth - 1]=want_pattern
-      fi
-      ;;
-  esac
-}
-
-# `\` の 1 つを処理する。**シングルクォートの中では呼ばない。** 中では `\` も
-# 字面で、閉じる `'` を隠さない (`'a\'` は `a\`)。実測で確かめた。
-#
-# 見なければ `"` の中の `\"` を閉じ引用符と読み、残りをまるごと 1 語へ吸い込む
-# （検知漏れ）。引用符の外では `\ ` を区切り、`\)` を部分シェルの終わりと読む
-# （語の取り違えと誤検知）。
-#
-# `cur` は呼び出し側の `local` を動的スコープで更新し、読み飛ばす添字の増分は
-# `_WT_TOK_ADVANCE` へ置く。
-_wt_tokenize_escape() {
-  local c="$1" esc="$2" quote="$3"
-  _WT_TOK_ADVANCE=1
-  # 文字列の末尾の `\` はエスケープする相手がいない。字面のまま残す。
-  if [ -z "$esc" ]; then cur+="$c"; _WT_TOK_ADVANCE=0; return 0; fi
-  # `\` + 改行は行継続で、両方が消える。命令の区切りにもならない。
-  if [ "$esc" = $'\n' ]; then return 0; fi
-  if [ -n "$quote" ]; then
-    # **`"` の中で `\` がエスケープとして働く相手は限られる。** `$` `` ` ``
-    # `"` `\` と改行だけで、それ以外の前では `\` が文字として残る
-    # (`"a\nb"` は `a\nb`、`"a\\b"` は `a\b`。実測で確かめた)。語の
-    # 区切りは変わらないが、語そのものが書き込み先のパスになるため、
-    # 落とす `\` と残す `\` を分けないと実在しない位置を案内する。
-    case "$esc" in
-      '$'|'`'|'"'|'\') cur+="$esc" ;;
-      *) cur+="$c$esc" ;;
-    esac
-    return 0
-  fi
-  # 引用符の外では次の 1 文字がそのまま語の一部になる。`\ ` の空白は
-  # 区切りにならず、`\(` `\)` は部分シェルの入口・終わりにならない。
-  cur+="$esc"
-}
-
-# `|` と `&` の位置で、演算子として切り出す語を決めて `_WT_TOK_OP` へ置く。
-# 切り出さないときは空にする。`out` への追加と添字の更新は呼び出し側が行う。
-#
-# `cur` と `out` は呼び出し側の `local` を動的スコープで読み書きする。
-_wt_tokenize_operator() {
-  local c="$1" pair="$2" last=""
-  ((${#out[@]} > 0)) && last=${out[${#out[@]} - 1]}
-  _WT_TOK_OP=""
-  # `>&2` `2>&1` `3<&0` の `&` はファイル記述子の複製であって、背景実行の
-  # 演算子ではない。切ると後続が別のコマンドに見え、`cd` の効果を落とす。
-  # 直前が `<` か、`>` の置き換えの印のときは字面のまま繋げる。
-  if [ "$c" = "&" ] && { [ "${cur: -1}" = "<" ] ||
-    { [ -z "$cur" ] &&
-      { [ "$last" = "__WT_REDIR__" ] || [ "$last" = "__WT_APPEND__" ]; }; }; }; then
-    cur+="$c"
-    return 0
-  fi
-  # 長い演算子を先に見る。`&&` を `&` 2 つに割ると、同じシェルで続く並びが
-  # 背景実行 2 つになって意味が変わる。
-  _WT_TOK_OP="$c"
-  case "$pair" in
-    "&&"|"||"|"|&") _WT_TOK_OP="$pair" ;;
-  esac
-}
-
 # シェルの語分割を、引用符を解釈しながら行う。1 行 1 語で出力する。
 # `sed -i 's/a b/c/' f` のように引用符の中へ空白を含む形を 1 語として扱うため、
 # 単純な空白区切りでは足りない。
 _wt_tokenize() {
-  local s="${1:-}" n i c quote="" cur="" last rest
-  local _WT_TOK_ADVANCE=0 _WT_TOK_OP=""
+  local s="${1:-}" n i c quote="" cur="" op last rest esc
   n=${#s}
   local -a out=()
   # 部分シェルの入口として切り出した `(` のうち、まだ閉じていない数。
@@ -376,21 +280,70 @@ _wt_tokenize() {
     [ "${case_state[case_depth - 1]}" = want_pattern ] || return 1
     return 0
   }
-  # 語を 1 つ出力し、`case` の段を進める。段の進め方は
-  # `_wt_tokenize_case_transition` が持つ。
+  # 語を 1 つ出力し、`case` の段を進める。`case` と `esac` を数えるのは命令の
+  # 位置にあるときだけで、`echo case` の `case` は入口として数えない。
+  #
+  # 命令の位置の一覧には**予約語の後ろも入れる**。`then` / `else` / `do` の直後に
+  # `case` を置く形は普通にあり、数えないと見出しを閉じた `)` が
+  # `__WT_CASE_END__` にならず、枝の中の `cd` が追跡から漏れる。呼び出し側
+  # (`wt_extract_write_target`) の `at_cmd` が同じ予約語を挙げているのと揃える。
   _tok_emit() {
     local w="$1" prev_out=""
     ((${#out[@]} > 0)) && prev_out=${out[${#out[@]} - 1]}
-    _wt_tokenize_case_transition "$w" "$prev_out"
+    case "$w" in
+      case|esac)
+        case "$prev_out" in
+          ""|__WT_SEP__|__WT_CASE_FALL__|__WT_SUBSHELL_END__|__WT_CASE_END__|"|"|"|&"|"&"\
+          |"&&"|"||"|"("|"{"|if|elif|then|else|while|until|do|"!"|time)
+            if [ "$w" = case ]; then
+              case_state[case_depth]=want_in
+              case_depth=$((case_depth + 1))
+            elif [ "$case_depth" -gt 0 ]; then
+              case_depth=$((case_depth - 1))
+            fi
+            ;;
+        esac
+        ;;
+      in)
+        # `case` の対象の後ろの `in` だけが見出しの位置を開く。枝の中の
+        # `for x in ...` の `in` は、その段が既に見出しを通っているため効かない。
+        if [ "$case_depth" -gt 0 ] && [ "${case_state[case_depth - 1]}" = want_in ]; then
+          case_state[case_depth - 1]=want_pattern
+        fi
+        ;;
+    esac
     out+=("$w")
   }
   for ((i = 0; i < n; i++)); do
     c=${s:i:1}
-    # `\` は次の 1 文字をエスケープする。**シングルクォートの中を除く。**
-    # 処理は `_wt_tokenize_escape` が持ち、読み飛ばす添字の増分だけを受け取る。
+    # `\` は次の 1 文字をエスケープする。**シングルクォートの中を除く。** 中では
+    # `\` も字面で、閉じる `'` を隠さない (`'a\'` は `a\`)。実測で確かめた。
+    #
+    # 見なければ `"` の中の `\"` を閉じ引用符と読み、残りをまるごと 1 語へ吸い
+    # 込む（検知漏れ）。引用符の外では `\ ` を区切り、`\)` を部分シェルの終わり
+    # と読む（語の取り違えと誤検知）。
     if [ "$c" = '\' ] && [ "$quote" != "'" ]; then
-      _wt_tokenize_escape "$c" "${s:i+1:1}" "$quote"
-      i=$((i + _WT_TOK_ADVANCE))
+      esc=${s:i+1:1}
+      # 文字列の末尾の `\` はエスケープする相手がいない。字面のまま残す。
+      if [ -z "$esc" ]; then cur+="$c"; continue; fi
+      # `\` + 改行は行継続で、両方が消える。命令の区切りにもならない。
+      if [ "$esc" = $'\n' ]; then i=$((i + 1)); continue; fi
+      if [ -n "$quote" ]; then
+        # **`"` の中で `\` がエスケープとして働く相手は限られる。** `$` `` ` ``
+        # `"` `\` と改行だけで、それ以外の前では `\` が文字として残る
+        # (`"a\nb"` は `a\nb`、`"a\\b"` は `a\b`。実測で確かめた)。語の
+        # 区切りは変わらないが、語そのものが書き込み先のパスになるため、
+        # 落とす `\` と残す `\` を分けないと実在しない位置を案内する。
+        case "$esc" in
+          '$'|'`'|'"'|'\') cur+="$esc" ;;
+          *) cur+="$c$esc" ;;
+        esac
+      else
+        # 引用符の外では次の 1 文字がそのまま語の一部になる。`\ ` の空白は
+        # 区切りにならず、`\(` `\)` は部分シェルの入口・終わりにならない。
+        cur+="$esc"
+      fi
+      i=$((i + 1))
       continue
     fi
     if [ -n "$quote" ]; then
@@ -452,13 +405,26 @@ _wt_tokenize() {
       # （次のコマンドの `c` を複製先として拾う）。`>` と `>>` は呼び出し側が
       # 印へ置き換えるため、ここには現れない。
       "|"|"&")
-        # 切り出す語を決めるのは `_wt_tokenize_operator` で、空のときは
-        # ファイル記述子の複製として `cur` へ繋がっている。
-        _wt_tokenize_operator "$c" "${s:i:2}"
-        [ -n "$_WT_TOK_OP" ] || continue
+        last=""
+        ((${#out[@]} > 0)) && last=${out[${#out[@]} - 1]}
+        # `>&2` `2>&1` `3<&0` の `&` はファイル記述子の複製であって、背景実行の
+        # 演算子ではない。切ると後続が別のコマンドに見え、`cd` の効果を落とす。
+        # 直前が `<` か、`>` の置き換えの印のときは字面のまま繋げる。
+        if [ "$c" = "&" ] && { [ "${cur: -1}" = "<" ] ||
+          { [ -z "$cur" ] &&
+            { [ "$last" = "__WT_REDIR__" ] || [ "$last" = "__WT_APPEND__" ]; }; }; }; then
+          cur+="$c"
+          continue
+        fi
+        # 長い演算子を先に見る。`&&` を `&` 2 つに割ると、同じシェルで続く並びが
+        # 背景実行 2 つになって意味が変わる。
+        op="$c"
+        case "${s:i:2}" in
+          "&&"|"||"|"|&") op=${s:i:2} ;;
+        esac
         if [ -n "$cur" ]; then _tok_emit "$cur"; cur=""; fi
-        out+=("$_WT_TOK_OP")
-        i=$((i + ${#_WT_TOK_OP} - 1))
+        out+=("$op")
+        i=$((i + ${#op} - 1))
         ;;
       # `(` は部分シェルを開く。語の頭にあるときだけ入口として切り出す。
       # 途中に現れる `(` は展開・関数定義・配列の代入の一部で、部分シェルでは
