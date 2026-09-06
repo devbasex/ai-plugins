@@ -124,7 +124,7 @@
 
 | 兆候 | 手法 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| long_method | extract_method | major | agy / kiro | レビュー中 | 1 |
+| long_method | extract_method | major | agy / kiro | 採用 | 1 |
 
 **なぜ**: 1 関数が (1) 控えの読み取り (2) frontier までの各工程を present/missing/conditional へ分類する走査 (3) 見出し・記録あり/なし/条件付き・案内文の整形 の 3 段を通しで行う。分類の走査は wf_stage_class を呼びつつ 3 本の配列へ振り分ける独立した段で、既に隣接する _wf_missing_before_pr が同型の走査を別関数へ切り出しており、この関数だけが走査と整形を同居させている。
 
@@ -165,7 +165,7 @@
 
 | 兆候 | 手法 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| deep_nesting | flatten_conditional | minor | agy | レビュー中 | 1 |
+| deep_nesting | flatten_conditional | minor | agy | 採用 | 1 |
 
 **なぜ**: wf_merge_target の state 3 処理において、case "$state" in 3) の直下に case "$tok" in *[!0-9]*) と case "$tok" in */pull/*) の 3 段の case 文が入れ子になっており、正常系である数値トークン判定や URL からの番号抽出の条件分岐が深くネストしている。例外条件やパターンを平坦化してネストを浅くできる。
 
@@ -176,7 +176,7 @@
 
 | 兆候 | 手法 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| duplication | consolidate_duplication | minor | kiro | レビュー中 | 1 |
+| duplication | consolidate_duplication | minor | kiro | 採用 | 1 |
 
 **なぜ**: git の remote.origin.url を <所有者>/<リポジトリ> へ畳む同じ規則（slug=${url%.git}; slug=${slug%/}; slug=${slug##*:} と owner/repo への分解、owner=${owner##*/} まで）が closing-issues.sh のインラインブロックと workflow-common.sh の wf_repo_slug に二重にある。URL の形（git@ / https / 末尾スラッシュ）への対応が変わると片方だけ直され、閉じる先の解決とリポジトリ判定で挙動が食い違う。ただし closing-issues.sh は独立実行を保つ設計（bash 副プロセスとして起動される）のため、共通化は共有ライブラリの source という結合を持ち込む点に注意が要る。
 
@@ -184,3 +184,70 @@
 2. wf_repo_slug をその関数への委譲に置き換える
 3. closing-issues.sh の DEFAULT_REPO 決定ブロックを同じ関数の呼び出しへ置き換える。独立実行の契約を壊さないよう、読み込み失敗時は現状どおり DEFAULT_REPO を空のまま進める分岐を残す
 4. closing-issues.sh の現状固定テスト（plugins/ndf/skills/merged/tests/closing_issues_helpers.py 経由）と wf_repo_slug を通る stage-check.sh 系の統合テストを実行し、slug 解決結果が不変であることを確認する。テストの置き場所が対象範囲外（skills/merged/tests）にあるため、共通化のコミットに合わせて --scope へ含める必要がある
+
+## ラウンド 4（実装 claude / レビュー codex / kiro）
+
+### R4-001 — `plugins/ndf/scripts/lib/post_queue.py#request_for`
+
+| 兆候 | 手法 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| conditional_chain | replace_with_lookup_table | major | agy / kiro | レビュー中 | 1 |
+
+**なぜ**: kind ごとの分岐 4 本（pr-comment / review-post / review-reply / thread-resolve）が if の連鎖で並び、各枝が {request, match} を組み立てる。同じ kind 判定は send()（method 分岐）や posted_match()（除外済み）でも繰り返され、種別を増やすと複数箇所を直す必要がある。未知の種別だけが末尾で ValueError になり、対応表としての網羅が制御構文に埋もれている。既存テスト（cross-review/tests/test_state_queue.py の request_for 3 件）が振る舞いを固定している。
+
+**手順**: 1. kind -> 組み立て関数の対応表 _REQUEST_BUILDERS を定義する（値は (repo, pr, fields) を受けて {request, match} を返す小関数）
+2. 現在の各 if 枝の中身を、対応する枝ごとの builder 関数へそのまま移す（int 変換・commit_id/comments の条件付き付与も枝内に保つ）
+3. request_for 本体を builder = _REQUEST_BUILDERS.get(kind) の 1 度の参照へ置き換え、未知なら従来と同じ ValueError(f"未知の種別: {kind}") を上げる
+4. 既存テスト（request_for 3 件と flush 系）を実行し、request/match の形が変わっていないことを確認する
+
+### R4-002 — `plugins/ndf/scripts/lib/worktree-common.sh#_wt_strip_heredocs`
+
+| 兆候 | 手法 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_method | split_into_pipeline | major | codex | 取り消し | 1 |
+
+**なぜ**: ヒアドキュメント本文の読み飛ばし、展開される本文の走査、通常行からの終端語抽出、引用符付き終端の判定が 1 つの処理に直列で埋まり、段階ごとの入出力が見えにくい
+
+**手順**: 1. 変更前に _wt_strip_heredocs を直接通す現状固定テストを追加し、引用符付き終端・<<-・<<<・展開される本文内のコマンド置換を固定する
+2. 本文中の 1 行処理を _wt_strip_heredoc_body_line として分け、更新後の head と out を返す
+3. 通常行から heredoc 宣言を集める処理を _wt_collect_heredoc_delims へ分ける
+4. _wt_strip_heredocs は lines の反復と各段の接続だけを担う形へ縮める
+5. 既存の書き込み先抽出テストと追加した現状固定テストを実行する
+
+### R4-003 — `plugins/ndf/scripts/lib/worktree-common.sh#_wt_tokenize`
+
+| 兆候 | 手法 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_method | extract_method | major | codex | 取り消し | 1 |
+
+**なぜ**: 1 関数の中にエスケープ処理・引用符処理・case 見出しの状態遷移・演算子切り出し・部分シェル判定が同居し、局所関数と多数の状態変数を共有している
+
+**手順**: 1. 変更前に _wt_tokenize を直接通す現状固定テストを追加し、引用符・case 見出し・部分シェル・演算子の代表入力を固定する
+2. case_depth と case_state の更新だけを _wt_tokenize_case_transition へ抽出する
+3. バックスラッシュ処理を _wt_tokenize_escape へ抽出し、更新後の cur と添字増分を明示的に返す
+4. 演算子切り出しを _wt_tokenize_operator へ抽出し、out への追加と添字更新を呼び出し側で行う
+5. 既存の書き込み先抽出テストと追加した現状固定テストを実行する
+
+### R4-004 — `plugins/ndf/scripts/lib/models.py#is_measurable`
+
+| 兆候 | 手法 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| dead_code | remove_dead_code | minor | codex | 取り消し | 0 |
+
+**なぜ**: 関数本体に同じ文字列リテラルが 2 回連続しており、2 つ目は docstring ではなく実行時に評価されるだけの到達可能な no-op 文になっている
+
+**手順**: 1. is_measurable の戻り値が separation_reason の有無だけで決まる現状固定テストを追加する
+2. 2 つ目の重複した文字列リテラルだけを削除する
+3. models.py を通る metrics の集計テストと追加した現状固定テストを実行する
+
+### R4-005 — `plugins/ndf/skills/development-workflow/scripts/lib/workflow-common.sh#wf_json_escape`
+
+| 兆候 | 手法 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| one_by_one_iteration | replace_with_bulk_operation | minor | agy | レビュー中 | 1 |
+
+**なぜ**: JSON 文字列エスケープにおいて、文字列長を取得して for (( i = 0; i < len; i++ )) で 1 文字ずつ ${s:i:1} を取り出し、case 分岐でエスケープ文字を判定して out+="$ch" と逐次連結している。これは典型的な one_by_one_iteration であり、長いテキストに対して bash の部分文字列抽出と文字列結合の反復オーバーヘッドがかさむ。bash のパターン置換パラメータ展開（${s//.../...}）による一括置換操作へ置き換えることで、反復ループと文字単位の分岐を排除し、簡潔かつ高速な一括処理にできる。
+
+**手順**: 1. wf_json_escape 内の 1 文字単位の for ループを、bash のパラメータ展開（バックスラッシュ、ダブルクォート、改行、タブ、復帰）による一括置換に置き換える
+2. 置換後の文字列を一括で出力する
+3. tests/test_workflow_guard.py を実行し、マージ拒否理由や追加コンテキストの JSON エスケープ出力が既存と完全に一致することを確認する
