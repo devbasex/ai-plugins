@@ -65,6 +65,14 @@ _wt_read_lines() {
   done
 }
 
+_wt_read_words() {
+  WT_WORDS=()
+  local word
+  while IFS= read -r -d '' word; do
+    WT_WORDS+=("$word")
+  done
+}
+
 # --- 位置の解決 -------------------------------------------------------------
 
 # `base` を起点に相対パスを実体の絶対パスへ直す。存在しなければ 1 を返す。
@@ -757,6 +765,55 @@ _wt_is_not_target() {
   return 1
 }
 
+prepare_write_target_words() {
+  local cmd="${1:-}" spaced wi
+  local -a words=() kept=()
+
+  cmd=$(_wt_strip_heredocs "$cmd")
+  spaced=${cmd//&&/__WT_ANDAND__}
+  spaced=${spaced//&>>/ __WT_APPEND__ }
+  spaced=${spaced//&>/ __WT_REDIR__ }
+  spaced=${spaced//__WT_ANDAND__/"&&"}
+  spaced=${spaced//>>/ __WT_APPEND__ }
+  spaced=${spaced//>/ __WT_REDIR__ }
+
+  _wt_read_lines < <(_wt_tokenize "$spaced")
+  words=("${WT_LINES[@]+"${WT_LINES[@]}"}")
+
+  for ((wi = 0; wi < ${#words[@]}; wi++)); do
+    case "${words[wi]}" in
+      *[!0-9]*|"") kept+=("${words[wi]}"); continue ;;
+    esac
+    case "${words[wi + 1]:-}" in
+      __WT_REDIR__|__WT_APPEND__) continue ;;
+    esac
+    kept+=("${words[wi]}")
+  done
+  printf '%s\0' "${kept[@]+"${kept[@]}"}"
+}
+
+resolve_redirection_target() {
+  local index="$1" p nx rest dest="" end
+  shift
+  local -a words=("$@")
+  p=$((index + 1))
+  end=$p
+  nx=${words[p]:-}
+  case "$nx" in
+    "&") end=$((p + 1)); dest=${words[p + 1]:-} ;;
+    "&"*)
+      rest=${nx#&}
+      case "$rest" in
+        "-") ;;
+        *[!0-9]*) dest=$rest ;;
+        *) ;;
+      esac
+      ;;
+    *) dest=$nx ;;
+  esac
+  printf '%s\t%s\n' "$dest" "$end"
+}
+
 # シェルコマンドの文字列から書き込み先を 1 行 1 件で出力する。
 # 対象は直接の書き換え (sed -i)・出力の付け替え (> / >>)・標準入力からの
 # 書き出し (tee)・複製と移動 (cp / mv) の 4 形式に限る。推定できなければ 1 を返す。
@@ -840,59 +897,9 @@ wt_extract_write_target() {
   # ため、命令の位置にこの名前が現れたら相対パスを出さない（決定 3）。
   local func_moving="|"
 
-  # ヒアドキュメントの本文を先に落とす。落とす前に印を挟むと、本文の中の `>` が
-  # 出力の付け替えとして数えられる。
-  cmd=$(_wt_strip_heredocs "$cmd")
-
-  # `>path` のように空白の無い形を語へ分けるため、先に印を挟む。
-  #
-  # `&>` と `&>>` は、標準出力と標準エラーをまとめて 1 つのファイルへ向ける形
-  # である（`&>>` は追記）。`&` は背景実行の演算子ではない。`>` だけを置き換えると
-  # `&` が演算子として残り、現在地が処理のまとまりの入口へ戻る
-  # （`cd a && echo hi &> f` の `f` を移動前の位置で解決してしまう）。
-  # `>` より先に、まとめて 1 つの印へ置き換える。
-  #
-  # 置き換えの前に `&&` を退避する。`cmd&&>f` は `&&` と `>` だが、字面では `&`
-  # と `>` が隣り合うため、退避しないと `&>` として拾い、残った `&` が背景実行の
-  # 演算子になる。退避は字面をそのまま戻すため、引用符の中の語も変わらない。
-  local spaced=${cmd//&&/__WT_ANDAND__}
-  spaced=${spaced//&>>/ __WT_APPEND__ }
-  spaced=${spaced//&>/ __WT_REDIR__ }
-  # 戻すときは置換の字面を引用符で囲む。bash 5.2 以降は置換文字列の裸の `&` が
-  # 「一致した部分」を指すため、囲まないと `&&` が `__WT_ANDAND__` 2 つへ戻る。
-  spaced=${spaced//__WT_ANDAND__/"&&"}
-  spaced=${spaced//>>/ __WT_APPEND__ }
-  spaced=${spaced//>/ __WT_REDIR__ }
-
   local -a words=()
-  _wt_read_lines < <(_wt_tokenize "$spaced")
-  words=("${WT_LINES[@]+"${WT_LINES[@]}"}")
-
-  # リダイレクトの印の直前にある、すべて数字の語を並びから外す。`2>&1` の `2` は
-  # ファイル記述子の番号であって、開かれるファイルの名前ではない。残すと番号を
-  # 書き込み先として案内するうえ、`cp` / `mv` は最後の被演算子を宛先とするため、
-  # 本来の宛先がその位置を奪われて出なくなる。
-  #
-  # **落とすのは語へ切り分けた後である。** 印への置き換えは引用符を見ないため、
-  # その前に数字を落とすと引用符の中の字面まで書き換わる（`cp a "x 2>&1"` の
-  # 宛先は `x 2>&1` という名前のファイルで、番号は名前の一部である）。
-  #
-  # すべて数字の語だけを落とす。`cat file2>log` の `file2` は語であって番号では
-  # なく、bash も `log` だけを開く（実測）。逆に `cp a 2 >f` の `2` は名前が
-  # すべて数字のファイルだが、印への置き換えが番号と `>` の間の空白を消すため
-  # 見分けられない。取り逃がす側へ倒す。
-  local -a kept=()
-  local wi
-  for ((wi = 0; wi < ${#words[@]}; wi++)); do
-    case "${words[wi]}" in
-      *[!0-9]*|"") kept+=("${words[wi]}"); continue ;;
-    esac
-    case "${words[wi + 1]:-}" in
-      __WT_REDIR__|__WT_APPEND__) continue ;;
-    esac
-    kept+=("${words[wi]}")
-  done
-  words=("${kept[@]+"${kept[@]}"}")
+  _wt_read_words < <(prepare_write_target_words "$cmd")
+  words=("${WT_WORDS[@]+"${WT_WORDS[@]}"}")
 
   local n=${#words[@]} i j w target found=0 prev="" at_cmd=0 dest="" k cmd_prefix=0 cd_end_of_options=0
   # `command` / `builtin` の被演算子を命令の位置として数えている間だけ 1。
@@ -927,26 +934,9 @@ wt_extract_write_target() {
   # ため実際には開かれないが、印へ置き換えた後は `echo 2 >& file` と字面が
   # 同じになり区別できない。案内が多めに出る側へ倒し、書き込み先として扱う。
   _redir_target() {
-    local p=$(($1 + 1)) nx rest
-    _WT_REDIR_DEST=""
-    _WT_REDIR_END=$p
-    nx=${words[p]:-}
-    case "$nx" in
-      # `>& file` の `&`。語として切れているときはファイル名が次の語にある。
-      "&") _WT_REDIR_END=$((p + 1)); _WT_REDIR_DEST=${words[p + 1]:-} ;;
-      "&"*)
-        rest=${nx#&}
-        case "$rest" in
-          # `>&-` は記述子を閉じる。
-          "-") ;;
-          # 数字以外を含むならファイル名である。
-          *[!0-9]*) _WT_REDIR_DEST=$rest ;;
-          # 数字だけなら記述子の複製である。
-          *) ;;
-        esac
-        ;;
-      *) _WT_REDIR_DEST=$nx ;;
-    esac
+    local out
+    out=$(resolve_redirection_target "$1" "${words[@]}")
+    IFS=$'\t' read -r _WT_REDIR_DEST _WT_REDIR_END <<<"$out"
   }
   # 複合コマンドの入口で `&` の復元先を積み、出口で戻す。
   _push_group() {
