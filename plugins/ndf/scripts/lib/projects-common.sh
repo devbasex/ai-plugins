@@ -10,6 +10,26 @@
 PJ_DECLARATION_VERSION=1
 PJ_DECLARATION_REL=".ndf/projects.json"
 
+# git の remote.origin.url を `<所有者>/<リポジトリ>` へ畳んで標準出力へ返す。
+# **通信しない。** URL の形（git@ / https / 末尾スラッシュ / .git）へ対応する規則を
+# 1 箇所に置き、閉じる先の解決（closing-issues.sh）とリポジトリ判定（wf_repo_slug）で
+# 挙動が食い違わないようにする（#435）。畳めなければ 1 を返し、標準出力へは何も足さない。
+pj_repo_slug() {
+  local dir="${1:-.}" url slug repo owner
+  command -v git >/dev/null 2>&1 || return 1
+  url=$(git -C "$dir" config --get remote.origin.url 2>/dev/null) || return 1
+  [ -n "$url" ] || return 1
+  slug=${url%.git}
+  slug=${slug%/}
+  slug=${slug##*:}          # git@github.com:owner/repo
+  case "$slug" in */*) ;; *) return 1 ;; esac
+  repo=${slug##*/}
+  owner=${slug%/*}
+  owner=${owner##*/}
+  [ -n "$owner" ] && [ -n "$repo" ] || return 1
+  printf '%s/%s\n' "$owner" "$repo"
+}
+
 # 工程の値。**development-workflow の工程表の行名と一致させる。**
 # 綴りの違う値を書き込むと、盤面の側に工程表に無い値が増える。
 PJ_STAGES=$'要求と受け入れ条件\n作業場所の用意\n設計\n設計レビュー\n計画\n実装\n構造改善\nレビュー\n完了判定\nPull Request\n確定仕様化\n後片付け\n配布\nリリース後テスト\n振り返り'

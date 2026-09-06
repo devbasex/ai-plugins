@@ -435,8 +435,15 @@ wf_emit_context() {
 # --- リポジトリと控えの置き場所 ---------------------------------------------
 
 # `<所有者>/<リポジトリ>` を返す。**通信しない。**
+# 畳む規則は projects-common.sh の pj_repo_slug の 1 箇所にある（#435）。
+# 読み込めていれば委譲し、できていなければ従来どおりの規則をここで実行する。
 wf_repo_slug() {
-  local dir="${1:-.}" url slug
+  local dir="${1:-.}"
+  if command -v pj_repo_slug >/dev/null 2>&1 && [ "$(type -t pj_repo_slug)" = "function" ]; then
+    pj_repo_slug "$dir"
+    return
+  fi
+  local url slug repo owner
   command -v git >/dev/null 2>&1 || return 1
   url=$(git -C "$dir" config --get remote.origin.url 2>/dev/null) || return 1
   [ -n "$url" ] || return 1
@@ -444,7 +451,6 @@ wf_repo_slug() {
   slug=${slug%/}
   slug=${slug##*:}          # git@github.com:owner/repo
   case "$slug" in */*) ;; *) return 1 ;; esac
-  local repo owner
   repo=${slug##*/}
   owner=${slug%/*}
   owner=${owner##*/}
@@ -500,6 +506,11 @@ if ! . "$(dirname "${BASH_SOURCE[0]}")/../../../../scripts/lib/lock-common.sh" 2
   ndf_lock_acquire() { return 1; }
   ndf_lock_release() { [ -n "${1:-}" ] || return 0; rm -rf "$1" 2>/dev/null; return 0; }
 fi
+
+# slug を畳む規則の実体は projects-common.sh の pj_repo_slug にある（#435）。
+# 読み込めなければ wf_repo_slug 側の従来の規則で処理するため、失敗は握りつぶす。
+# shellcheck source=../../../../scripts/lib/projects-common.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../../../../scripts/lib/projects-common.sh" 2>/dev/null || true
 
 # 捨ててよいと見なすまでの分数。共通ファイルの値を、既存の名前でも引けるようにする。
 WF_LOCK_STALE_MINUTES="${NDF_LOCK_STALE_MINUTES:-5}"
