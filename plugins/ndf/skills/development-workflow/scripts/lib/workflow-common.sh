@@ -15,31 +15,30 @@
 #   R = 必須 / C = 条件付き / - = 対象外
 # 表のセルが `—` なら対象外、`任意` か丸括弧で条件を添えたものなら条件付き、
 # それ以外は必須である。食い違いは tests/test_workflow_stage_matrix.py が拾う。
-WF_MODES=$'light\tstandard\tarchitecture\tlegacy-refactor'
-WF_STAGE_MATRIX=$'要求と受け入れ条件\tR\tR\tR\t-
-作業場所の用意\tC\tR\tR\tR
-設計\t-\tR\tR\tR
-設計レビュー\t-\tR\tR\tC
-計画\t-\tR\tR\tR
-実装\tR\tR\tR\tR
-構造改善\t-\tR\tR\tR
-レビュー\tR\tR\tR\tR
-完了判定\tR\tR\tR\tR
-Pull Request\tR\tR\tR\tR
-確定仕様化\t-\tC\tR\t-
-後片付け\tR\tR\tR\tR
-配布\tR\tR\tR\tR
-リリース後テスト\t-\tC\tR\tR
-振り返り\t-\tR\tR\tR'
+WF_MODES=$'light\tlegacy-refactor\tstandard'
+WF_STAGE_MATRIX=$'要求と受け入れ条件\tR\t-\tR
+作業場所の用意\tC\tR\tR
+設計\t-\tR\tR
+設計レビュー\t-\tC\tR
+計画\t-\tR\tR
+実装\tR\tR\tR
+構造改善\t-\tR\tR
+レビュー\tR\tR\tR
+完了判定\tR\tR\tR
+Pull Request\tR\tR\tR
+確定仕様化\t-\t-\tR
+後片付け\tR\tR\tR
+配布\tR\tR\tR
+リリース後テスト\t-\tR\tR
+振り返り\t-\tR\tR'
 
 # モードの高さ。**列の位置からは導かない**（決定 2-b）。`WF_MODES` の並びをそのまま
-# 高さにすると `architecture` と `legacy-refactor` が入れ替わる。高さは「判定の手順」の
+# 高さにすると読みやすさのための並びが高さの根拠として読まれる。高さは「判定の手順」の
 # 表の並び（上のモードが勝つ）に合わせる。母集合が変わっても、列とは別に持てば
 # 高さの定義を直さずに済む。
 WF_MODE_HEIGHT=$'light\t1
-standard\t2
-legacy-refactor\t3
-architecture\t4'
+legacy-refactor\t2
+standard\t3'
 
 # 報告の引き金になる工程。ここへ進んだ時点で、記録の無い必須の工程を案内する。
 WF_REPORT_STAGE='配布'
@@ -99,11 +98,11 @@ wf_stage_class() {
   local mode="${1:-}" stage="${2:-}" column line name
   column=$(_wf_mode_column "$mode") || return 1
   while IFS= read -r line; do
-    IFS=$'\t' read -r name c1 c2 c3 c4 <<<"$line"
+    IFS=$'\t' read -r name c1 c2 c3 <<<"$line"
     [ "$name" = "$stage" ] || continue
     case "$column" in
       1) printf '%s\n' "$c1" ;; 2) printf '%s\n' "$c2" ;;
-      3) printf '%s\n' "$c3" ;; 4) printf '%s\n' "$c4" ;;
+      3) printf '%s\n' "$c3" ;;
     esac
     return 0
   done <<<"$WF_STAGE_MATRIX"
@@ -187,6 +186,25 @@ wf_is_candidate() {
   grep -qE 'projects-sync\.sh|pr[[:space:]]+merge|pulls/[0-9]+/merge|pr[[:space:]]+create' <<<"${1:-}"
 }
 
+_wf_seek_gh_verb() {
+  local state="${1:-0}" tok="${2:-}" verb="${3:-}"
+  case "$state" in
+    0) [ "$tok" = "gh" ] && printf '1\n' || printf '0\n' ;;
+    1)
+      case "$tok" in
+        pr) printf '2\n' ;;
+        gh) printf '1\n' ;;
+        -R|--repo) printf '4\n' ;;
+        -*) printf '1\n' ;;
+        *) printf '0\n' ;;
+      esac
+      ;;
+    2) [ "$tok" = "$verb" ] && printf '3\n' || printf '0\n' ;;
+    4) printf '1\n' ;;
+    *) printf '%s\n' "$state" ;;
+  esac
+}
+
 # 進行の記録のコマンドなら、課題番号・キー・値をタブ区切りで出す。
 #
 # 見分けは `projects-sync.sh` で終わる語である。呼び出し側は `$SCRIPTS` を展開してから
@@ -229,22 +247,8 @@ _wf_pr_create_body() {
       want=""
       continue
     fi
-    case "$state" in
-      0) [ "$tok" = "gh" ] && state=1 ;;
-      1)
-        # **`gh` と `pr` の間の option を読み飛ばす。** `gh -R <所有者>/<リポジトリ> pr
-        # create` の形では、値の語で 0 へ戻して `create` を見落とす（#427 のレビュー）。
-        case "$tok" in
-          pr) state=2 ;;
-          gh) ;;
-          -R|--repo) state=4 ;;
-          -*) ;;
-          *) state=0 ;;
-        esac
-        ;;
-      2) if [ "$tok" = "create" ]; then state=3; found=0; else state=0; fi ;;
-      4) state=1 ;;
-    esac
+    state=$(_wf_seek_gh_verb "$state" "$tok" "create")
+    [ "$state" = "3" ] && found=0
     [ "$found" -eq 0 ] || continue
     case "$tok" in
       --body|-b) want=text ;;
@@ -288,21 +292,16 @@ _wf_missing_before_pr() {
   done < <(wf_stages_before_pr)
 }
 
-# リポジトリと番号の組（タブ区切り、1 行 1 件）を標準入力から受け、案内を 1 つの文字列で
-# 返す。**言うことが何も無ければ 1 を返す。**
-#
-# **拒否はしない。** 記録が無いことは、その工程を通っていないことと同じではない。
-wf_evidence_report() {
-  local line repo issue file content mode stage
-  local -a targets=() notes=() modes=()
-  local effective="" conflict=0 body=""
+_wf_collect_targets() {
+  local line repo issue file content mode
+  local -a raw_targets=() modes=()
+  local effective="" conflict=0
 
-  command -v jq >/dev/null 2>&1 || return 1
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     IFS=$'\t' read -r repo issue <<<"$line"
     [ -n "$repo" ] && [ -n "$issue" ] || continue
-    targets+=("$repo"$'\t'"$issue")
+    raw_targets+=("$repo"$'\t'"$issue")
     file=$(wf_state_file "$repo" "$issue") || continue
     [ -f "$file" ] || continue
     content=$(wf_state_read "$file")
@@ -311,33 +310,49 @@ wf_evidence_report() {
     _wf_contains "$mode" ${modes[@]+"${modes[@]}"} || modes+=("$mode")
     effective=$(wf_higher_mode "$effective" "$mode")
   done
-  [ "${#targets[@]}" -gt 0 ] || return 1
+  [ "${#raw_targets[@]}" -gt 0 ] || return 1
   [ "${#modes[@]}" -gt 1 ] && conflict=1
 
-  for line in "${targets[@]}"; do
-    IFS=$'\t' read -r repo issue <<<"$line"
-    file=$(wf_state_file "$repo" "$issue") || continue
-    if [ ! -f "$file" ]; then
-      notes+=("  #$issue ($repo): 進行の記録がありません（モードの記録も、通過工程の記録もありません）")
-      continue
-    fi
-    content=$(wf_state_read "$file")
-    mode=$(jq -r '.mode // empty' <<<"$content" 2>/dev/null)
-    if [ -z "$mode" ]; then
-      notes+=("  #$issue ($repo): モードの記録がありません")
-      [ -n "$effective" ] || continue
-      mode="$effective"
-    else
-      mode="$effective"
-    fi
-    local missing=""
-    while IFS= read -r stage; do
-      [ -n "$stage" ] || continue
-      [ -n "$missing" ] && missing="$missing / "
-      missing="$missing$stage"
-    done < <(_wf_missing_before_pr "$mode" "$content")
-    [ -n "$missing" ] && notes+=("  #$issue ($repo): 記録なし: $missing")
+  printf '%s\n' "$effective"
+  printf '%s\n' "$conflict"
+  printf '%s\n' "${modes[*]}"
+  for line in "${raw_targets[@]}"; do
+    printf '%s\n' "$line"
   done
+  return 0
+}
+
+_wf_target_note() {
+  local repo="${1:-}" issue="${2:-}" effective="${3:-}"
+  local file content mode stage missing=""
+  file=$(wf_state_file "$repo" "$issue") || return 0
+  if [ ! -f "$file" ]; then
+    printf '  #%s (%s): 進行の記録がありません（モードの記録も、通過工程の記録もありません）\n' "$issue" "$repo"
+    return 0
+  fi
+  content=$(wf_state_read "$file")
+  mode=$(jq -r '.mode // empty' <<<"$content" 2>/dev/null)
+  if [ -z "$mode" ]; then
+    printf '  #%s (%s): モードの記録がありません\n' "$issue" "$repo"
+    [ -n "$effective" ] || return 0
+    mode="$effective"
+  else
+    mode="$effective"
+  fi
+  while IFS= read -r stage; do
+    [ -n "$stage" ] || continue
+    [ -n "$missing" ] && missing="$missing / "
+    missing="$missing$stage"
+  done < <(_wf_missing_before_pr "$mode" "$content")
+  [ -n "$missing" ] && printf '  #%s (%s): 記録なし: %s\n' "$issue" "$repo" "$missing"
+  return 0
+}
+
+_wf_compose_evidence_body() {
+  local conflict="${1:-0}" effective="${2:-}" modes_str="${3:-}"
+  shift 3
+  local -a notes=("$@")
+  local body line
 
   [ "${#notes[@]}" -gt 0 ] || [ "$conflict" -eq 1 ] || return 1
 
@@ -346,7 +361,7 @@ wf_evidence_report() {
     body="$body"$'\n'"$line"
   done
   if [ "$conflict" -eq 1 ]; then
-    body="$body"$'\n'"モードの記録が課題ごとに食い違います（$(wf_join "${modes[@]}")）。最も高い $effective を基準に見ています。"
+    body="$body"$'\n'"モードの記録が課題ごとに食い違います（$modes_str）。最も高い $effective を基準に見ています。"
     body="$body"$'\n'"1 つの Pull Request に対しモードは 1 つです。閉じる課題すべての控えへ同じ値を書いてください。"
   fi
   body="$body"$'\n'"記録が無いことは、その工程を通っていないことと同じではありません。記録の側が遅れているだけのこともあります。"
@@ -354,24 +369,50 @@ wf_evidence_report() {
   printf '%s\n' "$body"
 }
 
+# リポジトリと番号の組（タブ区切り、1 行 1 件）を標準入力から受け、案内を 1 つの文字列で
+# 返す。**言うことが何も無ければ 1 を返す。**
+#
+# **拒否はしない。** 記録が無いことは、その工程を通っていないことと同じではない。
+wf_evidence_report() {
+  local collected effective conflict modes_str line repo issue note
+  local -a targets=() notes=() modes=()
+
+  command -v jq >/dev/null 2>&1 || return 1
+
+  collected=$(_wf_collect_targets) || return 1
+  {
+    IFS= read -r effective
+    IFS= read -r conflict
+    IFS= read -r modes_str
+    while IFS= read -r line; do
+      [ -n "$line" ] && targets+=("$line")
+    done
+  } <<<"$collected"
+  read -r -a modes <<<"$modes_str"
+
+  for line in "${targets[@]}"; do
+    IFS=$'\t' read -r repo issue <<<"$line"
+    while IFS= read -r note; do
+      [ -n "$note" ] && notes+=("$note")
+    done < <(_wf_target_note "$repo" "$issue" "$effective")
+  done
+
+  _wf_compose_evidence_body "$conflict" "$effective" "$(wf_join ${modes[@]+"${modes[@]}"})" ${notes[@]+"${notes[@]}"}
+}
+
 # --- JSON の組み立て --------------------------------------------------------
 # jq が無くても出力できるようにする。#266 は jq が無いときも拒否を返すため、
 # 出力の側が jq に依存すると、拒否そのものを届けられない。
 wf_json_escape() {
-  local s="${1:-}" out="" ch i len=0
-  len=${#s}
-  for (( i = 0; i < len; i++ )); do
-    ch=${s:i:1}
-    case "$ch" in
-      '\') out+='\\' ;;
-      '"') out+='\"' ;;
-      $'\n') out+='\n' ;;
-      $'\t') out+='\t' ;;
-      $'\r') out+='\r' ;;
-      *) out+="$ch" ;;
-    esac
-  done
-  printf '%s' "$out"
+  local s="${1:-}"
+  # **`\` を最初に置き換える。** 後にすると、`\"` や `\n` として足したほうの `\` まで
+  # 二重にしてしまう。以降の 4 つは互いに重ならないため順序を問わない。
+  s=${s//\\/\\\\}
+  s=${s//\"/\\\"}
+  s=${s//$'\n'/\\n}
+  s=${s//$'\t'/\\t}
+  s=${s//$'\r'/\\r}
+  printf '%s' "$s"
 }
 
 wf_emit_deny() {
@@ -389,8 +430,15 @@ wf_emit_context() {
 # --- リポジトリと控えの置き場所 ---------------------------------------------
 
 # `<所有者>/<リポジトリ>` を返す。**通信しない。**
+# 畳む規則は projects-common.sh の pj_repo_slug の 1 箇所にある（#435）。
+# 読み込めていれば委譲し、できていなければ従来どおりの規則をここで実行する。
 wf_repo_slug() {
-  local dir="${1:-.}" url slug
+  local dir="${1:-.}"
+  if command -v pj_repo_slug >/dev/null 2>&1 && [ "$(type -t pj_repo_slug)" = "function" ]; then
+    pj_repo_slug "$dir"
+    return
+  fi
+  local url slug repo owner
   command -v git >/dev/null 2>&1 || return 1
   url=$(git -C "$dir" config --get remote.origin.url 2>/dev/null) || return 1
   [ -n "$url" ] || return 1
@@ -398,7 +446,6 @@ wf_repo_slug() {
   slug=${slug%/}
   slug=${slug##*:}          # git@github.com:owner/repo
   case "$slug" in */*) ;; *) return 1 ;; esac
-  local repo owner
   repo=${slug##*/}
   owner=${slug%/*}
   owner=${owner##*/}
@@ -454,6 +501,11 @@ if ! . "$(dirname "${BASH_SOURCE[0]}")/../../../../scripts/lib/lock-common.sh" 2
   ndf_lock_acquire() { return 1; }
   ndf_lock_release() { [ -n "${1:-}" ] || return 0; rm -rf "$1" 2>/dev/null; return 0; }
 fi
+
+# slug を畳む規則の実体は projects-common.sh の pj_repo_slug にある（#435）。
+# 読み込めなければ wf_repo_slug 側の従来の規則で処理するため、失敗は握りつぶす。
+# shellcheck source=../../../../scripts/lib/projects-common.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../../../../scripts/lib/projects-common.sh" 2>/dev/null || true
 
 # 捨ててよいと見なすまでの分数。共通ファイルの値を、既存の名前でも引けるようにする。
 WF_LOCK_STALE_MINUTES="${NDF_LOCK_STALE_MINUTES:-5}"
@@ -559,9 +611,33 @@ wf_join() {
   printf '%s' "$out"
 }
 
+# frontier までの各工程を分類し、'class<TAB>stage' を 1 行 1 件で返す。
+# class は present（記録あり）・missing（必須で記録なし）・conditional（条件付き）。
+# recorded 配列・mode・frontier を引数で受け取る。
+_wf_classify_stages() {
+  local mode="$1" frontier="$2"
+  shift 2
+  local -a recorded=("$@")
+  local stage class index=0
+  while IFS= read -r stage; do
+    index=$((index + 1))
+    [ "$index" -le "$frontier" ] || break
+    if _wf_contains "$stage" ${recorded[@]+"${recorded[@]}"}; then
+      printf 'present\t%s\n' "$stage"
+      continue
+    fi
+    [ -n "$mode" ] || continue
+    class=$(wf_stage_class "$mode" "$stage") || continue
+    case "$class" in
+      R) printf 'missing\t%s\n' "$stage" ;;
+      C) printf 'conditional\t%s\n' "$stage" ;;
+    esac
+  done < <(wf_stages)
+}
+
 # 通過工程を報告する。**終了コードで工程を止めない。**
 wf_report() {
-  local slug="${1:-}" issue="${2:-}" file content mode stage class frontier index=0
+  local slug="${1:-}" issue="${2:-}" file content mode stage class frontier
   local -a recorded=() present=() missing=() conditional=()
 
   command -v jq >/dev/null 2>&1 || { wf_report_empty "$issue"; return 0; }
@@ -577,20 +653,13 @@ wf_report() {
   mode=$(jq -r '.mode // empty' <<<"$content" 2>/dev/null)
   frontier=$(_wf_frontier "${recorded[@]}")
 
-  while IFS= read -r stage; do
-    index=$((index + 1))
-    [ "$index" -le "$frontier" ] || break
-    if _wf_contains "$stage" "${recorded[@]}"; then
-      present+=("$stage")
-      continue
-    fi
-    [ -n "$mode" ] || continue
-    class=$(wf_stage_class "$mode" "$stage") || continue
+  while IFS=$'\t' read -r class stage; do
     case "$class" in
-      R) missing+=("$stage") ;;
-      C) conditional+=("$stage") ;;
+      present) present+=("$stage") ;;
+      missing) missing+=("$stage") ;;
+      conditional) conditional+=("$stage") ;;
     esac
-  done < <(wf_stages)
+  done < <(_wf_classify_stages "$mode" "$frontier" "${recorded[@]}")
 
   if [ -n "$mode" ]; then
     printf '#%s の通過工程（%s）\n' "$issue" "$mode"

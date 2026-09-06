@@ -210,10 +210,10 @@ def test_conflicting_modes_take_the_highest_and_say_so(repo: Path, state: Path) 
     assert "設計" in out
 
 
-def test_architecture_outranks_legacy_refactor(repo: Path, state: Path) -> None:
-    """高さは列の位置から導かない。`WF_MODES` の並びとは別に持つ（決定 2-b）。"""
-    result = run_lib('wf_higher_mode legacy-refactor architecture')
-    assert result.stdout.strip() == "architecture", result.stderr
+def test_standard_outranks_legacy_refactor(repo: Path, state: Path) -> None:
+    """高さは `WF_MODE_HEIGHT` が持つ。`WF_MODES` の並びからは導かない（決定 2-b）。"""
+    result = run_lib('wf_higher_mode legacy-refactor standard')
+    assert result.stdout.strip() == "standard", result.stderr
 
 
 # --- C10: 別のリポジトリ ----------------------------------------------------
