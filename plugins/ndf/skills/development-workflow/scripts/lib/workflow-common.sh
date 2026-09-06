@@ -605,33 +605,9 @@ wf_join() {
   printf '%s' "$out"
 }
 
-# frontier までの各工程を分類し、'class<TAB>stage' を 1 行 1 件で返す。
-# class は present（記録あり）・missing（必須で記録なし）・conditional（条件付き）。
-# recorded 配列・mode・frontier を引数で受け取る。
-_wf_classify_stages() {
-  local mode="$1" frontier="$2"
-  shift 2
-  local -a recorded=("$@")
-  local stage class index=0
-  while IFS= read -r stage; do
-    index=$((index + 1))
-    [ "$index" -le "$frontier" ] || break
-    if _wf_contains "$stage" ${recorded[@]+"${recorded[@]}"}; then
-      printf 'present\t%s\n' "$stage"
-      continue
-    fi
-    [ -n "$mode" ] || continue
-    class=$(wf_stage_class "$mode" "$stage") || continue
-    case "$class" in
-      R) printf 'missing\t%s\n' "$stage" ;;
-      C) printf 'conditional\t%s\n' "$stage" ;;
-    esac
-  done < <(wf_stages)
-}
-
 # 通過工程を報告する。**終了コードで工程を止めない。**
 wf_report() {
-  local slug="${1:-}" issue="${2:-}" file content mode stage class frontier
+  local slug="${1:-}" issue="${2:-}" file content mode stage class frontier index=0
   local -a recorded=() present=() missing=() conditional=()
 
   command -v jq >/dev/null 2>&1 || { wf_report_empty "$issue"; return 0; }
@@ -647,13 +623,20 @@ wf_report() {
   mode=$(jq -r '.mode // empty' <<<"$content" 2>/dev/null)
   frontier=$(_wf_frontier "${recorded[@]}")
 
-  while IFS=$'\t' read -r class stage; do
+  while IFS= read -r stage; do
+    index=$((index + 1))
+    [ "$index" -le "$frontier" ] || break
+    if _wf_contains "$stage" "${recorded[@]}"; then
+      present+=("$stage")
+      continue
+    fi
+    [ -n "$mode" ] || continue
+    class=$(wf_stage_class "$mode" "$stage") || continue
     case "$class" in
-      present) present+=("$stage") ;;
-      missing) missing+=("$stage") ;;
-      conditional) conditional+=("$stage") ;;
+      R) missing+=("$stage") ;;
+      C) conditional+=("$stage") ;;
     esac
-  done < <(_wf_classify_stages "$mode" "$frontier" "${recorded[@]}")
+  done < <(wf_stages)
 
   if [ -n "$mode" ]; then
     printf '#%s の通過工程（%s）\n' "$issue" "$mode"
