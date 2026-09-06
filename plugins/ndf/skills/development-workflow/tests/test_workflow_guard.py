@@ -12,7 +12,8 @@ from pathlib import Path
 import pytest
 
 from workflow_helpers import (
-    base_env, checkout, init_repo, path_with, pre_tool_use, run_guard, run_stage_check,
+    base_env, checkout, init_repo, path_with, pre_tool_use, run_guard, run_lib,
+    run_stage_check,
     state_file, stub_gh,
 )
 
@@ -276,6 +277,33 @@ def test_the_reason_of_an_undetermined_merge_names_what_was_missing(
 
 
 # --- #221 進行の記録の観測 --------------------------------------------------
+
+def test_parse_sync_reads_the_issue_key_and_value(repo: Path) -> None:
+    result = run_lib(
+        'wf_parse_sync \'bash "$SCRIPTS/projects-sync.sh" 161 stage "設計"\'',
+        cwd=repo,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "161\tstage\t設計"
+
+
+def test_parse_sync_rejects_a_command_with_too_few_arguments(repo: Path) -> None:
+    result = run_lib(
+        'wf_parse_sync \'bash "$SCRIPTS/projects-sync.sh" 161 stage\'',
+        cwd=repo,
+    )
+
+    assert result.returncode == 1
+    assert result.stdout.strip() == ""
+
+
+def test_parse_sync_rejects_an_unrelated_command(repo: Path) -> None:
+    result = run_lib('wf_parse_sync "gh pr create --base develop"', cwd=repo)
+
+    assert result.returncode == 1
+    assert result.stdout.strip() == ""
+
 
 def test_a_sync_command_is_recorded(repo: Path, state: Path) -> None:
     result = guard(repo, state, 'bash "$SCRIPTS/projects-sync.sh" 161 stage "設計"')
