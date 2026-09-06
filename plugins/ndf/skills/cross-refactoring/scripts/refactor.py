@@ -192,6 +192,9 @@ def main() -> None:
         ("advance", cmd_advance, "ラウンドの収束判定と、ラウンドの種類の切り替え"),
         ("final-gate", cmd_final_gate,
          "Step 7 — 最終ゲート。起動のされ方で cross-review と全体のテストが変わる"),
+        ("merge-final-fix", cmd_merge_final_fix,
+         "Step 7 — 最終ゲートの修正結果の取り込み。**適用ラウンドの `merge-fix` "
+         "とは別である**（起点も担当も改善項目も持たない）"),
         ("status", cmd_status, "現在の状態を人が読む形で出す"),
     ):
         sp = sub.add_parser(name, help=help_)

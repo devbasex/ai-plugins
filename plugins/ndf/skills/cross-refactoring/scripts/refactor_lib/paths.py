@@ -101,4 +101,9 @@ def stem_for(runtime: str, phase: str, state_id: int, round_no: Optional[int] = 
     """
     if phase == "propose":
         return f"{runtime}-propose-rf{state_id}-r{round_no}"
+    # **最終ゲートの修正だけラウンド番号を持たない。** Step 7 は提案ラウンドの外に
+    # あり、直すのは全体のテストの失敗である。番号を付けると、どの提案ラウンドの
+    # 修正なのかと読める名前になる。
+    if phase == "final-fix":
+        return f"{runtime}-final-fix"
     return f"{runtime}-{phase}-r{round_no}"

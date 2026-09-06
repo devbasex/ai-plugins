@@ -443,6 +443,40 @@ def _revert_item_commits(
     return len(shas)
 
 
+def revert_unverified_range(
+    path: pathlib.Path,
+    state: dict[str, Any],
+    entry: dict[str, Any],
+    ordered_range: list[str],
+    label: str,
+) -> None:
+    """検証を通らない範囲を取り消し、`entry` の起点を取り消し後の HEAD へ進める。
+
+    `entry` は**修正の控えを持つ辞書**である。適用ラウンドの控え（`rounds[]` の
+    要素）と最終ゲートの控え（`final_gate`）の両方が同じ 3 つの鍵
+    （`pending_push` / `fix_base_sha`）を持つため、どちらからも呼べる。
+    `label` は取り消しの単位を人が読むための名前で、git の操作には効かない。
+    """
+    work = state["worktrees"]["work"]
+    # **状態へ記録する前に取り消す。** 先に記録すると、取り消し済みのコミットが
+    # 状態ファイルに残り、後の見送り処理が同じコミットをもう一度取り消そうとする。
+    info("検証を通らない変更を残さないため、この修正ラウンドの範囲を取り消します")
+    # **取り消しへ着手する前に印を立てる。** 取り消しは済んだのに push できずに
+    # 終わると、未検証の変更が Pull Request に残ったままになる。
+    entry["pending_push"] = True
+    statefile.save(path, state)
+    _revert_item_commits(
+        state,
+        {"item_id": label, "commits": list(ordered_range)},
+        dry_run=False,
+    )
+    # 取り消し後の状態を新しい起点にし、**その場で保存する**。ここで保存せずに
+    # 落ちると、次の実行は古い起点から範囲を取り直して取り消しコミット自体を
+    # 「未申告」と判定し、**取り消しを取り消して**しまう。
+    entry["fix_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
+    statefile.save(path, state)
+
+
 def _reset_hard(work: str, sha: Optional[str]) -> None:
     """着手前の HEAD へ戻す。半端な履歴を Pull Request に残さないための後始末。"""
     if sha:

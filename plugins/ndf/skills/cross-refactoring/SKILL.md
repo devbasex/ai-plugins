@@ -331,15 +331,19 @@ while :; do
 done
 
 # Step 7: 最終ゲート。**起動のされ方で判定の相手が変わる。**
+#
+# **修正の起動と取り込みは適用ラウンドのものを使い回さない。** 落ちているのは全体の
+# テストで、どの改善項目にも提案ラウンドにも属さない。担当（`FINAL_FIX_IMPL`）と
+# 範囲の起点は `final-gate` が記録して返す。
 while :; do
   rf_eval final-gate "$ID"; gate=$?            # FINAL_GATE=... を返す
   case $gate in
     0) break ;;                                # 通過（または cross-review を実行する）
     1) echo "⚠ 最終ゲートが通らないまま修正の上限に達しました" >&2; break ;;
-    2) "$SCRIPTS/launch-cli.sh" "$IMPL" fix "$ID" "$ROUND"
-       "$LIB/monitor.py" "$ID" --agents "$IMPL" --tmp-dir "$TMP_DIR" \
-           --stem-template "{agent}-fix-r$ROUND"
-       rf merge-fix "$ID" "$ROUND" ;;
+    2) "$SCRIPTS/launch-cli.sh" "$FINAL_FIX_IMPL" final-fix "$ID"
+       "$LIB/monitor.py" "$ID" --agents "$FINAL_FIX_IMPL" --tmp-dir "$TMP_DIR" \
+           --stem-template "{agent}-final-fix"
+       rf merge-final-fix "$ID" ;;
     *) exit $gate ;;
   esac
 done

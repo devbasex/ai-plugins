@@ -4,9 +4,9 @@
 # Usage: launch-cli.sh <runtime> <phase> <ID> [ROUND]
 #
 #   runtime  claude | codex | agy | kiro
-#   phase    propose | propose-tests | apply | review | fix
+#   phase    propose | propose-tests | apply | review | fix | final-fix
 #   ID       状態ファイルの鍵（最初に初期化した Pull Request 番号）
-#   ROUND    propose 以外で必須
+#   ROUND    propose と final-fix 以外で必須
 #
 # **ホストか否かで分岐しない。** ランタイム名だけで分岐する。ホストと同じランタイムが
 # 実装担当になるラウンドでも、ホストのサブエージェント機能は使わず別プロセスの CLI と
@@ -73,6 +73,14 @@ case "$PHASE" in
     WORKDIR=$ROOT/$RUNTIME
     PRINT_TIMEOUT=900
     ;;
+  final-fix)
+    # **ラウンド番号を名前に入れない。** 最終ゲートは提案ラウンドの外にあり、
+    # 全体のテストの失敗を直す。番号を付けると、どの提案ラウンドの修正なのかと
+    # 読める名前になる。取り込み側（`merge-final-fix`）もこの名前で探す。
+    STEM=$TMP_DIR/$RUNTIME-final-fix
+    WORKDIR=$WORK
+    PRINT_TIMEOUT=3600
+    ;;
   *)
     echo "未知のフェーズです: $PHASE" >&2
     exit 1
@@ -107,7 +115,7 @@ APPLY_ROUND=0
 # ラウンドの種類。適用と修正では、項目が改善項目かテスト項目かで手順が変わる。
 ROUND_KIND=$(jq -r --argjson r "$ROUND" \
   '[.rounds[] | select(.round == $r)][0].kind // "structure"' "$STATE")
-if [ "$PHASE" != "propose" ] && [ "$PHASE" != "propose-tests" ]; then
+if [ "$PHASE" = "apply" ] || [ "$PHASE" = "fix" ] || [ "$PHASE" = "review" ]; then
   APPLY_ROUND=$(jq -r --argjson r "$ROUND" \
     '[.rounds[] | select(.round == $r)][0].apply_round // 0' "$STATE")
   ITEMS_JSON=$(jq --argjson r "$ROUND" --argjson a "$APPLY_ROUND" \

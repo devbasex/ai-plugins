@@ -26,13 +26,13 @@ from ..gitfacts import (
     _push_with_retry_marker,
     _read_result,
     _reported_shas,
-    _revert_item_commits,
     _round,
     _run_with_timeout,
     _safe_int,
     collect_commit_facts,
     commits_in_range,
     resolved_threads_on_github,
+    revert_unverified_range,
 )
 from ..outbound import dropped_line, item_lines, plan_line
 from ..paths import _load, _result_path, stem_for
@@ -345,27 +345,14 @@ def _revert_invalid_fix_round(
 
     取り消した以上、解決の申告も採らないので**常に空集合を返す**。
     """
-    work = state["worktrees"]["work"]
-    # **状態へ記録する前に取り消す。** 先に記録すると、取り消し済みのコミットが
-    # 状態ファイルに残り、後の見送り処理が同じコミットをもう一度取り消そうとする。
-    info("検証を通らない変更を残さないため、この修正ラウンドの範囲を取り消します")
-    # **取り消しへ着手する前に印を立てる。** 取り消しは済んだのに push できずに
-    # 終わると、未検証の変更が Pull Request に残ったままになる。
-    entry["pending_push"] = True
-    statefile.save(path, state)
-    _revert_item_commits(
-        state,
-        {"item_id": f"R{entry['round']}-fix{entry['fix_rounds'] + 1}",
-         "commits": list(ordered_range)},
-        dry_run=False,
-    )
-    # 取り消し後の状態を新しい起点にし、**その場で保存する**。ここで保存せずに
-    # 落ちると、次の実行は古い起点から範囲を取り直して取り消しコミット自体を
-    # 「未申告」と判定し、**取り消しを取り消して**しまう。
-    entry["fix_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
-    statefile.save(path, state)
+    # 取り消しの本体は最終ゲートと共有する（`revert_unverified_range`）。控えの
+    # 形が同じなので、適用ラウンドと最終ゲートで別々に持たない。
     # **push は保存のあと。** ここで push して失敗すると、取り消しコミットは
     # ローカルに残るのに起点の更新が保存されず、叩き直しで二重に取り消してしまう。
+    revert_unverified_range(
+        path, state, entry, ordered_range,
+        f"R{entry['round']}-fix{entry['fix_rounds'] + 1}",
+    )
     info("⚠ 修正を取り消したため、解決の申告は採用しません")
     return set()
 

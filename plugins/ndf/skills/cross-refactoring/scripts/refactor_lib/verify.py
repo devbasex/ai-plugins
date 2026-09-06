@@ -14,6 +14,7 @@ from .vocabulary import (
     EXTRACTION_TECHNIQUES,
     MAX_COMMITS_PER_ITEM,
     MAX_COMMITS_PER_ITEM_WITH_TEST_GAP,
+    FINAL_FIX_TRAILERS,
     REQUIRED_TRAILERS,
 )
 
@@ -79,14 +80,19 @@ def verify_scope(commit: dict[str, Any], scope: Iterable[str]) -> Optional[str]:
     )
 
 
-def verify_commit_trailers(commit: dict[str, Any]) -> Optional[str]:
-    """コミットのトレーラーが 4 つ揃っているか。欠けていれば理由を返す。
+def verify_commit_trailers(
+    commit: dict[str, Any], required: Iterable[str] = REQUIRED_TRAILERS
+) -> Optional[str]:
+    """コミットのトレーラーが揃っているか。欠けていれば理由を返す。
 
     `commit` は **git から取った事実**（`collect_commit_facts()` の戻り値）である。
     結果ファイルの `trailers` を渡してはならない。
+
+    求める顔ぶれを引数で受け取るのは、**最終ゲートの修正が改善項目にも提案ラウンド
+    にも属さない**ためである（`FINAL_FIX_TRAILERS`）。既定は適用と修正の 4 つ。
     """
     trailers = commit.get("trailers") or {}
-    missing = [k for k in REQUIRED_TRAILERS if not str(trailers.get(k) or "").strip()]
+    missing = [k for k in required if not str(trailers.get(k) or "").strip()]
     if missing:
         return f"コミット {commit.get('sha', '?')} にトレーラーが欠けています: {', '.join(missing)}"
     return None
@@ -97,6 +103,7 @@ def _verify_commit_basics(
     scope: Optional[Iterable[str]],
     missing_reason: str,
     check_test: bool = True,
+    required_trailers: Iterable[str] = REQUIRED_TRAILERS,
 ) -> Optional[str]:
     """コミット 1 件が手順を満たしているかを検証する。問題があれば理由を返す。
 
@@ -113,7 +120,7 @@ def _verify_commit_basics(
     """
     if not commit.get("exists", True):
         return missing_reason
-    problem = verify_commit_trailers(commit)
+    problem = verify_commit_trailers(commit, required_trailers)
     if problem:
         return problem
     problem = verify_scope(commit, scope or [])
@@ -139,6 +146,31 @@ def verify_fix_commit(
         commit,
         scope,
         f"コミット {commit.get('sha', '?')} が対象の範囲に存在しません",
+    )
+
+
+def verify_final_fix_commit(
+    commit: dict[str, Any], scope: Optional[Iterable[str]] = None
+) -> Optional[str]:
+    """最終ゲート（Step 7）の修正コミットを検証する。問題があれば理由を返す。
+
+    適用や修正ラウンドと**見る先が 2 つだけ違う**。
+
+    - **テストの合否を見ない**（`check_test=False`）。`--ci-check` を指定した実行では
+      手元のテストを 1 度も走らせないと決めてある（#436 決定 11 の排他）。ここで
+      コミットごとに走らせると、その排他をこの経路だけが破ることになる。合否は
+      直後の `final-gate` が採った側（手元のテスト / 継続的統合）で 1 度だけ見る。
+    - **`Item-Id` と `Round` を求めない**。最終ゲートの失敗は全体のテストのもので、
+      どの改善項目にも提案ラウンドにも紐づかない。
+
+    **対象範囲は見る。** 最終ゲートでも `--scope` の外を触ってよい理由は無い。
+    """
+    return _verify_commit_basics(
+        commit,
+        scope,
+        f"コミット {commit.get('sha', '?')} が最終ゲートの修正の範囲に存在しません",
+        check_test=False,
+        required_trailers=FINAL_FIX_TRAILERS,
     )
 
 

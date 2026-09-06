@@ -115,6 +115,11 @@ def vocabulary() -> dict[str, Any]:
 # 自由文で「codex が実装」と書かせると集計に使えないため、必ずトレーラー形式にする。
 REQUIRED_TRAILERS = ("Item-Id", "Round", "Impl-Runtime", "Impl-Model")
 
+# 最終ゲート（Step 7）の修正コミットに必須のトレーラー。**`Item-Id` と `Round` は
+# 求めない。** 最終ゲートが直すのは全体のテストの失敗であって、改善項目にも提案
+# ラウンドにも属さない。書かせると、実在しない項目番号を実装担当が作ることになる。
+FINAL_FIX_TRAILERS = ("Impl-Runtime", "Impl-Model")
+
 # 適用で必ず配置する Skill。ここに無いものは配らない。
 REQUIRED_SKILLS = ("refactoring", "tdd-cycle", "quality-gates")
 
