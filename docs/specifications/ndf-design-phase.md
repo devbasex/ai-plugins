@@ -8,7 +8,7 @@
 ## 概要
 
 設計工程は `design` Skill が担う。モードごとに作る文書を決め、変更が触る領域に対応する参照
-だけを読ませる。`standard` と `architecture` では設計を実装より先にレビューへ通し、設計だけを
+だけを読ませる。`standard` では設計を実装より先にレビューへ通し、設計だけを
 載せた Pull Request をマージしてから実装へ進む。
 
 ## 用語
@@ -44,10 +44,10 @@ AI ごとに変わり、文書の分割単位・記載項目・粒度をその�
 
 ## 工程表での位置
 
-| 工程 | `light` | `standard` | `architecture` | `legacy-refactor` |
-| --- | --- | --- | --- | --- |
-| 設計 | — | `design` | `design` | `design` |
-| 設計レビュー | — | `pr` → `cross-review` → `merged` | `pr` → `cross-review` → `merged` | 任意 |
+| 工程 | `light` | `legacy-refactor` | `standard` |
+| --- | --- | --- | --- |
+| 設計 | — | `design` | `design` |
+| 設計レビュー | — | 任意 | `pr` → `cross-review` → `merged` |
 
 `legacy-refactor` で設計レビューを任意としたのは、このモードが要求と受け入れ条件を通らず、
 レビューの軸が現状固定テストの通過に寄るためである。

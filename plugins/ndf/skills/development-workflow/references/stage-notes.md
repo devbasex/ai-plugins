@@ -65,7 +65,7 @@ Skill は使わず、`pr` → `cross-review` → `merged` の 3 つを順に呼�
 レビュー段階は**明示的に呼ぶ**。自然文で「レビューして」と依頼すると、Claude Code では
 組み込みの `code-review` が起動して判定の投稿経路が変わる。
 
-`standard` と `architecture` は `cross-review` を使う。**片側 1 回の判定では取りこぼしが残る**。
+`standard` は `cross-review` を使う。**片側 1 回の判定では取りこぼしが残る**。
 `cross-review` は 2 つの外部 AI が同じ差分を見て、両方が承認するまで修正を回す。
 `legacy-refactor` が `pr-review` なのは、振る舞いを変えないことの確認が主で、判定の軸が
 この工程で先に置く現状固定テストの通過に寄るためである。
@@ -75,7 +75,7 @@ Skill は使わず、`pr` → `cross-review` → `merged` の 3 つを順に呼�
 呼び出し元・呼び出し先と、同じファイル・同じモジュールの関連箇所まで**を含む（範囲と例外は
 `refactoring` の `references/code-smells.md`「手を付ける範囲」）。
 
-**`architecture` と `legacy-refactor` は `cross-refactoring` を通す。** `refactoring` は
+**`standard` と `legacy-refactor` は `cross-refactoring` を通す。** `refactoring` は
 「テストで守りながら 1 手ずつ直す」手順を持つが、**何を直すかの発見と、直した結果の評価が
 どちらも作業した AI 自身に閉じる**。複数モジュールにまたがる変更と、構造改善そのものが目的の
 変更では、発見と検証を別のランタイムへ分ける価値が費用に見合う。`refactoring` は各担当が

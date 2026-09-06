@@ -83,17 +83,17 @@ def test_a_report_without_any_record_says_so(repo: Path, state: Path) -> None:
 
 def test_a_report_lists_the_recorded_stages(repo: Path, state: Path) -> None:
     """#221-2: 報告はスクリプトの出力として出る。"""
-    seed(repo, state, 161, "architecture", FULL_161)
+    seed(repo, state, 161, "standard", FULL_161)
 
     out = report(repo, state, 161).stdout
 
-    assert out.splitlines()[0] == "#161 の通過工程（architecture）"
+    assert out.splitlines()[0] == "#161 の通過工程（standard）"
     assert "  記録あり: 要求と受け入れ条件 / 作業場所の用意 / 設計 / 設計レビュー / 計画 /" in out
 
 
 def test_the_measured_order_reports_only_the_missing_stage(repo: Path, state: Path) -> None:
     """#221-3: 工程が前後しても誤検知しない。#161 で抜けたのは確定仕様化だけである。"""
-    seed(repo, state, 161, "architecture", FULL_161)
+    seed(repo, state, 161, "standard", FULL_161)
 
     out = report(repo, state, 161).stdout
 
@@ -102,7 +102,7 @@ def test_the_measured_order_reports_only_the_missing_stage(repo: Path, state: Pa
 
 
 def test_the_report_shows_how_to_record_the_missing_stage(repo: Path, state: Path) -> None:
-    seed(repo, state, 161, "architecture", FULL_161)
+    seed(repo, state, 161, "standard", FULL_161)
 
     out = report(repo, state, 161).stdout
 
@@ -110,7 +110,7 @@ def test_the_report_shows_how_to_record_the_missing_stage(repo: Path, state: Pat
 
 
 def test_a_report_without_a_gap_says_so(repo: Path, state: Path) -> None:
-    seed(repo, state, 161, "architecture", MEASURED_161[:4])
+    seed(repo, state, 161, "standard", MEASURED_161[:4])
 
     out = report(repo, state, 161).stdout
 
@@ -119,18 +119,20 @@ def test_a_report_without_a_gap_says_so(repo: Path, state: Path) -> None:
 
 
 def test_a_conditional_stage_is_listed_apart(repo: Path, state: Path) -> None:
-    """条件付きの工程は必須と分けて出す。`standard` の確定仕様化がこれにあたる。"""
-    seed(repo, state, 161, "standard", FULL_161)
+    """条件付きの工程は必須と分けて出す。`legacy-refactor` の設計レビューがこれにあたる。"""
+    seed(repo, state, 161, "legacy-refactor",
+         ["作業場所の用意", "設計", "計画", "実装", "構造改善", "レビュー",
+          "完了判定", "Pull Request", "後片付け"])
 
     out = report(repo, state, 161).stdout
 
-    assert "  条件付き: 確定仕様化" in out
+    assert "  条件付き: 設計レビュー" in out
     assert "記録なし" not in out
 
 
 def test_stages_after_the_furthest_record_are_not_listed(repo: Path, state: Path) -> None:
     """まだ来ていない工程は欠落ではない。**いちばん先の記録までを見る。**"""
-    seed(repo, state, 161, "architecture", ["作業場所の用意", "要求と受け入れ条件", "設計"])
+    seed(repo, state, 161, "standard", ["作業場所の用意", "要求と受け入れ条件", "設計"])
 
     out = report(repo, state, 161).stdout
 
@@ -173,10 +175,10 @@ def test_a_repository_without_the_projects_declaration_still_records(repo: Path,
     """#221-7: 盤面に載っていない課題でも働く。宣言ファイルは読まない。"""
     assert not (repo / ".ndf" / "projects.json").exists()
 
-    seed(repo, state, 266, "architecture", ["作業場所の用意", "設計"])
+    seed(repo, state, 266, "standard", ["作業場所の用意", "設計"])
 
     assert state_file(state, 266).is_file()
-    assert "#266 の通過工程（architecture）" in report(repo, state, 266).stdout
+    assert "#266 の通過工程（standard）" in report(repo, state, 266).stdout
 
 
 def test_two_records_at_once_keep_both_stages(repo: Path, state: Path) -> None:

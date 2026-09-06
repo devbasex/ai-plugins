@@ -286,10 +286,10 @@ def test_a_sync_command_is_recorded(repo: Path, state: Path) -> None:
 
 
 def test_the_mode_is_recorded_from_the_same_command(repo: Path, state: Path) -> None:
-    guard(repo, state, 'bash /abs/scripts/projects-sync.sh 161 mode "architecture"')
+    guard(repo, state, 'bash /abs/scripts/projects-sync.sh 161 mode "standard"')
 
     saved = json.loads(state_file(state, 161).read_text(encoding="utf-8"))
-    assert saved["mode"] == "architecture"
+    assert saved["mode"] == "standard"
 
 
 def test_recording_a_stage_before_the_release_says_nothing(repo: Path, state: Path) -> None:
@@ -301,7 +301,7 @@ def test_recording_a_stage_before_the_release_says_nothing(repo: Path, state: Pa
 def test_recording_the_release_reports_the_missing_stages(repo: Path, state: Path) -> None:
     """#221-1: 必須の工程の記録が無いまま配布の記録へ進んだとき、名前が出力に現れる。"""
     env = base_env(state)
-    run_stage_check("record", "161", "mode", "architecture", cwd=repo, env=env)
+    run_stage_check("record", "161", "mode", "standard", cwd=repo, env=env)
     for stage in ("作業場所の用意", "要求と受け入れ条件", "設計", "設計レビュー", "計画",
                   "実装", "構造改善", "レビュー", "完了判定", "Pull Request", "後片付け"):
         run_stage_check("record", "161", "stage", stage, cwd=repo, env=env)

@@ -53,7 +53,7 @@ ${TMPDIR:-/tmp}/ndf-stages/              # どちらも作れないとき
 `git config --get remote.origin.url` から取る。**通信しない。**
 
 ```json
-{"version": 1, "repo": "devbasex/ai-plugins", "issue": 221, "mode": "architecture",
+{"version": 1, "repo": "devbasex/ai-plugins", "issue": 221, "mode": "standard",
  "stages": ["作業場所の用意", "要求と受け入れ条件", "設計", "設計レビュー"],
  "updated_at": "2026-09-03T00:00:00Z"}
 ```

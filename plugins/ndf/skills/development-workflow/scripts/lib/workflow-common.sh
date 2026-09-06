@@ -15,31 +15,30 @@
 #   R = 必須 / C = 条件付き / - = 対象外
 # 表のセルが `—` なら対象外、`任意` か丸括弧で条件を添えたものなら条件付き、
 # それ以外は必須である。食い違いは tests/test_workflow_stage_matrix.py が拾う。
-WF_MODES=$'light\tstandard\tarchitecture\tlegacy-refactor'
-WF_STAGE_MATRIX=$'要求と受け入れ条件\tR\tR\tR\t-
-作業場所の用意\tC\tR\tR\tR
-設計\t-\tR\tR\tR
-設計レビュー\t-\tR\tR\tC
-計画\t-\tR\tR\tR
-実装\tR\tR\tR\tR
-構造改善\t-\tR\tR\tR
-レビュー\tR\tR\tR\tR
-完了判定\tR\tR\tR\tR
-Pull Request\tR\tR\tR\tR
-確定仕様化\t-\tC\tR\t-
-後片付け\tR\tR\tR\tR
-配布\tR\tR\tR\tR
-リリース後テスト\t-\tC\tR\tR
-振り返り\t-\tR\tR\tR'
+WF_MODES=$'light\tlegacy-refactor\tstandard'
+WF_STAGE_MATRIX=$'要求と受け入れ条件\tR\t-\tR
+作業場所の用意\tC\tR\tR
+設計\t-\tR\tR
+設計レビュー\t-\tC\tR
+計画\t-\tR\tR
+実装\tR\tR\tR
+構造改善\t-\tR\tR
+レビュー\tR\tR\tR
+完了判定\tR\tR\tR
+Pull Request\tR\tR\tR
+確定仕様化\t-\t-\tR
+後片付け\tR\tR\tR
+配布\tR\tR\tR
+リリース後テスト\t-\tR\tR
+振り返り\t-\tR\tR'
 
 # モードの高さ。**列の位置からは導かない**（決定 2-b）。`WF_MODES` の並びをそのまま
-# 高さにすると `architecture` と `legacy-refactor` が入れ替わる。高さは「判定の手順」の
+# 高さにすると読みやすさのための並びが高さの根拠として読まれる。高さは「判定の手順」の
 # 表の並び（上のモードが勝つ）に合わせる。母集合が変わっても、列とは別に持てば
 # 高さの定義を直さずに済む。
 WF_MODE_HEIGHT=$'light\t1
-standard\t2
-legacy-refactor\t3
-architecture\t4'
+legacy-refactor\t2
+standard\t3'
 
 # 報告の引き金になる工程。ここへ進んだ時点で、記録の無い必須の工程を案内する。
 WF_REPORT_STAGE='配布'
