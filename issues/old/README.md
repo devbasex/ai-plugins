@@ -37,6 +37,10 @@
 | [#178](https://github.com/devbasex/ai-plugins/issues/178) | 版を上げるときに古くなる記載を検査の対象へ広げる | [issue-178-doc-staleness-checks.md](issue-178-doc-staleness-checks.md) |
 | [#188](https://github.com/devbasex/ai-plugins/issues/188) | まとめてマージした後の版上げの担い手と時期を決める | [issue-188-release-step.md](issue-188-release-step.md) |
 | [#202](https://github.com/devbasex/ai-plugins/issues/202) | 開発の起点ブランチを `.ndf/worktree.json` で宣言する | [issue-202-base-branch.md](issue-202-base-branch.md) |
+| [#392](https://github.com/devbasex/ai-plugins/issues/392) | 手順書のほぼ同一の段落を 1 つにする | [issue-418-workflow-stage-matrix.md](issue-418-workflow-stage-matrix.md) |
+| [#417](https://github.com/devbasex/ai-plugins/issues/417) | v10.5.0 の事後レビューで出た 8 件を直す | [issue-417-post-review-defects.md](issue-417-post-review-defects.md) |
+| [#418](https://github.com/devbasex/ai-plugins/issues/418) / [#420](https://github.com/devbasex/ai-plugins/issues/420) / [#422](https://github.com/devbasex/ai-plugins/issues/422) | 判定の単位を Pull Request にし、`light` にもレビューと gate を課す | [issue-418-417-workflow-gate/](issue-418-417-workflow-gate/01-requirements.md) / [issue-418-workflow-stage-matrix.md](issue-418-workflow-stage-matrix.md) |
+| [#424](https://github.com/devbasex/ai-plugins/issues/424) | 並行開発へ対応し、承認を 2 つの関門へ集約する | [issue-424-gate-and-approval.md](issue-424-gate-and-approval.md) |
 
 ## 計画と調査資料
 

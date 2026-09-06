@@ -8,7 +8,7 @@
   [#392](https://github.com/devbasex/ai-plugins/issues/392)
 - 要求と受け入れ条件: [issue-418-417-workflow-gate/01-requirements.md](issue-418-417-workflow-gate/01-requirements.md) の A1〜A6 / B1〜B6
 - 設計: [issue-418-417-workflow-gate/02-design.md](issue-418-417-workflow-gate/02-design.md) の決定 1・決定 2・決定 2-b・決定 9
-- 引継ぎ: [handoff-v10.5.1.md](handoff-v10.5.1.md) の本 2
+- 確定仕様: [ndf-workflow-unit-and-gates.md](../../docs/specifications/ndf-workflow-unit-and-gates.md)
 
 ## モード
 
