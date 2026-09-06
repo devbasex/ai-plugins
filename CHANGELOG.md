@@ -9,6 +9,51 @@
 **開発版（接尾辞の付いた版）は載せない。** `9.8.0` は `9.8.0-dev.1` までしか出ておらず、
 その内容は `10.0.0` で届いている。
 
+## [ndf 10.5.1] - 2026-09-06
+
+### 追加
+
+- Pull Request を作る時点で実行証跡の欠落を案内する（#424）。`gh pr create` を tool 実行前の
+  hook が観測し、本文の閉じる語が指す課題の控えからモードの記録・必須の工程の欠落・モードの
+  食い違いを読む。**拒否はしない**
+- 本番のチャネルを `.ndf/worktree.json` の `production_branch` で宣言できるようにした（#424）。
+  宣言が無ければ既定ブランチ。**開発の起点である `base_branch` は流用しない**
+- 並行開発の参照（`development-workflow/references/parallel-work.md`）を新設した（#424）。
+  課題と Pull Request の 4 つの形、工程が動く単位、任せるうえでの下限 6 つ、
+  `issue-plan-strategy` との境界を置いた
+- 確定仕様 `docs/specifications/ndf-workflow-unit-and-gates.md` を新設した
+
+### 変更
+
+- **モードを判定する単位を Pull Request にした**（#420）。工程の順序は「要求と受け入れ条件 →
+  モード判定 → 作業場所の用意」になり、`light` にも要求と受け入れ条件が掛かる
+- **`light` のレビューを `cross-review` にした**（#418）。レビューは 4 モードすべてで通る
+- **`light` を gate の検査から外さない**（#422）
+- 人手の承認を求める関門を 2 つ（設計 Pull Request のマージ / 本番のチャネルへ届く操作）に
+  集約し、要否の決まり方の違いを関門ごとの節に分けた（#424）。`merged` と `pr` から `release`
+  の規則への導線を置いた
+- 閉じる語の読み取りを `plugins/ndf/skills/merged/scripts/` から
+  `plugins/ndf/scripts/lib/closing-issues.sh` へ移した（#424）。**写しは持たない**
+- 語の分割（`wf_split`）の区切りを改行から NUL へ変えた（#424）
+
+### 修正
+
+- 行数の検査が非 ASCII のファイル名を拾う（#417）。`git ls-files -z` を使う。除外の後に対象が
+  0 件のときと、`EXEMPT` の指し先が無いときも失敗にする
+- agy の hook の導入で `--plugin-dir` の相対パスを絶対化し、command を `shlex.quote` した
+  絶対パスで組み立て直す（#417）。`--uninstall` の対象を配布する定義の名前に限り、
+  書き込みを一時ファイル経由の置き換えにした
+- `notion-writing` のバッククォートを含むコード表記を二重の囲みにした（#417）
+- スモークの assertion に残っていた `awk … | grep -qw` を、結果を変数で受ける形へ寄せた（#417）
+- `development-workflow` の手順書に並んでいたほぼ同一の段落を 1 つにした（#392）
+
+## [playwright-kit 2.0.3] - 2026-09-06
+
+### 修正
+
+- `_drive_auth.py` の案内から「どの公開セットにも同梱していない」を外し、`_CANDIDATES` へ
+  agy の導入先を足した（#417）。`google-auth` は 4 つの manifest すべてに載っている
+
 ## [ndf 10.5.0] - 2026-09-05
 
 ### 追加
