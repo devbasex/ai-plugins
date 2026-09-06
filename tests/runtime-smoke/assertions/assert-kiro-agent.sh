@@ -346,7 +346,11 @@ if ! agent_list > "$ARTIFACT_DIR/kiro-agent-list-$scope.txt"; then
 fi
 # global scope の $KIRO_CWD には .kiro がないため、ここに $AGENT_NAME が出ること自体が
 # 「Global: ~/.kiro/agents 経由でどこからでも解決できる」ことの検査になる。
-if ! awk '{ print $1, $2 }' "$ARTIFACT_DIR/kiro-agent-list-$scope.txt" | grep -qw "$AGENT_NAME"; then
+# **パイプの右で判定しない。** `grep -q` は最初の一致で終わるため、`awk` がまだ書いて
+# いる間にパイプが閉じ、`set -o pipefail` のもとでは一致していても 141 になる
+# （assert-plugin-files.sh の注記を参照）。結果を変数で受けてから照合する。
+names="$(awk '{ print $1, $2 }' "$ARTIFACT_DIR/kiro-agent-list-$scope.txt")"
+if ! grep -qw "$AGENT_NAME" <<<"$names"; then
   echo "agent list ($scope) does not contain $AGENT_NAME" >&2
   cat "$ARTIFACT_DIR/kiro-agent-list-$scope.txt" >&2
   exit 1

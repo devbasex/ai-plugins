@@ -42,12 +42,20 @@ EXEMPT: dict[str, str] = {
 
 
 def tracked_markdown(root: Path) -> list[str]:
-    """git が追跡する `.md` の相対パス。"""
+    """git が追跡する `.md` の相対パス。
+
+    **`-z` で受け取る。** 既定（`core.quotepath=true`）の `git ls-files` は非 ASCII を
+    8 進エスケープした引用付きの 1 語で返すため、そのままではファイルが見つからず
+    無言で走査から落ちる。このリポジトリの文書はすべて日本語であり、日本語の
+    ファイル名を付けた時点で行数の検査を素通りしていた（#417 の 1）。
+    `-c core.quotepath=false` でも同じ結果になるが、**利用者の設定を上書きする形は
+    避ける**。`-z` は出力の形だけを変え、設定を読まない。
+    """
     result = subprocess.run(
-        ["git", "-C", str(root), "ls-files", "*.md"],
+        ["git", "-C", str(root), "ls-files", "-z", "*.md"],
         capture_output=True, text=True, check=True,
     )
-    return [line for line in result.stdout.splitlines() if line]
+    return [entry for entry in result.stdout.split("\0") if entry]
 
 
 def is_record(path: str) -> bool:
@@ -89,11 +97,22 @@ def main(argv: list[str] | None = None) -> int:
         if count > LIMIT and rel not in EXEMPT:
             over.append((count, rel))
 
-    # 除外したのに基準を下回っている文書は、除外そのものが要らなくなっている。
+    # **除外は片方向ではない。** 基準を下回った文書も、指し先を失った文書も、除外
+    # そのものが要らなくなっている（後者は #417 の 6）。
     stale = sorted(
         rel for rel in EXEMPT
         if (root / rel).is_file() and line_count(root / rel) <= LIMIT
     )
+    missing = sorted(rel for rel in EXEMPT if not (root / rel).is_file())
+
+    # 除外の後に 1 件も残らないなら、検査は働いていない。`git ls-files` が非空でも
+    # 起こりうるため、走査対象の有無とは別に見る（#417 の 2）。
+    if not counts:
+        print(
+            "[check-doc-line-limit] 除外の後に走査対象が 1 件も残らない",
+            file=sys.stderr,
+        )
+        return 2
 
     if args.report:
         print(f"走査: {len(counts)} 本 / 上限 {LIMIT} 行")
@@ -113,8 +132,13 @@ def main(argv: list[str] | None = None) -> int:
             f"ERROR: {rel} は基準を下回っているのに EXEMPT に残っている。除外を外す",
             file=sys.stderr,
         )
+    for rel in missing:
+        print(
+            f"ERROR: {rel} は EXEMPT に載っているのに存在しない。除外を外す",
+            file=sys.stderr,
+        )
 
-    if over or stale:
+    if over or stale or missing:
         return 1
     print(f"Markdown line limits are satisfied ({len(counts)} files, limit {LIMIT})")
     return 0

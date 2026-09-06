@@ -28,15 +28,28 @@ def output_of(result: subprocess.CompletedProcess) -> str:
 
 @pytest.fixture()
 def repo(tmp_path: Path) -> Path:
-    """git が追跡する `.md` を持つ最小のリポジトリ。"""
+    """git が追跡する `.md` を持つ最小のリポジトリ。
+
+    `EXEMPT` の指し先（`CHANGELOG.md`）を置く。**除外の指し先が無いこと自体を
+    失敗として扱う**ため、置かないと検査そのものが落ちる（#417 の 6）。
+    """
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     (tmp_path / "docs").mkdir()
     (tmp_path / "issues").mkdir()
     (tmp_path / "docs" / "short.md").write_text("x\n" * 10, encoding="utf-8")
+    (tmp_path / "CHANGELOG.md").write_text("x\n" * 900, encoding="utf-8")
     subprocess.run(
         ["git", "-C", str(tmp_path), "add", "-A"], check=True, capture_output=True
     )
     return tmp_path
+
+
+def untrack(root: Path, rel: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(root), "rm", "-q", "--cached", rel],
+        check=True, capture_output=True,
+    )
+    (root / rel).unlink()
 
 
 def track(root: Path, rel: str, lines: int) -> Path:
@@ -131,3 +144,32 @@ def test_every_exemption_carries_a_reason() -> None:
 def test_the_repository_satisfies_the_limit() -> None:
     result = run(REPO)
     assert result.returncode == 0, output_of(result)
+
+
+def test_a_non_ascii_filename_is_scanned(repo: Path) -> None:
+    """`git ls-files` は既定で非 ASCII を 8 進エスケープして返す（#417 の 1）。
+
+    このリポジトリの文書はすべて日本語であり、日本語のファイル名を付けた時点で
+    行数の検査を素通りしていた。**失敗が表に出ない形で起きる。**
+    """
+    track(repo, "docs/日本語.md", 600)
+    result = run(repo)
+    assert result.returncode == 1, output_of(result)
+    assert "日本語.md" in output_of(result)
+
+
+def test_a_scan_that_is_empty_after_the_exclusions_is_a_failure(repo: Path) -> None:
+    """`git ls-files` が非空でも、除外の後に 0 件なら検査は働いていない（#417 の 2）。"""
+    untrack(repo, "docs/short.md")
+    untrack(repo, "CHANGELOG.md")
+    track(repo, "issues/plan.md", 900)
+    result = run(repo)
+    assert result.returncode == 2, output_of(result)
+
+
+def test_an_exemption_for_a_missing_file_fails(repo: Path) -> None:
+    """除外は片方向ではない。指し先が無い除外は、除外そのものが古い（#417 の 6）。"""
+    untrack(repo, "CHANGELOG.md")
+    result = run(repo)
+    assert result.returncode == 1, output_of(result)
+    assert "CHANGELOG.md" in output_of(result)
