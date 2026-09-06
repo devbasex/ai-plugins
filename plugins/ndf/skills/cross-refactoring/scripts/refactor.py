@@ -51,6 +51,7 @@ from refactor_lib import ABORT, die, info  # noqa: E402,F401
 from refactor_lib import vocabulary as _vocabulary  # noqa: E402
 from refactor_lib import rounds as _rounds  # noqa: E402
 from refactor_lib import paths as _paths  # noqa: E402
+from refactor_lib import scope as _scope  # noqa: E402
 from refactor_lib import plan as _plan  # noqa: E402
 from refactor_lib import gitfacts as _gitfacts  # noqa: E402
 from refactor_lib import proposals as _proposals  # noqa: E402
@@ -68,6 +69,7 @@ _LIB_MODULES: tuple[types.ModuleType, ...] = (
     _vocabulary,
     _rounds,
     _paths,
+    _scope,
     _plan,
     _gitfacts,
     _proposals,

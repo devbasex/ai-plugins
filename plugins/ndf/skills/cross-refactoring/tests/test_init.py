@@ -54,7 +54,9 @@ def origin_repo(tmp_path):
 
 def _args(tmp_path, **over):
     base = {
-        "pr": 130, "scope": ["src"], "host": "claude",
+        # **テストの置き場所を含める**（#436 決定 5）。含めないと `init` の関門で
+        # 止まる。関門そのものは `test_scope_gate.py` で見る。
+        "pr": 130, "scope": ["src", "tests"], "host": "claude",
         "max_outer_rounds": 3, "max_fix_rounds": 3, "max_items_per_round": 5,
         "max_test_rounds": 2, "ci_check": None, "workflow_step": False,
         "severity_threshold": "minor", "model": None, "baseline_test": "true",
@@ -108,6 +110,11 @@ def run_init(refactor, origin_repo, monkeypatch):
         monkeypatch.setenv("NDF_SKIP_AUTH_CHECK", "1")
         refactor.cmd_init(args)
     return _run
+
+
+def refactor_abort():
+    """中断の終了コード。`refactor` フィクスチャを取らない関数からも使う。"""
+    return 4
 
 
 def _state_of(tmp_path):
@@ -209,6 +216,32 @@ def test_init_refuses_to_start_when_the_baseline_test_fails(run_init, tmp_path):
     """壊れた状態から始めると、壊したのか元から壊れていたのか区別できない。"""
     with pytest.raises(SystemExit):
         run_init(_args(tmp_path, baseline_test="false"))
+
+
+def test_init_stops_when_the_scope_has_no_test_location(run_init, tmp_path):
+    """C3 — テストの置き場所が範囲に無ければ**止める**（#436 決定 5）。
+
+    案内だけでは同じ失敗を繰り返す。止めれば、利用者は 1 度だけ範囲を直せばよい。
+    """
+    with pytest.raises(SystemExit) as e:
+        run_init(_args(tmp_path, scope=["src"]))
+    assert e.value.code == refactor_abort()
+
+
+def test_init_stops_when_the_test_location_is_outside_the_baseline_search(
+    run_init, tmp_path, origin_repo
+):
+    """C3 — 足したテストが `--baseline-test` で実行されないなら止める。"""
+    (origin_repo / "src" / "unit").mkdir(parents=True, exist_ok=True)
+    with pytest.raises(SystemExit):
+        run_init(_args(tmp_path, scope=["src", "tests"],
+                       baseline_test="pytest src/unit"))
+
+
+def test_init_checks_the_scope_before_running_the_baseline_test(run_init, tmp_path):
+    """関門は着手前のテストより先に通す。落ちる実行に時間を使わせない。"""
+    with pytest.raises(SystemExit):
+        run_init(_args(tmp_path, scope=["src"], baseline_test="false"))
 
 
 def _parsed_init_args(refactor, monkeypatch, *extra):

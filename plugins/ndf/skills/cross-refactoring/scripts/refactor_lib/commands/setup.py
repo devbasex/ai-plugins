@@ -31,6 +31,7 @@ from ..paths import (
 )
 from ..plan import default_plan_file, normalize_plan_file
 from ..rounds import STRUCTURE, TEST, entry_kind, round_kind
+from ..scope import require_scope_covers_tests
 from ..vocabulary import (
     DEFAULT_TEST_TIMEOUT,
     REQUIRED_SKILLS,
@@ -210,6 +211,13 @@ def cmd_init(args: argparse.Namespace) -> None:
     )
     work = root / "work"
     _ensure_work_worktree(work, head_branch)
+
+    # **`--scope` の関門はここで通す**（#436 決定 5）。テストの置き場所が範囲に
+    # 無い、または `--baseline-test` の実行集合に入らないまま進むと、テスト整備
+    # ラウンドが足したテストが検証に効かない。案内だけでは同じ失敗を繰り返す
+    # ため、**止める**。作業ディレクトリが要るのは、探索範囲の語がディレクトリか
+    # どうかを実物で確かめるためである。
+    require_scope_covers_tests(args.scope, args.baseline_test, str(work))
 
     tmp_dir = _tmp_dir_for(work)
     tmp_dir.mkdir(parents=True, exist_ok=True)
