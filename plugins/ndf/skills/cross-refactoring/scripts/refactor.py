@@ -124,12 +124,28 @@ def main() -> None:
                       help="対象範囲。提案が無制限に広がらないよう必須にしている")
     init.add_argument("--host", choices=list(assignment.HOST_RUNTIMES), default=None,
                       help="ホストの明示指定。未指定時は環境変数から推定する")
-    # 既定は輪番の 1 周（適用の母集合の大きさ）。3 のままだと `ALL_RUNTIMES` の
-    # 先頭にある claude の順番（ラウンド 4）へ届かない。
-    init.add_argument("--max-outer-rounds", type=int,
-                      default=len(assignment.ALL_RUNTIMES))
-    init.add_argument("--max-fix-rounds", type=int, default=3)
-    init.add_argument("--max-items-per-round", type=int, default=5)
+    # **切るのは提案の回数であって、適用できる件数ではない**（#436 決定 8）。
+    # 適用ラウンドを分けたことで、1 回の提案で通せる件数は上限に縛られなくなった。
+    # 取り消した項目は除外されるため、同じ提案が積み上がって回数を食うこともない。
+    # **輪番の 1 周を根拠にしない。** 適用の担当は適用ラウンドごとに進むので、
+    # 1 つの提案ラウンドが複数の群を持てば輪番は 1 周しうる。
+    init.add_argument("--max-outer-rounds", type=int, default=3,
+                      help="構造改善の提案ラウンドの上限")
+    # テスト整備は母集合が増えない（対象のコードを変えないため、テストが薄い経路の
+    # 集合は最初から確定している）。2 回目に出るのは 1 回目の挙げ漏らしだけである。
+    init.add_argument("--max-test-rounds", type=int,
+                      default=DEFAULT_MAX_TEST_ROUNDS,
+                      help="テスト整備ラウンドの上限。到達したら採用が残っていても "
+                           "構造改善の提案ラウンドへ進む "
+                           f"(default: {DEFAULT_MAX_TEST_ROUNDS})")
+    init.add_argument("--max-fix-rounds", type=int, default=3,
+                      help="1 つの適用ラウンドあたりの修正ラウンドの上限")
+    init.add_argument("--max-items-per-round", type=int, default=5,
+                      help="1 つの提案ラウンド／テスト整備ラウンドの採用上限")
+    init.add_argument("--ci-check", default=None, metavar="NAME",
+                      help="最終ゲートで手元のテストの代わりに見る検査の名前。"
+                           "**指定すると手元のテストは実行しない**（排他）。"
+                           "指定が無ければ手元のテストで判定する")
     init.add_argument("--severity-threshold", default=DEFAULT_SEVERITY_THRESHOLD,
                       choices=[s for s in SEVERITY_ORDER if s != "unknown"])
     init.add_argument("--model", action="append", metavar="RUNTIME=MODEL",

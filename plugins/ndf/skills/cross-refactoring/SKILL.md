@@ -1,7 +1,7 @@
 ---
 name: cross-refactoring
 description: "Let several CLIs propose, apply, and review refactorings on a PR until no new proposal appears. Use when structural improvement should converge across runtimes（クロスリファクタリング・多AIリファクタリング・収束リファクタリング）."
-argument-hint: "[PR番号] --scope PATH... [--host claude|codex|agy|kiro] [--model RT=MODEL] [--baseline-test CMD] [--max-outer-rounds N] [--max-fix-rounds N] [--max-items-per-round N]"
+argument-hint: "[PR番号] --scope PATH... [--host claude|codex|agy|kiro] [--model RT=MODEL] [--baseline-test CMD] [--max-test-rounds N] [--max-outer-rounds N] [--max-fix-rounds N] [--max-items-per-round N] [--ci-check NAME]"
 allowed-tools:
   - Bash
   - Read
@@ -35,6 +35,26 @@ allowed-tools:
 - [scripts/launch-cli.sh](scripts/launch-cli.sh) — フェーズごとのプロンプト組み立てと CLI 起動
 - 監視と CLI 起動の実体は `../../scripts/lib/`（プラグインルート直下の収束ループ共通層）
 
+## この Skill で使う語
+
+**階層はすべて「ラウンド」で表す。** 4 つは同じ形（提案 → 採否 → 適用ラウンド →
+検証 → 修正ラウンド）を持つため、読み手が覚える形は 1 つで済む。**何の単位かと、
+どの上限が掛かるかは 4 つとも違う。**
+
+| 語 | 何の単位か | 上限を決めるもの |
+| --- | --- | --- |
+| テスト整備ラウンド | **足すべきテストを集める。** 3 者が提案し、採否を決める | `--max-test-rounds`（既定 2） |
+| 提案ラウンド | **構造改善の提案を集める。** 3 者が提案し、採否を決める | `--max-outer-rounds`（既定 3） |
+| 適用ラウンド | **同時に適用して検証する。** 書き換えるファイルが重ならない項目だけを含む。**上の 2 つのラウンドが共有する** | 別に置かない（`--max-items-per-round` が実質の上限） |
+| 修正ラウンド | **検証の失敗を直す。上の 2 つのラウンドが共有する** | `--max-fix-rounds`（既定 3） |
+| 改善項目 | 構造改善の提案の 1 件。`<ファイル>#<シンボル>` と兆候で識別する | — |
+| テスト項目 | テスト整備の提案の 1 件。固定する入口（`target`）と経路の種類（`case`）で識別する | — |
+
+**「バッチ」「パッチ」の語は使わない。** 読み手が別の意味で知っている語である。
+
+**適用ラウンドに別の上限を置かない。** 採用件数の上限が既に群の数を切っている。
+上限を 2 つ置くと、どちらで止まったのかを読み解く必要が出る。
+
 ## 設計方針
 
 | 観点 | 方針 |
@@ -63,9 +83,11 @@ allowed-tools:
 | `--host claude\|codex\|agy\|kiro` | ホストの明示指定。未指定時は環境変数から推定（agy は推定できないため明示する） | 推定 |
 | `--model RT=MODEL` | ランタイムごとのモデル。繰り返し指定できる | CLI の既定 |
 | `--baseline-test CMD` | 着手前と各コミットで実行するテスト。**振る舞い不変を示す手段が無い書き換えは構造改善ではないため必須** | 必須 |
-| `--max-outer-rounds N` | 提案ラウンドの上限 | `4` |
-| `--max-fix-rounds N` | 1 ラウンドあたりの修正の上限 | `3` |
-| `--max-items-per-round N` | 1 ラウンドの採用上限 | `5` |
+| `--max-test-rounds N` | **テスト整備ラウンド**の上限。到達したら採用が残っていても提案ラウンドへ進む | `2` |
+| `--max-outer-rounds N` | **提案ラウンド**の上限。切るのは提案の回数であって、適用できる件数ではない | `3` |
+| `--max-fix-rounds N` | **1 つの適用ラウンドあたり**の修正ラウンドの上限 | `3` |
+| `--max-items-per-round N` | **1 つの提案ラウンド／テスト整備ラウンド**の採用上限 | `5` |
+| `--ci-check NAME` | 最終ゲートで手元のテストの代わりに見る検査の名前。**指定すると手元のテストは実行しない**（排他） | なし |
 | `--severity-threshold LEVEL` | この重要度未満は採用しない | `minor` |
 | `--test-timeout SEC` | テスト 1 回あたりの上限秒数。超えたら失敗として扱う | `900` |
 | `--sync-command CMD` | 生成物を同期するコマンド。**push の直前**に進行側が実行し、差分があれば進行側のコミットとして積む | なし |
@@ -98,8 +120,9 @@ allowed-tools:
   `refactoring` / `tdd-cycle` / `quality-gates` を配っている
 - **ホストは適用にだけ参加する。** 提案とレビューから外れているので、
   「実装した者と評価する者が同一モデルにならない」構造は保たれる
-- **適用担当は 4 ラウンドで 1 周する。** `--max-outer-rounds` の既定を 4 にしているのは、
-  上限 3 では 4 者目（claude）の順番へ届かないためである
+- **適用担当は適用ラウンドごとに輪番を進める。** 1 つの提案ラウンドが複数の群を
+  持てば、その分だけ輪番も進む。**`--max-outer-rounds` が切るのは提案の回数だけ**で、
+  輪番の 1 周とは対応しない
 
 割り当ては `refactor.py start-round` が返し、状態ファイルへ記録する。**再開しても変わらない。**
 

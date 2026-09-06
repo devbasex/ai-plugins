@@ -56,6 +56,7 @@ def _args(tmp_path, **over):
     base = {
         "pr": 130, "scope": ["src"], "host": "claude",
         "max_outer_rounds": 3, "max_fix_rounds": 3, "max_items_per_round": 5,
+        "max_test_rounds": 2, "ci_check": None,
         "severity_threshold": "minor", "model": None, "baseline_test": "true",
         "sync_command": None, "plan_file": None,
         "test_timeout": 60,
@@ -210,21 +211,54 @@ def test_init_refuses_to_start_when_the_baseline_test_fails(run_init, tmp_path):
         run_init(_args(tmp_path, baseline_test="false"))
 
 
-def test_max_outer_rounds_defaults_to_the_rotation_length(refactor, monkeypatch):
-    """既定の上限が輪番の 1 周（4 ラウンド）に届くこと。
-
-    上限 3 のままだと、`ALL_RUNTIMES` の先頭にある claude の順番（ラウンド 4）へ
-    到達しない。除外を外したのに 1 者が適用担当にならない状態が残る。
-    """
+def _parsed_init_args(refactor, monkeypatch, *extra):
+    """`init` の引数を解析だけして返す。"""
     captured = {}
     monkeypatch.setattr(refactor, "cmd_init", lambda args: captured.update(vars(args)))
     monkeypatch.setattr(
         refactor.sys, "argv",
         ["refactor.py", "init", "130", "--scope", "src", "--host", "claude",
-         "--baseline-test", "true"],
+         "--baseline-test", "true", *extra],
     )
     refactor.main()
-    assert captured["max_outer_rounds"] == 4
+    return captured
+
+
+def test_the_round_caps_have_their_own_defaults(refactor, monkeypatch):
+    """E1 — 4 つの上限は別々の単位に掛かる（#436 決定 8）。
+
+    `--max-outer-rounds` が 3 でよいのは、適用ラウンドを分けたことで**1 回の提案で
+    通せる件数が上限に縛られなくなった**ためである。輪番の 1 周を根拠にしない
+    （適用の担当は適用ラウンドごとに進むので、1 つの提案ラウンドでも輪番は 1 周
+    しうる）。
+    """
+    captured = _parsed_init_args(refactor, monkeypatch)
+    assert captured["max_test_rounds"] == 2
+    assert captured["max_outer_rounds"] == 3
+    assert captured["max_fix_rounds"] == 3
+    assert captured["max_items_per_round"] == 5
+
+
+def test_the_ci_check_is_not_set_by_default(refactor, monkeypatch):
+    """指定が無ければ代替しない。**手元のテストで判定する**（決定 7 の排他）。"""
+    assert _parsed_init_args(refactor, monkeypatch)["ci_check"] is None
+    assert _parsed_init_args(
+        refactor, monkeypatch, "--ci-check", "tests")["ci_check"] == "tests"
+
+
+def test_init_starts_with_a_test_round(run_init, tmp_path):
+    """B4 — 初期化の後、最初の提案ラウンドの前にテスト整備ラウンドを置く。"""
+    run_init(_args(tmp_path))
+    _, state = _state_of(tmp_path)
+    assert state["round_kind"] == "test"
+    assert state["max_test_rounds"] == 2
+    assert state["test_vocabulary"]["cases"], "語彙は状態ファイル経由で渡す"
+
+
+def test_init_records_the_ci_check(run_init, tmp_path):
+    run_init(_args(tmp_path, ci_check="tests"))
+    _, state = _state_of(tmp_path)
+    assert state["ci_check"] == "tests"
 
 
 def test_baseline_test_is_required(refactor, monkeypatch):

@@ -246,10 +246,20 @@ def cmd_init(args: argparse.Namespace) -> None:
         # 提案プロンプトへ許容値をそのまま列挙するために持たせる。
         # 定義は検証側（この CLI）にあり、状態ファイル経由で起動側へ渡す。
         "vocabulary": vocabulary(),
+        # テスト整備ラウンドの語彙も同じ経路で渡す。**新しい語彙は作らず**、
+        # 既存の 3 本の参照が持つ分類をそのまま列挙する（決定 9）。
+        "test_vocabulary": test_vocabulary(),
         "skills": {"required": list(REQUIRED_SKILLS)},
         "max_outer_rounds": args.max_outer_rounds,
+        "max_test_rounds": args.max_test_rounds,
         "max_fix_rounds": args.max_fix_rounds,
         "max_items_per_round": args.max_items_per_round,
+        # 最終ゲートで手元のテストの代わりに見る検査の名前。**排他である**
+        # （指定があれば手元のテストを実行しない）。
+        "ci_check": args.ci_check,
+        # **最初に開くのはテスト整備ラウンドである。** テストが乏しい箇所では、
+        # 「テストが通ること」を検証に使えない（Step 5 の判定はテストで決まる）。
+        "round_kind": TEST,
         "severity_threshold": args.severity_threshold,
         "baseline_test": baseline,
         # 生成物の同期は**進行側の責務**。push の直前に実行する。
