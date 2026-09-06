@@ -32,8 +32,23 @@ Pull Request\tR\tR\tR\tR
 リリース後テスト\t-\tC\tR\tR
 振り返り\t-\tR\tR\tR'
 
+# モードの高さ。**列の位置からは導かない**（決定 2-b）。`WF_MODES` の並びをそのまま
+# 高さにすると `architecture` と `legacy-refactor` が入れ替わる。高さは「判定の手順」の
+# 表の並び（上のモードが勝つ）に合わせる。母集合が変わっても、列とは別に持てば
+# 高さの定義を直さずに済む。
+WF_MODE_HEIGHT=$'light\t1
+standard\t2
+legacy-refactor\t3
+architecture\t4'
+
 # 報告の引き金になる工程。ここへ進んだ時点で、記録の無い必須の工程を案内する。
 WF_REPORT_STAGE='配布'
+
+# Pull Request を作る時点の検査で、終点にする工程。この工程より前の必須の工程を見る。
+WF_PR_STAGE='Pull Request'
+# その検査から外す工程。**`cross-review` は Pull Request が無いと回せない**（決定 7）。
+# 求めれば毎回欠落として出て、案内が読まれなくなる。
+WF_PR_EXEMPT_STAGE='レビュー'
 # 承認の印。**この名前のラベルがリポジトリに定義されていること自体が有効化の宣言になる**。
 WF_APPROVAL_LABEL='design-approved'
 # 設計 Pull Request を見分ける head のブランチ名の接頭辞。
@@ -95,6 +110,41 @@ wf_stage_class() {
   return 1
 }
 
+# モードの高さを数で返す。知らないモードは 0 を返す。
+wf_mode_height() {
+  local want="${1:-}" line name value
+  [ -n "$want" ] || { printf '0\n'; return 1; }
+  while IFS= read -r line; do
+    IFS=$'\t' read -r name value <<<"$line"
+    if [ "$name" = "$want" ]; then printf '%s\n' "$value"; return 0; fi
+  done <<<"$WF_MODE_HEIGHT"
+  printf '0\n'
+  return 1
+}
+
+# 2 つのモードのうち高い方を返す。高さが同じなら先に与えた方を返す。
+wf_higher_mode() {
+  local a="${1:-}" b="${2:-}" ha hb
+  [ -n "$a" ] || { printf '%s\n' "$b"; return 0; }
+  [ -n "$b" ] || { printf '%s\n' "$a"; return 0; }
+  ha=$(wf_mode_height "$a") || true
+  hb=$(wf_mode_height "$b") || true
+  if [ "$hb" -gt "$ha" ]; then printf '%s\n' "$b"; else printf '%s\n' "$a"; fi
+}
+
+# Pull Request を作る時点で求める工程を 1 行 1 件返す。
+#
+# **終点は工程表が持つ並びで決める。** 記録済みの最も先の工程（`_wf_frontier`）に置くと、
+# Pull Request を作る時点では常にその手前であるため、欠落が 1 件も出ない（決定 7）。
+wf_stages_before_pr() {
+  local stage
+  while IFS= read -r stage; do
+    [ "$stage" = "$WF_PR_STAGE" ] && return 0
+    [ "$stage" = "$WF_PR_EXEMPT_STAGE" ] && continue
+    printf '%s\n' "$stage"
+  done < <(wf_stages)
+}
+
 # --- 引用符を解いた語の分割 --------------------------------------------------
 # **展開はしない。** コマンドの本文を判定するだけで、実行はこの hook の役目ではない。
 # `$SCRIPTS` のような未展開の変数はそのままの文字列として残る。
@@ -129,7 +179,7 @@ wf_split() {
 # 判定の対象になりうる本文かを、走査の前に安く見分ける。
 # **当たらない本文では語の分割そのものを行わない。**
 wf_is_candidate() {
-  grep -qE 'projects-sync\.sh|pr[[:space:]]+merge|pulls/[0-9]+/merge' <<<"${1:-}"
+  grep -qE 'projects-sync\.sh|pr[[:space:]]+merge|pulls/[0-9]+/merge|pr[[:space:]]+create' <<<"${1:-}"
 }
 
 # 進行の記録のコマンドなら、課題番号・キー・値をタブ区切りで出す。
@@ -149,6 +199,143 @@ wf_parse_sync() {
   [ "$found" -eq 0 ] || return 1
   [ "${#args[@]}" -ge 3 ] || return 1
   printf '%s\t%s\t%s\n' "${args[0]}" "${args[1]}" "${args[2]}"
+}
+
+# --- Pull Request の作成の観測（#424） ---------------------------------------
+
+# 閉じる語の読み取りの実体。**写しは持たない**（決定 3）。`merged` と gate の両方が
+# 同じファイルを `bash` の副プロセスとして起動する。
+#
+# **`cd` では解決しない。** Skill だけを複製する Kiro CLI の配置では symlink の手前へ
+# 戻り、プラグインルートを外す。4 階層の相対で指す形は #293 で契約として固定した。
+WF_CLOSING_ISSUES="$(dirname "${BASH_SOURCE[0]}")/../../../../scripts/lib/closing-issues.sh"
+
+# `gh pr create` の本文を取り出す。取れなければ 1 を返す。
+#
+# 本文の渡し方は 2 つある（`--body` と `--body-file`）。**短い形も見る**（`-b` / `-F`）。
+_wf_pr_create_body() {
+  local cmd="${1:-}" tok want="" body="" state=0 found=1
+  while IFS= read -r tok; do
+    if [ -n "$want" ]; then
+      case "$want" in
+        text) body="$tok" ;;
+        file) [ -f "$tok" ] && body=$(cat -- "$tok" 2>/dev/null) || body="" ;;
+      esac
+      want=""
+      continue
+    fi
+    case "$state" in
+      0) [ "$tok" = "gh" ] && state=1 ;;
+      1) case "$tok" in pr) state=2 ;; gh) ;; -*) ;; *) state=0 ;; esac ;;
+      2) if [ "$tok" = "create" ]; then state=3; found=0; else state=0; fi ;;
+    esac
+    [ "$found" -eq 0 ] || continue
+    case "$tok" in
+      --body|-b) want=text ;;
+      --body-file|-F) want=file ;;
+      --body=*) body="${tok#--body=}" ;;
+      --body-file=*)
+        tok="${tok#--body-file=}"
+        [ -f "$tok" ] && body=$(cat -- "$tok" 2>/dev/null) || body=""
+        ;;
+    esac
+  done < <(wf_split "$cmd")
+  [ "$found" -eq 0 ] || return 1
+  [ -n "$body" ] || return 1
+  printf '%s\n' "$body"
+}
+
+# `gh pr create` の本文から、閉じる語が指す `<所有者>/<リポジトリ>` と `<番号>` の組を
+# タブ区切りで出す。取れなければ 1 を返す（**何も出さずに通す**）。
+wf_parse_pr_create() {
+  local cmd="${1:-}" body slug out
+  [ -x "$WF_CLOSING_ISSUES" ] || [ -f "$WF_CLOSING_ISSUES" ] || return 1
+  body=$(_wf_pr_create_body "$cmd") || return 1
+  slug=$(wf_repo_slug ".") || return 1
+  out=$(printf '%s\n' "$body" | bash "$WF_CLOSING_ISSUES" --repo "$slug" 2>/dev/null) || return 1
+  [ -n "$out" ] || return 1
+  printf '%s\n' "$out"
+}
+
+# 控えに記録の無い、Pull Request の作成までに求める工程を 1 行 1 件返す。
+_wf_missing_before_pr() {
+  local mode="${1:-}" content="${2:-}" stage class
+  local -a recorded=()
+  while IFS= read -r stage; do
+    [ -n "$stage" ] && recorded+=("$stage")
+  done < <(_wf_recorded "$content")
+  while IFS= read -r stage; do
+    _wf_contains "$stage" ${recorded[@]+"${recorded[@]}"} && continue
+    class=$(wf_stage_class "$mode" "$stage") || continue
+    [ "$class" = "R" ] || continue
+    printf '%s\n' "$stage"
+  done < <(wf_stages_before_pr)
+}
+
+# リポジトリと番号の組（タブ区切り、1 行 1 件）を標準入力から受け、案内を 1 つの文字列で
+# 返す。**言うことが何も無ければ 1 を返す。**
+#
+# **拒否はしない。** 記録が無いことは、その工程を通っていないことと同じではない。
+wf_evidence_report() {
+  local line repo issue file content mode stage
+  local -a targets=() notes=() modes=()
+  local effective="" conflict=0 body=""
+
+  command -v jq >/dev/null 2>&1 || return 1
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    IFS=$'\t' read -r repo issue <<<"$line"
+    [ -n "$repo" ] && [ -n "$issue" ] || continue
+    targets+=("$repo"$'\t'"$issue")
+    file=$(wf_state_file "$repo" "$issue") || continue
+    [ -f "$file" ] || continue
+    content=$(wf_state_read "$file")
+    mode=$(jq -r '.mode // empty' <<<"$content" 2>/dev/null)
+    [ -n "$mode" ] || continue
+    _wf_contains "$mode" ${modes[@]+"${modes[@]}"} || modes+=("$mode")
+    effective=$(wf_higher_mode "$effective" "$mode")
+  done
+  [ "${#targets[@]}" -gt 0 ] || return 1
+  [ "${#modes[@]}" -gt 1 ] && conflict=1
+
+  for line in "${targets[@]}"; do
+    IFS=$'\t' read -r repo issue <<<"$line"
+    file=$(wf_state_file "$repo" "$issue") || continue
+    if [ ! -f "$file" ]; then
+      notes+=("  #$issue ($repo): 進行の記録がありません（モードの記録も、通過工程の記録もありません）")
+      continue
+    fi
+    content=$(wf_state_read "$file")
+    mode=$(jq -r '.mode // empty' <<<"$content" 2>/dev/null)
+    if [ -z "$mode" ]; then
+      notes+=("  #$issue ($repo): モードの記録がありません")
+      [ -n "$effective" ] || continue
+      mode="$effective"
+    else
+      mode="$effective"
+    fi
+    local missing=""
+    while IFS= read -r stage; do
+      [ -n "$stage" ] || continue
+      [ -n "$missing" ] && missing="$missing / "
+      missing="$missing$stage"
+    done < <(_wf_missing_before_pr "$mode" "$content")
+    [ -n "$missing" ] && notes+=("  #$issue ($repo): 記録なし: $missing")
+  done
+
+  [ "${#notes[@]}" -gt 0 ] || [ "$conflict" -eq 1 ] || return 1
+
+  body='Pull Request を作る前に、進行の記録を確かめてください。'
+  for line in ${notes[@]+"${notes[@]}"}; do
+    body="$body"$'\n'"$line"
+  done
+  if [ "$conflict" -eq 1 ]; then
+    body="$body"$'\n'"モードの記録が課題ごとに食い違います（$(wf_join "${modes[@]}")）。最も高い $effective を基準に見ています。"
+    body="$body"$'\n'"1 つの Pull Request に対しモードは 1 つです。閉じる課題すべての控えへ同じ値を書いてください。"
+  fi
+  body="$body"$'\n'"記録が無いことは、その工程を通っていないことと同じではありません。記録の側が遅れているだけのこともあります。"
+  body="$body"$'\n'"記録するには: bash \"\$SCRIPTS/projects-sync.sh\" <課題番号> stage \"<工程名>\""
+  printf '%s\n' "$body"
 }
 
 # --- JSON の組み立て --------------------------------------------------------
