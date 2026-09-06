@@ -292,16 +292,21 @@ _wf_missing_before_pr() {
   done < <(wf_stages_before_pr)
 }
 
-_wf_collect_targets() {
-  local line repo issue file content mode
-  local -a raw_targets=() modes=()
-  local effective="" conflict=0
+# リポジトリと番号の組（タブ区切り、1 行 1 件）を標準入力から受け、案内を 1 つの文字列で
+# 返す。**言うことが何も無ければ 1 を返す。**
+#
+# **拒否はしない。** 記録が無いことは、その工程を通っていないことと同じではない。
+wf_evidence_report() {
+  local line repo issue file content mode stage
+  local -a targets=() notes=() modes=()
+  local effective="" conflict=0 body=""
 
+  command -v jq >/dev/null 2>&1 || return 1
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     IFS=$'\t' read -r repo issue <<<"$line"
     [ -n "$repo" ] && [ -n "$issue" ] || continue
-    raw_targets+=("$repo"$'\t'"$issue")
+    targets+=("$repo"$'\t'"$issue")
     file=$(wf_state_file "$repo" "$issue") || continue
     [ -f "$file" ] || continue
     content=$(wf_state_read "$file")
@@ -310,49 +315,33 @@ _wf_collect_targets() {
     _wf_contains "$mode" ${modes[@]+"${modes[@]}"} || modes+=("$mode")
     effective=$(wf_higher_mode "$effective" "$mode")
   done
-  [ "${#raw_targets[@]}" -gt 0 ] || return 1
+  [ "${#targets[@]}" -gt 0 ] || return 1
   [ "${#modes[@]}" -gt 1 ] && conflict=1
 
-  printf '%s\n' "$effective"
-  printf '%s\n' "$conflict"
-  printf '%s\n' "${modes[*]}"
-  for line in "${raw_targets[@]}"; do
-    printf '%s\n' "$line"
+  for line in "${targets[@]}"; do
+    IFS=$'\t' read -r repo issue <<<"$line"
+    file=$(wf_state_file "$repo" "$issue") || continue
+    if [ ! -f "$file" ]; then
+      notes+=("  #$issue ($repo): 進行の記録がありません（モードの記録も、通過工程の記録もありません）")
+      continue
+    fi
+    content=$(wf_state_read "$file")
+    mode=$(jq -r '.mode // empty' <<<"$content" 2>/dev/null)
+    if [ -z "$mode" ]; then
+      notes+=("  #$issue ($repo): モードの記録がありません")
+      [ -n "$effective" ] || continue
+      mode="$effective"
+    else
+      mode="$effective"
+    fi
+    local missing=""
+    while IFS= read -r stage; do
+      [ -n "$stage" ] || continue
+      [ -n "$missing" ] && missing="$missing / "
+      missing="$missing$stage"
+    done < <(_wf_missing_before_pr "$mode" "$content")
+    [ -n "$missing" ] && notes+=("  #$issue ($repo): 記録なし: $missing")
   done
-  return 0
-}
-
-_wf_target_note() {
-  local repo="${1:-}" issue="${2:-}" effective="${3:-}"
-  local file content mode stage missing=""
-  file=$(wf_state_file "$repo" "$issue") || return 0
-  if [ ! -f "$file" ]; then
-    printf '  #%s (%s): 進行の記録がありません（モードの記録も、通過工程の記録もありません）\n' "$issue" "$repo"
-    return 0
-  fi
-  content=$(wf_state_read "$file")
-  mode=$(jq -r '.mode // empty' <<<"$content" 2>/dev/null)
-  if [ -z "$mode" ]; then
-    printf '  #%s (%s): モードの記録がありません\n' "$issue" "$repo"
-    [ -n "$effective" ] || return 0
-    mode="$effective"
-  else
-    mode="$effective"
-  fi
-  while IFS= read -r stage; do
-    [ -n "$stage" ] || continue
-    [ -n "$missing" ] && missing="$missing / "
-    missing="$missing$stage"
-  done < <(_wf_missing_before_pr "$mode" "$content")
-  [ -n "$missing" ] && printf '  #%s (%s): 記録なし: %s\n' "$issue" "$repo" "$missing"
-  return 0
-}
-
-_wf_compose_evidence_body() {
-  local conflict="${1:-0}" effective="${2:-}" modes_str="${3:-}"
-  shift 3
-  local -a notes=("$@")
-  local body line
 
   [ "${#notes[@]}" -gt 0 ] || [ "$conflict" -eq 1 ] || return 1
 
@@ -361,43 +350,12 @@ _wf_compose_evidence_body() {
     body="$body"$'\n'"$line"
   done
   if [ "$conflict" -eq 1 ]; then
-    body="$body"$'\n'"モードの記録が課題ごとに食い違います（$modes_str）。最も高い $effective を基準に見ています。"
+    body="$body"$'\n'"モードの記録が課題ごとに食い違います（$(wf_join "${modes[@]}")）。最も高い $effective を基準に見ています。"
     body="$body"$'\n'"1 つの Pull Request に対しモードは 1 つです。閉じる課題すべての控えへ同じ値を書いてください。"
   fi
   body="$body"$'\n'"記録が無いことは、その工程を通っていないことと同じではありません。記録の側が遅れているだけのこともあります。"
   body="$body"$'\n'"記録するには: bash \"\$SCRIPTS/projects-sync.sh\" <課題番号> stage \"<工程名>\""
   printf '%s\n' "$body"
-}
-
-# リポジトリと番号の組（タブ区切り、1 行 1 件）を標準入力から受け、案内を 1 つの文字列で
-# 返す。**言うことが何も無ければ 1 を返す。**
-#
-# **拒否はしない。** 記録が無いことは、その工程を通っていないことと同じではない。
-wf_evidence_report() {
-  local collected effective conflict modes_str line repo issue note
-  local -a targets=() notes=() modes=()
-
-  command -v jq >/dev/null 2>&1 || return 1
-
-  collected=$(_wf_collect_targets) || return 1
-  {
-    IFS= read -r effective
-    IFS= read -r conflict
-    IFS= read -r modes_str
-    while IFS= read -r line; do
-      [ -n "$line" ] && targets+=("$line")
-    done
-  } <<<"$collected"
-  read -r -a modes <<<"$modes_str"
-
-  for line in "${targets[@]}"; do
-    IFS=$'\t' read -r repo issue <<<"$line"
-    while IFS= read -r note; do
-      [ -n "$note" ] && notes+=("$note")
-    done < <(_wf_target_note "$repo" "$issue" "$effective")
-  done
-
-  _wf_compose_evidence_body "$conflict" "$effective" "$(wf_join ${modes[@]+"${modes[@]}"})" ${notes[@]+"${notes[@]}"}
 }
 
 # --- JSON の組み立て --------------------------------------------------------
