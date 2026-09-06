@@ -40,18 +40,11 @@ wf_merge_target() {
         esac
         ;;
     esac
+    if [ "$state" -ne 3 ]; then
+      state=$(_wf_seek_gh_verb "$state" "$tok" "merge")
+      [ "$state" = "3" ] && found=0
+    fi
     case "$state" in
-      0) [ "$tok" = "gh" ] && state=1 ;;
-      1)
-        case "$tok" in
-          pr) state=2 ;;
-          gh) ;;
-          -R|--repo) state=4 ;;
-          -*) ;;
-          *) state=0 ;;
-        esac
-        ;;
-      2) if [ "$tok" = "merge" ]; then state=3; found=0; else state=0; fi ;;
       3)
         [ -n "$num" ] && continue
         case "$tok" in
@@ -68,8 +61,6 @@ wf_merge_target() {
           *) num="$tok" ;;
         esac
         ;;
-      # `-R` / `--repo` が別の語で取る値。読み飛ばして `gh` の直後へ戻る。
-      4) state=1 ;;
     esac
   done < <(wf_split "$cmd")
   [ "$found" -eq 0 ] || return 1
