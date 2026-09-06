@@ -63,8 +63,8 @@ Pull Request が出る場合も、既定の `Linked pull requests` に並ぶた�
 
 | 工程表の行 | 記録する Skill | `stage` の値 |
 | --- | --- | --- |
-| 作業場所の用意 | `worktree` | `作業場所の用意` |
 | 要求と受け入れ条件 | `requirements-design` | `要求と受け入れ条件` |
+| 作業場所の用意 | `worktree` | `作業場所の用意` |
 | 設計 | `design` | `設計` |
 | 設計レビュー | `design` が `pr` / `cross-review` / `merged` を呼ぶ | `設計レビュー` |
 | 計画 | `implementation-plan` | `計画` |

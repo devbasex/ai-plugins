@@ -18,6 +18,27 @@ hooks:
 受け取る側に徹する。同じ基準を複数箇所へ書くと、モードを追加・変更したときに片方だけが
 古くなる。
 
+## 判定する単位
+
+**モードを判定する単位は Pull Request である。** 課題ではない。1 つの Pull Request に
+対しモードは 1 つで、その Pull Request が閉じる課題すべての控えへ同じ値を書く。
+
+**束ねたときにどのモードを採るかの規約は置かない。** 束ね方を変えるたびに同じ判断が
+要るためである。**判定の単位を Pull Request にすれば、数える対象が 1 つになる。**
+
+- **触るファイルが重ならないなら、分けてよい。** 束ねる理由は競合の回避であって、
+  モードを混ぜたいからではない
+- **モードの違う課題を 1 本の Pull Request へ混ぜない。** 混ざるなら高い方のモードで
+  進めるか、Pull Request を分ける
+- 分割の粒度・束ね方・並行度そのものは担当の判断に任せる
+
+**代わりに工程の順序が変わる。** Pull Request に何が入るかが決まらないと判定できない
+ため、**要求と受け入れ条件 → モード判定 → 作業場所の用意**の順になる。`light` にも
+要求と受け入れ条件が掛かる。その費用は受け入れる。判定の入力が無いまま判定する状態の
+ほうが高くつく。
+
+**モード判定は工程表の行を持たない。** 盤面へ記録する工程の値を増やさないためである。
+
 ## 判定の手順
 
 ### 1. 変更対象を確認する
@@ -71,14 +92,14 @@ mode: standard
 
 | 工程 | `light` | `standard` | `architecture` | `legacy-refactor` |
 | --- | --- | --- | --- | --- |
+| 要求と受け入れ条件 | `requirements-design` | `requirements-design` | `requirements-design` | — |
 | 作業場所の用意 | `worktree`（主ディレクトリで編集してよいパスだけなら不要） | `worktree` | `worktree` | `worktree` |
-| 要求と受け入れ条件 | — | `requirements-design` | `requirements-design` | — |
 | 設計 | — | `design` | `design` | `design` |
 | 設計レビュー | — | `pr` → `cross-review` → `merged` | `pr` → `cross-review` → `merged` | 任意 |
 | 計画 | — | `implementation-plan` | `implementation-plan` | `implementation-plan` |
 | 実装 | 直接編集 | `tdd-cycle` | `tdd-cycle` | `refactoring` |
 | 構造改善 | — | `refactoring` | `cross-refactoring` | `cross-refactoring` |
-| レビュー | — | `cross-review` | `cross-review` | `pr-review` |
+| レビュー | `cross-review` | `cross-review` | `cross-review` | `pr-review` |
 | 完了判定 | `quality-gates` | `quality-gates` | `quality-gates` | `quality-gates` |
 | Pull Request | `pr` | `pr` | `pr` | `pr` |
 | 確定仕様化 | — | `plan-to-spec`（仕様が変わった場合） | `plan-to-spec` | — |
@@ -90,15 +111,12 @@ mode: standard
 範囲外の課題の起票（`out-of-scope`）はこの表に載らない。工程ではないため、モードで要否を
 決めない（「範囲外の課題を見つけたとき」を参照）。
 
-**作業場所の用意は、要求を整理する前に済ませる。** 開発の変更は clone したディレクトリではなく
-`.worktrees/<ブランチ名>` の作業ツリーの中で行う。後から移すと、主ディレクトリに変更が残った
-まま並行作業が始まる。`light` でも、本番コードの文言やテストを触るなら作業ツリーを使う。
-`issues/` `docs/` と各ランタイムの設定だけで収まる変更は、主ディレクトリのままでよい。
-
-**作業場所の用意は、要求を整理する前に済ませる。** 開発の変更は clone したディレクトリではなく
-`.worktrees/<ブランチ名>` の作業ツリーの中で行う。後から移すと、主ディレクトリに変更が残った
-まま並行作業が始まる。`issues/` `docs/` と各ランタイムの設定だけで収まる変更は、主ディレクトリの
-ままでよい。
+**作業場所の用意は、モードを判定した後に行う。** 要求と受け入れ条件は `issues/` に書く
+ため、主ディレクトリのままで済む。開発の変更は clone したディレクトリではなく
+`.worktrees/<ブランチ名>` の作業ツリーの中で行い、判定が済んでから用意する。後から移すと、
+主ディレクトリに変更が残ったまま並行作業が始まる。`light` でも、本番コードの文言やテストを
+触るなら作業ツリーを使う。`issues/` `docs/` と各ランタイムの設定だけで収まる変更は、
+主ディレクトリのままでよい。
 
 **設計レビューは、設計だけを載せた Pull Request を実装より先にマージする工程である。** 新しい
 Skill は使わず `pr` → `cross-review` → `merged` を順に呼ぶ。**この工程のマージには人間の承認が
@@ -106,8 +124,10 @@ Skill は使わず `pr` → `cross-review` → `merged` を順に呼ぶ。**こ�
 マージした後は実装用の作業ツリーを作り直す。
 
 **構造改善とレビューは、通す工程であって任意ではない。** `architecture` と `legacy-refactor` の
-構造改善は `cross-refactoring` を通し、`standard` は `refactoring` のままである。レビュー段階は
-**明示的に呼ぶ**（自然文で「レビューして」と依頼すると、Claude Code では組み込みの
+構造改善は `cross-refactoring` を通し、`standard` は `refactoring` のままである。
+**レビューは 4 モードとも通す。** Pull Request を出す以上、その差分は誰かがレビューする。
+`light` は「本番の振る舞いも本番コードの構造も変えない」変更だが、**変えないことの確認**が
+要る。レビュー段階は**明示的に呼ぶ**（自然文で「レビューして」と依頼すると、Claude Code では組み込みの
 `code-review` が起動して判定の投稿経路が変わる）。
 
 **マージは取り込みであって配布ではない。** `release` は 4 モードすべてで通す。**自動で進めて
@@ -225,9 +245,10 @@ gh api "repos/<所有者>/<リポジトリ>/branches/<起点>/protection" --jq '
 
 ```mermaid
 flowchart TD
-    S[作業場所の用意] --> A[調査]
-    A --> B[要求と受け入れ条件]
-    B --> C[設計]
+    A[調査] --> B[要求と受け入れ条件]
+    B --> D{モード判定}
+    D --> S[作業場所の用意]
+    S --> C[設計]
     C --> F[設計レビュー<br/>PR → 承認 → マージ]
     F --> W[実装用の作業ツリーを<br/>作り直す]
     W --> G[実装計画]
@@ -244,19 +265,22 @@ flowchart TD
     RL --> Q[リリース後テスト]
     Q --> T[振り返り]
     RL -.->|standard / 未検証の項目なし| T
-    A -.->|legacy-refactor| C
+    A -.->|legacy-refactor| D
     C -.->|legacy-refactor で分けない| G
-    A -.->|light| K
+    S -.->|light| I
     K -.->|light| L
     L -.->|light / legacy-refactor| P
     RL -.->|light| Z[終了]
 ```
 
-- すべてのモードが S（作業場所の用意）から始まる。終わりは `light` が RL（配布）、他の 3 つが
+- すべてのモードが A（調査）から始まり、D（モード判定）を経て S（作業場所の用意）へ進む。
+  B（要求と受け入れ条件）を経るのは `light` / `standard` / `architecture` の 3 つで、
+  `legacy-refactor` は A から D へ抜ける。終わりは `light` が RL（配布）、他の 3 つが
   T（振り返り）である
-- **`light` は破線の経路（S → A → K → L → P → RL）のみを通る。** K は変更箇所を 1 度実行する
-  限定的な検証と静的解析だけを指し、N の全体テストと結合テストは通らない
-- `legacy-refactor` は A から C へ抜け、B（要求と受け入れ条件）と M（確定仕様化）を通らない。
+- **`light` は破線の経路（A → B → D → S → I → J → K → L → P → RL）を通る。** I と J の
+  レビューは通り、K は変更箇所を 1 度実行する限定的な検証と静的解析だけを指す。N の全体
+  テストと結合テストは通らない
+- `legacy-refactor` は A から D へ抜け、B（要求と受け入れ条件）と M（確定仕様化）を通らない。
   H は「現状固定テスト」、R は「段階的改善」、I は「本番の振る舞いが変わっていないことの確認」
   として読む
 
