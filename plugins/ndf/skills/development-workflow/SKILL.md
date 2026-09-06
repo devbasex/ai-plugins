@@ -355,7 +355,7 @@ flowchart TD
     G -.->|operation| X[外部の系への実行]
     X -.-> I
     S -.->|light| I
-    K -.->|light| L
+    K -.->|light / operation| L
     L -.->|light / legacy-refactor / 確定仕様化を通さない operation| P
     RL -.->|light / 振り返りを通さない operation| Z[終了]
 ```
@@ -365,6 +365,8 @@ flowchart TD
   `legacy-refactor` は A から D へ抜ける。終わりは `light` が RL（配布）、
   `legacy-refactor` と `standard` が T（振り返り）、`operation` は条件に当たれば
   T、当たらなければ RL である
+- **`operation` は N（全体テスト → ビルド・結合テスト）を通らない。** `quality-gates` が
+  この モードへ課す段階は 3 までである。K の限定的な検証で、**実行そのものの結果**を確かめる
 - **`operation` は C（設計）・F（設計レビュー）・R（構造改善）を通らない。** S から
   G（実装計画）へ抜け、X（外部の系への実行）が H の位置に立つ。X の手順は
   [references/operation-run.md](references/operation-run.md) が持ち、**実行の前に
