@@ -24,6 +24,10 @@
       "type": "string",
       "description": "開発の起点ブランチ。作業ツリーの分岐元と主ディレクトリの追従先になる。未指定なら origin の HEAD が指すブランチを使う。指定した名前が origin にもローカルにも無いときは既定へ落とさず解決に失敗する"
     },
+    "production_branch": {
+      "type": "string",
+      "description": "配布した版が常用する利用者へ届く本番のチャネルのブランチ。この先へ進める操作は人手の承認を求める。開発の起点である base_branch とは別の鍵で、流用しない。未指定なら origin の HEAD が指すブランチを使う。指定した名前が origin にもローカルにも無いときは既定へ落とさず解決に失敗する"
+    },
     "guard": {
       "type": "object",
       "additionalProperties": true,

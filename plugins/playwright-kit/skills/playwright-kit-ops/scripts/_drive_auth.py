@@ -5,10 +5,10 @@ upload_md_as_gdoc) はいずれも同じ手順で `google_auth.get_credentials()
 sys.path から発見する。本モジュールにロジックを集約する。
 
 Drive 連携は optional dependency。`GOOGLE_AUTH_SCRIPTS` 環境変数が設定されて
-いればそれを使い、それ以外は標準インストール先と sibling の google-auth
-スキルを探す。google-auth はどの公開セットにも含めていないため、Drive 系
-コマンドを使う場合は `GOOGLE_AUTH_SCRIPTS` を明示するか、同スキルを利用先へ
-導入する。
+いればそれを使い、それ以外は 4 ランタイムの標準インストール先と sibling の
+google-auth スキルを探す。google-auth は NDF の 4 つの manifest すべてに載って
+いるが、**playwright-kit とは別のプラグインである**ため、置かれる場所は導入した
+ランタイムで変わる。候補で見つからないときは `GOOGLE_AUTH_SCRIPTS` を明示する。
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ _CANDIDATES: tuple[Path, ...] = tuple(
         "~/.claude/skills/google-auth/scripts",
         "~/.codex/skills/google-auth/scripts",
         "~/.kiro/skills/google-auth/scripts",
+        "~/.gemini/config/plugins/ndf/skills/google-auth/scripts",
         str(_HERE.parent.parent.parent / "google-auth" / "scripts"),
     )
     if p
@@ -48,7 +49,8 @@ def _ensure_google_auth_on_path() -> None:
     searched = "\n  - ".join(str(p) for p in _CANDIDATES)
     raise RuntimeError(
         "Google Drive 連携には optional skill `google-auth` が必要です。\n"
-        "どの公開セットにも同梱していないため、Drive 系コマンドを使う前に "
+        "google-auth は NDF の配布物に含まれますが、playwright-kit とは別の"
+        "プラグインであるため、候補で見つからないときは "
         "`GOOGLE_AUTH_SCRIPTS` を google-auth/scripts へ設定してください。\n"
         "例: export GOOGLE_AUTH_SCRIPTS=<ai-plugins のパス>/plugins/ndf/skills/google-auth/scripts\n"
         "google_auth.py を探した候補:\n  - "

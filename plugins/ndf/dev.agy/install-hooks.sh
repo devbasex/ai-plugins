@@ -39,10 +39,13 @@ done
 
 # 差し込む定義の出どころは、導入した実体の hooks.json である。実体が無いときだけ、この
 # リポジトリの dev.agy/hooks.json へ落ちる（導入前に中身を確かめられるようにするため）。
+#
+# **--uninstall でも定義を読む。** 消す対象を「配布する定義が持つ名前」に限るため、
+# 名前の出どころが要る（#417 の 8）。
 SOURCE_HOOKS="$PLUGIN_DIR/hooks.json"
 [ -f "$SOURCE_HOOKS" ] || SOURCE_HOOKS="$SCRIPT_DIR/hooks.json"
 
-if [ "$UNINSTALL" = false ] && [ ! -f "$SOURCE_HOOKS" ]; then
+if [ ! -f "$SOURCE_HOOKS" ]; then
   echo "ERROR: hook の定義が見つからない: $SOURCE_HOOKS" >&2
   exit 1
 fi
@@ -52,17 +55,29 @@ command -v python3 >/dev/null 2>&1 || {
   exit 1
 }
 
-python3 - "$CONFIG_FILE" "$SOURCE_HOOKS" "$PLUGIN_DIR" "$UNINSTALL" "$DRY_RUN" <<'PY'
+python3 - "$CONFIG_FILE" "$SOURCE_HOOKS" "$PLUGIN_DIR" "$UNINSTALL" "$DRY_RUN" <<'PYEOF'
 import json
+import os
 import pathlib
+import re
+import shlex
 import shutil
 import sys
+import tempfile
 
 config_path = pathlib.Path(sys.argv[1])
 source_path = pathlib.Path(sys.argv[2])
-plugin_dir = pathlib.Path(sys.argv[3])
+# **相対のまま保存しない。** agy はリポジトリの外でも起動するため、実行時の現在地は
+# プラグインの位置と揃わない（#417 の 3）。案内は clone からの相対パスで書いてあり、
+# 書かれたとおりに実行すると踏む。
+plugin_dir = pathlib.Path(sys.argv[3]).expanduser().resolve()
 uninstall = sys.argv[4] == "true"
 dry_run = sys.argv[5] == "true"
+
+# 書き換えの対象にする command の形。`bash ./scripts/<名前>` だけを見る。
+RELATIVE_COMMAND = re.compile(r"^bash \./scripts/([A-Za-z0-9._-]+)$")
+
+unrewritten: list[str] = []
 
 
 def load(path: pathlib.Path) -> dict:
@@ -81,25 +96,44 @@ def load(path: pathlib.Path) -> dict:
     return value
 
 
-def absolutize(node: object) -> object:
-    """`bash ./scripts/x.sh` のような相対の指定を、導入先の絶対パスへ直す。
+def rewrite_command(command: str) -> str:
+    """`bash ./scripts/x.sh` を、導入先の絶対パスで組み立て直す。
 
-    利用者の設定へ差し込むと、実行時の現在地はプラグインの位置と揃わない。
+    **置換ではなく組み立て直しである。** 置換はシェルの語としての正しさを保証しない。
+    導入先に空白や特殊文字が含まれると、**正常終了するのに hook が効かない**状態に
+    なる（#417 の 4）。対象の形に当たらない command は書き換えず、書き換えなかった
+    ことを出力へ出す（黙って相対のまま保存しない）。
     """
+    matched = RELATIVE_COMMAND.match(command)
+    if not matched:
+        if "./scripts/" in command:
+            unrewritten.append(command)
+        return command
+    target = plugin_dir / "scripts" / matched.group(1)
+    return f"bash {shlex.quote(str(target))}"
+
+
+def absolutize(node: object) -> object:
+    """`command` の値だけを、導入先の絶対パスへ直す。"""
     if isinstance(node, dict):
-        return {k: absolutize(v) for k, v in node.items()}
+        return {
+            key: (
+                rewrite_command(value)
+                if key == "command" and isinstance(value, str)
+                else absolutize(value)
+            )
+            for key, value in node.items()
+        }
     if isinstance(node, list):
-        return [absolutize(v) for v in node]
-    if isinstance(node, str):
-        return node.replace("./scripts/", f"{plugin_dir}/scripts/")
+        return [absolutize(value) for value in node]
     return node
 
 
-source = {} if uninstall else load(source_path)
+source = load(source_path)
 config = load(config_path)
-names = sorted(source) if not uninstall else sorted(
-    n for n in config if n.startswith("ndf-")
-)
+# **消すのは、配布する定義が持つ名前だけである。** 接頭辞で選ぶと、利用者が自分で
+# 書いた `ndf-` 始まりの hook までまとめて消える（#417 の 8）。
+names = sorted(n for n in source if n in config) if uninstall else sorted(source)
 
 if uninstall:
     updated = {k: v for k, v in config.items() if k not in names}
@@ -107,6 +141,9 @@ else:
     updated = dict(config)
     for name in names:
         updated[name] = absolutize(source[name])
+
+for command in unrewritten:
+    print(f"NOTE: 対象の形に当たらないため書き換えられなかった command: {command}")
 
 if updated == config:
     print(f"変更なし: {config_path}")
@@ -128,8 +165,20 @@ if config_path.exists():
     shutil.copy2(config_path, backup)
     print(f"退避: {backup}")
 
-config_path.write_text(
-    json.dumps(updated, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+# **置き換えで書く。** 直接書くと長さを 0 へ戻してから書き直すため、中断すると利用者の
+# hook が壊れた JSON のまま残る（#417 の 8）。同じディレクトリへ書いてから移す。
+handle = tempfile.NamedTemporaryFile(
+    "w", encoding="utf-8", dir=str(config_path.parent),
+    prefix=config_path.name + ".", suffix=".tmp", delete=False,
 )
+try:
+    with handle:
+        handle.write(json.dumps(updated, ensure_ascii=False, indent=2) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(handle.name, config_path)
+except BaseException:
+    pathlib.Path(handle.name).unlink(missing_ok=True)
+    raise
 print("完了。agy を起動し直すと反映される")
-PY
+PYEOF

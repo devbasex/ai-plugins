@@ -12,7 +12,7 @@ PJ_DECLARATION_REL=".ndf/projects.json"
 
 # 工程の値。**development-workflow の工程表の行名と一致させる。**
 # 綴りの違う値を書き込むと、盤面の側に工程表に無い値が増える。
-PJ_STAGES=$'作業場所の用意\n要求と受け入れ条件\n設計\n設計レビュー\n計画\n実装\n構造改善\nレビュー\n完了判定\nPull Request\n確定仕様化\n後片付け\n配布\nリリース後テスト\n振り返り'
+PJ_STAGES=$'要求と受け入れ条件\n作業場所の用意\n設計\n設計レビュー\n計画\n実装\n構造改善\nレビュー\n完了判定\nPull Request\n確定仕様化\n後片付け\n配布\nリリース後テスト\n振り返り'
 PJ_MODES=$'light\nstandard\narchitecture\nlegacy-refactor'
 # 盤面の既定のフィールド。GitHub が最初から持つもので、値も既定のまま使う。
 PJ_STATUSES=$'Todo\nIn Progress\nDone'

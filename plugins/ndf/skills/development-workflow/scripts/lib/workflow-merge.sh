@@ -28,7 +28,7 @@
 # その語だけを飛ばす。** 値まで飛ばすと、続く語が `pr` であっても見落とす。
 wf_merge_target() {
   local cmd="${1:-}" tok num="" state=0 found=1 rest
-  while IFS= read -r tok; do
+  while IFS= read -r -d '' tok; do
     # REST の経路。`pulls/<番号>/merge` を指す語は、方式を問わずマージの意図と見なす。
     case "$tok" in
       *pulls/*/merge|*pulls/*/merge/*)

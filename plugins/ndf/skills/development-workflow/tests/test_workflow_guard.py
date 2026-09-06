@@ -317,7 +317,10 @@ def test_recording_the_release_without_a_gap_says_nothing(repo: Path, state: Pat
     """#221-3 と同じ考え方。欠落が無ければ何も出さない。"""
     env = base_env(state)
     run_stage_check("record", "161", "mode", "light", cwd=repo, env=env)
-    for stage in ("作業場所の用意", "実装", "完了判定", "Pull Request", "後片付け"):
+    for stage in (
+        "要求と受け入れ条件", "作業場所の用意", "実装", "レビュー", "完了判定",
+        "Pull Request", "後片付け",
+    ):
         run_stage_check("record", "161", "stage", stage, cwd=repo, env=env)
 
     result = guard(repo, state, 'bash "$SCRIPTS/projects-sync.sh" 161 stage "配布"')

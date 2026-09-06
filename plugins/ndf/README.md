@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.5.0）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.5.1）
 ```
 
 ### agy
@@ -119,17 +119,18 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.5.0 へ更新するとき
+## v10.5.1 へ更新するとき
 
-**配布 Skill が 5 個増えて 40 / 39 / 38 / 38 になります。** 既存の Skill の引数と副コマンドは
-変わりません。変更点の一覧は [CHANGELOG.md](../../CHANGELOG.md) にあります。
+**配布 Skill の数も、既存の Skill の引数と副コマンドも変わりません。変わるのは開発の
+進め方です。** 変更点の一覧は [CHANGELOG.md](../../CHANGELOG.md) にあります。
 
 | 変わったこと | 中身 |
 | --- | --- |
-| 配らなかった 4 個を配ります | `google-auth` / `google-drive` / `ml-model-structure` / `skill-stats`。これまではどのランタイムからも起動できませんでした |
-| `notion-writing` を新設しました | Notion のページを書くときの落とし穴。**`<page>` タグを落とすと子ページが削除される**こと、テーブルの列幅、編集の進め方 |
-| agy の hook が届きます | **agy はプラグインの `hooks.json` を読み込みません**（1.1.26 で実測）。`dev.agy/install-hooks.sh` が利用者の設定へ差し込みます |
-| 手順を実装と規約へ揃えました | 合否は終了コードで見る（`quality-gates` / `pr`）、`gh pr create` の REST への退避（`pr`）、更新案内のコマンドを実行して確かめる（`release`）、状態遷移図の記法（`markdown-writing`）ほか |
+| モードを判定する単位が Pull Request になりました | 課題ではありません。1 本に対しモードは 1 つで、工程の順序は**要求と受け入れ条件 → モード判定 → 作業場所の用意**になります |
+| **`light` にもレビューと要求工程が掛かります** | Pull Request を出す以上、その差分は誰かがレビューします。手段は他のモードと同じ `cross-review` です |
+| Pull Request を作る時点で実行証跡を見ます | `gh pr create` を観測し、記録の無い必須の工程を案内します。**拒否はしません** |
+| 人手の承認を求める関門を 2 つに定めました | 設計 Pull Request のマージと、本番のチャネルへ届く操作です。後者の宛先は `.ndf/worktree.json` の `production_branch` が宣言します |
+| 事後レビューで出た 8 件を直しました | 日本語のファイル名が行数の検査を素通りする、相対パスや空白を含むパスで導入した agy の hook が効かない、など。**agy の hook は差し込み直してください**（保存する command が絶対パスで組み立て直されます） |
 
 ### 手元で確かめる
 
@@ -280,7 +281,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.5.0/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.5.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -302,14 +303,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.5.0/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.5.1/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.5.0  <path>
+# => ndf@ai-plugins  installed, enabled  10.5.1  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
