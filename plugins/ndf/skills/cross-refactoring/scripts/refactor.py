@@ -49,32 +49,38 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 from refactor_lib import ABORT, die, info  # noqa: E402,F401
 from refactor_lib import vocabulary as _vocabulary  # noqa: E402
+from refactor_lib import rounds as _rounds  # noqa: E402
 from refactor_lib import paths as _paths  # noqa: E402
+from refactor_lib import scope as _scope  # noqa: E402
 from refactor_lib import plan as _plan  # noqa: E402
+from refactor_lib import outbound as _outbound  # noqa: E402
 from refactor_lib import gitfacts as _gitfacts  # noqa: E402
 from refactor_lib import proposals as _proposals  # noqa: E402
 from refactor_lib import verify as _verify  # noqa: E402
-from refactor_lib import review as _review  # noqa: E402
 from refactor_lib.commands import report as _cmd_report  # noqa: E402
 from refactor_lib.commands import setup as _cmd_setup  # noqa: E402
 from refactor_lib.commands import apply as _cmd_apply  # noqa: E402
 from refactor_lib.commands import review as _cmd_review  # noqa: E402
+from refactor_lib.commands import gate as _cmd_gate  # noqa: E402
 
 # **入口は全モジュールの名前を自分の名前空間へ取り込む。** 呼び出し側と手順書は
 # `refactor.py` を指し、テストは `refactor.<名前>` を参照する。分割してもその形を
 # 変えない。
 _LIB_MODULES: tuple[types.ModuleType, ...] = (
     _vocabulary,
+    _rounds,
     _paths,
+    _scope,
     _plan,
+    _outbound,
     _gitfacts,
     _proposals,
     _verify,
-    _review,
     _cmd_report,
     _cmd_setup,
     _cmd_apply,
     _cmd_review,
+    _cmd_gate,
 )
 
 
@@ -124,12 +130,28 @@ def main() -> None:
                       help="対象範囲。提案が無制限に広がらないよう必須にしている")
     init.add_argument("--host", choices=list(assignment.HOST_RUNTIMES), default=None,
                       help="ホストの明示指定。未指定時は環境変数から推定する")
-    # 既定は輪番の 1 周（適用の母集合の大きさ）。3 のままだと `ALL_RUNTIMES` の
-    # 先頭にある claude の順番（ラウンド 4）へ届かない。
-    init.add_argument("--max-outer-rounds", type=int,
-                      default=len(assignment.ALL_RUNTIMES))
-    init.add_argument("--max-fix-rounds", type=int, default=3)
-    init.add_argument("--max-items-per-round", type=int, default=5)
+    # **切るのは提案の回数であって、適用できる件数ではない**（#436 決定 8）。
+    # 適用ラウンドを分けたことで、1 回の提案で通せる件数は上限に縛られなくなった。
+    # 取り消した項目は除外されるため、同じ提案が積み上がって回数を食うこともない。
+    # **輪番の 1 周を根拠にしない。** 適用の担当は適用ラウンドごとに進むので、
+    # 1 つの提案ラウンドが複数の群を持てば輪番は 1 周しうる。
+    init.add_argument("--max-outer-rounds", type=int, default=3,
+                      help="構造改善の提案ラウンドの上限")
+    # テスト整備は母集合が増えない（対象のコードを変えないため、テストが薄い経路の
+    # 集合は最初から確定している）。2 回目に出るのは 1 回目の挙げ漏らしだけである。
+    init.add_argument("--max-test-rounds", type=int,
+                      default=DEFAULT_MAX_TEST_ROUNDS,
+                      help="テスト整備ラウンドの上限。到達したら採用が残っていても "
+                           "構造改善の提案ラウンドへ進む "
+                           f"(default: {DEFAULT_MAX_TEST_ROUNDS})")
+    init.add_argument("--max-fix-rounds", type=int, default=3,
+                      help="1 つの適用ラウンドあたりの修正ラウンドの上限")
+    init.add_argument("--max-items-per-round", type=int, default=5,
+                      help="1 つの提案ラウンド／テスト整備ラウンドの採用上限")
+    init.add_argument("--ci-check", default=None, metavar="NAME",
+                      help="最終ゲートで手元のテストの代わりに見る検査の名前。"
+                           "**指定すると手元のテストは実行しない**（排他）。"
+                           "指定が無ければ手元のテストで判定する")
     init.add_argument("--severity-threshold", default=DEFAULT_SEVERITY_THRESHOLD,
                       choices=[s for s in SEVERITY_ORDER if s != "unknown"])
     init.add_argument("--model", action="append", metavar="RUNTIME=MODEL",
@@ -141,15 +163,24 @@ def main() -> None:
                       help="生成物を同期するコマンド。**push の直前**に進行側が実行し、"
                            "差分があれば進行側のコミットとして積む。"
                            "同期を実装担当にさせると範囲外の変更になるため分離している")
+    # **既定は Pull Request のコメント 1 件である**（#436 決定 6）。改修計画は
+    # 実行の記録であって、リポジトリの知識ではない。ファイルにすると差分に混ざり、
+    # URL がブランチの後片付けで切れる。
     init.add_argument("--plan-file", default=None,
-                      help="改修計画を書き出すパス（対象リポジトリからの相対）。"
-                           "提案の理由と手順は状態ファイルにしか残らず、差分から"
-                           "除外されるため、公開の直前に進行側が書き出す。"
-                           f"既定は {DEFAULT_PLAN_DIR}/refactoring-plan-rf<PR>.md。"
+                      help="改修計画をファイルへ書き出すパス（対象リポジトリからの"
+                           "相対）。**指定したときだけファイルになる。**"
+                           "既定は対象の Pull Request のコメント 1 件で、"
+                           "ラウンドが進むたびに同じコメントを編集する。"
                            "空文字を渡すと記録しない")
     init.add_argument("--baseline-test", required=True,
                       help="着手前と各コミットで実行するテストコマンド。"
                            "振る舞い不変を示す手段が無い書き換えは構造改善ではないため必須")
+    # **起動のされ方は引数で受け取る**（#436 決定 7）。環境変数や控えの読み取りは、
+    # 起動元が違っても同じ値になりうる。呼ぶ側が明示すれば判定が 1 か所で済む。
+    init.add_argument("--workflow-step", action="store_true",
+                      help="`development-workflow` の 1 工程として起動したことを"
+                           "伝える。Step 7 の `cross-review` を省き、"
+                           "全体のテストで判定する")
     init.add_argument("--worktree-root", default=None)
     init.set_defaults(func=cmd_init)
 
@@ -158,7 +189,12 @@ def main() -> None:
          "Step 2 — 提案ラウンドを開く。実装担当とレビュー担当を返す"),
         ("merge-proposals", cmd_merge_proposals,
          "Step 3 — 提案の語彙検証・重複排除・優先度付け・採否"),
-        ("advance", cmd_advance, "Step 7 — 提案ラウンドの収束判定"),
+        ("advance", cmd_advance, "ラウンドの収束判定と、ラウンドの種類の切り替え"),
+        ("final-gate", cmd_final_gate,
+         "Step 7 — 最終ゲート。起動のされ方で cross-review と全体のテストが変わる"),
+        ("merge-final-fix", cmd_merge_final_fix,
+         "Step 7 — 最終ゲートの修正結果の取り込み。**適用ラウンドの `merge-fix` "
+         "とは別である**（起点も担当も改善項目も持たない）"),
         ("status", cmd_status, "現在の状態を人が読む形で出す"),
     ):
         sp = sub.add_parser(name, help=help_)
@@ -166,10 +202,12 @@ def main() -> None:
         sp.set_defaults(func=func)
 
     for name, func, help_ in (
-        ("review-targets", cmd_review_targets,
-         "Step 5 — 次に起動するレビュー担当（初回は 2 者、再レビューは変更要求を出した担当）"),
-        ("judge-review", cmd_judge_review, "Step 5 — レビュー担当の判定"),
-        ("should-abandon", cmd_should_abandon, "Step 6 — 修正ラウンド上限の到達判定"),
+        ("next-apply-round", cmd_next_apply_round,
+         "Step 4 — 次の適用ラウンド（群）を開く。実装担当と対象の項目を返す"),
+        ("verify-round", cmd_verify_round,
+         "Step 5 — 適用ラウンドの結果をテストで検証する"),
+        ("should-abandon", cmd_should_abandon,
+         "Step 6 — この適用ラウンドの修正上限の到達判定"),
         ("merge-fix", cmd_merge_fix, "Step 6 — 修正結果の取り込み"),
     ):
         sp = sub.add_parser(name, help=help_)
@@ -180,9 +218,9 @@ def main() -> None:
     # コミットを取り消しうる 2 つは、実行前に何が消えるかを確かめられるようにする。
     for name, func, help_ in (
         ("merge-apply", cmd_merge_apply,
-         "Step 4 — 適用結果の検証（差分予算 / テスト / トレーラー / 固定テスト先行）"),
+         "Step 4 — 適用ラウンドの検証（差分予算 / トレーラー / 範囲 / 1 コミット）"),
         ("abandon-items", cmd_abandon_items,
-         "Step 6 — 未解決の指摘に紐づく項目だけを取り消す"),
+         "Step 6 — テストが通らなかった適用ラウンドを取り消す"),
     ):
         sp = sub.add_parser(name, help=help_)
         sp.add_argument("id", type=int)

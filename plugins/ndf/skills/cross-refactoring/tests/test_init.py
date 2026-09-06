@@ -54,8 +54,11 @@ def origin_repo(tmp_path):
 
 def _args(tmp_path, **over):
     base = {
-        "pr": 130, "scope": ["src"], "host": "claude",
+        # **テストの置き場所を含める**（#436 決定 5）。含めないと `init` の関門で
+        # 止まる。関門そのものは `test_scope_gate.py` で見る。
+        "pr": 130, "scope": ["src", "tests"], "host": "claude",
         "max_outer_rounds": 3, "max_fix_rounds": 3, "max_items_per_round": 5,
+        "max_test_rounds": 2, "ci_check": None, "workflow_step": False,
         "severity_threshold": "minor", "model": None, "baseline_test": "true",
         "sync_command": None, "plan_file": None,
         "test_timeout": 60,
@@ -107,6 +110,11 @@ def run_init(refactor, origin_repo, monkeypatch):
         monkeypatch.setenv("NDF_SKIP_AUTH_CHECK", "1")
         refactor.cmd_init(args)
     return _run
+
+
+def refactor_abort():
+    """中断の終了コード。`refactor` フィクスチャを取らない関数からも使う。"""
+    return 4
 
 
 def _state_of(tmp_path):
@@ -210,21 +218,80 @@ def test_init_refuses_to_start_when_the_baseline_test_fails(run_init, tmp_path):
         run_init(_args(tmp_path, baseline_test="false"))
 
 
-def test_max_outer_rounds_defaults_to_the_rotation_length(refactor, monkeypatch):
-    """既定の上限が輪番の 1 周（4 ラウンド）に届くこと。
+def test_init_stops_when_the_scope_has_no_test_location(run_init, tmp_path):
+    """C3 — テストの置き場所が範囲に無ければ**止める**（#436 決定 5）。
 
-    上限 3 のままだと、`ALL_RUNTIMES` の先頭にある claude の順番（ラウンド 4）へ
-    到達しない。除外を外したのに 1 者が適用担当にならない状態が残る。
+    案内だけでは同じ失敗を繰り返す。止めれば、利用者は 1 度だけ範囲を直せばよい。
     """
+    with pytest.raises(SystemExit) as e:
+        run_init(_args(tmp_path, scope=["src"]))
+    assert e.value.code == refactor_abort()
+
+
+def test_init_stops_when_the_test_location_is_outside_the_baseline_search(
+    run_init, tmp_path, origin_repo
+):
+    """C3 — 足したテストが `--baseline-test` で実行されないなら止める。"""
+    (origin_repo / "src" / "unit").mkdir(parents=True, exist_ok=True)
+    with pytest.raises(SystemExit):
+        run_init(_args(tmp_path, scope=["src", "tests"],
+                       baseline_test="pytest src/unit"))
+
+
+def test_init_checks_the_scope_before_running_the_baseline_test(run_init, tmp_path):
+    """関門は着手前のテストより先に通す。落ちる実行に時間を使わせない。"""
+    with pytest.raises(SystemExit):
+        run_init(_args(tmp_path, scope=["src"], baseline_test="false"))
+
+
+def _parsed_init_args(refactor, monkeypatch, *extra):
+    """`init` の引数を解析だけして返す。"""
     captured = {}
     monkeypatch.setattr(refactor, "cmd_init", lambda args: captured.update(vars(args)))
     monkeypatch.setattr(
         refactor.sys, "argv",
         ["refactor.py", "init", "130", "--scope", "src", "--host", "claude",
-         "--baseline-test", "true"],
+         "--baseline-test", "true", *extra],
     )
     refactor.main()
-    assert captured["max_outer_rounds"] == 4
+    return captured
+
+
+def test_the_round_caps_have_their_own_defaults(refactor, monkeypatch):
+    """E1 — 4 つの上限は別々の単位に掛かる（#436 決定 8）。
+
+    `--max-outer-rounds` が 3 でよいのは、適用ラウンドを分けたことで**1 回の提案で
+    通せる件数が上限に縛られなくなった**ためである。輪番の 1 周を根拠にしない
+    （適用の担当は適用ラウンドごとに進むので、1 つの提案ラウンドでも輪番は 1 周
+    しうる）。
+    """
+    captured = _parsed_init_args(refactor, monkeypatch)
+    assert captured["max_test_rounds"] == 2
+    assert captured["max_outer_rounds"] == 3
+    assert captured["max_fix_rounds"] == 3
+    assert captured["max_items_per_round"] == 5
+
+
+def test_the_ci_check_is_not_set_by_default(refactor, monkeypatch):
+    """指定が無ければ代替しない。**手元のテストで判定する**（決定 7 の排他）。"""
+    assert _parsed_init_args(refactor, monkeypatch)["ci_check"] is None
+    assert _parsed_init_args(
+        refactor, monkeypatch, "--ci-check", "tests")["ci_check"] == "tests"
+
+
+def test_init_starts_with_a_test_round(run_init, tmp_path):
+    """B4 — 初期化の後、最初の提案ラウンドの前にテスト整備ラウンドを置く。"""
+    run_init(_args(tmp_path))
+    _, state = _state_of(tmp_path)
+    assert state["round_kind"] == "test"
+    assert state["max_test_rounds"] == 2
+    assert state["test_vocabulary"]["cases"], "語彙は状態ファイル経由で渡す"
+
+
+def test_init_records_the_ci_check(run_init, tmp_path):
+    run_init(_args(tmp_path, ci_check="tests"))
+    _, state = _state_of(tmp_path)
+    assert state["ci_check"] == "tests"
 
 
 def test_baseline_test_is_required(refactor, monkeypatch):
@@ -467,21 +534,29 @@ def test_init_fills_the_posting_event_when_resuming_an_old_state(run_init, tmp_p
 
 # ---------- 改修計画の書き出し先 ----------
 
-def test_init_records_the_default_plan_file(run_init, tmp_path):
-    """指定が無くても計画を残す。**既定で残らないと、誰も指定しない。**"""
+def test_init_defaults_the_plan_to_a_pull_request_comment(run_init, tmp_path):
+    """D4 — 既定は Pull Request のコメント 1 件（#436 決定 6）。
+
+    **改修計画は実行の記録であって、リポジトリの知識ではない。** ファイルに
+    すると差分に混ざり、URL がブランチの後片付けで切れる。
+    """
     run_init(_args(tmp_path))
     _, state = _state_of(tmp_path)
-    assert state["plan_file"] == "issues/refactoring-plan-rf130.md"
+    assert state["plan_mode"] == "comment"
+    assert state["plan_file"] == ""
 
 
 def test_init_keeps_an_explicit_plan_file(run_init, tmp_path):
+    """**`--plan-file` は残す。** 明示したときだけファイルにする。"""
     run_init(_args(tmp_path, plan_file="docs/plan.md"))
     _, state = _state_of(tmp_path)
+    assert state["plan_mode"] == "file"
     assert state["plan_file"] == "docs/plan.md"
 
 
 def test_init_accepts_an_empty_plan_file_as_off(run_init, tmp_path):
-    """計画を差分へ入れたくないリポジトリのために、空文字で無効にできる。"""
+    """計画を残したくないリポジトリのために、空文字で無効にできる。"""
     run_init(_args(tmp_path, plan_file=""))
     _, state = _state_of(tmp_path)
+    assert state["plan_mode"] == "none"
     assert state["plan_file"] == ""

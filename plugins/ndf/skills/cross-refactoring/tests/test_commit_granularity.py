@@ -1,11 +1,10 @@
-"""コミットの粒度（1 改善項目 = 1 コミット）のテスト。
+"""コミットの粒度のテスト。
 
-手順を 1 手ずつ進めることと、その途中経過を履歴に残すことは別である。
-**残すのは項目単位の 1 コミットだけ**にして、Pull Request を読む側が
-改善項目と履歴を 1 対 1 で辿れるようにする。
+**適用は適用ラウンド（群）ごとに 1 コミットである**（#436 決定 2）。取り消しの
+単位と一致させるためで、群の中の項目はまとめて 1 つのコミットへ入れる。
 
-現状固定テストが要る項目（`test_gap`）だけは、テストと実装を混ぜないために
-2 コミットを許す。
+修正コミットの側は項目ごとに 1 コミットのままである。現状固定テストが要る項目
+（`test_gap`）だけは、テストと実装を混ぜないために 2 コミットを許す。
 """
 from __future__ import annotations
 
@@ -40,56 +39,75 @@ def item(**over):
     return base
 
 
-# ---------- 適用フェーズ ----------
+# ---------- 適用フェーズ（適用ラウンド = 1 コミット） ----------
 
-def test_one_commit_per_item_passes(refactor):
-    assert refactor.verify_apply_item(item(), [fact()]) is None
+def test_one_commit_for_the_apply_round_passes(refactor):
+    assert refactor.verify_apply_round([item()], [fact()]) is None
 
 
-def test_two_commits_for_one_item_fails(refactor):
-    """途中経過を刻むと、改善項目と履歴が 1 対 1 で対応しなくなる。"""
-    problem = refactor.verify_apply_item(
-        item(), [fact(sha="aaa"), fact(sha="bbb")]
+def test_several_items_share_the_one_commit(refactor):
+    """群の中の項目はまとめて 1 コミットへ入れる。**同じ SHA の申告は正しい形。**"""
+    items = [item(item_id="R1-001"), item(item_id="R1-002", symbol="Foo.other")]
+    assert refactor.verify_apply_round(items, [fact()]) is None
+
+
+def test_two_commits_in_one_apply_round_fail(refactor):
+    """途中経過を刻むと、取り消しの単位とコミットの単位が食い違う。"""
+    problem = refactor.verify_apply_round(
+        [item()], [fact(sha="aaa"), fact(sha="bbb")]
     )
-    assert problem is not None and "1 コミット" in problem
+    assert problem is not None and "適用ラウンド = 1 コミット" in problem
 
 
-def test_the_granularity_message_names_the_item(refactor):
-    """どの項目が刻みすぎたのかを読めるようにする。"""
-    problem = refactor.verify_apply_item(
-        item(item_id="R2-003"), [fact(sha="aaa", trailers=trailers(item_id="R2-003")),
-                                 fact(sha="bbb", trailers=trailers(item_id="R2-003"))]
+def test_the_granularity_message_shows_the_count(refactor):
+    """何コミットに刻まれたのかを読めるようにする。"""
+    problem = refactor.verify_apply_round(
+        [item()], [fact(sha="aaa"), fact(sha="bbb"), fact(sha="ccc")]
     )
-    assert "R2-003" in problem
+    assert "3 件" in problem
 
 
-def test_test_gap_allows_the_characterization_test_commit(refactor):
-    """テストと実装を 1 コミットへ混ぜないため、この項目だけ 2 コミットを許す。"""
+def test_test_gap_still_needs_the_characterization_test_in_the_commit(refactor):
+    """テストが乏しい項目を含む群は、そのコミットがテストを触っていること。"""
+    assert refactor.verify_apply_round(
+        [item(test_gap=True)], [fact(touches_tests=True)]
+    ) is None
+    problem = refactor.verify_apply_round([item(test_gap=True)], [fact()])
+    assert problem is not None and "現状固定テスト" in problem
+
+
+def test_test_gap_does_not_buy_a_second_commit(refactor):
+    """テストを分けたい場合も、群のコミットは 1 つである。"""
     facts = [fact(sha="aaa", touches_tests=True), fact(sha="bbb")]
-    assert refactor.verify_apply_item(item(test_gap=True), facts) is None
-
-
-def test_test_gap_still_rejects_three_commits(refactor):
-    facts = [fact(sha="aaa", touches_tests=True), fact(sha="bbb"), fact(sha="ccc")]
-    problem = refactor.verify_apply_item(item(test_gap=True), facts)
-    assert problem is not None and "2 コミット" in problem
+    problem = refactor.verify_apply_round([item(test_gap=True)], facts)
+    assert problem is not None and "適用ラウンド = 1 コミット" in problem
 
 
 def test_a_broken_commit_is_reported_before_the_granularity(refactor):
-    """粒度は最後に見る。トレーラーやテストの問題を粒度で覆い隠さない。"""
-    problem = refactor.verify_apply_item(
-        item(), [fact(sha="aaa"), fact(sha="bbb", test_status="fail")]
-    )
-    assert problem is not None and "テストが成功していません" in problem
+    """粒度は最後に見る。トレーラーの問題を粒度で覆い隠さない。"""
+    broken = fact(sha="bbb", trailers=trailers(model=""))
+    problem = refactor.verify_apply_round([item()], [fact(sha="aaa"), broken])
+    assert problem is not None and "トレーラーが欠けています" in problem
 
 
 def test_the_budget_is_reported_before_the_granularity(refactor):
     """差分予算の超過は原因が別なので、粒度より先に伝える。"""
-    problem = refactor.verify_apply_item(
-        item(technique="rename", estimated_diff_lines=10),
+    problem = refactor.verify_apply_round(
+        [item(technique="rename", estimated_diff_lines=10)],
         [fact(sha="aaa", diff_lines=50), fact(sha="bbb", diff_lines=50)],
     )
     assert problem is not None and "差分予算" in problem
+
+
+def test_the_apply_check_does_not_look_at_the_test_result(refactor):
+    """**テストの合否は `verify-round` が見る**（決定 3）。
+
+    適用そのものが通らないことと、テストが落ちることは扱いが違う。前者はその群を
+    取り消し、後者は修正ラウンドを回す。
+    """
+    assert refactor.verify_apply_round(
+        [item()], [fact(test_status="fail")]
+    ) is None
 
 
 # ---------- 修正フェーズ ----------

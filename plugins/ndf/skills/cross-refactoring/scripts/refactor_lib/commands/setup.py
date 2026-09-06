@@ -29,8 +29,15 @@ from ..paths import (
     _state_path,
     _tmp_dir_for,
 )
-from ..plan import default_plan_file, normalize_plan_file
-from ..vocabulary import DEFAULT_TEST_TIMEOUT, REQUIRED_SKILLS, vocabulary
+from ..plan import PLAN_COMMENT, PLAN_FILE, PLAN_NONE, normalize_plan_file
+from ..rounds import STRUCTURE, TEST, entry_kind, round_kind
+from ..scope import require_scope_covers_tests
+from ..vocabulary import (
+    DEFAULT_TEST_TIMEOUT,
+    REQUIRED_SKILLS,
+    test_vocabulary,
+    vocabulary,
+)
 from .report import _finish
 
 
@@ -166,6 +173,20 @@ def _fetch_pr_context(pr: int, repo: Optional[str] = None) -> tuple[str, str, st
     return resolved, base_branch, head_branch, is_own_pr, author
 
 
+def _plan_mode_of(plan_file: Optional[str]) -> str:
+    """改修計画の置き場所を、`--plan-file` の与えられ方から決める。
+
+    | 与え方 | 置き場所 |
+    | --- | --- |
+    | 指定しない（既定） | Pull Request のコメント 1 件 |
+    | パスを指定 | そのファイル |
+    | 空文字を指定 | 記録しない |
+    """
+    if plan_file is None:
+        return PLAN_COMMENT
+    return PLAN_FILE if str(plan_file).strip() else PLAN_NONE
+
+
 def cmd_init(args: argparse.Namespace) -> None:
     """Step 0 — ホストと母集合を確定し、作業ディレクトリ root と状態を用意する。
 
@@ -205,6 +226,13 @@ def cmd_init(args: argparse.Namespace) -> None:
     work = root / "work"
     _ensure_work_worktree(work, head_branch)
 
+    # **`--scope` の関門はここで通す**（#436 決定 5）。テストの置き場所が範囲に
+    # 無い、または `--baseline-test` の実行集合に入らないまま進むと、テスト整備
+    # ラウンドが足したテストが検証に効かない。案内だけでは同じ失敗を繰り返す
+    # ため、**止める**。作業ディレクトリが要るのは、探索範囲の語がディレクトリか
+    # どうかを実物で確かめるためである。
+    require_scope_covers_tests(args.scope, args.baseline_test, str(work))
+
     tmp_dir = _tmp_dir_for(work)
     tmp_dir.mkdir(parents=True, exist_ok=True)
     state_file = _state_path(tmp_dir, args.pr)
@@ -240,19 +268,32 @@ def cmd_init(args: argparse.Namespace) -> None:
         # 提案プロンプトへ許容値をそのまま列挙するために持たせる。
         # 定義は検証側（この CLI）にあり、状態ファイル経由で起動側へ渡す。
         "vocabulary": vocabulary(),
+        # テスト整備ラウンドの語彙も同じ経路で渡す。**新しい語彙は作らず**、
+        # 既存の 3 本の参照が持つ分類をそのまま列挙する（決定 9）。
+        "test_vocabulary": test_vocabulary(),
         "skills": {"required": list(REQUIRED_SKILLS)},
         "max_outer_rounds": args.max_outer_rounds,
+        "max_test_rounds": args.max_test_rounds,
         "max_fix_rounds": args.max_fix_rounds,
         "max_items_per_round": args.max_items_per_round,
+        # 最終ゲートで手元のテストの代わりに見る検査の名前。**排他である**
+        # （指定があれば手元のテストを実行しない）。
+        "ci_check": args.ci_check,
+        # 最終ゲートの分かれ道。**単独起動が既定である。**
+        "workflow_step": bool(args.workflow_step),
+        # **最初に開くのはテスト整備ラウンドである。** テストが乏しい箇所では、
+        # 「テストが通ること」を検証に使えない（Step 5 の判定はテストで決まる）。
+        "round_kind": TEST,
         "severity_threshold": args.severity_threshold,
         "baseline_test": baseline,
         # 生成物の同期は**進行側の責務**。push の直前に実行する。
         "sync_command": args.sync_command,
-        # 改修計画の書き出し先も同じ経路に乗せる。指定が無ければ既定のパスを使い、
-        # 空文字なら記録しない。
-        "plan_file": normalize_plan_file(
-            default_plan_file(args.pr) if args.plan_file is None else args.plan_file
-        ),
+        # **改修計画の既定は Pull Request のコメント 1 件である**（#436 決定 6）。
+        # `--plan-file` を明示したときだけファイルにし、空文字なら記録しない。
+        "plan_mode": _plan_mode_of(args.plan_file),
+        "plan_file": normalize_plan_file(args.plan_file),
+        # 編集する先のコメント。**印で引き当て直せる**ので、失っても積み増さない。
+        "plan_comment": None,
         "test_timeout": args.test_timeout,
         "outer_round": 0,
         "phase": "init",
@@ -385,21 +426,31 @@ def _run_baseline_test(
     return {"command": command, "status": status, "checked_at": statefile.now()}
 
 
-def cmd_start_round(args: argparse.Namespace) -> None:
-    """Step 2 — 提案ラウンドを開き、実装担当とレビュー担当を返す。
+def rounds_of_kind(state: dict[str, Any], kind: str) -> list[dict[str, Any]]:
+    """その種類のラウンドだけを取り出す。上限はそれぞれ別に数える。"""
+    return [r for r in state.get("rounds") or [] if entry_kind(r) == kind]
 
-    終了コード: 0 = ラウンドを開いた / 1 = 提案ラウンドの繰り返しが終了済み。
+
+def cmd_start_round(args: argparse.Namespace) -> None:
+    """Step 2 — ラウンドを開き、実装担当とレビュー担当を返す。
+
+    終了コード: 0 = ラウンドを開いた / 1 = 繰り返しが終了済み。
+
+    **開くのはテスト整備ラウンドか提案ラウンドのどちらかである。** どちらを開くかは
+    状態の `round_kind` が持ち、切り替えるのは `advance` である（判定を 1 か所に
+    まとめ、開く側は宣言に従うだけにする）。
 
     **再開しても担当は変わらない。** 同じラウンド番号を開き直したときは記録済みの
     割り当てをそのまま返す。
     """
     path, state = _load(args.id)
     if state.get("final"):
-        info(f"提案ラウンドの繰り返しは終了しています（{state['final']}）")
+        info(f"ラウンドの繰り返しは終了しています（{state['final']}）")
         sys.exit(1)
 
     rounds = state["rounds"]
-    if len(rounds) >= state["max_outer_rounds"]:
+    kind = round_kind(state)
+    if kind == STRUCTURE and len(rounds_of_kind(state, STRUCTURE)) >= state["max_outer_rounds"]:
         _finish(path, state, "max_outer_rounds")
         sys.exit(1)
 
@@ -410,6 +461,9 @@ def cmd_start_round(args: argparse.Namespace) -> None:
         models = state["models"]
         existing = {
             "round": round_no,
+            # **種類はラウンドごとに残す。** 上限を別々に数えるためと、提案の
+            # 重複率を同じ種類どうしで測るためである。
+            "kind": kind,
             "started_at": statefile.now(),
             "impl": impl,
             "impl_model": {"requested": models.get(impl), "observed": None},
@@ -430,12 +484,24 @@ def cmd_start_round(args: argparse.Namespace) -> None:
         state["phase"] = "propose"
         statefile.save(path, state)
 
+    kind = entry_kind(existing)
+    if kind == TEST:
+        label = "テスト整備ラウンド"
+        limit = state.get("max_test_rounds")
+    else:
+        label = "提案ラウンド"
+        limit = state["max_outer_rounds"]
+    seq = len(rounds_of_kind(state, kind))
     info(
-        f"=== 提案ラウンド {round_no} / {state['max_outer_rounds']} "
+        f"=== {label} {seq} / {limit} "
         f"（実装 {existing['impl']} / レビュー {' + '.join(existing['reviewers'])}）==="
     )
     statefile.emit(
         ROUND=round_no,
+        ROUND_KIND=kind,
+        # 提案に使う雛形の名前。**結果ファイルの名前は種類で変えない**
+        # （ラウンド番号は通しなので衝突せず、監視の雛形をそのまま使える）。
+        PROPOSE_PHASE="propose-tests" if kind == TEST else "propose",
         IMPL=existing["impl"],
         IMPL_MODEL=existing["impl_model"]["requested"],
         REVIEWERS=" ".join(existing["reviewers"]),

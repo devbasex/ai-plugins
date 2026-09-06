@@ -17,7 +17,7 @@ import statefile
 
 from . import die, info
 from .paths import _sh, stem_for
-from .plan import format_plan, normalize_plan_file
+from .plan import format_plan, normalize_plan_file, publish_plan_comment
 from .vocabulary import (
     DEFAULT_TEST_TIMEOUT,
     PLAN_COMMIT_MESSAGE,
@@ -277,9 +277,12 @@ def collect_commit_facts(
             "diff_lines": commit_diff_lines(work, full),
             "files": commit_files(work, full),
             "touches_tests": commit_touches_tests(work, full),
+            # **テストコマンドが空なら走らせない。** 適用の検証は「適用そのものが
+            # 通ったか」だけを見る。テストの合否は適用ラウンドの単位で
+            # `verify-round` が 1 度だけ実行する（決定 3）。
             "test_status": run_test_at(
                 work, full, test_command, head_branch, test_timeout
-            ),
+            ) if test_command else "skipped",
         })
     return facts
 
@@ -340,6 +343,55 @@ def resolved_threads_on_github(repo: str, pr: int) -> Optional[set[str]]:
             return resolved
 
 
+# 継続的統合の照会は `commits/{sha}/check-runs` の 1 回だけにする。**併記された状態
+# （`commits/{sha}/status`）は使わない。** GitHub Actions は検査ジョブを記録し commit の
+# 状態を記録しないため、すべて成功した commit でも `pending` を返す。保留として読むと、
+# 通っている検査で通過できなくなる。
+CHECK_RUNS_PER_PAGE = 100
+
+
+def check_run_result(repo: str, sha: str, name: str) -> Optional[str]:
+    """名前が一致した検査ジョブの結果を 1 つの語で返す。
+
+    - すべて完了して結論が `success` なら `"success"`
+    - 未完了があれば `"pending"`
+    - それ以外は最初に見つけた失敗の結論（`"failure"` など）
+    - **照会できない・名前が一致する検査が 1 件も無いときは `None`**
+
+    **「照会できなかった」と「成功した」を区別する。** 呼び出し側は `None` を
+    通過させない（fail-closed）。名前で絞るのは、別の検査の成功で通さないためである。
+    """
+    if not repo or not sha or not name:
+        return None
+    out = _sh(
+        ["gh", "api", f"repos/{repo}/commits/{sha}/check-runs"
+                      f"?per_page={CHECK_RUNS_PER_PAGE}"],
+        check=False,
+    )
+    if not out:
+        return None
+    try:
+        body = json.loads(out)
+    except json.JSONDecodeError:
+        return None
+    runs = body.get("check_runs") if isinstance(body, dict) else None
+    if not isinstance(runs, list):
+        return None
+    matched = [
+        r for r in runs
+        if isinstance(r, dict) and str(r.get("name") or "") == name
+    ]
+    if not matched:
+        return None
+    if any(str(r.get("status") or "").lower() != "completed" for r in matched):
+        return "pending"
+    for run in matched:
+        conclusion = str(run.get("conclusion") or "").lower()
+        if conclusion != "success":
+            return conclusion or "unknown"
+    return "success"
+
+
 def _revert_item_commits(
     state: dict[str, Any], item: dict[str, Any], dry_run: bool = False
 ) -> int:
@@ -391,6 +443,40 @@ def _revert_item_commits(
     return len(shas)
 
 
+def revert_unverified_range(
+    path: pathlib.Path,
+    state: dict[str, Any],
+    entry: dict[str, Any],
+    ordered_range: list[str],
+    label: str,
+) -> None:
+    """検証を通らない範囲を取り消し、`entry` の起点を取り消し後の HEAD へ進める。
+
+    `entry` は**修正の控えを持つ辞書**である。適用ラウンドの控え（`rounds[]` の
+    要素）と最終ゲートの控え（`final_gate`）の両方が同じ 3 つの鍵
+    （`pending_push` / `fix_base_sha`）を持つため、どちらからも呼べる。
+    `label` は取り消しの単位を人が読むための名前で、git の操作には効かない。
+    """
+    work = state["worktrees"]["work"]
+    # **状態へ記録する前に取り消す。** 先に記録すると、取り消し済みのコミットが
+    # 状態ファイルに残り、後の見送り処理が同じコミットをもう一度取り消そうとする。
+    info("検証を通らない変更を残さないため、この修正ラウンドの範囲を取り消します")
+    # **取り消しへ着手する前に印を立てる。** 取り消しは済んだのに push できずに
+    # 終わると、未検証の変更が Pull Request に残ったままになる。
+    entry["pending_push"] = True
+    statefile.save(path, state)
+    _revert_item_commits(
+        state,
+        {"item_id": label, "commits": list(ordered_range)},
+        dry_run=False,
+    )
+    # 取り消し後の状態を新しい起点にし、**その場で保存する**。ここで保存せずに
+    # 落ちると、次の実行は古い起点から範囲を取り直して取り消しコミット自体を
+    # 「未申告」と判定し、**取り消しを取り消して**しまう。
+    entry["fix_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
+    statefile.save(path, state)
+
+
 def _reset_hard(work: str, sha: Optional[str]) -> None:
     """着手前の HEAD へ戻す。半端な履歴を Pull Request に残さないための後始末。"""
     if sha:
@@ -440,6 +526,23 @@ def _replay_commits(work: str, shas: list[str]) -> Optional[dict[str, str]]:
     return mapping
 
 
+def scoped_item_ids(entry: dict[str, Any]) -> list[str]:
+    """取り消しと積み直しの対象になる項目 ID。
+
+    適用ラウンド（群）を持つ状態ファイルでは**進行中の群の項目だけ**を返す。
+    1 件の失敗が群の外の項目を巻き込まないようにするためである（受け入れ条件 A4）。
+    群を持たない状態ファイル（この版より前）は、ラウンド全体を 1 つの群として読む。
+    """
+    groups = entry.get("apply_rounds")
+    if not groups:
+        return list(entry.get("items") or [])
+    current = entry.get("apply_round") or 1
+    for group in groups:
+        if group.get("apply_round") == current:
+            return list(group.get("items") or [])
+    return list(entry.get("items") or [])
+
+
 def _commit_owner(
     work: str, state: dict[str, Any], entry: dict[str, Any]
 ) -> dict[str, str]:
@@ -449,7 +552,7 @@ def _commit_owner(
     積み直しの対象から外すために、**属さないこと**を判定できる形にしておく。
     """
     owner: dict[str, str] = {}
-    for item_id in entry["items"]:
+    for item_id in scoped_item_ids(entry):
         item = _find_item(state, item_id, required=False)
         if item is None:
             continue
@@ -482,7 +585,7 @@ def _drop_replay_plan(
     owner = _commit_owner(work, state, entry)
     drop = set(pending)
     keep_ids = [
-        i for i in entry["items"]
+        i for i in scoped_item_ids(entry)
         if i not in drop
         and not (_find_item(state, i, required=False) or {}).get("reverted")
     ]
@@ -535,8 +638,9 @@ def _record_drop_result(
     mode: str,
 ) -> dict[str, Any]:
     """item の reverted/commits と entry.drops を更新し、結果を返す。"""
-    dropped = list(entry["items"]) if mode == "round" else pending
-    for item_id in entry["items"]:
+    scoped = scoped_item_ids(entry)
+    dropped = list(scoped) if mode == "round" else pending
+    for item_id in scoped:
         item = _find_item(state, item_id, required=False)
         if item is None:
             continue
@@ -865,6 +969,10 @@ def _push_head(state: dict[str, Any]) -> None:
         ["git", "push", "origin", f"HEAD:{state['head_branch']}"],
         cwd=state["worktrees"]["work"],
     )
+    # **改修計画のコメントは push の後で更新する**（#436 決定 6）。差分に混ざらない
+    # ので push とは独立だが、公開した内容と食い違わないよう後ろへ置く。投稿に
+    # 失敗しても進行は止めない（`publish_plan_comment` が出力へ残す）。
+    publish_plan_comment(state)
 
 
 def _push_with_retry_marker(
