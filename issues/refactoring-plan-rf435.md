@@ -82,7 +82,7 @@
 
 | 兆候 | 手法 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| long_method | split_into_pipeline | major | agy / kiro | レビュー中 | 1 |
+| long_method | split_into_pipeline | major | agy / kiro | 採用 | 1 |
 
 **なぜ**: 1 関数が「必要コマンドの検査 → リポジトリ名の解決 → 番号ありの問い合わせ／番号なしの問い合わせ（ブランチ取得・一覧取得・先頭抽出・番号再取得の入れ子分岐）→ head の読み取り → 設計接頭辞の判定 → ラベルの有無 → ラベル定義の有無」と直列に進む。特に番号なしの分岐が深く入れ子になり、正常系（ラベルの有無判定）が末尾に埋もれている。段の間で受け渡すのは num と json だけで、各段に名前が付く
 
@@ -96,7 +96,7 @@
 
 | 兆候 | 手法 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| long_method | extract_method | major | agy / kiro | レビュー中 | 1 |
+| long_method | extract_method | major | agy / kiro | 採用 | 1 |
 
 **なぜ**: 1 関数が 4 つの段階を通しで行う。targets へ 1 巡目で mode を集めて effective/conflict を決め、2 巡目でも同じ state ファイルを wf_state_read で読み直し mode を再解析し、そこで missing の note を組み立て、最後に conflict とラベル案内を含む body を連結する。2 巡目の再読込は 1 巡目と重複しており、note 生成と body 組み立ては別々の関心である。段階に名前が付く（対象の収集 / 課題ごとの記録なし工程の抽出 / 本文の組み立て）
 
@@ -117,3 +117,70 @@
 **手順**: 1. workflow-common.sh に工程名とモード名を返す小さな公開関数を置き、WF_STAGE_MATRIX から値を導く
 2. projects-common.sh 側の PJ_STAGES/PJ_MODES を固定文字列ではなくその関数の出力から初期化する
 3. pj_is_stage/pj_is_mode と wf_is_stage/wf_is_mode の既存入出力が変わらないことを既存の stage_values と workflow_stage_matrix のテストで確認する
+
+## ラウンド 3（実装 kiro / レビュー codex / agy）
+
+### R3-001 — `plugins/ndf/skills/development-workflow/scripts/lib/workflow-common.sh#wf_report`
+
+| 兆候 | 手法 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_method | extract_method | major | agy / kiro | レビュー中 | 1 |
+
+**なぜ**: 1 関数が (1) 控えの読み取り (2) frontier までの各工程を present/missing/conditional へ分類する走査 (3) 見出し・記録あり/なし/条件付き・案内文の整形 の 3 段を通しで行う。分類の走査は wf_stage_class を呼びつつ 3 本の配列へ振り分ける独立した段で、既に隣接する _wf_missing_before_pr が同型の走査を別関数へ切り出しており、この関数だけが走査と整形を同居させている。
+
+**手順**: 1. frontier までを走査して各工程を分類する部分（present へ入れるか、mode があれば wf_stage_class で R/C を判定して missing/conditional へ振り分ける while ループ）を _wf_classify_stages として抽出する
+2. 抽出関数は recorded 配列・mode・frontier を引数で受け取り、'class<TAB>stage'（present は present、必須は missing、条件付きは conditional）を 1 行 1 件で標準出力へ出す（本ファイルの _wf_missing_before_pr / wf_stages が採る行出力の流儀に合わせる）
+3. wf_report 側は抽出関数の出力を読み、タブの左で present/missing/conditional 配列へ bin する短いループへ置き換える
+4. 残る整形部（printf の並び）はそのまま wf_report に残し、走査と整形の責務を分ける
+5. stage-check.sh report 経由の統合テスト（tests/test_stage_check.py の report、tests/test_workflow_units.py::test_the_report_requires_a_review_for_light、tests/test_workflow_guard.py::test_recording_the_release_reports_the_missing_stages）を実行し、出力が不変であることを確認する
+
+### R3-002 — `plugins/ndf/scripts/lib/models.py#separation_reason`
+
+| 兆候 | 手法 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| embedded_business_rule | replace_with_lookup_table | major | codex | 取り消し | 0 |
+
+**なぜ**: 計測から分離する条件と文言が if 分岐に埋め込まれており、assumption_note と is_measurable も同じ判断に依存しているため、ランタイムごとの計測方針を一覧できない
+
+**手順**: 1. 現状固定テストで、kiro auto、未指定の codex/agy、指定ありの codex、observable な claude の戻り値を固定する
+2. 分離条件をランタイム別の小さな対応表へ移す
+3. separation_reason は対応表を参照して理由を返すだけにする
+4. assumption_note と is_measurable が同じ入口を使うことを確認し、既存テストを実行する
+
+### R3-003 — `plugins/ndf/scripts/lib/metrics.py#format_report`
+
+| 兆候 | 手法 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_method | split_into_pipeline | major | codex | 取り消し | 0 |
+
+**なぜ**: 1 つの関数が実装担当表・レビュー担当表・分離ラウンド・指定値代用ラウンド・比較上の注意を順に組み立てており、集計項目の追加時に表示段すべてを同時に読ませる構造になっている
+
+**手順**: 1. 現状固定テストで、impl だけ・reviewer だけ・unmeasured/assumed ありの出力を固定する
+2. 実装担当表を _format_impl_section に抽出する
+3. レビュー担当表を _format_reviewer_section に抽出する
+4. 警告セクションと比較上の注意をそれぞれ独立した段として返す関数へ分ける
+5. format_report は各段を順に連結するだけにして既存テストを実行する
+
+### R3-004 — `plugins/ndf/skills/development-workflow/scripts/lib/workflow-merge.sh#wf_merge_target`
+
+| 兆候 | 手法 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| deep_nesting | flatten_conditional | minor | agy | レビュー中 | 1 |
+
+**なぜ**: wf_merge_target の state 3 処理において、case "$state" in 3) の直下に case "$tok" in *[!0-9]*) と case "$tok" in */pull/*) の 3 段の case 文が入れ子になっており、正常系である数値トークン判定や URL からの番号抽出の条件分岐が深くネストしている。例外条件やパターンを平坦化してネストを浅くできる。
+
+**手順**: 1. state 3 内のトークン判定を平坦化し、URL 形式（*/pull/*）の抽出と数値判定（*[!0-9]* / *）を 1 階層の case 分岐へ整理する
+2. tests/test_workflow_guard.py を実行して番号指定・URL 指定・オプション混在時のマージ判定テストが全て通ることを確認する
+
+### R3-005 — `plugins/ndf/scripts/lib/closing-issues.sh#closing-issues.sh (git URL からの slug 解決ブロック)`
+
+| 兆候 | 手法 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| duplication | consolidate_duplication | minor | kiro | レビュー中 | 1 |
+
+**なぜ**: git の remote.origin.url を <所有者>/<リポジトリ> へ畳む同じ規則（slug=${url%.git}; slug=${slug%/}; slug=${slug##*:} と owner/repo への分解、owner=${owner##*/} まで）が closing-issues.sh のインラインブロックと workflow-common.sh の wf_repo_slug に二重にある。URL の形（git@ / https / 末尾スラッシュ）への対応が変わると片方だけ直され、閉じる先の解決とリポジトリ判定で挙動が食い違う。ただし closing-issues.sh は独立実行を保つ設計（bash 副プロセスとして起動される）のため、共通化は共有ライブラリの source という結合を持ち込む点に注意が要る。
+
+**手順**: 1. slug 解決の規則を 1 つの純関数（例: scripts/lib のごく小さな共通シェル関数、または既存の projects-common.sh 等 3 ランタイム共通で読まれる層）へ寄せる。標準出力へは何も足さず、slug を返すだけにする
+2. wf_repo_slug をその関数への委譲に置き換える
+3. closing-issues.sh の DEFAULT_REPO 決定ブロックを同じ関数の呼び出しへ置き換える。独立実行の契約を壊さないよう、読み込み失敗時は現状どおり DEFAULT_REPO を空のまま進める分岐を残す
+4. closing-issues.sh の現状固定テスト（plugins/ndf/skills/merged/tests/closing_issues_helpers.py 経由）と wf_repo_slug を通る stage-check.sh 系の統合テストを実行し、slug 解決結果が不変であることを確認する。テストの置き場所が対象範囲外（skills/merged/tests）にあるため、共通化のコミットに合わせて --scope へ含める必要がある
