@@ -88,7 +88,7 @@ def test_a_report_lists_the_recorded_stages(repo: Path, state: Path) -> None:
     out = report(repo, state, 161).stdout
 
     assert out.splitlines()[0] == "#161 の通過工程（architecture）"
-    assert "  記録あり: 作業場所の用意 / 要求と受け入れ条件 / 設計 / 設計レビュー / 計画 /" in out
+    assert "  記録あり: 要求と受け入れ条件 / 作業場所の用意 / 設計 / 設計レビュー / 計画 /" in out
 
 
 def test_the_measured_order_reports_only_the_missing_stage(repo: Path, state: Path) -> None:

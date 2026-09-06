@@ -16,14 +16,14 @@
 # 表のセルが `—` なら対象外、`任意` か丸括弧で条件を添えたものなら条件付き、
 # それ以外は必須である。食い違いは tests/test_workflow_stage_matrix.py が拾う。
 WF_MODES=$'light\tstandard\tarchitecture\tlegacy-refactor'
-WF_STAGE_MATRIX=$'作業場所の用意\tC\tR\tR\tR
-要求と受け入れ条件\t-\tR\tR\t-
+WF_STAGE_MATRIX=$'要求と受け入れ条件\tR\tR\tR\t-
+作業場所の用意\tC\tR\tR\tR
 設計\t-\tR\tR\tR
 設計レビュー\t-\tR\tR\tC
 計画\t-\tR\tR\tR
 実装\tR\tR\tR\tR
 構造改善\t-\tR\tR\tR
-レビュー\t-\tR\tR\tR
+レビュー\tR\tR\tR\tR
 完了判定\tR\tR\tR\tR
 Pull Request\tR\tR\tR\tR
 確定仕様化\t-\tC\tR\t-

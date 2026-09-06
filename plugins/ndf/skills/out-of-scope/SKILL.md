@@ -46,7 +46,7 @@ allowed-tools:
 | 受け入れ条件 | `requirements-design` が作った仕様（`issues/` 配下） |
 | やらないこと | `implementation-plan` の計画ファイルの「目的と非目的」 |
 
-どちらも無い変更（`light` など）では、依頼文が範囲を決める。
+どちらも無い変更では、依頼文が範囲を決める。
 
 ### 2. 3 択で決める
 
