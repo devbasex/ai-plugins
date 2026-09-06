@@ -1,6 +1,6 @@
 ---
 name: development-workflow
-description: "Classify a change into 4 workflow modes and route it to the required steps. Use when deciding how much process a change needs（モード判定・工程の振り分け）."
+description: "Classify a change into 3 workflow modes and route it to the required steps. Use when deciding how much process a change needs（モード判定・工程の振り分け）."
 hooks:
   PreToolUse:
     - matcher: "Bash"
@@ -12,7 +12,7 @@ hooks:
 
 # 開発ワークフローの振り分け
 
-変更内容を 4 つのモードへ分類し、必要な工程だけを起動する。**全変更にフル工程を課さない。**
+変更内容を 3 つのモードへ分類し、必要な工程だけを起動する。**全変更にフル工程を課さない。**
 
 **判定基準を持つのはこの Skill だけである。** 他の Skill とエージェント定義は判定結果を
 受け取る側に徹する。同じ基準を複数箇所へ書くと、モードを追加・変更したときに片方だけが
@@ -131,7 +131,7 @@ Skill は使わず `pr` → `cross-review` → `merged` を順に呼ぶ。**こ�
 要る。レビュー段階は**明示的に呼ぶ**（自然文で「レビューして」と依頼すると、Claude Code では組み込みの
 `code-review` が起動して判定の投稿経路が変わる）。
 
-**マージは取り込みであって配布ではない。** `release` は 4 モードすべてで通す。**自動で進めて
+**マージは取り込みであって配布ではない。** `release` は 3 モードすべてで通す。**自動で進めて
 よいのは検証への配布までで、本番への配布は承認を得るまで進めない。**
 
 工程ごとの理由・条件・例外は

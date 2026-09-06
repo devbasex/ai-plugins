@@ -21,9 +21,8 @@ allowed-tools:
 適用を担う側は `refactoring` を手順として読む。
 
 **工程表では `standard` と `legacy-refactor` の構造改善がこの Skill を指す。**
-`standard` の既定は `refactoring` 単独である（変更のついでの小さな整理になりやすく、
-4 つの CLI を複数ラウンド動かす費用に見合わない）。前提を満たせないときの退避先は
-`development-workflow` の `references/workflow-modes.md`「構造改善の退避先」にある。
+前提を満たせないときの退避先は `development-workflow` の
+`references/workflow-modes.md`「構造改善の退避先」にある。
 
 詳細は `docs/` に、コマンドは `scripts/` に分けている。
 
