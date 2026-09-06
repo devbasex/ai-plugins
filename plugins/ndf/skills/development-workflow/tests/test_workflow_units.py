@@ -74,7 +74,7 @@ def stages() -> list[str]:
 
 def test_light_is_reviewed_by_the_converging_loop() -> None:
     """レビューの深さをモードで変える根拠が無い。差分の小ささはラウンド数が吸収する。"""
-    assert "cross-review" in cell("レビュー", "light")
+    assert "cross-review" in cell("実装レビュー", "light")
 
 
 def test_light_carries_requirements_too() -> None:
@@ -210,7 +210,7 @@ def test_the_report_requires_a_review_for_light(repo, tmp_path) -> None:
     missing = next(
         (line for line in result.stdout.splitlines() if "記録なし:" in line), ""
     )
-    assert "レビュー" in missing, result.stdout
+    assert "実装レビュー" in missing, result.stdout
     assert "要求と受け入れ条件" in missing, result.stdout
     assert state_file(state_dir, 31).is_file()
 

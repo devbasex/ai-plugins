@@ -179,7 +179,7 @@ def test_the_scripts_are_executable_shell(script) -> None:
 def test_the_skill_names_the_design_branch_prefix() -> None:
     """設計 Pull Request の見分けは head のブランチ名で行う（決定 4）。規約を本文へ書く。"""
     body = SKILL.read_text(encoding="utf-8")
-    section = body.split("**設計レビューは")[1].split("\n## ")[0]
+    section = body.split("**ドキュメントレビューは")[1].split("\n## ")[0]
 
     assert "design/" in section
 

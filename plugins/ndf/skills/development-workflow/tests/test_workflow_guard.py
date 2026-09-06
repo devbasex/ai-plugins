@@ -330,8 +330,8 @@ def test_recording_the_release_reports_the_missing_stages(repo: Path, state: Pat
     """#221-1: 必須の工程の記録が無いまま配布の記録へ進んだとき、名前が出力に現れる。"""
     env = base_env(state)
     run_stage_check("record", "161", "mode", "standard", cwd=repo, env=env)
-    for stage in ("作業場所の用意", "要求と受け入れ条件", "設計", "設計レビュー", "計画",
-                  "実装", "構造改善", "レビュー", "完了判定", "Pull Request", "後片付け"):
+    for stage in ("作業場所の用意", "要求と受け入れ条件", "設計", "ドキュメントレビュー", "計画",
+                  "実装", "構造改善", "実装レビュー", "完了判定", "Pull Request", "後片付け"):
         run_stage_check("record", "161", "stage", stage, cwd=repo, env=env)
 
     result = guard(repo, state, 'bash "$SCRIPTS/projects-sync.sh" 161 stage "配布"')
@@ -346,7 +346,7 @@ def test_recording_the_release_without_a_gap_says_nothing(repo: Path, state: Pat
     env = base_env(state)
     run_stage_check("record", "161", "mode", "light", cwd=repo, env=env)
     for stage in (
-        "要求と受け入れ条件", "作業場所の用意", "実装", "レビュー", "完了判定",
+        "要求と受け入れ条件", "作業場所の用意", "実装", "実装レビュー", "完了判定",
         "Pull Request", "後片付け",
     ):
         run_stage_check("record", "161", "stage", stage, cwd=repo, env=env)

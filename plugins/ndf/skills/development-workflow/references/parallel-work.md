@@ -41,11 +41,12 @@
 | 要求と受け入れ条件 | 課題 | 何を満たすかは課題が持つ |
 | 作業場所の用意 | Pull Request | 1 本につき 1 つの作業ツリー |
 | 設計 | Pull Request | 設計文書は Pull Request の中身に対して書く |
-| 設計レビュー | Pull Request | 設計だけを載せた Pull Request を先にマージする |
+| ドキュメント再構成 | Pull Request | 組み直す対象がその Pull Request の設計文書である |
+| ドキュメントレビュー | Pull Request | 設計だけを載せた Pull Request を先にマージする |
 | 計画 | Pull Request | 分解の対象が Pull Request の中身である |
 | 実装 | Pull Request | — |
 | 構造改善 | Pull Request | — |
-| レビュー | Pull Request | `cross-review` は Pull Request 単位で回る |
+| 実装レビュー | Pull Request | `cross-review` は Pull Request 単位で回る |
 | 完了判定 | Pull Request | 取り込み前の差分に対する証跡である |
 | Pull Request | Pull Request | — |
 | 確定仕様化 | まとまり | 仕様は Pull Request の境界を越える |

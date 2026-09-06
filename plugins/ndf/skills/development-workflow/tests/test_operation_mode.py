@@ -28,16 +28,17 @@ EXPECTED_MODES = ["light", "operation", "legacy-refactor", "standard"]
 JUDGEMENT_HEADING = "### 2. 上から順に条件を判定する"
 WORKFLOW_TABLE_HEADING = "## モードごとに起動する Skill"
 
-# `operation` 列の期待値。工程表の 15 行すべてに値が入る（受け入れ条件 B3）。
+# `operation` 列の期待値。工程表の 16 行すべてに値が入る（受け入れ条件 B3）。
 EXPECTED_OPERATION_COLUMN = {
     "要求と受け入れ条件": "R",
     "作業場所の用意": "C",
     "設計": "-",
-    "設計レビュー": "-",
+    "ドキュメント再構成": "-",
+    "ドキュメントレビュー": "-",
     "計画": "R",
     "実装": "R",
     "構造改善": "-",
-    "レビュー": "R",
+    "実装レビュー": "R",
     "完了判定": "R",
     "Pull Request": "R",
     "確定仕様化": "C",

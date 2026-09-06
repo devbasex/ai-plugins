@@ -19,11 +19,12 @@ WF_MODES=$'light\toperation\tlegacy-refactor\tstandard'
 WF_STAGE_MATRIX=$'要求と受け入れ条件\tR\tR\t-\tR
 作業場所の用意\tC\tC\tR\tR
 設計\t-\t-\tR\tR
-設計レビュー\t-\t-\tC\tR
+ドキュメント再構成\t-\t-\tC\tR
+ドキュメントレビュー\t-\t-\tC\tR
 計画\t-\tR\tR\tR
 実装\tR\tR\tR\tR
 構造改善\t-\t-\tR\tR
-レビュー\tR\tR\tR\tR
+実装レビュー\tR\tR\tR\tR
 完了判定\tR\tR\tR\tR
 Pull Request\tR\tR\tR\tR
 確定仕様化\t-\tC\t-\tR
@@ -51,7 +52,7 @@ WF_REPORT_STAGE='配布'
 WF_PR_STAGE='Pull Request'
 # その検査から外す工程。**`cross-review` は Pull Request が無いと回せない**（決定 7）。
 # 求めれば毎回欠落として出て、案内が読まれなくなる。
-WF_PR_EXEMPT_STAGE='レビュー'
+WF_PR_EXEMPT_STAGE='実装レビュー'
 # 承認の印。**この名前のラベルがリポジトリに定義されていること自体が有効化の宣言になる**。
 WF_APPROVAL_LABEL='design-approved'
 # 設計 Pull Request を見分ける head のブランチ名の接頭辞。

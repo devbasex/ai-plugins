@@ -110,11 +110,12 @@ mode: standard
 | 要求と受け入れ条件 | `requirements-design` | `requirements-design` | — | `requirements-design` |
 | 作業場所の用意 | `worktree`（主ディレクトリで編集してよいパスだけなら不要） | `worktree`（主ディレクトリで編集してよいパスだけなら不要） | `worktree` | `worktree` |
 | 設計 | — | — | `design` | `design` |
-| 設計レビュー | — | — | 任意 | `pr` → `cross-review` → `merged` |
+| ドキュメント再構成 | — | — | `document-restructuring`（設計 Pull Request を分けた場合） | `document-restructuring` |
+| ドキュメントレビュー | — | — | `pr` → `cross-review` → `merged`（設計 Pull Request を分けた場合） | `pr` → `cross-review` → `merged` |
 | 計画 | — | `implementation-plan` | `implementation-plan` | `implementation-plan` |
 | 実装 | 直接編集 | 実行 → [operation-run.md](references/operation-run.md) | `refactoring` | `tdd-cycle` |
 | 構造改善 | — | — | `cross-refactoring` | `cross-refactoring` |
-| レビュー | `cross-review` | `cross-review` | `pr-review` | `cross-review` |
+| 実装レビュー | `cross-review` | `cross-review` | `pr-review` | `cross-review` |
 | 完了判定 | `quality-gates` | `quality-gates` | `quality-gates` | `quality-gates` |
 | Pull Request | `pr` | `pr` | `pr` | `pr` |
 | 確定仕様化 | — | `plan-to-spec`（実行で決まった設定が以後の判断の前提になる場合） | — | `plan-to-spec` |
@@ -138,16 +139,21 @@ mode: standard
 触るなら作業ツリーを使う。`issues/` `docs/` と各ランタイムの設定だけで収まる変更は、
 主ディレクトリのままでよい。
 
-**設計レビューは、設計だけを載せた Pull Request を実装より先にマージする工程である。** 新しい
-Skill は使わず `pr` → `cross-review` → `merged` を順に呼ぶ。**この工程のマージには人間の承認が
-要る**（止まり方は「`/goal` の引数として呼ばれたとき」）。head のブランチ名は `design/` で始め、
-マージした後は実装用の作業ツリーを作り直す。
+**ドキュメント再構成は、書き上げた設計文書を章立てから組み直す工程である。**
+`document-restructuring` が測る・並べ替える・整える・測り直すの 4 段を持つ。**レビューの前に
+置く。** 後に置くと、レビュー担当が構成の指摘と内容の指摘を同時に出すことになり、どちらの
+指摘なのかが混ざる。
 
-**構造改善とレビューは、通す工程であって任意ではない。** `standard` と `legacy-refactor` の
+**ドキュメントレビューは、設計だけを載せた Pull Request を実装より先にマージする工程である。**
+新しい Skill は使わず `pr` → `cross-review` → `merged` を順に呼ぶ。**この工程のマージには
+人間の承認が要る**（止まり方は「`/goal` の引数として呼ばれたとき」）。head のブランチ名は
+`design/` で始め、マージした後は実装用の作業ツリーを作り直す。
+
+**構造改善と実装レビューは、通す工程であって任意ではない。** `standard` と `legacy-refactor` の
 構造改善は `cross-refactoring` を通す。
-**レビューは 4 モードとも通す。** Pull Request を出す以上、その差分は誰かがレビューする。
+**実装レビューは 4 モードとも通す。** Pull Request を出す以上、その差分は誰かがレビューする。
 `light` は「本番の振る舞いも本番コードの構造も変えない」変更だが、**変えないことの確認**が
-要る。レビュー段階は**明示的に呼ぶ**（自然文で「レビューして」と依頼すると、Claude Code では組み込みの
+要る。実装レビューの工程は**明示的に呼ぶ**（自然文で「レビューして」と依頼すると、Claude Code では組み込みの
 `code-review` が起動して判定の投稿経路が変わる）。
 
 **マージは取り込みであって配布ではない。** `release` は 4 モードすべてで通す。**自動で進めて
@@ -166,7 +172,7 @@ issue にする**。順序を持たないため、複数の工程から呼ばれ
 flowchart TD
     H[実装] -.-> S[起票]
     R[構造改善] -.-> S
-    V[レビュー] -.-> S
+    V[実装レビュー] -.-> S
     K[完了判定] -.-> S
     S -.番号.-> T[振り返り]
 ```
@@ -220,7 +226,7 @@ flowchart TD
 
 | 関門 | いつ | 要否の決まり方 |
 | --- | --- | --- |
-| 設計 Pull Request のマージ | 設計レビューの工程 | **マージ先のチャネルによらず要る** |
+| 設計 Pull Request のマージ | ドキュメントレビューの工程 | **マージ先のチャネルによらず要る** |
 | 本番の系へ届く操作 | 配布の工程、および `operation` の実装の工程 | **届く先が本番の系かどうかで決まる** |
 
 **2 つは要否の決まり方が違う。** 並べて書くと片方に掛かる規則が両方に掛かって読めるため、
@@ -235,7 +241,7 @@ flowchart TD
 対象は `standard` である。`legacy-refactor` は設計 Pull Request を分けた
 ときだけ同じ扱いにする。`light` は設計工程を通らないため対象外である。
 
-**止める場所を設計レビューに限るのは、そこが後から直す費用の変わり目だからである。**
+**止める場所をドキュメントレビューに限るのは、そこが後から直す費用の変わり目だからである。**
 
 ### 本番の系へ届く操作
 
@@ -333,7 +339,8 @@ flowchart TD
     B --> D{モード判定}
     D --> S[作業場所の用意]
     S --> C[設計]
-    C --> F[設計レビュー<br/>PR → 承認 → マージ]
+    C --> DR[ドキュメント再構成]
+    DR --> F[ドキュメントレビュー<br/>PR → 承認 → マージ]
     F --> W[実装用の作業ツリーを<br/>作り直す]
     W --> G[実装計画]
     G --> H[失敗するテスト → 最小実装 → 整理]
@@ -367,16 +374,17 @@ flowchart TD
   T、当たらなければ RL である
 - **`operation` は N（全体テスト → ビルド・結合テスト）を通らない。** `quality-gates` が
   この モードへ課す段階は 3 までである。K の限定的な検証で、**実行そのものの結果**を確かめる
-- **`operation` は C（設計）・F（設計レビュー）・R（構造改善）を通らない。** S から
-  G（実装計画）へ抜け、X（外部の系への実行）が H の位置に立つ。X の手順は
-  [references/operation-run.md](references/operation-run.md) が持ち、**実行の前に
-  承認を得る**
+- **`operation` は C（設計）・DR（ドキュメント再構成）・F（ドキュメントレビュー）・
+  R（構造改善）を通らない。** S から G（実装計画）へ抜け、X（外部の系への実行）が H の位置に
+  立つ。X の手順は [references/operation-run.md](references/operation-run.md) が持ち、
+  **実行の前に承認を得る**
 - **`light` は破線の経路（A → B → D → S → I → J → K → L → P → RL）を通る。** I と J の
   レビューは通り、K は変更箇所を 1 度実行する限定的な検証と静的解析だけを指す。N の全体
   テストと結合テストは通らない
 - `legacy-refactor` は A から D へ抜け、B（要求と受け入れ条件）と M（確定仕様化）を通らない。
-  H は「現状固定テスト」、R は「段階的改善」、I は「本番の振る舞いが変わっていないことの確認」
-  として読む
+  DR（ドキュメント再構成）と F（ドキュメントレビュー）は、**設計 Pull Request を分けたときだけ**
+  通る。H は「現状固定テスト」、R は「段階的改善」、I は「本番の振る舞いが変わっていないことの
+  確認」として読む
 
 モードごとの経路の詳細と、図から読み取れない条件は
 [references/workflow-modes.md](references/workflow-modes.md) にある。
@@ -390,7 +398,8 @@ flowchart TD
 | 用語と不変条件 | `requirements-design` の仕様へ書く |
 | 設計文書 | `design` が独立したファイルで作る。触る領域に該当する節をすべて埋める |
 | 設計判断の記録 | 設計文書の「決定の記録」の節へ書く |
-| 設計レビュー | 設計だけを載せた Pull Request を `cross-review` へ通し、マージしてから実装へ進む |
+| ドキュメント再構成 | `document-restructuring` が章立てを読み手の問う順へ組み直し、前後の値を並べる |
+| ドキュメントレビュー | 設計だけを載せた Pull Request を `cross-review` へ通し、マージしてから実装へ進む |
 | 契約・結合テスト | `tdd-cycle` の階層の使い分けに従う |
 
 **判定基準の側は変えない。** モードの定義は確定しており、この節は振り分け先を示す。

@@ -22,7 +22,7 @@ Pull Request のマージが、人間の承認を経ずに実行できる（#266
 承認の印を作る。**この 1 回の操作が、マージの拒否を有効にする宣言を兼ねる。**
 
 ```bash
-gh label create design-approved --description "設計レビューを人間が承認した" --color 0e8a16
+gh label create design-approved --description "ドキュメントレビューを人間が承認した" --color 0e8a16
 ```
 
 新しい宣言ファイルは置かない。宣言があるのにラベルが定義されていない状態が作れてしまい、
@@ -54,7 +54,7 @@ ${TMPDIR:-/tmp}/ndf-stages/              # どちらも作れないとき
 
 ```json
 {"version": 1, "repo": "devbasex/ai-plugins", "issue": 221, "mode": "standard",
- "stages": ["作業場所の用意", "要求と受け入れ条件", "設計", "設計レビュー"],
+ "stages": ["作業場所の用意", "要求と受け入れ条件", "設計", "ドキュメントレビュー"],
  "updated_at": "2026-09-03T00:00:00Z"}
 ```
 
@@ -121,14 +121,14 @@ bash "$SCRIPTS/../skills/development-workflow/scripts/stage-check.sh" report <�
 
 ```text
 #161 の通過工程（architecture）
-  記録あり: 作業場所の用意 / 要求と受け入れ条件 / 設計 / 設計レビュー / 計画 / 実装 / 構造改善 / レビュー / 完了判定 / Pull Request / 後片付け
+  記録あり: 作業場所の用意 / 要求と受け入れ条件 / 設計 / ドキュメントレビュー / 計画 / 実装 / 構造改善 / 実装レビュー / 完了判定 / Pull Request / 後片付け
   記録なし: 確定仕様化
 実施済みであれば、記録してから先へ進んでください。
   bash "$SCRIPTS/projects-sync.sh" 161 stage "確定仕様化"
 ```
 
-- **判定は工程の集合で行い、並びは見ない。** 設計レビューの工程が `pr` → `cross-review` →
-  `merged` を呼ぶため、`レビュー` と `後片付け` は 2 回ずつ現れる。隣り合う 2 つの値を比べる
+- **判定は工程の集合で行い、並びは見ない。** ドキュメントレビューの工程が `pr` → `cross-review` →
+  `merged` を呼ぶため、`実装レビュー` と `後片付け` は 2 回ずつ現れる。隣り合う 2 つの値を比べる
   判定にすると毎回ひっかかる
 - **見る範囲は、いちばん先まで進んだ記録までとする。** まだ来ていない工程は欠落ではない
 - 条件付きの工程（モードによって要否が変わるもの）は `条件付き:` として必須と分けて出す
@@ -152,7 +152,7 @@ bash "$SCRIPTS/../skills/development-workflow/scripts/stage-check.sh" report <�
   何も出さずに通す
 - **検査の終点は工程表の並びで決める。** 記録済みの最も先の工程に置くと、Pull Request を
   作る時点では常にその手前であるため、欠落が 1 件も出ない
-- **「レビュー」だけは求めない。** `cross-review` は Pull Request が無いと回せないため、
+- **「実装レビュー」だけは求めない。** `cross-review` は Pull Request が無いと回せないため、
   求めれば毎回欠落として出て、案内が読まれなくなる
 - **`light` を外さない。** 必須の工程が少ないモードほど、通していないことが見えにくい
 

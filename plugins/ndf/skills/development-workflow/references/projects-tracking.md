@@ -66,11 +66,12 @@ Pull Request が出る場合も、既定の `Linked pull requests` に並ぶた�
 | 要求と受け入れ条件 | `requirements-design` | `要求と受け入れ条件` |
 | 作業場所の用意 | `worktree` | `作業場所の用意` |
 | 設計 | `design` | `設計` |
-| 設計レビュー | `design` が `pr` / `cross-review` / `merged` を呼ぶ | `設計レビュー` |
+| ドキュメント再構成 | `document-restructuring` | `ドキュメント再構成` |
+| ドキュメントレビュー | `design` が `pr` / `cross-review` / `merged` を呼ぶ | `ドキュメントレビュー` |
 | 計画 | `implementation-plan` | `計画` |
 | 実装 | `tdd-cycle` | `実装` |
 | 構造改善 | `refactoring` / `cross-refactoring` | `構造改善` |
-| レビュー | `cross-review` / `pr-review` | `レビュー` |
+| 実装レビュー | `cross-review` / `pr-review` | `実装レビュー` |
 | 完了判定 | `quality-gates` | `完了判定` |
 | Pull Request | `pr` | `Pull Request` |
 | 確定仕様化 | `plan-to-spec` | `確定仕様化` |
@@ -78,6 +79,23 @@ Pull Request が出る場合も、既定の `Linked pull requests` に並ぶた�
 | 配布 | `release` | `配布` |
 | リリース後テスト | `release-verification` | `リリース後テスト` |
 | 振り返り | `retrospective` | `振り返り` |
+
+## 工程名が変わったとき
+
+**旧い名前を新しい名前として読む表は持たない。** 読み替えの表を置くと、それをいつ消すかを
+決める工程が新たに要る。消す時期を決められないまま残ると、名前が 2 通り通用する状態が続く。
+
+**記録済みの値は移行で 1 度だけ書き換える。** 改名は同じものの名前が変わっただけであるため、
+書き換えても「そのとき何を通ったか」は失われない。
+
+| 書き換える先 | 手段 |
+| --- | --- |
+| 盤面の単一選択 | 利用者が値を足し、既存のアイテムを付け替える |
+| 課題の本文の `## 進行` の節 | 節の中の工程の一覧だけを差し替える。**節の外は書き換えない** |
+| 控え（実行のたびに作り直される） | 放置してよい |
+
+**書き換えた後は、現行の名前だけが通用する。** 一覧に無い値が来たら、名前の揺れではなく
+記録そのものの誤りとして扱う。
 
 ## 呼び方
 
@@ -91,7 +109,7 @@ bash "$SCRIPTS/projects-sync.sh" <issue番号> <キー> "<値>"
 同じ形で書き、呼び方を 1 つに揃える。
 
 ```bash
-bash "$SCRIPTS/projects-sync.sh" 186 stage "レビュー"
+bash "$SCRIPTS/projects-sync.sh" 186 stage "実装レビュー"
 bash "$SCRIPTS/projects-sync.sh" 186 stage "Pull Request"
 bash "$SCRIPTS/projects-sync.sh" 186 mode "standard"
 bash "$SCRIPTS/projects-sync.sh" 186 worktree ".worktrees/fix/issue-186"
