@@ -27,7 +27,7 @@
 
 | 兆候 | 手法 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| duplication | extract_method | major | kiro | レビュー中 | 1 |
+| duplication | extract_method | major | kiro | 採用 | 1 |
 
 **なぜ**: `gh` の直後から `pr` までグローバルオプション（`-R`/`--repo` は値付き、その他の `-*` は 1 語だけ）を読み飛ばして動詞を待つ state machine（state 0->1->2、`-R|--repo`->4->1、`-*` 素通り）が、workflow-common.sh の `_wf_pr_create_body` と workflow-merge.sh の `wf_merge_target` に同一の分岐として二重に書かれている。#427 のレビューで両方に同じ修正（`gh -R <slug> pr` を見落とす）を入れており、片方だけ直すと挙動が食い違う。同じ理由で必ず一緒に変わる重複である。
 
@@ -68,10 +68,52 @@
 
 | 兆候 | 手法 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| dead_code | remove_dead_code | minor | agy | レビュー中 | 1 |
+| dead_code | remove_dead_code | minor | agy | 採用 | 1 |
 
 **なぜ**: PR #435 でモード一覧から architecture が廃止され、WF_MODES および WF_STAGE_MATRIX の列数が 4 から 3 へ減った。しかし wf_stage_class の内部では IFS=$'\t' read -r name c1 c2 c3 c4 による 4 列目の受領と、case "$column" の 4) printf '%s\n' "$c4" 分岐が残っており、_wf_mode_column は最大 3 までしか返さないため到達不能なデッドコードになっている。
 
 **手順**: 1. wf_stage_class 内の read 行から未使用変数 c4 を削除し、read -r name c1 c2 c3 とする
 2. case "$column" から到達不能な分岐 4) printf '%s\n' "$c4" ;; を削除する
 3. 既存テストを実行して通過することを確認する
+
+## ラウンド 2（実装 agy / レビュー codex / kiro）
+
+### R2-001 — `plugins/ndf/skills/development-workflow/scripts/lib/workflow-merge.sh#wf_check_merge`
+
+| 兆候 | 手法 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_method | split_into_pipeline | major | agy / kiro | レビュー中 | 1 |
+
+**なぜ**: 1 関数が「必要コマンドの検査 → リポジトリ名の解決 → 番号ありの問い合わせ／番号なしの問い合わせ（ブランチ取得・一覧取得・先頭抽出・番号再取得の入れ子分岐）→ head の読み取り → 設計接頭辞の判定 → ラベルの有無 → ラベル定義の有無」と直列に進む。特に番号なしの分岐が深く入れ子になり、正常系（ラベルの有無判定）が末尾に埋もれている。段の間で受け渡すのは num と json だけで、各段に名前が付く
+
+**手順**: 1. jq / git / gh の存在検査と失敗時の判定拒否理由生成を _wf_require_merge_tools として抽出する
+2. 番号指定時（pulls/<番号>）と番号未指定時（ブランチ名から pulls?head= で検索）の PR 問い合わせと番号・JSON 解決を _wf_resolve_pr_info として抽出する
+3. 承認ラベルの有無およびラベル定義（404 判定）の確認を _wf_verify_approval_label として抽出する
+4. wf_check_merge 本体を「ツール検査 → PR 解決 → head 判定 → ラベル判定」の直列なパイプライン処理として整える
+5. 各手順ごとに test_workflow_guard.py を実行し、既存テストが全て通ることを確認する
+
+### R2-002 — `plugins/ndf/skills/development-workflow/scripts/lib/workflow-common.sh#wf_evidence_report`
+
+| 兆候 | 手法 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_method | extract_method | major | agy / kiro | レビュー中 | 1 |
+
+**なぜ**: 1 関数が 4 つの段階を通しで行う。targets へ 1 巡目で mode を集めて effective/conflict を決め、2 巡目でも同じ state ファイルを wf_state_read で読み直し mode を再解析し、そこで missing の note を組み立て、最後に conflict とラベル案内を含む body を連結する。2 巡目の再読込は 1 巡目と重複しており、note 生成と body 組み立ては別々の関心である。段階に名前が付く（対象の収集 / 課題ごとの記録なし工程の抽出 / 本文の組み立て）
+
+**手順**: 1. targets と modes/effective/conflict を集める 1 巡目を `_wf_collect_targets` として抽出し、targets 一覧と effective と conflict を返す形にする
+2. 課題 1 件から記録なし必須工程の note 1 行を作る処理を `_wf_target_note` として抽出し、2 巡目のループ本体をこの呼び出しに置き換える（state ファイルの読み直しはこの中に閉じる）
+3. notes/conflict/effective/modes から案内文字列を組み立てる部分を `_wf_compose_evidence_body` として抽出する
+4. wf_evidence_report 本体を「収集 → note 生成の反復 → body 組み立て」の 3 呼び出しへ縮める
+5. 各手ごとに test_workflow_evidence.py を実行して緑を確認する
+
+### R2-003 — `plugins/ndf/skills/development-workflow/scripts/lib/workflow-common.sh#WF_STAGE_MATRIX`
+
+| 兆候 | 手法 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| scattered_config | centralize_configuration | major | codex | 取り消し | 0 |
+
+**なぜ**: 工程名とモード名が WF_STAGE_MATRIX/WF_MODES と projects-common.sh の PJ_STAGES/PJ_MODES に別々の固定値として置かれており、同じ工程語彙を変更するときに片方だけ更新されると工程記録と報告の判定が食い違う
+
+**手順**: 1. workflow-common.sh に工程名とモード名を返す小さな公開関数を置き、WF_STAGE_MATRIX から値を導く
+2. projects-common.sh 側の PJ_STAGES/PJ_MODES を固定文字列ではなくその関数の出力から初期化する
+3. pj_is_stage/pj_is_mode と wf_is_stage/wf_is_mode の既存入出力が変わらないことを既存の stage_values と workflow_stage_matrix のテストで確認する
