@@ -103,8 +103,21 @@ flowchart TD
 4 ランタイムのすべてから相対でたどれる。`check-cross-skill-refs.py` が共通化の置き場所として
 案内するディレクトリそのものであり、Skill の境界をまたぐ参照にもならない。
 
-読み込みは `. "$DIR/../../../../scripts/lib/<名前>"` の形で行う（v10.1.0 で定めた契約）。
-`cd` で解決すると、Skill だけを複製する Kiro CLI の配置で symlink の手前へ戻る。
+**`closing-issues.sh` は shebang を持ち標準入力を読む実行スクリプトである。** どちらの
+呼び出し元も source せず、`bash` の副プロセスとして起動する。違うのは置き場所を指す起点だけで、
+起点は呼び出し元の位置が決める。
+
+| 呼び出し元 | 起点 | 移設後の指定 |
+| --- | --- | --- |
+| `merged/SKILL.md` | `$SCRIPTS`（`references/scripts-lookup.md` が決める） | `bash "$SCRIPTS/lib/closing-issues.sh"` |
+| gate（`development-workflow/scripts/lib/workflow-common.sh`） | `$(dirname "${BASH_SOURCE[0]}")` | `bash "$DIR/../../../../scripts/lib/closing-issues.sh"` |
+
+**`. "$DIR/../../../../scripts/lib/<名前>"` の形（v10.1.0 で定めた契約）は、source する
+ライブラリに掛かる。** `workflow-common.sh` が `lock-common.sh` を読む形がそれである。
+gate が `closing-issues.sh` から借りるのは 4 階層の相対の起点だけで、読み込みの形は借りない。
+
+どちらの起点も `cd` では解決しない。Skill だけを複製する Kiro CLI の配置で symlink の手前へ
+戻る。
 
 **採らなかった案: 同じ規則を写して 2 箇所に持つ。** 二重管理になり、GitHub が閉じる語の
 構文を変えたときに 2 箇所を直すことになる。同じ結果を返すことをテストで固定しても、
@@ -242,6 +255,8 @@ JSON へ種別の鍵を足し、CLI へ Pull Request を指す引数を足すこ
 規約の数が増えるほど守られなくなる。
 
 ## テスト設計
+
+左の列の記号（`A1` などの識別子）は [01-requirements.md](01-requirements.md) の受け入れ条件を指す。
 
 | 受け入れ条件 | 何で確かめるか |
 | --- | --- |
