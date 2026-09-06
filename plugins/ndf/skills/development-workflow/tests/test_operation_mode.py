@@ -178,6 +178,21 @@ def test_raising_from_operation_reaches_standard() -> None:
     assert result.stdout.strip() == "standard", result.stderr
 
 
+def test_raising_from_an_empty_mode_uses_the_other_mode() -> None:
+    result = run_lib("wf_higher_mode '' standard")
+    assert result.stdout.strip() == "standard", result.stderr
+
+
+def test_raising_to_an_empty_mode_keeps_the_first_mode() -> None:
+    result = run_lib("wf_higher_mode light ''")
+    assert result.stdout.strip() == "light", result.stderr
+
+
+def test_raising_modes_with_the_same_height_keeps_the_first_mode() -> None:
+    result = run_lib("wf_higher_mode light light")
+    assert result.stdout.strip() == "light", result.stderr
+
+
 def test_the_mode_is_accepted_by_the_library() -> None:
     result = run_lib("wf_is_mode operation && echo yes")
     assert result.stdout.strip() == "yes", result.stderr
