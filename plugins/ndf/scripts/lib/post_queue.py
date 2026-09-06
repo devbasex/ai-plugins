@@ -313,6 +313,60 @@ def _by_actor(row: dict[str, Any], actor: str | None) -> bool:
     return str((row.get("user") or {}).get("login") or "") == actor
 
 
+def _first(rows: list[dict[str, Any]] | None, pred) -> tuple[bool | None, dict | None]:
+    if rows is None:
+        return None, None
+    found = next((r for r in rows if pred(r)), None)
+    return (found is not None), found
+
+
+def _match_pr_comment(
+    repo: str, pr: int, match: dict[str, Any], actor: str | None
+) -> tuple[bool | None, dict[str, Any] | None]:
+    return _first(
+        _list_all(f"repos/{repo}/issues/{pr}/comments"),
+        lambda r: _by_actor(r, actor) and r.get("body") == match.get("body"))
+
+
+def _match_review_post(
+    repo: str, pr: int, match: dict[str, Any], actor: str | None
+) -> tuple[bool | None, dict[str, Any] | None]:
+    want = _REVIEW_STATE.get(str(match.get("event") or ""), "")
+    head = str(match.get("body") or "")[:BODY_MATCH_CHARS]
+    return _first(
+        _list_all(f"repos/{repo}/pulls/{pr}/reviews"),
+        lambda r: (_by_actor(r, actor)
+                   and str(r.get("state") or "") == want
+                   and str(r.get("body") or "")[:BODY_MATCH_CHARS] == head))
+
+
+def _match_review_reply(
+    repo: str, pr: int, match: dict[str, Any], actor: str | None
+) -> tuple[bool | None, dict[str, Any] | None]:
+    return _first(
+        _list_all(f"repos/{repo}/pulls/{pr}/comments"),
+        lambda r: (str(r.get("in_reply_to_id") or "") == str(match.get("in_reply_to"))
+                   and r.get("body") == match.get("body")))
+
+
+def _match_thread_resolve(
+    repo: str, pr: int, match: dict[str, Any], actor: str | None
+) -> tuple[bool | None, dict[str, Any] | None]:
+    del actor
+    ids = unresolved_thread_ids(repo, pr)
+    if ids is None:
+        return None, None
+    return (str(match.get("thread_id")) not in ids), None
+
+
+POSTED_MATCH_HANDLERS = {
+    "pr-comment": _match_pr_comment,
+    "review-post": _match_review_post,
+    "review-reply": _match_review_reply,
+    "thread-resolve": _match_thread_resolve,
+}
+
+
 def posted_match(item: dict[str, Any]) -> tuple[bool | None, dict[str, Any] | None]:
     """同じ内容が既に GitHub 側にあるか。あるときは、その投稿そのものも返す。
 
@@ -330,36 +384,10 @@ def posted_match(item: dict[str, Any]) -> tuple[bool | None, dict[str, Any] | No
     """
     kind, repo, pr = item["kind"], item["repo"], int(item["pr"])
     match, actor = item.get("match") or {}, item.get("actor")
-
-    def _first(rows: list[dict[str, Any]] | None, pred) -> tuple[bool | None, dict | None]:
-        if rows is None:
-            return None, None
-        found = next((r for r in rows if pred(r)), None)
-        return (found is not None), found
-
-    if kind == "pr-comment":
-        return _first(
-            _list_all(f"repos/{repo}/issues/{pr}/comments"),
-            lambda r: _by_actor(r, actor) and r.get("body") == match.get("body"))
-    if kind == "review-post":
-        want = _REVIEW_STATE.get(str(match.get("event") or ""), "")
-        head = str(match.get("body") or "")[:BODY_MATCH_CHARS]
-        return _first(
-            _list_all(f"repos/{repo}/pulls/{pr}/reviews"),
-            lambda r: (_by_actor(r, actor)
-                       and str(r.get("state") or "") == want
-                       and str(r.get("body") or "")[:BODY_MATCH_CHARS] == head))
-    if kind == "review-reply":
-        return _first(
-            _list_all(f"repos/{repo}/pulls/{pr}/comments"),
-            lambda r: (str(r.get("in_reply_to_id") or "") == str(match.get("in_reply_to"))
-                       and r.get("body") == match.get("body")))
-    if kind == "thread-resolve":
-        ids = unresolved_thread_ids(repo, pr)
-        if ids is None:
-            return None, None
-        return (str(match.get("thread_id")) not in ids), None
-    return None, None
+    handler = POSTED_MATCH_HANDLERS.get(kind)
+    if handler is None:
+        return None, None
+    return handler(repo, pr, match, actor)
 
 
 def already_posted(item: dict[str, Any]) -> bool | None:
