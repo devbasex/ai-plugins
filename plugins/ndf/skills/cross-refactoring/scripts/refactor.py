@@ -53,6 +53,7 @@ from refactor_lib import rounds as _rounds  # noqa: E402
 from refactor_lib import paths as _paths  # noqa: E402
 from refactor_lib import scope as _scope  # noqa: E402
 from refactor_lib import plan as _plan  # noqa: E402
+from refactor_lib import outbound as _outbound  # noqa: E402
 from refactor_lib import gitfacts as _gitfacts  # noqa: E402
 from refactor_lib import proposals as _proposals  # noqa: E402
 from refactor_lib import verify as _verify  # noqa: E402
@@ -71,6 +72,7 @@ _LIB_MODULES: tuple[types.ModuleType, ...] = (
     _paths,
     _scope,
     _plan,
+    _outbound,
     _gitfacts,
     _proposals,
     _verify,
@@ -161,11 +163,14 @@ def main() -> None:
                       help="生成物を同期するコマンド。**push の直前**に進行側が実行し、"
                            "差分があれば進行側のコミットとして積む。"
                            "同期を実装担当にさせると範囲外の変更になるため分離している")
+    # **既定は Pull Request のコメント 1 件である**（#436 決定 6）。改修計画は
+    # 実行の記録であって、リポジトリの知識ではない。ファイルにすると差分に混ざり、
+    # URL がブランチの後片付けで切れる。
     init.add_argument("--plan-file", default=None,
-                      help="改修計画を書き出すパス（対象リポジトリからの相対）。"
-                           "提案の理由と手順は状態ファイルにしか残らず、差分から"
-                           "除外されるため、公開の直前に進行側が書き出す。"
-                           f"既定は {DEFAULT_PLAN_DIR}/refactoring-plan-rf<PR>.md。"
+                      help="改修計画をファイルへ書き出すパス（対象リポジトリからの"
+                           "相対）。**指定したときだけファイルになる。**"
+                           "既定は対象の Pull Request のコメント 1 件で、"
+                           "ラウンドが進むたびに同じコメントを編集する。"
                            "空文字を渡すと記録しない")
     init.add_argument("--baseline-test", required=True,
                       help="着手前と各コミットで実行するテストコマンド。"

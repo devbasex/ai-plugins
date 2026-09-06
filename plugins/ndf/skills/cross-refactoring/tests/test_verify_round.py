@@ -223,3 +223,37 @@ def test_should_abandon_only_at_the_limit(refactor, tmp_path, env_tmp_dir):
     state["rounds"][0]["fix_rounds"] = 3
     state_path.write_text(json.dumps(state), encoding="utf-8")
     refactor.cmd_should_abandon(args)  # 上限到達で正常終了 = 見送りへ
+
+
+# ---------- 外へ出す文章の規約（#436 決定 6-b） ----------
+
+def test_a_passing_verification_names_the_items_and_the_plan(
+    refactor, tmp_path, env_tmp_dir, monkeypatch, capsys
+):
+    """D1 / D3 — 項目は `<ファイル>#<シンボル>` を併記し、改修計画は生の URL。"""
+    url = "https://github.com/devbasex/ai-plugins/pull/130#issuecomment-7"
+    state_path = _state(tmp_path, plan_mode="comment", plan_file="",
+                        plan_comment={"id": 7, "url": url})
+    env_tmp_dir(state_path)
+    _test_run(refactor, monkeypatch, code=0)
+
+    refactor.cmd_verify_round(_args())
+
+    out = capsys.readouterr().err
+    assert "src/foo.py#R1-001" in out
+    assert f"改修計画: {url}" in out
+
+
+def test_a_failing_verification_still_names_the_plan(
+    refactor, tmp_path, env_tmp_dir, monkeypatch, capsys
+):
+    url = "https://github.com/devbasex/ai-plugins/pull/130#issuecomment-7"
+    state_path = _state(tmp_path, plan_mode="comment", plan_file="",
+                        plan_comment={"id": 7, "url": url})
+    env_tmp_dir(state_path)
+    _test_run(refactor, monkeypatch, code=1)
+
+    with pytest.raises(SystemExit):
+        refactor.cmd_verify_round(_args())
+
+    assert url in capsys.readouterr().err

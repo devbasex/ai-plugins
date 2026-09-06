@@ -17,7 +17,7 @@ import statefile
 
 from . import die, info
 from .paths import _sh, stem_for
-from .plan import format_plan, normalize_plan_file
+from .plan import format_plan, normalize_plan_file, publish_plan_comment
 from .vocabulary import (
     DEFAULT_TEST_TIMEOUT,
     PLAN_COMMIT_MESSAGE,
@@ -935,6 +935,10 @@ def _push_head(state: dict[str, Any]) -> None:
         ["git", "push", "origin", f"HEAD:{state['head_branch']}"],
         cwd=state["worktrees"]["work"],
     )
+    # **改修計画のコメントは push の後で更新する**（#436 決定 6）。差分に混ざらない
+    # ので push とは独立だが、公開した内容と食い違わないよう後ろへ置く。投稿に
+    # 失敗しても進行は止めない（`publish_plan_comment` が出力へ残す）。
+    publish_plan_comment(state)
 
 
 def _push_with_retry_marker(

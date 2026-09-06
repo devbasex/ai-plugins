@@ -141,9 +141,6 @@ PLAN_COMMIT_MESSAGE = (
     "状態ファイルは差分から除外されるため、Pull Request から読める場所へ置く。"
 )
 
-# 改修計画を書き出す既定のディレクトリ。
-DEFAULT_PLAN_DIR = "issues"
-
 # 改善項目の状態を、Pull Request を読む側に通じる語へ置き換える。
 ITEM_STATUS_LABELS = {
     "pending": "未着手",

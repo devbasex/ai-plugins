@@ -15,6 +15,7 @@ import statefile
 
 from .. import info
 from ..gitfacts import _safe_int
+from ..outbound import plan_reference
 from ..paths import _load
 from ..proposals import duplicate_rate
 from ..rounds import STRUCTURE, TEST, entry_kind, item_kind, item_label
@@ -125,6 +126,9 @@ def cmd_report(args: argparse.Namespace) -> None:
     print(f"- ホスト: {state['host']}（{state['host_detection']}）")
     print(f"- 対象範囲: {', '.join(state['target_scope']) or '（未指定）'}")
     print(f"- 終了理由: {state.get('final') or '（未終了）'}")
+    # **生の URL で書く**（#436 決定 6-b）。Markdown のリンクにすると、読み手の
+    # 画面から URL を取り出せない。
+    print(f"- 改修計画: {plan_reference(state)}")
     if state.get("test_rounds_final"):
         print(f"- テスト整備の終わり方: {state['test_rounds_final']}")
     baseline = state.get("baseline_test") or {}
@@ -143,16 +147,13 @@ def cmd_report(args: argparse.Namespace) -> None:
     print("## 改善項目")
     print()
     print(_item_table(state))
-    if state["deferred_items"]:
-        print()
-        print("## 見送った提案")
-        print()
-        print("| ラウンド | 対象 | 兆候・経路 | 理由 |")
-        print("| --- | --- | --- | --- |")
-        for d in state["deferred_items"]:
-            kind_label = d.get("case") if item_kind(d) == TEST else d.get("smell")
-            print(f"| {d.get('round', '—')} | {item_label(d)} | "
-                  f"{kind_label or '—'} | {d.get('defer_reason', '—')} |")
+    # **取り消した項目の内訳は書かない**（#436 決定 6-b）。件数だけ述べ、内訳は
+    # 改修計画へ譲る。同じ一覧を 2 か所に置くと、片方だけが古くなる。
+    print()
+    print("## 見送った提案")
+    print()
+    print(f"- 件数: {len(state['deferred_items'])} 件")
+    print(f"- 内訳: 改修計画にある — {plan_reference(state)}")
     if args.metrics:
         print()
         print("# 指標")

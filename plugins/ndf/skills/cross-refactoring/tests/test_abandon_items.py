@@ -1013,3 +1013,18 @@ def test_abandon_retries_the_drop_before_resending_the_push(
     assert "revert" in order and "push" in order
     assert order.index("revert") < order.index("push"), "取り消しより先に push している"
     assert read_state(state_path)["rounds"][0]["pending_push"] is False
+
+
+def test_the_drop_is_reported_as_a_count_only(
+    refactor, tmp_path, env_tmp_dir, no_git, capsys
+):
+    """D2 — 取り消した項目の内訳は書かない。件数だけ述べ、内訳は改修計画へ譲る。"""
+    state_path = _state(tmp_path, [])
+    env_tmp_dir(state_path)
+
+    refactor.cmd_abandon_items(_args())
+
+    out = capsys.readouterr().err
+    assert "取り消し 2 件" in out
+    assert "内訳は改修計画にある" in out
+    assert "R1-001 を見送りました" not in out

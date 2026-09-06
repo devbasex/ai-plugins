@@ -534,21 +534,29 @@ def test_init_fills_the_posting_event_when_resuming_an_old_state(run_init, tmp_p
 
 # ---------- 改修計画の書き出し先 ----------
 
-def test_init_records_the_default_plan_file(run_init, tmp_path):
-    """指定が無くても計画を残す。**既定で残らないと、誰も指定しない。**"""
+def test_init_defaults_the_plan_to_a_pull_request_comment(run_init, tmp_path):
+    """D4 — 既定は Pull Request のコメント 1 件（#436 決定 6）。
+
+    **改修計画は実行の記録であって、リポジトリの知識ではない。** ファイルに
+    すると差分に混ざり、URL がブランチの後片付けで切れる。
+    """
     run_init(_args(tmp_path))
     _, state = _state_of(tmp_path)
-    assert state["plan_file"] == "issues/refactoring-plan-rf130.md"
+    assert state["plan_mode"] == "comment"
+    assert state["plan_file"] == ""
 
 
 def test_init_keeps_an_explicit_plan_file(run_init, tmp_path):
+    """**`--plan-file` は残す。** 明示したときだけファイルにする。"""
     run_init(_args(tmp_path, plan_file="docs/plan.md"))
     _, state = _state_of(tmp_path)
+    assert state["plan_mode"] == "file"
     assert state["plan_file"] == "docs/plan.md"
 
 
 def test_init_accepts_an_empty_plan_file_as_off(run_init, tmp_path):
-    """計画を差分へ入れたくないリポジトリのために、空文字で無効にできる。"""
+    """計画を残したくないリポジトリのために、空文字で無効にできる。"""
     run_init(_args(tmp_path, plan_file=""))
     _, state = _state_of(tmp_path)
+    assert state["plan_mode"] == "none"
     assert state["plan_file"] == ""

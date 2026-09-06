@@ -29,7 +29,7 @@ from ..paths import (
     _state_path,
     _tmp_dir_for,
 )
-from ..plan import default_plan_file, normalize_plan_file
+from ..plan import PLAN_COMMENT, PLAN_FILE, PLAN_NONE, normalize_plan_file
 from ..rounds import STRUCTURE, TEST, entry_kind, round_kind
 from ..scope import require_scope_covers_tests
 from ..vocabulary import (
@@ -173,6 +173,20 @@ def _fetch_pr_context(pr: int, repo: Optional[str] = None) -> tuple[str, str, st
     return resolved, base_branch, head_branch, is_own_pr, author
 
 
+def _plan_mode_of(plan_file: Optional[str]) -> str:
+    """改修計画の置き場所を、`--plan-file` の与えられ方から決める。
+
+    | 与え方 | 置き場所 |
+    | --- | --- |
+    | 指定しない（既定） | Pull Request のコメント 1 件 |
+    | パスを指定 | そのファイル |
+    | 空文字を指定 | 記録しない |
+    """
+    if plan_file is None:
+        return PLAN_COMMENT
+    return PLAN_FILE if str(plan_file).strip() else PLAN_NONE
+
+
 def cmd_init(args: argparse.Namespace) -> None:
     """Step 0 — ホストと母集合を確定し、作業ディレクトリ root と状態を用意する。
 
@@ -274,11 +288,12 @@ def cmd_init(args: argparse.Namespace) -> None:
         "baseline_test": baseline,
         # 生成物の同期は**進行側の責務**。push の直前に実行する。
         "sync_command": args.sync_command,
-        # 改修計画の書き出し先も同じ経路に乗せる。指定が無ければ既定のパスを使い、
-        # 空文字なら記録しない。
-        "plan_file": normalize_plan_file(
-            default_plan_file(args.pr) if args.plan_file is None else args.plan_file
-        ),
+        # **改修計画の既定は Pull Request のコメント 1 件である**（#436 決定 6）。
+        # `--plan-file` を明示したときだけファイルにし、空文字なら記録しない。
+        "plan_mode": _plan_mode_of(args.plan_file),
+        "plan_file": normalize_plan_file(args.plan_file),
+        # 編集する先のコメント。**印で引き当て直せる**ので、失っても積み増さない。
+        "plan_comment": None,
         "test_timeout": args.test_timeout,
         "outer_round": 0,
         "phase": "init",

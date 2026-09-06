@@ -34,6 +34,7 @@ from ..gitfacts import (
     commits_in_range,
     resolved_threads_on_github,
 )
+from ..outbound import dropped_line, item_lines, plan_line
 from ..paths import _load, _result_path, stem_for
 from ..rounds import deferred_record
 from ..verify import verify_commit_granularity, verify_fix_commit
@@ -89,6 +90,11 @@ def cmd_verify_round(args: argparse.Namespace) -> None:
         state["phase"] = _phase_after_group(entry)
         statefile.save(path, state)
         info(f"✅ 適用ラウンド {group['apply_round']} のテストが通りました（{command}）")
+        # **外へ出す文章の規約**（#436 決定 6-b）。項目は `<ファイル>#<シンボル>`
+        # を併記し、改修計画は生の URL で添える。
+        for line in item_lines(state, applied):
+            info(f"   {line}")
+        info(f"   {plan_line(state)}")
         return
 
     # **修正ラウンドの起点をここで記録する。** 記録せずに戻すと `merge-fix` が
@@ -100,6 +106,7 @@ def cmd_verify_round(args: argparse.Namespace) -> None:
         info(f"❌ テストが {timeout} 秒で終わりませんでした（{command}）")
     else:
         info(f"❌ テストが失敗しました（{command} / 終了コード {code}）")
+    info(f"   {plan_line(state)}")
     sys.exit(2)
 
 
@@ -172,10 +179,11 @@ def cmd_abandon_items(args: argparse.Namespace) -> None:
             continue
         state["deferred_items"].append(
             deferred_record(item, item_id, item["failure_reason"]))
-        info(f"↩ {item_id} を見送りました")
 
     # 見送りの記録と印の解除を**同じ保存で**行う。保存してから push するので、
     # push が失敗しても記録とローカルの git が食い違わない。
+    # **内訳は書かない。件数だけ述べ、内訳は改修計画へ譲る**（#436 決定 6-b）。
+    info(f"↩ 適用ラウンド {group['apply_round']}: {dropped_line(state, len(targets))}")
     group["abandoned"] = targets
     group["status"] = "dropped"
     entry["abandoned"] = targets
@@ -435,4 +443,7 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     # **取り消したかどうかに関わらず公開する。** 実装担当は push しないため、
     # ここで公開しないと再レビューが Pull Request 上の差分を見られない。
     _push_with_retry_marker(path, state, entry)
-    info(f"修正を取り込みました（解決 {len(resolved)} スレッド / 修正ラウンド {entry['fix_rounds']}）")
+    info(
+        f"修正を取り込みました（解決 {len(resolved)} スレッド / "
+        f"修正ラウンド {entry['fix_rounds']}）。{plan_line(state)}"
+    )
