@@ -11,6 +11,7 @@ import pathlib
 import sys
 from typing import Any
 
+import assignment
 import statefile
 
 from .. import die, info
@@ -32,7 +33,7 @@ from ..gitfacts import (
     commits_in_range,
 )
 from ..paths import _load, _result_path, stem_for
-from ..proposals import merge_proposals
+from ..proposals import assign_apply_rounds, merge_proposals
 from ..verify import verify_apply_item
 from ..vocabulary import DEFAULT_TEST_TIMEOUT
 
@@ -76,6 +77,41 @@ def _load_runtime_proposals(
     return proposals
 
 
+def _assign_apply_rounds_to_state(
+    state: dict[str, Any],
+    entry: dict[str, Any],
+    adopted: list[dict[str, Any]],
+) -> None:
+    """採用した項目を適用ラウンド（群）へ分け、状態へ記録する。
+
+    **適用の担当は適用ラウンドごとに進む。** 提案ラウンド単位で 1 者に固定すると、
+    群の数だけ 1 者が連続で適用することになり負荷が偏る。群の中の項目は互いに
+    独立しているため、1 つの群を適用するのに要る前提はその群の中で閉じている。
+
+    輪番の通し番号は `state["apply_seq"]` が持つ。**提案ラウンドの番号ではない。**
+    1 つの提案ラウンドが複数の群を持てば、輪番はその分だけ進む。
+    """
+    entry["apply_rounds"] = []
+    entry["apply_round"] = 0
+    seq = _safe_int(state.get("apply_seq"))
+    for n, group in enumerate(assign_apply_rounds(adopted), start=1):
+        seq += 1
+        impl, _ = assignment.assign(seq, state["host"])
+        for item in group:
+            item["apply_round"] = n
+        entry["apply_rounds"].append({
+            "apply_round": n,
+            "impl": impl,
+            "impl_model": {"requested": state["models"].get(impl), "observed": None},
+            "items": [i["item_id"] for i in group],
+            "status": "pending",
+            "base_sha": None,
+            "head_sha": None,
+            "fix_rounds": 0,
+        })
+    state["apply_seq"] = seq
+
+
 def _update_state_from_merged_proposals(
     path: pathlib.Path,
     state: dict[str, Any],
@@ -93,15 +129,16 @@ def _update_state_from_merged_proposals(
 
     round_no = entry["round"]
     for n, item in enumerate(adopted, start=1):
-        item_id = f"R{round_no}-{n:03d}"
+        item["item_id"] = f"R{round_no}-{n:03d}"
+    _assign_apply_rounds_to_state(state, entry, adopted)
+    for item in adopted:
         state["items"].append({
-            "item_id": item_id,
             "round": round_no,
             **item,
             "status": "pending",
             "commits": [],
         })
-        entry["items"].append(item_id)
+        entry["items"].append(item["item_id"])
     for item in deferred:
         state["deferred_items"].append({**item, "round": round_no})
 

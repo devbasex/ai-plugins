@@ -150,6 +150,42 @@ def merge_proposals(
     return adopted, deferred
 
 
+def assign_apply_rounds(
+    adopted: list[dict[str, Any]]
+) -> list[list[dict[str, Any]]]:
+    """採用した項目を、**書き換えるファイルが重ならない群**（適用ラウンド）へ分ける。
+
+    群の中の項目は**互いに独立している**（触るファイルが重ならない）ため、まとめて
+    1 コミットへ入れられる。群と群は同じファイルを直列に書き換えるため、**順序に
+    依存する**。後続の群は先行の群を適用した後の作業ツリーを読む。
+
+    分ける基準は**書き換えるファイルの一致**だけである。行の範囲は見ない。提案の
+    時点で行の範囲は分からず、見積を求めると提案の負荷が上がる。**見積の精度に
+    依存する分け方は、外れたときに取り消しが分離できない状態へ戻る**（決定 1）。
+
+    **群の数に上限は置かない。** 重なり方が決める。1 ラウンドの採用件数
+    （`--max-items-per-round`）が実質の上限になる。
+
+    `adopted` は `merge_proposals` が採否の優先度（合意した数 → 重要度 →
+    推定差分行数）で並べた順で渡す。**その順を崩さない**ため、群の順序も
+    同じ優先度に従う。
+    """
+    groups: list[list[dict[str, Any]]] = []
+    taken: list[set[str]] = []          # 群ごとの「その群が触るファイル」
+    for item in adopted:
+        path = item["path"]
+        for paths, group in zip(taken, groups):
+            if path in paths:
+                continue
+            paths.add(path)
+            group.append(item)
+            break
+        else:
+            groups.append([item])
+            taken.append({path})
+    return groups
+
+
 def duplicate_rate(
     current: Iterable[tuple[str, str, str]], previous: Iterable[tuple[str, str, str]]
 ) -> float:
