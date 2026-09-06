@@ -5,7 +5,7 @@
 - 課題: [#424](https://github.com/devbasex/ai-plugins/issues/424)
 - 要求と受け入れ条件: [issue-418-417-workflow-gate/01-requirements.md](issue-418-417-workflow-gate/01-requirements.md) の C1〜C13 / E1〜E11 / F1〜F11
 - 設計: [issue-418-417-workflow-gate/02-design.md](issue-418-417-workflow-gate/02-design.md) の決定 3・4・7・8・10・11・12
-- 引継ぎ: [handoff-v10.5.1.md](handoff-v10.5.1.md) の本 3
+- 確定仕様: [ndf-workflow-unit-and-gates.md](../../docs/specifications/ndf-workflow-unit-and-gates.md)
 
 ## モード
 
