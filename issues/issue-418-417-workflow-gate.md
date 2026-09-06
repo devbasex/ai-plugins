@@ -140,15 +140,18 @@
 - [ ] E2: **承認の要否はマージ先のチャネルが決める**と、判定と工程の側に書かれている。
       規則は `release` が持つが、実装 Pull Request をマージする時点で読むのは `merged` と
       `pr` であるため、そちらから辿れる
-- [ ] E3: どのブランチが本番のチャネルかを**リポジトリが宣言する**。宣言の置き場所と形が
-      決まっている（`.ndf/worktree.json` の `base_branch` と同じ形を採れるか）
-- [ ] E4: 宣言が無いリポジトリでの既定が決まっている
-- [ ] E5: 並行して走った Pull Request は、関門で**まとめて 1 回**の承認を求める。
-      1 本ずつ求めない
+- [ ] E3: どのブランチが本番のチャネルかを**リポジトリが宣言する**。`.ndf/worktree.json` へ
+      `production_branch` を新設し、その名前と読み取りの順序が `SKILL.md` に書かれている。
+      **既存の `base_branch` は流用しない**と書かれている（`base_branch` は開発の起点で、
+      このリポジトリでは `develop` を指す。決定 10）
+- [ ] E4: 宣言が無いリポジトリでは既定ブランチを本番のチャネルとして扱うと書かれている
+- [ ] E5: 並行して走った Pull Request を**関門でまとめて 1 回**の承認へ載せると
+      書かれている。1 本ずつ求める旨は書かれていない
 - [ ] E6: 承認を求めるとき、**対象の Pull Request の URL を全て明示する**。
       生の URL のまま書く（Markdown のリンクにしない）
-- [ ] E7: 複数あるときの並べ方が `approval-request.md` に定まっている
-- [ ] E8: 依存の順序があるときは、マージの順序も示す
+- [ ] E7: 複数あるときの並べ方が `approval-request.md` に書かれている
+- [ ] E8: 依存の順序があるときにマージの順序も示すことが `approval-request.md` に
+      書かれている
 - [ ] E9: `/goal` の引数として呼ばれたときの止まり方が、2 つの関門に合わせて書かれている
 - [ ] E10: **分割・束ね方・並行度は担当の判断に任せる**と書かれている。判断の材料
       （触るファイルの重なり・依存の順序・レビューの読みやすさ）は挙げるが、基準にしない
@@ -160,7 +163,7 @@
 | --- | --- |
 | A1〜A5, B1〜B6 | `uv run --with pytest pytest plugins/ndf/skills/development-workflow/tests -q` |
 | A6, C1〜C13 | 新しく足すテスト（`plugins/ndf/skills/development-workflow/tests/`） |
-| E1〜E11 | 新しく足すテスト。関門の数・宣言の読み取り・提示物の形を `SKILL.md` と `approval-request.md` から読んで突き合わせる |
+| E1〜E11 | 新しく足すテスト。関門の数・宣言の読み取り・提示物の形を `SKILL.md` と `approval-request.md` から読んで突き合わせる。導線は `merged` と `pr` の `SKILL.md` から読む |
 | D1〜D2, D6 | `uv run --with pytest pytest scripts/tests/test_doc_line_limit.py -q` |
 | D3〜D4, D8〜D9 | `uv run --with pytest pytest scripts/tests/test_agy_install_hooks.py -q` |
 | D5 | `python3 scripts/check-markdown-links.py --root .` と目視 |
@@ -177,11 +180,15 @@
 - `plugins/ndf/skills/development-workflow/`（`SKILL.md` / `scripts/` / `references/` / `tests/`）。
   `references/approval-request.md` を複数の Pull Request へ対応させることを含む
 - `plugins/ndf/scripts/lib/closing-issues.sh`（`merged/scripts/` からの移設先）
-- `plugins/ndf/skills/merged/`（読み込み先を移設先へ向ける変更と そのテスト）。
+- `plugins/ndf/skills/merged/`（読み込み先を移設先へ向ける変更と そのテスト、および
+  マージ先のチャネルが承認の要否を決めることと、規則を持つ `release` への導線）。
   `SKILL.md` の `CLOSING=` の行を `$SCRIPTS/lib/closing-issues.sh` へ向け直し、直前の
   「この Skill のスクリプトは、その 1 つ上（プラグインの根）から辿る」の説明も書き換える。
   `$SCRIPTS` の 1 つ上へ戻ってから `skills/merged/scripts/` へ下りる形が、`$SCRIPTS` の
   直下の `lib/` になるため、相対パスの深さが変わる
+- `plugins/ndf/skills/pr/`（`SKILL.md` へ、マージ先のチャネルが承認の要否を決めることと、
+  規則を持つ `release` への導線を書く。**実装 Pull Request のマージは、それ自体では関門に
+  ならない**）
 - `scripts/check-doc-line-limit.py` と そのテスト
 - `plugins/ndf/dev.agy/install-hooks.sh` と そのテスト
 - `plugins/ndf/skills/notion-writing/SKILL.md`
@@ -221,13 +228,15 @@
 
 **触る領域は「すべての変更」だけである。** 永続データのスキーマは変えず（gate が読む控えの
 形も、それを読み書きする CLI の引数も既存のまま。理由は決定 9）、呼び出される約束も画面も
-持たない。そのためデータ構造と入出力の契約の節は作らない。
+持たない。そのためデータ構造と入出力の契約の節は作らない。**宣言ファイル
+（`.ndf/worktree.json`）へは鍵を 1 つ足すが、既存の鍵の意味は変えない**（決定 10）。
 
 ## 構成要素
 
 | 要素 | 責務 |
 | --- | --- |
 | `development-workflow/SKILL.md` の工程表 | `light` のレビューを `cross-review` にする。モードを判定する単位を Pull Request と定め、工程の順序を「要求と受け入れ条件 → モード判定」へ直す。束ねずに分ける判断の基準を書く（束ねたときにどのモードを採るかの規約は置かない） |
+| `development-workflow/SKILL.md` の本文 | 人手の承認を求める関門を 2 つ（設計 Pull Request のマージ / 本番のチャネルへ届く操作）と定め、承認の要否をマージ先のチャネルで決めることを書く。本番のチャネルの宣言（`production_branch`）の読み取りと、宣言が無いときの既定を書く。分割・束ね方・並行度は担当の判断に任せること、複数のマイルストーンは原則として順次にすることを書く。`/goal` の引数として呼ばれたときの止まり方を 2 つの関門へ合わせる |
 | `lib/workflow-common.sh` の `WF_STAGE_MATRIX` | 工程表と同じ分類を機械の側に持つ。`レビュー` の `light` 列を `R` へ |
 | `lib/workflow-common.sh` の `wf_is_candidate` | 走査の前の安い絞り込み。`pr[[:space:]]+create` を足す。ここで落ちると本体へ届かない |
 | `lib/workflow-common.sh` の `wf_parse_pr_create`（新設） | `gh pr create` のコマンドから本文を取り、閉じる語が指す `<所有者>/<リポジトリ>` と `<番号>` の組を出す |
@@ -235,7 +244,7 @@
 | `workflow-guard.sh` | 観測点へ Pull Request の作成を足し、案内を出す。**拒否はしない** |
 | `<プラグインルート>/scripts/lib/closing-issues.sh` | 閉じる語の読み取りを 1 箇所で持つ。`merged` と gate の両方がここから読む（後述の決定 3）。`merged/scripts/` から移設する |
 | `references/approval-request.md` | 提示物を複数の Pull Request へ対応させる。URL は生のまま全て並べる |
-| `.ndf/worktree.json` の宣言 | どのブランチが本番のチャネルかを持つ。承認の要否がここから決まる |
+| `.ndf/worktree.json` の `production_branch`（新設） | どのブランチが本番のチャネルかを持つ。承認の要否がここから決まる。既存の `base_branch`（開発の起点）とは別の鍵にする |
 | `scripts/check-doc-line-limit.py` | 非 ASCII のファイル名・実質 0 件・`EXEMPT` の不在を塞ぐ |
 | `plugins/ndf/dev.agy/install-hooks.sh` | 相対パスの解決・クォート・削除対象の限定・アトミックな書き込み |
 
@@ -405,6 +414,12 @@ JSON へ種別の鍵を足し、CLI へ Pull Request を指す引数を足すこ
 回数が増えると、内容を読まずに通す動きが入る。採らなかった案は「実装 Pull Request の
 マージを 3 つ目の関門にする」で、マージ先を見ずに一律で止めると検証への反映まで止まる。
 
+**本番のチャネルの宣言には `production_branch` を新設する。** 既存の
+`.ndf/worktree.json` の `base_branch` は流用しない。`base_branch` は開発の起点であり、
+作業ツリーの起点・主ディレクトリの追従先・Pull Request の宛先の検査がこれを読む。
+このリポジトリの値は `develop` で、本設計が本番のチャネルと定める `main` とは別の
+ブランチである。流用すると、開発版のチャネルへのマージが本番の扱いになる。
+
 ### 決定 11: 並行開発の方法は担当の判断に任せる
 
 課題と Pull Request は 1 対 1 にならない（1 : N / N : 1 / N : M）。**4 つすべてに規約を
@@ -438,8 +453,8 @@ JSON へ種別の鍵を足し、CLI へ Pull Request を指す引数を足すこ
 | C11 | 新しいテスト。`light` の必須の工程を欠いた控えで案内が出る |
 | C12 | 新しいテスト。控えが 0 件のときに案内が出る（いまは出ない） |
 | C13 | 新しいテスト。案内の文面に、工程を通していないと断定する語が含まれない |
-| E1〜E2 | 新しいテスト。`SKILL.md` が関門を 2 つと定め、承認の要否がマージ先で決まると書いていること |
-| E3〜E4 | 新しいテスト。宣言から本番のチャネルを読める。宣言が無いときの既定が働く |
+| E1〜E2 | 新しいテスト。`SKILL.md` が関門を 2 つと定め、承認の要否がマージ先で決まると書いていること。`merged` と `pr` の `SKILL.md` から `release` の規則へ辿れること |
+| E3〜E4 | 新しいテスト。`production_branch` の宣言から本番のチャネルを読める。`base_branch` を読む経路が入っていない。宣言が無いときは既定ブランチになる |
 | E5〜E8 | 新しいテスト。`approval-request.md` が複数の Pull Request の並べ方と、URL を生のまま書く規約を持つこと |
 | E9〜E11 | 新しいテスト。`/goal` の止まり方と、方法を縛らない旨と、複数マイルストーンの既定が書かれていること |
 | D1〜D2, D6 | `test_doc_line_limit.py` へ追加（非 ASCII・実質 0 件・`EXEMPT` の不在） |
