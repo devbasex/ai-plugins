@@ -1781,6 +1781,35 @@ wt_base_branch() {
   wt_default_branch "$main_dir"
 }
 
+# 本番のチャネルのブランチ名を出力する。宣言の production_branch を優先し、指定が
+# 無ければ既定ブランチへ落とす。
+#
+# **`base_branch` は読まない**（#424 の決定 10）。`base_branch` は開発の起点であり、
+# 作業ツリーの分岐元と主ディレクトリの追従先を決める。このリポジトリの値は `develop`
+# で、本番のチャネルと定める `main` とは別のブランチである。流用すると、開発版の
+# チャネルへのマージが本番の扱いになる。
+#
+# **指定された名前が実在しないときは既定ブランチへ落とさない。** 本番のチャネルを
+# 取り違えると、承認を求める対象そのものが変わる。
+wt_production_branch() {
+  local main_dir="${1:-}" decl name=
+  [ -n "$main_dir" ] || return 1
+  if decl=$(wt_declaration "$main_dir"); then
+    name=$(printf '%s' "$decl" |
+      jq -r 'if (.production_branch|type) == "string" then .production_branch else empty end' 2>/dev/null)
+  fi
+  if [ -n "$name" ]; then
+    if wt_branch_exists "$main_dir" "$name"; then
+      printf '%s\n' "$name"
+      return 0
+    fi
+    printf 'NOTE: .ndf/worktree.json の production_branch が指す %s は origin にもローカルにもありません\n' \
+      "$name" >&2
+    return 1
+  fi
+  wt_default_branch "$main_dir"
+}
+
 # 主ディレクトリの追跡対象の未コミット変更を `<状態> <パス>` で 1 行 1 件出力する。
 # 追跡されていないファイルは含めない。
 wt_dirty_paths() {

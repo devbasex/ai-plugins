@@ -1,6 +1,7 @@
 {
   "version": 1,
   "base_branch": "develop",
+  "production_branch": "main",
   "guard": {
     "allow_paths": [
       "issues/",

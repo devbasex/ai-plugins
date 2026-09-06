@@ -58,21 +58,33 @@ if ! REASON=$(wf_check_merge "$COMMAND"); then
 fi
 
 # --- #221 進行の記録を観測して積む ------------------------------------------
-SYNC=$(wf_parse_sync "$COMMAND") || exit 0
-IFS=$'\t' read -r ISSUE KEY VALUE <<<"$SYNC"
-case "$ISSUE" in ''|*[!0-9]*) exit 0 ;; esac
-case "$KEY" in stage|mode) ;; *) exit 0 ;; esac
-[ -n "$VALUE" ] || exit 0
-if [ "$KEY" = "stage" ]; then wf_is_stage "$VALUE" || exit 0; fi
-if [ "$KEY" = "mode" ]; then wf_is_mode "$VALUE" || exit 0; fi
+#
+# **Pull Request の作成の見分けより先に置く。** 後ろに置くと、進行の記録のコマンドが
+# 作成と誤って一致したときに記録が積まれなくなる。
+if SYNC=$(wf_parse_sync "$COMMAND"); then
+  IFS=$'\t' read -r ISSUE KEY VALUE <<<"$SYNC"
+  case "$ISSUE" in ''|*[!0-9]*) exit 0 ;; esac
+  case "$KEY" in stage|mode) ;; *) exit 0 ;; esac
+  [ -n "$VALUE" ] || exit 0
+  if [ "$KEY" = "stage" ]; then wf_is_stage "$VALUE" || exit 0; fi
+  if [ "$KEY" = "mode" ]; then wf_is_mode "$VALUE" || exit 0; fi
 
-SLUG=$(wf_repo_slug ".") || exit 0
-wf_record "$SLUG" "$ISSUE" "$KEY" "$VALUE" 2>/dev/null
+  SLUG=$(wf_repo_slug ".") || exit 0
+  wf_record "$SLUG" "$ISSUE" "$KEY" "$VALUE" 2>/dev/null
 
-# 配布の記録へ進んだときだけ、記録の無い必須の工程を案内する。
-[ "$KEY" = "stage" ] && [ "$VALUE" = "$WF_REPORT_STAGE" ] || exit 0
-REPORT=$(wf_report "$SLUG" "$ISSUE")
-case "$REPORT" in
-  *'記録なし:'*|*'条件付き:'*) wf_emit_context "$REPORT" ;;
-esac
+  # 配布の記録へ進んだときだけ、記録の無い必須の工程を案内する。
+  [ "$KEY" = "stage" ] && [ "$VALUE" = "$WF_REPORT_STAGE" ] || exit 0
+  REPORT=$(wf_report "$SLUG" "$ISSUE")
+  case "$REPORT" in
+    *'記録なし:'*|*'条件付き:'*) wf_emit_context "$REPORT" ;;
+  esac
+  exit 0
+fi
+
+# --- #424 Pull Request の作成の時点で実行証跡を見る --------------------------
+#
+# **拒否はしない。** 判定できないときは何も出さずに通す（決定 4）。
+ENTRIES=$(wf_parse_pr_create "$COMMAND") || exit 0
+EVIDENCE=$(wf_evidence_report <<<"$ENTRIES") || exit 0
+[ -n "$EVIDENCE" ] && wf_emit_context "$EVIDENCE"
 exit 0

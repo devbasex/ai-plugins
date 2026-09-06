@@ -229,6 +229,21 @@ feature/xxx ──PR──→ qa/staging   ← ❌ qa/staging をmergeするとm
 
 `/ndf:cherry-pick-pr <base-branch>` を使う（自動化済み）。原則と手順は `/ndf:cherry-pick-pr` に記載のとおり。
 
+## マージに人手の承認が要るか
+
+**Pull Request を出すこと自体は承認の関門ではない。** 要否を決めるのは**マージ先のチャネル**
+である。検証環境や開発版のチャネルへ入れるマージは取り消せるため、承認を求めない。
+
+| マージ先 | 承認 |
+| --- | --- |
+| 開発版・検証環境のチャネル | 要らない |
+| **本番のチャネル** | **要る** |
+| head のブランチ名が `design/` で始まる Pull Request | **チャネルによらず要る**（設計レビューの関門） |
+
+**規則は `/ndf:release` が持つ。** どのブランチが本番のチャネルかはリポジトリが宣言し
+（`.ndf/worktree.json` の `production_branch`）、宣言が無ければ既定ブランチを指す。判定の
+全体像は `/ndf:development-workflow` の「人手の承認を求める関門」にある。
+
 この工程に入ったら `/ndf:progress-tracking <issue番号> "Pull Request"` を呼ぶ（記録の手順はその Skill が持つ）。
 
 ## 関連
@@ -238,3 +253,4 @@ feature/xxx ──PR──→ qa/staging   ← ❌ qa/staging をmergeするとm
 - `/ndf:pr-tests` — Test Plan 自動実行
 - `/ndf:pr-review` — PR単位レビュー
 - `/ndf:merged` — マージ後のブランチ整理 / 現ブランチに起点ブランチを取り込み
+- `/ndf:release` — 配布。**本番のチャネルへ届く操作の承認の規則を持つ**
