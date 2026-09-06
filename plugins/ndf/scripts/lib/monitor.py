@@ -606,6 +606,91 @@ def _tail_last_nonempty_line(path: pathlib.Path, limit: int = 4096) -> str:
     return ""
 
 
+def _await_pid(paths: AgentPaths, status: AgentStatus, log_prefix: str) -> Optional[int]:
+    grace_end = time.monotonic() + 30
+    while time.monotonic() < grace_end:
+        if paths.pidfile.exists():
+            break
+        time.sleep(2)
+    pid = _read_pidfile(paths.pidfile)
+    if pid is None:
+        status.status = "PIDFILE_BAD"
+        status.exit_code = 6
+        status.detail = f"pidfile not found: {paths.pidfile}"
+        _emit_log(log_prefix, paths.agent, status)
+        return None
+    return pid
+
+
+def _codex_sentinel_done(
+    paths: AgentPaths,
+    status: AgentStatus,
+    alive: bool,
+    pid: int,
+    log_prefix: str,
+) -> Optional[AgentStatus]:
+    if (
+        paths.agent == "codex"
+        and alive
+        and status.sentinel_seen
+        and paths.result.exists()
+        and paths.result.stat().st_size > 0
+    ):
+        _kill_pid(pid)
+        status.result_exists = True
+        status.status = "OK"
+        status.exit_code = 0
+        status.detail = (
+            f"codex sentinel + result.json detected; killed lingering pid {pid}"
+        )
+        _emit_log(log_prefix, paths.agent, status)
+        return status
+    return None
+
+
+def _lingering_result_done(
+    paths: AgentPaths,
+    status: AgentStatus,
+    alive: bool,
+    cmdline_validated: bool,
+    started_wall: float,
+    pid: int,
+    log_prefix: str,
+) -> Optional[AgentStatus]:
+    if not (
+        alive
+        and not status.sentinel_seen
+        and cmdline_validated
+        and paths.result.exists()
+        and paths.result.stat().st_size > 0
+    ):
+        return None
+    result_mtime = paths.result.stat().st_mtime
+    if result_mtime < started_wall:
+        return None
+    result_age = time.time() - result_mtime
+    if result_age < RESULT_AGE_GRACE:
+        return None
+    _kill_pid(pid)
+    status.result_exists = True
+    status.status = "OK"
+    status.exit_code = 0
+    status.detail = (
+        f"result.json exists for {result_age:.0f}s without process exit; "
+        f"killed lingering pid {pid}"
+    )
+    _emit_log(log_prefix, paths.agent, status)
+    return status
+
+
+def _progress_size(paths: AgentPaths, status: AgentStatus) -> int:
+    status.err_log_size = _safe_size(paths.err_log)
+    status.stdout_log_size = _safe_size(paths.stdout_log)
+    status.progress_log_size = _safe_size(paths.progress_log)
+    status.progress_tail = _tail_last_nonempty_line(paths.progress_log)
+    return status.err_log_size + status.stdout_log_size + status.progress_log_size
+
+
 def monitor_agent(
     agent: str,
     pr: int,
@@ -627,17 +712,8 @@ def monitor_agent(
     started = time.monotonic()
 
     # 起動チェック: 30 秒待っても pidfile が無ければ起動失敗
-    grace_end = started + 30
-    while time.monotonic() < grace_end:
-        if paths.pidfile.exists():
-            break
-        time.sleep(2)
-    pid = _read_pidfile(paths.pidfile)
+    pid = _await_pid(paths, status, log_prefix)
     if pid is None:
-        status.status = "PIDFILE_BAD"
-        status.exit_code = 6
-        status.detail = f"pidfile not found: {paths.pidfile}"
-        _emit_log(log_prefix, agent, status)
         return status
 
     status.pid = pid
@@ -669,22 +745,9 @@ def monitor_agent(
         # ケースがある (実機で観測)。result.json は正常に書かれているのに alive=True の
         # まま stall_timeout に達して STALLED 化してしまう。sentinel + result.json が
         # 揃った瞬間に対象プロセスを kill して OK 判定で返す。
-        if (
-            agent == "codex"
-            and alive
-            and status.sentinel_seen
-            and paths.result.exists()
-            and paths.result.stat().st_size > 0
-        ):
-            _kill_pid(pid)
-            status.result_exists = True
-            status.status = "OK"
-            status.exit_code = 0
-            status.detail = (
-                f"codex sentinel + result.json detected; killed lingering pid {pid}"
-            )
-            _emit_log(log_prefix, agent, status)
-            return status
+        done = _codex_sentinel_done(paths, status, alive, pid, log_prefix)
+        if done is not None:
+            return done
 
         # result.json が書かれた後もプロセスがハングするケース (実測:
         # MCP サーバー切断待ち等��� exit しない)。sentinel 機構を持たない agent 向け
@@ -693,27 +756,11 @@ def monitor_agent(
         # 安全条件:
         #   - cmdline_validated: PID 再利用でない (または検証不能環境) ことを確認済み
         #   - mtime >= started_wall: 前 round の stale result.json を拾わない
-        if (
-            alive
-            and not status.sentinel_seen
-            and cmdline_validated
-            and paths.result.exists()
-            and paths.result.stat().st_size > 0
-        ):
-            result_mtime = paths.result.stat().st_mtime
-            if result_mtime >= started_wall:
-                result_age = time.time() - result_mtime
-                if result_age >= RESULT_AGE_GRACE:
-                    _kill_pid(pid)
-                    status.result_exists = True
-                    status.status = "OK"
-                    status.exit_code = 0
-                    status.detail = (
-                        f"result.json exists for {result_age:.0f}s without process exit; "
-                        f"killed lingering pid {pid}"
-                    )
-                    _emit_log(log_prefix, agent, status)
-                    return status
+        done = _lingering_result_done(
+            paths, status, alive, cmdline_validated, started_wall, pid, log_prefix
+        )
+        if done is not None:
+            return done
 
         if alive and not cmdline_validated:
             # cmdline 検証は alive 確認後に 1 回だけ。生きていない瞬間に proc/<pid> を読むと
@@ -794,13 +841,7 @@ def monitor_agent(
         # agy は stdout 側だけ進捗が出るケースがあり、progress.log には
         # launcher が要求した短いフェーズマーカーが出るため、いずれかが
         # 更新されれば progress として扱う)
-        status.err_log_size = _safe_size(paths.err_log)
-        status.stdout_log_size = _safe_size(paths.stdout_log)
-        status.progress_log_size = _safe_size(paths.progress_log)
-        status.progress_tail = _tail_last_nonempty_line(paths.progress_log)
-        progress_size = (
-            status.err_log_size + status.stdout_log_size + status.progress_log_size
-        )
+        progress_size = _progress_size(paths, status)
         if progress_size != last_progress_size:
             last_progress_size = progress_size
             last_progress = time.monotonic()
