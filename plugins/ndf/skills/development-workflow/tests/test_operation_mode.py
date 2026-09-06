@@ -214,6 +214,20 @@ def test_every_stage_has_a_value_for_the_new_column() -> None:
         assert result.stdout.strip() == expected, (stage, result.stdout)
 
 
+def test_stage_class_rejects_an_unknown_mode_without_output() -> None:
+    """現状固定: 知らないモードでは失敗し、標準出力へ何も書かない。"""
+    result = run_lib('wf_stage_class unknown "実装"')
+    assert result.returncode == 1
+    assert result.stdout == ""
+
+
+def test_stage_class_rejects_an_unknown_stage_without_output() -> None:
+    """現状固定: 工程表にない工程では失敗し、標準出力へ何も書かない。"""
+    result = run_lib('wf_stage_class operation "存在しない工程"')
+    assert result.returncode == 1
+    assert result.stdout == ""
+
+
 def test_the_column_covers_the_whole_workflow_table() -> None:
     """期待値の側が工程表と同じ行を持つ。行が増えたら、この検査が先に落ちる。"""
     _, rows = _table_rows(skill(), WORKFLOW_TABLE_HEADING)
