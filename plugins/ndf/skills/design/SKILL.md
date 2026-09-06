@@ -151,11 +151,13 @@ API の記述を求めない。
 
 **契機は 2 つあり、別々の時点で 1 つずつ呼ぶ。** 手順 1（触る領域を決める）に入るときに
 `/ndf:progress-tracking <issue番号> "設計"`、手順 4（設計 Pull Request を出す）に入るときに
-`/ndf:progress-tracking <issue番号> "設計レビュー"` を呼ぶ（記録の手順はその Skill が持つ）。
+`/ndf:progress-tracking <issue番号> "ドキュメントレビュー"` を呼ぶ（記録の手順はその Skill が
+持つ）。**手順 4 の前に `document-restructuring` を通す**（工程「ドキュメント再構成」）。
 
 ## 関連
 
 - `/ndf:requirements-design` — 何を満たすか（この工程の入力）
 - `/ndf:implementation-plan` — どう分解するか（この工程の出力を受け取る）
 - `/ndf:cross-review` — 設計 Pull Request のレビュー
+- `/ndf:document-restructuring` — 書き上げた設計文書を章立てから組み直す（次の工程）
 - `/ndf:markdown-writing` — 文書と図の書き方

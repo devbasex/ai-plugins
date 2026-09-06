@@ -271,7 +271,7 @@ Step 5 をテストへ置き換え、Step 7 を条件付きで省くと、実行
 | 起動のされ方 | 誰が拾うか |
 | --- | --- |
 | 単独 | **Step 7 の `cross-review`。** 省略しない |
-| `development-workflow` の 1 工程 | **工程表の「レビュー」。** この Skill の後に `pr` → `cross-review` が続く |
+| `development-workflow` の 1 工程 | **工程表の「実装レビュー」。** この Skill の後に `pr` → `cross-review` が続く |
 
 **この Skill の中へ軽量なレビューを足さない。** 工程として起動したときに Step 7 を
 省くのは、**同じ差分を 2 度レビューしないため**である。v10.5.1 で `light` も
