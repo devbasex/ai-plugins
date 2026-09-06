@@ -186,6 +186,25 @@ wf_is_candidate() {
   grep -qE 'projects-sync\.sh|pr[[:space:]]+merge|pulls/[0-9]+/merge|pr[[:space:]]+create' <<<"${1:-}"
 }
 
+_wf_seek_gh_verb() {
+  local state="${1:-0}" tok="${2:-}" verb="${3:-}"
+  case "$state" in
+    0) [ "$tok" = "gh" ] && printf '1\n' || printf '0\n' ;;
+    1)
+      case "$tok" in
+        pr) printf '2\n' ;;
+        gh) printf '1\n' ;;
+        -R|--repo) printf '4\n' ;;
+        -*) printf '1\n' ;;
+        *) printf '0\n' ;;
+      esac
+      ;;
+    2) [ "$tok" = "$verb" ] && printf '3\n' || printf '0\n' ;;
+    4) printf '1\n' ;;
+    *) printf '%s\n' "$state" ;;
+  esac
+}
+
 # 進行の記録のコマンドなら、課題番号・キー・値をタブ区切りで出す。
 #
 # 見分けは `projects-sync.sh` で終わる語である。呼び出し側は `$SCRIPTS` を展開してから
@@ -228,22 +247,8 @@ _wf_pr_create_body() {
       want=""
       continue
     fi
-    case "$state" in
-      0) [ "$tok" = "gh" ] && state=1 ;;
-      1)
-        # **`gh` と `pr` の間の option を読み飛ばす。** `gh -R <所有者>/<リポジトリ> pr
-        # create` の形では、値の語で 0 へ戻して `create` を見落とす（#427 のレビュー）。
-        case "$tok" in
-          pr) state=2 ;;
-          gh) ;;
-          -R|--repo) state=4 ;;
-          -*) ;;
-          *) state=0 ;;
-        esac
-        ;;
-      2) if [ "$tok" = "create" ]; then state=3; found=0; else state=0; fi ;;
-      4) state=1 ;;
-    esac
+    state=$(_wf_seek_gh_verb "$state" "$tok" "create")
+    [ "$state" = "3" ] && found=0
     [ "$found" -eq 0 ] || continue
     case "$tok" in
       --body|-b) want=text ;;
