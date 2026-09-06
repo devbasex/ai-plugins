@@ -98,6 +98,8 @@ v10.5.2としてリリースしてください
       `cross-refactoring`）が旧 `architecture` に課していた条件を、新 `standard` へそのまま
       引き継いでいる。条件や必須の別を変えていない
 - [ ] A8. 後方互換の仕組み（旧い名前を新しい名前として読む表）が実装に無い
+- [ ] A9. `WF_MODES` と工程表の列が高さ順（`light` / `operation` / `legacy-refactor` /
+      `standard`）に並んでいる
 
 ### B. 運用モード（#423）
 
