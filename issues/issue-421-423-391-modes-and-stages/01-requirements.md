@@ -94,6 +94,9 @@ v10.5.2としてリリースしてください
 - [ ] A5. 記録済みの旧い `mode` を読んだときの動作が定まり、テストが固定する
 - [ ] A6. `architecture` を現行のモード名として書いている箇所が、履歴と記録を除いて 0 件になる
       （現況: 21 ファイル・59 か所）
+- [ ] A7. 周辺 Skill（`quality-gates` / `design` / `design-template.md` / `refactoring` /
+      `cross-refactoring`）が旧 `architecture` に課していた条件を、新 `standard` へそのまま
+      引き継いでいる。条件や必須の別を変えていない
 
 ### B. 運用モード（#423）
 
