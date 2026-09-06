@@ -60,7 +60,7 @@ v10.5.2としてリリースしてください
 | --- | --- | --- |
 | Q1 | 改名後の `standard` は、旧 `architecture` の値をそのまま採るか | #421 |
 | Q2 | 旧 `standard` の条件付き（確定仕様化・リリース後テスト）を残すか、必須へ倒すか | #421 |
-| Q3 | 記録済みの `architecture` をどう扱うか（読み替えるか、書き換えるか） | #421 |
+| Q3 | 記録済みの `architecture` を書き換える対象と手順（前提 3 のとおり、読み替えの表は持たない） | #421 |
 | Q4 | 運用モードの名前 | #423 |
 | Q5 | 「コードを触らない」をどう見分けるか | #423 |
 | Q6 | 運用モードで必須にする工程はどれか | #423 |
@@ -163,7 +163,7 @@ python3 scripts/check-doc-line-limit.py
 python3 scripts/check-markdown-links.py --root .
 python3 scripts/check-skill-repo-assumptions.py
 python3 scripts/check-cross-skill-refs.py
-python3 scripts/check-pr-base.sh
+bash scripts/check-pr-base.sh
 bash scripts/build-runtime-plugins.sh --check
 bash scripts/validate-runtime-plugins.sh
 claude plugin validate .
