@@ -41,11 +41,11 @@ allowed-tools:
 | --- | --- |
 | 参加者 | **全員 CLI プロセス。** ホストのサブエージェント機能は使わない。ホストと同じランタイムが実装担当のラウンドでも別プロセスで起動する |
 | 役割の分離 | 提案・レビューは**ホストを除く 3 者**、適用は**参加する 4 者すべて**。両者は重なるが一致しない |
-| レビューの単位 | **提案ラウンドの差分全体**に対して 1 回。項目ごとに回すと CLI 起動回数が採用件数に比例して膨らむ |
+| 検証の単位 | **適用ラウンド（群）に対して 1 回。** 判定は `--baseline-test` の合否で決まり、レビュー CLI は起動しない |
 | 収束しない項目 | **捨てる。** リファクタリングは任意の作業なので、揉める提案を Pull Request に残さない |
-| コミットの単位 | **1 改善項目 = 1 コミット。** テストも項目の単位で 1 回だけ求める（現状固定テストが要る項目のみ 2 コミット） |
+| コミットの単位 | **1 適用ラウンド = 1 コミット。** テストも適用ラウンドの単位で 1 回だけ求める |
 | 改修計画 | **差分の中へ残す。** 理由と手順は提案の時点でしか残らない。公開の直前に進行側が書き出し、生成物の同期と同じコミットへ入れる |
-| 取り消しの単位 | **改善項目ごと（独立している範囲で）。** 範囲を新しい順に全て戻し、残す項目を積み直す。同一ファイルの隣接行を触る項目どうしは git だけでは分離できないため、そのときは**ラウンド全件へ退避する** |
+| 取り消しの単位 | **適用ラウンドごと。** 群の範囲を新しい順に全て戻す。既に検証を通った群は Pull Request に残る。**群の中は 1 コミットなので、1 件の失敗が群の全件を巻き込む** |
 | 範囲の扱い | `--scope` は**検証にも効く**。範囲外を触ったコミットを含む項目は失敗になる |
 | 公開の責務 | **進行側だけが、検証を通した後に push する。** 実装担当は push しない。生成物の同期は `--sync-command` として push の直前に進行側が実行する |
 | 検証の情報源 | **git と実際のテスト実行。** 結果ファイルの申告は検証に使わない（書き換えるだけで通る検査にしない） |
@@ -252,34 +252,26 @@ while :; do                                   # 提案ラウンドの繰り返�
   "$LIB/monitor.py" "$ID" --agents "$RUNTIMES_CSV" --tmp-dir "$TMP_DIR" \
       --stem-template "{agent}-propose-rf{id}-r$ROUND" --timeout 900
   rf merge-proposals "$ID" || break            # 終了コード 2 = 採用 0 件
-
-  "$SCRIPTS/launch-cli.sh" "$IMPL" apply "$ID" "$ROUND"
-  "$LIB/monitor.py" "$ID" --agents "$IMPL" --tmp-dir "$TMP_DIR" \
-      --stem-template "{agent}-apply-r$ROUND" --timeout 3600
-  rf merge-apply "$ID" "$ROUND" || continue    # 終了コード 2 = 全件失敗
-
-  # 適用後の状態をレビュー担当へ見せるため、読み取り用を同期する
-  "$SCRIPTS/prepare-worktrees.sh" "$ID" sync "$(git -C "$WORK" rev-parse HEAD)"
-
-  while :; do                                 # レビュー収束の繰り返し
-    # 起動する担当は状態が決める。初回は 2 者、修正の後は変更要求を出した担当だけになる
-    rf_eval review-targets "$ID" "$ROUND"
-    for r in $REVIEW_TARGETS; do
-      "$SCRIPTS/launch-cli.sh" "$r" review "$ID" "$ROUND"
-    done
-    "$LIB/monitor.py" "$ID" --agents "$REVIEW_TARGETS_CSV" --tmp-dir "$TMP_DIR" \
-        --stem-template "{agent}-review-r$ROUND" --timeout 900
-    rf judge-review "$ID" "$ROUND"; rc=$?
-    [ $rc -eq 0 ] && break                    # 2 者とも承認
-    [ $rc -eq 3 ] && continue                 # 形式不正 — 差し戻して再レビュー
-    if rf should-abandon "$ID" "$ROUND"; then
-      rf abandon-items "$ID" "$ROUND"; break
-    fi
-    "$SCRIPTS/launch-cli.sh" "$IMPL" fix "$ID" "$ROUND"
+  while :; do                                 # 適用ラウンドの繰り返し
+    # 群と実装担当は状態が決める。輪番は群ごとに進む
+    rf_eval next-apply-round "$ID" "$ROUND" || break   # 終了コード 1 = 群が尽きた
+    "$SCRIPTS/launch-cli.sh" "$IMPL" apply "$ID" "$ROUND"
     "$LIB/monitor.py" "$ID" --agents "$IMPL" --tmp-dir "$TMP_DIR" \
-        --stem-template "{agent}-fix-r$ROUND"
-    rf merge-fix "$ID" "$ROUND"
-    # 修正後の状態を再レビューさせる。同期しないと古い差分を評価してしまう
+        --stem-template "{agent}-apply-r$ROUND" --timeout 3600
+    # 終了コード 2 = 適用が通らずこの群を取り消した。修正ラウンドは回さない
+    rf merge-apply "$ID" "$ROUND" || continue
+
+    while :; do                               # 検証と修正の繰り返し
+      rf verify-round "$ID" "$ROUND" && break # テストが通った
+      if rf should-abandon "$ID" "$ROUND"; then
+        rf abandon-items "$ID" "$ROUND"; break
+      fi
+      "$SCRIPTS/launch-cli.sh" "$IMPL" fix "$ID" "$ROUND"
+      "$LIB/monitor.py" "$ID" --agents "$IMPL" --tmp-dir "$TMP_DIR" \
+          --stem-template "{agent}-fix-r$ROUND"
+      rf merge-fix "$ID" "$ROUND"
+    done
+    # 次の群と、次のラウンドの提案に備えて読み取り用を同期する
     "$SCRIPTS/prepare-worktrees.sh" "$ID" sync "$(git -C "$WORK" rev-parse HEAD)"
   done
   rf advance "$ID" || break
@@ -295,11 +287,10 @@ done
 | --- | --- | --- |
 | 0 | 正常 | 続ける |
 | 1 | 繰り返しの終了（`start-round` / `advance`） | 抜ける |
-| 2 | 判定の結果（採用 0 件 / 全件失敗 / 変更要求 など） | 各コマンドの表に従う |
-| 3 | レビュー結果の形式不正 | 差し戻して再レビュー |
+| 2 | 判定の結果（採用 0 件 / 適用ラウンドの取り消し / テストの失敗 など） | 各コマンドの表に従う |
 | **4** | **中断**（取り消しの失敗、認証切れ、範囲を確定できない、レビュー結果が無いまま差し戻し上限に達したなど） | **進行ごと止める** |
 
-出力を `eval` する呼び出し（`init` / `start-round` / `review-targets`）は `rf_eval` を使う。
+出力を `eval` する呼び出し（`init` / `start-round` / `next-apply-round`）は `rf_eval` を使う。
 `eval "$(rf ...)"` と書くと `rf` はコマンド置換のサブシェルで動くため、`exit 4` は
 サブシェルしか終わらせず、外側の `eval` は空文字を評価して成功する。
 **中断したはずの進行がそのまま続く**ので、出力と終了コードは親シェルで受け取る。
@@ -323,9 +314,9 @@ Draft を解除し、`refactor.py report "$ID" --metrics` の出力を報告す�
 | 生成物を同期するリポジトリで `--sync-command` を省く | pre-push の検査で**あらゆる push が落ちる**。実装担当が同期に手を出し、範囲違反で全件失敗する |
 | 取り消しの失敗を「全件失敗」として次のラウンドへ進む | 検証を通っていない変更が Pull Request に残る。終了コード 4 は必ず進行ごと止める |
 | `--dry-run` の出力を実行結果と混同する | 確認用なので git も状態ファイルも触らない。進行は 1 歩も進まない |
-| 複数の改善項目を 1 コミットにまとめる | 取り消し範囲が項目単位で決まらなくなる。適用結果の検証で失敗になる |
-| 1 項目を複数のコミットへ刻む | 改善項目と履歴が 1 対 1 で辿れなくなり、取り消しと積み直しのコミットも件数に比例して増える |
-| 実装担当に手ごとのテストを義務づける | 進行側もコミットごとに回すため、テストの実行回数が手数の 2 倍になる（実測 44 手で 88 回） |
+| 1 つの適用ラウンドを複数のコミットへ刻む | 取り消しの単位（適用ラウンド）とコミットの単位が食い違う。適用結果の検証で全件失敗になる |
+| 書き換えるファイルが重なる項目を同じ適用ラウンドへ入れる | 群の中を 1 コミットにできない。割り当ては `merge-proposals` が `path` だけで決める |
+| 実装担当に手ごとのテストを義務づける | 進行側も検証で回すため、テストの実行回数が膨らむ（実測 44 手で 88 回） |
 | 改修計画を状態ファイルにだけ残す | 状態ファイルは差分から除外される。Pull Request を読む側からは、なぜ直したのかも、どう直す計画だったのかも見えない |
 | 結果ファイルの申告を検証の材料にする | 実装担当は報告する側。JSON を書き換えるだけで通る検査は機械検証ではない |
 | 投稿に失敗したまま結果ファイルを書かずに終了する | 進行側からは「レビュー担当が動かなかった」と区別が付かない。失敗したときほど `post_error` 付きの結果ファイルが要る |

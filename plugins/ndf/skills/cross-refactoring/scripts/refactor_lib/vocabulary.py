@@ -110,7 +110,7 @@ DEFAULT_PLAN_DIR = "issues"
 # 改善項目の状態を、Pull Request を読む側に通じる語へ置き換える。
 ITEM_STATUS_LABELS = {
     "pending": "未着手",
-    "reviewing": "レビュー中",
+    "applied": "検証中",
     "done": "採用",
     "abandoned": "取り消し",
     "blocked": "着手せず",

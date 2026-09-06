@@ -93,10 +93,19 @@ PROMPT=$STEM-prompt.md
 TEMPLATE=$PROMPTS/$PHASE.md
 [ -f "$TEMPLATE" ] || { echo "プロンプト雛形がありません: $TEMPLATE" >&2; exit 1; }
 
-# 採用済みの改善項目（適用 / レビュー / 修正で使う）。提案の段階ではまだ無い。
+# 採用済みの改善項目（適用 / 修正で使う）。提案の段階ではまだ無い。
+#
+# **渡すのは進行中の適用ラウンド（群）の項目だけである。** 群の中の項目は書き換える
+# ファイルが重ならず、まとめて 1 コミットにできる。群をまたいで渡すと、まだ適用して
+# いない項目まで 1 コミットへ入れさせることになる。
 ITEMS_JSON='[]'
+APPLY_ROUND=0
 if [ "$PHASE" != "propose" ]; then
-  ITEMS_JSON=$(jq --argjson r "$ROUND" '[.items[] | select(.round == $r)]' "$STATE")
+  APPLY_ROUND=$(jq -r --argjson r "$ROUND" \
+    '[.rounds[] | select(.round == $r)][0].apply_round // 0' "$STATE")
+  ITEMS_JSON=$(jq --argjson r "$ROUND" --argjson a "$APPLY_ROUND" \
+    '[.items[] | select(.round == $r) | select($a == 0 or (.apply_round // 1) == $a)]' \
+    "$STATE")
 fi
 # 見送った提案は「対象外」として渡し、毎ラウンド同じ提案が出続けるのを防ぐ。
 EXCLUDED=$(jq -r '[.deferred_items[] | "- \(.path)#\(.symbol) （\(.smell)）: \(.defer_reason // "見送り")"] | join("\n")' "$STATE")
@@ -135,6 +144,7 @@ VOCAB_SEVERITIES=$(jq -r '(.vocabulary.severities // []) | map("`" + . + "`") | 
 [ -n "$VOCAB_SEVERITIES" ] || VOCAB_SEVERITIES="\`critical\` / \`major\` / \`minor\`"
 
 export RF_ITEMS=$ITEMS_JSON RF_TMP_DIR=$TMP_DIR
+export RF_APPLY_ROUND=$APPLY_ROUND
 export RF_VOCAB_SMELLS=$VOCAB_SMELLS RF_VOCAB_TECHNIQUES=$VOCAB_TECHNIQUES
 export RF_VOCAB_SEVERITIES=$VOCAB_SEVERITIES
 

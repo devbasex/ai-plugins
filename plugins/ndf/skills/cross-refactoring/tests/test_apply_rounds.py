@@ -9,6 +9,8 @@
 """
 from __future__ import annotations
 
+import pytest
+
 from crossref_helpers import make_state, read_state, write_result
 
 
@@ -163,3 +165,117 @@ def test_each_apply_round_gets_its_own_impl(
     ])
     groups = state["rounds"][0]["apply_rounds"]
     assert groups[0]["impl"] != groups[1]["impl"]
+
+
+# ---------- 群を開く（next-apply-round） ----------
+
+def _round_with_groups(groups, apply_round=0, items=("R1-001", "R1-002")):
+    return {
+        "round": 1, "impl": "codex", "reviewers": ["agy", "kiro"],
+        "impl_model": {"requested": None, "observed": None},
+        "reviewer_models": {},
+        "proposed": {}, "merged": 2, "adopted": 2, "deferred": 0,
+        "items": list(items),
+        "apply_rounds": groups,
+        "apply_round": apply_round,
+        "apply": {"applied": [], "failed": [], "base_sha": None, "head_sha": None},
+        "fix_rounds": 0, "durations": {}, "reviews": [],
+    }
+
+
+def _two_groups():
+    return [
+        {"apply_round": 1, "impl": "codex",
+         "impl_model": {"requested": None, "observed": None},
+         "items": ["R1-001"], "status": "pending",
+         "base_sha": None, "head_sha": None, "fix_rounds": 0},
+        {"apply_round": 2, "impl": "agy",
+         "impl_model": {"requested": None, "observed": None},
+         "items": ["R1-002"], "status": "pending",
+         "base_sha": None, "head_sha": None, "fix_rounds": 0},
+    ]
+
+
+def _open_next(refactor, tmp_path, env_tmp_dir, monkeypatch, entry, head="HEAD_NOW"):
+    state_path = make_state(tmp_path, rounds=[entry], phase="apply", outer_round=1)
+    env_tmp_dir(state_path)
+    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **k: head)
+    refactor.cmd_next_apply_round(type("A", (), {"id": 130, "round": 1})())
+    return state_path
+
+
+def test_next_apply_round_opens_the_first_pending_group(
+    refactor, tmp_path, env_tmp_dir, monkeypatch, capsys
+):
+    state_path = _open_next(refactor, tmp_path, env_tmp_dir, monkeypatch,
+                            _round_with_groups(_two_groups()))
+    out = capsys.readouterr().out
+    assert "APPLY_ROUND=1" in out
+    assert "IMPL=codex" in out
+    assert "APPLY_ITEMS=R1-001" in out
+
+    entry = read_state(state_path)["rounds"][0]
+    assert entry["apply_round"] == 1
+    # **群の起点はここで確定する。** 後続の群は先行の群を適用した後を読む
+    assert entry["apply_base_sha"] == "HEAD_NOW"
+    assert entry["apply_rounds"][0]["base_sha"] == "HEAD_NOW"
+
+
+def test_next_apply_round_skips_the_groups_already_handled(
+    refactor, tmp_path, env_tmp_dir, monkeypatch, capsys
+):
+    groups = _two_groups()
+    groups[0]["status"] = "verified"
+    state_path = _open_next(refactor, tmp_path, env_tmp_dir, monkeypatch,
+                            _round_with_groups(groups, apply_round=1))
+    assert "APPLY_ROUND=2" in capsys.readouterr().out
+    assert read_state(state_path)["rounds"][0]["apply_round"] == 2
+
+
+def test_next_apply_round_resets_the_fix_rounds(
+    refactor, tmp_path, env_tmp_dir, monkeypatch
+):
+    """`--max-fix-rounds` は 1 つの適用ラウンドあたりの上限である。"""
+    groups = _two_groups()
+    groups[0]["status"] = "dropped"
+    entry = _round_with_groups(groups, apply_round=1)
+    entry["fix_rounds"] = 3
+    state_path = _open_next(refactor, tmp_path, env_tmp_dir, monkeypatch, entry)
+    assert read_state(state_path)["rounds"][0]["fix_rounds"] == 0
+
+
+def test_next_apply_round_exits_1_when_no_group_is_left(
+    refactor, tmp_path, env_tmp_dir, monkeypatch
+):
+    groups = _two_groups()
+    for g in groups:
+        g["status"] = "verified"
+    state_path = make_state(
+        tmp_path, rounds=[_round_with_groups(groups, apply_round=2)],
+        phase="apply", outer_round=1)
+    env_tmp_dir(state_path)
+    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **k: "HEAD")
+    with pytest.raises(SystemExit) as e:
+        refactor.cmd_next_apply_round(type("A", (), {"id": 130, "round": 1})())
+    assert e.value.code == 1
+
+
+def test_next_apply_round_reopens_a_group_that_was_applied_but_not_verified(
+    refactor, tmp_path, env_tmp_dir, monkeypatch, capsys
+):
+    """取り込み済みで検証前に落ちた群を飛ばさないこと。
+
+    飛ばすと、その群の項目が採用でも取り消しでもないまま残る。再開できることは
+    収束ループの前提である。**起点も修正の回数も動かさない。**
+    """
+    groups = _two_groups()
+    groups[0]["status"] = "applied"
+    groups[0]["base_sha"] = "BASE_OF_GROUP_1"
+    entry = _round_with_groups(groups, apply_round=1)
+    entry["fix_rounds"] = 2
+    state_path = _open_next(refactor, tmp_path, env_tmp_dir, monkeypatch, entry)
+
+    assert "APPLY_ROUND=1" in capsys.readouterr().out
+    saved = read_state(state_path)["rounds"][0]
+    assert saved["apply_base_sha"] == "BASE_OF_GROUP_1"
+    assert saved["fix_rounds"] == 2

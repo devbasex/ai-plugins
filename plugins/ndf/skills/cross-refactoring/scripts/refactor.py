@@ -54,7 +54,6 @@ from refactor_lib import plan as _plan  # noqa: E402
 from refactor_lib import gitfacts as _gitfacts  # noqa: E402
 from refactor_lib import proposals as _proposals  # noqa: E402
 from refactor_lib import verify as _verify  # noqa: E402
-from refactor_lib import review as _review  # noqa: E402
 from refactor_lib.commands import report as _cmd_report  # noqa: E402
 from refactor_lib.commands import setup as _cmd_setup  # noqa: E402
 from refactor_lib.commands import apply as _cmd_apply  # noqa: E402
@@ -70,7 +69,6 @@ _LIB_MODULES: tuple[types.ModuleType, ...] = (
     _gitfacts,
     _proposals,
     _verify,
-    _review,
     _cmd_report,
     _cmd_setup,
     _cmd_apply,
@@ -166,10 +164,12 @@ def main() -> None:
         sp.set_defaults(func=func)
 
     for name, func, help_ in (
-        ("review-targets", cmd_review_targets,
-         "Step 5 — 次に起動するレビュー担当（初回は 2 者、再レビューは変更要求を出した担当）"),
-        ("judge-review", cmd_judge_review, "Step 5 — レビュー担当の判定"),
-        ("should-abandon", cmd_should_abandon, "Step 6 — 修正ラウンド上限の到達判定"),
+        ("next-apply-round", cmd_next_apply_round,
+         "Step 4 — 次の適用ラウンド（群）を開く。実装担当と対象の項目を返す"),
+        ("verify-round", cmd_verify_round,
+         "Step 5 — 適用ラウンドの結果をテストで検証する"),
+        ("should-abandon", cmd_should_abandon,
+         "Step 6 — この適用ラウンドの修正上限の到達判定"),
         ("merge-fix", cmd_merge_fix, "Step 6 — 修正結果の取り込み"),
     ):
         sp = sub.add_parser(name, help=help_)
@@ -180,9 +180,9 @@ def main() -> None:
     # コミットを取り消しうる 2 つは、実行前に何が消えるかを確かめられるようにする。
     for name, func, help_ in (
         ("merge-apply", cmd_merge_apply,
-         "Step 4 — 適用結果の検証（差分予算 / テスト / トレーラー / 固定テスト先行）"),
+         "Step 4 — 適用ラウンドの検証（差分予算 / トレーラー / 範囲 / 1 コミット）"),
         ("abandon-items", cmd_abandon_items,
-         "Step 6 — 未解決の指摘に紐づく項目だけを取り消す"),
+         "Step 6 — テストが通らなかった適用ラウンドを取り消す"),
     ):
         sp = sub.add_parser(name, help=help_)
         sp.add_argument("id", type=int)

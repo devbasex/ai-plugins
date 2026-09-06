@@ -1,7 +1,8 @@
 """見送り処理のテスト。
 
-レビューはラウンド単位で回すが、**取り消しは項目単位**で行う。
-指摘の無い項目と解決済みの項目は Pull Request に残す。
+**取り消しの単位は適用ラウンド（群）である**（#436 決定 2）。群の中は 1 コミット
+なので、どの項目が落としたのかを特定しても分離して取り消せない。既に検証を通った
+群は Pull Request に残る。
 """
 from __future__ import annotations
 
@@ -14,7 +15,7 @@ from crossref_helpers import make_state, read_state, write_result
 REVIEWERS = ["agy", "kiro"]
 
 
-def _item(item_id, commits, status="reviewing"):
+def _item(item_id, commits, status="applied"):
     return {
         "item_id": item_id, "round": 1, "path": "src/foo.py", "symbol": item_id,
         "smell": "long_method", "technique": "extract_method", "severity": "major",
@@ -29,8 +30,19 @@ def _finding(item_id, resolved=False, thread="PRRT_x"):
             "thread_id": thread, "summary": "x", "resolved": resolved}
 
 
-def _state(tmp_path, findings, item_ids=("R1-001", "R1-002")):
+def _state(tmp_path, findings, item_ids=("R1-001", "R1-002"), groups=None,
+           apply_round=1, applied=None):
+    """1 提案ラウンド分の状態を組み立てる。
+
+    `groups` を渡さないときは、全項目が 1 つの適用ラウンドへ入る。
+    """
     items = [_item(i, [f"sha-{i}"]) for i in item_ids]
+    groups = groups or [{
+        "apply_round": 1, "impl": "codex",
+        "impl_model": {"requested": None, "observed": None},
+        "items": list(item_ids), "status": "applied",
+        "base_sha": "base0", "head_sha": None, "fix_rounds": 3,
+    }]
     return make_state(
         tmp_path,
         items=items,
@@ -41,7 +53,13 @@ def _state(tmp_path, findings, item_ids=("R1-001", "R1-002")):
                                 for r in REVIEWERS},
             "proposed": {}, "merged": 2, "adopted": 2, "deferred": 0,
             "items": list(item_ids),
-            "apply": {"applied": list(item_ids), "failed": []},
+            "apply_rounds": groups,
+            "apply_round": apply_round,
+            "apply": {
+                "apply_round": apply_round,
+                "applied": list(item_ids) if applied is None else list(applied),
+                "failed": [],
+            },
             "fix_rounds": 3, "durations": {},
             "reviews": [{"round": 1, "agy": "REQUEST_CHANGES", "kiro": "APPROVE",
                          "findings": findings}],
@@ -53,42 +71,52 @@ def _args(dry_run=False):
     return type("A", (), {"id": 130, "round": 1, "dry_run": dry_run})()
 
 
-def test_only_items_with_unresolved_findings_are_abandoned(
-    refactor, tmp_path, env_tmp_dir, no_git
-):
-    state_path = _state(tmp_path, [_finding("R1-001")])
+def test_the_whole_apply_round_is_abandoned(refactor, tmp_path, env_tmp_dir, no_git):
+    """**取り消しの単位は適用ラウンドである。** 群の中は 1 コミットで分離できない。"""
+    state_path = _state(tmp_path, [])
     env_tmp_dir(state_path)
     refactor.cmd_abandon_items(_args())
 
-    state = read_state(state_path)
-    by_id = {i["item_id"]: i for i in state["items"]}
-    assert by_id["R1-001"]["status"] == "abandoned"
-    # 合意済みの項目は Pull Request に残す
-    assert by_id["R1-002"]["status"] == "reviewing"
-    assert [d["item_id"] for d in state["deferred_items"]] == ["R1-001"]
-
-
-def test_resolved_findings_do_not_abandon(refactor, tmp_path, env_tmp_dir, no_git):
-    state_path = _state(tmp_path, [_finding("R1-001", resolved=True)])
-    env_tmp_dir(state_path)
-    refactor.cmd_abandon_items(_args())
-    state = read_state(state_path)
-    assert all(i["status"] == "reviewing" for i in state["items"])
-    assert state["deferred_items"] == []
-
-
-def test_null_item_id_abandons_the_whole_round(refactor, tmp_path, env_tmp_dir, no_git):
-    """どの項目にも紐づかない指摘が残ったら、そのラウンドの適用を全件取り消す。"""
-    state_path = _state(tmp_path, [_finding(None)])
-    env_tmp_dir(state_path)
-    refactor.cmd_abandon_items(_args())
     state = read_state(state_path)
     assert all(i["status"] == "abandoned" for i in state["items"])
-    assert len(state["deferred_items"]) == 2
+    assert [d["item_id"] for d in state["deferred_items"]] == ["R1-001", "R1-002"]
+    assert state["rounds"][0]["apply_rounds"][0]["status"] == "dropped"
+
+
+def test_other_apply_rounds_are_left_alone(refactor, tmp_path, env_tmp_dir, no_git):
+    """A4 — 取り消しは進行中の群に閉じる。検証を通った群は残す。"""
+    groups = [
+        {"apply_round": 1, "impl": "codex", "items": ["R1-001"],
+         "status": "verified", "base_sha": "base0", "head_sha": "sha-R1-001",
+         "fix_rounds": 0},
+        {"apply_round": 2, "impl": "agy", "items": ["R1-002"],
+         "status": "applied", "base_sha": "sha-R1-001", "head_sha": None,
+         "fix_rounds": 3},
+    ]
+    state_path = _state(tmp_path, [], groups=groups, apply_round=2,
+                        applied=["R1-002"])
+    env_tmp_dir(state_path)
+    refactor.cmd_abandon_items(_args())
+
+    by_id = {i["item_id"]: i for i in read_state(state_path)["items"]}
+    assert by_id["R1-001"]["status"] == "applied", "他の群を巻き込んでいる"
+    assert by_id["R1-002"]["status"] == "abandoned"
+
+
+def test_nothing_applied_means_nothing_to_abandon(
+    refactor, tmp_path, env_tmp_dir, no_git
+):
+    """既に取り消されている群では、見送る対象が無い。"""
+    state_path = _state(tmp_path, [], applied=[])
+    env_tmp_dir(state_path)
+    refactor.cmd_abandon_items(_args())
+    state = read_state(state_path)
+    assert state["deferred_items"] == []
+    assert state["rounds"][0]["apply_rounds"][0]["abandoned"] == []
 
 
 def test_deferred_entry_records_the_reason(refactor, tmp_path, env_tmp_dir, no_git):
-    state_path = _state(tmp_path, [_finding("R1-001")])
+    state_path = _state(tmp_path, [])
     env_tmp_dir(state_path)
     refactor.cmd_abandon_items(_args())
     entry = read_state(state_path)["deferred_items"][0]
@@ -622,19 +650,19 @@ def test_revert_is_idempotent(refactor, tmp_path, env_tmp_dir, monkeypatch):
 
 def test_abandon_items_is_idempotent(refactor, tmp_path, env_tmp_dir, monkeypatch):
     """叩き直しても見送りの記録を重複させないこと。"""
-    state_path = _state(tmp_path, [_finding("R1-001")])
+    state_path = _state(tmp_path, [])
     env_tmp_dir(state_path)
     _no_git(refactor, monkeypatch)
     refactor.cmd_abandon_items(_args(dry_run=False))
     refactor.cmd_abandon_items(_args(dry_run=False))
     state = read_state(state_path)
-    assert [d["item_id"] for d in state["deferred_items"]] == ["R1-001"]
+    assert [d["item_id"] for d in state["deferred_items"]] == ["R1-001", "R1-002"]
 
 
 def test_abandon_items_records_processing_even_with_no_targets(
     refactor, tmp_path, env_tmp_dir, monkeypatch
 ):
-    state_path = _state(tmp_path, [_finding("R1-001", resolved=True)])
+    state_path = _state(tmp_path, [], applied=[])
     env_tmp_dir(state_path)
     _no_git(refactor, monkeypatch)
     refactor.cmd_abandon_items(_args(dry_run=False))
@@ -824,7 +852,7 @@ def test_pending_push_is_retried_on_the_next_run(
 # ---------- 巻き戻して積み直す取り消し ----------
 
 def _range_state(tmp_path, findings, item_ids=("R1-001", "R1-002")):
-    """適用の起点を記録した状態。**積み直しの経路**を通る。"""
+    """適用の起点を記録した状態。**範囲の巻き戻しの経路**を通る。"""
     import json as _json
     state_path = _state(tmp_path, findings, item_ids=item_ids)
     state = read_state(state_path)
@@ -862,14 +890,15 @@ def _range_env(refactor, monkeypatch, ordered, pick_rc=0):
     return calls
 
 
-def test_abandon_replays_the_items_that_stay(
+def test_abandon_reverts_the_whole_range_of_the_group(
     refactor, tmp_path, env_tmp_dir, monkeypatch
 ):
-    """見送る項目より新しいコミットがあっても競合しないこと。
+    """範囲を新しい順に全て戻すこと。**積み直しは起きない。**
 
-    範囲を新しい順に全て戻してから、残す項目を古い順に積み直す。
+    取り消しの単位が適用ラウンドなので、群の中に残す項目が無い。範囲全体の
+    巻き戻しは履歴の逆再生なので競合しない。
     """
-    state_path = _range_state(tmp_path, [_finding("R1-001")])
+    state_path = _range_state(tmp_path, [])
     env_tmp_dir(state_path)
     # 履歴は R1-002 のコミットが新しい
     calls = _range_env(refactor, monkeypatch, ["sha-R1-002", "sha-R1-001"])
@@ -878,35 +907,42 @@ def test_abandon_replays_the_items_that_stay(
 
     assert [c[-1] for c in calls if c[:2] == ["git", "revert"]] == [
         "sha-R1-002", "sha-R1-001"]
-    assert [c[-1] for c in calls if c[:2] == ["git", "cherry-pick"]] == ["sha-R1-002"]
+    assert [c for c in calls if c[:2] == ["git", "cherry-pick"]] == []
 
     state = read_state(state_path)
-    by_id = {i["item_id"]: i for i in state["items"]}
-    assert by_id["R1-001"]["status"] == "abandoned"
-    assert by_id["R1-002"]["status"] == "reviewing"
-    assert by_id["R1-002"]["commits"] == ["new-sha-R1-002"]
+    assert all(i["status"] == "abandoned" for i in state["items"])
+    assert all(i["reverted"] is True for i in state["items"])
 
 
-def test_abandon_falls_back_to_the_whole_round_on_a_replay_conflict(
+def test_abandon_keeps_an_earlier_group_out_of_the_range(
     refactor, tmp_path, env_tmp_dir, monkeypatch
 ):
-    state_path = _range_state(tmp_path, [_finding("R1-001")])
+    """A4 — 先行の群のコミットは範囲に入らないので、巻き戻しの対象にならない。"""
+    groups = [
+        {"apply_round": 1, "impl": "codex", "items": ["R1-001"],
+         "status": "verified", "base_sha": "BASE", "head_sha": "sha-R1-001",
+         "fix_rounds": 0},
+        {"apply_round": 2, "impl": "agy", "items": ["R1-002"],
+         "status": "applied", "base_sha": "sha-R1-001", "head_sha": None,
+         "fix_rounds": 3},
+    ]
+    state_path = _state(tmp_path, [], groups=groups, apply_round=2,
+                        applied=["R1-002"])
     env_tmp_dir(state_path)
-    calls = _range_env(refactor, monkeypatch, ["sha-R1-002", "sha-R1-001"], pick_rc=1)
+    calls = _range_env(refactor, monkeypatch, ["sha-R1-002"])
 
     refactor.cmd_abandon_items(_args())
 
-    assert ["git", "cherry-pick", "--abort"] in calls
-    state = read_state(state_path)
-    assert all(i["status"] == "abandoned" for i in state["items"])
-    assert sorted(d["item_id"] for d in state["deferred_items"]) == ["R1-001", "R1-002"]
-    assert state["rounds"][0]["drops"][-1]["mode"] == "round"
+    assert [c[-1] for c in calls if c[:2] == ["git", "revert"]] == ["sha-R1-002"]
+    by_id = {i["item_id"]: i for i in read_state(state_path)["items"]}
+    assert by_id["R1-001"]["status"] == "applied"
+    assert "reverted" not in by_id["R1-001"]
 
 
 def test_abandon_marks_pending_push_before_reverting(
     refactor, tmp_path, env_tmp_dir, monkeypatch
 ):
-    state_path = _range_state(tmp_path, [_finding("R1-001")])
+    state_path = _range_state(tmp_path, [])
     env_tmp_dir(state_path)
     marks: list[bool] = []
     _range_env(refactor, monkeypatch, ["sha-R1-002", "sha-R1-001"])
@@ -929,10 +965,10 @@ def test_abandon_saves_the_drop_result_before_pushing(
 ):
     """取り消しの結果を push より先に保存すること。
 
-    保存しないまま落ちると、積み直しで変わった SHA と取り消し済みの印が失われ、
-    次の実行が**履歴に無い SHA を相手に**取り消しをやり直す。
+    保存しないまま落ちると、取り消し済みの印が失われ、次の実行が**履歴に無い
+    SHA を相手に**取り消しをやり直す。
     """
-    state_path = _range_state(tmp_path, [_finding("R1-001")])
+    state_path = _range_state(tmp_path, [])
     env_tmp_dir(state_path)
     _range_env(refactor, monkeypatch, ["sha-R1-002", "sha-R1-001"])
     seen: list[dict] = []
@@ -945,8 +981,7 @@ def test_abandon_saves_the_drop_result_before_pushing(
     assert seen, "push が実行されていない"
     at_push = seen[0]
     by_id = {i["item_id"]: i for i in at_push["items"]}
-    assert by_id["R1-002"]["commits"] == ["new-sha-R1-002"], "SHA の追従が保存前"
-    assert by_id["R1-001"]["reverted"] is True
+    assert all(i["reverted"] is True for i in by_id.values())
     assert at_push["rounds"][0]["pending_drop"] == []
 
 
@@ -957,7 +992,7 @@ def test_abandon_retries_the_drop_before_resending_the_push(
 
     先に push すると、取り消しが途中の HEAD をそのまま公開してしまう。
     """
-    state_path = _range_state(tmp_path, [_finding("R1-001")])
+    state_path = _range_state(tmp_path, [])
     state = read_state(state_path)
     state["rounds"][0]["pending_drop"] = ["R1-001"]
     state["rounds"][0]["pending_push"] = True

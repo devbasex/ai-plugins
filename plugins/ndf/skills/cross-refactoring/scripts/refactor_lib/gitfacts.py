@@ -277,9 +277,12 @@ def collect_commit_facts(
             "diff_lines": commit_diff_lines(work, full),
             "files": commit_files(work, full),
             "touches_tests": commit_touches_tests(work, full),
+            # **テストコマンドが空なら走らせない。** 適用の検証は「適用そのものが
+            # 通ったか」だけを見る。テストの合否は適用ラウンドの単位で
+            # `verify-round` が 1 度だけ実行する（決定 3）。
             "test_status": run_test_at(
                 work, full, test_command, head_branch, test_timeout
-            ),
+            ) if test_command else "skipped",
         })
     return facts
 
@@ -440,6 +443,23 @@ def _replay_commits(work: str, shas: list[str]) -> Optional[dict[str, str]]:
     return mapping
 
 
+def scoped_item_ids(entry: dict[str, Any]) -> list[str]:
+    """取り消しと積み直しの対象になる項目 ID。
+
+    適用ラウンド（群）を持つ状態ファイルでは**進行中の群の項目だけ**を返す。
+    1 件の失敗が群の外の項目を巻き込まないようにするためである（受け入れ条件 A4）。
+    群を持たない状態ファイル（この版より前）は、ラウンド全体を 1 つの群として読む。
+    """
+    groups = entry.get("apply_rounds")
+    if not groups:
+        return list(entry.get("items") or [])
+    current = entry.get("apply_round") or 1
+    for group in groups:
+        if group.get("apply_round") == current:
+            return list(group.get("items") or [])
+    return list(entry.get("items") or [])
+
+
 def _commit_owner(
     work: str, state: dict[str, Any], entry: dict[str, Any]
 ) -> dict[str, str]:
@@ -449,7 +469,7 @@ def _commit_owner(
     積み直しの対象から外すために、**属さないこと**を判定できる形にしておく。
     """
     owner: dict[str, str] = {}
-    for item_id in entry["items"]:
+    for item_id in scoped_item_ids(entry):
         item = _find_item(state, item_id, required=False)
         if item is None:
             continue
@@ -482,7 +502,7 @@ def _drop_replay_plan(
     owner = _commit_owner(work, state, entry)
     drop = set(pending)
     keep_ids = [
-        i for i in entry["items"]
+        i for i in scoped_item_ids(entry)
         if i not in drop
         and not (_find_item(state, i, required=False) or {}).get("reverted")
     ]
@@ -535,8 +555,9 @@ def _record_drop_result(
     mode: str,
 ) -> dict[str, Any]:
     """item の reverted/commits と entry.drops を更新し、結果を返す。"""
-    dropped = list(entry["items"]) if mode == "round" else pending
-    for item_id in entry["items"]:
+    scoped = scoped_item_ids(entry)
+    dropped = list(scoped) if mode == "round" else pending
+    for item_id in scoped:
         item = _find_item(state, item_id, required=False)
         if item is None:
             continue

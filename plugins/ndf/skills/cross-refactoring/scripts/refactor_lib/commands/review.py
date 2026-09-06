@@ -1,20 +1,21 @@
-"""レビューと修正の工程。
+"""検証（テスト）と修正の工程。
 
-`review-targets` / `judge-review` / `should-abandon` / `abandon-items` /
-`merge-fix` を持つ。
+`verify-round` / `should-abandon` / `abandon-items` / `merge-fix` を持つ。
+
+**Step 5 の判定はテストの結果で決まる**（#436 決定 3）。2 CLI のレビューは
+起動しない。判定の単位は適用ラウンドで、失敗を項目までは特定しない。
 """
 from __future__ import annotations
 
 import argparse
 import hashlib
-import json
 import pathlib
 import sys
-from typing import Any, Callable
+from typing import Any
 
 import statefile
 
-from .. import ABORT, die, info
+from .. import die, info
 from ..gitfacts import (
     _discard_impl_leftovers,
     _drop_items,
@@ -24,243 +25,90 @@ from ..gitfacts import (
     _push_head,
     _push_with_retry_marker,
     _read_result,
-    _record_observed_model,
     _reported_shas,
     _revert_item_commits,
     _round,
+    _run_with_timeout,
     _safe_int,
     collect_commit_facts,
     commits_in_range,
     resolved_threads_on_github,
 )
 from ..paths import _load, _result_path, stem_for
-from ..review import (
-    _requested_changes,
-    _unposted_reviewers,
-    judge,
-    unresolved_item_ids,
-)
 from ..verify import verify_commit_granularity, verify_fix_commit
-from ..vocabulary import DEFAULT_TEST_TIMEOUT, MAX_INVALID_REVIEWS
-from .apply import _prepare_fix_phase, _run_drop
+from ..vocabulary import DEFAULT_TEST_TIMEOUT
+from .apply import _phase_after_group, _prepare_fix_phase, _run_drop, current_group
 
 
-def cmd_review_targets(args: argparse.Namespace) -> None:
-    """Step 5 — 次に起動するレビュー担当を返す。
+def cmd_verify_round(args: argparse.Namespace) -> None:
+    """Step 5 — 適用ラウンドの結果を**テストで**検証する。
 
-    **初回と再レビューの区別は状態が持つ。** 呼び出し側は同じコマンドを 2 回呼ぶだけで、
-    どちらかを引数で伝えない。ラウンドの記録に `fix_reviewers` があれば再レビュー、
-    無ければ初回である。**このキーを持たない既存の状態ファイルは初回として読む。**
+    終了コード: 0 = テストが通った / 2 = 落ちた（修正ラウンドへ）。
 
-    差し戻し（`invalid`）はこのキーを書かないため、2 者へ戻る。結果の形が判定に使えない
-    状態は修正の成否とは別で、承認した担当の結果も読めていない可能性がある。
+    **2 CLI のレビューは起動しない**（決定 3）。`--baseline-test` が指す
+    コマンドを作業ディレクトリの HEAD で実行し、その合否で決める。
 
-    終了コード: 0 = 対象を返した / 4（`ABORT`）= ラウンドが無い、または対象が 0 人。
-    """
-    _, state = _load(args.id)
-    entry = _round(state, args.round)
-    targets = entry.get("fix_reviewers")
-    if targets is None:
-        targets = entry["reviewers"]
-    if not targets:
-        die(
-            f"ラウンド {args.round} の再レビューの対象が 0 人です。"
-            "判定できない状態のまま進めません"
-        )
-    print(f"REVIEW_TARGETS='{' '.join(targets)}'")
-    print(f"REVIEW_TARGETS_CSV={','.join(targets)}")
+    **失敗をどの項目に紐づけるかは決めない。** 適用ラウンドの中は 1 コミットで
+    あり、分離しても取り消せない。判定の単位と取り消しの単位を一致させる。
 
-
-def cmd_judge_review(args: argparse.Namespace) -> None:
-    """Step 5 — レビュー担当の判定を取り込む。
-
-    終了コード: 0 = 2 者とも承認 / 2 = 修正へ / 3 = 差し戻して再レビュー。
+    **継続的統合では代替しない。** 手元の未 push のコミットではなく push 済みの
+    先端に対する結果しか読めないためである。代替できるのは Step 7 だけである。
     """
     path, state = _load(args.id)
     entry = _round(state, args.round)
-    reviewers = entry["reviewers"]
-
-    reviews: dict[str, dict[str, Any]] = {}
-    # 鍵には**修正の世代**を含める。1 回修正したあとに同じ指摘文が返ってくることは
-    # 普通にあり、内容だけで見ると「叩き直し」と区別できず、起点も試行番号も
-    # 更新されないまま止まってしまう。
-    digest = hashlib.sha256(f"fix{entry.get('fix_rounds', 0)}:".encode("ascii"))
-    for name in reviewers:
-        result = _result_path(state, name, stem_for(name, "review", state["id"], args.round))
-        digest.update(name.encode("utf-8"))
-        if not result.exists():
-            info(f"⚠ {name} のレビュー結果がありません: {result}")
-            continue
-        digest.update(result.read_bytes())
-        try:
-            reviews[name] = json.loads(result.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as e:
-            info(f"⚠ {name} のレビュー結果が JSON として読めません: {e}")
-        _record_observed_model(entry, "reviewer", name, state, "review", args.round)
-
-    # **投稿の確認は結果ファイルの内容では決まらない。** GitHub 側の状態なので、
-    # 鍵に入れずに判定を再生すると、投稿が見えるようになった後で叩き直しても
-    # 差し戻しを返し続け、進行が止まる。確認の結果まで同じときだけ再生する。
-    unposted, post_problems = _unposted_reviewers(state, reviews, reviewers)
-    digest.update(("unposted:" + ",".join(sorted(unposted))).encode("utf-8"))
-
-    # **同じレビュー結果で叩き直しても、記録も起点も試行番号も動かさない。**
-    # 動かすと、同じ修正結果を別の試行として再処理したり、修正コミットを検証範囲の
-    # 外へ追い出したりできてしまう。前回の終了コードだけを再現する。
-    review_key = digest.hexdigest()
-    for seen in entry.get("review_merged", []):
-        if seen.get("key") == review_key:
-            info(f"↻ このレビュー結果は判定済みです（前回の終了コード {seen['exit']}）")
-            if seen["exit"]:
-                sys.exit(seen["exit"])
-            return
-
-    verdict, problems, record = _aggregate_review_results(
-        entry, reviewers, reviews, post_problems
-    )
-    statefile.save(path, state)
-
-    def _remember(exit_code: int) -> None:
-        entry.setdefault("review_merged", []).append(
-            {"key": review_key, "exit": exit_code}
+    group = current_group(entry)
+    applied = list((entry.get("apply") or {}).get("applied") or [])
+    if not applied:
+        die(
+            f"適用ラウンド {group['apply_round']} に検証する項目がありません。"
+            "先に `merge-apply` を通してください",
+            code=2,
         )
 
-    _handle_review_verdict(
-        path, state, entry, reviewers, reviews, unposted,
-        verdict, problems, record, _remember,
-    )
+    command = (state.get("baseline_test") or {}).get("command") or ""
+    work = str(state["worktrees"]["work"])
+    timeout = _safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT)
+    code, timed_out = _run_with_timeout(command, work, timeout)
+    passed = (not timed_out) and code == 0
 
+    entry.setdefault("verifications", []).append({
+        "apply_round": group["apply_round"],
+        "fix_round": entry.get("fix_rounds", 0),
+        "at": statefile.now(),
+        "command": command,
+        "status": "pass" if passed else "fail",
+        "exit_code": code,
+        "timed_out": timed_out,
+    })
 
-def _handle_review_verdict(
-    path: pathlib.Path,
-    state: dict[str, Any],
-    entry: dict[str, Any],
-    reviewers: list[str],
-    reviews: dict[str, dict[str, Any]],
-    unposted: list[str],
-    verdict: str,
-    problems: list[str],
-    record: dict[str, Any],
-    remember: Callable[[int], None],
-) -> None:
-    if verdict == "invalid":
-        for p in problems:
-            info(f"❌ {p}")
-        # **差し戻しは絞り込みを解く。** 変更要求で絞った後に形式の誤りが出た場合、
-        # 絞ったままだと差し戻しの再レビューが 1 者だけで行われる。結果の形が判定に
-        # 使えない状態は修正の成否とは別である。
-        entry.pop("fix_reviewers", None)
-        entry["invalid_reviews"] = entry.get("invalid_reviews", 0) + 1
-        if entry["invalid_reviews"] > MAX_INVALID_REVIEWS:
-            # **結果が無いことと、形が違うことを分ける。** 結果を残さなかったのは
-            # レビュー担当のプロセスが仕事をしなかったということで、実装担当が
-            # 直せる指摘ではない。変更要求へ落とすと、直しようのない指摘を渡された
-            # 実装担当が空回りし、承認済みの項目まで見送りへ進む。
-            missing = [name for name in reviewers if name not in reviews]
-            # **投稿できなかった担当も同じ扱いにする。** 判定は残っていても
-            # Pull Request に指摘が無い以上、実装担当が読めるものは存在しない。
-            blocked = missing + [name for name in unposted if name not in missing]
-            if blocked:
-                remember(ABORT)
-                statefile.save(path, state)
-                die(
-                    f"レビュー担当 {' / '.join(blocked)} が結果を残せませんでした"
-                    "（結果ファイルの欠落、または投稿の失敗）。"
-                    "実装担当への指摘ではないため、進行を中断します。"
-                    "原因を直して同じコマンド列を叩き直せば再開できます"
-                )
-            # 差し戻しを無限に繰り返さない。形式を満たせないレビューが続く以上、
-            # このラウンドの成果は検証されていないものとして扱い、変更要求へ落とす。
-            # 紐づけ先が決まらないので、取り消しはラウンド全件が対象になる。
-            record["findings"].append({
-                "reviewer": "cross-refactoring",
-                "item_id": None,
-                "thread_id": None,
-                "summary": (
-                    f"レビュー結果の形式が {MAX_INVALID_REVIEWS + 1} 回続けて不正だった: "
-                    + " / ".join(problems)
-                ),
-                "resolved": False,
-            })
-            # 絞り込みは上で解いたままにする。合成した指摘は誰が出したものでもなく、
-            # 再レビューの対象が決まらない。
-            # **この出口も修正フェーズの起点を記録する。** 記録せずに変更要求を
-            # 返すと `merge-fix` が範囲を確定できずに弾かれ、`fix_rounds` が
-            # 進まない。`should-abandon` は `fix_rounds` で見送りを決めるため、
-            # 上限へ永久に到達せず修正と再レビューを往復し続ける。
-            _prepare_fix_phase(state, entry)
-            remember(2)
-            statefile.save(path, state)
-            info("差し戻しの上限に達したため、変更要求として扱います")
-            sys.exit(2)
-        remember(3)
-        statefile.save(path, state)
-        info("レビュー結果を差し戻します。指摘には必ず改善項目 ID を付けてください")
-        sys.exit(3)
-    if verdict == "approved":
-        for item_id in entry["apply"]["applied"]:
+    if passed:
+        for item_id in applied:
             _find_item(state, item_id)["status"] = "done"
-        state["phase"] = "propose"
-        remember(0)
+        group["status"] = "verified"
+        state["phase"] = _phase_after_group(entry)
         statefile.save(path, state)
-        info("✅ レビュー担当 2 者とも承認しました")
+        info(f"✅ 適用ラウンド {group['apply_round']} のテストが通りました（{command}）")
         return
-    # **再レビューの対象を、変更要求を出した担当だけに絞る。** 差し戻し上限からの
-    # 落ちこみでは書かない。合成した指摘は誰が出したものでもなく、対象が決まらない。
-    entry["fix_reviewers"] = _requested_changes(reviewers, reviews)
+
+    # **修正ラウンドの起点をここで記録する。** 記録せずに戻すと `merge-fix` が
+    # 範囲を確定できずに弾かれ、`fix_rounds` が進まない。`should-abandon` は
+    # `fix_rounds` で見送りを決めるため、上限へ永久に到達しなくなる。
     _prepare_fix_phase(state, entry)
-    remember(2)
     statefile.save(path, state)
-    open_findings = sum(1 for f in record["findings"] if not f["resolved"])
-    info(f"変更要求があります（未解決の指摘 {open_findings} 件）")
+    if timed_out:
+        info(f"❌ テストが {timeout} 秒で終わりませんでした（{command}）")
+    else:
+        info(f"❌ テストが失敗しました（{command} / 終了コード {code}）")
     sys.exit(2)
 
 
-def _aggregate_review_results(
-    entry: dict[str, Any],
-    reviewers: list[str],
-    reviews: dict[str, dict[str, Any]],
-    post_problems: list[str],
-) -> tuple[str, list[str], dict[str, Any]]:
-    verdict, problems = judge(reviews, reviewers, entry["items"])
-    if post_problems:
-        verdict = "invalid"
-        problems = problems + post_problems
-
-    # 記録も**型検査済みの値だけ**で作る。`judge()` が invalid と判定した入力でも
-    # ここを通るため、無条件に `.get()` を呼ぶと差し戻す前に落ちる。
-    record: dict[str, Any] = {"round": len(entry["reviews"]) + 1, "findings": []}
-    for name in reviewers:
-        review = reviews.get(name)
-        review = review if isinstance(review, dict) else {}
-        record[name] = review.get("verdict")
-        findings = review.get("findings")
-        for finding in findings if isinstance(findings, list) else []:
-            if not isinstance(finding, dict):
-                continue
-            record["findings"].append({
-                "reviewer": name,
-                "item_id": finding.get("item_id"),
-                "thread_id": finding.get("thread_id"),
-                "summary": finding.get("summary"),
-                "resolved": bool(finding.get("resolved")),
-            })
-    entry["reviews"].append(record)
-    # レビュー担当ごとの所要時間は**別々に**持つ。ラウンドの合計を各担当へ配ると、
-    # 2 者分を両方に数えることになり、担当同士の比較が成り立たない。
-    per_reviewer = entry.setdefault("reviewer_seconds", {})
-    for name in reviewers:
-        review = reviews.get(name)
-        elapsed = review.get("elapsed_seconds") if isinstance(review, dict) else 0
-        per_reviewer[name] = per_reviewer.get(name, 0) + _safe_int(elapsed)
-    entry.setdefault("durations", {})["review"] = sum(per_reviewer.values())
-    return verdict, problems, record
-
-
 def cmd_should_abandon(args: argparse.Namespace) -> None:
-    """Step 6 — 修正ラウンドの上限に達したか。
+    """Step 6 — この適用ラウンドの修正の上限に達したか。
 
     終了コード: 0 = 見送りへ移る / 2 = まだ修正できる。
+
+    `--max-fix-rounds` は**1 つの適用ラウンドあたり**の上限である。数え直しは
+    `next-apply-round` が群を開くときに行う。
     """
     _, state = _load(args.id)
     entry = _round(state, args.round)
@@ -273,13 +121,15 @@ def cmd_should_abandon(args: argparse.Namespace) -> None:
 
 
 def cmd_abandon_items(args: argparse.Namespace) -> None:
-    """Step 6 — 未解決の指摘に紐づく改善項目だけを取り消す。
+    """Step 6 — テストが通らなかった適用ラウンドを取り消す。
 
-    **合意済みの項目は Pull Request に残す。** これを可能にするために、適用は
-    項目ごとに 1 コミットへまとめ、状態ファイルへコミットを記録している。
+    **取り消しの単位は適用ラウンドである**（決定 2）。群の中は 1 コミットなので、
+    どの項目が落としたのかを特定しても分離して取り消せない。**他の群には及ばない**
+    （受け入れ条件 A4）。既に検証を通った群は Pull Request に残る。
     """
     path, state = _load(args.id)
     entry = _round(state, args.round)
+    group = current_group(entry)
     if not args.dry_run:
         # **やり残した取り消しを push の再送より先に片づける。** 先に push すると、
         # 取り消しが途中の HEAD をそのまま Pull Request へ反映してしまう。
@@ -290,20 +140,16 @@ def cmd_abandon_items(args: argparse.Namespace) -> None:
             _flush_pending_push(path, state, entry)
 
     # 取り消し自体は `reverted` で冪等だが、見送りの記録は重複しうる。
-    if entry.get("abandoned") is not None:
-        info(f"↻ ラウンド {args.round} の見送りは処理済みです"
-             f"（{len(entry['abandoned'])} 件）")
+    if group.get("abandoned") is not None:
+        info(f"↻ 適用ラウンド {group['apply_round']} の見送りは処理済みです"
+             f"（{len(group['abandoned'])} 件）")
         return
 
-    targets, whole_round = unresolved_item_ids(entry["reviews"], entry["apply"]["applied"])
-    if whole_round:
-        info(
-            "どの項目にも紐づかない未解決の指摘があるため、"
-            "このラウンドで適用した項目を全件取り消します"
-        )
+    targets = list((entry.get("apply") or {}).get("applied") or [])
     if not targets:
         info("取り消す項目はありません")
         if not args.dry_run:
+            group["abandoned"] = []
             entry["abandoned"] = []
             statefile.save(path, state)
         return
@@ -313,31 +159,34 @@ def cmd_abandon_items(args: argparse.Namespace) -> None:
         info("（dry-run）状態ファイルは更新していません")
         return
 
-    result = _run_drop(path, state, entry, targets)
-    if result["mode"] == "round":
-        info("積み直せなかったため、このラウンドで適用した項目を全件見送ります")
-        targets = list(entry["apply"].get("applied") or targets)
+    _run_drop(path, state, entry, targets)
 
     already = {d.get("item_id") for d in state["deferred_items"]}
     for item_id in targets:
         item = _find_item(state, item_id)
         item["status"] = "abandoned"
-        item.setdefault("failure_reason", "修正ラウンドの上限に達しても指摘が解決しなかった")
+        item.setdefault(
+            "failure_reason", "修正ラウンドの上限に達してもテストが通らなかった")
         if item_id in already:
             continue
         state["deferred_items"].append({
             "item_id": item_id,
             "path": item["path"], "symbol": item["symbol"], "smell": item["smell"],
-            "round": entry["round"],
+            "round": item.get("round"),
             "defer_reason": item["failure_reason"],
         })
         info(f"↩ {item_id} を見送りました")
 
     # 見送りの記録と印の解除を**同じ保存で**行う。保存してから push するので、
     # push が失敗しても記録とローカルの git が食い違わない。
+    group["abandoned"] = targets
+    group["status"] = "dropped"
     entry["abandoned"] = targets
     entry["pending_drop"] = []
-    state["phase"] = "propose"
+    entry["apply_base_sha"] = _git_out(
+        state["worktrees"]["work"], ["rev-parse", "HEAD"])
+    group["base_sha"] = entry["apply_base_sha"]
+    state["phase"] = _phase_after_group(entry)
     statefile.save(path, state)
     _push_head(state)
     entry["pending_push"] = False

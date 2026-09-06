@@ -96,14 +96,20 @@ def _verify_commit_basics(
     commit: dict[str, Any],
     scope: Optional[Iterable[str]],
     missing_reason: str,
+    check_test: bool = True,
 ) -> Optional[str]:
     """コミット 1 件が手順を満たしているかを検証する。問題があれば理由を返す。
 
-    適用（`verify_apply_item`）と修正（`verify_fix_commit`）で**同じ基準**を使う。
+    適用（`verify_apply_round`）と修正（`verify_fix_commit`）で**同じ基準**を使う。
     片方だけ直されると基準が食い違い、緩い側から手順を外れた変更が入る。
 
     実体が無いときの理由文だけは呼び出し側から渡す。範囲の呼び方が適用
     （base..head）と修正（修正ラウンドの範囲）で違うためである。
+
+    **適用ではテストの合否を見ない**（`check_test=False`）。適用そのものが
+    通らないことと、テストが落ちることは扱いが違う。前者はその群を取り消し、
+    後者は修正ラウンドを回す。テストは `verify-round` が適用ラウンドの単位で
+    1 度だけ実行する（決定 3）。
     """
     if not commit.get("exists", True):
         return missing_reason
@@ -113,7 +119,7 @@ def _verify_commit_basics(
     problem = verify_scope(commit, scope or [])
     if problem:
         return problem
-    if commit.get("test_status") != "pass":
+    if check_test and commit.get("test_status") != "pass":
         return (
             f"コミット {commit.get('sha', '?')} でテストが成功していません "
             f"({commit.get('test_status')})"
@@ -146,18 +152,26 @@ def diff_budget_factor(technique: Optional[str]) -> int:
     return DIFF_BUDGET_FACTOR
 
 
-def verify_apply_item(
-    item: dict[str, Any], facts: list[dict[str, Any]],
+def verify_apply_round(
+    items: list[dict[str, Any]], facts: list[dict[str, Any]],
     scope: Optional[Iterable[str]] = None,
 ) -> Optional[str]:
-    """1 項目の適用結果を検証する。問題があれば失敗理由を返す。
+    """適用ラウンド 1 つ分の適用結果を検証する。問題があれば失敗理由を返す。
 
-    `facts` は `collect_commit_facts()` が git と実際のテスト実行から作る。
-    振る舞い不変そのものは機械的に確かめられないが、**手順が守られたかは結果から
-    確かめられる**。読ませ方の不確実性に対する最後の砦としてここを厚くする。
+    **判定の単位は適用ラウンドである**（決定 3）。群の中は 1 コミットであり、
+    分離しても取り消せないため、**失敗を項目までは特定しない**。1 件の失敗は
+    群の全件を巻き込む（「群の中の道連れ」）。分離を細かくしたい利用者は
+    `--max-items-per-round` を下げる。
+
+    `facts` は `collect_commit_facts()` が git から作る。振る舞い不変そのものは
+    ここでは確かめない（テストは `verify-round` が実行する）が、**手順が守られたかは
+    結果から確かめられる**。
     """
     if not facts:
-        return "コミットが 1 件もありません（1 改善項目 = 1 コミットの前提を満たしていません）"
+        return (
+            "コミットが 1 件もありません"
+            "（適用ラウンド = 1 コミットの前提を満たしていません）"
+        )
 
     for commit in facts:
         problem = _verify_commit_basics(
@@ -165,29 +179,25 @@ def verify_apply_item(
             scope,
             f"コミット {commit.get('sha', '?')} が base..head の範囲にありません"
             "（申告だけで実体がありません）",
+            check_test=False,
         )
         if problem:
             return problem
-        item_id = (commit.get("trailers") or {}).get("Item-Id")
-        if item_id != item["item_id"]:
-            return (
-                f"コミット {commit.get('sha', '?')} の Item-Id が {item_id} で、"
-                f"項目 {item['item_id']} と一致しません"
-                "（複数の項目を 1 コミットにまとめると取り消し範囲が決まりません）"
-            )
 
-    if item.get("test_gap"):
+    if any(i.get("test_gap") for i in items):
         # テストが乏しいと申告された項目は、現状固定テストの追加が先行していること。
-        # 実測では同じ課題で固定テストの追加数が 17 本 / 1 メソッド / 0 本と揃わなかった。
         # 「テストを足した」かどうかは、そのコミットがテストの置き場所を触ったかで見る。
         if not facts[0].get("touches_tests"):
             return (
-                "テストが乏しい項目なのに、現状固定テストの追加コミットが先行していません"
+                "テストが乏しい項目を含むのに、現状固定テストの追加が伴っていません"
                 f"（先頭コミット {facts[0].get('sha', '?')} がテストを触っていません）"
             )
 
-    estimated = _safe_int(item.get("estimated_diff_lines"))
-    factor = diff_budget_factor(item.get("technique"))
+    estimated = sum(_safe_int(i.get("estimated_diff_lines")) for i in items)
+    factor = max(
+        (diff_budget_factor(i.get("technique")) for i in items),
+        default=DIFF_BUDGET_FACTOR,
+    )
     budget = estimated * factor
     actual = sum(int(c.get("diff_lines") or 0) for c in facts)
     if budget and actual > budget:
@@ -196,12 +206,16 @@ def verify_apply_item(
             f"（見積 {estimated} 行 × {factor}）を超えました（範囲の逸脱）"
         )
 
-    # 粒度は最後に見る。トレーラーやテストの問題を粒度の失敗で覆い隠さない。
-    # 数えるのは**実在するコミットの数**である。同じコミットを重ねて申告しただけの
-    # ときに落とすと、食い違いの無い申告を刻みすぎとして扱ってしまう。
-    problem = verify_commit_granularity(item, len({c.get("sha") for c in facts}))
-    if problem:
-        return problem
+    # 粒度は最後に見る。トレーラーや範囲の問題を粒度の失敗で覆い隠さない。
+    # 数えるのは**実在するコミットの数**である。同じコミットを群の全項目が
+    # 申告するのは正しい形なので、重ねた申告では落とさない。
+    count = len({c.get("sha") for c in facts})
+    if count > 1:
+        return (
+            f"適用ラウンドのコミットが {count} 件あります"
+            "（残すのは適用ラウンド = 1 コミット。"
+            "群の中の項目はまとめて 1 つのコミットにします）"
+        )
     return None
 
 
@@ -215,8 +229,8 @@ def commit_limit_for(item: dict[str, Any]) -> int:
 def verify_commit_granularity(item: dict[str, Any], count: int) -> Optional[str]:
     """項目のコミット数が上限に収まっているか。超えていれば理由を返す。
 
-    適用（`verify_apply_item`）と修正（`_verify_fix_commits`）で**同じ基準**を使う。
-    適用側だけ揃えると、レビュー指摘への対応という名目で刻んだ履歴が戻ってくる。
+    修正コミットが項目ごとに刻まれていないかを見る（`_verify_fix_commits`）。
+    適用の側は適用ラウンドの単位で数えるため、この関数は通らない。
     """
     limit = commit_limit_for(item)
     if count <= limit:

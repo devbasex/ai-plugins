@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import json
 import pathlib
 import subprocess
 
@@ -64,7 +65,7 @@ def test_blank_trailer_value_fails(refactor):
 def test_item_fails_when_trailer_missing(refactor):
     t = trailers()
     del t["Impl-Model"]
-    problem = refactor.verify_apply_item(item(), [fact(trailers=t)])
+    problem = refactor.verify_apply_round([item()], [fact(trailers=t)])
     assert problem is not None and "Impl-Model" in problem
 
 
@@ -72,82 +73,102 @@ def test_item_fails_when_trailer_missing(refactor):
 
 def test_commit_that_does_not_exist_fails(refactor):
     """申告だけで実体が無いコミットを通さない。"""
-    problem = refactor.verify_apply_item(item(), [{"sha": "ghost", "exists": False}])
+    problem = refactor.verify_apply_round([item()], [{"sha": "ghost", "exists": False}])
     assert problem is not None and "範囲にありません" in problem
 
 
-# ---------- 1 改善項目 = 1 コミット ----------
+# ---------- 適用ラウンド = 1 コミット ----------
 
 def test_zero_commits_fails(refactor):
-    problem = refactor.verify_apply_item(item(), [])
+    problem = refactor.verify_apply_round([item()], [])
     assert problem is not None and "コミットが 1 件も" in problem
 
 
-def test_commit_belonging_to_another_item_fails(refactor):
-    """複数の項目を 1 コミットにまとめると、取り消し範囲が項目単位で決まらない。"""
-    problem = refactor.verify_apply_item(
-        item(), [fact(trailers=trailers(item_id="R1-002"))]
-    )
-    assert problem is not None and "Item-Id" in problem
+def test_every_item_of_the_group_claims_the_same_commit(refactor):
+    """群の項目は 1 つのコミットを共有する。**同じ SHA の申告は誤りではない。**
+
+    取り消しの単位は適用ラウンドなので、項目ごとにコミットを分ける理由が無い。
+    """
+    items = [item(item_id="R1-001"), item(item_id="R1-002", symbol="Foo.other")]
+    assert refactor.verify_apply_round(items, [fact()]) is None
 
 
-def test_failed_test_on_any_commit_fails(refactor):
-    problem = refactor.verify_apply_item(
-        item(), [fact(), fact(sha="def5678", test_status="fail")]
-    )
-    assert problem is not None and "テストが成功していません" in problem
+def test_the_apply_check_leaves_the_test_result_to_verify_round(refactor):
+    """テストの合否は適用の検証では見ない（決定 3）。
+
+    適用そのものが通らないことと、テストが落ちることは扱いが違う。前者はその群を
+    取り消し、後者は修正ラウンドを回す。
+    """
+    assert refactor.verify_apply_round([item()], [fact(test_status="fail")]) is None
 
 
 # ---------- 現状固定テストの先行 ----------
 
-def test_test_gap_requires_characterization_test_first(refactor):
-    problem = refactor.verify_apply_item(item(test_gap=True), [fact()])
+def test_test_gap_requires_the_characterization_test(refactor):
+    problem = refactor.verify_apply_round([item(test_gap=True)], [fact()])
     assert problem is not None and "現状固定テスト" in problem
 
 
-def test_test_gap_passes_when_characterization_test_leads(refactor):
-    facts = [fact(sha="aaa", touches_tests=True), fact(sha="bbb")]
-    assert refactor.verify_apply_item(item(test_gap=True), facts) is None
+def test_test_gap_passes_when_the_commit_touches_tests(refactor):
+    assert refactor.verify_apply_round(
+        [item(test_gap=True)], [fact(touches_tests=True)]
+    ) is None
 
 
 def test_no_test_gap_does_not_require_characterization_test(refactor):
-    assert refactor.verify_apply_item(item(test_gap=False), [fact()]) is None
+    assert refactor.verify_apply_round([item(test_gap=False)], [fact()]) is None
 
 
 # ---------- 差分予算 ----------
 
 def test_diff_within_budget_passes(refactor):
-    assert refactor.verify_apply_item(
-        item(technique="rename", estimated_diff_lines=40), [fact(diff_lines=80)]
+    assert refactor.verify_apply_round(
+        [item(technique="rename", estimated_diff_lines=40)], [fact(diff_lines=80)]
     ) is None
 
 
 def test_diff_over_budget_fails(refactor):
-    problem = refactor.verify_apply_item(
-        item(technique="rename", estimated_diff_lines=40), [fact(diff_lines=81)]
+    problem = refactor.verify_apply_round(
+        [item(technique="rename", estimated_diff_lines=40)], [fact(diff_lines=81)]
     )
     assert problem is not None and "差分予算" in problem
 
 
-def test_diff_lines_are_summed_across_commits(refactor):
-    problem = refactor.verify_apply_item(
-        item(technique="rename", estimated_diff_lines=40),
-        [fact(sha="a", diff_lines=50), fact(sha="b", diff_lines=50)],
+def test_diff_lines_are_summed_over_the_group(refactor):
+    """予算は群の見積の合計で見る。判定の単位が適用ラウンドだからである。"""
+    problem = refactor.verify_apply_round(
+        [item(technique="rename", estimated_diff_lines=40),
+         item(item_id="R1-002", technique="rename", estimated_diff_lines=10)],
+        [fact(diff_lines=101)],
     )
-    assert problem is not None and "100 行" in problem
+    assert problem is not None and "見積 50 行 × 2" in problem
+
+
+def test_the_widest_factor_of_the_group_applies(refactor):
+    """抽出系を 1 件でも含む群は、広い方の倍率で見る。
+
+    固定費（呼び出し側の書き換え・import・引数の受け渡し）が乗るのは抽出系で
+    あり、群の中の 1 件でもそれを含めば差分はその分だけ膨らむ。
+    """
+    assert refactor.verify_apply_round(
+        [item(technique="rename", estimated_diff_lines=20),
+         item(item_id="R1-002", technique="extract_method",
+              estimated_diff_lines=20)],
+        [fact(diff_lines=120)],
+    ) is None
 
 
 def test_zero_estimate_disables_budget_check(refactor):
     """見積り 0 は「見積れなかった」を意味する。予算 0 で必ず落とす方が害が大きい。"""
-    assert refactor.verify_apply_item(
-        item(estimated_diff_lines=0), [fact(diff_lines=500)]
+    assert refactor.verify_apply_round(
+        [item(estimated_diff_lines=0)], [fact(diff_lines=500)]
     ) is None
 
 
 def test_the_budget_message_shows_the_estimate_and_the_factor(refactor):
     """どの倍率で落ちたかを読めるようにする。倍率が手法で変わるため。"""
-    problem = refactor.verify_apply_item(
-        item(technique="rename", estimated_diff_lines=40), [fact(diff_lines=200)]
+    problem = refactor.verify_apply_round(
+        [item(technique="rename", estimated_diff_lines=40)], [fact(diff_lines=200)]
     )
     assert "見積 40 行 × 2" in problem
 
@@ -164,14 +185,14 @@ EXTRACTIONS = [
 @pytest.mark.parametrize("technique", EXTRACTIONS)
 def test_extraction_techniques_get_a_wider_budget(refactor, technique):
     """呼び出し側の書き換え・import・引数の受け渡しが固定費として乗るため。"""
-    assert refactor.verify_apply_item(
-        item(technique=technique, estimated_diff_lines=40), [fact(diff_lines=120)]
+    assert refactor.verify_apply_round(
+        [item(technique=technique, estimated_diff_lines=40)], [fact(diff_lines=120)]
     ) is None
 
 
 def test_extraction_over_the_wider_budget_still_fails(refactor):
-    problem = refactor.verify_apply_item(
-        item(technique="extract_method", estimated_diff_lines=40),
+    problem = refactor.verify_apply_round(
+        [item(technique="extract_method", estimated_diff_lines=40)],
         [fact(diff_lines=121)],
     )
     assert problem is not None and "見積 40 行 × 3" in problem
@@ -186,15 +207,15 @@ def test_the_measured_overruns_are_no_longer_rejected(refactor, actual, estimate
     いずれも範囲の逸脱ではなく、適用そのものは成立していた。倍率 2 の予算を
     わずかに超えただけで、ラウンドの成果を捨てていた。
     """
-    assert refactor.verify_apply_item(
-        item(estimated_diff_lines=estimated), [fact(diff_lines=actual)]
+    assert refactor.verify_apply_round(
+        [item(estimated_diff_lines=estimated)], [fact(diff_lines=actual)]
     ) is None
 
 
 def test_a_scope_escape_still_fails_for_extraction(refactor):
     """範囲外の 3 系統を触った実測例（見積の 4 倍）は、抽出系でも落ちること。"""
-    problem = refactor.verify_apply_item(
-        item(technique="extract_method", estimated_diff_lines=40),
+    problem = refactor.verify_apply_round(
+        [item(technique="extract_method", estimated_diff_lines=40)],
         [fact(diff_lines=160)],
     )
     assert problem is not None and "差分予算" in problem
@@ -328,7 +349,17 @@ def test_collect_facts_marks_out_of_range_sha_as_missing(refactor, monkeypatch):
 
 # ---------- サブコマンド ----------
 
-def _state_with_items(tmp_path, items, **over):
+def _state_with_items(tmp_path, items, rounds_override=None, apply_round=None, **over):
+    """1 提案ラウンド分の状態を組み立てる。
+
+    `rounds_override` を渡さないときは、全項目が 1 つの適用ラウンドへ入る。
+    """
+    groups = rounds_override or [{
+        "apply_round": 1, "impl": "codex",
+        "impl_model": {"requested": "gpt-5.5", "observed": None},
+        "items": [i["item_id"] for i in items],
+        "status": "pending", "base_sha": None, "head_sha": None, "fix_rounds": 0,
+    }]
     return make_state(
         tmp_path,
         items=items,
@@ -339,6 +370,8 @@ def _state_with_items(tmp_path, items, **over):
                                 "kiro": {"requested": None, "observed": None}},
             "proposed": {}, "merged": 2, "adopted": len(items), "deferred": 0,
             "items": [i["item_id"] for i in items],
+            "apply_rounds": groups,
+            "apply_round": apply_round or 1,
             "apply": {"applied": [], "failed": []}, "fix_rounds": 0,
             "durations": {}, "reviews": [],
         }],
@@ -368,10 +401,14 @@ def git_facts(refactor, monkeypatch):
     return _set
 
 
-def test_partial_failure_keeps_the_rest(
+def test_one_failure_takes_the_whole_apply_round(
     refactor, tmp_path, env_tmp_dir, no_git, git_facts
 ):
-    """1 件の失敗でラウンドを止めず、失敗した項目だけを見送りにする。"""
+    """**群の中の道連れ。** 1 件の失敗が群の全件を取り消す（決定 2）。
+
+    群の中は 1 コミットなので、失敗を項目まで特定しても分離して取り消せない。
+    分離を細かくしたい利用者は `--max-items-per-round` を下げる。
+    """
     items = [item(item_id="R1-001"), item(item_id="R1-002")]
     state_path = _state_with_items(tmp_path, items)
     env_tmp_dir(state_path)
@@ -380,17 +417,43 @@ def test_partial_failure_keeps_the_rest(
         "base_sha": "aaa", "elapsed_seconds": 100,
         "items": [
             {"item_id": "R1-001", "commits": [{"sha": "ok111"}]},
+            # 申告の無い項目。適用されたことを確かめる手がかりが無い
             {"item_id": "R1-002", "commits": []},
+        ],
+    })
+    with pytest.raises(SystemExit) as e:
+        refactor.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+        )
+    assert e.value.code == 2
+
+    state = read_state(state_path)
+    assert state["rounds"][0]["apply"]["applied"] == []
+    assert state["rounds"][0]["apply"]["failed"] == ["R1-001", "R1-002"]
+    assert all(i["status"] == "abandoned" for i in state["items"])
+
+
+def test_a_verified_apply_round_marks_every_item_applied(
+    refactor, tmp_path, env_tmp_dir, no_git, git_facts
+):
+    """群の全項目が同じ 1 コミットを申告すれば通る（決定 2）。"""
+    items = [item(item_id="R1-001"), item(item_id="R1-002")]
+    state_path = _state_with_items(tmp_path, items)
+    env_tmp_dir(state_path)
+    git_facts({"ok111": fact(sha="ok111")})
+    write_result(state_path, "codex-apply-r1", {
+        "base_sha": "aaa", "elapsed_seconds": 100,
+        "items": [
+            {"item_id": "R1-001", "commits": [{"sha": "ok111"}]},
+            {"item_id": "R1-002", "commits": [{"sha": "ok111"}]},
         ],
     })
     refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
 
     state = read_state(state_path)
-    assert state["rounds"][0]["apply"]["applied"] == ["R1-001"]
-    assert state["rounds"][0]["apply"]["failed"] == ["R1-002"]
-    assert state["items"][0]["status"] == "reviewing"
-    assert state["items"][1]["status"] == "abandoned"
-    assert state["phase"] == "review"
+    assert state["rounds"][0]["apply"]["applied"] == ["R1-001", "R1-002"]
+    assert all(i["status"] == "applied" for i in state["items"])
+    assert state["phase"] == "verify", "次はテストによる検証へ進む"
 
 
 def test_all_failed_exits_2(refactor, tmp_path, env_tmp_dir, no_git, git_facts):
@@ -427,16 +490,18 @@ def test_missing_item_in_result_is_a_failure(
 def test_self_reported_values_cannot_pass_the_check(
     refactor, tmp_path, env_tmp_dir, no_git, git_facts
 ):
-    """結果ファイルに「テストは通った」と書いても、git 側の事実で落ちること。"""
+    """結果ファイルに「トレーラーは揃っている」と書いても、git 側の事実で落ちること。"""
     items = [item(item_id="R1-001")]
     state_path = _state_with_items(tmp_path, items)
     env_tmp_dir(state_path)
-    git_facts({"bad111": fact(sha="bad111", test_status="fail")})
+    broken = trailers()
+    del broken["Impl-Model"]
+    git_facts({"bad111": fact(sha="bad111", trailers=broken)})
     write_result(state_path, "codex-apply-r1", {
         "base_sha": "aaa",
         "items": [{
             "item_id": "R1-001", "diff_lines": 1,
-            # 申告は「通った」。git 側の事実は fail
+            # 申告は「揃っている」。git 側の事実は欠けている
             "commits": [{"sha": "bad111", "test_status": "pass",
                          "characterization_test": True,
                          "trailers": trailers()}],
@@ -448,7 +513,7 @@ def test_self_reported_values_cannot_pass_the_check(
         )
     state = read_state(state_path)
     assert state["items"][0]["status"] == "abandoned"
-    assert "テストが成功していません" in state["items"][0]["failure_reason"]
+    assert "トレーラーが欠けています" in state["items"][0]["failure_reason"]
 
 
 def _drop_env(refactor, monkeypatch, revert_rc=0, pick_rc=0, sync_dirty=False,
@@ -510,88 +575,104 @@ def _drop_env(refactor, monkeypatch, revert_rc=0, pick_rc=0, sync_dirty=False,
 
 
 def _two_item_apply(tmp_path, env_tmp_dir, git_facts):
-    """1 件成功・1 件失敗の適用結果を用意する。失敗するのは R1-002。"""
+    """**群ごと失敗する**適用結果を用意する。
+
+    群の中は 1 コミットなので、範囲に 2 コミットあるだけで群の全件が失敗する。
+    履歴は bad222 が最も新しい。
+    """
     items = [item(item_id="R1-001"), item(item_id="R1-002")]
     state_path = _state_with_items(tmp_path, items)
     env_tmp_dir(state_path)
     git_facts(
         {
             "ok111": fact(sha="ok111"),
-            "bad111": fact(sha="bad111", diff_lines=400,
-                           trailers=trailers(item_id="R1-002")),
-            "bad222": fact(sha="bad222", diff_lines=400,
-                           trailers=trailers(item_id="R1-002")),
+            "bad222": fact(sha="bad222", diff_lines=40),
         },
-        # 履歴は bad222 が最も新しい
-        in_range=["bad222", "bad111", "ok111"],
+        in_range=["bad222", "ok111"],
     )
+    claimed = [{"sha": "ok111"}, {"sha": "bad222"}]
     write_result(state_path, "codex-apply-r1", {
         "base_sha": "aaa",
         "items": [
-            {"item_id": "R1-001", "commits": [{"sha": "ok111"}]},
-            # 差分予算を超えた項目。コミットは既に push されている
-            {"item_id": "R1-002", "commits": [{"sha": "bad111"}, {"sha": "bad222"}]},
+            {"item_id": "R1-001", "commits": list(claimed)},
+            {"item_id": "R1-002", "commits": list(claimed)},
         ],
     })
     return state_path
 
 
-def test_dropping_an_item_replays_the_kept_items(
+def test_a_failed_apply_round_reverts_its_whole_range(
     refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
 ):
-    """範囲を新しい順に全て戻し、残す項目を古い順に積み直すこと。
+    """範囲を新しい順に全て戻すこと。**積み直しは起きない。**
 
-    失敗した項目のコミット**だけ**を戻すと、あとから同じ箇所を触った別項目の
-    コミットと必ず競合する。範囲全体の巻き戻しは履歴の逆再生なので競合しない。
+    取り消しの単位が適用ラウンドなので、残す項目が無い。範囲全体の巻き戻しは
+    履歴の逆再生なので競合しない。
     """
     state_path = _two_item_apply(tmp_path, env_tmp_dir, git_facts)
     calls, pushes = _drop_env(refactor, monkeypatch)
-
-    refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
-
-    reverts = [c[-1] for c in calls if c[:2] == ["git", "revert"]]
-    picks = [c[-1] for c in calls if c[:2] == ["git", "cherry-pick"]]
-    assert reverts == ["bad222", "bad111", "ok111"], "範囲を新しい順に全て戻していない"
-    assert picks == ["ok111"], "残す項目だけを積み直していない"
-    assert pushes, "取り消し後に push していない"
-    for cmd in pushes:
-        assert "--force" not in cmd and "--no-verify" not in cmd
-
-    state = read_state(state_path)
-    by_id = {i["item_id"]: i for i in state["items"]}
-    assert by_id["R1-001"]["status"] == "reviewing"
-    assert by_id["R1-002"]["status"] == "abandoned"
-    assert by_id["R1-002"]["reverted"] is True
-    # 積み直しで SHA が変わるので、記録も追従すること
-    assert by_id["R1-001"]["commits"] == ["new-ok111"]
-
-
-def test_replay_conflict_falls_back_to_whole_round(
-    refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
-):
-    """積み直せないときはラウンド全件の取り消しへ退避すること。
-
-    どの項目を残せるか決められない以上、半端な履歴を残すより全件捨てる方が安全。
-    """
-    state_path = _two_item_apply(tmp_path, env_tmp_dir, git_facts)
-    calls, _ = _drop_env(refactor, monkeypatch, pick_rc=1)
 
     with pytest.raises(SystemExit) as e:
         refactor.cmd_merge_apply(
             type("A", (), {"id": 130, "round": 1, "dry_run": False})()
         )
-    assert e.value.code == 2, "全件失敗として次の提案ラウンドへ進むこと"
+    assert e.value.code == 2
 
-    assert ["git", "cherry-pick", "--abort"] in calls
-    # 取り消しが済んだ地点へ戻すだけ。着手前まで戻して取り消しをやり直すと、
-    # 同じ範囲の revert コミットが 2 組できて履歴が汚れる
-    assert ["git", "reset", "--hard", "REVERTED_HEAD"] in calls
     reverts = [c[-1] for c in calls if c[:2] == ["git", "revert"]]
-    assert reverts == ["bad222", "bad111", "ok111"], "取り消しを 2 度走らせている"
+    picks = [c[-1] for c in calls if c[:2] == ["git", "cherry-pick"]]
+    assert reverts == ["bad222", "ok111"], "範囲を新しい順に全て戻していない"
+    assert picks == [], "取り消しの単位が適用ラウンドなら積み直す対象は無い"
+    assert pushes, "取り消し後に push していない"
+    for cmd in pushes:
+        assert "--force" not in cmd and "--no-verify" not in cmd
+
     state = read_state(state_path)
     assert all(i["status"] == "abandoned" for i in state["items"])
     assert state["rounds"][0]["apply"]["applied"] == []
-    assert state["rounds"][0]["drops"][-1]["mode"] == "round"
+
+
+def test_a_failed_apply_round_leaves_the_other_groups_alone(
+    refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
+):
+    """A4 — 1 件の失敗が、その適用ラウンドの外の項目を取り消さない。"""
+    items = [item(item_id="R1-001", path="src/a.py"),
+             item(item_id="R1-002", path="src/a.py")]
+    state_path = _state_with_items(
+        tmp_path, items,
+        rounds_override=[{
+            "apply_round": 1, "impl": "codex", "items": ["R1-001"],
+            "status": "verified", "base_sha": "base0", "head_sha": "ok111",
+            "fix_rounds": 0,
+        }, {
+            "apply_round": 2, "impl": "agy", "items": ["R1-002"],
+            "status": "pending", "base_sha": "ok111", "head_sha": None,
+            "fix_rounds": 0,
+        }],
+        apply_round=2,
+    )
+    env_tmp_dir(state_path)
+    # 先に適用済みの群は既に検証を通っている
+    state = read_state(state_path)
+    state["items"][0]["status"] = "done"
+    state["items"][0]["commits"] = ["ok111"]
+    state_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+
+    git_facts({"bad222": fact(sha="bad222", files=["dist/x.py"])},
+              in_range=["bad222"])
+    write_result(state_path, "agy-apply-r1", {
+        "items": [{"item_id": "R1-002", "commits": [{"sha": "bad222"}]}],
+    })
+    _drop_env(refactor, monkeypatch)
+
+    with pytest.raises(SystemExit) as e:
+        refactor.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+        )
+    assert e.value.code == 2
+
+    by_id = {i["item_id"]: i for i in read_state(state_path)["items"]}
+    assert by_id["R1-001"]["status"] == "done", "他の群を巻き込んでいる"
+    assert by_id["R1-002"]["status"] == "abandoned"
 
 
 def test_revert_failure_aborts_with_the_abort_code(
@@ -636,8 +717,7 @@ def test_progress_is_recorded_before_reverting(
         )
 
     assert seen, "取り消しが走っていない"
-    recorded = {p["item_id"]: p["result"] for p in seen[0]}
-    assert recorded == {"R1-001": "ok", "R1-002": "failed"}
+    assert [(p["apply_round"], p["result"]) for p in seen[0]] == [(1, "failed")]
 
 
 def test_pending_push_is_marked_before_reverting(
@@ -672,7 +752,10 @@ def test_pending_push_is_cleared_after_a_successful_push(
 ):
     state_path = _two_item_apply(tmp_path, env_tmp_dir, git_facts)
     _drop_env(refactor, monkeypatch)
-    refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
+    with pytest.raises(SystemExit):
+        refactor.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+        )
     assert read_state(state_path)["rounds"][0]["pending_push"] is False
 
 
@@ -1013,13 +1096,13 @@ def test_non_object_result_file_fails(refactor, tmp_path, env_tmp_dir, no_git):
     assert e.value.code == 2
 
 
-def test_same_commit_claimed_by_two_items_fails_the_round(
+def test_the_group_sharing_one_commit_is_accepted(
     refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
 ):
-    """1 コミットの所有項目は 1 つだけ。
+    """群の全項目が同じコミットを申告するのが**正しい形**である（決定 2）。
 
-    重複したまま進むと、片方が失敗して取り消したときにもう片方は成功のまま残り、
-    状態ファイルと実際の差分が食い違う。
+    取り消しの単位が適用ラウンドになったため、項目ごとにコミットを分ける理由が
+    無くなった。分けると「適用ラウンド = 1 コミット」に反して群ごと失敗する。
     """
     items = [item(item_id="R1-001"), item(item_id="R1-002")]
     state_path = _state_with_items(tmp_path, items)
@@ -1037,14 +1120,10 @@ def test_same_commit_claimed_by_two_items_fails_the_round(
     )
     monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: "")
 
-    with pytest.raises(SystemExit) as e:
-        refactor.cmd_merge_apply(
-            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
-        )
-    assert e.value.code == 2
+    refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
     state = read_state(state_path)
-    assert state["rounds"][0]["apply"]["duplicated_commits"] == ["shared"]
-    assert all(i["status"] == "abandoned" for i in state["items"])
+    assert state["rounds"][0]["apply"]["applied"] == ["R1-001", "R1-002"]
+    assert all(i["status"] == "applied" for i in state["items"])
 
 
 def test_same_commit_reported_twice_for_one_item_is_fine(
@@ -1060,15 +1139,16 @@ def test_same_commit_reported_twice_for_one_item_is_fine(
                    "commits": [{"sha": "ok111"}, {"sha": "ok111"}]}],
     })
     refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
-    assert read_state(state_path)["items"][0]["status"] == "reviewing"
+    assert read_state(state_path)["items"][0]["status"] == "applied"
 
 
 def test_short_and_full_sha_are_seen_as_the_same_commit(
     refactor, tmp_path, env_tmp_dir, monkeypatch
 ):
-    """一方が完全 SHA、他方が短縮 SHA でも重複として検出すること。
+    """一方が完全 SHA、他方が短縮 SHA でも**同じ 1 コミット**として数えること。
 
-    申告の文字列をそのまま鍵にすると見逃す。
+    申告の文字列をそのまま鍵にすると 2 コミットに見え、「適用ラウンド = 1 コミット」
+    に反したものとして群ごと取り消してしまう。
     """
     full = "a" * 40
     items = [item(item_id="R1-001"), item(item_id="R1-002")]
@@ -1096,12 +1176,10 @@ def test_short_and_full_sha_are_seen_as_the_same_commit(
     )
     monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: "")
 
-    with pytest.raises(SystemExit) as e:
-        refactor.cmd_merge_apply(
-            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
-        )
-    assert e.value.code == 2
-    assert read_state(state_path)["rounds"][0]["apply"]["duplicated_commits"] == [full]
+    refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
+    entry = read_state(state_path)["rounds"][0]
+    assert entry["apply"]["applied"] == ["R1-001", "R1-002"]
+    assert entry["apply_progress"][-1]["commits"] == [full]
 
 
 # ---------- 数値の型崩れ ----------
@@ -1163,7 +1241,7 @@ def test_merge_apply_is_idempotent(refactor, tmp_path, env_tmp_dir, no_git, git_
     second = read_state(state_path)
 
     assert second["rounds"][0]["apply"]["applied"] == ["R1-001"]
-    assert second["items"][0]["status"] == "reviewing"
+    assert second["items"][0]["status"] == "applied"
     assert second["rounds"][0]["apply"] == first["rounds"][0]["apply"]
 
 
@@ -1201,7 +1279,7 @@ def test_revert_failure_keeps_the_round_retryable(
 
     entry = read_state(state_path)["rounds"][0]
     assert entry["apply"]["merged_at"] is None, "処理済みの印が立っている"
-    assert entry["pending_drop"] == ["R1-002"], "再実行の対象が残っていない"
+    assert entry["pending_drop"] == ["R1-001", "R1-002"], "再実行の対象が残っていない"
 
 
 def test_pending_drop_is_retried_before_the_processed_guard(
@@ -1217,10 +1295,13 @@ def test_pending_drop_is_retried_before_the_processed_guard(
 
     # 2 回目は取り消しが通る状況を模す
     calls, pushes = _drop_env(refactor, monkeypatch)
-    refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
+    with pytest.raises(SystemExit):
+        refactor.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+        )
 
     assert [c[-1] for c in calls if c[:2] == ["git", "revert"]] == [
-        "bad222", "bad111", "ok111"], "取り消しを再実行していない"
+        "bad222", "ok111"], "取り消しを再実行していない"
     entry = read_state(state_path)["rounds"][0]
     assert entry["pending_drop"] == []
     assert entry["pending_push"] is False
@@ -1252,7 +1333,10 @@ def test_push_precedes_nothing_when_the_drop_is_unfinished(
     )
     monkeypatch.setattr(
         refactor, "_sh", lambda cmd, **k: order.append("push") or "")
-    refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
+    with pytest.raises(SystemExit):
+        refactor.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+        )
 
     assert "push" in order
     assert order.index("revert") < order.index("push"), "取り消しより先に push している"
@@ -1286,14 +1370,17 @@ def test_push_failure_after_a_successful_drop_only_retries_the_push(
 
     # 2 回目: push が通る。取り消しは繰り返さない
     calls, pushes = _drop_env(refactor, monkeypatch)
-    refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
+    with pytest.raises(SystemExit):
+        refactor.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+        )
 
     assert [c for c in calls if c[:2] == ["git", "revert"]] == [], "取り消しを繰り返している"
     assert [c for c in calls if c[:2] == ["git", "cherry-pick"]] == []
     assert [c for c in pushes if c[:2] == ["git", "push"]], "push を再送していない"
     entry = read_state(state_path)["rounds"][0]
     assert entry["pending_push"] is False
-    assert entry["apply"]["applied"] == ["R1-001"]
+    assert entry["apply"]["applied"] == []
 
 
 # ---------- 適用で失敗した項目を「対象外」へ ----------
@@ -1308,16 +1395,19 @@ def test_failed_items_are_deferred(
     """
     state_path = _two_item_apply(tmp_path, env_tmp_dir, git_facts)
     _drop_env(refactor, monkeypatch)
-    refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
+    with pytest.raises(SystemExit):
+        refactor.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+        )
 
     state = read_state(state_path)
     deferred = {d["item_id"]: d for d in state["deferred_items"]}
-    assert list(deferred) == ["R1-002"], "失敗した項目だけを対象外にすること"
+    assert list(deferred) == ["R1-001", "R1-002"], "群の全件を対象外にすること"
     entry = deferred["R1-002"]
     # 次ラウンドの除外は path + symbol + smell の組で行われる
     assert (entry["path"], entry["symbol"], entry["smell"]) == (
         "src/foo.py", "Foo.handle", "long_method")
-    assert "差分予算" in entry["defer_reason"]
+    assert "適用ラウンド = 1 コミット" in entry["defer_reason"]
 
 
 def test_deferring_is_idempotent(refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts):
@@ -1325,9 +1415,11 @@ def test_deferring_is_idempotent(refactor, tmp_path, env_tmp_dir, monkeypatch, g
     state_path = _two_item_apply(tmp_path, env_tmp_dir, git_facts)
     _drop_env(refactor, monkeypatch)
     args = type("A", (), {"id": 130, "round": 1, "dry_run": False})()
-    refactor.cmd_merge_apply(args)
-    refactor.cmd_merge_apply(args)
-    assert [d["item_id"] for d in read_state(state_path)["deferred_items"]] == ["R1-002"]
+    for _ in range(2):
+        with pytest.raises(SystemExit):
+            refactor.cmd_merge_apply(args)
+    assert [d["item_id"] for d in read_state(state_path)["deferred_items"]] == [
+        "R1-001", "R1-002"]
 
 
 # ---------- push の直前に生成物を同期する ----------
@@ -1369,7 +1461,10 @@ def test_push_syncs_generated_files_first(
         refactor, "_run_with_timeout",
         lambda command, cwd, timeout, grace=5.0: ran.append((command, cwd)) or (0, False),
     )
-    refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
+    with pytest.raises(SystemExit):
+        refactor.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+        )
 
     assert ran and ran[0][0] == "make build", "同期コマンドを実行していない"
     assert "add" in order and "commit" in order, "同期の差分をコミットしていない"
@@ -1405,7 +1500,10 @@ def test_no_sync_command_runs_nothing(
         refactor, "_run_with_timeout",
         lambda command, cwd, timeout, grace=5.0: ran.append(command) or (0, False),
     )
-    refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
+    with pytest.raises(SystemExit):
+        refactor.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+        )
     assert ran == []
 
 
@@ -1490,7 +1588,10 @@ def test_dirt_inside_the_control_directory_does_not_abort(
         refactor, "_run_with_timeout",
         lambda command, cwd, timeout, grace=5.0: (0, False),
     )
-    refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
+    with pytest.raises(SystemExit):
+        refactor.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+        )
     assert [c for c in staged if c[:2] == ["git", "add"]] == [
         ["git", "add", "--", "generated/a.py"]]
 
@@ -1515,7 +1616,10 @@ def test_sync_excludes_the_control_directory(
         refactor, "_run_with_timeout",
         lambda command, cwd, timeout, grace=5.0: (0, False),
     )
-    refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
+    with pytest.raises(SystemExit):
+        refactor.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+        )
 
     adds = [c for c in staged if c[:2] == ["git", "add"]]
     assert adds == [["git", "add", "--", "generated/a.py"]]
@@ -1533,7 +1637,10 @@ def test_sync_without_changes_makes_no_commit(
         refactor, "_run_with_timeout",
         lambda command, cwd, timeout, grace=5.0: (0, False),
     )
-    refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
+    with pytest.raises(SystemExit):
+        refactor.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+        )
 
     assert [c for c in staged if c[:2] == ["git", "commit"]] == []
     assert [c for c in staged if c[:2] == ["git", "push"]], "push はすること"
