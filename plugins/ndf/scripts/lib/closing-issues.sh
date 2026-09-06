@@ -29,13 +29,20 @@ while [ "$#" -gt 0 ]; do
 done
 
 # 番号だけの形は、実行したリポジトリの issue を指す。**通信しない。**
-# slug を畳む規則は projects-common.sh の pj_repo_slug の 1 箇所にある（#435）。
-# **独立実行の契約を守る。** このスクリプトは bash の副プロセスとして起動されるため、
-# 共有ライブラリを読み込めないときは DEFAULT_REPO を空のまま進める（従来どおり）。
-if [ -z "$DEFAULT_REPO" ]; then
-  . "$(dirname "${BASH_SOURCE[0]}")/projects-common.sh" 2>/dev/null || true
-  if [ "$(type -t pj_repo_slug 2>/dev/null)" = "function" ]; then
-    DEFAULT_REPO=$(pj_repo_slug . 2>/dev/null) || DEFAULT_REPO=""
+if [ -z "$DEFAULT_REPO" ] && command -v git >/dev/null 2>&1; then
+  url=$(git config --get remote.origin.url 2>/dev/null) || url=""
+  if [ -n "$url" ]; then
+    slug=${url%.git}
+    slug=${slug%/}
+    slug=${slug##*:}
+    case "$slug" in
+      */*)
+        repo_name=${slug##*/}
+        owner_name=${slug%/*}
+        owner_name=${owner_name##*/}
+        [ -n "$owner_name" ] && [ -n "$repo_name" ] && DEFAULT_REPO="$owner_name/$repo_name"
+        ;;
+    esac
   fi
 fi
 
