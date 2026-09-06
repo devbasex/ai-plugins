@@ -99,19 +99,20 @@ wf_deny_undetermined() {
   printf '設計 Pull Request でない場合は、head のブランチ名を %s 以外へ変えてください。\n' "$WF_DESIGN_PREFIX"
 }
 
-_wf_require_merge_tools() {
-  local num="${1:-}"
+# マージを通してよければ 0 を返し、何も出さない。止めるときは理由を出して 1 を返す。
+wf_check_merge() {
+  local cmd="${1:-}" num slug owner branch json head list out rc
+  num=$(wf_merge_target "$cmd") || return 0
+
   command -v jq >/dev/null 2>&1 || {
     wf_deny_undetermined "$num" '承認の印（判定に要る jq が無い）'; return 1; }
   command -v git >/dev/null 2>&1 || {
     wf_deny_undetermined "$num" '承認の印（判定に要る git が無い）'; return 1; }
   command -v gh >/dev/null 2>&1 || {
     wf_deny_undetermined "$num" '承認の印（判定に要る gh が無い）'; return 1; }
-  return 0
-}
 
-_wf_resolve_pr_info() {
-  local slug="${1:-}" num="${2:-}" owner branch list json
+  slug=$(wf_repo_slug ".") || {
+    wf_deny_undetermined "$num" 'リポジトリの名前（origin の URL を取れない）'; return 1; }
   owner=${slug%%/*}
 
   # **問い合わせは REST に限る。** GraphQL は利用上限で落ちる。番号があるときは
@@ -129,14 +130,16 @@ _wf_resolve_pr_info() {
     json=$(jq -c '.[0] // empty' <<<"$list" 2>/dev/null)
     [ -n "$json" ] || {
       wf_deny_undetermined "" "Pull Request の番号（ブランチ $branch に対応する Pull Request が無い）"; return 1; }
+    num=$(jq -r '.number // empty' <<<"$json" 2>/dev/null)
   fi
 
-  printf '%s\n' "$json"
-  return 0
-}
+  head=$(jq -r '.head.ref // empty' <<<"$json" 2>/dev/null)
+  [ -n "$head" ] || {
+    wf_deny_undetermined "$num" 'head のブランチ名（応答から読み取れない）'; return 1; }
 
-_wf_verify_approval_label() {
-  local slug="${1:-}" num="${2:-}" head="${3:-}" json="${4:-}" out rc
+  # 設計 Pull Request でなければ、この仕組みは関わらない。
+  case "$head" in "$WF_DESIGN_PREFIX"*) ;; *) return 0 ;; esac
+
   jq -e --arg l "$WF_APPROVAL_LABEL" 'any(.labels[]?; .name == $l)' <<<"$json" >/dev/null 2>&1 && return 0
 
   # 印が無い。**定義そのものが無いことを確かめられたときだけ通す**（決定 6）。
@@ -152,30 +155,4 @@ _wf_verify_approval_label() {
 
   wf_deny_missing_label "$num" "$head"
   return 1
-}
-
-# マージを通してよければ 0 を返し、何も出さない。止めるときは理由を出して 1 を返す。
-wf_check_merge() {
-  local cmd="${1:-}" num slug head json
-  num=$(wf_merge_target "$cmd") || return 0
-
-  _wf_require_merge_tools "$num" || return 1
-
-  slug=$(wf_repo_slug ".") || {
-    wf_deny_undetermined "$num" 'リポジトリの名前（origin の URL を取れない）'; return 1; }
-
-  json=$(_wf_resolve_pr_info "$slug" "$num") || {
-    printf '%s\n' "$json"
-    return 1
-  }
-  [ -n "$num" ] || num=$(jq -r '.number // empty' <<<"$json" 2>/dev/null)
-
-  head=$(jq -r '.head.ref // empty' <<<"$json" 2>/dev/null)
-  [ -n "$head" ] || {
-    wf_deny_undetermined "$num" 'head のブランチ名（応答から読み取れない）'; return 1; }
-
-  # 設計 Pull Request でなければ、この仕組みは関わらない。
-  case "$head" in "$WF_DESIGN_PREFIX"*) ;; *) return 0 ;; esac
-
-  _wf_verify_approval_label "$slug" "$num" "$head" "$json"
 }
