@@ -35,6 +35,7 @@ from ..gitfacts import (
     resolved_threads_on_github,
 )
 from ..paths import _load, _result_path, stem_for
+from ..rounds import deferred_record
 from ..verify import verify_commit_granularity, verify_fix_commit
 from ..vocabulary import DEFAULT_TEST_TIMEOUT
 from .apply import _phase_after_group, _prepare_fix_phase, _run_drop, current_group
@@ -169,12 +170,8 @@ def cmd_abandon_items(args: argparse.Namespace) -> None:
             "failure_reason", "修正ラウンドの上限に達してもテストが通らなかった")
         if item_id in already:
             continue
-        state["deferred_items"].append({
-            "item_id": item_id,
-            "path": item["path"], "symbol": item["symbol"], "smell": item["smell"],
-            "round": item.get("round"),
-            "defer_reason": item["failure_reason"],
-        })
+        state["deferred_items"].append(
+            deferred_record(item, item_id, item["failure_reason"]))
         info(f"↩ {item_id} を見送りました")
 
     # 見送りの記録と印の解除を**同じ保存で**行う。保存してから push するので、

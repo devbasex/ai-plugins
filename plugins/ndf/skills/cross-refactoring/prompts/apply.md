@@ -1,7 +1,9 @@
 # リファクタリング適用（cross-refactoring / $RF_RUNTIME / 提案ラウンド $RF_ROUND）
 
 あなたは **$RF_RUNTIME**（モデル: $RF_MODEL）として、1 つの**適用ラウンド**に
-入っている改善項目を適用します。
+入っている項目を適用します。
+
+$RF_ROUND_NOTE
 
 **この適用ラウンドの項目は、書き換えるファイルが互いに重なりません。** そのため
 順番に適用でき、まとめて 1 つのコミットにできます。
@@ -17,7 +19,7 @@
 
 $RF_SKILL_BLOCK
 
-## 適用する改善項目（適用ラウンド $RF_APPLY_ROUND）
+## 適用する項目（適用ラウンド $RF_APPLY_ROUND）
 
 ```json
 $RF_ITEMS

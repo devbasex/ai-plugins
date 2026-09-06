@@ -49,6 +49,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 from refactor_lib import ABORT, die, info  # noqa: E402,F401
 from refactor_lib import vocabulary as _vocabulary  # noqa: E402
+from refactor_lib import rounds as _rounds  # noqa: E402
 from refactor_lib import paths as _paths  # noqa: E402
 from refactor_lib import plan as _plan  # noqa: E402
 from refactor_lib import gitfacts as _gitfacts  # noqa: E402
@@ -64,6 +65,7 @@ from refactor_lib.commands import review as _cmd_review  # noqa: E402
 # 変えない。
 _LIB_MODULES: tuple[types.ModuleType, ...] = (
     _vocabulary,
+    _rounds,
     _paths,
     _plan,
     _gitfacts,

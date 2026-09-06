@@ -51,6 +51,43 @@ TECHNIQUES: dict[str, str] = {
     "validate_at_boundary": "スキーマと版を与え、読み込み境界で検証する",
 }
 
+# テスト整備ラウンドの語彙。**新しい語彙は作らない**（#436 決定 9）。値は既存の
+# 3 本の参照が持つ分類をそのまま使う。閉じるのは 2 つだけで、17 種の兆候に当たる
+# ものは要らない。テスト整備の提案の中身は「どの経路が固定されていないか」で
+# あって、悪さの分類ではない。
+
+# 固定する経路の種類。出所は `refactoring/references/characterization-tests.md` の
+# 「分岐を洗い出して固定する」の表である。
+TEST_CASES: dict[str, str] = {
+    "normal": "代表的な正常系",
+    "branch": "各分岐に入る入力",
+    "boundary": "境界値（0 件・空・上限）",
+    "error": "例外・エラーになる入力",
+}
+
+# どの階層で固定するか。出所は `tdd-cycle/references/testing-levels.md` である。
+# **並びは階層の低い順**で、同じ経路に複数の階層が挙がったときは低い方を採る
+# （「上の階層へ持ち上げない」）。
+TEST_LEVELS: dict[str, str] = {
+    "unit": "単体",
+    "integration": "結合",
+    "contract": "契約",
+    "e2e": "端から端まで",
+}
+
+
+def test_vocabulary() -> dict[str, Any]:
+    """テスト整備の提案プロンプトへ**そのまま列挙する**ための語彙集合。
+
+    構造改善の `vocabulary()` と同じ形にする。手順書を読ませるだけでは足りず、
+    許容値を列挙しないと語彙外の値が返って全件降格する（実測）。
+    """
+    return {
+        "cases": dict(TEST_CASES),
+        "levels": dict(TEST_LEVELS),
+    }
+
+
 # 重要度。語彙外の提案は `unknown` へ降格し、しきい値で自動的に落ちるようにする。
 SEVERITY_ORDER = {"unknown": 0, "minor": 1, "major": 2, "critical": 3}
 DEFAULT_SEVERITY_THRESHOLD = "minor"
@@ -158,6 +195,12 @@ DEFAULT_TEST_TIMEOUT = 900
 
 # 提案の重複率がこの割合を超えたら、提案ラウンドの繰り返しを収束とみなす。
 DUPLICATE_RATE_THRESHOLD = 0.7
+
+# テスト整備ラウンドの既定の上限。**構造改善より少ない。** 母集合の増え方が違う
+# ためである。構造を変えると新しい兆候が見えて提案の母集合は増えるが、テストが
+# 薄い経路の集合は対象のコードを変えないため最初から確定している。2 回目に出るのは
+# 1 回目の挙げ漏らしだけである。**上限は歯止めであって、回数の指定ではない。**
+DEFAULT_MAX_TEST_ROUNDS = 2
 
 # レビュー結果の形式不正で差し戻せる回数。超えたら変更要求として扱う。
 # 差し戻しを無限に繰り返すと、形式を満たせないランタイムでループが止まらなくなる。

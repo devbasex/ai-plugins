@@ -30,7 +30,13 @@ from ..paths import (
     _tmp_dir_for,
 )
 from ..plan import default_plan_file, normalize_plan_file
-from ..vocabulary import DEFAULT_TEST_TIMEOUT, REQUIRED_SKILLS, vocabulary
+from ..rounds import STRUCTURE, TEST, entry_kind, round_kind
+from ..vocabulary import (
+    DEFAULT_TEST_TIMEOUT,
+    REQUIRED_SKILLS,
+    test_vocabulary,
+    vocabulary,
+)
 from .report import _finish
 
 
@@ -385,21 +391,31 @@ def _run_baseline_test(
     return {"command": command, "status": status, "checked_at": statefile.now()}
 
 
-def cmd_start_round(args: argparse.Namespace) -> None:
-    """Step 2 — 提案ラウンドを開き、実装担当とレビュー担当を返す。
+def rounds_of_kind(state: dict[str, Any], kind: str) -> list[dict[str, Any]]:
+    """その種類のラウンドだけを取り出す。上限はそれぞれ別に数える。"""
+    return [r for r in state.get("rounds") or [] if entry_kind(r) == kind]
 
-    終了コード: 0 = ラウンドを開いた / 1 = 提案ラウンドの繰り返しが終了済み。
+
+def cmd_start_round(args: argparse.Namespace) -> None:
+    """Step 2 — ラウンドを開き、実装担当とレビュー担当を返す。
+
+    終了コード: 0 = ラウンドを開いた / 1 = 繰り返しが終了済み。
+
+    **開くのはテスト整備ラウンドか提案ラウンドのどちらかである。** どちらを開くかは
+    状態の `round_kind` が持ち、切り替えるのは `advance` である（判定を 1 か所に
+    まとめ、開く側は宣言に従うだけにする）。
 
     **再開しても担当は変わらない。** 同じラウンド番号を開き直したときは記録済みの
     割り当てをそのまま返す。
     """
     path, state = _load(args.id)
     if state.get("final"):
-        info(f"提案ラウンドの繰り返しは終了しています（{state['final']}）")
+        info(f"ラウンドの繰り返しは終了しています（{state['final']}）")
         sys.exit(1)
 
     rounds = state["rounds"]
-    if len(rounds) >= state["max_outer_rounds"]:
+    kind = round_kind(state)
+    if kind == STRUCTURE and len(rounds_of_kind(state, STRUCTURE)) >= state["max_outer_rounds"]:
         _finish(path, state, "max_outer_rounds")
         sys.exit(1)
 
@@ -410,6 +426,9 @@ def cmd_start_round(args: argparse.Namespace) -> None:
         models = state["models"]
         existing = {
             "round": round_no,
+            # **種類はラウンドごとに残す。** 上限を別々に数えるためと、提案の
+            # 重複率を同じ種類どうしで測るためである。
+            "kind": kind,
             "started_at": statefile.now(),
             "impl": impl,
             "impl_model": {"requested": models.get(impl), "observed": None},
@@ -430,12 +449,24 @@ def cmd_start_round(args: argparse.Namespace) -> None:
         state["phase"] = "propose"
         statefile.save(path, state)
 
+    kind = entry_kind(existing)
+    if kind == TEST:
+        label = "テスト整備ラウンド"
+        limit = state.get("max_test_rounds")
+    else:
+        label = "提案ラウンド"
+        limit = state["max_outer_rounds"]
+    seq = len(rounds_of_kind(state, kind))
     info(
-        f"=== 提案ラウンド {round_no} / {state['max_outer_rounds']} "
+        f"=== {label} {seq} / {limit} "
         f"（実装 {existing['impl']} / レビュー {' + '.join(existing['reviewers'])}）==="
     )
     statefile.emit(
         ROUND=round_no,
+        ROUND_KIND=kind,
+        # 提案に使う雛形の名前。**結果ファイルの名前は種類で変えない**
+        # （ラウンド番号は通しなので衝突せず、監視の雛形をそのまま使える）。
+        PROPOSE_PHASE="propose-tests" if kind == TEST else "propose",
         IMPL=existing["impl"],
         IMPL_MODEL=existing["impl_model"]["requested"],
         REVIEWERS=" ".join(existing["reviewers"]),

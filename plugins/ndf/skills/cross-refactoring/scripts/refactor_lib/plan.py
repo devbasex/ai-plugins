@@ -9,6 +9,7 @@ import os
 from typing import Any, Optional
 
 from . import die
+from .rounds import TEST, item_kind, item_label
 from .vocabulary import DEFAULT_PLAN_DIR, ITEM_STATUS_LABELS
 
 
@@ -84,14 +85,23 @@ def _plan_round_section(state: dict[str, Any], entry: dict[str, Any]) -> list[st
 
 
 def _plan_item_section(item: dict[str, Any]) -> list[str]:
-    """改善項目 1 件の見出し・要約表・理由・手順。"""
+    """項目 1 件の見出し・要約表・理由・手順。
+
+    テスト項目は兆候と手法を持たない（決定 9）。代わりに固定する経路の種類と
+    階層を同じ位置へ書く。
+    """
     status = ITEM_STATUS_LABELS.get(item.get("status"), item.get("status") or "—")
+    if item_kind(item) == TEST:
+        first, second, severity = item.get("case"), item.get("level"), "—"
+    else:
+        first, second = item.get("smell"), item.get("technique")
+        severity = item.get("severity") or "—"
     return [
-        f"### {item['item_id']} — `{item['path']}#{item['symbol']}`",
+        f"### {item['item_id']} — `{item_label(item)}`",
         "",
-        "| 兆候 | 手法 | 重要度 | 提案元 | 状態 | コミット |",
+        "| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |",
         "| --- | --- | --- | --- | --- | ---: |",
-        f"| {item['smell']} | {item['technique']} | {item['severity']} | "
+        f"| {first or '—'} | {second or '—'} | {severity} | "
         f"{' / '.join(item.get('proposed_by') or []) or '—'} | {status} | "
         f"{len(item.get('commits') or [])} |",
         "",
