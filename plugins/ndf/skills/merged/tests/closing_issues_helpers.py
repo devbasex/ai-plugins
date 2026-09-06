@@ -8,7 +8,9 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parents[1] / "scripts/closing-issues.sh"
+# **実体はプラグインルート直下の共通層にある**（#424）。`merged` と gate の両方が
+# ここから読むため、Skill の下に写しを置かない。
+SCRIPT = Path(__file__).resolve().parents[3] / "scripts/lib/closing-issues.sh"
 DEFAULT_REPO = "devbasex/ai-plugins"
 
 

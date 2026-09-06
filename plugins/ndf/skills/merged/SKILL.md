@@ -119,8 +119,9 @@ fi
 
 ```bash
 # $SCRIPTS の決め方は development-workflow の references/scripts-lookup.md にある。
-# この Skill のスクリプトは、その 1 つ上（プラグインの根）から辿る。
-CLOSING="$SCRIPTS/../skills/merged/scripts/closing-issues.sh"
+# 閉じる語の読み取りは、どの Skill にも属さない共通層（$SCRIPTS/lib/）にある。
+# **gate も同じ実体を読む**ため、Skill の下に写しは無い。
+CLOSING="$SCRIPTS/lib/closing-issues.sh"
 
 # 1. 本文から閉じる語が指す先を取り出す（<所有者>/<リポジトリ> と <番号> をタブ区切りで出す）
 gh pr view <PR番号> --json body -q .body | bash "$CLOSING"
@@ -218,6 +219,12 @@ bash "$SCRIPTS/../skills/development-workflow/scripts/stage-check.sh" report <is
 残りがマージされる前に版が上がる。
 
 この Skill は版を上げない。担い手と時期は `release` が持つ。
+
+**このマージに人手の承認が要ったかどうかは、マージ先のチャネルが決める。** 開発版や検証
+環境のチャネルへ入れるマージは取り消せるため、承認を求めない。**本番のチャネルへ届く操作
+だけが関門である**（設計 Pull Request のマージは、チャネルによらず承認が要る別の関門である）。
+規則は `/ndf:release` が持ち、どのブランチが本番のチャネルかはリポジトリが宣言する
+（`.ndf/worktree.json` の `production_branch`。宣言が無ければ既定ブランチ）。
 
 この工程に入ったら `/ndf:progress-tracking <issue番号> "後片付け"` を呼ぶ（記録の手順はその Skill が持つ）。
 
