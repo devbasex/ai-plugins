@@ -130,6 +130,11 @@ def cmd_report(args: argparse.Namespace) -> None:
     baseline = state.get("baseline_test") or {}
     print(f"- 着手前のテスト: {baseline.get('command') or '（未指定）'}"
           f"（{baseline.get('status')}）")
+    gate = state.get("final_gate") or {}
+    if gate:
+        print(f"- 最終ゲート: {gate.get('mode') or '—'}"
+              f"（{gate.get('status') or '未実行'}"
+              f" / 修正 {gate.get('fix_rounds', 0)} 回）")
     print()
     print("## ラウンド")
     print()

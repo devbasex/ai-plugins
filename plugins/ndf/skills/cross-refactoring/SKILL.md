@@ -1,7 +1,7 @@
 ---
 name: cross-refactoring
 description: "Let several CLIs propose, apply, and review refactorings on a PR until no new proposal appears. Use when structural improvement should converge across runtimes（クロスリファクタリング・多AIリファクタリング・収束リファクタリング）."
-argument-hint: "[PR番号] --scope PATH... [--host claude|codex|agy|kiro] [--model RT=MODEL] [--baseline-test CMD] [--max-test-rounds N] [--max-outer-rounds N] [--max-fix-rounds N] [--max-items-per-round N] [--ci-check NAME]"
+argument-hint: "[PR番号] --scope PATH... [--host claude|codex|agy|kiro] [--model RT=MODEL] [--baseline-test CMD] [--max-test-rounds N] [--max-outer-rounds N] [--max-fix-rounds N] [--max-items-per-round N] [--ci-check NAME] [--workflow-step]"
 allowed-tools:
   - Bash
   - Read
@@ -88,6 +88,7 @@ allowed-tools:
 | `--max-fix-rounds N` | **1 つの適用ラウンドあたり**の修正ラウンドの上限 | `3` |
 | `--max-items-per-round N` | **1 つの提案ラウンド／テスト整備ラウンド**の採用上限 | `5` |
 | `--ci-check NAME` | 最終ゲートで手元のテストの代わりに見る検査の名前。**指定すると手元のテストは実行しない**（排他） | なし |
+| `--workflow-step` | `development-workflow` の 1 工程として起動したことを伝える。**Step 7 の `cross-review` を省き、全体のテストで判定する** | 単独起動 |
 | `--severity-threshold LEVEL` | この重要度未満は採用しない | `minor` |
 | `--test-timeout SEC` | テスト 1 回あたりの上限秒数。超えたら失敗として扱う | `900` |
 | `--sync-command CMD` | 生成物を同期するコマンド。**push の直前**に進行側が実行し、差分があれば進行側のコミットとして積む | なし |

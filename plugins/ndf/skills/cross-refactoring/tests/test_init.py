@@ -56,7 +56,7 @@ def _args(tmp_path, **over):
     base = {
         "pr": 130, "scope": ["src"], "host": "claude",
         "max_outer_rounds": 3, "max_fix_rounds": 3, "max_items_per_round": 5,
-        "max_test_rounds": 2, "ci_check": None,
+        "max_test_rounds": 2, "ci_check": None, "workflow_step": False,
         "severity_threshold": "minor", "model": None, "baseline_test": "true",
         "sync_command": None, "plan_file": None,
         "test_timeout": 60,

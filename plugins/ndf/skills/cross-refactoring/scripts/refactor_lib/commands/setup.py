@@ -257,6 +257,8 @@ def cmd_init(args: argparse.Namespace) -> None:
         # 最終ゲートで手元のテストの代わりに見る検査の名前。**排他である**
         # （指定があれば手元のテストを実行しない）。
         "ci_check": args.ci_check,
+        # 最終ゲートの分かれ道。**単独起動が既定である。**
+        "workflow_step": bool(args.workflow_step),
         # **最初に開くのはテスト整備ラウンドである。** テストが乏しい箇所では、
         # 「テストが通ること」を検証に使えない（Step 5 の判定はテストで決まる）。
         "round_kind": TEST,

@@ -343,6 +343,55 @@ def resolved_threads_on_github(repo: str, pr: int) -> Optional[set[str]]:
             return resolved
 
 
+# 継続的統合の照会は `commits/{sha}/check-runs` の 1 回だけにする。**併記された状態
+# （`commits/{sha}/status`）は使わない。** GitHub Actions は検査ジョブを記録し commit の
+# 状態を記録しないため、すべて成功した commit でも `pending` を返す。保留として読むと、
+# 通っている検査で通過できなくなる。
+CHECK_RUNS_PER_PAGE = 100
+
+
+def check_run_result(repo: str, sha: str, name: str) -> Optional[str]:
+    """名前が一致した検査ジョブの結果を 1 つの語で返す。
+
+    - すべて完了して結論が `success` なら `"success"`
+    - 未完了があれば `"pending"`
+    - それ以外は最初に見つけた失敗の結論（`"failure"` など）
+    - **照会できない・名前が一致する検査が 1 件も無いときは `None`**
+
+    **「照会できなかった」と「成功した」を区別する。** 呼び出し側は `None` を
+    通過させない（fail-closed）。名前で絞るのは、別の検査の成功で通さないためである。
+    """
+    if not repo or not sha or not name:
+        return None
+    out = _sh(
+        ["gh", "api", f"repos/{repo}/commits/{sha}/check-runs"
+                      f"?per_page={CHECK_RUNS_PER_PAGE}"],
+        check=False,
+    )
+    if not out:
+        return None
+    try:
+        body = json.loads(out)
+    except json.JSONDecodeError:
+        return None
+    runs = body.get("check_runs") if isinstance(body, dict) else None
+    if not isinstance(runs, list):
+        return None
+    matched = [
+        r for r in runs
+        if isinstance(r, dict) and str(r.get("name") or "") == name
+    ]
+    if not matched:
+        return None
+    if any(str(r.get("status") or "").lower() != "completed" for r in matched):
+        return "pending"
+    for run in matched:
+        conclusion = str(run.get("conclusion") or "").lower()
+        if conclusion != "success":
+            return conclusion or "unknown"
+    return "success"
+
+
 def _revert_item_commits(
     state: dict[str, Any], item: dict[str, Any], dry_run: bool = False
 ) -> int:

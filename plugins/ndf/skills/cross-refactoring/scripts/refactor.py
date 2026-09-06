@@ -59,6 +59,7 @@ from refactor_lib.commands import report as _cmd_report  # noqa: E402
 from refactor_lib.commands import setup as _cmd_setup  # noqa: E402
 from refactor_lib.commands import apply as _cmd_apply  # noqa: E402
 from refactor_lib.commands import review as _cmd_review  # noqa: E402
+from refactor_lib.commands import gate as _cmd_gate  # noqa: E402
 
 # **入口は全モジュールの名前を自分の名前空間へ取り込む。** 呼び出し側と手順書は
 # `refactor.py` を指し、テストは `refactor.<名前>` を参照する。分割してもその形を
@@ -75,6 +76,7 @@ _LIB_MODULES: tuple[types.ModuleType, ...] = (
     _cmd_setup,
     _cmd_apply,
     _cmd_review,
+    _cmd_gate,
 )
 
 
@@ -166,6 +168,12 @@ def main() -> None:
     init.add_argument("--baseline-test", required=True,
                       help="着手前と各コミットで実行するテストコマンド。"
                            "振る舞い不変を示す手段が無い書き換えは構造改善ではないため必須")
+    # **起動のされ方は引数で受け取る**（#436 決定 7）。環境変数や控えの読み取りは、
+    # 起動元が違っても同じ値になりうる。呼ぶ側が明示すれば判定が 1 か所で済む。
+    init.add_argument("--workflow-step", action="store_true",
+                      help="`development-workflow` の 1 工程として起動したことを"
+                           "伝える。Step 7 の `cross-review` を省き、"
+                           "全体のテストで判定する")
     init.add_argument("--worktree-root", default=None)
     init.set_defaults(func=cmd_init)
 
@@ -174,7 +182,9 @@ def main() -> None:
          "Step 2 — 提案ラウンドを開く。実装担当とレビュー担当を返す"),
         ("merge-proposals", cmd_merge_proposals,
          "Step 3 — 提案の語彙検証・重複排除・優先度付け・採否"),
-        ("advance", cmd_advance, "Step 7 — 提案ラウンドの収束判定"),
+        ("advance", cmd_advance, "ラウンドの収束判定と、ラウンドの種類の切り替え"),
+        ("final-gate", cmd_final_gate,
+         "Step 7 — 最終ゲート。起動のされ方で cross-review と全体のテストが変わる"),
         ("status", cmd_status, "現在の状態を人が読む形で出す"),
     ):
         sp = sub.add_parser(name, help=help_)
