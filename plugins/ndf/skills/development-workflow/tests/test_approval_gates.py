@@ -4,8 +4,12 @@
 回数が増えると、内容を読まずに通す動きが入る。
 
 **2 つは要否の決まり方が違う。** 設計 Pull Request のマージはマージ先のチャネルに
-よらず要り、本番のチャネルへ届く操作だけがチャネルで決まる。表と規則を並べて書くと
-片方に掛かる規則が両方に掛かって読めるため、**関門ごとに節を分ける**。
+よらず要り、本番の系へ届く操作だけが**届く先が本番の系かどうか**で決まる。表と規則を
+並べて書くと片方に掛かる規則が両方に掛かって読めるため、**関門ごとに節を分ける**。
+
+**2 つ目の関門は配布と運用モードの実行の両方を含む（#423）。** 性質が同じもの
+（反映した瞬間に効き、取り消しても「その状態を見た人」は戻らない）を別の関門として
+数えると、数だけが増える。
 """
 from __future__ import annotations
 
@@ -40,7 +44,7 @@ def test_there_are_exactly_two_gates() -> None:
     body = skill()
     assert re.search(r"関門は\s*\*{0,2}2 つ", body)
     assert "設計 Pull Request のマージ" in body
-    assert "本番のチャネルへ届く操作" in body
+    assert "本番の系へ届く操作" in body
 
 
 def test_the_design_gate_does_not_depend_on_the_channel() -> None:
@@ -49,16 +53,18 @@ def test_the_design_gate_does_not_depend_on_the_channel() -> None:
     assert "マージ先のチャネルによらず" in body
 
 
-def test_the_release_gate_depends_on_the_channel() -> None:
+def test_the_release_gate_depends_on_the_destination() -> None:
+    """要否は「届く先が本番の系かどうか」で決まる。`operation` はマージ経路を持たない。"""
     body = skill()
-    assert re.search(r"マージ先のチャネルが決める", body)
+    assert re.search(r"届く先が本番の系かどうかで決まる", body)
+    assert "チャネルは系の一種である" in body
 
 
 def test_the_two_gates_have_their_own_sections() -> None:
     """規則を並べて書くと、片方に掛かる規則が両方に掛かって読める。"""
     body = skill() + approval()
     assert body.count("### 設計 Pull Request のマージ") >= 1
-    assert body.count("### 本番のチャネルへ届く操作") >= 1
+    assert body.count("### 本番の系へ届く操作") >= 1
 
 
 def test_the_implementation_merge_is_not_a_gate() -> None:
