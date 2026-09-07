@@ -19,6 +19,7 @@
 | `cross-refactoring/scripts/refactor_lib/verify.py` | テストの変更の種類を見る | #443 |
 | `implementation-plan/references/pre-refactoring.md`（新設） | 実装の前に構造を整えるかの判断 | #442 |
 | `scripts/tests/test_vocabulary_single_source.py`（新設） | 語彙が 1 か所であることを機械で確かめる | #444 |
+| `scripts/check-cross-skill-refs.py` | 走査を `references` まで広げ、例外へ登録する | #444 |
 
 ## 処理の流れ
 
@@ -90,6 +91,23 @@ flowchart TD
 ```python
 _VOCAB = pathlib.Path(__file__).resolve().parents[3] / "refactoring" / "references" / "vocabulary.md"
 ```
+
+**この参照は、いまの検査では検出されない。** `check-cross-skill-refs.py` が拾うのは
+`../<Skill 名>/` と `"<Skill 名>" / "scripts"` の 2 つで、`"refactoring" / "references"` は
+どちらにも当たらない。**例外へ登録するだけでは、対応する参照が無いもの（stale）として
+検査が落ちる。**
+
+**走査を `references` まで広げる。** 検査の目的は「Skill をまたぐ参照が増えたときに
+気づく」ことであり、**配られなければ解決できない点で `scripts` と `references` は同じ**
+である。パターンを `"<Skill 名>" / "(scripts|references)"` へ広げ、そのうえで例外へ登録する。
+
+**検査の位置づけも書き替える。** いまの docstring は「実行の参照」を数えると書いている。
+**数えるのは「配布に依存する参照」である**（実行するか読むかは、配る先で相手が欠けたときの
+結果を変えない）。
+
+**採らなかった案**: 例外へ登録せず、配布の条件を固定するテストだけで担保する。
+**参照が増えたときに気づく機構が働かない。** `check-cross-skill-refs.py` はまさにそれを
+防ぐために置かれている（#285 の再発防止）。
 
 **同じ配布の条件を持つ前例がある。** `google-drive` が `google-auth` を読む形で、4 つの
 manifest がどちらも載せているため配る先で相手が欠けない。**ただし解決の方式は違う。**
@@ -274,6 +292,7 @@ assert price(order) == (
 | 15（先に整えるときの進め方） | `pre-refactoring.md` に、別の Pull Request へ分けることと理由がある |
 | 16（`legacy-refactor` との書き分け） | `pre-refactoring.md` の表。`development-workflow/references/workflow-modes.md` からの参照 |
 | 配布の条件 | 4 つの manifest が両方を載せることを固定するテスト |
+| 検査の走査 | `check-cross-skill-refs.py` が `"<Skill 名>" / "references"` の形を拾うこと。既存のテストへ追加する |
 
 ## 未確認のまま残ること
 
