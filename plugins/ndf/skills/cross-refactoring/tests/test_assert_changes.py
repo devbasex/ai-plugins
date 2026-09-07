@@ -10,6 +10,8 @@ from __future__ import annotations
 import pathlib
 import sys
 
+import pytest
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "scripts"))
 
 
@@ -385,3 +387,101 @@ def test_all_pending_across_groups_is_readable(verify) -> None:
     entry = {"pending_test_judgements": {"1": ["tests/test_a.py"],
                                          "2": ["tests/test_b.py"]}}
     assert verify.all_pending_judgements(entry) == ["tests/test_a.py", "tests/test_b.py"]
+
+
+def test_the_merge_command_drops_the_round_on_a_changed_verdict(
+    paths, patch_lib, cmd_apply, tmp_path, env_tmp_dir, monkeypatch
+) -> None:
+    """`changed` のとき、適用ラウンドを取り消して項目へ印を残すこと。
+
+    **`entry["items"]` は項目 ID の並びである。** dict として扱うと落ちる。
+    """
+    import json
+    import subprocess
+
+    from crossref_helpers import make_state, read_state
+    from test_merge_apply import item
+
+    items = [item(item_id="R1-001")]
+    state_path = make_state(tmp_path, items=items, rounds=[{
+        "round": 1, "impl": "codex", "reviewers": ["agy", "kiro"],
+        "impl_model": {"requested": None, "observed": None}, "reviewer_models": {},
+        "proposed": {}, "items": ["R1-001"], "apply_round": 1,
+        "apply_rounds": [{"apply_round": 1, "items": ["R1-001"], "status": "applied"}],
+        "apply": {"applied": ["R1-001"], "failed": []}, "fix_rounds": 0,
+        "durations": {}, "reviews": [],
+        "pending_test_judgements": {"1": ["tests/test_a.py"]},
+    }])
+    env_tmp_dir(state_path)
+    (state_path.parent / "codex-judge-test-changes-r1-result.json").write_text(
+        json.dumps({"verdicts": [{"path": "tests/test_a.py", "verdict": "changed",
+                                  "reason": "270 が 300 に"}]}), encoding="utf-8")
+    monkeypatch.setattr(paths.subprocess, "run",
+                        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "", ""))
+    patch_lib("sh", lambda cmd, **k: "")
+    patch_lib("git_out", lambda work, args, **k: "")
+
+    with pytest.raises(SystemExit) as caught:
+        cmd_apply.cmd_merge_test_judgements(type("A", (), {"id": 130, "round": 1})())
+    assert caught.value.code == 2
+
+    state = read_state(state_path)
+    dropped = [i for i in state["items"] if i["item_id"] == "R1-001"]
+    assert dropped and dropped[0]["status"] == "abandoned"
+
+
+def test_dropping_one_group_keeps_the_other_pending(
+    paths, patch_lib, cmd_apply, tmp_path, env_tmp_dir, monkeypatch
+) -> None:
+    """取り消した群の保留だけを消し、他の群の分を残すこと。"""
+    import json
+    import subprocess
+
+    from crossref_helpers import make_state, read_state
+    from test_merge_apply import item
+
+    items = [item(item_id="R1-001")]
+    state_path = make_state(tmp_path, items=items, rounds=[{
+        "round": 1, "impl": "codex", "reviewers": ["agy", "kiro"],
+        "impl_model": {"requested": None, "observed": None}, "reviewer_models": {},
+        "proposed": {}, "items": ["R1-001"], "apply_round": 2,
+        "apply_rounds": [{"apply_round": 2, "items": ["R1-001"], "status": "applied"}],
+        "apply": {"applied": ["R1-001"], "failed": []}, "fix_rounds": 0,
+        "durations": {}, "reviews": [],
+        "pending_test_judgements": {"1": ["tests/test_a.py"],
+                                    "2": ["tests/test_b.py"]},
+    }])
+    env_tmp_dir(state_path)
+    (state_path.parent / "codex-judge-test-changes-r1-result.json").write_text(
+        json.dumps({"verdicts": [{"path": "tests/test_b.py", "verdict": "changed"},
+                                 {"path": "tests/test_a.py", "verdict": "undecidable"}]}),
+        encoding="utf-8")
+    monkeypatch.setattr(paths.subprocess, "run",
+                        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "", ""))
+    patch_lib("sh", lambda cmd, **k: "")
+    patch_lib("git_out", lambda work, args, **k: "")
+
+    with pytest.raises(SystemExit):
+        cmd_apply.cmd_merge_test_judgements(type("A", (), {"id": 130, "round": 1})())
+
+    entry = read_state(state_path)["rounds"][0]
+    # **先行する群の保留は残る。** レビューへ引き継ぐと決めたものを失わない。
+    assert entry.get("pending_test_judgements") == {"1": ["tests/test_a.py"]}
+
+
+def test_adding_a_test_function_is_still_unchanged(verify) -> None:
+    """テスト関数を足しただけの差分を、判定できないものへ倒さないこと。
+
+    **外側の行が増えただけなら、既存の期待値は変わっていない。**
+    """
+    before = ["def test_a():\n", "    assert f(1) == 3\n"]
+    after = ["def test_a():\n", "    assert f(1) == 3\n",
+             "def test_b():\n", "    assert g(2) == 4\n"]
+    assert verify.assertion_change(before, after) == "unchanged"
+
+
+def test_a_removed_helper_line_is_undecidable(verify) -> None:
+    """外側の行が失われた差分は、判定できないものとして扱うこと。"""
+    before = ["EXPECTED = 3\n", "    assert f(1) == EXPECTED\n"]
+    after = ["    assert f(1) == EXPECTED\n"]
+    assert verify.assertion_change(before, after) == "undecidable"

@@ -412,10 +412,15 @@ def assertion_change(before: Iterable[str], after: Iterable[str]) -> str:
         # 期待値を動かしうるが、`assert` の行には現れない。
         return "undecidable"
 
-    # **`assert` の外が変わっていれば、行が同じでも判定できない。** 同じファイルの
+    # **`assert` の外が失われていれば、行が同じでも判定できない。** 同じファイルの
     # `EXPECTED = 3` を `4` にすると、`assert f(1) == EXPECTED` は変わらないまま
     # 期待出力が変わる。
-    if _outside_assertions(rows_before) != _outside_assertions(rows_after):
+    #
+    # **増えただけなら倒さない。** テスト関数を足せば外側の行は必ず増える。増加まで
+    # 判定できないものにすると、後続の判定が働かなくなる。
+    outside_before = Counter(_outside_assertions(rows_before))
+    outside_after = Counter(_outside_assertions(rows_after))
+    if outside_before - outside_after:
         return "undecidable"
 
     if kept_before == kept_after:
@@ -430,7 +435,17 @@ def assertion_change(before: Iterable[str], after: Iterable[str]) -> str:
     #
     # **機械で落とすのは、元の値が失われたときに限る。** 値が残っていれば、変わったのは
     # 呼び方か、足した分である。増えた値だけを見て落とさない。
-    if _values(kept_before) - _values(kept_after):
+    #
+    # **`assert` の外へ移った値は、失われたと数えない。** 値を定数へ抽出すると
+    # `assert` の行から値が消えるが、期待出力は変わっていない。
+    lost = _values(kept_before) - _values(kept_after)
+    if lost:
+        moved = Counter()
+        for line in _outside_assertions(rows_after):
+            for literal in _LITERAL.findall(line):
+                moved[literal] += 1
+        if not (lost - moved):
+            return "undecidable"
         return "changed"
     return "undecidable"
 

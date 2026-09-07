@@ -69,8 +69,11 @@ PENDING=$(jq -r '.rounds[] | select(.round == $r) | .pending_test_judgements // 
 # 2. 対象の差分を書き出す。**対象は直前の適用のコミット**であるため HEAD でよい
 git -C "$WORK" show HEAD -- $PENDING > "$TMP_DIR/test-diff-r$ROUND.diff"
 
-# 3. 判定させる。担当は `next-apply-round` が返した実装担当（$IMPL）でよい
-bash "$SCRIPTS/launch-cli.sh" "$IMPL" judge-test-changes "$ID" "$ROUND"
+# 3. 判定させる。担当は `next-apply-round` が返した実装担当（$IMPL）でよい。
+#    **起動は背景で走るため、待たずに次へ進むと結果が無い。**
+"$SCRIPTS/launch-cli.sh" "$IMPL" judge-test-changes "$ID" "$ROUND"
+"$LIB/monitor.py" "$ID" --agents "$IMPL" --tmp-dir "$TMP_DIR" \
+    --stem-template "{agent}-judge-test-changes-r$ROUND" --timeout 900
 
 # 4. 答えを取り込む（終了コード 2 は「取り消した」を表す）
 "$SCRIPTS/refactor.py" merge-test-judgements "$ID" "$ROUND"
@@ -83,7 +86,7 @@ bash "$SCRIPTS/launch-cli.sh" "$IMPL" judge-test-changes "$ID" "$ROUND"
 | すべて `unchanged` | **保留を解く。** 記録が消え、次の工程へ進む |
 | 1 件でも `changed` | **適用ラウンドを取り消す**（`merge-test-judgements` が行う）。終了コード 2 で返る |
 | `undecidable` | **保留のまま残し、Step 7 のレビューへ引き継ぐ** |
-| 答えが欠けている | `undecidable` と同じに扱う |
+| 答えが欠けている | `undecidable` と同じに扱う。**待機を挟まないと全件がこれになる** |
 
 **答えが欠けたものを `unchanged` に倒さない。** 倒すと、判定を返さないことが通過の手段に
 なる。知らない答えも同じ扱いにする。

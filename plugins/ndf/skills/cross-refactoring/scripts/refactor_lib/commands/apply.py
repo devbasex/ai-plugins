@@ -831,12 +831,16 @@ def cmd_merge_test_judgements(args: argparse.Namespace) -> None:
     if outcome["problem"]:
         group = current_group(entry)
         failed = list(group.get("items") or [])
-        for item in entry.get("items") or []:
-            if item.get("item_id") in failed:
+        # **`entry["items"]` は項目 ID の並びである。** 実体は `state["items"]` にある。
+        for item_id in failed:
+            item = find_item(state, item_id, required=False)
+            if item:
                 item["status"] = "abandoned"
                 item["failure_reason"] = outcome["problem"]
         _apply_drop(path, state, entry, group, failed)
-        entry.pop("pending_test_judgements", None)
+        # **取り消した群の保留だけを消す。** 先行する群でレビューへ引き継ぐと決めた
+        # 分まで捨てない。
+        record_pending_judgements(entry, group.get("apply_round") or 1, [])
         statefile.save(path, state)
         info(f"❌ 適用ラウンド {group.get('apply_round')}: {outcome['problem']}")
         # **終了コードは 2 にする。** 進行側は「取り消した」と読んで次の群へ進む。
