@@ -1,55 +1,67 @@
-"""兆候・手法・重要度の語彙と、判断の基準になる定数。
+"""兆候・手法・重要度の呼び名と、判断の基準になる定数。
 
 差分予算・コミット数の上限・テストの上限秒数など、工程の判断に使う値も持つ。
 """
 from __future__ import annotations
 
+import pathlib
+import re
+
 from typing import Any
 
 
-# 兆候と手法の語彙は `refactoring` Skill の references と 1 対 1 で対応させる。
-# **語彙を固定しないと重複排除が効かない**（同じ箇所への提案が別物として残る）。
+# 兆候と手法の呼び名は `refactoring` が持つ（#444）。**ここでは読むだけで、自分では
+# 持たない。** 2 か所にあると片方だけが更新され、枠組みの出力と方法論の説明が食い違う。
+#
+# **読めなければ止める。** 呼び名が揃わないと重複排除が効かず、同じ提案が別物として残る。
+# 確認は `init` の時点で行う（`commands/setup.py`）。
 
-SMELLS: dict[str, str] = {
-    "long_method": "長すぎるメソッド",
-    "large_class": "肥大したクラス",
-    "duplication": "重複",
-    "long_parameter_list": "長い引数リスト",
-    "feature_envy": "他クラスへの過度な関心",
-    "primitive_obsession": "基本型への固執",
-    "magic_value": "マジックナンバー・文字列",
-    "deep_nesting": "深いネスト",
-    "dead_code": "デッドコード",
-    "circular_dependency": "過度な相互依存",
-    "inconsistent_naming": "一貫しない命名",
-    "swallowed_exception": "例外の飲み込み",
-    "conditional_chain": "条件分岐の連鎖",
-    "scattered_config": "設定の散在",
-    "embedded_business_rule": "業務ルールの埋め込み",
-    "one_by_one_iteration": "一件ずつの反復",
-    "unvalidated_externalization": "検証のない外部化",
-}
+class VocabularyUnavailable(RuntimeError):
+    """呼び名の表を読めないことを表す。**握りつぶさない。**"""
 
-TECHNIQUES: dict[str, str] = {
-    "extract_method": "メソッドの抽出",
-    "rename": "変数・関数・クラスの改名",
-    "introduce_parameter_object": "引数オブジェクトの導入",
-    "introduce_value_object": "値オブジェクトの導入",
-    "flatten_conditional": "条件分岐の平坦化",
-    "replace_conditional_with_polymorphism": "多態による分岐の置き換え",
-    "replace_with_lookup_table": "対応表への置き換え",
-    "replace_with_bulk_operation": "一括処理への置き換え",
-    "extract_strategy": "戦略の切り出し",
-    "move_responsibility": "責務の移動",
-    "fix_dependency_direction": "依存の向きを整える",
-    "split_into_pipeline": "処理の連鎖への分解",
-    "remove_dead_code": "死んだコードの削除",
-    "consolidate_duplication": "重複の共通化",
-    "introduce_named_constant": "名前付き定数・列挙の導入",
-    "propagate_exception": "呼び出し元へ伝える",
-    "centralize_configuration": "定義を 1 箇所へ寄せる",
-    "validate_at_boundary": "スキーマと版を与え、読み込み境界で検証する",
-}
+
+# 呼び名の表の位置。**現在地には依存させない。** `uv run --script` で起動したときの
+# 現在地は、スクリプトの位置と揃わない。
+VOCABULARY_TABLE = (
+    pathlib.Path(__file__).resolve().parents[3]
+    / "refactoring" / "references" / "vocabulary.md"
+)
+
+
+def _read_table(heading: str, value_column: str) -> dict[str, str]:
+    """呼び名の表の 1 節を、識別子 → 値で返す。
+
+    **列は見出しの名前で決める。** 並びが変わっても読み取りが壊れない。
+    """
+    try:
+        text = VOCABULARY_TABLE.read_text(encoding="utf-8")
+    except OSError as exc:                       # 読めない = 呼び名が無い
+        raise VocabularyUnavailable(
+            f"呼び名の表を読めません: {VOCABULARY_TABLE} ({exc})"
+        ) from exc
+    body = re.search(rf"^## {re.escape(heading)}\n(.*?)(?=^## |\Z)", text, re.S | re.M)
+    if not body:
+        raise VocabularyUnavailable(f"呼び名の表に「{heading}」の節がありません")
+    rows = [ln for ln in body.group(1).splitlines() if ln.strip().startswith("|")]
+    if len(rows) < 3:
+        raise VocabularyUnavailable(f"呼び名の表の「{heading}」が空です")
+    header = [c.strip() for c in rows[0].strip("|").split("|")]
+    try:
+        i_id, i_value = header.index("識別子"), header.index(value_column)
+    except ValueError as exc:
+        raise VocabularyUnavailable(
+            f"呼び名の表の「{heading}」に列がありません: {exc}"
+        ) from exc
+    out: dict[str, str] = {}
+    for line in rows[2:]:
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        out[cells[i_id].strip("`")] = cells[i_value]
+    return out
+
+
+SMELLS: dict[str, str] = _read_table("兆候", "日本語の名前")
+
+TECHNIQUES: dict[str, str] = _read_table("手法", "日本語の名前")
 
 # テスト整備ラウンドの語彙。**新しい語彙は作らない**（#436 決定 9）。値は既存の
 # 3 本の参照が持つ分類をそのまま使う。閉じるのは 2 つだけで、17 種の兆候に当たる
@@ -167,16 +179,14 @@ DIFF_BUDGET_FACTOR = 2
 # 113/50 行）。範囲の逸脱ではなく、倍率 2 の予算をわずかに超えただけである。
 # 一方、範囲外の 3 系統を触った実測例は見積の 4 倍まで膨らんだので、倍率を 3 へ
 # 上げても逸脱は取り逃がさない。
-EXTRACTION_TECHNIQUES: frozenset[str] = frozenset({
-    "extract_method",
-    "extract_strategy",
-    "introduce_parameter_object",
-    "introduce_value_object",
-    "split_into_pipeline",
-    "move_responsibility",
-    "consolidate_duplication",
-})
+# 倍率 3 の手法は呼び名の表が持つ（#444）。**ここでは読むだけである。**
 EXTRACTION_DIFF_BUDGET_FACTOR = 3
+
+EXTRACTION_TECHNIQUES: frozenset[str] = frozenset(
+    name
+    for name, factor in _read_table("手法ごとの差分予算の倍率", "倍率").items()
+    if factor == str(EXTRACTION_DIFF_BUDGET_FACTOR)
+)
 
 # 1 改善項目が履歴に残せるコミット数。
 #
