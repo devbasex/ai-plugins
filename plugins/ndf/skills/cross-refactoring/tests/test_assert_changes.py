@@ -102,6 +102,8 @@ def test_the_launcher_accepts_the_judging_phase(tmp_path) -> None:
     stub = stub_dir / "codex"
     stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     stub.chmod(0o755)
+    # 判定の対象は進行側が書き出す。**無ければ起動しない。**
+    (state_path.parent / "test-diff-r1.diff").write_text("--- a\n+++ b\n", encoding="utf-8")
     proc = subprocess.run(
         [str(launch), "codex", "judge-test-changes", "130", "1"],
         env={**os.environ, "CROSS_REFACTORING_TMP_DIR": str(state_path.parent),
@@ -111,6 +113,31 @@ def test_the_launcher_accepts_the_judging_phase(tmp_path) -> None:
     assert "未知のフェーズです" not in proc.stderr
 
 
+def test_the_judging_phase_needs_the_diff(tmp_path) -> None:
+    """判定の対象が無ければ起動しないこと。**渡すものが無いまま起動しない。**"""
+    import os
+    import subprocess
+    from crossref_helpers import make_state
+
+    launch = pathlib.Path(__file__).resolve().parents[1] / "scripts" / "launch-cli.sh"
+    state_path = make_state(tmp_path)
+    proc = subprocess.run(
+        [str(launch), "codex", "judge-test-changes", "130", "1"],
+        env={**os.environ, "CROSS_REFACTORING_TMP_DIR": str(state_path.parent)},
+        capture_output=True, text=True,
+    )
+    assert proc.returncode != 0
+    assert "判定する差分がありません" in proc.stderr
+
+
+def test_the_judging_prompt_points_at_the_diff_file() -> None:
+    """プロンプトが、対象の差分の位置と結果の書き出し先を指すこと。"""
+    prompt = (pathlib.Path(__file__).resolve().parents[1]
+              / "prompts" / "judge-test-changes.md").read_text(encoding="utf-8")
+    assert "$RF_TEST_DIFF_PATH" in prompt
+    assert "$RF_STEM-result.json" in prompt
+
+
 def test_the_judging_prompt_asks_for_three_verdicts() -> None:
     """判定の答えが 3 択であること。**2 択だと迷ったものが片方へ倒れる。**"""
     prompt = (pathlib.Path(__file__).resolve().parents[1]
@@ -118,3 +145,78 @@ def test_the_judging_prompt_asks_for_three_verdicts() -> None:
     for verdict in ("unchanged", "changed", "undecidable"):
         assert verdict in prompt
     assert "リポジトリを編集しない" in prompt
+
+
+# ---------- 判定の穴（レビューの指摘） ----------
+
+def test_a_duplicated_assertion_that_changes_is_detected(verify) -> None:
+    """同じ `assert` が複数あるとき、その 1 つが変わったことを見落とさない。"""
+    before = ["    assert f(1) == 3\n", "    assert f(1) == 3\n"]
+    after = ["    assert f(1) == 3\n", "    assert f(1) == 4\n"]
+    assert verify.assertion_change(before, after) == "changed"
+
+
+def test_a_removed_duplicate_is_detected(verify) -> None:
+    """同じ `assert` の一部が消えたことを見落とさない。"""
+    before = ["    assert f(1) == 3\n", "    assert f(1) == 3\n"]
+    after = ["    assert f(1) == 3\n"]
+    assert verify.assertion_change(before, after) == "changed"
+
+
+def test_a_diff_without_assertions_is_undecidable(verify) -> None:
+    """`assert` を含まない差分は、判定できないものとして扱う。
+
+    フィクスチャや定数の変更は期待値を動かしうるが、`assert` の行には現れない。
+    """
+    before = ["EXPECTED = 3\n"]
+    after = ["EXPECTED = 4\n"]
+    assert verify.assertion_change(before, after) == "undecidable"
+
+
+def test_a_dot_inside_a_string_is_kept(verify) -> None:
+    """文字列の中のドットを、取り込み元の接頭辞として伏せない。"""
+    before = ['    assert path == "file.txt"\n']
+    after = ['    assert path == "other.txt"\n']
+    assert verify.assertion_change(before, after) == "changed"
+
+
+# ---------- 検証への配線（レビューの指摘） ----------
+
+def test_the_facts_carry_the_test_diff(gitfacts) -> None:
+    """git から取る事実に、テストの差分が含まれること。
+
+    **含まれないと、検証はテストの期待値を見られない。**
+    """
+    assert hasattr(gitfacts, "commit_test_changes")
+
+
+def test_the_round_verification_rejects_a_changed_expectation(verify) -> None:
+    """適用ラウンドの検証が、期待値の変更を落とすこと。
+
+    **新設した関数を呼ばなければ、手順書だけが「機械が見る」と書いた状態になる。**
+    """
+    items = [{"item_id": "R1-001", "technique": "extract_method",
+              "estimated_diff_lines": 100, "path": "src/a.py"}]
+    facts = [{
+        "sha": "a" * 40, "exists": True, "diff_lines": 10, "files": ["src/a.py"],
+        "trailers": {"Item-Id": "R1-001", "Round": "1",
+                     "Impl-Runtime": "codex", "Impl-Model": "gpt-5.5"},
+        "test_status": "pass", "touches_tests": True,
+        "test_changes": {"tests/test_a.py": (["    assert f(1) == 3\n"],
+                                             ["    assert f(1) == 4\n"])},
+    }]
+    problem = verify.verify_apply_round(items, facts)
+    assert problem is not None
+    assert "期待" in problem
+
+
+def test_the_round_verification_reports_undecidable_diffs(verify) -> None:
+    """判定できない差分を、検証の結果として持ち出せること。
+
+    **落とさないが、通ったものとしても扱わない。** 進行側がこれを段 2 へ渡す。
+    """
+    facts = [{
+        "test_changes": {"tests/test_a.py": (["    assert f(1) == (\n", "        3,\n"],
+                                             ["    assert f(1) == (\n", "        4,\n"])},
+    }]
+    assert verify.pending_test_judgements(facts) == ["tests/test_a.py"]

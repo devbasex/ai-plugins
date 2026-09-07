@@ -54,9 +54,21 @@ eval "$("$SCRIPTS/refactor.py" next-apply-round "$ID" "$ROUND")"  # 1 = 群が�
 | 2 | AI エージェント（`--phase judge-test-changes`） | 期待値が `assert` の行の外にある差分について、同じ入力に対する期待出力が変わったか |
 | 3 | Step 7 のレビュー | AI が `undecidable` と答えたものだけ |
 
-**段 2 を Step 5 の中で行う。** レビュー（Step 7）より前である。判定の対象は段 1 が
-拾えなかった差分に限る。変えてよい範囲の定義は `refactoring` の
-`references/test-changes.md` が持つ。
+**段 1 は `merge-apply` が機械で行う。** `verify_apply_round` が期待値の変更を落とし、
+決まらなかった差分を `pending_test_judgements` へ記録する。
+
+**段 2 は進行側が起動する。** 記録が空でなければ、その差分を
+`$TMP_DIR/test-diff-r<N>.diff` へ書き出し、`launch-cli.sh <ランタイム>
+judge-test-changes <ID> <ラウンド>` を実行する。**記録が残ったまま次の工程へ進まない。**
+
+```bash
+# 記録を読む
+jq -r '.rounds[] | select(.round == $r) | .pending_test_judgements // [] | .[]' \
+  --argjson r "$ROUND" "$STATE"
+```
+
+**段 2 の起動は手順である。** 機械が enforce するのは段 1 と、記録が残ることまでである。
+変えてよい範囲の定義は `refactoring` の `references/test-changes.md` が持つ。
 
 **検証の材料は結果ファイルの申告ではなく、git と実際のテスト実行から取る。**
 実装担当は自分の成果を報告する側なので、JSON の値をそのまま検査に使うと
@@ -72,7 +84,7 @@ eval "$("$SCRIPTS/refactor.py" next-apply-round "$ID" "$ROUND")"  # 1 = 群が�
 | 各コミットでテストが成功している | 実際の実行 | コミットを取り出して着手前と同じテストを走らせる。**JSON の `test_status` は読まない**。`--test-timeout`（既定 900 秒）を超えたら失敗 |
 | テストが無い経路は先に現状固定テスト | `git show --name-only` | `test_gap` が真の項目は、先頭コミットがテストの置き場所を触っている |
 | **テストの期待値が変わっていない** | `git show` のテストの差分 | 接頭辞を伏せた `assert` 行の集合を前後で突き合わせる。変わっていれば失敗（振る舞いの変更である）。**判定できない差分は次の行へ回す** |
-| **判定できないテストの差分** | AI エージェント | 期待値が `assert` の行の外にある差分を渡し、3 択で判定させる。`changed` なら失敗、`undecidable` なら Step 7 のレビューへ回す |
+| **判定できないテストの差分** | `merge-apply` が記録する | 期待値が `assert` の行の外にある差分を `pending_test_judgements` へ残す。**落とさないが、通ったものとしても扱わない** |
 | 項目の分離 | git のトレーラー | 各コミットの `Item-Id` がその項目と一致する。複数の項目を 1 コミットにまとめたら失敗 |
 | コミットの粒度 | 申告されたコミットの実数 | 1 改善項目 = 1 コミット。`test_gap` が真の項目だけ 2 コミット |
 | 差分予算 | `git show --numstat` | 実差分の合計が `estimated_diff_lines` の 2 倍（抽出系の手法は 3 倍）を超えたら失敗（範囲の逸脱） |

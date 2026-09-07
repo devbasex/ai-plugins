@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import re
 
+from collections import Counter
+
 from typing import Any, Iterable, Optional
 
 from .paths import git_out
@@ -228,6 +230,16 @@ def verify_apply_round(
                 f"（先頭コミット {facts[0].get('sha', '?')} がテストを触っていません）"
             )
 
+    # **テストの期待値が変わっていないか**（#443）。段 1（機械）で決まるものだけを
+    # ここで落とす。決まらないものは `pending_test_judgements` が集め、進行側が
+    # 段 2（AI エージェント）へ渡す。
+    changes: dict[str, tuple[list[str], list[str]]] = {}
+    for commit in facts:
+        changes.update(commit.get("test_changes") or {})
+    problem = verify_test_changes(changes)
+    if problem:
+        return problem
+
     estimated = sum(safe_int(i.get("estimated_diff_lines")) for i in items)
     factor = max(
         (diff_budget_factor(i.get("technique")) for i in items),
@@ -302,15 +314,34 @@ def unassigned_fix_commits(
 # 取り込み元の接頭辞。構造が変われば変わるため、比べる前に伏せる。
 _PREFIX = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*\.(?=[A-Za-z_])")
 
+# 文字列。**この中のドットは取り込み元ではない。** 伏せると `"file.txt"` と
+# `"other.txt"` が同じに見え、期待値の変更を見落とす。
+_STRING = re.compile(r"""(?:[rbuf]{0,2}"(?:\\.|[^"\\])*"|[rbuf]{0,2}'(?:\\.|[^'\\])*')""")
+
 # 期待値が `assert` の行の外にある形。集合の一致では判定できない。
 _OPEN_CALL = re.compile(r"[\(\[\{]\s*$")
 _PARAMETRIZE = re.compile(r"@pytest\.mark\.parametrize|@parameterized")
 
 
-def _assert_lines(lines: Iterable[str]) -> list[str]:
-    """`assert` の行だけを、接頭辞を伏せて並べ替えて返す。"""
-    return sorted(
-        _PREFIX.sub("MOD.", line.strip())
+def _mask_prefix(line: str) -> str:
+    """取り込み元の接頭辞だけを伏せる。**文字列の中は触らない。**"""
+    out, last = [], 0
+    for match in _STRING.finditer(line):
+        out.append(_PREFIX.sub("MOD.", line[last:match.start()]))
+        out.append(match.group(0))
+        last = match.end()
+    out.append(_PREFIX.sub("MOD.", line[last:]))
+    return "".join(out)
+
+
+def _assert_lines(lines: Iterable[str]) -> "Counter[str]":
+    """`assert` の行を、接頭辞を伏せて**件数ごと**数える。
+
+    **集合にしない。** 同じ `assert` が複数あるとき、その 1 つが変わったことを
+    見落とす（`test-changes.md` が「重複で対応が取れない」と書いているのと同じ形）。
+    """
+    return Counter(
+        _mask_prefix(line.strip())
         for line in lines
         if line.strip().startswith("assert ")
     )
@@ -343,10 +374,14 @@ def assertion_change(before: Iterable[str], after: Iterable[str]) -> str:
     if _has_undecidable_form(rows_before) or _has_undecidable_form(rows_after):
         return "undecidable"
     kept_before, kept_after = _assert_lines(rows_before), _assert_lines(rows_after)
+    if not kept_before and not kept_after:
+        # **`assert` の行が無い差分は判定できない。** フィクスチャや定数の変更は
+        # 期待値を動かしうるが、`assert` の行には現れない。
+        return "undecidable"
     if kept_before == kept_after:
         return "unchanged"
-    # 元の行がすべて残っていれば、足しただけである。
-    if all(line in kept_after for line in kept_before):
+    # 元の行が件数ごと残っていれば、足しただけである。**多重集合で見る。**
+    if not (kept_before - kept_after):
         return "unchanged"
     return "changed"
 
@@ -383,4 +418,15 @@ def verify_test_changes(
         f"（{', '.join(changed)}）。"
         "構造改善では期待出力を変えません。振る舞いの変更は別の変更に分けてください"
     )
+
+
+def pending_test_judgements(facts: Iterable[dict[str, Any]]) -> list[str]:
+    """段 2（AI エージェント）へ渡すテストを、ファイルの順で返す。
+
+    **機械で決まらなかったものだけが残る。** 空でないまま収束させない。
+    """
+    changes: dict[str, tuple[list[str], list[str]]] = {}
+    for commit in facts:
+        changes.update(commit.get("test_changes") or {})
+    return undecidable_test_changes(changes)
 

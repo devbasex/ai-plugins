@@ -45,7 +45,7 @@ from ..rounds import (
     item_label,
     phase_after_group,
 )
-from ..verify import verify_apply_round
+from ..verify import pending_test_judgements, verify_apply_round
 from ..vocabulary import DEFAULT_TEST_TIMEOUT
 
 
@@ -649,6 +649,15 @@ def _verify_apply_group(
         )
     else:
         problem = verify_apply_round(items, facts, scope)
+
+    # **機械で決まらなかったテストの差分を記録する**（#443）。落とさないが、
+    # 通ったものとしても扱わない。進行側がこれを見て段 2（`judge-test-changes`）を
+    # 起動する。**空でないまま収束させない。**
+    pending = pending_test_judgements(facts)
+    if pending:
+        entry["pending_test_judgements"] = pending
+    else:
+        entry.pop("pending_test_judgements", None)
 
     diff_lines = sum(safe_int(c.get("diff_lines")) for c in facts)
     for item in items:

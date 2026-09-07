@@ -74,6 +74,11 @@ case "$PHASE" in
     STEM=$TMP_DIR/$RUNTIME-judge-test-changes-r$ROUND
     WORKDIR=$WORK
     PRINT_TIMEOUT=900
+    # 判定の対象は、進行側が先に書き出す。**無ければ起動しない**（渡すものが無い）。
+    RF_TEST_DIFF_PATH=$TMP_DIR/test-diff-r$ROUND.diff
+    [ -s "$RF_TEST_DIFF_PATH" ] || {
+      echo "判定する差分がありません: $RF_TEST_DIFF_PATH" >&2; exit 1; }
+    export RF_TEST_DIFF_PATH
     ;;
   final-fix)
     # **ラウンド番号を名前に入れない。** 最終ゲートは提案ラウンドの外にあり、
