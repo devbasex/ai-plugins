@@ -70,13 +70,14 @@ def _args(tmp_path, **over):
 
 
 @pytest.fixture
-def run_init(patch_lib, refactor, origin_repo, monkeypatch):
+def run_init(refactor_lib, paths, patch_lib, refactor, origin_repo, monkeypatch):
     """`gh` 呼び出しだけを差し替えて `init` を走らせる。
 
     `viewer` は `gh api user` が返すログイン名。Pull Request の作成者は
     常に `author` なので、両者を一致させると自分の Pull Request になる。
     """
-    paths = sys.modules["refactor_lib.paths"]
+    refactor_lib = sys.modules["refactor_lib"]
+
     def _run(args, viewer="someone-else"):
         real_sh = paths.sh
 
@@ -88,7 +89,7 @@ def run_init(patch_lib, refactor, origin_repo, monkeypatch):
                     # viewer=None は取得に失敗する環境（bot トークンなど）を表す
                     if viewer is None:
                         if check:
-                            refactor.die("コマンドが失敗しました (gh api user): HTTP 403")
+                            refactor_lib.die("コマンドが失敗しました (gh api user): HTTP 403")
                         return ""
                     return viewer
                 # 作成者・head・base は REST の 1 回でまとめて返る（#271）。
@@ -154,9 +155,7 @@ def test_init_records_models(run_init, tmp_path):
     }
 
 
-def test_init_warns_that_the_kiro_default_model_cannot_be_measured(
-    run_init, tmp_path, capsys
-):
+def test_init_warns_that_the_kiro_default_model_cannot_be_measured(run_init, tmp_path, capsys):
     """既定の `auto` は実際に動いたモデルを取得できず、集計から分離される。
 
     報告まで分からないと、比較のために回した実行が丸ごと無駄になる。
@@ -183,9 +182,7 @@ def test_init_warns_when_codex_or_agy_has_no_model(run_init, tmp_path, capsys):
     assert "agy のモデルが default です" in warning
 
 
-def test_init_does_not_warn_when_every_model_can_be_measured(
-    run_init, tmp_path, capsys
-):
+def test_init_does_not_warn_when_every_model_can_be_measured(run_init, tmp_path, capsys):
     """claude だけは指定が無くても実測できるため、警告の対象にならない。"""
     run_init(_args(tmp_path, model=[
         "codex=gpt-5.5", "agy=gemini-3.8", "kiro=claude-opus-5",
@@ -230,9 +227,7 @@ def test_init_stops_when_the_scope_has_no_test_location(run_init, tmp_path):
     assert e.value.code == refactor_abort()
 
 
-def test_init_stops_when_the_test_location_is_outside_the_baseline_search(
-    run_init, tmp_path, origin_repo
-):
+def test_init_stops_when_the_test_location_is_outside_the_baseline_search(run_init, tmp_path, origin_repo):
     """C3 — 足したテストが `--baseline-test` で実行されないなら止める。"""
     (origin_repo / "src" / "unit").mkdir(parents=True, exist_ok=True)
     with pytest.raises(SystemExit):
@@ -261,7 +256,7 @@ def _parsed_init_args(patch_lib, refactor, monkeypatch, *extra):
     return captured
 
 
-def test_the_round_caps_have_their_own_defaults(patch_lib, cmd_setup, refactor, monkeypatch):
+def test_the_round_caps_have_their_own_defaults(patch_lib, refactor, monkeypatch):
     """E1 — 4 つの上限は別々の単位に掛かる（#436 決定 8）。
 
     `--max-outer-rounds` が 3 でよいのは、適用ラウンドを分けたことで**1 回の提案で
@@ -276,7 +271,7 @@ def test_the_round_caps_have_their_own_defaults(patch_lib, cmd_setup, refactor, 
     assert captured["max_items_per_round"] == 5
 
 
-def test_the_ci_check_is_not_set_by_default(patch_lib, cmd_setup, refactor, monkeypatch):
+def test_the_ci_check_is_not_set_by_default(patch_lib, refactor, monkeypatch):
     """指定が無ければ代替しない。**手元のテストで判定する**（決定 7 の排他）。"""
     assert _parsed_init_args(patch_lib, refactor, monkeypatch)["ci_check"] is None
     assert _parsed_init_args(patch_lib, refactor, monkeypatch, "--ci-check", "tests")["ci_check"] == "tests"
@@ -402,47 +397,48 @@ def test_init_records_the_vocabulary_for_the_prompt(run_init, tmp_path, vocabula
     assert state["vocabulary"]["smells"] == vocabulary.SMELLS
 
 
-def _probe_result(refactor, monkeypatch, outcomes):
+def _probe_result(cmd_setup, refactor, monkeypatch, outcomes):
     """認証確認コマンドの結果を差し替える。`{ランタイム: (rc, 出力)}`。"""
     def fake_run(cmd, **kwargs):
-        for runtime, probe in refactor.auth.AUTH_PROBES.items():
+        for runtime, probe in cmd_setup.auth.AUTH_PROBES.items():
             if list(cmd) == list(probe):
                 rc, out = outcomes.get(runtime, (0, "ok"))
                 return subprocess.CompletedProcess(cmd, rc, out, "")
         raise AssertionError(f"想定外の呼び出し: {cmd}")
-    monkeypatch.setattr(refactor.auth.subprocess, "run", fake_run)
+    monkeypatch.setattr(cmd_setup.auth.subprocess, "run", fake_run)
 
 
 def test_check_auth_passes_when_every_cli_is_logged_in(refactor, cmd_setup, monkeypatch):
     monkeypatch.delenv("NDF_SKIP_AUTH_CHECK", raising=False)
-    _probe_result(refactor, monkeypatch, {})
+    _probe_result(cmd_setup, refactor, monkeypatch, {})
     results = cmd_setup.check_auth(["claude", "codex", "agy", "kiro"])
     assert all(r["ok"] for r in results.values())
 
 
-def test_check_auth_fails_on_a_non_zero_exit(refactor, cmd_setup, monkeypatch):
+def test_check_auth_fails_on_a_non_zero_exit(refactor_lib, cmd_setup, refactor, monkeypatch):
     monkeypatch.delenv("NDF_SKIP_AUTH_CHECK", raising=False)
-    _probe_result(refactor, monkeypatch, {"kiro": (1, "")})
+    _probe_result(cmd_setup, refactor, monkeypatch, {"kiro": (1, "")})
     with pytest.raises(SystemExit) as e:
         cmd_setup.check_auth(["claude", "codex", "agy", "kiro"])
-    assert e.value.code == refactor.ABORT
+    assert e.value.code == refactor_abort()
 
 
 def test_check_auth_fails_when_the_output_says_not_logged_in(refactor, cmd_setup, monkeypatch):
     """終了コード 0 でも未認証を示すことがある（kiro は成否を終了コードで表さない）。"""
     monkeypatch.delenv("NDF_SKIP_AUTH_CHECK", raising=False)
-    _probe_result(refactor, monkeypatch, {"kiro": (0, "Not logged in")})
+    _probe_result(cmd_setup, refactor, monkeypatch, {"kiro": (0, "Not logged in")})
     with pytest.raises(SystemExit):
         cmd_setup.check_auth(["claude", "codex", "agy", "kiro"])
 
 
 def test_check_auth_fails_when_the_cli_is_missing(refactor, cmd_setup, monkeypatch):
+    cmd_setup = sys.modules["refactor_lib.commands.setup"]
     monkeypatch.delenv("NDF_SKIP_AUTH_CHECK", raising=False)
 
     def missing(cmd, **kwargs):
         raise FileNotFoundError(cmd[0])
 
-    monkeypatch.setattr(refactor.auth.subprocess, "run", missing)
+    monkeypatch.setattr(cmd_setup.auth.subprocess, "run", missing)
     with pytest.raises(SystemExit):
         cmd_setup.check_auth(["codex"])
 
@@ -454,11 +450,11 @@ def test_check_auth_can_be_skipped_explicitly(refactor, cmd_setup, monkeypatch):
     def never(cmd, **kwargs):
         raise AssertionError("認証確認を実行してはいけない")
 
-    monkeypatch.setattr(refactor.auth.subprocess, "run", never)
+    monkeypatch.setattr(cmd_setup.auth.subprocess, "run", never)
     assert cmd_setup.check_auth(["codex", "agy"]) == {}
 
 
-def test_init_checks_cli_authentication(patch_lib, refactor, paths, cmd_setup, origin_repo, monkeypatch, tmp_path):
+def test_init_checks_cli_authentication(patch_lib, refactor, cmd_setup, origin_repo, monkeypatch, tmp_path):
     """未認証の CLI があれば初期化ごと中断すること。
 
     参加者が 1 人欠けた構成のまま進むと、その者の提案とレビューが無いまま収束する。
@@ -466,13 +462,13 @@ def test_init_checks_cli_authentication(patch_lib, refactor, paths, cmd_setup, o
     monkeypatch.delenv("NDF_SKIP_AUTH_CHECK", raising=False)
     monkeypatch.chdir(origin_repo)
     monkeypatch.delenv("CROSS_REFACTORING_TMP_DIR", raising=False)
-    _probe_result(refactor, monkeypatch, {"agy": (1, "Authentication failed")})
+    _probe_result(cmd_setup, refactor, monkeypatch, {"agy": (1, "Authentication failed")})
     patch_lib("sh",
         lambda cmd, **k: pytest.fail("認証確認より前に gh を呼んでいる"),
     )
     with pytest.raises(SystemExit) as e:
         cmd_setup.cmd_init(_args(tmp_path))
-    assert e.value.code == refactor.ABORT
+    assert e.value.code == refactor_abort()
 
 
 def test_init_downgrades_the_posting_event_on_own_pull_request(run_init, tmp_path):

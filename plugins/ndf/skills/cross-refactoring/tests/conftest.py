@@ -82,6 +82,12 @@ def metrics() -> types.ModuleType:
     sys.path.insert(0, str(_LIB))
     return _load_module("ndf_lib_metrics", _LIB / "metrics.py")
 
+@pytest.fixture(scope="session")
+def refactor_lib(refactor: types.ModuleType) -> types.ModuleType:
+    """`refactor_lib` そのもの。`ABORT` / `die` / `info` を持つ。"""
+    return sys.modules["refactor_lib"]
+
+
 @pytest.fixture
 def patch_lib(refactor, monkeypatch):
     """`refactor_lib` の全モジュールで、その名前を持つものを差し替える。

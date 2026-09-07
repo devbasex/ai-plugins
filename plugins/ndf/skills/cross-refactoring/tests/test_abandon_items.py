@@ -127,7 +127,6 @@ def test_deferred_entry_records_the_reason(cmd_converge, tmp_path, env_tmp_dir, 
 
 def _history(patch_lib, refactor, monkeypatch, newest_first):
     """`git rev-list HEAD` の結果（新しい順）と SHA 解決を差し替える。"""
-    paths = sys.modules["refactor_lib.paths"]
     def fake_git_out(work, args, **_kw):
         if args[:1] == ["rev-list"]:
             return "\n".join(newest_first)
@@ -141,7 +140,7 @@ def _history(patch_lib, refactor, monkeypatch, newest_first):
     ["old111", "new222"],      # 古い順の申告
     ["new222", "old111"],      # 新しい順の申告
 ])
-def test_revert_runs_newest_commit_first(patch_lib, refactor, paths, cmd_converge, tmp_path, env_tmp_dir, monkeypatch, claimed):
+def test_revert_runs_newest_commit_first(paths, patch_lib, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch, claimed):
     """新しいコミットから順に戻す。逆順にすると後続の取り消しが競合する。
 
     **申告の順序は信用しない。** git の履歴から並べ直す。
@@ -159,7 +158,7 @@ def test_revert_runs_newest_commit_first(patch_lib, refactor, paths, cmd_converg
         calls.append(cmd)
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
-    monkeypatch.setattr(refactor.subprocess, "run", fake_run)
+    monkeypatch.setattr(paths.subprocess, "run", fake_run)
     patch_lib("sh", lambda *a, **k: "")
     cmd_converge.cmd_abandon_items(_args(dry_run=False))
 
@@ -167,7 +166,7 @@ def test_revert_runs_newest_commit_first(patch_lib, refactor, paths, cmd_converg
     assert [c[-1] for c in reverts] == ["new222", "old111"]
 
 
-def test_revert_failure_aborts_and_stops(refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
+def test_revert_failure_aborts_and_stops(paths, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
     """取り消しに失敗したら中断する。半端な状態を Pull Request に残さない。"""
     state_path = _state(tmp_path, [_finding("R1-001")], item_ids=("R1-001",))
     env_tmp_dir(state_path)
@@ -179,14 +178,13 @@ def test_revert_failure_aborts_and_stops(refactor, cmd_converge, tmp_path, env_t
         rc = 1 if cmd[:2] == ["git", "revert"] and "--abort" not in cmd else 0
         return subprocess.CompletedProcess(cmd, rc, "", "conflict")
 
-    monkeypatch.setattr(refactor.subprocess, "run", fake_run)
+    monkeypatch.setattr(paths.subprocess, "run", fake_run)
     with pytest.raises(SystemExit):
         cmd_converge.cmd_abandon_items(_args(dry_run=False))
     assert ["git", "revert", "--abort"] in calls
 
 
-def test_revert_failure_rolls_back_to_the_starting_head(patch_lib, paths, 
-    refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
+def test_revert_failure_rolls_back_to_the_starting_head(paths, patch_lib, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
     """複数コミットの途中で失敗したとき、成功済みの取り消しも巻き戻すこと。
 
     先行して成功した取り消しだけが履歴に残ると、再実行で不整合になって進めなくなる。
@@ -206,19 +204,19 @@ def test_revert_failure_rolls_back_to_the_starting_head(patch_lib, paths,
         return subprocess.CompletedProcess(cmd, 1 if failing else 0, "", "conflict")
 
     _history(patch_lib, refactor, monkeypatch, ["new222", "old111"])
-    monkeypatch.setattr(refactor.subprocess, "run", fake_run)
+    monkeypatch.setattr(paths.subprocess, "run", fake_run)
     with pytest.raises(SystemExit):
         cmd_converge.cmd_abandon_items(_args(dry_run=False))
 
     assert ["git", "reset", "--hard", "HEAD_BEFORE"] in calls
 
 
-def test_push_never_uses_force(patch_lib, refactor, paths, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
+def test_push_never_uses_force(paths, patch_lib, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
     """`--force` は使わない。他者の作業を消す事故を起こさないため。"""
     state_path = _state(tmp_path, [_finding("R1-001")], item_ids=("R1-001",))
     env_tmp_dir(state_path)
     monkeypatch.setattr(
-        refactor.subprocess, "run",
+        paths.subprocess, "run",
         lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "", ""),
     )
     pushes: list[list[str]] = []
@@ -246,8 +244,6 @@ def _fix_commit(**over):
 
 
 def _prepare_fix(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, claimed, thread="PRRT_a", facts=None):
-    paths = sys.modules["refactor_lib.paths"]
-    gitfacts = sys.modules["refactor_lib.gitfacts"]
     state_path = _state(tmp_path, [_finding("R1-001", thread=thread)])
     state = read_state(state_path)
     state["rounds"][0]["fix_rounds"] = 0
@@ -279,8 +275,7 @@ def _prepare_fix(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, claime
     return state_path
 
 
-def test_merge_fix_resolves_threads_and_counts_rounds(patch_lib, paths, 
-    refactor, gitfacts, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
+def test_merge_fix_resolves_threads_and_counts_rounds(patch_lib, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
     state_path = _prepare_fix(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, ["PRRT_a"])
     patch_lib("resolved_threads_on_github",
                         lambda repo, pr: {"PRRT_a"})
@@ -292,8 +287,7 @@ def test_merge_fix_resolves_threads_and_counts_rounds(patch_lib, paths,
     assert "fix111" in state["items"][0]["commits"]
 
 
-def test_merge_fix_rejects_unverified_resolution_claims(patch_lib, paths, 
-    refactor, gitfacts, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
+def test_merge_fix_rejects_unverified_resolution_claims(patch_lib, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
     """解決 API に失敗・未実行でも「解決済み」と書けてしまうため、突き合わせる。"""
     state_path = _prepare_fix(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, ["PRRT_a"])
     patch_lib("resolved_threads_on_github", lambda repo, pr: set())
@@ -308,7 +302,7 @@ def _no_git(patch_lib, refactor, monkeypatch):
     paths = sys.modules["refactor_lib.paths"]
     calls: list[list[str]] = []
     monkeypatch.setattr(
-        refactor.subprocess, "run",
+        paths.subprocess, "run",
         lambda cmd, **kw: calls.append(list(cmd))
         or subprocess.CompletedProcess(cmd, 0, "", ""),
     )
@@ -316,8 +310,7 @@ def _no_git(patch_lib, refactor, monkeypatch):
     return calls
 
 
-def test_merge_fix_rejects_commits_that_skip_the_procedure(patch_lib, paths, 
-    refactor, gitfacts, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
+def test_merge_fix_rejects_commits_that_skip_the_procedure(patch_lib, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
     """修正側だけ素通しにすると、手順を外れた変更がそのまま収束済みになる。
 
     記録しないだけでは Pull Request に残るため、**範囲ごと取り消す**。
@@ -337,8 +330,7 @@ def test_merge_fix_rejects_commits_that_skip_the_procedure(patch_lib, paths,
     assert any(c[:2] == ["git", "push"] for c in calls)
 
 
-def test_merge_fix_rejects_commits_missing_trailers(patch_lib, paths, 
-    refactor, gitfacts, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
+def test_merge_fix_rejects_commits_missing_trailers(patch_lib, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
     commit = _fix_commit()
     del commit["trailers"]["Impl-Model"]
     state_path = _prepare_fix(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, ["PRRT_a"], facts=[commit]
@@ -353,8 +345,7 @@ def test_merge_fix_rejects_commits_missing_trailers(patch_lib, paths,
     assert [c[-1] for c in calls if c[:2] == ["git", "revert"]] == ["fix111"]
 
 
-def test_merge_fix_treats_unreachable_github_as_unresolved(patch_lib, paths, 
-    refactor, gitfacts, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
+def test_merge_fix_treats_unreachable_github_as_unresolved(patch_lib, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
     """取得できないことと「解決済みが 0 件」を混同しない。安全側に倒す。"""
     state_path = _prepare_fix(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, ["PRRT_a"])
     patch_lib("resolved_threads_on_github", lambda repo, pr: None)
@@ -364,28 +355,28 @@ def test_merge_fix_treats_unreachable_github_as_unresolved(patch_lib, paths,
     assert state["rounds"][0]["reviews"][0]["findings"][0]["resolved"] is False
 
 
-def test_resolved_threads_returns_none_when_gh_fails(refactor, gitfacts, monkeypatch):
+def test_resolved_threads_returns_none_when_gh_fails(paths, refactor, gitfacts, monkeypatch):
     monkeypatch.setattr(
-        refactor.subprocess, "run",
+        paths.subprocess, "run",
         lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, "", "auth required"),
     )
     assert gitfacts.resolved_threads_on_github("a/b", 1) is None
 
 
-def test_resolved_threads_reads_only_resolved_ids(refactor, gitfacts, monkeypatch):
+def test_resolved_threads_reads_only_resolved_ids(paths, refactor, gitfacts, monkeypatch):
     payload = {"data": {"repository": {"pullRequest": {"reviewThreads": {
         "pageInfo": {"hasNextPage": False, "endCursor": None},
         "nodes": [{"id": "T1", "isResolved": True}, {"id": "T2", "isResolved": False}],
     }}}}}
     monkeypatch.setattr(
-        refactor.subprocess, "run",
+        paths.subprocess, "run",
         lambda cmd, **kw: subprocess.CompletedProcess(
             cmd, 0, __import__("json").dumps(payload), ""),
     )
     assert gitfacts.resolved_threads_on_github("a/b", 1) == {"T1"}
 
 
-def test_resolved_threads_follows_pagination(refactor, gitfacts, monkeypatch):
+def test_resolved_threads_follows_pagination(paths, refactor, gitfacts, monkeypatch):
     pages = [
         {"data": {"repository": {"pullRequest": {"reviewThreads": {
             "pageInfo": {"hasNextPage": True, "endCursor": "C1"},
@@ -401,13 +392,12 @@ def test_resolved_threads_follows_pagination(refactor, gitfacts, monkeypatch):
         return subprocess.CompletedProcess(
             cmd, 0, __import__("json").dumps(pages[len(calls) - 1]), "")
 
-    monkeypatch.setattr(refactor.subprocess, "run", fake_run)
+    monkeypatch.setattr(paths.subprocess, "run", fake_run)
     assert gitfacts.resolved_threads_on_github("a/b", 1) == {"T1", "T2"}
     assert any("cursor=C1" in "".join(c) for c in calls)
 
 
-def test_merge_fix_skips_already_merged_result(patch_lib, paths, 
-    refactor, gitfacts, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
+def test_merge_fix_skips_already_merged_result(patch_lib, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
     """同じ試行番号・同じ結果ファイルの内容は二重に取り込まない。
 
     叩き直しても鍵（試行番号 + 結果ファイルのハッシュ）が変わらなければ、
@@ -430,8 +420,7 @@ def test_merge_fix_skips_already_merged_result(patch_lib, paths,
     assert after["rounds"][0]["reviews"][0]["findings"][0]["resolved"] is False
 
 
-def test_merge_fix_rejects_commits_missing_from_the_claim(patch_lib, paths, 
-    refactor, gitfacts, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
+def test_merge_fix_rejects_commits_missing_from_the_claim(patch_lib, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
     """範囲に含まれるが誰の申告にも無いコミットがあれば、範囲ごと取り消す。"""
     state_path = _prepare_fix(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, ["PRRT_a"])
     patch_lib("resolved_threads_on_github",
@@ -452,7 +441,7 @@ def test_merge_fix_rejects_commits_missing_from_the_claim(patch_lib, paths,
 
 
 @pytest.mark.parametrize("broken_ids", ["文字列", 123, True, {"a": 1}])
-def test_broken_fix_result_does_not_crash(patch_lib, refactor, paths, gitfacts, cmd_converge, tmp_path, env_tmp_dir, monkeypatch, broken_ids):
+def test_broken_fix_result_does_not_crash(patch_lib, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch, broken_ids):
     """`commits` や `resolved_thread_ids` が壊れていてもクラッシュしない。
 
     文字列は 1 文字ずつに分解され、数値や真偽値は反復できずに落ちる。
@@ -479,7 +468,7 @@ def test_broken_fix_result_does_not_crash(patch_lib, refactor, paths, gitfacts, 
     assert state["rounds"][0]["reviews"][0]["findings"][0]["resolved"] is False
 
 
-def test_merge_fix_uses_the_recorded_range(patch_lib, refactor, paths, gitfacts, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
+def test_merge_fix_uses_the_recorded_range(patch_lib, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
     """修正の範囲も、オーケストレータが記録した起点から取ること。
 
     空集合を渡すと全ての修正コミットが「範囲外」になって必ず不正扱いになる。
@@ -506,7 +495,7 @@ def test_merge_fix_uses_the_recorded_range(patch_lib, refactor, paths, gitfacts,
     assert read_state(state_path)["rounds"][0]["reviews"][0]["findings"][0]["resolved"]
 
 
-def test_merge_fix_fails_when_the_range_cannot_be_determined(patch_lib, refactor, paths, gitfacts, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
+def test_merge_fix_fails_when_the_range_cannot_be_determined(patch_lib, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
     state_path = _prepare_fix(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, ["PRRT_a"])
     patch_lib("commits_in_range", lambda work, base, head: None)
     patch_lib("git_out", lambda work, args, **_kw: "HEAD_NOW")
@@ -517,7 +506,7 @@ def test_merge_fix_fails_when_the_range_cannot_be_determined(patch_lib, refactor
     assert e.value.code == 2
 
 
-def test_merge_fix_rejects_unreported_commits(patch_lib, refactor, paths, gitfacts, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
+def test_merge_fix_rejects_unreported_commits(paths, patch_lib, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
     """申告から漏れた修正コミットは検証を受けずに残る。範囲ごと取り消す。"""
     state_path = _prepare_fix(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, ["PRRT_a"])
     # 範囲には 2 件あるが、申告は 1 件だけ
@@ -530,7 +519,7 @@ def test_merge_fix_rejects_unreported_commits(patch_lib, refactor, paths, gitfac
                         lambda repo, pr: {"PRRT_a"})
     calls: list[list[str]] = []
     monkeypatch.setattr(
-        refactor.subprocess, "run",
+        paths.subprocess, "run",
         lambda cmd, **kw: calls.append(list(cmd))
         or subprocess.CompletedProcess(cmd, 0, "", ""),
     )
@@ -544,8 +533,7 @@ def test_merge_fix_rejects_unreported_commits(patch_lib, refactor, paths, gitfac
     assert state["rounds"][0]["reviews"][0]["findings"][0]["resolved"] is False
 
 
-def test_unattributable_invalid_commit_blocks_all_resolutions(patch_lib, paths, 
-    refactor, gitfacts, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
+def test_unattributable_invalid_commit_blocks_all_resolutions(patch_lib, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
     """項目を特定できない不正コミットがあれば、解決の申告を一切採らない。
 
     `invalid_items` に `None` を入れても指摘の `item_id` とは一致しないため、
@@ -566,8 +554,7 @@ def test_unattributable_invalid_commit_blocks_all_resolutions(patch_lib, paths,
     assert [c[-1] for c in calls if c[:2] == ["git", "revert"]] == ["fix111"]
 
 
-def test_reverted_fix_commits_are_not_recorded_in_state(patch_lib, paths, 
-    refactor, gitfacts, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
+def test_reverted_fix_commits_are_not_recorded_in_state(patch_lib, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
     """全件取り消しになるときは、状態へコミットを記録しないこと。
 
     先に記録すると、取り消し済みのコミットが状態ファイルに残り、後の見送り処理が
@@ -587,8 +574,7 @@ def test_reverted_fix_commits_are_not_recorded_in_state(patch_lib, paths,
     assert "bad222" not in recorded
 
 
-def test_broken_elapsed_seconds_does_not_crash(patch_lib, paths, 
-    refactor, gitfacts, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
+def test_broken_elapsed_seconds_does_not_crash(patch_lib, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
     """修正結果の `elapsed_seconds` が非数値でも落ちないこと。"""
     state_path = _prepare_fix(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, ["PRRT_a"])
     result = state_path.parent / "codex-fix-r1-result.json"
@@ -601,7 +587,7 @@ def test_broken_elapsed_seconds_does_not_crash(patch_lib, paths,
     assert read_state(state_path)["rounds"][0]["durations"]["fix"] == 0
 
 
-def test_revert_is_idempotent(patch_lib, paths, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
+def test_revert_is_idempotent(patch_lib, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
     """取り消し済みの項目へもう一度取り消しを掛けないこと。
 
     push の失敗などで叩き直したときに、既に戻したコミットへ `git revert` を
@@ -620,7 +606,7 @@ def test_revert_is_idempotent(patch_lib, paths, refactor, cmd_converge, tmp_path
     assert [c for c in calls if c[:2] == ["git", "revert"]] == []
 
 
-def test_abandon_items_is_idempotent(patch_lib, paths, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
+def test_abandon_items_is_idempotent(patch_lib, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
     """叩き直しても見送りの記録を重複させないこと。"""
     state_path = _state(tmp_path, [])
     env_tmp_dir(state_path)
@@ -631,8 +617,7 @@ def test_abandon_items_is_idempotent(patch_lib, paths, refactor, cmd_converge, t
     assert [d["item_id"] for d in state["deferred_items"]] == ["R1-001", "R1-002"]
 
 
-def test_abandon_items_records_processing_even_with_no_targets(patch_lib, paths, 
-    refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
+def test_abandon_items_records_processing_even_with_no_targets(patch_lib, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
     state_path = _state(tmp_path, [], applied=[])
     env_tmp_dir(state_path)
     _no_git(patch_lib, refactor, monkeypatch)
@@ -640,8 +625,7 @@ def test_abandon_items_records_processing_even_with_no_targets(patch_lib, paths,
     assert read_state(state_path)["rounds"][0]["abandoned"] == []
 
 
-def test_merge_fix_is_idempotent_for_the_same_input(patch_lib, paths, 
-    refactor, gitfacts, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
+def test_merge_fix_is_idempotent_for_the_same_input(patch_lib, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
     """同じ結果ファイルと同じ HEAD で叩き直しても、修正ラウンドを二重に数えない。
 
     修正は同じラウンドで何度も回るため「処理済みか」では判定できない。
@@ -659,8 +643,7 @@ def test_merge_fix_is_idempotent_for_the_same_input(patch_lib, paths,
     assert read_state(state_path)["items"][0]["commits"].count("fix111") == 1
 
 
-def test_merge_fix_counts_a_new_result_as_a_new_round(patch_lib, paths, 
-    refactor, gitfacts, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
+def test_merge_fix_counts_a_new_result_as_a_new_round(patch_lib, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
     """結果ファイルが書き換わったら、次の修正ラウンドとして数えること。"""
     state_path = _prepare_fix(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, ["PRRT_a"])
     patch_lib("resolved_threads_on_github",
@@ -677,8 +660,7 @@ def test_merge_fix_counts_a_new_result_as_a_new_round(patch_lib, paths,
     assert read_state(state_path)["rounds"][0]["fix_rounds"] == 2
 
 
-def test_identical_payload_in_a_later_round_still_counts(patch_lib, paths, 
-    refactor, gitfacts, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
+def test_identical_payload_in_a_later_round_still_counts(patch_lib, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
     """次の修正ラウンドが同じ JSON を返しても、別の実行として数えること。
 
     内容だけを鍵にすると過去のラウンドと衝突し、`fix_rounds` が進まないまま
@@ -700,8 +682,7 @@ def test_identical_payload_in_a_later_round_still_counts(patch_lib, paths,
     assert read_state(state_path)["rounds"][0]["fix_rounds"] == 2
 
 
-def test_rerunning_without_relaunch_is_still_skipped(patch_lib, paths, 
-    refactor, gitfacts, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
+def test_rerunning_without_relaunch_is_still_skipped(patch_lib, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
     """起動し直していない（ファイルがそのまま）なら、叩き直しても数えないこと。"""
     state_path = _prepare_fix(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, ["PRRT_a"])
     patch_lib("resolved_threads_on_github",
@@ -712,7 +693,7 @@ def test_rerunning_without_relaunch_is_still_skipped(patch_lib, paths,
     assert read_state(state_path)["rounds"][0]["fix_rounds"] == 1
 
 
-def test_merge_fix_is_idempotent_after_a_revert(patch_lib, refactor, paths, gitfacts, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
+def test_merge_fix_is_idempotent_after_a_revert(patch_lib, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
     """検証に失敗して取り消したあと、同じ結果ファイルで叩き直しても再処理しないこと。
 
     取り消しで HEAD が変わるため、鍵に HEAD を混ぜると一致しなくなる。
@@ -739,7 +720,7 @@ def test_merge_fix_is_idempotent_after_a_revert(patch_lib, refactor, paths, gitf
     assert [c for c in calls if c[:2] == ["git", "revert"]] == []
 
 
-def test_merge_fix_saves_before_pushing(patch_lib, refactor, paths, gitfacts, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
+def test_merge_fix_saves_before_pushing(paths, patch_lib, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
     """push が失敗しても、取り消しと起点の更新が食い違わないこと。
 
     先に push すると、取り消しコミットはローカルに残るのに起点の更新が保存されず、
@@ -751,7 +732,7 @@ def test_merge_fix_saves_before_pushing(patch_lib, refactor, paths, gitfacts, cm
     patch_lib("resolved_threads_on_github",
                         lambda repo, pr: {"PRRT_a"})
     monkeypatch.setattr(
-        refactor.subprocess, "run",
+        paths.subprocess, "run",
         lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "", ""),
     )
     saved_at_push: list[bool] = []
@@ -768,7 +749,7 @@ def test_merge_fix_saves_before_pushing(patch_lib, refactor, paths, gitfacts, cm
     assert saved_at_push == [True], "push の前に起点の更新が保存されていない"
 
 
-def test_pending_push_is_retried_on_the_next_run(patch_lib, refactor, paths, gitfacts, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
+def test_pending_push_is_retried_on_the_next_run(paths, patch_lib, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
     """push に失敗したら、次の実行で必ず再試行すること。
 
     印を残さないと、取り消しがローカルだけに留まったまま処理済みガードで
@@ -780,7 +761,7 @@ def test_pending_push_is_retried_on_the_next_run(patch_lib, refactor, paths, git
     patch_lib("resolved_threads_on_github",
                         lambda repo, pr: {"PRRT_a"})
     monkeypatch.setattr(
-        refactor.subprocess, "run",
+        paths.subprocess, "run",
         lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "", ""),
     )
 
@@ -823,7 +804,6 @@ def _range_state(tmp_path, findings, item_ids=("R1-001", "R1-002")):
 def _range_env(patch_lib, refactor, monkeypatch, ordered, pick_rc=0):
     """範囲と git 操作を差し替える。`ordered` は新しい順。"""
     paths = sys.modules["refactor_lib.paths"]
-    gitfacts = sys.modules["refactor_lib.gitfacts"]
     calls: list[list[str]] = []
     picked: list[str] = []
 
@@ -843,7 +823,7 @@ def _range_env(patch_lib, refactor, monkeypatch, ordered, pick_rc=0):
             return f"new-{picked[-1]}" if picked else "HEAD_BEFORE"
         return "HEAD_BEFORE"
 
-    monkeypatch.setattr(refactor.subprocess, "run", fake_run)
+    monkeypatch.setattr(paths.subprocess, "run", fake_run)
     patch_lib("git_out", fake_git_out)
     patch_lib("commits_in_range",
                         lambda work, base, head: list(ordered))
@@ -896,26 +876,26 @@ def test_abandon_keeps_an_earlier_group_out_of_the_range(patch_lib, refactor, cm
     assert "reverted" not in by_id["R1-001"]
 
 
-def test_abandon_marks_pending_push_before_reverting(patch_lib, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
+def test_abandon_marks_pending_push_before_reverting(paths, patch_lib, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
     state_path = _range_state(tmp_path, [])
     env_tmp_dir(state_path)
     marks: list[bool] = []
     _range_env(patch_lib, refactor, monkeypatch, ["sha-R1-002", "sha-R1-001"])
-    real_run = refactor.subprocess.run
+    real_run = paths.subprocess.run
 
     def spying_run(cmd, **kwargs):
         if cmd[:2] == ["git", "revert"]:
             marks.append(read_state(state_path)["rounds"][0].get("pending_push"))
         return real_run(cmd, **kwargs)
 
-    monkeypatch.setattr(refactor.subprocess, "run", spying_run)
+    monkeypatch.setattr(paths.subprocess, "run", spying_run)
     cmd_converge.cmd_abandon_items(_args())
 
     assert marks and marks[0] is True
     assert read_state(state_path)["rounds"][0]["pending_push"] is False
 
 
-def test_abandon_saves_the_drop_result_before_pushing(patch_lib, refactor, paths, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
+def test_abandon_saves_the_drop_result_before_pushing(patch_lib, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
     """取り消しの結果を push より先に保存すること。
 
     保存しないまま落ちると、取り消し済みの印が失われ、次の実行が**履歴に無い
@@ -937,7 +917,7 @@ def test_abandon_saves_the_drop_result_before_pushing(patch_lib, refactor, paths
     assert at_push["rounds"][0]["pending_drop"] == []
 
 
-def test_abandon_retries_the_drop_before_resending_the_push(patch_lib, refactor, paths, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
+def test_abandon_retries_the_drop_before_resending_the_push(paths, patch_lib, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
     """やり残した取り消しは、push の再送より先に片づけること。
 
     先に push すると、取り消しが途中の HEAD をそのまま公開してしまう。
@@ -951,9 +931,9 @@ def test_abandon_retries_the_drop_before_resending_the_push(patch_lib, refactor,
 
     order: list[str] = []
     calls = _range_env(patch_lib, refactor, monkeypatch, ["sha-R1-002", "sha-R1-001"])
-    real_run = refactor.subprocess.run
+    real_run = paths.subprocess.run
     monkeypatch.setattr(
-        refactor.subprocess, "run",
+        paths.subprocess, "run",
         lambda cmd, **kw: (order.append(cmd[1]) if cmd[:1] == ["git"] else None)
         or real_run(cmd, **kw),
     )

@@ -29,8 +29,6 @@ def _gate_state(tmp_path, **over):
 @pytest.fixture
 def gate_spy(patch_lib, refactor, monkeypatch):
     """テストの実行・git・push を差し替える。"""
-    paths = sys.modules["refactor_lib.paths"]
-    gitfacts = sys.modules["refactor_lib.gitfacts"]
     seen: dict[str, list] = {"tests": [], "pushed": []}
 
     def fake_run(command, cwd, timeout, grace=5.0):
@@ -151,8 +149,6 @@ def _failing_gate_state(tmp_path, **over):
 @pytest.fixture
 def merge_spy(patch_lib, refactor, monkeypatch):
     """`merge-final-fix` が触る git を差し替える。"""
-    paths = sys.modules["refactor_lib.paths"]
-    gitfacts = sys.modules["refactor_lib.gitfacts"]
     seen: dict[str, list] = {"pushed": [], "reverted": []}
 
     patch_lib("discard_impl_leftovers", lambda state, work: None)
@@ -224,7 +220,7 @@ def test_a_missing_impl_trailer_reverts_the_range(
     assert merge_spy["pushed"] == ["push"], "取り消しも公開する"
 
 
-def test_an_out_of_scope_final_fix_reverts_the_range(patch_lib, refactor, gitfacts, cmd_gate, tmp_path, env_tmp_dir, merge_spy, monkeypatch):
+def test_an_out_of_scope_final_fix_reverts_the_range(patch_lib, refactor, cmd_gate, tmp_path, env_tmp_dir, merge_spy, monkeypatch):
     """**最終ゲートでも `--scope` の外を触ってよい理由は無い。**"""
     state_path = _failing_gate_state(tmp_path)
     env_tmp_dir(state_path)
@@ -240,7 +236,7 @@ def test_an_out_of_scope_final_fix_reverts_the_range(patch_lib, refactor, gitfac
     assert len(merge_spy["reverted"]) == 1
 
 
-def test_an_unreported_commit_reverts_the_range(patch_lib, refactor, verify, cmd_gate, tmp_path, env_tmp_dir, merge_spy, monkeypatch):
+def test_an_unreported_commit_reverts_the_range(patch_lib, refactor, cmd_gate, tmp_path, env_tmp_dir, merge_spy, monkeypatch):
     """申告から漏れたコミットは検証を受けていない。範囲ごと取り消す。"""
     state_path = _failing_gate_state(tmp_path)
     env_tmp_dir(state_path)
@@ -253,7 +249,7 @@ def test_an_unreported_commit_reverts_the_range(patch_lib, refactor, verify, cmd
     assert len(merge_spy["reverted"]) == 1
 
 
-def test_the_commit_test_status_is_not_checked(patch_lib, refactor, gitfacts, cmd_gate, tmp_path, env_tmp_dir, merge_spy, monkeypatch):
+def test_the_commit_test_status_is_not_checked(patch_lib, refactor, cmd_gate, tmp_path, env_tmp_dir, merge_spy, monkeypatch):
     """**コミットごとのテストは走らせない**（決定 11 の排他を破らないため）。
 
     合否は直後の `final-gate` が採った側で 1 度だけ見る。

@@ -112,7 +112,7 @@ def test_sync_without_changes_makes_no_commit(gitfacts, tmp_path):
 
 # ---------- 同期の後段で落ちたとき ----------
 
-def test_failure_after_sync_discards_produced_changes(patch_lib, refactor, paths, gitfacts, tmp_path, monkeypatch):
+def test_failure_after_sync_discards_produced_changes(refactor_lib, patch_lib, refactor, gitfacts, tmp_path, monkeypatch):
     """`git add` / `git commit` が落ちても、同期が作った差分を残さない。
 
     残すと次の実行は清浄性の検査で必ず止まり、保留中の push を再試行できない。
@@ -121,7 +121,7 @@ def test_failure_after_sync_discards_produced_changes(patch_lib, refactor, paths
     state = read_state(_state_with_sync(
         tmp_path, work, command="printf 'x = 2\\n' > generated/out.py"))
     patch_lib("sh",
-                        lambda *a, **k: refactor.die("commit に失敗しました"))
+                        lambda *a, **k: refactor_lib.die("commit に失敗しました"))
 
     with pytest.raises(SystemExit):
         gitfacts._sync_generated(state)
@@ -180,7 +180,7 @@ def test_discard_keeps_control_directory(gitfacts, tmp_path):
     assert _git("status", "--porcelain", cwd=work).stdout == ""
 
 
-def test_merge_fix_continues_when_impl_left_changes(patch_lib, refactor, gitfacts, tmp_path, env_tmp_dir, monkeypatch):
+def test_merge_fix_continues_when_impl_left_changes(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch):
     """修正フェーズの置き土産があっても、`merge-fix` は中断しない。
 
     実装担当がコミットを作れずに終えると作業ツリーへ差分が残る。これを理由に
@@ -222,7 +222,7 @@ def test_merge_fix_continues_when_impl_left_changes(patch_lib, refactor, gitfact
     assert read_state(state_path)["rounds"][0]["fix_rounds"] == 1
 
 
-def test_merge_fix_advances_when_the_range_is_undeterminable(patch_lib, refactor, gitfacts, tmp_path, env_tmp_dir, monkeypatch):
+def test_merge_fix_advances_when_the_range_is_undeterminable(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch):
     """修正の範囲を確定できなくても、修正ラウンドは進めること。
 
     進めないと `should-abandon` が見送りへ移る条件（`fix_rounds` が上限に達する）を

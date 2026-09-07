@@ -305,7 +305,6 @@ def _entry(round_no=1, kind="test"):
 
 def _run_merge(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, proposals, **over):
     # モジュールと引数で同じ語を使わない（`proposals` は提案の中身を指す）
-    paths = sys.modules["refactor_lib.paths"]
     state_path = make_state(
         tmp_path, rounds=[_entry()], phase="propose", outer_round=1,
         round_kind="test", max_test_rounds=2, **over)
@@ -318,8 +317,7 @@ def _run_merge(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, proposal
     return read_state(state_path)
 
 
-def test_merge_proposals_records_test_items_and_their_apply_rounds(patch_lib, paths, 
-    refactor, tmp_path, env_tmp_dir, monkeypatch):
+def test_merge_proposals_records_test_items_and_their_apply_rounds(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch):
     state = _run_merge(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, [
         tprop(target="src/a.py#f", path="tests/test_a.py"),
         tprop(target="src/a.py#g", path="tests/test_a.py"),
@@ -330,15 +328,14 @@ def test_merge_proposals_records_test_items_and_their_apply_rounds(patch_lib, pa
     assert state["phase"] == "apply"
 
 
-def test_an_empty_test_round_does_not_end_the_run(patch_lib, paths, 
-    refactor, tmp_path, env_tmp_dir, monkeypatch):
+def test_an_empty_test_round_does_not_end_the_run(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch):
     """テスト整備の採用 0 件は**構造改善へ進む合図**であって、終了ではない。"""
     state = _run_merge(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, [])
     assert state["final"] is None
     assert state["phase"] == "propose"
 
 
-def test_an_empty_structure_round_still_ends_the_run(patch_lib, refactor, paths, tmp_path, env_tmp_dir, monkeypatch):
+def test_an_empty_structure_round_still_ends_the_run(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch):
     state_path = make_state(
         tmp_path, rounds=[_entry(kind="structure")], phase="propose",
         outer_round=1, round_kind="structure")
@@ -352,8 +349,7 @@ def test_an_empty_structure_round_still_ends_the_run(patch_lib, refactor, paths,
     assert read_state(state_path)["final"] == "no_more_proposals"
 
 
-def test_the_excluded_keys_of_a_test_round_use_target_and_case(patch_lib, paths, 
-    refactor, tmp_path, env_tmp_dir, monkeypatch):
+def test_the_excluded_keys_of_a_test_round_use_target_and_case(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch):
     """見送った記録が次のラウンドの「対象外」へ入る（決定 10）。"""
     state = _run_merge(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch,
         [tprop(target="src/a.py#f", case="branch")],

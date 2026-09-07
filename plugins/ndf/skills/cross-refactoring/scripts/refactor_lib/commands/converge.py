@@ -22,7 +22,6 @@ from ..gitfacts import (
     drop_items,
     find_item,
     flush_pending_push,
-    git_out,
     push_head,
     push_with_retry_marker,
     read_result,
@@ -36,7 +35,7 @@ from ..gitfacts import (
     revert_unverified_range,
 )
 from ..outbound import dropped_line, item_lines, plan_line
-from ..paths import load_state, result_path, stem_for
+from ..paths import git_out, load_state, result_path, stem_for
 from ..rounds import (
     current_group,
     deferred_record,

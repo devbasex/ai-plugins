@@ -47,7 +47,6 @@ def _state(tmp_path, **over):
 @pytest.fixture
 def gh(patch_lib, refactor, monkeypatch):
     """`gh api` の呼び出しを記録し、決めた応答を返す。"""
-    paths = sys.modules["refactor_lib.paths"]
     calls: list[list[str]] = []
     responses: dict[str, str] = {}
 

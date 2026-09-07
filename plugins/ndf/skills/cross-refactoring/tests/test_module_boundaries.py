@@ -58,6 +58,37 @@ def test_no_private_name_crosses_a_module() -> None:
     assert crossing == []
 
 
+def test_every_import_comes_from_the_module_that_defines_it() -> None:
+    """取り込みは定義元から行うこと。
+
+    **取り込んだ名前は、そのモジュールの名前空間にも載る。** 別のモジュールが
+    取り込んだものをさらに取り込むと、経由したモジュールが再エクスポートの役目を
+    負い、どこが定義元なのかが読めなくなる。入口から再エクスポートを外した
+    （#441）のと同じ理由で、モジュール間でも行わない。
+    """
+    defines: dict[str, set[str]] = {}
+    for p in _modules():
+        names: set[str] = set()
+        for node in ast.parse(p.read_text(encoding="utf-8")).body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                names.add(node.name)
+            elif isinstance(node, ast.Assign):
+                names |= {t.id for t in node.targets if isinstance(t, ast.Name)}
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                names.add(node.target.id)
+        defines[_module_name(p)] = names
+
+    borrowed = [
+        f"{_module_name(p)} ← {target}.{name}（定義元は {owner}）"
+        for p in _modules()
+        for target, names in _imports(p)
+        for name in names
+        if target in defines and name not in defines[target]
+        for owner in [next((m for m, ns in defines.items() if name in ns), "?")]
+    ]
+    assert borrowed == []
+
+
 def test_the_dependency_graph_has_no_cycle() -> None:
     """依存に循環が無いこと。"""
     graph = {

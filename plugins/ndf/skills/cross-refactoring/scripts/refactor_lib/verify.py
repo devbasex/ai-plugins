@@ -7,7 +7,8 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Optional
 
-from .gitfacts import git_out, safe_int
+from .paths import git_out
+from .gitfacts import safe_int
 from .vocabulary import (
     DIFF_BUDGET_FACTOR,
     EXTRACTION_DIFF_BUDGET_FACTOR,

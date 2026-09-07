@@ -22,7 +22,6 @@ from ..gitfacts import (
     drop_items,
     find_item,
     flush_pending_push,
-    git_out,
     push_head,
     read_result,
     record_observed_model,
@@ -33,7 +32,7 @@ from ..gitfacts import (
     collect_commit_facts,
     commits_in_range,
 )
-from ..paths import load_state, result_path, stem_for
+from ..paths import git_out, load_state, result_path, stem_for
 from ..proposals import assign_apply_rounds, merge_proposals, merge_test_proposals
 from ..rounds import (
     TEST,

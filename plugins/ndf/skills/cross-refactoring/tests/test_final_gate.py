@@ -29,8 +29,6 @@ def _args(state_id=130):
 @pytest.fixture
 def spy(patch_lib, refactor, monkeypatch):
     """テストの実行と `gh` の呼び出しを差し替え、何を呼んだかを記録する。"""
-    paths = sys.modules["refactor_lib.paths"]
-    gitfacts = sys.modules["refactor_lib.gitfacts"]
     seen: dict[str, list] = {"tests": [], "gh": []}
 
     def fake_run(command, cwd, timeout, grace=5.0):
@@ -212,7 +210,7 @@ def test_a_failure_opens_a_fix_round(cmd_gate, tmp_path, env_tmp_dir, spy):
     assert gate["status"] == "failing"
 
 
-def test_the_fix_cap_reports_the_failure_without_reverting(patch_lib, refactor, gitfacts, cmd_gate, tmp_path, env_tmp_dir, spy, monkeypatch):
+def test_the_fix_cap_reports_the_failure_without_reverting(patch_lib, refactor, cmd_gate, tmp_path, env_tmp_dir, spy, monkeypatch):
     """**Step 7 は push 済みの地点である。** 上限に達しても取り消さない。
 
     取り消しの判断は Pull Request の読み手が持つ。失敗として報告に書く。

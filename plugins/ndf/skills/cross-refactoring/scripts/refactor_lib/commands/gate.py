@@ -25,7 +25,6 @@ from .. import die, info
 from ..gitfacts import (
     discard_impl_leftovers,
     flush_pending_push,
-    git_out,
     push_with_retry_marker,
     read_result,
     reported_shas,
@@ -36,7 +35,7 @@ from ..gitfacts import (
     commits_in_range,
     revert_unverified_range,
 )
-from ..paths import load_state, result_path, stem_for
+from ..paths import git_out, load_state, result_path, stem_for
 from ..verify import verify_final_fix_commit
 from ..vocabulary import DEFAULT_TEST_TIMEOUT
 from ..verify import unassigned_fix_commits

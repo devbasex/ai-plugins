@@ -16,17 +16,8 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
-import json
-import os
 import pathlib
-import re
-import signal
-import subprocess
 import sys
-import time
-import types
-from typing import Any, Callable, Iterable, Optional
 
 # 共通層はプラグインルート直下にある。**`.resolve()` を通す。** Kiro CLI は
 # `.kiro/skills/<名前>` を symlink にするため、解かずに `parents[]` を数えると
@@ -37,17 +28,12 @@ sys.path.insert(
 )
 
 import assignment  # noqa: E402
-import auth  # noqa: E402
-import metrics as metrics_lib  # noqa: E402
-import models as models_lib  # noqa: E402
-import statefile  # noqa: E402
 
 # 分割したモジュールは同じディレクトリの `refactor_lib/` にある。**自身の
 # ディレクトリを探索先へ入れる。** `uv run --script` で起動したときの現在地は、
 # スクリプトの位置と揃わない。
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
-from refactor_lib import ABORT, die, info  # noqa: E402,F401
 from refactor_lib.commands.apply import (  # noqa: E402
     cmd_merge_apply,
     cmd_merge_proposals,

@@ -290,12 +290,12 @@ def test_commits_in_range_is_none_when_git_fails(patch_lib, gitfacts, monkeypatc
     assert gitfacts.commits_in_range("/w", "base", "head") is None
 
 
-def test_run_test_at_checks_out_and_restores(patch_lib, refactor, gitfacts, monkeypatch):
+def test_run_test_at_checks_out_and_restores(paths, patch_lib, refactor, gitfacts, monkeypatch):
     """テストは実際に走らせる。実行後は必ず元のブランチへ戻す。"""
     git_calls = []
     patch_lib("git_out", lambda work, args, **_kw: git_calls.append(args) or "")
     monkeypatch.setattr(
-        refactor.subprocess, "run",
+        paths.subprocess, "run",
         lambda *a, **kw: (git_calls.append(a[0]) if isinstance(a[0], list) else None)
         or subprocess.CompletedProcess(a[0], 0, "", ""),
     )
@@ -306,10 +306,10 @@ def test_run_test_at_checks_out_and_restores(patch_lib, refactor, gitfacts, monk
     assert ["git", "checkout", "main"] in git_calls
 
 
-def test_run_test_at_reports_failure(patch_lib, refactor, gitfacts, monkeypatch):
+def test_run_test_at_reports_failure(paths, patch_lib, refactor, gitfacts, monkeypatch):
     patch_lib("git_out", lambda work, args, **_kw: "")
     monkeypatch.setattr(
-        refactor.subprocess, "run",
+        paths.subprocess, "run",
         lambda *a, **kw: subprocess.CompletedProcess(a[0], 0, "", ""),
     )
     patch_lib("run_with_timeout",
@@ -317,7 +317,7 @@ def test_run_test_at_reports_failure(patch_lib, refactor, gitfacts, monkeypatch)
     assert gitfacts.run_test_at("/w", "abc", "pytest -q", "main") == "fail"
 
 
-def test_run_test_at_restores_branch_even_when_the_test_raises(patch_lib, refactor, gitfacts, monkeypatch):
+def test_run_test_at_restores_branch_even_when_the_test_raises(paths, patch_lib, refactor, gitfacts, monkeypatch):
     restored = []
 
     def fake_run(cmd, **kw):
@@ -327,7 +327,7 @@ def test_run_test_at_restores_branch_even_when_the_test_raises(patch_lib, refact
         raise OSError("テスト実行が壊れた")
 
     patch_lib("git_out", lambda work, args, **_kw: "")
-    monkeypatch.setattr(refactor.subprocess, "run", fake_run)
+    monkeypatch.setattr(paths.subprocess, "run", fake_run)
     with pytest.raises(OSError):
         gitfacts.run_test_at("/w", "abc", "pytest -q", "main")
     assert restored, "元のブランチへ戻していない"
@@ -380,8 +380,6 @@ def _state_with_items(tmp_path, items, rounds_override=None, apply_round=None, *
 @pytest.fixture
 def git_facts(patch_lib, refactor, monkeypatch):
     """git から取る事実を差し替える。`{sha: fact}` を渡す。"""
-    paths = sys.modules["refactor_lib.paths"]
-    gitfacts = sys.modules["refactor_lib.gitfacts"]
     def _set(mapping, in_range=None):
         ordered = list(mapping) if in_range is None else list(in_range)
         patch_lib("commits_in_range", lambda work, base, head: ordered)
@@ -528,6 +526,7 @@ def _drop_env(patch_lib, refactor, monkeypatch, revert_rc=0, pick_rc=0, sync_dir
     | 同期の前（清浄性の検査） | `sync_dirty[0]` |
     | 同期の後（生成された差分） | `sync_dirty[1]` |
     """
+    refactor_lib = sys.modules["refactor_lib"]
     paths = sys.modules["refactor_lib.paths"]
     calls: list[list[str]] = []
     picked: list[str] = []
@@ -564,7 +563,7 @@ def _drop_env(patch_lib, refactor, monkeypatch, revert_rc=0, pick_rc=0, sync_dir
             return before if len(statuses) == 2 else after
         return "HEAD_BEFORE"
 
-    monkeypatch.setattr(refactor.subprocess, "run", fake_run)
+    monkeypatch.setattr(paths.subprocess, "run", fake_run)
     patch_lib("git_out", fake_git_out)
     pushes: list[list[str]] = []
     patch_lib("sh", lambda cmd, **k: pushes.append(list(cmd)) or "")
@@ -668,7 +667,7 @@ def test_a_failed_apply_round_leaves_the_other_groups_alone(patch_lib, refactor,
     assert by_id["R1-002"]["status"] == "abandoned"
 
 
-def test_revert_failure_aborts_with_the_abort_code(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts):
+def test_revert_failure_aborts_with_the_abort_code(refactor_lib, patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts):
     """取り消しに失敗したら「全件失敗」ではなく**中断**として終わること。
 
     2（全件失敗）と同じ扱いにすると、検証を通っていない変更を Pull Request に
@@ -681,25 +680,25 @@ def test_revert_failure_aborts_with_the_abort_code(patch_lib, refactor, tmp_path
         refactor.cmd_merge_apply(
             type("A", (), {"id": 130, "round": 1, "dry_run": False})()
         )
-    assert e.value.code == refactor.ABORT == 4
+    assert e.value.code == refactor_lib.ABORT == 4
     assert ["git", "revert", "--abort"] in calls
     assert ["git", "reset", "--hard", "HEAD_BEFORE"] in calls
 
 
-def test_progress_is_recorded_before_reverting(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts):
+def test_progress_is_recorded_before_reverting(paths, patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts):
     """取り消しの前に判定を残すこと。中断しても到達点が状態から読める。"""
     state_path = _two_item_apply(tmp_path, env_tmp_dir, git_facts)
     seen: list[list[dict]] = []
 
     calls, _ = _drop_env(patch_lib, refactor, monkeypatch, revert_rc=1)
-    real_run = refactor.subprocess.run
+    real_run = paths.subprocess.run
 
     def spying_run(cmd, **kwargs):
         if cmd[:2] == ["git", "revert"]:
             seen.append(read_state(state_path)["rounds"][0].get("apply_progress"))
         return real_run(cmd, **kwargs)
 
-    monkeypatch.setattr(refactor.subprocess, "run", spying_run)
+    monkeypatch.setattr(paths.subprocess, "run", spying_run)
     with pytest.raises(SystemExit):
         refactor.cmd_merge_apply(
             type("A", (), {"id": 130, "round": 1, "dry_run": False})()
@@ -709,7 +708,7 @@ def test_progress_is_recorded_before_reverting(patch_lib, refactor, tmp_path, en
     assert [(p["apply_round"], p["result"]) for p in seen[0]] == [(1, "failed")]
 
 
-def test_pending_push_is_marked_before_reverting(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts):
+def test_pending_push_is_marked_before_reverting(paths, patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts):
     """取り消しへ着手する前に再送信の印を立てること。
 
     取り消しは済んだのに push できずに終わると、検証を通っていない変更が
@@ -719,14 +718,14 @@ def test_pending_push_is_marked_before_reverting(patch_lib, refactor, tmp_path, 
     marks: list[bool] = []
 
     calls, _ = _drop_env(patch_lib, refactor, monkeypatch, revert_rc=1)
-    real_run = refactor.subprocess.run
+    real_run = paths.subprocess.run
 
     def spying_run(cmd, **kwargs):
         if cmd[:2] == ["git", "revert"]:
             marks.append(read_state(state_path)["rounds"][0].get("pending_push"))
         return real_run(cmd, **kwargs)
 
-    monkeypatch.setattr(refactor.subprocess, "run", spying_run)
+    monkeypatch.setattr(paths.subprocess, "run", spying_run)
     with pytest.raises(SystemExit):
         refactor.cmd_merge_apply(
             type("A", (), {"id": 130, "round": 1, "dry_run": False})()
@@ -800,7 +799,7 @@ def test_blank_scope_entry_is_ignored(verify):
     assert not verify.path_in_scope("dist/foo.py", ["", "  ", "src"])
 
 
-def test_push_happens_once_per_merge_apply(patch_lib, refactor, paths, tmp_path, env_tmp_dir, monkeypatch, git_facts):
+def test_push_happens_once_per_merge_apply(paths, patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts):
     """全項目が通ったときも公開するが、push は 1 回だけにすること。
 
     公開するのは進行側だけである（実装担当は push しない）。
@@ -816,7 +815,7 @@ def test_push_happens_once_per_merge_apply(patch_lib, refactor, paths, tmp_path,
     pushes: list[list[str]] = []
     patch_lib("sh", lambda cmd, **k: pushes.append(cmd) or "")
     monkeypatch.setattr(
-        refactor.subprocess, "run",
+        paths.subprocess, "run",
         lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "", ""),
     )
     refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
@@ -845,7 +844,7 @@ def test_dry_run_touches_neither_git_nor_state(
     assert not [c for c in no_git if c[:2] == ["git", "push"]]
 
 
-def test_state_is_saved_before_push(patch_lib, refactor, paths, tmp_path, env_tmp_dir, monkeypatch, git_facts):
+def test_state_is_saved_before_push(paths, patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts):
     """push が失敗しても、記録とローカルの git が食い違わないようにする。"""
     items = [item(item_id="R1-001")]
     state_path = _state_with_items(tmp_path, items)
@@ -856,7 +855,7 @@ def test_state_is_saved_before_push(patch_lib, refactor, paths, tmp_path, env_tm
         "items": [{"item_id": "R1-001", "commits": [{"sha": "bad111"}]}],
     })
     monkeypatch.setattr(
-        refactor.subprocess, "run",
+        paths.subprocess, "run",
         lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "", ""),
     )
     saved_at_push: list[bool] = []
@@ -914,7 +913,7 @@ def test_unknown_baseline_also_blocks(refactor, tmp_path, env_tmp_dir):
     assert read_state(state_path)["items"][0]["status"] == "blocked"
 
 
-def test_unassigned_commit_fails_the_whole_round(patch_lib, refactor, paths, tmp_path, env_tmp_dir, monkeypatch, git_facts):
+def test_unassigned_commit_fails_the_whole_round(paths, patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts):
     """申告から漏れたコミットは検査を素通りして PR に残る。ラウンドごと取り消す。"""
     items = [item(item_id="R1-001")]
     state_path = _state_with_items(tmp_path, items)
@@ -926,7 +925,7 @@ def test_unassigned_commit_fails_the_whole_round(patch_lib, refactor, paths, tmp
     })
     calls: list[list[str]] = []
     monkeypatch.setattr(
-        refactor.subprocess, "run",
+        paths.subprocess, "run",
         lambda cmd, **kw: calls.append(list(cmd))
         or subprocess.CompletedProcess(cmd, 0, "", ""),
     )
@@ -947,7 +946,7 @@ def test_unassigned_commit_fails_the_whole_round(patch_lib, refactor, paths, tmp
     assert reverts == ["sneaky", "ok111"]
 
 
-def test_range_that_cannot_be_determined_fails_closed(patch_lib, refactor, gitfacts, tmp_path, env_tmp_dir, no_git, monkeypatch):
+def test_range_that_cannot_be_determined_fails_closed(patch_lib, refactor, tmp_path, env_tmp_dir, no_git, monkeypatch):
     """範囲を確定できないなら何も検証できない。素通しにせず失敗させる。"""
     items = [item(item_id="R1-001")]
     state_path = _state_with_items(tmp_path, items)
@@ -964,7 +963,7 @@ def test_range_that_cannot_be_determined_fails_closed(patch_lib, refactor, gitfa
     assert read_state(state_path)["items"][0]["status"] == "blocked"
 
 
-def test_apply_base_is_recorded_by_the_orchestrator(patch_lib, refactor, paths, gitfacts, tmp_path, env_tmp_dir, monkeypatch):
+def test_apply_base_is_recorded_by_the_orchestrator(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch):
     """起点を実装担当の申告に委ねない。"""
 
     state_path = make_state(tmp_path, rounds=[{
@@ -975,9 +974,8 @@ def test_apply_base_is_recorded_by_the_orchestrator(patch_lib, refactor, paths, 
         "durations": {}, "reviews": [],
     }])
     env_tmp_dir(state_path)
-    # **差し替えは入口経由のままにする。** `commands/apply.py` は `git_out` を
-    # 自分の名前空間へ取り込んでいるため、定義元を差し替えても届かない。
-    # 段階 3（#441）で非公開名の受け渡しを無くしたときに寄せ直す。
+    # **その名前を持つモジュールすべてへ当てる。** 取り込みは値の写しであり、
+    # `commands/apply.py` が取り込んだ `git_out` は定義元とは別のオブジェクトである。
     patch_lib("git_out", lambda work, args, **_kw: "BASE_HEAD")
     for rt in ("codex", "agy", "kiro"):
         write_result(state_path, f"{rt}-propose-rf130", {"items": []})
@@ -986,7 +984,7 @@ def test_apply_base_is_recorded_by_the_orchestrator(patch_lib, refactor, paths, 
     assert read_state(state_path)["rounds"][0]["apply_base_sha"] == "BASE_HEAD"
 
 
-def test_commits_claimed_by_an_unknown_item_are_rejected(patch_lib, refactor, paths, tmp_path, env_tmp_dir, monkeypatch, git_facts):
+def test_commits_claimed_by_an_unknown_item_are_rejected(paths, patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts):
     """架空の項目 ID へ割り当てても、割り当て済みとは扱わない。
 
     数に入れてしまうと `unassigned` を通過するのに項目別の検証にも入らず、
@@ -1004,7 +1002,7 @@ def test_commits_claimed_by_an_unknown_item_are_rejected(patch_lib, refactor, pa
         ],
     })
     monkeypatch.setattr(
-        refactor.subprocess, "run",
+        paths.subprocess, "run",
         lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "", ""),
     )
     patch_lib("sh", lambda cmd, **k: "")
@@ -1070,7 +1068,7 @@ def test_non_object_result_file_fails(refactor, tmp_path, env_tmp_dir, no_git):
     assert e.value.code == 2
 
 
-def test_the_group_sharing_one_commit_is_accepted(patch_lib, refactor, paths, tmp_path, env_tmp_dir, monkeypatch, git_facts):
+def test_the_group_sharing_one_commit_is_accepted(paths, patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts):
     """群の全項目が同じコミットを申告するのが**正しい形**である（決定 2）。
 
     取り消しの単位が適用ラウンドになったため、項目ごとにコミットを分ける理由が
@@ -1087,7 +1085,7 @@ def test_the_group_sharing_one_commit_is_accepted(patch_lib, refactor, paths, tm
         ],
     })
     monkeypatch.setattr(
-        refactor.subprocess, "run",
+        paths.subprocess, "run",
         lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "", ""),
     )
     patch_lib("sh", lambda cmd, **k: "")
@@ -1114,14 +1112,12 @@ def test_same_commit_reported_twice_for_one_item_is_fine(
     assert read_state(state_path)["items"][0]["status"] == "applied"
 
 
-def test_short_and_full_sha_are_seen_as_the_same_commit(patch_lib, refactor, paths, gitfacts, tmp_path, env_tmp_dir, monkeypatch):
+def test_short_and_full_sha_are_seen_as_the_same_commit(paths, patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch):
     """一方が完全 SHA、他方が短縮 SHA でも**同じ 1 コミット**として数えること。
 
     申告の文字列をそのまま鍵にすると 2 コミットに見え、「適用ラウンド = 1 コミット」
     に反したものとして群ごと取り消してしまう。
     """
-    # **差し替えは入口経由のままにする。** 実装（`commands/apply.py`）が非公開名を
-    # 自分の名前空間へ取り込んでいるため、定義元を差し替えても届かない。
     full = "a" * 40
     items = [item(item_id="R1-001"), item(item_id="R1-002")]
     state_path = _state_with_items(tmp_path, items)
@@ -1141,7 +1137,7 @@ def test_short_and_full_sha_are_seen_as_the_same_commit(patch_lib, refactor, pat
         ],
     })
     monkeypatch.setattr(
-        refactor.subprocess, "run",
+        paths.subprocess, "run",
         lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "", ""),
     )
     patch_lib("sh", lambda cmd, **k: "")
@@ -1230,7 +1226,7 @@ def test_merge_apply_dry_run_leaves_no_processed_marker(
     assert not (read_state(state_path)["rounds"][0]["apply"] or {}).get("merged_at")
 
 
-def test_revert_failure_keeps_the_round_retryable(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts):
+def test_revert_failure_keeps_the_round_retryable(refactor_lib, patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts):
     """取り消しに失敗したら、処理済みの印を立てないこと。
 
     先に `merged_at` を立てると、次の実行は処理済みガードで素通りし、
@@ -1243,7 +1239,7 @@ def test_revert_failure_keeps_the_round_retryable(patch_lib, refactor, tmp_path,
         refactor.cmd_merge_apply(
             type("A", (), {"id": 130, "round": 1, "dry_run": False})()
         )
-    assert e.value.code == refactor.ABORT
+    assert e.value.code == refactor_lib.ABORT
 
     entry = read_state(state_path)["rounds"][0]
     assert entry["apply"]["merged_at"] is None, "処理済みの印が立っている"
@@ -1275,7 +1271,7 @@ def test_pending_drop_is_retried_before_the_processed_guard(patch_lib, refactor,
     assert pushes, "再実行後に push していない"
 
 
-def test_push_precedes_nothing_when_the_drop_is_unfinished(patch_lib, refactor, paths, tmp_path, env_tmp_dir, monkeypatch, git_facts):
+def test_push_precedes_nothing_when_the_drop_is_unfinished(paths, patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts):
     """取り消しをやり残したまま push だけ先に流さないこと。
 
     未検証の HEAD をそのまま Pull Request へ反映してしまう。
@@ -1289,9 +1285,9 @@ def test_push_precedes_nothing_when_the_drop_is_unfinished(patch_lib, refactor, 
 
     order: list[str] = []
     calls, _ = _drop_env(patch_lib, refactor, monkeypatch)
-    real_run = refactor.subprocess.run
+    real_run = paths.subprocess.run
     monkeypatch.setattr(
-        refactor.subprocess, "run",
+        paths.subprocess, "run",
         lambda cmd, **kw: (order.append(cmd[1]) if cmd[:1] == ["git"] else None)
         or real_run(cmd, **kw),
     )
@@ -1306,7 +1302,7 @@ def test_push_precedes_nothing_when_the_drop_is_unfinished(patch_lib, refactor, 
     assert read_state(state_path)["rounds"][0]["apply"]["merged_at"] is not None
 
 
-def test_push_failure_after_a_successful_drop_only_retries_the_push(patch_lib, refactor, paths, tmp_path, env_tmp_dir, monkeypatch, git_facts):
+def test_push_failure_after_a_successful_drop_only_retries_the_push(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts):
     """取り消しが済んだあとに push だけ失敗したら、次は push の再送だけを行うこと。
 
     取り消しの完了を push より先に永続化しないと、次の実行が適用の検証をやり直し、
@@ -1397,7 +1393,7 @@ def _sync_state(tmp_path, env_tmp_dir, git_facts, command="make build"):
     return state_path
 
 
-def test_push_syncs_generated_files_first(patch_lib, refactor, paths, gitfacts, tmp_path, env_tmp_dir, monkeypatch, git_facts):
+def test_push_syncs_generated_files_first(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts):
     """push の直前に同期し、差分があれば進行側のコミットとして積むこと。
 
     同期を実装担当にさせると範囲外の変更になり、範囲の検査で全件失敗する。
@@ -1425,7 +1421,7 @@ def test_push_syncs_generated_files_first(patch_lib, refactor, paths, gitfacts, 
     assert order.index("commit") < order.index("push"), "コミットより先に push している"
 
 
-def test_sync_failure_aborts_without_pushing(patch_lib, refactor, gitfacts, tmp_path, env_tmp_dir, monkeypatch, git_facts):
+def test_sync_failure_aborts_without_pushing(refactor_lib, patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts):
     """同期に失敗したら中断する。黙って push しない。"""
     _sync_state(tmp_path, env_tmp_dir, git_facts)
     calls, pushes = _drop_env(patch_lib, refactor, monkeypatch)
@@ -1436,11 +1432,11 @@ def test_sync_failure_aborts_without_pushing(patch_lib, refactor, gitfacts, tmp_
         refactor.cmd_merge_apply(
             type("A", (), {"id": 130, "round": 1, "dry_run": False})()
         )
-    assert e.value.code == refactor.ABORT
+    assert e.value.code == refactor_lib.ABORT
     assert [c for c in pushes if c[:2] == ["git", "push"]] == []
 
 
-def test_no_sync_command_runs_nothing(patch_lib, refactor, gitfacts, tmp_path, env_tmp_dir, monkeypatch, git_facts):
+def test_no_sync_command_runs_nothing(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts):
     """`--sync-command` 未指定なら同期は走らない（既存の利用者に影響しない）。"""
     _two_item_apply(tmp_path, env_tmp_dir, git_facts)
     _drop_env(patch_lib, refactor, monkeypatch)
@@ -1480,7 +1476,7 @@ def test_merge_apply_pushes_even_when_every_item_passes(patch_lib, refactor, tmp
     assert entry["apply"]["applied"] == ["R1-001"]
 
 
-def test_sync_aborts_when_the_worktree_is_dirty(patch_lib, refactor, paths, gitfacts, tmp_path, env_tmp_dir, monkeypatch, git_facts):
+def test_sync_aborts_when_the_worktree_is_dirty(refactor_lib, patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts):
     """同期の前に作業ツリーが汚れていたら中断すること。
 
     汚れたまま同期すると、同期が作った差分と元からあった差分を区別できない。
@@ -1503,12 +1499,12 @@ def test_sync_aborts_when_the_worktree_is_dirty(patch_lib, refactor, paths, gitf
         refactor.cmd_merge_apply(
             type("A", (), {"id": 130, "round": 1, "dry_run": False})()
         )
-    assert e.value.code == refactor.ABORT
+    assert e.value.code == refactor_lib.ABORT
     assert ran == [], "汚れたまま同期を走らせている"
     assert [c for c in staged if c[:2] == ["git", "push"]] == []
 
 
-def test_dirt_inside_the_control_directory_does_not_abort(patch_lib, refactor, paths, gitfacts, tmp_path, env_tmp_dir, monkeypatch, git_facts):
+def test_dirt_inside_the_control_directory_does_not_abort(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts):
     """制御用ディレクトリの中は汚れていても止めないこと。
 
     状態ファイル・結果・ログは常にそこへ書かれる。
@@ -1536,7 +1532,7 @@ def test_dirt_inside_the_control_directory_does_not_abort(patch_lib, refactor, p
         ["git", "add", "--", "generated/a.py"]]
 
 
-def test_sync_excludes_the_control_directory(patch_lib, refactor, paths, gitfacts, tmp_path, env_tmp_dir, monkeypatch, git_facts):
+def test_sync_excludes_the_control_directory(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts):
     """状態ファイル・結果・ログの置き場所を同期コミットへ入れないこと。"""
     state_path = _sync_state(tmp_path, env_tmp_dir, git_facts)
     # 既定の配置では制御用ディレクトリが作業ディレクトリの中にある
@@ -1562,7 +1558,7 @@ def test_sync_excludes_the_control_directory(patch_lib, refactor, paths, gitfact
     assert adds == [["git", "add", "--", "generated/a.py"]]
 
 
-def test_sync_without_changes_makes_no_commit(patch_lib, refactor, paths, gitfacts, tmp_path, env_tmp_dir, monkeypatch, git_facts):
+def test_sync_without_changes_makes_no_commit(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts):
     """同期しても差分が出なければ、空のコミットを積まないこと。"""
     _sync_state(tmp_path, env_tmp_dir, git_facts)
     staged: list[list[str]] = []
@@ -1609,7 +1605,7 @@ def test_whole_round_failure_also_defers_items(
     assert "割り当てられていない" in deferred["R1-001"]["defer_reason"]
 
 
-def test_sync_failure_discards_what_it_produced(patch_lib, refactor, gitfacts, tmp_path, env_tmp_dir, monkeypatch, git_facts):
+def test_sync_failure_discards_what_it_produced(refactor_lib, patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts):
     """同期が途中で失敗したら、作った差分を捨てて再開できる状態にすること。
 
     残すと次の実行は清浄性の検査で必ず止まり、`pending_push` の再試行が
@@ -1624,7 +1620,7 @@ def test_sync_failure_discards_what_it_produced(patch_lib, refactor, gitfacts, t
         refactor.cmd_merge_apply(
             type("A", (), {"id": 130, "round": 1, "dry_run": False})()
         )
-    assert e.value.code == refactor.ABORT
+    assert e.value.code == refactor_lib.ABORT
     # index も戻す。`git checkout -- .` では staged された差分が残り、
     # 清浄性の検査が通らないままになる
     assert ["git", "reset", "--hard", "HEAD"] in calls, "index を戻していない"
@@ -1644,7 +1640,7 @@ def test_status_disables_path_quoting(patch_lib, gitfacts, monkeypatch):
     assert seen[0][:2] == ["-c", "core.quotePath=false"]
 
 
-def test_sync_failure_also_resets_the_index(patch_lib, refactor, gitfacts, tmp_path, env_tmp_dir, monkeypatch, git_facts):
+def test_sync_failure_also_resets_the_index(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts):
     """同期が `git add` してから失敗しても、次の実行が再開できること。
 
     `git checkout -- .` は staged された差分を戻さないため、index も戻さないと

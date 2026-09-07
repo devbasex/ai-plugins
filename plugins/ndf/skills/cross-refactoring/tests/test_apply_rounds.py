@@ -109,7 +109,6 @@ def round_of(items=()):
 
 def _run_merge_proposals(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, proposals):
     # モジュールと引数で同じ語を使わない（`proposals` は提案の中身を指す）
-    paths = sys.modules["refactor_lib.paths"]
     state_path = make_state(tmp_path, rounds=[round_of()], phase="propose",
                             outer_round=1)
     env_tmp_dir(state_path)
@@ -121,8 +120,7 @@ def _run_merge_proposals(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch
     return read_state(state_path)
 
 
-def test_merge_proposals_records_the_apply_rounds(patch_lib, paths, 
-    refactor, tmp_path, env_tmp_dir, monkeypatch):
+def test_merge_proposals_records_the_apply_rounds(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch):
     """採用した項目が群として状態へ残る。"""
     state = _run_merge_proposals(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, [
         prop(path="src/a.py", symbol="f"),
@@ -134,8 +132,7 @@ def test_merge_proposals_records_the_apply_rounds(patch_lib, paths,
     assert [g["items"] for g in groups] == [["R1-001", "R1-003"], ["R1-002"]]
 
 
-def test_every_item_knows_its_apply_round(patch_lib, paths, 
-    refactor, tmp_path, env_tmp_dir, monkeypatch):
+def test_every_item_knows_its_apply_round(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch):
     state = _run_merge_proposals(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, [
         prop(path="src/a.py", symbol="f"),
         prop(path="src/a.py", symbol="g"),
@@ -143,16 +140,14 @@ def test_every_item_knows_its_apply_round(patch_lib, paths,
     assert [i["apply_round"] for i in state["items"]] == [1, 2]
 
 
-def test_the_apply_round_cursor_starts_before_the_first_group(patch_lib, paths, 
-    refactor, tmp_path, env_tmp_dir, monkeypatch):
+def test_the_apply_round_cursor_starts_before_the_first_group(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch):
     """`next-apply-round` が最初の群を開くまで、進行中の群は無い。"""
     state = _run_merge_proposals(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch,
                                  [prop()])
     assert state["rounds"][0]["apply_round"] == 0
 
 
-def test_each_apply_round_gets_its_own_impl(patch_lib, paths, 
-    refactor, tmp_path, env_tmp_dir, monkeypatch):
+def test_each_apply_round_gets_its_own_impl(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch):
     """適用の担当は適用ラウンドごとに輪番を進める。
 
     1 つの提案ラウンドが複数の群を持つとき、群ごとに次の担当へ渡す。提案ラウンド
@@ -196,7 +191,6 @@ def _two_groups():
 
 
 def _open_next(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, entry, head="HEAD_NOW"):
-    paths = sys.modules["refactor_lib.paths"]
     state_path = make_state(tmp_path, rounds=[entry], phase="apply", outer_round=1)
     env_tmp_dir(state_path)
     patch_lib("git_out", lambda work, args, **k: head)
@@ -204,8 +198,7 @@ def _open_next(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, entry, h
     return state_path
 
 
-def test_next_apply_round_opens_the_first_pending_group(patch_lib, paths, 
-    refactor, tmp_path, env_tmp_dir, monkeypatch, capsys):
+def test_next_apply_round_opens_the_first_pending_group(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, capsys):
     state_path = _open_next(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch,
                             _round_with_groups(_two_groups()))
     out = capsys.readouterr().out
@@ -220,8 +213,7 @@ def test_next_apply_round_opens_the_first_pending_group(patch_lib, paths,
     assert entry["apply_rounds"][0]["base_sha"] == "HEAD_NOW"
 
 
-def test_next_apply_round_skips_the_groups_already_handled(patch_lib, paths, 
-    refactor, tmp_path, env_tmp_dir, monkeypatch, capsys):
+def test_next_apply_round_skips_the_groups_already_handled(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, capsys):
     groups = _two_groups()
     groups[0]["status"] = "verified"
     state_path = _open_next(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch,
@@ -230,8 +222,7 @@ def test_next_apply_round_skips_the_groups_already_handled(patch_lib, paths,
     assert read_state(state_path)["rounds"][0]["apply_round"] == 2
 
 
-def test_next_apply_round_resets_the_fix_rounds(patch_lib, paths, 
-    refactor, tmp_path, env_tmp_dir, monkeypatch):
+def test_next_apply_round_resets_the_fix_rounds(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch):
     """`--max-fix-rounds` は 1 つの適用ラウンドあたりの上限である。"""
     groups = _two_groups()
     groups[0]["status"] = "dropped"
@@ -241,7 +232,7 @@ def test_next_apply_round_resets_the_fix_rounds(patch_lib, paths,
     assert read_state(state_path)["rounds"][0]["fix_rounds"] == 0
 
 
-def test_next_apply_round_exits_1_when_no_group_is_left(patch_lib, refactor, paths, cmd_apply, tmp_path, env_tmp_dir, monkeypatch):
+def test_next_apply_round_exits_1_when_no_group_is_left(patch_lib, refactor, cmd_apply, tmp_path, env_tmp_dir, monkeypatch):
     groups = _two_groups()
     for g in groups:
         g["status"] = "verified"
@@ -255,8 +246,7 @@ def test_next_apply_round_exits_1_when_no_group_is_left(patch_lib, refactor, pat
     assert e.value.code == 1
 
 
-def test_next_apply_round_reopens_a_group_that_was_applied_but_not_verified(patch_lib, paths, 
-    refactor, tmp_path, env_tmp_dir, monkeypatch, capsys):
+def test_next_apply_round_reopens_a_group_that_was_applied_but_not_verified(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, capsys):
     """取り込み済みで検証前に落ちた群を飛ばさないこと。
 
     飛ばすと、その群の項目が採用でも取り消しでもないまま残る。再開できることは
