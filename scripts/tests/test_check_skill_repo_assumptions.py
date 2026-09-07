@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -203,13 +204,27 @@ def test_default_scan_covers_the_real_repository() -> None:
 
 
 def test_report_shows_scan_size() -> None:
-    """`--report` が走査した本数とヒット数を出す（受け入れ条件 A9 の根拠）。"""
+    """`--report` が走査した本数とヒット数を出す（受け入れ条件 A9 の根拠）。
+
+    **数を直書きしない。** 走査の対象は Skill が増減するたびに変わるため、直書きした数は
+    書いた時点でしか正しくない。**しかも部分一致では、指摘の一覧に出る行番号へ偶然当たる。**
+    実測では `33` が `official-skills-autoloader/SKILL.md:33` に、`89` が
+    `form-package-plugin.md:89` に一致しており、実際の本数（41 個 / 112 本）と食い違ったまま
+    通り続けていた。**行を足して行番号が動いた時点で初めて落ちる。**
+
+    見るのは形である。**数そのものではなく、数が出ていることを確かめる。**
+    """
     result = subprocess.run([sys.executable, str(CHECKER), "--report"],
                             capture_output=True, text=True, cwd=REPO_ROOT)
     assert result.returncode == 0, output_of(result)
     out = output_of(result)
-    assert "33" in out, f"公開する Skill の数が出ていない: {out}"
-    assert "89" in out, f"走査した本数が出ていない: {out}"
+    summary = re.search(
+        r"^plugins/ndf/skills: 公開する Skill (\d+) 個 / Markdown (\d+) 本 / ヒット (\d+) 行$",
+        out, re.MULTILINE)
+    assert summary is not None, f"走査の要約が出ていない: {out}"
+    skills, markdown, _hits = (int(value) for value in summary.groups())
+    assert skills > 0, f"公開する Skill の数が 0 になっている: {out}"
+    assert markdown >= skills, f"Markdown の本数が Skill の数を下回っている: {out}"
 
 
 def test_report_still_fails_on_a_hit(tmp_path: Path) -> None:
