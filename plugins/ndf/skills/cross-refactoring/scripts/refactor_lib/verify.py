@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+import re
+
 from typing import Any, Iterable, Optional
 
 from .paths import git_out
@@ -288,3 +290,97 @@ def unassigned_fix_commits(
         ) if full
     }
     return sorted(set(ordered_range) - reported_full)
+
+# ---------- テストの変更の種類 ----------
+#
+# **「テストを足したか」だけでは、期待値の変更を止められない**（#443）。同じ入力に対する
+# 期待出力が変わっていれば、それは振る舞いの変更である。
+#
+# 判定は 3 段で行う。ここが担うのは段 1（機械）で、判定できないものは段 2（AI）へ渡す。
+# **判定できないものを通ったものとして扱わない。**
+
+# 取り込み元の接頭辞。構造が変われば変わるため、比べる前に伏せる。
+_PREFIX = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*\.(?=[A-Za-z_])")
+
+# 期待値が `assert` の行の外にある形。集合の一致では判定できない。
+_OPEN_CALL = re.compile(r"[\(\[\{]\s*$")
+_PARAMETRIZE = re.compile(r"@pytest\.mark\.parametrize|@parameterized")
+
+
+def _assert_lines(lines: Iterable[str]) -> list[str]:
+    """`assert` の行だけを、接頭辞を伏せて並べ替えて返す。"""
+    return sorted(
+        _PREFIX.sub("MOD.", line.strip())
+        for line in lines
+        if line.strip().startswith("assert ")
+    )
+
+
+def _has_undecidable_form(lines: Iterable[str]) -> bool:
+    """期待値が `assert` の行の外にある形を含むか。"""
+    rows = list(lines)
+    if any(_PARAMETRIZE.search(line) for line in rows):
+        return True
+    return any(
+        line.strip().startswith("assert ") and _OPEN_CALL.search(line.rstrip("\n"))
+        for line in rows
+    )
+
+
+def assertion_change(before: Iterable[str], after: Iterable[str]) -> str:
+    """テストの変更の種類を返す。
+
+    | 戻り値 | 意味 |
+    | --- | --- |
+    | `unchanged` | 期待値は変わっていない（読み込みの経路だけが変わった） |
+    | `changed` | 同じ入力に対する期待出力が変わった |
+    | `undecidable` | **機械では判定できない。** 段 2（AI エージェント）へ渡す |
+
+    **足しただけは `unchanged` とする。** 既にある期待値が変わっていなければ、
+    振る舞いの期待は変わっていない。
+    """
+    rows_before, rows_after = list(before), list(after)
+    if _has_undecidable_form(rows_before) or _has_undecidable_form(rows_after):
+        return "undecidable"
+    kept_before, kept_after = _assert_lines(rows_before), _assert_lines(rows_after)
+    if kept_before == kept_after:
+        return "unchanged"
+    # 元の行がすべて残っていれば、足しただけである。
+    if all(line in kept_after for line in kept_before):
+        return "unchanged"
+    return "changed"
+
+
+def undecidable_test_changes(
+    changes: dict[str, tuple[list[str], list[str]]],
+) -> list[str]:
+    """機械では判定できないテストの差分を、ファイルの順で返す。
+
+    **呼ぶ側はこれを段 2（AI エージェント）へ渡す。** 空でないまま通さない。
+    """
+    return sorted(
+        path for path, (before, after) in changes.items()
+        if assertion_change(before, after) == "undecidable"
+    )
+
+
+def verify_test_changes(
+    changes: dict[str, tuple[list[str], list[str]]],
+) -> Optional[str]:
+    """テストの差分に、期待値の変更が含まれていないかを見る。
+
+    **判定できないものはここでは落とさない。** `undecidable_test_changes` が集め、
+    呼ぶ側が段 2 へ渡す。
+    """
+    changed = sorted(
+        path for path, (before, after) in changes.items()
+        if assertion_change(before, after) == "changed"
+    )
+    if not changed:
+        return None
+    return (
+        "テストの期待する振る舞いが変わっています"
+        f"（{', '.join(changed)}）。"
+        "構造改善では期待出力を変えません。振る舞いの変更は別の変更に分けてください"
+    )
+

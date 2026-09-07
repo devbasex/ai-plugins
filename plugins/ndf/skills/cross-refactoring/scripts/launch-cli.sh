@@ -4,7 +4,7 @@
 # Usage: launch-cli.sh <runtime> <phase> <ID> [ROUND]
 #
 #   runtime  claude | codex | agy | kiro
-#   phase    propose | propose-tests | apply | fix | final-fix
+#   phase    propose | propose-tests | apply | judge-test-changes | fix | final-fix
 #   ID       状態ファイルの鍵（最初に初期化した Pull Request 番号）
 #   ROUND    propose と final-fix 以外で必須
 #
@@ -66,6 +66,14 @@ case "$PHASE" in
     # 適用と修正は常に work/ の中だけで行う。並列適用はしない。
     WORKDIR=$WORK
     PRINT_TIMEOUT=3600
+    ;;
+  judge-test-changes)
+    # **テストの差分が振る舞いの変更を含むかの判定**（#443）。機械で決まらない差分だけを
+    # 渡すため、対象は小さい。判定だけを返させるので上限は提案と同じでよい。
+    [ "$ROUND" -ge 1 ] 2>/dev/null || { echo "$PHASE には ROUND が必要です" >&2; exit 1; }
+    STEM=$TMP_DIR/$RUNTIME-judge-test-changes-r$ROUND
+    WORKDIR=$WORK
+    PRINT_TIMEOUT=900
     ;;
   final-fix)
     # **ラウンド番号を名前に入れない。** 最終ゲートは提案ラウンドの外にあり、
