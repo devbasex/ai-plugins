@@ -44,7 +44,7 @@ flowchart TD
 ```
 
 **順序を入れ替えられない。** 段階 1 を後にすると、消すテストを段階 2 で寄せ直すことになる。
-段階 3 を先にすると、テストが入口経由で差し替えている 9 つの名前が届かなくなる。
+段階 3 を先にすると、テストが入口経由で差し替えている名前が届かなくなる。
 
 ## いまの構造
 
@@ -159,6 +159,7 @@ Pull Request のレビューへ掛かる位置に置かれる。
 | 項目 | 内容 |
 | --- | --- |
 | 依存するテストの実数 | #446 の本文は `review` フェーズに約 5 件、スレッドの突き合わせに約 30 件としている。**着手の時点で数え直す** |
+| 入口経由で差し替えている名前の数 | `tests/` の `monkeypatch.setattr(refactor, ...)` は 11 個（`cmd_init` / `collect_commit_facts` / `commits_in_range` / `_discard_impl_leftovers` / `_drop_items` / `_git_out` / `_push_head` / `resolved_threads_on_github` / `_run_with_timeout` / `_sh` / `_unassigned_fix_commits`。2026-09-07 に実測）。**段階 2 の着手の時点で数え直す** |
 | モジュールをまたぐ非公開名の内訳 | #441 の本文は 27 個（`gitfacts` 15 / `paths` 7 / `review` 2 / `commands/apply` 2 / `commands/report` 1）としている。改名の後に数え直す |
 | 段階 2 で分けるテストファイルの単位 | モジュールと 1 対 1 にするか、既存のファイルの単位を保つかは、寄せる過程で決める |
 | `commands` 層どうしの横の依存 | `review` → `apply`、`setup` → `report` の 2 つ。解消の手段は段階 3 で決める |
