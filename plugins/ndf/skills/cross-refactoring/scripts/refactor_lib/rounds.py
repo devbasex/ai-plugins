@@ -9,7 +9,13 @@
 """
 from __future__ import annotations
 
+import pathlib
+
 from typing import Any
+
+import statefile
+
+from . import info
 
 # ラウンドの種類。**宣言の無い状態ファイルは構造改善として読む**（この版より前で
 # 始めた実行を、再開の時点でテスト整備へ戻さないため）。
@@ -77,3 +83,10 @@ def deferred_record(
     else:
         record.update({"symbol": item.get("symbol"), "smell": item.get("smell")})
     return record
+
+def finish_outer_rounds(path: pathlib.Path, state: dict[str, Any], reason: str) -> None:
+    state["final"] = reason
+    state["ended_at"] = statefile.now()
+    state["phase"] = "final"
+    statefile.save(path, state)
+    info(f"提案ラウンドの繰り返しを終了します（理由: {reason}）")

@@ -30,7 +30,7 @@ from ..paths import (
     tmp_dir_for,
 )
 from ..plan import PLAN_COMMENT, PLAN_FILE, PLAN_NONE, normalize_plan_file
-from ..rounds import STRUCTURE, TEST, entry_kind, round_kind
+from ..rounds import finish_outer_rounds, STRUCTURE, TEST, entry_kind, round_kind
 from ..scope import require_scope_covers_tests
 from ..vocabulary import (
     DEFAULT_TEST_TIMEOUT,
@@ -38,7 +38,6 @@ from ..vocabulary import (
     test_vocabulary,
     vocabulary,
 )
-from .report import _finish
 
 
 def check_auth(runtimes: Iterable[str]) -> dict[str, dict[str, Any]]:
@@ -430,7 +429,7 @@ def cmd_start_round(args: argparse.Namespace) -> None:
     rounds = state["rounds"]
     kind = round_kind(state)
     if kind == STRUCTURE and len(rounds_of_kind(state, STRUCTURE)) >= state["max_outer_rounds"]:
-        _finish(path, state, "max_outer_rounds")
+        finish_outer_rounds(path, state, "max_outer_rounds")
         sys.exit(1)
 
     round_no = len(rounds) + 1

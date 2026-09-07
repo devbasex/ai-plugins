@@ -18,7 +18,7 @@ from ..gitfacts import safe_int
 from ..outbound import plan_reference
 from ..paths import load_state
 from ..proposals import duplicate_rate
-from ..rounds import STRUCTURE, TEST, entry_kind, item_kind, item_label
+from ..rounds import finish_outer_rounds, STRUCTURE, TEST, entry_kind, item_kind, item_label
 from ..vocabulary import DEFAULT_MAX_TEST_ROUNDS, DUPLICATE_RATE_THRESHOLD
 
 
@@ -46,10 +46,10 @@ def cmd_advance(args: argparse.Namespace) -> None:
         _advance_test_rounds(path, state, last)
         return
     if len(_of_kind(rounds, STRUCTURE)) >= state["max_outer_rounds"]:
-        _finish(path, state, "max_outer_rounds")
+        finish_outer_rounds(path, state, "max_outer_rounds")
         sys.exit(1)
     if last.get("adopted") == 0:
-        _finish(path, state, "no_more_proposals")
+        finish_outer_rounds(path, state, "no_more_proposals")
         sys.exit(1)
     previous = _of_kind(rounds[:-1], STRUCTURE)
     if previous:
@@ -61,7 +61,7 @@ def cmd_advance(args: argparse.Namespace) -> None:
         )
         if rate >= DUPLICATE_RATE_THRESHOLD:
             info(f"提案の重複率が {rate:.0%} で、前ラウンドとほぼ同じです")
-            _finish(path, state, "duplicate_proposals")
+            finish_outer_rounds(path, state, "duplicate_proposals")
             sys.exit(1)
 
 
@@ -95,13 +95,6 @@ def _advance_test_rounds(
     statefile.save(path, state)
     info(f"{note}。構造改善の提案ラウンドへ進みます")
 
-
-def _finish(path: pathlib.Path, state: dict[str, Any], reason: str) -> None:
-    state["final"] = reason
-    state["ended_at"] = statefile.now()
-    state["phase"] = "final"
-    statefile.save(path, state)
-    info(f"提案ラウンドの繰り返しを終了します（理由: {reason}）")
 
 
 def cmd_status(args: argparse.Namespace) -> None:
