@@ -57,8 +57,48 @@
 | `- [ ] 設計レビュー` → `- [ ] ドキュメントレビュー` | 同上 |
 | `- [ ] レビュー` → `- [ ] 実装レビュー` | 同上 |
 | `- [ ] ドキュメント再構成` の挿入 | 「設計」の次の行 |
+| `設計レビュー` → `ドキュメントレビュー` / `レビュー` → `実装レビュー` / `architecture` → `standard` | **通過工程の控え**（下のコマンド） |
 
 **`## 進行` の節だけを書き換え、節の外は書き換えない。** 対象は版を出す時点で数え直す。
+
+**通過工程の控えも書き換える。** 課題ごとに 1 つのファイルが残り続けるため、旧い名前のまま
+では**実際に通った工程が「記録なし」として案内される**。`mode` が `architecture` のままだと
+モードが解決できず、**必須の工程の欠落を検知できなくなる**。
+
+置き場所は環境で変わるため、次の 4 つを順に探す。**無い候補は読み飛ばす。**
+
+```bash
+# 1. 数える（書き換える前に対象を確かめる）
+for dir in ${CLAUDE_PLUGIN_DATA:+"$CLAUDE_PLUGIN_DATA/stages"} \
+           ${XDG_STATE_HOME:+"$XDG_STATE_HOME/ndf/stages"} \
+           "$HOME/.local/state/ndf/stages" \
+           "${TMPDIR:-/tmp}/ndf-stages"; do
+  [ -d "$dir" ] || continue
+  n=$(grep -lE '"(設計レビュー|レビュー)"|"architecture"' "$dir"/*.json 2>/dev/null | wc -l)
+  printf '%s: %s 件\n' "$dir" "$n"
+done
+
+# 2. 書き換える（jq が要る。控えの読み書きは元から jq に依存している）
+for dir in ${CLAUDE_PLUGIN_DATA:+"$CLAUDE_PLUGIN_DATA/stages"} \
+           ${XDG_STATE_HOME:+"$XDG_STATE_HOME/ndf/stages"} \
+           "$HOME/.local/state/ndf/stages" \
+           "${TMPDIR:-/tmp}/ndf-stages"; do
+  [ -d "$dir" ] || continue
+  for f in "$dir"/*.json; do
+    [ -f "$f" ] || continue
+    jq '(.stages // []) |= map(if . == "設計レビュー" then "ドキュメントレビュー"
+                               elif . == "レビュー" then "実装レビュー"
+                               else . end)
+        | if .mode == "architecture" then .mode = "standard" else . end' "$f" >"$f.new" \
+      && mv "$f.new" "$f" || rm -f "$f.new"
+  done
+done
+```
+
+**`ドキュメント再構成` は控えへ挿入しない。** 控えは記録が書かれた工程の並びであり、通って
+いない工程を書き加えると、通ったことにならない工程が通ったものとして数えられる。
+
+書き換えた結果は `stage-check.sh report <課題番号>` で確かめる。
 
 盤面（GitHub Projects）の単一選択へ新しい値を足すのは、盤面を持つリポジトリ側の操作である
 （値が無くても工程は止まらない）。
