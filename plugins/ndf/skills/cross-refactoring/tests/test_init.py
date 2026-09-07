@@ -410,30 +410,30 @@ def _probe_result(refactor, monkeypatch, outcomes):
     monkeypatch.setattr(refactor.auth.subprocess, "run", fake_run)
 
 
-def test_check_auth_passes_when_every_cli_is_logged_in(refactor, monkeypatch):
+def test_check_auth_passes_when_every_cli_is_logged_in(refactor, cmd_setup, monkeypatch):
     monkeypatch.delenv("NDF_SKIP_AUTH_CHECK", raising=False)
     _probe_result(refactor, monkeypatch, {})
-    results = refactor.check_auth(["claude", "codex", "agy", "kiro"])
+    results = cmd_setup.check_auth(["claude", "codex", "agy", "kiro"])
     assert all(r["ok"] for r in results.values())
 
 
-def test_check_auth_fails_on_a_non_zero_exit(refactor, monkeypatch):
+def test_check_auth_fails_on_a_non_zero_exit(refactor, cmd_setup, monkeypatch):
     monkeypatch.delenv("NDF_SKIP_AUTH_CHECK", raising=False)
     _probe_result(refactor, monkeypatch, {"kiro": (1, "")})
     with pytest.raises(SystemExit) as e:
-        refactor.check_auth(["claude", "codex", "agy", "kiro"])
+        cmd_setup.check_auth(["claude", "codex", "agy", "kiro"])
     assert e.value.code == refactor.ABORT
 
 
-def test_check_auth_fails_when_the_output_says_not_logged_in(refactor, monkeypatch):
+def test_check_auth_fails_when_the_output_says_not_logged_in(refactor, cmd_setup, monkeypatch):
     """終了コード 0 でも未認証を示すことがある（kiro は成否を終了コードで表さない）。"""
     monkeypatch.delenv("NDF_SKIP_AUTH_CHECK", raising=False)
     _probe_result(refactor, monkeypatch, {"kiro": (0, "Not logged in")})
     with pytest.raises(SystemExit):
-        refactor.check_auth(["claude", "codex", "agy", "kiro"])
+        cmd_setup.check_auth(["claude", "codex", "agy", "kiro"])
 
 
-def test_check_auth_fails_when_the_cli_is_missing(refactor, monkeypatch):
+def test_check_auth_fails_when_the_cli_is_missing(refactor, cmd_setup, monkeypatch):
     monkeypatch.delenv("NDF_SKIP_AUTH_CHECK", raising=False)
 
     def missing(cmd, **kwargs):
@@ -441,10 +441,10 @@ def test_check_auth_fails_when_the_cli_is_missing(refactor, monkeypatch):
 
     monkeypatch.setattr(refactor.auth.subprocess, "run", missing)
     with pytest.raises(SystemExit):
-        refactor.check_auth(["codex"])
+        cmd_setup.check_auth(["codex"])
 
 
-def test_check_auth_can_be_skipped_explicitly(refactor, monkeypatch):
+def test_check_auth_can_be_skipped_explicitly(refactor, cmd_setup, monkeypatch):
     """確認コマンドは CLI の版で変わる。飛ばせる逃げ道を残す。"""
     monkeypatch.setenv("NDF_SKIP_AUTH_CHECK", "1")
 
@@ -452,10 +452,10 @@ def test_check_auth_can_be_skipped_explicitly(refactor, monkeypatch):
         raise AssertionError("認証確認を実行してはいけない")
 
     monkeypatch.setattr(refactor.auth.subprocess, "run", never)
-    assert refactor.check_auth(["codex", "agy"]) == {}
+    assert cmd_setup.check_auth(["codex", "agy"]) == {}
 
 
-def test_init_checks_cli_authentication(refactor, origin_repo, monkeypatch, tmp_path):
+def test_init_checks_cli_authentication(refactor, cmd_setup, origin_repo, monkeypatch, tmp_path):
     """未認証の CLI があれば初期化ごと中断すること。
 
     参加者が 1 人欠けた構成のまま進むと、その者の提案とレビューが無いまま収束する。
@@ -469,7 +469,7 @@ def test_init_checks_cli_authentication(refactor, origin_repo, monkeypatch, tmp_
         lambda cmd, **k: pytest.fail("認証確認より前に gh を呼んでいる"),
     )
     with pytest.raises(SystemExit) as e:
-        refactor.cmd_init(_args(tmp_path))
+        cmd_setup.cmd_init(_args(tmp_path))
     assert e.value.code == refactor.ABORT
 
 

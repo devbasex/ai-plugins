@@ -62,31 +62,31 @@ def gh(refactor, monkeypatch):
 
 # ---------- 置き場所の決まり方 ----------
 
-def test_the_default_mode_is_a_comment(refactor, tmp_path):
+def test_the_default_mode_is_a_comment(plan, tmp_path):
     _, state = _state(tmp_path)
-    assert refactor.plan_mode(state) == refactor.PLAN_COMMENT
+    assert plan.plan_mode(state) == plan.PLAN_COMMENT
 
 
-def test_a_state_file_from_an_older_version_keeps_using_the_file(refactor, tmp_path):
+def test_a_state_file_from_an_older_version_keeps_using_the_file(plan, tmp_path):
     """宣言の無い状態ファイルは書き出し先から読む。再開でコメントへ移さない。"""
     _, state = _state(tmp_path, plan_mode=None, plan_file="issues/plan.md")
-    assert refactor.plan_mode(state) == refactor.PLAN_FILE
+    assert plan.plan_mode(state) == plan.PLAN_FILE
 
 
-def test_a_state_file_without_any_plan_records_nothing(refactor, tmp_path):
+def test_a_state_file_without_any_plan_records_nothing(plan, tmp_path):
     _, state = _state(tmp_path, plan_mode=None, plan_file="")
-    assert refactor.plan_mode(state) == refactor.PLAN_NONE
+    assert plan.plan_mode(state) == plan.PLAN_NONE
 
 
 # ---------- 投稿と編集 ----------
 
-def test_the_first_publish_creates_a_comment(refactor, tmp_path, gh):
+def test_the_first_publish_creates_a_comment(plan, tmp_path, gh):
     calls, responses = gh
     responses["issues/130/comments"] = json.dumps(
         {"id": 999, "html_url": COMMENT_URL})
     _, state = _state(tmp_path)
 
-    url = refactor.publish_plan_comment(state)
+    url = plan.publish_plan_comment(state)
 
     assert url == COMMENT_URL
     assert state["plan_comment"] == {"id": 999, "url": COMMENT_URL}
@@ -94,14 +94,14 @@ def test_the_first_publish_creates_a_comment(refactor, tmp_path, gh):
     assert len(posted) == 1
 
 
-def test_the_second_publish_edits_the_same_comment(refactor, tmp_path, gh):
+def test_the_second_publish_edits_the_same_comment(plan, tmp_path, gh):
     """**同じコメントを編集する。** ラウンドごとに積み増さない。"""
     calls, responses = gh
     responses["issues/comments/999"] = json.dumps(
         {"id": 999, "html_url": COMMENT_URL})
     _, state = _state(tmp_path, plan_comment={"id": 999, "url": COMMENT_URL})
 
-    refactor.publish_plan_comment(state)
+    plan.publish_plan_comment(state)
 
     assert not [c for c in calls if "POST" in c]
     patched = [c for c in calls if "PATCH" in c]
@@ -109,58 +109,58 @@ def test_the_second_publish_edits_the_same_comment(refactor, tmp_path, gh):
     assert "repos/devbasex/ai-plugins/issues/comments/999" in patched[0]
 
 
-def test_a_lost_record_is_recovered_from_the_marker(refactor, tmp_path, gh):
+def test_a_lost_record_is_recovered_from_the_marker(plan, tmp_path, gh):
     """控えが失われても、印で引き当て直す。引き当てないとコメントが積まれる。"""
     calls, responses = gh
     _, state = _state(tmp_path)
-    marker = refactor.plan_comment_marker(state)
+    marker = plan.plan_comment_marker(state)
     responses["--paginate"] = json.dumps(
         [{"id": 12, "body": "別のコメント"},
          {"id": 999, "body": f"{marker}\n\n# 改修計画"}])
     responses["issues/comments/999"] = json.dumps(
         {"id": 999, "html_url": COMMENT_URL})
 
-    refactor.publish_plan_comment(state)
+    plan.publish_plan_comment(state)
 
     assert not [c for c in calls if "POST" in c]
     assert [c for c in calls if "PATCH" in c]
 
 
-def test_the_body_carries_the_marker_and_the_plan(refactor, tmp_path):
+def test_the_body_carries_the_marker_and_the_plan(plan, tmp_path):
     _, state = _state(tmp_path)
-    body = refactor.plan_comment_body(state)
-    assert body.startswith(refactor.plan_comment_marker(state))
+    body = plan.plan_comment_body(state)
+    assert body.startswith(plan.plan_comment_marker(state))
     assert "R1-001" in body and "src/foo.py" in body
 
 
-def test_a_failed_post_does_not_stop_the_run(refactor, tmp_path, gh):
+def test_a_failed_post_does_not_stop_the_run(plan, tmp_path, gh):
     """記録が残らないことと、変更が検証を通っていないことは別である。"""
     _, state = _state(tmp_path)
-    assert refactor.publish_plan_comment(state) is None
+    assert plan.publish_plan_comment(state) is None
     assert state.get("plan_comment") in (None, {})
 
 
-def test_the_file_mode_does_not_post_a_comment(refactor, tmp_path, gh):
+def test_the_file_mode_does_not_post_a_comment(plan, tmp_path, gh):
     calls, _ = gh
     _, state = _state(tmp_path, plan_mode="file", plan_file="issues/plan.md")
-    assert refactor.publish_plan_comment(state) is None
+    assert plan.publish_plan_comment(state) is None
     assert calls == []
 
 
 # ---------- 見送りの内訳は改修計画が持つ ----------
 
-def test_the_plan_lists_the_deferred_items(refactor, tmp_path):
+def test_the_plan_lists_the_deferred_items(plan, tmp_path):
     """**内訳を持つのは改修計画だけである**（決定 6-b）。"""
     _, state = _state(tmp_path, deferred_items=[{
         "item_id": "R1-002", "round": 1, "path": "src/bar.py",
         "symbol": "Bar.run", "smell": "duplication",
         "defer_reason": "差分予算を超えた",
     }])
-    text = refactor.format_plan(state)
+    text = plan.format_plan(state)
     assert "見送った項目" in text
     assert "src/bar.py#Bar.run" in text and "差分予算を超えた" in text
 
 
-def test_the_plan_says_none_when_nothing_was_deferred(refactor, tmp_path):
+def test_the_plan_says_none_when_nothing_was_deferred(plan, tmp_path):
     _, state = _state(tmp_path)
-    assert "見送った項目" in refactor.format_plan(state)
+    assert "見送った項目" in plan.format_plan(state)

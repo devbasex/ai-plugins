@@ -44,7 +44,7 @@ def gate_spy(refactor, monkeypatch):
 # ---------- 起点と担当を記録して返す ----------
 
 def test_the_gate_records_the_fix_base_before_it_asks_for_a_fix(
-    refactor, tmp_path, env_tmp_dir, gate_spy
+    refactor, cmd_gate, tmp_path, env_tmp_dir, gate_spy
 ):
     """**起点を記録しないと、取り込み側が範囲を確定できない。**"""
     state_path = _gate_state(tmp_path)
@@ -52,7 +52,7 @@ def test_the_gate_records_the_fix_base_before_it_asks_for_a_fix(
     gate_spy["test_code"] = 1
 
     with pytest.raises(SystemExit) as e:
-        refactor.cmd_final_gate(_args())
+        cmd_gate.cmd_final_gate(_args())
 
     assert e.value.code == 2
     gate = read_state(state_path)["final_gate"]
@@ -61,7 +61,7 @@ def test_the_gate_records_the_fix_base_before_it_asks_for_a_fix(
 
 
 def test_the_gate_emits_the_fix_impl_and_round(
-    refactor, tmp_path, env_tmp_dir, gate_spy, capsys
+    refactor, cmd_gate, tmp_path, env_tmp_dir, gate_spy, capsys
 ):
     """呼び出し側は担当を**出力から**受け取る。控えを読み直させない。"""
     state_path = _gate_state(tmp_path)
@@ -69,7 +69,7 @@ def test_the_gate_emits_the_fix_impl_and_round(
     gate_spy["test_code"] = 1
 
     with pytest.raises(SystemExit):
-        refactor.cmd_final_gate(_args())
+        cmd_gate.cmd_final_gate(_args())
 
     out = capsys.readouterr().out
     impl = read_state(state_path)["final_gate"]["impl"]
@@ -79,7 +79,7 @@ def test_the_gate_emits_the_fix_impl_and_round(
 
 
 def test_the_gate_does_not_reuse_the_apply_round_fix_base(
-    refactor, tmp_path, env_tmp_dir, gate_spy
+    refactor, cmd_gate, tmp_path, env_tmp_dir, gate_spy
 ):
     """**適用ラウンドの起点は流用しない。**
 
@@ -98,7 +98,7 @@ def test_the_gate_does_not_reuse_the_apply_round_fix_base(
     gate_spy["test_code"] = 1
 
     with pytest.raises(SystemExit):
-        refactor.cmd_final_gate(_args())
+        cmd_gate.cmd_final_gate(_args())
 
     state = read_state(state_path)
     assert state["final_gate"]["fix_base_sha"] == "HEADSHA"
@@ -106,7 +106,7 @@ def test_the_gate_does_not_reuse_the_apply_round_fix_base(
 
 
 def test_the_same_runtime_keeps_fixing_across_fix_rounds(
-    refactor, tmp_path, env_tmp_dir, gate_spy
+    refactor, cmd_gate, tmp_path, env_tmp_dir, gate_spy
 ):
     """**担当は最初に落ちたときだけ決める。** 直しかけの文脈を持つ者が続ける。"""
     state_path = _gate_state(
@@ -115,7 +115,7 @@ def test_the_same_runtime_keeps_fixing_across_fix_rounds(
     gate_spy["test_code"] = 1
 
     with pytest.raises(SystemExit):
-        refactor.cmd_final_gate(_args())
+        cmd_gate.cmd_final_gate(_args())
 
     state = read_state(state_path)
     assert state["final_gate"]["impl"] == "kiro"
@@ -123,13 +123,13 @@ def test_the_same_runtime_keeps_fixing_across_fix_rounds(
 
 
 def test_a_passing_gate_records_no_fix_impl(
-    refactor, tmp_path, env_tmp_dir, gate_spy
+    refactor, cmd_gate, tmp_path, env_tmp_dir, gate_spy
 ):
     """通ったときは担当を決めない。輪番も進めない。"""
     state_path = _gate_state(tmp_path)
     env_tmp_dir(state_path)
 
-    refactor.cmd_final_gate(_args())
+    cmd_gate.cmd_final_gate(_args())
 
     state = read_state(state_path)
     assert "impl" not in state["final_gate"]
@@ -171,14 +171,14 @@ def merge_spy(refactor, monkeypatch):
 
 
 def test_a_clean_final_fix_is_taken_in_and_published(
-    refactor, tmp_path, env_tmp_dir, merge_spy
+    refactor, cmd_gate, tmp_path, env_tmp_dir, merge_spy
 ):
     state_path = _failing_gate_state(tmp_path)
     env_tmp_dir(state_path)
     write_result(state_path, "codex-final-fix",
                  {"elapsed_seconds": 42, "commits": [{"sha": "C1FULL"}]})
 
-    refactor.cmd_merge_final_fix(_args())
+    cmd_gate.cmd_merge_final_fix(_args())
 
     gate = read_state(state_path)["final_gate"]
     assert merge_spy["reverted"] == [], "問題が無ければ取り消さない"
@@ -189,7 +189,7 @@ def test_a_clean_final_fix_is_taken_in_and_published(
 
 
 def test_the_final_fix_commit_does_not_need_an_item_id(
-    refactor, tmp_path, env_tmp_dir, merge_spy
+    refactor, cmd_gate, tmp_path, env_tmp_dir, merge_spy
 ):
     """**`Item-Id` と `Round` は求めない。**
 
@@ -201,13 +201,13 @@ def test_the_final_fix_commit_does_not_need_an_item_id(
     merge_spy["trailers"] = {"Impl-Runtime": "codex", "Impl-Model": "gpt-5.5"}
     write_result(state_path, "codex-final-fix", {"commits": [{"sha": "C1FULL"}]})
 
-    refactor.cmd_merge_final_fix(_args())
+    cmd_gate.cmd_merge_final_fix(_args())
 
     assert merge_spy["reverted"] == []
 
 
 def test_a_missing_impl_trailer_reverts_the_range(
-    refactor, tmp_path, env_tmp_dir, merge_spy
+    refactor, cmd_gate, tmp_path, env_tmp_dir, merge_spy
 ):
     """誰が直したかは残す。欠けていれば取り込まない。"""
     state_path = _failing_gate_state(tmp_path)
@@ -215,14 +215,14 @@ def test_a_missing_impl_trailer_reverts_the_range(
     merge_spy["trailers"] = {"Impl-Runtime": "codex"}
     write_result(state_path, "codex-final-fix", {"commits": [{"sha": "C1FULL"}]})
 
-    refactor.cmd_merge_final_fix(_args())
+    cmd_gate.cmd_merge_final_fix(_args())
 
     assert len(merge_spy["reverted"]) == 1
     assert merge_spy["pushed"] == ["push"], "取り消しも公開する"
 
 
 def test_an_out_of_scope_final_fix_reverts_the_range(
-    refactor, tmp_path, env_tmp_dir, merge_spy, monkeypatch
+    refactor, cmd_gate, tmp_path, env_tmp_dir, merge_spy, monkeypatch
 ):
     """**最終ゲートでも `--scope` の外を触ってよい理由は無い。**"""
     state_path = _failing_gate_state(tmp_path)
@@ -234,13 +234,13 @@ def test_an_out_of_scope_final_fix_reverts_the_range(
     ])
     write_result(state_path, "codex-final-fix", {"commits": [{"sha": "C1FULL"}]})
 
-    refactor.cmd_merge_final_fix(_args())
+    cmd_gate.cmd_merge_final_fix(_args())
 
     assert len(merge_spy["reverted"]) == 1
 
 
 def test_an_unreported_commit_reverts_the_range(
-    refactor, tmp_path, env_tmp_dir, merge_spy, monkeypatch
+    refactor, cmd_gate, tmp_path, env_tmp_dir, merge_spy, monkeypatch
 ):
     """申告から漏れたコミットは検証を受けていない。範囲ごと取り消す。"""
     state_path = _failing_gate_state(tmp_path)
@@ -249,13 +249,13 @@ def test_an_unreported_commit_reverts_the_range(
                         lambda work, reported, ordered: ["C2FULL"])
     write_result(state_path, "codex-final-fix", {"commits": [{"sha": "C1FULL"}]})
 
-    refactor.cmd_merge_final_fix(_args())
+    cmd_gate.cmd_merge_final_fix(_args())
 
     assert len(merge_spy["reverted"]) == 1
 
 
 def test_the_commit_test_status_is_not_checked(
-    refactor, tmp_path, env_tmp_dir, merge_spy, monkeypatch
+    refactor, cmd_gate, tmp_path, env_tmp_dir, merge_spy, monkeypatch
 ):
     """**コミットごとのテストは走らせない**（決定 11 の排他を破らないため）。
 
@@ -275,14 +275,14 @@ def test_the_commit_test_status_is_not_checked(
     monkeypatch.setattr(refactor, "collect_commit_facts", spy_facts)
     write_result(state_path, "codex-final-fix", {"commits": [{"sha": "C1FULL"}]})
 
-    refactor.cmd_merge_final_fix(_args())
+    cmd_gate.cmd_merge_final_fix(_args())
 
     assert seen == [""], "テストコマンドを渡さない"
     assert merge_spy["reverted"] == [], "`skipped` を失敗として扱わない"
 
 
 def test_a_range_that_cannot_be_determined_does_not_take_anything_in(
-    refactor, tmp_path, env_tmp_dir, merge_spy
+    refactor, cmd_gate, tmp_path, env_tmp_dir, merge_spy
 ):
     """起点が無ければ取り込まない。**空の範囲と混同しない。**"""
     state_path = _failing_gate_state(tmp_path, final_gate={"fix_base_sha": None})
@@ -290,21 +290,21 @@ def test_a_range_that_cannot_be_determined_does_not_take_anything_in(
     write_result(state_path, "codex-final-fix", {"commits": []})
 
     with pytest.raises(SystemExit) as e:
-        refactor.cmd_merge_final_fix(_args())
+        cmd_gate.cmd_merge_final_fix(_args())
 
     assert e.value.code == 2
     assert merge_spy["pushed"] == []
 
 
 def test_the_take_in_needs_the_gate_to_run_first(
-    refactor, tmp_path, env_tmp_dir, merge_spy
+    refactor, cmd_gate, tmp_path, env_tmp_dir, merge_spy
 ):
     """担当が無いまま呼ばれたら**進行ごと止める**（終了コード 4）。"""
     state_path = _gate_state(tmp_path)
     env_tmp_dir(state_path)
 
     with pytest.raises(SystemExit) as e:
-        refactor.cmd_merge_final_fix(_args())
+        cmd_gate.cmd_merge_final_fix(_args())
 
     assert e.value.code == 4
 

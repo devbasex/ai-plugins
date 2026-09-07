@@ -41,40 +41,40 @@ def _state(tmp_path, **over):
 
 # ---------- D3: 改修計画の参照 ----------
 
-def test_the_plan_reference_is_a_raw_url(refactor, tmp_path):
+def test_the_plan_reference_is_a_raw_url(outbound, tmp_path):
     """**Markdown のリンクにしない。** 読み手が URL を取り出せなくなる。"""
     _, state = _state(tmp_path)
-    reference = refactor.plan_reference(state)
+    reference = outbound.plan_reference(state)
     assert reference == COMMENT_URL
     assert "[" not in reference and "](" not in reference
 
 
-def test_the_plan_line_names_the_plan(refactor, tmp_path):
+def test_the_plan_line_names_the_plan(outbound, tmp_path):
     _, state = _state(tmp_path)
-    assert refactor.plan_line(state) == f"改修計画: {COMMENT_URL}"
+    assert outbound.plan_line(state) == f"改修計画: {COMMENT_URL}"
 
 
-def test_a_missing_comment_is_stated_instead_of_a_blank(refactor, tmp_path):
+def test_a_missing_comment_is_stated_instead_of_a_blank(outbound, tmp_path):
     """投稿できていないことを黙らない。空欄だと読み手が探し始める。"""
     _, state = _state(tmp_path, plan_comment=None)
-    assert "作成できていません" in refactor.plan_reference(state)
+    assert "作成できていません" in outbound.plan_reference(state)
 
 
-def test_the_file_mode_points_at_the_file(refactor, tmp_path):
+def test_the_file_mode_points_at_the_file(outbound, tmp_path):
     _, state = _state(tmp_path, plan_mode="file", plan_file="issues/plan.md")
-    assert refactor.plan_reference(state) == "issues/plan.md"
+    assert outbound.plan_reference(state) == "issues/plan.md"
 
 
 # ---------- D1: 項目の指し方 ----------
 
-def test_an_item_is_named_with_its_file_and_symbol(refactor, tmp_path):
+def test_an_item_is_named_with_its_file_and_symbol(outbound, tmp_path):
     _, state = _state(tmp_path)
-    assert refactor.item_lines(state, ["R1-001"]) == [
+    assert outbound.item_lines(state, ["R1-001"]) == [
         "R1-001 `src/foo.py#Foo.handle`"
     ]
 
 
-def test_a_test_item_is_named_with_its_target(refactor, tmp_path):
+def test_a_test_item_is_named_with_its_target(outbound, tmp_path):
     """テスト項目の `path` はテストを足す先。指すのは固定する入口である。"""
     _, state = _state(tmp_path, items=[{
         "item_id": "R1-001", "round": 1, "kind": "test",
@@ -82,16 +82,16 @@ def test_a_test_item_is_named_with_its_target(refactor, tmp_path):
         "case": "branch", "level": "unit", "proposed_by": ["codex"],
         "status": "done", "commits": [],
     }])
-    assert refactor.item_lines(state, ["R1-001"]) == [
+    assert outbound.item_lines(state, ["R1-001"]) == [
         "R1-001 `src/foo.py#Foo.handle`"
     ]
 
 
 # ---------- D2: 取り消しは件数だけ ----------
 
-def test_a_drop_is_reported_as_a_count(refactor, tmp_path):
+def test_a_drop_is_reported_as_a_count(outbound, tmp_path):
     _, state = _state(tmp_path)
-    line = refactor.dropped_line(state, 3)
+    line = outbound.dropped_line(state, 3)
     assert "3 件" in line and "内訳は改修計画にある" in line
     assert COMMENT_URL in line
 

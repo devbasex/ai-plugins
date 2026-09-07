@@ -143,21 +143,21 @@ def test_test_items_are_split_by_the_file_the_test_goes_into(refactor):
 
 # ---------- 鍵と表示 ----------
 
-def test_the_key_differs_by_the_kind_of_item(refactor):
-    assert refactor.item_key({
+def test_the_key_differs_by_the_kind_of_item(rounds):
+    assert rounds.item_key({
         "kind": "test", "target": "src/a.py#f", "case": "branch"}) == (
         "src/a.py#f", "branch")
-    assert refactor.item_key({
+    assert rounds.item_key({
         "path": "src/a.py", "symbol": "f", "smell": "long_method"}) == (
         "src/a.py", "f", "long_method")
 
 
-def test_the_label_names_the_file_and_the_symbol(refactor):
+def test_the_label_names_the_file_and_the_symbol(rounds):
     """外へ出す文章は内部の識別子だけで書かない。"""
-    assert refactor.item_label({
+    assert rounds.item_label({
         "kind": "test", "target": "src/a.py#f", "path": "tests/test_a.py",
     }) == "src/a.py#f"
-    assert refactor.item_label({"path": "src/a.py", "symbol": "f"}) == "src/a.py#f"
+    assert rounds.item_label({"path": "src/a.py", "symbol": "f"}) == "src/a.py#f"
 
 
 # ---------- ラウンドの開始 ----------

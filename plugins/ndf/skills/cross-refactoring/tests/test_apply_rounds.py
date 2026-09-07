@@ -245,7 +245,7 @@ def test_next_apply_round_resets_the_fix_rounds(
 
 
 def test_next_apply_round_exits_1_when_no_group_is_left(
-    refactor, tmp_path, env_tmp_dir, monkeypatch
+    refactor, cmd_apply, tmp_path, env_tmp_dir, monkeypatch
 ):
     groups = _two_groups()
     for g in groups:
@@ -256,7 +256,7 @@ def test_next_apply_round_exits_1_when_no_group_is_left(
     env_tmp_dir(state_path)
     monkeypatch.setattr(refactor, "_git_out", lambda work, args, **k: "HEAD")
     with pytest.raises(SystemExit) as e:
-        refactor.cmd_next_apply_round(type("A", (), {"id": 130, "round": 1})())
+        cmd_apply.cmd_next_apply_round(type("A", (), {"id": 130, "round": 1})())
     assert e.value.code == 1
 
 
