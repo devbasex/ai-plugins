@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import hashlib
 import pathlib
 import sys
@@ -43,6 +44,7 @@ from ..rounds import (
     prepare_fix_phase,
 )
 from ..verify import (
+    merge_test_judgements,
     unassigned_fix_commits,
     verify_commit_granularity,
     verify_fix_commit,
@@ -426,3 +428,50 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         f"修正を取り込みました（解決 {len(resolved)} スレッド / "
         f"修正ラウンド {entry['fix_rounds']}）。{plan_line(state)}"
     )
+
+
+def cmd_merge_test_judgements(args: argparse.Namespace) -> None:
+    """段 2（AI エージェント）の答えを取り込む（#443）。
+
+    **答えが欠けたものを通さない。** `undecidable` と同じに扱い、保留のまま残す。
+    残った分は Step 7 のレビューへ引き継ぐ。
+    """
+    path, state = load_state(args.id)
+    entry = round_of(state, args.round)
+    pending = list(entry.get("pending_test_judgements") or [])
+    if not pending:
+        info("判定を待っているテストはありません")
+        return
+
+    verdicts: list[dict[str, Any]] = []
+    for runtime in state.get("runtimes", []):
+        result = result_path(
+            state, runtime, f"{runtime}-judge-test-changes-r{args.round}")
+        if not result.exists():
+            continue
+        try:
+            payload = json.loads(result.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        found = payload.get("verdicts")
+        if isinstance(found, list):
+            verdicts.extend(v for v in found if isinstance(v, dict))
+
+    outcome = merge_test_judgements(pending, verdicts)
+    if outcome["problem"]:
+        entry["pending_test_judgements"] = []
+        statefile.save(path, state)
+        die(outcome["problem"])
+        return
+
+    if outcome["pending"]:
+        entry["pending_test_judgements"] = outcome["pending"]
+        info(
+            f"{len(outcome['pending'])} 件はレビューへ引き継ぎます: "
+            + ", ".join(outcome["pending"])
+        )
+    else:
+        entry.pop("pending_test_judgements", None)
+        info("テストの差分は、期待する振る舞いを変えていません")
+    statefile.save(path, state)
+

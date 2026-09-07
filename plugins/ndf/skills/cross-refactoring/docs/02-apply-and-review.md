@@ -57,18 +57,39 @@ eval "$("$SCRIPTS/refactor.py" next-apply-round "$ID" "$ROUND")"  # 1 = 群が�
 **段 1 は `merge-apply` が機械で行う。** `verify_apply_round` が期待値の変更を落とし、
 決まらなかった差分を `pending_test_judgements` へ記録する。
 
-**段 2 は進行側が起動する。** 記録が空でなければ、その差分を
-`$TMP_DIR/test-diff-r<N>.diff` へ書き出し、`launch-cli.sh <ランタイム>
-judge-test-changes <ID> <ラウンド>` を実行する。**記録が残ったまま次の工程へ進まない。**
+**段 2 は進行側が起動し、答えを取り込む。** 記録が空でなければ次の 4 手を行う。
+**記録が残ったまま次の工程へ進まない。**
 
 ```bash
-# 記録を読む
-jq -r '.rounds[] | select(.round == $r) | .pending_test_judgements // [] | .[]' \
-  --argjson r "$ROUND" "$STATE"
+# 1. 記録を読む
+PENDING=$(jq -r '.rounds[] | select(.round == $r) | .pending_test_judgements // [] | .[]' \
+  --argjson r "$ROUND" "$STATE")
+[ -n "$PENDING" ] || exit 0        # 空なら段 2 は要らない
+
+# 2. 対象の差分を書き出す
+git -C "$WORK" show "$SHA" -- $PENDING > "$TMP_DIR/test-diff-r$ROUND.diff"
+
+# 3. 判定させる（担当は適用の担当と同じでよい。判定だけを返す）
+bash "$SKILL_DIR/scripts/launch-cli.sh" "$RUNTIME" judge-test-changes "$ID" "$ROUND"
+
+# 4. 答えを取り込む
+"$SCRIPTS/refactor.py" merge-test-judgements "$ID" "$ROUND"
 ```
 
-**段 2 の起動は手順である。** 機械が enforce するのは段 1 と、記録が残ることまでである。
-変えてよい範囲の定義は `refactoring` の `references/test-changes.md` が持つ。
+**取り込みの結果で次が決まる。**
+
+| 答え | 次にどうするか |
+| --- | --- |
+| すべて `unchanged` | **保留を解く。** 記録が消え、次の工程へ進む |
+| 1 件でも `changed` | **適用ラウンドを取り消す。** 期待出力を変えているため |
+| `undecidable` | **保留のまま残し、Step 7 のレビューへ引き継ぐ** |
+| 答えが欠けている | `undecidable` と同じに扱う |
+
+**答えが欠けたものを `unchanged` に倒さない。** 倒すと、判定を返さないことが通過の手段に
+なる。知らない答えも同じ扱いにする。
+
+**機械が enforce するのは段 1 と、記録が残ること、取り込みの判定である。** 起動そのものは
+手順である。変えてよい範囲の定義は `refactoring` の `references/test-changes.md` が持つ。
 
 **検証の材料は結果ファイルの申告ではなく、git と実際のテスト実行から取る。**
 実装担当は自分の成果を報告する側なので、JSON の値をそのまま検査に使うと

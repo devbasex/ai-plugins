@@ -220,3 +220,108 @@ def test_the_round_verification_reports_undecidable_diffs(verify) -> None:
                                              ["    assert f(1) == (\n", "        4,\n"])},
     }]
     assert verify.pending_test_judgements(facts) == ["tests/test_a.py"]
+
+
+# ---------- 判定を安全側へ倒す（レビューの指摘） ----------
+
+def test_a_direct_import_is_undecidable(verify) -> None:
+    """取り込み方を変えて呼び出しの形が変わった差分を、落とさないこと。
+
+    **`assert` 行の不一致だけでは、期待出力が変わったとは決まらない。**
+    `oldmod.f(1)` を `f(1)` へ変えただけでも行は一致しなくなる。
+    """
+    before = ["    assert oldmod.f(1) == 3\n"]
+    after = ["    assert f(1) == 3\n"]
+    assert verify.assertion_change(before, after) == "undecidable"
+
+
+def test_a_renamed_local_is_undecidable(verify) -> None:
+    """局所の名前を変えた差分も、落とさずに段 2 へ回すこと。"""
+    before = ["    assert build(order) == 3\n"]
+    after = ["    assert build(o) == 3\n"]
+    assert verify.assertion_change(before, after) == "undecidable"
+
+
+def test_a_changed_literal_is_still_detected(verify) -> None:
+    """**値だけが変わった差分は、機械で落とす。** 安全側へ倒しすぎない。"""
+    before = ["    assert build(order) == 3\n"]
+    after = ["    assert build(order) == 4\n"]
+    assert verify.assertion_change(before, after) == "changed"
+
+
+def test_a_changed_string_is_still_detected(verify) -> None:
+    """文字列の期待値が変わった差分も、機械で落とすこと。"""
+    before = ['    assert path == "file.txt"\n']
+    after = ['    assert path == "other.txt"\n']
+    assert verify.assertion_change(before, after) == "changed"
+
+
+# ---------- 判定結果の取り込み（レビューの指摘） ----------
+
+def test_all_unchanged_clears_the_pending_record(verify) -> None:
+    """全件が `unchanged` なら、保留の記録が消えること。"""
+    verdicts = [{"path": "tests/test_a.py", "verdict": "unchanged", "reason": "経路だけ"}]
+    outcome = verify.merge_test_judgements(["tests/test_a.py"], verdicts)
+    assert outcome["pending"] == []
+    assert outcome["problem"] is None
+
+
+def test_a_changed_verdict_fails_the_round(verify) -> None:
+    """1 件でも `changed` があれば、適用ラウンドを落とすこと。"""
+    verdicts = [{"path": "tests/test_a.py", "verdict": "changed", "reason": "270 が 300 に"}]
+    outcome = verify.merge_test_judgements(["tests/test_a.py"], verdicts)
+    assert outcome["problem"] is not None
+    assert "期待" in outcome["problem"]
+
+
+def test_an_undecidable_verdict_is_carried_to_the_review(verify) -> None:
+    """`undecidable` は保留のまま残し、レビューへ引き継ぐこと。"""
+    verdicts = [{"path": "tests/test_a.py", "verdict": "undecidable", "reason": "追えない"}]
+    outcome = verify.merge_test_judgements(["tests/test_a.py"], verdicts)
+    assert outcome["pending"] == ["tests/test_a.py"]
+    assert outcome["problem"] is None
+
+
+def test_a_missing_verdict_is_treated_as_undecidable(verify) -> None:
+    """答えが欠けたものは、判定できないものとして扱うこと。
+
+    **通ったものとして扱わない。** 抜けを `unchanged` に倒すと、判定を返さない
+    ことが通過の手段になる。
+    """
+    outcome = verify.merge_test_judgements(["tests/test_a.py", "tests/test_b.py"],
+                                           [{"path": "tests/test_a.py",
+                                             "verdict": "unchanged", "reason": "経路だけ"}])
+    assert outcome["pending"] == ["tests/test_b.py"]
+
+
+def test_an_unknown_verdict_is_treated_as_undecidable(verify) -> None:
+    """知らない答えも、判定できないものとして扱うこと。"""
+    outcome = verify.merge_test_judgements(
+        ["tests/test_a.py"], [{"path": "tests/test_a.py", "verdict": "maybe"}])
+    assert outcome["pending"] == ["tests/test_a.py"]
+
+
+def test_the_merge_command_clears_or_fails(
+    paths, patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch
+) -> None:
+    """取り込みのサブコマンドが、保留を解くか落とすこと。"""
+    import json
+    from crossref_helpers import make_state, read_state
+
+    state_path = make_state(tmp_path, rounds=[{
+        "round": 1, "impl": "codex", "reviewers": ["agy", "kiro"],
+        "impl_model": {"requested": None, "observed": None}, "reviewer_models": {},
+        "proposed": {}, "items": [], "apply": {"applied": [], "failed": []},
+        "fix_rounds": 0, "durations": {}, "reviews": [],
+        "pending_test_judgements": ["tests/test_a.py"],
+    }])
+    env_tmp_dir(state_path)
+    (state_path.parent / "codex-judge-test-changes-r1-result.json").write_text(
+        json.dumps({"verdicts": [{"path": "tests/test_a.py", "verdict": "unchanged",
+                                  "reason": "経路だけ"}]}), encoding="utf-8")
+
+    refactor.cmd_merge_test_judgements(
+        type("A", (), {"id": 130, "round": 1})())
+
+    entry = read_state(state_path)["rounds"][0]
+    assert entry.get("pending_test_judgements", []) == []

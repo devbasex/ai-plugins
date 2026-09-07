@@ -358,6 +358,26 @@ def _has_undecidable_form(lines: Iterable[str]) -> bool:
     )
 
 
+# 値そのもの。数値・文字列・真偽・None を指す。
+_LITERAL = re.compile(
+    r"""(?:[rbuf]{0,2}"(?:\\.|[^"\\])*"|[rbuf]{0,2}'(?:\\.|[^'\\])*'"""
+    r"""|\b\d+(?:\.\d+)?\b|\bTrue\b|\bFalse\b|\bNone\b)"""
+)
+
+
+def _values(lines: "Counter[str]") -> "Counter[str]":
+    """`assert` の行から、値だけを件数ごと数える。
+
+    **呼び方の違いを落とすため、値だけを残す。** 値が同じなら、変わったのは
+    取り込み方か名前であり、期待出力が変わったとは決まらない。
+    """
+    found: Counter[str] = Counter()
+    for line, count in lines.items():
+        for literal in _LITERAL.findall(line):
+            found[literal] += count
+    return found
+
+
 def assertion_change(before: Iterable[str], after: Iterable[str]) -> str:
     """テストの変更の種類を返す。
 
@@ -383,7 +403,15 @@ def assertion_change(before: Iterable[str], after: Iterable[str]) -> str:
     # 元の行が件数ごと残っていれば、足しただけである。**多重集合で見る。**
     if not (kept_before - kept_after):
         return "unchanged"
-    return "changed"
+    # **行が違うことは、期待出力が変わったことを意味しない。** 取り込み方を変えれば
+    # `oldmod.f(1)` は `f(1)` になり、局所の名前を変えれば `build(order)` は
+    # `build(o)` になる。どちらも期待出力は変わっていない。
+    #
+    # **機械で落とすのは、値そのものが変わったときに限る。** 値を伏せてなお行が
+    # 揃うなら、変わったのは呼び方であり、判定は段 2 へ回す。
+    if _values(kept_before) != _values(kept_after):
+        return "changed"
+    return "undecidable"
 
 
 def undecidable_test_changes(
@@ -429,4 +457,37 @@ def pending_test_judgements(facts: Iterable[dict[str, Any]]) -> list[str]:
     for commit in facts:
         changes.update(commit.get("test_changes") or {})
     return undecidable_test_changes(changes)
+
+
+def merge_test_judgements(
+    pending: Iterable[str], verdicts: Iterable[dict[str, Any]],
+) -> dict[str, Any]:
+    """段 2（AI エージェント）の答えを取り込み、次にどうするかを返す。
+
+    | 戻り値の項目 | 中身 |
+    | --- | --- |
+    | `problem` | `changed` が 1 件でもあれば失敗の理由。無ければ `None` |
+    | `pending` | レビューへ引き継ぐもの（`undecidable` と、答えが欠けたもの） |
+
+    **答えが欠けたものを `unchanged` に倒さない。** 倒すと、判定を返さないことが
+    通過の手段になる。知らない答えも同じ扱いにする。
+    """
+    answers = {
+        str(v.get("path")): str(v.get("verdict"))
+        for v in verdicts if isinstance(v, dict) and v.get("path")
+    }
+    changed = sorted(p for p in pending if answers.get(p) == "changed")
+    if changed:
+        return {
+            "problem": (
+                "テストの期待する振る舞いが変わっています"
+                f"（{', '.join(changed)}）。"
+                "構造改善では期待出力を変えません。振る舞いの変更は別の変更に分けてください"
+            ),
+            "pending": [],
+        }
+    return {
+        "problem": None,
+        "pending": sorted(p for p in pending if answers.get(p) != "unchanged"),
+    }
 

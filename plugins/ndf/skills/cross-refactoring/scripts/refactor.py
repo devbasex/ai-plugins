@@ -50,6 +50,7 @@ from refactor_lib.commands.apply import (  # noqa: E402
 )
 from refactor_lib.commands.converge import (  # noqa: E402
     cmd_abandon_items,
+    cmd_merge_test_judgements,
     cmd_merge_fix,
     cmd_should_abandon,
     cmd_verify_round,
@@ -164,6 +165,8 @@ def main() -> None:
         ("should-abandon", cmd_should_abandon,
          "Step 6 — この適用ラウンドの修正上限の到達判定"),
         ("merge-fix", cmd_merge_fix, "Step 6 — 修正結果の取り込み"),
+        ("merge-test-judgements", cmd_merge_test_judgements,
+         "Step 5 — テストの差分の判定（段 2）の答えを取り込む"),
     ):
         sp = sub.add_parser(name, help=help_)
         sp.add_argument("id", type=int)
