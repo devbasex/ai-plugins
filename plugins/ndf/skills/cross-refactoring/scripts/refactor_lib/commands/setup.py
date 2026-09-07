@@ -20,17 +20,17 @@ import models as models_lib
 import statefile
 
 from .. import ABORT, die, info
-from ..gitfacts import _run_with_timeout
+from ..gitfacts import run_with_timeout
 from ..paths import (
-    _default_worktree_base,
-    _load,
-    _repo_slug,
-    _sh,
-    _state_path,
-    _tmp_dir_for,
+    default_worktree_base,
+    load_state,
+    repo_slug,
+    sh,
+    state_path,
+    tmp_dir_for,
 )
 from ..plan import PLAN_COMMENT, PLAN_FILE, PLAN_NONE, normalize_plan_file
-from ..rounds import STRUCTURE, TEST, entry_kind, round_kind
+from ..rounds import finish_outer_rounds, STRUCTURE, TEST, entry_kind, round_kind
 from ..scope import require_scope_covers_tests
 from ..vocabulary import (
     DEFAULT_TEST_TIMEOUT,
@@ -38,7 +38,6 @@ from ..vocabulary import (
     test_vocabulary,
     vocabulary,
 )
-from .report import _finish
 
 
 def check_auth(runtimes: Iterable[str]) -> dict[str, dict[str, Any]]:
@@ -95,13 +94,13 @@ def _repo_from_git() -> Optional[str]:
     **求めた名前はそのまま使わない。** `repos/{owner}/{repo}/pulls/{PR}` の応答が
     そのまま検証になるため、誤った名前は失敗として現れる（`_fetch_pr_context`）。
     """
-    m = _REPO_URL.search(_sh(["git", "remote", "get-url", "origin"], check=False))
+    m = _REPO_URL.search(sh(["git", "remote", "get-url", "origin"], check=False))
     return f"{m.group('owner')}/{m.group('name')}" if m else None
 
 
 def _pr_payload(repo: str, pr: int) -> Optional[dict[str, Any]]:
     """`repos/{repo}/pulls/{pr}` の応答を返す。読めなければ `None`。"""
-    out = _sh(["gh", "api", f"repos/{repo}/pulls/{int(pr)}"], check=False)
+    out = sh(["gh", "api", f"repos/{repo}/pulls/{int(pr)}"], check=False)
     if not out:
         return None
     try:
@@ -133,7 +132,7 @@ def _fetch_pr_context(pr: int, repo: Optional[str] = None) -> tuple[str, str, st
             break
     if body is None:
         # 求めた名前が誤っていたときだけ、GraphQL で解決し直す。
-        fallback = _sh(
+        fallback = sh(
             ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
         body = _pr_payload(fallback, pr)
         if body is None:
@@ -144,7 +143,7 @@ def _fetch_pr_context(pr: int, repo: Optional[str] = None) -> tuple[str, str, st
     # **取得に失敗しても止めない。** bot トークン（Actions の `GITHUB_TOKEN` など）は
     # `/user` を読めず `HTTP 403` を返す。この値は自分の Pull Request かどうかの
     # 判定にしか使わないので、読めなければ他者の Pull Request として扱えばよい。
-    viewer = _sh(["gh", "api", "user", "--jq", ".login"], check=False)
+    viewer = sh(["gh", "api", "user", "--jq", ".login"], check=False)
     author = str((body.get("user") or {}).get("login") or "")
     is_own_pr = bool(viewer) and viewer == author
     head_branch = str((body.get("head") or {}).get("ref") or "")
@@ -200,7 +199,7 @@ def cmd_init(args: argparse.Namespace) -> None:
 
     root = (
         pathlib.Path(args.worktree_root).resolve() if args.worktree_root
-        else _default_worktree_base() / _repo_slug(repo) / f"rf{args.pr}"
+        else default_worktree_base() / repo_slug(repo) / f"rf{args.pr}"
     )
     work = root / "work"
     _ensure_work_worktree(work, head_branch)
@@ -212,9 +211,9 @@ def cmd_init(args: argparse.Namespace) -> None:
     # どうかを実物で確かめるためである。
     require_scope_covers_tests(args.scope, args.baseline_test, str(work))
 
-    tmp_dir = _tmp_dir_for(work)
+    tmp_dir = tmp_dir_for(work)
     tmp_dir.mkdir(parents=True, exist_ok=True)
-    state_file = _state_path(tmp_dir, args.pr)
+    state_file = state_path(tmp_dir, args.pr)
 
     if state_file.exists():
         state = statefile.load(state_file)
@@ -326,7 +325,7 @@ def _ensure_work_worktree(work: pathlib.Path, head_branch: str) -> None:
         info(f"⚠ 現リポジトリの作業ディレクトリではないため退避しました: {stale}")
     work.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "worktree", "prune"], capture_output=True, text=True)
-    _sh(["git", "fetch", "origin", head_branch])
+    sh(["git", "fetch", "origin", head_branch])
     # ローカルに head ブランチがあるかどうかで作り方が変わる。無い状態で
     # `worktree add <path> <branch>` を叩くと「そんなブランチは無い」で失敗する。
     exists = subprocess.run(
@@ -334,9 +333,9 @@ def _ensure_work_worktree(work: pathlib.Path, head_branch: str) -> None:
         capture_output=True, text=True,
     ).returncode == 0
     if exists:
-        _sh(["git", "worktree", "add", str(work), head_branch])
+        sh(["git", "worktree", "add", str(work), head_branch])
     else:
-        _sh(["git", "worktree", "add", "-b", head_branch, str(work),
+        sh(["git", "worktree", "add", "-b", head_branch, str(work),
              f"origin/{head_branch}"])
     info(f"✅ 書き込み用の作業ディレクトリを作成しました: {work}")
 
@@ -374,7 +373,7 @@ def _sync_work_worktree(work: pathlib.Path, head_branch: str) -> None:
 
 
 def _is_registered_worktree(path: pathlib.Path) -> bool:
-    out = _sh(["git", "worktree", "list", "--porcelain"], check=False)
+    out = sh(["git", "worktree", "list", "--porcelain"], check=False)
     target = str(path.resolve())
     return any(line == f"worktree {target}" for line in out.splitlines())
 
@@ -388,7 +387,7 @@ def _run_baseline_test(
     区別できない。そもそも振る舞いが変わっていないことを示す手段が無い書き換えは
     構造改善ではないため、テストコマンドは必須にしている。
     """
-    code, timed_out = _run_with_timeout(command, str(work), timeout)
+    code, timed_out = run_with_timeout(command, str(work), timeout)
     if timed_out:
         die(
             f"着手前のテストが {timeout} 秒で終わりませんでした（{command}）。"
@@ -422,7 +421,7 @@ def cmd_start_round(args: argparse.Namespace) -> None:
     **再開しても担当は変わらない。** 同じラウンド番号を開き直したときは記録済みの
     割り当てをそのまま返す。
     """
-    path, state = _load(args.id)
+    path, state = load_state(args.id)
     if state.get("final"):
         info(f"ラウンドの繰り返しは終了しています（{state['final']}）")
         sys.exit(1)
@@ -430,7 +429,7 @@ def cmd_start_round(args: argparse.Namespace) -> None:
     rounds = state["rounds"]
     kind = round_kind(state)
     if kind == STRUCTURE and len(rounds_of_kind(state, STRUCTURE)) >= state["max_outer_rounds"]:
-        _finish(path, state, "max_outer_rounds")
+        finish_outer_rounds(path, state, "max_outer_rounds")
         sys.exit(1)
 
     round_no = len(rounds) + 1

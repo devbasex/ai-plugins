@@ -16,31 +16,34 @@ import statefile
 
 from .. import die, info
 from ..gitfacts import (
-    _current_round,
-    _discard_impl_leftovers,
-    _drop_items,
-    _find_item,
-    _flush_pending_push,
-    _git_out,
-    _push_head,
-    _read_result,
-    _record_observed_model,
-    _reported_shas,
-    _revert_item_commits,
-    _round,
-    _safe_int,
+    run_drop,
+    current_round,
+    discard_impl_leftovers,
+    drop_items,
+    find_item,
+    flush_pending_push,
+    push_head,
+    read_result,
+    record_observed_model,
+    reported_shas,
+    revert_item_commits,
+    round_of,
+    safe_int,
     collect_commit_facts,
     commits_in_range,
 )
-from ..paths import _load, _result_path, stem_for
+from ..paths import git_out, load_state, result_path, stem_for
 from ..proposals import assign_apply_rounds, merge_proposals, merge_test_proposals
 from ..rounds import (
     TEST,
+    apply_groups,
+    current_group,
     deferred_record,
     entry_kind,
     item_key,
     item_kind,
     item_label,
+    phase_after_group,
 )
 from ..verify import verify_apply_round
 from ..vocabulary import DEFAULT_TEST_TIMEOUT
@@ -56,7 +59,7 @@ def _load_runtime_proposals(
     """
     proposals: dict[str, list[dict[str, Any]]] = {}
     for runtime in state["runtimes"]:
-        result = _result_path(
+        result = result_path(
             state, runtime,
             stem_for(runtime, "propose", state["id"], entry["round"]),
         )
@@ -101,7 +104,7 @@ def _assign_apply_rounds_to_state(
     """
     entry["apply_rounds"] = []
     entry["apply_round"] = 0
-    seq = _safe_int(state.get("apply_seq"))
+    seq = safe_int(state.get("apply_seq"))
     for n, group in enumerate(assign_apply_rounds(adopted), start=1):
         seq += 1
         impl, _ = assignment.assign(seq, state["host"])
@@ -153,7 +156,7 @@ def _update_state_from_merged_proposals(
     # 適用の起点は**オーケストレータ側で**確定させる。実装担当の申告に委ねると、
     # 欠落・不正時に範囲検査が無効になり、過去の任意のコミットが実在扱いになる。
     # 提案は読むだけなので、この時点の HEAD が着手前の状態である。
-    entry["apply_base_sha"] = _git_out(state["worktrees"]["work"], ["rev-parse", "HEAD"])
+    entry["apply_base_sha"] = git_out(state["worktrees"]["work"], ["rev-parse", "HEAD"])
 
     if adopted:
         state["phase"] = "apply"
@@ -178,8 +181,8 @@ def cmd_merge_proposals(args: argparse.Namespace) -> None:
     **同じラウンドで叩き直しても二重に項目を作らない。** 進行を止めても再開できる
     ことが前提なので、統合済みなら前回と同じ結果をそのまま返す。
     """
-    path, state = _load(args.id)
-    entry = _current_round(state)
+    path, state = load_state(args.id)
+    entry = current_round(state)
 
     kind = entry_kind(entry)
     if entry.get("proposal_keys") is not None:
@@ -188,7 +191,7 @@ def cmd_merge_proposals(args: argparse.Namespace) -> None:
             f"（採用 {entry.get('adopted', 0)} 件 / 見送り {entry.get('deferred', 0)} 件）"
         )
         for item_id in entry.get("items", []):
-            item = _find_item(state, item_id, required=False)
+            item = find_item(state, item_id, required=False)
             if item is not None:
                 info(f"  {item_id} {item_label(item)}")
         if not entry.get("adopted") and kind != TEST:
@@ -218,7 +221,7 @@ def cmd_merge_proposals(args: argparse.Namespace) -> None:
         f"採用 {entry['adopted']} 件 / 見送り {entry['deferred']} 件"
     )
     for item_id in entry["items"]:
-        info(f"  {item_id} {_item_summary(_find_item(state, item_id))}")
+        info(f"  {item_id} {_item_summary(find_item(state, item_id))}")
     if not adopted:
         if kind == TEST:
             # **終了ではない。** 足すべきテストが出なくなっただけで、この後に
@@ -244,38 +247,8 @@ def _item_summary(item: dict[str, Any]) -> str:
     )
 
 
-def apply_groups(entry: dict[str, Any]) -> list[dict[str, Any]]:
-    """このラウンドの適用ラウンド（群）の一覧。
-
-    群を持たない状態ファイル（この版より前）は、**ラウンド全体を 1 つの群**として
-    読み、その場で記録する。中断から再開したときに、群の単位が実行のたびに
-    変わらないようにするためである。
-    """
-    groups = entry.get("apply_rounds")
-    if groups:
-        return groups
-    entry["apply_rounds"] = [{
-        "apply_round": 1,
-        "impl": entry.get("impl"),
-        "impl_model": entry.get("impl_model") or {"requested": None, "observed": None},
-        "items": list(entry.get("items") or []),
-        "status": "pending",
-        "base_sha": entry.get("apply_base_sha"),
-        "head_sha": None,
-        "fix_rounds": entry.get("fix_rounds", 0),
-    }]
-    entry.setdefault("apply_round", 1)
-    return entry["apply_rounds"]
 
 
-def current_group(entry: dict[str, Any]) -> dict[str, Any]:
-    """進行中の適用ラウンド。まだ開いていなければ最初の群を返す。"""
-    groups = apply_groups(entry)
-    current = entry.get("apply_round") or 1
-    for group in groups:
-        if group.get("apply_round") == current:
-            return group
-    return groups[-1]
 
 
 def cmd_next_apply_round(args: argparse.Namespace) -> None:
@@ -289,8 +262,8 @@ def cmd_next_apply_round(args: argparse.Namespace) -> None:
     **修正ラウンドの数え直しも群ごとである。** `--max-fix-rounds` は 1 つの適用
     ラウンドあたりの上限だからである。
     """
-    path, state = _load(args.id)
-    entry = _round(state, args.round)
+    path, state = load_state(args.id)
+    entry = round_of(state, args.round)
     groups = apply_groups(entry)
 
     # **`applied` の群も開き直す。** 適用は取り込んだが検証まで進めずに落ちた場合、
@@ -307,7 +280,7 @@ def cmd_next_apply_round(args: argparse.Namespace) -> None:
     if opened.get("status") == "pending":
         # 起点は**オーケストレータ側で**確定させる。実装担当の申告に委ねると、
         # 欠落・不正時に範囲検査が無効になり、過去の任意のコミットが実在扱いになる。
-        head = _git_out(state["worktrees"]["work"], ["rev-parse", "HEAD"])
+        head = git_out(state["worktrees"]["work"], ["rev-parse", "HEAD"])
         opened["base_sha"] = head
         entry["apply_base_sha"] = head
         entry["fix_rounds"] = 0
@@ -349,11 +322,11 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
     **群の中は 1 コミットなので、1 件の失敗が群の全件を取り消す**（決定 2）。
     他の群には及ばない（受け入れ条件 A4）。
     """
-    path, state = _load(args.id)
-    entry = _round(state, args.round)
+    path, state = load_state(args.id)
+    entry = round_of(state, args.round)
     group = current_group(entry)
     if not args.dry_run:
-        _discard_impl_leftovers(state, state["worktrees"]["work"])
+        discard_impl_leftovers(state, state["worktrees"]["work"])
         _resume_incomplete_apply(path, state, entry)
 
     # **叩き直しても同じ判定を返す。** 取り込み済みで再実行すると、前回作った
@@ -400,7 +373,7 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
     }
     group["head_sha"] = head_sha
     durations = entry.setdefault("durations", {})
-    durations["apply"] = durations.get("apply", 0) + _safe_int(
+    durations["apply"] = durations.get("apply", 0) + safe_int(
         payload.get("elapsed_seconds")
     )
 
@@ -408,7 +381,7 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
     # つもりで実行した利用者の進行が壊れる。
     if args.dry_run:
         if failed:
-            _drop_items(state, entry, failed, dry_run=True)
+            drop_items(state, entry, failed, dry_run=True)
         info("（dry-run）状態ファイルは更新していません")
         applied = list(entry["apply"]["applied"])
     elif failed:
@@ -423,7 +396,7 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
         entry["apply"]["merged_at"] = statefile.now()
         entry["pending_push"] = True
         statefile.save(path, state)
-        _push_head(state)
+        push_head(state)
         entry["pending_push"] = False
         statefile.save(path, state)
 
@@ -440,10 +413,10 @@ def _load_apply_context(
     args: argparse.Namespace,
 ) -> tuple[dict[str, Any], pathlib.Path, str, list[str], set[str]]:
     impl = group.get("impl") or entry["impl"]
-    result = _result_path(state, impl, stem_for(impl, "apply", state["id"], args.round))
-    payload = _read_result(result, impl)
+    result = result_path(state, impl, stem_for(impl, "apply", state["id"], args.round))
+    payload = read_result(result, impl)
 
-    _record_observed_model(entry, "impl", impl, state, "apply", args.round)
+    record_observed_model(entry, "impl", impl, state, "apply", args.round)
 
     # 着手前のテストが**成功と確認できていない限り**適用結果を採らない。
     # `red` だけでなく `unknown`（確認していない）も拒否する。確認していない状態を
@@ -451,7 +424,7 @@ def _load_apply_context(
     baseline = state.get("baseline_test") or {}
     if baseline.get("status") != "green":
         for item_id in group["items"]:
-            _find_item(state, item_id)["status"] = "blocked"
+            find_item(state, item_id)["status"] = "blocked"
         if not args.dry_run:
             statefile.save(path, state)
         die(
@@ -463,14 +436,14 @@ def _load_apply_context(
     # 検証の材料は git から取る。結果ファイルから使うのは
     # 「どのコミットがこの群のものか」という対応付けだけ。
     work = state["worktrees"]["work"]
-    head_sha = _git_out(work, ["rev-parse", "HEAD"]) or ""
+    head_sha = git_out(work, ["rev-parse", "HEAD"]) or ""
     # 起点は `next-apply-round` が記録したもの。**実装担当の申告は使わない。**
     ordered_range = commits_in_range(work, entry.get("apply_base_sha"), head_sha)
     in_range = set(ordered_range or [])
     if ordered_range is None:
         # 範囲を確定できないなら、何も検証できない。素通しにせず失敗させる。
         for item_id in group["items"]:
-            _find_item(state, item_id)["status"] = "blocked"
+            find_item(state, item_id)["status"] = "blocked"
         if not args.dry_run:
             statefile.save(path, state)
         die(
@@ -519,8 +492,8 @@ def _reported_commit_shas(
     """
     shas: list[str] = []
     for r in reported.values():
-        for sha in _reported_shas(r):
-            full = _git_out(work, ["rev-parse", "--verify", f"{sha}^{{commit}}"])
+        for sha in reported_shas(r):
+            full = git_out(work, ["rev-parse", "--verify", f"{sha}^{{commit}}"])
             if full is None:
                 full = sha        # 実在しない申告は群の検証で落ちる
             if full not in shas:
@@ -564,7 +537,7 @@ def _revert_unverified_apply_round(
 ) -> None:
     """検証を通らない適用ラウンドの範囲を取り消し、状態と公開を反映する。"""
     # 範囲全体を取り消す。どのコミットが安全かを決められない以上、
-    # 起点まで戻すのが最も確実である。順序は `_revert_item_commits` が
+    # 起点まで戻すのが最も確実である。順序は `revert_item_commits` が
     # git の履歴から決め直す。
     whole_round = {
         "item_id": f"R{entry['round']}-A{group['apply_round']}",
@@ -575,11 +548,11 @@ def _revert_unverified_apply_round(
         # できずに終わると、未検証の変更が Pull Request に残ったままになる。
         entry["pending_push"] = True
         statefile.save(path, state)
-    _revert_item_commits(state, whole_round, args.dry_run)
+    revert_item_commits(state, whole_round, args.dry_run)
     if not args.dry_run:
         # 取り消し後の状態を新しい起点にする。叩き直しても範囲が空になり、
         # 取り消しコミット自体を「未割当」として再び戻すことがない。
-        entry["apply_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
+        entry["apply_base_sha"] = git_out(work, ["rev-parse", "HEAD"])
         group["base_sha"] = entry["apply_base_sha"]
     entry["apply"] = {
         "apply_round": group["apply_round"],
@@ -590,7 +563,7 @@ def _revert_unverified_apply_round(
         "merged_at": statefile.now(),
     }
     group["status"] = "dropped"
-    state["phase"] = _phase_after_group(entry)
+    state["phase"] = phase_after_group(entry)
     if args.dry_run:
         info("（dry-run）状態ファイルは更新していません")
     else:
@@ -598,7 +571,7 @@ def _revert_unverified_apply_round(
         # 残さないと同じ提案が次のラウンドで再び採用される。
         _defer_abandoned_items(state, group)
         statefile.save(path, state)
-        _push_head(state)
+        push_head(state)
         entry["pending_push"] = False
         statefile.save(path, state)
 
@@ -628,7 +601,7 @@ def _validate_apply_commit_ownership(
     reason = _build_ownership_error_reason(unassigned, unknown_ids)
     info(f"❌ {reason}")
     for item_id in group["items"]:
-        it = _find_item(state, item_id)
+        it = find_item(state, item_id)
         it["status"] = "abandoned"
         it["failure_reason"] = reason
     _revert_unverified_apply_round(
@@ -654,20 +627,20 @@ def _verify_apply_group(
     特定しても取り消しは分離できない。
     """
     scope = state.get("target_scope") or []
-    items = [_find_item(state, i) for i in group["items"]]
+    items = [find_item(state, i) for i in group["items"]]
 
     # **群の全項目が同じコミットを申告する。** 申告の無い項目は、適用されたことを
     # 確かめる手がかりが無い。群の中は 1 コミットなので、1 件の欠落が群の全件を
     # 巻き込む（「群の中の道連れ」）。
     missing = [
-        i for i in group["items"] if not _reported_shas(reported.get(i) or {})
+        i for i in group["items"] if not reported_shas(reported.get(i) or {})
     ]
     shas = _reported_commit_shas(work, reported)
     # **テストはここで走らせない。** 適用そのものが通ったかだけを見る
     # （テストコマンドを空で渡すと `collect_commit_facts` は実行しない）。
     facts = collect_commit_facts(
         work, shas, in_range, "", state["head_branch"],
-        _safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT),
+        safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT),
     )
     if missing:
         problem = (
@@ -677,7 +650,7 @@ def _verify_apply_group(
     else:
         problem = verify_apply_round(items, facts, scope)
 
-    diff_lines = sum(_safe_int(c.get("diff_lines")) for c in facts)
+    diff_lines = sum(safe_int(c.get("diff_lines")) for c in facts)
     for item in items:
         item["commits"] = list(shas)
         if problem:
@@ -708,13 +681,6 @@ def _verify_apply_group(
     return list(group["items"]), []
 
 
-def _phase_after_group(entry: dict[str, Any]) -> str:
-    """この群を終えた後のフェーズ。残りの群があれば適用を続ける。"""
-    remaining = [
-        g for g in entry.get("apply_rounds") or []
-        if g.get("status") == "pending"
-    ]
-    return "apply" if remaining else "propose"
 
 
 def _defer_abandoned_items(state: dict[str, Any], group: dict[str, Any]) -> None:
@@ -730,7 +696,7 @@ def _defer_abandoned_items(state: dict[str, Any], group: dict[str, Any]) -> None
     """
     already = {d.get("item_id") for d in state["deferred_items"]}
     for item_id in group["items"]:
-        item = _find_item(state, item_id, required=False)
+        item = find_item(state, item_id, required=False)
         if item is None or item.get("status") != "abandoned" or item_id in already:
             continue
         state["deferred_items"].append(deferred_record(
@@ -739,26 +705,6 @@ def _defer_abandoned_items(state: dict[str, Any], group: dict[str, Any]) -> None
         ))
 
 
-def _run_drop(
-    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any],
-    targets: list[str],
-) -> dict[str, Any]:
-    """取り消しを、中断しても再開できる形で実行する。
-
-    `pending_drop` と `pending_push` を立ててから入り、**戻ったらすぐ保存する**。
-    保存しないまま落ちると、積み直しで変わった SHA と取り消し済みの印が失われ、
-    次の実行は**履歴に無い SHA を相手に**取り消しをやり直すことになる。
-
-    印はここでは消さない。**呼び出し側が完了の記録と同じ保存で消す。** 先に消すと、
-    完了を記録する前に落ちたときに、次の実行が「取り消し済みだが未完了」の状態を
-    見分けられなくなる。
-    """
-    entry["pending_drop"] = list(targets)
-    entry["pending_push"] = True
-    statefile.save(path, state)
-    result = _drop_items(state, entry, list(targets))
-    statefile.save(path, state)
-    return result
 
 
 def _apply_drop(
@@ -781,12 +727,12 @@ def _apply_drop(
     取り消しと積み直しのコミットを「未割当」と判定して群ごと巻き込む。
     """
     work = state["worktrees"]["work"]
-    result = _run_drop(path, state, entry, failed)
+    result = run_drop(path, state, entry, failed)
     applied = list(entry["apply"].get("applied") or [])
     if result["mode"] == "round":
         # 積み直せなかった。この群の全件を捨てる。**他の群には及ばない。**
         for item_id in group["items"]:
-            it = _find_item(state, item_id)
+            it = find_item(state, item_id)
             it["status"] = "abandoned"
             it.setdefault(
                 "failure_reason",
@@ -797,12 +743,12 @@ def _apply_drop(
         entry["apply"]["failed"] = list(group["items"])
     if not applied:
         # 取り消し後の状態を新しい起点にする（叩き直しでの二重取り消しを防ぐ）。
-        entry["apply_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
+        entry["apply_base_sha"] = git_out(work, ["rev-parse", "HEAD"])
         group["base_sha"] = entry["apply_base_sha"]
         group["status"] = "dropped"
     else:
         group["status"] = "applied"
-    state["phase"] = _phase_after_group(entry)
+    state["phase"] = phase_after_group(entry)
 
     # 取り消した項目は「対象外」として残す。次のラウンドで同じ提案が採用され、
     # 同じ理由で失敗するのを防ぐ。
@@ -814,7 +760,7 @@ def _apply_drop(
     entry["pending_drop"] = []
     entry["apply"]["merged_at"] = statefile.now()
     statefile.save(path, state)
-    _push_head(state)
+    push_head(state)
     entry["pending_push"] = False
     statefile.save(path, state)
     return applied
@@ -833,16 +779,6 @@ def _resume_incomplete_apply(
         _apply_drop(path, state, entry, current_group(entry),
                     list(entry["pending_drop"]))
         return
-    _flush_pending_push(path, state, entry)
+    flush_pending_push(path, state, entry)
 
 
-def _prepare_fix_phase(state: dict[str, Any], entry: dict[str, Any]) -> None:
-    """修正ラウンドへ入る前に、必要な記録を残す。
-
-    - `fix_base_sha`: 修正の範囲の起点。無いと `merge-fix` が範囲を確定できず、
-      `fix_rounds` が進まないまま修正と検証を往復し続ける
-    - `fix_attempts`: 試行番号。`merge-fix` が「叩き直し」と「次のラウンド」を
-      区別するのに使う
-    """
-    entry["fix_base_sha"] = _git_out(state["worktrees"]["work"], ["rev-parse", "HEAD"])
-    entry["fix_attempts"] = entry.get("fix_attempts", 0) + 1

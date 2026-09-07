@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import sys
 import pytest
 
 from crossref_helpers import make_state, read_state, write_result
@@ -26,7 +27,7 @@ def _gate_state(tmp_path, **over):
 
 
 @pytest.fixture
-def gate_spy(refactor, monkeypatch):
+def gate_spy(patch_lib, refactor, monkeypatch):
     """テストの実行・git・push を差し替える。"""
     seen: dict[str, list] = {"tests": [], "pushed": []}
 
@@ -34,9 +35,9 @@ def gate_spy(refactor, monkeypatch):
         seen["tests"].append(command)
         return seen.get("test_code", 0), False
 
-    monkeypatch.setattr(refactor, "_run_with_timeout", fake_run)
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **k: "HEADSHA")
-    monkeypatch.setattr(refactor, "_push_head",
+    patch_lib("run_with_timeout", fake_run)
+    patch_lib("git_out", lambda work, args, **k: "HEADSHA")
+    patch_lib("push_head",
                         lambda state: seen["pushed"].append(state["head_branch"]))
     return seen
 
@@ -78,7 +79,7 @@ def test_the_gate_emits_the_fix_impl_and_round(
     assert "FINAL_FIX_ROUND=1" in out
 
 
-def test_the_gate_does_not_reuse_the_apply_round_fix_base(
+def test_the_gate_does_not_reuse_the_apply_round_fix_base(rounds, 
     refactor, cmd_gate, tmp_path, env_tmp_dir, gate_spy
 ):
     """**適用ラウンドの起点は流用しない。**
@@ -146,22 +147,20 @@ def _failing_gate_state(tmp_path, **over):
 
 
 @pytest.fixture
-def merge_spy(refactor, monkeypatch):
+def merge_spy(patch_lib, refactor, monkeypatch):
     """`merge-final-fix` が触る git を差し替える。"""
     seen: dict[str, list] = {"pushed": [], "reverted": []}
 
-    monkeypatch.setattr(refactor, "_discard_impl_leftovers", lambda state, work: None)
-    monkeypatch.setattr(refactor, "_push_head",
+    patch_lib("discard_impl_leftovers", lambda state, work: None)
+    patch_lib("push_head",
                         lambda state: seen["pushed"].append("push"))
-    monkeypatch.setattr(
-        refactor, "_revert_item_commits",
+    patch_lib("revert_item_commits",
         lambda state, item, dry_run=False: seen["reverted"].append(item) or 1)
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **k: (
+    patch_lib("git_out", lambda work, args, **k: (
         "HEADSHA" if args[:2] == ["rev-parse", "HEAD"] else "C1FULL"))
-    monkeypatch.setattr(
-        refactor, "commits_in_range",
+    patch_lib("commits_in_range",
         lambda work, base, head: None if not base else ["C1FULL"])
-    monkeypatch.setattr(refactor, "collect_commit_facts", lambda *a, **k: [
+    patch_lib("collect_commit_facts", lambda *a, **k: [
         {"sha": "C1FULL", "exists": True, "files": ["src/foo.py"],
          "trailers": seen.get("trailers", {"Impl-Runtime": "codex",
                                            "Impl-Model": "gpt-5.5"}),
@@ -221,13 +220,11 @@ def test_a_missing_impl_trailer_reverts_the_range(
     assert merge_spy["pushed"] == ["push"], "取り消しも公開する"
 
 
-def test_an_out_of_scope_final_fix_reverts_the_range(
-    refactor, cmd_gate, tmp_path, env_tmp_dir, merge_spy, monkeypatch
-):
+def test_an_out_of_scope_final_fix_reverts_the_range(patch_lib, refactor, cmd_gate, tmp_path, env_tmp_dir, merge_spy, monkeypatch):
     """**最終ゲートでも `--scope` の外を触ってよい理由は無い。**"""
     state_path = _failing_gate_state(tmp_path)
     env_tmp_dir(state_path)
-    monkeypatch.setattr(refactor, "collect_commit_facts", lambda *a, **k: [
+    patch_lib("collect_commit_facts", lambda *a, **k: [
         {"sha": "C1FULL", "exists": True, "files": ["docs/other.md"],
          "trailers": {"Impl-Runtime": "codex", "Impl-Model": "gpt-5.5"},
          "diff_lines": 10, "touches_tests": False, "test_status": "skipped"},
@@ -239,13 +236,11 @@ def test_an_out_of_scope_final_fix_reverts_the_range(
     assert len(merge_spy["reverted"]) == 1
 
 
-def test_an_unreported_commit_reverts_the_range(
-    refactor, cmd_gate, tmp_path, env_tmp_dir, merge_spy, monkeypatch
-):
+def test_an_unreported_commit_reverts_the_range(patch_lib, refactor, cmd_gate, tmp_path, env_tmp_dir, merge_spy, monkeypatch):
     """申告から漏れたコミットは検証を受けていない。範囲ごと取り消す。"""
     state_path = _failing_gate_state(tmp_path)
     env_tmp_dir(state_path)
-    monkeypatch.setattr(refactor, "_unassigned_fix_commits",
+    patch_lib("unassigned_fix_commits",
                         lambda work, reported, ordered: ["C2FULL"])
     write_result(state_path, "codex-final-fix", {"commits": [{"sha": "C1FULL"}]})
 
@@ -254,9 +249,7 @@ def test_an_unreported_commit_reverts_the_range(
     assert len(merge_spy["reverted"]) == 1
 
 
-def test_the_commit_test_status_is_not_checked(
-    refactor, cmd_gate, tmp_path, env_tmp_dir, merge_spy, monkeypatch
-):
+def test_the_commit_test_status_is_not_checked(patch_lib, refactor, cmd_gate, tmp_path, env_tmp_dir, merge_spy, monkeypatch):
     """**コミットごとのテストは走らせない**（決定 11 の排他を破らないため）。
 
     合否は直後の `final-gate` が採った側で 1 度だけ見る。
@@ -272,7 +265,7 @@ def test_the_commit_test_status_is_not_checked(
                  "diff_lines": 10, "touches_tests": False,
                  "test_status": "skipped"}]
 
-    monkeypatch.setattr(refactor, "collect_commit_facts", spy_facts)
+    patch_lib("collect_commit_facts", spy_facts)
     write_result(state_path, "codex-final-fix", {"commits": [{"sha": "C1FULL"}]})
 
     cmd_gate.cmd_merge_final_fix(_args())
@@ -311,13 +304,13 @@ def test_the_take_in_needs_the_gate_to_run_first(
 
 # ---------- 名前の取り決め ----------
 
-def test_the_final_fix_result_file_has_no_round_number(refactor):
+def test_the_final_fix_result_file_has_no_round_number(paths):
     """**最終ゲートは提案ラウンドの外にある。** 番号を名前に入れない。
 
     `launch-cli.sh` の `--stem-template "{agent}-final-fix"` と揃える。
     """
-    assert refactor.stem_for("codex", "final-fix", 130) == "codex-final-fix"
-    assert refactor.stem_for("codex", "fix", 130, 2) == "codex-fix-r2"
+    assert paths.stem_for("codex", "final-fix", 130) == "codex-final-fix"
+    assert paths.stem_for("codex", "fix", 130, 2) == "codex-fix-r2"
 
 
 # ---------- 起動（launch-cli.sh） ----------

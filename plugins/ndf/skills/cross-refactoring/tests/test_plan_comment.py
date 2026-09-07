@@ -3,10 +3,11 @@
 **改修計画は実行の記録であって、リポジトリの知識ではない。** 既定はコメントで、
 ラウンドが進むたびに**同じコメントを編集する**。URL は永続で、マージの後も開ける。
 
-`gh` は呼ばない。`_sh` を差し替え、渡した引数と返した JSON だけを見る。
+`gh` は呼ばない。`sh` を差し替え、渡した引数と返した JSON だけを見る。
 """
 from __future__ import annotations
 
+import sys
 import json
 
 import pytest
@@ -44,7 +45,7 @@ def _state(tmp_path, **over):
 
 
 @pytest.fixture
-def gh(refactor, monkeypatch):
+def gh(patch_lib, refactor, monkeypatch):
     """`gh api` の呼び出しを記録し、決めた応答を返す。"""
     calls: list[list[str]] = []
     responses: dict[str, str] = {}
@@ -56,7 +57,7 @@ def gh(refactor, monkeypatch):
                 return value
         return ""
 
-    monkeypatch.setattr(refactor, "_sh", fake_sh)
+    patch_lib("sh", fake_sh)
     return calls, responses
 
 

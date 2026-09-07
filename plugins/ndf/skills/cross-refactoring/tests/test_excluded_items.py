@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import sys
 import json
 
 import pytest
@@ -40,7 +41,7 @@ def _test_item(item_id="R1-001", status="applied"):
     }
 
 
-def _round(kind, item_ids):
+def round_of(kind, item_ids):
     return {
         "round": 1, "kind": kind, "impl": "codex", "reviewers": ["agy", "kiro"],
         "impl_model": {"requested": None, "observed": None},
@@ -70,7 +71,7 @@ def test_an_abandoned_structure_item_is_recorded_with_its_key(
     refactor, tmp_path, env_tmp_dir, no_git
 ):
     state_path = make_state(tmp_path, items=[_structure_item()],
-                            rounds=[_round("structure", ["R1-001"])])
+                            rounds=[round_of("structure", ["R1-001"])])
     env_tmp_dir(state_path)
 
     state = _abandon(refactor, state_path)
@@ -85,7 +86,7 @@ def test_an_abandoned_test_item_is_recorded_with_its_key(
 ):
     """**テスト項目の鍵は `target` + `case` である**（決定 9）。"""
     state_path = make_state(tmp_path, items=[_test_item()],
-                            rounds=[_round("test", ["R1-001"])])
+                            rounds=[round_of("test", ["R1-001"])])
     env_tmp_dir(state_path)
 
     state = _abandon(refactor, state_path)
@@ -104,7 +105,7 @@ def _propose(refactor, state_path, payloads, round_no=2, kind="structure"):
     ここでは統合の結果だけを見るので、その終了は握って状態を読み直す。
     """
     state = read_state(state_path)
-    state["rounds"].append({**_round(kind, []), "round": round_no,
+    state["rounds"].append({**round_of(kind, []), "round": round_no,
                             "items": [], "adopted": 0, "merged": 0,
                             "apply_rounds": [], "apply_round": 0})
     state_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
@@ -122,7 +123,7 @@ def test_an_abandoned_structure_item_is_not_adopted_again(
     refactor, tmp_path, env_tmp_dir, no_git
 ):
     state_path = make_state(tmp_path, items=[_structure_item()],
-                            rounds=[_round("structure", ["R1-001"])])
+                            rounds=[round_of("structure", ["R1-001"])])
     env_tmp_dir(state_path)
     _abandon(refactor, state_path)
 
@@ -143,7 +144,7 @@ def test_an_abandoned_test_item_is_not_adopted_again(
 ):
     """**改善項目とテスト項目の両方が対象である**（決定 10）。"""
     state_path = make_state(tmp_path, items=[_test_item()],
-                            rounds=[_round("test", ["R1-001"])],
+                            rounds=[round_of("test", ["R1-001"])],
                             round_kind="test")
     env_tmp_dir(state_path)
     _abandon(refactor, state_path)
@@ -162,7 +163,7 @@ def test_a_different_case_on_the_same_target_is_still_adopted(
 ):
     """鍵は `target` + `case` である。**入口だけで落とさない。**"""
     state_path = make_state(tmp_path, items=[_test_item()],
-                            rounds=[_round("test", ["R1-001"])],
+                            rounds=[round_of("test", ["R1-001"])],
                             round_kind="test")
     env_tmp_dir(state_path)
     _abandon(refactor, state_path)
@@ -180,6 +181,7 @@ def test_a_different_case_on_the_same_target_is_still_adopted(
 
 def _prompt_with_deferred(tmp_path, refactor, phase, deferred):
     """`launch-cli.sh` に提案プロンプトを組み立てさせ、本文を返す。"""
+    vocabulary = sys.modules["refactor_lib.vocabulary"]
     import os
     import pathlib
     import subprocess
@@ -187,8 +189,8 @@ def _prompt_with_deferred(tmp_path, refactor, phase, deferred):
     launch = pathlib.Path(__file__).resolve().parent.parent / "scripts" / "launch-cli.sh"
     runtime = "codex"
     state_path = make_state(tmp_path, deferred_items=deferred,
-                            vocabulary=refactor.vocabulary(),
-                            test_vocabulary=refactor.test_vocabulary())
+                            vocabulary=vocabulary.vocabulary(),
+                            test_vocabulary=vocabulary.test_vocabulary())
     for name in ("work", runtime):
         (tmp_path / name).mkdir(parents=True, exist_ok=True)
     stub_dir = tmp_path / "bin"

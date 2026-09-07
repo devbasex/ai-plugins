@@ -24,8 +24,8 @@ def proposal(**over):
 
 # ---------- 重複排除 ----------
 
-def test_same_target_and_smell_is_merged(refactor):
-    adopted, _ = refactor.merge_proposals({
+def test_same_target_and_smell_is_merged(proposals):
+    adopted, _ = proposals.merge_proposals({
         "codex": [proposal()],
         "agy": [proposal(rationale="短い")],
         "kiro": [proposal(path="src/bar.py")],
@@ -35,9 +35,9 @@ def test_same_target_and_smell_is_merged(refactor):
     assert sorted(merged["proposed_by"]) == ["agy", "codex"]
 
 
-def test_merged_item_keeps_the_most_specific_text(refactor):
+def test_merged_item_keeps_the_most_specific_text(proposals):
     """`rationale` と `plan` は最も具体的なもの（長い方）を採る。"""
-    adopted, _ = refactor.merge_proposals({
+    adopted, _ = proposals.merge_proposals({
         "codex": [proposal(rationale="長い", plan="短")],
         "agy": [proposal(rationale="短", plan="とても長い手順の説明")],
     })
@@ -45,9 +45,9 @@ def test_merged_item_keeps_the_most_specific_text(refactor):
     assert adopted[0]["plan"] == "とても長い手順の説明"
 
 
-def test_merged_item_takes_the_higher_severity_and_larger_estimate(refactor):
+def test_merged_item_takes_the_higher_severity_and_larger_estimate(proposals):
     """見積りを楽観側へ倒さない。差分予算の検証が甘くなるため。"""
-    adopted, _ = refactor.merge_proposals({
+    adopted, _ = proposals.merge_proposals({
         "codex": [proposal(severity="minor", estimated_diff_lines=10)],
         "agy": [proposal(severity="critical", estimated_diff_lines=90)],
     })
@@ -55,17 +55,17 @@ def test_merged_item_takes_the_higher_severity_and_larger_estimate(refactor):
     assert adopted[0]["estimated_diff_lines"] == 90
 
 
-def test_test_gap_is_sticky(refactor):
+def test_test_gap_is_sticky(proposals):
     """1 者でもテストが乏しいと申告したら、固定テストの先行を要求する側へ倒す。"""
-    adopted, _ = refactor.merge_proposals({
+    adopted, _ = proposals.merge_proposals({
         "codex": [proposal(test_gap=False)],
         "agy": [proposal(test_gap=True)],
     })
     assert adopted[0]["test_gap"] is True
 
 
-def test_different_smell_on_same_target_is_not_merged(refactor):
-    adopted, _ = refactor.merge_proposals({
+def test_different_smell_on_same_target_is_not_merged(proposals):
+    adopted, _ = proposals.merge_proposals({
         "codex": [proposal(smell="long_method")],
         "agy": [proposal(smell="deep_nesting", technique="flatten_conditional")],
     })
@@ -74,9 +74,9 @@ def test_different_smell_on_same_target_is_not_merged(refactor):
 
 # ---------- 語彙 ----------
 
-def test_unknown_smell_is_degraded_and_dropped(refactor):
+def test_unknown_smell_is_degraded_and_dropped(proposals):
     """語彙外は unknown へ降格し、しきい値で自動的に落ちる。"""
-    adopted, deferred = refactor.merge_proposals({
+    adopted, deferred = proposals.merge_proposals({
         "codex": [proposal(smell="spaghetti")],
     })
     assert adopted == []
@@ -84,24 +84,24 @@ def test_unknown_smell_is_degraded_and_dropped(refactor):
     assert deferred[0]["severity"] == "unknown"
 
 
-def test_unknown_technique_is_degraded(refactor):
-    adopted, deferred = refactor.merge_proposals({
+def test_unknown_technique_is_degraded(proposals):
+    adopted, deferred = proposals.merge_proposals({
         "codex": [proposal(technique="make_it_nicer")],
     })
     assert adopted == []
     assert deferred[0]["technique"] == "unknown"
 
 
-def test_unknown_severity_is_degraded(refactor):
-    adopted, deferred = refactor.merge_proposals({
+def test_unknown_severity_is_degraded(proposals):
+    adopted, deferred = proposals.merge_proposals({
         "codex": [proposal(severity="blocker")],
     })
     assert adopted == []
     assert deferred[0]["severity"] == "unknown"
 
 
-def test_proposal_without_target_is_ignored(refactor):
-    adopted, deferred = refactor.merge_proposals({
+def test_proposal_without_target_is_ignored(proposals):
+    adopted, deferred = proposals.merge_proposals({
         "codex": [proposal(symbol=""), proposal()],
     })
     assert len(adopted) == 1
@@ -110,16 +110,16 @@ def test_proposal_without_target_is_ignored(refactor):
 
 # ---------- しきい値 ----------
 
-def test_below_threshold_is_deferred(refactor):
-    adopted, deferred = refactor.merge_proposals(
+def test_below_threshold_is_deferred(proposals):
+    adopted, deferred = proposals.merge_proposals(
         {"codex": [proposal(severity="minor")]}, threshold="major"
     )
     assert adopted == []
     assert "しきい値" in deferred[0]["defer_reason"]
 
 
-def test_at_threshold_is_adopted(refactor):
-    adopted, _ = refactor.merge_proposals(
+def test_at_threshold_is_adopted(proposals):
+    adopted, _ = proposals.merge_proposals(
         {"codex": [proposal(severity="major")]}, threshold="major"
     )
     assert len(adopted) == 1
@@ -127,9 +127,9 @@ def test_at_threshold_is_adopted(refactor):
 
 # ---------- 優先度と上限件数 ----------
 
-def test_priority_is_agreement_then_severity_then_size(refactor):
+def test_priority_is_agreement_then_severity_then_size(proposals):
     """小さく合意の多いものから直す。"""
-    adopted, _ = refactor.merge_proposals({
+    adopted, _ = proposals.merge_proposals({
         "codex": [
             proposal(symbol="A", severity="minor", estimated_diff_lines=5),
             proposal(symbol="B", severity="critical", estimated_diff_lines=200),
@@ -140,8 +140,8 @@ def test_priority_is_agreement_then_severity_then_size(refactor):
     assert [i["symbol"] for i in adopted] == ["C", "B", "A"]
 
 
-def test_max_items_cuts_the_tail_into_deferred(refactor):
-    adopted, deferred = refactor.merge_proposals(
+def test_max_items_cuts_the_tail_into_deferred(proposals):
+    adopted, deferred = proposals.merge_proposals(
         {"codex": [proposal(symbol=f"S{n}") for n in range(8)]}, max_items=3
     )
     assert len(adopted) == 3
@@ -149,9 +149,9 @@ def test_max_items_cuts_the_tail_into_deferred(refactor):
     assert all("上限" in d["defer_reason"] for d in deferred)
 
 
-def test_previously_deferred_keys_are_excluded(refactor):
+def test_previously_deferred_keys_are_excluded(proposals):
     """見送った項目を毎ラウンド再提案されると収束しない。"""
-    adopted, deferred = refactor.merge_proposals(
+    adopted, deferred = proposals.merge_proposals(
         {"codex": [proposal()]},
         excluded_keys=[("src/foo.py", "Foo.handle", "long_method")],
     )
@@ -161,15 +161,15 @@ def test_previously_deferred_keys_are_excluded(refactor):
 
 # ---------- 重複率 ----------
 
-def test_duplicate_rate_counts_shared_keys(refactor):
+def test_duplicate_rate_counts_shared_keys(proposals):
     prev = [("a", "b", "c"), ("d", "e", "f")]
-    assert refactor.duplicate_rate(prev, prev) == 1.0
-    assert refactor.duplicate_rate([("a", "b", "c")], prev) == 1.0
-    assert refactor.duplicate_rate([("x", "y", "z")], prev) == 0.0
+    assert proposals.duplicate_rate(prev, prev) == 1.0
+    assert proposals.duplicate_rate([("a", "b", "c")], prev) == 1.0
+    assert proposals.duplicate_rate([("x", "y", "z")], prev) == 0.0
 
 
-def test_duplicate_rate_is_zero_without_previous_round(refactor):
-    assert refactor.duplicate_rate([("a", "b", "c")], []) == 0.0
+def test_duplicate_rate_is_zero_without_previous_round(proposals):
+    assert proposals.duplicate_rate([("a", "b", "c")], []) == 0.0
 
 
 # ---------- サブコマンド ----------

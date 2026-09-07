@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import sys
 import pytest
 
 from crossref_helpers import make_state, read_state, write_result
@@ -27,7 +28,9 @@ def tprop(target="src/foo.py#handle", case="branch", **over):
 
 
 def _merge(refactor, proposals, **kw):
-    return refactor.merge_test_proposals(proposals, **kw)
+    # モジュールと引数で同じ語を使わない（`proposals` は提案の中身を指す）
+    proposals_mod = sys.modules["refactor_lib.proposals"]
+    return proposals_mod.merge_test_proposals(proposals, **kw)
 
 
 # ---------- 重複排除の鍵は `target` + `case` ----------
@@ -90,11 +93,11 @@ def test_a_proposal_without_a_target_is_dropped(refactor):
     assert adopted == [] and deferred == []
 
 
-def test_the_vocabulary_comes_from_the_existing_references(refactor):
+def test_the_vocabulary_comes_from_the_existing_references(vocabulary):
     """`case` は現状固定テストの表、`level` はテストの階層から採る（決定 9）。"""
-    assert list(refactor.TEST_CASES) == ["normal", "branch", "boundary", "error"]
-    assert list(refactor.TEST_LEVELS) == ["unit", "integration", "contract", "e2e"]
-    assert "smells" not in refactor.test_vocabulary()
+    assert list(vocabulary.TEST_CASES) == ["normal", "branch", "boundary", "error"]
+    assert list(vocabulary.TEST_LEVELS) == ["unit", "integration", "contract", "e2e"]
+    assert "smells" not in vocabulary.test_vocabulary()
 
 
 # ---------- 対象外と採用上限 ----------
@@ -128,14 +131,14 @@ def test_the_most_agreed_test_item_comes_first(refactor):
 
 # ---------- 適用ラウンドを共有する ----------
 
-def test_test_items_are_split_by_the_file_the_test_goes_into(refactor):
+def test_test_items_are_split_by_the_file_the_test_goes_into(refactor, proposals):
     """割り当ては改善項目と同じ関数が行う。見るのは**テストを足す先**である。"""
     adopted, _ = _merge(refactor, {"codex": [
         tprop(target="src/a.py#f", path="tests/test_a.py"),
         tprop(target="src/a.py#g", path="tests/test_a.py"),
         tprop(target="src/b.py#h", path="tests/test_b.py"),
     ]})
-    groups = refactor.assign_apply_rounds(adopted)
+    groups = proposals.assign_apply_rounds(adopted)
     assert [[i["target"] for i in g] for g in groups] == [
         ["src/a.py#f", "src/b.py#h"], ["src/a.py#g"],
     ]
@@ -162,7 +165,7 @@ def test_the_label_names_the_file_and_the_symbol(rounds):
 
 # ---------- ラウンドの開始 ----------
 
-def _round(round_no, kind, **over):
+def round_of(round_no, kind, **over):
     base = {
         "round": round_no, "kind": kind, "impl": "codex",
         "reviewers": ["agy", "kiro"],
@@ -210,7 +213,7 @@ def test_the_structure_cap_counts_only_structure_rounds(
     """テスト整備ラウンドは `--max-outer-rounds` を食わない。"""
     state_path = make_state(
         tmp_path, max_outer_rounds=1, round_kind="structure",
-        rounds=[_round(1, "test"), _round(2, "test")],
+        rounds=[round_of(1, "test"), round_of(2, "test")],
     )
     env_tmp_dir(state_path)
     refactor.cmd_start_round(_args())
@@ -225,7 +228,7 @@ def test_no_adopted_test_item_moves_on_to_the_structure_rounds(
     """収束の条件は**採用 0 件**。提案ラウンドと同じ形にする。"""
     state_path = make_state(
         tmp_path, round_kind="test", max_test_rounds=2,
-        rounds=[_round(1, "test", adopted=0)],
+        rounds=[round_of(1, "test", adopted=0)],
     )
     env_tmp_dir(state_path)
     refactor.cmd_advance(_args())
@@ -242,7 +245,7 @@ def test_the_test_rounds_stop_at_the_cap_even_with_items_left(
     """B4 — 上限に達したら採用が残っていても提案ラウンドへ進む。"""
     state_path = make_state(
         tmp_path, round_kind="test", max_test_rounds=2,
-        rounds=[_round(1, "test"), _round(2, "test")],
+        rounds=[round_of(1, "test"), round_of(2, "test")],
     )
     env_tmp_dir(state_path)
     refactor.cmd_advance(_args())
@@ -257,7 +260,7 @@ def test_another_test_round_follows_while_items_are_still_adopted(
 ):
     state_path = make_state(
         tmp_path, round_kind="test", max_test_rounds=2,
-        rounds=[_round(1, "test")],
+        rounds=[round_of(1, "test")],
     )
     env_tmp_dir(state_path)
     refactor.cmd_advance(_args())
@@ -275,9 +278,9 @@ def test_the_duplicate_rate_compares_rounds_of_the_same_kind(
     state_path = make_state(
         tmp_path, max_outer_rounds=5, round_kind="structure",
         rounds=[
-            _round(1, "structure", proposal_keys=keys),
-            _round(2, "test", proposal_keys=[["src/a.py#f", "branch"]]),
-            _round(3, "structure", proposal_keys=keys),
+            round_of(1, "structure", proposal_keys=keys),
+            round_of(2, "test", proposal_keys=[["src/a.py#f", "branch"]]),
+            round_of(3, "structure", proposal_keys=keys),
         ],
     )
     env_tmp_dir(state_path)
@@ -300,12 +303,13 @@ def _entry(round_no=1, kind="test"):
     }
 
 
-def _run_merge(refactor, tmp_path, env_tmp_dir, monkeypatch, proposals, **over):
+def _run_merge(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, proposals, **over):
+    # モジュールと引数で同じ語を使わない（`proposals` は提案の中身を指す）
     state_path = make_state(
         tmp_path, rounds=[_entry()], phase="propose", outer_round=1,
         round_kind="test", max_test_rounds=2, **over)
     env_tmp_dir(state_path)
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **k: "base0")
+    patch_lib("git_out", lambda work, args, **k: "base0")
     write_result(state_path, "codex-propose-rf130-r1", {"items": proposals})
     for runtime in ("agy", "kiro"):
         write_result(state_path, f"{runtime}-propose-rf130-r1", {"items": []})
@@ -313,10 +317,8 @@ def _run_merge(refactor, tmp_path, env_tmp_dir, monkeypatch, proposals, **over):
     return read_state(state_path)
 
 
-def test_merge_proposals_records_test_items_and_their_apply_rounds(
-    refactor, tmp_path, env_tmp_dir, monkeypatch
-):
-    state = _run_merge(refactor, tmp_path, env_tmp_dir, monkeypatch, [
+def test_merge_proposals_records_test_items_and_their_apply_rounds(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch):
+    state = _run_merge(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, [
         tprop(target="src/a.py#f", path="tests/test_a.py"),
         tprop(target="src/a.py#g", path="tests/test_a.py"),
     ])
@@ -326,23 +328,19 @@ def test_merge_proposals_records_test_items_and_their_apply_rounds(
     assert state["phase"] == "apply"
 
 
-def test_an_empty_test_round_does_not_end_the_run(
-    refactor, tmp_path, env_tmp_dir, monkeypatch
-):
+def test_an_empty_test_round_does_not_end_the_run(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch):
     """テスト整備の採用 0 件は**構造改善へ進む合図**であって、終了ではない。"""
-    state = _run_merge(refactor, tmp_path, env_tmp_dir, monkeypatch, [])
+    state = _run_merge(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, [])
     assert state["final"] is None
     assert state["phase"] == "propose"
 
 
-def test_an_empty_structure_round_still_ends_the_run(
-    refactor, tmp_path, env_tmp_dir, monkeypatch
-):
+def test_an_empty_structure_round_still_ends_the_run(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch):
     state_path = make_state(
         tmp_path, rounds=[_entry(kind="structure")], phase="propose",
         outer_round=1, round_kind="structure")
     env_tmp_dir(state_path)
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **k: "base0")
+    patch_lib("git_out", lambda work, args, **k: "base0")
     for runtime in ("codex", "agy", "kiro"):
         write_result(state_path, f"{runtime}-propose-rf130-r1", {"items": []})
     with pytest.raises(SystemExit) as e:
@@ -351,12 +349,9 @@ def test_an_empty_structure_round_still_ends_the_run(
     assert read_state(state_path)["final"] == "no_more_proposals"
 
 
-def test_the_excluded_keys_of_a_test_round_use_target_and_case(
-    refactor, tmp_path, env_tmp_dir, monkeypatch
-):
+def test_the_excluded_keys_of_a_test_round_use_target_and_case(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch):
     """見送った記録が次のラウンドの「対象外」へ入る（決定 10）。"""
-    state = _run_merge(
-        refactor, tmp_path, env_tmp_dir, monkeypatch,
+    state = _run_merge(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch,
         [tprop(target="src/a.py#f", case="branch")],
         deferred_items=[{
             "item_id": "R0-001", "kind": "test", "path": "tests/test_a.py",

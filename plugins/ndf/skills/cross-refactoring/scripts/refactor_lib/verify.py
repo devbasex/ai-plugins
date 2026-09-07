@@ -7,7 +7,8 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Optional
 
-from .gitfacts import _safe_int
+from .paths import git_out
+from .gitfacts import safe_int
 from .vocabulary import (
     DIFF_BUDGET_FACTOR,
     EXTRACTION_DIFF_BUDGET_FACTOR,
@@ -225,7 +226,7 @@ def verify_apply_round(
                 f"（先頭コミット {facts[0].get('sha', '?')} がテストを触っていません）"
             )
 
-    estimated = sum(_safe_int(i.get("estimated_diff_lines")) for i in items)
+    estimated = sum(safe_int(i.get("estimated_diff_lines")) for i in items)
     factor = max(
         (diff_budget_factor(i.get("technique")) for i in items),
         default=DIFF_BUDGET_FACTOR,
@@ -271,3 +272,19 @@ def verify_commit_granularity(item: dict[str, Any], count: int) -> Optional[str]
         f"項目 {item['item_id']} のコミットが {count} 件あります"
         f"（残すのは 1 項目 = 1 コミット。現状固定テストが要る項目だけ 2 コミットまで）"
     )
+
+def unassigned_fix_commits(
+    work: str, reported_shas: list[str], ordered_range: list[str]
+) -> list[str]:
+    """範囲内のコミットのうち、どの申告にも含まれていないものを返す。
+
+    適用と同じく、**範囲のコミットは全て申告されていること**を求める。
+    申告から漏れた修正コミットは検証を受けないまま Pull Request に残る。
+    """
+    reported_full = {
+        full for full in (
+            git_out(work, ["rev-parse", "--verify", f"{s}^{{commit}}"])
+            for s in reported_shas
+        ) if full
+    }
+    return sorted(set(ordered_range) - reported_full)

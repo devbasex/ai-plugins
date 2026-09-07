@@ -115,11 +115,11 @@ def test_a_test_location_inside_the_baseline_search_passes(scope, tmp_path):
         ["src", "tests/services"], "pytest tests", str(tmp_path)) is None
 
 
-def test_the_gate_stops_the_run(refactor, scope, tmp_path):
+def test_the_gate_stops_the_run(refactor_lib, refactor, scope, tmp_path):
     """**止める。** 案内だけでは同じ失敗を繰り返す（決定 5）。"""
     with pytest.raises(SystemExit) as e:
         scope.require_scope_covers_tests(["src"], "pytest -q", str(tmp_path))
-    assert e.value.code == refactor.ABORT
+    assert e.value.code == refactor_lib.ABORT
 
 
 def test_the_gate_passes_a_valid_scope(scope, tmp_path):

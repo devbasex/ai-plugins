@@ -14,11 +14,11 @@ import models as models_lib
 import statefile
 
 from .. import info
-from ..gitfacts import _safe_int
+from ..gitfacts import safe_int
 from ..outbound import plan_reference
-from ..paths import _load
+from ..paths import load_state
 from ..proposals import duplicate_rate
-from ..rounds import STRUCTURE, TEST, entry_kind, item_kind, item_label
+from ..rounds import finish_outer_rounds, STRUCTURE, TEST, entry_kind, item_kind, item_label
 from ..vocabulary import DEFAULT_MAX_TEST_ROUNDS, DUPLICATE_RATE_THRESHOLD
 
 
@@ -34,7 +34,7 @@ def cmd_advance(args: argparse.Namespace) -> None:
     提案ラウンドの終了条件は 3 つ。採用 0 件 / 上限到達 / 前ラウンドとの提案
     重複率がしきい値以上。**同じ提案が毎ラウンド出続けて終わらない**ことを防ぐ。
     """
-    path, state = _load(args.id)
+    path, state = load_state(args.id)
     rounds = state["rounds"]
     if state.get("final"):
         info(f"終了済みです（{state['final']}）")
@@ -46,10 +46,10 @@ def cmd_advance(args: argparse.Namespace) -> None:
         _advance_test_rounds(path, state, last)
         return
     if len(_of_kind(rounds, STRUCTURE)) >= state["max_outer_rounds"]:
-        _finish(path, state, "max_outer_rounds")
+        finish_outer_rounds(path, state, "max_outer_rounds")
         sys.exit(1)
     if last.get("adopted") == 0:
-        _finish(path, state, "no_more_proposals")
+        finish_outer_rounds(path, state, "no_more_proposals")
         sys.exit(1)
     previous = _of_kind(rounds[:-1], STRUCTURE)
     if previous:
@@ -61,7 +61,7 @@ def cmd_advance(args: argparse.Namespace) -> None:
         )
         if rate >= DUPLICATE_RATE_THRESHOLD:
             info(f"提案の重複率が {rate:.0%} で、前ラウンドとほぼ同じです")
-            _finish(path, state, "duplicate_proposals")
+            finish_outer_rounds(path, state, "duplicate_proposals")
             sys.exit(1)
 
 
@@ -80,7 +80,7 @@ def _advance_test_rounds(
     歯止めで止まったのかを報告で読み分けるため）。
     """
     done = len(_of_kind(state["rounds"], TEST))
-    limit = _safe_int(state.get("max_test_rounds"), DEFAULT_MAX_TEST_ROUNDS)
+    limit = safe_int(state.get("max_test_rounds"), DEFAULT_MAX_TEST_ROUNDS)
     if last.get("adopted") == 0:
         reason = "no_more_test_proposals"
         note = "足すべきテストの提案が出なくなりました"
@@ -96,17 +96,10 @@ def _advance_test_rounds(
     info(f"{note}。構造改善の提案ラウンドへ進みます")
 
 
-def _finish(path: pathlib.Path, state: dict[str, Any], reason: str) -> None:
-    state["final"] = reason
-    state["ended_at"] = statefile.now()
-    state["phase"] = "final"
-    statefile.save(path, state)
-    info(f"提案ラウンドの繰り返しを終了します（理由: {reason}）")
-
 
 def cmd_status(args: argparse.Namespace) -> None:
     """現在の状態を人が読む形で出す。"""
-    _, state = _load(args.id)
+    _, state = load_state(args.id)
     print(f"# cross-refactoring rf{state['id']}（{state['repo']} #{state['current_pr']}）")
     print(f"ホスト: {state['host']}（{state['host_detection']}）")
     print(f"提案・レビュー: {' / '.join(state['runtimes'])}")
@@ -120,7 +113,7 @@ def cmd_status(args: argparse.Namespace) -> None:
 
 def cmd_report(args: argparse.Namespace) -> None:
     """Step 8 — ラウンド表・項目表・見送り項目・指標を出す。"""
-    _, state = _load(args.id)
+    _, state = load_state(args.id)
     print(f"# cross-refactoring 実行報告 — {state['repo']} #{state['current_pr']}")
     print()
     print(f"- ホスト: {state['host']}（{state['host_detection']}）")

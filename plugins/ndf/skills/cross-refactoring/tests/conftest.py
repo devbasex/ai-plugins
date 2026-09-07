@@ -82,8 +82,39 @@ def metrics() -> types.ModuleType:
     sys.path.insert(0, str(_LIB))
     return _load_module("ndf_lib_metrics", _LIB / "metrics.py")
 
+@pytest.fixture(scope="session")
+def refactor_lib(refactor: types.ModuleType) -> types.ModuleType:
+    """`refactor_lib` そのもの。`ABORT` / `die` / `info` を持つ。"""
+    return sys.modules["refactor_lib"]
+
+
 @pytest.fixture
-def no_git(refactor, monkeypatch):
+def patch_lib(refactor, monkeypatch):
+    """`refactor_lib` の全モジュールで、その名前を持つものを差し替える。
+
+    **取り込みは値の写しである。** `from .paths import sh` と書いたモジュールは、
+    定義元の `paths.sh` を差し替えても元の値を呼び続ける。差し替えたい対象が
+    どのモジュールで使われているかはテストからは決まらないため、その名前を
+    持つモジュールすべてへ当てる。
+
+    段階 3（#441）より前は入口の `__setattr__` がこれを行っていた。**入口から
+    仕掛けを外したので、テストの側が持つ。** 実装には何も残さない。
+    """
+    def _patch(name: str, value: object) -> None:
+        hit = False
+        for mod in list(sys.modules.values()):
+            if not getattr(mod, "__name__", "").startswith("refactor_lib"):
+                continue
+            if name in vars(mod):
+                monkeypatch.setattr(mod, name, value)
+                hit = True
+        assert hit, f"{name} を持つモジュールが無い"
+
+    return _patch
+
+
+@pytest.fixture
+def no_git(paths, patch_lib, monkeypatch):
     """git / gh を呼ばせず、実行されたコマンドを記録する。
 
     外部プロセスを呼ばないという方針を保ちつつ、取り消しと push の**順序と引数**を
@@ -97,8 +128,9 @@ def no_git(refactor, monkeypatch):
         calls.append(list(cmd))
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
-    monkeypatch.setattr(refactor.subprocess, "run", fake_run)
-    monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: calls.append(list(cmd)) or "")
+    # **差し替えは定義元へ向ける。** 入口の再エクスポートは無くなった（#441）。
+    monkeypatch.setattr(paths.subprocess, "run", fake_run)
+    patch_lib("sh", lambda cmd, **k: calls.append(list(cmd)) or "")
     return calls
 
 @pytest.fixture

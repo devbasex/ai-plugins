@@ -139,7 +139,7 @@ def test_drop_older_item_keeps_the_newer_one(gitfacts, request, fixture_name):
     """独立した変更なら、古い項目だけを取り消して新しい項目を残せること。"""
     built = request.getfixturevalue(fixture_name)
     state, entry = _state(built)
-    result = gitfacts._drop_items(state, entry, ["R1-001"])
+    result = gitfacts.drop_items(state, entry, ["R1-001"])
 
     assert result["mode"] == "item"
     assert "line3-by-R1-001" not in _content(built), "取り消した項目の変更が残っている"
@@ -156,7 +156,7 @@ def test_drop_older_item_keeps_the_newer_one(gitfacts, request, fixture_name):
 def test_drop_newer_item_keeps_the_older_one(gitfacts, distant_repo):
     """新しい項目だけを取り消す向きでも成立すること。"""
     state, entry = _state(distant_repo)
-    assert gitfacts._drop_items(state, entry, ["R1-002"])["mode"] == "item"
+    assert gitfacts.drop_items(state, entry, ["R1-002"])["mode"] == "item"
     assert "line3-by-R1-001" in _content(distant_repo)
     assert "line31-by-R1-002" not in _content(distant_repo)
 
@@ -167,17 +167,17 @@ def test_second_drop_after_the_first_still_works(gitfacts, distant_repo):
     積み直しで SHA が変わるので、記録を更新していないとここで破綻する。
     """
     state, entry = _state(distant_repo)
-    gitfacts._drop_items(state, entry, ["R1-001"])
-    assert gitfacts._drop_items(state, entry, ["R1-002"])["mode"] == "item"
+    gitfacts.drop_items(state, entry, ["R1-001"])
+    assert gitfacts.drop_items(state, entry, ["R1-002"])["mode"] == "item"
     assert _content(distant_repo) == "".join(LINES)
 
 
 def test_dropping_is_idempotent(gitfacts, distant_repo):
     state, entry = _state(distant_repo)
-    gitfacts._drop_items(state, entry, ["R1-001"])
+    gitfacts.drop_items(state, entry, ["R1-001"])
     head = _git("rev-parse", "HEAD", cwd=distant_repo["repo"]).stdout.strip()
 
-    assert gitfacts._drop_items(state, entry, ["R1-001"])["mode"] == "skip"
+    assert gitfacts.drop_items(state, entry, ["R1-001"])["mode"] == "skip"
     assert _git("rev-parse", "HEAD",
                 cwd=distant_repo["repo"]).stdout.strip() == head
 
@@ -192,7 +192,7 @@ def test_adjacent_changes_fall_back_to_the_whole_round(gitfacts, adjacent_repo):
     state, entry = _state(adjacent_repo)
     before = int(_git("rev-list", "--count", "HEAD",
                       cwd=adjacent_repo["repo"]).stdout.strip())
-    result = gitfacts._drop_items(state, entry, ["R1-001"])
+    result = gitfacts.drop_items(state, entry, ["R1-001"])
 
     assert result["mode"] == "round"
     assert _content(adjacent_repo) == "".join(LINES), "着手前の内容へ戻っていない"
@@ -206,7 +206,7 @@ def test_adjacent_changes_fall_back_to_the_whole_round(gitfacts, adjacent_repo):
 
 def test_dropping_every_item_returns_to_the_base_tree(gitfacts, distant_repo):
     state, entry = _state(distant_repo)
-    gitfacts._drop_items(state, entry, ["R1-001", "R1-002"])
+    gitfacts.drop_items(state, entry, ["R1-001", "R1-002"])
     assert _content(distant_repo) == "".join(LINES)
 
 
@@ -215,7 +215,7 @@ def test_history_is_never_rewritten(gitfacts, distant_repo):
     state, entry = _state(distant_repo)
     before = _git("rev-list", "--count", "HEAD",
                   cwd=distant_repo["repo"]).stdout.strip()
-    gitfacts._drop_items(state, entry, ["R1-001"])
+    gitfacts.drop_items(state, entry, ["R1-001"])
     after = _git("rev-list", "--count", "HEAD",
                  cwd=distant_repo["repo"]).stdout.strip()
     assert int(after) > int(before), "履歴を書き換えている"

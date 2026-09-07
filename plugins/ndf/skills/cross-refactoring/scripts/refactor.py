@@ -16,17 +16,8 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
-import json
-import os
 import pathlib
-import re
-import signal
-import subprocess
 import sys
-import time
-import types
-from typing import Any, Callable, Iterable, Optional
 
 # 共通層はプラグインルート直下にある。**`.resolve()` を通す。** Kiro CLI は
 # `.kiro/skills/<名前>` を symlink にするため、解かずに `parents[]` を数えると
@@ -37,81 +28,36 @@ sys.path.insert(
 )
 
 import assignment  # noqa: E402
-import auth  # noqa: E402
-import metrics as metrics_lib  # noqa: E402
-import models as models_lib  # noqa: E402
-import statefile  # noqa: E402
 
 # 分割したモジュールは同じディレクトリの `refactor_lib/` にある。**自身の
 # ディレクトリを探索先へ入れる。** `uv run --script` で起動したときの現在地は、
 # スクリプトの位置と揃わない。
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
-from refactor_lib import ABORT, die, info  # noqa: E402,F401
-from refactor_lib import vocabulary as _vocabulary  # noqa: E402
-from refactor_lib import rounds as _rounds  # noqa: E402
-from refactor_lib import paths as _paths  # noqa: E402
-from refactor_lib import scope as _scope  # noqa: E402
-from refactor_lib import plan as _plan  # noqa: E402
-from refactor_lib import outbound as _outbound  # noqa: E402
-from refactor_lib import gitfacts as _gitfacts  # noqa: E402
-from refactor_lib import proposals as _proposals  # noqa: E402
-from refactor_lib import verify as _verify  # noqa: E402
-from refactor_lib.commands import report as _cmd_report  # noqa: E402
-from refactor_lib.commands import setup as _cmd_setup  # noqa: E402
-from refactor_lib.commands import apply as _cmd_apply  # noqa: E402
-from refactor_lib.commands import converge as _cmd_converge  # noqa: E402
-from refactor_lib.commands import gate as _cmd_gate  # noqa: E402
-
-# **入口は全モジュールの名前を自分の名前空間へ取り込む。** 呼び出し側と手順書は
-# `refactor.py` を指し、テストは `refactor.<名前>` を参照する。分割してもその形を
-# 変えない。
-_LIB_MODULES: tuple[types.ModuleType, ...] = (
-    _vocabulary,
-    _rounds,
-    _paths,
-    _scope,
-    _plan,
-    _outbound,
-    _gitfacts,
-    _proposals,
-    _verify,
-    _cmd_report,
-    _cmd_setup,
-    _cmd_apply,
-    _cmd_converge,
-    _cmd_gate,
+from refactor_lib.commands.apply import (  # noqa: E402
+    cmd_merge_apply,
+    cmd_merge_proposals,
+    cmd_next_apply_round,
 )
-
-
-def _reexport() -> None:
-    """各モジュールの名前を入口へ取り込む。モジュール自身は取り込まない。"""
-    for mod in _LIB_MODULES:
-        for name, value in vars(mod).items():
-            if name.startswith("__") or isinstance(value, types.ModuleType):
-                continue
-            globals()[name] = value
-
-
-_reexport()
-
-
-class _Entry(types.ModuleType):
-    """`refactor.<名前>` の差し替えを、定義元のモジュールへも伝える。
-
-    再エクスポートは値の写しであるため、入口だけを差し替えても、定義元を見て
-    いる呼び出し側は元の値を使い続ける。**差し替えが片側にしか効かない状態を
-    作らない。**
-    """
-
-    def __setattr__(self, name: str, value: Any) -> None:
-        super().__setattr__(name, value)
-        for mod in _LIB_MODULES:
-            if name in vars(mod):
-                setattr(mod, name, value)
-
-
-sys.modules[__name__].__class__ = _Entry
+from refactor_lib.commands.converge import (  # noqa: E402
+    cmd_abandon_items,
+    cmd_merge_fix,
+    cmd_should_abandon,
+    cmd_verify_round,
+)
+from refactor_lib.commands.gate import cmd_final_gate, cmd_merge_final_fix  # noqa: E402
+from refactor_lib.commands.report import (  # noqa: E402
+    cmd_advance,
+    cmd_report,
+    cmd_status,
+)
+from refactor_lib.commands.setup import cmd_init, cmd_start_round  # noqa: E402
+from refactor_lib.vocabulary import (  # noqa: E402
+    DEFAULT_MAX_TEST_ROUNDS,
+    DEFAULT_SEVERITY_THRESHOLD,
+    DEFAULT_TEST_TIMEOUT,
+    SEVERITY_ORDER,
+)
 
 
 # ---------------- main ----------------

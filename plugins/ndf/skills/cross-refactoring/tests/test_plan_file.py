@@ -99,7 +99,7 @@ def test_plan_marks_an_abandoned_item(plan, tmp_path):
     assert "取り消し" in text
 
 
-def test_plan_groups_items_by_round(plan, tmp_path):
+def test_plan_groups_items_by_round(rounds, plan, tmp_path):
     rounds = [
         {"round": 1, "impl": "codex", "reviewers": ["agy", "kiro"],
          "items": ["R1-001"], "reviews": [], "fix_rounds": 0},
@@ -125,11 +125,11 @@ def test_plan_is_stable_for_the_same_state(plan, tmp_path):
 
 # ---------- 置き場所 ----------
 
-def test_the_plan_file_is_written_inside_the_work_dir(refactor, tmp_path):
+def test_the_plan_file_is_written_inside_the_work_dir(gitfacts, tmp_path):
     work = _make_work(tmp_path)
     _, state = _state(tmp_path, work=work, plan_file="issues/plan.md")
 
-    refactor._write_plan_file(state, str(work), "issues/plan.md")
+    gitfacts._write_plan_file(state, str(work), "issues/plan.md")
 
     written = (work / "issues" / "plan.md").read_text(encoding="utf-8")
     assert "R1-001" in written
@@ -137,13 +137,13 @@ def test_the_plan_file_is_written_inside_the_work_dir(refactor, tmp_path):
 
 # ---------- 公開 ----------
 
-def test_the_plan_lands_in_one_commit_with_the_generated_files(refactor, tmp_path):
+def test_the_plan_lands_in_one_commit_with_the_generated_files(gitfacts, tmp_path):
     """計画書と生成物で 2 コミットに分けない。"""
     work = _make_work(tmp_path)
     _, state = _state(tmp_path, work=work, plan_file="issues/plan.md",
                       sync_command="printf 'x = 2\\n' > generated/out.py")
 
-    refactor._sync_generated(state)
+    gitfacts._sync_generated(state)
 
     subject = _git("log", "-1", "--format=%s", cwd=work).stdout.strip()
     files = _git("show", "--name-only", "--format=", "HEAD", cwd=work).stdout.split()
@@ -152,37 +152,37 @@ def test_the_plan_lands_in_one_commit_with_the_generated_files(refactor, tmp_pat
 
 
 def test_a_repository_without_a_sync_command_still_records_the_plan(
-    refactor, tmp_path
+    refactor, gitfacts, tmp_path
 ):
     work = _make_work(tmp_path)
     _, state = _state(tmp_path, work=work, plan_file="issues/plan.md",
                       sync_command=None)
 
-    refactor._sync_generated(state)
+    gitfacts._sync_generated(state)
 
     files = _git("show", "--name-only", "--format=", "HEAD", cwd=work).stdout.split()
     assert "issues/plan.md" in files
 
 
-def test_an_unchanged_plan_does_not_add_a_commit(refactor, tmp_path):
+def test_an_unchanged_plan_does_not_add_a_commit(gitfacts, tmp_path):
     """状態が動いていないのにコミットを積まない。"""
     work = _make_work(tmp_path)
     _, state = _state(tmp_path, work=work, plan_file="issues/plan.md",
                       sync_command=None)
-    refactor._sync_generated(state)
+    gitfacts._sync_generated(state)
     before = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
 
-    refactor._sync_generated(state)
+    gitfacts._sync_generated(state)
 
     assert _git("rev-parse", "HEAD", cwd=work).stdout.strip() == before
 
 
-def test_an_empty_plan_file_setting_turns_the_record_off(refactor, tmp_path):
+def test_an_empty_plan_file_setting_turns_the_record_off(gitfacts, tmp_path):
     """計画を差分へ入れたくないリポジトリのために、無効にできる。"""
     work = _make_work(tmp_path)
     _, state = _state(tmp_path, work=work, plan_file="", sync_command=None)
 
-    refactor._sync_generated(state)
+    gitfacts._sync_generated(state)
 
     assert not (work / "issues").exists()
 
@@ -220,11 +220,11 @@ def test_a_traversal_in_the_middle_is_refused(plan):
         plan.normalize_plan_file("issues/../../out.md")
 
 
-def test_the_written_path_stays_inside_the_work_dir(refactor, tmp_path):
+def test_the_written_path_stays_inside_the_work_dir(gitfacts, tmp_path):
     work = _make_work(tmp_path)
     _, state = _state(tmp_path, work=work, plan_file="issues/plan.md")
 
-    refactor._write_plan_file(state, str(work), state["plan_file"])
+    gitfacts._write_plan_file(state, str(work), state["plan_file"])
 
     assert (work / "issues" / "plan.md").exists()
     assert not (tmp_path / "plan.md").exists()
