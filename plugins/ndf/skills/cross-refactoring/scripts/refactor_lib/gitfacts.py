@@ -16,7 +16,7 @@ import models as models_lib
 import statefile
 
 from . import die, info
-from .paths import sh, stem_for
+from .paths import git_out, sh, stem_for
 from .plan import format_plan, normalize_plan_file, publish_plan_comment
 from .vocabulary import (
     DEFAULT_TEST_TIMEOUT,
@@ -73,18 +73,6 @@ def reported_shas(reported: Any) -> list[str]:
     return shas
 
 
-def git_out(work: str, args: list[str], strip: bool = True) -> Optional[str]:
-    """`git` を実行して標準出力を返す。失敗したら `None`。
-
-    **固定幅で読む出力には `strip=False` を渡す。** `git status --porcelain` の
-    状態コードは未 stage の変更で ` M` と先頭が空白になるため、`strip()` すると
-    1 行目だけ 1 文字ずれ、切り出したパスの先頭が欠ける。欠けたパスは
-    `git add` で `pathspec ... did not match any files` になり、同期が止まる。
-    """
-    r = subprocess.run(["git", *args], cwd=work, capture_output=True, text=True)
-    if r.returncode != 0:
-        return None
-    return r.stdout.strip() if strip else r.stdout.rstrip("\n")
 
 
 def commits_in_range(work: str, base: Optional[str], head: str) -> Optional[list[str]]:
@@ -1077,3 +1065,30 @@ def record_observed_model(
     warning = models_lib.mismatch_warning(runtime, requested, observed)
     if warning:
         info(warning)
+
+
+# ---------- 取り消しの実行 ----------
+#
+# **`drop_items` を直に使うため、ここへ置く。** ラウンドの側（`rounds`）へ置くと
+# `rounds → gitfacts → plan → rounds` の循環になる（#441 で実測）。
+
+def run_drop(
+    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any],
+    targets: list[str],
+) -> dict[str, Any]:
+    """取り消しを、中断しても再開できる形で実行する。
+
+    `pending_drop` と `pending_push` を立ててから入り、**戻ったらすぐ保存する**。
+    保存しないまま落ちると、積み直しで変わった SHA と取り消し済みの印が失われ、
+    次の実行は**履歴に無い SHA を相手に**取り消しをやり直すことになる。
+
+    印はここでは消さない。**呼び出し側が完了の記録と同じ保存で消す。** 先に消すと、
+    完了を記録する前に落ちたときに、次の実行が「取り消し済みだが未完了」の状態を
+    見分けられなくなる。
+    """
+    entry["pending_drop"] = list(targets)
+    entry["pending_push"] = True
+    statefile.save(path, state)
+    result = drop_items(state, entry, list(targets))
+    statefile.save(path, state)
+    return result

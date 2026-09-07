@@ -17,6 +17,7 @@ import statefile
 
 from .. import die, info
 from ..gitfacts import (
+    run_drop,
     discard_impl_leftovers,
     drop_items,
     find_item,
@@ -36,14 +37,18 @@ from ..gitfacts import (
 )
 from ..outbound import dropped_line, item_lines, plan_line
 from ..paths import load_state, result_path, stem_for
-from ..rounds import deferred_record
+from ..rounds import (
+    current_group,
+    deferred_record,
+    phase_after_group,
+    prepare_fix_phase,
+)
 from ..verify import (
     unassigned_fix_commits,
     verify_commit_granularity,
     verify_fix_commit,
 )
 from ..vocabulary import DEFAULT_TEST_TIMEOUT
-from .apply import _phase_after_group, _prepare_fix_phase, _run_drop, current_group
 
 
 def cmd_verify_round(args: argparse.Namespace) -> None:
@@ -91,7 +96,7 @@ def cmd_verify_round(args: argparse.Namespace) -> None:
         for item_id in applied:
             find_item(state, item_id)["status"] = "done"
         group["status"] = "verified"
-        state["phase"] = _phase_after_group(entry)
+        state["phase"] = phase_after_group(entry)
         statefile.save(path, state)
         info(f"✅ 適用ラウンド {group['apply_round']} のテストが通りました（{command}）")
         # **外へ出す文章の規約**（#436 決定 6-b）。項目は `<ファイル>#<シンボル>`
@@ -104,7 +109,7 @@ def cmd_verify_round(args: argparse.Namespace) -> None:
     # **修正ラウンドの起点をここで記録する。** 記録せずに戻すと `merge-fix` が
     # 範囲を確定できずに弾かれ、`fix_rounds` が進まない。`should-abandon` は
     # `fix_rounds` で見送りを決めるため、上限へ永久に到達しなくなる。
-    _prepare_fix_phase(state, entry)
+    prepare_fix_phase(state, entry)
     statefile.save(path, state)
     if timed_out:
         info(f"❌ テストが {timeout} 秒で終わりませんでした（{command}）")
@@ -147,7 +152,7 @@ def cmd_abandon_items(args: argparse.Namespace) -> None:
         # 取り消しが途中の HEAD をそのまま Pull Request へ反映してしまう。
         if entry.get("pending_drop"):
             info("↻ 前回終わらなかった取り消しを再実行します")
-            _run_drop(path, state, entry, list(entry["pending_drop"]))
+            run_drop(path, state, entry, list(entry["pending_drop"]))
         else:
             flush_pending_push(path, state, entry)
 
@@ -171,7 +176,7 @@ def cmd_abandon_items(args: argparse.Namespace) -> None:
         info("（dry-run）状態ファイルは更新していません")
         return
 
-    _run_drop(path, state, entry, targets)
+    run_drop(path, state, entry, targets)
 
     already = {d.get("item_id") for d in state["deferred_items"]}
     for item_id in targets:
@@ -195,7 +200,7 @@ def cmd_abandon_items(args: argparse.Namespace) -> None:
     entry["apply_base_sha"] = git_out(
         state["worktrees"]["work"], ["rev-parse", "HEAD"])
     group["base_sha"] = entry["apply_base_sha"]
-    state["phase"] = _phase_after_group(entry)
+    state["phase"] = phase_after_group(entry)
     statefile.save(path, state)
     push_head(state)
     entry["pending_push"] = False

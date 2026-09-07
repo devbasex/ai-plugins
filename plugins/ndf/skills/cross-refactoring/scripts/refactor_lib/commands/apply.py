@@ -16,6 +16,7 @@ import statefile
 
 from .. import die, info
 from ..gitfacts import (
+    run_drop,
     current_round,
     discard_impl_leftovers,
     drop_items,
@@ -36,11 +37,14 @@ from ..paths import load_state, result_path, stem_for
 from ..proposals import assign_apply_rounds, merge_proposals, merge_test_proposals
 from ..rounds import (
     TEST,
+    apply_groups,
+    current_group,
     deferred_record,
     entry_kind,
     item_key,
     item_kind,
     item_label,
+    phase_after_group,
 )
 from ..verify import verify_apply_round
 from ..vocabulary import DEFAULT_TEST_TIMEOUT
@@ -244,38 +248,8 @@ def _item_summary(item: dict[str, Any]) -> str:
     )
 
 
-def apply_groups(entry: dict[str, Any]) -> list[dict[str, Any]]:
-    """このラウンドの適用ラウンド（群）の一覧。
-
-    群を持たない状態ファイル（この版より前）は、**ラウンド全体を 1 つの群**として
-    読み、その場で記録する。中断から再開したときに、群の単位が実行のたびに
-    変わらないようにするためである。
-    """
-    groups = entry.get("apply_rounds")
-    if groups:
-        return groups
-    entry["apply_rounds"] = [{
-        "apply_round": 1,
-        "impl": entry.get("impl"),
-        "impl_model": entry.get("impl_model") or {"requested": None, "observed": None},
-        "items": list(entry.get("items") or []),
-        "status": "pending",
-        "base_sha": entry.get("apply_base_sha"),
-        "head_sha": None,
-        "fix_rounds": entry.get("fix_rounds", 0),
-    }]
-    entry.setdefault("apply_round", 1)
-    return entry["apply_rounds"]
 
 
-def current_group(entry: dict[str, Any]) -> dict[str, Any]:
-    """進行中の適用ラウンド。まだ開いていなければ最初の群を返す。"""
-    groups = apply_groups(entry)
-    current = entry.get("apply_round") or 1
-    for group in groups:
-        if group.get("apply_round") == current:
-            return group
-    return groups[-1]
 
 
 def cmd_next_apply_round(args: argparse.Namespace) -> None:
@@ -590,7 +564,7 @@ def _revert_unverified_apply_round(
         "merged_at": statefile.now(),
     }
     group["status"] = "dropped"
-    state["phase"] = _phase_after_group(entry)
+    state["phase"] = phase_after_group(entry)
     if args.dry_run:
         info("（dry-run）状態ファイルは更新していません")
     else:
@@ -708,13 +682,6 @@ def _verify_apply_group(
     return list(group["items"]), []
 
 
-def _phase_after_group(entry: dict[str, Any]) -> str:
-    """この群を終えた後のフェーズ。残りの群があれば適用を続ける。"""
-    remaining = [
-        g for g in entry.get("apply_rounds") or []
-        if g.get("status") == "pending"
-    ]
-    return "apply" if remaining else "propose"
 
 
 def _defer_abandoned_items(state: dict[str, Any], group: dict[str, Any]) -> None:
@@ -739,26 +706,6 @@ def _defer_abandoned_items(state: dict[str, Any], group: dict[str, Any]) -> None
         ))
 
 
-def _run_drop(
-    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any],
-    targets: list[str],
-) -> dict[str, Any]:
-    """取り消しを、中断しても再開できる形で実行する。
-
-    `pending_drop` と `pending_push` を立ててから入り、**戻ったらすぐ保存する**。
-    保存しないまま落ちると、積み直しで変わった SHA と取り消し済みの印が失われ、
-    次の実行は**履歴に無い SHA を相手に**取り消しをやり直すことになる。
-
-    印はここでは消さない。**呼び出し側が完了の記録と同じ保存で消す。** 先に消すと、
-    完了を記録する前に落ちたときに、次の実行が「取り消し済みだが未完了」の状態を
-    見分けられなくなる。
-    """
-    entry["pending_drop"] = list(targets)
-    entry["pending_push"] = True
-    statefile.save(path, state)
-    result = drop_items(state, entry, list(targets))
-    statefile.save(path, state)
-    return result
 
 
 def _apply_drop(
@@ -781,7 +728,7 @@ def _apply_drop(
     取り消しと積み直しのコミットを「未割当」と判定して群ごと巻き込む。
     """
     work = state["worktrees"]["work"]
-    result = _run_drop(path, state, entry, failed)
+    result = run_drop(path, state, entry, failed)
     applied = list(entry["apply"].get("applied") or [])
     if result["mode"] == "round":
         # 積み直せなかった。この群の全件を捨てる。**他の群には及ばない。**
@@ -802,7 +749,7 @@ def _apply_drop(
         group["status"] = "dropped"
     else:
         group["status"] = "applied"
-    state["phase"] = _phase_after_group(entry)
+    state["phase"] = phase_after_group(entry)
 
     # 取り消した項目は「対象外」として残す。次のラウンドで同じ提案が採用され、
     # 同じ理由で失敗するのを防ぐ。
@@ -836,13 +783,3 @@ def _resume_incomplete_apply(
     flush_pending_push(path, state, entry)
 
 
-def _prepare_fix_phase(state: dict[str, Any], entry: dict[str, Any]) -> None:
-    """修正ラウンドへ入る前に、必要な記録を残す。
-
-    - `fix_base_sha`: 修正の範囲の起点。無いと `merge-fix` が範囲を確定できず、
-      `fix_rounds` が進まないまま修正と検証を往復し続ける
-    - `fix_attempts`: 試行番号。`merge-fix` が「叩き直し」と「次のラウンド」を
-      区別するのに使う
-    """
-    entry["fix_base_sha"] = git_out(state["worktrees"]["work"], ["rev-parse", "HEAD"])
-    entry["fix_attempts"] = entry.get("fix_attempts", 0) + 1

@@ -107,3 +107,17 @@ def stem_for(runtime: str, phase: str, state_id: int, round_no: Optional[int] = 
     if phase == "final-fix":
         return f"{runtime}-final-fix"
     return f"{runtime}-{phase}-r{round_no}"
+
+
+def git_out(work: str, args: list[str], strip: bool = True) -> Optional[str]:
+    """`git` を実行して標準出力を返す。失敗したら `None`。
+
+    **固定幅で読む出力には `strip=False` を渡す。** `git status --porcelain` の
+    状態コードは未 stage の変更で ` M` と先頭が空白になるため、`strip()` すると
+    1 行目だけ 1 文字ずれ、切り出したパスの先頭が欠ける。欠けたパスは
+    `git add` で `pathspec ... did not match any files` になり、同期が止まる。
+    """
+    r = subprocess.run(["git", *args], cwd=work, capture_output=True, text=True)
+    if r.returncode != 0:
+        return None
+    return r.stdout.strip() if strip else r.stdout.rstrip("\n")
