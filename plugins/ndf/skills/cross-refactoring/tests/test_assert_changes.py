@@ -151,7 +151,7 @@ def test_the_launcher_accepts_the_judging_phase(tmp_path) -> None:
     stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     stub.chmod(0o755)
     # 判定の対象は進行側が書き出す。**無ければ起動しない。**
-    (state_path.parent / "test-diff-r1.diff").write_text("--- a\n+++ b\n", encoding="utf-8")
+    (state_path.parent / "test-diff-r1-g1.diff").write_text("--- a\n+++ b\n", encoding="utf-8")
     proc = subprocess.run(
         [str(launch), "codex", "judge-test-changes", "130", "1"],
         env={**os.environ, "CROSS_REFACTORING_TMP_DIR": str(state_path.parent),
@@ -303,7 +303,7 @@ def test_the_merge_command_clears_or_fails(
         "pending_test_judgements": {"1": ["tests/test_a.py"]},
     }])
     env_tmp_dir(state_path)
-    (state_path.parent / "codex-judge-test-changes-r1-result.json").write_text(
+    (state_path.parent / "codex-judge-test-changes-r1-g1-result.json").write_text(
         json.dumps({"verdicts": [{"path": "tests/test_a.py", "verdict": "unchanged",
                                   "reason": "経路だけ"}]}), encoding="utf-8")
 
@@ -368,7 +368,7 @@ def test_the_merge_command_drops_the_round_on_a_changed_verdict(
         "pending_test_judgements": {"1": ["tests/test_a.py"]},
     }])
     env_tmp_dir(state_path)
-    (state_path.parent / "codex-judge-test-changes-r1-result.json").write_text(
+    (state_path.parent / "codex-judge-test-changes-r1-g1-result.json").write_text(
         json.dumps({"verdicts": [{"path": "tests/test_a.py", "verdict": "changed",
                                   "reason": "270 が 300 に"}]}), encoding="utf-8")
     monkeypatch.setattr(paths.subprocess, "run",
@@ -407,9 +407,8 @@ def test_dropping_one_group_keeps_the_other_pending(
                                     "2": ["tests/test_b.py"]},
     }])
     env_tmp_dir(state_path)
-    (state_path.parent / "codex-judge-test-changes-r1-result.json").write_text(
-        json.dumps({"verdicts": [{"path": "tests/test_b.py", "verdict": "changed"},
-                                 {"path": "tests/test_a.py", "verdict": "undecidable"}]}),
+    (state_path.parent / "codex-judge-test-changes-r1-g2-result.json").write_text(
+        json.dumps({"verdicts": [{"path": "tests/test_b.py", "verdict": "changed"}]}),
         encoding="utf-8")
     monkeypatch.setattr(paths.subprocess, "run",
                         lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "", ""))

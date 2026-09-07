@@ -817,19 +817,22 @@ def cmd_merge_test_judgements(args: argparse.Namespace) -> None:
         info("判定を待っているテストはありません")
         return
 
+    # **読むのは、この群を判定した担当の結果だけである。** 全ランタイムを読むと、
+    # 前の群で別の担当が返した古い答えが混ざり、今回の `changed` を打ち消す。
+    impl = (current_group(entry) or {}).get("impl") or entry.get("impl")
     verdicts: list[dict[str, Any]] = []
-    for runtime in state.get("runtimes", []):
+    if impl:
         result = result_path(
-            state, runtime, f"{runtime}-judge-test-changes-r{args.round}")
-        if not result.exists():
-            continue
-        try:
-            payload = json.loads(result.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        found = payload.get("verdicts")
-        if isinstance(found, list):
-            verdicts.extend(v for v in found if isinstance(v, dict))
+            state, impl,
+            f"{impl}-judge-test-changes-r{args.round}-g{group_of_round}")
+        if result.exists():
+            try:
+                payload = json.loads(result.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                payload = {}
+            found = payload.get("verdicts")
+            if isinstance(found, list):
+                verdicts = [v for v in found if isinstance(v, dict)]
 
     outcome = merge_test_judgements(pending, verdicts)
     if outcome["problem"]:

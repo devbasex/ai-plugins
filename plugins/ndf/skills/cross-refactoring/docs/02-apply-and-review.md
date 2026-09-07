@@ -61,23 +61,35 @@ eval "$("$SCRIPTS/refactor.py" next-apply-round "$ID" "$ROUND")"  # 1 = 群が�
 **記録が残ったまま次の工程へ進まない。**
 
 ```bash
-# 1. 記録を読む。**適用群ごとに持つ**ため、全ての群の分をまとめて取る
-PENDING=$(jq -r '.rounds[] | select(.round == $r) | .pending_test_judgements // {}
-  | to_entries[] | .value[]' --argjson r "$ROUND" "$STATE" | sort -u)
-[ -n "$PENDING" ] || exit 0        # 空なら段 2 は要らない
+# 1. **この群**の記録を読む。保留は適用群ごとに持つ
+PENDING=$(jq -r --argjson r "$ROUND" --arg g "$APPLY_ROUND" \
+  '.rounds[] | select(.round == $r) | .pending_test_judgements // {}
+   | .[$g] // [] | .[]' "$STATE")
 
-# 2. 対象の差分を書き出す。**対象は直前の適用のコミット**であるため HEAD でよい
-git -C "$WORK" show HEAD -- $PENDING > "$TMP_DIR/test-diff-r$ROUND.diff"
+if [ -n "$PENDING" ]; then
+  # 2. 対象の差分を書き出す。**起点はこの群の記録である。**
+  #    `merge-apply` の成功時に生成物の同期コミットが積まれるため、HEAD は
+  #    適用のコミットとは限らない
+  RANGE=$(jq -r --argjson r "$ROUND" --arg g "$APPLY_ROUND" \
+    '.rounds[] | select(.round == $r) | .apply_rounds[]
+     | select((.apply_round|tostring) == $g) | "\(.base_sha)..\(.head_sha)"' "$STATE")
+  git -C "$WORK" diff "$RANGE" -- $PENDING > "$TMP_DIR/test-diff-r$ROUND-g$APPLY_ROUND.diff"
 
-# 3. 判定させる。担当は `next-apply-round` が返した実装担当（$IMPL）でよい。
-#    **起動は背景で走るため、待たずに次へ進むと結果が無い。**
-"$SCRIPTS/launch-cli.sh" "$IMPL" judge-test-changes "$ID" "$ROUND"
-"$LIB/monitor.py" "$ID" --agents "$IMPL" --tmp-dir "$TMP_DIR" \
-    --stem-template "{agent}-judge-test-changes-r$ROUND" --timeout 900
+  # 3. 判定させる。担当はこの群の実装担当（$IMPL）である。
+  #    **起動は背景で走るため、待たずに次へ進むと結果が無い。**
+  "$SCRIPTS/launch-cli.sh" "$IMPL" judge-test-changes "$ID" "$ROUND"
+  "$LIB/monitor.py" "$ID" --agents "$IMPL" --tmp-dir "$TMP_DIR" \
+      --stem-template "{agent}-judge-test-changes-r$ROUND-g$APPLY_ROUND" --timeout 900
 
-# 4. 答えを取り込む（終了コード 2 は「取り消した」を表す）
-"$SCRIPTS/refactor.py" merge-test-judgements "$ID" "$ROUND"
+  # 4. 答えを取り込む（終了コード 2 は「取り消した」を表す）
+  "$SCRIPTS/refactor.py" merge-test-judgements "$ID" "$ROUND"
+fi
 ```
+
+**`exit 0` で抜けない。** 保留が無いのは正常であり、後続の群の適用と Step 5 へ進む。
+
+**差分の名前と結果の名前に群番号を入れる。** 同じ提案ラウンドで複数の群が段 2 を通ると、
+前の群の分を上書きする。
 
 **取り込みの結果で次が決まる。**
 

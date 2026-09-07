@@ -71,11 +71,16 @@ case "$PHASE" in
     # **テストの差分が振る舞いの変更を含むかの判定**（#443）。機械で決まらない差分だけを
     # 渡すため、対象は小さい。判定だけを返させるので上限は提案と同じでよい。
     [ "$ROUND" -ge 1 ] 2>/dev/null || { echo "$PHASE には ROUND が必要です" >&2; exit 1; }
-    STEM=$TMP_DIR/$RUNTIME-judge-test-changes-r$ROUND
+    # **名前に適用群を入れる。** 同じ提案ラウンドで複数の群が段 2 を通ると、
+    # 前の群の差分と結果を上書きする。**この時点では `APPLY_ROUND` が未設定である
+    # ため、ここで先に読む**（下の共通の読み取りは `STEM` の後にある）。
+    JUDGE_GROUP=$(jq -r --argjson r "$ROUND" \
+      '[.rounds[] | select(.round == $r)][0].apply_round // 1' "$STATE")
+    STEM=$TMP_DIR/$RUNTIME-judge-test-changes-r$ROUND-g$JUDGE_GROUP
     WORKDIR=$WORK
     PRINT_TIMEOUT=900
     # 判定の対象は、進行側が先に書き出す。**無ければ起動しない**（渡すものが無い）。
-    RF_TEST_DIFF_PATH=$TMP_DIR/test-diff-r$ROUND.diff
+    RF_TEST_DIFF_PATH=$TMP_DIR/test-diff-r$ROUND-g$JUDGE_GROUP.diff
     [ -s "$RF_TEST_DIFF_PATH" ] || {
       echo "判定する差分がありません: $RF_TEST_DIFF_PATH" >&2; exit 1; }
     export RF_TEST_DIFF_PATH
@@ -122,7 +127,7 @@ APPLY_ROUND=0
 # ラウンドの種類。適用と修正では、項目が改善項目かテスト項目かで手順が変わる。
 ROUND_KIND=$(jq -r --argjson r "$ROUND" \
   '[.rounds[] | select(.round == $r)][0].kind // "structure"' "$STATE")
-if [ "$PHASE" = "apply" ] || [ "$PHASE" = "fix" ]; then
+if [ "$PHASE" = "apply" ] || [ "$PHASE" = "fix" ] || [ "$PHASE" = "judge-test-changes" ]; then
   APPLY_ROUND=$(jq -r --argjson r "$ROUND" \
     '[.rounds[] | select(.round == $r)][0].apply_round // 0' "$STATE")
   ITEMS_JSON=$(jq --argjson r "$ROUND" --argjson a "$APPLY_ROUND" \
