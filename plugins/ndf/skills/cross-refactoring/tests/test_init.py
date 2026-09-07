@@ -1,6 +1,6 @@
 """`init` のテスト。
 
-`gh` は呼ばないので `_sh` を差し替える。git は実際に動かし、
+`gh` は呼ばないので `sh` を差し替える。git は実際に動かし、
 **書き込み用の作業ディレクトリが本当に作れるか**を確かめる。
 """
 from __future__ import annotations
@@ -76,7 +76,7 @@ def run_init(refactor, origin_repo, monkeypatch):
     常に `author` なので、両者を一致させると自分の Pull Request になる。
     """
     def _run(args, viewer="someone-else"):
-        real_sh = refactor._sh
+        real_sh = refactor.sh
 
         def fake_sh(cmd, cwd=None, check=True):
             if cmd[0] == "gh":
@@ -102,7 +102,7 @@ def run_init(refactor, origin_repo, monkeypatch):
                 raise AssertionError(f"想定外の gh 呼び出し: {cmd}")
             return real_sh(cmd, cwd=cwd, check=check)
 
-        monkeypatch.setattr(refactor, "_sh", fake_sh)
+        monkeypatch.setattr(refactor, "sh", fake_sh)
         monkeypatch.chdir(origin_repo)
         monkeypatch.delenv("CROSS_REFACTORING_TMP_DIR", raising=False)
         # 認証確認は実際の CLI を起動する。ここでは対象外なので飛ばす
@@ -465,7 +465,7 @@ def test_init_checks_cli_authentication(refactor, cmd_setup, origin_repo, monkey
     monkeypatch.delenv("CROSS_REFACTORING_TMP_DIR", raising=False)
     _probe_result(refactor, monkeypatch, {"agy": (1, "Authentication failed")})
     monkeypatch.setattr(
-        refactor, "_sh",
+        refactor, "sh",
         lambda cmd, **k: pytest.fail("認証確認より前に gh を呼んでいる"),
     )
     with pytest.raises(SystemExit) as e:

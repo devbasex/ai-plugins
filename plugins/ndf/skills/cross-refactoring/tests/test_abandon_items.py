@@ -132,7 +132,7 @@ def _history(refactor, monkeypatch, newest_first):
         if args[:2] == ["rev-parse", "--verify"]:
             return args[-1].replace("^{commit}", "")
         return "HEAD_BEFORE"
-    monkeypatch.setattr(refactor, "_git_out", fake_git_out)
+    monkeypatch.setattr(refactor, "git_out", fake_git_out)
 
 
 @pytest.mark.parametrize("claimed", [
@@ -160,7 +160,7 @@ def test_revert_runs_newest_commit_first(
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
     monkeypatch.setattr(refactor.subprocess, "run", fake_run)
-    monkeypatch.setattr(refactor, "_sh", lambda *a, **k: "")
+    monkeypatch.setattr(refactor, "sh", lambda *a, **k: "")
     cmd_converge.cmd_abandon_items(_args(dry_run=False))
 
     reverts = [c for c in calls if c[:2] == ["git", "revert"]]
@@ -223,7 +223,7 @@ def test_push_never_uses_force(refactor, cmd_converge, tmp_path, env_tmp_dir, mo
         lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "", ""),
     )
     pushes: list[list[str]] = []
-    monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: pushes.append(cmd) or "")
+    monkeypatch.setattr(refactor, "sh", lambda cmd, **k: pushes.append(cmd) or "")
     cmd_converge.cmd_abandon_items(_args(dry_run=False))
 
     assert pushes, "push が実行されていない"
@@ -259,7 +259,7 @@ def _prepare_fix(refactor, tmp_path, env_tmp_dir, monkeypatch, claimed,
     # `rev-parse --verify <sha>^{commit}` は SHA をそのまま返す形にしておく。
     # 未申告コミットの判定がこの解決を通るため。
     monkeypatch.setattr(
-        refactor, "_git_out",
+        refactor, "git_out",
         lambda work, args, **_kw: (args[-1].replace("^{commit}", "")
                             if args[:2] == ["rev-parse", "--verify"] else "HEAD_NOW"),
     )
@@ -273,7 +273,7 @@ def _prepare_fix(refactor, tmp_path, env_tmp_dir, monkeypatch, claimed,
         lambda work, shas, rng, cmd, branch, timeout=None: resolved_facts,
     )
     # 修正の取り込みは取り消しの有無に関わらず push する。既定では実行させない
-    monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: "")
+    monkeypatch.setattr(refactor, "sh", lambda cmd, **k: "")
     write_result(state_path, "codex-fix-r1", {
         "resolved_thread_ids": claimed,
         "elapsed_seconds": 12,
@@ -316,7 +316,7 @@ def _no_git(refactor, monkeypatch):
         lambda cmd, **kw: calls.append(list(cmd))
         or subprocess.CompletedProcess(cmd, 0, "", ""),
     )
-    monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: calls.append(list(cmd)) or "")
+    monkeypatch.setattr(refactor, "sh", lambda cmd, **k: calls.append(list(cmd)) or "")
     return calls
 
 
@@ -475,14 +475,14 @@ def test_broken_fix_result_does_not_crash(
     state_path = _state(tmp_path, [_finding("R1-001")])
     env_tmp_dir(state_path)
     # 修正の取り込みは取り消しの有無に関わらず push する。既定では実行させない
-    monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: "")
+    monkeypatch.setattr(refactor, "sh", lambda cmd, **k: "")
     write_result(state_path, "codex-fix-r1", {
         "resolved_thread_ids": broken_ids,
         "commits": {"sha": "辞書ではあるが配列でない"},
     })
     monkeypatch.setattr(refactor, "resolved_threads_on_github", lambda repo, pr: set())
     monkeypatch.setattr(refactor, "commits_in_range", lambda work, base, head: [])
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **_kw: "HEAD")
+    monkeypatch.setattr(refactor, "git_out", lambda work, args, **_kw: "HEAD")
     monkeypatch.setattr(
         refactor, "collect_commit_facts",
         lambda work, shas, rng, cmd, branch, timeout=None: [],
@@ -511,7 +511,7 @@ def test_merge_fix_uses_the_recorded_range(refactor, cmd_converge, tmp_path, env
         lambda work, base, head: seen.append((base, head)) or ["fix111"],
     )
     monkeypatch.setattr(
-        refactor, "_git_out",
+        refactor, "git_out",
         lambda work, args, **_kw: (args[-1].replace("^{commit}", "")
                             if args[:2] == ["rev-parse", "--verify"] else "HEAD_NOW"),
     )
@@ -528,7 +528,7 @@ def test_merge_fix_fails_when_the_range_cannot_be_determined(
 ):
     state_path = _prepare_fix(refactor, tmp_path, env_tmp_dir, monkeypatch, ["PRRT_a"])
     monkeypatch.setattr(refactor, "commits_in_range", lambda work, base, head: None)
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **_kw: "HEAD_NOW")
+    monkeypatch.setattr(refactor, "git_out", lambda work, args, **_kw: "HEAD_NOW")
     monkeypatch.setattr(refactor, "resolved_threads_on_github",
                         lambda repo, pr: {"PRRT_a"})
     with pytest.raises(SystemExit) as e:
@@ -545,7 +545,7 @@ def test_merge_fix_rejects_unreported_commits(
     monkeypatch.setattr(
         refactor, "commits_in_range", lambda work, base, head: ["sneaky", "fix111"])
     monkeypatch.setattr(
-        refactor, "_git_out",
+        refactor, "git_out",
         lambda work, args, **_kw: args[-1].replace("^{commit}", "") if args[0] == "rev-parse"
         else "HEAD_NOW",
     )
@@ -557,7 +557,7 @@ def test_merge_fix_rejects_unreported_commits(
         lambda cmd, **kw: calls.append(list(cmd))
         or subprocess.CompletedProcess(cmd, 0, "", ""),
     )
-    monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: "")
+    monkeypatch.setattr(refactor, "sh", lambda cmd, **k: "")
 
     cmd_converge.cmd_merge_fix(type("A", (), {"id": 130, "round": 1})())
 
@@ -766,7 +766,7 @@ def test_merge_fix_is_idempotent_after_a_revert(
     # 取り消しで HEAD が進んだ状況を模す
     calls.clear()
     monkeypatch.setattr(
-        refactor, "_git_out",
+        refactor, "git_out",
         lambda work, args, **_kw: ("HEAD_AFTER_REVERT" if args[:1] == ["rev-parse"]
                             else args[-1].replace("^{commit}", "")),
     )
@@ -800,7 +800,7 @@ def test_merge_fix_saves_before_pushing(refactor, cmd_converge, tmp_path, env_tm
             saved_at_push.append(entry.get("fix_base_sha") != "FIX_BASE")
         return ""
 
-    monkeypatch.setattr(refactor, "_sh", fake_sh)
+    monkeypatch.setattr(refactor, "sh", fake_sh)
     cmd_converge.cmd_merge_fix(type("A", (), {"id": 130, "round": 1})())
 
     assert saved_at_push == [True], "push の前に起点の更新が保存されていない"
@@ -833,7 +833,7 @@ def test_pending_push_is_retried_on_the_next_run(
             raise SystemExit(1)
         return ""
 
-    monkeypatch.setattr(refactor, "_sh", failing_sh)
+    monkeypatch.setattr(refactor, "sh", failing_sh)
     args = type("A", (), {"id": 130, "round": 1})()
     with pytest.raises(SystemExit):
         cmd_converge.cmd_merge_fix(args)
@@ -842,7 +842,7 @@ def test_pending_push_is_retried_on_the_next_run(
 
     # 次の実行では、処理済みの判定より先に push を片づける
     pushes.clear()
-    monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: pushes.append(list(cmd)) or "")
+    monkeypatch.setattr(refactor, "sh", lambda cmd, **k: pushes.append(list(cmd)) or "")
     cmd_converge.cmd_merge_fix(args)
 
     assert [c for c in pushes if c[:2] == ["git", "push"]], "再試行していない"
@@ -883,10 +883,10 @@ def _range_env(refactor, monkeypatch, ordered, pick_rc=0):
         return "HEAD_BEFORE"
 
     monkeypatch.setattr(refactor.subprocess, "run", fake_run)
-    monkeypatch.setattr(refactor, "_git_out", fake_git_out)
+    monkeypatch.setattr(refactor, "git_out", fake_git_out)
     monkeypatch.setattr(refactor, "commits_in_range",
                         lambda work, base, head: list(ordered))
-    monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: "")
+    monkeypatch.setattr(refactor, "sh", lambda cmd, **k: "")
     return calls
 
 
@@ -973,7 +973,7 @@ def test_abandon_saves_the_drop_result_before_pushing(
     _range_env(refactor, monkeypatch, ["sha-R1-002", "sha-R1-001"])
     seen: list[dict] = []
     monkeypatch.setattr(
-        refactor, "_sh",
+        refactor, "sh",
         lambda cmd, **k: seen.append(read_state(state_path)) or "",
     )
     cmd_converge.cmd_abandon_items(_args())
@@ -1007,7 +1007,7 @@ def test_abandon_retries_the_drop_before_resending_the_push(
         lambda cmd, **kw: (order.append(cmd[1]) if cmd[:1] == ["git"] else None)
         or real_run(cmd, **kw),
     )
-    monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: order.append("push") or "")
+    monkeypatch.setattr(refactor, "sh", lambda cmd, **k: order.append("push") or "")
     cmd_converge.cmd_abandon_items(_args())
 
     assert "revert" in order and "push" in order

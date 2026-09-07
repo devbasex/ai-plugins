@@ -162,7 +162,7 @@ def test_the_label_names_the_file_and_the_symbol(rounds):
 
 # ---------- ラウンドの開始 ----------
 
-def _round(round_no, kind, **over):
+def round_of(round_no, kind, **over):
     base = {
         "round": round_no, "kind": kind, "impl": "codex",
         "reviewers": ["agy", "kiro"],
@@ -210,7 +210,7 @@ def test_the_structure_cap_counts_only_structure_rounds(
     """テスト整備ラウンドは `--max-outer-rounds` を食わない。"""
     state_path = make_state(
         tmp_path, max_outer_rounds=1, round_kind="structure",
-        rounds=[_round(1, "test"), _round(2, "test")],
+        rounds=[round_of(1, "test"), round_of(2, "test")],
     )
     env_tmp_dir(state_path)
     refactor.cmd_start_round(_args())
@@ -225,7 +225,7 @@ def test_no_adopted_test_item_moves_on_to_the_structure_rounds(
     """収束の条件は**採用 0 件**。提案ラウンドと同じ形にする。"""
     state_path = make_state(
         tmp_path, round_kind="test", max_test_rounds=2,
-        rounds=[_round(1, "test", adopted=0)],
+        rounds=[round_of(1, "test", adopted=0)],
     )
     env_tmp_dir(state_path)
     refactor.cmd_advance(_args())
@@ -242,7 +242,7 @@ def test_the_test_rounds_stop_at_the_cap_even_with_items_left(
     """B4 — 上限に達したら採用が残っていても提案ラウンドへ進む。"""
     state_path = make_state(
         tmp_path, round_kind="test", max_test_rounds=2,
-        rounds=[_round(1, "test"), _round(2, "test")],
+        rounds=[round_of(1, "test"), round_of(2, "test")],
     )
     env_tmp_dir(state_path)
     refactor.cmd_advance(_args())
@@ -257,7 +257,7 @@ def test_another_test_round_follows_while_items_are_still_adopted(
 ):
     state_path = make_state(
         tmp_path, round_kind="test", max_test_rounds=2,
-        rounds=[_round(1, "test")],
+        rounds=[round_of(1, "test")],
     )
     env_tmp_dir(state_path)
     refactor.cmd_advance(_args())
@@ -275,9 +275,9 @@ def test_the_duplicate_rate_compares_rounds_of_the_same_kind(
     state_path = make_state(
         tmp_path, max_outer_rounds=5, round_kind="structure",
         rounds=[
-            _round(1, "structure", proposal_keys=keys),
-            _round(2, "test", proposal_keys=[["src/a.py#f", "branch"]]),
-            _round(3, "structure", proposal_keys=keys),
+            round_of(1, "structure", proposal_keys=keys),
+            round_of(2, "test", proposal_keys=[["src/a.py#f", "branch"]]),
+            round_of(3, "structure", proposal_keys=keys),
         ],
     )
     env_tmp_dir(state_path)
@@ -305,7 +305,7 @@ def _run_merge(refactor, tmp_path, env_tmp_dir, monkeypatch, proposals, **over):
         tmp_path, rounds=[_entry()], phase="propose", outer_round=1,
         round_kind="test", max_test_rounds=2, **over)
     env_tmp_dir(state_path)
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **k: "base0")
+    monkeypatch.setattr(refactor, "git_out", lambda work, args, **k: "base0")
     write_result(state_path, "codex-propose-rf130-r1", {"items": proposals})
     for runtime in ("agy", "kiro"):
         write_result(state_path, f"{runtime}-propose-rf130-r1", {"items": []})
@@ -342,7 +342,7 @@ def test_an_empty_structure_round_still_ends_the_run(
         tmp_path, rounds=[_entry(kind="structure")], phase="propose",
         outer_round=1, round_kind="structure")
     env_tmp_dir(state_path)
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **k: "base0")
+    monkeypatch.setattr(refactor, "git_out", lambda work, args, **k: "base0")
     for runtime in ("codex", "agy", "kiro"):
         write_result(state_path, f"{runtime}-propose-rf130-r1", {"items": []})
     with pytest.raises(SystemExit) as e:

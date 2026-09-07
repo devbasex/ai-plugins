@@ -1,7 +1,7 @@
 """状態ファイルと結果ファイルの置き場所を決める。
 
 作業ディレクトリの解決・状態ファイルの探索と読み込み・結果ファイルの名前付けを
-持つ。外部コマンドの実行（`_sh`）も、置き場所を確かめる手として同居する。
+持つ。外部コマンドの実行（`sh`）も、置き場所を確かめる手として同居する。
 """
 from __future__ import annotations
 
@@ -75,7 +75,7 @@ def _load(state_id: int) -> tuple[pathlib.Path, dict[str, Any]]:
     return path, statefile.load(path)
 
 
-def _sh(cmd: list[str], cwd: Optional[str] = None, check: bool = True) -> str:
+def sh(cmd: list[str], cwd: Optional[str] = None, check: bool = True) -> str:
     r = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
     if check and r.returncode != 0:
         die(f"コマンドが失敗しました ({' '.join(cmd)}): {r.stderr.strip()}")

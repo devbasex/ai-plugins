@@ -12,7 +12,7 @@ def _args(state_id=130):
     return type("A", (), {"id": state_id})()
 
 
-def _round(round_no, **over):
+def round_of(round_no, **over):
     base = {
         "round": round_no, "impl": "codex", "reviewers": ["agy", "kiro"],
         "impl_model": {"requested": None, "observed": None},
@@ -61,7 +61,7 @@ def test_start_round_is_idempotent_on_resume(refactor, tmp_path, env_tmp_dir):
 
 def test_start_round_stops_at_max_outer_rounds(refactor, tmp_path, env_tmp_dir):
     state_path = make_state(tmp_path, max_outer_rounds=2,
-                            rounds=[_round(1), _round(2)])
+                            rounds=[round_of(1), round_of(2)])
     env_tmp_dir(state_path)
     with pytest.raises(SystemExit) as e:
         refactor.cmd_start_round(_args())
@@ -80,14 +80,14 @@ def test_start_round_stops_when_already_final(refactor, tmp_path, env_tmp_dir):
 # ---------- advance（収束判定） ----------
 
 def test_advance_continues_when_progress_is_made(cmd_report, tmp_path, env_tmp_dir):
-    state_path = make_state(tmp_path, rounds=[_round(1)])
+    state_path = make_state(tmp_path, rounds=[round_of(1)])
     env_tmp_dir(state_path)
     cmd_report.cmd_advance(_args())
     assert read_state(state_path)["final"] is None
 
 
 def test_advance_stops_when_nothing_adopted(cmd_report, tmp_path, env_tmp_dir):
-    state_path = make_state(tmp_path, rounds=[_round(1, adopted=0)])
+    state_path = make_state(tmp_path, rounds=[round_of(1, adopted=0)])
     env_tmp_dir(state_path)
     with pytest.raises(SystemExit) as e:
         cmd_report.cmd_advance(_args())
@@ -96,7 +96,7 @@ def test_advance_stops_when_nothing_adopted(cmd_report, tmp_path, env_tmp_dir):
 
 
 def test_advance_stops_at_max_outer_rounds(cmd_report, tmp_path, env_tmp_dir):
-    state_path = make_state(tmp_path, max_outer_rounds=1, rounds=[_round(1)])
+    state_path = make_state(tmp_path, max_outer_rounds=1, rounds=[round_of(1)])
     env_tmp_dir(state_path)
     with pytest.raises(SystemExit):
         cmd_report.cmd_advance(_args())
@@ -108,7 +108,7 @@ def test_advance_stops_on_duplicate_proposals(cmd_report, tmp_path, env_tmp_dir)
     keys = [["src/a.py", "A", "long_method"], ["src/b.py", "B", "duplication"]]
     state_path = make_state(
         tmp_path, max_outer_rounds=5,
-        rounds=[_round(1, proposal_keys=keys), _round(2, proposal_keys=keys)],
+        rounds=[round_of(1, proposal_keys=keys), round_of(2, proposal_keys=keys)],
     )
     env_tmp_dir(state_path)
     with pytest.raises(SystemExit):
@@ -123,7 +123,7 @@ def test_advance_allows_partially_overlapping_proposals(cmd_report, tmp_path, en
            ["src/d.py", "D", "dead_code"]]
     state_path = make_state(
         tmp_path, max_outer_rounds=5,
-        rounds=[_round(1, proposal_keys=prev), _round(2, proposal_keys=cur)],
+        rounds=[round_of(1, proposal_keys=prev), round_of(2, proposal_keys=cur)],
     )
     env_tmp_dir(state_path)
     cmd_report.cmd_advance(_args())
@@ -135,7 +135,7 @@ def test_advance_allows_partially_overlapping_proposals(cmd_report, tmp_path, en
 def test_report_renders_tables(cmd_report, tmp_path, env_tmp_dir, capsys):
     state_path = make_state(
         tmp_path,
-        rounds=[_round(1, items=["R1-001"], apply={"applied": ["R1-001"], "failed": []},
+        rounds=[round_of(1, items=["R1-001"], apply={"applied": ["R1-001"], "failed": []},
                        reviews=[{"round": 1, "agy": "APPROVE", "kiro": "APPROVE",
                                  "findings": []}])],
         items=[{"item_id": "R1-001", "round": 1, "path": "src/a.py", "symbol": "A",

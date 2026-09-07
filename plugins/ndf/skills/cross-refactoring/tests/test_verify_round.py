@@ -71,8 +71,8 @@ def _test_run(refactor, monkeypatch, code=0, timed_out=False):
         seen.append((command, cwd, timeout))
         return code, timed_out
 
-    monkeypatch.setattr(refactor, "_run_with_timeout", fake)
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **k: "HEAD_NOW")
+    monkeypatch.setattr(refactor, "run_with_timeout", fake)
+    monkeypatch.setattr(refactor, "git_out", lambda work, args, **k: "HEAD_NOW")
     return seen
 
 

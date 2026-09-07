@@ -152,7 +152,7 @@ def test_reverting_in_history_order_succeeds(gitfacts, work):
 
     state = {"worktrees": {"work": str(work)}}
     item = {"item_id": "R1-001", "commits": [first, second]}   # 古い順の申告
-    assert gitfacts._revert_item_commits(state, item) == 2
+    assert gitfacts.revert_item_commits(state, item) == 2
     assert item["reverted"] is True
 
     # 取り消し後は着手前の状態へ戻る（このファイルは base に存在しない）

@@ -34,9 +34,9 @@ def gate_spy(refactor, monkeypatch):
         seen["tests"].append(command)
         return seen.get("test_code", 0), False
 
-    monkeypatch.setattr(refactor, "_run_with_timeout", fake_run)
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **k: "HEADSHA")
-    monkeypatch.setattr(refactor, "_push_head",
+    monkeypatch.setattr(refactor, "run_with_timeout", fake_run)
+    monkeypatch.setattr(refactor, "git_out", lambda work, args, **k: "HEADSHA")
+    monkeypatch.setattr(refactor, "push_head",
                         lambda state: seen["pushed"].append(state["head_branch"]))
     return seen
 
@@ -150,13 +150,13 @@ def merge_spy(refactor, monkeypatch):
     """`merge-final-fix` が触る git を差し替える。"""
     seen: dict[str, list] = {"pushed": [], "reverted": []}
 
-    monkeypatch.setattr(refactor, "_discard_impl_leftovers", lambda state, work: None)
-    monkeypatch.setattr(refactor, "_push_head",
+    monkeypatch.setattr(refactor, "discard_impl_leftovers", lambda state, work: None)
+    monkeypatch.setattr(refactor, "push_head",
                         lambda state: seen["pushed"].append("push"))
     monkeypatch.setattr(
-        refactor, "_revert_item_commits",
+        refactor, "revert_item_commits",
         lambda state, item, dry_run=False: seen["reverted"].append(item) or 1)
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **k: (
+    monkeypatch.setattr(refactor, "git_out", lambda work, args, **k: (
         "HEADSHA" if args[:2] == ["rev-parse", "HEAD"] else "C1FULL"))
     monkeypatch.setattr(
         refactor, "commits_in_range",

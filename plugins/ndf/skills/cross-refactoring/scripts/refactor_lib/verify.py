@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Optional
 
-from .gitfacts import _safe_int
+from .gitfacts import safe_int
 from .vocabulary import (
     DIFF_BUDGET_FACTOR,
     EXTRACTION_DIFF_BUDGET_FACTOR,
@@ -225,7 +225,7 @@ def verify_apply_round(
                 f"（先頭コミット {facts[0].get('sha', '?')} がテストを触っていません）"
             )
 
-    estimated = sum(_safe_int(i.get("estimated_diff_lines")) for i in items)
+    estimated = sum(safe_int(i.get("estimated_diff_lines")) for i in items)
     factor = max(
         (diff_budget_factor(i.get("technique")) for i in items),
         default=DIFF_BUDGET_FACTOR,

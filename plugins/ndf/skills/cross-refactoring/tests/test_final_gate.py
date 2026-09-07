@@ -38,9 +38,9 @@ def spy(refactor, monkeypatch):
         seen["gh"].append(list(cmd))
         return seen.get("gh_out", "")
 
-    monkeypatch.setattr(refactor, "_run_with_timeout", fake_run)
-    monkeypatch.setattr(refactor, "_sh", fake_sh)
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **k: "HEADSHA")
+    monkeypatch.setattr(refactor, "run_with_timeout", fake_run)
+    monkeypatch.setattr(refactor, "sh", fake_sh)
+    monkeypatch.setattr(refactor, "git_out", lambda work, args, **k: "HEADSHA")
     return seen
 
 
@@ -216,7 +216,7 @@ def test_the_fix_cap_reports_the_failure_without_reverting(
     取り消しの判断は Pull Request の読み手が持つ。失敗として報告に書く。
     """
     dropped: list = []
-    monkeypatch.setattr(refactor, "_drop_items",
+    monkeypatch.setattr(refactor, "drop_items",
                         lambda *a, **k: dropped.append(a) or {})
     state_path = _state(
         tmp_path, workflow_step=True, max_fix_rounds=2,

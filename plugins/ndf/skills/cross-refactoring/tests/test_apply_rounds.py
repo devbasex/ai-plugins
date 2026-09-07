@@ -94,7 +94,7 @@ def test_no_adopted_item_makes_no_apply_round(refactor):
 
 # ---------- 状態への記録 ----------
 
-def _round(items=()):
+def round_of(items=()):
     return {
         "round": 1, "impl": "codex", "reviewers": ["agy", "kiro"],
         "impl_model": {"requested": None, "observed": None},
@@ -107,10 +107,10 @@ def _round(items=()):
 
 
 def _run_merge_proposals(refactor, tmp_path, env_tmp_dir, monkeypatch, proposals):
-    state_path = make_state(tmp_path, rounds=[_round()], phase="propose",
+    state_path = make_state(tmp_path, rounds=[round_of()], phase="propose",
                             outer_round=1)
     env_tmp_dir(state_path)
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **k: "base0")
+    monkeypatch.setattr(refactor, "git_out", lambda work, args, **k: "base0")
     write_result(state_path, "codex-propose-rf130-r1", {"items": proposals})
     for runtime in ("agy", "kiro"):
         write_result(state_path, f"{runtime}-propose-rf130-r1", {"items": []})
@@ -199,7 +199,7 @@ def _two_groups():
 def _open_next(refactor, tmp_path, env_tmp_dir, monkeypatch, entry, head="HEAD_NOW"):
     state_path = make_state(tmp_path, rounds=[entry], phase="apply", outer_round=1)
     env_tmp_dir(state_path)
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **k: head)
+    monkeypatch.setattr(refactor, "git_out", lambda work, args, **k: head)
     refactor.cmd_next_apply_round(type("A", (), {"id": 130, "round": 1})())
     return state_path
 
@@ -254,7 +254,7 @@ def test_next_apply_round_exits_1_when_no_group_is_left(
         tmp_path, rounds=[_round_with_groups(groups, apply_round=2)],
         phase="apply", outer_round=1)
     env_tmp_dir(state_path)
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **k: "HEAD")
+    monkeypatch.setattr(refactor, "git_out", lambda work, args, **k: "HEAD")
     with pytest.raises(SystemExit) as e:
         cmd_apply.cmd_next_apply_round(type("A", (), {"id": 130, "round": 1})())
     assert e.value.code == 1

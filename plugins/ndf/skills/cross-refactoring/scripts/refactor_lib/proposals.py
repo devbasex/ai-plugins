@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any, Callable, Iterable, Optional
 
 from . import info
-from .gitfacts import _safe_int
+from .gitfacts import safe_int
 from .rounds import TEST, item_key
 from .vocabulary import (
     DEFAULT_SEVERITY_THRESHOLD,
@@ -53,7 +53,7 @@ def _normalize_proposal(raw: dict[str, Any], source: str) -> Optional[dict[str, 
     if degraded:
         severity = "unknown"
 
-    estimated = _safe_int(raw.get("estimated_diff_lines"))
+    estimated = safe_int(raw.get("estimated_diff_lines"))
 
     return {
         "path": path,

@@ -98,7 +98,7 @@ def no_git(refactor, monkeypatch):
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
     monkeypatch.setattr(refactor.subprocess, "run", fake_run)
-    monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: calls.append(list(cmd)) or "")
+    monkeypatch.setattr(refactor, "sh", lambda cmd, **k: calls.append(list(cmd)) or "")
     return calls
 
 @pytest.fixture

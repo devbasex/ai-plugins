@@ -120,7 +120,7 @@ def test_failure_after_sync_discards_produced_changes(refactor, gitfacts, tmp_pa
     work = _make_work(tmp_path)
     state = read_state(_state_with_sync(
         tmp_path, work, command="printf 'x = 2\\n' > generated/out.py"))
-    monkeypatch.setattr(refactor, "_sh",
+    monkeypatch.setattr(refactor, "sh",
                         lambda *a, **k: refactor.die("commit に失敗しました"))
 
     with pytest.raises(SystemExit):
@@ -153,7 +153,7 @@ def test_leftover_changes_are_discarded_before_merge(gitfacts, tmp_path):
     (work / "src.py").write_text("直しかけ\n", encoding="utf-8")
     state = read_state(_state_with_sync(tmp_path, work))
 
-    gitfacts._discard_impl_leftovers(state, str(work))
+    gitfacts.discard_impl_leftovers(state, str(work))
 
     assert _git("status", "--porcelain", cwd=work).stdout == ""
     assert (work / "src.py").read_text(encoding="utf-8") == "x = 1\n"
@@ -174,7 +174,7 @@ def test_discard_keeps_control_directory(gitfacts, tmp_path):
         tmp_dir=str(control),
     ))
 
-    gitfacts._discard_impl_leftovers(state, str(work))
+    gitfacts.discard_impl_leftovers(state, str(work))
 
     assert (control / "keep.json").exists()
     assert _git("status", "--porcelain", cwd=work).stdout == ""
@@ -213,7 +213,7 @@ def test_merge_fix_continues_when_impl_left_changes(
                 "status": "applied", "commits": []}],
     )
     env_tmp_dir(state_path)
-    monkeypatch.setattr(gitfacts, "_push_head", lambda state: None)
+    monkeypatch.setattr(gitfacts, "push_head", lambda state: None)
     write_result(state_path, "codex-fix-r1",
                  {"resolved_thread_ids": [], "unresolved": [], "commits": []})
     (work / "src.py").write_text("直しかけ\n", encoding="utf-8")
@@ -258,7 +258,7 @@ def test_merge_fix_advances_when_the_range_is_undeterminable(
                 "status": "applied", "commits": []}],
     )
     env_tmp_dir(state_path)
-    monkeypatch.setattr(gitfacts, "_push_head", lambda state: None)
+    monkeypatch.setattr(gitfacts, "push_head", lambda state: None)
     write_result(state_path, "codex-fix-r1",
                  {"resolved_thread_ids": [], "unresolved": [], "commits": []})
 

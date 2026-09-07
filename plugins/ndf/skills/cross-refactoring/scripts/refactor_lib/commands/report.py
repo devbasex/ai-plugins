@@ -14,7 +14,7 @@ import models as models_lib
 import statefile
 
 from .. import info
-from ..gitfacts import _safe_int
+from ..gitfacts import safe_int
 from ..outbound import plan_reference
 from ..paths import _load
 from ..proposals import duplicate_rate
@@ -80,7 +80,7 @@ def _advance_test_rounds(
     歯止めで止まったのかを報告で読み分けるため）。
     """
     done = len(_of_kind(state["rounds"], TEST))
-    limit = _safe_int(state.get("max_test_rounds"), DEFAULT_MAX_TEST_ROUNDS)
+    limit = safe_int(state.get("max_test_rounds"), DEFAULT_MAX_TEST_ROUNDS)
     if last.get("adopted") == 0:
         reason = "no_more_test_proposals"
         note = "足すべきテストの提案が出なくなりました"
