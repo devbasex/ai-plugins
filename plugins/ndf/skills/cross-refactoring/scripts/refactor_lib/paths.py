@@ -15,7 +15,7 @@ import statefile
 from . import die
 
 
-def _default_worktree_base() -> pathlib.Path:
+def default_worktree_base() -> pathlib.Path:
     """作業ディレクトリの親。解決順は cross-review と揃える。
 
     1. 環境変数 `NDF_WORKTREE_BASE`（明示指定）
@@ -28,11 +28,11 @@ def _default_worktree_base() -> pathlib.Path:
     return pathlib.Path(tempfile.gettempdir()) / "ndf-worktrees"
 
 
-def _repo_slug(repo: str) -> str:
+def repo_slug(repo: str) -> str:
     return repo.replace("/", "--")
 
 
-def _tmp_dir_for(work: pathlib.Path) -> pathlib.Path:
+def tmp_dir_for(work: pathlib.Path) -> pathlib.Path:
     """一時ディレクトリ。解決順は cross-review と同じ規約に揃える。
 
     1. 環境変数 `CROSS_REFACTORING_TMP_DIR`（明示指定）
@@ -42,7 +42,7 @@ def _tmp_dir_for(work: pathlib.Path) -> pathlib.Path:
     return pathlib.Path(env).resolve() if env else work / ".cross_refactoring"
 
 
-def _state_path(tmp_dir: pathlib.Path, state_id: int) -> pathlib.Path:
+def state_path(tmp_dir: pathlib.Path, state_id: int) -> pathlib.Path:
     return tmp_dir / f"cross-refactoring-rf{state_id}-state.json"
 
 
@@ -70,7 +70,7 @@ def _find_state(state_id: int) -> pathlib.Path:
     raise SystemExit(1)  # die が抜けることはないが型のために置く
 
 
-def _load(state_id: int) -> tuple[pathlib.Path, dict[str, Any]]:
+def load_state(state_id: int) -> tuple[pathlib.Path, dict[str, Any]]:
     path = _find_state(state_id)
     return path, statefile.load(path)
 
@@ -82,7 +82,7 @@ def sh(cmd: list[str], cwd: Optional[str] = None, check: bool = True) -> str:
     return r.stdout.strip()
 
 
-def _result_path(state: dict[str, Any], runtime: str, stem: str) -> pathlib.Path:
+def result_path(state: dict[str, Any], runtime: str, stem: str) -> pathlib.Path:
     """CLI が結果を書き出すパス。
 
     agy だけは現在地を作業領域にしないため、起動時に一時ディレクトリを作業領域へ

@@ -35,7 +35,7 @@ from ..gitfacts import (
     revert_unverified_range,
 )
 from ..outbound import dropped_line, item_lines, plan_line
-from ..paths import _load, _result_path, stem_for
+from ..paths import load_state, result_path, stem_for
 from ..rounds import deferred_record
 from ..verify import verify_commit_granularity, verify_fix_commit
 from ..vocabulary import DEFAULT_TEST_TIMEOUT
@@ -56,7 +56,7 @@ def cmd_verify_round(args: argparse.Namespace) -> None:
     **継続的統合では代替しない。** 手元の未 push のコミットではなく push 済みの
     先端に対する結果しか読めないためである。代替できるのは Step 7 だけである。
     """
-    path, state = _load(args.id)
+    path, state = load_state(args.id)
     entry = round_of(state, args.round)
     group = current_group(entry)
     applied = list((entry.get("apply") or {}).get("applied") or [])
@@ -118,7 +118,7 @@ def cmd_should_abandon(args: argparse.Namespace) -> None:
     `--max-fix-rounds` は**1 つの適用ラウンドあたり**の上限である。数え直しは
     `next-apply-round` が群を開くときに行う。
     """
-    _, state = _load(args.id)
+    _, state = load_state(args.id)
     entry = round_of(state, args.round)
     limit = state["max_fix_rounds"]
     if entry["fix_rounds"] >= limit:
@@ -135,7 +135,7 @@ def cmd_abandon_items(args: argparse.Namespace) -> None:
     どの項目が落としたのかを特定しても分離して取り消せない。**他の群には及ばない**
     （受け入れ条件 A4）。既に検証を通った群は Pull Request に残る。
     """
-    path, state = _load(args.id)
+    path, state = load_state(args.id)
     entry = round_of(state, args.round)
     group = current_group(entry)
     if not args.dry_run:
@@ -359,12 +359,12 @@ def _revert_invalid_fix_round(
 
 def cmd_merge_fix(args: argparse.Namespace) -> None:
     """Step 6 — 修正結果を取り込み、修正ラウンドを 1 つ進める。"""
-    path, state = _load(args.id)
+    path, state = load_state(args.id)
     entry = round_of(state, args.round)
     discard_impl_leftovers(state, state["worktrees"]["work"])
     flush_pending_push(path, state, entry)
     impl = entry["impl"]
-    result = _result_path(state, impl, stem_for(impl, "fix", state["id"], args.round))
+    result = result_path(state, impl, stem_for(impl, "fix", state["id"], args.round))
     payload = read_result(result, impl)
 
     work = state["worktrees"]["work"]

@@ -36,7 +36,7 @@ from ..gitfacts import (
     commits_in_range,
     revert_unverified_range,
 )
-from ..paths import _load, _result_path, stem_for
+from ..paths import load_state, result_path, stem_for
 from ..verify import verify_final_fix_commit
 from ..vocabulary import DEFAULT_TEST_TIMEOUT
 from .converge import _unassigned_fix_commits
@@ -51,7 +51,7 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
     **Step 7 は push 済みの地点である。** 上限に達しても取り消さない。取り消しの
     判断は Pull Request の読み手が持つため、失敗として報告に書く。
     """
-    path, state = _load(args.id)
+    path, state = load_state(args.id)
     gate = state.setdefault("final_gate", {"fix_rounds": 0, "checks": []})
 
     if not state.get("workflow_step"):
@@ -148,7 +148,7 @@ def cmd_merge_final_fix(args: argparse.Namespace) -> None:
     終了コード: 0 = 取り込んだ / 2 = 取り込めなかった（範囲を確定できない）。
     合否そのものは判定せず、**次の `final-gate` が採った側で 1 度だけ見る**。
     """
-    path, state = _load(args.id)
+    path, state = load_state(args.id)
     gate = state.setdefault("final_gate", {"fix_rounds": 0, "checks": []})
     impl = str(gate.get("impl") or "")
     if not impl:
@@ -162,7 +162,7 @@ def cmd_merge_final_fix(args: argparse.Namespace) -> None:
     discard_impl_leftovers(state, work)
     flush_pending_push(path, state, gate)
 
-    result = _result_path(state, impl, stem_for(impl, "final-fix", state["id"]))
+    result = result_path(state, impl, stem_for(impl, "final-fix", state["id"]))
     payload = read_result(result, impl)
     head_now = git_out(work, ["rev-parse", "HEAD"]) or ""
     ordered_range = commits_in_range(work, gate.get("fix_base_sha"), head_now)

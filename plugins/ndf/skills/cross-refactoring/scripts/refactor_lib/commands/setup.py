@@ -22,12 +22,12 @@ import statefile
 from .. import ABORT, die, info
 from ..gitfacts import run_with_timeout
 from ..paths import (
-    _default_worktree_base,
-    _load,
-    _repo_slug,
+    default_worktree_base,
+    load_state,
+    repo_slug,
     sh,
-    _state_path,
-    _tmp_dir_for,
+    state_path,
+    tmp_dir_for,
 )
 from ..plan import PLAN_COMMENT, PLAN_FILE, PLAN_NONE, normalize_plan_file
 from ..rounds import STRUCTURE, TEST, entry_kind, round_kind
@@ -200,7 +200,7 @@ def cmd_init(args: argparse.Namespace) -> None:
 
     root = (
         pathlib.Path(args.worktree_root).resolve() if args.worktree_root
-        else _default_worktree_base() / _repo_slug(repo) / f"rf{args.pr}"
+        else default_worktree_base() / repo_slug(repo) / f"rf{args.pr}"
     )
     work = root / "work"
     _ensure_work_worktree(work, head_branch)
@@ -212,9 +212,9 @@ def cmd_init(args: argparse.Namespace) -> None:
     # どうかを実物で確かめるためである。
     require_scope_covers_tests(args.scope, args.baseline_test, str(work))
 
-    tmp_dir = _tmp_dir_for(work)
+    tmp_dir = tmp_dir_for(work)
     tmp_dir.mkdir(parents=True, exist_ok=True)
-    state_file = _state_path(tmp_dir, args.pr)
+    state_file = state_path(tmp_dir, args.pr)
 
     if state_file.exists():
         state = statefile.load(state_file)
@@ -422,7 +422,7 @@ def cmd_start_round(args: argparse.Namespace) -> None:
     **再開しても担当は変わらない。** 同じラウンド番号を開き直したときは記録済みの
     割り当てをそのまま返す。
     """
-    path, state = _load(args.id)
+    path, state = load_state(args.id)
     if state.get("final"):
         info(f"ラウンドの繰り返しは終了しています（{state['final']}）")
         sys.exit(1)

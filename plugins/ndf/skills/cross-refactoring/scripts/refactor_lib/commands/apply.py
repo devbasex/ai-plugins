@@ -32,7 +32,7 @@ from ..gitfacts import (
     collect_commit_facts,
     commits_in_range,
 )
-from ..paths import _load, _result_path, stem_for
+from ..paths import load_state, result_path, stem_for
 from ..proposals import assign_apply_rounds, merge_proposals, merge_test_proposals
 from ..rounds import (
     TEST,
@@ -56,7 +56,7 @@ def _load_runtime_proposals(
     """
     proposals: dict[str, list[dict[str, Any]]] = {}
     for runtime in state["runtimes"]:
-        result = _result_path(
+        result = result_path(
             state, runtime,
             stem_for(runtime, "propose", state["id"], entry["round"]),
         )
@@ -178,7 +178,7 @@ def cmd_merge_proposals(args: argparse.Namespace) -> None:
     **同じラウンドで叩き直しても二重に項目を作らない。** 進行を止めても再開できる
     ことが前提なので、統合済みなら前回と同じ結果をそのまま返す。
     """
-    path, state = _load(args.id)
+    path, state = load_state(args.id)
     entry = current_round(state)
 
     kind = entry_kind(entry)
@@ -289,7 +289,7 @@ def cmd_next_apply_round(args: argparse.Namespace) -> None:
     **修正ラウンドの数え直しも群ごとである。** `--max-fix-rounds` は 1 つの適用
     ラウンドあたりの上限だからである。
     """
-    path, state = _load(args.id)
+    path, state = load_state(args.id)
     entry = round_of(state, args.round)
     groups = apply_groups(entry)
 
@@ -349,7 +349,7 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
     **群の中は 1 コミットなので、1 件の失敗が群の全件を取り消す**（決定 2）。
     他の群には及ばない（受け入れ条件 A4）。
     """
-    path, state = _load(args.id)
+    path, state = load_state(args.id)
     entry = round_of(state, args.round)
     group = current_group(entry)
     if not args.dry_run:
@@ -440,7 +440,7 @@ def _load_apply_context(
     args: argparse.Namespace,
 ) -> tuple[dict[str, Any], pathlib.Path, str, list[str], set[str]]:
     impl = group.get("impl") or entry["impl"]
-    result = _result_path(state, impl, stem_for(impl, "apply", state["id"], args.round))
+    result = result_path(state, impl, stem_for(impl, "apply", state["id"], args.round))
     payload = read_result(result, impl)
 
     record_observed_model(entry, "impl", impl, state, "apply", args.round)
