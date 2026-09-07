@@ -1673,8 +1673,8 @@ def test_merge_apply_records_the_pending_judgements(
     git_facts({"shared": {
         **fact(sha="shared"),
         "test_changes": {"tests/test_a.py": (
-            ["    assert f(1) == (\n", "        3,\n"],
-            ["    assert f(1) == (\n", "        4,\n"])},
+            ["    assert refactor.f(1) == 3\n"],
+            ["    assert gitfacts.f(1) == 3\n"])},
     }}, in_range=["shared"])
     write_result(state_path, "codex-apply-r1",
                  {"items": [{"item_id": "R1-001", "commits": [{"sha": "shared"}]}]})

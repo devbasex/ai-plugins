@@ -308,55 +308,18 @@ def unassigned_fix_commits(
 # **「テストを足したか」だけでは、期待値の変更を止められない**（#443）。同じ入力に対する
 # 期待出力が変わっていれば、それは振る舞いの変更である。
 #
-# 判定は 3 段で行う。ここが担うのは段 1（機械）で、判定できないものは段 2（AI）へ渡す。
-# **判定できないものを通ったものとして扱わない。**
-
-# 取り込み元の接頭辞。構造が変われば変わるため、比べる前に伏せる。
-_PREFIX = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*\.(?=[A-Za-z_])")
-
-# 文字列。**この中のドットは取り込み元ではない。** 伏せると `"file.txt"` と
-# `"other.txt"` が同じに見え、期待値の変更を見落とす。
-_STRING = re.compile(r"""(?:[rbuf]{0,2}"(?:\\.|[^"\\])*"|[rbuf]{0,2}'(?:\\.|[^'\\])*')""")
-
-# 期待値が `assert` の行の外にある形。集合の一致では判定できない。
-_OPEN_CALL = re.compile(r"[\(\[\{]\s*$")
-_PARAMETRIZE = re.compile(r"@pytest\.mark\.parametrize|@parameterized")
-
-
-def _mask_prefix(line: str) -> str:
-    """取り込み元の接頭辞だけを伏せる。**文字列の中は触らない。**"""
-    out, last = [], 0
-    for match in _STRING.finditer(line):
-        out.append(_PREFIX.sub("MOD.", line[last:match.start()]))
-        out.append(match.group(0))
-        last = match.end()
-    out.append(_PREFIX.sub("MOD.", line[last:]))
-    return "".join(out)
-
-
-def _assert_lines(lines: Iterable[str]) -> "Counter[str]":
-    """`assert` の行を、接頭辞を伏せて**件数ごと**数える。
-
-    **集合にしない。** 同じ `assert` が複数あるとき、その 1 つが変わったことを
-    見落とす（`test-changes.md` が「重複で対応が取れない」と書いているのと同じ形）。
-    """
-    return Counter(
-        _mask_prefix(line.strip())
-        for line in lines
-        if line.strip().startswith("assert ")
-    )
-
-
-def _has_undecidable_form(lines: Iterable[str]) -> bool:
-    """期待値が `assert` の行の外にある形を含むか。"""
-    rows = list(lines)
-    if any(_PARAMETRIZE.search(line) for line in rows):
-        return True
-    return any(
-        line.strip().startswith("assert ") and _OPEN_CALL.search(line.rstrip("\n"))
-        for line in rows
-    )
-
+# 判定は 3 段で行う。ここが担うのは段 1（機械）で、決まらないものは段 2（AI）へ渡す。
+#
+# **機械が「変わっていない」と言える範囲を最小にする。** 差分の意味を機械で読もうとすると
+# 穴が開く。実測で 5 回続けて別の抜けが見つかった。
+#
+# | 抜けた形 | なぜ抜けたか |
+# | --- | --- |
+# | `Status.SUCCESS.value` → `Status.FAILURE.value` | 接頭辞を伏せると同じ行に見える |
+# | `EXPECTED = 4` を足して既存を残す | 外側の行が減らない |
+# | 値を定数へ抽出する | `assert` の行から値が消える |
+#
+# **決められないものを決めない。** 段 2 の AI が読む。
 
 # 値そのもの。数値・文字列・真偽・None を指す。
 _LITERAL = re.compile(
@@ -365,87 +328,31 @@ _LITERAL = re.compile(
 )
 
 
-def _outside_assertions(lines: Iterable[str]) -> list[str]:
-    """`assert` 以外の行を、空行を除いて返す。
-
-    **期待値は `assert` の行の外にも置ける。** 定数やフィクスチャが変われば、
-    `assert` の行が同じでも期待出力は変わる。
-    """
-    return [
-        line.rstrip("\n") for line in lines
-        if line.strip() and not line.strip().startswith("assert ")
-    ]
-
-
-def _values(lines: "Counter[str]") -> "Counter[str]":
-    """`assert` の行から、値だけを件数ごと数える。
-
-    **呼び方の違いを落とすため、値だけを残す。** 値が同じなら、変わったのは
-    取り込み方か名前であり、期待出力が変わったとは決まらない。
-    """
+def _values(lines: Iterable[str]) -> "Counter[str]":
+    """差分の中の値を、件数ごと数える。**`assert` の行に限らない。**"""
     found: Counter[str] = Counter()
-    for line, count in lines.items():
+    for line in lines:
         for literal in _LITERAL.findall(line):
-            found[literal] += count
+            found[literal] += 1
     return found
 
 
 def assertion_change(before: Iterable[str], after: Iterable[str]) -> str:
     """テストの変更の種類を返す。
 
-    | 戻り値 | 意味 |
-    | --- | --- |
-    | `unchanged` | 期待値は変わっていない（読み込みの経路だけが変わった） |
-    | `changed` | 同じ入力に対する期待出力が変わった |
-    | `undecidable` | **機械では判定できない。** 段 2（AI エージェント）へ渡す |
+    | 戻り値 | 意味 | 判定 |
+    | --- | --- | --- |
+    | `unchanged` | 変わっていない | 前後が同一 |
+    | `changed` | 期待出力が変わった | **値が失われた** |
+    | `undecidable` | **機械では決まらない** | それ以外すべて |
 
-    **足しただけは `unchanged` とする。** 既にある期待値が変わっていなければ、
-    振る舞いの期待は変わっていない。
+    **`unchanged` は「同じ」のときだけ返す。** 経路だけの変更も、行の並べ替えも、
+    テストの追加も、機械では期待出力への影響を否定できない。段 2 の AI が読む。
     """
     rows_before, rows_after = list(before), list(after)
-    if _has_undecidable_form(rows_before) or _has_undecidable_form(rows_after):
-        return "undecidable"
-
-    kept_before, kept_after = _assert_lines(rows_before), _assert_lines(rows_after)
-    if not kept_before and not kept_after:
-        # **`assert` の行が無い差分は判定できない。** フィクスチャや定数の変更は
-        # 期待値を動かしうるが、`assert` の行には現れない。
-        return "undecidable"
-
-    # **`assert` の外が失われていれば、行が同じでも判定できない。** 同じファイルの
-    # `EXPECTED = 3` を `4` にすると、`assert f(1) == EXPECTED` は変わらないまま
-    # 期待出力が変わる。
-    #
-    # **増えただけなら倒さない。** テスト関数を足せば外側の行は必ず増える。増加まで
-    # 判定できないものにすると、後続の判定が働かなくなる。
-    outside_before = Counter(_outside_assertions(rows_before))
-    outside_after = Counter(_outside_assertions(rows_after))
-    if outside_before - outside_after:
-        return "undecidable"
-
-    if kept_before == kept_after:
+    if rows_before == rows_after:
         return "unchanged"
-    # 元の行が件数ごと残っていれば、足しただけである。**多重集合で見る。**
-    if not (kept_before - kept_after):
-        return "unchanged"
-
-    # **行が違うことは、期待出力が変わったことを意味しない。** 取り込み方を変えれば
-    # `oldmod.f(1)` は `f(1)` になり、局所の名前を変えれば `build(order)` は
-    # `build(o)` になる。どちらも期待出力は変わっていない。
-    #
-    # **機械で落とすのは、元の値が失われたときに限る。** 値が残っていれば、変わったのは
-    # 呼び方か、足した分である。増えた値だけを見て落とさない。
-    #
-    # **`assert` の外へ移った値は、失われたと数えない。** 値を定数へ抽出すると
-    # `assert` の行から値が消えるが、期待出力は変わっていない。
-    lost = _values(kept_before) - _values(kept_after)
-    if lost:
-        moved = Counter()
-        for line in _outside_assertions(rows_after):
-            for literal in _LITERAL.findall(line):
-                moved[literal] += 1
-        if not (lost - moved):
-            return "undecidable"
+    if _values(rows_before) - _values(rows_after):
         return "changed"
     return "undecidable"
 
@@ -556,4 +463,29 @@ def all_pending_judgements(entry: dict[str, Any]) -> list[str]:
     if not isinstance(records, dict):
         return []
     return sorted({path for paths in records.values() for path in paths})
+
+
+def apply_judgements_to_group(
+    entry: dict[str, Any], group: int, verdicts: Iterable[dict[str, Any]],
+) -> list[str]:
+    """判定の答えを、**それが見た群の保留にだけ**適用する（#443）。
+
+    段 2 へ渡すのはその群の差分であるため、答えも同じ群にしか効かない。
+    別の群で同じファイルが保留のまま残っていても、そちらは解かない。
+
+    レビューへ引き継ぐものを返す。
+    """
+    records = entry.get("pending_test_judgements")
+    if not isinstance(records, dict):
+        return []
+    answers = {
+        str(v.get("path")): str(v.get("verdict"))
+        for v in verdicts if isinstance(v, dict) and v.get("path")
+    }
+    remaining = sorted(
+        path for path in records.get(str(group), [])
+        if answers.get(path) != "unchanged"
+    )
+    record_pending_judgements(entry, group, remaining)
+    return remaining
 

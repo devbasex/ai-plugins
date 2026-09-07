@@ -15,44 +15,90 @@ import pytest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "scripts"))
 
 
-def test_the_same_assertions_are_seen_as_unchanged(verify) -> None:
-    """接頭辞だけが変わった `assert` は、変わっていないものとして扱う。"""
-    before = ["    assert refactor.build(x) == 3\n"]
-    after = ["    assert gitfacts.build(x) == 3\n"]
-    assert verify.assertion_change(before, after) == "unchanged"
+def test_an_identical_file_is_unchanged(verify) -> None:
+    """前後が同じなら、変わっていないものとして扱う。"""
+    rows = ["    assert build(x) == 3\n"]
+    assert verify.assertion_change(rows, list(rows)) == "unchanged"
 
 
-def test_a_changed_expectation_is_detected(verify) -> None:
-    """期待値が変わった `assert` を、変わったものとして扱う。"""
+def test_a_lost_value_is_changed(verify) -> None:
+    """値が失われた差分は、期待出力が変わったものとして扱う。"""
     before = ["    assert build(x) == 3\n"]
     after = ["    assert build(x) == 4\n"]
     assert verify.assertion_change(before, after) == "changed"
 
 
-def test_an_expectation_outside_the_assert_line_is_undecidable(verify) -> None:
-    """期待値が `assert` の行の外にあるときは、判定できないものとして扱う。
+def test_a_lost_string_is_changed(verify) -> None:
+    """文字列の期待値が失われた差分も、同じに扱う。"""
+    before = ['    assert path == "file.txt"\n']
+    after = ['    assert path == "other.txt"\n']
+    assert verify.assertion_change(before, after) == "changed"
 
-    **通ったものとして扱わない。** 集合の一致は振る舞い不変の証明にならない。
+
+def test_a_path_only_change_is_undecidable(verify) -> None:
+    """読み込みの経路だけが変わった差分も、機械では決めない。
+
+    **`unchanged` は「同じ」のときだけ返す。** 経路の変更が期待出力へ影響しないことを、
+    機械では確かめられない。段 2 の AI が読む。
     """
-    before = ["    assert price(order) == (\n", "        270,\n", "    )\n"]
-    after = ["    assert price(order) == (\n", "        300,\n", "    )\n"]
+    before = ["    assert refactor.build(x) == 3\n"]
+    after = ["    assert gitfacts.build(x) == 3\n"]
     assert verify.assertion_change(before, after) == "undecidable"
 
 
-def test_a_parametrised_value_is_undecidable(verify) -> None:
-    """パラメータ化の値が変わったときも、判定できないものとして扱う。"""
-    before = ['@pytest.mark.parametrize("n", [1, 2])\n', "def test_x(n):\n",
-              "    assert f(n) > 0\n"]
-    after = ['@pytest.mark.parametrize("n", [1, 3])\n', "def test_x(n):\n",
-             "    assert f(n) > 0\n"]
+def test_an_attribute_change_is_not_hidden(verify) -> None:
+    """属性の参照が変わった差分を、接頭辞として伏せないこと。
+
+    `Status.SUCCESS.value` → `Status.FAILURE.value` は期待出力が変わりうる。
+    """
+    before = ["    assert state == Status.SUCCESS.value\n"]
+    after = ["    assert state == Status.FAILURE.value\n"]
     assert verify.assertion_change(before, after) == "undecidable"
 
 
-def test_adding_a_test_is_not_a_change_of_expectation(verify) -> None:
-    """テストを足しただけのときは、変わっていないものとして扱う。"""
+def test_an_added_constant_is_undecidable(verify) -> None:
+    """既存を残したまま値を足した差分も、機械では決めない。
+
+    `EXPECTED = 4` を足すと、どちらが使われるかは行の並びでは決まらない。
+    """
+    before = ["EXPECTED = 3\n", "    assert f(1) == EXPECTED\n"]
+    after = ["EXPECTED = 3\n", "EXPECTED = 4\n", "    assert f(1) == EXPECTED\n"]
+    assert verify.assertion_change(before, after) == "undecidable"
+
+
+def test_a_changed_constant_is_changed(verify) -> None:
+    """`assert` の外の値が失われた差分は、機械で落とす。"""
+    before = ["EXPECTED = 3\n", "    assert f(1) == EXPECTED\n"]
+    after = ["EXPECTED = 4\n", "    assert f(1) == EXPECTED\n"]
+    assert verify.assertion_change(before, after) == "changed"
+
+
+def test_extracting_a_literal_keeps_the_value(verify) -> None:
+    """値を定数へ抽出しただけなら、値は失われない。"""
+    before = ["    assert f(1) == 3\n"]
+    after = ["EXPECTED = 3\n", "    assert f(1) == EXPECTED\n"]
+    assert verify.assertion_change(before, after) == "undecidable"
+
+
+def test_adding_a_test_is_undecidable(verify) -> None:
+    """テストを足した差分も、機械では決めない。"""
     before = ["    assert build(x) == 3\n"]
     after = ["    assert build(x) == 3\n", "    assert build(y) == 4\n"]
-    assert verify.assertion_change(before, after) == "unchanged"
+    assert verify.assertion_change(before, after) == "undecidable"
+
+
+def test_a_multiline_expectation_is_undecidable(verify) -> None:
+    """期待値が `assert` の行の外にある差分も、決めない。"""
+    before = ["    assert price(order) == (\n", "        270,\n", "    )\n"]
+    after = ["    assert price(order) == (\n", "        300,\n", "    )\n"]
+    assert verify.assertion_change(before, after) == "changed"
+
+
+def test_a_parametrised_value_is_changed(verify) -> None:
+    """パラメータ化の値が失われた差分は、機械で落とす。"""
+    before = ['@pytest.mark.parametrize("n", [1, 2])\n', "    assert f(n) > 0\n"]
+    after = ['@pytest.mark.parametrize("n", [1, 3])\n', "    assert f(n) > 0\n"]
+    assert verify.assertion_change(before, after) == "changed"
 
 
 # ---------- 検証の経路へ組み込む ----------
@@ -80,8 +126,8 @@ def test_undecidable_diffs_are_collected_for_the_next_stage(verify) -> None:
     **通ったものとして扱わない。** 戻り値に残ることで、呼ぶ側が段 2 を起動できる。
     """
     pending = verify.undecidable_test_changes(
-        {"tests/test_a.py": (["    assert f(1) == (\n", "        3,\n", "    )\n"],
-                             ["    assert f(1) == (\n", "        4,\n", "    )\n"]),
+        {"tests/test_a.py": (["    assert refactor.f(1) == 3\n"],
+                             ["    assert gitfacts.f(1) == 3\n"]),
          "tests/test_b.py": (["    assert g(1) == 3\n"], ["    assert g(1) == 3\n"])}
     )
     assert pending == ["tests/test_a.py"]
@@ -151,36 +197,6 @@ def test_the_judging_prompt_asks_for_three_verdicts() -> None:
 
 # ---------- 判定の穴（レビューの指摘） ----------
 
-def test_a_duplicated_assertion_that_changes_is_detected(verify) -> None:
-    """同じ `assert` が複数あるとき、その 1 つが変わったことを見落とさない。"""
-    before = ["    assert f(1) == 3\n", "    assert f(1) == 3\n"]
-    after = ["    assert f(1) == 3\n", "    assert f(1) == 4\n"]
-    assert verify.assertion_change(before, after) == "changed"
-
-
-def test_a_removed_duplicate_is_detected(verify) -> None:
-    """同じ `assert` の一部が消えたことを見落とさない。"""
-    before = ["    assert f(1) == 3\n", "    assert f(1) == 3\n"]
-    after = ["    assert f(1) == 3\n"]
-    assert verify.assertion_change(before, after) == "changed"
-
-
-def test_a_diff_without_assertions_is_undecidable(verify) -> None:
-    """`assert` を含まない差分は、判定できないものとして扱う。
-
-    フィクスチャや定数の変更は期待値を動かしうるが、`assert` の行には現れない。
-    """
-    before = ["EXPECTED = 3\n"]
-    after = ["EXPECTED = 4\n"]
-    assert verify.assertion_change(before, after) == "undecidable"
-
-
-def test_a_dot_inside_a_string_is_kept(verify) -> None:
-    """文字列の中のドットを、取り込み元の接頭辞として伏せない。"""
-    before = ['    assert path == "file.txt"\n']
-    after = ['    assert path == "other.txt"\n']
-    assert verify.assertion_change(before, after) == "changed"
-
 
 # ---------- 検証への配線（レビューの指摘） ----------
 
@@ -218,44 +234,13 @@ def test_the_round_verification_reports_undecidable_diffs(verify) -> None:
     **落とさないが、通ったものとしても扱わない。** 進行側がこれを段 2 へ渡す。
     """
     facts = [{
-        "test_changes": {"tests/test_a.py": (["    assert f(1) == (\n", "        3,\n"],
-                                             ["    assert f(1) == (\n", "        4,\n"])},
+        "test_changes": {"tests/test_a.py": (["    assert refactor.f(1) == 3\n"],
+                                             ["    assert gitfacts.f(1) == 3\n"])},
     }]
     assert verify.pending_test_judgements(facts) == ["tests/test_a.py"]
 
 
 # ---------- 判定を安全側へ倒す（レビューの指摘） ----------
-
-def test_a_direct_import_is_undecidable(verify) -> None:
-    """取り込み方を変えて呼び出しの形が変わった差分を、落とさないこと。
-
-    **`assert` 行の不一致だけでは、期待出力が変わったとは決まらない。**
-    `oldmod.f(1)` を `f(1)` へ変えただけでも行は一致しなくなる。
-    """
-    before = ["    assert oldmod.f(1) == 3\n"]
-    after = ["    assert f(1) == 3\n"]
-    assert verify.assertion_change(before, after) == "undecidable"
-
-
-def test_a_renamed_local_is_undecidable(verify) -> None:
-    """局所の名前を変えた差分も、落とさずに段 2 へ回すこと。"""
-    before = ["    assert build(order) == 3\n"]
-    after = ["    assert build(o) == 3\n"]
-    assert verify.assertion_change(before, after) == "undecidable"
-
-
-def test_a_changed_literal_is_still_detected(verify) -> None:
-    """**値だけが変わった差分は、機械で落とす。** 安全側へ倒しすぎない。"""
-    before = ["    assert build(order) == 3\n"]
-    after = ["    assert build(order) == 4\n"]
-    assert verify.assertion_change(before, after) == "changed"
-
-
-def test_a_changed_string_is_still_detected(verify) -> None:
-    """文字列の期待値が変わった差分も、機械で落とすこと。"""
-    before = ['    assert path == "file.txt"\n']
-    after = ['    assert path == "other.txt"\n']
-    assert verify.assertion_change(before, after) == "changed"
 
 
 # ---------- 判定結果の取り込み（レビューの指摘） ----------
@@ -329,36 +314,6 @@ def test_the_merge_command_clears_or_fails(
 
 
 # ---------- 判定の穴（ラウンド 3 の指摘） ----------
-
-def test_a_changed_constant_outside_the_assert_is_undecidable(verify) -> None:
-    """`assert` の行が同じでも、参照する定数が変われば判定できないものとする。"""
-    before = ["EXPECTED = 3\n", "    assert f(1) == EXPECTED\n"]
-    after = ["EXPECTED = 4\n", "    assert f(1) == EXPECTED\n"]
-    assert verify.assertion_change(before, after) == "undecidable"
-
-
-def test_extracting_a_literal_into_a_constant_is_undecidable(verify) -> None:
-    """値を定数へ抽出しただけの差分を、落とさないこと。"""
-    before = ["    assert f(1) == 3\n"]
-    after = ["EXPECTED = 3\n", "    assert f(1) == EXPECTED\n"]
-    assert verify.assertion_change(before, after) == "undecidable"
-
-
-def test_adding_an_assertion_while_changing_the_call_is_undecidable(verify) -> None:
-    """呼び方の変更と新しい `assert` の追加が同時でも、落とさないこと。
-
-    **元の値が残っていれば `changed` と決められない。**
-    """
-    before = ["    assert oldmod.f(1) == 10\n"]
-    after = ["    assert f(1) == 10\n", "    assert g(2) == 20\n"]
-    assert verify.assertion_change(before, after) == "undecidable"
-
-
-def test_a_lost_value_is_still_detected(verify) -> None:
-    """元の値が失われた差分は、機械で落とすこと。"""
-    before = ["    assert f(1) == 10\n"]
-    after = ["    assert f(1) == 20\n"]
-    assert verify.assertion_change(before, after) == "changed"
 
 
 # ---------- 保留の持ち方（ラウンド 3 の指摘） ----------
@@ -469,19 +424,14 @@ def test_dropping_one_group_keeps_the_other_pending(
     assert entry.get("pending_test_judgements") == {"1": ["tests/test_a.py"]}
 
 
-def test_adding_a_test_function_is_still_unchanged(verify) -> None:
-    """テスト関数を足しただけの差分を、判定できないものへ倒さないこと。
+def test_a_verdict_only_clears_the_group_it_covered(verify) -> None:
+    """判定は、それが実際に見た群の保留だけを解くこと。
 
-    **外側の行が増えただけなら、既存の期待値は変わっていない。**
+    **群 1 の `undecidable` を、群 2 の判定で消さない。** 段 2 へ渡すのは
+    その群の差分だけである。
     """
-    before = ["def test_a():\n", "    assert f(1) == 3\n"]
-    after = ["def test_a():\n", "    assert f(1) == 3\n",
-             "def test_b():\n", "    assert g(2) == 4\n"]
-    assert verify.assertion_change(before, after) == "unchanged"
-
-
-def test_a_removed_helper_line_is_undecidable(verify) -> None:
-    """外側の行が失われた差分は、判定できないものとして扱うこと。"""
-    before = ["EXPECTED = 3\n", "    assert f(1) == EXPECTED\n"]
-    after = ["    assert f(1) == EXPECTED\n"]
-    assert verify.assertion_change(before, after) == "undecidable"
+    entry = {"pending_test_judgements": {"1": ["tests/test_a.py"],
+                                         "2": ["tests/test_a.py"]}}
+    verify.apply_judgements_to_group(
+        entry, 2, [{"path": "tests/test_a.py", "verdict": "unchanged"}])
+    assert entry["pending_test_judgements"] == {"1": ["tests/test_a.py"]}

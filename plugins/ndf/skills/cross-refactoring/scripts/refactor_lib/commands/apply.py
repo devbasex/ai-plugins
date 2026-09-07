@@ -46,7 +46,7 @@ from ..rounds import (
     phase_after_group,
 )
 from ..verify import (
-    all_pending_judgements,
+    apply_judgements_to_group,
     merge_test_judgements,
     pending_test_judgements,
     record_pending_judgements,
@@ -808,7 +808,11 @@ def cmd_merge_test_judgements(args: argparse.Namespace) -> None:
     """
     path, state = load_state(args.id)
     entry = round_of(state, args.round)
-    pending = all_pending_judgements(entry)
+    # **判定の対象はこの群の保留である。** 全ての群をまとめて解かない。
+    records = entry.get("pending_test_judgements")
+    group_of_round = (current_group(entry) or {}).get("apply_round") or 1
+    pending = list((records or {}).get(str(group_of_round), [])) \
+        if isinstance(records, dict) else []
     if not pending:
         info("判定を待っているテストはありません")
         return
@@ -846,22 +850,15 @@ def cmd_merge_test_judgements(args: argparse.Namespace) -> None:
         # **終了コードは 2 にする。** 進行側は「取り消した」と読んで次の群へ進む。
         sys.exit(2)
 
-    records = entry.get("pending_test_judgements")
-    if isinstance(records, dict):
-        remaining = set(outcome["pending"])
-        entry["pending_test_judgements"] = {
-            group: sorted(set(paths) & remaining)
-            for group, paths in records.items()
-            if set(paths) & remaining
-        }
-        if not entry["pending_test_judgements"]:
-            entry.pop("pending_test_judgements", None)
-    if outcome["pending"]:
+    # **解くのは、判定が実際に見た群の保留だけである。** 段 2 へ渡すのはその群の
+    # 差分であるため、別の群で同じファイルが残っていてもそちらは解かない。
+    group_no = (current_group(entry) or {}).get("apply_round") or 1
+    remaining = apply_judgements_to_group(entry, group_no, verdicts)
+    if remaining:
         info(
-            f"{len(outcome['pending'])} 件はレビューへ引き継ぎます: "
-            + ", ".join(outcome["pending"])
+            f"{len(remaining)} 件はレビューへ引き継ぎます: " + ", ".join(remaining)
         )
     else:
-        info("テストの差分は、期待する振る舞いを変えていません")
+        info("この適用群のテストの差分は、期待する振る舞いを変えていません")
     statefile.save(path, state)
 

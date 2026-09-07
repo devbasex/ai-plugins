@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import hashlib
 import pathlib
 import sys
