@@ -4,7 +4,7 @@
 # Usage: launch-cli.sh <runtime> <phase> <ID> [ROUND]
 #
 #   runtime  claude | codex | agy | kiro
-#   phase    propose | propose-tests | apply | review | fix | final-fix
+#   phase    propose | propose-tests | apply | fix | final-fix
 #   ID       状態ファイルの鍵（最初に初期化した Pull Request 番号）
 #   ROUND    propose と final-fix 以外で必須
 #
@@ -67,12 +67,6 @@ case "$PHASE" in
     WORKDIR=$WORK
     PRINT_TIMEOUT=3600
     ;;
-  review)
-    [ "$ROUND" -ge 1 ] 2>/dev/null || { echo "review には ROUND が必要です" >&2; exit 1; }
-    STEM=$TMP_DIR/$RUNTIME-review-r$ROUND
-    WORKDIR=$ROOT/$RUNTIME
-    PRINT_TIMEOUT=900
-    ;;
   final-fix)
     # **ラウンド番号を名前に入れない。** 最終ゲートは提案ラウンドの外にあり、
     # 全体のテストの失敗を直す。番号を付けると、どの提案ラウンドの修正なのかと
@@ -115,7 +109,7 @@ APPLY_ROUND=0
 # ラウンドの種類。適用と修正では、項目が改善項目かテスト項目かで手順が変わる。
 ROUND_KIND=$(jq -r --argjson r "$ROUND" \
   '[.rounds[] | select(.round == $r)][0].kind // "structure"' "$STATE")
-if [ "$PHASE" = "apply" ] || [ "$PHASE" = "fix" ] || [ "$PHASE" = "review" ]; then
+if [ "$PHASE" = "apply" ] || [ "$PHASE" = "fix" ]; then
   APPLY_ROUND=$(jq -r --argjson r "$ROUND" \
     '[.rounds[] | select(.round == $r)][0].apply_round // 0' "$STATE")
   ITEMS_JSON=$(jq --argjson r "$ROUND" --argjson a "$APPLY_ROUND" \
@@ -190,9 +184,6 @@ export RF_VOCAB_SEVERITIES=$VOCAB_SEVERITIES
 
 # 投稿の event の指示。自分の Pull Request では GitHub が APPROVE と
 # REQUEST_CHANGES を拒むため、検証側が組み立てた文面をそのまま渡す。
-RF_POST_EVENT_NOTE=$(jq -r '.review_post_note // ""' "$STATE")
-[ -n "$RF_POST_EVENT_NOTE" ] || RF_POST_EVENT_NOTE="投稿の \`-f event=\` には判定をそのまま渡してください。"
-export RF_POST_EVENT_NOTE
 
 # 雛形は `${RF_*}` を展開するだけの素の Markdown。コマンド置換は展開しない
 # （プロンプト本文に `$(...)` や backtick が現れても実行させないため）。

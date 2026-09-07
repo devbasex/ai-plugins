@@ -483,7 +483,6 @@ def test_init_downgrades_the_posting_event_on_own_pull_request(run_init, tmp_pat
     _, state = _state_of(tmp_path)
     assert state["is_own_pr"] is True
     assert state["event_downgrade"] is True
-    assert "COMMENT" in state["review_post_note"]
 
 
 def test_init_keeps_the_posting_event_on_someone_elses_pull_request(run_init, tmp_path):
@@ -492,7 +491,6 @@ def test_init_keeps_the_posting_event_on_someone_elses_pull_request(run_init, tm
     _, state = _state_of(tmp_path)
     assert state["is_own_pr"] is False
     assert state["event_downgrade"] is False
-    assert "COMMENT" not in state["review_post_note"]
 
 
 def test_init_continues_when_the_viewer_cannot_be_read(run_init, tmp_path):
@@ -517,8 +515,8 @@ def test_init_fills_the_posting_event_when_resuming_an_old_state(run_init, tmp_p
     """
     run_init(_args(tmp_path), viewer="me")
     path, state = _state_of(tmp_path)
-    # 旧版が書いた状態ファイル（3 項目が無い）を再現する
-    for key in ("is_own_pr", "event_downgrade", "review_post_note"):
+    # 旧版が書いた状態ファイル（2 項目が無い）を再現する
+    for key in ("is_own_pr", "event_downgrade"):
         state.pop(key)
     state["outer_round"] = 2
     path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
@@ -529,7 +527,6 @@ def test_init_fills_the_posting_event_when_resuming_an_old_state(run_init, tmp_p
     assert resumed["outer_round"] == 2, "再開であって初期化ではないこと"
     assert resumed["is_own_pr"] is True
     assert resumed["event_downgrade"] is True
-    assert "COMMENT" in resumed["review_post_note"]
 
 
 # ---------- 改修計画の書き出し先 ----------

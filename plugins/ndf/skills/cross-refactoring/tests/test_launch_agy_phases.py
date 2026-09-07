@@ -29,7 +29,7 @@ mv "$NDF_TEST_ARGS_FILE.tmp" "$NDF_TEST_ARGS_FILE"
 """
 
 # フェーズごとの監視の上限（`SKILL.md` の `--timeout`）。起動時の上限はこれ以上にする。
-MONITOR_TIMEOUT = {"propose": 900, "apply": 3600, "review": 900, "fix": 3600}
+MONITOR_TIMEOUT = {"propose": 900, "apply": 3600, "fix": 3600}
 
 
 def _launch(tmp_path: pathlib.Path, phase: str) -> tuple[list[str], pathlib.Path]:

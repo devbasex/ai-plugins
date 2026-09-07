@@ -50,26 +50,6 @@ def check_auth(runtimes: Iterable[str]) -> dict[str, dict[str, Any]]:
     return auth.check_auth(runtimes, info=info, die=die)
 
 
-def _review_post_note(is_own_pr: bool) -> str:
-    """レビュープロンプトへ渡す投稿の event の指示を組み立てる。
-
-    定義を検証側（この CLI）に置き、状態ファイル経由で起動側へ渡す。
-    語彙の受け渡しと同じ形にして、文面の分岐が起動シェルへ散らないようにする。
-    """
-    if is_own_pr:
-        return (
-            "この Pull Request の作成者はあなたを動かしている利用者本人です。"
-            "GitHub は自分の Pull Request への `APPROVE` と `REQUEST_CHANGES` を "
-            "`HTTP 422` で拒むため、**投稿は必ず `-f event=COMMENT` で行ってください**。"
-            "判定そのものは本文の先頭行と結果ファイルへ `APPROVE` / `REQUEST_CHANGES` "
-            "のまま残します。収束判定は結果ファイルの判定を見るので、"
-            "投稿を倒しても評価は変わりません。"
-        )
-    return (
-        "投稿の `-f event=` には判定をそのまま渡してください"
-        "（`APPROVE` または `REQUEST_CHANGES`）。"
-    )
-
 
 def _apply_post_event(state: dict[str, Any], is_own_pr: bool) -> None:
     """投稿の event に関する項目を状態へ入れる。
@@ -81,7 +61,6 @@ def _apply_post_event(state: dict[str, Any], is_own_pr: bool) -> None:
     """
     state["is_own_pr"] = is_own_pr
     state["event_downgrade"] = is_own_pr
-    state["review_post_note"] = _review_post_note(is_own_pr)
 
 
 def _warn_unmeasurable_models(
