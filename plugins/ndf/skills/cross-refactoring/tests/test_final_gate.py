@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import sys
 import json
 
 import pytest
@@ -26,8 +27,10 @@ def _args(state_id=130):
 
 
 @pytest.fixture
-def spy(refactor, monkeypatch):
+def spy(patch_lib, refactor, monkeypatch):
     """テストの実行と `gh` の呼び出しを差し替え、何を呼んだかを記録する。"""
+    paths = sys.modules["refactor_lib.paths"]
+    gitfacts = sys.modules["refactor_lib.gitfacts"]
     seen: dict[str, list] = {"tests": [], "gh": []}
 
     def fake_run(command, cwd, timeout, grace=5.0):
@@ -38,9 +41,9 @@ def spy(refactor, monkeypatch):
         seen["gh"].append(list(cmd))
         return seen.get("gh_out", "")
 
-    monkeypatch.setattr(refactor, "run_with_timeout", fake_run)
-    monkeypatch.setattr(refactor, "sh", fake_sh)
-    monkeypatch.setattr(refactor, "git_out", lambda work, args, **k: "HEADSHA")
+    patch_lib("run_with_timeout", fake_run)
+    patch_lib("sh", fake_sh)
+    patch_lib("git_out", lambda work, args, **k: "HEADSHA")
     return seen
 
 
@@ -87,6 +90,7 @@ def test_a_workflow_step_run_skips_cross_review_and_runs_the_tests(
 def test_the_launch_mode_comes_from_the_argument(refactor, monkeypatch):
     """決定 7 — 環境変数や控えの読み取りではなく、呼ぶ側が引数で伝える。"""
     captured = {}
+    # **入口の名前を差し替える。** `main()` は `refactor.py` が取り込んだ `cmd_init` を呼ぶ。
     monkeypatch.setattr(refactor, "cmd_init", lambda args: captured.update(vars(args)))
     monkeypatch.setattr(
         refactor.sys, "argv",
@@ -208,15 +212,13 @@ def test_a_failure_opens_a_fix_round(cmd_gate, tmp_path, env_tmp_dir, spy):
     assert gate["status"] == "failing"
 
 
-def test_the_fix_cap_reports_the_failure_without_reverting(
-    refactor, cmd_gate, tmp_path, env_tmp_dir, spy, monkeypatch
-):
+def test_the_fix_cap_reports_the_failure_without_reverting(patch_lib, refactor, gitfacts, cmd_gate, tmp_path, env_tmp_dir, spy, monkeypatch):
     """**Step 7 は push 済みの地点である。** 上限に達しても取り消さない。
 
     取り消しの判断は Pull Request の読み手が持つ。失敗として報告に書く。
     """
     dropped: list = []
-    monkeypatch.setattr(refactor, "drop_items",
+    patch_lib("drop_items",
                         lambda *a, **k: dropped.append(a) or {})
     state_path = _state(
         tmp_path, workflow_step=True, max_fix_rounds=2,

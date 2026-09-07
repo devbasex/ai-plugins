@@ -75,13 +75,13 @@ def test_facts_come_from_a_real_repository(gitfacts, work):
     assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=work).stdout.strip() == "main"
 
 
-def test_missing_trailers_are_seen_as_missing(refactor, gitfacts, work):
+def test_missing_trailers_are_seen_as_missing(verify, gitfacts, work):
     base = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
     sha = _commit(work, "Refactor: トレーラーなし", {"src/foo.py": "def f():\n    return 2\n"})
     facts = gitfacts.collect_commit_facts(
         str(work), [sha], {sha}, "true", "main"
     )
-    problem = refactor.verify_commit_trailers(facts[0])
+    problem = verify.verify_commit_trailers(facts[0])
     assert problem is not None and "Item-Id" in problem
     assert base != sha
 
@@ -112,7 +112,7 @@ def test_failing_test_is_detected_by_running_it(gitfacts, work):
     assert base != sha
 
 
-def test_fix_commits_pass_verification_through_real_git(refactor, gitfacts, work):
+def test_fix_commits_pass_verification_through_real_git(verify, gitfacts, work):
     """修正コミットが git 経由の検証を通ること。
 
     範囲に空集合を渡していた頃は、全ての修正コミットが必ず不正扱いになっていた。
@@ -124,7 +124,7 @@ def test_fix_commits_pass_verification_through_real_git(refactor, gitfacts, work
     facts = gitfacts.collect_commit_facts(
         str(work), [sha], set(ordered), "true", "main"
     )
-    assert refactor.verify_fix_commit(facts[0]) is None
+    assert verify.verify_fix_commit(facts[0]) is None
 
 
 def test_revert_order_comes_from_history_not_from_the_claim(gitfacts, work):

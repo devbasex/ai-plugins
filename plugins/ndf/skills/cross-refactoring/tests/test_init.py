@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import sys
 import json
 import os
 import pathlib
@@ -69,14 +70,15 @@ def _args(tmp_path, **over):
 
 
 @pytest.fixture
-def run_init(refactor, origin_repo, monkeypatch):
+def run_init(patch_lib, refactor, origin_repo, monkeypatch):
     """`gh` 呼び出しだけを差し替えて `init` を走らせる。
 
     `viewer` は `gh api user` が返すログイン名。Pull Request の作成者は
     常に `author` なので、両者を一致させると自分の Pull Request になる。
     """
+    paths = sys.modules["refactor_lib.paths"]
     def _run(args, viewer="someone-else"):
-        real_sh = refactor.sh
+        real_sh = paths.sh
 
         def fake_sh(cmd, cwd=None, check=True):
             if cmd[0] == "gh":
@@ -102,7 +104,7 @@ def run_init(refactor, origin_repo, monkeypatch):
                 raise AssertionError(f"想定外の gh 呼び出し: {cmd}")
             return real_sh(cmd, cwd=cwd, check=check)
 
-        monkeypatch.setattr(refactor, "sh", fake_sh)
+        patch_lib("sh", fake_sh)
         monkeypatch.chdir(origin_repo)
         monkeypatch.delenv("CROSS_REFACTORING_TMP_DIR", raising=False)
         # 認証確認は実際の CLI を起動する。ここでは対象外なので飛ばす
@@ -244,9 +246,11 @@ def test_init_checks_the_scope_before_running_the_baseline_test(run_init, tmp_pa
         run_init(_args(tmp_path, scope=["src"], baseline_test="false"))
 
 
-def _parsed_init_args(refactor, monkeypatch, *extra):
+def _parsed_init_args(patch_lib, refactor, monkeypatch, *extra):
     """`init` の引数を解析だけして返す。"""
     captured = {}
+    # **入口の名前を差し替える。** `main()` は `refactor.py` が取り込んだ `cmd_init` を
+    # 呼ぶ。`patch_lib` が見るのは `refactor_lib` 配下だけなので、ここには届かない。
     monkeypatch.setattr(refactor, "cmd_init", lambda args: captured.update(vars(args)))
     monkeypatch.setattr(
         refactor.sys, "argv",
@@ -257,7 +261,7 @@ def _parsed_init_args(refactor, monkeypatch, *extra):
     return captured
 
 
-def test_the_round_caps_have_their_own_defaults(refactor, monkeypatch):
+def test_the_round_caps_have_their_own_defaults(patch_lib, cmd_setup, refactor, monkeypatch):
     """E1 — 4 つの上限は別々の単位に掛かる（#436 決定 8）。
 
     `--max-outer-rounds` が 3 でよいのは、適用ラウンドを分けたことで**1 回の提案で
@@ -265,18 +269,17 @@ def test_the_round_caps_have_their_own_defaults(refactor, monkeypatch):
     （適用の担当は適用ラウンドごとに進むので、1 つの提案ラウンドでも輪番は 1 周
     しうる）。
     """
-    captured = _parsed_init_args(refactor, monkeypatch)
+    captured = _parsed_init_args(patch_lib, refactor, monkeypatch)
     assert captured["max_test_rounds"] == 2
     assert captured["max_outer_rounds"] == 3
     assert captured["max_fix_rounds"] == 3
     assert captured["max_items_per_round"] == 5
 
 
-def test_the_ci_check_is_not_set_by_default(refactor, monkeypatch):
+def test_the_ci_check_is_not_set_by_default(patch_lib, cmd_setup, refactor, monkeypatch):
     """指定が無ければ代替しない。**手元のテストで判定する**（決定 7 の排他）。"""
-    assert _parsed_init_args(refactor, monkeypatch)["ci_check"] is None
-    assert _parsed_init_args(
-        refactor, monkeypatch, "--ci-check", "tests")["ci_check"] == "tests"
+    assert _parsed_init_args(patch_lib, refactor, monkeypatch)["ci_check"] is None
+    assert _parsed_init_args(patch_lib, refactor, monkeypatch, "--ci-check", "tests")["ci_check"] == "tests"
 
 
 def test_init_starts_with_a_test_round(run_init, tmp_path):
@@ -384,7 +387,7 @@ def test_diverged_worktree_stops_the_run(run_init, tmp_path):
 
 # ---------- 語彙と認証 ----------
 
-def test_init_records_the_vocabulary_for_the_prompt(run_init, tmp_path, refactor):
+def test_init_records_the_vocabulary_for_the_prompt(run_init, tmp_path, vocabulary):
     """許容値をプロンプトへ列挙できるよう、語彙集合を状態へ残すこと。
 
     手順書の見出しは日本語なので、「語彙に限定する」とだけ書くと読んだ側が
@@ -396,7 +399,7 @@ def test_init_records_the_vocabulary_for_the_prompt(run_init, tmp_path, refactor
     assert "extract_method" in state["vocabulary"]["techniques"]
     assert state["vocabulary"]["severities"] == ["minor", "major", "critical"]
     # 定義は検証側の 1 箇所だけに置く
-    assert state["vocabulary"]["smells"] == refactor.SMELLS
+    assert state["vocabulary"]["smells"] == vocabulary.SMELLS
 
 
 def _probe_result(refactor, monkeypatch, outcomes):
@@ -455,7 +458,7 @@ def test_check_auth_can_be_skipped_explicitly(refactor, cmd_setup, monkeypatch):
     assert cmd_setup.check_auth(["codex", "agy"]) == {}
 
 
-def test_init_checks_cli_authentication(refactor, cmd_setup, origin_repo, monkeypatch, tmp_path):
+def test_init_checks_cli_authentication(patch_lib, refactor, paths, cmd_setup, origin_repo, monkeypatch, tmp_path):
     """未認証の CLI があれば初期化ごと中断すること。
 
     参加者が 1 人欠けた構成のまま進むと、その者の提案とレビューが無いまま収束する。
@@ -464,8 +467,7 @@ def test_init_checks_cli_authentication(refactor, cmd_setup, origin_repo, monkey
     monkeypatch.chdir(origin_repo)
     monkeypatch.delenv("CROSS_REFACTORING_TMP_DIR", raising=False)
     _probe_result(refactor, monkeypatch, {"agy": (1, "Authentication failed")})
-    monkeypatch.setattr(
-        refactor, "sh",
+    patch_lib("sh",
         lambda cmd, **k: pytest.fail("認証確認より前に gh を呼んでいる"),
     )
     with pytest.raises(SystemExit) as e:

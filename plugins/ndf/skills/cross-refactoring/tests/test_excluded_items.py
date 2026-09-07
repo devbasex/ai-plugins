@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import sys
 import json
 
 import pytest
@@ -180,6 +181,7 @@ def test_a_different_case_on_the_same_target_is_still_adopted(
 
 def _prompt_with_deferred(tmp_path, refactor, phase, deferred):
     """`launch-cli.sh` に提案プロンプトを組み立てさせ、本文を返す。"""
+    vocabulary = sys.modules["refactor_lib.vocabulary"]
     import os
     import pathlib
     import subprocess
@@ -187,8 +189,8 @@ def _prompt_with_deferred(tmp_path, refactor, phase, deferred):
     launch = pathlib.Path(__file__).resolve().parent.parent / "scripts" / "launch-cli.sh"
     runtime = "codex"
     state_path = make_state(tmp_path, deferred_items=deferred,
-                            vocabulary=refactor.vocabulary(),
-                            test_vocabulary=refactor.test_vocabulary())
+                            vocabulary=vocabulary.vocabulary(),
+                            test_vocabulary=vocabulary.test_vocabulary())
     for name in ("work", runtime):
         (tmp_path / name).mkdir(parents=True, exist_ok=True)
     stub_dir = tmp_path / "bin"

@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import sys
 import json
 
 import pytest
@@ -44,8 +45,9 @@ def _state(tmp_path, **over):
 
 
 @pytest.fixture
-def gh(refactor, monkeypatch):
+def gh(patch_lib, refactor, monkeypatch):
     """`gh api` の呼び出しを記録し、決めた応答を返す。"""
+    paths = sys.modules["refactor_lib.paths"]
     calls: list[list[str]] = []
     responses: dict[str, str] = {}
 
@@ -56,7 +58,7 @@ def gh(refactor, monkeypatch):
                 return value
         return ""
 
-    monkeypatch.setattr(refactor, "sh", fake_sh)
+    patch_lib("sh", fake_sh)
     return calls, responses
 
 
