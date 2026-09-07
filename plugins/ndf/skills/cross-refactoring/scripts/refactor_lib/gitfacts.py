@@ -126,6 +126,32 @@ def commit_files(work: str, sha: str) -> list[str]:
     return [p.strip() for p in (out or "").splitlines() if p.strip()]
 
 
+def commit_test_changes(work: str, sha: str) -> dict[str, tuple[list[str], list[str]]]:
+    """コミットが触ったテストの、変更前後の行をファイルごとに返す。
+
+    **検証がテストの期待値を見るために要る**（#443）。差分ではなく前後の行を返すのは、
+    判定が `assert` の行の集合を突き合わせる形だからである。
+    """
+    out = git_out(work, ["show", "--name-only", "--format=", sha])
+    changes: dict[str, tuple[list[str], list[str]]] = {}
+    for path in (out or "").splitlines():
+        if not path.strip() or not _is_test_path(path):
+            continue
+        before = git_out(work, ["show", f"{sha}^:{path}"]) or ""
+        after = git_out(work, ["show", f"{sha}:{path}"]) or ""
+        changes[path] = (before.splitlines(keepends=True),
+                         after.splitlines(keepends=True))
+    return changes
+
+
+def _is_test_path(path: str) -> bool:
+    """テストの置き場所か。判定は `commit_touches_tests` と同じ印で行う。"""
+    lowered = f"/{path.lower()}"
+    name = lowered.rsplit("/", 1)[-1]
+    return (any(m in lowered for m in TEST_PATH_MARKERS)
+            or any(m in name for m in TEST_NAME_MARKERS))
+
+
 def commit_touches_tests(work: str, sha: str) -> bool:
     """コミットがテストの置き場所を触っているか。"""
     out = git_out(work, ["show", "--name-only", "--format=", sha])
@@ -265,6 +291,8 @@ def collect_commit_facts(
             "diff_lines": commit_diff_lines(work, full),
             "files": commit_files(work, full),
             "touches_tests": commit_touches_tests(work, full),
+            # **テストの期待値が変わっていないかを検証が見る**（#443）。
+            "test_changes": commit_test_changes(work, full),
             # **テストコマンドが空なら走らせない。** 適用の検証は「適用そのものが
             # 通ったか」だけを見る。テストの合否は適用ラウンドの単位で
             # `verify-round` が 1 度だけ実行する（決定 3）。

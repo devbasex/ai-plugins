@@ -1658,3 +1658,32 @@ def test_sync_failure_also_resets_the_index(patch_lib, refactor, tmp_path, env_t
         )
     assert ["git", "reset", "--hard", "HEAD"] in calls
     assert [c for c in pushes if c[:2] == ["git", "push"]] == []
+
+
+def test_merge_apply_records_the_pending_judgements(
+    paths, patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
+) -> None:
+    """判定できない差分を、適用ラウンドの記録へ残すこと。
+
+    **通ったものとして扱わない。** 進行側はこの記録を見て段 2 を起動する。
+    """
+    items = [item(item_id="R1-001")]
+    state_path = _state_with_items(tmp_path, items)
+    env_tmp_dir(state_path)
+    git_facts({"shared": {
+        **fact(sha="shared"),
+        "test_changes": {"tests/test_a.py": (
+            ["    assert refactor.f(1) == 3\n"],
+            ["    assert gitfacts.f(1) == 3\n"])},
+    }}, in_range=["shared"])
+    write_result(state_path, "codex-apply-r1",
+                 {"items": [{"item_id": "R1-001", "commits": [{"sha": "shared"}]}]})
+    monkeypatch.setattr(paths.subprocess, "run",
+                        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "", ""))
+    patch_lib("sh", lambda cmd, **k: "")
+
+    refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
+
+    entry = read_state(state_path)["rounds"][0]
+    # **記録は適用群ごとに持つ。** 後続の群の検証で消えない。
+    assert entry.get("pending_test_judgements") == {"1": ["tests/test_a.py"]}

@@ -34,8 +34,18 @@ import assignment  # noqa: E402
 # スクリプトの位置と揃わない。
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
+# **呼び名の表は `refactoring` が持つ**（#444）。読めないと兆候と手法の名前が決まらず、
+# 重複排除が効かない。取り込みの時点で読むため、ここで捕まえて理由だけを出す
+# （トレースバックを見せても、直す手がかりにならない）。
+try:
+    from refactor_lib.vocabulary import VocabularyUnavailable  # noqa: E402
+except Exception as _exc:                        # 取り込みそのものが失敗した
+    print(f"ERROR: {_exc}", file=sys.stderr)
+    sys.exit(4)
+
 from refactor_lib.commands.apply import (  # noqa: E402
     cmd_merge_apply,
+    cmd_merge_test_judgements,
     cmd_merge_proposals,
     cmd_next_apply_round,
 )
@@ -155,6 +165,8 @@ def main() -> None:
         ("should-abandon", cmd_should_abandon,
          "Step 6 — この適用ラウンドの修正上限の到達判定"),
         ("merge-fix", cmd_merge_fix, "Step 6 — 修正結果の取り込み"),
+        ("merge-test-judgements", cmd_merge_test_judgements,
+         "Step 5 — テストの差分の判定（段 2）の答えを取り込む"),
     ):
         sp = sub.add_parser(name, help=help_)
         sp.add_argument("id", type=int)
