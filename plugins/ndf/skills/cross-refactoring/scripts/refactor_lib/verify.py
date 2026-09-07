@@ -5,9 +5,14 @@
 """
 from __future__ import annotations
 
+import re
+
+from collections import Counter
+
 from typing import Any, Iterable, Optional
 
-from .gitfacts import _safe_int
+from .paths import git_out
+from .gitfacts import safe_int
 from .vocabulary import (
     DIFF_BUDGET_FACTOR,
     EXTRACTION_DIFF_BUDGET_FACTOR,
@@ -225,7 +230,17 @@ def verify_apply_round(
                 f"（先頭コミット {facts[0].get('sha', '?')} がテストを触っていません）"
             )
 
-    estimated = sum(_safe_int(i.get("estimated_diff_lines")) for i in items)
+    # **テストの期待値が変わっていないか**（#443）。段 1（機械）で決まるものだけを
+    # ここで落とす。決まらないものは `pending_test_judgements` が集め、進行側が
+    # 段 2（AI エージェント）へ渡す。
+    changes: dict[str, tuple[list[str], list[str]]] = {}
+    for commit in facts:
+        changes.update(commit.get("test_changes") or {})
+    problem = verify_test_changes(changes)
+    if problem:
+        return problem
+
+    estimated = sum(safe_int(i.get("estimated_diff_lines")) for i in items)
     factor = max(
         (diff_budget_factor(i.get("technique")) for i in items),
         default=DIFF_BUDGET_FACTOR,
@@ -271,3 +286,206 @@ def verify_commit_granularity(item: dict[str, Any], count: int) -> Optional[str]
         f"項目 {item['item_id']} のコミットが {count} 件あります"
         f"（残すのは 1 項目 = 1 コミット。現状固定テストが要る項目だけ 2 コミットまで）"
     )
+
+def unassigned_fix_commits(
+    work: str, reported_shas: list[str], ordered_range: list[str]
+) -> list[str]:
+    """範囲内のコミットのうち、どの申告にも含まれていないものを返す。
+
+    適用と同じく、**範囲のコミットは全て申告されていること**を求める。
+    申告から漏れた修正コミットは検証を受けないまま Pull Request に残る。
+    """
+    reported_full = {
+        full for full in (
+            git_out(work, ["rev-parse", "--verify", f"{s}^{{commit}}"])
+            for s in reported_shas
+        ) if full
+    }
+    return sorted(set(ordered_range) - reported_full)
+
+# ---------- テストの変更の種類 ----------
+#
+# **「テストを足したか」だけでは、期待値の変更を止められない**（#443）。同じ入力に対する
+# 期待出力が変わっていれば、それは振る舞いの変更である。
+#
+# 判定は 3 段で行う。ここが担うのは段 1（機械）で、決まらないものは段 2（AI）へ渡す。
+#
+# **機械が「変わっていない」と言える範囲を最小にする。** 差分の意味を機械で読もうとすると
+# 穴が開く。実測で 5 回続けて別の抜けが見つかった。
+#
+# | 抜けた形 | なぜ抜けたか |
+# | --- | --- |
+# | `Status.SUCCESS.value` → `Status.FAILURE.value` | 接頭辞を伏せると同じ行に見える |
+# | `EXPECTED = 4` を足して既存を残す | 外側の行が減らない |
+# | 値を定数へ抽出する | `assert` の行から値が消える |
+#
+# **決められないものを決めない。** 段 2 の AI が読む。
+
+# 値そのもの。数値・文字列・真偽・None を指す。
+_LITERAL = re.compile(
+    r"""(?:[rbuf]{0,2}"(?:\\.|[^"\\])*"|[rbuf]{0,2}'(?:\\.|[^'\\])*'"""
+    r"""|\b\d+(?:\.\d+)?\b|\bTrue\b|\bFalse\b|\bNone\b)"""
+)
+
+
+def _values(lines: Iterable[str]) -> "Counter[str]":
+    """差分の中の値を、件数ごと数える。**`assert` の行に限らない。**"""
+    found: Counter[str] = Counter()
+    for line in lines:
+        for literal in _LITERAL.findall(line):
+            found[literal] += 1
+    return found
+
+
+def assertion_change(before: Iterable[str], after: Iterable[str]) -> str:
+    """テストの変更の種類を返す。
+
+    | 戻り値 | 意味 | 判定 |
+    | --- | --- | --- |
+    | `unchanged` | 変わっていない | 前後が同一 |
+    | `changed` | 期待出力が変わった | **値が失われた** |
+    | `undecidable` | **機械では決まらない** | それ以外すべて |
+
+    **`unchanged` は「同じ」のときだけ返す。** 経路だけの変更も、行の並べ替えも、
+    テストの追加も、機械では期待出力への影響を否定できない。段 2 の AI が読む。
+    """
+    rows_before, rows_after = list(before), list(after)
+    if rows_before == rows_after:
+        return "unchanged"
+    if _values(rows_before) - _values(rows_after):
+        return "changed"
+    return "undecidable"
+
+
+def undecidable_test_changes(
+    changes: dict[str, tuple[list[str], list[str]]],
+) -> list[str]:
+    """機械では判定できないテストの差分を、ファイルの順で返す。
+
+    **呼ぶ側はこれを段 2（AI エージェント）へ渡す。** 空でないまま通さない。
+    """
+    return sorted(
+        path for path, (before, after) in changes.items()
+        if assertion_change(before, after) == "undecidable"
+    )
+
+
+def verify_test_changes(
+    changes: dict[str, tuple[list[str], list[str]]],
+) -> Optional[str]:
+    """テストの差分に、期待値の変更が含まれていないかを見る。
+
+    **判定できないものはここでは落とさない。** `undecidable_test_changes` が集め、
+    呼ぶ側が段 2 へ渡す。
+    """
+    changed = sorted(
+        path for path, (before, after) in changes.items()
+        if assertion_change(before, after) == "changed"
+    )
+    if not changed:
+        return None
+    return (
+        "テストの期待する振る舞いが変わっています"
+        f"（{', '.join(changed)}）。"
+        "構造改善では期待出力を変えません。振る舞いの変更は別の変更に分けてください"
+    )
+
+
+def pending_test_judgements(facts: Iterable[dict[str, Any]]) -> list[str]:
+    """段 2（AI エージェント）へ渡すテストを、ファイルの順で返す。
+
+    **機械で決まらなかったものだけが残る。** 空でないまま収束させない。
+    """
+    changes: dict[str, tuple[list[str], list[str]]] = {}
+    for commit in facts:
+        changes.update(commit.get("test_changes") or {})
+    return undecidable_test_changes(changes)
+
+
+def merge_test_judgements(
+    pending: Iterable[str], verdicts: Iterable[dict[str, Any]],
+) -> dict[str, Any]:
+    """段 2（AI エージェント）の答えを取り込み、次にどうするかを返す。
+
+    | 戻り値の項目 | 中身 |
+    | --- | --- |
+    | `problem` | `changed` が 1 件でもあれば失敗の理由。無ければ `None` |
+    | `pending` | レビューへ引き継ぐもの（`undecidable` と、答えが欠けたもの） |
+
+    **答えが欠けたものを `unchanged` に倒さない。** 倒すと、判定を返さないことが
+    通過の手段になる。知らない答えも同じ扱いにする。
+    """
+    answers = {
+        str(v.get("path")): str(v.get("verdict"))
+        for v in verdicts if isinstance(v, dict) and v.get("path")
+    }
+    changed = sorted(p for p in pending if answers.get(p) == "changed")
+    if changed:
+        return {
+            "problem": (
+                "テストの期待する振る舞いが変わっています"
+                f"（{', '.join(changed)}）。"
+                "構造改善では期待出力を変えません。振る舞いの変更は別の変更に分けてください"
+            ),
+            "pending": [],
+        }
+    return {
+        "problem": None,
+        "pending": sorted(p for p in pending if answers.get(p) != "unchanged"),
+    }
+
+
+def record_pending_judgements(
+    entry: dict[str, Any], group: int, pending: Iterable[str],
+) -> None:
+    """保留を**適用群ごと**に記録する（#443）。
+
+    **群をまたいで上書きしない。** 前の群で段 2 が `undecidable` と答えたものは、
+    次の群の検証を通ってもレビューへ引き継ぐまで残る。
+    """
+    records = entry.get("pending_test_judgements")
+    if not isinstance(records, dict):        # 群ごとに持たない古い形は捨てる
+        records = {}
+    listed = sorted(pending)
+    if listed:
+        records[str(group)] = listed
+    else:
+        records.pop(str(group), None)
+    if records:
+        entry["pending_test_judgements"] = records
+    else:
+        entry.pop("pending_test_judgements", None)
+
+
+def all_pending_judgements(entry: dict[str, Any]) -> list[str]:
+    """全ての群の保留を、重複を除いてファイルの順で返す。"""
+    records = entry.get("pending_test_judgements")
+    if not isinstance(records, dict):
+        return []
+    return sorted({path for paths in records.values() for path in paths})
+
+
+def apply_judgements_to_group(
+    entry: dict[str, Any], group: int, verdicts: Iterable[dict[str, Any]],
+) -> list[str]:
+    """判定の答えを、**それが見た群の保留にだけ**適用する（#443）。
+
+    段 2 へ渡すのはその群の差分であるため、答えも同じ群にしか効かない。
+    別の群で同じファイルが保留のまま残っていても、そちらは解かない。
+
+    レビューへ引き継ぐものを返す。
+    """
+    records = entry.get("pending_test_judgements")
+    if not isinstance(records, dict):
+        return []
+    answers = {
+        str(v.get("path")): str(v.get("verdict"))
+        for v in verdicts if isinstance(v, dict) and v.get("path")
+    }
+    remaining = sorted(
+        path for path in records.get(str(group), [])
+        if answers.get(path) != "unchanged"
+    )
+    record_pending_judgements(entry, group, remaining)
+    return remaining
+

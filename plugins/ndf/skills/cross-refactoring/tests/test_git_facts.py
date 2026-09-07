@@ -46,7 +46,7 @@ TRAILERS = (
 )
 
 
-def test_facts_come_from_a_real_repository(refactor, work):
+def test_facts_come_from_a_real_repository(gitfacts, work):
     base = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
     first = _commit(work, "Test: 現状固定テストを足す" + TRAILERS,
                     {"tests/test_foo.py": "def test_f():\n    assert True\n"})
@@ -54,10 +54,10 @@ def test_facts_come_from_a_real_repository(refactor, work):
                      {"src/foo.py": "def _one():\n    return 1\n\n\ndef f():\n"
                                     "    return _one()\n"})
 
-    ordered = refactor.commits_in_range(str(work), base, "HEAD")
+    ordered = gitfacts.commits_in_range(str(work), base, "HEAD")
     assert ordered == [second, first], "新しい順で返っていない"
 
-    facts = refactor.collect_commit_facts(
+    facts = gitfacts.collect_commit_facts(
         str(work), [first, second], set(ordered), "true", "main"
     )
     assert [f["sha"] for f in facts] == [first, second]
@@ -75,36 +75,36 @@ def test_facts_come_from_a_real_repository(refactor, work):
     assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=work).stdout.strip() == "main"
 
 
-def test_missing_trailers_are_seen_as_missing(refactor, work):
+def test_missing_trailers_are_seen_as_missing(verify, gitfacts, work):
     base = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
     sha = _commit(work, "Refactor: トレーラーなし", {"src/foo.py": "def f():\n    return 2\n"})
-    facts = refactor.collect_commit_facts(
+    facts = gitfacts.collect_commit_facts(
         str(work), [sha], {sha}, "true", "main"
     )
-    problem = refactor.verify_commit_trailers(facts[0])
+    problem = verify.verify_commit_trailers(facts[0])
     assert problem is not None and "Item-Id" in problem
     assert base != sha
 
 
-def test_commit_outside_the_range_is_rejected(refactor, work):
+def test_commit_outside_the_range_is_rejected(gitfacts, work):
     """起点より前のコミットを申告しても実在扱いにしない。"""
     old = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
     base = _commit(work, "Chore: 起点" + TRAILERS, {"src/bar.py": "y = 1\n"})
     new = _commit(work, "Refactor: 対象" + TRAILERS, {"src/foo.py": "def f():\n    return 3\n"})
 
-    ordered = refactor.commits_in_range(str(work), base, "HEAD")
+    ordered = gitfacts.commits_in_range(str(work), base, "HEAD")
     assert ordered == [new]
-    facts = refactor.collect_commit_facts(
+    facts = gitfacts.collect_commit_facts(
         str(work), [old], set(ordered), "true", "main"
     )
     assert facts[0]["exists"] is False
 
 
-def test_failing_test_is_detected_by_running_it(refactor, work):
+def test_failing_test_is_detected_by_running_it(gitfacts, work):
     """`test_status` は実際に走らせて決まる。申告では決まらない。"""
     base = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
     sha = _commit(work, "Refactor: 壊した" + TRAILERS, {"src/foo.py": "def f():\n    return 9\n"})
-    facts = refactor.collect_commit_facts(
+    facts = gitfacts.collect_commit_facts(
         str(work), [sha], {sha}, "false", "main"
     )
     assert facts[0]["test_status"] == "fail"
@@ -112,7 +112,7 @@ def test_failing_test_is_detected_by_running_it(refactor, work):
     assert base != sha
 
 
-def test_fix_commits_pass_verification_through_real_git(refactor, work):
+def test_fix_commits_pass_verification_through_real_git(verify, gitfacts, work):
     """修正コミットが git 経由の検証を通ること。
 
     範囲に空集合を渡していた頃は、全ての修正コミットが必ず不正扱いになっていた。
@@ -120,31 +120,31 @@ def test_fix_commits_pass_verification_through_real_git(refactor, work):
     base = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
     sha = _commit(work, "Fix: レビュー指摘の反映" + TRAILERS,
                   {"src/foo.py": "def f():\n    return 1  # 直した\n"})
-    ordered = refactor.commits_in_range(str(work), base, "HEAD")
-    facts = refactor.collect_commit_facts(
+    ordered = gitfacts.commits_in_range(str(work), base, "HEAD")
+    facts = gitfacts.collect_commit_facts(
         str(work), [sha], set(ordered), "true", "main"
     )
-    assert refactor.verify_fix_commit(facts[0]) is None
+    assert verify.verify_fix_commit(facts[0]) is None
 
 
-def test_revert_order_comes_from_history_not_from_the_claim(refactor, work):
+def test_revert_order_comes_from_history_not_from_the_claim(gitfacts, work):
     """申告の順序ではなく、実際の履歴で新しい順に並べること。"""
     first = _commit(work, "one", {"src/a.py": "a = 1\n"})
     second = _commit(work, "two", {"src/a.py": "a = 2\n"})
     third = _commit(work, "three", {"src/a.py": "a = 3\n"})
 
     # わざと順不同で渡す
-    ordered = refactor._order_newest_first(str(work), [first, third, second])
+    ordered = gitfacts._order_newest_first(str(work), [first, third, second])
     assert ordered == [third, second, first]
 
 
-def test_revert_order_tolerates_unknown_shas(refactor, work):
+def test_revert_order_tolerates_unknown_shas(gitfacts, work):
     known = _commit(work, "one", {"src/a.py": "a = 1\n"})
-    ordered = refactor._order_newest_first(str(work), ["deadbeef", known])
+    ordered = gitfacts._order_newest_first(str(work), ["deadbeef", known])
     assert ordered[0] == known, "履歴にあるものを先に戻す"
 
 
-def test_reverting_in_history_order_succeeds(refactor, work):
+def test_reverting_in_history_order_succeeds(gitfacts, work):
     """履歴順に戻せば、同じファイルを触る連続コミットでも競合しない。"""
     base = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
     first = _commit(work, "one", {"src/a.py": "a = 1\n"})
@@ -152,7 +152,7 @@ def test_reverting_in_history_order_succeeds(refactor, work):
 
     state = {"worktrees": {"work": str(work)}}
     item = {"item_id": "R1-001", "commits": [first, second]}   # 古い順の申告
-    assert refactor._revert_item_commits(state, item) == 2
+    assert gitfacts.revert_item_commits(state, item) == 2
     assert item["reverted"] is True
 
     # 取り消し後は着手前の状態へ戻る（このファイルは base に存在しない）
@@ -161,21 +161,21 @@ def test_reverting_in_history_order_succeeds(refactor, work):
     assert diff == "", f"着手前との差分が残っている: {diff}"
 
 
-def test_hanging_test_is_cut_off(refactor, work):
+def test_hanging_test_is_cut_off(gitfacts, work):
     """テストが終わらないときは打ち切って失敗にする。
 
     無限ループに入ったコードを待ち続けると、進行全体が止まる。
     """
     sha = _commit(work, "Refactor: 無限ループ" + TRAILERS,
                   {"src/foo.py": "def f():\n    return 2\n"})
-    status = refactor.run_test_at(
+    status = gitfacts.run_test_at(
         str(work), sha, "sleep 30", "main", timeout=1
     )
     assert status == "fail"
     assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=work).stdout.strip() == "main"
 
 
-def test_cutting_off_a_test_kills_its_children(refactor, work):
+def test_cutting_off_a_test_kills_its_children(gitfacts, work):
     """打ち切るときは**子プロセスまで**止めること。
 
     シェルだけを終了すると pytest 等が走り続け、直後の checkout と同じ作業
@@ -189,14 +189,14 @@ def test_cutting_off_a_test_kills_its_children(refactor, work):
     # 子プロセスが 2 秒後に痕跡を残そうとする
     command = f"(sleep 2 && touch {marker}) & sleep 30"
 
-    status = refactor.run_test_at(str(work), sha, command, "main", timeout=1)
+    status = gitfacts.run_test_at(str(work), sha, command, "main", timeout=1)
     assert status == "fail"
 
     time.sleep(3)
     assert not marker.exists(), "子プロセスが生き残って書き込んでいる"
 
 
-def test_cutting_off_kills_children_that_ignore_sigterm(refactor, work):
+def test_cutting_off_kills_children_that_ignore_sigterm(gitfacts, work):
     """SIGTERM を無視する子にも必ず SIGKILL が届くこと。
 
     親シェルの終了で打ち切ると、無視する子はグループに残って作業ディレクトリを
@@ -210,7 +210,7 @@ def test_cutting_off_kills_children_that_ignore_sigterm(refactor, work):
     command = f"trap '' TERM; (sleep 3 && touch {marker}) & sleep 30"
 
     started = time.monotonic()
-    status = refactor.run_test_at(
+    status = gitfacts.run_test_at(
         str(work), sha, command, "main", timeout=1, kill_grace=1.0
     )
     elapsed = time.monotonic() - started

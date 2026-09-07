@@ -1,10 +1,11 @@
 """`init` のテスト。
 
-`gh` は呼ばないので `_sh` を差し替える。git は実際に動かし、
+`gh` は呼ばないので `sh` を差し替える。git は実際に動かし、
 **書き込み用の作業ディレクトリが本当に作れるか**を確かめる。
 """
 from __future__ import annotations
 
+import sys
 import json
 import os
 import pathlib
@@ -69,14 +70,16 @@ def _args(tmp_path, **over):
 
 
 @pytest.fixture
-def run_init(refactor, origin_repo, monkeypatch):
+def run_init(refactor_lib, paths, patch_lib, refactor, origin_repo, monkeypatch):
     """`gh` 呼び出しだけを差し替えて `init` を走らせる。
 
     `viewer` は `gh api user` が返すログイン名。Pull Request の作成者は
     常に `author` なので、両者を一致させると自分の Pull Request になる。
     """
+    refactor_lib = sys.modules["refactor_lib"]
+
     def _run(args, viewer="someone-else"):
-        real_sh = refactor._sh
+        real_sh = paths.sh
 
         def fake_sh(cmd, cwd=None, check=True):
             if cmd[0] == "gh":
@@ -86,7 +89,7 @@ def run_init(refactor, origin_repo, monkeypatch):
                     # viewer=None は取得に失敗する環境（bot トークンなど）を表す
                     if viewer is None:
                         if check:
-                            refactor.die("コマンドが失敗しました (gh api user): HTTP 403")
+                            refactor_lib.die("コマンドが失敗しました (gh api user): HTTP 403")
                         return ""
                     return viewer
                 # 作成者・head・base は REST の 1 回でまとめて返る（#271）。
@@ -102,7 +105,7 @@ def run_init(refactor, origin_repo, monkeypatch):
                 raise AssertionError(f"想定外の gh 呼び出し: {cmd}")
             return real_sh(cmd, cwd=cwd, check=check)
 
-        monkeypatch.setattr(refactor, "_sh", fake_sh)
+        patch_lib("sh", fake_sh)
         monkeypatch.chdir(origin_repo)
         monkeypatch.delenv("CROSS_REFACTORING_TMP_DIR", raising=False)
         # 認証確認は実際の CLI を起動する。ここでは対象外なので飛ばす
@@ -152,9 +155,7 @@ def test_init_records_models(run_init, tmp_path):
     }
 
 
-def test_init_warns_that_the_kiro_default_model_cannot_be_measured(
-    run_init, tmp_path, capsys
-):
+def test_init_warns_that_the_kiro_default_model_cannot_be_measured(run_init, tmp_path, capsys):
     """既定の `auto` は実際に動いたモデルを取得できず、集計から分離される。
 
     報告まで分からないと、比較のために回した実行が丸ごと無駄になる。
@@ -181,9 +182,7 @@ def test_init_warns_when_codex_or_agy_has_no_model(run_init, tmp_path, capsys):
     assert "agy のモデルが default です" in warning
 
 
-def test_init_does_not_warn_when_every_model_can_be_measured(
-    run_init, tmp_path, capsys
-):
+def test_init_does_not_warn_when_every_model_can_be_measured(run_init, tmp_path, capsys):
     """claude だけは指定が無くても実測できるため、警告の対象にならない。"""
     run_init(_args(tmp_path, model=[
         "codex=gpt-5.5", "agy=gemini-3.8", "kiro=claude-opus-5",
@@ -228,9 +227,7 @@ def test_init_stops_when_the_scope_has_no_test_location(run_init, tmp_path):
     assert e.value.code == refactor_abort()
 
 
-def test_init_stops_when_the_test_location_is_outside_the_baseline_search(
-    run_init, tmp_path, origin_repo
-):
+def test_init_stops_when_the_test_location_is_outside_the_baseline_search(run_init, tmp_path, origin_repo):
     """C3 — 足したテストが `--baseline-test` で実行されないなら止める。"""
     (origin_repo / "src" / "unit").mkdir(parents=True, exist_ok=True)
     with pytest.raises(SystemExit):
@@ -244,9 +241,11 @@ def test_init_checks_the_scope_before_running_the_baseline_test(run_init, tmp_pa
         run_init(_args(tmp_path, scope=["src"], baseline_test="false"))
 
 
-def _parsed_init_args(refactor, monkeypatch, *extra):
+def _parsed_init_args(patch_lib, refactor, monkeypatch, *extra):
     """`init` の引数を解析だけして返す。"""
     captured = {}
+    # **入口の名前を差し替える。** `main()` は `refactor.py` が取り込んだ `cmd_init` を
+    # 呼ぶ。`patch_lib` が見るのは `refactor_lib` 配下だけなので、ここには届かない。
     monkeypatch.setattr(refactor, "cmd_init", lambda args: captured.update(vars(args)))
     monkeypatch.setattr(
         refactor.sys, "argv",
@@ -257,7 +256,7 @@ def _parsed_init_args(refactor, monkeypatch, *extra):
     return captured
 
 
-def test_the_round_caps_have_their_own_defaults(refactor, monkeypatch):
+def test_the_round_caps_have_their_own_defaults(patch_lib, refactor, monkeypatch):
     """E1 — 4 つの上限は別々の単位に掛かる（#436 決定 8）。
 
     `--max-outer-rounds` が 3 でよいのは、適用ラウンドを分けたことで**1 回の提案で
@@ -265,18 +264,17 @@ def test_the_round_caps_have_their_own_defaults(refactor, monkeypatch):
     （適用の担当は適用ラウンドごとに進むので、1 つの提案ラウンドでも輪番は 1 周
     しうる）。
     """
-    captured = _parsed_init_args(refactor, monkeypatch)
+    captured = _parsed_init_args(patch_lib, refactor, monkeypatch)
     assert captured["max_test_rounds"] == 2
     assert captured["max_outer_rounds"] == 3
     assert captured["max_fix_rounds"] == 3
     assert captured["max_items_per_round"] == 5
 
 
-def test_the_ci_check_is_not_set_by_default(refactor, monkeypatch):
+def test_the_ci_check_is_not_set_by_default(patch_lib, refactor, monkeypatch):
     """指定が無ければ代替しない。**手元のテストで判定する**（決定 7 の排他）。"""
-    assert _parsed_init_args(refactor, monkeypatch)["ci_check"] is None
-    assert _parsed_init_args(
-        refactor, monkeypatch, "--ci-check", "tests")["ci_check"] == "tests"
+    assert _parsed_init_args(patch_lib, refactor, monkeypatch)["ci_check"] is None
+    assert _parsed_init_args(patch_lib, refactor, monkeypatch, "--ci-check", "tests")["ci_check"] == "tests"
 
 
 def test_init_starts_with_a_test_round(run_init, tmp_path):
@@ -384,7 +382,7 @@ def test_diverged_worktree_stops_the_run(run_init, tmp_path):
 
 # ---------- 語彙と認証 ----------
 
-def test_init_records_the_vocabulary_for_the_prompt(run_init, tmp_path, refactor):
+def test_init_records_the_vocabulary_for_the_prompt(run_init, tmp_path, vocabulary):
     """許容値をプロンプトへ列挙できるよう、語彙集合を状態へ残すこと。
 
     手順書の見出しは日本語なので、「語彙に限定する」とだけ書くと読んだ側が
@@ -396,66 +394,67 @@ def test_init_records_the_vocabulary_for_the_prompt(run_init, tmp_path, refactor
     assert "extract_method" in state["vocabulary"]["techniques"]
     assert state["vocabulary"]["severities"] == ["minor", "major", "critical"]
     # 定義は検証側の 1 箇所だけに置く
-    assert state["vocabulary"]["smells"] == refactor.SMELLS
+    assert state["vocabulary"]["smells"] == vocabulary.SMELLS
 
 
-def _probe_result(refactor, monkeypatch, outcomes):
+def _probe_result(cmd_setup, refactor, monkeypatch, outcomes):
     """認証確認コマンドの結果を差し替える。`{ランタイム: (rc, 出力)}`。"""
     def fake_run(cmd, **kwargs):
-        for runtime, probe in refactor.auth.AUTH_PROBES.items():
+        for runtime, probe in cmd_setup.auth.AUTH_PROBES.items():
             if list(cmd) == list(probe):
                 rc, out = outcomes.get(runtime, (0, "ok"))
                 return subprocess.CompletedProcess(cmd, rc, out, "")
         raise AssertionError(f"想定外の呼び出し: {cmd}")
-    monkeypatch.setattr(refactor.auth.subprocess, "run", fake_run)
+    monkeypatch.setattr(cmd_setup.auth.subprocess, "run", fake_run)
 
 
-def test_check_auth_passes_when_every_cli_is_logged_in(refactor, monkeypatch):
+def test_check_auth_passes_when_every_cli_is_logged_in(refactor, cmd_setup, monkeypatch):
     monkeypatch.delenv("NDF_SKIP_AUTH_CHECK", raising=False)
-    _probe_result(refactor, monkeypatch, {})
-    results = refactor.check_auth(["claude", "codex", "agy", "kiro"])
+    _probe_result(cmd_setup, refactor, monkeypatch, {})
+    results = cmd_setup.check_auth(["claude", "codex", "agy", "kiro"])
     assert all(r["ok"] for r in results.values())
 
 
-def test_check_auth_fails_on_a_non_zero_exit(refactor, monkeypatch):
+def test_check_auth_fails_on_a_non_zero_exit(refactor_lib, cmd_setup, refactor, monkeypatch):
     monkeypatch.delenv("NDF_SKIP_AUTH_CHECK", raising=False)
-    _probe_result(refactor, monkeypatch, {"kiro": (1, "")})
+    _probe_result(cmd_setup, refactor, monkeypatch, {"kiro": (1, "")})
     with pytest.raises(SystemExit) as e:
-        refactor.check_auth(["claude", "codex", "agy", "kiro"])
-    assert e.value.code == refactor.ABORT
+        cmd_setup.check_auth(["claude", "codex", "agy", "kiro"])
+    assert e.value.code == refactor_abort()
 
 
-def test_check_auth_fails_when_the_output_says_not_logged_in(refactor, monkeypatch):
+def test_check_auth_fails_when_the_output_says_not_logged_in(refactor, cmd_setup, monkeypatch):
     """終了コード 0 でも未認証を示すことがある（kiro は成否を終了コードで表さない）。"""
     monkeypatch.delenv("NDF_SKIP_AUTH_CHECK", raising=False)
-    _probe_result(refactor, monkeypatch, {"kiro": (0, "Not logged in")})
+    _probe_result(cmd_setup, refactor, monkeypatch, {"kiro": (0, "Not logged in")})
     with pytest.raises(SystemExit):
-        refactor.check_auth(["claude", "codex", "agy", "kiro"])
+        cmd_setup.check_auth(["claude", "codex", "agy", "kiro"])
 
 
-def test_check_auth_fails_when_the_cli_is_missing(refactor, monkeypatch):
+def test_check_auth_fails_when_the_cli_is_missing(refactor, cmd_setup, monkeypatch):
+    cmd_setup = sys.modules["refactor_lib.commands.setup"]
     monkeypatch.delenv("NDF_SKIP_AUTH_CHECK", raising=False)
 
     def missing(cmd, **kwargs):
         raise FileNotFoundError(cmd[0])
 
-    monkeypatch.setattr(refactor.auth.subprocess, "run", missing)
+    monkeypatch.setattr(cmd_setup.auth.subprocess, "run", missing)
     with pytest.raises(SystemExit):
-        refactor.check_auth(["codex"])
+        cmd_setup.check_auth(["codex"])
 
 
-def test_check_auth_can_be_skipped_explicitly(refactor, monkeypatch):
+def test_check_auth_can_be_skipped_explicitly(refactor, cmd_setup, monkeypatch):
     """確認コマンドは CLI の版で変わる。飛ばせる逃げ道を残す。"""
     monkeypatch.setenv("NDF_SKIP_AUTH_CHECK", "1")
 
     def never(cmd, **kwargs):
         raise AssertionError("認証確認を実行してはいけない")
 
-    monkeypatch.setattr(refactor.auth.subprocess, "run", never)
-    assert refactor.check_auth(["codex", "agy"]) == {}
+    monkeypatch.setattr(cmd_setup.auth.subprocess, "run", never)
+    assert cmd_setup.check_auth(["codex", "agy"]) == {}
 
 
-def test_init_checks_cli_authentication(refactor, origin_repo, monkeypatch, tmp_path):
+def test_init_checks_cli_authentication(patch_lib, refactor, cmd_setup, origin_repo, monkeypatch, tmp_path):
     """未認証の CLI があれば初期化ごと中断すること。
 
     参加者が 1 人欠けた構成のまま進むと、その者の提案とレビューが無いまま収束する。
@@ -463,14 +462,13 @@ def test_init_checks_cli_authentication(refactor, origin_repo, monkeypatch, tmp_
     monkeypatch.delenv("NDF_SKIP_AUTH_CHECK", raising=False)
     monkeypatch.chdir(origin_repo)
     monkeypatch.delenv("CROSS_REFACTORING_TMP_DIR", raising=False)
-    _probe_result(refactor, monkeypatch, {"agy": (1, "Authentication failed")})
-    monkeypatch.setattr(
-        refactor, "_sh",
+    _probe_result(cmd_setup, refactor, monkeypatch, {"agy": (1, "Authentication failed")})
+    patch_lib("sh",
         lambda cmd, **k: pytest.fail("認証確認より前に gh を呼んでいる"),
     )
     with pytest.raises(SystemExit) as e:
-        refactor.cmd_init(_args(tmp_path))
-    assert e.value.code == refactor.ABORT
+        cmd_setup.cmd_init(_args(tmp_path))
+    assert e.value.code == refactor_abort()
 
 
 def test_init_downgrades_the_posting_event_on_own_pull_request(run_init, tmp_path):
@@ -483,7 +481,6 @@ def test_init_downgrades_the_posting_event_on_own_pull_request(run_init, tmp_pat
     _, state = _state_of(tmp_path)
     assert state["is_own_pr"] is True
     assert state["event_downgrade"] is True
-    assert "COMMENT" in state["review_post_note"]
 
 
 def test_init_keeps_the_posting_event_on_someone_elses_pull_request(run_init, tmp_path):
@@ -492,7 +489,6 @@ def test_init_keeps_the_posting_event_on_someone_elses_pull_request(run_init, tm
     _, state = _state_of(tmp_path)
     assert state["is_own_pr"] is False
     assert state["event_downgrade"] is False
-    assert "COMMENT" not in state["review_post_note"]
 
 
 def test_init_continues_when_the_viewer_cannot_be_read(run_init, tmp_path):
@@ -517,8 +513,8 @@ def test_init_fills_the_posting_event_when_resuming_an_old_state(run_init, tmp_p
     """
     run_init(_args(tmp_path), viewer="me")
     path, state = _state_of(tmp_path)
-    # 旧版が書いた状態ファイル（3 項目が無い）を再現する
-    for key in ("is_own_pr", "event_downgrade", "review_post_note"):
+    # 旧版が書いた状態ファイル（2 項目が無い）を再現する
+    for key in ("is_own_pr", "event_downgrade"):
         state.pop(key)
     state["outer_round"] = 2
     path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
@@ -529,7 +525,6 @@ def test_init_fills_the_posting_event_when_resuming_an_old_state(run_init, tmp_p
     assert resumed["outer_round"] == 2, "再開であって初期化ではないこと"
     assert resumed["is_own_pr"] is True
     assert resumed["event_downgrade"] is True
-    assert "COMMENT" in resumed["review_post_note"]
 
 
 # ---------- 改修計画の書き出し先 ----------

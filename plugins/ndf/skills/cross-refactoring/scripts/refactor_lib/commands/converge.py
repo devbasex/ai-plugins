@@ -17,29 +17,37 @@ import statefile
 
 from .. import die, info
 from ..gitfacts import (
-    _discard_impl_leftovers,
-    _drop_items,
-    _find_item,
-    _flush_pending_push,
-    _git_out,
-    _push_head,
-    _push_with_retry_marker,
-    _read_result,
-    _reported_shas,
-    _round,
-    _run_with_timeout,
-    _safe_int,
+    run_drop,
+    discard_impl_leftovers,
+    drop_items,
+    find_item,
+    flush_pending_push,
+    push_head,
+    push_with_retry_marker,
+    read_result,
+    reported_shas,
+    round_of,
+    run_with_timeout,
+    safe_int,
     collect_commit_facts,
     commits_in_range,
     resolved_threads_on_github,
     revert_unverified_range,
 )
 from ..outbound import dropped_line, item_lines, plan_line
-from ..paths import _load, _result_path, stem_for
-from ..rounds import deferred_record
-from ..verify import verify_commit_granularity, verify_fix_commit
+from ..paths import git_out, load_state, result_path, stem_for
+from ..rounds import (
+    current_group,
+    deferred_record,
+    phase_after_group,
+    prepare_fix_phase,
+)
+from ..verify import (
+    unassigned_fix_commits,
+    verify_commit_granularity,
+    verify_fix_commit,
+)
 from ..vocabulary import DEFAULT_TEST_TIMEOUT
-from .apply import _phase_after_group, _prepare_fix_phase, _run_drop, current_group
 
 
 def cmd_verify_round(args: argparse.Namespace) -> None:
@@ -56,8 +64,8 @@ def cmd_verify_round(args: argparse.Namespace) -> None:
     **継続的統合では代替しない。** 手元の未 push のコミットではなく push 済みの
     先端に対する結果しか読めないためである。代替できるのは Step 7 だけである。
     """
-    path, state = _load(args.id)
-    entry = _round(state, args.round)
+    path, state = load_state(args.id)
+    entry = round_of(state, args.round)
     group = current_group(entry)
     applied = list((entry.get("apply") or {}).get("applied") or [])
     if not applied:
@@ -69,8 +77,8 @@ def cmd_verify_round(args: argparse.Namespace) -> None:
 
     command = (state.get("baseline_test") or {}).get("command") or ""
     work = str(state["worktrees"]["work"])
-    timeout = _safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT)
-    code, timed_out = _run_with_timeout(command, work, timeout)
+    timeout = safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT)
+    code, timed_out = run_with_timeout(command, work, timeout)
     passed = (not timed_out) and code == 0
 
     entry.setdefault("verifications", []).append({
@@ -85,9 +93,9 @@ def cmd_verify_round(args: argparse.Namespace) -> None:
 
     if passed:
         for item_id in applied:
-            _find_item(state, item_id)["status"] = "done"
+            find_item(state, item_id)["status"] = "done"
         group["status"] = "verified"
-        state["phase"] = _phase_after_group(entry)
+        state["phase"] = phase_after_group(entry)
         statefile.save(path, state)
         info(f"✅ 適用ラウンド {group['apply_round']} のテストが通りました（{command}）")
         # **外へ出す文章の規約**（#436 決定 6-b）。項目は `<ファイル>#<シンボル>`
@@ -100,7 +108,7 @@ def cmd_verify_round(args: argparse.Namespace) -> None:
     # **修正ラウンドの起点をここで記録する。** 記録せずに戻すと `merge-fix` が
     # 範囲を確定できずに弾かれ、`fix_rounds` が進まない。`should-abandon` は
     # `fix_rounds` で見送りを決めるため、上限へ永久に到達しなくなる。
-    _prepare_fix_phase(state, entry)
+    prepare_fix_phase(state, entry)
     statefile.save(path, state)
     if timed_out:
         info(f"❌ テストが {timeout} 秒で終わりませんでした（{command}）")
@@ -118,8 +126,8 @@ def cmd_should_abandon(args: argparse.Namespace) -> None:
     `--max-fix-rounds` は**1 つの適用ラウンドあたり**の上限である。数え直しは
     `next-apply-round` が群を開くときに行う。
     """
-    _, state = _load(args.id)
-    entry = _round(state, args.round)
+    _, state = load_state(args.id)
+    entry = round_of(state, args.round)
     limit = state["max_fix_rounds"]
     if entry["fix_rounds"] >= limit:
         info(f"修正ラウンドが上限 {limit} に達しました。未解決の項目を見送ります")
@@ -135,17 +143,17 @@ def cmd_abandon_items(args: argparse.Namespace) -> None:
     どの項目が落としたのかを特定しても分離して取り消せない。**他の群には及ばない**
     （受け入れ条件 A4）。既に検証を通った群は Pull Request に残る。
     """
-    path, state = _load(args.id)
-    entry = _round(state, args.round)
+    path, state = load_state(args.id)
+    entry = round_of(state, args.round)
     group = current_group(entry)
     if not args.dry_run:
         # **やり残した取り消しを push の再送より先に片づける。** 先に push すると、
         # 取り消しが途中の HEAD をそのまま Pull Request へ反映してしまう。
         if entry.get("pending_drop"):
             info("↻ 前回終わらなかった取り消しを再実行します")
-            _run_drop(path, state, entry, list(entry["pending_drop"]))
+            run_drop(path, state, entry, list(entry["pending_drop"]))
         else:
-            _flush_pending_push(path, state, entry)
+            flush_pending_push(path, state, entry)
 
     # 取り消し自体は `reverted` で冪等だが、見送りの記録は重複しうる。
     if group.get("abandoned") is not None:
@@ -163,15 +171,15 @@ def cmd_abandon_items(args: argparse.Namespace) -> None:
         return
 
     if args.dry_run:
-        _drop_items(state, entry, targets, dry_run=True)
+        drop_items(state, entry, targets, dry_run=True)
         info("（dry-run）状態ファイルは更新していません")
         return
 
-    _run_drop(path, state, entry, targets)
+    run_drop(path, state, entry, targets)
 
     already = {d.get("item_id") for d in state["deferred_items"]}
     for item_id in targets:
-        item = _find_item(state, item_id)
+        item = find_item(state, item_id)
         item["status"] = "abandoned"
         item.setdefault(
             "failure_reason", "修正ラウンドの上限に達してもテストが通らなかった")
@@ -188,12 +196,12 @@ def cmd_abandon_items(args: argparse.Namespace) -> None:
     group["status"] = "dropped"
     entry["abandoned"] = targets
     entry["pending_drop"] = []
-    entry["apply_base_sha"] = _git_out(
+    entry["apply_base_sha"] = git_out(
         state["worktrees"]["work"], ["rev-parse", "HEAD"])
     group["base_sha"] = entry["apply_base_sha"]
-    state["phase"] = _phase_after_group(entry)
+    state["phase"] = phase_after_group(entry)
     statefile.save(path, state)
-    _push_head(state)
+    push_head(state)
     entry["pending_push"] = False
     statefile.save(path, state)
 
@@ -263,22 +271,6 @@ def _resolved_fix_thread_ids(payload: dict[str, Any], repo: str, pr: int) -> set
     return resolved
 
 
-def _unassigned_fix_commits(
-    work: str, reported_shas: list[str], ordered_range: list[str]
-) -> list[str]:
-    """範囲内のコミットのうち、どの申告にも含まれていないものを返す。
-
-    適用と同じく、**範囲のコミットは全て申告されていること**を求める。
-    申告から漏れた修正コミットは検証を受けないまま Pull Request に残る。
-    """
-    reported_full = {
-        full for full in (
-            _git_out(work, ["rev-parse", "--verify", f"{s}^{{commit}}"])
-            for s in reported_shas
-        ) if full
-    }
-    return sorted(set(ordered_range) - reported_full)
-
 
 def _verify_fix_commits(
     facts: list[dict[str, Any]], scope: list[str]
@@ -330,7 +322,7 @@ def _record_accepted_fix_commits(
     見送り済みなどで項目が見つからないコミットは、紐づけ先が無いので飛ばす。
     """
     for item_id, sha in accepted:
-        item = _find_item(state, item_id, required=False)
+        item = find_item(state, item_id, required=False)
         if item is not None:
             item.setdefault("commits", []).append(sha)
 
@@ -359,16 +351,16 @@ def _revert_invalid_fix_round(
 
 def cmd_merge_fix(args: argparse.Namespace) -> None:
     """Step 6 — 修正結果を取り込み、修正ラウンドを 1 つ進める。"""
-    path, state = _load(args.id)
-    entry = _round(state, args.round)
-    _discard_impl_leftovers(state, state["worktrees"]["work"])
-    _flush_pending_push(path, state, entry)
+    path, state = load_state(args.id)
+    entry = round_of(state, args.round)
+    discard_impl_leftovers(state, state["worktrees"]["work"])
+    flush_pending_push(path, state, entry)
     impl = entry["impl"]
-    result = _result_path(state, impl, stem_for(impl, "fix", state["id"], args.round))
-    payload = _read_result(result, impl)
+    result = result_path(state, impl, stem_for(impl, "fix", state["id"], args.round))
+    payload = read_result(result, impl)
 
     work = state["worktrees"]["work"]
-    head_now = _git_out(work, ["rev-parse", "HEAD"]) or ""
+    head_now = git_out(work, ["rev-parse", "HEAD"]) or ""
     merge_key = _fix_merge_key(entry, result)
     if _already_merged_fix_result(entry, merge_key):
         return
@@ -395,13 +387,13 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
             "検証できない修正は採りません",
             code=2,
         )
-    reported_shas = _reported_shas(payload)
-    unassigned = _unassigned_fix_commits(work, reported_shas, ordered_range)
+    claimed_shas = reported_shas(payload)
+    unassigned = unassigned_fix_commits(work, claimed_shas, ordered_range)
 
     facts = collect_commit_facts(
-        work, reported_shas, set(ordered_range),
+        work, claimed_shas, set(ordered_range),
         baseline.get("command") or "true", state["head_branch"],
-        _safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT),
+        safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT),
     )
 
     problems, accepted = _verify_fix_commits(facts, state.get("target_scope") or [])
@@ -424,12 +416,12 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
 
     entry.setdefault("durations", {})["fix"] = (
         entry.get("durations", {}).get("fix", 0)
-        + _safe_int(payload.get("elapsed_seconds"))
+        + safe_int(payload.get("elapsed_seconds"))
     )
     statefile.save(path, state)
     # **取り消したかどうかに関わらず公開する。** 実装担当は push しないため、
     # ここで公開しないと再レビューが Pull Request 上の差分を見られない。
-    _push_with_retry_marker(path, state, entry)
+    push_with_retry_marker(path, state, entry)
     info(
         f"修正を取り込みました（解決 {len(resolved)} スレッド / "
         f"修正ラウンド {entry['fix_rounds']}）。{plan_line(state)}"

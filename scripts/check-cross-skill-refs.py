@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Skill の境界をまたぐ**実行の参照**を数え、例外の一覧に無いものを失敗として返す。
+"""Skill の境界をまたぐ**配布に依存する参照**を数え、例外の一覧に無いものを失敗として返す。
 
 Skill は配布の基準（`plugins/ndf/manifests/*-skills.txt`）で 1 つずつ配るかを決める。
 **配る Skill を絞る配布先（agy）では、基準に無い Skill が配布した先から消える。**
-別の Skill の `scripts/` を読み込む・起動する・`sys.path` へ入れる参照は、その相手を
-配らない配布先で解決できない。
+別の Skill の `scripts/` や `references/` を読み込む・起動する・`sys.path` へ入れる参照は、
+その相手を配らない配布先で解決できない。**実行するか読むかは、相手が欠けたときの結果を
+変えない。**
 
 `cross-refactoring` が `cross-review` の共通層を相対で読んでいたのがこの形で、共通層を
 プラグインルート直下へ移して解消した（#285）。**増えたときに気づく手段が無ければ、
@@ -19,9 +20,10 @@ Skill は配布の基準（`plugins/ndf/manifests/*-skills.txt`）で 1 つず�
 | --- | --- |
 | 相対パス | `"$SKILL_DIR/../cross-review/scripts/state.py"` |
 | Python のパス連結 | `... / "fix" / "scripts" / "fetch-pr-comments.sh"` |
+| 同上（読み込む先） | `... / "refactoring" / "references" / "vocabulary.md"` |
 
 Skill 名だけを手がかりにすると、`gh pr view` のような別の用途まで入る。直後に
-`scripts` が続く形へ絞る。
+`scripts` か `references` が続く形へ絞る。
 
     python3 scripts/check-cross-skill-refs.py --root .
 """
@@ -34,7 +36,11 @@ from pathlib import Path
 
 SKILLS_REL = "plugins/ndf/skills"
 SUFFIXES = (".py", ".sh", ".md")
-IGNORED_DIRS = {"__pycache__", ".pytest_cache"}
+# **テストは配らない。** 配布物に入るのは `SKILL.md` と `references/` と `scripts/` で、
+# `tests/` は含まれない（Claude Code のキャッシュで実測）。配る先で相手が欠けることが
+# 起きないため、走査から外す。外さないと、別の Skill の参照を読むテストがすべて
+# 例外の登録を求めることになる。
+IGNORED_DIRS = {"__pycache__", ".pytest_cache", "tests"}
 
 # 既に知っている参照。**共通層ではなく Skill の本体どうしの参照**であるため、置き場所を
 # 移すだけでは解けない。解くには双方の Skill の設計が要る（#344）。
@@ -46,6 +52,12 @@ EXCEPTIONS: dict[tuple[str, str], str] = {
     # `scripts/tests/test_google_auth_codistribution.py` が固定する。参照は候補の
     # 3 番目で、環境変数と `~/.claude/skills/` を先に見るため、隣に無い配置でも動く。
     ("plugins/ndf/skills/google-drive/scripts/gdrive_fetch.py", "google-auth"): "#116",
+    # `cross-refactoring` は兆候と手法の呼び名を持たず、`refactoring` の表を読む
+    # （#444）。**4 つの manifest すべてが両方を載せている**ため、配る先で相手が
+    # 欠けることが起きない。その条件は
+    # `scripts/tests/test_refactoring_codistribution.py` が固定する。
+    ("plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/vocabulary.py",
+     "refactoring"): "#444",
 }
 
 # Markdown の行内リンクの飛び先。読み手への案内であるため走査から外す。
@@ -68,7 +80,9 @@ def _patterns(names: list[str]) -> list[tuple[str, re.Pattern[str]]]:
             name,
             re.compile(
                 rf"\.\./{escaped}/"                                  # 相対パス
-                rf"|\"{escaped}\"\s*/\s*\"scripts\""                 # Python のパス連結
+                # Python のパス連結。**`scripts` に限らない。** 配られなければ
+                # 解決できない点で、読み込む先が `references` でも同じである。
+                rf"|\"{escaped}\"\s*/\s*\"(?:scripts|references)\""
             ),
         ))
     return built

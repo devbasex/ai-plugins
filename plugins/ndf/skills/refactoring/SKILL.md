@@ -55,6 +55,10 @@ description: "Change structure without changing behavior, guarded by tests, judg
 
 一度に複数の兆候へ手を入れない。落ちたときに原因を切り分けられなくなる。
 
+**テストが構造に依存しているときは、テストも変える。** 「テストを変えない」を絶対の条件に
+すると、実装に歪みが入るか、構造が形だけ分かれる。**変えてよい範囲と、変えたことの判定は
+[references/test-changes.md](references/test-changes.md) が定める。**
+
 ## テストが乏しい既存コード
 
 振る舞いを変えないことを示す手段がないため、**先に手段を作る**。
@@ -149,6 +153,8 @@ flowchart TD
   - [references/lang-typescript.md](references/lang-typescript.md)
   - [references/lang-php.md](references/lang-php.md)
   - 一覧にない言語は、`data-representation.md` の判定表から自分で対応付ける
+- [references/test-changes.md](references/test-changes.md) — テストをどこまで変えてよいか。判定の 3 段と、段階の分け方
+- [references/vocabulary.md](references/vocabulary.md) — 兆候と手法の呼び名。**識別子を持つ唯一の場所**
 - [references/characterization-tests.md](references/characterization-tests.md) — 現状固定テストの作り方
 - `/ndf:cross-refactoring` — 発見と検証を別のランタイムへ分ける形。**この Skill は
   「テストで守りながら 1 手ずつ直す」手順を持つが、何を直すかの発見と、直した結果の評価が

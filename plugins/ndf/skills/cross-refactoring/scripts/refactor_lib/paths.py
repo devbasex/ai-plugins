@@ -1,7 +1,7 @@
 """状態ファイルと結果ファイルの置き場所を決める。
 
 作業ディレクトリの解決・状態ファイルの探索と読み込み・結果ファイルの名前付けを
-持つ。外部コマンドの実行（`_sh`）も、置き場所を確かめる手として同居する。
+持つ。外部コマンドの実行（`sh`）も、置き場所を確かめる手として同居する。
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ import statefile
 from . import die
 
 
-def _default_worktree_base() -> pathlib.Path:
+def default_worktree_base() -> pathlib.Path:
     """作業ディレクトリの親。解決順は cross-review と揃える。
 
     1. 環境変数 `NDF_WORKTREE_BASE`（明示指定）
@@ -28,11 +28,11 @@ def _default_worktree_base() -> pathlib.Path:
     return pathlib.Path(tempfile.gettempdir()) / "ndf-worktrees"
 
 
-def _repo_slug(repo: str) -> str:
+def repo_slug(repo: str) -> str:
     return repo.replace("/", "--")
 
 
-def _tmp_dir_for(work: pathlib.Path) -> pathlib.Path:
+def tmp_dir_for(work: pathlib.Path) -> pathlib.Path:
     """一時ディレクトリ。解決順は cross-review と同じ規約に揃える。
 
     1. 環境変数 `CROSS_REFACTORING_TMP_DIR`（明示指定）
@@ -42,7 +42,7 @@ def _tmp_dir_for(work: pathlib.Path) -> pathlib.Path:
     return pathlib.Path(env).resolve() if env else work / ".cross_refactoring"
 
 
-def _state_path(tmp_dir: pathlib.Path, state_id: int) -> pathlib.Path:
+def state_path(tmp_dir: pathlib.Path, state_id: int) -> pathlib.Path:
     return tmp_dir / f"cross-refactoring-rf{state_id}-state.json"
 
 
@@ -70,19 +70,19 @@ def _find_state(state_id: int) -> pathlib.Path:
     raise SystemExit(1)  # die が抜けることはないが型のために置く
 
 
-def _load(state_id: int) -> tuple[pathlib.Path, dict[str, Any]]:
+def load_state(state_id: int) -> tuple[pathlib.Path, dict[str, Any]]:
     path = _find_state(state_id)
     return path, statefile.load(path)
 
 
-def _sh(cmd: list[str], cwd: Optional[str] = None, check: bool = True) -> str:
+def sh(cmd: list[str], cwd: Optional[str] = None, check: bool = True) -> str:
     r = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
     if check and r.returncode != 0:
         die(f"コマンドが失敗しました ({' '.join(cmd)}): {r.stderr.strip()}")
     return r.stdout.strip()
 
 
-def _result_path(state: dict[str, Any], runtime: str, stem: str) -> pathlib.Path:
+def result_path(state: dict[str, Any], runtime: str, stem: str) -> pathlib.Path:
     """CLI が結果を書き出すパス。
 
     agy だけは現在地を作業領域にしないため、起動時に一時ディレクトリを作業領域へ
@@ -107,3 +107,17 @@ def stem_for(runtime: str, phase: str, state_id: int, round_no: Optional[int] = 
     if phase == "final-fix":
         return f"{runtime}-final-fix"
     return f"{runtime}-{phase}-r{round_no}"
+
+
+def git_out(work: str, args: list[str], strip: bool = True) -> Optional[str]:
+    """`git` を実行して標準出力を返す。失敗したら `None`。
+
+    **固定幅で読む出力には `strip=False` を渡す。** `git status --porcelain` の
+    状態コードは未 stage の変更で ` M` と先頭が空白になるため、`strip()` すると
+    1 行目だけ 1 文字ずれ、切り出したパスの先頭が欠ける。欠けたパスは
+    `git add` で `pathspec ... did not match any files` になり、同期が止まる。
+    """
+    r = subprocess.run(["git", *args], cwd=work, capture_output=True, text=True)
+    if r.returncode != 0:
+        return None
+    return r.stdout.strip() if strip else r.stdout.rstrip("\n")

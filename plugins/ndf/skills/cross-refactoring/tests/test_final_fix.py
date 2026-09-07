@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import sys
 import pytest
 
 from crossref_helpers import make_state, read_state, write_result
@@ -26,7 +27,7 @@ def _gate_state(tmp_path, **over):
 
 
 @pytest.fixture
-def gate_spy(refactor, monkeypatch):
+def gate_spy(patch_lib, refactor, monkeypatch):
     """テストの実行・git・push を差し替える。"""
     seen: dict[str, list] = {"tests": [], "pushed": []}
 
@@ -34,9 +35,9 @@ def gate_spy(refactor, monkeypatch):
         seen["tests"].append(command)
         return seen.get("test_code", 0), False
 
-    monkeypatch.setattr(refactor, "_run_with_timeout", fake_run)
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **k: "HEADSHA")
-    monkeypatch.setattr(refactor, "_push_head",
+    patch_lib("run_with_timeout", fake_run)
+    patch_lib("git_out", lambda work, args, **k: "HEADSHA")
+    patch_lib("push_head",
                         lambda state: seen["pushed"].append(state["head_branch"]))
     return seen
 
@@ -44,7 +45,7 @@ def gate_spy(refactor, monkeypatch):
 # ---------- 起点と担当を記録して返す ----------
 
 def test_the_gate_records_the_fix_base_before_it_asks_for_a_fix(
-    refactor, tmp_path, env_tmp_dir, gate_spy
+    refactor, cmd_gate, tmp_path, env_tmp_dir, gate_spy
 ):
     """**起点を記録しないと、取り込み側が範囲を確定できない。**"""
     state_path = _gate_state(tmp_path)
@@ -52,7 +53,7 @@ def test_the_gate_records_the_fix_base_before_it_asks_for_a_fix(
     gate_spy["test_code"] = 1
 
     with pytest.raises(SystemExit) as e:
-        refactor.cmd_final_gate(_args())
+        cmd_gate.cmd_final_gate(_args())
 
     assert e.value.code == 2
     gate = read_state(state_path)["final_gate"]
@@ -61,7 +62,7 @@ def test_the_gate_records_the_fix_base_before_it_asks_for_a_fix(
 
 
 def test_the_gate_emits_the_fix_impl_and_round(
-    refactor, tmp_path, env_tmp_dir, gate_spy, capsys
+    refactor, cmd_gate, tmp_path, env_tmp_dir, gate_spy, capsys
 ):
     """呼び出し側は担当を**出力から**受け取る。控えを読み直させない。"""
     state_path = _gate_state(tmp_path)
@@ -69,7 +70,7 @@ def test_the_gate_emits_the_fix_impl_and_round(
     gate_spy["test_code"] = 1
 
     with pytest.raises(SystemExit):
-        refactor.cmd_final_gate(_args())
+        cmd_gate.cmd_final_gate(_args())
 
     out = capsys.readouterr().out
     impl = read_state(state_path)["final_gate"]["impl"]
@@ -78,8 +79,8 @@ def test_the_gate_emits_the_fix_impl_and_round(
     assert "FINAL_FIX_ROUND=1" in out
 
 
-def test_the_gate_does_not_reuse_the_apply_round_fix_base(
-    refactor, tmp_path, env_tmp_dir, gate_spy
+def test_the_gate_does_not_reuse_the_apply_round_fix_base(rounds, 
+    refactor, cmd_gate, tmp_path, env_tmp_dir, gate_spy
 ):
     """**適用ラウンドの起点は流用しない。**
 
@@ -98,7 +99,7 @@ def test_the_gate_does_not_reuse_the_apply_round_fix_base(
     gate_spy["test_code"] = 1
 
     with pytest.raises(SystemExit):
-        refactor.cmd_final_gate(_args())
+        cmd_gate.cmd_final_gate(_args())
 
     state = read_state(state_path)
     assert state["final_gate"]["fix_base_sha"] == "HEADSHA"
@@ -106,7 +107,7 @@ def test_the_gate_does_not_reuse_the_apply_round_fix_base(
 
 
 def test_the_same_runtime_keeps_fixing_across_fix_rounds(
-    refactor, tmp_path, env_tmp_dir, gate_spy
+    refactor, cmd_gate, tmp_path, env_tmp_dir, gate_spy
 ):
     """**担当は最初に落ちたときだけ決める。** 直しかけの文脈を持つ者が続ける。"""
     state_path = _gate_state(
@@ -115,7 +116,7 @@ def test_the_same_runtime_keeps_fixing_across_fix_rounds(
     gate_spy["test_code"] = 1
 
     with pytest.raises(SystemExit):
-        refactor.cmd_final_gate(_args())
+        cmd_gate.cmd_final_gate(_args())
 
     state = read_state(state_path)
     assert state["final_gate"]["impl"] == "kiro"
@@ -123,13 +124,13 @@ def test_the_same_runtime_keeps_fixing_across_fix_rounds(
 
 
 def test_a_passing_gate_records_no_fix_impl(
-    refactor, tmp_path, env_tmp_dir, gate_spy
+    refactor, cmd_gate, tmp_path, env_tmp_dir, gate_spy
 ):
     """通ったときは担当を決めない。輪番も進めない。"""
     state_path = _gate_state(tmp_path)
     env_tmp_dir(state_path)
 
-    refactor.cmd_final_gate(_args())
+    cmd_gate.cmd_final_gate(_args())
 
     state = read_state(state_path)
     assert "impl" not in state["final_gate"]
@@ -146,22 +147,20 @@ def _failing_gate_state(tmp_path, **over):
 
 
 @pytest.fixture
-def merge_spy(refactor, monkeypatch):
+def merge_spy(patch_lib, refactor, monkeypatch):
     """`merge-final-fix` が触る git を差し替える。"""
     seen: dict[str, list] = {"pushed": [], "reverted": []}
 
-    monkeypatch.setattr(refactor, "_discard_impl_leftovers", lambda state, work: None)
-    monkeypatch.setattr(refactor, "_push_head",
+    patch_lib("discard_impl_leftovers", lambda state, work: None)
+    patch_lib("push_head",
                         lambda state: seen["pushed"].append("push"))
-    monkeypatch.setattr(
-        refactor, "_revert_item_commits",
+    patch_lib("revert_item_commits",
         lambda state, item, dry_run=False: seen["reverted"].append(item) or 1)
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **k: (
+    patch_lib("git_out", lambda work, args, **k: (
         "HEADSHA" if args[:2] == ["rev-parse", "HEAD"] else "C1FULL"))
-    monkeypatch.setattr(
-        refactor, "commits_in_range",
+    patch_lib("commits_in_range",
         lambda work, base, head: None if not base else ["C1FULL"])
-    monkeypatch.setattr(refactor, "collect_commit_facts", lambda *a, **k: [
+    patch_lib("collect_commit_facts", lambda *a, **k: [
         {"sha": "C1FULL", "exists": True, "files": ["src/foo.py"],
          "trailers": seen.get("trailers", {"Impl-Runtime": "codex",
                                            "Impl-Model": "gpt-5.5"}),
@@ -171,14 +170,14 @@ def merge_spy(refactor, monkeypatch):
 
 
 def test_a_clean_final_fix_is_taken_in_and_published(
-    refactor, tmp_path, env_tmp_dir, merge_spy
+    refactor, cmd_gate, tmp_path, env_tmp_dir, merge_spy
 ):
     state_path = _failing_gate_state(tmp_path)
     env_tmp_dir(state_path)
     write_result(state_path, "codex-final-fix",
                  {"elapsed_seconds": 42, "commits": [{"sha": "C1FULL"}]})
 
-    refactor.cmd_merge_final_fix(_args())
+    cmd_gate.cmd_merge_final_fix(_args())
 
     gate = read_state(state_path)["final_gate"]
     assert merge_spy["reverted"] == [], "問題が無ければ取り消さない"
@@ -189,7 +188,7 @@ def test_a_clean_final_fix_is_taken_in_and_published(
 
 
 def test_the_final_fix_commit_does_not_need_an_item_id(
-    refactor, tmp_path, env_tmp_dir, merge_spy
+    refactor, cmd_gate, tmp_path, env_tmp_dir, merge_spy
 ):
     """**`Item-Id` と `Round` は求めない。**
 
@@ -201,13 +200,13 @@ def test_the_final_fix_commit_does_not_need_an_item_id(
     merge_spy["trailers"] = {"Impl-Runtime": "codex", "Impl-Model": "gpt-5.5"}
     write_result(state_path, "codex-final-fix", {"commits": [{"sha": "C1FULL"}]})
 
-    refactor.cmd_merge_final_fix(_args())
+    cmd_gate.cmd_merge_final_fix(_args())
 
     assert merge_spy["reverted"] == []
 
 
 def test_a_missing_impl_trailer_reverts_the_range(
-    refactor, tmp_path, env_tmp_dir, merge_spy
+    refactor, cmd_gate, tmp_path, env_tmp_dir, merge_spy
 ):
     """誰が直したかは残す。欠けていれば取り込まない。"""
     state_path = _failing_gate_state(tmp_path)
@@ -215,48 +214,42 @@ def test_a_missing_impl_trailer_reverts_the_range(
     merge_spy["trailers"] = {"Impl-Runtime": "codex"}
     write_result(state_path, "codex-final-fix", {"commits": [{"sha": "C1FULL"}]})
 
-    refactor.cmd_merge_final_fix(_args())
+    cmd_gate.cmd_merge_final_fix(_args())
 
     assert len(merge_spy["reverted"]) == 1
     assert merge_spy["pushed"] == ["push"], "取り消しも公開する"
 
 
-def test_an_out_of_scope_final_fix_reverts_the_range(
-    refactor, tmp_path, env_tmp_dir, merge_spy, monkeypatch
-):
+def test_an_out_of_scope_final_fix_reverts_the_range(patch_lib, refactor, cmd_gate, tmp_path, env_tmp_dir, merge_spy, monkeypatch):
     """**最終ゲートでも `--scope` の外を触ってよい理由は無い。**"""
     state_path = _failing_gate_state(tmp_path)
     env_tmp_dir(state_path)
-    monkeypatch.setattr(refactor, "collect_commit_facts", lambda *a, **k: [
+    patch_lib("collect_commit_facts", lambda *a, **k: [
         {"sha": "C1FULL", "exists": True, "files": ["docs/other.md"],
          "trailers": {"Impl-Runtime": "codex", "Impl-Model": "gpt-5.5"},
          "diff_lines": 10, "touches_tests": False, "test_status": "skipped"},
     ])
     write_result(state_path, "codex-final-fix", {"commits": [{"sha": "C1FULL"}]})
 
-    refactor.cmd_merge_final_fix(_args())
+    cmd_gate.cmd_merge_final_fix(_args())
 
     assert len(merge_spy["reverted"]) == 1
 
 
-def test_an_unreported_commit_reverts_the_range(
-    refactor, tmp_path, env_tmp_dir, merge_spy, monkeypatch
-):
+def test_an_unreported_commit_reverts_the_range(patch_lib, refactor, cmd_gate, tmp_path, env_tmp_dir, merge_spy, monkeypatch):
     """申告から漏れたコミットは検証を受けていない。範囲ごと取り消す。"""
     state_path = _failing_gate_state(tmp_path)
     env_tmp_dir(state_path)
-    monkeypatch.setattr(refactor, "_unassigned_fix_commits",
+    patch_lib("unassigned_fix_commits",
                         lambda work, reported, ordered: ["C2FULL"])
     write_result(state_path, "codex-final-fix", {"commits": [{"sha": "C1FULL"}]})
 
-    refactor.cmd_merge_final_fix(_args())
+    cmd_gate.cmd_merge_final_fix(_args())
 
     assert len(merge_spy["reverted"]) == 1
 
 
-def test_the_commit_test_status_is_not_checked(
-    refactor, tmp_path, env_tmp_dir, merge_spy, monkeypatch
-):
+def test_the_commit_test_status_is_not_checked(patch_lib, refactor, cmd_gate, tmp_path, env_tmp_dir, merge_spy, monkeypatch):
     """**コミットごとのテストは走らせない**（決定 11 の排他を破らないため）。
 
     合否は直後の `final-gate` が採った側で 1 度だけ見る。
@@ -272,17 +265,17 @@ def test_the_commit_test_status_is_not_checked(
                  "diff_lines": 10, "touches_tests": False,
                  "test_status": "skipped"}]
 
-    monkeypatch.setattr(refactor, "collect_commit_facts", spy_facts)
+    patch_lib("collect_commit_facts", spy_facts)
     write_result(state_path, "codex-final-fix", {"commits": [{"sha": "C1FULL"}]})
 
-    refactor.cmd_merge_final_fix(_args())
+    cmd_gate.cmd_merge_final_fix(_args())
 
     assert seen == [""], "テストコマンドを渡さない"
     assert merge_spy["reverted"] == [], "`skipped` を失敗として扱わない"
 
 
 def test_a_range_that_cannot_be_determined_does_not_take_anything_in(
-    refactor, tmp_path, env_tmp_dir, merge_spy
+    refactor, cmd_gate, tmp_path, env_tmp_dir, merge_spy
 ):
     """起点が無ければ取り込まない。**空の範囲と混同しない。**"""
     state_path = _failing_gate_state(tmp_path, final_gate={"fix_base_sha": None})
@@ -290,34 +283,34 @@ def test_a_range_that_cannot_be_determined_does_not_take_anything_in(
     write_result(state_path, "codex-final-fix", {"commits": []})
 
     with pytest.raises(SystemExit) as e:
-        refactor.cmd_merge_final_fix(_args())
+        cmd_gate.cmd_merge_final_fix(_args())
 
     assert e.value.code == 2
     assert merge_spy["pushed"] == []
 
 
 def test_the_take_in_needs_the_gate_to_run_first(
-    refactor, tmp_path, env_tmp_dir, merge_spy
+    refactor, cmd_gate, tmp_path, env_tmp_dir, merge_spy
 ):
     """担当が無いまま呼ばれたら**進行ごと止める**（終了コード 4）。"""
     state_path = _gate_state(tmp_path)
     env_tmp_dir(state_path)
 
     with pytest.raises(SystemExit) as e:
-        refactor.cmd_merge_final_fix(_args())
+        cmd_gate.cmd_merge_final_fix(_args())
 
     assert e.value.code == 4
 
 
 # ---------- 名前の取り決め ----------
 
-def test_the_final_fix_result_file_has_no_round_number(refactor):
+def test_the_final_fix_result_file_has_no_round_number(paths):
     """**最終ゲートは提案ラウンドの外にある。** 番号を名前に入れない。
 
     `launch-cli.sh` の `--stem-template "{agent}-final-fix"` と揃える。
     """
-    assert refactor.stem_for("codex", "final-fix", 130) == "codex-final-fix"
-    assert refactor.stem_for("codex", "fix", 130, 2) == "codex-fix-r2"
+    assert paths.stem_for("codex", "final-fix", 130) == "codex-final-fix"
+    assert paths.stem_for("codex", "fix", 130, 2) == "codex-fix-r2"
 
 
 # ---------- 起動（launch-cli.sh） ----------

@@ -56,7 +56,7 @@ def _state_with_sync(tmp_path, work, command="true"):
 
 # ---------- 変更のパスを 1 文字も欠かさず拾う ----------
 
-def test_unstaged_change_on_first_line_keeps_full_path(refactor, tmp_path):
+def test_unstaged_change_on_first_line_keeps_full_path(gitfacts, tmp_path):
     """先頭が空白の状態コード（` M`）でも、パスの先頭文字が消えない。
 
     `git status --porcelain` は「状態 2 文字 + 空白 + パス」の固定幅で、
@@ -66,19 +66,19 @@ def test_unstaged_change_on_first_line_keeps_full_path(refactor, tmp_path):
     work = _make_work(tmp_path)
     (work / "src.py").write_text("x = 2\n", encoding="utf-8")
 
-    changes = refactor._worktree_changes(str(work))
+    changes = gitfacts._worktree_changes(str(work))
 
     assert "src.py" in changes
 
 
-def test_every_changed_path_is_addable(refactor, tmp_path):
+def test_every_changed_path_is_addable(paths, gitfacts, tmp_path):
     """拾ったパスは、そのまま `git add` に渡して通る。"""
     work = _make_work(tmp_path)
     (work / "src.py").write_text("x = 2\n", encoding="utf-8")
     (work / "generated" / "out.py").write_text("x = 2\n", encoding="utf-8")
     state = read_state(_state_with_sync(tmp_path, work))
 
-    paths = refactor._dirty_paths(state, str(work))
+    paths = gitfacts._dirty_paths(state, str(work))
 
     assert paths == ["generated/out.py", "src.py"]
     _git("add", "--", *paths, cwd=work)
@@ -86,33 +86,33 @@ def test_every_changed_path_is_addable(refactor, tmp_path):
 
 # ---------- 同期コミット ----------
 
-def test_sync_commits_generated_changes(refactor, tmp_path):
+def test_sync_commits_generated_changes(vocabulary, gitfacts, tmp_path):
     """同期コマンドが作った差分は、進行側のコミットとして積まれる。"""
     work = _make_work(tmp_path)
     state = read_state(_state_with_sync(
         tmp_path, work, command="printf 'x = 2\\n' > generated/out.py"))
 
-    refactor._sync_generated(state)
+    gitfacts._sync_generated(state)
 
     assert _git("status", "--porcelain", cwd=work).stdout == ""
     subject = _git("log", "-1", "--format=%s", cwd=work).stdout.strip()
-    assert subject == refactor.SYNC_COMMIT_MESSAGE.splitlines()[0]
+    assert subject == vocabulary.SYNC_COMMIT_MESSAGE.splitlines()[0]
 
 
-def test_sync_without_changes_makes_no_commit(refactor, tmp_path):
+def test_sync_without_changes_makes_no_commit(gitfacts, tmp_path):
     """差分が出ない同期はコミットを作らない。"""
     work = _make_work(tmp_path)
     before = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
     state = read_state(_state_with_sync(tmp_path, work, command="true"))
 
-    refactor._sync_generated(state)
+    gitfacts._sync_generated(state)
 
     assert _git("rev-parse", "HEAD", cwd=work).stdout.strip() == before
 
 
 # ---------- 同期の後段で落ちたとき ----------
 
-def test_failure_after_sync_discards_produced_changes(refactor, tmp_path, monkeypatch):
+def test_failure_after_sync_discards_produced_changes(refactor_lib, patch_lib, refactor, gitfacts, tmp_path, monkeypatch):
     """`git add` / `git commit` が落ちても、同期が作った差分を残さない。
 
     残すと次の実行は清浄性の検査で必ず止まり、保留中の push を再試行できない。
@@ -120,30 +120,30 @@ def test_failure_after_sync_discards_produced_changes(refactor, tmp_path, monkey
     work = _make_work(tmp_path)
     state = read_state(_state_with_sync(
         tmp_path, work, command="printf 'x = 2\\n' > generated/out.py"))
-    monkeypatch.setattr(refactor, "_sh",
-                        lambda *a, **k: refactor.die("commit に失敗しました"))
+    patch_lib("sh",
+                        lambda *a, **k: refactor_lib.die("commit に失敗しました"))
 
     with pytest.raises(SystemExit):
-        refactor._sync_generated(state)
+        gitfacts._sync_generated(state)
 
     assert _git("status", "--porcelain", cwd=work).stdout == ""
 
 
-def test_failed_sync_command_discards_partial_changes(refactor, tmp_path):
+def test_failed_sync_command_discards_partial_changes(gitfacts, tmp_path):
     """同期コマンド自身が落ちたときも、途中まで書き換えた差分を残さない。"""
     work = _make_work(tmp_path)
     state = read_state(_state_with_sync(
         tmp_path, work, command="printf 'x = 2\\n' > generated/out.py; exit 1"))
 
     with pytest.raises(SystemExit):
-        refactor._sync_generated(state)
+        gitfacts._sync_generated(state)
 
     assert _git("status", "--porcelain", cwd=work).stdout == ""
 
 
 # ---------- 実装担当が残した未コミット変更 ----------
 
-def test_leftover_changes_are_discarded_before_merge(refactor, tmp_path):
+def test_leftover_changes_are_discarded_before_merge(gitfacts, tmp_path):
     """実装担当が残した未コミット変更は、取り込みの前に捨てる。
 
     公開は進行側が検証を通してから行うので、コミットされなかった変更は
@@ -153,13 +153,13 @@ def test_leftover_changes_are_discarded_before_merge(refactor, tmp_path):
     (work / "src.py").write_text("直しかけ\n", encoding="utf-8")
     state = read_state(_state_with_sync(tmp_path, work))
 
-    refactor._discard_impl_leftovers(state, str(work))
+    gitfacts.discard_impl_leftovers(state, str(work))
 
     assert _git("status", "--porcelain", cwd=work).stdout == ""
     assert (work / "src.py").read_text(encoding="utf-8") == "x = 1\n"
 
 
-def test_discard_keeps_control_directory(refactor, tmp_path):
+def test_discard_keeps_control_directory(gitfacts, tmp_path):
     """制御用ディレクトリ（状態・結果・ログ）は捨てない。"""
     work = _make_work(tmp_path)
     control = work / ".cross_refactoring"
@@ -174,15 +174,13 @@ def test_discard_keeps_control_directory(refactor, tmp_path):
         tmp_dir=str(control),
     ))
 
-    refactor._discard_impl_leftovers(state, str(work))
+    gitfacts.discard_impl_leftovers(state, str(work))
 
     assert (control / "keep.json").exists()
     assert _git("status", "--porcelain", cwd=work).stdout == ""
 
 
-def test_merge_fix_continues_when_impl_left_changes(
-    refactor, tmp_path, env_tmp_dir, monkeypatch
-):
+def test_merge_fix_continues_when_impl_left_changes(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch):
     """修正フェーズの置き土産があっても、`merge-fix` は中断しない。
 
     実装担当がコミットを作れずに終えると作業ツリーへ差分が残る。これを理由に
@@ -213,7 +211,7 @@ def test_merge_fix_continues_when_impl_left_changes(
                 "status": "applied", "commits": []}],
     )
     env_tmp_dir(state_path)
-    monkeypatch.setattr(refactor, "_push_head", lambda state: None)
+    patch_lib("push_head", lambda state: None)
     write_result(state_path, "codex-fix-r1",
                  {"resolved_thread_ids": [], "unresolved": [], "commits": []})
     (work / "src.py").write_text("直しかけ\n", encoding="utf-8")
@@ -224,9 +222,7 @@ def test_merge_fix_continues_when_impl_left_changes(
     assert read_state(state_path)["rounds"][0]["fix_rounds"] == 1
 
 
-def test_merge_fix_advances_when_the_range_is_undeterminable(
-    refactor, tmp_path, env_tmp_dir, monkeypatch
-):
+def test_merge_fix_advances_when_the_range_is_undeterminable(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch):
     """修正の範囲を確定できなくても、修正ラウンドは進めること。
 
     進めないと `should-abandon` が見送りへ移る条件（`fix_rounds` が上限に達する）を
@@ -258,7 +254,7 @@ def test_merge_fix_advances_when_the_range_is_undeterminable(
                 "status": "applied", "commits": []}],
     )
     env_tmp_dir(state_path)
-    monkeypatch.setattr(refactor, "_push_head", lambda state: None)
+    patch_lib("push_head", lambda state: None)
     write_result(state_path, "codex-fix-r1",
                  {"resolved_thread_ids": [], "unresolved": [], "commits": []})
 

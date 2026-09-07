@@ -4,7 +4,7 @@
 # Usage: launch-cli.sh <runtime> <phase> <ID> [ROUND]
 #
 #   runtime  claude | codex | agy | kiro
-#   phase    propose | propose-tests | apply | review | fix | final-fix
+#   phase    propose | propose-tests | apply | judge-test-changes | fix | final-fix
 #   ID       状態ファイルの鍵（最初に初期化した Pull Request 番号）
 #   ROUND    propose と final-fix 以外で必須
 #
@@ -67,11 +67,23 @@ case "$PHASE" in
     WORKDIR=$WORK
     PRINT_TIMEOUT=3600
     ;;
-  review)
-    [ "$ROUND" -ge 1 ] 2>/dev/null || { echo "review には ROUND が必要です" >&2; exit 1; }
-    STEM=$TMP_DIR/$RUNTIME-review-r$ROUND
-    WORKDIR=$ROOT/$RUNTIME
+  judge-test-changes)
+    # **テストの差分が振る舞いの変更を含むかの判定**（#443）。機械で決まらない差分だけを
+    # 渡すため、対象は小さい。判定だけを返させるので上限は提案と同じでよい。
+    [ "$ROUND" -ge 1 ] 2>/dev/null || { echo "$PHASE には ROUND が必要です" >&2; exit 1; }
+    # **名前に適用群を入れる。** 同じ提案ラウンドで複数の群が段 2 を通ると、
+    # 前の群の差分と結果を上書きする。**この時点では `APPLY_ROUND` が未設定である
+    # ため、ここで先に読む**（下の共通の読み取りは `STEM` の後にある）。
+    JUDGE_GROUP=$(jq -r --argjson r "$ROUND" \
+      '[.rounds[] | select(.round == $r)][0].apply_round // 1' "$STATE")
+    STEM=$TMP_DIR/$RUNTIME-judge-test-changes-r$ROUND-g$JUDGE_GROUP
+    WORKDIR=$WORK
     PRINT_TIMEOUT=900
+    # 判定の対象は、進行側が先に書き出す。**無ければ起動しない**（渡すものが無い）。
+    RF_TEST_DIFF_PATH=$TMP_DIR/test-diff-r$ROUND-g$JUDGE_GROUP.diff
+    [ -s "$RF_TEST_DIFF_PATH" ] || {
+      echo "判定する差分がありません: $RF_TEST_DIFF_PATH" >&2; exit 1; }
+    export RF_TEST_DIFF_PATH
     ;;
   final-fix)
     # **ラウンド番号を名前に入れない。** 最終ゲートは提案ラウンドの外にあり、
@@ -115,7 +127,7 @@ APPLY_ROUND=0
 # ラウンドの種類。適用と修正では、項目が改善項目かテスト項目かで手順が変わる。
 ROUND_KIND=$(jq -r --argjson r "$ROUND" \
   '[.rounds[] | select(.round == $r)][0].kind // "structure"' "$STATE")
-if [ "$PHASE" = "apply" ] || [ "$PHASE" = "fix" ] || [ "$PHASE" = "review" ]; then
+if [ "$PHASE" = "apply" ] || [ "$PHASE" = "fix" ] || [ "$PHASE" = "judge-test-changes" ]; then
   APPLY_ROUND=$(jq -r --argjson r "$ROUND" \
     '[.rounds[] | select(.round == $r)][0].apply_round // 0' "$STATE")
   ITEMS_JSON=$(jq --argjson r "$ROUND" --argjson a "$APPLY_ROUND" \
@@ -187,12 +199,6 @@ RF_ROUND_NOTE="この適用ラウンドの項目は**構造改善**です。振�
 export RF_ROUND_KIND=$ROUND_KIND RF_ROUND_NOTE=$RF_ROUND_NOTE
 export RF_VOCAB_SMELLS=$VOCAB_SMELLS RF_VOCAB_TECHNIQUES=$VOCAB_TECHNIQUES
 export RF_VOCAB_SEVERITIES=$VOCAB_SEVERITIES
-
-# 投稿の event の指示。自分の Pull Request では GitHub が APPROVE と
-# REQUEST_CHANGES を拒むため、検証側が組み立てた文面をそのまま渡す。
-RF_POST_EVENT_NOTE=$(jq -r '.review_post_note // ""' "$STATE")
-[ -n "$RF_POST_EVENT_NOTE" ] || RF_POST_EVENT_NOTE="投稿の \`-f event=\` には判定をそのまま渡してください。"
-export RF_POST_EVENT_NOTE
 
 # 雛形は `${RF_*}` を展開するだけの素の Markdown。コマンド置換は展開しない
 # （プロンプト本文に `$(...)` や backtick が現れても実行させないため）。

@@ -9,6 +9,7 @@ CLI そのものは起動しない。PATH へ何もしない実行ファイル�
 """
 from __future__ import annotations
 
+import sys
 import os
 import pathlib
 import subprocess
@@ -23,7 +24,8 @@ RUNTIME = "codex"
 
 @pytest.fixture
 def prompt(refactor, tmp_path):
-    state_path = make_state(tmp_path, vocabulary=refactor.vocabulary(),
+    vocabulary = sys.modules["refactor_lib.vocabulary"]
+    state_path = make_state(tmp_path, vocabulary=vocabulary.vocabulary(),
                             max_items_per_round=4)
     for name in ("work", RUNTIME):
         (tmp_path / name).mkdir(parents=True, exist_ok=True)

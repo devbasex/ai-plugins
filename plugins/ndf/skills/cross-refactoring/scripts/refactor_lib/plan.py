@@ -16,7 +16,7 @@ import os
 from typing import Any, Optional
 
 from . import die, info
-from .paths import _sh
+from .paths import sh
 from .rounds import TEST, item_kind, item_label
 from .vocabulary import ITEM_STATUS_LABELS
 
@@ -60,7 +60,7 @@ def _comment_payload(out: str) -> Optional[dict[str, Any]]:
 def _find_plan_comment(state: dict[str, Any]) -> Optional[dict[str, Any]]:
     """印を持つ既存のコメントを探す。見つからなければ `None`。"""
     repo, pr = state.get("repo"), state.get("current_pr")
-    out = _sh(
+    out = sh(
         ["gh", "api", f"repos/{repo}/issues/{int(pr)}/comments", "--paginate"],
         check=False,
     )
@@ -101,13 +101,13 @@ def publish_plan_comment(state: dict[str, Any]) -> Optional[str]:
 
     body = plan_comment_body(state)
     if comment_id:
-        out = _sh(
+        out = sh(
             ["gh", "api", f"repos/{repo}/issues/comments/{comment_id}",
              "-X", "PATCH", "-f", f"body={body}"],
             check=False,
         )
     else:
-        out = _sh(
+        out = sh(
             ["gh", "api", f"repos/{repo}/issues/{int(pr)}/comments",
              "-X", "POST", "-f", f"body={body}"],
             check=False,

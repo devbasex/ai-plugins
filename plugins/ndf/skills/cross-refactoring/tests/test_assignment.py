@@ -101,7 +101,7 @@ def test_host_takes_impl_turn_at_least_once(assignment, host):
     assert host in impls
 
 
-def test_reviewers_narrow_to_two_when_impl_is_host(assignment):
+def test_reviewers_narrow_to_two_when_impl_is_host(rounds, assignment):
     """実装担当がホストと同じラウンドでも、レビュー担当は 3 者にならず 2 者になる。"""
     host = "claude"
     rounds = [r for r in range(1, 13) if assignment.assign(r, host)[0] == host]

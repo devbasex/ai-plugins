@@ -16,7 +16,7 @@ import models as models_lib
 import statefile
 
 from . import die, info
-from .paths import _sh, stem_for
+from .paths import git_out, sh, stem_for
 from .plan import format_plan, normalize_plan_file, publish_plan_comment
 from .vocabulary import (
     DEFAULT_TEST_TIMEOUT,
@@ -34,7 +34,7 @@ TEST_PATH_MARKERS = ("/test/", "/tests/", "/spec/", "/specs/", "__tests__/")
 TEST_NAME_MARKERS = (".test.", ".spec.", "_test.", "_spec.", "test_", "spec_")
 
 
-def _safe_int(value: Any, fallback: int = 0) -> int:
+def safe_int(value: Any, fallback: int = 0) -> int:
     """LLM が返した値を int にする。数値として読めなければ `fallback`。
 
     非数値の文字列・配列・辞書が返ってくることがあり、素の `int()` は
@@ -53,7 +53,7 @@ def _safe_int(value: Any, fallback: int = 0) -> int:
     return fallback
 
 
-def _reported_shas(reported: Any) -> list[str]:
+def reported_shas(reported: Any) -> list[str]:
     """結果ファイルの `commits[]` から SHA を安全に取り出す。
 
     相手は LLM なので、`commits` が配列でない・要素が辞書でない・`sha` が
@@ -73,18 +73,6 @@ def _reported_shas(reported: Any) -> list[str]:
     return shas
 
 
-def _git_out(work: str, args: list[str], strip: bool = True) -> Optional[str]:
-    """`git` を実行して標準出力を返す。失敗したら `None`。
-
-    **固定幅で読む出力には `strip=False` を渡す。** `git status --porcelain` の
-    状態コードは未 stage の変更で ` M` と先頭が空白になるため、`strip()` すると
-    1 行目だけ 1 文字ずれ、切り出したパスの先頭が欠ける。欠けたパスは
-    `git add` で `pathspec ... did not match any files` になり、同期が止まる。
-    """
-    r = subprocess.run(["git", *args], cwd=work, capture_output=True, text=True)
-    if r.returncode != 0:
-        return None
-    return r.stdout.strip() if strip else r.stdout.rstrip("\n")
 
 
 def commits_in_range(work: str, base: Optional[str], head: str) -> Optional[list[str]]:
@@ -99,7 +87,7 @@ def commits_in_range(work: str, base: Optional[str], head: str) -> Optional[list
     """
     if not base:
         return None
-    out = _git_out(work, ["rev-list", f"{base}..{head}"])
+    out = git_out(work, ["rev-list", f"{base}..{head}"])
     return None if out is None else out.split()
 
 
@@ -109,7 +97,7 @@ def commit_trailers(work: str, sha: str) -> dict[str, str]:
     **結果ファイルの `trailers` は使わない。** JSON 上は仕様どおりでも、実際の
     `git commit` でトレーラーを書き忘れていれば集計に使えない。
     """
-    out = _git_out(work, ["log", "-1", "--format=%(trailers:only,unfold)", sha])
+    out = git_out(work, ["log", "-1", "--format=%(trailers:only,unfold)", sha])
     trailers: dict[str, str] = {}
     for line in (out or "").splitlines():
         key, sep, value = line.partition(":")
@@ -120,7 +108,7 @@ def commit_trailers(work: str, sha: str) -> dict[str, str]:
 
 def commit_diff_lines(work: str, sha: str) -> int:
     """コミットの追加 + 削除行数を git から数える。"""
-    out = _git_out(work, ["show", "--numstat", "--format=", sha])
+    out = git_out(work, ["show", "--numstat", "--format=", sha])
     total = 0
     for line in (out or "").splitlines():
         parts = line.split("\t")
@@ -134,13 +122,39 @@ def commit_diff_lines(work: str, sha: str) -> int:
 
 def commit_files(work: str, sha: str) -> list[str]:
     """コミットが触ったファイルのリポジトリ相対パス。範囲の検査に使う。"""
-    out = _git_out(work, ["show", "--name-only", "--format=", sha])
+    out = git_out(work, ["show", "--name-only", "--format=", sha])
     return [p.strip() for p in (out or "").splitlines() if p.strip()]
+
+
+def commit_test_changes(work: str, sha: str) -> dict[str, tuple[list[str], list[str]]]:
+    """コミットが触ったテストの、変更前後の行をファイルごとに返す。
+
+    **検証がテストの期待値を見るために要る**（#443）。差分ではなく前後の行を返すのは、
+    判定が `assert` の行の集合を突き合わせる形だからである。
+    """
+    out = git_out(work, ["show", "--name-only", "--format=", sha])
+    changes: dict[str, tuple[list[str], list[str]]] = {}
+    for path in (out or "").splitlines():
+        if not path.strip() or not _is_test_path(path):
+            continue
+        before = git_out(work, ["show", f"{sha}^:{path}"]) or ""
+        after = git_out(work, ["show", f"{sha}:{path}"]) or ""
+        changes[path] = (before.splitlines(keepends=True),
+                         after.splitlines(keepends=True))
+    return changes
+
+
+def _is_test_path(path: str) -> bool:
+    """テストの置き場所か。判定は `commit_touches_tests` と同じ印で行う。"""
+    lowered = f"/{path.lower()}"
+    name = lowered.rsplit("/", 1)[-1]
+    return (any(m in lowered for m in TEST_PATH_MARKERS)
+            or any(m in name for m in TEST_NAME_MARKERS))
 
 
 def commit_touches_tests(work: str, sha: str) -> bool:
     """コミットがテストの置き場所を触っているか。"""
-    out = _git_out(work, ["show", "--name-only", "--format=", sha])
+    out = git_out(work, ["show", "--name-only", "--format=", sha])
     for path in (out or "").splitlines():
         lowered = f"/{path.lower()}"
         name = lowered.rsplit("/", 1)[-1]
@@ -151,7 +165,7 @@ def commit_touches_tests(work: str, sha: str) -> bool:
     return False
 
 
-def _run_with_timeout(
+def run_with_timeout(
     command: str, cwd: str, timeout: int, kill_grace: float = 5.0
 ) -> tuple[Optional[int], bool]:
     """テストコマンドを実行し `(終了コード, 打ち切ったか)` を返す。
@@ -241,10 +255,10 @@ def run_test_at(
     上限時間を超えたら `fail` とする。生成されたコードやテストが無限ループに入ると、
     待ち続けて進行全体が止まるためで、通す側には倒さない。
     """
-    if _git_out(work, ["checkout", "--detach", sha]) is None:
+    if git_out(work, ["checkout", "--detach", sha]) is None:
         return "missing"
     try:
-        code, timed_out = _run_with_timeout(command, work, timeout, kill_grace)
+        code, timed_out = run_with_timeout(command, work, timeout, kill_grace)
         if timed_out:
             info(f"⚠ コミット {sha[:7]} のテストが {timeout} 秒で終わりませんでした")
             return "fail"
@@ -266,7 +280,7 @@ def collect_commit_facts(
     """
     facts: list[dict[str, Any]] = []
     for sha in shas:
-        full = _git_out(work, ["rev-parse", "--verify", f"{sha}^{{commit}}"])
+        full = git_out(work, ["rev-parse", "--verify", f"{sha}^{{commit}}"])
         if full is None or full not in in_range:
             facts.append({"sha": sha, "exists": False})
             continue
@@ -277,6 +291,8 @@ def collect_commit_facts(
             "diff_lines": commit_diff_lines(work, full),
             "files": commit_files(work, full),
             "touches_tests": commit_touches_tests(work, full),
+            # **テストの期待値が変わっていないかを検証が見る**（#443）。
+            "test_changes": commit_test_changes(work, full),
             # **テストコマンドが空なら走らせない。** 適用の検証は「適用そのものが
             # 通ったか」だけを見る。テストの合否は適用ラウンドの単位で
             # `verify-round` が 1 度だけ実行する（決定 3）。
@@ -363,7 +379,7 @@ def check_run_result(repo: str, sha: str, name: str) -> Optional[str]:
     """
     if not repo or not sha or not name:
         return None
-    out = _sh(
+    out = sh(
         ["gh", "api", f"repos/{repo}/commits/{sha}/check-runs"
                       f"?per_page={CHECK_RUNS_PER_PAGE}"],
         check=False,
@@ -392,7 +408,7 @@ def check_run_result(repo: str, sha: str, name: str) -> Optional[str]:
     return "success"
 
 
-def _revert_item_commits(
+def revert_item_commits(
     state: dict[str, Any], item: dict[str, Any], dry_run: bool = False
 ) -> int:
     """改善項目のコミットを取り消し、取り消した件数を返す。
@@ -422,7 +438,7 @@ def _revert_item_commits(
 
     # 途中で失敗したら**着手前の HEAD まで戻す**。1 項目が複数のコミットを持つとき、
     # 先行して成功した取り消しだけが履歴に残ると、再実行で不整合になって進めなくなる。
-    before = _git_out(work, ["rev-parse", "HEAD"])
+    before = git_out(work, ["rev-parse", "HEAD"])
     for sha in shas:
         r = subprocess.run(
             ["git", "revert", "--no-edit", sha],
@@ -465,7 +481,7 @@ def revert_unverified_range(
     # 終わると、未検証の変更が Pull Request に残ったままになる。
     entry["pending_push"] = True
     statefile.save(path, state)
-    _revert_item_commits(
+    revert_item_commits(
         state,
         {"item_id": label, "commits": list(ordered_range)},
         dry_run=False,
@@ -473,7 +489,7 @@ def revert_unverified_range(
     # 取り消し後の状態を新しい起点にし、**その場で保存する**。ここで保存せずに
     # 落ちると、次の実行は古い起点から範囲を取り直して取り消しコミット自体を
     # 「未申告」と判定し、**取り消しを取り消して**しまう。
-    entry["fix_base_sha"] = _git_out(work, ["rev-parse", "HEAD"])
+    entry["fix_base_sha"] = git_out(work, ["rev-parse", "HEAD"])
     statefile.save(path, state)
 
 
@@ -522,7 +538,7 @@ def _replay_commits(work: str, shas: list[str]) -> Optional[dict[str, str]]:
                            capture_output=True, text=True)
             info(f"⚠ {sha[:7]} を積み直せませんでした: {r.stderr.strip()[:200]}")
             return None
-        mapping[sha] = _git_out(work, ["rev-parse", "HEAD"]) or sha
+        mapping[sha] = git_out(work, ["rev-parse", "HEAD"]) or sha
     return mapping
 
 
@@ -553,13 +569,13 @@ def _commit_owner(
     """
     owner: dict[str, str] = {}
     for item_id in scoped_item_ids(entry):
-        item = _find_item(state, item_id, required=False)
+        item = find_item(state, item_id, required=False)
         if item is None:
             continue
         for sha in item.get("commits") or []:
             if not isinstance(sha, str) or not sha.strip():
                 continue
-            full = _git_out(work, ["rev-parse", "--verify", f"{sha.strip()}^{{commit}}"])
+            full = git_out(work, ["rev-parse", "--verify", f"{sha.strip()}^{{commit}}"])
             owner[full or sha.strip()] = item_id
     return owner
 
@@ -568,7 +584,7 @@ def _pending_drop_item_ids(state: dict[str, Any], drop_ids: list[str]) -> list[s
     """drop_ids から、まだ取り消されていない項目 ID だけを返す。"""
     return [
         i for i in drop_ids
-        if not (_find_item(state, i, required=False) or {}).get("reverted")
+        if not (find_item(state, i, required=False) or {}).get("reverted")
     ]
 
 
@@ -587,7 +603,7 @@ def _drop_replay_plan(
     keep_ids = [
         i for i in scoped_item_ids(entry)
         if i not in drop
-        and not (_find_item(state, i, required=False) or {}).get("reverted")
+        and not (find_item(state, i, required=False) or {}).get("reverted")
     ]
     replay = [s for s in reversed(ordered) if owner.get(s) in keep_ids]
     return owner, keep_ids, replay
@@ -615,7 +631,7 @@ def _execute_drop_replay(
     """
     _revert_range(work, ordered, head)
     # 取り消しが済んだ地点。積み直しに失敗したらここへ戻せばよい。
-    reverted_head = _git_out(work, ["rev-parse", "HEAD"])
+    reverted_head = git_out(work, ["rev-parse", "HEAD"])
     mapping = _replay_commits(work, replay)
     if mapping is None:
         info("⚠ 残す項目を積み直せませんでした。このラウンドは全件取り消します")
@@ -641,7 +657,7 @@ def _record_drop_result(
     scoped = scoped_item_ids(entry)
     dropped = list(scoped) if mode == "round" else pending
     for item_id in scoped:
-        item = _find_item(state, item_id, required=False)
+        item = find_item(state, item_id, required=False)
         if item is None:
             continue
         if mode == "round" or item_id not in keep_ids:
@@ -663,7 +679,7 @@ def _record_drop_result(
             "reverted": len(ordered), "replayed": len(mapping)}
 
 
-def _drop_items(
+def drop_items(
     state: dict[str, Any], entry: dict[str, Any], drop_ids: list[str],
     dry_run: bool = False,
 ) -> dict[str, Any]:
@@ -691,7 +707,7 @@ def _drop_items(
         info("↩ 取り消し対象は取り消し済みです")
         return {"mode": "skip", "dropped": [], "reverted": 0, "replayed": 0}
 
-    head = _git_out(work, ["rev-parse", "HEAD"])
+    head = git_out(work, ["rev-parse", "HEAD"])
     ordered = commits_in_range(work, entry.get("apply_base_sha"), head or "HEAD")
     if ordered is None:
         # 起点を記録していない状態ファイル（旧版）では積み直せない。
@@ -699,7 +715,7 @@ def _drop_items(
         info("⚠ 適用の範囲を確定できないため、項目のコミットだけを取り消します")
         reverted = 0
         for item_id in pending:
-            reverted += _revert_item_commits(state, _find_item(state, item_id), dry_run)
+            reverted += revert_item_commits(state, find_item(state, item_id), dry_run)
         return {"mode": "item", "dropped": pending,
                 "reverted": reverted, "replayed": 0}
 
@@ -723,12 +739,12 @@ def _order_newest_first(work: str, shas: list[str]) -> list[str]:
     """
     if len(shas) < 2:
         return list(shas)
-    history = _git_out(work, ["rev-list", "HEAD"])
+    history = git_out(work, ["rev-list", "HEAD"])
     if history is None:
         return list(shas)
     rank = {sha: i for i, sha in enumerate(history.split())}   # 0 が最も新しい
     resolved = {
-        s: (_git_out(work, ["rev-parse", "--verify", f"{s}^{{commit}}"]) or s)
+        s: (git_out(work, ["rev-parse", "--verify", f"{s}^{{commit}}"]) or s)
         for s in shas
     }
     return sorted(shas, key=lambda s: rank.get(resolved[s], len(rank)))
@@ -742,7 +758,7 @@ def _worktree_changes(work: str) -> dict[str, str]:
     """
     # `core.quotePath` の既定（true）では、非 ASCII を含むパスが `"` で囲まれ
     # `\343` の形へエスケープされる。そのまま `git add` へ渡すと見つからない。
-    out = _git_out(
+    out = git_out(
         work, ["-c", "core.quotePath=false", "status", "--porcelain", "-uall"],
         strip=False,
     )
@@ -799,7 +815,7 @@ def _discard_worktree_changes(work: str) -> None:
         subprocess.run(["git", *args], cwd=work, capture_output=True, text=True)
 
 
-def _discard_impl_leftovers(state: dict[str, Any], work: str) -> None:
+def discard_impl_leftovers(state: dict[str, Any], work: str) -> None:
     """実装担当が残した未コミットの変更を捨てる。取り込みの前に呼ぶ。
 
     **公開は進行側が検証を通してから行う**ので、コミットされなかった変更は
@@ -858,8 +874,8 @@ def _run_sync_command(state: dict[str, Any], work: str, command: str) -> None:
     **黙って push しない。** 同期できない状態を公開すると、利用者のリポジトリの
     検査を壊したまま進むことになる。
     """
-    code, timed_out = _run_with_timeout(
-        command, work, _safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT)
+    code, timed_out = run_with_timeout(
+        command, work, safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT)
     )
     if not (timed_out or code != 0):
         return
@@ -913,8 +929,8 @@ def _commit_sync_changes(
     # 同期コマンド自身が失敗したときと同じで、着手前が綺麗だったことを
     # 確認済みだからである。
     try:
-        _sh(["git", "add", "--", *produced], cwd=work)
-        _sh(["git", "commit", "-m", _publish_commit_message(produced, plan_rel)],
+        sh(["git", "add", "--", *produced], cwd=work)
+        sh(["git", "commit", "-m", _publish_commit_message(produced, plan_rel)],
             cwd=work)
     except SystemExit:
         _discard_worktree_changes(work)
@@ -958,14 +974,14 @@ def _sync_generated(state: dict[str, Any]) -> None:
     _commit_sync_changes(work, command, _dirty_paths(state, work), plan_rel)
 
 
-def _push_head(state: dict[str, Any]) -> None:
+def push_head(state: dict[str, Any]) -> None:
     """head ブランチへ push する。**`--force` は使わない。**
 
     **公開するのは進行側だけである。** 実装担当に push させると、検証を通る前に
     変更が Pull Request へ現れ、取り消しの反映漏れがそのまま残る。
     """
     _sync_generated(state)
-    _sh(
+    sh(
         ["git", "push", "origin", f"HEAD:{state['head_branch']}"],
         cwd=state["worktrees"]["work"],
     )
@@ -975,7 +991,7 @@ def _push_head(state: dict[str, Any]) -> None:
     publish_plan_comment(state)
 
 
-def _push_with_retry_marker(
+def push_with_retry_marker(
     path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any]
 ) -> None:
     """保留の印を立ててから push し、成功したら印を消す。
@@ -985,30 +1001,30 @@ def _push_with_retry_marker(
     """
     entry["pending_push"] = True
     statefile.save(path, state)
-    _push_head(state)
+    push_head(state)
     entry["pending_push"] = False
     statefile.save(path, state)
 
 
-def _flush_pending_push(
+def flush_pending_push(
     path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any]
 ) -> None:
     """前回やり残した push を、処理済みの判定より**先に**片づける。"""
     if not entry.get("pending_push"):
         return
     info("↻ 前回 push できなかった取り消しを反映します")
-    _push_head(state)
+    push_head(state)
     entry["pending_push"] = False
     statefile.save(path, state)
 
 
-def _current_round(state: dict[str, Any]) -> dict[str, Any]:
+def current_round(state: dict[str, Any]) -> dict[str, Any]:
     if not state["rounds"]:
         die("提案ラウンドが開かれていません。先に start-round を実行してください")
     return state["rounds"][-1]
 
 
-def _round(state: dict[str, Any], round_no: int) -> dict[str, Any]:
+def round_of(state: dict[str, Any], round_no: int) -> dict[str, Any]:
     for entry in state["rounds"]:
         if entry["round"] == round_no:
             return entry
@@ -1016,7 +1032,7 @@ def _round(state: dict[str, Any], round_no: int) -> dict[str, Any]:
     raise SystemExit(1)
 
 
-def _find_item(
+def find_item(
     state: dict[str, Any], item_id: Optional[str], required: bool = True
 ) -> Any:
     for item in state["items"]:
@@ -1027,7 +1043,7 @@ def _find_item(
     return None
 
 
-def _read_result(path: pathlib.Path, runtime: str) -> dict[str, Any]:
+def read_result(path: pathlib.Path, runtime: str) -> dict[str, Any]:
     """結果ファイルを読む。**JSON オブジェクトでなければ失敗させる。**
 
     配列や数値が返ってきたまま呼び出し側へ渡すと、`payload.get(...)` で
@@ -1049,7 +1065,7 @@ def _read_result(path: pathlib.Path, runtime: str) -> dict[str, Any]:
     return payload
 
 
-def _record_observed_model(
+def record_observed_model(
     entry: dict[str, Any], role: str, runtime: str,
     state: dict[str, Any], phase: str, round_no: Optional[int],
 ) -> None:
@@ -1077,3 +1093,30 @@ def _record_observed_model(
     warning = models_lib.mismatch_warning(runtime, requested, observed)
     if warning:
         info(warning)
+
+
+# ---------- 取り消しの実行 ----------
+#
+# **`drop_items` を直に使うため、ここへ置く。** ラウンドの側（`rounds`）へ置くと
+# `rounds → gitfacts → plan → rounds` の循環になる（#441 で実測）。
+
+def run_drop(
+    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any],
+    targets: list[str],
+) -> dict[str, Any]:
+    """取り消しを、中断しても再開できる形で実行する。
+
+    `pending_drop` と `pending_push` を立ててから入り、**戻ったらすぐ保存する**。
+    保存しないまま落ちると、積み直しで変わった SHA と取り消し済みの印が失われ、
+    次の実行は**履歴に無い SHA を相手に**取り消しをやり直すことになる。
+
+    印はここでは消さない。**呼び出し側が完了の記録と同じ保存で消す。** 先に消すと、
+    完了を記録する前に落ちたときに、次の実行が「取り消し済みだが未完了」の状態を
+    見分けられなくなる。
+    """
+    entry["pending_drop"] = list(targets)
+    entry["pending_push"] = True
+    statefile.save(path, state)
+    result = drop_items(state, entry, list(targets))
+    statefile.save(path, state)
+    return result
