@@ -21,6 +21,15 @@
 | `scripts/tests/test_vocabulary_single_source.py`（新設） | 語彙が 1 か所であることを機械で確かめる | #444 |
 | `scripts/check-cross-skill-refs.py` | 走査を `references` まで広げ、例外へ登録する | #444 |
 
+## いまの構造
+
+| 事実 | 実測（2026-09-07） |
+| --- | ---: |
+| `vocabulary.py` の `SMELLS` / `TECHNIQUES` | 17 個 / 18 個 |
+| `code-smells.md` に現れる英識別子 | **0 個** |
+| 「テストを変えてよいか」を定めた記述 | **どちらの Skill にも 0 件** |
+| `refactoring` / `cross-refactoring` を載せる manifest | **4 つすべて** |
+
 ## 処理の流れ
 
 ```mermaid
@@ -45,16 +54,7 @@ flowchart TD
     PR -.整えると決めたら.-> M
 ```
 
-## いまの構造
-
-| 事実 | 実測（2026-09-07） |
-| --- | ---: |
-| `vocabulary.py` の `SMELLS` / `TECHNIQUES` | 17 個 / 18 個 |
-| `code-smells.md` に現れる英識別子 | **0 個** |
-| 「テストを変えてよいか」を定めた記述 | **どちらの Skill にも 0 件** |
-| `refactoring` / `cross-refactoring` を載せる manifest | **4 つすべて** |
-
-## 決定の記録
+## 決定の記録: 語彙の移送（#444）
 
 ### 1. 語彙は `refactoring/references/vocabulary.md` が持つ
 
@@ -92,10 +92,16 @@ flowchart TD
 _VOCAB = pathlib.Path(__file__).resolve().parents[3] / "refactoring" / "references" / "vocabulary.md"
 ```
 
-**この参照は、いまの検査では検出されない。** `check-cross-skill-refs.py` が拾うのは
-`../<Skill 名>/` と `"<Skill 名>" / "scripts"` の 2 つで、`"refactoring" / "references"` は
-どちらにも当たらない。**例外へ登録するだけでは、対応する参照が無いもの（stale）として
-検査が落ちる。**
+**この参照は、いまの検査では検出されない。** `check-cross-skill-refs.py` が拾う形は 2 つ
+しかない。
+
+| 拾う形 | 例 |
+| --- | --- |
+| 相対パス | `../<Skill 名>/` |
+| Python のパス連結（直後が `scripts`） | `"<Skill 名>" / "scripts"` |
+
+**`"refactoring" / "references"` はどちらにも当たらない。** 例外へ登録するだけでは、対応する
+参照が無いもの（stale）として検査が落ちる。
 
 **走査を `references` まで広げる。** 検査の目的は「Skill をまたぐ参照が増えたときに
 気づく」ことであり、**配られなければ解決できない点で `scripts` と `references` は同じ**
@@ -126,6 +132,8 @@ manifest がどちらも載せているため配る先で相手が欠けない�
 
 **採らなかった案**: 共通層（`plugins/ndf/scripts/lib/`）へ置く。**方法論はプラグイン全体の
 共通物ではない。** 置くと、`refactoring` を読む利用者から語彙が離れる。
+
+## 決定の記録: テストの扱い（#443）
 
 ### 4. テストの変更は 3 つに分けて書く
 
@@ -163,8 +171,7 @@ assert price(order) == (
 
 ### 5. 兆候の語彙へテストの問題を 3 つ足す
 
-**結論**: `test_coupled_to_internals` / `test_bypasses_module_boundary` /
-`mock_targets_implementation_detail` を足す。
+**結論**: テストの側の問題を表す兆候を 3 つ足す。識別子と日本語の名前は下の表で定める。
 
 **理由**: **兆候として挙げられなければ、構造改善の対象にならない。** #438 と #440 で実際に
 起きた 3 つの形である。
@@ -217,17 +224,18 @@ assert price(order) == (
 テストは「テストの役目」で決まる。** 軸が違うものを同じ表へ並べると、両方に当たる変更の
 扱いが決まらない。
 
-### 7. 実装前の判断は `implementation-plan` の参照に置く（#442 の案 C）
+## 決定の記録: 実装前の判断（#442）
+
+### 7. 実装前の判断は `implementation-plan` の参照に置く
 
 **結論**: `implementation-plan/references/pre-refactoring.md` を新設し、`SKILL.md` の
 「リスクと対処」から呼ぶ。**工程表の行は増やさない。**
 
-**理由**: #442 の本文は 3 案を挙げ、**案 B（計画の中の判断）は #436 の実装計画で失敗した
-形**だと記録している。失敗の中身は「リスクと対処の表が空欄で、何を書くべきかの手がかりが無かった」ことで
-あり、**判断の手順が無かったことが原因である。** 場所ではなく手順を足す。
+**理由**: 計画の中の判断として置く形は、#436 の実装計画で機能しなかった。**リスクと対処の
+表が空欄のまま残り、何を書くべきかの手がかりが無かった。** 原因は置き場所ではなく、判断の
+手順が無かったことである。**場所ではなく手順を足す。**
 
-**採らなかった案**: 工程表へ行を足す（案 A）。盤面へ記録する工程の値が増え、v10.5.1 の決定に
-反する。
+**採らなかった案**: 工程表へ行を足す。盤面へ記録する工程の値が増え、v10.5.1 の決定に反する。
 
 ### 8. 判断の基準は測れるものと測れないものに分ける
 
