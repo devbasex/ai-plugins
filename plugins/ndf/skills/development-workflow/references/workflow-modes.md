@@ -38,6 +38,11 @@
 構造変更のみの単独依頼も、テストがあるなら `standard` で扱う（`legacy-refactor` は
 「振る舞い不変を示す手段がない」ことへの対処であり、テストが揃っていれば不要）。
 
+**実装の前に構造を整える判断は、モードとは別である。** `legacy-refactor` は変更全体に
+掛かるモードで、そちらは**これから触る対象の構造**に対する判断である。書き分けは
+[implementation-plan の pre-refactoring.md](../../implementation-plan/references/pre-refactoring.md)
+にある。
+
 ## よくある境界事例
 
 | 変更 | モード | 理由 |
