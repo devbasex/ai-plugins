@@ -60,3 +60,6 @@ ${SERENA_HOME}/
 
 # playwright_kit のテストが起点の直下へ作る報告書
 reports/
+
+# 利用者ごとの Claude Code の設定（.claude/settings.json は共有する）
+.claude/settings.local.json
