@@ -182,9 +182,6 @@ export RF_ROUND_KIND=$ROUND_KIND RF_ROUND_NOTE=$RF_ROUND_NOTE
 export RF_VOCAB_SMELLS=$VOCAB_SMELLS RF_VOCAB_TECHNIQUES=$VOCAB_TECHNIQUES
 export RF_VOCAB_SEVERITIES=$VOCAB_SEVERITIES
 
-# 投稿の event の指示。自分の Pull Request では GitHub が APPROVE と
-# REQUEST_CHANGES を拒むため、検証側が組み立てた文面をそのまま渡す。
-
 # 雛形は `${RF_*}` を展開するだけの素の Markdown。コマンド置換は展開しない
 # （プロンプト本文に `$(...)` や backtick が現れても実行させないため）。
 python3 - "$TEMPLATE" > "$PROMPT" <<'PY'
