@@ -9,6 +9,52 @@
 **開発版（接尾辞の付いた版）は載せない。** `9.8.0` は `9.8.0-dev.1` までしか出ておらず、
 その内容は `10.0.0` で届いている。
 
+## [ndf 10.7.0] - 2026-09-07
+
+### 追加
+
+- **兆候と手法の呼び名の表を `refactoring/references/vocabulary.md` へ置いた**（#444）。
+  兆候 20 組・手法 18 組の識別子と日本語の名前、手法ごとの差分予算の倍率を持つ。
+  **ここが呼び名を持つ唯一の場所である**
+- `refactoring/references/test-changes.md` を新設した（#443）。テストの変更を 3 つに分け、
+  判定を機械 → AI エージェント → 人の 3 段で行う。段階（移送 → テストを寄せる → 仕掛けを
+  外す）の分け方も置いた
+- 兆候を 3 つ足した（#443）。`test_coupled_to_internals` /
+  `test_bypasses_module_boundary` / `mock_targets_implementation_detail`
+- `implementation-plan/references/pre-refactoring.md` を新設した（#442）。実装の前に構造を
+  整えるかの判断。**工程表の行は増やしていない**
+- `cross-refactoring` に `judge-test-changes` フェーズと `merge-test-judgements` を足した
+  （#443）。機械で決まらないテストの差分を AI エージェントへ渡し、答えを取り込む
+- `cross-refactoring/tests/test_module_boundaries.py` を新設した（#441）。依存の循環・
+  モジュールをまたぐ非公開名・`commands` 層の横の依存を見る
+
+### 変更
+
+- **`cross-refactoring` が呼び名を自分で持たなくなった**（#444）。`refactoring` の表を読み、
+  読めなければ `init` の時点で止まる
+- `refactor.py` から再エクスポートと `__setattr__` の仕掛けを外した（#441）。入口は
+  argparse と `main` だけを持つ（244 行 → 190 行）
+- モジュールをまたぐ非公開名を 27 個から 0 個にした（#441）。`commands` 層どうしの横の
+  依存も 3 本から 0 本になった
+- `cross-refactoring` のテストをモジュール境界へ寄せた（#440）。`conftest.py` が
+  モジュールごとのフィクスチャを持つ
+- `check-cross-skill-refs.py` の走査を `references` まで広げた（#444）。**配布物にテストは
+  含まれない**ため、走査から `tests` を外した
+- `cross-refactoring` の検証がテストの期待値の変更を見る（#443）。**機械が「変わっていない」
+  と言えるのは前後が同一のときだけ**で、値が失われたときに落とし、それ以外は AI へ回す
+
+### 削除
+
+- `cross-refactoring` からレビュー機構の残骸を取り除いた（#446）。`prompts/review.md`、
+  `launch-cli.sh` の `review` フェーズ、投稿の event の注記
+- `commands/review.py` を `commands/converge.py` へ改名した（#446）。持つのは収束ループの
+  判定と取り消しであり、レビューではない
+
+### 修正
+
+- 通過工程の控えの移行を、更新の案内へ入れた（#451）。控えは課題ごとに残り続けるため、
+  旧い名前のままだと通った工程が「記録なし」として案内される
+
 ## [ndf 10.6.0] - 2026-09-07
 
 ### 追加
