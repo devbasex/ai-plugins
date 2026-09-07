@@ -284,6 +284,7 @@ assert price(order) == (
 | 2（一致の検査） | `scripts/tests/test_vocabulary_single_source.py`。`vocabulary.md` の表と `SMELLS` / `TECHNIQUES` が一致すること |
 | 3（固定費） | `vocabulary.md` の表に手法ごとの倍率があること。`verify.py` がそれを使うこと |
 | 5（振る舞いが変わらない） | `cross-refactoring` の既存のテストが通る |
+| 6（検査と全体テスト） | 検査 8 本と `uv run --with pytest pytest scripts/tests plugins/ndf -q` を実行し、終了コードを証跡へ残す（`quality-gates`） |
 | 7 / 8 / 10 / 12（テストの扱い） | `test-changes.md` の記述。`markdown-writing` のセルフチェック |
 | 9（兆候の語彙） | 一致の検査に 3 つが含まれること |
 | 11（検証が種類を見る） | `verify.py` のテスト。期待値が変わった差分を落とすこと |
