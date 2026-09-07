@@ -2,7 +2,7 @@
 
 `development-workflow` の工程表が判定の基準を持つ唯一の場所である。対応表も盤面の値の
 一覧も、その表から作られる。片方だけが更新されると、工程を盤面へ記録できなくなる。
-実際に「設計レビュー」が値の一覧から抜けており、その工程にいることを記録できなかった。
+実際に「ドキュメントレビュー」が値の一覧から抜けており、その工程にいることを記録できなかった。
 
 突き合わせる先は 4 つある。
 
@@ -96,8 +96,8 @@ def test_the_declared_values_match_the_workflow_table() -> None:
 
 
 def test_the_design_review_stage_is_declared() -> None:
-    """設計レビューの工程を盤面へ記録できること（#231 そのもの）。"""
-    assert "設計レビュー" in declared_stages()
+    """ドキュメントレビューの工程を盤面へ記録できること（#231 そのもの）。"""
+    assert "ドキュメントレビュー" in declared_stages()
 
 
 @pytest.mark.parametrize("heading", [WORKFLOW_TABLE_HEADING, TRACKING_TABLE_HEADING])

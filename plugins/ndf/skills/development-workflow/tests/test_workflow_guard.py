@@ -12,7 +12,8 @@ from pathlib import Path
 import pytest
 
 from workflow_helpers import (
-    base_env, checkout, init_repo, path_with, pre_tool_use, run_guard, run_stage_check,
+    base_env, checkout, init_repo, path_with, pre_tool_use, run_guard, run_lib,
+    run_stage_check,
     state_file, stub_gh,
 )
 
@@ -277,6 +278,33 @@ def test_the_reason_of_an_undetermined_merge_names_what_was_missing(
 
 # --- #221 進行の記録の観測 --------------------------------------------------
 
+def test_parse_sync_reads_the_issue_key_and_value(repo: Path) -> None:
+    result = run_lib(
+        'wf_parse_sync \'bash "$SCRIPTS/projects-sync.sh" 161 stage "設計"\'',
+        cwd=repo,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "161\tstage\t設計"
+
+
+def test_parse_sync_rejects_a_command_with_too_few_arguments(repo: Path) -> None:
+    result = run_lib(
+        'wf_parse_sync \'bash "$SCRIPTS/projects-sync.sh" 161 stage\'',
+        cwd=repo,
+    )
+
+    assert result.returncode == 1
+    assert result.stdout.strip() == ""
+
+
+def test_parse_sync_rejects_an_unrelated_command(repo: Path) -> None:
+    result = run_lib('wf_parse_sync "gh pr create --base develop"', cwd=repo)
+
+    assert result.returncode == 1
+    assert result.stdout.strip() == ""
+
+
 def test_a_sync_command_is_recorded(repo: Path, state: Path) -> None:
     result = guard(repo, state, 'bash "$SCRIPTS/projects-sync.sh" 161 stage "設計"')
 
@@ -286,10 +314,10 @@ def test_a_sync_command_is_recorded(repo: Path, state: Path) -> None:
 
 
 def test_the_mode_is_recorded_from_the_same_command(repo: Path, state: Path) -> None:
-    guard(repo, state, 'bash /abs/scripts/projects-sync.sh 161 mode "architecture"')
+    guard(repo, state, 'bash /abs/scripts/projects-sync.sh 161 mode "standard"')
 
     saved = json.loads(state_file(state, 161).read_text(encoding="utf-8"))
-    assert saved["mode"] == "architecture"
+    assert saved["mode"] == "standard"
 
 
 def test_recording_a_stage_before_the_release_says_nothing(repo: Path, state: Path) -> None:
@@ -301,9 +329,9 @@ def test_recording_a_stage_before_the_release_says_nothing(repo: Path, state: Pa
 def test_recording_the_release_reports_the_missing_stages(repo: Path, state: Path) -> None:
     """#221-1: 必須の工程の記録が無いまま配布の記録へ進んだとき、名前が出力に現れる。"""
     env = base_env(state)
-    run_stage_check("record", "161", "mode", "architecture", cwd=repo, env=env)
-    for stage in ("作業場所の用意", "要求と受け入れ条件", "設計", "設計レビュー", "計画",
-                  "実装", "構造改善", "レビュー", "完了判定", "Pull Request", "後片付け"):
+    run_stage_check("record", "161", "mode", "standard", cwd=repo, env=env)
+    for stage in ("作業場所の用意", "要求と受け入れ条件", "設計", "ドキュメントレビュー", "計画",
+                  "実装", "構造改善", "実装レビュー", "完了判定", "Pull Request", "後片付け"):
         run_stage_check("record", "161", "stage", stage, cwd=repo, env=env)
 
     result = guard(repo, state, 'bash "$SCRIPTS/projects-sync.sh" 161 stage "配布"')
@@ -318,7 +346,7 @@ def test_recording_the_release_without_a_gap_says_nothing(repo: Path, state: Pat
     env = base_env(state)
     run_stage_check("record", "161", "mode", "light", cwd=repo, env=env)
     for stage in (
-        "要求と受け入れ条件", "作業場所の用意", "実装", "レビュー", "完了判定",
+        "要求と受け入れ条件", "作業場所の用意", "実装", "実装レビュー", "完了判定",
         "Pull Request", "後片付け",
     ):
         run_stage_check("record", "161", "stage", stage, cwd=repo, env=env)

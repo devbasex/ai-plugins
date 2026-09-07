@@ -125,10 +125,6 @@ def test_plan_is_stable_for_the_same_state(refactor, tmp_path):
 
 # ---------- 置き場所 ----------
 
-def test_the_default_plan_file_lives_under_issues(refactor):
-    assert refactor.default_plan_file(136) == "issues/refactoring-plan-rf136.md"
-
-
 def test_the_plan_file_is_written_inside_the_work_dir(refactor, tmp_path):
     work = _make_work(tmp_path)
     _, state = _state(tmp_path, work=work, plan_file="issues/plan.md")

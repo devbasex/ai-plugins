@@ -8,10 +8,10 @@ PR 運用、レビュー、調査、実装計画、仕様書化、開発方法�
 
 | ランタイム | 公開 Skill | マニフェスト |
 | --- | --- | --- |
-| Claude Code | 40 個 | `.claude-plugin/plugin.json` |
-| Codex | 38 個 | `.codex-plugin/plugin.json` |
-| Kiro CLI | 39 個 | `dev.kiro/install.sh`（プラグイン機構が無いため installer で導入） |
-| agy | 38 個 | `dev.agy/plugin.json`（取得元の登録が無いため clone から導入） |
+| Claude Code | 41 個 | `.claude-plugin/plugin.json` |
+| Codex | 39 個 | `.codex-plugin/plugin.json` |
+| Kiro CLI | 40 個 | `dev.kiro/install.sh`（プラグイン機構が無いため installer で導入） |
+| agy | 39 個 | `dev.agy/plugin.json`（取得元の登録が無いため clone から導入） |
 
 ## レイアウト
 
@@ -19,7 +19,7 @@ PR 運用、レビュー、調査、実装計画、仕様書化、開発方法�
 plugins/ndf/
 ├── .claude-plugin/plugin.json   # Claude Code のマニフェスト
 ├── .codex-plugin/plugin.json    # Codex のマニフェスト
-├── skills/                      # 配布 Skill の唯一の実体（40 個）
+├── skills/                      # 配布 Skill の唯一の実体（41 個）
 ├── skills/README.md             # Skill 執筆の規約
 ├── manifests/                   # ランタイム別の配布 Skill 一覧
 ├── agents/                      # Claude Code のサブエージェント定義（8 個）
@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.5.1）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.6.0）
 ```
 
 ### agy
@@ -102,7 +102,7 @@ agy plugin install plugins/ndf/dev.agy                               # 初回
 agy plugin uninstall ndf && agy plugin install plugins/ndf/dev.agy   # 新しい版へ
 ```
 
-導入すると `manifests/agy-skills.txt` に載る Skill 38 個と、エージェント 8 個、hook 1 個が
+導入すると `manifests/agy-skills.txt` に載る Skill 39 個と、エージェント 8 個、hook 1 個が
 `~/.gemini/config/plugins/ndf/` へ複製されます。symlink は実体へ解決されて複製されるため、
 clone を消しても導入した内容は残ります。
 
@@ -119,18 +119,30 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.5.1 へ更新するとき
+## v10.6.0 へ更新するとき
 
-**配布 Skill の数も、既存の Skill の引数と副コマンドも変わりません。変わるのは開発の
-進め方です。** 変更点の一覧は [CHANGELOG.md](../../CHANGELOG.md) にあります。
+**破壊的な変更が 3 つあります。** 配布 Skill は 1 つ増え、モード名と工程名が変わります。
+変更点の一覧は [CHANGELOG.md](../../CHANGELOG.md) にあります。
 
 | 変わったこと | 中身 |
 | --- | --- |
-| モードを判定する単位が Pull Request になりました | 課題ではありません。1 本に対しモードは 1 つで、工程の順序は**要求と受け入れ条件 → モード判定 → 作業場所の用意**になります |
-| **`light` にもレビューと要求工程が掛かります** | Pull Request を出す以上、その差分は誰かがレビューします。手段は他のモードと同じ `cross-review` です |
-| Pull Request を作る時点で実行証跡を見ます | `gh pr create` を観測し、記録の無い必須の工程を案内します。**拒否はしません** |
-| 人手の承認を求める関門を 2 つに定めました | 設計 Pull Request のマージと、本番のチャネルへ届く操作です。後者の宛先は `.ndf/worktree.json` の `production_branch` が宣言します |
-| 事後レビューで出た 8 件を直しました | 日本語のファイル名が行数の検査を素通りする、相対パスや空白を含むパスで導入した agy の hook が効かない、など。**agy の hook は差し込み直してください**（保存する command が絶対パスで組み立て直されます） |
+| **モードの一覧** | `architecture` を廃止して `standard` へ統合し、**運用モード `operation`** を足しました（`light` / `operation` / `legacy-refactor` / `standard`。高さ順） |
+| **工程名の改名 2 件** | 設計レビュー → **ドキュメントレビュー**、レビュー → **実装レビュー** |
+| 工程と Skill が 1 つずつ増加 | 「設計」の次に**ドキュメント再構成**（`standard` では必須）。Skill は **`document-restructuring`** |
+| **`cross-refactoring` のフロー** | ラウンドが 4 層（テスト整備 / 提案 / 適用 / 修正）になり、**レビューがテストへ置き換わりました**。`judge-review` と `review-targets` は削除 |
+| 承認の関門の名前 | 「本番のチャネルへ届く操作」→「**本番の系へ届く操作**」。配布と運用の実行を含みます（**関門は 2 つのまま**） |
+
+### 記録の移行が要ります
+
+**後方互換の仕組みはありません。** 進行を記録している課題の `## 進行` の節で、
+`モード: architecture` を `standard` へ、`設計レビュー` を `ドキュメントレビュー` へ、
+`レビュー` を `実装レビュー` へ書き換え、「設計」の次へ `ドキュメント再構成` を入れて
+ください。**節の外は書き換えないこと。** 対象は書き換える前に数え直します。
+書き換えの詳細は [CHANGELOG.md](../../CHANGELOG.md) の「移行」にあります。
+
+盤面（GitHub Projects）を使っている場合は単一選択へ新しい値を足してください（値が無くても
+工程は止まりません）。**ブランチ名の接頭辞 `design/` と承認ラベル `design-approved` は
+変わりません。**
 
 ### 手元で確かめる
 
@@ -281,7 +293,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.5.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.6.0/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -303,14 +315,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.5.1/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.6.0/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.5.1  <path>
+# => ndf@ai-plugins  installed, enabled  10.6.0  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
@@ -432,57 +444,9 @@ Kiro CLI には Skill・フック・外部連携・常時指示をまとめて�
 
 ## 実機検証の記録
 
-kiro-cli **2.16.1** / 検証日 **2026-08-07**（ランタイム規約の調査）、**2026-08-08**（本変更の導入方式の検証）。
-
-`docs/specifications/ndf-skill-inventory/`（Skill 棚卸台帳）は本ブランチ時点で未作成のため、検証結果はここに記録します。台帳への転記は台帳作成後に行います。
-
-| 検証項目 | 結果 | 根拠 |
-| --- | --- | --- |
-| シンボリックリンク経由の Skill を認識するか | 認識する（[#6401](https://github.com/kirodotdev/Kiro/issues/6401) は 2.16.1 で再現せず） | 実体ディレクトリとリンクを並べ、両方が一覧・読み取りとも成功 |
-| 起動時に Skill 本文を読み込むか | 読み込まない（[#6680](https://github.com/kirodotdev/Kiro/issues/6680) は 2.16.1 で再現せず） | 「ファイルを読まずに本文中のマーカーを出力せよ」に対し「本文なし」と応答 |
-| `description` 一致で自動発動するか | 発動する（[#5867](https://github.com/kirodotdev/Kiro/issues/5867) は 2.16.1 で再現せず） | `skill://` 指定を削除した状態で、該当依頼に対し `docker-container-access/SKILL.md` を自ら読みに行った |
-| プロジェクト配置で `allowed-tools` が事前承認になるか | **ならない**（[#6055](https://github.com/kirodotdev/Kiro/issues/6055)） | `allowed-tools: execute_bash` を持つ検査用 Skill が denied list で拒否された |
-| `install.sh` 後に `kiro-cli agent list` へ現れるか | 現れる | `ndf  Workspace  NDF統合開発エージェント（Kiro CLI用）` |
-| `--agent ndf` で agentSpawn フックが動くか | 動く | `[NDF] CLAUDE.ndf.md が検出されました…` が文脈へ注入された。`kiro_default` では注入されない |
-| `--set-default` で既定が切り替わるか | 切り替わる | `agent list` の `*` が `ndf` へ移り、素の `kiro-cli chat` でも agentSpawn フックが動いた |
-| `--project` で別ディレクトリへ導入したとき `--set-default` が効くか | 効く（修正後） | 修正前は導入先以外の cwd から実行すると `Failed to set default agent: No agent with name ndf found` になり、しかも終了コード 0 で「変更しました」と表示していた。修正後は導入先で `kiro-cli` を実行し、`agent list` で反映を検証する |
-| `--scope global --set-default` が効くか | 効く | `$HOME` で `kiro-cli` を実行し `agent list` の `*` が `ndf` へ移った。検証後に `kiro-cli agent set-default kiro_default` で復旧し、`~/.kiro` の `find` 比較で検証前と一致することを確認 |
-| `--scope global` で `~/.kiro/` へ配置されるか | 配置される | `~/.kiro/{skills,steering,prompts,agents}` が生成され、プロジェクト外でも `Global` として一覧に出た |
-| steering がエージェント選択に依存せず読まれるか | 読まれる | `kiro_default` の `/context show` にも `.kiro/steering/**/*.md` の一致として現れた |
-| 再インストールで利用者管理の設定が残るか | 残る | `mcpServers.bigquery` / `hooks.userPromptSubmit` / `toolsSettings` を書き足してから再実行し、すべて残ることを確認。ログに `利用者管理の設定を引き継ぎました: hooks.userPromptSubmit, mcpServers.bigquery, toolsSettings` |
-| `--with-codex` を外した再実行の挙動 | `mcpServers.codex` だけ消える | 同じ再実行で `mcpServers.bigquery` は残った。`codex` は installer 管理のため |
-| 既存 `ndf.json` が壊れた JSON のとき | テンプレートから再生成する | `WARN: 既存の … を読めないため引き継ぎません` を出して続行し、`.bak` は残る |
-| `kiro-cli agent set-default` の保存先 | `~/.local/share/kiro-cli/data.sqlite3`（マシン全体の設定） | 実行した cwd に `.kiro/settings.json` は生成されず、`find ~/.kiro ~/.aws` にも差分が出なかった |
-| 既定エージェントが cwd 依存で復旧できるか | 導入先から実行すれば復旧できる | 対象プロジェクト限定の workspace エージェントを既定にした状態では、別 cwd からの `set-default` が `No agent with name … found` になりつつ終了コード 0 を返し、既定が戻らなかった |
-
-コンテキスト占有率を `kiro-cli chat --agent <名前> --no-interactive '/context show'` で実測しました。測定用プロジェクトには本リポジトリの `AGENTS.md` と `README.md` を置き、`install.sh --project <測定用ディレクトリ>` で配布物を導入しています。**下表は Kiro manifest が 21 個だった時点の測定値**で、4 構成を比較するために同一プロジェクトで測ったものです（`ndf-policies` は `.kiro/steering/` へ回すため `.kiro/skills/` に並ぶのは 20 個）。`一致ファイル数` と `合計文字数` は `/context show` が列挙したファイルを数え上げた値、`占有率` は `Context files total` の表示値です。
-
-| 構成 | 一致ファイル数 | `ndf-policies` の注入回数 | 占有率 | 文脈ファイルの合計文字数 |
-| --- | --- | --- | --- | --- |
-| 変更前 `default` エージェント | 26 | 2（`resources` + Skill） | 0.6% | 125,723 |
-| 本 PR 初版 `ndf` エージェント | 26 | 2（Skill + steering） | 0.6% | 125,746 |
-| 修正後 `ndf` エージェント | 25 | 1（steering のみ） | 0.6% | 125,562 |
-| 参考: 組み込み `kiro_default` | 25 | 1（steering のみ） | 0.6% | 125,562 |
-
-`resources` の二重登録を解消しただけでは、代わりに steering が 1 件増えるためファイル数は 26 のまま減りませんでした。`ndf-policies` を `.kiro/skills/` へ symlink しない変更を加えて、はじめて 26 → 25 に減っています。ただし `ndf-policies/SKILL.md` は 184 文字しかないため、合計文字数の削減は 125,746 → 125,562（-184 文字）にとどまり、`/context show` の表示（0.1% 刻み）は 0.6% のまま変わりません。重複解消の目的は表示上の占有率低減ではなく、同じ指示が 2 回注入される状態を解消することです。
-
-`ndf-policies` を Skill として置かなくても機能は落ちません。`user-invocable: false` で本文の参照を前提としない Skill であり、内容は steering として常時読み込まれるためです。
-
-なお 2026-08-07 に別プロジェクトで測った 0.2% / 112,598 文字という値は、測定用プロジェクトの `AGENTS.md` / `README.md` が異なるため本表とは比較できません。上表は 4 構成すべてを同一プロジェクトで測り直した値です。
-
-その後、ブラウザ自動テストの 3 個を 3 ランタイムへ配布する変更で Kiro manifest は
-**24 個**（`.kiro/skills/` に並ぶのは 23 個）になりました。同じ手順で測り直した現行
-構成の値は次のとおりです。
-
-| 構成 | 一致ファイル数 | `ndf-policies` の注入回数 | 占有率 | 文脈ファイルの合計文字数 |
-| --- | --- | --- | --- | --- |
-| 現行 `ndf` エージェント（manifest 24 個） | 26 | 1（steering のみ） | 0.9% | 139,182 |
-
-Skill が 3 個増えても `ndf-policies` の注入は 1 回のままです。占有率が 0.6% から
-0.9% へ上がったのは、Skill が 3 個増えたことに加え、測定用プロジェクトへ置いた
-`AGENTS.md` / `README.md` が棚卸の記載追加でその間に大きくなったためです（同一
-プロジェクトでの前後比較ではないため、この差分だけを Skill 増加の影響として
-読まないこと）。
+kiro-cli の実機検証と、Skill 数が文脈量へ与える影響の実測は
+[docs/field-test-records.md](docs/field-test-records.md) にある。
+**その時点の実測であり、以後の構成変更には追随しない。**
 
 ## 検証
 

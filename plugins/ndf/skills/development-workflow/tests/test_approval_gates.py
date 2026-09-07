@@ -4,8 +4,12 @@
 回数が増えると、内容を読まずに通す動きが入る。
 
 **2 つは要否の決まり方が違う。** 設計 Pull Request のマージはマージ先のチャネルに
-よらず要り、本番のチャネルへ届く操作だけがチャネルで決まる。表と規則を並べて書くと
-片方に掛かる規則が両方に掛かって読めるため、**関門ごとに節を分ける**。
+よらず要り、本番の系へ届く操作だけが**届く先が本番の系かどうか**で決まる。表と規則を
+並べて書くと片方に掛かる規則が両方に掛かって読めるため、**関門ごとに節を分ける**。
+
+**2 つ目の関門は配布と運用モードの実行の両方を含む（#423）。** 性質が同じもの
+（反映した瞬間に効き、取り消しても「その状態を見た人」は戻らない）を別の関門として
+数えると、数だけが増える。
 """
 from __future__ import annotations
 
@@ -40,7 +44,7 @@ def test_there_are_exactly_two_gates() -> None:
     body = skill()
     assert re.search(r"関門は\s*\*{0,2}2 つ", body)
     assert "設計 Pull Request のマージ" in body
-    assert "本番のチャネルへ届く操作" in body
+    assert "本番の系へ届く操作" in body
 
 
 def test_the_design_gate_does_not_depend_on_the_channel() -> None:
@@ -49,16 +53,18 @@ def test_the_design_gate_does_not_depend_on_the_channel() -> None:
     assert "マージ先のチャネルによらず" in body
 
 
-def test_the_release_gate_depends_on_the_channel() -> None:
+def test_the_release_gate_depends_on_the_destination() -> None:
+    """要否は「届く先が本番の系かどうか」で決まる。`operation` はマージ経路を持たない。"""
     body = skill()
-    assert re.search(r"マージ先のチャネルが決める", body)
+    assert re.search(r"届く先が本番の系かどうかで決まる", body)
+    assert "チャネルは系の一種である" in body
 
 
 def test_the_two_gates_have_their_own_sections() -> None:
     """規則を並べて書くと、片方に掛かる規則が両方に掛かって読める。"""
     body = skill() + approval()
     assert body.count("### 設計 Pull Request のマージ") >= 1
-    assert body.count("### 本番のチャネルへ届く操作") >= 1
+    assert body.count("### 本番の系へ届く操作") >= 1
 
 
 def test_the_implementation_merge_is_not_a_gate() -> None:
@@ -158,15 +164,41 @@ def test_the_boundary_with_issue_plan_strategy_is_written() -> None:
 
 
 def test_every_stage_says_which_unit_it_moves_in() -> None:
-    """工程表の 15 行それぞれが、どの単位で動くかを持つ。"""
+    """工程表の各行が、どの単位で動くかを持つ。
+
+    **工程の一覧をここへ写さない。** 写すと工程を足したときに片方だけが古くなる。
+    `SKILL.md` の工程表を読み、その行がすべて `parallel-work.md` にあることを見る。
+    """
     body = parallel()
-    stages = [
-        "要求と受け入れ条件", "作業場所の用意", "設計", "設計レビュー", "計画", "実装",
-        "構造改善", "レビュー", "完了判定", "Pull Request", "確定仕様化", "後片付け",
-        "配布", "リリース後テスト", "振り返り",
-    ]
+    stages = _stages_from_the_workflow_table()
+    assert len(stages) >= 15, stages
     for stage in stages:
         assert re.search(rf"^\|\s*{re.escape(stage)}\s*\|", body, re.MULTILINE), stage
+
+
+def _stages_from_the_workflow_table() -> list[str]:
+    """`SKILL.md` の「モードごとに起動する Skill」の表から工程名を読む。"""
+    lines = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8").splitlines()
+    start = next(i for i, ln in enumerate(lines)
+                 if ln.strip() == "## モードごとに起動する Skill")
+    stages: list[str] = []
+    header_seen = False
+    for line in lines[start + 1:]:
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            break
+        if not stripped.startswith("|"):
+            if stages:
+                break
+            continue
+        cells = [c.strip() for c in stripped.strip("|").split("|")]
+        if not header_seen:
+            header_seen = True
+            continue
+        if set("".join(cells)) <= set("-: "):
+            continue
+        stages.append(cells[0])
+    return stages
 
 
 LOWER_BOUNDS = (

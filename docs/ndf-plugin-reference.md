@@ -19,7 +19,7 @@ Skill の実体は `plugins/ndf/skills/` の 1 箇所だけです。ランタイ
 plugins/ndf/
 ├── .claude-plugin/plugin.json   # Claude Code（agents / hooks / skills 配列）
 ├── .codex-plugin/plugin.json    # Codex（hooks / skills 配列）
-├── skills/                      # 配布 Skill の唯一の実体（40 個）
+├── skills/                      # 配布 Skill の唯一の実体（41 個）
 ├── manifests/                   # ランタイム別の配布 Skill 一覧
 ├── agents/                      # Claude Code のサブエージェント（8 個）
 ├── hooks/claude.json            # Claude Code の SessionStart / Stop hook

@@ -403,7 +403,8 @@ bash ループは Agent tool を呼べないため、light モードでは Step 
 詳細は PR 上のインラインコメントと state.json に残っているため、本報告では
 繰り返さない。
 
-この工程に入ったら `/ndf:progress-tracking <issue番号> "レビュー"` を呼ぶ（記録の手順はその Skill が持つ）。
+この工程に入ったら `/ndf:progress-tracking <issue番号> "実装レビュー"` を呼ぶ（記録の手順はその Skill が持つ）。
+設計だけを載せた Pull Request で呼ばれたときは `"ドキュメントレビュー"` を記録する。
 
 ## 関連
 

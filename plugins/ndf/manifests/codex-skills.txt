@@ -28,6 +28,7 @@ refactoring
 release-verification
 requirements-design
 design
+document-restructuring
 retrospective
 tdd-cycle
 worktree

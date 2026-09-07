@@ -26,10 +26,10 @@ from workflow_helpers import (
     run_stage_check,
 )
 
-# `standard` で Pull Request の作成までに求める工程（「レビュー」を除く）。
+# `standard` で Pull Request の作成までに求める工程（「実装レビュー」を除く）。
 STANDARD_BEFORE_PR = (
-    "要求と受け入れ条件", "作業場所の用意", "設計", "設計レビュー", "計画", "実装",
-    "構造改善", "完了判定",
+    "要求と受け入れ条件", "作業場所の用意", "設計", "ドキュメント再構成", "ドキュメントレビュー",
+    "計画", "実装", "構造改善", "完了判定",
 )
 
 
@@ -93,6 +93,12 @@ def test_it_reads_the_closing_words_from_the_body(repo: Path) -> None:
     assert result.stdout.strip() == "devbasex/ai-plugins\t417", result.stderr
 
 
+def test_it_reads_the_closing_words_from_a_body_equals_option(repo: Path) -> None:
+    command = 'gh pr create --base develop --body="Closes #419"'
+    result = run_lib(f"wf_parse_pr_create {shlex.quote(command)}", cwd=repo)
+    assert result.stdout.strip() == "devbasex/ai-plugins\t419", result.stderr
+
+
 def test_it_reads_the_closing_words_from_a_body_file(repo: Path, tmp_path: Path) -> None:
     body = tmp_path / "body.md"
     body.write_text("まとめ\n\nCloses #418\nCloses #420\n", encoding="utf-8")
@@ -101,6 +107,16 @@ def test_it_reads_the_closing_words_from_a_body_file(repo: Path, tmp_path: Path)
     assert result.stdout.split() == [
         "devbasex/ai-plugins", "418", "devbasex/ai-plugins", "420"
     ], result.stderr
+
+
+def test_it_reads_the_closing_words_from_a_body_file_equals_option(
+    repo: Path, tmp_path: Path
+) -> None:
+    body = tmp_path / "body.md"
+    body.write_text("まとめ\n\nCloses #421\n", encoding="utf-8")
+    command = f"gh pr create --base develop --body-file={body}"
+    result = run_lib(f"wf_parse_pr_create {shlex.quote(command)}", cwd=repo)
+    assert result.stdout.strip() == "devbasex/ai-plugins\t421", result.stderr
 
 
 def test_a_body_without_closing_words_yields_nothing(repo: Path) -> None:
@@ -210,10 +226,10 @@ def test_conflicting_modes_take_the_highest_and_say_so(repo: Path, state: Path) 
     assert "設計" in out
 
 
-def test_architecture_outranks_legacy_refactor(repo: Path, state: Path) -> None:
-    """高さは列の位置から導かない。`WF_MODES` の並びとは別に持つ（決定 2-b）。"""
-    result = run_lib('wf_higher_mode legacy-refactor architecture')
-    assert result.stdout.strip() == "architecture", result.stderr
+def test_standard_outranks_legacy_refactor(repo: Path, state: Path) -> None:
+    """高さは `WF_MODE_HEIGHT` が持つ。`WF_MODES` の並びからは導かない（決定 2-b）。"""
+    result = run_lib('wf_higher_mode legacy-refactor standard')
+    assert result.stdout.strip() == "standard", result.stderr
 
 
 # --- C10: 別のリポジトリ ----------------------------------------------------

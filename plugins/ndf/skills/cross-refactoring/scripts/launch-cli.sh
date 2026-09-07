@@ -4,9 +4,9 @@
 # Usage: launch-cli.sh <runtime> <phase> <ID> [ROUND]
 #
 #   runtime  claude | codex | agy | kiro
-#   phase    propose | apply | review | fix
+#   phase    propose | propose-tests | apply | review | fix | final-fix
 #   ID       状態ファイルの鍵（最初に初期化した Pull Request 番号）
-#   ROUND    propose 以外で必須
+#   ROUND    propose と final-fix 以外で必須
 #
 # **ホストか否かで分岐しない。** ランタイム名だけで分岐する。ホストと同じランタイムが
 # 実装担当になるラウンドでも、ホストのサブエージェント機能は使わず別プロセスの CLI と
@@ -48,10 +48,14 @@ MAX_ITEMS=$(jq -r '.max_items_per_round' "$STATE")
 # CLI 側の実行時間の上限。**フェーズごとの監視の上限に合わせる。** 短いと CLI が
 # 先に打ち切り、結果ファイルが残らなかった場合と区別が付かなくなる。
 case "$PHASE" in
-  propose)
+  propose|propose-tests)
     # **提案にもラウンド番号を入れる。** 起動時に同名の結果ファイルを消すため、
     # 番号が無いと 2 巡目の提案が 1 巡目の内容を消してしまう。
-    [ "$ROUND" -ge 1 ] 2>/dev/null || { echo "propose には ROUND が必要です" >&2; exit 1; }
+    #
+    # **結果ファイルの名前はテスト整備でも変えない。** ラウンド番号は種類を
+    # またいで通しなので衝突せず、監視の雛形（`{agent}-propose-rf{id}-r<N>`）を
+    # そのまま使える。
+    [ "$ROUND" -ge 1 ] 2>/dev/null || { echo "$PHASE には ROUND が必要です" >&2; exit 1; }
     STEM=$TMP_DIR/$RUNTIME-propose-rf$ID-r$ROUND
     WORKDIR=$ROOT/$RUNTIME
     PRINT_TIMEOUT=900
@@ -68,6 +72,14 @@ case "$PHASE" in
     STEM=$TMP_DIR/$RUNTIME-review-r$ROUND
     WORKDIR=$ROOT/$RUNTIME
     PRINT_TIMEOUT=900
+    ;;
+  final-fix)
+    # **ラウンド番号を名前に入れない。** 最終ゲートは提案ラウンドの外にあり、
+    # 全体のテストの失敗を直す。番号を付けると、どの提案ラウンドの修正なのかと
+    # 読める名前になる。取り込み側（`merge-final-fix`）もこの名前で探す。
+    STEM=$TMP_DIR/$RUNTIME-final-fix
+    WORKDIR=$WORK
+    PRINT_TIMEOUT=3600
     ;;
   *)
     echo "未知のフェーズです: $PHASE" >&2
@@ -93,13 +105,31 @@ PROMPT=$STEM-prompt.md
 TEMPLATE=$PROMPTS/$PHASE.md
 [ -f "$TEMPLATE" ] || { echo "プロンプト雛形がありません: $TEMPLATE" >&2; exit 1; }
 
-# 採用済みの改善項目（適用 / レビュー / 修正で使う）。提案の段階ではまだ無い。
+# 採用済みの改善項目（適用 / 修正で使う）。提案の段階ではまだ無い。
+#
+# **渡すのは進行中の適用ラウンド（群）の項目だけである。** 群の中の項目は書き換える
+# ファイルが重ならず、まとめて 1 コミットにできる。群をまたいで渡すと、まだ適用して
+# いない項目まで 1 コミットへ入れさせることになる。
 ITEMS_JSON='[]'
-if [ "$PHASE" != "propose" ]; then
-  ITEMS_JSON=$(jq --argjson r "$ROUND" '[.items[] | select(.round == $r)]' "$STATE")
+APPLY_ROUND=0
+# ラウンドの種類。適用と修正では、項目が改善項目かテスト項目かで手順が変わる。
+ROUND_KIND=$(jq -r --argjson r "$ROUND" \
+  '[.rounds[] | select(.round == $r)][0].kind // "structure"' "$STATE")
+if [ "$PHASE" = "apply" ] || [ "$PHASE" = "fix" ] || [ "$PHASE" = "review" ]; then
+  APPLY_ROUND=$(jq -r --argjson r "$ROUND" \
+    '[.rounds[] | select(.round == $r)][0].apply_round // 0' "$STATE")
+  ITEMS_JSON=$(jq --argjson r "$ROUND" --argjson a "$APPLY_ROUND" \
+    '[.items[] | select(.round == $r) | select($a == 0 or (.apply_round // 1) == $a)]' \
+    "$STATE")
 fi
 # 見送った提案は「対象外」として渡し、毎ラウンド同じ提案が出続けるのを防ぐ。
-EXCLUDED=$(jq -r '[.deferred_items[] | "- \(.path)#\(.symbol) （\(.smell)）: \(.defer_reason // "見送り")"] | join("\n")' "$STATE")
+# **見送りの記録は種類で形が違う。** 改善項目は `path#symbol`（兆候）、テスト項目は
+# `target`（固定する経路）で指す。null をそのまま並べると読めない一覧になる。
+EXCLUDED=$(jq -r '[.deferred_items[]
+  | if .kind == "test"
+    then "- \(.target) （\(.case)）: \(.defer_reason // "見送り")"
+    else "- \(.path)#\(.symbol) （\(.smell)）: \(.defer_reason // "見送り")"
+    end] | join("\n")' "$STATE")
 [ -n "$EXCLUDED" ] || EXCLUDED="（なし）"
 
 SKILL_BLOCK="（この実行では手順書を配置していません）"
@@ -121,7 +151,7 @@ export RF_REPO=$REPO RF_PR=$PR RF_ROUND=${ROUND:-} RF_RUNTIME=$RUNTIME
 export RF_MODEL=${MODEL:-default} RF_WORKDIR=$WORKDIR RF_STEM=$STEM
 export RF_SCOPE=$SCOPE RF_HEAD_BRANCH=$HEAD_BRANCH RF_BASE_BRANCH=$BASE_BRANCH
 export RF_BASELINE_TEST=$BASELINE_TEST RF_MAX_ITEMS=$MAX_ITEMS
-export RF_SKILL_BLOCK=$SKILL_BLOCK RF_EXCLUDED=$EXCLUDED
+export RF_SKILL_BLOCK=$SKILL_BLOCK RF_EXCLUDED=$EXCLUDED RF_SKILL_BASE=$SKILL_BASE
 
 # 語彙の許容値。**手順書を読ませるだけでは足りない。** 手順書の見出しは日本語なので、
 # 「語彙に限定する」とだけ書くと読んだ側が日本語を語彙と解釈し、語彙外の降格規則で
@@ -134,7 +164,27 @@ VOCAB_SEVERITIES=$(jq -r '(.vocabulary.severities // []) | map("`" + . + "`") | 
 [ -n "$VOCAB_TECHNIQUES" ] || VOCAB_TECHNIQUES="（同上）"
 [ -n "$VOCAB_SEVERITIES" ] || VOCAB_SEVERITIES="\`critical\` / \`major\` / \`minor\`"
 
+# テスト整備ラウンドの語彙。**構造改善と同じく許容値をそのまま列挙する。**
+# 手順書を読ませるだけでは足りず、語彙外の値が返ると全件が対象外になる。
+VOCAB_CASES=$(jq -r '(.test_vocabulary.cases // {}) | to_entries[] | "- `\(.key)` — \(.value)"' "$STATE")
+VOCAB_LEVELS=$(jq -r '(.test_vocabulary.levels // {}) | to_entries[] | "- `\(.key)` — \(.value)"' "$STATE")
+[ -n "$VOCAB_CASES" ] || VOCAB_CASES="- \`normal\` — 代表的な正常系
+- \`branch\` — 各分岐に入る入力
+- \`boundary\` — 境界値（0 件・空・上限）
+- \`error\` — 例外・エラーになる入力"
+[ -n "$VOCAB_LEVELS" ] || VOCAB_LEVELS="- \`unit\` — 単体
+- \`integration\` — 結合
+- \`contract\` — 契約
+- \`e2e\` — 端から端まで"
+export RF_VOCAB_CASES=$VOCAB_CASES RF_VOCAB_LEVELS=$VOCAB_LEVELS
+
 export RF_ITEMS=$ITEMS_JSON RF_TMP_DIR=$TMP_DIR
+export RF_APPLY_ROUND=$APPLY_ROUND
+RF_ROUND_NOTE="この適用ラウンドの項目は**構造改善**です。振る舞いを変えずに構造だけを直します。"
+[ "$ROUND_KIND" != "test" ] || RF_ROUND_NOTE="この適用ラウンドの項目は**テスト整備**です。\
+足すのは現状固定テストだけで、**対象のコードは変更しません**。項目の \`target\` が固定する入口、\
+\`case\` が固定する経路の種類、\`level\` がどの階層で固定するかを示します。"
+export RF_ROUND_KIND=$ROUND_KIND RF_ROUND_NOTE=$RF_ROUND_NOTE
 export RF_VOCAB_SMELLS=$VOCAB_SMELLS RF_VOCAB_TECHNIQUES=$VOCAB_TECHNIQUES
 export RF_VOCAB_SEVERITIES=$VOCAB_SEVERITIES
 

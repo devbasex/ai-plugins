@@ -16,15 +16,15 @@ from workflow_helpers import (
     SLUG, base_env, init_repo, path_with, run_stage_check, state_file,
 )
 
-# #161 の実測の並び（issue #221 の本文）。レビューと後片付けが 2 回ずつ現れる。
+# #161 の実測の並び（issue #221 の本文）。実装レビューと後片付けが 2 回ずつ現れる。
 MEASURED_161 = [
-    "作業場所の用意", "要求と受け入れ条件", "設計", "設計レビュー", "後片付け",
-    "計画", "完了判定", "レビュー", "後片付け",
+    "作業場所の用意", "要求と受け入れ条件", "設計", "ドキュメント再構成", "ドキュメントレビュー",
+    "後片付け", "計画", "完了判定", "実装レビュー", "後片付け",
 ]
 # 上の並びに、実装・構造改善・Pull Request を足した完全版。抜けは確定仕様化だけになる。
 FULL_161 = [
-    "作業場所の用意", "要求と受け入れ条件", "設計", "設計レビュー", "後片付け",
-    "計画", "実装", "構造改善", "完了判定", "レビュー", "Pull Request", "後片付け",
+    "作業場所の用意", "要求と受け入れ条件", "設計", "ドキュメント再構成", "ドキュメントレビュー",
+    "後片付け", "計画", "実装", "構造改善", "完了判定", "実装レビュー", "Pull Request", "後片付け",
 ]
 
 
@@ -65,11 +65,11 @@ def test_a_record_writes_the_state_file(repo: Path, state: Path) -> None:
 
 def test_the_same_stage_twice_is_kept_twice(repo: Path, state: Path) -> None:
     """事象の記録を採る。既にある値を書き換えない。"""
-    record(repo, state, 221, "stage", "レビュー")
-    record(repo, state, 221, "stage", "レビュー")
+    record(repo, state, 221, "stage", "実装レビュー")
+    record(repo, state, 221, "stage", "実装レビュー")
 
     saved = json.loads(state_file(state, 221).read_text(encoding="utf-8"))
-    assert saved["stages"] == ["レビュー", "レビュー"]
+    assert saved["stages"] == ["実装レビュー", "実装レビュー"]
 
 
 def test_a_report_without_any_record_says_so(repo: Path, state: Path) -> None:
@@ -83,26 +83,26 @@ def test_a_report_without_any_record_says_so(repo: Path, state: Path) -> None:
 
 def test_a_report_lists_the_recorded_stages(repo: Path, state: Path) -> None:
     """#221-2: 報告はスクリプトの出力として出る。"""
-    seed(repo, state, 161, "architecture", FULL_161)
+    seed(repo, state, 161, "standard", FULL_161)
 
     out = report(repo, state, 161).stdout
 
-    assert out.splitlines()[0] == "#161 の通過工程（architecture）"
-    assert "  記録あり: 要求と受け入れ条件 / 作業場所の用意 / 設計 / 設計レビュー / 計画 /" in out
+    assert out.splitlines()[0] == "#161 の通過工程（standard）"
+    assert "  記録あり: 要求と受け入れ条件 / 作業場所の用意 / 設計 / ドキュメント再構成 /" in out
 
 
 def test_the_measured_order_reports_only_the_missing_stage(repo: Path, state: Path) -> None:
     """#221-3: 工程が前後しても誤検知しない。#161 で抜けたのは確定仕様化だけである。"""
-    seed(repo, state, 161, "architecture", FULL_161)
+    seed(repo, state, 161, "standard", FULL_161)
 
     out = report(repo, state, 161).stdout
 
     assert "  記録なし: 確定仕様化" in out
-    assert "レビュー" not in out.split("記録なし:")[1]
+    assert "実装レビュー" not in out.split("記録なし:")[1]
 
 
 def test_the_report_shows_how_to_record_the_missing_stage(repo: Path, state: Path) -> None:
-    seed(repo, state, 161, "architecture", FULL_161)
+    seed(repo, state, 161, "standard", FULL_161)
 
     out = report(repo, state, 161).stdout
 
@@ -110,7 +110,7 @@ def test_the_report_shows_how_to_record_the_missing_stage(repo: Path, state: Pat
 
 
 def test_a_report_without_a_gap_says_so(repo: Path, state: Path) -> None:
-    seed(repo, state, 161, "architecture", MEASURED_161[:4])
+    seed(repo, state, 161, "standard", MEASURED_161[:4])
 
     out = report(repo, state, 161).stdout
 
@@ -119,18 +119,20 @@ def test_a_report_without_a_gap_says_so(repo: Path, state: Path) -> None:
 
 
 def test_a_conditional_stage_is_listed_apart(repo: Path, state: Path) -> None:
-    """条件付きの工程は必須と分けて出す。`standard` の確定仕様化がこれにあたる。"""
-    seed(repo, state, 161, "standard", FULL_161)
+    """条件付きの工程は必須と分けて出す。`legacy-refactor` のドキュメントレビューがこれにあたる。"""
+    seed(repo, state, 161, "legacy-refactor",
+         ["作業場所の用意", "設計", "計画", "実装", "構造改善", "実装レビュー",
+          "完了判定", "Pull Request", "後片付け"])
 
     out = report(repo, state, 161).stdout
 
-    assert "  条件付き: 確定仕様化" in out
+    assert "  条件付き: ドキュメント再構成 / ドキュメントレビュー" in out
     assert "記録なし" not in out
 
 
 def test_stages_after_the_furthest_record_are_not_listed(repo: Path, state: Path) -> None:
     """まだ来ていない工程は欠落ではない。**いちばん先の記録までを見る。**"""
-    seed(repo, state, 161, "architecture", ["作業場所の用意", "要求と受け入れ条件", "設計"])
+    seed(repo, state, 161, "standard", ["作業場所の用意", "要求と受け入れ条件", "設計"])
 
     out = report(repo, state, 161).stdout
 
@@ -173,10 +175,10 @@ def test_a_repository_without_the_projects_declaration_still_records(repo: Path,
     """#221-7: 盤面に載っていない課題でも働く。宣言ファイルは読まない。"""
     assert not (repo / ".ndf" / "projects.json").exists()
 
-    seed(repo, state, 266, "architecture", ["作業場所の用意", "設計"])
+    seed(repo, state, 266, "standard", ["作業場所の用意", "設計"])
 
     assert state_file(state, 266).is_file()
-    assert "#266 の通過工程（architecture）" in report(repo, state, 266).stdout
+    assert "#266 の通過工程（standard）" in report(repo, state, 266).stdout
 
 
 def test_two_records_at_once_keep_both_stages(repo: Path, state: Path) -> None:
@@ -188,13 +190,13 @@ def test_two_records_at_once_keep_both_stages(repo: Path, state: Path) -> None:
              "record", "221", "stage", stage],
             cwd=str(repo), env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
-        for stage in ("設計", "計画", "実装", "レビュー")
+        for stage in ("設計", "計画", "実装", "実装レビュー")
     ]
     for proc in procs:
         proc.communicate()
 
     saved = json.loads(state_file(state, 221).read_text(encoding="utf-8"))
-    assert sorted(saved["stages"]) == sorted(["設計", "計画", "実装", "レビュー"])
+    assert sorted(saved["stages"]) == sorted(["設計", "計画", "実装", "実装レビュー"])
 
 
 def test_a_record_that_cannot_take_the_lock_changes_nothing(repo: Path, state: Path) -> None:
@@ -249,7 +251,7 @@ def test_records_at_once_never_skip_a_stage(repo: Path, state: Path) -> None:
     1 回の実行では取りこぼしがあっても通ることがあるため、繰り返して件数で見る。
     受け入れ条件が求める 60 回は完了判定として手元で回す。
     """
-    stages = ("設計", "計画", "実装", "レビュー")
+    stages = ("設計", "計画", "実装", "実装レビュー")
     env = base_env(state, {"NDF_STAGE_LOCK_TIMEOUT": "20"})
     script = str(Path(__file__).resolve().parents[1] / "scripts/stage-check.sh")
 

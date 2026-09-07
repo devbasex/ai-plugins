@@ -17,6 +17,7 @@ from workflow_helpers import (
     SKILL_DIR,
     base_env,
     init_repo,
+    run_lib,
     run_stage_check,
     state_file,
 )
@@ -73,7 +74,7 @@ def stages() -> list[str]:
 
 def test_light_is_reviewed_by_the_converging_loop() -> None:
     """レビューの深さをモードで変える根拠が無い。差分の小ささはラウンド数が吸収する。"""
-    assert "cross-review" in cell("レビュー", "light")
+    assert "cross-review" in cell("実装レビュー", "light")
 
 
 def test_light_carries_requirements_too() -> None:
@@ -209,6 +210,24 @@ def test_the_report_requires_a_review_for_light(repo, tmp_path) -> None:
     missing = next(
         (line for line in result.stdout.splitlines() if "記録なし:" in line), ""
     )
-    assert "レビュー" in missing, result.stdout
+    assert "実装レビュー" in missing, result.stdout
     assert "要求と受け入れ条件" in missing, result.stdout
     assert state_file(state_dir, 31).is_file()
+
+
+def test_repo_slug_reads_an_ssh_origin(tmp_path) -> None:
+    repo = init_repo(tmp_path / "ssh", remote="git@github.com:devbasex/ai-plugins.git")
+
+    result = run_lib(f"wf_repo_slug {repo}")
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "devbasex/ai-plugins"
+
+
+def test_repo_slug_rejects_a_repository_without_origin(tmp_path) -> None:
+    repo = init_repo(tmp_path / "bare", remote=None)
+
+    result = run_lib(f"wf_repo_slug {repo}")
+
+    assert result.returncode == 1
+    assert result.stdout.strip() == ""

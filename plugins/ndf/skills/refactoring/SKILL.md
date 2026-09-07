@@ -8,7 +8,7 @@ description: "Change structure without changing behavior, guarded by tests, judg
 **テストがなければ、それは構造改善ではなく単なる編集である。** 振る舞いが変わっていない
 ことを示す手段がない書き換えは、この Skill の対象外として扱う。
 
-この工程は**レビューと同じく、実装のあとに必ず通す**。動くコードが出た時点では整理が済んで
+この工程は**実装レビューと同じく、実装のあとに必ず通す**。動くコードが出た時点では整理が済んで
 いないことを前提に置く。対象は書き換えた行だけでなく、**その呼び出し元・呼び出し先と、同じ
 ファイル・同じモジュールの関連箇所まで**を含む（範囲と例外は
 [references/code-smells.md](references/code-smells.md) の「手を付ける範囲」）。
@@ -153,7 +153,7 @@ flowchart TD
 - `/ndf:cross-refactoring` — 発見と検証を別のランタイムへ分ける形。**この Skill は
   「テストで守りながら 1 手ずつ直す」手順を持つが、何を直すかの発見と、直した結果の評価が
   どちらも作業した AI 自身に閉じる。** その 2 つを補うのが `cross-refactoring` で、
-  工程表は `architecture` と `legacy-refactor` の構造改善にそちらを置く。適用を担う側は
+  工程表は `standard` と `legacy-refactor` の構造改善にそちらを置く。適用を担う側は
   この Skill を手順として読む
 
 この工程に入ったら `/ndf:progress-tracking <issue番号> "構造改善"` を呼ぶ（記録の手順はその Skill が持つ）。

@@ -49,12 +49,12 @@ def run(fake_gh, *args):
 def test_the_section_is_appended_when_it_is_missing(fake_gh):
     """節が無ければ本文の末尾へ足す。"""
     fake_gh.body.write_text("# 課題\n\n本文\n", encoding="utf-8")
-    out = run(fake_gh, "123", "設計", "--mode", "architecture")
+    out = run(fake_gh, "123", "設計", "--mode", "standard")
     assert out.returncode == 0, out.stderr
     written = fake_gh.written.read_text(encoding="utf-8")
     assert written.startswith("# 課題\n\n本文\n")
     assert "## 進行" in written
-    assert "モード: architecture" in written
+    assert "モード: standard" in written
     assert "- [x] 設計 —" in written
     assert "- [ ] 実装" in written
 
