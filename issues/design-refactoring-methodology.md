@@ -4,21 +4,21 @@
 [issue-443-444-442-methodology.md](issue-443-444-442-methodology.md) にある。
 
 **3 件を 1 つの設計にまとめる。** いずれも「方法論がどこにあるか」を扱い、同じ 2 つの Skill と
-工程表を触る。**実装の Pull Request は 2 本に分ける**（語彙とテストの扱いで 1 本、工程の判断で
+工程表を触る。**実装の Pull Request は 2 本に分ける**（呼び名とテストの扱いで 1 本、工程の判断で
 1 本）。
 
 ## 構成要素
 
 | 要素 | 責務 | 課題 |
 | --- | --- | --- |
-| `refactoring/references/vocabulary.md`（新設） | **兆候と手法の語彙**（識別子・日本語の名前・固定費）を持つ唯一の場所 | #444 |
+| `refactoring/references/vocabulary.md`（新設） | **兆候と手法の呼び名の表**（識別子・日本語の名前・差分予算の倍率）を持つ唯一の場所 | #444 |
 | `refactoring/references/test-changes.md`（新設） | テストをどこまで変えてよいかの規約と、段階の進め方 | #443 |
-| `cross-refactoring/scripts/refactor_lib/vocabulary.py` | **語彙を読み込む**。自分では持たない | #444 |
+| `cross-refactoring/scripts/refactor_lib/vocabulary.py` | **呼び名の表を読み込む**。自分では持たない | #444 |
 | `refactoring/references/code-smells.md` | 兆候の説明。**識別子の列を足す** | #444 |
 | `refactoring/references/refactoring-catalog.md` | 手法の説明。**識別子の列を足す** | #444 |
 | `cross-refactoring/scripts/refactor_lib/verify.py` | テストの変更の種類を見る | #443 |
 | `implementation-plan/references/pre-refactoring.md`（新設） | 実装の前に構造を整えるかの判断 | #442 |
-| `scripts/tests/test_vocabulary_single_source.py`（新設） | 語彙が 1 か所であることを機械で確かめる | #444 |
+| `scripts/tests/test_vocabulary_single_source.py`（新設） | 呼び名の表が 1 か所であることを機械で確かめる | #444 |
 | `scripts/check-cross-skill-refs.py` | 走査を `references` まで広げ、例外へ登録する | #444 |
 
 ## いまの構造
@@ -54,36 +54,48 @@ flowchart TD
     PR -.整えると決めたら.-> M
 ```
 
-## 決定の記録: 語彙の移送（#444）
+## 決定の記録: 呼び名の表の移送（#444）
 
-### 1. 語彙は `refactoring/references/vocabulary.md` が持つ
+### 1. 呼び名の表は `refactoring` が持つ
 
 **結論**: 表 3 つ（兆候 / 手法 / 手法ごとの固定費）を持つ Markdown を新設し、そこを唯一の
 基準にする。`cross-refactoring` はこのファイルを読む。
 
-**理由**: 方法論の語彙であり、`refactoring` を単独で使うときにも要る。**枠組みが持つと、
-枠組みを使わない利用者から語彙が見えない。**
+**理由**: 呼び名は方法論の一部であり、`refactoring` を単独で使うときにも要る。**枠組みが
+持つと、枠組みを使わない利用者から呼び名が見えない。**
 
 **形を Markdown の表にする理由**: `refactoring` の参照は人が読む文書である。JSON を別に置くと、
 人が読む表と機械が読む値の 2 つになり、片方だけが更新される。**表から読めば 1 つで済む。**
 
-**採らなかった案**: `vocabulary.py` を今の位置に残し、一致だけを検査で固定する。**語彙の
+**採らなかった案**: `vocabulary.py` を今の位置に残し、一致だけを検査で固定する。**表の
 置き場所が枠組みのままであり、#444 の目的を満たさない。**
 
 ### 2. `code-smells.md` と `refactoring-catalog.md` には識別子の列を足す
 
-**結論**: 説明の表へ「識別子」の列を足す。語彙そのものは `vocabulary.md` が持つ。
+**結論**: 説明の表へ「識別子」の列を足す。呼び名の表そのものは `vocabulary.md` が持つ。
 
-**理由**: 説明を読む人が、枠組みの出力（`long_method` など）と結び付けられる。**説明と語彙を
-1 つのファイルへまとめない。** 説明は言語や事例で伸びるが、語彙は固定である。
+**理由**: 説明を読む人が、枠組みの出力（`long_method` など）と結び付けられる。**説明と呼び名を
+1 つのファイルへまとめない。** 説明は言語や事例で伸びるが、呼び名は固定である。
 
-### 3. `cross-refactoring` は Skill の境界をまたいで読む
+### 3. `cross-refactoring` は、呼び名の表を `refactoring` から直に読む
 
-**結論**: `vocabulary.py` が `refactoring/references/vocabulary.md` を読む。
-**`check-cross-skill-refs.py` の例外へ入れ、4 つの manifest がどちらも載せていることを
-テストで固定する。**
+**結論**: 枠組みは呼び名の表を自分で持たず、`refactoring` に置いた 1 つのファイル
+（`vocabulary.md`）を読む。
 
-**パスは `Path(__file__)` から解決する。** `vocabulary.py` は
+**何を読むのか。** 兆候と手法の**呼び名の表**である。中身は次の 3 つで、いずれも
+`cross-refactoring` が提案を集めるときに使う。
+
+| 中身 | 例 |
+| --- | --- |
+| 兆候の識別子と日本語の名前（17 組） | `long_method` ｜ 長すぎるメソッド |
+| 手法の識別子と日本語の名前（18 組） | `extract_method` ｜ メソッドの抽出 |
+| 手法ごとの差分予算の倍率 | 抽出系の 7 手法は 3、他は 2 |
+
+**呼び名が揃わないと重複排除が効かない。** 3 つの CLI が同じ箇所を別の名前で呼ぶと、同じ
+提案が別物として残る。**単一のパスから読み、読めなければ止めるのはこのためである。**
+`init` の時点で確かめ、読めなければ理由を出して終わる。
+
+**パスは `Path(__file__)` から解決する。** 読む側（`vocabulary.py`）は
 `cross-refactoring/scripts/refactor_lib/` にある。そこから `skills/` の隣へ届くのは
 `../../../refactoring/`（`..` が 3 つ）である。**現在地には依存させない。**
 `uv run --script` で起動したときの現在地は、スクリプトの位置と揃わない。
@@ -92,8 +104,19 @@ flowchart TD
 _VOCAB = pathlib.Path(__file__).resolve().parents[3] / "refactoring" / "references" / "vocabulary.md"
 ```
 
-**この参照は、いまの検査では検出されない。** `check-cross-skill-refs.py` が拾う形は 2 つ
-しかない。
+**採らなかった案**: 共通層（`plugins/ndf/scripts/lib/`）へ置く。**方法論はプラグイン全体の
+共通物ではない。** 置くと、`refactoring` を読む利用者から呼び名の表が離れる。
+
+### 3-2. 配る先で相手が欠けないことを、検査とテストで固定する
+
+**Skill をまたいで読むため、相手が配られない配布先があると解決できない。** 2 つで固定する。
+
+| 手段 | 何を固定するか |
+| --- | --- |
+| `scripts/tests/` のテスト | 4 つの `manifests/*-skills.txt` が両方の Skill を載せていること |
+| `check-cross-skill-refs.py` の例外 | この参照が意図したものであること。**増えたときに気づく** |
+
+**いまの検査はこの参照を検出しない。** 拾う形が 2 つしかない。
 
 | 拾う形 | 例 |
 | --- | --- |
@@ -103,13 +126,10 @@ _VOCAB = pathlib.Path(__file__).resolve().parents[3] / "refactoring" / "referenc
 **`"refactoring" / "references"` はどちらにも当たらない。** 例外へ登録するだけでは、対応する
 参照が無いもの（stale）として検査が落ちる。
 
-**走査を `references` まで広げる。** 検査の目的は「Skill をまたぐ参照が増えたときに
-気づく」ことであり、**配られなければ解決できない点で `scripts` と `references` は同じ**
-である。パターンを `"<Skill 名>" / "(scripts|references)"` へ広げ、そのうえで例外へ登録する。
-
-**検査の位置づけも書き替える。** いまの docstring は「実行の参照」を数えると書いている。
-**数えるのは「配布に依存する参照」である**（実行するか読むかは、配る先で相手が欠けたときの
-結果を変えない）。
+**走査を `references` まで広げる。** **配られなければ解決できない点で `scripts` と
+`references` は同じ**である。パターンを `"<Skill 名>" / "(scripts|references)"` へ広げ、
+そのうえで例外へ登録する。あわせて検査の位置づけを「実行の参照」から「**配布に依存する
+参照**」へ書き替える（実行するか読むかは、配る先で相手が欠けたときの結果を変えない）。
 
 **採らなかった案**: 例外へ登録せず、配布の条件を固定するテストだけで担保する。
 **参照が増えたときに気づく機構が働かない。** `check-cross-skill-refs.py` はまさにそれを
@@ -123,15 +143,8 @@ manifest がどちらも載せているため配る先で相手が欠けない�
 | 解決 | 環境変数 → `~/.claude/skills/` → 隣接の 3 段 | **単一のパス** |
 | 相手が無いとき | 次の候補を試し、隣に無くても動く | **止める** |
 
-**単一のパスにするのは、語彙が提案の重複排除の鍵だからである。** 別の場所の語彙を拾うと、
-枠組みが使う識別子と方法論の説明が食い違ったまま進む。前例は資格情報の置き場所が利用者の
-環境で変わるため候補を持つが、語彙は配布物の中で位置が決まる。
-
-**読めないときの振る舞い**: **止める。** 欠けたまま進むと同じ提案が別物として残る。
-`init` の時点で確かめ、読めなければ理由を出して終わる。
-
-**採らなかった案**: 共通層（`plugins/ndf/scripts/lib/`）へ置く。**方法論はプラグイン全体の
-共通物ではない。** 置くと、`refactoring` を読む利用者から語彙が離れる。
+**前例が候補を持つのは、資格情報の置き場所が利用者の環境で変わるためである。** 呼び名の表は
+配布物の中で位置が決まるため、候補を持たせる理由が無い。
 
 ## 決定の記録: テストの扱い（#443）
 
@@ -169,7 +182,7 @@ assert price(order) == (
 **判定できない範囲は「未判定」として人へ回す。** 通ったものとして扱わない。`cross-refactoring`
 の検証も同じで、判定できない差分は落とさず、**未判定として Pull Request のレビューへ渡す**。
 
-### 5. 兆候の語彙へテストの問題を 3 つ足す
+### 5. 兆候の一覧へテストの問題を 3 つ足す
 
 **結論**: テストの側の問題を表す兆候を 3 つ足す。識別子と日本語の名前は下の表で定める。
 
@@ -182,7 +195,7 @@ assert price(order) == (
 | `test_bypasses_module_boundary` | テストが 1 つの入口から全部を引く | どのモジュールが何を公開しているかがテストから読めない | 責務の移動 |
 | `mock_targets_implementation_detail` | モックの対象が実装の詳細 | 差し替える名前が内部の関数で、公開 API を通っていない | 依存の向きを整える |
 
-**主な手法は既存の語彙から採る。** 3 つのために新しい手法を足さない。テストの側の兆候でも、
+**主な手法は既存の一覧から採る。** 3 つのために新しい手法を足さない。テストの側の兆候でも、
 直し方は本番コードと同じ（依存の向きを整える / 責務を移す）である。
 
 **採らなかった案**: 1 つにまとめる。**直し方が違う。** 内部への依存は差し替えの対象を変え、
@@ -288,13 +301,13 @@ assert price(order) == (
 
 | 受け入れ条件 | 何で確かめるか |
 | --- | --- |
-| 1 / 4（語彙を `refactoring` が持ち、経路が 1 つ） | `vocabulary.py` が `vocabulary.md` を読むこと。読めなければ止まること |
+| 1 / 4（呼び名の表を `refactoring` が持ち、経路が 1 つ） | `vocabulary.py` が `vocabulary.md` を読むこと。読めなければ止まること |
 | 2（一致の検査） | `scripts/tests/test_vocabulary_single_source.py`。`vocabulary.md` の表と `SMELLS` / `TECHNIQUES` が一致すること |
 | 3（固定費） | `vocabulary.md` の表に手法ごとの倍率があること。`verify.py` がそれを使うこと |
 | 5（振る舞いが変わらない） | `cross-refactoring` の既存のテストが通る |
 | 6（検査と全体テスト） | 検査 8 本と `uv run --with pytest pytest scripts/tests plugins/ndf -q` を実行し、終了コードを証跡へ残す（`quality-gates`） |
 | 7 / 8 / 10 / 12（テストの扱い） | `test-changes.md` の記述。`markdown-writing` のセルフチェック |
-| 9（兆候の語彙） | 一致の検査に 3 つが含まれること |
+| 9（兆候の一覧） | 一致の検査に 3 つが含まれること |
 | 11（検証が種類を見る） | `verify.py` のテスト。期待値が変わった差分を落とすこと |
 | 12（現状固定テストとの関係） | `test-changes.md` の記述。印の無いテストを現状固定として扱わないこと |
 | 13 / 14 / 17 / 18（実装前の判断） | `pre-refactoring.md` の記述。`implementation-plan/SKILL.md` からの呼び出し |
