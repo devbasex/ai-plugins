@@ -33,6 +33,40 @@ def _load_module(name: str, path: pathlib.Path) -> types.ModuleType:
 def refactor() -> types.ModuleType:
     return _load_module("cross_refactoring_refactor", _SCRIPT)
 
+# ---------- モジュールごとのフィクスチャ ----------
+#
+# **`refactor` フィクスチャは入口そのものを見るテストのために残す。** 個々の
+# モジュールを確かめるテストは、この下のフィクスチャでその実体を直に引く。
+# 入口の再エクスポートを通さないため、**どのモジュールが何を公開しているかが
+# テストから読める**（#440）。
+#
+# 実体は `refactor.py` が読み込んだ時点で `sys.modules` に載る。ここで読み直すと
+# 別のオブジェクトになり、差し替えが入口側へ伝わらない。
+
+_MODULES = (
+    "commands.apply", "commands.converge", "commands.gate",
+    "commands.report", "commands.setup",
+    "gitfacts", "outbound", "paths", "plan", "proposals",
+    "rounds", "scope", "verify", "vocabulary",
+)
+
+
+def _module_fixture(name: str, fixture_name: str):
+    @pytest.fixture(scope="session", name=fixture_name)
+    def _fixture(refactor: types.ModuleType) -> types.ModuleType:
+        return sys.modules[f"refactor_lib.{name}"]
+
+    return _fixture
+
+
+for _name in _MODULES:
+    # `commands.apply` → `cmd_apply`、`gitfacts` → `gitfacts`
+    _fixture_name = (
+        "cmd_" + _name.split(".", 1)[1] if _name.startswith("commands.") else _name
+    )
+    globals()[_fixture_name] = _module_fixture(_name, _fixture_name)
+
+
 @pytest.fixture(scope="session")
 def assignment() -> types.ModuleType:
     sys.path.insert(0, str(_LIB))

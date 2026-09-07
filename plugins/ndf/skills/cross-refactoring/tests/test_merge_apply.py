@@ -234,92 +234,89 @@ def test_the_wider_factor_is_limited_to_the_vocabulary(refactor):
 
 # ---------- git から事実を取る ----------
 
-def test_commit_trailers_are_read_from_git(refactor, monkeypatch):
+def test_commit_trailers_are_read_from_git(gitfacts, monkeypatch):
     """結果ファイルではなく実際のコミットメッセージから読む。"""
-    monkeypatch.setattr(
-        refactor, "_git_out",
+    monkeypatch.setattr(gitfacts, "_git_out",
         lambda work, args, **_kw: "Item-Id: R1-001\nRound: 1\n"
                            "Impl-Runtime: codex\nImpl-Model: gpt-5.5",
     )
-    assert refactor.commit_trailers("/w", "abc") == {
+    assert gitfacts.commit_trailers("/w", "abc") == {
         "Item-Id": "R1-001", "Round": "1",
         "Impl-Runtime": "codex", "Impl-Model": "gpt-5.5",
     }
 
 
-def test_commit_trailers_are_empty_when_git_fails(refactor, monkeypatch):
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **_kw: None)
-    assert refactor.commit_trailers("/w", "abc") == {}
+def test_commit_trailers_are_empty_when_git_fails(gitfacts, monkeypatch):
+    monkeypatch.setattr(gitfacts, "_git_out", lambda work, args, **_kw: None)
+    assert gitfacts.commit_trailers("/w", "abc") == {}
 
 
-def test_diff_lines_come_from_numstat(refactor, monkeypatch):
-    monkeypatch.setattr(
-        refactor, "_git_out",
+def test_diff_lines_come_from_numstat(gitfacts, monkeypatch):
+    monkeypatch.setattr(gitfacts, "_git_out",
         lambda work, args, **_kw: "10\t5\tsrc/a.py\n3\t2\tsrc/b.py\n-\t-\tbin.png",
     )
-    assert refactor.commit_diff_lines("/w", "abc") == 20
+    assert gitfacts.commit_diff_lines("/w", "abc") == 20
 
 
-def test_touches_tests_detects_test_paths(refactor, monkeypatch):
-    monkeypatch.setattr(refactor, "_git_out",
+def test_touches_tests_detects_test_paths(gitfacts, monkeypatch):
+    monkeypatch.setattr(gitfacts, "_git_out",
                         lambda work, args, **_kw: "src/a.py\ntests/test_a.py")
-    assert refactor.commit_touches_tests("/w", "abc") is True
+    assert gitfacts.commit_touches_tests("/w", "abc") is True
 
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **_kw: "src/a.py")
-    assert refactor.commit_touches_tests("/w", "abc") is False
+    monkeypatch.setattr(gitfacts, "_git_out", lambda work, args, **_kw: "src/a.py")
+    assert gitfacts.commit_touches_tests("/w", "abc") is False
 
 
-def test_commits_in_range_uses_rev_list(refactor, monkeypatch):
+def test_commits_in_range_uses_rev_list(gitfacts, monkeypatch):
     calls = []
 
     def fake(work, args, **_kw):
         calls.append(args)
         return "aaa\nbbb"
 
-    monkeypatch.setattr(refactor, "_git_out", fake)
-    assert refactor.commits_in_range("/w", "base", "head") == ["aaa", "bbb"]
+    monkeypatch.setattr(gitfacts, "_git_out", fake)
+    assert gitfacts.commits_in_range("/w", "base", "head") == ["aaa", "bbb"]
     assert calls == [["rev-list", "base..head"]]
 
 
-def test_commits_in_range_is_none_without_base(refactor):
+def test_commits_in_range_is_none_without_base(gitfacts):
     """範囲を確定できないことと「0 件」を区別する。"""
-    assert refactor.commits_in_range("/w", None, "head") is None
+    assert gitfacts.commits_in_range("/w", None, "head") is None
 
 
-def test_commits_in_range_is_none_when_git_fails(refactor, monkeypatch):
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **_kw: None)
-    assert refactor.commits_in_range("/w", "base", "head") is None
+def test_commits_in_range_is_none_when_git_fails(gitfacts, monkeypatch):
+    monkeypatch.setattr(gitfacts, "_git_out", lambda work, args, **_kw: None)
+    assert gitfacts.commits_in_range("/w", "base", "head") is None
 
 
-def test_run_test_at_checks_out_and_restores(refactor, monkeypatch):
+def test_run_test_at_checks_out_and_restores(refactor, gitfacts, monkeypatch):
     """テストは実際に走らせる。実行後は必ず元のブランチへ戻す。"""
     git_calls = []
-    monkeypatch.setattr(
-        refactor, "_git_out", lambda work, args, **_kw: git_calls.append(args) or "")
+    monkeypatch.setattr(gitfacts, "_git_out", lambda work, args, **_kw: git_calls.append(args) or "")
     monkeypatch.setattr(
         refactor.subprocess, "run",
         lambda *a, **kw: (git_calls.append(a[0]) if isinstance(a[0], list) else None)
         or subprocess.CompletedProcess(a[0], 0, "", ""),
     )
-    monkeypatch.setattr(refactor, "_run_with_timeout",
+    monkeypatch.setattr(gitfacts, "_run_with_timeout",
                         lambda cmd, cwd, timeout, grace=5.0: (0, False))
-    assert refactor.run_test_at("/w", "abc", "pytest -q", "main") == "pass"
+    assert gitfacts.run_test_at("/w", "abc", "pytest -q", "main") == "pass"
     assert ["checkout", "--detach", "abc"] in git_calls
     assert ["git", "checkout", "main"] in git_calls
 
 
-def test_run_test_at_reports_failure(refactor, monkeypatch):
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **_kw: "")
+def test_run_test_at_reports_failure(refactor, gitfacts, monkeypatch):
+    monkeypatch.setattr(gitfacts, "_git_out", lambda work, args, **_kw: "")
     monkeypatch.setattr(
         refactor.subprocess, "run",
         lambda *a, **kw: subprocess.CompletedProcess(a[0], 0, "", ""),
     )
-    monkeypatch.setattr(refactor, "_run_with_timeout",
+    monkeypatch.setattr(gitfacts, "_run_with_timeout",
                         lambda cmd, cwd, timeout, grace=5.0: (1, False))
-    assert refactor.run_test_at("/w", "abc", "pytest -q", "main") == "fail"
+    assert gitfacts.run_test_at("/w", "abc", "pytest -q", "main") == "fail"
 
 
-def test_run_test_at_restores_branch_even_when_the_test_raises(refactor, monkeypatch):
+def test_run_test_at_restores_branch_even_when_the_test_raises(refactor, gitfacts, monkeypatch):
     restored = []
 
     def fake_run(cmd, **kw):
@@ -328,22 +325,22 @@ def test_run_test_at_restores_branch_even_when_the_test_raises(refactor, monkeyp
             return subprocess.CompletedProcess(cmd, 0, "", "")
         raise OSError("テスト実行が壊れた")
 
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **_kw: "")
+    monkeypatch.setattr(gitfacts, "_git_out", lambda work, args, **_kw: "")
     monkeypatch.setattr(refactor.subprocess, "run", fake_run)
     with pytest.raises(OSError):
-        refactor.run_test_at("/w", "abc", "pytest -q", "main")
+        gitfacts.run_test_at("/w", "abc", "pytest -q", "main")
     assert restored, "元のブランチへ戻していない"
 
 
-def test_collect_facts_marks_unknown_sha_as_missing(refactor, monkeypatch):
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **_kw: None)
-    facts = refactor.collect_commit_facts("/w", ["ghost"], {"aaa"}, "true", "main")
+def test_collect_facts_marks_unknown_sha_as_missing(gitfacts, monkeypatch):
+    monkeypatch.setattr(gitfacts, "_git_out", lambda work, args, **_kw: None)
+    facts = gitfacts.collect_commit_facts("/w", ["ghost"], {"aaa"}, "true", "main")
     assert facts == [{"sha": "ghost", "exists": False}]
 
 
-def test_collect_facts_marks_out_of_range_sha_as_missing(refactor, monkeypatch):
-    monkeypatch.setattr(refactor, "_git_out", lambda work, args, **_kw: "zzz")
-    facts = refactor.collect_commit_facts("/w", ["zzz"], {"aaa"}, "true", "main")
+def test_collect_facts_marks_out_of_range_sha_as_missing(gitfacts, monkeypatch):
+    monkeypatch.setattr(gitfacts, "_git_out", lambda work, args, **_kw: "zzz")
+    facts = gitfacts.collect_commit_facts("/w", ["zzz"], {"aaa"}, "true", "main")
     assert facts[0]["exists"] is False
 
 
@@ -971,13 +968,13 @@ def test_unassigned_commit_fails_the_whole_round(
 
 
 def test_range_that_cannot_be_determined_fails_closed(
-    refactor, tmp_path, env_tmp_dir, no_git, monkeypatch
+    refactor, gitfacts, tmp_path, env_tmp_dir, no_git, monkeypatch
 ):
     """範囲を確定できないなら何も検証できない。素通しにせず失敗させる。"""
     items = [item(item_id="R1-001")]
     state_path = _state_with_items(tmp_path, items)
     env_tmp_dir(state_path)
-    monkeypatch.setattr(refactor, "commits_in_range", lambda work, base, head: None)
+    monkeypatch.setattr(gitfacts, "commits_in_range", lambda work, base, head: None)
     write_result(state_path, "codex-apply-r1", {
         "items": [{"item_id": "R1-001", "commits": [{"sha": "abc"}]}],
     })
@@ -990,7 +987,7 @@ def test_range_that_cannot_be_determined_fails_closed(
 
 
 def test_apply_base_is_recorded_by_the_orchestrator(
-    refactor, tmp_path, env_tmp_dir, monkeypatch
+    refactor, gitfacts, tmp_path, env_tmp_dir, monkeypatch
 ):
     """起点を実装担当の申告に委ねない。"""
 
@@ -1002,6 +999,9 @@ def test_apply_base_is_recorded_by_the_orchestrator(
         "durations": {}, "reviews": [],
     }])
     env_tmp_dir(state_path)
+    # **差し替えは入口経由のままにする。** `commands/apply.py` は `_git_out` を
+    # 自分の名前空間へ取り込んでいるため、定義元を差し替えても届かない。
+    # 段階 3（#441）で非公開名の受け渡しを無くしたときに寄せ直す。
     monkeypatch.setattr(refactor, "_git_out", lambda work, args, **_kw: "BASE_HEAD")
     for rt in ("codex", "agy", "kiro"):
         write_result(state_path, f"{rt}-propose-rf130", {"items": []})
@@ -1055,13 +1055,13 @@ def test_commits_claimed_by_an_unknown_item_are_rejected(
     {},
     "オブジェクトですらない",
 ])
-def test_reported_shas_survives_broken_output(refactor, broken):
-    assert refactor._reported_shas(broken) == []
+def test_reported_shas_survives_broken_output(gitfacts, broken):
+    assert gitfacts._reported_shas(broken) == []
 
 
-def test_reported_shas_extracts_valid_entries_only(refactor):
+def test_reported_shas_extracts_valid_entries_only(gitfacts):
     payload = {"commits": [{"sha": "aaa"}, "壊れた", {"sha": ""}, {"sha": " bbb "}]}
-    assert refactor._reported_shas(payload) == ["aaa", "bbb"]
+    assert gitfacts._reported_shas(payload) == ["aaa", "bbb"]
 
 
 def test_broken_apply_result_does_not_crash(
@@ -1143,25 +1143,25 @@ def test_same_commit_reported_twice_for_one_item_is_fine(
 
 
 def test_short_and_full_sha_are_seen_as_the_same_commit(
-    refactor, tmp_path, env_tmp_dir, monkeypatch
+    refactor, gitfacts, tmp_path, env_tmp_dir, monkeypatch
 ):
     """一方が完全 SHA、他方が短縮 SHA でも**同じ 1 コミット**として数えること。
 
     申告の文字列をそのまま鍵にすると 2 コミットに見え、「適用ラウンド = 1 コミット」
     に反したものとして群ごと取り消してしまう。
     """
+    # **差し替えは入口経由のままにする。** 実装（`commands/apply.py`）が非公開名を
+    # 自分の名前空間へ取り込んでいるため、定義元を差し替えても届かない。
     full = "a" * 40
     items = [item(item_id="R1-001"), item(item_id="R1-002")]
     state_path = _state_with_items(tmp_path, items)
     env_tmp_dir(state_path)
     monkeypatch.setattr(refactor, "commits_in_range", lambda w, b, h: [full])
     # 短縮 SHA も完全 SHA も同じコミットへ解決される
-    monkeypatch.setattr(
-        refactor, "_git_out",
+    monkeypatch.setattr(refactor, "_git_out",
         lambda work, args, **_kw: full if args[:2] == ["rev-parse", "--verify"] else "HEAD",
     )
-    monkeypatch.setattr(
-        refactor, "collect_commit_facts",
+    monkeypatch.setattr(refactor, "collect_commit_facts",
         lambda work, shas, rng, cmd, branch, timeout=None: [fact(sha=s) for s in shas],
     )
     write_result(state_path, "codex-apply-r1", {
@@ -1185,14 +1185,14 @@ def test_short_and_full_sha_are_seen_as_the_same_commit(
 # ---------- 数値の型崩れ ----------
 
 @pytest.mark.parametrize("broken", ["たくさん", ["50"], {"n": 1}, None, True])
-def test_safe_int_falls_back_on_broken_values(refactor, broken):
-    assert refactor._safe_int(broken) == 0
+def test_safe_int_falls_back_on_broken_values(gitfacts, broken):
+    assert gitfacts._safe_int(broken) == 0
 
 
-def test_safe_int_reads_numbers_and_numeric_strings(refactor):
-    assert refactor._safe_int(42) == 42
-    assert refactor._safe_int(4.9) == 4
-    assert refactor._safe_int(" 7 ") == 7
+def test_safe_int_reads_numbers_and_numeric_strings(gitfacts):
+    assert gitfacts._safe_int(42) == 42
+    assert gitfacts._safe_int(4.9) == 4
+    assert gitfacts._safe_int(" 7 ") == 7
 
 
 def test_broken_diff_lines_does_not_crash(
@@ -1440,7 +1440,7 @@ def _sync_state(tmp_path, env_tmp_dir, git_facts, command="make build"):
 
 
 def test_push_syncs_generated_files_first(
-    refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
+    refactor, gitfacts, tmp_path, env_tmp_dir, monkeypatch, git_facts
 ):
     """push の直前に同期し、差分があれば進行側のコミットとして積むこと。
 
@@ -1457,8 +1457,7 @@ def test_push_syncs_generated_files_first(
         or "",
     )
     ran: list[tuple[str, str]] = []
-    monkeypatch.setattr(
-        refactor, "_run_with_timeout",
+    monkeypatch.setattr(gitfacts, "_run_with_timeout",
         lambda command, cwd, timeout, grace=5.0: ran.append((command, cwd)) or (0, False),
     )
     with pytest.raises(SystemExit):
@@ -1472,13 +1471,12 @@ def test_push_syncs_generated_files_first(
 
 
 def test_sync_failure_aborts_without_pushing(
-    refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
+    refactor, gitfacts, tmp_path, env_tmp_dir, monkeypatch, git_facts
 ):
     """同期に失敗したら中断する。黙って push しない。"""
     _sync_state(tmp_path, env_tmp_dir, git_facts)
     calls, pushes = _drop_env(refactor, monkeypatch)
-    monkeypatch.setattr(
-        refactor, "_run_with_timeout",
+    monkeypatch.setattr(gitfacts, "_run_with_timeout",
         lambda command, cwd, timeout, grace=5.0: (1, False),
     )
     with pytest.raises(SystemExit) as e:
@@ -1490,14 +1488,13 @@ def test_sync_failure_aborts_without_pushing(
 
 
 def test_no_sync_command_runs_nothing(
-    refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
+    refactor, gitfacts, tmp_path, env_tmp_dir, monkeypatch, git_facts
 ):
     """`--sync-command` 未指定なら同期は走らない（既存の利用者に影響しない）。"""
     _two_item_apply(tmp_path, env_tmp_dir, git_facts)
     _drop_env(refactor, monkeypatch)
     ran: list = []
-    monkeypatch.setattr(
-        refactor, "_run_with_timeout",
+    monkeypatch.setattr(gitfacts, "_run_with_timeout",
         lambda command, cwd, timeout, grace=5.0: ran.append(command) or (0, False),
     )
     with pytest.raises(SystemExit):
@@ -1535,7 +1532,7 @@ def test_merge_apply_pushes_even_when_every_item_passes(
 
 
 def test_sync_aborts_when_the_worktree_is_dirty(
-    refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
+    refactor, gitfacts, tmp_path, env_tmp_dir, monkeypatch, git_facts
 ):
     """同期の前に作業ツリーが汚れていたら中断すること。
 
@@ -1552,8 +1549,7 @@ def test_sync_aborts_when_the_worktree_is_dirty(
     )
     monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: staged.append(list(cmd)) or "")
     ran: list = []
-    monkeypatch.setattr(
-        refactor, "_run_with_timeout",
+    monkeypatch.setattr(gitfacts, "_run_with_timeout",
         lambda command, cwd, timeout, grace=5.0: ran.append(command) or (0, False),
     )
     with pytest.raises(SystemExit) as e:
@@ -1566,7 +1562,7 @@ def test_sync_aborts_when_the_worktree_is_dirty(
 
 
 def test_dirt_inside_the_control_directory_does_not_abort(
-    refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
+    refactor, gitfacts, tmp_path, env_tmp_dir, monkeypatch, git_facts
 ):
     """制御用ディレクトリの中は汚れていても止めないこと。
 
@@ -1584,8 +1580,7 @@ def test_dirt_inside_the_control_directory_does_not_abort(
                     f"?? {control}/codex-apply-r1-result.json\n M generated/a.py"),
     )
     monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: staged.append(list(cmd)) or "")
-    monkeypatch.setattr(
-        refactor, "_run_with_timeout",
+    monkeypatch.setattr(gitfacts, "_run_with_timeout",
         lambda command, cwd, timeout, grace=5.0: (0, False),
     )
     with pytest.raises(SystemExit):
@@ -1597,7 +1592,7 @@ def test_dirt_inside_the_control_directory_does_not_abort(
 
 
 def test_sync_excludes_the_control_directory(
-    refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
+    refactor, gitfacts, tmp_path, env_tmp_dir, monkeypatch, git_facts
 ):
     """状態ファイル・結果・ログの置き場所を同期コミットへ入れないこと。"""
     state_path = _sync_state(tmp_path, env_tmp_dir, git_facts)
@@ -1612,8 +1607,7 @@ def test_sync_excludes_the_control_directory(
         sync_dirty=("", f"?? {control}/codex-apply-r1-result.json\n M generated/a.py"),
     )
     monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: staged.append(list(cmd)) or "")
-    monkeypatch.setattr(
-        refactor, "_run_with_timeout",
+    monkeypatch.setattr(gitfacts, "_run_with_timeout",
         lambda command, cwd, timeout, grace=5.0: (0, False),
     )
     with pytest.raises(SystemExit):
@@ -1626,15 +1620,14 @@ def test_sync_excludes_the_control_directory(
 
 
 def test_sync_without_changes_makes_no_commit(
-    refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
+    refactor, gitfacts, tmp_path, env_tmp_dir, monkeypatch, git_facts
 ):
     """同期しても差分が出なければ、空のコミットを積まないこと。"""
     _sync_state(tmp_path, env_tmp_dir, git_facts)
     staged: list[list[str]] = []
     _drop_env(refactor, monkeypatch, sync_dirty=("", ""))
     monkeypatch.setattr(refactor, "_sh", lambda cmd, **k: staged.append(list(cmd)) or "")
-    monkeypatch.setattr(
-        refactor, "_run_with_timeout",
+    monkeypatch.setattr(gitfacts, "_run_with_timeout",
         lambda command, cwd, timeout, grace=5.0: (0, False),
     )
     with pytest.raises(SystemExit):
@@ -1676,7 +1669,7 @@ def test_whole_round_failure_also_defers_items(
 
 
 def test_sync_failure_discards_what_it_produced(
-    refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
+    refactor, gitfacts, tmp_path, env_tmp_dir, monkeypatch, git_facts
 ):
     """同期が途中で失敗したら、作った差分を捨てて再開できる状態にすること。
 
@@ -1685,8 +1678,7 @@ def test_sync_failure_discards_what_it_produced(
     """
     _sync_state(tmp_path, env_tmp_dir, git_facts)
     calls, pushes = _drop_env(refactor, monkeypatch, sync_dirty=("", " M generated/a.py"))
-    monkeypatch.setattr(
-        refactor, "_run_with_timeout",
+    monkeypatch.setattr(gitfacts, "_run_with_timeout",
         lambda command, cwd, timeout, grace=5.0: (1, False),
     )
     with pytest.raises(SystemExit) as e:
@@ -1703,19 +1695,18 @@ def test_sync_failure_discards_what_it_produced(
     assert [c for c in pushes if c[:2] == ["git", "push"]] == []
 
 
-def test_status_disables_path_quoting(refactor, monkeypatch):
+def test_status_disables_path_quoting(gitfacts, monkeypatch):
     """`core.quotePath` の既定では非 ASCII のパスがエスケープされて `git add` が失敗する。"""
     seen: list[list[str]] = []
-    monkeypatch.setattr(
-        refactor, "_git_out",
+    monkeypatch.setattr(gitfacts, "_git_out",
         lambda work, args, **_kw: seen.append(list(args)) or " M plugins/日本語/a.py",
     )
-    assert refactor._worktree_changes("/w") == {"plugins/日本語/a.py": " M"}
+    assert gitfacts._worktree_changes("/w") == {"plugins/日本語/a.py": " M"}
     assert seen[0][:2] == ["-c", "core.quotePath=false"]
 
 
 def test_sync_failure_also_resets_the_index(
-    refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
+    refactor, gitfacts, tmp_path, env_tmp_dir, monkeypatch, git_facts
 ):
     """同期が `git add` してから失敗しても、次の実行が再開できること。
 
@@ -1725,8 +1716,7 @@ def test_sync_failure_also_resets_the_index(
     _sync_state(tmp_path, env_tmp_dir, git_facts)
     # 同期が index へ追加してから失敗した状況（`M ` は staged）
     calls, pushes = _drop_env(refactor, monkeypatch, sync_dirty=("", "M  generated/a.py"))
-    monkeypatch.setattr(
-        refactor, "_run_with_timeout",
+    monkeypatch.setattr(gitfacts, "_run_with_timeout",
         lambda command, cwd, timeout, grace=5.0: (1, False),
     )
     with pytest.raises(SystemExit):
