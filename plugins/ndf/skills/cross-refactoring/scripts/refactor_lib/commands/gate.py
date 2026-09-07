@@ -39,7 +39,7 @@ from ..gitfacts import (
 from ..paths import _load, _result_path, stem_for
 from ..verify import verify_final_fix_commit
 from ..vocabulary import DEFAULT_TEST_TIMEOUT
-from .review import _unassigned_fix_commits
+from .converge import _unassigned_fix_commits
 
 
 def cmd_final_gate(args: argparse.Namespace) -> None:

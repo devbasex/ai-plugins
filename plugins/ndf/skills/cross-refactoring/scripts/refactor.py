@@ -60,7 +60,7 @@ from refactor_lib import verify as _verify  # noqa: E402
 from refactor_lib.commands import report as _cmd_report  # noqa: E402
 from refactor_lib.commands import setup as _cmd_setup  # noqa: E402
 from refactor_lib.commands import apply as _cmd_apply  # noqa: E402
-from refactor_lib.commands import review as _cmd_review  # noqa: E402
+from refactor_lib.commands import converge as _cmd_converge  # noqa: E402
 from refactor_lib.commands import gate as _cmd_gate  # noqa: E402
 
 # **入口は全モジュールの名前を自分の名前空間へ取り込む。** 呼び出し側と手順書は
@@ -79,7 +79,7 @@ _LIB_MODULES: tuple[types.ModuleType, ...] = (
     _cmd_report,
     _cmd_setup,
     _cmd_apply,
-    _cmd_review,
+    _cmd_converge,
     _cmd_gate,
 )
 
