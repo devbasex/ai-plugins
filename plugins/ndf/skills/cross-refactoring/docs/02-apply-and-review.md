@@ -61,18 +61,18 @@ eval "$("$SCRIPTS/refactor.py" next-apply-round "$ID" "$ROUND")"  # 1 = 群が�
 **記録が残ったまま次の工程へ進まない。**
 
 ```bash
-# 1. 記録を読む
-PENDING=$(jq -r '.rounds[] | select(.round == $r) | .pending_test_judgements // [] | .[]' \
-  --argjson r "$ROUND" "$STATE")
+# 1. 記録を読む。**適用群ごとに持つ**ため、全ての群の分をまとめて取る
+PENDING=$(jq -r '.rounds[] | select(.round == $r) | .pending_test_judgements // {}
+  | to_entries[] | .value[]' --argjson r "$ROUND" "$STATE" | sort -u)
 [ -n "$PENDING" ] || exit 0        # 空なら段 2 は要らない
 
-# 2. 対象の差分を書き出す
-git -C "$WORK" show "$SHA" -- $PENDING > "$TMP_DIR/test-diff-r$ROUND.diff"
+# 2. 対象の差分を書き出す。**対象は直前の適用のコミット**であるため HEAD でよい
+git -C "$WORK" show HEAD -- $PENDING > "$TMP_DIR/test-diff-r$ROUND.diff"
 
-# 3. 判定させる（担当は適用の担当と同じでよい。判定だけを返す）
-bash "$SKILL_DIR/scripts/launch-cli.sh" "$RUNTIME" judge-test-changes "$ID" "$ROUND"
+# 3. 判定させる。担当は `next-apply-round` が返した実装担当（$IMPL）でよい
+bash "$SCRIPTS/launch-cli.sh" "$IMPL" judge-test-changes "$ID" "$ROUND"
 
-# 4. 答えを取り込む
+# 4. 答えを取り込む（終了コード 2 は「取り消した」を表す）
 "$SCRIPTS/refactor.py" merge-test-judgements "$ID" "$ROUND"
 ```
 
@@ -81,7 +81,7 @@ bash "$SKILL_DIR/scripts/launch-cli.sh" "$RUNTIME" judge-test-changes "$ID" "$RO
 | 答え | 次にどうするか |
 | --- | --- |
 | すべて `unchanged` | **保留を解く。** 記録が消え、次の工程へ進む |
-| 1 件でも `changed` | **適用ラウンドを取り消す。** 期待出力を変えているため |
+| 1 件でも `changed` | **適用ラウンドを取り消す**（`merge-test-judgements` が行う）。終了コード 2 で返る |
 | `undecidable` | **保留のまま残し、Step 7 のレビューへ引き継ぐ** |
 | 答えが欠けている | `undecidable` と同じに扱う |
 

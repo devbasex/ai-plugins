@@ -1685,4 +1685,5 @@ def test_merge_apply_records_the_pending_judgements(
     refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
 
     entry = read_state(state_path)["rounds"][0]
-    assert entry.get("pending_test_judgements") == ["tests/test_a.py"]
+    # **記録は適用群ごとに持つ。** 後続の群の検証で消えない。
+    assert entry.get("pending_test_judgements") == {"1": ["tests/test_a.py"]}

@@ -365,6 +365,18 @@ _LITERAL = re.compile(
 )
 
 
+def _outside_assertions(lines: Iterable[str]) -> list[str]:
+    """`assert` 以外の行を、空行を除いて返す。
+
+    **期待値は `assert` の行の外にも置ける。** 定数やフィクスチャが変われば、
+    `assert` の行が同じでも期待出力は変わる。
+    """
+    return [
+        line.rstrip("\n") for line in lines
+        if line.strip() and not line.strip().startswith("assert ")
+    ]
+
+
 def _values(lines: "Counter[str]") -> "Counter[str]":
     """`assert` の行から、値だけを件数ごと数える。
 
@@ -393,23 +405,32 @@ def assertion_change(before: Iterable[str], after: Iterable[str]) -> str:
     rows_before, rows_after = list(before), list(after)
     if _has_undecidable_form(rows_before) or _has_undecidable_form(rows_after):
         return "undecidable"
+
     kept_before, kept_after = _assert_lines(rows_before), _assert_lines(rows_after)
     if not kept_before and not kept_after:
         # **`assert` の行が無い差分は判定できない。** フィクスチャや定数の変更は
         # 期待値を動かしうるが、`assert` の行には現れない。
         return "undecidable"
+
+    # **`assert` の外が変わっていれば、行が同じでも判定できない。** 同じファイルの
+    # `EXPECTED = 3` を `4` にすると、`assert f(1) == EXPECTED` は変わらないまま
+    # 期待出力が変わる。
+    if _outside_assertions(rows_before) != _outside_assertions(rows_after):
+        return "undecidable"
+
     if kept_before == kept_after:
         return "unchanged"
     # 元の行が件数ごと残っていれば、足しただけである。**多重集合で見る。**
     if not (kept_before - kept_after):
         return "unchanged"
+
     # **行が違うことは、期待出力が変わったことを意味しない。** 取り込み方を変えれば
     # `oldmod.f(1)` は `f(1)` になり、局所の名前を変えれば `build(order)` は
     # `build(o)` になる。どちらも期待出力は変わっていない。
     #
-    # **機械で落とすのは、値そのものが変わったときに限る。** 値を伏せてなお行が
-    # 揃うなら、変わったのは呼び方であり、判定は段 2 へ回す。
-    if _values(kept_before) != _values(kept_after):
+    # **機械で落とすのは、元の値が失われたときに限る。** 値が残っていれば、変わったのは
+    # 呼び方か、足した分である。増えた値だけを見て落とさない。
+    if _values(kept_before) - _values(kept_after):
         return "changed"
     return "undecidable"
 
@@ -490,4 +511,34 @@ def merge_test_judgements(
         "problem": None,
         "pending": sorted(p for p in pending if answers.get(p) != "unchanged"),
     }
+
+
+def record_pending_judgements(
+    entry: dict[str, Any], group: int, pending: Iterable[str],
+) -> None:
+    """保留を**適用群ごと**に記録する（#443）。
+
+    **群をまたいで上書きしない。** 前の群で段 2 が `undecidable` と答えたものは、
+    次の群の検証を通ってもレビューへ引き継ぐまで残る。
+    """
+    records = entry.get("pending_test_judgements")
+    if not isinstance(records, dict):        # 群ごとに持たない古い形は捨てる
+        records = {}
+    listed = sorted(pending)
+    if listed:
+        records[str(group)] = listed
+    else:
+        records.pop(str(group), None)
+    if records:
+        entry["pending_test_judgements"] = records
+    else:
+        entry.pop("pending_test_judgements", None)
+
+
+def all_pending_judgements(entry: dict[str, Any]) -> list[str]:
+    """全ての群の保留を、重複を除いてファイルの順で返す。"""
+    records = entry.get("pending_test_judgements")
+    if not isinstance(records, dict):
+        return []
+    return sorted({path for paths in records.values() for path in paths})
 

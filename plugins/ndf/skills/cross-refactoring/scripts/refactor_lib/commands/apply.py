@@ -45,7 +45,13 @@ from ..rounds import (
     item_label,
     phase_after_group,
 )
-from ..verify import pending_test_judgements, verify_apply_round
+from ..verify import (
+    all_pending_judgements,
+    merge_test_judgements,
+    pending_test_judgements,
+    record_pending_judgements,
+    verify_apply_round,
+)
 from ..vocabulary import DEFAULT_TEST_TIMEOUT
 
 
@@ -653,11 +659,11 @@ def _verify_apply_group(
     # **機械で決まらなかったテストの差分を記録する**（#443）。落とさないが、
     # 通ったものとしても扱わない。進行側がこれを見て段 2（`judge-test-changes`）を
     # 起動する。**空でないまま収束させない。**
-    pending = pending_test_judgements(facts)
-    if pending:
-        entry["pending_test_judgements"] = pending
-    else:
-        entry.pop("pending_test_judgements", None)
+    #
+    # **記録は適用群ごとに持つ。** 前の群でレビューへ引き継ぐと決めた保留が、次の群の
+    # 検証で消えてはならない。
+    record_pending_judgements(
+        entry, entry.get("apply_round") or 1, pending_test_judgements(facts))
 
     diff_lines = sum(safe_int(c.get("diff_lines")) for c in facts)
     for item in items:
@@ -790,4 +796,68 @@ def _resume_incomplete_apply(
         return
     flush_pending_push(path, state, entry)
 
+
+def cmd_merge_test_judgements(args: argparse.Namespace) -> None:
+    """段 2（AI エージェント）の答えを取り込む（#443）。
+
+    **`changed` なら適用ラウンドを取り消す。** 期待出力を変えたコミットを作業ツリーへ
+    残さない。取り消しは検証の失敗と同じ経路（`_apply_drop`）を通る。
+
+    **答えが欠けたものを通さない。** `undecidable` と同じに扱い、保留のまま残す。
+    残った分は Step 7 のレビューへ引き継ぐ。
+    """
+    path, state = load_state(args.id)
+    entry = round_of(state, args.round)
+    pending = all_pending_judgements(entry)
+    if not pending:
+        info("判定を待っているテストはありません")
+        return
+
+    verdicts: list[dict[str, Any]] = []
+    for runtime in state.get("runtimes", []):
+        result = result_path(
+            state, runtime, f"{runtime}-judge-test-changes-r{args.round}")
+        if not result.exists():
+            continue
+        try:
+            payload = json.loads(result.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        found = payload.get("verdicts")
+        if isinstance(found, list):
+            verdicts.extend(v for v in found if isinstance(v, dict))
+
+    outcome = merge_test_judgements(pending, verdicts)
+    if outcome["problem"]:
+        group = current_group(entry)
+        failed = list(group.get("items") or [])
+        for item in entry.get("items") or []:
+            if item.get("item_id") in failed:
+                item["status"] = "abandoned"
+                item["failure_reason"] = outcome["problem"]
+        _apply_drop(path, state, entry, group, failed)
+        entry.pop("pending_test_judgements", None)
+        statefile.save(path, state)
+        info(f"❌ 適用ラウンド {group.get('apply_round')}: {outcome['problem']}")
+        # **終了コードは 2 にする。** 進行側は「取り消した」と読んで次の群へ進む。
+        sys.exit(2)
+
+    records = entry.get("pending_test_judgements")
+    if isinstance(records, dict):
+        remaining = set(outcome["pending"])
+        entry["pending_test_judgements"] = {
+            group: sorted(set(paths) & remaining)
+            for group, paths in records.items()
+            if set(paths) & remaining
+        }
+        if not entry["pending_test_judgements"]:
+            entry.pop("pending_test_judgements", None)
+    if outcome["pending"]:
+        info(
+            f"{len(outcome['pending'])} 件はレビューへ引き継ぎます: "
+            + ", ".join(outcome["pending"])
+        )
+    else:
+        info("テストの差分は、期待する振る舞いを変えていません")
+    statefile.save(path, state)
 

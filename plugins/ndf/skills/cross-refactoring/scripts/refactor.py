@@ -45,12 +45,12 @@ except Exception as _exc:                        # 取り込みそのものが�
 
 from refactor_lib.commands.apply import (  # noqa: E402
     cmd_merge_apply,
+    cmd_merge_test_judgements,
     cmd_merge_proposals,
     cmd_next_apply_round,
 )
 from refactor_lib.commands.converge import (  # noqa: E402
     cmd_abandon_items,
-    cmd_merge_test_judgements,
     cmd_merge_fix,
     cmd_should_abandon,
     cmd_verify_round,

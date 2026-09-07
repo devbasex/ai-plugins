@@ -302,7 +302,7 @@ def test_an_unknown_verdict_is_treated_as_undecidable(verify) -> None:
 
 
 def test_the_merge_command_clears_or_fails(
-    paths, patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch
+    cmd_apply, tmp_path, env_tmp_dir
 ) -> None:
     """取り込みのサブコマンドが、保留を解くか落とすこと。"""
     import json
@@ -313,15 +313,75 @@ def test_the_merge_command_clears_or_fails(
         "impl_model": {"requested": None, "observed": None}, "reviewer_models": {},
         "proposed": {}, "items": [], "apply": {"applied": [], "failed": []},
         "fix_rounds": 0, "durations": {}, "reviews": [],
-        "pending_test_judgements": ["tests/test_a.py"],
+        "pending_test_judgements": {"1": ["tests/test_a.py"]},
     }])
     env_tmp_dir(state_path)
     (state_path.parent / "codex-judge-test-changes-r1-result.json").write_text(
         json.dumps({"verdicts": [{"path": "tests/test_a.py", "verdict": "unchanged",
                                   "reason": "経路だけ"}]}), encoding="utf-8")
 
-    refactor.cmd_merge_test_judgements(
-        type("A", (), {"id": 130, "round": 1})())
+    cmd_apply.cmd_merge_test_judgements(type("A", (), {"id": 130, "round": 1})())
 
     entry = read_state(state_path)["rounds"][0]
     assert entry.get("pending_test_judgements", []) == []
+
+
+# ---------- 判定の穴（ラウンド 3 の指摘） ----------
+
+def test_a_changed_constant_outside_the_assert_is_undecidable(verify) -> None:
+    """`assert` の行が同じでも、参照する定数が変われば判定できないものとする。"""
+    before = ["EXPECTED = 3\n", "    assert f(1) == EXPECTED\n"]
+    after = ["EXPECTED = 4\n", "    assert f(1) == EXPECTED\n"]
+    assert verify.assertion_change(before, after) == "undecidable"
+
+
+def test_extracting_a_literal_into_a_constant_is_undecidable(verify) -> None:
+    """値を定数へ抽出しただけの差分を、落とさないこと。"""
+    before = ["    assert f(1) == 3\n"]
+    after = ["EXPECTED = 3\n", "    assert f(1) == EXPECTED\n"]
+    assert verify.assertion_change(before, after) == "undecidable"
+
+
+def test_adding_an_assertion_while_changing_the_call_is_undecidable(verify) -> None:
+    """呼び方の変更と新しい `assert` の追加が同時でも、落とさないこと。
+
+    **元の値が残っていれば `changed` と決められない。**
+    """
+    before = ["    assert oldmod.f(1) == 10\n"]
+    after = ["    assert f(1) == 10\n", "    assert g(2) == 20\n"]
+    assert verify.assertion_change(before, after) == "undecidable"
+
+
+def test_a_lost_value_is_still_detected(verify) -> None:
+    """元の値が失われた差分は、機械で落とすこと。"""
+    before = ["    assert f(1) == 10\n"]
+    after = ["    assert f(1) == 20\n"]
+    assert verify.assertion_change(before, after) == "changed"
+
+
+# ---------- 保留の持ち方（ラウンド 3 の指摘） ----------
+
+def test_pending_records_do_not_overwrite_each_other(verify) -> None:
+    """群ごとに保留を持ち、後続の群で消えないこと。
+
+    **Step 7 へ引き継ぐ判定が、次の群の検証で失われてはならない。**
+    """
+    entry = {"pending_test_judgements": {"1": ["tests/test_a.py"]}}
+    verify.record_pending_judgements(entry, 2, ["tests/test_b.py"])
+    assert entry["pending_test_judgements"] == {
+        "1": ["tests/test_a.py"], "2": ["tests/test_b.py"]}
+
+
+def test_an_empty_result_clears_only_its_own_group(verify) -> None:
+    """対象が無い群は、自分の分だけを消すこと。"""
+    entry = {"pending_test_judgements": {"1": ["tests/test_a.py"],
+                                         "2": ["tests/test_b.py"]}}
+    verify.record_pending_judgements(entry, 2, [])
+    assert entry["pending_test_judgements"] == {"1": ["tests/test_a.py"]}
+
+
+def test_all_pending_across_groups_is_readable(verify) -> None:
+    """全ての群の保留を、まとめて読めること。"""
+    entry = {"pending_test_judgements": {"1": ["tests/test_a.py"],
+                                         "2": ["tests/test_b.py"]}}
+    assert verify.all_pending_judgements(entry) == ["tests/test_a.py", "tests/test_b.py"]
