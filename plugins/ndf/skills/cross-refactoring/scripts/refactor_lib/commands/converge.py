@@ -37,7 +37,11 @@ from ..gitfacts import (
 from ..outbound import dropped_line, item_lines, plan_line
 from ..paths import load_state, result_path, stem_for
 from ..rounds import deferred_record
-from ..verify import verify_commit_granularity, verify_fix_commit
+from ..verify import (
+    unassigned_fix_commits,
+    verify_commit_granularity,
+    verify_fix_commit,
+)
 from ..vocabulary import DEFAULT_TEST_TIMEOUT
 from .apply import _phase_after_group, _prepare_fix_phase, _run_drop, current_group
 
@@ -263,22 +267,6 @@ def _resolved_fix_thread_ids(payload: dict[str, Any], repo: str, pr: int) -> set
     return resolved
 
 
-def _unassigned_fix_commits(
-    work: str, reported_shas: list[str], ordered_range: list[str]
-) -> list[str]:
-    """範囲内のコミットのうち、どの申告にも含まれていないものを返す。
-
-    適用と同じく、**範囲のコミットは全て申告されていること**を求める。
-    申告から漏れた修正コミットは検証を受けないまま Pull Request に残る。
-    """
-    reported_full = {
-        full for full in (
-            git_out(work, ["rev-parse", "--verify", f"{s}^{{commit}}"])
-            for s in reported_shas
-        ) if full
-    }
-    return sorted(set(ordered_range) - reported_full)
-
 
 def _verify_fix_commits(
     facts: list[dict[str, Any]], scope: list[str]
@@ -396,7 +384,7 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
             code=2,
         )
     claimed_shas = reported_shas(payload)
-    unassigned = _unassigned_fix_commits(work, claimed_shas, ordered_range)
+    unassigned = unassigned_fix_commits(work, claimed_shas, ordered_range)
 
     facts = collect_commit_facts(
         work, claimed_shas, set(ordered_range),

@@ -39,7 +39,7 @@ from ..gitfacts import (
 from ..paths import load_state, result_path, stem_for
 from ..verify import verify_final_fix_commit
 from ..vocabulary import DEFAULT_TEST_TIMEOUT
-from .converge import _unassigned_fix_commits
+from ..verify import unassigned_fix_commits
 
 
 def cmd_final_gate(args: argparse.Namespace) -> None:
@@ -176,7 +176,7 @@ def cmd_merge_final_fix(args: argparse.Namespace) -> None:
         )
 
     claimed_shas = reported_shas(payload)
-    unassigned = _unassigned_fix_commits(work, claimed_shas, ordered_range)
+    unassigned = unassigned_fix_commits(work, claimed_shas, ordered_range)
     # **テストコマンドは渡さない。** 合否は `final-gate` が採った側で 1 度だけ見る
     # （`--ci-check` を指定した実行で手元のテストを走らせないため）。
     facts = collect_commit_facts(

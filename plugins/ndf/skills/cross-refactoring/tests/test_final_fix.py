@@ -245,7 +245,7 @@ def test_an_unreported_commit_reverts_the_range(
     """申告から漏れたコミットは検証を受けていない。範囲ごと取り消す。"""
     state_path = _failing_gate_state(tmp_path)
     env_tmp_dir(state_path)
-    monkeypatch.setattr(refactor, "_unassigned_fix_commits",
+    monkeypatch.setattr(refactor, "unassigned_fix_commits",
                         lambda work, reported, ordered: ["C2FULL"])
     write_result(state_path, "codex-final-fix", {"commits": [{"sha": "C1FULL"}]})
 
