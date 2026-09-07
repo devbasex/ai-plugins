@@ -31,6 +31,9 @@
 | `embedded_business_rule` | 業務ルールの埋め込み |
 | `one_by_one_iteration` | 一件ずつの反復 |
 | `unvalidated_externalization` | 検証のない外部化 |
+| `test_coupled_to_internals` | テストが内部の詳細に依存している |
+| `test_bypasses_module_boundary` | テストが 1 つの入口から全部を引く |
+| `mock_targets_implementation_detail` | モックの対象が実装の詳細 |
 
 ## 手法
 
