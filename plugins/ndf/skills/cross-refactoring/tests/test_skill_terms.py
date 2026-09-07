@@ -58,14 +58,14 @@ def test_every_cap_appears_in_the_argument_table(skill):
         assert f"`{cap} N`" in skill, f"引数の表に {cap} が無い"
 
 
-def test_the_defaults_match_the_implementation(refactor, skill):
+def test_the_defaults_match_the_implementation(refactor, vocabulary, skill):
     """既定値は 1 か所（`refactor.py`）が持ち、表はそれを写す。"""
     assert "| `--max-test-rounds N` | " in skill
     for cap, default in (("--max-test-rounds", 2), ("--max-outer-rounds", 3),
                          ("--max-fix-rounds", 3), ("--max-items-per-round", 5)):
         row = next(l for l in skill.splitlines() if l.startswith(f"| `{cap} N`"))
         assert f"`{default}`" in row, f"{cap} の既定が表と実装で食い違う"
-    assert refactor.DEFAULT_MAX_TEST_ROUNDS == 2
+    assert vocabulary.DEFAULT_MAX_TEST_ROUNDS == 2
 
 
 # ---------- 実行のコマンド列（A1 / B6） ----------

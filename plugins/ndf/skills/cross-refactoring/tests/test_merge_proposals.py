@@ -175,7 +175,7 @@ def test_duplicate_rate_is_zero_without_previous_round(refactor):
 # ---------- サブコマンド ----------
 
 def test_merge_proposals_command_creates_items(
-    refactor, tmp_path, env_tmp_dir, no_git, capsys
+    refactor, cmd_apply, tmp_path, env_tmp_dir, no_git, capsys
 ):
     state_path = make_state(tmp_path, rounds=[{
         "round": 1, "impl": "codex", "reviewers": ["agy", "kiro"],
@@ -189,7 +189,7 @@ def test_merge_proposals_command_creates_items(
     write_result(state_path, "agy-propose-rf130-r1", {"items": [proposal()]})
     write_result(state_path, "kiro-propose-rf130-r1", {"items": []})
 
-    refactor.cmd_merge_proposals(type("A", (), {"id": 130})())
+    cmd_apply.cmd_merge_proposals(type("A", (), {"id": 130})())
 
     state = read_state(state_path)
     assert [i["item_id"] for i in state["items"]] == ["R1-001"]
@@ -199,7 +199,7 @@ def test_merge_proposals_command_creates_items(
 
 
 def test_merge_proposals_command_exits_2_when_nothing_adopted(
-    refactor, tmp_path, env_tmp_dir, no_git
+    refactor, cmd_apply, tmp_path, env_tmp_dir, no_git
 ):
     state_path = make_state(tmp_path, rounds=[{
         "round": 1, "impl": "codex", "reviewers": ["agy", "kiro"],
@@ -213,7 +213,7 @@ def test_merge_proposals_command_exits_2_when_nothing_adopted(
         write_result(state_path, f"{rt}-propose-rf130-r1", {"items": []})
 
     with pytest.raises(SystemExit) as e:
-        refactor.cmd_merge_proposals(type("A", (), {"id": 130})())
+        cmd_apply.cmd_merge_proposals(type("A", (), {"id": 130})())
     assert e.value.code == 2
     state = read_state(state_path)
     assert state["phase"] == "converged"
@@ -223,7 +223,7 @@ def test_merge_proposals_command_exits_2_when_nothing_adopted(
 
 
 def test_non_object_proposal_result_is_treated_as_empty(
-    refactor, tmp_path, env_tmp_dir, no_git
+    refactor, cmd_apply, tmp_path, env_tmp_dir, no_git
 ):
     """結果が配列でもクラッシュせず、その 1 者の提案なしとして続けること。"""
     state_path = make_state(tmp_path, rounds=[{
@@ -238,14 +238,14 @@ def test_non_object_proposal_result_is_treated_as_empty(
     write_result(state_path, "agy-propose-rf130-r1", {"items": [proposal()]})
     write_result(state_path, "kiro-propose-rf130-r1", {"items": [proposal()]})
 
-    refactor.cmd_merge_proposals(type("A", (), {"id": 130})())
+    cmd_apply.cmd_merge_proposals(type("A", (), {"id": 130})())
 
     state = read_state(state_path)
     assert state["rounds"][0]["proposed"]["codex"] == 0
     assert len(state["items"]) == 1
 
 
-def test_merge_proposals_is_idempotent(refactor, tmp_path, env_tmp_dir, no_git):
+def test_merge_proposals_is_idempotent(cmd_apply, tmp_path, env_tmp_dir, no_git):
     """同じラウンドで叩き直しても項目を二重に作らないこと。
 
     進行を止めても再開できることが前提なので、統合済みなら前回と同じ結果を返す。
@@ -262,9 +262,9 @@ def test_merge_proposals_is_idempotent(refactor, tmp_path, env_tmp_dir, no_git):
         write_result(state_path, f"{rt}-propose-rf130-r1", {"items": [proposal()]})
 
     args = type("A", (), {"id": 130})()
-    refactor.cmd_merge_proposals(args)
+    cmd_apply.cmd_merge_proposals(args)
     first = read_state(state_path)
-    refactor.cmd_merge_proposals(args)
+    cmd_apply.cmd_merge_proposals(args)
     second = read_state(state_path)
 
     assert [i["item_id"] for i in second["items"]] == ["R1-001"]
@@ -273,7 +273,7 @@ def test_merge_proposals_is_idempotent(refactor, tmp_path, env_tmp_dir, no_git):
 
 
 def test_merge_proposals_replays_the_converged_exit_code(
-    refactor, tmp_path, env_tmp_dir, no_git
+    refactor, cmd_apply, tmp_path, env_tmp_dir, no_git
 ):
     """採用 0 件で終わったラウンドを叩き直しても、同じ終了コードを返す。"""
     state_path = make_state(tmp_path, rounds=[{
@@ -290,6 +290,6 @@ def test_merge_proposals_replays_the_converged_exit_code(
     args = type("A", (), {"id": 130})()
     for _ in range(2):
         with pytest.raises(SystemExit) as e:
-            refactor.cmd_merge_proposals(args)
+            cmd_apply.cmd_merge_proposals(args)
         assert e.value.code == 2
     assert read_state(state_path)["items"] == []

@@ -112,32 +112,32 @@ def test_the_apply_check_does_not_look_at_the_test_result(refactor):
 
 # ---------- 修正フェーズ ----------
 
-def test_fix_accepts_one_commit_per_item(refactor):
+def test_fix_accepts_one_commit_per_item(cmd_converge):
     facts = [fact(sha="aaa", trailers=trailers(item_id="R1-001")),
              fact(sha="bbb", trailers=trailers(item_id="R1-002"))]
-    problems, accepted = refactor._verify_fix_commits(facts, ["src"])
+    problems, accepted = cmd_converge._verify_fix_commits(facts, ["src"])
     assert problems == []
     assert accepted == [("R1-001", "aaa"), ("R1-002", "bbb")]
 
 
-def test_fix_rejects_two_commits_for_the_same_item(refactor):
+def test_fix_rejects_two_commits_for_the_same_item(cmd_converge):
     """適用側だけ揃えると、指摘への対応という名目で刻んだ履歴が戻ってくる。"""
     facts = [fact(sha="aaa", trailers=trailers(item_id="R1-001")),
              fact(sha="bbb", trailers=trailers(item_id="R1-001"))]
-    problems, _ = refactor._verify_fix_commits(facts, ["src"])
+    problems, _ = cmd_converge._verify_fix_commits(facts, ["src"])
     assert problems and any("R1-001" in p and "1 コミット" in p for p in problems)
 
 
-def test_fix_granularity_does_not_hide_a_broken_commit(refactor):
+def test_fix_granularity_does_not_hide_a_broken_commit(cmd_converge):
     facts = [fact(sha="aaa", trailers=trailers(item_id="R1-001")),
              fact(sha="bbb", test_status="fail", trailers=trailers(item_id="R1-001"))]
-    problems, _ = refactor._verify_fix_commits(facts, ["src"])
+    problems, _ = cmd_converge._verify_fix_commits(facts, ["src"])
     assert any("テストが成功していません" in p for p in problems)
 
 
 @pytest.mark.parametrize("count", [1, 2, 3])
-def test_fix_allows_one_commit_for_each_distinct_item(refactor, count):
+def test_fix_allows_one_commit_for_each_distinct_item(cmd_converge, count):
     facts = [fact(sha=f"s{i}", trailers=trailers(item_id=f"R1-00{i}"))
              for i in range(count)]
-    problems, accepted = refactor._verify_fix_commits(facts, ["src"])
+    problems, accepted = cmd_converge._verify_fix_commits(facts, ["src"])
     assert problems == [] and len(accepted) == count

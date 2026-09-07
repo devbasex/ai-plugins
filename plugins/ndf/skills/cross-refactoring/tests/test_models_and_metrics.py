@@ -326,7 +326,7 @@ def test_report_survives_empty_state(metrics):
 
 # ---------- 指定値は全ラウンドで不変 ----------
 
-def test_models_are_fixed_across_rounds(refactor, tmp_path, env_tmp_dir):
+def test_models_are_fixed_across_rounds(cmd_setup, tmp_path, env_tmp_dir):
     """`start-round` が状態ファイルの指定値をそのままラウンドへ写すこと。"""
     state_path = make_state(
         tmp_path,
@@ -337,7 +337,7 @@ def test_models_are_fixed_across_rounds(refactor, tmp_path, env_tmp_dir):
     args = type("A", (), {"id": 130})()
     for _ in range(3):
         try:
-            refactor.cmd_start_round(args)
+            cmd_setup.cmd_start_round(args)
         except SystemExit:
             break
         state = read_state(state_path)

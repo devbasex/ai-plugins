@@ -55,13 +55,13 @@ def _run(name, conclusion="success", status="completed"):
 # ---------- B2: 起動のされ方で最終ゲートが変わる ----------
 
 def test_a_standalone_run_goes_to_cross_review(
-    refactor, tmp_path, env_tmp_dir, spy, capsys
+    refactor, cmd_gate, tmp_path, env_tmp_dir, spy, capsys
 ):
     """既定は単独起動。`cross-review` を実行する。"""
     state_path = _state(tmp_path)
     env_tmp_dir(state_path)
 
-    refactor.cmd_final_gate(_args())
+    cmd_gate.cmd_final_gate(_args())
 
     assert "FINAL_GATE=cross-review" in capsys.readouterr().out
     assert spy["tests"] == [], "単独起動では全体のテストを実行しない"
@@ -69,13 +69,13 @@ def test_a_standalone_run_goes_to_cross_review(
 
 
 def test_a_workflow_step_run_skips_cross_review_and_runs_the_tests(
-    refactor, tmp_path, env_tmp_dir, spy, capsys
+    refactor, cmd_gate, tmp_path, env_tmp_dir, spy, capsys
 ):
     """工程の 1 つとして起動したときは `cross-review` を省く。"""
     state_path = _state(tmp_path, workflow_step=True)
     env_tmp_dir(state_path)
 
-    refactor.cmd_final_gate(_args())
+    cmd_gate.cmd_final_gate(_args())
 
     out = capsys.readouterr().out
     assert "FINAL_GATE=passed" in out
@@ -100,27 +100,27 @@ def test_the_launch_mode_comes_from_the_argument(refactor, monkeypatch):
 # ---------- B2: `--ci-check` は排他 ----------
 
 def test_the_ci_check_replaces_the_local_tests(
-    refactor, tmp_path, env_tmp_dir, spy, capsys
+    refactor, cmd_gate, tmp_path, env_tmp_dir, spy, capsys
 ):
     state_path = _state(tmp_path, workflow_step=True, ci_check="tests")
     env_tmp_dir(state_path)
     spy["gh_out"] = _check_runs(_run("tests"))
 
-    refactor.cmd_final_gate(_args())
+    cmd_gate.cmd_final_gate(_args())
 
     assert spy["tests"] == [], "継続的統合を採ったら手元のテストは実行しない"
     assert "FINAL_GATE=passed" in capsys.readouterr().out
 
 
 def test_the_check_runs_are_read_once_and_status_is_not_used(
-    refactor, tmp_path, env_tmp_dir, spy
+    refactor, cmd_gate, tmp_path, env_tmp_dir, spy
 ):
     """`status` は使わない（GitHub Actions は常に `pending` を返す）。"""
     state_path = _state(tmp_path, workflow_step=True, ci_check="tests")
     env_tmp_dir(state_path)
     spy["gh_out"] = _check_runs(_run("tests"))
 
-    refactor.cmd_final_gate(_args())
+    cmd_gate.cmd_final_gate(_args())
 
     assert len(spy["gh"]) == 1, "読むのは check-runs の 1 回だけ"
     path = spy["gh"][0][-1]
@@ -128,13 +128,13 @@ def test_the_check_runs_are_read_once_and_status_is_not_used(
     assert not path.endswith("/status")
 
 
-def test_a_failed_ci_check_does_not_pass(refactor, tmp_path, env_tmp_dir, spy):
+def test_a_failed_ci_check_does_not_pass(cmd_gate, tmp_path, env_tmp_dir, spy):
     state_path = _state(tmp_path, workflow_step=True, ci_check="tests")
     env_tmp_dir(state_path)
     spy["gh_out"] = _check_runs(_run("tests", conclusion="failure"))
 
     with pytest.raises(SystemExit) as e:
-        refactor.cmd_final_gate(_args())
+        cmd_gate.cmd_final_gate(_args())
     assert e.value.code == 2
     assert read_state(state_path)["final_gate"]["checks"][-1]["status"] == "fail"
 
@@ -144,29 +144,29 @@ def test_a_failed_ci_check_does_not_pass(refactor, tmp_path, env_tmp_dir, spy):
     '{"total_count": 0, "check_runs": []}',    # 検査が 1 件も無い
     "not json",                                # 応答を解釈できない
 ])
-def test_no_result_does_not_pass(refactor, tmp_path, env_tmp_dir, spy, payload):
+def test_no_result_does_not_pass(cmd_gate, tmp_path, env_tmp_dir, spy, payload):
     """fail-closed — **結果を得られないときは通過させない。**"""
     state_path = _state(tmp_path, workflow_step=True, ci_check="tests")
     env_tmp_dir(state_path)
     spy["gh_out"] = payload
 
     with pytest.raises(SystemExit) as e:
-        refactor.cmd_final_gate(_args())
+        cmd_gate.cmd_final_gate(_args())
     assert e.value.code == 2
 
 
-def test_an_unfinished_ci_check_does_not_pass(refactor, tmp_path, env_tmp_dir, spy):
+def test_an_unfinished_ci_check_does_not_pass(cmd_gate, tmp_path, env_tmp_dir, spy):
     state_path = _state(tmp_path, workflow_step=True, ci_check="tests")
     env_tmp_dir(state_path)
     spy["gh_out"] = _check_runs(_run("tests", conclusion=None, status="in_progress"))
 
     with pytest.raises(SystemExit) as e:
-        refactor.cmd_final_gate(_args())
+        cmd_gate.cmd_final_gate(_args())
     assert e.value.code == 2
 
 
 def test_a_named_check_that_is_missing_does_not_pass(
-    refactor, tmp_path, env_tmp_dir, spy
+    refactor, cmd_gate, tmp_path, env_tmp_dir, spy
 ):
     """名前が一致しない検査の成功で通さない。"""
     state_path = _state(tmp_path, workflow_step=True, ci_check="tests")
@@ -174,12 +174,12 @@ def test_a_named_check_that_is_missing_does_not_pass(
     spy["gh_out"] = _check_runs(_run("lint"))
 
     with pytest.raises(SystemExit) as e:
-        refactor.cmd_final_gate(_args())
+        cmd_gate.cmd_final_gate(_args())
     assert e.value.code == 2
 
 
 def test_a_failing_local_test_is_not_overturned_by_the_ci(
-    refactor, tmp_path, env_tmp_dir, spy
+    refactor, cmd_gate, tmp_path, env_tmp_dir, spy
 ):
     """**「どちらか一方が通れば通過」とはしない。** 指定が無ければ手元のテストだけを見る。"""
     state_path = _state(tmp_path, workflow_step=True)
@@ -188,20 +188,20 @@ def test_a_failing_local_test_is_not_overturned_by_the_ci(
     spy["gh_out"] = _check_runs(_run("tests"))
 
     with pytest.raises(SystemExit) as e:
-        refactor.cmd_final_gate(_args())
+        cmd_gate.cmd_final_gate(_args())
     assert e.value.code == 2
     assert spy["gh"] == [], "手元のテストを採ったら継続的統合は読まない"
 
 
 # ---------- B5: 落ちたら修正ラウンドを回し、上限では取り消さない ----------
 
-def test_a_failure_opens_a_fix_round(refactor, tmp_path, env_tmp_dir, spy):
+def test_a_failure_opens_a_fix_round(cmd_gate, tmp_path, env_tmp_dir, spy):
     state_path = _state(tmp_path, workflow_step=True)
     env_tmp_dir(state_path)
     spy["test_code"] = 1
 
     with pytest.raises(SystemExit) as e:
-        refactor.cmd_final_gate(_args())
+        cmd_gate.cmd_final_gate(_args())
     assert e.value.code == 2
     gate = read_state(state_path)["final_gate"]
     assert gate["fix_rounds"] == 1
@@ -209,7 +209,7 @@ def test_a_failure_opens_a_fix_round(refactor, tmp_path, env_tmp_dir, spy):
 
 
 def test_the_fix_cap_reports_the_failure_without_reverting(
-    refactor, tmp_path, env_tmp_dir, spy, monkeypatch
+    refactor, cmd_gate, tmp_path, env_tmp_dir, spy, monkeypatch
 ):
     """**Step 7 は push 済みの地点である。** 上限に達しても取り消さない。
 
@@ -225,7 +225,7 @@ def test_the_fix_cap_reports_the_failure_without_reverting(
     spy["test_code"] = 1
 
     with pytest.raises(SystemExit) as e:
-        refactor.cmd_final_gate(_args())
+        cmd_gate.cmd_final_gate(_args())
     assert e.value.code == 1, "報告へ抜ける。進行ごと止める中断（4）ではない"
     assert dropped == [], "取り消さない"
     assert read_state(state_path)["final_gate"]["status"] == "failed"
