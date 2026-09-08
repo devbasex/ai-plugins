@@ -34,9 +34,11 @@
 | `design/references/data-structure.md` | ER 図・テーブル定義・CRUD 図を足す |
 | `design/references/interface-ui.md` | 画面一覧・項目定義・レイアウトの粒度を決める |
 | `design/references/design-template.md` | 雛形の節を拡張し、「図の水準」を差し替え、突き合わせる対の一覧を置く（F6） |
-| `design/SKILL.md` | 成果物の節を要否表と書き先の表へ置き換え、領域の表へ 3 行足し、手順 4 の前に突き合わせを置く |
-| `development-workflow/SKILL.md` | 工程表の「設計」の行と、工程の図の `light` / `operation` の経路（F5） |
+| `design/SKILL.md` | 成果物の節を要否表と書き先の表へ置き換え、領域の表へ 3 行足し、手順 4 の前に突き合わせを置き、手順 4 とドキュメント再構成と進行の記録（ドキュメントレビュー）を設計 Pull Request を出すモードに限る |
+| `development-workflow/SKILL.md` | 工程表の「設計」の行、工程の図と注記の `light` / `operation` の経路、設計 Pull Request のマージの節が `light` を外す理由（F5） |
 | `development-workflow/scripts/lib/workflow-common.sh` | `WF_STAGE_MATRIX` の「設計」の行（F5） |
+| `development-workflow/references/stage-notes.md` | 「設計」の工程の注記を、`light` / `operation` が条件付きで通る形へ改める（F5） |
+| `development-workflow/references/workflow-modes.md` | `operation` の節の「設計を行わない」を条件付きへ改める（F5） |
 | `development-workflow/references/operation-run.md` | `operation` の設計の書き先と、再掲しない範囲 |
 | `plan-to-spec/SKILL.md` | クラス図の同期の時点 |
 | `docs/specifications/ndf-design-phase.md` | 決定の理由 |
@@ -83,12 +85,14 @@ graph TD
 **`nonfunctional-requirements.md` と `nonfunctional.md` の関係が、#375 と #376 を対にする
 唯一の線である。** 要求側が書いた項目だけが、設計側で実現方式を求められる。
 
-**図は参照を読む関係だけを描く。** 構成要素の表に挙げた 17 個のうち、次の 3 つは図に
+**図は参照を読む関係だけを描く。** 構成要素の表に挙げた 19 個のうち、次の 5 つは図に
 含めない。この線のどれにも乗らないためである。
 
 | 図に含めないもの | 何をする先か |
 | --- | --- |
-| `operation-run.md` | 決まったことを自分の側へ書き写す |
+| `development-workflow/references/stage-notes.md` | 決まったことを自分の側へ書き写す |
+| `development-workflow/references/workflow-modes.md` | 同上 |
+| `operation-run.md` | 同上 |
 | `plan-to-spec/SKILL.md` | 同上 |
 | `docs/specifications/ndf-design-phase.md` | 決定の理由を残す |
 
@@ -124,10 +128,10 @@ graph TD
 
 ```mermaid
 flowchart TD
-    M[モード判定] --> R{"「すべての変更」以外の<br/>領域が 1 つ以上あるか"}
-    R -->|"いいえ、かつ light / operation"| Skip[design を通さない]
-    R -->|はい| D[design を通す]
-    M -->|"legacy-refactor / standard"| D
+    M[モード判定] -->|"light / operation"| R{"「すべての変更」以外の<br/>領域が 1 つ以上あるか"}
+    M -->|"legacy-refactor / standard"| D[design を通す]
+    R -->|いいえ| Skip[design を通さない]
+    R -->|はい| D
     D --> L[領域ごとの参照を読む]
     L --> Y{成果物ごとの水準}
     Y -->|必須| W1[書く。対象が無ければ<br/>「対象範囲（含まない）」へ理由]
@@ -237,6 +241,21 @@ flowchart TD
 突き合わせの規則が別の場所に分かれる。`SKILL.md` の手順 4 の前には、一覧を通す 1 手だけを
 書く。
 
+置く一覧は次の 6 つの対である。**いずれも同じ文書の中だけで確かめられる。** 外部の情報を
+必要とする対は入れない。それはレビューが拾うものである。
+
+| 突き合わせる対 | 何を見るか |
+| --- | --- |
+| 構成要素の表 ↔ 処理の流れの図 | 表に挙げた要素が、すべて図に現れるか |
+| 責務の記述 ↔ 失敗の形 | 「純粋な処理」としたものが、終了コードや出力を持っていないか |
+| 件数の記述 ↔ 表の行数 | 「次の N か所」と書いた直下の表が N 行あるか |
+| 影響範囲の図 ↔ 呼び出し元の一覧 | 図の辺が、一覧に挙げた呼び出しと一致するか |
+| 受け入れ条件 ↔ テスト設計 | 条件ごとに確かめ方が対応しているか |
+| 決定の記録 ↔ 構成要素・処理の流れ | 決定で退けた案が、他の節に残っていないか |
+
+**表に挙げた要素が図に現れるかを見る対は、図に含めない要素を明示している文書では、その
+一覧を差し引いて数える。** この設計文書自身が 19 個のうち 5 個を差し引く形にあたる。
+
 ## テスト設計
 
 | 受け入れ条件 | 何で確かめるか |
@@ -248,6 +267,7 @@ flowchart TD
 | 配布 Skill の数と版数が変わらない | `python3 scripts/check-doc-staleness.py` |
 | 既存の振る舞いを壊さない | `uv run --with pytest pytest scripts/tests plugins/ndf -q` |
 | 要否表・領域の表・6 大項目の記述がある | 目視。**文章の中身は機械で判定しない** |
+| `development-workflow` の説明文書が条件付きの起動と食い違わない | 目視。`light` / `operation` と「設計」を含む行を全文検索して読む |
 
 **新しいテストは足さない。** 変えるのは Skill 本文と 1 つの定数で、定数の側は既存のテストが
 表との一致を見る。文章の中身を検査する仕組みを作ると、規約を変えるたびに検査も変えることに

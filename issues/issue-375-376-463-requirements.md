@@ -60,6 +60,8 @@
 - `design` のモードごとの成果物を、モード × 成果物の要否表へ置き換える
 - `light` / `operation` でも該当すれば `design` を通す条件と、設計の書き先を決める
 - 工程表と `WF_STAGE_MATRIX` の「設計」の行を合わせる
+- `development-workflow` の説明文書のうち、`light` / `operation` が設計工程を通らないと
+  書いている記述を、条件付きで通る形へ改める
 - `design` の手順 4 の前に、文書の内部整合を突き合わせる手順を置く
 
 含まない:
@@ -111,6 +113,15 @@
 - [ ] `WF_STAGE_MATRIX` の「設計」の行が `C\tC\tR\tR` になっている
 - [ ] `WF_STAGE_MATRIX` の「ドキュメント再構成」「ドキュメントレビュー」の `light` /
       `operation` の値が `-` のままである
+- [ ] `development-workflow/references/stage-notes.md` の「設計」の注記が、`light` /
+      `operation` を工程ごと対象外とせず、領域に当たれば通ることを書いている
+- [ ] `development-workflow/references/workflow-modes.md` の `operation` の節から、設計を
+      無条件に行わないとする記述が消えている
+- [ ] `development-workflow/SKILL.md` の工程の図の注記と、設計 Pull Request のマージの節が、
+      `light` / `operation` の条件付きの起動と食い違っていない
+- [ ] `design/SKILL.md` の手順 4・ドキュメント再構成・進行の記録（「ドキュメントレビュー」）
+      が設計 Pull Request を出すモードに限られ、`light` / `operation` は突き合わせの後に
+      実装へ進むと書かれている
 - [ ] `operation` の設計の記述が `operation-run.md` が既に持つもの（実行の範囲・取り消しの
       手段・記録の置き場所）を再掲していない
 - [ ] 触る領域の表に、新設の 3 つの参照へ向かう行がある
@@ -121,7 +132,8 @@
 
 - [ ] `design` の手順 4（設計 Pull Request を出す）の前に、突き合わせる対の一覧を通す手順が
       ある
-- [ ] 一覧が、#463 の本文に挙がった 6 つの対をすべて含む
+- [ ] 一覧が、#463 の本文に挙がった 6 つの対をすべて含む（対の内容は設計文書の
+      「決定 10」にある）
 - [ ] 突き合わせた結果を成果物として残すことを求めていない
 - [ ] この手順によって設計文書の節が増えていない
 
