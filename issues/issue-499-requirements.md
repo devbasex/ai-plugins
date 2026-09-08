@@ -19,6 +19,7 @@
 | --- | --- |
 | チャネルを 2 つに分けること、正式版を既定ブランチへ置くこと | `AGENTS.md` |
 | 接尾辞を付ける方針、版を上げる時期（まとまり単位） | `AGENTS.md` |
+| 接尾辞の形の一覧（版数の例を並べた表） | **移す** |
 | マイルストーンの名前の付け方、版を決める唯一の箇所 | `AGENTS.md` |
 | 同名の取得元を登録しないこと | `AGENTS.md` |
 | clone の fetch の refspec、CLI ごとの副コマンドの差 | **移す** |
@@ -49,17 +50,21 @@
 | 「版の付け方と開発版の配布」節の版数 | **`docs/versioning-and-distribution.md`** |
 
 **検査の読む先も一緒に動かす。** 記載を消すだけでは、位置を決める語が見つからず読み取れない
-こととして落ちる。
+こととして落ちる。移設は読む先のファイルだけでは済まず、報告先のキーと位置決めの見出しも
+動く。触る箇所は [issue-499-design.md](issue-499-design.md) の「検査が読む先」が持つ。
 
 ## 受け入れ条件
 
 - [ ] `AGENTS.md` の版数の扱いが `docs/versioning-and-distribution.md` へ移り、`AGENTS.md`
       からはリンクで辿れる
 - [ ] `AGENTS.md` が 300 行以下になる
-- [ ] 移した記述が失われていない（節の見出しと表が移動先に揃っている）
+- [ ] 移した記述が失われていない（移動前の節と移動後の章の対応表を設計が持ち、表・実測値・
+      コマンド例がその対応どおりに揃っている）
 - [ ] `docs/plugin-development-guide.md` の「バージョン管理」と「利用者が過去の版へ戻る」が、
       正本へのリンクに置き換わっている
-- [ ] `python3 scripts/check-doc-staleness.py` が終了コード 0（読む先を動かした分の変更を含む）
+- [ ] `python3 scripts/check-doc-staleness.py` が終了コード 0（読む先・報告先・位置決めの
+      見出しを動かした分の変更を含む）
+- [ ] `AGENTS.md` に囲んだ版数が「主要プラグインです（v<版>）」の 1 箇所だけ残る
 - [ ] `uv run --with pytest pytest scripts/tests -q` が通る
 - [ ] `python3 scripts/check-markdown-links.py --root .` が終了コード 0
 - [ ] `python3 scripts/check-doc-line-limit.py` が終了コード 0
