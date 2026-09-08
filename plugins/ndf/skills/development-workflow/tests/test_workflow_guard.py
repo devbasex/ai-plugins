@@ -346,7 +346,7 @@ def test_recording_the_release_without_a_gap_says_nothing(repo: Path, state: Pat
     env = base_env(state)
     run_stage_check("record", "161", "mode", "light", cwd=repo, env=env)
     for stage in (
-        "要求と受け入れ条件", "作業場所の用意", "実装", "実装レビュー", "完了判定",
+        "要求と受け入れ条件", "作業場所の用意", "設計", "実装", "実装レビュー", "完了判定",
         "Pull Request", "後片付け",
     ):
         run_stage_check("record", "161", "stage", stage, cwd=repo, env=env)
@@ -354,6 +354,26 @@ def test_recording_the_release_without_a_gap_says_nothing(repo: Path, state: Pat
     result = guard(repo, state, 'bash "$SCRIPTS/projects-sync.sh" 161 stage "配布"')
 
     assert result.stdout.strip() == ""
+
+
+def test_a_conditional_stage_without_a_record_is_not_a_gap(repo: Path, state: Path) -> None:
+    """条件付きの工程は、記録が無くても欠落としては並ばない。
+
+    `light` の「設計」は触る領域が該当したときだけ通る（#375）。当たらない変更では記録が
+    残らないため、**必須の工程の欠落と同じ列に並べない**。案内は出るが、文言が違う。
+    """
+    env = base_env(state)
+    run_stage_check("record", "161", "mode", "light", cwd=repo, env=env)
+    for stage in (
+        "要求と受け入れ条件", "作業場所の用意", "実装", "実装レビュー", "完了判定",
+        "Pull Request", "後片付け",
+    ):
+        run_stage_check("record", "161", "stage", stage, cwd=repo, env=env)
+
+    result = guard(repo, state, 'bash "$SCRIPTS/projects-sync.sh" 161 stage "配布"')
+
+    assert "条件付き: 設計" in result.stdout
+    assert "記録なし:" not in result.stdout
 
 
 def test_a_repository_without_a_remote_records_nothing(tmp_path: Path, state: Path) -> None:

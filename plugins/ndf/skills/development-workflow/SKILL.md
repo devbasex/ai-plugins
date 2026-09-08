@@ -109,7 +109,7 @@ mode: standard
 | --- | --- | --- | --- | --- |
 | 要求と受け入れ条件 | `requirements-design` | `requirements-design` | — | `requirements-design` |
 | 作業場所の用意 | `worktree`（主ディレクトリで編集してよいパスだけなら不要） | `worktree`（主ディレクトリで編集してよいパスだけなら不要） | `worktree` | `worktree` |
-| 設計 | — | — | `design` | `design` |
+| 設計 | `design`（該当時） | `design`（該当時） | `design` | `design` |
 | ドキュメント再構成 | — | — | `document-restructuring`（設計 Pull Request を分けた場合） | `document-restructuring` |
 | ドキュメントレビュー | — | — | `pr` → `cross-review` → `merged`（設計 Pull Request を分けた場合） | `pr` → `cross-review` → `merged` |
 | 計画 | — | `implementation-plan` | `implementation-plan` | `implementation-plan` |
@@ -239,7 +239,9 @@ flowchart TD
 コードの両方を書き直すことになる。この費用はマージ先のチャネルで変わらない。
 
 対象は `standard` である。`legacy-refactor` は設計 Pull Request を分けた
-ときだけ同じ扱いにする。`light` は設計工程を通らないため対象外である。
+ときだけ同じ扱いにする。**`light` と `operation` は、設計工程を条件付きで通る場合でも
+対象外である。** どちらも独立した設計文書を作らず、設計 Pull Request を出さない。関門が
+掛かるのは設計だけを載せた Pull Request のマージであって、設計を書くこと自体ではない。
 
 **止める場所をドキュメントレビューに限るのは、そこが後から直す費用の変わり目だからである。**
 
@@ -358,10 +360,11 @@ flowchart TD
     RL -.->|standard / 未検証の項目なし| T
     A -.->|legacy-refactor| D
     C -.->|legacy-refactor で分けない| G
-    S -.->|operation| G
+    S -.->|"operation / 領域に当たらない"| G
+    S -.->|"light / operation / 領域に当たる"| C
     G -.->|operation| X[外部の系への実行]
     X -.-> I
-    S -.->|light| I
+    S -.->|"light / 領域に当たらない"| I
     K -.->|light / operation| L
     L -.->|light / legacy-refactor / 確定仕様化を通さない operation| P
     RL -.->|light / 振り返りを通さない operation| Z[終了]
@@ -374,13 +377,17 @@ flowchart TD
   T、当たらなければ RL である
 - **`operation` は N（全体テスト → ビルド・結合テスト）を通らない。** `quality-gates` が
   この モードへ課す段階は 3 までである。K の限定的な検証で、**実行そのものの結果**を確かめる
-- **`operation` は C（設計）・DR（ドキュメント再構成）・F（ドキュメントレビュー）・
-  R（構造改善）を通らない。** S から G（実装計画）へ抜け、X（外部の系への実行）が H の位置に
-  立つ。X の手順は [references/operation-run.md](references/operation-run.md) が持ち、
-  **実行の前に承認を得る**
+- **`operation` は DR（ドキュメント再構成）・F（ドキュメントレビュー）・R（構造改善）を
+  通らない。** S から G（実装計画）へ抜け、X（外部の系への実行）が H の位置に立つ。X の手順は
+  [references/operation-run.md](references/operation-run.md) が持ち、**実行の前に承認を得る**
 - **`light` は破線の経路（A → B → D → S → I → J → K → L → P → RL）を通る。** I と J の
   レビューは通り、K は変更箇所を 1 度実行する限定的な検証と静的解析だけを指す。N の全体
   テストと結合テストは通らない
+- **`light` と `operation` は C（設計）を条件付きで通る。** `design` の「触る領域を決める」の
+  表で、「すべての変更」以外の領域が 1 つ以上該当するときだけ通る。1 つも当たらなければ
+  通さない。**通る場合も独立した設計文書は作らず**、`light` は受け入れ条件を書いたファイルの
+  節へ、`operation` は実行の記録と同じファイルの節へ書く。**DR と F は通らない**（どちらも
+  独立した設計文書と設計 Pull Request を前提とする工程である）
 - `legacy-refactor` は A から D へ抜け、B（要求と受け入れ条件）と M（確定仕様化）を通らない。
   DR（ドキュメント再構成）と F（ドキュメントレビュー）は、**設計 Pull Request を分けたときだけ**
   通る。H は「現状固定テスト」、R は「段階的改善」、I は「本番の振る舞いが変わっていないことの

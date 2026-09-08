@@ -132,6 +132,7 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 ## 参照
 
 - [references/acceptance-criteria.md](references/acceptance-criteria.md) — 受け入れ条件の形式と性質
+- [references/nonfunctional-requirements.md](references/nonfunctional-requirements.md) — 非機能の 6 大項目の書き方・例・該当の判定
 - [references/spec-template.md](references/spec-template.md) — 仕様の雛形
 
 この工程に入ったら `/ndf:progress-tracking <issue番号> "要求と受け入れ条件"` を呼ぶ（記録の手順はその Skill が持つ）。
