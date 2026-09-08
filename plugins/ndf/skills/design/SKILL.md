@@ -88,7 +88,7 @@ issue のことではない。
 | 触る領域 | 読む参照 |
 | --- | --- |
 | すべての変更 | [references/design-template.md](references/design-template.md) / [references/deliverables.md](references/deliverables.md) / [references/decisions.md](references/decisions.md) |
-| 構成要素の配置・依存・反映先を変える | [references/system-architecture.md](references/system-architecture.md) |
+| 構成要素を追加・変更する、または配置・依存・反映先を変える | [references/system-architecture.md](references/system-architecture.md) |
 | 型・クラスを追加または変更する、または型を変えずに状態遷移か処理の順序を変える | [references/structure-behavior.md](references/structure-behavior.md) |
 | 永続データを持つ、またはスキーマを変える | [references/data-structure.md](references/data-structure.md) |
 | 呼び出される約束（API・イベント・コマンド）を変える | [references/interface-api.md](references/interface-api.md) |
