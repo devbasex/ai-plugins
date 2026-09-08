@@ -18,7 +18,7 @@
 WF_MODES=$'light\toperation\tlegacy-refactor\tstandard'
 WF_STAGE_MATRIX=$'要求と受け入れ条件\tR\tR\t-\tR
 作業場所の用意\tC\tC\tR\tR
-設計\t-\t-\tR\tR
+設計\tC\tC\tR\tR
 ドキュメント再構成\t-\t-\tC\tR
 ドキュメントレビュー\t-\t-\tC\tR
 計画\t-\tR\tR\tR
