@@ -24,8 +24,8 @@ gh issue list --milestone "<まとまりの名前>"   # まとまりごと
 **このディレクトリにあるのは、着手した課題の計画と調査だけである。**
 
 ```bash
-ls issues/*.md        # 進行中のもの
-ls issues/old/        # 完了したもの
+ls issues/*.md | grep -v '^issues/README\.md$'   # 進行中のもの
+ls issues/old/                                   # 完了したもの
 ```
 
 着手するときに `/ndf:implementation-plan` で `issues/issue-<番号>-<内容>.md` を 1 ファイル
