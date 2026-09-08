@@ -113,9 +113,9 @@ issue のことではない。
 選んだ結論と、その理由と、採らなかった案を残す。書き方は
 [references/decisions.md](references/decisions.md) にある。
 
-### 4. 出す前に文書の内部整合を突き合わせる
+### 4. 進む前に文書の内部整合を突き合わせる
 
-**[references/design-template.md](references/design-template.md) の「出す前に突き合わせる対」
+**[references/design-template.md](references/design-template.md) の「進む前に突き合わせる対」
 の 6 つを通す。** いずれも同じ文書の中だけで確かめられるもので、外部の情報を必要としない。
 
 **確かめた結果は残さない。** 残らないことが結果である。レビューが内部整合の指摘を出さなく
