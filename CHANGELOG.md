@@ -9,6 +9,49 @@
 **開発版（接尾辞の付いた版）は載せない。** `9.8.0` は `9.8.0-dev.1` までしか出ておらず、
 その内容は `10.0.0` で届いている。
 
+## [ndf 10.8.0] - 2026-09-08
+
+### 追加
+
+- **`design/references/deliverables.md` を新設した**（#375）。モード × 成果物の要否表 17 行と、
+  成果物ごとの中身・書き先を持つ。水準は「必須」と「該当時」の 2 つで、**「不要」を表す値を
+  置かない**
+- `design/references/structure-behavior.md` を新設した（#375）。クラス図・オブジェクト図・
+  処理の流れ・状態遷移図の書き分けと粒度
+- `design/references/system-architecture.md` を新設した（#375）。文脈・構成要素・配置の
+  3 階層と、パッケージ・モジュール構成
+- `design/references/nonfunctional.md` を新設した（#375）。6 大項目に対する実現方式と、
+  非機能設計表の 4 列（大項目・要求の条件・実現方式・確かめ方）
+- `requirements-design/references/nonfunctional-requirements.md` を新設した（#376）。
+  IPA 非機能要求グレードの 6 大項目それぞれの書き方・例・該当の判定表
+- `design/references/design-template.md` へ「進む前に突き合わせる対」の 6 つを置いた（#463）。
+  いずれも同じ文書の中だけで確かめられ、**確かめた結果は残さない**
+- `design/references/data-structure.md` へ ER 図・テーブル定義・CRUD 図を足した（#375）
+- `design/references/interface-ui.md` へ項目定義と、画面一覧・遷移・レイアウトの粒度を足した（#375）
+- `plugins/ndf/docs/kiro-cli.md` を新設した（#416）。`plugins/ndf/README.md` から Kiro CLI の
+  運用と制限（99 行）を移した
+
+### 変更
+
+- **工程表の「設計」の行を `design`（該当時）/ `design`（該当時）/ `design` / `design` へ、
+  `WF_STAGE_MATRIX` の同じ行を `C\tC\tR\tR` へ変えた**（#375）。`light` と `operation` でも、
+  触る領域が「すべての変更」以外に 1 つ以上当たれば `design` を通る。**独立した設計文書は
+  作らない**（受け入れ条件か実行の記録と同じファイルの節へ書く）
+- `design/SKILL.md` の「モードごとの成果物」を、水準の定義・設計の書き先・省いた理由の書き先の
+  3 つの表へ置き換えた（#375）。「設計で重視する 3 点」は「構造と振る舞い」を加えて 4 点になった
+- `design/SKILL.md` の「触る領域を決める」へ 3 行を足した（#375）。構成要素の追加・変更または
+  配置の変更、型・クラスの変更または状態遷移か処理の順序の変更、非機能の条件
+- `requirements-design` の非機能を 6 大項目へ広げた（#376）。**現行 4 種（性能・容量・権限・
+  記録）の書き方と例は、親を付け替えて残している**
+- `development-workflow/references/stage-notes.md` / `workflow-modes.md` /
+  `operation-run.md` を、設計が条件付きで通る形へ改めた（#375）
+- `plan-to-spec/SKILL.md` へクラス図の同期の時点を書いた（#375）。**`docs/` へ移すときの
+  1 回だけである**
+- **`AGENTS.md` の DO で確かめる対象を、外部コマンドから入力と出力の形まで広げた**（#432）。
+  実際に使う入力の形を 1 度通すことと、内部で決めた区切りを読む側と書く側の両方で見ること
+- `plugins/ndf/README.md` が 458 行から 365 行になった（#416）。配布のたびに書き直す更新案内が
+  伸びる余裕を 135 行確保した
+
 ## [ndf 10.7.0] - 2026-09-07
 
 ### 追加

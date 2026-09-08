@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.7.0）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.8.0-dev.1）
 ```
 
 ### agy
@@ -119,24 +119,29 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.7.0 へ更新するとき
+## v10.8.0-dev.1 へ更新するとき
 
-**破壊的な変更はありません。** 記録の移行も要りません。変更点の一覧は
+**設計工程の通り方が変わります。** 記録の移行は要りません。変更点の一覧は
 [CHANGELOG.md](../../CHANGELOG.md) にあります。
 
 | 変わったこと | 中身 |
 | --- | --- |
-| **兆候と手法の呼び名の置き場所** | `refactoring/references/vocabulary.md` が持つようになりました。`cross-refactoring` は読むだけです（**読めないと止まります**） |
-| **テストをどこまで変えてよいか** | `refactoring/references/test-changes.md` を新設しました。変更を 3 つに分け、判定を機械 → AI → 人の 3 段で行います |
-| 兆候が 3 つ増加 | テストの側の問題（内部の詳細への依存 / 入口から全部を引く / モックの対象が実装の詳細） |
-| **実装の前の構造改善の判断** | `implementation-plan/references/pre-refactoring.md` を新設しました。**工程表の行は増えていません** |
-| `cross-refactoring` の検証 | テストの期待値が変わっていないかを見ます。機械で決まらない差分は `judge-test-changes` で AI へ渡します |
+| **設計の成果物の決まり方** | モード × 成果物の要否表になりました（`design/references/deliverables.md`）。水準は「必須」と「該当時」の 2 つで、**違いは省いたときに理由が要るかです** |
+| **`light` / `operation` でも設計を通ります** | 触る領域が「すべての変更」以外に 1 つ以上当たるときだけです。**独立した設計文書は作りません**（受け入れ条件か実行の記録と同じファイルの節へ書きます） |
+| **図の階層が 4 つになりました** | 文脈・構成要素・配置・クラスです。クラス図は**変更が触る型だけ**に絞り、実装後の追随義務は負いません |
+| **非機能が 6 大項目になりました** | 可用性・性能拡張性・運用保守性・移行性・セキュリティ・システム環境（IPA 非機能要求グレード）。**現行 4 種（性能・容量・権限・記録）の書き方と例はそのまま残っています** |
+| 設計 Pull Request を出す前の突き合わせ | 同じ文書の中だけで確かめられる 6 つの対を通します。**確かめた結果は残しません** |
 
-### 呼び名の表が要ります
+### `light` / `operation` で設計の案内が出ます
 
-**`cross-refactoring` は `refactoring` の `references/vocabulary.md` を読みます。** 4 つの
-manifest はどちらの Skill も載せているため、通常の導入では揃います。**片方だけを配る構成に
-している場合は、両方を配ってください。** 読めないと `init` の時点で止まります。
+**工程の分類が `-`（対象外）から `C`（条件付き）へ変わりました。** 領域に当たらない変更では
+設計を通らなくてよいのですが、進行の記録が無いと配布の時点で「条件付き: 設計」の 1 行が出ます。
+**必須の工程の欠落（「記録なし」）とは別の行で、拒否はしません。**
+
+### 非機能を書いている仕様文書はそのままで動きます
+
+**現行 4 種は親を付け替えただけです。** 性能と容量は性能・拡張性、権限はセキュリティ、記録は
+運用・保守性の下に入ります。既にある仕様文書を書き直す必要はありません。
 
 ### 手元で確かめる
 
@@ -287,7 +292,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.7.0/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.8.0-dev.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -309,14 +314,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.7.0/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.8.0-dev.1/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.7.0  <path>
+# => ndf@ai-plugins  installed, enabled  10.8.0-dev.1  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
