@@ -7,7 +7,7 @@
 指す先を失っても、機械が知らせない。
 
 ```console
-$ sed -n '52,56p' scripts/check-markdown-links.py
+$ sed -n '41,43p' scripts/check-markdown-links.py
 def should_skip(target: str) -> bool:
     if not target or target.startswith("#"):
         return True
@@ -24,7 +24,7 @@ GitHub の生成規則に合わせる。日本語の見出しをそのまま参�
 | --- | --- |
 | 1 | 見出しの本文から HTML のタグを取り除く |
 | 2 | 小文字にする |
-| 3 | 文字・数字・結合文字・`-`・`_` 以外を取り除く |
+| 3 | 文字・数字・結合文字・空白・`-`・`_` 以外を取り除く |
 | 4 | 空白を `-` にする |
 | 5 | 同じ名前が既にあれば `-1`、`-2` と後ろに付ける |
 
