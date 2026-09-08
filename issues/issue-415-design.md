@@ -48,6 +48,28 @@ ERROR: --project points at a path that is not a directory: /tmp/example/afile
 `mkdir -p` はそのパスが既にあるとして失敗する（実測）。1 つの文言にまとめると、存在している
 パスを「does not exist」と述べたうえで、実行すると失敗する手順を案内することになる。
 
+**`HINT:` の行のパスは、シェルの語 1 つとして読める形へ整える。** 受け取った値をそのまま
+埋め込むと、空白を含むパスが 2 つの語に割れる。案内どおりに打っても、意図した導入先は作られない。
+
+```console
+$ pwd
+/tmp
+$ mkdir -p /tmp/qdemo/my project
+$ ls -1 /tmp/qdemo
+my
+$ ls -d /tmp/project
+/tmp/project
+```
+
+`/tmp/qdemo/my` と、現在地の下の `project` の 2 つが作られ、`/tmp/qdemo/my project` はどこにも
+残らない（実測）。整形は `printf '%q'` で行う。**`ERROR:` の行のパスは整形しない。** こちらは
+止まった理由を述べる文であって、利用者が打つ語ではない。
+
+```text
+ERROR: --project points at a path that does not exist: /tmp/qdemo/my project
+HINT: mkdir -p /tmp/qdemo/my\ project
+```
+
 **英語で書く。** 既存の `--project requires a path` / `unknown option` と同じ言語にする。
 このスクリプトの案内には日本語の行（`--scope global には HOME が必要です`）も混ざるが、
 `--project` に関わる案内は英語で揃っている。
@@ -97,6 +119,21 @@ ERROR: --project points at a path that is not a directory: /tmp/example/afile
 確かめる分岐が離れ、`--project` を読む箇所が 2 つになる。誤った値を渡したことは、無視される
 場合でも利用者に伝わるほうがよい。
 
+### 決定 6: 案内のパスの整形に `printf '%q'` を使う
+
+単引用符で囲む案（`mkdir -p '<パス>'`）は、パスに単引用符が含まれると囲みが閉じてしまう。
+`printf '%q'` は bash が自分で読み戻せる形を返し、次のいずれも 1 つの語として通る（実測）。
+
+| 渡した値 | `printf '%q'` の出力 |
+| --- | --- |
+| `/tmp/qtest2/my project` | `/tmp/qtest2/my\ project` |
+| `/tmp/qtest2/it's here` | `/tmp/qtest2/it\'s\ here` |
+| `/tmp/qtest2/a$b` | `/tmp/qtest2/a\$b` |
+
+**案内を読む側のシェルも bash を前提にする。** 制御文字を含むパスでは `$'...'` の形になり、
+これは bash と zsh が解釈する書式である。このスクリプト自身が `#!/usr/bin/env bash` で動き、
+案内も `bash plugins/ndf/dev.kiro/install.sh ...` の形で載っているため、前提は揃っている。
+
 ## テスト設計
 
 `scripts/tests/test_kiro_installer_project.py` に置く。既存の `test_agy_install_hooks.py` と
@@ -106,6 +143,7 @@ ERROR: --project points at a path that is not a directory: /tmp/example/afile
 | --- | --- |
 | 存在しないパスで止まる | 一時ディレクトリの下の未作成のパスを渡し、終了コード 2 と `ERROR:` の行を見る |
 | 作り方が案内に出る | 同じ出力に `HINT: mkdir -p <渡したパス>` が含まれることを見る |
+| 空白を含むパスでも案内が通る | 空白を含む未作成のパスを渡し、`HINT:` の行のパスがシェルの語 1 つへ戻ることを見る（`shlex.split` で 1 語になる） |
 | ディレクトリではないパスで止まる | 一時ファイルを作って渡し、終了コード 2 と、`not a directory` を述べる `ERROR:` の行を見る |
 | ファイルには作り方を案内しない | 同じ出力に `HINT:` の行が現れないことを見る |
 | 併用でも同じ形で止まる | `--scope global` と未作成のパスを渡し、終了コード 2 と `ERROR:` / `HINT:` の 2 行を見る |

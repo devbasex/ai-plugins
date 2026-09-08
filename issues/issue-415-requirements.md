@@ -33,6 +33,10 @@ $ echo $?
 **案内の本文へ作り方を添える。** 導入先を先に作ることを利用者が知らないと 2 手になるため、
 `mkdir -p <パス>` を `HINT:` で始まる行として案内へ書く。
 
+**案内のパスは、シェルの語 1 つとして読める形で書く。** 受け取った値をそのまま埋め込むと、
+空白を含むパスが 2 つの語に割れ、案内どおりに打っても意図した導入先は作られない（実測）。
+整形の手段は設計で決める。
+
 **作り方を添えるのは、存在しないパスに限る。** ファイルを渡した場合、`mkdir -p` はそのパスが
 既にあるとして失敗する（実測）。実行できない手順を案内することになるため、この入力には
 `HINT:` の行を出さず、ディレクトリではないことを述べる `ERROR:` の 1 行だけを出す。
@@ -58,12 +62,13 @@ $ echo $?
 
 - [ ] `--project` に存在しないパスを渡すと、`ERROR:` で始まる 1 行と `HINT: mkdir -p <パス>`
       の 1 行を標準エラーへ出して終了コード 2 で止まる
+- [ ] `HINT:` の行のパスは、空白などを含んでいてもシェルの語 1 つとして読める形で出る
 - [ ] `--project` にディレクトリではないパス（ファイル）を渡すと、`ERROR:` で始まる 1 行を
       標準エラーへ出して終了コード 2 で止まる。`HINT:` の行は出さない
 - [ ] `--scope global` と存在しないパスを併用したときも、存在しないパスと同じ形で止まる
 - [ ] `cd:` で始まるシェルのエラーが出力に現れない
 - [ ] 存在するディレクトリを渡したときの振る舞いが変わらない（`--dry-run` で終了コード 0）
-- [ ] 上の 5 つを検査する自動テストが `scripts/tests/` にあり、
+- [ ] 上の 6 つを検査する自動テストが `scripts/tests/` にあり、
       `uv run --with pytest pytest scripts/tests -q` が通る
 
 ## 対象範囲
@@ -85,6 +90,7 @@ $ echo $?
 | 振る舞い | `uv run --with pytest pytest scripts/tests -q` |
 | 手で 1 度通す | `bash plugins/ndf/dev.kiro/install.sh --project /nonexistent-xyz --yes; echo $?` |
 | 併用の形 | `bash plugins/ndf/dev.kiro/install.sh --scope global --project /nonexistent-xyz --yes; echo $?` |
+| 案内のパスの形 | `bash plugins/ndf/dev.kiro/install.sh --project "/tmp/no such dir" --yes` の `HINT:` の行 |
 | 配布物の整合 | `bash scripts/validate-runtime-plugins.sh` |
 
 ## 境界
