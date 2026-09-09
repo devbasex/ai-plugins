@@ -177,7 +177,8 @@ plugins/ndf/skills/fix/SKILL.md # rejected[] の形
 図が付ける「根拠なしの印」はこの項目である。
 
 **`comments_count` は変えない。** `result.json` の件数は投稿したインラインの数を指し、
-`cmd_read_result` が GitHub 側の実数との突き合わせに使う（`state.py:2235`）。指摘の全件を
+`cmd_read_result` が GitHub 側の実数との突き合わせに使う（`state.py:2235` で読み、
+`state.py:2296-2298` で `_posted_comment_count` の戻り値と比べる）。指摘の全件を
 ここへ入れると、投稿が届いたかの照合が常に食い違う。全件は `payload.json` の側で数える。
 
 **`payload.json` を読むのは `cmd_read_result` にする。** いまこのファイルを開くのは
