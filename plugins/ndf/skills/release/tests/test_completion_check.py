@@ -307,6 +307,35 @@ def test_the_template_leaves_on_the_limit_word() -> None:
     assert not done.stderr, done.stderr
 
 
+@pytest.mark.parametrize(
+    "log_body, overrides, reason",
+    [
+        # 完了・失敗の語が無く、時間の条件だけが成立する。IDLE を大きくして limit で抜ける。
+        ("publishing\n", {"IDLE": "3600", "LIMIT": "0"}, "limit"),
+        # 完了と失敗の語が同時に載り、時間の条件も成立する。done が fail・時間より先に選ばれる。
+        ("x\n[done] ok\n[fail] no\n", {"IDLE": "0", "LIMIT": "0"}, "done"),
+        # ログ内の順序を入れ替えても、grep の照合は行の順序に依らず done を先に選ぶ。
+        ("x\n[fail] no\n[done] ok\n", {"IDLE": "0", "LIMIT": "0"}, "done"),
+        # 失敗の語だけが載り、時間の条件も成立する。fail が時間より先に選ばれる。
+        ("x\n[fail] no\n", {"IDLE": "0", "LIMIT": "0"}, "fail"),
+    ],
+    ids=["limit", "done-over-fail-and-time", "done-regardless-of-log-order", "fail-over-time"],
+)
+def test_the_template_chooses_by_priority_when_conditions_coincide(
+    log_body: str, overrides: dict[str, str], reason: str
+) -> None:
+    """複数の条件が同時に成立したときの選択を固定する（done > fail > idle > limit）。
+
+    既存の idle ケース（`test_the_word_is_matched_as_a_fixed_string`）と合わせて優先順位を
+    守る。実時間の待機や内部コマンドの呼び出し回数は検証しない。
+    """
+    with tempfile.TemporaryDirectory() as work:
+        done = watch(work, log_body, **overrides)
+    assert done.stdout.split() == [reason], done.stdout
+    assert done.returncode == 0, done.stderr
+    assert not done.stderr, done.stderr
+
+
 def test_the_word_is_matched_as_a_fixed_string() -> None:
     """`[done]` を正規表現として渡すと `d` だけの行に一致する（#295 の指摘）。"""
     with tempfile.TemporaryDirectory() as work:
