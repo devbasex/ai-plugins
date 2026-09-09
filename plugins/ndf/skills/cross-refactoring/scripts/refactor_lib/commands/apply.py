@@ -381,6 +381,42 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
         ctx, commit_range, reported,
     )
 
+    record = _record_apply_result(entry, group, commit_range, applied, failed, payload)
+
+    # `--dry-run` では git も状態ファイルも触らない。片方だけ進むと、確認の
+    # つもりで実行した利用者の進行が壊れる。
+    if args.dry_run:
+        if failed:
+            drop_items(state, entry, failed, dry_run=True)
+        info("（dry-run）状態ファイルは更新していません")
+        applied = list(record["applied"])
+    elif failed:
+        # `merged_at` は `_apply_drop` が取り消しの完了時点で立てる。
+        applied = _apply_drop(path, state, entry, group, failed)
+    else:
+        # **全項目が通ったときも進行側が公開する。** 実装担当は push しないため、
+        # ここで公開しないと Pull Request 上の差分が古いままになる。
+        group["status"] = "applied"
+        # 次は `verify-round` がテストで検証する。ここではまだ群を閉じない。
+        state["phase"] = "verify"
+        record["merged_at"] = statefile.now()
+        # 保留の印・保存・push・印の解除は 1 か所が持つ（`push_with_retry_marker`）。
+        push_with_retry_marker(path, state, entry)
+
+    if not applied:
+        info("この適用ラウンドは取り消しました。検証は行いません")
+        sys.exit(2)
+
+
+def _record_apply_result(
+    entry: dict[str, Any],
+    group: dict[str, Any],
+    commit_range: _ApplyCommitRange,
+    applied: list[str],
+    failed: list[str],
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """適用結果と所要時間を記録し、反映待ちの記録を返す。"""
     entry["apply"] = {
         "apply_round": group["apply_round"],
         "applied": applied,
@@ -398,30 +434,7 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
     durations["apply"] = durations.get("apply", 0) + safe_int(
         payload.get("elapsed_seconds")
     )
-
-    # `--dry-run` では git も状態ファイルも触らない。片方だけ進むと、確認の
-    # つもりで実行した利用者の進行が壊れる。
-    if args.dry_run:
-        if failed:
-            drop_items(state, entry, failed, dry_run=True)
-        info("（dry-run）状態ファイルは更新していません")
-        applied = list(entry["apply"]["applied"])
-    elif failed:
-        # `merged_at` は `_apply_drop` が取り消しの完了時点で立てる。
-        applied = _apply_drop(path, state, entry, group, failed)
-    else:
-        # **全項目が通ったときも進行側が公開する。** 実装担当は push しないため、
-        # ここで公開しないと Pull Request 上の差分が古いままになる。
-        group["status"] = "applied"
-        # 次は `verify-round` がテストで検証する。ここではまだ群を閉じない。
-        state["phase"] = "verify"
-        entry["apply"]["merged_at"] = statefile.now()
-        # 保留の印・保存・push・印の解除は 1 か所が持つ（`push_with_retry_marker`）。
-        push_with_retry_marker(path, state, entry)
-
-    if not applied:
-        info("この適用ラウンドは取り消しました。検証は行いません")
-        sys.exit(2)
+    return entry["apply"]
 
 
 def _load_apply_context(
