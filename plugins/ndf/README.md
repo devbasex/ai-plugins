@@ -8,10 +8,10 @@ PR 運用、レビュー、調査、実装計画、仕様書化、開発方法�
 
 | ランタイム | 公開 Skill | マニフェスト |
 | --- | --- | --- |
-| Claude Code | 44 個 | `.claude-plugin/plugin.json` |
-| Codex | 42 個 | `.codex-plugin/plugin.json` |
-| Kiro CLI | 43 個 | `dev.kiro/install.sh`（プラグイン機構が無いため installer で導入） |
-| agy | 42 個 | `dev.agy/plugin.json`（取得元の登録が無いため clone から導入） |
+| Claude Code | 45 個 | `.claude-plugin/plugin.json` |
+| Codex | 43 個 | `.codex-plugin/plugin.json` |
+| Kiro CLI | 44 個 | `dev.kiro/install.sh`（プラグイン機構が無いため installer で導入） |
+| agy | 43 個 | `dev.agy/plugin.json`（取得元の登録が無いため clone から導入） |
 
 ## レイアウト
 
@@ -19,7 +19,7 @@ PR 運用、レビュー、調査、実装計画、仕様書化、開発方法�
 plugins/ndf/
 ├── .claude-plugin/plugin.json   # Claude Code のマニフェスト
 ├── .codex-plugin/plugin.json    # Codex のマニフェスト
-├── skills/                      # 配布 Skill の唯一の実体（44 個）
+├── skills/                      # 配布 Skill の唯一の実体（45 個）
 ├── skills/README.md             # Skill 執筆の規約
 ├── manifests/                   # ランタイム別の配布 Skill 一覧
 ├── agents/                      # Claude Code のサブエージェント定義（8 個）
@@ -102,7 +102,7 @@ agy plugin install plugins/ndf/dev.agy                               # 初回
 agy plugin uninstall ndf && agy plugin install plugins/ndf/dev.agy   # 新しい版へ
 ```
 
-導入すると `manifests/agy-skills.txt` に載る Skill 42 個と、エージェント 8 個、hook 1 個が
+導入すると `manifests/agy-skills.txt` に載る Skill 43 個と、エージェント 8 個、hook 1 個が
 `~/.gemini/config/plugins/ndf/` へ複製されます。symlink は実体へ解決されて複製されるため、
 clone を消しても導入した内容は残ります。
 

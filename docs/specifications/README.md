@@ -9,5 +9,6 @@
 | [ndf-skill-inventory/](ndf-skill-inventory/01-ledger-and-criteria.md) | Skill ごとの利用実績と、維持・統合・削除・発動改善の判定（3 本） |
 | [ndf-design-phase.md](ndf-design-phase.md) | 設計工程を置いた経緯と決定。手順は `design` の SKILL.md が正 |
 | [ndf-workflow-unit-and-gates.md](ndf-workflow-unit-and-gates.md) | モードを判定する単位、承認の関門、実行証跡の gate。手順は `development-workflow` の SKILL.md が正 |
+| [ndf-documentation-mode.md](ndf-documentation-mode.md) | ビジネス文書のワークフロー（`documentation` モード）。3 つの軸と 2 つの関門。手順は各 Skill の `SKILL.md` が正 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
