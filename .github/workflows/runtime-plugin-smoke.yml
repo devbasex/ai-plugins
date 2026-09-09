@@ -25,7 +25,7 @@ jobs:
       matrix:
         runtime: [claude, codex, kiro, agy]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Run unauthenticated runtime smoke
         run: bash scripts/runtime-smoke-test.sh --runtime "${{ matrix.runtime }}" --with-secrets=off
       - name: Upload smoke artifacts
