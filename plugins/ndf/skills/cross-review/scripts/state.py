@@ -1635,6 +1635,9 @@ def cmd_init(args: argparse.Namespace) -> None:
         "pr_history": [{"pr": pr, "opened_at": _now(), "closed_at": None, "rounds": 0}],
         "rounds": [],
         "deferred_nits": [],
+        # 却下した指摘は per-item で残す（#156）。件数だけでは、次のラウンドへ
+        # 渡しても同じ指摘だと判定できない。
+        "rejected_findings": [],
         # 引き継いだ指摘は再開の時点で決まる。新規の開始では空にする。
         "carried_over": None,
         "final": None,
@@ -2798,6 +2801,16 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     else:
         _deferred_count = _count(_deferred_raw)
 
+    # 却下も同じ正規化を通す。**件数だけが返る劣化表現（int）では per-item を作れない**
+    # ため、そのときは記録を空にし、件数は `_count()` の値で残す。
+    _rejected_raw = fix.get("rejected")
+    if isinstance(_rejected_raw, list):
+        _rejected_items = [r for r in _rejected_raw if isinstance(r, dict)]
+    elif isinstance(_rejected_raw, dict):
+        _rejected_items = [_rejected_raw]
+    else:
+        _rejected_items = []
+
     st["rounds"][-1]["fix"] = {
         "commit": fix_commit,
         "fixed": fixed_count,
@@ -2822,6 +2835,13 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         info(f"↻ 引き継いだ指摘を round {round_no} の修正の工程へ通しました")
     for d in _deferred_nits:
         st["deferred_nits"].append({**d, "pr": pr, "round": round_no})
+
+    # **却下した指摘も per-item で残す**（#156）。`rounds[].fix.rejected` の件数は
+    # ラウンドごとの報告が読むため残し、こちらは理由と位置を持つ記録として積む。
+    # **項目が欠けた要素も落とさない。** 落とすと却下そのものが記録から消える。
+    rejected_findings = st.setdefault("rejected_findings", [])
+    for r in _rejected_items:
+        rejected_findings.append({**r, "pr": pr, "round": round_no})
     _save(pr, st)
 
     # CI 分類
@@ -3053,6 +3073,19 @@ def cmd_report(args: argparse.Namespace) -> None:
             print(f"- [{n.get('severity')}] {n.get('path')}:{n.get('line')} — {n.get('summary')}")
         print()
         print("これらの nit を一括対応する場合は再度 `/ndf:fix <PR#>` を起動してください。")
+        print()
+
+    # **却下した指摘も一覧で出す**（#156）。次のラウンドで同じ論点が再提出されたとき、
+    # 既に却下したものかどうかをここで照合できる。
+    rejected = st.get("rejected_findings") or []
+    if rejected:
+        print(f"## 却下した指摘 ({len(rejected)} 件)")
+        for r in rejected:
+            print(
+                f"- [round {r.get('round')}] [{r.get('severity')}] "
+                f"{r.get('path')}:{r.get('line')} — {r.get('summary')}"
+            )
+            print(f"  却下の理由: {r.get('reason_for_rejection')}")
     else:
         print("## 残 deferred nit: なし")
 
