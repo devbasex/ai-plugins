@@ -119,6 +119,26 @@ def test_it_reads_the_closing_words_from_a_body_file_equals_option(
     assert result.stdout.strip() == "devbasex/ai-plugins\t421", result.stderr
 
 
+def test_it_reads_the_closing_words_from_a_short_body_option(repo: Path) -> None:
+    """現状固定: -b でもリポジトリと課題番号の組を返す。"""
+    command = 'gh pr create -b "Closes #417"'
+    result = run_lib(f"wf_parse_pr_create {shlex.quote(command)}", cwd=repo)
+    assert result.stdout.strip() == "devbasex/ai-plugins\t417", result.stderr
+
+
+def test_it_reads_the_closing_words_from_a_short_body_file_option(
+    repo: Path, tmp_path: Path
+) -> None:
+    """現状固定: -F の本文ファイルから複数の組を返す。"""
+    body = tmp_path / "body.md"
+    body.write_text("まとめ\n\nCloses #418\nCloses #420\n", encoding="utf-8")
+    command = f"gh pr create -F {body}"
+    result = run_lib(f"wf_parse_pr_create {shlex.quote(command)}", cwd=repo)
+    assert result.stdout.split() == [
+        "devbasex/ai-plugins", "418", "devbasex/ai-plugins", "420"
+    ], result.stderr
+
+
 def test_a_body_without_closing_words_yields_nothing(repo: Path) -> None:
     command = create("ただの説明")
     result = run_lib(f'wf_parse_pr_create {shlex.quote(command)}', cwd=repo)

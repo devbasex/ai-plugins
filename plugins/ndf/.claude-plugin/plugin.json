@@ -1,7 +1,7 @@
 {
   "name": "ndf",
-  "version": "10.8.0",
-  "description": "Claude Code plugin (v10.8.0): 8 specialized agents and 41 focused NDF skills for PR/review workflows, cross-review, implementation planning, plan-to-spec, Docker container access, statusline, external AI delegation (Codex/agy), transcript retention guard, and optional Slack notifications.",
+  "version": "10.9.0",
+  "description": "Claude Code plugin (v10.9.0): 8 specialized agents and 45 focused NDF skills for PR/review workflows, cross-review, implementation planning, plan-to-spec, Docker container access, statusline, external AI delegation (Codex/agy), transcript retention guard, and optional Slack notifications.",
   "author": {
     "name": "takemi-ohama",
     "url": "https://github.com/takemi-ohama"
@@ -40,6 +40,7 @@
     "./skills/notion-writing",
     "./skills/docker-container-access",
     "./skills/implementation-plan",
+    "./skills/layout-review",
     "./skills/investigation-rules",
     "./skills/problem-solving",
     "./skills/logging-guidelines",
@@ -54,7 +55,10 @@
     "./skills/development-workflow",
     "./skills/requirements-design",
     "./skills/design",
+    "./skills/document-sources",
+    "./skills/document-drafting",
     "./skills/document-restructuring",
+    "./skills/document-systems",
     "./skills/tdd-cycle",
     "./skills/refactoring",
     "./skills/quality-gates",

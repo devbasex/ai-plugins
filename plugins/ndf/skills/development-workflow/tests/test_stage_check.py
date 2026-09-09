@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from workflow_helpers import (
-    SLUG, base_env, init_repo, path_with, run_stage_check, state_file,
+    SLUG, base_env, init_repo, path_with, run_lib, run_stage_check, state_file,
 )
 
 # #161 の実測の並び（issue #221 の本文）。実装レビューと後片付けが 2 回ずつ現れる。
@@ -169,6 +169,38 @@ def test_a_state_file_of_another_version_is_ignored(repo: Path, state: Path) -> 
     out = report(repo, state, 221).stdout
 
     assert out.strip() == "#221 の進行の記録がありません。"
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "{壊れている",
+        json.dumps({
+            "version": 2, "repo": SLUG, "issue": 221,
+            "mode": "standard", "stages": ["設計"],
+        }, ensure_ascii=False),
+    ],
+    ids=["broken-json", "unsupported-version"],
+)
+def test_record_replaces_an_unreadable_state(
+    repo: Path, state: Path, content: str
+) -> None:
+    """現状固定: 読めない控えへの再記録は旧モードと旧工程を引き継がない。"""
+    path = state_file(state, 221)
+    path.parent.mkdir(parents=True)
+    path.write_text(content, encoding="utf-8")
+
+    result = run_lib(
+        f"wf_record {SLUG} 221 stage 計画", cwd=repo, env=base_env(state)
+    )
+
+    assert result.returncode == 0, result.stderr
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert saved["version"] == 1
+    assert saved["repo"] == SLUG
+    assert saved["issue"] == 221
+    assert saved["stages"] == ["計画"]
+    assert "mode" not in saved
 
 
 def test_a_repository_without_the_projects_declaration_still_records(repo: Path, state: Path) -> None:

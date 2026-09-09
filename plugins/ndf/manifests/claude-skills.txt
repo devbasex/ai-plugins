@@ -10,6 +10,7 @@ markdown-writing
 notion-writing
 docker-container-access
 implementation-plan
+layout-review
 investigation-rules
 problem-solving
 logging-guidelines
@@ -24,7 +25,10 @@ official-skills-autoloader
 development-workflow
 requirements-design
 design
+document-sources
+document-drafting
 document-restructuring
+document-systems
 tdd-cycle
 refactoring
 quality-gates
