@@ -373,6 +373,28 @@ def test_every_markdown_stays_within_the_file_budget(path: Path) -> None:
 # --- 条件 10: 記載を消したときも落ちる ---------------------------------------------
 
 
+def test_section_keeps_fenced_headings_and_stops_at_the_next_section() -> None:
+    """現状固定: 囲みの中の見出しでは節を終えず、囲みの外で区切る。"""
+    body = """## 最初の節
+本文。
+```markdown
+## 囲みの中の見出し
+雛形の本文。
+```
+囲みの外の続き。
+## 次の節
+次の本文。
+"""
+    result = section(body, "## 最初の節")
+
+    assert result == """本文。
+```markdown
+## 囲みの中の見出し
+雛形の本文。
+```
+囲みの外の続き。"""
+
+
 def test_a_missing_section_is_not_passed_over() -> None:
     with pytest.raises(AssertionError):
         section("# 見出しのない文書\n", COMPLETION_SECTIONS[0])
