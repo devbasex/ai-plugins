@@ -47,7 +47,7 @@ graph TD
     CR -->|support / refute / ...| RF
     RF --> CL[_classify_finding]
     CL -->|5 つの区分| JG[cmd_judge]
-    JG -->|verified_blocking があれば| FX[修正の工程]
+    JG -->|verified_blocking / needs_human_judgment があれば| FX[修正の工程]
 ```
 
 ## 入出力の契約
@@ -158,15 +158,40 @@ $ python3 -c "import shlex; print(shlex.split('pytest -p reviewer_plugin'))"
 
 | `result` | 決まり方 |
 | --- | --- |
-| `reproduced` | 実行が終わり、終了コードが 0 でない（指摘のとおり壊れている） |
-| `not_reproduced` | 実行が終わり、終了コードが 0（指摘が成り立たない） |
-| `not_run` | 宣言が無い / トークン照合に当たらない / 宣言より後ろに `-` で始まるトークンがある / **上限時間で打ち切った** / **起動に失敗した** |
+| `reproduced` | 実行が終わり、終了コードが**再現の終了コード**に一致した |
+| `not_reproduced` | 実行が終わり、終了コードが 0 |
+| `not_run` | 宣言が無い / トークン照合に当たらない / 宣言より後ろに `-` で始まるトークンがある / **上記のどちらでもない終了コード** / **上限時間で打ち切った** / **起動に失敗した** |
 
-**打ち切りと起動の失敗を `reproduced` にしない。** どちらも終了コードは 0 以外になるが、
-指摘が正しいことの証拠ではない。`subprocess.run` は上限時間で `TimeoutExpired` を、
-コマンドが無いときは `OSError`（`FileNotFoundError` / `PermissionError`）を送出するため、
-**終了コードを読む前に例外で分かれる**。例外で分かれた経路は `not_run` とし、`reason` へ
-どちらであったかを残す。
+#### 「0 でない」を再現としない
+
+**再現とみなす終了コードを宣言する。** 既定は `[1]` である。0 以外をすべて再現として
+扱うと、指摘とは無関係な失敗まで「指摘のとおり壊れている」ことになる。
+
+```json
+{"version": 1, "verify_commands": ["pytest"], "reproduced_exit_codes": [1]}
+```
+
+pytest の終了コードを実測すると、**バグの再現と、指摘の書き誤りが別の値で分かれる**。
+
+```console
+$ uv run --with pytest pytest test_ng.py   >/dev/null 2>&1; echo $?   # テストが失敗
+1
+$ uv run --with pytest pytest test_missing.py >/dev/null 2>&1; echo $?  # ファイルが無い
+4
+$ uv run --with pytest pytest test_ok.py::test_absent >/dev/null 2>&1; echo $?  # テスト ID が無い
+4
+$ uv run --with pytest pytest -k 'nothing_matches' test_ok.py >/dev/null 2>&1; echo $?  # 収集 0 件
+5
+```
+
+**4 と 5 は、指摘が正しいことの証拠にならない。** レビュワーが書いた `suggested_check` の
+対象が存在しないか、引数が誤っているだけである。既定 `[1]` はこれらを `not_run` へ落とす。
+**終了コードの意味はランナーごとに違う**ため、値は宣言側が持つ。
+
+**打ち切りと起動の失敗も `reproduced` にしない。** `subprocess.run` は上限時間で
+`TimeoutExpired` を、コマンドが無いときは `OSError`（`FileNotFoundError` /
+`PermissionError`）を送出するため、**終了コードを読む前に例外で分かれる**。例外で分かれた
+経路は `not_run` とし、`reason` へどの理由であったかを残す。
 
 **再現の向きに注意する。** 指摘は「壊れている」という主張であるため、**テストが失敗する
 ことが再現である。**
@@ -241,6 +266,25 @@ $ python3 -c "import shlex; print(shlex.split('pytest -p reviewer_plugin'))"
 **棄却の理由を残す。** `rejected` の要素へ `rejection_reason` を書く（実行の結果か、
 `refute` の理由）。
 
+#### `duplicate` と `out_of_scope` は区分を決めない
+
+**5 つの値のうち、区分の条件に現れるのは `support` と `refute` の 2 つだけである。**
+残りの 3 つは、区分ではなく別の行き先を持つ。
+
+| 値 | 何が起きるか |
+| --- | --- |
+| `insufficient_evidence` | 数えない。支持でも反証でもないため、区分は他の担当の値と根拠で決まる |
+| `duplicate` | `_merge_duplicates` の入力にする。**区分は代表の 1 件が持つ** |
+| `out_of_scope` | 区分を変えない。`out_of_scope` を返した担当の一覧を要素へ残し、**修正の担当が `/ndf:out-of-scope` で起票する材料にする** |
+
+**`refute` の代わりに使わせない。** `duplicate` は「別の指摘と同一」、`out_of_scope` は
+「この Pull Request の範囲から外れる」であり、どちらも**指摘が誤っているという主張では
+ない**。範囲外の指摘は、この Pull Request で直さないだけで、課題としては残る。
+
+**統合は反証より前に済んでいる**（前述）。それでも `duplicate` を受け取れるようにするのは、
+位置も本文も離れているために機械では結べない重複を、担当が見つけることがあるためである。
+その申告は次のラウンドの統合の入力にする。
+
 ## 処理の流れ
 
 ```mermaid
@@ -255,7 +299,7 @@ sequenceDiagram
     J->>R: 反証（提案者以外へ。実行の結果を添える）
     R->>J: support / refute / ...
     J->>J: 区分を決める
-    J->>J: verified_blocking があれば修正へ
+    J->>J: verified_blocking / needs_human_judgment があれば修正へ
 ```
 
 **実行検証が反証より前にある。** 機能一覧の並びと同じで、反証を返す担当は実行の結果を
@@ -275,6 +319,20 @@ sequenceDiagram
 `major` 以上を求め、`needs_human_judgment` も同じ条件を持つ。`minor` 以下の指摘は
 どの経路からも新規性へ入らない。
 
+**数える 2 つは、どちらも修正の工程へ渡る。** 新規性が数えた指摘が修正へ渡らないと、
+そのラウンドは「収束していないのに直すものが無い」状態になり、次のラウンドで同じ指摘が
+また数えられる。
+
+| 区分 | 修正の担当が何をするか |
+| --- | --- |
+| `verified_blocking` | 直す。機械が再現しているため、判断の余地は無い |
+| `needs_human_judgment` | **読んで決める。** 直す・`rejected` として理由を返す・範囲外として起票する、のいずれか |
+
+**`needs_human_judgment` を人へのエスカレーションにしない。** 収束のループはこの工程の
+中で回っており、止めて人を待つと `cross-review` が自動で進まなくなる。**決めるのは修正の
+担当（AI）で、その判断の記録が次のラウンドの入力になる。** 区分の名前が指すのは「機械の
+証拠だけでは決まらない」ことであって、人の関与が必須であることではない。
+
 **`rejected` と `insufficient_evidence` と `verified_non_blocking` は新規性へ数えない。**
 数えると、棄却した指摘と `minor` の指摘のぶんだけラウンドが増える。#69 で同じ論点が
 5 ラウンド続いた事象がこれにあたる。
@@ -290,7 +348,7 @@ sequenceDiagram
 | 大項目 | 実現方式 | 確かめ方 |
 | --- | --- | --- |
 | セキュリティ | 宣言のトークン列と先頭が一致し、後ろに `-` で始まるトークンを持たない値だけを `shell=False` で実行する | 別コマンド・引数の注入・メタ文字を渡すテスト |
-| 可用性 | 実行の失敗（コマンドが無い / 上限時間）は `not_run` として扱い、進行を止めない | 不在のコマンドと、上限を超えるコマンドを渡すテスト |
+| 可用性 | 実行の失敗（コマンドが無い / 上限時間 / 対象が無い）は `not_run` として扱い、進行を止めない | 不在のコマンド・上限を超えるコマンド・終了コード 4 と 5 を渡すテスト |
 | 移行性 | 宣言が無いリポジトリでは実行検証を行わず、従来どおり動く | 宣言なしのテスト |
 | 保守性 | 区分の決め方を 1 つの関数へ集める | 区分ごとのテスト |
 | 性能 | 実行は 1 指摘につき 1 回。上限時間を設ける | 上限を超える実行のテスト |
@@ -351,7 +409,9 @@ sequenceDiagram
 | メタ文字を含む値は実行しない | 同上。`pytest; rm -rf /` と `pytest $(whoami)` が `not_run` になること |
 | 宣言が無ければ実行しない | 同上 |
 | 打ち切りと起動の失敗を再現としない | 同上。上限を超えるコマンドと不在のコマンドが `not_run` になること |
-| 再現の向き（失敗＝再現） | 同上 |
+| 指摘の書き誤りを再現としない | 同上。終了コード 4（対象が無い）と 5（収集 0 件）が `not_run` になること |
+| 再現の向き（失敗＝再現） | 同上。終了コード 1 が `reproduced`、0 が `not_reproduced` |
+| `duplicate` / `out_of_scope` が区分を決めない | `tests/test_classify_findings.py`。両者だけを持つ指摘の区分が、値を持たない指摘と変わらないこと |
 | 5 つの区分へ分かれる | `tests/test_classify_findings.py`（新設）。区分ごとに 1 件以上 |
 | 実行で再現した指摘は支持が少なくても残る | 同上 |
 | 実行で再現した指摘は `refute` があっても棄却されない | 同上。`reproduced` と `refute` を両方持つ 1 件 |
