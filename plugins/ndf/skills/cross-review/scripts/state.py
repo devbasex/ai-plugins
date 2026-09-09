@@ -716,6 +716,38 @@ def _is_synced(
     return True
 
 
+def _reset_worktree_head(
+    worktree: str, pr: int, target: str | None, code: int,
+) -> None:
+    """基準へ巻き戻す。基準が無ければ PR の checkout へフォールバックする。"""
+    if target is not None:
+        reset = subprocess.run(
+            ["git", "reset", "--hard", target],
+            capture_output=True, text=True, cwd=worktree,
+        )
+        if reset.returncode != 0:
+            die(f"worktree を {target} へ同期できない: {reset.stderr.strip()}", code=code)
+    else:
+        checkout = subprocess.run(
+            ["gh", "pr", "checkout", str(pr), "--detach"],
+            capture_output=True, text=True, cwd=worktree,
+        )
+        if checkout.returncode != 0:
+            die(f"gh pr checkout --detach #{pr} 失敗: {checkout.stderr.strip()}", code=code)
+
+
+def _clean_untracked_files(worktree: str, exclusions: list[str], code: int) -> None:
+    """除外パスを残して追跡対象外のファイルを掃除する。"""
+    clean = subprocess.run(
+        ["git", "clean", "-fd", *[a for e in exclusions for a in ("-e", e)]],
+        capture_output=True, text=True, cwd=worktree,
+    )
+    if clean.returncode != 0:
+        # 消せないまま進むと、残骸を抱えた作業ツリーで fix 担当が `git add -A` を
+        # 使い、Pull Request へ混ざる。差分そのものは合っていても止める。
+        die(f"追跡対象外のファイルを消せない: {clean.stderr.strip()}", code=code)
+
+
 def _sync_worktree(
     worktree: str,
     pr: int,
@@ -767,12 +799,6 @@ def _sync_worktree(
         if strict and isinstance(head, HeadRef) and _is_synced(
                 worktree, pr, head, exclusions, code):
             return
-        reset = subprocess.run(
-            ["git", "reset", "--hard", target],
-            capture_output=True, text=True, cwd=worktree,
-        )
-        if reset.returncode != 0:
-            die(f"worktree を {target} へ同期できない: {reset.stderr.strip()}", code=code)
     elif strict:
         # HEAD を動かす前に、何が失われるかを数える材料が無い（基準が手元に無いのだから、
         # 未 push のコミットを数えられない）。判定できない状態でフォールバックしない。
@@ -784,20 +810,8 @@ def _sync_worktree(
     else:
         # フォーク PR は origin に head branch が無い。作成時と同じ経路で合わせる。
         info(f"⚠ git fetch origin {label} 失敗 (フォーク PR の可能性) — gh pr checkout でフォールバック")
-        checkout = subprocess.run(
-            ["gh", "pr", "checkout", str(pr), "--detach"],
-            capture_output=True, text=True, cwd=worktree,
-        )
-        if checkout.returncode != 0:
-            die(f"gh pr checkout --detach #{pr} 失敗: {checkout.stderr.strip()}", code=code)
-    clean = subprocess.run(
-        ["git", "clean", "-fd", *[a for e in exclusions for a in ("-e", e)]],
-        capture_output=True, text=True, cwd=worktree,
-    )
-    if clean.returncode != 0:
-        # 消せないまま進むと、残骸を抱えた作業ツリーで fix 担当が `git add -A` を
-        # 使い、Pull Request へ混ざる。差分そのものは合っていても止める。
-        die(f"追跡対象外のファイルを消せない: {clean.stderr.strip()}", code=code)
+    _reset_worktree_head(worktree, pr, target if have_base else None, code)
+    _clean_untracked_files(worktree, exclusions, code)
     rev = subprocess.run(
         ["git", "rev-parse", "--short", "HEAD"],
         capture_output=True, text=True, cwd=worktree,
