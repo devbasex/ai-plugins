@@ -23,6 +23,8 @@ qa-security-scan
 development-workflow
 requirements-design
 design
+document-sources
+document-drafting
 document-restructuring
 document-systems
 tdd-cycle

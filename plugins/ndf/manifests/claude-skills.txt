@@ -24,6 +24,8 @@ official-skills-autoloader
 development-workflow
 requirements-design
 design
+document-sources
+document-drafting
 document-restructuring
 document-systems
 tdd-cycle
