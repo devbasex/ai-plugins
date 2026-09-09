@@ -18,10 +18,12 @@
 | --- | --- |
 | `commands/setup.py` の `cmd_start_round` | ラウンドの値に母集合（`RUNTIMES` / `RUNTIMES_CSV`）を足して返す |
 | `scripts/check-skill-shell-vars.py`（新設） | 骨組みが参照する変数が、その行より前のコマンドで得られることを検査する |
-| `refactor_lib/scope.py` の `is_test_location` | 名前で当たらないとき、実体を 1 段だけ走査して判定する |
-| `scripts/lib/git-credential.sh`（新設） | helper を退避した `git` の呼び出し方を 1 か所で持つ |
+| `refactor_lib/scope.py` の `is_test_location` | 名前で当たらないとき、作業ツリーを起点に実体を 1 段だけ走査して判定する |
+| `refactor_lib/scope.py` の `test_locations` | 関門が後段で見る**置き場所そのもの**を返す（渡された `--scope` の語ではない） |
+| `plugins/ndf/scripts/lib/git-credential.sh`（新設） | helper を退避した `git` の呼び出し方を 1 か所で持つ |
 | `refactor_lib/gitfacts.py` の `push_head` | 失敗したときに退避して 1 度だけ再試行する |
-| `pr` / `fix` / `cross-refactoring` の `SKILL.md` | 退避の手を手順として書く |
+| `cross-refactoring` の `SKILL.md` | 実装が共通層を読むことを書く |
+| `pr` / `fix` の `SKILL.md` | 退避の `git` コマンドを**そのまま案内する**（共通層は読み込まない） |
 
 ```mermaid
 graph TD
@@ -40,9 +42,15 @@ graph TD
     CHK[check-skill-shell-vars.py] -->|参照と出所を突き合わせる| SK
     CHK -->|emit のキーを読む| SR
     SK -->|値を受け取る| SR
-    PH -->|退避の手を借りる| GC
-    PRS -->|同じ手を案内する| GC
+    PH -->|読み込んで呼ぶ| GC
+    PRS -.->|同じコマンドを写して案内する| GC
 ```
+
+**実線と破線は結び方が違う。** 実線は実行時に読み込む経路で、破線は同じコマンドを人が
+読んで実行する経路である。`pr` / `fix` は**任意のリポジトリで動く手順書**であり、その
+リポジトリに `plugins/ndf/` がある保証が無いため、共通層を読み込まない。写しが 2 か所に
+なることは避けられないので、**共通層のファイルを唯一の原本とし、手順書はそこから写す**。
+食い違いは検査で見る（「テスト設計」の最終行）。
 
 ## システム構成（文脈と配置）
 
@@ -71,16 +79,25 @@ plugins/ndf/
 │   └── lib/
 │       └── git-credential.sh          # 新設。退避した git の呼び出し方
 └── skills/
-    └── cross-refactoring/
-        ├── SKILL.md                   # 骨組みと push の手順
-        └── scripts/refactor_lib/
-            ├── scope.py               # --scope の関門
-            ├── gitfacts.py            # push_head
-            └── commands/setup.py      # cmd_start_round
+    ├── cross-refactoring/
+    │   ├── SKILL.md                   # 骨組みと push の手順
+    │   ├── scripts/refactor_lib/
+    │   │   ├── scope.py               # --scope の関門
+    │   │   ├── gitfacts.py            # push_head
+    │   │   └── commands/setup.py      # cmd_start_round
+    │   └── tests/                     # この Skill のテストの置き場所
+    │       ├── test_start_round_emits_runtimes.py   # 新設
+    │       ├── test_scope_gate.py                   # 追加
+    │       └── test_git_facts.py                    # 追加
+    ├── pr/SKILL.md                    # 退避の git コマンドを案内する
+    └── fix/SKILL.md                   # 同上
 scripts/
 ├── check-skill-shell-vars.py          # 新設。骨組みの変数の検査
-└── tests/test_skill_shell_vars.py     # 新設
+└── tests/test_skill_shell_vars.py     # 新設。Skill をまたぐ検査はここに置く
 ```
+
+**テストの置き場所は 2 つに分かれる。** 1 つの Skill の中で閉じるものはその Skill の
+`tests/` へ置き、Skill をまたいで見る検査だけがリポジトリ直下の `scripts/tests/` へ入る。
 
 ## 入出力の契約
 
@@ -99,14 +116,56 @@ scripts/
 **値の出所は状態ファイルの `runtimes` である。** `init` が返すものと同じ配列を読むため、
 2 つの副コマンドが違う母集合を返すことはない。
 
+**関門の中の受け渡しも約束にあたる。** 実体を見るには走査の起点が要るため、名前だけを
+受け取っていた 2 つの関数が作業ツリーのパスを受け取る。
+
+| 名前 | 変更前 | 変更後 |
+| --- | --- | --- |
+| `is_test_location` | `(path) -> bool` | `(path, work) -> bool` |
+| `test_locations` | `(scope) -> list[str]` | `(scope, work) -> list[str]` |
+
+**`test_locations` が返す値の意味が変わる。** これまでは渡された `--scope` の語をその
+まま返していたが、**実体の走査で当たったときは、当たった置き場所の側を返す**。
+`plugins/ndf/skills/development-workflow` を渡して配下の `tests/` で当たったなら、返すのは
+`plugins/ndf/skills/development-workflow/tests` である。
+
+**返す値を親のままにすると、後段の `covered_by_roots` が必ず落ちる。** 後段は
+`--baseline-test` が限定した探索の起点で始まるかを見る。起点が
+`plugins/ndf/skills/development-workflow/tests` のとき、親のパスはその起点で始まらない。
+**関門を通した直後に、同じ関門の別の判定が拒む**ことになる。
+
+双方向の包含（親が起点を含む場合も通す）を許す案は採らない。関門が見たいのは「足した
+テストが実行されるか」であり、**実行されるのは起点の配下だけ**である。親を通すと、実行
+されないテストを実行されるものとして数える。
+
 `git-credential.sh` は呼ばれる約束を持つ。
 
 | 名前 | `ndf_git_with_fallback <git の引数...>` |
 | --- | --- |
 | 入力 | `git` へ渡す引数 |
 | 出力 | `git` の出力をそのまま通す |
+| 退避の形 | `git -c credential.helper= -c credential.helper='!gh auth git-credential' <引数...>` |
 | 失敗の形 | 1 度目の失敗で退避して再試行し、それも失敗すれば `git` の終了コードを返す |
 | 互換性 | 新設のため既存の呼び出し側は無い |
+
+**空の値を先に置くことが退避の本体である。** `credential.helper` は複数の値を持てる設定で、
+`git` は宣言された順に問い合わせる。空の値だけが一覧を空へ戻す。**先に置かないと、応答
+しない helper が先に当たり続け、足した `gh` の経路へ到達しない。**
+
+```console
+$ printf 'protocol=https\nhost=example.invalid\n\n' | git \
+    -c credential.helper='!f(){ [ "$1" = get ] && echo username=FIRST && echo password=x; }; f' \
+    -c credential.helper='!g(){ [ "$1" = get ] && echo username=SECOND && echo password=y; }; g' \
+    credential fill
+username=FIRST          # 後から足した側は呼ばれない
+
+$ printf 'protocol=https\nhost=example.invalid\n\n' | git \
+    -c credential.helper='!f(){ [ "$1" = get ] && echo username=FIRST && echo password=x; }; f' \
+    -c credential.helper= \
+    -c credential.helper='!g(){ [ "$1" = get ] && echo username=SECOND && echo password=y; }; g' \
+    credential fill
+username=SECOND         # 空の値が一覧を空へ戻し、足した側が当たる
+```
 
 ## 処理の流れ
 
@@ -137,7 +196,7 @@ sequenceDiagram
     P->>G: git push
     G-->>P: 失敗（helper が応答しない）
     P->>P: gh の認証を確かめる
-    P->>G: git -c credential.helper='!gh auth git-credential' push
+    P->>G: git -c credential.helper= -c credential.helper='!gh auth git-credential' push
     G->>H: 資格情報を得る
     G-->>P: 成功
 ```
@@ -150,11 +209,19 @@ helper が正しく動く環境でも `gh` への依存が入る。
 ```mermaid
 graph TD
     A[--scope の 1 件] --> B{名前がテストの置き場所か}
-    B -->|当たる| T[テストの置き場所とみなす]
-    B -->|当たらない| C{実体としてテストの置き場所を配下に持つか}
-    C -->|持つ| T
-    C -->|持たない| F[みなさない]
+    B -->|当たる| T[渡された語をそのまま置き場所とする]
+    B -->|当たらない| C{作業ツリーの配下 1 段に<br/>テストの置き場所があるか}
+    C -->|ある| D[当たった配下の側を置き場所とする]
+    C -->|ない| F[置き場所として数えない]
+    T --> E{--baseline-test の起点に含まれるか}
+    D --> E
+    E -->|含まれる| P[関門を通す]
+    E -->|含まれない| S[止める]
 ```
+
+**走査の起点は関門が受け取っている作業ツリーのパスである。** `--scope` は相対の語で
+渡されるため、起点が無いと実体を探せない。関門の入口（`scope_problem`）はすでに
+このパスを受け取っており、**新しく外から渡す値は無い**。
 
 ## 非機能の実現方式
 
@@ -195,6 +262,10 @@ graph TD
 実体だけで判定する案は採らない。`--scope tests/services` のように、これから作る置き場所を
 渡す運用が通らなくなる。
 
+**当たった側を返すのは、後段の判定と同じ粒度に揃えるためである。** 後段は
+`--baseline-test` の起点で始まるかを見るため、親のパスを返すと通した直後に拒まれる。
+詳しくは「入出力の契約」にある。
+
 ### 決定 4: 退避は失敗してから 1 度だけ行う
 
 既定の経路を変えず、`git` が失敗したときに退避して再試行する。helper が正しく動く環境の
@@ -209,19 +280,38 @@ graph TD
 コマンドが 2 か所に書かれると、片方だけが更新される。** 共通層の 1 本を実装が読み、手順書は
 同じコマンドを案内する。
 
+**手順書に共通層を読み込ませる案は採らない。** `pr` / `fix` は任意のリポジトリで起動する
+Skill であり、そこに `plugins/ndf/` がある保証が無い（#292 で同じ判断をしている）。読み
+込む形にすると、このリポジトリの外では書かれたとおりに実行できない。
+
+| どちらが実行するか | 退避の手をどう得るか | 対象 |
+| --- | --- | --- |
+| 実装（`refactor.py`） | 共通層を読み込んで関数として呼ぶ | `cross-refactoring` |
+| 人（手順書を読んで実行） | 手順書に書かれた `git` コマンドをそのまま打つ | `pr` / `fix` |
+
+**原本は共通層のファイルである。** 手順書の記載はそこからの写しであり、食い違いは
+文書検査で見る（「テスト設計」の最終行）。
+
 ## テスト設計
 
 | 受け入れ条件 | 何で確かめるか |
 | --- | --- |
-| `start-round` が母集合を返す | `tests/test_start_round_emits_runtimes.py`（新設）。emit のキーと値を突き合わせる |
+**`cross-refactoring` のテストはその Skill の配下に置く。** 表の `<crf>` は
+`plugins/ndf/skills/cross-refactoring` を指す（「パッケージ・モジュール構成」の配置と
+同じ）。リポジトリ直下の `scripts/tests/` は、Skill をまたいで見る検査だけが使う。
+
+| 受け入れ条件 | 何で確かめるか |
+| --- | --- |
+| `start-round` が母集合を返す | `<crf>/tests/test_start_round_emits_runtimes.py`（新設）。emit のキーと値を突き合わせる |
 | 骨組みの変数の出所を機械で検査する | `scripts/tests/test_skill_shell_vars.py`（新設）。未定義を混ぜた骨組みで落ちること、現行の骨組みで通ること |
 | 提案が母集合の全員に対して起動する | 同上。`for a in $RUNTIMES` の参照が母集合を指すこと |
-| 実体を持つ親ディレクトリが関門を通る | `tests/test_scope_gate.py` へ追加。`tests/` を持つ親を渡して通ること |
+| 実体を持つ親ディレクトリが関門を通る | `<crf>/tests/test_scope_gate.py` へ追加。`tests/` を持つ親を渡して通ること |
+| 関門が返す置き場所は当たった配下の側になる | 同上。`--baseline-test` の起点を配下に絞っても通ること |
 | 実体も名前も当たらない `--scope` は止まる | 同上。テストを持たないディレクトリで止まること |
 | 名前で渡す経路は通る | 同上。存在しない `tests/services` で通ること |
-| 進行側の push が退避して再試行する | `tests/test_git_facts.py` へ追加。1 度目の失敗を模し、2 度目の引数に退避が入ること |
+| 進行側の push が退避して再試行する | `<crf>/tests/test_git_facts.py` へ追加。1 度目の失敗を模し、2 度目の引数に空の値と `gh` の helper がこの順で入ること |
 | 退避も失敗したときの出力 | 同上。終了コードと、原因が認証の未実施ではないことを示す出力 |
-| 手順書に退避の手がある | `scripts/tests/` の文書検査。3 本の `SKILL.md` に退避のコマンドがあること |
+| 手順書に退避の手がある | `scripts/tests/` の文書検査。3 本の `SKILL.md` の記載が共通層のコマンドと一致すること |
 
 ## 未確認のまま残ること
 
