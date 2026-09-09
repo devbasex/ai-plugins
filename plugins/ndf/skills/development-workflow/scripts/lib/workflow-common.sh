@@ -650,49 +650,6 @@ _wf_classify_stages() {
   done < <(wf_stages)
 }
 
-# 分類済みの 3 群を報告の本文として整形し、標準出力へ書く。
-# 群は件数と値の並びで受け取る（present / missing / conditional の順）。
-_wf_render_report() {
-  local mode="$1" issue="$2" n_present="$3" n_missing="$4" n_conditional="$5" stage
-  shift 5
-  local -a present=() missing=() conditional=()
-  while [ "$n_present" -gt 0 ]; do
-    present+=("$1")
-    shift
-    n_present=$((n_present - 1))
-  done
-  while [ "$n_missing" -gt 0 ]; do
-    missing+=("$1")
-    shift
-    n_missing=$((n_missing - 1))
-  done
-  while [ "$n_conditional" -gt 0 ]; do
-    conditional+=("$1")
-    shift
-    n_conditional=$((n_conditional - 1))
-  done
-
-  if [ -n "$mode" ]; then
-    printf '#%s の通過工程（%s）\n' "$issue" "$mode"
-  else
-    printf '#%s の通過工程（モード不明）\n' "$issue"
-  fi
-  printf '  記録あり: %s\n' "$(wf_join "${present[@]+"${present[@]}"}")"
-  [ "${#missing[@]}" -gt 0 ] && printf '  記録なし: %s\n' "$(wf_join "${missing[@]}")"
-  [ "${#conditional[@]}" -gt 0 ] && printf '  条件付き: %s\n' "$(wf_join "${conditional[@]}")"
-  if [ -z "$mode" ]; then
-    printf 'モードの記録が無いため、必須の工程は判定しません。\n'
-  elif [ "${#missing[@]}" -eq 0 ] && [ "${#conditional[@]}" -eq 0 ]; then
-    printf '記録の無い必須の工程はありません。\n'
-  else
-    printf '実施済みであれば、記録してから先へ進んでください。\n'
-    for stage in "${missing[@]+"${missing[@]}"}" "${conditional[@]+"${conditional[@]}"}"; do
-      printf '  bash "$SCRIPTS/projects-sync.sh" %s stage "%s"\n' "$issue" "$stage"
-    done
-  fi
-  return 0
-}
-
 # 通過工程を報告する。**終了コードで工程を止めない。**
 wf_report() {
   local slug="${1:-}" issue="${2:-}" file content mode stage class frontier
@@ -719,11 +676,24 @@ wf_report() {
     esac
   done < <(_wf_classify_stages "$mode" "$frontier" "${recorded[@]}")
 
-  _wf_render_report "$mode" "$issue" \
-    "${#present[@]}" "${#missing[@]}" "${#conditional[@]}" \
-    ${present[@]+"${present[@]}"} \
-    ${missing[@]+"${missing[@]}"} \
-    ${conditional[@]+"${conditional[@]}"}
+  if [ -n "$mode" ]; then
+    printf '#%s の通過工程（%s）\n' "$issue" "$mode"
+  else
+    printf '#%s の通過工程（モード不明）\n' "$issue"
+  fi
+  printf '  記録あり: %s\n' "$(wf_join "${present[@]+"${present[@]}"}")"
+  [ "${#missing[@]}" -gt 0 ] && printf '  記録なし: %s\n' "$(wf_join "${missing[@]}")"
+  [ "${#conditional[@]}" -gt 0 ] && printf '  条件付き: %s\n' "$(wf_join "${conditional[@]}")"
+  if [ -z "$mode" ]; then
+    printf 'モードの記録が無いため、必須の工程は判定しません。\n'
+  elif [ "${#missing[@]}" -eq 0 ] && [ "${#conditional[@]}" -eq 0 ]; then
+    printf '記録の無い必須の工程はありません。\n'
+  else
+    printf '実施済みであれば、記録してから先へ進んでください。\n'
+    for stage in "${missing[@]+"${missing[@]}"}" "${conditional[@]+"${conditional[@]}"}"; do
+      printf '  bash "$SCRIPTS/projects-sync.sh" %s stage "%s"\n' "$issue" "$stage"
+    done
+  fi
   return 0
 }
 
