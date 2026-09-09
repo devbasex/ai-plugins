@@ -357,10 +357,8 @@ _wf_target_note() {
   if [ -z "$mode" ]; then
     printf '  #%s (%s): モードの記録がありません\n' "$issue" "$repo"
     [ -n "$effective" ] || return 0
-    mode="$effective"
-  else
-    mode="$effective"
   fi
+  mode="$effective"
   while IFS= read -r stage; do
     [ -n "$stage" ] || continue
     missing_stages+=("$stage")
