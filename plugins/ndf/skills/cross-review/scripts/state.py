@@ -2870,7 +2870,11 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         "commit": fix_commit,
         "fixed": fixed_count,
         # deferred は上記の単一整合ルールで算出した件数を保存する。
-        # resolved_threads / rejected は件数しか保存せず後段ループが無いため _count() で可。
+        # resolved_threads は件数しか保存せず後段ループが無いため _count() で可。
+        # **rejected は per-item の記録を持つが、件数は raw のまま数える**（#156）。
+        # dict にできない要素も却下 1 件であり、記録に残せないことと、却下が
+        # 何件あったかを失うことは別である。そのため deferred と違い、この件数と
+        # `rejected_findings` の件数は一致しないことがある。
         "deferred": _deferred_count,
         "rejected": _count(fix.get("rejected")),
         "resolved_threads": _count(fix.get("resolved_threads")),

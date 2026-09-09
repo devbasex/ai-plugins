@@ -225,9 +225,13 @@ def test_non_dict_items_in_rejected_list_are_filtered_out(tmp_dir, state_mod):
 
     state_mod.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
 
-    kept = _read(tmp_dir)["rejected_findings"]
+    st = _read(tmp_dir)
+    kept = st["rejected_findings"]
     assert len(kept) == 1
     assert kept[0]["comment_id"] == REJECTED["comment_id"]
+    # **却下が何件あったかは失わない。** 記録に残せない要素も却下 1 件であるため、
+    # ラウンドごとの件数は raw の要素数のままになる（記録の件数とは一致しない）。
+    assert st["rounds"][-1]["fix"]["rejected"] == 5
 
 
 
