@@ -49,6 +49,7 @@ graph TD
     RF --> CL[_classify_finding]
     CL -->|5 つの区分| JG[cmd_judge]
     JG -->|verified_blocking / needs_human_judgment があれば| FX[修正の工程]
+    JG -->|残る 3 区分は未解決のスレッドとして| SW[最終スイープ]
 ```
 
 ## 入出力の契約
@@ -127,6 +128,26 @@ sequenceDiagram
 **`rejected` と `insufficient_evidence` と `verified_non_blocking` は新規性へ数えない。**
 数えると、棄却した指摘と `minor` の指摘のぶんだけラウンドが増える。#69 で同じ論点が
 5 ラウンド続いた事象がこれにあたる。
+
+**数えない 3 つにも行き先がある。数えないことと、扱わないことは別である。**
+
+| 区分 | 当ラウンドの修正の工程 | 行き先 |
+| --- | --- | --- |
+| `verified_non_blocking` | 渡さない | **最終スイープ。** 再現した事実は `verification` として記録に残る |
+| `insufficient_evidence` | 渡さない | 同上 |
+| `rejected` | 渡さない | 棄却の理由（`rejection_reason`）が記録に残り、次のラウンドのレビュープロンプトへ渡る。スレッドは最終スイープが閉じる |
+
+**最終スイープはループのどの終了経路でも走る**（`cross-review` の `SKILL.md`
+「取りこぼし防止」と Step 7.5）。`approved` / `max_rounds` / `oscillation` / `error` の
+いずれで抜けても `/ndf:fix` を再実行し、残った未解決のスレッドを直すか `deferred` として
+記録し、未解決 0 件で終える。**`verified_non_blocking` が記録だけ残して消えることはない。**
+
+**当ラウンドの修正の工程へ渡さないのは、`minor` でラウンドを増やさないためである。**
+機械が再現していても重要度は `minor` であり、収束の判定が数えない指摘のために修正の工程を
+動かすと、直すものが尽きるまでラウンドが続く。**再現したことは棄てず、扱う時期を
+ループの外へ送る。** 修正の工程が `verified_blocking` か `needs_human_judgment` で起動した
+ラウンドでは、記録を読んだ担当が併せて直してよい。**求めはしない**（求めると、`minor` の
+修正が収束の判定に載らないまま毎ラウンド積み増される）。
 
 **担当の判定（`event`）は見なくなる。** 重要度の自己申告と `event` の対応が保証されない
 ためである（PR #157 の round 6 で minor 2 件だけの `REQUEST_CHANGES` が出た）。
@@ -217,6 +238,9 @@ sequenceDiagram
 | 近傍だけで本文が違う 2 件を統合しない | 同上。行差 2・本文が別の 2 件が 2 件のまま残り、`duplicate_candidates` に相手が載ること |
 | 束ねられた側の形が決まっている | 同上。被統合側に `merged_into` が、代表に `merged_from` が付くこと |
 | 被統合側の重要度と実行結果が失われない | 同上。`minor` と `major` の組の代表が `major`、`not_reproduced` と `reproduced` の組が `reproduced`、`not_reproduced` と `not_run` の組が `not_reproduced` になること |
+| 被統合側の根拠が失われない | 同上。`has_evidence` が偽の代表と真の被統合側の組で、代表が真になり、`evidence` と `falsification` の本文が対で写り、`evidence_from` に被統合側の `finding_id` が載ること |
+| 根拠を片方ずつ継ぎ合わせない | 同上。`evidence` だけの要素と `falsification` だけの要素の組で、代表の `has_evidence` が偽のままになること |
+| 根拠の集約が取り込みの順序で変わらない | `tests/test_classify_findings.py`。全員 `not_run`・`major`・`origin_runtimes` 2 者で根拠を持つのが片方だけの組が、取り込みの順序を入れ替えてもどちらも `needs_human_judgment` になり、収束しないこと |
 | 提案者以外が賛否を返す | `tests/test_critiques.py`（新設）。自分の指摘へ返さないこと |
 | 5 つの値が記録される | 同上 |
 | `finding_id` で指摘へ結ばれる | 同上。既知でない `finding_id` が `unmatched_critiques` へ残ること |
@@ -239,6 +263,7 @@ sequenceDiagram
 | 実行で再現しない指摘は支持が多くても棄却される | 同上 |
 | `minor` の支持だけではラウンドが増えない | 同上。`minor` かつ `support` 1 件が `insufficient_evidence` になること |
 | 棄却の理由が残る | 同上 |
+| 再現した `minor` が修正の工程を起動しない | 同上。`verified_non_blocking` 1 件だけのラウンドで、収束の判定が 0 件を返し、修正の工程が動かないこと |
 | 新規性が 2 つの区分だけを数える | 判定のテスト |
 | 指摘の記録が無いラウンドは従来の判定へ落ちる | 同上。`(0, False)` が返ること |
 | 全件を棄却したラウンドが収束する | 同上。記録はあるが数える 2 区分が 0 件・元の判定が `REQUEST_CHANGES` のラウンドで `(0, True)` が返り、収束すること |
@@ -249,5 +274,6 @@ sequenceDiagram
 | 項目 | 内容 |
 | --- | --- |
 | 振動の閾値 | 母集合が広がった後の適正値。**この変更の後の実測で決める** |
+| 担当が 3 者以上になったときの区分の順序 | 順 4 の `origin_runtimes` 2 者以上は、1 ラウンドの担当が 2 者であることに支えられている（全員一致の指摘には提案者以外が残らず、`refute` が必ず 0 件になる）。3 者以上へ広げると、単一の `refute` が順 3 で全員一致を覆す。**この変更では広げない。**広げるときに順 3 と順 4 の順序を決め直す |
 | 実行の上限時間 | 既定を何秒にするか。実測が無いため、まず 300 秒で置く。**超えた実行は `not_run` であり、再現ではない** |
 | 効果の測定 | **4 本目が扱う。** #531 が「3 までの記録が揃ってから計算できる」を分割の理由とし、指標も 4 本目で決めるとしている（`issues/issue-156-design.md` の「分ける単位」と「未確認のまま残ること」）。この文書の時点では計算に使う記録が揃っていない |
