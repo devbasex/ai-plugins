@@ -32,6 +32,7 @@ PR を**ホストを除く 3 者から選んだ 2 者**にレビューさせ、*
 - [docs/03-review-output.md](docs/03-review-output.md) — レビュー出力の制約 / CI failure の分類 / アンチパターン / monitor.py の誤検知
 - [docs/04-contracts.md](docs/04-contracts.md) — 状態ファイルの形式と AI への入出力の契約（手順の途中では読まない）
 - [docs/05-pool-and-convergence.md](docs/05-pool-and-convergence.md) — 誰がレビューし、いつ止めるか（母集合・担当の輪番・認証・終了基準の 3 層）
+- [docs/06-evidence.md](docs/06-evidence.md) — 指摘に求める根拠と反証条件、独立発見の規約
 - [scripts/state.py](scripts/state.py) — state.json 操作（uv 自己完結スクリプト、stdlib のみ）
 - [scripts/launch-reviewer.sh](scripts/launch-reviewer.sh) — レビュワー起動の入口（4 ランタイム共通）。`launch-codex.sh` / `launch-agy.sh` はここへの薄い委譲
 - [scripts/monitor.py](scripts/monitor.py) — codex/agy プロセス多軸監視 (sentinel / pidfile / 早期エラー / stall / hard timeout / result.json)
