@@ -98,6 +98,30 @@ def test_plan_shows_the_case_and_level_for_a_test_item(plan, tmp_path):
     assert "extract_method" not in text
 
 
+def test_plan_shows_the_case_for_a_deferred_test_item(plan, tmp_path):
+    """現状固定: 見送りの表は test 種の項目に対し兆候ではなく case を書く。
+
+    `_plan_deferred_section` は test 種のとき `smell` ではなく `case` を「兆候・経路」
+    の列へ出す分岐を持つ。構造項目だけを渡す既存の見送りテストではこの分岐が通らない。
+    """
+    _, state = _state(
+        tmp_path,
+        rounds=[],
+        items=[],
+        deferred_items=[{
+            "item_id": "R1-001", "round": 1, "kind": "test",
+            "target": "src/paths.py#load_state", "case": "branch", "level": "unit",
+            "defer_reason": "修正ラウンドの上限",
+        }],
+    )
+
+    text = plan.format_plan(state)
+
+    assert "`src/paths.py#load_state`" in text
+    assert "branch" in text
+    assert "long_method" not in text
+
+
 def test_plan_records_who_proposed_it(plan, tmp_path):
     _, state = _state(tmp_path)
     assert "codex" in plan.format_plan(state)

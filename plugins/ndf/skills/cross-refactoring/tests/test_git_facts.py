@@ -264,3 +264,14 @@ def test_cutting_off_kills_children_that_ignore_sigterm(gitfacts, work):
     assert elapsed < 20, f"打ち切りに時間がかかりすぎている: {elapsed:.1f}s"
     time.sleep(4)
     assert not marker.exists(), "SIGTERM を無視する子が生き残っている"
+
+
+def test_find_item_returns_none_for_a_missing_id_when_not_required(gitfacts):
+    """現状固定: `required=False` で存在しない項目 ID を探すと None を返す。
+
+    取り消しや積み直しの経路（`_commit_owner` など）は、状態に残っていない
+    項目 ID を渡しても落とさずに読み飛ばせることを前提にしている。
+    """
+    state = {"items": [{"item_id": "R1-001"}, {"item_id": "R1-002"}]}
+
+    assert gitfacts.find_item(state, "R9-999", required=False) is None
