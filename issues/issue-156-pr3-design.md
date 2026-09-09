@@ -2,11 +2,12 @@
 
 #156 を 4 本へ分けた 3 本目の設計。**全体の設計は `docs/specifications/` へ移す前の
 `issues/issue-156-design.md`（Pull Request #531 でマージ済み）にあり、この文書はそこで
-「未確認のまま残ること」とした 3 つを決める。**
+「未確認のまま残ること」とした 4 つを決める。**
 
 | #531 で残したもの | この文書で決めること |
 | --- | --- |
 | 集約の判定の形 | 区分の決め方と、収束の判定への入れ方 |
+| 重複の統合と `origin_runtimes` | 何を同一と見なすか、統合の後に何を残すか |
 | 実行検証の対象 | 何を実行してよいか、どう宣言させるか |
 | 振動の検知への影響 | 母集合が広がった後の測り方 |
 
@@ -14,34 +15,161 @@
 
 | # | 機能 | 誰が使うか |
 | --- | --- | --- |
-| 1 | 提案者以外が各指摘へ賛否を返す | レビュワー |
+| 1 | 重複を統合しても、提案した担当をすべて残す | 集約の判定 |
 | 2 | 実行できる検証を、担当の再評価より先に走らせる | 進行側 |
-| 3 | 指摘を 5 つの区分へ分ける | 進行側、修正の担当 |
-| 4 | 収束の判定が、担当の判定ではなく指摘ごとの検証結果を見る | 進行側 |
+| 3 | 提案者以外が各指摘へ賛否を返す | レビュワー |
+| 4 | 指摘を 5 つの区分へ分ける | 進行側、修正の担当 |
+| 5 | 収束の判定が、担当の判定ではなく指摘ごとの検証結果を見る | 進行側 |
+
+**並びが処理の順序である。** 実行検証は反証より前に置く。#156 の受け入れ条件が
+「実行できる検証手順を持つ指摘は、担当の再評価より先に実行する」と定めており、反証を
+返す担当は実行の結果を見たうえで賛否を決められる。
 
 ## 構成要素
 
 | 要素 | 責務 |
 | --- | --- |
+| `state.py` の `_merge_duplicates`（新設） | 同一の指摘を 1 件へ束ね、`origin_runtimes` を残す |
+| `state.py` の `cmd_verify_findings`（新設） | `suggested_check` を実行し、結果を記録する |
 | `scripts/critique.sh`（新設） | 反証のプロンプトを組み立て、提案者以外を起動する |
 | `state.py` の `cmd_collect_critiques`（新設） | 反証の結果を `review_findings[]` へ結ぶ |
-| `state.py` の `cmd_verify_findings`（新設） | `suggested_check` を実行し、結果を記録する |
 | `state.py` の `_classify_finding`（新設） | 1 件の指摘を 5 つの区分のいずれかへ分ける |
 | `state.py` の `cmd_judge` | 区分を読んで収束を決める |
 | `docs/06-evidence.md` | 反証の値・区分の決め方・実行の範囲 |
 
 ```mermaid
 graph TD
-    RF[review_findings] --> CR[cmd_collect_critiques]
-    CR -->|support / refute / ...| RF
+    RF[review_findings] --> MD[_merge_duplicates]
+    MD -->|origin_runtimes| RF
     RF --> VF[cmd_verify_findings]
-    VF -->|reproduced / not_reproduced| RF
+    VF -->|reproduced / not_reproduced / not_run| RF
+    RF --> CR[cmd_collect_critiques]
+    CR -->|support / refute / ...| RF
     RF --> CL[_classify_finding]
     CL -->|5 つの区分| JG[cmd_judge]
     JG -->|verified_blocking があれば| FX[修正の工程]
 ```
 
 ## 入出力の契約
+
+### 指摘の識別子（`finding_id`）
+
+**反証も実行の結果も、指摘 1 件へ結ぶ。** 結ぶ先を指す値が要る。`review_findings[]` の
+要素は `pr` / `round` / `agent` を持つが（`state.py:2379-2382`）、同じ担当の同じラウンドの中で
+1 件を指す値を持たない。
+
+**`finding_id` を取り込みの時点で採番する。** 形は `<agent>-r<round>-<索引>` で、索引は
+その担当の `payload.json` の `comments[]` の並びである。取り込みは
+`(pr, round, agent)` の組ごとに入れ替える（`state.py:2372-2376`）ため、再実行しても
+同じ指摘へ同じ値が付く。
+
+```json
+{"finding_id": "codex-r3-0", "pr": 539, "round": 3, "agent": "codex"}
+```
+
+### 重複の統合（`_merge_duplicates`）
+
+**同じ指摘を複数の担当が出したとき、1 件へ束ねる。** **新しい一致の判定は作らない。**
+既存の一致の判定をそのまま使う。別の物差しを持つと、同じ 2 件が一方では重複で他方では
+別件という状態ができる。
+
+| 使うもの | 実測した中身 |
+| --- | --- |
+| `_finding_keys`（`state.py:2668-2709`） | `(ファイル, 行, 正規化した本文)` の 3 つ組 |
+| 振動の検知が結ぶ条件（`state.py:2718`） | 位置・近傍（`OSCILLATION_NEAR_LINES` 以内）・本文の**いずれか**で結び付く |
+
+**束ねる相手は、この条件で結び付く別の担当の指摘である。** ラウンドをまたぐ一致を見る
+振動の検知に対し、こちらは**同じラウンドの中**で見る。見る範囲だけが違い、条件は同じで
+ある。
+
+| キー | 何を持つか |
+| --- | --- |
+| `origin_runtimes` | その指摘を出した担当の一覧。統合しても消さない |
+| `finding_id` | 束ねた先の代表 1 件の値。代表は**先に取り込まれた担当**の指摘とする（`origin_runtimes` の先頭） |
+| `merged_from` | 束ねられた側の `finding_id` の一覧 |
+
+```json
+{"finding_id": "codex-r3-0", "origin_runtimes": ["codex", "kiro"],
+ "merged_from": ["kiro-r3-2"]}
+```
+
+**束ねられた側は消さない。** `review_findings[]` に残したまま `merged_into` へ代表の
+`finding_id` を書く。消すと、反証の結果ファイルがその `finding_id` を指してきたときに
+結び先を失う。区分と収束の判定が読むのは代表の 1 件だけである。
+
+**独立して出したかを区別する。** `origin_runtimes` の長さは「同じ指摘へ到達した担当の
+数」であり、反証の `support` の数とは別に数える。支持は他者の指摘を読んだうえでの賛成で、
+こちらは読まずに同じ結論へ達したことを表す。
+
+**統合は反証より前に行う。** 後にすると、束ねられる 2 件へ別々に反証が付き、どちらの
+値を採るかという判断が増える。
+
+### 実行検証（`cmd_verify_findings`）
+
+**実行してよいのは、リポジトリが宣言したコマンドだけである。**
+
+| 宣言 | 何を書くか |
+| --- | --- |
+| `.ndf/cross-review.json` の `verify_commands` | 実行を許すコマンドの一覧。**トークン列として読む** |
+
+```json
+{"version": 1, "verify_commands": ["pytest", "uv run --with pytest pytest"]}
+```
+
+**宣言が無ければ実行検証を行わない。** 行わなかったことを記録へ残し、区分は根拠と反証で
+決める。**新しい実行系は導入しない。**
+
+#### 照合はトークン単位で行う
+
+**文字列の前方一致では照合しない。** 宣言 `"pytest"` に対し `pytest-danger --evil` が
+一致してしまう。宣言と `suggested_check` の両方を `shlex.split` でトークン列にし、
+**宣言のトークン列が `suggested_check` のトークン列の先頭と全要素で一致する**ことを求める。
+
+```console
+$ python3 -c "import shlex; print(shlex.split('pytest-danger --evil'))"
+['pytest-danger', '--evil']
+$ python3 -c "import shlex; print(shlex.split('pytest; rm -rf /'))"
+['pytest;', 'rm', '-rf', '/']
+```
+
+**実測のとおり、区切りのメタ文字はトークンの一部になる。** `pytest; rm -rf /` の先頭
+トークンは `pytest;` であり、宣言 `pytest` と一致しない。**メタ文字の一覧を持たない。**
+弾く文字を列挙する方式は、列挙から漏れた文字がそのまま通る。
+
+**宣言より後ろのトークンは、`-` で始まらないものだけを許す。** トークン境界だけでは
+`pytest -c /tmp/evil.ini` や `pytest -p reviewer_plugin` が通り、レビュワーが書いた
+文字列で任意の設定ファイルとプラグインを読み込ませられる。実行してよいのは、対象を絞る
+引数（テストの位置指定）までである。
+
+```console
+$ python3 -c "import shlex; print(shlex.split('pytest -p reviewer_plugin'))"
+['pytest', '-p', 'reviewer_plugin']
+```
+
+**実行は `shell=False` で行う。** トークン列をそのまま渡し、シェルを経由させない。
+経由させなければ、`$(...)` や `` ` `` を含むトークンは展開されずに引数として渡る。
+
+`review_findings[]` の各要素へ `verification` を足す。
+
+```json
+{"verification": {"command": "pytest tests/test_foo.py::test_null_input",
+                  "exit_code": 1, "result": "reproduced", "ran_at": "..."}}
+```
+
+| `result` | 決まり方 |
+| --- | --- |
+| `reproduced` | 実行が終わり、終了コードが 0 でない（指摘のとおり壊れている） |
+| `not_reproduced` | 実行が終わり、終了コードが 0（指摘が成り立たない） |
+| `not_run` | 宣言が無い / トークン照合に当たらない / 宣言より後ろに `-` で始まるトークンがある / **上限時間で打ち切った** / **起動に失敗した** |
+
+**打ち切りと起動の失敗を `reproduced` にしない。** どちらも終了コードは 0 以外になるが、
+指摘が正しいことの証拠ではない。`subprocess.run` は上限時間で `TimeoutExpired` を、
+コマンドが無いときは `OSError`（`FileNotFoundError` / `PermissionError`）を送出するため、
+**終了コードを読む前に例外で分かれる**。例外で分かれた経路は `not_run` とし、`reason` へ
+どちらであったかを残す。
+
+**再現の向きに注意する。** 指摘は「壊れている」という主張であるため、**テストが失敗する
+ことが再現である。**
 
 ### 反証（`cmd_collect_critiques`）
 
@@ -55,50 +183,27 @@ graph TD
 | `duplicate` | 別の指摘と同一 |
 | `out_of_scope` | この Pull Request の範囲・目的から外れる |
 
-`review_findings[]` の各要素へ `critiques` を足す。
+**結果は担当ごとに 1 ファイルへ書く。** 名前は
+`<agent>-critique-pr<PR>-round<ラウンド>.json` とする。既存の
+`<agent>-review-pr<PR>-round<ラウンド>-payload.json`（`state.py:881-882`）と同じ位置
+（`_resolve_tmp_dir(pr)`）に置き、同じ組み立て方に揃える。
 
 ```json
 {"critiques": [
-  {"agent": "codex", "verdict": "refute",
+  {"finding_id": "codex-r3-0", "verdict": "refute",
    "reason": "handle() は呼び出し前に None を弾く（api.py:70）"}
 ]}
 ```
 
+`cmd_collect_critiques` は `finding_id` で突き合わせ、`review_findings[]` の該当要素へ
+`critiques` を足す。積むときに `agent` を添えるが、**その値はファイル名から採る**。本文の
+申告を採ると、別の担当を名乗った値をそのまま数えることになる。
+
+**`finding_id` が既知でない要素は捨てず、`unmatched_critiques` へ残す。** 黙って捨てると、
+反証が 0 件のラウンドと、結び先を誤ったラウンドが同じに見える。
+
 **自分の指摘へは返さない。** 自己支持を数に入れると、1 者が出した指摘が常に 1 票を持つ。
-
-### 実行検証（`cmd_verify_findings`）
-
-**実行してよいのは、リポジトリが宣言したコマンドだけである。**
-
-| 宣言 | 何を書くか |
-| --- | --- |
-| `.ndf/cross-review.json` の `verify_commands` | 実行を許すコマンドの接頭辞の一覧 |
-
-```json
-{"version": 1, "verify_commands": ["pytest", "uv run --with pytest pytest"]}
-```
-
-**宣言が無ければ実行検証を行わない。** 行わなかったことを記録へ残し、区分は根拠と反証で
-決める。**新しい実行系は導入しない。**
-
-**接頭辞で照合する。** `suggested_check` がその一覧のいずれかで始まるときだけ実行する。
-シェルのメタ文字（`;` / `|` / `&` / `` ` `` / `$(`）を含む値は実行しない。
-
-`review_findings[]` の各要素へ `verification` を足す。
-
-```json
-{"verification": {"command": "pytest tests/test_foo.py::test_null_input",
-                  "exit_code": 1, "result": "reproduced", "ran_at": "..."}}
-```
-
-| `result` | 決まり方 |
-| --- | --- |
-| `reproduced` | 実行して失敗した（指摘のとおり壊れている） |
-| `not_reproduced` | 実行して通った（指摘が成り立たない） |
-| `not_run` | 宣言が無い / 接頭辞に当たらない / メタ文字を含む |
-
-**再現の向きに注意する。** 指摘は「壊れている」という主張であるため、**テストが失敗する
-ことが再現である。**
+統合された指摘では `origin_runtimes` に載る担当すべてが提案者であり、いずれも返さない。
 
 ### 区分（`_classify_finding`）
 
@@ -106,17 +211,32 @@ graph TD
 
 | 順 | 区分 | 条件 |
 | --- | --- | --- |
-| 1 | `rejected` | 実行して再現しなかった、または `refute` が 1 件以上ある |
-| 2 | `verified_blocking` | 実行して再現した、かつ重要度が `major` 以上 |
-| 3 | `verified_non_blocking` | 実行して再現した、かつ重要度が `minor` 以下 |
-| 4 | `needs_human_judgment` | 根拠を持ち、`support` が 1 件以上ある |
+| 1 | `verified_blocking` | `verification.result` が `reproduced`、かつ重要度が `major` 以上 |
+| 2 | `verified_non_blocking` | `verification.result` が `reproduced`、かつ重要度が `minor` 以下 |
+| 3 | `rejected` | `verification.result` が `not_reproduced`、または `refute` が 1 件以上ある |
+| 4 | `needs_human_judgment` | 根拠を持ち、`support` が 1 件以上あり、かつ重要度が `major` 以上 |
 | 5 | `insufficient_evidence` | 上のいずれにも当たらない |
 
-**実行の結果を担当の支持より先に見る。** 実行で再現した指摘は、支持が少なくても
-`verified_blocking` になる。実行で再現しなかった指摘は、支持が多くても `rejected` になる。
+**実行で再現した指摘を先に採るのは、順序そのもので決定 2 を表すためである。** 再現した
+指摘へ `refute` が付いていても、順 1 と順 2 が先に当たるため `rejected` へ落ちない。
+#156 の受け入れ条件「実行で再現した指摘は、支持した担当が少数でも棄却されない」がこの
+向きを求めている。**順 3 を先に置くと、機械が再現した事実を担当の再評価が覆す。**
 
-**`refute` を支持より強く見る。** 反証は「なぜ成り立たないか」を示すもので、支持の
-「確かにそう見える」より確かめられる形をしている。
+**`refute` が効くのは再現していない指摘だけである。** 反証は「なぜ成り立たないか」を
+示すもので、支持の「確かにそう見える」より確かめられる形をしている。ただし実行の結果が
+`reproduced` のときは、より確かな根拠が既にあるため見ない。
+
+**`not_run` は実行の結果を持たないものとして扱う。** `reproduced` でも `not_reproduced`
+でもないため、順 1・順 2 と、順 3 の前半（`not_reproduced`）はいずれも当たらない。区分は
+`refute` の有無と根拠で決まる。**実行できなかったことを、再現しなかったことと同じに
+しない。**
+
+**`needs_human_judgment` は `major` 以上に限る。** この区分は収束の判定が数える
+（後述）ため、重要度を問わないと `minor` の指摘へ `support` が 1 件付いただけで
+ラウンドが増える。PR #157 の round 6 で `minor` 2 件だけの `REQUEST_CHANGES` が出た事象が
+これにあたる。**`minor` 以下で支持を得た指摘は `insufficient_evidence` へ落ちる**が、
+記録には残るため修正の担当は読める。実行で再現した `minor` を `verified_non_blocking` へ
+分け、収束の判定から外す扱いと揃う。**`minor` は区分を問わず新規性へ入らない。**
 
 **棄却の理由を残す。** `rejected` の要素へ `rejection_reason` を書く（実行の結果か、
 `refute` の理由）。
@@ -129,13 +249,17 @@ sequenceDiagram
     participant R as レビュワー
     participant T as テスト
     R->>J: 指摘（根拠・反証条件・検証手順）
-    J->>R: 反証（提案者以外へ）
+    J->>J: 重複を統合する（origin_runtimes を残す）
+    J->>T: suggested_check（トークン照合を通ったものだけ）
+    T->>J: 終了コード / 打ち切り / 起動の失敗
+    J->>R: 反証（提案者以外へ。実行の結果を添える）
     R->>J: support / refute / ...
-    J->>T: suggested_check
-    T->>J: 終了コード
     J->>J: 区分を決める
     J->>J: verified_blocking があれば修正へ
 ```
+
+**実行検証が反証より前にある。** 機能一覧の並びと同じで、反証を返す担当は実行の結果を
+読んだうえで賛否を決める。
 
 ## 収束の判定
 
@@ -147,8 +271,13 @@ sequenceDiagram
 | 新規性 | 前のラウンドと一致しない指摘の件数 | **`verified_blocking` と `needs_human_judgment` だけを数える** |
 | 振動 | 重複率 0.5 以上で中断 | 変えない |
 
-**`rejected` と `insufficient_evidence` は新規性へ数えない。** 数えると、棄却した指摘の
-ぶんだけラウンドが増える。#69 で同じ論点が 5 ラウンド続いた事象がこれにあたる。
+**数える 2 つはどちらも `major` 以上である。** `verified_blocking` は区分の条件が
+`major` 以上を求め、`needs_human_judgment` も同じ条件を持つ。`minor` 以下の指摘は
+どの経路からも新規性へ入らない。
+
+**`rejected` と `insufficient_evidence` と `verified_non_blocking` は新規性へ数えない。**
+数えると、棄却した指摘と `minor` の指摘のぶんだけラウンドが増える。#69 で同じ論点が
+5 ラウンド続いた事象がこれにあたる。
 
 **担当の判定（`event`）は見なくなる。** 重要度の自己申告と `event` の対応が保証されない
 ためである（PR #157 の round 6 で minor 2 件だけの `REQUEST_CHANGES` が出た）。
@@ -160,8 +289,8 @@ sequenceDiagram
 
 | 大項目 | 実現方式 | 確かめ方 |
 | --- | --- | --- |
-| セキュリティ | 実行するのは宣言された接頭辞に当たるコマンドだけ。メタ文字を含む値は実行しない | 実行を試みるテスト |
-| 可用性 | 実行の失敗（コマンドが無い等）は `not_run` として扱い、進行を止めない | 不在のコマンドを渡すテスト |
+| セキュリティ | 宣言のトークン列と先頭が一致し、後ろに `-` で始まるトークンを持たない値だけを `shell=False` で実行する | 別コマンド・引数の注入・メタ文字を渡すテスト |
+| 可用性 | 実行の失敗（コマンドが無い / 上限時間）は `not_run` として扱い、進行を止めない | 不在のコマンドと、上限を超えるコマンドを渡すテスト |
 | 移行性 | 宣言が無いリポジトリでは実行検証を行わず、従来どおり動く | 宣言なしのテスト |
 | 保守性 | 区分の決め方を 1 つの関数へ集める | 区分ごとのテスト |
 | 性能 | 実行は 1 指摘につき 1 回。上限時間を設ける | 上限を超える実行のテスト |
@@ -176,10 +305,20 @@ sequenceDiagram
 宣言が無ければ実行検証を行わない案を採る。既定の一覧を持たせる案は採らない。リポジトリに
 よってテストの起動が違い、既定は当たらない。
 
+**宣言は「実行してよいものの一覧」であって、コマンド名の一覧ではない。** 文字列の前方
+一致で照合すると、宣言した名前で始まる別のコマンドと、宣言の後ろへ足した任意の引数が
+通る。前者はトークン列の照合で、後者は後ろのトークンから `-` で始まるものを外すことで
+塞ぐ。**引数まで完全一致で固定する案は採らない。** `suggested_check` は指摘ごとに対象の
+テストが変わるため、固定すると実行検証がほぼ働かなくなる。
+
 ### 決定 2: 実行の結果を担当の支持より先に見る
 
 **機械が再現した事実は、担当の再評価より確かである。** 実行で再現した指摘は支持が少なくても
 残し、再現しなかった指摘は支持が多くても棄却する。#156 の受け入れ条件がこの向きを求めている。
+
+**この向きは区分の順序として実装する。** 条件の中で優先順位を書き分けるのではなく、
+`reproduced` を見る 2 つの区分を表の上へ置く。**順序が向きそのものになるため、後から
+条件を足しても向きが崩れない。**
 
 ### 決定 3: 新規性が数えるのは 2 つの区分だけである
 
@@ -201,15 +340,23 @@ sequenceDiagram
 
 | 受け入れ条件 | 何で確かめるか |
 | --- | --- |
+| 統合しても提案した担当が残る | `tests/test_merge_duplicates.py`（新設）。`origin_runtimes` に 2 者が載ること |
+| 独立して出した数と支持の数を区別できる | 同上。`origin_runtimes` の長さと `support` の件数が別に読めること |
 | 提案者以外が賛否を返す | `tests/test_critiques.py`（新設）。自分の指摘へ返さないこと |
 | 5 つの値が記録される | 同上 |
+| `finding_id` で指摘へ結ばれる | 同上。既知でない `finding_id` が `unmatched_critiques` へ残ること |
 | 宣言されたコマンドだけを実行する | `tests/test_verify_findings.py`（新設） |
-| メタ文字を含む値は実行しない | 同上 |
+| 別コマンドを実行しない | 同上。宣言 `pytest` に対し `pytest-danger --evil` が `not_run` になること |
+| 引数の注入を実行しない | 同上。`pytest -c /tmp/evil.ini` と `pytest -p reviewer_plugin` が `not_run` になること |
+| メタ文字を含む値は実行しない | 同上。`pytest; rm -rf /` と `pytest $(whoami)` が `not_run` になること |
 | 宣言が無ければ実行しない | 同上 |
+| 打ち切りと起動の失敗を再現としない | 同上。上限を超えるコマンドと不在のコマンドが `not_run` になること |
 | 再現の向き（失敗＝再現） | 同上 |
 | 5 つの区分へ分かれる | `tests/test_classify_findings.py`（新設）。区分ごとに 1 件以上 |
 | 実行で再現した指摘は支持が少なくても残る | 同上 |
+| 実行で再現した指摘は `refute` があっても棄却されない | 同上。`reproduced` と `refute` を両方持つ 1 件 |
 | 実行で再現しない指摘は支持が多くても棄却される | 同上 |
+| `minor` の支持だけではラウンドが増えない | 同上。`minor` かつ `support` 1 件が `insufficient_evidence` になること |
 | 棄却の理由が残る | 同上 |
 | 新規性が 2 つの区分だけを数える | 判定のテスト |
 | 測れないときは従来の判定へ落ちる | 同上 |
@@ -219,5 +366,5 @@ sequenceDiagram
 | 項目 | 内容 |
 | --- | --- |
 | 振動の閾値 | 母集合が広がった後の適正値。**この変更の後の実測で決める** |
-| 実行の上限時間 | 既定を何秒にするか。実測が無いため、まず 300 秒で置く |
-| 効果の測定 | 4 本目が扱う |
+| 実行の上限時間 | 既定を何秒にするか。実測が無いため、まず 300 秒で置く。**超えた実行は `not_run` であり、再現ではない** |
+| 効果の測定 | **4 本目が扱う。** #531 が「3 までの記録が揃ってから計算できる」を分割の理由とし、指標も 4 本目で決めるとしている（`issues/issue-156-design.md` の「分ける単位」と「未確認のまま残ること」）。この文書の時点では計算に使う記録が揃っていない |
