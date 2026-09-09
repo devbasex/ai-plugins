@@ -62,6 +62,14 @@ def test_the_reset_actually_changes_which_helper_answers(tmp_path):
 
 # ---------- 進行側の push ----------
 
+def test_credential_fallback_args_returns_helper_reset_arguments(gitfacts):
+    """現状固定: credential_fallback_args() の直接呼び出しが helper 退避引数を返す。"""
+    assert gitfacts.credential_fallback_args() == [
+        "-c", "credential.helper=",
+        "-c", "credential.helper=!gh auth git-credential",
+    ]
+
+
 def test_missing_shared_library_returns_no_fallback_args(gitfacts, monkeypatch, tmp_path):
     """現状固定: 共通層が無い環境では例外を出さず退避を省く。"""
     monkeypatch.setattr(gitfacts, "_CREDENTIAL_LIB", tmp_path / "missing.sh")
