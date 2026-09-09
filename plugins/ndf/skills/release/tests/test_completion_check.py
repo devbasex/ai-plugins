@@ -365,6 +365,30 @@ def test_an_unset_variable_stops_before_the_loop() -> None:
     assert not done.stdout.split(), done.stdout
 
 
+def test_an_uncreatable_log_stops_before_the_loop() -> None:
+    """変数はすべて設定されているが、ログを作れない経路を固定する。
+
+    `touch` は親のディレクトリが無いと失敗し、`if` の条件が偽になってループへ入らない。
+    **終了コード 0 は現状固定であって、成功仕様の主張ではない。** 雛形は打ち切りの理由を
+    出さずに終わるため、呼び出し側は終了コードだけでは作れなかったことを判別できない。
+    診断は `touch` が標準エラーへ書く文言に頼っており、その文面は固定しない。
+    """
+    with tempfile.TemporaryDirectory() as work:
+        log = Path(work) / "missing" / "run.log"
+        done = run_template(
+            work,
+            LOG=str(log),
+            DONE="[done]",
+            FAIL="[fail]",
+            IDLE="0",
+            LIMIT="0",
+        )
+    assert not done.stdout.split(), f"打ち切りの理由を出した: {done.stdout}"
+    assert done.stderr.strip(), "作れなかったことが標準エラーに出ていない"
+    assert not log.exists(), "作れないはずのログができている"
+    assert done.returncode == 0, done.stderr
+
+
 # --- 条件 4〜6: 工程への結び付け ----------------------------------------------------
 
 
