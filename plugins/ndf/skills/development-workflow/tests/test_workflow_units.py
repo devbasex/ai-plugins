@@ -47,6 +47,24 @@ def test_higher_mode_at_empty_and_equal_height_boundaries(
     assert result.stdout.strip() == expected
 
 
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("a\\b", r"a\\b"),
+        ('a"b', r'a\"b'),
+        ("a\nb", r"a\nb"),
+        ("a\tb", r"a\tb"),
+        ("a\rb", r"a\rb"),
+    ],
+    ids=["backslash", "double-quote", "newline", "tab", "carriage-return"],
+)
+def test_json_escape_replaces_each_special_character(value: str, expected: str) -> None:
+    """現状固定: 各エスケープ対象文字を含む入力の実測出力を固定する。"""
+    result = run_lib(f"wf_json_escape {shlex.quote(value)}")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == expected
+
+
 def workflow_table() -> tuple[list[str], list[list[str]]]:
     """工程表の見出しと本文の行を返す。読み取れないことは失敗として扱う。"""
     lines = SKILL.read_text(encoding="utf-8").splitlines()
