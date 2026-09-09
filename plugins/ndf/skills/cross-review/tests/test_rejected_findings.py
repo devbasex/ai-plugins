@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+import subprocess
 
 import pytest
 
@@ -76,6 +77,32 @@ REJECTED = {
 
 
 # ---------------- 蓄積 ----------------
+
+def test_init_stores_an_empty_rejected_findings_list(tmp_dir, state_mod, monkeypatch):
+    """新規初期化で保存される却下記録の初期値を固定する。"""
+    worktree = tmp_dir / "worktree"
+    worktree.mkdir()
+    monkeypatch.setattr(state_mod, "_repo_from_git", lambda: REPO)
+    monkeypatch.setattr(state_mod, "_fetch_pr_metadata", lambda pr, repo:
+                        state_mod.PrMetadata(REPO, "author", "feature/test", "abc",
+                                             "develop", False, 4000, None))
+    monkeypatch.setattr(state_mod, "_sh", lambda cmd, check=True: "viewer")
+    monkeypatch.setattr(state_mod, "_fetch_changed_files", lambda pr, repo: [])
+    monkeypatch.setattr(state_mod, "_is_registered_worktree", lambda path: True)
+    monkeypatch.setattr(state_mod, "_sync_worktree", lambda *args: None)
+    monkeypatch.setattr(state_mod.subprocess, "run", lambda *args, **kwargs:
+                        subprocess.CompletedProcess(args[0], 0, stdout="", stderr=""))
+    monkeypatch.setattr(state_mod.auth, "check_auth", lambda *args, **kwargs: None)
+
+    state_mod.cmd_init(argparse.Namespace(
+        pr=PR, max_rounds=12, rotate_after=8, only=None, worktree=str(worktree),
+        focus=None, extra_instructions_file=None, host="codex",
+    ))
+
+    saved = _read(tmp_dir)
+    assert "rejected_findings" in saved
+    assert saved["rejected_findings"] == []
+
 
 def test_a_rejected_finding_is_kept_with_its_location(tmp_dir, state_mod):
     _write(tmp_dir, _state())
