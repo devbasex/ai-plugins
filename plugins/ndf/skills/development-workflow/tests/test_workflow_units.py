@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import re
+import shlex
 
 import pytest
 
@@ -26,6 +27,24 @@ SKILL = SKILL_DIR / "SKILL.md"
 MODES_REF = SKILL_DIR / "references" / "workflow-modes.md"
 COMPLETENESS_REF = SKILL_DIR / "references" / "stage-completeness.md"
 WORKFLOW_TABLE_HEADING = "## モードごとに起動する Skill"
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "expected"),
+    [
+        ("", "standard", "standard"),
+        ("standard", "", "standard"),
+        ("standard", "standard", "standard"),
+        ("unknown-first", "unknown-second", "unknown-first"),
+    ],
+)
+def test_higher_mode_at_empty_and_equal_height_boundaries(
+    first: str, second: str, expected: str
+) -> None:
+    """現状固定: 空なら非空側、同じ高さなら先に渡した側を返す。"""
+    result = run_lib(f"wf_higher_mode {shlex.quote(first)} {shlex.quote(second)}")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == expected
 
 
 def workflow_table() -> tuple[list[str], list[list[str]]]:

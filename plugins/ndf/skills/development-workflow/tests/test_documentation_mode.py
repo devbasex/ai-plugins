@@ -9,6 +9,9 @@
 from __future__ import annotations
 
 import re
+import shlex
+
+import pytest
 
 from workflow_helpers import LIB, run_lib
 
@@ -34,6 +37,14 @@ def test_the_height_is_five() -> None:
     result = run_lib(f"wf_mode_height {MODE}")
     assert result.returncode == 0
     assert result.stdout.strip() == "5"
+
+
+@pytest.mark.parametrize("mode", ["unknown-mode", ""])
+def test_an_unknown_or_empty_mode_has_zero_height_and_fails(mode: str) -> None:
+    """現状固定: 高さが未定義なら 0 を出力し、終了コード 1 を返す。"""
+    result = run_lib(f"wf_mode_height {shlex.quote(mode)}")
+    assert result.stdout.strip() == "0"
+    assert result.returncode == 1
 
 
 def test_the_height_is_higher_than_standard() -> None:
