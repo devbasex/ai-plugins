@@ -234,6 +234,43 @@ def test_the_report_requires_a_review_for_light(repo, tmp_path) -> None:
     assert state_file(state_dir, 31).is_file()
 
 
+# --- R2-001: 証跡の検査が見る工程の並び（現状固定） -------------------------
+
+# `wf_stages_before_pr` が返す工程の並びを、そのまま正解として記録する。
+# 証跡の報告（`_wf_missing_before_pr`）はこの並びを終点に使う。`WF_PR_EXEMPT_STAGE`
+# の改名や WF_STAGE_MATRIX の並べ替えは、何を証跡として確かめるかを黙って変える。
+# ここで並びを固定し、変わったときに落ちるようにする。
+STAGES_BEFORE_PR = [
+    "要求と受け入れ条件",
+    "作業場所の用意",
+    "設計",
+    "素材の収集と出典の確定",
+    "ドキュメント再構成",
+    "ドキュメントレビュー",
+    "計画",
+    "実装",
+    "構造改善",
+    "完了判定",
+]
+
+
+def test_stages_before_pr_returns_the_recorded_ordered_list() -> None:
+    """現状固定: 正確な並びを記録した値と一致する。"""
+    result = run_lib("wf_stages_before_pr")
+    assert result.returncode == 0, result.stderr
+    lines = [line for line in result.stdout.splitlines() if line != ""]
+    assert lines == STAGES_BEFORE_PR
+
+
+def test_stages_before_pr_excludes_the_exempt_and_pr_stages() -> None:
+    """免除される実装レビューと終点の Pull Request は並びに現れない。"""
+    result = run_lib("wf_stages_before_pr")
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert "実装レビュー" not in lines
+    assert "Pull Request" not in lines
+
+
 def test_repo_slug_reads_an_ssh_origin(tmp_path) -> None:
     repo = init_repo(tmp_path / "ssh", remote="git@github.com:devbasex/ai-plugins.git")
 

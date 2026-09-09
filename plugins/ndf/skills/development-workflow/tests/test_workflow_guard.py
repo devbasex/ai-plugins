@@ -6,6 +6,7 @@ GitHub への問い合わせは `gh` を PATH で差し替えて作り物へ向�
 from __future__ import annotations
 
 import json
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -83,7 +84,6 @@ def test_a_command_outside_the_target_does_nothing(repo: Path, state: Path, comm
 
 
 # --- #266 設計 Pull Request のマージ ----------------------------------------
-
 def test_a_design_pull_request_without_the_label_is_denied(repo: Path, state: Path, tmp_path: Path) -> None:
     """#266-1"""
     result = guard(repo, state, "gh pr merge 268 --squash", tmp_path=tmp_path,
@@ -384,3 +384,35 @@ def test_a_repository_without_a_remote_records_nothing(tmp_path: Path, state: Pa
 
     assert result.returncode == 0
     assert result.stdout.strip() == ""
+
+
+# --- R2-002: 案内の直列化と復号の契約（現状固定） ---------------------------
+
+# `wf_emit_context` は systemMessage と additionalContext の両方へ同じ文字列を
+# 載せ、JSON として出す。引用符・バックスラッシュ・改行・タブ・復帰文字を含む値と
+# 空文字が、有効な JSON になり復号すると元の値へ戻ることを、最小の出力入口で固定する。
+# 生成 JSON の空白・キー順や文言の完全一致は要求しない（復号後の値だけを見る）。
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",
+        "日本語の案内です",
+        'quote " inside',
+        r"backslash \ inside",
+        "line1\nline2",
+        "col1\tcol2",
+        "carriage\rreturn",
+        '全部盛り 日本語 "q" \\b\n改行\ttab\rcr',
+    ],
+)
+def test_emit_context_round_trips_the_value(text: str) -> None:
+    """現状固定: 入力値が JSON を経て systemMessage と additionalContext に保たれる。"""
+    result = run_lib(f"wf_emit_context {shlex.quote(text)}")
+
+    assert result.returncode == 0, result.stderr
+    decoded = json.loads(result.stdout)
+    assert decoded["systemMessage"] == text
+    hook = decoded["hookSpecificOutput"]
+    assert hook["additionalContext"] == text
+    assert hook["hookEventName"] == "PreToolUse"
+    assert "permissionDecision" not in hook
