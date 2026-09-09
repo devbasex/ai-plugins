@@ -294,8 +294,6 @@ Skill であり、そこに `plugins/ndf/` がある保証が無い（#292 で�
 
 ## テスト設計
 
-| 受け入れ条件 | 何で確かめるか |
-| --- | --- |
 **`cross-refactoring` のテストはその Skill の配下に置く。** 表の `<crf>` は
 `plugins/ndf/skills/cross-refactoring` を指す（「パッケージ・モジュール構成」の配置と
 同じ）。リポジトリ直下の `scripts/tests/` は、Skill をまたいで見る検査だけが使う。
