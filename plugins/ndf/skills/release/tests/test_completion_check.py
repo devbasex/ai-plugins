@@ -62,15 +62,6 @@ def read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def is_section_boundary(line: str, fenced: bool, depth: int) -> bool:
-    """この行で節が終わるかを返す。囲みの中の見出しは節の終わりにしない。"""
-    stripped = line.lstrip()
-    if fenced or not stripped.startswith("#"):
-        return False
-    level = len(stripped) - len(stripped.lstrip("#"))
-    return level <= depth
-
-
 def section(body: str, heading: str) -> str:
     """見出しから、同じか浅い深さの次の見出しまでを返す。\n\n    囲みの中の行は見出しとして数えない。出力物の雛形は Markdown の見出しを含む。\n    """
     depth = len(heading) - len(heading.lstrip("#"))
@@ -82,12 +73,15 @@ def section(body: str, heading: str) -> str:
     collected: list[str] = []
     fenced = False
     for line in lines[start + 1 :]:
-        if line.lstrip().startswith("```"):
+        stripped = line.lstrip()
+        if stripped.startswith("```"):
             fenced = not fenced
             collected.append(line)
             continue
-        if is_section_boundary(line, fenced, depth):
-            break
+        if not fenced and stripped.startswith("#"):
+            level = len(stripped) - len(stripped.lstrip("#"))
+            if level <= depth:
+                break
         collected.append(line)
     text = "\n".join(collected).strip()
     assert text, f"節の本文が空である: {heading}"

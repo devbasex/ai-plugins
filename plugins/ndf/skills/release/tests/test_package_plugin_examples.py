@@ -13,11 +13,6 @@ FORM = Path(__file__).resolve().parents[1] / "references/form-package-plugin.md"
 PLUGIN_JSON = Path("plugins/ndf/.claude-plugin/plugin.json")
 PAYLOAD = Path("plugins/ndf/payload.txt")
 
-# 検査用リポジトリの開発ブランチ名。例の側は HEAD しか見ないため、この値は試験の中で閉じる。
-DEFAULT_BRANCH = "development"
-# 例が `--list 'ndf--v*'` で絞る接頭辞。ここを変えると例の選び方から外れる。
-TAG_PREFIX = "ndf--v"
-
 
 @pytest.fixture
 def repository(tmp_path: Path):
@@ -39,7 +34,7 @@ def repository(tmp_path: Path):
             text=True, capture_output=True, check=True,
         )
 
-    git("init", "--template=", f"--initial-branch={DEFAULT_BRANCH}")
+    git("init", "--template=", "--initial-branch=development")
     git("config", "core.hooksPath", os.devnull)
     git("config", "commit.gpgSign", "false")
     git("config", "tag.gpgSign", "false")
@@ -72,19 +67,19 @@ def test_latest_product_tag_is_used_even_outside_head_ancestry(repository) -> No
     """現状固定: 版順・製品名で選び、祖先でない公開版と同じ配布内容なら差分なし。"""
     root, _, git = repository
     commit_package(repository, "1.9.0", "古い配布内容")
-    git("tag", f"{TAG_PREFIX}1.9.0")
+    git("tag", "ndf--v1.9.0")
     git("tag", "other--v99.0.0")
 
     git("checkout", "-b", "published")
     commit_package(repository, "1.10.0", "最新の配布内容")
-    git("tag", f"{TAG_PREFIX}1.10.0")
+    git("tag", "ndf--v1.10.0")
 
-    git("checkout", DEFAULT_BRANCH)
+    git("checkout", "development")
     # 配布物以外の差も置き、比較対象をプラグインへ絞る挙動を通す。
     (root / "development.txt").write_text("開発側だけの記録\n", encoding="utf-8")
     git("add", "development.txt")
     commit_package(repository, "1.10.0", "最新の配布内容")
-    assert git("rev-list", f"HEAD..{TAG_PREFIX}1.10.0").stdout.strip()
+    assert git("rev-list", "HEAD..ndf--v1.10.0").stdout.strip()
 
     result = run_base_example(repository)
 
