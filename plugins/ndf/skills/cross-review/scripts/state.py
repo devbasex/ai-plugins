@@ -1095,6 +1095,27 @@ PATH_CATEGORY_RULES = (
     ("infra", _is_infra_path),
 )
 
+# カテゴリ名 → レビュー観点テンプレートの対応。PATH_CATEGORY_RULES（カテゴリ名 →
+# 判定述語）と対にして 1 か所に置く。カテゴリを増やすときは両方の表を同時に直す。
+# special な common / docs_only / deletion_rename は判定述語を持たないためこの表にだけ載る。
+CATEGORY_TEMPLATES = {
+    "common": COMMON_REVIEW_TEMPLATE,
+    "docs_only": DOCS_ONLY_REVIEW_TEMPLATE,
+    "code": CODE_REVIEW_TEMPLATE,
+    "db_migration": DB_MIGRATION_REVIEW_TEMPLATE,
+    "test": TEST_REVIEW_TEMPLATE,
+    "dependency": DEPENDENCY_REVIEW_TEMPLATE,
+    "config_ci": CONFIG_CI_REVIEW_TEMPLATE,
+    "api_contract": API_CONTRACT_REVIEW_TEMPLATE,
+    "auth_security": AUTH_SECURITY_REVIEW_TEMPLATE,
+    "frontend": FRONTEND_REVIEW_TEMPLATE,
+    "performance": PERFORMANCE_REVIEW_TEMPLATE,
+    "deletion_rename": DELETION_RENAME_REVIEW_TEMPLATE,
+    "generated": GENERATED_REVIEW_TEMPLATE,
+    "i18n": I18N_REVIEW_TEMPLATE,
+    "infra": INFRA_REVIEW_TEMPLATE,
+}
+
 
 def _classify_changed_files(entries: list[dict[str, Any]]) -> list[str]:
     paths = [p for entry in entries for p in entry.get("paths", []) if isinstance(p, str)]
@@ -1119,24 +1140,8 @@ def _classify_changed_files(entries: list[dict[str, Any]]) -> list[str]:
 
 
 def _auto_review_instructions(categories: list[str]) -> str:
-    templates = {
-        "common": COMMON_REVIEW_TEMPLATE,
-        "docs_only": DOCS_ONLY_REVIEW_TEMPLATE,
-        "code": CODE_REVIEW_TEMPLATE,
-        "db_migration": DB_MIGRATION_REVIEW_TEMPLATE,
-        "test": TEST_REVIEW_TEMPLATE,
-        "dependency": DEPENDENCY_REVIEW_TEMPLATE,
-        "config_ci": CONFIG_CI_REVIEW_TEMPLATE,
-        "api_contract": API_CONTRACT_REVIEW_TEMPLATE,
-        "auth_security": AUTH_SECURITY_REVIEW_TEMPLATE,
-        "frontend": FRONTEND_REVIEW_TEMPLATE,
-        "performance": PERFORMANCE_REVIEW_TEMPLATE,
-        "deletion_rename": DELETION_RENAME_REVIEW_TEMPLATE,
-        "generated": GENERATED_REVIEW_TEMPLATE,
-        "i18n": I18N_REVIEW_TEMPLATE,
-        "infra": INFRA_REVIEW_TEMPLATE,
-    }
-    return "\n\n".join(templates[c] for c in categories if c in templates)
+    parts = (CATEGORY_TEMPLATES.get(c) for c in categories)
+    return "\n\n".join(p for p in parts if p is not None)
 
 
 def _combined_review_instructions(auto: str, manual: str) -> str:
