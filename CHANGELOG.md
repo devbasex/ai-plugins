@@ -9,6 +9,50 @@
 **開発版（接尾辞の付いた版）は載せない。** `9.8.0` は `9.8.0-dev.1` までしか出ておらず、
 その内容は `10.0.0` で届いている。
 
+## [ndf 10.9.0] - 2026-09-09
+
+### 追加
+
+- **`development-workflow` に `documentation` モードを足した**（#507）。工程表が 18 行 × 5 列に
+  なり、`素材の収集と出典の確定`（`設計` の後）と `体裁レビュー`（`配布` の後）の 2 行が増えた。
+  判定の順序は `operation` → `documentation` → `standard` → `legacy-refactor` → `light`
+- `development-workflow/references/document-types.md` を新設した（#507）。6 タイプ（提案・企画 /
+  決裁・稟議 / 定例報告 / 指標定義 / 運用マニュアル / 説明・研修）の判定条件と境界事例を持つ
+- `development-workflow/references/document-destinations.md` を新設した（#508）。文書の提出先の
+  宣言（`.ndf/document.json`）の形と、本番の提出先ごとに対の下書き先を求める契約を持つ
+- **`document-systems` を新設した**（#515）。Google Drive / Notion / Confluence / SharePoint /
+  リポジトリ自身の 5 システムを 1 システム 1 ファイルで持つ。各ファイルは同じ 8 項目
+  （認証 / 取り込みの手段と取れないもの / 投稿の手段 / 本文の表現 / 版の扱い / 図の扱い /
+  描画して見る手段 / 既知の失敗）を持つ
+- `document-systems/references/import.md` を新設した（#514）。外部の文書を取り込む 3 つの用途、
+  正規化、格納先、継続的統合で動かすかを持つ
+- **`document-sources` を新設した**（#509）。出所として残す 4 項目（場所 / 位置 / 時点 / 手段）と、
+  実績 / 見込み / 概算の区別を持つ。取得の手段は持たない
+- **`document-drafting` を新設した**（#510）。6 タイプの参照を持ち、各参照は同じ 4 つの節
+  （必ず書く節 / 書かない節 / 読み手が最初に問うこと / よくある欠落）を持つ
+- **`layout-review` を新設した**（#513）。生成物を描画して版面を見る。機械で測る項目と人が画像を
+  見る項目を分け、**描画できない・画像を読めないときは止める**
+- `release` に出力の形を 4 つ足した（#511）。`form-slide.md` / `form-document.md` /
+  `form-spreadsheet.md` / `form-page.md`。**形の参照はシステム固有の手順を持たない**
+- `design` に体裁設計を足した（#513）。`references/layout-slide.md` / `layout-document.md` /
+  `layout-spreadsheet.md` / `layout-page.md` の 4 本
+- `requirements-design/references/document-requirements.md` を新設した（#509）。読み手・目的・
+  読み手に求める判断を受け入れ条件として書く形
+
+### 変更
+
+- `workflow-common.sh` の `WF_MODES` が 5 値、`WF_STAGE_MATRIX` が 18 行 × 5 列、
+  `WF_MODE_HEIGHT` が 5 値になった（#507）。`wf_stage_class` が 5 列目を読む
+- `projects-common.sh` の `PJ_STAGES` が 18 値、`PJ_MODES` が 5 値になった（#512）。
+  **工程名の並びを持つ箇所が 5 つになり、すべて一致する**
+- `quality-gates` のモード別の表へ `documentation` の行を足した（#509）。必須の段は 3 で、
+  追加で**事実確認**（書かれた値と出典の突き合わせ）を求める。**事実確認は書いた本人だけでは
+  完了しない**（`cross-review` のレビュワーが行う）
+- 承認の 2 つの関門へ文書での意味（企画承認 / 制作物承認）を写像した（#508）。**関門は 2 つの
+  ままで、`WF_APPROVAL_LABEL` と `WF_DESIGN_PREFIX` は変えていない**
+- 配布 Skill が 41 / 40 / 39 / 39 から **45 / 44 / 43 / 43** になった
+  （Claude Code / Kiro CLI / Codex / agy）
+
 ## [ndf 10.8.0] - 2026-09-08
 
 ### 追加
