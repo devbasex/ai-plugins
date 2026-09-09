@@ -381,7 +381,8 @@ EOMD
      "reason_for_deferral": "好みの範囲。プロジェクト規約と齟齬なし"}
   ],
   "rejected": [
-    {"comment_id": 3222849090, "summary": "heredoc を <<'JSON' にせよ",
+    {"comment_id": 3222849090, "path": "scripts/state.py", "line": 120,
+     "severity": "minor", "summary": "heredoc を <<'JSON' にせよ",
      "reason_for_rejection": "$SHA を意図的に展開する必要があり、クオート化すると逆に壊れる"}
   ],
   "summary_comment_url": "https://github.com/.../pull/67#issuecomment-..."
@@ -390,6 +391,9 @@ EOMD
 
 - `resolved_threads` / `deferred` / `rejected` は **必ず配列**で返す（件数の int は誤り）。
   該当が無ければ空配列
+- **`rejected` の各要素は `path` / `line` / `severity` を持つ。** 却下した論点が次のラウンドで
+  再提出されたとき、位置が無いと同じ指摘だと判定できない（実測では同じ論点が 5 ラウンド
+  続けて提出された）。進行側はこの記録を `rejected_findings` へ蓄積する
 - `ci_failed_checks` — `ci_status = FAILURE` のとき、失敗した check 名の配列。
   `/ndf:cross-review` 側で code-related（`pint` / `larastan` / `test` / `build` / `lint` /
   `type`）と meta-only（`check_pr_requirements` / `assignees` / `reviewers` / `labels`）を

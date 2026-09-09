@@ -59,6 +59,10 @@
     {"pr": 123, "round": 1, "path": "src/foo.py", "line": 42, "severity": "nit",
      "summary": "...", "comment_url": "..."}
   ],
+  "rejected_findings": [
+    {"pr": 123, "round": 1, "path": "src/foo.py", "line": 42, "severity": "minor",
+     "comment_id": 3222849090, "summary": "...", "reason_for_rejection": "..."}
+  ],
   "final": null
 }
 ```
@@ -68,6 +72,10 @@
 ### 重要なフィールド
 
 - `host` — 確定したホスト名（`claude` / `codex` / `agy` / `kiro`）。母集合から外れる
+- `rejected_findings` — 却下した指摘を **per-item** で蓄積する。`rounds[].fix.rejected` は
+  ラウンドごとの件数で、こちらは理由と位置を持つ。**両方を持つのは、件数だけが返る劣化表現
+  （`fix` が int を返す経路）があるためである。** そのときは記録が空になり、件数だけが残る。
+  **項目が欠けた要素も落とさない**（落とすと却下そのものが記録から消える）
 - `host_source` — `explicit`（`--host`）または `env`（環境変数からの推定）
 - `rounds[].reviewers` — そのラウンドのレビュー担当 2 者。**ラウンドを開くときに決めて残す**
 - `worktree_path` — 並行セッションとの分離。サブエージェントへの cwd 指示にも使う

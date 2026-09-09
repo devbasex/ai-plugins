@@ -25,6 +25,11 @@ ROOT_CONFTEST = REPO_ROOT / "conftest.py"
 # 前提を確かめる対象として、外部コマンドを呼ばずに済む小さな束を使う。
 BUNDLE = "plugins/ndf/skills/development-workflow/tests"
 
+# 一覧に無い束。**シェルスクリプトを起動しない束であること**が条件である。
+# `_path_without` が組み立てる `PATH` には `dirname` すら無いため、スクリプトを
+# 起動する束をここへ置くと、前提の検査ではなくスクリプトの側で落ちる。
+OUTSIDE_BUNDLE = "plugins/ndf/skills/retrospective/tests"
+
 
 def _read_root_conftest() -> str:
     return ROOT_CONFTEST.read_text(encoding="utf-8")
@@ -124,9 +129,19 @@ def test_the_opt_in_skips_instead_of_failing(tmp_path: Path) -> None:
     assert "skipped" in result.stdout
 
 
+def test_the_outside_bundle_is_really_outside_the_table() -> None:
+    """`OUTSIDE_BUNDLE` が一覧へ載ったら、次の検査は何も確かめていない。
+
+    載せた側は検査が素通りしたことに気づけないため、ここで落とす。
+    """
+    body = _read_root_conftest()
+    assert f'"{OUTSIDE_BUNDLE}"' not in body
+    assert f'"{BUNDLE}"' in body
+
+
 def test_a_bundle_outside_the_table_is_not_checked(tmp_path: Path) -> None:
     """一覧に無い束だけを収集したときは、前提を確かめない。"""
-    result = _run_pytest("plugins/ndf/skills/cross-review/tests", path=_path_without(tmp_path, "jq"))
+    result = _run_pytest(OUTSIDE_BUNDLE, path=_path_without(tmp_path, "jq"))
 
     assert result.returncode == 0, result.stdout + result.stderr
 

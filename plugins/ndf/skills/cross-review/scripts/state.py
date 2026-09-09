@@ -74,6 +74,11 @@ CI_CONFIG_MARKERS = (
     "/.github/workflows/", "/.gitlab-ci", "/.circleci/", "/.buildkite/",
     "/.kiro/", "/.claude/", "/.codex/",
 )
+CONFIG_CI_FILENAMES = {"dockerfile", "makefile", ".editorconfig"}
+# 環境別の接尾辞を持つファイルも、名前の先頭で判定する。
+ENV_FILENAME_PREFIX = ".env"
+# ルート直下の GitHub 設定を対象にするため、部分一致のマーカーとは分ける。
+GITHUB_CONFIG_PATH_PREFIX = ".github/"
 CONFIG_EXTENSIONS = {
     ".json", ".toml", ".yaml", ".yml", ".ini", ".env", ".example",
 }
@@ -716,6 +721,38 @@ def _is_synced(
     return True
 
 
+def _reset_worktree_head(
+    worktree: str, pr: int, target: str | None, code: int,
+) -> None:
+    """基準へ巻き戻す。基準が無ければ PR の checkout へフォールバックする。"""
+    if target is not None:
+        reset = subprocess.run(
+            ["git", "reset", "--hard", target],
+            capture_output=True, text=True, cwd=worktree,
+        )
+        if reset.returncode != 0:
+            die(f"worktree を {target} へ同期できない: {reset.stderr.strip()}", code=code)
+    else:
+        checkout = subprocess.run(
+            ["gh", "pr", "checkout", str(pr), "--detach"],
+            capture_output=True, text=True, cwd=worktree,
+        )
+        if checkout.returncode != 0:
+            die(f"gh pr checkout --detach #{pr} 失敗: {checkout.stderr.strip()}", code=code)
+
+
+def _clean_untracked_files(worktree: str, exclusions: list[str], code: int) -> None:
+    """除外パスを残して追跡対象外のファイルを掃除する。"""
+    clean = subprocess.run(
+        ["git", "clean", "-fd", *[a for e in exclusions for a in ("-e", e)]],
+        capture_output=True, text=True, cwd=worktree,
+    )
+    if clean.returncode != 0:
+        # 消せないまま進むと、残骸を抱えた作業ツリーで fix 担当が `git add -A` を
+        # 使い、Pull Request へ混ざる。差分そのものは合っていても止める。
+        die(f"追跡対象外のファイルを消せない: {clean.stderr.strip()}", code=code)
+
+
 def _sync_worktree(
     worktree: str,
     pr: int,
@@ -767,12 +804,6 @@ def _sync_worktree(
         if strict and isinstance(head, HeadRef) and _is_synced(
                 worktree, pr, head, exclusions, code):
             return
-        reset = subprocess.run(
-            ["git", "reset", "--hard", target],
-            capture_output=True, text=True, cwd=worktree,
-        )
-        if reset.returncode != 0:
-            die(f"worktree を {target} へ同期できない: {reset.stderr.strip()}", code=code)
     elif strict:
         # HEAD を動かす前に、何が失われるかを数える材料が無い（基準が手元に無いのだから、
         # 未 push のコミットを数えられない）。判定できない状態でフォールバックしない。
@@ -784,20 +815,8 @@ def _sync_worktree(
     else:
         # フォーク PR は origin に head branch が無い。作成時と同じ経路で合わせる。
         info(f"⚠ git fetch origin {label} 失敗 (フォーク PR の可能性) — gh pr checkout でフォールバック")
-        checkout = subprocess.run(
-            ["gh", "pr", "checkout", str(pr), "--detach"],
-            capture_output=True, text=True, cwd=worktree,
-        )
-        if checkout.returncode != 0:
-            die(f"gh pr checkout --detach #{pr} 失敗: {checkout.stderr.strip()}", code=code)
-    clean = subprocess.run(
-        ["git", "clean", "-fd", *[a for e in exclusions for a in ("-e", e)]],
-        capture_output=True, text=True, cwd=worktree,
-    )
-    if clean.returncode != 0:
-        # 消せないまま進むと、残骸を抱えた作業ツリーで fix 担当が `git add -A` を
-        # 使い、Pull Request へ混ざる。差分そのものは合っていても止める。
-        die(f"追跡対象外のファイルを消せない: {clean.stderr.strip()}", code=code)
+    _reset_worktree_head(worktree, pr, target if have_base else None, code)
+    _clean_untracked_files(worktree, exclusions, code)
     rev = subprocess.run(
         ["git", "rev-parse", "--short", "HEAD"],
         capture_output=True, text=True, cwd=worktree,
@@ -1027,9 +1046,9 @@ def _is_config_ci_path(path: str) -> bool:
     lower, normalized, name, ext = _path_info(path)
     return (
         _contains_any(normalized, CI_CONFIG_MARKERS)
-        or name.startswith(".env")
-        or name in {"dockerfile", "makefile", ".editorconfig"}
-        or lower.startswith(".github/")
+        or name.startswith(ENV_FILENAME_PREFIX)
+        or name in CONFIG_CI_FILENAMES
+        or lower.startswith(GITHUB_CONFIG_PATH_PREFIX)
         or (ext in CONFIG_EXTENSIONS and ("/config/" in normalized or "/configs/" in normalized))
     )
 
@@ -1095,6 +1114,27 @@ PATH_CATEGORY_RULES = (
     ("infra", _is_infra_path),
 )
 
+# カテゴリ名 → レビュー観点テンプレートの対応。PATH_CATEGORY_RULES（カテゴリ名 →
+# 判定述語）と対にして 1 か所に置く。カテゴリを増やすときは両方の表を同時に直す。
+# special な common / docs_only / deletion_rename は判定述語を持たないためこの表にだけ載る。
+CATEGORY_TEMPLATES = {
+    "common": COMMON_REVIEW_TEMPLATE,
+    "docs_only": DOCS_ONLY_REVIEW_TEMPLATE,
+    "code": CODE_REVIEW_TEMPLATE,
+    "db_migration": DB_MIGRATION_REVIEW_TEMPLATE,
+    "test": TEST_REVIEW_TEMPLATE,
+    "dependency": DEPENDENCY_REVIEW_TEMPLATE,
+    "config_ci": CONFIG_CI_REVIEW_TEMPLATE,
+    "api_contract": API_CONTRACT_REVIEW_TEMPLATE,
+    "auth_security": AUTH_SECURITY_REVIEW_TEMPLATE,
+    "frontend": FRONTEND_REVIEW_TEMPLATE,
+    "performance": PERFORMANCE_REVIEW_TEMPLATE,
+    "deletion_rename": DELETION_RENAME_REVIEW_TEMPLATE,
+    "generated": GENERATED_REVIEW_TEMPLATE,
+    "i18n": I18N_REVIEW_TEMPLATE,
+    "infra": INFRA_REVIEW_TEMPLATE,
+}
+
 
 def _classify_changed_files(entries: list[dict[str, Any]]) -> list[str]:
     paths = [p for entry in entries for p in entry.get("paths", []) if isinstance(p, str)]
@@ -1119,24 +1159,8 @@ def _classify_changed_files(entries: list[dict[str, Any]]) -> list[str]:
 
 
 def _auto_review_instructions(categories: list[str]) -> str:
-    templates = {
-        "common": COMMON_REVIEW_TEMPLATE,
-        "docs_only": DOCS_ONLY_REVIEW_TEMPLATE,
-        "code": CODE_REVIEW_TEMPLATE,
-        "db_migration": DB_MIGRATION_REVIEW_TEMPLATE,
-        "test": TEST_REVIEW_TEMPLATE,
-        "dependency": DEPENDENCY_REVIEW_TEMPLATE,
-        "config_ci": CONFIG_CI_REVIEW_TEMPLATE,
-        "api_contract": API_CONTRACT_REVIEW_TEMPLATE,
-        "auth_security": AUTH_SECURITY_REVIEW_TEMPLATE,
-        "frontend": FRONTEND_REVIEW_TEMPLATE,
-        "performance": PERFORMANCE_REVIEW_TEMPLATE,
-        "deletion_rename": DELETION_RENAME_REVIEW_TEMPLATE,
-        "generated": GENERATED_REVIEW_TEMPLATE,
-        "i18n": I18N_REVIEW_TEMPLATE,
-        "infra": INFRA_REVIEW_TEMPLATE,
-    }
-    return "\n\n".join(templates[c] for c in categories if c in templates)
+    parts = (CATEGORY_TEMPLATES.get(c) for c in categories)
+    return "\n\n".join(p for p in parts if p is not None)
 
 
 def _combined_review_instructions(auto: str, manual: str) -> str:
@@ -1635,6 +1659,9 @@ def cmd_init(args: argparse.Namespace) -> None:
         "pr_history": [{"pr": pr, "opened_at": _now(), "closed_at": None, "rounds": 0}],
         "rounds": [],
         "deferred_nits": [],
+        # 却下した指摘は per-item で残す（#156）。件数だけでは、次のラウンドへ
+        # 渡しても同じ指摘だと判定できない。
+        "rejected_findings": [],
         # 引き継いだ指摘は再開の時点で決まる。新規の開始では空にする。
         "carried_over": None,
         "final": None,
@@ -2184,23 +2211,7 @@ def _die_no_result(pr: int, agent: str, reason: str, msg: str, code: int = 1) ->
     die(msg, code=code)
 
 
-def cmd_read_result(args: argparse.Namespace) -> None:
-    """Step 2.4 — codex/agy の result.json を state にマージ。
-
-    使える結果が残らなかったときは、`NO_RESULT` と理由をラウンドへ残してから止める。
-    終了コードは現行のまま（無い・判定の値を持たないときは 1、JSON として読めない
-    ときは 3）で、進む先を決めるのは次の判定である。
-
-    **ここでは待ち行列を流さない。** 流すと `review-post` の書き戻し先（そのラウンドの
-    担当のエントリ）がまだ無い時点で項目が消える。`_confirm_flushed` は書き戻せず、
-    この後の取り込みが `queued: true` だけを保存するため、待ち行列が空で `queued` の
-    ままの状態ができる。判定はその状態で収束してしまい、投稿の存在も参照も確かめない。
-    **両方の担当を取り込んだ後に流す**（`judge` の入口）。取り込みは判定の直前に
-    しかないため、流す時期が遅れるのは 1 コマンド分である。
-    """
-    agent = args.agent
-    pr = args.pr
-    rfile = pathlib.Path(args.file or _resolve_tmp_dir(pr) / f"{agent}-review-pr{pr}-result.json")
+def _read_review_result_file(pr: int, agent: str, rfile: pathlib.Path) -> dict[str, Any]:
     if not rfile.exists() or rfile.stat().st_size == 0:
         _die_no_result(pr, agent, "missing", f"{agent}: result 未生成 ({rfile})")
 
@@ -2227,6 +2238,75 @@ def cmd_read_result(args: argparse.Namespace) -> None:
             f"({rfile}, type={type(r).__name__})。review launcher の出力形式不正。",
             code=3,
         )
+    return r
+
+
+def _verify_review_arrival(
+    pr: int, agent: str, repo: str, result: dict[str, Any]
+) -> bool:
+    """投稿が Pull Request に届いたかを確かめ、待ち行列へ積んだかどうかを返す。
+
+    **投稿が届いたかを先に確かめる。** 判定だけが残り、指摘の中身が Pull Request に
+    無いまま修正の工程へ進む経路を塞ぐ（#261）。届いていないときは結果なしとして
+    記録し、判定の側の「同じラウンドで 1 度だけ起動し直す」経路へ乗せる。修正の担当
+    から見ると、結果が残らなかった場合と、結果はあるが指摘が届いていない場合は同じ
+    状態である（読むべき指摘が無い）。
+
+    **待ち行列へ積んだ投稿は、積んだ時点では届いていない。** ここで照会すると
+    結果なしになり、起動し直しで同じ内容が二重に積まれる。届いたことは流した直後に
+    1 度だけ確かめる（`_confirm_flushed`）。
+    """
+    queued = bool(result.get("queued"))
+    if queued:
+        info(
+            f"⚠ {agent}: 投稿を待ち行列へ積んでいます。"
+            "届いたことの確認は流した直後に行います"
+        )
+    post_error = None if queued else result.get("post_error")
+    if post_error:
+        _die_no_result(
+            pr,
+            agent,
+            "not_posted",
+            f"{agent}: レビューの投稿に失敗しています (post_error={post_error})。"
+            " 指摘が Pull Request に届いていないため、結果なしとして扱います",
+        )
+    exists = None if queued else _review_exists(repo, pr, result.get("review_url"))
+    if exists is False:
+        _die_no_result(
+            pr,
+            agent,
+            "not_posted",
+            f"{agent}: 投稿されたレビューを確認できません "
+            f"(review_url={result.get('review_url')!r})。"
+            " 指摘が Pull Request に届いていないため、結果なしとして扱います",
+        )
+    if exists is None and not queued:
+        info(
+            f"⚠ {agent}: レビューの投稿を確認できませんでした。"
+            "申告をそのまま採用します"
+        )
+    return queued
+
+
+def cmd_read_result(args: argparse.Namespace) -> None:
+    """Step 2.4 — codex/agy の result.json を state にマージ。
+
+    使える結果が残らなかったときは、`NO_RESULT` と理由をラウンドへ残してから止める。
+    終了コードは現行のまま（無い・判定の値を持たないときは 1、JSON として読めない
+    ときは 3）で、進む先を決めるのは次の判定である。
+
+    **ここでは待ち行列を流さない。** 流すと `review-post` の書き戻し先（そのラウンドの
+    担当のエントリ）がまだ無い時点で項目が消える。`_confirm_flushed` は書き戻せず、
+    この後の取り込みが `queued: true` だけを保存するため、待ち行列が空で `queued` の
+    ままの状態ができる。判定はその状態で収束してしまい、投稿の存在も参照も確かめない。
+    **両方の担当を取り込んだ後に流す**（`judge` の入口）。取り込みは判定の直前に
+    しかないため、流す時期が遅れるのは 1 コマンド分である。
+    """
+    agent = args.agent
+    pr = args.pr
+    rfile = pathlib.Path(args.file or _resolve_tmp_dir(pr) / f"{agent}-review-pr{pr}-result.json")
+    r = _read_review_result_file(pr, agent, rfile)
 
     # 別名フィールドへのフォールバック (`intent` / `comment_count` を使う変則 JSON を
     # 書き出す既知のケースに対応する。仕様としては `event` / `comments_count` が正)
@@ -2251,44 +2331,7 @@ def cmd_read_result(args: argparse.Namespace) -> None:
 
     repo = str(st.get("repo") or "")
 
-    # **投稿が届いたかを先に確かめる。** 判定だけが残り、指摘の中身が Pull Request に
-    # 無いまま修正の工程へ進む経路を塞ぐ（#261）。届いていないときは結果なしとして
-    # 記録し、判定の側の「同じラウンドで 1 度だけ起動し直す」経路へ乗せる。修正の担当
-    # から見ると、結果が残らなかった場合と、結果はあるが指摘が届いていない場合は同じ
-    # 状態である（読むべき指摘が無い）。
-    # **待ち行列へ積んだ投稿は、積んだ時点では届いていない。** ここで照会すると
-    # 結果なしになり、起動し直しで同じ内容が二重に積まれる。届いたことは流した直後に
-    # 1 度だけ確かめる（`_confirm_flushed`）。
-    queued = bool(r.get("queued"))
-    if queued:
-        info(
-            f"⚠ {agent}: 投稿を待ち行列へ積んでいます。"
-            "届いたことの確認は流した直後に行います"
-        )
-    post_error = None if queued else r.get("post_error")
-    if post_error:
-        _die_no_result(
-            pr,
-            agent,
-            "not_posted",
-            f"{agent}: レビューの投稿に失敗しています (post_error={post_error})。"
-            " 指摘が Pull Request に届いていないため、結果なしとして扱います",
-        )
-    exists = None if queued else _review_exists(repo, pr, r.get("review_url"))
-    if exists is False:
-        _die_no_result(
-            pr,
-            agent,
-            "not_posted",
-            f"{agent}: 投稿されたレビューを確認できません "
-            f"(review_url={r.get('review_url')!r})。"
-            " 指摘が Pull Request に届いていないため、結果なしとして扱います",
-        )
-    if exists is None and not queued:
-        info(
-            f"⚠ {agent}: レビューの投稿を確認できませんでした。"
-            "申告をそのまま採用します"
-        )
+    queued = _verify_review_arrival(pr, agent, repo, r)
 
     # **申告を GitHub 側と突き合わせる。** 投稿は AI 自身が行うので、失敗しても
     # 結果ファイルには件数が残る。申告のまま進むと、修正担当が読むべき指摘が
@@ -2359,6 +2402,74 @@ def _round_ci(st: dict[str, Any], last: dict[str, Any], pr: int) -> dict[str, An
     return {"verdict": "success", "sha": sha}
 
 
+def _handle_no_result_round(
+    pr: int, st: dict[str, Any], last: dict[str, Any], no_result: list[str]
+) -> None:
+    last["verdict"] = "no_result"
+    relaunched = last.get("relaunched") or []
+    pending = [a for a in no_result if a not in relaunched]
+    if not pending:
+        # 2 度続けて結果が残らないのは、対象や負荷ではなく実行環境の側の事象である。
+        st["final"] = "error"
+        st["ended_at"] = _now()
+        _save(pr, st)
+        die(
+            f"起動し直した後も結果が残りませんでした: {' '.join(no_result)}。"
+            " 実行環境の側の問題として中断します。最終スイープを通してから"
+            "完了報告へ進んでください",
+            code=1,
+        )
+    last["relaunched"] = relaunched + pending
+    _save(pr, st)
+    print(f"RELAUNCH_AGENTS='{' '.join(pending)}'")
+    print(f"RELAUNCH_AGENTS_CSV={','.join(pending)}")
+    # 互換のために残す。**`both` は codex / agy の 2 者だけを指す語**であるため、
+    # 担当がそれ以外を含むラウンドでは CSV の側を使う。
+    print(f"RELAUNCH_TARGET={'both' if len(pending) == 2 else pending[0]}")
+    info(
+        f"→ 結果を残さなかったレビュアーがいる: {' '.join(pending)}。"
+        "同じラウンドで 1 度だけ起動し直す。"
+    )
+    sys.exit(7)
+
+
+def _finalize_converged_round(
+    pr: int,
+    st: dict[str, Any],
+    last: dict[str, Any],
+    findings_measurable: bool,
+) -> None:
+    ci = _round_ci(st, last, pr)
+    last["ci"] = ci
+    print(f"CI_VERDICT={ci['verdict']}")
+    if ci["verdict"] == "code_failure":
+        last["verdict"] = "changes_requested"
+        _save(pr, st)
+        info(
+            f"→ 両方 APPROVE だが継続的統合が失敗している: {' '.join(ci['failed'])}。"
+            "修正へ。"
+        )
+        sys.exit(2)
+    last["verdict"] = "approved"
+    st["final"] = "approved"
+    st["ended_at"] = _now()
+    _save(pr, st)
+    if ci["verdict"] == "meta_only":
+        info(f"⚠ {ci['note']}")
+    elif ci["verdict"] == "pending":
+        info(
+            f"⚠ 未完了の検査ジョブが残ったまま収束する: {' '.join(ci['pending'])}。"
+            "完了は待たない"
+        )
+    elif ci["verdict"] == "unverified":
+        info(f"⚠ 継続的統合を確かめられないまま収束する: {ci['reason']}")
+    info(
+        "✅ 新しい指摘が出なくなった。収束。" if findings_measurable
+        else "✅ 全員が承認した。収束。"
+    )
+    sys.exit(0)
+
+
 def cmd_judge(args: argparse.Namespace) -> None:
     """Step 3 — intent ベース pass 判定。
 
@@ -2398,32 +2509,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
 
     no_result = _no_result_agents(last, only, reviewers)
     if no_result:
-        last["verdict"] = "no_result"
-        relaunched = last.get("relaunched") or []
-        pending = [a for a in no_result if a not in relaunched]
-        if not pending:
-            # 2 度続けて結果が残らないのは、対象や負荷ではなく実行環境の側の事象である。
-            st["final"] = "error"
-            st["ended_at"] = _now()
-            _save(pr, st)
-            die(
-                f"起動し直した後も結果が残りませんでした: {' '.join(no_result)}。"
-                " 実行環境の側の問題として中断します。最終スイープを通してから"
-                "完了報告へ進んでください",
-                code=1,
-            )
-        last["relaunched"] = relaunched + pending
-        _save(pr, st)
-        print(f"RELAUNCH_AGENTS='{' '.join(pending)}'")
-        print(f"RELAUNCH_AGENTS_CSV={','.join(pending)}")
-        # 互換のために残す。**`both` は codex / agy の 2 者だけを指す語**であるため、
-        # 担当がそれ以外を含むラウンドでは CSV の側を使う。
-        print(f"RELAUNCH_TARGET={'both' if len(pending) == 2 else pending[0]}")
-        info(
-            f"→ 結果を残さなかったレビュアーがいる: {' '.join(pending)}。"
-            "同じラウンドで 1 度だけ起動し直す。"
-        )
-        sys.exit(7)
+        _handle_no_result_round(pr, st, last, no_result)
 
     # **新規の指摘が 0 件なら収束する。** 全員 `APPROVE` は最も止まらない参加者に
     # 律速される。同じ論点の再提出では止まり、新しい観点が出るあいだは回る。
@@ -2443,35 +2529,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
         sys.exit(8)
 
     if converged:
-        ci = _round_ci(st, last, pr)
-        last["ci"] = ci
-        print(f"CI_VERDICT={ci['verdict']}")
-        if ci["verdict"] == "code_failure":
-            last["verdict"] = "changes_requested"
-            _save(pr, st)
-            info(
-                f"→ 両方 APPROVE だが継続的統合が失敗している: {' '.join(ci['failed'])}。"
-                "修正へ。"
-            )
-            sys.exit(2)
-        last["verdict"] = "approved"
-        st["final"] = "approved"
-        st["ended_at"] = _now()
-        _save(pr, st)
-        if ci["verdict"] == "meta_only":
-            info(f"⚠ {ci['note']}")
-        elif ci["verdict"] == "pending":
-            info(
-                f"⚠ 未完了の検査ジョブが残ったまま収束する: {' '.join(ci['pending'])}。"
-                "完了は待たない"
-            )
-        elif ci["verdict"] == "unverified":
-            info(f"⚠ 継続的統合を確かめられないまま収束する: {ci['reason']}")
-        info(
-            "✅ 新しい指摘が出なくなった。収束。" if findings_measurable
-            else "✅ 全員が承認した。収束。"
-        )
-        sys.exit(0)
+        _finalize_converged_round(pr, st, last, findings_measurable)
 
     last["verdict"] = "changes_requested"
     _save(pr, st)
@@ -2798,11 +2856,25 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     else:
         _deferred_count = _count(_deferred_raw)
 
+    # 却下も同じ正規化を通す。**件数だけが返る劣化表現（int）では per-item を作れない**
+    # ため、そのときは記録を空にし、件数は `_count()` の値で残す。
+    _rejected_raw = fix.get("rejected")
+    if isinstance(_rejected_raw, list):
+        _rejected_items = [r for r in _rejected_raw if isinstance(r, dict)]
+    elif isinstance(_rejected_raw, dict):
+        _rejected_items = [_rejected_raw]
+    else:
+        _rejected_items = []
+
     st["rounds"][-1]["fix"] = {
         "commit": fix_commit,
         "fixed": fixed_count,
         # deferred は上記の単一整合ルールで算出した件数を保存する。
-        # resolved_threads / rejected は件数しか保存せず後段ループが無いため _count() で可。
+        # resolved_threads は件数しか保存せず後段ループが無いため _count() で可。
+        # **rejected は per-item の記録を持つが、件数は raw のまま数える**（#156）。
+        # dict にできない要素も却下 1 件であり、記録に残せないことと、却下が
+        # 何件あったかを失うことは別である。そのため deferred と違い、この件数と
+        # `rejected_findings` の件数は一致しないことがある。
         "deferred": _deferred_count,
         "rejected": _count(fix.get("rejected")),
         "resolved_threads": _count(fix.get("resolved_threads")),
@@ -2822,6 +2894,13 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         info(f"↻ 引き継いだ指摘を round {round_no} の修正の工程へ通しました")
     for d in _deferred_nits:
         st["deferred_nits"].append({**d, "pr": pr, "round": round_no})
+
+    # **却下した指摘も per-item で残す**（#156）。`rounds[].fix.rejected` の件数は
+    # ラウンドごとの報告が読むため残し、こちらは理由と位置を持つ記録として積む。
+    # **項目が欠けた要素も落とさない。** 落とすと却下そのものが記録から消える。
+    rejected_findings = st.setdefault("rejected_findings", [])
+    for r in _rejected_items:
+        rejected_findings.append({**r, "pr": pr, "round": round_no})
     _save(pr, st)
 
     # CI 分類
@@ -3053,8 +3132,24 @@ def cmd_report(args: argparse.Namespace) -> None:
             print(f"- [{n.get('severity')}] {n.get('path')}:{n.get('line')} — {n.get('summary')}")
         print()
         print("これらの nit を一括対応する場合は再度 `/ndf:fix <PR#>` を起動してください。")
+        print()
     else:
+        # **「なし」は nit の側の見出しである。** 却下した指摘の有無で出し分けると、
+        # 一覧を出した直後に「なし」も出る（#535 のレビュー）。
         print("## 残 deferred nit: なし")
+        print()
+
+    # **却下した指摘も一覧で出す**（#156）。次のラウンドで同じ論点が再提出されたとき、
+    # 既に却下したものかどうかをここで照合できる。
+    rejected = st.get("rejected_findings") or []
+    if rejected:
+        print(f"## 却下した指摘 ({len(rejected)} 件)")
+        for r in rejected:
+            print(
+                f"- [round {r.get('round')}] [{r.get('severity')}] "
+                f"{r.get('path')}:{r.get('line')} — {r.get('summary')}"
+            )
+            print(f"  却下の理由: {r.get('reason_for_rejection')}")
 
 
 # ---------------- main ----------------
