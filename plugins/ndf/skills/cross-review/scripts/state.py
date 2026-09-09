@@ -2669,6 +2669,78 @@ def _normalized_body(body: object) -> str:
     return _OSCILLATION_DROP.sub("", body.lower())[:OSCILLATION_BODY_CHARS]
 
 
+# 重要度の高さ。区分の判定と、統合した組の代表が引き継ぐ値に使う。
+_SEVERITY_RANK = {"critical": 3, "major": 2, "minor": 1, "nit": 0}
+
+
+def _merge_duplicates(st: dict[str, Any], round_no: int) -> None:
+    """同じラウンドの同じ指摘を 1 件へ束ねる（#156）。
+
+    **結び方は振動の検知と同じにしない。** 振動は位置・近傍・本文の**いずれか**で結ぶが、
+    統合は近傍**かつ**本文の一致を求める。**過剰な統合は指摘を失うが、統合し損ねても
+    失われるものは無い**（両方が区分に載り、`origin_runtimes` が 1 者ずつになるだけ）。
+    誤りの代償が非対称であるため、厳しい側へ倒す。
+
+    **束ねられた側は消さない。** `merged_into` を書いて残す。消すと、反証の結果が
+    その `finding_id` を指したときに結び先を失う。
+    """
+    findings = st.setdefault("review_findings", [])
+    targets = [f for f in findings if f.get("round") == round_no]
+    for f in targets:
+        f.setdefault("origin_runtimes", [f.get("agent")])
+
+    for i, rep in enumerate(targets):
+        if rep.get("merged_into"):
+            continue
+        for other in targets[i + 1:]:
+            if other.get("merged_into") or other.get("agent") == rep.get("agent"):
+                continue
+            if not _is_near(rep, other):
+                continue
+            if _normalized_body(rep.get("body")) == _normalized_body(other.get("body")):
+                _absorb(rep, other)
+            else:
+                # **位置の一致は候補の抽出までである。** 本文が違う組は残し、
+                # 反証で相互に `duplicate` が付いたときに 2 段目で統合する。
+                rep.setdefault("duplicate_candidates", []).append(other["finding_id"])
+                other.setdefault("duplicate_candidates", []).append(rep["finding_id"])
+
+
+def _is_near(a: dict[str, Any], b: dict[str, Any]) -> bool:
+    """同じファイルで、行差が `OSCILLATION_NEAR_LINES` 以内か。"""
+    if str(a.get("path") or "") != str(b.get("path") or ""):
+        return False
+    try:
+        return abs(int(a.get("line")) - int(b.get("line"))) <= OSCILLATION_NEAR_LINES
+    except (TypeError, ValueError):
+        return False
+
+
+def _absorb(rep: dict[str, Any], other: dict[str, Any]) -> None:
+    """`other` を `rep` へ束ねる。**集約は代表の値ではなく組から採る。**"""
+    other["merged_into"] = rep["finding_id"]
+    rep.setdefault("merged_from", []).append(other["finding_id"])
+    for agent in other.get("origin_runtimes") or [other.get("agent")]:
+        if agent and agent not in rep["origin_runtimes"]:
+            rep["origin_runtimes"].append(agent)
+
+    # 重要度は組の中で最も高いものを引き継ぐ。低い側を採ると、区分が下がる。
+    if _SEVERITY_RANK.get(str(other.get("severity")), -1) > \
+       _SEVERITY_RANK.get(str(rep.get("severity")), -1):
+        rep["severity"] = other["severity"]
+
+    # **根拠の対は同じ要素から採る。** `evidence` だけの要素と `falsification` だけの
+    # 要素を継ぎ合わせると、どちらも根拠として成り立たないのに、誰も書いていない組を
+    # 根拠として作り出す。
+    if not rep.get("has_evidence") and other.get("has_evidence"):
+        rep["evidence"] = other.get("evidence", "")
+        rep["falsification"] = other.get("falsification", "")
+        rep["has_evidence"] = True
+        rep["evidence_from"] = other["finding_id"]
+    elif rep.get("has_evidence"):
+        rep.setdefault("evidence_from", rep["finding_id"])
+
+
 def _finding_keys(
     st: dict[str, Any], pr: int, round_no: int
 ) -> list[tuple[str, int, str]]:
