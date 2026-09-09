@@ -437,6 +437,13 @@ def _record_apply_result(
     return entry["apply"]
 
 
+def _block_group_items(ctx: _ApplyExecutionContext) -> None:
+    for item_id in ctx.group["items"]:
+        find_item(ctx.state, item_id)["status"] = "blocked"
+    if not ctx.args.dry_run:
+        statefile.save(ctx.path, ctx.state)
+
+
 def _load_apply_context(
     ctx: _ApplyExecutionContext,
 ) -> tuple[dict[str, Any], _ApplyCommitRange]:
@@ -451,10 +458,7 @@ def _load_apply_context(
     # 通すと、「壊したのか元から壊れていたのか」を判別する手段が無いまま進む。
     baseline = ctx.state.get("baseline_test") or {}
     if baseline.get("status") != "green":
-        for item_id in ctx.group["items"]:
-            find_item(ctx.state, item_id)["status"] = "blocked"
-        if not ctx.args.dry_run:
-            statefile.save(ctx.path, ctx.state)
+        _block_group_items(ctx)
         die(
             f"着手前のテストが成功と確認できていません（status={baseline.get('status')}）。"
             "適用へ着手しません（全項目を blocked）",
@@ -470,10 +474,7 @@ def _load_apply_context(
     in_range = set(ordered_range or [])
     if ordered_range is None:
         # 範囲を確定できないなら、何も検証できない。素通しにせず失敗させる。
-        for item_id in ctx.group["items"]:
-            find_item(ctx.state, item_id)["status"] = "blocked"
-        if not ctx.args.dry_run:
-            statefile.save(ctx.path, ctx.state)
+        _block_group_items(ctx)
         die(
             "適用の範囲を確定できませんでした"
             f"（起点 {ctx.entry.get('apply_base_sha')} / HEAD {head_sha}）。"

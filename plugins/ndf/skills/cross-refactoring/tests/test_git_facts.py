@@ -320,3 +320,39 @@ def test_find_item_returns_none_for_a_missing_id_when_not_required(gitfacts):
     state = {"items": [{"item_id": "R1-001"}, {"item_id": "R1-002"}]}
 
     assert gitfacts.find_item(state, "R9-999", required=False) is None
+
+
+def test_revert_item_commits_failure_message_includes_item_id(gitfacts, work, capsys):
+    """現状固定: revert_item_commits 失敗時は項目 ID 接頭辞付きのエラー文を出して中断する。"""
+    first = _commit(work, "one", {"src/a.py": "a = 1\n"})
+    second = _commit(work, "two", {"src/a.py": "a = 2\n"})
+
+    state = {"worktrees": {"work": str(work)}}
+    item = {"item_id": "R1-001", "commits": [first]}
+
+    with pytest.raises(SystemExit) as e:
+        gitfacts.revert_item_commits(state, item)
+
+    assert e.value.code == 4
+    err = capsys.readouterr().err
+    assert "❌ R1-001 のコミット" in err
+    assert "を取り消せませんでした" in err
+    assert f"（HEAD を {second} へ戻しました）" in err
+    assert _git("rev-parse", "HEAD", cwd=work).stdout.strip() == second
+
+
+def test_revert_range_failure_message_has_no_item_id_prefix(gitfacts, work, capsys):
+    """現状固定: _revert_range 失敗時は項目 ID 接頭辞のないエラー文を出して中断する。"""
+    first = _commit(work, "one", {"src/a.py": "a = 1\n"})
+    second = _commit(work, "two", {"src/a.py": "a = 2\n"})
+
+    with pytest.raises(SystemExit) as e:
+        gitfacts._revert_range(str(work), [first], second)
+
+    assert e.value.code == 4
+    err = capsys.readouterr().err
+    assert "❌ コミット" in err
+    assert "を取り消せませんでした" in err
+    assert f"（HEAD を {second} へ戻しました）" in err
+    assert _git("rev-parse", "HEAD", cwd=work).stdout.strip() == second
+

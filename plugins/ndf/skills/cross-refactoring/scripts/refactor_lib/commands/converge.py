@@ -22,7 +22,6 @@ from ..gitfacts import (
     drop_items,
     find_item,
     flush_pending_push,
-    push_head,
     push_with_retry_marker,
     read_result,
     reported_shas,
@@ -230,10 +229,7 @@ def cmd_abandon_items(args: argparse.Namespace) -> None:
         state["worktrees"]["work"], ["rev-parse", "HEAD"])
     group["base_sha"] = entry["apply_base_sha"]
     state["phase"] = phase_after_group(entry)
-    statefile.save(path, state)
-    push_head(state)
-    entry["pending_push"] = False
-    statefile.save(path, state)
+    push_with_retry_marker(path, state, entry)
 
 
 def _fix_merge_key(entry: dict[str, Any], result: pathlib.Path) -> str:

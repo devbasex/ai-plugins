@@ -445,22 +445,7 @@ def revert_item_commits(
     # 途中で失敗したら**着手前の HEAD まで戻す**。1 項目が複数のコミットを持つとき、
     # 先行して成功した取り消しだけが履歴に残ると、再実行で不整合になって進めなくなる。
     before = git_out(work, ["rev-parse", "HEAD"])
-    for sha in shas:
-        r = subprocess.run(
-            ["git", "revert", "--no-edit", sha],
-            cwd=work, capture_output=True, text=True,
-        )
-        if r.returncode != 0:
-            subprocess.run(["git", "revert", "--abort"], cwd=work,
-                           capture_output=True, text=True)
-            if before:
-                subprocess.run(["git", "reset", "--hard", before], cwd=work,
-                               capture_output=True, text=True)
-            die(
-                f"{item['item_id']} のコミット {sha} を取り消せませんでした: "
-                f"{r.stderr.strip()[:400]}"
-                f"（HEAD を {before} へ戻しました）"
-            )
+    _revert_range(work, shas, before, prefix=f"{item['item_id']} の")
     item["reverted"] = True
     return len(shas)
 
@@ -506,7 +491,9 @@ def _reset_hard(work: str, sha: Optional[str]) -> None:
                        capture_output=True, text=True)
 
 
-def _revert_range(work: str, ordered: list[str], before: Optional[str]) -> None:
+def _revert_range(
+    work: str, ordered: list[str], before: Optional[str], prefix: str = ""
+) -> None:
     """範囲を**新しい順に**全て取り消す。失敗したら着手前へ戻して中断する。
 
     範囲全体を新しい順にたどる取り消しは、履歴をそのまま逆再生するだけなので
@@ -522,7 +509,7 @@ def _revert_range(work: str, ordered: list[str], before: Optional[str]) -> None:
                            capture_output=True, text=True)
             _reset_hard(work, before)
             die(
-                f"コミット {sha} を取り消せませんでした: {r.stderr.strip()[:400]}"
+                f"{prefix}コミット {sha} を取り消せませんでした: {r.stderr.strip()[:400]}"
                 f"（HEAD を {before} へ戻しました）"
             )
 
