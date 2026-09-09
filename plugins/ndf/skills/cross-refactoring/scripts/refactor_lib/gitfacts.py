@@ -155,15 +155,7 @@ def _is_test_path(path: str) -> bool:
 
 def commit_touches_tests(work: str, sha: str) -> bool:
     """コミットがテストの置き場所を触っているか。"""
-    out = git_out(work, ["show", "--name-only", "--format=", sha])
-    for path in (out or "").splitlines():
-        lowered = f"/{path.lower()}"
-        name = lowered.rsplit("/", 1)[-1]
-        if any(m in lowered for m in TEST_PATH_MARKERS):
-            return True
-        if any(m in name for m in TEST_NAME_MARKERS):
-            return True
-    return False
+    return any(_is_test_path(p) for p in commit_files(work, sha))
 
 
 def run_with_timeout(

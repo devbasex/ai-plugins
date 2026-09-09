@@ -78,12 +78,8 @@ def _dedupe_key(item: dict[str, Any]) -> tuple[str, ...]:
     return item_key(item)
 
 
-def _merge_one(existing: dict[str, Any], incoming: dict[str, Any]) -> None:
-    """同一の鍵を持つ提案を統合する。
-
-    `rationale` と `plan` は**最も具体的なもの**（長い方）を採る。重要度は高い方、
-    推定差分行数は大きい方を採り、見積りを楽観側へ倒さない。
-    """
+def _merge_common_attributes(existing: dict[str, Any], incoming: dict[str, Any]) -> None:
+    """共通の提案属性（proposed_by, rationale, plan）をマージする。"""
     for source in incoming["proposed_by"]:
         if source not in existing["proposed_by"]:
             existing["proposed_by"].append(source)
@@ -91,6 +87,15 @@ def _merge_one(existing: dict[str, Any], incoming: dict[str, Any]) -> None:
         existing["rationale"] = incoming["rationale"]
     if len(incoming["plan"]) > len(existing["plan"]):
         existing["plan"] = incoming["plan"]
+
+
+def _merge_one(existing: dict[str, Any], incoming: dict[str, Any]) -> None:
+    """同一の鍵を持つ提案を統合する。
+
+    `rationale` と `plan` は**最も具体的なもの**（長い方）を採る。重要度は高い方、
+    推定差分行数は大きい方を採り、見積りを楽観側へ倒さない。
+    """
+    _merge_common_attributes(existing, incoming)
     if SEVERITY_ORDER[incoming["severity"]] > SEVERITY_ORDER[existing["severity"]]:
         existing["severity"] = incoming["severity"]
         existing["technique"] = incoming["technique"]
@@ -241,13 +246,7 @@ def _merge_test_one(existing: dict[str, Any], incoming: dict[str, Any]) -> None:
     採る**（「上の階層へ持ち上げない」）。語彙外の階層は最後に置くため、片方が
     語彙の値を持っていればそちらへ寄る。
     """
-    for source in incoming["proposed_by"]:
-        if source not in existing["proposed_by"]:
-            existing["proposed_by"].append(source)
-    if len(incoming["rationale"]) > len(existing["rationale"]):
-        existing["rationale"] = incoming["rationale"]
-    if len(incoming["plan"]) > len(existing["plan"]):
-        existing["plan"] = incoming["plan"]
+    _merge_common_attributes(existing, incoming)
     if _level_rank(incoming["level"]) < _level_rank(existing["level"]):
         existing["level"] = incoming["level"]
 

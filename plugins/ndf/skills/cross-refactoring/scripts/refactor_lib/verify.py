@@ -370,6 +370,14 @@ def undecidable_test_changes(
     )
 
 
+def _changed_test_message(changed: list[str]) -> str:
+    return (
+        "テストの期待する振る舞いが変わっています"
+        f"（{', '.join(changed)}）。"
+        "構造改善では期待出力を変えません。振る舞いの変更は別の変更に分けてください"
+    )
+
+
 def verify_test_changes(
     changes: dict[str, tuple[list[str], list[str]]],
 ) -> Optional[str]:
@@ -384,11 +392,7 @@ def verify_test_changes(
     )
     if not changed:
         return None
-    return (
-        "テストの期待する振る舞いが変わっています"
-        f"（{', '.join(changed)}）。"
-        "構造改善では期待出力を変えません。振る舞いの変更は別の変更に分けてください"
-    )
+    return _changed_test_message(changed)
 
 
 def pending_test_judgements(facts: Iterable[dict[str, Any]]) -> list[str]:
@@ -422,11 +426,7 @@ def merge_test_judgements(
     changed = sorted(p for p in pending if answers.get(p) == "changed")
     if changed:
         return {
-            "problem": (
-                "テストの期待する振る舞いが変わっています"
-                f"（{', '.join(changed)}）。"
-                "構造改善では期待出力を変えません。振る舞いの変更は別の変更に分けてください"
-            ),
+            "problem": _changed_test_message(changed),
             "pending": [],
         }
     return {
