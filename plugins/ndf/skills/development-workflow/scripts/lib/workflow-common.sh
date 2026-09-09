@@ -109,16 +109,14 @@ _wf_mode_column() {
 
 # ある工程がそのモードで必須か（R / C / -）を返す。
 wf_stage_class() {
-  local mode="${1:-}" stage="${2:-}" column line name
+  local mode="${1:-}" stage="${2:-}" column line
+  local -a cells
   column=$(_wf_mode_column "$mode") || return 1
   while IFS= read -r line; do
-    IFS=$'\t' read -r name c1 c2 c3 c4 c5 <<<"$line"
-    [ "$name" = "$stage" ] || continue
-    case "$column" in
-      1) printf '%s\n' "$c1" ;; 2) printf '%s\n' "$c2" ;;
-      3) printf '%s\n' "$c3" ;; 4) printf '%s\n' "$c4" ;;
-      5) printf '%s\n' "$c5" ;;
-    esac
+    IFS=$'\t' read -r -a cells <<<"$line"
+    # column は 1 始まり。cells は 0 始まりで cells[0] が工程名、cells[column] が該当セル。
+    [ "${cells[0]}" = "$stage" ] || continue
+    printf '%s\n' "${cells[column]}"
     return 0
   done <<<"$WF_STAGE_MATRIX"
   return 1

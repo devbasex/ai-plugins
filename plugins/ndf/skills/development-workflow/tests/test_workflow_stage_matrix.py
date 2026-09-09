@@ -18,6 +18,7 @@ import re
 
 import pytest
 
+from table_parser import parse_table
 from workflow_helpers import LIB, SKILL_DIR
 
 SKILL = SKILL_DIR / "SKILL.md"
@@ -26,28 +27,7 @@ CLASS_OF = {"必須": "R", "条件付き": "C", "対象外": "-"}
 
 
 def _table(heading: str) -> tuple[list[str], list[list[str]]]:
-    lines = SKILL.read_text(encoding="utf-8").splitlines()
-    try:
-        start = next(i for i, line in enumerate(lines) if line.strip() == heading)
-    except StopIteration:
-        raise AssertionError(f"見出しが見つからない: {heading}")
-    header: list[str] = []
-    rows: list[list[str]] = []
-    for line in lines[start + 1 :]:
-        stripped = line.strip()
-        if stripped.startswith("## "):
-            break
-        if not stripped.startswith("|"):
-            if rows:
-                break
-            continue
-        cells = [c.strip() for c in stripped.strip("|").split("|")]
-        if not header:
-            header = cells
-            continue
-        if set("".join(cells)) <= set("-: "):
-            continue
-        rows.append(cells)
+    header, rows = parse_table(SKILL.read_text(encoding="utf-8"), heading)
     assert header and rows, f"表を読み取れない: {heading}"
     return header, rows
 
