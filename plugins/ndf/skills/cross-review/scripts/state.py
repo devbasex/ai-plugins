@@ -74,6 +74,11 @@ CI_CONFIG_MARKERS = (
     "/.github/workflows/", "/.gitlab-ci", "/.circleci/", "/.buildkite/",
     "/.kiro/", "/.claude/", "/.codex/",
 )
+CONFIG_CI_FILENAMES = {"dockerfile", "makefile", ".editorconfig"}
+# 環境別の接尾辞を持つファイルも、名前の先頭で判定する。
+ENV_FILENAME_PREFIX = ".env"
+# ルート直下の GitHub 設定を対象にするため、部分一致のマーカーとは分ける。
+GITHUB_CONFIG_PATH_PREFIX = ".github/"
 CONFIG_EXTENSIONS = {
     ".json", ".toml", ".yaml", ".yml", ".ini", ".env", ".example",
 }
@@ -1041,9 +1046,9 @@ def _is_config_ci_path(path: str) -> bool:
     lower, normalized, name, ext = _path_info(path)
     return (
         _contains_any(normalized, CI_CONFIG_MARKERS)
-        or name.startswith(".env")
-        or name in {"dockerfile", "makefile", ".editorconfig"}
-        or lower.startswith(".github/")
+        or name.startswith(ENV_FILENAME_PREFIX)
+        or name in CONFIG_CI_FILENAMES
+        or lower.startswith(GITHUB_CONFIG_PATH_PREFIX)
         or (ext in CONFIG_EXTENSIONS and ("/config/" in normalized or "/configs/" in normalized))
     )
 
