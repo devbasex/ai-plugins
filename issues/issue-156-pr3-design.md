@@ -9,7 +9,7 @@
 | 集約の判定の形 | 区分の決め方と、収束の判定への入れ方 |
 | 重複の統合と `origin_runtimes` | 何を同一と見なすか、統合の後に何を残すか |
 | 実行検証の対象 | 何を実行してよいか、どう受け取るか |
-| 振動の検知への影響 | 母集合が広がった後の測り方 |
+| 振動の検知への影響 | **この変更では変えない。**閾値は母集合が広がった後の実測で決める |
 
 ## 機能一覧
 
@@ -255,6 +255,7 @@ sequenceDiagram
 | 指摘の書き誤りを再現としない | 同上。終了コード 4（対象が無い）と 5（収集 0 件）が `not_run` になること |
 | 再現の向き（失敗＝再現） | 同上。終了コード 1 が `reproduced`、0 が `not_reproduced` |
 | 相互の `duplicate` を当ラウンドで統合する | `tests/test_classify_findings.py`。本文の違う `major` 2 件が 1 件の `needs_human_judgment` になり、収束しないこと |
+| 2 段目の統合で実行し直さない | 同上。1 段目の後に `verification` を記録した組が相互の `duplicate` で統合されたとき、代表の `verification.result` が記録済みの値から選ばれ、実行が追加で走らないこと |
 | `duplicate` / `out_of_scope` が区分を決めない | `tests/test_classify_findings.py`。両者だけを持つ指摘の区分が、値を持たない指摘と変わらないこと |
 | 5 つの区分へ分かれる | `tests/test_classify_findings.py`（新設）。区分ごとに 1 件以上 |
 | 実行で再現した指摘は支持が少なくても残る | 同上 |
