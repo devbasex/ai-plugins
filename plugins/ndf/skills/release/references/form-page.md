@@ -35,11 +35,24 @@
 
 ## 検証への配布
 
-**必ず [documentation モードの配布手順 — 検証への配布](documentation-distribution.md#検証への配布) を読み、その手順に従う。**
+**対になる下書き先へ生成する。** 本番の提出先へは、承認した生成物だけが届く。
+下書き先は `.ndf/document.json` の `draft` が指す（`development-workflow` の
+`references/document-destinations.md`）。
 
 ## 本番への配布
 
-**必ず [documentation モードの配布手順 — 本番への配布](documentation-distribution.md#本番への配布) を読み、その手順に従う。**
+**承認を得てから、下書き先の生成物を本番の提出先へ移す。** 作り直さない。
+**作り直すと、承認したものと届くものが別になる。**
+
+順序は次のとおり。
+
+1. 下書き先で生成する
+2. 生成物を取り込み、正本と内容を照合する（`document-systems` の `import.md`、用途 1）
+3. 描画して版面を見る（`layout-review`）
+4. **制作物承認を得る**
+5. 本番の提出先へ移す
+6. 公開範囲を設定し、**設定した後に読み直して確かめる**
+7. 索引へ登録する（宣言に `index` があるとき）
 
 ## 置き場所と命名
 

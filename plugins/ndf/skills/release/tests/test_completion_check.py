@@ -288,12 +288,28 @@ def test_the_template_is_valid_bash() -> None:
     assert done.returncode == 0, done.stderr
 
 
+def test_the_template_leaves_on_the_word_it_was_given() -> None:
+    with tempfile.TemporaryDirectory() as work:
+        done = watch(work, "publishing\n[done] ok\n")
+    assert done.stdout.split() == ["done"], done.stdout
+
+
+def test_the_template_leaves_on_the_failure_word() -> None:
+    with tempfile.TemporaryDirectory() as work:
+        done = watch(work, "publishing\n[fail] rejected\n")
+    assert done.stdout.split() == ["fail"], done.stdout
+
+
+def test_the_template_leaves_on_the_limit_word() -> None:
+    with tempfile.TemporaryDirectory() as work:
+        done = watch(work, "publishing\n", IDLE="3600", LIMIT="0")
+    assert done.stdout.split() == ["limit"], done.stdout
+    assert not done.stderr, done.stderr
+
+
 @pytest.mark.parametrize(
     "log_body, overrides, reason",
     [
-        ("publishing\n[done] ok\n", {}, "done"),
-        ("publishing\n[fail] rejected\n", {}, "fail"),
-        ("publishing\n", {"IDLE": "3600", "LIMIT": "0"}, "limit"),
         # 完了・失敗の語が無く、時間の条件だけが成立する。IDLE を大きくして limit で抜ける。
         ("publishing\n", {"IDLE": "3600", "LIMIT": "0"}, "limit"),
         # 完了と失敗の語が同時に載り、時間の条件も成立する。done が fail・時間より先に選ばれる。
@@ -303,10 +319,7 @@ def test_the_template_is_valid_bash() -> None:
         # 失敗の語だけが載り、時間の条件も成立する。fail が時間より先に選ばれる。
         ("x\n[fail] no\n", {"IDLE": "0", "LIMIT": "0"}, "fail"),
     ],
-    ids=[
-        "done-word", "failure-word", "limit-word", "limit",
-        "done-over-fail-and-time", "done-regardless-of-log-order", "fail-over-time",
-    ],
+    ids=["limit", "done-over-fail-and-time", "done-regardless-of-log-order", "fail-over-time"],
 )
 def test_the_template_chooses_by_priority_when_conditions_coincide(
     log_body: str, overrides: dict[str, str], reason: str

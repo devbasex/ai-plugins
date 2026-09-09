@@ -6,7 +6,6 @@ import os
 import re
 import subprocess
 from pathlib import Path
-from typing import Callable, NamedTuple
 
 import pytest
 
@@ -15,14 +14,8 @@ PLUGIN_JSON = Path("plugins/ndf/.claude-plugin/plugin.json")
 PAYLOAD = Path("plugins/ndf/payload.txt")
 
 
-class RepositoryContext(NamedTuple):
-    root: Path
-    env: dict[str, str]
-    git: Callable[..., subprocess.CompletedProcess[str]]
-
-
 @pytest.fixture
-def repository(tmp_path: Path) -> RepositoryContext:
+def repository(tmp_path: Path):
     # 設定・署名・フックと、呼び出し元の GIT_DIR 等を持ち込まない。
     env = {
         "PATH": os.environ["PATH"],
@@ -46,44 +39,47 @@ def repository(tmp_path: Path) -> RepositoryContext:
     git("config", "commit.gpgSign", "false")
     git("config", "tag.gpgSign", "false")
     (tmp_path / PLUGIN_JSON).parent.mkdir(parents=True)
-    return RepositoryContext(tmp_path, env, git)
+    return tmp_path, env, git
 
 
 def commit_package(repository, version: str, payload: str) -> None:
-    (repository.root / PLUGIN_JSON).write_text(
+    root, _, git = repository
+    (root / PLUGIN_JSON).write_text(
         json.dumps({"version": version}) + "\n", encoding="utf-8",
     )
-    (repository.root / PAYLOAD).write_text(payload + "\n", encoding="utf-8")
-    repository.git("add", "plugins/ndf")
-    repository.git("commit", "-m", "テスト用の配布内容を記録")
+    (root / PAYLOAD).write_text(payload + "\n", encoding="utf-8")
+    git("add", "plugins/ndf")
+    git("commit", "-m", "テスト用の配布内容を記録")
 
 
 def run_base_example(repository) -> subprocess.CompletedProcess[str]:
+    root, env, _ = repository
     body = FORM.read_text(encoding="utf-8")
     example = re.search(r"^```bash\n(.*?)^```", body, re.MULTILINE | re.DOTALL)
     assert example, "文書の最初の Bash ブロックが見つからない"
     return subprocess.run(
         ["bash", "--noprofile", "--norc", "-euo", "pipefail", "-c", example.group(1)],
-        cwd=repository.root, env=repository.env, text=True, capture_output=True,
+        cwd=root, env=env, text=True, capture_output=True,
     )
 
 
 def test_latest_product_tag_is_used_even_outside_head_ancestry(repository) -> None:
     """現状固定: 版順・製品名で選び、祖先でない公開版と同じ配布内容なら差分なし。"""
+    root, _, git = repository
     commit_package(repository, "1.9.0", "古い配布内容")
-    repository.git("tag", "ndf--v1.9.0")
-    repository.git("tag", "other--v99.0.0")
+    git("tag", "ndf--v1.9.0")
+    git("tag", "other--v99.0.0")
 
-    repository.git("checkout", "-b", "published")
+    git("checkout", "-b", "published")
     commit_package(repository, "1.10.0", "最新の配布内容")
-    repository.git("tag", "ndf--v1.10.0")
+    git("tag", "ndf--v1.10.0")
 
-    repository.git("checkout", "development")
+    git("checkout", "development")
     # 配布物以外の差も置き、比較対象をプラグインへ絞る挙動を通す。
-    (repository.root / "development.txt").write_text("開発側だけの記録\n", encoding="utf-8")
-    repository.git("add", "development.txt")
+    (root / "development.txt").write_text("開発側だけの記録\n", encoding="utf-8")
+    git("add", "development.txt")
     commit_package(repository, "1.10.0", "最新の配布内容")
-    assert repository.git("rev-list", "HEAD..ndf--v1.10.0").stdout.strip()
+    assert git("rev-list", "HEAD..ndf--v1.10.0").stdout.strip()
 
     result = run_base_example(repository)
 
