@@ -175,7 +175,7 @@ mode: standard
 **工程は 1 つの窓で通し切らなくてよい。** 判定したモードと通った工程は会話の外へ残るため、
 文脈を捨てても現在地から続けられる。**長い文脈のまま進めると、記録は残っているのに後の
 工程の判断だけが悪くなる。** 窓の切れ目・委譲してよい対象・残量の見方は
-[references/context-budget.md](references/context-budget.md) にある。
+[references/context-window.md](references/context-window.md) にある。
 
 ## 範囲外の課題を見つけたとき
 
@@ -472,4 +472,4 @@ flowchart TD
 - [references/parallel-work.md](references/parallel-work.md) — 並行開発の 4 つの形、工程が動く単位、任せるうえでの下限
 - [references/approval-request.md](references/approval-request.md) — 承認を求めるときに提示するもの
 - [references/operation-run.md](references/operation-run.md) — `operation` の実行の範囲・記録・失敗したときの扱い
-- [references/context-budget.md](references/context-budget.md) — 窓の切れ目、委譲する対象としない対象、残量の見方
+- [references/context-window.md](references/context-window.md) — 窓の切れ目、委譲する対象としない対象、残量の見方
