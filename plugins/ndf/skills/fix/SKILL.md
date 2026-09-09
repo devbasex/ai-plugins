@@ -60,6 +60,16 @@ PR: <PR番号>
 **修正 → コミット → push → reply → Resolve Conversation** まで実行する。
 メインへの戻り値は最小限のサマリのみ。
 
+**push が credential helper の不全で落ちたときは退避する**（#524）。`gh` が認証済みでも
+`git` だけが `Authentication failed` を返す環境がある。
+
+```bash
+git -c credential.helper= -c credential.helper='!gh auth git-credential' push
+```
+
+**空の値を先に置く。** `credential.helper` は複数の値を持てる設定で、`git` は宣言された
+順に問い合わせる。空の値だけが一覧を空へ戻す。
+
 ## コメントの取得（3 ソース）
 
 インラインコメント / レビュー body / PR レベルコメントを一括取得する。
