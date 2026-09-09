@@ -24,13 +24,14 @@ issue #156 の本文を基準とする。提案は 5 つ（独立発見 / 重複
 **却下の理由は現在も残らない。**
 
 ```console
-$ sed -n '2647p' plugins/ndf/skills/cross-review/scripts/state.py
+$ sed -n '2807p' plugins/ndf/skills/cross-review/scripts/state.py
             "rejected": _count(fix.get("rejected")),
 ```
 
 **却下した指摘の位置も残らない。** `fix` の戻り値の `rejected[]` は `comment_id` /
 `summary` / `reason_for_rejection` の 3 つだけを持ち、同じファイルの `deferred[]` が持つ
-`path` / `line` / `severity` を持たない（`plugins/ndf/skills/fix/SKILL.md:368-378`）。
+`path` / `line` / `severity` を持たない（`plugins/ndf/skills/fix/SKILL.md:383-386`。
+`deferred[]` は同じファイルの 378-382 行にある）。
 
 ## 受け入れ条件
 

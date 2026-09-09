@@ -40,8 +40,9 @@
 | `state.py` の `cmd_merge_fix` | 却下した指摘を per-item で残す（件数の int へ潰さない） |
 | `state.py` の `rejected_findings`（新設） | 却下の記録を、ラウンドをまたいで読める形で持つ |
 | `fix/SKILL.md` の `rejected[]` | 位置・重要度を持つ形へ広げる |
-| レビュープロンプト | 根拠・反証条件・検証手順を求める |
+| `scripts/launch-reviewer.sh` | レビュープロンプトの本体。根拠・反証条件・検証手順を求める節と、却下の記録を渡す節を足す |
 | `state.py` の `cmd_read_result` | 構造化された指摘を状態ファイルへ取り込む |
+| `state.py` の `review_findings`（新設） | 構造化された指摘を、ラウンドをまたいで読める形で持つ |
 
 ```mermaid
 graph TD
@@ -50,19 +51,25 @@ graph TD
         DN[deferred_nits]
     end
     subgraph 発見["指摘の構造化（Pull Request 2）"]
-        PR2[レビュープロンプト]
+        LR[launch-reviewer.sh]
         RR[cmd_read_result]
+        FD[review_findings]
     end
     subgraph 判定["集約（Pull Request 3）"]
         JG[cmd_judge]
     end
-    PR2 -->|根拠と反証条件| RR
-    RR -->|指摘の記録| RJ
+    LR -->|根拠と反証条件を求める| RR
+    RR -->|構造化した指摘| FD
     FX[cmd_merge_fix] -->|却下の理由と位置| RJ
-    RJ -->|次のラウンドの入力| PR2
+    RJ -->|次のラウンドの入力| LR
     RJ --> JG
     DN --> JG
+    FD --> JG
 ```
+
+**`cmd_read_result` の出力先は `rejected_findings` ではない。** 却下は `fix` が決めるもので、
+レビュワーが出した指摘そのものではない。両者を同じ器へ入れると、次のラウンドへ「却下済み」
+として渡る対象に、まだ誰も却下していない指摘が混ざる。
 
 ## パッケージ・モジュール構成
 
@@ -76,9 +83,15 @@ plugins/ndf/skills/cross-review/
 │   ├── 04-contracts.md         # 133 行。指摘の形の契約はここ
 │   ├── 05-pool-and-convergence.md  # 58 行
 │   └── 06-evidence.md          # 新設。根拠・反証・集約の規約
-└── scripts/state.py            # 3176 行
+└── scripts/
+    ├── state.py                # 3176 行
+    └── launch-reviewer.sh      # 202 行。レビュープロンプトを組み立てる実体
 plugins/ndf/skills/fix/SKILL.md # rejected[] の形
 ```
+
+**レビュープロンプトは `launch-reviewer.sh` が持つ。** 87 行目の `cat > "$PROMPT" <<EOF` から
+始まるヒアドキュメントが本体で、結果ファイルの契約（`result.json` と `payload.json`）も
+ここに書かれている。Pull Request 2 の加筆はこのヒアドキュメントへ入る。
 
 **加筆は `docs/04-contracts.md` と新設の `06-evidence.md` へ置く。** `SKILL.md` と
 `docs/01` `docs/02` は分割の基準（501 行）に近く、足すと超える。
@@ -87,7 +100,8 @@ plugins/ndf/skills/fix/SKILL.md # rejected[] の形
 
 ### 却下の記録（Pull Request 1）
 
-`fix` が返す `rejected[]` の各要素は、`deferred[]` と同じ 4 つを持つ。
+`fix` が返す `rejected[]` の各要素へ、`deferred[]` が既に持つ `path` / `line` / `severity` の
+3 つを足す。既存の 3 つと合わせて 6 項目になる。
 
 | 項目 | 変更前 | 変更後 |
 | --- | --- | --- |
@@ -115,13 +129,36 @@ plugins/ndf/skills/fix/SKILL.md # rejected[] の形
 
 ### 指摘の形（Pull Request 2）
 
-レビュワーが返す結果ファイルの指摘は、次の 3 つを足す。
+**足す先は `payload.json` である。** レビュワーが書き出すファイルは 2 つに分かれており、
+指摘を 1 件ずつ持つのは `payload.json` の側だけである（`docs/04-contracts.md:123-130`）。
+
+| ファイル | いまの中身 | この変更 |
+| --- | --- | --- |
+| `<agent>-review-pr<PR>-result.json` | `event` / `posted_as` / `comments_count` / `review_url` / `by_severity` のサマリ | 変えない |
+| `<agent>-review-pr<PR>-round<R>-payload.json` | `{"comments": [{path, line, body, severity}, ...]}` | `comments[]` の各要素へ 3 つ足す |
+
+`comments[]` の各要素へ足すのは次の 3 つである。
 
 | 項目 | 何を書くか | 無いときの扱い |
 | --- | --- | --- |
 | `evidence` | 根拠。対象のコードと到達経路 | 集約で「根拠なし」として扱う |
 | `falsification` | 反証条件。これが成り立てば棄却できる | 同上 |
 | `suggested_check` | 実行できる検証手順 | 実行検証の対象から外す |
+
+**取り込み先は状態ファイルの `review_findings[]`（新設）である。** `deferred_nits` と同じく
+蓄積の配列で、要素は `payload.json` の 1 件に `pr` / `round` / `agent` を添えた形になる。
+
+```json
+{"review_findings": [
+  {"pr": 67, "round": 3, "agent": "agy", "path": "src/foo.py", "line": 42,
+   "severity": "major", "body": "...", "evidence": "...", "falsification": "...",
+   "suggested_check": "pytest tests/test_foo.py -q", "has_evidence": true}
+]}
+```
+
+**`payload.json` を読むのは `cmd_read_result` にする。** いまは振動の検知（`cmd_judge`）だけが
+`payload.json` を開いており（`state.py:2521`）、読んだ内容は状態ファイルへ残らない。
+取り込みを結果の読み取りの側へ寄せれば、判定は状態ファイルだけを見ればよくなる。
 
 **`confidence` は求めない。** 自己申告の数値は担当ごとに尺度が違い、突き合わせられない。
 根拠と反証条件は文章として読めるため、別の担当が確かめられる。
@@ -143,18 +180,26 @@ plugins/ndf/skills/fix/SKILL.md # rejected[] の形
 **図に含めないものが 1 つある。** 効果の測定（Pull Request 4）は、記録を読んで計算する
 だけで、収束の流れに関わらない。
 
-### 却下の記録が次のラウンドへ渡る（Pull Request 1）
+### 却下の記録が残り、次のラウンドへ渡る（Pull Request 1 と 2）
 
 ```mermaid
 sequenceDiagram
     participant F as fix
     participant S as state.py
+    participant L as launch-reviewer.sh
     participant R as 次のラウンドのレビュワー
     F->>S: rejected[]（位置・重要度・理由）
+    Note over F,S: Pull Request 1
     S->>S: rejected_findings へ蓄積
-    S->>R: 既存コメントのスナップショット + 却下の記録
+    S->>L: 却下の記録を読み出す
+    Note over S,R: Pull Request 2
+    L->>R: 既存コメントのスナップショット + 却下の記録
     R->>R: 同じ論点を再提出しない
 ```
+
+**Pull Request 1 が作るのは器と読み出しまでで、プロンプトへ載せるのは Pull Request 2 で
+ある。** 受け入れ条件の「却下の記録がラウンドをまたいで読める（次のラウンドの入力になる）」は
+読み出せることを求めており、レビュワーへ渡す節を書くのはプロンプトを変える側の責務になる。
 
 **却下の記録を渡す先は、既存コメントのスナップショットと同じ経路である。** 新しい経路を
 作らない。
