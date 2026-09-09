@@ -29,7 +29,7 @@
 
 | 要素 | 責務 |
 | --- | --- |
-| `state.py` の `_merge_duplicates`（新設） | 同一の指摘を 1 件へ束ね、`origin_runtimes` を残す |
+| `state.py` の `_merge_duplicates`（新設） | 同一の指摘を 1 件へ束ね、`origin_runtimes` を残す。機械の 1 段目と申告の 2 段目 |
 | `state.py` の `cmd_verify_findings`（新設） | `suggested_check` を実行し、結果を記録する |
 | `scripts/critique.sh`（新設） | 反証のプロンプトを組み立て、提案者以外を起動する |
 | `state.py` の `cmd_collect_critiques`（新設） | 反証の結果を `review_findings[]` へ結ぶ |
@@ -45,6 +45,7 @@ graph TD
     VF -->|reproduced / not_reproduced / not_run| RF
     RF --> CR[cmd_collect_critiques]
     CR -->|support / refute / ...| RF
+    CR -->|duplicate| MD
     RF --> CL[_classify_finding]
     CL -->|5 つの区分| JG[cmd_judge]
     JG -->|verified_blocking / needs_human_judgment があれば| FX[修正の工程]
@@ -107,12 +108,17 @@ graph TD
 `finding_id` を書く。消すと、反証の結果ファイルがその `finding_id` を指してきたときに
 結び先を失う。区分と収束の判定が読むのは代表の 1 件だけである。
 
+**実行検証は束ねた組の全員の `suggested_check` を対象にする。** 代表の値だけを実行すると、
+被統合側が再現していた事実が取り込みの順序で失われる。**1 件でも `reproduced` があれば代表を
+`reproduced` とする**（決定 2 の向き）。無ければ、すべてが `not_reproduced` のときだけ
+`not_reproduced` とし、残りは `not_run` とする。出所は `verification.finding_id` へ残す。
+
 **独立して出したかを区別する。** `origin_runtimes` の長さは「同じ指摘へ到達した担当の
 数」であり、反証の `support` の数とは別に数える。支持は他者の指摘を読んだうえでの賛成で、
 こちらは読まずに同じ結論へ達したことを表す。
 
-**統合は反証より前に行う。** 後にすると、束ねられる 2 件へ別々に反証が付き、どちらの
-値を採るかという判断が増える。
+**1 段目の統合は反証より前に行う。** 後にすると、束ねられる 2 件へ別々に反証が付き、
+どちらの値を採るかという判断が増える。担当の申告による 2 段目は反証の後に置く（後述）。
 
 ### 実行検証（`cmd_verify_findings`）
 
@@ -180,8 +186,8 @@ True
 `review_findings[]` の各要素へ `verification` を足す。
 
 ```json
-{"verification": {"command": "pytest tests/test_foo.py::test_null_input",
-                  "exit_code": 1, "result": "reproduced", "ran_at": "..."}}
+{"verification": {"command": "pytest tests/test_foo.py::test_null_input", "exit_code": 1,
+                  "result": "reproduced", "finding_id": "kiro-r3-2", "ran_at": "..."}}
 ```
 
 | `result` | 決まり方 |
@@ -253,7 +259,7 @@ $ uv run --with pytest pytest -q test_target.py >/dev/null 2>&1; echo $?  # 対�
 | `support` | 根拠を独立に確認できた |
 | `refute` | 反例・仕様・コードから誤りを示せる |
 | `insufficient_evidence` | 可能性はあるが立証できない |
-| `duplicate` | 別の指摘と同一 |
+| `duplicate` | 別の指摘と同一。相手の `finding_id` を `duplicate_of` へ書く |
 | `out_of_scope` | この Pull Request の範囲・目的から外れる |
 
 **結果は担当ごとに 1 ファイルへ書く。** 名前は
@@ -300,9 +306,8 @@ $ uv run --with pytest pytest -q test_target.py >/dev/null 2>&1; echo $?  # 対�
 `reproduced` のときは、より確かな根拠が既にあるため見ない。
 
 **`not_run` は実行の結果を持たないものとして扱う。** `reproduced` でも `not_reproduced`
-でもないため、順 1・順 2 と、順 3 の前半（`not_reproduced`）はいずれも当たらない。区分は
-`refute` の有無と根拠で決まる。**実行できなかったことを、再現しなかったことと同じに
-しない。**
+でもないため、順 1・順 2 と順 3 の前半（`not_reproduced`）はいずれも当たらず、区分は
+`refute` の有無と根拠で決まる。**実行できなかったことを、再現しなかったことと同じにしない。**
 
 **`needs_human_judgment` は `major` 以上に限る。** この区分は収束の判定が数える
 （後述）ため、重要度を問わないと `minor` の指摘へ `support` が 1 件付いただけで
@@ -329,16 +334,18 @@ $ uv run --with pytest pytest -q test_target.py >/dev/null 2>&1; echo $?  # 対�
 | 値 | 何が起きるか |
 | --- | --- |
 | `insufficient_evidence` | 数えない。支持でも反証でもないため、区分は他の担当の値と根拠で決まる |
-| `duplicate` | `_merge_duplicates` の入力にする。**区分は代表の 1 件が持つ** |
+| `duplicate` | **当ラウンドの 2 段目の統合の入力にする**（後述）。区分は代表の 1 件が持つ |
 | `out_of_scope` | 区分を変えない。`out_of_scope` を返した担当の一覧を要素へ残し、**修正の担当が `/ndf:out-of-scope` で起票する材料にする** |
 
 **`refute` の代わりに使わせない。** `duplicate` は「別の指摘と同一」、`out_of_scope` は
 「この Pull Request の範囲から外れる」であり、どちらも**指摘が誤っているという主張では
 ない**。範囲外の指摘は、この Pull Request で直さないだけで、課題としては残る。
 
-**統合は反証より前に済んでいる**（前述）。それでも `duplicate` を受け取れるようにするのは、
-位置も本文も離れているために機械では結べない重複を、担当が見つけることがあるためである。
-その申告は次のラウンドの統合の入力にする。
+**機械では結べない重複は担当が見つける。その申告は次のラウンドへ回さず、当ラウンドの区分の
+前に 2 段目の統合として適用する。** 回すと、同じ `major` の指摘を 2 者が別の本文で出した組が
+どちらも `origin_runtimes` 1 者・`support` 0 件のまま `insufficient_evidence` へ落ち、統合
+される前に収束する（前述の全員一致と同じ事象）。**2 段目は相互の申告に限る**（片側は
+`duplicate_candidates` へ残す）。形は 1 段目と同じで、統合の後は組の担当の値を数えない。
 
 ## 処理の流れ
 
@@ -348,12 +355,12 @@ sequenceDiagram
     participant R as レビュワー
     participant T as テスト
     R->>J: 指摘（根拠・反証条件・検証手順）
-    J->>J: 重複を統合する（origin_runtimes を残す）
+    J->>J: 重複を統合する（1 段目・origin_runtimes を残す）
     J->>T: suggested_check（トークン照合を通ったものだけ）
     T->>J: 終了コード / 打ち切り / 起動の失敗
     J->>R: 反証（提案者以外へ。実行の結果を添える）
     R->>J: support / refute / ...
-    J->>J: 区分を決める
+    J->>J: 相互の duplicate を統合し、区分を決める
     J->>J: verified_blocking / needs_human_judgment があれば修正へ
 ```
 
@@ -457,6 +464,7 @@ sequenceDiagram
 | 独立して出した数と支持の数を区別できる | 同上。`origin_runtimes` の長さと `support` の件数が別に読めること |
 | 近傍だけで本文が違う 2 件を統合しない | 同上。行差 2・本文が別の 2 件が 2 件のまま残り、`duplicate_candidates` に相手が載ること |
 | 束ねられた側の形が決まっている | 同上。被統合側に `merged_into` が、代表に `merged_from` が付くこと |
+| 被統合側の再現結果が失われない | 同上。代表が `not_reproduced`・被統合側が `reproduced` の組で、代表が `reproduced` になること |
 | 提案者以外が賛否を返す | `tests/test_critiques.py`（新設）。自分の指摘へ返さないこと |
 | 5 つの値が記録される | 同上 |
 | `finding_id` で指摘へ結ばれる | 同上。既知でない `finding_id` が `unmatched_critiques` へ残ること |
@@ -470,6 +478,7 @@ sequenceDiagram
 | 打ち切りと起動の失敗を再現としない | 同上。上限を超えるコマンドと不在のコマンドが `not_run` になること |
 | 指摘の書き誤りを再現としない | 同上。終了コード 4（対象が無い）と 5（収集 0 件）が `not_run` になること |
 | 再現の向き（失敗＝再現） | 同上。終了コード 1 が `reproduced`、0 が `not_reproduced` |
+| 相互の `duplicate` を当ラウンドで統合する | `tests/test_classify_findings.py`。本文の違う `major` 2 件が 1 件の `needs_human_judgment` になり、収束しないこと |
 | `duplicate` / `out_of_scope` が区分を決めない | `tests/test_classify_findings.py`。両者だけを持つ指摘の区分が、値を持たない指摘と変わらないこと |
 | 5 つの区分へ分かれる | `tests/test_classify_findings.py`（新設）。区分ごとに 1 件以上 |
 | 実行で再現した指摘は支持が少なくても残る | 同上 |
