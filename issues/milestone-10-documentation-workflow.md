@@ -59,8 +59,8 @@ Pull Request は無い。
 | --- | --- | --- | --- |
 | 設計 | `design/milestone-10-documentation-workflow` | **閉じない** | `issues/` の設計文書 |
 | 実装 1 | `feature/issue-507-508-documentation-mode` | #507 / #508 | `development-workflow/`、`workflow-common.sh`、`projects-common.sh` |
-| 実装 2 | `feature/issue-515-511-514-systems` | #515 / #511 / #514 | `document-systems/`（新設）、`release/references/` |
-| 実装 3 | `feature/issue-509-510-drafting` | #509 / #510 | `document-sources/`・`document-drafting/`（新設）、`quality-gates/` |
+| 実装 2 | `feature/issue-515-511-514-systems` | #515 / #511 / #514 | `document-systems/`（新設）、`release/references/`、`cross-review/scripts/state.py` の `PATH_CATEGORY_RULES` |
+| 実装 3 | `feature/issue-509-510-drafting` | #509 / #510 | `document-sources/`・`document-drafting/`（新設）、`quality-gates/`、`requirements-design/references/document-requirements.md` |
 | 実装 4 | `feature/issue-513-512-layout` | #513 / #512 | `design/references/`、`layout-review/`（新設）、`manifests/`、`README.md` |
 
 **設計 Pull Request の本文には課題を閉じる語を書かない。** 実装が終わっていない段階で
@@ -117,8 +117,9 @@ Pull Request が**自分が新設した分**を `manifests/*-skills.txt` へ載�
 
 - [ ] 条件 1: `WF_STAGE_MATRIX` が 18 行 × 5 列になり、`SKILL.md` の工程表・`PJ_STAGES`・
       盤面の単一選択の 4 箇所が**並びまで**一致する。突き合わせをテストが行う
-- [ ] 条件 2: 新設した Skill が 4 個で、いずれも `manifests/*-skills.txt` の少なくとも 1 つに
-      載る。`skills/` の実体と manifest の食い違いをテストが拾う
+- [ ] 条件 2: 新設した Skill が 4 個で、いずれも `plugins/ndf/manifests/*-skills.txt` の
+      **4 ファイルすべてに載る**（決定 33 / 前提 2）。`skills/` の実体と manifest の食い違いを
+      テストが拾う
 - [ ] 条件 3: 承認の関門が 2 つのままである。`WF_APPROVAL_LABEL` と `WF_DESIGN_PREFIX` を
       変更していない
 - [ ] 条件 4: 3 つの軸（出力の形 / ドキュメンテーションシステム / 文書タイプ）が別の

@@ -65,7 +65,9 @@ flowchart LR
 
 ## 工程表（18 行 × 5 列）
 
-**列の並びは高さと同じ順である。** `documentation` は必須の工程が最も多く、5 列目に来る。
+**列の並びは高さと同じ順である。** `documentation` は高さが 5 であるため、5 列目に来る。
+**高さは必須の工程の数ではない**（この表で `R` を数えると `standard` が 16 個、
+`documentation` は 14 個である）。高さの根拠は決定 2 にある。
 
 | 工程 | `light` | `operation` | `legacy-refactor` | `standard` | `documentation` |
 | --- | --- | --- | --- | --- | --- |
@@ -200,18 +202,33 @@ flowchart TD
     A[要求と受け入れ条件] --> B[設計<br/>構成案 + 体裁設計]
     B --> C[素材の収集と出典の確定]
     C --> D[ドキュメント再構成]
-    D --> E[ドキュメントレビュー<br/>企画承認]
-    E --> F[執筆]
+    D --> E[ドキュメントレビュー]
+    E --> P1[設計 Pull Request]
+    P1 --> Q{企画承認<br/>design/ + design-approved}
+    Q -->|差し戻し| B
+    Q -->|承認| R1[設計 PR のマージ]
+    R1 --> W[実装用の worktree を用意]
+    W --> F[執筆]
     F --> G[実装レビュー]
     G --> H[完了判定<br/>事実確認]
-    H --> I[Pull Request]
+    H --> I[実装 Pull Request]
     I --> J[後片付け]
     J --> K[配布・生成]
     K --> L[体裁レビュー<br/>描画して見る]
     L --> M{制作物承認}
-    M -->|承認| N[提出・索引への登録]
     M -->|差し戻し| B
+    M -->|承認| N[提出・索引への登録]
+    N --> O[リリース後テスト]
+    O --> V[振り返り]
 ```
+
+**企画承認は「ドキュメントレビュー」の段ではなく、設計 Pull Request のマージである。**
+レビューは指摘を出す工程で、承認の関門はその後のマージに置く。マージした後は実装用の
+ブランチ名で `worktree` を呼び直す（マージが設計のブランチと作業ツリーを消すため）。
+
+**`配布` は生成と提出の 2 段である。** 図の K（生成）と N（提出・索引への登録）はどちらも
+工程表の `配布` に当たり、その間に `体裁レビュー` と制作物承認が入る。提出まで終わった後に
+`リリース後テスト` と `振り返り` が続く（工程表の最後の 2 行）。
 
 **体裁レビューが配布の後にあるのは、Markdown の時点では版面が存在しないためである。**
 生成してはじめて描画できる。
@@ -237,8 +254,8 @@ flowchart TD
 
 | 受け入れ条件 | 何で確かめるか |
 | --- | --- |
-| 工程表が 18 行 × 5 列 | `tests/test_workflow_stage_matrix.py` が `SKILL.md` の表と `WF_STAGE_MATRIX` を突き合わせる |
-| 4 箇所の並びが一致 | 同テストへ `PJ_STAGES` と盤面の値の一覧を足す |
+| 工程表が 18 行 × 5 列 | `plugins/ndf/skills/development-workflow/tests/test_workflow_stage_matrix.py` が `SKILL.md` の表と `WF_STAGE_MATRIX` を突き合わせる |
+| 4 箇所の並びが一致 | `plugins/ndf/skills/development-workflow/tests/test_stage_values.py` が担当する（既存）。新しい 2 工程を `references/projects-tracking.md` の対応表と `PJ_STAGES` へ足せば、そのまま並びまで突き合わせる |
 | `WF_MODE_HEIGHT` に `documentation` | `wf_mode_height documentation` が 5 を返す |
 | `wf_stage_class` が 5 列目を読む | `wf_stage_class documentation 体裁レビュー` が `R` を返す |
 | 承認の関門が 2 つ | `WF_APPROVAL_LABEL` と `WF_DESIGN_PREFIX` の値を固定するテスト |
