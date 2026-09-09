@@ -2323,6 +2323,15 @@ def _collect_review_findings(
 
     **`comments[]` は投稿の写しではなく、その担当が出した指摘の全件である**（#156）。
     総評だけへ書いた指摘も入るため、インラインの件数（`comments_count`）とは一致しない。
+
+    **形の不正は黙って読み飛ばさない。** 同じファイルを判定の直前に読む
+    `_finding_keys` は、`payload` が dict でないときと `comments[]` の要素が dict で
+    ないときを `die(code=3)` で止める。取り込みが無言で 0 件を返すと、記録は空なのに
+    判定は致命という割れ方をし、原因が payload の形であることが読み取れない。
+
+    **ただし、ここでは止めない。** `_save` はこの呼び出しの後にあるため、止めると
+    そのラウンドのレビュー結果（`rounds[-1][agent]`）ごと失われる。警告で見えるように
+    して、止める判断は判定の側に残す。
     """
     # **キーは読めたかどうかに関わらず作る。** 旧い状態ファイルを読んだときも、
     # 以後の取り込みが同じ形で積めるようにする。
@@ -2332,10 +2341,39 @@ def _collect_review_findings(
         return 0
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, OSError) as exc:
+        info(f"⚠ {agent}: payload.json を読めません（{path}: {exc}）。"
+             "指摘の記録は 0 件です")
+        return 0
+    if not isinstance(payload, dict):
+        # 実測: dict 以外（`[]` / `null` / 文字列 / 数値）を渡すと
+        # `payload.get(...)` が AttributeError で落ち、取り込みが例外で終わっていた。
+        info(f"⚠ {agent}: payload.json が dict ではありません"
+             f"（{path}, type={type(payload).__name__}）。指摘の記録は 0 件です。"
+             " review launcher の出力形式不正で、判定は中断します")
         return 0
     raw = payload.get("comments")
-    items = [c for c in raw if isinstance(c, dict)] if isinstance(raw, list) else []
+    if not isinstance(raw, list):
+        info(f"⚠ {agent}: payload.comments が list ではありません"
+             f"（{path}, type={type(raw).__name__}）。指摘の記録は 0 件です。"
+             " review launcher の出力形式不正で、判定は中断します")
+        return 0
+    items = [c for c in raw if isinstance(c, dict)]
+    if len(items) != len(raw):
+        info(f"⚠ {agent}: payload.comments に dict でないエントリが"
+             f" {len(raw) - len(items)} 件あります（{path}）。"
+             "その分を除いて記録します。判定は中断します")
+    # **同じ (pr, round, agent) の記録は入れ替える。** 中断からの再実行で
+    # `cmd_read_result` が 2 度走ることがあり、`rounds[-1][agent]` は代入で上書き
+    # されるのに対し、こちらは追記であるため、そのままでは同じ指摘が件数だけ増える
+    # （実測: 3 回の実行で 1 件が 3 件になった）。
+    # **落とすのは、書き込む中身が確定した後である。** 読めなかったときに先へ落とすと、
+    # 一度取り込めていた記録を、再実行の失敗が消してしまう。
+    findings[:] = [
+        f for f in findings
+        if not (f.get("pr") == pr and f.get("round") == round_no
+                and f.get("agent") == agent)
+    ]
     for item in items:
         finding = {**_FINDING_DEFAULTS, **item}
         finding.update({

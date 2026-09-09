@@ -221,6 +221,116 @@ def test_a_missing_payload_does_not_break_the_import(tmp_dir, state_mod):
     assert _read(tmp_dir)["review_findings"] == []
 
 
+# ---------- 壊れた payload ----------
+
+@pytest.mark.parametrize("broken", [[], None, "text", 3])
+def test_a_payload_that_is_not_a_dict_does_not_raise(tmp_dir, state_mod, broken,
+                                                     capsys):
+    """**dict 以外でも例外にしない。** 実測では `payload.get` が AttributeError で
+    落ち、取り込みがそのラウンドのレビュー結果ごと失われていた。
+    """
+    _write(tmp_dir, _state()); _result(tmp_dir)
+    (tmp_dir / f"{AGENT}-review-pr{PR}-round1-payload.json").write_text(
+        json.dumps(broken))
+
+    _read_result(state_mod)
+
+    assert _read(tmp_dir)["review_findings"] == []
+    assert "dict ではありません" in capsys.readouterr().err
+
+
+def test_a_payload_whose_comments_is_not_a_list_warns(tmp_dir, state_mod, capsys):
+    """**黙って 0 件にしない。** 判定の直前に読む `_finding_keys` は同じ形で
+    `die(code=3)` する。無言だと、記録が空である理由が読み取れない。
+    """
+    _write(tmp_dir, _state()); _result(tmp_dir)
+    (tmp_dir / f"{AGENT}-review-pr{PR}-round1-payload.json").write_text(
+        json.dumps({"comments": "not-a-list"}))
+
+    _read_result(state_mod)
+
+    assert _read(tmp_dir)["review_findings"] == []
+    assert "list ではありません" in capsys.readouterr().err
+
+
+def test_a_non_dict_entry_is_dropped_with_a_warning(tmp_dir, state_mod, capsys):
+    _write(tmp_dir, _state()); _result(tmp_dir); _payload(tmp_dir, [FULL, "x"])
+
+    _read_result(state_mod)
+
+    assert len(_read(tmp_dir)["review_findings"]) == 1
+    assert "dict でないエントリ" in capsys.readouterr().err
+
+
+def test_an_unreadable_payload_warns(tmp_dir, state_mod, capsys):
+    _write(tmp_dir, _state()); _result(tmp_dir)
+    (tmp_dir / f"{AGENT}-review-pr{PR}-round1-payload.json").write_text("{ broken")
+
+    _read_result(state_mod)
+
+    assert _read(tmp_dir)["review_findings"] == []
+    assert "読めません" in capsys.readouterr().err
+
+
+# ---------- 再取り込み ----------
+
+def test_reimporting_the_same_round_does_not_duplicate(tmp_dir, state_mod):
+    """**中断からの再実行で件数が増えない。** `rounds[-1][agent]` は代入で
+    上書きされるのに対し、こちらは追記であるため、揃えないと同じ指摘が積み上がる。
+    """
+    _write(tmp_dir, _state()); _result(tmp_dir); _payload(tmp_dir, [FULL])
+
+    _read_result(state_mod)
+    _read_result(state_mod)
+    _read_result(state_mod)
+
+    assert len(_read(tmp_dir)["review_findings"]) == 1
+
+
+def test_reimporting_replaces_rather_than_appends(tmp_dir, state_mod):
+    """入れ替えであって、追記の抑止ではない。**減った指摘は記録からも消える。**"""
+    _write(tmp_dir, _state()); _result(tmp_dir)
+    _payload(tmp_dir, [FULL, {**FULL, "line": 99}])
+    _read_result(state_mod)
+    assert len(_read(tmp_dir)["review_findings"]) == 2
+
+    _payload(tmp_dir, [{**FULL, "line": 7}])
+    _read_result(state_mod)
+
+    found = _read(tmp_dir)["review_findings"]
+    assert [f["line"] for f in found] == [7]
+
+
+def test_reimporting_keeps_other_agents(tmp_dir, state_mod):
+    _write(tmp_dir, _state()); _result(tmp_dir); _payload(tmp_dir, [FULL])
+    _read_result(state_mod)
+
+    (tmp_dir / f"kiro-review-pr{PR}-result.json").write_text(json.dumps({
+        "event": "APPROVE", "posted_as": "COMMENT", "comments_count": 0,
+        "review_url": "https://example.invalid/r/2", "by_severity": {}}))
+    (tmp_dir / f"kiro-review-pr{PR}-round1-payload.json").write_text(json.dumps({
+        "comments": [{**FULL, "line": 99}]}))
+    state_mod.cmd_read_result(argparse.Namespace(pr=PR, agent="kiro", file=None))
+
+    _read_result(state_mod)      # agy をもう一度
+
+    found = _read(tmp_dir)["review_findings"]
+    assert sorted(f["agent"] for f in found) == ["agy", "kiro"]
+
+
+def test_a_failed_reimport_does_not_erase_what_was_taken(tmp_dir, state_mod):
+    """**読めなかった再実行が、取り込めていた記録を消さない。** 落とすのは
+    書き込む中身が確定した後である。
+    """
+    _write(tmp_dir, _state()); _result(tmp_dir); _payload(tmp_dir, [FULL])
+    _read_result(state_mod)
+
+    (tmp_dir / f"{AGENT}-review-pr{PR}-round1-payload.json").write_text("{ broken")
+    _read_result(state_mod)
+
+    assert len(_read(tmp_dir)["review_findings"]) == 1
+
+
 # ---------- プロンプトの規約 ----------
 
 SKILL = pathlib.Path(__file__).resolve().parents[1]
