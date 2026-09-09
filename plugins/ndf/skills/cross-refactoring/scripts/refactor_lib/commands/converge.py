@@ -375,6 +375,85 @@ def _revert_invalid_fix_round(
     return set()
 
 
+def _resolve_fix_range(
+    path: pathlib.Path,
+    state: dict[str, Any],
+    entry: dict[str, Any],
+    work: str,
+    head_now: str,
+) -> list[str]:
+    """修正の範囲を**オーケストレータが記録した起点**から確定して返す。
+
+    起点は `verify-round` がテストの失敗を返したときの HEAD である。確定できない
+    ときは修正ラウンドを 1 つ進めて保存したうえで `die` する。
+    """
+    ordered_range = commits_in_range(work, entry.get("fix_base_sha"), head_now)
+    if ordered_range is None:
+        # **修正ラウンドは進める。** 進めないと `should-abandon` が見送りへ移る
+        # 条件（`fix_rounds` が上限に達する）を永久に満たさず、修正フェーズと
+        # 再レビューを無限に往復する。この修正は採らないので、範囲外の記録は
+        # 何も足さない。
+        entry["fix_rounds"] += 1
+        statefile.save(path, state)
+        die(
+            "修正の範囲を確定できませんでした"
+            f"（起点 {entry.get('fix_base_sha')} / HEAD {head_now}）。"
+            "検証できない修正は採りません",
+            code=2,
+        )
+    return ordered_range
+
+
+def _inspect_fix_commits(
+    state: dict[str, Any],
+    work: str,
+    payload: dict[str, Any],
+    baseline: dict[str, Any],
+    ordered_range: list[str],
+) -> tuple[list[str], list[str], list[tuple[str, str]]]:
+    """修正コミットを **git と実際のテスト実行から**検証する。
+
+    結果ファイルの申告で済ませると、手順を満たさない変更が収束済みになれてしまう。
+    未割当コミットの一覧・問題点の一覧・受理した (item_id, sha) を返す。
+    """
+    claimed_shas = reported_shas(payload)
+    unassigned = unassigned_fix_commits(work, claimed_shas, ordered_range)
+
+    facts = collect_commit_facts(
+        work, claimed_shas, set(ordered_range),
+        baseline.get("command") or "true", state["head_branch"],
+        safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT),
+    )
+
+    problems, accepted = _verify_fix_commits(facts, state.get("target_scope") or [])
+
+    if unassigned:
+        info(
+            f"❌ どの申告にも含まれていない修正コミットが {len(unassigned)} 件あります"
+            f"（{', '.join(s[:7] for s in unassigned[:5])}）"
+        )
+    return unassigned, problems, accepted
+
+
+def _settle_fix_round(
+    path: pathlib.Path,
+    state: dict[str, Any],
+    entry: dict[str, Any],
+    ordered_range: list[str],
+    resolved: set[str],
+    unassigned: list[str],
+    problems: list[str],
+    accepted: list[tuple[str, str]],
+) -> None:
+    """検証結果に応じて修正ラウンドを取り消すか受理し、解決の印を付ける。"""
+    if unassigned or problems:
+        resolved = _revert_invalid_fix_round(path, state, entry, ordered_range)
+    else:
+        _record_accepted_fix_commits(state, accepted)
+
+    _mark_resolved_fix_findings(entry, resolved)
+
+
 def cmd_merge_fix(args: argparse.Namespace) -> None:
     """Step 6 — 修正結果を取り込み、修正ラウンドを 1 つ進める。"""
     path, state = load_state(args.id)
@@ -394,48 +473,14 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
 
     resolved = _resolved_fix_thread_ids(payload, state["repo"], state["current_pr"])
 
-    # 修正コミットも適用と同じ基準で、**git と実際のテスト実行から**検証する。
-    # 結果ファイルの申告で済ませると、手順を満たさない変更が収束済みになれてしまう。
     baseline = state.get("baseline_test") or {}
-    # 修正の範囲も**オーケストレータが記録した起点**から取る。起点は
-    # `verify-round` がテストの失敗を返したときの HEAD である。
-    ordered_range = commits_in_range(work, entry.get("fix_base_sha"), head_now)
-    if ordered_range is None:
-        # **修正ラウンドは進める。** 進めないと `should-abandon` が見送りへ移る
-        # 条件（`fix_rounds` が上限に達する）を永久に満たさず、修正フェーズと
-        # 再レビューを無限に往復する。この修正は採らないので、範囲外の記録は
-        # 何も足さない。
-        entry["fix_rounds"] += 1
-        statefile.save(path, state)
-        die(
-            "修正の範囲を確定できませんでした"
-            f"（起点 {entry.get('fix_base_sha')} / HEAD {head_now}）。"
-            "検証できない修正は採りません",
-            code=2,
-        )
-    claimed_shas = reported_shas(payload)
-    unassigned = unassigned_fix_commits(work, claimed_shas, ordered_range)
-
-    facts = collect_commit_facts(
-        work, claimed_shas, set(ordered_range),
-        baseline.get("command") or "true", state["head_branch"],
-        safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT),
+    ordered_range = _resolve_fix_range(path, state, entry, work, head_now)
+    unassigned, problems, accepted = _inspect_fix_commits(
+        state, work, payload, baseline, ordered_range
     )
-
-    problems, accepted = _verify_fix_commits(facts, state.get("target_scope") or [])
-
-    if unassigned:
-        info(
-            f"❌ どの申告にも含まれていない修正コミットが {len(unassigned)} 件あります"
-            f"（{', '.join(s[:7] for s in unassigned[:5])}）"
-        )
-
-    if unassigned or problems:
-        resolved = _revert_invalid_fix_round(path, state, entry, ordered_range)
-    else:
-        _record_accepted_fix_commits(state, accepted)
-
-    _mark_resolved_fix_findings(entry, resolved)
+    _settle_fix_round(
+        path, state, entry, ordered_range, resolved, unassigned, problems, accepted
+    )
 
     merged_keys.append(merge_key)
     entry["fix_rounds"] += 1

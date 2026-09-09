@@ -625,6 +625,43 @@ def _validate_apply_commit_ownership(
     sys.exit(2)
 
 
+def _update_items_apply_status(
+    items: list[dict[str, Any]],
+    shas: list[str],
+    problem: str,
+    diff_lines: int,
+) -> None:
+    """検証結果に応じて群の各改善項目の状態を更新する。
+
+    群の中は 1 コミットなので、全項目へ同じ `shas` を紐づける。`problem` があれば
+    見送り、無ければ適用済みとして記録する。
+    """
+    for item in items:
+        item["commits"] = list(shas)
+        if problem:
+            item["status"] = "abandoned"
+            item["failure_reason"] = problem
+            item["budget_exceeded"] = "差分予算" in problem
+            item["out_of_scope"] = "対象範囲の外" in problem
+        else:
+            item["status"] = "applied"
+            item["diff_lines"] = diff_lines
+
+
+def _record_apply_progress(
+    entry: dict[str, Any],
+    group: dict[str, Any],
+    problem: str,
+    shas: list[str],
+) -> None:
+    """適用ラウンドの進捗を `apply_progress` へ 1 件追記する。"""
+    entry.setdefault("apply_progress", []).append({
+        "apply_round": group["apply_round"], "at": statefile.now(),
+        "result": "failed" if problem else "ok",
+        "reason": problem, "commits": list(shas),
+    })
+
+
 def _verify_apply_group(
     ctx: _ApplyExecutionContext,
     commit_range: _ApplyCommitRange,
@@ -669,22 +706,9 @@ def _verify_apply_group(
         ctx.entry, ctx.entry.get("apply_round") or 1, pending_test_judgements(facts))
 
     diff_lines = sum(safe_int(c.get("diff_lines")) for c in facts)
-    for item in items:
-        item["commits"] = list(shas)
-        if problem:
-            item["status"] = "abandoned"
-            item["failure_reason"] = problem
-            item["budget_exceeded"] = "差分予算" in problem
-            item["out_of_scope"] = "対象範囲の外" in problem
-        else:
-            item["status"] = "applied"
-            item["diff_lines"] = diff_lines
+    _update_items_apply_status(items, shas, problem, diff_lines)
 
-    ctx.entry.setdefault("apply_progress", []).append({
-        "apply_round": ctx.group["apply_round"], "at": statefile.now(),
-        "result": "failed" if problem else "ok",
-        "reason": problem, "commits": list(shas),
-    })
+    _record_apply_progress(ctx.entry, ctx.group, problem, shas)
     if problem:
         info(f"❌ 適用ラウンド {ctx.group['apply_round']}: {problem}")
     else:
