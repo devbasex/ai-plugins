@@ -233,9 +233,7 @@ def verify_apply_round(
     # **テストの期待値が変わっていないか**（#443）。段 1（機械）で決まるものだけを
     # ここで落とす。決まらないものは `pending_test_judgements` が集め、進行側が
     # 段 2（AI エージェント）へ渡す。
-    changes: dict[str, tuple[list[str], list[str]]] = {}
-    for commit in facts:
-        changes.update(commit.get("test_changes") or {})
+    changes = collect_test_changes(facts)
     problem = verify_test_changes(changes)
     if problem:
         return problem
@@ -378,6 +376,19 @@ def _changed_test_message(changed: list[str]) -> str:
     )
 
 
+def collect_test_changes(
+    facts: Iterable[dict[str, Any]],
+) -> dict[str, tuple[list[str], list[str]]]:
+    """コミット単位の `test_changes` を 1 つの辞書へまとめる。
+
+    後のコミットの値が前のコミットの値を上書きする（同じファイルなら最後の状態を採る）。
+    """
+    changes: dict[str, tuple[list[str], list[str]]] = {}
+    for commit in facts:
+        changes.update(commit.get("test_changes") or {})
+    return changes
+
+
 def verify_test_changes(
     changes: dict[str, tuple[list[str], list[str]]],
 ) -> Optional[str]:
@@ -400,9 +411,7 @@ def pending_test_judgements(facts: Iterable[dict[str, Any]]) -> list[str]:
 
     **機械で決まらなかったものだけが残る。** 空でないまま収束させない。
     """
-    changes: dict[str, tuple[list[str], list[str]]] = {}
-    for commit in facts:
-        changes.update(commit.get("test_changes") or {})
+    changes = collect_test_changes(facts)
     return undecidable_test_changes(changes)
 
 
