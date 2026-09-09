@@ -477,6 +477,11 @@ def cmd_start_round(args: argparse.Namespace) -> None:
     statefile.emit(
         ROUND=round_no,
         ROUND_KIND=kind,
+        # **母集合は繰り返しの中でも返す**（#518-1）。`init` だけが返す形では、
+        # 状態ファイルから再開する経路と、骨組みを抜粋して写す経路の両方で
+        # 未定義になる。出所は `init` と同じ状態ファイルの `runtimes` である。
+        RUNTIMES=" ".join(state["runtimes"]),
+        RUNTIMES_CSV=",".join(state["runtimes"]),
         # 提案に使う雛形の名前。**結果ファイルの名前は種類で変えない**
         # （ラウンド番号は通しなので衝突せず、監視の雛形をそのまま使える）。
         PROPOSE_PHASE="propose-tests" if kind == TEST else "propose",

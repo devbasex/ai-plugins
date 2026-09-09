@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import shutil
 import signal
 import subprocess
 import time
@@ -974,6 +975,49 @@ def _sync_generated(state: dict[str, Any]) -> None:
     _commit_sync_changes(work, command, _dirty_paths(state, work), plan_rel)
 
 
+# 退避に使う値は共通層が 1 か所で持つ（#524）。**写しは持たない。** 手順書と実装が
+# 別々に同じ文字列を持つと、片方だけが更新される。
+_CREDENTIAL_LIB = (
+    pathlib.Path(__file__).resolve().parents[4] / "scripts" / "lib" / "git-credential.sh"
+)
+
+
+def gh_available() -> bool:
+    """`gh` を使えるか。使えなければ退避しても通らない。"""
+    return shutil.which("gh") is not None
+
+
+def credential_fallback_args() -> list[str]:
+    """共通層が定める退避のオプションを読む。読めなければ空を返す。"""
+    if not _CREDENTIAL_LIB.is_file():
+        return []
+    out = subprocess.run(
+        ["bash", "-c", f'. "{_CREDENTIAL_LIB}"; ndf_git_credential_fallback_args'],
+        capture_output=True, text=True,
+    )
+    if out.returncode != 0:
+        return []
+    return [line for line in out.stdout.split("\n") if line]
+
+
+def _push_with_credential_fallback(args: list[str], cwd: str) -> None:
+    """`git` を実行し、失敗したときだけ退避して**1 度だけ**再試行する。
+
+    **既定の経路は変えない。** helper が正しく動く環境では 1 度目で終わる。
+    再試行を 1 度に限るのは、認証以外の理由（参照の競合・ネットワークの不通）で
+    失敗したときに同じ失敗を繰り返さないためである。
+    """
+    try:
+        sh(["git", *args], cwd=cwd)
+        return
+    except Exception:
+        fallback = credential_fallback_args() if gh_available() else []
+        if not fallback:
+            raise
+    info("↻ credential helper を退避して push をやり直します（gh の認証を使う）")
+    sh(["git", *fallback, *args], cwd=cwd)
+
+
 def push_head(state: dict[str, Any]) -> None:
     """head ブランチへ push する。**`--force` は使わない。**
 
@@ -981,9 +1025,9 @@ def push_head(state: dict[str, Any]) -> None:
     変更が Pull Request へ現れ、取り消しの反映漏れがそのまま残る。
     """
     _sync_generated(state)
-    sh(
-        ["git", "push", "origin", f"HEAD:{state['head_branch']}"],
-        cwd=state["worktrees"]["work"],
+    _push_with_credential_fallback(
+        ["push", "origin", f"HEAD:{state['head_branch']}"],
+        state["worktrees"]["work"],
     )
     # **改修計画のコメントは push の後で更新する**（#436 決定 6）。差分に混ざらない
     # ので push とは独立だが、公開した内容と食い違わないよう後ろへ置く。投稿に

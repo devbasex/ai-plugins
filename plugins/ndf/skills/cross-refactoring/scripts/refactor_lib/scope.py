@@ -33,11 +33,10 @@ TEST_NAME_PATTERNS: tuple[str, ...] = (
 )
 
 
-def is_test_location(path: str) -> bool:
-    """その `--scope` の 1 件がテストの置き場所かどうか。
+def _matches_by_name(path: str) -> bool:
+    """名前だけで置き場所と読めるか。**実在は見ない。**
 
-    判定は**名前だけ**で行い、実在は見ない。`--scope` は提案の範囲の宣言であり、
-    まだ存在しないディレクトリを指すことがある。
+    `--scope` は提案の範囲の宣言であり、まだ存在しないディレクトリを指すことがある。
     """
     parts = [p.lower() for p in pathlib.PurePosixPath(str(path).strip()).parts]
     parts = [p for p in parts if p not in (".", "/")]
@@ -48,9 +47,51 @@ def is_test_location(path: str) -> bool:
     return any(fnmatch.fnmatch(parts[-1], pat) for pat in TEST_NAME_PATTERNS)
 
 
-def test_locations(scope: Iterable[str]) -> list[str]:
-    """`--scope` のうち、テストの置き場所とみなせるもの。"""
-    return [s for s in scope if is_test_location(s)]
+def _child_test_location(path: str, work: str) -> Optional[str]:
+    """配下に実在するテストの置き場所を 1 つ返す。無ければ `None`。
+
+    **走査は 1 段だけである。** 深く潜ると、無関係な階層のテストを根拠にして
+    関門が素通りする。返すのは当たった置き場所であり、渡された親ではない。
+    """
+    base = pathlib.Path(work) / str(path).strip()
+    try:
+        entries = sorted(entry.name for entry in base.iterdir() if entry.is_dir())
+    except OSError:
+        return None
+    for name in entries:
+        if name.lower() in TEST_PATH_SEGMENTS:
+            return os.path.normpath(f"{str(path).strip()}/{name}")
+    return None
+
+
+def is_test_location(path: str, work: str) -> bool:
+    """その `--scope` の 1 件がテストの置き場所かどうか。
+
+    **名前で当たらないときだけ実体を見る**（#518-2）。名前だけの判定では、
+    実体として `tests/` を持つ親ディレクトリを渡した実行が関門で止まっていた。
+    """
+    if _matches_by_name(path):
+        return True
+    return _child_test_location(path, work) is not None
+
+
+def test_locations(scope: Iterable[str], work: str) -> list[str]:
+    """`--scope` のうち、テストの置き場所とみなせるもの。
+
+    **返すのは置き場所そのものである。** 実体の走査で当たったときは、渡された
+    親ではなく当たった配下を返す。後段の `covered_by_roots` は
+    `--baseline-test` が限定した起点で始まるかを見るため、親を返すと**関門を
+    通した直後に同じ関門の別の判定が拒む**。
+    """
+    found: list[str] = []
+    for item in scope:
+        if _matches_by_name(item):
+            found.append(item)
+            continue
+        child = _child_test_location(item, work)
+        if child is not None:
+            found.append(child)
+    return found
 
 
 def baseline_search_roots(command: str, work: str) -> list[str]:
@@ -94,7 +135,7 @@ def scope_problem(
 ) -> Optional[str]:
     """関門に引っかかる理由を返す。問題が無ければ `None`。"""
     listed = list(scope)
-    locations = test_locations(listed)
+    locations = test_locations(listed, work)
     if not locations:
         return (
             "--scope にテストの置き場所が含まれていません"
