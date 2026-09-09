@@ -2526,53 +2526,6 @@ def _normalized_body(body: object) -> str:
     return _OSCILLATION_DROP.sub("", body.lower())[:OSCILLATION_BODY_CHARS]
 
 
-def _extract_agent_finding_keys(
-    agent: str, pr: int, round_no: int
-) -> list[tuple[str, int, str]]:
-    """1 人のレビュー担当の記録から (ファイル, 行, 正規化した本文) の並びを取り出す。
-
-    **記録が読めないことと、記録の形が違うことは別に扱う。** 記録が無い・JSON として
-    壊れているときは空を返し、その担当を数えない。dict でないときは launcher の出力
-    形式の不正であるため、その場で止める。
-    """
-    p = _payload_path(agent, pr, round_no)
-    if not p.exists():
-        return []
-    try:
-        payload = json.loads(p.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return []
-    # gemini round 4 指摘: payload は本来 dict (comments: [...]) だが、
-    # launcher のバグで list / str が入り込むと `payload.get(...)` で
-    # AttributeError になる。不正な review payload はバグなので
-    # 即時 die(code=3) で停止させる。
-    if not isinstance(payload, dict):
-        die(
-            f"{agent}: payload.json が dict ではない "
-            f"({p}, type={type(payload).__name__})。"
-            " review launcher の出力形式不正。",
-            code=3,
-        )
-    keys: list[tuple[str, int, str]] = []
-    for c in payload.get("comments", []):
-        if not isinstance(c, dict):
-            # comments エントリが dict でない場合も同様に致命扱い
-            die(
-                f"{agent}: payload.comments のエントリが dict ではない "
-                f"({p}, type={type(c).__name__})。",
-                code=3,
-            )
-        path = c.get("path")
-        line = c.get("line") or c.get("start_line")
-        if not path or line is None:
-            continue
-        try:
-            keys.append((str(path), int(line), _normalized_body(c.get("body"))))
-        except (TypeError, ValueError):
-            continue
-    return keys
-
-
 def _finding_keys(
     st: dict[str, Any], pr: int, round_no: int
 ) -> list[tuple[str, int, str]]:
@@ -2584,7 +2537,39 @@ def _finding_keys(
     """
     keys: list[tuple[str, int, str]] = []
     for agent in _round_reviewers(st, round_no):
-        keys.extend(_extract_agent_finding_keys(agent, pr, round_no))
+        p = _payload_path(agent, pr, round_no)
+        if not p.exists():
+            continue
+        try:
+            payload = json.loads(p.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+        # gemini round 4 指摘: payload は本来 dict (comments: [...]) だが、
+        # launcher のバグで list / str が入り込むと `payload.get(...)` で
+        # AttributeError になる。不正な review payload はバグなので
+        # 即時 die(code=3) で停止させる。
+        if not isinstance(payload, dict):
+            die(
+                f"{agent}: payload.json が dict ではない "
+                f"({p}, type={type(payload).__name__})。"
+                " review launcher の出力形式不正。",
+                code=3,
+            )
+        for c in payload.get("comments", []):
+            if not isinstance(c, dict):
+                # comments エントリが dict でない場合も同様に致命扱い
+                die(
+                    f"{agent}: payload.comments のエントリが dict ではない "
+                    f"({p}, type={type(c).__name__})。",
+                    code=3,
+                )
+            path = c.get("path")
+            line = c.get("line") or c.get("start_line")
+            if path and line is not None:
+                try:
+                    keys.append((str(path), int(line), _normalized_body(c.get("body"))))
+                except (TypeError, ValueError):
+                    continue
     return keys
 
 
