@@ -35,7 +35,7 @@ MANIFEST_DIR = PLUGIN_DIR / "manifests"
 # #215 の受け入れ条件（A12）である。値を書いて固定する。v10.5.0 で 5 個
 # （`optional-skills/` の 4 個と `notion-writing`）を 4 ランタイムすべてへ足したため、
 # 4 つとも同じ 5 だけ増えている（#116 / #144）。
-EXPECTED_COUNTS = {"claude": 44, "codex": 42, "kiro": 43, "agy": 42}
+EXPECTED_COUNTS = {"claude": 45, "codex": 43, "kiro": 44, "agy": 43}
 
 
 def manifest_names(runtime: str) -> list[str]:

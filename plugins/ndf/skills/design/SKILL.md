@@ -94,8 +94,12 @@ issue のことではない。
 | 呼び出される約束（API・イベント・コマンド）を変える | [references/interface-api.md](references/interface-api.md) |
 | 画面を追加・変更する | [references/interface-ui.md](references/interface-ui.md) |
 | 非機能の条件が仕様にある | [references/nonfunctional.md](references/nonfunctional.md) |
+| **読み手へ渡す文書を作る**（`documentation`） | 出力の形に当たる `references/layout-<出力の形>.md`（[slide](references/layout-slide.md) / [document](references/layout-document.md) / [spreadsheet](references/layout-spreadsheet.md) / [page](references/layout-page.md)） |
 
 触らない領域の参照は読まない。
+
+**`documentation` では、読ませる参照を決めるのは触る領域ではなく出力の形である。**
+スライドと表計算では版面の決め方が違う。**対象の形のファイルだけを読む。**
 
 **`light` / `operation` では、この表が起動の条件も決める。** 「すべての変更」以外の領域が
 1 つ以上該当するときにこの Skill を通し、1 つも当たらなければ通さない。「すべての変更」の行を
