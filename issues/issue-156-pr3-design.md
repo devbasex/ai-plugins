@@ -85,8 +85,8 @@ graph TD
 だけである）。非対称であるため、厳しい側へ倒す。
 
 **本文が一致しない候補は統合しない。** 近傍で当たっただけの組は `duplicate_candidates`
-へ両方の `finding_id` を残し、反証で `duplicate` が付いたときに次のラウンドで統合する
-（後述）。**位置の一致は候補の抽出までである。**
+へ両方の `finding_id` を残し、反証で相互に `duplicate` が付いたときに当ラウンドの
+2 段目として統合する（後述）。**位置の一致は候補の抽出までである。**
 
 ラウンドをまたぐ一致を見る振動の検知に対し、統合は**同じラウンドの中**で見る。
 
@@ -109,9 +109,10 @@ graph TD
 結び先を失う。区分と収束の判定が読むのは代表の 1 件だけである。
 
 **実行検証は束ねた組の全員の `suggested_check` を対象にする。** 代表の値だけを実行すると、
-被統合側が再現していた事実が取り込みの順序で失われる。**1 件でも `reproduced` があれば代表を
-`reproduced` とする**（決定 2 の向き）。無ければ、すべてが `not_reproduced` のときだけ
-`not_reproduced` とし、残りは `not_run` とする。出所は `verification.finding_id` へ残す。
+被統合側が再現していた事実が取り込みの順序で失われる。**採るのは `reproduced` >
+`not_reproduced` > `not_run` の順で最初に当たった 1 件である**（決定 2 の向き）。全員一致を
+求めると `not_reproduced` と `not_run` の組の代表が `not_run` になり、順 3 を素通りして順 4 で
+`needs_human_judgment` へ昇格する。出所は `verification.finding_id` へ残す。
 
 **独立して出したかを区別する。** `origin_runtimes` の長さは「同じ指摘へ到達した担当の
 数」であり、反証の `support` の数とは別に数える。支持は他者の指摘を読んだうえでの賛成で、
@@ -446,7 +447,7 @@ sequenceDiagram
 **却下の記録（1 本目）と反証（この変更）は、同じ論点が戻ることを止めるために入れた。**
 数える対象を絞らないと、その効果が判定に出ない。
 
-### 決定 4: 反証は同じラウンドの 2 段目として回す
+### 決定 4: 反証は新しいラウンドを足さず同じラウンドの中で回す
 
 新しいラウンドを足す案は採らない。ラウンド数が 2 倍になり、収束の上限（12）の意味が変わる。
 **発見と反証を 1 ラウンドの中で完結させる。**
@@ -464,14 +465,14 @@ sequenceDiagram
 | 独立して出した数と支持の数を区別できる | 同上。`origin_runtimes` の長さと `support` の件数が別に読めること |
 | 近傍だけで本文が違う 2 件を統合しない | 同上。行差 2・本文が別の 2 件が 2 件のまま残り、`duplicate_candidates` に相手が載ること |
 | 束ねられた側の形が決まっている | 同上。被統合側に `merged_into` が、代表に `merged_from` が付くこと |
-| 被統合側の再現結果が失われない | 同上。代表が `not_reproduced`・被統合側が `reproduced` の組で、代表が `reproduced` になること |
+| 被統合側の実行結果が失われない | 同上。`not_reproduced` と `reproduced` の組が `reproduced`、`not_reproduced` と `not_run` の組が `not_reproduced` になること |
 | 提案者以外が賛否を返す | `tests/test_critiques.py`（新設）。自分の指摘へ返さないこと |
 | 5 つの値が記録される | 同上 |
 | `finding_id` で指摘へ結ばれる | 同上。既知でない `finding_id` が `unmatched_critiques` へ残ること |
 | 宣言されたコマンドだけを実行する | `tests/test_verify_findings.py`（新設） |
 | 別コマンドを実行しない | 同上。宣言 `pytest` に対し `pytest-danger --evil` が `not_run` になること |
 | 引数の注入を実行しない | 同上。`pytest -c /tmp/evil.ini` と `pytest -p reviewer_plugin` が `not_run` になること |
-| メタ文字を含む値は実行しない | 同上。`pytest; rm -rf /` と `pytest $(whoami)` が `not_run` になること |
+| メタ文字が展開されない | 同上。`pytest; rm -rf /` は先頭トークンの不一致で、`pytest $(whoami)` は `shell=False` のまま実行されて終了コード 4 で、いずれも `not_run` になること |
 | 作業ツリーの外は実行しない | 同上。`pytest ../evil.py`・`pytest /tmp/evil.py`・外を指す symlink が `not_run` になること |
 | 位置指定を持たない値は実行しない | 同上。宣言 `pytest` と同じ `pytest` が `not_run` になること |
 | 宣言が無ければ実行しない | 同上 |
