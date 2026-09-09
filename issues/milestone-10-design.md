@@ -142,7 +142,7 @@ flowchart LR
 | --- | --- |
 | 名前 | `.ndf/document.json` |
 | 入力 | リポジトリの根からの相対パスで読む |
-| 出力 | 提出先の一覧。`production` が真のものが本番の系 |
+| 出力 | 提出先の一覧。`production` が真のものが本番の系。真のものは `draft` で対になる下書き先を指す |
 | 失敗の形 | **無ければ何も起きず終了コード 0。** 提出の工程は「提出先が宣言されていない」と伝えて止まる |
 | 互換性 | 新設のため既存の呼び出し側は無い。`.ndf/worktree.json` と `.ndf/projects.json` の宣言方式に揃える |
 
@@ -157,14 +157,16 @@ flowchart LR
       "location": "https://drive.google.com/drive/folders/<識別子>",
       "visibility": "internal",
       "production": true,
+      "draft": "proposal-drive-draft",
       "auth": { "kind": "env", "keys": ["GOOGLE_APPLICATION_CREDENTIALS"] }
     },
     {
-      "name": "draft-notion",
-      "system": "notion",
-      "location": "https://www.notion.so/<識別子>",
+      "name": "proposal-drive-draft",
+      "system": "gdrive",
+      "location": "https://drive.google.com/drive/folders/<識別子>",
       "visibility": "internal",
-      "production": false
+      "production": false,
+      "auth": { "kind": "env", "keys": ["GOOGLE_APPLICATION_CREDENTIALS"] }
     }
   ],
   "index": { "system": "notion", "location": "https://www.notion.so/<識別子>" }
@@ -177,8 +179,14 @@ flowchart LR
   は承認を求めない
 - **承認の前に書き込んでよいのは `production` が偽の提出先だけである。** 生成・取り込みと
   内容照合・体裁レビューはすべてこちらで行い、真の提出先へは承認した生成物だけが届く
-  （決定 24）。**偽の提出先を 1 つも宣言できないときは提出の工程で止める。** 既存の正式な
-  文書を改訂する場合も、真の提出先を直接書き換えない
+  （決定 24）。既存の正式な文書を改訂する場合も、真の提出先を直接書き換えない
+- **`draft` は本番の提出先ごとに 1 つ要る。** `production` が真の提出先は、対になる下書き先の
+  `name` を `draft` で指す。**対の下書き先は `system` が同じでなければならない**（決定 24）。
+  系が違うと、承認した生成物をそのまま移せず作り直しになるため、承認したものと届くものが
+  別になる
+- **`draft` を解決できないときは提出の工程で止める。** 指す先が無い・`production` が真・
+  `system` が違う・`draft` の記載自体が無いのいずれでも、その提出先は使えないものとして扱う。
+  **「偽の提出先がどこかに 1 つある」では足りない**（決定 24）
 - `index` は索引への登録先である。無ければ索引への登録の手順を飛ばす
 
 ### `wf_stage_class` の列の追加
@@ -218,13 +226,13 @@ flowchart TD
     G --> H[完了判定<br/>事実確認]
     H --> I[実装 Pull Request]
     I --> J[後片付け]
-    J --> K[配布・生成<br/>production が偽の提出先へ]
+    J --> K[配布・生成<br/>対になる下書き先へ]
     K --> K2[生成物の取り込み<br/>正本との内容照合]
     K2 -->|不一致| K
     K2 -->|一致| L[体裁レビュー<br/>描画して見る]
     L --> M{制作物承認}
     M -->|差し戻し| B
-    M -->|承認| N[提出・索引への登録<br/>production が真の提出先へ]
+    M -->|承認| N[提出・索引への登録<br/>本番の提出先へそのまま移す]
     N --> O[リリース後テスト]
     O --> V[振り返り]
 ```
@@ -287,6 +295,7 @@ flowchart TD
 | 自リポジトリ前提を持たない | `python3 scripts/check-skill-repo-assumptions.py` |
 | 公開 Skill 数の記載 | `python3 scripts/check-doc-staleness.py` |
 | 宣言が無ければ何も起きない | `.ndf/document.json` が無い状態で提出の手順が終了コード 0 で終わる |
+| 対の下書きが無ければ止まる | `draft` が無い / 指す先が無い / `system` が違う / 指す先が `production` 真、の 4 つの宣言で提出の手順が「承認前の生成先が無い」と伝えて止まる |
 
 ## 未確認のまま残ること
 
