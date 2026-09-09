@@ -60,7 +60,8 @@
      "summary": "...", "comment_url": "..."}
   ],
   "review_findings": [
-    {"pr": 123, "round": 1, "agent": "agy", "path": "src/foo.py", "line": 42,
+    {"finding_id": "agy-r1-0", "pr": 123, "round": 1, "agent": "agy",
+     "path": "src/foo.py", "line": 42,
      "severity": "major", "body": "...", "evidence": "...", "falsification": "...",
      "suggested_check": "pytest tests/test_foo.py -q", "posted_to": "body",
      "has_evidence": true}
@@ -78,7 +79,10 @@
 ### 重要なフィールド
 
 - `host` — 確定したホスト名（`claude` / `codex` / `agy` / `kiro`）。母集合から外れる
-- `review_findings` — 取り込んだ指摘を **per-item** で蓄積する（#156）。要素は
+- `review_findings` — 取り込んだ指摘を **per-item** で蓄積する（#156）。各要素は
+  `finding_id`（`<担当>-r<ラウンド>-<索引>`）を持つ。**取り込みの時点で採番し、統合・
+  反証・実行検証の記録がどの指摘を指すかをこの値で結ぶ。** 担当とラウンドを含めるため、
+  別の担当が同じ索引を持っても衝突しない。要素は
   `payload.json` の 1 件に `pr` / `round` / `agent` と `has_evidence` を添えた形である。
   **`has_evidence` は `evidence` と `falsification` の両方が空でないときだけ真になる**
   （片方だけでは、別の担当がその指摘を確かめられない）

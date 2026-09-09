@@ -2374,9 +2374,13 @@ def _collect_review_findings(
         if not (f.get("pr") == pr and f.get("round") == round_no
                 and f.get("agent") == agent)
     ]
-    for item in items:
+    for index, item in enumerate(items):
         finding = {**_FINDING_DEFAULTS, **item}
         finding.update({
+            # **識別子は取り込みの時点で採番する**（#156）。統合・反証・実行検証の記録が、
+            # どの指摘を指すかをこの値で結ぶ。担当とラウンドを含めるため、別の担当が
+            # 同じ索引を持っても衝突しない。
+            "finding_id": f"{agent}-r{round_no}-{index}",
             "pr": pr, "round": round_no, "agent": agent,
             "has_evidence": _has_evidence(finding),
         })
