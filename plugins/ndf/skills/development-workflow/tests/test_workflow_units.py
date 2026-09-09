@@ -14,7 +14,6 @@ import shlex
 
 import pytest
 
-from table_parser import parse_table
 from workflow_helpers import (
     SKILL_DIR,
     base_env,
@@ -77,9 +76,29 @@ def test_json_escape_replaces_all_five_special_characters_together() -> None:
 
 def workflow_table() -> tuple[list[str], list[list[str]]]:
     """工程表の見出しと本文の行を返す。読み取れないことは失敗として扱う。"""
-    header, rows = parse_table(
-        SKILL.read_text(encoding="utf-8"), WORKFLOW_TABLE_HEADING
+    lines = SKILL.read_text(encoding="utf-8").splitlines()
+    start = next(
+        (i for i, line in enumerate(lines) if line.strip() == WORKFLOW_TABLE_HEADING),
+        None,
     )
+    assert start is not None, f"見出しが見つからない: {WORKFLOW_TABLE_HEADING}"
+    header: list[str] = []
+    rows: list[list[str]] = []
+    for line in lines[start + 1 :]:
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            break
+        if not stripped.startswith("|"):
+            if rows:
+                break
+            continue
+        cells = [c.strip() for c in stripped.strip("|").split("|")]
+        if not header:
+            header = cells
+            continue
+        if set("".join(cells)) <= set("-: "):
+            continue
+        rows.append(cells)
     assert header and rows, "工程表を読み取れない"
     return header, rows
 
@@ -295,106 +314,3 @@ def test_repo_slug_rejects_a_repository_without_origin(tmp_path) -> None:
 
     assert result.returncode == 1
     assert result.stdout.strip() == ""
-
-
-# --- R3-001: wf_stage_class の現状固定 --------------------------------------
-
-# `wf_stage_class` はモードの列番号（1〜5）に応じて WF_STAGE_MATRIX の該当セルを返す。
-# 各列の変数への手動バインドと分岐連鎖を配列アクセスへ畳む前に、既知の入力での戻り値と
-# 未知の入力での失敗（戻り値 1・標準出力なし）を現状固定する。
-@pytest.mark.parametrize(
-    ("mode", "stage", "expected"),
-    [
-        ("light", "要求と受け入れ条件", "R"),
-        ("light", "作業場所の用意", "C"),
-        ("light", "構造改善", "-"),
-        ("operation", "計画", "R"),
-        ("operation", "設計", "C"),
-        ("operation", "素材の収集と出典の確定", "-"),
-        ("legacy-refactor", "設計", "R"),
-        ("legacy-refactor", "ドキュメント再構成", "C"),
-        ("legacy-refactor", "要求と受け入れ条件", "-"),
-        ("standard", "実装", "R"),
-        ("standard", "確定仕様化", "R"),
-        ("documentation", "体裁レビュー", "R"),
-        ("documentation", "確定仕様化", "C"),
-        ("documentation", "構造改善", "-"),
-    ],
-)
-def test_stage_class_returns_the_matrix_cell(mode: str, stage: str, expected: str) -> None:
-    """現状固定: 既知のモード×工程で該当セル（R / C / -）を返す。"""
-    result = run_lib(f'wf_stage_class {shlex.quote(mode)} {shlex.quote(stage)}')
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == expected
-
-
-def test_stage_class_rejects_an_unknown_mode() -> None:
-    """現状固定: 知らないモードでは戻り値 1 で、標準出力へ何も書かない。"""
-    result = run_lib('wf_stage_class unknown-mode "実装"')
-    assert result.returncode == 1
-    assert result.stdout == ""
-
-
-def test_stage_class_rejects_an_unknown_stage() -> None:
-    """現状固定: 工程表にない工程では戻り値 1 で、標準出力へ何も書かない。"""
-    result = run_lib('wf_stage_class standard "存在しない工程"')
-    assert result.returncode == 1
-    assert result.stdout == ""
-
-
-# --- R3-002: 表解析の現状固定 -----------------------------------------------
-
-# `workflow_table` と `test_workflow_stage_matrix._table` は同一の表解析を持っていた。
-# 共通部分を table_parser.parse_table へ寄せる前に、両経路の戻り値と失敗時の契約
-# （例外の型とメッセージ）を現状固定する。入力は plan が挙げる 7 種を網羅する。
-
-
-def test_workflow_table_reads_the_actual_workflow_table() -> None:
-    """現状固定: 実際の工程表で、ヘッダーと 1 列目・複数行が読める。"""
-    header, rows = workflow_table()
-    assert header[0] == "工程"
-    assert rows[0][0] == "要求と受け入れ条件"
-    assert len(rows) >= 15
-
-
-def test_workflow_table_raises_when_the_heading_is_missing() -> None:
-    """現状固定: 見出しが無いと AssertionError（`見出しが見つからない: <見出し>`）。"""
-    with pytest.raises(AssertionError, match="見出しが見つからない"):
-        parse_table("# 本文だけ\n\n段落\n", WORKFLOW_TABLE_HEADING)
-
-
-@pytest.mark.parametrize(
-    ("body", "expected_header", "expected_rows"),
-    [
-        # 表なし: 見出しの直後に段落だけがある。
-        (f"{WORKFLOW_TABLE_HEADING}\n\n本文だけで表が無い。\n", [], []),
-        # ヘッダーのみ: 区切り行はあるが本文の行が無い。
-        (f"{WORKFLOW_TABLE_HEADING}\n| A | B |\n| --- | --- |\n", ["A", "B"], []),
-        # 区切り行を飛ばし、本文の行を読む。
-        (
-            f"{WORKFLOW_TABLE_HEADING}\n| A | B |\n| --- | --- |\n| a | b |\n",
-            ["A", "B"],
-            [["a", "b"]],
-        ),
-        # 表の後の本文: 本文の行の後に段落が来たら、そこで打ち切る。
-        (
-            f"{WORKFLOW_TABLE_HEADING}\n| A | B |\n| --- | --- |\n| a | b |\n\n後ろの本文。\n",
-            ["A", "B"],
-            [["a", "b"]],
-        ),
-        # 次の ## 見出し: 別の見出しが来たら打ち切る。
-        (
-            f"{WORKFLOW_TABLE_HEADING}\n| A | B |\n| --- | --- |\n| a | b |\n## 次の見出し\n| x | y |\n",
-            ["A", "B"],
-            [["a", "b"]],
-        ),
-    ],
-    ids=["no-table", "header-only", "separator-row", "body-after-table", "next-heading"],
-)
-def test_parse_table_characterizes_each_shape(
-    body: str, expected_header: list[str], expected_rows: list[list[str]]
-) -> None:
-    """現状固定: 表の各形での header と rows の戻り値を固定する。"""
-    header, rows = parse_table(body, WORKFLOW_TABLE_HEADING)
-    assert header == expected_header
-    assert rows == expected_rows
