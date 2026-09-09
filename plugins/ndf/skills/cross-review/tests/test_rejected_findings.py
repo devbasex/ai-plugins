@@ -243,6 +243,37 @@ def test_the_report_lists_the_rejected_findings(tmp_dir, state_mod, capsys):
     assert "src/foo.py:42" in out
 
 
+NIT = {"comment_id": 91, "path": "src/bar.py", "line": 7,
+       "severity": "nit", "summary": "末尾の空白"}
+
+
+def test_the_nit_list_and_the_none_line_are_exclusive(tmp_dir, state_mod, capsys):
+    """**nit の一覧と「なし」は同時に出ない。**
+
+    「なし」は却下した指摘の有無ではなく nit の有無で決まる。却下が空のときだけ
+    「なし」を出す形にすると、一覧を出した直後に「なし」も並ぶ。
+    """
+    _write(tmp_dir, _state(deferred_nits=[NIT], rejected_findings=[]))
+
+    state_mod.cmd_report(argparse.Namespace(pr=PR))
+
+    out = capsys.readouterr().out
+    assert "## 残 deferred nit (1 件)" in out
+    assert "## 残 deferred nit: なし" not in out
+
+
+def test_the_none_line_survives_a_rejected_finding(tmp_dir, state_mod, capsys):
+    """却下した指摘があっても、nit が無ければ「なし」を出す。"""
+    _write(tmp_dir, _state(deferred_nits=[],
+                           rejected_findings=[{**REJECTED, "pr": PR, "round": 1}]))
+
+    state_mod.cmd_report(argparse.Namespace(pr=PR))
+
+    out = capsys.readouterr().out
+    assert "## 残 deferred nit: なし" in out
+    assert "## 却下した指摘 (1 件)" in out
+
+
 # ---------------- 手順書と契約 ----------------
 
 SKILLS = pathlib.Path(__file__).resolve().parents[2]

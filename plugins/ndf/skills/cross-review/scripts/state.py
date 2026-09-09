@@ -3129,6 +3129,11 @@ def cmd_report(args: argparse.Namespace) -> None:
         print()
         print("これらの nit を一括対応する場合は再度 `/ndf:fix <PR#>` を起動してください。")
         print()
+    else:
+        # **「なし」は nit の側の見出しである。** 却下した指摘の有無で出し分けると、
+        # 一覧を出した直後に「なし」も出る（#535 のレビュー）。
+        print("## 残 deferred nit: なし")
+        print()
 
     # **却下した指摘も一覧で出す**（#156）。次のラウンドで同じ論点が再提出されたとき、
     # 既に却下したものかどうかをここで照合できる。
@@ -3141,8 +3146,6 @@ def cmd_report(args: argparse.Namespace) -> None:
                 f"{r.get('path')}:{r.get('line')} — {r.get('summary')}"
             )
             print(f"  却下の理由: {r.get('reason_for_rejection')}")
-    else:
-        print("## 残 deferred nit: なし")
 
 
 # ---------------- main ----------------
