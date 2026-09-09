@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.8.0）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.9.0）
 ```
 
 ### agy
@@ -119,39 +119,48 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.8.0 へ更新するとき
+## v10.9.0 へ更新するとき
 
-**設計工程の通り方が変わります。** 記録の移行は要りません。変更点の一覧は
-[CHANGELOG.md](../../CHANGELOG.md) にあります。
+**ビジネス文書を作る工程が加わりました。** 既存の 4 モードの判定と工程は変わりません。
+変更点の一覧は [CHANGELOG.md](../../CHANGELOG.md) にあります。
 
 | 変わったこと | 中身 |
 | --- | --- |
-| **設計の成果物の決まり方** | モード × 成果物の要否表になりました（`design/references/deliverables.md`）。水準は「必須」と「該当時」の 2 つで、**違いは省いたときに理由が要るかです** |
-| **`light` / `operation` でも設計を通ります** | 触る領域が「すべての変更」以外に 1 つ以上当たるときだけです。**独立した設計文書は作りません**（受け入れ条件か実行の記録と同じファイルの節へ書きます） |
-| **図の階層が 4 つになりました** | 文脈・構成要素・配置・クラスです。クラス図は**変更が触る型だけ**に絞り、実装後の追随義務は負いません |
-| **非機能が 6 大項目になりました** | 可用性・性能拡張性・運用保守性・移行性・セキュリティ・システム環境（IPA 非機能要求グレード）。**現行 4 種（性能・容量・権限・記録）の書き方と例はそのまま残っています** |
-| 設計 Pull Request を出す前の突き合わせ | 同じ文書の中だけで確かめられる 6 つの対を通します。**確かめた結果は残しません** |
+| **モードが 5 つになりました** | `documentation` が加わりました。**読み手へ渡すビジネス文書**（提案資料・稟議書・定例報告・指標の定義・運用マニュアル・説明資料）を作るときに当たります |
+| **工程が 2 つ増えました** | `素材の収集と出典の確定`（`設計` の後）と `体裁レビュー`（`配布` の後）です。**どちらも `documentation` でだけ必須です** |
+| Skill が 4 個増えました | `document-systems` / `document-sources` / `document-drafting` / `layout-review` |
+| `release` に出力の形が 4 つ増えました | スライド / 文書 / 表計算 / ページ |
+| `design` に体裁設計が入りました | `references/layout-<出力の形>.md` 4 本 |
+| `quality-gates` に `documentation` の行が加わりました | 必須の段は 3 で、追加で**事実確認**を求めます |
 
-### `light` / `operation` で設計の案内が出ます
+### `README.md` と `docs/` の変更はこれまでどおり `light` です
 
-**工程の分類が `-`（対象外）から `C`（条件付き）へ変わりました。** 領域に当たらない変更では
-設計を通らなくてよいのですが、進行の記録が無いと配布の時点で「条件付き: 設計」の 1 行が出ます。
-**必須の工程の欠落（「記録なし」）とは別の行で、拒否はしません。**
+**判定を分けるのは読み手です。** リポジトリを読む人へ向けた文書は `documentation` に当たり
+ません。当たるのは、リポジトリの外にいる読み手へ渡す文書だけです。
 
-### 非機能を書いている仕様文書はそのままで動きます
+### 承認の関門は 2 つのままです
 
-**現行 4 種は親を付け替えただけです。** 性能と容量は性能・拡張性、権限はセキュリティ、記録は
-運用・保守性の下に入ります。既にある仕様文書を書き直す必要はありません。
+企画承認は設計 Pull Request のマージ、制作物承認は本番の提出先への操作へ写像しました。
+**新しい関門は作っていません。** `design-approved` のラベル名と `design/` の接頭辞も
+変えていません。
 
-### 手元で確かめる
+### 盤面を使っている場合は値を足してください
 
-```bash
-claude plugin update ndf@ai-plugins   # 再起動するまで反映されません
-codex plugin add ndf@ai-plugins       # 取得元を更新してから
-bash <clone>/plugins/ndf/dev.kiro/install.sh --project <ディレクトリ> --yes
-agy plugin uninstall ndf && agy plugin install <clone>/plugins/ndf/dev.agy
-bash <clone>/plugins/ndf/dev.agy/install-hooks.sh   # agy は hook の差し込みが要ります
-```
+**進行を GitHub Projects へ記録している場合、盤面の単一選択へ値を足す必要があります。**
+リポジトリの変更では完結せず、足りない値は書き込み時に弾かれます。
+
+| フィールド | 足す値 |
+| --- | --- |
+| 進行 | `素材の収集と出典の確定`（`設計` の次）/ `体裁レビュー`（`配布` の次） |
+| モード | `documentation` |
+
+**盤面の宣言（`.ndf/projects.json`）が無いリポジトリでは何もしなくて構いません。**
+
+### 文書の提出先を使うときは宣言が要ります
+
+`documentation` の配布（生成と提出）は `.ndf/document.json` を読みます。**無ければ提出の
+工程が止まるだけで、他の工程は動きます。** 形は
+`development-workflow/references/document-destinations.md` にあります。
 
 ## Playwright テストについて
 
@@ -292,7 +301,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.8.0/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.9.0/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -314,14 +323,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.8.0/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.9.0/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.8.0  <path>
+# => ndf@ai-plugins  installed, enabled  10.9.0  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
