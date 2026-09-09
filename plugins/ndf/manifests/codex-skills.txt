@@ -28,6 +28,8 @@ refactoring
 release-verification
 requirements-design
 design
+document-sources
+document-drafting
 document-restructuring
 document-systems
 retrospective
