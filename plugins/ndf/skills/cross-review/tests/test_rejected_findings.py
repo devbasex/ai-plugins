@@ -218,6 +218,19 @@ def test_items_missing_the_location_are_still_kept(tmp_dir, state_mod):
     assert kept[0]["comment_id"] == 5
 
 
+def test_non_dict_items_in_rejected_list_are_filtered_out(tmp_dir, state_mod):
+    """fix の rejected に辞書以外（文字列・None等）が混在しても辞書要素のみ抽出される。"""
+    _write(tmp_dir, _state())
+    _fix_result(tmp_dir, rejected=[REJECTED, "string-item", None, 123, ["nested"]])
+
+    state_mod.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
+
+    kept = _read(tmp_dir)["rejected_findings"]
+    assert len(kept) == 1
+    assert kept[0]["comment_id"] == REJECTED["comment_id"]
+
+
+
 # ---------------- 報告 ----------------
 
 def test_the_report_lists_the_rejected_findings(tmp_dir, state_mod, capsys):
