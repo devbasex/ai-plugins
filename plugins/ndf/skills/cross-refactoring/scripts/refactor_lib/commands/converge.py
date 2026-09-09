@@ -50,6 +50,52 @@ from ..verify import (
 from ..vocabulary import DEFAULT_TEST_TIMEOUT
 
 
+def _verification_record(
+    group: dict[str, Any],
+    entry: dict[str, Any],
+    command: str,
+    code: int,
+    timed_out: bool,
+    passed: bool,
+) -> dict[str, Any]:
+    """検証 1 回分の記録を作る。**状態は変えない。**
+
+    判定を作る段と、判定を状態へ反映する段を分ける。合否そのものは呼び出し側が
+    決めており、ここは何を記録に残すかだけを持つ。
+    """
+    return {
+        "apply_round": group["apply_round"],
+        "fix_round": entry.get("fix_rounds", 0),
+        "at": statefile.now(),
+        "command": command,
+        "status": "pass" if passed else "fail",
+        "exit_code": code,
+        "timed_out": timed_out,
+    }
+
+
+def _record_verify_pass(
+    path: pathlib.Path,
+    state: dict[str, Any],
+    entry: dict[str, Any],
+    group: dict[str, Any],
+    applied: list[str],
+    command: str,
+) -> None:
+    """テストが通った適用ラウンドを状態へ反映し、結果を出力する。"""
+    for item_id in applied:
+        find_item(state, item_id)["status"] = "done"
+    group["status"] = "verified"
+    state["phase"] = phase_after_group(entry)
+    statefile.save(path, state)
+    info(f"✅ 適用ラウンド {group['apply_round']} のテストが通りました（{command}）")
+    # **外へ出す文章の規約**（#436 決定 6-b）。項目は `<ファイル>#<シンボル>`
+    # を併記し、改修計画は生の URL で添える。
+    for line in item_lines(state, applied):
+        info(f"   {line}")
+    info(f"   {plan_line(state)}")
+
+
 def cmd_verify_round(args: argparse.Namespace) -> None:
     """Step 5 — 適用ラウンドの結果を**テストで**検証する。
 
@@ -81,28 +127,12 @@ def cmd_verify_round(args: argparse.Namespace) -> None:
     code, timed_out = run_with_timeout(command, work, timeout)
     passed = (not timed_out) and code == 0
 
-    entry.setdefault("verifications", []).append({
-        "apply_round": group["apply_round"],
-        "fix_round": entry.get("fix_rounds", 0),
-        "at": statefile.now(),
-        "command": command,
-        "status": "pass" if passed else "fail",
-        "exit_code": code,
-        "timed_out": timed_out,
-    })
+    entry.setdefault("verifications", []).append(
+        _verification_record(group, entry, command, code, timed_out, passed)
+    )
 
     if passed:
-        for item_id in applied:
-            find_item(state, item_id)["status"] = "done"
-        group["status"] = "verified"
-        state["phase"] = phase_after_group(entry)
-        statefile.save(path, state)
-        info(f"✅ 適用ラウンド {group['apply_round']} のテストが通りました（{command}）")
-        # **外へ出す文章の規約**（#436 決定 6-b）。項目は `<ファイル>#<シンボル>`
-        # を併記し、改修計画は生の URL で添える。
-        for line in item_lines(state, applied):
-            info(f"   {line}")
-        info(f"   {plan_line(state)}")
+        _record_verify_pass(path, state, entry, group, applied, command)
         return
 
     # **修正ラウンドの起点をここで記録する。** 記録せずに戻すと `merge-fix` が

@@ -23,7 +23,7 @@ from ..gitfacts import (
     drop_items,
     find_item,
     flush_pending_push,
-    push_head,
+    push_with_retry_marker,
     read_result,
     record_observed_model,
     reported_shas,
@@ -416,11 +416,8 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
         # 次は `verify-round` がテストで検証する。ここではまだ群を閉じない。
         state["phase"] = "verify"
         entry["apply"]["merged_at"] = statefile.now()
-        entry["pending_push"] = True
-        statefile.save(path, state)
-        push_head(state)
-        entry["pending_push"] = False
-        statefile.save(path, state)
+        # 保留の印・保存・push・印の解除は 1 か所が持つ（`push_with_retry_marker`）。
+        push_with_retry_marker(path, state, entry)
 
     if not applied:
         info("この適用ラウンドは取り消しました。検証は行いません")
@@ -582,10 +579,9 @@ def _revert_unverified_apply_round(
         # 項目別の失敗と同じく、**ここで取り消した項目も「対象外」に残す**。
         # 残さないと同じ提案が次のラウンドで再び採用される。
         _defer_abandoned_items(ctx.state, ctx.group)
-        statefile.save(ctx.path, ctx.state)
-        push_head(ctx.state)
-        ctx.entry["pending_push"] = False
-        statefile.save(ctx.path, ctx.state)
+        # 印は取り消しの前に立ててある。ここは保存・push・印の解除を行う
+        # （`push_with_retry_marker` が立て直しても値は変わらない）。
+        push_with_retry_marker(ctx.path, ctx.state, ctx.entry)
 
 
 def _validate_apply_commit_ownership(
@@ -767,10 +763,9 @@ def _apply_drop(
     # `pending_push` は残るので、次の実行は push の再送だけを行う。
     entry["pending_drop"] = []
     entry["apply"]["merged_at"] = statefile.now()
-    statefile.save(path, state)
-    push_head(state)
-    entry["pending_push"] = False
-    statefile.save(path, state)
+    # 印は `run_drop` が立ててある。ここは保存・push・印の解除を行う
+    # （`push_with_retry_marker` が立て直しても値は変わらない）。
+    push_with_retry_marker(path, state, entry)
     return applied
 
 

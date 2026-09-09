@@ -310,6 +310,34 @@ query($owner: String!, $repo: String!, $pr: Int!, $cursor: String) {
 """
 
 
+def _fetch_review_threads_page(
+    owner: str, name: str, pr: int, cursor: Optional[str]
+) -> Optional[dict[str, Any]]:
+    """レビュースレッドを 1 ページ分だけ取得する。取れなければ `None` を返す。
+
+    呼び出しの失敗と応答の解釈の失敗を、どちらも `None` へ畳む。ページ送りの側は
+    「取れたか」だけを見ればよく、GraphQL の呼び方を知らずに済む。
+    """
+    cmd = [
+        "gh", "api", "graphql",
+        "-f", f"query={_REVIEW_THREADS_QUERY}",
+        "-F", f"owner={owner}", "-F", f"repo={name}", "-F", f"pr={pr}",
+    ]
+    if cursor:
+        cmd += ["-F", f"cursor={cursor}"]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        info(f"⚠ レビュースレッドの取得に失敗しました: {r.stderr.strip()[:200]}")
+        return None
+    try:
+        return (
+            json.loads(r.stdout)["data"]["repository"]["pullRequest"]["reviewThreads"]
+        )
+    except (json.JSONDecodeError, KeyError, TypeError) as e:
+        info(f"⚠ レビュースレッドの応答を解釈できませんでした: {e}")
+        return None
+
+
 def resolved_threads_on_github(repo: str, pr: int) -> Optional[set[str]]:
     """GitHub 上で実際に解決済みのレビュースレッド ID を返す。
 
@@ -323,23 +351,8 @@ def resolved_threads_on_github(repo: str, pr: int) -> Optional[set[str]]:
     resolved: set[str] = set()
     cursor: Optional[str] = None
     while True:
-        cmd = [
-            "gh", "api", "graphql",
-            "-f", f"query={_REVIEW_THREADS_QUERY}",
-            "-F", f"owner={owner}", "-F", f"repo={name}", "-F", f"pr={pr}",
-        ]
-        if cursor:
-            cmd += ["-F", f"cursor={cursor}"]
-        r = subprocess.run(cmd, capture_output=True, text=True)
-        if r.returncode != 0:
-            info(f"⚠ レビュースレッドの取得に失敗しました: {r.stderr.strip()[:200]}")
-            return None
-        try:
-            threads = (
-                json.loads(r.stdout)["data"]["repository"]["pullRequest"]["reviewThreads"]
-            )
-        except (json.JSONDecodeError, KeyError, TypeError) as e:
-            info(f"⚠ レビュースレッドの応答を解釈できませんでした: {e}")
+        threads = _fetch_review_threads_page(owner, name, pr, cursor)
+        if threads is None:
             return None
         resolved.update(
             n["id"] for n in threads.get("nodes", []) if n.get("isResolved")
