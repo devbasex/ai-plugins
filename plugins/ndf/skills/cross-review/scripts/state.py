@@ -2187,23 +2187,7 @@ def _die_no_result(pr: int, agent: str, reason: str, msg: str, code: int = 1) ->
     die(msg, code=code)
 
 
-def cmd_read_result(args: argparse.Namespace) -> None:
-    """Step 2.4 — codex/agy の result.json を state にマージ。
-
-    使える結果が残らなかったときは、`NO_RESULT` と理由をラウンドへ残してから止める。
-    終了コードは現行のまま（無い・判定の値を持たないときは 1、JSON として読めない
-    ときは 3）で、進む先を決めるのは次の判定である。
-
-    **ここでは待ち行列を流さない。** 流すと `review-post` の書き戻し先（そのラウンドの
-    担当のエントリ）がまだ無い時点で項目が消える。`_confirm_flushed` は書き戻せず、
-    この後の取り込みが `queued: true` だけを保存するため、待ち行列が空で `queued` の
-    ままの状態ができる。判定はその状態で収束してしまい、投稿の存在も参照も確かめない。
-    **両方の担当を取り込んだ後に流す**（`judge` の入口）。取り込みは判定の直前に
-    しかないため、流す時期が遅れるのは 1 コマンド分である。
-    """
-    agent = args.agent
-    pr = args.pr
-    rfile = pathlib.Path(args.file or _resolve_tmp_dir(pr) / f"{agent}-review-pr{pr}-result.json")
+def _read_review_result_file(pr: int, agent: str, rfile: pathlib.Path) -> dict[str, Any]:
     if not rfile.exists() or rfile.stat().st_size == 0:
         _die_no_result(pr, agent, "missing", f"{agent}: result 未生成 ({rfile})")
 
@@ -2230,6 +2214,27 @@ def cmd_read_result(args: argparse.Namespace) -> None:
             f"({rfile}, type={type(r).__name__})。review launcher の出力形式不正。",
             code=3,
         )
+    return r
+
+
+def cmd_read_result(args: argparse.Namespace) -> None:
+    """Step 2.4 — codex/agy の result.json を state にマージ。
+
+    使える結果が残らなかったときは、`NO_RESULT` と理由をラウンドへ残してから止める。
+    終了コードは現行のまま（無い・判定の値を持たないときは 1、JSON として読めない
+    ときは 3）で、進む先を決めるのは次の判定である。
+
+    **ここでは待ち行列を流さない。** 流すと `review-post` の書き戻し先（そのラウンドの
+    担当のエントリ）がまだ無い時点で項目が消える。`_confirm_flushed` は書き戻せず、
+    この後の取り込みが `queued: true` だけを保存するため、待ち行列が空で `queued` の
+    ままの状態ができる。判定はその状態で収束してしまい、投稿の存在も参照も確かめない。
+    **両方の担当を取り込んだ後に流す**（`judge` の入口）。取り込みは判定の直前に
+    しかないため、流す時期が遅れるのは 1 コマンド分である。
+    """
+    agent = args.agent
+    pr = args.pr
+    rfile = pathlib.Path(args.file or _resolve_tmp_dir(pr) / f"{agent}-review-pr{pr}-result.json")
+    r = _read_review_result_file(pr, agent, rfile)
 
     # 別名フィールドへのフォールバック (`intent` / `comment_count` を使う変則 JSON を
     # 書き出す既知のケースに対応する。仕様としては `event` / `comments_count` が正)
