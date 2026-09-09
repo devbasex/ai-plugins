@@ -65,6 +65,15 @@ def test_json_escape_replaces_each_special_character(value: str, expected: str) 
     assert result.stdout == expected
 
 
+def test_json_escape_replaces_all_five_special_characters_together() -> None:
+    """現状固定: 5 種のエスケープ対象文字（\\, ", \\n, \\t, \\r）をすべて含む入力の実測出力を固定する。"""
+    value = 'back=\\ quote=" nl=\n tab=\t cr=\r'
+    expected = r'back=\\ quote=\" nl=\n tab=\t cr=\r'
+    result = run_lib(f"wf_json_escape {shlex.quote(value)}")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == expected
+
+
 def workflow_table() -> tuple[list[str], list[list[str]]]:
     """工程表の見出しと本文の行を返す。読み取れないことは失敗として扱う。"""
     lines = SKILL.read_text(encoding="utf-8").splitlines()
