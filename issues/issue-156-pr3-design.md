@@ -93,7 +93,7 @@ graph TD
 | キー | 何を持つか |
 | --- | --- |
 | `origin_runtimes` | その指摘を出した担当の一覧。統合しても消さない |
-| `finding_id` | 束ねた先の代表 1 件の値。代表は**先に取り込まれた担当**の指摘とする（`origin_runtimes` の先頭） |
+| `finding_id` | 束ねた先の代表 1 件の値。代表は**先に取り込まれた担当**の指摘とする（`origin_runtimes` の先頭）。**重要度と `verification` は代表の値ではなく組の集約を採る**（後述） |
 | `merged_from` | 代表が持つ。束ねられた側の `finding_id` の一覧 |
 | `merged_into` | **束ねられた側が持つ。**代表の `finding_id`。代表は持たない |
 | `duplicate_candidates` | 近傍で当たったが本文が一致せず、統合しなかった相手の `finding_id` |
@@ -104,15 +104,15 @@ graph TD
 {"finding_id": "kiro-r3-2", "origin_runtimes": ["kiro"], "merged_into": "codex-r3-0"}
 ```
 
-**束ねられた側は消さない。** `review_findings[]` に残したまま `merged_into` へ代表の
-`finding_id` を書く。消すと、反証の結果ファイルがその `finding_id` を指してきたときに
-結び先を失う。区分と収束の判定が読むのは代表の 1 件だけである。
+**束ねられた側は消さない。** `merged_into` へ代表の `finding_id` を書いて残す。消すと、反証の
+結果ファイルがその `finding_id` を指したときに結び先を失う。判定が読むのは代表の 1 件である。
 
-**実行検証は束ねた組の全員の `suggested_check` を対象にする。** 代表の値だけを実行すると、
-被統合側が再現していた事実が取り込みの順序で失われる。**採るのは `reproduced` >
-`not_reproduced` > `not_run` の順で最初に当たった 1 件である**（決定 2 の向き）。全員一致を
-求めると `not_reproduced` と `not_run` の組の代表が `not_run` になり、順 3 を素通りして順 4 で
-`needs_human_judgment` へ昇格する。出所は `verification.finding_id` へ残す。
+**代表は組の集約を持つ。重要度は最も高いもの、実行の結果は `reproduced` > `not_reproduced` >
+`not_run` の順で最初に当たった 1 件である**（決定 2 の向き）。取り込みの順序で決めると、
+`minor` が代表の組は再現しても `verified_non_blocking` へ落ち、`not_reproduced` と `not_run`
+の組は代表が `not_run` になって順 3 を素通りし、順 4 で `needs_human_judgment` へ昇格する。
+実行検証は束ねた組の全員の `suggested_check` を対象にし、出所は `verification.finding_id` へ
+残す。**この集約は 1 段目にも 2 段目にも掛かる。**
 
 **独立して出したかを区別する。** `origin_runtimes` の長さは「同じ指摘へ到達した担当の
 数」であり、反証の `support` の数とは別に数える。支持は他者の指摘を読んだうえでの賛成で、
@@ -465,7 +465,7 @@ sequenceDiagram
 | 独立して出した数と支持の数を区別できる | 同上。`origin_runtimes` の長さと `support` の件数が別に読めること |
 | 近傍だけで本文が違う 2 件を統合しない | 同上。行差 2・本文が別の 2 件が 2 件のまま残り、`duplicate_candidates` に相手が載ること |
 | 束ねられた側の形が決まっている | 同上。被統合側に `merged_into` が、代表に `merged_from` が付くこと |
-| 被統合側の実行結果が失われない | 同上。`not_reproduced` と `reproduced` の組が `reproduced`、`not_reproduced` と `not_run` の組が `not_reproduced` になること |
+| 被統合側の重要度と実行結果が失われない | 同上。`minor` と `major` の組の代表が `major`、`not_reproduced` と `reproduced` の組が `reproduced`、`not_reproduced` と `not_run` の組が `not_reproduced` になること |
 | 提案者以外が賛否を返す | `tests/test_critiques.py`（新設）。自分の指摘へ返さないこと |
 | 5 つの値が記録される | 同上 |
 | `finding_id` で指摘へ結ばれる | 同上。既知でない `finding_id` が `unmatched_critiques` へ残ること |
