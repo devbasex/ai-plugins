@@ -2236,6 +2236,54 @@ def _read_review_result_file(pr: int, agent: str, rfile: pathlib.Path) -> dict[s
     return r
 
 
+def _verify_review_arrival(
+    pr: int, agent: str, repo: str, result: dict[str, Any]
+) -> bool:
+    """投稿が Pull Request に届いたかを確かめ、待ち行列へ積んだかどうかを返す。
+
+    **投稿が届いたかを先に確かめる。** 判定だけが残り、指摘の中身が Pull Request に
+    無いまま修正の工程へ進む経路を塞ぐ（#261）。届いていないときは結果なしとして
+    記録し、判定の側の「同じラウンドで 1 度だけ起動し直す」経路へ乗せる。修正の担当
+    から見ると、結果が残らなかった場合と、結果はあるが指摘が届いていない場合は同じ
+    状態である（読むべき指摘が無い）。
+
+    **待ち行列へ積んだ投稿は、積んだ時点では届いていない。** ここで照会すると
+    結果なしになり、起動し直しで同じ内容が二重に積まれる。届いたことは流した直後に
+    1 度だけ確かめる（`_confirm_flushed`）。
+    """
+    queued = bool(result.get("queued"))
+    if queued:
+        info(
+            f"⚠ {agent}: 投稿を待ち行列へ積んでいます。"
+            "届いたことの確認は流した直後に行います"
+        )
+    post_error = None if queued else result.get("post_error")
+    if post_error:
+        _die_no_result(
+            pr,
+            agent,
+            "not_posted",
+            f"{agent}: レビューの投稿に失敗しています (post_error={post_error})。"
+            " 指摘が Pull Request に届いていないため、結果なしとして扱います",
+        )
+    exists = None if queued else _review_exists(repo, pr, result.get("review_url"))
+    if exists is False:
+        _die_no_result(
+            pr,
+            agent,
+            "not_posted",
+            f"{agent}: 投稿されたレビューを確認できません "
+            f"(review_url={result.get('review_url')!r})。"
+            " 指摘が Pull Request に届いていないため、結果なしとして扱います",
+        )
+    if exists is None and not queued:
+        info(
+            f"⚠ {agent}: レビューの投稿を確認できませんでした。"
+            "申告をそのまま採用します"
+        )
+    return queued
+
+
 def cmd_read_result(args: argparse.Namespace) -> None:
     """Step 2.4 — codex/agy の result.json を state にマージ。
 
@@ -2278,44 +2326,7 @@ def cmd_read_result(args: argparse.Namespace) -> None:
 
     repo = str(st.get("repo") or "")
 
-    # **投稿が届いたかを先に確かめる。** 判定だけが残り、指摘の中身が Pull Request に
-    # 無いまま修正の工程へ進む経路を塞ぐ（#261）。届いていないときは結果なしとして
-    # 記録し、判定の側の「同じラウンドで 1 度だけ起動し直す」経路へ乗せる。修正の担当
-    # から見ると、結果が残らなかった場合と、結果はあるが指摘が届いていない場合は同じ
-    # 状態である（読むべき指摘が無い）。
-    # **待ち行列へ積んだ投稿は、積んだ時点では届いていない。** ここで照会すると
-    # 結果なしになり、起動し直しで同じ内容が二重に積まれる。届いたことは流した直後に
-    # 1 度だけ確かめる（`_confirm_flushed`）。
-    queued = bool(r.get("queued"))
-    if queued:
-        info(
-            f"⚠ {agent}: 投稿を待ち行列へ積んでいます。"
-            "届いたことの確認は流した直後に行います"
-        )
-    post_error = None if queued else r.get("post_error")
-    if post_error:
-        _die_no_result(
-            pr,
-            agent,
-            "not_posted",
-            f"{agent}: レビューの投稿に失敗しています (post_error={post_error})。"
-            " 指摘が Pull Request に届いていないため、結果なしとして扱います",
-        )
-    exists = None if queued else _review_exists(repo, pr, r.get("review_url"))
-    if exists is False:
-        _die_no_result(
-            pr,
-            agent,
-            "not_posted",
-            f"{agent}: 投稿されたレビューを確認できません "
-            f"(review_url={r.get('review_url')!r})。"
-            " 指摘が Pull Request に届いていないため、結果なしとして扱います",
-        )
-    if exists is None and not queued:
-        info(
-            f"⚠ {agent}: レビューの投稿を確認できませんでした。"
-            "申告をそのまま採用します"
-        )
+    queued = _verify_review_arrival(pr, agent, repo, r)
 
     # **申告を GitHub 側と突き合わせる。** 投稿は AI 自身が行うので、失敗しても
     # 結果ファイルには件数が残る。申告のまま進むと、修正担当が読むべき指摘が
