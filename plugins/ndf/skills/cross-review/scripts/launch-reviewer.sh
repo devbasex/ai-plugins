@@ -176,9 +176,26 @@ $EXTRA_REVIEW_BLOCK
   - \`event\` の値は \`APPROVE\` / \`REQUEST_CHANGES\` / \`COMMENT\` のいずれか
   - \`event_downgrade=true\` のとき \`posted_as\` は \`COMMENT\` にダウングレード可
 - payload は **$STEM-round$ROUND-payload.json** に保存
-  （振動検知用、\`{ "comments": [{path, line, body, severity}, ...] }\` 形式）
+  （\`{ "comments": [{path, line, body, severity, evidence, falsification,
+  suggested_check, posted_to}, ...] }\` 形式）
+  - **\`comments[]\` に載せるのは、あなたが出した指摘の全件である。** 投稿したインラインの
+    写しではない。**差分の外を指すために body へ書いた指摘も、422 で body へ移した指摘も
+    載せる**（載せないと進行側から見えない）
+  - \`posted_to\` は \`inline\` / \`body\` のどちらへ投稿したか
+  - \`path\` / \`line\` は body へ書いたときも埋める（body でも「ファイル名:行 + 指摘」の
+    形で書くため、値は手元にある）
+  - \`evidence\` は根拠（対象のコードと到達経路）、\`falsification\` は反証条件
+    （これが成り立てば棄却できる）、\`suggested_check\` は実行できる検証手順
+  - **根拠と反証条件は、別の担当がその指摘を確かめるためのものである。** 確かめられない
+    書き方（「一般によくない」など）は根拠にならない
 
 ## 守るべきこと
+- **発見を終えるまで、参照してよい既存コメントは起動時に渡されたスナップショットに
+  限る。** 同じラウンドの他の担当が投稿した指摘・結果ファイル・進捗ログは参照しない
+  （指摘を出し終えて投稿するまでの間の話で、投稿の手順が既存コメントを引くことは妨げない）
+  - **担当は並列に起動する。** 先に投稿した担当の指摘を読むと、独立に見つけた指摘と
+    区別できなくなる。同じ指摘が 2 者から出たことに意味があるのは、互いを見ていない場合
+    だけである
 - **リポジトリ編集禁止**。gh api での投稿のみ許可
 - worktree 外のパスは触らない
 - gh api 失敗時は err.log にエラー詳細を残し、**result.json を書いてから**終了する

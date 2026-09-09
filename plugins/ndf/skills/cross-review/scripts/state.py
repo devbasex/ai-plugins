@@ -1662,6 +1662,9 @@ def cmd_init(args: argparse.Namespace) -> None:
         # 却下した指摘は per-item で残す（#156）。件数だけでは、次のラウンドへ
         # 渡しても同じ指摘だと判定できない。
         "rejected_findings": [],
+        # 取り込んだ指摘は per-item で残す（#156）。`payload.json` の 1 件に
+        # `pr` / `round` / `agent` と `has_evidence` を添えた形で積む。
+        "review_findings": [],
         # 引き継いだ指摘は再開の時点で決まる。新規の開始では空にする。
         "carried_over": None,
         "final": None,
@@ -2289,6 +2292,60 @@ def _verify_review_arrival(
     return queued
 
 
+# 指摘へ既定を与える項目。**持たない指摘も捨てない**（#156）。捨てると、4 項目へ
+# 対応していない担当の指摘が記録から消える。
+_FINDING_DEFAULTS: dict[str, Any] = {
+    "evidence": "",
+    "falsification": "",
+    "suggested_check": "",
+    # 投稿先。プロンプトが求める値は `inline` / `body` の 2 つで、持たない指摘は
+    # 従来どおり投稿したインラインの写しであるため `inline` として扱う。
+    "posted_to": "inline",
+}
+
+
+def _has_evidence(finding: dict[str, Any]) -> bool:
+    """根拠と反証条件の**両方**が空でないか。
+
+    片方だけでは、別の担当がその指摘を確かめられない。根拠は「何がそう言えるか」で、
+    反証条件は「何が成り立てば棄却できるか」である。
+    """
+    return all(
+        str(finding.get(key) or "").strip()
+        for key in ("evidence", "falsification")
+    )
+
+
+def _collect_review_findings(
+    st: dict[str, Any], agent: str, pr: int, round_no: int
+) -> int:
+    """その担当の `payload.json` を読み、`review_findings[]` へ積む。
+
+    **`comments[]` は投稿の写しではなく、その担当が出した指摘の全件である**（#156）。
+    総評だけへ書いた指摘も入るため、インラインの件数（`comments_count`）とは一致しない。
+    """
+    # **キーは読めたかどうかに関わらず作る。** 旧い状態ファイルを読んだときも、
+    # 以後の取り込みが同じ形で積めるようにする。
+    findings = st.setdefault("review_findings", [])
+    path = _payload_path(agent, pr, round_no)
+    if not path.exists():
+        return 0
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return 0
+    raw = payload.get("comments")
+    items = [c for c in raw if isinstance(c, dict)] if isinstance(raw, list) else []
+    for item in items:
+        finding = {**_FINDING_DEFAULTS, **item}
+        finding.update({
+            "pr": pr, "round": round_no, "agent": agent,
+            "has_evidence": _has_evidence(finding),
+        })
+        findings.append(finding)
+    return len(items)
+
+
 def cmd_read_result(args: argparse.Namespace) -> None:
     """Step 2.4 — codex/agy の result.json を state にマージ。
 
@@ -2359,8 +2416,13 @@ def cmd_read_result(args: argparse.Namespace) -> None:
         "by_severity": r.get("by_severity", {}),
         "queued": queued,
     }
+    # **指摘そのものは別に積む**（#156）。`comments` は投稿したインラインの数で、
+    # GitHub 側の実数との突き合わせに使う。総評だけへ書いた指摘はそこに現れない。
+    collected = _collect_review_findings(st, agent, pr, st["rounds"][-1]["round"])
     _save(pr, st)
     info(f"✅ {agent}: intent={intent} posted_as={posted_as} comments={comments}")
+    if collected:
+        info(f"   指摘の記録: {collected} 件")
 
 
 def _round_ci(st: dict[str, Any], last: dict[str, Any], pr: int) -> dict[str, Any]:

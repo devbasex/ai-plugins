@@ -59,6 +59,12 @@
     {"pr": 123, "round": 1, "path": "src/foo.py", "line": 42, "severity": "nit",
      "summary": "...", "comment_url": "..."}
   ],
+  "review_findings": [
+    {"pr": 123, "round": 1, "agent": "agy", "path": "src/foo.py", "line": 42,
+     "severity": "major", "body": "...", "evidence": "...", "falsification": "...",
+     "suggested_check": "pytest tests/test_foo.py -q", "posted_to": "body",
+     "has_evidence": true}
+  ],
   "rejected_findings": [
     {"pr": 123, "round": 1, "path": "src/foo.py", "line": 42, "severity": "minor",
      "comment_id": 3222849090, "summary": "...", "reason_for_rejection": "..."}
@@ -72,6 +78,10 @@
 ### 重要なフィールド
 
 - `host` — 確定したホスト名（`claude` / `codex` / `agy` / `kiro`）。母集合から外れる
+- `review_findings` — 取り込んだ指摘を **per-item** で蓄積する（#156）。要素は
+  `payload.json` の 1 件に `pr` / `round` / `agent` と `has_evidence` を添えた形である。
+  **`has_evidence` は `evidence` と `falsification` の両方が空でないときだけ真になる**
+  （片方だけでは、別の担当がその指摘を確かめられない）
 - `rejected_findings` — 却下した指摘を **per-item** で蓄積する。`rounds[].fix.rejected` は
   ラウンドごとの件数で、こちらは理由と位置を持つ。**両方を持つのは、件数だけが返る劣化表現
   （`fix` が int を返す経路）があるためである。** そのときは記録が空になり、件数だけが残る。
@@ -135,7 +145,21 @@ launcher が生成するプロンプトに以下を強制している:
 | ファイル | 内容 |
 |---|---|
 | `$TMP_DIR/<agent>-review-pr<PR>-result.json` | `{event, posted_as, comments_count, review_url, by_severity}` のサマリ |
-| `$TMP_DIR/<agent>-review-pr<PR>-round<R>-payload.json` | `{comments: [{path, line, body, severity}, ...]}` 振動検知用 |
+| `$TMP_DIR/<agent>-review-pr<PR>-round<R>-payload.json` | `{comments: [{path, line, body, severity, evidence, falsification, suggested_check, posted_to}, ...]}` |
+
+**`comments[]` が持つのは、その担当が出した指摘の全件である**（#156）。投稿した
+インラインの写しではない。**差分の外を指すために総評へ書いた指摘も、`HTTP 422` で総評へ
+移した指摘も載る。** そのため `result.json` の `comments_count`（投稿したインラインの数）
+とは一致しない。
+
+| 項目 | 何を書くか | 無いときの扱い |
+| --- | --- | --- |
+| `evidence` | 根拠。対象のコードと到達経路 | 空。`has_evidence` が偽になる |
+| `falsification` | 反証条件。これが成り立てば棄却できる | 同上 |
+| `suggested_check` | 実行できる検証手順 | 空 |
+| `posted_to` | `inline` / `body` のどちらへ投稿したか | `inline` として扱う |
+
+**4 項目を持たない指摘も捨てない。** 捨てると、対応していない担当の指摘が記録から消える。
 
 `/ndf:pr-review` の result.json 出力規約に `posted_as` フィールドを含むこと
 （自分PR ダウングレード時に GitHub に実際送った event。デフォルトは `event` と同値）。
