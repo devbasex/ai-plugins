@@ -66,6 +66,7 @@ Pull Request が出る場合も、既定の `Linked pull requests` に並ぶた�
 | 要求と受け入れ条件 | `requirements-design` | `要求と受け入れ条件` |
 | 作業場所の用意 | `worktree` | `作業場所の用意` |
 | 設計 | `design` | `設計` |
+| 素材の収集と出典の確定 | `document-sources` | `素材の収集と出典の確定` |
 | ドキュメント再構成 | `document-restructuring` | `ドキュメント再構成` |
 | ドキュメントレビュー | `design` が `pr` / `cross-review` / `merged` を呼ぶ | `ドキュメントレビュー` |
 | 計画 | `implementation-plan` | `計画` |
@@ -77,6 +78,7 @@ Pull Request が出る場合も、既定の `Linked pull requests` に並ぶた�
 | 確定仕様化 | `plan-to-spec` | `確定仕様化` |
 | 後片付け | `merged` | `後片付け` |
 | 配布 | `release` | `配布` |
+| 体裁レビュー | `layout-review` | `体裁レビュー` |
 | リリース後テスト | `release-verification` | `リリース後テスト` |
 | 振り返り | `retrospective` | `振り返り` |
 
