@@ -300,6 +300,13 @@ def test_the_template_leaves_on_the_failure_word() -> None:
     assert done.stdout.split() == ["fail"], done.stdout
 
 
+def test_the_template_leaves_on_the_limit_word() -> None:
+    with tempfile.TemporaryDirectory() as work:
+        done = watch(work, "publishing\n", IDLE="3600", LIMIT="0")
+    assert done.stdout.split() == ["limit"], done.stdout
+    assert not done.stderr, done.stderr
+
+
 def test_the_word_is_matched_as_a_fixed_string() -> None:
     """`[done]` を正規表現として渡すと `d` だけの行に一致する（#295 の指摘）。"""
     with tempfile.TemporaryDirectory() as work:
