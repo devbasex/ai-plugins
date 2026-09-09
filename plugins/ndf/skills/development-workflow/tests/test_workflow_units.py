@@ -271,6 +271,21 @@ def test_stages_before_pr_excludes_the_exempt_and_pr_stages() -> None:
     assert "Pull Request" not in lines
 
 
+# --- R2-003: モードの有効性の境界（現状固定） ------------------------------
+
+
+def test_is_mode_rejects_the_empty_string() -> None:
+    """現状固定: 空文字列は無効なモードとして終了コード 1 になり、何も出力しない。
+
+    `wf_is_mode` は `WF_MODES` を区切りごと囲んで照合する。区切りの並びを変えると
+    空文字列が一致しうるため、境界としてここで固定する。
+    """
+    result = run_lib("wf_is_mode ''")
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+
+
 def test_repo_slug_reads_an_ssh_origin(tmp_path) -> None:
     repo = init_repo(tmp_path / "ssh", remote="git@github.com:devbasex/ai-plugins.git")
 
