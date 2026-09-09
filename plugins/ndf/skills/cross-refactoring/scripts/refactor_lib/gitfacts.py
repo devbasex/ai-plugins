@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import shutil
 import signal
 import subprocess
 import time
@@ -154,15 +155,7 @@ def _is_test_path(path: str) -> bool:
 
 def commit_touches_tests(work: str, sha: str) -> bool:
     """コミットがテストの置き場所を触っているか。"""
-    out = git_out(work, ["show", "--name-only", "--format=", sha])
-    for path in (out or "").splitlines():
-        lowered = f"/{path.lower()}"
-        name = lowered.rsplit("/", 1)[-1]
-        if any(m in lowered for m in TEST_PATH_MARKERS):
-            return True
-        if any(m in name for m in TEST_NAME_MARKERS):
-            return True
-    return False
+    return any(_is_test_path(p) for p in commit_files(work, sha))
 
 
 def run_with_timeout(
@@ -317,6 +310,34 @@ query($owner: String!, $repo: String!, $pr: Int!, $cursor: String) {
 """
 
 
+def _fetch_review_threads_page(
+    owner: str, name: str, pr: int, cursor: Optional[str]
+) -> Optional[dict[str, Any]]:
+    """レビュースレッドを 1 ページ分だけ取得する。取れなければ `None` を返す。
+
+    呼び出しの失敗と応答の解釈の失敗を、どちらも `None` へ畳む。ページ送りの側は
+    「取れたか」だけを見ればよく、GraphQL の呼び方を知らずに済む。
+    """
+    cmd = [
+        "gh", "api", "graphql",
+        "-f", f"query={_REVIEW_THREADS_QUERY}",
+        "-F", f"owner={owner}", "-F", f"repo={name}", "-F", f"pr={pr}",
+    ]
+    if cursor:
+        cmd += ["-F", f"cursor={cursor}"]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        info(f"⚠ レビュースレッドの取得に失敗しました: {r.stderr.strip()[:200]}")
+        return None
+    try:
+        return (
+            json.loads(r.stdout)["data"]["repository"]["pullRequest"]["reviewThreads"]
+        )
+    except (json.JSONDecodeError, KeyError, TypeError) as e:
+        info(f"⚠ レビュースレッドの応答を解釈できませんでした: {e}")
+        return None
+
+
 def resolved_threads_on_github(repo: str, pr: int) -> Optional[set[str]]:
     """GitHub 上で実際に解決済みのレビュースレッド ID を返す。
 
@@ -330,23 +351,8 @@ def resolved_threads_on_github(repo: str, pr: int) -> Optional[set[str]]:
     resolved: set[str] = set()
     cursor: Optional[str] = None
     while True:
-        cmd = [
-            "gh", "api", "graphql",
-            "-f", f"query={_REVIEW_THREADS_QUERY}",
-            "-F", f"owner={owner}", "-F", f"repo={name}", "-F", f"pr={pr}",
-        ]
-        if cursor:
-            cmd += ["-F", f"cursor={cursor}"]
-        r = subprocess.run(cmd, capture_output=True, text=True)
-        if r.returncode != 0:
-            info(f"⚠ レビュースレッドの取得に失敗しました: {r.stderr.strip()[:200]}")
-            return None
-        try:
-            threads = (
-                json.loads(r.stdout)["data"]["repository"]["pullRequest"]["reviewThreads"]
-            )
-        except (json.JSONDecodeError, KeyError, TypeError) as e:
-            info(f"⚠ レビュースレッドの応答を解釈できませんでした: {e}")
+        threads = _fetch_review_threads_page(owner, name, pr, cursor)
+        if threads is None:
             return None
         resolved.update(
             n["id"] for n in threads.get("nodes", []) if n.get("isResolved")
@@ -439,22 +445,7 @@ def revert_item_commits(
     # 途中で失敗したら**着手前の HEAD まで戻す**。1 項目が複数のコミットを持つとき、
     # 先行して成功した取り消しだけが履歴に残ると、再実行で不整合になって進めなくなる。
     before = git_out(work, ["rev-parse", "HEAD"])
-    for sha in shas:
-        r = subprocess.run(
-            ["git", "revert", "--no-edit", sha],
-            cwd=work, capture_output=True, text=True,
-        )
-        if r.returncode != 0:
-            subprocess.run(["git", "revert", "--abort"], cwd=work,
-                           capture_output=True, text=True)
-            if before:
-                subprocess.run(["git", "reset", "--hard", before], cwd=work,
-                               capture_output=True, text=True)
-            die(
-                f"{item['item_id']} のコミット {sha} を取り消せませんでした: "
-                f"{r.stderr.strip()[:400]}"
-                f"（HEAD を {before} へ戻しました）"
-            )
+    _revert_range(work, shas, before, prefix=f"{item['item_id']} の")
     item["reverted"] = True
     return len(shas)
 
@@ -500,7 +491,9 @@ def _reset_hard(work: str, sha: Optional[str]) -> None:
                        capture_output=True, text=True)
 
 
-def _revert_range(work: str, ordered: list[str], before: Optional[str]) -> None:
+def _revert_range(
+    work: str, ordered: list[str], before: Optional[str], prefix: str = ""
+) -> None:
     """範囲を**新しい順に**全て取り消す。失敗したら着手前へ戻して中断する。
 
     範囲全体を新しい順にたどる取り消しは、履歴をそのまま逆再生するだけなので
@@ -516,7 +509,7 @@ def _revert_range(work: str, ordered: list[str], before: Optional[str]) -> None:
                            capture_output=True, text=True)
             _reset_hard(work, before)
             die(
-                f"コミット {sha} を取り消せませんでした: {r.stderr.strip()[:400]}"
+                f"{prefix}コミット {sha} を取り消せませんでした: {r.stderr.strip()[:400]}"
                 f"（HEAD を {before} へ戻しました）"
             )
 
@@ -974,6 +967,49 @@ def _sync_generated(state: dict[str, Any]) -> None:
     _commit_sync_changes(work, command, _dirty_paths(state, work), plan_rel)
 
 
+# 退避に使う値は共通層が 1 か所で持つ（#524）。**写しは持たない。** 手順書と実装が
+# 別々に同じ文字列を持つと、片方だけが更新される。
+_CREDENTIAL_LIB = (
+    pathlib.Path(__file__).resolve().parents[4] / "scripts" / "lib" / "git-credential.sh"
+)
+
+
+def gh_available() -> bool:
+    """`gh` を使えるか。使えなければ退避しても通らない。"""
+    return shutil.which("gh") is not None
+
+
+def credential_fallback_args() -> list[str]:
+    """共通層が定める退避のオプションを読む。読めなければ空を返す。"""
+    if not _CREDENTIAL_LIB.is_file():
+        return []
+    out = subprocess.run(
+        ["bash", "-c", f'. "{_CREDENTIAL_LIB}"; ndf_git_credential_fallback_args'],
+        capture_output=True, text=True,
+    )
+    if out.returncode != 0:
+        return []
+    return [line for line in out.stdout.split("\n") if line]
+
+
+def _push_with_credential_fallback(args: list[str], cwd: str) -> None:
+    """`git` を実行し、失敗したときだけ退避して**1 度だけ**再試行する。
+
+    **既定の経路は変えない。** helper が正しく動く環境では 1 度目で終わる。
+    再試行を 1 度に限るのは、認証以外の理由（参照の競合・ネットワークの不通）で
+    失敗したときに同じ失敗を繰り返さないためである。
+    """
+    try:
+        sh(["git", *args], cwd=cwd)
+        return
+    except Exception:
+        fallback = credential_fallback_args() if gh_available() else []
+        if not fallback:
+            raise
+    info("↻ credential helper を退避して push をやり直します（gh の認証を使う）")
+    sh(["git", *fallback, *args], cwd=cwd)
+
+
 def push_head(state: dict[str, Any]) -> None:
     """head ブランチへ push する。**`--force` は使わない。**
 
@@ -981,9 +1017,9 @@ def push_head(state: dict[str, Any]) -> None:
     変更が Pull Request へ現れ、取り消しの反映漏れがそのまま残る。
     """
     _sync_generated(state)
-    sh(
-        ["git", "push", "origin", f"HEAD:{state['head_branch']}"],
-        cwd=state["worktrees"]["work"],
+    _push_with_credential_fallback(
+        ["push", "origin", f"HEAD:{state['head_branch']}"],
+        state["worktrees"]["work"],
     )
     # **改修計画のコメントは push の後で更新する**（#436 決定 6）。差分に混ざらない
     # ので push とは独立だが、公開した内容と食い違わないよう後ろへ置く。投稿に

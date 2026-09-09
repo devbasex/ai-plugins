@@ -97,6 +97,19 @@ push と PR 作成は外部（GitHub）への書き込みで、取り消しに�
 git push -u origin <branch-name>
 ```
 
+**credential helper が応答しない環境では、この push が落ちる**（#524）。`gh` は認証済み
+なのに `git` だけが `Authentication failed` を返す。そのときは helper を退避して
+やり直す。
+
+```bash
+git -c credential.helper= -c credential.helper='!gh auth git-credential' \
+    push -u origin <branch-name>
+```
+
+**空の値を先に置く。** `credential.helper` は複数の値を持てる設定で、`git` は宣言された
+順に問い合わせる。空の値だけが一覧を空へ戻す。先に置かないと、応答しない helper が先に
+当たり続け、足した経路へ到達しない。
+
 ### 5. PR作成
 
 - **作成する PR のタイトル・ベースブランチ・ドラフト有無を提示してから実行する**

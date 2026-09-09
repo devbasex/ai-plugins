@@ -21,8 +21,8 @@ import pytest
     "src/services/bar_test.go",
     "web/app.spec.ts",
 ])
-def test_a_test_location_is_recognized(scope, path):
-    assert scope.is_test_location(path) is True
+def test_a_test_location_is_recognized(scope, tmp_path, path):
+    assert scope.is_test_location(path, str(tmp_path)) is True
 
 
 @pytest.mark.parametrize("path", [
@@ -31,13 +31,13 @@ def test_a_test_location_is_recognized(scope, path):
     "plugins/ndf/scripts",
     "docs/latest.md",
 ])
-def test_a_non_test_location_is_not_recognized(scope, path):
-    assert scope.is_test_location(path) is False
+def test_a_non_test_location_is_not_recognized(scope, tmp_path, path):
+    assert scope.is_test_location(path, str(tmp_path)) is False
 
 
-def test_the_judgement_does_not_need_the_directory_to_exist(scope):
+def test_the_judgement_does_not_need_the_directory_to_exist(scope, tmp_path):
     """`--scope` は範囲の宣言である。まだ無いディレクトリを指すことがある。"""
-    assert scope.is_test_location("tests/not-created-yet") is True
+    assert scope.is_test_location("tests/not-created-yet", str(tmp_path)) is True
 
 
 # ---------- `--baseline-test` の探索範囲 ----------
@@ -125,3 +125,57 @@ def test_the_gate_stops_the_run(refactor_lib, refactor, scope, tmp_path):
 def test_the_gate_passes_a_valid_scope(scope, tmp_path):
     scope.require_scope_covers_tests(
         ["src", "tests"], "pytest -q", str(tmp_path))
+
+
+# ---------- 実体としてテストの置き場所を持つ親（#518-2） ----------
+
+def test_a_parent_holding_tests_is_recognized(scope, tmp_path):
+    """名前で当たらなくても、配下に実体があれば置き場所として扱う。"""
+    (tmp_path / "skills" / "development-workflow" / "tests").mkdir(parents=True)
+    assert scope.is_test_location(
+        "skills/development-workflow", str(tmp_path)) is True
+
+
+def test_a_parent_without_tests_is_still_not_recognized(scope, tmp_path):
+    (tmp_path / "skills" / "development-workflow" / "docs").mkdir(parents=True)
+    assert scope.is_test_location(
+        "skills/development-workflow", str(tmp_path)) is False
+
+
+def test_the_scan_does_not_go_deeper_than_one_level(scope, tmp_path):
+    """深く潜ると、無関係な階層のテストを根拠にして関門が素通りする。"""
+    (tmp_path / "src" / "a" / "b" / "tests").mkdir(parents=True)
+    assert scope.is_test_location("src", str(tmp_path)) is False
+
+
+def test_the_returned_location_is_the_one_that_matched(scope, tmp_path):
+    """後段が見るのは置き場所そのものである。親のままでは必ず落ちる。"""
+    (tmp_path / "skills" / "development-workflow" / "tests").mkdir(parents=True)
+    assert scope.test_locations(
+        ["skills/development-workflow"], str(tmp_path),
+    ) == ["skills/development-workflow/tests"]
+
+
+def test_a_location_named_directly_is_returned_as_written(scope, tmp_path):
+    assert scope.test_locations(["tests/services"], str(tmp_path)) == [
+        "tests/services"]
+
+
+def test_a_parent_holding_tests_passes_the_gate(scope, tmp_path):
+    """#518-2 の実測。`tests/` を実体として持つ親を渡して止まらないこと。"""
+    (tmp_path / "skills" / "development-workflow" / "tests").mkdir(parents=True)
+    assert scope.scope_problem(
+        ["skills/development-workflow"],
+        "pytest skills/development-workflow/tests",
+        str(tmp_path),
+    ) is None
+
+
+def test_the_matched_location_is_checked_against_the_search_roots(scope, tmp_path):
+    """返す値が親のままだと、通した直後に同じ関門の別の判定が拒む。"""
+    (tmp_path / "skills" / "development-workflow" / "tests").mkdir(parents=True)
+    (tmp_path / "other").mkdir()
+    problem = scope.scope_problem(
+        ["skills/development-workflow"], "pytest other", str(tmp_path))
+    assert problem is not None
+    assert "skills/development-workflow/tests" in problem

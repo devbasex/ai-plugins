@@ -75,6 +75,10 @@ allowed-tools:
 | 状態の永続化 | `<work>/.cross_refactoring/cross-refactoring-rf<番号>-state.json` に集約。中断・再開可能 |
 | 計測 | 起動時にモデルを固定し、コミットのトレーラーとレビューコメントへ実行主体を残す |
 
+**push が credential helper の不全で落ちたときは、進行側が退避して 1 度だけやり直す**
+（#524）。退避の値は共通層（`<プラグインルート>/scripts/lib/git-credential.sh`）が
+1 か所で持ち、実装がそれを読む。**手順として実行する必要は無い。**
+
 ## 引数
 
 | 引数 | 意味 | 既定 |
