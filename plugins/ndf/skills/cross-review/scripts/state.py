@@ -2362,6 +2362,37 @@ def _round_ci(st: dict[str, Any], last: dict[str, Any], pr: int) -> dict[str, An
     return {"verdict": "success", "sha": sha}
 
 
+def _handle_no_result_round(
+    pr: int, st: dict[str, Any], last: dict[str, Any], no_result: list[str]
+) -> None:
+    last["verdict"] = "no_result"
+    relaunched = last.get("relaunched") or []
+    pending = [a for a in no_result if a not in relaunched]
+    if not pending:
+        # 2 度続けて結果が残らないのは、対象や負荷ではなく実行環境の側の事象である。
+        st["final"] = "error"
+        st["ended_at"] = _now()
+        _save(pr, st)
+        die(
+            f"起動し直した後も結果が残りませんでした: {' '.join(no_result)}。"
+            " 実行環境の側の問題として中断します。最終スイープを通してから"
+            "完了報告へ進んでください",
+            code=1,
+        )
+    last["relaunched"] = relaunched + pending
+    _save(pr, st)
+    print(f"RELAUNCH_AGENTS='{' '.join(pending)}'")
+    print(f"RELAUNCH_AGENTS_CSV={','.join(pending)}")
+    # 互換のために残す。**`both` は codex / agy の 2 者だけを指す語**であるため、
+    # 担当がそれ以外を含むラウンドでは CSV の側を使う。
+    print(f"RELAUNCH_TARGET={'both' if len(pending) == 2 else pending[0]}")
+    info(
+        f"→ 結果を残さなかったレビュアーがいる: {' '.join(pending)}。"
+        "同じラウンドで 1 度だけ起動し直す。"
+    )
+    sys.exit(7)
+
+
 def cmd_judge(args: argparse.Namespace) -> None:
     """Step 3 — intent ベース pass 判定。
 
@@ -2401,32 +2432,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
 
     no_result = _no_result_agents(last, only, reviewers)
     if no_result:
-        last["verdict"] = "no_result"
-        relaunched = last.get("relaunched") or []
-        pending = [a for a in no_result if a not in relaunched]
-        if not pending:
-            # 2 度続けて結果が残らないのは、対象や負荷ではなく実行環境の側の事象である。
-            st["final"] = "error"
-            st["ended_at"] = _now()
-            _save(pr, st)
-            die(
-                f"起動し直した後も結果が残りませんでした: {' '.join(no_result)}。"
-                " 実行環境の側の問題として中断します。最終スイープを通してから"
-                "完了報告へ進んでください",
-                code=1,
-            )
-        last["relaunched"] = relaunched + pending
-        _save(pr, st)
-        print(f"RELAUNCH_AGENTS='{' '.join(pending)}'")
-        print(f"RELAUNCH_AGENTS_CSV={','.join(pending)}")
-        # 互換のために残す。**`both` は codex / agy の 2 者だけを指す語**であるため、
-        # 担当がそれ以外を含むラウンドでは CSV の側を使う。
-        print(f"RELAUNCH_TARGET={'both' if len(pending) == 2 else pending[0]}")
-        info(
-            f"→ 結果を残さなかったレビュアーがいる: {' '.join(pending)}。"
-            "同じラウンドで 1 度だけ起動し直す。"
-        )
-        sys.exit(7)
+        _handle_no_result_round(pr, st, last, no_result)
 
     # **新規の指摘が 0 件なら収束する。** 全員 `APPROVE` は最も止まらない参加者に
     # 律速される。同じ論点の再提出では止まり、新しい観点が出るあいだは回る。
