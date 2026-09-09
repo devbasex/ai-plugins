@@ -75,6 +75,51 @@ def test_facts_come_from_a_real_repository(gitfacts, work):
     assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=work).stdout.strip() == "main"
 
 
+def test_commit_test_changes_reads_an_added_test(gitfacts, work):
+    """現状固定: 行途中の改行は残り、末尾の改行は除かれる。"""
+    sha = _commit(work, "Test: テストを追加", {
+        "tests/test_foo.py": "def test_f():\n    assert f() == 1\n",
+        "src/foo.py": "def f():\n    return 2\n",
+    })
+
+    assert gitfacts.commit_test_changes(str(work), sha) == {
+        "tests/test_foo.py": ([], ["def test_f():\n", "    assert f() == 1"]),
+    }
+
+
+def test_commit_test_changes_reads_both_sides_of_a_modified_test(gitfacts, work):
+    """現状固定: 変更前後の期待値を Git からそれぞれ読み取る。"""
+    _commit(work, "Test: 変更前", {
+        "tests/test_foo.py": "def test_f():\n    assert f() == 1\n",
+    })
+    sha = _commit(work, "Test: 期待値を変更", {
+        "tests/test_foo.py": "def test_f():\n    assert f() == 2\n",
+        "src/foo.py": "def f():\n    return 2\n",
+    })
+
+    assert gitfacts.commit_test_changes(str(work), sha) == {
+        "tests/test_foo.py": (
+            ["def test_f():\n", "    assert f() == 1"],
+            ["def test_f():\n", "    assert f() == 2"],
+        ),
+    }
+
+
+def test_commit_test_changes_reads_a_deleted_test(gitfacts, work):
+    """現状固定: 削除したテストは変更前の行と空の変更後を返す。"""
+    _commit(work, "Test: 削除前", {
+        "tests/test_foo.py": "def test_f():\n    assert f() == 2\n",
+    })
+    (work / "tests" / "test_foo.py").unlink()
+    sha = _commit(work, "Test: テストを削除", {
+        "src/foo.py": "def f():\n    return 2\n",
+    })
+
+    assert gitfacts.commit_test_changes(str(work), sha) == {
+        "tests/test_foo.py": (["def test_f():\n", "    assert f() == 2"], []),
+    }
+
+
 def test_missing_trailers_are_seen_as_missing(verify, gitfacts, work):
     base = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
     sha = _commit(work, "Refactor: トレーラーなし", {"src/foo.py": "def f():\n    return 2\n"})

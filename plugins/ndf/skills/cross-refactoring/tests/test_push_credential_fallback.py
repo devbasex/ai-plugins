@@ -62,6 +62,13 @@ def test_the_reset_actually_changes_which_helper_answers(tmp_path):
 
 # ---------- 進行側の push ----------
 
+def test_missing_shared_library_returns_no_fallback_args(gitfacts, monkeypatch, tmp_path):
+    """現状固定: 共通層が無い環境では例外を出さず退避を省く。"""
+    monkeypatch.setattr(gitfacts, "_CREDENTIAL_LIB", tmp_path / "missing.sh")
+
+    assert gitfacts.credential_fallback_args() == []
+
+
 @pytest.fixture
 def failing_first_push(patch_lib, monkeypatch, gitfacts):
     """1 度目の `git push` だけを失敗させ、呼ばれた引数を記録する。"""

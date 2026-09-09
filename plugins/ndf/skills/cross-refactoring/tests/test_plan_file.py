@@ -87,6 +87,17 @@ def test_plan_shows_the_smell_and_the_technique(plan, tmp_path):
     assert "long_method" in text and "extract_method" in text
 
 
+def test_plan_shows_the_case_and_level_for_a_test_item(plan, tmp_path):
+    """現状固定: テスト項目の表には経路と階層を表示する。"""
+    _, state = _state(tmp_path, items=[_item(kind="test", case="branch", level="unit")])
+
+    text = plan.format_plan(state)
+
+    assert "| branch | unit | — |" in text
+    assert "long_method" not in text
+    assert "extract_method" not in text
+
+
 def test_plan_records_who_proposed_it(plan, tmp_path):
     _, state = _state(tmp_path)
     assert "codex" in plan.format_plan(state)
