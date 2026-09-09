@@ -15,35 +15,44 @@
 #   R = 必須 / C = 条件付き / - = 対象外
 # 表のセルが `—` なら対象外、`任意` か丸括弧で条件を添えたものなら条件付き、
 # それ以外は必須である。食い違いは tests/test_workflow_stage_matrix.py が拾う。
-WF_MODES=$'light\toperation\tlegacy-refactor\tstandard'
-WF_STAGE_MATRIX=$'要求と受け入れ条件\tR\tR\t-\tR
-作業場所の用意\tC\tC\tR\tR
-設計\tC\tC\tR\tR
-ドキュメント再構成\t-\t-\tC\tR
-ドキュメントレビュー\t-\t-\tC\tR
-計画\t-\tR\tR\tR
-実装\tR\tR\tR\tR
-構造改善\t-\t-\tR\tR
-実装レビュー\tR\tR\tR\tR
-完了判定\tR\tR\tR\tR
-Pull Request\tR\tR\tR\tR
-確定仕様化\t-\tC\t-\tR
-後片付け\tR\tR\tR\tR
-配布\tR\tR\tR\tR
-リリース後テスト\t-\tC\tR\tR
-振り返り\t-\tC\tR\tR'
+WF_MODES=$'light\toperation\tlegacy-refactor\tstandard\tdocumentation'
+WF_STAGE_MATRIX=$'要求と受け入れ条件\tR\tR\t-\tR\tR
+作業場所の用意\tC\tC\tR\tR\tR
+設計\tC\tC\tR\tR\tR
+素材の収集と出典の確定\t-\t-\t-\t-\tR
+ドキュメント再構成\t-\t-\tC\tR\tR
+ドキュメントレビュー\t-\t-\tC\tR\tR
+計画\t-\tR\tR\tR\tC
+実装\tR\tR\tR\tR\tR
+構造改善\t-\t-\tR\tR\t-
+実装レビュー\tR\tR\tR\tR\tR
+完了判定\tR\tR\tR\tR\tR
+Pull Request\tR\tR\tR\tR\tR
+確定仕様化\t-\tC\t-\tR\tC
+後片付け\tR\tR\tR\tR\tR
+配布\tR\tR\tR\tR\tR
+体裁レビュー\t-\t-\t-\t-\tR
+リリース後テスト\t-\tC\tR\tR\tC
+振り返り\t-\tC\tR\tR\tR'
 
 # モードの高さ。**列の位置からは導かない**（決定 2-b）。`WF_MODES` の並びをそのまま
 # 高さにすると読みやすさのための並びが高さの根拠として読まれる。母集合が変わっても、
 # 列とは別に持てば高さの定義を直さずに済む。
 #
+# **`documentation` の高さの根拠は工程の数ではない**（マイルストーン 10 の決定 2）。この表で
+# `R` を数えると `standard` が 16 個、`documentation` は 14 個であり、最多ではない。根拠は
+# **混在が分割し損ねた状態であること**にある。`documentation` と他のモードが混ざる Pull Request
+# は分けると定めており、`documentation` の列にしかない必須の工程（素材の収集と出典の確定 /
+# 体裁レビュー）は、`standard` の側で検査すると一度も求められない。混ざっていること自体が
+# 表に出ないため、`documentation` の側で検査する。
 # **列の並びは高さと同じ順である**（決定 10）。表を軽い順に読めるようにするためであって、
 # 導出の根拠ではない。**判定の順序とも別である。** `operation` は判定では 1 番に来るが、
 # 高さは `light` の 1 つ上に置く（工程の重さが `light` と `legacy-refactor` の間にある）。
 WF_MODE_HEIGHT=$'light\t1
 operation\t2
 legacy-refactor\t3
-standard\t4'
+standard\t4
+documentation\t5'
 
 # 報告の引き金になる工程。ここへ進んだ時点で、記録の無い必須の工程を案内する。
 WF_REPORT_STAGE='配布'
@@ -103,11 +112,12 @@ wf_stage_class() {
   local mode="${1:-}" stage="${2:-}" column line name
   column=$(_wf_mode_column "$mode") || return 1
   while IFS= read -r line; do
-    IFS=$'\t' read -r name c1 c2 c3 c4 <<<"$line"
+    IFS=$'\t' read -r name c1 c2 c3 c4 c5 <<<"$line"
     [ "$name" = "$stage" ] || continue
     case "$column" in
       1) printf '%s\n' "$c1" ;; 2) printf '%s\n' "$c2" ;;
       3) printf '%s\n' "$c3" ;; 4) printf '%s\n' "$c4" ;;
+      5) printf '%s\n' "$c5" ;;
     esac
     return 0
   done <<<"$WF_STAGE_MATRIX"

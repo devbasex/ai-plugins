@@ -59,9 +59,10 @@ git diff --stat            # 変更済みなら
 | 順 | モード | 該当条件（いずれか 1 つで該当） |
 | --- | --- | --- |
 | 1 | `operation` | **本番コードも文書も変えず、外部の系の状態だけを変える**（権限や保護の規則の設定、反映先の構成の変更、データの投入・修正、外部サービスへの操作など） |
-| 2 | `standard` | 公開インタフェース（API・イベント・コマンド）の追加・変更・削除 / 既存データの移行を伴うスキーマ変更（列の削除・改名・型変更など） / 認証・認可の変更 / 複数モジュールにまたがる変更 / 重要なドメインルールの追加・変更 / 本番の振る舞いの追加・変更、バグ修正 / 本番の振る舞いを変えない構造変更で、対象にテストが十分にある |
-| 3 | `legacy-refactor` | 本番の振る舞いを変えず本番コードの構造を変える変更で、対象にテストがない・少ない |
-| 4 | `light` | **本番の振る舞いも本番コードの構造も変えない局所変更**（文言・書式・コメント・ドキュメント・静的な設定値、テストの追加、ログ出力の追加など） |
+| 2 | **`documentation`** | **読み手へ渡すビジネス文書を作る・改訂する**（提案資料・稟議書・定例報告・指標の定義・運用マニュアル・説明資料など）。リポジトリの説明文書はこれに当たらない |
+| 3 | `standard` | 公開インタフェース（API・イベント・コマンド）の追加・変更・削除 / 既存データの移行を伴うスキーマ変更（列の削除・改名・型変更など） / 認証・認可の変更 / 複数モジュールにまたがる変更 / 重要なドメインルールの追加・変更 / 本番の振る舞いの追加・変更、バグ修正 / 本番の振る舞いを変えない構造変更で、対象にテストが十分にある |
+| 4 | `legacy-refactor` | 本番の振る舞いを変えず本番コードの構造を変える変更で、対象にテストがない・少ない |
+| 5 | `light` | **本番の振る舞いも本番コードの構造も変えない局所変更**（文言・書式・コメント・ドキュメント・静的な設定値、テストの追加、ログ出力の追加など） |
 
 `light` と `operation` の括弧内は**例示であり限定列挙ではない**。`light` の判定の基準は
 「本番の振る舞いも本番コードの構造も変えない」ことであり、例示に無い変更もこの条件を
@@ -83,6 +84,11 @@ git diff --stat            # 変更済みなら
 スキーマ変更のうち、既存データの移行が不要な追加（インデックスの追加、既定値付き
 NULL 許容列の追加）は `standard` として扱う。判定に迷う場合と境界事例は
 [references/workflow-modes.md](references/workflow-modes.md) を参照する。
+
+**`documentation` に決まったら、2 段目で 6 つのタイプのうち 1 つを選ぶ。** 判定の条件と
+境界事例は [references/document-types.md](references/document-types.md) にある。**`README.md`
+と `docs/` の変更はこのモードに当たらない**（判定を分けるのは読み手で、リポジトリの外にいる
+人へ渡すものだけが当たる）。
 
 ### 3. 判定結果を出力する
 
@@ -106,24 +112,26 @@ mode: standard
 
 ## モードごとに起動する Skill
 
-| 工程 | `light` | `operation` | `legacy-refactor` | `standard` |
-| --- | --- | --- | --- | --- |
-| 要求と受け入れ条件 | `requirements-design` | `requirements-design` | — | `requirements-design` |
-| 作業場所の用意 | `worktree`（主ディレクトリで編集してよいパスだけなら不要） | `worktree`（主ディレクトリで編集してよいパスだけなら不要） | `worktree` | `worktree` |
-| 設計 | `design`（該当時） | `design`（該当時） | `design` | `design` |
-| ドキュメント再構成 | — | — | `document-restructuring`（設計 Pull Request を分けた場合） | `document-restructuring` |
-| ドキュメントレビュー | — | — | `pr` → `cross-review` → `merged`（設計 Pull Request を分けた場合） | `pr` → `cross-review` → `merged` |
-| 計画 | — | `implementation-plan` | `implementation-plan` | `implementation-plan` |
-| 実装 | 直接編集 | 実行 → [operation-run.md](references/operation-run.md) | `refactoring` | `tdd-cycle` |
-| 構造改善 | — | — | `cross-refactoring` | `cross-refactoring` |
-| 実装レビュー | `cross-review` | `cross-review` | `pr-review` | `cross-review` |
-| 完了判定 | `quality-gates` | `quality-gates` | `quality-gates` | `quality-gates` |
-| Pull Request | `pr` | `pr` | `pr` | `pr` |
-| 確定仕様化 | — | `plan-to-spec`（実行で決まった設定が以後の判断の前提になる場合） | — | `plan-to-spec` |
-| 後片付け | `merged` | `merged` | `merged` | `merged` |
-| 配布 | `release` | `release` | `release` | `release` |
-| リリース後テスト | — | `release-verification`（実行した経路とは別の経路で確かめられる場合） | `release-verification` | `release-verification` |
-| 振り返り | — | `retrospective`（実行の手順そのものを変えた場合） | `retrospective` | `retrospective` |
+| 工程 | `light` | `operation` | `legacy-refactor` | `standard` | `documentation` |
+| --- | --- | --- | --- | --- | --- |
+| 要求と受け入れ条件 | `requirements-design` | `requirements-design` | — | `requirements-design` | `requirements-design` |
+| 作業場所の用意 | `worktree`（主ディレクトリで編集してよいパスだけなら不要） | `worktree`（主ディレクトリで編集してよいパスだけなら不要） | `worktree` | `worktree` | `worktree` |
+| 設計 | `design`（該当時） | `design`（該当時） | `design` | `design` | `design` |
+| 素材の収集と出典の確定 | — | — | — | — | `document-sources` |
+| ドキュメント再構成 | — | — | `document-restructuring`（設計 Pull Request を分けた場合） | `document-restructuring` | `document-restructuring` |
+| ドキュメントレビュー | — | — | `pr` → `cross-review` → `merged`（設計 Pull Request を分けた場合） | `pr` → `cross-review` → `merged` | `pr` → `cross-review` → `merged` |
+| 計画 | — | `implementation-plan` | `implementation-plan` | `implementation-plan` | `implementation-plan`（執筆を分担する場合） |
+| 実装 | 直接編集 | 実行 → [operation-run.md](references/operation-run.md) | `refactoring` | `tdd-cycle` | `document-drafting` |
+| 構造改善 | — | — | `cross-refactoring` | `cross-refactoring` | — |
+| 実装レビュー | `cross-review` | `cross-review` | `pr-review` | `cross-review` | `cross-review` |
+| 完了判定 | `quality-gates` | `quality-gates` | `quality-gates` | `quality-gates` | `quality-gates` |
+| Pull Request | `pr` | `pr` | `pr` | `pr` | `pr` |
+| 確定仕様化 | — | `plan-to-spec`（実行で決まった設定が以後の判断の前提になる場合） | — | `plan-to-spec` | `plan-to-spec`（確定版を残す場合） |
+| 後片付け | `merged` | `merged` | `merged` | `merged` | `merged` |
+| 配布 | `release` | `release` | `release` | `release` | `release` |
+| 体裁レビュー | — | — | — | — | `layout-review` |
+| リリース後テスト | — | `release-verification`（実行した経路とは別の経路で確かめられる場合） | `release-verification` | `release-verification` | `release-verification`（提出の後に確かめる経路がある場合） |
+| 振り返り | — | `retrospective`（実行の手順そのものを変えた場合） | `retrospective` | `retrospective` | `retrospective` |
 
 範囲外の課題の起票（`out-of-scope`）はこの表に載らない。工程ではないため、モードで要否を
 決めない（「範囲外の課題を見つけたとき」を参照）。
@@ -225,10 +233,14 @@ flowchart TD
 **増やさないのは、増やすほど「承認したこと」の意味が薄れるためである。** 通過の回数が
 増えると、内容を読まずに通す動きが入る。
 
-| 関門 | いつ | 要否の決まり方 |
-| --- | --- | --- |
-| 設計 Pull Request のマージ | ドキュメントレビューの工程 | **マージ先のチャネルによらず要る** |
-| 本番の系へ届く操作 | 配布の工程、および `operation` の実装の工程 | **届く先が本番の系かどうかで決まる** |
+| 関門 | いつ | 文書での意味 | 要否の決まり方 |
+| --- | --- | --- | --- |
+| 設計 Pull Request のマージ | ドキュメントレビューの工程 | **企画承認** | **マージ先のチャネルによらず要る** |
+| 本番の系へ届く操作 | 配布の工程、および `operation` の実装の工程 | **制作物承認** | **届く先が本番の系かどうかで決まる** |
+
+**`documentation` でも関門は 2 つのままである。** 企画承認は構成案と体裁設計を載せた設計
+Pull Request のマージ、制作物承認は本番の提出先への操作にそのまま当たる。**新しい関門を
+作らない。**
 
 **2 つは要否の決まり方が違う。** 並べて書くと片方に掛かる規則が両方に掛かって読めるため、
 節を分ける。
@@ -239,7 +251,7 @@ flowchart TD
 起点ブランチであっても要る。マージした時点で設計は実装の前提になり、後から直すと設計文書と
 コードの両方を書き直すことになる。この費用はマージ先のチャネルで変わらない。
 
-対象は `standard` である。`legacy-refactor` は設計 Pull Request を分けた
+対象は `standard` と `documentation` である。`legacy-refactor` は設計 Pull Request を分けた
 ときだけ同じ扱いにする。**`light` と `operation` は、設計工程を条件付きで通る場合でも
 対象外である。** どちらも独立した設計文書を作らず、設計 Pull Request を出さない。関門が
 掛かるのは設計だけを載せた Pull Request のマージであって、設計を書くこと自体ではない。
@@ -257,6 +269,7 @@ flowchart TD
 | --- | --- |
 | 配布（マージと公開） | マージ先が本番のチャネルか。**チャネルは系の一種である** |
 | `operation` の実行 | 操作する先が本番の系か。検証用の系への操作は承認を求めない |
+| **文書の提出** | 提出先の `production` が真か。宣言は [references/document-destinations.md](references/document-destinations.md) が定める |
 
 **検証環境や開発版のチャネルへ入れるマージは取り消せるため、承認を求めない。**
 **実装 Pull Request のマージは、それ自体では関門にならない。** 一律で止めると検証への
@@ -370,6 +383,12 @@ flowchart TD
     K -.->|light / operation| L
     L -.->|light / legacy-refactor / 確定仕様化を通さない operation| P
     RL -.->|light / 振り返りを通さない operation| Z[終了]
+    C -.->|documentation| SR[素材の収集と出典の確定]
+    SR -.-> DR
+    F -.->|documentation| DW[執筆]
+    DW -.-> I
+    RL -.->|documentation| LR[体裁レビュー]
+    LR -.-> Q
 ```
 
 - すべてのモードが A（調査）から始まり、D（モード判定）を経て S（作業場所の用意）へ進む。
@@ -377,6 +396,10 @@ flowchart TD
   `legacy-refactor` は A から D へ抜ける。終わりは `light` が RL（配布）、
   `legacy-refactor` と `standard` が T（振り返り）、`operation` は条件に当たれば
   T、当たらなければ RL である
+- **`documentation` は破線の経路（A → B → D → S → C → SR → DR → F → DW → I → J → K → L
+  → P → RL → LR → Q → T）を通る。** SR（素材の収集と出典の確定）が C（設計）の後、
+  LR（体裁レビュー）が RL（配布）の後に立ち、DW（執筆）が H の位置に立つ。R（構造改善）は
+  通らない
 - **`operation` は N（全体テスト → ビルド・結合テスト）を通らない。** `quality-gates` が
   この モードへ課す段階は 3 までである。K の限定的な検証で、**実行そのものの結果**を確かめる
 - **`operation` は DR（ドキュメント再構成）・F（ドキュメントレビュー）・R（構造改善）を
@@ -426,7 +449,12 @@ flowchart TD
 | `light` のつもりが本番の振る舞いを変えると分かった | `standard` へ上げ、受け入れ条件を作り直す |
 | `light` のつもりが本番コードの構造を変えると分かった | テストの有無で `standard` か `legacy-refactor` へ上げる |
 | `legacy-refactor` の途中で公開インタフェースが変わると分かった | `standard` へ上げる。ここまでの差分を分ける |
+| `light` のつもりが読み手へ渡す文書だと分かった | `documentation` へ上げる |
+| `documentation` の途中で本番コードも触ると分かった | **上げ下げではなく分ける。** 文書とコードを別の Pull Request にする |
 | 工程が重いのでモードを下げたい | 下げない。重い理由が条件に該当しているため |
+
+**`documentation` と他のモードの間だけは上げ下げにしない。** 対象が変わったのであって重く
+なったのではない。本番コードを触ると分かった変更を文書のモードへ移すのは誤りである。
 
 モードを下げたい場合は、**変更そのものを分割する**。本番の振る舞いも本番コードの構造も
 変えない部分を先に `light` として出し、残りを本来のモードで進める。
