@@ -340,6 +340,7 @@ _wf_collect_targets() {
 _wf_target_note() {
   local repo="${1:-}" issue="${2:-}" effective="${3:-}"
   local file content mode stage missing=""
+  local -a missing_stages=()
   file=$(wf_state_file "$repo" "$issue") || return 0
   if [ ! -f "$file" ]; then
     printf '  #%s (%s): 進行の記録がありません（モードの記録も、通過工程の記録もありません）\n' "$issue" "$repo"
@@ -356,9 +357,9 @@ _wf_target_note() {
   fi
   while IFS= read -r stage; do
     [ -n "$stage" ] || continue
-    [ -n "$missing" ] && missing="$missing / "
-    missing="$missing$stage"
+    missing_stages+=("$stage")
   done < <(_wf_missing_before_pr "$mode" "$content")
+  missing=$(wf_join ${missing_stages[@]+"${missing_stages[@]}"})
   [ -n "$missing" ] && printf '  #%s (%s): 記録なし: %s\n' "$issue" "$repo" "$missing"
   return 0
 }
