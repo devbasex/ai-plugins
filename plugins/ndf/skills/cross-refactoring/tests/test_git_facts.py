@@ -206,6 +206,16 @@ def test_reverting_in_history_order_succeeds(gitfacts, work):
     assert diff == "", f"着手前との差分が残っている: {diff}"
 
 
+def test_run_test_at_missing_commit_preserves_branch(gitfacts, work):
+    """現状固定: 存在しない SHA は missing を返し、元のブランチを保つ。"""
+    branch = _git("rev-parse", "--abbrev-ref", "HEAD", cwd=work).stdout.strip()
+
+    status = gitfacts.run_test_at(str(work), "0" * 40, "true", branch)
+
+    assert status == "missing"
+    assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=work).stdout.strip() == branch
+
+
 def test_hanging_test_is_cut_off(gitfacts, work):
     """テストが終わらないときは打ち切って失敗にする。
 
