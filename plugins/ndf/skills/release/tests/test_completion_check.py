@@ -47,6 +47,8 @@ COMPLETION_SECTIONS = [
     "## 上限に達したとき",
 ]
 
+FORM_INDEX = "## 形ごとのファイル"
+
 STEP_FOUR = "### 4. 公開する"
 CRITERIA = "## 完了の判定"
 OUTPUT = "## 出力物"
@@ -177,6 +179,20 @@ def test_the_form_files_are_the_known_forms() -> None:
         "form-slide.md",
         "form-spreadsheet.md",
     ]
+
+
+def test_the_form_index_links_to_every_form_file() -> None:
+    """索引の表が 9 形すべてを指す。
+
+    実ファイルが増えても表へ足し忘れると、`SKILL.md` から辿れる先はそのままである。
+    ファイルの有無ではなく、**索引から辿り着けるか**を見る。
+    """
+    listed = [
+        target
+        for target in link_targets(section(read(DISTRIBUTION_FORMS), FORM_INDEX))
+        if target.startswith("form-")
+    ]
+    assert sorted(listed) == [path.name for path in FORM_FILES]
 
 
 @pytest.mark.parametrize("path", FORM_FILES, ids=lambda path: path.name)

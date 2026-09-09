@@ -69,6 +69,10 @@
 | デスクトップアプリ | [form-desktop.md](form-desktop.md) |
 | モバイルアプリ | [form-mobile.md](form-mobile.md) |
 | 手順・設定の変更 | [form-procedure.md](form-procedure.md) |
+| スライド | [form-slide.md](form-slide.md) |
+| 文書 | [form-document.md](form-document.md) |
+| 表計算 | [form-spreadsheet.md](form-spreadsheet.md) |
+| ページ | [form-page.md](form-page.md) |
 
 **エージェントプラグインをサービスや手順・設定へ分類しない。** 利用者が取得の操作をして
 受け取るため、パッケージ・プラグインにあたる。版数ではなく git の ref で取得する版が
