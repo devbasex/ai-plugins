@@ -69,28 +69,38 @@ graph TD
 
 ### 重複の統合（`_merge_duplicates`）
 
-**同じ指摘を複数の担当が出したとき、1 件へ束ねる。** **新しい一致の判定は作らない。**
-既存の一致の判定をそのまま使う。別の物差しを持つと、同じ 2 件が一方では重複で他方では
-別件という状態ができる。
+**同じ指摘を複数の担当が出したとき、1 件へ束ねる。** 読む値は振動の検知と同じ 3 つ組
+（`_finding_keys`、`state.py:2668-2709` の `(ファイル, 行, 正規化した本文)`）である。
+**ただし結び方は同じにしない。**
 
-| 使うもの | 実測した中身 |
-| --- | --- |
-| `_finding_keys`（`state.py:2668-2709`） | `(ファイル, 行, 正規化した本文)` の 3 つ組 |
-| 振動の検知が結ぶ条件（`state.py:2718`） | 位置・近傍（`OSCILLATION_NEAR_LINES` 以内）・本文の**いずれか**で結び付く |
+| 判定 | 結び方 | 誤って結んだときに何が起きるか |
+| --- | --- | --- |
+| 振動の検知（`state.py:2747`） | 位置・近傍（`OSCILLATION_NEAR_LINES` 以内）・本文の**いずれか** | 重複率が 1 件ぶん動く。閾値 0.5 の中で薄まる |
+| 統合（この設計） | 近傍**かつ**本文（同じファイル・行差 3 以内・正規化本文が一致） | 代表以外が区分と収束の判定から外れ、**別の修正事項が消える** |
 
-**束ねる相手は、この条件で結び付く別の担当の指摘である。** ラウンドをまたぐ一致を見る
-振動の検知に対し、こちらは**同じラウンドの中**で見る。見る範囲だけが違い、条件は同じで
-ある。
+**誤りの代償が違うため、条件を同じにしない。** 近傍だけで結ぶと、`api.py:40` の null
+入力と `api.py:42` の認可漏れが 1 件へ束ねられる。**過剰な統合は指摘を失うが、統合し
+損ねても失われるものは無い**（両方が区分に載り、`origin_runtimes` が 1 者ずつになる
+だけである）。非対称であるため、厳しい側へ倒す。
+
+**本文が一致しない候補は統合しない。** 近傍で当たっただけの組は `duplicate_candidates`
+へ両方の `finding_id` を残し、反証で `duplicate` が付いたときに次のラウンドで統合する
+（後述）。**位置の一致は候補の抽出までである。**
+
+ラウンドをまたぐ一致を見る振動の検知に対し、統合は**同じラウンドの中**で見る。
 
 | キー | 何を持つか |
 | --- | --- |
 | `origin_runtimes` | その指摘を出した担当の一覧。統合しても消さない |
 | `finding_id` | 束ねた先の代表 1 件の値。代表は**先に取り込まれた担当**の指摘とする（`origin_runtimes` の先頭） |
-| `merged_from` | 束ねられた側の `finding_id` の一覧 |
+| `merged_from` | 代表が持つ。束ねられた側の `finding_id` の一覧 |
+| `merged_into` | **束ねられた側が持つ。**代表の `finding_id`。代表は持たない |
+| `duplicate_candidates` | 近傍で当たったが本文が一致せず、統合しなかった相手の `finding_id` |
 
 ```json
 {"finding_id": "codex-r3-0", "origin_runtimes": ["codex", "kiro"],
  "merged_from": ["kiro-r3-2"]}
+{"finding_id": "kiro-r3-2", "origin_runtimes": ["kiro"], "merged_into": "codex-r3-0"}
 ```
 
 **束ねられた側は消さない。** `review_findings[]` に残したまま `merged_into` へ代表の
@@ -141,10 +151,28 @@ $ python3 -c "import shlex; print(shlex.split('pytest; rm -rf /'))"
 文字列で任意の設定ファイルとプラグインを読み込ませられる。実行してよいのは、対象を絞る
 引数（テストの位置指定）までである。
 
+#### 位置指定は作業ツリーの中に限る
+
+**`-` で始まらないことだけでは足りない。** 位置指定は `pytest` が import する対象で
+あるため、`pytest ../external/test_payload.py` や `pytest /tmp/evil.py` を通すと、
+レビュワーが書いた文字列でリポジトリの外の任意のコードを実行できる。
+
+**後ろの各トークンを実行時の作業ディレクトリから解決し、その配下に収まることを求める。**
+作業ディレクトリはその Pull Request の作業ツリーの根である。**解決は
+`os.path.realpath` で行う。`os.path.abspath` は symlink をたどらないため使わない。**
+
 ```console
-$ python3 -c "import shlex; print(shlex.split('pytest -p reviewer_plugin'))"
-['pytest', '-p', 'reviewer_plugin']
+$ ln -s ../outside/evil.py repo/link.py     # 作業ツリーの中から外を指す
+$ python3 -c "import os; r=os.path.realpath('repo')
+print(os.path.realpath('repo/link.py').startswith(r+os.sep))"   # realpath
+False
+$ python3 -c "import os; r=os.path.realpath('repo')
+print(os.path.abspath('repo/link.py').startswith(r+os.sep))"    # abspath は見逃す
+True
 ```
+
+**`::` を含むトークンはファイル名の部分だけを解決する。** `tests/t.py::test_x` は
+ファイルとテスト ID を `::` で結ぶ形である。
 
 **実行は `shell=False` で行う。** トークン列をそのまま渡し、シェルを経由させない。
 経由させなければ、`$(...)` や `` ` `` を含むトークンは展開されずに引数として渡る。
@@ -160,7 +188,7 @@ $ python3 -c "import shlex; print(shlex.split('pytest -p reviewer_plugin'))"
 | --- | --- |
 | `reproduced` | 実行が終わり、終了コードが**再現の終了コード**に一致した |
 | `not_reproduced` | 実行が終わり、終了コードが 0 |
-| `not_run` | 宣言が無い / トークン照合に当たらない / 宣言より後ろに `-` で始まるトークンがある / **上記のどちらでもない終了コード** / **上限時間で打ち切った** / **起動に失敗した** |
+| `not_run` | 宣言が無い / トークン照合に当たらない / 宣言より後ろに `-` で始まるトークンがある / **位置指定が作業ツリーの外を指す** / **位置指定を 1 つも持たない** / **上記のどちらでもない終了コード** / **上限時間で打ち切った** / **起動に失敗した** |
 
 #### 「0 でない」を再現としない
 
@@ -195,6 +223,26 @@ $ uv run --with pytest pytest -k 'nothing_matches' test_ok.py >/dev/null 2>&1; e
 
 **再現の向きに注意する。** 指摘は「壊れている」という主張であるため、**テストが失敗する
 ことが再現である。**
+
+#### 終了コードが答えるのは、書かれた検証手順の成否だけである
+
+**対象を絞らない実行は、指摘と無関係な失敗を拾う。** 実測では、対象のテストが通って
+いても同じ範囲に落ちるテストが 1 つあれば 1 を返す。**位置指定を 1 つも持たない値を
+`not_run` とするのはこのためである。**
+
+```console
+$ uv run --with pytest pytest -q >/dev/null 2>&1; echo $?              # 対象は通るが無関係が落ちる
+1
+$ uv run --with pytest pytest -q test_target.py >/dev/null 2>&1; echo $?  # 対象だけ
+0
+```
+
+**それでも「実行した対象が、その指摘を検査しているか」は機械では確かめられない。**
+ここは `suggested_check` を**指摘を出した担当自身が書く**ことに支えている。反証条件と
+検証手順は指摘の一部であり（`issues/issue-156-design.md`）、自分が「これで分かる」と
+宣言した手順が 0 を返したなら、その形では主張が成り立たなかったことになる。**他者が
+書いた手順で棄却される経路は無い。** 実行した値は `verification.command` へ残し、
+`rejection_reason` から読めるようにする。
 
 ### 反証（`cmd_collect_critiques`）
 
@@ -239,7 +287,7 @@ $ uv run --with pytest pytest -k 'nothing_matches' test_ok.py >/dev/null 2>&1; e
 | 1 | `verified_blocking` | `verification.result` が `reproduced`、かつ重要度が `major` 以上 |
 | 2 | `verified_non_blocking` | `verification.result` が `reproduced`、かつ重要度が `minor` 以下 |
 | 3 | `rejected` | `verification.result` が `not_reproduced`、または `refute` が 1 件以上ある |
-| 4 | `needs_human_judgment` | 根拠を持ち、`support` が 1 件以上あり、かつ重要度が `major` 以上 |
+| 4 | `needs_human_judgment` | 根拠を持ち、重要度が `major` 以上で、`support` が 1 件以上**または** `origin_runtimes` が 2 者以上 |
 | 5 | `insufficient_evidence` | 上のいずれにも当たらない |
 
 **実行で再現した指摘を先に採るのは、順序そのもので決定 2 を表すためである。** 再現した
@@ -262,6 +310,13 @@ $ uv run --with pytest pytest -k 'nothing_matches' test_ok.py >/dev/null 2>&1; e
 これにあたる。**`minor` 以下で支持を得た指摘は `insufficient_evidence` へ落ちる**が、
 記録には残るため修正の担当は読める。実行で再現した `minor` を `verified_non_blocking` へ
 分け、収束の判定から外す扱いと揃う。**`minor` は区分を問わず新規性へ入らない。**
+
+**独立に到達した担当の数も、支持と並べて数える。** レビュワーは 2 者である
+（`cross-review` の `SKILL.md`「レビュワーの母集合」）。2 者が同じ指摘を独立に出すと
+`origin_runtimes` が 2 者になり、**提案者以外が 1 人も残らないため `support` は必ず
+0 件になる**（「自分の指摘へは返さない」）。支持の数だけを見ると、最も強い一致である
+**全員一致が `insufficient_evidence` へ落ちて収束する。** `origin_runtimes` の長さを
+別に数える（前述）のはこのためである。
 
 **棄却の理由を残す。** `rejected` の要素へ `rejection_reason` を書く（実行の結果か、
 `refute` の理由）。
@@ -347,7 +402,7 @@ sequenceDiagram
 
 | 大項目 | 実現方式 | 確かめ方 |
 | --- | --- | --- |
-| セキュリティ | 宣言のトークン列と先頭が一致し、後ろに `-` で始まるトークンを持たない値だけを `shell=False` で実行する | 別コマンド・引数の注入・メタ文字を渡すテスト |
+| セキュリティ | 宣言のトークン列と先頭が一致し、後ろに `-` で始まるトークンを持たず、位置指定が作業ツリーの中へ解決される値だけを `shell=False` で実行する | 別コマンド・引数の注入・メタ文字・作業ツリー外のパスを渡すテスト |
 | 可用性 | 実行の失敗（コマンドが無い / 上限時間 / 対象が無い）は `not_run` として扱い、進行を止めない | 不在のコマンド・上限を超えるコマンド・終了コード 4 と 5 を渡すテスト |
 | 移行性 | 宣言が無いリポジトリでは実行検証を行わず、従来どおり動く | 宣言なしのテスト |
 | 保守性 | 区分の決め方を 1 つの関数へ集める | 区分ごとのテスト |
@@ -400,6 +455,8 @@ sequenceDiagram
 | --- | --- |
 | 統合しても提案した担当が残る | `tests/test_merge_duplicates.py`（新設）。`origin_runtimes` に 2 者が載ること |
 | 独立して出した数と支持の数を区別できる | 同上。`origin_runtimes` の長さと `support` の件数が別に読めること |
+| 近傍だけで本文が違う 2 件を統合しない | 同上。行差 2・本文が別の 2 件が 2 件のまま残り、`duplicate_candidates` に相手が載ること |
+| 束ねられた側の形が決まっている | 同上。被統合側に `merged_into` が、代表に `merged_from` が付くこと |
 | 提案者以外が賛否を返す | `tests/test_critiques.py`（新設）。自分の指摘へ返さないこと |
 | 5 つの値が記録される | 同上 |
 | `finding_id` で指摘へ結ばれる | 同上。既知でない `finding_id` が `unmatched_critiques` へ残ること |
@@ -407,6 +464,8 @@ sequenceDiagram
 | 別コマンドを実行しない | 同上。宣言 `pytest` に対し `pytest-danger --evil` が `not_run` になること |
 | 引数の注入を実行しない | 同上。`pytest -c /tmp/evil.ini` と `pytest -p reviewer_plugin` が `not_run` になること |
 | メタ文字を含む値は実行しない | 同上。`pytest; rm -rf /` と `pytest $(whoami)` が `not_run` になること |
+| 作業ツリーの外は実行しない | 同上。`pytest ../evil.py`・`pytest /tmp/evil.py`・外を指す symlink が `not_run` になること |
+| 位置指定を持たない値は実行しない | 同上。宣言 `pytest` と同じ `pytest` が `not_run` になること |
 | 宣言が無ければ実行しない | 同上 |
 | 打ち切りと起動の失敗を再現としない | 同上。上限を超えるコマンドと不在のコマンドが `not_run` になること |
 | 指摘の書き誤りを再現としない | 同上。終了コード 4（対象が無い）と 5（収集 0 件）が `not_run` になること |
@@ -414,6 +473,7 @@ sequenceDiagram
 | `duplicate` / `out_of_scope` が区分を決めない | `tests/test_classify_findings.py`。両者だけを持つ指摘の区分が、値を持たない指摘と変わらないこと |
 | 5 つの区分へ分かれる | `tests/test_classify_findings.py`（新設）。区分ごとに 1 件以上 |
 | 実行で再現した指摘は支持が少なくても残る | 同上 |
+| 全員一致の指摘が収束しない | 同上。`origin_runtimes` 2 者・`support` 0 件・`major` の 1 件が `needs_human_judgment` になること |
 | 実行で再現した指摘は `refute` があっても棄却されない | 同上。`reproduced` と `refute` を両方持つ 1 件 |
 | 実行で再現しない指摘は支持が多くても棄却される | 同上 |
 | `minor` の支持だけではラウンドが増えない | 同上。`minor` かつ `support` 1 件が `insufficient_evidence` になること |
