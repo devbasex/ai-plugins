@@ -114,7 +114,7 @@ scripts/tests/test_push_fallback_docs.py                      # 新設
   `<crf>/scripts/refactor_lib/gitfacts.py` / `<crf>/SKILL.md` /
   `plugins/ndf/skills/pr/SKILL.md` / `plugins/ndf/skills/fix/SKILL.md` /
   `<crf>/tests/test_git_facts.py` / `scripts/tests/test_push_fallback_docs.py`（新設）
-- **変更内容:** 共通層へ `ndf_git_with_fallback` を置き、`push_head` が失敗時に 1 度だけ
+- **変更内容:** 共通層へ `ndf_git_credential_fallback_args` を置き、`push_head` が失敗時に 1 度だけ
   退避して再試行する。**空の値を先に置く**（`-c credential.helper=` →
   `-c credential.helper='!gh auth git-credential'`）。手順書 3 本は同じコマンドを案内する
 - **満たす受け入れ条件:** 8 / 9
