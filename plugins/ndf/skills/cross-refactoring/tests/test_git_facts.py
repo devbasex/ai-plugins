@@ -266,6 +266,41 @@ def test_cutting_off_kills_children_that_ignore_sigterm(gitfacts, work):
     assert not marker.exists(), "SIGTERM を無視する子が生き残っている"
 
 
+def test_read_result_aborts_when_the_file_is_missing(gitfacts, tmp_path):
+    """現状固定: 結果ファイルが無ければ終了コード 2 で中断する。
+
+    起動した CLI が結果を残さなかった場合であり、進行は次のラウンドへ進む。
+    """
+    with pytest.raises(SystemExit) as e:
+        gitfacts.read_result(tmp_path / "missing.json", "claude")
+    assert e.value.code == 2
+
+
+def test_read_result_aborts_on_broken_json(gitfacts, tmp_path):
+    """現状固定: JSON として読めなければ終了コード 2 で中断する。"""
+    path = tmp_path / "result.json"
+    path.write_text('{"items": [', encoding="utf-8")
+
+    with pytest.raises(SystemExit) as e:
+        gitfacts.read_result(path, "claude")
+    assert e.value.code == 2
+
+
+@pytest.mark.parametrize("body", ['[{"item_id": "R1-001"}]', "42"])
+def test_read_result_aborts_when_the_json_is_not_an_object(gitfacts, tmp_path, body):
+    """現状固定: 配列や数値も終了コード 2 で中断する。
+
+    呼び出し側は `payload.get(...)` を呼ぶため、読み込みの時点で弾かないと
+    `AttributeError` になって進行が止まる。
+    """
+    path = tmp_path / "result.json"
+    path.write_text(body, encoding="utf-8")
+
+    with pytest.raises(SystemExit) as e:
+        gitfacts.read_result(path, "claude")
+    assert e.value.code == 2
+
+
 def test_find_item_returns_none_for_a_missing_id_when_not_required(gitfacts):
     """現状固定: `required=False` で存在しない項目 ID を探すと None を返す。
 
