@@ -84,7 +84,7 @@ docs/documents/<文書名>/
 | Notion | [system-notion.md](system-notion.md) |
 | Confluence | [system-confluence.md](system-confluence.md) |
 | SharePoint | [system-sharepoint.md](system-sharepoint.md) |
-| リポジトリ自身 | [system-repo.md](system-repo.md)（取り込みは要らない） |
+| リポジトリ自身 | [system-repo.md](system-repo.md)（生成物が Markdown のときだけ要らない） |
 
 ## 継続的統合で動かすか
 

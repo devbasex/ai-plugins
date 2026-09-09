@@ -38,9 +38,31 @@ allowed-tools:
 
 ## 対象のシステムを決める
 
-**提出先の宣言が決める。** `.ndf/document.json` の `destinations[].system` にある値を採る。
-宣言が無ければこの Skill は動かない（形と書き方は `development-workflow` の
-`references/document-destinations.md` にある）。
+**この Skill が受け取るのは、システム名と用途である**（取得 / 投稿 / 描画）。
+**用途によって、どのシステムを選ぶかが変わる。**
+
+| 用途 | 選ぶシステム | 何が決めるか |
+| --- | --- | --- |
+| 投稿 | 文書を置く先 | `.ndf/document.json` の `destinations[].system`。**宣言が無ければ投稿へ進まない**（形と書き方は `development-workflow` の `references/document-destinations.md`） |
+| 取得 | **素材や既存の文書がある側** | 呼び出し側が渡したシステム名。渡されないときは取得元の URL から見分ける |
+| 描画 | 生成物が載っている先 | 生成した先。本番の提出先ではなく、対になる下書き先である |
+
+**取得で提出先の宣言を要求しない。** 素材が Google Drive にあり、提出先が Notion である構成が
+ある。提出先だけを見ると、取得の参照を取り違える。**提出先がまだ決まっていない既存文書の
+取り込み（[references/import.md](references/import.md) の用途 2）も、宣言の有無によらず行う。**
+
+取得元の URL から見分けるときの手掛かりは次のとおり。
+
+| URL の形 | `system` の値 |
+| --- | --- |
+| `drive.google.com` / `docs.google.com` | `gdrive` |
+| `notion.so` | `notion` |
+| Confluence の空間（`/wiki/spaces/`） | `confluence` |
+| SharePoint / OneDrive（`sharepoint.com`） | `sharepoint` |
+| 対象のリポジトリの中のパス | `repo` |
+
+**見分けが付かないときは推測せず、呼び出し側にシステム名を確かめる。** 別のシステムの参照を
+読むと、取れないものの一覧が実際と食い違う。
 
 | `system` の値 | 読む参照 |
 | --- | --- |
