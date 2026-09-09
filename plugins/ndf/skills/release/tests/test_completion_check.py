@@ -76,7 +76,9 @@ def section(body: str, heading: str) -> str:
         stripped = line.lstrip()
         if stripped.startswith("```"):
             fenced = not fenced
-        elif not fenced and stripped.startswith("#"):
+            collected.append(line)
+            continue
+        if not fenced and stripped.startswith("#"):
             level = len(stripped) - len(stripped.lstrip("#"))
             if level <= depth:
                 break
