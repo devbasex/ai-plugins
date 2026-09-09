@@ -62,13 +62,9 @@ def read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def heading_level(heading: str) -> int:
-    return len(heading) - len(heading.lstrip("#"))
-
-
 def section(body: str, heading: str) -> str:
     """見出しから、同じか浅い深さの次の見出しまでを返す。\n\n    囲みの中の行は見出しとして数えない。出力物の雛形は Markdown の見出しを含む。\n    """
-    depth = heading_level(heading)
+    depth = len(heading) - len(heading.lstrip("#"))
     lines = body.splitlines()
     try:
         start = next(i for i, line in enumerate(lines) if line.strip() == heading)
@@ -81,7 +77,7 @@ def section(body: str, heading: str) -> str:
         if stripped.startswith("```"):
             fenced = not fenced
         elif not fenced and stripped.startswith("#"):
-            level = heading_level(stripped)
+            level = len(stripped) - len(stripped.lstrip("#"))
             if level <= depth:
                 break
         collected.append(line)
