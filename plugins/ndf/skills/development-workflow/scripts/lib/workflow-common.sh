@@ -248,6 +248,13 @@ wf_parse_sync() {
 # 戻り、プラグインルートを外す。4 階層の相対で指す形は #293 で契約として固定した。
 WF_CLOSING_ISSUES="$(dirname "${BASH_SOURCE[0]}")/../../../../scripts/lib/closing-issues.sh"
 
+_wf_read_file() {
+  local file="${1:-}"
+  if [ -f "$file" ]; then
+    cat -- "$file" 2>/dev/null || true
+  fi
+}
+
 # `gh pr create` の本文を取り出す。取れなければ 1 を返す。
 #
 # 本文の渡し方は 2 つある（`--body` と `--body-file`）。**短い形も見る**（`-b` / `-F`）。
@@ -257,7 +264,7 @@ _wf_pr_create_body() {
     if [ -n "$want" ]; then
       case "$want" in
         text) body="$tok" ;;
-        file) [ -f "$tok" ] && body=$(cat -- "$tok" 2>/dev/null) || body="" ;;
+        file) body=$(_wf_read_file "$tok") ;;
       esac
       want=""
       continue
@@ -270,8 +277,7 @@ _wf_pr_create_body() {
       --body-file|-F) want=file ;;
       --body=*) body="${tok#--body=}" ;;
       --body-file=*)
-        tok="${tok#--body-file=}"
-        [ -f "$tok" ] && body=$(cat -- "$tok" 2>/dev/null) || body=""
+        body=$(_wf_read_file "${tok#--body-file=}")
         ;;
     esac
   done < <(wf_split "$cmd")
