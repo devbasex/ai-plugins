@@ -2417,6 +2417,43 @@ def _handle_no_result_round(
     sys.exit(7)
 
 
+def _finalize_converged_round(
+    pr: int,
+    st: dict[str, Any],
+    last: dict[str, Any],
+    findings_measurable: bool,
+) -> None:
+    ci = _round_ci(st, last, pr)
+    last["ci"] = ci
+    print(f"CI_VERDICT={ci['verdict']}")
+    if ci["verdict"] == "code_failure":
+        last["verdict"] = "changes_requested"
+        _save(pr, st)
+        info(
+            f"→ 両方 APPROVE だが継続的統合が失敗している: {' '.join(ci['failed'])}。"
+            "修正へ。"
+        )
+        sys.exit(2)
+    last["verdict"] = "approved"
+    st["final"] = "approved"
+    st["ended_at"] = _now()
+    _save(pr, st)
+    if ci["verdict"] == "meta_only":
+        info(f"⚠ {ci['note']}")
+    elif ci["verdict"] == "pending":
+        info(
+            f"⚠ 未完了の検査ジョブが残ったまま収束する: {' '.join(ci['pending'])}。"
+            "完了は待たない"
+        )
+    elif ci["verdict"] == "unverified":
+        info(f"⚠ 継続的統合を確かめられないまま収束する: {ci['reason']}")
+    info(
+        "✅ 新しい指摘が出なくなった。収束。" if findings_measurable
+        else "✅ 全員が承認した。収束。"
+    )
+    sys.exit(0)
+
+
 def cmd_judge(args: argparse.Namespace) -> None:
     """Step 3 — intent ベース pass 判定。
 
@@ -2476,35 +2513,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
         sys.exit(8)
 
     if converged:
-        ci = _round_ci(st, last, pr)
-        last["ci"] = ci
-        print(f"CI_VERDICT={ci['verdict']}")
-        if ci["verdict"] == "code_failure":
-            last["verdict"] = "changes_requested"
-            _save(pr, st)
-            info(
-                f"→ 両方 APPROVE だが継続的統合が失敗している: {' '.join(ci['failed'])}。"
-                "修正へ。"
-            )
-            sys.exit(2)
-        last["verdict"] = "approved"
-        st["final"] = "approved"
-        st["ended_at"] = _now()
-        _save(pr, st)
-        if ci["verdict"] == "meta_only":
-            info(f"⚠ {ci['note']}")
-        elif ci["verdict"] == "pending":
-            info(
-                f"⚠ 未完了の検査ジョブが残ったまま収束する: {' '.join(ci['pending'])}。"
-                "完了は待たない"
-            )
-        elif ci["verdict"] == "unverified":
-            info(f"⚠ 継続的統合を確かめられないまま収束する: {ci['reason']}")
-        info(
-            "✅ 新しい指摘が出なくなった。収束。" if findings_measurable
-            else "✅ 全員が承認した。収束。"
-        )
-        sys.exit(0)
+        _finalize_converged_round(pr, st, last, findings_measurable)
 
     last["verdict"] = "changes_requested"
     _save(pr, st)
