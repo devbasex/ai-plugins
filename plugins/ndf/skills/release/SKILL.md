@@ -26,6 +26,15 @@ allowed-tools:
 | デスクトップアプリ | Windows / macOS のアプリ | 利用者が導入する。署名が要る |
 | モバイルアプリ | iOS / Android のアプリ | ストアの審査を経て公開される |
 | 手順・設定 | 運用手順 / 設定の変更 | 利用者へ配る |
+| スライド | 提案資料 / 月次の報告 / 説明資料 | 提出先へ置き、読み手が開く |
+| 文書 | 提案書 / 稟議書 / 報告書 | 同上 |
+| 表計算 | 指標の管理表 / 稟議の内訳 | 同上 |
+| ページ | 運用マニュアル / 稟議のページ | 同上 |
+
+**下の 4 つ（スライド / 文書 / 表計算 / ページ）は `documentation` モードの配布である。**
+上の 5 つと違い、**配布が生成と提出の 2 段になる**。生成は対になる下書き先へ行い、その間に
+生成物の内容照合と体裁レビューと制作物承認が入る。**投稿の手順は形ではなく置き先のシステムが
+持つ**（`document-systems` の `system-<名前>.md`）。
 
 形ごとの詳細は [references/distribution-forms.md](references/distribution-forms.md) の索引から辿る。
 **着手したら、対象の形のファイルだけを読んでから手順へ入る。** 探しに行くのは、読んだ
@@ -284,7 +293,8 @@ Pull Request が最後かどうかを判断できない。
 
 - [references/distribution-forms.md](references/distribution-forms.md) — 形の索引と、形をまたぐ決まり。
   手順は形ごとのファイル（`form-package-plugin.md` / `form-service.md` / `form-desktop.md` /
-  `form-mobile.md` / `form-procedure.md`）にある
+  `form-mobile.md` / `form-procedure.md` / `form-slide.md` / `form-document.md` /
+  `form-spreadsheet.md` / `form-page.md`）にある
 - [references/completion-check.md](references/completion-check.md) — 公開の操作が済んだことの
   確かめ方のうち、形で変わらないもの。ログの扱い・待ちの上限・照会の間隔
 - `/ndf:merged` — この工程の前に行うマージ後の後片付け

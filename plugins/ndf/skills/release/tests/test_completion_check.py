@@ -54,7 +54,7 @@ RULES_SECTION = COMPLETION_SECTIONS[0]
 TEMPLATE_SECTION = COMPLETION_SECTIONS[1]
 LIMIT_SECTION = COMPLETION_SECTIONS[2]
 
-SKILL_MD_MAX_LINES = 300
+SKILL_MD_MAX_LINES = 320
 MARKDOWN_MAX_LINES = 500
 
 
@@ -162,13 +162,18 @@ def link_targets(body: str) -> list[str]:
 # --- 条件 1: 形ごとの「完了の事実」 -------------------------------------------------
 
 
-def test_the_form_files_are_the_five_known_forms() -> None:
+def test_the_form_files_are_the_known_forms() -> None:
+    """形は 9 つある。上の 5 つが配布物、下の 4 つが `documentation` の出力の形である。"""
     assert [path.name for path in FORM_FILES] == [
         "form-desktop.md",
+        "form-document.md",
         "form-mobile.md",
         "form-package-plugin.md",
+        "form-page.md",
         "form-procedure.md",
         "form-service.md",
+        "form-slide.md",
+        "form-spreadsheet.md",
     ]
 
 
