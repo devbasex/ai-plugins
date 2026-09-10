@@ -2577,6 +2577,50 @@ def _collect_review_findings(
     return len(items)
 
 
+def _resolve_result_aliases(r: dict[str, Any]) -> tuple[str | None, str | None, Any]:
+    """result.json の別名フィールドを正規のキーへ解決する。
+
+    `intent` / `comment_count` を使う変則 JSON を書き出す既知のケースに対応する。
+    仕様としては `event` / `comments_count` が正で、そちらを優先する。
+    """
+    intent = r.get("event") or r.get("intent")
+    posted_as = r.get("posted_as") or intent
+    comments = r.get("comments_count")
+    if comments is None:
+        comments = r.get("comment_count")
+    return intent, posted_as, comments
+
+
+def _verify_declared_comments(
+    repo: str,
+    pr: int,
+    agent: str,
+    comments: Any,
+    review_url: str | None,
+    queued: bool,
+) -> None:
+    """**申告を GitHub 側と突き合わせる。**
+
+    投稿は AI 自身が行うので、失敗しても結果ファイルには件数が残る。申告のまま進むと、
+    修正担当が読むべき指摘が GitHub 上に存在しないまま収束判定まで走る
+    （実測: 申告 2 件に対しスレッド 0）。
+    """
+    declared = _as_count(comments)
+    if declared > 0 and not queued:
+        actual = _posted_comment_count(repo, pr, review_url)
+        if actual is None:
+            info(
+                f"⚠ {agent}: 投稿されたコメント数を確認できませんでした。"
+                f"申告（{declared} 件）をそのまま採用します"
+            )
+        elif actual < declared:
+            die(
+                f"{agent}: インラインコメントの申告 {declared} 件に対し、"
+                f"GitHub 上には {actual} 件しかありません。投稿が届いていないため"
+                "中断します。レビューを投稿し直してから再実行してください"
+            )
+
+
 def cmd_read_result(args: argparse.Namespace) -> None:
     """Step 2.4 — codex/agy の result.json を state にマージ。
 
@@ -2596,13 +2640,7 @@ def cmd_read_result(args: argparse.Namespace) -> None:
     rfile = pathlib.Path(args.file or _resolve_tmp_dir(pr) / f"{agent}-review-pr{pr}-result.json")
     r = _read_review_result_file(pr, agent, rfile)
 
-    # 別名フィールドへのフォールバック (`intent` / `comment_count` を使う変則 JSON を
-    # 書き出す既知のケースに対応する。仕様としては `event` / `comments_count` が正)
-    intent = r.get("event") or r.get("intent")
-    posted_as = r.get("posted_as") or intent
-    comments = r.get("comments_count")
-    if comments is None:
-        comments = r.get("comment_count")
+    intent, posted_as, comments = _resolve_result_aliases(r)
 
     if intent is None:
         _die_no_result(
@@ -2621,23 +2659,7 @@ def cmd_read_result(args: argparse.Namespace) -> None:
 
     queued = _verify_review_arrival(pr, agent, repo, r)
 
-    # **申告を GitHub 側と突き合わせる。** 投稿は AI 自身が行うので、失敗しても
-    # 結果ファイルには件数が残る。申告のまま進むと、修正担当が読むべき指摘が
-    # GitHub 上に存在しないまま収束判定まで走る（実測: 申告 2 件に対しスレッド 0）。
-    declared = _as_count(comments)
-    if declared > 0 and not queued:
-        actual = _posted_comment_count(repo, pr, r.get("review_url"))
-        if actual is None:
-            info(
-                f"⚠ {agent}: 投稿されたコメント数を確認できませんでした。"
-                f"申告（{declared} 件）をそのまま採用します"
-            )
-        elif actual < declared:
-            die(
-                f"{agent}: インラインコメントの申告 {declared} 件に対し、"
-                f"GitHub 上には {actual} 件しかありません。投稿が届いていないため"
-                "中断します。レビューを投稿し直してから再実行してください"
-            )
+    _verify_declared_comments(repo, pr, agent, comments, r.get("review_url"), queued)
 
     st["rounds"][-1][agent] = {
         "intent": intent,
