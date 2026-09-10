@@ -1,8 +1,9 @@
 # NDF の版ごとの決定と理由（v6.1.0〜v10.5.1）
 
 `CLAUDE.md` から移した、出た版の記録である。**その版で何を決め、なぜそう決めたか**を残す。
-変更点の列挙は `CHANGELOG.md` にあり、こちらは判断の理由を持つ。**現行版の判断だけが
-`CLAUDE.md` にあり、版を配布した時点でこちらへ移す。**
+変更点の列挙は `CHANGELOG.md` にあり、こちらは判断の理由を持つ。**`CLAUDE.md` へ書くのは
+現行版で決めたことだけで、版を配布した時点でこちらへ移す。** そのため `CLAUDE.md` に版の段落が
+1 つも無いことがある（配布の直後がその状態で、現行版で新しく決めたときに書き足される）。
 
 v6.1.0 で開発方法論レイヤーの 5 個（`development-workflow` / `requirements-design` / `tdd-cycle` / `refactoring`（当時は `safe-refactoring`）/ `quality-gates`）を追加した。モード判定の基準を持つのは `development-workflow` だけで、他の Skill とエージェント定義は判定結果を受け取る側に徹する。
 
