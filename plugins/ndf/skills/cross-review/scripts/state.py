@@ -3106,6 +3106,30 @@ def _finding_keys(
     return keys
 
 
+def _counted_finding_keys(
+    st: dict[str, Any], round_no: int
+) -> list[tuple[str, int, str]]:
+    """新規性が数える指摘を、`_finding_keys` と同じ 3 つ組で返す（#156）。
+
+    **一致の判定は変えない。** 変えるのは母集合だけである。
+    """
+    keys: list[tuple[str, int, str]] = []
+    for finding in st.get("review_findings") or []:
+        if finding.get("round") != round_no or finding.get("merged_into"):
+            continue
+        if _apply_classification(finding) not in COUNTED_CLASSIFICATIONS:
+            continue
+        try:
+            line = int(finding.get("line"))
+        except (TypeError, ValueError):
+            continue
+        path = str(finding.get("path") or "")
+        if not path:
+            continue
+        keys.append((path, line, _normalized_body(finding.get("body"))))
+    return keys
+
+
 def _new_finding_count(st: dict[str, Any], pr: int) -> tuple[int, bool]:
     """最後のラウンドの新しい指摘の `(件数, 測れたかどうか)` を返す。
 
@@ -3127,9 +3151,16 @@ def _new_finding_count(st: dict[str, Any], pr: int) -> tuple[int, bool]:
     same_pr = [r for r in rounds if r.get("pr") == st.get("current_pr")]
     if not same_pr:
         return 0, False
-    curr = _finding_keys(st, pr, same_pr[-1]["round"])
+    round_no = same_pr[-1]["round"]
+    curr = _finding_keys(st, pr, round_no)
+    # **測れたかどうかは区分で絞る前に決める。** 全件が `rejected` になったラウンドを
+    # 「測れなかった」と扱うと、元の REQUEST_CHANGES のまま終わらない。
     if not curr:
         return 0, False
+    # **区分を持つラウンドは、数える 2 つへ絞る**（#156）。持たないラウンドは従来どおり
+    # 全件を数える（旧い状態ファイルと、3 本目より前に開いたラウンドがこれに当たる）。
+    if any(f.get("round") == round_no for f in st.get("review_findings") or []):
+        curr = _counted_finding_keys(st, round_no)
     if len(same_pr) < 2:
         return len(curr), True
     prev = _finding_keys(st, pr, same_pr[-2]["round"])

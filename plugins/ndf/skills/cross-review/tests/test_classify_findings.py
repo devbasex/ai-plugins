@@ -190,3 +190,74 @@ def test_a_merged_side_is_not_counted(state_mod):
 
 def test_nothing_counted_without_findings(state_mod):
     assert counted(state_mod, []) == []
+
+
+# ---------- 新規性への接続 ----------
+
+def _payload(tmp_dir, agent, pr, round_no, comments):
+    import json
+    (tmp_dir / f"{agent}-review-pr{pr}-round{round_no}-payload.json").write_text(
+        json.dumps({"comments": comments}))
+
+
+def test_the_new_count_uses_the_classification(state_mod, tmp_path, monkeypatch):
+    """**新規性は区分で絞った集合を数える。**"""
+    monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
+    st = {
+        "current_pr": 1, "repo": "o/r",
+        "rounds": [{"round": 1, "pr": 1}],
+        "review_findings": [
+            _finding(finding_id="a", path="a.py", line=1,
+                     verification=_verified("reproduced")),
+            _finding(finding_id="b", path="b.py", line=2,
+                     verification=_verified("not_reproduced")),
+        ],
+    }
+    _payload(tmp_path, "codex", 1, 1, [
+        {"path": "a.py", "line": 1, "body": "x", "severity": "major"},
+        {"path": "b.py", "line": 2, "body": "y", "severity": "major"},
+    ])
+
+    count, measurable = state_mod._new_finding_count(st, 1)
+
+    assert measurable is True
+    assert count == 1          # rejected の 1 件は数えない
+
+
+def test_the_old_path_is_used_without_classifications(state_mod, tmp_path, monkeypatch):
+    """**区分を持たないラウンドは、従来の数え方へ落ちる。**"""
+    monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
+    st = {"current_pr": 1, "repo": "o/r", "rounds": [{"round": 1, "pr": 1}]}
+    _payload(tmp_path, "codex", 1, 1, [
+        {"path": "a.py", "line": 1, "body": "x", "severity": "major"},
+        {"path": "b.py", "line": 2, "body": "y", "severity": "major"},
+    ])
+
+    count, measurable = state_mod._new_finding_count(st, 1)
+
+    assert measurable is True
+    assert count == 2          # 区分が無いため全件を数える
+
+
+def test_measurability_is_decided_before_narrowing(state_mod, tmp_path, monkeypatch):
+    """**測れたかどうかは区分で絞る前に決める。**
+
+    全件が `rejected` になったラウンドを「測れなかった」と扱うと、元の
+    `REQUEST_CHANGES` のまま終わらない。
+    """
+    monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
+    st = {
+        "current_pr": 1, "repo": "o/r",
+        "rounds": [{"round": 1, "pr": 1}],
+        "review_findings": [
+            _finding(finding_id="a", path="a.py", line=1,
+                     verification=_verified("not_reproduced")),
+        ],
+    }
+    _payload(tmp_path, "codex", 1, 1, [
+        {"path": "a.py", "line": 1, "body": "x", "severity": "major"}])
+
+    count, measurable = state_mod._new_finding_count(st, 1)
+
+    assert measurable is True   # 読めている
+    assert count == 0           # 数える区分が 0 件
