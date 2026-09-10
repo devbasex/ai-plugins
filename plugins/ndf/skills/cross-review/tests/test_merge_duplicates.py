@@ -148,3 +148,107 @@ def test_nothing_happens_without_findings(state_mod):
     st = {}
     state_mod._merge_duplicates(st, round_no=1)
     assert st.get("review_findings", []) == []
+
+
+# ---------- 2 段目（申告による統合） ----------
+
+def merge_declared(state_mod, findings):
+    st = {"review_findings": list(findings)}
+    state_mod._merge_declared_duplicates(st, round_no=1)
+    return st["review_findings"]
+
+
+def _with_critique(finding, agent, verdict, target=None):
+    c = {"agent": agent, "verdict": verdict, "reason": "r"}
+    if target:
+        c["duplicate_of"] = target
+    finding.setdefault("critiques", []).append(c)
+    return finding
+
+
+def test_a_mutual_duplicate_is_merged(state_mod):
+    """**機械では結べない重複を担当が見つける。** 相互の申告で束ねる。"""
+    a = _with_critique(
+        _finding("codex-r1-0", "codex", "api.py", 40, "null で落ちる"),
+        "agy", "duplicate", "kiro-r1-0")
+    b = _with_critique(
+        _finding("kiro-r1-0", "kiro", "api.py", 42, "None が渡る"),
+        "agy", "duplicate", "codex-r1-0")
+
+    out = by_id(merge_declared(state_mod, [a, b]))
+
+    assert out["codex-r1-0"]["merged_from"] == ["kiro-r1-0"]
+    assert out["kiro-r1-0"]["merged_into"] == "codex-r1-0"
+    assert out["codex-r1-0"]["origin_runtimes"] == ["codex", "kiro"]
+
+
+def test_a_one_sided_duplicate_is_not_merged(state_mod):
+    """**2 段目は相互の申告に限る。** 片側だけでは束ねない。"""
+    a = _with_critique(
+        _finding("codex-r1-0", "codex", "api.py", 40, "null で落ちる"),
+        "agy", "duplicate", "kiro-r1-0")
+    b = _finding("kiro-r1-0", "kiro", "api.py", 42, "None が渡る")
+
+    out = by_id(merge_declared(state_mod, [a, b]))
+
+    assert "merged_from" not in out["codex-r1-0"]
+    assert "merged_into" not in out["kiro-r1-0"]
+
+
+def test_a_declared_merge_aggregates_the_severity(state_mod):
+    a = _with_critique(
+        _finding("codex-r1-0", "codex", "a.py", 1, "x", severity="minor"),
+        "agy", "duplicate", "kiro-r1-0")
+    b = _with_critique(
+        _finding("kiro-r1-0", "kiro", "a.py", 2, "y", severity="critical"),
+        "agy", "duplicate", "codex-r1-0")
+
+    out = merge_declared(state_mod, [a, b])
+
+    assert out[0]["severity"] == "critical"
+
+
+def test_a_declared_merge_does_not_rerun_the_verification(state_mod):
+    """**2 段目は記録済みの結果を選び直すだけである。** 実行し直さない。"""
+    a = _with_critique(
+        _finding("codex-r1-0", "codex", "a.py", 1, "x",
+                 verification={"result": "not_run", "exit_code": None}),
+        "agy", "duplicate", "kiro-r1-0")
+    b = _with_critique(
+        _finding("kiro-r1-0", "kiro", "a.py", 2, "y",
+                 verification={"result": "reproduced", "exit_code": 1,
+                               "finding_id": "kiro-r1-0"}),
+        "agy", "duplicate", "codex-r1-0")
+
+    out = merge_declared(state_mod, [a, b])
+
+    assert out[0]["verification"]["result"] == "reproduced"
+    assert out[0]["verification"]["finding_id"] == "kiro-r1-0"
+
+
+def test_a_declared_merge_carries_the_evidence(state_mod):
+    a = _with_critique(
+        _finding("codex-r1-0", "codex", "a.py", 1, "x"),
+        "agy", "duplicate", "kiro-r1-0")
+    b = _with_critique(
+        _finding("kiro-r1-0", "kiro", "a.py", 2, "y",
+                 evidence="根拠", falsification="反証", has_evidence=True),
+        "agy", "duplicate", "codex-r1-0")
+
+    out = merge_declared(state_mod, [a, b])
+
+    assert out[0]["has_evidence"] is True
+    assert out[0]["evidence_from"] == "kiro-r1-0"
+
+
+def test_an_already_merged_finding_is_left_alone(state_mod):
+    """1 段目で束ねた組へ 2 段目を掛けない。"""
+    a = _finding("codex-r1-0", "codex", "a.py", 1, "x")
+    b = _with_critique(
+        _finding("kiro-r1-0", "kiro", "a.py", 1, "x", merged_into="codex-r1-0"),
+        "agy", "duplicate", "codex-r1-0")
+
+    out = by_id(merge_declared(state_mod, [a, b]))
+
+    assert out["kiro-r1-0"]["merged_into"] == "codex-r1-0"
+    assert out["codex-r1-0"].get("merged_from", []) == []

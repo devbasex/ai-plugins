@@ -2843,6 +2843,54 @@ def cmd_collect_critiques(args: argparse.Namespace) -> None:
          + (f"（結び先なし {len(unmatched)} 件）" if unmatched else ""))
 
 
+# 実行の結果の強さ。**組から選び直すときの順である。**
+_VERIFY_RANK = {"reproduced": 2, "not_reproduced": 1, "not_run": 0}
+
+
+def _verify_result(finding: dict[str, Any]) -> str:
+    v = finding.get("verification")
+    return str((v or {}).get("result") or "not_run")
+
+
+def _declared_duplicate_targets(finding: dict[str, Any]) -> set:
+    """その指摘へ付いた `duplicate` の申告が指す先。"""
+    targets = set()
+    for c in finding.get("critiques") or []:
+        if c.get("verdict") == "duplicate" and c.get("duplicate_of"):
+            targets.add(c["duplicate_of"])
+    return targets
+
+
+def _merge_declared_duplicates(st: dict[str, Any], round_no: int) -> None:
+    """担当が `duplicate` と申告した組を束ねる（#156 の 2 段目）。
+
+    **機械では結べない重複を担当が見つける。その申告は次のラウンドへ回さず、当ラウンドの
+    区分の前に適用する。** 回すと、同じ重要度の指摘を 2 者が別の本文で出した組が、
+    どちらも `origin_runtimes` 1 者・`support` 0 件のまま `insufficient_evidence` へ
+    落ち、統合される前に収束する。
+
+    **相互の申告に限る。** 片側だけの申告では束ねない（`duplicate_candidates` に残る）。
+    """
+    findings = st.setdefault("review_findings", [])
+    targets = [f for f in findings if f.get("round") == round_no]
+    # 1 段目を通っていない要素もあるため、ここでも初期化する（順序に依存させない）。
+    for f in targets:
+        f.setdefault("origin_runtimes", [f.get("agent")])
+    by_id = {f.get("finding_id"): f for f in targets}
+
+    for rep in targets:
+        if rep.get("merged_into"):
+            continue
+        for target_id in sorted(_declared_duplicate_targets(rep)):
+            other = by_id.get(target_id)
+            if other is None or other.get("merged_into") or other is rep:
+                continue
+            # 相互の申告であることを確かめる
+            if rep.get("finding_id") not in _declared_duplicate_targets(other):
+                continue
+            _absorb(rep, other)
+
+
 def _merge_duplicates(st: dict[str, Any], round_no: int) -> None:
     """同じラウンドの同じ指摘を 1 件へ束ねる（#156）。
 
@@ -2898,6 +2946,13 @@ def _absorb(rep: dict[str, Any], other: dict[str, Any]) -> None:
     if _SEVERITY_RANK.get(str(other.get("severity")), -1) > \
        _SEVERITY_RANK.get(str(rep.get("severity")), -1):
         rep["severity"] = other["severity"]
+
+    # **実行の結果は組から選び直す。** `reproduced` > `not_reproduced` > `not_run` の
+    # 順で採り、出所を残す。**実行し直さない**（2 段目は反証の後にあり、その時点では
+    # 組の全員が `verification` を持っている）。
+    if _VERIFY_RANK.get(_verify_result(other), -1) > \
+       _VERIFY_RANK.get(_verify_result(rep), -1):
+        rep["verification"] = other.get("verification")
 
     # **根拠の対は同じ要素から採る。** `evidence` だけの要素と `falsification` だけの
     # 要素を継ぎ合わせると、どちらも根拠として成り立たないのに、誰も書いていない組を
