@@ -5,6 +5,10 @@
 現行版で決めたことだけで、版を配布した時点でこちらへ移す。** そのため `CLAUDE.md` に版の段落が
 1 つも無いことがある（配布の直後がその状態で、現行版で新しく決めたときに書き足される）。
 
+**v10.6.0 から v10.9.1 の判断はここにも `CLAUDE.md` にも無い。** この 4 版は退避の手順を決める
+より前に出ており、`CLAUDE.md` へ段落を書かないまま配布された。変更点は `CHANGELOG.md` にある。
+見出しの範囲が `v10.5.1` で止まっているのはこのためで、退避が働くのは次の配布からである。
+
 v6.1.0 で開発方法論レイヤーの 5 個（`development-workflow` / `requirements-design` / `tdd-cycle` / `refactoring`（当時は `safe-refactoring`）/ `quality-gates`）を追加した。モード判定の基準を持つのは `development-workflow` だけで、他の Skill とエージェント定義は判定結果を受け取る側に徹する。
 
 v7.0.0 で playwright 系 4 個を `playwright-kit` プラグインへ分離した。対応表は予告どおり v8.0.0 で削除済み。
