@@ -113,6 +113,7 @@ INFRA_MARKERS = (
     "dockerfile", "docker-compose",
 )
 INFRA_EXTENSIONS = {".tf", ".tfvars"}
+INFRA_FILENAMES = {"dockerfile", "docker-compose.yml", "docker-compose.yaml"}
 
 
 COMMON_REVIEW_TEMPLATE = """## 自動追加レビュー観点: 共通
@@ -1093,7 +1094,7 @@ def _is_infra_path(path: str) -> bool:
     lower, normalized, name, ext = _path_info(path)
     return (
         _contains_any(normalized, INFRA_MARKERS)
-        or name in {"dockerfile", "docker-compose.yml", "docker-compose.yaml"}
+        or name in INFRA_FILENAMES
         or ext in INFRA_EXTENSIONS
         or lower.endswith(".tfvars.json")
     )
