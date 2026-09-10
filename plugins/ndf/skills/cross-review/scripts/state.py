@@ -3548,6 +3548,21 @@ def _read_fix_result(
     return fix
 
 
+def _normalize_dict_items(raw: object) -> list[dict]:
+    """不定形データから dict 要素のみを抽出・正規化する。
+
+    LLM が返すスキーマ違反（文字列リスト、単一 dict、件数数値など）の劣化表現を受理する。
+    - list の場合: dict 要素のみを抽出
+    - dict の場合: 単一 dict を 1 件の list にラップ
+    - それ以外: 空 list
+    """
+    if isinstance(raw, list):
+        return [d for d in raw if isinstance(d, dict)]
+    if isinstance(raw, dict):
+        return [raw]
+    return []
+
+
 def _merge_fix_records(st: dict, fix: dict, pr: int) -> dict:
     """fix の戻り値を正規化して記録へ反映し、ラウンドの fix 辞書を返す。"""
     # key 名 fallback (サブエージェントが別名で書いた場合の救済)。
@@ -3564,12 +3579,7 @@ def _merge_fix_records(st: dict, fix: dict, pr: int) -> dict:
     # deferred_nits 展開ループは dict 以外をスキップするため、まず dict 要素のみへ
     # 正規化する (単一 dict は 1 件として包む)。
     _deferred_raw = fix.get("deferred")
-    if isinstance(_deferred_raw, list):
-        _deferred_nits = [d for d in _deferred_raw if isinstance(d, dict)]
-    elif isinstance(_deferred_raw, dict):  # 単一 dict フォールバック (gemini #3)
-        _deferred_nits = [_deferred_raw]
-    else:
-        _deferred_nits = []
+    _deferred_nits = _normalize_dict_items(_deferred_raw)
 
     # 保存件数の単一整合ルール:
     #   - 構造化データ (list / dict) は per-item を保持できるので、展開件数
@@ -3583,13 +3593,7 @@ def _merge_fix_records(st: dict, fix: dict, pr: int) -> dict:
 
     # 却下も同じ正規化を通す。**件数だけが返る劣化表現（int）では per-item を作れない**
     # ため、そのときは記録を空にし、件数は `_count()` の値で残す。
-    _rejected_raw = fix.get("rejected")
-    if isinstance(_rejected_raw, list):
-        _rejected_items = [r for r in _rejected_raw if isinstance(r, dict)]
-    elif isinstance(_rejected_raw, dict):
-        _rejected_items = [_rejected_raw]
-    else:
-        _rejected_items = []
+    _rejected_items = _normalize_dict_items(fix.get("rejected"))
 
     st["rounds"][-1]["fix"] = {
         "commit": fix_commit,
