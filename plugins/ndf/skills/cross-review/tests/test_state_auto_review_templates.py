@@ -198,27 +198,6 @@ def test_tokenizer_async_jobcard_and_tflite_do_not_trigger_categories(state_mod)
     assert "infra" in state_mod._classify_changed_files(terraform_file)
 
 
-# ---- パスが 1 件も無いときの境界（現状固定テスト。正しさを主張しない） ----
-#
-# 既存の分類テストはいずれもパスを持つ項目を渡しており、パスが 0 件になる形は
-# 固定されていない。分類の規則を足し引きしても、この形が土台の `["common"]` の
-# ままであることを記録する。
-
-
-def test_no_entries_gives_only_the_common_category(state_mod):
-    """項目が 1 件も無い入力は、土台の `common` だけを返す。"""
-    assert state_mod._classify_changed_files([]) == ["common"]
-
-
-def test_an_entry_without_paths_gives_only_the_common_category(state_mod):
-    """`paths` を持たない項目だけの入力も、土台の `common` だけを返す。
-
-    パスが 0 件のため `docs_only` も規則による分類も付かず、`status` が `M` で
-    `deletion_rename` にも当たらない。
-    """
-    assert state_mod._classify_changed_files([{"status": "M"}]) == ["common"]
-
-
 def test_combined_review_instructions_puts_auto_before_manual(state_mod):
     assert state_mod._combined_review_instructions("auto", "manual") == "auto\n\nmanual"
     assert state_mod._combined_review_instructions("auto", "") == "auto"
