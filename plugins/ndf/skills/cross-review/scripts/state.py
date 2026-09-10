@@ -1727,131 +1727,10 @@ def _init_new_state(
         # 取り込んだ指摘は per-item で残す（#156）。`payload.json` の 1 件に
         # `pr` / `round` / `agent` と `has_evidence` を添えた形で積む。
         "review_findings": [],
-        # 引き継いだ指摘は再開の時点で決まる。新規の開始では空にする。
-        "carried_over": None,
-        "final": None,
-    }
-    state_file.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
-    info(f"✅ state 初期化: {state_file}")
-    _print_init_result(
-        pr,
-        worktree,
-        tmp_dir,
-        repo,
-        head_branch,
-        base_branch,
-        is_own,
-        event_downgrade,
-        bool(review_instructions),
-        0,
-        False,
-    )
-
-    if meta is None:
-        die(f"PR #{pr} のメタデータを取得できません（リポジトリ名: {repo}）")
-        return
-    if meta.repo != repo:
-        repo = meta.repo
-        if not args.worktree:
-            worktree = str(_default_worktree_base() / _repo_slug(repo) / f"pr{pr}")
-    if meta.rate_remaining is not None:
-        info(f"ℹ GitHub REST の残量: {meta.rate_remaining}")
-
-    me = _sh(["gh", "api", "user", "--jq", ".login"])
-    author = meta.author
-    is_own = (me == author)
-    event_downgrade = is_own
-    if is_own:
-        info(f"⚠ 自分の PR (author={me}) — REQUEST_CHANGES → COMMENT 強制ダウングレード")
-
-    # worktree 分離 — _tmp_dir() より先に worktree を作成/確認する
-    head_branch = meta.head_branch
-    base_branch = meta.base_branch
-    changed_files = _fetch_changed_files(pr, repo)
-    auto_review_categories = _classify_changed_files(changed_files)
-    auto_review = _auto_review_instructions(auto_review_categories)
-    review_instructions = _combined_review_instructions(auto_review, manual_extra_review)
-    if not pathlib.Path(worktree).exists():
-        _create_worktree(worktree, pr, head_branch)
-    elif _is_registered_worktree(worktree):
-        info(f"↻ 既存 worktree 流用: {worktree}")
-        _sync_worktree(worktree, pr, head_branch)
-    else:
-        # パスは存在するが現リポジトリの worktree ではない (別リポジトリの残骸等)。
-        # 流用すると git 操作が壊れるため退避して作り直す。
-        stale = f"{worktree}.stale-{time.strftime('%Y%m%d%H%M%S')}"
-        pathlib.Path(worktree).rename(stale)
-        info(f"⚠ 現リポジトリの worktree でないため退避: {stale}")
-        _create_worktree(worktree, pr, head_branch)
-
-    # worktree 作成/確認後に _tmp_dir() を呼ぶ (ここで .cross_review/ が作られる)
-    tmp_dir = _tmp_dir(worktree)
-    state_file = tmp_dir / f"cross-review-pr{pr}-state.json"
-
-    # 既存コメントスナップショット（重複指摘防止）。
-    # 3 ソース (インラインコメント / レビュー body / PR レベルコメント) を
-    # fix skill の共有スクリプトで一括取得する。
-    fetch_script = pathlib.Path(__file__).resolve().parent.parent.parent / "fix" / "scripts" / "fetch-pr-comments.sh"
-    r = subprocess.run(
-        [str(fetch_script), repo, str(pr)],
-        capture_output=True, text=True,
-    )
-    existing_path = tmp_dir / f"cross-review-pr{pr}-existing-comments.txt"
-    if r.returncode == 0:
-        existing_path.write_text(r.stdout, encoding="utf-8")
-    else:
-        die(f"既存コメント取得失敗 (重複検出無効のため中断): {r.stderr.strip()[:200]}")
-
-    # **ホストを先に確定する。** 誤ると母集合が狂い、ホストが自分自身をレビューする。
-    # 推定できないときに既定を置かない（間違ったまま一周してしまう）。
-    try:
-        host, host_source = assignment.detect_host(getattr(args, "host", None))
-    except assignment.AssignmentError as e:
-        die(str(e))
-        raise
-    reviewers = assignment.review_pool(host)
-    info(f"ホスト: {host}（{host_source}） / レビュワーの母集合: {' / '.join(reviewers)}")
-    _validate_only(args.only, host)
-    # 未認証の CLI は起動から短時間で終わり、結果を残さないまま担当から欠ける。
-    # **確かめるのは実際に起動する担当だけである。** `--only` で 1 者へ絞ったとき、
-    # 母集合の全員を確かめると、そのラウンドで起動しない CLI の未認証で初期化が失敗する。
-    auth.check_auth(_auth_targets(args.only, host), info=info, die=lambda m: die(m))
-
-    state = {
-        "started_at": _now(),
-        "host": host,
-        "host_source": host_source,
-        "max_rounds": args.max_rounds,
-        "rotate_after": args.rotate_after,
-        "only": args.only,
-        "current_pr": pr,
-        "worktree_path": worktree,
-        "tmp_dir": str(tmp_dir),
-        "repo": repo,
-        "head_branch": head_branch,
-        "base_branch": base_branch,
-        "pr_author": author,
-        # 自分のログイン名は変わらない値である。一度取って持ち、以降は読まない。
-        # 待ち行列の冪等の照合が「投稿者が自分か」を見るために使う。
-        "viewer_login": me,
-        "is_own_pr": is_own,
-        "event_downgrade": event_downgrade,
-        "changed_files": changed_files,
-        "auto_review_categories": auto_review_categories,
-        "auto_review_instructions": auto_review,
-        "manual_extra_review_instructions": manual_extra_review,
-        # 後方互換: 旧 key は manual 指示を保持する。
-        "extra_review_instructions": manual_extra_review,
-        "review_instructions": review_instructions,
-        "pr_history": [{"pr": pr, "opened_at": _now(), "closed_at": None, "rounds": 0}],
-        "rounds": [],
-        "deferred_nits": [],
-        # 却下した指摘は per-item で残す（#156）。件数だけでは、次のラウンドへ
-        # 渡しても同じ指摘だと判定できない。
-        "rejected_findings": [],
-        # 取り込んだ指摘は per-item で残す（#156）。`payload.json` の 1 件に
-        # `pr` / `round` / `agent` と `has_evidence` を添えた形で積む。
-        "review_findings": [],
+        # 実行検証の許しは起動した側が渡す（#156）。**渡されなければ実行しない。**
+        # ラウンドごとに `verify-findings` が読むため、状態ファイルへ持つ。
+        "verify_commands": list(getattr(args, "verify_command", None) or []),
+        "verify_exit_codes": list(getattr(args, "verify_exit_code", None) or []),
         # 引き継いだ指摘は再開の時点で決まる。新規の開始では空にする。
         "carried_over": None,
         "final": None,
@@ -2986,6 +2865,51 @@ def _verify_findings(
         finding["verification"] = record
 
 
+def cmd_verify_findings(args: argparse.Namespace) -> None:
+    """Step 2.5 前段 — 重複を束ね（1 段目）、`suggested_check` を実行する（#156）。
+
+    **反証より前に置く。** 反証を返す担当は実行の結果を読んだうえで賛否を決める。
+    統合の 1 段目も反証より前に行う。後にすると、束ねられる 2 件へ別々に反証が付き、
+    どちらの値を採るかという判断が増える。
+
+    **実行してよいのは `init` へ渡されたコマンドだけである。** 渡されていなければ
+    実行を行わず、区分は根拠と反証で決まる（`docs/06-evidence.md`）。
+    """
+    pr = args.pr
+    st = _load(pr)
+    if not st.get("rounds"):
+        die("state.rounds が空。`state.py start-round` を先に呼んでください")
+    round_no = st["rounds"][-1]["round"]
+
+    _merge_duplicates(st, round_no)
+
+    allowed = [str(c) for c in (st.get("verify_commands") or [])]
+    codes = [int(c) for c in (st.get("verify_exit_codes") or [])] or None
+    _verify_findings(
+        st,
+        round_no,
+        allowed=allowed,
+        work=str(st.get("worktree_path") or "."),
+        reproduced_codes=codes,
+    )
+
+    merged = 0
+    results: dict[str, int] = {}
+    for finding in st.get("review_findings") or []:
+        if finding.get("round") != round_no:
+            continue
+        if finding.get("merged_into"):
+            merged += 1
+            continue
+        result = _verify_result(finding)
+        results[result] = results.get(result, 0) + 1
+    _save(pr, st)
+    info(
+        f"✅ 統合: {merged} 件を束ねた / 実行検証: "
+        + (" ".join(f"{k}={v}" for k, v in sorted(results.items())) or "対象なし")
+    )
+
+
 # 反証で返してよい値（#156）。**一覧に無い値は結ばない。**
 CRITIQUE_VERDICTS = (
     "support", "refute", "insufficient_evidence", "duplicate", "out_of_scope",
@@ -3048,6 +2972,10 @@ def cmd_collect_critiques(args: argparse.Namespace) -> None:
                 continue
             target.setdefault("critiques", []).append(record)
             attached += 1
+
+    # **申告による統合（2 段目）は、反証の後・区分の前に走らせる。** 次のラウンドへ
+    # 回すと、同じ主張を別の本文で出した組が統合される前に収束する。
+    _merge_declared_duplicates(st, round_no)
 
     _save(pr, st)
     info(f"✅ 反証を取り込みました: {attached} 件"
@@ -3968,6 +3896,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="この収束ループを起動している CLI。省略時は環境変数から推定する")
     sp.add_argument("--worktree", default=None)
     sp.add_argument(
+        "--verify-command", action="append", default=None,
+        help="実行検証で実行してよいコマンド。繰り返し指定できる。"
+             "渡されなければ実行検証を行わない")
+    sp.add_argument(
+        "--verify-exit-code", action="append", type=int, default=None,
+        help="再現とみなす終了コード（既定 1）。繰り返し指定できる")
+    sp.add_argument(
         "--focus",
         default=None,
         help="追加レビュー観点。例: ドキュメントとコードの整合性を重点的に確認",
@@ -4018,7 +3953,15 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_check_oscillation)
 
-    sp = sub.add_parser("collect-critiques", help="反証の結果を指摘へ結ぶ（#156）")
+    sp = sub.add_parser(
+        "verify-findings",
+        help="Step 2.5 前段 — 重複の統合（1 段目）と実行検証（#156）")
+    sp.add_argument("pr", type=int)
+    sp.set_defaults(func=cmd_verify_findings)
+
+    sp = sub.add_parser(
+        "collect-critiques",
+        help="Step 2.5 後段 — 反証の結果を指摘へ結び、申告の重複を束ねる（#156）")
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_collect_critiques)
 

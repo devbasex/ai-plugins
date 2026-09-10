@@ -397,13 +397,17 @@ def test_normal_path_builds_prompt_and_launches_the_cli(tmp_dir, tmp_path, kiro_
     assert "codex-r1-0" in prompt
 
     # launch-cli.sh は作業ツリーへ cd してから STEM に沿った成果物（pid ファイル）を
-    # 作る。STEM は相対のため、pid ファイルは作業ツリー側に置かれる（現状の挙動）。
-    pid_file = work / f"kiro-critique-pr{PR}.pid"
+    # 作る。**STEM は絶対パスで渡す。** 相対の値を渡すと、pid ファイルと標準出力の
+    # 記録が作業ツリーの直下へ落ちて差分に現れる。
+    pid_file = tmp_dir / f"kiro-critique-pr{PR}.pid"
     for _ in range(100):
         if pid_file.is_file():
             break
         time.sleep(0.05)
     assert pid_file.is_file(), "launch-cli.sh が起動していない"
+    assert not (work / f"kiro-critique-pr{PR}.pid").exists(), "作業ツリーを汚している"
+    assert not (work / f"kiro-critique-pr{PR}-stdout.log").exists(), \
+        "作業ツリーを汚している"
 
     # kiro-cli が作業ツリーで、生成されたプロンプトを標準入力に受けて起動される。
     for _ in range(100):

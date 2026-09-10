@@ -203,3 +203,21 @@ launcher が生成するプロンプトに以下を強制している:
 
 `/ndf:pr-review` の result.json 出力規約に `posted_as` フィールドを含むこと
 （自分PR ダウングレード時に GitHub に実際送った event。デフォルトは `event` と同値）。
+
+## `<worktree-base>` の解決順
+
+`state.py init` は worktree の親ディレクトリを以下の優先順で解決する:
+
+1. `NDF_WORKTREE_BASE` 環境変数（明示オーバーライド）
+2. `<システム tmpdir>/ndf-worktrees`（Python `tempfile.gettempdir()`。非永続領域のため
+   コンテナ再作成で自動消滅し、共有 volume を消費しない）
+
+worktree の実パスは `<base>/<owner>--<repo>/pr<PR>` 形式で、リポジトリ slug を含める
+ことで**他リポジトリの同一 PR 番号と衝突しない**。永続 volume（旧 `/work/worktrees`）を
+使っていた頃は別プロジェクトの残骸 worktree を誤って流用する事故があったため、
+パスが存在しても `git worktree list` に登録されていなければ `.stale-<timestamp>` に
+退避して作り直すガードも入っている。
+
+解決した実パスは `state.json` の `worktree_path` に書かれるため、後続スクリプトや
+サブエージェント prompt は state.json から読めば追従できる。
+
