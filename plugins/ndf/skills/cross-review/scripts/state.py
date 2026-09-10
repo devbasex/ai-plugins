@@ -3798,29 +3798,14 @@ def cmd_verify_sweep(args: argparse.Namespace) -> None:
     sys.exit(6)
 
 
-def cmd_report(args: argparse.Namespace) -> None:
-    """Step 8 — deferred nit + ラウンドサマリ表示。"""
-    pr = args.pr
-    st = _load(pr)
-    final = st.get("final") or "in_progress"
-    total = len(st["rounds"])
-    prs = [h["pr"] for h in st["pr_history"]]
-    rotated = max(0, len(prs) - 1)
-
-    print(f"## 最終ステータス: {final}")
-    print(f"## 総ラウンド数: {total} / PR数: {len(prs)} (rotated {rotated} 回)")
-    print()
-    print("## PR 履歴")
-    for h in st["pr_history"]:
-        state_str = "closed" if h.get("closed_at") else "open"
-        print(f"- #{h['pr']} ({state_str}, {h.get('rounds', 0)} rounds)")
-    print()
+def _print_round_summary(rounds: list) -> None:
+    """cmd_report のラウンドサマリ表を出す。"""
     print("## ラウンドサマリ")
     # **担当は 4 つの名前を取りうる。** 2 者を列にした表では、`claude` / `kiro` が
     # 担当したラウンドの結果が読めない。担当と判定を 1 つの列へまとめる。
     print("| round | PR | レビュー | fix | CI |")
     print("|---|---|---|---|---|")
-    for r in st["rounds"]:
+    for r in rounds:
         reviewers = r.get("reviewers") or list(LEGACY_AGENTS)
         parts = []
         for name in reviewers:
@@ -3838,6 +3823,9 @@ def cmd_report(args: argparse.Namespace) -> None:
         print(f"| {r['round']} | #{r['pr']} | {review_s} | {fix_s} | {ci_s} |")
     print()
 
+
+def _print_sweep(st: dict) -> None:
+    """cmd_report の最終スイープの節を出す。"""
     sweep = st.get("sweep")
     if isinstance(sweep, dict):
         source = "GitHub 側で確認済み" if sweep.get("verified") else "申告のまま（確認できず）"
@@ -3851,6 +3839,9 @@ def cmd_report(args: argparse.Namespace) -> None:
         print("`state.py verify-sweep <PR>` を実行してから完了報告へ進んでください。")
         print()
 
+
+def _print_deferred_nits(st: dict) -> None:
+    """cmd_report の残 deferred nit の節を出す。"""
     nits = st.get("deferred_nits") or []
     if nits:
         print(f"## 残 deferred nit ({len(nits)} 件)")
@@ -3865,6 +3856,9 @@ def cmd_report(args: argparse.Namespace) -> None:
         print("## 残 deferred nit: なし")
         print()
 
+
+def _print_rejected(st: dict) -> None:
+    """cmd_report の却下した指摘の節を出す。"""
     # **却下した指摘も一覧で出す**（#156）。次のラウンドで同じ論点が再提出されたとき、
     # 既に却下したものかどうかをここで照合できる。
     rejected = st.get("rejected_findings") or []
@@ -3876,6 +3870,29 @@ def cmd_report(args: argparse.Namespace) -> None:
                 f"{r.get('path')}:{r.get('line')} — {r.get('summary')}"
             )
             print(f"  却下の理由: {r.get('reason_for_rejection')}")
+
+
+def cmd_report(args: argparse.Namespace) -> None:
+    """Step 8 — deferred nit + ラウンドサマリ表示。"""
+    pr = args.pr
+    st = _load(pr)
+    final = st.get("final") or "in_progress"
+    total = len(st["rounds"])
+    prs = [h["pr"] for h in st["pr_history"]]
+    rotated = max(0, len(prs) - 1)
+
+    print(f"## 最終ステータス: {final}")
+    print(f"## 総ラウンド数: {total} / PR数: {len(prs)} (rotated {rotated} 回)")
+    print()
+    print("## PR 履歴")
+    for h in st["pr_history"]:
+        state_str = "closed" if h.get("closed_at") else "open"
+        print(f"- #{h['pr']} ({state_str}, {h.get('rounds', 0)} rounds)")
+    print()
+    _print_round_summary(st["rounds"])
+    _print_sweep(st)
+    _print_deferred_nits(st)
+    _print_rejected(st)
 
 
 # ---------------- main ----------------
