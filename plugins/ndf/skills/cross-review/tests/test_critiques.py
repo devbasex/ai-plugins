@@ -182,3 +182,112 @@ def test_no_files_leaves_the_findings_untouched(tmp_dir, state_mod):
     collect(state_mod)
 
     assert _read(tmp_dir)["review_findings"][0].get("critiques", []) == []
+
+
+# ---------- 起動（critique.sh） ----------
+
+SCRIPTS = pathlib.Path(__file__).resolve().parents[1] / "scripts"
+
+
+def _state_file(tmp_dir, findings, worktree):
+    st = _state(findings)
+    st["worktree_path"] = str(worktree)
+    _write(tmp_dir, st)
+
+
+def run_critique(tmp_dir, agent, worktree, launcher=None):
+    import subprocess
+    env = dict(os.environ, CROSS_REVIEW_TMP_DIR=str(tmp_dir))
+    if launcher:
+        env["PATH"] = f"{launcher}:{env['PATH']}"
+    return subprocess.run(
+        ["bash", str(SCRIPTS / "critique.sh"), agent, str(PR), "1"],
+        capture_output=True, text=True, env=env,
+    )
+
+
+import os
+
+
+@pytest.fixture()
+def fake_launcher(tmp_path):
+    """`launch-cli.sh` の呼び出しを記録するだけの置き換え。"""
+    lib = tmp_path / "lib"
+    lib.mkdir(parents=True, exist_ok=True)
+    (lib / "launch-cli.sh").write_text(
+        '#!/usr/bin/env bash\necho "launched $1" > "$6/launched.txt"\n')
+    (lib / "launch-cli.sh").chmod(0o755)
+    return lib
+
+
+def test_the_prompt_lists_only_other_agents_findings(tmp_dir, tmp_path):
+    """**自分が出した指摘は渡さない。**"""
+    work = tmp_path / "work"; work.mkdir()
+    _state_file(tmp_dir, [
+        _finding("codex-r1-0", "codex"),
+        _finding("kiro-r1-0", "kiro"),
+    ], work)
+
+    run_critique(tmp_dir, "kiro", work)
+
+    prompt = (tmp_dir / f"kiro-critique-pr{PR}-prompt.md").read_text()
+    assert "codex-r1-0" in prompt
+    assert "kiro-r1-0" not in prompt
+
+
+def test_a_merged_proposer_is_excluded(tmp_dir, tmp_path):
+    """統合された指摘では `origin_runtimes` の担当すべてが提案者である。"""
+    work = tmp_path / "work"; work.mkdir()
+    _state_file(tmp_dir, [
+        _finding("codex-r1-0", "codex", origin_runtimes=["codex", "kiro"]),
+    ], work)
+
+    result = run_critique(tmp_dir, "kiro", work)
+
+    assert "対象がありません" in result.stdout
+    assert not (tmp_dir / f"kiro-critique-pr{PR}-prompt.md").exists()
+
+
+def test_a_merged_side_is_not_offered(tmp_dir, tmp_path):
+    work = tmp_path / "work"; work.mkdir()
+    _state_file(tmp_dir, [
+        _finding("codex-r1-0", "codex"),
+        _finding("codex-r1-1", "codex", merged_into="codex-r1-0"),
+    ], work)
+
+    run_critique(tmp_dir, "kiro", work)
+
+    prompt = (tmp_dir / f"kiro-critique-pr{PR}-prompt.md").read_text()
+    assert "codex-r1-0" in prompt
+    assert "codex-r1-1" not in prompt
+
+
+def test_the_prompt_names_the_five_verdicts(tmp_dir, tmp_path):
+    work = tmp_path / "work"; work.mkdir()
+    _state_file(tmp_dir, [_finding("codex-r1-0", "codex")], work)
+
+    run_critique(tmp_dir, "kiro", work)
+
+    prompt = (tmp_dir / f"kiro-critique-pr{PR}-prompt.md").read_text()
+    for verdict in ("support", "refute", "insufficient_evidence",
+                    "duplicate", "out_of_scope"):
+        assert verdict in prompt
+
+
+def test_the_prompt_forbids_editing(tmp_dir, tmp_path):
+    work = tmp_path / "work"; work.mkdir()
+    _state_file(tmp_dir, [_finding("codex-r1-0", "codex")], work)
+
+    run_critique(tmp_dir, "kiro", work)
+
+    prompt = (tmp_dir / f"kiro-critique-pr{PR}-prompt.md").read_text()
+    assert "編集しない" in prompt
+
+
+def test_an_unknown_runtime_is_refused(tmp_dir, tmp_path):
+    work = tmp_path / "work"; work.mkdir()
+    _state_file(tmp_dir, [_finding("codex-r1-0", "codex")], work)
+
+    result = run_critique(tmp_dir, "nowhere", work)
+
+    assert result.returncode != 0
