@@ -22,7 +22,7 @@
 
 ## 残っていること
 
-### 1. #156 の 3 本目の実装（着手済み）
+### 1. #156 の 3 本目（実装は完了。**PR #549 の構造改善が途中**）
 
 **ブランチ**: `feature/issue-156-pr3-impl`（`develop` を取り込み済み、push 済み）
 **計画**: `issues/issue-156-pr3-plan.md`
@@ -35,14 +35,50 @@ Task の順序は **0 → 1（1 段目）→ 2 → 3 → 1（2 段目）→ 4 �
 | --- | --- | --- |
 | 0 | `finding_id` の採番（`<担当>-r<ラウンド>-<索引>`） | **完了**（`cc41f0b`） |
 | 1（1 段目） | `_merge_duplicates`（近傍かつ本文の一致） | **完了**（`12278da`） |
-| 2 | `_verify_findings`（実行検証） | **完了**（`026916d`） |
+| 2 | `_verify_findings`（実行検証） | **完了** |
 | 3 | `critique.sh` と `cmd_collect_critiques`（反証） | **完了** |
 | 1（2 段目） | 相互 `duplicate` の統合（反証の後） | **完了** |
 | 4 | `_classify_finding` と新規性の絞り込み | **完了** |
 | 5 | `docs/06-evidence.md` と `docs/04-contracts.md` | **完了** |
 
-**受け入れ条件は 14 件。** 計画の表にある。**実装はすべて完了し、テストは
-2910 件が通る。** 残るのは Pull Request の作成とレビューである。
+**新しいテストは 77 件**（採番 3 / 統合 18 / 実行検証 17 / 反証 16 / 区分 23）。
+構造改善のラウンドでさらに 6 件が足された。
+
+**受け入れ条件は 14 件。** 計画の表にある。**実装はすべて完了し、テストは 2910 件が
+通る。Pull Request は #549 として作成済み。**
+
+**いま止まっているのは `cross-refactoring`（構造改善）の途中である。**
+
+| ラウンド | 状態 |
+| --- | --- |
+| テスト整備 1 | 完了（5 件を適用） |
+| テスト整備 2 | 完了（1 件を適用、4 件はトレーラー欠落で取り消し） |
+| 構造改善 1 | **3 件中 2 件が適用済み**（`cmd_merge_fix` / `cmd_init`）。**残るのは R3-003（`cmd_report`）** |
+| 構造改善 2・3 | 未着手 |
+
+**再開のしかた。** 状態ファイルは `/tmp/ndf-worktrees/devbasex--ai-plugins/rf549/work/.cross_refactoring/`
+にあり、そのまま続けられる。消えていれば `init` からやり直す（提案は残らない）。
+
+```bash
+SKILL_DIR=/home/ubuntu/.claude/plugins/cache/ai-plugins/ndf/<版>/skills/cross-refactoring
+SCRIPTS="$SKILL_DIR/scripts"; LIB="$SKILL_DIR/../../scripts/lib"
+TMP=/tmp/ndf-worktrees/devbasex--ai-plugins/rf549/work/.cross_refactoring
+export CROSS_REFACTORING_TMP_DIR="$TMP"; WORK=/tmp/ndf-worktrees/devbasex--ai-plugins/rf549/work
+# 群が尽きるまで繰り返す（merge-apply の終了コードを変数で受ける）
+V=$("$SCRIPTS/refactor.py" next-apply-round 549 3) || echo "群が尽きた"
+IMPL=$(echo "$V" | grep "^IMPL=" | cut -d= -f2)
+"$SCRIPTS/launch-cli.sh" "$IMPL" apply 549 3
+"$LIB/monitor.py" 549 --agents "$IMPL" --tmp-dir "$TMP" --stem-template "{agent}-apply-r3" --timeout 3600
+out=$("$SCRIPTS/refactor.py" merge-apply 549 3); mrc=$?     # ← パイプで消さない
+[ $mrc -eq 0 ] && "$SCRIPTS/refactor.py" verify-round 549 3
+```
+
+**構造改善を飛ばす判断もある。** 提案は 3 件（`cmd_merge_fix` / `cmd_init` /
+`cmd_report` の長い関数の抽出）で、いずれも**この変更が触っていない既存の関数**である。
+飛ばすなら `development-workflow` の `references/workflow-modes.md`「構造改善の退避先」に
+従う。
+
+その後は **実装レビュー（`cross-review`）→ 完了判定 → マージ**である。
 
 ### 2. #156 の 4 本目（効果の測定）
 
@@ -121,6 +157,15 @@ RUNTIMES=$(python3 -c "import json;print(' '.join(json.load(open('$TMP/cross-ref
 10 巡・39 件は例外ではない。**7 巡目で一度収束した後、設計を 1 点変えたことで
 8〜10 巡目の指摘が生まれた。** 収束は「もう指摘が出ない」ことではなく、「いま出ている
 指摘が尽きた」ことでしかない。
+
+### claude が実装担当のときトレーラーが落ちる
+
+`cross-refactoring` の適用で **claude が担当したラウンドは、コミットのトレーラー
+（`Item-Id` / `Round` / `Impl-Runtime` / `Impl-Model`）が欠けて取り消される**ことが
+繰り返し起きた（PR #529 と #549 で各 1 回）。取り消されると群が丸ごと落ちる。
+
+**起票していない。** 再現の条件（claude のときだけか、プロンプトの読み落としか）を
+確かめていないためである。次に見たら数えて起票する。
 
 ## 判断の記録（次のセッションで蒸し返さないもの）
 
