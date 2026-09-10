@@ -3548,23 +3548,8 @@ def _read_fix_result(
     return fix
 
 
-def cmd_merge_fix(args: argparse.Namespace) -> None:
-    """Step 5 後段 — fix サブエージェント戻り値を state にマージ + CI 分類。
-
-    Exit code: 0=continue, 3=ci-code-fail (final=error)
-    """
-    pr = args.pr
-
-    # state を先に読み、fallback 検証用の round 開始時刻を取得する
-    # (round 開始前の古いファイルや、別リポジトリの同番号 PR の戻り値を
-    # 誤マージするのを防ぐ)。
-    st = _load(pr)
-    if not st.get("rounds"):
-        die("state.rounds が空。`state.py start-round` を先に呼んでください", code=3)
-    round_started_ts = _round_started_unixtime(st["rounds"][-1])
-
-    fix = _read_fix_result(pr, args.file, round_started_ts)
-
+def _merge_fix_records(st: dict, fix: dict, pr: int) -> dict:
+    """fix の戻り値を正規化して記録へ反映し、ラウンドの fix 辞書を返す。"""
     # key 名 fallback (サブエージェントが別名で書いた場合の救済)。
     # 正規は fix_commit / fixed_count、別名は commit_sha / fixed のみ受理する。
     fix_commit = fix.get("fix_commit") or fix.get("commit_sha")
@@ -3572,7 +3557,6 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     if fixed_count is None:
         fixed_count = fix.get("fixed", 0)
 
-    # `st` は冒頭の fallback 検証で既に load 済み。
     round_no = st["rounds"][-1]["round"]
 
     # deferred は list が正だが、LLM がスキーマを無視して文字列リスト
@@ -3642,11 +3626,32 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     rejected_findings = st.setdefault("rejected_findings", [])
     for r in _rejected_items:
         rejected_findings.append({**r, "pr": pr, "round": round_no})
+    return st["rounds"][-1]["fix"]
+
+
+def cmd_merge_fix(args: argparse.Namespace) -> None:
+    """Step 5 後段 — fix サブエージェント戻り値を state にマージ + CI 分類。
+
+    Exit code: 0=continue, 3=ci-code-fail (final=error)
+    """
+    pr = args.pr
+
+    # state を先に読み、fallback 検証用の round 開始時刻を取得する
+    # (round 開始前の古いファイルや、別リポジトリの同番号 PR の戻り値を
+    # 誤マージするのを防ぐ)。
+    st = _load(pr)
+    if not st.get("rounds"):
+        die("state.rounds が空。`state.py start-round` を先に呼んでください", code=3)
+    round_started_ts = _round_started_unixtime(st["rounds"][-1])
+
+    fix = _read_fix_result(pr, args.file, round_started_ts)
+
+    round_fix = _merge_fix_records(st, fix, pr)
     _save(pr, st)
 
     # CI 分類
     if (fix.get("ci_status") or "").upper() != "FAILURE":
-        info(f"✅ fix マージ完了 (commit={fix_commit} fixed={fixed_count})")
+        info(f"✅ fix マージ完了 (commit={round_fix['commit']} fixed={round_fix['fixed']})")
         return
 
     # 振り分けは `_classify_ci` が 1 か所で持つ。ここが読むのは修正の担当が申告した
