@@ -3265,28 +3265,21 @@ def _count(v: Any) -> int:
     return 0
 
 
-def cmd_merge_fix(args: argparse.Namespace) -> None:
-    """Step 5 後段 — fix サブエージェント戻り値を state にマージ + CI 分類。
+def _read_fix_result(
+    pr: int | str,
+    explicit_file: str | pathlib.Path | None,
+    round_started_ts: float | None,
+) -> dict[str, Any]:
+    """fix サブエージェントの戻り値ファイルを探索・検証して辞書として読み込む。
 
-    Exit code: 0=continue, 3=ci-code-fail (final=error)
+    探索順:
+      1. explicit_file 明示 (ユーザー指定なので mtime/pr 検証はスキップ)
+      2. $TMP_DIR/fix-pr<PR>-result.json (正規; _tmp_dir() 解決先)
+      3. /tmp/fix-pr<PR>-result.json (旧プロンプトで /tmp を指定したサブエージェント救済)
+    2, 3 は PR 番号だけで命名されているため、別 round / 別リポジトリの
+    古い結果を拾わないよう mtime と (あれば) JSON 内の `pr` で検証する。
     """
-    pr = args.pr
-
-    # state を先に読み、fallback 検証用の round 開始時刻を取得する
-    # (round 開始前の古いファイルや、別リポジトリの同番号 PR の戻り値を
-    # 誤マージするのを防ぐ)。
-    st = _load(pr)
-    if not st.get("rounds"):
-        die("state.rounds が空。`state.py start-round` を先に呼んでください", code=3)
-    round_started_ts = _round_started_unixtime(st["rounds"][-1])
-
-    # 戻り値ファイルの探索順:
-    #   1. --file 明示 (ユーザー指定なので mtime/pr 検証はスキップ)
-    #   2. $TMP_DIR/fix-pr<PR>-result.json (正規; _tmp_dir() 解決先)
-    #   3. /tmp/fix-pr<PR>-result.json (旧プロンプトで /tmp を指定したサブエージェント救済)
-    # 2, 3 は PR 番号だけで命名されているため、別 round / 別リポジトリの
-    # 古い結果を拾わないよう mtime と (あれば) JSON 内の `pr` で検証する。
-    explicit = pathlib.Path(args.file) if args.file else None
+    explicit = pathlib.Path(explicit_file) if explicit_file else None
     canonical_path = _resolve_tmp_dir(pr) / f"fix-pr{pr}-result.json"
     legacy_tmp_path = pathlib.Path(f"/tmp/fix-pr{pr}-result.json")
     # (path, is_canonical) のタプル: 正規パス (canonical) の parse 失敗は die(code=3) する
@@ -3348,6 +3341,26 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
             f"(checked: {checked})",
             code=3,
         )
+
+    return fix
+
+
+def cmd_merge_fix(args: argparse.Namespace) -> None:
+    """Step 5 後段 — fix サブエージェント戻り値を state にマージ + CI 分類。
+
+    Exit code: 0=continue, 3=ci-code-fail (final=error)
+    """
+    pr = args.pr
+
+    # state を先に読み、fallback 検証用の round 開始時刻を取得する
+    # (round 開始前の古いファイルや、別リポジトリの同番号 PR の戻り値を
+    # 誤マージするのを防ぐ)。
+    st = _load(pr)
+    if not st.get("rounds"):
+        die("state.rounds が空。`state.py start-round` を先に呼んでください", code=3)
+    round_started_ts = _round_started_unixtime(st["rounds"][-1])
+
+    fix = _read_fix_result(pr, args.file, round_started_ts)
 
     # key 名 fallback (サブエージェントが別名で書いた場合の救済)。
     # 正規は fix_commit / fixed_count、別名は commit_sha / fixed のみ受理する。
