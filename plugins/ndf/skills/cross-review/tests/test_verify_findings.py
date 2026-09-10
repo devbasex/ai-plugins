@@ -156,6 +156,53 @@ def test_a_finding_without_a_check_is_not_run(state_mod, work):
     assert out[0]["verification"]["result"] == "not_run"
 
 
+# ---------- 実行時刻 ----------
+
+def test_a_record_that_was_not_run_has_no_time(state_mod, work):
+    """**実行していない記録へ時刻を入れない。** 実行済みに見える。"""
+    out = verify(state_mod, [_finding("f0", "pytest tests/t.py")], allowed=[], work=work)
+    v = out[0]["verification"]
+    assert v["result"] == "not_run"
+    assert v["exit_code"] is None
+    assert v["ran_at"] is None
+
+
+def test_a_refused_command_has_no_time(state_mod, work):
+    """渡されていないコマンドは実行されないため、時刻も残らない。"""
+    out = verify(state_mod, [_finding("f0", "pytest-danger tests/t.py")],
+                 allowed=["pytest"], work=work)
+    assert out[0]["verification"]["ran_at"] is None
+
+
+def test_a_finding_without_a_check_has_no_time(state_mod, work):
+    out = verify(state_mod, [_finding("f0", "")], allowed=["pytest"], work=work)
+    assert out[0]["verification"]["ran_at"] is None
+
+
+def test_the_time_is_written_whenever_the_exit_code_is_known(state_mod, work):
+    """実行した枝は、結果が `not_run`（対象外の終了コード）でも時刻を持つ。
+
+    **時刻が対になるのは `exit_code` である。** 実行して 4 を受け取った記録は、
+    一度も実行していない記録と区別できる。
+    """
+    out = verify(state_mod, [_finding("f0", "pytest tests/t.py")],
+                 allowed=["pytest"], work=work, runner=lambda *a, **k: 4)
+    v = out[0]["verification"]
+    assert v["result"] == "not_run"
+    assert v["exit_code"] == 4
+    assert v["ran_at"]
+
+
+def test_a_reused_result_carries_a_time_too(state_mod, work):
+    """同じコマンドは 1 度しか実行しないが、どちらの記録も実行済みである。"""
+    out = verify(state_mod, [
+        _finding("f0", "pytest tests/t.py"),
+        _finding("f1", "pytest tests/t.py"),
+    ], allowed=["pytest"], work=work, runner=lambda *a, **k: 1)
+    assert out[0]["verification"]["ran_at"]
+    assert out[1]["verification"]["ran_at"]
+
+
 # ---------- 束ねた組 ----------
 
 def test_a_merged_side_is_verified_too(state_mod, work):

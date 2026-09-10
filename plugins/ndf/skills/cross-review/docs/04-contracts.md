@@ -96,7 +96,9 @@
 - `review_findings[].verification` — 実行検証の結果（#156）。`result` は
   `reproduced` / `not_reproduced` / `not_run` の 3 つで、**`not_run` は実行できなかった
   ことを表す**（再現しなかったことと同じにしない）。`finding_id` は結果の出所で、
-  統合した組では代表と違う値になりうる
+  統合した組では代表と違う値になりうる。**`ran_at` は実行した記録にだけ入り、実行
+  しなかった記録では `exit_code` とともに `null` である**（実行していない記録に時刻が
+  残ると、実行済みと見分けられない）
 - `review_findings[].critiques` — 反証の結果（#156）。**提案者以外の担当だけが載る。**
   値は `support` / `refute` / `insufficient_evidence` / `duplicate` / `out_of_scope`。
   **1 つの `(ラウンド, finding_id, 担当)` が持つ値は 1 つである。** 取り直した反証は

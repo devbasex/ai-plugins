@@ -2873,6 +2873,10 @@ def _verify_findings(
 
     **同じコマンドは 1 度しか実行しない。** 組の全員が同じ `suggested_check` を書くのは
     普通に起こり（統合の条件は本文の一致である）、そのたびに走らせると実行が増える。
+
+    **`ran_at` は結果を受け取った記録にだけ入れる。** 初期化で入れると、実行していない
+    `not_run` の記録にも時刻が残り、実行済みに見える。記録の `result` / `exit_code` /
+    `ran_at` が同じことを指すようにする。
     """
     codes = set(reproduced_codes or VERIFY_REPRODUCED_CODES)
     run = runner or _run_verify
@@ -2886,7 +2890,7 @@ def _verify_findings(
         check = str(finding.get("suggested_check") or "")
         record: dict[str, Any] = {
             "command": check, "finding_id": finding.get("finding_id"),
-            "exit_code": None, "result": "not_run", "ran_at": _now(),
+            "exit_code": None, "result": "not_run", "ran_at": None,
         }
         argv = _verify_argv(check, allowed, work) if allowed else None
         if argv is not None:
@@ -2897,6 +2901,7 @@ def _verify_findings(
                 code = run(argv, work)
                 ran[key] = code
             record["exit_code"] = code
+            record["ran_at"] = _now()
             if code in codes:
                 record["result"] = "reproduced"
             elif code == 0:
