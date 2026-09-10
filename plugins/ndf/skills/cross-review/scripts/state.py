@@ -3318,6 +3318,26 @@ def _counted_finding_keys(
     return keys
 
 
+def _finding_match_kind(
+    current_key: tuple[str, int, str],
+    previous_keys: list[tuple[str, int, str]],
+) -> str | None:
+    """前ラウンドの指摘リストに対する現指摘の一致種別を返す。
+
+    同一ファイルに限定した候補全体に対して、完全一致 → 近傍 → 本文の優先順で判定し、
+    "exact" / "near" / "body" / None を返す。
+    """
+    path, line, body = current_key
+    same_file = [q for q in previous_keys if q[0] == path]
+    if any(line == q[1] for q in same_file):
+        return "exact"
+    if any(abs(line - q[1]) <= OSCILLATION_NEAR_LINES for q in same_file):
+        return "near"
+    if body and any(body == q[2] for q in same_file):
+        return "body"
+    return None
+
+
 def _new_finding_count(st: dict[str, Any], pr: int) -> tuple[int, bool]:
     """最後のラウンドの新しい指摘の `(件数, 測れたかどうか)` を返す。
 
@@ -3353,14 +3373,8 @@ def _new_finding_count(st: dict[str, Any], pr: int) -> tuple[int, bool]:
         return len(curr), True
     prev = _finding_keys(st, pr, same_pr[-2]["round"])
     new = 0
-    for path, line, body in curr:
-        same_file = [q for q in prev if q[0] == path]
-        matched = (
-            any(line == q[1] for q in same_file)
-            or any(abs(line - q[1]) <= OSCILLATION_NEAR_LINES for q in same_file)
-            or (body and any(body == q[2] for q in same_file))
-        )
-        if not matched:
+    for key in curr:
+        if _finding_match_kind(key, prev) is None:
             new += 1
     return new, True
 
@@ -3405,13 +3419,13 @@ def cmd_check_oscillation(args: argparse.Namespace) -> None:
         sys.exit(2)
 
     exact = near = same_body = 0
-    for path, line, body in curr:
-        same_file = [p for p in prev if p[0] == path]
-        if any(line == p[1] for p in same_file):
+    for key in curr:
+        kind = _finding_match_kind(key, prev)
+        if kind == "exact":
             exact += 1
-        elif any(abs(line - p[1]) <= OSCILLATION_NEAR_LINES for p in same_file):
+        elif kind == "near":
             near += 1
-        elif body and any(body == p[2] for p in same_file):
+        elif kind == "body":
             same_body += 1
     overlap_count = exact + near + same_body
     ratio = overlap_count / len(curr)
