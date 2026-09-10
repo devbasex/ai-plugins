@@ -36,12 +36,13 @@ Task の順序は **0 → 1（1 段目）→ 2 → 3 → 1（2 段目）→ 4 �
 | 0 | `finding_id` の採番（`<担当>-r<ラウンド>-<索引>`） | **完了**（`cc41f0b`） |
 | 1（1 段目） | `_merge_duplicates`（近傍かつ本文の一致） | **完了**（`12278da`） |
 | 2 | `_verify_findings`（実行検証） | **完了**（`026916d`） |
-| 3 | `critique.sh` と `cmd_collect_critiques`（反証） | 未着手 |
-| 1（2 段目） | 相互 `duplicate` の統合（反証の後） | 未着手 |
-| 4 | `_classify_finding` と `cmd_judge`（区分と収束） | 未着手 |
-| 5 | `docs/06-evidence.md` と `docs/04-contracts.md` | 一部済み（`finding_id` の契約は書いた） |
+| 3 | `critique.sh` と `cmd_collect_critiques`（反証） | **完了** |
+| 1（2 段目） | 相互 `duplicate` の統合（反証の後） | **完了** |
+| 4 | `_classify_finding` と新規性の絞り込み | **完了** |
+| 5 | `docs/06-evidence.md` と `docs/04-contracts.md` | **完了** |
 
-**受け入れ条件は 14 件。** 計画の表にある。
+**受け入れ条件は 14 件。** 計画の表にある。**実装はすべて完了し、テストは
+2910 件が通る。** 残るのは Pull Request の作成とレビューである。
 
 ### 2. #156 の 4 本目（効果の測定）
 

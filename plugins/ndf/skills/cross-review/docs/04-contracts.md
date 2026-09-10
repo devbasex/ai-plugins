@@ -63,9 +63,15 @@
     {"finding_id": "agy-r1-0", "pr": 123, "round": 1, "agent": "agy",
      "path": "src/foo.py", "line": 42,
      "severity": "major", "body": "...", "evidence": "...", "falsification": "...",
-     "suggested_check": "pytest tests/test_foo.py -q", "posted_to": "body",
-     "has_evidence": true}
+     "suggested_check": "pytest tests/test_foo.py::test_x", "posted_to": "body",
+     "has_evidence": true,
+     "origin_runtimes": ["agy", "kiro"], "merged_from": ["kiro-r1-2"],
+     "verification": {"command": "...", "exit_code": 1, "result": "reproduced",
+                      "finding_id": "agy-r1-0", "ran_at": "..."},
+     "critiques": [{"agent": "codex", "verdict": "support", "reason": "..."}],
+     "classification": "verified_blocking"}
   ],
+  "unmatched_critiques": [],
   "rejected_findings": [
     {"pr": 123, "round": 1, "path": "src/foo.py", "line": 42, "severity": "minor",
      "comment_id": 3222849090, "summary": "...", "reason_for_rejection": "..."}
@@ -86,6 +92,16 @@
   `payload.json` の 1 件に `pr` / `round` / `agent` と `has_evidence` を添えた形である。
   **`has_evidence` は `evidence` と `falsification` の両方が空でないときだけ真になる**
   （片方だけでは、別の担当がその指摘を確かめられない）
+- `review_findings[].verification` — 実行検証の結果（#156）。`result` は
+  `reproduced` / `not_reproduced` / `not_run` の 3 つで、**`not_run` は実行できなかった
+  ことを表す**（再現しなかったことと同じにしない）。`finding_id` は結果の出所で、
+  統合した組では代表と違う値になりうる
+- `review_findings[].critiques` — 反証の結果（#156）。**提案者以外の担当だけが載る。**
+  値は `support` / `refute` / `insufficient_evidence` / `duplicate` / `out_of_scope`
+- `review_findings[].classification` — 5 つの区分（#156）。**収束の判定が数えるのは
+  `verified_blocking` と `needs_human_judgment` の 2 つだけである**
+- `unmatched_critiques` — 結び先の無い反証（#156）。**捨てない**（反証 0 件のラウンドと、
+  結び先を誤ったラウンドを区別するため）
 - `rejected_findings` — 却下した指摘を **per-item** で蓄積する。`rounds[].fix.rejected` は
   ラウンドごとの件数で、こちらは理由と位置を持つ。**両方を持つのは、件数だけが返る劣化表現
   （`fix` が int を返す経路）があるためである。** そのときは記録が空になり、件数だけが残る。
