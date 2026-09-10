@@ -240,12 +240,11 @@ while :; do
 
   # Step 2.5: 根拠の検証（#156）。順序と理由は docs/06-evidence.md の「走らせる順序」。
   #   飛ばすと、判定が読む区分が統合も実行の結果も反映しないまま決まる。
-  #   反証の結果は `<stem>-result.json` ではないため、監視は --no-require-result で待つ。
+  # ⚠ 起動 → 監視 → 取り込みは critique-round.sh が持つ。**未起動の担当を監視へ渡さない**
+  #   （渡すと 30 秒待って PIDFILE_BAD (exit 6) が返る）ことと、有効な反証が揃わない
+  #   ときに同じラウンドで 1 度だけ取り直すことを、この 1 本が引き受ける。
   "$SCRIPTS/state.py" verify-findings "$STATE_PR"
-  for r in ${ONLY:-$REVIEWERS}; do "$SCRIPTS/critique.sh" "$r" "$STATE_PR" "$ROUND"; done
-  "$SCRIPTS/monitor.py" "$STATE_PR" --agents "${ONLY:-$REVIEWERS_CSV}" \
-    --stem-template '{agent}-critique-pr{id}' --no-require-result || true
-  "$SCRIPTS/state.py" collect-critiques "$STATE_PR"
+  "$SCRIPTS/critique-round.sh" "$STATE_PR" "$ROUND" ${ONLY:-$REVIEWERS}
 
   # Step 3: 判定 (0=収束 / 2=修正へ / 7=結果なし / 8=待ち行列に残あり / 1=中断)。引き継いだ指摘が残っていれば、
   #   両者が承認しても 2 を返して修正の工程へ回す。置換の終了コードは変数で受けてから読む。

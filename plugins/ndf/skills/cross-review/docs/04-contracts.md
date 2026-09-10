@@ -98,7 +98,10 @@
   ことを表す**（再現しなかったことと同じにしない）。`finding_id` は結果の出所で、
   統合した組では代表と違う値になりうる
 - `review_findings[].critiques` — 反証の結果（#156）。**提案者以外の担当だけが載る。**
-  値は `support` / `refute` / `insufficient_evidence` / `duplicate` / `out_of_scope`
+  値は `support` / `refute` / `insufficient_evidence` / `duplicate` / `out_of_scope`。
+  **1 つの `(ラウンド, finding_id, 担当)` が持つ値は 1 つである。** 取り直した反証は
+  古い値へ積まず置き換える（積むと、`refute` を `support` へ訂正しても両方が並び、
+  区分の順で `refute` が先に当たって指摘が `rejected` のままになる）
 - `review_findings[].classification` — 5 つの区分（#156）。**収束の判定が数えるのは
   `verified_blocking` と `needs_human_judgment` の 2 つだけである**
 - `unmatched_critiques` — 結び先の無い反証（#156）。**捨てない**（反証 0 件のラウンドと、
@@ -108,7 +111,10 @@
   持たないラウンドは従来どおり全件を数える。**`review_findings` の有無では判定しない**
   （取り込みはこの変更より前から要素を積むため、区分も `verification` も持たない旧い
   ラウンドが絞り込みに掛かり、修正必須の `major` が `insufficient_evidence` へ落ちて
-  新規 0 件で収束する）。印を書くのは経路の最後（`collect-critiques`）である
+  新規 0 件で収束する）。印を書くのは経路の最後（`collect-critiques`）で、**対象ごとに
+  有効な反証が揃ったときだけである**
+- `rounds[].critique_relaunched` — 反証を取り直した担当（#549 レビュー対応）。
+  **同じラウンドで 1 度だけ取り直す**ための控えである
 - `rejected_findings` — 却下した指摘を **per-item** で蓄積する。`rounds[].fix.rejected` は
   ラウンドごとの件数で、こちらは理由と位置を持つ。**両方を持つのは、件数だけが返る劣化表現
   （`fix` が int を返す経路）があるためである。** そのときは記録が空になり、件数だけが残る。

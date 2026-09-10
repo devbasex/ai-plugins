@@ -270,7 +270,11 @@ def test_an_old_review_findings_does_not_switch_to_the_classification(
 
 def test_the_marker_is_written_by_the_last_step_of_the_pipeline(
         state_mod, tmp_path, monkeypatch):
-    """印を付けるのは経路の最後（`collect-critiques`）である。"""
+    """印を付けるのは経路の最後（`collect-critiques`）である。
+
+    **対象ごとに有効な反証が揃ったときだけ付く**（#549 レビュー対応）。round 1 の
+    担当は `agy` / `kiro` であるため、両方の結果ファイルを用意する。
+    """
     import argparse
     import json
 
@@ -282,6 +286,10 @@ def test_the_marker_is_written_by_the_last_step_of_the_pipeline(
         "final": None,
     }
     (tmp_path / "cross-review-pr1-state.json").write_text(json.dumps(st))
+    for agent in ("agy", "kiro"):
+        (tmp_path / f"{agent}-critique-pr1-round1.json").write_text(json.dumps(
+            {"critiques": [{"finding_id": "codex-r1-0",
+                            "verdict": "insufficient_evidence", "reason": "?"}]}))
 
     state_mod.cmd_collect_critiques(argparse.Namespace(pr=1))
 

@@ -38,6 +38,12 @@ STATE=$TMP_DIR/cross-review-pr$STATE_PR-state.json
 WORKTREE=$(jq -r '.worktree_path' "$STATE")
 PR=$(jq -r '.current_pr' "$STATE")
 
+STEM=$TMP_DIR/$RUNTIME-critique-pr$STATE_PR
+# **前のラウンドの pid ファイルを先に捨てる。** 監視は `<stem>.pid` の有無で起動を
+# 見るため、残骸があると起動していない担当を起動済みと読む（`<stem>` はラウンドを
+# 名前に持たない）。対象が無くて起動しない経路より前に捨てる。
+rm -f "$STEM.pid"
+
 # **この担当が提案者でない指摘だけを渡す。** origin_runtimes に載る担当は
 # すべて提案者である（統合した組を含む）。束ねられた側も渡さない。
 #
@@ -60,7 +66,6 @@ fi
 OUT=$TMP_DIR/$RUNTIME-critique-pr$STATE_PR-round$ROUND.json
 rm -f "$OUT"
 
-STEM=$TMP_DIR/$RUNTIME-critique-pr$STATE_PR
 PROMPT=$STEM-prompt.md
 cat > "$PROMPT" <<EOF
 # 反証: PR #$PR round $ROUND

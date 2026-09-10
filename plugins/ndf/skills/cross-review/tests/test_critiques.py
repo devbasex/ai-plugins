@@ -54,8 +54,20 @@ def tmp_dir(monkeypatch, tmp_path, state_mod):
     return tmp_path
 
 
-def collect(state_mod):
-    state_mod.cmd_collect_critiques(argparse.Namespace(pr=PR))
+def collect(state_mod, expect_rc: int | None = None) -> int:
+    """反証を取り込み、終了コードを返す。
+
+    **揃わないときの 7 は「揃ったことの確認」の節で見る。** 結び方のテストで対象の
+    全件へ反証を用意すると、確かめたい 1 件が他の値に埋もれる。
+    """
+    rc = 0
+    try:
+        state_mod.cmd_collect_critiques(argparse.Namespace(pr=PR))
+    except SystemExit as exc:
+        rc = int(exc.code or 0)
+    if expect_rc is not None:
+        assert rc == expect_rc, f"終了コードが {rc}"
+    return rc
 
 
 # ---------- 取り込み ----------
@@ -184,6 +196,194 @@ def test_no_files_leaves_the_findings_untouched(tmp_dir, state_mod):
     assert _read(tmp_dir)["review_findings"][0].get("critiques", []) == []
 
 
+# ---------- 同じ担当の反証は置き換える（#549 レビュー対応） ----------
+#
+# 同じラウンドの反証を取り直して `collect-critiques` を再実行すると、古い値へ
+# 積み増していた。`refute` を `support` へ訂正しても両方が並び、区分の順で `refute`
+# が先に当たって指摘が `rejected` のままになる。
+
+def test_recollecting_replaces_the_same_agents_critique(tmp_dir, state_mod):
+    """**`(ラウンド, finding_id, 担当)` が持つ値は 1 つである。**"""
+    _write(tmp_dir, _state([_finding("codex-r1-0", "codex")]))
+    _critique_file(tmp_dir, "kiro", [
+        {"finding_id": "codex-r1-0", "verdict": "refute", "reason": "誤りだと思う"}])
+    collect(state_mod)
+
+    # 取り直して訂正する（refute → support）。
+    _critique_file(tmp_dir, "kiro", [
+        {"finding_id": "codex-r1-0", "verdict": "support", "reason": "読み直した"}])
+    collect(state_mod)
+
+    got = _read(tmp_dir)["review_findings"][0]["critiques"]
+    assert got == [{"agent": "kiro", "verdict": "support", "reason": "読み直した"}]
+
+
+def test_a_corrected_verdict_stops_the_finding_from_staying_rejected(
+        tmp_dir, state_mod):
+    """訂正が効かないと `rejected` のまま残る。区分まで見て固定する。"""
+    _write(tmp_dir, _state([
+        _finding("codex-r1-0", "codex", has_evidence=True)]))
+    _critique_file(tmp_dir, "kiro", [
+        {"finding_id": "codex-r1-0", "verdict": "refute", "reason": "誤りだと思う"}])
+    collect(state_mod)
+    assert state_mod._classify_finding(
+        _read(tmp_dir)["review_findings"][0]) == "rejected"
+
+    _critique_file(tmp_dir, "kiro", [
+        {"finding_id": "codex-r1-0", "verdict": "support", "reason": "読み直した"}])
+    collect(state_mod)
+
+    assert state_mod._classify_finding(
+        _read(tmp_dir)["review_findings"][0]) == "needs_human_judgment"
+
+
+def test_recollecting_does_not_inflate_the_unmatched_list(tmp_dir, state_mod):
+    """取り直しは同じ結果ファイルを読み直す。**結び先なしを二重に数えない。**"""
+    _write(tmp_dir, _state([_finding("codex-r1-0", "codex")]))
+    _critique_file(tmp_dir, "kiro", [
+        {"finding_id": "nowhere-r1-9", "verdict": "refute", "reason": "?"}])
+
+    collect(state_mod)
+    collect(state_mod)
+
+    assert len(_read(tmp_dir)["unmatched_critiques"]) == 1
+
+
+def test_the_other_agents_critique_is_kept(tmp_dir, state_mod):
+    """置き換えるのは同じ担当の値だけである。"""
+    _write(tmp_dir, _state([_finding("codex-r1-0", "codex")]))
+    _critique_file(tmp_dir, "agy", [
+        {"finding_id": "codex-r1-0", "verdict": "support", "reason": "a"}])
+    _critique_file(tmp_dir, "kiro", [
+        {"finding_id": "codex-r1-0", "verdict": "refute", "reason": "b"}])
+    collect(state_mod)
+
+    _critique_file(tmp_dir, "kiro", [
+        {"finding_id": "codex-r1-0", "verdict": "support", "reason": "c"}])
+    collect(state_mod)
+
+    got = {c["agent"]: c["verdict"] for c in
+           _read(tmp_dir)["review_findings"][0]["critiques"]}
+    assert got == {"agy": "support", "kiro": "support"}
+
+
+# ---------- 揃ったことを確かめてから印を付ける（#549 レビュー対応） ----------
+#
+# 結果ファイルが欠落・不正でも印が付くと、実行検証を持たない単独の major が
+# `insufficient_evidence` へ落ち、新規 0 件のまま未検証で収束する。
+
+def _cover(tmp_dir, agents, fid="codex-r1-0"):
+    for agent in agents:
+        _critique_file(tmp_dir, agent, [
+            {"finding_id": fid, "verdict": "insufficient_evidence", "reason": "?"}])
+
+
+def test_the_marker_is_written_when_every_target_is_covered(tmp_dir, state_mod):
+    _write(tmp_dir, _state([_finding("codex-r1-0", "codex")]))
+    _cover(tmp_dir, ("agy", "kiro"))
+
+    collect(state_mod, expect_rc=0)
+
+    assert _read(tmp_dir)["evidence_rounds"] == [1]
+
+
+@pytest.mark.parametrize("setup", ["missing", "broken", "partial"])
+def test_a_missing_or_invalid_result_leaves_the_round_unmarked(
+        tmp_dir, state_mod, setup):
+    """**印を付けず、終了コード 7 で再取得へ戻す。**"""
+    _write(tmp_dir, _state([_finding("codex-r1-0", "codex")]))
+    if setup == "broken":
+        _cover(tmp_dir, ("agy",))
+        (tmp_dir / f"kiro-critique-pr{PR}-round1.json").write_text("not json")
+    elif setup == "partial":
+        _cover(tmp_dir, ("agy",))
+        _critique_file(tmp_dir, "kiro", [
+            {"finding_id": "codex-r1-0", "verdict": "maybe", "reason": "?"}])
+
+    collect(state_mod, expect_rc=7)
+
+    st = _read(tmp_dir)
+    assert st.get("evidence_rounds", []) == []
+    assert state_mod._evidence_completed(st, 1) is False
+
+
+def test_an_unmarked_round_still_counts_every_finding(tmp_dir, state_mod):
+    """印が無いラウンドは全件を数える。**未検証のまま収束しない。**
+
+    実行検証も支持も無い単独の `major` は `insufficient_evidence` へ落ちる。印が
+    付いていれば数える 2 つから外れて新規 0 件になり、そのまま収束する。
+    """
+    _write(tmp_dir, _state([_finding("agy-r1-0", "agy")]))
+    # 新規性は担当の payload から数える（`_finding_keys`）。round 1 の担当は agy / kiro。
+    (tmp_dir / f"agy-review-pr{PR}-round1-payload.json").write_text(json.dumps(
+        {"comments": [{"path": "a.py", "line": 1, "body": "x",
+                       "severity": "major"}]}))
+
+    collect(state_mod, expect_rc=7)
+
+    st = _read(tmp_dir)
+    count, measurable = state_mod._new_finding_count(st, PR)
+    assert measurable is True
+    assert count == 1
+
+
+def test_the_retry_agents_are_returned(tmp_dir, state_mod, capsys):
+    _write(tmp_dir, _state([_finding("codex-r1-0", "codex")]))
+    _cover(tmp_dir, ("agy",))
+
+    collect(state_mod, expect_rc=7)
+
+    out = capsys.readouterr().out
+    assert "CRITIQUE_RETRY_AGENTS='kiro'" in out
+    assert "CRITIQUE_RETRY_AGENTS_CSV=kiro" in out
+
+
+def test_the_retry_happens_once_per_round(tmp_dir, state_mod):
+    """**取り直しは同じラウンドで 1 度だけである。** 2 度目は 0 で返して工程を進める。"""
+    _write(tmp_dir, _state([_finding("codex-r1-0", "codex")]))
+
+    collect(state_mod, expect_rc=7)
+    collect(state_mod, expect_rc=0)
+
+    st = _read(tmp_dir)
+    assert sorted(st["rounds"][0]["critique_relaunched"]) == ["agy", "kiro"]
+    # 揃わないまま進むが、印は付かないので全件が数えられる。
+    assert st.get("evidence_rounds", []) == []
+
+
+def test_a_proposer_only_round_is_marked_without_any_file(tmp_dir, state_mod):
+    """**反証の対象が無い担当は不足に数えない。** 全員が提案者なら印が付く。"""
+    _write(tmp_dir, _state([
+        _finding("agy-r1-0", "agy", origin_runtimes=["agy", "kiro"])]))
+
+    collect(state_mod, expect_rc=0)
+
+    assert _read(tmp_dir)["evidence_rounds"] == [1]
+
+
+def test_a_merged_finding_is_not_counted_as_missing(tmp_dir, state_mod):
+    """束ねられた側は対象から外れる。**不足は統合の後に数える。**"""
+    _write(tmp_dir, _state([
+        _finding("codex-r1-0", "codex", body="片方の本文"),
+        _finding("kiro-r1-0", "kiro", body="もう片方の本文"),
+    ]))
+    for agent, fid, other in (("kiro", "codex-r1-0", "kiro-r1-0"),
+                              ("agy", "kiro-r1-0", "codex-r1-0")):
+        _critique_file(tmp_dir, agent, [
+            {"finding_id": fid, "verdict": "duplicate",
+             "duplicate_of": other, "reason": "同じ主張である"}])
+
+    # kiro は codex-r1-0 だけ、agy は kiro-r1-0 だけへ返している。統合の前に数えると
+    # 双方 1 件ずつ不足するが、束ねた後は代表 1 件だけが残る。
+    rc = collect(state_mod)
+
+    st = _read(tmp_dir)
+    findings = {f["finding_id"]: f for f in st["review_findings"]}
+    assert "merged_into" in findings["kiro-r1-0"]
+    assert rc == 7  # 代表へ返していない担当が 1 者残る
+    assert st["rounds"][0]["critique_relaunched"] == ["agy"]
+
+
 # ---------- 起動（critique.sh） ----------
 
 SCRIPTS = pathlib.Path(__file__).resolve().parents[1] / "scripts"
@@ -271,6 +471,76 @@ def test_no_targets_exits_successfully_without_launching(tmp_dir, tmp_path, find
     assert result.stderr == ""
     assert not (tmp_dir / f"kiro-critique-pr{PR}-prompt.md").exists()
     assert set(tmp_dir.rglob("*")) == before
+
+
+# ---------- 1 ラウンドの通し（critique-round.sh / #549 レビュー対応） ----------
+#
+# **未起動の担当を監視へ渡すと 30 秒止まる。** critique.sh は反証の対象が無い担当で
+# `launch-cli.sh` を呼ばずに終わるため `<stem>.pid` を作らない。monitor.py はその
+# pid ファイルを 30 秒ポーリングしたうえで PIDFILE_BAD (exit 6) を返す。
+#
+# 上限を 15 秒に置くのは、**30 秒の停止が起きていないこと**を測るためである
+# （起きていれば必ず 30 秒を超える）。
+
+MONITOR_GRACE_SECONDS = 30
+ROUND_TIME_LIMIT = 15
+
+
+def run_round(tmp_dir, agents, round_no=1):
+    import subprocess
+    env = dict(os.environ, CROSS_REVIEW_TMP_DIR=str(tmp_dir))
+    return subprocess.run(
+        ["bash", str(SCRIPTS / "critique-round.sh"), str(PR), str(round_no), *agents],
+        capture_output=True, text=True, env=env,
+    )
+
+
+def test_a_round_without_targets_does_not_block(tmp_dir, tmp_path):
+    """**指摘 0 件で収束するラウンドで止まらない。**"""
+    import time as _time
+    work = tmp_path / "work"
+    work.mkdir()
+    _state_file(tmp_dir, [], work)
+
+    started = _time.monotonic()
+    result = run_round(tmp_dir, ["agy", "kiro"])
+    elapsed = _time.monotonic() - started
+
+    assert result.returncode == 0, result.stderr
+    assert elapsed < ROUND_TIME_LIMIT, f"{elapsed:.1f} 秒かかった（監視が待っている）"
+
+
+def test_a_stale_pidfile_is_not_read_as_a_launch(tmp_dir, tmp_path):
+    """**`<stem>` はラウンドを名前に持たない。** 残骸を起動済みと読まない。"""
+    import time as _time
+    work = tmp_path / "work"
+    work.mkdir()
+    _state_file(tmp_dir, [], work)
+    stale = tmp_dir / f"agy-critique-pr{PR}.pid"
+    stale.write_text("999999\n")
+
+    started = _time.monotonic()
+    result = run_round(tmp_dir, ["agy", "kiro"])
+    elapsed = _time.monotonic() - started
+
+    assert result.returncode == 0, result.stderr
+    assert not stale.exists(), "前のラウンドの pid ファイルが残っている"
+    assert elapsed < ROUND_TIME_LIMIT, f"{elapsed:.1f} 秒かかった（監視が待っている）"
+
+
+def test_the_stale_pidfile_is_removed_even_without_targets(tmp_dir, tmp_path):
+    """捨てるのは、対象が無くて起動しない経路より前である。"""
+    work = tmp_path / "work"
+    work.mkdir()
+    _state_file(tmp_dir, [_finding("kiro-r1-0", "kiro")], work)
+    stale = tmp_dir / f"kiro-critique-pr{PR}.pid"
+    stale.write_text("999999\n")
+
+    result = run_critique(tmp_dir, "kiro", work)
+
+    assert result.returncode == 0, result.stderr
+    assert "反証の対象がありません" in result.stdout
+    assert not stale.exists()
 
 
 def test_a_merged_side_is_not_offered(tmp_dir, tmp_path):
