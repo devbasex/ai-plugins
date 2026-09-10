@@ -42,3 +42,34 @@ def test_existing_comments_are_inlined_or_replaced_with_none(tmp_path, comments,
     snapshot = prompt.split("## 既存コメントスナップショット（重複指摘禁止）\n", 1)[1]
     snapshot = snapshot.split("```\n", 2)[1]
     assert snapshot == expected + "\n"
+
+
+@pytest.mark.parametrize("event_downgrade, expected_line", [
+    (True, "- event_downgrade: true"),
+    (False, "- event_downgrade: false"),
+], ids=["downgrade-true", "downgrade-false"])
+def test_event_downgrade_is_reflected_in_prompt(tmp_path, event_downgrade, expected_line):
+    """現状固定: state.json の event_downgrade がプロンプトに反映される。"""
+    state = {
+        "current_pr": PR, "repo": "o/r", "worktree_path": str(tmp_path),
+        "event_downgrade": event_downgrade,
+        "rounds": [{"round": 1, "head_sha": "a" * 40}],
+    }
+    (tmp_path / f"cross-review-pr{PR}-state.json").write_text(json.dumps(state))
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    stub = bin_dir / "codex"
+    stub.write_text("#!/bin/sh\nexit 0\n")
+    stub.chmod(0o755)
+
+    result = subprocess.run(
+        ["bash", str(SCRIPT), "codex", str(PR), "1"],
+        capture_output=True, text=True,
+        env={**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+             "CROSS_REVIEW_TMP_DIR": str(tmp_path)},
+    )
+
+    assert result.returncode == 0, result.stderr
+    prompt = (tmp_path / f"codex-review-pr{PR}-prompt.md").read_text()
+    assert expected_line in prompt
+

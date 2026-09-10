@@ -316,3 +316,18 @@ def test_an_unknown_runtime_is_refused(tmp_dir, tmp_path):
     result = run_critique(tmp_dir, "nowhere", work)
 
     assert result.returncode != 0
+
+
+@pytest.mark.parametrize("state_setup", ["missing", "empty"], ids=["missing", "empty"])
+def test_missing_or_empty_state_file_exits_with_error(tmp_dir, tmp_path, state_setup):
+    """現状固定: state.json が存在しない、または空ファイルの場合は終了コード 1 で終了する。"""
+    work = tmp_path / "work"
+    work.mkdir()
+    if state_setup == "empty":
+        (tmp_dir / f"cross-review-pr{PR}-state.json").write_text("")
+
+    result = run_critique(tmp_dir, "kiro", work)
+
+    assert result.returncode == 1
+    assert "state.json not found" in result.stderr
+
