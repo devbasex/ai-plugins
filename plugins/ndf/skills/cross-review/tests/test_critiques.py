@@ -331,3 +331,85 @@ def test_missing_or_empty_state_file_exits_with_error(tmp_dir, tmp_path, state_s
     assert result.returncode == 1
     assert "state.json not found" in result.stderr
 
+
+
+# ---------- 通し経路（critique.sh → launch-cli.sh） ----------
+#
+# 現状固定: 他の担当の指摘があるとき、critique.sh はプロンプトを組み立てて
+# 共通層の `launch-cli.sh` を呼び、終了コード 0 で正常終了する。launch-cli.sh は
+# `kiro` ランタイムに対し `kiro-cli` を作業ツリーで背景起動するので、CLI 本体を
+# 記録するだけのスタブへ差し替え、経路が通ることと渡された引数を固定する。
+
+import subprocess  # noqa: E402  (通し経路のテストが使う)
+import time  # noqa: E402
+
+
+@pytest.fixture()
+def kiro_cli_stub(tmp_path):
+    """`launch-cli.sh` が `kiro` に対して起動する `kiro-cli` を記録するだけの置き換え。
+
+    実物の `launch-cli.sh` を通したうえで、CLI 本体だけを無害なスタブへ差し替える。
+    呼び出し引数と作業ディレクトリ、標準入力（プロンプト本文）を記録する。
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    log = tmp_path / "kiro-cli-calls.log"
+    stub = bin_dir / "kiro-cli"
+    stub.write_text(
+        "#!/bin/sh\n"
+        'printf "cwd=%s\\n" "$(pwd)" >> "$NDF_TEST_KIRO_LOG"\n'
+        'printf "argv=%s\\n" "$*" >> "$NDF_TEST_KIRO_LOG"\n'
+        'cat >> "$NDF_TEST_KIRO_LOG"\n'
+        "exit 0\n"
+    )
+    stub.chmod(0o755)
+    log.write_text("")
+    return {"bin": bin_dir, "log": log}
+
+
+def test_normal_path_builds_prompt_and_launches_the_cli(tmp_dir, tmp_path, kiro_cli_stub):
+    """現状固定: 他の担当の指摘があると、プロンプトを組み立てて launch-cli.sh を
+    呼び、終了コード 0 で終わる。launch-cli.sh は作業ツリーで生成された
+    プロンプトを渡して `kiro-cli` を起動する。"""
+    work = tmp_path / "work"
+    work.mkdir()
+    _state_file(tmp_dir, [_finding("codex-r1-0", "codex")], work)
+
+    env = dict(
+        os.environ,
+        CROSS_REVIEW_TMP_DIR=str(tmp_dir),
+        PATH=f"{kiro_cli_stub['bin']}{os.pathsep}{os.environ['PATH']}",
+        NDF_TEST_KIRO_LOG=str(kiro_cli_stub["log"]),
+    )
+    result = subprocess.run(
+        ["bash", str(SCRIPTS / "critique.sh"), "kiro", str(PR), "1"],
+        capture_output=True, text=True, env=env,
+    )
+
+    # 経路が通り、終了コード 0 で正常終了する。
+    assert result.returncode == 0, result.stderr
+
+    # プロンプトが作業ツリーのパスと対象の指摘を載せて生成される。
+    prompt_path = tmp_dir / f"kiro-critique-pr{PR}-prompt.md"
+    assert prompt_path.is_file()
+    prompt = prompt_path.read_text()
+    assert str(work) in prompt
+    assert "codex-r1-0" in prompt
+
+    # launch-cli.sh は作業ツリーへ cd してから STEM に沿った成果物（pid ファイル）を
+    # 作る。STEM は相対のため、pid ファイルは作業ツリー側に置かれる（現状の挙動）。
+    pid_file = work / f"kiro-critique-pr{PR}.pid"
+    for _ in range(100):
+        if pid_file.is_file():
+            break
+        time.sleep(0.05)
+    assert pid_file.is_file(), "launch-cli.sh が起動していない"
+
+    # kiro-cli が作業ツリーで、生成されたプロンプトを標準入力に受けて起動される。
+    for _ in range(100):
+        recorded = kiro_cli_stub["log"].read_text()
+        if "codex-r1-0" in recorded:
+            break
+        time.sleep(0.05)
+    assert f"cwd={work}" in recorded
+    assert "codex-r1-0" in recorded
