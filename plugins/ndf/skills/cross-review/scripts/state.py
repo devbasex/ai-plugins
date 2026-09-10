@@ -2775,6 +2775,74 @@ def _verify_findings(
         finding["verification"] = record
 
 
+# 反証で返してよい値（#156）。**一覧に無い値は結ばない。**
+CRITIQUE_VERDICTS = (
+    "support", "refute", "insufficient_evidence", "duplicate", "out_of_scope",
+)
+
+
+def _critique_path(agent: str, pr: int, round_: int) -> pathlib.Path:
+    return _resolve_tmp_dir(pr) / f"{agent}-critique-pr{pr}-round{round_}.json"
+
+
+def cmd_collect_critiques(args: argparse.Namespace) -> None:
+    """反証の結果を `review_findings[]` へ結ぶ（#156）。
+
+    **担当はファイル名から採る。** 本文の申告を採ると、別の担当を名乗った値をそのまま
+    数えることになる。**自分の指摘へは返さない**（統合された指摘では `origin_runtimes`
+    に載る担当すべてが提案者である）。
+
+    **結び先の無い値は捨てず `unmatched_critiques` へ残す。** 黙って捨てると、反証が
+    0 件のラウンドと、結び先を誤ったラウンドが同じに見える。
+    """
+    pr = args.pr
+    st = _load(pr)
+    if not st.get("rounds"):
+        die("state.rounds が空。`state.py start-round` を先に呼んでください")
+    round_no = st["rounds"][-1]["round"]
+    findings = {
+        f.get("finding_id"): f
+        for f in st.get("review_findings") or []
+        if f.get("round") == round_no
+    }
+    unmatched = st.setdefault("unmatched_critiques", [])
+    attached = 0
+
+    for agent in _round_reviewers(st, round_no):
+        path = _critique_path(agent, pr, round_no)
+        if not path.exists():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            info(f"⚠ {agent}: 反証の結果を読めません（{path.name}）")
+            continue
+        raw = payload.get("critiques")
+        items = [c for c in raw if isinstance(c, dict)] if isinstance(raw, list) else []
+        for item in items:
+            record = {
+                "agent": agent,
+                "verdict": item.get("verdict"),
+                "reason": item.get("reason", ""),
+            }
+            if item.get("duplicate_of"):
+                record["duplicate_of"] = item["duplicate_of"]
+            target = findings.get(item.get("finding_id"))
+            if target is None or record["verdict"] not in CRITIQUE_VERDICTS:
+                unmatched.append({**record, "finding_id": item.get("finding_id")})
+                continue
+            # 提案者は返さない。統合した組では origin_runtimes 全員が提案者である。
+            proposers = target.get("origin_runtimes") or [target.get("agent")]
+            if agent in proposers:
+                continue
+            target.setdefault("critiques", []).append(record)
+            attached += 1
+
+    _save(pr, st)
+    info(f"✅ 反証を取り込みました: {attached} 件"
+         + (f"（結び先なし {len(unmatched)} 件）" if unmatched else ""))
+
+
 def _merge_duplicates(st: dict[str, Any], round_no: int) -> None:
     """同じラウンドの同じ指摘を 1 件へ束ねる（#156）。
 
@@ -3506,6 +3574,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_check_oscillation)
+
+    sp = sub.add_parser("collect-critiques", help="反証の結果を指摘へ結ぶ（#156）")
+    sp.add_argument("pr", type=int)
+    sp.set_defaults(func=cmd_collect_critiques)
 
     sp = sub.add_parser("merge-fix", help="Step 5 post — fix 戻り値マージ + CI 分類")
     sp.add_argument("pr", type=int)
