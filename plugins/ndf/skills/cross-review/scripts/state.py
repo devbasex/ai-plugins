@@ -1465,6 +1465,124 @@ def cmd_flush(args: argparse.Namespace) -> None:
         info(f"✅ 待ち行列は空です（送った {len(result.sent)} 件）")
 
 
+def _print_init_result(
+    pr: object,
+    worktree: object,
+    tmp_dir: object,
+    repo: object,
+    head_branch: object,
+    base_branch: object,
+    is_own: bool,
+    event_downgrade: bool,
+    has_extra: bool,
+    carried_count: int,
+    resumed: bool,
+) -> None:
+    """cmd_init の 2 経路（再開・新規）が共有する末尾の出力ブロック。
+
+    出力形式は再開側・新規側で同一のため 1 箇所へ寄せる。PR 番号だけは
+    元の両分岐に合わせて quote しない（数値のため）。
+    """
+    print(f"PR={pr}")
+    print(f'WORKTREE={shlex.quote(str(worktree))}')
+    print(f'TMP_DIR={shlex.quote(str(tmp_dir))}')
+    print(f'REPO={shlex.quote(str(repo))}')
+    print(f'HEAD_BRANCH={shlex.quote(str(head_branch))}')
+    print(f'BASE_BRANCH={shlex.quote(str(base_branch))}')
+    print(f"IS_OWN_PR={'1' if is_own else '0'}")
+    print(f"EVENT_DOWNGRADE={'1' if event_downgrade else '0'}")
+    print(f"HAS_EXTRA_REVIEW_INSTRUCTIONS={'1' if has_extra else '0'}")
+    print(f"CARRIED_OVER_THREADS={carried_count}")
+    print(f"RESUMED={'1' if resumed else '0'}")
+
+
+def _resume_from_state(
+    pr: object,
+    repo: str,
+    worktree: str,
+    manual_extra_review: str,
+) -> bool:
+    """既存 state からの再開経路。
+
+    再開に該当し出力まで済ませたら True、該当する state が無ければ False を返す。
+    False のとき cmd_init は新規 init へ進む。
+    """
+    # 再開チェック: CROSS_REVIEW_TMP_DIR が設定されている場合はそちらを優先し、
+    # 未設定なら <worktree>/.cross_review/ を直接パスとして組む。
+    # _tmp_dir() は mkdir 副作用があるため使用せず、パス解決のみ行う。
+    env_tmp = os.environ.get("CROSS_REVIEW_TMP_DIR")
+    if env_tmp:
+        resume_dir = pathlib.Path(env_tmp).resolve()
+    else:
+        resume_dir = pathlib.Path(worktree) / ".cross_review"
+    resume_state_file = resume_dir / f"cross-review-pr{pr}-state.json"
+    if not resume_state_file.exists():
+        return False
+    st = json.loads(resume_state_file.read_text(encoding="utf-8"))
+    if st.get("final") is not None:
+        return False
+    state_changed = False
+    if "auto_review_instructions" not in st:
+        changed_files = _fetch_changed_files(pr, st.get("repo") or repo)
+        categories = _classify_changed_files(changed_files)
+        st["changed_files"] = changed_files
+        st["auto_review_categories"] = categories
+        st["auto_review_instructions"] = _auto_review_instructions(categories)
+        state_changed = True
+    if manual_extra_review:
+        st["manual_extra_review_instructions"] = manual_extra_review
+        # 後方互換: 旧 key も manual 指示として保持する。
+        st["extra_review_instructions"] = manual_extra_review
+        state_changed = True
+    manual = st.get("manual_extra_review_instructions") or st.get("extra_review_instructions") or ""
+    combined = _combined_review_instructions(
+        st.get("auto_review_instructions") or "",
+        manual,
+    )
+    if st.get("review_instructions") != combined:
+        st["review_instructions"] = combined
+        state_changed = True
+    # 再開した時点で残っている未解決の指摘を引き継ぎとして記録する。
+    if _record_carried_over(st, st.get("repo") or repo, st.get("current_pr") or pr):
+        state_changed = True
+    if state_changed:
+        resume_state_file.write_text(
+            json.dumps(st, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        info("↻ 追加レビュー観点を state に反映して再開")
+    # 待ち行列を流すのは、手元の `st` を書き戻した**後**である。流した結果
+    # （`queued` の解除と、届かなかった投稿の結果なし）は `_confirm_flushed` が
+    # 状態ファイルへ直接書く。先に流すと、この関数がその後に書き戻す古い `st` が
+    # それらを消す。再開の入口で流すこと自体は変えないため、回復した後の
+    # 1 本目のコマンドで届く。
+    # 渡すのは状態ファイルの鍵（`args.pr`）で、`current_pr` ではない。待ち行列も
+    # 状態ファイルも鍵で引くため、巻き直しの後に `current_pr` を渡すと引けない。
+    _auto_flush(pr)
+    tmp_dir = _tmp_dir(worktree)
+    wt = st.get("worktree_path") or ""
+    # 再開でも同期する。中断から再開までの間に head が進んでいることがあり、
+    # そのまま次のラウンドを回すと古い差分をレビューさせる。
+    resume_head = str(st.get("head_branch") or "")
+    if wt and resume_head and _is_registered_worktree(str(wt)):
+        _sync_worktree(str(wt), int(st.get("current_pr") or pr), resume_head)
+    info(f"↻ 前回中断 state から再開（round={len(st.get('rounds', []))}）")
+    _print_init_result(
+        st["current_pr"],
+        wt,
+        tmp_dir,
+        st.get("repo") or "",
+        st.get("head_branch") or "",
+        st.get("base_branch") or "",
+        bool(st.get("is_own_pr")),
+        bool(st.get("event_downgrade")),
+        bool(st.get("review_instructions")),
+        (st.get("carried_over") or {}).get("count", 0),
+        True,
+    )
+    return True
+
+
 def cmd_init(args: argparse.Namespace) -> None:
     """Step 0 — state 初期化 or 既存 state 引き継ぎ + プリチェック。"""
     pr = args.pr
@@ -1485,77 +1603,20 @@ def cmd_init(args: argparse.Namespace) -> None:
     # worktree ディレクトリが副作用で作成され exists() が常に true になる。
     # そのため _tmp_dir() 呼び出しは worktree 作成/確認の後に行う。
 
-    # 再開チェック: CROSS_REVIEW_TMP_DIR が設定されている場合はそちらを優先し、
-    # 未設定なら <worktree>/.cross_review/ を直接パスとして組む。
-    # _tmp_dir() は mkdir 副作用があるため使用せず、パス解決のみ行う。
-    env_tmp = os.environ.get("CROSS_REVIEW_TMP_DIR")
-    if env_tmp:
-        resume_dir = pathlib.Path(env_tmp).resolve()
-    else:
-        resume_dir = pathlib.Path(worktree) / ".cross_review"
-    resume_state_file = resume_dir / f"cross-review-pr{pr}-state.json"
-    if resume_state_file.exists():
-        st = json.loads(resume_state_file.read_text(encoding="utf-8"))
-        if st.get("final") is None:
-            state_changed = False
-            if "auto_review_instructions" not in st:
-                changed_files = _fetch_changed_files(pr, st.get("repo") or repo)
-                categories = _classify_changed_files(changed_files)
-                st["changed_files"] = changed_files
-                st["auto_review_categories"] = categories
-                st["auto_review_instructions"] = _auto_review_instructions(categories)
-                state_changed = True
-            if manual_extra_review:
-                st["manual_extra_review_instructions"] = manual_extra_review
-                # 後方互換: 旧 key も manual 指示として保持する。
-                st["extra_review_instructions"] = manual_extra_review
-                state_changed = True
-            manual = st.get("manual_extra_review_instructions") or st.get("extra_review_instructions") or ""
-            combined = _combined_review_instructions(
-                st.get("auto_review_instructions") or "",
-                manual,
-            )
-            if st.get("review_instructions") != combined:
-                st["review_instructions"] = combined
-                state_changed = True
-            # 再開した時点で残っている未解決の指摘を引き継ぎとして記録する。
-            if _record_carried_over(st, st.get("repo") or repo, st.get("current_pr") or pr):
-                state_changed = True
-            if state_changed:
-                resume_state_file.write_text(
-                    json.dumps(st, indent=2, ensure_ascii=False),
-                    encoding="utf-8",
-                )
-                info("↻ 追加レビュー観点を state に反映して再開")
-            # 待ち行列を流すのは、手元の `st` を書き戻した**後**である。流した結果
-            # （`queued` の解除と、届かなかった投稿の結果なし）は `_confirm_flushed` が
-            # 状態ファイルへ直接書く。先に流すと、この関数がその後に書き戻す古い `st` が
-            # それらを消す。再開の入口で流すこと自体は変えないため、回復した後の
-            # 1 本目のコマンドで届く。
-            # 渡すのは状態ファイルの鍵（`args.pr`）で、`current_pr` ではない。待ち行列も
-            # 状態ファイルも鍵で引くため、巻き直しの後に `current_pr` を渡すと引けない。
-            _auto_flush(pr)
-            tmp_dir = _tmp_dir(worktree)
-            wt = st.get("worktree_path") or ""
-            # 再開でも同期する。中断から再開までの間に head が進んでいることがあり、
-            # そのまま次のラウンドを回すと古い差分をレビューさせる。
-            resume_head = str(st.get("head_branch") or "")
-            if wt and resume_head and _is_registered_worktree(str(wt)):
-                _sync_worktree(str(wt), int(st.get("current_pr") or pr), resume_head)
-            info(f"↻ 前回中断 state から再開（round={len(st.get('rounds', []))}）")
-            print(f'PR={st["current_pr"]}')
-            print(f'WORKTREE={shlex.quote(str(wt))}')
-            print(f'TMP_DIR={shlex.quote(str(tmp_dir))}')
-            print(f'REPO={shlex.quote(str(st.get("repo") or ""))}')
-            print(f'HEAD_BRANCH={shlex.quote(str(st.get("head_branch") or ""))}')
-            print(f'BASE_BRANCH={shlex.quote(str(st.get("base_branch") or ""))}')
-            print(f"IS_OWN_PR={'1' if st.get('is_own_pr') else '0'}")
-            print(f"EVENT_DOWNGRADE={'1' if st.get('event_downgrade') else '0'}")
-            print(f"HAS_EXTRA_REVIEW_INSTRUCTIONS={'1' if st.get('review_instructions') else '0'}")
-            print(f"CARRIED_OVER_THREADS={(st.get('carried_over') or {}).get('count', 0)}")
-            print(f"RESUMED=1")
-            return
+    if _resume_from_state(pr, repo, worktree, manual_extra_review):
+        return
 
+    _init_new_state(args, pr, repo, worktree, manual_extra_review)
+
+
+def _init_new_state(
+    args: argparse.Namespace,
+    pr: object,
+    repo: str,
+    worktree: str,
+    manual_extra_review: str,
+) -> None:
+    """新規 init 経路: プリチェック → worktree 作成 → state 構築 → 出力。"""
     # 新規 init: プリチェック。
     # **作成者・head・base は REST の 1 回でまとめて取る。** 項目ごとに `gh pr view` を
     # 投げていた分（GraphQL 3 点）と、リポジトリ名の解決（同 1 点）が 0 点になる。
@@ -1671,17 +1732,144 @@ def cmd_init(args: argparse.Namespace) -> None:
     }
     state_file.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
     info(f"✅ state 初期化: {state_file}")
-    print(f"PR={pr}")
-    print(f'WORKTREE={shlex.quote(str(worktree))}')
-    print(f'TMP_DIR={shlex.quote(str(tmp_dir))}')
-    print(f'REPO={shlex.quote(str(repo))}')
-    print(f'HEAD_BRANCH={shlex.quote(str(head_branch))}')
-    print(f'BASE_BRANCH={shlex.quote(str(base_branch))}')
-    print(f"IS_OWN_PR={'1' if is_own else '0'}")
-    print(f"EVENT_DOWNGRADE={'1' if event_downgrade else '0'}")
-    print(f"HAS_EXTRA_REVIEW_INSTRUCTIONS={'1' if review_instructions else '0'}")
-    print("CARRIED_OVER_THREADS=0")
-    print("RESUMED=0")
+    _print_init_result(
+        pr,
+        worktree,
+        tmp_dir,
+        repo,
+        head_branch,
+        base_branch,
+        is_own,
+        event_downgrade,
+        bool(review_instructions),
+        0,
+        False,
+    )
+
+    if meta is None:
+        die(f"PR #{pr} のメタデータを取得できません（リポジトリ名: {repo}）")
+        return
+    if meta.repo != repo:
+        repo = meta.repo
+        if not args.worktree:
+            worktree = str(_default_worktree_base() / _repo_slug(repo) / f"pr{pr}")
+    if meta.rate_remaining is not None:
+        info(f"ℹ GitHub REST の残量: {meta.rate_remaining}")
+
+    me = _sh(["gh", "api", "user", "--jq", ".login"])
+    author = meta.author
+    is_own = (me == author)
+    event_downgrade = is_own
+    if is_own:
+        info(f"⚠ 自分の PR (author={me}) — REQUEST_CHANGES → COMMENT 強制ダウングレード")
+
+    # worktree 分離 — _tmp_dir() より先に worktree を作成/確認する
+    head_branch = meta.head_branch
+    base_branch = meta.base_branch
+    changed_files = _fetch_changed_files(pr, repo)
+    auto_review_categories = _classify_changed_files(changed_files)
+    auto_review = _auto_review_instructions(auto_review_categories)
+    review_instructions = _combined_review_instructions(auto_review, manual_extra_review)
+    if not pathlib.Path(worktree).exists():
+        _create_worktree(worktree, pr, head_branch)
+    elif _is_registered_worktree(worktree):
+        info(f"↻ 既存 worktree 流用: {worktree}")
+        _sync_worktree(worktree, pr, head_branch)
+    else:
+        # パスは存在するが現リポジトリの worktree ではない (別リポジトリの残骸等)。
+        # 流用すると git 操作が壊れるため退避して作り直す。
+        stale = f"{worktree}.stale-{time.strftime('%Y%m%d%H%M%S')}"
+        pathlib.Path(worktree).rename(stale)
+        info(f"⚠ 現リポジトリの worktree でないため退避: {stale}")
+        _create_worktree(worktree, pr, head_branch)
+
+    # worktree 作成/確認後に _tmp_dir() を呼ぶ (ここで .cross_review/ が作られる)
+    tmp_dir = _tmp_dir(worktree)
+    state_file = tmp_dir / f"cross-review-pr{pr}-state.json"
+
+    # 既存コメントスナップショット（重複指摘防止）。
+    # 3 ソース (インラインコメント / レビュー body / PR レベルコメント) を
+    # fix skill の共有スクリプトで一括取得する。
+    fetch_script = pathlib.Path(__file__).resolve().parent.parent.parent / "fix" / "scripts" / "fetch-pr-comments.sh"
+    r = subprocess.run(
+        [str(fetch_script), repo, str(pr)],
+        capture_output=True, text=True,
+    )
+    existing_path = tmp_dir / f"cross-review-pr{pr}-existing-comments.txt"
+    if r.returncode == 0:
+        existing_path.write_text(r.stdout, encoding="utf-8")
+    else:
+        die(f"既存コメント取得失敗 (重複検出無効のため中断): {r.stderr.strip()[:200]}")
+
+    # **ホストを先に確定する。** 誤ると母集合が狂い、ホストが自分自身をレビューする。
+    # 推定できないときに既定を置かない（間違ったまま一周してしまう）。
+    try:
+        host, host_source = assignment.detect_host(getattr(args, "host", None))
+    except assignment.AssignmentError as e:
+        die(str(e))
+        raise
+    reviewers = assignment.review_pool(host)
+    info(f"ホスト: {host}（{host_source}） / レビュワーの母集合: {' / '.join(reviewers)}")
+    _validate_only(args.only, host)
+    # 未認証の CLI は起動から短時間で終わり、結果を残さないまま担当から欠ける。
+    # **確かめるのは実際に起動する担当だけである。** `--only` で 1 者へ絞ったとき、
+    # 母集合の全員を確かめると、そのラウンドで起動しない CLI の未認証で初期化が失敗する。
+    auth.check_auth(_auth_targets(args.only, host), info=info, die=lambda m: die(m))
+
+    state = {
+        "started_at": _now(),
+        "host": host,
+        "host_source": host_source,
+        "max_rounds": args.max_rounds,
+        "rotate_after": args.rotate_after,
+        "only": args.only,
+        "current_pr": pr,
+        "worktree_path": worktree,
+        "tmp_dir": str(tmp_dir),
+        "repo": repo,
+        "head_branch": head_branch,
+        "base_branch": base_branch,
+        "pr_author": author,
+        # 自分のログイン名は変わらない値である。一度取って持ち、以降は読まない。
+        # 待ち行列の冪等の照合が「投稿者が自分か」を見るために使う。
+        "viewer_login": me,
+        "is_own_pr": is_own,
+        "event_downgrade": event_downgrade,
+        "changed_files": changed_files,
+        "auto_review_categories": auto_review_categories,
+        "auto_review_instructions": auto_review,
+        "manual_extra_review_instructions": manual_extra_review,
+        # 後方互換: 旧 key は manual 指示を保持する。
+        "extra_review_instructions": manual_extra_review,
+        "review_instructions": review_instructions,
+        "pr_history": [{"pr": pr, "opened_at": _now(), "closed_at": None, "rounds": 0}],
+        "rounds": [],
+        "deferred_nits": [],
+        # 却下した指摘は per-item で残す（#156）。件数だけでは、次のラウンドへ
+        # 渡しても同じ指摘だと判定できない。
+        "rejected_findings": [],
+        # 取り込んだ指摘は per-item で残す（#156）。`payload.json` の 1 件に
+        # `pr` / `round` / `agent` と `has_evidence` を添えた形で積む。
+        "review_findings": [],
+        # 引き継いだ指摘は再開の時点で決まる。新規の開始では空にする。
+        "carried_over": None,
+        "final": None,
+    }
+    state_file.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
+    info(f"✅ state 初期化: {state_file}")
+    _print_init_result(
+        pr,
+        worktree,
+        tmp_dir,
+        repo,
+        head_branch,
+        base_branch,
+        is_own,
+        event_downgrade,
+        bool(review_instructions),
+        0,
+        False,
+    )
 
 
 # **母集合を広げる前からある 2 者。** `host` を持たない状態ファイル（このリポジトリの
