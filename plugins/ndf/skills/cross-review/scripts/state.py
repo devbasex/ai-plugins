@@ -104,10 +104,6 @@ PERFORMANCE_MARKERS = (
 GENERATED_MARKERS = (
     "/dist/", "/build/", "/generated/", "/vendor/", "/node_modules/",
 )
-GENERATED_FILENAMES = {
-    "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "composer.lock",
-    "gemfile.lock", "go.sum", "poetry.lock", "uv.lock", "cargo.lock",
-}
 I18N_MARKERS = (
     "/locales/", "/locale/", "/i18n/", "/translations/",
 )
@@ -1083,7 +1079,10 @@ def _is_performance_path(path: str) -> bool:
 
 def _is_generated_path(path: str) -> bool:
     _, normalized, name, _ = _path_info(path)
-    return _contains_any(normalized, GENERATED_MARKERS) or name in GENERATED_FILENAMES
+    return _contains_any(normalized, GENERATED_MARKERS) or name in {
+        "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "composer.lock",
+        "gemfile.lock", "go.sum", "poetry.lock", "uv.lock", "cargo.lock",
+    }
 
 
 def _is_i18n_path(path: str) -> bool:
