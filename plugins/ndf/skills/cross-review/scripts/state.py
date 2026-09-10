@@ -2673,6 +2673,108 @@ def _normalized_body(body: object) -> str:
 _SEVERITY_RANK = {"critical": 3, "major": 2, "minor": 1, "nit": 0}
 
 
+# 実行検証の上限。実測が無いため、まず 300 秒で置く（#156 の 3 本目）。
+VERIFY_TIMEOUT_SECONDS = 300
+
+# 再現とみなす終了コードの既定。**「0 でない」を再現としない。** pytest は対象が無い
+# ときに 4、収集 0 件で 5 を返し、バグの再現と指摘の書き誤りが別の値で分かれる。
+VERIFY_REPRODUCED_CODES = (1,)
+
+
+def _resolves_inside(token: str, work: str) -> bool:
+    """位置指定が作業ツリーの配下へ解決されるか。
+
+    **`realpath` で解決する。** `abspath` は symlink をたどらないため、作業ツリーの
+    中から外を指すリンクを見逃す（実測）。`::` を含む値はファイル名の部分だけを見る。
+    """
+    path = token.split("::", 1)[0]
+    if not path:
+        return False
+    root = os.path.realpath(work)
+    target = os.path.realpath(os.path.join(work, path))
+    return target == root or target.startswith(root + os.sep)
+
+
+def _verify_argv(check: str, allowed: list[str], work: str) -> Optional[list[str]]:
+    """実行してよい形なら引数の並びを返す。**そうでなければ `None`。**
+
+    照合はトークン単位で行う。文字列の前方一致では `pytest` の宣言に `pytest-danger`
+    が当たる。**メタ文字の一覧は持たない**（列挙から漏れた文字が通る）。区切りの
+    メタ文字は `shlex.split` でトークンの一部になるため、照合で自然に外れる。
+    """
+    try:
+        argv = shlex.split(str(check or ""))
+    except ValueError:
+        return None
+    if not argv:
+        return None
+    for candidate in allowed:
+        try:
+            prefix = shlex.split(str(candidate or ""))
+        except ValueError:
+            continue
+        if not prefix or argv[:len(prefix)] != prefix:
+            continue
+        rest = argv[len(prefix):]
+        # 実行してよいのは対象を絞る引数までである。`-c` や `-p` は任意の設定と
+        # プラグインを読み込ませる。
+        if any(token.startswith("-") for token in rest):
+            return None
+        # **位置指定を 1 つも持たない実行は、指摘とは無関係な失敗を拾う。**
+        if not rest:
+            return None
+        if not all(_resolves_inside(token, work) for token in rest):
+            return None
+        return argv
+    return None
+
+
+def _run_verify(argv: list[str], work: str) -> Optional[int]:
+    """`shell=False` で実行し、終了コードを返す。起動できなければ `None`。"""
+    try:
+        proc = subprocess.run(
+            argv, cwd=work, capture_output=True, text=True,
+            timeout=VERIFY_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return proc.returncode
+
+
+def _verify_findings(
+    st: dict[str, Any],
+    round_no: int,
+    allowed: list[str],
+    work: str,
+    reproduced_codes: Optional[list[int]] = None,
+    runner: Optional[Any] = None,
+) -> None:
+    """`suggested_check` を実行し、結果を `verification` へ残す（#156）。
+
+    **担当の再評価より先に走らせる。** 機械が再現した事実は、担当の支持より確かである。
+    **束ねられた側は個別に走らせない**（代表の集約で扱う）。
+    """
+    codes = set(reproduced_codes or VERIFY_REPRODUCED_CODES)
+    run = runner or _run_verify
+    for finding in st.get("review_findings") or []:
+        if finding.get("round") != round_no or finding.get("merged_into"):
+            continue
+        check = str(finding.get("suggested_check") or "")
+        record: dict[str, Any] = {
+            "command": check, "finding_id": finding.get("finding_id"),
+            "exit_code": None, "result": "not_run", "ran_at": _now(),
+        }
+        argv = _verify_argv(check, allowed, work) if allowed else None
+        if argv is not None:
+            code = run(argv, work)
+            record["exit_code"] = code
+            if code in codes:
+                record["result"] = "reproduced"
+            elif code == 0:
+                record["result"] = "not_reproduced"
+        finding["verification"] = record
+
+
 def _merge_duplicates(st: dict[str, Any], round_no: int) -> None:
     """同じラウンドの同じ指摘を 1 件へ束ねる（#156）。
 
