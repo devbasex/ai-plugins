@@ -2861,6 +2861,99 @@ def _declared_duplicate_targets(finding: dict[str, Any]) -> set:
     return targets
 
 
+# 収束の判定が数える区分（#156）。**残る 3 つは数えない。** 棄却した指摘を数えると、
+# そのぶんラウンドが増える（#69 で同じ論点が 5 ラウンド続いた事象）。
+COUNTED_CLASSIFICATIONS = ("verified_blocking", "needs_human_judgment")
+
+
+def _verdicts(finding: dict[str, Any], verdict: str) -> list[str]:
+    """その値を返した担当の一覧。"""
+    return [
+        str(c.get("agent"))
+        for c in finding.get("critiques") or []
+        if c.get("verdict") == verdict
+    ]
+
+
+def _classify_finding(finding: dict[str, Any]) -> str:
+    """1 件の指摘を 5 つの区分のいずれかへ分ける（#156）。
+
+    **上から順に見て、最初に当たった区分を採る。** 実行で再現した指摘を先に採ることで、
+    「実行の結果を担当の支持より先に見る」を順序そのもので表す。順 3 を先に置くと、
+    機械が再現した事実を担当の再評価が覆す。
+    """
+    result = _verify_result(finding)
+    major = _SEVERITY_RANK.get(str(finding.get("severity")), -1) >= _SEVERITY_RANK["major"]
+
+    if result == "reproduced":
+        return "verified_blocking" if major else "verified_non_blocking"
+    # **`refute` が効くのは再現していない指摘だけである。**
+    if result == "not_reproduced" or _verdicts(finding, "refute"):
+        return "rejected"
+    # **`minor` 以下は数えない。** 支持が 1 件付いただけでラウンドが増えるのを避ける。
+    if finding.get("has_evidence") and major and (
+        _verdicts(finding, "support")
+        or len(finding.get("origin_runtimes") or []) >= 2
+    ):
+        return "needs_human_judgment"
+    return "insufficient_evidence"
+
+
+def _apply_classification(finding: dict[str, Any]) -> str:
+    """区分を決めて要素へ書く。**棄却したものには理由を残す。**"""
+    classification = _classify_finding(finding)
+    finding["classification"] = classification
+    if classification != "rejected":
+        finding.pop("rejection_reason", None)
+        return classification
+    if _verify_result(finding) == "not_reproduced":
+        command = (finding.get("verification") or {}).get("command") or ""
+        finding["rejection_reason"] = (
+            f"実行して再現しなかった（{command} が終了コード 0 を返した）"
+        )
+    else:
+        agents = _verdicts(finding, "refute")
+        reasons = [
+            str(c.get("reason") or "")
+            for c in finding.get("critiques") or []
+            if c.get("verdict") == "refute"
+        ]
+        finding["rejection_reason"] = (
+            "refute: " + " / ".join(f"{a}: {r}" for a, r in zip(agents, reasons))
+        )
+    return classification
+
+
+def _counted_finding_ids(st: dict[str, Any], round_no: int) -> list[str]:
+    """新規性が数える指摘の `finding_id`（#156）。
+
+    **数えるのは `verified_blocking` と `needs_human_judgment` だけである。**
+    棄却した指摘を数えると、そのぶんラウンドが増える（#69 で同じ論点が 5 ラウンド
+    続いた事象）。どちらも `major` 以上で、修正の工程へ渡る。
+    """
+    ids: list[str] = []
+    for finding in st.get("review_findings") or []:
+        if finding.get("round") != round_no or finding.get("merged_into"):
+            continue
+        if _apply_classification(finding) in COUNTED_CLASSIFICATIONS:
+            ids.append(str(finding.get("finding_id")))
+    return ids
+
+
+def _classify_round(st: dict[str, Any], round_no: int) -> dict[str, int]:
+    """そのラウンドの指摘を区分へ分け、区分ごとの件数を返す。
+
+    **束ねられた側は数えない。** 判定が読むのは代表の 1 件である。
+    """
+    counts: dict[str, int] = {}
+    for finding in st.get("review_findings") or []:
+        if finding.get("round") != round_no or finding.get("merged_into"):
+            continue
+        classification = _apply_classification(finding)
+        counts[classification] = counts.get(classification, 0) + 1
+    return counts
+
+
 def _merge_declared_duplicates(st: dict[str, Any], round_no: int) -> None:
     """担当が `duplicate` と申告した組を束ねる（#156 の 2 段目）。
 
