@@ -248,6 +248,31 @@ def test_a_merged_proposer_is_excluded(tmp_dir, tmp_path):
     assert not (tmp_dir / f"kiro-critique-pr{PR}-prompt.md").exists()
 
 
+@pytest.mark.parametrize("findings", [
+    [],
+    [_finding("codex-r2-0", "codex", round=2)],
+], ids=["empty-findings", "other-round-only"])
+def test_no_targets_exits_successfully_without_launching(tmp_dir, tmp_path, findings):
+    """現状固定: 対象 0 件では案内だけを出し、生成・起動を行わない。"""
+    work = tmp_path / "work"
+    work.mkdir()
+    _state_file(tmp_dir, findings, work)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    stub = bin_dir / "kiro-cli"
+    stub.write_text("#!/bin/sh\nexit 0\n")
+    stub.chmod(0o755)
+    before = set(tmp_dir.rglob("*"))
+
+    result = run_critique(tmp_dir, "kiro", work, launcher=bin_dir)
+
+    assert result.returncode == 0, result.stderr
+    assert "反証の対象がありません" in result.stdout
+    assert result.stderr == ""
+    assert not (tmp_dir / f"kiro-critique-pr{PR}-prompt.md").exists()
+    assert set(tmp_dir.rglob("*")) == before
+
+
 def test_a_merged_side_is_not_offered(tmp_dir, tmp_path):
     work = tmp_path / "work"; work.mkdir()
     _state_file(tmp_dir, [
