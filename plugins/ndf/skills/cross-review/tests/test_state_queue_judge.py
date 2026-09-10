@@ -366,6 +366,92 @@ def test_a_broken_item_is_reported_instead_of_being_skipped(
     assert "待ち行列の項目を読めない" in capsys.readouterr().err
 
 
+# ---- 書き戻し先が複数のラウンドから選ばれる（現状固定テスト） ----
+#
+# 上の flush のテストは、書き戻し先になりうるラウンドが 1 つしかない。項目の
+# `round` と `agent` が過去のラウンドを指すとき、そこだけが変わり最新ラウンドと
+# 別担当が入力のまま残ることは固定されていない。正しさを主張せず、いまの値を記録する。
+
+
+def _seed_two_rounds(tmp_dir: pathlib.Path) -> None:
+    _seed(tmp_dir, rounds=[
+        {
+            "round": 1, "pr": PR, "started_at": "2026-09-03T00:00:00+00:00",
+            "codex": {"intent": "APPROVE", "queued": True, "by_severity": {}},
+            "agy": {"intent": "REQUEST_CHANGES", "by_severity": {"major": 1}},
+        },
+        {
+            "round": 2, "pr": PR, "started_at": "2026-09-04T00:00:00+00:00",
+            "codex": {"intent": "REQUEST_CHANGES", "by_severity": {"major": 2}},
+            "agy": {"intent": "APPROVE", "by_severity": {}},
+        },
+    ])
+
+
+def _enqueue_for_round_one_codex(queue_mod, tmp_dir: pathlib.Path) -> None:
+    queue_mod.enqueue(
+        queue_mod.Queue(tmp_dir / "pending"), "review-post", REPO, PR,
+        {"body": "1 ラウンド目の本文", "event": "APPROVE"},
+        actor="me", extra={"agent": "codex", "round": 1})
+
+
+_UNTOUCHED_ROUND_TWO = {
+    "round": 2, "pr": PR, "started_at": "2026-09-04T00:00:00+00:00",
+    "codex": {"intent": "REQUEST_CHANGES", "by_severity": {"major": 2}},
+    "agy": {"intent": "APPROVE", "by_severity": {}},
+}
+
+
+def test_a_flush_writes_back_only_to_the_round_the_item_names(
+        state_mod, queue_mod, fake_gh, tmp_dir, monkeypatch) -> None:
+    """届いたときは、項目が指す 1 ラウンド目の codex だけが書き変わる。"""
+    _seed_two_rounds(tmp_dir)
+    _enqueue_for_round_one_codex(queue_mod, tmp_dir)
+    fake_gh.set_rules([
+        {"match": f"pulls/{PR}/reviews?", "stdout": "[]"},
+        {"match": "", "stdout": json.dumps(
+            {"id": 4961230016, "html_url": REVIEW_URL})},
+    ])
+    monkeypatch.setattr(state_mod, "_review_exists", lambda repo, pr, url: True)
+
+    state_mod.cmd_flush(argparse.Namespace(pr=PR))
+
+    rounds = _state(tmp_dir)["rounds"]
+    assert rounds[0]["codex"] == {
+        "intent": "APPROVE", "queued": False, "by_severity": {},
+        "review_url": REVIEW_URL,
+    }
+    # 同じラウンドの別担当と、最新ラウンドは入力のまま残る。
+    assert rounds[0]["agy"] == {"intent": "REQUEST_CHANGES",
+                                "by_severity": {"major": 1}}
+    assert rounds[1] == _UNTOUCHED_ROUND_TWO
+
+
+def test_a_flush_that_cannot_confirm_marks_only_that_round_as_no_result(
+        state_mod, queue_mod, fake_gh, tmp_dir, monkeypatch) -> None:
+    """届いていないときも、書き変わるのは項目が指す宛先だけである。"""
+    _seed_two_rounds(tmp_dir)
+    _enqueue_for_round_one_codex(queue_mod, tmp_dir)
+    fake_gh.set_rules([
+        {"match": f"pulls/{PR}/reviews?", "stdout": "[]"},
+        {"match": "", "stdout": json.dumps(
+            {"id": 4961230016, "html_url": REVIEW_URL})},
+    ])
+    monkeypatch.setattr(state_mod, "_review_exists", lambda repo, pr, url: False)
+
+    state_mod.cmd_flush(argparse.Namespace(pr=PR))
+
+    rounds = _state(tmp_dir)["rounds"]
+    assert rounds[0]["codex"] == {
+        "intent": "NO_RESULT", "no_result_reason": "not_posted",
+        "posted_as": None, "comments": None, "review_url": None,
+        "by_severity": {},
+    }
+    assert rounds[0]["agy"] == {"intent": "REQUEST_CHANGES",
+                                "by_severity": {"major": 1}}
+    assert rounds[1] == _UNTOUCHED_ROUND_TWO
+
+
 def test_the_flush_stops_at_a_broken_item(queue_mod, tmp_path) -> None:
     """後ろの項目まで送らない。**順序が入れ替わる。**"""
     pending = tmp_path / "pending"
