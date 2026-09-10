@@ -156,11 +156,72 @@ def test_a_finding_without_a_check_is_not_run(state_mod, work):
     assert out[0]["verification"]["result"] == "not_run"
 
 
-def test_a_merged_side_is_not_verified_on_its_own(state_mod, work):
-    """束ねられた側は代表の集約で扱う。**個別には走らせない。**"""
+# ---------- 束ねた組 ----------
+
+def test_a_merged_side_is_verified_too(state_mod, work):
+    """**束ねた組の全員を対象にする**（`issue-156-pr3-contracts.md`）。"""
     out = verify(state_mod, [
         _finding("f0", "pytest tests/t.py"),
         _finding("f1", "pytest tests/t.py", merged_into="f0"),
     ], allowed=["pytest"], work=work, runner=lambda *a, **k: 1)
     assert out[0]["verification"]["result"] == "reproduced"
-    assert "verification" not in out[1] or out[1].get("verification") is None
+    assert out[1]["verification"]["result"] == "reproduced"
+    assert out[1]["verification"]["finding_id"] == "f1"
+
+
+def test_the_group_supplies_the_check_when_the_representative_has_none(state_mod, work):
+    """**代表の手順が空でも、組の誰かが書いていれば検証できる。**
+
+    代表の値だけを読むと、取り込みの順序で採否が変わる（実行回数 0・`not_run`）。
+    """
+    out = verify(state_mod, [
+        _finding("f0", ""),
+        _finding("f1", "pytest tests/t.py", merged_into="f0"),
+    ], allowed=["pytest"], work=work, runner=lambda *a, **k: 1)
+
+    assert out[0]["verification"]["result"] == "reproduced"
+    # **出所を残す。** 代表ではなく、その手順を書いた指摘の `finding_id` である。
+    assert out[0]["verification"]["finding_id"] == "f1"
+    assert out[0]["verification"]["command"] == "pytest tests/t.py"
+
+
+def test_the_order_of_the_group_does_not_change_the_outcome(state_mod, work):
+    """代表と束ねられた側を入れ替えても同じ結果になる。"""
+    reversed_group = verify(state_mod, [
+        _finding("f0", "pytest tests/t.py"),
+        _finding("f1", "", merged_into="f0"),
+    ], allowed=["pytest"], work=work, runner=lambda *a, **k: 1)
+    assert reversed_group[0]["verification"]["result"] == "reproduced"
+    assert reversed_group[0]["verification"]["finding_id"] == "f0"
+
+
+def test_the_strongest_result_wins_in_the_group(state_mod, work):
+    """`reproduced` > `not_reproduced` > `not_run` の順で選び直す。"""
+    def runner(argv, _work):
+        return 0 if "t.py" in argv[-1] else 1
+
+    out = verify(state_mod, [
+        _finding("f0", "pytest tests/t.py"),
+        _finding("f1", "pytest tests/u.py", merged_into="f0"),
+    ], allowed=["pytest"], work=work, runner=runner)
+
+    assert out[0]["verification"]["result"] == "reproduced"
+    assert out[0]["verification"]["finding_id"] == "f1"
+    # 束ねられた側は自分の結果を持ち続ける。
+    assert out[1]["verification"]["result"] == "reproduced"
+
+
+def test_the_same_command_runs_only_once(state_mod, work):
+    """組の全員が同じ手順を書くのは普通に起こる。**2 度走らせない。**"""
+    calls = []
+
+    def runner(argv, _work):
+        calls.append(tuple(argv))
+        return 1
+
+    verify(state_mod, [
+        _finding("f0", "pytest tests/t.py"),
+        _finding("f1", "pytest tests/t.py", merged_into="f0"),
+    ], allowed=["pytest"], work=work, runner=runner)
+
+    assert len(calls) == 1

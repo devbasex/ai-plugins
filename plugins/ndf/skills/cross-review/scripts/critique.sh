@@ -40,13 +40,17 @@ PR=$(jq -r '.current_pr' "$STATE")
 
 # **この担当が提案者でない指摘だけを渡す。** origin_runtimes に載る担当は
 # すべて提案者である（統合した組を含む）。束ねられた側も渡さない。
+#
+# **`verification` を落とさない。** 反証は実行検証の後にあり、担当は直前に実行した
+# コマンド・終了コード・再現の結果を読んだうえで賛否を決める（`docs/06-evidence.md` の
+# 「走らせる順序」）。射影から外すと、担当は結果を見ないまま賛否を返すことになる。
 TARGETS=$(jq -r --arg agent "$RUNTIME" --argjson round "$ROUND" '
   [ (.review_findings // [])[]
     | select(.round == $round)
     | select(has("merged_into") | not)
     | select(((.origin_runtimes // [.agent]) | index($agent)) == null)
     | {finding_id, path, line, severity, body, evidence, falsification,
-       suggested_check} ]' "$STATE")
+       suggested_check, verification} ]' "$STATE")
 
 if [ "$(printf '%s' "$TARGETS" | jq 'length')" = "0" ]; then
   echo "⏭ $RUNTIME: 反証の対象がありません（すべて自分の指摘）"
@@ -86,11 +90,24 @@ cat > "$PROMPT" <<EOF
 $TARGETS
 \`\`\`
 
+各指摘の \`verification\` は、**この反証より前に実行した検証の結果**である。
+
+| 項目 | 何が入るか |
+| --- | --- |
+| \`command\` | 実行した \`suggested_check\`。実行しなかったときも申告の値が入る |
+| \`exit_code\` | 終了コード。実行しなかったときは \`null\` |
+| \`result\` | \`reproduced\`（再現した） / \`not_reproduced\`（再現しなかった） / \`not_run\`（実行していない） |
+| \`finding_id\` | その手順を書いた指摘。束ねた組から選んだときは代表以外の値になる |
+
+**\`result\` が \`not_run\` のときは、実行していないだけである。** 再現しなかったことの
+証拠として読まないでください。
+
 ## 作業
 
 1. \`cd $WORKTREE\` で作業する
-2. 各指摘の \`evidence\`（根拠）と \`falsification\`（反証条件）を読み、コードで確かめる
-3. **リポジトリを編集しない。** 読むだけである
+2. 各指摘の \`verification\`（実行検証の結果）を読む
+3. \`evidence\`（根拠）と \`falsification\`（反証条件）を読み、コードで確かめる
+4. **リポジトリを編集しない。** 読むだけである
 
 ## 書き出すもの
 

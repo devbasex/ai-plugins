@@ -206,6 +206,7 @@ def test_the_new_count_uses_the_classification(state_mod, tmp_path, monkeypatch)
     st = {
         "current_pr": 1, "repo": "o/r",
         "rounds": [{"round": 1, "pr": 1}],
+        "evidence_rounds": [1],
         "review_findings": [
             _finding(finding_id="a", path="a.py", line=1,
                      verification=_verified("reproduced")),
@@ -239,6 +240,56 @@ def test_the_old_path_is_used_without_classifications(state_mod, tmp_path, monke
     assert count == 2          # 区分が無いため全件を数える
 
 
+def test_an_old_review_findings_does_not_switch_to_the_classification(
+        state_mod, tmp_path, monkeypatch):
+    """**旧形式の `review_findings` は絞り込みの合図にならない**（#549 レビュー対応）。
+
+    取り込み（`cmd_read_result`）はこの変更より前から `review_findings[]` を積む。
+    存在だけで絞り込むと、`verification` も `critiques` も持たない旧いラウンドの
+    `major` が `insufficient_evidence` へ落ち、**修正必須の指摘が残ったまま新規
+    0 件で収束する**。
+    """
+    monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
+    st = {
+        "current_pr": 1, "repo": "o/r",
+        "rounds": [{"round": 1, "pr": 1}],
+        # 旧形式: 区分も verification も critiques も無い
+        "review_findings": [
+            {"finding_id": "codex-r1-0", "agent": "codex", "path": "a.py",
+             "line": 1, "body": "x", "severity": "major", "pr": 1, "round": 1},
+        ],
+    }
+    _payload(tmp_path, "codex", 1, 1, [
+        {"path": "a.py", "line": 1, "body": "x", "severity": "major"}])
+
+    count, measurable = state_mod._new_finding_count(st, 1)
+
+    assert measurable is True
+    assert count == 1          # 従来どおり全件を数える（0 件にしない）
+
+
+def test_the_marker_is_written_by_the_last_step_of_the_pipeline(
+        state_mod, tmp_path, monkeypatch):
+    """印を付けるのは経路の最後（`collect-critiques`）である。"""
+    import argparse
+    import json
+
+    monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
+    st = {
+        "current_pr": 1, "repo": "o/r", "only": None, "host": "claude",
+        "rounds": [{"round": 1, "pr": 1}],
+        "review_findings": [_finding(finding_id="codex-r1-0")],
+        "final": None,
+    }
+    (tmp_path / "cross-review-pr1-state.json").write_text(json.dumps(st))
+
+    state_mod.cmd_collect_critiques(argparse.Namespace(pr=1))
+
+    got = json.loads((tmp_path / "cross-review-pr1-state.json").read_text())
+    assert got["evidence_rounds"] == [1]
+    assert state_mod._evidence_completed(got, 1) is True
+
+
 def test_measurability_is_decided_before_narrowing(state_mod, tmp_path, monkeypatch):
     """**測れたかどうかは区分で絞る前に決める。**
 
@@ -249,6 +300,7 @@ def test_measurability_is_decided_before_narrowing(state_mod, tmp_path, monkeypa
     st = {
         "current_pr": 1, "repo": "o/r",
         "rounds": [{"round": 1, "pr": 1}],
+        "evidence_rounds": [1],
         "review_findings": [
             _finding(finding_id="a", path="a.py", line=1,
                      verification=_verified("not_reproduced")),

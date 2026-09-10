@@ -287,6 +287,46 @@ def test_a_merged_side_is_not_offered(tmp_dir, tmp_path):
     assert "codex-r1-1" not in prompt
 
 
+def test_the_prompt_carries_the_verification_result(tmp_dir, tmp_path):
+    """**実行検証の結果を射影から落とさない**（#549 レビュー対応）。
+
+    反証は実行検証の後にあり、担当は直前に実行したコマンド・終了コード・再現の結果を
+    読んだうえで賛否を決める。落とすと、結果を見ないまま賛否を返すことになる。
+    """
+    work = tmp_path / "work"; work.mkdir()
+    _state_file(tmp_dir, [
+        _finding("codex-r1-0", "codex",
+                 suggested_check="pytest tests/t.py::test_x",
+                 verification={"command": "pytest tests/t.py::test_x",
+                               "exit_code": 1, "result": "reproduced",
+                               "finding_id": "kiro-r1-2",
+                               "ran_at": "2026-09-10T00:00:00+00:00"}),
+    ], work)
+
+    result = run_critique(tmp_dir, "kiro", work)
+
+    assert result.returncode == 0, result.stderr
+    prompt = (tmp_dir / f"kiro-critique-pr{PR}-prompt.md").read_text()
+    assert '"verification"' in prompt
+    assert '"result": "reproduced"' in prompt
+    assert '"exit_code": 1' in prompt
+    assert "pytest tests/t.py::test_x" in prompt
+    # 出所（束ねた組から選んだ手順を書いた指摘）も残る。
+    assert "kiro-r1-2" in prompt
+
+
+def test_the_prompt_explains_not_run(tmp_dir, tmp_path):
+    """**`not_run` を「再現しなかった」と読ませない。**"""
+    work = tmp_path / "work"; work.mkdir()
+    _state_file(tmp_dir, [_finding("codex-r1-0", "codex")], work)
+
+    run_critique(tmp_dir, "kiro", work)
+
+    prompt = (tmp_dir / f"kiro-critique-pr{PR}-prompt.md").read_text()
+    assert "not_run" in prompt
+    assert "実行していないだけ" in prompt
+
+
 def test_the_prompt_names_the_five_verdicts(tmp_dir, tmp_path):
     work = tmp_path / "work"; work.mkdir()
     _state_file(tmp_dir, [_finding("codex-r1-0", "codex")], work)

@@ -72,6 +72,7 @@
      "classification": "verified_blocking"}
   ],
   "unmatched_critiques": [],
+  "evidence_rounds": [1],
   "rejected_findings": [
     {"pr": 123, "round": 1, "path": "src/foo.py", "line": 42, "severity": "minor",
      "comment_id": 3222849090, "summary": "...", "reason_for_rejection": "..."}
@@ -102,6 +103,12 @@
   `verified_blocking` と `needs_human_judgment` の 2 つだけである**
 - `unmatched_critiques` — 結び先の無い反証（#156）。**捨てない**（反証 0 件のラウンドと、
   結び先を誤ったラウンドを区別するため）
+- `evidence_rounds` — 証拠集約（統合・実行検証・反証）を通ったラウンドの番号（#156）。
+  **収束の判定はこの印で母集合を決める。** 印を持つラウンドだけを区分の 2 つへ絞り、
+  持たないラウンドは従来どおり全件を数える。**`review_findings` の有無では判定しない**
+  （取り込みはこの変更より前から要素を積むため、区分も `verification` も持たない旧い
+  ラウンドが絞り込みに掛かり、修正必須の `major` が `insufficient_evidence` へ落ちて
+  新規 0 件で収束する）。印を書くのは経路の最後（`collect-critiques`）である
 - `rejected_findings` — 却下した指摘を **per-item** で蓄積する。`rounds[].fix.rejected` は
   ラウンドごとの件数で、こちらは理由と位置を持つ。**両方を持つのは、件数だけが返る劣化表現
   （`fix` が int を返す経路）があるためである。** そのときは記録が空になり、件数だけが残る。

@@ -1727,6 +1727,10 @@ def _init_new_state(
         # 取り込んだ指摘は per-item で残す（#156）。`payload.json` の 1 件に
         # `pr` / `round` / `agent` と `has_evidence` を添えた形で積む。
         "review_findings": [],
+        # 証拠集約（統合・実行検証・反証）を通ったラウンドの番号（#156）。**収束の
+        # 判定はこの印で母集合を決める。** `review_findings` の有無では、旧い状態
+        # ファイルのラウンドと区別できない（`_evidence_completed`）。
+        "evidence_rounds": [],
         # 実行検証の許しは起動した側が渡す（#156）。**渡されなければ実行しない。**
         # ラウンドごとに `verify-findings` が読むため、状態ファイルへ持つ。
         "verify_commands": list(getattr(args, "verify_command", None) or []),
@@ -2831,6 +2835,21 @@ def _run_verify(argv: list[str], work: str) -> Optional[int]:
     return proc.returncode
 
 
+def _merged_root(
+    finding: dict[str, Any], by_id: dict[Any, dict[str, Any]]
+) -> dict[str, Any]:
+    """束ねられた側から代表をたどる。**環になっていたらその場で止める。**"""
+    seen = {finding.get("finding_id")}
+    current = finding
+    while current.get("merged_into"):
+        nxt = by_id.get(current["merged_into"])
+        if nxt is None or nxt.get("finding_id") in seen:
+            break
+        seen.add(nxt.get("finding_id"))
+        current = nxt
+    return current
+
+
 def _verify_findings(
     st: dict[str, Any],
     round_no: int,
@@ -2842,13 +2861,28 @@ def _verify_findings(
     """`suggested_check` を実行し、結果を `verification` へ残す（#156）。
 
     **担当の再評価より先に走らせる。** 機械が再現した事実は、担当の支持より確かである。
-    **束ねられた側は個別に走らせない**（代表の集約で扱う）。
+
+    **束ねた組の全員を対象にする**（`issues/issue-156-pr3-contracts.md` の「重複の統合」）。
+    代表の `suggested_check` だけを読むと、代表が手順を書いていない組は、束ねられた側が
+    実行できる手順を書いていても実行回数 0・`not_run` のまま `insufficient_evidence` へ
+    落ちる。**どちらが先に取り込まれたかで採否が変わる。** 1 段目の統合は実行検証より
+    **前**にあるため、束ねられた側を読み飛ばすと、その手順は一度も実行されない。
+
+    代表が持つのは組の集約である。`reproduced` > `not_reproduced` > `not_run` の順で
+    最初に当たった 1 件を採り、**出所を `verification.finding_id` へ残す**。
+
+    **同じコマンドは 1 度しか実行しない。** 組の全員が同じ `suggested_check` を書くのは
+    普通に起こり（統合の条件は本文の一致である）、そのたびに走らせると実行が増える。
     """
     codes = set(reproduced_codes or VERIFY_REPRODUCED_CODES)
     run = runner or _run_verify
-    for finding in st.get("review_findings") or []:
-        if finding.get("round") != round_no or finding.get("merged_into"):
-            continue
+    targets = [
+        f for f in st.get("review_findings") or [] if f.get("round") == round_no
+    ]
+    by_id = {f.get("finding_id"): f for f in targets}
+    ran: dict[tuple[str, ...], Optional[int]] = {}
+
+    for finding in targets:
         check = str(finding.get("suggested_check") or "")
         record: dict[str, Any] = {
             "command": check, "finding_id": finding.get("finding_id"),
@@ -2856,13 +2890,34 @@ def _verify_findings(
         }
         argv = _verify_argv(check, allowed, work) if allowed else None
         if argv is not None:
-            code = run(argv, work)
+            key = tuple(argv)
+            if key in ran:
+                code = ran[key]
+            else:
+                code = run(argv, work)
+                ran[key] = code
             record["exit_code"] = code
             if code in codes:
                 record["result"] = "reproduced"
             elif code == 0:
                 record["result"] = "not_reproduced"
         finding["verification"] = record
+
+    # 代表は組から選び直す。**実行し直さない**（記録済みの結果を選ぶだけである）。
+    for rep in targets:
+        if rep.get("merged_into"):
+            continue
+        best = rep["verification"]
+        for member in targets:
+            if member is rep or not member.get("merged_into"):
+                continue
+            if _merged_root(member, by_id) is not rep:
+                continue
+            if _VERIFY_RANK.get(_verify_result(member), -1) > \
+               _VERIFY_RANK.get(str(best.get("result") or "not_run"), -1):
+                best = member["verification"]
+        if best is not rep["verification"]:
+            rep["verification"] = dict(best)
 
 
 def cmd_verify_findings(args: argparse.Namespace) -> None:
@@ -2918,6 +2973,38 @@ CRITIQUE_VERDICTS = (
 
 def _critique_path(agent: str, pr: int, round_: int) -> pathlib.Path:
     return _resolve_tmp_dir(pr) / f"{agent}-critique-pr{pr}-round{round_}.json"
+
+
+def _mark_evidence_round(st: dict[str, Any], round_no: int) -> None:
+    """そのラウンドが証拠集約を通ったことを状態ファイルへ残す（#156）。
+
+    **印を付けるのは経路の最後（`collect-critiques`）である。** 途中で付けると、
+    反証を結ぶ前の区分（`support` も `refute` も 0 件）で数えることになり、根拠を持つ
+    `major` の指摘が `insufficient_evidence` へ落ちて収束する。
+    """
+    marked = st.setdefault("evidence_rounds", [])
+    if round_no not in marked:
+        marked.append(round_no)
+
+
+def _evidence_completed(st: dict[str, Any], round_no: int) -> bool:
+    """そのラウンドが証拠集約（統合・実行検証・反証）を通ったか（#156）。
+
+    **`review_findings` の有無では判定できない。** 取り込み（`cmd_read_result`）は
+    この変更より前から `review_findings[]` を積むため、旧い状態ファイルにも要素が
+    ある。存在で判定すると、区分も `verification` も持たない旧いラウンドまで区分で
+    絞り込むことになり、**修正必須の `major` が `insufficient_evidence` へ落ちて
+    新規 0 件（`(0, True)`）で収束する**。印を持たないラウンドは従来どおり全件を
+    数える。
+    """
+    marked = st.get("evidence_rounds") or []
+    for value in marked:
+        try:
+            if int(value) == int(round_no):
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
 
 
 def cmd_collect_critiques(args: argparse.Namespace) -> None:
@@ -2976,6 +3063,10 @@ def cmd_collect_critiques(args: argparse.Namespace) -> None:
     # **申告による統合（2 段目）は、反証の後・区分の前に走らせる。** 次のラウンドへ
     # 回すと、同じ主張を別の本文で出した組が統合される前に収束する。
     _merge_declared_duplicates(st, round_no)
+
+    # **経路を通り切ったラウンドだけへ印を付ける。** 収束の判定はこの印で母集合を
+    # 決める（`_evidence_completed`）。
+    _mark_evidence_round(st, round_no)
 
     _save(pr, st)
     info(f"✅ 反証を取り込みました: {attached} 件"
@@ -3316,9 +3407,12 @@ def _new_finding_count(st: dict[str, Any], pr: int) -> tuple[int, bool]:
     # 「測れなかった」と扱うと、元の REQUEST_CHANGES のまま終わらない。
     if not curr:
         return 0, False
-    # **区分を持つラウンドは、数える 2 つへ絞る**（#156）。持たないラウンドは従来どおり
-    # 全件を数える（旧い状態ファイルと、3 本目より前に開いたラウンドがこれに当たる）。
-    if any(f.get("round") == round_no for f in st.get("review_findings") or []):
+    # **証拠集約を通ったラウンドだけを、数える 2 つへ絞る**（#156）。通っていない
+    # ラウンドは従来どおり全件を数える（旧い状態ファイルと、3 本目より前に開いた
+    # ラウンドがこれに当たる）。**`review_findings` の有無では判定しない**
+    # （旧版でも取り込みの時点で積まれるため、区分も検証結果も持たない旧いラウンドが
+    # 絞り込みに掛かる。詳細は `_evidence_completed`）。
+    if _evidence_completed(st, round_no):
         curr = _counted_finding_keys(st, round_no)
     if len(same_pr) < 2:
         return len(curr), True
