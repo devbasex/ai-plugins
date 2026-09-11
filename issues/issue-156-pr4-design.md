@@ -62,6 +62,26 @@
 統合されていても、`origin_runtimes` にその担当が載るため数えられる。**統合された側の要素を
 数えない**（統合の前後で `single` の値が変わらないようにする）。
 
+**`origin_runtimes` が無い指摘は `[agent]` として読む。** この値は統合のときに初めて付く。
+`_collect_review_findings` が取り込んだ直後の指摘は持たず（実測: 取り込み直後のキーは
+`agent` / `finding_id` / `pr` / `round` / `path` / `line` / `severity` / `body` /
+`evidence` / `falsification` / `suggested_check` / `posted_to` / `has_evidence` の 13 個で、
+`origin_runtimes` を含まない）、値を補うのは `_merge_duplicates`（`cmd_verify_findings` から）と
+`_merge_declared_duplicates`（`cmd_read_critiques` から）の `setdefault` である。
+**どちらもそのラウンドの指摘しか触らない**（`targets` を `round == round_no` で絞る）。
+そのため Step 2.5 へ届かずに終わったラウンドの指摘と、3 本目より前に取った記録は、代表で
+あってもこの値を持たない。
+
+**無いものを「0 者」として読むと、比較対象の過去の記録の `single` が全件 0 になる。**
+変更の前後を比べるのがこの測定の目的であり、前の側が数えられないと目的そのものが立たない。
+`state.py` 自身も同じ場面で `finding.get("origin_runtimes") or [finding.get("agent")]` と
+読んでおり（`_critique_targets` / `_assign_critiques` / `_absorb`）、測定もこれに合わせる。
+
+`majority` も同じ読み替えを通す。補った値は 1 者であるため `majority` には入らない
+（統合を通っていない指摘は、2 者が出したことが記録から言えない）。**`majority` の値は
+読み替えても変わらないが、2 つの方式が同じ読み方を通ることで、片方だけが補う状態を
+作らない。**
+
 **`oracle` は上限を表す。** 実際に修正された指摘の集合であり、どの方式でもこれを超えられない。
 
 ### `oracle` の判定
@@ -279,6 +299,7 @@ graph LR
 | --- | --- |
 | 4 つの方式を同じ記録から計算する | `plugins/ndf/skills/cross-review/tests/test_measure.py`（新設）。作った状態ファイルを読ませる |
 | `single` が担当ごとに出る | 同上 |
+| `origin_runtimes` を持たない記録でも担当別の件数が残る | 同上。`agent` だけを持つ指摘（統合を通っていないラウンド・3 本目より前の記録）を 2 者分。`single` がその `agent` の側で 1 件ずつ数え、**どちらも 0 件にならない**。`majority` は 0 件 |
 | 統合された指摘を 2 回数えない | 同上。`merged_into` を持つ要素と代表を混ぜた記録 |
 | `oracle` が修正された指摘だけを数える | 同上。`resolved_thread_positions` を持つ記録 |
 | `oracle` が解決より後のラウンドの指摘を拾わない | 同上。round 1 で解決した `a.py:10` と、round 2 の同じ位置に出た別の指摘を持つ記録。`oracle` は 1 件で、round 2 の指摘を含まない |
