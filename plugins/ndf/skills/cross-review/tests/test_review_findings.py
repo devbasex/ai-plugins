@@ -359,3 +359,47 @@ def test_the_snapshot_is_still_passed():
     """スナップショットは渡し続ける。**渡さないと同じ指摘が毎ラウンド出る。**"""
     text = (SKILL / "scripts/launch-reviewer.sh").read_text(encoding="utf-8")
     assert "existing-comments" in text
+
+
+# ---------- 指摘の識別子（#156 の 3 本目の前提） ----------
+
+def test_each_finding_gets_an_identifier(tmp_dir, state_mod):
+    """統合・反証・実行検証の記録が、どの指摘を指すかをこの値で結ぶ。"""
+    _write(tmp_dir, _state()); _result(tmp_dir)
+    _payload(tmp_dir, [FULL, {**FULL, "line": 99}])
+
+    _read_result(state_mod)
+
+    found = _read(tmp_dir)["review_findings"]
+    assert [f["finding_id"] for f in found] == [f"{AGENT}-r1-0", f"{AGENT}-r1-1"]
+
+
+def test_the_identifier_separates_agents_and_rounds(tmp_dir, state_mod):
+    """担当とラウンドが違えば、索引が同じでも別の値になる。"""
+    _write(tmp_dir, _state()); _result(tmp_dir); _payload(tmp_dir, [FULL])
+    _read_result(state_mod)
+
+    (tmp_dir / f"kiro-review-pr{PR}-result.json").write_text(json.dumps({
+        "event": "APPROVE", "posted_as": "COMMENT", "comments_count": 0,
+        "review_url": "https://example.invalid/r/2", "by_severity": {},
+    }))
+    (tmp_dir / f"kiro-review-pr{PR}-round1-payload.json").write_text(
+        json.dumps({"comments": [FULL]}))
+    state_mod.cmd_read_result(argparse.Namespace(pr=PR, agent="kiro", file=None))
+
+    ids = [f["finding_id"] for f in _read(tmp_dir)["review_findings"]]
+    assert ids == [f"{AGENT}-r1-0", "kiro-r1-0"]
+    assert len(set(ids)) == 2
+
+
+def test_the_identifier_is_stable_when_reimported(tmp_dir, state_mod):
+    """同じラウンドを取り込み直しても、値が変わらない。"""
+    _write(tmp_dir, _state()); _result(tmp_dir); _payload(tmp_dir, [FULL])
+    _read_result(state_mod)
+    first = _read(tmp_dir)["review_findings"][0]["finding_id"]
+
+    _read_result(state_mod)
+
+    found = _read(tmp_dir)["review_findings"]
+    assert len(found) == 1          # 置き換えであって、積み増しではない
+    assert found[0]["finding_id"] == first

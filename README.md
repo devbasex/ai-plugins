@@ -231,8 +231,9 @@ claude plugin marketplace add devbasex/ai-plugins@<タグ>
 
 ### 変更履歴
 
-版ごとの変更点は [CHANGELOG.md](./CHANGELOG.md) にある。判断の理由と、その版で決めた規約は
-[CLAUDE.md](./CLAUDE.md) の版ごとの段落にある。
+版ごとの変更点は [CHANGELOG.md](./CHANGELOG.md) にある。出た版の判断の理由と、その版で決めた
+規約は [docs/ndf-version-decisions.md](./docs/ndf-version-decisions.md) にある。現行版の分だけは
+[CLAUDE.md](./CLAUDE.md) にあり、配布した時点で退避先へ移る。
 
 ## 開発ガイドライン
 
