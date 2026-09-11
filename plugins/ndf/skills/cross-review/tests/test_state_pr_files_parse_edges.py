@@ -7,6 +7,26 @@ API 出力で欠けやすい形（空文字列・空行のみ・列が欠けた�
 from __future__ import annotations
 
 
+def test_pr_files_payload_with_invalid_json_gives_no_entries(state_mod):
+    """現状固定: JSON として読めない出力は空の一覧になる。"""
+    assert state_mod._parse_pr_files_payload("not JSON") == []
+
+
+def test_pr_files_payload_with_an_array_gives_no_entries(state_mod):
+    """現状固定: 辞書ではない JSON 配列は空の一覧になる。"""
+    assert state_mod._parse_pr_files_payload("[]") == []
+
+
+def test_pr_files_payload_with_non_list_files_gives_no_entries(state_mod):
+    """現状固定: files が辞書の場合は空の一覧になる。"""
+    assert state_mod._parse_pr_files_payload('{"files": {"path": "src/app.py"}}') == []
+
+
+def test_pr_files_payload_without_files_gives_no_entries(state_mod):
+    """現状固定: files キーが無い場合は空の一覧になる。"""
+    assert state_mod._parse_pr_files_payload("{}") == []
+
+
 def test_an_empty_string_gives_no_entries(state_mod):
     """空文字列は 1 件も返さない。"""
     assert state_mod._parse_pr_files_api_lines("") == []

@@ -60,11 +60,19 @@
      "summary": "...", "comment_url": "..."}
   ],
   "review_findings": [
-    {"pr": 123, "round": 1, "agent": "agy", "path": "src/foo.py", "line": 42,
+    {"finding_id": "agy-r1-0", "pr": 123, "round": 1, "agent": "agy",
+     "path": "src/foo.py", "line": 42,
      "severity": "major", "body": "...", "evidence": "...", "falsification": "...",
-     "suggested_check": "pytest tests/test_foo.py -q", "posted_to": "body",
-     "has_evidence": true}
+     "suggested_check": "pytest tests/test_foo.py::test_x", "posted_to": "body",
+     "has_evidence": true,
+     "origin_runtimes": ["agy", "kiro"], "merged_from": ["kiro-r1-2"],
+     "verification": {"command": "...", "exit_code": 1, "result": "reproduced",
+                      "finding_id": "agy-r1-0", "ran_at": "..."},
+     "critiques": [{"agent": "codex", "verdict": "support", "reason": "..."}],
+     "classification": "verified_blocking"}
   ],
+  "unmatched_critiques": [],
+  "evidence_rounds": [1],
   "rejected_findings": [
     {"pr": 123, "round": 1, "path": "src/foo.py", "line": 42, "severity": "minor",
      "comment_id": 3222849090, "summary": "...", "reason_for_rejection": "..."}
@@ -78,10 +86,37 @@
 ### 重要なフィールド
 
 - `host` — 確定したホスト名（`claude` / `codex` / `agy` / `kiro`）。母集合から外れる
-- `review_findings` — 取り込んだ指摘を **per-item** で蓄積する（#156）。要素は
+- `review_findings` — 取り込んだ指摘を **per-item** で蓄積する（#156）。各要素は
+  `finding_id`（`<担当>-r<ラウンド>-<索引>`）を持つ。**取り込みの時点で採番し、統合・
+  反証・実行検証の記録がどの指摘を指すかをこの値で結ぶ。** 担当とラウンドを含めるため、
+  別の担当が同じ索引を持っても衝突しない。要素は
   `payload.json` の 1 件に `pr` / `round` / `agent` と `has_evidence` を添えた形である。
   **`has_evidence` は `evidence` と `falsification` の両方が空でないときだけ真になる**
   （片方だけでは、別の担当がその指摘を確かめられない）
+- `review_findings[].verification` — 実行検証の結果（#156）。`result` は
+  `reproduced` / `not_reproduced` / `not_run` の 3 つで、**`not_run` は実行できなかった
+  ことを表す**（再現しなかったことと同じにしない）。`finding_id` は結果の出所で、
+  統合した組では代表と違う値になりうる。**`ran_at` は実行した記録にだけ入り、実行
+  しなかった記録では `exit_code` とともに `null` である**（実行していない記録に時刻が
+  残ると、実行済みと見分けられない）
+- `review_findings[].critiques` — 反証の結果（#156）。**提案者以外の担当だけが載る。**
+  値は `support` / `refute` / `insufficient_evidence` / `duplicate` / `out_of_scope`。
+  **1 つの `(ラウンド, finding_id, 担当)` が持つ値は 1 つである。** 取り直した反証は
+  古い値へ積まず置き換える（積むと、`refute` を `support` へ訂正しても両方が並び、
+  区分の順で `refute` が先に当たって指摘が `rejected` のままになる）
+- `review_findings[].classification` — 5 つの区分（#156）。**収束の判定が数えるのは
+  `verified_blocking` と `needs_human_judgment` の 2 つだけである**
+- `unmatched_critiques` — 結び先の無い反証（#156）。**捨てない**（反証 0 件のラウンドと、
+  結び先を誤ったラウンドを区別するため）
+- `evidence_rounds` — 証拠集約（統合・実行検証・反証）を通ったラウンドの番号（#156）。
+  **収束の判定はこの印で母集合を決める。** 印を持つラウンドだけを区分の 2 つへ絞り、
+  持たないラウンドは従来どおり全件を数える。**`review_findings` の有無では判定しない**
+  （取り込みはこの変更より前から要素を積むため、区分も `verification` も持たない旧い
+  ラウンドが絞り込みに掛かり、修正必須の `major` が `insufficient_evidence` へ落ちて
+  新規 0 件で収束する）。印を書くのは経路の最後（`collect-critiques`）で、**対象ごとに
+  有効な反証が揃ったときだけである**
+- `rounds[].critique_relaunched` — 反証を取り直した担当（#549 レビュー対応）。
+  **同じラウンドで 1 度だけ取り直す**ための控えである
 - `rejected_findings` — 却下した指摘を **per-item** で蓄積する。`rounds[].fix.rejected` は
   ラウンドごとの件数で、こちらは理由と位置を持つ。**両方を持つのは、件数だけが返る劣化表現
   （`fix` が int を返す経路）があるためである。** そのときは記録が空になり、件数だけが残る。
@@ -183,3 +218,21 @@ launcher が生成するプロンプトに以下を強制している:
 
 `/ndf:pr-review` の result.json 出力規約に `posted_as` フィールドを含むこと
 （自分PR ダウングレード時に GitHub に実際送った event。デフォルトは `event` と同値）。
+
+## `<worktree-base>` の解決順
+
+`state.py init` は worktree の親ディレクトリを以下の優先順で解決する:
+
+1. `NDF_WORKTREE_BASE` 環境変数（明示オーバーライド）
+2. `<システム tmpdir>/ndf-worktrees`（Python `tempfile.gettempdir()`。非永続領域のため
+   コンテナ再作成で自動消滅し、共有 volume を消費しない）
+
+worktree の実パスは `<base>/<owner>--<repo>/pr<PR>` 形式で、リポジトリ slug を含める
+ことで**他リポジトリの同一 PR 番号と衝突しない**。永続 volume（旧 `/work/worktrees`）を
+使っていた頃は別プロジェクトの残骸 worktree を誤って流用する事故があったため、
+パスが存在しても `git worktree list` に登録されていなければ `.stale-<timestamp>` に
+退避して作り直すガードも入っている。
+
+解決した実パスは `state.json` の `worktree_path` に書かれるため、後続スクリプトや
+サブエージェント prompt は state.json から読めば追従できる。
+

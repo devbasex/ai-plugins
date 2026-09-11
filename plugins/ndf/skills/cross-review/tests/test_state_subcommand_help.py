@@ -24,6 +24,8 @@ SUBCOMMANDS = (
     "unresolved-threads",
     "judge",
     "check-oscillation",
+    "verify-findings",
+    "collect-critiques",
     "merge-fix",
     "should-rotate",
     "set-current-pr",
