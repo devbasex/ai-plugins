@@ -20,8 +20,15 @@
 
 ## 構成要素
 
-**パスはリポジトリの根からの相対で書く。** `plugins/ndf/skills/cross-review/` の外へ置くと、
-継続的統合の収集（`pytest scripts/tests plugins/ndf`）の対象から外れる。
+**パスはリポジトリの根からの相対で書く。** 新設するものは
+`plugins/ndf/skills/cross-review/` の下へ置く。**この Skill が使うものを、この Skill の下へ
+同居させるのがこのリポジトリの配置である**（`scripts/` に `state.py` と `monitor.py`、
+`docs/` に手順書、`tests/` にテストが既にある）。
+
+**収集の対象に入るかどうかで置き場所を決めていない。** 継続的統合はリポジトリの根から
+`uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest pytest . -q`
+で全件を収集する（`.github/workflows/pytest.yml`）。**根から収集するため、どこへ置いても
+対象に入る。**
 
 | 要素 | 責務 |
 | --- | --- |
@@ -76,10 +83,15 @@
 "line": ...}]` の形で、戻り値の `resolved_threads[]` から位置ごと写す。既存の
 `resolved_thread_ids` は変えない（次のラウンドの開始時の検査が読む）。
 
-**照合の規則を 2 つ決める。**
+**照合の規則を 3 つ決める。**
 
-- 突き合わせは `(path, line)` で行う。複数の代表が一致するときは、**ラウンドが最も新しい
-  ものを採る**。行番号は修正で動くため、古い側へ結ぶと別の指摘を数える
+- **照合の対象は、その解決を記録した fix のラウンド以下の指摘に限る。**
+  `rounds[R].fix.resolved_thread_positions` の 1 件は、**ラウンド R の時点で出ていた指摘**を
+  解決したものである（`review_findings[].round` が指摘の出たラウンドを持つ）。R より後の
+  指摘は、解決した時点でまだ存在しない。限らないと、round 1 で修正した `a.py:10` の解決が、
+  **round 2 に同じ行へ出た別の未修正の指摘**へ結ばれ、その指摘を `oracle` へ誤って算入する
+- 突き合わせは `(path, line)` で行う。上の絞り込みの後になお複数の代表が一致するときは、
+  **ラウンドが最も新しいものを採る**。行番号は修正で動くため、古い側へ結ぶと別の指摘を数える
 - どの指摘とも一致しなかった解決済みスレッドは `oracle` に数えず、**件数を
   `oracle` の `unmatched` として出す**。落としたことが出力から見えないと、`of_oracle` が
   実際より高く出ていることに気づけない
@@ -98,6 +110,17 @@
 値である。**印の無いラウンドを `proposed` の母集合へ入れない**（入れると、区分の付かない
 指摘が `insufficient_evidence` として落ち、方式の再現率が実際より低く出る）。印の無い
 ラウンドしか無い状態ファイルは、`proposed` を計算せず、後述の形で「計算できない」ことを出す。
+
+**`proposed` の `of_oracle` は、分母も印のあるラウンドに限る。** 分子だけを絞ると、印の
+混ざった記録で再現率が過小に出る。印の無い round 1 と印のある round 2 に修正された指摘が
+1 件ずつあるとき、`proposed` が採れるのは round 2 の 1 件だけなのに、全ラウンドの `oracle`
+（2 件）で割ると、**拾えるものを全部拾っても 0.5 にしかならない**。再現率は分子と分母を
+同じ母集合で数える。
+
+**分母が全ラウンドと違うことは出力へ出す。** `proposed` は `oracle_scope`
+（`all_rounds` / `evidence_rounds`）と `oracle_base`（分母に使った `oracle` の件数）を
+**常に持つ**。添えないと、`proposed` の `of_oracle` を他の 3 つと同じ分母の値として読める
+（他の 3 つは全ラウンドの `oracle` で割る）。
 
 **統合し損ねた組は `majority` に入らない。** 3 本目は過剰統合を避けて厳しい側へ倒して
 おり、取りこぼしは `duplicate_candidates` に残る。**この方式の値は、統合の判定の厳しさを
@@ -124,7 +147,8 @@ measure.py <状態ファイルのパス> [--output <パス>]
  "methods": {
    "single": {"agy": {"found": 8, "of_oracle": 0.62}, "kiro": {"found": 5, "of_oracle": 0.38}},
    "majority": {"found": 4, "of_oracle": 0.31},
-   "proposed": {"found": 11, "of_oracle": 0.85},
+   "proposed": {"found": 11, "of_oracle": 0.85,
+                "oracle_scope": "all_rounds", "oracle_base": 13},
    "oracle": {"found": 13, "unmatched": 1}},
  "cost": {"rounds": 5, "reviewer_launches": 10, "wall_clock_seconds": 4200},
  "convergence": {"final": "approved", "oscillation": 0, "max_rounds": 0}}
@@ -135,9 +159,10 @@ measure.py <状態ファイルのパス> [--output <パス>]
 
 | 決まらない場面 | 出す形 |
 | --- | --- |
-| 印（`evidence_rounds`）を持つラウンドが無い | `"proposed": {"found": null, "of_oracle": null, "reason": "no_evidence_rounds"}` |
-| 位置の記録（`resolved_thread_positions`）を持つラウンドが無い | `"oracle": {"found": null, "unmatched": null, "reason": "no_resolved_thread_positions"}`。`of_oracle` は全方式で `null` |
+| 印（`evidence_rounds`）を持つラウンドが無い | `"proposed": {"found": null, "of_oracle": null, "oracle_scope": null, "oracle_base": null, "reason": "no_evidence_rounds"}` |
+| 位置の記録（`resolved_thread_positions`）を持つラウンドが無い | `"oracle": {"found": null, "unmatched": null, "reason": "no_resolved_thread_positions"}`。`of_oracle` は全方式で `null`、`proposed` の `oracle_base` も `null` |
 | `oracle` が 0 件 | `of_oracle` は `null`（0 除算。`0.0` にすると「拾えなかった」と読めるが、実際は比べる相手がいない） |
+| 印のあるラウンドに修正された指摘が 1 件も無い | `proposed` の `oracle_base` は `0`、`of_oracle` は `null`（同じ 0 除算）。`found` は数えた件数をそのまま出す |
 | その方式が 0 件 | `"found": 0`。`of_oracle` は `0.0`（計算できている） |
 
 **`reason` は値が `null` のときだけ置く。** 決まった値に添えると、読む側が例外の有無を
@@ -239,8 +264,16 @@ graph LR
 
 ## テスト設計
 
-**テストの置き場所は `plugins/ndf/skills/cross-review/tests/` である。** リポジトリの根の
-`tests/` へ置くと、継続的統合の収集（`pytest scripts/tests plugins/ndf`）の対象から外れる。
+**テストの置き場所は `plugins/ndf/skills/cross-review/tests/` である。** 収集の対象に入るか
+どうかでは決めていない（根から `pytest . -q` で全件を回すため、根の `tests/` も収集される）。
+根拠は 2 つである。
+
+- **Skill のテストはその Skill の下へ置く**のがこのリポジトリの配置である
+  （`plugins/ndf/skills/<名前>/tests/`）。根の `tests/` にあるのは `tests/runtime-smoke/`
+  だけで、こちらは容器を起動する shell のテストであり、Python のテストを持たない
+- `plugins/ndf/skills/cross-review/tests/conftest.py` が `state.py` を**相対の位置**
+  （`_HERE.parent / "scripts" / "state.py"`）で読み込む。同じ位置へ置けば、`state_mod` などの
+  既存のフィクスチャをそのまま使える
 
 | 受け入れ条件 | 何で確かめるか |
 | --- | --- |
@@ -248,6 +281,8 @@ graph LR
 | `single` が担当ごとに出る | 同上 |
 | 統合された指摘を 2 回数えない | 同上。`merged_into` を持つ要素と代表を混ぜた記録 |
 | `oracle` が修正された指摘だけを数える | 同上。`resolved_thread_positions` を持つ記録 |
+| `oracle` が解決より後のラウンドの指摘を拾わない | 同上。round 1 で解決した `a.py:10` と、round 2 の同じ位置に出た別の指摘を持つ記録。`oracle` は 1 件で、round 2 の指摘を含まない |
+| 印の混ざった記録で `proposed` の分母が印のあるラウンドに限られる | 同上。印の無い round 1 と印のある round 2 に修正された指摘を 1 件ずつ持つ記録。`of_oracle` が `1.0`、`oracle_scope` が `evidence_rounds`、`oracle_base` が `1` |
 | 一致しないスレッドを `unmatched` に出す | 同上。位置がどの指摘とも合わない記録 |
 | 計算できない値が `null` で出る | 同上。印の無い記録・位置の記録が無い記録・`oracle` が 0 件の記録 |
 | 費用が並ぶ | 同上。時刻の差を確かめる |
