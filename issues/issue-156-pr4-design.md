@@ -93,11 +93,33 @@ uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest 
 **自動で残す案は採らない。** 状態ファイルには Pull Request の中身が入り、置き場所と保持の
 期間を決める必要がある。測定のためだけに決めるには重い。
 
-### 決定 5: 1 回の実行が測るのは 1 つの Pull Request
+### 決定 5: 1 回の実行が測るのは 1 つの状態ファイル
 
 複数の状態ファイルを渡して集計する形は作らない。**集計の単位は測る目的で変わる**
 （変更の前後・担当ごと・リポジトリごと）。出力を 0 か 1 の値で出しておけば、どの単位でも
 測る側が足し合わせられる。中で先に束ねると、束ね方を変えるたびにスクリプトを直すことになる。
+
+**単位は Pull Request ではない。** 1 つの状態ファイルが 2 つ以上の Pull Request を
+含むことがある。`cmd_set_current_pr` が切り替えるのは `current_pr` だけである。
+状態ファイルの名前も、過去の `rounds[]` / `review_findings[]` もそのまま残り、
+`pr_history[]` へ新しい要素が積まれる。実行して確かめた結果は次のとおりである。
+
+| ローテーションの後 | 値 |
+| --- | --- |
+| 状態ファイルの名前 | `cross-review-pr123-state.json`（変わらない） |
+| `current_pr` | `124` |
+| `pr_history[]` | `#123`（`closed_at` と `rounds` が入る）と `#124` の 2 件 |
+| `rounds[]` | 2 件とも残り、`pr` は `123` |
+| `review_findings[]` | 残り、`pr` は `123` |
+
+**測る単位は、この 1 回の収束である。** ローテーションは同じ変更に対するレビューの続きで
+あり、`final` も上限の判定も状態ファイル全体で 1 つである（`total = len(st["rounds"])`）。
+`current_pr` の分だけを測ると、それ以前のラウンドがまるごと落ちる。
+
+**ただし、Pull Request をまたいで結んではならないものがある。** 解決済みスレッドはその
+Pull Request のものであり、`oracle` の照合は同じ `pr` の指摘に限る（「照合の規則」）。
+`rounds[]` と `review_findings[]` はどちらも `pr` を持つため、この絞り込みは記録だけで
+行える。
 
 ## 4 つの方式
 
@@ -189,10 +211,14 @@ uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest 
 
 ### 照合の規則
 
-**照合の対象は、その解決を記録した fix のラウンド以下の指摘に限る。**
-`rounds[R].fix.resolved_thread_positions` の 1 件は、**ラウンド R の時点で出ていた指摘**を
-解決したものである。指摘の出たラウンドは `review_findings[].round` が持つ。R より後の
-指摘は、解決した時点でまだ存在しない。
+**照合の対象は、その解決を記録した fix と同じ Pull Request の指摘に限る。**
+`rounds[R].fix.resolved_thread_positions` の 1 件は、`rounds[R].pr` の Pull Request の
+スレッドである。`review_findings[].round` は状態ファイル全体の通し番号であるため、
+ラウンドだけで絞ると、ローテーション前の Pull Request の指摘へ結ばれる。
+
+**そのうえで、fix のラウンド以下の指摘に限る。** その 1 件は、**ラウンド R の時点で
+出ていた指摘**を解決したものである。指摘の出たラウンドは `review_findings[].round` が
+持つ。R より後の指摘は、解決した時点でまだ存在しない。
 
 限らないと、round 1 で修正した `a.py:10` の解決が、**round 2 に同じ行へ出た別の未修正の
 指摘**へ結ばれ、その指摘を `oracle` へ誤って算入する。
@@ -252,10 +278,10 @@ uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest 
 （2 件）で割ると、**拾えるものを全部拾っても 0.5 にしかならない**。再現率は分子と分母を
 同じ母集合で数える。
 
-**分母が全ラウンドと違うことは出力へ出す。** `proposed` は `oracle_scope`
-（`all_rounds` / `evidence_rounds`）と `oracle_base`（分母に使った `oracle` の件数）を
-**常に持つ**。添えないと、`proposed` の `of_oracle` を他の 3 つと同じ分母の値として読める
-（他の 3 つは全ラウンドの `oracle` で割る）。
+**分母が全ラウンドと違うことは出力へ出す。** `proposed` は 2 つのキーを**常に持つ**。
+`oracle_scope` は `all_rounds` / `evidence_rounds` のどちらかで、`oracle_base` は分母に
+使った `oracle` の件数である。添えないと、`proposed` の `of_oracle` を他の 3 つと同じ
+分母の値として読める（他の 3 つは全ラウンドの `oracle` で割る）。
 
 ## 呼び出し方
 
@@ -268,17 +294,21 @@ measure.py <状態ファイルのパス> [--output <パス>]
 | `<状態ファイルのパス>` | 必須。**1 つだけ受け取る**（`cross-review-pr<番号>-state.json`） |
 | `--output` | 書き出し先。省略すると標準出力へ出す |
 
-**1 回の実行が測るのは 1 つの Pull Request である。** 複数を渡して集計する形は作らない
+**1 回の実行が測るのは 1 つの状態ファイルである。** 複数を渡して集計する形は作らない
 （決定 5）。出力は 1 件の JSON で、複数を比べるときは測る側が並べる。
+
+**ローテーションを経た状態ファイルは、2 つ以上の Pull Request を含む。** 出力の `pr` は
+状態ファイルの鍵（`init` した番号）で、`prs` が `pr_history[]` の順に全件を持つ。
 
 ## 出力
 
 ```json
-{"pr": 123, "rounds": 5,
+{"pr": 123, "prs": [123, 124], "rounds": 5,
  "methods": {
-   "single": {"agy": {"found": 8, "of_oracle": 0.62}, "kiro": {"found": 5, "of_oracle": 0.38}},
-   "majority": {"found": 4, "of_oracle": 0.31},
-   "proposed": {"found": 11, "of_oracle": 0.85,
+   "single": {"agy": {"found": 10, "matched": 8, "of_oracle": 0.62},
+              "kiro": {"found": 7, "matched": 5, "of_oracle": 0.38}},
+   "majority": {"found": 5, "matched": 4, "of_oracle": 0.31},
+   "proposed": {"found": 14, "matched": 11, "of_oracle": 0.85,
                 "oracle_scope": "all_rounds", "oracle_base": 13},
    "oracle": {"found": 13, "unmatched": 1, "ambiguous": 0}},
  "cost": {"rounds": 5, "reviewer_launches": 10, "wall_clock_seconds": 4200},
@@ -290,17 +320,38 @@ measure.py <状態ファイルのパス> [--output <パス>]
 
 | 決まらない場面 | 出す形 |
 | --- | --- |
-| 印（`evidence_rounds`）を持つラウンドが無い | `"proposed": {"found": null, "of_oracle": null, "oracle_scope": null, "oracle_base": null, "reason": "no_evidence_rounds"}` |
-| 位置の記録（`resolved_thread_positions`）を持つラウンドが無い | `"oracle": {"found": null, "unmatched": null, "ambiguous": null, "reason": "no_resolved_thread_positions"}`。`of_oracle` は全方式で `null`、`proposed` の `oracle_base` も `null` |
-| `oracle` が 0 件 | `of_oracle` は `null`（0 除算。`0.0` にすると「拾えなかった」と読めるが、実際は比べる相手がいない） |
-| 印のあるラウンドに修正された指摘が 1 件も無い | `proposed` の `oracle_base` は `0`、`of_oracle` は `null`（同じ 0 除算）。`found` は数えた件数をそのまま出す |
-| その方式が 0 件 | `"found": 0`。`of_oracle` は `0.0`（計算できている） |
+| 印（`evidence_rounds`）を持つラウンドが無い | `"proposed": {"found": null, "matched": null, "of_oracle": null, "oracle_scope": null, "oracle_base": null, "reason": "no_evidence_rounds"}` |
+| 位置の記録（`resolved_thread_positions`）を持つラウンドが無い | `"oracle": {"found": null, "unmatched": null, "ambiguous": null, "reason": "no_resolved_thread_positions"}`。`matched` と `of_oracle` は全方式で `null`、`proposed` の `oracle_base` も `null` |
+| `oracle` が 0 件 | `matched` は `0`、`of_oracle` は `null`（0 除算。`0.0` にすると「拾えなかった」と読めるが、実際は比べる相手がいない） |
+| 印のあるラウンドに修正された指摘が 1 件も無い | `proposed` の `oracle_base` は `0`、`of_oracle` は `null`（同じ 0 除算）。`found` と `matched` は数えた件数をそのまま出す |
+| その方式が 0 件 | `"found": 0` / `"matched": 0`。`of_oracle` は `0.0`（計算できている） |
 
 **`reason` は値が `null` のときだけ置く。** 決まった値に添えると、読む側が例外の有無を
 毎回見分けることになる。
 
 **`of_oracle` は再現率である。** その方式が `oracle` の何割を拾えたかを表す。
 **精度（false positive）は測らない**（決定 2）。
+
+**分子は `found` ではない。** 各方式が採る集合には、修正されなかった指摘も却下された
+指摘も入る。`found` をそのまま割ると 1.0 を超える。修正済み 1 件と却下 1 件を出した
+`single` は `found` が 2 になり、`oracle` が 1 件なら `2.0` になる。**「`oracle` が上限」
+という定義と両立しない。**
+
+| キー | 何の件数か |
+| --- | --- |
+| `found` | その方式が採る指摘の件数。修正されたかどうかを問わない |
+| `matched` | 採用集合と `oracle` 集合の積集合の件数。`finding_id` で突き合わせる |
+| `of_oracle` | `matched` を分母の `oracle` の件数で割った値 |
+
+**積集合を取る相手は、その方式の分母に使う `oracle` 集合である。** `proposed` は印のある
+ラウンドの `oracle` 集合（件数は `oracle_base`）、他の 3 つは全ラウンドの `oracle` 集合を
+使う。分子と分母が同じ母集合から出る。
+
+**`matched` は出力へ出す。** `of_oracle` は `found` からは計算し直せない。添えないと、
+読む側が `found` を分子として検算し、出力の値と食い違う。
+
+**`matched` は `found` 以下であり、分母の `oracle` の件数以下でもある。** そのため
+`of_oracle` は 1.0 を超えない。
 
 ## 費用
 
@@ -310,11 +361,17 @@ measure.py <状態ファイルのパス> [--output <パス>]
 | レビュワーの起動回数 | ラウンドごとの担当の数の合計 |
 | 実時間 | `started_at` と `ended_at` の差 |
 
+**費用はローテーション全体の合計である。** ローテーションを経た状態ファイルでは
+`rounds[]` が Pull Request をまたいで並ぶ。ラウンドも起動回数も実時間も、1 回の収束に
+かかった量としてそのまま合計する。Pull Request ごとの内訳が要るときは、測る側が
+`rounds[].pr` を数えて得る。
+
 **トークンの量は測らない。** 状態ファイルが持っておらず、CLI ごとに取り方が違う。
 
 ## 収束の様子
 
-**測るのは 1 つの Pull Request であるため、値は 0 か 1 である。**
+**測るのは 1 回の収束であるため、値は 0 か 1 である。** `final` は状態ファイル全体で
+1 つであり、ローテーションを経ても 1 回と数える。
 
 | 項目 | どこから取るか |
 | --- | --- |
@@ -323,7 +380,7 @@ measure.py <状態ファイルのパス> [--output <パス>]
 | `max_rounds` | `final == "max_rounds"` なら 1、そうでなければ 0 |
 
 **0 か 1 で出すのは、複数を比べるときに足せるようにするためである。** 「振動で中断した
-Pull Request 数」は、測る側がこの値を合計して得る。合計そのものは作らない（決定 5）。
+実行の数」は、測る側がこの値を合計して得る。合計そのものは作らない（決定 5）。
 
 **変更の前後を比べるには、両方の期間の状態ファイルが要る。** 状態ファイルは作業ツリーの
 中にあり、`merged` が消す。**比較のためには、測る前に残す必要がある。**
@@ -367,6 +424,8 @@ graph LR
 | 印の混ざった記録で `proposed` の分母が印のあるラウンドに限られる | 同上。印の無い round 1 と印のある round 2 に修正された指摘を 1 件ずつ持つ記録。`of_oracle` が `1.0`、`oracle_scope` が `evidence_rounds`、`oracle_base` が `1` |
 | 一致しないスレッドを `unmatched` に出す | 同上。位置がどの指摘とも合わない記録 |
 | 同じ位置に並んだ 2 件を `oracle` へ算入しない | 同上。同じラウンド・同じ位置に別の本文の指摘を 2 件持ち、解決済みスレッドが 1 件の記録。`found` は 0 件、`ambiguous` は 1 件 |
+| 未修正・却下の指摘が混ざっても `of_oracle` が 1.0 を超えない | 同上。`single` が修正済み 1 件と却下された 1 件を出した記録。`found` は 2、`matched` は 1、`of_oracle` は 1.0 |
+| ローテーション済みの記録で Pull Request をまたいで結ばない | 同上。`pr` が 123 と 124 のラウンドを持ち、124 の解決済みスレッドと同じ位置の指摘が 123 側にある記録。`oracle` はその指摘を数えず、`prs` が 2 件、費用は両方のラウンドの合計 |
 | 計算できない値が `null` で出る | 同上。印の無い記録・位置の記録が無い記録・`oracle` が 0 件の記録 |
 | 費用が並ぶ | 同上。時刻の差を確かめる |
 | 収束の様子が並ぶ | 同上。4 つの `final` それぞれ |
