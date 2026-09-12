@@ -27,7 +27,7 @@ import datetime as _dt
 import json
 import pathlib
 import sys
-from typing import Any
+from typing import Any, NamedTuple
 
 
 # **担当の名前は 4 つである。** `reviewers` を持たない古い記録で、結果を残した
@@ -144,6 +144,106 @@ def _convergence(st: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+class Oracle(NamedTuple):
+    """上限の方式の結果。
+
+    `finding_ids` は**修正された指摘の集合**で、他の方式が拾えた件数
+    （`matched`）を数えるときの突き合わせ先になる。
+    """
+
+    finding_ids: set[str]
+    unmatched: int
+    ambiguous: int
+
+
+def _representatives(st: dict[str, Any]) -> list[dict[str, Any]]:
+    """母集合は代表だけである。
+
+    統合された側（`merged_into` を持つ要素）を一緒に数えると、同じ指摘が
+    2 件になる。`state.py` の区分・反証・集計も同じ規則で数えている。
+    """
+    findings = st.get("review_findings")
+    if not isinstance(findings, list):
+        return []
+    return [f for f in findings if isinstance(f, dict) and not f.get("merged_into")]
+
+
+def _matches(finding: dict[str, Any], pr: int | None, round_no: int,
+             path: str, line: int) -> bool:
+    """その解決が指しうる指摘かどうか。
+
+    **同じ Pull Request の指摘に限る。** `review_findings[].round` は状態
+    ファイル全体の通し番号であるため、ラウンドだけで絞ると、ローテーション前の
+    Pull Request の指摘へ結ばれる。
+
+    **そのうえで、解決を記録したラウンド以下の指摘に限る。** それより後の
+    指摘は、解決した時点でまだ存在しない。
+    """
+    finding_round = _as_int(finding.get("round"))
+    if finding_round is None or finding_round > round_no:
+        return False
+    if _as_int(finding.get("pr")) != pr:
+        return False
+    return finding.get("path") == path and _as_int(finding.get("line")) == line
+
+
+def _oracle(st: dict[str, Any]) -> Oracle:
+    """解決したスレッドの位置と指摘の位置を結び、修正された指摘を集める。
+
+    **突き合わせは `(path, line)` で行う。** 絞り込んだ後になお複数が一致する
+    ときはラウンドが最も新しいものを採り（行番号は修正で動くため、古い側へ結ぶと
+    別の指摘を数える）、その中に 2 件以上あるときはどれとも結ばずに `ambiguous`
+    へ数える。どの指摘とも一致しなかったものは `unmatched` へ数える。
+
+    **どちらも `found` には数えない。** 落としたことが出力から見えないと、
+    再現率が実際より高く出ていることに気づけない。
+    """
+    representatives = _representatives(st)
+    rounds = _rounds(st)
+    finding_ids: set[str] = set()
+    unmatched = 0
+    ambiguous = 0
+    for index, round_rec in enumerate(rounds):
+        fix = round_rec.get("fix")
+        positions = (
+            fix.get("resolved_thread_positions") if isinstance(fix, dict) else None
+        )
+        if not isinstance(positions, list):
+            continue
+        round_no = _round_no(rounds, index)
+        pr = _as_int(round_rec.get("pr"))
+        for position in positions:
+            path = position.get("path") if isinstance(position, dict) else None
+            line = _as_int(position.get("line")) if isinstance(position, dict) else None
+            if not path or line is None:
+                # 位置の欠けた要素も落とさない（`_thread_positions` が残す）。
+                unmatched += 1
+                continue
+            candidates = [
+                f for f in representatives if _matches(f, pr, round_no, path, line)
+            ]
+            if not candidates:
+                unmatched += 1
+                continue
+            newest = max(_as_int(f.get("round")) or 0 for f in candidates)
+            newest_candidates = [
+                f for f in candidates if (_as_int(f.get("round")) or 0) == newest
+            ]
+            if len(newest_candidates) > 1:
+                ambiguous += 1
+                continue
+            finding_ids.add(str(newest_candidates[0].get("finding_id")))
+    return Oracle(finding_ids, unmatched, ambiguous)
+
+
+def _oracle_output(oracle: Oracle) -> dict[str, Any]:
+    return {
+        "found": len(oracle.finding_ids),
+        "unmatched": oracle.unmatched,
+        "ambiguous": oracle.ambiguous,
+    }
+
+
 def measure(st: dict[str, Any]) -> dict[str, Any]:
     """状態ファイルの中身から測定の結果を組み立てる。
 
@@ -156,7 +256,7 @@ def measure(st: dict[str, Any]) -> dict[str, Any]:
         "pr": _state_file_pr(st),
         "prs": _prs(st),
         "rounds": len(_rounds(st)),
-        "methods": {},
+        "methods": {"oracle": _oracle_output(_oracle(st))},
         "cost": _cost(st),
         "convergence": _convergence(st),
     }

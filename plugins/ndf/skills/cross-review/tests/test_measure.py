@@ -38,6 +38,30 @@ def _round(round_no: int, pr: int = 123, **overrides) -> dict:
     return rec
 
 
+def _finding(finding_id: str, round_no: int, path: str, line: int,
+             pr: int = 123, **overrides) -> dict:
+    rec = {
+        "finding_id": finding_id, "pr": pr, "round": round_no, "agent": "codex",
+        "path": path, "line": line, "severity": "major", "body": finding_id,
+    }
+    rec.update(overrides)
+    return rec
+
+
+def _fix(*positions: dict) -> dict:
+    """修正の記録。位置は `resolved_thread_positions` が持つ（#156 の Task 1）。"""
+    return {
+        "commit": "abc1234", "fixed": len(positions),
+        "resolved_threads": len(positions),
+        "resolved_thread_ids": [p["thread_id"] for p in positions if p.get("thread_id")],
+        "resolved_thread_positions": list(positions),
+    }
+
+
+def _position(thread_id: str, path: str | None, line: int | None) -> dict:
+    return {"thread_id": thread_id, "path": path, "line": line}
+
+
 # ---------- 受け入れ条件 13: 費用（ラウンド数・起動回数・実時間）が並ぶ ----------
 
 
@@ -162,3 +186,161 @@ def test_cli_fails_when_the_state_file_is_missing(tmp_path):
 
     assert proc.returncode != 0
     assert "absent.json" in proc.stderr
+
+
+# ---------- 受け入れ条件 5 / 6 / 8 / 9 / 11: 上限の方式（`oracle`） ----------
+
+
+def test_oracle_counts_only_the_findings_that_were_fixed(measure_mod):
+    """受け入れ条件 5。解決したスレッドと位置が結べた指摘だけを数える。"""
+    st = _state(
+        rounds=[_round(1, fix=_fix(_position("T1", "a.py", 10)))],
+        review_findings=[
+            _finding("codex-r1-0", 1, "a.py", 10),
+            _finding("codex-r1-1", 1, "b.py", 20),
+        ],
+    )
+
+    result = measure_mod.measure(st)
+
+    assert result["methods"]["oracle"] == {"found": 1, "unmatched": 0, "ambiguous": 0}
+    assert measure_mod._oracle(st).finding_ids == {"codex-r1-0"}
+
+
+def test_oracle_does_not_pick_up_a_finding_from_a_later_round(measure_mod):
+    """受け入れ条件 6。round 1 の解決が、round 2 の同じ位置の指摘へ結ばれない。
+
+    限らないと、**解決した時点でまだ存在しない指摘**を上限へ算入する。
+    """
+    st = _state(
+        rounds=[
+            _round(1, fix=_fix(_position("T1", "a.py", 10))),
+            _round(2),
+        ],
+        review_findings=[
+            _finding("codex-r1-0", 1, "a.py", 10),
+            _finding("agy-r2-0", 2, "a.py", 10, agent="agy"),
+        ],
+    )
+
+    oracle = measure_mod._oracle(st)
+
+    assert oracle.finding_ids == {"codex-r1-0"}
+    assert measure_mod.measure(st)["methods"]["oracle"]["found"] == 1
+
+
+def test_oracle_takes_the_newest_round_when_several_match(measure_mod):
+    """絞り込んだ後になお複数が一致するときは、ラウンドが最も新しいものを採る。
+
+    行番号は修正で動くため、古い側へ結ぶと別の指摘を数える。
+    """
+    st = _state(
+        rounds=[
+            _round(1),
+            _round(2, fix=_fix(_position("T1", "a.py", 10))),
+        ],
+        review_findings=[
+            _finding("codex-r1-0", 1, "a.py", 10),
+            _finding("agy-r2-0", 2, "a.py", 10, agent="agy"),
+        ],
+    )
+
+    assert measure_mod._oracle(st).finding_ids == {"agy-r2-0"}
+
+
+def test_oracle_reports_unmatched_threads(measure_mod):
+    """受け入れ条件 8。どの指摘とも一致しないスレッドを `unmatched` に出す。
+
+    落としたことが出力から見えないと、再現率が実際より高く出ていることに
+    気づけない。
+    """
+    st = _state(
+        rounds=[_round(1, fix=_fix(_position("T1", "z.py", 99)))],
+        review_findings=[_finding("codex-r1-0", 1, "a.py", 10)],
+    )
+
+    assert measure_mod.measure(st)["methods"]["oracle"] == {
+        "found": 0, "unmatched": 1, "ambiguous": 0}
+
+
+def test_oracle_counts_a_thread_without_a_position_as_unmatched(measure_mod):
+    """位置の欠けた要素は結べない。**落とさずに `unmatched` へ数える。**"""
+    st = _state(
+        rounds=[_round(1, fix=_fix(_position("T1", None, None)))],
+        review_findings=[_finding("codex-r1-0", 1, "a.py", 10)],
+    )
+
+    assert measure_mod.measure(st)["methods"]["oracle"] == {
+        "found": 0, "unmatched": 1, "ambiguous": 0}
+
+
+def test_oracle_reports_two_findings_at_one_position_as_ambiguous(measure_mod):
+    """受け入れ条件 9。同じラウンドの同じ位置に別の本文の指摘が 2 件あるとき。
+
+    **どちらを解決したかが記録から決まらない。** 片方を採ると、未修正の
+    もう片方を上限へ算入しうる。
+    """
+    st = _state(
+        rounds=[_round(1, fix=_fix(_position("T1", "a.py", 10)))],
+        review_findings=[
+            _finding("codex-r1-0", 1, "a.py", 10, body="別の本文 A"),
+            _finding("agy-r1-0", 1, "a.py", 10, agent="agy", body="別の本文 B"),
+        ],
+    )
+
+    assert measure_mod.measure(st)["methods"]["oracle"] == {
+        "found": 0, "unmatched": 0, "ambiguous": 1}
+
+
+def test_oracle_ignores_merged_elements(measure_mod):
+    """母集合は代表だけである。統合された側を数えると同じ指摘が 2 件になる。"""
+    st = _state(
+        rounds=[_round(1, fix=_fix(_position("T1", "a.py", 10)))],
+        review_findings=[
+            _finding("codex-r1-0", 1, "a.py", 10, origin_runtimes=["codex", "agy"],
+                     merged_from=["agy-r1-0"]),
+            _finding("agy-r1-0", 1, "a.py", 10, agent="agy",
+                     merged_into="codex-r1-0"),
+        ],
+    )
+
+    assert measure_mod.measure(st)["methods"]["oracle"] == {
+        "found": 1, "unmatched": 0, "ambiguous": 0}
+    assert measure_mod._oracle(st).finding_ids == {"codex-r1-0"}
+
+
+def test_oracle_does_not_link_across_pull_requests(measure_mod):
+    """受け入れ条件 11。ローテーション済みの記録で Pull Request をまたいで結ばない。
+
+    解決済みスレッドはその Pull Request のものである。ラウンドだけで絞ると、
+    ローテーション前の Pull Request の指摘へ結ばれる。
+    """
+    st = _state(
+        current_pr=124,
+        pr_history=[{"pr": 123, "rounds": 1}, {"pr": 124, "rounds": 1}],
+        rounds=[
+            _round(1, pr=123),
+            _round(2, pr=124, fix=_fix(_position("T1", "a.py", 10))),
+        ],
+        review_findings=[_finding("codex-r1-0", 1, "a.py", 10, pr=123)],
+    )
+
+    result = measure_mod.measure(st)
+
+    assert result["methods"]["oracle"] == {"found": 0, "unmatched": 1, "ambiguous": 0}
+    assert result["prs"] == [123, 124]
+    assert result["cost"]["rounds"] == 2
+    assert result["cost"]["reviewer_launches"] == 4
+
+
+def test_oracle_counts_one_finding_once_for_two_resolutions(measure_mod):
+    """同じ指摘を 2 度解決しても、上限の件数は 1 である。"""
+    st = _state(
+        rounds=[
+            _round(1, fix=_fix(_position("T1", "a.py", 10))),
+            _round(2, fix=_fix(_position("T2", "a.py", 10))),
+        ],
+        review_findings=[_finding("codex-r1-0", 1, "a.py", 10)],
+    )
+
+    assert measure_mod.measure(st)["methods"]["oracle"]["found"] == 1
