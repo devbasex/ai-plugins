@@ -9,6 +9,49 @@
 **開発版（接尾辞の付いた版）は載せない。** `9.8.0` は `9.8.0-dev.1` までしか出ておらず、
 その内容は `10.0.0` で届いている。
 
+## [ndf 10.10.0] - 2026-09-12
+
+### 追加
+
+- **指摘に根拠と反証条件を求める規約**（#156）。`cross-review` の指摘は位置・再現の筋道・
+  反証条件の 3 項目を持ち、揃ったものだけが `has_evidence` になる。`docs/06-evidence.md` を
+  新設し、根拠の求め方・独立発見・走らせる順序・区分・効果の測定を 1 本にまとめた
+- **独立発見の規約**（#156）。担当が参照してよい既存コメントを起動時のスナップショットに
+  限った。同じラウンドで先に投稿した担当の指摘は渡さない。**同じ指摘が 2 者から出たことに
+  意味があるのは、互いを見ていない場合だけである**
+- **反証と実行検証**（#156）。収束ループへ Step 2.5 を足した。`state.py verify-findings` と
+  `scripts/critique.sh` / `scripts/critique-round.sh` を新設し、レビュー担当が互いの指摘へ
+  支持・反証を出す。`--verify-command` を渡したラウンドは、そのコマンドを実行して再現を
+  確かめる
+- **証拠ベース集約**（#156）。指摘を `verified_blocking` / `verified_non_blocking` /
+  `rejected` / `needs_human_judgment` / `insufficient_evidence` の 5 区分へ集約する。
+  収束の判定が数えるのは `verified_blocking` と `needs_human_judgment` の 2 つだけで、
+  棄却した指摘はラウンドを増やさない
+- `--verify-command` / `--verify-exit-code` を `cross-review` へ足した（#156）。渡さなければ
+  実行検証を行わない。再現とみなす終了コードは既定 `1` で、**「0 でない」を再現としない**
+- **却下した指摘を per-item で残す**（#156）。`rejected_findings` へ位置と理由を蓄積し、
+  次のラウンドで同じ論点が再提出されたときに突き合わせる
+- **効果の測定**（#156）。`scripts/measure.py` を新設した。状態ファイル 1 つから
+  `single` / `majority` / `proposed` / `oracle` の 4 方式を読み、費用と収束の様子を出す。
+  収束ループの外にあり、手順の途中では呼ばない
+- **コンテキストの窓を工程の単位として扱う規約**（#546）。`development-workflow` へ
+  `references/context-window.md` を新設し、切ってよい点・委譲する対象・残量の見方を定めた。
+  工程表の行は増やしていない
+
+### 変更
+
+- `fix` が返す `rejected` の各要素が `path` / `line` / `severity` を持つ（#156）。位置が無いと、
+  却下した論点が再提出されたときに同じ指摘だと判定できない（実測では同じ論点が 5 ラウンド
+  続けて提出された）
+- `release` の手順へ、出た版の判断を開発の指示書から退避する規約を足した（#551）。指示書に
+  残すと、その内容を全セッションと全サブエージェントが毎回読む
+- `cross-review` の `SKILL.md` から `<worktree-base>` の解決順を `docs/04-contracts.md` へ
+  移した（#156）
+- `CLAUDE.md` の v10.0.0〜v10.5.1 の判断を `docs/ndf-version-decisions.md` へ移した（#551）。
+  `CLAUDE.md` は 333 行 → 79 行。参照から `@` を外し、毎回の読み込みから外した
+- 計画と設計 9 本 2207 行を `docs/specifications/cross-review-evidence-based.md` 464 行の
+  確定仕様 1 本へまとめた（#156）
+
 ## [ndf 10.9.1] - 2026-09-09
 
 ### 修正
