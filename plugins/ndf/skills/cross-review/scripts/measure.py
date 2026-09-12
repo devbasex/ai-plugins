@@ -244,6 +244,103 @@ def _oracle_output(oracle: Oracle) -> dict[str, Any]:
     }
 
 
+def _origin_runtimes(finding: dict[str, Any]) -> list[str]:
+    """提案した担当の一覧。**持たない指摘は取り込み時の担当 1 者として読む。**
+
+    この値は統合のときに初めて付く（`_merge_duplicates` / `_merge_declared_duplicates`
+    の `setdefault`）。取り込んだ直後の指摘と、3 本目より前に取った記録は持たない。
+
+    **無いものを「0 者」として読むと、比較対象の過去の記録の 1 者だけの方式が
+    全件 0 になる。** 変更の前後を比べるのがこの測定の目的であり、前の側が
+    数えられないと目的そのものが立たない。`state.py` 自身も同じ場面で
+    `finding.get("origin_runtimes") or [finding.get("agent")]` と読んでいる。
+    """
+    origins = finding.get("origin_runtimes") or [finding.get("agent")]
+    return [str(name) for name in origins if name]
+
+
+def _recall(matched: int, base: int | None) -> float | None:
+    """再現率。**分母が 0 か決まらないときは出さない。**
+
+    `0.0` にすると「拾えなかった」と読めるが、実際は比べる相手がいない。
+
+    小数第 2 位で丸める。**丸めても検算できる**のは、分子（`matched`）と分母
+    （`oracle` の件数）を出力へ出しているためである。
+    """
+    if base is None or base == 0:
+        return None
+    return round(matched / base, 2)
+
+
+def _method_output(finding_ids: set[str], oracle_ids: set[str] | None) -> dict[str, Any]:
+    """方式 1 つの結果。
+
+    **分子は `found` ではない。** 採用集合には修正されなかった指摘も却下された
+    指摘も入る。`found` をそのまま割ると 1.0 を超える。拾えた件数は上限の方式の
+    集合との積集合で数え、`finding_id` で突き合わせる。
+    """
+    if oracle_ids is None:
+        return {"found": len(finding_ids), "matched": None, "of_oracle": None}
+    matched = len(finding_ids & oracle_ids)
+    return {
+        "found": len(finding_ids),
+        "matched": matched,
+        "of_oracle": _recall(matched, len(oracle_ids)),
+    }
+
+
+def _single(representatives: list[dict[str, Any]],
+            oracle_ids: set[str] | None) -> dict[str, Any]:
+    """1 者だけの方式。**担当ごとに 1 通り出す。**
+
+    1 者だけの結果は誰を選ぶかで変わる。1 つの数字にまとめると、選び方が結果に
+    混ざる。**統合された側の要素は数えない**（統合の前後で値が変わらないよう、
+    代表の `origin_runtimes` で判定する）。
+    """
+    per_agent: dict[str, set[str]] = {}
+    for finding in representatives:
+        for agent in _origin_runtimes(finding):
+            per_agent.setdefault(agent, set()).add(str(finding.get("finding_id")))
+    return {
+        agent: _method_output(ids, oracle_ids)
+        for agent, ids in sorted(per_agent.items())
+    }
+
+
+def _majority(representatives: list[dict[str, Any]],
+              oracle_ids: set[str] | None) -> dict[str, Any]:
+    """多数決の方式。**3 本目の統合の結果を読む。**
+
+    `origin_runtimes` が 2 者以上の指摘を採る。**位置が近いだけの組を自分で
+    数え直さない**（3 本目が近傍かつ本文の一致で統合しており、同じ判定を 2 か所に
+    持つと片方だけが古くなる）。統合し損ねた組は `duplicate_candidates` に残り、
+    この方式には入らない。
+    """
+    finding_ids = {
+        str(finding.get("finding_id"))
+        for finding in representatives
+        if len(set(_origin_runtimes(finding))) >= 2
+    }
+    return _method_output(finding_ids, oracle_ids)
+
+
+def _methods(st: dict[str, Any]) -> dict[str, Any]:
+    """4 つの方式を、同じ `review_findings[]` から違う規則で読む。
+
+    **上限の方式が上限を表す。** 実際に修正された指摘の集合であり、どの方式でも
+    これを超えられない。そのため先に計算し、残りの方式が拾えた件数の
+    突き合わせ先にする。
+    """
+    representatives = _representatives(st)
+    oracle = _oracle(st)
+    oracle_ids = oracle.finding_ids
+    return {
+        "single": _single(representatives, oracle_ids),
+        "majority": _majority(representatives, oracle_ids),
+        "oracle": _oracle_output(oracle),
+    }
+
+
 def measure(st: dict[str, Any]) -> dict[str, Any]:
     """状態ファイルの中身から測定の結果を組み立てる。
 
@@ -256,7 +353,7 @@ def measure(st: dict[str, Any]) -> dict[str, Any]:
         "pr": _state_file_pr(st),
         "prs": _prs(st),
         "rounds": len(_rounds(st)),
-        "methods": {"oracle": _oracle_output(_oracle(st))},
+        "methods": _methods(st),
         "cost": _cost(st),
         "convergence": _convergence(st),
     }

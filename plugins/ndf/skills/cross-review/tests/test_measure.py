@@ -344,3 +344,101 @@ def test_oracle_counts_one_finding_once_for_two_resolutions(measure_mod):
     )
 
     assert measure_mod.measure(st)["methods"]["oracle"]["found"] == 1
+
+
+# ---------- 受け入れ条件 1 / 2 / 3 / 4 / 10: 1 者だけの方式と多数決の方式 ----------
+
+
+def test_single_reports_one_result_per_agent(measure_mod):
+    """受け入れ条件 2。**担当ごとに 1 通り出す。**
+
+    1 者だけの結果は誰を選ぶかで変わる。1 つの数字にまとめると、選び方が結果に混ざる。
+    """
+    st = _state(
+        rounds=[_round(1, fix=_fix(_position("T1", "a.py", 10)))],
+        review_findings=[
+            _finding("codex-r1-0", 1, "a.py", 10, origin_runtimes=["codex"]),
+            _finding("agy-r1-0", 1, "b.py", 20, agent="agy", origin_runtimes=["agy"]),
+        ],
+    )
+
+    single = measure_mod.measure(st)["methods"]["single"]
+
+    assert single["codex"] == {"found": 1, "matched": 1, "of_oracle": 1.0}
+    assert single["agy"] == {"found": 1, "matched": 0, "of_oracle": 0.0}
+
+
+def test_single_reads_the_agent_when_origin_runtimes_is_absent(measure_mod):
+    """受け入れ条件 3。`origin_runtimes` を持たない指摘は `[agent]` として読む。
+
+    **無いものを「0 者」として読むと、比較対象の過去の記録の `single` が全件
+    0 になる。** 変更の前後を比べるのがこの測定の目的である。
+    """
+    st = _state(
+        rounds=[_round(1, fix=_fix(_position("T1", "a.py", 10)))],
+        review_findings=[
+            _finding("codex-r1-0", 1, "a.py", 10),
+            _finding("agy-r1-0", 1, "b.py", 20, agent="agy"),
+        ],
+    )
+
+    methods = measure_mod.measure(st)["methods"]
+
+    assert methods["single"]["codex"]["found"] == 1
+    assert methods["single"]["agy"]["found"] == 1
+    # 補った値は 1 者であるため、多数決には入らない。
+    assert methods["majority"]["found"] == 0
+
+
+def test_methods_do_not_count_a_merged_finding_twice(measure_mod):
+    """受け入れ条件 4。母集合は代表だけである。
+
+    統合された側を一緒に数えると、同じ指摘が 2 件になる。統合の前後で
+    `single` の値が変わらないよう、代表の `origin_runtimes` で判定する。
+    """
+    st = _state(
+        rounds=[_round(1, fix=_fix(_position("T1", "a.py", 10)))],
+        review_findings=[
+            _finding("codex-r1-0", 1, "a.py", 10, origin_runtimes=["codex", "agy"],
+                     merged_from=["agy-r1-0"]),
+            _finding("agy-r1-0", 1, "a.py", 10, agent="agy", merged_into="codex-r1-0"),
+        ],
+    )
+
+    methods = measure_mod.measure(st)["methods"]
+
+    assert methods["single"]["codex"]["found"] == 1
+    assert methods["single"]["agy"]["found"] == 1
+    assert methods["majority"] == {"found": 1, "matched": 1, "of_oracle": 1.0}
+
+
+def test_majority_takes_findings_with_two_or_more_origins(measure_mod):
+    """多数決は `origin_runtimes` が 2 者以上の指摘を採る。"""
+    st = _state(
+        rounds=[_round(1, fix=_fix(_position("T1", "a.py", 10)))],
+        review_findings=[
+            _finding("codex-r1-0", 1, "a.py", 10, origin_runtimes=["codex", "agy"]),
+            _finding("codex-r1-1", 1, "b.py", 20, origin_runtimes=["codex"]),
+        ],
+    )
+
+    assert measure_mod.measure(st)["methods"]["majority"] == {
+        "found": 1, "matched": 1, "of_oracle": 1.0}
+
+
+def test_of_oracle_does_not_exceed_one_when_a_finding_was_not_fixed(measure_mod):
+    """受け入れ条件 10。**分子は `found` ではない。**
+
+    採用集合には修正されなかった指摘も却下された指摘も入る。`found` をそのまま
+    割ると 1.0 を超える。
+    """
+    st = _state(
+        rounds=[_round(1, fix=_fix(_position("T1", "a.py", 10)))],
+        review_findings=[
+            _finding("codex-r1-0", 1, "a.py", 10),
+            _finding("codex-r1-1", 1, "b.py", 20, classification="rejected"),
+        ],
+    )
+
+    assert measure_mod.measure(st)["methods"]["single"]["codex"] == {
+        "found": 2, "matched": 1, "of_oracle": 1.0}
