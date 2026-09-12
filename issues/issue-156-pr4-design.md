@@ -191,7 +191,7 @@ uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest 
 
 **照合の対象は、その解決を記録した fix のラウンド以下の指摘に限る。**
 `rounds[R].fix.resolved_thread_positions` の 1 件は、**ラウンド R の時点で出ていた指摘**を
-解決したものである（`review_findings[].round` が指摘の出たラウンドを持つ）。R より後の
+解決したものである。指摘の出たラウンドは `review_findings[].round` が持つ。R より後の
 指摘は、解決した時点でまだ存在しない。
 
 限らないと、round 1 で修正した `a.py:10` の解決が、**round 2 に同じ行へ出た別の未修正の
@@ -200,9 +200,36 @@ uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest 
 **突き合わせは `(path, line)` で行う。** 上の絞り込みの後になお複数の代表が一致するときは、
 **ラウンドが最も新しいものを採る**。行番号は修正で動くため、古い側へ結ぶと別の指摘を数える。
 
+**その最も新しいラウンドの中に代表が 2 件以上あるときは、どれとも結ばない。** 件数を
+`oracle` の `ambiguous` として出し、`found` には数えない。**どちらを解決したかが記録から
+決まらない**ためである。片方を採ると、未修正のもう片方を `oracle` へ算入しうる。上限を
+表す値が実際より大きくなると、`of_oracle` が実際より低く出る。
+
+**この組は実際に作られる。** `_merge_duplicates` が束ねる条件は近傍**かつ**本文の一致で
+ある。本文の違う組は代表のまま残る。次の 2 つを実行して確かめた。
+
+| 同じ位置に代表が 2 件残る組 | `_merge_duplicates` の扱い |
+| --- | --- |
+| 別の担当・同じ行・別の本文 | `duplicate_candidates` へ入れて両方を残す |
+| 同じ担当・同じ行・別の本文 | 同じ担当どうしを比較の対象から外すため、候補にも入らない |
+
+**一意な対応を記録する案は採らない。** 指摘とスレッドを結ぶ識別子が、どちらの側にも無い。
+`review_findings[]` の `posted_to` は `inline` / `body` の 2 値で、投稿先の識別子ではない
+（`_FINDING_DEFAULTS`）。結ぶには、レビューを投稿する側が指摘ごとの `comment_id` を返す
+必要がある。**戻り値の形を変えるのは 4 者すべてのプロンプトに掛かる**ため、この変更の範囲を
+超える。
+
 **どの指摘とも一致しなかった解決済みスレッドは `oracle` に数えない。** 件数を `oracle` の
 `unmatched` として出す。落としたことが出力から見えないと、`of_oracle` が実際より高く出て
 いることに気づけない。
+
+**`unmatched` と `ambiguous` は別の事象である。** どちらも `oracle` に数えない解決済み
+スレッドの件数だが、一致した代表の数が違う。**両方に数えられるスレッドは無い。**
+
+| 項目 | 一致した代表の数 | 何が起きているか |
+| --- | ---: | --- |
+| `unmatched` | 0 | 位置が動いた。または総評だけの指摘を解決した |
+| `ambiguous` | 2 以上 | 同じ位置に別の本文の指摘が並んでいる |
 
 **総評だけへ書いた指摘は `oracle` に入らない。** `posted_to` が `body` の指摘はスレッドを
 持たないため、修正されても解決済みスレッドとして現れない。`oracle` は
@@ -253,7 +280,7 @@ measure.py <状態ファイルのパス> [--output <パス>]
    "majority": {"found": 4, "of_oracle": 0.31},
    "proposed": {"found": 11, "of_oracle": 0.85,
                 "oracle_scope": "all_rounds", "oracle_base": 13},
-   "oracle": {"found": 13, "unmatched": 1}},
+   "oracle": {"found": 13, "unmatched": 1, "ambiguous": 0}},
  "cost": {"rounds": 5, "reviewer_launches": 10, "wall_clock_seconds": 4200},
  "convergence": {"final": "approved", "oscillation": 0, "max_rounds": 0}}
 ```
@@ -264,7 +291,7 @@ measure.py <状態ファイルのパス> [--output <パス>]
 | 決まらない場面 | 出す形 |
 | --- | --- |
 | 印（`evidence_rounds`）を持つラウンドが無い | `"proposed": {"found": null, "of_oracle": null, "oracle_scope": null, "oracle_base": null, "reason": "no_evidence_rounds"}` |
-| 位置の記録（`resolved_thread_positions`）を持つラウンドが無い | `"oracle": {"found": null, "unmatched": null, "reason": "no_resolved_thread_positions"}`。`of_oracle` は全方式で `null`、`proposed` の `oracle_base` も `null` |
+| 位置の記録（`resolved_thread_positions`）を持つラウンドが無い | `"oracle": {"found": null, "unmatched": null, "ambiguous": null, "reason": "no_resolved_thread_positions"}`。`of_oracle` は全方式で `null`、`proposed` の `oracle_base` も `null` |
 | `oracle` が 0 件 | `of_oracle` は `null`（0 除算。`0.0` にすると「拾えなかった」と読めるが、実際は比べる相手がいない） |
 | 印のあるラウンドに修正された指摘が 1 件も無い | `proposed` の `oracle_base` は `0`、`of_oracle` は `null`（同じ 0 除算）。`found` は数えた件数をそのまま出す |
 | その方式が 0 件 | `"found": 0`。`of_oracle` は `0.0`（計算できている） |
@@ -339,6 +366,7 @@ graph LR
 | `oracle` が解決より後のラウンドの指摘を拾わない | 同上。round 1 で解決した `a.py:10` と、round 2 の同じ位置に出た別の指摘を持つ記録。`oracle` は 1 件で、round 2 の指摘を含まない |
 | 印の混ざった記録で `proposed` の分母が印のあるラウンドに限られる | 同上。印の無い round 1 と印のある round 2 に修正された指摘を 1 件ずつ持つ記録。`of_oracle` が `1.0`、`oracle_scope` が `evidence_rounds`、`oracle_base` が `1` |
 | 一致しないスレッドを `unmatched` に出す | 同上。位置がどの指摘とも合わない記録 |
+| 同じ位置に並んだ 2 件を `oracle` へ算入しない | 同上。同じラウンド・同じ位置に別の本文の指摘を 2 件持ち、解決済みスレッドが 1 件の記録。`found` は 0 件、`ambiguous` は 1 件 |
 | 計算できない値が `null` で出る | 同上。印の無い記録・位置の記録が無い記録・`oracle` が 0 件の記録 |
 | 費用が並ぶ | 同上。時刻の差を確かめる |
 | 収束の様子が並ぶ | 同上。4 つの `final` それぞれ |
