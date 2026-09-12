@@ -156,6 +156,12 @@ class Oracle(NamedTuple):
     ambiguous: int
 
 
+class ResolvedPositionSource(NamedTuple):
+    round_no: int
+    pr: int | None
+    positions: list[Any]
+
+
 def _representatives(st: dict[str, Any]) -> list[dict[str, Any]]:
     """母集合は代表だけである。
 
@@ -224,6 +230,54 @@ def _find_best_match(
     return str(newest_candidates[0].get("finding_id")), False
 
 
+def _resolved_position_sources(st: dict[str, Any]) -> list[ResolvedPositionSource]:
+    """resolved_thread_positions を持つ round を、照合に必要な値へ変換する。"""
+    rounds = _rounds(st)
+    sources: list[ResolvedPositionSource] = []
+    for index, round_rec in enumerate(rounds):
+        fix = round_rec.get("fix")
+        positions = (
+            fix.get("resolved_thread_positions") if isinstance(fix, dict) else None
+        )
+        if isinstance(positions, list):
+            sources.append(ResolvedPositionSource(
+                _round_no(rounds, index),
+                _as_int(round_rec.get("pr")),
+                positions,
+            ))
+    return sources
+
+
+def _resolved_position(position: Any) -> tuple[str | None, int | None]:
+    """位置要素から path と line を取り出す。欠けていれば None を返す。"""
+    if not isinstance(position, dict):
+        return None, None
+    path = position.get("path")
+    line = _as_int(position.get("line"))
+    return (path, line) if path else (None, line)
+
+
+def _add_oracle_match(
+    oracle: Oracle,
+    representatives: list[dict[str, Any]],
+    pr: int | None,
+    round_no: int,
+    path: str | None,
+    line: int | None,
+) -> Oracle:
+    """1 件の resolved position を Oracle 集計へ反映する。"""
+    if path is None or line is None:
+        # 位置の欠けた要素も落とさない（`_thread_positions` が残す）。
+        return Oracle(oracle.finding_ids, oracle.unmatched + 1, oracle.ambiguous)
+    finding_id, is_ambiguous = _find_best_match(
+        representatives, pr, round_no, path, line)
+    if is_ambiguous:
+        return Oracle(oracle.finding_ids, oracle.unmatched, oracle.ambiguous + 1)
+    if finding_id is None:
+        return Oracle(oracle.finding_ids, oracle.unmatched + 1, oracle.ambiguous)
+    return Oracle(oracle.finding_ids | {finding_id}, oracle.unmatched, oracle.ambiguous)
+
+
 def _oracle(st: dict[str, Any]) -> Oracle | None:
     """解決したスレッドの位置と指摘の位置を結び、修正された指摘を集める。
 
@@ -239,37 +293,14 @@ def _oracle(st: dict[str, Any]) -> Oracle | None:
         # **この変更より前に取った記録では計算できない。** 値を 0 で埋めると、
         # 「修正が 1 件も無かった実行」として比較へ混ざる。
         return None
+    oracle = Oracle(set(), 0, 0)
     representatives = _representatives(st)
-    rounds = _rounds(st)
-    finding_ids: set[str] = set()
-    unmatched = 0
-    ambiguous = 0
-    for index, round_rec in enumerate(rounds):
-        fix = round_rec.get("fix")
-        positions = (
-            fix.get("resolved_thread_positions") if isinstance(fix, dict) else None
-        )
-        if not isinstance(positions, list):
-            continue
-        round_no = _round_no(rounds, index)
-        pr = _as_int(round_rec.get("pr"))
-        for position in positions:
-            path = position.get("path") if isinstance(position, dict) else None
-            line = _as_int(position.get("line")) if isinstance(position, dict) else None
-            if not path or line is None:
-                # 位置の欠けた要素も落とさない（`_thread_positions` が残す）。
-                unmatched += 1
-                continue
-            finding_id, is_ambiguous = _find_best_match(
-                representatives, pr, round_no, path, line)
-            if is_ambiguous:
-                ambiguous += 1
-                continue
-            if finding_id is None:
-                unmatched += 1
-                continue
-            finding_ids.add(finding_id)
-    return Oracle(finding_ids, unmatched, ambiguous)
+    for source in _resolved_position_sources(st):
+        for position in source.positions:
+            path, line = _resolved_position(position)
+            oracle = _add_oracle_match(
+                oracle, representatives, source.pr, source.round_no, path, line)
+    return oracle
 
 
 def _oracle_output(oracle: Oracle | None) -> dict[str, Any]:

@@ -1235,13 +1235,25 @@ def _is_fresh_fix_result(
         後続候補へ流れて別 PR の戻り値を誤マージする事故を防ぐ)。
         正規パスでも `pr` 不一致 / stale mtime は fallback 継続対象とする。
     """
-    # 1. mtime チェック
+    if not _is_fresh_mtime(path, round_started_ts):
+        return False, None
+
+    payload = _read_and_parse_fix_payload(path, is_canonical=is_canonical)
+    if payload is None:
+        return False, None
+    if not _matches_pr(path, payload, pr):
+        return False, None
+    return True, payload
+
+
+def _is_fresh_mtime(path: pathlib.Path, round_started_ts: float | None) -> bool:
+    """fallback 候補の mtime が round 開始以降かを返す。"""
     if round_started_ts is not None:
         try:
             mtime = path.stat().st_mtime
         except OSError as exc:
             info(f"⚠ fallback 候補 stat 失敗 ({path}): {exc} — skip")
-            return False, None
+            return False
         if mtime < round_started_ts:
             info(
                 f"⚠ fallback 候補が round 開始前の古いファイル ({path}, "
@@ -1249,9 +1261,15 @@ def _is_fresh_fix_result(
                 f"< round_started={_dt.datetime.fromtimestamp(round_started_ts).isoformat(timespec='seconds')}) "
                 "— skip"
             )
-            return False, None
+            return False
+    return True
 
-    # 2. JSON 内 `pr` フィールドの一致 (任意)
+
+def _read_and_parse_fix_payload(
+    path: pathlib.Path,
+    is_canonical: bool = False,
+) -> dict[str, Any] | None:
+    """fix 戻り値ファイルを dict として読み取る。"""
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -1262,7 +1280,7 @@ def _is_fresh_fix_result(
                 code=3,
             )
         info(f"⚠ fallback 候補 JSON 解析失敗 ({path}): {exc} — skip")
-        return False, None
+        return None
     # gemini round 3 指摘: `json.loads` は dict 以外 (list 等) も返す。
     # 後続の `payload.get(...)` や cmd_merge_fix 側の `.get()` でクラッシュしないよう、
     # dict でない場合は warn を出して fallback 不採用 ((False, None)) として扱う。
@@ -1282,7 +1300,12 @@ def _is_fresh_fix_result(
             f"⚠ fallback 候補 JSON が dict ではない ({path}, type={type(payload).__name__}) "
             "— skip"
         )
-        return False, None
+        return None
+    return payload
+
+
+def _matches_pr(path: pathlib.Path, payload: dict[str, Any], pr: int) -> bool:
+    """payload の pr フィールドが対象 PR と一致するかを返す。"""
     file_pr = payload.get("pr")
     if file_pr is not None:
         try:
@@ -1292,14 +1315,14 @@ def _is_fresh_fix_result(
                 f"⚠ fallback 候補の pr フィールドが数値として解釈できない "
                 f"({path}, file_pr={file_pr!r}) — skip"
             )
-            return False, None
+            return False
         if file_pr_int != int(pr):
             info(
                 f"⚠ fallback 候補の pr 不一致 ({path}, file_pr={file_pr} != pr={pr}) "
                 "— 別 PR の戻り値の可能性。skip"
             )
-            return False, None
-    return True, payload
+            return False
+    return True
 
 
 def _load(pr: int) -> dict[str, Any]:
