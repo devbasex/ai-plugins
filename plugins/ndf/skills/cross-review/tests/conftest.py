@@ -17,6 +17,7 @@ import types
 _HERE = pathlib.Path(__file__).resolve().parent
 _SCRIPT = _HERE.parent / "scripts" / "state.py"
 _MONITOR = _HERE.parent / "scripts" / "monitor.py"
+_MEASURE = _HERE.parent / "scripts" / "measure.py"
 
 
 def _load_module(name: str, path: pathlib.Path) -> types.ModuleType:
@@ -62,6 +63,12 @@ def state_mod() -> types.ModuleType:
 @pytest.fixture(scope="session")
 def monitor_mod() -> types.ModuleType:
     return _load_monitor_module()
+
+
+@pytest.fixture(scope="session")
+def measure_mod() -> types.ModuleType:
+    """効果の測定（#156）。状態ファイルを読むだけで、GitHub を呼ばない。"""
+    return _load_module("cross_review_measure", _MEASURE)
 
 
 @pytest.fixture(autouse=True)
