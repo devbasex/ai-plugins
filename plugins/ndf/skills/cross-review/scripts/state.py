@@ -2071,7 +2071,8 @@ def _posted_comment_count(repo: str, pr: int, review_url: str | None) -> int | N
              "--paginate", "--jq", "length"],
             check=False,
         )
-    except Exception:
+    except Exception as exc:
+        info(f"⚠ 投稿数を確認できない: {exc}")
         return None
     counts = [int(line) for line in str(out).split() if line.strip().isdigit()]
     return sum(counts) if counts else None
@@ -2119,7 +2120,8 @@ def _review_exists(repo: str, pr: int, review_url: str | None) -> bool | None:
             ["gh", "api", f"repos/{repo}/pulls/{pr}/reviews/{m.group(1)}", "--jq", ".id"],
             check=False,
         )
-    except Exception:
+    except Exception as exc:
+        info(f"⚠ レビューの実在を確認できない: {exc}")
         return None
     text = str(out).strip()
     if not text:
@@ -3986,7 +3988,8 @@ def _head_branch_of(pr: int) -> str | None:
     try:
         out = _sh(["gh", "pr", "view", str(pr), "--json", "headRefName", "-q", ".headRefName"],
                   check=False)
-    except Exception:
+    except Exception as exc:
+        info(f"⚠ head branch を取り直せない: {exc}")
         return None
     name = str(out).strip()
     return name or None
