@@ -271,3 +271,29 @@ def test_a_create_success_closes_the_old_pr_and_opens_the_new_pr(rotation: _Rota
     assert states[str(_NEW_PR)] == "open"
     assert f"NEW_PR={_NEW_PR}" in out.stdout
     assert not any(c.startswith("pr reopen") for c in rotation.gh_calls())
+
+
+# ---- execute の引数検証（R2-004、現状固定） ----
+#
+# `--mode` の値検証と未知フラグの検出は gh/git を一切呼ばない純粋な引数解析であり、
+# `load_state` (state.json の読み込み) より前で止まる。現状固定として、終了コードと
+# stderr のメッセージを実行して確かめる。
+
+def test_an_invalid_mode_value_is_rejected() -> None:
+    out = subprocess.run(
+        ["bash", str(ROTATE), "execute", "123", "--mode", "bogus"],
+        capture_output=True, text=True, timeout=60,
+    )
+
+    assert out.returncode == 2
+    assert "invalid --mode: bogus" in out.stderr
+
+
+def test_an_unknown_flag_is_rejected() -> None:
+    out = subprocess.run(
+        ["bash", str(ROTATE), "execute", "123", "--unknown-flag"],
+        capture_output=True, text=True, timeout=60,
+    )
+
+    assert out.returncode == 2
+    assert "unknown arg: --unknown-flag" in out.stderr
