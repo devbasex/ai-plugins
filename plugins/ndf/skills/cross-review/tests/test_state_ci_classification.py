@@ -48,55 +48,76 @@ def _write(tmp_dir: pathlib.Path, state: dict) -> None:
     (tmp_dir / f"cross-review-pr{PR}-state.json").write_text(json.dumps(state))
 
 
+def _run_judge_with_ci(tmp_dir, state_mod, monkeypatch, runs):
+    """全体処理の入り口 (cmd_judge) から継続的統合の判定をテストする。"""
+    monkeypatch.setattr(state_mod, "_fetch_check_runs", lambda repo, sha: runs)
+    approved = {
+        "round": 1, "pr": PR, "started_at": "2026-09-04T00:00:00+00:00",
+        "codex": {"intent": "APPROVE", "by_severity": {}},
+        "agy": {"intent": "APPROVE", "by_severity": {}},
+        "head_sha": "b87b3ae",
+    }
+    _write(tmp_dir, _state([approved]))
+    
+    with pytest.raises(SystemExit) as judge_exit:
+        state_mod.cmd_judge(argparse.Namespace(pr=PR))
+        
+    saved = json.loads((tmp_dir / f"cross-review-pr{PR}-state.json").read_text())
+    return judge_exit.value.code, saved["rounds"][-1]["ci"]
+
+
 # ---------------- 振り分けそのもの ----------------
 
-def test_an_unknown_name_is_treated_as_code_related(state_mod):
+def test_an_unknown_name_is_treated_as_code_related(tmp_dir, state_mod, monkeypatch):
     """一覧に無い名前は code-related として扱う（保守的な既定）。"""
-    got = state_mod._classify_ci([_run("我々の知らない検査")])
-
-    assert got.code_failed == ["我々の知らない検査"]
-    assert got.meta_failed == []
-
-
-def test_a_meta_name_is_separated_from_a_code_name(state_mod):
-    got = state_mod._classify_ci([_run("check_pr_requirements"), _run("pytest")])
-
-    assert got.code_failed == ["pytest"]
-    assert got.meta_failed == ["check_pr_requirements"]
+    code, ci = _run_judge_with_ci(tmp_dir, state_mod, monkeypatch, [_run("我々の知らない検査")])
+    assert code == 2
+    assert ci["verdict"] == "code_failure"
+    assert ci["failed"] == ["我々の知らない検査"]
 
 
-def test_a_code_name_that_starts_with_a_meta_word_is_not_meta(state_mod):
+def test_a_meta_name_is_separated_from_a_code_name(tmp_dir, state_mod, monkeypatch):
+    code, ci = _run_judge_with_ci(tmp_dir, state_mod, monkeypatch, [_run("check_pr_requirements"), _run("pytest")])
+    assert code == 2
+    assert ci["verdict"] == "code_failure"
+    assert ci["failed"] == ["pytest"]
+    assert ci["meta_failed"] == ["check_pr_requirements"]
+
+
+def test_a_code_name_that_starts_with_a_meta_word_is_not_meta(tmp_dir, state_mod, monkeypatch):
     """`meta` を含むだけの名前を meta-only にしない。
 
     部分一致で拾うと `metabase tests` / `metadata lint` のようなコード検査が
     meta-only になり、失敗したまま収束する。一覧に無い名前は code-related へ倒す。
     """
-    got = state_mod._classify_ci([_run("metabase tests"), _run("metadata lint")])
+    code, ci = _run_judge_with_ci(tmp_dir, state_mod, monkeypatch, [_run("metabase tests"), _run("metadata lint")])
+    assert code == 2
+    assert ci["verdict"] == "code_failure"
+    assert set(ci["failed"]) == {"metabase tests", "metadata lint"}
 
-    assert got.code_failed == ["metabase tests", "metadata lint"]
-    assert got.meta_failed == []
 
-
-def test_a_meta_word_between_separators_is_still_meta(state_mod):
+def test_a_meta_word_between_separators_is_still_meta(tmp_dir, state_mod, monkeypatch):
     """区切りで挟まれた語は meta-only のままにする。"""
-    got = state_mod._classify_ci([
+    code, ci = _run_judge_with_ci(tmp_dir, state_mod, monkeypatch, [
         _run("meta"), _run("meta / labels"), _run("pr-meta"), _run("check_pr_requirements"),
     ])
+    assert code == 0
+    assert ci["verdict"] == "meta_only"
+    assert set(ci["meta_failed"]) == {"meta", "meta / labels", "pr-meta", "check_pr_requirements"}
+    assert "failed" not in ci
 
-    assert got.meta_failed == ["meta", "meta / labels", "pr-meta", "check_pr_requirements"]
-    assert got.code_failed == []
 
-
-def test_a_run_that_has_not_completed_is_neither(state_mod):
-    got = state_mod._classify_ci([
+def test_a_run_that_has_not_completed_is_neither(tmp_dir, state_mod, monkeypatch):
+    code, ci = _run_judge_with_ci(tmp_dir, state_mod, monkeypatch, [
         _run("pytest", status="in_progress", conclusion=""),
         _run("lint", status="queued", conclusion=""),
         _run("build", conclusion="success"),
     ])
-
-    assert got.code_failed == []
-    assert got.meta_failed == []
-    assert got.pending == ["pytest", "lint"]
+    assert code == 0
+    assert ci["verdict"] == "pending"
+    assert set(ci["pending"]) == {"pytest", "lint"}
+    assert "failed" not in ci
+    assert "meta_failed" not in ci
 
 
 # ---------------- 判定と修正の取り込みが同じ実装を呼ぶ ----------------
@@ -104,13 +125,13 @@ def test_a_run_that_has_not_completed_is_neither(state_mod):
 def test_the_judge_and_the_merge_share_one_classification(tmp_dir, state_mod, monkeypatch):
     """同じ名前の一覧に対して、判定と修正の取り込みが同じ判断へ至る。"""
     seen: list[list[str]] = []
-    real = state_mod._classify_ci
+    real = state_mod.classify_ci
 
     def _spy(runs):
         seen.append([str(r.get("name")) for r in runs])
         return real(runs)
 
-    monkeypatch.setattr(state_mod, "_classify_ci", _spy)
+    monkeypatch.setattr(state_mod, "classify_ci", _spy)
     monkeypatch.setattr(state_mod, "_fetch_check_runs", lambda repo, sha: [_run("pytest")])
 
     # 修正の取り込み側: 申告された失敗の名前を読む
@@ -158,3 +179,4 @@ def test_merge_fix_continues_when_only_meta_checks_failed(tmp_dir, state_mod):
         "メタチェックのみ失敗: ['labels'] — コードと無関係のため継続"
     )
     assert saved["final"] is None
+

@@ -507,7 +507,7 @@ class CiClassification(NamedTuple):
     pending: list[str]
 
 
-def _classify_ci(runs: list[dict[str, Any]]) -> CiClassification:
+def classify_ci(runs: list[dict[str, Any]]) -> CiClassification:
     """検査ジョブを振り分ける。`cmd_judge` と `cmd_merge_fix` が同じ実装を呼ぶ。
 
     **`status` が `completed` 以外の検査ジョブは失敗にしない。** 完了を待たずに
@@ -540,7 +540,7 @@ def _fetch_check_runs(repo: str, sha: str) -> list[dict[str, Any]] | None:
 
     **`total_count` に届くまでページを読む。** 1 ページの上限は 100 件で、
     `total_count` はページの件数ではなく全体の件数を返す。読み切らないまま
-    `_classify_ci` へ渡すと、後ろのページにある失敗が無いものとして扱われる。
+    `classify_ci` へ渡すと、後ろのページにある失敗が無いものとして扱われる。
     100 件で収まるリポジトリは 1 回で終わり、呼び出し回数は変わらない。
     """
     if not repo or not sha:
@@ -2647,7 +2647,7 @@ def _round_ci(st: dict[str, Any], last: dict[str, Any], pr: int) -> dict[str, An
             "reason": "検査ジョブを照会できない（未 push・権限・検査ジョブ 0 件のいずれか）",
             "sha": sha,
         }
-    c = _classify_ci(runs)
+    c = classify_ci(runs)
     if c.code_failed:
         return {"verdict": "code_failure", "sha": sha, "failed": c.code_failed,
                 "meta_failed": c.meta_failed, "pending": c.pending}
@@ -3745,6 +3745,55 @@ def _count(v: Any) -> int:
     return 0
 
 
+def _read_explicit_fix_result(explicit: pathlib.Path) -> dict[str, Any]:
+    # codex round 4 指摘: `--file` 明示時は fallback 探索に進まず即時失敗させる。
+    # ユーザーが特定ファイルを指定しているのに、それが存在しない / 空 / JSON 不正
+    # だった場合、無言で fallback に流れて別実行の戻り値を誤マージすると事故になる。
+    if not explicit.exists():
+        die(
+            f"--file で指定されたパスが存在しません: {explicit}",
+            code=3,
+        )
+    if explicit.stat().st_size == 0:
+        die(
+            f"--file で指定されたファイルが空です: {explicit}",
+            code=3,
+        )
+    try:
+        fix = json.loads(explicit.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        die(
+            f"--file 指定の fix 戻り値ファイルの読み取り / parse に失敗 "
+            f"({explicit}): {exc}",
+            code=3,
+        )
+    # gemini round 3 指摘: `--file` で `list` 等の non-dict JSON が渡されると
+    # 後続の `fix.get(...)` でクラッシュする。即時 die(code=3) で中断。
+    if not isinstance(fix, dict):
+        die(
+            f"--file 指定の fix 戻り値ファイルが dict ではない "
+            f"({explicit}, type={type(fix).__name__})。"
+            " fix サブエージェント出力の形式不正。",
+            code=3,
+        )
+    return fix
+
+
+def _read_fallback_fix_result(
+    fallback_candidates: list[tuple[pathlib.Path, bool]],
+    pr: int | str,
+    round_started_ts: float | None,
+) -> tuple[pathlib.Path | None, dict[str, Any] | None]:
+    for c, is_canonical in fallback_candidates:
+        if not (c.exists() and c.stat().st_size > 0):
+            continue
+        is_fresh, parsed = _is_fresh_fix_result(c, pr, round_started_ts, is_canonical=is_canonical)
+        if not is_fresh:
+            continue
+        return c, parsed
+    return None, None
+
+
 def _read_fix_result(
     pr: int | str,
     explicit_file: str | pathlib.Path | None,
@@ -3771,48 +3820,11 @@ def _read_fix_result(
     ffile: pathlib.Path | None = None
     fix: dict[str, Any] | None = None
     if explicit is not None:
-        # codex round 4 指摘: `--file` 明示時は fallback 探索に進まず即時失敗させる。
-        # ユーザーが特定ファイルを指定しているのに、それが存在しない / 空 / JSON 不正
-        # だった場合、無言で fallback に流れて別実行の戻り値を誤マージすると事故になる。
-        if not explicit.exists():
-            die(
-                f"--file で指定されたパスが存在しません: {explicit}",
-                code=3,
-            )
-        if explicit.stat().st_size == 0:
-            die(
-                f"--file で指定されたファイルが空です: {explicit}",
-                code=3,
-            )
-        try:
-            fix = json.loads(explicit.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            die(
-                f"--file 指定の fix 戻り値ファイルの読み取り / parse に失敗 "
-                f"({explicit}): {exc}",
-                code=3,
-            )
-        # gemini round 3 指摘: `--file` で `list` 等の non-dict JSON が渡されると
-        # 後続の `fix.get(...)` でクラッシュする。即時 die(code=3) で中断。
-        if not isinstance(fix, dict):
-            die(
-                f"--file 指定の fix 戻り値ファイルが dict ではない "
-                f"({explicit}, type={type(fix).__name__})。"
-                " fix サブエージェント出力の形式不正。",
-                code=3,
-            )
         ffile = explicit
+        fix = _read_explicit_fix_result(explicit)
         # 明示指定は stale 検証スキップ
     else:
-        for c, is_canonical in fallback_candidates:
-            if not (c.exists() and c.stat().st_size > 0):
-                continue
-            is_fresh, parsed = _is_fresh_fix_result(c, pr, round_started_ts, is_canonical=is_canonical)
-            if not is_fresh:
-                continue
-            ffile = c
-            fix = parsed  # 既にパース済みのデータを再利用 (gemini round 2 指摘の性能改善)
-            break
+        ffile, fix = _read_fallback_fix_result(fallback_candidates, pr, round_started_ts)
 
     if ffile is None or fix is None:
         checked = ([str(explicit)] if explicit else []) + [str(c) for c, _ in fallback_candidates]
@@ -3938,10 +3950,10 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         info(f"✅ fix マージ完了 (commit={round_fix['commit']} fixed={round_fix['fixed']})")
         return
 
-    # 振り分けは `_classify_ci` が 1 か所で持つ。ここが読むのは修正の担当が申告した
+    # 振り分けは `classify_ci` が 1 か所で持つ。ここが読むのは修正の担当が申告した
     # 失敗の名前で、進行側が照会し直す段ではない。申告は完了した失敗として渡す。
     failed = fix.get("ci_failed_checks") or []
-    classified = _classify_ci(
+    classified = classify_ci(
         [{"name": str(n), "status": "completed", "conclusion": "failure"} for n in failed]
     )
 
