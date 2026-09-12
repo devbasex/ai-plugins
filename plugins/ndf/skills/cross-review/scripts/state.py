@@ -2916,6 +2916,86 @@ def _merged_root(
     return current
 
 
+def _verify_targets(
+    st: dict[str, Any], round_no: int
+) -> tuple[list[dict[str, Any]], dict[Any, dict[str, Any]]]:
+    """対象ラウンドの指摘と、`finding_id` から引く索引を返す。
+
+    **束ねられた側も対象に入れる**（`issues/issue-156-pr3-contracts.md` の「重複の統合」）。
+    索引は統合の代表をたどるために要る。
+    """
+    targets = [
+        f for f in st.get("review_findings") or [] if f.get("round") == round_no
+    ]
+    return targets, {f.get("finding_id"): f for f in targets}
+
+
+def _verification_record(
+    finding: dict[str, Any],
+    allowed: list[str],
+    work: str,
+    codes: set[int],
+    run: Any,
+    ran: dict[tuple[str, ...], Optional[int]],
+) -> dict[str, Any]:
+    """1 件の指摘の `suggested_check` を実行し、記録を作って返す。
+
+    **同じコマンドは 1 度しか実行しない。** 実行済みの並びと終了コードを `ran` が持ち、
+    当たれば実行せずにその値を使う。組の全員が同じ `suggested_check` を書くのは普通に
+    起こり（統合の条件は本文の一致である）、そのたびに走らせると実行が増える。
+
+    **`ran_at` は結果を受け取った記録にだけ入れる。** 初期化で入れると、実行していない
+    `not_run` の記録にも時刻が残り、実行済みに見える。記録の `result` / `exit_code` /
+    `ran_at` が同じことを指すようにする。
+    """
+    check = str(finding.get("suggested_check") or "")
+    record: dict[str, Any] = {
+        "command": check, "finding_id": finding.get("finding_id"),
+        "exit_code": None, "result": "not_run", "ran_at": None,
+    }
+    argv = _verify_argv(check, allowed, work) if allowed else None
+    if argv is None:
+        return record
+    key = tuple(argv)
+    if key in ran:
+        code = ran[key]
+    else:
+        code = run(argv, work)
+        ran[key] = code
+    record["exit_code"] = code
+    record["ran_at"] = _now()
+    if code in codes:
+        record["result"] = "reproduced"
+    elif code == 0:
+        record["result"] = "not_reproduced"
+    return record
+
+
+def _adopt_group_verification(
+    targets: list[dict[str, Any]], by_id: dict[Any, dict[str, Any]]
+) -> None:
+    """統合の代表へ、組で最も強い結果を反映する。
+
+    代表が持つのは組の集約である。`reproduced` > `not_reproduced` > `not_run` の順で
+    最初に当たった 1 件を採り、**出所を `verification.finding_id` へ残す**。
+    **実行し直さない**（記録済みの結果を選ぶだけである）。
+    """
+    for rep in targets:
+        if rep.get("merged_into"):
+            continue
+        best = rep["verification"]
+        for member in targets:
+            if member is rep or not member.get("merged_into"):
+                continue
+            if _merged_root(member, by_id) is not rep:
+                continue
+            if _VERIFY_RANK.get(_verify_result(member), -1) > \
+               _VERIFY_RANK.get(str(best.get("result") or "not_run"), -1):
+                best = member["verification"]
+        if best is not rep["verification"]:
+            rep["verification"] = dict(best)
+
+
 def _verify_findings(
     st: dict[str, Any],
     round_no: int,
@@ -2934,61 +3014,18 @@ def _verify_findings(
     落ちる。**どちらが先に取り込まれたかで採否が変わる。** 1 段目の統合は実行検証より
     **前**にあるため、束ねられた側を読み飛ばすと、その手順は一度も実行されない。
 
-    代表が持つのは組の集約である。`reproduced` > `not_reproduced` > `not_run` の順で
-    最初に当たった 1 件を採り、**出所を `verification.finding_id` へ残す**。
-
-    **同じコマンドは 1 度しか実行しない。** 組の全員が同じ `suggested_check` を書くのは
-    普通に起こり（統合の条件は本文の一致である）、そのたびに走らせると実行が増える。
-
-    **`ran_at` は結果を受け取った記録にだけ入れる。** 初期化で入れると、実行していない
-    `not_run` の記録にも時刻が残り、実行済みに見える。記録の `result` / `exit_code` /
-    `ran_at` が同じことを指すようにする。
+    対象の抽出・1 件ごとの実行・代表への反映を順に呼ぶ。
     """
     codes = set(reproduced_codes or VERIFY_REPRODUCED_CODES)
     run = runner or _run_verify
-    targets = [
-        f for f in st.get("review_findings") or [] if f.get("round") == round_no
-    ]
-    by_id = {f.get("finding_id"): f for f in targets}
+    targets, by_id = _verify_targets(st, round_no)
     ran: dict[tuple[str, ...], Optional[int]] = {}
 
     for finding in targets:
-        check = str(finding.get("suggested_check") or "")
-        record: dict[str, Any] = {
-            "command": check, "finding_id": finding.get("finding_id"),
-            "exit_code": None, "result": "not_run", "ran_at": None,
-        }
-        argv = _verify_argv(check, allowed, work) if allowed else None
-        if argv is not None:
-            key = tuple(argv)
-            if key in ran:
-                code = ran[key]
-            else:
-                code = run(argv, work)
-                ran[key] = code
-            record["exit_code"] = code
-            record["ran_at"] = _now()
-            if code in codes:
-                record["result"] = "reproduced"
-            elif code == 0:
-                record["result"] = "not_reproduced"
-        finding["verification"] = record
-
-    # 代表は組から選び直す。**実行し直さない**（記録済みの結果を選ぶだけである）。
-    for rep in targets:
-        if rep.get("merged_into"):
-            continue
-        best = rep["verification"]
-        for member in targets:
-            if member is rep or not member.get("merged_into"):
-                continue
-            if _merged_root(member, by_id) is not rep:
-                continue
-            if _VERIFY_RANK.get(_verify_result(member), -1) > \
-               _VERIFY_RANK.get(str(best.get("result") or "not_run"), -1):
-                best = member["verification"]
-        if best is not rep["verification"]:
-            rep["verification"] = dict(best)
+        finding["verification"] = _verification_record(
+            finding, allowed, work, codes, run, ran
+        )
+    _adopt_group_verification(targets, by_id)
 
 
 def cmd_verify_findings(args: argparse.Namespace) -> None:
