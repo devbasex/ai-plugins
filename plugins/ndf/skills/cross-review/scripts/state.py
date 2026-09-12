@@ -324,38 +324,124 @@ def _parse_rest_headers(text: str) -> tuple[dict[str, str], str]:
     return headers, "".join(lines[body_at:])
 
 
-def _gh_rest(path: str) -> RestResponse | None:
-    """REST の 1 回の要求を投げ、ヘッダと本文を返す。失敗は `None`。
+class GitHubClient:
+    """GitHub から読む境界。
 
     **例外を投げず、進行を止めない側へ倒す**（#291 の待ち行列を挟む位置）。
     呼び出し側は `None` を「確かめられなかった」として扱う。積む・待つ・流すは
     ここではなく呼び出し側が持つ。
     """
-    try:
-        r = subprocess.run(["gh", "api", "-i", path], capture_output=True, text=True)
-    except OSError as exc:
-        info(f"⚠ gh の実行に失敗 ({path}): {exc}")
-        return None
-    if r.returncode != 0:
-        info(f"⚠ REST が失敗 ({path}, exit={r.returncode}): {r.stderr.strip()[:200]}")
-        return None
-    headers, raw = _parse_rest_headers(r.stdout)
-    try:
-        body = json.loads(raw) if raw.strip() else None
-    except json.JSONDecodeError as exc:
-        info(f"⚠ REST の応答を読み取れない ({path}): {exc}")
-        return None
-    remaining = headers.get("x-ratelimit-remaining")
-    try:
-        rate_remaining = int(remaining) if remaining is not None else None
-    except ValueError:
-        rate_remaining = None
-    return RestResponse(
-        headers=headers,
-        body=body,
-        rate_remaining=rate_remaining,
-        rate_reset=headers.get("x-ratelimit-reset"),
-    )
+
+    def rest(self, path: str) -> RestResponse | None:
+        """REST の 1 回の要求を投げ、ヘッダと本文を返す。失敗は `None`。"""
+        try:
+            r = subprocess.run(["gh", "api", "-i", path], capture_output=True, text=True)
+        except OSError as exc:
+            info(f"⚠ gh の実行に失敗 ({path}): {exc}")
+            return None
+        if r.returncode != 0:
+            info(f"⚠ REST が失敗 ({path}, exit={r.returncode}): {r.stderr.strip()[:200]}")
+            return None
+        headers, raw = _parse_rest_headers(r.stdout)
+        try:
+            body = json.loads(raw) if raw.strip() else None
+        except json.JSONDecodeError as exc:
+            info(f"⚠ REST の応答を読み取れない ({path}): {exc}")
+            return None
+        remaining = headers.get("x-ratelimit-remaining")
+        try:
+            rate_remaining = int(remaining) if remaining is not None else None
+        except ValueError:
+            rate_remaining = None
+        return RestResponse(
+            headers=headers,
+            body=body,
+            rate_remaining=rate_remaining,
+            rate_reset=headers.get("x-ratelimit-reset"),
+        )
+
+    def repo_from_git(self) -> str | None:
+        """git の設定から `owner/repo` を求める。求まらなければ `None`。"""
+        m = _REPO_URL.search(_git_remote_url())
+        return f"{m.group('owner')}/{m.group('name')}" if m else None
+
+    def resolve_current_repo(self) -> str:
+        """`gh repo view` で現在のリポジトリ名を求める。"""
+        return _sh(
+            ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
+            check=False,
+        )
+
+    def fetch_pr_metadata(self, pr: int, repo: str | None = None) -> PrMetadata | None:
+        """作成者・head・base・head の commit を REST の 1 回で取る。"""
+        tried: list[str] = []
+        for candidate in (repo, self.repo_from_git()):
+            if not candidate or candidate in tried:
+                continue
+            tried.append(candidate)
+            resp = self.rest(f"repos/{candidate}/pulls/{int(pr)}")
+            if resp is None:
+                continue
+            meta = _pr_metadata_of(candidate, resp)
+            if meta is not None:
+                return meta
+        resolved = self.resolve_current_repo()
+        if not resolved or resolved in tried:
+            return None
+        resp = self.rest(f"repos/{resolved}/pulls/{int(pr)}")
+        return _pr_metadata_of(resolved, resp) if resp is not None else None
+
+    def classify_ci(self, runs: list[dict[str, Any]]) -> CiClassification:
+        """検査ジョブを振り分ける。`cmd_judge` と `cmd_merge_fix` が同じ実装を呼ぶ。"""
+        code_failed: list[str] = []
+        meta_failed: list[str] = []
+        pending: list[str] = []
+        for run in runs:
+            name = str(run.get("name") or "")
+            if str(run.get("status") or "completed").lower() != "completed":
+                pending.append(name)
+                continue
+            if str(run.get("conclusion") or "").lower() not in CI_FAILED_CONCLUSIONS:
+                continue
+            if _CI_META_RE.search(name.lower()):
+                meta_failed.append(name)
+            else:
+                # 一覧に無い名前も含めて code-related へ倒す（保守的）。
+                code_failed.append(name)
+        return CiClassification(code_failed, meta_failed, pending)
+
+    def fetch_check_runs(self, repo: str, sha: str) -> list[dict[str, Any]] | None:
+        """head の commit に対する検査ジョブの一覧を返す。照会できなければ `None`。"""
+        if not repo or not sha:
+            return None
+        base = f"repos/{repo}/commits/{sha}/check-runs?per_page={CHECK_RUNS_PER_PAGE}"
+        runs: list[dict[str, Any]] = []
+        total: int | None = None
+        for page in range(1, CHECK_RUNS_MAX_PAGES + 1):
+            resp = self.rest(f"{base}&page={page}")
+            if resp is None or not isinstance(resp.body, dict):
+                return None
+            if total is None:
+                try:
+                    total = int(resp.body.get("total_count") or 0)
+                except (TypeError, ValueError):
+                    return None
+                if total <= 0:
+                    return None
+            chunk = resp.body.get("check_runs")
+            if not isinstance(chunk, list) or not chunk:
+                break
+            runs.extend(r for r in chunk if isinstance(r, dict))
+            if len(runs) >= total:
+                break
+        return runs or None
+
+
+GITHUB = GitHubClient()
+
+
+def _gh_rest(path: str) -> RestResponse | None:
+    return GITHUB.rest(path)
 
 
 _REPO_URL = re.compile(
@@ -407,8 +493,7 @@ def _repo_from_git() -> str | None:
     **求めた名前はそのまま使わない。** `repos/{owner}/{repo}/pulls/{PR}` の応答が
     そのまま検証になるため、誤った名前は失敗として現れる（`_fetch_pr_metadata`）。
     """
-    m = _REPO_URL.search(_git_remote_url())
-    return f"{m.group('owner')}/{m.group('name')}" if m else None
+    return GITHUB.repo_from_git()
 
 
 class PrMetadata(NamedTuple):
@@ -450,25 +535,7 @@ def _fetch_pr_metadata(pr: int, repo: str | None = None) -> PrMetadata | None:
     いれば応答が失敗するため、そのときだけ `gh repo view` で解決し直す。**
     確かめる手段が同じ呼び出しに含まれるので、追加の消費なしで誤りを塞げる。
     """
-    tried: list[str] = []
-    for candidate in (repo, _repo_from_git()):
-        if not candidate or candidate in tried:
-            continue
-        tried.append(candidate)
-        resp = _gh_rest(f"repos/{candidate}/pulls/{int(pr)}")
-        if resp is None:
-            continue
-        meta = _pr_metadata_of(candidate, resp)
-        if meta is not None:
-            return meta
-    resolved = _sh(
-        ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
-        check=False,
-    )
-    if not resolved or resolved in tried:
-        return None
-    resp = _gh_rest(f"repos/{resolved}/pulls/{int(pr)}")
-    return _pr_metadata_of(resolved, resp) if resp is not None else None
+    return GITHUB.fetch_pr_metadata(pr, repo)
 
 
 # 継続的統合の照会は `commits/{sha}/check-runs` の 1 回だけにする。
@@ -513,22 +580,7 @@ def _classify_ci(runs: list[dict[str, Any]]) -> CiClassification:
     **`status` が `completed` 以外の検査ジョブは失敗にしない。** 完了を待たずに
     未完了として別に返し、呼び出し側が「未完了のまま収束した」ことを残す。
     """
-    code_failed: list[str] = []
-    meta_failed: list[str] = []
-    pending: list[str] = []
-    for run in runs:
-        name = str(run.get("name") or "")
-        if str(run.get("status") or "completed").lower() != "completed":
-            pending.append(name)
-            continue
-        if str(run.get("conclusion") or "").lower() not in CI_FAILED_CONCLUSIONS:
-            continue
-        if _CI_META_RE.search(name.lower()):
-            meta_failed.append(name)
-        else:
-            # 一覧に無い名前も含めて code-related へ倒す（保守的）。
-            code_failed.append(name)
-    return CiClassification(code_failed, meta_failed, pending)
+    return GITHUB.classify_ci(runs)
 
 
 def _fetch_check_runs(repo: str, sha: str) -> list[dict[str, Any]] | None:
@@ -543,29 +595,28 @@ def _fetch_check_runs(repo: str, sha: str) -> list[dict[str, Any]] | None:
     `_classify_ci` へ渡すと、後ろのページにある失敗が無いものとして扱われる。
     100 件で収まるリポジトリは 1 回で終わり、呼び出し回数は変わらない。
     """
-    if not repo or not sha:
-        return None
-    base = f"repos/{repo}/commits/{sha}/check-runs?per_page={CHECK_RUNS_PER_PAGE}"
-    runs: list[dict[str, Any]] = []
-    total: int | None = None
-    for page in range(1, CHECK_RUNS_MAX_PAGES + 1):
-        resp = _gh_rest(f"{base}&page={page}")
-        if resp is None or not isinstance(resp.body, dict):
-            return None
-        if total is None:
-            try:
-                total = int(resp.body.get("total_count") or 0)
-            except (TypeError, ValueError):
-                return None
-            if total <= 0:
-                return None
-        chunk = resp.body.get("check_runs")
-        if not isinstance(chunk, list) or not chunk:
-            break
-        runs.extend(r for r in chunk if isinstance(r, dict))
-        if len(runs) >= total:
-            break
-    return runs or None
+    return GITHUB.fetch_check_runs(repo, sha)
+
+
+PR_FILE_STATUS_CODE_MAP = {
+    "ADDED": "A",
+    "MODIFIED": "M",
+    "REMOVED": "D",
+    "DELETED": "D",
+    "RENAMED": "R",
+    "COPIED": "C",
+    "CHANGED": "M",
+}
+
+
+def _pr_file_entry(status_raw: Any, path: str, previous: Any = "") -> dict[str, Any]:
+    status_key = str(status_raw or "MODIFIED").upper()
+    status = PR_FILE_STATUS_CODE_MAP.get(status_key, status_key[:1] or "M")
+    paths = []
+    if isinstance(previous, str) and previous and previous != path:
+        paths.append(previous)
+    paths.append(path)
+    return {"status": status, "paths": paths}
 
 
 class HeadRef(NamedTuple):
@@ -901,14 +952,6 @@ def _parse_pr_files_payload(output: str) -> list[dict[str, Any]]:
     if not isinstance(files, list):
         return []
 
-    status_map = {
-        "ADDED": "A",
-        "MODIFIED": "M",
-        "DELETED": "D",
-        "RENAMED": "R",
-        "COPIED": "C",
-        "CHANGED": "M",
-    }
     entries: list[dict[str, Any]] = []
     for f in files:
         if not isinstance(f, dict):
@@ -916,27 +959,13 @@ def _parse_pr_files_payload(output: str) -> list[dict[str, Any]]:
         path = f.get("path")
         if not isinstance(path, str) or not path:
             continue
-        change_type = str(f.get("changeType") or "MODIFIED").upper()
-        status = status_map.get(change_type, change_type[:1] or "M")
-        paths = []
         previous = f.get("previousPath") or f.get("previous_filename")
-        if isinstance(previous, str) and previous and previous != path:
-            paths.append(previous)
-        paths.append(path)
-        entries.append({"status": status, "paths": paths})
+        entries.append(_pr_file_entry(f.get("changeType") or "MODIFIED", path, previous))
     return entries
 
 
 def _parse_pr_files_api_lines(output: str) -> list[dict[str, Any]]:
     """GitHub API の PR files を TSV(JSON jq) 出力から分類用構造に変換する。"""
-    status_map = {
-        "added": "A",
-        "modified": "M",
-        "removed": "D",
-        "renamed": "R",
-        "copied": "C",
-        "changed": "M",
-    }
     entries: list[dict[str, Any]] = []
     for raw in output.splitlines():
         if not raw.strip():
@@ -947,11 +976,7 @@ def _parse_pr_files_api_lines(output: str) -> list[dict[str, Any]]:
         previous = cols[2].strip() if len(cols) > 2 else ""
         if not path:
             continue
-        paths = []
-        if previous and previous != path:
-            paths.append(previous)
-        paths.append(path)
-        entries.append({"status": status_map.get(status_raw, status_raw[:1].upper() or "M"), "paths": paths})
+        entries.append(_pr_file_entry(status_raw, path, previous))
     return entries
 
 

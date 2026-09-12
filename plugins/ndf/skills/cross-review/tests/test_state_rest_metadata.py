@@ -70,9 +70,12 @@ def test_an_unreadable_remote_gives_no_name(state_mod, monkeypatch):
 
 def test_one_rest_response_fills_author_head_and_base(state_mod, real_github, monkeypatch):
     paths: list[str] = []
-    monkeypatch.setattr(state_mod, "_repo_from_git", lambda: REPO)
-    monkeypatch.setattr(state_mod, "_gh_rest", lambda p: (paths.append(p), _response(state_mod))[1])
-    monkeypatch.setattr(state_mod, "_sh", lambda *a, **k: pytest.fail("GraphQL へ落ちてはならない"))
+    monkeypatch.setattr(state_mod.GITHUB, "repo_from_git", lambda: REPO)
+    monkeypatch.setattr(state_mod.GITHUB, "rest", lambda p: (paths.append(p), _response(state_mod))[1])
+    monkeypatch.setattr(
+        state_mod.GITHUB, "resolve_current_repo",
+        lambda: pytest.fail("GraphQL へ落ちてはならない"),
+    )
 
     meta = state_mod._fetch_pr_metadata(PR)
 
@@ -88,8 +91,8 @@ def test_one_rest_response_fills_author_head_and_base(state_mod, real_github, mo
 def test_a_fork_pull_request_is_detected_from_the_same_response(state_mod, real_github, monkeypatch):
     body = json.loads(json.dumps(PULL_BODY))
     body["head"]["repo"]["full_name"] = "someone/ai-plugins"
-    monkeypatch.setattr(state_mod, "_repo_from_git", lambda: REPO)
-    monkeypatch.setattr(state_mod, "_gh_rest", lambda p: _response(state_mod, body))
+    monkeypatch.setattr(state_mod.GITHUB, "repo_from_git", lambda: REPO)
+    monkeypatch.setattr(state_mod.GITHUB, "rest", lambda p: _response(state_mod, body))
 
     assert state_mod._fetch_pr_metadata(PR).is_fork is True
 
@@ -102,9 +105,9 @@ def test_a_wrong_repository_name_falls_back_to_gh_repo_view(state_mod, real_gith
         paths.append(path)
         return _response(state_mod) if path == f"repos/{REPO}/pulls/{PR}" else None
 
-    monkeypatch.setattr(state_mod, "_repo_from_git", lambda: "wrong/name")
-    monkeypatch.setattr(state_mod, "_gh_rest", _rest)
-    monkeypatch.setattr(state_mod, "_sh", lambda cmd, check=True: REPO)
+    monkeypatch.setattr(state_mod.GITHUB, "repo_from_git", lambda: "wrong/name")
+    monkeypatch.setattr(state_mod.GITHUB, "rest", _rest)
+    monkeypatch.setattr(state_mod.GITHUB, "resolve_current_repo", lambda: REPO)
 
     meta = state_mod._fetch_pr_metadata(PR)
 
@@ -113,9 +116,9 @@ def test_a_wrong_repository_name_falls_back_to_gh_repo_view(state_mod, real_gith
 
 
 def test_an_unreachable_pull_request_gives_nothing(state_mod, real_github, monkeypatch):
-    monkeypatch.setattr(state_mod, "_repo_from_git", lambda: REPO)
-    monkeypatch.setattr(state_mod, "_gh_rest", lambda p: None)
-    monkeypatch.setattr(state_mod, "_sh", lambda cmd, check=True: REPO)
+    monkeypatch.setattr(state_mod.GITHUB, "repo_from_git", lambda: REPO)
+    monkeypatch.setattr(state_mod.GITHUB, "rest", lambda p: None)
+    monkeypatch.setattr(state_mod.GITHUB, "resolve_current_repo", lambda: REPO)
 
     assert state_mod._fetch_pr_metadata(PR) is None
 
@@ -170,7 +173,7 @@ def test_check_runs_are_read_one_hundred_at_a_time(state_mod, real_github, monke
         paths.append(path)
         return _check_runs_response(state_mod, 9, [f"job{i}" for i in range(9)])
 
-    monkeypatch.setattr(state_mod, "_gh_rest", _rest)
+    monkeypatch.setattr(state_mod.GITHUB, "rest", _rest)
 
     runs = state_mod._fetch_check_runs(REPO, "b87b3ae")
 
@@ -191,7 +194,7 @@ def test_check_runs_beyond_one_page_are_followed(state_mod, real_github, monkeyp
         seen.append(page)
         return _check_runs_response(state_mod, 120, pages[page])
 
-    monkeypatch.setattr(state_mod, "_gh_rest", _rest)
+    monkeypatch.setattr(state_mod.GITHUB, "rest", _rest)
 
     runs = state_mod._fetch_check_runs(REPO, "b87b3ae")
 
@@ -207,7 +210,7 @@ def test_a_failing_later_page_gives_nothing(state_mod, real_github, monkeypatch)
             return _check_runs_response(state_mod, 120, [f"job{i}" for i in range(100)])
         return None
 
-    monkeypatch.setattr(state_mod, "_gh_rest", _rest)
+    monkeypatch.setattr(state_mod.GITHUB, "rest", _rest)
 
     assert state_mod._fetch_check_runs(REPO, "b87b3ae") is None
 
@@ -215,7 +218,7 @@ def test_a_failing_later_page_gives_nothing(state_mod, real_github, monkeypatch)
 def test_reading_stops_at_the_page_limit(state_mod, real_github, monkeypatch):
     """上限に達しても止めず、読めた範囲で判定する。"""
     monkeypatch.setattr(
-        state_mod, "_gh_rest",
+        state_mod.GITHUB, "rest",
         lambda path: _check_runs_response(state_mod, 10_000, [f"job{i}" for i in range(100)]),
     )
 
