@@ -3134,6 +3134,35 @@ def _put_critique(target: dict[str, Any], record: dict[str, Any]) -> None:
     critiques.append(record)
 
 
+def _load_critique_items(agent: str, path: pathlib.Path) -> list[dict[str, Any]]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        info(f"⚠ {agent}: 反証の結果を読めません（{path.name}）")
+        return []
+    raw = payload.get("critiques")
+    return [c for c in raw if isinstance(c, dict)] if isinstance(raw, list) else []
+
+
+def _critique_record(agent: str, item: dict[str, Any]) -> dict[str, Any]:
+    record = {
+        "agent": agent,
+        "verdict": item.get("verdict"),
+        "reason": item.get("reason", ""),
+    }
+    if item.get("duplicate_of"):
+        record["duplicate_of"] = item["duplicate_of"]
+    return record
+
+
+def _record_unmatched_critique(
+    unmatched: list[dict[str, Any]], record: dict[str, Any], item: dict[str, Any]
+) -> None:
+    entry = {**record, "finding_id": item.get("finding_id")}
+    if entry not in unmatched:
+        unmatched.append(entry)
+
+
 def _attach_critiques(
     st: dict[str, Any],
     pr: int,
@@ -3150,28 +3179,14 @@ def _attach_critiques(
         path = _critique_path(agent, pr, round_no)
         if not path.exists():
             continue
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            info(f"⚠ {agent}: 反証の結果を読めません（{path.name}）")
-            continue
-        raw = payload.get("critiques")
-        items = [c for c in raw if isinstance(c, dict)] if isinstance(raw, list) else []
+        items = _load_critique_items(agent, path)
         for item in items:
-            record = {
-                "agent": agent,
-                "verdict": item.get("verdict"),
-                "reason": item.get("reason", ""),
-            }
-            if item.get("duplicate_of"):
-                record["duplicate_of"] = item["duplicate_of"]
+            record = _critique_record(agent, item)
             target = findings.get(item.get("finding_id"))
             if target is None or record["verdict"] not in CRITIQUE_VERDICTS:
                 # **取り直しても増やさない。** 同じラウンドで読み直すため、同じ値が
                 # 何度も積まれると「結び先なし」の件数が実際より多く見える。
-                entry = {**record, "finding_id": item.get("finding_id")}
-                if entry not in unmatched:
-                    unmatched.append(entry)
+                _record_unmatched_critique(unmatched, record, item)
                 continue
             # 提案者は返さない。統合した組では origin_runtimes 全員が提案者である。
             proposers = target.get("origin_runtimes") or [target.get("agent")]
