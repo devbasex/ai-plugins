@@ -188,6 +188,28 @@ def test_cli_fails_when_the_state_file_is_missing(tmp_path):
     assert "absent.json" in proc.stderr
 
 
+def test_cli_fails_when_the_state_file_json_is_invalid(tmp_path):
+    state_file = tmp_path / "broken.json"
+    state_file.write_text("{bad json", encoding="utf-8")
+
+    proc = _run([str(state_file)])
+
+    assert proc.returncode != 0
+    assert "状態ファイルの JSON を読めません" in proc.stderr
+    assert str(state_file) in proc.stderr
+
+
+def test_cli_fails_when_the_state_file_is_not_a_dict(tmp_path):
+    state_file = tmp_path / "array.json"
+    state_file.write_text(json.dumps([]), encoding="utf-8")
+
+    proc = _run([str(state_file)])
+
+    assert proc.returncode != 0
+    assert "状態ファイルの中身が辞書ではありません" in proc.stderr
+    assert str(state_file) in proc.stderr
+
+
 # ---------- 受け入れ条件 5 / 6 / 8 / 9 / 11: 上限の方式（`oracle`） ----------
 
 
