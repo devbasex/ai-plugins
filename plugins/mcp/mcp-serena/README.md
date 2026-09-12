@@ -2,6 +2,12 @@
 
 Serena MCPサーバーを提供するプラグインです。セマンティックコードインテリジェンス機能（シンボル検索、リファレンス検索、安全なリファクタリング）を利用できます。
 
+## v2.0.1 へ更新するとき
+
+Claude Code の起動時に出ていた `hooks.json: unknown key ... ignored` の警告を消しました。
+hook が実行する内容は変えていません。`claude plugin update mcp-serena@ai-plugins` のあとに
+Claude Code を起動し直すと反映されます。
+
 ## v2.0.0 へ更新するとき
 
 配布ディレクトリが `plugins/mcp/{shared,claude,codex,kiro}/mcp-serena/` から
