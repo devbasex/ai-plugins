@@ -94,3 +94,38 @@ def test_round_in_pr_counts_only_the_current_pr_after_a_rotation(
     out = capsys.readouterr().out
     assert f"CURRENT_PR={new_pr}" in out
     assert "ROUND_IN_PR=8" in out
+
+
+# ---- total 側の境界だけを動かす対（round_in_pr は両方 rotate_after ちょうどで固定） ----
+#
+# 上の 4 つは round_in_pr と total が同じ値か、max_rounds から遠い状態しか通らない。
+# そのため `total = len(st["rounds"])` を `total = round_in_pr` に書き換えても全て通る。
+# total が **前の PR の round も数える**ことと、その境界が `<` であることを、
+# round_in_pr を動かさずに固定する。
+
+def test_the_round_cap_counts_rounds_of_earlier_prs_too(tmp_dir, state_mod) -> None:
+    """round_in_pr が rotate_after ちょうどでも、前の PR を含めた total が
+    max_rounds に達していれば keep。"""
+    new_pr = PR + 1
+    rounds = _rounds(PR, 4) + _rounds(new_pr, 8)   # total=12, round_in_pr=8
+    _write(tmp_dir, _state(rounds, rotate_after=8, max_rounds=12, current_pr=new_pr))
+
+    with pytest.raises(SystemExit) as e:
+        state_mod.cmd_should_rotate(argparse.Namespace(pr=PR))
+
+    assert e.value.code == 2
+
+
+def test_one_round_below_the_cap_still_rotates(tmp_dir, state_mod, capsys) -> None:
+    """同じ round_in_pr のまま total だけを 1 減らすと rotate へ切り替わる。"""
+    new_pr = PR + 1
+    rounds = _rounds(PR, 3) + _rounds(new_pr, 8)   # total=11, round_in_pr=8
+    _write(tmp_dir, _state(rounds, rotate_after=8, max_rounds=12, current_pr=new_pr))
+
+    with pytest.raises(SystemExit) as e:
+        state_mod.cmd_should_rotate(argparse.Namespace(pr=PR))
+
+    assert e.value.code == 0
+    out = capsys.readouterr().out
+    assert f"CURRENT_PR={new_pr}" in out
+    assert "ROUND_IN_PR=8" in out
