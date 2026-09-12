@@ -324,6 +324,75 @@ def _majority(representatives: list[dict[str, Any]],
     return _method_output(finding_ids, oracle_ids)
 
 
+# 3 本目の区分のうち、この変更の方式が採る 2 つ（`state.py` の
+# `COUNTED_CLASSIFICATIONS` と同じ）。**残る 3 つは採らない。**
+COUNTED_CLASSIFICATIONS = ("verified_blocking", "needs_human_judgment")
+
+
+def _evidence_rounds(st: dict[str, Any]) -> set[int]:
+    """証拠集約（統合・実行検証・反証）を通ったラウンドの印。
+
+    印の無いラウンドの指摘は区分を持たないか、持っていても反証を結ぶ前の値である。
+    """
+    marked: set[int] = set()
+    for value in st.get("evidence_rounds") or []:
+        round_no = _as_int(value)
+        if round_no is not None:
+            marked.add(round_no)
+    return marked
+
+
+def _all_rounds_marked(st: dict[str, Any], marked: set[int]) -> bool:
+    """記録のラウンドがすべて印を持つか。
+
+    すべて持つなら、この変更の方式の分母は他の 3 つと同じ集合になる。
+    """
+    rounds = _rounds(st)
+    if not rounds:
+        return False
+    return all(_round_no(rounds, i) in marked for i in range(len(rounds)))
+
+
+def _proposed(st: dict[str, Any], representatives: list[dict[str, Any]],
+              oracle_ids: set[str] | None) -> dict[str, Any]:
+    """この変更の方式。**読むのは証拠集約を通ったラウンドだけである。**
+
+    印の無いラウンドを母集合へ入れると、区分の付かない指摘が
+    `insufficient_evidence` として落ち、方式の再現率が実際より低く出る。
+
+    **分母も印のあるラウンドに限る。** 分子だけを絞ると、印の混ざった記録で
+    再現率が過小に出る。印の無い round 1 と印のある round 2 に修正された指摘が
+    1 件ずつあるとき、採れるのは round 2 の 1 件だけであり、全ラウンドの上限
+    （2 件）で割ると**拾えるものを全部拾っても 0.5 にしかならない**。
+
+    **分母が全ラウンドと違うことは出力へ出す。** 添えないと、読む側がこの方式の
+    再現率を他の 3 つと同じ分母の値として読む。
+    """
+    marked = _evidence_rounds(st)
+    finding_ids = {
+        str(finding.get("finding_id"))
+        for finding in representatives
+        if _as_int(finding.get("round")) in marked
+        and finding.get("classification") in COUNTED_CLASSIFICATIONS
+    }
+    if oracle_ids is None:
+        base_ids = None
+    else:
+        rounds_by_id = {
+            str(finding.get("finding_id")): _as_int(finding.get("round"))
+            for finding in representatives
+        }
+        base_ids = {
+            fid for fid in oracle_ids if rounds_by_id.get(fid) in marked
+        }
+    result = _method_output(finding_ids, base_ids)
+    result["oracle_scope"] = (
+        "all_rounds" if _all_rounds_marked(st, marked) else "evidence_rounds"
+    )
+    result["oracle_base"] = None if base_ids is None else len(base_ids)
+    return result
+
+
 def _methods(st: dict[str, Any]) -> dict[str, Any]:
     """4 つの方式を、同じ `review_findings[]` から違う規則で読む。
 
@@ -337,6 +406,7 @@ def _methods(st: dict[str, Any]) -> dict[str, Any]:
     return {
         "single": _single(representatives, oracle_ids),
         "majority": _majority(representatives, oracle_ids),
+        "proposed": _proposed(st, representatives, oracle_ids),
         "oracle": _oracle_output(oracle),
     }
 

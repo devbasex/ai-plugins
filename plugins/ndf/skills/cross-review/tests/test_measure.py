@@ -442,3 +442,116 @@ def test_of_oracle_does_not_exceed_one_when_a_finding_was_not_fixed(measure_mod)
 
     assert measure_mod.measure(st)["methods"]["single"]["codex"] == {
         "found": 2, "matched": 1, "of_oracle": 1.0}
+
+
+# ---------- 受け入れ条件 1 / 7: この変更の方式（`proposed`） ----------
+
+
+def test_four_methods_come_from_one_record(measure_mod):
+    """受け入れ条件 1。4 つの方式を同じ記録から計算する。"""
+    st = _state(
+        evidence_rounds=[1],
+        rounds=[_round(1, fix=_fix(_position("T1", "a.py", 10)))],
+        review_findings=[
+            _finding("codex-r1-0", 1, "a.py", 10, origin_runtimes=["codex", "agy"],
+                     classification="verified_blocking"),
+        ],
+    )
+
+    methods = measure_mod.measure(st)["methods"]
+
+    assert set(methods) == {"single", "majority", "proposed", "oracle"}
+    assert methods["single"]["codex"]["found"] == 1
+    assert methods["majority"]["found"] == 1
+    assert methods["proposed"]["found"] == 1
+    assert methods["oracle"]["found"] == 1
+
+
+def test_proposed_limits_the_denominator_to_marked_rounds(measure_mod):
+    """受け入れ条件 7。**分母も印のあるラウンドに限る。**
+
+    分子だけを絞ると、印の混ざった記録で再現率が過小に出る。全ラウンドの上限
+    （2 件）で割ると、**拾えるものを全部拾っても 0.5 にしかならない。**
+    """
+    st = _state(
+        evidence_rounds=[2],
+        rounds=[
+            _round(1, fix=_fix(_position("T1", "a.py", 10))),
+            _round(2, fix=_fix(_position("T2", "b.py", 20))),
+        ],
+        review_findings=[
+            _finding("codex-r1-0", 1, "a.py", 10),
+            _finding("codex-r2-0", 2, "b.py", 20, classification="verified_blocking"),
+        ],
+    )
+
+    methods = measure_mod.measure(st)["methods"]
+
+    assert methods["oracle"]["found"] == 2
+    assert methods["proposed"] == {
+        "found": 1, "matched": 1, "of_oracle": 1.0,
+        "oracle_scope": "evidence_rounds", "oracle_base": 1}
+
+
+def test_proposed_reports_all_rounds_when_every_round_is_marked(measure_mod):
+    """印が全ラウンドに付いていれば、分母は他の 3 つと同じである。
+
+    添えないと、読む側が `proposed` の再現率を他の 3 つと同じ分母の値として読む。
+    """
+    st = _state(
+        evidence_rounds=[1, 2],
+        rounds=[
+            _round(1, fix=_fix(_position("T1", "a.py", 10))),
+            _round(2, fix=_fix(_position("T2", "b.py", 20))),
+        ],
+        review_findings=[
+            _finding("codex-r1-0", 1, "a.py", 10, classification="verified_blocking"),
+            _finding("codex-r2-0", 2, "b.py", 20, classification="needs_human_judgment"),
+        ],
+    )
+
+    assert measure_mod.measure(st)["methods"]["proposed"] == {
+        "found": 2, "matched": 2, "of_oracle": 1.0,
+        "oracle_scope": "all_rounds", "oracle_base": 2}
+
+
+def test_proposed_takes_only_the_two_counted_classifications(measure_mod):
+    """採るのは `verified_blocking` と `needs_human_judgment` の 2 つだけである。
+
+    棄却した指摘と立証できなかった指摘は採らない。
+    """
+    st = _state(
+        evidence_rounds=[1],
+        rounds=[_round(1, fix=_fix(_position("T1", "a.py", 10)))],
+        review_findings=[
+            _finding("codex-r1-0", 1, "a.py", 10, classification="verified_blocking"),
+            _finding("codex-r1-1", 1, "b.py", 20, classification="rejected"),
+            _finding("codex-r1-2", 1, "c.py", 30,
+                     classification="insufficient_evidence"),
+            _finding("agy-r1-0", 1, "d.py", 40, agent="agy",
+                     classification="needs_human_judgment"),
+        ],
+    )
+
+    assert measure_mod.measure(st)["methods"]["proposed"]["found"] == 2
+
+
+def test_proposed_ignores_findings_from_unmarked_rounds(measure_mod):
+    """印の無いラウンドの指摘を母集合へ入れない。
+
+    入れると、区分の付かない指摘が `insufficient_evidence` として落ち、方式の
+    再現率が実際より低く出る。
+    """
+    st = _state(
+        evidence_rounds=[2],
+        rounds=[
+            _round(1, fix=_fix(_position("T1", "a.py", 10))),
+            _round(2, fix=_fix(_position("T2", "b.py", 20))),
+        ],
+        review_findings=[
+            _finding("codex-r1-0", 1, "a.py", 10, classification="verified_blocking"),
+            _finding("codex-r2-0", 2, "b.py", 20, classification="verified_blocking"),
+        ],
+    )
+
+    assert measure_mod.measure(st)["methods"]["proposed"]["found"] == 1
