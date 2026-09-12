@@ -3,7 +3,6 @@
     "PreToolUse": [
       {
         "matcher": "Edit|MultiEdit|Write|NotebookEdit|fs_write|edit_file|write_file|str_replace_editor|replace|write_to_file|replace_file_content|apply_patch|Bash|shell|execute_bash|local_shell|run_command|run_shell_command",
-        "description": "Guide development edits into a worktree when the cloned directory is being edited",
         "hooks": [
           {
             "type": "command",
@@ -19,7 +18,6 @@
     "SessionStart": [
       {
         "matcher": "startup",
-        "description": "Ensure ~/.claude/settings.json cleanupPeriodDays >= 90 (guarded by 7-day timestamp flag) and set default statusline when none is configured",
         "hooks": [
           {
             "type": "command",
