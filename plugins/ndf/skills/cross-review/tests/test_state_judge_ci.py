@@ -171,7 +171,7 @@ def test_no_check_run_is_treated_as_unavailable(tmp_dir, state_mod, real_github,
     REST の応答そのものから、その扱いになることを見る。
     """
     monkeypatch.setattr(
-        state_mod.GITHUB, "rest",
+        state_mod, "_gh_rest",
         lambda path: state_mod.RestResponse(
             headers={}, body={"total_count": 0, "check_runs": []},
             rate_remaining=None, rate_reset=None,

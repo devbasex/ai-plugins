@@ -49,9 +49,7 @@ import pytest
 
 # 既定で差し替える、GitHub を読みに行く関数。実物は `_REAL` へ退避する。
 _GITHUB_LOOKUPS = ("_fetch_check_runs", "_fetch_pr_metadata")
-_GITHUB_CLIENT_LOOKUPS = ("fetch_check_runs", "fetch_pr_metadata")
 _REAL: dict[str, object] = {}
-_REAL_GITHUB: dict[str, object] = {}
 
 
 @pytest.fixture(scope="session")
@@ -59,8 +57,6 @@ def state_mod() -> types.ModuleType:
     mod = _load_state_module()
     for name in _GITHUB_LOOKUPS:
         _REAL[name] = getattr(mod, name)
-    for name in _GITHUB_CLIENT_LOOKUPS:
-        _REAL_GITHUB[name] = getattr(mod.GITHUB, name)
     return mod
 
 
@@ -115,16 +111,8 @@ def _no_github(monkeypatch, state_mod) -> None:
     monkeypatch.setattr(subprocess, "run", _guard)
     # 照会は既定で「確かめられなかった」に倒す。判定は収束を止めない側へ倒すため、
     # 検査ジョブを見ない既存のテストは期待値を変えずに通る。
-    monkeypatch.setattr(state_mod.GITHUB, "fetch_check_runs", lambda repo, sha: None)
-    monkeypatch.setattr(state_mod.GITHUB, "fetch_pr_metadata", lambda pr, repo=None: None)
-    monkeypatch.setattr(
-        state_mod, "_fetch_check_runs",
-        lambda repo, sha: state_mod.GITHUB.fetch_check_runs(repo, sha),
-    )
-    monkeypatch.setattr(
-        state_mod, "_fetch_pr_metadata",
-        lambda pr, repo=None: state_mod.GITHUB.fetch_pr_metadata(pr, repo),
-    )
+    monkeypatch.setattr(state_mod, "_fetch_check_runs", lambda repo, sha: None)
+    monkeypatch.setattr(state_mod, "_fetch_pr_metadata", lambda pr, repo=None: None)
 
 
 @pytest.fixture()
@@ -136,8 +124,6 @@ def real_github(monkeypatch, state_mod):
     """
     for name in _GITHUB_LOOKUPS:
         monkeypatch.setattr(state_mod, name, _REAL[name])
-    for name in _GITHUB_CLIENT_LOOKUPS:
-        monkeypatch.setattr(state_mod.GITHUB, name, _REAL_GITHUB[name])
 
 
 # ---- 模した `gh` を PATH の先頭へ置く（#291） ----

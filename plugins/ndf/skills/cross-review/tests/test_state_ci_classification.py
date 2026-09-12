@@ -104,14 +104,14 @@ def test_a_run_that_has_not_completed_is_neither(state_mod):
 def test_the_judge_and_the_merge_share_one_classification(tmp_dir, state_mod, monkeypatch):
     """同じ名前の一覧に対して、判定と修正の取り込みが同じ判断へ至る。"""
     seen: list[list[str]] = []
-    real = state_mod.GITHUB.classify_ci
+    real = state_mod._classify_ci
 
     def _spy(runs):
         seen.append([str(r.get("name")) for r in runs])
         return real(runs)
 
-    monkeypatch.setattr(state_mod.GITHUB, "classify_ci", _spy)
-    monkeypatch.setattr(state_mod.GITHUB, "fetch_check_runs", lambda repo, sha: [_run("pytest")])
+    monkeypatch.setattr(state_mod, "_classify_ci", _spy)
+    monkeypatch.setattr(state_mod, "_fetch_check_runs", lambda repo, sha: [_run("pytest")])
 
     # 修正の取り込み側: 申告された失敗の名前を読む
     approved = {
