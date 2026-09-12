@@ -2168,6 +2168,35 @@ def _thread_ids(value: Any) -> list[str]:
     ]
 
 
+def _thread_positions(value: Any) -> list[dict[str, Any]]:
+    """fix の戻り値から、Resolve したスレッドの位置を取り出す（#156）。
+
+    効果の測定（`scripts/measure.py`）の上限の方式が、この位置と指摘の位置を
+    結んで「修正された指摘」を決める。**位置は fix の戻り値にしか無い**ため、
+    取り込みの時点で写しておかないと後から計算できない。
+
+    **位置の欠けた要素も落とさない。** 落とすと、解決したスレッドの件数
+    (`resolved_threads`) と位置の件数が食い違う。欠けた要素は測定の側で
+    「どの指摘とも一致しないもの」として数える。
+
+    件数(int) しか返らない劣化表現では位置を作れないため、空の一覧になる。
+    """
+    positions: list[dict[str, Any]] = []
+    for d in _normalize_dict_items(value):
+        thread_id = d.get("thread_id")
+        path = d.get("path")
+        try:
+            line: int | None = int(d.get("line"))
+        except (TypeError, ValueError):
+            line = None
+        positions.append({
+            "thread_id": str(thread_id) if thread_id else None,
+            "path": str(path) if path else None,
+            "line": line,
+        })
+    return positions
+
+
 def _record_carried_over(st: dict[str, Any], repo: str, pr: int) -> bool:
     """再開した時点で残っている未解決の指摘を「引き継いだ指摘」として記録する。
 
@@ -3743,6 +3772,9 @@ def _merge_fix_records(st: dict, fix: dict, pr: int) -> dict:
         "resolved_threads": _count(fix.get("resolved_threads")),
         # 次のラウンドの開始時に、申告どおり Resolve されたかを突き合わせる。
         "resolved_thread_ids": _thread_ids(fix.get("resolved_threads")),
+        # **位置は効果の測定だけが読む**（#156）。収束ループの判断は増やさない。
+        # ここで写さないと、上限の方式（`oracle`）を後から計算できない。
+        "resolved_thread_positions": _thread_positions(fix.get("resolved_threads")),
         "ci": fix.get("ci_status"),
         "ci_failed_checks": fix.get("ci_failed_checks", []) or [],
         "ci_note": fix.get("ci_note"),

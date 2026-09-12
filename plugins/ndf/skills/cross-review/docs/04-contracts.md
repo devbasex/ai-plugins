@@ -51,6 +51,8 @@
                  "by_severity": {"critical": 0, "major": 2, "minor": 1, "nit": 0}},
       "fix":    {"commit": "abc1234", "fixed": 6, "deferred": 2, "rejected": 0,
                  "resolved_threads": 4, "resolved_thread_ids": ["PRRT_kwDO..."],
+                 "resolved_thread_positions": [
+                   {"thread_id": "PRRT_kwDO...", "path": "src/foo.py", "line": 42}],
                  "ci": "SUCCESS", "ci_note": null},
       "ended_at": "..."
     }
@@ -140,6 +142,14 @@
   次のラウンドの開始時に、修正の記録の有無を突き合わせるために使う
 - `rounds[].fix.resolved_thread_ids` — 修正サブエージェントが Resolve したと申告した
   thread ID の一覧。次のラウンドの開始時に GitHub 側の未解決集合と突き合わせる
+- `rounds[].fix.resolved_thread_positions` — Resolve したと申告したスレッドの位置
+  （#156）。要素は `{"thread_id", "path", "line"}` で、fix の戻り値の
+  `resolved_threads[]` から写す。**読むのは効果の測定（`scripts/measure.py`）だけで、
+  収束ループはこの値を見ない。** 上限の方式が、この位置と `review_findings[].path` /
+  `line` を結んで「修正された指摘」を決める。**位置の欠けた要素も落とさない**
+  （`path` / `line` は `null` になりうる）。件数だけが返る劣化表現（`resolved_threads`
+  が int）では空の一覧になる。**この項目を持たない過去の状態ファイルでは、上限の方式を
+  計算できない**
 - `carried_over` — 再開の時点で残っていた未解決の指摘。`fixed_in_round` が `null` の
   あいだは、両者が承認しても収束させない（[01-state-and-review.md](01-state-and-review.md) の Step 3 参照）
 - `viewer_login` — 自分のログイン名。一度取って持つ控えで、待ち行列の冪等の照合が
