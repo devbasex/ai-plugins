@@ -2976,7 +2976,8 @@ def _verify_findings(
 
     **担当の再評価より先に走らせる。** 機械が再現した事実は、担当の支持より確かである。
 
-    **束ねた組の全員を対象にする**（`issues/issue-156-pr3-contracts.md` の「重複の統合」）。
+    **束ねた組の全員を対象にする**（`docs/specifications/cross-review-evidence-based.md`
+    の「重複の統合」）。
     代表の `suggested_check` だけを読むと、代表が手順を書いていない組は、束ねられた側が
     実行できる手順を書いていても実行回数 0・`not_run` のまま `insufficient_evidence` へ
     落ちる。**どちらが先に取り込まれたかで採否が変わる。** 1 段目の統合は実行検証より
