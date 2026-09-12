@@ -2705,6 +2705,38 @@ def _finalize_converged_round(
     sys.exit(0)
 
 
+def _print_judge_status(
+    reviewers: list[str],
+    intents: dict[str, str],
+    new_findings: int,
+    findings_measurable: bool,
+    carried_count: int,
+    pending_posts: int,
+) -> None:
+    """`cmd_judge` の冒頭で出す状態表示の print 群。"""
+    print("REVIEWER_INTENTS='" + " ".join(
+        f"{a}={intents[a]}" for a in reviewers) + "'")
+    print(f"NEW_FINDINGS={new_findings if findings_measurable else '-'}")
+    print(f"CARRIED_OVER_THREADS={carried_count}")
+    print(f"PENDING_POSTS={pending_posts}")
+
+
+def _evaluate_convergence(
+    carried: dict[str, Any] | None,
+    round_passes: bool,
+    findings_measurable: bool,
+    new_findings: int,
+) -> bool:
+    """このラウンドが収束したかを判定する。
+
+    **新規の指摘が 0 件なら収束する。** 全員 `APPROVE` は最も止まらない参加者に
+    律速される。同じ論点の再提出では止まり、新しい観点が出るあいだは回る。
+    """
+    return carried is None and (
+        round_passes or (findings_measurable and new_findings == 0)
+    )
+
+
 def cmd_judge(args: argparse.Namespace) -> None:
     """Step 3 — intent ベース pass 判定。
 
@@ -2734,22 +2766,19 @@ def cmd_judge(args: argparse.Namespace) -> None:
     carried = _carried_over_pending(st)
     carried_count = (st.get("carried_over") or {}).get("count", 0)
     new_findings, findings_measurable = _new_finding_count(st, pr)
-
-    print("REVIEWER_INTENTS='" + " ".join(
-        f"{a}={intents[a]}" for a in reviewers) + "'")
-    print(f"NEW_FINDINGS={new_findings if findings_measurable else '-'}")
-    print(f"CARRIED_OVER_THREADS={carried_count}")
     pending_posts = _pending_posts(pr)
-    print(f"PENDING_POSTS={pending_posts}")
+
+    _print_judge_status(
+        reviewers, intents, new_findings, findings_measurable,
+        carried_count, pending_posts,
+    )
 
     no_result = _no_result_agents(last, only, reviewers)
     if no_result:
         _handle_no_result_round(pr, st, last, no_result)
 
-    # **新規の指摘が 0 件なら収束する。** 全員 `APPROVE` は最も止まらない参加者に
-    # 律速される。同じ論点の再提出では止まり、新しい観点が出るあいだは回る。
-    converged = carried is None and (
-        round_passes or (findings_measurable and new_findings == 0)
+    converged = _evaluate_convergence(
+        carried, round_passes, findings_measurable, new_findings,
     )
 
     if converged and pending_posts:
