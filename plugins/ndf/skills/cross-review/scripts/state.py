@@ -3074,34 +3074,16 @@ def _put_critique(target: dict[str, Any], record: dict[str, Any]) -> None:
     critiques.append(record)
 
 
-def cmd_collect_critiques(args: argparse.Namespace) -> None:
-    """反証の結果を `review_findings[]` へ結ぶ（#156）。
-
-    **担当はファイル名から採る。** 本文の申告を採ると、別の担当を名乗った値をそのまま
-    数えることになる。**自分の指摘へは返さない**（統合された指摘では `origin_runtimes`
-    に載る担当すべてが提案者である）。
-
-    **結び先の無い値は捨てず `unmatched_critiques` へ残す。** 黙って捨てると、反証が
-    0 件のラウンドと、結び先を誤ったラウンドが同じに見える。
-
-    **印を付けるのは、対象ごとに有効な反証が揃ったときだけである**（#549 レビュー
-    対応）。結果ファイルの欠落・不正でも印を付けると、実行検証を持たない単独の
-    `major` が `insufficient_evidence` へ落ち、新規 0 件のまま**未検証で収束する**。
-    足りないときは印を付けず、終了コード 7 と取り直す担当を返して再取得へ戻す。
-    """
-    pr = args.pr
-    st = _load(pr)
-    if not st.get("rounds"):
-        die("state.rounds が空。`state.py start-round` を先に呼んでください")
-    round_no = st["rounds"][-1]["round"]
-    findings = {
-        f.get("finding_id"): f
-        for f in st.get("review_findings") or []
-        if f.get("round") == round_no
-    }
+def _attach_critiques(
+    st: dict[str, Any],
+    pr: int,
+    round_no: int,
+    findings: dict[str, dict[str, Any]],
+    reviewers: list[str],
+) -> tuple[int, dict[str, set[str]]]:
+    """反証ファイルを読み、結べた反証を指摘へ付ける。"""
     unmatched = st.setdefault("unmatched_critiques", [])
     attached = 0
-    reviewers = _round_reviewers(st, round_no)
     covered: dict[str, set[str]] = {a: set() for a in reviewers}
 
     for agent in reviewers:
@@ -3139,10 +3121,42 @@ def cmd_collect_critiques(args: argparse.Namespace) -> None:
             covered[agent].add(str(target.get("finding_id")))
             attached += 1
 
+    return attached, covered
+
+
+def cmd_collect_critiques(args: argparse.Namespace) -> None:
+    """反証の結果を `review_findings[]` へ結ぶ（#156）。
+
+    **担当はファイル名から採る。** 本文の申告を採ると、別の担当を名乗った値をそのまま
+    数えることになる。**自分の指摘へは返さない**（統合された指摘では `origin_runtimes`
+    に載る担当すべてが提案者である）。
+
+    **結び先の無い値は捨てず `unmatched_critiques` へ残す。** 黙って捨てると、反証が
+    0 件のラウンドと、結び先を誤ったラウンドが同じに見える。
+
+    **印を付けるのは、対象ごとに有効な反証が揃ったときだけである**（#549 レビュー
+    対応）。結果ファイルの欠落・不正でも印を付けると、実行検証を持たない単独の
+    `major` が `insufficient_evidence` へ落ち、新規 0 件のまま**未検証で収束する**。
+    足りないときは印を付けず、終了コード 7 と取り直す担当を返して再取得へ戻す。
+    """
+    pr = args.pr
+    st = _load(pr)
+    if not st.get("rounds"):
+        die("state.rounds が空。`state.py start-round` を先に呼んでください")
+    round_no = st["rounds"][-1]["round"]
+    findings = {
+        f.get("finding_id"): f
+        for f in st.get("review_findings") or []
+        if f.get("round") == round_no
+    }
+    reviewers = _round_reviewers(st, round_no)
+    attached, covered = _attach_critiques(st, pr, round_no, findings, reviewers)
+
     # **申告による統合（2 段目）は、反証の後・区分の前に走らせる。** 次のラウンドへ
     # 回すと、同じ主張を別の本文で出した組が統合される前に収束する。
     _merge_declared_duplicates(st, round_no)
 
+    unmatched = st.get("unmatched_critiques") or []
     info(f"✅ 反証を取り込みました: {attached} 件"
          + (f"（結び先なし {len(unmatched)} 件）" if unmatched else ""))
 

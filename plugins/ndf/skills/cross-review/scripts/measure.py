@@ -202,6 +202,28 @@ def _has_recorded_positions(st: dict[str, Any]) -> bool:
     return False
 
 
+def _find_best_match(
+    representatives: list[dict[str, Any]],
+    pr: int | None,
+    round_no: int,
+    path: str,
+    line: int,
+) -> tuple[str | None, bool]:
+    """解決位置に対応する指摘 ID と、曖昧だったかを返す。"""
+    candidates = [
+        f for f in representatives if _matches(f, pr, round_no, path, line)
+    ]
+    if not candidates:
+        return None, False
+    newest = max(_as_int(f.get("round")) or 0 for f in candidates)
+    newest_candidates = [
+        f for f in candidates if (_as_int(f.get("round")) or 0) == newest
+    ]
+    if len(newest_candidates) > 1:
+        return None, True
+    return str(newest_candidates[0].get("finding_id")), False
+
+
 def _oracle(st: dict[str, Any]) -> Oracle | None:
     """解決したスレッドの位置と指摘の位置を結び、修正された指摘を集める。
 
@@ -238,20 +260,15 @@ def _oracle(st: dict[str, Any]) -> Oracle | None:
                 # 位置の欠けた要素も落とさない（`_thread_positions` が残す）。
                 unmatched += 1
                 continue
-            candidates = [
-                f for f in representatives if _matches(f, pr, round_no, path, line)
-            ]
-            if not candidates:
-                unmatched += 1
-                continue
-            newest = max(_as_int(f.get("round")) or 0 for f in candidates)
-            newest_candidates = [
-                f for f in candidates if (_as_int(f.get("round")) or 0) == newest
-            ]
-            if len(newest_candidates) > 1:
+            finding_id, is_ambiguous = _find_best_match(
+                representatives, pr, round_no, path, line)
+            if is_ambiguous:
                 ambiguous += 1
                 continue
-            finding_ids.add(str(newest_candidates[0].get("finding_id")))
+            if finding_id is None:
+                unmatched += 1
+                continue
+            finding_ids.add(finding_id)
     return Oracle(finding_ids, unmatched, ambiguous)
 
 
