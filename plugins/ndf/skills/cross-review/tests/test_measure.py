@@ -555,3 +555,185 @@ def test_proposed_ignores_findings_from_unmarked_rounds(measure_mod):
     )
 
     assert measure_mod.measure(st)["methods"]["proposed"]["found"] == 1
+
+
+# ---------- 受け入れ条件 12: 計算できない値が理由つきの `null` で出る ----------
+
+
+def test_proposed_is_null_when_no_round_carries_the_evidence_mark(measure_mod):
+    """印を持つラウンドが無ければ、この変更の方式は計算できない。
+
+    **キーは常に置く。** 省くと、読む側が「0 件」と「計算できない」を区別できず、
+    欠けたキーを読んで落ちる。
+    """
+    st = _state(
+        evidence_rounds=[],
+        rounds=[_round(1, fix=_fix(_position("T1", "a.py", 10)))],
+        review_findings=[
+            _finding("codex-r1-0", 1, "a.py", 10, classification="verified_blocking"),
+        ],
+    )
+
+    assert measure_mod.measure(st)["methods"]["proposed"] == {
+        "found": None, "matched": None, "of_oracle": None,
+        "oracle_scope": None, "oracle_base": None,
+        "reason": "no_evidence_rounds"}
+
+
+def test_oracle_is_null_without_any_recorded_position(measure_mod):
+    """位置の記録を持つラウンドが無ければ、上限の方式は計算できない。
+
+    **値を 0 で埋めない。** 埋めると、この変更より前に取った記録が「修正が
+    1 件も無かった実行」として比較へ混ざる。
+    """
+    st = _state(
+        evidence_rounds=[1],
+        rounds=[_round(1, fix={"commit": "abc1234", "fixed": 1,
+                               "resolved_threads": 1, "resolved_thread_ids": ["T1"]})],
+        review_findings=[
+            _finding("codex-r1-0", 1, "a.py", 10, classification="verified_blocking"),
+        ],
+    )
+
+    methods = measure_mod.measure(st)["methods"]
+
+    assert methods["oracle"] == {
+        "found": None, "unmatched": None, "ambiguous": None,
+        "reason": "no_resolved_thread_positions"}
+    # 拾えた件数と再現率は全方式で決まらない。**件数はそのまま出す。**
+    assert methods["single"]["codex"] == {
+        "found": 1, "matched": None, "of_oracle": None}
+    assert methods["majority"] == {"found": 0, "matched": None, "of_oracle": None}
+    assert methods["proposed"] == {
+        "found": 1, "matched": None, "of_oracle": None,
+        "oracle_scope": "all_rounds", "oracle_base": None}
+
+
+def test_of_oracle_is_null_when_the_oracle_is_empty(measure_mod):
+    """上限の方式が 0 件なら、再現率は割れない。
+
+    `0.0` にすると「拾えなかった」と読めるが、実際は比べる相手がいない。
+    """
+    st = _state(
+        evidence_rounds=[1],
+        rounds=[_round(1, fix=_fix())],
+        review_findings=[
+            _finding("codex-r1-0", 1, "a.py", 10, classification="verified_blocking"),
+        ],
+    )
+
+    methods = measure_mod.measure(st)["methods"]
+
+    assert methods["oracle"] == {"found": 0, "unmatched": 0, "ambiguous": 0}
+    assert methods["single"]["codex"] == {"found": 1, "matched": 0, "of_oracle": None}
+    assert methods["proposed"] == {
+        "found": 1, "matched": 0, "of_oracle": None,
+        "oracle_scope": "all_rounds", "oracle_base": 0}
+
+
+def test_proposed_base_is_zero_when_marked_rounds_fixed_nothing(measure_mod):
+    """印のあるラウンドに修正された指摘が 1 件も無いとき。
+
+    分母は `0` で、再現率は `null` である。**`found` と `matched` は数えた件数を
+    そのまま出す。**
+    """
+    st = _state(
+        evidence_rounds=[2],
+        rounds=[
+            _round(1, fix=_fix(_position("T1", "a.py", 10))),
+            _round(2, fix=_fix()),
+        ],
+        review_findings=[
+            _finding("codex-r1-0", 1, "a.py", 10, classification="verified_blocking"),
+            _finding("codex-r2-0", 2, "b.py", 20, classification="verified_blocking"),
+        ],
+    )
+
+    methods = measure_mod.measure(st)["methods"]
+
+    assert methods["oracle"]["found"] == 1
+    assert methods["proposed"] == {
+        "found": 1, "matched": 0, "of_oracle": None,
+        "oracle_scope": "evidence_rounds", "oracle_base": 0}
+
+
+def test_reason_is_absent_while_the_value_is_decided(measure_mod):
+    """**`reason` は値が `null` のときだけ置く。**
+
+    決まった値に添えると、読む側が例外の有無を毎回見分けることになる。
+    """
+    st = _state(
+        evidence_rounds=[1],
+        rounds=[_round(1, fix=_fix(_position("T1", "a.py", 10)))],
+        review_findings=[
+            _finding("codex-r1-0", 1, "a.py", 10, classification="verified_blocking"),
+        ],
+    )
+
+    methods = measure_mod.measure(st)["methods"]
+
+    assert "reason" not in methods["oracle"]
+    assert "reason" not in methods["proposed"]
+    assert "reason" not in methods["majority"]
+    assert "reason" not in methods["single"]["codex"]
+
+
+def test_empty_state_reports_both_reasons(measure_mod):
+    """記録が無いときも落ちず、2 つの理由が出る（受け入れ条件 12 / 15）。"""
+    methods = measure_mod.measure({})["methods"]
+
+    assert methods["single"] == {}
+    assert methods["majority"] == {"found": 0, "matched": None, "of_oracle": None}
+    assert methods["proposed"]["reason"] == "no_evidence_rounds"
+    assert methods["oracle"]["reason"] == "no_resolved_thread_positions"
+
+
+# ---------- 書き込み側と読み取り側をつなげて 1 度通す ----------
+
+
+def test_state_writes_positions_that_measure_reads(monkeypatch, tmp_path, state_mod):
+    """`state.py merge-fix` が書いた記録を、そのまま `measure.py` が読む。
+
+    **落ちるのは形の組み合わせである。** 書く側と読む側を別々に試すと、書いた側が
+    残した位置の形を読む側が受け取れなくても、失敗として現れない。
+    """
+    import argparse
+
+    pr = 9919
+    monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
+    state_file = tmp_path / f"cross-review-pr{pr}-state.json"
+    state_file.write_text(json.dumps(_state(
+        current_pr=pr,
+        pr_history=[{"pr": pr, "rounds": 1}],
+        rounds=[{"round": 1, "pr": pr, "reviewers": ["codex", "agy"],
+                 "started_at": "2026-05-23T00:00:00+00:00"}],
+        review_findings=[
+            _finding("codex-r1-0", 1, "src/foo.py", 42, pr=pr,
+                     origin_runtimes=["codex", "agy"],
+                     classification="verified_blocking"),
+            _finding("agy-r1-0", 1, "src/foo.py", 42, pr=pr, agent="agy",
+                     merged_into="codex-r1-0"),
+        ],
+        evidence_rounds=[1],
+        deferred_nits=[],
+    )), encoding="utf-8")
+    (tmp_path / f"fix-pr{pr}-result.json").write_text(json.dumps({
+        "pr": pr, "fix_commit": "abc1234", "fixed_count": 1,
+        "ci_status": "SUCCESS", "ci_failed_checks": [],
+        "by_severity": {"critical": 0, "major": 1, "minor": 0, "nit": 0},
+        "resolved_threads": [
+            {"thread_id": "T1", "comment_id": 111, "path": "src/foo.py", "line": 42},
+            {"thread_id": "T2", "comment_id": 222, "path": "src/gone.py", "line": 99},
+        ],
+        "deferred": [], "rejected": [],
+    }), encoding="utf-8")
+
+    state_mod.cmd_merge_fix(argparse.Namespace(pr=pr, file=None))
+    proc = _run([str(state_file)])
+
+    assert proc.returncode == 0, proc.stderr
+    methods = json.loads(proc.stdout)["methods"]
+    assert methods["oracle"] == {"found": 1, "unmatched": 1, "ambiguous": 0}
+    assert methods["single"]["agy"] == {"found": 1, "matched": 1, "of_oracle": 1.0}
+    assert methods["majority"]["matched"] == 1
+    assert methods["proposed"]["of_oracle"] == 1.0

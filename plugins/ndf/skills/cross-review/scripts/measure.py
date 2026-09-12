@@ -187,7 +187,22 @@ def _matches(finding: dict[str, Any], pr: int | None, round_no: int,
     return finding.get("path") == path and _as_int(finding.get("line")) == line
 
 
-def _oracle(st: dict[str, Any]) -> Oracle:
+def _has_recorded_positions(st: dict[str, Any]) -> bool:
+    """位置の記録（`resolved_thread_positions`）を持つラウンドがあるか（#156）。
+
+    **空の一覧は「持つ」である。** 解決したスレッドが 0 件だったことと、記録の
+    項目そのものが無いこと（この変更より前に取った記録）は別である。前者は
+    上限の方式が 0 件、後者は計算できない。
+    """
+    for round_rec in _rounds(st):
+        fix = round_rec.get("fix")
+        if isinstance(fix, dict) and isinstance(
+                fix.get("resolved_thread_positions"), list):
+            return True
+    return False
+
+
+def _oracle(st: dict[str, Any]) -> Oracle | None:
     """解決したスレッドの位置と指摘の位置を結び、修正された指摘を集める。
 
     **突き合わせは `(path, line)` で行う。** 絞り込んだ後になお複数が一致する
@@ -198,6 +213,10 @@ def _oracle(st: dict[str, Any]) -> Oracle:
     **どちらも `found` には数えない。** 落としたことが出力から見えないと、
     再現率が実際より高く出ていることに気づけない。
     """
+    if not _has_recorded_positions(st):
+        # **この変更より前に取った記録では計算できない。** 値を 0 で埋めると、
+        # 「修正が 1 件も無かった実行」として比較へ混ざる。
+        return None
     representatives = _representatives(st)
     rounds = _rounds(st)
     finding_ids: set[str] = set()
@@ -236,7 +255,18 @@ def _oracle(st: dict[str, Any]) -> Oracle:
     return Oracle(finding_ids, unmatched, ambiguous)
 
 
-def _oracle_output(oracle: Oracle) -> dict[str, Any]:
+def _oracle_output(oracle: Oracle | None) -> dict[str, Any]:
+    """**キーは常に置き、決まらない値は `null` にする。**
+
+    省くと、読む側が「0 件」と「計算できない」を区別できないうえ、欠けたキーを
+    読んで落ちる。**`reason` は値が `null` のときだけ置く**（決まった値に添えると、
+    読む側が例外の有無を毎回見分けることになる）。
+    """
+    if oracle is None:
+        return {
+            "found": None, "unmatched": None, "ambiguous": None,
+            "reason": "no_resolved_thread_positions",
+        }
     return {
         "found": len(oracle.finding_ids),
         "unmatched": oracle.unmatched,
@@ -369,6 +399,12 @@ def _proposed(st: dict[str, Any], representatives: list[dict[str, Any]],
     再現率を他の 3 つと同じ分母の値として読む。
     """
     marked = _evidence_rounds(st)
+    if not marked:
+        return {
+            "found": None, "matched": None, "of_oracle": None,
+            "oracle_scope": None, "oracle_base": None,
+            "reason": "no_evidence_rounds",
+        }
     finding_ids = {
         str(finding.get("finding_id"))
         for finding in representatives
@@ -402,7 +438,7 @@ def _methods(st: dict[str, Any]) -> dict[str, Any]:
     """
     representatives = _representatives(st)
     oracle = _oracle(st)
-    oracle_ids = oracle.finding_ids
+    oracle_ids = None if oracle is None else oracle.finding_ids
     return {
         "single": _single(representatives, oracle_ids),
         "majority": _majority(representatives, oracle_ids),
