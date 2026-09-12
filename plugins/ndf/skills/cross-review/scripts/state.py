@@ -2417,6 +2417,35 @@ def _has_evidence(finding: dict[str, Any]) -> bool:
     )
 
 
+def _load_payload(agent: str, path: pathlib.Path) -> list[dict[str, Any]] | None:
+    """payload.json を読み、検証して dict のリストとして返す。読めない・不正なときは None を返す。"""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        info(f"⚠ {agent}: payload.json を読めません（{path}: {exc}）。"
+             "指摘の記録は 0 件です")
+        return None
+    if not isinstance(payload, dict):
+        # 実測: dict 以外（`[]` / `null` / 文字列 / 数値）を渡すと
+        # `payload.get(...)` が AttributeError で落ち、取り込みが例外で終わっていた。
+        info(f"⚠ {agent}: payload.json が dict ではありません"
+             f"（{path}, type={type(payload).__name__}）。指摘の記録は 0 件です。"
+             " review launcher の出力形式不正で、判定は中断します")
+        return None
+    raw = payload.get("comments")
+    if not isinstance(raw, list):
+        info(f"⚠ {agent}: payload.comments が list ではありません"
+             f"（{path}, type={type(raw).__name__}）。指摘の記録は 0 件です。"
+             " review launcher の出力形式不正で、判定は中断します")
+        return None
+    items = [c for c in raw if isinstance(c, dict)]
+    if len(items) != len(raw):
+        info(f"⚠ {agent}: payload.comments に dict でないエントリが"
+             f" {len(raw) - len(items)} 件あります（{path}）。"
+             "その分を除いて記録します。判定は中断します")
+    return items
+
+
 def _collect_review_findings(
     st: dict[str, Any], agent: str, pr: int, round_no: int
 ) -> int:
@@ -2440,30 +2469,9 @@ def _collect_review_findings(
     path = _payload_path(agent, pr, round_no)
     if not path.exists():
         return 0
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
-        info(f"⚠ {agent}: payload.json を読めません（{path}: {exc}）。"
-             "指摘の記録は 0 件です")
+    items = _load_payload(agent, path)
+    if items is None:
         return 0
-    if not isinstance(payload, dict):
-        # 実測: dict 以外（`[]` / `null` / 文字列 / 数値）を渡すと
-        # `payload.get(...)` が AttributeError で落ち、取り込みが例外で終わっていた。
-        info(f"⚠ {agent}: payload.json が dict ではありません"
-             f"（{path}, type={type(payload).__name__}）。指摘の記録は 0 件です。"
-             " review launcher の出力形式不正で、判定は中断します")
-        return 0
-    raw = payload.get("comments")
-    if not isinstance(raw, list):
-        info(f"⚠ {agent}: payload.comments が list ではありません"
-             f"（{path}, type={type(raw).__name__}）。指摘の記録は 0 件です。"
-             " review launcher の出力形式不正で、判定は中断します")
-        return 0
-    items = [c for c in raw if isinstance(c, dict)]
-    if len(items) != len(raw):
-        info(f"⚠ {agent}: payload.comments に dict でないエントリが"
-             f" {len(raw) - len(items)} 件あります（{path}）。"
-             "その分を除いて記録します。判定は中断します")
     # **同じ (pr, round, agent) の記録は入れ替える。** 中断からの再実行で
     # `cmd_read_result` が 2 度走ることがあり、`rounds[-1][agent]` は代入で上書き
     # されるのに対し、こちらは追記であるため、そのままでは同じ指摘が件数だけ増える
