@@ -2760,6 +2760,43 @@ def _evaluate_convergence(
     )
 
 
+def _collect_reviewer_intents(
+    st: dict[str, Any], last: dict[str, Any], only: str | None,
+) -> tuple[list[str], dict[str, str], bool]:
+    """このラウンドの担当を洗い出し、各担当の intent と pass 判定を集計する。"""
+    reviewers = _round_reviewers(st, last.get("round", 1))
+    intents = {a: _agent_intent(last, a, only) for a in reviewers}
+    round_passes = _round_passes(last, only, reviewers)
+    return reviewers, intents, round_passes
+
+
+def _finalize_round_if_converged(
+    pr: int,
+    st: dict[str, Any],
+    last: dict[str, Any],
+    converged: bool,
+    findings_measurable: bool,
+    pending_posts: int,
+) -> None:
+    """収束していれば、待ち行列の有無に応じて確定させて終了する。
+
+    収束していなければ何もせず戻る（呼び出し側が修正のラウンドへ進める）。
+    """
+    if not converged:
+        return
+    if pending_posts:
+        # **届いていない投稿があるあいだは収束させない。** 修正するものは無いので
+        # 修正の工程（2）へは回さず、流し直す先（8）へ分ける。
+        last["verdict"] = "queued"
+        _save(pr, st)
+        info(
+            f"→ 待ち行列に {pending_posts} 件残っている。"
+            "流し切るまで収束させない（`state.py flush` で流す）。"
+        )
+        sys.exit(8)
+    _finalize_converged_round(pr, st, last, findings_measurable)
+
+
 def cmd_judge(args: argparse.Namespace) -> None:
     """Step 3 — intent ベース pass 判定。
 
@@ -2782,9 +2819,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
     last = st["rounds"][-1]
     only = st.get("only")
 
-    reviewers = _round_reviewers(st, last.get("round", 1))
-    intents = {a: _agent_intent(last, a, only) for a in reviewers}
-    round_passes = _round_passes(last, only, reviewers)
+    reviewers, intents, round_passes = _collect_reviewer_intents(st, last, only)
 
     carried = _carried_over_pending(st)
     carried_count = (st.get("carried_over") or {}).get("count", 0)
@@ -2804,19 +2839,9 @@ def cmd_judge(args: argparse.Namespace) -> None:
         carried, round_passes, findings_measurable, new_findings,
     )
 
-    if converged and pending_posts:
-        # **届いていない投稿があるあいだは収束させない。** 修正するものは無いので
-        # 修正の工程（2）へは回さず、流し直す先（8）へ分ける。
-        last["verdict"] = "queued"
-        _save(pr, st)
-        info(
-            f"→ 待ち行列に {pending_posts} 件残っている。"
-            "流し切るまで収束させない（`state.py flush` で流す）。"
-        )
-        sys.exit(8)
-
-    if converged:
-        _finalize_converged_round(pr, st, last, findings_measurable)
+    _finalize_round_if_converged(
+        pr, st, last, converged, findings_measurable, pending_posts,
+    )
 
     last["verdict"] = "changes_requested"
     _save(pr, st)
