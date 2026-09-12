@@ -1235,13 +1235,25 @@ def _is_fresh_fix_result(
         後続候補へ流れて別 PR の戻り値を誤マージする事故を防ぐ)。
         正規パスでも `pr` 不一致 / stale mtime は fallback 継続対象とする。
     """
-    # 1. mtime チェック
+    if not _is_fresh_mtime(path, round_started_ts):
+        return False, None
+
+    payload = _read_and_parse_fix_payload(path, is_canonical=is_canonical)
+    if payload is None:
+        return False, None
+    if not _matches_pr(path, payload, pr):
+        return False, None
+    return True, payload
+
+
+def _is_fresh_mtime(path: pathlib.Path, round_started_ts: float | None) -> bool:
+    """fallback 候補の mtime が round 開始以降かを返す。"""
     if round_started_ts is not None:
         try:
             mtime = path.stat().st_mtime
         except OSError as exc:
             info(f"⚠ fallback 候補 stat 失敗 ({path}): {exc} — skip")
-            return False, None
+            return False
         if mtime < round_started_ts:
             info(
                 f"⚠ fallback 候補が round 開始前の古いファイル ({path}, "
@@ -1249,9 +1261,15 @@ def _is_fresh_fix_result(
                 f"< round_started={_dt.datetime.fromtimestamp(round_started_ts).isoformat(timespec='seconds')}) "
                 "— skip"
             )
-            return False, None
+            return False
+    return True
 
-    # 2. JSON 内 `pr` フィールドの一致 (任意)
+
+def _read_and_parse_fix_payload(
+    path: pathlib.Path,
+    is_canonical: bool = False,
+) -> dict[str, Any] | None:
+    """fix 戻り値ファイルを dict として読み取る。"""
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -1262,7 +1280,7 @@ def _is_fresh_fix_result(
                 code=3,
             )
         info(f"⚠ fallback 候補 JSON 解析失敗 ({path}): {exc} — skip")
-        return False, None
+        return None
     # gemini round 3 指摘: `json.loads` は dict 以外 (list 等) も返す。
     # 後続の `payload.get(...)` や cmd_merge_fix 側の `.get()` でクラッシュしないよう、
     # dict でない場合は warn を出して fallback 不採用 ((False, None)) として扱う。
@@ -1282,7 +1300,12 @@ def _is_fresh_fix_result(
             f"⚠ fallback 候補 JSON が dict ではない ({path}, type={type(payload).__name__}) "
             "— skip"
         )
-        return False, None
+        return None
+    return payload
+
+
+def _matches_pr(path: pathlib.Path, payload: dict[str, Any], pr: int) -> bool:
+    """payload の pr フィールドが対象 PR と一致するかを返す。"""
     file_pr = payload.get("pr")
     if file_pr is not None:
         try:
@@ -1292,14 +1315,14 @@ def _is_fresh_fix_result(
                 f"⚠ fallback 候補の pr フィールドが数値として解釈できない "
                 f"({path}, file_pr={file_pr!r}) — skip"
             )
-            return False, None
+            return False
         if file_pr_int != int(pr):
             info(
                 f"⚠ fallback 候補の pr 不一致 ({path}, file_pr={file_pr} != pr={pr}) "
                 "— 別 PR の戻り値の可能性。skip"
             )
-            return False, None
-    return True, payload
+            return False
+    return True
 
 
 def _load(pr: int) -> dict[str, Any]:
@@ -2168,6 +2191,35 @@ def _thread_ids(value: Any) -> list[str]:
     ]
 
 
+def _thread_positions(value: Any) -> list[dict[str, Any]]:
+    """fix の戻り値から、Resolve したスレッドの位置を取り出す（#156）。
+
+    効果の測定（`scripts/measure.py`）の上限の方式が、この位置と指摘の位置を
+    結んで「修正された指摘」を決める。**位置は fix の戻り値にしか無い**ため、
+    取り込みの時点で写しておかないと後から計算できない。
+
+    **位置の欠けた要素も落とさない。** 落とすと、解決したスレッドの件数
+    (`resolved_threads`) と位置の件数が食い違う。欠けた要素は測定の側で
+    「どの指摘とも一致しないもの」として数える。
+
+    件数(int) しか返らない劣化表現では位置を作れないため、空の一覧になる。
+    """
+    positions: list[dict[str, Any]] = []
+    for d in _normalize_dict_items(value):
+        thread_id = d.get("thread_id")
+        path = d.get("path")
+        try:
+            line: int | None = int(d.get("line"))
+        except (TypeError, ValueError):
+            line = None
+        positions.append({
+            "thread_id": str(thread_id) if thread_id else None,
+            "path": str(path) if path else None,
+            "line": line,
+        })
+    return positions
+
+
 def _record_carried_over(st: dict[str, Any], repo: str, pr: int) -> bool:
     """再開した時点で残っている未解決の指摘を「引き継いだ指摘」として記録する。
 
@@ -2388,6 +2440,35 @@ def _has_evidence(finding: dict[str, Any]) -> bool:
     )
 
 
+def _load_payload(agent: str, path: pathlib.Path) -> list[dict[str, Any]] | None:
+    """payload.json を読み、検証して dict のリストとして返す。読めない・不正なときは None を返す。"""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        info(f"⚠ {agent}: payload.json を読めません（{path}: {exc}）。"
+             "指摘の記録は 0 件です")
+        return None
+    if not isinstance(payload, dict):
+        # 実測: dict 以外（`[]` / `null` / 文字列 / 数値）を渡すと
+        # `payload.get(...)` が AttributeError で落ち、取り込みが例外で終わっていた。
+        info(f"⚠ {agent}: payload.json が dict ではありません"
+             f"（{path}, type={type(payload).__name__}）。指摘の記録は 0 件です。"
+             " review launcher の出力形式不正で、判定は中断します")
+        return None
+    raw = payload.get("comments")
+    if not isinstance(raw, list):
+        info(f"⚠ {agent}: payload.comments が list ではありません"
+             f"（{path}, type={type(raw).__name__}）。指摘の記録は 0 件です。"
+             " review launcher の出力形式不正で、判定は中断します")
+        return None
+    items = [c for c in raw if isinstance(c, dict)]
+    if len(items) != len(raw):
+        info(f"⚠ {agent}: payload.comments に dict でないエントリが"
+             f" {len(raw) - len(items)} 件あります（{path}）。"
+             "その分を除いて記録します。判定は中断します")
+    return items
+
+
 def _collect_review_findings(
     st: dict[str, Any], agent: str, pr: int, round_no: int
 ) -> int:
@@ -2411,30 +2492,9 @@ def _collect_review_findings(
     path = _payload_path(agent, pr, round_no)
     if not path.exists():
         return 0
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
-        info(f"⚠ {agent}: payload.json を読めません（{path}: {exc}）。"
-             "指摘の記録は 0 件です")
+    items = _load_payload(agent, path)
+    if items is None:
         return 0
-    if not isinstance(payload, dict):
-        # 実測: dict 以外（`[]` / `null` / 文字列 / 数値）を渡すと
-        # `payload.get(...)` が AttributeError で落ち、取り込みが例外で終わっていた。
-        info(f"⚠ {agent}: payload.json が dict ではありません"
-             f"（{path}, type={type(payload).__name__}）。指摘の記録は 0 件です。"
-             " review launcher の出力形式不正で、判定は中断します")
-        return 0
-    raw = payload.get("comments")
-    if not isinstance(raw, list):
-        info(f"⚠ {agent}: payload.comments が list ではありません"
-             f"（{path}, type={type(raw).__name__}）。指摘の記録は 0 件です。"
-             " review launcher の出力形式不正で、判定は中断します")
-        return 0
-    items = [c for c in raw if isinstance(c, dict)]
-    if len(items) != len(raw):
-        info(f"⚠ {agent}: payload.comments に dict でないエントリが"
-             f" {len(raw) - len(items)} 件あります（{path}）。"
-             "その分を除いて記録します。判定は中断します")
     # **同じ (pr, round, agent) の記録は入れ替える。** 中断からの再実行で
     # `cmd_read_result` が 2 度走ることがあり、`rounds[-1][agent]` は代入で上書き
     # されるのに対し、こちらは追記であるため、そのままでは同じ指摘が件数だけ増える
@@ -2668,6 +2728,75 @@ def _finalize_converged_round(
     sys.exit(0)
 
 
+def _print_judge_status(
+    reviewers: list[str],
+    intents: dict[str, str],
+    new_findings: int,
+    findings_measurable: bool,
+    carried_count: int,
+    pending_posts: int,
+) -> None:
+    """`cmd_judge` の冒頭で出す状態表示の print 群。"""
+    print("REVIEWER_INTENTS='" + " ".join(
+        f"{a}={intents[a]}" for a in reviewers) + "'")
+    print(f"NEW_FINDINGS={new_findings if findings_measurable else '-'}")
+    print(f"CARRIED_OVER_THREADS={carried_count}")
+    print(f"PENDING_POSTS={pending_posts}")
+
+
+def _evaluate_convergence(
+    carried: dict[str, Any] | None,
+    round_passes: bool,
+    findings_measurable: bool,
+    new_findings: int,
+) -> bool:
+    """このラウンドが収束したかを判定する。
+
+    **新規の指摘が 0 件なら収束する。** 全員 `APPROVE` は最も止まらない参加者に
+    律速される。同じ論点の再提出では止まり、新しい観点が出るあいだは回る。
+    """
+    return carried is None and (
+        round_passes or (findings_measurable and new_findings == 0)
+    )
+
+
+def _collect_reviewer_intents(
+    st: dict[str, Any], last: dict[str, Any], only: str | None,
+) -> tuple[list[str], dict[str, str], bool]:
+    """このラウンドの担当を洗い出し、各担当の intent と pass 判定を集計する。"""
+    reviewers = _round_reviewers(st, last.get("round", 1))
+    intents = {a: _agent_intent(last, a, only) for a in reviewers}
+    round_passes = _round_passes(last, only, reviewers)
+    return reviewers, intents, round_passes
+
+
+def _finalize_round_if_converged(
+    pr: int,
+    st: dict[str, Any],
+    last: dict[str, Any],
+    converged: bool,
+    findings_measurable: bool,
+    pending_posts: int,
+) -> None:
+    """収束していれば、待ち行列の有無に応じて確定させて終了する。
+
+    収束していなければ何もせず戻る（呼び出し側が修正のラウンドへ進める）。
+    """
+    if not converged:
+        return
+    if pending_posts:
+        # **届いていない投稿があるあいだは収束させない。** 修正するものは無いので
+        # 修正の工程（2）へは回さず、流し直す先（8）へ分ける。
+        last["verdict"] = "queued"
+        _save(pr, st)
+        info(
+            f"→ 待ち行列に {pending_posts} 件残っている。"
+            "流し切るまで収束させない（`state.py flush` で流す）。"
+        )
+        sys.exit(8)
+    _finalize_converged_round(pr, st, last, findings_measurable)
+
+
 def cmd_judge(args: argparse.Namespace) -> None:
     """Step 3 — intent ベース pass 判定。
 
@@ -2690,44 +2819,29 @@ def cmd_judge(args: argparse.Namespace) -> None:
     last = st["rounds"][-1]
     only = st.get("only")
 
-    reviewers = _round_reviewers(st, last.get("round", 1))
-    intents = {a: _agent_intent(last, a, only) for a in reviewers}
-    round_passes = _round_passes(last, only, reviewers)
+    reviewers, intents, round_passes = _collect_reviewer_intents(st, last, only)
 
     carried = _carried_over_pending(st)
     carried_count = (st.get("carried_over") or {}).get("count", 0)
     new_findings, findings_measurable = _new_finding_count(st, pr)
-
-    print("REVIEWER_INTENTS='" + " ".join(
-        f"{a}={intents[a]}" for a in reviewers) + "'")
-    print(f"NEW_FINDINGS={new_findings if findings_measurable else '-'}")
-    print(f"CARRIED_OVER_THREADS={carried_count}")
     pending_posts = _pending_posts(pr)
-    print(f"PENDING_POSTS={pending_posts}")
+
+    _print_judge_status(
+        reviewers, intents, new_findings, findings_measurable,
+        carried_count, pending_posts,
+    )
 
     no_result = _no_result_agents(last, only, reviewers)
     if no_result:
         _handle_no_result_round(pr, st, last, no_result)
 
-    # **新規の指摘が 0 件なら収束する。** 全員 `APPROVE` は最も止まらない参加者に
-    # 律速される。同じ論点の再提出では止まり、新しい観点が出るあいだは回る。
-    converged = carried is None and (
-        round_passes or (findings_measurable and new_findings == 0)
+    converged = _evaluate_convergence(
+        carried, round_passes, findings_measurable, new_findings,
     )
 
-    if converged and pending_posts:
-        # **届いていない投稿があるあいだは収束させない。** 修正するものは無いので
-        # 修正の工程（2）へは回さず、流し直す先（8）へ分ける。
-        last["verdict"] = "queued"
-        _save(pr, st)
-        info(
-            f"→ 待ち行列に {pending_posts} 件残っている。"
-            "流し切るまで収束させない（`state.py flush` で流す）。"
-        )
-        sys.exit(8)
-
-    if converged:
-        _finalize_converged_round(pr, st, last, findings_measurable)
+    _finalize_round_if_converged(
+        pr, st, last, converged, findings_measurable, pending_posts,
+    )
 
     last["verdict"] = "changes_requested"
     _save(pr, st)
@@ -3045,6 +3159,71 @@ def _put_critique(target: dict[str, Any], record: dict[str, Any]) -> None:
     critiques.append(record)
 
 
+def _load_critique_items(agent: str, path: pathlib.Path) -> list[dict[str, Any]]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        info(f"⚠ {agent}: 反証の結果を読めません（{path.name}）")
+        return []
+    raw = payload.get("critiques")
+    return [c for c in raw if isinstance(c, dict)] if isinstance(raw, list) else []
+
+
+def _critique_record(agent: str, item: dict[str, Any]) -> dict[str, Any]:
+    record = {
+        "agent": agent,
+        "verdict": item.get("verdict"),
+        "reason": item.get("reason", ""),
+    }
+    if item.get("duplicate_of"):
+        record["duplicate_of"] = item["duplicate_of"]
+    return record
+
+
+def _record_unmatched_critique(
+    unmatched: list[dict[str, Any]], record: dict[str, Any], item: dict[str, Any]
+) -> None:
+    entry = {**record, "finding_id": item.get("finding_id")}
+    if entry not in unmatched:
+        unmatched.append(entry)
+
+
+def _attach_critiques(
+    st: dict[str, Any],
+    pr: int,
+    round_no: int,
+    findings: dict[str, dict[str, Any]],
+    reviewers: list[str],
+) -> tuple[int, dict[str, set[str]]]:
+    """反証ファイルを読み、結べた反証を指摘へ付ける。"""
+    unmatched = st.setdefault("unmatched_critiques", [])
+    attached = 0
+    covered: dict[str, set[str]] = {a: set() for a in reviewers}
+
+    for agent in reviewers:
+        path = _critique_path(agent, pr, round_no)
+        if not path.exists():
+            continue
+        items = _load_critique_items(agent, path)
+        for item in items:
+            record = _critique_record(agent, item)
+            target = findings.get(item.get("finding_id"))
+            if target is None or record["verdict"] not in CRITIQUE_VERDICTS:
+                # **取り直しても増やさない。** 同じラウンドで読み直すため、同じ値が
+                # 何度も積まれると「結び先なし」の件数が実際より多く見える。
+                _record_unmatched_critique(unmatched, record, item)
+                continue
+            # 提案者は返さない。統合した組では origin_runtimes 全員が提案者である。
+            proposers = target.get("origin_runtimes") or [target.get("agent")]
+            if agent in proposers:
+                continue
+            _put_critique(target, record)
+            covered[agent].add(str(target.get("finding_id")))
+            attached += 1
+
+    return attached, covered
+
+
 def cmd_collect_critiques(args: argparse.Namespace) -> None:
     """反証の結果を `review_findings[]` へ結ぶ（#156）。
 
@@ -3070,50 +3249,14 @@ def cmd_collect_critiques(args: argparse.Namespace) -> None:
         for f in st.get("review_findings") or []
         if f.get("round") == round_no
     }
-    unmatched = st.setdefault("unmatched_critiques", [])
-    attached = 0
     reviewers = _round_reviewers(st, round_no)
-    covered: dict[str, set[str]] = {a: set() for a in reviewers}
-
-    for agent in reviewers:
-        path = _critique_path(agent, pr, round_no)
-        if not path.exists():
-            continue
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            info(f"⚠ {agent}: 反証の結果を読めません（{path.name}）")
-            continue
-        raw = payload.get("critiques")
-        items = [c for c in raw if isinstance(c, dict)] if isinstance(raw, list) else []
-        for item in items:
-            record = {
-                "agent": agent,
-                "verdict": item.get("verdict"),
-                "reason": item.get("reason", ""),
-            }
-            if item.get("duplicate_of"):
-                record["duplicate_of"] = item["duplicate_of"]
-            target = findings.get(item.get("finding_id"))
-            if target is None or record["verdict"] not in CRITIQUE_VERDICTS:
-                # **取り直しても増やさない。** 同じラウンドで読み直すため、同じ値が
-                # 何度も積まれると「結び先なし」の件数が実際より多く見える。
-                entry = {**record, "finding_id": item.get("finding_id")}
-                if entry not in unmatched:
-                    unmatched.append(entry)
-                continue
-            # 提案者は返さない。統合した組では origin_runtimes 全員が提案者である。
-            proposers = target.get("origin_runtimes") or [target.get("agent")]
-            if agent in proposers:
-                continue
-            _put_critique(target, record)
-            covered[agent].add(str(target.get("finding_id")))
-            attached += 1
+    attached, covered = _attach_critiques(st, pr, round_no, findings, reviewers)
 
     # **申告による統合（2 段目）は、反証の後・区分の前に走らせる。** 次のラウンドへ
     # 回すと、同じ主張を別の本文で出した組が統合される前に収束する。
     _merge_declared_duplicates(st, round_no)
 
+    unmatched = st.get("unmatched_critiques") or []
     info(f"✅ 反証を取り込みました: {attached} 件"
          + (f"（結び先なし {len(unmatched)} 件）" if unmatched else ""))
 
@@ -3743,6 +3886,9 @@ def _merge_fix_records(st: dict, fix: dict, pr: int) -> dict:
         "resolved_threads": _count(fix.get("resolved_threads")),
         # 次のラウンドの開始時に、申告どおり Resolve されたかを突き合わせる。
         "resolved_thread_ids": _thread_ids(fix.get("resolved_threads")),
+        # **位置は効果の測定だけが読む**（#156）。収束ループの判断は増やさない。
+        # ここで写さないと、上限の方式（`oracle`）を後から計算できない。
+        "resolved_thread_positions": _thread_positions(fix.get("resolved_threads")),
         "ci": fix.get("ci_status"),
         "ci_failed_checks": fix.get("ci_failed_checks", []) or [],
         "ci_note": fix.get("ci_note"),
