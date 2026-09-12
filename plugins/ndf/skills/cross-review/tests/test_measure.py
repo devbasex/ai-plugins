@@ -1,6 +1,6 @@
 """効果の測定（`scripts/measure.py`）のテスト（#156 の 4 本目）。
 
-設計は `issues/issue-156-pr4-design.md`、計画は `issues/issue-156-pr4-plan.md` にある。
+確定仕様は `docs/specifications/cross-review-evidence-based.md` にある。
 **測定は状態ファイルを読むだけで、GitHub へ問い合わせない。**
 """
 from __future__ import annotations

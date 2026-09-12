@@ -206,7 +206,7 @@ def test_a_reused_result_carries_a_time_too(state_mod, work):
 # ---------- 束ねた組 ----------
 
 def test_a_merged_side_is_verified_too(state_mod, work):
-    """**束ねた組の全員を対象にする**（`issue-156-pr3-contracts.md`）。"""
+    """**束ねた組の全員を対象にする**（`docs/specifications/cross-review-evidence-based.md`）。"""
     out = verify(state_mod, [
         _finding("f0", "pytest tests/t.py"),
         _finding("f1", "pytest tests/t.py", merged_into="f0"),
