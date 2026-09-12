@@ -150,6 +150,23 @@ def test_wall_clock_is_null_while_the_run_has_not_ended(measure_mod):
     assert measure_mod.measure(st)["cost"]["wall_clock_seconds"] is None
 
 
+@pytest.mark.parametrize("started_at,ended_at", [
+    ("2026-05-23T00:00:00+00:00", "2026-05-23T01:10:00"),
+    ("2026-05-23T00:00:00", "2026-05-23T01:10:00+00:00"),
+])
+def test_wall_clock_is_null_when_the_offsets_do_not_match(
+        measure_mod, started_at, ended_at):
+    """タイムゾーンの有無が混ざった記録でも測定を止めない（#558 レビュー）。
+
+    offset-aware と offset-naive の引き算は `TypeError` を投げる。受け取って
+    `None` を返さないと、費用の 1 項目のために測定そのものが落ちる。
+    **どちらが欠けても同じである**ため、並びを入れ替えた 2 通りを固定する。
+    """
+    st = _state(rounds=[_round(1)], started_at=started_at, ended_at=ended_at)
+
+    assert measure_mod.measure(st)["cost"]["wall_clock_seconds"] is None
+
+
 # ---------- 呼び出し方 ----------
 
 
@@ -292,6 +309,25 @@ def test_oracle_counts_a_thread_without_a_position_as_unmatched(measure_mod):
         review_findings=[_finding("codex-r1-0", 1, "a.py", 10)],
     )
 
+    assert measure_mod.measure(st)["methods"]["oracle"] == {
+        "found": 0, "unmatched": 1, "ambiguous": 0}
+
+
+def test_oracle_does_not_count_a_finding_without_an_id(measure_mod):
+    """`finding_id` を持たない指摘は結ばない（#558 レビュー）。
+
+    `str(None)` を返すと、呼び出し側の `finding_id is None` の検査をすり抜け、
+    上限の方式の集合へ文字列 `"None"` が入る。**上限が 1 件多く見え、他の方式の
+    再現率がその分だけ低く出る。** 結べなかったものとして `unmatched` へ数える。
+    """
+    finding = _finding("codex-r1-0", 1, "a.py", 10)
+    del finding["finding_id"]
+    st = _state(
+        rounds=[_round(1, fix=_fix(_position("T1", "a.py", 10)))],
+        review_findings=[finding],
+    )
+
+    assert measure_mod._oracle(st).finding_ids == set()
     assert measure_mod.measure(st)["methods"]["oracle"] == {
         "found": 0, "unmatched": 1, "ambiguous": 0}
 

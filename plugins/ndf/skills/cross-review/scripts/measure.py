@@ -100,12 +100,20 @@ def _wall_clock_seconds(st: dict[str, Any]) -> int | None:
 
     片方でも読めなければ `None` を返す。0 で埋めると、終わっていない実行が
     「一瞬で終わった実行」として合計へ混ざる。
+
+    **タイムゾーンの有無が揃わない記録も読めないものとして扱う。** offset-aware と
+    offset-naive の引き算は `TypeError` を投げる。受け取らないと、費用の 1 項目の
+    ために測定そのものが落ちる。
     """
     started = _parse_time(st.get("started_at"))
     ended = _parse_time(st.get("ended_at"))
     if started is None or ended is None:
         return None
-    return int(round((ended - started).total_seconds()))
+    try:
+        elapsed = (ended - started).total_seconds()
+    except TypeError:
+        return None
+    return int(round(elapsed))
 
 
 def _reviewer_count(round_rec: dict[str, Any]) -> int:
@@ -227,7 +235,13 @@ def _find_best_match(
     ]
     if len(newest_candidates) > 1:
         return None, True
-    return str(newest_candidates[0].get("finding_id")), False
+    finding_id = newest_candidates[0].get("finding_id")
+    if finding_id is None:
+        # **`str(None)` を返さない。** 呼び出し側の `finding_id is None` の検査を
+        # すり抜け、上限の方式の集合へ文字列 `"None"` が入る。上限が 1 件多く
+        # 見え、他の方式の再現率がその分だけ低く出る。
+        return None, False
+    return str(finding_id), False
 
 
 def _resolved_position_sources(st: dict[str, Any]) -> list[ResolvedPositionSource]:
