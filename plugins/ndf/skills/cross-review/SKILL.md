@@ -1,7 +1,7 @@
 ---
 name: cross-review
 description: "Review a PR with two CLIs picked from the runtimes other than the host, looping fixes until no new finding appears. Use when a converging multi-AI review is wanted（クロスレビュー・両AIレビュー・収束レビュー）."
-argument-hint: "[PR番号] [--host claude|codex|agy|kiro] [--max-rounds N] [--rotate-after K] [--rotate-mode light|squash] [--only RUNTIME] [--focus TEXT] [--extra-instructions-file PATH]"
+argument-hint: "[PR番号] [--host claude|codex|agy|kiro] [--max-rounds N] [--rotate-after K] [--rotate-mode light|squash] [--only RUNTIME] [--focus TEXT] [--extra-instructions-file PATH] [--verify-command CMD] [--verify-exit-code N]"
 allowed-tools:
   - Bash
   - Read
@@ -32,11 +32,13 @@ PR を**ホストを除く 3 者から選んだ 2 者**にレビューさせ、*
 - [docs/03-review-output.md](docs/03-review-output.md) — レビュー出力の制約 / CI failure の分類 / アンチパターン / monitor.py の誤検知
 - [docs/04-contracts.md](docs/04-contracts.md) — 状態ファイルの形式と AI への入出力の契約（手順の途中では読まない）
 - [docs/05-pool-and-convergence.md](docs/05-pool-and-convergence.md) — 誰がレビューし、いつ止めるか（母集合・担当の輪番・認証・終了基準の 3 層）
+- [docs/06-evidence.md](docs/06-evidence.md) — 指摘に求める根拠と反証条件、独立発見の規約、効果の測定（4 つの方式と限界）
 - [scripts/state.py](scripts/state.py) — state.json 操作（uv 自己完結スクリプト、stdlib のみ）
 - [scripts/launch-reviewer.sh](scripts/launch-reviewer.sh) — レビュワー起動の入口（4 ランタイム共通）。`launch-codex.sh` / `launch-agy.sh` はここへの薄い委譲
 - [scripts/monitor.py](scripts/monitor.py) — codex/agy プロセス多軸監視 (sentinel / pidfile / 早期エラー / stall / hard timeout / result.json)
 - [scripts/wait-review.sh](scripts/wait-review.sh) — `monitor.py` の薄ラッパ（互換用）
 - [scripts/rotate-pr.sh](scripts/rotate-pr.sh) — PR ローテーション
+- [scripts/measure.py](scripts/measure.py) — 効果の測定（状態ファイル 1 つを読む。収束ループの外にあり、手順の途中では呼ばない）
 
 メインセッションからは `$SCRIPTS/state.py <subcommand>` 形式で呼ぶだけで、
 state.json の読み書きや AI launcher 起動・完了待ちは全て委譲される。
@@ -71,6 +73,8 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 | `--only RUNTIME` | 1 者だけで回す（デバッグ用）。**そのラウンドの担当を 1 者へ絞る。** 母集合の外を指定したら `init` が弾く | 担当 2 者 |
 | `--focus TEXT` | 自動レビュー観点に上乗せして**そのラウンドのレビュー担当 2 者**に渡す追加観点。短い重点チェック向け | なし |
 | `--extra-instructions-file PATH` | 自動レビュー観点に上乗せして**そのラウンドのレビュー担当 2 者**に渡す追加観点を UTF-8 テキストファイルから読む。長いチェックリスト向け | なし |
+| `--verify-command CMD` | 実行検証（Step 2.5）で実行してよいコマンド。**渡さなければ実行検証を行わない** | なし |
+| `--verify-exit-code N` | 再現とみなす終了コード。**「0 でない」を再現としない** | `1` |
 
 例:
 
@@ -81,6 +85,7 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 /ndf:cross-review 123 --only codex
 /ndf:cross-review 123 --focus "ドキュメントとコードの整合性を重点的に確認"
 /ndf:cross-review 123 --extra-instructions-file /tmp/review-focus.md
+/ndf:cross-review 123 --verify-command "pytest" --verify-exit-code 1
 ```
 
 ### 自動レビュー観点テンプレート
@@ -131,22 +136,7 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 | 3 | agy の作業領域 | `launch-agy.sh` が `--add-dir` で作業ツリーを宣言する。**tmp dir は `<worktree>/.cross_review/`** を採用し、宣言する作業領域を 1 つに保つ |
 | 4 | 既存コメント差分 | `fix/scripts/fetch-pr-comments.sh` で 3 ソース (インラインコメント / レビュー body / PR レベルコメント) を一括取得し `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt` に保存。agy プロンプトには **内容をインライン埋め込み**、codex プロンプトには path を渡す |
 
-### `<worktree-base>` の解決順
-
-`state.py init` は worktree の親ディレクトリを以下の優先順で解決する:
-
-1. `NDF_WORKTREE_BASE` 環境変数（明示オーバーライド）
-2. `<システム tmpdir>/ndf-worktrees`（Python `tempfile.gettempdir()`。非永続領域のため
-   コンテナ再作成で自動消滅し、共有 volume を消費しない）
-
-worktree の実パスは `<base>/<owner>--<repo>/pr<PR>` 形式で、リポジトリ slug を含める
-ことで**他リポジトリの同一 PR 番号と衝突しない**。永続 volume（旧 `/work/worktrees`）を
-使っていた頃は別プロジェクトの残骸 worktree を誤って流用する事故があったため、
-パスが存在しても `git worktree list` に登録されていなければ `.stale-<timestamp>` に
-退避して作り直すガードも入っている。
-
-解決した実パスは `state.json` の `worktree_path` に書かれるため、後続スクリプトや
-サブエージェント prompt は state.json から読めば追従できる。
+`<worktree-base>` の解決順と worktree の実パスの形は [docs/04-contracts.md](docs/04-contracts.md) の「`<worktree-base>` の解決順」にある。
 
 ### intent / posted_as の両保持（最重要）
 
@@ -222,6 +212,7 @@ INIT_VARS=$("$SCRIPTS/state.py" init "$STATE_PR" \
           ${HOST:+--host "$HOST"} \
           ${ONLY:+--only "$ONLY"} \
           ${FOCUS:+--focus "$FOCUS"} \
+          ${VERIFY_COMMAND:+--verify-command "$VERIFY_COMMAND"} ${VERIFY_EXIT_CODE:+--verify-exit-code "$VERIFY_EXIT_CODE"} \
           ${EXTRA_INSTRUCTIONS_FILE:+--extra-instructions-file "$EXTRA_INSTRUCTIONS_FILE"}) || exit $?
 eval "$INIT_VARS"
 # eval で TMP_DIR がセットされる。後続スクリプトに env として伝播させる。
@@ -247,6 +238,14 @@ while :; do
     [ -z "$ONLY" ] || [ "$ONLY" = "$r" ] || continue
     "$SCRIPTS/state.py" read-result "$STATE_PR" "$r" || true
   done
+
+  # Step 2.5: 根拠の検証（#156）。順序と理由は docs/06-evidence.md の「走らせる順序」。
+  #   飛ばすと、判定が読む区分が統合も実行の結果も反映しないまま決まる。
+  # ⚠ 起動 → 監視 → 取り込みは critique-round.sh が持つ。**未起動の担当を監視へ渡さない**
+  #   （渡すと 30 秒待って PIDFILE_BAD (exit 6) が返る）ことと、有効な反証が揃わない
+  #   ときに同じラウンドで 1 度だけ取り直すことを、この 1 本が引き受ける。
+  "$SCRIPTS/state.py" verify-findings "$STATE_PR"
+  "$SCRIPTS/critique-round.sh" "$STATE_PR" "$ROUND" ${ONLY:-$REVIEWERS}
 
   # Step 3: 判定 (0=収束 / 2=修正へ / 7=結果なし / 8=待ち行列に残あり / 1=中断)。引き継いだ指摘が残っていれば、
   #   両者が承認しても 2 を返して修正の工程へ回す。置換の終了コードは変数で受けてから読む。

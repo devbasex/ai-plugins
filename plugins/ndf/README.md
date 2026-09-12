@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.9.1）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.10.0）
 ```
 
 ### agy
@@ -119,27 +119,28 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.9.1 へ更新するとき
+## v10.10.0 へ更新するとき
 
-**`cross-refactoring` が手順書どおりに起動できるようになりました。** 工程とモードの判定は
-変わりません。変更点の一覧は [CHANGELOG.md](../../CHANGELOG.md) にあります。
+**`cross-review` が指摘に根拠と反証条件を求めるようになりました。** 起動のしかたは変わり
+ません。変更点の一覧は [CHANGELOG.md](../../CHANGELOG.md) にあります。
 
 | 変わったこと | 中身 |
 | --- | --- |
-| **提案フェーズの起動が止まらなくなりました** | `refactor.py start-round` が提案・レビューの母集合（`RUNTIMES` / `RUNTIMES_CSV`）を返します。これまでは `init` だけが返していたため、状態ファイルから再開する経路と骨組みを抜粋して写す経路で未定義になっていました |
-| **`--scope` にテストの実体を持つ親を渡せます** | 名前で当たらないときだけ、配下 1 段を走査して判定します。`plugins/ndf/skills/development-workflow` のように `tests/` を実体として持つディレクトリが通ります |
-| **push が credential helper の不全で止まりません** | 失敗したときに `gh` の認証へ退避して 1 度だけ再試行します。既定の経路は変わりません |
-| 手順書 3 本に退避の手が載りました | `pr` / `fix` / `cross-refactoring` |
+| **指摘に 3 項目が要ります** | 位置・再現の筋道・反証条件が揃ったものだけを根拠のある指摘として扱います。揃わない指摘は `insufficient_evidence` になり、収束の判定に数えません |
+| **収束ループに反証の段（Step 2.5）が入りました** | レビュー担当が互いの指摘へ支持・反証を出し、結果を 5 つの区分へ集約します。収束の判定が数えるのは `verified_blocking` と `needs_human_judgment` の 2 つだけで、棄却した指摘はラウンドを増やしません |
+| **実行して再現を確かめられます** | `--verify-command` を渡したラウンドだけ、そのコマンドを実行します。渡さなければ実行検証は行いません |
+| **却下した指摘が位置ごとに残ります** | 次のラウンドで同じ論点が再提出されたときに突き合わせます。`fix` が返す `rejected` の各要素に `path` / `line` / `severity` が要ります |
+| 効果を測れます | `scripts/measure.py` が状態ファイル 1 つから 4 つの方式を読み、費用と収束の様子を出します。収束ループの外にあり、手順の途中では呼びません |
+| 工程を 1 つの窓で通し切らなくてよくなりました | `development-workflow` の `references/context-window.md` が、切ってよい点・委譲する対象・残量の見方を持ちます |
 
-### 退避の手を手で使うとき
+### 実行検証を使うとき
 
-`gh` は認証済みなのに `git push` だけが `Authentication failed` を返す環境では、次の形で
-通ります。**空の値を先に置いてください。** `credential.helper` は複数の値を持てる設定で、
-`git` は宣言された順に問い合わせます。空の値だけが一覧を空へ戻します。
+**`--verify-command` に渡したコマンドだけが実行されます。** 渡さないラウンドは反証だけを
+行います。再現とみなす終了コードは既定で `1` です。**「0 でない」を再現としません**（実行が
+失敗しただけの状態を再現と数えないためです）。
 
 ```bash
-git -c credential.helper= -c credential.helper='!gh auth git-credential' \
-    push -u origin <ブランチ>
+/ndf:cross-review 123 --verify-command "pytest -q" --verify-exit-code 1
 ```
 
 ## Playwright テストについて
@@ -281,7 +282,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.9.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.10.0/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -303,14 +304,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.9.1/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.10.0/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.9.1  <path>
+# => ndf@ai-plugins  installed, enabled  10.10.0  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
