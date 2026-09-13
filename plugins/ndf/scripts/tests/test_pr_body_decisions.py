@@ -242,6 +242,29 @@ def test_5_fence_inside_decisions_does_not_end_or_add_headings(fake):
     assert out.returncode == 0, out.stdout + out.stderr
 
 
+def test_5_long_fence_closes_only_with_same_marker_and_sufficient_length(fake):
+    """現状固定: 長い fence は異なる記号や短い同記号では閉じない。"""
+    design = (
+        "# 設計\n\n## 決定の記録\n\n"
+        "### 決定 1: fence 外の決定\n\n"
+        "``````markdown\n"
+        "```\n"
+        "~~~~~~\n"
+        "### 決定 9: fence 内の見出し\n"
+        "``````\n\n"
+        "### 決定 2: 閉じ fence 後の決定\n"
+    )
+    expected = section((
+        "issues/issue-1-design.md",
+        ["決定 1: fence 外の決定", "決定 2: 閉じ fence 後の決定"],
+    ))
+    design_pr(fake, expected, design=design)
+
+    out = fake.run("check", "7", "--repo", REPO)
+
+    assert out.returncode == 0, out.stdout + out.stderr
+
+
 @pytest.mark.parametrize("flag", ["fail_pr"])
 def test_6_unreadable_pull_request_returns_2(fake, flag):
     design_pr(fake, EXPECTED, **{flag: True})
