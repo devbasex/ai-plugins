@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.11.0-dev.1）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.11.0）
 ```
 
 ### agy
@@ -119,13 +119,12 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.11.0-dev.1 へ更新するとき
+## v10.11.0 へ更新するとき
 
 **失敗や食い違いが表に出ないまま通っていた箇所を塞ぎました。** 破壊的な変更はなく、記録の
 移行も要りません。変更点の一覧は [CHANGELOG.md](../../CHANGELOG.md) にあります。
 
-**開発版です。** `develop` にだけ載ります。取得元へ `#develop` を足す手順は
-[docs/versioning-and-distribution.md の「開発版を試す」](../../docs/versioning-and-distribution.md#開発版を試す)にあります。
+**正式版です。** 開発版 `10.11.0-dev.1` と中身は同じで、`main` に載ります。
 
 | 変わったこと | 中身 |
 | --- | --- |
@@ -137,8 +136,10 @@ agy plugin list
 | Skill 執筆の規約のファイル名 | `skills/README.md` から `skills/AUTHORING.md` へ変わりました。本文は変わりません |
 | `--model` の例 | claude の識別子を `claude-opus-5` へ直しました。以前の例の `opus-5` を写すと 404 になります |
 
-開発版のチャネルを登録済みなら、次で入れ替わります。**動いているセッションには反映されない**
-ため、更新したあとは起動し直してください。
+正式版のチャネル（ref を指定せずに登録した取得元）なら、次で入れ替わります。**動いているセッションには
+反映されない**ため、更新したあとは起動し直してください。開発版を試すために `develop` を登録した
+場合は、[docs/versioning-and-distribution.md の「ランタイムごとの取得と導入」](../../docs/versioning-and-distribution.md#ランタイムごとの取得と導入)
+の手順で ref を指定せずに登録し直してから導入します。
 
 ```bash
 claude plugin marketplace update ai-plugins
@@ -299,7 +300,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.11.0-dev.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.11.0/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -321,14 +322,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.11.0-dev.1/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.11.0/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.11.0-dev.1  <path>
+# => ndf@ai-plugins  installed, enabled  10.11.0  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
