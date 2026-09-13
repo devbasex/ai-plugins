@@ -135,116 +135,111 @@ if [ ! -f "$POLICY_SKILL_FILE" ]; then
   exit 1
 fi
 
+# 導入の各段は関数にし、末尾のパイプラインが順に呼ぶ。各段が読むのは上で確定した
+# 変数だけで、段をまたいで受け渡すのは SKILL_COUNT と MIGRATED_FROM_LEGACY の 2 つである。
+
 # --- Step 1: Create symlinks in <scope>/skills/ ---
-echo "Skills シンボリックリンクを作成中..."
-SKILL_COUNT=0
-if [ "$DRY_RUN" = false ]; then
-  mkdir -p "$SKILLS_DIR"
-  while IFS= read -r skill_link; do
-    target="$(readlink "$skill_link")"
-    case "$target" in
-      /*) target_abs="$target" ;;
-      *) target_abs="$(realpath -m "$(dirname "$skill_link")/$target")" ;;
-    esac
-    plugin_skills_abs="$(realpath -m "$PLUGIN_SKILLS_DIR")"
-    case "$target_abs" in
-      "$plugin_skills_abs"/*) rm -f "$skill_link" ;;
-    esac
-  done < <(find "$SKILLS_DIR" -mindepth 1 -maxdepth 1 -type l | sort)
-fi
-
-while IFS= read -r src_dir; do
-  skill_name="$(basename "$src_dir")"
-
-  if [ ! -f "$src_dir/SKILL.md" ]; then
-    echo "  SKIP: $skill_name (SKILL.mdなし)"
-    continue
-  fi
-
-  # ndf-policies は Step 3 で steering として展開する。Skill としてもリンクすると
-  # Kiro 組み込みルールの Skill 読み込みと steering 読み込みで文脈へ二重注入されるため、
-  # ここではリンクしない。manifest には残す（steering の生成元として必要なため）。
-  # 旧 installer が別 checkout から張ったリンクは Step 1 の掃除（現在の
-  # $PLUGIN_SKILLS_DIR 配下を指すものだけ削除）に掛からないため、ここで
-  # リンク先に関係なく既存のエントリを取り除いてから skip する。
-  if [ "$skill_name" = "ndf-policies" ]; then
-    # 削除するのは旧 installer が張ったシンボリックリンクだけに限る。実体
-    # ディレクトリや通常ファイルは利用者が置いたものの可能性があるため、
-    # 消さずに案内して手動対応に委ねる。
-    if [ -L "$SKILLS_DIR/$skill_name" ]; then
-      if [ "$DRY_RUN" = false ]; then
-        rm -f "$SKILLS_DIR/$skill_name"
-      fi
-      echo "  REMOVED: $skill_name (steering へ移行済みのため .kiro/skills のリンクを削除)"
-    elif [ -e "$SKILLS_DIR/$skill_name" ]; then
-      echo "  WARN: $SKILLS_DIR/$skill_name はシンボリックリンクではありません。" >&2
-      echo "        steering (.kiro/steering/ndf-policies.md) と二重に読み込まれるため、" >&2
-      echo "        内容を確認のうえ手動で退避または削除してください。" >&2
-    fi
-    echo "  SKIP: $skill_name (steering として配置)"
-    continue
-  fi
-
+# 出力: SKILL_COUNT（リンクした Skill の数）
+install_skills() {
+  local skill_link target target_abs plugin_skills_abs src_dir skill_name
+  echo "Skills シンボリックリンクを作成中..."
+  SKILL_COUNT=0
   if [ "$DRY_RUN" = false ]; then
-    ln -sfn "$PLUGIN_SKILLS_DIR/$skill_name" "$SKILLS_DIR/$skill_name"
+    mkdir -p "$SKILLS_DIR"
+    while IFS= read -r skill_link; do
+      target="$(readlink "$skill_link")"
+      case "$target" in
+        /*) target_abs="$target" ;;
+        *) target_abs="$(realpath -m "$(dirname "$skill_link")/$target")" ;;
+      esac
+      plugin_skills_abs="$(realpath -m "$PLUGIN_SKILLS_DIR")"
+      case "$target_abs" in
+        "$plugin_skills_abs"/*) rm -f "$skill_link" ;;
+      esac
+    done < <(find "$SKILLS_DIR" -mindepth 1 -maxdepth 1 -type l | sort)
   fi
-  echo "  linked: $skill_name"
-  SKILL_COUNT=$((SKILL_COUNT + 1))
-  # 配る Skill は manifests/kiro-skills.txt が決める。skills/ にはどの runtime へも配る
-  # Skill が並んでおり、Kiro 向けはその一部である。ディレクトリを列挙すると、他の runtime
-  # だけへ配る Skill まで張ってしまう。
-done < <(sed 's/#.*//' "$SKILL_MANIFEST" | sed 's/[[:space:]]*$//' \
-           | grep -v '^$' | sort | sed "s#^#$PLUGIN_SKILLS_DIR/#")
+
+  while IFS= read -r src_dir; do
+    skill_name="$(basename "$src_dir")"
+
+    if [ ! -f "$src_dir/SKILL.md" ]; then
+      echo "  SKIP: $skill_name (SKILL.mdなし)"
+      continue
+    fi
+
+    # ndf-policies は Step 3 で steering として展開する。Skill としてもリンクすると
+    # Kiro 組み込みルールの Skill 読み込みと steering 読み込みで文脈へ二重注入されるため、
+    # ここではリンクしない。manifest には残す（steering の生成元として必要なため）。
+    # 旧 installer が別 checkout から張ったリンクは Step 1 の掃除（現在の
+    # $PLUGIN_SKILLS_DIR 配下を指すものだけ削除）に掛からないため、ここで
+    # リンク先に関係なく既存のエントリを取り除いてから skip する。
+    if [ "$skill_name" = "ndf-policies" ]; then
+      # 削除するのは旧 installer が張ったシンボリックリンクだけに限る。実体
+      # ディレクトリや通常ファイルは利用者が置いたものの可能性があるため、
+      # 消さずに案内して手動対応に委ねる。
+      if [ -L "$SKILLS_DIR/$skill_name" ]; then
+        if [ "$DRY_RUN" = false ]; then
+          rm -f "$SKILLS_DIR/$skill_name"
+        fi
+        echo "  REMOVED: $skill_name (steering へ移行済みのため .kiro/skills のリンクを削除)"
+      elif [ -e "$SKILLS_DIR/$skill_name" ]; then
+        echo "  WARN: $SKILLS_DIR/$skill_name はシンボリックリンクではありません。" >&2
+        echo "        steering (.kiro/steering/ndf-policies.md) と二重に読み込まれるため、" >&2
+        echo "        内容を確認のうえ手動で退避または削除してください。" >&2
+      fi
+      echo "  SKIP: $skill_name (steering として配置)"
+      continue
+    fi
+
+    if [ "$DRY_RUN" = false ]; then
+      ln -sfn "$PLUGIN_SKILLS_DIR/$skill_name" "$SKILLS_DIR/$skill_name"
+    fi
+    echo "  linked: $skill_name"
+    SKILL_COUNT=$((SKILL_COUNT + 1))
+    # 配る Skill は manifests/kiro-skills.txt が決める。skills/ にはどの runtime へも配る
+    # Skill が並んでおり、Kiro 向けはその一部である。ディレクトリを列挙すると、他の runtime
+    # だけへ配る Skill まで張ってしまう。
+  done < <(sed 's/#.*//' "$SKILL_MANIFEST" | sed 's/[[:space:]]*$//' \
+             | grep -v '^$' | sort | sed "s#^#$PLUGIN_SKILLS_DIR/#")
+}
 
 # --- Step 2: Create prompts in <scope>/prompts/ for workflow skills ---
-echo "ワークフロープロンプトを作成中..."
-if [ "$DRY_RUN" = false ]; then
-  mkdir -p "$PROMPTS_DIR"
-  if [ "$WITH_CODEX" = false ]; then
-    rm -f "$PROMPTS_DIR/codex.md"
-  fi
-  for deprecated_prompt in $DEPRECATED_PROMPTS; do
-    if [ -f "$PROMPTS_DIR/$deprecated_prompt" ]; then
-      rm -f "$PROMPTS_DIR/$deprecated_prompt"
-      echo "  removed (deprecated): ${deprecated_prompt%.md}"
-    fi
-  done
-fi
-
-while IFS= read -r prompt_file; do
-  prompt_name="$(basename "$prompt_file")"
-  [ "$prompt_name" = "codex.md" ] && [ "$WITH_CODEX" = false ] && continue
+install_prompts() {
+  local deprecated_prompt prompt_file prompt_name
+  echo "ワークフロープロンプトを作成中..."
   if [ "$DRY_RUN" = false ]; then
-    cp "$prompt_file" "$PROMPTS_DIR/$prompt_name"
+    mkdir -p "$PROMPTS_DIR"
+    if [ "$WITH_CODEX" = false ]; then
+      rm -f "$PROMPTS_DIR/codex.md"
+    fi
+    for deprecated_prompt in $DEPRECATED_PROMPTS; do
+      if [ -f "$PROMPTS_DIR/$deprecated_prompt" ]; then
+        rm -f "$PROMPTS_DIR/$deprecated_prompt"
+        echo "  removed (deprecated): ${deprecated_prompt%.md}"
+      fi
+    done
   fi
-  echo "  prompt: ${prompt_name%.md}"
-done < <(find "$PLUGIN_PROMPTS_DIR" -maxdepth 1 -type f -name '*.md' | sort)
 
-if [ "$WITH_CODEX" = true ] && [ ! -f "$PLUGIN_PROMPTS_DIR/codex.md" ]; then
-  echo "ERROR: $PLUGIN_PROMPTS_DIR/codex.md が見つかりません" >&2
-  exit 1
-fi
+  while IFS= read -r prompt_file; do
+    prompt_name="$(basename "$prompt_file")"
+    [ "$prompt_name" = "codex.md" ] && [ "$WITH_CODEX" = false ] && continue
+    if [ "$DRY_RUN" = false ]; then
+      cp "$prompt_file" "$PROMPTS_DIR/$prompt_name"
+    fi
+    echo "  prompt: ${prompt_name%.md}"
+  done < <(find "$PLUGIN_PROMPTS_DIR" -maxdepth 1 -type f -name '*.md' | sort)
 
-if [ "$WITH_SLACK" = true ]; then echo "Slack通知: 有効"; else echo "Slack通知: 無効 (--with-slack で有効化)"; fi
-if [ "$WITH_CODEX" = true ]; then echo "Codex CLI連携: 有効"; else echo "Codex CLI連携: 無効 (--with-codex で有効化)"; fi
-
-if [ "$DRY_RUN" = true ]; then
-  echo ""
-  echo "DRY RUN: 書き込みは行いませんでした"
-  if [ -f "$LEGACY_AGENT_FILE" ]; then
-    echo "  旧設定 $LEGACY_AGENT_FILE を検出（実行時に移行可否を判定します）"
+  if [ "$WITH_CODEX" = true ] && [ ! -f "$PLUGIN_PROMPTS_DIR/codex.md" ]; then
+    echo "ERROR: $PLUGIN_PROMPTS_DIR/codex.md が見つかりません" >&2
+    exit 1
   fi
-  echo "  NDF バージョン: $NDF_VERSION"
-  echo "  エージェント設定: $AGENT_FILE"
-  echo "  常時指示: $STEERING_FILE"
-  echo "  Skills数: $SKILL_COUNT"
-  exit 0
-fi
+}
 
 # --- Step 3: Generate steering (always-on instructions) ---
 # steering はエージェント選択に依存せず読み込まれるため、常時指示はここへ置く。
-mkdir -p "$(dirname "$STEERING_FILE")"
-python3 - "$POLICY_SKILL_FILE" "$STEERING_FILE" <<'PY'
+generate_steering() {
+  mkdir -p "$(dirname "$STEERING_FILE")"
+  python3 - "$POLICY_SKILL_FILE" "$STEERING_FILE" <<'PY'
 import sys
 from pathlib import Path
 
@@ -261,16 +256,19 @@ header = (
 )
 dest.write_text(f"{header}\n{body}\n", encoding="utf-8")
 PY
-echo "常時指示を生成: $STEERING_FILE"
+  echo "常時指示を生成: $STEERING_FILE"
+}
 
 # --- Step 4: Migrate legacy default agent ---
-MIGRATED_FROM_LEGACY=false
-if [ -f "$LEGACY_AGENT_FILE" ]; then
-  cp "$LEGACY_AGENT_FILE" "${LEGACY_AGENT_FILE}.bak"
-  echo ""
-  echo "WARN: 旧エージェント設定 $LEGACY_AGENT_FILE を検出しました。"
-  echo "      バックアップ: ${LEGACY_AGENT_FILE}.bak"
-  if python3 -c '
+# 出力: MIGRATED_FROM_LEGACY（旧設定を $AGENT_FILE へ移したとき true）
+migrate_legacy_agent() {
+  MIGRATED_FROM_LEGACY=false
+  if [ -f "$LEGACY_AGENT_FILE" ]; then
+    cp "$LEGACY_AGENT_FILE" "${LEGACY_AGENT_FILE}.bak"
+    echo ""
+    echo "WARN: 旧エージェント設定 $LEGACY_AGENT_FILE を検出しました。"
+    echo "      バックアップ: ${LEGACY_AGENT_FILE}.bak"
+    if python3 -c '
 import json, sys
 try:
     config = json.load(open(sys.argv[1], encoding="utf-8"))
@@ -310,47 +308,51 @@ except Exception:
     sys.exit(1)
 sys.exit(0 if matched else 1)
 ' "$LEGACY_AGENT_FILE"; then
-    echo "      これは旧版 NDF installer の生成物です。"
-    if [ -f "$AGENT_FILE" ]; then
-      # 移行先が既にある場合に上書きすると、そちらの利用者設定を失う。手動判断へ回す。
-      echo "      ただし $AGENT_FILE が既に存在するため自動移行しません。"
-      echo "      移行手順:"
-      echo "        1. 必要な設定が ${LEGACY_AGENT_FILE}.bak にだけ残っていないか確認する"
-      echo "        2. 不要になったら rm $LEGACY_AGENT_FILE ${LEGACY_AGENT_FILE}.bak"
+      echo "      これは旧版 NDF installer の生成物です。"
+      if [ -f "$AGENT_FILE" ]; then
+        # 移行先が既にある場合に上書きすると、そちらの利用者設定を失う。手動判断へ回す。
+        echo "      ただし $AGENT_FILE が既に存在するため自動移行しません。"
+        echo "      移行手順:"
+        echo "        1. 必要な設定が ${LEGACY_AGENT_FILE}.bak にだけ残っていないか確認する"
+        echo "        2. 不要になったら rm $LEGACY_AGENT_FILE ${LEGACY_AGENT_FILE}.bak"
+      else
+        # 旧設定を移行先へ置いてから Step 5 に進める。Step 5 は既存ファイルから
+        # installer 管理外のキーを引き継ぐため、これだけで利用者設定の移行と
+        # テンプレート由来キー（エージェント名など）の最新化が両方完了する。
+        mv "$LEGACY_AGENT_FILE" "$AGENT_FILE"
+        MIGRATED_FROM_LEGACY=true
+        echo "      $AGENT_FILE へ自動移行しました（利用者が追記した設定は下で引き継ぎます）。"
+        echo "      不要になったら: rm ${LEGACY_AGENT_FILE}.bak"
+      fi
     else
-      # 旧設定を移行先へ置いてから Step 5 に進める。Step 5 は既存ファイルから
-      # installer 管理外のキーを引き継ぐため、これだけで利用者設定の移行と
-      # テンプレート由来キー（エージェント名など）の最新化が両方完了する。
-      mv "$LEGACY_AGENT_FILE" "$AGENT_FILE"
-      MIGRATED_FROM_LEGACY=true
-      echo "      $AGENT_FILE へ自動移行しました（利用者が追記した設定は下で引き継ぎます）。"
-      echo "      不要になったら: rm ${LEGACY_AGENT_FILE}.bak"
+      echo "      NDF 以外が管理している設定です。移行手順:"
+      echo "        1. 必要な mcpServers / hooks を $AGENT_FILE へ写す"
+      echo "        2. 不要になったら rm $LEGACY_AGENT_FILE ${LEGACY_AGENT_FILE}.bak"
+      echo "      Kiro 用 MCP プラグインの installer は default.json を更新するため、"
+      echo "      MCP を併用する場合は上記の写し替えが必要です。"
+      echo "      写した設定は本 installer を再実行しても保持されます。"
     fi
-  else
-    echo "      NDF 以外が管理している設定です。移行手順:"
-    echo "        1. 必要な mcpServers / hooks を $AGENT_FILE へ写す"
-    echo "        2. 不要になったら rm $LEGACY_AGENT_FILE ${LEGACY_AGENT_FILE}.bak"
-    echo "      Kiro 用 MCP プラグインの installer は default.json を更新するため、"
-    echo "      MCP を併用する場合は上記の写し替えが必要です。"
-    echo "      写した設定は本 installer を再実行しても保持されます。"
+    echo ""
   fi
-  echo ""
-fi
+}
 
 # --- Step 5: Generate agent config ---
-mkdir -p "$KIRO_DIR/agents"
+# 引数: Step 4 の MIGRATED_FROM_LEGACY
+generate_agent_config() {
+  local migrated_from_legacy="$1"
+  mkdir -p "$KIRO_DIR/agents"
 
-# Step 4 で移行した直後は ${LEGACY_AGENT_FILE}.bak が同じ内容のバックアップなので取らない。
-if [ -f "$AGENT_FILE" ] && [ "$MIGRATED_FROM_LEGACY" = false ]; then
-  cp "$AGENT_FILE" "${AGENT_FILE}.bak"
-  echo "既存設定をバックアップ: ${AGENT_FILE}.bak"
-fi
+  # Step 4 で移行した直後は ${LEGACY_AGENT_FILE}.bak が同じ内容のバックアップなので取らない。
+  if [ -f "$AGENT_FILE" ] && [ "$migrated_from_legacy" = false ]; then
+    cp "$AGENT_FILE" "${AGENT_FILE}.bak"
+    echo "既存設定をバックアップ: ${AGENT_FILE}.bak"
+  fi
 
-# installer が管理するのはテンプレート由来のキー（name / description / tools /
-# resources / hooks.agentSpawn）と、フラグで切り替える hooks.stop / mcpServers.codex
-# だけ。それ以外（利用者が足した mcpServers エントリ、独自フック、独自キー）は
-# 既存の $AGENT_FILE から引き継ぐ。再インストールで写し替えた設定が消えないようにする。
-python3 - "$TEMPLATE_FILE" "$WITH_SLACK" "$WITH_CODEX" "$AGENT_FILE" "$PLUGIN_DIR" "$NDF_VERSION" <<'PY'
+  # installer が管理するのはテンプレート由来のキー（name / description / tools /
+  # resources / hooks.agentSpawn）と、フラグで切り替える hooks.stop / mcpServers.codex
+  # だけ。それ以外（利用者が足した mcpServers エントリ、独自フック、独自キー）は
+  # 既存の $AGENT_FILE から引き継ぐ。再インストールで写し替えた設定が消えないようにする。
+  python3 - "$TEMPLATE_FILE" "$WITH_SLACK" "$WITH_CODEX" "$AGENT_FILE" "$PLUGIN_DIR" "$NDF_VERSION" <<'PY'
 import json
 import shlex
 import sys
@@ -458,9 +460,11 @@ with open(agent_file, "w", encoding="utf-8") as f:
 if kept:
     print("  利用者管理の設定を引き継ぎました: " + ", ".join(sorted(kept)))
 PY
+}
 
 # --- Step 6: Optionally switch the default agent ---
-if [ "$SET_DEFAULT" = true ]; then
+configure_default_agent() {
+  local KIRO_CWD esc current_default proceed answer
   echo ""
   if ! command -v kiro-cli >/dev/null 2>&1; then
     echo "ERROR: kiro-cli が見つからないため既定エージェントを変更できません" >&2
@@ -515,6 +519,32 @@ if [ "$SET_DEFAULT" = true ]; then
   else
     echo "既定エージェントは変更しませんでした"
   fi
+}
+
+install_skills
+install_prompts
+
+if [ "$WITH_SLACK" = true ]; then echo "Slack通知: 有効"; else echo "Slack通知: 無効 (--with-slack で有効化)"; fi
+if [ "$WITH_CODEX" = true ]; then echo "Codex CLI連携: 有効"; else echo "Codex CLI連携: 無効 (--with-codex で有効化)"; fi
+
+if [ "$DRY_RUN" = true ]; then
+  echo ""
+  echo "DRY RUN: 書き込みは行いませんでした"
+  if [ -f "$LEGACY_AGENT_FILE" ]; then
+    echo "  旧設定 $LEGACY_AGENT_FILE を検出（実行時に移行可否を判定します）"
+  fi
+  echo "  NDF バージョン: $NDF_VERSION"
+  echo "  エージェント設定: $AGENT_FILE"
+  echo "  常時指示: $STEERING_FILE"
+  echo "  Skills数: $SKILL_COUNT"
+  exit 0
+fi
+
+generate_steering
+migrate_legacy_agent
+generate_agent_config "$MIGRATED_FROM_LEGACY"
+if [ "$SET_DEFAULT" = true ]; then
+  configure_default_agent
 fi
 
 echo ""
