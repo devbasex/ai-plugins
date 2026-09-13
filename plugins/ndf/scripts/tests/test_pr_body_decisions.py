@@ -175,6 +175,14 @@ def test_1_matching_section_returns_0(fake):
     assert out.returncode == 0, out.stdout + out.stderr
 
 
+def test_1_matching_section_with_trailing_whitespace_returns_0(fake):
+    """現状固定: 節の各行に末尾空白があっても normalize で無視され一致（終了コード 0）として扱う。"""
+    section_with_trailing_spaces = "\n".join(f"{line}  " for line in EXPECTED.splitlines()) + "\n"
+    design_pr(fake, f"## Summary\n\n- 要約\n\n{section_with_trailing_spaces}\n## Test plan\n\n- [ ] 何か\n")
+    out = fake.run("check", "7", "--repo", REPO)
+    assert out.returncode == 0, out.stdout + out.stderr
+
+
 def test_2_changed_heading_returns_1_and_shows_both_lines(fake):
     """#539 の形: 設計文書の決定の見出しが変わったのに、本文は古い見出しのまま。"""
     design_pr(fake, f"## Summary\n\n{OLD_SECTION}\n## Test plan\n")
