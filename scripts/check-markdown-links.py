@@ -116,13 +116,7 @@ def _matching_closer(runs: list[re.Match], start: int) -> int | None:
     )
 
 
-def strip_inline_code(line: str) -> str:
-    """Replace each inline code span in one line with a single space (#543).
-
-    A span runs from a backtick run to the next run of the same length. A run
-    with no matching closer stays as text, so links after it are still read.
-    """
-    runs = list(BACKTICK_RUN_RE.finditer(line))
+def _kept_segments(line: str, runs: list[re.Match]) -> list[str]:
     parts: list[str] = []
     pos = 0
     i = 0
@@ -136,7 +130,17 @@ def strip_inline_code(line: str) -> str:
         pos = runs[closer].end()
         i = closer + 1
     parts.append(line[pos:])
-    return "".join(parts)
+    return parts
+
+
+def strip_inline_code(line: str) -> str:
+    """Replace each inline code span in one line with a single space (#543).
+
+    A span runs from a backtick run to the next run of the same length. A run
+    with no matching closer stays as text, so links after it are still read.
+    """
+    runs = list(BACKTICK_RUN_RE.finditer(line))
+    return "".join(_kept_segments(line, runs))
 
 
 def link_targets(text: str) -> list[str]:
