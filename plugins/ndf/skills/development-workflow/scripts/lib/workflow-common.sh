@@ -347,16 +347,25 @@ _wf_missing_before_pr() {
   done < <(wf_stages_before_pr)
 }
 
-_wf_collect_targets() {
-  local line repo issue file content mode
-  local -a raw_targets=() modes=()
-  local effective="" conflict=0
-
+_wf_parse_targets() {
+  local line repo issue
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     IFS=$'\t' read -r repo issue <<<"$line"
     [ -n "$repo" ] && [ -n "$issue" ] || continue
-    raw_targets+=("$repo"$'\t'"$issue")
+    printf '%s\t%s\n' "$repo" "$issue"
+  done
+}
+
+_wf_collect_target_modes() {
+  local line repo issue file content mode
+  local -a raw_targets=() modes=()
+  local effective=""
+
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    raw_targets+=("$line")
+    IFS=$'\t' read -r repo issue <<<"$line"
     file=$(wf_state_file "$repo" "$issue") || continue
     [ -f "$file" ] || continue
     content=$(wf_state_read "$file")
@@ -366,11 +375,34 @@ _wf_collect_targets() {
     effective=$(wf_higher_mode "$effective" "$mode")
   done
   [ "${#raw_targets[@]}" -gt 0 ] || return 1
+
+  printf '%s\n' "$effective"
+  printf '%s\n' "${modes[*]}"
+  for line in "${raw_targets[@]}"; do
+    printf '%s\n' "$line"
+  done
+}
+
+_wf_collect_targets() {
+  local parsed collected effective modes_str line conflict=0
+  local -a raw_targets=() modes=()
+
+  parsed=$(_wf_parse_targets) || return 1
+  [ -n "$parsed" ] || return 1
+  collected=$(printf '%s\n' "$parsed" | _wf_collect_target_modes) || return 1
+  {
+    IFS= read -r effective
+    IFS= read -r modes_str
+    while IFS= read -r line; do
+      [ -n "$line" ] && raw_targets+=("$line")
+    done
+  } <<<"$collected"
+  read -r -a modes <<<"$modes_str"
   [ "${#modes[@]}" -gt 1 ] && conflict=1
 
   printf '%s\n' "$effective"
   printf '%s\n' "$conflict"
-  printf '%s\n' "${modes[*]}"
+  printf '%s\n' "$modes_str"
   for line in "${raw_targets[@]}"; do
     printf '%s\n' "$line"
   done
