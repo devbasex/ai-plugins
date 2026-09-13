@@ -238,6 +238,68 @@ test_claude_plugins_report() {
   fi
 }
 
+test_claude_debug_log_patterns() {
+  # Claude のデバッグログから拾う行の形を固定する。報告は hooks に触れる WARN / ERROR を
+  # 大文字小文字を問わず拾い、読み込み済みは `Read (hooks.json|manifest hooks) for plugin <名前> (`
+  # の名前を重複なく並べる。
+  cat >"$base/bin/claude" <<'PY'
+#!/usr/bin/env python3
+import sys
+
+if "--version" in sys.argv:
+    print("1.0.0")
+    sys.exit(0)
+
+debug_file = sys.argv[sys.argv.index("--debug-file") + 1]
+with open(debug_file, "w", encoding="utf-8") as f:
+    if any("hooks-positive-control" in arg for arg in sys.argv):
+        f.write("[WARN] Plugin broken-hooks: hooks.json: fixture warning\n")
+        f.write("Read hooks.json for plugin broken-hooks (0.0.0)\n")
+    else:
+        f.write('[WARN] Plugin ndf: hooks.json: unknown key "description" in hooks.PreToolUse[0]\n')
+        f.write("[ERROR] Failed to load hooks for mcp-serena\n")
+        f.write("[ERROR] Hooks file /x/hooks.json not found\n")
+        f.write("[warn] lower-case hook notice\n")
+        f.write("[WARN] Plugin ndf: skills: unrelated warning\n")
+        f.write("[INFO] hooks loaded\n")
+        f.write("Read hooks.json for plugin ndf (0.0.0)\n")
+        f.write("Read manifest hooks for plugin mcp-playwright (1.2.3)\n")
+        f.write("Read hooks.json for plugin ndf (0.0.0)\n")
+        f.write("Read hooks.json for plugin mcp-serena (0.0.0)\n")
+        f.write("Read hooks.json for plugin no-paren\n")
+PY
+  chmod +x "$base/bin/claude"
+
+  local rc=0 out="$base/artifacts-claude-patterns/hook-definitions"
+  ARTIFACT_DIR="$base/artifacts-claude-patterns" HOME="$base/home" PATH="$base/bin:$PATH" \
+    "$REPO_ROOT/tests/runtime-smoke/assertions/assert-hook-definitions.sh" claude \
+    >"$base/claude-patterns.stdout" 2>"$base/claude-patterns.stderr" || rc=$?
+  if [ "$rc" -ne 1 ]; then
+    echo "assert-hook-definitions did not fail on the claude debug log patterns (exit $rc)" >&2
+    cat "$base/claude-patterns.stderr" >&2
+    exit 1
+  fi
+  if ! diff -u - "$out/claude-plugins.reports" <<'EOF'
+[WARN] Plugin ndf: hooks.json: unknown key "description" in hooks.PreToolUse[0]
+[ERROR] Failed to load hooks for mcp-serena
+[ERROR] Hooks file /x/hooks.json not found
+[warn] lower-case hook notice
+EOF
+  then
+    echo "claude debug log reports did not match the characterized lines" >&2
+    exit 1
+  fi
+  if ! diff -u - "$out/claude-plugins.loaded" <<'EOF'
+mcp-playwright
+mcp-serena
+ndf
+EOF
+  then
+    echo "claude debug log loaded plugins did not match the characterized names" >&2
+    exit 1
+  fi
+}
+
 test_codex_missing_hooks() {
   cat >"$base/bin/codex" <<'PY'
 #!/usr/bin/env python3
@@ -299,6 +361,7 @@ test_reject_marketplace_without_hooks
 test_claude_missing_hooks
 test_claude_control_silent
 test_claude_plugins_report
+test_claude_debug_log_patterns
 test_codex_missing_hooks
 
 echo "hooks characterization tests: pass"

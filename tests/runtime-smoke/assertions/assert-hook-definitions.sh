@@ -28,6 +28,15 @@ HOOKS_LIST="$REPO_ROOT/tests/runtime-smoke/lib/codex-hooks-list.py"
 OUT_DIR="$ARTIFACT_DIR/hook-definitions"
 mkdir -p "$OUT_DIR"
 
+# Claude のデバッグログの文言に結合する形。ログの文言が変わったらここを直す。
+# 報告は hooks に触れる警告と誤りのすべてとする。未知キーの `[WARN] Plugin <名前>: hooks.json: ...`、
+# JSON の誤りの `[ERROR] Failed to load hooks for <名前>`、マニフェストが指す先が無いときの
+# `[ERROR] Hooks file ... not found` がこの形で出る（最後のものは hooks.json が別にあると
+# 読み込みの行も出るため、「読まれていない」では拾えない）。
+readonly CLAUDE_REPORT_RE='\[(WARN|ERROR)\] .*hook'
+# 読み込みの行からプラグイン名を取り出す sed の式
+readonly CLAUDE_LOADED_SED='s/.*Read (hooks\.json|manifest hooks) for plugin ([^ ]+) \(.*/\2/p'
+
 WORK_ROOT="$(mktemp -d)"
 trap 'rm -rf "$WORK_ROOT"' EXIT
 
@@ -62,12 +71,8 @@ marketplace_name() {
 # parse_claude_debug_log <log> <reports_file> <loaded_file>
 parse_claude_debug_log() {
   local log="$1" reports_file="$2" loaded_file="$3"
-  # 報告は hooks に触れる警告と誤りのすべてとする。未知キーの `[WARN] Plugin <名前>: hooks.json: ...`、
-  # JSON の誤りの `[ERROR] Failed to load hooks for <名前>`、マニフェストが指す先が無いときの
-  # `[ERROR] Hooks file ... not found` がこの形で出る（最後のものは hooks.json が別にあると
-  # 読み込みの行も出るため、「読まれていない」では拾えない）。
-  grep -iE '\[(WARN|ERROR)\] .*hook' "$log" >"$reports_file" || true
-  sed -nE 's/.*Read (hooks\.json|manifest hooks) for plugin ([^ ]+) \(.*/\2/p' "$log" \
+  grep -iE "$CLAUDE_REPORT_RE" "$log" >"$reports_file" || true
+  sed -nE "$CLAUDE_LOADED_SED" "$log" \
     | sort -u >"$loaded_file"
 }
 
