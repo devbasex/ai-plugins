@@ -302,3 +302,23 @@ def test_iter_markdown_files_collects_root_files_and_scan_dirs(tmp_path: Path) -
         tmp_path / "plugins" / "p" / "README.md",
     ]
     assert files == sorted(set(files))
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("a   b", "a---b"),
+        ("A_B C-D", "a_b-c-d"),
+        ("Hello, World!", "hello-world"),
+        ("  test  ", "test"),
+    ],
+)
+def test_slugify_boundary_and_character_retention(text: str, expected: str) -> None:
+    """slugify の空白展開・記号保持・記号除去の境界値規則を固定する（R2-005）。"""
+    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.slugify(text) == expected
+
