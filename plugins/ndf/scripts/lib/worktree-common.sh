@@ -336,6 +336,108 @@ _wt_tokenize() {
     esac
     out+=("$w")
   }
+  # エスケープを消費し、現在語と走査位置を進める。シングルクォート内では
+  # バックスラッシュも字面なので、対象外として 1 を返す。
+  _tok_consume_escape() {
+    [ "$c" = '\' ] && [ "$quote" != "'" ] || return 1
+    esc=${s:i+1:1}
+    # 文字列の末尾の `\` はエスケープする相手がいない。字面のまま残す。
+    if [ -z "$esc" ]; then cur+="$c"; return 0; fi
+    # `\` + 改行は行継続で、両方が消える。命令の区切りにもならない。
+    if [ "$esc" = $'\n' ]; then i=$((i + 1)); return 0; fi
+    if [ -n "$quote" ]; then
+      # `"` の中で `\` がエスケープとして働く相手は限られる。
+      case "$esc" in
+        '$'|'`'|'"'|'\') cur+="$esc" ;;
+        *) cur+="$c$esc" ;;
+      esac
+    else
+      cur+="$esc"
+    fi
+    i=$((i + 1))
+    return 0
+  }
+  # 改行・セミコロンを区切り印へ変え、case の枝の状態を進める。
+  _tok_emit_separator() {
+    if [ -n "$cur" ]; then _tok_emit "$cur"; cur=""; fi
+    if [ "$c" = ";" ] && [ "$case_depth" -gt 0 ]; then
+      case "${s:i+1:2}" in
+        ";&")
+          case_state[case_depth - 1]=want_pattern
+          out+=("__WT_CASE_FALL__")
+          i=$((i + 2))
+          return 0
+          ;;
+      esac
+      case "${s:i+1:1}" in
+        "&")
+          case_state[case_depth - 1]=want_pattern
+          out+=("__WT_CASE_FALL__")
+          i=$((i + 1))
+          return 0
+          ;;
+        ";") case_state[case_depth - 1]=want_pattern ;;
+      esac
+    fi
+    out+=("__WT_SEP__")
+  }
+  # パイプ・アンパサンドを、ファイル記述子の複製または演算子として出力する。
+  _tok_emit_operator() {
+    last=""
+    ((${#out[@]} > 0)) && last=${out[${#out[@]} - 1]}
+    if [ "$c" = "&" ] && { [ "${cur: -1}" = "<" ] ||
+      { [ -z "$cur" ] &&
+        { [ "$last" = "__WT_REDIR__" ] || [ "$last" = "__WT_APPEND__" ]; }; }; }; then
+      cur+="$c"
+      return 0
+    fi
+    op="$c"
+    case "${s:i:2}" in
+      "&&"|"||"|"|&") op=${s:i:2} ;;
+    esac
+    if [ -n "$cur" ]; then _tok_emit "$cur"; cur=""; fi
+    out+=("$op")
+    i=$((i + ${#op} - 1))
+  }
+  # 丸括弧を case 見出し、語中括弧、部分シェルの境界へ分類する。
+  _tok_emit_parenthesis() {
+    if [ "$c" = "(" ]; then
+      if [ -n "$cur" ] || [ "$inword" -gt 0 ]; then
+        inword=$((inword + 1))
+        cur+="$c"
+        return 0
+      fi
+      if _tok_in_pattern; then cur+="$c"; return 0; fi
+      rest=${s:i+1}
+      rest=${rest#"${rest%%[!$' \t']*}"}
+      if [ "${rest:0:1}" = ")" ]; then
+        inword=$((inword + 1))
+        cur+="$c"
+        return 0
+      fi
+      out+=("$c")
+      subshells=$((subshells + 1))
+      return 0
+    fi
+    if [ "$inword" -gt 0 ]; then
+      inword=$((inword - 1))
+      cur+="$c"
+      return 0
+    fi
+    if _tok_in_pattern; then
+      if [ -n "$cur" ]; then _tok_emit "$cur"; cur=""; fi
+      case_state[case_depth - 1]=body
+      out+=("__WT_CASE_END__")
+      return 0
+    fi
+    if [ "$subshells" -le 0 ]; then
+      cur+="$c"
+      return 0
+    fi
+    if [ -n "$cur" ]; then _tok_emit "$cur"; cur=""; fi
+    out+=("__WT_SUBSHELL_END__")
+    subshells=$((subshells - 1))
+  }
   for ((i = 0; i < n; i++)); do
     c=${s:i:1}
     # `\` は次の 1 文字をエスケープする。**シングルクォートの中を除く。** 中では
@@ -344,30 +446,7 @@ _wt_tokenize() {
     # 見なければ `"` の中の `\"` を閉じ引用符と読み、残りをまるごと 1 語へ吸い
     # 込む（検知漏れ）。引用符の外では `\ ` を区切り、`\)` を部分シェルの終わり
     # と読む（語の取り違えと誤検知）。
-    if [ "$c" = '\' ] && [ "$quote" != "'" ]; then
-      esc=${s:i+1:1}
-      # 文字列の末尾の `\` はエスケープする相手がいない。字面のまま残す。
-      if [ -z "$esc" ]; then cur+="$c"; continue; fi
-      # `\` + 改行は行継続で、両方が消える。命令の区切りにもならない。
-      if [ "$esc" = $'\n' ]; then i=$((i + 1)); continue; fi
-      if [ -n "$quote" ]; then
-        # **`"` の中で `\` がエスケープとして働く相手は限られる。** `$` `` ` ``
-        # `"` `\` と改行だけで、それ以外の前では `\` が文字として残る
-        # (`"a\nb"` は `a\nb`、`"a\\b"` は `a\b`。実測で確かめた)。語の
-        # 区切りは変わらないが、語そのものが書き込み先のパスになるため、
-        # 落とす `\` と残す `\` を分けないと実在しない位置を案内する。
-        case "$esc" in
-          '$'|'`'|'"'|'\') cur+="$esc" ;;
-          *) cur+="$c$esc" ;;
-        esac
-      else
-        # 引用符の外では次の 1 文字がそのまま語の一部になる。`\ ` の空白は
-        # 区切りにならず、`\(` `\)` は部分シェルの入口・終わりにならない。
-        cur+="$esc"
-      fi
-      i=$((i + 1))
-      continue
-    fi
+    _tok_consume_escape && continue
     if [ -n "$quote" ]; then
       if [ "$c" = "$quote" ]; then quote=""; else cur+="$c"; fi
       continue
@@ -378,35 +457,13 @@ _wt_tokenize() {
       # 前のコマンドの対象と取り違える（`cp a b` の次の行の `echo c` の `c` を
       # 複製先として拾うなど）。区切りの印を独立した語として出す。
       $'\n'|";")
-        if [ -n "$cur" ]; then _tok_emit "$cur"; cur=""; fi
         # `;;` `;&` `;;&` は `case` の枝の終わりで、次に来るのは見出しである。
         #
         # **`;&` と `;;&` は 1 つの印にする。** どちらも次の枝の本体を前の枝の
         # 出口から始めるが、`__WT_SEP__` と `&` の 2 語へ割ると、後者が背景実行の
         # 演算子として読まれて現在地がまとまりの入口へ戻る。走査の側でフォール
         # スルーと背景実行を見分けられるよう、専用の印を出す。
-        if [ "$c" = ";" ] && [ "$case_depth" -gt 0 ]; then
-          case "${s:i+1:2}" in
-            # `;;&`。見出しを試し直すが、見出しの評価では命令が走らないため
-            # 本体の始まる位置は `;&` と同じである。
-            ";&")
-              case_state[case_depth - 1]=want_pattern
-              out+=("__WT_CASE_FALL__")
-              i=$((i + 2))
-              continue
-              ;;
-          esac
-          case "${s:i+1:1}" in
-            "&")
-              case_state[case_depth - 1]=want_pattern
-              out+=("__WT_CASE_FALL__")
-              i=$((i + 1))
-              continue
-              ;;
-            ";") case_state[case_depth - 1]=want_pattern ;;
-          esac
-        fi
-        out+=("__WT_SEP__")
+        _tok_emit_separator
         ;;
       " "|$'\t')
         # `>& file` の `&` は、標準出力と標準エラーをまとめて 1 つのファイルへ
@@ -427,81 +484,37 @@ _wt_tokenize() {
       # （次のコマンドの `c` を複製先として拾う）。`>` と `>>` は呼び出し側が
       # 印へ置き換えるため、ここには現れない。
       "|"|"&")
-        last=""
-        ((${#out[@]} > 0)) && last=${out[${#out[@]} - 1]}
         # `>&2` `2>&1` `3<&0` の `&` はファイル記述子の複製であって、背景実行の
         # 演算子ではない。切ると後続が別のコマンドに見え、`cd` の効果を落とす。
         # 直前が `<` か、`>` の置き換えの印のときは字面のまま繋げる。
-        if [ "$c" = "&" ] && { [ "${cur: -1}" = "<" ] ||
-          { [ -z "$cur" ] &&
-            { [ "$last" = "__WT_REDIR__" ] || [ "$last" = "__WT_APPEND__" ]; }; }; }; then
-          cur+="$c"
-          continue
-        fi
         # 長い演算子を先に見る。`&&` を `&` 2 つに割ると、同じシェルで続く並びが
         # 背景実行 2 つになって意味が変わる。
-        op="$c"
-        case "${s:i:2}" in
-          "&&"|"||"|"|&") op=${s:i:2} ;;
-        esac
-        if [ -n "$cur" ]; then _tok_emit "$cur"; cur=""; fi
-        out+=("$op")
-        i=$((i + ${#op} - 1))
+        _tok_emit_operator
         ;;
       # `(` は部分シェルを開く。語の頭にあるときだけ入口として切り出す。
       # 途中に現れる `(` は展開・関数定義・配列の代入の一部で、部分シェルでは
       # ない。字面のまま語へ残し、対応する `)` も切り出さないよう数える。
       "(")
-        if [ -n "$cur" ] || [ "$inword" -gt 0 ]; then
-          inword=$((inword + 1))
-          cur+="$c"
-          continue
-        fi
         # 見出しの位置の `(` は飾りで、部分シェルの入口ではない
         # （`case $x in (a) ...`）。語の一部として残す。
-        if _tok_in_pattern; then cur+="$c"; continue; fi
         # 中身の無い `()` は関数定義の目印で、部分シェルの入口ではない。`f ()`
         # のように空白を挟む書き方があるため、語の途中かどうかでは見分けられない。
-        rest=${s:i+1}
-        rest=${rest#"${rest%%[!$' \t']*}"}
-        if [ "${rest:0:1}" = ")" ]; then
-          inword=$((inword + 1))
-          cur+="$c"
-          continue
-        fi
-        out+=("$c")
-        subshells=$((subshells + 1))
+        _tok_emit_parenthesis
         ;;
       # `)` は、切り出した `(` が残っているときだけ部分シェルの終わりである。
       # `case` の見出し (`a)`) のように対応する `(` が無いものは語の一部で、
       # 切り出すと存在しない位置を書き込み先として示すことになる。
       ")")
-        if [ "$inword" -gt 0 ]; then
-          inword=$((inword - 1))
-          cur+="$c"
-          continue
-        fi
         # 見出しを閉じる `)`。枝の本体が始まることを印で伝える。見出しの語と
         # くっついているか (`a)`) 離れているか (`a )`) で扱いを変えない。
-        if _tok_in_pattern; then
-          if [ -n "$cur" ]; then _tok_emit "$cur"; cur=""; fi
-          case_state[case_depth - 1]=body
-          out+=("__WT_CASE_END__")
-          continue
-        fi
-        if [ "$subshells" -le 0 ]; then
-          cur+="$c"
-          continue
-        fi
-        if [ -n "$cur" ]; then _tok_emit "$cur"; cur=""; fi
-        out+=("__WT_SUBSHELL_END__")
-        subshells=$((subshells - 1))
+        _tok_emit_parenthesis
         ;;
       *) cur+="$c" ;;
     esac
   done
   [ -n "$cur" ] && _tok_emit "$cur"
-  unset -f _tok_in_pattern _tok_emit
+  unset -f _tok_in_pattern _tok_emit _tok_consume_escape _tok_emit_separator
+  unset -f _tok_emit_operator _tok_emit_parenthesis
   printf '%s\n' "${out[@]+"${out[@]}"}"
 }
 

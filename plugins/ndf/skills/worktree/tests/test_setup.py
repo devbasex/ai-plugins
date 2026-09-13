@@ -10,7 +10,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from worktree_helpers import SCRIPTS_DIR, git, write_declaration
+from worktree_helpers import GUARD, SESSION, SCRIPTS_DIR, git, run_lib, write_declaration
 
 SETUP = SCRIPTS_DIR / "worktree-setup.sh"
 
@@ -40,8 +40,6 @@ def test_init_creates_a_readable_declaration(main_repo: Path) -> None:
 
 def test_init_makes_the_guard_active(main_repo: Path) -> None:
     """作った直後から、主ディレクトリの編集で案内が出る。"""
-    from worktree_helpers import GUARD
-
     run(["init"], cwd=main_repo)
 
     payload = {
@@ -367,8 +365,6 @@ def test_status_lines_are_unchanged_for_the_three_states(main_repo: Path) -> Non
 
 def test_declaration_state_function(main_repo: Path) -> None:
     """wt_declaration_state は 3 語のいずれかを出し、引数が空なら 1 を返す。"""
-    from worktree_helpers import run_lib
-
     def state() -> str:
         got = run_lib(f'wt_declaration_state "{main_repo}"')
         assert got.returncode == 0, got.stderr
@@ -386,8 +382,6 @@ def test_declaration_state_function(main_repo: Path) -> None:
 
 def test_declaration_state_without_arguments_returns_error() -> None:
     """現状固定: 引数なしの呼び出しは 1 を返し、標準出力には何も出さない。"""
-    from worktree_helpers import run_lib
-
     result = run_lib("wt_declaration_state")
 
     assert result.returncode == 1
@@ -396,8 +390,6 @@ def test_declaration_state_without_arguments_returns_error() -> None:
 
 def test_empty_declaration_file_is_unreadable(main_repo: Path) -> None:
     """現状固定: 0 バイトの宣言ファイルは unreadable と判定する。"""
-    from worktree_helpers import run_lib
-
     declaration(main_repo).parent.mkdir()
     declaration(main_repo).write_bytes(b"")
 
@@ -409,8 +401,6 @@ def test_empty_declaration_file_is_unreadable(main_repo: Path) -> None:
 
 def test_declaration_state_absent_for_a_nonexistent_path() -> None:
     """現状固定: 存在しないディレクトリパスを渡しても、エラーにせず 0 で absent を出す。"""
-    from worktree_helpers import run_lib
-
     result = run_lib('wt_declaration_state "/nonexistent/path"')
 
     assert result.returncode == 0, result.stderr
@@ -421,8 +411,6 @@ def test_declaration_state_present_for_a_symlink_to_a_readable_declaration(
     main_repo: Path, tmp_path: Path,
 ) -> None:
     """現状固定: 読める宣言を指す symlink は、たどった先を読んで present と判定する。"""
-    from worktree_helpers import run_lib
-
     target = tmp_path / "outside.json"
     body = json.dumps({"version": 1})
     target.write_text(body, encoding="utf-8")
@@ -438,8 +426,6 @@ def test_declaration_state_present_for_a_symlink_to_a_readable_declaration(
 
 def test_hooks_stay_silent_without_a_declaration(main_repo: Path) -> None:
     """受け入れ条件 7: 宣言が無ければ、2 つの hook は何も出さず 0 で終わる。"""
-    from worktree_helpers import GUARD, SESSION
-
     cases = [
         (SESSION, {"session_id": "s527", "cwd": str(main_repo), "hook_event_name": "SessionStart"}),
         (GUARD, {
@@ -460,8 +446,6 @@ def test_hooks_stay_silent_without_a_declaration(main_repo: Path) -> None:
 
 def test_compose_project_rejects_empty_and_invalid_names() -> None:
     """現状固定: 許可文字が残らない入力・区切り文字のみ・空文字は 1 で弾かれ、標準出力は空。"""
-    from worktree_helpers import run_lib
-
     for given in ["!!!", "---", ""]:
         res = run_lib(f'wt_compose_project "{given}"')
         assert res.returncode == 1, (given, res.returncode, res.stdout, res.stderr)
@@ -470,8 +454,6 @@ def test_compose_project_rejects_empty_and_invalid_names() -> None:
 
 def test_default_branch_falls_back_to_master(tmp_path: Path) -> None:
     """現状固定: origin/HEAD が無く main も無い場合、master があれば既定ブランチとして返す。"""
-    from worktree_helpers import run_lib
-
     repo = tmp_path / "master_repo"
     repo.mkdir(parents=True, exist_ok=True)
     git(repo, "init", "-q", "-b", "master")
@@ -490,8 +472,6 @@ def test_default_branch_falls_back_to_master(tmp_path: Path) -> None:
 
 def test_slot_touch_updates_last_used_at_and_keeps_released_at_null(main_repo: Path) -> None:
     """現状固定: wt_slot_touch は未解放スロットの last_used_at を更新し released_at を null のまま保つ。"""
-    from worktree_helpers import run_lib
-
     run_lib(f'wt_slot_acquire "{main_repo}" "/wt/a" "feature/a" "env-a"', cwd=main_repo)
 
     registry_file = main_repo / ".git" / "ndf" / "worktree-registry.json"
@@ -506,4 +486,3 @@ def test_slot_touch_updates_last_used_at_and_keeps_released_at_null(main_repo: P
     assignment = after["assignments"][0]
     assert assignment["last_used_at"] != "2020-01-01T00:00:00Z"
     assert assignment["released_at"] is None
-
