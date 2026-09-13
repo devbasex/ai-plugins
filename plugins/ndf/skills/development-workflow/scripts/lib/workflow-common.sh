@@ -224,32 +224,21 @@ wf_is_candidate() {
     <<<"${text//$'\\\n'/ }"
 }
 
-# `_wf_seek_gh_verb` の状態。呼び出し側は到達を `WF_GH_SEEN_VERB` との比較で見る。
-WF_GH_START=0           # `gh` を待つ
-WF_GH_SEEN_GH=1         # `gh` を読んだ。`pr` かグローバルオプションを待つ
-WF_GH_SEEN_PR=2         # `pr` を読んだ。動詞を待つ
-WF_GH_SEEN_VERB=3       # 動詞まで読んだ（到達）
-WF_GH_SKIP_REPO_VALUE=4 # `-R` / `--repo` の値の語を読み飛ばす
-
 _wf_seek_gh_verb() {
-  local state="${1:-$WF_GH_START}" tok="${2:-}" verb="${3:-}"
+  local state="${1:-0}" tok="${2:-}" verb="${3:-}"
   case "$state" in
-    "$WF_GH_START")
-      [ "$tok" = "gh" ] && printf '%s\n' "$WF_GH_SEEN_GH" || printf '%s\n' "$WF_GH_START"
-      ;;
-    "$WF_GH_SEEN_GH")
+    0) [ "$tok" = "gh" ] && printf '1\n' || printf '0\n' ;;
+    1)
       case "$tok" in
-        pr) printf '%s\n' "$WF_GH_SEEN_PR" ;;
-        gh) printf '%s\n' "$WF_GH_SEEN_GH" ;;
-        -R|--repo) printf '%s\n' "$WF_GH_SKIP_REPO_VALUE" ;;
-        -*) printf '%s\n' "$WF_GH_SEEN_GH" ;;
-        *) printf '%s\n' "$WF_GH_START" ;;
+        pr) printf '2\n' ;;
+        gh) printf '1\n' ;;
+        -R|--repo) printf '4\n' ;;
+        -*) printf '1\n' ;;
+        *) printf '0\n' ;;
       esac
       ;;
-    "$WF_GH_SEEN_PR")
-      [ "$tok" = "$verb" ] && printf '%s\n' "$WF_GH_SEEN_VERB" || printf '%s\n' "$WF_GH_START"
-      ;;
-    "$WF_GH_SKIP_REPO_VALUE") printf '%s\n' "$WF_GH_SEEN_GH" ;;
+    2) [ "$tok" = "$verb" ] && printf '3\n' || printf '0\n' ;;
+    4) printf '1\n' ;;
     *) printf '%s\n' "$state" ;;
   esac
 }
@@ -298,12 +287,12 @@ _wf_read_file() {
 #
 # 本文の渡し方は 2 つある（`--body` と `--body-file`）。**短い形も見る**（`-b` / `-F`）。
 _wf_pr_create_body() {
-  local cmd="${1:-}" tok want="" body="" state="$WF_GH_START" found=1
+  local cmd="${1:-}" tok want="" body="" state=0 found=1
   while IFS= read -r -d '' tok; do
     # 区切り。作成を見つける前なら探索をやり直し、見つけた後なら読むのを止める。
     if [ -z "$tok" ]; then
       [ "$found" -ne 0 ] || break
-      state="$WF_GH_START"
+      state=0
       continue
     fi
     if [ -n "$want" ]; then
@@ -315,7 +304,7 @@ _wf_pr_create_body() {
       continue
     fi
     state=$(_wf_seek_gh_verb "$state" "$tok" "create")
-    [ "$state" = "$WF_GH_SEEN_VERB" ] && found=0
+    [ "$state" = "3" ] && found=0
     [ "$found" -eq 0 ] || continue
     case "$tok" in
       --body|-b) want=text ;;
