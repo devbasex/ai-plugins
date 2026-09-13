@@ -1058,3 +1058,32 @@ def test_location_of_with_index_out_of_bounds_returns_empty_string() -> None:
         lines=[10],
     )
     assert module.location_of(claim, 1) == ""
+
+
+# --- check_version_examples: 正式版の行が重複したとき比較をスキップする（単体）---
+
+
+def test_version_examples_skips_base_comparison_when_stable_row_is_duplicated() -> None:
+    """正式版の行が重複している場合、開発版との基底比較をスキップする（現状固定）。
+
+    正式版の行が 1 つのときだけ比較を行う分岐（len(rows["正式版"]) == 1）において、
+    正式版が重複したとき比較をスキップする経路を固定する。
+    開発版が正式版より古い基底を持っていても、「正式版の行より新しい版を指していない」
+    というエラーは出ず、正式版の重複エラーのみが報告される。
+    """
+    module = _load_checker()
+    report = module.Report()
+    body = (
+        f"{module.VERSION_SECTION_HEADING}\n"
+        "| 正式版 | `9.3.0` | 利用者が常用してよい |\n"
+        "| 正式版 | `9.3.1` | 利用者が常用してよい |\n"
+        "| 開発版 | `9.2.0-dev.1` | 検証中 |\n"
+        "| 公開前の確認版 | `9.4.0-rc.1` | 正式版の候補 |\n"
+        "\n"
+        "`9.3.0` の次を開発するなら `9.4.0-dev.1`\n"
+    )
+    module.check_version_examples(body, report)
+    assert report.errors == [
+        f"{module.VERSIONING_MD}: 版の付け方の節の版の形の表に同じ行が複数ある（正式版: L2, L3）"
+    ]
+    assert not any("正式版の行より新しい版を指していない" in err for err in report.errors)
