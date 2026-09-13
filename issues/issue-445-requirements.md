@@ -61,8 +61,11 @@ GitHub の生成規則に合わせる。日本語の見出しをそのまま参�
       `#worktree-base-の解決順` の参照が解決できる
 - [ ] 現在のリポジトリに対して `python3 scripts/check-markdown-links.py --root .` が
       終了コード 0 で終わる
-- [ ] 上の 5 つの振る舞いを検査する自動テストが `scripts/tests/` にあり、
-      `uv run --with pytest pytest scripts/tests -q` が通る
+- [ ] コードブロックの中に書かれた、解決できない見出しへの参照では落ちない
+- [ ] 存在しない文書を指す `無い.md#見出し` の参照では、ファイルの欠落だけを 1 行出力し、
+      見出しの誤りは出さない
+- [ ] 上の振る舞い（リポジトリ全体に対する実行を除くすべて）を検査する自動テストが
+      `scripts/tests/` にあり、`uv run --with pytest pytest scripts/tests -q` が通る
 
 ## 対象範囲
 
