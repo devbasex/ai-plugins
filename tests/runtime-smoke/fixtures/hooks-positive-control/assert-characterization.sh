@@ -168,4 +168,103 @@ if [ "$rc" -ne 1 ] || ! grep -Fq "claude did not load hooks for:" "$base/claude-
   exit 1
 fi
 
+# 公開 CLI の判定分岐を固定する。内部の読み込み関数ではなく、外部ランタイムだけを
+# スタブへ置き換えて終了コードと診断の要点を観測する。
+cat >"$base/bin/claude" <<'PY'
+#!/usr/bin/env python3
+import os
+import sys
+
+if "--version" in sys.argv:
+    print("1.0.0")
+    sys.exit(0)
+
+debug_file = sys.argv[sys.argv.index("--debug-file") + 1]
+is_control = any("hooks-positive-control" in arg for arg in sys.argv)
+scenario = os.environ["CLAUDE_CHARACTERIZATION_SCENARIO"]
+with open(debug_file, "w", encoding="utf-8") as f:
+    if is_control and scenario != "control-silent":
+        f.write("[WARN] Plugin broken-hooks: hooks.json: fixture warning\n")
+        f.write("Read hooks.json for plugin broken-hooks (0.0.0)\n")
+    elif not is_control:
+        for name in ("ndf", "mcp-playwright", "mcp-serena"):
+            f.write(f"Read hooks.json for plugin {name} (0.0.0)\n")
+        if scenario == "plugins-report":
+            f.write("[WARN] Plugin ndf: hooks.json: characterization warning\n")
+PY
+chmod +x "$base/bin/claude"
+
+rc=0
+CLAUDE_CHARACTERIZATION_SCENARIO=control-silent \
+ARTIFACT_DIR="$base/artifacts-control-silent" HOME="$base/home" PATH="$base/bin:$PATH" \
+  "$REPO_ROOT/tests/runtime-smoke/assertions/assert-hook-definitions.sh" claude \
+  >"$base/control-silent.stdout" 2>"$base/control-silent.stderr" || rc=$?
+if [ "$rc" -ne 1 ] || ! grep -Fq "did not report the broken hooks fixture" "$base/control-silent.stderr"; then
+  echo "assert-hook-definitions did not reject a silent positive control (exit $rc)" >&2
+  cat "$base/control-silent.stderr" >&2
+  exit 1
+fi
+
+rc=0
+CLAUDE_CHARACTERIZATION_SCENARIO=plugins-report \
+ARTIFACT_DIR="$base/artifacts-plugins-report" HOME="$base/home" PATH="$base/bin:$PATH" \
+  "$REPO_ROOT/tests/runtime-smoke/assertions/assert-hook-definitions.sh" claude \
+  >"$base/plugins-report.stdout" 2>"$base/plugins-report.stderr" || rc=$?
+if [ "$rc" -ne 1 ] || ! grep -Fq "claude reported hooks definitions:" "$base/plugins-report.stderr" \
+  || ! grep -Fq "characterization warning" "$base/plugins-report.stderr"; then
+  echo "assert-hook-definitions did not report real plugin hooks diagnostics (exit $rc)" >&2
+  cat "$base/plugins-report.stderr" >&2
+  exit 1
+fi
+
+cat >"$base/bin/codex" <<'PY'
+#!/usr/bin/env python3
+import json
+import os
+from pathlib import Path
+import sys
+
+if "--version" in sys.argv:
+    print("codex-cli 1.0.0")
+    sys.exit(0)
+if len(sys.argv) >= 5 and sys.argv[1:4] == ["plugin", "marketplace", "add"]:
+    Path(os.environ["CODEX_HOME"], "fixture-root").write_text(sys.argv[4], encoding="utf-8")
+    sys.exit(0)
+if len(sys.argv) >= 3 and sys.argv[1:3] == ["plugin", "add"]:
+    sys.exit(0)
+if sys.argv[1:] == ["app-server"]:
+    root = Path(os.environ["CODEX_HOME"], "fixture-root").read_text(encoding="utf-8")
+    for line in sys.stdin:
+        message = json.loads(line)
+        if message.get("id") != 2:
+            continue
+        if "hooks-positive-control" in root:
+            data = [{
+                "hooks": [{
+                    "pluginId": "broken-hooks@hooks-positive-control",
+                    "type": "command",
+                    "command": "true",
+                }],
+                "warnings": ["characterization fixture warning"],
+                "errors": [],
+            }]
+        else:
+            data = []
+        print(json.dumps({"id": 2, "result": {"data": data}}), flush=True)
+        break
+    sys.exit(0)
+sys.exit(2)
+PY
+chmod +x "$base/bin/codex"
+
+rc=0
+ARTIFACT_DIR="$base/artifacts-codex-missing" HOME="$base/home" PATH="$base/bin:$PATH" \
+  "$REPO_ROOT/tests/runtime-smoke/assertions/assert-hook-definitions.sh" codex \
+  >"$base/codex-missing.stdout" 2>"$base/codex-missing.stderr" || rc=$?
+if [ "$rc" -ne 1 ] || ! grep -Fq "codex did not load hooks for:" "$base/codex-missing.stderr"; then
+  echo "assert-hook-definitions did not report missing hooks for codex (exit $rc)" >&2
+  cat "$base/codex-missing.stderr" >&2
+  exit 1
+fi
+
 echo "hooks characterization tests: pass"
