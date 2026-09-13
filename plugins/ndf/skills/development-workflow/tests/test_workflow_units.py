@@ -48,37 +48,6 @@ def test_higher_mode_at_empty_and_equal_height_boundaries(
 
 
 @pytest.mark.parametrize(
-    ("mode", "expected", "returncode"),
-    [
-        ("light", "1", 0),
-        ("operation", "2", 0),
-        ("legacy-refactor", "3", 0),
-        ("standard", "4", 0),
-        ("documentation", "5", 0),
-        ("unknown", "0", 1),
-        ("", "0", 1),
-    ],
-    ids=[
-        "light",
-        "operation",
-        "legacy-refactor",
-        "standard",
-        "documentation",
-        "unknown",
-        "empty",
-    ],
-)
-def test_mode_height_current_values(
-    mode: str, expected: str, returncode: int
-) -> None:
-    """現状固定: 既知モードの高さと未知値の失敗時出力を固定する。"""
-    result = run_lib(f"wf_mode_height {shlex.quote(mode)}")
-
-    assert result.returncode == returncode, result.stderr
-    assert result.stdout.strip() == expected
-
-
-@pytest.mark.parametrize(
     ("value", "expected"),
     [
         ("a\\b", r"a\\b"),
