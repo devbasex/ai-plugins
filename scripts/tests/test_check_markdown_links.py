@@ -425,6 +425,24 @@ def test_heading_anchors_collision_with_explicit_numbered_heading() -> None:
     assert anchors == {"手順", "手順-1", "手順-2"}
 
 
+def test_heading_anchors_without_headings_returns_empty_set(tmp_path: Path) -> None:
+    """heading_anchors が見出し行を 1 件も持たないファイルで空集合を返す現状を固定する（R2-003）。
+
+    空のファイルと、見出し記号を含まない本文だけのファイルは、どちらも見出し行に
+    一致する行が無く、空の set を返す。
+    """
+    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    empty = write(tmp_path, "empty.md", "")
+    body_only = write(tmp_path, "body.md", "本文だけの段落。\n\n- 箇条書き\n")
+
+    assert module.heading_anchors(empty) == set()
+    assert module.heading_anchors(body_only) == set()
+
+
 def test_iter_markdown_files_collects_root_files_and_scan_dirs(tmp_path: Path) -> None:
     """iter_markdown_files の探索範囲の現状を固定する（R2-003）。
 
