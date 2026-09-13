@@ -40,15 +40,22 @@ DEFAULT_SCAN_TARGETS = (
 )
 
 
+def _markdown_files_under(target: Path) -> list[Path]:
+    if target.is_file():
+        return [target]
+    if target.is_dir():
+        return list(target.rglob("*.md"))
+    return []
+
+
 def iter_markdown_files(root: Path) -> list[Path]:
-    roots = [root / target for target in DEFAULT_SCAN_TARGETS]
-    files: list[Path] = []
-    for item in roots:
-        if item.is_file():
-            files.append(item)
-        elif item.is_dir():
-            files.extend(item.rglob("*.md"))
-    return sorted(set(files))
+    return sorted(
+        {
+            path
+            for target in DEFAULT_SCAN_TARGETS
+            for path in _markdown_files_under(root / target)
+        }
+    )
 
 
 def strip_title(target: str) -> str:
