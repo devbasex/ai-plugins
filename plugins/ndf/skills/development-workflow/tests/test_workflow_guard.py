@@ -688,3 +688,40 @@ def test_is_candidate_passes_a_single_line_target(text: str) -> None:
 def test_is_candidate_rejects_an_unrelated_command(text: str) -> None:
     """対照: いずれの目印にも当たらない本文は候補にしない。"""
     assert is_candidate(text) == 1
+
+
+# --- R2-001: `wf_looks_like_merge_text` の単体（現状固定） ------------------
+
+def looks_like_merge_text(text: str) -> int:
+    """`wf_looks_like_merge_text` の終了コードを返す。0 が一致、1 が不一致。"""
+    result = run_lib(f"wf_looks_like_merge_text {shlex.quote(text)}")
+    return result.returncode
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "gh pr merge 268",
+        "gh -R o/r pr merge 268",
+        "pulls/12/merge",
+    ],
+    ids=["gh-pr-merge", "gh-global-option", "rest-merge"],
+)
+def test_merge_text_matcher_accepts_a_coarse_merge_pattern(text: str) -> None:
+    """現状固定: CLI と REST パスの粗いマージ表現を一致として扱う。"""
+    assert looks_like_merge_text(text) == 0
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "gh pr create --base develop",
+        "gh pr view 268",
+        "",
+        "echo hello",
+    ],
+    ids=["pr-create", "pr-view", "empty", "echo"],
+)
+def test_merge_text_matcher_rejects_text_without_a_merge_pattern(text: str) -> None:
+    """対照: マージ表現を含まない本文は一致として扱わない。"""
+    assert looks_like_merge_text(text) == 1
