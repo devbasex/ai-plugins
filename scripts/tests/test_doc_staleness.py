@@ -388,6 +388,19 @@ def test_plugin_table_unknown_plugin_fails(tree: Path) -> None:
     assert "ghost-kit" in out
 
 
+def test_plugin_table_malformed_plugin_json_fails(tree: Path) -> None:
+    """`plugin.json` が構文不正な場合、例外ではなく検査の失敗として出す。"""
+    (tree / "plugins/fixture-kit/.claude-plugin/plugin.json").write_text(
+        "{\n  not json\n", encoding="utf-8"
+    )
+    result = run_check(tree)
+    out = output_of(result)
+    assert result.returncode != 0
+    assert "Traceback" not in out
+    assert "fixture-kit" in out
+    assert "plugin.json" in out
+
+
 def test_plugin_table_row_removed_fails(tree: Path) -> None:
     """一覧表から NDF の行を消して検査を通せる状態にしない。"""
     edit(root_readme(tree), "| **ndf** | 9.3.0 | 検査用の最小構成 |\n", "")
