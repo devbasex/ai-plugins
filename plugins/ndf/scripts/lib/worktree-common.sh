@@ -277,24 +277,11 @@ wt_relative_to_main() {
 
 # --- シェルコマンドからの書き込み先の推定 -----------------------------------
 
-# `"` の中で `\` の直後に来た 1 文字を、語へ入れる断片へ解決する。結果は
-# _WT_DQ_ESCAPED に入る。走査の内側で文字ごとに呼ぶため `$(...)` で受けない。
-#
-# **`"` の中で `\` がエスケープとして働く相手は限られる。** `$` `` ` `` `"` `\` と
-# 改行だけで、それ以外の前では `\` が文字として残る (`"a\nb"` は `a\nb`、
-# `"a\\b"` は `a\b`。実測で確かめた)。改行は呼び出し側が先に扱う。
-_wt_dq_escaped() {
-  case "$1" in
-    '$'|'`'|'"'|'\') _WT_DQ_ESCAPED="$1" ;;
-    *) _WT_DQ_ESCAPED="\\$1" ;;
-  esac
-}
-
 # シェルの語分割を、引用符を解釈しながら行う。1 行 1 語で出力する。
 # `sed -i 's/a b/c/' f` のように引用符の中へ空白を含む形を 1 語として扱うため、
 # 単純な空白区切りでは足りない。
 _wt_tokenize() {
-  local s="${1:-}" n i c quote="" cur="" op last rest esc _WT_DQ_ESCAPED
+  local s="${1:-}" n i c quote="" cur="" op last rest esc
   n=${#s}
   local -a out=()
   # 部分シェルの入口として切り出した `(` のうち、まだ閉じていない数。
@@ -364,11 +351,15 @@ _wt_tokenize() {
       # `\` + 改行は行継続で、両方が消える。命令の区切りにもならない。
       if [ "$esc" = $'\n' ]; then i=$((i + 1)); continue; fi
       if [ -n "$quote" ]; then
-        # 落とす `\` と残す `\` の別は `_wt_dq_escaped` が持つ。語の区切りは
-        # 変わらないが、語そのものが書き込み先のパスになるため、分けないと
-        # 実在しない位置を案内する。
-        _wt_dq_escaped "$esc"
-        cur+="$_WT_DQ_ESCAPED"
+        # **`"` の中で `\` がエスケープとして働く相手は限られる。** `$` `` ` ``
+        # `"` `\` と改行だけで、それ以外の前では `\` が文字として残る
+        # (`"a\nb"` は `a\nb`、`"a\\b"` は `a\b`。実測で確かめた)。語の
+        # 区切りは変わらないが、語そのものが書き込み先のパスになるため、
+        # 落とす `\` と残す `\` を分けないと実在しない位置を案内する。
+        case "$esc" in
+          '$'|'`'|'"'|'\') cur+="$esc" ;;
+          *) cur+="$c$esc" ;;
+        esac
       else
         # 引用符の外では次の 1 文字がそのまま語の一部になる。`\ ` の空白は
         # 区切りにならず、`\(` `\)` は部分シェルの入口・終わりにならない。
@@ -634,7 +625,7 @@ _wt_scan_expanded_line() {
 _wt_strip_heredocs() {
   local text="${1:-}"
   local -a lines=() delims=() strips=() expands=()
-  local line candidate out="" n i c delim strip quoted dq _WT_DQ_ESCAPED
+  local line candidate out="" n i c delim strip quoted dq
   # 展開される本文の中で、コマンド置換が続いているかを行をまたいで持つ。
   # 走査は _wt_scan_expanded_line が行う。`local` で宣言すると、bash の動的
   # スコープにより呼び出し先からも読み書きできる。グローバルへは残らない。
@@ -722,11 +713,13 @@ _wt_strip_heredocs() {
         if [ -n "$dq" ]; then
           # `"` の中の `\"` は引用を閉じない。閉じたと読むと終端の語を取り違え、
           # 本文の終わりを見つけられない（後続の命令まで本文として落とす）。
-          # 落とす `\` と残す `\` の別は `_wt_dq_escaped` が持つ。
+          # 落とす `\` と残す `\` の別は `_wt_tokenize` と同じ。
           # `'` の中では `\` は字面で、エスケープにならない。
           if [ "$dq" = '"' ] && [ "$c" = '\' ] && [ -n "${line:i+1:1}" ]; then
-            _wt_dq_escaped "${line:i+1:1}"
-            delim+="$_WT_DQ_ESCAPED"
+            case "${line:i+1:1}" in
+              '$'|'`'|'"'|'\') delim+="${line:i+1:1}" ;;
+              *) delim+="$c${line:i+1:1}" ;;
+            esac
             i=$((i + 2))
             continue
           fi

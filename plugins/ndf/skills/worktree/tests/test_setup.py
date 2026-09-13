@@ -135,7 +135,7 @@ def test_init_refuses_a_symlinked_declaration(main_repo: Path, tmp_path: Path) -
     outside = tmp_path / "outside.json"
     outside.write_text('{"keep": true}', encoding="utf-8")
     (main_repo / ".ndf").mkdir()
-    declaration(main_repo).symlink_to(outside)
+    (main_repo / ".ndf" / "worktree.json").symlink_to(outside)
 
     result = run(["init", "--force"], cwd=main_repo)
 
@@ -340,7 +340,7 @@ def _declaration_line_pair(repo: Path) -> tuple[str, str, int]:
 
 def test_a_directory_declaration_is_unreadable_in_both(main_repo: Path) -> None:
     """`[ -e ]` が真で `[ -f ]` が偽のもの。status と check の 1 行目が一致する。"""
-    declaration(main_repo).mkdir(parents=True)
+    (main_repo / ".ndf" / "worktree.json").mkdir(parents=True)
     status_line, check_line, rc = _declaration_line_pair(main_repo)
     assert status_line == check_line == BROKEN_LINE
     assert rc == 3
@@ -349,7 +349,7 @@ def test_a_directory_declaration_is_unreadable_in_both(main_repo: Path) -> None:
 def test_a_dangling_symlink_declaration_is_missing_in_both(main_repo: Path, tmp_path: Path) -> None:
     """壊れた symlink は `[ -e ]` が偽で「なし」。"""
     (main_repo / ".ndf").mkdir()
-    declaration(main_repo).symlink_to(tmp_path / "gone.json")
+    (main_repo / ".ndf" / "worktree.json").symlink_to(tmp_path / "gone.json")
     status_line, check_line, rc = _declaration_line_pair(main_repo)
     assert status_line == check_line == MISSING_LINE
     assert rc == 2
