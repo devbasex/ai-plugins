@@ -397,6 +397,16 @@ def test_empty_declaration_file_is_unreadable(main_repo: Path) -> None:
     assert result.stdout == "unreadable\n"
 
 
+def test_declaration_state_absent_for_a_nonexistent_path() -> None:
+    """現状固定: 存在しないディレクトリパスを渡しても、エラーにせず 0 で absent を出す。"""
+    from worktree_helpers import run_lib
+
+    result = run_lib('wt_declaration_state "/nonexistent/path"')
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "absent\n"
+
+
 def test_hooks_stay_silent_without_a_declaration(main_repo: Path) -> None:
     """受け入れ条件 7: 宣言が無ければ、2 つの hook は何も出さず 0 で終わる。"""
     from worktree_helpers import GUARD, SESSION
