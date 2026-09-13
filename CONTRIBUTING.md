@@ -112,7 +112,7 @@ Fix: 作業ツリーの書き込み先の判定が case のフォールスルー
 | どのランタイムへ配るか | `plugins/ndf/manifests/<ランタイム>-skills.txt` に名前を 1 行書く |
 | frontmatter の書き方 | [plugins/ndf/skills/AUTHORING.md](./plugins/ndf/skills/AUTHORING.md) の規約 |
 | 文章の書き方 | `plugins/ndf/skills/markdown-writing/SKILL.md` |
-| 新しいプラグインそのものを足すとき | [README.md](./README.md) の「新しいプラグインの作成手順」 |
+| 新しいプラグインそのものを足すとき | [docs/plugin-development-guide.md](./docs/plugin-development-guide.md) の「新しいプラグインの追加」 |
 
 frontmatter は `python3 scripts/check-skill-frontmatter.py` が検査します。`description` の
 長さには上限があり、4 つのランタイムのうち最も厳しいものに合わせています。上限と根拠は
