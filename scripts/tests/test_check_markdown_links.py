@@ -215,3 +215,19 @@ def test_should_skip() -> None:
     assert module.should_skip("mailto:user@example.com") is True
     assert module.should_skip("{repo}/blob/{branch}") is True
     assert module.should_skip("path/to/file.md") is False
+
+
+def test_anchor_refs_empty_or_missing_fragment_skipped() -> None:
+    """anchor_refs の空フラグメント等の境界値経路の現状を固定する（R2-001）。
+
+    'file.md#' や '#' のように sep は存在するが fragment が空のリンク、
+    および 'file.md' のように sep 自体が存在しないリンクはスキップされ空リストを返す。
+    """
+    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.anchor_refs("[x](file.md#)\n") == []
+    assert module.anchor_refs("[x](#)\n") == []
+    assert module.anchor_refs("[x](file.md)\n") == []
