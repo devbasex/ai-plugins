@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pytest
@@ -297,6 +298,30 @@ def test_missing_plugin_json_fails(tree: Path) -> None:
     result = run_check(tree)
     assert result.returncode != 0
     assert "plugin.json" in output_of(result)
+
+
+def test_missing_root_readme_fails(tree: Path) -> None:
+    """現状固定: 対象の説明文書 `README.md` が無いこと自体を失敗として扱い、そのパスを出す。"""
+    root_readme(tree).unlink()
+    result = run_check(tree)
+    assert result.returncode != 0
+    assert "README.md" in output_of(result)
+
+
+def test_missing_plugin_readme_fails(tree: Path) -> None:
+    """現状固定: 対象の説明文書 `plugins/ndf/README.md` が無いこと自体を失敗として扱う。"""
+    plugin_readme(tree).unlink()
+    result = run_check(tree)
+    assert result.returncode != 0
+    assert "plugins/ndf/README.md" in output_of(result)
+
+
+def test_missing_skills_dir_fails(tree: Path) -> None:
+    """現状固定: Skill の実体を数える `plugins/ndf/skills` が無いことを失敗として扱う。"""
+    shutil.rmtree(tree / "plugins/ndf/skills")
+    result = run_check(tree)
+    assert result.returncode != 0
+    assert "plugins/ndf/skills" in output_of(result)
 
 
 # --- G〜M: 説明文書の本文に書かれた版数 ---
