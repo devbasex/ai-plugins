@@ -54,6 +54,14 @@ def assert_no_bare_cd_error(proc: subprocess.CompletedProcess) -> None:
     assert "cd:" not in proc.stdout + proc.stderr
 
 
+def test_project_without_path_stops_with_error(tmp_path: Path) -> None:
+    proc = run("--project", home=tmp_path)
+
+    assert proc.returncode == 2
+    assert proc.stderr.splitlines() == ["ERROR: --project requires a path"]
+    assert_no_bare_cd_error(proc)
+
+
 @pytest.mark.parametrize("name", ["missing", "my project", "tab\tx"])
 def test_missing_path_stops_with_error_and_hint(tmp_path: Path, name: str) -> None:
     target = tmp_path / name
