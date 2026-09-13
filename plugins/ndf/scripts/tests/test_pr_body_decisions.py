@@ -265,6 +265,24 @@ def test_5_long_fence_closes_only_with_same_marker_and_sufficient_length(fake):
     assert out.returncode == 0, out.stdout + out.stderr
 
 
+def test_5_h1_heading_closes_decisions_section(fake):
+    """現状固定: # で始まる h1 見出しが「## 決定の記録」を閉じ、後ろの ### は数えない。"""
+    design = (
+        "# 設計\n\n## 決定の記録\n\n"
+        "### 決定 A: 採用する方針\n\n"
+        "# 付録\n\n"
+        "### 数えない見出し: 付録の小見出し\n"
+    )
+    expected = section((
+        "issues/issue-1-design.md",
+        ["決定 A: 採用する方針"],
+    ))
+    design_pr(fake, body=f"## Summary\n\n{expected}\n## Test plan\n", design=design)
+    out = fake.run("check", "7", "--repo", REPO)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert "決定 1 件" in out.stdout
+
+
 @pytest.mark.parametrize("flag", ["fail_pr"])
 def test_6_unreadable_pull_request_returns_2(fake, flag):
     design_pr(fake, EXPECTED, **{flag: True})
