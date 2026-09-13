@@ -337,8 +337,8 @@ _wf_missing_before_pr() {
   local mode="${1:-}" content="${2:-}" stage class
   local -a recorded=()
   while IFS= read -r stage; do
-    [ -n "$stage" ] && recorded+=("$stage")
-  done < <(_wf_recorded "$content")
+    recorded+=("$stage")
+  done < <(_wf_recorded_lines "$content")
   while IFS= read -r stage; do
     _wf_contains "$stage" ${recorded[@]+"${recorded[@]}"} && continue
     class=$(wf_stage_class "$mode" "$stage") || continue
@@ -640,6 +640,14 @@ _wf_recorded() {
   jq -r '(.stages // []) | .[]' <<<"$1" 2>/dev/null
 }
 
+# _wf_recorded の出力から空行を除き、記録済み工程を 1 行 1 件返す。
+# bash は配列を戻せないため行で返す。
+_wf_recorded_lines() {
+  _wf_recorded "${1:-}" | while IFS= read -r s; do
+    [ -n "$s" ] && printf '%s\n' "$s"
+  done
+}
+
 # 与えた値が並びの中にあれば 0 を返す。
 _wf_contains() {
   local want="$1" item
@@ -708,8 +716,8 @@ wf_report() {
   file=$(wf_state_file "$slug" "$issue") || { wf_report_empty "$issue"; return 0; }
   content=$(wf_state_read "$file")
   while IFS= read -r stage; do
-    [ -n "$stage" ] && recorded+=("$stage")
-  done < <(_wf_recorded "$content")
+    recorded+=("$stage")
+  done < <(_wf_recorded_lines "$content")
   if [ "${#recorded[@]}" -eq 0 ]; then
     wf_report_empty "$issue"
     return 0
