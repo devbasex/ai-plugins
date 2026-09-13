@@ -18,7 +18,6 @@ run_step "claude plugin list" claude plugin list
 "$REPO_ROOT/tests/runtime-smoke/assertions/assert-plugin-files.sh" claude
 "$REPO_ROOT/tests/runtime-smoke/assertions/assert-mcp-config.sh" claude "$REPO_ROOT/plugins/mcp/mcp-bigquery/.mcp.json"
 "$REPO_ROOT/tests/runtime-smoke/assertions/assert-hook-fixtures.sh" claude
-"$REPO_ROOT/tests/runtime-smoke/fixtures/hooks-positive-control/assert-characterization.sh"
 "$REPO_ROOT/tests/runtime-smoke/assertions/assert-authenticated-smoke.sh" claude
 "$REPO_ROOT/tests/runtime-smoke/assertions/assert-hook-definitions.sh" claude
 "$REPO_ROOT/tests/runtime-smoke/assertions/assert-no-host-contamination.sh" claude

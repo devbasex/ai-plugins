@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# assert-hook-definitions.sh と lib/codex-hooks-list.py の判定分岐を、claude / codex をスタブへ
+# 置き換えて固定する単体テスト。実機のスモーク（adapters/）からは呼ばない。
+# 呼ぶのは pytest の tests/runtime-smoke/test_hook_definitions_characterization.py の 1 か所だけ。
 set -euo pipefail
 
 REPO_ROOT="${REPO_ROOT:?}"
