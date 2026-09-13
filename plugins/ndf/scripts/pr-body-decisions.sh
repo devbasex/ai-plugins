@@ -207,6 +207,10 @@ def count_decisions(docs):
     return sum(len(h) for _, h in docs)
 
 
+def summary(docs):
+    return f"設計文書 {len(docs)} 本 / 決定 {count_decisions(docs)} 件"
+
+
 def compare(body, docs):
     span = find_section(body, HEADING)
     actual = body[span[0]:span[1]] if span else None
@@ -215,12 +219,11 @@ def compare(body, docs):
 
 
 def report(actual, expected, docs):
-    total = count_decisions(docs)
     if expected is None:
         print(f"食い違い: 変更したファイルに「## 決定の記録」を持つ設計文書が無いのに、本文に「{HEADING}」の節がある")
         return
     if actual is None:
-        print(f"食い違い: 本文に「{HEADING}」の節が無い（設計文書 {len(docs)} 本 / 決定 {total} 件）")
+        print(f"食い違い: 本文に「{HEADING}」の節が無い（{summary(docs)}）")
     else:
         print(f"食い違い: 本文の「{HEADING}」の節が設計文書の決定の見出しと一致しない")
     diff = difflib.unified_diff(
@@ -261,9 +264,8 @@ def sync_section(body, span, expected, docs):
     write_body(rewrite(body, span, expected))
     _, _, body = read_pr()
     same, _, actual, expected = compare(body, docs)
-    total = count_decisions(docs)
     if same:
-        print(f"書き直した: 設計文書 {len(docs)} 本 / 決定 {total} 件")
+        print(f"書き直した: {summary(docs)}")
         return 0
     report(actual, expected, docs)
     return 1
@@ -272,13 +274,13 @@ def sync_section(body, span, expected, docs):
 def build_comparison(head_sha, body):
     docs = changed_markdown(head_sha)
     same, span, actual, expected = compare(body, docs)
-    return body, docs, same, span, actual, expected, count_decisions(docs)
+    return body, docs, same, span, actual, expected
 
 
 def handle_comparison(sub, comparison):
-    body, docs, same, span, actual, expected, total = comparison
+    body, docs, same, span, actual, expected = comparison
     if same:
-        print(f"一致: 設計文書 {len(docs)} 本 / 決定 {total} 件")
+        print(f"一致: {summary(docs)}")
         return 0
     if sub == "check":
         report(actual, expected, docs)
