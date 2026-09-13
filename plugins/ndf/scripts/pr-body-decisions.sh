@@ -93,7 +93,10 @@ def gh(*args, input_file=None):
     if done.returncode != 0:
         detail = done.stderr.decode("utf-8", "replace").strip().splitlines()
         raise Unreadable(f"gh api {' '.join(args)}: {detail[-1] if detail else done.returncode}")
-    return done.stdout.decode("utf-8")
+    try:
+        return done.stdout.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise Unreadable(f"gh api {args[-1]}: 応答が UTF-8 ではありません: {exc}")
 
 
 def read_pr():
@@ -156,7 +159,7 @@ def markdown_names(raw):
             files += page
         return sorted(f["filename"] for f in files
                       if f.get("status") != "removed" and f["filename"].endswith(".md"))
-    except (ValueError, KeyError, TypeError) as exc:
+    except (ValueError, KeyError, TypeError, AttributeError) as exc:
         raise Unreadable(f"変更したファイルの一覧を読めません: {exc}")
 
 

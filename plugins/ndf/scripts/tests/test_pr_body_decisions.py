@@ -78,6 +78,9 @@ def respond_files(state):
 
 def respond_contents(state, parts):
     name = urllib.parse.unquote("/".join(parts[4:]))
+    if name in state.get("contents_hex", {}):
+        sys.stdout.buffer.write(bytes.fromhex(state["contents_hex"][name]))
+        sys.exit(0)
     if name not in state["contents"]:
         sys.exit(1)
     sys.stdout.write(state["contents"][name])
@@ -363,8 +366,8 @@ def test_6_unreadable_design_document_returns_2(fake):
 
 @pytest.mark.parametrize(
     "files_response",
-    ["{", json.dumps([{"status": "added"}])],
-    ids=["broken-json", "missing-filename"],
+    ["{", json.dumps([{"status": "added"}]), json.dumps({"message": "Not Found"}), json.dumps(["a.md"])],
+    ids=["broken-json", "missing-filename", "object-page", "non-object-entry"],
 )
 def test_6_unreadable_changed_files_returns_2(fake, files_response):
     """現状固定: 一覧 API が成功しても応答を解釈できなければ読み取り失敗にする。"""
@@ -372,6 +375,15 @@ def test_6_unreadable_changed_files_returns_2(fake, files_response):
     out = fake.run("check", "7", "--repo", REPO)
     assert out.returncode == 2, out.stdout + out.stderr
     assert "変更したファイルの一覧を読めません" in out.stderr
+
+
+def test_6_design_document_with_invalid_utf8_returns_2(fake):
+    """中身が UTF-8 として読めなければ、未処理の例外（1）ではなく読み取り失敗（2）にする。"""
+    fake.setup(body=EXPECTED, files={"issues/issue-1-design.md": "added"},
+               contents_hex={"issues/issue-1-design.md": "23208080ff0a"})
+    out = fake.run("check", "7", "--repo", REPO)
+    assert out.returncode == 2, out.stdout + out.stderr
+    assert "Traceback" not in out.stderr
 
 
 def test_6_missing_gh_returns_2(fake, tmp_path):
