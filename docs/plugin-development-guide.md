@@ -171,6 +171,23 @@ plugins/{plugin-name}/
 [versioning-and-distribution.md の「利用者が過去の版へ戻る」](versioning-and-distribution.md#利用者が過去の版へ戻る)
 にあります。
 
+## 既存プラグインの削除
+
+1. `.claude-plugin/marketplace.json` から該当プラグインの項目を削除
+2. 必要ならプラグインディレクトリを削除
+   ```bash
+   rm -rf plugins/{plugin-name}
+   ```
+3. 作業ブランチでコミットし、`develop` 宛の Pull Request を作成（`main` / `develop` へ直接
+   push しない。規則は [AGENTS.md](../AGENTS.md) の「Git運用ルール」）
+   ```bash
+   git checkout -b feature/remove-{plugin-name}
+   git add .claude-plugin/marketplace.json plugins/{plugin-name}
+   git commit -m "Update: {plugin-name} をマーケットプレイスから外す"
+   git push origin feature/remove-{plugin-name}
+   gh pr create --base develop
+   ```
+
 ## 検証とテスト
 
 ### ローカルテスト
@@ -203,6 +220,9 @@ claude --plugin-dir plugins/ndf
 bash scripts/build-runtime-plugins.sh
 bash scripts/validate-runtime-plugins.sh
 ```
+
+実ランタイムのインストール経路を Docker コンテナ内で確かめる smoke test の手順は
+[tests/runtime-smoke/README.md](../tests/runtime-smoke/README.md) にあります。
 
 `scripts/` 自体を変更した場合は、その検査のテストも実行します。
 
