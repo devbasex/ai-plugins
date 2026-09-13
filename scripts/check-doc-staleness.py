@@ -66,10 +66,19 @@ PLUGIN_README_RUNTIMES = {
     "agy": "agy",
 }
 
-RUNTIME_COUNT = re.compile(r"(Claude Code|Kiro|Codex|agy)向け core\s*(\d+)\s*個")
+def runtime_alternation(labels: dict[str, str]) -> str:
+    """対応表のキーから、ランタイム名を拾う正規表現の選択肢を作る。
+
+    選択肢を対応表と別に書き写すと、表記を足すか改名したときに片方だけが古い綴りを読む。
+    キーを `re.escape` で囲んで並べ、対応表を唯一の定義にする。
+    """
+    return "|".join(re.escape(label) for label in labels)
+
+
+RUNTIME_COUNT = re.compile(r"(" + runtime_alternation(ROOT_README_RUNTIMES) + r")向け core\s*(\d+)\s*個")
 SOURCE_COUNT = re.compile(r"元Skills（\s*(\d+)\s*個\s*）")
 CATEGORY_LINE = re.compile(r"^\s+-\s+(?P<label>.+?)\s+\((?P<count>\d+)\)\s*[:：]\s*(?P<names>.+)$")
-TABLE_ROW = re.compile(r"^\|\s*(Claude Code|Codex|Kiro CLI|agy)\s*\|\s*(\d+)\s*個\s*\|")
+TABLE_ROW = re.compile(r"^\|\s*(" + runtime_alternation(PLUGIN_README_RUNTIMES) + r")\s*\|\s*(\d+)\s*個\s*\|")
 LAYOUT_SKILLS = re.compile(r"唯一の実体（\s*(\d+)\s*個\s*）")
 NAME_SEPARATOR = re.compile(r"[,、]")
 
@@ -97,12 +106,7 @@ UPGRADE_HEADING = re.compile(r"^##\s+v" + VERSION + r"\s+へ更新するとき\s
 #
 # 周囲の固定の語で位置を決めてから照合する。文書内の版数のうち現行版を指すのはこれだけで、
 # 残りは変更履歴・履歴の説明であり、前の版のまま残すのが正しい。
-OVERVIEW_VERSION = re.compile(r"\*\*NDFプラグイン v" + VERSION + r"\*\*")  # G
 PLUGIN_TABLE_ROW = re.compile(r"^\|\s*\*\*(?P<name>[A-Za-z0-9_.-]+)\*\*\s*\|\s*" + VERSION + r"\s*\|")  # H
-MAIN_PLUGIN_VERSION = re.compile(r"主要プラグインです（v" + VERSION + r"）")  # I
-KIRO_AGENT_VERSION = re.compile(r"Kiro CLI用 / v" + VERSION + r"）")  # K
-CODEX_CACHE_PATH = re.compile(r"plugins/cache/ai-plugins/" + FAMILY + r"/" + VERSION + r"/skills/")  # L
-CODEX_LIST_OUTPUT = re.compile(FAMILY + r"@ai-plugins\s+installed, enabled\s+" + VERSION)  # M
 
 # J: 区間の検査。正本のこの見出しから次の同位以上の見出しの直前までに並ぶ版数を、
 # 現行版の基底と比べる。
@@ -121,6 +125,25 @@ CODE_FENCE = re.compile(r"^\s*(?:```|~~~)")
 # この章の版数はすべて `` `9.6.0` `` の形で書く（正本へ移した時点の章の中の 10 箇所すべてが
 # 囲まれていることを確認済み）。囲まずに書いた版数は走査に入らないため、例を足すときは囲みを付ける。
 SECTION_VERSION = re.compile(r"`v?" + VERSION + r"`")
+
+# J の続き: 章 2 の中で、次に出す版を指すはずの例（#566）。版数を一括で置換すると、
+# 次の版を指す例が現行版を指す形へ崩れる。崩れた値は現行版そのものと等しいことがあり、
+# 値だけでは正式版を指す正しい例と区別できない。値が何を指すはずかは周囲の語で決める。
+#
+# 比べる相手は現行版ではなく同じ章の例である。`develop` の版は接尾辞付きになりうるため、
+# 現行版との一致を求めると開発版の配布のたびに正しい例が落ちる。正式版の行を現行版へ結び
+# 付けるのは、上の区間の規則（基底が現行版より小さければ落ちる）が持つ。
+VERSION_FORM_ROW = re.compile(
+    r"^\|\s*(?P<label>正式版|開発版|公開前の確認版)\s*\|\s*`v?" + VERSION + r"`\s*\|"
+)
+NEXT_DEVELOPMENT = re.compile(r"`v?" + VERSION + r"`\s*の次を開発するなら\s*`v?" + VERSION + r"`")
+# 表の行の語ごとに、版数が終わるべき接尾辞の形。`None` は接尾辞を持たないことを求める。
+VERSION_FORM_SUFFIX: dict[str, tuple[re.Pattern[str] | None, str]] = {
+    "正式版": (None, "接尾辞なし"),
+    "開発版": (re.compile(r"-dev\.\d+$"), "-dev.<連番>"),
+    "公開前の確認版": (re.compile(r"-rc\.\d+$"), "-rc.<連番>"),
+}
+DEV_SUFFIX = VERSION_FORM_SUFFIX["開発版"][0]
 
 
 @dataclass
@@ -171,6 +194,17 @@ class Claim:
 
 
 @dataclass(frozen=True)
+class RuntimeCountDocSpec:
+    """説明文書にあるランタイム別 Skill 数の記載定義。"""
+
+    path: str
+    labels: dict[str, str]
+    subject_fmt: str
+    wording_fmt: str
+    source_of: Callable[[str], str]
+
+
+@dataclass(frozen=True)
 class PointVersionSpec:
     """周囲の固定の語で位置を決める版数記載の定義。"""
 
@@ -180,28 +214,55 @@ class PointVersionSpec:
     pattern: re.Pattern[str]
 
 
+@dataclass(frozen=True)
+class RepositoryMetrics:
+    """同じ検査時点にリポジトリの実体から集めた突き合わせ先の値。
+
+    ランタイム別の配布 Skill 数・実体の Skill 数・版数と、元 Skill 数の出典の文言を
+    1 つにまとめる。個別の引数として渡し回すと、同じ時点の値であるという関係が読めない。
+
+    元 Skill 数（`total`）は実体の Skill 数（`skills`）と同じ値であるため、別に持たず
+    `skills` から取り出す。
+    """
+
+    counts: dict[str, int | None]
+    skills: int | None
+    version: str | None
+    source: str
+
+
 # 点で照合する版数記載（G・I・K・L・M）の一覧。点の照合を足すときはここへ 1 行足す。
 # 同じ文書の中では並びの順に報告する。
 POINT_VERSION_SPECS: list[PointVersionSpec] = [
-    PointVersionSpec(ROOT_README, "概要の版数", "**NDFプラグイン v<版>**", OVERVIEW_VERSION),  # G
+    PointVersionSpec(
+        ROOT_README,
+        "概要の版数",
+        "**NDFプラグイン v<版>**",
+        re.compile(r"\*\*NDFプラグイン v" + VERSION + r"\*\*"),
+    ),  # G
     PointVersionSpec(
         AGENTS_MD,
         "「主要プラグインです（v<版>）」の版数",
         "主要プラグインです（v<版>）",
-        MAIN_PLUGIN_VERSION,
+        re.compile(r"主要プラグインです（v" + VERSION + r"）"),
     ),  # I
-    PointVersionSpec(PLUGIN_README, "Kiro の確認例の版数", "（Kiro CLI用 / v<版>）", KIRO_AGENT_VERSION),  # K
+    PointVersionSpec(
+        PLUGIN_README,
+        "Kiro の確認例の版数",
+        "（Kiro CLI用 / v<版>）",
+        re.compile(r"Kiro CLI用 / v" + VERSION + r"）"),
+    ),  # K
     PointVersionSpec(
         PLUGIN_README,
         "Codex のキャッシュパスの例の版数",
         f"~/.codex/plugins/cache/ai-plugins/{FAMILY}/<版>/skills/...",
-        CODEX_CACHE_PATH,
+        re.compile(r"plugins/cache/ai-plugins/" + FAMILY + r"/" + VERSION + r"/skills/"),
     ),  # L
     PointVersionSpec(
         PLUGIN_README,
         "`codex plugin list` の出力例の版数",
         f"{FAMILY}@ai-plugins  installed, enabled  <版>",
-        CODEX_LIST_OUTPUT,
+        re.compile(FAMILY + r"@ai-plugins\s+installed, enabled\s+" + VERSION),
     ),  # M
 ]
 
@@ -261,13 +322,25 @@ def skill_dir_count(root: Path, relative: str, report: Report) -> int | None:
     return sum(1 for child in directory.iterdir() if (child / "SKILL.md").is_file())
 
 
+def read_version_field(path: Path, *, ignore_invalid_json: bool = True) -> str | None:
+    if not path.is_file():
+        return None
+    try:
+        version = json.loads(path.read_text(encoding="utf-8")).get("version")
+    except json.JSONDecodeError:
+        if not ignore_invalid_json:
+            raise
+        return None
+    return version if isinstance(version, str) else None
+
+
 def plugin_version(root: Path, report: Report) -> str | None:
     path = root / PLUGIN_JSON
     if not path.is_file():
         report.add_source(f"{PLUGIN_JSON} が無い（版数を突き合わせる相手）")
         return None
-    version = json.loads(path.read_text(encoding="utf-8")).get("version")
-    if not isinstance(version, str):
+    version = read_version_field(path, ignore_invalid_json=False)
+    if version is None:
         report.add_source(f"{PLUGIN_JSON} に version がない")
         return None
     if not VERSION_VALUE.fullmatch(version):
@@ -285,14 +358,7 @@ def named_plugin_version(root: Path, name: str) -> str | None:
     突き合わせ先が無いことは呼び出し側が食い違いとして扱う。ここで報告しないのは、行に
     書かれた名前そのものを出力へ含めたいためである。
     """
-    path = root / plugin_json_path(name)
-    if not path.is_file():
-        return None
-    try:
-        version = json.loads(path.read_text(encoding="utf-8")).get("version")
-    except json.JSONDecodeError:
-        return None
-    return version if isinstance(version, str) else None
+    return read_version_field(root / plugin_json_path(name))
 
 
 def base_of(version: str) -> tuple[int, int, int]:
@@ -403,20 +469,24 @@ def parse_plugin_table_rows(body: str) -> list[tuple[str, str, int]]:
     return rows
 
 
+def row_location(value: str, number: int) -> str:
+    """記載の値と行番号を、失敗の文言に埋める断片として返す。"""
+    return f"記載: {value}（L{number}）"
+
+
 def compare_plugin_table_row(root: Path, name: str, value: str, number: int, report: Report) -> None:
     """一覧表の 1 行の版数を、その名前の `plugin.json` と突き合わせる。"""
     expected = named_plugin_version(root, name)
+    written = row_location(value, number)
     if expected is None:
         report.add(
             ROOT_README,
-            f"プラグイン一覧表の {name} の版数を突き合わせられない"
-            f"（記載: {value}（L{number}） / {plugin_json_path(name)} が無い）",
+            f"プラグイン一覧表の {name} の版数を突き合わせられない（{written} / {plugin_json_path(name)} が無い）",
         )
     elif value != expected:
         report.add(
             ROOT_README,
-            f"プラグイン一覧表の {name} の版数が食い違う"
-            f"（記載: {value}（L{number}） / {plugin_json_path(name)}: {expected}）",
+            f"プラグイン一覧表の {name} の版数が食い違う（{written} / {plugin_json_path(name)}: {expected}）",
         )
 
 
@@ -437,33 +507,48 @@ def check_plugin_table(root: Path, body: str, report: Report) -> None:
         compare_plugin_table_row(root, name, value, number, report)
 
 
-def scan_section_versions(lines: list[str]) -> tuple[list[str], list[int]]:
-    """「版の付け方と開発版の配布」章に囲みで並ぶ版数と、その行番号を拾う。
+def section_lines(lines: list[str]) -> list[tuple[int, str, bool]] | None:
+    """「版の付け方と開発版の配布」章の行を、行番号と囲みの中かどうかを付けて返す。
 
-    見出しを見つけ、次の同位以上の見出しの直前まで走査する。区間の終わりは自身と同じか
-    上位の見出しであり、囲みの中は見出しとして数えない。拾うのは `` `9.6.0` `` のように
-    囲まれた版数だけである。見出しが無ければ空を返す。
+    見出しを見つけ、次の同位以上の見出しの直前までを返す。区間の終わりは自身と同じか
+    上位の見出しであり、囲みの中は見出しとして数えない。囲みの開始と終了の行そのものも
+    囲みの中として扱う。見出しが無ければ `None` を返す。
     """
     start = next(
         (index for index, line in enumerate(lines) if line.strip() == VERSION_SECTION_HEADING),
         None,
     )
+    if start is None:
+        return None
+    section: list[tuple[int, str, bool]] = []
+    in_fence = False
+    for number, line in enumerate(lines[start + 1 :], start + 2):
+        if CODE_FENCE.match(line):
+            in_fence = not in_fence
+            section.append((number, line, True))
+            continue
+        if not in_fence and SECTION_HEADING.match(line):
+            break
+        section.append((number, line, in_fence))
+    return section
+
+
+def scan_section_versions(lines: list[str]) -> tuple[list[str], list[int]]:
+    """「版の付け方と開発版の配布」章に囲みで並ぶ版数と、その行番号を拾う。
+
+    章の区間は `section_lines` が決める。拾うのは `` `9.6.0` `` のように囲まれた版数だけで、
+    コードの囲みの中の行も拾う。見出しが無ければ空を返す。
+    """
     values: list[str] = []
     line_numbers: list[int] = []
-    if start is not None:
-        in_fence = False
-        for number, line in enumerate(lines[start + 1 :], start + 2):
-            if CODE_FENCE.match(line):
-                in_fence = not in_fence
-            elif not in_fence and SECTION_HEADING.match(line):
-                break
-            for found in SECTION_VERSION.finditer(line):
-                values.append(found.group(1))
-                line_numbers.append(number)
+    for number, line, _ in section_lines(lines) or []:
+        for found in SECTION_VERSION.finditer(line):
+            values.append(found.group(1))
+            line_numbers.append(number)
     return values, line_numbers
 
 
-def check_version_section(body: str, version: str | None, report: Report) -> None:
+def check_version_section(body: str, version: str | None, report: Report) -> bool:
     """正本の「版の付け方と開発版の配布」章に並ぶ版数を、現行版の基底と比べる（J）。
 
     この節の版数は 1 つの値ではなく、現行版を基にした例の集まりである。現行版そのもの・
@@ -476,6 +561,9 @@ def check_version_section(body: str, version: str | None, report: Report) -> Non
 
     節の走査（見出しの探索・囲みの追跡・囲まれた版数の収集）は `scan_section_versions` が担う。
     ここでは読み取れないことの報告と、現行版の基底との比較だけを行う。
+
+    節の版数を読み取れたかを返す。読み取れなければ、例どうしの比較（`check_version_examples`）
+    は同じ原因の報告を重ねるだけになる。
     """
     values, line_numbers = scan_section_versions(body.splitlines())
     if not values:
@@ -485,9 +573,9 @@ def check_version_section(body: str, version: str | None, report: Report) -> Non
             f"（`{VERSION_SECTION_HEADING}` の節へ版数の例を囲みで置く。"
             f"{PLUGIN_JSON}: {version}）",
         )
-        return
+        return False
     if version is None:
-        return
+        return True
     current = base_of(version)
     for value, number in zip(values, line_numbers):
         if base_of(value) < current:
@@ -496,6 +584,100 @@ def check_version_section(body: str, version: str | None, report: Report) -> Non
                 "版の付け方の節の版数が現行版より古い"
                 f"（記載: {value}（L{number}） / {PLUGIN_JSON}: {version}）",
             )
+    return True
+
+
+def parse_version_form_rows_and_examples(
+    body: str,
+) -> tuple[dict[str, list[tuple[str, int]]], list[tuple[str, str, int]]]:
+    """章 2 の囲みの外から、版の形の表の行と次の開発の例を行番号つきで拾う。"""
+    rows: dict[str, list[tuple[str, int]]] = {label: [] for label in VERSION_FORM_SUFFIX}
+    examples: list[tuple[str, str, int]] = []
+    for number, line, in_fence in section_lines(body.splitlines()) or []:
+        if in_fence:
+            continue
+        row = VERSION_FORM_ROW.match(line)
+        if row:
+            rows[row.group("label")].append((row.group(2), number))
+        for found in NEXT_DEVELOPMENT.finditer(line):
+            examples.append((found.group(1), found.group(2), number))
+    return rows, examples
+
+
+def check_version_form_rows_presence(rows: dict[str, list[tuple[str, int]]], report: Report) -> None:
+    """版の形の表の各行が 1 つずつあるかを見る。"""
+    for label, found_rows in rows.items():
+        if not found_rows:
+            report.add(
+                VERSIONING_MD,
+                f"版の付け方の節の版の形の表を読み取れない（無い行: {label}。"
+                f"| {label} | `<版>` | ... | の形で書く）",
+            )
+        elif len(found_rows) > 1:
+            numbers = ", ".join(f"L{number}" for _, number in found_rows)
+            report.add(VERSIONING_MD, f"版の付け方の節の版の形の表に同じ行が複数ある（{label}: {numbers}）")
+
+
+def check_version_form_row_suffixes(rows: dict[str, list[tuple[str, int]]], report: Report) -> None:
+    """版の形の表の各行が、その行に求める接尾辞の形を持つかを見る。"""
+    for label, found_rows in rows.items():
+        suffix, wording = VERSION_FORM_SUFFIX[label]
+        for value, number in found_rows:
+            if ("-" in value) if suffix is None else not suffix.search(value):
+                report.add(
+                    VERSIONING_MD,
+                    f"版の付け方の節の{label}の行の接尾辞が違う"
+                    f"（記載: {value}（L{number}） / 求める形: {wording}）",
+                )
+
+
+def check_rows_newer_than_stable(rows: dict[str, list[tuple[str, int]]], report: Report) -> None:
+    """開発版と公開前の確認版の行が、正式版の行より新しい基底を指すかを見る。"""
+    # 比べる相手が 1 つに決まるときだけ、正式版の行より新しい基底を指すかを見る。
+    if len(rows["正式版"]) != 1:
+        return
+
+    stable, stable_number = rows["正式版"][0]
+    for label in ("開発版", "公開前の確認版"):
+        for value, number in rows[label]:
+            if base_of(value) <= base_of(stable):
+                report.add(
+                    VERSIONING_MD,
+                    f"版の付け方の節の{label}の行が正式版の行より新しい版を指していない"
+                    f"（記載: {value}（L{number}） / 正式版: {stable}（L{stable_number}））",
+                )
+
+
+def check_next_development_examples(examples: list[tuple[str, str, int]], report: Report) -> None:
+    """次の開発の例があり、どれも次の版の開発版を指すかを見る。"""
+    if not examples:
+        report.add(
+            VERSIONING_MD,
+            "版の付け方の節の次の開発の例を読み取れない"
+            "（`<版>` の次を開発するなら `<版>-dev.<連番>` の形で書く）",
+        )
+    for left, right, number in examples:
+        if base_of(right) <= base_of(left) or not DEV_SUFFIX.search(right):
+            report.add(
+                VERSIONING_MD,
+                f"版の付け方の節の次の開発の例が次の版を指していない（記載: {left} → {right}（L{number}））",
+            )
+
+
+def check_version_examples(body: str, report: Report) -> None:
+    """章 2 の版の形の表と次の開発の例を、例どうしで比べる（J の続き。#566）。
+
+    見るのは囲みの外の行だけである。囲みの中の表や文は実行例か出力例で、章の例そのもの
+    ではない。数えると、実行例を足しただけで「同じ行が複数ある」に当たる。
+
+    位置を決める語（表の 1 列目の 3 語と「の次を開発するなら」）が見つからないときも、
+    重なるときも失敗にする。黙って通すと、行を言い換えるだけで規則が外れる。
+    """
+    rows, examples = parse_version_form_rows_and_examples(body)
+    check_version_form_rows_presence(rows, report)
+    check_version_form_row_suffixes(rows, report)
+    check_rows_newer_than_stable(rows, report)
+    check_next_development_examples(examples, report)
 
 
 def check_root_readme_versions(root: Path, body: str, report: Report) -> None:
@@ -507,43 +689,39 @@ def check_root_readme_versions(root: Path, body: str, report: Report) -> None:
 
 
 def check_runtime_counts(
-    path: str,
+    spec: RuntimeCountDocSpec,
     described_by_label: dict[str, list[int]],
-    labels: dict[str, str],
     counts: dict[str, int | None],
-    subject_fmt: str,
-    wording_fmt: str,
-    source_of: Callable[[str], str],
     report: Report,
 ) -> None:
     """ランタイム別の Skill 数を突き合わせる。"""
-    for label, runtime in labels.items():
+    for label, runtime in spec.labels.items():
         verify(
             Claim(
-                path=path,
-                subject=subject_fmt.format(label, label=label),
-                wording=wording_fmt.format(label, label=label),
+                path=spec.path,
+                subject=spec.subject_fmt.format(label, label=label),
+                wording=spec.wording_fmt.format(label, label=label),
                 described=described_by_label[label],
                 expected=counts.get(runtime),
-                source=source_of(runtime),
+                source=spec.source_of(runtime),
             ),
             report,
         )
 
 
-def check_root_readme(
-    body: str, counts: dict[str, int | None], total: int | None, source: str, report: Report
-) -> None:
+def check_root_readme(body: str, metrics: RepositoryMetrics, report: Report) -> None:
     """`README.md` のランタイム別の数（A）・元 Skill 数（B）・カテゴリ内訳（C）を見る。"""
     found = labelled_numbers(RUNTIME_COUNT, body, ROOT_README_RUNTIMES)
     check_runtime_counts(
-        ROOT_README,
+        RuntimeCountDocSpec(
+            path=ROOT_README,
+            labels=ROOT_README_RUNTIMES,
+            subject_fmt="公開Skills の {label} の数",
+            wording_fmt="{label}向け core <数>個",
+            source_of=manifest_path,
+        ),
         found,
-        ROOT_README_RUNTIMES,
-        counts,
-        "公開Skills の {label} の数",
-        "{label}向け core <数>個",
-        manifest_path,
+        metrics.counts,
         report,
     )
     verify(
@@ -552,12 +730,12 @@ def check_root_readme(
             subject="元Skills の数",
             wording="元Skills（<数>個）",
             described=numbers_of(SOURCE_COUNT, body),
-            expected=total,
-            source=source,
+            expected=metrics.skills,
+            source=metrics.source,
         ),
         report,
     )
-    check_category_breakdown(body, total, source, report)
+    check_category_breakdown(body, metrics.skills, metrics.source, report)
 
 
 def check_category_breakdown(body: str, total: int | None, source: str, report: Report) -> None:
@@ -588,23 +766,19 @@ def check_category_breakdown(body: str, total: int | None, source: str, report: 
     )
 
 
-def check_plugin_readme(
-    body: str,
-    counts: dict[str, int | None],
-    skills: int | None,
-    version: str | None,
-    report: Report,
-) -> None:
+def check_plugin_readme(body: str, metrics: RepositoryMetrics, report: Report) -> None:
     """`plugins/ndf/README.md` の配布先の表（D）・レイアウト図（E）・更新案内（F）を見る。"""
     found = labelled_numbers(TABLE_ROW, body, PLUGIN_README_RUNTIMES)
     check_runtime_counts(
-        PLUGIN_README,
+        RuntimeCountDocSpec(
+            path=PLUGIN_README,
+            labels=PLUGIN_README_RUNTIMES,
+            subject_fmt="配布先の表の {label} の数",
+            wording_fmt="| {label} | <数> 個 | ... |",
+            source_of=manifest_path,
+        ),
         found,
-        PLUGIN_README_RUNTIMES,
-        counts,
-        "配布先の表の {label} の数",
-        "| {label} | <数> 個 | ... |",
-        manifest_path,
+        metrics.counts,
         report,
     )
     verify(
@@ -613,12 +787,12 @@ def check_plugin_readme(
             subject="レイアウト図の数",
             wording="唯一の実体（<数> 個）",
             described=numbers_of(LAYOUT_SKILLS, body),
-            expected=skills,
+            expected=metrics.skills,
             source=f"{SKILLS_DIR}/ の実体",
         ),
         report,
     )
-    check_upgrade_heading(body, version, report)
+    check_upgrade_heading(body, metrics.version, report)
 
 
 def check_upgrade_heading(body: str, version: str | None, report: Report) -> None:
@@ -665,12 +839,12 @@ def main() -> int:
 
     # 配らない Skill の置き場所（`optional-skills/`）は v10.5.0 で無くなった（#116）。
     # 元 Skill の数は `skills/` の実体だけで決まる。
-    total = skills
     source = f"{SKILLS_DIR}/ の実体 {skills}"
+    metrics = RepositoryMetrics(counts=counts, skills=skills, version=version, source=source)
 
     root_body = read_document(root, ROOT_README, report)
     if root_body is not None:
-        check_root_readme(root_body, counts, total, source, report)
+        check_root_readme(root_body, metrics, report)
         check_point_versions(ROOT_README, root_body, version, report)
         check_root_readme_versions(root, root_body, report)
 
@@ -681,12 +855,12 @@ def main() -> int:
     # 検査 I（`AGENTS.md`）と検査 J（正本）は別の文書を読む。本文を共有すると、正本の記載が
     # 古いことを `AGENTS.md` の失敗として報告してしまう。
     versioning_body = read_document(root, VERSIONING_MD, report)
-    if versioning_body is not None:
-        check_version_section(versioning_body, version, report)
+    if versioning_body is not None and check_version_section(versioning_body, version, report):
+        check_version_examples(versioning_body, report)
 
     plugin_body = read_document(root, PLUGIN_README, report)
     if plugin_body is not None:
-        check_plugin_readme(plugin_body, counts, skills, version, report)
+        check_plugin_readme(plugin_body, metrics, report)
         check_point_versions(PLUGIN_README, plugin_body, version, report)
 
     if report.errors:

@@ -5,6 +5,9 @@
 """
 from __future__ import annotations
 
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -48,6 +51,19 @@ def test_real_repository_passes() -> None:
     """実物のリポジトリでも通る。検査を入れた時点で落ちる状態を作らない。"""
     result = run_check(REPO_ROOT)
     assert result.returncode == 0, output_of(result)
+
+
+def test_root_defaults_to_current_directory() -> None:
+    """現状固定: `--root` を省くとカレントディレクトリをリポジトリの根として検査する。"""
+    result = subprocess.run(
+        [sys.executable, str(CHECKER)],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, output_of(result)
+    assert result.stdout == "documented skill counts and versions are up to date\n"
 
 
 # --- A: README.md のランタイム別の公開 Skill 数 ---
@@ -299,6 +315,30 @@ def test_missing_plugin_json_fails(tree: Path) -> None:
     assert "plugin.json" in output_of(result)
 
 
+def test_missing_root_readme_fails(tree: Path) -> None:
+    """現状固定: 対象の説明文書 `README.md` が無いこと自体を失敗として扱い、そのパスを出す。"""
+    root_readme(tree).unlink()
+    result = run_check(tree)
+    assert result.returncode != 0
+    assert "README.md" in output_of(result)
+
+
+def test_missing_plugin_readme_fails(tree: Path) -> None:
+    """現状固定: 対象の説明文書 `plugins/ndf/README.md` が無いこと自体を失敗として扱う。"""
+    plugin_readme(tree).unlink()
+    result = run_check(tree)
+    assert result.returncode != 0
+    assert "plugins/ndf/README.md" in output_of(result)
+
+
+def test_missing_skills_dir_fails(tree: Path) -> None:
+    """現状固定: Skill の実体を数える `plugins/ndf/skills` が無いことを失敗として扱う。"""
+    shutil.rmtree(tree / "plugins/ndf/skills")
+    result = run_check(tree)
+    assert result.returncode != 0
+    assert "plugins/ndf/skills" in output_of(result)
+
+
 # --- G〜M: 説明文書の本文に書かれた版数 ---
 #
 # 記号は `issues/parallel-batch-03/04-issue-209.md` の「検査する記載」に対応する。
@@ -445,7 +485,7 @@ def test_version_section_stale_example_fails(tree: Path) -> None:
     assert result.returncode != 0
     out = output_of(result)
     assert "9.2.1" in out and "9.3.0" in out
-    assert "L17" in out
+    assert "L18" in out
 
 
 def test_version_section_failure_names_the_canonical_document(tree: Path) -> None:
@@ -586,6 +626,186 @@ def test_stale_example_after_a_code_fence_is_still_found(tree: Path) -> None:
     assert "9.2.1" in out and "9.3.0" in out
 
 
+def test_stale_example_after_a_tilde_code_fence_is_still_found(tree: Path) -> None:
+    """~~~ の囲みより後ろも走査の対象に残る。閉じてしまうと後続の版数を見落とす。"""
+    edit(
+        versioning_md(tree),
+        "## 版の付け方と開発版の配布\n",
+        "## 版の付け方と開発版の配布\n"
+        "\n"
+        "~~~bash\n"
+        "# 常用する利用者（正式版）\n"
+        "claude plugin marketplace add https://example.invalid/fixture\n"
+        "~~~\n",
+    )
+    add_to_version_section(tree, "- 前の版の例。`9.2.1` はもう使わない")
+    result = run_check(tree)
+    assert result.returncode != 0
+    out = output_of(result)
+    assert "9.2.1" in out and "9.3.0" in out
+
+
+# --- J: 版の形の表と次の開発の例を、例どうしで比べる（#566） ---
+#
+# 雛形の章 2 は L13 が正式版 `9.3.0`、L14 が開発版 `9.4.0-dev.1`、L15 が公開前の確認版
+# `9.4.0-rc.1`、L17 が「`9.3.0` の次を開発するなら `9.4.0-dev.1`」である。
+
+J_ERROR = f"ERROR: {VERSIONING_MD_PATH}: 版の付け方の節の"
+STABLE_ROW = "| 正式版 | `9.3.0` | 利用者が常用してよい |\n"
+DEV_ROW = "| 開発版 | `9.4.0-dev.1` | 検証中 |\n"
+RC_ROW = "| 公開前の確認版 | `9.4.0-rc.1` | 正式版の候補 |\n"
+NEXT_EXAMPLE = "`9.3.0` の次を開発するなら `9.4.0-dev.1`"
+
+
+def j_errors(result) -> list[str]:
+    """検査 J の失敗の行だけを取り出す。"""
+    return [line for line in output_of(result).splitlines() if line.startswith(J_ERROR)]
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "expected"),
+    [
+        (DEV_ROW, "| 開発版 | `9.3.0` | 検証中 |\n", "開発版の行の接尾辞が違う（記載: 9.3.0（L14） / 求める形: -dev.<連番>）"),
+        (
+            RC_ROW,
+            "| 公開前の確認版 | `9.4.0` | 正式版の候補 |\n",
+            "公開前の確認版の行の接尾辞が違う（記載: 9.4.0（L15） / 求める形: -rc.<連番>）",
+        ),
+        (
+            STABLE_ROW,
+            "| 正式版 | `9.3.0-dev.1` | 利用者が常用してよい |\n",
+            "正式版の行の接尾辞が違う（記載: 9.3.0-dev.1（L13） / 求める形: 接尾辞なし）",
+        ),
+    ],
+    ids=["dev-without-suffix", "rc-without-suffix", "stable-with-suffix"],
+)
+def test_version_form_row_with_wrong_suffix_fails(tree: Path, before: str, after: str, expected: str) -> None:
+    """AC1: 版の形の表の行の接尾辞が、その行の語が求める形でなければ行番号付きで落ちる。"""
+    edit(versioning_md(tree), before, after)
+    result = run_check(tree)
+    assert result.returncode == 1
+    assert J_ERROR + expected in j_errors(result), output_of(result)
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "expected"),
+    [
+        (
+            DEV_ROW,
+            "| 開発版 | `9.3.0-dev.1` | 検証中 |\n",
+            "開発版の行が正式版の行より新しい版を指していない（記載: 9.3.0-dev.1（L14） / 正式版: 9.3.0（L13））",
+        ),
+        (
+            RC_ROW,
+            "| 公開前の確認版 | `9.2.0-rc.1` | 正式版の候補 |\n",
+            "公開前の確認版の行が正式版の行より新しい版を指していない（記載: 9.2.0-rc.1（L15） / 正式版: 9.3.0（L13））",
+        ),
+    ],
+    ids=["dev-same-base", "rc-older-base"],
+)
+def test_version_form_row_not_newer_than_stable_fails(tree: Path, before: str, after: str, expected: str) -> None:
+    """AC2: 開発版か公開前の確認版の行の基底が、正式版の行の基底以下なら落ちる。"""
+    edit(versioning_md(tree), before, after)
+    result = run_check(tree)
+    assert result.returncode == 1
+    assert J_ERROR + expected in j_errors(result), output_of(result)
+
+
+@pytest.mark.parametrize("right", ["9.3.0-dev.1", "9.4.0", "9.2.0-dev.1"])
+def test_next_development_example_not_pointing_to_next_version_fails(tree: Path, right: str) -> None:
+    """AC3: 次の開発の例の右側が、左側より新しい基底の開発版でなければ落ちる。"""
+    edit(versioning_md(tree), NEXT_EXAMPLE, f"`9.3.0` の次を開発するなら `{right}`")
+    result = run_check(tree)
+    assert result.returncode == 1
+    expected = f"次の開発の例が次の版を指していない（記載: 9.3.0 → {right}（L17））"
+    assert J_ERROR + expected in j_errors(result), output_of(result)
+
+
+def test_issue_form_current_version_left_in_place_fails(tree: Path) -> None:
+    """AC4: 現行版のまま、表の開発版の行と次の開発の例の右側が現行版を指す形（issue の 1 つ目）。"""
+    edit(versioning_md(tree), DEV_ROW, "| 開発版 | `9.3.0` | 検証中 |\n")
+    edit(versioning_md(tree), NEXT_EXAMPLE, "`9.3.0` の次を開発するなら `9.3.0-dev.1`")
+    result = run_check(tree)
+    assert result.returncode == 1
+    assert j_errors(result) == [
+        J_ERROR + "開発版の行の接尾辞が違う（記載: 9.3.0（L14） / 求める形: -dev.<連番>）",
+        J_ERROR + "開発版の行が正式版の行より新しい版を指していない（記載: 9.3.0（L14） / 正式版: 9.3.0（L13））",
+        J_ERROR + "次の開発の例が次の版を指していない（記載: 9.3.0 → 9.3.0-dev.1（L17））",
+    ]
+
+
+def test_issue_form_bulk_replacement_fails(tree: Path) -> None:
+    """AC4: 現行版を一括で次の版へ置換し、開発版の行の接尾辞が消えた形（issue の 2 つ目）。
+
+    置換は木のすべてのファイルへ行う。現行版を指す他の記載はすべて揃うため、落ちるのは章 2 の
+    例だけになる。
+    """
+    for path in tree.rglob("*"):
+        if path.is_file():
+            body = path.read_text(encoding="utf-8")
+            path.write_text(body.replace("9.3.0", "9.4.0"), encoding="utf-8")
+    edit(versioning_md(tree), DEV_ROW, "| 開発版 | `9.4.0` | 検証中 |\n")
+    result = run_check(tree)
+    assert result.returncode == 1
+    assert output_of(result).count("ERROR: ") == len(j_errors(result)), output_of(result)
+    assert j_errors(result) == [
+        J_ERROR + "開発版の行の接尾辞が違う（記載: 9.4.0（L14） / 求める形: -dev.<連番>）",
+        J_ERROR + "開発版の行が正式版の行より新しい版を指していない（記載: 9.4.0（L14） / 正式版: 9.4.0（L13））",
+        J_ERROR + "公開前の確認版の行が正式版の行より新しい版を指していない（記載: 9.4.0-rc.1（L15） / 正式版: 9.4.0（L13））",
+        J_ERROR + "次の開発の例が次の版を指していない（記載: 9.4.0 → 9.4.0-dev.1（L17））",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("row", "label"),
+    [(STABLE_ROW, "正式版"), (DEV_ROW, "開発版"), (RC_ROW, "公開前の確認版")],
+    ids=["stable", "dev", "rc"],
+)
+def test_version_form_row_removed_fails(tree: Path, row: str, label: str) -> None:
+    """AC5: 表の行を消して規則を外せない。"""
+    edit(versioning_md(tree), row, "")
+    result = run_check(tree)
+    assert result.returncode == 1
+    expected = f"版の形の表を読み取れない（無い行: {label}。| {label} | `<版>` | ... | の形で書く）"
+    assert J_ERROR + expected in j_errors(result), output_of(result)
+
+
+def test_version_form_row_duplicated_fails(tree: Path) -> None:
+    """AC5: 同じ語の行が 2 つあると比べる相手が決まらないため落ちる。"""
+    edit(versioning_md(tree), DEV_ROW, DEV_ROW + "| 開発版 | `9.4.0-dev.2` | 検証中 |\n")
+    result = run_check(tree)
+    assert result.returncode == 1
+    expected = "版の形の表に同じ行が複数ある（開発版: L14, L15）"
+    assert J_ERROR + expected in j_errors(result), output_of(result)
+
+
+def test_next_development_example_removed_fails(tree: Path) -> None:
+    """AC5: 次の開発の例を消して規則を外せない。"""
+    edit(versioning_md(tree), f"。{NEXT_EXAMPLE}\n", "\n")
+    result = run_check(tree)
+    assert result.returncode == 1
+    expected = "次の開発の例を読み取れない（`<版>` の次を開発するなら `<版>-dev.<連番>` の形で書く）"
+    assert J_ERROR + expected in j_errors(result), output_of(result)
+
+
+def test_version_form_row_inside_code_fence_is_not_counted(tree: Path) -> None:
+    """AC5: 囲みの中の表の行と例は、章 2 の例として数えない（実行例を足しても落ちない）。"""
+    add_to_version_section(
+        tree,
+        "\n```text\n| 開発版 | `9.3.0` | 検証中 |\n`9.3.0` の次を開発するなら `9.3.0` と書かない\n```",
+    )
+    result = run_check(tree)
+    assert result.returncode == 0, output_of(result)
+
+
+def test_version_section_heading_removed_reports_only_the_existing_failure(tree: Path) -> None:
+    """章の見出しが無いときは、既存の「版数を読み取れない」だけを出し、表と例の報告を重ねない。"""
+    edit(versioning_md(tree), "## 版の付け方と開発版の配布\n", "")
+    result = run_check(tree)
+    assert result.returncode == 1
+    assert [line for line in j_errors(result) if "版数を読み取れない" not in line] == []
+
+
 # --- 突き合わせ先の版数そのものが読めないとき ---
 
 
@@ -703,12 +923,42 @@ def _load_checker():
     return module
 
 
+def test_named_plugin_version_returns_none_for_non_string_version(tmp_path: Path) -> None:
+    """version が文字列でなければ None を返す（現状固定）。"""
+    module = _load_checker()
+    plugin_json = tmp_path / "plugins/test-plugin/.claude-plugin/plugin.json"
+    plugin_json.parent.mkdir(parents=True)
+    plugin_json.write_text('{"version": 123}\n', encoding="utf-8")
+
+    assert module.named_plugin_version(tmp_path, "test-plugin") is None
+
+
 def test_base_of_drops_suffix_and_splits_into_int_triple() -> None:
     """接尾辞あり・なしのどちらの入力も、同じ整数の 3 つ組へ分解される（現状固定）。"""
     module = _load_checker()
     assert module.base_of("9.6.0-dev.1") == (9, 6, 0)
     assert module.base_of("9.6.0") == (9, 6, 0)
     assert module.base_of("9.6.0-dev.1") == module.base_of("9.6.0")
+
+
+# --- manifest_skill_count: 有効な Skill 名が 0 件の境界（単体）---
+
+
+def test_manifest_skill_count_with_only_blank_and_comment_lines_returns_zero(tmp_path: Path) -> None:
+    """空行とコメント行だけのマニフェストは 0 を返し、エラーを記録しない（現状固定）。
+
+    有効な Skill 名が 1 件も無い境界において、`manifest_skill_count` が `None` ではなく
+    0 を返し、`report.errors` が空のまま戻ることを固定する。ファイルが存在しないときの
+    `None` と区別されている経路である。
+    """
+    module = _load_checker()
+    manifest = tmp_path / "plugins/ndf/manifests/kiro-skills.txt"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text("# コメント行\n\n   \n# 別のコメント\n", encoding="utf-8")
+
+    report = module.Report()
+    assert module.manifest_skill_count(tmp_path, "kiro", report) == 0
+    assert report.errors == []
 
 
 # --- check_version_section: 節に版数が 1 件も無い境界（単体）---
@@ -724,6 +974,19 @@ def test_version_section_without_any_version_reports_once_and_returns() -> None:
         f"（`{module.VERSION_SECTION_HEADING}` の節へ版数の例を囲みで置く。"
         f"{module.PLUGIN_JSON}: 9.3.0）"
     ]
+
+
+# --- check_version_section: 現行版数が取得できない分岐（単体）---
+
+
+def test_version_section_with_no_current_version_returns_true_without_error() -> None:
+    """節の版数を読めても現行版数が無ければ、比較せず正常終了する（現状固定）。"""
+    module = _load_checker()
+    report = module.Report()
+    body = f"{module.VERSION_SECTION_HEADING}\n\n開発版の例は `9.3.0` である。\n"
+
+    assert module.check_version_section(body, None, report) is True
+    assert report.errors == []
 
 
 # --- check_version_section: 節の後ろに終端の見出しが無い境界（単体）---
@@ -796,6 +1059,22 @@ def test_category_lines_without_source_count_returns_none() -> None:
     assert module.category_lines(markdown) is None
 
 
+def test_category_lines_stops_at_first_non_category_line() -> None:
+    """カテゴリ内訳が途切れた後のカテゴリ行は拾わない（現状固定）。"""
+    module = _load_checker()
+    markdown = (
+        "- **元Skills（5個）**:\n"
+        "  - 第1群 (4): alpha, bravo, charlie, delta\n"
+        "通常文\n"
+        "  - 第2群 (1): echo\n"
+    )
+    matched = module.category_lines(markdown)
+    assert matched is not None
+    assert [found.group(0) for found in matched] == [
+        "  - 第1群 (4): alpha, bravo, charlie, delta"
+    ]
+
+
 # --- location_of: index が lines の要素数以上である境界（単体）---
 
 
@@ -812,4 +1091,53 @@ def test_location_of_with_index_out_of_bounds_returns_empty_string() -> None:
         lines=[10],
     )
     assert module.location_of(claim, 1) == ""
+
+
+# --- check_version_examples: 正式版の行が重複したとき比較をスキップする（単体）---
+
+
+def test_version_examples_skips_base_comparison_when_stable_row_is_duplicated() -> None:
+    """正式版の行が重複している場合、開発版との基底比較をスキップする（現状固定）。
+
+    正式版の行が 1 つのときだけ比較を行う分岐（len(rows["正式版"]) == 1）において、
+    正式版が重複したとき比較をスキップする経路を固定する。
+    開発版が正式版より古い基底を持っていても、「正式版の行より新しい版を指していない」
+    というエラーは出ず、正式版の重複エラーのみが報告される。
+    """
+    module = _load_checker()
+    report = module.Report()
+    body = (
+        f"{module.VERSION_SECTION_HEADING}\n"
+        "| 正式版 | `9.3.0` | 利用者が常用してよい |\n"
+        "| 正式版 | `9.3.1` | 利用者が常用してよい |\n"
+        "| 開発版 | `9.2.0-dev.1` | 検証中 |\n"
+        "| 公開前の確認版 | `9.4.0-rc.1` | 正式版の候補 |\n"
+        "\n"
+        "`9.3.0` の次を開発するなら `9.4.0-dev.1`\n"
+    )
+    module.check_version_examples(body, report)
+    assert report.errors == [
+        f"{module.VERSIONING_MD}: 版の付け方の節の版の形の表に同じ行が複数ある（正式版: L2, L3）"
+    ]
+    assert not any("正式版の行より新しい版を指していない" in err for err in report.errors)
+
+
+# --- compare_plugin_table_row: 記載版数と plugin.json の版数が食い違う分岐（単体）---
+
+
+def test_compare_plugin_table_row_with_mismatched_version_records_error(
+    tmp_path: Path,
+) -> None:
+    """一覧表の記載版数と plugin.json の版数が食い違う場合、行番号と双方の版数を含むエラーを記録する（現状固定）。"""
+    module = _load_checker()
+    plugin_json = tmp_path / "plugins/fixture-kit/.claude-plugin/plugin.json"
+    plugin_json.parent.mkdir(parents=True)
+    plugin_json.write_text('{"version": "1.4.2"}\n', encoding="utf-8")
+
+    report = module.Report()
+    module.compare_plugin_table_row(tmp_path, "fixture-kit", "1.4.1", 42, report)
+    assert report.errors == [
+        f"{module.ROOT_README}: プラグイン一覧表の fixture-kit の版数が食い違う"
+        f"（記載: 1.4.1（L42） / {module.plugin_json_path('fixture-kit')}: 1.4.2）"
+    ]
 
