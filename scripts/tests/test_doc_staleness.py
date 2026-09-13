@@ -724,3 +724,19 @@ def test_version_section_without_any_version_reports_once_and_returns() -> None:
         f"（`{module.VERSION_SECTION_HEADING}` の節へ版数の例を囲みで置く。"
         f"{module.PLUGIN_JSON}: 9.3.0）"
     ]
+
+
+# --- category_lines: 元Skills行が無い境界（単体）---
+
+
+def test_category_lines_without_source_count_returns_none() -> None:
+    """本文中に元Skills行が存在しない場合、None を返す（現状固定）。"""
+    module = _load_checker()
+    markdown = (
+        "# ドキュメント\n"
+        "\n"
+        "- カテゴリA: 3個\n"
+        "- カテゴリB: 2個\n"
+    )
+    assert module.category_lines(markdown) is None
+
