@@ -90,55 +90,40 @@ if actual != expected:
   fi
 }
 
-test_discover_targets_empty_boundary() {
-  # discover_targets の境界: hooks 定義を持つプラグインが 0 件のマーケットプレイスでは
-  # 空出力（0 行）を返す。呼び出し元はこの空出力を 0 件として検出する（後段の no-hooks の
-  # 経路が確かめる）。ここでは関数そのものを本物の assert-hook-definitions.sh から取り出して
-  # 実行し、実装と結合したまま境界値を固定する。
-  local assert_dir="$REPO_ROOT/tests/runtime-smoke/assertions/assert-hook-definitions.sh"
-  local no_hooks_fixture="$REPO_ROOT/tests/runtime-smoke/fixtures/hooks-positive-control/no-hooks"
-  local discover_fn
-  discover_fn="$(sed -n '/^discover_targets() {$/,/^}$/p' "$assert_dir")"
-  if [ -z "$discover_fn" ]; then
-    echo "could not extract discover_targets from $assert_dir" >&2
-    exit 1
-  fi
-  eval "$discover_fn"
-  local rt targets_out
-  for rt in claude codex; do
-    targets_out="$(discover_targets "$no_hooks_fixture" "$rt")"
-    if [ -n "$targets_out" ]; then
-      echo "discover_targets ($rt) returned output for a marketplace without hooks:" >&2
-      printf '%s\n' "$targets_out" >&2
-      exit 1
-    fi
-  done
-  unset -f discover_targets
-}
-
 test_reject_marketplace_without_hooks() {
+  # 0 件境界: hooks 定義を持つプラグインが無いマーケットプレイスは、公開スクリプトが
+  # 終了コード 1・診断・ランタイム未起動で拒む。claude と codex の両方で同じ境界を観測する。
+  cat >"$base/bin/claude" <<'SH'
+#!/usr/bin/env bash
+touch "${RUNTIME_CALLED:?}"
+exit 99
+SH
   cat >"$base/bin/codex" <<'SH'
 #!/usr/bin/env bash
 touch "${RUNTIME_CALLED:?}"
 exit 99
 SH
-  chmod +x "$base/bin/codex"
+  chmod +x "$base/bin/claude" "$base/bin/codex"
 
-  local rc=0
-  RUNTIME_CALLED="$base/runtime-called" \
-  REPO_ROOT="$REPO_ROOT/tests/runtime-smoke/fixtures/hooks-positive-control/no-hooks" \
-  ARTIFACT_DIR="$base/artifacts" HOME="$base/home" PATH="$base/bin:$PATH" \
-    "$REPO_ROOT/tests/runtime-smoke/assertions/assert-hook-definitions.sh" codex \
-    >"$base/no-hooks.stdout" 2>"$base/no-hooks.stderr" || rc=$?
-  if [ "$rc" -ne 1 ] || ! grep -Fq "no plugin with hooks definitions found" "$base/no-hooks.stderr"; then
-    echo "assert-hook-definitions did not reject a marketplace without hooks (exit $rc)" >&2
-    cat "$base/no-hooks.stderr" >&2
-    exit 1
-  fi
-  if [ -e "$base/runtime-called" ]; then
-    echo "assert-hook-definitions started codex before rejecting a marketplace without hooks" >&2
-    exit 1
-  fi
+  local rt rc
+  for rt in claude codex; do
+    rc=0
+    rm -f "$base/runtime-called"
+    RUNTIME_CALLED="$base/runtime-called" \
+    REPO_ROOT="$REPO_ROOT/tests/runtime-smoke/fixtures/hooks-positive-control/no-hooks" \
+    ARTIFACT_DIR="$base/artifacts-$rt" HOME="$base/home" PATH="$base/bin:$PATH" \
+      "$REPO_ROOT/tests/runtime-smoke/assertions/assert-hook-definitions.sh" "$rt" \
+      >"$base/no-hooks-$rt.stdout" 2>"$base/no-hooks-$rt.stderr" || rc=$?
+    if [ "$rc" -ne 1 ] || ! grep -Fq "no plugin with hooks definitions found" "$base/no-hooks-$rt.stderr"; then
+      echo "assert-hook-definitions ($rt) did not reject a marketplace without hooks (exit $rc)" >&2
+      cat "$base/no-hooks-$rt.stderr" >&2
+      exit 1
+    fi
+    if [ -e "$base/runtime-called" ]; then
+      echo "assert-hook-definitions started $rt before rejecting a marketplace without hooks" >&2
+      exit 1
+    fi
+  done
 }
 
 test_claude_missing_hooks() {
@@ -294,7 +279,6 @@ mkdir -p "$base/bin" "$base/cwd"
 
 test_codex_hooks_list_error
 test_codex_hooks_list_filter
-test_discover_targets_empty_boundary
 test_reject_marketplace_without_hooks
 test_claude_missing_hooks
 test_claude_control_silent
