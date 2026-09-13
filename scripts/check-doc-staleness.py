@@ -210,6 +210,23 @@ class PointVersionSpec:
     pattern: re.Pattern[str]
 
 
+@dataclass(frozen=True)
+class RepositoryMetrics:
+    """同じ検査時点にリポジトリの実体から集めた突き合わせ先の値。
+
+    ランタイム別の配布 Skill 数・実体の Skill 数・版数と、元 Skill 数の出典の文言を
+    1 つにまとめる。個別の引数として渡し回すと、同じ時点の値であるという関係が読めない。
+
+    元 Skill 数（`total`）は実体の Skill 数（`skills`）と同じ値であるため、別に持たず
+    `skills` から取り出す。
+    """
+
+    counts: dict[str, int | None]
+    skills: int | None
+    version: str | None
+    source: str
+
+
 # 点で照合する版数記載（G・I・K・L・M）の一覧。点の照合を足すときはここへ 1 行足す。
 # 同じ文書の中では並びの順に報告する。
 POINT_VERSION_SPECS: list[PointVersionSpec] = [
@@ -667,9 +684,7 @@ def check_runtime_counts(
         )
 
 
-def check_root_readme(
-    body: str, counts: dict[str, int | None], total: int | None, source: str, report: Report
-) -> None:
+def check_root_readme(body: str, metrics: RepositoryMetrics, report: Report) -> None:
     """`README.md` のランタイム別の数（A）・元 Skill 数（B）・カテゴリ内訳（C）を見る。"""
     found = labelled_numbers(RUNTIME_COUNT, body, ROOT_README_RUNTIMES)
     check_runtime_counts(
@@ -681,7 +696,7 @@ def check_root_readme(
             source_of=manifest_path,
         ),
         found,
-        counts,
+        metrics.counts,
         report,
     )
     verify(
@@ -690,12 +705,12 @@ def check_root_readme(
             subject="元Skills の数",
             wording="元Skills（<数>個）",
             described=numbers_of(SOURCE_COUNT, body),
-            expected=total,
-            source=source,
+            expected=metrics.skills,
+            source=metrics.source,
         ),
         report,
     )
-    check_category_breakdown(body, total, source, report)
+    check_category_breakdown(body, metrics.skills, metrics.source, report)
 
 
 def check_category_breakdown(body: str, total: int | None, source: str, report: Report) -> None:
@@ -726,13 +741,7 @@ def check_category_breakdown(body: str, total: int | None, source: str, report: 
     )
 
 
-def check_plugin_readme(
-    body: str,
-    counts: dict[str, int | None],
-    skills: int | None,
-    version: str | None,
-    report: Report,
-) -> None:
+def check_plugin_readme(body: str, metrics: RepositoryMetrics, report: Report) -> None:
     """`plugins/ndf/README.md` の配布先の表（D）・レイアウト図（E）・更新案内（F）を見る。"""
     found = labelled_numbers(TABLE_ROW, body, PLUGIN_README_RUNTIMES)
     check_runtime_counts(
@@ -744,7 +753,7 @@ def check_plugin_readme(
             source_of=manifest_path,
         ),
         found,
-        counts,
+        metrics.counts,
         report,
     )
     verify(
@@ -753,12 +762,12 @@ def check_plugin_readme(
             subject="レイアウト図の数",
             wording="唯一の実体（<数> 個）",
             described=numbers_of(LAYOUT_SKILLS, body),
-            expected=skills,
+            expected=metrics.skills,
             source=f"{SKILLS_DIR}/ の実体",
         ),
         report,
     )
-    check_upgrade_heading(body, version, report)
+    check_upgrade_heading(body, metrics.version, report)
 
 
 def check_upgrade_heading(body: str, version: str | None, report: Report) -> None:
@@ -805,12 +814,12 @@ def main() -> int:
 
     # 配らない Skill の置き場所（`optional-skills/`）は v10.5.0 で無くなった（#116）。
     # 元 Skill の数は `skills/` の実体だけで決まる。
-    total = skills
     source = f"{SKILLS_DIR}/ の実体 {skills}"
+    metrics = RepositoryMetrics(counts=counts, skills=skills, version=version, source=source)
 
     root_body = read_document(root, ROOT_README, report)
     if root_body is not None:
-        check_root_readme(root_body, counts, total, source, report)
+        check_root_readme(root_body, metrics, report)
         check_point_versions(ROOT_README, root_body, version, report)
         check_root_readme_versions(root, root_body, report)
 
@@ -826,7 +835,7 @@ def main() -> int:
 
     plugin_body = read_document(root, PLUGIN_README, report)
     if plugin_body is not None:
-        check_plugin_readme(plugin_body, counts, skills, version, report)
+        check_plugin_readme(plugin_body, metrics, report)
         check_point_versions(PLUGIN_README, plugin_body, version, report)
 
     if report.errors:
