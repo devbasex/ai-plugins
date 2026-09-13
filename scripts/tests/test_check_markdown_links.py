@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import importlib.util
 import subprocess
 from pathlib import Path
 from urllib.parse import quote
@@ -140,3 +141,18 @@ def test_external_url_with_fragment_is_ignored(tmp_path: Path) -> None:
     write(tmp_path, "docs/a.md", "[外](https://example.com/x.md#無い見出し)\n")
     result = run(tmp_path)
     assert result.returncode == 0, result.stderr
+
+
+def test_should_skip() -> None:
+    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.should_skip("") is True
+    assert module.should_skip("/path") is True
+    assert module.should_skip("//domain/path") is True
+    assert module.should_skip("mailto:user@example.com") is True
+    assert module.should_skip("{repo}/blob/{branch}") is True
+    assert module.should_skip("path/to/file.md") is False
+
