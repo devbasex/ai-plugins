@@ -93,13 +93,11 @@ claude_load() {
 
 # ---- Codex -------------------------------------------------------------------
 
-# codex_load <label> <marketplace root> <marketplace 上の名前>...
-codex_load() {
-  local label="$1" root="$2"; shift 2
-  local home workdir name mname install_log="$OUT_DIR/codex-$label.install.log"
-  local response="$OUT_DIR/codex-$label.json"
-  home="$(mktemp -d "$WORK_ROOT/codex-home.XXXXXX")"
-  workdir="$(mktemp -d "$WORK_ROOT/codex-cwd.XXXXXX")"
+# codex_install <label> <home> <marketplace root> <marketplace 上の名前>...
+# 隔離した CODEX_HOME へ marketplace を登録し、指定のプラグインを導入する。
+codex_install() {
+  local label="$1" home="$2" root="$3"; shift 3
+  local name mname install_log="$OUT_DIR/codex-$label.install.log"
   mname="$(marketplace_name "$root")"
   : >"$install_log"
   CODEX_HOME="$home" codex plugin marketplace add "$root" >>"$install_log" 2>&1 \
@@ -108,13 +106,30 @@ codex_load() {
     CODEX_HOME="$home" codex plugin add "$name@$mname" >>"$install_log" 2>&1 \
       || { echo "codex plugin add $name@$mname failed:" >&2; cat "$install_log" >&2; exit 1; }
   done
-  CODEX_HOME="$home" python3 "$HOOKS_LIST" --cwd "$workdir" >"$response" \
-    || { echo "could not read hooks/list from codex app-server for the $label hooks" >&2; exit 1; }
+}
+
+# parse_codex_hooks_list <response> <reports_file> <loaded_file>
+# hooks/list の応答から報告（警告・誤り）と読まれたプラグイン名を書き出す。
+parse_codex_hooks_list() {
+  local response="$1" reports_file="$2" loaded_file="$3"
   jq -r '.data[] | (.warnings // [])[], (.errors // [])[] | if type == "string" then . else tojson end' \
-    "$response" >"$OUT_DIR/codex-$label.reports"
+    "$response" >"$reports_file"
   # 読まれた = hooks が 1 つ以上登録された（空の定義は報告なしで一覧から消える: 実測 #15）
   jq -r '.data[].hooks[]?.pluginId | split("@")[0]' "$response" \
-    | sort -u >"$OUT_DIR/codex-$label.loaded"
+    | sort -u >"$loaded_file"
+}
+
+# codex_load <label> <marketplace root> <marketplace 上の名前>...
+codex_load() {
+  local label="$1" root="$2"; shift 2
+  local home workdir
+  local response="$OUT_DIR/codex-$label.json"
+  home="$(mktemp -d "$WORK_ROOT/codex-home.XXXXXX")"
+  workdir="$(mktemp -d "$WORK_ROOT/codex-cwd.XXXXXX")"
+  codex_install "$label" "$home" "$root" "$@"
+  CODEX_HOME="$home" python3 "$HOOKS_LIST" --cwd "$workdir" >"$response" \
+    || { echo "could not read hooks/list from codex app-server for the $label hooks" >&2; exit 1; }
+  parse_codex_hooks_list "$response" "$OUT_DIR/codex-$label.reports" "$OUT_DIR/codex-$label.loaded"
 }
 
 # ---- 判定 --------------------------------------------------------------------
