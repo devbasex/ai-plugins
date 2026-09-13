@@ -1107,3 +1107,27 @@ def test_version_examples_skips_base_comparison_when_stable_row_is_duplicated() 
         f"{module.VERSIONING_MD}: 版の付け方の節の版の形の表に同じ行が複数ある（正式版: L2, L3）"
     ]
     assert not any("正式版の行より新しい版を指していない" in err for err in report.errors)
+
+
+# --- check_version_examples: 妥当な次の開発の例が複数あるとき（単体）---
+
+
+def test_version_examples_accepts_multiple_valid_next_development_examples() -> None:
+    """妥当な次の開発の例が 2 行あっても、エラーを追加しない（現状固定）。
+
+    表の行とは違い、次の開発の例は件数の上限を見ず、1 件ずつ次の版を指すかだけを比べる。
+    複数の例を許すことの正しさは主張せず、現状の振る舞いを記録する。
+    """
+    module = _load_checker()
+    report = module.Report()
+    body = (
+        f"{module.VERSION_SECTION_HEADING}\n"
+        "| 正式版 | `9.3.0` | 利用者が常用してよい |\n"
+        "| 開発版 | `9.4.0-dev.1` | 検証中 |\n"
+        "| 公開前の確認版 | `9.4.0-rc.1` | 正式版の候補 |\n"
+        "\n"
+        "`9.3.0` の次を開発するなら `9.4.0-dev.1`\n"
+        "`9.3.0` の次を開発するなら `9.4.0-dev.1`\n"
+    )
+    module.check_version_examples(body, report)
+    assert report.errors == []
