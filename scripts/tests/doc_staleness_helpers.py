@@ -152,11 +152,7 @@ codex plugin list
 """
 
 
-def build_tree(base: Path) -> Path:
-    """突き合わせに要るものだけを備えた木を作り、その根を返す。"""
-    root = base / "repo"
-    ndf = root / "plugins/ndf"
-
+def _create_plugin_configs(root: Path, ndf: Path) -> None:
     (ndf / ".claude-plugin").mkdir(parents=True)
     (ndf / ".claude-plugin/plugin.json").write_text(
         '{\n  "name": "ndf",\n  "version": "%s"\n}\n' % VERSION, encoding="utf-8"
@@ -169,6 +165,8 @@ def build_tree(base: Path) -> Path:
         encoding="utf-8",
     )
 
+
+def _create_manifests_and_skills(ndf: Path) -> None:
     (ndf / "manifests").mkdir(parents=True)
     for runtime, skills in MANIFESTS.items():
         body = "# コメント行と空行は数えない\n\n" + "".join(f"{name}\n" for name in skills)
@@ -180,11 +178,22 @@ def build_tree(base: Path) -> Path:
     # SKILL.md を持たないディレクトリは実体として数えない。
     (ndf / "skills/README.md").write_text("# 規約\n", encoding="utf-8")
 
+
+def _create_fixture_documents(root: Path, ndf: Path) -> None:
     (root / "README.md").write_text(ROOT_README, encoding="utf-8")
     (root / "AGENTS.md").write_text(AGENTS_MD, encoding="utf-8")
     (root / "docs").mkdir(parents=True)
     (root / VERSIONING_MD_PATH).write_text(VERSIONING_MD, encoding="utf-8")
     (ndf / "README.md").write_text(PLUGIN_README, encoding="utf-8")
+
+
+def build_tree(base: Path) -> Path:
+    """突き合わせに要るものだけを備えた木を作り、その根を返す。"""
+    root = base / "repo"
+    ndf = root / "plugins/ndf"
+    _create_plugin_configs(root, ndf)
+    _create_manifests_and_skills(ndf)
+    _create_fixture_documents(root, ndf)
     return root
 
 

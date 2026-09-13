@@ -30,6 +30,7 @@ import argparse
 import json
 import re
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -515,23 +516,46 @@ def check_plugin_readme_versions(body: str, version: str | None, report: Report)
 # --- 説明文書ごとの検査 ---
 
 
+def check_runtime_counts(
+    path: str,
+    described_by_label: dict[str, list[int]],
+    labels: dict[str, str],
+    counts: dict[str, int | None],
+    subject_fmt: str,
+    wording_fmt: str,
+    source_of: Callable[[str], str],
+    report: Report,
+) -> None:
+    """ランタイム別の Skill 数を突き合わせる。"""
+    for label, runtime in labels.items():
+        verify(
+            Claim(
+                path=path,
+                subject=subject_fmt.format(label, label=label),
+                wording=wording_fmt.format(label, label=label),
+                described=described_by_label[label],
+                expected=counts.get(runtime),
+                source=source_of(runtime),
+            ),
+            report,
+        )
+
+
 def check_root_readme(
     body: str, counts: dict[str, int | None], total: int | None, source: str, report: Report
 ) -> None:
     """`README.md` のランタイム別の数（A）・元 Skill 数（B）・カテゴリ内訳（C）を見る。"""
     found = labelled_numbers(RUNTIME_COUNT, body, ROOT_README_RUNTIMES)
-    for label, runtime in ROOT_README_RUNTIMES.items():
-        verify(
-            Claim(
-                path=ROOT_README,
-                subject=f"公開Skills の {label} の数",
-                wording=f"{label}向け core <数>個",
-                described=found[label],
-                expected=counts.get(runtime),
-                source=manifest_path(runtime),
-            ),
-            report,
-        )
+    check_runtime_counts(
+        ROOT_README,
+        found,
+        ROOT_README_RUNTIMES,
+        counts,
+        "公開Skills の {label} の数",
+        "{label}向け core <数>個",
+        manifest_path,
+        report,
+    )
     verify(
         Claim(
             path=ROOT_README,
@@ -583,18 +607,16 @@ def check_plugin_readme(
 ) -> None:
     """`plugins/ndf/README.md` の配布先の表（D）・レイアウト図（E）・更新案内（F）を見る。"""
     found = labelled_numbers(TABLE_ROW, body, PLUGIN_README_RUNTIMES)
-    for label, runtime in PLUGIN_README_RUNTIMES.items():
-        verify(
-            Claim(
-                path=PLUGIN_README,
-                subject=f"配布先の表の {label} の数",
-                wording=f"| {label} | <数> 個 | ... |",
-                described=found[label],
-                expected=counts.get(runtime),
-                source=manifest_path(runtime),
-            ),
-            report,
-        )
+    check_runtime_counts(
+        PLUGIN_README,
+        found,
+        PLUGIN_README_RUNTIMES,
+        counts,
+        "配布先の表の {label} の数",
+        "| {label} | <数> 個 | ... |",
+        manifest_path,
+        report,
+    )
     verify(
         Claim(
             path=PLUGIN_README,
