@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -146,6 +147,42 @@ def test_existing_directory_is_unchanged(tmp_path: Path) -> None:
     assert_no_bare_cd_error(proc)
     # --dry-run は導入先へ書き込まない
     assert list(project.iterdir()) == []
+
+
+def test_reinstall_preserves_user_managed_agent_config(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    first = run("--project", str(project), "--yes", home=tmp_path)
+    assert first.returncode == 0, first.stderr
+
+    agent_file = project / ".kiro" / "agents" / "ndf.json"
+    config = json.loads(agent_file.read_text(encoding="utf-8"))
+    config["customKey"] = {"enabled": True}
+    config.setdefault("mcpServers", {})["myserver"] = {
+        "command": "myserver",
+        "args": ["serve"],
+    }
+    config.setdefault("hooks", {})["myhook"] = [
+        {"command": "echo custom", "timeout_ms": 1000}
+    ]
+    agent_file.write_text(
+        json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+
+    second = run("--project", str(project), "--yes", home=tmp_path)
+    assert second.returncode == 0, second.stderr
+
+    reinstalled = json.loads(agent_file.read_text(encoding="utf-8"))
+    assert reinstalled["customKey"] == {"enabled": True}
+    assert reinstalled["mcpServers"]["myserver"] == {
+        "command": "myserver",
+        "args": ["serve"],
+    }
+    assert reinstalled["hooks"]["myhook"] == [
+        {"command": "echo custom", "timeout_ms": 1000}
+    ]
+    assert reinstalled["hooks"]["agentSpawn"]
+    assert reinstalled["hooks"]["userPromptSubmit"]
 
 
 @pytest.mark.parametrize(
