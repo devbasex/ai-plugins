@@ -13,6 +13,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CHECKER = REPO_ROOT / "scripts/check-doc-staleness.py"
 
@@ -206,6 +208,20 @@ def edit(path: Path, old: str, new: str) -> None:
     if body.count(old) != 1:
         raise AssertionError(f"{path} に {old!r} がちょうど 1 箇所ない（{body.count(old)} 箇所）")
     path.write_text(body.replace(old, new), encoding="utf-8")
+
+
+@pytest.mark.parametrize("body", ["untouched\n", "before before\n"])
+def test_edit_rejects_a_target_that_does_not_appear_exactly_once(
+    tmp_path: Path, body: str
+) -> None:
+    """現状固定: 対象が 0・2 箇所なら、内容を変えずに失敗する。"""
+    document = tmp_path / "document.md"
+    document.write_text(body, encoding="utf-8")
+
+    with pytest.raises(AssertionError):
+        edit(document, "before", "after")
+
+    assert document.read_text(encoding="utf-8") == body
 
 
 def edit_all(path: Path, old: str, new: str, expected: int) -> None:
