@@ -384,6 +384,16 @@ def test_declaration_state_function(main_repo: Path) -> None:
     assert empty.returncode == 1 and empty.stdout == ""
 
 
+def test_declaration_state_without_arguments_returns_error() -> None:
+    """現状固定: 引数なしの呼び出しは 1 を返し、標準出力には何も出さない。"""
+    from worktree_helpers import run_lib
+
+    result = run_lib("wt_declaration_state")
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+
+
 def test_empty_declaration_file_is_unreadable(main_repo: Path) -> None:
     """現状固定: 0 バイトの宣言ファイルは unreadable と判定する。"""
     from worktree_helpers import run_lib
