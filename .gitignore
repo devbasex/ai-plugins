@@ -63,3 +63,6 @@ reports/
 
 # 利用者ごとの Claude Code の設定（.claude/settings.json は共有する）
 .claude/settings.local.json
+
+# cross-review が起動したレビュワーの PID（実行時にだけ作られる）
+*-review-pr*.pid

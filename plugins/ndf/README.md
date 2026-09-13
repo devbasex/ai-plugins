@@ -8,10 +8,10 @@ PR 運用、レビュー、調査、実装計画、仕様書化、開発方法�
 
 | ランタイム | 公開 Skill | マニフェスト |
 | --- | --- | --- |
-| Claude Code | 41 個 | `.claude-plugin/plugin.json` |
-| Codex | 39 個 | `.codex-plugin/plugin.json` |
-| Kiro CLI | 40 個 | `dev.kiro/install.sh`（プラグイン機構が無いため installer で導入） |
-| agy | 39 個 | `dev.agy/plugin.json`（取得元の登録が無いため clone から導入） |
+| Claude Code | 45 個 | `.claude-plugin/plugin.json` |
+| Codex | 43 個 | `.codex-plugin/plugin.json` |
+| Kiro CLI | 44 個 | `dev.kiro/install.sh`（プラグイン機構が無いため installer で導入） |
+| agy | 43 個 | `dev.agy/plugin.json`（取得元の登録が無いため clone から導入） |
 
 ## レイアウト
 
@@ -19,7 +19,7 @@ PR 運用、レビュー、調査、実装計画、仕様書化、開発方法�
 plugins/ndf/
 ├── .claude-plugin/plugin.json   # Claude Code のマニフェスト
 ├── .codex-plugin/plugin.json    # Codex のマニフェスト
-├── skills/                      # 配布 Skill の唯一の実体（41 個）
+├── skills/                      # 配布 Skill の唯一の実体（45 個）
 ├── skills/README.md             # Skill 執筆の規約
 ├── manifests/                   # ランタイム別の配布 Skill 一覧
 ├── agents/                      # Claude Code のサブエージェント定義（8 個）
@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.8.0）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.10.1）
 ```
 
 ### agy
@@ -102,7 +102,7 @@ agy plugin install plugins/ndf/dev.agy                               # 初回
 agy plugin uninstall ndf && agy plugin install plugins/ndf/dev.agy   # 新しい版へ
 ```
 
-導入すると `manifests/agy-skills.txt` に載る Skill 39 個と、エージェント 8 個、hook 1 個が
+導入すると `manifests/agy-skills.txt` に載る Skill 43 個と、エージェント 8 個、hook 1 個が
 `~/.gemini/config/plugins/ndf/` へ複製されます。symlink は実体へ解決されて複製されるため、
 clone を消しても導入した内容は残ります。
 
@@ -119,38 +119,24 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.8.0 へ更新するとき
+## v10.10.1 へ更新するとき
 
-**設計工程の通り方が変わります。** 記録の移行は要りません。変更点の一覧は
-[CHANGELOG.md](../../CHANGELOG.md) にあります。
+**Claude Code の起動時に出ていた hooks 定義の警告を消しました。** hook が実行する内容は
+変わりません。変更点の一覧は [CHANGELOG.md](../../CHANGELOG.md) にあります。
 
-| 変わったこと | 中身 |
-| --- | --- |
-| **設計の成果物の決まり方** | モード × 成果物の要否表になりました（`design/references/deliverables.md`）。水準は「必須」と「該当時」の 2 つで、**違いは省いたときに理由が要るかです** |
-| **`light` / `operation` でも設計を通ります** | 触る領域が「すべての変更」以外に 1 つ以上当たるときだけです。**独立した設計文書は作りません**（受け入れ条件か実行の記録と同じファイルの節へ書きます） |
-| **図の階層が 4 つになりました** | 文脈・構成要素・配置・クラスです。クラス図は**変更が触る型だけ**に絞り、実装後の追随義務は負いません |
-| **非機能が 6 大項目になりました** | 可用性・性能拡張性・運用保守性・移行性・セキュリティ・システム環境（IPA 非機能要求グレード）。**現行 4 種（性能・容量・権限・記録）の書き方と例はそのまま残っています** |
-| 設計 Pull Request を出す前の突き合わせ | 同じ文書の中だけで確かめられる 6 つの対を通します。**確かめた結果は残しません** |
+```text
+● ndf: hooks.json: unknown keys "description" in hooks.PreToolUse[0], "description" in hooks.SessionStart[0] ignored
+```
 
-### `light` / `operation` で設計の案内が出ます
-
-**工程の分類が `-`（対象外）から `C`（条件付き）へ変わりました。** 領域に当たらない変更では
-設計を通らなくてよいのですが、進行の記録が無いと配布の時点で「条件付き: 設計」の 1 行が出ます。
-**必須の工程の欠落（「記録なし」）とは別の行で、拒否はしません。**
-
-### 非機能を書いている仕様文書はそのままで動きます
-
-**現行 4 種は親を付け替えただけです。** 性能と容量は性能・拡張性、権限はセキュリティ、記録は
-運用・保守性の下に入ります。既にある仕様文書を書き直す必要はありません。
-
-### 手元で確かめる
+`mcp-serena` と `mcp-playwright` も同じ警告を出していたため、あわせて 2.0.1 へ上げています。
+**導入済みの実体を入れ替えるまで警告は残ります。** 更新したあとは Claude Code を
+起動し直してください。
 
 ```bash
-claude plugin update ndf@ai-plugins   # 再起動するまで反映されません
-codex plugin add ndf@ai-plugins       # 取得元を更新してから
-bash <clone>/plugins/ndf/dev.kiro/install.sh --project <ディレクトリ> --yes
-agy plugin uninstall ndf && agy plugin install <clone>/plugins/ndf/dev.agy
-bash <clone>/plugins/ndf/dev.agy/install-hooks.sh   # agy は hook の差し込みが要ります
+claude plugin marketplace update ai-plugins
+claude plugin update ndf@ai-plugins
+claude plugin update mcp-serena@ai-plugins        # 導入している場合
+claude plugin update mcp-playwright@ai-plugins    # 導入している場合
 ```
 
 ## Playwright テストについて
@@ -292,7 +278,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.8.0/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.10.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -314,14 +300,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.8.0/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.10.1/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.8.0  <path>
+# => ndf@ai-plugins  installed, enabled  10.10.1  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。

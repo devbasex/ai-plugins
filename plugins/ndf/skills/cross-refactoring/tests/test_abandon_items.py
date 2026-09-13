@@ -397,6 +397,35 @@ def test_resolved_threads_follows_pagination(paths, refactor, gitfacts, monkeypa
     assert any("cursor=C1" in "".join(c) for c in calls)
 
 
+@pytest.mark.parametrize("returncode, stdout", [
+    pytest.param(1, "", id="command-failure"),
+    pytest.param(0, "invalid json", id="invalid-json"),
+    pytest.param(0, '{"data": null}', id="null-data"),
+    pytest.param(0, '{"data": {"repository": {"pullRequest": {}}}}',
+                 id="missing-review-threads"),
+])
+def test_resolved_threads_discards_partial_results_when_later_page_fails(
+    gitfacts, monkeypatch, returncode, stdout
+):
+    """現状固定: 後続ページを取得できなければ先行ページの T1 も返さない。"""
+    first_page = {"data": {"repository": {"pullRequest": {"reviewThreads": {
+        "pageInfo": {"hasNextPage": True, "endCursor": "C1"},
+        "nodes": [{"id": "T1", "isResolved": True}],
+    }}}}}
+    responses = iter([
+        (0, __import__("json").dumps(first_page)),
+        (returncode, stdout),
+    ])
+
+    def fake_run(cmd, **kwargs):
+        code, body = next(responses)
+        return subprocess.CompletedProcess(cmd, code, body, "")
+
+    monkeypatch.setattr(gitfacts.subprocess, "run", fake_run)
+
+    assert gitfacts.resolved_threads_on_github("a/b", 1) is None
+
+
 def test_merge_fix_skips_already_merged_result(patch_lib, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
     """同じ試行番号・同じ結果ファイルの内容は二重に取り込まない。
 

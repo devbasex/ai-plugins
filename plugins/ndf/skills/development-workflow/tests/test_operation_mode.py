@@ -24,7 +24,7 @@ STAGE_NOTES_REF = REFS / "stage-notes.md"
 PROJECTS_COMMON = SKILL_DIR.parents[1] / "scripts" / "lib" / "projects-common.sh"
 SPEC = SKILL_DIR.parents[3] / "docs" / "specifications" / "ndf-workflow-unit-and-gates.md"
 
-EXPECTED_MODES = ["light", "operation", "legacy-refactor", "standard"]
+EXPECTED_MODES = ["light", "operation", "legacy-refactor", "standard", "documentation"]
 JUDGEMENT_HEADING = "### 2. 上から順に条件を判定する"
 WORKFLOW_TABLE_HEADING = "## モードごとに起動する Skill"
 
@@ -34,6 +34,7 @@ EXPECTED_OPERATION_COLUMN = {
     "要求と受け入れ条件": "R",
     "作業場所の用意": "C",
     "設計": "C",
+    "素材の収集と出典の確定": "-",
     "ドキュメント再構成": "-",
     "ドキュメントレビュー": "-",
     "計画": "R",
@@ -45,6 +46,7 @@ EXPECTED_OPERATION_COLUMN = {
     "確定仕様化": "C",
     "後片付け": "R",
     "配布": "R",
+    "体裁レビュー": "-",
     "リリース後テスト": "C",
     "振り返り": "C",
 }
@@ -123,7 +125,7 @@ def test_the_mode_is_judged_first() -> None:
 
 def test_the_judgement_order_is_numbered_from_one() -> None:
     _, rows = _table_rows(skill(), JUDGEMENT_HEADING)
-    assert [row[0] for row in rows] == ["1", "2", "3", "4"]
+    assert [row[0] for row in rows] == ["1", "2", "3", "4", "5"]
 
 
 def test_the_condition_is_the_state_of_an_external_system() -> None:

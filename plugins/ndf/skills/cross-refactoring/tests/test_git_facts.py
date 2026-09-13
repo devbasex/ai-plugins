@@ -75,6 +75,51 @@ def test_facts_come_from_a_real_repository(gitfacts, work):
     assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=work).stdout.strip() == "main"
 
 
+def test_commit_test_changes_reads_an_added_test(gitfacts, work):
+    """現状固定: 行途中の改行は残り、末尾の改行は除かれる。"""
+    sha = _commit(work, "Test: テストを追加", {
+        "tests/test_foo.py": "def test_f():\n    assert f() == 1\n",
+        "src/foo.py": "def f():\n    return 2\n",
+    })
+
+    assert gitfacts.commit_test_changes(str(work), sha) == {
+        "tests/test_foo.py": ([], ["def test_f():\n", "    assert f() == 1"]),
+    }
+
+
+def test_commit_test_changes_reads_both_sides_of_a_modified_test(gitfacts, work):
+    """現状固定: 変更前後の期待値を Git からそれぞれ読み取る。"""
+    _commit(work, "Test: 変更前", {
+        "tests/test_foo.py": "def test_f():\n    assert f() == 1\n",
+    })
+    sha = _commit(work, "Test: 期待値を変更", {
+        "tests/test_foo.py": "def test_f():\n    assert f() == 2\n",
+        "src/foo.py": "def f():\n    return 2\n",
+    })
+
+    assert gitfacts.commit_test_changes(str(work), sha) == {
+        "tests/test_foo.py": (
+            ["def test_f():\n", "    assert f() == 1"],
+            ["def test_f():\n", "    assert f() == 2"],
+        ),
+    }
+
+
+def test_commit_test_changes_reads_a_deleted_test(gitfacts, work):
+    """現状固定: 削除したテストは変更前の行と空の変更後を返す。"""
+    _commit(work, "Test: 削除前", {
+        "tests/test_foo.py": "def test_f():\n    assert f() == 2\n",
+    })
+    (work / "tests" / "test_foo.py").unlink()
+    sha = _commit(work, "Test: テストを削除", {
+        "src/foo.py": "def f():\n    return 2\n",
+    })
+
+    assert gitfacts.commit_test_changes(str(work), sha) == {
+        "tests/test_foo.py": (["def test_f():\n", "    assert f() == 2"], []),
+    }
+
+
 def test_missing_trailers_are_seen_as_missing(verify, gitfacts, work):
     base = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
     sha = _commit(work, "Refactor: トレーラーなし", {"src/foo.py": "def f():\n    return 2\n"})
@@ -161,6 +206,16 @@ def test_reverting_in_history_order_succeeds(gitfacts, work):
     assert diff == "", f"着手前との差分が残っている: {diff}"
 
 
+def test_run_test_at_missing_commit_preserves_branch(gitfacts, work):
+    """現状固定: 存在しない SHA は missing を返し、元のブランチを保つ。"""
+    branch = _git("rev-parse", "--abbrev-ref", "HEAD", cwd=work).stdout.strip()
+
+    status = gitfacts.run_test_at(str(work), "0" * 40, "true", branch)
+
+    assert status == "missing"
+    assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=work).stdout.strip() == branch
+
+
 def test_hanging_test_is_cut_off(gitfacts, work):
     """テストが終わらないときは打ち切って失敗にする。
 
@@ -219,3 +274,85 @@ def test_cutting_off_kills_children_that_ignore_sigterm(gitfacts, work):
     assert elapsed < 20, f"打ち切りに時間がかかりすぎている: {elapsed:.1f}s"
     time.sleep(4)
     assert not marker.exists(), "SIGTERM を無視する子が生き残っている"
+
+
+def test_read_result_aborts_when_the_file_is_missing(gitfacts, tmp_path):
+    """現状固定: 結果ファイルが無ければ終了コード 2 で中断する。
+
+    起動した CLI が結果を残さなかった場合であり、進行は次のラウンドへ進む。
+    """
+    with pytest.raises(SystemExit) as e:
+        gitfacts.read_result(tmp_path / "missing.json", "claude")
+    assert e.value.code == 2
+
+
+def test_read_result_aborts_on_broken_json(gitfacts, tmp_path):
+    """現状固定: JSON として読めなければ終了コード 2 で中断する。"""
+    path = tmp_path / "result.json"
+    path.write_text('{"items": [', encoding="utf-8")
+
+    with pytest.raises(SystemExit) as e:
+        gitfacts.read_result(path, "claude")
+    assert e.value.code == 2
+
+
+@pytest.mark.parametrize("body", ['[{"item_id": "R1-001"}]', "42"])
+def test_read_result_aborts_when_the_json_is_not_an_object(gitfacts, tmp_path, body):
+    """現状固定: 配列や数値も終了コード 2 で中断する。
+
+    呼び出し側は `payload.get(...)` を呼ぶため、読み込みの時点で弾かないと
+    `AttributeError` になって進行が止まる。
+    """
+    path = tmp_path / "result.json"
+    path.write_text(body, encoding="utf-8")
+
+    with pytest.raises(SystemExit) as e:
+        gitfacts.read_result(path, "claude")
+    assert e.value.code == 2
+
+
+def test_find_item_returns_none_for_a_missing_id_when_not_required(gitfacts):
+    """現状固定: `required=False` で存在しない項目 ID を探すと None を返す。
+
+    取り消しや積み直しの経路（`_commit_owner` など）は、状態に残っていない
+    項目 ID を渡しても落とさずに読み飛ばせることを前提にしている。
+    """
+    state = {"items": [{"item_id": "R1-001"}, {"item_id": "R1-002"}]}
+
+    assert gitfacts.find_item(state, "R9-999", required=False) is None
+
+
+def test_revert_item_commits_failure_message_includes_item_id(gitfacts, work, capsys):
+    """現状固定: revert_item_commits 失敗時は項目 ID 接頭辞付きのエラー文を出して中断する。"""
+    first = _commit(work, "one", {"src/a.py": "a = 1\n"})
+    second = _commit(work, "two", {"src/a.py": "a = 2\n"})
+
+    state = {"worktrees": {"work": str(work)}}
+    item = {"item_id": "R1-001", "commits": [first]}
+
+    with pytest.raises(SystemExit) as e:
+        gitfacts.revert_item_commits(state, item)
+
+    assert e.value.code == 4
+    err = capsys.readouterr().err
+    assert "❌ R1-001 のコミット" in err
+    assert "を取り消せませんでした" in err
+    assert f"（HEAD を {second} へ戻しました）" in err
+    assert _git("rev-parse", "HEAD", cwd=work).stdout.strip() == second
+
+
+def test_revert_range_failure_message_has_no_item_id_prefix(gitfacts, work, capsys):
+    """現状固定: _revert_range 失敗時は項目 ID 接頭辞のないエラー文を出して中断する。"""
+    first = _commit(work, "one", {"src/a.py": "a = 1\n"})
+    second = _commit(work, "two", {"src/a.py": "a = 2\n"})
+
+    with pytest.raises(SystemExit) as e:
+        gitfacts._revert_range(str(work), [first], second)
+
+    assert e.value.code == 4
+    err = capsys.readouterr().err
+    assert "❌ コミット" in err
+    assert "を取り消せませんでした" in err
+    assert f"（HEAD を {second} へ戻しました）" in err
+    assert _git("rev-parse", "HEAD", cwd=work).stdout.strip() == second
+

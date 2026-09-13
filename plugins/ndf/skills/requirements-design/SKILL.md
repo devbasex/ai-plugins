@@ -129,11 +129,18 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 - ~~受け入れ条件 4: 1 ページ 20 件~~ → 50 件へ変更（2026-08-13、利用者の指示）
 ```
 
+## 読み手へ渡す文書の場合
+
+**受け入れ条件の形が変わる。** 動く対象が無いため、観測できるのは**読み手が何をできるように
+なるか**である。書き方は
+[references/document-requirements.md](references/document-requirements.md) にある。
+
 ## 参照
 
 - [references/acceptance-criteria.md](references/acceptance-criteria.md) — 受け入れ条件の形式と性質
 - [references/nonfunctional-requirements.md](references/nonfunctional-requirements.md) — 非機能の 6 大項目の書き方・例・該当の判定
 - [references/spec-template.md](references/spec-template.md) — 仕様の雛形
+- [references/document-requirements.md](references/document-requirements.md) — 読み手へ渡す文書の受け入れ条件
 
 この工程に入ったら `/ndf:progress-tracking <issue番号> "要求と受け入れ条件"` を呼ぶ（記録の手順はその Skill が持つ）。
 
