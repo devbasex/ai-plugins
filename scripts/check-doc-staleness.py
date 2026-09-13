@@ -615,16 +615,18 @@ def check_version_form_row_suffixes(rows: dict[str, list[tuple[str, int]]], repo
 def check_rows_newer_than_stable(rows: dict[str, list[tuple[str, int]]], report: Report) -> None:
     """開発版と公開前の確認版の行が、正式版の行より新しい基底を指すかを見る。"""
     # 比べる相手が 1 つに決まるときだけ、正式版の行より新しい基底を指すかを見る。
-    if len(rows["正式版"]) == 1:
-        stable, stable_number = rows["正式版"][0]
-        for label in ("開発版", "公開前の確認版"):
-            for value, number in rows[label]:
-                if base_of(value) <= base_of(stable):
-                    report.add(
-                        VERSIONING_MD,
-                        f"版の付け方の節の{label}の行が正式版の行より新しい版を指していない"
-                        f"（記載: {value}（L{number}） / 正式版: {stable}（L{stable_number}））",
-                    )
+    if len(rows["正式版"]) != 1:
+        return
+
+    stable, stable_number = rows["正式版"][0]
+    for label in ("開発版", "公開前の確認版"):
+        for value, number in rows[label]:
+            if base_of(value) <= base_of(stable):
+                report.add(
+                    VERSIONING_MD,
+                    f"版の付け方の節の{label}の行が正式版の行より新しい版を指していない"
+                    f"（記載: {value}（L{number}） / 正式版: {stable}（L{stable_number}））",
+                )
 
 
 def check_next_development_examples(examples: list[tuple[str, str, int]], report: Report) -> None:
