@@ -154,7 +154,7 @@ run_runtime() {
     -e ARTIFACT_DIR=/tmp/runtime-artifacts \
     "ai-plugins-runtime-smoke-$runtime" sleep infinity)"
   if [ "$KEEP_CONTAINER" = false ]; then
-    trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' RETURN
+    STARTED_CONTAINERS+=("$cid")
   else
     echo "$cid" > "$runtime_artifacts/container-id.txt"
   fi
@@ -179,6 +179,20 @@ run_runtime() {
     docker rm -f "$cid" >/dev/null 2>&1 || true
   fi
 }
+
+# 起動したコンテナは EXIT で消す。`set -e` のもとでアダプタの `docker exec` が失敗すると
+# スクリプトはその場で終わり、関数は戻らない。そのため RETURN の trap は動かず、失敗した
+# 実行のたびに `sleep infinity` のコンテナが残っていた（#571 の実装中に 238 個たまった）。
+STARTED_CONTAINERS=()
+remove_started_containers() {
+  local cid
+  for cid in ${STARTED_CONTAINERS[@]+"${STARTED_CONTAINERS[@]}"}; do
+    docker rm -f "$cid" >/dev/null 2>&1 || true
+  done
+}
+trap remove_started_containers EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 build_images
 for runtime in "${RUNTIMES[@]}"; do

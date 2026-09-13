@@ -1,0 +1,14 @@
+{
+  "name": "no-hooks",
+  "description": "Fixture with no hooks definitions",
+  "owner": {
+    "name": "runtime-smoke"
+  },
+  "plugins": [
+    {
+      "name": "plain-plugin",
+      "source": "./plugins/plain-plugin",
+      "description": "Plugin without hooks definitions"
+    }
+  ]
+}

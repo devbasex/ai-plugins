@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "cmd",
+            "command": "true"
+          }
+        ]
+      }
+    ]
+  }
+}

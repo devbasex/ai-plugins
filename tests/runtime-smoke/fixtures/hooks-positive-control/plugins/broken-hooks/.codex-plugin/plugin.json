@@ -1,0 +1,6 @@
+{
+  "name": "broken-hooks",
+  "version": "0.0.0",
+  "description": "Hooks definitions that are broken on purpose",
+  "hooks": "./hooks/codex.json"
+}
