@@ -109,10 +109,73 @@ def test_heading_with_angle_brackets_in_inline_code_resolves(tmp_path: Path) -> 
     assert result.returncode == 0, result.stderr
 
 
+def test_link_inside_inline_code_is_ignored(tmp_path: Path) -> None:
+    """#543 決定 4: インラインコードの中の記法の例はリンクとして読まない。"""
+    write(
+        tmp_path,
+        "docs/a.md",
+        "`[文言](位置)` の書き方と `<a href=\"無い.md\">` の書き方\n"
+        "``[x](無い.md) と ` を含む``\n",
+    )
+    result = run(tmp_path)
+    assert result.returncode == 0, result.stderr
+
+
+def test_link_outside_inline_code_on_same_line_fails(tmp_path: Path) -> None:
+    """#543: 同じ行でも、インラインコードの外にある解決できないリンクは落ちる。"""
+    write(tmp_path, "docs/a.md", "`[文言](位置)` と [x](無い.md)\n")
+    result = run(tmp_path)
+    assert result.returncode == 1
+    assert failure_lines(result) == ["- docs/a.md: missing link target: 無い.md"]
+
+
+def test_unclosed_backtick_run_does_not_hide_link(tmp_path: Path) -> None:
+    """#543: 同じ本数の列で閉じないバッククォートは、後ろのリンクを隠さない。"""
+    write(tmp_path, "docs/a.md", "`` 閉じない ` と [x](無い.md)\n")
+    result = run(tmp_path)
+    assert result.returncode == 1
+    assert failure_lines(result) == ["- docs/a.md: missing link target: 無い.md"]
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        ("a `b` c", "a   c"),
+        ("a ``b ` c`` d", "a   d"),
+        ("a ``b` c", "a ``b` c"),
+        ("`a`[x](y.md)`b`", " [x](y.md) "),
+        ("[x](y.md)", "[x](y.md)"),
+    ],
+)
+def test_strip_inline_code(line: str, expected: str) -> None:
+    """#543: インラインコードの範囲を空白 1 つへ置き換える。"""
+    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.strip_inline_code(line) == expected
+
+
 def test_reference_inside_code_fence_is_ignored(tmp_path: Path) -> None:
     write(tmp_path, "docs/a.md", "# 手順\n\n```markdown\n[飛ぶ](#無い見出し)\n```\n")
     result = run(tmp_path)
     assert result.returncode == 0, result.stderr
+
+
+def test_broken_links_inside_block_quote_are_ignored(tmp_path: Path) -> None:
+    """引用内の Markdown・HTML リンクを除外する現状を固定する（R1-005）。"""
+    write(
+        tmp_path,
+        "docs/a.md",
+        "> [Markdown](missing-markdown.md)\n"
+        '> <a href="missing-html.md">HTML</a>\n',
+    )
+
+    result = run(tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert failure_lines(result) == []
 
 
 def test_missing_document_reports_only_missing_file(tmp_path: Path) -> None:
@@ -149,11 +212,31 @@ def test_heading_inside_quote_or_fence_is_not_heading(tmp_path: Path) -> None:
 
 
 def test_document_outside_scan_scope_is_not_checked_for_headings(tmp_path: Path) -> None:
-    """決定 2: 検査の対象外の文書（`issues/`）は、見出しを読みに行かない。"""
-    write(tmp_path, "issues/plan.md", "# 在る見出し\n")
-    write(tmp_path, "docs/a.md", "[飛ぶ](../issues/plan.md#無い見出し)\n")
+    """決定 2: 検査の対象外の文書（`notes/`）は、見出しを読みに行かない。"""
+    write(tmp_path, "notes/plan.md", "# 在る見出し\n")
+    write(tmp_path, "docs/a.md", "[飛ぶ](../notes/plan.md#無い見出し)\n")
     result = run(tmp_path)
     assert result.returncode == 0, result.stderr
+
+
+def test_issues_document_missing_heading_fails(tmp_path: Path) -> None:
+    """#543: `issues/` の文書の無い見出しを指す参照は落ちる。"""
+    write(tmp_path, "issues/plan.md", "# 在る見出し\n")
+    write(tmp_path, "docs/a.md", "[飛ぶ](../issues/plan.md#在る見出し)\n[飛ぶ](../issues/plan.md#無い見出し)\n")
+    result = run(tmp_path)
+    assert result.returncode == 1
+    assert failure_lines(result) == [
+        "- docs/a.md: missing heading anchor: ../issues/plan.md#無い見出し",
+    ]
+
+
+@pytest.mark.parametrize("rel", ["issues/plan.md", "issues/old/batch/00.md"])
+def test_issues_document_missing_link_target_fails(tmp_path: Path, rel: str) -> None:
+    """#543: `issues/` 直下と `issues/old/` の入れ子の文書の壊れた参照は落ちる。"""
+    write(tmp_path, rel, "[x](無い.md)\n")
+    result = run(tmp_path)
+    assert result.returncode == 1
+    assert failure_lines(result) == [f"- {rel}: missing link target: 無い.md"]
 
 
 def test_external_url_with_fragment_is_ignored(tmp_path: Path) -> None:
@@ -198,6 +281,22 @@ def test_link_targets_extracts_html_and_excludes_images() -> None:
     assert targets == ["std.md", "dq.md", "sq.md"]
 
 
+def test_link_targets_returns_empty_list_for_plain_text_and_empty_string() -> None:
+    """link_targets の空文字列やプレーンテキストに対する境界値の現状を固定する（R2-005）。
+
+    リンク記法（Markdown または HTML）を含まないテキストや空文字列に対して、
+    link_targets が空リストを返すことを確認する。
+    """
+    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.link_targets("") == []
+    assert module.link_targets("リンク記法を含まない通常のプレーンテキスト") == []
+    assert module.link_targets("Markdown や HTML のタグのない複数行\nテキストです。") == []
+
+
 @pytest.mark.parametrize(
     ("target", "expected"),
     [
@@ -234,6 +333,45 @@ def test_should_skip() -> None:
     assert module.should_skip("path/to/file.md") is False
 
 
+def test_heading_anchors_matches_levels_and_skips_non_headings(tmp_path: Path) -> None:
+    """heading_anchors の見出し行判定分岐の現状を固定する（R1-003）。
+
+    `#` 1〜6 個の各レベルの行は見出しとして slugify されアンカー集合へ入り、
+    見出しでない行（空行・通常テキスト・`#` を空白なしで始める行・`#` 7 個以上の行）は
+    `HEADING_RE.match` が None を返して除外される。
+    """
+    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    body = (
+        "# Level One\n"
+        "## Level Two\n"
+        "### Level Three\n"
+        "#### Level Four\n"
+        "##### Level Five\n"
+        "###### Level Six\n"
+        "\n"
+        "plain text line\n"
+        "####### Seven Hashes\n"
+        "#nospace after hash\n"
+    )
+    path = tmp_path / "a.md"
+    path.write_text(body, encoding="utf-8")
+
+    anchors = module.heading_anchors(path)
+
+    assert anchors == {
+        "level-one",
+        "level-two",
+        "level-three",
+        "level-four",
+        "level-five",
+        "level-six",
+    }
+
+
 def test_anchor_refs_empty_or_missing_fragment_skipped() -> None:
     """anchor_refs の空フラグメント等の境界値経路の現状を固定する（R2-001）。
 
@@ -248,6 +386,36 @@ def test_anchor_refs_empty_or_missing_fragment_skipped() -> None:
     assert module.anchor_refs("[x](file.md#)\n") == []
     assert module.anchor_refs("[x](#)\n") == []
     assert module.anchor_refs("[x](file.md)\n") == []
+
+
+def test_anchor_refs_extracts_same_and_relative_document_fragments() -> None:
+    """同一文書と相対文書のアンカー抽出の現状を固定する（R1-001）。"""
+    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    text = "[同一文書](#sec)\n[相対文書](doc.md#other-sec)\n"
+
+    assert module.anchor_refs(text) == [
+        ("", "sec", "#sec"),
+        ("doc.md", "other-sec", "doc.md#other-sec"),
+    ]
+
+
+def test_anchor_refs_skips_external_and_absolute_path_fragments() -> None:
+    """スキップ対象のパスを持つアンカー参照の現状を固定する（R1-001）。"""
+    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    text = (
+        "[外部](https://example.com/doc.md#sec)\n"
+        "[絶対パス](/doc.md#sec)\n"
+    )
+
+    assert module.anchor_refs(text) == []
 
 
 def test_heading_anchors_collision_with_explicit_numbered_heading() -> None:
@@ -277,7 +445,8 @@ def test_iter_markdown_files_collects_root_files_and_scan_dirs(tmp_path: Path) -
     """iter_markdown_files の探索範囲の現状を固定する（R2-003）。
 
     ルート直下の所定ファイルは個別に、`docs/` と `plugins/` は配下を再帰で集める。
-    所定外のルート直下ファイル・対象外ディレクトリ（`issues/`）・`.md` 以外は含めず、
+    `issues/` も配下を再帰で集める（#543）。
+    所定外のルート直下ファイル・対象外ディレクトリ（`notes/`）・`.md` 以外は含めず、
     戻り値はソート済みで重複を持たない。
     """
     spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
@@ -292,6 +461,7 @@ def test_iter_markdown_files_collects_root_files_and_scan_dirs(tmp_path: Path) -
     write(tmp_path, "docs/note.txt", "n\n")
     write(tmp_path, "plugins/p/README.md", "# p\n")
     write(tmp_path, "issues/plan.md", "# i\n")
+    write(tmp_path, "notes/plan.md", "# n\n")
 
     files = module.iter_markdown_files(tmp_path)
 
@@ -299,9 +469,20 @@ def test_iter_markdown_files_collects_root_files_and_scan_dirs(tmp_path: Path) -
         tmp_path / "README.md",
         tmp_path / "docs" / "b.md",
         tmp_path / "docs" / "sub" / "a.md",
+        tmp_path / "issues" / "plan.md",
         tmp_path / "plugins" / "p" / "README.md",
     ]
     assert files == sorted(set(files))
+
+
+def test_iter_markdown_files_returns_empty_list_for_empty_root(tmp_path: Path) -> None:
+    """既定の走査対象が存在しない空ルートの現状を固定する（R2-004）。"""
+    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.iter_markdown_files(tmp_path) == []
 
 
 @pytest.mark.parametrize(
@@ -321,6 +502,22 @@ def test_slugify_boundary_and_character_retention(text: str, expected: str) -> N
     spec.loader.exec_module(module)
 
     assert module.slugify(text) == expected
+
+
+def test_slugify_keeps_combining_mark(tmp_path: Path) -> None:
+    """slugify が M(結合文字)カテゴリの文字を保持する分岐を固定する（R2-002）。
+
+    既存の境界値テストは L(字母)・N(数字)・空白・記号だけを通し、
+    SLUG_KEEP_CATEGORIES='LMN' のうち M(結合文字)の分岐を一度も通っていない。
+    結合アキュートアクセント（U+0301）を含む文字列を渡し、その結合文字が
+    落とされずに残る現状の振る舞いを記録する。
+    """
+    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.slugify("Cafe\u0301 Menu") == "cafe\u0301-menu"
 
 
 def test_target_path_current_behavior(tmp_path: Path) -> None:
@@ -349,3 +546,45 @@ def test_target_path_current_behavior(tmp_path: Path) -> None:
     assert module.target_path(source, 'other.md "title"') == (tmp_path / "docs" / "other.md").resolve()
     assert module.target_path(source, '<other.md> "title"') == (tmp_path / "docs" / "<other.md>").resolve()
 
+
+def test_visible_lines_skips_code_fences_and_quotes(tmp_path: Path) -> None:
+    """visible_lines のコードフェンスおよび引用行スキップの現状を固定する（R1-002）。"""
+    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    path = tmp_path / "test.md"
+    body = (
+        "可視行 1\n"
+        "```\n"
+        "フェンス内の行\n"
+        "```\n"
+        "> 引用（> 始まり）行\n"
+        "  > インデント後に > を持つ行\n"
+        "可視行 2\n"
+    )
+    path.write_text(body, encoding="utf-8")
+
+    result = module.visible_lines(path)
+
+    assert result == ["可視行 1", "可視行 2"]
+
+
+def test_no_scanned_markdown_files_passes(tmp_path: Path) -> None:
+    """走査対象の Markdown が 0 件のとき成功する現状を固定する（R1-004）。"""
+    write(tmp_path, "notes/a.md", "[x](無い.md)\n")
+    result = run(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+    assert failure_lines(result) == []
+    assert result.stdout == "Markdown local links are valid\n"
+
+
+def test_html_anchor_with_missing_heading_fragment_fails(tmp_path: Path) -> None:
+    """フラグメント付き HTML リンクの見出し参照失敗の現状を固定する（R2-001）。"""
+    write(tmp_path, "docs/b.md", "# 在る見出し\n")
+    write(tmp_path, "docs/a.md", '<a href="b.md#無い見出し">x</a>\n')
+    result = run(tmp_path)
+    assert result.returncode == 1
+    assert failure_lines(result) == ["- docs/a.md: missing heading anchor: b.md#無い見出し"]

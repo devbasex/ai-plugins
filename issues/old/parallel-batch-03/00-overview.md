@@ -143,5 +143,5 @@ uv run --with pytest pytest <テストのパス> -q
 
 ## 参照
 
-- [issues/old/parallel-batch-01/00-overview.md](../old/parallel-batch-01/00-overview.md) — 前のバッチの指示書
+- [issues/old/parallel-batch-01/00-overview.md](../parallel-batch-01/00-overview.md) — 前のバッチの指示書
 - `plugins/ndf/skills/development-workflow/SKILL.md` — 工程の振り分けの基準

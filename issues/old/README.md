@@ -7,7 +7,7 @@
 ## cross-refactoring（issue #113）の記録
 
 `/ndf:cross-refactoring` の設計の初版と、7 回の実機試行、そこで見つけた不具合の修正計画である。
-現行の実装計画は [../issue-113-cross-refactoring.md](../issue-113-cross-refactoring.md) にある。
+現行の実装計画は [../issue-113-cross-refactoring.md](issue-113-cross-refactoring.md) にある。
 
 | ファイル | 内容 |
 | --- | --- |

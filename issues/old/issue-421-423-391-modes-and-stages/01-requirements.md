@@ -185,5 +185,5 @@ claude plugin validate .
 ## 参照
 
 - #421 モードの再編 / #423 運用モードの新設 / #391 ドキュメント再構成
-- v10.5.1 の確定仕様: [../../docs/specifications/ndf-workflow-unit-and-gates.md](../../docs/specifications/ndf-workflow-unit-and-gates.md)
-- 設計工程の確定仕様: [../../docs/specifications/ndf-design-phase.md](../../docs/specifications/ndf-design-phase.md)
+- v10.5.1 の確定仕様: [../../docs/specifications/ndf-workflow-unit-and-gates.md](../../../docs/specifications/ndf-workflow-unit-and-gates.md)
+- 設計工程の確定仕様: [../../docs/specifications/ndf-design-phase.md](../../../docs/specifications/ndf-design-phase.md)

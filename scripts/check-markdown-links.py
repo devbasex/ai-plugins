@@ -24,6 +24,7 @@ LINK_RE = re.compile(r"(?<!!)\[[^\]]+\]\(([^)]+)\)")
 INLINE_HTML_RE = re.compile(r"<a\s+[^>]*href=[\"']([^\"']+)[\"']", re.IGNORECASE)
 TITLE_RE = re.compile(r"\s+(?:\"[^\"]*\"|'[^']*'|\([^)]*\))\s*$")
 HEADING_RE = re.compile(r"^#{1,6}\s+(.*)$")
+BACKTICK_RUN_RE = re.compile(r"`+")
 # GitHub の見出しアンカー規則: 記号は空白・ハイフン・アンダースコアだけ残す。
 SLUG_KEEP_PUNCTUATION = " -_"
 # 同規則: Unicode 一般カテゴリの先頭文字が L(字母)・M(結合文字)・N(数字) の文字を残す。
@@ -35,6 +36,7 @@ DEFAULT_SCAN_TARGETS = (
     "KIRO.md",
     "docs",
     "plugins",
+    "issues",
 )
 
 
@@ -76,12 +78,26 @@ def resolve_document(source: Path, path_part: str) -> Path:
     return (source.parent / unquote(path_part)).resolve()
 
 
-def target_path(source: Path, raw_target: str) -> Path | None:
-    target = strip_title(raw_target)
+def parse_target(raw: str) -> tuple[str, str, str]:
+    """Split a raw link into (path part, fragment, stripped target) after title stripping."""
+    target = strip_title(raw)
+    path_part, _, fragment = target.partition("#")
+    return path_part, fragment, target
+
+
+def _resolvable_path_part(raw: str) -> str | None:
+    """The path part to resolve, or None when the link names no other document."""
+    path_part, _fragment, target = parse_target(raw)
     if should_skip(target):
         return None
-    path_part = target.split("#", 1)[0]
     if not path_part:
+        return None
+    return path_part
+
+
+def target_path(source: Path, raw_target: str) -> Path | None:
+    path_part = _resolvable_path_part(raw_target)
+    if path_part is None:
         return None
     return resolve_document(source, path_part)
 
@@ -98,6 +114,41 @@ def visible_lines(path: Path) -> list[str]:
             continue
         lines.append(line)
     return lines
+
+
+def _matching_closer(runs: list[re.Match], start: int) -> int | None:
+    width = len(runs[start].group())
+    return next(
+        (j for j in range(start + 1, len(runs)) if len(runs[j].group()) == width),
+        None,
+    )
+
+
+def _segments_without_inline_code(line: str, runs: list[re.Match]) -> list[str]:
+    parts: list[str] = []
+    pos = 0
+    i = 0
+    while i < len(runs):
+        closer = _matching_closer(runs, i)
+        if closer is None:
+            i += 1
+            continue
+        parts.append(line[pos:runs[i].start()])
+        parts.append(" ")
+        pos = runs[closer].end()
+        i = closer + 1
+    parts.append(line[pos:])
+    return parts
+
+
+def strip_inline_code(line: str) -> str:
+    """Replace each inline code span in one line with a single space (#543).
+
+    A span runs from a backtick run to the next run of the same length. A run
+    with no matching closer stays as text, so links after it are still read.
+    """
+    runs = list(BACKTICK_RUN_RE.finditer(line))
+    return "".join(_segments_without_inline_code(line, runs))
 
 
 def link_targets(text: str) -> list[str]:
@@ -139,9 +190,8 @@ def anchor_refs(text: str) -> list[tuple[str, str, str]]:
     """(path part, fragment, raw target) for every link carrying a fragment."""
     refs: list[tuple[str, str, str]] = []
     for raw in link_targets(text):
-        target = strip_title(raw)
-        path_part, sep, fragment = target.partition("#")
-        if not sep or not fragment:
+        path_part, fragment, target = parse_target(raw)
+        if not fragment:
             continue
         if path_part and should_skip(target):
             continue
@@ -170,7 +220,7 @@ def main() -> int:
         return f"{md.relative_to(root)}: {reason}: {raw}"
 
     for md in markdown_files:
-        text = "\n".join(visible_lines(md))
+        text = "\n".join(strip_inline_code(line) for line in visible_lines(md))
         for raw in link_targets(text):
             resolved = target_path(md, raw)
             if resolved is None:
