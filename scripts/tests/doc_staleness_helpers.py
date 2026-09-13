@@ -226,27 +226,6 @@ def next_minor(version: str) -> str:
     return f"{major}.{int(minor) + 1}.{patch}"
 
 
-def _retarget_versioning_doc(root: Path, old_base: str, new_base: str) -> None:
-    """版の付け方の章の基底版と dev 版を、新しい基底へ揃える。
-
-    章は基底で比べる。例に並ぶ版数の基底が現行版より古ければ落ちるため、現行版の例も
-    次の版の例も、新しい基底へ寄せる。
-    """
-    versioning = root / VERSIONING_MD_PATH
-    edit_all(versioning, f"`{old_base}`", f"`{new_base}`", 2)
-    edit(versioning, f"`{old_base}-dev.1`", f"`{new_base}-dev.1`")
-    edit(versioning, f"`{next_minor(VERSION)}-dev.1`", f"`{next_minor(new_base)}-dev.1`")
-
-
-def _retarget_plugin_readme(root: Path, version: str) -> None:
-    """`plugins/ndf/README.md` の各記載（更新案内・Kiro 確認例・キャッシュパス・出力例）を揃える。"""
-    plugin_readme = root / "plugins/ndf/README.md"
-    edit(plugin_readme, f"## v{VERSION} へ更新するとき", f"## v{version} へ更新するとき")
-    edit(plugin_readme, f"Kiro CLI用 / v{VERSION}）", f"Kiro CLI用 / v{version}）")
-    edit_all(plugin_readme, f"ndf/{VERSION}/skills/", f"ndf/{version}/skills/", 2)
-    edit(plugin_readme, f"enabled  {VERSION}  <path>", f"enabled  {version}  <path>")
-
-
 def retarget_version(root: Path, version: str) -> None:
     """木の現行版を指す記載を、`plugin.json` ごとまとめて別の版へ揃える。
 
@@ -264,8 +243,18 @@ def retarget_version(root: Path, version: str) -> None:
     agents = root / "AGENTS.md"
     edit(agents, f"主要プラグインです（v{VERSION}）", f"主要プラグインです（v{version}）")
 
-    _retarget_versioning_doc(root, old_base, new_base)
-    _retarget_plugin_readme(root, version)
+    # 版の付け方の章は基底で比べる。例に並ぶ版数の基底が現行版より古ければ落ちるため、
+    # 現行版の例も次の版の例も、新しい基底へ寄せる。
+    versioning = root / VERSIONING_MD_PATH
+    edit_all(versioning, f"`{old_base}`", f"`{new_base}`", 2)
+    edit(versioning, f"`{old_base}-dev.1`", f"`{new_base}-dev.1`")
+    edit(versioning, f"`{next_minor(VERSION)}-dev.1`", f"`{next_minor(version)}-dev.1`")
+
+    plugin_readme = root / "plugins/ndf/README.md"
+    edit(plugin_readme, f"## v{VERSION} へ更新するとき", f"## v{version} へ更新するとき")
+    edit(plugin_readme, f"Kiro CLI用 / v{VERSION}）", f"Kiro CLI用 / v{version}）")
+    edit_all(plugin_readme, f"ndf/{VERSION}/skills/", f"ndf/{version}/skills/", 2)
+    edit(plugin_readme, f"enabled  {VERSION}  <path>", f"enabled  {version}  <path>")
 
 
 def run_check(root: Path) -> subprocess.CompletedProcess[str]:
@@ -280,15 +269,3 @@ def run_check(root: Path) -> subprocess.CompletedProcess[str]:
 
 def output_of(result: subprocess.CompletedProcess[str]) -> str:
     return result.stdout + result.stderr
-
-
-def run_check_expecting_failure(root: Path) -> str:
-    """検査を実行して非 0 終了を検証し、結合済みの出力を返す。
-
-    失敗系テストで繰り返される「実行 → 非 0 終了の確認 → 結合出力の取得」を 1 つにまとめる。
-    終了コードだけを意図的に見るテストや成功系は、この補助を使わず従来どおりの形を保つ。
-    """
-    result = run_check(root)
-    out = output_of(result)
-    assert result.returncode != 0, out
-    return out
