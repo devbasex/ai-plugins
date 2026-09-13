@@ -703,50 +703,51 @@ def _load_checker():
     return module
 
 
-def test_base_of_drops_suffix_and_splits_into_int_triple() -> None:
+@pytest.fixture
+def checker():
+    return _load_checker()
+
+
+def test_base_of_drops_suffix_and_splits_into_int_triple(checker) -> None:
     """接尾辞あり・なしのどちらの入力も、同じ整数の 3 つ組へ分解される（現状固定）。"""
-    module = _load_checker()
-    assert module.base_of("9.6.0-dev.1") == (9, 6, 0)
-    assert module.base_of("9.6.0") == (9, 6, 0)
-    assert module.base_of("9.6.0-dev.1") == module.base_of("9.6.0")
+    assert checker.base_of("9.6.0-dev.1") == (9, 6, 0)
+    assert checker.base_of("9.6.0") == (9, 6, 0)
+    assert checker.base_of("9.6.0-dev.1") == checker.base_of("9.6.0")
 
 
 # --- check_version_section: 節に版数が 1 件も無い境界（単体）---
 
 
-def test_version_section_without_any_version_reports_once_and_returns() -> None:
+def test_version_section_without_any_version_reports_once_and_returns(checker) -> None:
     """見出しだけで囲みの版数が 0 件なら、読み取れない旨の 1 件だけを記録して戻る（現状固定）。"""
-    module = _load_checker()
-    report = module.Report()
-    module.check_version_section(f"{module.VERSION_SECTION_HEADING}\n", "9.3.0", report)
+    report = checker.Report()
+    checker.check_version_section(f"{checker.VERSION_SECTION_HEADING}\n", "9.3.0", report)
     assert report.errors == [
-        f"{module.VERSIONING_MD}: 版の付け方の節の版数を読み取れない"
-        f"（`{module.VERSION_SECTION_HEADING}` の節へ版数の例を囲みで置く。"
-        f"{module.PLUGIN_JSON}: 9.3.0）"
+        f"{checker.VERSIONING_MD}: 版の付け方の節の版数を読み取れない"
+        f"（`{checker.VERSION_SECTION_HEADING}` の節へ版数の例を囲みで置く。"
+        f"{checker.PLUGIN_JSON}: 9.3.0）"
     ]
 
 
 # --- check_version_section: 節の後ろに終端の見出しが無い境界（単体）---
 
 
-def test_version_section_at_end_of_document_scans_until_eof() -> None:
+def test_version_section_at_end_of_document_scans_until_eof(checker) -> None:
     """節が文書の末尾で終端の見出しが無くても、EOF まで走査して古い版数を記録する（現状固定）。"""
-    module = _load_checker()
-    report = module.Report()
-    body = f"{module.VERSION_SECTION_HEADING}\n\n開発版の例は `9.2.1` である。\n"
-    module.check_version_section(body, "9.3.0", report)
+    report = checker.Report()
+    body = f"{checker.VERSION_SECTION_HEADING}\n\n開発版の例は `9.2.1` である。\n"
+    checker.check_version_section(body, "9.3.0", report)
     assert report.errors == [
-        f"{module.VERSIONING_MD}: 版の付け方の節の版数が現行版より古い"
-        f"（記載: 9.2.1（L3） / {module.PLUGIN_JSON}: 9.3.0）"
+        f"{checker.VERSIONING_MD}: 版の付け方の節の版数が現行版より古い"
+        f"（記載: 9.2.1（L3） / {checker.PLUGIN_JSON}: 9.3.0）"
     ]
 
 
-def test_version_section_finds_stale_version_inside_code_fence() -> None:
+def test_version_section_finds_stale_version_inside_code_fence(checker) -> None:
     """囲みの中の版数も走査し、古い版数なら記録する（現状固定）。"""
-    module = _load_checker()
-    report = module.Report()
+    report = checker.Report()
     body = (
-        f"{module.VERSION_SECTION_HEADING}\n"
+        f"{checker.VERSION_SECTION_HEADING}\n"
         "\n"
         "```text\n"
         "古い版の例は `9.2.1` である。\n"
@@ -754,55 +755,52 @@ def test_version_section_finds_stale_version_inside_code_fence() -> None:
         "\n"
         "現行版の例は `9.3.0` である。\n"
     )
-    module.check_version_section(body, "9.3.0", report)
+    checker.check_version_section(body, "9.3.0", report)
     assert report.errors == [
-        f"{module.VERSIONING_MD}: 版の付け方の節の版数が現行版より古い"
-        f"（記載: 9.2.1（L4） / {module.PLUGIN_JSON}: 9.3.0）"
+        f"{checker.VERSIONING_MD}: 版の付け方の節の版数が現行版より古い"
+        f"（記載: 9.2.1（L4） / {checker.PLUGIN_JSON}: 9.3.0）"
     ]
 
 
 
-def test_category_breakdown_ideographic_comma_names_are_split() -> None:
+def test_category_breakdown_ideographic_comma_names_are_split(checker) -> None:
     """Skill 名の区切りが読点「、」でも分割され、個数が計上される（現状固定）。
 
     `NAME_SEPARATOR` は `[,、]` で、半角カンマと読点のどちらも区切りとして扱う。
     読点で区切った本文を渡しても、宣言数と並ぶ名前の数が一致し、合計も総数と一致すれば
     Report にエラーが追加されないことを固定する。
     """
-    module = _load_checker()
-    report = module.Report()
+    report = checker.Report()
     body = (
         "- **元Skills（5個）**:\n"
         "  - 第1群 (4): alpha、bravo、charlie、delta\n"
         "  - 第2群 (1): echo\n"
         "- 次の行\n"
     )
-    module.check_category_breakdown(body, 5, "src", report)
+    checker.check_category_breakdown(body, 5, "src", report)
     assert report.errors == []
 
 
 # --- category_lines: 元Skills行が無い境界（単体）---
 
 
-def test_category_lines_without_source_count_returns_none() -> None:
+def test_category_lines_without_source_count_returns_none(checker) -> None:
     """本文中に元Skills行が存在しない場合、None を返す（現状固定）。"""
-    module = _load_checker()
     markdown = (
         "# ドキュメント\n"
         "\n"
         "- カテゴリA: 3個\n"
         "- カテゴリB: 2個\n"
     )
-    assert module.category_lines(markdown) is None
+    assert checker.category_lines(markdown) is None
 
 
 # --- location_of: index が lines の要素数以上である境界（単体）---
 
 
-def test_location_of_with_index_out_of_bounds_returns_empty_string() -> None:
+def test_location_of_with_index_out_of_bounds_returns_empty_string(checker) -> None:
     """指定された index が lines の要素数以上である境界値において、空文字列を返す（現状固定）。"""
-    module = _load_checker()
-    claim = module.Claim(
+    claim = checker.Claim(
         path="test.md",
         subject="テスト",
         wording="テスト",
@@ -811,5 +809,4 @@ def test_location_of_with_index_out_of_bounds_returns_empty_string() -> None:
         source="source",
         lines=[10],
     )
-    assert module.location_of(claim, 1) == ""
-
+    assert checker.location_of(claim, 1) == ""

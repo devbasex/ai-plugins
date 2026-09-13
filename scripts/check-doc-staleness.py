@@ -180,6 +180,33 @@ class PointVersionSpec:
     pattern: re.Pattern[str]
 
 
+@dataclass(frozen=True)
+class RuntimeCountSpec:
+    """文書ごとのランタイム別 Skill 数の検査仕様。"""
+
+    path: str
+    labels: dict[str, str]
+    subject_fmt: str
+    wording_fmt: str
+    source_of: Callable[[str], str]
+
+
+ROOT_README_COUNT_SPEC = RuntimeCountSpec(
+    ROOT_README,
+    ROOT_README_RUNTIMES,
+    "公開Skills の {label} の数",
+    "{label}向け core <数>個",
+    manifest_path,
+)
+PLUGIN_README_COUNT_SPEC = RuntimeCountSpec(
+    PLUGIN_README,
+    PLUGIN_README_RUNTIMES,
+    "配布先の表の {label} の数",
+    "| {label} | <数> 個 | ... |",
+    manifest_path,
+)
+
+
 # 点で照合する版数記載（G・I・K・L・M）の一覧。点の照合を足すときはここへ 1 行足す。
 # 同じ文書の中では並びの順に報告する。
 POINT_VERSION_SPECS: list[PointVersionSpec] = [
@@ -499,25 +526,21 @@ def check_root_readme_versions(root: Path, body: str, report: Report) -> None:
 
 
 def check_runtime_counts(
-    path: str,
+    spec: RuntimeCountSpec,
     described_by_label: dict[str, list[int]],
-    labels: dict[str, str],
     counts: dict[str, int | None],
-    subject_fmt: str,
-    wording_fmt: str,
-    source_of: Callable[[str], str],
     report: Report,
 ) -> None:
     """ランタイム別の Skill 数を突き合わせる。"""
-    for label, runtime in labels.items():
+    for label, runtime in spec.labels.items():
         verify(
             Claim(
-                path=path,
-                subject=subject_fmt.format(label, label=label),
-                wording=wording_fmt.format(label, label=label),
+                path=spec.path,
+                subject=spec.subject_fmt.format(label, label=label),
+                wording=spec.wording_fmt.format(label, label=label),
                 described=described_by_label[label],
                 expected=counts.get(runtime),
-                source=source_of(runtime),
+                source=spec.source_of(runtime),
             ),
             report,
         )
@@ -529,13 +552,9 @@ def check_root_readme(
     """`README.md` のランタイム別の数（A）・元 Skill 数（B）・カテゴリ内訳（C）を見る。"""
     found = labelled_numbers(RUNTIME_COUNT, body, ROOT_README_RUNTIMES)
     check_runtime_counts(
-        ROOT_README,
+        ROOT_README_COUNT_SPEC,
         found,
-        ROOT_README_RUNTIMES,
         counts,
-        "公開Skills の {label} の数",
-        "{label}向け core <数>個",
-        manifest_path,
         report,
     )
     verify(
@@ -590,13 +609,9 @@ def check_plugin_readme(
     """`plugins/ndf/README.md` の配布先の表（D）・レイアウト図（E）・更新案内（F）を見る。"""
     found = labelled_numbers(TABLE_ROW, body, PLUGIN_README_RUNTIMES)
     check_runtime_counts(
-        PLUGIN_README,
+        PLUGIN_README_COUNT_SPEC,
         found,
-        PLUGIN_README_RUNTIMES,
         counts,
-        "配布先の表の {label} の数",
-        "| {label} | <数> 個 | ... |",
-        manifest_path,
         report,
     )
     verify(
