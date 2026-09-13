@@ -106,9 +106,25 @@ _wf_require_merge_tools() {
   return 0
 }
 
-_wf_resolve_pr_info() {
-  local slug="${1:-}" num="${2:-}" owner branch list json
+_wf_resolve_pr_by_branch() {
+  local slug="${1:-}" owner branch list json
   owner=${slug%%/*}
+
+  branch=$(git branch --show-current 2>/dev/null)
+  [ -n "$branch" ] || {
+    wf_deny_undetermined "" 'Pull Request の番号（現在のブランチ名を取れない）'; return 1; }
+  list=$(gh api "/repos/$slug/pulls?head=$owner:$branch" 2>/dev/null) || {
+    wf_deny_undetermined "" "Pull Request の番号（ブランチ $branch の問い合わせに失敗）"; return 1; }
+  json=$(jq -c '.[0] // empty' <<<"$list" 2>/dev/null)
+  [ -n "$json" ] || {
+    wf_deny_undetermined "" "Pull Request の番号（ブランチ $branch に対応する Pull Request が無い）"; return 1; }
+
+  printf '%s\n' "$json"
+  return 0
+}
+
+_wf_resolve_pr_info() {
+  local slug="${1:-}" num="${2:-}" json
 
   # **問い合わせは REST に限る。** GraphQL は利用上限で落ちる。番号があるときは
   # `pulls/<番号>` を 1 回、無いときは `pulls?head=…` を 1 回で、どちらも番号・
@@ -117,14 +133,7 @@ _wf_resolve_pr_info() {
     json=$(gh api "/repos/$slug/pulls/$num" 2>/dev/null) || {
       wf_deny_undetermined "$num" 'head のブランチ名と承認の印（Pull Request の問い合わせに失敗）'; return 1; }
   else
-    branch=$(git branch --show-current 2>/dev/null)
-    [ -n "$branch" ] || {
-      wf_deny_undetermined "" 'Pull Request の番号（現在のブランチ名を取れない）'; return 1; }
-    list=$(gh api "/repos/$slug/pulls?head=$owner:$branch" 2>/dev/null) || {
-      wf_deny_undetermined "" "Pull Request の番号（ブランチ $branch の問い合わせに失敗）"; return 1; }
-    json=$(jq -c '.[0] // empty' <<<"$list" 2>/dev/null)
-    [ -n "$json" ] || {
-      wf_deny_undetermined "" "Pull Request の番号（ブランチ $branch に対応する Pull Request が無い）"; return 1; }
+    json=$(_wf_resolve_pr_by_branch "$slug") || { printf '%s\n' "$json"; return 1; }
   fi
 
   printf '%s\n' "$json"

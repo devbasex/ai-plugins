@@ -3,10 +3,7 @@
   "hooks": {
     "SessionStart": [
       {
-        "description": "Ensure Playwright browser is installed",
         "matcher": "startup|resume",
-        "priority": 100,
-        "enabled": true,
         "hooks": [
           {
             "type": "command",

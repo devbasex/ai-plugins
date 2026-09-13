@@ -774,3 +774,81 @@ def test_merge_fix_deferred_count_matches_expanded_nits(patched_tmp_dir, state_m
     assert merged["deferred"] == len(expanded) == 3
     summaries = {n["summary"] for n in expanded}
     assert summaries == {"nit-a", "nit-b", "nit-c"}
+
+
+# ---------- #156-4 Task 1: 解決したスレッドの位置を記録へ残す ----------
+
+
+def test_merge_fix_records_resolved_thread_positions(patched_tmp_dir, state_mod):
+    """`rounds[].fix.resolved_thread_positions` へ位置ごと写す（#156 の 4 本目）。
+
+    上限の方式（`oracle`）は、解決したスレッドの位置と指摘の位置を結んで
+    「修正された指摘」を決める。位置は fix の戻り値にあるが、取り込みが件数と
+    識別子だけを残して捨てていた。**既存のキーは変えない。**
+    """
+    tmp_dir = patched_tmp_dir
+    _seed_state(tmp_dir)
+    fix = _canonical_fix()
+    fix["resolved_threads"] = [
+        {"thread_id": "T1", "comment_id": 111, "path": "src/foo.py", "line": 42},
+        {"thread_id": "T2", "comment_id": 222, "path": "src/bar.py", "line": 7},
+    ]
+    (tmp_dir / f"fix-pr{PR}-result.json").write_text(json.dumps(fix))
+
+    state_mod.cmd_merge_fix(_make_args())
+
+    merged = _read_state(tmp_dir)["rounds"][-1]["fix"]
+    assert merged["resolved_thread_positions"] == [
+        {"thread_id": "T1", "path": "src/foo.py", "line": 42},
+        {"thread_id": "T2", "path": "src/bar.py", "line": 7},
+    ]
+    # 既存のキーは変わらない。
+    assert merged["resolved_threads"] == 2
+    assert merged["resolved_thread_ids"] == ["T1", "T2"]
+
+
+def test_merge_fix_resolved_thread_positions_int_form_does_not_crash(
+    patched_tmp_dir, state_mod
+):
+    """件数(int) しか返らない劣化表現では位置を作れない。**落ちない。**"""
+    tmp_dir = patched_tmp_dir
+    _seed_state(tmp_dir)
+    fix = _canonical_fix()
+    fix["resolved_threads"] = 3
+    (tmp_dir / f"fix-pr{PR}-result.json").write_text(json.dumps(fix))
+
+    state_mod.cmd_merge_fix(_make_args())
+
+    merged = _read_state(tmp_dir)["rounds"][-1]["fix"]
+    assert merged["resolved_thread_positions"] == []
+    assert merged["resolved_threads"] == 3
+    assert merged["resolved_thread_ids"] == []
+
+
+def test_merge_fix_resolved_thread_positions_keeps_incomplete_items(
+    patched_tmp_dir, state_mod
+):
+    """位置の欠けた要素も落とさない。
+
+    落とすと、解決したスレッドの件数と位置の件数が食い違う。欠けた要素は
+    上限の方式の側で「どの指摘とも一致しないもの」として数える。
+    """
+    tmp_dir = patched_tmp_dir
+    _seed_state(tmp_dir)
+    fix = _canonical_fix()
+    fix["resolved_threads"] = [
+        {"thread_id": "T1", "path": "src/foo.py", "line": 42},
+        {"thread_id": "T2"},
+        {"path": "src/baz.py", "line": "13"},
+    ]
+    (tmp_dir / f"fix-pr{PR}-result.json").write_text(json.dumps(fix))
+
+    state_mod.cmd_merge_fix(_make_args())
+
+    merged = _read_state(tmp_dir)["rounds"][-1]["fix"]
+    assert merged["resolved_thread_positions"] == [
+        {"thread_id": "T1", "path": "src/foo.py", "line": 42},
+        {"thread_id": "T2", "path": None, "line": None},
+        {"thread_id": None, "path": "src/baz.py", "line": 13},
+    ]
+    assert merged["resolved_threads"] == 3

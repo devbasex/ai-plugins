@@ -167,3 +167,61 @@ def test_a_comment_with_an_unreadable_line_is_skipped(tmp_dir, state_mod):
         [{"path": "a.py", "line": "ten", "body": "あ"}, {"path": "a.py", "line": 10, "body": "あ"}],
     )
     assert code == 4
+
+
+def test_new_finding_count_characterization_conditions(tmp_dir, state_mod):
+    """_new_finding_count の完全一致・近傍境界・離れた同一本文・別ファイル・空本文・不一致の現在の件数を固定する。"""
+    _seed(tmp_dir)
+    prev = [
+        {"path": "a.py", "line": 10, "body": "本文A"},
+        {"path": "a.py", "line": 50, "body": "本文B"},
+        {"path": "c.py", "line": 30, "body": "本文C"},
+    ]
+    curr = [
+        {"path": "a.py", "line": 10, "body": "本文A"},        # 1. 完全一致 -> 一致
+        {"path": "a.py", "line": 13, "body": "別の本文1"},      # 2. 近傍境界 (+3) -> 一致
+        {"path": "a.py", "line": 7, "body": "別の本文2"},       # 2. 近傍境界 (-3) -> 一致
+        {"path": "a.py", "line": 14, "body": "別の本文3"},      # 2. 近傍境界外 (+4) -> 不一致（新規）
+        {"path": "a.py", "line": 200, "body": "本文B"},        # 3. 離れた同一本文 -> 一致
+        {"path": "b.py", "line": 10, "body": "本文A"},         # 4. 別ファイル -> 不一致（新規）
+        {"path": "a.py", "line": 300, "body": "!!!"},          # 5. 空本文（正規化で空） -> 不一致（新規）
+        {"path": "c.py", "line": 80, "body": "異なる本文"},    # 6. 通常の不一致 -> 不一致（新規）
+    ]
+    _payload(tmp_dir, 1, prev)
+    _payload(tmp_dir, 2, curr)
+    st = state_mod._load(PR)
+    count, measurable = state_mod._new_finding_count(st, PR)
+    assert measurable is True
+    assert count == 4
+
+
+def test_oscillation_matching_priority_exact_over_near_and_body(tmp_dir, state_mod, capsys):
+    """前ラウンドに複数候補があるとき、完全一致が近傍や本文一致より優先してカウントされることを固定する。"""
+    prev = [
+        {"path": "a.py", "line": 10, "body": "本文A"},
+        {"path": "a.py", "line": 12, "body": "本文B"},
+        {"path": "a.py", "line": 50, "body": "本文C"},
+    ]
+    curr = [
+        {"path": "a.py", "line": 10, "body": "本文C"},
+    ]
+    code = _run(tmp_dir, state_mod, prev, curr)
+    assert code == 4
+    err = capsys.readouterr().err
+    assert "位置=1 近傍=0 本文=0" in err
+
+
+def test_oscillation_matching_priority_near_over_body(tmp_dir, state_mod, capsys):
+    """前ラウンドに複数候補があるとき、近傍一致が本文一致より優先してカウントされることを固定する。"""
+    prev = [
+        {"path": "a.py", "line": 20, "body": "本文X"},
+        {"path": "a.py", "line": 80, "body": "本文Y"},
+    ]
+    curr = [
+        {"path": "a.py", "line": 18, "body": "本文Y"},
+    ]
+    code = _run(tmp_dir, state_mod, prev, curr)
+    assert code == 4
+    err = capsys.readouterr().err
+    assert "位置=0 近傍=1 本文=0" in err
+

@@ -136,3 +136,25 @@ def test_the_judge_and_the_merge_share_one_classification(tmp_dir, state_mod, mo
     assert merge_exit.value.code == 3   # 修正の取り込みは中断する
     assert judge_exit.value.code == 2   # 判定は中断せず修正へ回す
     assert seen == [["pytest"], ["pytest"]]
+
+
+def test_merge_fix_continues_when_only_meta_checks_failed(tmp_dir, state_mod):
+    approved = {
+        "round": 1, "pr": PR, "started_at": "2026-09-04T00:00:00+00:00",
+        "codex": {"intent": "APPROVE", "by_severity": {}},
+        "agy": {"intent": "APPROVE", "by_severity": {}},
+        "head_sha": "b87b3ae",
+    }
+    _write(tmp_dir, _state([approved]))
+    (tmp_dir / f"fix-pr{PR}-result.json").write_text(json.dumps({
+        "pr": PR, "fix_commit": "abc1234", "ci_status": "FAILURE",
+        "ci_failed_checks": ["labels"], "fixed_count": 1,
+    }))
+
+    state_mod.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
+
+    saved = json.loads((tmp_dir / f"cross-review-pr{PR}-state.json").read_text())
+    assert saved["rounds"][-1]["fix"]["ci_note"] == (
+        "メタチェックのみ失敗: ['labels'] — コードと無関係のため継続"
+    )
+    assert saved["final"] is None

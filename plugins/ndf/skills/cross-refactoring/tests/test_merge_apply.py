@@ -822,6 +822,52 @@ def test_push_happens_once_per_merge_apply(paths, patch_lib, refactor, tmp_path,
     assert len([c for c in pushes if c[:2] == ["git", "push"]]) == 1
 
 
+def test_a_failed_push_is_retried_without_redoing_the_merge(
+    paths, patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts
+):
+    """push だけが失敗しても、取り込みは記録され、次の実行は再送だけを行う。
+
+    印を残さずに push すると、失敗したときに取り込みがローカルに留まったまま
+    処理済みガードで素通りし、Pull Request へ永久に反映されない。逆に取り込みを
+    記録し直すと、取り消しと積み直しを繰り返す。
+    """
+    items = [item(item_id="R1-001")]
+    state_path = _state_with_items(tmp_path, items)
+    env_tmp_dir(state_path)
+    git_facts({"ok111": fact(sha="ok111")})
+    write_result(state_path, "codex-apply-r1", {
+        "base_sha": "aaa",
+        "items": [{"item_id": "R1-001", "commits": [{"sha": "ok111"}]}],
+    })
+    monkeypatch.setattr(
+        paths.subprocess, "run",
+        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "", ""),
+    )
+
+    def failing_push(state):
+        raise RuntimeError("push に失敗した")
+
+    patch_lib("push_head", failing_push)
+    with pytest.raises(RuntimeError):
+        refactor.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": False})()
+        )
+
+    state = read_state(state_path)
+    assert state["rounds"][0]["apply"]["merged_at"] is not None
+    assert state["rounds"][0]["apply"]["applied"] == ["R1-001"]
+    assert state["rounds"][0]["pending_push"] is True, "再送の印が残っていない"
+
+    pushed: list[dict] = []
+    patch_lib("push_head", lambda st: pushed.append(st) or None)
+    refactor.cmd_merge_apply(type("A", (), {"id": 130, "round": 1, "dry_run": False})())
+
+    assert len(pushed) == 1, "再実行は push の再送だけを行う"
+    state = read_state(state_path)
+    assert state["rounds"][0]["pending_push"] is False, "成功後に印が消えていない"
+    assert state["items"][0]["status"] == "applied"
+
+
 def test_dry_run_touches_neither_git_nor_state(
     refactor, tmp_path, env_tmp_dir, no_git, git_facts
 ):
