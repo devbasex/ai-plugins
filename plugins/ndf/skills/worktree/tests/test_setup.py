@@ -254,6 +254,35 @@ def test_check_prints_declared_branches(main_repo: Path) -> None:
     ], result["out"]
 
 
+def test_check_prints_only_base_branch_declared(main_repo: Path) -> None:
+    """現状固定: base_branch だけを持つ宣言では、開発の起点は宣言値、本番の
+    チャネルは既定ブランチへ落ちる。2 つのキーは独立に判定される。"""
+    write_declaration(
+        main_repo,
+        json.dumps({"version": 1, "base_branch": "develop"}),
+    )
+    result = run(["check"], cwd=main_repo)
+    assert result["rc"] == 0, result
+    assert result["out"].splitlines()[1:] == [
+        "開発の起点: develop（宣言）",
+        "本番のチャネル: main（未宣言。既定ブランチ）",
+    ], result["out"]
+
+
+def test_check_prints_only_production_branch_declared(main_repo: Path) -> None:
+    """現状固定: production_branch だけを持つ宣言では、両者が逆になる。"""
+    write_declaration(
+        main_repo,
+        json.dumps({"version": 1, "production_branch": "release"}),
+    )
+    result = run(["check"], cwd=main_repo)
+    assert result["rc"] == 0, result
+    assert result["out"].splitlines()[1:] == [
+        "開発の起点: main（未宣言。既定ブランチ）",
+        "本番のチャネル: release（宣言）",
+    ], result["out"]
+
+
 def test_check_ignores_branches_in_an_unreadable_declaration(main_repo: Path) -> None:
     """読めない宣言のキーは未宣言として扱う。"""
     write_declaration(main_repo, json.dumps({"version": 99, "base_branch": "develop"}))
