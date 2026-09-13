@@ -97,12 +97,7 @@ UPGRADE_HEADING = re.compile(r"^##\s+v" + VERSION + r"\s+へ更新するとき\s
 #
 # 周囲の固定の語で位置を決めてから照合する。文書内の版数のうち現行版を指すのはこれだけで、
 # 残りは変更履歴・履歴の説明であり、前の版のまま残すのが正しい。
-OVERVIEW_VERSION = re.compile(r"\*\*NDFプラグイン v" + VERSION + r"\*\*")  # G
 PLUGIN_TABLE_ROW = re.compile(r"^\|\s*\*\*(?P<name>[A-Za-z0-9_.-]+)\*\*\s*\|\s*" + VERSION + r"\s*\|")  # H
-MAIN_PLUGIN_VERSION = re.compile(r"主要プラグインです（v" + VERSION + r"）")  # I
-KIRO_AGENT_VERSION = re.compile(r"Kiro CLI用 / v" + VERSION + r"）")  # K
-CODEX_CACHE_PATH = re.compile(r"plugins/cache/ai-plugins/" + FAMILY + r"/" + VERSION + r"/skills/")  # L
-CODEX_LIST_OUTPUT = re.compile(FAMILY + r"@ai-plugins\s+installed, enabled\s+" + VERSION)  # M
 
 # J: 区間の検査。正本のこの見出しから次の同位以上の見出しの直前までに並ぶ版数を、
 # 現行版の基底と比べる。
@@ -230,25 +225,35 @@ class RepositoryMetrics:
 # 点で照合する版数記載（G・I・K・L・M）の一覧。点の照合を足すときはここへ 1 行足す。
 # 同じ文書の中では並びの順に報告する。
 POINT_VERSION_SPECS: list[PointVersionSpec] = [
-    PointVersionSpec(ROOT_README, "概要の版数", "**NDFプラグイン v<版>**", OVERVIEW_VERSION),  # G
+    PointVersionSpec(
+        ROOT_README,
+        "概要の版数",
+        "**NDFプラグイン v<版>**",
+        re.compile(r"\*\*NDFプラグイン v" + VERSION + r"\*\*"),
+    ),  # G
     PointVersionSpec(
         AGENTS_MD,
         "「主要プラグインです（v<版>）」の版数",
         "主要プラグインです（v<版>）",
-        MAIN_PLUGIN_VERSION,
+        re.compile(r"主要プラグインです（v" + VERSION + r"）"),
     ),  # I
-    PointVersionSpec(PLUGIN_README, "Kiro の確認例の版数", "（Kiro CLI用 / v<版>）", KIRO_AGENT_VERSION),  # K
+    PointVersionSpec(
+        PLUGIN_README,
+        "Kiro の確認例の版数",
+        "（Kiro CLI用 / v<版>）",
+        re.compile(r"Kiro CLI用 / v" + VERSION + r"）"),
+    ),  # K
     PointVersionSpec(
         PLUGIN_README,
         "Codex のキャッシュパスの例の版数",
         f"~/.codex/plugins/cache/ai-plugins/{FAMILY}/<版>/skills/...",
-        CODEX_CACHE_PATH,
+        re.compile(r"plugins/cache/ai-plugins/" + FAMILY + r"/" + VERSION + r"/skills/"),
     ),  # L
     PointVersionSpec(
         PLUGIN_README,
         "`codex plugin list` の出力例の版数",
         f"{FAMILY}@ai-plugins  installed, enabled  <版>",
-        CODEX_LIST_OUTPUT,
+        re.compile(FAMILY + r"@ai-plugins\s+installed, enabled\s+" + VERSION),
     ),  # M
 ]
 
