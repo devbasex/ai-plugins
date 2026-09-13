@@ -424,3 +424,93 @@ def test_ndf_policies_skill_migration(tmp_path: Path, case: str) -> None:
     source_skill = ROOT / "plugins" / "ndf" / "skills" / "ndf-policies" / "SKILL.md"
     source_body = source_skill.read_text(encoding="utf-8").split("\n---\n", 1)[1].strip("\n")
     assert source_body in steering_content
+
+
+def _kiro_manifest_skills() -> set[str]:
+    """manifests/kiro-skills.txt が配布対象として列挙する Skill 名の集合。
+
+    install.sh の Step 1 と同じ整形（コメント除去・末尾空白除去・空行除去）で読む。
+    """
+    manifest = INSTALLER.parents[1] / "manifests" / "kiro-skills.txt"
+    names: set[str] = set()
+    for raw in manifest.read_text(encoding="utf-8").splitlines():
+        line = raw.split("#", 1)[0].rstrip()
+        if line:
+            names.add(line)
+    return names
+
+
+def test_manifest_skills_are_linked_with_count_and_output(tmp_path: Path) -> None:
+    # 現状固定: Step 1 の Skill 配布パイプラインは manifest 掲載 Skill のうち
+    # ndf-policies を除いた分だけ .kiro/skills/ へ symlink を張り、その本数を
+    # 「Skills数」として出力し、各 Skill に "  linked: <名前>" を出す。リンク先は
+    # プラグインの skills/<名前> を指す。構造改善で本数・リンク先・出力が動かないことを守る。
+    project = tmp_path / "project"
+    project.mkdir()
+    proc = run("--project", str(project), "--yes", home=tmp_path)
+    assert proc.returncode == 0, proc.stderr
+
+    skills_dir = project / ".kiro" / "skills"
+    plugin_skills = INSTALLER.parents[1] / "skills"
+    manifest_skills = _kiro_manifest_skills()
+    expected_linked = manifest_skills - {"ndf-policies"}
+
+    # 実際に張られた symlink とそのリンク先を確認する。
+    linked = {p.name for p in skills_dir.iterdir() if p.is_symlink()}
+    assert linked == expected_linked
+    for name in expected_linked:
+        assert (skills_dir / name).resolve() == (plugin_skills / name).resolve()
+
+    # ndf-policies は steering へ回すためリンクしない。
+    assert not (skills_dir / "ndf-policies").is_symlink()
+
+    # 出力の「linked」行と「Skills数」が本数と一致する。
+    linked_lines = {
+        line[len("  linked: "):]
+        for line in proc.stdout.splitlines()
+        if line.startswith("  linked: ")
+    }
+    assert linked_lines == expected_linked
+    assert f"  Skills数: {len(expected_linked)} (シンボリックリンク: {skills_dir})" in proc.stdout
+
+
+def test_reinstall_removes_only_managed_skill_links(tmp_path: Path) -> None:
+    # 現状固定: 掃除が消すのは現在の checkout（プラグインの skills/）配下を指す
+    # 既存リンクだけである。別の場所を指す利用者のリンクは残す。再インストールでも
+    # 掃除→再リンクで最終状態が manifest 掲載分と一致する。
+    project = tmp_path / "project"
+    project.mkdir()
+    first = run("--project", str(project), "--yes", home=tmp_path)
+    assert first.returncode == 0, first.stderr
+
+    skills_dir = project / ".kiro" / "skills"
+    plugin_skills = INSTALLER.parents[1] / "skills"
+
+    # 利用者が別の場所を指して張ったリンク（掃除対象外）。
+    foreign_target = tmp_path / "foreign_skill"
+    foreign_target.mkdir()
+    (skills_dir / "user-external").symlink_to(foreign_target)
+
+    # 現在の checkout を指すが manifest に無い名前のリンク（掃除対象）。
+    stale = skills_dir / "stale-managed"
+    stale.symlink_to(plugin_skills / "pr")
+
+    second = run("--project", str(project), "--yes", home=tmp_path)
+    assert second.returncode == 0, second.stderr
+
+    manifest_skills = _kiro_manifest_skills()
+    expected_managed = manifest_skills - {"ndf-policies"}
+
+    # 現在の checkout 配下を指す managed リンクは manifest 掲載分だけが残る。
+    assert not (skills_dir / "stale-managed").exists()
+    # 別の場所を指す利用者のリンクは残る。
+    assert (skills_dir / "user-external").is_symlink()
+    assert (skills_dir / "user-external").resolve() == foreign_target.resolve()
+
+    managed_now = {
+        p.name
+        for p in skills_dir.iterdir()
+        if p.is_symlink()
+        and str(p.resolve()).startswith(str(plugin_skills.resolve()) + os.sep)
+    }
+    assert managed_now == expected_managed
