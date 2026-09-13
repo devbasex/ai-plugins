@@ -459,7 +459,7 @@ def check_version_section(body: str, version: str | None, report: Report) -> Non
         None,
     )
     values: list[str] = []
-    numbers: list[int] = []
+    line_numbers: list[int] = []
     if start is not None:
         in_fence = False
         for number, line in enumerate(lines[start + 1 :], start + 2):
@@ -469,7 +469,7 @@ def check_version_section(body: str, version: str | None, report: Report) -> Non
                 break
             for found in SECTION_VERSION.finditer(line):
                 values.append(found.group(1))
-                numbers.append(number)
+                line_numbers.append(number)
     if not values:
         report.add(
             VERSIONING_MD,
@@ -481,7 +481,7 @@ def check_version_section(body: str, version: str | None, report: Report) -> Non
     if version is None:
         return
     current = base_of(version)
-    for value, number in zip(values, numbers):
+    for value, number in zip(values, line_numbers):
         if base_of(value) < current:
             report.add(
                 VERSIONING_MD,
