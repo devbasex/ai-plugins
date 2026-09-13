@@ -1788,6 +1788,27 @@ wt_branch_exists() {
   return 1
 }
 
+# 宣言の <キー名> が指すブランチ名を出力する。指定が無ければ既定ブランチへ落とす。
+# 指定された名前が origin にもローカルにも無いときは、標準エラーへ案内を出して 1 を返す。
+_wt_branch_from_declaration() {
+  local main_dir="${1:-}" key="${2:-}" decl name=
+  [ -n "$main_dir" ] || return 1
+  if decl=$(wt_declaration "$main_dir"); then
+    name=$(printf '%s' "$decl" |
+      jq -r --arg k "$key" 'if (.[$k]|type) == "string" then .[$k] else empty end' 2>/dev/null)
+  fi
+  if [ -n "$name" ]; then
+    if wt_branch_exists "$main_dir" "$name"; then
+      printf '%s\n' "$name"
+      return 0
+    fi
+    printf 'NOTE: .ndf/worktree.json の %s が指す %s は origin にもローカルにもありません\n' \
+      "$key" "$name" >&2
+    return 1
+  fi
+  wt_default_branch "$main_dir"
+}
+
 # 開発の起点ブランチ名を出力する。宣言の base_branch を優先し、指定が無ければ
 # 既定ブランチへ落とす。
 #
@@ -1795,22 +1816,7 @@ wt_branch_exists() {
 # 変更が正式版から分岐したまま進む。origin かローカルのどちらかに同名のブランチが
 # あることを確かめ、無ければ標準エラーへ案内を出して 1 を返す。
 wt_base_branch() {
-  local main_dir="${1:-}" decl name=
-  [ -n "$main_dir" ] || return 1
-  if decl=$(wt_declaration "$main_dir"); then
-    name=$(printf '%s' "$decl" |
-      jq -r 'if (.base_branch|type) == "string" then .base_branch else empty end' 2>/dev/null)
-  fi
-  if [ -n "$name" ]; then
-    if wt_branch_exists "$main_dir" "$name"; then
-      printf '%s\n' "$name"
-      return 0
-    fi
-    printf 'NOTE: .ndf/worktree.json の base_branch が指す %s は origin にもローカルにもありません\n' \
-      "$name" >&2
-    return 1
-  fi
-  wt_default_branch "$main_dir"
+  _wt_branch_from_declaration "${1:-}" base_branch
 }
 
 # 本番のチャネルのブランチ名を出力する。宣言の production_branch を優先し、指定が
@@ -1824,22 +1830,7 @@ wt_base_branch() {
 # **指定された名前が実在しないときは既定ブランチへ落とさない。** 本番のチャネルを
 # 取り違えると、承認を求める対象そのものが変わる。
 wt_production_branch() {
-  local main_dir="${1:-}" decl name=
-  [ -n "$main_dir" ] || return 1
-  if decl=$(wt_declaration "$main_dir"); then
-    name=$(printf '%s' "$decl" |
-      jq -r 'if (.production_branch|type) == "string" then .production_branch else empty end' 2>/dev/null)
-  fi
-  if [ -n "$name" ]; then
-    if wt_branch_exists "$main_dir" "$name"; then
-      printf '%s\n' "$name"
-      return 0
-    fi
-    printf 'NOTE: .ndf/worktree.json の production_branch が指す %s は origin にもローカルにもありません\n' \
-      "$name" >&2
-    return 1
-  fi
-  wt_default_branch "$main_dir"
+  _wt_branch_from_declaration "${1:-}" production_branch
 }
 
 # 主ディレクトリの追跡対象の未コミット変更を `<状態> <パス>` で 1 行 1 件出力する。
