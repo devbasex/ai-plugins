@@ -208,6 +208,22 @@ def test_4_no_section_and_no_design_document_returns_0(fake):
     assert out.returncode == 0, out.stdout + out.stderr
 
 
+def test_4_empty_decisions_without_subheadings_is_treated_as_zero_decisions(fake):
+    """現状固定: 「## 決定の記録」があっても「### 」見出しが無ければ決定 0 件として扱う。"""
+    empty_design = "# 設計\n\n## 決定の記録\n\n決定事項はまだありません。\n\n## その他\n"
+    # 本文に「## 決めたこと」節がない状態で check を実行し、決定 0 件として一致（終了コード 0）
+    design_pr(fake, body="## Summary\n\n- 要約\n\n## Test plan\n", design=empty_design)
+    out = fake.run("check", "7", "--repo", REPO)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert "設計文書 0 本 / 決定 0 件" in out.stdout
+
+    # 本文に「## 決めたこと」節がある状態で check を実行し、決定がないのに節が存在する食い違い（終了コード 1）
+    design_pr(fake, body=f"## Summary\n\n{EXPECTED}\n## Test plan\n", design=empty_design)
+    out_with_section = fake.run("check", "7", "--repo", REPO)
+    assert out_with_section.returncode == 1, out_with_section.stdout + out_with_section.stderr
+    assert "食い違い" in out_with_section.stdout
+
+
 def test_5_headings_inside_code_fences_are_not_counted(fake):
     template = (
         "# 雛形\n\n```markdown\n## 決定の記録\n\n### 決定 1: {結論を 1 文で}\n```\n\n"
