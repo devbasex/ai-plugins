@@ -78,6 +78,19 @@ def test_missing_path_stops_with_error_and_hint(tmp_path: Path, name: str) -> No
     assert_no_bare_cd_error(proc)
 
 
+def test_empty_path_stops_with_error_and_hint(tmp_path: Path) -> None:
+    proc = run("--project", "", "--yes", home=tmp_path)
+
+    assert proc.returncode == 2
+    lines = proc.stderr.splitlines()
+    assert lines[0] == "ERROR: --project points at a path that does not exist: "
+    assert lines[1].startswith("HINT: mkdir -p ")
+    assert len(lines) == 2
+    assert hint_words(proc.stderr) == [""]
+    assert list(tmp_path.iterdir()) == []
+    assert_no_bare_cd_error(proc)
+
+
 def test_file_path_stops_without_hint(tmp_path: Path) -> None:
     target = tmp_path / "afile"
     target.write_text("", encoding="utf-8")
