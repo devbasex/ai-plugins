@@ -665,8 +665,13 @@ wf_join() {
   printf '%s' "$out"
 }
 
+# 工程の分類。_wf_classify_stages が書き、wf_report が読む。
+WF_CLASS_PRESENT='present'         # 記録あり
+WF_CLASS_MISSING='missing'         # 必須で記録なし
+WF_CLASS_CONDITIONAL='conditional' # 条件付き
+
 # frontier までの各工程を分類し、'class<TAB>stage' を 1 行 1 件で返す。
-# class は present（記録あり）・missing（必須で記録なし）・conditional（条件付き）。
+# class は WF_CLASS_* のいずれか。
 # recorded 配列・mode・frontier を引数で受け取る。
 _wf_classify_stages() {
   local mode="$1" frontier="$2"
@@ -677,14 +682,14 @@ _wf_classify_stages() {
     index=$((index + 1))
     [ "$index" -le "$frontier" ] || break
     if _wf_contains "$stage" ${recorded[@]+"${recorded[@]}"}; then
-      printf 'present\t%s\n' "$stage"
+      printf '%s\t%s\n' "$WF_CLASS_PRESENT" "$stage"
       continue
     fi
     [ -n "$mode" ] || continue
     class=$(wf_stage_class "$mode" "$stage") || continue
     case "$class" in
-      R) printf 'missing\t%s\n' "$stage" ;;
-      C) printf 'conditional\t%s\n' "$stage" ;;
+      R) printf '%s\t%s\n' "$WF_CLASS_MISSING" "$stage" ;;
+      C) printf '%s\t%s\n' "$WF_CLASS_CONDITIONAL" "$stage" ;;
     esac
   done < <(wf_stages)
 }
@@ -709,9 +714,9 @@ wf_report() {
 
   while IFS=$'\t' read -r class stage; do
     case "$class" in
-      present) present+=("$stage") ;;
-      missing) missing+=("$stage") ;;
-      conditional) conditional+=("$stage") ;;
+      "$WF_CLASS_PRESENT") present+=("$stage") ;;
+      "$WF_CLASS_MISSING") missing+=("$stage") ;;
+      "$WF_CLASS_CONDITIONAL") conditional+=("$stage") ;;
     esac
   done < <(_wf_classify_stages "$mode" "$frontier" "${recorded[@]}")
 
