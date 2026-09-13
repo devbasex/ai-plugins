@@ -234,6 +234,44 @@ def test_reinstall_removes_optional_features_when_flags_omitted(tmp_path: Path) 
 
 
 @pytest.mark.parametrize(
+    ("existing", "warn_marker"),
+    [
+        # 不正 JSON: 読み込みが例外になり、読めない旨で引き継ぎを断念する。
+        ("{ not json", "を読めないため引き継ぎません"),
+        # JSON オブジェクト以外（配列）: dict でないため引き継ぎを断念する。
+        ("[]", "が JSON オブジェクトではないため引き継ぎません"),
+        # hooks がオブジェクト以外（配列）: その節だけ引き継ぎを断念する。
+        ('{"hooks": []}', "の hooks が JSON オブジェクトではないため引き継ぎません"),
+        # mcpServers がオブジェクト以外（文字列）: その節だけ引き継ぎを断念する。
+        ('{"mcpServers": "x"}', "の mcpServers が JSON オブジェクトではないため引き継ぎません"),
+    ],
+)
+def test_reinstall_with_malformed_agent_config_warns_and_continues(
+    tmp_path: Path, existing: str, warn_marker: str
+) -> None:
+    # 既存 ndf.json が不正 JSON・JSON オブジェクト以外・hooks / mcpServers が
+    # オブジェクト以外のとき、引き継ぎを断念して警告を出しつつ導入を続ける経路を固定する。
+    # 終了コードは 0 で、出力された ndf.json は JSON オブジェクトとして読め、
+    # テンプレート由来の agentSpawn と userPromptSubmit を必ず持つ。
+    project = tmp_path / "project"
+    (project / ".kiro" / "agents").mkdir(parents=True)
+    agent_file = project / ".kiro" / "agents" / "ndf.json"
+    agent_file.write_text(existing, encoding="utf-8")
+
+    proc = run("--project", str(project), "--yes", home=tmp_path)
+
+    assert proc.returncode == 0, proc.stderr
+    # 引き継ぎ断念の警告は Python 側の print で標準出力へ出る。
+    assert f"WARN: 既存の {agent_file} {warn_marker}" in proc.stdout
+    assert_no_bare_cd_error(proc)
+
+    reinstalled = json.loads(agent_file.read_text(encoding="utf-8"))
+    assert isinstance(reinstalled, dict)
+    assert reinstalled["hooks"]["agentSpawn"]
+    assert reinstalled["hooks"]["userPromptSubmit"]
+
+
+@pytest.mark.parametrize(
     ("cwd_part", "arg", "resolved_part"),
     [(".", "project/sub", "project/sub"), ("project", ".", "project")],
 )
