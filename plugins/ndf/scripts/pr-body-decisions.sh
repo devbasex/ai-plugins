@@ -198,6 +198,10 @@ def normalize(text):
     return "\n".join(lines).strip("\n")
 
 
+def count_decisions(docs):
+    return sum(len(h) for _, h in docs)
+
+
 def compare(body, docs):
     span = find_section(body, HEADING)
     actual = body[span[0]:span[1]] if span else None
@@ -206,7 +210,7 @@ def compare(body, docs):
 
 
 def report(actual, expected, docs):
-    total = sum(len(h) for _, h in docs)
+    total = count_decisions(docs)
     if expected is None:
         print(f"食い違い: 変更したファイルに「## 決定の記録」を持つ設計文書が無いのに、本文に「{HEADING}」の節がある")
         return
@@ -252,7 +256,7 @@ def sync_section(body, span, expected, docs):
     write_body(rewrite(body, span, expected))
     _, _, body = read_pr()
     same, _, actual, expected = compare(body, docs)
-    total = sum(len(h) for _, h in docs)
+    total = count_decisions(docs)
     if same:
         print(f"書き直した: 設計文書 {len(docs)} 本 / 決定 {total} 件")
         return 0
@@ -268,7 +272,7 @@ def main():
             return 0
         docs = changed_markdown(head_sha)
         same, span, actual, expected = compare(body, docs)
-        total = sum(len(h) for _, h in docs)
+        total = count_decisions(docs)
         if same:
             print(f"一致: 設計文書 {len(docs)} 本 / 決定 {total} 件")
             return 0
