@@ -162,6 +162,9 @@ def main() -> int:
             anchors_by_path[path] = heading_anchors(path)
         return anchors_by_path[path]
 
+    def report(md: Path, reason: str, raw: str) -> str:
+        return f"{md.relative_to(root)}: {reason}: {raw}"
+
     for md in markdown_files:
         text = "\n".join(visible_lines(md))
         for raw in link_targets(text):
@@ -171,17 +174,17 @@ def main() -> int:
             try:
                 resolved.relative_to(root)
             except ValueError:
-                failures.append(f"{md.relative_to(root)}: link escapes repository: {raw}")
+                failures.append(report(md, "link escapes repository", raw))
                 continue
             if not resolved.exists():
-                failures.append(f"{md.relative_to(root)}: missing link target: {raw}")
+                failures.append(report(md, "missing link target", raw))
 
         for path_part, fragment, raw in anchor_refs(text):
             document = resolve_document(md, path_part)
             if document not in scanned:
                 continue
             if unquote(fragment).lower() not in anchors_of(document):
-                failures.append(f"{md.relative_to(root)}: missing heading anchor: {raw}")
+                failures.append(report(md, "missing heading anchor", raw))
 
     if failures:
         print("Markdown link check failed:", file=sys.stderr)
