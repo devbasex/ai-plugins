@@ -957,6 +957,22 @@ def test_category_lines_without_source_count_returns_none() -> None:
     assert module.category_lines(markdown) is None
 
 
+def test_category_lines_stops_at_first_non_category_line() -> None:
+    """カテゴリ内訳が途切れた後のカテゴリ行は拾わない（現状固定）。"""
+    module = _load_checker()
+    markdown = (
+        "- **元Skills（5個）**:\n"
+        "  - 第1群 (4): alpha, bravo, charlie, delta\n"
+        "通常文\n"
+        "  - 第2群 (1): echo\n"
+    )
+    matched = module.category_lines(markdown)
+    assert matched is not None
+    assert [found.group(0) for found in matched] == [
+        "  - 第1群 (4): alpha, bravo, charlie, delta"
+    ]
+
+
 # --- location_of: index が lines の要素数以上である境界（単体）---
 
 
@@ -973,4 +989,3 @@ def test_location_of_with_index_out_of_bounds_returns_empty_string() -> None:
         lines=[10],
     )
     assert module.location_of(claim, 1) == ""
-
