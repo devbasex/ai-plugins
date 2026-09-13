@@ -302,6 +302,45 @@ def test_should_skip() -> None:
     assert module.should_skip("path/to/file.md") is False
 
 
+def test_heading_anchors_matches_levels_and_skips_non_headings(tmp_path: Path) -> None:
+    """heading_anchors の見出し行判定分岐の現状を固定する（R1-003）。
+
+    `#` 1〜6 個の各レベルの行は見出しとして slugify されアンカー集合へ入り、
+    見出しでない行（空行・通常テキスト・`#` を空白なしで始める行・`#` 7 個以上の行）は
+    `HEADING_RE.match` が None を返して除外される。
+    """
+    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    body = (
+        "# Level One\n"
+        "## Level Two\n"
+        "### Level Three\n"
+        "#### Level Four\n"
+        "##### Level Five\n"
+        "###### Level Six\n"
+        "\n"
+        "plain text line\n"
+        "####### Seven Hashes\n"
+        "#nospace after hash\n"
+    )
+    path = tmp_path / "a.md"
+    path.write_text(body, encoding="utf-8")
+
+    anchors = module.heading_anchors(path)
+
+    assert anchors == {
+        "level-one",
+        "level-two",
+        "level-three",
+        "level-four",
+        "level-five",
+        "level-six",
+    }
+
+
 def test_anchor_refs_empty_or_missing_fragment_skipped() -> None:
     """anchor_refs の空フラグメント等の境界値経路の現状を固定する（R2-001）。
 
