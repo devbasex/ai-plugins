@@ -197,11 +197,31 @@ def test_heading_inside_quote_or_fence_is_not_heading(tmp_path: Path) -> None:
 
 
 def test_document_outside_scan_scope_is_not_checked_for_headings(tmp_path: Path) -> None:
-    """決定 2: 検査の対象外の文書（`issues/`）は、見出しを読みに行かない。"""
-    write(tmp_path, "issues/plan.md", "# 在る見出し\n")
-    write(tmp_path, "docs/a.md", "[飛ぶ](../issues/plan.md#無い見出し)\n")
+    """決定 2: 検査の対象外の文書（`notes/`）は、見出しを読みに行かない。"""
+    write(tmp_path, "notes/plan.md", "# 在る見出し\n")
+    write(tmp_path, "docs/a.md", "[飛ぶ](../notes/plan.md#無い見出し)\n")
     result = run(tmp_path)
     assert result.returncode == 0, result.stderr
+
+
+def test_issues_document_missing_heading_fails(tmp_path: Path) -> None:
+    """#543: `issues/` の文書の無い見出しを指す参照は落ちる。"""
+    write(tmp_path, "issues/plan.md", "# 在る見出し\n")
+    write(tmp_path, "docs/a.md", "[飛ぶ](../issues/plan.md#在る見出し)\n[飛ぶ](../issues/plan.md#無い見出し)\n")
+    result = run(tmp_path)
+    assert result.returncode == 1
+    assert failure_lines(result) == [
+        "- docs/a.md: missing heading anchor: ../issues/plan.md#無い見出し",
+    ]
+
+
+@pytest.mark.parametrize("rel", ["issues/plan.md", "issues/old/batch/00.md"])
+def test_issues_document_missing_link_target_fails(tmp_path: Path, rel: str) -> None:
+    """#543: `issues/` 直下と `issues/old/` の入れ子の文書の壊れた参照は落ちる。"""
+    write(tmp_path, rel, "[x](無い.md)\n")
+    result = run(tmp_path)
+    assert result.returncode == 1
+    assert failure_lines(result) == [f"- {rel}: missing link target: 無い.md"]
 
 
 def test_external_url_with_fragment_is_ignored(tmp_path: Path) -> None:
@@ -325,7 +345,8 @@ def test_iter_markdown_files_collects_root_files_and_scan_dirs(tmp_path: Path) -
     """iter_markdown_files の探索範囲の現状を固定する（R2-003）。
 
     ルート直下の所定ファイルは個別に、`docs/` と `plugins/` は配下を再帰で集める。
-    所定外のルート直下ファイル・対象外ディレクトリ（`issues/`）・`.md` 以外は含めず、
+    `issues/` も配下を再帰で集める（#543）。
+    所定外のルート直下ファイル・対象外ディレクトリ（`notes/`）・`.md` 以外は含めず、
     戻り値はソート済みで重複を持たない。
     """
     spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
@@ -340,6 +361,7 @@ def test_iter_markdown_files_collects_root_files_and_scan_dirs(tmp_path: Path) -
     write(tmp_path, "docs/note.txt", "n\n")
     write(tmp_path, "plugins/p/README.md", "# p\n")
     write(tmp_path, "issues/plan.md", "# i\n")
+    write(tmp_path, "notes/plan.md", "# n\n")
 
     files = module.iter_markdown_files(tmp_path)
 
@@ -347,6 +369,7 @@ def test_iter_markdown_files_collects_root_files_and_scan_dirs(tmp_path: Path) -
         tmp_path / "README.md",
         tmp_path / "docs" / "b.md",
         tmp_path / "docs" / "sub" / "a.md",
+        tmp_path / "issues" / "plan.md",
         tmp_path / "plugins" / "p" / "README.md",
     ]
     assert files == sorted(set(files))

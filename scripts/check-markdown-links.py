@@ -36,6 +36,7 @@ DEFAULT_SCAN_TARGETS = (
     "KIRO.md",
     "docs",
     "plugins",
+    "issues",
 )
 
 
