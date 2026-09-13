@@ -1,0 +1,31 @@
+name: PR body decisions
+
+# 設計 Pull Request（head が design/ で始まる）の本文の「決めたこと」の節が、設計文書の
+# 決定の見出しと一致するかを確かめる。対象かどうかはスクリプトが決め、対象外は成功で終わる。
+#
+# **本文の編集（edited）でも起動する。** 進行側が本文や設計文書を手順を通らずに直したとき、
+# 機械で食い違いを見つけられるのはここだけである。sync で直した結果もここで緑に戻る。
+#
+# ruleset の必須の検査にはしていない（#545 の決定 8）。必須にするかは利用者が決める。
+on:
+  pull_request:
+    types: [opened, synchronize, edited, reopened]
+
+# 本文を読むだけで、書き込まない。書き直し（sync）はここから呼ばない。
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare the decisions section with the design documents
+        # 番号とリポジトリ名は環境変数で渡す。ブランチ名と本文はシェルの本文へ埋めない。
+        # 設計文書は head のコミットから、本文は Pull Request から API で読む。
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+        run: bash plugins/ndf/scripts/pr-body-decisions.sh check "$PR_NUMBER" --repo "$REPOSITORY"
