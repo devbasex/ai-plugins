@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.10.1）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.11.0-dev.1）
 ```
 
 ### agy
@@ -119,24 +119,45 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.10.1 へ更新するとき
+## v10.11.0-dev.1 へ更新するとき
 
-**Claude Code の起動時に出ていた hooks 定義の警告を消しました。** hook が実行する内容は
-変わりません。変更点の一覧は [CHANGELOG.md](../../CHANGELOG.md) にあります。
+**失敗や食い違いが表に出ないまま通っていた箇所を塞ぎました。** 破壊的な変更はなく、記録の
+移行も要りません。変更点の一覧は [CHANGELOG.md](../../CHANGELOG.md) にあります。
 
-```text
-● ndf: hooks.json: unknown keys "description" in hooks.PreToolUse[0], "description" in hooks.SessionStart[0] ignored
-```
+**開発版です。** `develop` にだけ載ります。取得元へ `#develop` を足す手順は
+[docs/versioning-and-distribution.md の「開発版を試す」](../../docs/versioning-and-distribution.md#開発版を試す)にあります。
 
-`mcp-serena` と `mcp-playwright` も同じ警告を出していたため、あわせて 2.0.1 へ上げています。
-**導入済みの実体を入れ替えるまで警告は残ります。** 更新したあとは Claude Code を
-起動し直してください。
+| 変わったこと | 中身 |
+| --- | --- |
+| **`development-workflow` が起動時に作業ツリーの宣言を確かめます** | `.ndf/worktree.json` が無ければ `worktree` の宣言の用意へ進み、読めなければ先へ進みません。判定結果に `宣言:` の行が増えます。**編集やコマンドは拒否しません** |
+| `worktree-setup.sh check` を新設 | 宣言の状態を終了コードで返します（0 あり / 2 なし / 3 読めない / 1 判定できない）。ファイルを作りません |
+| **設計 Pull Request の本文の「決めたこと」** | `pr-body-decisions.sh` を新設しました。head が `design/` で始まる Pull Request では、`pr` と `fix` が本文の `## 決めたこと` を設計文書の `## 決定の記録` の見出しから作り直します。**この節を手で書いても上書きされます** |
+| 進行の記録の読み取り | 記録の値に `;` などの演算子が密着しても、通過工程の控えに積まれます。これまでは黙って捨てられていました |
+| Kiro のインストーラ | `--project` に存在しないパスかファイルを渡すと、`ERROR:` と終了コード 2 で止まります |
+| Skill 執筆の規約のファイル名 | `skills/README.md` から `skills/AUTHORING.md` へ変わりました。本文は変わりません |
+| `--model` の例 | claude の識別子を `claude-opus-5` へ直しました。以前の例の `opus-5` を写すと 404 になります |
+
+開発版のチャネルを登録済みなら、次で入れ替わります。**動いているセッションには反映されない**
+ため、更新したあとは起動し直してください。
 
 ```bash
 claude plugin marketplace update ai-plugins
 claude plugin update ndf@ai-plugins
-claude plugin update mcp-serena@ai-plugins        # 導入している場合
-claude plugin update mcp-playwright@ai-plugins    # 導入している場合
+
+codex plugin marketplace upgrade ai-plugins
+codex plugin add ndf@ai-plugins
+```
+
+### 手元で確かめる
+
+どちらも読むだけで、ファイルも本文も書き換えません。`$SCRIPTS` はプラグインの `scripts/` の
+絶対パスで、決め方は
+[development-workflow/references/scripts-lookup.md](skills/development-workflow/references/scripts-lookup.md)
+にあります。
+
+```bash
+bash "$SCRIPTS/worktree-setup.sh" check; echo "exit=$?"                # 0 あり / 2 なし / 3 読めない / 1 判定できない
+bash "$SCRIPTS/pr-body-decisions.sh" check <PR番号>; echo "exit=$?"   # 0 一致・対象外 / 1 食い違い / 2 読めない
 ```
 
 ## Playwright テストについて
@@ -278,7 +299,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.10.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.11.0-dev.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -300,14 +321,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.10.1/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.11.0-dev.1/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.10.1  <path>
+# => ndf@ai-plugins  installed, enabled  10.11.0-dev.1  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
