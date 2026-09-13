@@ -26,6 +26,9 @@ WT_DEFAULT_ALLOW_PATHS=(
 # 読み取れる宣言ファイルの版。知らない版は読まずに終わる。
 WT_DECLARATION_VERSION=1
 
+# 宣言ファイルの主ディレクトリからの相対パス。
+WT_DECLARATION_FILE=".ndf/worktree.json"
+
 # 開発用の作業ツリーを置くディレクトリ (主ディレクトリからの相対)。
 WT_WORKTREE_DIR=".worktrees"
 
@@ -143,7 +146,7 @@ wt_in_worktree() {
 wt_declaration() {
   local main_dir="${1:-}" file json version
   [ -n "$main_dir" ] || return 1
-  file="$main_dir/.ndf/worktree.json"
+  file="$main_dir/$WT_DECLARATION_FILE"
   [ -f "$file" ] || return 1
   command -v jq >/dev/null 2>&1 || return 1
   json=$(jq -c '.' "$file" 2>/dev/null) || return 1
@@ -165,7 +168,7 @@ wt_declaration_state() {
   [ -n "$main_dir" ] || return 1
   if wt_declaration "$main_dir" >/dev/null; then
     printf 'present\n'
-  elif [ -e "$main_dir/.ndf/worktree.json" ]; then
+  elif [ -e "$main_dir/$WT_DECLARATION_FILE" ]; then
     printf 'unreadable\n'
   else
     printf 'absent\n'
@@ -181,7 +184,7 @@ wt_declaration_state() {
 wt_declaration_stamp() {
   local main_dir="${1:-}" file
   [ -n "$main_dir" ] || return 1
-  file="$main_dir/.ndf/worktree.json"
+  file="$main_dir/$WT_DECLARATION_FILE"
   [ -e "$file" ] || { printf '\n'; return 0; }
 
   if command -v cksum >/dev/null 2>&1; then
@@ -1788,14 +1791,23 @@ wt_branch_exists() {
   return 1
 }
 
+# 宣言 JSON から指定されたキーの string 型の値だけを出力する。値が string でない、
+# キーが無い、JSON が空のいずれでも何も出力しない。実在確認・NOTE 出力・既定ブランチ
+# への落としは含まない。それらは呼び出し側が担う。
+_wt_declaration_string() {
+  local decl="${1:-}" key="${2:-}"
+  [ -n "$decl" ] || return 0
+  printf '%s' "$decl" |
+    jq -r --arg key "$key" 'if (.[$key]|type) == "string" then .[$key] else empty end' 2>/dev/null
+}
+
 # 宣言の指定されたキーからブランチ名を読み、実在を確認して出力する。指定が無ければ
 # 既定ブランチへ落とす。
 wt_declaration_branch() {
   local main_dir="${1:-}" key="${2:-}" decl name=
   [ -n "$main_dir" ] && [ -n "$key" ] || return 1
   if decl=$(wt_declaration "$main_dir"); then
-    name=$(printf '%s' "$decl" |
-      jq -r --arg key "$key" 'if (.[$key]|type) == "string" then .[$key] else empty end' 2>/dev/null)
+    name=$(_wt_declaration_string "$decl" "$key")
   fi
   if [ -n "$name" ]; then
     if wt_branch_exists "$main_dir" "$name"; then

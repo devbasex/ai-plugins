@@ -149,8 +149,7 @@ do_status() {
 print_branch_line() {
   local label="$1" key="$2" decl="$3" name= fallback
   if [ -n "$decl" ]; then
-    name=$(printf '%s' "$decl" |
-      jq -r --arg k "$key" 'if (.[$k]|type) == "string" then .[$k] else empty end' 2>/dev/null)
+    name=$(_wt_declaration_string "$decl" "$key")
   fi
   if [ -n "$name" ]; then
     printf '%s: %s（宣言）\n' "$label" "$name"
