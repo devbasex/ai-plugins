@@ -336,6 +336,19 @@ def test_declaration_state_function(main_repo: Path) -> None:
     assert empty.returncode == 1 and empty.stdout == ""
 
 
+def test_empty_declaration_file_is_unreadable(main_repo: Path) -> None:
+    """現状固定: 0 バイトの宣言ファイルは unreadable と判定する。"""
+    from worktree_helpers import run_lib
+
+    declaration(main_repo).parent.mkdir()
+    declaration(main_repo).write_bytes(b"")
+
+    result = run_lib(f'wt_declaration_state "{main_repo}"')
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "unreadable\n"
+
+
 def test_hooks_stay_silent_without_a_declaration(main_repo: Path) -> None:
     """受け入れ条件 7: 宣言が無ければ、2 つの hook は何も出さず 0 で終わる。"""
     from worktree_helpers import GUARD, SESSION
