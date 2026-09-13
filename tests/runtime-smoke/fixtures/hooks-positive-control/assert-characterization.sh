@@ -116,6 +116,25 @@ test_discover_targets_empty_boundary() {
   unset -f discover_targets
 }
 
+test_artifact_path() {
+  local assert_dir="$REPO_ROOT/tests/runtime-smoke/assertions/assert-hook-definitions.sh"
+  local artifact_path_fn actual
+  artifact_path_fn="$(sed -n '/^artifact_path() {$/,/^}$/p' "$assert_dir")"
+  if [ -z "$artifact_path_fn" ]; then
+    echo "could not extract artifact_path from $assert_dir" >&2
+    exit 1
+  fi
+  eval "$artifact_path_fn"
+  OUT_DIR="$base/artifacts/hook-definitions"
+
+  actual="$(artifact_path codex positive-control reports)"
+  if [ "$actual" != "$OUT_DIR/codex-positive-control.reports" ]; then
+    echo "artifact_path returned an unexpected path: $actual" >&2
+    exit 1
+  fi
+  unset -f artifact_path
+}
+
 test_reject_marketplace_without_hooks() {
   cat >"$base/bin/codex" <<'SH'
 #!/usr/bin/env bash
@@ -295,6 +314,7 @@ mkdir -p "$base/bin" "$base/cwd"
 test_codex_hooks_list_error
 test_codex_hooks_list_filter
 test_discover_targets_empty_boundary
+test_artifact_path
 test_reject_marketplace_without_hooks
 test_claude_missing_hooks
 test_claude_control_silent

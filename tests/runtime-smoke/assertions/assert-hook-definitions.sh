@@ -31,6 +31,10 @@ mkdir -p "$OUT_DIR"
 WORK_ROOT="$(mktemp -d)"
 trap 'rm -rf "$WORK_ROOT"' EXIT
 
+artifact_path() {
+  printf '%s/%s-%s.%s\n' "$OUT_DIR" "$1" "$2" "$3"
+}
+
 # マーケットプレイス定義から、そのランタイムの hooks 定義を持つプラグインを見つける（決定 6）。
 # 1 行に 1 プラグインを「マーケットプレイス上の名前 TAB plugin.json の名前 TAB ディレクトリ」で書く。
 discover_targets() {
@@ -75,20 +79,24 @@ parse_claude_debug_log() {
 # 報告の行を $OUT_DIR/claude-<label>.reports に、読まれたプラグイン名を .loaded に書く。
 claude_load() {
   local label="$1"; shift
-  local log="$OUT_DIR/claude-$label.log" config args=() dir rc=0
+  local log config stdout reports loaded args=() dir rc=0
+  log="$(artifact_path claude "$label" log)"
+  stdout="$(artifact_path claude "$label" stdout)"
+  reports="$(artifact_path claude "$label" reports)"
+  loaded="$(artifact_path claude "$label" loaded)"
   config="$(mktemp -d "$WORK_ROOT/claude-config.XXXXXX")"
   for dir in "$@"; do args+=(--plugin-dir "$dir"); done
   rm -f "$log"
   CLAUDE_CONFIG_DIR="$config" claude --debug-file "$log" "${args[@]}" plugin list \
-    </dev/null >"$OUT_DIR/claude-$label.stdout" 2>&1 || rc=$?
+    </dev/null >"$stdout" 2>&1 || rc=$?
   # 読み込みに失敗しても plugin list は 0 を返す（実測 #5）。0 以外は起動そのものの失敗である。
   if [ "$rc" -ne 0 ]; then
     echo "claude plugin list failed while loading the $label hooks (exit $rc):" >&2
-    cat "$OUT_DIR/claude-$label.stdout" >&2
+    cat "$stdout" >&2
     exit 1
   fi
   [ -f "$log" ] || { echo "claude did not write the debug log: $log" >&2; exit 1; }
-  parse_claude_debug_log "$log" "$OUT_DIR/claude-$label.reports" "$OUT_DIR/claude-$label.loaded"
+  parse_claude_debug_log "$log" "$reports" "$loaded"
 }
 
 # ---- Codex -------------------------------------------------------------------
@@ -97,7 +105,8 @@ claude_load() {
 # 隔離した CODEX_HOME へ marketplace を登録し、指定のプラグインを導入する。
 codex_install() {
   local label="$1" home="$2" root="$3"; shift 3
-  local name mname install_log="$OUT_DIR/codex-$label.install.log"
+  local name mname install_log
+  install_log="$(artifact_path codex "$label" install.log)"
   mname="$(marketplace_name "$root")"
   : >"$install_log"
   CODEX_HOME="$home" codex plugin marketplace add "$root" >>"$install_log" 2>&1 \
@@ -122,14 +131,16 @@ parse_codex_hooks_list() {
 # codex_load <label> <marketplace root> <marketplace 上の名前>...
 codex_load() {
   local label="$1" root="$2"; shift 2
-  local home workdir
-  local response="$OUT_DIR/codex-$label.json"
+  local home workdir response reports loaded
+  response="$(artifact_path codex "$label" json)"
+  reports="$(artifact_path codex "$label" reports)"
+  loaded="$(artifact_path codex "$label" loaded)"
   home="$(mktemp -d "$WORK_ROOT/codex-home.XXXXXX")"
   workdir="$(mktemp -d "$WORK_ROOT/codex-cwd.XXXXXX")"
   codex_install "$label" "$home" "$root" "$@"
   CODEX_HOME="$home" python3 "$HOOKS_LIST" --cwd "$workdir" >"$response" \
     || { echo "could not read hooks/list from codex app-server for the $label hooks" >&2; exit 1; }
-  parse_codex_hooks_list "$response" "$OUT_DIR/codex-$label.reports" "$OUT_DIR/codex-$label.loaded"
+  parse_codex_hooks_list "$response" "$reports" "$loaded"
 }
 
 # ---- 判定 --------------------------------------------------------------------
@@ -159,11 +170,12 @@ case "$runtime" in
   claude) claude_load positive-control "$control_dir" ;;
   codex) codex_load positive-control "$FIXTURE_ROOT" "$control_entry" ;;
 esac
-if [ ! -s "$OUT_DIR/$runtime-positive-control.reports" ]; then
+positive_control_reports="$(artifact_path "$runtime" positive-control reports)"
+if [ ! -s "$positive_control_reports" ]; then
   echo "$runtime $(runtime_version) did not report the broken hooks fixture; the report format may have changed or the image is stale" >&2
   exit 1
 fi
-echo "positive control reported: $(head -n 1 "$OUT_DIR/$runtime-positive-control.reports")"
+echo "positive control reported: $(head -n 1 "$positive_control_reports")"
 
 # Claude Code のログは plugin.json の名前を、Codex の pluginId はマーケットプレイス上の名前を書く
 case "$runtime" in
@@ -178,15 +190,17 @@ case "$runtime" in
 esac
 
 status=0
-if [ -s "$OUT_DIR/$runtime-plugins.reports" ]; then
+plugin_reports="$(artifact_path "$runtime" plugins reports)"
+plugin_loaded="$(artifact_path "$runtime" plugins loaded)"
+if [ -s "$plugin_reports" ]; then
   echo "$runtime reported hooks definitions:" >&2
-  cat "$OUT_DIR/$runtime-plugins.reports" >&2
+  cat "$plugin_reports" >&2
   status=1
 fi
 
 missing=()
 for name in "${expected[@]}"; do
-  grep -Fxq "$name" "$OUT_DIR/$runtime-plugins.loaded" || missing+=("$name")
+  grep -Fxq "$name" "$plugin_loaded" || missing+=("$name")
 done
 if [ "${#missing[@]}" -gt 0 ]; then
   echo "$runtime did not load hooks for: ${missing[*]}" >&2
