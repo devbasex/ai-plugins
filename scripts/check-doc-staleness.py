@@ -187,16 +187,6 @@ def location_of(claim: Claim, index: int) -> str:
     return f"（L{claim.lines[index]}）"
 
 
-def format_mismatch(value: object, location: str, source: str, expected: object) -> str:
-    """食い違いの本文。記載の値・その位置・突き合わせ先・期待値を 1 つの形にまとめる。
-
-    `location` は `location_of()` が返す `（L{n}）` か空文字、または `f"（L{number}）"` を渡す。
-    3 箇所（`verify`・`compare_plugin_table_row`・`check_version_section`）で同じ書式を使う
-    ため、ここで一度だけ組み立てる。
-    """
-    return f"（記載: {value}{location} / {source}: {expected}）"
-
-
 def verify(claim: Claim, report: Report) -> None:
     """記載が無いことと、値が食い違うことの両方を失敗として扱う。"""
     if not claim.described:
@@ -213,7 +203,7 @@ def verify(claim: Claim, report: Report) -> None:
             report.add(
                 claim.path,
                 f"{claim.subject}が食い違う"
-                + format_mismatch(value, location_of(claim, index), claim.source, claim.expected),
+                f"（記載: {value}{location_of(claim, index)} / {claim.source}: {claim.expected}）",
             )
 
 
@@ -393,7 +383,7 @@ def compare_plugin_table_row(root: Path, name: str, value: str, number: int, rep
         report.add(
             ROOT_README,
             f"プラグイン一覧表の {name} の版数が食い違う"
-            + format_mismatch(value, f"（L{number}）", plugin_json_path(name), expected),
+            f"（記載: {value}（L{number}） / {plugin_json_path(name)}: {expected}）",
         )
 
 
@@ -463,7 +453,7 @@ def check_version_section(body: str, version: str | None, report: Report) -> Non
             report.add(
                 VERSIONING_MD,
                 "版の付け方の節の版数が現行版より古い"
-                + format_mismatch(value, f"（L{number}）", PLUGIN_JSON, version),
+                f"（記載: {value}（L{number}） / {PLUGIN_JSON}: {version}）",
             )
 
 
