@@ -37,8 +37,10 @@ bash plugins/ndf/scripts/projects-sync.sh 565 stage "要求と受け入れ条件
 - 前提 1: hook の登録と発火は Claude Code 2.1.270 で動いている（対話・非対話、bypass
   permissions、`/goal` 経由のいずれでも実測で控えが積まれた）。hook の登録の仕組みは変えない
 - 前提 2: 観測の対象は `projects-sync.sh` だけである（`stage-completeness.md` の契約）。
-  `progress-record.sh` は観測しない。issue の 5 件のうち `progress-record.sh` の 2 件が
-  積まれなかったのは、この契約どおりである
+  `progress-record.sh` は観測しない。issue 本文の「5 回」は会話 `a27ffb35` の実行を要約した
+  一覧で、`progress-record.sh` の 2 件と `projects-sync.sh` の 3 件を含む。`progress-record.sh`
+  の 2 件が積まれなかったのは、この契約どおりである。設計文書の表の「5 件」は会話記録から
+  拾った `projects-sync.sh` の実行の件数で、別の数である
 - 前提 3: hook が受け取るのは書かれたままの本文で、展開はしない（`wf_split` の既存の方針）
 
 ## 対象範囲
@@ -68,7 +70,7 @@ bash plugins/ndf/scripts/projects-sync.sh 565 stage "要求と受け入れ条件
 | --- | --- |
 | 控え | `${XDG_STATE_HOME:-$HOME/.local/state}/ndf/stages/<所有者>__<リポジトリ>__<課題番号>.json` |
 | 進行の記録 | `projects-sync.sh <課題番号> <キー> <値>` の実行 |
-| 制御演算子 | 引用の外にある `;` `&` `&&` `|` `||` `(` `)` と改行。`2>&1` `>&2` `&>` の `&` はリダイレクトの一部で、区切りではない |
+| 制御演算子 | 引用の外にある `;` `&` `&&` `|` `||` `(` `)` と、本文の途中の改行（最後の改行は含まない）。`2>&1` `>&2` `&>` の `&` はリダイレクトの一部で、区切りではない |
 | 区切り | `wf_split` が出す空の語。コマンドの境目を表す |
 
 ## 受け入れ条件
@@ -78,7 +80,7 @@ bash plugins/ndf/scripts/projects-sync.sh 565 stage "要求と受け入れ条件
 - [ ] AC1: 値の直後に `;` を密着させた記録（`... stage "設計"; echo "exit=$?"`）で、控えの
   `stages` に `設計` が入る
 - [ ] AC2: 値の直後に `&&` `||` `|` `)` を密着させた記録と、引用符を付けない値へ密着させた
-  記録（`... stage 設計&&echo`）で、控えに値がそのまま入る
+  記録（`... stage 設計&&echo`）で、区切りの手前までの値（例: `設計`）が控えに入る
 - [ ] AC3: 先頭に `cd <dir>;` などの別のコマンドを置いた記録（`cd /work/ai-plugins; bash
   plugins/ndf/scripts/projects-sync.sh 565 stage "要求と受け入れ条件"; echo "exit=$?"`）で、
   控えに値が入る
