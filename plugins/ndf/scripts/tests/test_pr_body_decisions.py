@@ -283,6 +283,24 @@ def test_5_h1_heading_closes_decisions_section(fake):
     assert "決定 1 件" in out.stdout
 
 
+def test_5_h1_appendix_subheadings_after_decisions_section_are_not_collected(fake):
+    """現状固定: 「## 決定の記録」の直後に h1（# 付録）が来ると節が終わり、その配下の ### を数えない。"""
+    design = (
+        "# 設計\n\n## 決定の記録\n\n"
+        "### 決定 1: 実行してよいコマンドは起動の引数で受け取る\n\n理由。\n\n"
+        "# 付録\n\n"
+        "### 付録見出し\n\n付録の本文。\n"
+    )
+    expected = section((
+        "issues/issue-1-design.md",
+        ["決定 1: 実行してよいコマンドは起動の引数で受け取る"],
+    ))
+    design_pr(fake, body=f"## Summary\n\n{expected}\n## Test plan\n", design=design)
+    out = fake.run("check", "7", "--repo", REPO)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert "決定 1 件" in out.stdout
+
+
 @pytest.mark.parametrize("flag", ["fail_pr"])
 def test_6_unreadable_pull_request_returns_2(fake, flag):
     design_pr(fake, EXPECTED, **{flag: True})
