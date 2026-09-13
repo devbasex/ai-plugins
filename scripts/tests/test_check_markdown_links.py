@@ -459,6 +459,16 @@ def test_iter_markdown_files_collects_root_files_and_scan_dirs(tmp_path: Path) -
     assert files == sorted(set(files))
 
 
+def test_iter_markdown_files_returns_empty_list_for_empty_root(tmp_path: Path) -> None:
+    """既定の走査対象が存在しない空ルートの現状を固定する（R2-004）。"""
+    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.iter_markdown_files(tmp_path) == []
+
+
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
@@ -562,4 +572,3 @@ def test_html_anchor_with_missing_heading_fragment_fails(tmp_path: Path) -> None
     result = run(tmp_path)
     assert result.returncode == 1
     assert failure_lines(result) == ["- docs/a.md: missing heading anchor: b.md#無い見出し"]
-
