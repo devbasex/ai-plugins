@@ -82,6 +82,23 @@ def test_japanese_heading_resolves_raw_and_percent_encoded(tmp_path: Path) -> No
     assert result.returncode == 0, result.stderr
 
 
+def test_percent_encoded_document_path_and_heading_resolve(tmp_path: Path) -> None:
+    """パスと見出しを符号化した相対リンクの現状を固定する（R2-004）。"""
+    document = "reference guide.md"
+    anchor = "利用-方法"
+    write(tmp_path, f"docs/{document}", "## 利用 方法\n")
+    write(
+        tmp_path,
+        "docs/a.md",
+        f"[飛ぶ]({quote(document)}#{quote(anchor)})\n",
+    )
+
+    result = run(tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert failure_lines(result) == []
+
+
 def test_heading_with_angle_brackets_in_inline_code_resolves(tmp_path: Path) -> None:
     write(
         tmp_path,
