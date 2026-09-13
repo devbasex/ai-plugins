@@ -143,6 +143,16 @@ def test_external_url_with_fragment_is_ignored(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
 
 
+def test_relative_link_without_fragment_to_existing_file_passes(tmp_path: Path) -> None:
+    """見出しへの参照を持たない通常の相対リンクの現状を固定する（R1-004）。"""
+    write(tmp_path, "docs/b.md", "# 参照先\n")
+    write(tmp_path, "docs/a.md", "[飛ぶ](b.md)\n[飛ぶ](../docs/b.md)\n")
+    result = run(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+    assert result.stdout == "Markdown local links are valid\n"
+
+
 def test_link_targets_extracts_html_and_excludes_images() -> None:
     """link_targets の現状を固定する（#445, R1-003）。
 
