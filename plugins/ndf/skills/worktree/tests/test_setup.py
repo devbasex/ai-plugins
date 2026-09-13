@@ -466,3 +466,24 @@ def test_compose_project_rejects_empty_and_invalid_names() -> None:
         res = run_lib(f'wt_compose_project "{given}"')
         assert res.returncode == 1, (given, res.returncode, res.stdout, res.stderr)
         assert res.stdout == "", (given, res.stdout)
+
+
+def test_default_branch_falls_back_to_master(tmp_path: Path) -> None:
+    """現状固定: origin/HEAD が無く main も無い場合、master があれば既定ブランチとして返す。"""
+    from worktree_helpers import run_lib
+
+    repo = tmp_path / "master_repo"
+    repo.mkdir(parents=True, exist_ok=True)
+    git(repo, "init", "-q", "-b", "master")
+    git(repo, "config", "user.email", "test@example.com")
+    git(repo, "config", "user.name", "test")
+    git(repo, "config", "commit.gpgsign", "false")
+    (repo / "README.md").write_text("# test\n", encoding="utf-8")
+    git(repo, "add", "README.md")
+    git(repo, "commit", "-q", "-m", "init")
+
+    result = run_lib(f'wt_default_branch "{repo}"')
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "master\n"
+
