@@ -923,6 +923,16 @@ def _load_checker():
     return module
 
 
+def test_named_plugin_version_returns_none_for_non_string_version(tmp_path: Path) -> None:
+    """version が文字列でなければ None を返す（現状固定）。"""
+    module = _load_checker()
+    plugin_json = tmp_path / "plugins/test-plugin/.claude-plugin/plugin.json"
+    plugin_json.parent.mkdir(parents=True)
+    plugin_json.write_text('{"version": 123}\n', encoding="utf-8")
+
+    assert module.named_plugin_version(tmp_path, "test-plugin") is None
+
+
 def test_base_of_drops_suffix_and_splits_into_int_triple() -> None:
     """接尾辞あり・なしのどちらの入力も、同じ整数の 3 つ組へ分解される（現状固定）。"""
     module = _load_checker()
