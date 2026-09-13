@@ -37,6 +37,15 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --project)
       [ "$#" -ge 2 ] || { echo "ERROR: --project requires a path" >&2; exit 2; }
+      # cd の裸のエラーで終わらせず、何を直せばよいかを案内して止める（#415）。
+      # 作り方は存在しないパスにだけ添える（ファイルに mkdir -p は失敗する）。
+      # 案内のパスは printf '%q' で bash の語 1 つとして読める形へ整える。
+      [ -e "$2" ] || {
+        echo "ERROR: --project points at a path that does not exist: $2" >&2
+        printf 'HINT: mkdir -p %q\n' "$2" >&2
+        exit 2
+      }
+      [ -d "$2" ] || { echo "ERROR: --project points at a path that is not a directory: $2" >&2; exit 2; }
       PROJECT_ROOT="$(cd "$2" && pwd)"
       PROJECT_GIVEN=true
       shift
@@ -96,125 +105,150 @@ STEERING_FILE="$KIRO_DIR/steering/ndf-policies.md"
 AGENT_FILE="$KIRO_DIR/agents/$AGENT_NAME.json"
 LEGACY_AGENT_FILE="$KIRO_DIR/agents/default.json"
 
-echo "=== NDF Plugin Installer for Kiro CLI ==="
-echo "  スコープ: $SCOPE ($KIRO_DIR)"
+require_path() {
+  local test_flag="$1" path="$2"
+  [ "$test_flag" "$path" ] || {
+    echo "ERROR: $path が見つかりません" >&2
+    exit 1
+  }
+}
 
-if [ ! -d "$PLUGIN_SKILLS_DIR" ]; then
-  echo "ERROR: $PLUGIN_SKILLS_DIR が見つかりません" >&2
-  exit 1
-fi
-if [ ! -f "$SKILL_MANIFEST" ]; then
-  echo "ERROR: $SKILL_MANIFEST が見つかりません" >&2
-  exit 1
-fi
-if [ ! -f "$MANIFEST_FILE" ]; then
-  echo "ERROR: $MANIFEST_FILE が見つかりません" >&2
-  exit 1
-fi
-NDF_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$MANIFEST_FILE")"
-if [ -z "$NDF_VERSION" ]; then
-  echo "ERROR: $MANIFEST_FILE から版数を読み取れません" >&2
-  exit 1
-fi
-
-if [ ! -f "$TEMPLATE_FILE" ]; then
-  echo "ERROR: $TEMPLATE_FILE が見つかりません" >&2
-  exit 1
-fi
-if [ ! -f "$POLICY_SKILL_FILE" ]; then
-  echo "ERROR: $POLICY_SKILL_FILE が見つかりません" >&2
-  exit 1
-fi
-
-# --- Step 1: Create symlinks in <scope>/skills/ ---
-echo "Skills シンボリックリンクを作成中..."
-SKILL_COUNT=0
-if [ "$DRY_RUN" = false ]; then
+# 掃除するのは現在の checkout（$PLUGIN_SKILLS_DIR 配下）を指す既存リンクだけに限る。
+# 別の場所を指す利用者のリンクは残す。旧 installer が別 checkout から張ったリンクは
+# ここでは掛からず、後段の migrate_policy_skill_entry などが名前単位で扱う。
+remove_managed_skill_links() {
   mkdir -p "$SKILLS_DIR"
+  local skill_link target target_abs plugin_skills_abs
+  plugin_skills_abs="$(realpath -m "$PLUGIN_SKILLS_DIR")"
   while IFS= read -r skill_link; do
     target="$(readlink "$skill_link")"
     case "$target" in
       /*) target_abs="$target" ;;
       *) target_abs="$(realpath -m "$(dirname "$skill_link")/$target")" ;;
     esac
-    plugin_skills_abs="$(realpath -m "$PLUGIN_SKILLS_DIR")"
     case "$target_abs" in
       "$plugin_skills_abs"/*) rm -f "$skill_link" ;;
     esac
   done < <(find "$SKILLS_DIR" -mindepth 1 -maxdepth 1 -type l | sort)
-fi
+}
 
-while IFS= read -r src_dir; do
-  skill_name="$(basename "$src_dir")"
-
-  if [ ! -f "$src_dir/SKILL.md" ]; then
-    echo "  SKIP: $skill_name (SKILL.mdなし)"
-    continue
-  fi
-
-  # ndf-policies は Step 3 で steering として展開する。Skill としてもリンクすると
-  # Kiro 組み込みルールの Skill 読み込みと steering 読み込みで文脈へ二重注入されるため、
-  # ここではリンクしない。manifest には残す（steering の生成元として必要なため）。
-  # 旧 installer が別 checkout から張ったリンクは Step 1 の掃除（現在の
-  # $PLUGIN_SKILLS_DIR 配下を指すものだけ削除）に掛からないため、ここで
-  # リンク先に関係なく既存のエントリを取り除いてから skip する。
-  if [ "$skill_name" = "ndf-policies" ]; then
-    # 削除するのは旧 installer が張ったシンボリックリンクだけに限る。実体
-    # ディレクトリや通常ファイルは利用者が置いたものの可能性があるため、
-    # 消さずに案内して手動対応に委ねる。
-    if [ -L "$SKILLS_DIR/$skill_name" ]; then
-      if [ "$DRY_RUN" = false ]; then
-        rm -f "$SKILLS_DIR/$skill_name"
-      fi
-      echo "  REMOVED: $skill_name (steering へ移行済みのため .kiro/skills のリンクを削除)"
-    elif [ -e "$SKILLS_DIR/$skill_name" ]; then
-      echo "  WARN: $SKILLS_DIR/$skill_name はシンボリックリンクではありません。" >&2
-      echo "        steering (.kiro/steering/ndf-policies.md) と二重に読み込まれるため、" >&2
-      echo "        内容を確認のうえ手動で退避または削除してください。" >&2
+# ndf-policies は Step 3 で steering として展開する。Skill としてもリンクすると
+# Kiro 組み込みルールの Skill 読み込みと steering 読み込みで文脈へ二重注入されるため、
+# ここではリンクしない。manifest には残す（steering の生成元として必要なため）。
+# 旧 installer が別 checkout から張ったリンクは remove_managed_skill_links の掃除
+# （現在の $PLUGIN_SKILLS_DIR 配下を指すものだけ削除）に掛からないため、ここで
+# リンク先に関係なく既存のエントリを取り除いてから skip する。
+migrate_policy_skill_entry() {
+  local skill_name="$1"
+  # 削除するのは旧 installer が張ったシンボリックリンクだけに限る。実体
+  # ディレクトリや通常ファイルは利用者が置いたものの可能性があるため、
+  # 消さずに案内して手動対応に委ねる。
+  if [ -L "$SKILLS_DIR/$skill_name" ]; then
+    if [ "$DRY_RUN" = false ]; then
+      rm -f "$SKILLS_DIR/$skill_name"
     fi
-    echo "  SKIP: $skill_name (steering として配置)"
-    continue
+    echo "  REMOVED: $skill_name (steering へ移行済みのため .kiro/skills のリンクを削除)"
+  elif [ -e "$SKILLS_DIR/$skill_name" ]; then
+    echo "  WARN: $SKILLS_DIR/$skill_name はシンボリックリンクではありません。" >&2
+    echo "        steering (.kiro/steering/ndf-policies.md) と二重に読み込まれるため、" >&2
+    echo "        内容を確認のうえ手動で退避または削除してください。" >&2
   fi
+  echo "  SKIP: $skill_name (steering として配置)"
+}
 
-  if [ "$DRY_RUN" = false ]; then
-    ln -sfn "$PLUGIN_SKILLS_DIR/$skill_name" "$SKILLS_DIR/$skill_name"
-  fi
-  echo "  linked: $skill_name"
-  SKILL_COUNT=$((SKILL_COUNT + 1))
-  # 配る Skill は manifests/kiro-skills.txt が決める。skills/ にはどの runtime へも配る
-  # Skill が並んでおり、Kiro 向けはその一部である。ディレクトリを列挙すると、他の runtime
-  # だけへ配る Skill まで張ってしまう。
-done < <(sed 's/#.*//' "$SKILL_MANIFEST" | sed 's/[[:space:]]*$//' \
-           | grep -v '^$' | sort | sed "s#^#$PLUGIN_SKILLS_DIR/#")
+# manifest 掲載の Skill を .kiro/skills/ へリンクする。張った本数はグローバルの
+# SKILL_COUNT へ明示して返し（標準出力は "  linked:" 等の案内だけに保つ）、呼び出し側は
+# その変数を読む。ndf-policies は migrate_policy_skill_entry に委ね、リンクは張らない。
+install_manifest_skills() {
+  SKILL_COUNT=0
+  local src_dir skill_name
+  while IFS= read -r src_dir; do
+    skill_name="$(basename "$src_dir")"
 
-# --- Step 2: Create prompts in <scope>/prompts/ for workflow skills ---
-echo "ワークフロープロンプトを作成中..."
-if [ "$DRY_RUN" = false ]; then
+    if [ ! -f "$src_dir/SKILL.md" ]; then
+      echo "  SKIP: $skill_name (SKILL.mdなし)"
+      continue
+    fi
+
+    if [ "$skill_name" = "ndf-policies" ]; then
+      migrate_policy_skill_entry "$skill_name"
+      continue
+    fi
+
+    if [ "$DRY_RUN" = false ]; then
+      ln -sfn "$PLUGIN_SKILLS_DIR/$skill_name" "$SKILLS_DIR/$skill_name"
+    fi
+    echo "  linked: $skill_name"
+    SKILL_COUNT=$((SKILL_COUNT + 1))
+    # 配る Skill は manifests/kiro-skills.txt が決める。skills/ にはどの runtime へも配る
+    # Skill が並んでおり、Kiro 向けはその一部である。ディレクトリを列挙すると、他の runtime
+    # だけへ配る Skill まで張ってしまう。
+  done < <(sed 's/#.*//' "$SKILL_MANIFEST" | sed 's/[[:space:]]*$//' \
+             | grep -v '^$' | sort | sed "s#^#$PLUGIN_SKILLS_DIR/#")
+}
+
+# 再インストールで消すのは installer が配った prompt だけに限る。--with-codex を
+# 外したときの codex.md と、配布を終えた $DEPRECATED_PROMPTS を除き、利用者の prompt は残す。
+cleanup_managed_prompts() {
   mkdir -p "$PROMPTS_DIR"
   if [ "$WITH_CODEX" = false ]; then
     rm -f "$PROMPTS_DIR/codex.md"
   fi
+  local deprecated_prompt
   for deprecated_prompt in $DEPRECATED_PROMPTS; do
     if [ -f "$PROMPTS_DIR/$deprecated_prompt" ]; then
       rm -f "$PROMPTS_DIR/$deprecated_prompt"
       echo "  removed (deprecated): ${deprecated_prompt%.md}"
     fi
   done
-fi
+}
 
-while IFS= read -r prompt_file; do
-  prompt_name="$(basename "$prompt_file")"
-  [ "$prompt_name" = "codex.md" ] && [ "$WITH_CODEX" = false ] && continue
-  if [ "$DRY_RUN" = false ]; then
-    cp "$prompt_file" "$PROMPTS_DIR/$prompt_name"
+# 配布元の prompt を .kiro/prompts/ へコピーする。codex.md の有無の検査はコピーと
+# 案内の出力を終えた後に行う（検査より前の標準出力と配置を変えないため）。
+install_prompts() {
+  local prompt_file prompt_name
+  while IFS= read -r prompt_file; do
+    prompt_name="$(basename "$prompt_file")"
+    [ "$prompt_name" = "codex.md" ] && [ "$WITH_CODEX" = false ] && continue
+    if [ "$DRY_RUN" = false ]; then
+      cp "$prompt_file" "$PROMPTS_DIR/$prompt_name"
+    fi
+    echo "  prompt: ${prompt_name%.md}"
+  done < <(find "$PLUGIN_PROMPTS_DIR" -maxdepth 1 -type f -name '*.md' | sort)
+
+  if [ "$WITH_CODEX" = true ]; then
+    require_path -f "$PLUGIN_PROMPTS_DIR/codex.md"
   fi
-  echo "  prompt: ${prompt_name%.md}"
-done < <(find "$PLUGIN_PROMPTS_DIR" -maxdepth 1 -type f -name '*.md' | sort)
+}
 
-if [ "$WITH_CODEX" = true ] && [ ! -f "$PLUGIN_PROMPTS_DIR/codex.md" ]; then
-  echo "ERROR: $PLUGIN_PROMPTS_DIR/codex.md が見つかりません" >&2
+echo "=== NDF Plugin Installer for Kiro CLI ==="
+echo "  スコープ: $SCOPE ($KIRO_DIR)"
+
+require_path -d "$PLUGIN_SKILLS_DIR"
+require_path -f "$SKILL_MANIFEST"
+require_path -f "$MANIFEST_FILE"
+NDF_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$MANIFEST_FILE")"
+if [ -z "$NDF_VERSION" ]; then
+  echo "ERROR: $MANIFEST_FILE から版数を読み取れません" >&2
   exit 1
 fi
+
+require_path -f "$TEMPLATE_FILE"
+require_path -f "$POLICY_SKILL_FILE"
+
+# --- Step 1: Create symlinks in <scope>/skills/ ---
+echo "Skills シンボリックリンクを作成中..."
+if [ "$DRY_RUN" = false ]; then
+  remove_managed_skill_links
+fi
+install_manifest_skills
+
+# --- Step 2: Create prompts in <scope>/prompts/ for workflow skills ---
+echo "ワークフロープロンプトを作成中..."
+if [ "$DRY_RUN" = false ]; then
+  cleanup_managed_prompts
+fi
+install_prompts
 
 if [ "$WITH_SLACK" = true ]; then echo "Slack通知: 有効"; else echo "Slack通知: 無効 (--with-slack で有効化)"; fi
 if [ "$WITH_CODEX" = true ]; then echo "Codex CLI連携: 有効"; else echo "Codex CLI連携: 無効 (--with-codex で有効化)"; fi
