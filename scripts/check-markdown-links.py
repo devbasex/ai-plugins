@@ -78,18 +78,17 @@ def resolve_document(source: Path, path_part: str) -> Path:
     return (source.parent / unquote(path_part)).resolve()
 
 
-def parse_target(raw: str) -> tuple[str, str]:
-    """Split a raw link into (path part, fragment) after title stripping."""
+def parse_target(raw: str) -> tuple[str, str, str]:
+    """Split a raw link into (path part, fragment, stripped target) after title stripping."""
     target = strip_title(raw)
     path_part, _, fragment = target.partition("#")
-    return path_part, fragment
+    return path_part, fragment, target
 
 
 def target_path(source: Path, raw_target: str) -> Path | None:
-    target = strip_title(raw_target)
+    path_part, _fragment, target = parse_target(raw_target)
     if should_skip(target):
         return None
-    path_part, _fragment = parse_target(raw_target)
     if not path_part:
         return None
     return resolve_document(source, path_part)
@@ -179,8 +178,7 @@ def anchor_refs(text: str) -> list[tuple[str, str, str]]:
     """(path part, fragment, raw target) for every link carrying a fragment."""
     refs: list[tuple[str, str, str]] = []
     for raw in link_targets(text):
-        target = strip_title(raw)
-        path_part, fragment = parse_target(raw)
+        path_part, fragment, target = parse_target(raw)
         if not fragment:
             continue
         if path_part and should_skip(target):
