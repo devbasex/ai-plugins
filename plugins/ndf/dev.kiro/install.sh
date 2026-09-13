@@ -37,6 +37,15 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --project)
       [ "$#" -ge 2 ] || { echo "ERROR: --project requires a path" >&2; exit 2; }
+      # cd の裸のエラーで終わらせず、何を直せばよいかを案内して止める（#415）。
+      # 作り方は存在しないパスにだけ添える（ファイルに mkdir -p は失敗する）。
+      # 案内のパスは printf '%q' で bash の語 1 つとして読める形へ整える。
+      [ -e "$2" ] || {
+        echo "ERROR: --project points at a path that does not exist: $2" >&2
+        printf 'HINT: mkdir -p %q\n' "$2" >&2
+        exit 2
+      }
+      [ -d "$2" ] || { echo "ERROR: --project points at a path that is not a directory: $2" >&2; exit 2; }
       PROJECT_ROOT="$(cd "$2" && pwd)"
       PROJECT_GIVEN=true
       shift
