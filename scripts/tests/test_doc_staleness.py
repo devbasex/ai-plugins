@@ -36,6 +36,14 @@ def test_consistent_tree_passes(tree: Path) -> None:
     assert result.returncode == 0, output_of(result)
 
 
+def test_manifest_skill_with_inline_comment_counts_as_one(tree: Path) -> None:
+    """現状固定: Skill 名の後ろにコメントがあっても 1 件として数える。"""
+    manifest = tree / "plugins/ndf/manifests/claude-skills.txt"
+    edit(manifest, "alpha\n", "alpha # 注記\n")
+    result = run_check(tree)
+    assert result.returncode == 0, output_of(result)
+
+
 def test_real_repository_passes() -> None:
     """実物のリポジトリでも通る。検査を入れた時点で落ちる状態を作らない。"""
     result = run_check(REPO_ROOT)
