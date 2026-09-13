@@ -976,6 +976,19 @@ def test_version_section_without_any_version_reports_once_and_returns() -> None:
     ]
 
 
+# --- check_version_section: 現行版数が取得できない分岐（単体）---
+
+
+def test_version_section_with_no_current_version_returns_true_without_error() -> None:
+    """節の版数を読めても現行版数が無ければ、比較せず正常終了する（現状固定）。"""
+    module = _load_checker()
+    report = module.Report()
+    body = f"{module.VERSION_SECTION_HEADING}\n\n開発版の例は `9.3.0` である。\n"
+
+    assert module.check_version_section(body, None, report) is True
+    assert report.errors == []
+
+
 # --- check_version_section: 節の後ろに終端の見出しが無い境界（単体）---
 
 
