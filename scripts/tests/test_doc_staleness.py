@@ -586,6 +586,25 @@ def test_stale_example_after_a_code_fence_is_still_found(tree: Path) -> None:
     assert "9.2.1" in out and "9.3.0" in out
 
 
+def test_stale_example_after_a_tilde_code_fence_is_still_found(tree: Path) -> None:
+    """~~~ の囲みより後ろも走査の対象に残る。閉じてしまうと後続の版数を見落とす。"""
+    edit(
+        versioning_md(tree),
+        "## 版の付け方と開発版の配布\n",
+        "## 版の付け方と開発版の配布\n"
+        "\n"
+        "~~~bash\n"
+        "# 常用する利用者（正式版）\n"
+        "claude plugin marketplace add https://example.invalid/fixture\n"
+        "~~~\n",
+    )
+    add_to_version_section(tree, "- 前の版の例。`9.2.1` はもう使わない")
+    result = run_check(tree)
+    assert result.returncode != 0
+    out = output_of(result)
+    assert "9.2.1" in out and "9.3.0" in out
+
+
 # --- J: 版の形の表と次の開発の例を、例どうしで比べる（#566） ---
 #
 # 雛形の章 2 は L13 が正式版 `9.3.0`、L14 が開発版 `9.4.0-dev.1`、L15 が公開前の確認版
