@@ -755,32 +755,47 @@ def test_merge_text_matcher_rejects_text_without_a_merge_pattern(text: str) -> N
 # 単体階層で固定する（対象コードは変更しない）。
 
 
-def predicate_status(function_name: str, value: str) -> int:
-    """値集合を判定するシェル関数の終了コードを返す。"""
-    result = run_lib(f"{function_name} {shlex.quote(value)}")
+def is_mode(mode: str) -> int:
+    """`wf_is_mode` の終了コードを返す。0 が既知、1 が未知または空。"""
+    result = run_lib(f"wf_is_mode {shlex.quote(mode)}")
     return result.returncode
 
 
-@pytest.mark.parametrize(
-    ("function_name", "value", "expected"),
-    [
-        ("wf_is_mode", "standard", 0),
-        ("wf_is_mode", "unknown-mode", 1),
-        ("wf_is_mode", "", 1),
-        ("wf_is_stage", "配布", 0),
-        ("wf_is_stage", "存在しない工程", 1),
-        ("wf_is_stage", "", 1),
-    ],
-    ids=[
-        "mode-known", "mode-unknown", "mode-empty",
-        "stage-known", "stage-unknown", "stage-empty",
-    ],
-)
-def test_value_predicates_return_the_expected_status(
-    function_name: str, value: str, expected: int
-) -> None:
-    """現状固定: 既知値は 0、未知値と空値は 1 を返す。"""
-    assert predicate_status(function_name, value) == expected
+def test_is_mode_accepts_a_known_mode() -> None:
+    """現状固定: 既知のモードは終了コード 0 を返す。"""
+    assert is_mode("standard") == 0
+
+
+def test_is_mode_rejects_an_unknown_mode() -> None:
+    """現状固定: 未知のモードは終了コード 1 を返す。"""
+    assert is_mode("unknown-mode") == 1
+
+
+def test_is_mode_rejects_an_empty_mode() -> None:
+    """現状固定: 空引数は早期復帰により終了コード 1 を返す。"""
+    assert is_mode("") == 1
+
+
+
+def is_stage(stage: str) -> int:
+    """`wf_is_stage` の終了コードを返す。0 が既知の工程、1 が未知または空。"""
+    result = run_lib(f"wf_is_stage {shlex.quote(stage)}")
+    return result.returncode
+
+
+def test_is_stage_accepts_a_known_stage() -> None:
+    """現状固定: 既知の工程は終了コード 0 を返す。"""
+    assert is_stage("配布") == 0
+
+
+def test_is_stage_rejects_an_unknown_stage() -> None:
+    """現状固定: 未知の工程は while ループを抜けて終了コード 1 を返す。"""
+    assert is_stage("存在しない工程") == 1
+
+
+def test_is_stage_rejects_an_empty_stage() -> None:
+    """現状固定: 空引数は早期復帰により終了コード 1 を返す。"""
+    assert is_stage("") == 1
 
 
 # --- R2-004: 閉じる課題でモードが食い違うときの案内（現状固定） --------------
