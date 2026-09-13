@@ -348,9 +348,8 @@ def test_5_h1_appendix_subheadings_after_decisions_section_are_not_collected(fak
     assert "決定 1 件" in out.stdout
 
 
-@pytest.mark.parametrize("flag", ["fail_pr"])
-def test_6_unreadable_pull_request_returns_2(fake, flag):
-    design_pr(fake, EXPECTED, **{flag: True})
+def test_6_unreadable_pull_request_returns_2(fake):
+    design_pr(fake, EXPECTED, fail_pr=True)
     for sub in ("check", "sync"):
         out = fake.run(sub, "7", "--repo", REPO)
         assert out.returncode == 2, (sub, out.stdout, out.stderr)
