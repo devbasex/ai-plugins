@@ -412,23 +412,23 @@ def test_a_repository_without_a_remote_records_nothing(tmp_path: Path, state: Pa
 
 # --- R2-002: 案内の直列化と復号の契約（現状固定） ---------------------------
 
+JSON_ROUND_TRIP_TEXTS = [
+    "",
+    "日本語の案内です",
+    'quote " inside',
+    r"backslash \ inside",
+    "line1\nline2",
+    "col1\tcol2",
+    "carriage\rreturn",
+    '全部盛り 日本語 "q" \\b\n改行\ttab\rcr',
+]
+
+
 # `wf_emit_context` は systemMessage と additionalContext の両方へ同じ文字列を
 # 載せ、JSON として出す。引用符・バックスラッシュ・改行・タブ・復帰文字を含む値と
 # 空文字が、有効な JSON になり復号すると元の値へ戻ることを、最小の出力入口で固定する。
 # 生成 JSON の空白・キー順や文言の完全一致は要求しない（復号後の値だけを見る）。
-@pytest.mark.parametrize(
-    "text",
-    [
-        "",
-        "日本語の案内です",
-        'quote " inside',
-        r"backslash \ inside",
-        "line1\nline2",
-        "col1\tcol2",
-        "carriage\rreturn",
-        '全部盛り 日本語 "q" \\b\n改行\ttab\rcr',
-    ],
-)
+@pytest.mark.parametrize("text", JSON_ROUND_TRIP_TEXTS)
 def test_emit_context_round_trips_the_value(text: str) -> None:
     """現状固定: 入力値が JSON を経て systemMessage と additionalContext に保たれる。"""
     result = run_lib(f"wf_emit_context {shlex.quote(text)}")
@@ -445,19 +445,7 @@ def test_emit_context_round_trips_the_value(text: str) -> None:
 # `wf_emit_deny` は permissionDecision を deny とし、permissionDecisionReason に
 # 理由を載せて JSON として出す。境界入力で有効な JSON になり、復号すると元の値へ
 # 戻ることを固定する。
-@pytest.mark.parametrize(
-    "text",
-    [
-        "",
-        "日本語の案内です",
-        'quote " inside',
-        r"backslash \ inside",
-        "line1\nline2",
-        "col1\tcol2",
-        "carriage\rreturn",
-        '全部盛り 日本語 "q" \\b\n改行\ttab\rcr',
-    ],
-)
+@pytest.mark.parametrize("text", JSON_ROUND_TRIP_TEXTS)
 def test_emit_deny_round_trips_the_reason(text: str) -> None:
     """現状固定: 拒否理由が JSON を経て permissionDecisionReason に保たれる。"""
     result = run_lib(f"wf_emit_deny {shlex.quote(text)}")

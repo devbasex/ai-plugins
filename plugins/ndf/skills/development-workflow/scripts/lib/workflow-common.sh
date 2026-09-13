@@ -10,6 +10,8 @@
 #   - #266 のマージは**拒否する側へ倒す**。`curl` の REST は `gh` が無くても成立するため、
 #     判定できないまま通すとマージが動く。マージは取り消せない
 
+WF_LIB_DIR="$(dirname "${BASH_SOURCE[0]}")/../../../../scripts/lib"
+
 # --- 工程の分類 -------------------------------------------------------------
 # 並びと分類は SKILL.md の「モードごとに起動する Skill」の表から導ける。
 #   R = 必須 / C = 条件付き / - = 対象外
@@ -274,7 +276,7 @@ wf_parse_sync() {
 #
 # **`cd` では解決しない。** Skill だけを複製する Kiro CLI の配置では symlink の手前へ
 # 戻り、プラグインルートを外す。4 階層の相対で指す形は #293 で契約として固定した。
-WF_CLOSING_ISSUES="$(dirname "${BASH_SOURCE[0]}")/../../../../scripts/lib/closing-issues.sh"
+WF_CLOSING_ISSUES="$WF_LIB_DIR/closing-issues.sh"
 
 _wf_read_file() {
   local file="${1:-}"
@@ -551,7 +553,7 @@ wf_state_file() {
 # **読み込めないときは、常に取得できないものとして定義する。** 控えへ 1 件積む処理は、
 # 取得できないとき書き込みそのものを行わず、終了コード 0 で工程を続ける。
 # shellcheck source=../../../../scripts/lib/lock-common.sh
-if ! . "$(dirname "${BASH_SOURCE[0]}")/../../../../scripts/lib/lock-common.sh" 2>/dev/null; then
+if ! . "$WF_LIB_DIR/lock-common.sh" 2>/dev/null; then
   ndf_lock_acquire() { return 1; }
   ndf_lock_release() { [ -n "${1:-}" ] || return 0; rm -rf "$1" 2>/dev/null; return 0; }
 fi
@@ -559,7 +561,7 @@ fi
 # slug を畳む規則の実体は projects-common.sh の pj_repo_slug にある（#435）。
 # 読み込めなければ wf_repo_slug 側の従来の規則で処理するため、失敗は握りつぶす。
 # shellcheck source=../../../../scripts/lib/projects-common.sh
-. "$(dirname "${BASH_SOURCE[0]}")/../../../../scripts/lib/projects-common.sh" 2>/dev/null || true
+. "$WF_LIB_DIR/projects-common.sh" 2>/dev/null || true
 
 # 捨ててよいと見なすまでの分数。共通ファイルの値を、既存の名前でも引けるようにする。
 WF_LOCK_STALE_MINUTES="${NDF_LOCK_STALE_MINUTES:-5}"
