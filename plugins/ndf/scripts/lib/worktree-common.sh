@@ -1913,6 +1913,7 @@ WT_SLOT_MAX=63
 # 名前は 40 文字で切る。**要約値は必ず残す。** 単純に末尾を落とすと、先頭が
 # 同じ長いブランチ名どうしで同じ名前になり、テスト環境が混ざる。
 WT_ENV_NAME_MAX=40
+WT_ENV_DIGEST_LEN=6
 
 _wt_slug() {
   printf '%s' "$1" \
@@ -1923,14 +1924,14 @@ _wt_slug() {
 wt_env_name() {
   local main_dir="${1:-}" branch="${2:-}" repo digest head room name
   [ -n "$main_dir" ] && [ -n "$branch" ] || return 1
-  digest=$(printf '%s' "$branch" | (sha1sum 2>/dev/null || shasum 2>/dev/null) | cut -c1-6)
+  digest=$(printf '%s' "$branch" | (sha1sum 2>/dev/null || shasum 2>/dev/null) | cut -c"1-$WT_ENV_DIGEST_LEN")
   [ -n "$digest" ] || return 1
 
   repo=$(_wt_slug "$(basename "$main_dir")")
   branch=$(_wt_slug "$branch")
 
-  # 要約値と区切りに 7 文字を残し、その手前を切る。
-  room=$((WT_ENV_NAME_MAX - 7))
+  # 要約値と区切りに WT_ENV_DIGEST_LEN + 1 文字を残し、その手前を切る。
+  room=$((WT_ENV_NAME_MAX - (WT_ENV_DIGEST_LEN + 1)))
   head=$(printf '%s-wt-%s' "$repo" "$branch" | cut -c "1-$room")
   head=${head%-}
   name=$(printf '%s-%s' "$head" "$digest")
