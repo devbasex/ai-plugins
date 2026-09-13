@@ -1692,6 +1692,13 @@ wt_dev_worktrees() {
   local main_dir="${1:-}" prefix path branch
   [ -n "$main_dir" ] || return 1
   prefix="$main_dir/$WT_WORKTREE_DIR/"
+  # prefix 配下の作業ツリーだけを 1 行出力する。出力の条件と書式を 1 か所へ寄せ、
+  # ループ内（空行の枝）とループ後（最後の項目）で食い違わないようにする。
+  _wt_emit_worktree() {
+    case "$1" in
+      "$prefix"*) printf '%s\t%s\n' "$1" "$2" ;;
+    esac
+  }
   path=""
   branch=""
   while IFS= read -r line; do
@@ -1705,18 +1712,15 @@ wt_dev_worktrees() {
         branch=${branch#refs/heads/}
         ;;
       "")
-        case "$path" in
-          "$prefix"*) printf '%s\t%s\n' "$path" "$branch" ;;
-        esac
+        _wt_emit_worktree "$path" "$branch"
         path=""
         branch=""
         ;;
     esac
   done < <(git -C "$main_dir" worktree list --porcelain 2>/dev/null)
   # 最後の項目は空行で終わらないことがある。
-  case "$path" in
-    "$prefix"*) printf '%s\t%s\n' "$path" "$branch" ;;
-  esac
+  _wt_emit_worktree "$path" "$branch"
+  unset -f _wt_emit_worktree
 }
 
 # 主ディレクトリの追従先を決める。git は呼ばず、引数だけで判定する。
