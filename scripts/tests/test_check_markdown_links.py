@@ -163,6 +163,21 @@ def test_reference_inside_code_fence_is_ignored(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
 
 
+def test_broken_links_inside_block_quote_are_ignored(tmp_path: Path) -> None:
+    """引用内の Markdown・HTML リンクを除外する現状を固定する（R1-005）。"""
+    write(
+        tmp_path,
+        "docs/a.md",
+        "> [Markdown](missing-markdown.md)\n"
+        '> <a href="missing-html.md">HTML</a>\n',
+    )
+
+    result = run(tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert failure_lines(result) == []
+
+
 def test_missing_document_reports_only_missing_file(tmp_path: Path) -> None:
     write(tmp_path, "docs/a.md", "[飛ぶ](無い.md#見出し)\n")
     result = run(tmp_path)
@@ -522,5 +537,4 @@ def test_no_scanned_markdown_files_passes(tmp_path: Path) -> None:
     assert result.stderr == ""
     assert failure_lines(result) == []
     assert result.stdout == "Markdown local links are valid\n"
-
 
