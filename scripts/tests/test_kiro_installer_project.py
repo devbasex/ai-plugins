@@ -56,6 +56,36 @@ def assert_no_bare_cd_error(proc: subprocess.CompletedProcess) -> None:
     assert "cd:" not in proc.stdout + proc.stderr
 
 
+def _inject_custom_agent_config(agent_file: Path) -> None:
+    """ndf.json に利用者カスタム設定（customKey / myserver / myhook）を注入して保存する。"""
+    config = json.loads(agent_file.read_text(encoding="utf-8"))
+    config["customKey"] = {"enabled": True}
+    config.setdefault("mcpServers", {})["myserver"] = {
+        "command": "myserver",
+        "args": ["serve"],
+    }
+    config.setdefault("hooks", {})["myhook"] = [
+        {"command": "echo custom", "timeout_ms": 1000}
+    ]
+    agent_file.write_text(
+        json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+
+
+def _assert_custom_config_preserved(config: dict) -> None:
+    """再インストール後の ndf.json で利用者設定と基本 hooks が保持されていることを検証する。"""
+    assert config["customKey"] == {"enabled": True}
+    assert config["mcpServers"]["myserver"] == {
+        "command": "myserver",
+        "args": ["serve"],
+    }
+    assert config["hooks"]["myhook"] == [
+        {"command": "echo custom", "timeout_ms": 1000}
+    ]
+    assert config["hooks"]["agentSpawn"]
+    assert config["hooks"]["userPromptSubmit"]
+
+
 def test_project_without_path_stops_with_error(tmp_path: Path) -> None:
     proc = run("--project", home=tmp_path)
 
@@ -156,33 +186,13 @@ def test_reinstall_preserves_user_managed_agent_config(tmp_path: Path) -> None:
     assert first.returncode == 0, first.stderr
 
     agent_file = project / ".kiro" / "agents" / "ndf.json"
-    config = json.loads(agent_file.read_text(encoding="utf-8"))
-    config["customKey"] = {"enabled": True}
-    config.setdefault("mcpServers", {})["myserver"] = {
-        "command": "myserver",
-        "args": ["serve"],
-    }
-    config.setdefault("hooks", {})["myhook"] = [
-        {"command": "echo custom", "timeout_ms": 1000}
-    ]
-    agent_file.write_text(
-        json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
+    _inject_custom_agent_config(agent_file)
 
     second = run("--project", str(project), "--yes", home=tmp_path)
     assert second.returncode == 0, second.stderr
 
     reinstalled = json.loads(agent_file.read_text(encoding="utf-8"))
-    assert reinstalled["customKey"] == {"enabled": True}
-    assert reinstalled["mcpServers"]["myserver"] == {
-        "command": "myserver",
-        "args": ["serve"],
-    }
-    assert reinstalled["hooks"]["myhook"] == [
-        {"command": "echo custom", "timeout_ms": 1000}
-    ]
-    assert reinstalled["hooks"]["agentSpawn"]
-    assert reinstalled["hooks"]["userPromptSubmit"]
+    _assert_custom_config_preserved(reinstalled)
 
 
 def test_reinstall_removes_optional_features_when_flags_omitted(tmp_path: Path) -> None:
@@ -203,17 +213,7 @@ def test_reinstall_removes_optional_features_when_flags_omitted(tmp_path: Path) 
     assert "stop" in config["hooks"]
     assert "codex" in config["mcpServers"]
 
-    config["customKey"] = {"enabled": True}
-    config["mcpServers"]["myserver"] = {
-        "command": "myserver",
-        "args": ["serve"],
-    }
-    config["hooks"]["myhook"] = [
-        {"command": "echo custom", "timeout_ms": 1000}
-    ]
-    agent_file.write_text(
-        json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
+    _inject_custom_agent_config(agent_file)
 
     second = run("--project", str(project), "--yes", home=tmp_path)
     assert second.returncode == 0, second.stderr
@@ -221,16 +221,7 @@ def test_reinstall_removes_optional_features_when_flags_omitted(tmp_path: Path) 
     reinstalled = json.loads(agent_file.read_text(encoding="utf-8"))
     assert "stop" not in reinstalled["hooks"]
     assert "codex" not in reinstalled.get("mcpServers", {})
-    assert reinstalled["mcpServers"]["myserver"] == {
-        "command": "myserver",
-        "args": ["serve"],
-    }
-    assert reinstalled["hooks"]["myhook"] == [
-        {"command": "echo custom", "timeout_ms": 1000}
-    ]
-    assert reinstalled["customKey"] == {"enabled": True}
-    assert reinstalled["hooks"]["agentSpawn"]
-    assert reinstalled["hooks"]["userPromptSubmit"]
+    _assert_custom_config_preserved(reinstalled)
 
 
 def test_reinstall_removes_deprecated_prompts_and_keeps_user_prompt(tmp_path: Path) -> None:

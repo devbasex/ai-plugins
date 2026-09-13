@@ -356,6 +356,57 @@ import shlex
 import sys
 from pathlib import Path
 
+
+def load_existing_agent_config(agent_file):
+    """既存の agent_file を読み、引き継ぎ対象の辞書を返す。
+
+    不正 JSON・JSON オブジェクト以外はそれぞれ警告を出して空の辞書を返す。
+    ファイルが無い場合も空の辞書を返す。
+    """
+    agent_path = Path(agent_file)
+    if not agent_path.is_file():
+        return {}
+    try:
+        loaded = json.loads(agent_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        print(f"  WARN: 既存の {agent_file} を読めないため引き継ぎません: {exc}")
+        return {}
+    if not isinstance(loaded, dict):
+        print(f"  WARN: 既存の {agent_file} が JSON オブジェクトではないため引き継ぎません")
+        return {}
+    return loaded
+
+
+def merge_user_managed_config(
+    existing, agent_file, config, hooks, servers, managed_keys, managed_hooks, managed_servers
+):
+    """既存設定から installer 管理外のキー・hooks・mcpServers をターゲットへ写す。
+
+    引き継いだキーの一覧を返す。hooks / mcpServers が dict 以外（配列や文字列）
+    だと .items() で落ちるため、壊れた JSON と同じく警告して引き継ぎ対象から外す。
+    """
+    kept = []
+    for key, value in existing.items():
+        if key not in managed_keys:
+            config[key] = value
+            kept.append(key)
+    for section, target, managed in (
+        ("hooks", hooks, managed_hooks),
+        ("mcpServers", servers, managed_servers),
+    ):
+        value = existing.get(section)
+        if value is None:
+            continue
+        if not isinstance(value, dict):
+            print(f"  WARN: 既存の {agent_file} の {section} が JSON オブジェクトではないため引き継ぎません")
+            continue
+        for key, item in value.items():
+            if key not in managed:
+                target[key] = item
+                kept.append(f"{section}.{key}")
+    return kept
+
+
 template_file, with_slack, with_codex, agent_file, plugin_dir, ndf_version = sys.argv[1:7]
 with open(template_file, encoding="utf-8") as f:
     config = json.load(f)
@@ -409,40 +460,17 @@ if with_codex == "true":
         "env": {},
     }
 
-existing = {}
-agent_path = Path(agent_file)
-if agent_path.is_file():
-    try:
-        loaded = json.loads(agent_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        print(f"  WARN: 既存の {agent_file} を読めないため引き継ぎません: {exc}")
-    else:
-        if isinstance(loaded, dict):
-            existing = loaded
-        else:
-            print(f"  WARN: 既存の {agent_file} が JSON オブジェクトではないため引き継ぎません")
-
-kept = []
-for key, value in existing.items():
-    if key not in managed_keys:
-        config[key] = value
-        kept.append(key)
-# hooks / mcpServers が dict 以外（配列や文字列）だと .items() で落ちるため、
-# 壊れた JSON と同じく警告して引き継ぎ対象から外す。
-for section, target, managed in (
-    ("hooks", hooks, managed_hooks),
-    ("mcpServers", servers, managed_servers),
-):
-    value = existing.get(section)
-    if value is None:
-        continue
-    if not isinstance(value, dict):
-        print(f"  WARN: 既存の {agent_file} の {section} が JSON オブジェクトではないため引き継ぎません")
-        continue
-    for key, item in value.items():
-        if key not in managed:
-            target[key] = item
-            kept.append(f"{section}.{key}")
+existing = load_existing_agent_config(agent_file)
+kept = merge_user_managed_config(
+    existing,
+    agent_file,
+    config,
+    hooks,
+    servers,
+    managed_keys,
+    managed_hooks,
+    managed_servers,
+)
 
 if not hooks:
     config.pop("hooks", None)
