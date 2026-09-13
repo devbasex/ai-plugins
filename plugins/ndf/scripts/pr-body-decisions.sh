@@ -73,7 +73,6 @@ import urllib.parse
 
 sub, pr, repo = sys.argv[1:4]
 HEADING = "## 決めたこと"
-TEST_PLAN_HEADING = "## Test plan"
 MARKER = "<!-- 設計文書の「決定の記録」の見出しから pr-body-decisions.sh sync が作る。手で書き換えない -->"
 
 
@@ -231,7 +230,7 @@ def rewrite(body, span, expected):
         if not text:
             return body[:start] + body[end:]
         return body[:start] + text + (nl if end < len(body) else "") + body[end:]
-    plan = find_section(body, TEST_PLAN_HEADING)
+    plan = find_section(body, "## Test plan")
     if plan:
         return body[:plan[0]] + text + nl + body[plan[0]:]
     if not body:
