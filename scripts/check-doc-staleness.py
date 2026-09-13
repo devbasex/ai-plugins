@@ -536,15 +536,10 @@ def check_version_section(body: str, version: str | None, report: Report) -> boo
     return True
 
 
-def check_version_examples(body: str, report: Report) -> None:
-    """章 2 の版の形の表と次の開発の例を、例どうしで比べる（J の続き。#566）。
-
-    見るのは囲みの外の行だけである。囲みの中の表や文は実行例か出力例で、章の例そのもの
-    ではない。数えると、実行例を足しただけで「同じ行が複数ある」に当たる。
-
-    位置を決める語（表の 1 列目の 3 語と「の次を開発するなら」）が見つからないときも、
-    重なるときも失敗にする。黙って通すと、行を言い換えるだけで規則が外れる。
-    """
+def parse_version_form_rows_and_examples(
+    body: str,
+) -> tuple[dict[str, list[tuple[str, int]]], list[tuple[str, str, int]]]:
+    """章 2 の囲みの外から、版の形の表の行と次の開発の例を行番号つきで拾う。"""
     rows: dict[str, list[tuple[str, int]]] = {label: [] for label in VERSION_FORM_SUFFIX}
     examples: list[tuple[str, str, int]] = []
     for number, line, in_fence in section_lines(body.splitlines()) or []:
@@ -555,7 +550,11 @@ def check_version_examples(body: str, report: Report) -> None:
             rows[row.group("label")].append((row.group(2), number))
         for found in NEXT_DEVELOPMENT.finditer(line):
             examples.append((found.group(1), found.group(2), number))
+    return rows, examples
 
+
+def check_version_form_rows_presence(rows: dict[str, list[tuple[str, int]]], report: Report) -> None:
+    """版の形の表の各行が 1 つずつあるかを見る。"""
     for label, found_rows in rows.items():
         if not found_rows:
             report.add(
@@ -567,6 +566,9 @@ def check_version_examples(body: str, report: Report) -> None:
             numbers = ", ".join(f"L{number}" for _, number in found_rows)
             report.add(VERSIONING_MD, f"版の付け方の節の版の形の表に同じ行が複数ある（{label}: {numbers}）")
 
+
+def check_version_form_row_suffixes(rows: dict[str, list[tuple[str, int]]], report: Report) -> None:
+    """版の形の表の各行が、その行に求める接尾辞の形を持つかを見る。"""
     for label, found_rows in rows.items():
         suffix, wording = VERSION_FORM_SUFFIX[label]
         for value, number in found_rows:
@@ -577,6 +579,9 @@ def check_version_examples(body: str, report: Report) -> None:
                     f"（記載: {value}（L{number}） / 求める形: {wording}）",
                 )
 
+
+def check_rows_newer_than_stable(rows: dict[str, list[tuple[str, int]]], report: Report) -> None:
+    """開発版と公開前の確認版の行が、正式版の行より新しい基底を指すかを見る。"""
     # 比べる相手が 1 つに決まるときだけ、正式版の行より新しい基底を指すかを見る。
     if len(rows["正式版"]) == 1:
         stable, stable_number = rows["正式版"][0]
@@ -589,6 +594,9 @@ def check_version_examples(body: str, report: Report) -> None:
                         f"（記載: {value}（L{number}） / 正式版: {stable}（L{stable_number}））",
                     )
 
+
+def check_next_development_examples(examples: list[tuple[str, str, int]], report: Report) -> None:
+    """次の開発の例があり、どれも次の版の開発版を指すかを見る。"""
     if not examples:
         report.add(
             VERSIONING_MD,
@@ -601,6 +609,22 @@ def check_version_examples(body: str, report: Report) -> None:
                 VERSIONING_MD,
                 f"版の付け方の節の次の開発の例が次の版を指していない（記載: {left} → {right}（L{number}））",
             )
+
+
+def check_version_examples(body: str, report: Report) -> None:
+    """章 2 の版の形の表と次の開発の例を、例どうしで比べる（J の続き。#566）。
+
+    見るのは囲みの外の行だけである。囲みの中の表や文は実行例か出力例で、章の例そのもの
+    ではない。数えると、実行例を足しただけで「同じ行が複数ある」に当たる。
+
+    位置を決める語（表の 1 列目の 3 語と「の次を開発するなら」）が見つからないときも、
+    重なるときも失敗にする。黙って通すと、行を言い換えるだけで規則が外れる。
+    """
+    rows, examples = parse_version_form_rows_and_examples(body)
+    check_version_form_rows_presence(rows, report)
+    check_version_form_row_suffixes(rows, report)
+    check_rows_newer_than_stable(rows, report)
+    check_next_development_examples(examples, report)
 
 
 def check_root_readme_versions(root: Path, body: str, report: Report) -> None:
