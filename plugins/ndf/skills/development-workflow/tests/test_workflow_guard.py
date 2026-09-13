@@ -56,6 +56,26 @@ def decision(result: subprocess.CompletedProcess) -> dict:
     return json.loads(result.stdout)["hookSpecificOutput"]
 
 
+@pytest.mark.parametrize(
+    ("first", "second", "expected"),
+    [
+        ("light", "standard", "standard"),
+        ("standard", "light", "standard"),
+        ("standard", "standard", "standard"),
+        ("", "standard", "standard"),
+        ("light", "", "light"),
+    ],
+)
+def test_higher_mode_keeps_the_current_branch_behavior(
+    first: str, second: str, expected: str
+) -> None:
+    """現状固定: 高い側、同じ高さの先頭、空でない側を返す。"""
+    result = run_lib(f"wf_higher_mode {shlex.quote(first)} {shlex.quote(second)}")
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == expected
+
+
 # --- 判定の対象でないもの ---------------------------------------------------
 
 def test_another_event_does_nothing(repo: Path, state: Path) -> None:
