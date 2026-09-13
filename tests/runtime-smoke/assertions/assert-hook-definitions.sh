@@ -66,7 +66,10 @@ parse_claude_debug_log() {
   # JSON の誤りの `[ERROR] Failed to load hooks for <名前>`、マニフェストが指す先が無いときの
   # `[ERROR] Hooks file ... not found` がこの形で出る（最後のものは hooks.json が別にあると
   # 読み込みの行も出るため、「読まれていない」では拾えない）。
-  grep -iE '\[(WARN|ERROR)\] .*hook' "$log" >"$reports_file" || true
+  # タグは大文字だけに一致させ（`-i` を付けると小文字の `[error]` にも当たる）、`hook` /
+  # `hooks` / `Hooks` は前後が英数字でない語として一致させる（部分一致では `webhook` のような
+  # hooks と無関係の誤りまで報告に数える）。`broken-hooks` のように記号で区切られた名前は拾う。
+  grep -E '\[(WARN|ERROR)\] (.*[^[:alnum:]])?[Hh]ooks?([^[:alnum:]]|$)' "$log" >"$reports_file" || true
   sed -nE 's/.*Read (hooks\.json|manifest hooks) for plugin ([^ ]+) \(.*/\2/p' "$log" \
     | sort -u >"$loaded_file"
 }
