@@ -422,6 +422,34 @@ def test_emit_context_round_trips_the_value(text: str) -> None:
     assert "permissionDecision" not in hook
 
 
+# `wf_emit_deny` は permissionDecision を deny とし、permissionDecisionReason に
+# 理由を載せて JSON として出す。境界入力で有効な JSON になり、復号すると元の値へ
+# 戻ることを固定する。
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",
+        "日本語の案内です",
+        'quote " inside',
+        r"backslash \ inside",
+        "line1\nline2",
+        "col1\tcol2",
+        "carriage\rreturn",
+        '全部盛り 日本語 "q" \\b\n改行\ttab\rcr',
+    ],
+)
+def test_emit_deny_round_trips_the_reason(text: str) -> None:
+    """現状固定: 拒否理由が JSON を経て permissionDecisionReason に保たれる。"""
+    result = run_lib(f"wf_emit_deny {shlex.quote(text)}")
+
+    assert result.returncode == 0, result.stderr
+    decoded = json.loads(result.stdout)
+    hook = decoded["hookSpecificOutput"]
+    assert hook["permissionDecision"] == "deny"
+    assert hook["hookEventName"] == "PreToolUse"
+    assert hook["permissionDecisionReason"] == text
+
+
 # --- #565 コマンドの区切り ---------------------------------------------------
 #
 # 語の分割は、引用の外の制御演算子と本文の途中の改行で空の語（区切り）を出す。3 つの
