@@ -116,7 +116,7 @@ def _matching_closer(runs: list[re.Match], start: int) -> int | None:
     )
 
 
-def _kept_segments(line: str, runs: list[re.Match]) -> list[str]:
+def _segments_without_inline_code(line: str, runs: list[re.Match]) -> list[str]:
     parts: list[str] = []
     pos = 0
     i = 0
@@ -140,7 +140,7 @@ def strip_inline_code(line: str) -> str:
     with no matching closer stays as text, so links after it are still read.
     """
     runs = list(BACKTICK_RUN_RE.finditer(line))
-    return "".join(_kept_segments(line, runs))
+    return "".join(_segments_without_inline_code(line, runs))
 
 
 def link_targets(text: str) -> list[str]:
