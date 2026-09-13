@@ -741,6 +741,26 @@ def test_version_section_at_end_of_document_scans_until_eof() -> None:
     ]
 
 
+def test_version_section_finds_stale_version_inside_code_fence() -> None:
+    """囲みの中の版数も走査し、古い版数なら記録する（現状固定）。"""
+    module = _load_checker()
+    report = module.Report()
+    body = (
+        f"{module.VERSION_SECTION_HEADING}\n"
+        "\n"
+        "```text\n"
+        "古い版の例は `9.2.1` である。\n"
+        "```\n"
+        "\n"
+        "現行版の例は `9.3.0` である。\n"
+    )
+    module.check_version_section(body, "9.3.0", report)
+    assert report.errors == [
+        f"{module.VERSIONING_MD}: 版の付け方の節の版数が現行版より古い"
+        f"（記載: 9.2.1（L4） / {module.PLUGIN_JSON}: 9.3.0）"
+    ]
+
+
 
 def test_category_breakdown_ideographic_comma_names_are_split() -> None:
     """Skill 名の区切りが読点「、」でも分割され、個数が計上される（現状固定）。
@@ -774,4 +794,3 @@ def test_category_lines_without_source_count_returns_none() -> None:
         "- カテゴリB: 2個\n"
     )
     assert module.category_lines(markdown) is None
-
