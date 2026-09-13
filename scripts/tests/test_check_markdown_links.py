@@ -478,6 +478,22 @@ def test_slugify_boundary_and_character_retention(text: str, expected: str) -> N
     assert module.slugify(text) == expected
 
 
+def test_slugify_keeps_combining_mark(tmp_path: Path) -> None:
+    """slugify が M(結合文字)カテゴリの文字を保持する分岐を固定する（R2-002）。
+
+    既存の境界値テストは L(字母)・N(数字)・空白・記号だけを通し、
+    SLUG_KEEP_CATEGORIES='LMN' のうち M(結合文字)の分岐を一度も通っていない。
+    結合アキュートアクセント（U+0301）を含む文字列を渡し、その結合文字が
+    落とされずに残る現状の振る舞いを記録する。
+    """
+    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.slugify("Cafe\u0301 Menu") == "cafe\u0301-menu"
+
+
 def test_target_path_current_behavior(tmp_path: Path) -> None:
     """target_path のリンク解決・スキップ判定の現状を固定する（R4-001）。"""
     spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
