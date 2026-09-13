@@ -450,3 +450,28 @@ def test_target_path_current_behavior(tmp_path: Path) -> None:
     assert module.target_path(source, 'other.md "title"') == (tmp_path / "docs" / "other.md").resolve()
     assert module.target_path(source, '<other.md> "title"') == (tmp_path / "docs" / "<other.md>").resolve()
 
+
+def test_visible_lines_skips_code_fences_and_quotes(tmp_path: Path) -> None:
+    """visible_lines のコードフェンスおよび引用行スキップの現状を固定する（R1-002）。"""
+    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    path = tmp_path / "test.md"
+    body = (
+        "可視行 1\n"
+        "```\n"
+        "フェンス内の行\n"
+        "```\n"
+        "> 引用（> 始まり）行\n"
+        "  > インデント後に > を持つ行\n"
+        "可視行 2\n"
+    )
+    path.write_text(body, encoding="utf-8")
+
+    result = module.visible_lines(path)
+
+    assert result == ["可視行 1", "可視行 2"]
+
+
