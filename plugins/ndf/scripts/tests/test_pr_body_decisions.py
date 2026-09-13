@@ -429,3 +429,11 @@ def test_22_usage_errors_return_3_without_reading(fake, args):
     out = fake.run(*args)
     assert out.returncode == 3, (args, out.stdout, out.stderr)
     assert not fake.calls()
+
+
+def test_22_repo_flag_without_value_returns_3_without_reading(fake):
+    """現状固定: `--repo` に値を続けないと `[ -n "${2:-}" ] || usage` で終了コード 3。GitHub を読まない。"""
+    design_pr(fake, EXPECTED)
+    out = fake.run("check", "7", "--repo")
+    assert out.returncode == 3, (out.stdout, out.stderr)
+    assert not fake.calls()
