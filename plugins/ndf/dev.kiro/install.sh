@@ -221,6 +221,70 @@ install_prompts() {
   fi
 }
 
+# --set-default の各段階を、入出力を明示した関数へ分ける。呼び出し側は下の
+# --set-default ブロックで順に呼び、標準出力・標準エラー・終了コード・kiro-cli を
+# 実行するディレクトリは分割前と変えない。
+
+# scope から kiro-cli を実行するディレクトリを決め、グローバルの KIRO_CWD へ返す。
+#   workspace: 導入先プロジェクトルート ($PROJECT_ROOT/.kiro/agents)
+#   global:    $HOME （$HOME/.kiro/agents = 生成先。global エージェントはどこからでも
+#              解決できるが、cwd 側の同名 workspace エージェントに隠されないようにする）
+# kiro-cli は workspace エージェントを cwd 配下の .kiro/agents からのみ検出する。
+# 呼び出し元 cwd のままだと、--project で別ディレクトリへ導入したエージェントを
+# 見つけられない（または同名の別エージェントを既定にしてしまう）。生成した
+# $AGENT_FILE を確実に指すディレクトリで kiro-cli を実行する。
+resolve_kiro_cwd() {
+  case "$SCOPE" in
+    workspace) KIRO_CWD="$PROJECT_ROOT" ;;
+    *) KIRO_CWD="$HOME" ;;
+  esac
+}
+
+# KIRO_CWD で kiro-cli agent list を実行し、現在の既定エージェント名を標準出力へ返す。
+# kiro-cli 2.16.1 の agent list は一覧を標準エラー出力へ書くため 2>&1 でまとめ、
+# ANSI エスケープを除いてから先頭が "*" の行の 2 番目の語を取る。
+kiro_default_agent() {
+  local esc
+  esc="$(printf '\033')"
+  (cd "$KIRO_CWD" && kiro-cli agent list 2>&1) \
+    | sed -e "s/${esc}\\[[0-9;]*m//g" \
+    | awk '/^\*/ { print $2; exit }'
+}
+
+# 利用者に既定エージェントの変更可否を尋ねる。--yes・非対話のときは確認を省いて
+# 承認とみなす。承認なら 0、拒否なら 1 を返す（呼び出し側の proceed 判定に使う）。
+confirm_set_default() {
+  if [ "$ASSUME_YES" = true ]; then
+    return 0
+  fi
+  if [ ! -t 0 ]; then
+    echo "確認入力を取得できないため、--set-default の指定を承認とみなして続行します"
+    return 0
+  fi
+  local answer
+  printf '既定エージェントを %s に変更しますか? [y/N]: ' "$AGENT_NAME"
+  # EOF (Ctrl+D) で read が非ゼロ終了しても set -e で落とさず、既定の N へ倒す
+  read -r answer || answer=""
+  case "$answer" in
+    [yY]|[yY][eE][sS]) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# 既定エージェントを $AGENT_NAME へ変更し、agent list で反映を検証する。
+# 引数は復帰案内に使う変更前の既定エージェント名。検証に失敗したらエラーで終了する。
+apply_set_default() {
+  local previous_default="$1"
+  (cd "$KIRO_CWD" && kiro-cli agent set-default "$AGENT_NAME")
+  # kiro-cli 2.16.1 の set-default はエージェント未検出でも終了コード 0 を返すため、
+  # 反映結果を agent list で検証する。
+  if [ "$(kiro_default_agent || true)" != "$AGENT_NAME" ]; then
+    echo "ERROR: 既定エージェントを $AGENT_NAME に変更できませんでした（$KIRO_CWD で検出できず）" >&2
+    exit 1
+  fi
+  echo "既定エージェントを $AGENT_NAME に変更しました（元に戻す: kiro-cli agent set-default ${previous_default:-kiro_default}）"
+}
+
 echo "=== NDF Plugin Installer for Kiro CLI ==="
 echo "  スコープ: $SCOPE ($KIRO_DIR)"
 
@@ -491,52 +555,14 @@ if [ "$SET_DEFAULT" = true ]; then
     echo "ERROR: kiro-cli が見つからないため既定エージェントを変更できません" >&2
     exit 1
   fi
-  # kiro-cli は workspace エージェントを cwd 配下の .kiro/agents からのみ検出する。
-  # 呼び出し元 cwd のままだと、--project で別ディレクトリへ導入したエージェントを
-  # 見つけられない（または同名の別エージェントを既定にしてしまう）。生成した
-  # $AGENT_FILE を確実に指すディレクトリで kiro-cli を実行する。
-  #   workspace: 導入先プロジェクトルート ($PROJECT_ROOT/.kiro/agents)
-  #   global:    $HOME （$HOME/.kiro/agents = 生成先。global エージェントはどこからでも
-  #              解決できるが、cwd 側の同名 workspace エージェントに隠されないようにする）
-  case "$SCOPE" in
-    workspace) KIRO_CWD="$PROJECT_ROOT" ;;
-    *) KIRO_CWD="$HOME" ;;
-  esac
-  esc="$(printf '\033')"
-  # kiro-cli 2.16.1 の agent list は一覧を標準エラー出力へ書く
-  kiro_default_agent() {
-    (cd "$KIRO_CWD" && kiro-cli agent list 2>&1) \
-      | sed -e "s/${esc}\\[[0-9;]*m//g" \
-      | awk '/^\*/ { print $2; exit }'
-  }
+  resolve_kiro_cwd
   # 表示用の取得は失敗しても続行する（未ログイン等でも set-default の結果は後段で検証する）
   current_default="$(kiro_default_agent || true)"
   echo "既定エージェントの操作ディレクトリ: $KIRO_CWD"
   echo "現在の既定エージェント: ${current_default:-不明}"
   echo "変更後の既定エージェント: $AGENT_NAME"
-  proceed=true
-  if [ "$ASSUME_YES" = false ]; then
-    if [ -t 0 ]; then
-      printf '既定エージェントを %s に変更しますか? [y/N]: ' "$AGENT_NAME"
-      # EOF (Ctrl+D) で read が非ゼロ終了しても set -e で落とさず、既定の N へ倒す
-      read -r answer || answer=""
-      case "$answer" in
-        [yY]|[yY][eE][sS]) ;;
-        *) proceed=false ;;
-      esac
-    else
-      echo "確認入力を取得できないため、--set-default の指定を承認とみなして続行します"
-    fi
-  fi
-  if [ "$proceed" = true ]; then
-    (cd "$KIRO_CWD" && kiro-cli agent set-default "$AGENT_NAME")
-    # kiro-cli 2.16.1 の set-default はエージェント未検出でも終了コード 0 を返すため、
-    # 反映結果を agent list で検証する。
-    if [ "$(kiro_default_agent || true)" != "$AGENT_NAME" ]; then
-      echo "ERROR: 既定エージェントを $AGENT_NAME に変更できませんでした（$KIRO_CWD で検出できず）" >&2
-      exit 1
-    fi
-    echo "既定エージェントを $AGENT_NAME に変更しました（元に戻す: kiro-cli agent set-default ${current_default:-kiro_default}）"
+  if confirm_set_default; then
+    apply_set_default "$current_default"
   else
     echo "既定エージェントは変更しませんでした"
   fi
