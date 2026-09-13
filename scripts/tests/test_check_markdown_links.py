@@ -514,3 +514,13 @@ def test_visible_lines_skips_code_fences_and_quotes(tmp_path: Path) -> None:
     assert result == ["可視行 1", "可視行 2"]
 
 
+def test_no_scanned_markdown_files_passes(tmp_path: Path) -> None:
+    """走査対象の Markdown が 0 件のとき成功する現状を固定する（R1-004）。"""
+    write(tmp_path, "notes/a.md", "[x](無い.md)\n")
+    result = run(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+    assert failure_lines(result) == []
+    assert result.stdout == "Markdown local links are valid\n"
+
+
