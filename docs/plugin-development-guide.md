@@ -110,67 +110,11 @@ plugins/{plugin-name}/
 }
 ```
 
-## バージョン管理
+## 版と配布
 
-**セマンティックバージョニング**:
-- **MAJOR**: 破壊的変更
-- **MINOR**: 後方互換性のある新機能
-- **PATCH**: バグフィックス
-- **接尾辞**: 開発版は `-dev.<連番>`、公開前の確認版は `-rc.<連番>`。付け方と外し方は
-  AGENTS.md の「版の付け方と開発版の配布」にある
-
-**配布のチャネルは 2 つある。** `main` が正式版、`develop` が開発版です。ここに書く手順は
-版数を書き換えるところまでで、**常用する利用者へ届くのは `main` を進めた時点**です。
-
-```bash
-gh pr create --base main --head develop --title "Release: v<版>" --body "..."
-gh pr merge <番号> --merge --admin   # 正式版として公開する
-```
-
-**`git push origin develop:main` は使えません。** ruleset の bypass は `pull_request` で
-作ってあり、直接 push は管理者でも拒まれます。`--admin` を付けるのは、GitHub が自分の
-Pull Request を自分で承認できず、承認 1 件必須のもとでメンテナーが 1 人の間はこれが唯一の
-経路になるためです。理由と、`main` が `develop` の fast-forward ではなくなることは
-AGENTS.md の「版の付け方と開発版の配布」にあります。
-
-進める判断と承認は `/ndf:release` が扱います。**承認を得ないまま実行しないでください。**
-`main` へ入った時点で、常用する利用者の `marketplace update` に載ります。
-
-**バージョン更新時の手順**:
-1. `plugin.json`のバージョンをインクリメント
-2. 変更内容をドキュメント化
-3. `plugins/ndf/README.md` の「v&lt;版&gt; へ更新するとき」の節を開き、**本文をその版の変更内容へ書き直す**。見出しの版数だけを置き換えて、本文を前の版の説明のまま残さない
-4. `CHANGELOG.md` の先頭へその版の節を足す。書式は Keep a Changelog に従い、変更点を
-   `追加` / `変更` / `修正` / `削除` へ分類して 1〜2 行で書く。判断の理由は `CLAUDE.md` の側に置く
-5. Skill の数が増減した場合は、`README.md` と `plugins/ndf/README.md` に書かれた数を書き直す
-6. `python3 scripts/check-doc-staleness.py --root .` を実行し、説明文書に残った古い版数を
-   出力の行番号のとおりに直す
-7. 破壊的変更がある場合は明示
-8. テストを実行
-9. **正式版として `main` を進めた後、リリースタグを打つ**
-
-```bash
-claude plugin tag plugins/ndf --dry-run   # 打つ内容を確認する
-claude plugin tag plugins/ndf --push      # ndf--v<版> を作って origin へ送る
-```
-
-`claude plugin tag` は `{プラグイン名}--v{版}` の形でタグを作り、**`plugin.json` の版と
-マーケットプレイスの項目が食い違っていないか**を打つ前に検査します。タグは利用者が過去の版へ
-戻るときの目印になります（「利用者が過去の版へ戻る」）。
-
-**`.claude-plugin/marketplace.json` に `version` フィールドは置きません。** 版を持つのは
-`plugins/<名前>/.claude-plugin/plugin.json` だけです。マーケットプレイス側の `description`
-に書かれた `(vX.Y.Z)` は読み手向けの記載で、取得する版を決める値ではありません。
-
-`scripts/validate-runtime-plugins.sh` が突き合わせるのは、説明文書に書かれた Skill の数と、
-**版数を書いた 15 箇所**です。定義ファイルと更新案内の見出しが 8 箇所、説明文書の本文が
-7 箇所あります（`README.md` の概要とプラグイン一覧表、`AGENTS.md` の 2 箇所、
-`plugins/ndf/README.md` の Kiro と Codex の確認例 3 種類）。**記載を消しても検査は通りません。**
-一覧は AGENTS.md の「検査が突き合わせる 15 箇所」にあります。
-
-**検査が見るのは版数そのものの一致までで、記載の中身までは見ません。** 更新案内の本文が
-その版の変更内容を説明しているかは機械では判定できません。手順 3 が、その本文を人が
-読み直す機会にあたります。接尾辞の付け忘れ・外し忘れも検査では捕まりません。
+版数の付け方（セマンティックバージョニングと接尾辞）、正式版と開発版の配布、版を上げるときの手順、
+版数を書いた 15 箇所は [versioning-and-distribution.md](versioning-and-distribution.md) にあります
+（版数の扱いの正本）。
 
 ## ドキュメント要件
 
@@ -223,67 +167,9 @@ claude plugin tag plugins/ndf --push      # ndf--v<版> を作って origin へ�
 5. テスト
 6. コミット & PR作成
 
-## 利用者が過去の版へ戻る
-
-**版数を書き換えても、過去の版のコードには戻りません。** `plugin.json` の `version` は
-更新の判定に使う識別子で、どのコードを取るかは**取得元の git ref** が決めます。
-`claude plugin install` に版を指定する手段はありません。
-
-戻す手段は 2 つあり、どちらも**利用者の側の操作**です。
-
-### 取得元ごとリリースタグへ固定する
-
-マーケットプレイスの項目は `./plugins/ndf` のような相対パスで実体を指すため、リポジトリを
-過去のタグへ固定すれば、その時点のプラグインが入ります。
-
-```bash
-claude plugin marketplace add devbasex/ai-plugins@<タグ>
-```
-
-**最初のタグは `ndf--v9.5.0` です**（手元のタグは `git tag -l` で確かめられます）。
-それより前の版（9.4.0 以前）はタグを打っていないため、**タグでは戻せません**。戻すなら、
-その版のコミットを調べて ref に指定します。
-
-**同じ取得元の他のプラグインも同時に過去の状態になります。** `playwright-kit` や `mcp-*` を
-最新のまま使いたい場合は次の方法を採ります。
-
-### 対象のプラグインだけを固定する
-
-別名のマーケットプレイスを 1 つ用意し、`git-subdir` で対象のディレクトリと ref を直接指します。
-
-```json
-{
-  "name": "ai-plugins-pinned",
-  "owner": {"name": "takemi-ohama"},
-  "plugins": [
-    {"name": "ndf",
-     "source": {"source": "git-subdir",
-                "url": "https://github.com/devbasex/ai-plugins.git",
-                "path": "plugins/ndf",
-                "ref": "<タグ>"}}
-  ]
-}
-```
-
-`ref` はブランチまたはタグ、`sha` は 40 文字のコミット。両方あるときは `sha` が効きます。
-この形が `claude plugin validate` を通ることは確認済みです。
-
-この定義を読み込ませて導入します。**JSON ファイルのパスを直接渡せます**（実機で確認）。
-
-```bash
-claude plugin marketplace add <この JSON のパス> --scope local
-claude plugin install ndf@ai-plugins-pinned
-```
-
-**`--scope local` を付けます。** 固定は一時的な操作なので、利用者全体の設定へ残しません。
-戻すときは `claude plugin marketplace remove ai-plugins-pinned` です。名前が `ai-plugins` と
-違うため、通常の取得元は消えません。
-
-**固定した版と最新版を同時に有効にしないでください。** どちらの `/ndf:*` が使われるかが
-定まりません。切り替えるときは、先に一方を無効にします。
-
-**名前は必ず変えます。** `ai-plugins` のまま追加すると、利用者の取得元が置き換わります
-（AGENTS.md の「版の付け方と開発版の配布」）。
+利用者が過去の版へ戻る手順は
+[versioning-and-distribution.md の「利用者が過去の版へ戻る」](versioning-and-distribution.md#利用者が過去の版へ戻る)
+にあります。
 
 ## 検証とテスト
 
@@ -306,8 +192,8 @@ claude --plugin-dir plugins/ndf
 
 **通常の取得経路で確かめたい場合は、開発版のチャネル（`develop`）へ出す。** 版数へ
 `-dev.<連番>` を付けて公開し、検証に参加する利用者が `#develop` を付けた登録で取得します。
-常用する利用者は `main` を見ているため、この公開では届きません（AGENTS.md の「版の付け方と
-開発版の配布」）。
+常用する利用者は `main` を見ているため、この公開では届きません（[versioning-and-distribution.md](versioning-and-distribution.md) の
+「開発版を試す」）。
 
 ### Runtime plugin 検証
 

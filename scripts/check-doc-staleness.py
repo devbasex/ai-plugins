@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """説明文書に書かれた Skill 数と版数を、実体・マニフェスト・plugin.json と突き合わせる。
 
-対象は利用者が読む 3 本の説明文書（`README.md` / `AGENTS.md` / `plugins/ndf/README.md`）
-である。
+対象は利用者が読む 4 本の説明文書（`README.md` / `AGENTS.md` /
+`docs/versioning-and-distribution.md` / `plugins/ndf/README.md`）である。
 
 配布する Skill の数はランタイムごとに違い、その数が `README.md` と `plugins/ndf/README.md`
 に書かれている。数を機械的に突き合わせる検査はプラグインの定義ファイルにしか届いていな
@@ -38,6 +38,8 @@ from pathlib import Path
 FAMILY = "ndf"
 ROOT_README = "README.md"
 AGENTS_MD = "AGENTS.md"
+# 版数と配布の扱いの正本（#499）。版の付け方の章（J）はここにある。
+VERSIONING_MD = "docs/versioning-and-distribution.md"
 PLUGIN_README = f"plugins/{FAMILY}/README.md"
 PLUGIN_JSON = f"plugins/{FAMILY}/.claude-plugin/plugin.json"
 SKILLS_DIR = f"plugins/{FAMILY}/skills"
@@ -101,18 +103,22 @@ KIRO_AGENT_VERSION = re.compile(r"Kiro CLI用 / v" + VERSION + r"）")  # K
 CODEX_CACHE_PATH = re.compile(r"plugins/cache/ai-plugins/" + FAMILY + r"/" + VERSION + r"/skills/")  # L
 CODEX_LIST_OUTPUT = re.compile(FAMILY + r"@ai-plugins\s+installed, enabled\s+" + VERSION)  # M
 
-# J: 区間の検査。この見出しから次の `### ` の直前までに並ぶ版数を、現行版の基底と比べる。
-VERSION_SECTION_HEADING = "### 版の付け方と開発版の配布"
-# 終端は自身と同じか上位の見出しで取る。`^###` だけで区切ると、次が `## ` のときに区間が
-# 閉じず、そのまま変更履歴まで走査して前の版の版数を現行版と比べてしまう。
-SECTION_HEADING = re.compile(r"^#{1,3}\s")
+# J: 区間の検査。正本のこの見出しから次の同位以上の見出しの直前までに並ぶ版数を、
+# 現行版の基底と比べる。
+VERSION_SECTION_HEADING = "## 版の付け方と開発版の配布"
+# 終端は自身と同じか上位の見出しで取り、深さは位置決めの見出しから導く。同じ深さだけで
+# 区切ると、次が上位の見出しのときに区間が閉じず、後ろの章に並ぶ前の版の版数まで現行版と
+# 比べてしまう。深さを固定すると、位置決めの見出しの深さを変えたときに規則から外れる
+# （`## ` の章を固定の 3 段で閉じると、章の中の `### ` 小見出しで区間が切れる）。
+_SECTION_DEPTH = len(VERSION_SECTION_HEADING) - len(VERSION_SECTION_HEADING.lstrip("#"))
+SECTION_HEADING = re.compile(r"^#{1,%d}\s" % _SECTION_DEPTH)
 # 囲みの中の `# ` 始まりはシェルのコメントであって見出しではない。囲みを跨いで数えると、
 # 節の途中の実行例で区間が切れる。
 CODE_FENCE = re.compile(r"^\s*(?:```|~~~)")
 # 囲みまで含めて位置を固定する。前後の 1 文字を塞ぐだけでは、空白で区切られた
 # `codex-cli 0.146.1` の `0.146.1` が走査へ入り、現行版より小さい基底として誤検出になる。
-# この節の版数はすべて `` `9.6.0` `` の形で書く（節の中の 10 箇所すべてが囲まれていることを
-# 確認済み）。囲まずに書いた版数は走査に入らないため、例を足すときは囲みを付ける。
+# この章の版数はすべて `` `9.6.0` `` の形で書く（正本へ移した時点の章の中の 10 箇所すべてが
+# 囲まれていることを確認済み）。囲まずに書いた版数は走査に入らないため、例を足すときは囲みを付ける。
 SECTION_VERSION = re.compile(r"`v?" + VERSION + r"`")
 
 
@@ -380,7 +386,7 @@ def check_plugin_table(root: Path, body: str, report: Report) -> None:
 
 
 def check_version_section(body: str, version: str | None, report: Report) -> None:
-    """「版の付け方と開発版の配布」節に並ぶ版数を、現行版の基底と比べる（J）。
+    """正本の「版の付け方と開発版の配布」章に並ぶ版数を、現行版の基底と比べる（J）。
 
     この節の版数は 1 つの値ではなく、現行版を基にした例の集まりである。現行版そのもの・
     接尾辞を付けたもの・次の版を指すものが混ざるため、点の照合ではなく区間の規則にする。
@@ -388,7 +394,7 @@ def check_version_section(body: str, version: str | None, report: Report) -> Non
 
     **接尾辞は基底を取り出す時点で捨てる。** semver の順序では `9.6.0-dev.1` が `9.6.0`
     より小さいため、接尾辞まで見て比べると節の内容がそのまま失敗になる。接尾辞の
-    付け忘れ・外し忘れをここでは見ない（`AGENTS.md` に書かれているとおりである）。
+    付け忘れ・外し忘れをここでは見ない（正本の「検査に載らず手で直す箇所」に書かれているとおりである）。
 
     **区間の終わりは、自身と同じか上位の見出しである。** 囲みの中は見出しとして数えない。
 
@@ -414,7 +420,7 @@ def check_version_section(body: str, version: str | None, report: Report) -> Non
                 numbers.append(number)
     if not values:
         report.add(
-            AGENTS_MD,
+            VERSIONING_MD,
             "版の付け方の節の版数を読み取れない"
             f"（`{VERSION_SECTION_HEADING}` の節へ版数の例を囲みで置く。"
             f"{PLUGIN_JSON}: {version}）",
@@ -426,7 +432,7 @@ def check_version_section(body: str, version: str | None, report: Report) -> Non
     for value, number in zip(values, numbers):
         if base_of(value) < current:
             report.add(
-                AGENTS_MD,
+                VERSIONING_MD,
                 "版の付け方の節の版数が現行版より古い"
                 f"（記載: {value}（L{number}） / {PLUGIN_JSON}: {version}）",
             )
@@ -447,7 +453,7 @@ def check_root_readme_versions(root: Path, body: str, version: str | None, repor
 
 
 def check_agents_md(body: str, version: str | None, report: Report) -> None:
-    """`AGENTS.md` の「主要プラグインです（v<版>）」（I）と版の付け方の節（J）を見る。"""
+    """`AGENTS.md` の「主要プラグインです（v<版>）」（I）を見る。"""
     check_point_version(
         AGENTS_MD,
         "「主要プラグインです（v<版>）」の版数",
@@ -457,7 +463,6 @@ def check_agents_md(body: str, version: str | None, report: Report) -> None:
         version,
         report,
     )
-    check_version_section(body, version, report)
 
 
 def check_plugin_readme_versions(body: str, version: str | None, report: Report) -> None:
@@ -580,7 +585,7 @@ def check_upgrade_heading(body: str, version: str | None, report: Report) -> Non
 
     本文がその版の変更内容を説明しているかは機械では決められない。ここで見るのは見出しの
     版数だけで、版を上げたときに必ずこの節へ触る状態を作ることを目的とする。本文を読み直す
-    機会は `docs/plugin-development-guide.md` のバージョン管理の手順が作る。
+    機会は `docs/versioning-and-distribution.md` の「検査に載らず手で直す箇所」が作る。
     """
     headings = UPGRADE_HEADING.findall(body)
     if not headings:
@@ -630,6 +635,12 @@ def main() -> int:
     agents_body = read_document(root, AGENTS_MD, report)
     if agents_body is not None:
         check_agents_md(agents_body, version, report)
+
+    # 検査 I（`AGENTS.md`）と検査 J（正本）は別の文書を読む。本文を共有すると、正本の記載が
+    # 古いことを `AGENTS.md` の失敗として報告してしまう。
+    versioning_body = read_document(root, VERSIONING_MD, report)
+    if versioning_body is not None:
+        check_version_section(versioning_body, version, report)
 
     plugin_body = read_document(root, PLUGIN_README, report)
     if plugin_body is not None:

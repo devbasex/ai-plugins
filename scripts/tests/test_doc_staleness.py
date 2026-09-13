@@ -11,6 +11,7 @@ import pytest
 
 from doc_staleness_helpers import (
     REPO_ROOT,
+    VERSIONING_MD_PATH,
     bump_plugin_version,
     edit,
     edit_all,
@@ -395,13 +396,20 @@ def test_plugin_table_row_removed_fails(tree: Path) -> None:
     assert "README.md" in output_of(result)
 
 
-# --- J: AGENTS.md の「版の付け方と開発版の配布」節（区間の検査） ---
+# --- J: 正本の「版の付け方と開発版の配布」章（区間の検査） ---
+#
+# 版数の扱いの正本は `docs/versioning-and-distribution.md` である（#499）。検査 J は
+# `AGENTS.md` ではなく正本の章 2 を読み、失敗も正本のパスで報告する。
+
+
+def versioning_md(tree: Path) -> Path:
+    return tree / VERSIONING_MD_PATH
 
 
 def add_to_version_section(tree: Path, line: str) -> None:
-    """版の付け方の節の末尾へ 1 行足す。"""
+    """版の付け方の章の末尾へ 1 行足す。"""
     edit(
-        agents_md(tree),
+        versioning_md(tree),
         "- 接尾辞は次に出す正式版の版数へ付ける。`9.3.0` の次を開発するなら `9.4.0-dev.1`\n",
         "- 接尾辞は次に出す正式版の版数へ付ける。`9.3.0` の次を開発するなら `9.4.0-dev.1`\n"
         f"{line}\n",
@@ -409,14 +417,21 @@ def add_to_version_section(tree: Path, line: str) -> None:
 
 
 def test_version_section_stale_example_fails(tree: Path) -> None:
-    """節の中に現行版より古い基底の版数があれば失敗し、行番号が出力に入る。"""
+    """章の中に現行版より古い基底の版数があれば失敗し、行番号が出力に入る。"""
     add_to_version_section(tree, "- 前の版の例。`9.2.1` はもう使わない")
     result = run_check(tree)
     assert result.returncode != 0
     out = output_of(result)
-    assert "AGENTS.md" in out
     assert "9.2.1" in out and "9.3.0" in out
-    assert "L13" in out
+    assert "L17" in out
+
+
+def test_version_section_failure_names_the_canonical_document(tree: Path) -> None:
+    """報告先は正本のパスである。`AGENTS.md` の失敗として出さない。"""
+    add_to_version_section(tree, "- 前の版の例。`9.2.1` はもう使わない")
+    out = output_of(run_check(tree))
+    assert f"ERROR: {VERSIONING_MD_PATH}: 版の付け方の節の版数が現行版より古い" in out
+    assert "ERROR: AGENTS.md" not in out
 
 
 def test_version_section_newer_example_passes(tree: Path) -> None:
@@ -441,30 +456,56 @@ def test_version_section_two_digit_minor_passes(tree: Path) -> None:
 
 
 def test_version_section_heading_removed_fails(tree: Path) -> None:
-    """節を消して検査を通せる状態にしない。"""
-    edit(agents_md(tree), "### 版の付け方と開発版の配布\n", "")
+    """章を消して検査を通せる状態にしない。"""
+    edit(versioning_md(tree), "## 版の付け方と開発版の配布\n", "")
     result = run_check(tree)
     assert result.returncode != 0
-    assert "AGENTS.md" in output_of(result)
+    assert VERSIONING_MD_PATH in output_of(result)
 
 
-def test_version_section_stops_at_a_higher_level_heading(tree: Path) -> None:
-    """節の直後が上位の見出し（`## `）でも区間を抜ける。
+def test_missing_versioning_document_fails(tree: Path) -> None:
+    """正本そのものが無いことを失敗として扱い、正本のパスを出す。"""
+    versioning_md(tree).unlink()
+    result = run_check(tree)
+    assert result.returncode != 0
+    assert VERSIONING_MD_PATH in output_of(result)
 
-    自身と同じ深さの見出しだけで区切ると、次が `## ` のときに区間が閉じない。閉じなければ
-    走査は文書の末尾まで続き、変更履歴に並ぶ前の版の版数を現行版と比べてしまう。
-    """
-    edit(agents_md(tree), "### 検査が突き合わせる箇所\n", "## 検査が突き合わせる箇所\n")
-    body = agents_md(tree).read_text(encoding="utf-8")
-    assert "v8.5.4" in body and "8.4.0" in body
+
+def test_versions_after_the_section_do_not_fail(tree: Path) -> None:
+    """章 2 より後ろの章に囲んだ古い版数があっても落ちない（区間は次の同位の見出しで閉じる）。"""
+    body = versioning_md(tree).read_text(encoding="utf-8")
+    assert "`8.4.0`" in body.split("## 版数を持つ 15 箇所", 1)[1]
     result = run_check(tree)
     assert result.returncode == 0, output_of(result)
 
 
-def test_other_software_version_in_the_section_is_ignored(tree: Path) -> None:
-    """節の中の他ソフトの版数を拾わない。
+def test_version_section_stops_at_a_higher_level_heading(tree: Path) -> None:
+    """章の直後が上位の見出し（`# `）でも区間を抜ける。
 
-    節は配布の手順を説明するため、CLI の名前と版数を並べて書くことがある。前後の 1 文字だけで
+    自身と同じ深さの見出しだけで区切ると、次が上位の見出しのときに区間が閉じない。閉じなければ
+    走査は文書の末尾まで続き、後ろの章に並ぶ前の版の版数を現行版と比べてしまう。
+    """
+    edit(versioning_md(tree), "## 版数を持つ 15 箇所\n", "# 版数を持つ 15 箇所\n")
+    result = run_check(tree)
+    assert result.returncode == 0, output_of(result)
+
+
+def test_subheading_inside_the_section_does_not_close_it(tree: Path) -> None:
+    """章 2 の中の `### ` 小見出しで区間を閉じない。
+
+    終端を固定の 3 段で取ると、`## ` の章の中の小見出しで区間が切れ、その後ろの古い版数を
+    見落とす。終端は位置決めの見出しの深さから導く。
+    """
+    add_to_version_section(tree, "\n### 接尾辞の規則\n\n- 前の版の例。`9.2.1` はもう使わない")
+    result = run_check(tree)
+    assert result.returncode != 0
+    assert "9.2.1" in output_of(result)
+
+
+def test_other_software_version_in_the_section_is_ignored(tree: Path) -> None:
+    """章の中の他ソフトの版数を拾わない。
+
+    章は配布の手順を説明するため、CLI の名前と版数を並べて書くことがある。前後の 1 文字だけで
     位置を決めると、`codex-cli 0.146.1` の `0.146.1` のように空白で区切られた値が走査へ入り、
     現行版より小さい基底として誤検出になる。
     """
@@ -493,11 +534,11 @@ def test_backticked_current_versions_pass(tree: Path) -> None:
 
 
 def add_code_fence_to_version_section(tree: Path) -> None:
-    """版の付け方の節の先頭へ、シェルのコメントを含む実行例を置く。"""
+    """版の付け方の章の先頭へ、シェルのコメントを含む実行例を置く。"""
     edit(
-        agents_md(tree),
-        "### 版の付け方と開発版の配布\n",
-        "### 版の付け方と開発版の配布\n"
+        versioning_md(tree),
+        "## 版の付け方と開発版の配布\n",
+        "## 版の付け方と開発版の配布\n"
         "\n"
         "```bash\n"
         "# 常用する利用者（正式版）\n"
@@ -507,7 +548,7 @@ def add_code_fence_to_version_section(tree: Path) -> None:
 
 
 def test_code_fence_comment_does_not_close_the_section(tree: Path) -> None:
-    """囲みの中の `# ` 始まりで区間を閉じない（実物の節は実行例を含む）。"""
+    """囲みの中の `# ` 始まりで区間を閉じない（実物の章は実行例を含む）。"""
     add_code_fence_to_version_section(tree)
     result = run_check(tree)
     assert result.returncode == 0, output_of(result)
