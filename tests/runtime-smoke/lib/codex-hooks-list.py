@@ -30,6 +30,37 @@ def fail(message, stderr_tail):
     sys.exit(1)
 
 
+def await_hooks_list(lines, reader_done, stderr_tail):
+    deadline = time.monotonic() + TIMEOUT_SECONDS
+    received = []
+    while True:
+        while lines:
+            line = lines.popleft()
+            received.append(line)
+            try:
+                message = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if message.get("id") != HOOKS_LIST_ID:
+                continue
+            body = "".join(received)
+            if "error" in message:
+                fail("hooks/list returned an error:\n" + body, stderr_tail)
+            result = message.get("result")
+            if not isinstance(result, dict) or "data" not in result:
+                fail("hooks/list response has no result.data:\n" + body, stderr_tail)
+            json.dump(result, sys.stdout, ensure_ascii=False, indent=2)
+            sys.stdout.write("\n")
+            return
+        if reader_done.is_set() and not lines:
+            fail("codex app-server exited before answering hooks/list:\n"
+                 + "".join(received), stderr_tail)
+        if time.monotonic() > deadline:
+            fail(f"codex app-server did not answer hooks/list within {TIMEOUT_SECONDS}s:\n"
+                 + "".join(received), stderr_tail)
+        time.sleep(0.05)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--cwd", default=os.getcwd())
@@ -69,35 +100,7 @@ def main():
               "params": {"clientInfo": {"name": "runtime-smoke", "version": "0.0.0"}}})
         send({"method": "initialized"})
         send({"id": HOOKS_LIST_ID, "method": "hooks/list", "params": {"cwds": [args.cwd]}})
-
-        deadline = time.monotonic() + TIMEOUT_SECONDS
-        received = []
-        while True:
-            while lines:
-                line = lines.popleft()
-                received.append(line)
-                try:
-                    message = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if message.get("id") != HOOKS_LIST_ID:
-                    continue
-                body = "".join(received)
-                if "error" in message:
-                    fail("hooks/list returned an error:\n" + body, stderr_tail)
-                result = message.get("result")
-                if not isinstance(result, dict) or "data" not in result:
-                    fail("hooks/list response has no result.data:\n" + body, stderr_tail)
-                json.dump(result, sys.stdout, ensure_ascii=False, indent=2)
-                sys.stdout.write("\n")
-                return
-            if reader_done.is_set() and not lines:
-                fail("codex app-server exited before answering hooks/list:\n"
-                     + "".join(received), stderr_tail)
-            if time.monotonic() > deadline:
-                fail(f"codex app-server did not answer hooks/list within {TIMEOUT_SECONDS}s:\n"
-                     + "".join(received), stderr_tail)
-            time.sleep(0.05)
+        await_hooks_list(lines, reader_done, stderr_tail)
     finally:
         if proc.poll() is None:
             proc.kill()

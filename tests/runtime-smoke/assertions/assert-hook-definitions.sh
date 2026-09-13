@@ -138,6 +138,61 @@ runtime_version() {
   "$runtime" --version 2>/dev/null | tail -n 1
 }
 
+# 陽性対照を先に読ませ、報告を受け取れることを確かめてから本物を読ませる
+run_positive_control() {
+  local control=() control_entry control_dir
+  mapfile -t control < <(discover_targets "$FIXTURE_ROOT" "$runtime")
+  IFS=$'\t' read -r control_entry _ control_dir <<<"${control[0]:?positive control fixture has no plugin for $runtime}"
+
+  case "$runtime" in
+    claude) claude_load positive-control "$control_dir" ;;
+    codex) codex_load positive-control "$FIXTURE_ROOT" "$control_entry" ;;
+  esac
+  if [ ! -s "$OUT_DIR/$runtime-positive-control.reports" ]; then
+    echo "$runtime $(runtime_version) did not report the broken hooks fixture; the report format may have changed or the image is stale" >&2
+    exit 1
+  fi
+  echo "positive control reported: $(head -n 1 "$OUT_DIR/$runtime-positive-control.reports")"
+}
+
+# 実プラグインを読ませ、読まれるべき名前を expected に入れる。
+# Claude Code のログは plugin.json の名前を、Codex の pluginId はマーケットプレイス上の名前を書く
+load_plugin_targets() {
+  case "$runtime" in
+    claude)
+      claude_load plugins "${dirs[@]}"
+      expected=("${manifest_names[@]}")
+      ;;
+    codex)
+      codex_load plugins "$REPO_ROOT" "${entry_names[@]}"
+      expected=("${entry_names[@]}")
+      ;;
+  esac
+}
+
+# 報告が 0 件で expected のすべてが読まれていれば 0 を、そうでなければ 1 を返す
+evaluate_loaded_targets() {
+  local status=0 missing=() name
+  if [ -s "$OUT_DIR/$runtime-plugins.reports" ]; then
+    echo "$runtime reported hooks definitions:" >&2
+    cat "$OUT_DIR/$runtime-plugins.reports" >&2
+    status=1
+  fi
+
+  for name in "${expected[@]}"; do
+    grep -Fxq "$name" "$OUT_DIR/$runtime-plugins.loaded" || missing+=("$name")
+  done
+  if [ "${#missing[@]}" -gt 0 ]; then
+    echo "$runtime did not load hooks for: ${missing[*]}" >&2
+    status=1
+  fi
+
+  if [ "$status" -eq 0 ]; then
+    echo "hooks definitions ($runtime): no report, all ${#expected[@]} plugins loaded"
+  fi
+  return "$status"
+}
+
 mapfile -t targets < <(discover_targets "$REPO_ROOT" "$runtime")
 if [ "${#targets[@]}" -eq 0 ]; then
   echo "no plugin with hooks definitions found" >&2
@@ -151,49 +206,8 @@ for line in "${targets[@]}"; do
 done
 echo "==> hooks definitions ($runtime): ${manifest_names[*]}"
 
-mapfile -t control < <(discover_targets "$FIXTURE_ROOT" "$runtime")
-IFS=$'\t' read -r control_entry _ control_dir <<<"${control[0]:?positive control fixture has no plugin for $runtime}"
-
-# 陽性対照を先に読ませ、報告を受け取れることを確かめてから本物を読ませる
-case "$runtime" in
-  claude) claude_load positive-control "$control_dir" ;;
-  codex) codex_load positive-control "$FIXTURE_ROOT" "$control_entry" ;;
-esac
-if [ ! -s "$OUT_DIR/$runtime-positive-control.reports" ]; then
-  echo "$runtime $(runtime_version) did not report the broken hooks fixture; the report format may have changed or the image is stale" >&2
-  exit 1
-fi
-echo "positive control reported: $(head -n 1 "$OUT_DIR/$runtime-positive-control.reports")"
-
-# Claude Code のログは plugin.json の名前を、Codex の pluginId はマーケットプレイス上の名前を書く
-case "$runtime" in
-  claude)
-    claude_load plugins "${dirs[@]}"
-    expected=("${manifest_names[@]}")
-    ;;
-  codex)
-    codex_load plugins "$REPO_ROOT" "${entry_names[@]}"
-    expected=("${entry_names[@]}")
-    ;;
-esac
-
+run_positive_control
+load_plugin_targets
 status=0
-if [ -s "$OUT_DIR/$runtime-plugins.reports" ]; then
-  echo "$runtime reported hooks definitions:" >&2
-  cat "$OUT_DIR/$runtime-plugins.reports" >&2
-  status=1
-fi
-
-missing=()
-for name in "${expected[@]}"; do
-  grep -Fxq "$name" "$OUT_DIR/$runtime-plugins.loaded" || missing+=("$name")
-done
-if [ "${#missing[@]}" -gt 0 ]; then
-  echo "$runtime did not load hooks for: ${missing[*]}" >&2
-  status=1
-fi
-
-if [ "$status" -eq 0 ]; then
-  echo "hooks definitions ($runtime): no report, all ${#expected[@]} plugins loaded"
-fi
+evaluate_loaded_targets || status=$?
 exit "$status"
