@@ -208,6 +208,22 @@ def test_4_no_section_and_no_design_document_returns_0(fake):
     assert out.returncode == 0, out.stdout + out.stderr
 
 
+@pytest.mark.parametrize(
+    ("body", "expected_returncode"),
+    [
+        ("## Summary\n", 0),
+        (f"## Summary\n\n{EXPECTED}\n## Test plan\n", 1),
+    ],
+)
+def test_4_no_changed_files_compares_against_zero_decisions(fake, body, expected_returncode):
+    """現状固定: 変更ファイル 0 件は設計文書・決定とも 0 件として扱う。"""
+    fake.setup(body=body, files={})
+
+    out = fake.run("check", "7", "--repo", REPO)
+
+    assert out.returncode == expected_returncode, out.stdout + out.stderr
+
+
 def test_4_empty_decisions_without_subheadings_is_treated_as_zero_decisions(fake):
     """現状固定: 「## 決定の記録」があっても「### 」見出しが無ければ決定 0 件として扱う。"""
     empty_design = "# 設計\n\n## 決定の記録\n\n決定事項はまだありません。\n\n## その他\n"
