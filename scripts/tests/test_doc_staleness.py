@@ -582,6 +582,18 @@ def test_malformed_plugin_version_is_reported_as_a_failure(tree: Path, version: 
     assert "plugin.json" in out and "ERROR: " in out
 
 
+def test_missing_plugin_version_is_reported_as_a_failure(tree: Path) -> None:
+    """`version` キーが無ければ、例外ではなく検査の失敗として出す。"""
+    (tree / "plugins/ndf/.claude-plugin/plugin.json").write_text(
+        '{\n  "name": "ndf"\n}\n', encoding="utf-8"
+    )
+    result = run_check(tree)
+    out = output_of(result)
+    assert result.returncode != 0
+    assert "Traceback" not in out
+    assert "plugin.json" in out
+
+
 def test_versions_outside_the_section_do_not_fail(tree: Path) -> None:
     """変更履歴・履歴の説明にある古い版数を誤検出しない。"""
     body = agents_md(tree).read_text(encoding="utf-8")
