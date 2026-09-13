@@ -185,6 +185,54 @@ def test_reinstall_preserves_user_managed_agent_config(tmp_path: Path) -> None:
     assert reinstalled["hooks"]["userPromptSubmit"]
 
 
+def test_reinstall_removes_optional_features_when_flags_omitted(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    first = run(
+        "--project",
+        str(project),
+        "--with-slack",
+        "--with-codex",
+        "--yes",
+        home=tmp_path,
+    )
+    assert first.returncode == 0, first.stderr
+
+    agent_file = project / ".kiro" / "agents" / "ndf.json"
+    config = json.loads(agent_file.read_text(encoding="utf-8"))
+    assert "stop" in config["hooks"]
+    assert "codex" in config["mcpServers"]
+
+    config["customKey"] = {"enabled": True}
+    config["mcpServers"]["myserver"] = {
+        "command": "myserver",
+        "args": ["serve"],
+    }
+    config["hooks"]["myhook"] = [
+        {"command": "echo custom", "timeout_ms": 1000}
+    ]
+    agent_file.write_text(
+        json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+
+    second = run("--project", str(project), "--yes", home=tmp_path)
+    assert second.returncode == 0, second.stderr
+
+    reinstalled = json.loads(agent_file.read_text(encoding="utf-8"))
+    assert "stop" not in reinstalled["hooks"]
+    assert "codex" not in reinstalled.get("mcpServers", {})
+    assert reinstalled["mcpServers"]["myserver"] == {
+        "command": "myserver",
+        "args": ["serve"],
+    }
+    assert reinstalled["hooks"]["myhook"] == [
+        {"command": "echo custom", "timeout_ms": 1000}
+    ]
+    assert reinstalled["customKey"] == {"enabled": True}
+    assert reinstalled["hooks"]["agentSpawn"]
+    assert reinstalled["hooks"]["userPromptSubmit"]
+
+
 @pytest.mark.parametrize(
     ("cwd_part", "arg", "resolved_part"),
     [(".", "project/sub", "project/sub"), ("project", ".", "project")],
