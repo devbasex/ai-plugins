@@ -900,193 +900,244 @@ def test_missing_agents_md_fails(tree: Path) -> None:
     assert "AGENTS.md" in output_of(result)
 
 
-# --- これより下は、以前は動的ロードした module の内部関数・内部定数・Report.errors を
-# 直接触っていた現状固定テスト群である。同じ入力条件と観測結果を、一時リポジトリと
-# `run_check` の公開 CLI 境界で確かめる形へ置き換えた（内部への結合を断つ）。
+# --- base_of: バージョン文字列を基底タプルへ分解する（単体）---
 
 
-# --- base_of: 版数の基底の取り出し（接尾辞を捨てる・整数の組で比べる）---
+def _load_checker():
+    """`scripts/check-doc-staleness.py` を module として読み込む。
 
-
-def test_version_section_prerelease_and_two_digit_minor_pass(tree: Path) -> None:
-    """節の版数の比較が、接尾辞を捨てた基底を整数の組で行うことを境界で確かめる。
-
-    `9.3.0-dev.9`（現行版の接尾辞付き）と `9.10.0`（2 桁 minor）を節へ足す。前者は
-    接尾辞まで見ると `9.3.0` より小さく、後者は文字列比較だと `9.3.0` より小さいと
-    誤判定される。どちらも通ることで、接尾辞を捨てた整数の組で比べていることを固定する。
+    ファイル名にハイフンを含むため通常の import では取り込めない。
+    リポジトリ内の他のテスト（`test_doc_line_limit.py` など）と同じく
+    `spec_from_file_location` で読み込む。
     """
-    add_to_version_section(tree, "- 開発版の例。`9.3.0-dev.9` は検証中である")
-    add_to_version_section(tree, "- 先の版の例。`9.10.0` へ進む")
-    result = run_check(tree)
-    assert result.returncode == 0, output_of(result)
+    import importlib.util
+    import sys
+
+    spec = importlib.util.spec_from_file_location("check_doc_staleness", CHECKER)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    # dataclass の解決は `cls.__module__` を `sys.modules` から引くため、
+    # exec_module の前に登録しておく。
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
-# --- H: 一覧表の行の plugin.json が非文字列の version を持つ境界 ---
+def test_named_plugin_version_returns_none_for_non_string_version(tmp_path: Path) -> None:
+    """version が文字列でなければ None を返す（現状固定）。"""
+    module = _load_checker()
+    plugin_json = tmp_path / "plugins/test-plugin/.claude-plugin/plugin.json"
+    plugin_json.parent.mkdir(parents=True)
+    plugin_json.write_text('{"version": 123}\n', encoding="utf-8")
+
+    assert module.named_plugin_version(tmp_path, "test-plugin") is None
 
 
-def test_plugin_table_non_string_version_is_reported_as_missing(tree: Path) -> None:
-    """一覧表の行の `plugin.json` の version が文字列でなければ、突き合わせ先が無いものとして失敗する。
+def test_base_of_drops_suffix_and_splits_into_int_triple() -> None:
+    """接尾辞あり・なしのどちらの入力も、同じ整数の 3 つ組へ分解される（現状固定）。"""
+    module = _load_checker()
+    assert module.base_of("9.6.0-dev.1") == (9, 6, 0)
+    assert module.base_of("9.6.0") == (9, 6, 0)
+    assert module.base_of("9.6.0-dev.1") == module.base_of("9.6.0")
 
-    以前の `named_plugin_version` が `None` を返す経路の現状固定を、CLI 境界で確かめる。
+
+# --- manifest_skill_count: 有効な Skill 名が 0 件の境界（単体）---
+
+
+def test_manifest_skill_count_with_only_blank_and_comment_lines_returns_zero(tmp_path: Path) -> None:
+    """空行とコメント行だけのマニフェストは 0 を返し、エラーを記録しない（現状固定）。
+
+    有効な Skill 名が 1 件も無い境界において、`manifest_skill_count` が `None` ではなく
+    0 を返し、`report.errors` が空のまま戻ることを固定する。ファイルが存在しないときの
+    `None` と区別されている経路である。
     """
-    (tree / "plugins/fixture-kit/.claude-plugin/plugin.json").write_text(
-        '{"name": "fixture-kit", "version": 123}\n', encoding="utf-8"
-    )
-    result = run_check(tree)
-    assert result.returncode != 0
-    out = output_of(result)
-    assert "fixture-kit" in out
-    assert "突き合わせられない" in out
-
-
-# --- manifest_skill_count: 有効な Skill 名が 0 件の境界 ---
-
-
-def test_manifest_with_only_blank_and_comment_lines_counts_as_zero(tree: Path) -> None:
-    """空行とコメント行だけのマニフェストは 0 件として数え、記載側の数も 0 なら通る。
-
-    有効な Skill 名が 1 件も無い境界で、マニフェストが「無い」（`None`）ではなく 0 件として
-    扱われることを固定する。README と plugin README の Kiro の数を 0 へ合わせると、突き合わせ先が
-    無いという失敗ではなく、0 同士が一致して検査が通る。
-    """
-    manifest = tree / "plugins/ndf/manifests/kiro-skills.txt"
+    module = _load_checker()
+    manifest = tmp_path / "plugins/ndf/manifests/kiro-skills.txt"
+    manifest.parent.mkdir(parents=True)
     manifest.write_text("# コメント行\n\n   \n# 別のコメント\n", encoding="utf-8")
-    edit(root_readme(tree), "Kiro向け core 4個", "Kiro向け core 0個")
-    edit(plugin_readme(tree), "| Kiro CLI | 4 個 |", "| Kiro CLI | 0 個 |")
-    result = run_check(tree)
-    assert result.returncode == 0, output_of(result)
+
+    report = module.Report()
+    assert module.manifest_skill_count(tmp_path, "kiro", report) == 0
+    assert report.errors == []
 
 
-# --- check_version_section: 節に版数が 1 件も無い境界 ---
+# --- check_version_section: 節に版数が 1 件も無い境界（単体）---
 
 
-def replace_version_section_body(tree: Path, new_body: str) -> None:
-    """版の付け方の章の見出しと次の章の見出しの間を、丸ごと差し替える。
-
-    節の版数の例をすべて外した状態や、任意の例だけを置いた状態を境界として作るために使う。
-    """
-    heading = "## 版の付け方と開発版の配布\n"
-    next_heading = "## 版数を持つ 15 箇所\n"
-    body = versioning_md(tree).read_text(encoding="utf-8")
-    before, rest = body.split(heading, 1)
-    _, after = rest.split(next_heading, 1)
-    versioning_md(tree).write_text(before + heading + new_body + next_heading + after, encoding="utf-8")
-
-
-def test_version_section_without_any_version_fails(tree: Path) -> None:
-    """章の見出しはあるが囲みの版数が 1 件も無ければ、「版数を読み取れない」で失敗する。"""
-    replace_version_section_body(tree, "\n版数の例をここには置いていない。\n\n")
-    result = run_check(tree)
-    assert result.returncode != 0
-    out = output_of(result)
-    assert VERSIONING_MD_PATH in out
-    assert "版の付け方の節の版数を読み取れない" in out
+def test_version_section_without_any_version_reports_once_and_returns() -> None:
+    """見出しだけで囲みの版数が 0 件なら、読み取れない旨の 1 件だけを記録して戻る（現状固定）。"""
+    module = _load_checker()
+    report = module.Report()
+    module.check_version_section(f"{module.VERSION_SECTION_HEADING}\n", "9.3.0", report)
+    assert report.errors == [
+        f"{module.VERSIONING_MD}: 版の付け方の節の版数を読み取れない"
+        f"（`{module.VERSION_SECTION_HEADING}` の節へ版数の例を囲みで置く。"
+        f"{module.PLUGIN_JSON}: 9.3.0）"
+    ]
 
 
-# --- check_version_section: 現行版数（plugin.json）が読めない分岐 ---
+# --- check_version_section: 現行版数が取得できない分岐（単体）---
 
 
-def test_version_section_not_compared_when_plugin_version_unreadable(tree: Path) -> None:
-    """`plugin.json` の版数が読めないときは、節の版数との比較を行わない。
+def test_version_section_with_no_current_version_returns_true_without_error() -> None:
+    """節の版数を読めても現行版数が無ければ、比較せず正常終了する（現状固定）。"""
+    module = _load_checker()
+    report = module.Report()
+    body = f"{module.VERSION_SECTION_HEADING}\n\n開発版の例は `9.3.0` である。\n"
 
-    節に現行版より古い基底の例を置いても、`plugin.json` の版数が読めなければ「現行版より古い」
-    という失敗は出ない。出るのは版数そのものが読めないという 1 件だけである。
-    """
-    add_to_version_section(tree, "- 前の版の例。`9.2.1` はもう使わない")
-    bump_plugin_version(tree, "1.0")  # semver の形でない → 版数が読めない
-    result = run_check(tree)
-    assert result.returncode != 0
-    out = output_of(result)
-    assert "plugin.json" in out
-    assert "版の付け方の節の版数が現行版より古い" not in out
+    assert module.check_version_section(body, None, report) is True
+    assert report.errors == []
 
 
-# --- check_version_section: 節の後ろに終端の見出しが無い境界 ---
+# --- check_version_section: 節の後ろに終端の見出しが無い境界（単体）---
 
 
-def test_version_section_at_end_of_document_scans_until_eof(tree: Path) -> None:
-    """章が文書の末尾で終端の見出しが無くても、EOF まで走査して古い版数を拾う。"""
-    body = versioning_md(tree).read_text(encoding="utf-8")
-    head = body.split("## 版数を持つ 15 箇所", 1)[0]
-    versioning_md(tree).write_text(head + "- 末尾の例。`9.2.1` はもう使わない\n", encoding="utf-8")
-    result = run_check(tree)
-    assert result.returncode != 0
-    out = output_of(result)
-    assert "9.2.1" in out and "9.3.0" in out
+def test_version_section_at_end_of_document_scans_until_eof() -> None:
+    """節が文書の末尾で終端の見出しが無くても、EOF まで走査して古い版数を記録する（現状固定）。"""
+    module = _load_checker()
+    report = module.Report()
+    body = f"{module.VERSION_SECTION_HEADING}\n\n開発版の例は `9.2.1` である。\n"
+    module.check_version_section(body, "9.3.0", report)
+    assert report.errors == [
+        f"{module.VERSIONING_MD}: 版の付け方の節の版数が現行版より古い"
+        f"（記載: 9.2.1（L3） / {module.PLUGIN_JSON}: 9.3.0）"
+    ]
 
 
-def test_version_section_finds_stale_version_inside_code_fence(tree: Path) -> None:
-    """囲みの中の版数も走査し、古い版数なら拾う。"""
-    replace_version_section_body(
-        tree,
-        "\n```text\n古い版の例は `9.2.1` である。\n```\n\n現行版の例は `9.3.0` である。\n\n",
+def test_version_section_finds_stale_version_inside_code_fence() -> None:
+    """囲みの中の版数も走査し、古い版数なら記録する（現状固定）。"""
+    module = _load_checker()
+    report = module.Report()
+    body = (
+        f"{module.VERSION_SECTION_HEADING}\n"
+        "\n"
+        "```text\n"
+        "古い版の例は `9.2.1` である。\n"
+        "```\n"
+        "\n"
+        "現行版の例は `9.3.0` である。\n"
     )
-    result = run_check(tree)
-    assert result.returncode != 0
-    out = output_of(result)
-    assert "9.2.1" in out and "9.3.0" in out
+    module.check_version_section(body, "9.3.0", report)
+    assert report.errors == [
+        f"{module.VERSIONING_MD}: 版の付け方の節の版数が現行版より古い"
+        f"（記載: 9.2.1（L4） / {module.PLUGIN_JSON}: 9.3.0）"
+    ]
 
 
-# --- C: カテゴリ内訳の Skill 名の区切りが読点「、」でも分割される ---
 
+def test_category_breakdown_ideographic_comma_names_are_split() -> None:
+    """Skill 名の区切りが読点「、」でも分割され、個数が計上される（現状固定）。
 
-def test_category_breakdown_ideographic_comma_names_are_split(tree: Path) -> None:
-    """Skill 名の区切りが読点「、」でも半角カンマと同じく分割され、数が一致すれば通る。"""
-    edit(
-        root_readme(tree),
-        "  - 第1群 (4): alpha, bravo, charlie, delta\n",
-        "  - 第1群 (4): alpha、bravo、charlie、delta\n",
-    )
-    result = run_check(tree)
-    assert result.returncode == 0, output_of(result)
-
-
-def test_category_breakdown_ideographic_comma_line_count_mismatch_fails(tree: Path) -> None:
-    """読点区切りでも、宣言数と並ぶ名前の数が食い違えば失敗する（区切りが効いている証拠）。"""
-    edit(
-        root_readme(tree),
-        "  - 第1群 (4): alpha, bravo, charlie, delta\n",
-        "  - 第1群 (5): alpha、bravo、charlie、delta\n",
-    )
-    result = run_check(tree)
-    assert result.returncode != 0
-    assert "第1群" in output_of(result)
-
-
-# --- category_lines: 元Skills 行の直後だけを内訳として拾う ---
-
-
-def test_category_breakdown_below_a_non_category_line_is_not_counted(tree: Path) -> None:
-    """元Skills 行と内訳の間に別の行が入ると、その後ろの内訳は拾わず合計が食い違う。
-
-    位置で内訳を拾う（元Skills 行の直後から途切れるまで）ことを境界で確かめる。第2群を
-    元Skills 行から切り離すと、合計は第1群の 4 だけになり総数 5 と食い違って失敗する。
+    `NAME_SEPARATOR` は `[,、]` で、半角カンマと読点のどちらも区切りとして扱う。
+    読点で区切った本文を渡しても、宣言数と並ぶ名前の数が一致し、合計も総数と一致すれば
+    Report にエラーが追加されないことを固定する。
     """
-    edit(
-        root_readme(tree),
-        "  - 第1群 (4): alpha, bravo, charlie, delta\n  - 第2群 (1): echo\n",
-        "  - 第1群 (4): alpha, bravo, charlie, delta\n通常文\n  - 第2群 (1): echo\n",
+    module = _load_checker()
+    report = module.Report()
+    body = (
+        "- **元Skills（5個）**:\n"
+        "  - 第1群 (4): alpha、bravo、charlie、delta\n"
+        "  - 第2群 (1): echo\n"
+        "- 次の行\n"
     )
-    result = run_check(tree)
-    assert result.returncode != 0
-    out = output_of(result)
-    assert "4" in out and "5" in out
+    module.check_category_breakdown(body, 5, "src", report)
+    assert report.errors == []
 
 
-# --- check_version_examples: 正式版の行が重複したとき、正式版との比較をスキップする ---
+# --- category_lines: 元Skills行が無い境界（単体）---
 
 
-def test_version_form_stable_row_duplicated_skips_newer_than_stable_comparison(tree: Path) -> None:
-    """正式版の行が重複すると、開発版が正式版より古い基底でも「新しい版を指していない」は出ない。
+def test_category_lines_without_source_count_returns_none() -> None:
+    """本文中に元Skills行が存在しない場合、None を返す（現状固定）。"""
+    module = _load_checker()
+    markdown = (
+        "# ドキュメント\n"
+        "\n"
+        "- カテゴリA: 3個\n"
+        "- カテゴリB: 2個\n"
+    )
+    assert module.category_lines(markdown) is None
 
-    比較は正式版の行が 1 つのときだけ行う。重複を作り、開発版を正式版より古い基底へ落としても、
-    出る J の失敗は「同じ行が複数ある（正式版）」だけであることを固定する。
+
+def test_category_lines_stops_at_first_non_category_line() -> None:
+    """カテゴリ内訳が途切れた後のカテゴリ行は拾わない（現状固定）。"""
+    module = _load_checker()
+    markdown = (
+        "- **元Skills（5個）**:\n"
+        "  - 第1群 (4): alpha, bravo, charlie, delta\n"
+        "通常文\n"
+        "  - 第2群 (1): echo\n"
+    )
+    matched = module.category_lines(markdown)
+    assert matched is not None
+    assert [found.group(0) for found in matched] == [
+        "  - 第1群 (4): alpha, bravo, charlie, delta"
+    ]
+
+
+# --- location_of: index が lines の要素数以上である境界（単体）---
+
+
+def test_location_of_with_index_out_of_bounds_returns_empty_string() -> None:
+    """指定された index が lines の要素数以上である境界値において、空文字列を返す（現状固定）。"""
+    module = _load_checker()
+    claim = module.Claim(
+        path="test.md",
+        subject="テスト",
+        wording="テスト",
+        described=[10],
+        expected=10,
+        source="source",
+        lines=[10],
+    )
+    assert module.location_of(claim, 1) == ""
+
+
+# --- check_version_examples: 正式版の行が重複したとき比較をスキップする（単体）---
+
+
+def test_version_examples_skips_base_comparison_when_stable_row_is_duplicated() -> None:
+    """正式版の行が重複している場合、開発版との基底比較をスキップする（現状固定）。
+
+    正式版の行が 1 つのときだけ比較を行う分岐（len(rows["正式版"]) == 1）において、
+    正式版が重複したとき比較をスキップする経路を固定する。
+    開発版が正式版より古い基底を持っていても、「正式版の行より新しい版を指していない」
+    というエラーは出ず、正式版の重複エラーのみが報告される。
     """
-    edit(versioning_md(tree), STABLE_ROW, STABLE_ROW + "| 正式版 | `9.3.1` | 利用者が常用してよい |\n")
-    edit(versioning_md(tree), DEV_ROW, "| 開発版 | `9.2.0-dev.1` | 検証中 |\n")
-    result = run_check(tree)
-    assert result.returncode != 0
-    errors = j_errors(result)
-    assert any("同じ行が複数ある（正式版" in line for line in errors), output_of(result)
-    assert not any("正式版の行より新しい版を指していない" in line for line in errors)
+    module = _load_checker()
+    report = module.Report()
+    body = (
+        f"{module.VERSION_SECTION_HEADING}\n"
+        "| 正式版 | `9.3.0` | 利用者が常用してよい |\n"
+        "| 正式版 | `9.3.1` | 利用者が常用してよい |\n"
+        "| 開発版 | `9.2.0-dev.1` | 検証中 |\n"
+        "| 公開前の確認版 | `9.4.0-rc.1` | 正式版の候補 |\n"
+        "\n"
+        "`9.3.0` の次を開発するなら `9.4.0-dev.1`\n"
+    )
+    module.check_version_examples(body, report)
+    assert report.errors == [
+        f"{module.VERSIONING_MD}: 版の付け方の節の版の形の表に同じ行が複数ある（正式版: L2, L3）"
+    ]
+    assert not any("正式版の行より新しい版を指していない" in err for err in report.errors)
+
+
+# --- compare_plugin_table_row: 記載版数と plugin.json の版数が食い違う分岐（単体）---
+
+
+def test_compare_plugin_table_row_with_mismatched_version_records_error(
+    tmp_path: Path,
+) -> None:
+    """一覧表の記載版数と plugin.json の版数が食い違う場合、行番号と双方の版数を含むエラーを記録する（現状固定）。"""
+    module = _load_checker()
+    plugin_json = tmp_path / "plugins/fixture-kit/.claude-plugin/plugin.json"
+    plugin_json.parent.mkdir(parents=True)
+    plugin_json.write_text('{"version": "1.4.2"}\n', encoding="utf-8")
+
+    report = module.Report()
+    module.compare_plugin_table_row(tmp_path, "fixture-kit", "1.4.1", 42, report)
+    assert report.errors == [
+        f"{module.ROOT_README}: プラグイン一覧表の fixture-kit の版数が食い違う"
+        f"（記載: 1.4.1（L42） / {module.plugin_json_path('fixture-kit')}: 1.4.2）"
+    ]
 

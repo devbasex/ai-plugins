@@ -754,19 +754,13 @@ def check_upgrade_heading(body: str, version: str | None, report: Report) -> Non
         )
 
 
-@dataclass(frozen=True)
-class Sources:
-    """突き合わせ先として集めた値。説明文書の記載はこれと比べる。"""
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--root", default=".", help="リポジトリの根（既定: カレントディレクトリ）")
+    args = parser.parse_args()
+    root = Path(args.root).resolve()
 
-    counts: dict[str, int | None]
-    skills: int | None
-    version: str | None
-    total: int | None
-    source: str
-
-
-def collect_sources(root: Path, report: Report) -> Sources:
-    """配布 Skill 数・実体 Skill 数・plugin 版数など、突き合わせ先の値を集める。"""
+    report = Report()
     counts = {
         runtime: manifest_skill_count(root, runtime, report)
         for runtime in ("claude", "codex", "kiro", "agy")
@@ -778,72 +772,34 @@ def collect_sources(root: Path, report: Report) -> Sources:
     # 元 Skill の数は `skills/` の実体だけで決まる。
     total = skills
     source = f"{SKILLS_DIR}/ の実体 {skills}"
-    return Sources(counts=counts, skills=skills, version=version, total=total, source=source)
 
+    root_body = read_document(root, ROOT_README, report)
+    if root_body is not None:
+        check_root_readme(root_body, counts, total, source, report)
+        check_point_versions(ROOT_README, root_body, version, report)
+        check_root_readme_versions(root, root_body, report)
 
-def check_root_readme_document(root: Path, sources: Sources, report: Report) -> None:
-    """`README.md` を読み、数（A〜C）・点の版数（G）・一覧表の版数（H）を検査する。"""
-    body = read_document(root, ROOT_README, report)
-    if body is None:
-        return
-    check_root_readme(body, sources.counts, sources.total, sources.source, report)
-    check_point_versions(ROOT_README, body, sources.version, report)
-    check_root_readme_versions(root, body, report)
+    agents_body = read_document(root, AGENTS_MD, report)
+    if agents_body is not None:
+        check_point_versions(AGENTS_MD, agents_body, version, report)
 
+    # 検査 I（`AGENTS.md`）と検査 J（正本）は別の文書を読む。本文を共有すると、正本の記載が
+    # 古いことを `AGENTS.md` の失敗として報告してしまう。
+    versioning_body = read_document(root, VERSIONING_MD, report)
+    if versioning_body is not None and check_version_section(versioning_body, version, report):
+        check_version_examples(versioning_body, report)
 
-def check_agents_document(root: Path, sources: Sources, report: Report) -> None:
-    """`AGENTS.md` を読み、点の版数（I）を検査する。"""
-    body = read_document(root, AGENTS_MD, report)
-    if body is None:
-        return
-    check_point_versions(AGENTS_MD, body, sources.version, report)
+    plugin_body = read_document(root, PLUGIN_README, report)
+    if plugin_body is not None:
+        check_plugin_readme(plugin_body, counts, skills, version, report)
+        check_point_versions(PLUGIN_README, plugin_body, version, report)
 
-
-def check_versioning_document(root: Path, sources: Sources, report: Report) -> None:
-    """版数正本を読み、版の付け方の章（J）を検査する。
-
-    検査 I（`AGENTS.md`）と検査 J（正本）は別の文書を読む。本文を共有すると、正本の記載が
-    古いことを `AGENTS.md` の失敗として報告してしまう。
-    """
-    body = read_document(root, VERSIONING_MD, report)
-    if body is not None and check_version_section(body, sources.version, report):
-        check_version_examples(body, report)
-
-
-def check_plugin_readme_document(root: Path, sources: Sources, report: Report) -> None:
-    """`plugins/ndf/README.md` を読み、配布先の表（D）・レイアウト図（E）・更新案内（F）・点の版数（K〜M）を検査する。"""
-    body = read_document(root, PLUGIN_README, report)
-    if body is None:
-        return
-    check_plugin_readme(body, sources.counts, sources.skills, sources.version, report)
-    check_point_versions(PLUGIN_README, body, sources.version, report)
-
-
-def report_errors(report: Report) -> int:
-    """食い違いを標準エラーへ出し、終了コードを決める。"""
     if report.errors:
         for error in report.errors:
             print(f"ERROR: {error}", file=sys.stderr)
         return 1
     print("documented skill counts and versions are up to date")
     return 0
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", default=".", help="リポジトリの根（既定: カレントディレクトリ）")
-    args = parser.parse_args()
-    root = Path(args.root).resolve()
-
-    report = Report()
-    sources = collect_sources(root, report)
-
-    check_root_readme_document(root, sources, report)
-    check_agents_document(root, sources, report)
-    check_versioning_document(root, sources, report)
-    check_plugin_readme_document(root, sources, report)
-
-    return report_errors(report)
 
 
 if __name__ == "__main__":

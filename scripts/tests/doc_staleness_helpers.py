@@ -238,37 +238,6 @@ def next_minor(version: str) -> str:
     return f"{major}.{int(minor) + 1}.{patch}"
 
 
-def retarget_root_readme(root: Path, old: str, new: str) -> None:
-    """`README.md` の概要とプラグイン一覧表の現行版の記載を、別の版へ揃える。"""
-    readme = root / "README.md"
-    edit(readme, f"**NDFプラグイン v{old}**", f"**NDFプラグイン v{new}**")
-    edit(readme, f"| **ndf** | {old} |", f"| **ndf** | {new} |")
-
-
-def retarget_versioning(
-    root: Path, old_base: str, new_base: str, old_next: str, new_next: str
-) -> None:
-    """版数正本の「版の付け方と開発版の配布」章の例を、新しい基底へ揃える。
-
-    版の付け方の章は基底で比べる。例に並ぶ版数の基底が現行版より古ければ落ちるため、
-    現行版の例も次の版の例も、新しい基底へ寄せる。次の版の例（開発版の行と次の開発の例の
-    右側、公開前の確認版の行）は、新しい基底のさらに次の版へ寄せ、例どうしの関係を保つ。
-    """
-    versioning = root / VERSIONING_MD_PATH
-    edit_all(versioning, f"`{old_base}`", f"`{new_base}`", 2)
-    edit_all(versioning, f"`{old_next}-dev.1`", f"`{new_next}-dev.1`", 2)
-    edit(versioning, f"`{old_next}-rc.1`", f"`{new_next}-rc.1`")
-
-
-def retarget_plugin_readme(root: Path, old: str, new: str) -> None:
-    """`plugins/ndf/README.md` の更新案内・確認例・キャッシュパスの版数を、別の版へ揃える。"""
-    plugin_readme = root / "plugins/ndf/README.md"
-    edit(plugin_readme, f"## v{old} へ更新するとき", f"## v{new} へ更新するとき")
-    edit(plugin_readme, f"Kiro CLI用 / v{old}）", f"Kiro CLI用 / v{new}）")
-    edit_all(plugin_readme, f"ndf/{old}/skills/", f"ndf/{new}/skills/", 2)
-    edit(plugin_readme, f"enabled  {old}  <path>", f"enabled  {new}  <path>")
-
-
 def retarget_version(root: Path, version: str) -> None:
     """木の現行版を指す記載を、`plugin.json` ごとまとめて別の版へ揃える。
 
@@ -276,18 +245,30 @@ def retarget_version(root: Path, version: str) -> None:
     突き合わせ先もすべて動かし、その版で検査が通る状態を作る。接尾辞の付いた版で通ることは、
     版数を書く箇所がすべて揃った木でしか確かめられない。
     """
+    old_base, new_base = base_of(VERSION), base_of(version)
     bump_plugin_version(root, version)
 
-    retarget_root_readme(root, VERSION, version)
+    readme = root / "README.md"
+    edit(readme, f"**NDFプラグイン v{VERSION}**", f"**NDFプラグイン v{version}**")
+    edit(readme, f"| **ndf** | {VERSION} |", f"| **ndf** | {version} |")
 
     agents = root / "AGENTS.md"
     edit(agents, f"主要プラグインです（v{VERSION}）", f"主要プラグインです（v{version}）")
 
-    retarget_versioning(
-        root, base_of(VERSION), base_of(version), next_minor(VERSION), next_minor(version)
-    )
+    # 版の付け方の章は基底で比べる。例に並ぶ版数の基底が現行版より古ければ落ちるため、
+    # 現行版の例も次の版の例も、新しい基底へ寄せる。次の版の例（開発版の行と次の開発の例の
+    # 右側、公開前の確認版の行）は、新しい基底のさらに次の版へ寄せ、例どうしの関係を保つ。
+    versioning = root / VERSIONING_MD_PATH
+    old_next, new_next = next_minor(VERSION), next_minor(version)
+    edit_all(versioning, f"`{old_base}`", f"`{new_base}`", 2)
+    edit_all(versioning, f"`{old_next}-dev.1`", f"`{new_next}-dev.1`", 2)
+    edit(versioning, f"`{old_next}-rc.1`", f"`{new_next}-rc.1`")
 
-    retarget_plugin_readme(root, VERSION, version)
+    plugin_readme = root / "plugins/ndf/README.md"
+    edit(plugin_readme, f"## v{VERSION} へ更新するとき", f"## v{version} へ更新するとき")
+    edit(plugin_readme, f"Kiro CLI用 / v{VERSION}）", f"Kiro CLI用 / v{version}）")
+    edit_all(plugin_readme, f"ndf/{VERSION}/skills/", f"ndf/{version}/skills/", 2)
+    edit(plugin_readme, f"enabled  {VERSION}  <path>", f"enabled  {version}  <path>")
 
 
 def run_check(root: Path) -> subprocess.CompletedProcess[str]:
