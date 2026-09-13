@@ -143,6 +143,32 @@ def test_external_url_with_fragment_is_ignored(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
 
 
+def test_link_targets_extracts_html_and_excludes_images() -> None:
+    """link_targets の現状を固定する（#445, R1-003）。
+
+    標準の Markdown リンクに加え、ダブルクォート・シングルクォートの
+    `<a href="...">` を抽出し、画像リンク記法 `![alt](...)` は除外する。
+    抽出は Markdown リンクが先、インライン HTML が後の順に並ぶ。
+    """
+    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    text = (
+        "標準リンク [a](std.md) と "
+        '<a href="dq.md">dq</a> と '
+        "<a href='sq.md'>sq</a> と "
+        "画像 ![alt](img.png) を含む\n"
+    )
+    targets = module.link_targets(text)
+
+    assert "dq.md" in targets
+    assert "sq.md" in targets
+    assert "img.png" not in targets
+    assert targets == ["std.md", "dq.md", "sq.md"]
+
+
 def test_should_skip() -> None:
     spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
     assert spec is not None and spec.loader is not None
