@@ -233,6 +233,36 @@ def test_reinstall_removes_optional_features_when_flags_omitted(tmp_path: Path) 
     assert reinstalled["hooks"]["userPromptSubmit"]
 
 
+def test_reinstall_removes_deprecated_prompts_and_keeps_user_prompt(tmp_path: Path) -> None:
+    # 配布を終えた clean.md と review.md は再インストールで除去し、利用者が置いた
+    # 無関係な prompt は残す。削除範囲が広がる退行を検出するための現状固定である。
+    project = tmp_path / "project"
+    prompts_dir = project / ".kiro" / "prompts"
+    prompts_dir.mkdir(parents=True)
+    (prompts_dir / "clean.md").write_text("old clean\n", encoding="utf-8")
+    (prompts_dir / "review.md").write_text("old review\n", encoding="utf-8")
+    custom_text = "利用者が置いた prompt\n"
+    (prompts_dir / "custom.md").write_text(custom_text, encoding="utf-8")
+
+    proc = run("--project", str(project), "--yes", home=tmp_path)
+
+    assert proc.returncode == 0, proc.stderr
+    assert "  removed (deprecated): clean" in proc.stdout.splitlines()
+    assert "  removed (deprecated): review" in proc.stdout.splitlines()
+    assert not (prompts_dir / "clean.md").exists()
+    assert not (prompts_dir / "review.md").exists()
+    assert (prompts_dir / "custom.md").read_text(encoding="utf-8") == custom_text
+
+    # --with-codex を付けないため codex.md は配布されない
+    distributed = {
+        p.name
+        for p in (INSTALLER.parent / "prompts").glob("*.md")
+        if p.name != "codex.md"
+    }
+    assert distributed
+    assert {p.name for p in prompts_dir.iterdir()} == distributed | {"custom.md"}
+
+
 @pytest.mark.parametrize(
     ("existing", "warn_marker"),
     [
