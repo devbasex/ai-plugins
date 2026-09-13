@@ -169,6 +169,16 @@ class Claim:
     """
 
 
+@dataclass(frozen=True)
+class PointVersionSpec:
+    """周囲の固定の語で位置を決める版数記載の定義。"""
+
+    path: str
+    subject: str
+    wording: str
+    pattern: re.Pattern[str]
+
+
 def location_of(claim: Claim, index: int) -> str:
     """食い違った記載の行番号。持っていなければ空文字を返す。"""
     if not claim.lines or index >= len(claim.lines):
@@ -328,21 +338,18 @@ def category_lines(body: str) -> list[re.Match[str]] | None:
 
 
 def check_point_version(
-    path: str,
-    subject: str,
-    wording: str,
-    pattern: re.Pattern[str],
+    spec: PointVersionSpec,
     body: str,
     version: str | None,
     report: Report,
 ) -> None:
     """周囲の固定の語で位置を決めた 1 種類の版数を、現行版と照合する。"""
-    described, lines = versions_of(pattern, body)
+    described, lines = versions_of(spec.pattern, body)
     verify(
         Claim(
-            path=path,
-            subject=subject,
-            wording=wording,
+            path=spec.path,
+            subject=spec.subject,
+            wording=spec.wording,
             described=described,
             expected=version,
             source=PLUGIN_JSON,
@@ -452,10 +459,12 @@ def check_version_section(body: str, version: str | None, report: Report) -> Non
 def check_root_readme_versions(root: Path, body: str, version: str | None, report: Report) -> None:
     """`README.md` の概要の版数（G）とプラグイン一覧表の版数（H）を見る。"""
     check_point_version(
-        ROOT_README,
-        "概要の版数",
-        "**NDFプラグイン v<版>**",
-        OVERVIEW_VERSION,
+        PointVersionSpec(
+            ROOT_README,
+            "概要の版数",
+            "**NDFプラグイン v<版>**",
+            OVERVIEW_VERSION,
+        ),
         body,
         version,
         report,
@@ -466,10 +475,12 @@ def check_root_readme_versions(root: Path, body: str, version: str | None, repor
 def check_agents_md(body: str, version: str | None, report: Report) -> None:
     """`AGENTS.md` の「主要プラグインです（v<版>）」（I）を見る。"""
     check_point_version(
-        AGENTS_MD,
-        "「主要プラグインです（v<版>）」の版数",
-        "主要プラグインです（v<版>）",
-        MAIN_PLUGIN_VERSION,
+        PointVersionSpec(
+            AGENTS_MD,
+            "「主要プラグインです（v<版>）」の版数",
+            "主要プラグインです（v<版>）",
+            MAIN_PLUGIN_VERSION,
+        ),
         body,
         version,
         report,
@@ -478,20 +489,27 @@ def check_agents_md(body: str, version: str | None, report: Report) -> None:
 
 def check_plugin_readme_versions(body: str, version: str | None, report: Report) -> None:
     """`plugins/ndf/README.md` の Kiro の確認例（K）・キャッシュパス（L）・出力例（M）を見る。"""
-    for subject, wording, pattern in (
-        ("Kiro の確認例の版数", "（Kiro CLI用 / v<版>）", KIRO_AGENT_VERSION),
-        (
+    for spec in (
+        PointVersionSpec(
+            PLUGIN_README,
+            "Kiro の確認例の版数",
+            "（Kiro CLI用 / v<版>）",
+            KIRO_AGENT_VERSION,
+        ),
+        PointVersionSpec(
+            PLUGIN_README,
             "Codex のキャッシュパスの例の版数",
             f"~/.codex/plugins/cache/ai-plugins/{FAMILY}/<版>/skills/...",
             CODEX_CACHE_PATH,
         ),
-        (
+        PointVersionSpec(
+            PLUGIN_README,
             "`codex plugin list` の出力例の版数",
             f"{FAMILY}@ai-plugins  installed, enabled  <版>",
             CODEX_LIST_OUTPUT,
         ),
     ):
-        check_point_version(PLUGIN_README, subject, wording, pattern, body, version, report)
+        check_point_version(spec, body, version, report)
 
 
 # --- 説明文書ごとの検査 ---
