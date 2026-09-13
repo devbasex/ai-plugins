@@ -275,6 +275,8 @@ def test_a_record_without_jq_does_not_fail(repo: Path, state: Path, tmp_path: Pa
     result = run_stage_check("record", "221", "stage", "設計", cwd=repo, env=env)
 
     assert result.returncode == 0
+    # 通したのが jq の欠如によることを見る。jq があれば控えが書かれる。
+    assert not state_file(state, 221).exists()
 
 
 def test_records_at_once_never_skip_a_stage(repo: Path, state: Path) -> None:

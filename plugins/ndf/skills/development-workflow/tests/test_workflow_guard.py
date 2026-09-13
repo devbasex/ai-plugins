@@ -204,6 +204,7 @@ def test_a_missing_gh_is_denied(repo: Path, state: Path, tmp_path: Path) -> None
                    extra={"PATH": path_with(tmp_path / "bin", without=("gh",))})
 
     assert decision(result)["permissionDecision"] == "deny"
+    assert "判定に要る gh が無い" in decision(result)["permissionDecisionReason"]
 
 
 def test_a_missing_jq_is_denied(repo: Path, state: Path, tmp_path: Path) -> None:
@@ -212,6 +213,7 @@ def test_a_missing_jq_is_denied(repo: Path, state: Path, tmp_path: Path) -> None
                    extra={"PATH": path_with(tmp_path / "bin", without=("jq",))})
 
     assert decision(result)["permissionDecision"] == "deny"
+    assert "判定に要る jq または awk が無い" in decision(result)["permissionDecisionReason"]
 
 
 def test_a_missing_awk_is_denied(repo: Path, state: Path, tmp_path: Path) -> None:
@@ -233,6 +235,7 @@ def test_a_missing_awk_with_a_global_option_is_denied(repo: Path, state: Path, t
                    extra={"PATH": path_with(tmp_path / "bin", without=("awk",))})
 
     assert decision(result)["permissionDecision"] == "deny"
+    assert "awk" in decision(result)["permissionDecisionReason"]
 
 
 def test_a_detached_head_without_a_number_is_denied(repo: Path, state: Path, tmp_path: Path) -> None:
