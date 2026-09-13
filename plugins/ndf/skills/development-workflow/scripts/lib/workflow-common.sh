@@ -360,7 +360,7 @@ _wf_collect_targets() {
     file=$(wf_state_file "$repo" "$issue") || continue
     [ -f "$file" ] || continue
     content=$(wf_state_read "$file")
-    mode=$(jq -r '.mode // empty' <<<"$content" 2>/dev/null)
+    mode=$(_wf_read_mode "$content")
     [ -n "$mode" ] || continue
     _wf_contains "$mode" ${modes[@]+"${modes[@]}"} || modes+=("$mode")
     effective=$(wf_higher_mode "$effective" "$mode")
@@ -387,7 +387,7 @@ _wf_target_note() {
     return 0
   fi
   content=$(wf_state_read "$file")
-  mode=$(jq -r '.mode // empty' <<<"$content" 2>/dev/null)
+  mode=$(_wf_read_mode "$content")
   if [ -z "$mode" ]; then
     printf '  #%s (%s): モードの記録がありません\n' "$issue" "$repo"
     [ -n "$effective" ] || return 0
@@ -598,6 +598,11 @@ wf_state_read() {
   printf '{"version":1,"stages":[]}\n'
 }
 
+# 控えから記録されたモードを取り出す。
+_wf_read_mode() {
+  jq -r '.mode // empty' <<<"${1:-}" 2>/dev/null
+}
+
 # 控えへ 1 件積む。**排他を取れないときは書き込みそのものを行わない。**
 # 飛ばしても終了コード 0 で返って工程は続き、飛ばした工程は報告の「記録なし」に含まれる。
 wf_record() {
@@ -709,7 +714,7 @@ wf_report() {
     wf_report_empty "$issue"
     return 0
   fi
-  mode=$(jq -r '.mode // empty' <<<"$content" 2>/dev/null)
+  mode=$(_wf_read_mode "$content")
   frontier=$(_wf_frontier "${recorded[@]}")
 
   while IFS=$'\t' read -r class stage; do
