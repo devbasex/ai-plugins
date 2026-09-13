@@ -181,7 +181,8 @@ Skill を 35 個から **36 個**へ増やした。まとまりの Pull Request 
 後片付けは各 Pull Request の担当が行い、版を上げるのはまとまりの最後のマージを行った側が
 行い、配布された成果物を確かめるのは利用者の環境を持つ側が行う。
 
-版を上げる基準そのものは `docs/plugin-development-guide.md` にあり、`release` はそれを指す。
+版を上げる基準そのものは `docs/versioning-and-distribution.md`（「版の付け方と開発版の配布」と
+「検査に載らず手で直す箇所」）にあり、`release` はそれを指す。
 Skill 側に新しい基準は置かない。
 
 予算への影響（`python3 scripts/check-skill-frontmatter.py --report`）:

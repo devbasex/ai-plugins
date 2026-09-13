@@ -217,7 +217,7 @@ claude plugin marketplace add devbasex/ai-plugins@<タグ>
 
 **同じ取得元の他のプラグインも同時に過去の状態になります。** NDF だけを戻したい場合は、別名の
 マーケットプレイスを用意して対象のディレクトリと ref を直接指します。手順は
-[docs/plugin-development-guide.md](./docs/plugin-development-guide.md#利用者が過去の版へ戻る)
+[docs/versioning-and-distribution.md](./docs/versioning-and-distribution.md#利用者が過去の版へ戻る)
 にあります。
 
 固定した版と最新版を同時に有効にしないでください。どちらの `/ndf:*` が使われるかが定まりません。

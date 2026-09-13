@@ -1,6 +1,7 @@
 """説明文書の検査（`scripts/check-doc-staleness.py`）のテスト補助。
 
-実物の `README.md` / `AGENTS.md` / `plugins/ndf/README.md` は書き換えない。代わりに、
+実物の `README.md` / `AGENTS.md` / `docs/versioning-and-distribution.md` /
+`plugins/ndf/README.md` は書き換えない。代わりに、
 突き合わせの対象になる最小の木を一時ディレクトリへ作り、そこの説明文書だけを崩す。
 
 数は実物（33 / 31 / 32 / 31）と重ならない小さい値にしてある。版数も実物とは別の
@@ -58,23 +59,14 @@ ROOT_README = """# Fixture Marketplace
 - v4.0.0 で古い経路を廃止しました。それより前の版（8.5.4 以前）には戻せません
 """
 
-# I: 「主要プラグインです（v<版>）」 / J: 版の付け方の節（区間の検査）
+# I: 「主要プラグインです（v<版>）」。版数の例は置かない（J は正本の側が持つ）
 AGENTS_MD = """# Fixture Guidelines
 
 ## ポリシー
 
-### 版の付け方と開発版の配布
+### 版と配布の方針
 
-| 版 | 形 | 意味 |
-| --- | --- | --- |
-| 正式版 | `9.3.0` | 利用者が常用してよい |
-| 開発版 | `9.3.0-dev.1` | 検証中 |
-
-- 接尾辞は次に出す正式版の版数へ付ける。`9.3.0` の次を開発するなら `9.4.0-dev.1`
-
-### 検査が突き合わせる箇所
-
-版数の基準は `plugins/ndf/.claude-plugin/plugin.json` の `version` である。
+版数と配布の手順・実測・一覧は `docs/versioning-and-distribution.md` にある。
 
 ## NDFプラグインについて
 
@@ -83,6 +75,36 @@ AGENTS_MD = """# Fixture Guidelines
 ## 変更の履歴
 
 v8.5.4 で古い経路を廃止した。それより前の版（8.4.0 以前）は対象外である。
+"""
+
+VERSIONING_MD_PATH = "docs/versioning-and-distribution.md"
+
+# J: 版の付け方の章（区間の検査）。章は `## ` で書き、章 2 が位置決めになる。
+# 章 2 より後ろの章に囲んだ古い版数を置き、区間の外を走査しないことを雛形そのもので示す。
+VERSIONING_MD = """# Fixture Versioning
+
+## チャネルと ref
+
+| チャネル | ref |
+| --- | --- |
+| 正式版 | `main` |
+
+## 版の付け方と開発版の配布
+
+| 版 | 形 | 意味 |
+| --- | --- | --- |
+| 正式版 | `9.3.0` | 利用者が常用してよい |
+| 開発版 | `9.3.0-dev.1` | 検証中 |
+
+- 接尾辞は次に出す正式版の版数へ付ける。`9.3.0` の次を開発するなら `9.4.0-dev.1`
+
+## 版数を持つ 15 箇所
+
+版数の基準は `plugins/ndf/.claude-plugin/plugin.json` の `version` である。
+
+## 利用者が過去の版へ戻る
+
+最初のタグは `ndf--v8.5.4` である。それより前の版（`8.4.0` 以前）はタグでは戻せない。
 """
 
 # K: Kiro の確認例 / L: Codex のキャッシュパスの例（2 箇所） / M: `codex plugin list` の出力例
@@ -130,11 +152,7 @@ codex plugin list
 """
 
 
-def build_tree(base: Path) -> Path:
-    """突き合わせに要るものだけを備えた木を作り、その根を返す。"""
-    root = base / "repo"
-    ndf = root / "plugins/ndf"
-
+def _create_plugin_configs(root: Path, ndf: Path) -> None:
     (ndf / ".claude-plugin").mkdir(parents=True)
     (ndf / ".claude-plugin/plugin.json").write_text(
         '{\n  "name": "ndf",\n  "version": "%s"\n}\n' % VERSION, encoding="utf-8"
@@ -147,6 +165,8 @@ def build_tree(base: Path) -> Path:
         encoding="utf-8",
     )
 
+
+def _create_manifests_and_skills(ndf: Path) -> None:
     (ndf / "manifests").mkdir(parents=True)
     for runtime, skills in MANIFESTS.items():
         body = "# コメント行と空行は数えない\n\n" + "".join(f"{name}\n" for name in skills)
@@ -158,9 +178,22 @@ def build_tree(base: Path) -> Path:
     # SKILL.md を持たないディレクトリは実体として数えない。
     (ndf / "skills/README.md").write_text("# 規約\n", encoding="utf-8")
 
+
+def _create_fixture_documents(root: Path, ndf: Path) -> None:
     (root / "README.md").write_text(ROOT_README, encoding="utf-8")
     (root / "AGENTS.md").write_text(AGENTS_MD, encoding="utf-8")
+    (root / "docs").mkdir(parents=True)
+    (root / VERSIONING_MD_PATH).write_text(VERSIONING_MD, encoding="utf-8")
     (ndf / "README.md").write_text(PLUGIN_README, encoding="utf-8")
+
+
+def build_tree(base: Path) -> Path:
+    """突き合わせに要るものだけを備えた木を作り、その根を返す。"""
+    root = base / "repo"
+    ndf = root / "plugins/ndf"
+    _create_plugin_configs(root, ndf)
+    _create_manifests_and_skills(ndf)
+    _create_fixture_documents(root, ndf)
     return root
 
 
@@ -197,7 +230,7 @@ def base_of(version: str) -> str:
 
 
 def next_minor(version: str) -> str:
-    """基底の minor を 1 つ進めた版数。版の付け方の節が置く「次の版」の例に使う。"""
+    """基底の minor を 1 つ進めた版数。版の付け方の章が置く「次の版」の例に使う。"""
     major, minor, patch = base_of(version).split(".")
     return f"{major}.{int(minor) + 1}.{patch}"
 
@@ -218,11 +251,13 @@ def retarget_version(root: Path, version: str) -> None:
 
     agents = root / "AGENTS.md"
     edit(agents, f"主要プラグインです（v{VERSION}）", f"主要プラグインです（v{version}）")
-    # 版の付け方の節は基底で比べる。例に並ぶ版数の基底が現行版より古ければ落ちるため、
+
+    # 版の付け方の章は基底で比べる。例に並ぶ版数の基底が現行版より古ければ落ちるため、
     # 現行版の例も次の版の例も、新しい基底へ寄せる。
-    edit_all(agents, f"`{old_base}`", f"`{new_base}`", 2)
-    edit(agents, f"`{old_base}-dev.1`", f"`{new_base}-dev.1`")
-    edit(agents, f"`{next_minor(VERSION)}-dev.1`", f"`{next_minor(version)}-dev.1`")
+    versioning = root / VERSIONING_MD_PATH
+    edit_all(versioning, f"`{old_base}`", f"`{new_base}`", 2)
+    edit(versioning, f"`{old_base}-dev.1`", f"`{new_base}-dev.1`")
+    edit(versioning, f"`{next_minor(VERSION)}-dev.1`", f"`{next_minor(version)}-dev.1`")
 
     plugin_readme = root / "plugins/ndf/README.md"
     edit(plugin_readme, f"## v{VERSION} へ更新するとき", f"## v{version} へ更新するとき")

@@ -10,7 +10,9 @@ from pathlib import Path
 import pytest
 
 from doc_staleness_helpers import (
+    CHECKER,
     REPO_ROOT,
+    VERSIONING_MD_PATH,
     bump_plugin_version,
     edit,
     edit_all,
@@ -30,6 +32,14 @@ def plugin_readme(tree: Path) -> Path:
 
 def test_consistent_tree_passes(tree: Path) -> None:
     """突き合わせ元と突き合わせ先が一致していれば終了コード 0 で終わる。"""
+    result = run_check(tree)
+    assert result.returncode == 0, output_of(result)
+
+
+def test_manifest_skill_with_inline_comment_counts_as_one(tree: Path) -> None:
+    """現状固定: Skill 名の後ろにコメントがあっても 1 件として数える。"""
+    manifest = tree / "plugins/ndf/manifests/claude-skills.txt"
+    edit(manifest, "alpha\n", "alpha # 注記\n")
     result = run_check(tree)
     assert result.returncode == 0, output_of(result)
 
@@ -387,6 +397,19 @@ def test_plugin_table_unknown_plugin_fails(tree: Path) -> None:
     assert "ghost-kit" in out
 
 
+def test_plugin_table_malformed_plugin_json_fails(tree: Path) -> None:
+    """`plugin.json` が構文不正な場合、例外ではなく検査の失敗として出す。"""
+    (tree / "plugins/fixture-kit/.claude-plugin/plugin.json").write_text(
+        "{\n  not json\n", encoding="utf-8"
+    )
+    result = run_check(tree)
+    out = output_of(result)
+    assert result.returncode != 0
+    assert "Traceback" not in out
+    assert "fixture-kit" in out
+    assert "plugin.json" in out
+
+
 def test_plugin_table_row_removed_fails(tree: Path) -> None:
     """一覧表から NDF の行を消して検査を通せる状態にしない。"""
     edit(root_readme(tree), "| **ndf** | 9.3.0 | 検査用の最小構成 |\n", "")
@@ -395,13 +418,20 @@ def test_plugin_table_row_removed_fails(tree: Path) -> None:
     assert "README.md" in output_of(result)
 
 
-# --- J: AGENTS.md の「版の付け方と開発版の配布」節（区間の検査） ---
+# --- J: 正本の「版の付け方と開発版の配布」章（区間の検査） ---
+#
+# 版数の扱いの正本は `docs/versioning-and-distribution.md` である（#499）。検査 J は
+# `AGENTS.md` ではなく正本の章 2 を読み、失敗も正本のパスで報告する。
+
+
+def versioning_md(tree: Path) -> Path:
+    return tree / VERSIONING_MD_PATH
 
 
 def add_to_version_section(tree: Path, line: str) -> None:
-    """版の付け方の節の末尾へ 1 行足す。"""
+    """版の付け方の章の末尾へ 1 行足す。"""
     edit(
-        agents_md(tree),
+        versioning_md(tree),
         "- 接尾辞は次に出す正式版の版数へ付ける。`9.3.0` の次を開発するなら `9.4.0-dev.1`\n",
         "- 接尾辞は次に出す正式版の版数へ付ける。`9.3.0` の次を開発するなら `9.4.0-dev.1`\n"
         f"{line}\n",
@@ -409,14 +439,21 @@ def add_to_version_section(tree: Path, line: str) -> None:
 
 
 def test_version_section_stale_example_fails(tree: Path) -> None:
-    """節の中に現行版より古い基底の版数があれば失敗し、行番号が出力に入る。"""
+    """章の中に現行版より古い基底の版数があれば失敗し、行番号が出力に入る。"""
     add_to_version_section(tree, "- 前の版の例。`9.2.1` はもう使わない")
     result = run_check(tree)
     assert result.returncode != 0
     out = output_of(result)
-    assert "AGENTS.md" in out
     assert "9.2.1" in out and "9.3.0" in out
-    assert "L13" in out
+    assert "L17" in out
+
+
+def test_version_section_failure_names_the_canonical_document(tree: Path) -> None:
+    """報告先は正本のパスである。`AGENTS.md` の失敗として出さない。"""
+    add_to_version_section(tree, "- 前の版の例。`9.2.1` はもう使わない")
+    out = output_of(run_check(tree))
+    assert f"ERROR: {VERSIONING_MD_PATH}: 版の付け方の節の版数が現行版より古い" in out
+    assert "ERROR: AGENTS.md" not in out
 
 
 def test_version_section_newer_example_passes(tree: Path) -> None:
@@ -441,30 +478,56 @@ def test_version_section_two_digit_minor_passes(tree: Path) -> None:
 
 
 def test_version_section_heading_removed_fails(tree: Path) -> None:
-    """節を消して検査を通せる状態にしない。"""
-    edit(agents_md(tree), "### 版の付け方と開発版の配布\n", "")
+    """章を消して検査を通せる状態にしない。"""
+    edit(versioning_md(tree), "## 版の付け方と開発版の配布\n", "")
     result = run_check(tree)
     assert result.returncode != 0
-    assert "AGENTS.md" in output_of(result)
+    assert VERSIONING_MD_PATH in output_of(result)
 
 
-def test_version_section_stops_at_a_higher_level_heading(tree: Path) -> None:
-    """節の直後が上位の見出し（`## `）でも区間を抜ける。
+def test_missing_versioning_document_fails(tree: Path) -> None:
+    """正本そのものが無いことを失敗として扱い、正本のパスを出す。"""
+    versioning_md(tree).unlink()
+    result = run_check(tree)
+    assert result.returncode != 0
+    assert VERSIONING_MD_PATH in output_of(result)
 
-    自身と同じ深さの見出しだけで区切ると、次が `## ` のときに区間が閉じない。閉じなければ
-    走査は文書の末尾まで続き、変更履歴に並ぶ前の版の版数を現行版と比べてしまう。
-    """
-    edit(agents_md(tree), "### 検査が突き合わせる箇所\n", "## 検査が突き合わせる箇所\n")
-    body = agents_md(tree).read_text(encoding="utf-8")
-    assert "v8.5.4" in body and "8.4.0" in body
+
+def test_versions_after_the_section_do_not_fail(tree: Path) -> None:
+    """章 2 より後ろの章に囲んだ古い版数があっても落ちない（区間は次の同位の見出しで閉じる）。"""
+    body = versioning_md(tree).read_text(encoding="utf-8")
+    assert "`8.4.0`" in body.split("## 版数を持つ 15 箇所", 1)[1]
     result = run_check(tree)
     assert result.returncode == 0, output_of(result)
 
 
-def test_other_software_version_in_the_section_is_ignored(tree: Path) -> None:
-    """節の中の他ソフトの版数を拾わない。
+def test_version_section_stops_at_a_higher_level_heading(tree: Path) -> None:
+    """章の直後が上位の見出し（`# `）でも区間を抜ける。
 
-    節は配布の手順を説明するため、CLI の名前と版数を並べて書くことがある。前後の 1 文字だけで
+    自身と同じ深さの見出しだけで区切ると、次が上位の見出しのときに区間が閉じない。閉じなければ
+    走査は文書の末尾まで続き、後ろの章に並ぶ前の版の版数を現行版と比べてしまう。
+    """
+    edit(versioning_md(tree), "## 版数を持つ 15 箇所\n", "# 版数を持つ 15 箇所\n")
+    result = run_check(tree)
+    assert result.returncode == 0, output_of(result)
+
+
+def test_subheading_inside_the_section_does_not_close_it(tree: Path) -> None:
+    """章 2 の中の `### ` 小見出しで区間を閉じない。
+
+    終端を固定の 3 段で取ると、`## ` の章の中の小見出しで区間が切れ、その後ろの古い版数を
+    見落とす。終端は位置決めの見出しの深さから導く。
+    """
+    add_to_version_section(tree, "\n### 接尾辞の規則\n\n- 前の版の例。`9.2.1` はもう使わない")
+    result = run_check(tree)
+    assert result.returncode != 0
+    assert "9.2.1" in output_of(result)
+
+
+def test_other_software_version_in_the_section_is_ignored(tree: Path) -> None:
+    """章の中の他ソフトの版数を拾わない。
+
+    章は配布の手順を説明するため、CLI の名前と版数を並べて書くことがある。前後の 1 文字だけで
     位置を決めると、`codex-cli 0.146.1` の `0.146.1` のように空白で区切られた値が走査へ入り、
     現行版より小さい基底として誤検出になる。
     """
@@ -493,11 +556,11 @@ def test_backticked_current_versions_pass(tree: Path) -> None:
 
 
 def add_code_fence_to_version_section(tree: Path) -> None:
-    """版の付け方の節の先頭へ、シェルのコメントを含む実行例を置く。"""
+    """版の付け方の章の先頭へ、シェルのコメントを含む実行例を置く。"""
     edit(
-        agents_md(tree),
-        "### 版の付け方と開発版の配布\n",
-        "### 版の付け方と開発版の配布\n"
+        versioning_md(tree),
+        "## 版の付け方と開発版の配布\n",
+        "## 版の付け方と開発版の配布\n"
         "\n"
         "```bash\n"
         "# 常用する利用者（正式版）\n"
@@ -507,7 +570,7 @@ def add_code_fence_to_version_section(tree: Path) -> None:
 
 
 def test_code_fence_comment_does_not_close_the_section(tree: Path) -> None:
-    """囲みの中の `# ` 始まりで区間を閉じない（実物の節は実行例を含む）。"""
+    """囲みの中の `# ` 始まりで区間を閉じない（実物の章は実行例を含む）。"""
     add_code_fence_to_version_section(tree)
     result = run_check(tree)
     assert result.returncode == 0, output_of(result)
@@ -539,6 +602,18 @@ def test_malformed_plugin_version_is_reported_as_a_failure(tree: Path, version: 
     assert result.returncode != 0
     assert "Traceback" not in out
     assert "plugin.json" in out and "ERROR: " in out
+
+
+def test_missing_plugin_version_is_reported_as_a_failure(tree: Path) -> None:
+    """`version` キーが無ければ、例外ではなく検査の失敗として出す。"""
+    (tree / "plugins/ndf/.claude-plugin/plugin.json").write_text(
+        '{\n  "name": "ndf"\n}\n', encoding="utf-8"
+    )
+    result = run_check(tree)
+    out = output_of(result)
+    assert result.returncode != 0
+    assert "Traceback" not in out
+    assert "plugin.json" in out
 
 
 def test_versions_outside_the_section_do_not_fail(tree: Path) -> None:
@@ -603,3 +678,138 @@ def test_missing_agents_md_fails(tree: Path) -> None:
     result = run_check(tree)
     assert result.returncode != 0
     assert "AGENTS.md" in output_of(result)
+
+
+# --- base_of: バージョン文字列を基底タプルへ分解する（単体）---
+
+
+def _load_checker():
+    """`scripts/check-doc-staleness.py` を module として読み込む。
+
+    ファイル名にハイフンを含むため通常の import では取り込めない。
+    リポジトリ内の他のテスト（`test_doc_line_limit.py` など）と同じく
+    `spec_from_file_location` で読み込む。
+    """
+    import importlib.util
+    import sys
+
+    spec = importlib.util.spec_from_file_location("check_doc_staleness", CHECKER)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    # dataclass の解決は `cls.__module__` を `sys.modules` から引くため、
+    # exec_module の前に登録しておく。
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_base_of_drops_suffix_and_splits_into_int_triple() -> None:
+    """接尾辞あり・なしのどちらの入力も、同じ整数の 3 つ組へ分解される（現状固定）。"""
+    module = _load_checker()
+    assert module.base_of("9.6.0-dev.1") == (9, 6, 0)
+    assert module.base_of("9.6.0") == (9, 6, 0)
+    assert module.base_of("9.6.0-dev.1") == module.base_of("9.6.0")
+
+
+# --- check_version_section: 節に版数が 1 件も無い境界（単体）---
+
+
+def test_version_section_without_any_version_reports_once_and_returns() -> None:
+    """見出しだけで囲みの版数が 0 件なら、読み取れない旨の 1 件だけを記録して戻る（現状固定）。"""
+    module = _load_checker()
+    report = module.Report()
+    module.check_version_section(f"{module.VERSION_SECTION_HEADING}\n", "9.3.0", report)
+    assert report.errors == [
+        f"{module.VERSIONING_MD}: 版の付け方の節の版数を読み取れない"
+        f"（`{module.VERSION_SECTION_HEADING}` の節へ版数の例を囲みで置く。"
+        f"{module.PLUGIN_JSON}: 9.3.0）"
+    ]
+
+
+# --- check_version_section: 節の後ろに終端の見出しが無い境界（単体）---
+
+
+def test_version_section_at_end_of_document_scans_until_eof() -> None:
+    """節が文書の末尾で終端の見出しが無くても、EOF まで走査して古い版数を記録する（現状固定）。"""
+    module = _load_checker()
+    report = module.Report()
+    body = f"{module.VERSION_SECTION_HEADING}\n\n開発版の例は `9.2.1` である。\n"
+    module.check_version_section(body, "9.3.0", report)
+    assert report.errors == [
+        f"{module.VERSIONING_MD}: 版の付け方の節の版数が現行版より古い"
+        f"（記載: 9.2.1（L3） / {module.PLUGIN_JSON}: 9.3.0）"
+    ]
+
+
+def test_version_section_finds_stale_version_inside_code_fence() -> None:
+    """囲みの中の版数も走査し、古い版数なら記録する（現状固定）。"""
+    module = _load_checker()
+    report = module.Report()
+    body = (
+        f"{module.VERSION_SECTION_HEADING}\n"
+        "\n"
+        "```text\n"
+        "古い版の例は `9.2.1` である。\n"
+        "```\n"
+        "\n"
+        "現行版の例は `9.3.0` である。\n"
+    )
+    module.check_version_section(body, "9.3.0", report)
+    assert report.errors == [
+        f"{module.VERSIONING_MD}: 版の付け方の節の版数が現行版より古い"
+        f"（記載: 9.2.1（L4） / {module.PLUGIN_JSON}: 9.3.0）"
+    ]
+
+
+
+def test_category_breakdown_ideographic_comma_names_are_split() -> None:
+    """Skill 名の区切りが読点「、」でも分割され、個数が計上される（現状固定）。
+
+    `NAME_SEPARATOR` は `[,、]` で、半角カンマと読点のどちらも区切りとして扱う。
+    読点で区切った本文を渡しても、宣言数と並ぶ名前の数が一致し、合計も総数と一致すれば
+    Report にエラーが追加されないことを固定する。
+    """
+    module = _load_checker()
+    report = module.Report()
+    body = (
+        "- **元Skills（5個）**:\n"
+        "  - 第1群 (4): alpha、bravo、charlie、delta\n"
+        "  - 第2群 (1): echo\n"
+        "- 次の行\n"
+    )
+    module.check_category_breakdown(body, 5, "src", report)
+    assert report.errors == []
+
+
+# --- category_lines: 元Skills行が無い境界（単体）---
+
+
+def test_category_lines_without_source_count_returns_none() -> None:
+    """本文中に元Skills行が存在しない場合、None を返す（現状固定）。"""
+    module = _load_checker()
+    markdown = (
+        "# ドキュメント\n"
+        "\n"
+        "- カテゴリA: 3個\n"
+        "- カテゴリB: 2個\n"
+    )
+    assert module.category_lines(markdown) is None
+
+
+# --- location_of: index が lines の要素数以上である境界（単体）---
+
+
+def test_location_of_with_index_out_of_bounds_returns_empty_string() -> None:
+    """指定された index が lines の要素数以上である境界値において、空文字列を返す（現状固定）。"""
+    module = _load_checker()
+    claim = module.Claim(
+        path="test.md",
+        subject="テスト",
+        wording="テスト",
+        described=[10],
+        expected=10,
+        source="source",
+        lines=[10],
+    )
+    assert module.location_of(claim, 1) == ""
+
