@@ -688,3 +688,28 @@ def test_is_candidate_passes_a_single_line_target(text: str) -> None:
 def test_is_candidate_rejects_an_unrelated_command(text: str) -> None:
     """対照: いずれの目印にも当たらない本文は候補にしない。"""
     assert is_candidate(text) == 1
+
+
+# --- R1-005: `wf_parse_pr_create` の前方の区切り（現状固定） -----------------
+#
+# PR #593 で、作成を見つける前の区切りは探索の状態を 0 へ戻すようになった。既存テストは
+# 区切りの後ろのコマンドを読まないことだけを見ており、前に別のコマンドが置かれたときに
+# 区切りでやり直して閉じる語を読む分岐が固定されていない。`gh pr;` は、状態を戻さなければ
+# 後続の `gh pr create` を見失う入力である。現状の出力を正解として記録する。
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cd /work; gh pr create --body 'Closes #161'",
+        "gh --help; gh pr create --body 'Closes #161'",
+        "gh pr; gh pr create --body 'Closes #161'",
+    ],
+    ids=["cd-before", "gh-help-before", "gh-pr-before"],
+)
+def test_pr_create_after_a_preceding_command_is_read(repo: Path, command: str) -> None:
+    """現状固定: 作成より前の区切りで探索をやり直し、後続の作成の本文を読む。"""
+    result = run_lib(f"wf_parse_pr_create {shlex.quote(command)}", cwd=repo)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "devbasex/ai-plugins\t161"
