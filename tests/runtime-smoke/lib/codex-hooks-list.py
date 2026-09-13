@@ -19,7 +19,6 @@ import time
 from collections import deque
 
 TIMEOUT_SECONDS = 30
-INITIALIZE_ID = 1
 HOOKS_LIST_ID = 2
 
 
@@ -66,7 +65,7 @@ def main():
     threading.Thread(target=read_stdout, daemon=True).start()
 
     try:
-        send({"id": INITIALIZE_ID, "method": "initialize",
+        send({"id": 1, "method": "initialize",
               "params": {"clientInfo": {"name": "runtime-smoke", "version": "0.0.0"}}})
         send({"method": "initialized"})
         send({"id": HOOKS_LIST_ID, "method": "hooks/list", "params": {"cwds": [args.cwd]}})
