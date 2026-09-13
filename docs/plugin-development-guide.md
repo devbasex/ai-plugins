@@ -171,6 +171,54 @@ plugins/{plugin-name}/
 [versioning-and-distribution.md の「利用者が過去の版へ戻る」](versioning-and-distribution.md#利用者が過去の版へ戻る)
 にあります。
 
+## 既存プラグインへ Skill を足す
+
+NDF（`plugins/ndf/`）へ Skill を 1 個足すときに触る箇所は 15 あります。**検査は食い違いを
+指摘しますが、直す順序と、検査が見ない箇所は教えません。** 表の上から順に進めます。
+frontmatter と命名の書き方は [AUTHORING.md](../plugins/ndf/skills/AUTHORING.md) にあります。
+
+**`build-runtime-plugins.sh` を先に実行します。** 生成物が無いと `validate-runtime-plugins.sh`
+は先頭の `--check` で止まり、`skills` 配列と `description` の食い違いを指摘するところまで進みません。
+
+| # | 触る箇所 | 書く値 | 取りこぼしを拾う検査 |
+| ---: | --- | --- | --- |
+| 1 | `plugins/ndf/skills/<名前>/SKILL.md` | 実体 | `check-skill-frontmatter.py`（形だけ） |
+| 2 | `plugins/ndf/manifests/<ランタイム>-skills.txt` | 配るランタイムの分だけ名前を 1 行 | `validate-runtime-plugins.sh`（どの manifest にも無いときだけ。配る先は判断） |
+| 3 | `plugins/ndf/.claude-plugin/plugin.json` / `.codex-plugin/plugin.json` の `skills` 配列 | `./skills/<名前>`（manifest に載せたランタイムの分） | `validate-runtime-plugins.sh` |
+| 4 | `bash scripts/build-runtime-plugins.sh` の生成物 | `dev.agy/skills/<名前>`（agy へ配るとき）、`skills/<名前>/agents/openai.yaml`（`disable-model-invocation: true` のとき）をコミット | `build-runtime-plugins.sh --check` |
+| 5 | `README.md` の概要「公開Skills」とプラグイン一覧表の `ndf` 行（2 行） | `Claude Code向け core 45個` の形で 4 ランタイム | `check-doc-staleness.py` |
+| 6 | `README.md` の「元Skills（N個）」 | 実体の数 | `check-doc-staleness.py` |
+| 7 | `README.md` のカテゴリ内訳 | `- 運用 (2): skill-stats, statusline` の形。名前と括弧の数 | `check-doc-staleness.py`（合計だけ。どのカテゴリに入れるかは判断） |
+| 8 | `plugins/ndf/README.md` の配布先の表 4 行 | `\| Claude Code \| 45 個 \|` の形 | `check-doc-staleness.py` |
+| 9 | `plugins/ndf/README.md` のレイアウト図 | `唯一の実体（45 個）` | `check-doc-staleness.py` |
+| 10 | `plugin.json` 3 本（claude・codex・`dev.agy`）の `description` | `45 focused NDF skills` の形 | `validate-runtime-plugins.sh` |
+| 11 | `.claude-plugin/marketplace.json` の `ndf` の `description` | 10 と同じ形（Claude Code の数） | `validate-runtime-plugins.sh` |
+| 12 | `scripts/tests/test_agy_distribution.py` の `EXPECTED_COUNTS` | 4 ランタイムの数 | `pytest`（件数の assert だけで、直す場所を名指ししない） |
+| 13 | `plugins/ndf/README.md` の agy の節「Skill N 個」 | agy の数 | **拾わない**（#611） |
+| 14 | `plugins/ndf/README.md` の「Codex の暗黙起動抑止」の数と表 | `disable-model-invocation: true` のときだけ | **拾わない**（#611） |
+| 15 | `docs/ndf-plugin-reference.md` の数 | 4 ランタイムの数と実体の数 | **拾わない**（#611） |
+
+**数の形は 3 通りあります。** `README.md` は `core 45個`（空白なし）、`plugins/ndf/README.md` は
+`45 個`、`plugin.json` は `45 focused NDF skills` です。数だけを機械的に置き換えると、どれかに
+当たりません。数はランタイムごとに manifest の行数から決めます。
+
+```bash
+for r in claude codex kiro agy; do
+  printf '%s ' "$r"; grep -cvE '^[[:space:]]*(#|$)' "plugins/ndf/manifests/$r-skills.txt"
+done
+ls -d plugins/ndf/skills/*/ | wc -l   # 実体の数（6・9）
+```
+
+最後に次を実行し、すべて終了コード 0 で終わることを確かめます。
+
+```bash
+bash scripts/build-runtime-plugins.sh --check
+bash scripts/validate-runtime-plugins.sh
+python3 scripts/check-doc-staleness.py --root .
+python3 scripts/check-skill-frontmatter.py
+uv run --with pytest pytest scripts/tests -q
+```
+
 ## 既存プラグインの削除
 
 1. `.claude-plugin/marketplace.json` から該当プラグインの項目を削除
