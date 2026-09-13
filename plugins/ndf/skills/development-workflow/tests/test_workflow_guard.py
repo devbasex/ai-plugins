@@ -630,3 +630,61 @@ def test_a_continued_stage_is_recorded(repo: Path, state: Path) -> None:
     guard(repo, state, 'bash plugins/ndf/scripts/projects-sync.sh \\\n  565 stage "設計"')
 
     assert stages_of(state, 565) == ["設計"]
+
+
+# --- R1-003: `wf_is_candidate` の単体（現状固定） ---------------------------
+#
+# `wf_is_candidate` は、語の分割の前に走る安い絞り込みである。PR #593 で行末の `\` と
+# 改行を空白へ畳んでから grep する処理が加わったが、この関数自体の単体テストが無く、
+# 行継続で分割された対象コマンドが候補として通過する分岐が単体階層で固定されていない。
+# ここで現状の振る舞いを正解として記録する（対象コードは変更しない）。
+
+
+def is_candidate(text: str) -> int:
+    """`wf_is_candidate` の終了コードを返す。0 が候補、1 が非候補。"""
+    result = run_lib(f"wf_is_candidate {shlex.quote(text)}")
+    return result.returncode
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "gh pr \\\nmerge 268",
+        "gh pr \\\ncreate --base develop",
+        "gh pr merge 268 --merge \\\n  --admin",
+    ],
+    ids=["continued-merge", "continued-create", "continued-tail"],
+)
+def test_is_candidate_passes_a_line_continued_target(text: str) -> None:
+    """現状固定: 行末の `\\` と改行を空白へ畳むため、分割された対象も候補として通る。"""
+    assert is_candidate(text) == 0
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "gh pr merge 268",
+        "gh pr create --base develop",
+        'bash plugins/ndf/scripts/projects-sync.sh 565 stage "設計"',
+        "curl -s https://api.github.com/repos/o/r/pulls/268/merge",
+    ],
+    ids=["merge", "create", "sync", "rest-merge"],
+)
+def test_is_candidate_passes_a_single_line_target(text: str) -> None:
+    """現状固定: 継続の無い対象コマンドはそのまま候補として通る。"""
+    assert is_candidate(text) == 0
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",
+        "echo hello world",
+        "git status --short",
+        "gh pr view 268",
+    ],
+    ids=["empty", "echo", "git-status", "pr-view"],
+)
+def test_is_candidate_rejects_an_unrelated_command(text: str) -> None:
+    """対照: いずれの目印にも当たらない本文は候補にしない。"""
+    assert is_candidate(text) == 1
