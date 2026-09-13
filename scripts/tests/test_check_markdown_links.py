@@ -254,3 +254,34 @@ def test_heading_anchors_collision_with_explicit_numbered_heading() -> None:
         anchors = module.heading_anchors(path)
 
     assert anchors == {"手順", "手順-1", "手順-2"}
+
+
+def test_iter_markdown_files_collects_root_files_and_scan_dirs(tmp_path: Path) -> None:
+    """iter_markdown_files の探索範囲の現状を固定する（R2-003）。
+
+    ルート直下の所定ファイルは個別に、`docs/` と `plugins/` は配下を再帰で集める。
+    所定外のルート直下ファイル・対象外ディレクトリ（`issues/`）・`.md` 以外は含めず、
+    戻り値はソート済みで重複を持たない。
+    """
+    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    write(tmp_path, "README.md", "# r\n")
+    write(tmp_path, "OTHER.md", "# o\n")
+    write(tmp_path, "docs/b.md", "# b\n")
+    write(tmp_path, "docs/sub/a.md", "# a\n")
+    write(tmp_path, "docs/note.txt", "n\n")
+    write(tmp_path, "plugins/p/README.md", "# p\n")
+    write(tmp_path, "issues/plan.md", "# i\n")
+
+    files = module.iter_markdown_files(tmp_path)
+
+    assert files == [
+        tmp_path / "README.md",
+        tmp_path / "docs" / "b.md",
+        tmp_path / "docs" / "sub" / "a.md",
+        tmp_path / "plugins" / "p" / "README.md",
+    ]
+    assert files == sorted(set(files))
