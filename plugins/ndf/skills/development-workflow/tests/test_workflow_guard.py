@@ -550,6 +550,26 @@ def test_merge_target_stops_at_the_boundary(repo: Path) -> None:
 
 
 @pytest.mark.parametrize(
+    ("command", "expected", "returncode"),
+    [
+        ("gh api --method PUT /repos/o/r/pulls/268/merge", "268", 0),
+        ("gh pr merge https://github.com/o/r/pull/268 --squash", "268", 0),
+        ("gh pr merge --squash", "", 0),
+        ("ls -la", "", 1),
+    ],
+    ids=["rest-path", "pull-request-url", "missing-number", "not-a-merge"],
+)
+def test_merge_target_current_branches(
+    repo: Path, command: str, expected: str, returncode: int
+) -> None:
+    """現状固定: マージ対象の抽出経路と非マージ時の終了状態を固定する。"""
+    result = run_lib(f"wf_merge_target {shlex.quote(command)}", cwd=repo)
+
+    assert result.returncode == returncode, result.stderr
+    assert result.stdout.strip() == expected
+
+
+@pytest.mark.parametrize(
     "command",
     ["cd x&&gh pr merge 268", "cd x;gh pr merge 268", "true|gh pr merge 268"],
 )
