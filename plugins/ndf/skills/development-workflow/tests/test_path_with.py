@@ -77,6 +77,39 @@ def test_every_copy_of_the_command_is_hidden(
     assert shutil.which("keep", path=path) is not None
 
 
+def test_calling_again_with_the_same_directory_does_not_collide(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """同じ `bin_dir` で隠す対象を変えて呼び直しても、前の写しに引きずられない。"""
+    tools = tmp_path / "tools"
+    command(tools, "jq")
+    command(tools, "awk")
+    monkeypatch.setenv("PATH", str(tools))
+
+    first = path_with(tmp_path / "bin", without=("jq",))
+    second = path_with(tmp_path / "bin", without=("awk",))
+
+    assert shutil.which("jq", path=first) is None
+    assert shutil.which("awk", path=first) is not None
+    assert shutil.which("awk", path=second) is None
+    assert shutil.which("jq", path=second) is not None
+
+
+def test_a_relative_path_entry_keeps_working_links(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PATH の相対パスから写したリンクも、写しの場所から辿れる。"""
+    command(tmp_path / "tools", "jq")
+    command(tmp_path / "tools", "keep")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PATH", "tools")
+
+    path = path_with(tmp_path / "bin", without=("jq",))
+
+    assert shutil.which("jq", path=path) is None
+    assert shutil.which("keep", path=path) is not None
+
+
 def test_a_command_that_cannot_be_hidden_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, restore_modes: list[Path],
 ) -> None:

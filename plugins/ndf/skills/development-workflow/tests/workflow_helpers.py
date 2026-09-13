@@ -11,6 +11,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 SKILL_DIR = Path(__file__).resolve().parents[1]
@@ -134,8 +135,13 @@ def path_with(bin_dir: Path, without: tuple[str, ...] = ()) -> str:
     **隠せないときは例外で落とす。** 対象を持つディレクトリが一覧できなければ、そのまま
     `PermissionError` を上げる。返す前に対象が見つからないことも確かめる。黙って返すと、
     テストが確かめたい「コマンドが無いとき」が成立しないまま通る。
+
+    写しは呼び出しごとに別のディレクトリへ作る。同じ `bin_dir` で呼び直しても、前の
+    呼び出しの写しと衝突しない。
     """
     hidden = set(without)
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    root = Path(tempfile.mkdtemp(prefix="shim-", dir=bin_dir))
     entries: list[str] = []
     copies: dict[str, str] = {}
     for entry in os.environ.get("PATH", "").split(os.pathsep):
@@ -145,9 +151,10 @@ def path_with(bin_dir: Path, without: tuple[str, ...] = ()) -> str:
             entries.append(entry)
             continue
         if entry not in copies:
-            copy = bin_dir / "shim" / str(len(copies))
-            copy.mkdir(parents=True, exist_ok=True)
-            for src in Path(entry).iterdir():
+            copy = root / str(len(copies))
+            copy.mkdir()
+            # 相対パスの PATH でもリンクが切れないよう、リンク先は絶対パスにする。
+            for src in Path(entry).absolute().iterdir():
                 if src.name not in hidden:
                     (copy / src.name).symlink_to(src)
             copies[entry] = str(copy)
