@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[2]
 INSTALLER = ROOT / "plugins" / "ndf" / "dev.kiro" / "install.sh"
 
 
-def run(*args: str, home: Path) -> subprocess.CompletedProcess:
+def run(*args: str, home: Path, cwd: Path | None = None) -> subprocess.CompletedProcess:
     # `--scope global` は HOME の下を導入先にする。誤って書き込んでも利用者の HOME に
     # 届かないよう、一時ディレクトリを HOME として渡す。
     env = {**os.environ, "HOME": str(home)}
@@ -29,6 +29,7 @@ def run(*args: str, home: Path) -> subprocess.CompletedProcess:
         capture_output=True,
         text=True,
         env=env,
+        cwd=cwd,
     )
 
 
@@ -145,3 +146,22 @@ def test_existing_directory_is_unchanged(tmp_path: Path) -> None:
     assert_no_bare_cd_error(proc)
     # --dry-run は導入先へ書き込まない
     assert list(project.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    ("cwd_part", "arg", "resolved_part"),
+    [(".", "project/sub", "project/sub"), ("project", ".", "project")],
+)
+def test_relative_path_is_resolved_against_cwd(
+    tmp_path: Path, cwd_part: str, arg: str, resolved_part: str
+) -> None:
+    # 相対パスは実行時のカレントディレクトリを起点に `cd` と `pwd` で絶対パスへ解決され、
+    # スコープの表示にはその絶対パスが出る。
+    base = tmp_path.resolve()
+    (base / "project" / "sub").mkdir(parents=True)
+    proc = run("--project", arg, "--dry-run", "--yes", home=base, cwd=base / cwd_part)
+
+    assert proc.returncode == 0, proc.stderr
+    assert f"スコープ: workspace ({base / resolved_part}/.kiro)" in proc.stdout
+    assert "ERROR:" not in proc.stderr
+    assert_no_bare_cd_error(proc)
