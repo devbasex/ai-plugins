@@ -776,3 +776,34 @@ def test_is_stage_rejects_an_unknown_stage() -> None:
 def test_is_stage_rejects_an_empty_stage() -> None:
     """現状固定: 空引数は早期復帰により終了コード 1 を返す。"""
     assert is_stage("") == 1
+
+
+# --- R2-004: 閉じる課題でモードが食い違うときの案内（現状固定） --------------
+#
+# `wf_evidence_report` は、閉じる課題の控えのモードが食い違うと最も高いモードを選び、
+# **全課題の不足工程をそのモードで数える**。公開の hook 入口へ `gh pr create` を渡し、
+# 復号した additionalContext の要点（食い違いの告知・選ばれたモード・課題ごとの不足
+# 工程）と、拒否を出さないことを結合の階層で固定する（対象コードは変更しない）。
+
+
+def test_conflicting_modes_apply_the_highest_to_every_issue(repo: Path, state: Path) -> None:
+    """現状固定: `light` の課題にも `standard` の基準で不足工程を並べ、案内だけで通す。"""
+    env = base_env(state)
+    run_stage_check("record", "417", "mode", "light", cwd=repo, env=env)
+    run_stage_check("record", "417", "stage", "実装", cwd=repo, env=env)
+    run_stage_check("record", "418", "mode", "standard", cwd=repo, env=env)
+    run_stage_check("record", "418", "stage", "設計", cwd=repo, env=env)
+
+    result = guard(repo, state, 'gh pr create --base develop --title "t" --body "Closes #417\nCloses #418"')
+
+    hook = decision(result)
+    assert "permissionDecision" not in hook
+    lines = hook["additionalContext"].splitlines()
+    assert "モードの記録が課題ごとに食い違います（light / standard）。最も高い standard を基準に見ています。" in lines
+    note_417 = next(line for line in lines if line.startswith("  #417 (devbasex/ai-plugins): 記録なし: "))
+    note_418 = next(line for line in lines if line.startswith("  #418 (devbasex/ai-plugins): 記録なし: "))
+    # `light` では条件付きの「設計」も、`standard` を当てるため不足として並ぶ。
+    assert "設計" in note_417.split(": ")[-1].split(" / ")
+    assert "実装" not in note_417.split(": ")[-1].split(" / ")
+    assert "実装" in note_418.split(": ")[-1].split(" / ")
+    assert "設計" not in note_418.split(": ")[-1].split(" / ")
