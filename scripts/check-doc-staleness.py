@@ -385,16 +385,11 @@ def check_plugin_table(root: Path, body: str, report: Report) -> None:
             )
 
 
-def check_version_section(body: str, version: str | None, report: Report) -> None:
-    """正本の「版の付け方と開発版の配布」章に並ぶ版数を、現行版の基底と比べる（J）。
+def collect_section_versions(body: str) -> tuple[list[str], list[int]]:
+    """正本の「版の付け方と開発版の配布」章に並ぶ版数と、その行番号を集める。
 
-    この節の版数は 1 つの値ではなく、現行版を基にした例の集まりである。現行版そのもの・
-    接尾辞を付けたもの・次の版を指すものが混ざるため、点の照合ではなく区間の規則にする。
-    節へ例を足しても検査を書き換えずに済み、版を上げた時点で前の版の例だけが残らない。
-
-    **接尾辞は基底を取り出す時点で捨てる。** semver の順序では `9.6.0-dev.1` が `9.6.0`
-    より小さいため、接尾辞まで見て比べると節の内容がそのまま失敗になる。接尾辞の
-    付け忘れ・外し忘れをここでは見ない（正本の「検査に載らず手で直す箇所」に書かれているとおりである）。
+    章の開始行を探し、囲み（コード）を跨がず、自身と同じか上位の見出しの直前までを区間として
+    走査する。囲まれた版数（`` `9.6.0` ``）だけを拾い、他ソフトの版数を巻き込まない。
 
     **区間の終わりは、自身と同じか上位の見出しである。** 囲みの中は見出しとして数えない。
 
@@ -418,6 +413,24 @@ def check_version_section(body: str, version: str | None, report: Report) -> Non
             for found in SECTION_VERSION.finditer(line):
                 values.append(found.group(1))
                 numbers.append(number)
+    return values, numbers
+
+
+def check_version_section(body: str, version: str | None, report: Report) -> None:
+    """正本の「版の付け方と開発版の配布」章に並ぶ版数を、現行版の基底と比べる（J）。
+
+    この節の版数は 1 つの値ではなく、現行版を基にした例の集まりである。現行版そのもの・
+    接尾辞を付けたもの・次の版を指すものが混ざるため、点の照合ではなく区間の規則にする。
+    節へ例を足しても検査を書き換えずに済み、版を上げた時点で前の版の例だけが残らない。
+
+    区間の走査は `collect_section_versions` が担う。ここは読み取れないことの報告と、
+    読み取れた版数を現行版の基底と比べる判定だけを行う。
+
+    **接尾辞は基底を取り出す時点で捨てる。** semver の順序では `9.6.0-dev.1` が `9.6.0`
+    より小さいため、接尾辞まで見て比べると節の内容がそのまま失敗になる。接尾辞の
+    付け忘れ・外し忘れをここでは見ない（正本の「検査に載らず手で直す箇所」に書かれているとおりである）。
+    """
+    values, numbers = collect_section_versions(body)
     if not values:
         report.add(
             VERSIONING_MD,
