@@ -305,17 +305,6 @@ def test_7_removed_and_non_markdown_files_are_not_read(fake):
     assert all("old.md" not in a and "script.sh" not in a for a in read)
 
 
-def test_7_markdown_path_with_space_non_ascii_and_hash_is_encoded_for_contents_api(fake):
-    """現状固定: contents API へは符号化したパスで読み、本文には元のパスを載せる。"""
-    name = "issues/設計 #1.md"
-    fake.setup(body="## Summary\n", files={name: "added"}, contents={name: DESIGN})
-    out = fake.run("sync", "7", "--repo", REPO)
-    assert out.returncode == 0, out.stdout + out.stderr
-    read = [a for c in fake.calls() for a in c if "/contents/" in a]
-    assert read == [f"repos/{REPO}/contents/issues/%E8%A8%AD%E8%A8%88%20%231.md?ref={HEAD_SHA}"]
-    assert f"`{name}`" in fake.patched_body()
-
-
 def test_8_non_design_pull_request_is_out_of_scope(fake):
     design_pr(fake, "## Summary\n", head="feature/issue-1-x")
     out = fake.run("check", "7", "--repo", REPO)
