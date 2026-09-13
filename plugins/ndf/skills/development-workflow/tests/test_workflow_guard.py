@@ -8,12 +8,13 @@ from __future__ import annotations
 import json
 import shlex
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
 
 from workflow_helpers import (
-    base_env, checkout, init_repo, path_with, pre_tool_use, run_guard, run_lib,
+    LIB, base_env, checkout, init_repo, path_with, pre_tool_use, run_guard, run_lib,
     run_stage_check,
     state_file, stub_gh,
 )
@@ -419,3 +420,185 @@ def test_emit_context_round_trips_the_value(text: str) -> None:
     assert hook["additionalContext"] == text
     assert hook["hookEventName"] == "PreToolUse"
     assert "permissionDecision" not in hook
+
+
+# --- #565 コマンドの区切り ---------------------------------------------------
+#
+# 語の分割は、引用の外の制御演算子と本文の途中の改行で空の語（区切り）を出す。3 つの
+# 読み手は、1 つ目の対象のコマンドの終わりで読むのを止める。
+
+PARENT_BODY = (
+    "cd /work/ai-plugins; ls issues/ | grep 565; date '+%H:%M'; "
+    'bash plugins/ndf/scripts/projects-sync.sh 565 stage "要求と受け入れ条件"; echo "exit=$?"'
+)
+
+
+def split(text: str) -> list[str]:
+    """`wf_split` の出力を語の並びで返す。区切りは空文字になる。"""
+    result = subprocess.run(
+        ["bash", "-c", f'. "$1"; wf_split "$2"', "_", str(LIB), text],
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr
+    out = result.stdout.decode("utf-8")
+    assert out == "" or out.endswith("\0"), repr(out)
+    return out.split("\0")[:-1] if out else []
+
+
+def stages_of(state: Path, issue: int) -> list[str]:
+    path = state_file(state, issue)
+    if not path.exists():
+        return []
+    return json.loads(path.read_text(encoding="utf-8"))["stages"]
+
+
+@pytest.mark.parametrize(
+    ("text", "words"),
+    [
+        ('a "b c"; d', ["a", "b c", "", "d"]),
+        ("x 2>&1 | y", ["x", "2>&1", "", "y"]),
+        ("cd x&&gh pr merge 1", ["cd", "x", "", "", "gh", "pr", "merge", "1"]),
+        ("cmd &>/dev/null", ["cmd", "&>/dev/null"]),
+        ("a b\nc", ["a", "b", "", "c"]),
+        ("gh pr \\\nmerge 268", ["gh", "pr", "merge", "268"]),
+        ("echo >&2 x", ["echo", ">&2", "x"]),
+        ("(a)|b||c", ["", "a", "", "", "b", "", "", "c"]),
+        ("sleep 1 & wait", ["sleep", "1", "", "wait"]),
+        ('echo "a;b|c&&d(e)"', ["echo", "a;b|c&&d(e)"]),
+        ("echo 'x\ny' z", ["echo", "x\ny", "z"]),
+    ],
+)
+def test_split_marks_the_command_boundaries(text: str, words: list[str]) -> None:
+    """AC11 と区切りの契約（設計の「`wf_split` の出力」）。"""
+    assert split(text) == words
+
+
+def test_split_does_not_mark_the_last_newline() -> None:
+    """here-string が足す最後の改行では区切りを出さない。"""
+    assert split("a b\n") == ["a", "b"]
+
+
+def test_split_finishes_quickly_on_a_long_body() -> None:
+    """非機能: 36KB の本文で 0.1 秒以内。演算子を引用の外に置き、区切りの判定を通す。"""
+    body = "| 表 | x; y && z 2>&1 |\n" * 1500
+    assert len(body.encode("utf-8")) >= 36000
+    started = time.monotonic()
+    split(body)
+    assert time.monotonic() - started < 0.1
+
+
+def test_a_stage_glued_to_a_semicolon_is_recorded(repo: Path, state: Path) -> None:
+    """AC1"""
+    guard(repo, state, 'bash plugins/ndf/scripts/projects-sync.sh 161 stage "設計"; echo "exit=$?"')
+
+    assert stages_of(state, 161) == ["設計"]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'bash "$SCRIPTS/projects-sync.sh" 161 stage "設計"&& echo ok',
+        'bash "$SCRIPTS/projects-sync.sh" 161 stage "設計"|| echo ng',
+        'bash "$SCRIPTS/projects-sync.sh" 161 stage "設計"| tail -3',
+        '(bash "$SCRIPTS/projects-sync.sh" 161 stage "設計")',
+        'bash "$SCRIPTS/projects-sync.sh" 161 stage 設計&&echo',
+    ],
+)
+def test_a_stage_glued_to_an_operator_is_recorded(repo: Path, state: Path, command: str) -> None:
+    """AC2"""
+    guard(repo, state, command)
+
+    assert stages_of(state, 161) == ["設計"]
+
+
+def test_the_command_the_parent_ran_is_recorded(repo: Path, state: Path) -> None:
+    """AC3: 親の会話で実行した本文そのもの。"""
+    guard(repo, state, PARENT_BODY)
+
+    assert stages_of(state, 565) == ["要求と受け入れ条件"]
+
+
+def test_parse_sync_stops_at_the_boundary(repo: Path) -> None:
+    """AC4: 区切りより前に 3 語そろわなければ積まない。"""
+    result = run_lib("wf_parse_sync 'projects-sync.sh 161 stage; echo 設計'", cwd=repo)
+
+    assert result.returncode == 1
+    assert result.stdout.strip() == ""
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'bash "$SCRIPTS/projects-sync.sh" 161 stage "設計" 2>&1 | tail -3',
+        'bash "$SCRIPTS/projects-sync.sh" 161 stage "設計"',
+        'bash /abs/plugins/ndf/scripts/projects-sync.sh 161 stage "設計" 2>&1 | tail -2',
+    ],
+)
+def test_the_forms_recorded_before_stay_the_same(repo: Path, state: Path, command: str) -> None:
+    """AC5"""
+    guard(repo, state, command)
+
+    assert stages_of(state, 161) == ["設計"]
+
+
+def test_merge_target_stops_at_the_boundary(repo: Path) -> None:
+    """AC6"""
+    result = run_lib("wf_merge_target 'gh pr merge 268; echo ok'", cwd=repo)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "268"
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["cd x&&gh pr merge 268", "cd x;gh pr merge 268", "true|gh pr merge 268"],
+)
+def test_a_merge_after_an_operator_is_denied(repo: Path, state: Path, tmp_path: Path, command: str) -> None:
+    """AC7"""
+    result = guard(repo, state, command, tmp_path=tmp_path,
+                   responses={"pulls/268": DESIGN_PR, "labels/design-approved": LABEL_DEFINED})
+
+    assert decision(result)["permissionDecision"] == "deny"
+    assert "268" in decision(result)["permissionDecisionReason"]
+
+
+def test_a_number_after_the_merge_command_is_not_taken(repo: Path) -> None:
+    """AC8"""
+    result = run_lib("wf_merge_target 'gh pr merge; echo 268'", cwd=repo)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == ""
+
+
+def test_pr_create_body_glued_to_a_semicolon_is_read(repo: Path) -> None:
+    """AC9"""
+    command = 'gh pr create --body "Closes #161"; echo ok'
+    result = run_lib(f"wf_parse_pr_create {shlex.quote(command)}", cwd=repo)
+
+    assert result.stdout.strip() == "devbasex/ai-plugins\t161", result.stderr
+
+
+def test_pr_create_body_after_the_boundary_is_not_read(repo: Path) -> None:
+    """AC10"""
+    command = 'gh pr create --title t; echo --body "Closes #161"'
+    result = run_lib(f"wf_parse_pr_create {shlex.quote(command)}", cwd=repo)
+
+    assert result.returncode == 1
+    assert result.stdout.strip() == ""
+
+
+@pytest.mark.parametrize("command", ["gh pr merge \\\n  268 --merge", "gh pr \\\nmerge 268"])
+def test_a_continued_merge_is_denied(repo: Path, state: Path, tmp_path: Path, command: str) -> None:
+    """AC13: 行末の `\\` の継続は区切りではない。hook を通して関門が働く。"""
+    result = guard(repo, state, command, tmp_path=tmp_path,
+                   responses={"pulls/268": DESIGN_PR, "labels/design-approved": LABEL_DEFINED})
+
+    assert decision(result)["permissionDecision"] == "deny"
+    assert "268" in decision(result)["permissionDecisionReason"]
+
+
+def test_a_continued_stage_is_recorded(repo: Path, state: Path) -> None:
+    """AC13"""
+    guard(repo, state, 'bash plugins/ndf/scripts/projects-sync.sh \\\n  565 stage "設計"')
+
+    assert stages_of(state, 565) == ["設計"]

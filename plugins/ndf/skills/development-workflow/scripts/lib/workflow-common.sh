@@ -171,10 +171,25 @@ wf_stages_before_pr() {
 # 1 つの語が複数に割れる。`pr` が必須と定めるヒアドキュメントの本文はこの形になり、
 # 行区切りで読むと 1 行目だけを本文として扱ってしまう（#427 のレビュー）。
 # 読む側は `read -r -d ""` で受ける。
+#
+# **コマンドの境目は空の語で表す（#565）。** 引用の外の `;` `|` `(` `)` `&` と、本文の
+# 途中の改行で出す。記録の値に `"設計";` のように演算子が密着すると、区切りが無ければ
+# 値の一部として読まれ、工程名ではないとして黙って捨てられていた。空の語は `""` を解いた
+# 結果として出ることがないため、実在の語と衝突しない。読む側は `[ -z "$tok" ]` で見分ける。
+#
+#   - `&` は直前が `>` `<` か直後が `>` のときリダイレクトの一部として残す（`2>&1` / `&>`）
+#   - 改行の区切りは次の行の頭で出す。awk は次の行を読むまで、行末が本文の途中だったかを
+#     知らない。空の行では出さずに持ち越すため、本文の末尾の改行（here-string が足すもの
+#     を含む）では出ない
+#   - 行末の `\` は継続として捨て、区切りを出さない
 wf_split() {
   awk '
+    function flush() { if (out != "") { printf "%s%c", out, 0; out = "" } }
+    function mark() { flush(); printf "%s%c", "", 0 }
     {
       n = length($0)
+      if (pending && n > 0) { printf "%s%c", "", 0; pending = 0 }
+      cont = 0
       for (i = 1; i <= n; i++) {
         ch = substr($0, i, 1)
         if (quote != "") {
@@ -182,23 +197,31 @@ wf_split() {
           continue
         }
         if (ch == "\"" || ch == "'"'"'") { quote = ch; continue }
-        if (ch == " " || ch == "\t") {
-          if (out != "") { printf "%s%c", out, 0; out = "" }
-          continue
+        if (ch == " " || ch == "\t") { flush(); continue }
+        if (ch == ";" || ch == "|" || ch == "(" || ch == ")") { mark(); continue }
+        if (ch == "&") {
+          prev = substr($0, i - 1, 1)
+          if (prev != ">" && prev != "<" && substr($0, i + 1, 1) != ">") { mark(); continue }
         }
+        if (ch == "\\" && i == n) { cont = 1; continue }
         out = out ch
       }
       if (quote != "") { out = out "\n" }
-      else if (out != "") { printf "%s%c", out, 0; out = "" }
+      else { flush(); pending = !cont }
     }
-    END { if (out != "") printf "%s%c", out, 0 }
+    END { flush() }
   ' <<<"${1:-}"
 }
 
 # 判定の対象になりうる本文かを、走査の前に安く見分ける。
 # **当たらない本文では語の分割そのものを行わない。**
+#
+# **行末の `\` による継続は空白へ畳んでから見る。** `gh pr \⏎merge 268` は行単位の grep では
+# `pr` と `merge` が別の行に分かれ、読み手の判定まで届かない（#565）。
 wf_is_candidate() {
-  grep -qE 'projects-sync\.sh|pr[[:space:]]+merge|pulls/[0-9]+/merge|pr[[:space:]]+create' <<<"${1:-}"
+  local text="${1:-}"
+  grep -qE 'projects-sync\.sh|pr[[:space:]]+merge|pulls/[0-9]+/merge|pr[[:space:]]+create' \
+    <<<"${text//$'\\\n'/ }"
 }
 
 _wf_seek_gh_verb() {
@@ -224,6 +247,9 @@ _wf_seek_gh_verb() {
 #
 # 見分けは `projects-sync.sh` で終わる語である。呼び出し側は `$SCRIPTS` を展開してから
 # 実行するが、hook が受け取るのは書かれたままの本文なので、どちらの形でも当たる。
+#
+# **1 つ目の記録のコマンドだけを読む。** 見つけた後の区切りか 3 語目で止める。区切りを
+# 越えて読むと、`stage; echo 設計` の `echo` を値として読む。
 wf_parse_sync() {
   local cmd="${1:-}" tok found=1
   local -a args=()
@@ -232,7 +258,9 @@ wf_parse_sync() {
       case "$tok" in *projects-sync.sh) found=0 ;; esac
       continue
     fi
+    [ -n "$tok" ] || break
     args+=("$tok")
+    [ "${#args[@]}" -lt 3 ] || break
   done < <(wf_split "$cmd")
   [ "$found" -eq 0 ] || return 1
   [ "${#args[@]}" -ge 3 ] || return 1
@@ -261,6 +289,12 @@ _wf_read_file() {
 _wf_pr_create_body() {
   local cmd="${1:-}" tok want="" body="" state=0 found=1
   while IFS= read -r -d '' tok; do
+    # 区切り。作成を見つける前なら探索をやり直し、見つけた後なら読むのを止める。
+    if [ -z "$tok" ]; then
+      [ "$found" -ne 0 ] || break
+      state=0
+      continue
+    fi
     if [ -n "$want" ]; then
       case "$want" in
         text) body="$tok" ;;

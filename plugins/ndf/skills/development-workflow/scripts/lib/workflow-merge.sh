@@ -29,6 +29,13 @@
 wf_merge_target() {
   local cmd="${1:-}" tok num="" state=0 found=1 rest
   while IFS= read -r -d '' tok; do
+    # 区切り（#565）。マージを見つける前なら `gh` の探索をやり直し、見つけた後なら
+    # 読むのを止める。越えて読むと `gh pr merge; echo 268` の 268 を番号に取る。
+    if [ -z "$tok" ]; then
+      [ "$found" -ne 0 ] || break
+      state=0
+      continue
+    fi
     # REST の経路。`pulls/<番号>/merge` を指す語は、方式を問わずマージの意図と見なす。
     case "$tok" in
       *pulls/*/merge|*pulls/*/merge/*)
