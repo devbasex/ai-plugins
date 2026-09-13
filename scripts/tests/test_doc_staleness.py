@@ -1120,3 +1120,24 @@ def test_version_examples_skips_base_comparison_when_stable_row_is_duplicated() 
         f"{module.VERSIONING_MD}: 版の付け方の節の版の形の表に同じ行が複数ある（正式版: L2, L3）"
     ]
     assert not any("正式版の行より新しい版を指していない" in err for err in report.errors)
+
+
+# --- compare_plugin_table_row: 記載版数と plugin.json の版数が食い違う分岐（単体）---
+
+
+def test_compare_plugin_table_row_with_mismatched_version_records_error(
+    tmp_path: Path,
+) -> None:
+    """一覧表の記載版数と plugin.json の版数が食い違う場合、行番号と双方の版数を含むエラーを記録する（現状固定）。"""
+    module = _load_checker()
+    plugin_json = tmp_path / "plugins/fixture-kit/.claude-plugin/plugin.json"
+    plugin_json.parent.mkdir(parents=True)
+    plugin_json.write_text('{"version": "1.4.2"}\n', encoding="utf-8")
+
+    report = module.Report()
+    module.compare_plugin_table_row(tmp_path, "fixture-kit", "1.4.1", 42, report)
+    assert report.errors == [
+        f"{module.ROOT_README}: プラグイン一覧表の fixture-kit の版数が食い違う"
+        f"（記載: 1.4.1（L42） / {module.plugin_json_path('fixture-kit')}: 1.4.2）"
+    ]
+
