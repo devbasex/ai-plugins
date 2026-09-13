@@ -88,9 +88,17 @@
 ## 図の水準
 
 **4 つの階層すべてを成果物に持つ。** モードごとの要否は
-[deliverables.md](deliverables.md) の要否表が決める。文脈・構成要素・配置の役割と書き方は
-system-architecture.md、クラス・コードの階層（載せる範囲を含む）は structure-behavior.md を
-唯一の定義として読む。
+[deliverables.md](deliverables.md) の要否表が決める。
+
+| 階層 | 何を示すか | 書き方 |
+| --- | --- | --- |
+| システムの文脈（外部との関係） | 変更の影響が及ぶ外側 | system-architecture.md |
+| 構成要素の関係 | 責務の分かれ目 | system-architecture.md |
+| 配置（どこで動くか） | 実行の単位と境界 | system-architecture.md |
+| クラス・コードの構造 | 変更が触る型と、その関係 | structure-behavior.md |
+
+**クラス・コードの階層は、変更が触る型だけに絞る。** 載せる範囲・追随義務・同期の時点は
+`structure-behavior.md` のクラス図規約を唯一の定義として読む。
 
 記法・横幅の上限・使ってよい形式は `markdown-writing` の図表ガイドが持つ。ここでは重ねて
 定めない。
