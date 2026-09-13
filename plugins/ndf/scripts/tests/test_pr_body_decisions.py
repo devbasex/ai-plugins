@@ -49,6 +49,9 @@ def respond_patch(state, state_path, input_file):
         f.write(sent["body"])
     if state.get("patch_effective", True):
         state["pr"]["body"] = sent["body"]
+    if "head_after_patch" in state:
+        # 書き込みと読み直しの間に head が進んだことを再現する
+        state["pr"]["head"]["sha"] = state["head_after_patch"]
     state["reads"] = state.get("reads", 0)
     json.dump(state, open(state_path, "w", encoding="utf-8"), ensure_ascii=False)
     sys.stdout.write(json.dumps(state["pr"]))
@@ -76,8 +79,13 @@ def respond_files(state):
     sys.exit(0)
 
 
-def respond_contents(state, parts):
+def respond_contents(state, parts, query):
     name = urllib.parse.unquote("/".join(parts[4:]))
+    ref = urllib.parse.parse_qs(query).get("ref", [None])[0]
+    at_ref = state.get("contents_at", {}).get(ref, {})
+    if name in at_ref:
+        sys.stdout.write(at_ref[name])
+        sys.exit(0)
     if name in state.get("contents_hex", {}):
         sys.stdout.buffer.write(bytes.fromhex(state["contents_hex"][name]))
         sys.exit(0)
@@ -104,7 +112,7 @@ if len(parts) == 5 and parts[3] == "pulls":
 if len(parts) == 6 and parts[5] == "files":
     respond_files(state)
 if len(parts) >= 5 and parts[3] == "contents":
-    respond_contents(state, parts)
+    respond_contents(state, parts, query)
 sys.exit(1)
 '''
 
@@ -509,6 +517,21 @@ def test_12_write_that_does_not_stick_returns_1(fake):
     out = fake.run("sync", "7", "--repo", REPO)
     assert out.returncode == 1, out.stdout + out.stderr
     assert fake.writes()
+
+
+def test_12_head_advanced_during_sync_is_compared_at_new_head(fake):
+    new_sha = "fedcba9876543210fedcba9876543210fedcba98"
+    design_pr(
+        fake, "## Summary\n",
+        head_after_patch=new_sha,
+        contents_at={new_sha: {"issues/issue-1-design.md": OLD_DESIGN}},
+    )
+    out = fake.run("sync", "7", "--repo", REPO)
+    assert out.returncode == 1, out.stdout + out.stderr
+    assert fake.writes()
+    refs = [urllib.parse.parse_qs(urllib.parse.urlsplit(a).query)["ref"][0]
+            for c in fake.calls() for a in c if "/contents/" in a]
+    assert new_sha in refs
 
 
 def test_12_unreadable_after_write_returns_2(fake):

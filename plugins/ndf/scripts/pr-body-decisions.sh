@@ -263,9 +263,12 @@ def write_body(new_body):
         os.unlink(payload)
 
 
-def sync_section(body, span, expected, docs):
+def sync_section(body, span, expected, docs, head_sha):
     write_body(rewrite(body, span, expected))
-    _, _, body = read_pr()
+    _, new_sha, body = read_pr()
+    # 書き込みの間に head が進んだら、進んだ先の設計文書と突き合わせる。古い決定を一致と報告しない。
+    if new_sha != head_sha:
+        docs = changed_markdown(new_sha)
     same, _, actual, expected = compare(body, docs)
     if same:
         print(f"書き直した: {summary(docs)}")
@@ -277,18 +280,18 @@ def sync_section(body, span, expected, docs):
 def build_comparison(head_sha, body):
     docs = changed_markdown(head_sha)
     same, span, actual, expected = compare(body, docs)
-    return body, docs, same, span, actual, expected
+    return head_sha, body, docs, same, span, actual, expected
 
 
 def handle_comparison(sub, comparison):
-    body, docs, same, span, actual, expected = comparison
+    head_sha, body, docs, same, span, actual, expected = comparison
     if same:
         print(f"一致: {summary(docs)}")
         return 0
     if sub == "check":
         report(actual, expected, docs)
         return 1
-    return sync_section(body, span, expected, docs)
+    return sync_section(body, span, expected, docs, head_sha)
 
 
 def main():
