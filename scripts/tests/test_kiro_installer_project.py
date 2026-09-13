@@ -251,6 +251,7 @@ def test_reinstall_removes_deprecated_prompts_and_keeps_user_prompt(tmp_path: Pa
     assert "  removed (deprecated): review" in proc.stdout.splitlines()
     assert not (prompts_dir / "clean.md").exists()
     assert not (prompts_dir / "review.md").exists()
+    assert (prompts_dir / "pr.md").is_file()
     assert (prompts_dir / "custom.md").read_text(encoding="utf-8") == custom_text
 
     # --with-codex を付けないため codex.md は配布されない
