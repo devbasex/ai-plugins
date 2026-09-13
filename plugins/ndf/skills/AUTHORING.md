@@ -5,6 +5,7 @@
 に委ねるが、**本文のうち、実行先のリポジトリに依存する部分は規約が扱う**（「対象リポジトリを
 仮定しない」）。手順の中身が正しいかと、その手順が ai-plugins でしか成立しないかは別の問題で、
 後者は Skill を書く人ごとに判断が分かれるためである。
+Skill を配布へ載せる手順（manifests・生成物・数の記載）は [開発ガイドの「既存プラグインへ Skill を足す」](../../../docs/plugin-development-guide.md#既存プラグインへ-skill-を足す) にある。
 
 本規約のうち機械的に判定できる項目は `scripts/check-skill-frontmatter.py` が検査し、
 継続的インテグレーションで実行する（`scripts/build-runtime-plugins.sh --check` /
