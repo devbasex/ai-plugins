@@ -725,3 +725,33 @@ def test_merge_text_matcher_accepts_a_coarse_merge_pattern(text: str) -> None:
 def test_merge_text_matcher_rejects_text_without_a_merge_pattern(text: str) -> None:
     """対照: マージ表現を含まない本文は一致として扱わない。"""
     assert looks_like_merge_text(text) == 1
+
+
+# --- R2-002: `wf_is_mode` の単体（現状固定） --------------------------------
+#
+# `wf_is_mode` は、指定された文字列が `WF_MODES` に含まれるモードかを判定する。
+# 既存のテストでは既知のモードに対する終了コード 0 の復帰分岐のみが確認されていた。
+# 未知のモードに対する終了コード 1 と、空引数による早期復帰の終了コード 1 を
+# 単体階層で固定する（対象コードは変更しない）。
+
+
+def is_mode(mode: str) -> int:
+    """`wf_is_mode` の終了コードを返す。0 が既知、1 が未知または空。"""
+    result = run_lib(f"wf_is_mode {shlex.quote(mode)}")
+    return result.returncode
+
+
+def test_is_mode_accepts_a_known_mode() -> None:
+    """現状固定: 既知のモードは終了コード 0 を返す。"""
+    assert is_mode("standard") == 0
+
+
+def test_is_mode_rejects_an_unknown_mode() -> None:
+    """現状固定: 未知のモードは終了コード 1 を返す。"""
+    assert is_mode("unknown-mode") == 1
+
+
+def test_is_mode_rejects_an_empty_mode() -> None:
+    """現状固定: 空引数は早期復帰により終了コード 1 を返す。"""
+    assert is_mode("") == 1
+
