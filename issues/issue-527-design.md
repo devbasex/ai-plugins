@@ -94,7 +94,7 @@
 | `wt_declaration_state`（`plugins/ndf/scripts/lib/worktree-common.sh`） | 新設 | **宣言の状態を分ける唯一の場所。** `present` / `absent` / `unreadable` を出力する。読むのは既存の `wt_declaration` |
 | `worktree-setup.sh check` | 新設 | 状態を終了コードへ写し、人が読む 3 行を出す。読み取り専用 |
 | `worktree-setup.sh status` | 変更 | 「宣言ファイル:」の行の分岐を `wt_declaration_state` へ置き換える。出力は変えない |
-| `development-workflow/SKILL.md` | 変更 | 「判定の手順」の先頭に手順 0 を置く。「この文書が受け取る値」の表と、出力の `宣言:` の行を足す |
+| `development-workflow/SKILL.md` | 変更 | 「判定の手順」の先頭に手順 0 を置く。その直前に「この文書が受け取る値」の節（`$SCRIPTS`）を足し、出力に `宣言:` の行を足す |
 | `worktree/SKILL.md` | 変更 | 手順 0 の末尾で `check` を案内する |
 | `worktree/tests/test_setup.py` | 変更 | `check` の終了コードと、ファイルを作らないことを検査する |
 | `development-workflow/tests/test_declaration_check.py` | 新設 | 本文の手順 0 の位置・分岐・拒否しない理由と、判定の実体が 1 か所であることを検査する |
@@ -163,6 +163,7 @@ plugins/ndf/
 | 入力 | 主ディレクトリの絶対パス（必須） |
 | 出力 | `present` / `absent` / `unreadable` のいずれか 1 語を標準出力へ 1 行 |
 | 判定 | `wt_declaration` が 0 → `present`。1 のうち `.ndf/worktree.json` が存在しない → `absent`。存在する → `unreadable` |
+| 存在の確かめ方 | **`[ -e ]` を使う。** 現行の `do_status`（`worktree-setup.sh:116`）と同じ演算子にし、`status` の出力を変えない（受け入れ条件 3）。`wt_declaration` は `[ -f ]` で見るため、2 つの演算子の差に当たるものは次のとおり分かれる。ディレクトリは `-e` が真・`-f` が偽で `unreadable`。壊れた symlink は `-e` が偽で `absent`（`status` も「なし」と出す） |
 | 失敗の形 | 引数が空なら何も出さず 1 を返す |
 | 前提 | `jq` があること。無いと読める宣言も `unreadable` になるため、**呼び出し側が先に `jq` を確かめる**（`worktree-setup.sh` は冒頭で確かめている） |
 
@@ -190,16 +191,31 @@ plugins/ndf/
 標準出力は人が読む 3 行である。本文はこれを解析しない。
 
 ```text
-宣言ファイル: なし（.ndf/worktree.json）
+宣言ファイル: なし。`worktree-setup.sh init` で作れます
 開発の起点: main（未宣言。既定ブランチ）
 本番のチャネル: main（未宣言。既定ブランチ）
 ```
 
-| 行 | 値の取り方 |
-| --- | --- |
-| 宣言ファイル | `あり` / `なし` / `読めません` |
-| 開発の起点 | 宣言の `base_branch` が文字列なら `<値>（宣言）`。無ければ `wt_default_branch` の値に `（未宣言。既定ブランチ）` |
-| 本番のチャネル | `production_branch` について同じ。既定ブランチも取れなければ `不明（origin/HEAD が未設定）` |
+**1 行目は `status` の「宣言ファイル:」の行と一字一句同じにする。** 同じ状態を 2 つの副コマンドが
+別の言葉で書くと、利用者がどちらかの出力だけを見て別の状態と読みうる。状態ごとの 1 行目は
+次の 3 つで、`<パス>` は主ディレクトリからの相対パス（`.ndf/worktree.json`）である。
+
+| 状態 | 終了コード | 1 行目 |
+| --- | --- | --- |
+| あり | 0 | `宣言ファイル: あり（<パス>）` |
+| なし | 2 | ``宣言ファイル: なし。`worktree-setup.sh init` で作れます`` |
+| 読めない | 3 | `宣言ファイル: 読めません（版が未対応か、JSON として壊れています）` |
+
+2 行目と 3 行目は、3 つの状態のどれでも同じ規則で出す。宣言が無いときと読めないときは、
+どちらのキーも未宣言として扱う。
+
+| 行 | 宣言にキーが文字列で書かれている | 未宣言で、既定ブランチが取れる | 未宣言で、既定ブランチも取れない |
+| --- | --- | --- | --- |
+| 開発の起点 | `開発の起点: <base_branch の値>（宣言）` | `開発の起点: <wt_default_branch の値>（未宣言。既定ブランチ）` | `開発の起点: 不明（origin/HEAD が未設定）` |
+| 本番のチャネル | `本番のチャネル: <production_branch の値>（宣言）` | `本番のチャネル: <wt_default_branch の値>（未宣言。既定ブランチ）` | `本番のチャネル: 不明（origin/HEAD が未設定）` |
+
+「既定ブランチも取れない」は `wt_default_branch` が 1 を返すとき（`origin/HEAD` が無く、
+ローカルに `main` も `master` も無い）を指す。
 
 **2 行目と 3 行目は、宣言に書かれた名前の実在を確かめない。** 確かめる `wt_branch_exists` は
 origin へ問い合わせることがあり、起動のたびに通信が走る。実在の確認は、その名前を使う時点の
@@ -209,17 +225,34 @@ origin へ問い合わせることがあり、起動のたびに通信が走る�
 
 「判定の手順」の見出しの直下、`### 1. 変更対象を確認する` の前に置く。
 
+**`$SCRIPTS` の決め方は、本文の既存の参照に揃える。** `## 判定の手順` の直前に
+`## この文書が受け取る値` の節を新しく置き、`worktree/SKILL.md:45-51` と同じ形の表で
+`$SCRIPTS`（プラグインの `scripts/` の絶対パス）を定義する。決め方の列は
+[references/scripts-lookup.md](../plugins/ndf/skills/development-workflow/references/scripts-lookup.md)
+（本文からの相対では `references/scripts-lookup.md`）を指す。
+
 ```bash
 # 「$SCRIPTS を決める」の手順でパスを決めてから実行する。
-bash "$SCRIPTS/worktree-setup.sh" check; echo "exit=$?"
+# 決められなくても止めない（決定 6）。exit せず、判定できないことを出力へ残す。
+if [ -n "${SCRIPTS:-}" ]; then
+  bash "$SCRIPTS/worktree-setup.sh" check; echo "exit=$?"
+else
+  echo "exit=判定できない（scripts を解決できない）"
+fi
 ```
+
+**`worktree/SKILL.md` の手順 0 と違い、ガードで `exit 1` しない。** あちらは宣言を作る手順で、
+`$SCRIPTS` が無ければ続けても意味が無い。こちらは確認であり、決められないときも手順 1 へ
+進む（下の表の最後の行）。空のまま `"$SCRIPTS/worktree-setup.sh"` を実行すると
+`/worktree-setup.sh` を探して終了コード 127 になり、表のどの行にも当たらないため、
+実行する前に分ける。
 
 | 終了コード | 本文の指示 | 判定結果の出力の `宣言:` の行 |
 | --- | --- | --- |
 | 0 | そのまま手順 1 へ進む | `宣言: あり` |
 | 2 | `worktree` の「0. 宣言ファイルを用意する」を通し、`check` が 0 を返してから手順 1 へ進む | `宣言: 作成した（起点 <名前> / 本番 <名前>。未宣言なら既定ブランチ）` |
 | 3 | **先へ進まない。** `init --force` を実行せず、`check` の出力を示して利用者に直してもらう | 出力しない（判定まで進まないため） |
-| 1、または `$SCRIPTS` を決められない | 止めずに手順 1 へ進む | `宣言: 判定できない（<理由>）` |
+| 1、または `$SCRIPTS` を決められない | 止めずに手順 1 へ進む | `宣言: 判定できない（<理由>）`。理由は 1 なら `check` の標準エラー、`$SCRIPTS` なら `scripts を解決できない` |
 
 判定結果の出力の例は次の形になる。
 
@@ -252,9 +285,18 @@ flowchart TD
     U --> ONE
 ```
 
-**`init` の後にもう一度 `check` を通すのは、`init` が読めない宣言を「既にあります」と報告して
-0 で終わるためである**（実測。#573）。`init` の終了コードだけを見ると、作れなかったことが
-表に出ない。
+**`init` の後にもう一度 `check` を通すのは、`init` の終了コード 0 が「作った」と「既にある
+（読めるとは限らない）」の両方を含むためである。** 作った結果が読めることを、`init` の報告に
+頼らず `check` で確かめる。
+
+この経路の `init` は、最初の `check` が 2（ファイルが無い）を返した後にしか呼ばれない。そのため
+「既にあります」が出るのは、`check` と `init` の間に別の手（並行する別の会話など）がファイルを
+置いた場合に限られる。その置かれたファイルが読めなくても、`init` は 0 で終わる（実測。#573）。
+再度の `check` はこれを 3 として捉え、止まる側へ分ける。
+
+`init` が 1 で終わる場合（書き込みの失敗、`.ndf` か宣言ファイルが symlink）も、再度の `check`
+は 0 を返さないため同じく止まる。壊れた symlink は最初の `check` で 2 になり（`[ -e ]` が偽）、
+`init` が symlink を断って 1 で終わる経路がこれに当たる。
 
 **起動していない会話はこの図に入らない。** 宣言の無いリポジトリで動くのは `worktree-guard.sh` と
 `worktree-session.sh` だけで、どちらも変更前と同じく `wt_declaration` の 1 で何もせずに終わる。
@@ -273,7 +315,7 @@ flowchart TD
 | --- | --- |
 | 1（なし → 2、作らない） | `test_setup.py`: 一時リポジトリで `check` を実行し、終了コード 2 と `.ndf/` が無いことを見る |
 | 2（読めない 3 / あり 0 / 外 1） | `test_setup.py`: 壊れた JSON・`version: 99`・`init` の直後・`tmp_path`（リポジトリ外）の 4 通り |
-| 3（`status` の出力が一致） | 既存の `test_status_reports_*` が通ること。加えて `worktree-setup.sh` の `do_status` が `wt_declaration_state` を呼ぶことを本文の走査で見る |
+| 3（`status` の出力が一致） | 既存の `test_status_reports_*` が通ること。加えて `worktree-setup.sh` の `do_status` が `wt_declaration_state` を呼ぶことを本文の走査で見る。`.ndf/worktree.json` をディレクトリにした場合（`unreadable`）と壊れた symlink にした場合（`absent`）で、`status` と `check` の 1 行目が一致すること |
 | 4（手順 0 の位置と分岐） | `test_declaration_check.py`: 本文の「判定の手順」で、`check` を含むブロックが `### 1.` より前にあり、終了コード 2 の行が `worktree` の手順 0 を指す |
 | 5（なし → 作られる、実機） | `claude -p --plugin-dir <作業ツリー>/plugins/ndf` を宣言の無い一時リポジトリで実行する。実行後に `.ndf/worktree.json` があり、出力に `宣言: 作成した` がある。記録を実装 PR に貼る |
 | 6（あり → 変わらない、実機） | 同じ手順を宣言のあるリポジトリで実行し、`cksum` が前後で一致し、出力に `宣言: あり` がある |
@@ -282,7 +324,7 @@ flowchart TD
 | 9（拒否しない理由） | `test_declaration_check.py`: 本文に「拒否しない」と #565 への言及がある |
 | 10（実体が 1 か所） | `test_declaration_check.py`: `worktree.json` の文字列が `development-workflow/SKILL.md` の手順 0 と `workflow-guard.sh` に現れない。`unreadable` を返す分岐が `worktree-common.sh` だけにある |
 | 11（読めない → 止まる） | `test_declaration_check.py`: 手順 0 の表の終了コード 3 の行に「進まない」があり、`--force` を指示しない |
-| 12（判定できない → 止めない） | `test_declaration_check.py`: 終了コード 1 の行に「判定できない」が出力へ載ると書かれている |
+| 12（判定できない → 止めない） | `test_declaration_check.py`: 終了コード 1 の行に「判定できない」が出力へ載ると書かれている。手順 0 の bash ブロックが `$SCRIPTS` の空を分岐で扱い、`exit` を含まない |
 
 ## 未確認のまま残ること
 
