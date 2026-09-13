@@ -87,6 +87,28 @@ if actual != expected:
   exit 1
 fi
 
+# discover_targets の境界: hooks 定義を持つプラグインが 0 件のマーケットプレイスでは
+# 空出力（0 行）を返す。呼び出し元はこの空出力を 0 件として検出する（後段の no-hooks の
+# 経路が確かめる）。ここでは関数そのものを本物の assert-hook-definitions.sh から取り出して
+# 実行し、実装と結合したまま境界値を固定する。
+assert_dir="$REPO_ROOT/tests/runtime-smoke/assertions/assert-hook-definitions.sh"
+no_hooks_fixture="$REPO_ROOT/tests/runtime-smoke/fixtures/hooks-positive-control/no-hooks"
+discover_fn="$(sed -n '/^discover_targets() {$/,/^}$/p' "$assert_dir")"
+if [ -z "$discover_fn" ]; then
+  echo "could not extract discover_targets from $assert_dir" >&2
+  exit 1
+fi
+eval "$discover_fn"
+for rt in claude codex; do
+  targets_out="$(discover_targets "$no_hooks_fixture" "$rt")"
+  if [ -n "$targets_out" ]; then
+    echo "discover_targets ($rt) returned output for a marketplace without hooks:" >&2
+    printf '%s\n' "$targets_out" >&2
+    exit 1
+  fi
+done
+unset -f discover_targets
+
 cat >"$base/bin/codex" <<'SH'
 #!/usr/bin/env bash
 touch "${RUNTIME_CALLED:?}"
