@@ -57,6 +57,13 @@ def should_skip(target: str) -> bool:
     return False
 
 
+def resolve_document(source: Path, path_part: str) -> Path:
+    """The document a link's path part names; an empty part names the source."""
+    if not path_part:
+        return source.resolve()
+    return (source.parent / unquote(path_part)).resolve()
+
+
 def target_path(root: Path, source: Path, raw_target: str) -> Path | None:
     target = strip_title(raw_target)
     if should_skip(target):
@@ -64,8 +71,7 @@ def target_path(root: Path, source: Path, raw_target: str) -> Path | None:
     path_part = target.split("#", 1)[0]
     if not path_part:
         return None
-    path_part = unquote(path_part)
-    return (source.parent / path_part).resolve()
+    return resolve_document(source, path_part)
 
 
 def visible_lines(path: Path) -> list[str]:
@@ -159,7 +165,7 @@ def main() -> int:
                 failures.append(f"{md.relative_to(root)}: missing link target: {raw}")
 
         for path_part, fragment, raw in anchor_refs(text):
-            document = (md.parent / unquote(path_part)).resolve() if path_part else md.resolve()
+            document = resolve_document(md, path_part)
             if document not in scanned:
                 continue
             if unquote(fragment).lower() not in anchors_of(document):
