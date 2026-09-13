@@ -14,6 +14,8 @@ import subprocess
 from pathlib import Path
 from urllib.parse import quote
 
+import pytest
+
 REPO = Path(__file__).resolve().parents[2]
 CHECK = REPO / "scripts" / "check-markdown-links.py"
 
@@ -179,6 +181,28 @@ def test_link_targets_extracts_html_and_excludes_images() -> None:
     assert targets == ["std.md", "dq.md", "sq.md"]
 
 
+@pytest.mark.parametrize(
+    ("target", "expected"),
+    [
+        ("<path>", "path"),
+        ('path "title"', "path"),
+        ("path 'title'", "path"),
+        ("path (title)", "path"),
+        ('<path> "title"', "<path>"),
+        ("  <path>  ", "path"),
+        ('  path "title"  ', "path"),
+    ],
+)
+def test_strip_title_current_behavior(target: str, expected: str) -> None:
+    """strip_title の山括弧・タイトル除去の現状を固定する（R1-005）。"""
+    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.strip_title(target) == expected
+
+
 def test_should_skip() -> None:
     spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
     assert spec is not None and spec.loader is not None
@@ -191,4 +215,3 @@ def test_should_skip() -> None:
     assert module.should_skip("mailto:user@example.com") is True
     assert module.should_skip("{repo}/blob/{branch}") is True
     assert module.should_skip("path/to/file.md") is False
-
