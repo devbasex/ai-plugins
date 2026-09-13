@@ -586,6 +586,167 @@ def test_stale_example_after_a_code_fence_is_still_found(tree: Path) -> None:
     assert "9.2.1" in out and "9.3.0" in out
 
 
+# --- J: 版の形の表と次の開発の例を、例どうしで比べる（#566） ---
+#
+# 雛形の章 2 は L13 が正式版 `9.3.0`、L14 が開発版 `9.4.0-dev.1`、L15 が公開前の確認版
+# `9.4.0-rc.1`、L17 が「`9.3.0` の次を開発するなら `9.4.0-dev.1`」である。
+
+J_ERROR = f"ERROR: {VERSIONING_MD_PATH}: 版の付け方の節の"
+STABLE_ROW = "| 正式版 | `9.3.0` | 利用者が常用してよい |\n"
+DEV_ROW = "| 開発版 | `9.4.0-dev.1` | 検証中 |\n"
+RC_ROW = "| 公開前の確認版 | `9.4.0-rc.1` | 正式版の候補 |\n"
+NEXT_EXAMPLE = "`9.3.0` の次を開発するなら `9.4.0-dev.1`"
+
+
+def j_errors(result) -> list[str]:
+    """検査 J の失敗の行だけを取り出す。"""
+    return [line for line in output_of(result).splitlines() if line.startswith(J_ERROR)]
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "expected"),
+    [
+        (DEV_ROW, "| 開発版 | `9.3.0` | 検証中 |\n", "開発版の行の接尾辞が違う（記載: 9.3.0（L14） / 求める形: -dev.<連番>）"),
+        (
+            RC_ROW,
+            "| 公開前の確認版 | `9.4.0` | 正式版の候補 |\n",
+            "公開前の確認版の行の接尾辞が違う（記載: 9.4.0（L15） / 求める形: -rc.<連番>）",
+        ),
+        (
+            STABLE_ROW,
+            "| 正式版 | `9.3.0-dev.1` | 利用者が常用してよい |\n",
+            "正式版の行の接尾辞が違う（記載: 9.3.0-dev.1（L13） / 求める形: 接尾辞なし）",
+        ),
+    ],
+    ids=["dev-without-suffix", "rc-without-suffix", "stable-with-suffix"],
+)
+def test_version_form_row_with_wrong_suffix_fails(tree: Path, before: str, after: str, expected: str) -> None:
+    """AC1: 版の形の表の行の接尾辞が、その行の語が求める形でなければ行番号付きで落ちる。"""
+    edit(versioning_md(tree), before, after)
+    result = run_check(tree)
+    assert result.returncode == 1
+    assert J_ERROR + expected in j_errors(result), output_of(result)
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "expected"),
+    [
+        (
+            DEV_ROW,
+            "| 開発版 | `9.3.0-dev.1` | 検証中 |\n",
+            "開発版の行が正式版の行より新しい版を指していない（記載: 9.3.0-dev.1（L14） / 正式版: 9.3.0（L13））",
+        ),
+        (
+            RC_ROW,
+            "| 公開前の確認版 | `9.2.0-rc.1` | 正式版の候補 |\n",
+            "公開前の確認版の行が正式版の行より新しい版を指していない（記載: 9.2.0-rc.1（L15） / 正式版: 9.3.0（L13））",
+        ),
+    ],
+    ids=["dev-same-base", "rc-older-base"],
+)
+def test_version_form_row_not_newer_than_stable_fails(tree: Path, before: str, after: str, expected: str) -> None:
+    """AC2: 開発版か公開前の確認版の行の基底が、正式版の行の基底以下なら落ちる。"""
+    edit(versioning_md(tree), before, after)
+    result = run_check(tree)
+    assert result.returncode == 1
+    assert J_ERROR + expected in j_errors(result), output_of(result)
+
+
+@pytest.mark.parametrize("right", ["9.3.0-dev.1", "9.4.0", "9.2.0-dev.1"])
+def test_next_development_example_not_pointing_to_next_version_fails(tree: Path, right: str) -> None:
+    """AC3: 次の開発の例の右側が、左側より新しい基底の開発版でなければ落ちる。"""
+    edit(versioning_md(tree), NEXT_EXAMPLE, f"`9.3.0` の次を開発するなら `{right}`")
+    result = run_check(tree)
+    assert result.returncode == 1
+    expected = f"次の開発の例が次の版を指していない（記載: 9.3.0 → {right}（L17））"
+    assert J_ERROR + expected in j_errors(result), output_of(result)
+
+
+def test_issue_form_current_version_left_in_place_fails(tree: Path) -> None:
+    """AC4: 現行版のまま、表の開発版の行と次の開発の例の右側が現行版を指す形（issue の 1 つ目）。"""
+    edit(versioning_md(tree), DEV_ROW, "| 開発版 | `9.3.0` | 検証中 |\n")
+    edit(versioning_md(tree), NEXT_EXAMPLE, "`9.3.0` の次を開発するなら `9.3.0-dev.1`")
+    result = run_check(tree)
+    assert result.returncode == 1
+    assert j_errors(result) == [
+        J_ERROR + "開発版の行の接尾辞が違う（記載: 9.3.0（L14） / 求める形: -dev.<連番>）",
+        J_ERROR + "開発版の行が正式版の行より新しい版を指していない（記載: 9.3.0（L14） / 正式版: 9.3.0（L13））",
+        J_ERROR + "次の開発の例が次の版を指していない（記載: 9.3.0 → 9.3.0-dev.1（L17））",
+    ]
+
+
+def test_issue_form_bulk_replacement_fails(tree: Path) -> None:
+    """AC4: 現行版を一括で次の版へ置換し、開発版の行の接尾辞が消えた形（issue の 2 つ目）。
+
+    置換は木のすべてのファイルへ行う。現行版を指す他の記載はすべて揃うため、落ちるのは章 2 の
+    例だけになる。
+    """
+    for path in tree.rglob("*"):
+        if path.is_file():
+            body = path.read_text(encoding="utf-8")
+            path.write_text(body.replace("9.3.0", "9.4.0"), encoding="utf-8")
+    edit(versioning_md(tree), DEV_ROW, "| 開発版 | `9.4.0` | 検証中 |\n")
+    result = run_check(tree)
+    assert result.returncode == 1
+    assert output_of(result).count("ERROR: ") == len(j_errors(result)), output_of(result)
+    assert j_errors(result) == [
+        J_ERROR + "開発版の行の接尾辞が違う（記載: 9.4.0（L14） / 求める形: -dev.<連番>）",
+        J_ERROR + "開発版の行が正式版の行より新しい版を指していない（記載: 9.4.0（L14） / 正式版: 9.4.0（L13））",
+        J_ERROR + "公開前の確認版の行が正式版の行より新しい版を指していない（記載: 9.4.0-rc.1（L15） / 正式版: 9.4.0（L13））",
+        J_ERROR + "次の開発の例が次の版を指していない（記載: 9.4.0 → 9.4.0-dev.1（L17））",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("row", "label"),
+    [(STABLE_ROW, "正式版"), (DEV_ROW, "開発版"), (RC_ROW, "公開前の確認版")],
+    ids=["stable", "dev", "rc"],
+)
+def test_version_form_row_removed_fails(tree: Path, row: str, label: str) -> None:
+    """AC5: 表の行を消して規則を外せない。"""
+    edit(versioning_md(tree), row, "")
+    result = run_check(tree)
+    assert result.returncode == 1
+    expected = f"版の形の表を読み取れない（無い行: {label}。| {label} | `<版>` | ... | の形で書く）"
+    assert J_ERROR + expected in j_errors(result), output_of(result)
+
+
+def test_version_form_row_duplicated_fails(tree: Path) -> None:
+    """AC5: 同じ語の行が 2 つあると比べる相手が決まらないため落ちる。"""
+    edit(versioning_md(tree), DEV_ROW, DEV_ROW + "| 開発版 | `9.4.0-dev.2` | 検証中 |\n")
+    result = run_check(tree)
+    assert result.returncode == 1
+    expected = "版の形の表に同じ行が複数ある（開発版: L14, L15）"
+    assert J_ERROR + expected in j_errors(result), output_of(result)
+
+
+def test_next_development_example_removed_fails(tree: Path) -> None:
+    """AC5: 次の開発の例を消して規則を外せない。"""
+    edit(versioning_md(tree), f"。{NEXT_EXAMPLE}\n", "\n")
+    result = run_check(tree)
+    assert result.returncode == 1
+    expected = "次の開発の例を読み取れない（`<版>` の次を開発するなら `<版>-dev.<連番>` の形で書く）"
+    assert J_ERROR + expected in j_errors(result), output_of(result)
+
+
+def test_version_form_row_inside_code_fence_is_not_counted(tree: Path) -> None:
+    """AC5: 囲みの中の表の行と例は、章 2 の例として数えない（実行例を足しても落ちない）。"""
+    add_to_version_section(
+        tree,
+        "\n```text\n| 開発版 | `9.3.0` | 検証中 |\n`9.3.0` の次を開発するなら `9.3.0` と書かない\n```",
+    )
+    result = run_check(tree)
+    assert result.returncode == 0, output_of(result)
+
+
+def test_version_section_heading_removed_reports_only_the_existing_failure(tree: Path) -> None:
+    """章の見出しが無いときは、既存の「版数を読み取れない」だけを出し、表と例の報告を重ねない。"""
+    edit(versioning_md(tree), "## 版の付け方と開発版の配布\n", "")
+    result = run_check(tree)
+    assert result.returncode == 1
+    assert [line for line in j_errors(result) if "版数を読み取れない" not in line] == []
+
+
 # --- 突き合わせ先の版数そのものが読めないとき ---
 
 

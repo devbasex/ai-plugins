@@ -122,6 +122,25 @@ CODE_FENCE = re.compile(r"^\s*(?:```|~~~)")
 # 囲まれていることを確認済み）。囲まずに書いた版数は走査に入らないため、例を足すときは囲みを付ける。
 SECTION_VERSION = re.compile(r"`v?" + VERSION + r"`")
 
+# J の続き: 章 2 の中で、次に出す版を指すはずの例（#566）。版数を一括で置換すると、
+# 次の版を指す例が現行版を指す形へ崩れる。崩れた値は現行版そのものと等しいことがあり、
+# 値だけでは正式版を指す正しい例と区別できない。値が何を指すはずかは周囲の語で決める。
+#
+# 比べる相手は現行版ではなく同じ章の例である。`develop` の版は接尾辞付きになりうるため、
+# 現行版との一致を求めると開発版の配布のたびに正しい例が落ちる。正式版の行を現行版へ結び
+# 付けるのは、上の区間の規則（基底が現行版より小さければ落ちる）が持つ。
+VERSION_FORM_ROW = re.compile(
+    r"^\|\s*(?P<label>正式版|開発版|公開前の確認版)\s*\|\s*`v?" + VERSION + r"`\s*\|"
+)
+NEXT_DEVELOPMENT = re.compile(r"`v?" + VERSION + r"`\s*の次を開発するなら\s*`v?" + VERSION + r"`")
+# 表の行の語ごとに、版数が終わるべき接尾辞の形。`None` は接尾辞を持たないことを求める。
+VERSION_FORM_SUFFIX: dict[str, tuple[re.Pattern[str] | None, str]] = {
+    "正式版": (None, "接尾辞なし"),
+    "開発版": (re.compile(r"-dev\.\d+$"), "-dev.<連番>"),
+    "公開前の確認版": (re.compile(r"-rc\.\d+$"), "-rc.<連番>"),
+}
+DEV_SUFFIX = VERSION_FORM_SUFFIX["開発版"][0]
+
 
 @dataclass
 class Report:
@@ -437,33 +456,48 @@ def check_plugin_table(root: Path, body: str, report: Report) -> None:
         compare_plugin_table_row(root, name, value, number, report)
 
 
-def scan_section_versions(lines: list[str]) -> tuple[list[str], list[int]]:
-    """「版の付け方と開発版の配布」章に囲みで並ぶ版数と、その行番号を拾う。
+def section_lines(lines: list[str]) -> list[tuple[int, str, bool]] | None:
+    """「版の付け方と開発版の配布」章の行を、行番号と囲みの中かどうかを付けて返す。
 
-    見出しを見つけ、次の同位以上の見出しの直前まで走査する。区間の終わりは自身と同じか
-    上位の見出しであり、囲みの中は見出しとして数えない。拾うのは `` `9.6.0` `` のように
-    囲まれた版数だけである。見出しが無ければ空を返す。
+    見出しを見つけ、次の同位以上の見出しの直前までを返す。区間の終わりは自身と同じか
+    上位の見出しであり、囲みの中は見出しとして数えない。囲みの開始と終了の行そのものも
+    囲みの中として扱う。見出しが無ければ `None` を返す。
     """
     start = next(
         (index for index, line in enumerate(lines) if line.strip() == VERSION_SECTION_HEADING),
         None,
     )
+    if start is None:
+        return None
+    section: list[tuple[int, str, bool]] = []
+    in_fence = False
+    for number, line in enumerate(lines[start + 1 :], start + 2):
+        if CODE_FENCE.match(line):
+            in_fence = not in_fence
+            section.append((number, line, True))
+            continue
+        if not in_fence and SECTION_HEADING.match(line):
+            break
+        section.append((number, line, in_fence))
+    return section
+
+
+def scan_section_versions(lines: list[str]) -> tuple[list[str], list[int]]:
+    """「版の付け方と開発版の配布」章に囲みで並ぶ版数と、その行番号を拾う。
+
+    章の区間は `section_lines` が決める。拾うのは `` `9.6.0` `` のように囲まれた版数だけで、
+    コードの囲みの中の行も拾う。見出しが無ければ空を返す。
+    """
     values: list[str] = []
     line_numbers: list[int] = []
-    if start is not None:
-        in_fence = False
-        for number, line in enumerate(lines[start + 1 :], start + 2):
-            if CODE_FENCE.match(line):
-                in_fence = not in_fence
-            elif not in_fence and SECTION_HEADING.match(line):
-                break
-            for found in SECTION_VERSION.finditer(line):
-                values.append(found.group(1))
-                line_numbers.append(number)
+    for number, line, _ in section_lines(lines) or []:
+        for found in SECTION_VERSION.finditer(line):
+            values.append(found.group(1))
+            line_numbers.append(number)
     return values, line_numbers
 
 
-def check_version_section(body: str, version: str | None, report: Report) -> None:
+def check_version_section(body: str, version: str | None, report: Report) -> bool:
     """正本の「版の付け方と開発版の配布」章に並ぶ版数を、現行版の基底と比べる（J）。
 
     この節の版数は 1 つの値ではなく、現行版を基にした例の集まりである。現行版そのもの・
@@ -476,6 +510,9 @@ def check_version_section(body: str, version: str | None, report: Report) -> Non
 
     節の走査（見出しの探索・囲みの追跡・囲まれた版数の収集）は `scan_section_versions` が担う。
     ここでは読み取れないことの報告と、現行版の基底との比較だけを行う。
+
+    節の版数を読み取れたかを返す。読み取れなければ、例どうしの比較（`check_version_examples`）
+    は同じ原因の報告を重ねるだけになる。
     """
     values, line_numbers = scan_section_versions(body.splitlines())
     if not values:
@@ -485,9 +522,9 @@ def check_version_section(body: str, version: str | None, report: Report) -> Non
             f"（`{VERSION_SECTION_HEADING}` の節へ版数の例を囲みで置く。"
             f"{PLUGIN_JSON}: {version}）",
         )
-        return
+        return False
     if version is None:
-        return
+        return True
     current = base_of(version)
     for value, number in zip(values, line_numbers):
         if base_of(value) < current:
@@ -495,6 +532,74 @@ def check_version_section(body: str, version: str | None, report: Report) -> Non
                 VERSIONING_MD,
                 "版の付け方の節の版数が現行版より古い"
                 f"（記載: {value}（L{number}） / {PLUGIN_JSON}: {version}）",
+            )
+    return True
+
+
+def check_version_examples(body: str, report: Report) -> None:
+    """章 2 の版の形の表と次の開発の例を、例どうしで比べる（J の続き。#566）。
+
+    見るのは囲みの外の行だけである。囲みの中の表や文は実行例か出力例で、章の例そのもの
+    ではない。数えると、実行例を足しただけで「同じ行が複数ある」に当たる。
+
+    位置を決める語（表の 1 列目の 3 語と「の次を開発するなら」）が見つからないときも、
+    重なるときも失敗にする。黙って通すと、行を言い換えるだけで規則が外れる。
+    """
+    rows: dict[str, list[tuple[str, int]]] = {label: [] for label in VERSION_FORM_SUFFIX}
+    examples: list[tuple[str, str, int]] = []
+    for number, line, in_fence in section_lines(body.splitlines()) or []:
+        if in_fence:
+            continue
+        row = VERSION_FORM_ROW.match(line)
+        if row:
+            rows[row.group("label")].append((row.group(2), number))
+        for found in NEXT_DEVELOPMENT.finditer(line):
+            examples.append((found.group(1), found.group(2), number))
+
+    for label, found_rows in rows.items():
+        if not found_rows:
+            report.add(
+                VERSIONING_MD,
+                f"版の付け方の節の版の形の表を読み取れない（無い行: {label}。"
+                f"| {label} | `<版>` | ... | の形で書く）",
+            )
+        elif len(found_rows) > 1:
+            numbers = ", ".join(f"L{number}" for _, number in found_rows)
+            report.add(VERSIONING_MD, f"版の付け方の節の版の形の表に同じ行が複数ある（{label}: {numbers}）")
+
+    for label, found_rows in rows.items():
+        suffix, wording = VERSION_FORM_SUFFIX[label]
+        for value, number in found_rows:
+            if ("-" in value) if suffix is None else not suffix.search(value):
+                report.add(
+                    VERSIONING_MD,
+                    f"版の付け方の節の{label}の行の接尾辞が違う"
+                    f"（記載: {value}（L{number}） / 求める形: {wording}）",
+                )
+
+    # 比べる相手が 1 つに決まるときだけ、正式版の行より新しい基底を指すかを見る。
+    if len(rows["正式版"]) == 1:
+        stable, stable_number = rows["正式版"][0]
+        for label in ("開発版", "公開前の確認版"):
+            for value, number in rows[label]:
+                if base_of(value) <= base_of(stable):
+                    report.add(
+                        VERSIONING_MD,
+                        f"版の付け方の節の{label}の行が正式版の行より新しい版を指していない"
+                        f"（記載: {value}（L{number}） / 正式版: {stable}（L{stable_number}））",
+                    )
+
+    if not examples:
+        report.add(
+            VERSIONING_MD,
+            "版の付け方の節の次の開発の例を読み取れない"
+            "（`<版>` の次を開発するなら `<版>-dev.<連番>` の形で書く）",
+        )
+    for left, right, number in examples:
+        if base_of(right) <= base_of(left) or not DEV_SUFFIX.search(right):
+            report.add(
+                VERSIONING_MD,
+                f"版の付け方の節の次の開発の例が次の版を指していない（記載: {left} → {right}（L{number}））",
             )
 
 
@@ -681,8 +786,8 @@ def main() -> int:
     # 検査 I（`AGENTS.md`）と検査 J（正本）は別の文書を読む。本文を共有すると、正本の記載が
     # 古いことを `AGENTS.md` の失敗として報告してしまう。
     versioning_body = read_document(root, VERSIONING_MD, report)
-    if versioning_body is not None:
-        check_version_section(versioning_body, version, report)
+    if versioning_body is not None and check_version_section(versioning_body, version, report):
+        check_version_examples(versioning_body, report)
 
     plugin_body = read_document(root, PLUGIN_README, report)
     if plugin_body is not None:
