@@ -407,6 +407,25 @@ def test_declaration_state_absent_for_a_nonexistent_path() -> None:
     assert result.stdout == "absent\n"
 
 
+def test_declaration_state_present_for_a_symlink_to_a_readable_declaration(
+    main_repo: Path, tmp_path: Path,
+) -> None:
+    """現状固定: 読める宣言を指す symlink は、たどった先を読んで present と判定する。"""
+    from worktree_helpers import run_lib
+
+    target = tmp_path / "outside.json"
+    body = json.dumps({"version": 1})
+    target.write_text(body, encoding="utf-8")
+    declaration(main_repo).parent.mkdir()
+    declaration(main_repo).symlink_to(target)
+
+    result = run_lib(f'wt_declaration_state "{main_repo}"')
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "present\n"
+    assert target.read_text(encoding="utf-8") == body
+
+
 def test_hooks_stay_silent_without_a_declaration(main_repo: Path) -> None:
     """受け入れ条件 7: 宣言が無ければ、2 つの hook は何も出さず 0 で終わる。"""
     from worktree_helpers import GUARD, SESSION
