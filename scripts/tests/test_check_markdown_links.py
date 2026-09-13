@@ -538,3 +538,12 @@ def test_no_scanned_markdown_files_passes(tmp_path: Path) -> None:
     assert failure_lines(result) == []
     assert result.stdout == "Markdown local links are valid\n"
 
+
+def test_html_anchor_with_missing_heading_fragment_fails(tmp_path: Path) -> None:
+    """フラグメント付き HTML リンクの見出し参照失敗の現状を固定する（R2-001）。"""
+    write(tmp_path, "docs/b.md", "# 在る見出し\n")
+    write(tmp_path, "docs/a.md", '<a href="b.md#無い見出し">x</a>\n')
+    result = run(tmp_path)
+    assert result.returncode == 1
+    assert failure_lines(result) == ["- docs/a.md: missing heading anchor: b.md#無い見出し"]
+
