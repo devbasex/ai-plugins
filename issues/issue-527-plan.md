@@ -21,6 +21,7 @@
 - `hooks/*.json` / `worktree-guard.sh` / `worktree-session.sh` / `workflow-guard.sh` / `development-workflow` の frontmatter の変更（受け入れ条件 8。#565 と重なる）
 - `init` が読めない宣言を「既にあります」と報告する件（#573）
 - `scripts-lookup.md` の「`worktree` は 3 本を呼ぶ」の書き足し（設計の「作るもの」に無い）
+- `scripts-lookup.md` の `${CLAUDE_PLUGIN_ROOT}` が参照ファイルでは置き換わらず、Claude Code で Codex の古い控えを採る件（実機の確認で観測。#590 として起票）
 
 ## 受け入れ条件
 
