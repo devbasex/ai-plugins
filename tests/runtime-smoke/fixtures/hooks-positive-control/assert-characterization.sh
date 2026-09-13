@@ -161,7 +161,9 @@ setup_claude_diagnostic_stub() {
   # スタブへ置き換えて終了コードと診断の要点を観測する。
   cat >"$base/bin/claude" <<'PY'
 #!/usr/bin/env python3
+import json
 import os
+from pathlib import Path
 import sys
 
 if "--version" in sys.argv:
@@ -169,6 +171,7 @@ if "--version" in sys.argv:
     sys.exit(0)
 
 debug_file = sys.argv[sys.argv.index("--debug-file") + 1]
+plugin_dirs = [sys.argv[i + 1] for i, arg in enumerate(sys.argv[:-1]) if arg == "--plugin-dir"]
 is_control = any("hooks-positive-control" in arg for arg in sys.argv)
 scenario = os.environ["CLAUDE_CHARACTERIZATION_SCENARIO"]
 with open(debug_file, "w", encoding="utf-8") as f:
@@ -176,8 +179,10 @@ with open(debug_file, "w", encoding="utf-8") as f:
         f.write("[WARN] Plugin broken-hooks: hooks.json: fixture warning\n")
         f.write("Read hooks.json for plugin broken-hooks (0.0.0)\n")
     elif not is_control:
-        for name in ("ndf", "mcp-playwright", "mcp-serena"):
-            f.write(f"Read hooks.json for plugin {name} (0.0.0)\n")
+        # 渡されたプラグインをすべて読んだことにする。名前は列挙せず、各 plugin.json から取る。
+        for plugin_dir in plugin_dirs:
+            manifest = json.loads(Path(plugin_dir, ".claude-plugin", "plugin.json").read_text(encoding="utf-8"))
+            f.write(f"Read hooks.json for plugin {manifest['name']} (0.0.0)\n")
         if scenario == "plugins-report":
             f.write("[WARN] Plugin ndf: hooks.json: characterization warning\n")
 PY
