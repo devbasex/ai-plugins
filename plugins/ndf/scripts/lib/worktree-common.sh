@@ -2101,32 +2101,36 @@ wt_slot_acquire() {
   wt_slot_of "$main_dir" "$worktree"
 }
 
+# 割り当ての未解放行を対象に、指定した代入式でフィールドを更新する。
+_wt_slot_set_field() {
+  local main_dir="${1:-}" worktree="${2:-}" assignment="${3:-}"
+  if [ "$#" -ge 3 ]; then
+    shift 3
+  else
+    shift "$#"
+  fi
+  local path
+  path=$(wt_registry_path "$main_dir") || return 1
+  wt_registry_update "$path" "
+    .assignments |= map(
+      if .worktree == \$wt and .released_at == null then ${assignment} else . end
+    )" --arg wt "$worktree" "$@"
+}
+
 # 割り当てを解放する。**行は消さず、解放の時刻を書き込む。**
 wt_slot_release() {
-  local main_dir="${1:-}" worktree="${2:-}" path
-  path=$(wt_registry_path "$main_dir") || return 1
-  wt_registry_update "$path" '
-    .assignments |= map(
-      if .worktree == $wt and .released_at == null then .released_at = (now | todate) else . end
-    )' --arg wt "$worktree"
+  local main_dir="${1:-}" worktree="${2:-}"
+  _wt_slot_set_field "$main_dir" "$worktree" '.released_at = (now | todate)'
 }
 
 # 割り当てへポートを記録する。
 wt_slot_set_ports() {
-  local main_dir="${1:-}" worktree="${2:-}" ports_json="${3:-}" path
-  path=$(wt_registry_path "$main_dir") || return 1
-  wt_registry_update "$path" '
-    .assignments |= map(
-      if .worktree == $wt and .released_at == null then .ports = $ports else . end
-    )' --arg wt "$worktree" --argjson ports "$ports_json"
+  local main_dir="${1:-}" worktree="${2:-}" ports_json="${3:-}"
+  _wt_slot_set_field "$main_dir" "$worktree" '.ports = $ports' --argjson ports "$ports_json"
 }
 
 # 最後に使った時刻を記録する。reap の判定が読む。
 wt_slot_touch() {
-  local main_dir="${1:-}" worktree="${2:-}" path
-  path=$(wt_registry_path "$main_dir") || return 1
-  wt_registry_update "$path" '
-    .assignments |= map(
-      if .worktree == $wt and .released_at == null then .last_used_at = (now | todate) else . end
-    )' --arg wt "$worktree"
+  local main_dir="${1:-}" worktree="${2:-}"
+  _wt_slot_set_field "$main_dir" "$worktree" '.last_used_at = (now | todate)'
 }

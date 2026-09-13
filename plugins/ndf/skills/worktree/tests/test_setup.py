@@ -487,3 +487,23 @@ def test_default_branch_falls_back_to_master(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     assert result.stdout == "master\n"
 
+
+def test_slot_touch_updates_last_used_at_and_keeps_released_at_null(main_repo: Path) -> None:
+    """現状固定: wt_slot_touch は未解放スロットの last_used_at を更新し released_at を null のまま保つ。"""
+    from worktree_helpers import run_lib
+
+    run_lib(f'wt_slot_acquire "{main_repo}" "/wt/a" "feature/a" "env-a"', cwd=main_repo)
+
+    registry_file = main_repo / ".git" / "ndf" / "worktree-registry.json"
+    data = json.loads(registry_file.read_text(encoding="utf-8"))
+    data["assignments"][0]["last_used_at"] = "2020-01-01T00:00:00Z"
+    registry_file.write_text(json.dumps(data), encoding="utf-8")
+
+    res = run_lib(f'wt_slot_touch "{main_repo}" "/wt/a"', cwd=main_repo)
+    assert res.returncode == 0, res.stderr
+
+    after = json.loads(registry_file.read_text(encoding="utf-8"))
+    assignment = after["assignments"][0]
+    assert assignment["last_used_at"] != "2020-01-01T00:00:00Z"
+    assert assignment["released_at"] is None
+
