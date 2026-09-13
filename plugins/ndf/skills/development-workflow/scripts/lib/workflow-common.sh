@@ -357,8 +357,18 @@ _wf_parse_targets() {
   done
 }
 
+# 控えが存在すれば本文とモードをタブ区切り 1 行で返す。控えが無ければ 1 を返す。
+_wf_load_state_mode() {
+  local repo="${1:-}" issue="${2:-}" file content mode
+  file=$(wf_state_file "$repo" "$issue") || return 1
+  [ -f "$file" ] || return 1
+  content=$(wf_state_read "$file")
+  mode=$(_wf_read_mode "$content")
+  printf '%s\t%s\n' "$content" "$mode"
+}
+
 _wf_collect_target_modes() {
-  local line repo issue file content mode
+  local line repo issue state_mode content mode
   local -a raw_targets=() modes=()
   local effective=""
 
@@ -366,10 +376,8 @@ _wf_collect_target_modes() {
     [ -n "$line" ] || continue
     raw_targets+=("$line")
     IFS=$'\t' read -r repo issue <<<"$line"
-    file=$(wf_state_file "$repo" "$issue") || continue
-    [ -f "$file" ] || continue
-    content=$(wf_state_read "$file")
-    mode=$(_wf_read_mode "$content")
+    state_mode=$(_wf_load_state_mode "$repo" "$issue") || continue
+    IFS=$'\t' read -r content mode <<<"$state_mode"
     [ -n "$mode" ] || continue
     _wf_contains "$mode" ${modes[@]+"${modes[@]}"} || modes+=("$mode")
     effective=$(wf_higher_mode "$effective" "$mode")
@@ -411,15 +419,13 @@ _wf_collect_targets() {
 
 _wf_target_note() {
   local repo="${1:-}" issue="${2:-}" effective="${3:-}"
-  local file content mode stage missing=""
+  local state_mode content mode stage missing=""
   local -a missing_stages=()
-  file=$(wf_state_file "$repo" "$issue") || return 0
-  if [ ! -f "$file" ]; then
+  if ! state_mode=$(_wf_load_state_mode "$repo" "$issue"); then
     printf '  #%s (%s): 進行の記録がありません（モードの記録も、通過工程の記録もありません）\n' "$issue" "$repo"
     return 0
   fi
-  content=$(wf_state_read "$file")
-  mode=$(_wf_read_mode "$content")
+  IFS=$'\t' read -r content mode <<<"$state_mode"
   if [ -z "$mode" ]; then
     printf '  #%s (%s): モードの記録がありません\n' "$issue" "$repo"
     [ -n "$effective" ] || return 0
