@@ -117,6 +117,24 @@ def test_global_scope_with_missing_path_stops_the_same_way(tmp_path: Path) -> No
     assert_no_bare_cd_error(proc)
 
 
+def test_global_scope_with_existing_path_warns_and_succeeds(tmp_path: Path) -> None:
+    # --scope global と存在するディレクトリの併用では、PROJECT_GIVEN が真になって
+    # WARN を出しつつ正常終了する。誤りではないため終了コードは 0 で、案内 (HINT) も
+    # 出ない。存在しないパス併用時のエラー停止（上のテスト）とは別の経路である。
+    project = tmp_path / "project"
+    project.mkdir()
+    proc = run(
+        "--scope", "global", "--project", str(project), "--dry-run", "--yes",
+        home=tmp_path,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert "WARN: --scope global では --project は使用されません" in proc.stderr
+    assert "ERROR:" not in proc.stderr
+    assert "HINT:" not in proc.stderr
+    assert_no_bare_cd_error(proc)
+
+
 def test_existing_directory_is_unchanged(tmp_path: Path) -> None:
     project = tmp_path / "project"
     project.mkdir()
