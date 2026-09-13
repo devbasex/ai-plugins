@@ -417,10 +417,24 @@ _wf_collect_targets() {
   return 0
 }
 
+# content（通過工程の記録）と effective モードから、PR 前に記録が無い必須工程の案内文だけを
+# 組み立てて返す。欠落が無ければ何も出力しない。状態ファイルやモードの診断は行わない。
+_wf_missing_stage_note() {
+  local repo="${1:-}" issue="${2:-}" effective="${3:-}" content="${4:-}"
+  local stage missing=""
+  local -a missing_stages=()
+  while IFS= read -r stage; do
+    [ -n "$stage" ] || continue
+    missing_stages+=("$stage")
+  done < <(_wf_missing_before_pr "$effective" "$content")
+  missing=$(wf_join ${missing_stages[@]+"${missing_stages[@]}"})
+  [ -n "$missing" ] && printf '  #%s (%s): 記録なし: %s\n' "$issue" "$repo" "$missing"
+  return 0
+}
+
 _wf_target_note() {
   local repo="${1:-}" issue="${2:-}" effective="${3:-}"
-  local state_mode content mode stage missing=""
-  local -a missing_stages=()
+  local state_mode content mode
   if ! state_mode=$(_wf_load_state_mode "$repo" "$issue"); then
     printf '  #%s (%s): 進行の記録がありません（モードの記録も、通過工程の記録もありません）\n' "$issue" "$repo"
     return 0
@@ -430,13 +444,7 @@ _wf_target_note() {
     printf '  #%s (%s): モードの記録がありません\n' "$issue" "$repo"
     [ -n "$effective" ] || return 0
   fi
-  mode="$effective"
-  while IFS= read -r stage; do
-    [ -n "$stage" ] || continue
-    missing_stages+=("$stage")
-  done < <(_wf_missing_before_pr "$mode" "$content")
-  missing=$(wf_join ${missing_stages[@]+"${missing_stages[@]}"})
-  [ -n "$missing" ] && printf '  #%s (%s): 記録なし: %s\n' "$issue" "$repo" "$missing"
+  _wf_missing_stage_note "$repo" "$issue" "$effective" "$content"
   return 0
 }
 
