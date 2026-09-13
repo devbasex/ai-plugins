@@ -417,3 +417,13 @@ def test_hooks_stay_silent_without_a_declaration(main_repo: Path) -> None:
         assert proc.returncode == 0, (script.name, proc.stderr)
         assert proc.stdout == "", (script.name, proc.stdout)
     assert not (main_repo / ".ndf").exists()
+
+
+def test_compose_project_rejects_empty_and_invalid_names() -> None:
+    """現状固定: 許可文字が残らない入力・区切り文字のみ・空文字は 1 で弾かれ、標準出力は空。"""
+    from worktree_helpers import run_lib
+
+    for given in ["!!!", "---", ""]:
+        res = run_lib(f'wt_compose_project "{given}"')
+        assert res.returncode == 1, (given, res.returncode, res.stdout, res.stderr)
+        assert res.stdout == "", (given, res.stdout)
