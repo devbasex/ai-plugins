@@ -17,6 +17,7 @@ import re
 import sys
 import unicodedata
 from pathlib import Path
+from typing import Callable
 from urllib.parse import unquote, urlparse
 
 
@@ -127,6 +128,36 @@ def anchor_refs(text: str) -> list[tuple[str, str, str]]:
     return refs
 
 
+def check_link_targets(md: Path, text: str, root: Path, failures: list[str]) -> None:
+    for raw in link_targets(text):
+        resolved = target_path(root, md, raw)
+        if resolved is None:
+            continue
+        try:
+            resolved.relative_to(root)
+        except ValueError:
+            failures.append(f"{md.relative_to(root)}: link escapes repository: {raw}")
+            continue
+        if not resolved.exists():
+            failures.append(f"{md.relative_to(root)}: missing link target: {raw}")
+
+
+def check_anchor_refs(
+    md: Path,
+    text: str,
+    root: Path,
+    scanned: set[Path],
+    anchors_of: Callable[[Path], set[str]],
+    failures: list[str],
+) -> None:
+    for path_part, fragment, raw in anchor_refs(text):
+        document = (md.parent / unquote(path_part)).resolve() if path_part else md.resolve()
+        if document not in scanned:
+            continue
+        if unquote(fragment).lower() not in anchors_of(document):
+            failures.append(f"{md.relative_to(root)}: missing heading anchor: {raw}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default=".", help="repository root")
@@ -146,24 +177,8 @@ def main() -> int:
 
     for md in markdown_files:
         text = "\n".join(visible_lines(md))
-        for raw in link_targets(text):
-            resolved = target_path(root, md, raw)
-            if resolved is None:
-                continue
-            try:
-                resolved.relative_to(root)
-            except ValueError:
-                failures.append(f"{md.relative_to(root)}: link escapes repository: {raw}")
-                continue
-            if not resolved.exists():
-                failures.append(f"{md.relative_to(root)}: missing link target: {raw}")
-
-        for path_part, fragment, raw in anchor_refs(text):
-            document = (md.parent / unquote(path_part)).resolve() if path_part else md.resolve()
-            if document not in scanned:
-                continue
-            if unquote(fragment).lower() not in anchors_of(document):
-                failures.append(f"{md.relative_to(root)}: missing heading anchor: {raw}")
+        check_link_targets(md, text, root, failures)
+        check_anchor_refs(md, text, root, scanned, anchors_of, failures)
 
     if failures:
         print("Markdown link check failed:", file=sys.stderr)
