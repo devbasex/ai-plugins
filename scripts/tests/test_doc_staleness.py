@@ -941,6 +941,26 @@ def test_base_of_drops_suffix_and_splits_into_int_triple() -> None:
     assert module.base_of("9.6.0-dev.1") == module.base_of("9.6.0")
 
 
+# --- manifest_skill_count: 有効な Skill 名が 0 件の境界（単体）---
+
+
+def test_manifest_skill_count_with_only_blank_and_comment_lines_returns_zero(tmp_path: Path) -> None:
+    """空行とコメント行だけのマニフェストは 0 を返し、エラーを記録しない（現状固定）。
+
+    有効な Skill 名が 1 件も無い境界において、`manifest_skill_count` が `None` ではなく
+    0 を返し、`report.errors` が空のまま戻ることを固定する。ファイルが存在しないときの
+    `None` と区別されている経路である。
+    """
+    module = _load_checker()
+    manifest = tmp_path / "plugins/ndf/manifests/kiro-skills.txt"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text("# コメント行\n\n   \n# 別のコメント\n", encoding="utf-8")
+
+    report = module.Report()
+    assert module.manifest_skill_count(tmp_path, "kiro", report) == 0
+    assert report.errors == []
+
+
 # --- check_version_section: 節に版数が 1 件も無い境界（単体）---
 
 
