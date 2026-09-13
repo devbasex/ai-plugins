@@ -36,7 +36,7 @@ command -v git >/dev/null 2>&1 || { printf '%s\n' "git が要ります" >&2; exi
 command -v jq >/dev/null 2>&1 || { printf '%s\n' "jq が要ります" >&2; exit 1; }
 
 MAIN_DIR=$(wt_main_dir) || { printf '%s\n' "git のリポジトリの中で実行してください" >&2; exit 1; }
-DECLARATION_FILE="$MAIN_DIR/$WT_DECLARATION_FILE"
+DECLARATION_FILE="$MAIN_DIR/.ndf/worktree.json"
 
 SCHEMA_URL="https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/ndf/skills/worktree/schemas/worktree.schema.json"
 

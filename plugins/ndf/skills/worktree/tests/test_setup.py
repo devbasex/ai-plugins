@@ -323,6 +323,15 @@ def test_check_does_not_query_origin(main_repo: Path) -> None:
     assert "NOTE" not in result["err"], result["err"]
 
 
+def test_status_and_check_share_the_state(main_repo: Path) -> None:
+    """受け入れ条件 3 / 10: status は check と同じ関数から状態を得る。"""
+    body = SETUP.read_text(encoding="utf-8")
+    status = body[body.index("do_status() {"):]
+    status = status[: status.index("\n}\n")]
+    assert "wt_declaration_state" in status, "status が状態の関数を呼んでいない"
+    assert "wt_declaration " not in status, "status に独自の分岐が残っている"
+
+
 def _declaration_line_pair(repo: Path) -> tuple[str, str, int]:
     status = run(["status"], cwd=repo)
     check = run(["check"], cwd=repo)
@@ -497,3 +506,4 @@ def test_slot_touch_updates_last_used_at_and_keeps_released_at_null(main_repo: P
     assignment = after["assignments"][0]
     assert assignment["last_used_at"] != "2020-01-01T00:00:00Z"
     assert assignment["released_at"] is None
+

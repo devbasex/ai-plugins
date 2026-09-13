@@ -779,34 +779,6 @@ _wt_is_not_target() {
   return 1
 }
 
-# 書き込み先の走査に使う語列を WT_WRITE_WORDS へ置く。ヒアドキュメントの本文を
-# 除き、リダイレクトを印へ置き換え、ファイル記述子の番号を取り除く。
-_wt_write_words() {
-  local cmd="${1:-}" spaced wi
-  local -a words=() kept=()
-
-  cmd=$(_wt_strip_heredocs "$cmd")
-  spaced=${cmd//&&/__WT_ANDAND__}
-  spaced=${spaced//&>>/ __WT_APPEND__ }
-  spaced=${spaced//&>/ __WT_REDIR__ }
-  spaced=${spaced//__WT_ANDAND__/"&&"}
-  spaced=${spaced//>>/ __WT_APPEND__ }
-  spaced=${spaced//>/ __WT_REDIR__ }
-
-  _wt_read_lines < <(_wt_tokenize "$spaced")
-  words=("${WT_LINES[@]+"${WT_LINES[@]}"}")
-  for ((wi = 0; wi < ${#words[@]}; wi++)); do
-    case "${words[wi]}" in
-      *[!0-9]*|"") kept+=("${words[wi]}"); continue ;;
-    esac
-    case "${words[wi + 1]:-}" in
-      __WT_REDIR__|__WT_APPEND__) continue ;;
-    esac
-    kept+=("${words[wi]}")
-  done
-  WT_WRITE_WORDS=("${kept[@]+"${kept[@]}"}")
-}
-
 # シェルコマンドの文字列から書き込み先を 1 行 1 件で出力する。
 # 対象は直接の書き換え (sed -i)・出力の付け替え (> / >>)・標準入力からの
 # 書き出し (tee)・複製と移動 (cp / mv) の 4 形式に限る。推定できなければ 1 を返す。
@@ -890,11 +862,61 @@ wt_extract_write_target() {
   # ため、命令の位置にこの名前が現れたら相対パスを出さない（決定 3）。
   local func_moving="|"
 
-  local -a words=()
-  _wt_write_words "$cmd"
-  words=("${WT_WRITE_WORDS[@]+"${WT_WRITE_WORDS[@]}"}")
+  # ヒアドキュメントの本文を先に落とす。落とす前に印を挟むと、本文の中の `>` が
+  # 出力の付け替えとして数えられる。
+  cmd=$(_wt_strip_heredocs "$cmd")
 
-  local n=${#words[@]} i j w target found=0 prev="" at_cmd=0 dest="" k cmd_prefix=0
+  # `>path` のように空白の無い形を語へ分けるため、先に印を挟む。
+  #
+  # `&>` と `&>>` は、標準出力と標準エラーをまとめて 1 つのファイルへ向ける形
+  # である（`&>>` は追記）。`&` は背景実行の演算子ではない。`>` だけを置き換えると
+  # `&` が演算子として残り、現在地が処理のまとまりの入口へ戻る
+  # （`cd a && echo hi &> f` の `f` を移動前の位置で解決してしまう）。
+  # `>` より先に、まとめて 1 つの印へ置き換える。
+  #
+  # 置き換えの前に `&&` を退避する。`cmd&&>f` は `&&` と `>` だが、字面では `&`
+  # と `>` が隣り合うため、退避しないと `&>` として拾い、残った `&` が背景実行の
+  # 演算子になる。退避は字面をそのまま戻すため、引用符の中の語も変わらない。
+  local spaced=${cmd//&&/__WT_ANDAND__}
+  spaced=${spaced//&>>/ __WT_APPEND__ }
+  spaced=${spaced//&>/ __WT_REDIR__ }
+  # 戻すときは置換の字面を引用符で囲む。bash 5.2 以降は置換文字列の裸の `&` が
+  # 「一致した部分」を指すため、囲まないと `&&` が `__WT_ANDAND__` 2 つへ戻る。
+  spaced=${spaced//__WT_ANDAND__/"&&"}
+  spaced=${spaced//>>/ __WT_APPEND__ }
+  spaced=${spaced//>/ __WT_REDIR__ }
+
+  local -a words=()
+  _wt_read_lines < <(_wt_tokenize "$spaced")
+  words=("${WT_LINES[@]+"${WT_LINES[@]}"}")
+
+  # リダイレクトの印の直前にある、すべて数字の語を並びから外す。`2>&1` の `2` は
+  # ファイル記述子の番号であって、開かれるファイルの名前ではない。残すと番号を
+  # 書き込み先として案内するうえ、`cp` / `mv` は最後の被演算子を宛先とするため、
+  # 本来の宛先がその位置を奪われて出なくなる。
+  #
+  # **落とすのは語へ切り分けた後である。** 印への置き換えは引用符を見ないため、
+  # その前に数字を落とすと引用符の中の字面まで書き換わる（`cp a "x 2>&1"` の
+  # 宛先は `x 2>&1` という名前のファイルで、番号は名前の一部である）。
+  #
+  # すべて数字の語だけを落とす。`cat file2>log` の `file2` は語であって番号では
+  # なく、bash も `log` だけを開く（実測）。逆に `cp a 2 >f` の `2` は名前が
+  # すべて数字のファイルだが、印への置き換えが番号と `>` の間の空白を消すため
+  # 見分けられない。取り逃がす側へ倒す。
+  local -a kept=()
+  local wi
+  for ((wi = 0; wi < ${#words[@]}; wi++)); do
+    case "${words[wi]}" in
+      *[!0-9]*|"") kept+=("${words[wi]}"); continue ;;
+    esac
+    case "${words[wi + 1]:-}" in
+      __WT_REDIR__|__WT_APPEND__) continue ;;
+    esac
+    kept+=("${words[wi]}")
+  done
+  words=("${kept[@]+"${kept[@]}"}")
+
+  local n=${#words[@]} i j w target found=0 prev="" at_cmd=0 dest="" k cmd_prefix=0 cd_end_of_options=0
   # `command` / `builtin` の被演算子を命令の位置として数えている間だけ 1。
   local cmd_wrapper=0 or_next=""
   # `||` の右辺のブレースグループが必ず後続へ進まないと判ったときに積む。まとまり
@@ -947,30 +969,6 @@ wt_extract_write_target() {
         ;;
       *) _WT_REDIR_DEST=$nx ;;
     esac
-  }
-  # `cd` の移動先と、移動前に開くリダイレクトを区切りまで走査する。
-  # 結果は WT_CD_DEST / WT_CD_END へ置く。
-  _scan_cd_operands() {
-    local start=$1 k end_of_options=0
-    WT_CD_DEST=""
-    for ((k = start + 1; k < n; k++)); do
-      case "${words[k]}" in
-        __WT_REDIR__|__WT_APPEND__)
-          _redir_target "$k"
-          _emit "$_WT_REDIR_DEST"
-          k=$_WT_REDIR_END
-          continue
-          ;;
-      esac
-      if _wt_is_separator "${words[k]}"; then break; fi
-      case "${words[k]}" in
-        --) [ "$end_of_options" = 1 ] || { end_of_options=1; continue; } ;;
-        -) continue ;;
-        -*) [ "$end_of_options" = 1 ] || continue ;;
-      esac
-      [ -n "$WT_CD_DEST" ] || WT_CD_DEST=${words[k]}
-    done
-    WT_CD_END=$k
   }
   # 複合コマンドの入口で `&` の復元先を積み、出口で戻す。
   _push_group() {
@@ -1553,10 +1551,37 @@ wt_extract_write_target() {
         # 開いてから命令を実行するためである。移動後の位置で解決すると、主
         # ディレクトリ側への書き込みを作業ツリー側と取り違えて案内を出さない
         # （検知漏れになる）。まだ `cwd` を更新していないここで解決する。
-        _scan_cd_operands "$i"
-        dest=$WT_CD_DEST
+        dest=""
+        cd_end_of_options=0
+        for ((k = i + 1; k < n; k++)); do
+          case "${words[k]}" in
+            __WT_REDIR__|__WT_APPEND__)
+              _redir_target "$k"
+              _emit "$_WT_REDIR_DEST"
+              k=$_WT_REDIR_END
+              continue
+              ;;
+          esac
+          if _wt_is_separator "${words[k]}"; then break; fi
+          case "${words[k]}" in
+            # `--` 以降はオプションの解釈を止める。`cd -- -dir` の `-dir` は
+            # 移動先であって `cd -` ではない。止めないと読み飛ばして、後続の
+            # 相対パスを抑止する。
+            --) [ "$cd_end_of_options" = 1 ] || { cd_end_of_options=1; continue; } ;;
+            # **`-` だけは `--` の後でも直前の位置を指す。** bash では `-` が
+            # オプションではなく被演算子の綴りとして扱われるためで、`-` という
+            # 名前のディレクトリがあっても `$OLDPWD` へ移る（実測で確認）。
+            # 字面からは追えないため、移動先を決めない。
+            -) continue ;;
+            # `cd -` と同じく、オプションは移動先ではない。
+            -*) [ "$cd_end_of_options" = 1 ] || continue ;;
+          esac
+          # 移動先は最初の被演算子である。リダイレクトを拾い切るため、
+          # 見つけても区切りまで走査を続ける。
+          [ -n "$dest" ] || dest=${words[k]}
+        done
         # 走査が届いた位置を控える。`__WT_REDIR__` の枝が同じ語を二度拾わない。
-        resolved_redir_end=$WT_CD_END
+        resolved_redir_end=$k
         # `||` の右辺で戻せるかどうかの判定に使う。
         list_cds=$((list_cds + 1)); cd_is_last=1
         # `&&` を跨いだ先の `cd` は、走ったかどうかが左辺の成否で決まる。
@@ -1601,7 +1626,7 @@ wt_extract_write_target() {
     esac
   done
 
-  unset -f _emit _scan_cd_operands _push_group _pop_group _push_subshell _pop_subshell _or_group_exits \
+  unset -f _emit _push_group _pop_group _push_subshell _pop_subshell _or_group_exits \
     _or_exit_redirs _close_function_body _wt_extract_sed_targets _wt_extract_cp_mv_target
   [ "$found" = 1 ] || return 1
 }
