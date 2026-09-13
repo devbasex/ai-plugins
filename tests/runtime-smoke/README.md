@@ -37,7 +37,7 @@ The authenticated GitHub workflow accepts `BIGQUERY_KEY_FILE_JSON` as a protecte
 
 `assertions/assert-hook-definitions.sh <claude|codex>` は、hooks 定義をランタイム自身に読ませ、
 読み込みの報告（警告・誤り）が 1 件でもあれば落とす。受け取るキーの一覧はこちらで持たない。
-設計は `issues/issue-571-hooks-key-check-design.md` にある。
+決定の理由は [Runtime Plugin Container Smoke Test 仕様](../../docs/specifications/runtime-plugin-container-smoke.md#hooks-定義の検査) にある。
 
 | ランタイム | 読ませ方 | 報告として扱うもの | 「読まれた」の判定 |
 | --- | --- | --- | --- |
