@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Skill の frontmatter が執筆規約に適合しているかを検査する。
 
-規約の本文は plugins/ndf/skills/README.md にある。本スクリプトはそのうち
+規約の本文は plugins/ndf/skills/AUTHORING.md にある。本スクリプトはそのうち
 機械的に判定できる項目だけを検査し、継続的インテグレーションで実行する。
 
 検査は 3 種類に分かれる。
@@ -34,7 +34,7 @@ import re
 import sys
 
 # --- 規約の上限値 -----------------------------------------------------------
-# 出典は plugins/ndf/skills/README.md「上限値」。
+# 出典は plugins/ndf/skills/AUTHORING.md「上限値」。
 NAME_MAX = 64                 # Agent Skills 仕様
 DESCRIPTION_SPEC_MAX = 1024   # Agent Skills 仕様
 DESCRIPTION_OPS_MAX = 300     # 運用目標

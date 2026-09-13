@@ -93,7 +93,7 @@ Skill 数は v7.0.0 と同じ 30 個に戻るが、初期一覧は 48 文字（f
 ## 参照
 
 - 棚卸の計画: [issues/old/ndf-development-skills/02-skill-inventory.md](../../../issues/old/ndf-development-skills/02-skill-inventory.md)
-- frontmatter 規約: [plugins/ndf/skills/README.md](../../../plugins/ndf/skills/README.md)
+- frontmatter 規約: [plugins/ndf/skills/AUTHORING.md](../../../plugins/ndf/skills/AUTHORING.md)
 
 ## v8.1.0 での追加（cross-refactoring）
 

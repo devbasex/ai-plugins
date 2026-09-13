@@ -179,7 +179,7 @@ def _create_manifests_and_skills(ndf: Path) -> None:
         (ndf / "skills" / name).mkdir(parents=True)
         (ndf / "skills" / name / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
     # SKILL.md を持たないディレクトリは実体として数えない。
-    (ndf / "skills/README.md").write_text("# 規約\n", encoding="utf-8")
+    (ndf / "skills/AUTHORING.md").write_text("# 規約\n", encoding="utf-8")
 
 
 def _create_fixture_documents(root: Path, ndf: Path) -> None:

@@ -20,7 +20,7 @@ plugins/ndf/
 ├── .claude-plugin/plugin.json   # Claude Code のマニフェスト
 ├── .codex-plugin/plugin.json    # Codex のマニフェスト
 ├── skills/                      # 配布 Skill の唯一の実体（45 個）
-├── skills/README.md             # Skill 執筆の規約
+├── skills/AUTHORING.md          # Skill 執筆の規約
 ├── manifests/                   # ランタイム別の配布 Skill 一覧
 ├── agents/                      # Claude Code のサブエージェント定義（8 個）
 ├── hooks/claude.json            # Claude Code の PreToolUse / SessionStart / Stop hook
@@ -46,7 +46,7 @@ plugins/ndf/
 
 **以下は正式版（`main`）の手順です。** 検証中の開発版は `develop` に載ります。取得元へ
 `#develop` を足す形で、手順は
-[リポジトリ README の「開発版を試す」](../../README.md#開発版を試す開発者向け)にあります。
+[docs/versioning-and-distribution.md の「開発版を試す」](../../docs/versioning-and-distribution.md#開発版を試す)にあります。
 
 ### Claude Code
 
@@ -340,17 +340,9 @@ kiro-cli の実機検証と、Skill 数が文脈量へ与える影響の実測�
 [docs/field-test-records.md](docs/field-test-records.md) にある。
 **その時点の実測であり、以後の構成変更には追随しない。**
 
-## 検証
+## 変更するとき
 
-```bash
-bash scripts/validate-runtime-plugins.sh
-claude plugin validate plugins/ndf
-python3 -m json.tool plugins/ndf/.codex-plugin/plugin.json >/dev/null
-bash plugins/ndf/dev.kiro/install.sh --dry-run >/dev/null
-```
-
-## 開発者向け
-
-Skill の実体は `skills/` の 1 箇所だけです。ランタイムごとの複製はありません。Skill を変更したら
-上記の検証を実行してください。frontmatter の規約は `skills/README.md` にあり、
+Skill の実体は `skills/` の 1 箇所だけです。ランタイムごとの複製はありません。変更したら
+[CONTRIBUTING.md の「手元での検証」](../../CONTRIBUTING.md#手元での検証)の検証を実行してください。
+frontmatter の規約は [skills/AUTHORING.md](skills/AUTHORING.md) にあり、
 `python3 scripts/check-skill-frontmatter.py` で検査します。

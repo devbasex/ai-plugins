@@ -7,7 +7,7 @@
 - [版ごとの追加と統合](03-version-history.md)
 
 Skill ごとの実測値と、維持・統合・削除・発動改善の判定を記録する。判定の基準そのものは
-[frontmatter 規約](../../../plugins/ndf/skills/README.md) ではなく本書の「判断基準」節に置き、
+[frontmatter 規約](../../../plugins/ndf/skills/AUTHORING.md) ではなく本書の「判断基準」節に置き、
 以降の棚卸もこの表を更新する形で行う。
 
 - 測定日: 2026-08-08
