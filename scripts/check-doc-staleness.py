@@ -352,17 +352,40 @@ def check_point_version(
     )
 
 
+def parse_plugin_table_rows(body: str) -> list[tuple[str, str, int]]:
+    """プラグイン一覧表の行を、名前・記載の版数・行番号の組として拾う。"""
+    rows: list[tuple[str, str, int]] = []
+    for number, line in enumerate(body.splitlines(), 1):
+        found = PLUGIN_TABLE_ROW.match(line)
+        if found:
+            rows.append((found.group("name"), found.group(2), number))
+    return rows
+
+
+def compare_plugin_table_row(root: Path, name: str, value: str, number: int, report: Report) -> None:
+    """一覧表の 1 行の版数を、その名前の `plugin.json` と突き合わせる。"""
+    expected = named_plugin_version(root, name)
+    if expected is None:
+        report.add(
+            ROOT_README,
+            f"プラグイン一覧表の {name} の版数を突き合わせられない"
+            f"（記載: {value}（L{number}） / {plugin_json_path(name)} が無い）",
+        )
+    elif value != expected:
+        report.add(
+            ROOT_README,
+            f"プラグイン一覧表の {name} の版数が食い違う"
+            f"（記載: {value}（L{number}） / {plugin_json_path(name)}: {expected}）",
+        )
+
+
 def check_plugin_table(root: Path, body: str, report: Report) -> None:
     """プラグイン一覧表の版数を、行ごとにその名前の `plugin.json` と突き合わせる（H）。
 
     一覧表には NDF 以外のプラグインも並ぶ。行の名前から突き合わせ先を引くことで、表へ
     プラグインを足しても検査を書き換えずに済む。
     """
-    rows: list[tuple[str, str, int]] = []
-    for number, line in enumerate(body.splitlines(), 1):
-        found = PLUGIN_TABLE_ROW.match(line)
-        if found:
-            rows.append((found.group("name"), found.group(2), number))
+    rows = parse_plugin_table_rows(body)
     if not any(name == FAMILY for name, _, _ in rows):
         report.add(
             ROOT_README,
@@ -370,19 +393,7 @@ def check_plugin_table(root: Path, body: str, report: Report) -> None:
             f"（`| **{FAMILY}** | <版> | ... |` の形で書く。{PLUGIN_JSON} と突き合わせる）",
         )
     for name, value, number in rows:
-        expected = named_plugin_version(root, name)
-        if expected is None:
-            report.add(
-                ROOT_README,
-                f"プラグイン一覧表の {name} の版数を突き合わせられない"
-                f"（記載: {value}（L{number}） / {plugin_json_path(name)} が無い）",
-            )
-        elif value != expected:
-            report.add(
-                ROOT_README,
-                f"プラグイン一覧表の {name} の版数が食い違う"
-                f"（記載: {value}（L{number}） / {plugin_json_path(name)}: {expected}）",
-            )
+        compare_plugin_table_row(root, name, value, number, report)
 
 
 def check_version_section(body: str, version: str | None, report: Report) -> None:
