@@ -59,6 +59,18 @@ marketplace_name() {
 
 # ---- Claude Code -------------------------------------------------------------
 
+# parse_claude_debug_log <log> <reports_file> <loaded_file>
+parse_claude_debug_log() {
+  local log="$1" reports_file="$2" loaded_file="$3"
+  # 報告は hooks に触れる警告と誤りのすべてとする。未知キーの `[WARN] Plugin <名前>: hooks.json: ...`、
+  # JSON の誤りの `[ERROR] Failed to load hooks for <名前>`、マニフェストが指す先が無いときの
+  # `[ERROR] Hooks file ... not found` がこの形で出る（最後のものは hooks.json が別にあると
+  # 読み込みの行も出るため、「読まれていない」では拾えない）。
+  grep -iE '\[(WARN|ERROR)\] .*hook' "$log" >"$reports_file" || true
+  sed -nE 's/.*Read (hooks\.json|manifest hooks) for plugin ([^ ]+) \(.*/\2/p' "$log" \
+    | sort -u >"$loaded_file"
+}
+
 # claude_load <label> <plugin dir>...
 # 報告の行を $OUT_DIR/claude-<label>.reports に、読まれたプラグイン名を .loaded に書く。
 claude_load() {
@@ -76,13 +88,7 @@ claude_load() {
     exit 1
   fi
   [ -f "$log" ] || { echo "claude did not write the debug log: $log" >&2; exit 1; }
-  # 報告は hooks に触れる警告と誤りのすべてとする。未知キーの `[WARN] Plugin <名前>: hooks.json: ...`、
-  # JSON の誤りの `[ERROR] Failed to load hooks for <名前>`、マニフェストが指す先が無いときの
-  # `[ERROR] Hooks file ... not found` がこの形で出る（最後のものは hooks.json が別にあると
-  # 読み込みの行も出るため、「読まれていない」では拾えない）。
-  grep -iE '\[(WARN|ERROR)\] .*hook' "$log" >"$OUT_DIR/claude-$label.reports" || true
-  sed -nE 's/.*Read (hooks\.json|manifest hooks) for plugin ([^ ]+) \(.*/\2/p' "$log" \
-    | sort -u >"$OUT_DIR/claude-$label.loaded"
+  parse_claude_debug_log "$log" "$OUT_DIR/claude-$label.reports" "$OUT_DIR/claude-$label.loaded"
 }
 
 # ---- Codex -------------------------------------------------------------------
