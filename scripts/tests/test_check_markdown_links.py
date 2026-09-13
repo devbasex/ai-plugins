@@ -38,16 +38,6 @@ def failure_lines(result: subprocess.CompletedProcess) -> list[str]:
     return [line for line in result.stderr.splitlines() if line.startswith("- ")]
 
 
-@pytest.fixture
-def module():
-    """検査モジュールを importlib で読み込んで返す（R3-004）。"""
-    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
 def test_same_document_missing_heading_fails(tmp_path: Path) -> None:
     write(tmp_path, "docs/a.md", "# 手順\n\n[飛ぶ](#無い見出し)\n")
     result = run(tmp_path)
@@ -182,13 +172,18 @@ def test_relative_link_without_fragment_to_existing_file_passes(tmp_path: Path) 
     assert result.stdout == "Markdown local links are valid\n"
 
 
-def test_link_targets_extracts_html_and_excludes_images(module) -> None:
+def test_link_targets_extracts_html_and_excludes_images() -> None:
     """link_targets の現状を固定する（#445, R1-003）。
 
     標準の Markdown リンクに加え、ダブルクォート・シングルクォートの
     `<a href="...">` を抽出し、画像リンク記法 `![alt](...)` は除外する。
     抽出は Markdown リンクが先、インライン HTML が後の順に並ぶ。
     """
+    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
     text = (
         "標準リンク [a](std.md) と "
         '<a href="dq.md">dq</a> と '
@@ -215,12 +210,22 @@ def test_link_targets_extracts_html_and_excludes_images(module) -> None:
         ('  path "title"  ', "path"),
     ],
 )
-def test_strip_title_current_behavior(target: str, expected: str, module) -> None:
+def test_strip_title_current_behavior(target: str, expected: str) -> None:
     """strip_title の山括弧・タイトル除去の現状を固定する（R1-005）。"""
+    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
     assert module.strip_title(target) == expected
 
 
-def test_should_skip(module) -> None:
+def test_should_skip() -> None:
+    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
     assert module.should_skip("") is True
     assert module.should_skip("/path") is True
     assert module.should_skip("//domain/path") is True
@@ -229,18 +234,23 @@ def test_should_skip(module) -> None:
     assert module.should_skip("path/to/file.md") is False
 
 
-def test_anchor_refs_empty_or_missing_fragment_skipped(module) -> None:
+def test_anchor_refs_empty_or_missing_fragment_skipped() -> None:
     """anchor_refs の空フラグメント等の境界値経路の現状を固定する（R2-001）。
 
     'file.md#' や '#' のように sep は存在するが fragment が空のリンク、
     および 'file.md' のように sep 自体が存在しないリンクはスキップされ空リストを返す。
     """
+    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
     assert module.anchor_refs("[x](file.md#)\n") == []
     assert module.anchor_refs("[x](#)\n") == []
     assert module.anchor_refs("[x](file.md)\n") == []
 
 
-def test_heading_anchors_collision_with_explicit_numbered_heading(module) -> None:
+def test_heading_anchors_collision_with_explicit_numbered_heading() -> None:
     """heading_anchors の連番衝突解決の while ループ反復経路を固定する（R2-002）。
 
     自動付番される名前（`手順-1`）と同名の見出しが文書内に明示的に書かれているとき、
@@ -248,6 +258,11 @@ def test_heading_anchors_collision_with_explicit_numbered_heading(module) -> Non
     探索して解決する。明示的な `## 手順-1` を先頭に置くことで、2 つ目の `## 手順` が
     `手順` → `手順-1`（衝突）→ `手順-2` と 2 回反復する経路を通す。
     """
+    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
     import tempfile
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -258,13 +273,18 @@ def test_heading_anchors_collision_with_explicit_numbered_heading(module) -> Non
     assert anchors == {"手順", "手順-1", "手順-2"}
 
 
-def test_iter_markdown_files_collects_root_files_and_scan_dirs(tmp_path: Path, module) -> None:
+def test_iter_markdown_files_collects_root_files_and_scan_dirs(tmp_path: Path) -> None:
     """iter_markdown_files の探索範囲の現状を固定する（R2-003）。
 
     ルート直下の所定ファイルは個別に、`docs/` と `plugins/` は配下を再帰で集める。
     所定外のルート直下ファイル・対象外ディレクトリ（`issues/`）・`.md` 以外は含めず、
     戻り値はソート済みで重複を持たない。
     """
+    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
     write(tmp_path, "README.md", "# r\n")
     write(tmp_path, "OTHER.md", "# o\n")
     write(tmp_path, "docs/b.md", "# b\n")
@@ -293,7 +313,12 @@ def test_iter_markdown_files_collects_root_files_and_scan_dirs(tmp_path: Path, m
         ("  test  ", "test"),
     ],
 )
-def test_slugify_boundary_and_character_retention(text: str, expected: str, module) -> None:
+def test_slugify_boundary_and_character_retention(text: str, expected: str) -> None:
     """slugify の空白展開・記号保持・記号除去の境界値規則を固定する（R2-005）。"""
+    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
     assert module.slugify(text) == expected
 
