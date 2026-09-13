@@ -726,7 +726,20 @@ def test_version_section_without_any_version_reports_once_and_returns() -> None:
     ]
 
 
-# --- check_category_breakdown: Skill 名を読点「、」で区切る分岐（単体）---
+# --- check_version_section: 節の後ろに終端の見出しが無い境界（単体）---
+
+
+def test_version_section_at_end_of_document_scans_until_eof() -> None:
+    """節が文書の末尾で終端の見出しが無くても、EOF まで走査して古い版数を記録する（現状固定）。"""
+    module = _load_checker()
+    report = module.Report()
+    body = f"{module.VERSION_SECTION_HEADING}\n\n開発版の例は `9.2.1` である。\n"
+    module.check_version_section(body, "9.3.0", report)
+    assert report.errors == [
+        f"{module.VERSIONING_MD}: 版の付け方の節の版数が現行版より古い"
+        f"（記載: 9.2.1（L3） / {module.PLUGIN_JSON}: 9.3.0）"
+    ]
+
 
 
 def test_category_breakdown_ideographic_comma_names_are_split() -> None:
