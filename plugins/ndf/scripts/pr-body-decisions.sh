@@ -238,6 +238,28 @@ def rewrite(body, span, expected):
     return body + ("" if body.endswith(("\n", "\r")) else nl) + nl + text
 
 
+def write_body(new_body):
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
+        json.dump({"body": new_body}, f, ensure_ascii=False)
+        payload = f.name
+    try:
+        gh("-X", "PATCH", f"repos/{repo}/pulls/{pr}", input_file=payload)
+    finally:
+        os.unlink(payload)
+
+
+def sync_section(body, span, expected, docs):
+    write_body(rewrite(body, span, expected))
+    _, _, body = read_pr()
+    same, _, actual, expected = compare(body, docs)
+    total = sum(len(h) for _, h in docs)
+    if same:
+        print(f"書き直した: 設計文書 {len(docs)} 本 / 決定 {total} 件")
+        return 0
+    report(actual, expected, docs)
+    return 1
+
+
 def main():
     try:
         head_ref, head_sha, body = read_pr()
@@ -253,21 +275,7 @@ def main():
         if sub == "check":
             report(actual, expected, docs)
             return 1
-        new_body = rewrite(body, span, expected)
-        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
-            json.dump({"body": new_body}, f, ensure_ascii=False)
-            payload = f.name
-        try:
-            gh("-X", "PATCH", f"repos/{repo}/pulls/{pr}", input_file=payload)
-        finally:
-            os.unlink(payload)
-        _, _, body = read_pr()
-        same, _, actual, expected = compare(body, docs)
-        if same:
-            print(f"書き直した: 設計文書 {len(docs)} 本 / 決定 {total} 件")
-            return 0
-        report(actual, expected, docs)
-        return 1
+        return sync_section(body, span, expected, docs)
     except Unreadable as exc:
         print(f"ERROR: 読めなかった（一致とは扱わない）: {exc}", file=sys.stderr)
         return 2

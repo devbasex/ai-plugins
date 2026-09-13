@@ -22,29 +22,26 @@ MARKER = "<!-- 設計文書の「決定の記録」の見出しから pr-body-de
 
 FAKE_GH = r'''#!/usr/bin/env python3
 import json, os, sys, urllib.parse
-state_path = os.environ["FAKE_GH_STATE"]
-state = json.load(open(state_path, encoding="utf-8"))
-args = sys.argv[1:]
-with open(os.environ["FAKE_GH_LOG"], "a", encoding="utf-8") as log:
-    log.write(json.dumps(args, ensure_ascii=False) + "\n")
-if not args or args[0] != "api":
-    sys.exit(1)
-method, endpoint, input_file = "GET", None, None
-i = 1
-while i < len(args):
-    a = args[i]
-    if a in ("-X", "--method"):
-        method = args[i + 1]; i += 2; continue
-    if a in ("-H", "--header"):
-        i += 2; continue
-    if a == "--input":
-        input_file = args[i + 1]; i += 2; continue
-    if a.startswith("-"):
-        i += 1; continue
-    endpoint = a; i += 1
-path, _, query = endpoint.partition("?")
-parts = path.split("/")
-if method == "PATCH":
+
+
+def parse_request(args):
+    method, endpoint, input_file = "GET", None, None
+    i = 1
+    while i < len(args):
+        a = args[i]
+        if a in ("-X", "--method"):
+            method = args[i + 1]; i += 2; continue
+        if a in ("-H", "--header"):
+            i += 2; continue
+        if a == "--input":
+            input_file = args[i + 1]; i += 2; continue
+        if a.startswith("-"):
+            i += 1; continue
+        endpoint = a; i += 1
+    return method, endpoint, input_file
+
+
+def respond_patch(state, state_path, input_file):
     if state.get("fail_patch"):
         sys.exit(1)
     sent = json.load(open(input_file, encoding="utf-8"))
@@ -56,7 +53,9 @@ if method == "PATCH":
     json.dump(state, open(state_path, "w", encoding="utf-8"), ensure_ascii=False)
     sys.stdout.write(json.dumps(state["pr"]))
     sys.exit(0)
-if len(parts) == 5 and parts[3] == "pulls":
+
+
+def respond_pull_request(state, state_path):
     state["reads"] = state.get("reads", 0) + 1
     json.dump(state, open(state_path, "w", encoding="utf-8"), ensure_ascii=False)
     if state.get("fail_pr") or (state.get("fail_reread") and state["reads"] >= 2):
@@ -64,7 +63,9 @@ if len(parts) == 5 and parts[3] == "pulls":
         sys.exit(1)
     sys.stdout.write(json.dumps(state["pr"]))
     sys.exit(0)
-if len(parts) == 6 and parts[5] == "files":
+
+
+def respond_files(state):
     if "files_response" in state:
         sys.stdout.write(state["files_response"])
         sys.exit(0)
@@ -73,12 +74,34 @@ if len(parts) == 6 and parts[5] == "files":
     half = len(files) // 2
     sys.stdout.write(json.dumps(files[:half]) + json.dumps(files[half:]))
     sys.exit(0)
-if len(parts) >= 5 and parts[3] == "contents":
+
+
+def respond_contents(state, parts):
     name = urllib.parse.unquote("/".join(parts[4:]))
     if name not in state["contents"]:
         sys.exit(1)
     sys.stdout.write(state["contents"][name])
     sys.exit(0)
+
+
+state_path = os.environ["FAKE_GH_STATE"]
+state = json.load(open(state_path, encoding="utf-8"))
+args = sys.argv[1:]
+with open(os.environ["FAKE_GH_LOG"], "a", encoding="utf-8") as log:
+    log.write(json.dumps(args, ensure_ascii=False) + "\n")
+if not args or args[0] != "api":
+    sys.exit(1)
+method, endpoint, input_file = parse_request(args)
+path, _, query = endpoint.partition("?")
+parts = path.split("/")
+if method == "PATCH":
+    respond_patch(state, state_path, input_file)
+if len(parts) == 5 and parts[3] == "pulls":
+    respond_pull_request(state, state_path)
+if len(parts) == 6 and parts[5] == "files":
+    respond_files(state)
+if len(parts) >= 5 and parts[3] == "contents":
+    respond_contents(state, parts)
 sys.exit(1)
 '''
 
