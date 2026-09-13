@@ -102,7 +102,7 @@ allowed-tools:
 ```text
 /ndf:cross-refactoring 130 --scope src/services tests/services --baseline-test "pytest -q"
 /ndf:cross-refactoring 130 --scope src --baseline-test "pytest -q" --sync-command "make generate"
-/ndf:cross-refactoring 130 --scope src --model codex=gpt-5.5 --model claude=opus-5
+/ndf:cross-refactoring 130 --scope src --model codex=gpt-5.5 --model claude=claude-opus-5
 /ndf:cross-refactoring 130 --scope src --host codex --max-outer-rounds 1
 ```
 
