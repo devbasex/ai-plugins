@@ -104,7 +104,7 @@ class Fake:
         }
         self.state.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
 
-    def run(self, *args, path=None):
+    def run(self, *args, path=None, cwd=None):
         env = {
             **os.environ,
             "PATH": path or f"{self.bin}:{os.environ['PATH']}",
@@ -113,7 +113,7 @@ class Fake:
             "FAKE_GH_PATCHED": str(self.patched),
         }
         return subprocess.run(
-            ["bash", str(SCRIPT), *args], capture_output=True, text=True, env=env, timeout=60
+            ["bash", str(SCRIPT), *args], capture_output=True, text=True, env=env, timeout=60, cwd=cwd
         )
 
     def calls(self):
@@ -495,4 +495,19 @@ def test_22_repo_flag_without_value_returns_3_without_reading(fake):
     design_pr(fake, EXPECTED)
     out = fake.run("check", "7", "--repo")
     assert out.returncode == 3, (out.stdout, out.stderr)
+    assert not fake.calls()
+
+
+def test_22_unresolvable_repo_returns_2_without_reading(fake, tmp_path, monkeypatch):
+    """現状固定: `--repo` が無く、作業場所から origin を読めないと終了コード 2。GitHub を読まない。"""
+    outside = tmp_path / "outside-git"
+    outside.mkdir()
+    # 作業場所より上のリポジトリや、フックから継いだ GIT_DIR を拾わせない
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    monkeypatch.delenv("GIT_DIR", raising=False)
+    monkeypatch.delenv("GIT_WORK_TREE", raising=False)
+    design_pr(fake, EXPECTED)
+    out = fake.run("check", "7", cwd=str(outside))
+    assert out.returncode == 2, (out.stdout, out.stderr)
+    assert "リポジトリを決められません" in out.stderr
     assert not fake.calls()
