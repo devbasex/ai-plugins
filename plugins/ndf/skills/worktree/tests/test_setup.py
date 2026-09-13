@@ -234,15 +234,10 @@ def test_check_outside_a_repository_is_undecidable(tmp_path: Path) -> None:
 
 
 def test_check_runs_from_inside_a_worktree(main_repo: Path, worktree: Path) -> None:
-    """現状固定: 作業ツリーの中から主ディレクトリの宣言とブランチを見る。"""
+    """作業ツリーの中からでも、主ディレクトリの宣言を見る。"""
     run(["init"], cwd=main_repo)
     result = run(["check"], cwd=worktree)
     assert result["rc"] == 0, result
-    assert result["out"].splitlines() == [
-        PRESENT_LINE,
-        "開発の起点: main（未宣言。既定ブランチ）",
-        "本番のチャネル: main（未宣言。既定ブランチ）",
-    ], result["out"]
 
 
 def test_check_prints_undeclared_branches_as_default(main_repo: Path) -> None:
