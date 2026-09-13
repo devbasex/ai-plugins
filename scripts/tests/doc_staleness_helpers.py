@@ -18,6 +18,15 @@ CHECKER = REPO_ROOT / "scripts/check-doc-staleness.py"
 
 VERSION = "9.3.0"
 
+# 現行版から導く名前付き値。fixture 本文の現行版を指す箇所はこれらから組み立て、定数を
+# 変えれば本文も追従するようにする。`next_minor` は後段の関数だが、ここでは定義前なので
+# 基底の minor を進める計算を直接書く。
+_VERSION_MAJOR, _VERSION_MINOR, _VERSION_PATCH = VERSION.split("-", 1)[0].split(".")
+# 現行版の開発版例（`9.4.0-dev.1` などではなく現行版そのものの接尾辞付き）。
+CURRENT_DEV_VERSION = f"{VERSION}-dev.1"
+# 版の付け方の章が置く「次の版」の開発版例。基底の minor を 1 つ進める。
+NEXT_MINOR_DEV_VERSION = f"{_VERSION_MAJOR}.{int(_VERSION_MINOR) + 1}.{_VERSION_PATCH}-dev.1"
+
 # 一覧表の行ごとに、その名前の `plugin.json` と突き合わせることを確かめるための 2 つ目の
 # プラグイン。NDF とは別の版数にしておく。
 OTHER_PLUGIN = "fixture-kit"
@@ -39,7 +48,7 @@ MANIFESTS = {
 # G: 概要の版数 / H: プラグイン一覧表の版数の列
 ROOT_README = """# Fixture Marketplace
 
-**NDFプラグイン v9.3.0** の検査用の最小構成です。
+**NDFプラグイン v%(version)s** の検査用の最小構成です。
 
 - **公開Skills**: Claude Code向け core 5個、Kiro向け core 4個、Codex向け core 3個、agy向け core 2個に分離。
 - **元Skills（5個）**:
@@ -51,13 +60,13 @@ ROOT_README = """# Fixture Marketplace
 
 | プラグイン名 | バージョン | 説明 |
 |------------|----------|------|
-| **ndf** | 9.3.0 | 検査用の最小構成 |
-| **fixture-kit** | 1.4.2 | 一覧表の行ごとの突き合わせを確かめるための 2 つ目 |
+| **ndf** | %(version)s | 検査用の最小構成 |
+| **fixture-kit** | %(other_version)s | 一覧表の行ごとの突き合わせを確かめるための 2 つ目 |
 
 ### NDF v9.0.0 の主な変更（非互換）
 
 - v4.0.0 で古い経路を廃止しました。それより前の版（8.5.4 以前）には戻せません
-"""
+""" % {"version": VERSION, "other_version": OTHER_VERSION}
 
 # I: 「主要プラグインです（v<版>）」。版数の例は置かない（J は正本の側が持つ）
 AGENTS_MD = """# Fixture Guidelines
@@ -70,12 +79,12 @@ AGENTS_MD = """# Fixture Guidelines
 
 ## NDFプラグインについて
 
-**NDFプラグイン**は、このマーケットプレイスの主要プラグインです（v9.3.0）。
+**NDFプラグイン**は、このマーケットプレイスの主要プラグインです（v%(version)s）。
 
 ## 変更の履歴
 
 v8.5.4 で古い経路を廃止した。それより前の版（8.4.0 以前）は対象外である。
-"""
+""" % {"version": VERSION}
 
 VERSIONING_MD_PATH = "docs/versioning-and-distribution.md"
 
@@ -93,10 +102,10 @@ VERSIONING_MD = """# Fixture Versioning
 
 | 版 | 形 | 意味 |
 | --- | --- | --- |
-| 正式版 | `9.3.0` | 利用者が常用してよい |
-| 開発版 | `9.3.0-dev.1` | 検証中 |
+| 正式版 | `%(version)s` | 利用者が常用してよい |
+| 開発版 | `%(current_dev)s` | 検証中 |
 
-- 接尾辞は次に出す正式版の版数へ付ける。`9.3.0` の次を開発するなら `9.4.0-dev.1`
+- 接尾辞は次に出す正式版の版数へ付ける。`%(version)s` の次を開発するなら `%(next_dev)s`
 
 ## 版数を持つ 15 箇所
 
@@ -105,7 +114,11 @@ VERSIONING_MD = """# Fixture Versioning
 ## 利用者が過去の版へ戻る
 
 最初のタグは `ndf--v8.5.4` である。それより前の版（`8.4.0` 以前）はタグでは戻せない。
-"""
+""" % {
+    "version": VERSION,
+    "current_dev": CURRENT_DEV_VERSION,
+    "next_dev": NEXT_MINOR_DEV_VERSION,
+}
 
 # K: Kiro の確認例 / L: Codex のキャッシュパスの例（2 箇所） / M: `codex plugin list` の出力例
 PLUGIN_README = """# NDF Plugin
@@ -127,7 +140,7 @@ plugins/ndf/
 └── manifests/                   # ランタイム別の配布 Skill 一覧
 ```
 
-## v9.3.0 へ更新するとき
+## v%(version)s へ更新するとき
 
 **Skill が 1 個増えます。** 既存の Skill の手順は変わりません。
 
@@ -135,21 +148,21 @@ plugins/ndf/
 
 ```bash
 kiro agent list
-# => NDF統合開発エージェント（Kiro CLI用 / v9.3.0）
+# => NDF統合開発エージェント（Kiro CLI用 / v%(version)s）
 ```
 
 ## Codex で確かめる
 
 ```text
-~/.codex/plugins/cache/ai-plugins/ndf/9.3.0/skills/deploy/SKILL.md を読んでください。
+~/.codex/plugins/cache/ai-plugins/ndf/%(version)s/skills/deploy/SKILL.md を読んでください。
 ```
 
 ```bash
 codex plugin list
-# => ndf@ai-plugins  installed, enabled  9.3.0  <path>
-# ~/.codex/plugins/cache/ai-plugins/ndf/9.3.0/skills/deploy/SKILL.md
+# => ndf@ai-plugins  installed, enabled  %(version)s  <path>
+# ~/.codex/plugins/cache/ai-plugins/ndf/%(version)s/skills/deploy/SKILL.md
 ```
-"""
+""" % {"version": VERSION}
 
 
 def _create_plugin_configs(root: Path, ndf: Path) -> None:
