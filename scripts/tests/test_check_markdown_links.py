@@ -318,6 +318,36 @@ def test_anchor_refs_empty_or_missing_fragment_skipped() -> None:
     assert module.anchor_refs("[x](file.md)\n") == []
 
 
+def test_anchor_refs_extracts_same_and_relative_document_fragments() -> None:
+    """同一文書と相対文書のアンカー抽出の現状を固定する（R1-001）。"""
+    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    text = "[同一文書](#sec)\n[相対文書](doc.md#other-sec)\n"
+
+    assert module.anchor_refs(text) == [
+        ("", "sec", "#sec"),
+        ("doc.md", "other-sec", "doc.md#other-sec"),
+    ]
+
+
+def test_anchor_refs_skips_external_and_absolute_path_fragments() -> None:
+    """スキップ対象のパスを持つアンカー参照の現状を固定する（R1-001）。"""
+    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    text = (
+        "[外部](https://example.com/doc.md#sec)\n"
+        "[絶対パス](/doc.md#sec)\n"
+    )
+
+    assert module.anchor_refs(text) == []
+
+
 def test_heading_anchors_collision_with_explicit_numbered_heading() -> None:
     """heading_anchors の連番衝突解決の while ループ反復経路を固定する（R2-002）。
 
