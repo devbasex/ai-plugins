@@ -322,3 +322,30 @@ def test_slugify_boundary_and_character_retention(text: str, expected: str) -> N
 
     assert module.slugify(text) == expected
 
+
+def test_target_path_current_behavior(tmp_path: Path) -> None:
+    """target_path のリンク解決・スキップ判定の現状を固定する（R4-001）。"""
+    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    source = tmp_path / "docs" / "index.md"
+
+    # スキップ対象は None
+    assert module.target_path(source, "") is None
+    assert module.target_path(source, "https://example.com/foo.md") is None
+    assert module.target_path(source, "/root/file.md") is None
+
+    # 同一文書内アンカー（path_part が空）は None
+    assert module.target_path(source, "#heading") is None
+    assert module.target_path(source, "#") is None
+
+    # 相対パス（フラグメント・タイトル・山括弧付き含む）は解決先 Path
+    assert module.target_path(source, "other.md") == (tmp_path / "docs" / "other.md").resolve()
+    assert module.target_path(source, "other.md#heading") == (tmp_path / "docs" / "other.md").resolve()
+    assert module.target_path(source, "../readme.md") == (tmp_path / "readme.md").resolve()
+    assert module.target_path(source, '<other.md>') == (tmp_path / "docs" / "other.md").resolve()
+    assert module.target_path(source, 'other.md "title"') == (tmp_path / "docs" / "other.md").resolve()
+    assert module.target_path(source, '<other.md> "title"') == (tmp_path / "docs" / "<other.md>").resolve()
+

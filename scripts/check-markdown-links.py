@@ -72,7 +72,7 @@ def resolve_document(source: Path, path_part: str) -> Path:
     return (source.parent / unquote(path_part)).resolve()
 
 
-def target_path(root: Path, source: Path, raw_target: str) -> Path | None:
+def target_path(source: Path, raw_target: str) -> Path | None:
     target = strip_title(raw_target)
     if should_skip(target):
         return None
@@ -161,7 +161,7 @@ def main() -> int:
     for md in markdown_files:
         text = "\n".join(visible_lines(md))
         for raw in link_targets(text):
-            resolved = target_path(root, md, raw)
+            resolved = target_path(md, raw)
             if resolved is None:
                 continue
             try:
