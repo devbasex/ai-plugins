@@ -76,11 +76,20 @@ def resolve_document(source: Path, path_part: str) -> Path:
     return (source.parent / unquote(path_part)).resolve()
 
 
-def target_path(source: Path, raw_target: str) -> Path | None:
+def parse_link_target(raw_target: str) -> tuple[str, str] | None:
+    """(path part, fragment) of a link; None when its path part is skipped."""
     target = strip_title(raw_target)
-    if should_skip(target):
+    path_part, _, fragment = target.partition("#")
+    if path_part and should_skip(target):
         return None
-    path_part = target.split("#", 1)[0]
+    return path_part, fragment
+
+
+def target_path(source: Path, raw_target: str) -> Path | None:
+    parsed = parse_link_target(raw_target)
+    if parsed is None:
+        return None
+    path_part, _ = parsed
     if not path_part:
         return None
     return resolve_document(source, path_part)
@@ -135,11 +144,11 @@ def anchor_refs(text: str) -> list[tuple[str, str, str]]:
     """(path part, fragment, raw target) for every link carrying a fragment."""
     refs: list[tuple[str, str, str]] = []
     for raw in link_targets(text):
-        target = strip_title(raw)
-        path_part, sep, fragment = target.partition("#")
-        if not sep or not fragment:
+        parsed = parse_link_target(raw)
+        if parsed is None:
             continue
-        if path_part and should_skip(target):
+        path_part, fragment = parsed
+        if not fragment:
             continue
         refs.append((path_part, fragment, raw))
     return refs
