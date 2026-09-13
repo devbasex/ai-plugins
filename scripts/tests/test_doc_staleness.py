@@ -794,3 +794,22 @@ def test_category_lines_without_source_count_returns_none() -> None:
         "- カテゴリB: 2個\n"
     )
     assert module.category_lines(markdown) is None
+
+
+# --- location_of: index が lines の要素数以上である境界（単体）---
+
+
+def test_location_of_with_index_out_of_bounds_returns_empty_string() -> None:
+    """指定された index が lines の要素数以上である境界値において、空文字列を返す（現状固定）。"""
+    module = _load_checker()
+    claim = module.Claim(
+        path="test.md",
+        subject="テスト",
+        wording="テスト",
+        described=[10],
+        expected=10,
+        source="source",
+        lines=[10],
+    )
+    assert module.location_of(claim, 1) == ""
+
