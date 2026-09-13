@@ -122,7 +122,8 @@ tests/runtime-smoke/
 ### 決定 1: ランタイムに読ませて判定し、受け取るキーの一覧を持たない
 
 受け取るキーはランタイムと版で違う。Claude Code 2.1.270 はマッチャーグループと上位の未知キーを
-報告し、コマンド階層の未知キーは報告しない（実測 #4）。Codex 0.154.0 はどの階層の未知キーも
+報告し、コマンド階層の未知キーは報告しない。上位でも `description` は受け取り、報告しない
+（実測 #2・#4）。Codex 0.154.0 はどの階層の未知キーも
 受け取る（実測 #10）。1 つの一覧で両方を表すと、どちらかで実際には受け取るキーを落とすか、
 受け取らないキーを見逃す。ランタイムに読ませれば、継続的統合が最新版を導入するたびに判定が
 その版に揃う（前提 1）。
@@ -194,9 +195,9 @@ agy はプラグイン配下の `hooks.json` を読まず、`install-hooks.sh` �
 | # | 条件 | 結果 |
 | --- | --- | --- |
 | 1 | Claude Code 2.1.270（コンテナ）、`claude --debug-file <log> --plugin-dir <壊した mcp-serena> plugin list` | 終了コード 0、0.3 秒。ログに `[WARN] Plugin mcp-serena: hooks.json: unknown key "description" in hooks.SessionStart[0] ignored (<パス>)` |
-| 2 | 同じ版、`develop` の ndf / mcp-serena / mcp-playwright を `--plugin-dir` で渡す | 終了コード 0。`[WARN] Plugin` の行は 0 件。`Read hooks.json for plugin <名前>` / `Read manifest hooks for plugin <名前>` が 3 プラグイン分出る |
+| 2 | 同じ版、`develop` の ndf / mcp-serena / mcp-playwright を `--plugin-dir` で渡す。mcp-serena と mcp-playwright の定義は上位に `description` を持つ | 終了コード 0。`[WARN] Plugin` の行は 0 件（手元の 2.1.270 でも同じ）。`Read hooks.json for plugin <名前>` / `Read manifest hooks for plugin <名前>` が 3 プラグイン分出る |
 | 3 | Claude Code 2.1.270（手元）、#1 と同じ定義を `-p "reply ok"` で起動 | 警告は同じくログに出るが、`Not logged in` で終了コード 1。`develop` の 3 プラグインを渡した起動は API の再試行で 47 秒かかった |
-| 4 | Claude Code 2.1.270（手元）、コマンド階層に未知キー `bogus`、上位に未知キー `foo`、未知のイベント名 `SessionStartt` を置く | `foo` とイベント名は `[WARN] Plugin <名前>: hooks...` で報告される。コマンド階層の `bogus` は報告されない |
+| 4 | Claude Code 2.1.270（手元）、上位に `description` を持つ mcp-serena の定義へ、コマンド階層に未知キー `bogus`、上位に未知キー `foo`、未知のイベント名 `SessionStartt` を置く | `foo` とイベント名は `[WARN] Plugin <名前>: hooks...` で報告される（`foo` は `hooks.json: unknown key "foo" ignored`）。コマンド階層の `bogus` と、同じ定義が上位に持つ `description` は報告されない。**上位の `description` は受け取るキーである** |
 | 5 | Claude Code 2.1.270（手元）、JSON として壊れた定義 | `[ERROR] Failed to load hooks for mcp-serena: JSON Parse error: ...`。`plugin list` の表示は `✘ loaded with errors`、終了コードは 0 |
 | 6 | Claude Code 2.1.261（キャッシュの残った古いコンテナ像）、#1 と同じ定義 | **警告が出ない。** `Read hooks.json` の行だけが出る |
 | 7 | Claude Code 2.1.270（手元）、隔離した設定へ `ndf@ai-plugins` を導入した後に `--plugin-dir <壊した ndf>` を渡す | 導入済みの ndf と `--plugin-dir` の ndf の両方を読み、`Read manifest hooks for plugin ndf` が 2 行出る |
