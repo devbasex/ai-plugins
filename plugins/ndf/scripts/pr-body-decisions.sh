@@ -73,6 +73,7 @@ import urllib.parse
 
 sub, pr, repo = sys.argv[1:4]
 HEADING = "## 決めたこと"
+DECISIONS_HEADING = "## 決定の記録"
 MARKER = "<!-- 設計文書の「決定の記録」の見出しから pr-body-decisions.sh sync が作る。手で書き換えない -->"
 
 
@@ -132,7 +133,7 @@ def decision_headings(text):
     for _, line, outside in lines_outside_fences(text):
         if not outside:
             continue
-        if re.fullmatch(r"## 決定の記録[ \t]*", line):
+        if re.fullmatch(re.escape(DECISIONS_HEADING) + r"[ \t]*", line):
             inside = True
         elif is_top_heading(line):
             inside = False

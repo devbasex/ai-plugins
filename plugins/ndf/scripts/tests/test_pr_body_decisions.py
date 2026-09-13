@@ -312,35 +312,30 @@ def test_5_long_fence_closes_only_with_same_marker_and_sufficient_length(fake):
     assert out.returncode == 0, out.stdout + out.stderr
 
 
-def test_5_h1_heading_closes_decisions_section(fake):
+@pytest.mark.parametrize(
+    ("decision_heading", "appendix_heading"),
+    [
+        (
+            "決定 A: 採用する方針",
+            "### 数えない見出し: 付録の小見出し\n",
+        ),
+        (
+            "決定 1: 実行してよいコマンドは起動の引数で受け取る",
+            "### 付録見出し\n\n付録の本文。\n",
+        ),
+    ],
+)
+def test_5_h1_heading_closes_decisions_section(fake, decision_heading, appendix_heading):
     """現状固定: # で始まる h1 見出しが「## 決定の記録」を閉じ、後ろの ### は数えない。"""
     design = (
-        "# 設計\n\n## 決定の記録\n\n"
-        "### 決定 A: 採用する方針\n\n"
-        "# 付録\n\n"
-        "### 数えない見出し: 付録の小見出し\n"
+        f"# 設計\n\n## 決定の記録\n\n"
+        f"### {decision_heading}\n\n"
+        f"# 付録\n\n"
+        f"{appendix_heading}"
     )
     expected = section((
         "issues/issue-1-design.md",
-        ["決定 A: 採用する方針"],
-    ))
-    design_pr(fake, body=f"## Summary\n\n{expected}\n## Test plan\n", design=design)
-    out = fake.run("check", "7", "--repo", REPO)
-    assert out.returncode == 0, out.stdout + out.stderr
-    assert "決定 1 件" in out.stdout
-
-
-def test_5_h1_appendix_subheadings_after_decisions_section_are_not_collected(fake):
-    """現状固定: 「## 決定の記録」の直後に h1（# 付録）が来ると節が終わり、その配下の ### を数えない。"""
-    design = (
-        "# 設計\n\n## 決定の記録\n\n"
-        "### 決定 1: 実行してよいコマンドは起動の引数で受け取る\n\n理由。\n\n"
-        "# 付録\n\n"
-        "### 付録見出し\n\n付録の本文。\n"
-    )
-    expected = section((
-        "issues/issue-1-design.md",
-        ["決定 1: 実行してよいコマンドは起動の引数で受け取る"],
+        [decision_heading],
     ))
     design_pr(fake, body=f"## Summary\n\n{expected}\n## Test plan\n", design=design)
     out = fake.run("check", "7", "--repo", REPO)
