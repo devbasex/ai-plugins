@@ -155,11 +155,13 @@ codex plugin list
 """
 
 
+def _write_ndf_plugin_json(path: Path, version: str) -> None:
+    path.write_text('{\n  "name": "ndf",\n  "version": "%s"\n}\n' % version, encoding="utf-8")
+
+
 def _create_plugin_configs(root: Path, ndf: Path) -> None:
     (ndf / ".claude-plugin").mkdir(parents=True)
-    (ndf / ".claude-plugin/plugin.json").write_text(
-        '{\n  "name": "ndf",\n  "version": "%s"\n}\n' % VERSION, encoding="utf-8"
-    )
+    _write_ndf_plugin_json(ndf / ".claude-plugin/plugin.json", VERSION)
 
     other = root / "plugins" / OTHER_PLUGIN / ".claude-plugin"
     other.mkdir(parents=True)
@@ -222,9 +224,7 @@ def edit_all(path: Path, old: str, new: str, expected: int) -> None:
 
 def bump_plugin_version(root: Path, version: str) -> None:
     """木の `plugin.json` の版だけを上げる。説明文書には触らない。"""
-    (root / "plugins/ndf/.claude-plugin/plugin.json").write_text(
-        '{\n  "name": "ndf",\n  "version": "%s"\n}\n' % version, encoding="utf-8"
-    )
+    _write_ndf_plugin_json(root / "plugins/ndf/.claude-plugin/plugin.json", version)
 
 
 def base_of(version: str) -> str:
