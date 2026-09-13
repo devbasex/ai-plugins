@@ -70,7 +70,8 @@ bash "$SCRIPTS/worktree-setup.sh" init
   運用が要る
 
 導入の状態は `worktree-setup.sh status` で見られる（宣言ファイルの有無、`.worktrees/`
-の登録、稼働中の作業ツリー数）。
+の登録、稼働中の作業ツリー数）。**手順が分岐に使うなら `worktree-setup.sh check` を使う。**
+宣言の状態を終了コードで返し（0 あり / 2 なし / 3 読めない / 1 判定できない）、ファイルを作らない。
 
 ローカル環境での動作検証やテスト実行の分離を使うときは `localenv` / `testenv` を足す。
 書き方は [references/declaration.md](references/declaration.md) にある。

@@ -171,10 +171,25 @@ wf_stages_before_pr() {
 # 1 つの語が複数に割れる。`pr` が必須と定めるヒアドキュメントの本文はこの形になり、
 # 行区切りで読むと 1 行目だけを本文として扱ってしまう（#427 のレビュー）。
 # 読む側は `read -r -d ""` で受ける。
+#
+# **コマンドの境目は空の語で表す（#565）。** 引用の外の `;` `|` `(` `)` `&` と、本文の
+# 途中の改行で出す。記録の値に `"設計";` のように演算子が密着すると、区切りが無ければ
+# 値の一部として読まれ、工程名ではないとして黙って捨てられていた。空の語は `""` を解いた
+# 結果として出ることがないため、実在の語と衝突しない。読む側は `[ -z "$tok" ]` で見分ける。
+#
+#   - `&` は直前が `>` `<` か直後が `>` のときリダイレクトの一部として残す（`2>&1` / `&>`）
+#   - 改行の区切りは次の行の頭で出す。awk は次の行を読むまで、行末が本文の途中だったかを
+#     知らない。空の行では出さずに持ち越すため、本文の末尾の改行（here-string が足すもの
+#     を含む）では出ない
+#   - 行末の `\` は継続として捨て、区切りを出さない
 wf_split() {
   awk '
+    function flush() { if (out != "") { printf "%s%c", out, 0; out = "" } }
+    function mark() { flush(); printf "%s%c", "", 0 }
     {
       n = length($0)
+      if (pending && n > 0) { printf "%s%c", "", 0; pending = 0 }
+      cont = 0
       for (i = 1; i <= n; i++) {
         ch = substr($0, i, 1)
         if (quote != "") {
@@ -182,23 +197,31 @@ wf_split() {
           continue
         }
         if (ch == "\"" || ch == "'"'"'") { quote = ch; continue }
-        if (ch == " " || ch == "\t") {
-          if (out != "") { printf "%s%c", out, 0; out = "" }
-          continue
+        if (ch == " " || ch == "\t") { flush(); continue }
+        if (ch == ";" || ch == "|" || ch == "(" || ch == ")") { mark(); continue }
+        if (ch == "&") {
+          prev = substr($0, i - 1, 1)
+          if (prev != ">" && prev != "<" && substr($0, i + 1, 1) != ">") { mark(); continue }
         }
+        if (ch == "\\" && i == n) { cont = 1; continue }
         out = out ch
       }
       if (quote != "") { out = out "\n" }
-      else if (out != "") { printf "%s%c", out, 0; out = "" }
+      else { flush(); pending = !cont }
     }
-    END { if (out != "") printf "%s%c", out, 0 }
+    END { flush() }
   ' <<<"${1:-}"
 }
 
 # 判定の対象になりうる本文かを、走査の前に安く見分ける。
 # **当たらない本文では語の分割そのものを行わない。**
+#
+# **行末の `\` による継続は空白へ畳んでから見る。** `gh pr \⏎merge 268` は行単位の grep では
+# `pr` と `merge` が別の行に分かれ、読み手の判定まで届かない（#565）。
 wf_is_candidate() {
-  grep -qE 'projects-sync\.sh|pr[[:space:]]+merge|pulls/[0-9]+/merge|pr[[:space:]]+create' <<<"${1:-}"
+  local text="${1:-}"
+  grep -qE 'projects-sync\.sh|pr[[:space:]]+merge|pulls/[0-9]+/merge|pr[[:space:]]+create' \
+    <<<"${text//$'\\\n'/ }"
 }
 
 _wf_seek_gh_verb() {
@@ -224,6 +247,9 @@ _wf_seek_gh_verb() {
 #
 # 見分けは `projects-sync.sh` で終わる語である。呼び出し側は `$SCRIPTS` を展開してから
 # 実行するが、hook が受け取るのは書かれたままの本文なので、どちらの形でも当たる。
+#
+# **1 つ目の記録のコマンドだけを読む。** 見つけた後の区切りか 3 語目で止める。区切りを
+# 越えて読むと、`stage; echo 設計` の `echo` を値として読む。
 wf_parse_sync() {
   local cmd="${1:-}" tok found=1
   local -a args=()
@@ -232,7 +258,9 @@ wf_parse_sync() {
       case "$tok" in *projects-sync.sh) found=0 ;; esac
       continue
     fi
+    [ -n "$tok" ] || break
     args+=("$tok")
+    [ "${#args[@]}" -lt 3 ] || break
   done < <(wf_split "$cmd")
   [ "$found" -eq 0 ] || return 1
   [ "${#args[@]}" -ge 3 ] || return 1
@@ -261,6 +289,12 @@ _wf_read_file() {
 _wf_pr_create_body() {
   local cmd="${1:-}" tok want="" body="" state=0 found=1
   while IFS= read -r -d '' tok; do
+    # 区切り。作成を見つける前なら探索をやり直し、見つけた後なら読むのを止める。
+    if [ -z "$tok" ]; then
+      [ "$found" -ne 0 ] || break
+      state=0
+      continue
+    fi
     if [ -n "$want" ]; then
       case "$want" in
         text) body="$tok" ;;
@@ -303,8 +337,8 @@ _wf_missing_before_pr() {
   local mode="${1:-}" content="${2:-}" stage class
   local -a recorded=()
   while IFS= read -r stage; do
-    [ -n "$stage" ] && recorded+=("$stage")
-  done < <(_wf_recorded "$content")
+    recorded+=("$stage")
+  done < <(_wf_recorded_lines "$content")
   while IFS= read -r stage; do
     _wf_contains "$stage" ${recorded[@]+"${recorded[@]}"} && continue
     class=$(wf_stage_class "$mode" "$stage") || continue
@@ -313,58 +347,104 @@ _wf_missing_before_pr() {
   done < <(wf_stages_before_pr)
 }
 
-_wf_collect_targets() {
-  local line repo issue file content mode
-  local -a raw_targets=() modes=()
-  local effective="" conflict=0
-
+_wf_parse_targets() {
+  local line repo issue
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     IFS=$'\t' read -r repo issue <<<"$line"
     [ -n "$repo" ] && [ -n "$issue" ] || continue
-    raw_targets+=("$repo"$'\t'"$issue")
-    file=$(wf_state_file "$repo" "$issue") || continue
-    [ -f "$file" ] || continue
-    content=$(wf_state_read "$file")
-    mode=$(jq -r '.mode // empty' <<<"$content" 2>/dev/null)
+    printf '%s\t%s\n' "$repo" "$issue"
+  done
+}
+
+# 控えが存在すれば本文とモードをタブ区切り 1 行で返す。控えが無ければ 1 を返す。
+_wf_load_state_mode() {
+  local repo="${1:-}" issue="${2:-}" file content mode
+  file=$(wf_state_file "$repo" "$issue") || return 1
+  [ -f "$file" ] || return 1
+  content=$(wf_state_read "$file")
+  mode=$(_wf_read_mode "$content")
+  printf '%s\t%s\n' "$content" "$mode"
+}
+
+_wf_collect_target_modes() {
+  local line repo issue state_mode content mode
+  local -a raw_targets=() modes=()
+  local effective=""
+
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    raw_targets+=("$line")
+    IFS=$'\t' read -r repo issue <<<"$line"
+    state_mode=$(_wf_load_state_mode "$repo" "$issue") || continue
+    IFS=$'\t' read -r content mode <<<"$state_mode"
     [ -n "$mode" ] || continue
     _wf_contains "$mode" ${modes[@]+"${modes[@]}"} || modes+=("$mode")
     effective=$(wf_higher_mode "$effective" "$mode")
   done
   [ "${#raw_targets[@]}" -gt 0 ] || return 1
+
+  printf '%s\n' "$effective"
+  printf '%s\n' "${modes[*]}"
+  for line in "${raw_targets[@]}"; do
+    printf '%s\n' "$line"
+  done
+}
+
+_wf_collect_targets() {
+  local parsed collected effective modes_str line conflict=0
+  local -a raw_targets=() modes=()
+
+  parsed=$(_wf_parse_targets) || return 1
+  [ -n "$parsed" ] || return 1
+  collected=$(printf '%s\n' "$parsed" | _wf_collect_target_modes) || return 1
+  {
+    IFS= read -r effective
+    IFS= read -r modes_str
+    while IFS= read -r line; do
+      [ -n "$line" ] && raw_targets+=("$line")
+    done
+  } <<<"$collected"
+  read -r -a modes <<<"$modes_str"
   [ "${#modes[@]}" -gt 1 ] && conflict=1
 
   printf '%s\n' "$effective"
   printf '%s\n' "$conflict"
-  printf '%s\n' "${modes[*]}"
+  printf '%s\n' "$modes_str"
   for line in "${raw_targets[@]}"; do
     printf '%s\n' "$line"
   done
   return 0
 }
 
+# content（通過工程の記録）と effective モードから、PR 前に記録が無い必須工程の案内文だけを
+# 組み立てて返す。欠落が無ければ何も出力しない。状態ファイルやモードの診断は行わない。
+_wf_missing_stage_note() {
+  local repo="${1:-}" issue="${2:-}" effective="${3:-}" content="${4:-}"
+  local stage missing=""
+  local -a missing_stages=()
+  while IFS= read -r stage; do
+    [ -n "$stage" ] || continue
+    missing_stages+=("$stage")
+  done < <(_wf_missing_before_pr "$effective" "$content")
+  missing=$(wf_join ${missing_stages[@]+"${missing_stages[@]}"})
+  [ -n "$missing" ] && printf '  #%s (%s): 記録なし: %s\n' "$issue" "$repo" "$missing"
+  return 0
+}
+
 _wf_target_note() {
   local repo="${1:-}" issue="${2:-}" effective="${3:-}"
-  local file content mode stage missing=""
-  local -a missing_stages=()
-  file=$(wf_state_file "$repo" "$issue") || return 0
-  if [ ! -f "$file" ]; then
+  local state_mode content mode
+  if ! state_mode=$(_wf_load_state_mode "$repo" "$issue"); then
     printf '  #%s (%s): 進行の記録がありません（モードの記録も、通過工程の記録もありません）\n' "$issue" "$repo"
     return 0
   fi
-  content=$(wf_state_read "$file")
-  mode=$(jq -r '.mode // empty' <<<"$content" 2>/dev/null)
+  IFS=$'\t' read -r content mode <<<"$state_mode"
   if [ -z "$mode" ]; then
     printf '  #%s (%s): モードの記録がありません\n' "$issue" "$repo"
     [ -n "$effective" ] || return 0
   fi
-  mode="$effective"
-  while IFS= read -r stage; do
-    [ -n "$stage" ] || continue
-    missing_stages+=("$stage")
-  done < <(_wf_missing_before_pr "$mode" "$content")
-  missing=$(wf_join ${missing_stages[@]+"${missing_stages[@]}"})
-  [ -n "$missing" ] && printf '  #%s (%s): 記録なし: %s\n' "$issue" "$repo" "$missing"
+  _wf_missing_stage_note "$repo" "$issue" "$effective" "$content"
   return 0
 }
 
@@ -475,7 +555,7 @@ wf_repo_slug() {
 
 # 控えの置き場所。リポジトリの中には置かない（変更として Pull Request に載るため）。
 wf_state_dir() {
-  local base
+  local base fallback="${TMPDIR:-/tmp}/ndf-stages"
   if [ -n "${CLAUDE_PLUGIN_DATA:-}" ]; then
     base="$CLAUDE_PLUGIN_DATA/stages"
   elif [ -n "${XDG_STATE_HOME:-}" ]; then
@@ -483,13 +563,13 @@ wf_state_dir() {
   elif [ -n "${HOME:-}" ]; then
     base="$HOME/.local/state/ndf/stages"
   else
-    base="${TMPDIR:-/tmp}/ndf-stages"
+    base="$fallback"
   fi
   if mkdir -p "$base" 2>/dev/null && [ -w "$base" ]; then
     printf '%s\n' "$base"
     return 0
   fi
-  base="${TMPDIR:-/tmp}/ndf-stages"
+  base="$fallback"
   mkdir -p "$base" 2>/dev/null || return 1
   printf '%s\n' "$base"
 }
@@ -564,6 +644,11 @@ wf_state_read() {
   printf '{"version":1,"stages":[]}\n'
 }
 
+# 控えから記録されたモードを取り出す。
+_wf_read_mode() {
+  jq -r '.mode // empty' <<<"${1:-}" 2>/dev/null
+}
+
 # 控えへ 1 件積む。**排他を取れないときは書き込みそのものを行わない。**
 # 飛ばしても終了コード 0 で返って工程は続き、飛ばした工程は報告の「記録なし」に含まれる。
 wf_record() {
@@ -601,6 +686,14 @@ _wf_recorded() {
   jq -r '(.stages // []) | .[]' <<<"$1" 2>/dev/null
 }
 
+# _wf_recorded の出力から空行を除き、記録済み工程を 1 行 1 件返す。
+# bash は配列を戻せないため行で返す。
+_wf_recorded_lines() {
+  _wf_recorded "${1:-}" | while IFS= read -r s; do
+    [ -n "$s" ] && printf '%s\n' "$s"
+  done
+}
+
 # 与えた値が並びの中にあれば 0 を返す。
 _wf_contains() {
   local want="$1" item
@@ -631,8 +724,13 @@ wf_join() {
   printf '%s' "$out"
 }
 
+# 工程の分類。_wf_classify_stages が書き、wf_report が読む。
+WF_CLASS_PRESENT='present'         # 記録あり
+WF_CLASS_MISSING='missing'         # 必須で記録なし
+WF_CLASS_CONDITIONAL='conditional' # 条件付き
+
 # frontier までの各工程を分類し、'class<TAB>stage' を 1 行 1 件で返す。
-# class は present（記録あり）・missing（必須で記録なし）・conditional（条件付き）。
+# class は WF_CLASS_* のいずれか。
 # recorded 配列・mode・frontier を引数で受け取る。
 _wf_classify_stages() {
   local mode="$1" frontier="$2"
@@ -643,14 +741,14 @@ _wf_classify_stages() {
     index=$((index + 1))
     [ "$index" -le "$frontier" ] || break
     if _wf_contains "$stage" ${recorded[@]+"${recorded[@]}"}; then
-      printf 'present\t%s\n' "$stage"
+      printf '%s\t%s\n' "$WF_CLASS_PRESENT" "$stage"
       continue
     fi
     [ -n "$mode" ] || continue
     class=$(wf_stage_class "$mode" "$stage") || continue
     case "$class" in
-      R) printf 'missing\t%s\n' "$stage" ;;
-      C) printf 'conditional\t%s\n' "$stage" ;;
+      R) printf '%s\t%s\n' "$WF_CLASS_MISSING" "$stage" ;;
+      C) printf '%s\t%s\n' "$WF_CLASS_CONDITIONAL" "$stage" ;;
     esac
   done < <(wf_stages)
 }
@@ -664,20 +762,20 @@ wf_report() {
   file=$(wf_state_file "$slug" "$issue") || { wf_report_empty "$issue"; return 0; }
   content=$(wf_state_read "$file")
   while IFS= read -r stage; do
-    [ -n "$stage" ] && recorded+=("$stage")
-  done < <(_wf_recorded "$content")
+    recorded+=("$stage")
+  done < <(_wf_recorded_lines "$content")
   if [ "${#recorded[@]}" -eq 0 ]; then
     wf_report_empty "$issue"
     return 0
   fi
-  mode=$(jq -r '.mode // empty' <<<"$content" 2>/dev/null)
+  mode=$(_wf_read_mode "$content")
   frontier=$(_wf_frontier "${recorded[@]}")
 
   while IFS=$'\t' read -r class stage; do
     case "$class" in
-      present) present+=("$stage") ;;
-      missing) missing+=("$stage") ;;
-      conditional) conditional+=("$stage") ;;
+      "$WF_CLASS_PRESENT") present+=("$stage") ;;
+      "$WF_CLASS_MISSING") missing+=("$stage") ;;
+      "$WF_CLASS_CONDITIONAL") conditional+=("$stage") ;;
     esac
   done < <(_wf_classify_stages "$mode" "$frontier" "${recorded[@]}")
 

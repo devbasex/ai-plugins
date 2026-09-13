@@ -26,6 +26,9 @@ WT_DEFAULT_ALLOW_PATHS=(
 # 読み取れる宣言ファイルの版。知らない版は読まずに終わる。
 WT_DECLARATION_VERSION=1
 
+# 宣言ファイルの主ディレクトリからの相対パス。
+WT_DECLARATION_FILE=".ndf/worktree.json"
+
 # 開発用の作業ツリーを置くディレクトリ (主ディレクトリからの相対)。
 WT_WORKTREE_DIR=".worktrees"
 
@@ -143,7 +146,7 @@ wt_in_worktree() {
 wt_declaration() {
   local main_dir="${1:-}" file json version
   [ -n "$main_dir" ] || return 1
-  file="$main_dir/.ndf/worktree.json"
+  file="$main_dir/$WT_DECLARATION_FILE"
   [ -f "$file" ] || return 1
   command -v jq >/dev/null 2>&1 || return 1
   json=$(jq -c '.' "$file" 2>/dev/null) || return 1
@@ -151,6 +154,25 @@ wt_declaration() {
   version=$(printf '%s' "$json" | jq -r 'if (.version|type) == "number" then .version else empty end' 2>/dev/null)
   [ "$version" = "$WT_DECLARATION_VERSION" ] || return 1
   printf '%s\n' "$json"
+}
+
+# 宣言の状態を `present` / `absent` / `unreadable` の 1 語で出力する。引数が空なら 1 を返す。
+# **状態を分けるのはこの関数だけである**（#527）。`check` と `status` はこれを呼び、
+# 手順書と hook は基準を書き写さない。
+#
+# 存在は `[ -e ]` で見る。`wt_declaration` は `[ -f ]` で見るため、ディレクトリは
+# `unreadable`、壊れた symlink は `absent` に分かれる。**`jq` が無いと読める宣言も
+# `unreadable` になる。** 呼び出し側が先に `jq` を確かめる。
+wt_declaration_state() {
+  local main_dir="${1:-}"
+  [ -n "$main_dir" ] || return 1
+  if wt_declaration "$main_dir" >/dev/null; then
+    printf 'present\n'
+  elif [ -e "$main_dir/$WT_DECLARATION_FILE" ]; then
+    printf 'unreadable\n'
+  else
+    printf 'absent\n'
+  fi
 }
 
 # 宣言ファイルの状態を表す印を返す。存在しなければ空文字。
@@ -162,7 +184,7 @@ wt_declaration() {
 wt_declaration_stamp() {
   local main_dir="${1:-}" file
   [ -n "$main_dir" ] || return 1
-  file="$main_dir/.ndf/worktree.json"
+  file="$main_dir/$WT_DECLARATION_FILE"
   [ -e "$file" ] || { printf '\n'; return 0; }
 
   if command -v cksum >/dev/null 2>&1; then
@@ -314,6 +336,108 @@ _wt_tokenize() {
     esac
     out+=("$w")
   }
+  # エスケープを消費し、現在語と走査位置を進める。シングルクォート内では
+  # バックスラッシュも字面なので、対象外として 1 を返す。
+  _tok_consume_escape() {
+    [ "$c" = '\' ] && [ "$quote" != "'" ] || return 1
+    esc=${s:i+1:1}
+    # 文字列の末尾の `\` はエスケープする相手がいない。字面のまま残す。
+    if [ -z "$esc" ]; then cur+="$c"; return 0; fi
+    # `\` + 改行は行継続で、両方が消える。命令の区切りにもならない。
+    if [ "$esc" = $'\n' ]; then i=$((i + 1)); return 0; fi
+    if [ -n "$quote" ]; then
+      # `"` の中で `\` がエスケープとして働く相手は限られる。
+      case "$esc" in
+        '$'|'`'|'"'|'\') cur+="$esc" ;;
+        *) cur+="$c$esc" ;;
+      esac
+    else
+      cur+="$esc"
+    fi
+    i=$((i + 1))
+    return 0
+  }
+  # 改行・セミコロンを区切り印へ変え、case の枝の状態を進める。
+  _tok_emit_separator() {
+    if [ -n "$cur" ]; then _tok_emit "$cur"; cur=""; fi
+    if [ "$c" = ";" ] && [ "$case_depth" -gt 0 ]; then
+      case "${s:i+1:2}" in
+        ";&")
+          case_state[case_depth - 1]=want_pattern
+          out+=("__WT_CASE_FALL__")
+          i=$((i + 2))
+          return 0
+          ;;
+      esac
+      case "${s:i+1:1}" in
+        "&")
+          case_state[case_depth - 1]=want_pattern
+          out+=("__WT_CASE_FALL__")
+          i=$((i + 1))
+          return 0
+          ;;
+        ";") case_state[case_depth - 1]=want_pattern ;;
+      esac
+    fi
+    out+=("__WT_SEP__")
+  }
+  # パイプ・アンパサンドを、ファイル記述子の複製または演算子として出力する。
+  _tok_emit_operator() {
+    last=""
+    ((${#out[@]} > 0)) && last=${out[${#out[@]} - 1]}
+    if [ "$c" = "&" ] && { [ "${cur: -1}" = "<" ] ||
+      { [ -z "$cur" ] &&
+        { [ "$last" = "__WT_REDIR__" ] || [ "$last" = "__WT_APPEND__" ]; }; }; }; then
+      cur+="$c"
+      return 0
+    fi
+    op="$c"
+    case "${s:i:2}" in
+      "&&"|"||"|"|&") op=${s:i:2} ;;
+    esac
+    if [ -n "$cur" ]; then _tok_emit "$cur"; cur=""; fi
+    out+=("$op")
+    i=$((i + ${#op} - 1))
+  }
+  # 丸括弧を case 見出し、語中括弧、部分シェルの境界へ分類する。
+  _tok_emit_parenthesis() {
+    if [ "$c" = "(" ]; then
+      if [ -n "$cur" ] || [ "$inword" -gt 0 ]; then
+        inword=$((inword + 1))
+        cur+="$c"
+        return 0
+      fi
+      if _tok_in_pattern; then cur+="$c"; return 0; fi
+      rest=${s:i+1}
+      rest=${rest#"${rest%%[!$' \t']*}"}
+      if [ "${rest:0:1}" = ")" ]; then
+        inword=$((inword + 1))
+        cur+="$c"
+        return 0
+      fi
+      out+=("$c")
+      subshells=$((subshells + 1))
+      return 0
+    fi
+    if [ "$inword" -gt 0 ]; then
+      inword=$((inword - 1))
+      cur+="$c"
+      return 0
+    fi
+    if _tok_in_pattern; then
+      if [ -n "$cur" ]; then _tok_emit "$cur"; cur=""; fi
+      case_state[case_depth - 1]=body
+      out+=("__WT_CASE_END__")
+      return 0
+    fi
+    if [ "$subshells" -le 0 ]; then
+      cur+="$c"
+      return 0
+    fi
+    if [ -n "$cur" ]; then _tok_emit "$cur"; cur=""; fi
+    out+=("__WT_SUBSHELL_END__")
+    subshells=$((subshells - 1))
+  }
   for ((i = 0; i < n; i++)); do
     c=${s:i:1}
     # `\` は次の 1 文字をエスケープする。**シングルクォートの中を除く。** 中では
@@ -322,30 +446,7 @@ _wt_tokenize() {
     # 見なければ `"` の中の `\"` を閉じ引用符と読み、残りをまるごと 1 語へ吸い
     # 込む（検知漏れ）。引用符の外では `\ ` を区切り、`\)` を部分シェルの終わり
     # と読む（語の取り違えと誤検知）。
-    if [ "$c" = '\' ] && [ "$quote" != "'" ]; then
-      esc=${s:i+1:1}
-      # 文字列の末尾の `\` はエスケープする相手がいない。字面のまま残す。
-      if [ -z "$esc" ]; then cur+="$c"; continue; fi
-      # `\` + 改行は行継続で、両方が消える。命令の区切りにもならない。
-      if [ "$esc" = $'\n' ]; then i=$((i + 1)); continue; fi
-      if [ -n "$quote" ]; then
-        # **`"` の中で `\` がエスケープとして働く相手は限られる。** `$` `` ` ``
-        # `"` `\` と改行だけで、それ以外の前では `\` が文字として残る
-        # (`"a\nb"` は `a\nb`、`"a\\b"` は `a\b`。実測で確かめた)。語の
-        # 区切りは変わらないが、語そのものが書き込み先のパスになるため、
-        # 落とす `\` と残す `\` を分けないと実在しない位置を案内する。
-        case "$esc" in
-          '$'|'`'|'"'|'\') cur+="$esc" ;;
-          *) cur+="$c$esc" ;;
-        esac
-      else
-        # 引用符の外では次の 1 文字がそのまま語の一部になる。`\ ` の空白は
-        # 区切りにならず、`\(` `\)` は部分シェルの入口・終わりにならない。
-        cur+="$esc"
-      fi
-      i=$((i + 1))
-      continue
-    fi
+    _tok_consume_escape && continue
     if [ -n "$quote" ]; then
       if [ "$c" = "$quote" ]; then quote=""; else cur+="$c"; fi
       continue
@@ -356,35 +457,13 @@ _wt_tokenize() {
       # 前のコマンドの対象と取り違える（`cp a b` の次の行の `echo c` の `c` を
       # 複製先として拾うなど）。区切りの印を独立した語として出す。
       $'\n'|";")
-        if [ -n "$cur" ]; then _tok_emit "$cur"; cur=""; fi
         # `;;` `;&` `;;&` は `case` の枝の終わりで、次に来るのは見出しである。
         #
         # **`;&` と `;;&` は 1 つの印にする。** どちらも次の枝の本体を前の枝の
         # 出口から始めるが、`__WT_SEP__` と `&` の 2 語へ割ると、後者が背景実行の
         # 演算子として読まれて現在地がまとまりの入口へ戻る。走査の側でフォール
         # スルーと背景実行を見分けられるよう、専用の印を出す。
-        if [ "$c" = ";" ] && [ "$case_depth" -gt 0 ]; then
-          case "${s:i+1:2}" in
-            # `;;&`。見出しを試し直すが、見出しの評価では命令が走らないため
-            # 本体の始まる位置は `;&` と同じである。
-            ";&")
-              case_state[case_depth - 1]=want_pattern
-              out+=("__WT_CASE_FALL__")
-              i=$((i + 2))
-              continue
-              ;;
-          esac
-          case "${s:i+1:1}" in
-            "&")
-              case_state[case_depth - 1]=want_pattern
-              out+=("__WT_CASE_FALL__")
-              i=$((i + 1))
-              continue
-              ;;
-            ";") case_state[case_depth - 1]=want_pattern ;;
-          esac
-        fi
-        out+=("__WT_SEP__")
+        _tok_emit_separator
         ;;
       " "|$'\t')
         # `>& file` の `&` は、標準出力と標準エラーをまとめて 1 つのファイルへ
@@ -405,81 +484,37 @@ _wt_tokenize() {
       # （次のコマンドの `c` を複製先として拾う）。`>` と `>>` は呼び出し側が
       # 印へ置き換えるため、ここには現れない。
       "|"|"&")
-        last=""
-        ((${#out[@]} > 0)) && last=${out[${#out[@]} - 1]}
         # `>&2` `2>&1` `3<&0` の `&` はファイル記述子の複製であって、背景実行の
         # 演算子ではない。切ると後続が別のコマンドに見え、`cd` の効果を落とす。
         # 直前が `<` か、`>` の置き換えの印のときは字面のまま繋げる。
-        if [ "$c" = "&" ] && { [ "${cur: -1}" = "<" ] ||
-          { [ -z "$cur" ] &&
-            { [ "$last" = "__WT_REDIR__" ] || [ "$last" = "__WT_APPEND__" ]; }; }; }; then
-          cur+="$c"
-          continue
-        fi
         # 長い演算子を先に見る。`&&` を `&` 2 つに割ると、同じシェルで続く並びが
         # 背景実行 2 つになって意味が変わる。
-        op="$c"
-        case "${s:i:2}" in
-          "&&"|"||"|"|&") op=${s:i:2} ;;
-        esac
-        if [ -n "$cur" ]; then _tok_emit "$cur"; cur=""; fi
-        out+=("$op")
-        i=$((i + ${#op} - 1))
+        _tok_emit_operator
         ;;
       # `(` は部分シェルを開く。語の頭にあるときだけ入口として切り出す。
       # 途中に現れる `(` は展開・関数定義・配列の代入の一部で、部分シェルでは
       # ない。字面のまま語へ残し、対応する `)` も切り出さないよう数える。
       "(")
-        if [ -n "$cur" ] || [ "$inword" -gt 0 ]; then
-          inword=$((inword + 1))
-          cur+="$c"
-          continue
-        fi
         # 見出しの位置の `(` は飾りで、部分シェルの入口ではない
         # （`case $x in (a) ...`）。語の一部として残す。
-        if _tok_in_pattern; then cur+="$c"; continue; fi
         # 中身の無い `()` は関数定義の目印で、部分シェルの入口ではない。`f ()`
         # のように空白を挟む書き方があるため、語の途中かどうかでは見分けられない。
-        rest=${s:i+1}
-        rest=${rest#"${rest%%[!$' \t']*}"}
-        if [ "${rest:0:1}" = ")" ]; then
-          inword=$((inword + 1))
-          cur+="$c"
-          continue
-        fi
-        out+=("$c")
-        subshells=$((subshells + 1))
+        _tok_emit_parenthesis
         ;;
       # `)` は、切り出した `(` が残っているときだけ部分シェルの終わりである。
       # `case` の見出し (`a)`) のように対応する `(` が無いものは語の一部で、
       # 切り出すと存在しない位置を書き込み先として示すことになる。
       ")")
-        if [ "$inword" -gt 0 ]; then
-          inword=$((inword - 1))
-          cur+="$c"
-          continue
-        fi
         # 見出しを閉じる `)`。枝の本体が始まることを印で伝える。見出しの語と
         # くっついているか (`a)`) 離れているか (`a )`) で扱いを変えない。
-        if _tok_in_pattern; then
-          if [ -n "$cur" ]; then _tok_emit "$cur"; cur=""; fi
-          case_state[case_depth - 1]=body
-          out+=("__WT_CASE_END__")
-          continue
-        fi
-        if [ "$subshells" -le 0 ]; then
-          cur+="$c"
-          continue
-        fi
-        if [ -n "$cur" ]; then _tok_emit "$cur"; cur=""; fi
-        out+=("__WT_SUBSHELL_END__")
-        subshells=$((subshells - 1))
+        _tok_emit_parenthesis
         ;;
       *) cur+="$c" ;;
     esac
   done
   [ -n "$cur" ] && _tok_emit "$cur"
-  unset -f _tok_in_pattern _tok_emit
+  unset -f _tok_in_pattern _tok_emit _tok_consume_escape _tok_emit_separator
+  unset -f _tok_emit_operator _tok_emit_parenthesis
   printf '%s\n' "${out[@]+"${out[@]}"}"
 }
 
@@ -1136,6 +1171,69 @@ wt_extract_write_target() {
     printf '%s\n' "$(wt_normalize_path "$1" "$cwd")"
     found=1
   }
+  # sed の被演算子から、in-place で書き換えられるファイルをすべて拾う。引数は
+  # `sed` の語の添字。`-i` / `--in-place` があるときだけ書き込み先として出す。
+  # `-e` / `-f` が現れなければ、最初の被演算子がスクリプトで残りがファイルである。
+  _wt_extract_sed_targets() {
+    local start=$1 j2 target
+    local has_inplace=0 seen_script=0 skip_next=0
+    local -a files=()
+    for ((j2 = start + 1; j2 < n; j2++)); do
+      if [ "$skip_next" = 1 ]; then skip_next=0; continue; fi
+      if _wt_is_separator "${words[j2]}"; then break; fi
+      case "${words[j2]}" in
+        --in-place|--in-place=*) has_inplace=1 ;;
+        -e|-f|--expression|--file) seen_script=1; skip_next=1 ;;
+        --expression=*|--file=*) seen_script=1 ;;
+        # `-es/a/b/` のように空白を挟まずスクリプトを続ける形もある。
+        # 見落とすと、最初のファイルをスクリプトと取り違える。
+        -e*|-f*) seen_script=1 ;;
+        --) ;;
+        -*)
+          if [[ ${words[j2]} =~ ^-[a-zA-Z]*i([a-zA-Z]*|\..*)$ ]]; then
+            has_inplace=1
+          fi
+          ;;
+        *)
+          if [ "$seen_script" = 0 ]; then
+            seen_script=1
+          else
+            files+=("${words[j2]}")
+          fi
+          ;;
+      esac
+    done
+    if [ "$has_inplace" = 1 ]; then
+      for target in "${files[@]+"${files[@]}"}"; do
+        _emit "$target"
+      done
+    fi
+  }
+  # cp / mv の被演算子から宛先を拾う。引数は `cp` / `mv` の語の添字。既定では
+  # 最後の被演算子が宛先だが、`-t <ディレクトリ>` を付けると宛先が先に来て、
+  # 後ろの被演算子はすべて複製元になる。
+  _wt_extract_cp_mv_target() {
+    local start=$1 j2
+    local dest="" target_dir="" take_next=0
+    for ((j2 = start + 1; j2 < n; j2++)); do
+      if [ "$take_next" = 1 ]; then
+        target_dir=${words[j2]}
+        take_next=0
+        continue
+      fi
+      if _wt_is_separator "${words[j2]}"; then break; fi
+      case "${words[j2]}" in
+        -t|--target-directory) take_next=1 ;;
+        --target-directory=*) target_dir=${words[j2]#--target-directory=} ;;
+        # `-t<ディレクトリ>` のように空白を挟まない形もある。
+        -t*) target_dir=${words[j2]#-t} ;;
+        -*) continue ;;
+        *) dest=${words[j2]} ;;
+      esac
+    done
+    [ -n "$target_dir" ] && dest=$target_dir
+    _emit "$dest"
+  }
 
   for ((i = 0; i < n; i++)); do
     w=${words[i]}
@@ -1531,68 +1629,18 @@ wt_extract_write_target() {
         ;;
       sed)
         # in-place の指定があるとき、操作対象のファイルをすべて拾う。
-        # `-e` / `-f` が現れなければ、最初の被演算子がスクリプトで残りがファイル。
-        local has_inplace=0 seen_script=0 skip_next=0
-        local -a files=()
-        for ((j = i + 1; j < n; j++)); do
-          if [ "$skip_next" = 1 ]; then skip_next=0; continue; fi
-          if _wt_is_separator "${words[j]}"; then break; fi
-          case "${words[j]}" in
-            --in-place|--in-place=*) has_inplace=1 ;;
-            -e|-f|--expression|--file) seen_script=1; skip_next=1 ;;
-            --expression=*|--file=*) seen_script=1 ;;
-            # `-es/a/b/` のように空白を挟まずスクリプトを続ける形もある。
-            # 見落とすと、最初のファイルをスクリプトと取り違える。
-            -e*|-f*) seen_script=1 ;;
-            --) ;;
-            -*)
-              if [[ ${words[j]} =~ ^-[a-zA-Z]*i([a-zA-Z]*|\..*)$ ]]; then
-                has_inplace=1
-              fi
-              ;;
-            *)
-              if [ "$seen_script" = 0 ]; then
-                seen_script=1
-              else
-                files+=("${words[j]}")
-              fi
-              ;;
-          esac
-        done
-        if [ "$has_inplace" = 1 ]; then
-          for target in "${files[@]+"${files[@]}"}"; do
-            _emit "$target"
-          done
-        fi
+        _wt_extract_sed_targets "$i"
         ;;
       cp|mv)
         # 既定では最後の被演算子が宛先だが、`-t <ディレクトリ>` を付けると
         # 宛先が先に来て、後ろの被演算子はすべて複製元になる。
-        local dest="" target_dir="" take_next=0
-        for ((j = i + 1; j < n; j++)); do
-          if [ "$take_next" = 1 ]; then
-            target_dir=${words[j]}
-            take_next=0
-            continue
-          fi
-          if _wt_is_separator "${words[j]}"; then break; fi
-          case "${words[j]}" in
-            -t|--target-directory) take_next=1 ;;
-            --target-directory=*) target_dir=${words[j]#--target-directory=} ;;
-            # `-t<ディレクトリ>` のように空白を挟まない形もある。
-            -t*) target_dir=${words[j]#-t} ;;
-            -*) continue ;;
-            *) dest=${words[j]} ;;
-          esac
-        done
-        [ -n "$target_dir" ] && dest=$target_dir
-        _emit "$dest"
+        _wt_extract_cp_mv_target "$i"
         ;;
     esac
   done
 
   unset -f _emit _push_group _pop_group _push_subshell _pop_subshell _or_group_exits \
-    _or_exit_redirs _close_function_body
+    _or_exit_redirs _close_function_body _wt_extract_sed_targets _wt_extract_cp_mv_target
   [ "$found" = 1 ] || return 1
 }
 
@@ -1657,6 +1705,13 @@ wt_dev_worktrees() {
   local main_dir="${1:-}" prefix path branch
   [ -n "$main_dir" ] || return 1
   prefix="$main_dir/$WT_WORKTREE_DIR/"
+  # prefix 配下の作業ツリーだけを 1 行出力する。出力の条件と書式を 1 か所へ寄せ、
+  # ループ内（空行の枝）とループ後（最後の項目）で食い違わないようにする。
+  _wt_emit_worktree() {
+    case "$1" in
+      "$prefix"*) printf '%s\t%s\n' "$1" "$2" ;;
+    esac
+  }
   path=""
   branch=""
   while IFS= read -r line; do
@@ -1670,18 +1725,15 @@ wt_dev_worktrees() {
         branch=${branch#refs/heads/}
         ;;
       "")
-        case "$path" in
-          "$prefix"*) printf '%s\t%s\n' "$path" "$branch" ;;
-        esac
+        _wt_emit_worktree "$path" "$branch"
         path=""
         branch=""
         ;;
     esac
   done < <(git -C "$main_dir" worktree list --porcelain 2>/dev/null)
   # 最後の項目は空行で終わらないことがある。
-  case "$path" in
-    "$prefix"*) printf '%s\t%s\n' "$path" "$branch" ;;
-  esac
+  _wt_emit_worktree "$path" "$branch"
+  unset -f _wt_emit_worktree
 }
 
 # 主ディレクトリの追従先を決める。git は呼ばず、引数だけで判定する。
@@ -1756,6 +1808,36 @@ wt_branch_exists() {
   return 1
 }
 
+# 宣言 JSON から指定されたキーの string 型の値だけを出力する。値が string でない、
+# キーが無い、JSON が空のいずれでも何も出力しない。実在確認・NOTE 出力・既定ブランチ
+# への落としは含まない。それらは呼び出し側が担う。
+_wt_declaration_string() {
+  local decl="${1:-}" key="${2:-}"
+  [ -n "$decl" ] || return 0
+  printf '%s' "$decl" |
+    jq -r --arg key "$key" 'if (.[$key]|type) == "string" then .[$key] else empty end' 2>/dev/null
+}
+
+# 宣言の指定されたキーからブランチ名を読み、実在を確認して出力する。指定が無ければ
+# 既定ブランチへ落とす。
+wt_declaration_branch() {
+  local main_dir="${1:-}" key="${2:-}" decl name=
+  [ -n "$main_dir" ] && [ -n "$key" ] || return 1
+  if decl=$(wt_declaration "$main_dir"); then
+    name=$(_wt_declaration_string "$decl" "$key")
+  fi
+  if [ -n "$name" ]; then
+    if wt_branch_exists "$main_dir" "$name"; then
+      printf '%s\n' "$name"
+      return 0
+    fi
+    printf 'NOTE: .ndf/worktree.json の %s が指す %s は origin にもローカルにもありません\n' \
+      "$key" "$name" >&2
+    return 1
+  fi
+  wt_default_branch "$main_dir"
+}
+
 # 開発の起点ブランチ名を出力する。宣言の base_branch を優先し、指定が無ければ
 # 既定ブランチへ落とす。
 #
@@ -1763,22 +1845,7 @@ wt_branch_exists() {
 # 変更が正式版から分岐したまま進む。origin かローカルのどちらかに同名のブランチが
 # あることを確かめ、無ければ標準エラーへ案内を出して 1 を返す。
 wt_base_branch() {
-  local main_dir="${1:-}" decl name=
-  [ -n "$main_dir" ] || return 1
-  if decl=$(wt_declaration "$main_dir"); then
-    name=$(printf '%s' "$decl" |
-      jq -r 'if (.base_branch|type) == "string" then .base_branch else empty end' 2>/dev/null)
-  fi
-  if [ -n "$name" ]; then
-    if wt_branch_exists "$main_dir" "$name"; then
-      printf '%s\n' "$name"
-      return 0
-    fi
-    printf 'NOTE: .ndf/worktree.json の base_branch が指す %s は origin にもローカルにもありません\n' \
-      "$name" >&2
-    return 1
-  fi
-  wt_default_branch "$main_dir"
+  wt_declaration_branch "${1:-}" base_branch
 }
 
 # 本番のチャネルのブランチ名を出力する。宣言の production_branch を優先し、指定が
@@ -1792,22 +1859,7 @@ wt_base_branch() {
 # **指定された名前が実在しないときは既定ブランチへ落とさない。** 本番のチャネルを
 # 取り違えると、承認を求める対象そのものが変わる。
 wt_production_branch() {
-  local main_dir="${1:-}" decl name=
-  [ -n "$main_dir" ] || return 1
-  if decl=$(wt_declaration "$main_dir"); then
-    name=$(printf '%s' "$decl" |
-      jq -r 'if (.production_branch|type) == "string" then .production_branch else empty end' 2>/dev/null)
-  fi
-  if [ -n "$name" ]; then
-    if wt_branch_exists "$main_dir" "$name"; then
-      printf '%s\n' "$name"
-      return 0
-    fi
-    printf 'NOTE: .ndf/worktree.json の production_branch が指す %s は origin にもローカルにもありません\n' \
-      "$name" >&2
-    return 1
-  fi
-  wt_default_branch "$main_dir"
+  wt_declaration_branch "${1:-}" production_branch
 }
 
 # 主ディレクトリの追跡対象の未コミット変更を `<状態> <パス>` で 1 行 1 件出力する。
@@ -1878,6 +1930,7 @@ WT_SLOT_MAX=63
 # 名前は 40 文字で切る。**要約値は必ず残す。** 単純に末尾を落とすと、先頭が
 # 同じ長いブランチ名どうしで同じ名前になり、テスト環境が混ざる。
 WT_ENV_NAME_MAX=40
+WT_ENV_DIGEST_LEN=6
 
 _wt_slug() {
   printf '%s' "$1" \
@@ -1888,14 +1941,14 @@ _wt_slug() {
 wt_env_name() {
   local main_dir="${1:-}" branch="${2:-}" repo digest head room name
   [ -n "$main_dir" ] && [ -n "$branch" ] || return 1
-  digest=$(printf '%s' "$branch" | (sha1sum 2>/dev/null || shasum 2>/dev/null) | cut -c1-6)
+  digest=$(printf '%s' "$branch" | (sha1sum 2>/dev/null || shasum 2>/dev/null) | cut -c"1-$WT_ENV_DIGEST_LEN")
   [ -n "$digest" ] || return 1
 
   repo=$(_wt_slug "$(basename "$main_dir")")
   branch=$(_wt_slug "$branch")
 
-  # 要約値と区切りに 7 文字を残し、その手前を切る。
-  room=$((WT_ENV_NAME_MAX - 7))
+  # 要約値と区切りに WT_ENV_DIGEST_LEN + 1 文字を残し、その手前を切る。
+  room=$((WT_ENV_NAME_MAX - (WT_ENV_DIGEST_LEN + 1)))
   head=$(printf '%s-wt-%s' "$repo" "$branch" | cut -c "1-$room")
   head=${head%-}
   name=$(printf '%s-%s' "$head" "$digest")
@@ -2078,32 +2131,36 @@ wt_slot_acquire() {
   wt_slot_of "$main_dir" "$worktree"
 }
 
+# 割り当ての未解放行を対象に、指定した代入式でフィールドを更新する。
+_wt_slot_set_field() {
+  local main_dir="${1:-}" worktree="${2:-}" assignment="${3:-}"
+  if [ "$#" -ge 3 ]; then
+    shift 3
+  else
+    shift "$#"
+  fi
+  local path
+  path=$(wt_registry_path "$main_dir") || return 1
+  wt_registry_update "$path" "
+    .assignments |= map(
+      if .worktree == \$wt and .released_at == null then ${assignment} else . end
+    )" --arg wt "$worktree" "$@"
+}
+
 # 割り当てを解放する。**行は消さず、解放の時刻を書き込む。**
 wt_slot_release() {
-  local main_dir="${1:-}" worktree="${2:-}" path
-  path=$(wt_registry_path "$main_dir") || return 1
-  wt_registry_update "$path" '
-    .assignments |= map(
-      if .worktree == $wt and .released_at == null then .released_at = (now | todate) else . end
-    )' --arg wt "$worktree"
+  local main_dir="${1:-}" worktree="${2:-}"
+  _wt_slot_set_field "$main_dir" "$worktree" '.released_at = (now | todate)'
 }
 
 # 割り当てへポートを記録する。
 wt_slot_set_ports() {
-  local main_dir="${1:-}" worktree="${2:-}" ports_json="${3:-}" path
-  path=$(wt_registry_path "$main_dir") || return 1
-  wt_registry_update "$path" '
-    .assignments |= map(
-      if .worktree == $wt and .released_at == null then .ports = $ports else . end
-    )' --arg wt "$worktree" --argjson ports "$ports_json"
+  local main_dir="${1:-}" worktree="${2:-}" ports_json="${3:-}"
+  _wt_slot_set_field "$main_dir" "$worktree" '.ports = $ports' --argjson ports "$ports_json"
 }
 
 # 最後に使った時刻を記録する。reap の判定が読む。
 wt_slot_touch() {
-  local main_dir="${1:-}" worktree="${2:-}" path
-  path=$(wt_registry_path "$main_dir") || return 1
-  wt_registry_update "$path" '
-    .assignments |= map(
-      if .worktree == $wt and .released_at == null then .last_used_at = (now | todate) else . end
-    )' --arg wt "$worktree"
+  local main_dir="${1:-}" worktree="${2:-}"
+  _wt_slot_set_field "$main_dir" "$worktree" '.last_used_at = (now | todate)'
 }

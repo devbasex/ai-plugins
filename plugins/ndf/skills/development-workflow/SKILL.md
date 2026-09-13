@@ -41,7 +41,31 @@ hooks:
 
 **モード判定は工程表の行を持たない。** 盤面へ記録する工程の値を増やさないためである。
 
+## この文書が受け取る値
+
+| 変数 | 値 | 決め方 |
+| --- | --- | --- |
+| `$SCRIPTS` | プラグインの `scripts/` の絶対パス | [references/scripts-lookup.md](references/scripts-lookup.md)。シェルが変わったら決め直す |
+
 ## 判定の手順
+
+### 0. 作業ツリーの宣言を確かめる
+
+```bash
+# 起動したら手順 1 より先に実行する。$SCRIPTS を決めてから。決められなくても止めない
+if [ -n "${SCRIPTS:-}" ]; then bash "$SCRIPTS/worktree-setup.sh" check; echo "exit=$?"
+else echo "exit=判定できない（scripts を解決できない）"; fi
+```
+
+| 終了コード | 次に行うこと | 判定結果の出力の `宣言:` の行 |
+| --- | --- | --- |
+| 0 | 手順 1 へ進む | `宣言: あり` |
+| 2 | `worktree` の「0. 宣言ファイルを用意する」を通し、`check` が 0 を返してから手順 1 へ進む | `宣言: 作成した（起点 <名前> / 本番 <名前>。未宣言なら既定ブランチ）` |
+| 3 | **先へ進まない。** `init --force` を実行せず、`check` の出力を示して利用者に直してもらう | 出さない（判定まで進まない） |
+| 1、または `$SCRIPTS` を決められない | 止めずに手順 1 へ進む | `宣言: 判定できない（<理由>）` |
+
+**拒否しない。** 起動の時点に止める引き金が無く（hook は次のコマンドでしか働かない）、4 ランタイムで
+同じに働かせるには本文に置くしかない。frontmatter の `hooks` は発火していない疑いもある（#565）。
 
 ### 1. 変更対象を確認する
 
@@ -97,6 +121,7 @@ NULL 許容列の追加）は `standard` として扱う。判定に迷う場合
 ```text
 mode: standard
 根拠: 注文確定の振る舞いを変更する。公開 API とスキーマは変えない
+宣言: あり
 必須工程: worktree → requirements-design → implementation-plan → tdd-cycle
   → refactoring → cross-review → quality-gates → pr
   → plan-to-spec（仕様が変わった場合） → merged → release

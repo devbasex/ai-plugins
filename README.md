@@ -6,7 +6,7 @@ Claude Code / Codex / Kiro CLI / agy 向けのスキル・MCP設定を共有す�
 
 このマーケットプレイスは、チーム全体でAI開発ツール（Claude Code / Codex / Kiro CLI / agy）の導入を加速するための事前設定されたプラグインを提供します。
 
-**NDFプラグイン v10.10.1** は、同じ `ndf@ai-plugins` という名前で Claude Code / Codex / Kiro CLI / agy へ配布されるプラグインです。配布物は `plugins/ndf/` の1ディレクトリにまとまっており、Skill の実体は `plugins/ndf/skills/` の1箇所だけです。どのランタイムへ配るかは `plugins/ndf/manifests/*-skills.txt` が決めます。
+**NDFプラグイン v10.11.0** は、同じ `ndf@ai-plugins` という名前で Claude Code / Codex / Kiro CLI / agy へ配布されるプラグインです。配布物は `plugins/ndf/` の1ディレクトリにまとまっており、Skill の実体は `plugins/ndf/skills/` の1箇所だけです。どのランタイムへ配るかは `plugins/ndf/manifests/*-skills.txt` が決めます。
 
 - **公開Skills**: Claude Code向け core 45個、Kiro向け core 44個、Codex向け core 43個、agy向け core 43個に分離。
 - **元Skills（45個）**:
@@ -37,20 +37,15 @@ Claude Code / Codex / Kiro CLI / agy 向けのスキル・MCP設定を共有す�
 | 開発版 | マージされた変更がそのまま | 同じ URL に `#develop` を足す | 検証に参加する人 |
 
 開発版は検証中の版です。版数に `-dev.<連番>` が付き、壊れていることがあります。手順は
-[開発版を試す](#開発版を試す開発者向け)にあります。
+[開発版を試す](#開発版を試す)にあります。
+
+以下は NDF プラグインを正式版から導入する最初の 1 手です。導入の選択肢と、その後の更新・hook・
+通知の設定は [plugins/ndf/README.md](./plugins/ndf/README.md) にあります。
 
 ### Claude Code
 
-#### 1. マーケットプレイスの追加
-
 ```bash
 /plugin marketplace add https://github.com/devbasex/ai-plugins
-```
-
-#### 2. プラグインのインストール
-
-```bash
-# NDFプラグイン（オールインワン統合プラグイン）
 /plugin install ndf@ai-plugins
 ```
 
@@ -61,172 +56,61 @@ codex plugin marketplace add https://github.com/devbasex/ai-plugins
 codex plugin add ndf@ai-plugins
 ```
 
-開発版を試す場合は[開発版を試す](#開発版を試す開発者向け)を参照してください。**ローカルの
-ディレクトリを同じ名前で追加しないでください。** 取得元が置き換わります。
+**ローカルのディレクトリを同じ名前で追加しないでください。** 取得元が置き換わります。
+ランタイムごとの振る舞いは
+[docs/versioning-and-distribution.md の「ランタイムごとの取得と導入」](./docs/versioning-and-distribution.md#ランタイムごとの取得と導入)
+にあります。
 
 ### Kiro CLI
 
-#### 1. リポジトリをクローン
+Kiro CLI はマーケットプレイスの経路を持ちません。clone したディレクトリで installer を実行します。
 
 ```bash
 git clone https://github.com/devbasex/ai-plugins.git
 cd ai-plugins
-```
-
-#### 2. インストーラーを実行
-
-```bash
-# 基本（Skills + agentSpawnフックのみ）
 bash plugins/ndf/dev.kiro/install.sh
-
-# Slack通知も有効化
-bash plugins/ndf/dev.kiro/install.sh --with-slack
-
-# 全部入り（Slack + Codex CLI 連携）
-bash plugins/ndf/dev.kiro/install.sh --with-slack --with-codex
 ```
 
-インストーラーは `plugins/ndf/skills/` から `.kiro/skills/` への symlink、`.kiro/steering/ndf-policies.md`、`.kiro/agents/ndf.json` を生成します。
-
-#### 3. Slack通知の設定（オプション）
-
-`.env` に以下を設定：
-```
-SLACK_CHANNEL_ID=C0123456789
-SLACK_BOT_TOKEN=xoxb-...
-SLACK_USER_MENTION=<@U0123456789>
-```
-
-#### 4. 起動
-
-```bash
-kiro-cli chat --agent ndf
-```
-
-既定エージェントとして使いたい場合は `bash plugins/ndf/dev.kiro/install.sh --set-default` を実行します。
-
-詳細は [KIRO.md](./KIRO.md) を参照。
+Slack 通知・Codex CLI 連携の選択肢と起動の方法は
+[plugins/ndf/README.md の「Kiro CLI」](./plugins/ndf/README.md#kiro-cli)、既定エージェントへの
+切り替えは [plugins/ndf/docs/kiro-cli.md](./plugins/ndf/docs/kiro-cli.md) にあります。
 
 ### agy
 
-**agy はマーケットプレイスの経路を持ちません。** clone したディレクトリから
-`plugins/ndf/dev.agy` を直接導入します。
-
-#### 1. リポジトリをクローン
+agy もマーケットプレイスの経路を持ちません。clone したディレクトリから `plugins/ndf/dev.agy` を
+直接導入します。
 
 ```bash
 git clone https://github.com/devbasex/ai-plugins.git
 cd ai-plugins
-```
-
-#### 2. プラグインの導入
-
-```bash
 agy plugin install plugins/ndf/dev.agy
 ```
 
-導入すると Skill 33 個・エージェント 8 個・hook 1 個が
-`~/.gemini/config/plugins/ndf/` へ複製されます。リポジトリ側の symlink は実体へ解決されるため、
-clone を消しても導入した内容は残ります。
+hook を効かせる手順と、新しい版へ入れ替える手順は
+[plugins/ndf/README.md の「agy」](./plugins/ndf/README.md#agy) にあります。
 
-#### 3. 確認
+### 開発版を試す
 
-```bash
-agy plugin list
-# => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
-```
-
-**新しい版へ入れ替える手段は `uninstall` と `install` の組み合わせです**（[#289](https://github.com/devbasex/ai-plugins/issues/289)）。
-
-### 開発版を試す（開発者向け）
-
-**開発版は `develop` ブランチに載ります。** `main` へ進めるのは正式版を出すときだけなので、
-`develop` にはマージ済みで未リリースの変更が入っています。
-
-取得元は名前ごとに 1 つしか登録できないため、**正式版と開発版は同時に入れられません。** 常用
-している環境で試すときは、一時的に登録し直すか、取得元を書き換えない手段（後述）を使います。
-
-#### Claude Code
-
-```bash
-claude plugin marketplace add https://github.com/devbasex/ai-plugins.git#develop
-claude plugin install ndf@ai-plugins
-```
-
-#### Codex
-
-```bash
-codex plugin marketplace add devbasex/ai-plugins --ref develop
-codex plugin add ndf@ai-plugins
-```
-
-#### Kiro CLI
-
-clone した作業ディレクトリから導入するため、ref にあたるのは checkout です。
-
-```bash
-git -C <クローン先> checkout develop
-bash plugins/ndf/dev.kiro/install.sh --project <検証用ディレクトリ> --yes
-```
-
-#### agy
-
-Kiro CLI と同じく、ref にあたるのは clone の checkout です。
-
-```bash
-git -C <クローン先> checkout develop
-agy plugin install <クローン先>/plugins/ndf/dev.agy
-```
-
-#### 取得元を書き換えずに確かめる
-
-リポジトリを clone してある場合は、取得元の登録に触れずに読み込めます。
-
-```bash
-claude --plugin-dir plugins/ndf                                            # Claude Code
-bash plugins/ndf/dev.kiro/install.sh --project <検証用ディレクトリ> --yes  # Kiro CLI
-agy plugin validate plugins/ndf/dev.agy                                    # agy（読み込みの確認）
-```
-
-**ローカルのディレクトリを同じ名前でマーケットプレイスとして追加しないでください。** 登録の鍵は
-取得元ではなく `marketplace.json` の `name` で、1 つの名前につき 1 つしか登録できません。
-`--scope local` を指定しても**利用者の取得元が置き換わり**、続けて `marketplace remove` すると
-clone と導入記録まで消えます。
-
-#### 開発に参加する場合
-
-Pull Request の宛先は **`develop`** です。既定ブランチは `main`（正式版）なので、`gh pr create`
-には `--base develop` を付けます。
-
-`main` 宛の Pull Request は `develop` から出たものだけが継続的統合を通ります
-（`scripts/check-pr-base.sh`）。詳細は [AGENTS.md](./AGENTS.md) を参照してください。
+取得元へ `#develop`（Codex は `--ref develop`）を足して登録します。正式版と開発版は同時に
+入れられません。ランタイムごとの手順は
+[docs/versioning-and-distribution.md の「開発版を試す」](./docs/versioning-and-distribution.md#開発版を試す)、
+取得元を書き換えずに手元で確かめる方法は
+[「ランタイムごとの取得と導入」](./docs/versioning-and-distribution.md#ランタイムごとの取得と導入)
+にあります。
 
 ### 過去の版へ戻す
 
-**版数を指定してインストールする手段はありません。** どのコードを取るかは取得元の git ref が
-決めます。各プラグインの正式版へ `{プラグイン名}--v<版>`（NDF なら `ndf--v<版>`）のタグを
-打つので、取得元をそのタグへ固定します。
-
-```bash
-claude plugin marketplace add devbasex/ai-plugins@<タグ>
-```
-
-**最初のタグは `ndf--v9.5.0` です。** それより前の版（9.4.0 以前）はタグを打っていないため、
-**タグでは戻せません**。戻したい場合は、その版のコミットを自分で調べて ref に指定することに
-なります。手元にあるタグは `git tag -l` で確かめられます。
-
-**同じ取得元の他のプラグインも同時に過去の状態になります。** NDF だけを戻したい場合は、別名の
-マーケットプレイスを用意して対象のディレクトリと ref を直接指します。手順は
-[docs/plugin-development-guide.md](./docs/plugin-development-guide.md#利用者が過去の版へ戻る)
+**版数を指定してインストールする手段はありません。** 取得元をリリースタグ（NDF なら
+`ndf--v<版>`）へ固定します。手順と、タグで戻せない版・他のプラグインも戻る点・固定した版と
+最新版を同時に有効にしない点は
+[docs/versioning-and-distribution.md の「利用者が過去の版へ戻る」](./docs/versioning-and-distribution.md#利用者が過去の版へ戻る)
 にあります。
-
-固定した版と最新版を同時に有効にしないでください。どちらの `/ndf:*` が使われるかが定まりません。
 
 ### 利用可能なプラグイン
 
 | プラグイン名 | バージョン | 説明 | 詳細 |
 |------------|----------|------|------|
-| **ndf** | 10.10.1 | Claude Code / Codex / Kiro CLI / agy へ 1 ディレクトリから配布する NDF プラグイン。8個の専門エージェント（Claude版）、公開Skills（Claude Code向け core 45個、Kiro向け core 44個、Codex向け core 43個、agy向け core 43個）、4ランタイム共通の作業ツリー運用フック（PreToolUse / SessionStart / userPromptSubmit / agentSpawn / PreInvocation）、Claude Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:external-ai` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [README](./plugins/ndf/README.md) |
+| **ndf** | 10.11.0 | Claude Code / Codex / Kiro CLI / agy へ 1 ディレクトリから配布する NDF プラグイン。8個の専門エージェント（Claude版）、公開Skills（Claude Code向け core 45個、Kiro向け core 44個、Codex向け core 43個、agy向け core 43個）、4ランタイム共通の作業ツリー運用フック（PreToolUse / SessionStart / userPromptSubmit / agentSpawn / PreInvocation）、Claude Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:external-ai` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [README](./plugins/ndf/README.md) |
 | **playwright-kit** | 2.0.3 | Playwright による E2E テストの計画・実装・証跡管理を提供するプラグイン。ページ役割からのテスト計画、動画 / trace 付きスクリプト実装、レポート生成と Drive 保管、playwright_kit ランタイム（init、a11y / CWV スキャン）の 4 Skill。NDF v7.0.0 で分離。 | [README](./plugins/playwright-kit/README.md) |
 
 ### 変更履歴
@@ -235,199 +119,9 @@ claude plugin marketplace add devbasex/ai-plugins@<タグ>
 規約は [docs/ndf-version-decisions.md](./docs/ndf-version-decisions.md) にある。現行版の分だけは
 [CLAUDE.md](./CLAUDE.md) にあり、配布した時点で退避先へ移る。
 
-## 開発ガイドライン
+## リファレンス
 
-### プラグイン開発
-
-#### ディレクトリ構造
-
-```
-ai-plugins/
-├── .claude-plugin/
-│   └── marketplace.json          # マーケットプレイス定義（Claude Code / Codex 共通）
-├── plugins/
-│   ├── ndf/                      # NDF（4ランタイム共通の単一ディレクトリ）
-│   ├── playwright-kit/           # playwright-kit（3ランタイム共通の単一ディレクトリ）
-│   └── mcp/
-│       └── mcp-*/               # MCPプラグイン10個（3ランタイム共通）
-├── README.md
-└── CLAUDE.md                     # AIエージェント向けガイドライン
-```
-
-#### Runtime plugin の検証
-
-プラグインを変更した場合は、生成物の同期と manifest / link 検証を実行します。
-
-```bash
-bash scripts/build-runtime-plugins.sh
-bash scripts/validate-runtime-plugins.sh
-```
-
-実ランタイムのインストール経路を確認する場合は、Docker コンテナ内で smoke test を実行します。
-
-```bash
-bash scripts/runtime-smoke-test.sh
-bash scripts/runtime-smoke-test.sh --runtime claude
-bash scripts/runtime-smoke-test.sh --runtime codex
-bash scripts/runtime-smoke-test.sh --runtime kiro
-```
-
-ローカル hook を使う場合は以下を実行します。
-
-```bash
-bash scripts/install-dev-hooks.sh
-```
-
-#### 新しいプラグインの作成手順
-
-**1. プラグインディレクトリを作成:**
-
-```bash
-mkdir -p plugins/{plugin-name}/{.claude-plugin,commands,agents,skills}
-```
-
-**2. `plugin.json` を作成:**
-
-```json
-{
-  "name": "plugin-name",
-  "version": "1.0.0",
-  "description": "プラグインの説明",
-  "author": {
-    "name": "作者名",
-    "url": "https://github.com/username"
-  },
-  "skills": [
-    {
-      "path": "skills/skill-name/SKILL.md"
-    }
-  ]
-}
-```
-
-**3. プロジェクトスキルを作成（オプション）:**
-
-`skills/{skill-name}/SKILL.md` を作成：
-
-```markdown
----
-name: スキル名
-description: スキルの説明（自動起動のキーワードを含める）
----
-
-# スキル名
-
-スキルの詳細説明とドキュメント...
-```
-
-**4. `marketplace.json` に登録:**
-
-`.claude-plugin/marketplace.json` に追加：
-
-```json
-{
-  "name": "ai-plugins",
-  "owner": {
-    "name": "takemi-ohama",
-    "email": "takemi.ohama@example.com"
-  },
-  "plugins": [
-    {
-      "name": "plugin-name",
-      "source": "./plugins/plugin-name",
-      "description": "プラグインの簡単な説明"
-    }
-  ]
-}
-```
-
-**5. README.md を作成:**
-
-`plugins/{plugin-name}/README.md` を作成し、以下を含める：
-- プラグインの概要
-- インストール手順（マーケットプレイス追加を含む）
-- 使用方法
-- トラブルシューティング
-
-**6. テストとコミット:**
-
-```bash
-# ローカルでテスト
-/plugin marketplace add file:///path/to/ai-plugins
-/plugin install plugin-name@ai-plugins
-
-# 動作確認後、コミット
-git add .
-git commit -m "Add plugin-name plugin"
-git push
-```
-
-#### 開発のベストプラクティス
-
-**実施すること:**
-- ✅ セマンティックバージョニング（MAJOR.MINOR.PATCH）に従う
-- ✅ `plugin.json` に完全なメタデータを含める
-- ✅ YAMLフロントマター付きの `SKILL.md` を作成
-- ✅ 包括的なドキュメント（README.md）を提供
-- ✅ 環境変数で認証情報を管理
-- ✅ `.env` を `.gitignore` に追加
-- ✅ インストール手順をテスト
-- ✅ プラグイン追加時は `marketplace.json` を更新
-
-**してはいけないこと:**
-- ❌ 機密トークンや認証情報をコミット
-- ❌ ドキュメントをスキップ
-- ❌ バージョンインクリメントを忘れる
-- ❌ 一貫性のない命名規則を使用
-
-### マーケットプレイス管理
-
-#### プラグインの更新
-
-```bash
-# 1. プラグインファイルを修正
-# 2. plugin.json のバージョンをインクリメント
-vim plugins/{plugin-name}/.claude-plugin/plugin.json
-
-# 3. 変更をコミット
-git add plugins/{plugin-name}
-git commit -m "Update plugin-name to v1.1.0"
-git push
-```
-
-ユーザーは Claude Code UI から更新を確認できます。
-
-#### プラグインの削除
-
-```bash
-# 1. marketplace.json から削除
-vim .claude-plugin/marketplace.json
-
-# 2. オプションでプラグインディレクトリを削除
-rm -rf plugins/{plugin-name}
-
-# 3. 変更をコミット
-git add .
-git commit -m "Remove plugin-name from marketplace"
-git push
-```
-
-#### バージョン管理ルール
-
-セマンティックバージョニング（`MAJOR.MINOR.PATCH`）に従います：
-
-- **MAJOR**: 破壊的変更（後方互換性なし）
-- **MINOR**: 後方互換性のある新機能追加
-- **PATCH**: バグフィックスのみ
-
-例：
-- `1.0.0 → 1.0.1`: バグ修正
-- `1.0.1 → 1.1.0`: 新機能追加
-- `1.1.0 → 2.0.0`: 破壊的変更
-
-### リファレンス
-
-#### 公式ドキュメント
+### 公式ドキュメント
 
 - [Claude Code ドキュメント](https://docs.claude.com/en/docs/claude-code)
 - [プラグインマーケットプレイス](https://code.claude.com/docs/ja/plugin-marketplaces)
@@ -435,7 +129,7 @@ git push
 - [スキルドキュメント](https://docs.claude.com/en/docs/claude-code/skills)
 - [MCP仕様](https://modelcontextprotocol.io)
 
-#### MCPサーバー公式リポジトリ
+### MCPサーバー公式リポジトリ
 
 - [GitHub MCP](https://github.com/github/github-mcp-server)
 - [Serena MCP](https://github.com/oraios/serena)
@@ -445,11 +139,13 @@ git push
 - [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp)
 - [AWS Documentation MCP](https://github.com/awslabs/aws-documentation-mcp-server)
 
-#### プロジェクト内ドキュメント
+### プロジェクト内ドキュメント
 
 - [CHANGELOG.md](./CHANGELOG.md) - 版ごとの変更点
 - [GOVERNANCE.md](./GOVERNANCE.md) - 役割・決め方・メンテナーになる道
 - [CONTRIBUTING.md](./CONTRIBUTING.md) - 参加の手引き（開発の進め方・手元での検証）
+- [docs/plugin-development-guide.md](./docs/plugin-development-guide.md) - プラグインの作成・更新・削除の手順
+- [docs/versioning-and-distribution.md](./docs/versioning-and-distribution.md) - 版の付け方・開発版と正式版の配布・過去の版へ戻る手順
 - [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) - 行動規範
 - [SECURITY.md](./SECURITY.md) - 脆弱性の報告
 - [SUPPORT.md](./SUPPORT.md) - 質問と不具合の報告

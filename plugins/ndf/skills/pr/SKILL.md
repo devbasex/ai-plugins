@@ -54,6 +54,12 @@ push と PR 作成は外部（GitHub）への書き込みで、取り消しに�
   push する**。同意が得られなければ commit までで止め、push も PR 作成も行わない
 - ベースブランチが `main`/`master` 以外の場合は、手順 2 の誘導を優先する
 
+## この文書が受け取る値
+
+| 変数 | 値 | 決め方 |
+| --- | --- | --- |
+| `$SCRIPTS` | プラグインの `scripts/` の絶対パス | [scripts-lookup.md](../development-workflow/references/scripts-lookup.md)。シェルが変わったら決め直す |
+
 ## 手順
 
 ### 0. PR確認
@@ -164,6 +170,14 @@ gh api "repos/<所有者>/<リポジトリ>/pulls" --input /tmp/pr.json --jq '.h
 push 済みかの確認を持つため、通る間はそちらを使う。`gh pr view` / `gh pr checks` /
 `gh pr merge` も同じ経路を持つため、上限に達している間は同じ形で REST へ退避する。
 
+**作成した直後に、本文の決めたことの節を設計文書に揃える。** 対象かどうか（head が
+`design/` で始まるか）はスクリプトが決めるため、ここでは判定せずに呼ぶ。節の形は
+「設計 Pull Request の本文」にある。
+
+```bash
+bash "$SCRIPTS/pr-body-decisions.sh" sync <number>; echo "exit=$?"
+```
+
 ### 6. 完了報告
 
 **PR を作成・更新しただけでは完了ではない。この手順まで実行して完了とする。**
@@ -186,6 +200,7 @@ PR #<番号> <タイトル>
 - 変更量: <コミット数> コミット / <ファイル数> ファイル / +<追加> -<削除>
 - 主な変更: <1〜3 行>
 - PR 本文: Summary の要点 1 行 / Test plan <項目数> 件（実行済み <n> 件）
+- 決めたことの節: `pr-body-decisions.sh sync` の exit=<n>（2 なら「本文の決めたことを確かめられていない」と書く）
 
 URL: <gh pr view で取得した url をそのまま>
 ```
@@ -215,6 +230,32 @@ URL を取り出せない。
    ```bash
    gh pr edit <number> --body "<new-description>"
    ```
+5. **決めたことの節を揃える**: 本文を全体から作り直すと節が消えるか古いまま残るため、
+   書いた直後に `bash "$SCRIPTS/pr-body-decisions.sh" sync <number>` を実行し、終了コードを
+   手順 6 の完了報告に載せる
+
+## 設計 Pull Request の本文
+
+**head のブランチ名が `design/` で始まる Pull Request の本文は、決定の中身を持たない。**
+本文と設計文書が同じ決定を別の文で持つと、レビューで設計を変えたときに片方だけが直る。
+承認する人は本文を読むため、古い本文は古い前提での承認になる。
+
+| 節 | 何を書くか |
+| --- | --- |
+| `## Summary` | 何を設計したかと、設計文書へのリンク。**決定を言い換えて書かない**（機械では突き合わせられない） |
+| `## 決めたこと` | **手で書かない。** `pr-body-decisions.sh sync` が設計文書の `## 決定の記録` の見出しから作る |
+| `## Test plan` | 設計の段階で確かめたこと |
+
+**決めたことの節は、変更したファイルのうち `## 決定の記録` を持つ Markdown ごとに、その
+`### ` の見出しをそのまま並べる。** 理由と採らなかった案は設計文書を読む。手で直すと、次の
+`sync` と継続的統合の突き合わせで食い違いになる。
+
+```bash
+bash "$SCRIPTS/pr-body-decisions.sh" check <number>   # 0 一致・対象外 / 1 食い違い / 2 読めない / 3 呼び出しの誤り
+bash "$SCRIPTS/pr-body-decisions.sh" sync  <number>   # 節だけを書き直し、突き合わせ直した結果を返す
+```
+
+**2 を一致と読まない。** 本文か設計文書を読めなかったことを表す。
 
 ## 命名規則
 

@@ -325,7 +325,7 @@ Step 5 のテストが済ませている。同じ観点を後段へ渡すと、�
 | 比べたいもの | 揃えるもの | 例 |
 | --- | --- | --- |
 | モデルの差 | ランタイムを固定 | kiro の claude-opus-5 と kiro の gpt-5.6-sol |
-| ハーネスの差 | モデルを固定 | kiro の claude-opus-5 と claude の opus-5 |
+| ハーネスの差 | モデルを固定 | kiro の claude-opus-5 と claude の claude-opus-5 |
 
 ### 比較の限界
 

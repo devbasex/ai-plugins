@@ -8,7 +8,7 @@ body:
         既存の Skill の一覧は
         [plugins/ndf/README.md](https://github.com/devbasex/ai-plugins/blob/main/plugins/ndf/README.md)
         にあります。執筆の規約は
-        [plugins/ndf/skills/README.md](https://github.com/devbasex/ai-plugins/blob/main/plugins/ndf/skills/README.md)
+        [plugins/ndf/skills/AUTHORING.md](https://github.com/devbasex/ai-plugins/blob/main/plugins/ndf/skills/AUTHORING.md)
         にあります。
 
   - type: input

@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 SKILL_DIR = Path(__file__).resolve().parents[1]
@@ -124,20 +126,44 @@ def path_with(bin_dir: Path, without: tuple[str, ...] = ()) -> str:
 
     PATH を空にすると bash の組み込み以外が何も動かず、判定そのものへ入れない。
     実際に隠したいコマンドだけを外した経路を作る。
+
+    **一覧するのは、隠したいコマンドを持つディレクトリだけである**（#555）。それ以外の
+    ディレクトリは PATH へそのまま残す。読めないディレクトリ（`/root/.local/bin` など）も
+    一覧しないまま残るため、走査が例外で落ちない。対象を持つかどうかは `os.access` で
+    見る。権限が無ければ例外ではなく偽を返し、そのとき中のコマンドは実行もできない。
+
+    **隠せないときは例外で落とす。** 対象を持つディレクトリが一覧できなければ、そのまま
+    `PermissionError` を上げる。返す前に対象が見つからないことも確かめる。黙って返すと、
+    テストが確かめたい「コマンドが無いとき」が成立しないまま通る。
+
+    写しは呼び出しごとに別のディレクトリへ作る。同じ `bin_dir` で呼び直しても、前の
+    呼び出しの写しと衝突しない。
     """
-    shim = bin_dir / "shim"
-    shim.mkdir(parents=True, exist_ok=True)
+    hidden = set(without)
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    root = Path(tempfile.mkdtemp(prefix="shim-", dir=bin_dir))
+    entries: list[str] = []
+    copies: dict[str, str] = {}
     for entry in os.environ.get("PATH", "").split(os.pathsep):
-        if not entry or not Path(entry).is_dir():
+        if not entry:
             continue
-        for src in Path(entry).iterdir():
-            if src.name in without or (shim / src.name).exists():
-                continue
-            try:
-                (shim / src.name).symlink_to(src)
-            except OSError:
-                pass
-    return str(shim)
+        if not any(os.access(os.path.join(entry, name), os.X_OK) for name in hidden):
+            entries.append(entry)
+            continue
+        if entry not in copies:
+            copy = root / str(len(copies))
+            copy.mkdir()
+            # 相対パスの PATH でもリンクが切れないよう、リンク先は絶対パスにする。
+            for src in Path(entry).absolute().iterdir():
+                if src.name not in hidden:
+                    (copy / src.name).symlink_to(src)
+            copies[entry] = str(copy)
+        entries.append(copies[entry])
+    path = os.pathsep.join(entries)
+    visible = sorted(name for name in hidden if shutil.which(name, path=path))
+    if visible:
+        raise AssertionError(f"PATH から隠せなかったコマンド: {visible}")
+    return path
 
 
 def state_file(state_dir: Path, issue: int, slug: str = SLUG) -> Path:

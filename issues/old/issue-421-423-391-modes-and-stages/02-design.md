@@ -46,7 +46,7 @@
 | NDF 自身の実装と配布 | `WF_MODES` / `WF_STAGE_MATRIX` / 配布一覧の行数 / 版数 | 仮定してよい（このリポジトリ自身の中身） |
 
 **以後の決定は、どちらの層の話かを見て読む。** 上の層には
-[「対象リポジトリを仮定しない」の規約](../../plugins/ndf/skills/README.md)（#292）が掛かり、
+[「対象リポジトリを仮定しない」の規約](../../../plugins/ndf/skills/AUTHORING.md)（#292）が掛かり、
 下の層には掛からない。
 
 ## データ構造
@@ -331,7 +331,7 @@ flowchart TD
 数だけが増える。
 
 **これは名前を広げるだけの変更ではない。要否の判定基準そのものを改める。** v10.5.1 の
-確定仕様（[../../docs/specifications/ndf-workflow-unit-and-gates.md](../../docs/specifications/ndf-workflow-unit-and-gates.md)）は
+確定仕様（[../../docs/specifications/ndf-workflow-unit-and-gates.md](../../../docs/specifications/ndf-workflow-unit-and-gates.md)）は
 関門 2 の要否を「**マージ先のチャネルが決める**」と定めている。**`operation` の実行は
 マージ経路を持たないため、この基準では判定できない**（マージ先が無い）。
 
@@ -481,7 +481,7 @@ flowchart TD
 回せない）は変わらない。**
 
 **確定仕様も同じ版で追随する。**
-[`ndf-workflow-unit-and-gates.md`](../../docs/specifications/ndf-workflow-unit-and-gates.md) は
+[`ndf-workflow-unit-and-gates.md`](../../../docs/specifications/ndf-workflow-unit-and-gates.md) は
 実行証跡の検査の除外規則ほか複数の箇所で工程名「レビュー」を本文から参照する。
 `WF_PR_EXEMPT_STAGE` が「実装レビュー」を指すのに確定仕様が「レビュー」を名指しすると、
 **同じ規則が 2 か所で食い違う**（受け入れ条件 D9）。
