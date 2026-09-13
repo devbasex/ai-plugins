@@ -190,6 +190,17 @@ class Claim:
 
 
 @dataclass(frozen=True)
+class RuntimeCountDocSpec:
+    """説明文書にあるランタイム別 Skill 数の記載定義。"""
+
+    path: str
+    labels: dict[str, str]
+    subject_fmt: str
+    wording_fmt: str
+    source_of: Callable[[str], str]
+
+
+@dataclass(frozen=True)
 class PointVersionSpec:
     """周囲の固定の語で位置を決める版数記載の定義。"""
 
@@ -636,25 +647,21 @@ def check_root_readme_versions(root: Path, body: str, report: Report) -> None:
 
 
 def check_runtime_counts(
-    path: str,
+    spec: RuntimeCountDocSpec,
     described_by_label: dict[str, list[int]],
-    labels: dict[str, str],
     counts: dict[str, int | None],
-    subject_fmt: str,
-    wording_fmt: str,
-    source_of: Callable[[str], str],
     report: Report,
 ) -> None:
     """ランタイム別の Skill 数を突き合わせる。"""
-    for label, runtime in labels.items():
+    for label, runtime in spec.labels.items():
         verify(
             Claim(
-                path=path,
-                subject=subject_fmt.format(label, label=label),
-                wording=wording_fmt.format(label, label=label),
+                path=spec.path,
+                subject=spec.subject_fmt.format(label, label=label),
+                wording=spec.wording_fmt.format(label, label=label),
                 described=described_by_label[label],
                 expected=counts.get(runtime),
-                source=source_of(runtime),
+                source=spec.source_of(runtime),
             ),
             report,
         )
@@ -666,13 +673,15 @@ def check_root_readme(
     """`README.md` のランタイム別の数（A）・元 Skill 数（B）・カテゴリ内訳（C）を見る。"""
     found = labelled_numbers(RUNTIME_COUNT, body, ROOT_README_RUNTIMES)
     check_runtime_counts(
-        ROOT_README,
+        RuntimeCountDocSpec(
+            path=ROOT_README,
+            labels=ROOT_README_RUNTIMES,
+            subject_fmt="公開Skills の {label} の数",
+            wording_fmt="{label}向け core <数>個",
+            source_of=manifest_path,
+        ),
         found,
-        ROOT_README_RUNTIMES,
         counts,
-        "公開Skills の {label} の数",
-        "{label}向け core <数>個",
-        manifest_path,
         report,
     )
     verify(
@@ -727,13 +736,15 @@ def check_plugin_readme(
     """`plugins/ndf/README.md` の配布先の表（D）・レイアウト図（E）・更新案内（F）を見る。"""
     found = labelled_numbers(TABLE_ROW, body, PLUGIN_README_RUNTIMES)
     check_runtime_counts(
-        PLUGIN_README,
+        RuntimeCountDocSpec(
+            path=PLUGIN_README,
+            labels=PLUGIN_README_RUNTIMES,
+            subject_fmt="配布先の表の {label} の数",
+            wording_fmt="| {label} | <数> 個 | ... |",
+            source_of=manifest_path,
+        ),
         found,
-        PLUGIN_README_RUNTIMES,
         counts,
-        "配布先の表の {label} の数",
-        "| {label} | <数> 個 | ... |",
-        manifest_path,
         report,
     )
     verify(
