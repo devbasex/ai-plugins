@@ -319,3 +319,65 @@ def test_relative_path_is_resolved_against_cwd(
     assert f"スコープ: workspace ({base / resolved_part}/.kiro)" in proc.stdout
     assert "ERROR:" not in proc.stderr
     assert_no_bare_cd_error(proc)
+
+
+@pytest.mark.parametrize("case", ["symlink", "file", "directory"])
+def test_ndf_policies_skill_migration(tmp_path: Path, case: str) -> None:
+    # ndf-policies の旧シンボリックリンクは削除する一方、同名の通常ファイルまたは
+    # 実体ディレクトリは保持する分岐と、どちらでも steering を生成する結果を固定する。
+    project = tmp_path / f"project_{case}"
+    skills_dir = project / ".kiro" / "skills"
+    skills_dir.mkdir(parents=True)
+    target = skills_dir / "ndf-policies"
+
+    if case == "symlink":
+        dummy = tmp_path / "legacy_target"
+        dummy.mkdir()
+        target.symlink_to(dummy)
+    elif case == "file":
+        target.write_text("user managed ndf-policies file\n", encoding="utf-8")
+    elif case == "directory":
+        target.mkdir()
+        (target / "custom.md").write_text("user managed content\n", encoding="utf-8")
+
+    proc = run("--project", str(project), "--yes", home=tmp_path)
+
+    assert proc.returncode == 0, proc.stderr
+    assert_no_bare_cd_error(proc)
+
+    if case == "symlink":
+        assert not target.exists()
+        assert not target.is_symlink()
+        assert (
+            "  REMOVED: ndf-policies (steering へ移行済みのため .kiro/skills のリンクを削除)"
+            in proc.stdout
+        )
+        assert f"WARN: {target} はシンボリックリンクではありません。" not in proc.stderr
+    elif case == "file":
+        assert target.is_file()
+        assert not target.is_symlink()
+        assert target.read_text(encoding="utf-8") == "user managed ndf-policies file\n"
+        assert f"WARN: {target} はシンボリックリンクではありません。" in proc.stderr
+        assert "  REMOVED: ndf-policies" not in proc.stdout
+    elif case == "directory":
+        assert target.is_dir()
+        assert not target.is_symlink()
+        assert (target / "custom.md").read_text(encoding="utf-8") == "user managed content\n"
+        assert f"WARN: {target} はシンボリックリンクではありません。" in proc.stderr
+        assert "  REMOVED: ndf-policies" not in proc.stdout
+
+    steering_file = project / ".kiro" / "steering" / "ndf-policies.md"
+    assert steering_file.is_file()
+    steering_content = steering_file.read_text(encoding="utf-8")
+    assert (
+        "<!-- plugins/ndf/dev.kiro/install.sh が生成します。直接編集しないでください。 -->"
+        in steering_content
+    )
+    assert "<!-- 編集元: plugins/ndf/skills/ndf-policies/SKILL.md -->" in steering_content
+    assert "# NDFポリシー" in steering_content
+    assert "## ブランチ運用の原則" in steering_content
+
+    source_skill = ROOT / "plugins" / "ndf" / "skills" / "ndf-policies" / "SKILL.md"
+    source_body = source_skill.read_text(encoding="utf-8").split("\n---\n", 1)[1].strip("\n")
+    assert source_body in steering_content
+
