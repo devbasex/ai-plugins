@@ -450,20 +450,24 @@ def parse_plugin_table_rows(body: str) -> list[tuple[str, str, int]]:
     return rows
 
 
+def row_location(value: str, number: int) -> str:
+    """記載の値と行番号を、失敗の文言に埋める断片として返す。"""
+    return f"記載: {value}（L{number}）"
+
+
 def compare_plugin_table_row(root: Path, name: str, value: str, number: int, report: Report) -> None:
     """一覧表の 1 行の版数を、その名前の `plugin.json` と突き合わせる。"""
     expected = named_plugin_version(root, name)
+    written = row_location(value, number)
     if expected is None:
         report.add(
             ROOT_README,
-            f"プラグイン一覧表の {name} の版数を突き合わせられない"
-            f"（記載: {value}（L{number}） / {plugin_json_path(name)} が無い）",
+            f"プラグイン一覧表の {name} の版数を突き合わせられない（{written} / {plugin_json_path(name)} が無い）",
         )
     elif value != expected:
         report.add(
             ROOT_README,
-            f"プラグイン一覧表の {name} の版数が食い違う"
-            f"（記載: {value}（L{number}） / {plugin_json_path(name)}: {expected}）",
+            f"プラグイン一覧表の {name} の版数が食い違う（{written} / {plugin_json_path(name)}: {expected}）",
         )
 
 
