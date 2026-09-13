@@ -70,7 +70,7 @@ write_declaration() {
   cat >"$tmp" <<JSON
 {
   "\$schema": "$SCHEMA_URL",
-  "version": 1
+  "version": $WT_DECLARATION_VERSION
 }
 JSON
   mv "$tmp" "$DECLARATION_FILE" 2>/dev/null || { rm -f "$tmp"; return 1; }
