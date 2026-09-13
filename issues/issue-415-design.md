@@ -13,23 +13,12 @@
 **新しい関数を作らない。** 検査は 1 箇所で、他の選択肢の分岐と同じ形（`[ 条件 ] || { echo
 "ERROR: ..." >&2; exit 2; }`）を 2 つ並べれば書ける。
 
-## 処理の流れ
-
-```mermaid
-graph TD
-    A["--project の値"] --> B{存在するか}
-    B -->|しない| C["ERROR: の 1 行と<br/>HINT: mkdir -p の 1 行"]
-    B -->|する| D{ディレクトリか}
-    D -->|する| E[パスを解決して<br/>導入を続ける]
-    D -->|しない| F["ERROR: の 1 行<br/>HINT: は出さない"]
-    C --> G[終了コード 2]
-    F --> G
-```
-
 ## 出力の形
 
 既存の案内と同じく、`ERROR:` で始まる行を標準エラーへ出す。**存在しないパスにだけ、作り方を
 添える行を 1 行足す。**
+
+### 誤りの種類ごとの文言
 
 存在しないパスを渡した場合。
 
@@ -48,6 +37,8 @@ ERROR: --project points at a path that is not a directory: /tmp/example/afile
 `mkdir -p` はそのパスが既にあるとして失敗する（実測）。1 つの文言にまとめると、存在している
 パスを「does not exist」と述べたうえで、実行すると失敗する手順を案内することになる。
 
+### 案内のパスの整形
+
 **`HINT:` の行のパスは、シェルの語 1 つとして読める形へ整える。** 受け取った値をそのまま
 埋め込むと、空白を含むパスが 2 つの語に割れる。案内どおりに打っても、意図した導入先は作られない。
 
@@ -61,7 +52,7 @@ $ ls -d /tmp/project
 /tmp/project
 ```
 
-`/tmp/qdemo/my` と、現在地の下の `project` の 2 つが作られ、`/tmp/qdemo/my project` はどこにも
+`/tmp/qdemo/my` と、現在地の下の `project` の 2 つが作られる。`/tmp/qdemo/my project` はどこにも
 残らない（実測）。整形は `printf '%q'` で行う。**`ERROR:` の行のパスは整形しない。** こちらは
 止まった理由を述べる文であって、利用者が打つ語ではない。
 
@@ -70,9 +61,24 @@ ERROR: --project points at a path that does not exist: /tmp/qdemo/my project
 HINT: mkdir -p /tmp/qdemo/my\ project
 ```
 
+### 案内の言語
+
 **英語で書く。** 既存の `--project requires a path` / `unknown option` と同じ言語にする。
 このスクリプトの案内には日本語の行（`--scope global には HOME が必要です`）も混ざるが、
 `--project` に関わる案内は英語で揃っている。
+
+## 処理の流れ
+
+```mermaid
+graph TD
+    A["--project の値"] --> B{存在するか}
+    B -->|しない| C["ERROR: の 1 行と<br/>HINT: mkdir -p の 1 行"]
+    B -->|する| D{ディレクトリか}
+    D -->|する| E[パスを解決して<br/>導入を続ける]
+    D -->|しない| F["ERROR: の 1 行<br/>HINT: は出さない"]
+    C --> G[終了コード 2]
+    F --> G
+```
 
 ## 決定の記録
 
@@ -131,8 +137,8 @@ HINT: mkdir -p /tmp/qdemo/my\ project
 | `/tmp/qtest2/a$b` | `/tmp/qtest2/a\$b` |
 
 **案内を読む側のシェルも bash を前提にする。** 制御文字を含むパスでは `$'...'` の形になり、
-これは bash と zsh が解釈する書式である。このスクリプト自身が `#!/usr/bin/env bash` で動き、
-案内も `bash plugins/ndf/dev.kiro/install.sh ...` の形で載っているため、前提は揃っている。
+これは bash と zsh が解釈する書式である。このスクリプト自身が `#!/usr/bin/env bash` で動く。
+案内も `bash plugins/ndf/dev.kiro/install.sh ...` の形で載っている。そのため前提は揃っている。
 
 ## テスト設計
 
