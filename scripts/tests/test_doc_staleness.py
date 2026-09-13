@@ -726,6 +726,28 @@ def test_version_section_without_any_version_reports_once_and_returns() -> None:
     ]
 
 
+# --- check_category_breakdown: Skill 名を読点「、」で区切る分岐（単体）---
+
+
+def test_category_breakdown_ideographic_comma_names_are_split() -> None:
+    """Skill 名の区切りが読点「、」でも分割され、個数が計上される（現状固定）。
+
+    `NAME_SEPARATOR` は `[,、]` で、半角カンマと読点のどちらも区切りとして扱う。
+    読点で区切った本文を渡しても、宣言数と並ぶ名前の数が一致し、合計も総数と一致すれば
+    Report にエラーが追加されないことを固定する。
+    """
+    module = _load_checker()
+    report = module.Report()
+    body = (
+        "- **元Skills（5個）**:\n"
+        "  - 第1群 (4): alpha、bravo、charlie、delta\n"
+        "  - 第2群 (1): echo\n"
+        "- 次の行\n"
+    )
+    module.check_category_breakdown(body, 5, "src", report)
+    assert report.errors == []
+
+
 # --- category_lines: 元Skills行が無い境界（単体）---
 
 
