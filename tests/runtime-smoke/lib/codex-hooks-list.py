@@ -80,7 +80,7 @@ def main():
                     message = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                if message.get("id") != HOOKS_LIST_ID:
+                if not isinstance(message, dict) or message.get("id") != HOOKS_LIST_ID:
                     continue
                 body = "".join(received)
                 if "error" in message:

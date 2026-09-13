@@ -45,6 +45,8 @@ for line in sys.stdin:
         continue
     if message.get("id") == 2:
         print("non-json line from app-server", flush=True)
+        print(json.dumps(["json but not an object"]), flush=True)
+        print("42", flush=True)
         print(json.dumps({"method": "window/logMessage", "params": {"type": 3, "message": "initializing"}}), flush=True)
         print(json.dumps({"id": 1, "result": {"serverInfo": {"name": "dummy"}}}), flush=True)
         result = {
