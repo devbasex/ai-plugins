@@ -547,41 +547,24 @@ def check_version_section(body: str, version: str | None, report: Report) -> boo
     return True
 
 
-@dataclass(frozen=True)
-class VersionFormRow:
-    """版の形の表の 1 行（記載値と行番号）。"""
-
-    value: str
-    line: int
-
-
-@dataclass(frozen=True)
-class NextDevelopmentExample:
-    """次の開発の例（左右の版と行番号）。"""
-
-    left: str
-    right: str
-    line: int
-
-
 def parse_version_form_rows_and_examples(
     body: str,
-) -> tuple[dict[str, list[VersionFormRow]], list[NextDevelopmentExample]]:
+) -> tuple[dict[str, list[tuple[str, int]]], list[tuple[str, str, int]]]:
     """章 2 の囲みの外から、版の形の表の行と次の開発の例を行番号つきで拾う。"""
-    rows: dict[str, list[VersionFormRow]] = {label: [] for label in VERSION_FORM_SUFFIX}
-    examples: list[NextDevelopmentExample] = []
+    rows: dict[str, list[tuple[str, int]]] = {label: [] for label in VERSION_FORM_SUFFIX}
+    examples: list[tuple[str, str, int]] = []
     for number, line, in_fence in section_lines(body.splitlines()) or []:
         if in_fence:
             continue
         row = VERSION_FORM_ROW.match(line)
         if row:
-            rows[row.group("label")].append(VersionFormRow(row.group(2), number))
+            rows[row.group("label")].append((row.group(2), number))
         for found in NEXT_DEVELOPMENT.finditer(line):
-            examples.append(NextDevelopmentExample(found.group(1), found.group(2), number))
+            examples.append((found.group(1), found.group(2), number))
     return rows, examples
 
 
-def check_version_form_rows_presence(rows: dict[str, list[VersionFormRow]], report: Report) -> None:
+def check_version_form_rows_presence(rows: dict[str, list[tuple[str, int]]], report: Report) -> None:
     """版の形の表の各行が 1 つずつあるかを見る。"""
     for label, found_rows in rows.items():
         if not found_rows:
@@ -591,39 +574,39 @@ def check_version_form_rows_presence(rows: dict[str, list[VersionFormRow]], repo
                 f"| {label} | `<版>` | ... | の形で書く）",
             )
         elif len(found_rows) > 1:
-            numbers = ", ".join(f"L{row.line}" for row in found_rows)
+            numbers = ", ".join(f"L{number}" for _, number in found_rows)
             report.add(VERSIONING_MD, f"版の付け方の節の版の形の表に同じ行が複数ある（{label}: {numbers}）")
 
 
-def check_version_form_row_suffixes(rows: dict[str, list[VersionFormRow]], report: Report) -> None:
+def check_version_form_row_suffixes(rows: dict[str, list[tuple[str, int]]], report: Report) -> None:
     """版の形の表の各行が、その行に求める接尾辞の形を持つかを見る。"""
     for label, found_rows in rows.items():
         suffix, wording = VERSION_FORM_SUFFIX[label]
-        for row in found_rows:
-            if ("-" in row.value) if suffix is None else not suffix.search(row.value):
+        for value, number in found_rows:
+            if ("-" in value) if suffix is None else not suffix.search(value):
                 report.add(
                     VERSIONING_MD,
                     f"版の付け方の節の{label}の行の接尾辞が違う"
-                    f"（記載: {row.value}（L{row.line}） / 求める形: {wording}）",
+                    f"（記載: {value}（L{number}） / 求める形: {wording}）",
                 )
 
 
-def check_rows_newer_than_stable(rows: dict[str, list[VersionFormRow]], report: Report) -> None:
+def check_rows_newer_than_stable(rows: dict[str, list[tuple[str, int]]], report: Report) -> None:
     """開発版と公開前の確認版の行が、正式版の行より新しい基底を指すかを見る。"""
     # 比べる相手が 1 つに決まるときだけ、正式版の行より新しい基底を指すかを見る。
     if len(rows["正式版"]) == 1:
-        stable = rows["正式版"][0]
+        stable, stable_number = rows["正式版"][0]
         for label in ("開発版", "公開前の確認版"):
-            for row in rows[label]:
-                if base_of(row.value) <= base_of(stable.value):
+            for value, number in rows[label]:
+                if base_of(value) <= base_of(stable):
                     report.add(
                         VERSIONING_MD,
                         f"版の付け方の節の{label}の行が正式版の行より新しい版を指していない"
-                        f"（記載: {row.value}（L{row.line}） / 正式版: {stable.value}（L{stable.line}））",
+                        f"（記載: {value}（L{number}） / 正式版: {stable}（L{stable_number}））",
                     )
 
 
-def check_next_development_examples(examples: list[NextDevelopmentExample], report: Report) -> None:
+def check_next_development_examples(examples: list[tuple[str, str, int]], report: Report) -> None:
     """次の開発の例があり、どれも次の版の開発版を指すかを見る。"""
     if not examples:
         report.add(
@@ -631,11 +614,11 @@ def check_next_development_examples(examples: list[NextDevelopmentExample], repo
             "版の付け方の節の次の開発の例を読み取れない"
             "（`<版>` の次を開発するなら `<版>-dev.<連番>` の形で書く）",
         )
-    for example in examples:
-        if base_of(example.right) <= base_of(example.left) or not DEV_SUFFIX.search(example.right):
+    for left, right, number in examples:
+        if base_of(right) <= base_of(left) or not DEV_SUFFIX.search(right):
             report.add(
                 VERSIONING_MD,
-                f"版の付け方の節の次の開発の例が次の版を指していない（記載: {example.left} → {example.right}（L{example.line}））",
+                f"版の付け方の節の次の開発の例が次の版を指していない（記載: {left} → {right}（L{number}））",
             )
 
 
