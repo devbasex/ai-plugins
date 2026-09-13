@@ -2,7 +2,6 @@
   "hooks": {
     "PreToolUse": [
       {
-        "description": "NDF: notify when the main directory is edited",
         "matcher": "Edit|MultiEdit|Write|NotebookEdit|fs_write|edit_file|write_file|str_replace_editor|replace|write_to_file|replace_file_content|apply_patch|Bash|shell|execute_bash|local_shell|run_command|run_shell_command",
         "hooks": [
           {
