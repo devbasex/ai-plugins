@@ -24,6 +24,10 @@ LINK_RE = re.compile(r"(?<!!)\[[^\]]+\]\(([^)]+)\)")
 INLINE_HTML_RE = re.compile(r"<a\s+[^>]*href=[\"']([^\"']+)[\"']", re.IGNORECASE)
 TITLE_RE = re.compile(r"\s+(?:\"[^\"]*\"|'[^']*'|\([^)]*\))\s*$")
 HEADING_RE = re.compile(r"^#{1,6}\s+(.*)$")
+# GitHub の見出しアンカー規則: 記号は空白・ハイフン・アンダースコアだけ残す。
+SLUG_KEEP_PUNCTUATION = " -_"
+# 同規則: Unicode 一般カテゴリの先頭文字が L(字母)・M(結合文字)・N(数字) の文字を残す。
+SLUG_KEEP_CATEGORIES = "LMN"
 DEFAULT_SCAN_TARGETS = (
     "README.md",
     "AGENTS.md",
@@ -106,7 +110,7 @@ def slugify(text: str) -> str:
     """GitHub's heading anchor: keep letters, marks, digits, space, '-', '_'."""
     kept = "".join(
         ch for ch in text.strip().lower()
-        if ch in " -_" or unicodedata.category(ch)[0] in "LMN"
+        if ch in SLUG_KEEP_PUNCTUATION or unicodedata.category(ch)[0] in SLUG_KEEP_CATEGORIES
     )
     return kept.replace(" ", "-")
 
