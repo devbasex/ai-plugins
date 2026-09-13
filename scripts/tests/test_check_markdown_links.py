@@ -231,3 +231,26 @@ def test_anchor_refs_empty_or_missing_fragment_skipped() -> None:
     assert module.anchor_refs("[x](file.md#)\n") == []
     assert module.anchor_refs("[x](#)\n") == []
     assert module.anchor_refs("[x](file.md)\n") == []
+
+
+def test_heading_anchors_collision_with_explicit_numbered_heading() -> None:
+    """heading_anchors の連番衝突解決の while ループ反復経路を固定する（R2-002）。
+
+    自動付番される名前（`手順-1`）と同名の見出しが文書内に明示的に書かれているとき、
+    後続の同名見出しは while ループが複数回実行され、次の空き連番（`手順-2`）まで
+    探索して解決する。明示的な `## 手順-1` を先頭に置くことで、2 つ目の `## 手順` が
+    `手順` → `手順-1`（衝突）→ `手順-2` と 2 回反復する経路を通す。
+    """
+    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / "a.md"
+        path.write_text("## 手順-1\n\n## 手順\n\n## 手順\n", encoding="utf-8")
+        anchors = module.heading_anchors(path)
+
+    assert anchors == {"手順", "手順-1", "手順-2"}
