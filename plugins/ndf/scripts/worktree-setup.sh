@@ -3,12 +3,14 @@
 #
 #   init [--force]   宣言ファイル (.ndf/worktree.json) を作る
 #   status           導入の状態を出す
+#   check            宣言の状態を終了コードで返す（読み取り専用）
 #
 # 作業ツリー運用の仕組みは、リポジトリ側に宣言ファイルがあるときだけ動く。
 # 無ければ hook もコマンドも何も出力せず終了コード 0 で終わる。**このスクリプトは
 # その入口を作る。** 他のスクリプトと違い、宣言が無い状態で意味を持つ唯一のもの。
 #
 # 終了コードは 0 を「処理が完了した」、1 を「処理できなかった」に割り当てる。
+# check だけは状態を 0（あり）/ 2（なし）/ 3（読めない）へ分け、1 は「判定できない」を指す。
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -108,16 +110,20 @@ EOS
 
 # --- status -----------------------------------------------------------------
 
+# 「宣言ファイル:」の行を出す。**status と check は同じ行を出す。** 同じ状態を別の
+# 言葉で書くと、どちらかの出力だけを見た利用者が別の状態と読みうる。
+print_declaration_line() {
+  case "$1" in
+    present) printf '宣言ファイル: あり（%s）\n' "${DECLARATION_FILE#"$MAIN_DIR"/}" ;;
+    unreadable) printf '宣言ファイル: 読めません（版が未対応か、JSON として壊れています）\n' ;;
+    *) printf '宣言ファイル: なし。`worktree-setup.sh init` で作れます\n' ;;
+  esac
+}
+
 do_status() {
   printf '主ディレクトリ: %s\n' "$MAIN_DIR"
 
-  if wt_declaration "$MAIN_DIR" >/dev/null; then
-    printf '宣言ファイル: あり（%s）\n' "${DECLARATION_FILE#"$MAIN_DIR"/}"
-  elif [ -e "$DECLARATION_FILE" ]; then
-    printf '宣言ファイル: 読めません（版が未対応か、JSON として壊れています）\n'
-  else
-    printf '宣言ファイル: なし。`worktree-setup.sh init` で作れます\n'
-  fi
+  print_declaration_line "$(wt_declaration_state "$MAIN_DIR")"
 
   if git -C "$MAIN_DIR" check-ignore -q "$WT_WORKTREE_DIR/" 2>/dev/null; then
     printf '%s/ の登録: あり\n' "$WT_WORKTREE_DIR"
@@ -135,11 +141,48 @@ do_status() {
   printf '開発用の作業ツリー: %s 個\n' "$count"
 }
 
+# --- check ------------------------------------------------------------------
+
+# 宣言のキーを行へ出す。**名前の実在は確かめない。** 確かめる wt_branch_exists は
+# origin へ問い合わせることがあり、起動のたびに通信が走る。実在の確認は、その名前を
+# 使う時点の wt_base_branch / wt_production_branch が持つ。
+print_branch_line() {
+  local label="$1" key="$2" decl="$3" name= fallback
+  if [ -n "$decl" ]; then
+    name=$(printf '%s' "$decl" |
+      jq -r --arg k "$key" 'if (.[$k]|type) == "string" then .[$k] else empty end' 2>/dev/null)
+  fi
+  if [ -n "$name" ]; then
+    printf '%s: %s（宣言）\n' "$label" "$name"
+  elif fallback=$(wt_default_branch "$MAIN_DIR"); then
+    printf '%s: %s（未宣言。既定ブランチ）\n' "$label" "$fallback"
+  else
+    printf '%s: 不明（origin/HEAD が未設定）\n' "$label"
+  fi
+}
+
+do_check() {
+  local state decl=
+  state=$(wt_declaration_state "$MAIN_DIR") || return 1
+  [ "$state" = present ] && decl=$(wt_declaration "$MAIN_DIR")
+
+  print_declaration_line "$state"
+  print_branch_line "開発の起点" base_branch "$decl"
+  print_branch_line "本番のチャネル" production_branch "$decl"
+
+  case "$state" in
+    present) return 0 ;;
+    absent) return 2 ;;
+    *) return 3 ;;
+  esac
+}
+
 case "$SUBCOMMAND" in
   init) do_init ;;
   status) do_status ;;
+  check) do_check ;;
   *)
-    printf '使い方: worktree-setup.sh <init|status> [--force]\n' >&2
+    printf '使い方: worktree-setup.sh <init|status|check> [--force]\n' >&2
     exit 1
     ;;
 esac

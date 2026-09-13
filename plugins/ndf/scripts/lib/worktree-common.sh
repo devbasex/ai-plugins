@@ -153,6 +153,25 @@ wt_declaration() {
   printf '%s\n' "$json"
 }
 
+# 宣言の状態を `present` / `absent` / `unreadable` の 1 語で出力する。引数が空なら 1 を返す。
+# **状態を分けるのはこの関数だけである**（#527）。`check` と `status` はこれを呼び、
+# 手順書と hook は基準を書き写さない。
+#
+# 存在は `[ -e ]` で見る。`wt_declaration` は `[ -f ]` で見るため、ディレクトリは
+# `unreadable`、壊れた symlink は `absent` に分かれる。**`jq` が無いと読める宣言も
+# `unreadable` になる。** 呼び出し側が先に `jq` を確かめる。
+wt_declaration_state() {
+  local main_dir="${1:-}"
+  [ -n "$main_dir" ] || return 1
+  if wt_declaration "$main_dir" >/dev/null; then
+    printf 'present\n'
+  elif [ -e "$main_dir/.ndf/worktree.json" ]; then
+    printf 'unreadable\n'
+  else
+    printf 'absent\n'
+  fi
+}
+
 # 宣言ファイルの状態を表す印を返す。存在しなければ空文字。
 # 控えの作り直しが要るかを、git を呼ばずに判定するために使う。
 #
