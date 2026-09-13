@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -49,6 +51,19 @@ def test_real_repository_passes() -> None:
     """実物のリポジトリでも通る。検査を入れた時点で落ちる状態を作らない。"""
     result = run_check(REPO_ROOT)
     assert result.returncode == 0, output_of(result)
+
+
+def test_root_defaults_to_current_directory() -> None:
+    """現状固定: `--root` を省くとカレントディレクトリをリポジトリの根として検査する。"""
+    result = subprocess.run(
+        [sys.executable, str(CHECKER)],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, output_of(result)
+    assert result.stdout == "documented skill counts and versions are up to date\n"
 
 
 # --- A: README.md のランタイム別の公開 Skill 数 ---
