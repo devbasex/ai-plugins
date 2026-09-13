@@ -755,3 +755,24 @@ def test_is_mode_rejects_an_empty_mode() -> None:
     """現状固定: 空引数は早期復帰により終了コード 1 を返す。"""
     assert is_mode("") == 1
 
+
+
+def is_stage(stage: str) -> int:
+    """`wf_is_stage` の終了コードを返す。0 が既知の工程、1 が未知または空。"""
+    result = run_lib(f"wf_is_stage {shlex.quote(stage)}")
+    return result.returncode
+
+
+def test_is_stage_accepts_a_known_stage() -> None:
+    """現状固定: 既知の工程は終了コード 0 を返す。"""
+    assert is_stage("配布") == 0
+
+
+def test_is_stage_rejects_an_unknown_stage() -> None:
+    """現状固定: 未知の工程は while ループを抜けて終了コード 1 を返す。"""
+    assert is_stage("存在しない工程") == 1
+
+
+def test_is_stage_rejects_an_empty_stage() -> None:
+    """現状固定: 空引数は早期復帰により終了コード 1 を返す。"""
+    assert is_stage("") == 1
