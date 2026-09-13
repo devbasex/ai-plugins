@@ -281,6 +281,22 @@ def test_link_targets_extracts_html_and_excludes_images() -> None:
     assert targets == ["std.md", "dq.md", "sq.md"]
 
 
+def test_link_targets_returns_empty_list_for_plain_text_and_empty_string() -> None:
+    """link_targets の空文字列やプレーンテキストに対する境界値の現状を固定する（R2-005）。
+
+    リンク記法（Markdown または HTML）を含まないテキストや空文字列に対して、
+    link_targets が空リストを返すことを確認する。
+    """
+    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.link_targets("") == []
+    assert module.link_targets("リンク記法を含まない通常のプレーンテキスト") == []
+    assert module.link_targets("Markdown や HTML のタグのない複数行\nテキストです。") == []
+
+
 @pytest.mark.parametrize(
     ("target", "expected"),
     [
