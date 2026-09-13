@@ -102,6 +102,14 @@ def visible_lines(path: Path) -> list[str]:
     return lines
 
 
+def _matching_closer(runs: list[re.Match], start: int) -> int | None:
+    width = len(runs[start].group())
+    return next(
+        (j for j in range(start + 1, len(runs)) if len(runs[j].group()) == width),
+        None,
+    )
+
+
 def strip_inline_code(line: str) -> str:
     """Replace each inline code span in one line with a single space (#543).
 
@@ -113,11 +121,7 @@ def strip_inline_code(line: str) -> str:
     pos = 0
     i = 0
     while i < len(runs):
-        width = len(runs[i].group())
-        closer = next(
-            (j for j in range(i + 1, len(runs)) if len(runs[j].group()) == width),
-            None,
-        )
+        closer = _matching_closer(runs, i)
         if closer is None:
             i += 1
             continue
