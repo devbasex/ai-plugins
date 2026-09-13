@@ -1,0 +1,14 @@
+{
+  "name": "hooks-positive-control",
+  "description": "Fixture for runtime-smoke: a plugin whose hooks definitions every runtime must report.",
+  "owner": {
+    "name": "takemi-ohama"
+  },
+  "plugins": [
+    {
+      "name": "broken-hooks",
+      "source": "./plugins/broken-hooks",
+      "description": "Hooks definitions that are broken on purpose"
+    }
+  ]
+}
