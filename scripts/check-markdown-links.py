@@ -85,11 +85,19 @@ def parse_target(raw: str) -> tuple[str, str, str]:
     return path_part, fragment, target
 
 
-def target_path(source: Path, raw_target: str) -> Path | None:
-    path_part, _fragment, target = parse_target(raw_target)
+def _resolvable_path_part(raw: str) -> str | None:
+    """The path part to resolve, or None when the link names no other document."""
+    path_part, _fragment, target = parse_target(raw)
     if should_skip(target):
         return None
     if not path_part:
+        return None
+    return path_part
+
+
+def target_path(source: Path, raw_target: str) -> Path | None:
+    path_part = _resolvable_path_part(raw_target)
+    if path_part is None:
         return None
     return resolve_document(source, path_part)
 
