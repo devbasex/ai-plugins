@@ -180,6 +180,32 @@ class PointVersionSpec:
     pattern: re.Pattern[str]
 
 
+# 点で照合する版数記載（G・I・K・L・M）の一覧。点の照合を足すときはここへ 1 行足す。
+# 同じ文書の中では並びの順に報告する。
+POINT_VERSION_SPECS: list[PointVersionSpec] = [
+    PointVersionSpec(ROOT_README, "概要の版数", "**NDFプラグイン v<版>**", OVERVIEW_VERSION),  # G
+    PointVersionSpec(
+        AGENTS_MD,
+        "「主要プラグインです（v<版>）」の版数",
+        "主要プラグインです（v<版>）",
+        MAIN_PLUGIN_VERSION,
+    ),  # I
+    PointVersionSpec(PLUGIN_README, "Kiro の確認例の版数", "（Kiro CLI用 / v<版>）", KIRO_AGENT_VERSION),  # K
+    PointVersionSpec(
+        PLUGIN_README,
+        "Codex のキャッシュパスの例の版数",
+        f"~/.codex/plugins/cache/ai-plugins/{FAMILY}/<版>/skills/...",
+        CODEX_CACHE_PATH,
+    ),  # L
+    PointVersionSpec(
+        PLUGIN_README,
+        "`codex plugin list` の出力例の版数",
+        f"{FAMILY}@ai-plugins  installed, enabled  <版>",
+        CODEX_LIST_OUTPUT,
+    ),  # M
+]
+
+
 def location_of(claim: Claim, index: int) -> str:
     """食い違った記載の行番号。持っていなければ空文字を返す。"""
     if not claim.lines or index >= len(claim.lines):
@@ -360,6 +386,13 @@ def check_point_version(
     )
 
 
+def check_point_versions(path: str, body: str, version: str | None, report: Report) -> None:
+    """`POINT_VERSION_SPECS` のうち、その文書に書かれる記載をすべて照合する。"""
+    for spec in POINT_VERSION_SPECS:
+        if spec.path == path:
+            check_point_version(spec, body, version, report)
+
+
 def parse_plugin_table_rows(body: str) -> list[tuple[str, str, int]]:
     """プラグイン一覧表の行を、名前・記載の版数・行番号の組として拾う。"""
     rows: list[tuple[str, str, int]] = []
@@ -457,60 +490,9 @@ def check_version_section(body: str, version: str | None, report: Report) -> Non
             )
 
 
-def check_root_readme_versions(root: Path, body: str, version: str | None, report: Report) -> None:
-    """`README.md` の概要の版数（G）とプラグイン一覧表の版数（H）を見る。"""
-    check_point_version(
-        PointVersionSpec(
-            ROOT_README,
-            "概要の版数",
-            "**NDFプラグイン v<版>**",
-            OVERVIEW_VERSION,
-        ),
-        body,
-        version,
-        report,
-    )
+def check_root_readme_versions(root: Path, body: str, report: Report) -> None:
+    """`README.md` のプラグイン一覧表の版数（H）を見る。概要の版数（G）は `POINT_VERSION_SPECS` が持つ。"""
     check_plugin_table(root, body, report)
-
-
-def check_agents_md(body: str, version: str | None, report: Report) -> None:
-    """`AGENTS.md` の「主要プラグインです（v<版>）」（I）を見る。"""
-    check_point_version(
-        PointVersionSpec(
-            AGENTS_MD,
-            "「主要プラグインです（v<版>）」の版数",
-            "主要プラグインです（v<版>）",
-            MAIN_PLUGIN_VERSION,
-        ),
-        body,
-        version,
-        report,
-    )
-
-
-def check_plugin_readme_versions(body: str, version: str | None, report: Report) -> None:
-    """`plugins/ndf/README.md` の Kiro の確認例（K）・キャッシュパス（L）・出力例（M）を見る。"""
-    for spec in (
-        PointVersionSpec(
-            PLUGIN_README,
-            "Kiro の確認例の版数",
-            "（Kiro CLI用 / v<版>）",
-            KIRO_AGENT_VERSION,
-        ),
-        PointVersionSpec(
-            PLUGIN_README,
-            "Codex のキャッシュパスの例の版数",
-            f"~/.codex/plugins/cache/ai-plugins/{FAMILY}/<版>/skills/...",
-            CODEX_CACHE_PATH,
-        ),
-        PointVersionSpec(
-            PLUGIN_README,
-            "`codex plugin list` の出力例の版数",
-            f"{FAMILY}@ai-plugins  installed, enabled  <版>",
-            CODEX_LIST_OUTPUT,
-        ),
-    ):
-        check_point_version(spec, body, version, report)
 
 
 # --- 説明文書ごとの検査 ---
@@ -681,11 +663,12 @@ def main() -> int:
     root_body = read_document(root, ROOT_README, report)
     if root_body is not None:
         check_root_readme(root_body, counts, total, source, report)
-        check_root_readme_versions(root, root_body, version, report)
+        check_point_versions(ROOT_README, root_body, version, report)
+        check_root_readme_versions(root, root_body, report)
 
     agents_body = read_document(root, AGENTS_MD, report)
     if agents_body is not None:
-        check_agents_md(agents_body, version, report)
+        check_point_versions(AGENTS_MD, agents_body, version, report)
 
     # 検査 I（`AGENTS.md`）と検査 J（正本）は別の文書を読む。本文を共有すると、正本の記載が
     # 古いことを `AGENTS.md` の失敗として報告してしまう。
@@ -696,7 +679,7 @@ def main() -> int:
     plugin_body = read_document(root, PLUGIN_README, report)
     if plugin_body is not None:
         check_plugin_readme(plugin_body, counts, skills, version, report)
-        check_plugin_readme_versions(plugin_body, version, report)
+        check_point_versions(PLUGIN_README, plugin_body, version, report)
 
     if report.errors:
         for error in report.errors:
