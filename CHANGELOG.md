@@ -2,12 +2,24 @@
 
 書式は [Keep a Changelog 1.1.0](https://keepachangelog.com/ja/1.1.0/) に、版の付け方は
 [Semantic Versioning](https://semver.org/lang/ja/) に従う。**複数のプラグインを配布するため、
-版の見出しにプラグイン名を含める。** 版が動くのは `ndf` と `playwright-kit` の 2 つである。
+版の見出しにプラグイン名を含める。** 版が動くのは主に `ndf` と `playwright-kit` で、MCP プラグインは変更があった版だけ載せる。
 
 **ここに書くのは「何が変わったか」である。** 「なぜそう変えたか」と、その版で決めた規約は
 `CLAUDE.md` の版ごとの段落に、詳細な経緯は `issues/` の記録と Pull Request にある。
 **開発版（接尾辞の付いた版）は載せない。** `9.8.0` は `9.8.0-dev.1` までしか出ておらず、
 その内容は `10.0.0` で届いている。
+
+## [ndf 10.10.1] - 2026-09-12
+
+### 修正
+
+- Claude Code の起動時に出ていた `hooks.json: unknown key "description" ... ignored` の警告を
+  解消した（#568）。hooks 定義のマッチャーグループ（`hooks.<イベント>[n]`）から、Claude Code が
+  認識しないキーを外した。`ndf` は `PreToolUse[0]` と `SessionStart[0]` の `description`
+- 同じ警告を出していた `mcp-serena` の `SessionStart[0]` の `description` と、`mcp-playwright` の
+  `SessionStart[0]` の `description` / `priority` / `enabled` を外した（#568、mcp-serena 2.0.1 /
+  mcp-playwright 2.0.1）。**Claude Code は版数でキャッシュを分けるため、版を上げないと利用者の
+  手元の実体が入れ替わらない**
 
 ## [ndf 10.10.0] - 2026-09-12
 

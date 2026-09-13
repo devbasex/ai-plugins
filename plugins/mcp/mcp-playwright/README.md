@@ -13,6 +13,12 @@ Playwright MCPを自動的にセットアップし、ブラウザ自動化機能
 - **冪等性**: 既にインストール済みの場合はスキップ（高速起動）
 - **環境変数対応**: PLAYWRIGHT_BROWSERS_PATHで共有キャッシュを利用
 
+## v2.0.1 へ更新するとき
+
+Claude Code の起動時に出ていた `hooks.json: unknown key ... ignored` の警告を消しました。
+hook が実行する内容は変えていません。`claude plugin update mcp-playwright@ai-plugins` のあとに
+Claude Code を起動し直すと反映されます。
+
 ## v2.0.0 へ更新するとき
 
 配布ディレクトリが `plugins/mcp/{shared,claude,codex,kiro}/mcp-playwright/` から
