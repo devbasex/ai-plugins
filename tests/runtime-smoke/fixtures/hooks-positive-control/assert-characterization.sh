@@ -87,6 +87,41 @@ if actual != expected:
   exit 1
 fi
 
+# hooks/list の境界: result.data が 0 件でも応答を受け取ったものとして終了コード 0 を返し、
+# 空配列を欠落やエラーに変えずにそのまま中継する。0 件の合否は呼び出し側が決める。
+cat >"$base/bin/codex" <<'PY'
+#!/usr/bin/env python3
+import json
+import sys
+
+for line in sys.stdin:
+    message = json.loads(line)
+    if message.get("id") == 2:
+        print(json.dumps({"id": 2, "result": {"data": []}}), flush=True)
+        break
+PY
+chmod +x "$base/bin/codex"
+
+rc=0
+PATH="$base/bin:$PATH" python3 "$REPO_ROOT/tests/runtime-smoke/lib/codex-hooks-list.py" \
+  --cwd "$base/cwd" >"$base/hooks-list-empty.stdout" 2>"$base/hooks-list-empty.stderr" || rc=$?
+if [ "$rc" -ne 0 ]; then
+  echo "codex-hooks-list failed on an empty hooks/list result (exit $rc)" >&2
+  cat "$base/hooks-list-empty.stderr" >&2
+  exit 1
+fi
+
+if ! python3 -c "
+import json, sys
+actual = json.load(open('$base/hooks-list-empty.stdout'))
+if actual != {'data': []}:
+    sys.stderr.write(f'unexpected empty hooks/list result: {actual}\n')
+    sys.exit(1)
+"; then
+  echo "codex-hooks-list did not relay the empty data array" >&2
+  exit 1
+fi
+
 # discover_targets の境界: hooks 定義を持つプラグインが 0 件のマーケットプレイスでは
 # 空出力（0 行）を返す。呼び出し元はこの空出力を 0 件として検出する（後段の no-hooks の
 # 経路が確かめる）。ここでは関数そのものを本物の assert-hook-definitions.sh から取り出して
