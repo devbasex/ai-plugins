@@ -51,7 +51,7 @@ Skill の配布は `plugins/ndf/manifests/` が唯一の基準（数と内訳は
 
 ```bash
 /ndf:cross-refactoring 130 --scope src/services --baseline-test "pytest -q"
-/ndf:cross-refactoring 130 --scope src --model codex=gpt-5.5 --model claude=opus-5
+/ndf:cross-refactoring 130 --scope src --model codex=gpt-5.5 --model claude=claude-opus-5
 ```
 
 - `--scope` は必須。提案が発散して PR が肥大するのを防ぐ。**検証にも効く**ので、現状固定テストの置き場所も含める

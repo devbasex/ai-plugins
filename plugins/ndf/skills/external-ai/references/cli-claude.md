@@ -73,7 +73,7 @@ claude には冗長だが害はない。
 ## モデル指定
 
 ```bash
-claude -p --model opus-5 < prompt.md
+claude -p --model claude-opus-5 < prompt.md
 ```
 
 別名（`opus` / `sonnet` / `fable`）と正式名の両方を受け付ける。
