@@ -509,7 +509,7 @@ wf_repo_slug() {
 
 # 控えの置き場所。リポジトリの中には置かない（変更として Pull Request に載るため）。
 wf_state_dir() {
-  local base
+  local base fallback="${TMPDIR:-/tmp}/ndf-stages"
   if [ -n "${CLAUDE_PLUGIN_DATA:-}" ]; then
     base="$CLAUDE_PLUGIN_DATA/stages"
   elif [ -n "${XDG_STATE_HOME:-}" ]; then
@@ -517,13 +517,13 @@ wf_state_dir() {
   elif [ -n "${HOME:-}" ]; then
     base="$HOME/.local/state/ndf/stages"
   else
-    base="${TMPDIR:-/tmp}/ndf-stages"
+    base="$fallback"
   fi
   if mkdir -p "$base" 2>/dev/null && [ -w "$base" ]; then
     printf '%s\n' "$base"
     return 0
   fi
-  base="${TMPDIR:-/tmp}/ndf-stages"
+  base="$fallback"
   mkdir -p "$base" 2>/dev/null || return 1
   printf '%s\n' "$base"
 }
