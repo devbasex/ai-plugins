@@ -207,35 +207,51 @@ PY
   chmod +x "$base/bin/claude"
 }
 
-test_claude_control_silent() {
+assert_claude_diagnostic_scenario() {
+  local scenario="$1"
+  local suffix="$2"
+  local failure_desc="$3"
+  shift 3
+  local expected_diagnostics=("$@")
+
   setup_claude_diagnostic_stub
 
   local rc=0
-  CLAUDE_CHARACTERIZATION_SCENARIO=control-silent \
-  ARTIFACT_DIR="$base/artifacts-control-silent" HOME="$base/home" PATH="$base/bin:$PATH" \
+  CLAUDE_CHARACTERIZATION_SCENARIO="$scenario" \
+  ARTIFACT_DIR="$base/artifacts-$suffix" HOME="$base/home" PATH="$base/bin:$PATH" \
     "$REPO_ROOT/tests/runtime-smoke/assertions/assert-hook-definitions.sh" claude \
-    >"$base/control-silent.stdout" 2>"$base/control-silent.stderr" || rc=$?
-  if [ "$rc" -ne 1 ] || ! grep -Fq "did not report the broken hooks fixture" "$base/control-silent.stderr"; then
-    echo "assert-hook-definitions did not reject a silent positive control (exit $rc)" >&2
-    cat "$base/control-silent.stderr" >&2
+    >"$base/$suffix.stdout" 2>"$base/$suffix.stderr" || rc=$?
+
+  local match_failed=0
+  for pattern in "${expected_diagnostics[@]}"; do
+    if ! grep -Fq "$pattern" "$base/$suffix.stderr"; then
+      match_failed=1
+      break
+    fi
+  done
+
+  if [ "$rc" -ne 1 ] || [ "$match_failed" -ne 0 ]; then
+    echo "$failure_desc (exit $rc)" >&2
+    cat "$base/$suffix.stderr" >&2
     exit 1
   fi
 }
 
-test_claude_plugins_report() {
-  setup_claude_diagnostic_stub
+test_claude_control_silent() {
+  assert_claude_diagnostic_scenario \
+    control-silent \
+    control-silent \
+    "assert-hook-definitions did not reject a silent positive control" \
+    "did not report the broken hooks fixture"
+}
 
-  local rc=0
-  CLAUDE_CHARACTERIZATION_SCENARIO=plugins-report \
-  ARTIFACT_DIR="$base/artifacts-plugins-report" HOME="$base/home" PATH="$base/bin:$PATH" \
-    "$REPO_ROOT/tests/runtime-smoke/assertions/assert-hook-definitions.sh" claude \
-    >"$base/plugins-report.stdout" 2>"$base/plugins-report.stderr" || rc=$?
-  if [ "$rc" -ne 1 ] || ! grep -Fq "claude reported hooks definitions:" "$base/plugins-report.stderr" \
-    || ! grep -Fq "characterization warning" "$base/plugins-report.stderr"; then
-    echo "assert-hook-definitions did not report real plugin hooks diagnostics (exit $rc)" >&2
-    cat "$base/plugins-report.stderr" >&2
-    exit 1
-  fi
+test_claude_plugins_report() {
+  assert_claude_diagnostic_scenario \
+    plugins-report \
+    plugins-report \
+    "assert-hook-definitions did not report real plugin hooks diagnostics" \
+    "claude reported hooks definitions:" \
+    "characterization warning"
 }
 
 test_codex_missing_hooks() {

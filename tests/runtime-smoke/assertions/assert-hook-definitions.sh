@@ -154,11 +154,38 @@ echo "==> hooks definitions ($runtime): ${manifest_names[*]}"
 mapfile -t control < <(discover_targets "$FIXTURE_ROOT" "$runtime")
 IFS=$'\t' read -r control_entry _ control_dir <<<"${control[0]:?positive control fixture has no plugin for $runtime}"
 
+# load_reports <label> <positive|plugins>
+load_reports() {
+  local label="$1"
+  local target="${2:-$label}"
+  case "$runtime" in
+    claude)
+      case "$target" in
+        positive-control|positive)
+          claude_load "$label" "$control_dir"
+          ;;
+        plugins)
+          claude_load "$label" "${dirs[@]}"
+          expected=("${manifest_names[@]}")
+          ;;
+      esac
+      ;;
+    codex)
+      case "$target" in
+        positive-control|positive)
+          codex_load "$label" "$FIXTURE_ROOT" "$control_entry"
+          ;;
+        plugins)
+          codex_load "$label" "$REPO_ROOT" "${entry_names[@]}"
+          expected=("${entry_names[@]}")
+          ;;
+      esac
+      ;;
+  esac
+}
+
 # 陽性対照を先に読ませ、報告を受け取れることを確かめてから本物を読ませる
-case "$runtime" in
-  claude) claude_load positive-control "$control_dir" ;;
-  codex) codex_load positive-control "$FIXTURE_ROOT" "$control_entry" ;;
-esac
+load_reports positive-control
 if [ ! -s "$OUT_DIR/$runtime-positive-control.reports" ]; then
   echo "$runtime $(runtime_version) did not report the broken hooks fixture; the report format may have changed or the image is stale" >&2
   exit 1
@@ -166,16 +193,7 @@ fi
 echo "positive control reported: $(head -n 1 "$OUT_DIR/$runtime-positive-control.reports")"
 
 # Claude Code のログは plugin.json の名前を、Codex の pluginId はマーケットプレイス上の名前を書く
-case "$runtime" in
-  claude)
-    claude_load plugins "${dirs[@]}"
-    expected=("${manifest_names[@]}")
-    ;;
-  codex)
-    codex_load plugins "$REPO_ROOT" "${entry_names[@]}"
-    expected=("${entry_names[@]}")
-    ;;
-esac
+load_reports plugins
 
 status=0
 if [ -s "$OUT_DIR/$runtime-plugins.reports" ]; then
