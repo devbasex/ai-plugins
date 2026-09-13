@@ -322,13 +322,25 @@ def skill_dir_count(root: Path, relative: str, report: Report) -> int | None:
     return sum(1 for child in directory.iterdir() if (child / "SKILL.md").is_file())
 
 
+def read_version_field(path: Path, *, ignore_invalid_json: bool = True) -> str | None:
+    if not path.is_file():
+        return None
+    try:
+        version = json.loads(path.read_text(encoding="utf-8")).get("version")
+    except json.JSONDecodeError:
+        if not ignore_invalid_json:
+            raise
+        return None
+    return version if isinstance(version, str) else None
+
+
 def plugin_version(root: Path, report: Report) -> str | None:
     path = root / PLUGIN_JSON
     if not path.is_file():
         report.add_source(f"{PLUGIN_JSON} が無い（版数を突き合わせる相手）")
         return None
-    version = json.loads(path.read_text(encoding="utf-8")).get("version")
-    if not isinstance(version, str):
+    version = read_version_field(path, ignore_invalid_json=False)
+    if version is None:
         report.add_source(f"{PLUGIN_JSON} に version がない")
         return None
     if not VERSION_VALUE.fullmatch(version):
@@ -346,14 +358,7 @@ def named_plugin_version(root: Path, name: str) -> str | None:
     突き合わせ先が無いことは呼び出し側が食い違いとして扱う。ここで報告しないのは、行に
     書かれた名前そのものを出力へ含めたいためである。
     """
-    path = root / plugin_json_path(name)
-    if not path.is_file():
-        return None
-    try:
-        version = json.loads(path.read_text(encoding="utf-8")).get("version")
-    except json.JSONDecodeError:
-        return None
-    return version if isinstance(version, str) else None
+    return read_version_field(root / plugin_json_path(name))
 
 
 def base_of(version: str) -> tuple[int, int, int]:
