@@ -161,6 +161,16 @@ def test_init_leaves_no_temporary_file(main_repo: Path) -> None:
     assert leftovers == [], leftovers
 
 
+def test_init_rejects_unknown_argument(main_repo: Path) -> None:
+    """現状固定: 未知の引数は 1 で弾かれ、宣言ファイルは作られない。"""
+    result = run(["init", "--bogus"], cwd=main_repo)
+
+    assert result["rc"] == 1, result
+    assert result["out"] == "", result
+    assert result["err"].strip(), result
+    assert not declaration(main_repo).exists(), "引数解析で弾かれたときは宣言を作らない"
+
+
 # --- check: 宣言の状態を終了コードで返す（#527） ------------------------------
 
 MISSING_LINE = "宣言ファイル: なし。`worktree-setup.sh init` で作れます"
