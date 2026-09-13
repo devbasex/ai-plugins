@@ -171,6 +171,15 @@ def test_init_rejects_unknown_argument(main_repo: Path) -> None:
     assert not declaration(main_repo).exists(), "引数解析で弾かれたときは宣言を作らない"
 
 
+def test_unknown_subcommand_prints_usage(main_repo: Path) -> None:
+    """現状固定: 知らない副コマンドは 1 で弾かれ、使い方は標準エラーへ出す。"""
+    result = run(["bogus"], cwd=main_repo)
+
+    assert result["rc"] == 1, result
+    assert result["out"] == "", result
+    assert result["err"].strip(), result
+
+
 # --- check: 宣言の状態を終了コードで返す（#527） ------------------------------
 
 MISSING_LINE = "宣言ファイル: なし。`worktree-setup.sh init` で作れます"
