@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -54,6 +55,49 @@ def hint_words(stderr: str) -> list[str]:
 
 def assert_no_bare_cd_error(proc: subprocess.CompletedProcess) -> None:
     assert "cd:" not in proc.stdout + proc.stderr
+
+
+@pytest.mark.parametrize(
+    ("missing_path", "extra_args"),
+    [
+        (Path("skills"), ()),
+        (Path("manifests/kiro-skills.txt"), ()),
+        (Path("dev.kiro/prompts/codex.md"), ("--with-codex",)),
+    ],
+)
+def test_missing_prerequisite_stops_with_path_error(
+    tmp_path: Path, missing_path: Path, extra_args: tuple[str, ...]
+) -> None:
+    # 現状固定: 必須パスの種類や検査位置によらず、同じ形式のエラー 1 行と
+    # 終了コード 1 で停止する。
+    plugin_dir = tmp_path / "ndf"
+    shutil.copytree(INSTALLER.parents[1], plugin_dir)
+    missing = plugin_dir / missing_path
+    if missing.is_dir():
+        shutil.rmtree(missing)
+    else:
+        missing.unlink()
+
+    project = tmp_path / "project"
+    project.mkdir()
+    env = {**os.environ, "HOME": str(tmp_path)}
+    proc = subprocess.run(
+        [
+            "bash",
+            str(plugin_dir / "dev.kiro" / "install.sh"),
+            "--project",
+            str(project),
+            "--dry-run",
+            "--yes",
+            *extra_args,
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert proc.returncode == 1
+    assert proc.stderr.splitlines() == [f"ERROR: {missing} が見つかりません"]
 
 
 def test_project_without_path_stops_with_error(tmp_path: Path) -> None:
@@ -380,4 +424,3 @@ def test_ndf_policies_skill_migration(tmp_path: Path, case: str) -> None:
     source_skill = ROOT / "plugins" / "ndf" / "skills" / "ndf-policies" / "SKILL.md"
     source_body = source_skill.read_text(encoding="utf-8").split("\n---\n", 1)[1].strip("\n")
     assert source_body in steering_content
-

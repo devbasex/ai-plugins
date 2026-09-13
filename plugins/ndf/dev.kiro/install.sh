@@ -105,35 +105,28 @@ STEERING_FILE="$KIRO_DIR/steering/ndf-policies.md"
 AGENT_FILE="$KIRO_DIR/agents/$AGENT_NAME.json"
 LEGACY_AGENT_FILE="$KIRO_DIR/agents/default.json"
 
+require_path() {
+  local test_flag="$1" path="$2"
+  [ "$test_flag" "$path" ] || {
+    echo "ERROR: $path が見つかりません" >&2
+    exit 1
+  }
+}
+
 echo "=== NDF Plugin Installer for Kiro CLI ==="
 echo "  スコープ: $SCOPE ($KIRO_DIR)"
 
-if [ ! -d "$PLUGIN_SKILLS_DIR" ]; then
-  echo "ERROR: $PLUGIN_SKILLS_DIR が見つかりません" >&2
-  exit 1
-fi
-if [ ! -f "$SKILL_MANIFEST" ]; then
-  echo "ERROR: $SKILL_MANIFEST が見つかりません" >&2
-  exit 1
-fi
-if [ ! -f "$MANIFEST_FILE" ]; then
-  echo "ERROR: $MANIFEST_FILE が見つかりません" >&2
-  exit 1
-fi
+require_path -d "$PLUGIN_SKILLS_DIR"
+require_path -f "$SKILL_MANIFEST"
+require_path -f "$MANIFEST_FILE"
 NDF_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$MANIFEST_FILE")"
 if [ -z "$NDF_VERSION" ]; then
   echo "ERROR: $MANIFEST_FILE から版数を読み取れません" >&2
   exit 1
 fi
 
-if [ ! -f "$TEMPLATE_FILE" ]; then
-  echo "ERROR: $TEMPLATE_FILE が見つかりません" >&2
-  exit 1
-fi
-if [ ! -f "$POLICY_SKILL_FILE" ]; then
-  echo "ERROR: $POLICY_SKILL_FILE が見つかりません" >&2
-  exit 1
-fi
+require_path -f "$TEMPLATE_FILE"
+require_path -f "$POLICY_SKILL_FILE"
 
 # --- Step 1: Create symlinks in <scope>/skills/ ---
 echo "Skills シンボリックリンクを作成中..."
@@ -220,9 +213,8 @@ while IFS= read -r prompt_file; do
   echo "  prompt: ${prompt_name%.md}"
 done < <(find "$PLUGIN_PROMPTS_DIR" -maxdepth 1 -type f -name '*.md' | sort)
 
-if [ "$WITH_CODEX" = true ] && [ ! -f "$PLUGIN_PROMPTS_DIR/codex.md" ]; then
-  echo "ERROR: $PLUGIN_PROMPTS_DIR/codex.md が見つかりません" >&2
-  exit 1
+if [ "$WITH_CODEX" = true ]; then
+  require_path -f "$PLUGIN_PROMPTS_DIR/codex.md"
 fi
 
 if [ "$WITH_SLACK" = true ]; then echo "Slack通知: 有効"; else echo "Slack通知: 無効 (--with-slack で有効化)"; fi
