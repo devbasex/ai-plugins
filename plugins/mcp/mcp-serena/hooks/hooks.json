@@ -3,7 +3,6 @@
   "hooks": {
     "SessionStart": [
       {
-        "description": "Remind to activate Serena project",
         "hooks": [
           {
             "type": "command",

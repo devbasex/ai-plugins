@@ -42,6 +42,9 @@ REQUIRED_COMMANDS: dict[str, tuple[str, ...]] = {
     # `test_prepare_worktrees.py` が `prepare-worktrees.sh` を bash で起動し、
     # そのスクリプトが `jq` を要求する。残りのテストは `git` だけを使う。
     "plugins/ndf/skills/cross-refactoring/tests": ("bash", "jq", "git"),
+    # `launch-reviewer.sh` と `rotate-pr.sh` を bash で起動する束がある。
+    # どちらも内部で `jq` を呼ぶ。
+    "plugins/ndf/skills/cross-review/tests": ("bash", "jq", "git"),
 }
 
 # 読み飛ばしを選ぶ指定。**既定は失敗**である。読み飛ばしたい実行環境のために残すが、

@@ -165,6 +165,85 @@ def _plan_mode_of(plan_file: Optional[str]) -> str:
     return PLAN_FILE if str(plan_file).strip() else PLAN_NONE
 
 
+def _build_initial_state(
+    args: argparse.Namespace,
+    repo: str,
+    base_branch: str,
+    head_branch: str,
+    root: pathlib.Path,
+    work: pathlib.Path,
+    tmp_dir: pathlib.Path,
+    host: str,
+    detection: str,
+    runtimes: list[str],
+    impl_capable: list[str],
+    model_spec: dict[str, Optional[str]],
+    auth: dict[str, dict[str, Any]],
+    baseline: dict[str, Any],
+) -> dict[str, Any]:
+    """確定済みの材料から、初期の状態を組み立てて返す。
+
+    **判断はここでは行わない。** ホストの検出・母集合の確定・認証・Pull Request の
+    メタデータ・作業ディレクトリの用意・着手前のテストは、いずれも呼び出し側
+    （`cmd_init`）が済ませたうえで値として渡す。この関数が持つのは、状態ファイルに
+    何という鍵で何を残すかだけである。
+    """
+    return {
+        "id": args.pr,
+        "started_at": statefile.now(),
+        "repo": repo,
+        "current_pr": args.pr,
+        "base_branch": base_branch,
+        "head_branch": head_branch,
+        "worktree_root": str(root),
+        "worktrees": {"work": str(work), **{r: str(root / r) for r in runtimes}},
+        "tmp_dir": str(tmp_dir),
+        "target_scope": list(args.scope),
+        "host": host,
+        "host_detection": detection,
+        "runtimes": runtimes,
+        "impl_capable": impl_capable,
+        "models": model_spec,
+        "auth": auth,
+        # 提案プロンプトへ許容値をそのまま列挙するために持たせる。
+        # 定義は検証側（この CLI）にあり、状態ファイル経由で起動側へ渡す。
+        "vocabulary": vocabulary(),
+        # テスト整備ラウンドの語彙も同じ経路で渡す。**新しい語彙は作らず**、
+        # 既存の 3 本の参照が持つ分類をそのまま列挙する（決定 9）。
+        "test_vocabulary": test_vocabulary(),
+        "skills": {"required": list(REQUIRED_SKILLS)},
+        "max_outer_rounds": args.max_outer_rounds,
+        "max_test_rounds": args.max_test_rounds,
+        "max_fix_rounds": args.max_fix_rounds,
+        "max_items_per_round": args.max_items_per_round,
+        # 最終ゲートで手元のテストの代わりに見る検査の名前。**排他である**
+        # （指定があれば手元のテストを実行しない）。
+        "ci_check": args.ci_check,
+        # 最終ゲートの分かれ道。**単独起動が既定である。**
+        "workflow_step": bool(args.workflow_step),
+        # **最初に開くのはテスト整備ラウンドである。** テストが乏しい箇所では、
+        # 「テストが通ること」を検証に使えない（Step 5 の判定はテストで決まる）。
+        "round_kind": TEST,
+        "severity_threshold": args.severity_threshold,
+        "baseline_test": baseline,
+        # 生成物の同期は**進行側の責務**。push の直前に実行する。
+        "sync_command": args.sync_command,
+        # **改修計画の既定は Pull Request のコメント 1 件である**（#436 決定 6）。
+        # `--plan-file` を明示したときだけファイルにし、空文字なら記録しない。
+        "plan_mode": _plan_mode_of(args.plan_file),
+        "plan_file": normalize_plan_file(args.plan_file),
+        # 編集する先のコメント。**印で引き当て直せる**ので、失っても積み増さない。
+        "plan_comment": None,
+        "test_timeout": args.test_timeout,
+        "outer_round": 0,
+        "phase": "init",
+        "rounds": [],
+        "items": [],
+        "deferred_items": [],
+        "final": None,
+    }
+
+
 def cmd_init(args: argparse.Namespace) -> None:
     """Step 0 — ホストと母集合を確定し、作業ディレクトリ root と状態を用意する。
 
@@ -226,60 +305,10 @@ def cmd_init(args: argparse.Namespace) -> None:
 
     baseline = _run_baseline_test(args.baseline_test, work, args.test_timeout)
 
-    state: dict[str, Any] = {
-        "id": args.pr,
-        "started_at": statefile.now(),
-        "repo": repo,
-        "current_pr": args.pr,
-        "base_branch": base_branch,
-        "head_branch": head_branch,
-        "worktree_root": str(root),
-        "worktrees": {"work": str(work), **{r: str(root / r) for r in runtimes}},
-        "tmp_dir": str(tmp_dir),
-        "target_scope": list(args.scope),
-        "host": host,
-        "host_detection": detection,
-        "runtimes": runtimes,
-        "impl_capable": impl_capable,
-        "models": model_spec,
-        "auth": auth,
-        # 提案プロンプトへ許容値をそのまま列挙するために持たせる。
-        # 定義は検証側（この CLI）にあり、状態ファイル経由で起動側へ渡す。
-        "vocabulary": vocabulary(),
-        # テスト整備ラウンドの語彙も同じ経路で渡す。**新しい語彙は作らず**、
-        # 既存の 3 本の参照が持つ分類をそのまま列挙する（決定 9）。
-        "test_vocabulary": test_vocabulary(),
-        "skills": {"required": list(REQUIRED_SKILLS)},
-        "max_outer_rounds": args.max_outer_rounds,
-        "max_test_rounds": args.max_test_rounds,
-        "max_fix_rounds": args.max_fix_rounds,
-        "max_items_per_round": args.max_items_per_round,
-        # 最終ゲートで手元のテストの代わりに見る検査の名前。**排他である**
-        # （指定があれば手元のテストを実行しない）。
-        "ci_check": args.ci_check,
-        # 最終ゲートの分かれ道。**単独起動が既定である。**
-        "workflow_step": bool(args.workflow_step),
-        # **最初に開くのはテスト整備ラウンドである。** テストが乏しい箇所では、
-        # 「テストが通ること」を検証に使えない（Step 5 の判定はテストで決まる）。
-        "round_kind": TEST,
-        "severity_threshold": args.severity_threshold,
-        "baseline_test": baseline,
-        # 生成物の同期は**進行側の責務**。push の直前に実行する。
-        "sync_command": args.sync_command,
-        # **改修計画の既定は Pull Request のコメント 1 件である**（#436 決定 6）。
-        # `--plan-file` を明示したときだけファイルにし、空文字なら記録しない。
-        "plan_mode": _plan_mode_of(args.plan_file),
-        "plan_file": normalize_plan_file(args.plan_file),
-        # 編集する先のコメント。**印で引き当て直せる**ので、失っても積み増さない。
-        "plan_comment": None,
-        "test_timeout": args.test_timeout,
-        "outer_round": 0,
-        "phase": "init",
-        "rounds": [],
-        "items": [],
-        "deferred_items": [],
-        "final": None,
-    }
+    state = _build_initial_state(
+        args, repo, base_branch, head_branch, root, work, tmp_dir,
+        host, detection, runtimes, impl_capable, model_spec, auth, baseline,
+    )
     # GitHub は自分の Pull Request への `APPROVE` と `REQUEST_CHANGES` を
     # `HTTP 422` で拒む。判定はそのまま結果ファイルへ残し、**投稿の event だけ**
     # を倒す。収束判定は結果ファイルの判定を見るので、倒しても進行は変わらない。
@@ -477,6 +506,11 @@ def cmd_start_round(args: argparse.Namespace) -> None:
     statefile.emit(
         ROUND=round_no,
         ROUND_KIND=kind,
+        # **母集合は繰り返しの中でも返す**（#518-1）。`init` だけが返す形では、
+        # 状態ファイルから再開する経路と、骨組みを抜粋して写す経路の両方で
+        # 未定義になる。出所は `init` と同じ状態ファイルの `runtimes` である。
+        RUNTIMES=" ".join(state["runtimes"]),
+        RUNTIMES_CSV=",".join(state["runtimes"]),
         # 提案に使う雛形の名前。**結果ファイルの名前は種類で変えない**
         # （ラウンド番号は通しなので衝突せず、監視の雛形をそのまま使える）。
         PROPOSE_PHASE="propose-tests" if kind == TEST else "propose",

@@ -2,12 +2,136 @@
 
 書式は [Keep a Changelog 1.1.0](https://keepachangelog.com/ja/1.1.0/) に、版の付け方は
 [Semantic Versioning](https://semver.org/lang/ja/) に従う。**複数のプラグインを配布するため、
-版の見出しにプラグイン名を含める。** 版が動くのは `ndf` と `playwright-kit` の 2 つである。
+版の見出しにプラグイン名を含める。** 版が動くのは主に `ndf` と `playwright-kit` で、MCP プラグインは変更があった版だけ載せる。
 
 **ここに書くのは「何が変わったか」である。** 「なぜそう変えたか」と、その版で決めた規約は
 `CLAUDE.md` の版ごとの段落に、詳細な経緯は `issues/` の記録と Pull Request にある。
 **開発版（接尾辞の付いた版）は載せない。** `9.8.0` は `9.8.0-dev.1` までしか出ておらず、
 その内容は `10.0.0` で届いている。
+
+## [ndf 10.10.1] - 2026-09-12
+
+### 修正
+
+- Claude Code の起動時に出ていた `hooks.json: unknown key "description" ... ignored` の警告を
+  解消した（#568）。hooks 定義のマッチャーグループ（`hooks.<イベント>[n]`）から、Claude Code が
+  認識しないキーを外した。`ndf` は `PreToolUse[0]` と `SessionStart[0]` の `description`
+- 同じ警告を出していた `mcp-serena` の `SessionStart[0]` の `description` と、`mcp-playwright` の
+  `SessionStart[0]` の `description` / `priority` / `enabled` を外した（#568、mcp-serena 2.0.1 /
+  mcp-playwright 2.0.1）。**Claude Code は版数でキャッシュを分けるため、版を上げないと利用者の
+  手元の実体が入れ替わらない**
+
+## [ndf 10.10.0] - 2026-09-12
+
+### 追加
+
+- **指摘に根拠と反証条件を求める規約**（#156）。`cross-review` の指摘は位置・再現の筋道・
+  反証条件の 3 項目を持ち、揃ったものだけが `has_evidence` になる。`docs/06-evidence.md` を
+  新設し、根拠の求め方・独立発見・走らせる順序・区分・効果の測定を 1 本にまとめた
+- **独立発見の規約**（#156）。担当が参照してよい既存コメントを起動時のスナップショットに
+  限った。同じラウンドで先に投稿した担当の指摘は渡さない。**同じ指摘が 2 者から出たことに
+  意味があるのは、互いを見ていない場合だけである**
+- **反証と実行検証**（#156）。収束ループへ Step 2.5 を足した。`state.py verify-findings` と
+  `scripts/critique.sh` / `scripts/critique-round.sh` を新設し、レビュー担当が互いの指摘へ
+  支持・反証を出す。`--verify-command` を渡したラウンドは、そのコマンドを実行して再現を
+  確かめる
+- **証拠ベース集約**（#156）。指摘を `verified_blocking` / `verified_non_blocking` /
+  `rejected` / `needs_human_judgment` / `insufficient_evidence` の 5 区分へ集約する。
+  収束の判定が数えるのは `verified_blocking` と `needs_human_judgment` の 2 つだけで、
+  棄却した指摘はラウンドを増やさない
+- `--verify-command` / `--verify-exit-code` を `cross-review` へ足した（#156）。渡さなければ
+  実行検証を行わない。再現とみなす終了コードは既定 `1` で、**「0 でない」を再現としない**
+- **却下した指摘を per-item で残す**（#156）。`rejected_findings` へ位置と理由を蓄積し、
+  次のラウンドで同じ論点が再提出されたときに突き合わせる
+- **効果の測定**（#156）。`scripts/measure.py` を新設した。状態ファイル 1 つから
+  `single` / `majority` / `proposed` / `oracle` の 4 方式を読み、費用と収束の様子を出す。
+  収束ループの外にあり、手順の途中では呼ばない
+- **コンテキストの窓を工程の単位として扱う規約**（#546）。`development-workflow` へ
+  `references/context-window.md` を新設し、切ってよい点・委譲する対象・残量の見方を定めた。
+  工程表の行は増やしていない
+
+### 変更
+
+- `fix` が返す `rejected` の各要素が `path` / `line` / `severity` を持つ（#156）。位置が無いと、
+  却下した論点が再提出されたときに同じ指摘だと判定できない（実測では同じ論点が 5 ラウンド
+  続けて提出された）
+- `release` の手順へ、出た版の判断を開発の指示書から退避する規約を足した（#551）。指示書に
+  残すと、その内容を全セッションと全サブエージェントが毎回読む
+- `cross-review` の `SKILL.md` から `<worktree-base>` の解決順を `docs/04-contracts.md` へ
+  移した（#156）
+- `CLAUDE.md` の v10.0.0〜v10.5.1 の判断を `docs/ndf-version-decisions.md` へ移した（#551）。
+  `CLAUDE.md` は 333 行 → 79 行。参照から `@` を外し、毎回の読み込みから外した
+- 計画と設計 9 本 2207 行を `docs/specifications/cross-review-evidence-based.md` 464 行の
+  確定仕様 1 本へまとめた（#156）
+
+## [ndf 10.9.1] - 2026-09-09
+
+### 修正
+
+- **`refactor.py start-round` が提案・レビューの母集合を返す**（#518）。`RUNTIMES` と
+  `RUNTIMES_CSV` を足した。`init` だけが返していたため、状態ファイルから再開する経路と、
+  骨組みを抜粋して写す経路で `unbound variable` になっていた
+- **`--scope` の関門が、名前で当たらないときだけ実体を 1 段だけ走査する**（#518）。
+  `tests/` を実体として持つ親ディレクトリが通るようになった。返す値は当たった置き場所
+  そのもので、渡された親ではない
+- **進行側の push が credential helper の不全で止まらない**（#524）。失敗したときに
+  `gh auth git-credential` へ退避して 1 度だけ再試行する。既定の経路は変えていない
+
+### 追加
+
+- `plugins/ndf/scripts/lib/git-credential.sh` を新設した（#524）。退避に使う `git` の
+  オプションを 1 か所で持つ
+- `scripts/check-skill-shell-vars.py` を新設した（#518）。手順書の bash が参照する変数が、
+  その行より前のコマンドで得られるかを検査する。継続的統合のジョブは 14 個になった
+- `pr` / `fix` / `cross-refactoring` の `SKILL.md` へ退避の手を書いた（#524）
+
+### 変更
+
+- `refactor_lib` の `is_test_location` / `test_locations` が走査の起点を受け取る（#518）
+
+## [ndf 10.9.0] - 2026-09-09
+
+### 追加
+
+- **`development-workflow` に `documentation` モードを足した**（#507）。工程表が 18 行 × 5 列に
+  なり、`素材の収集と出典の確定`（`設計` の後）と `体裁レビュー`（`配布` の後）の 2 行が増えた。
+  判定の順序は `operation` → `documentation` → `standard` → `legacy-refactor` → `light`
+- `development-workflow/references/document-types.md` を新設した（#507）。6 タイプ（提案・企画 /
+  決裁・稟議 / 定例報告 / 指標定義 / 運用マニュアル / 説明・研修）の判定条件と境界事例を持つ
+- `development-workflow/references/document-destinations.md` を新設した（#508）。文書の提出先の
+  宣言（`.ndf/document.json`）の形と、本番の提出先ごとに対の下書き先を求める契約を持つ
+- **`document-systems` を新設した**（#515）。Google Drive / Notion / Confluence / SharePoint /
+  リポジトリ自身の 5 システムを 1 システム 1 ファイルで持つ。各ファイルは同じ 8 項目
+  （認証 / 取り込みの手段と取れないもの / 投稿の手段 / 本文の表現 / 版の扱い / 図の扱い /
+  描画して見る手段 / 既知の失敗）を持つ
+- `document-systems/references/import.md` を新設した（#514）。外部の文書を取り込む 3 つの用途、
+  正規化、格納先、継続的統合で動かすかを持つ
+- **`document-sources` を新設した**（#509）。出所として残す 4 項目（場所 / 位置 / 時点 / 手段）と、
+  実績 / 見込み / 概算の区別を持つ。取得の手段は持たない
+- **`document-drafting` を新設した**（#510）。6 タイプの参照を持ち、各参照は同じ 4 つの節
+  （必ず書く節 / 書かない節 / 読み手が最初に問うこと / よくある欠落）を持つ
+- **`layout-review` を新設した**（#513）。生成物を描画して版面を見る。機械で測る項目と人が画像を
+  見る項目を分け、**描画できない・画像を読めないときは止める**
+- `release` に出力の形を 4 つ足した（#511）。`form-slide.md` / `form-document.md` /
+  `form-spreadsheet.md` / `form-page.md`。**形の参照はシステム固有の手順を持たない**
+- `design` に体裁設計を足した（#513）。`references/layout-slide.md` / `layout-document.md` /
+  `layout-spreadsheet.md` / `layout-page.md` の 4 本
+- `requirements-design/references/document-requirements.md` を新設した（#509）。読み手・目的・
+  読み手に求める判断を受け入れ条件として書く形
+
+### 変更
+
+- `workflow-common.sh` の `WF_MODES` が 5 値、`WF_STAGE_MATRIX` が 18 行 × 5 列、
+  `WF_MODE_HEIGHT` が 5 値になった（#507）。`wf_stage_class` が 5 列目を読む
+- `projects-common.sh` の `PJ_STAGES` が 18 値、`PJ_MODES` が 5 値になった（#512）。
+  **工程名の並びを持つ箇所が 5 つになり、すべて一致する**
+- `quality-gates` のモード別の表へ `documentation` の行を足した（#509）。必須の段は 3 で、
+  追加で**事実確認**（書かれた値と出典の突き合わせ）を求める。**事実確認は書いた本人だけでは
+  完了しない**（`cross-review` のレビュワーが行う）
+- 承認の 2 つの関門へ文書での意味（企画承認 / 制作物承認）を写像した（#508）。**関門は 2 つの
+  ままで、`WF_APPROVAL_LABEL` と `WF_DESIGN_PREFIX` は変えていない**
+- 配布 Skill が 41 / 40 / 39 / 39 から **45 / 44 / 43 / 43** になった
+  （Claude Code / Kiro CLI / Codex / agy）
 
 ## [ndf 10.8.0] - 2026-09-08
 
