@@ -1155,6 +1155,69 @@ wt_extract_write_target() {
     printf '%s\n' "$(wt_normalize_path "$1" "$cwd")"
     found=1
   }
+  # sed の被演算子から、in-place で書き換えられるファイルをすべて拾う。引数は
+  # `sed` の語の添字。`-i` / `--in-place` があるときだけ書き込み先として出す。
+  # `-e` / `-f` が現れなければ、最初の被演算子がスクリプトで残りがファイルである。
+  _wt_extract_sed_targets() {
+    local start=$1 j2 target
+    local has_inplace=0 seen_script=0 skip_next=0
+    local -a files=()
+    for ((j2 = start + 1; j2 < n; j2++)); do
+      if [ "$skip_next" = 1 ]; then skip_next=0; continue; fi
+      if _wt_is_separator "${words[j2]}"; then break; fi
+      case "${words[j2]}" in
+        --in-place|--in-place=*) has_inplace=1 ;;
+        -e|-f|--expression|--file) seen_script=1; skip_next=1 ;;
+        --expression=*|--file=*) seen_script=1 ;;
+        # `-es/a/b/` のように空白を挟まずスクリプトを続ける形もある。
+        # 見落とすと、最初のファイルをスクリプトと取り違える。
+        -e*|-f*) seen_script=1 ;;
+        --) ;;
+        -*)
+          if [[ ${words[j2]} =~ ^-[a-zA-Z]*i([a-zA-Z]*|\..*)$ ]]; then
+            has_inplace=1
+          fi
+          ;;
+        *)
+          if [ "$seen_script" = 0 ]; then
+            seen_script=1
+          else
+            files+=("${words[j2]}")
+          fi
+          ;;
+      esac
+    done
+    if [ "$has_inplace" = 1 ]; then
+      for target in "${files[@]+"${files[@]}"}"; do
+        _emit "$target"
+      done
+    fi
+  }
+  # cp / mv の被演算子から宛先を拾う。引数は `cp` / `mv` の語の添字。既定では
+  # 最後の被演算子が宛先だが、`-t <ディレクトリ>` を付けると宛先が先に来て、
+  # 後ろの被演算子はすべて複製元になる。
+  _wt_extract_cp_mv_target() {
+    local start=$1 j2
+    local dest="" target_dir="" take_next=0
+    for ((j2 = start + 1; j2 < n; j2++)); do
+      if [ "$take_next" = 1 ]; then
+        target_dir=${words[j2]}
+        take_next=0
+        continue
+      fi
+      if _wt_is_separator "${words[j2]}"; then break; fi
+      case "${words[j2]}" in
+        -t|--target-directory) take_next=1 ;;
+        --target-directory=*) target_dir=${words[j2]#--target-directory=} ;;
+        # `-t<ディレクトリ>` のように空白を挟まない形もある。
+        -t*) target_dir=${words[j2]#-t} ;;
+        -*) continue ;;
+        *) dest=${words[j2]} ;;
+      esac
+    done
+    [ -n "$target_dir" ] && dest=$target_dir
+    _emit "$dest"
+  }
 
   for ((i = 0; i < n; i++)); do
     w=${words[i]}
@@ -1550,68 +1613,18 @@ wt_extract_write_target() {
         ;;
       sed)
         # in-place の指定があるとき、操作対象のファイルをすべて拾う。
-        # `-e` / `-f` が現れなければ、最初の被演算子がスクリプトで残りがファイル。
-        local has_inplace=0 seen_script=0 skip_next=0
-        local -a files=()
-        for ((j = i + 1; j < n; j++)); do
-          if [ "$skip_next" = 1 ]; then skip_next=0; continue; fi
-          if _wt_is_separator "${words[j]}"; then break; fi
-          case "${words[j]}" in
-            --in-place|--in-place=*) has_inplace=1 ;;
-            -e|-f|--expression|--file) seen_script=1; skip_next=1 ;;
-            --expression=*|--file=*) seen_script=1 ;;
-            # `-es/a/b/` のように空白を挟まずスクリプトを続ける形もある。
-            # 見落とすと、最初のファイルをスクリプトと取り違える。
-            -e*|-f*) seen_script=1 ;;
-            --) ;;
-            -*)
-              if [[ ${words[j]} =~ ^-[a-zA-Z]*i([a-zA-Z]*|\..*)$ ]]; then
-                has_inplace=1
-              fi
-              ;;
-            *)
-              if [ "$seen_script" = 0 ]; then
-                seen_script=1
-              else
-                files+=("${words[j]}")
-              fi
-              ;;
-          esac
-        done
-        if [ "$has_inplace" = 1 ]; then
-          for target in "${files[@]+"${files[@]}"}"; do
-            _emit "$target"
-          done
-        fi
+        _wt_extract_sed_targets "$i"
         ;;
       cp|mv)
         # 既定では最後の被演算子が宛先だが、`-t <ディレクトリ>` を付けると
         # 宛先が先に来て、後ろの被演算子はすべて複製元になる。
-        local dest="" target_dir="" take_next=0
-        for ((j = i + 1; j < n; j++)); do
-          if [ "$take_next" = 1 ]; then
-            target_dir=${words[j]}
-            take_next=0
-            continue
-          fi
-          if _wt_is_separator "${words[j]}"; then break; fi
-          case "${words[j]}" in
-            -t|--target-directory) take_next=1 ;;
-            --target-directory=*) target_dir=${words[j]#--target-directory=} ;;
-            # `-t<ディレクトリ>` のように空白を挟まない形もある。
-            -t*) target_dir=${words[j]#-t} ;;
-            -*) continue ;;
-            *) dest=${words[j]} ;;
-          esac
-        done
-        [ -n "$target_dir" ] && dest=$target_dir
-        _emit "$dest"
+        _wt_extract_cp_mv_target "$i"
         ;;
     esac
   done
 
   unset -f _emit _push_group _pop_group _push_subshell _pop_subshell _or_group_exits \
-    _or_exit_redirs _close_function_body
+    _or_exit_redirs _close_function_body _wt_extract_sed_targets _wt_extract_cp_mv_target
   [ "$found" = 1 ] || return 1
 }
 
