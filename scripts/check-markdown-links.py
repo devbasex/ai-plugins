@@ -78,11 +78,23 @@ def resolve_document(source: Path, path_part: str) -> Path:
     return (source.parent / unquote(path_part)).resolve()
 
 
-def target_path(source: Path, raw_target: str) -> Path | None:
+def parse_target(raw_target: str) -> tuple[str, str, bool]:
+    """Split a raw link target into its path part, fragment, and skip flag.
+
+    The flag is `should_skip` applied to the whole stripped target, matching
+    the check both callers make on the same value. Callers decide when the
+    flag applies: `target_path` always honours it, while `anchor_refs` honours
+    it only when a path part is present.
+    """
     target = strip_title(raw_target)
-    if should_skip(target):
+    path_part, _sep, fragment = target.partition("#")
+    return path_part, fragment, should_skip(target)
+
+
+def target_path(source: Path, raw_target: str) -> Path | None:
+    path_part, _fragment, skip = parse_target(raw_target)
+    if skip:
         return None
-    path_part = target.split("#", 1)[0]
     if not path_part:
         return None
     return resolve_document(source, path_part)
@@ -168,11 +180,10 @@ def anchor_refs(text: str) -> list[tuple[str, str, str]]:
     """(path part, fragment, raw target) for every link carrying a fragment."""
     refs: list[tuple[str, str, str]] = []
     for raw in link_targets(text):
-        target = strip_title(raw)
-        path_part, sep, fragment = target.partition("#")
-        if not sep or not fragment:
+        path_part, fragment, skip = parse_target(raw)
+        if not fragment:
             continue
-        if path_part and should_skip(target):
+        if path_part and skip:
             continue
         refs.append((path_part, fragment, raw))
     return refs

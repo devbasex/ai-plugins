@@ -20,6 +20,15 @@ REPO = Path(__file__).resolve().parents[2]
 CHECK = REPO / "scripts" / "check-markdown-links.py"
 
 
+def load_module():
+    """スクリプト名が `-` を含み import できないため動的に読み込む。"""
+    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def run(root: Path) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["python3", str(CHECK), "--root", str(root)],
@@ -149,10 +158,7 @@ def test_unclosed_backtick_run_does_not_hide_link(tmp_path: Path) -> None:
 )
 def test_strip_inline_code(line: str, expected: str) -> None:
     """#543: インラインコードの範囲を空白 1 つへ置き換える。"""
-    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = load_module()
 
     assert module.strip_inline_code(line) == expected
 
@@ -262,10 +268,7 @@ def test_link_targets_extracts_html_and_excludes_images() -> None:
     `<a href="...">` を抽出し、画像リンク記法 `![alt](...)` は除外する。
     抽出は Markdown リンクが先、インライン HTML が後の順に並ぶ。
     """
-    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = load_module()
 
     text = (
         "標準リンク [a](std.md) と "
@@ -287,10 +290,7 @@ def test_link_targets_returns_empty_list_for_plain_text_and_empty_string() -> No
     リンク記法（Markdown または HTML）を含まないテキストや空文字列に対して、
     link_targets が空リストを返すことを確認する。
     """
-    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = load_module()
 
     assert module.link_targets("") == []
     assert module.link_targets("リンク記法を含まない通常のプレーンテキスト") == []
@@ -311,19 +311,13 @@ def test_link_targets_returns_empty_list_for_plain_text_and_empty_string() -> No
 )
 def test_strip_title_current_behavior(target: str, expected: str) -> None:
     """strip_title の山括弧・タイトル除去の現状を固定する（R1-005）。"""
-    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = load_module()
 
     assert module.strip_title(target) == expected
 
 
 def test_should_skip() -> None:
-    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = load_module()
 
     assert module.should_skip("") is True
     assert module.should_skip("/path") is True
@@ -340,10 +334,7 @@ def test_heading_anchors_matches_levels_and_skips_non_headings(tmp_path: Path) -
     見出しでない行（空行・通常テキスト・`#` を空白なしで始める行・`#` 7 個以上の行）は
     `HEADING_RE.match` が None を返して除外される。
     """
-    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = load_module()
 
     body = (
         "# Level One\n"
@@ -378,10 +369,7 @@ def test_anchor_refs_empty_or_missing_fragment_skipped() -> None:
     'file.md#' や '#' のように sep は存在するが fragment が空のリンク、
     および 'file.md' のように sep 自体が存在しないリンクはスキップされ空リストを返す。
     """
-    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = load_module()
 
     assert module.anchor_refs("[x](file.md#)\n") == []
     assert module.anchor_refs("[x](#)\n") == []
@@ -390,10 +378,7 @@ def test_anchor_refs_empty_or_missing_fragment_skipped() -> None:
 
 def test_anchor_refs_extracts_same_and_relative_document_fragments() -> None:
     """同一文書と相対文書のアンカー抽出の現状を固定する（R1-001）。"""
-    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = load_module()
 
     text = "[同一文書](#sec)\n[相対文書](doc.md#other-sec)\n"
 
@@ -405,10 +390,7 @@ def test_anchor_refs_extracts_same_and_relative_document_fragments() -> None:
 
 def test_anchor_refs_skips_external_and_absolute_path_fragments() -> None:
     """スキップ対象のパスを持つアンカー参照の現状を固定する（R1-001）。"""
-    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = load_module()
 
     text = (
         "[外部](https://example.com/doc.md#sec)\n"
@@ -426,10 +408,7 @@ def test_heading_anchors_collision_with_explicit_numbered_heading() -> None:
     探索して解決する。明示的な `## 手順-1` を先頭に置くことで、2 つ目の `## 手順` が
     `手順` → `手順-1`（衝突）→ `手順-2` と 2 回反復する経路を通す。
     """
-    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = load_module()
 
     import tempfile
 
@@ -449,10 +428,7 @@ def test_iter_markdown_files_collects_root_files_and_scan_dirs(tmp_path: Path) -
     所定外のルート直下ファイル・対象外ディレクトリ（`notes/`）・`.md` 以外は含めず、
     戻り値はソート済みで重複を持たない。
     """
-    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = load_module()
 
     write(tmp_path, "README.md", "# r\n")
     write(tmp_path, "OTHER.md", "# o\n")
@@ -477,10 +453,7 @@ def test_iter_markdown_files_collects_root_files_and_scan_dirs(tmp_path: Path) -
 
 def test_iter_markdown_files_returns_empty_list_for_empty_root(tmp_path: Path) -> None:
     """既定の走査対象が存在しない空ルートの現状を固定する（R2-004）。"""
-    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = load_module()
 
     assert module.iter_markdown_files(tmp_path) == []
 
@@ -496,10 +469,7 @@ def test_iter_markdown_files_returns_empty_list_for_empty_root(tmp_path: Path) -
 )
 def test_slugify_boundary_and_character_retention(text: str, expected: str) -> None:
     """slugify の空白展開・記号保持・記号除去の境界値規則を固定する（R2-005）。"""
-    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = load_module()
 
     assert module.slugify(text) == expected
 
@@ -512,20 +482,14 @@ def test_slugify_keeps_combining_mark(tmp_path: Path) -> None:
     結合アキュートアクセント（U+0301）を含む文字列を渡し、その結合文字が
     落とされずに残る現状の振る舞いを記録する。
     """
-    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = load_module()
 
     assert module.slugify("Cafe\u0301 Menu") == "cafe\u0301-menu"
 
 
 def test_target_path_current_behavior(tmp_path: Path) -> None:
     """target_path のリンク解決・スキップ判定の現状を固定する（R4-001）。"""
-    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = load_module()
 
     source = tmp_path / "docs" / "index.md"
 
@@ -549,10 +513,7 @@ def test_target_path_current_behavior(tmp_path: Path) -> None:
 
 def test_visible_lines_skips_code_fences_and_quotes(tmp_path: Path) -> None:
     """visible_lines のコードフェンスおよび引用行スキップの現状を固定する（R1-002）。"""
-    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = load_module()
 
     path = tmp_path / "test.md"
     body = (
@@ -588,3 +549,39 @@ def test_html_anchor_with_missing_heading_fragment_fails(tmp_path: Path) -> None
     result = run(tmp_path)
     assert result.returncode == 1
     assert failure_lines(result) == ["- docs/a.md: missing heading anchor: b.md#無い見出し"]
+
+
+@pytest.mark.parametrize(
+    ("raw", "target_path_resolves", "anchor_refs_expected"),
+    [
+        ("#frag", False, [("", "frag", "#frag")]),
+        ("a.md#frag", True, [("a.md", "frag", "a.md#frag")]),
+        ("/abs#frag", False, []),
+        ("https://x#frag", False, []),
+        ("a.md#", True, []),
+    ],
+)
+def test_target_path_and_anchor_refs_share_raw_parsing(
+    tmp_path: Path,
+    raw: str,
+    target_path_resolves: bool,
+    anchor_refs_expected: list,
+) -> None:
+    """target_path と anchor_refs が同一 raw に対して返す現状を固定する（R3-004）。
+
+    両者は strip_title / '#' 分割 / should_skip という同じ解析を各自に持つが、
+    should_skip の呼び方が異なる（target_path は無条件、anchor_refs は path_part が
+    真のときだけ）。この差異ごと現状を記録する。'#frag' は target_path が None・
+    anchor_refs が抽出、'a.md#' は target_path が解決・anchor_refs が空になる。
+    """
+    module = load_module()
+
+    source = tmp_path / "docs" / "index.md"
+    resolved = module.target_path(source, raw)
+    if target_path_resolves:
+        path_part = raw.split("#", 1)[0]
+        assert resolved == (source.parent / path_part).resolve()
+    else:
+        assert resolved is None
+
+    assert module.anchor_refs(f"[x]({raw})\n") == anchor_refs_expected
