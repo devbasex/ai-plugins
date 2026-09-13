@@ -701,3 +701,18 @@ def test_base_of_drops_suffix_and_splits_into_int_triple() -> None:
     assert module.base_of("9.6.0-dev.1") == (9, 6, 0)
     assert module.base_of("9.6.0") == (9, 6, 0)
     assert module.base_of("9.6.0-dev.1") == module.base_of("9.6.0")
+
+
+# --- check_version_section: 節に版数が 1 件も無い境界（単体）---
+
+
+def test_version_section_without_any_version_reports_once_and_returns() -> None:
+    """見出しだけで囲みの版数が 0 件なら、読み取れない旨の 1 件だけを記録して戻る（現状固定）。"""
+    module = _load_checker()
+    report = module.Report()
+    module.check_version_section(f"{module.VERSION_SECTION_HEADING}\n", "9.3.0", report)
+    assert report.errors == [
+        f"{module.VERSIONING_MD}: 版の付け方の節の版数を読み取れない"
+        f"（`{module.VERSION_SECTION_HEADING}` の節へ版数の例を囲みで置く。"
+        f"{module.PLUGIN_JSON}: 9.3.0）"
+    ]
