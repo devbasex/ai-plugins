@@ -8,12 +8,13 @@ from __future__ import annotations
 import json
 import shlex
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
 
 from workflow_helpers import (
-    base_env, checkout, init_repo, path_with, pre_tool_use, run_guard, run_lib,
+    LIB, base_env, checkout, init_repo, path_with, pre_tool_use, run_guard, run_lib,
     run_stage_check,
     state_file, stub_gh,
 )
@@ -53,6 +54,26 @@ def decision(result: subprocess.CompletedProcess) -> dict:
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip(), "出力が無い"
     return json.loads(result.stdout)["hookSpecificOutput"]
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "expected"),
+    [
+        ("light", "standard", "standard"),
+        ("standard", "light", "standard"),
+        ("standard", "standard", "standard"),
+        ("", "standard", "standard"),
+        ("light", "", "light"),
+    ],
+)
+def test_higher_mode_keeps_the_current_branch_behavior(
+    first: str, second: str, expected: str
+) -> None:
+    """現状固定: 高い側、同じ高さの先頭、空でない側を返す。"""
+    result = run_lib(f"wf_higher_mode {shlex.quote(first)} {shlex.quote(second)}")
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == expected
 
 
 # --- 判定の対象でないもの ---------------------------------------------------
@@ -419,3 +440,390 @@ def test_emit_context_round_trips_the_value(text: str) -> None:
     assert hook["additionalContext"] == text
     assert hook["hookEventName"] == "PreToolUse"
     assert "permissionDecision" not in hook
+
+
+# `wf_emit_deny` は permissionDecision を deny とし、permissionDecisionReason に
+# 理由を載せて JSON として出す。境界入力で有効な JSON になり、復号すると元の値へ
+# 戻ることを固定する。
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",
+        "日本語の案内です",
+        'quote " inside',
+        r"backslash \ inside",
+        "line1\nline2",
+        "col1\tcol2",
+        "carriage\rreturn",
+        '全部盛り 日本語 "q" \\b\n改行\ttab\rcr',
+    ],
+)
+def test_emit_deny_round_trips_the_reason(text: str) -> None:
+    """現状固定: 拒否理由が JSON を経て permissionDecisionReason に保たれる。"""
+    result = run_lib(f"wf_emit_deny {shlex.quote(text)}")
+
+    assert result.returncode == 0, result.stderr
+    decoded = json.loads(result.stdout)
+    hook = decoded["hookSpecificOutput"]
+    assert hook["permissionDecision"] == "deny"
+    assert hook["hookEventName"] == "PreToolUse"
+    assert hook["permissionDecisionReason"] == text
+
+
+# --- #565 コマンドの区切り ---------------------------------------------------
+#
+# 語の分割は、引用の外の制御演算子と本文の途中の改行で空の語（区切り）を出す。3 つの
+# 読み手は、1 つ目の対象のコマンドの終わりで読むのを止める。
+
+PARENT_BODY = (
+    "cd /work/ai-plugins; ls issues/ | grep 565; date '+%H:%M'; "
+    'bash plugins/ndf/scripts/projects-sync.sh 565 stage "要求と受け入れ条件"; echo "exit=$?"'
+)
+
+
+def split(text: str) -> list[str]:
+    """`wf_split` の出力を語の並びで返す。区切りは空文字になる。"""
+    result = subprocess.run(
+        ["bash", "-c", f'. "$1"; wf_split "$2"', "_", str(LIB), text],
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr
+    out = result.stdout.decode("utf-8")
+    assert out == "" or out.endswith("\0"), repr(out)
+    return out.split("\0")[:-1] if out else []
+
+
+def stages_of(state: Path, issue: int) -> list[str]:
+    path = state_file(state, issue)
+    if not path.exists():
+        return []
+    return json.loads(path.read_text(encoding="utf-8"))["stages"]
+
+
+@pytest.mark.parametrize(
+    ("text", "words"),
+    [
+        ('a "b c"; d', ["a", "b c", "", "d"]),
+        ("x 2>&1 | y", ["x", "2>&1", "", "y"]),
+        ("cd x&&gh pr merge 1", ["cd", "x", "", "", "gh", "pr", "merge", "1"]),
+        ("cmd &>/dev/null", ["cmd", "&>/dev/null"]),
+        ("a b\nc", ["a", "b", "", "c"]),
+        ("gh pr \\\nmerge 268", ["gh", "pr", "merge", "268"]),
+        ("echo >&2 x", ["echo", ">&2", "x"]),
+        ("(a)|b||c", ["", "a", "", "", "b", "", "", "c"]),
+        ("sleep 1 & wait", ["sleep", "1", "", "wait"]),
+        ('echo "a;b|c&&d(e)"', ["echo", "a;b|c&&d(e)"]),
+        ("echo 'x\ny' z", ["echo", "x\ny", "z"]),
+    ],
+)
+def test_split_marks_the_command_boundaries(text: str, words: list[str]) -> None:
+    """AC11 と区切りの契約（設計の「`wf_split` の出力」）。"""
+    assert split(text) == words
+
+
+def test_split_does_not_mark_the_last_newline() -> None:
+    """here-string が足す最後の改行では区切りを出さない。"""
+    assert split("a b\n") == ["a", "b"]
+
+
+def test_split_finishes_quickly_on_a_long_body() -> None:
+    """非機能: 36KB の本文で 0.1 秒以内。演算子を引用の外に置き、区切りの判定を通す。"""
+    body = "| 表 | x; y && z 2>&1 |\n" * 1500
+    assert len(body.encode("utf-8")) >= 36000
+    started = time.monotonic()
+    split(body)
+    assert time.monotonic() - started < 0.1
+
+
+def test_a_stage_glued_to_a_semicolon_is_recorded(repo: Path, state: Path) -> None:
+    """AC1"""
+    guard(repo, state, 'bash plugins/ndf/scripts/projects-sync.sh 161 stage "設計"; echo "exit=$?"')
+
+    assert stages_of(state, 161) == ["設計"]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'bash "$SCRIPTS/projects-sync.sh" 161 stage "設計"&& echo ok',
+        'bash "$SCRIPTS/projects-sync.sh" 161 stage "設計"|| echo ng',
+        'bash "$SCRIPTS/projects-sync.sh" 161 stage "設計"| tail -3',
+        '(bash "$SCRIPTS/projects-sync.sh" 161 stage "設計")',
+        'bash "$SCRIPTS/projects-sync.sh" 161 stage 設計&&echo',
+    ],
+)
+def test_a_stage_glued_to_an_operator_is_recorded(repo: Path, state: Path, command: str) -> None:
+    """AC2"""
+    guard(repo, state, command)
+
+    assert stages_of(state, 161) == ["設計"]
+
+
+def test_the_command_the_parent_ran_is_recorded(repo: Path, state: Path) -> None:
+    """AC3: 親の会話で実行した本文そのもの。"""
+    guard(repo, state, PARENT_BODY)
+
+    assert stages_of(state, 565) == ["要求と受け入れ条件"]
+
+
+def test_parse_sync_stops_at_the_boundary(repo: Path) -> None:
+    """AC4: 区切りより前に 3 語そろわなければ積まない。"""
+    result = run_lib("wf_parse_sync 'projects-sync.sh 161 stage; echo 設計'", cwd=repo)
+
+    assert result.returncode == 1
+    assert result.stdout.strip() == ""
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'bash "$SCRIPTS/projects-sync.sh" 161 stage "設計" 2>&1 | tail -3',
+        'bash "$SCRIPTS/projects-sync.sh" 161 stage "設計"',
+        'bash /abs/plugins/ndf/scripts/projects-sync.sh 161 stage "設計" 2>&1 | tail -2',
+    ],
+)
+def test_the_forms_recorded_before_stay_the_same(repo: Path, state: Path, command: str) -> None:
+    """AC5"""
+    guard(repo, state, command)
+
+    assert stages_of(state, 161) == ["設計"]
+
+
+def test_merge_target_stops_at_the_boundary(repo: Path) -> None:
+    """AC6"""
+    result = run_lib("wf_merge_target 'gh pr merge 268; echo ok'", cwd=repo)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "268"
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["cd x&&gh pr merge 268", "cd x;gh pr merge 268", "true|gh pr merge 268"],
+)
+def test_a_merge_after_an_operator_is_denied(repo: Path, state: Path, tmp_path: Path, command: str) -> None:
+    """AC7"""
+    result = guard(repo, state, command, tmp_path=tmp_path,
+                   responses={"pulls/268": DESIGN_PR, "labels/design-approved": LABEL_DEFINED})
+
+    assert decision(result)["permissionDecision"] == "deny"
+    assert "268" in decision(result)["permissionDecisionReason"]
+
+
+def test_a_number_after_the_merge_command_is_not_taken(repo: Path) -> None:
+    """AC8"""
+    result = run_lib("wf_merge_target 'gh pr merge; echo 268'", cwd=repo)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == ""
+
+
+def test_pr_create_body_glued_to_a_semicolon_is_read(repo: Path) -> None:
+    """AC9"""
+    command = 'gh pr create --body "Closes #161"; echo ok'
+    result = run_lib(f"wf_parse_pr_create {shlex.quote(command)}", cwd=repo)
+
+    assert result.stdout.strip() == "devbasex/ai-plugins\t161", result.stderr
+
+
+def test_pr_create_body_after_the_boundary_is_not_read(repo: Path) -> None:
+    """AC10"""
+    command = 'gh pr create --title t; echo --body "Closes #161"'
+    result = run_lib(f"wf_parse_pr_create {shlex.quote(command)}", cwd=repo)
+
+    assert result.returncode == 1
+    assert result.stdout.strip() == ""
+
+
+@pytest.mark.parametrize("command", ["gh pr merge \\\n  268 --merge", "gh pr \\\nmerge 268"])
+def test_a_continued_merge_is_denied(repo: Path, state: Path, tmp_path: Path, command: str) -> None:
+    """AC13: 行末の `\\` の継続は区切りではない。hook を通して関門が働く。"""
+    result = guard(repo, state, command, tmp_path=tmp_path,
+                   responses={"pulls/268": DESIGN_PR, "labels/design-approved": LABEL_DEFINED})
+
+    assert decision(result)["permissionDecision"] == "deny"
+    assert "268" in decision(result)["permissionDecisionReason"]
+
+
+def test_a_continued_stage_is_recorded(repo: Path, state: Path) -> None:
+    """AC13"""
+    guard(repo, state, 'bash plugins/ndf/scripts/projects-sync.sh \\\n  565 stage "設計"')
+
+    assert stages_of(state, 565) == ["設計"]
+
+
+# --- R1-003: `wf_is_candidate` の単体（現状固定） ---------------------------
+#
+# `wf_is_candidate` は、語の分割の前に走る安い絞り込みである。PR #593 で行末の `\` と
+# 改行を空白へ畳んでから grep する処理が加わったが、この関数自体の単体テストが無く、
+# 行継続で分割された対象コマンドが候補として通過する分岐が単体階層で固定されていない。
+# ここで現状の振る舞いを正解として記録する（対象コードは変更しない）。
+
+
+def is_candidate(text: str) -> int:
+    """`wf_is_candidate` の終了コードを返す。0 が候補、1 が非候補。"""
+    result = run_lib(f"wf_is_candidate {shlex.quote(text)}")
+    return result.returncode
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "gh pr \\\nmerge 268",
+        "gh pr \\\ncreate --base develop",
+        "gh pr merge 268 --merge \\\n  --admin",
+    ],
+    ids=["continued-merge", "continued-create", "continued-tail"],
+)
+def test_is_candidate_passes_a_line_continued_target(text: str) -> None:
+    """現状固定: 行末の `\\` と改行を空白へ畳むため、分割された対象も候補として通る。"""
+    assert is_candidate(text) == 0
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "gh pr merge 268",
+        "gh pr create --base develop",
+        'bash plugins/ndf/scripts/projects-sync.sh 565 stage "設計"',
+        "curl -s https://api.github.com/repos/o/r/pulls/268/merge",
+    ],
+    ids=["merge", "create", "sync", "rest-merge"],
+)
+def test_is_candidate_passes_a_single_line_target(text: str) -> None:
+    """現状固定: 継続の無い対象コマンドはそのまま候補として通る。"""
+    assert is_candidate(text) == 0
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",
+        "echo hello world",
+        "git status --short",
+        "gh pr view 268",
+    ],
+    ids=["empty", "echo", "git-status", "pr-view"],
+)
+def test_is_candidate_rejects_an_unrelated_command(text: str) -> None:
+    """対照: いずれの目印にも当たらない本文は候補にしない。"""
+    assert is_candidate(text) == 1
+
+
+# --- R2-001: `wf_looks_like_merge_text` の単体（現状固定） ------------------
+
+def looks_like_merge_text(text: str) -> int:
+    """`wf_looks_like_merge_text` の終了コードを返す。0 が一致、1 が不一致。"""
+    result = run_lib(f"wf_looks_like_merge_text {shlex.quote(text)}")
+    return result.returncode
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "gh pr merge 268",
+        "gh -R o/r pr merge 268",
+        "pulls/12/merge",
+    ],
+    ids=["gh-pr-merge", "gh-global-option", "rest-merge"],
+)
+def test_merge_text_matcher_accepts_a_coarse_merge_pattern(text: str) -> None:
+    """現状固定: CLI と REST パスの粗いマージ表現を一致として扱う。"""
+    assert looks_like_merge_text(text) == 0
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "gh pr create --base develop",
+        "gh pr view 268",
+        "",
+        "echo hello",
+    ],
+    ids=["pr-create", "pr-view", "empty", "echo"],
+)
+def test_merge_text_matcher_rejects_text_without_a_merge_pattern(text: str) -> None:
+    """対照: マージ表現を含まない本文は一致として扱わない。"""
+    assert looks_like_merge_text(text) == 1
+
+
+# --- R2-002: `wf_is_mode` の単体（現状固定） --------------------------------
+#
+# `wf_is_mode` は、指定された文字列が `WF_MODES` に含まれるモードかを判定する。
+# 既存のテストでは既知のモードに対する終了コード 0 の復帰分岐のみが確認されていた。
+# 未知のモードに対する終了コード 1 と、空引数による早期復帰の終了コード 1 を
+# 単体階層で固定する（対象コードは変更しない）。
+
+
+def is_mode(mode: str) -> int:
+    """`wf_is_mode` の終了コードを返す。0 が既知、1 が未知または空。"""
+    result = run_lib(f"wf_is_mode {shlex.quote(mode)}")
+    return result.returncode
+
+
+def test_is_mode_accepts_a_known_mode() -> None:
+    """現状固定: 既知のモードは終了コード 0 を返す。"""
+    assert is_mode("standard") == 0
+
+
+def test_is_mode_rejects_an_unknown_mode() -> None:
+    """現状固定: 未知のモードは終了コード 1 を返す。"""
+    assert is_mode("unknown-mode") == 1
+
+
+def test_is_mode_rejects_an_empty_mode() -> None:
+    """現状固定: 空引数は早期復帰により終了コード 1 を返す。"""
+    assert is_mode("") == 1
+
+
+
+def is_stage(stage: str) -> int:
+    """`wf_is_stage` の終了コードを返す。0 が既知の工程、1 が未知または空。"""
+    result = run_lib(f"wf_is_stage {shlex.quote(stage)}")
+    return result.returncode
+
+
+def test_is_stage_accepts_a_known_stage() -> None:
+    """現状固定: 既知の工程は終了コード 0 を返す。"""
+    assert is_stage("配布") == 0
+
+
+def test_is_stage_rejects_an_unknown_stage() -> None:
+    """現状固定: 未知の工程は while ループを抜けて終了コード 1 を返す。"""
+    assert is_stage("存在しない工程") == 1
+
+
+def test_is_stage_rejects_an_empty_stage() -> None:
+    """現状固定: 空引数は早期復帰により終了コード 1 を返す。"""
+    assert is_stage("") == 1
+
+
+# --- R2-004: 閉じる課題でモードが食い違うときの案内（現状固定） --------------
+#
+# `wf_evidence_report` は、閉じる課題の控えのモードが食い違うと最も高いモードを選び、
+# **全課題の不足工程をそのモードで数える**。公開の hook 入口へ `gh pr create` を渡し、
+# 復号した additionalContext の要点（食い違いの告知・選ばれたモード・課題ごとの不足
+# 工程）と、拒否を出さないことを結合の階層で固定する（対象コードは変更しない）。
+
+
+def test_conflicting_modes_apply_the_highest_to_every_issue(repo: Path, state: Path) -> None:
+    """現状固定: `light` の課題にも `standard` の基準で不足工程を並べ、案内だけで通す。"""
+    env = base_env(state)
+    run_stage_check("record", "417", "mode", "light", cwd=repo, env=env)
+    run_stage_check("record", "417", "stage", "実装", cwd=repo, env=env)
+    run_stage_check("record", "418", "mode", "standard", cwd=repo, env=env)
+    run_stage_check("record", "418", "stage", "設計", cwd=repo, env=env)
+
+    result = guard(repo, state, 'gh pr create --base develop --title "t" --body "Closes #417\nCloses #418"')
+
+    hook = decision(result)
+    assert "permissionDecision" not in hook
+    lines = hook["additionalContext"].splitlines()
+    assert "モードの記録が課題ごとに食い違います（light / standard）。最も高い standard を基準に見ています。" in lines
+    note_417 = next(line for line in lines if line.startswith("  #417 (devbasex/ai-plugins): 記録なし: "))
+    note_418 = next(line for line in lines if line.startswith("  #418 (devbasex/ai-plugins): 記録なし: "))
+    # `light` では条件付きの「設計」も、`standard` を当てるため不足として並ぶ。
+    assert "設計" in note_417.split(": ")[-1].split(" / ")
+    assert "実装" not in note_417.split(": ")[-1].split(" / ")
+    assert "実装" in note_418.split(": ")[-1].split(" / ")
+    assert "設計" not in note_418.split(": ")[-1].split(" / ")
