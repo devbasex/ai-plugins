@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from doc_staleness_helpers import (
+    CHECKER,
     REPO_ROOT,
     VERSIONING_MD_PATH,
     bump_plugin_version,
@@ -669,3 +670,34 @@ def test_missing_agents_md_fails(tree: Path) -> None:
     result = run_check(tree)
     assert result.returncode != 0
     assert "AGENTS.md" in output_of(result)
+
+
+# --- base_of: バージョン文字列を基底タプルへ分解する（単体）---
+
+
+def _load_checker():
+    """`scripts/check-doc-staleness.py` を module として読み込む。
+
+    ファイル名にハイフンを含むため通常の import では取り込めない。
+    リポジトリ内の他のテスト（`test_doc_line_limit.py` など）と同じく
+    `spec_from_file_location` で読み込む。
+    """
+    import importlib.util
+    import sys
+
+    spec = importlib.util.spec_from_file_location("check_doc_staleness", CHECKER)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    # dataclass の解決は `cls.__module__` を `sys.modules` から引くため、
+    # exec_module の前に登録しておく。
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_base_of_drops_suffix_and_splits_into_int_triple() -> None:
+    """接尾辞あり・なしのどちらの入力も、同じ整数の 3 つ組へ分解される（現状固定）。"""
+    module = _load_checker()
+    assert module.base_of("9.6.0-dev.1") == (9, 6, 0)
+    assert module.base_of("9.6.0") == (9, 6, 0)
+    assert module.base_of("9.6.0-dev.1") == module.base_of("9.6.0")
