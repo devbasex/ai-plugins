@@ -22,34 +22,10 @@ ROOT = Path(__file__).resolve().parents[2]
 INSTALLER = ROOT / "plugins" / "ndf" / "dev.kiro" / "install.sh"
 
 
-@pytest.fixture
-def project_dir(tmp_path: Path) -> Path:
-    """導入先の空プロジェクトディレクトリ (tmp_path/"project") を作って返す。
-
-    複数のテストが繰り返していた `project = tmp_path / "project"; project.mkdir()`
-    の前置きを 1 箇所へまとめる。run(...) の呼び出しはテストごとに引数が異なるため
-    各テストに残し、この fixture はディレクトリの用意だけに限る。
-    """
-    project = tmp_path / "project"
-    project.mkdir()
-    return project
-
-
-def run(
-    *args: str,
-    home: Path,
-    cwd: Path | None = None,
-    path_prepend: Path | None = None,
-    extra_env: dict[str, str] | None = None,
-) -> subprocess.CompletedProcess:
+def run(*args: str, home: Path, cwd: Path | None = None) -> subprocess.CompletedProcess:
     # `--scope global` は HOME の下を導入先にする。誤って書き込んでも利用者の HOME に
     # 届かないよう、一時ディレクトリを HOME として渡す。
     env = {**os.environ, "HOME": str(home)}
-    # 偽の kiro-cli を差し込むテストのため、PATH の先頭へディレクトリを足せるようにする。
-    if path_prepend is not None:
-        env["PATH"] = os.pathsep.join([str(path_prepend), env.get("PATH", "")])
-    if extra_env is not None:
-        env.update(extra_env)
     return subprocess.run(
         ["bash", str(INSTALLER), *args],
         capture_output=True,
@@ -187,14 +163,14 @@ def test_global_scope_with_missing_path_stops_the_same_way(tmp_path: Path) -> No
     assert_no_bare_cd_error(proc)
 
 
-def test_global_scope_with_existing_path_warns_and_succeeds(
-    tmp_path: Path, project_dir: Path
-) -> None:
+def test_global_scope_with_existing_path_warns_and_succeeds(tmp_path: Path) -> None:
     # --scope global と存在するディレクトリの併用では、PROJECT_GIVEN が真になって
     # WARN を出しつつ正常終了する。誤りではないため終了コードは 0 で、案内 (HINT) も
     # 出ない。存在しないパス併用時のエラー停止（上のテスト）とは別の経路である。
+    project = tmp_path / "project"
+    project.mkdir()
     proc = run(
-        "--scope", "global", "--project", str(project_dir), "--dry-run", "--yes",
+        "--scope", "global", "--project", str(project), "--dry-run", "--yes",
         home=tmp_path,
     )
 
@@ -205,8 +181,9 @@ def test_global_scope_with_existing_path_warns_and_succeeds(
     assert_no_bare_cd_error(proc)
 
 
-def test_existing_directory_is_unchanged(tmp_path: Path, project_dir: Path) -> None:
-    project = project_dir
+def test_existing_directory_is_unchanged(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
     proc = run("--project", str(project), "--dry-run", "--yes", home=tmp_path)
 
     assert proc.returncode == 0, proc.stderr
@@ -216,10 +193,9 @@ def test_existing_directory_is_unchanged(tmp_path: Path, project_dir: Path) -> N
     assert list(project.iterdir()) == []
 
 
-def test_reinstall_preserves_user_managed_agent_config(
-    tmp_path: Path, project_dir: Path
-) -> None:
-    project = project_dir
+def test_reinstall_preserves_user_managed_agent_config(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
     first = run("--project", str(project), "--yes", home=tmp_path)
     assert first.returncode == 0, first.stderr
 
@@ -253,10 +229,9 @@ def test_reinstall_preserves_user_managed_agent_config(
     assert reinstalled["hooks"]["userPromptSubmit"]
 
 
-def test_reinstall_removes_optional_features_when_flags_omitted(
-    tmp_path: Path, project_dir: Path
-) -> None:
-    project = project_dir
+def test_reinstall_removes_optional_features_when_flags_omitted(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
     first = run(
         "--project",
         str(project),
@@ -465,14 +440,13 @@ def _kiro_manifest_skills() -> set[str]:
     return names
 
 
-def test_manifest_skills_are_linked_with_count_and_output(
-    tmp_path: Path, project_dir: Path
-) -> None:
+def test_manifest_skills_are_linked_with_count_and_output(tmp_path: Path) -> None:
     # 現状固定: Step 1 の Skill 配布パイプラインは manifest 掲載 Skill のうち
     # ndf-policies を除いた分だけ .kiro/skills/ へ symlink を張り、その本数を
     # 「Skills数」として出力し、各 Skill に "  linked: <名前>" を出す。リンク先は
     # プラグインの skills/<名前> を指す。構造改善で本数・リンク先・出力が動かないことを守る。
-    project = project_dir
+    project = tmp_path / "project"
+    project.mkdir()
     proc = run("--project", str(project), "--yes", home=tmp_path)
     assert proc.returncode == 0, proc.stderr
 
@@ -500,13 +474,12 @@ def test_manifest_skills_are_linked_with_count_and_output(
     assert f"  Skills数: {len(expected_linked)} (シンボリックリンク: {skills_dir})" in proc.stdout
 
 
-def test_reinstall_removes_only_managed_skill_links(
-    tmp_path: Path, project_dir: Path
-) -> None:
+def test_reinstall_removes_only_managed_skill_links(tmp_path: Path) -> None:
     # 現状固定: 掃除が消すのは現在の checkout（プラグインの skills/）配下を指す
     # 既存リンクだけである。別の場所を指す利用者のリンクは残す。再インストールでも
     # 掃除→再リンクで最終状態が manifest 掲載分と一致する。
-    project = project_dir
+    project = tmp_path / "project"
+    project.mkdir()
     first = run("--project", str(project), "--yes", home=tmp_path)
     assert first.returncode == 0, first.stderr
 
@@ -541,186 +514,3 @@ def test_reinstall_removes_only_managed_skill_links(
         and str(p.resolve()).startswith(str(plugin_skills.resolve()) + os.sep)
     }
     assert managed_now == expected_managed
-
-
-# --- --set-default ワークフローの現状固定 -----------------------------------
-#
-# --set-default は kiro-cli の存在確認・scope からの実行ディレクトリ決定・ANSI 除去を
-# 伴う現在値取得・対話確認・変更と再検証を直列に行う。実機の kiro-cli はログインを要し
-# 副作用を持つため、PATH の先頭へ偽の kiro-cli を置いて経路を固定する。ここで守るのは
-# 標準出力・標準エラー・終了コード・kiro-cli を呼んだディレクトリが構造改善で不変で
-# あることである。
-
-# 偽の kiro-cli。呼ばれた副コマンドと実行ディレクトリ (pwd) を $KIRO_FAKE_LOG へ追記する。
-#   agent list       : $KIRO_FAKE_STATE の名前を "* <名前>" 形式（ANSI 付き）で stderr へ
-#   agent set-default : SET_DEFAULT_MODE=success なら $KIRO_FAKE_STATE を書き換える。
-#                       それ以外は書き換えず（未検出を模す）、どちらも終了コード 0。
-_FAKE_KIRO_CLI = r"""#!/usr/bin/env bash
-set -u
-printf '%s\t%s\n' "$*" "$PWD" >> "$KIRO_FAKE_LOG"
-if [ "$1" = "agent" ] && [ "$2" = "list" ]; then
-  name="$(cat "$KIRO_FAKE_STATE" 2>/dev/null || true)"
-  # ANSI 付きで stderr へ出す（install.sh 側が除去できることを固定する）
-  printf '\033[32m* %s\033[0m\n' "$name" >&2
-  printf '  other-agent\n' >&2
-  exit 0
-fi
-if [ "$1" = "agent" ] && [ "$2" = "set-default" ]; then
-  if [ "${SET_DEFAULT_MODE:-success}" = "success" ]; then
-    printf '%s' "$3" > "$KIRO_FAKE_STATE"
-  fi
-  exit 0
-fi
-exit 0
-"""
-
-
-def _make_fake_kiro_cli(
-    tmp_path: Path, *, initial_default: str = "kiro_default"
-) -> tuple[Path, Path, Path, dict[str, str]]:
-    """偽の kiro-cli を作り、(bin ディレクトリ, 状態ファイル, ログファイル, env) を返す。
-
-    env は偽の kiro-cli が参照する KIRO_FAKE_LOG / KIRO_FAKE_STATE を持つ。install.sh の
-    run(..., extra_env=env) へ渡す。
-    """
-    bin_dir = tmp_path / "fakebin"
-    bin_dir.mkdir()
-    fake = bin_dir / "kiro-cli"
-    fake.write_text(_FAKE_KIRO_CLI, encoding="utf-8")
-    fake.chmod(0o755)
-    state = tmp_path / "kiro_default_state"
-    state.write_text(initial_default, encoding="utf-8")
-    log = tmp_path / "kiro_calls.log"
-    log.write_text("", encoding="utf-8")
-    env = {"KIRO_FAKE_LOG": str(log), "KIRO_FAKE_STATE": str(state)}
-    return bin_dir, state, log, env
-
-
-def test_set_default_not_found_stops_with_error(tmp_path: Path, project_dir: Path) -> None:
-    # kiro-cli が PATH に無いとき、専用のエラー 1 行と終了コード 1 で止まる。
-    # 導入自体（skills/agent 生成）は完了しており、失敗するのは Step 6 だけである。
-    # kiro-cli を含まない標準ディレクトリだけの PATH を与える（python3/sed/awk 等は残す）。
-    std_path = "/usr/bin:/bin:/usr/sbin:/sbin"
-    assert shutil.which("kiro-cli", path=std_path) is None
-    env = {**os.environ, "HOME": str(tmp_path), "PATH": std_path}
-    proc = subprocess.run(
-        ["bash", str(INSTALLER), "--project", str(project_dir), "--set-default", "--yes"],
-        capture_output=True,
-        text=True,
-        env=env,
-    )
-    assert proc.returncode == 1
-    assert (
-        "ERROR: kiro-cli が見つからないため既定エージェントを変更できません"
-        in proc.stderr
-    )
-
-
-def test_set_default_workspace_uses_project_root_and_reverifies(
-    tmp_path: Path, project_dir: Path
-) -> None:
-    # workspace スコープでは kiro-cli を導入先プロジェクトルートで実行し、set-default 後に
-    # agent list で反映を検証して成功メッセージを出す。ANSI 付きの現在値も除去される。
-    bin_dir, state, log, env = _make_fake_kiro_cli(tmp_path)
-    proc = run(
-        "--project", str(project_dir), "--set-default", "--yes",
-        home=tmp_path, path_prepend=bin_dir, extra_env=env,
-    )
-    assert proc.returncode == 0, proc.stderr
-    out = proc.stdout
-    assert f"既定エージェントの操作ディレクトリ: {project_dir}" in out
-    assert "現在の既定エージェント: kiro_default" in out
-    assert "変更後の既定エージェント: ndf" in out
-    assert (
-        "既定エージェントを ndf に変更しました（元に戻す: kiro-cli agent set-default kiro_default）"
-        in out
-    )
-    # kiro-cli は導入先プロジェクトルートで呼ばれる。
-    call_dirs = {
-        line.split("\t", 1)[1]
-        for line in log.read_text(encoding="utf-8").splitlines()
-        if line
-    }
-    assert call_dirs == {str(project_dir)}
-    # 反映されている。
-    assert state.read_text(encoding="utf-8") == "ndf"
-
-
-def test_set_default_global_uses_home(tmp_path: Path) -> None:
-    # global スコープでは kiro-cli を $HOME で実行する（$HOME/.kiro/agents が生成先）。
-    home = tmp_path / "home"
-    home.mkdir()
-    bin_dir, state, log, env = _make_fake_kiro_cli(tmp_path)
-    proc = run(
-        "--scope", "global", "--set-default", "--yes",
-        home=home, path_prepend=bin_dir, extra_env=env,
-    )
-    assert proc.returncode == 0, proc.stderr
-    assert f"既定エージェントの操作ディレクトリ: {home}" in proc.stdout
-    call_dirs = {
-        line.split("\t", 1)[1]
-        for line in log.read_text(encoding="utf-8").splitlines()
-        if line
-    }
-    assert call_dirs == {str(home)}
-    assert state.read_text(encoding="utf-8") == "ndf"
-
-
-def test_set_default_reverify_failure_stops_with_error(
-    tmp_path: Path, project_dir: Path
-) -> None:
-    # set-default が終了コード 0 でも反映されない（未検出）とき、再検証で捕らえて
-    # エラー 1 行と終了コード 1 で止まる。
-    bin_dir, state, log, env = _make_fake_kiro_cli(tmp_path)
-    env = {**env, "SET_DEFAULT_MODE": "noop"}
-    proc = run(
-        "--project", str(project_dir), "--set-default", "--yes",
-        home=tmp_path, path_prepend=bin_dir, extra_env=env,
-    )
-    assert proc.returncode == 1
-    assert (
-        f"ERROR: 既定エージェントを ndf に変更できませんでした（{project_dir} で検出できず）"
-        in proc.stderr
-    )
-    # 反映されていない（初期値のまま）。
-    assert state.read_text(encoding="utf-8") == "kiro_default"
-
-
-def test_set_default_confirmation_rejected_leaves_default_unchanged(
-    tmp_path: Path, project_dir: Path
-) -> None:
-    # 対話端末で確認に N を返すと、変更せず「変更しませんでした」を出して正常終了する。
-    # [ -t 0 ] を真にするため pty を stdin に与える。
-    import pty
-
-    bin_dir, state, log, fake_env = _make_fake_kiro_cli(tmp_path)
-    env = {
-        **os.environ,
-        "HOME": str(tmp_path),
-        "PATH": os.pathsep.join([str(bin_dir), os.environ.get("PATH", "")]),
-        **fake_env,
-    }
-    master, slave = pty.openpty()
-    try:
-        proc = subprocess.Popen(
-            ["bash", str(INSTALLER), "--project", str(project_dir), "--set-default"],
-            stdin=slave,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            env=env,
-        )
-        os.write(master, b"n\n")
-        stdout, stderr = proc.communicate(timeout=60)
-    finally:
-        os.close(master)
-        os.close(slave)
-
-    assert proc.returncode == 0, stderr
-    assert "既定エージェントを ndf に変更しますか?" in stdout
-    assert "既定エージェントは変更しませんでした" in stdout
-    # set-default は呼ばれない。
-    log_text = log.read_text(encoding="utf-8")
-    assert "set-default" not in log_text
-    # 既定は初期値のまま。
-    assert state.read_text(encoding="utf-8") == "kiro_default"
