@@ -24,6 +24,7 @@ LINK_RE = re.compile(r"(?<!!)\[[^\]]+\]\(([^)]+)\)")
 INLINE_HTML_RE = re.compile(r"<a\s+[^>]*href=[\"']([^\"']+)[\"']", re.IGNORECASE)
 TITLE_RE = re.compile(r"\s+(?:\"[^\"]*\"|'[^']*'|\([^)]*\))\s*$")
 HEADING_RE = re.compile(r"^#{1,6}\s+(.*)$")
+BACKTICK_RUN_RE = re.compile(r"`+")
 # GitHub の見出しアンカー規則: 記号は空白・ハイフン・アンダースコアだけ残す。
 SLUG_KEEP_PUNCTUATION = " -_"
 # 同規則: Unicode 一般カテゴリの先頭文字が L(字母)・M(結合文字)・N(数字) の文字を残す。
@@ -100,6 +101,33 @@ def visible_lines(path: Path) -> list[str]:
     return lines
 
 
+def strip_inline_code(line: str) -> str:
+    """Replace each inline code span in one line with a single space (#543).
+
+    A span runs from a backtick run to the next run of the same length. A run
+    with no matching closer stays as text, so links after it are still read.
+    """
+    runs = list(BACKTICK_RUN_RE.finditer(line))
+    parts: list[str] = []
+    pos = 0
+    i = 0
+    while i < len(runs):
+        width = len(runs[i].group())
+        closer = next(
+            (j for j in range(i + 1, len(runs)) if len(runs[j].group()) == width),
+            None,
+        )
+        if closer is None:
+            i += 1
+            continue
+        parts.append(line[pos:runs[i].start()])
+        parts.append(" ")
+        pos = runs[closer].end()
+        i = closer + 1
+    parts.append(line[pos:])
+    return "".join(parts)
+
+
 def link_targets(text: str) -> list[str]:
     targets = [m.group(1) for m in LINK_RE.finditer(text)]
     targets.extend(m.group(1) for m in INLINE_HTML_RE.finditer(text))
@@ -170,7 +198,7 @@ def main() -> int:
         return f"{md.relative_to(root)}: {reason}: {raw}"
 
     for md in markdown_files:
-        text = "\n".join(visible_lines(md))
+        text = "\n".join(strip_inline_code(line) for line in visible_lines(md))
         for raw in link_targets(text):
             resolved = target_path(md, raw)
             if resolved is None:

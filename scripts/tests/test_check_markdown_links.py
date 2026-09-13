@@ -109,6 +109,54 @@ def test_heading_with_angle_brackets_in_inline_code_resolves(tmp_path: Path) -> 
     assert result.returncode == 0, result.stderr
 
 
+def test_link_inside_inline_code_is_ignored(tmp_path: Path) -> None:
+    """#543 決定 4: インラインコードの中の記法の例はリンクとして読まない。"""
+    write(
+        tmp_path,
+        "docs/a.md",
+        "`[文言](位置)` の書き方と `<a href=\"無い.md\">` の書き方\n"
+        "``[x](無い.md) と ` を含む``\n",
+    )
+    result = run(tmp_path)
+    assert result.returncode == 0, result.stderr
+
+
+def test_link_outside_inline_code_on_same_line_fails(tmp_path: Path) -> None:
+    """#543: 同じ行でも、インラインコードの外にある解決できないリンクは落ちる。"""
+    write(tmp_path, "docs/a.md", "`[文言](位置)` と [x](無い.md)\n")
+    result = run(tmp_path)
+    assert result.returncode == 1
+    assert failure_lines(result) == ["- docs/a.md: missing link target: 無い.md"]
+
+
+def test_unclosed_backtick_run_does_not_hide_link(tmp_path: Path) -> None:
+    """#543: 同じ本数の列で閉じないバッククォートは、後ろのリンクを隠さない。"""
+    write(tmp_path, "docs/a.md", "`` 閉じない ` と [x](無い.md)\n")
+    result = run(tmp_path)
+    assert result.returncode == 1
+    assert failure_lines(result) == ["- docs/a.md: missing link target: 無い.md"]
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        ("a `b` c", "a   c"),
+        ("a ``b ` c`` d", "a   d"),
+        ("a ``b` c", "a ``b` c"),
+        ("`a`[x](y.md)`b`", " [x](y.md) "),
+        ("[x](y.md)", "[x](y.md)"),
+    ],
+)
+def test_strip_inline_code(line: str, expected: str) -> None:
+    """#543: インラインコードの範囲を空白 1 つへ置き換える。"""
+    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.strip_inline_code(line) == expected
+
+
 def test_reference_inside_code_fence_is_ignored(tmp_path: Path) -> None:
     write(tmp_path, "docs/a.md", "# 手順\n\n```markdown\n[飛ぶ](#無い見出し)\n```\n")
     result = run(tmp_path)
