@@ -66,10 +66,19 @@ PLUGIN_README_RUNTIMES = {
     "agy": "agy",
 }
 
-RUNTIME_COUNT = re.compile(r"(Claude Code|Kiro|Codex|agy)向け core\s*(\d+)\s*個")
+def runtime_alternation(labels: dict[str, str]) -> str:
+    """対応表のキーから、ランタイム名を拾う正規表現の選択肢を作る。
+
+    選択肢を対応表と別に書き写すと、表記を足すか改名したときに片方だけが古い綴りを読む。
+    キーを `re.escape` で囲んで並べ、対応表を唯一の定義にする。
+    """
+    return "|".join(re.escape(label) for label in labels)
+
+
+RUNTIME_COUNT = re.compile(r"(" + runtime_alternation(ROOT_README_RUNTIMES) + r")向け core\s*(\d+)\s*個")
 SOURCE_COUNT = re.compile(r"元Skills（\s*(\d+)\s*個\s*）")
 CATEGORY_LINE = re.compile(r"^\s+-\s+(?P<label>.+?)\s+\((?P<count>\d+)\)\s*[:：]\s*(?P<names>.+)$")
-TABLE_ROW = re.compile(r"^\|\s*(Claude Code|Codex|Kiro CLI|agy)\s*\|\s*(\d+)\s*個\s*\|")
+TABLE_ROW = re.compile(r"^\|\s*(" + runtime_alternation(PLUGIN_README_RUNTIMES) + r")\s*\|\s*(\d+)\s*個\s*\|")
 LAYOUT_SKILLS = re.compile(r"唯一の実体（\s*(\d+)\s*個\s*）")
 NAME_SEPARATOR = re.compile(r"[,、]")
 
