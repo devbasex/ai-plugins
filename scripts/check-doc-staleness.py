@@ -437,23 +437,13 @@ def check_plugin_table(root: Path, body: str, report: Report) -> None:
         compare_plugin_table_row(root, name, value, number, report)
 
 
-def check_version_section(body: str, version: str | None, report: Report) -> None:
-    """正本の「版の付け方と開発版の配布」章に並ぶ版数を、現行版の基底と比べる（J）。
+def scan_section_versions(lines: list[str]) -> tuple[list[str], list[int]]:
+    """「版の付け方と開発版の配布」章に囲みで並ぶ版数と、その行番号を拾う。
 
-    この節の版数は 1 つの値ではなく、現行版を基にした例の集まりである。現行版そのもの・
-    接尾辞を付けたもの・次の版を指すものが混ざるため、点の照合ではなく区間の規則にする。
-    節へ例を足しても検査を書き換えずに済み、版を上げた時点で前の版の例だけが残らない。
-
-    **接尾辞は基底を取り出す時点で捨てる。** semver の順序では `9.6.0-dev.1` が `9.6.0`
-    より小さいため、接尾辞まで見て比べると節の内容がそのまま失敗になる。接尾辞の
-    付け忘れ・外し忘れをここでは見ない（正本の「検査に載らず手で直す箇所」に書かれているとおりである）。
-
-    **区間の終わりは、自身と同じか上位の見出しである。** 囲みの中は見出しとして数えない。
-
-    **拾うのは `` `9.6.0` `` のように囲まれた版数だけである。** 節には配布に使う CLI の名前と
-    版数を並べて書くことがあり、位置を固定しないと他のソフトの版数まで現行版と比べてしまう。
+    見出しを見つけ、次の同位以上の見出しの直前まで走査する。区間の終わりは自身と同じか
+    上位の見出しであり、囲みの中は見出しとして数えない。拾うのは `` `9.6.0` `` のように
+    囲まれた版数だけである。見出しが無ければ空を返す。
     """
-    lines = body.splitlines()
     start = next(
         (index for index, line in enumerate(lines) if line.strip() == VERSION_SECTION_HEADING),
         None,
@@ -470,6 +460,24 @@ def check_version_section(body: str, version: str | None, report: Report) -> Non
             for found in SECTION_VERSION.finditer(line):
                 values.append(found.group(1))
                 line_numbers.append(number)
+    return values, line_numbers
+
+
+def check_version_section(body: str, version: str | None, report: Report) -> None:
+    """正本の「版の付け方と開発版の配布」章に並ぶ版数を、現行版の基底と比べる（J）。
+
+    この節の版数は 1 つの値ではなく、現行版を基にした例の集まりである。現行版そのもの・
+    接尾辞を付けたもの・次の版を指すものが混ざるため、点の照合ではなく区間の規則にする。
+    節へ例を足しても検査を書き換えずに済み、版を上げた時点で前の版の例だけが残らない。
+
+    **接尾辞は基底を取り出す時点で捨てる。** semver の順序では `9.6.0-dev.1` が `9.6.0`
+    より小さいため、接尾辞まで見て比べると節の内容がそのまま失敗になる。接尾辞の
+    付け忘れ・外し忘れをここでは見ない（正本の「検査に載らず手で直す箇所」に書かれているとおりである）。
+
+    節の走査（見出しの探索・囲みの追跡・囲まれた版数の収集）は `scan_section_versions` が担う。
+    ここでは読み取れないことの報告と、現行版の基底との比較だけを行う。
+    """
+    values, line_numbers = scan_section_versions(body.splitlines())
     if not values:
         report.add(
             VERSIONING_MD,
