@@ -102,6 +102,15 @@ def test_missing_document_reports_only_missing_file(tmp_path: Path) -> None:
     assert failure_lines(result) == ["- docs/a.md: missing link target: 無い.md#見出し"]
 
 
+def test_relative_link_escaping_repository_fails(tmp_path: Path) -> None:
+    write(tmp_path, "docs/a.md", "[out](../../outside.md)\n")
+    result = run(tmp_path)
+    assert result.returncode == 1
+    assert failure_lines(result) == [
+        "- docs/a.md: link escapes repository: ../../outside.md",
+    ]
+
+
 def test_line_starting_with_hash_without_space_is_not_heading(tmp_path: Path) -> None:
     """`#183 の指摘は…` のような課題番号で始まる文は見出しにしない。"""
     write(tmp_path, "docs/a.md", "#183 の指摘\n\n[飛ぶ](#183-の指摘)\n")
