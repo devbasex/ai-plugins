@@ -187,6 +187,40 @@ install_manifest_skills() {
              | grep -v '^$' | sort | sed "s#^#$PLUGIN_SKILLS_DIR/#")
 }
 
+# 再インストールで消すのは installer が配った prompt だけに限る。--with-codex を
+# 外したときの codex.md と、配布を終えた $DEPRECATED_PROMPTS を除き、利用者の prompt は残す。
+cleanup_managed_prompts() {
+  mkdir -p "$PROMPTS_DIR"
+  if [ "$WITH_CODEX" = false ]; then
+    rm -f "$PROMPTS_DIR/codex.md"
+  fi
+  local deprecated_prompt
+  for deprecated_prompt in $DEPRECATED_PROMPTS; do
+    if [ -f "$PROMPTS_DIR/$deprecated_prompt" ]; then
+      rm -f "$PROMPTS_DIR/$deprecated_prompt"
+      echo "  removed (deprecated): ${deprecated_prompt%.md}"
+    fi
+  done
+}
+
+# 配布元の prompt を .kiro/prompts/ へコピーする。codex.md の有無の検査はコピーと
+# 案内の出力を終えた後に行う（検査より前の標準出力と配置を変えないため）。
+install_prompts() {
+  local prompt_file prompt_name
+  while IFS= read -r prompt_file; do
+    prompt_name="$(basename "$prompt_file")"
+    [ "$prompt_name" = "codex.md" ] && [ "$WITH_CODEX" = false ] && continue
+    if [ "$DRY_RUN" = false ]; then
+      cp "$prompt_file" "$PROMPTS_DIR/$prompt_name"
+    fi
+    echo "  prompt: ${prompt_name%.md}"
+  done < <(find "$PLUGIN_PROMPTS_DIR" -maxdepth 1 -type f -name '*.md' | sort)
+
+  if [ "$WITH_CODEX" = true ]; then
+    require_path -f "$PLUGIN_PROMPTS_DIR/codex.md"
+  fi
+}
+
 echo "=== NDF Plugin Installer for Kiro CLI ==="
 echo "  スコープ: $SCOPE ($KIRO_DIR)"
 
@@ -212,30 +246,9 @@ install_manifest_skills
 # --- Step 2: Create prompts in <scope>/prompts/ for workflow skills ---
 echo "ワークフロープロンプトを作成中..."
 if [ "$DRY_RUN" = false ]; then
-  mkdir -p "$PROMPTS_DIR"
-  if [ "$WITH_CODEX" = false ]; then
-    rm -f "$PROMPTS_DIR/codex.md"
-  fi
-  for deprecated_prompt in $DEPRECATED_PROMPTS; do
-    if [ -f "$PROMPTS_DIR/$deprecated_prompt" ]; then
-      rm -f "$PROMPTS_DIR/$deprecated_prompt"
-      echo "  removed (deprecated): ${deprecated_prompt%.md}"
-    fi
-  done
+  cleanup_managed_prompts
 fi
-
-while IFS= read -r prompt_file; do
-  prompt_name="$(basename "$prompt_file")"
-  [ "$prompt_name" = "codex.md" ] && [ "$WITH_CODEX" = false ] && continue
-  if [ "$DRY_RUN" = false ]; then
-    cp "$prompt_file" "$PROMPTS_DIR/$prompt_name"
-  fi
-  echo "  prompt: ${prompt_name%.md}"
-done < <(find "$PLUGIN_PROMPTS_DIR" -maxdepth 1 -type f -name '*.md' | sort)
-
-if [ "$WITH_CODEX" = true ]; then
-  require_path -f "$PLUGIN_PROMPTS_DIR/codex.md"
-fi
+install_prompts
 
 if [ "$WITH_SLACK" = true ]; then echo "Slack通知: 有効"; else echo "Slack通知: 無効 (--with-slack で有効化)"; fi
 if [ "$WITH_CODEX" = true ]; then echo "Codex CLI連携: 有効"; else echo "Codex CLI連携: 無効 (--with-codex で有効化)"; fi
