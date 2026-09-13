@@ -65,6 +65,9 @@ if len(parts) == 5 and parts[3] == "pulls":
     sys.stdout.write(json.dumps(state["pr"]))
     sys.exit(0)
 if len(parts) == 6 and parts[5] == "files":
+    if "files_response" in state:
+        sys.stdout.write(state["files_response"])
+        sys.exit(0)
     files = state["files"]
     # 2 ページに分けて返し、--paginate の連結した出力を読めることを確かめる
     half = len(files) // 2
@@ -235,6 +238,19 @@ def test_6_unreadable_design_document_returns_2(fake):
     fake.setup(body=EXPECTED, files={"issues/issue-1-design.md": "added"}, contents={})
     out = fake.run("check", "7", "--repo", REPO)
     assert out.returncode == 2, out.stdout + out.stderr
+
+
+@pytest.mark.parametrize(
+    "files_response",
+    ["{", json.dumps([{"status": "added"}])],
+    ids=["broken-json", "missing-filename"],
+)
+def test_6_unreadable_changed_files_returns_2(fake, files_response):
+    """現状固定: 一覧 API が成功しても応答を解釈できなければ読み取り失敗にする。"""
+    fake.setup(body=EXPECTED, files_response=files_response)
+    out = fake.run("check", "7", "--repo", REPO)
+    assert out.returncode == 2, out.stdout + out.stderr
+    assert "変更したファイルの一覧を読めません" in out.stderr
 
 
 def test_6_missing_gh_returns_2(fake, tmp_path):
