@@ -28,6 +28,65 @@ if [ "$rc" -ne 1 ] || ! grep -Fq "hooks/list returned an error" "$base/hooks-lis
   exit 1
 fi
 
+cat >"$base/bin/codex" <<'PY'
+#!/usr/bin/env python3
+import json
+import sys
+
+for line in sys.stdin:
+    try:
+        message = json.loads(line)
+    except Exception:
+        continue
+    if message.get("id") == 2:
+        print("non-json line from app-server", flush=True)
+        print(json.dumps({"method": "window/logMessage", "params": {"type": 3, "message": "initializing"}}), flush=True)
+        print(json.dumps({"id": 1, "result": {"serverInfo": {"name": "dummy"}}}), flush=True)
+        result = {
+            "data": [
+                {
+                    "pluginId": "dummy-plugin@ai-plugins",
+                    "hooks": [
+                        {"type": "command", "command": "echo characterization"}
+                    ]
+                }
+            ]
+        }
+        print(json.dumps({"id": 2, "result": result}), flush=True)
+        break
+PY
+chmod +x "$base/bin/codex"
+
+rc=0
+PATH="$base/bin:$PATH" python3 "$REPO_ROOT/tests/runtime-smoke/lib/codex-hooks-list.py" \
+  --cwd "$base/cwd" >"$base/hooks-list-branch.stdout" 2>"$base/hooks-list-branch.stderr" || rc=$?
+if [ "$rc" -ne 0 ]; then
+  echo "codex-hooks-list failed on non-JSON and other id lines (exit $rc)" >&2
+  cat "$base/hooks-list-branch.stderr" >&2
+  exit 1
+fi
+
+if ! python3 -c "
+import json, sys
+actual = json.load(open('$base/hooks-list-branch.stdout'))
+expected = {
+    'data': [
+        {
+            'pluginId': 'dummy-plugin@ai-plugins',
+            'hooks': [
+                {'type': 'command', 'command': 'echo characterization'}
+            ]
+        }
+    ]
+}
+if actual != expected:
+    sys.stderr.write(f'unexpected hooks/list result: {actual}\n')
+    sys.exit(1)
+"; then
+  echo "codex-hooks-list output did not match expected result" >&2
+  exit 1
+fi
+
 cat >"$base/bin/codex" <<'SH'
 #!/usr/bin/env bash
 touch "${RUNTIME_CALLED:?}"
@@ -48,6 +107,42 @@ if [ "$rc" -ne 1 ] || ! grep -Fq "no plugin with hooks definitions found" "$base
 fi
 if [ -e "$base/runtime-called" ]; then
   echo "assert-hook-definitions started codex before rejecting a marketplace without hooks" >&2
+  exit 1
+fi
+
+cat >"$base/bin/claude" <<'PY'
+#!/usr/bin/env python3
+import sys
+
+if "--version" in sys.argv:
+    print("1.0.0")
+    sys.exit(0)
+
+debug_file = None
+for i, arg in enumerate(sys.argv):
+    if arg == "--debug-file" and i + 1 < len(sys.argv):
+        debug_file = sys.argv[i + 1]
+        break
+
+if debug_file:
+    with open(debug_file, "w", encoding="utf-8") as f:
+        if any("broken-hooks" in arg or "positive-control" in arg for arg in sys.argv):
+            f.write("[WARN] Plugin broken-hooks: hooks.json: fixture warning\n")
+            f.write("Read hooks.json for plugin broken-hooks (0.0.0)\n")
+        else:
+            f.write("[INFO] plugin list called without reading hooks\n")
+
+sys.exit(0)
+PY
+chmod +x "$base/bin/claude"
+
+rc=0
+ARTIFACT_DIR="$base/artifacts-claude" HOME="$base/home" PATH="$base/bin:$PATH" \
+  "$REPO_ROOT/tests/runtime-smoke/assertions/assert-hook-definitions.sh" claude \
+  >"$base/claude-missing.stdout" 2>"$base/claude-missing.stderr" || rc=$?
+if [ "$rc" -ne 1 ] || ! grep -Fq "claude did not load hooks for:" "$base/claude-missing.stderr"; then
+  echo "assert-hook-definitions did not report missing hooks for claude (exit $rc)" >&2
+  cat "$base/claude-missing.stderr" >&2
   exit 1
 fi
 
