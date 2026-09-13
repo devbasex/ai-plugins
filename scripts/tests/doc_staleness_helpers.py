@@ -81,6 +81,8 @@ VERSIONING_MD_PATH = "docs/versioning-and-distribution.md"
 
 # J: 版の付け方の章（区間の検査）。章は `## ` で書き、章 2 が位置決めになる。
 # 章 2 より後ろの章に囲んだ古い版数を置き、区間の外を走査しないことを雛形そのもので示す。
+# 版の形の表の 3 行と次の開発の例は、正本の章 2 と同じ関係に置く。開発版と公開前の確認版の
+# 行は正式版より新しい基底を指し、次の開発の例の右側は左側より新しい基底の開発版である（#566）。
 VERSIONING_MD = """# Fixture Versioning
 
 ## チャネルと ref
@@ -94,7 +96,8 @@ VERSIONING_MD = """# Fixture Versioning
 | 版 | 形 | 意味 |
 | --- | --- | --- |
 | 正式版 | `9.3.0` | 利用者が常用してよい |
-| 開発版 | `9.3.0-dev.1` | 検証中 |
+| 開発版 | `9.4.0-dev.1` | 検証中 |
+| 公開前の確認版 | `9.4.0-rc.1` | 正式版の候補 |
 
 - 接尾辞は次に出す正式版の版数へ付ける。`9.3.0` の次を開発するなら `9.4.0-dev.1`
 
@@ -253,11 +256,13 @@ def retarget_version(root: Path, version: str) -> None:
     edit(agents, f"主要プラグインです（v{VERSION}）", f"主要プラグインです（v{version}）")
 
     # 版の付け方の章は基底で比べる。例に並ぶ版数の基底が現行版より古ければ落ちるため、
-    # 現行版の例も次の版の例も、新しい基底へ寄せる。
+    # 現行版の例も次の版の例も、新しい基底へ寄せる。次の版の例（開発版の行と次の開発の例の
+    # 右側、公開前の確認版の行）は、新しい基底のさらに次の版へ寄せ、例どうしの関係を保つ。
     versioning = root / VERSIONING_MD_PATH
+    old_next, new_next = next_minor(VERSION), next_minor(version)
     edit_all(versioning, f"`{old_base}`", f"`{new_base}`", 2)
-    edit(versioning, f"`{old_base}-dev.1`", f"`{new_base}-dev.1`")
-    edit(versioning, f"`{next_minor(VERSION)}-dev.1`", f"`{next_minor(version)}-dev.1`")
+    edit_all(versioning, f"`{old_next}-dev.1`", f"`{new_next}-dev.1`", 2)
+    edit(versioning, f"`{old_next}-rc.1`", f"`{new_next}-rc.1`")
 
     plugin_readme = root / "plugins/ndf/README.md"
     edit(plugin_readme, f"## v{VERSION} へ更新するとき", f"## v{version} へ更新するとき")

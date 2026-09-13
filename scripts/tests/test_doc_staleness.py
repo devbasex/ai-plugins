@@ -445,7 +445,7 @@ def test_version_section_stale_example_fails(tree: Path) -> None:
     assert result.returncode != 0
     out = output_of(result)
     assert "9.2.1" in out and "9.3.0" in out
-    assert "L17" in out
+    assert "L18" in out
 
 
 def test_version_section_failure_names_the_canonical_document(tree: Path) -> None:
