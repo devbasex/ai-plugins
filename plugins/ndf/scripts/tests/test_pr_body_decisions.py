@@ -144,6 +144,9 @@ class Fake:
             return []
         return [json.loads(line) for line in self.log.read_text(encoding="utf-8").splitlines()]
 
+    def writes(self):
+        return [c for c in self.calls() if "PATCH" in c]
+
     def patched_body(self):
         return self.patched.read_bytes().decode("utf-8") if self.patched.exists() else None
 
@@ -183,10 +186,6 @@ def design_pr(fake, body, design=DESIGN, **flags):
         contents={"issues/issue-1-design.md": design, "issues/issue-1-requirements.md": "# 要求\n\n本文\n"},
         **flags,
     )
-
-
-def writes(fake):
-    return [c for c in fake.calls() if "PATCH" in c]
 
 
 # --- 突き合わせ（check） -------------------------------------------------------
@@ -490,14 +489,14 @@ def test_11_matching_section_is_not_written(fake):
     design_pr(fake, f"## Summary\n\n{EXPECTED}\n## Test plan\n")
     out = fake.run("sync", "7", "--repo", REPO)
     assert out.returncode == 0, out.stdout + out.stderr
-    assert not writes(fake)
+    assert not fake.writes()
 
 
 def test_12_write_that_does_not_stick_returns_1(fake):
     design_pr(fake, "## Summary\n", patch_effective=False)
     out = fake.run("sync", "7", "--repo", REPO)
     assert out.returncode == 1, out.stdout + out.stderr
-    assert writes(fake)
+    assert fake.writes()
 
 
 def test_12_unreadable_after_write_returns_2(fake):
@@ -526,7 +525,7 @@ def test_20_sync_does_not_write_to_non_design_pull_request(fake):
     design_pr(fake, "## Summary\n", head="feature/issue-1-x")
     out = fake.run("sync", "7", "--repo", REPO)
     assert out.returncode == 0
-    assert not writes(fake)
+    assert not fake.writes()
 
 
 @pytest.mark.parametrize("args", [[], ["verify", "7"], ["check", "abc"], ["check"], ["sync", "7", "--bogus"]])

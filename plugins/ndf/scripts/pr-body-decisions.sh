@@ -141,8 +141,7 @@ def decision_headings(text):
     return found
 
 
-def changed_markdown(head_sha):
-    raw = gh("--paginate", f"repos/{repo}/pulls/{pr}/files?per_page=100")
+def markdown_names(raw):
     # --paginate はページごとの配列を連結して出す。1 つずつ読み進める。
     decoder, pos, files = json.JSONDecoder(), 0, []
     try:
@@ -153,10 +152,14 @@ def changed_markdown(head_sha):
                 break
             page, pos = decoder.raw_decode(raw, pos)
             files += page
-        names = sorted(f["filename"] for f in files
-                       if f.get("status") != "removed" and f["filename"].endswith(".md"))
+        return sorted(f["filename"] for f in files
+                      if f.get("status") != "removed" and f["filename"].endswith(".md"))
     except (ValueError, KeyError, TypeError) as exc:
         raise Unreadable(f"変更したファイルの一覧を読めません: {exc}")
+
+
+def changed_markdown(head_sha):
+    names = markdown_names(gh("--paginate", f"repos/{repo}/pulls/{pr}/files?per_page=100"))
     docs = []
     for name in names:
         quoted = urllib.parse.quote(name, safe="/")
