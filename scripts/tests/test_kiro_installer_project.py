@@ -22,18 +22,15 @@ ROOT = Path(__file__).resolve().parents[2]
 INSTALLER = ROOT / "plugins" / "ndf" / "dev.kiro" / "install.sh"
 
 
-def make_env(home: Path) -> dict[str, str]:
+def run(*args: str, home: Path, cwd: Path | None = None) -> subprocess.CompletedProcess:
     # `--scope global` は HOME の下を導入先にする。誤って書き込んでも利用者の HOME に
     # 届かないよう、一時ディレクトリを HOME として渡す。
-    return {**os.environ, "HOME": str(home)}
-
-
-def run(*args: str, home: Path, cwd: Path | None = None) -> subprocess.CompletedProcess:
+    env = {**os.environ, "HOME": str(home)}
     return subprocess.run(
         ["bash", str(INSTALLER), *args],
         capture_output=True,
         text=True,
-        env=make_env(home),
+        env=env,
         cwd=cwd,
     )
 
@@ -83,7 +80,7 @@ def test_missing_prerequisite_stops_with_path_error(
 
     project = tmp_path / "project"
     project.mkdir()
-    env = make_env(tmp_path)
+    env = {**os.environ, "HOME": str(tmp_path)}
     proc = subprocess.run(
         [
             "bash",
