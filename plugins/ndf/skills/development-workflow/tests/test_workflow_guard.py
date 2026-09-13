@@ -827,3 +827,48 @@ def test_conflicting_modes_apply_the_highest_to_every_issue(repo: Path, state: P
     assert "実装" not in note_417.split(": ")[-1].split(" / ")
     assert "実装" in note_418.split(": ")[-1].split(" / ")
     assert "設計" not in note_418.split(": ")[-1].split(" / ")
+
+
+# --- R4-005: `_wf_seek_gh_verb` の状態遷移（現状固定） ----------------------
+#
+# `gh` の語順を追う状態機械は、`wf_merge_target` と `_wf_pr_create_body` の両方が使う。
+# 状態へ名前を付ける前に、語を 1 つずつ渡したときの状態の並びを現状の値で固定する
+# （対象コードは変更しない）。
+
+
+def seek_states(tokens: list[str], verb: str, start: str = "0") -> list[str]:
+    """`_wf_seek_gh_verb` へ語を順に渡し、各語の後の状態を並べて返す。"""
+    words = " ".join(shlex.quote(tok) for tok in tokens)
+    snippet = (
+        f"s={shlex.quote(start)}; for t in {words}; do "
+        f's=$(_wf_seek_gh_verb "$s" "$t" {shlex.quote(verb)}); printf "%s " "$s"; done'
+    )
+    result = run_lib(snippet)
+    assert result.returncode == 0, result.stderr
+    return result.stdout.split()
+
+
+@pytest.mark.parametrize(
+    ("tokens", "verb", "states"),
+    [
+        (["gh", "pr", "merge"], "merge", ["1", "2", "3"]),
+        (["gh", "pr", "create"], "create", ["1", "2", "3"]),
+        (["gh", "-R", "o/r", "pr", "merge"], "merge", ["1", "4", "1", "2", "3"]),
+        (["gh", "--repo", "o/r", "pr", "merge"], "merge", ["1", "4", "1", "2", "3"]),
+        (["gh", "--help", "pr", "merge"], "merge", ["1", "1", "2", "3"]),
+        (["gh", "gh", "pr", "merge"], "merge", ["1", "1", "2", "3"]),
+        (["gh", "pr", "create"], "merge", ["1", "2", "0"]),
+        (["gh", "issue"], "merge", ["1", "0"]),
+        (["echo", "gh"], "merge", ["0", "1"]),
+    ],
+    ids=["merge", "create", "short-repo", "long-repo", "flag", "gh-again",
+         "other-verb", "other-command", "not-gh"],
+)
+def test_seek_gh_verb_walks_the_states(tokens: list[str], verb: str, states: list[str]) -> None:
+    """現状固定: gh→pr→動詞で 3 に至り、`-R` は値の語を読み飛ばし、不一致で 0 に戻る。"""
+    assert seek_states(tokens, verb) == states
+
+
+def test_seek_gh_verb_keeps_the_reached_state() -> None:
+    """現状固定: 到達した 3 は、続く語が何であっても 3 のまま返す。"""
+    assert seek_states(["268", "gh", "--merge"], "merge", start="3") == ["3", "3", "3"]
