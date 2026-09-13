@@ -106,11 +106,15 @@ def link_targets(text: str) -> list[str]:
     return targets
 
 
+def _is_kept_char(ch: str) -> bool:
+    return ch in SLUG_KEEP_PUNCTUATION or unicodedata.category(ch)[0] in SLUG_KEEP_CATEGORIES
+
+
 def slugify(text: str) -> str:
     """GitHub's heading anchor: keep letters, marks, digits, space, '-', '_'."""
     kept = "".join(
         ch for ch in text.strip().lower()
-        if ch in SLUG_KEEP_PUNCTUATION or unicodedata.category(ch)[0] in SLUG_KEEP_CATEGORIES
+        if _is_kept_char(ch)
     )
     return kept.replace(" ", "-")
 
