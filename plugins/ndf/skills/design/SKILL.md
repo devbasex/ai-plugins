@@ -38,45 +38,8 @@ issue のことではない。
 ## モードごとの成果物
 
 **何を書くかはモードと領域の 2 つで決まる。** モードが水準を決め、領域が該当を決める。
-成果物ごとの要否表と中身は [references/deliverables.md](references/deliverables.md) にある。
-
-| 水準 | 対象が存在するとき | 対象が存在しないとき |
-| --- | --- | --- |
-| 必須 | そのモードで `design` を通すなら書く | 書かない。**対象が無いことを、下の書き先へ書く** |
-| 該当時 | 触る領域に当たれば書く | 書かない。理由も要らない |
-
-**「不要」を表す値は置かない。** どの成果物も、変更の中身が求めれば書く対象になる。モードが
-決めるのは無条件に求めるかどうかであって、書いてはいけない成果物を決めるものではない。
-
-### 設計の書き先
-
-| モード | 設計の書き先 | 設計 Pull Request |
-| --- | --- | --- |
-| `light` | 受け入れ条件を書いたファイルの節（`issues/` 配下） | 不要 |
-| `operation` | 実行の記録と同じファイルの節（置き場所は `operation-run.md` が決める） | 不要 |
-| `legacy-refactor` | 独立したファイル、または実装の Pull Request に載せる | 任意 |
-| `standard` | 独立したファイル | 必須 |
-
-独立したファイルの置き場所は `issues/` 配下とし、完了後に `plan-to-spec` が `docs/` へ移す。
-仕様と同じ場所に置くのは、同じ変更の記録が 2 箇所に分かれないようにするためである。
-
-### 省いた理由の書き先
-
-| モード | 書き先 |
-| --- | --- |
-| `light` / `operation` / `standard` | 仕様の「対象範囲（含まない）」 |
-| `legacy-refactor` | 設計文書の「決定の記録」 |
-
-**触らない領域の節は作らない。** 空の見出しを残すと、書き忘れと意図的な省略を読み手が
-区別できない。**`legacy-refactor` だけ書き先が違うのは、このモードが仕様を入力に取らない
-ためである。**
-
-独立したファイルにするのは、**設計として確定した内容と、実装の段階で入る計画の更新を、
-別の差分として読めるようにする**ためである。**設計の分量が小さく、仕様と混ざっても読み分け
-られるときだけ**、同じファイルの別の節でよい。判断は「**設計 Pull Request として単独で
-読めるか**」で見る。
-
-1 ファイルが 500 行を超えたら分割する（`markdown-writing` の分量の基準）。
+成果物の要否、水準、設計の書き先、設計 Pull Request の要否、省いた理由の書き先は
+[references/deliverables.md](references/deliverables.md) を唯一の定義として読む。
 
 ## 手順
 
@@ -94,12 +57,12 @@ issue のことではない。
 | 呼び出される約束（API・イベント・コマンド）を変える | [references/interface-api.md](references/interface-api.md) |
 | 画面を追加・変更する | [references/interface-ui.md](references/interface-ui.md) |
 | 非機能の条件が仕様にある | [references/nonfunctional.md](references/nonfunctional.md) |
-| **読み手へ渡す文書を作る**（`documentation`） | 出力の形に当たる `references/layout-<出力の形>.md`（[slide](references/layout-slide.md) / [document](references/layout-document.md) / [spreadsheet](references/layout-spreadsheet.md) / [page](references/layout-page.md)） |
+| **読み手へ渡す文書を作る**（`documentation`） | 共通の [references/layout-common.md](references/layout-common.md) と、出力の形に当たる参照 1 つ（[slide](references/layout-slide.md) / [document](references/layout-document.md) / [spreadsheet](references/layout-spreadsheet.md) / [page](references/layout-page.md)） |
 
 触らない領域の参照は読まない。
 
-**`documentation` では、読ませる参照を決めるのは触る領域ではなく出力の形である。**
-スライドと表計算では版面の決め方が違う。**対象の形のファイルだけを読む。**
+**`documentation` では、共通参照を先に読み、その後に対象の形のファイル 1 つだけを読む。**
+形態固有の参照を決めるのは触る領域ではなく出力の形である。
 
 **`light` / `operation` では、この表が起動の条件も決める。** 「すべての変更」以外の領域が
 1 つ以上該当するときにこの Skill を通し、1 つも当たらなければ通さない。「すべての変更」の行を
