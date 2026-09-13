@@ -2,7 +2,7 @@
 
 ## 関連リンク
 
-- 棚卸台帳: [docs/specifications/ndf-skill-inventory.md](../../docs/specifications/ndf-skill-inventory.md)
+- 棚卸台帳: [docs/specifications/ndf-skill-inventory.md](../../docs/specifications/ndf-skill-inventory/)
 - frontmatter 規約: [plugins/ndf-shared/skills/README.md](../../plugins/ndf/skills/README.md)
 - 直前のリリース: [issues/ndf-development-skills/](ndf-development-skills/)（v6.1.0 で Skill 29 → 34）
 

@@ -5,7 +5,7 @@
 - [issue #159](https://github.com/devbasex/ai-plugins/issues/159) — この計画の追跡先
 - [issue #236](https://github.com/devbasex/ai-plugins/issues/236) — OSS 運用の整備。この計画から分離した（Task 4 / 5 / 9 の移譲先）
 - [issue-158-llm-ensemble-for-agentic-development.md](issue-158-llm-ensemble-for-agentic-development.md) — 集めたデータの用途
-- [issue-113-cross-refactoring.md](issue-113-cross-refactoring.md) — データの発生源となる Skill の改修
+- [issue-113-cross-refactoring.md](old/issue-113-cross-refactoring.md) — データの発生源となる Skill の改修
 
 ## モード
 

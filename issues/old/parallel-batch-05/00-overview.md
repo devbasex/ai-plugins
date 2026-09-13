@@ -16,7 +16,7 @@
 | `/goal` で工程を通すとき | 設計レビューのマージ前で 1 度止まり、承認を待つ（`development-workflow` の該当節） |
 
 **このバッチの 8 件は、バッチ 04 が「次のまとまりへ回す」と明記して外したものである**
-（[バッチ 04 の全体指示](../old/parallel-batch-04/00-overview.md) の「このバッチに入れなかった
+（[バッチ 04 の全体指示](../parallel-batch-04/00-overview.md) の「このバッチに入れなかった
 課題」）。#266 と #221 は「#265 の運用を先に見る」として保留していたが、運用者の判断で着手する。
 
 ## 用語
@@ -317,6 +317,6 @@ bash scripts/build-runtime-plugins.sh
 
 ## 参照
 
-- [issues/old/parallel-batch-04/00-overview.md](../old/parallel-batch-04/00-overview.md) — 前のバッチの指示書
-- [docs/development-history/10-2026-09-02.md](../../docs/development-history/10-2026-09-02.md) — バッチ 04 の振り返り
+- [issues/old/parallel-batch-04/00-overview.md](../parallel-batch-04/00-overview.md) — 前のバッチの指示書
+- [docs/development-history/10-2026-09-02.md](../../../docs/development-history/10-2026-09-02.md) — バッチ 04 の振り返り
 - `plugins/ndf/skills/development-workflow/SKILL.md` — 工程の振り分けの基準
