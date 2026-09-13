@@ -267,22 +267,31 @@ def sync_section(body, span, expected, docs):
     return 1
 
 
+def build_comparison(head_sha, body):
+    docs = changed_markdown(head_sha)
+    same, span, actual, expected = compare(body, docs)
+    return body, docs, same, span, actual, expected, count_decisions(docs)
+
+
+def handle_comparison(sub, comparison):
+    body, docs, same, span, actual, expected, total = comparison
+    if same:
+        print(f"一致: 設計文書 {len(docs)} 本 / 決定 {total} 件")
+        return 0
+    if sub == "check":
+        report(actual, expected, docs)
+        return 1
+    return sync_section(body, span, expected, docs)
+
+
 def main():
     try:
         head_ref, head_sha, body = read_pr()
         if not head_ref.startswith("design/"):
             print(f"対象外: head が design/ で始まらない（{head_ref}）")
             return 0
-        docs = changed_markdown(head_sha)
-        same, span, actual, expected = compare(body, docs)
-        total = count_decisions(docs)
-        if same:
-            print(f"一致: 設計文書 {len(docs)} 本 / 決定 {total} 件")
-            return 0
-        if sub == "check":
-            report(actual, expected, docs)
-            return 1
-        return sync_section(body, span, expected, docs)
+        comparison = build_comparison(head_sha, body)
+        return handle_comparison(sub, comparison)
     except Unreadable as exc:
         print(f"ERROR: 読めなかった（一致とは扱わない）: {exc}", file=sys.stderr)
         return 2
