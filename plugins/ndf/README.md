@@ -20,7 +20,7 @@ plugins/ndf/
 ├── .claude-plugin/plugin.json   # Claude Code のマニフェスト
 ├── .codex-plugin/plugin.json    # Codex のマニフェスト
 ├── skills/                      # 配布 Skill の唯一の実体（45 個）
-├── skills/README.md             # Skill 執筆の規約
+├── skills/AUTHORING.md          # Skill 執筆の規約
 ├── manifests/                   # ランタイム別の配布 Skill 一覧
 ├── agents/                      # Claude Code のサブエージェント定義（8 個）
 ├── hooks/claude.json            # Claude Code の PreToolUse / SessionStart / Stop hook

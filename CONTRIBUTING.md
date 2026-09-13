@@ -110,7 +110,7 @@ Fix: 作業ツリーの書き込み先の判定が case のフォールスルー
 | 決めること | どこで決まるか |
 | --- | --- |
 | どのランタイムへ配るか | `plugins/ndf/manifests/<ランタイム>-skills.txt` に名前を 1 行書く |
-| frontmatter の書き方 | [plugins/ndf/skills/README.md](./plugins/ndf/skills/README.md) の規約 |
+| frontmatter の書き方 | [plugins/ndf/skills/AUTHORING.md](./plugins/ndf/skills/AUTHORING.md) の規約 |
 | 文章の書き方 | `plugins/ndf/skills/markdown-writing/SKILL.md` |
 | 新しいプラグインそのものを足すとき | [README.md](./README.md) の「新しいプラグインの作成手順」 |
 

@@ -5,7 +5,7 @@ NDF の Skill は任意のリポジトリに対して実行される。本文が
 パス・値を条件なしで実行させると、他のリポジトリでは成立せず、担当した AI が自分の判断で
 別のものへ振り替える。振り替えた事実は記録に残らない。
 
-規約の本文は plugins/ndf/skills/README.md「対象リポジトリを仮定しない」にある。本
+規約の本文は plugins/ndf/skills/AUTHORING.md「対象リポジトリを仮定しない」にある。本
 スクリプトはそのうち機械的に判定できる部分、すなわち **ai-plugins に固有の語が本文へ
 現れていないか**だけを検査する。書き方が正しいか（探し方を書いているか、形で分岐して
 いるか）は判定しない。
@@ -308,7 +308,7 @@ def main() -> int:
         for h in outside:
             print(f"  {h}", file=sys.stderr)
         print("\n対象リポジトリに無い場合の振る舞いを、コマンドとセットで書く。"
-              "書き方は plugins/ndf/skills/README.md「対象リポジトリを仮定しない」にある。",
+              "書き方は plugins/ndf/skills/AUTHORING.md「対象リポジトリを仮定しない」にある。",
               file=sys.stderr)
         return 1
 

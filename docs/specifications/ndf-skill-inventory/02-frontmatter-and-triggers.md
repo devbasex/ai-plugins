@@ -9,7 +9,7 @@
 ## frontmatter 見直しの結果
 
 [棚卸の計画](../../../issues/old/ndf-development-skills/07-tasks.md) の Task 0-7 で全 29 Skill の
-frontmatter を [規約](../../../plugins/ndf/skills/README.md) へ揃えた。台帳の表は測定日
+frontmatter を [規約](../../../plugins/ndf/skills/AUTHORING.md) へ揃えた。台帳の表は測定日
 時点の値であり、以下の変更は表へ反映していない。
 
 ### 発動制御
