@@ -24,10 +24,18 @@ LINK_RE = re.compile(r"(?<!!)\[[^\]]+\]\(([^)]+)\)")
 INLINE_HTML_RE = re.compile(r"<a\s+[^>]*href=[\"']([^\"']+)[\"']", re.IGNORECASE)
 TITLE_RE = re.compile(r"\s+(?:\"[^\"]*\"|'[^']*'|\([^)]*\))\s*$")
 HEADING_RE = re.compile(r"^#{1,6}\s+(.*)$")
+DEFAULT_SCAN_TARGETS = (
+    "README.md",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "KIRO.md",
+    "docs",
+    "plugins",
+)
 
 
 def iter_markdown_files(root: Path) -> list[Path]:
-    roots = [root / "README.md", root / "AGENTS.md", root / "CLAUDE.md", root / "KIRO.md", root / "docs", root / "plugins"]
+    roots = [root / target for target in DEFAULT_SCAN_TARGETS]
     files: list[Path] = []
     for item in roots:
         if item.is_file():
