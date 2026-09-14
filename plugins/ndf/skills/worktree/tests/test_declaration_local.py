@@ -421,6 +421,16 @@ def test_local_state_without_arguments_returns_error() -> None:
     assert got.returncode == 1 and got.stdout == ""
 
 
+def test_ignored_without_arguments_returns_error() -> None:
+    got = run_lib("wt_declaration_local_ignored")
+    assert got.returncode == 1 and got.stdout == ""
+
+
+def test_ignored_with_an_empty_argument_returns_error() -> None:
+    got = run_lib('wt_declaration_local_ignored ""')
+    assert got.returncode == 1 and got.stdout == ""
+
+
 def test_ignored_lists_operational_and_expose_keys(shared: Path) -> None:
     local_json(
         shared,
