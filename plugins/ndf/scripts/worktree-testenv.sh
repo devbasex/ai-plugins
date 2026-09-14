@@ -333,7 +333,13 @@ do_down() {
       return 1
     fi
   fi
-  wt_slot_release "$MAIN_DIR" "$TARGET"
+  # 破棄は済んでいる。解放を書けないまま 0 で返すと、割り当てが残って次の採番が
+  # 同じスロットを避ける。再実行すれば、破棄済みのプロジェクトへの down は 0 を
+  # 返し、解放の記録だけをやり直せる（#315）。
+  wt_slot_release "$MAIN_DIR" "$TARGET" || {
+    printf '%s\n' "破棄しましたが、スロットの解放を台帳へ記録できませんでした。down を再実行してください: $ENVIRONMENT" >&2
+    return 1
+  }
 }
 
 # --- test -------------------------------------------------------------------
@@ -451,7 +457,12 @@ do_unexpose() {
     fi
   fi
 
-  _close_record
+  # 閉じる手段は済んでいる。台帳を閉じられないと、次の公開が「別が公開中」で
+  # 拒まれ続ける。再実行で台帳の側だけをやり直せる（#315）。
+  _close_record || {
+    printf '%s\n' "公開を閉じる手段は実行しましたが、台帳を閉じられませんでした。unexpose を再実行してください: $url" >&2
+    return 1
+  }
 }
 
 # 台帳の公開の記録だけを閉じる。口を開けられなかったときの巻き戻しに使う。
@@ -536,9 +547,13 @@ do_expose() {
   if ! (cd "$TARGET" && env "NDF_EXPOSE_URL=$opened" "NDF_EXPOSE_HOST=$host" \
         "NDF_EXPOSE_ENVIRONMENT=$ENVIRONMENT" "NDF_EXPOSE_SLOT=$SLOT" \
         sh -c "$open_command"); then
-    # 口は開いていないので、閉じる手段は呼ばずに記録だけ戻す。
-    _close_record
-    printf '%s\n' "公開の手段が失敗しました。記録を戻しました" >&2
+    # 口は開いていないので、閉じる手段は呼ばずに記録だけ戻す。戻せなかったときに
+    # 「戻しました」と出すと、利用者は次の公開が拒まれる理由をたどれない（#315）。
+    if _close_record; then
+      printf '%s\n' "公開の手段が失敗しました。記録を戻しました" >&2
+    else
+      printf '%s\n' "公開の手段が失敗し、記録も戻せませんでした。unexpose で閉じてください: $opened" >&2
+    fi
     return 1
   fi
   printf '%s\n' "$opened"

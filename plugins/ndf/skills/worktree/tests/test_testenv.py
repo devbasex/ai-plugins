@@ -1430,3 +1430,69 @@ def test_test_warns_and_keeps_the_command_exit_code(main_repo: Path, worktree: P
 
     assert result["rc"] == 3, result
     assert "警告" in result["err"] and "最後に使った時刻" in result["err"], result
+
+
+def test_down_reports_when_the_release_cannot_be_recorded(main_repo: Path, worktree: Path) -> None:
+    """AC13: 破棄はしたが解放を書けなければ、1 を返して再実行を案内する。"""
+    dump = compose_ready(main_repo, worktree)
+    env = failing_jq(main_repo, ".released_at = (now")
+    env["WT_DOCKER_COMMAND"] = str(stub_docker(main_repo, dump))
+
+    result = run(["down", str(worktree)], cwd=main_repo, env=env)
+
+    assert result["rc"] == 1, result
+    assert "スロットの解放を台帳へ記録できませんでした" in result["err"], result
+    assert "down を再実行" in result["err"], result
+    assert dump.read_text().rstrip().endswith("down"), "破棄はしている"
+    assert registry(main_repo)["assignments"][0]["released_at"] is None
+
+
+def exposed(main_repo: Path, worktree: Path, **expose: str) -> None:
+    """公開を許す基準が載った割り当てを作り、公開する。"""
+    declare(main_repo, testenv={
+        "port_band": [20000, 29999],
+        "expose": {"enabled": True, "public_tag": "golden-public",
+                   "base_domain": "example.test", "open_command": "true", **expose},
+    })
+    run(["env", str(worktree)], cwd=main_repo)
+    golden(main_repo, worktree)
+    assert run(["expose", str(worktree)], cwd=main_repo)["rc"] == 0
+
+
+def test_unexpose_reports_when_the_record_cannot_be_closed(main_repo: Path, worktree: Path) -> None:
+    """AC14: 閉じる手段は実行したが台帳を閉じられなければ、1 を返して再実行を案内する。"""
+    marker = main_repo / "closed.txt"
+    exposed(main_repo, worktree, close_command=f"touch {marker}")
+
+    result = run(
+        ["unexpose", str(worktree)], cwd=main_repo,
+        env=failing_jq(main_repo, ".expose.closed_at = (now"),
+    )
+
+    assert result["rc"] == 1, result
+    assert "台帳を閉じられませんでした" in result["err"], result
+    assert "unexpose を再実行" in result["err"], result
+    assert marker.exists(), "閉じる手段は実行している"
+    assert registry(main_repo)["assignments"][0]["expose"]["closed_at"] is None
+
+
+def test_expose_reports_when_the_rollback_fails(main_repo: Path, worktree: Path) -> None:
+    """AC15: 公開の手段が失敗し、記録も戻せなければ、戻したとは言わず unexpose を案内する。"""
+    declare(main_repo, testenv={
+        "port_band": [20000, 29999],
+        "expose": {"enabled": True, "public_tag": "golden-public",
+                   "base_domain": "example.test", "open_command": "exit 1"},
+    })
+    run(["env", str(worktree)], cwd=main_repo)
+    golden(main_repo, worktree)
+
+    result = run(
+        ["expose", str(worktree)], cwd=main_repo,
+        env=failing_jq(main_repo, ".expose.closed_at = (now"),
+    )
+
+    assert result["rc"] == 1, result
+    assert "記録を戻しました" not in result["err"], result
+    assert "記録も戻せませんでした" in result["err"], result
+    assert "unexpose で閉じて" in result["err"], result
+    assert registry(main_repo)["assignments"][0]["expose"]["closed_at"] is None
