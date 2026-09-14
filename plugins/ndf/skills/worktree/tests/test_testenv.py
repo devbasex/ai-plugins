@@ -999,6 +999,30 @@ def test_up_passes_the_numbered_values_to_compose(main_repo: Path, worktree: Pat
     assert "compose -p main-wt-feature-x-" in body, body
 
 
+def test_up_passes_the_profile_services_to_compose(main_repo: Path, worktree: Path) -> None:
+    """`--profile` を渡すと、その profile の宣言のサービスを宣言順で compose up へ渡す。"""
+    (worktree / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+    declare(
+        main_repo,
+        testenv={"port_band": [20000, 29999], "port_roles": {"http": 0},
+                 "profiles": {"minimal": ["web", "api"]}},
+        localenv={"kind": "compose", "compose_files": ["docker-compose.yml"]},
+    )
+    dump = main_repo.parent / "compose-profile.txt"
+    stub = stub_docker(main_repo, dump)
+
+    env = os.environ.copy()
+    env["WT_DOCKER_COMMAND"] = str(stub)
+    proc = subprocess.run(
+        ["bash", str(TESTENV), "up", str(worktree), "--profile", "minimal"],
+        cwd=str(main_repo), env=env, capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc
+
+    body = dump.read_text()
+    assert body.rstrip().endswith("up -d web api"), body
+
+
 def test_role_names_become_upper_case_variables(main_repo: Path, worktree: Path) -> None:
     (worktree / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
     declare(
