@@ -73,6 +73,7 @@ MAIN_DIR=$(wt_main_dir "$TARGET") || MAIN_DIR=$(wt_main_dir) || exit 0
 DECLARATION=$(wt_declaration "$MAIN_DIR") || exit 0
 
 decl_get() { printf '%s' "$DECLARATION" | jq -r "$1" 2>/dev/null; }
+test_kind_get() { printf '%s' "$DECLARATION" | jq -r --arg k "$KIND" "$1" 2>/dev/null; }
 decl_raw() { printf '%s' "$DECLARATION" | jq -c "$1" 2>/dev/null; }
 
 # testenv の宣言が無いリポジトリでは何もしない。
@@ -110,8 +111,60 @@ do_tag() {
 
 # --- env --------------------------------------------------------------------
 
+# 失敗した env が新しく取った割り当てを返す。解放も台帳へ書けなければ、割り当てが
+# 残ったことを知らせる。排他を取れないことが原因なら、解放も同じ理由で失敗しうる。
+release_new_slot() {
+  wt_slot_release "$MAIN_DIR" "$TARGET" && return 0
+  printf '%s\n' "スロットの解放を台帳へ記録できませんでした。down を実行してください: $TARGET" >&2
+  return 1
+}
+
+# 役割一覧を帯の中で採番し、ports JSON を組み立てて出力する。帯を出た番号は他の
+# 用途と衝突するため、その場で理由を出して 1 を返す。解放は呼び出し元が判断する。
+build_assigned_ports() {
+  local slot=$1 band_low=$2 band_high=$3
+  local ports role role_number port
+  ports="{}"
+  while IFS=$'\t' read -r role role_number; do
+    [ -n "$role" ] || continue
+    port=$(wt_port_for "$band_low" "$slot" "$role_number") || continue
+    # 帯を出た番号は、他の用途と衝突する。黙って使わない。
+    if [ -n "$band_high" ] && [ "$port" -gt "$band_high" ]; then
+      printf '%s\n' "採番が帯を超えました（役割 $role のポート $port が上限 $band_high を超える）" >&2
+      return 1
+    fi
+    ports=$(printf '%s' "$ports" | jq --arg r "$role" --argjson p "$port" '. + {($r): $p}')
+  done < <(decl_get '.testenv.port_roles // {} | to_entries[] | "\(.key)\t\(.value)"')
+  printf '%s\n' "$ports"
+}
+
+env_assign_ports() {
+  local slot=$1 had_slot=$2 environment=$3
+  local band_low band_high ports
+  band_low=$(decl_get '.testenv.port_band[0] // empty')
+  band_high=$(decl_get '.testenv.port_band[1] // empty')
+  ports="{}"
+  if [ -n "$band_low" ]; then
+    ports=$(build_assigned_ports "$slot" "$band_low" "$band_high") || {
+      # 採番が帯を超えた。失敗した呼び出しがスロットを握ったままにしない。
+      [ "$had_slot" = 0 ] && release_new_slot
+      return 1
+    }
+    # 台帳に無いポートを JSON へ載せると、読む側はその値で起動を組み立てる。
+    # ポートの無い割り当てを残すと、次の env は「既にある」として同じスロットを
+    # 返し、ポートは {} のままになる。新しく取った割り当てなら解放する（#315）。
+    if ! wt_slot_set_ports "$MAIN_DIR" "$TARGET" "$ports"; then
+      printf '%s\n' "ポートを台帳へ記録できませんでした: $environment" >&2
+      [ "$had_slot" = 0 ] && release_new_slot
+      return 1
+    fi
+  fi
+
+  printf '%s\n' "$ports"
+}
+
 do_env() {
-  local branch environment slot band_low band_high ports role role_number port
+  local branch environment slot ports
   branch=$(target_branch) || true
   [ -n "$branch" ] || { printf '作業ツリーのブランチを取れません: %s\n' "$TARGET" >&2; return 1; }
 
@@ -124,42 +177,56 @@ do_env() {
     printf '空きスロットがありません（上限 %s）\n' "$((WT_SLOT_MAX + 1))" >&2
     return 1
   }
-
-  band_low=$(decl_get '.testenv.port_band[0] // empty')
-  band_high=$(decl_get '.testenv.port_band[1] // empty')
-  ports="{}"
-  if [ -n "$band_low" ]; then
-    while IFS=$'\t' read -r role role_number; do
-      [ -n "$role" ] || continue
-      port=$(wt_port_for "$band_low" "$slot" "$role_number") || continue
-      # 帯を出た番号は、他の用途と衝突する。黙って使わない。
-      if [ -n "$band_high" ] && [ "$port" -gt "$band_high" ]; then
-        printf '%s\n' "採番が帯を超えました（役割 $role のポート $port が上限 $band_high を超える）" >&2
-        # 失敗した呼び出しがスロットを握ったままにしない。
-        [ "$had_slot" = 0 ] && wt_slot_release "$MAIN_DIR" "$TARGET"
-        return 1
-      fi
-      ports=$(printf '%s' "$ports" | jq --arg r "$role" --argjson p "$port" '. + {($r): $p}')
-    done < <(decl_get '.testenv.port_roles // {} | to_entries[] | "\(.key)\t\(.value)"')
-    wt_slot_set_ports "$MAIN_DIR" "$TARGET" "$ports"
-  fi
+  ports=$(env_assign_ports "$slot" "$had_slot" "$environment") || return 1
 
   jq -n --arg environment "$environment" --argjson slot "$slot" \
         --arg worktree "$TARGET" --arg branch "$branch" --argjson ports "$ports" \
     '{environment: $environment, slot: $slot, worktree: $worktree, branch: $branch, ports: $ports}'
 }
 
+# 最後に使った時刻を台帳へ書く。**書けなくても止めない。** この値を読むのは reap
+# だけで、書けなくても割り当て・ポート・公開の記録は食い違わない。test は実行した
+# コマンドの終了コードをそのまま返す約束を持つため、記録の失敗で変えない（#315）。
+# 戻り値は常に 0 である。
+touch_or_warn() {
+  wt_slot_touch "$MAIN_DIR" "$TARGET" && return 0
+  printf '%s\n' "警告: 最後に使った時刻を台帳へ記録できませんでした。reap が早く止めることがあります: $ENVIRONMENT" >&2
+  return 0
+}
+
+# この作業ツリーの最新の割り当てレコードを、追加の抽出条件を付けて台帳から引く。
+# 条件に一致するものが無ければ `null` を返す。共通の骨組みを 1 箇所へ寄せる。
+_wt_latest_assignment() {
+  local predicate="${1:-true}"
+  wt_registry_visible "$(registry)" \
+    | jq -c --arg wt "$TARGET" \
+      "[.assignments[] | select(.worktree == \$wt and ($predicate))] | last" 2>/dev/null
+}
+
+# この作業ツリーの現在の割り当て（未解放の最後の 1 件）を 1 行の JSON で返す。
+# 無ければ `null`。「どの割り当てが現在有効か」の規則はここ 1 箇所が持つ。
+current_assignment() {
+  _wt_latest_assignment '.released_at == null'
+}
+
+
 # 起動と停止で使う共通の値を変数へ入れる。
 load_assignment() {
   ENVIRONMENT=""
   SLOT=""
   local row
-  row=$(wt_registry_visible "$(registry)" \
-    | jq -c --arg wt "$TARGET" \
-      '[.assignments[] | select(.released_at == null and .worktree == $wt)] | last' 2>/dev/null)
+  row=$(current_assignment)
   [ -n "$row" ] && [ "$row" != "null" ] || return 1
   ENVIRONMENT=$(printf '%s' "$row" | jq -r '.environment')
   SLOT=$(printf '%s' "$row" | jq -r '.slot')
+}
+
+# 割り当てを読み込む。無ければ do_env で初期化してから読み直す。
+# 起動と test で共通のフォールバックをここへ寄せる。
+ensure_assignment() {
+  load_assignment && return 0
+  do_env >/dev/null || return 1
+  load_assignment
 }
 
 # コンテナ実行系のコマンド。テストから差し替えられるようにしておく。
@@ -182,43 +249,56 @@ compose_env() {
     [ -n "$role" ] || continue
     role=$(printf '%s' "$role" | tr '[:lower:]' '[:upper:]' | sed 's/[^A-Z0-9]/_/g')
     COMPOSE_ENV+=("NDF_PORT_${role}=$port")
-  done < <(wt_registry_visible "$(registry)" \
-    | jq -r --arg wt "$TARGET" \
-      '[.assignments[] | select(.released_at == null and .worktree == $wt)] | last
-       | (.ports // {}) | to_entries[] | "\(.key)\t\(.value)"' 2>/dev/null)
+  done < <(current_assignment \
+    | jq -r '(.ports // {}) | to_entries[] | "\(.key)\t\(.value)"' 2>/dev/null)
+}
+
+# compose_files の宣言値 1 件が作業ツリーの中に収まるかを検証し、検証済みの絶対パスを
+# 標準出力へ返す。作業ツリーの外を指すパス（字面・symlink・実体のいずれか）は断る。
+validate_compose_file() {
+  local f=$1
+  # 宣言に `../` が入ると、作業ツリーの外の定義を読み込む。
+  if ! wt_is_safe_relative "$f"; then
+    printf '%s\n' "compose_files の $f は作業ツリーの外を指します" >&2
+    return 1
+  fi
+  # 字面だけでは足りない。作業ツリーの中に置かれた symlink が外を指していると、
+  # 実行系はその先を読む。symlink はたどらずに断る。
+  if [ -L "$TARGET/$f" ]; then
+    printf '%s\n' "compose_files の $f は symlink です。たどらずに終わります" >&2
+    return 1
+  fi
+  local resolved
+  resolved=$(wt_normalize_path "$TARGET/$f" "$TARGET")
+  case "$resolved" in
+    "$TARGET"/*) ;;
+    *)
+      printf '%s\n' "compose_files の $f の実体が作業ツリーの外（$resolved）にあります" >&2
+      return 1
+      ;;
+  esac
+  printf '%s\n' "$TARGET/$f"
+}
+
+# 宣言の compose_files を列挙し、`docker compose` へ渡す `-f` 引数を COMPOSE_FILE_ARGS
+# へ組み立てる。1 件でも検証に落ちれば 1 を返す。
+# 対象が 1 件も無ければ 2 を返し、実行系を呼ばずに終わらせる。
+compose_file_args() {
+  COMPOSE_FILE_ARGS=()
+  _wt_read_lines < <(decl_get '.localenv.compose_files // [] | .[]')
+  local f path
+  for f in "${WT_LINES[@]+"${WT_LINES[@]}"}"; do
+    [ -n "$f" ] || continue
+    path=$(validate_compose_file "$f") || return 1
+    COMPOSE_FILE_ARGS+=(-f "$path")
+  done
+  [ "${#COMPOSE_FILE_ARGS[@]}" -gt 0 ] || return 2
 }
 
 compose() {
-  local -a files=()
-  _wt_read_lines < <(decl_get '.localenv.compose_files // [] | .[]')
-  local f
-  for f in "${WT_LINES[@]+"${WT_LINES[@]}"}"; do
-    [ -n "$f" ] || continue
-    # 宣言に `../` が入ると、作業ツリーの外の定義を読み込む。
-    if ! wt_is_safe_relative "$f"; then
-      printf '%s\n' "compose_files の $f は作業ツリーの外を指します" >&2
-      return 1
-    fi
-    # 字面だけでは足りない。作業ツリーの中に置かれた symlink が外を指していると、
-    # 実行系はその先を読む。symlink はたどらずに断る。
-    if [ -L "$TARGET/$f" ]; then
-      printf '%s\n' "compose_files の $f は symlink です。たどらずに終わります" >&2
-      return 1
-    fi
-    local resolved
-    resolved=$(wt_normalize_path "$TARGET/$f" "$TARGET")
-    case "$resolved" in
-      "$TARGET"/*) ;;
-      *)
-        printf '%s\n' "compose_files の $f の実体が作業ツリーの外（$resolved）にあります" >&2
-        return 1
-        ;;
-    esac
-    files+=(-f "$TARGET/$f")
-  done
-  [ "${#files[@]}" -gt 0 ] || return 2
+  compose_file_args || return
   compose_env
-  env "${COMPOSE_ENV[@]}" "$(docker_command)" compose -p "$ENVIRONMENT" "${files[@]}" "$@"
+  env "${COMPOSE_ENV[@]}" "$(docker_command)" compose -p "$ENVIRONMENT" "${COMPOSE_FILE_ARGS[@]}" "$@"
 }
 
 # --- bake -------------------------------------------------------------------
@@ -258,15 +338,20 @@ do_bake() {
 # --- up / stop / down -------------------------------------------------------
 
 do_up() {
-  load_assignment || { do_env >/dev/null || return 1; load_assignment || return 1; }
+  ensure_assignment || return 1
   has_docker || { printf 'コンテナ実行系が見つかりません\n' >&2; return 1; }
 
   [ -n "$TAG" ] || TAG=$(do_tag) || TAG=""
   if [ -n "$TAG" ]; then
+    # 基準のタグは expose の関門が読む。書けないまま起動すると、載っている基準が
+    # 台帳に残らず、公開の可否を判定できない（#315）。
     wt_registry_update "$(registry)" '
       .assignments |= map(
         if .worktree == $wt and .released_at == null then .golden_tag = $tag else . end
-      )' --arg wt "$TARGET" --arg tag "$TAG"
+      )' --arg wt "$TARGET" --arg tag "$TAG" || {
+      printf '%s\n' "基準のタグを台帳へ記録できませんでした。起動していません: $ENVIRONMENT" >&2
+      return 1
+    }
   fi
 
   local -a services=()
@@ -274,7 +359,7 @@ do_up() {
     _wt_read_lines < <(printf '%s' "$DECLARATION" | jq -r --arg p "$PROFILE" '.testenv.profiles[$p] // [] | .[]' 2>/dev/null)
     services=("${WT_LINES[@]+"${WT_LINES[@]}"}")
   fi
-  wt_slot_touch "$MAIN_DIR" "$TARGET"
+  touch_or_warn
   # 定義に無いコンテナを削除する指定は付けない。稼働中のプロジェクトに定義外の
   # コンテナが属していることがあり、付けると削除される。
   compose up -d "${services[@]+"${services[@]}"}"
@@ -303,7 +388,13 @@ do_down() {
       return 1
     fi
   fi
-  wt_slot_release "$MAIN_DIR" "$TARGET"
+  # 破棄は済んでいる。解放を書けないまま 0 で返すと、割り当てが残って次の採番が
+  # 同じスロットを避ける。再実行すれば、破棄済みのプロジェクトへの down は 0 を
+  # 返し、解放の記録だけをやり直せる（#315）。
+  wt_slot_release "$MAIN_DIR" "$TARGET" || {
+    printf '%s\n' "破棄しましたが、スロットの解放を台帳へ記録できませんでした。down を再実行してください: $ENVIRONMENT" >&2
+    return 1
+  }
 }
 
 # --- test -------------------------------------------------------------------
@@ -322,36 +413,27 @@ exclude_evidence() {
   printf '.ndf-evidence/\n' >>"$exclude" 2>/dev/null || true
 }
 
-do_test() {
-  [ -n "$KIND" ] || { printf '%s\n' '--kind が要ります' >&2; return 1; }
-  local run base_url_env out_env
-  run=$(printf '%s' "$DECLARATION" | jq -r --arg k "$KIND" '.testenv.test_kinds[$k].run // empty' 2>/dev/null)
-  # 種類の宣言が無いリポジトリでは何もしない（受け入れ条件 39）。
-  [ -n "$run" ] || return 0
-
-  load_assignment || { do_env >/dev/null || return 1; load_assignment || return 1; }
-
-  local -a env_pairs=()
+build_test_env() {
+  local base_url_env out_env
+  TEST_ENV=()
   # 初期化を抑止する指定を渡す。渡さないと最初のテストが全体を作り直す構成がある。
   local key value
   while IFS=$'\t' read -r key value; do
     [ -n "$key" ] || continue
-    env_pairs+=("$key=$value")
-  done < <(printf '%s' "$DECLARATION" | jq -r --arg k "$KIND" \
-    '.testenv.test_kinds[$k].skip_reset // {} | to_entries[] | "\(.key)\t\(.value)"' 2>/dev/null)
+    TEST_ENV+=("$key=$value")
+  done < <(test_kind_get \
+    '.testenv.test_kinds[$k].skip_reset // {} | to_entries[] | "\(.key)\t\(.value)"')
 
-  base_url_env=$(printf '%s' "$DECLARATION" | jq -r --arg k "$KIND" '.testenv.test_kinds[$k].base_url_env // empty' 2>/dev/null)
+  base_url_env=$(test_kind_get '.testenv.test_kinds[$k].base_url_env // empty')
   if [ -n "$base_url_env" ]; then
     # 入口の役割名は宣言で決める。`http` 以外の名前を使うリポジトリがある。
     local port_role http_port
-    port_role=$(printf '%s' "$DECLARATION" | jq -r --arg k "$KIND" '.testenv.test_kinds[$k].port_role // "http"' 2>/dev/null)
-    http_port=$(wt_registry_visible "$(registry)" \
-      | jq -r --arg wt "$TARGET" --arg role "$port_role" \
-        '[.assignments[] | select(.released_at == null and .worktree == $wt)] | last | .ports[$role] // empty')
-    [ -n "$http_port" ] && env_pairs+=("$base_url_env=http://localhost:$http_port")
+    port_role=$(test_kind_get '.testenv.test_kinds[$k].port_role // "http"')
+    http_port=$(current_assignment | jq -r --arg role "$port_role" '.ports[$role] // empty')
+    [ -n "$http_port" ] && TEST_ENV+=("$base_url_env=http://localhost:$http_port")
   fi
 
-  out_env=$(printf '%s' "$DECLARATION" | jq -r --arg k "$KIND" '.testenv.test_kinds[$k].out_env // empty' 2>/dev/null)
+  out_env=$(test_kind_get '.testenv.test_kinds[$k].out_env // empty')
   if [ -n "$out_env" ]; then
     # 証跡は作業ツリー配下へ固定する。共有の保管先へは送らない。
     # 外から渡された置き場所も、作業ツリーの中に収まるかを実体で確かめる。
@@ -368,10 +450,21 @@ do_test() {
     # 追跡対象に入ると差分が埋まる。その作業ツリー限りの除外へ登録する
     # （リポジトリの .gitignore は触らない）。
     exclude_evidence
-    env_pairs+=("$out_env=$OUT")
+    TEST_ENV+=("$out_env=$OUT")
   fi
+}
 
-  wt_slot_touch "$MAIN_DIR" "$TARGET"
+do_test() {
+  [ -n "$KIND" ] || { printf '%s\n' '--kind が要ります' >&2; return 1; }
+  local run
+  run=$(test_kind_get '.testenv.test_kinds[$k].run // empty')
+  # 種類の宣言が無いリポジトリでは何もしない（受け入れ条件 39）。
+  [ -n "$run" ] || return 0
+
+  ensure_assignment || return 1
+  build_test_env || return 1
+
+  touch_or_warn
 
   # 実行中は reap の対象から外れるよう、ロックを握ったまま走らせる。
   # `flock` の有無で判定が変わらないよう、印はディレクトリで持つ。
@@ -382,10 +475,10 @@ do_test() {
     printf '%s\n' "同じテスト環境で別の実行が動いています: $ENVIRONMENT" >&2
     return 1
   }
-  (cd "$TARGET" && env "${env_pairs[@]+"${env_pairs[@]}"}" sh -c "$run")
+  (cd "$TARGET" && env "${TEST_ENV[@]+"${TEST_ENV[@]}"}" sh -c "$run")
   rc=$?
   wt_lock_release "$lock"
-  wt_slot_touch "$MAIN_DIR" "$TARGET"
+  touch_or_warn
   return "$rc"
 }
 
@@ -395,8 +488,7 @@ do_unexpose() {
   local close_command row url host environment slot
   # 公開の記録は、割り当てを解放した後にも残る。`down` の後で閉じることが
   # あるため、稼働中の割り当てを見る load_assignment には頼らない。
-  row=$(wt_registry_visible "$(registry)" \
-    | jq -c --arg wt "$TARGET" '[.assignments[] | select(.worktree == $wt and (.expose // {}).closed_at == null and .expose != null)] | last' 2>/dev/null)
+  row=$(_wt_latest_assignment '(.expose // {}).closed_at == null and .expose != null')
   url=""
   environment=""
   slot=""
@@ -421,20 +513,33 @@ do_unexpose() {
     fi
   fi
 
-  _close_record
+  # 閉じる手段は済んでいる。台帳を閉じられないと、次の公開が「別が公開中」で
+  # 拒まれ続ける。再実行で台帳の側だけをやり直せる（#315）。
+  _close_record || {
+    printf '%s\n' "公開を閉じる手段は実行しましたが、台帳を閉じられませんでした。unexpose を再実行してください: $url" >&2
+    return 1
+  }
+}
+
+# この作業ツリーの割り当てのうち $predicate に合う件へ $update を施す jq の式を組む。
+# 開く側と閉じる側で「.worktree == $wt かつ現在有効な 1 件」へ絞る骨組みを 1 箇所へ
+# 寄せる。呼び出し側は `--arg wt "$TARGET"` を渡す。
+_wt_update_current_expose() {
+  local predicate="$1" update="$2"
+  printf '.assignments |= map(if .worktree == $wt and (%s) then %s else . end)' \
+    "$predicate" "$update"
 }
 
 # 台帳の公開の記録だけを閉じる。口を開けられなかったときの巻き戻しに使う。
 _close_record() {
-  wt_registry_update "$(registry)" '
-    .assignments |= map(
-      if .worktree == $wt and .expose != null and .expose.closed_at == null
-      then .expose.closed_at = (now | todate) else . end
-    )' --arg wt "$TARGET"
+  wt_registry_update "$(registry)" \
+    "$(_wt_update_current_expose '.expose != null and .expose.closed_at == null' \
+        '.expose.closed_at = (now | todate)')" --arg wt "$TARGET"
 }
 
-do_expose() {
-  local enabled public_tag base_domain ttl loaded_tag host
+# 公開設定（有効化フラグ、公開基準タグ、ドメイン）を検証する。
+expose_validate_config() {
+  local enabled public_tag base_domain
   enabled=$(decl_get '.testenv.expose.enabled // false')
   if [ "$enabled" != "true" ]; then
     printf '拒否: testenv.expose.enabled が有効ではありません\n' >&2
@@ -447,68 +552,93 @@ do_expose() {
     printf '拒否: testenv.expose.public_tag と base_domain が要ります\n' >&2
     return 1
   fi
+}
+
+# 既に開いている公開 URL を取得・判定する。開いていればその URL を表示して 0 を返し、
+# 開いていなければ 1 を返す。
+expose_existing_url() {
+  local row already
+  row=$(_wt_latest_assignment '.released_at == null and .expose != null and .expose.closed_at == null')
+  already=$(printf '%s' "$row" | jq -r '.expose.url // empty' 2>/dev/null)
+  if [ -n "$already" ]; then
+    printf '%s\n' "$already"
+    return 0
+  fi
+  return 1
+}
+
+# 折り返しを使う公開は先着 1 本で排他する。**判定を排他区間の中で行う。**
+# 区間の外で数えると、同時に走った 2 本が両方とも通り抜ける。
+expose_record_assignment() {
+  local host="$1"
+  local ttl="$2"
+  local url="https://$host"
+
+  wt_registry_update "$(registry)" "
+    if ([.assignments[] | select(.expose != null and .expose.closed_at == null and .worktree != \$wt)] | length) > 0
+    then .
+    else $(_wt_update_current_expose '.released_at == null' \
+            '.expose = {url: $url, ttl: $ttl, opened_at: (now | todate), closed_at: null}')
+    end" --arg wt "$TARGET" --arg url "$url" --arg ttl "$ttl" || return 1
+
+  local opened
+  opened=$(current_assignment | jq -r '.expose.url // empty')
+  if [ -z "$opened" ]; then
+    printf '拒否: 別のテスト環境が公開中です（同時に開けるのは 1 本）\n' >&2
+    return 1
+  fi
+
+  printf '%s\n' "$opened"
+}
+
+do_expose() {
+  expose_validate_config || return 1
 
   load_assignment || { printf '拒否: 割り当てがありません\n' >&2; return 1; }
 
   # 既に開いているなら、開ける手段を再実行しない。再実行が失敗すると、口が
   # 開いたままで台帳だけ閉じることになる。
-  local already
-  already=$(wt_registry_visible "$(registry)" \
-    | jq -r --arg wt "$TARGET" '[.assignments[] | select(.released_at == null and .worktree == $wt and .expose != null and .expose.closed_at == null)] | last | .expose.url // empty')
-  if [ -n "$already" ]; then
-    printf '%s\n' "$already"
+  if expose_existing_url; then
     return 0
   fi
 
-  loaded_tag=$(wt_registry_visible "$(registry)" \
-    | jq -r --arg wt "$TARGET" '[.assignments[] | select(.released_at == null and .worktree == $wt)] | last | .golden_tag // empty')
+  local public_tag loaded_tag
+  public_tag=$(decl_get '.testenv.expose.public_tag // empty')
+  loaded_tag=$(current_assignment | jq -r '.golden_tag // empty')
   if [ "$loaded_tag" != "$public_tag" ]; then
     printf '拒否: 載っている基準（%s）が公開を許す基準（%s）と一致しません\n' \
       "${loaded_tag:-なし}" "$public_tag" >&2
     return 1
   fi
 
+  local base_domain ttl host open_command
+  base_domain=$(decl_get '.testenv.expose.base_domain // empty')
   ttl=$(decl_get '.testenv.expose.ttl // "8h"')
   host="wt${SLOT}.${base_domain}"
 
   # 実際に口を開ける手段はリポジトリごとに違う（共有の入口の設定、折り返しの
   # 中継など）。宣言が無ければ、記録だけ残して公開したことにはしない。
-  local open_command
   open_command=$(decl_get '.testenv.expose.open_command // empty')
   if [ -z "$open_command" ]; then
     printf '%s\n' "公開の手段が宣言されていません（testenv.expose.open_command）" >&2
     return 2
   fi
 
-  # 折り返しを使う公開は先着 1 本で排他する。**判定を排他区間の中で行う。**
-  # 区間の外で数えると、同時に走った 2 本が両方とも通り抜ける。
-  wt_registry_update "$(registry)" '
-    if ([.assignments[] | select(.expose != null and .expose.closed_at == null and .worktree != $wt)] | length) > 0
-    then .
-    else
-      .assignments |= map(
-        if .worktree == $wt and .released_at == null then
-          .expose = {url: $url, ttl: $ttl, opened_at: (now | todate), closed_at: null}
-        else . end
-      )
-    end' --arg wt "$TARGET" --arg url "https://$host" --arg ttl "$ttl" || return 1
-
   local opened
-  opened=$(wt_registry_visible "$(registry)" \
-    | jq -r --arg wt "$TARGET" '[.assignments[] | select(.released_at == null and .worktree == $wt)] | last | .expose.url // empty')
-  if [ -z "$opened" ]; then
-    printf '拒否: 別のテスト環境が公開中です（同時に開けるのは 1 本）\n' >&2
-    return 1
-  fi
+  opened=$(expose_record_assignment "$host" "$ttl") || return 1
 
   # 記録を先に置くのは、先着 1 本の関門を通ったことを示すため。口を開けられ
   # なければ記録を戻す。残すと、次の公開が「別が公開中」で拒まれ続ける。
   if ! (cd "$TARGET" && env "NDF_EXPOSE_URL=$opened" "NDF_EXPOSE_HOST=$host" \
         "NDF_EXPOSE_ENVIRONMENT=$ENVIRONMENT" "NDF_EXPOSE_SLOT=$SLOT" \
         sh -c "$open_command"); then
-    # 口は開いていないので、閉じる手段は呼ばずに記録だけ戻す。
-    _close_record
-    printf '%s\n' "公開の手段が失敗しました。記録を戻しました" >&2
+    # 口は開いていないので、閉じる手段は呼ばずに記録だけ戻す。戻せなかったときに
+    # 「戻しました」と出すと、利用者は次の公開が拒まれる理由をたどれない（#315）。
+    if _close_record; then
+      printf '%s\n' "公開の手段が失敗しました。記録を戻しました" >&2
+    else
+      printf '%s\n' "公開の手段が失敗し、記録も戻せませんでした。unexpose で閉じてください: $opened" >&2
+    fi
     return 1
   fi
   printf '%s\n' "$opened"
@@ -516,6 +646,34 @@ do_expose() {
 
 
 # --- reap -------------------------------------------------------------------
+
+# 実行中ロックや稼働状態を判定し、個別環境を停止する。
+reap_environment() {
+  local worktree="$1"
+  local environment="$2"
+  local slot="$3"
+  local lock
+
+  TARGET="$worktree"
+  ENVIRONMENT="$environment"
+  # `compose_env` はスロットも渡す。読まずに `compose` を呼ぶと、未定義の
+  # 変数を参照した時点で終了し（`set -u`）、コンテナが動いたまま残る。
+  SLOT="$slot"
+
+  # 実行中の作業ツリーはロックを握っている。握られていれば対象から外す。
+  lock=$(inuse_lock "$environment")
+  if wt_lock_is_held "$lock"; then
+    return 0
+  fi
+
+  # 起動していないものは止める必要がない。
+  if [ -z "$("$(docker_command)" ps -q --filter "label=com.docker.compose.project=$environment" 2>/dev/null)" ]; then
+    return 0
+  fi
+
+  printf '停止します: %s（%s）\n' "$environment" "$worktree"
+  compose stop
+}
 
 do_reap() {
   local idle_seconds
@@ -525,28 +683,10 @@ do_reap() {
   }
   has_docker || return 0
 
-  local worktree environment slot lock
+  local worktree environment slot
   while IFS=$'\t' read -r worktree environment slot; do
     [ -n "$worktree" ] || continue
-    TARGET="$worktree"
-    ENVIRONMENT="$environment"
-    # `compose_env` はスロットも渡す。読まずに `compose` を呼ぶと、未定義の
-    # 変数を参照した時点で終了し（`set -u`）、コンテナが動いたまま残る。
-    SLOT="$slot"
-
-    # 実行中の作業ツリーはロックを握っている。握られていれば対象から外す。
-    lock=$(inuse_lock "$environment")
-    if wt_lock_is_held "$lock"; then
-      continue
-    fi
-
-    # 起動していないものは止める必要がない。
-    if [ -z "$("$(docker_command)" ps -q --filter "label=com.docker.compose.project=$environment" 2>/dev/null)" ]; then
-      continue
-    fi
-
-    printf '停止します: %s（%s）\n' "$environment" "$worktree"
-    compose stop
+    reap_environment "$worktree" "$environment" "$slot"
   done < <(wt_registry_visible "$(registry)" \
     | jq -r --argjson idle "$idle_seconds" '
       [.assignments[]
