@@ -88,6 +88,18 @@ def test_review_worktree_is_excluded(main_repo: Path, worktree: Path, tmp_path: 
     assert "review-worktree" not in got.stdout
 
 
+def test_detached_worktree_in_worktrees_dir_has_empty_branch(main_repo: Path) -> None:
+    """`.worktrees/` 配下に detached HEAD の作業ツリーがあると、タブ以降のブランチ名が空で出力される。"""
+    detached = main_repo / ".worktrees" / "tmp"
+    git(main_repo, "worktree", "add", "-q", "--detach", str(detached))
+    got = run_lib(f'wt_dev_worktrees "{main_repo}"', cwd=main_repo)
+    lines = [ln for ln in got.stdout.splitlines() if ln]
+    assert len(lines) == 1, got.stdout
+    path, _, branch = lines[0].partition("\t")
+    assert Path(path).resolve() == detached.resolve()
+    assert branch == "", got.stdout
+
+
 def test_main_dir_itself_is_excluded(main_repo: Path) -> None:
     """作業ツリーが無いとき、主ディレクトリ自身を数に入れない。"""
     got = run_lib(f'wt_dev_worktrees "{main_repo}"', cwd=main_repo)
