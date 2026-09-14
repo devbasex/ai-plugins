@@ -73,6 +73,7 @@ MAIN_DIR=$(wt_main_dir "$TARGET") || MAIN_DIR=$(wt_main_dir) || exit 0
 DECLARATION=$(wt_declaration "$MAIN_DIR") || exit 0
 
 decl_get() { printf '%s' "$DECLARATION" | jq -r "$1" 2>/dev/null; }
+test_kind_get() { printf '%s' "$DECLARATION" | jq -r --arg k "$KIND" "$1" 2>/dev/null; }
 decl_raw() { printf '%s' "$DECLARATION" | jq -c "$1" 2>/dev/null; }
 
 # testenv の宣言が無いリポジトリでは何もしない。
@@ -379,7 +380,7 @@ exclude_evidence() {
 do_test() {
   [ -n "$KIND" ] || { printf '%s\n' '--kind が要ります' >&2; return 1; }
   local run base_url_env out_env
-  run=$(printf '%s' "$DECLARATION" | jq -r --arg k "$KIND" '.testenv.test_kinds[$k].run // empty' 2>/dev/null)
+  run=$(test_kind_get '.testenv.test_kinds[$k].run // empty')
   # 種類の宣言が無いリポジトリでは何もしない（受け入れ条件 39）。
   [ -n "$run" ] || return 0
 
@@ -391,19 +392,19 @@ do_test() {
   while IFS=$'\t' read -r key value; do
     [ -n "$key" ] || continue
     env_pairs+=("$key=$value")
-  done < <(printf '%s' "$DECLARATION" | jq -r --arg k "$KIND" \
-    '.testenv.test_kinds[$k].skip_reset // {} | to_entries[] | "\(.key)\t\(.value)"' 2>/dev/null)
+  done < <(test_kind_get \
+    '.testenv.test_kinds[$k].skip_reset // {} | to_entries[] | "\(.key)\t\(.value)"')
 
-  base_url_env=$(printf '%s' "$DECLARATION" | jq -r --arg k "$KIND" '.testenv.test_kinds[$k].base_url_env // empty' 2>/dev/null)
+  base_url_env=$(test_kind_get '.testenv.test_kinds[$k].base_url_env // empty')
   if [ -n "$base_url_env" ]; then
     # 入口の役割名は宣言で決める。`http` 以外の名前を使うリポジトリがある。
     local port_role http_port
-    port_role=$(printf '%s' "$DECLARATION" | jq -r --arg k "$KIND" '.testenv.test_kinds[$k].port_role // "http"' 2>/dev/null)
+    port_role=$(test_kind_get '.testenv.test_kinds[$k].port_role // "http"')
     http_port=$(current_assignment | jq -r --arg role "$port_role" '.ports[$role] // empty')
     [ -n "$http_port" ] && env_pairs+=("$base_url_env=http://localhost:$http_port")
   fi
 
-  out_env=$(printf '%s' "$DECLARATION" | jq -r --arg k "$KIND" '.testenv.test_kinds[$k].out_env // empty' 2>/dev/null)
+  out_env=$(test_kind_get '.testenv.test_kinds[$k].out_env // empty')
   if [ -n "$out_env" ]; then
     # 証跡は作業ツリー配下へ固定する。共有の保管先へは送らない。
     # 外から渡された置き場所も、作業ツリーの中に収まるかを実体で確かめる。
