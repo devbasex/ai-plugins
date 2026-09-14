@@ -1947,14 +1947,28 @@ def test_a_redirect_does_not_become_the_option_argument(command: str) -> None:
     [
         ("sed -i -e >log 's/a/b/' x.md", {"x.md", "log"}),
         ("sed -i -e <in 's/a/b/' x.md", {"x.md"}),
+    ],
+)
+def test_sed_expression_argument_waiting_across_redirect(
+    command: str, expected: set[str]
+) -> None:
+    """AC5: sed の `-e` が引数を待つ途中にリダイレクトを挟んでも引数待ちを維持する。"""
+    targets, rc = extract(command)
+    assert rc == 0
+    assert set(targets) == expected, targets
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
         ("sed -i -f >log script.sed x.md", {"x.md", "log"}),
         ("sed -i -f <in script.sed x.md", {"x.md"}),
     ],
 )
-def test_sed_argument_waiting_across_redirect(
+def test_sed_file_argument_waiting_across_redirect(
     command: str, expected: set[str]
 ) -> None:
-    """AC5 / 現状固定: sed の `-e` `-f` が引数を待つ途中にリダイレクトを挟んでも引数待ちを維持する。"""
+    """現状固定: sed の `-f` もリダイレクト越しにスクリプト名を受け取る。"""
     targets, rc = extract(command)
     assert rc == 0
     assert set(targets) == expected, targets
