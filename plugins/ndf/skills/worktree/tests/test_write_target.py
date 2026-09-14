@@ -2179,13 +2179,19 @@ def test_sed_after_end_of_options_finds_no_target() -> None:
     assert targets == [], targets
 
 
-@pytest.mark.parametrize("command", ["cp src -- -dest", "mv src -- -dest"])
-def test_cp_mv_after_end_of_options_reports_the_word_before_it(command: str) -> None:
-    """現状固定: `cp src -- -dest` / `mv src -- -dest` は `--` より前の `src` を宛先として返す。
+def test_cp_after_end_of_options_reports_the_word_before_it() -> None:
+    """現状固定: `cp src -- -dest` は `--` より前の `src` を宛先として返す。
 
     `--` の枝が無く `-dest` を `-*) continue` で読み飛ばすため、最後に残る
     被演算子は `src` になる。
     """
-    targets, rc = extract(command)
-    assert rc == 0, (command, targets)
-    assert targets == ["src"], (command, targets)
+    targets, rc = extract("cp src -- -dest")
+    assert rc == 0, targets
+    assert targets == ["src"], targets
+
+
+def test_mv_after_end_of_options_reports_the_word_before_it() -> None:
+    """現状固定: `mv src -- -dest` も `--` より前の `src` を宛先として返す。"""
+    targets, rc = extract("mv src -- -dest")
+    assert rc == 0, targets
+    assert targets == ["src"], targets
