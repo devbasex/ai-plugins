@@ -2128,3 +2128,32 @@ def test_a_shift_inside_a_sed_script_does_not_change_the_output(
     targets, rc = extract(command)
     assert rc == 0
     assert targets == [expected], targets
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "",
+        "echo hi >",
+        "sed -i 's/a/b/'",
+        "echo hi | tee",
+        "cp",
+        "mv",
+    ],
+)
+def test_boundary_missing_operands_produce_no_targets(command: str) -> None:
+    """下限境界: 空入力、宛先欠落リダイレクト、被演算子0件の各コマンドは空出力を返し終了コード1になる。"""
+    targets, rc = extract(command)
+    assert rc == 1, (command, targets)
+    assert targets == [], (command, targets)
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["cp a", "mv a"],
+)
+def test_boundary_cp_mv_single_operand_reports_as_dest(command: str) -> None:
+    """現状固定: 被演算子1件の cp / mv は、その1件を宛先として認識して終了コード0を返す。"""
+    targets, rc = extract(command)
+    assert rc == 0, (command, targets)
+    assert targets == ["a"], (command, targets)
