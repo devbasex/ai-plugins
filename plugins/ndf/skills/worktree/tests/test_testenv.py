@@ -165,6 +165,29 @@ def test_bake_reports_when_every_golden_volume_already_exists(
     assert result["out"] == "同じタグの基準が既にあります（1 件）\n", result
 
 
+def test_bake_creates_the_missing_golden_volume(main_repo: Path, worktree: Path) -> None:
+    """現状固定: 基準が無ければ volume を作り、作った旨を出して 0 を返す。"""
+    declare(main_repo, testenv={"golden_volumes": {"source-data": "golden-data"}})
+    run(["env", str(worktree)], cwd=main_repo)
+    # inspect は「未作成」、create と run は成功を返す偽の実行系。
+    docker = main_repo.parent / "creating-volume-docker"
+    docker.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = volume ] && [ "$2" = inspect ]; then exit 1; fi\n'
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    docker.chmod(0o755)
+    env = os.environ.copy()
+    env["WT_DOCKER_COMMAND"] = str(docker)
+
+    result = run(["bake", str(worktree), "--tag", "new-tag"], cwd=main_repo, env=env)
+
+    assert result["rc"] == 0, result
+    assert "基準を作りました" in result["out"], result
+    assert result["out"] == "基準を作りました: golden-data-new-tag\n", result
+
+
 # --- テストの実行 -----------------------------------------------------------
 
 
