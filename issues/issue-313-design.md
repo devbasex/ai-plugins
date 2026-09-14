@@ -194,8 +194,8 @@ graph TD
 ### 決定 3: 入力側のリダイレクトは語の頭の形で見分け、印へ置き換えない
 
 出力側と同じく字句解析の前に `<` を印へ置き換えれば、引用符の中の `<`（`cp a "<b"`）と区別できる。
-しかし字句解析は `<&` を記述子の複製として 1 語に繋げるため、`<` の置き換えだけを試作に入れると
-`cd sub && cat 2<&1 x; echo hi > f` の `f` が `/base/sub/f` から `/base/f` へ変わった。**この退行は既存の
+しかし字句解析は、`<` の直後の `&` を記述子の複製として 1 語に繋げる。`<` の置き換えだけを試作に入れると、
+この繋ぎが外れた。`cd sub && cat 2<&1 x; echo hi > f` の `f` は `/base/sub/f` から `/base/f` へ変わった。**この退行は既存の
 テスト 350 件を通過した。** 置き換えを採るなら字句解析の `&` の扱いも直す必要があり、`cd` の追跡の全体へ
 退行の範囲が広がる。
 
@@ -205,7 +205,7 @@ graph TD
 
 ### 決定 4: 読み飛ばしを `skip_next` / `take_next` の判定より前に置く
 
-bash はリダイレクトを引数の並びから除いてから命令へ渡すため、`sed -e >log s/a/b/ x.md` の `-e` の引数は
+bash はリダイレクトを引数の並びから除いてから命令へ渡す。`sed -e >log s/a/b/ x.md` の `-e` の引数は
 `s/a/b/` で、`cp -t >log dir a b` の宛先は `dir` である（どちらも実測）。後に置くと、オプションが印を
 引数として受け取る。試作では `cp -t >log dir a b` が `>` と `log` を出し、`dir` を出さなかった。
 
@@ -224,8 +224,12 @@ bash はリダイレクトを引数の並びから除いてから命令へ渡す
 ## テスト設計
 
 テストは `plugins/ndf/skills/worktree/tests/test_write_target.py` に置き、既存の `extract`（起点なし）と、
-起点を渡す既存の呼び方を使う。実行は `uv run --with pytest pytest plugins/ndf/skills/worktree/tests/test_write_target.py -q`、
-仕上げに `uv run --with pytest pytest scripts/tests plugins/ndf -q`。「変更前」は develop（f081502）での結果である。
+起点を渡す既存の呼び方を使う。「変更前」は develop（f081502）での結果である。
+
+| 実行の場面 | コマンド |
+| --- | --- |
+| 変更した枝の確認 | `uv run --with pytest pytest plugins/ndf/skills/worktree/tests/test_write_target.py -q` |
+| 仕上げ | `uv run --with pytest pytest scripts/tests plugins/ndf -q` |
 
 | 受け入れ条件 | 何で確かめるか | 変更前 |
 | --- | --- | --- |
