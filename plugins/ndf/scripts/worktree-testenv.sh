@@ -164,6 +164,16 @@ do_env() {
     '{environment: $environment, slot: $slot, worktree: $worktree, branch: $branch, ports: $ports}'
 }
 
+# 最後に使った時刻を台帳へ書く。**書けなくても止めない。** この値を読むのは reap
+# だけで、書けなくても割り当て・ポート・公開の記録は食い違わない。test は実行した
+# コマンドの終了コードをそのまま返す約束を持つため、記録の失敗で変えない（#315）。
+# 戻り値は常に 0 である。
+touch_or_warn() {
+  wt_slot_touch "$MAIN_DIR" "$TARGET" && return 0
+  printf '%s\n' "警告: 最後に使った時刻を台帳へ記録できませんでした。reap が早く止めることがあります: $ENVIRONMENT" >&2
+  return 0
+}
+
 # 起動と停止で使う共通の値を変数へ入れる。
 load_assignment() {
   ENVIRONMENT=""
@@ -278,10 +288,15 @@ do_up() {
 
   [ -n "$TAG" ] || TAG=$(do_tag) || TAG=""
   if [ -n "$TAG" ]; then
+    # 基準のタグは expose の関門が読む。書けないまま起動すると、載っている基準が
+    # 台帳に残らず、公開の可否を判定できない（#315）。
     wt_registry_update "$(registry)" '
       .assignments |= map(
         if .worktree == $wt and .released_at == null then .golden_tag = $tag else . end
-      )' --arg wt "$TARGET" --arg tag "$TAG"
+      )' --arg wt "$TARGET" --arg tag "$TAG" || {
+      printf '%s\n' "基準のタグを台帳へ記録できませんでした。起動していません: $ENVIRONMENT" >&2
+      return 1
+    }
   fi
 
   local -a services=()
@@ -289,7 +304,7 @@ do_up() {
     _wt_read_lines < <(printf '%s' "$DECLARATION" | jq -r --arg p "$PROFILE" '.testenv.profiles[$p] // [] | .[]' 2>/dev/null)
     services=("${WT_LINES[@]+"${WT_LINES[@]}"}")
   fi
-  wt_slot_touch "$MAIN_DIR" "$TARGET"
+  touch_or_warn
   # 定義に無いコンテナを削除する指定は付けない。稼働中のプロジェクトに定義外の
   # コンテナが属していることがあり、付けると削除される。
   compose up -d "${services[@]+"${services[@]}"}"
@@ -386,7 +401,7 @@ do_test() {
     env_pairs+=("$out_env=$OUT")
   fi
 
-  wt_slot_touch "$MAIN_DIR" "$TARGET"
+  touch_or_warn
 
   # 実行中は reap の対象から外れるよう、ロックを握ったまま走らせる。
   # `flock` の有無で判定が変わらないよう、印はディレクトリで持つ。
@@ -400,7 +415,7 @@ do_test() {
   (cd "$TARGET" && env "${env_pairs[@]+"${env_pairs[@]}"}" sh -c "$run")
   rc=$?
   wt_lock_release "$lock"
-  wt_slot_touch "$MAIN_DIR" "$TARGET"
+  touch_or_warn
   return "$rc"
 }
 

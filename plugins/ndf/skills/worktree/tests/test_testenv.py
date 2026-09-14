@@ -1355,3 +1355,78 @@ def test_env_reports_when_the_release_after_a_band_overflow_fails(main_repo: Pat
     assert "スロットの解放を台帳へ記録できませんでした" in result["err"], result
     rows = registry(main_repo)["assignments"]
     assert rows[0]["released_at"] is None, "解放は書けていない"
+
+
+def compose_ready(main_repo: Path, worktree: Path) -> Path:
+    """compose の定義と宣言を置き、割り当てを 1 つ作る。偽の実行系の書き出し先を返す。"""
+    (worktree / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+    declare(
+        main_repo,
+        testenv={"port_band": [20000, 29999], "port_roles": {"http": 0}},
+        localenv={"kind": "compose", "compose_files": ["docker-compose.yml"]},
+    )
+    run(["env", str(worktree)], cwd=main_repo)
+    return main_repo.parent / "compose-env.txt"
+
+
+def test_up_does_not_start_when_the_golden_tag_cannot_be_recorded(main_repo: Path, worktree: Path) -> None:
+    """AC11: 基準のタグを台帳へ書けなければ、起動せずに 1 を返す。"""
+    dump = compose_ready(main_repo, worktree)
+    env = failing_jq(main_repo, ".golden_tag = $tag")
+    env["WT_DOCKER_COMMAND"] = str(stub_docker(main_repo, dump))
+
+    result = run(["up", str(worktree), "--tag", "abc"], cwd=main_repo, env=env)
+
+    assert result["rc"] == 1, result
+    assert "基準のタグを台帳へ記録できませんでした" in result["err"], result
+    assert not dump.exists(), "compose up を呼ばない"
+
+
+def test_up_does_not_start_when_the_registry_lock_is_held(main_repo: Path, worktree: Path) -> None:
+    """AC12: 台帳の排他を取れないときも起動しない。待ちは 1 回分（上限 5 秒）で終わる。"""
+    import time
+
+    dump = compose_ready(main_repo, worktree)
+    lock = main_repo / ".git" / "ndf" / "worktree-registry.json.lockdir"
+    lock.mkdir()
+    (lock / "held").write_text("", encoding="utf-8")
+    (lock / "token").write_text("tok\n", encoding="utf-8")
+    (lock / "pid").write_text(f"{os.getpid()}\n", encoding="utf-8")
+    env = os.environ.copy()
+    env["WT_DOCKER_COMMAND"] = str(stub_docker(main_repo, dump))
+
+    started = time.monotonic()
+    result = run(["up", str(worktree), "--tag", "abc"], cwd=main_repo, env=env)
+    elapsed = time.monotonic() - started
+
+    assert result["rc"] == 1, result
+    assert "基準のタグを台帳へ記録できませんでした" in result["err"], result
+    assert not dump.exists(), "compose up を呼ばない"
+    assert elapsed < 8, elapsed
+
+
+def test_up_warns_but_starts_when_the_last_used_time_cannot_be_recorded(main_repo: Path, worktree: Path) -> None:
+    """AC16（up）: 最後に使った時刻を書けなくても、警告を出して起動する。"""
+    dump = compose_ready(main_repo, worktree)
+    env = failing_jq(main_repo, ".last_used_at = (now")
+    env["WT_DOCKER_COMMAND"] = str(stub_docker(main_repo, dump))
+
+    result = run(["up", str(worktree)], cwd=main_repo, env=env)
+
+    assert result["rc"] == 0, result
+    assert "警告" in result["err"] and "最後に使った時刻" in result["err"], result
+    assert dump.read_text().rstrip().endswith("up -d"), dump.read_text()
+
+
+def test_test_warns_and_keeps_the_command_exit_code(main_repo: Path, worktree: Path) -> None:
+    """AC16（test）: 最後に使った時刻を書けなくても、実行したコマンドの終了コードを返す。"""
+    declare(main_repo, testenv={"port_band": [20000, 29999], "test_kinds": {"unit": {"run": "exit 3"}}})
+    run(["env", str(worktree)], cwd=main_repo)
+
+    result = run(
+        ["test", str(worktree), "--kind", "unit"],
+        cwd=main_repo, env=failing_jq(main_repo, ".last_used_at = (now"),
+    )
+
+    assert result["rc"] == 3, result
+    assert "警告" in result["err"] and "最後に使った時刻" in result["err"], result
