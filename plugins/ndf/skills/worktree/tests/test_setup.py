@@ -118,6 +118,14 @@ def test_status_counts_worktrees(main_repo: Path, worktree: Path) -> None:
     assert "開発用の作業ツリー: 1 個" in result["out"], result["out"]
 
 
+def test_status_counts_zero_worktrees(main_repo: Path) -> None:
+    """現状固定: 開発用の作業ツリーが無い境界では 0 個と報告する。"""
+    result = run(["status"], cwd=main_repo)
+
+    assert result["rc"] == 0, result
+    assert "開発用の作業ツリー: 0 個" in result["out"], result["out"]
+
+
 def test_status_reports_the_gitignore_registration(main_repo: Path) -> None:
     result = run(["status"], cwd=main_repo)
     assert ".worktrees/ の登録: なし" in result["out"], result["out"]
