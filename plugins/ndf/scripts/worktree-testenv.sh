@@ -521,13 +521,20 @@ do_unexpose() {
   }
 }
 
+# この作業ツリーの割り当てのうち $predicate に合う件へ $update を施す jq の式を組む。
+# 開く側と閉じる側で「.worktree == $wt かつ現在有効な 1 件」へ絞る骨組みを 1 箇所へ
+# 寄せる。呼び出し側は `--arg wt "$TARGET"` を渡す。
+_wt_update_current_expose() {
+  local predicate="$1" update="$2"
+  printf '.assignments |= map(if .worktree == $wt and (%s) then %s else . end)' \
+    "$predicate" "$update"
+}
+
 # 台帳の公開の記録だけを閉じる。口を開けられなかったときの巻き戻しに使う。
 _close_record() {
-  wt_registry_update "$(registry)" '
-    .assignments |= map(
-      if .worktree == $wt and .expose != null and .expose.closed_at == null
-      then .expose.closed_at = (now | todate) else . end
-    )' --arg wt "$TARGET"
+  wt_registry_update "$(registry)" \
+    "$(_wt_update_current_expose '.expose != null and .expose.closed_at == null' \
+        '.expose.closed_at = (now | todate)')" --arg wt "$TARGET"
 }
 
 # 公開設定（有効化フラグ、公開基準タグ、ドメイン）を検証する。
@@ -567,16 +574,12 @@ expose_record_assignment() {
   local ttl="$2"
   local url="https://$host"
 
-  wt_registry_update "$(registry)" '
-    if ([.assignments[] | select(.expose != null and .expose.closed_at == null and .worktree != $wt)] | length) > 0
+  wt_registry_update "$(registry)" "
+    if ([.assignments[] | select(.expose != null and .expose.closed_at == null and .worktree != \$wt)] | length) > 0
     then .
-    else
-      .assignments |= map(
-        if .worktree == $wt and .released_at == null then
-          .expose = {url: $url, ttl: $ttl, opened_at: (now | todate), closed_at: null}
-        else . end
-      )
-    end' --arg wt "$TARGET" --arg url "$url" --arg ttl "$ttl" || return 1
+    else $(_wt_update_current_expose '.released_at == null' \
+            '.expose = {url: $url, ttl: $ttl, opened_at: (now | todate), closed_at: null}')
+    end" --arg wt "$TARGET" --arg url "$url" --arg ttl "$ttl" || return 1
 
   local opened
   opened=$(current_assignment | jq -r '.expose.url // empty')
