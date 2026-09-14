@@ -1987,6 +1987,22 @@ def test_an_input_file_is_not_the_destination(command: str) -> None:
     assert targets == ["b"], targets
 
 
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        ("sed -i s/a/b/ x.md <in >log y.md", {"x.md", "log", "y.md"}),
+        ("cp a <in >log b", {"log", "b"}),
+    ],
+)
+def test_consecutive_redirects_are_skipped_in_order(
+    command: str, expected: set[str]
+) -> None:
+    """入力・出力が連続しても、各対象と後続の被演算子を過不足なく出す。"""
+    targets, rc = extract(command)
+    assert rc == 0
+    assert set(targets) == expected, targets
+
+
 def test_a_read_write_redirect_is_skipped_and_its_file_reported() -> None:
     """AC9: `<>` は読み書きで開く。読み飛ばしつつ、開くファイルは印の枝が出す。"""
     targets, rc = extract("sed -i s/a/b/ x.md <>rw y.md")
