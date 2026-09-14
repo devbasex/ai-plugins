@@ -450,6 +450,29 @@ def test_default_keeps_head_for_other_runtimes(
     assert position_of(main_repo) == before
 
 
+def test_agy_later_invocation_does_not_follow(
+    main_repo: Path, worktree: Path,
+) -> None:
+    """agy の通し番号が 0 を越えた再呼び出しでは、有効な宣言があっても追従しない。"""
+    declared(main_repo, True)
+    git(worktree, "commit", "-q", "--allow-empty", "-m", "work")
+    before = position_of(main_repo)
+    payload = {
+        "cwd": str(main_repo),
+        "workspacePaths": [str(main_repo)],
+        "invocationNum": 1,
+        "conversationId": "c1",
+        "initialNumSteps": 4,
+    }
+
+    result = run_payload(main_repo, payload)
+
+    assert result["rc"] == 0
+    assert position_of(main_repo) == before
+    assert before[0] == "main"
+    assert before[1] != head_of(worktree)
+
+
 @pytest.mark.parametrize("value", [False, "true", 1, None], ids=["false", "str-true", "one", "null"])
 def test_non_boolean_true_does_not_follow(main_repo: Path, worktree: Path, value: object) -> None:
     """`follow_branch` が真偽値の true でなければ、書かないときと同じく動かない（AC5）。"""

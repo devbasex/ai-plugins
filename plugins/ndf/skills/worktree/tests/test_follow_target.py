@@ -54,6 +54,14 @@ def test_detached_worktree_is_excluded_from_branch_count() -> None:
 # --- 一覧の取得（受け入れ条件 15） ------------------------------------------
 
 
+def test_dev_worktrees_rejects_empty_main_dir() -> None:
+    """主ディレクトリが空なら、何も出力せず終了コード 1 を返す。"""
+    got = run_lib("wt_dev_worktrees \"\"")
+
+    assert got.returncode == 1
+    assert got.stdout == ""
+
+
 def test_dev_worktrees_lists_only_worktrees_dir(main_repo: Path, worktree: Path) -> None:
     got = run_lib(f'wt_dev_worktrees "{main_repo}"', cwd=main_repo)
     lines = [ln for ln in got.stdout.splitlines() if ln]
