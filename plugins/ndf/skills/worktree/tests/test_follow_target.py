@@ -71,3 +71,24 @@ def test_main_dir_itself_is_excluded(main_repo: Path) -> None:
     """作業ツリーが無いとき、主ディレクトリ自身を数に入れない。"""
     got = run_lib(f'wt_dev_worktrees "{main_repo}"', cwd=main_repo)
     assert got.stdout.strip() == "", got.stdout
+
+
+# --- 追従を有効にする宣言（#610） -------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("declaration", "expected"),
+    [
+        ('{"version":1,"follow_branch":true}', 0),
+        ('{"version":1,"follow_branch":false}', 1),
+        ('{"version":1,"follow_branch":"true"}', 1),
+        ('{"version":1,"follow_branch":1}', 1),
+        ('{"version":1,"follow_branch":null}', 1),
+        ('{"version":1}', 1),
+        ("", 1),
+    ],
+)
+def test_follow_enabled_only_for_boolean_true(declaration: str, expected: int) -> None:
+    """`follow_branch` が真偽値の true のときだけ 0 を返す。git は呼ばない（受け入れ条件 5）。"""
+    got = run_lib(f"wt_follow_enabled '{declaration}'; echo \"exit=$?\"")
+    assert got.stdout.strip() == f"exit={expected}", got.stdout + got.stderr

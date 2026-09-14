@@ -185,7 +185,7 @@ bash plugins/playwright-kit/dev.kiro/install.sh       # Kiro CLI
 | 主ディレクトリの保護対象パスを編集しようとすると案内が出る | tool 実行前 | `PreToolUse` | `PreToolUse` | — | `PreToolUse` |
 | 作業ツリーで作業する旨の案内がプロンプトごとに出る | プロンプト送信時 | — | — | `userPromptSubmit` | — |
 | 主ディレクトリに残った未コミット変更が提示される | セッション開始時 | `SessionStart` | `SessionStart` | `agentSpawn` | `PreInvocation` |
-| 主ディレクトリのブランチが稼働中の作業ツリーへ追従する | セッション開始時 | `SessionStart` | `SessionStart` | `agentSpawn` | `PreInvocation` |
+| 主ディレクトリのブランチが稼働中の作業ツリーへ追従する（既定では動かさない。宣言の `follow_branch: true` で有効にする） | セッション開始時 | `SessionStart` | `SessionStart` | `agentSpawn` | `PreInvocation` |
 
 Kiro CLI に tool 実行前の案内が無いのは、この事象でモデルへ案内を渡す手段が終了コード 2 に
 限られ、それが tool の実行を拒否するためです。拒否しない方針のもとでは置けないため、パスを

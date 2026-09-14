@@ -1761,6 +1761,19 @@ wt_follow_target() {
   fi
 }
 
+# 宣言が主ディレクトリの追従を有効にしているかを終了コードで返す。git は呼ばず、
+# 引数の JSON だけで判定する。
+#
+# **追従は既定で行わない**（#610 の決定 2）。並列に動くエージェントのどれが開始しても
+# 主ディレクトリの HEAD が動かないようにするためで、`follow_branch` が真偽値の `true`
+# のときだけ 0 を返す。`"true"` / `1` / `null` / 項目なし / 空の入力はすべて 1 になる。
+# 使い方: wt_follow_enabled "<宣言の JSON>"
+wt_follow_enabled() {
+  local decl="${1:-}"
+  [ -n "$decl" ] || return 1
+  printf '%s' "$decl" | jq -e '.follow_branch == true' >/dev/null 2>&1 || return 1
+}
+
 # 主ディレクトリの既定ブランチ名を出力する。origin の HEAD が指す先を優先し、
 # 取れなければ main / master の順で存在するものを返す。
 wt_default_branch() {

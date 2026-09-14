@@ -22,7 +22,12 @@
     },
     "base_branch": {
       "type": "string",
-      "description": "開発の起点ブランチ。作業ツリーの分岐元と主ディレクトリの追従先になる。未指定なら origin の HEAD が指すブランチを使う。指定した名前が origin にもローカルにも無いときは既定へ落とさず解決に失敗する"
+      "description": "開発の起点ブランチ。作業ツリーの分岐元になり、follow_branch が true のときは主ディレクトリの追従先にもなる。未指定なら origin の HEAD が指すブランチを使う。指定した名前が origin にもローカルにも無いときは既定へ落とさず解決に失敗する"
+    },
+    "follow_branch": {
+      "type": "boolean",
+      "default": false,
+      "description": "true のときだけ、セッション開始時の hook が主ディレクトリのブランチを稼働中の作業ツリーへ detached HEAD で追従させる。既定では主ディレクトリの HEAD を動かさない。真偽値以外は false と同じ"
     },
     "production_branch": {
       "type": "string",
