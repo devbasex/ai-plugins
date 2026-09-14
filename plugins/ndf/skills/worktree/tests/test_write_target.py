@@ -2064,6 +2064,25 @@ def test_a_joined_input_redirect_after_the_target_directory_is_split() -> None:
     assert targets == ["dir"], targets
 
 
+@pytest.mark.parametrize(
+    "command",
+    ["cp -t <in dir a b", "cp -t < in dir a b", "mv -t <in dir a b"],
+)
+def test_an_input_redirect_between_the_option_and_its_directory_is_skipped(
+    command: str,
+) -> None:
+    """`-t` が引数を待つ途中（`take_next=1`）の入力側リダイレクトも読み飛ばす。
+
+    `_wt_extract_cp_mv_target` は `take_next` を見る前にリダイレクトを飛ばす。出力側は
+    `cp -t >log dir a b` で固定済みだが、入力側は印へ置き換わらず語のまま残るため、
+    経路が別である。飛ばし損ねると `-t` が `in` を宛先として受け取り、`dir` が
+    出なくなる。現状の出力（宛先 `dir` のみ）を固定する。
+    """
+    targets, rc = extract(command)
+    assert rc == 0, command
+    assert targets == ["dir"], (command, targets)
+
+
 def test_a_joined_read_write_redirect_is_split() -> None:
     """AC10: `b<>rw` は `b` が被演算子、`rw` が開かれるファイルである。"""
     targets, rc = extract("cp a b<>rw")
