@@ -11,26 +11,17 @@ import pytest
 from worktree_helpers import run_lib
 
 
-def _run_extract(command: str, base: str | None = None) -> tuple[list[str], int]:
+def extract(command: str) -> tuple[list[str], int]:
     # 改行を含むコマンドも渡せるよう、ヒアドキュメントで受け渡す。
     # 引数へ埋めると、改行が字面の `\n` になって 1 行に潰れる。
-    target_cmd = (
-        'wt_extract_write_target "$cmd"'
-        if base is None
-        else f'wt_extract_write_target "$cmd" "{base}"'
-    )
     snippet = (
         "cmd=$(cat <<'WT_EOF'\n" + command + "\nWT_EOF\n)\n"
-        f"{target_cmd}; echo rc=$?"
+        'wt_extract_write_target "$cmd"; echo rc=$?'
     )
     got = run_lib(snippet)
     lines = [ln for ln in got.stdout.splitlines() if ln]
     rc = int(lines.pop().removeprefix("rc="))
     return lines, rc
-
-
-def extract(command: str) -> tuple[list[str], int]:
-    return _run_extract(command)
 
 
 @pytest.mark.parametrize(
@@ -509,7 +500,14 @@ def extract_at(command: str, base: str) -> tuple[list[str], int]:
     起点を渡した場合、出力は絶対パスになる。同じコマンドの中で先に実行される
     `cd` を反映するため、字面のままでは解決できない。
     """
-    return _run_extract(command, base)
+    snippet = (
+        "cmd=$(cat <<'WT_EOF'\n" + command + "\nWT_EOF\n)\n"
+        f'wt_extract_write_target "$cmd" "{base}"; echo rc=$?'
+    )
+    got = run_lib(snippet)
+    lines = [ln for ln in got.stdout.splitlines() if ln]
+    rc = int(lines.pop().removeprefix("rc="))
+    return lines, rc
 
 
 @pytest.mark.parametrize(
