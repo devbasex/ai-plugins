@@ -1880,3 +1880,171 @@ def test_a_brace_group_still_carries_cd_outside_itself() -> None:
     targets, rc = extract_at("{ cd .worktrees/x; }; cp a.txt README.md", "/base")
     assert rc == 0
     assert targets == ["/base/.worktrees/x/README.md"]
+
+
+# --- リダイレクトを挟んだ被演算子（#313） ------------------------------------
+#
+# bash はリダイレクトを引数の並びから取り除いてから命令を実行するため、リダイレクトの
+# 前後の被演算子は同じ並びに属する。出力の順序は契約に含めないため、集合で比べる。
+
+
+def test_operands_after_an_output_redirect_are_still_targets() -> None:
+    """AC1: リダイレクトより後ろの被演算子も書き込み先として出す。"""
+    targets, rc = extract("sed -i 's/a/b/' x.md >log y.md")
+    assert rc == 0
+    assert set(targets) == {"x.md", "y.md", "log"}, targets
+
+
+@pytest.mark.parametrize(
+    "redirect",
+    ["2>&1", "2>/dev/null", "&>log", ">&log", ">& log", ">>log"],
+)
+def test_every_output_redirect_form_is_skipped(redirect: str) -> None:
+    """AC2: 記述子の複製・`/dev/null`・`&>`・`>&`・追記のどれを挟んでも後ろの語が出る。"""
+    targets, rc = extract(f"sed -i 's/a/b/' x.md {redirect} y.md")
+    assert rc == 0
+    assert "y.md" in targets, targets
+    assert "/dev/null" not in targets, targets
+    assert not any(t.isdigit() for t in targets), targets
+
+
+@pytest.mark.parametrize("command", ["cp a b >log c", "mv a b >log c"])
+def test_the_destination_after_a_redirect_wins(command: str) -> None:
+    """AC3: リダイレクトの後ろの語が最後の被演算子で、宛先になる。"""
+    targets, rc = extract(command)
+    assert rc == 0
+    assert "c" in targets, targets
+    assert "b" not in targets, targets
+
+
+def test_tee_keeps_collecting_after_a_redirect() -> None:
+    """AC4: tee はリダイレクトの後ろのファイルへも書き込む。"""
+    targets, rc = extract("tee a >log b")
+    assert rc == 0
+    assert set(targets) == {"a", "b", "log"}, targets
+
+
+def test_a_redirect_between_the_command_and_its_operands_is_skipped() -> None:
+    """AC5: 命令名と被演算子の間のリダイレクトを読み飛ばす。"""
+    targets, rc = extract("sed -i >log 's/a/b/' x.md")
+    assert rc == 0
+    assert "x.md" in targets, targets
+
+
+@pytest.mark.parametrize("command", ["cp -t >log dir a b", "cp a >log -t dir b"])
+def test_a_redirect_does_not_become_the_option_argument(command: str) -> None:
+    """AC5: `-t` はリダイレクトを飛ばした先の語を受け取る。"""
+    targets, rc = extract(command)
+    assert rc == 0
+    assert "dir" in targets, targets
+    assert not {"a", "b", ">"} & set(targets), targets
+
+
+def test_operands_after_a_redirect_follow_a_cd() -> None:
+    """AC11: 起点を渡した呼び方でも、リダイレクトの後ろの語が `cd` の先で解決される。"""
+    targets, rc = extract_at("cd sub && sed -i s/a/b/ x.md >log y.md", "/base")
+    assert rc == 0
+    assert set(targets) == {"/base/sub/x.md", "/base/sub/y.md", "/base/sub/log"}, targets
+
+
+def test_a_separator_after_a_redirect_still_stops_the_scan() -> None:
+    """AC12: リダイレクトを読み飛ばしても、区切りで走査は止まる。"""
+    targets, rc = extract("cp a b 2>&1 || echo c")
+    assert rc == 0
+    assert targets == ["b"], targets
+
+
+# --- 入力側のリダイレクト（#313） ---------------------------------------------
+#
+# 入力側の語は印へ置き換わらず、語のまま残る。被演算子として読むと、宛先の位置を奪う
+# （`cp a b < in` の宛先が `in` になる）。
+
+
+@pytest.mark.parametrize(
+    "redirect",
+    ["<in", "< in", "<<<word", "<<< word", "2<in", "<&0"],
+)
+def test_an_input_redirect_is_not_an_operand(redirect: str) -> None:
+    """AC6: 入力側のリダイレクトとその被演算子を読み飛ばし、後ろの語は出す。"""
+    targets, rc = extract(f"sed -i s/a/b/ x.md {redirect} y.md")
+    assert rc == 0
+    assert set(targets) == {"x.md", "y.md"}, targets
+
+
+@pytest.mark.parametrize("opener", ["<<EOF", "<< EOF"])
+def test_a_heredoc_opener_is_not_an_operand(opener: str) -> None:
+    """AC7: ヒアドキュメントの開始を挟んでも、前後の被演算子だけが出る。"""
+    targets, rc = extract(f"sed -i s/a/b/ x.md {opener} y.md\nbody\nEOF")
+    assert rc == 0
+    assert set(targets) == {"x.md", "y.md"}, targets
+
+
+@pytest.mark.parametrize("command", ["cp a b <in", "cp a b < in"])
+def test_an_input_file_is_not_the_destination(command: str) -> None:
+    """AC8: 入力側のリダイレクトの被演算子は宛先にならない。"""
+    targets, rc = extract(command)
+    assert rc == 0
+    assert targets == ["b"], targets
+
+
+def test_a_read_write_redirect_is_skipped_and_its_file_reported() -> None:
+    """AC9: `<>` は読み書きで開く。読み飛ばしつつ、開くファイルは印の枝が出す。"""
+    targets, rc = extract("sed -i s/a/b/ x.md <>rw y.md")
+    assert rc == 0
+    assert set(targets) == {"x.md", "y.md", "rw"}, targets
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["cp a b<in", "cp a b< in", "cp a b<&0", "cp a b<<<word"],
+)
+def test_an_input_redirect_joined_to_the_operand_is_split(command: str) -> None:
+    """AC10: 前の被演算子に密着した入力側のリダイレクトを、被演算子と分けて読む。"""
+    targets, rc = extract(command)
+    assert rc == 0
+    assert targets == ["b"], targets
+
+
+def test_a_joined_input_redirect_in_sed_operands_is_split() -> None:
+    """AC10: sed の被演算子でも `<` の前だけが被演算子である。"""
+    targets, rc = extract("sed -i s/a/b/ x.md<in y.md")
+    assert rc == 0
+    assert set(targets) == {"x.md", "y.md"}, targets
+
+
+def test_a_joined_input_redirect_after_the_target_directory_is_split() -> None:
+    """AC10: `-t` が受け取るのは `<` の前である。"""
+    targets, rc = extract("cp -t dir<in a b")
+    assert rc == 0
+    assert targets == ["dir"], targets
+
+
+def test_a_joined_read_write_redirect_is_split() -> None:
+    """AC10: `b<>rw` は `b` が被演算子、`rw` が開かれるファイルである。"""
+    targets, rc = extract("cp a b<>rw")
+    assert rc == 0
+    assert set(targets) == {"b", "rw"}, targets
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [("cp <(echo) dest", "dest"), ("cp a<(echo) d", "d")],
+)
+def test_a_process_substitution_is_an_operand(command: str, expected: str) -> None:
+    """AC13: `<(` はリダイレクトではなく、被演算子の一部である。"""
+    targets, rc = extract(command)
+    assert rc == 0
+    assert targets == [expected], targets
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [("sed -i 's/<br>/x/' y.md", "y.md"), ("sed -e 's/<a/b/' -i x.md", "x.md")],
+)
+def test_a_shift_inside_a_sed_script_does_not_change_the_output(
+    command: str, expected: str
+) -> None:
+    """AC14: 引用符の中の `<` を持つスクリプトは出力を変えない。"""
+    targets, rc = extract(command)
+    assert rc == 0
+    assert targets == [expected], targets
