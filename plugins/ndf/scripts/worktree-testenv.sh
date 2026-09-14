@@ -224,8 +224,11 @@ compose_env() {
     | jq -r '(.ports // {}) | to_entries[] | "\(.key)\t\(.value)"' 2>/dev/null)
 }
 
-compose() {
-  local -a files=()
+# 宣言の compose_files を検証し、`docker compose` へ渡す `-f` 引数を COMPOSE_FILE_ARGS
+# へ組み立てる。作業ツリーの外を指すパス（字面・symlink・実体のいずれか）は断る。
+# 対象が 1 件も無ければ 2 を返し、実行系を呼ばずに終わらせる。
+compose_file_args() {
+  COMPOSE_FILE_ARGS=()
   _wt_read_lines < <(decl_get '.localenv.compose_files // [] | .[]')
   local f
   for f in "${WT_LINES[@]+"${WT_LINES[@]}"}"; do
@@ -250,11 +253,15 @@ compose() {
         return 1
         ;;
     esac
-    files+=(-f "$TARGET/$f")
+    COMPOSE_FILE_ARGS+=(-f "$TARGET/$f")
   done
-  [ "${#files[@]}" -gt 0 ] || return 2
+  [ "${#COMPOSE_FILE_ARGS[@]}" -gt 0 ] || return 2
+}
+
+compose() {
+  compose_file_args || return
   compose_env
-  env "${COMPOSE_ENV[@]}" "$(docker_command)" compose -p "$ENVIRONMENT" "${files[@]}" "$@"
+  env "${COMPOSE_ENV[@]}" "$(docker_command)" compose -p "$ENVIRONMENT" "${COMPOSE_FILE_ARGS[@]}" "$@"
 }
 
 # --- bake -------------------------------------------------------------------
