@@ -40,6 +40,12 @@ DECLARATION_FILE="$MAIN_DIR/.ndf/worktree.json"
 
 SCHEMA_URL="https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/ndf/skills/worktree/schemas/worktree.schema.json"
 
+# check の各行に付く注記。意味（宣言由来・既定ブランチへの退避・退避先不明）を
+# 名前で表す。文言を変えるときはここだけを直す。
+readonly NOTE_DECLARED="（宣言）"
+readonly NOTE_DEFAULT_BRANCH="（未宣言。既定ブランチ）"
+readonly NOTE_UNKNOWN_FALLBACK="不明（origin/HEAD が未設定）"
+
 # --- init -------------------------------------------------------------------
 
 # 書き先が symlink なら断る。たどると、リポジトリの外を指した状態で --force を
@@ -77,13 +83,30 @@ JSON
 }
 
 do_init() {
-  refuse_symlink || return 1
-
-  if [ -e "$DECLARATION_FILE" ] && [ "$FORCE" = 0 ]; then
-    # **上書きしない。** 書き加えた内容を消さないため。
-    printf '宣言ファイルは既にあります: %s\n' "${DECLARATION_FILE#"$MAIN_DIR"/}"
-    return 0
+  # --force が無ければ、書く前に宣言の状態を読む。状態は status / check と同じ関数で
+  # 決める（基準を書き写すと、同じ宣言を別の状態として報告する経路が再び生まれる）。
+  # refuse_symlink より前に置くのは、読むだけの枝ではリポジトリの外を書き換えないため。
+  # 後に置くと、読める宣言を指す symlink で「symlink です」と断ってしまう。
+  if [ "$FORCE" = 0 ]; then
+    case "$(wt_declaration_state "$MAIN_DIR")" in
+      present)
+        # **上書きしない。** 書き加えた内容を消さないため。
+        printf '宣言ファイルは既にあります: %s\n' "${DECLARATION_FILE#"$MAIN_DIR"/}"
+        return 0
+        ;;
+      unreadable)
+        # 読めない宣言は「既にある」ではない。運用は宣言を読めないと何もしないため、
+        # 用意できなかったとして 1 で終わる。直すか消すかは利用者が決める。--force は
+        # 形によって結果が分かれる（ディレクトリは #628）ため勧めない。
+        print_declaration_line unreadable >&2
+        printf '中身を直すか、書き加えた内容が要らなければ %s を消してから、もう一度 init を実行してください\n' \
+          "${DECLARATION_FILE#"$MAIN_DIR"/}" >&2
+        return 1
+        ;;
+    esac
   fi
+
+  refuse_symlink || return 1
 
   write_declaration || { printf '%s\n' "宣言ファイルを書けませんでした" >&2; return 1; }
 
@@ -152,11 +175,11 @@ print_branch_line() {
     name=$(_wt_declaration_string "$decl" "$key")
   fi
   if [ -n "$name" ]; then
-    printf '%s: %s（宣言）\n' "$label" "$name"
+    printf '%s: %s%s\n' "$label" "$name" "$NOTE_DECLARED"
   elif fallback=$(wt_default_branch "$MAIN_DIR"); then
-    printf '%s: %s（未宣言。既定ブランチ）\n' "$label" "$fallback"
+    printf '%s: %s%s\n' "$label" "$fallback" "$NOTE_DEFAULT_BRANCH"
   else
-    printf '%s: 不明（origin/HEAD が未設定）\n' "$label"
+    printf '%s: %s\n' "$label" "$NOTE_UNKNOWN_FALLBACK"
   fi
 }
 

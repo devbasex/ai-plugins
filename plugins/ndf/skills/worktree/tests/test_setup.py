@@ -10,6 +10,8 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from worktree_helpers import GUARD, SESSION, SCRIPTS_DIR, git, run_lib, write_declaration
 
 SETUP = SCRIPTS_DIR / "worktree-setup.sh"
@@ -31,6 +33,17 @@ def declaration(main_repo: Path) -> Path:
 
 def test_init_creates_a_readable_declaration(main_repo: Path) -> None:
     result = run(["init"], cwd=main_repo)
+
+    assert result["rc"] == 0, result
+    body = json.loads(declaration(main_repo).read_text(encoding="utf-8"))
+    assert body["version"] == 1
+    assert body["$schema"].endswith("worktree.schema.json")
+
+
+def test_no_subcommand_defaults_to_init(main_repo: Path) -> None:
+    """現状固定: 副コマンドを渡さない呼び出しは既定で init として扱われ、
+    明示的な init と同じ宣言（version と $schema の要点）を rc=0 で作る。"""
+    result = run([], cwd=main_repo)
 
     assert result["rc"] == 0, result
     body = json.loads(declaration(main_repo).read_text(encoding="utf-8"))
@@ -116,6 +129,27 @@ def test_status_counts_worktrees(main_repo: Path, worktree: Path) -> None:
     assert "開発用の作業ツリー: 1 個" in result["out"], result["out"]
 
 
+def test_status_runs_from_inside_a_worktree(main_repo: Path, worktree: Path) -> None:
+    """現状固定: 作業ツリー内からでも、主ディレクトリの導入状態を報告する。"""
+    run(["init"], cwd=main_repo)
+
+    result = run(["status"], cwd=worktree)
+
+    assert result["rc"] == 0, result
+    assert f"主ディレクトリ: {main_repo}" in result["out"], result["out"]
+    assert PRESENT_LINE in result["out"], result["out"]
+    assert ".worktrees/ の登録: なし" in result["out"], result["out"]
+    assert "開発用の作業ツリー: 1 個" in result["out"], result["out"]
+
+
+def test_status_counts_zero_worktrees(main_repo: Path) -> None:
+    """現状固定: 開発用の作業ツリーが無い境界では 0 個と報告する。"""
+    result = run(["status"], cwd=main_repo)
+
+    assert result["rc"] == 0, result
+    assert "開発用の作業ツリー: 0 個" in result["out"], result["out"]
+
+
 def test_status_reports_the_gitignore_registration(main_repo: Path) -> None:
     result = run(["status"], cwd=main_repo)
     assert ".worktrees/ の登録: なし" in result["out"], result["out"]
@@ -150,7 +184,21 @@ def test_init_refuses_a_symlinked_ndf_directory(main_repo: Path, tmp_path: Path)
     result = run(["init", "--force"], cwd=main_repo)
 
     assert result["rc"] == 1, result
+    assert ".ndf" in result["err"], result["err"]
     assert not (outside / "worktree.json").exists(), "外へ書かない"
+
+
+def test_init_fails_when_ndf_is_a_regular_file(main_repo: Path) -> None:
+    """現状固定: .ndf が通常ファイルなら内容を変えず、宣言を作らずに 1 で終わる。"""
+    ndf = main_repo / ".ndf"
+    original = b"keep existing content\n"
+    ndf.write_bytes(original)
+
+    result = run(["init"], cwd=main_repo)
+
+    assert result["rc"] == 1, result
+    assert not declaration(main_repo).exists(), "宣言を作らない"
+    assert ndf.read_bytes() == original, ".ndf の内容を変えない"
 
 
 def test_init_leaves_no_temporary_file(main_repo: Path) -> None:
@@ -167,6 +215,33 @@ def test_init_rejects_unknown_argument(main_repo: Path) -> None:
     assert result["out"] == "", result
     assert result["err"].strip(), result
     assert not declaration(main_repo).exists(), "引数解析で弾かれたときは宣言を作らない"
+
+
+def test_init_accepts_double_dash(main_repo: Path) -> None:
+    """現状固定: 引数解析で -- を受理して処理を続け、
+    明示的な init と同じ宣言（version と $schema の要点）を rc=0 で作る。"""
+    result = run(["init", "--"], cwd=main_repo)
+
+    assert result["rc"] == 0, result
+    body = json.loads(declaration(main_repo).read_text(encoding="utf-8"))
+    assert body["version"] == 1
+    assert body["$schema"].endswith("worktree.schema.json")
+
+
+def test_double_dash_does_not_stop_force_parsing(main_repo: Path) -> None:
+    """現状固定: `--` は POSIX 慣習では以降を非オプションとして扱う区切りだが、
+    引数解析の loop は `--` の後の `--force` も引き続き解釈する。guard 付きの
+    既存宣言に対し `init -- --force` を渡すと rc=0 で上書きされ、guard が残らない。"""
+    write_declaration(
+        main_repo,
+        json.dumps({"version": 1, "guard": {"allow_paths": ["notes/"]}}),
+    )
+
+    result = run(["init", "--", "--force"], cwd=main_repo)
+
+    assert result["rc"] == 0, result
+    body = json.loads(declaration(main_repo).read_text(encoding="utf-8"))
+    assert "guard" not in body, "-- が --force の解釈を止めないため上書きされる"
 
 
 def test_unknown_subcommand_prints_usage(main_repo: Path) -> None:
@@ -307,6 +382,25 @@ def test_check_reports_an_unknown_default_branch(tmp_path: Path) -> None:
     assert result["rc"] == 2, result
     assert result["out"].splitlines()[1:] == [
         "開発の起点: 不明（origin/HEAD が未設定）",
+        "本番のチャネル: 不明（origin/HEAD が未設定）",
+    ], result["out"]
+
+
+def test_check_mixes_declared_base_branch_with_an_unknown_default(tmp_path: Path) -> None:
+    """現状固定: base_branch だけを宣言し、origin/HEAD も main / master も無い
+    リポジトリでは、開発の起点は宣言値、本番のチャネルは「不明」が混在して出る。
+    宣言のキーは独立に判定され、片方の退避先が無くても rc は 0 のまま。"""
+    repo = tmp_path / "trunk"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "trunk")
+    write_declaration(repo, json.dumps({"version": 1, "base_branch": "develop"}))
+
+    result = run(["check"], cwd=repo)
+
+    assert result["rc"] == 0, result
+    assert result["out"].splitlines() == [
+        PRESENT_LINE,
+        "開発の起点: develop（宣言）",
         "本番のチャネル: 不明（origin/HEAD が未設定）",
     ], result["out"]
 
@@ -486,3 +580,163 @@ def test_slot_touch_updates_last_used_at_and_keeps_released_at_null(main_repo: P
     assignment = after["assignments"][0]
     assert assignment["last_used_at"] != "2020-01-01T00:00:00Z"
     assert assignment["released_at"] is None
+
+
+# --- init: 読めない宣言を失敗として報告する（#573） ---------------------------
+
+WORKTREE_SKILL = SCRIPTS_DIR.parent / "skills" / "worktree" / "SKILL.md"
+
+UNREADABLE_FORMS = ["broken_json", "unsupported_version", "empty_file", "directory", "unreadable_permission"]
+
+
+def _make_broken_json(main_repo: Path, path: Path) -> None:
+    write_declaration(main_repo, "{ not json")
+
+
+def _make_unsupported_version(main_repo: Path, path: Path) -> None:
+    write_declaration(main_repo, json.dumps({"version": 99}))
+
+
+def _make_empty_file(main_repo: Path, path: Path) -> None:
+    write_declaration(main_repo, "")
+
+
+def _make_directory(main_repo: Path, path: Path) -> None:
+    path.mkdir(parents=True)
+
+
+def _make_unreadable_permission(main_repo: Path, path: Path) -> None:
+    if os.geteuid() == 0:
+        pytest.skip("root は権限 000 のファイルも読めるため、この形を作れない")
+    write_declaration(main_repo, json.dumps({"version": 1}))
+    path.chmod(0)
+
+
+_UNREADABLE_HANDLERS = {
+    "broken_json": _make_broken_json,
+    "unsupported_version": _make_unsupported_version,
+    "empty_file": _make_empty_file,
+    "directory": _make_directory,
+    "unreadable_permission": _make_unreadable_permission,
+}
+
+
+def make_unreadable(main_repo: Path, form: str) -> Path:
+    """`wt_declaration_state` が `unreadable` を返す形を作る。"""
+    path = declaration(main_repo)
+    try:
+        handler = _UNREADABLE_HANDLERS[form]
+    except KeyError:
+        raise AssertionError(form)
+    handler(main_repo, path)
+    return path
+
+
+def snapshot(path: Path) -> tuple:
+    """宣言の中身（ディレクトリなら一覧）と権限。init の前後で比べる。"""
+    mode = path.lstat().st_mode
+    if path.is_dir():
+        return mode, sorted(p.name for p in path.iterdir())
+    return mode, path.read_bytes() if os.access(path, os.R_OK) else None
+
+
+@pytest.mark.parametrize("form", UNREADABLE_FORMS)
+def test_init_fails_on_an_unreadable_declaration(main_repo: Path, form: str) -> None:
+    """受け入れ条件 1 / 4: 読めない宣言は 1 で終わり、「既にあります」を出さない。"""
+    make_unreadable(main_repo, form)
+
+    result = run(["init"], cwd=main_repo)
+
+    assert result["rc"] == 1, result
+    assert "既にあります" not in result["out"], result["out"]
+    assert result["out"] == "", result["out"]
+
+
+@pytest.mark.parametrize("form", UNREADABLE_FORMS)
+def test_init_prints_the_same_declaration_line_as_status_and_check(main_repo: Path, form: str) -> None:
+    """受け入れ条件 2 / 4: 標準エラーの 1 行目は status / check の宣言の行と一字一句同じ。"""
+    make_unreadable(main_repo, form)
+
+    result = run(["init"], cwd=main_repo)
+    status_line, check_line, _ = _declaration_line_pair(main_repo)
+
+    assert result["err"].splitlines()[0] == BROKEN_LINE == status_line == check_line, result["err"]
+
+
+def test_init_tells_the_user_to_fix_or_remove_and_does_not_suggest_force(main_repo: Path) -> None:
+    """受け入れ条件 3: 直すか消してから init をもう一度。--force は勧めない。"""
+    write_declaration(main_repo, "{ not json")
+
+    result = run(["init"], cwd=main_repo)
+
+    assert ".ndf/worktree.json を消してから" in result["err"], result["err"]
+    assert "init" in result["err"], result["err"]
+    assert "--force" not in result["err"], result["err"]
+
+
+@pytest.mark.parametrize("form", UNREADABLE_FORMS)
+def test_init_leaves_an_unreadable_declaration_untouched(main_repo: Path, form: str) -> None:
+    """受け入れ条件 5: 読めない宣言の中身と権限を変えない。"""
+    path = make_unreadable(main_repo, form)
+    before = snapshot(path)
+
+    run(["init"], cwd=main_repo)
+
+    assert snapshot(path) == before
+
+
+def test_init_accepts_a_symlink_to_a_readable_declaration(main_repo: Path, tmp_path: Path) -> None:
+    """受け入れ条件 8: 読める宣言を指す symlink は、書き込まないので「既にあります」で 0。"""
+    outside = tmp_path / "outside.json"
+    body = json.dumps({"version": 1, "guard": {"allow_paths": ["notes/"]}})
+    outside.write_text(body, encoding="utf-8")
+    (main_repo / ".ndf").mkdir()
+    declaration(main_repo).symlink_to(outside)
+
+    result = run(["init"], cwd=main_repo)
+
+    assert result["rc"] == 0, result
+    assert "既にあります" in result["out"], result["out"]
+    assert outside.read_text(encoding="utf-8") == body, "指す先を変えない"
+
+
+@pytest.mark.parametrize("form", [f for f in UNREADABLE_FORMS if f != "directory"])
+def test_force_rebuilds_an_unreadable_declaration(main_repo: Path, form: str) -> None:
+    """受け入れ条件 9: --force は読めない宣言を作り直し、直後の check が 0。
+    ディレクトリの形は #628 が扱うため含めない。"""
+    make_unreadable(main_repo, form)
+
+    result = run(["init", "--force"], cwd=main_repo)
+
+    assert result["rc"] == 0, result
+    assert run(["check"], cwd=main_repo)["rc"] == 0
+
+
+@pytest.mark.parametrize("form", UNREADABLE_FORMS)
+def test_status_and_check_are_unchanged_for_unreadable_forms(main_repo: Path, form: str) -> None:
+    """受け入れ条件 12: status / check の出力と終了コードは変更前と同じ。"""
+    make_unreadable(main_repo, form)
+    status_line, check_line, rc = _declaration_line_pair(main_repo)
+    assert status_line == check_line == BROKEN_LINE
+    assert rc == 3
+    assert run(["status"], cwd=main_repo)["rc"] == 0
+
+
+def step0_section() -> str:
+    body = WORKTREE_SKILL.read_text(encoding="utf-8")
+    return body[body.index("## 0. 宣言ファイルを用意する"): body.index("## 1. 現在地を確かめる")]
+
+
+def test_step0_stops_when_init_fails() -> None:
+    """受け入れ条件 10: 手順 0 は init の終了コードを見て止まり、利用者が決める。"""
+    section = step0_section()
+    assert 'exit=$?' in section
+    assert "先へ進まない" in section
+    assert "利用者" in section
+
+
+def test_step0_limits_no_overwrite_to_readable_declarations() -> None:
+    """受け入れ条件 11: 上書きしないのは読める宣言に限り、読めない宣言では 1 で終わる。"""
+    section = step0_section()
+    assert "読める宣言" in section
+    assert "1 で終わる" in section
