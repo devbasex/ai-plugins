@@ -119,25 +119,37 @@ release_new_slot() {
   return 1
 }
 
+# 役割一覧を帯の中で採番し、ports JSON を組み立てて出力する。帯を出た番号は他の
+# 用途と衝突するため、その場で理由を出して 1 を返す。解放は呼び出し元が判断する。
+build_assigned_ports() {
+  local slot=$1 band_low=$2 band_high=$3
+  local ports role role_number port
+  ports="{}"
+  while IFS=$'\t' read -r role role_number; do
+    [ -n "$role" ] || continue
+    port=$(wt_port_for "$band_low" "$slot" "$role_number") || continue
+    # 帯を出た番号は、他の用途と衝突する。黙って使わない。
+    if [ -n "$band_high" ] && [ "$port" -gt "$band_high" ]; then
+      printf '%s\n' "採番が帯を超えました（役割 $role のポート $port が上限 $band_high を超える）" >&2
+      return 1
+    fi
+    ports=$(printf '%s' "$ports" | jq --arg r "$role" --argjson p "$port" '. + {($r): $p}')
+  done < <(decl_get '.testenv.port_roles // {} | to_entries[] | "\(.key)\t\(.value)"')
+  printf '%s\n' "$ports"
+}
+
 env_assign_ports() {
   local slot=$1 had_slot=$2 environment=$3
-  local band_low band_high ports role role_number port
+  local band_low band_high ports
   band_low=$(decl_get '.testenv.port_band[0] // empty')
   band_high=$(decl_get '.testenv.port_band[1] // empty')
   ports="{}"
   if [ -n "$band_low" ]; then
-    while IFS=$'\t' read -r role role_number; do
-      [ -n "$role" ] || continue
-      port=$(wt_port_for "$band_low" "$slot" "$role_number") || continue
-      # 帯を出た番号は、他の用途と衝突する。黙って使わない。
-      if [ -n "$band_high" ] && [ "$port" -gt "$band_high" ]; then
-        printf '%s\n' "採番が帯を超えました（役割 $role のポート $port が上限 $band_high を超える）" >&2
-        # 失敗した呼び出しがスロットを握ったままにしない。
-        [ "$had_slot" = 0 ] && release_new_slot
-        return 1
-      fi
-      ports=$(printf '%s' "$ports" | jq --arg r "$role" --argjson p "$port" '. + {($r): $p}')
-    done < <(decl_get '.testenv.port_roles // {} | to_entries[] | "\(.key)\t\(.value)"')
+    ports=$(build_assigned_ports "$slot" "$band_low" "$band_high") || {
+      # 採番が帯を超えた。失敗した呼び出しがスロットを握ったままにしない。
+      [ "$had_slot" = 0 ] && release_new_slot
+      return 1
+    }
     # 台帳に無いポートを JSON へ載せると、読む側はその値で起動を組み立てる。
     # ポートの無い割り当てを残すと、次の env は「既にある」として同じスロットを
     # 返し、ポートは {} のままになる。新しく取った割り当てなら解放する（#315）。
