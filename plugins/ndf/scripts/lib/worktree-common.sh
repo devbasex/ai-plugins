@@ -1034,6 +1034,14 @@ wt_extract_write_target() {
     fi
     return 0
   }
+  _wt_take_redirect_operand() {
+    local index_name=$1 word_name=$2 operand_index
+    eval "operand_index=\${$index_name}"
+    _redir_span "$operand_index" || return 0
+    printf -v "$index_name" '%s' "$_WT_REDIR_END"
+    [ -n "$_WT_REDIR_HEAD" ] || return 1
+    printf -v "$word_name" '%s' "$_WT_REDIR_HEAD"
+  }
   # 複合コマンドの入口で `&` の復元先を積み、出口で戻す。
   _push_group() {
     group_cwd[group_depth]="$job_cwd"
@@ -1233,11 +1241,7 @@ wt_extract_write_target() {
       w2=${words[j2]}
       # リダイレクトはオプションの引数にならない（`sed -e >log s/a/b/` の `-e` は
       # `s/a/b/` を受け取る）ため、`skip_next` より先に読み飛ばす。
-      if _redir_span "$j2"; then
-        j2=$_WT_REDIR_END
-        [ -n "$_WT_REDIR_HEAD" ] || continue
-        w2=$_WT_REDIR_HEAD
-      fi
+      _wt_take_redirect_operand j2 w2 || continue
       if [ "$skip_next" = 1 ]; then skip_next=0; continue; fi
       if _wt_is_separator "$w2"; then break; fi
       case "$w2" in
@@ -1277,11 +1281,7 @@ wt_extract_write_target() {
     for ((j2 = start + 1; j2 < n; j2++)); do
       w2=${words[j2]}
       # `-t >log dir` の `-t` は `dir` を受け取るため、`take_next` より先に読み飛ばす。
-      if _redir_span "$j2"; then
-        j2=$_WT_REDIR_END
-        [ -n "$_WT_REDIR_HEAD" ] || continue
-        w2=$_WT_REDIR_HEAD
-      fi
+      _wt_take_redirect_operand j2 w2 || continue
       if [ "$take_next" = 1 ]; then
         target_dir=$w2
         take_next=0
@@ -1687,11 +1687,7 @@ wt_extract_write_target() {
         # tee は並べたファイルすべてへ書き込む。1 件目で止めない。
         for ((j = i + 1; j < n; j++)); do
           tw=${words[j]}
-          if _redir_span "$j"; then
-            j=$_WT_REDIR_END
-            [ -n "$_WT_REDIR_HEAD" ] || continue
-            tw=$_WT_REDIR_HEAD
-          fi
+          _wt_take_redirect_operand j tw || continue
           if _wt_is_separator "$tw"; then break; fi
           case "$tw" in
             -*) continue ;;
@@ -1713,7 +1709,7 @@ wt_extract_write_target() {
 
   unset -f _emit _push_group _pop_group _push_subshell _pop_subshell _or_group_exits \
     _or_exit_redirs _close_function_body _wt_extract_sed_targets _wt_extract_cp_mv_target \
-    _redir_span
+    _redir_span _wt_take_redirect_operand
   [ "$found" = 1 ] || return 1
 }
 
