@@ -134,6 +134,24 @@ def test_arrays_are_replaced_not_appended(shared: Path) -> None:
     assert merged(shared)["localenv"]["kind"] == "compose"
 
 
+def test_local_symlink_target_is_merged_without_modification(shared: Path) -> None:
+    target = shared / "personal-worktree.json"
+    target.write_text(
+        json.dumps({"version": 1, "localenv": {"copy_from_main": ["node_modules"]}}),
+        encoding="utf-8",
+    )
+    before = target.read_bytes()
+    (shared / ".ndf" / "worktree.local.json").symlink_to(target)
+
+    body = merged(shared)
+
+    assert body["localenv"] == {
+        "kind": "compose",
+        "copy_from_main": ["node_modules"],
+    }
+    assert target.read_bytes() == before
+
+
 # --- AC14: 個人の宣言だけで追従を有効にできる -------------------------------
 
 
