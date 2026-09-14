@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# NDF plugin: セッション開始時に、主ディレクトリの逸脱を提示してブランチを追従させる。
+# NDF plugin: セッション開始時に、主ディレクトリの逸脱を提示する。宣言で有効にした
+# リポジトリではブランチも追従させる。
 #
 # 結線先はセッション開始時の hook (Claude Code / Codex CLI の SessionStart、
 # Kiro CLI の agentSpawn) と、agy のモデル呼び出し前の hook (PreInvocation)。判定は
@@ -11,8 +12,11 @@
 # (詳細設計 #215 の決定 5)。あわせて、tool 実行前の hook が控えへ積んだ案内をここで
 # 取り出して渡す。agy はその事象でモデルへ文言を返せないためである (同 決定 4)。
 #
-# 追従は detached HEAD で行う (同 決定 4)。同じブランチを 2 つの作業ディレクトリへ
-# checkout できないためで、detached HEAD ではコミットしてもブランチが動かない。
+# **追従は既定で行わない** (#610 の決定 2)。並列に動くエージェントのどれが開始・再開
+# しても主ディレクトリの HEAD が動かないようにするためで、宣言の `follow_branch: true`
+# のときだけ判定へ進む。追従は detached HEAD で行う (詳細設計 06 の決定 4)。同じ
+# ブランチを 2 つの作業ディレクトリへ checkout できないためで、detached HEAD では
+# コミットしてもブランチが動かない。
 #
 # 追従に失敗しても作業を止めない。依存コマンドが無い場合や入力が読めない場合も
 # 含め、常に終了コード 0 で終わる。
@@ -91,6 +95,11 @@ drain_pending() {
 AT_START=1
 [ "$AGY" = 1 ] && [ "$INVOCATION" != 0 ] && AT_START=0
 
+# 追従は宣言で有効にしたときだけ判定する (#610 の決定 2)。無効なら作業ツリーの
+# 一覧も取らず、DECISION は空のまま後段のどの枝にも入らない。
+FOLLOW=0
+wt_follow_enabled "$DECLARATION" && FOLLOW=1
+
 DIRTY_COUNT=0
 DIRTY=""
 DECISION=""
@@ -98,11 +107,13 @@ if [ "$AT_START" = 1 ]; then
   DIRTY=$(wt_dirty_paths "$MAIN_DIR")
   [ -n "$DIRTY" ] && DIRTY_COUNT=$(printf '%s\n' "$DIRTY" | grep -c '^' )
 
-  LISTING=$(wt_dev_worktrees "$MAIN_DIR")
-  if [ "$DIRTY_COUNT" -gt 0 ]; then
-    DECISION=$(wt_follow_target "$LISTING" 1)
-  else
-    DECISION=$(wt_follow_target "$LISTING" 0)
+  if [ "$FOLLOW" = 1 ]; then
+    LISTING=$(wt_dev_worktrees "$MAIN_DIR")
+    if [ "$DIRTY_COUNT" -gt 0 ]; then
+      DECISION=$(wt_follow_target "$LISTING" 1)
+    else
+      DECISION=$(wt_follow_target "$LISTING" 0)
+    fi
   fi
 fi
 
@@ -118,13 +129,16 @@ if [ "$DIRTY_COUNT" -gt 0 ]; then
     list="$list
   ... 他 $((DIRTY_COUNT - WT_DIRTY_LIST_MAX)) 件"
   fi
-  MESSAGES+=("主ディレクトリに追跡対象の未コミット変更が ${DIRTY_COUNT} 件あります。
+  message="主ディレクトリに追跡対象の未コミット変更が ${DIRTY_COUNT} 件あります。
 
 $list
 
 開発の変更であれば、作業ツリーへ移してください。手順は /ndf:worktree の
-「主ディレクトリに残った変更を移す」にあります。主ディレクトリのブランチは、
-変更がある間は稼働中の作業ツリーへ追従しません。")
+「主ディレクトリに残った変更を移す」にあります。"
+  # 追従の断りは、追従を有効にしたリポジトリにだけ意味がある。
+  [ "$FOLLOW" = 1 ] && message="$message主ディレクトリのブランチは、
+変更がある間は稼働中の作業ツリーへ追従しません。"
+  MESSAGES+=("$message")
 fi
 
 # --- ブランチ追従 -----------------------------------------------------------

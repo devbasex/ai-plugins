@@ -45,7 +45,21 @@ def test_detached_worktree_is_not_followed() -> None:
     assert follow("/repo/.worktrees/tmp\t", "0") == "default"
 
 
+def test_detached_worktree_is_excluded_from_branch_count() -> None:
+    """detached が併存しても、ブランチを持つ 1 件だけを追従先にする。"""
+    listing = f"{ONE}\n/repo/.worktrees/tmp\t"
+    assert follow(listing, "0") == "detach feature/x"
+
+
 # --- 一覧の取得（受け入れ条件 15） ------------------------------------------
+
+
+def test_dev_worktrees_rejects_empty_main_dir() -> None:
+    """主ディレクトリが空なら、何も出力せず終了コード 1 を返す。"""
+    got = run_lib("wt_dev_worktrees \"\"")
+
+    assert got.returncode == 1
+    assert got.stdout == ""
 
 
 def test_dev_worktrees_lists_only_worktrees_dir(main_repo: Path, worktree: Path) -> None:
@@ -55,6 +69,21 @@ def test_dev_worktrees_lists_only_worktrees_dir(main_repo: Path, worktree: Path)
     path, branch = lines[0].split("\t")
     assert Path(path).resolve() == worktree.resolve()
     assert branch == "feature/x"
+
+
+def test_dev_worktrees_multiple_worktrees(main_repo: Path, worktree: Path) -> None:
+    """作業ツリーが 2 つ以上のとき、各作業ツリーが 1 行ずつ出力される。"""
+    second = main_repo / ".worktrees" / "fix" / "y"
+    git(main_repo, "worktree", "add", "-q", "-b", "fix/y", str(second))
+
+    got = run_lib(f'wt_dev_worktrees "{main_repo}"', cwd=main_repo)
+    lines = [ln for ln in got.stdout.splitlines() if ln]
+
+    assert len(lines) == 2, got.stdout
+    for line in lines:
+        path, branch = line.split("\t")
+        assert (main_repo / ".worktrees").resolve() in Path(path).resolve().parents
+        assert branch != ""
 
 
 def test_review_worktree_is_excluded(main_repo: Path, worktree: Path, tmp_path: Path) -> None:
@@ -67,7 +96,40 @@ def test_review_worktree_is_excluded(main_repo: Path, worktree: Path, tmp_path: 
     assert "review-worktree" not in got.stdout
 
 
+def test_detached_worktree_in_worktrees_dir_has_empty_branch(main_repo: Path) -> None:
+    """`.worktrees/` 配下に detached HEAD の作業ツリーがあると、タブ以降のブランチ名が空で出力される。"""
+    detached = main_repo / ".worktrees" / "tmp"
+    git(main_repo, "worktree", "add", "-q", "--detach", str(detached))
+    got = run_lib(f'wt_dev_worktrees "{main_repo}"', cwd=main_repo)
+    lines = [ln for ln in got.stdout.splitlines() if ln]
+    assert len(lines) == 1, got.stdout
+    path, _, branch = lines[0].partition("\t")
+    assert Path(path).resolve() == detached.resolve()
+    assert branch == "", got.stdout
+
+
 def test_main_dir_itself_is_excluded(main_repo: Path) -> None:
     """作業ツリーが無いとき、主ディレクトリ自身を数に入れない。"""
     got = run_lib(f'wt_dev_worktrees "{main_repo}"', cwd=main_repo)
     assert got.stdout.strip() == "", got.stdout
+
+
+# --- 追従を有効にする宣言（#610） -------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("declaration", "expected"),
+    [
+        ('{"version":1,"follow_branch":true}', 0),
+        ('{"version":1,"follow_branch":false}', 1),
+        ('{"version":1,"follow_branch":"true"}', 1),
+        ('{"version":1,"follow_branch":1}', 1),
+        ('{"version":1,"follow_branch":null}', 1),
+        ('{"version":1}', 1),
+        ("", 1),
+    ],
+)
+def test_follow_enabled_only_for_boolean_true(declaration: str, expected: int) -> None:
+    """`follow_branch` が真偽値の true のときだけ 0 を返す。git は呼ばない（受け入れ条件 5）。"""
+    got = run_lib(f"wt_follow_enabled '{declaration}'; echo \"exit=$?\"")
+    assert got.stdout.strip() == f"exit={expected}", got.stdout + got.stderr
