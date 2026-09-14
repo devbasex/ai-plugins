@@ -296,6 +296,31 @@ def test_expose_is_refused_by_default(main_repo: Path, worktree: Path) -> None:
     assert result["rc"] == 1, result
 
 
+@pytest.mark.parametrize(
+    "expose_conf",
+    [
+        {"enabled": True, "base_domain": "example.test"},
+        {"enabled": True, "public_tag": "golden-public"},
+    ],
+)
+def test_expose_is_refused_when_public_tag_or_base_domain_is_missing(
+    main_repo: Path, worktree: Path, expose_conf: dict
+) -> None:
+    marker = main_repo / "opened.txt"
+    declare(main_repo, testenv={
+        "port_band": [20000, 29999],
+        "expose": {**expose_conf, "open_command": f'printf "%s" "$NDF_EXPOSE_URL" > {marker}'},
+    })
+    run(["env", str(worktree)], cwd=main_repo)
+
+    result = run(["expose", str(worktree)], cwd=main_repo)
+
+    assert result["rc"] == 1, result
+    assert "public_tag と base_domain が要ります" in result["err"], result["err"]
+    assert not marker.exists(), "公開コマンドは実行されない"
+    assert registry(main_repo)["assignments"][0]["expose"] is None
+
+
 def test_expose_is_refused_when_the_golden_tag_differs(main_repo: Path, worktree: Path) -> None:
     declare(main_repo, testenv={
         "port_band": [20000, 29999],
