@@ -221,6 +221,14 @@ load_assignment() {
   SLOT=$(printf '%s' "$row" | jq -r '.slot')
 }
 
+# 割り当てを読み込む。無ければ do_env で初期化してから読み直す。
+# 起動と test で共通のフォールバックをここへ寄せる。
+ensure_assignment() {
+  load_assignment && return 0
+  do_env >/dev/null || return 1
+  load_assignment
+}
+
 # コンテナ実行系のコマンド。テストから差し替えられるようにしておく。
 docker_command() { printf '%s\n' "${WT_DOCKER_COMMAND:-docker}"; }
 has_docker() { command -v "$(docker_command)" >/dev/null 2>&1; }
@@ -330,7 +338,7 @@ do_bake() {
 # --- up / stop / down -------------------------------------------------------
 
 do_up() {
-  load_assignment || { do_env >/dev/null || return 1; load_assignment || return 1; }
+  ensure_assignment || return 1
   has_docker || { printf 'コンテナ実行系が見つかりません\n' >&2; return 1; }
 
   [ -n "$TAG" ] || TAG=$(do_tag) || TAG=""
@@ -453,7 +461,7 @@ do_test() {
   # 種類の宣言が無いリポジトリでは何もしない（受け入れ条件 39）。
   [ -n "$run" ] || return 0
 
-  load_assignment || { do_env >/dev/null || return 1; load_assignment || return 1; }
+  ensure_assignment || return 1
   build_test_env || return 1
 
   touch_or_warn
