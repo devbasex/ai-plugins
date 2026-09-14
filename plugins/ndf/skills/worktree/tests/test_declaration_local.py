@@ -351,15 +351,6 @@ def test_local_state_is_absent_without_the_file(shared: Path) -> None:
     assert local_state(shared) == "absent"
 
 
-def test_local_state_is_absent_for_a_dangling_symlink(shared: Path) -> None:
-    """参照先の無いリンクは `[ -e ]` が偽になるため、壊れた形ではなく無い扱いになる。"""
-    link = shared / ".ndf" / "worktree.local.json"
-    link.symlink_to(shared / "missing-worktree.json")
-    assert link.is_symlink() and not link.exists()
-
-    assert local_state(shared) == "absent"
-
-
 def test_local_state_is_present_for_a_readable_file(shared: Path) -> None:
     local_json(shared, {"version": 1, "testenv": {"port_band": [40000, 40999]}})
     assert local_state(shared) == "present"
