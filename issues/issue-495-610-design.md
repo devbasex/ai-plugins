@@ -253,7 +253,7 @@ jq 1.8.1 と git で確かめた。
 | `wt_declaration_local_ignored`（新設） | 個人の宣言のうち反映しない項目名を 1 行 1 件で返す | 2 |
 | `worktree-setup.sh` | `status` / `check` へ個人の宣言の行を足す。`init` が `.ndf/.gitignore` を作る | 1（文言）/ 2 |
 | `.ndf/.gitignore`（このリポジトリ） | `worktree.local.json` を追跡から外す | 2 |
-| 文書（SKILL.md / declaration.md / schema / README / AGENTS.md / KIRO.md） | 既定と有効にする方法、個人の宣言の規則を書く | 1 / 2 |
+| 文書（`worktree` と `development-workflow` の SKILL.md / declaration.md / schema / README / AGENTS.md / KIRO.md） | 既定と有効にする方法、個人の宣言の規則を書く。`AGENTS.md` と `development-workflow` は追従先の説明を `follow_branch: true` のときに限る | 1 / 2 |
 
 ```mermaid
 graph TD
@@ -431,9 +431,9 @@ plugins/ndf/
 │       ├── test_session.py             # 1
 │       ├── test_declaration_local.py   # 2（新設）
 │       └── test_setup.py               # 2
-├── skills/development-workflow/SKILL.md # 1: base_branch の説明の「追従先」
+├── skills/development-workflow/SKILL.md # 1: base_branch の説明の「追従先」を follow_branch: true のときに限る
 └── README.md                           # 1: hook の表
-AGENTS.md                               # 1: Git 運用ルールの「主ディレクトリの追従先」
+AGENTS.md                               # 1: Git 運用ルールの「主ディレクトリの追従先」を follow_branch: true のときに限る
 KIRO.md                                 # 1: agentSpawn の表
 scripts/tests/
 ├── test_pr_base_guard.py               # 2
@@ -466,7 +466,7 @@ Pull Request 1 を載せ、Pull Request 2 は Pull Request 1 の後に載せる�
 | AC6 | origin の URL を到達できないものへ変え、hook の後に `.git/FETCH_HEAD` が無い | `test_session.py` |
 | AC7 | 既存の追従のテストの宣言に `follow_branch: true` を足す。期待値は変えない | `test_session.py` |
 | AC8、AC9 | 追跡対象を変えた主ディレクトリで `follow_branch` の有無を並べ、提示と終了コード 0 | `test_session.py` |
-| AC10 | 6 ファイルを並べた `grep -L follow_branch` と `grep -n "ブランチ追従"` が何も出力しない。変更前の文言は「ブランチ追従が」の直後で改行しており、文を丸ごと探すと変更前でも 0 件になる。文書の中身はレビューで見る | 手動 |
+| AC10 | 要求文書の表の 8 ファイルを並べた `grep -L follow_branch` と `grep -n "ブランチ追従"` が何も出力しない。変更前の文言は「ブランチ追従が」の直後で改行しており、文を丸ごと探すと変更前でも 0 件になる。文書の中身はレビューで見る | 手動 |
 | AC11 | 個人の `port_band` を置き、`worktree-testenv.sh env` の JSON の `ports` が帯の中 | `test_declaration_local.py` |
 | AC12〜AC14 | `wt_declaration` の出力を jq で読み、該当の値を比べる。AC14 は hook で detach を見る | `test_declaration_local.py` |
 | AC15、AC16 | 個人の宣言の有無で `wt_base_branch` / `wt_production_branch` / `wt_allow_paths` / `expose` を比べる | `test_declaration_local.py` |

@@ -19,7 +19,7 @@
 - `worktree-session.sh` の追従を宣言の `follow_branch` で有効にする形へ変える（#610）
 - 共通層の `wt_declaration` に個人の宣言の重ね合わせを足す（#495）
 - `worktree-setup.sh` の `init` / `status` / `check` の個人の宣言の扱い（#495）
-- 文書（SKILL.md / declaration.md / schema / README / AGENTS.md / KIRO.md）とテスト
+- 文書（`worktree` と `development-workflow` の SKILL.md / declaration.md / schema / README / AGENTS.md / KIRO.md）とテスト
 
 含まない:
 
@@ -63,18 +63,22 @@
 
 文書:
 
-- [ ] AC10: 次の 6 か所が、既定で追従しないことと `follow_branch` で有効にする方法を書く。6 ファイルを
-  並べた `grep -L follow_branch` が何も出力せず、`grep -n "ブランチ追従"` も何も出力しない（変更前は
-  前者が 6 件、後者が SKILL.md:68 と worktree-setup.sh:99 の 2 件）
+- [ ] AC10: 次の 8 か所が、追従を既定で行う前提を書かなくなる。「既定と有効にする方法」の 6 か所は
+  既定で追従しないことと `follow_branch` で有効にする方法を書き、「追従先の説明」の 2 か所は
+  `base_branch` が追従先になるのを `follow_branch: true` のときに限って書く。8 ファイルを並べた
+  `grep -L follow_branch` が何も出力せず、`grep -n "ブランチ追従"` も何も出力しない（変更前は前者が
+  8 件、後者が SKILL.md:68 と worktree-setup.sh:99 の 2 件）
 
-  | 場所 | ファイル |
-  | --- | --- |
-  | `worktree` の SKILL.md「主ディレクトリのブランチ」と手順 0 の完了の説明 | `plugins/ndf/skills/worktree/SKILL.md` |
-  | 宣言の項目の説明 | `plugins/ndf/skills/worktree/references/declaration.md` |
-  | スキーマ | `plugins/ndf/skills/worktree/schemas/worktree.schema.json` |
-  | hook の表 | `plugins/ndf/README.md` |
-  | `init` の完了の文言 | `plugins/ndf/scripts/worktree-setup.sh` |
-  | Kiro の `agentSpawn` の表 | `KIRO.md` |
+  | 書くこと | 場所 | ファイル |
+  | --- | --- | --- |
+  | 既定と有効にする方法 | `worktree` の SKILL.md「主ディレクトリのブランチ」と手順 0 の完了の説明 | `plugins/ndf/skills/worktree/SKILL.md` |
+  | 既定と有効にする方法 | 宣言の項目の説明 | `plugins/ndf/skills/worktree/references/declaration.md` |
+  | 既定と有効にする方法 | スキーマ | `plugins/ndf/skills/worktree/schemas/worktree.schema.json` |
+  | 既定と有効にする方法 | hook の表 | `plugins/ndf/README.md` |
+  | 既定と有効にする方法 | `init` の完了の文言 | `plugins/ndf/scripts/worktree-setup.sh` |
+  | 既定と有効にする方法 | Kiro の `agentSpawn` の表 | `KIRO.md` |
+  | 追従先の説明 | Git 運用ルールの「主ディレクトリの追従先」（変更前の 20 行目） | `AGENTS.md` |
+  | 追従先の説明 | 本番のチャネルの節の `base_branch` の説明「追従先を決める」（変更前の 323 行目） | `plugins/ndf/skills/development-workflow/SKILL.md` |
 
 ## 受け入れ条件（#495: 反映される値と、変わらない運用）
 
