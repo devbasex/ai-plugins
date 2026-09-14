@@ -204,6 +204,17 @@ def test_init_rejects_unknown_argument(main_repo: Path) -> None:
     assert not declaration(main_repo).exists(), "引数解析で弾かれたときは宣言を作らない"
 
 
+def test_init_accepts_double_dash(main_repo: Path) -> None:
+    """現状固定: 引数解析で -- を受理して処理を続け、
+    明示的な init と同じ宣言（version と $schema の要点）を rc=0 で作る。"""
+    result = run(["init", "--"], cwd=main_repo)
+
+    assert result["rc"] == 0, result
+    body = json.loads(declaration(main_repo).read_text(encoding="utf-8"))
+    assert body["version"] == 1
+    assert body["$schema"].endswith("worktree.schema.json")
+
+
 def test_unknown_subcommand_prints_usage(main_repo: Path) -> None:
     """現状固定: 知らない副コマンドは 1 で弾かれ、使い方は標準エラーへ出す。"""
     result = run(["bogus"], cwd=main_repo)
