@@ -237,36 +237,44 @@ compose_env() {
     | jq -r '(.ports // {}) | to_entries[] | "\(.key)\t\(.value)"' 2>/dev/null)
 }
 
-# 宣言の compose_files を検証し、`docker compose` へ渡す `-f` 引数を COMPOSE_FILE_ARGS
-# へ組み立てる。作業ツリーの外を指すパス（字面・symlink・実体のいずれか）は断る。
+# compose_files の宣言値 1 件が作業ツリーの中に収まるかを検証し、検証済みの絶対パスを
+# 標準出力へ返す。作業ツリーの外を指すパス（字面・symlink・実体のいずれか）は断る。
+validate_compose_file() {
+  local f=$1
+  # 宣言に `../` が入ると、作業ツリーの外の定義を読み込む。
+  if ! wt_is_safe_relative "$f"; then
+    printf '%s\n' "compose_files の $f は作業ツリーの外を指します" >&2
+    return 1
+  fi
+  # 字面だけでは足りない。作業ツリーの中に置かれた symlink が外を指していると、
+  # 実行系はその先を読む。symlink はたどらずに断る。
+  if [ -L "$TARGET/$f" ]; then
+    printf '%s\n' "compose_files の $f は symlink です。たどらずに終わります" >&2
+    return 1
+  fi
+  local resolved
+  resolved=$(wt_normalize_path "$TARGET/$f" "$TARGET")
+  case "$resolved" in
+    "$TARGET"/*) ;;
+    *)
+      printf '%s\n' "compose_files の $f の実体が作業ツリーの外（$resolved）にあります" >&2
+      return 1
+      ;;
+  esac
+  printf '%s\n' "$TARGET/$f"
+}
+
+# 宣言の compose_files を列挙し、`docker compose` へ渡す `-f` 引数を COMPOSE_FILE_ARGS
+# へ組み立てる。1 件でも検証に落ちれば 1 を返す。
 # 対象が 1 件も無ければ 2 を返し、実行系を呼ばずに終わらせる。
 compose_file_args() {
   COMPOSE_FILE_ARGS=()
   _wt_read_lines < <(decl_get '.localenv.compose_files // [] | .[]')
-  local f
+  local f path
   for f in "${WT_LINES[@]+"${WT_LINES[@]}"}"; do
     [ -n "$f" ] || continue
-    # 宣言に `../` が入ると、作業ツリーの外の定義を読み込む。
-    if ! wt_is_safe_relative "$f"; then
-      printf '%s\n' "compose_files の $f は作業ツリーの外を指します" >&2
-      return 1
-    fi
-    # 字面だけでは足りない。作業ツリーの中に置かれた symlink が外を指していると、
-    # 実行系はその先を読む。symlink はたどらずに断る。
-    if [ -L "$TARGET/$f" ]; then
-      printf '%s\n' "compose_files の $f は symlink です。たどらずに終わります" >&2
-      return 1
-    fi
-    local resolved
-    resolved=$(wt_normalize_path "$TARGET/$f" "$TARGET")
-    case "$resolved" in
-      "$TARGET"/*) ;;
-      *)
-        printf '%s\n' "compose_files の $f の実体が作業ツリーの外（$resolved）にあります" >&2
-        return 1
-        ;;
-    esac
-    COMPOSE_FILE_ARGS+=(-f "$TARGET/$f")
+    path=$(validate_compose_file "$f") || return 1
+    COMPOSE_FILE_ARGS+=(-f "$path")
   done
   [ "${#COMPOSE_FILE_ARGS[@]}" -gt 0 ] || return 2
 }
