@@ -174,6 +174,20 @@ def test_two_worktrees_fall_back_to_default(main_repo: Path, worktree: Path) -> 
     assert head_of(main_repo) == before
 
 
+def test_two_worktrees_follow_declared_base_branch(
+    main_repo: Path, worktree: Path,
+) -> None:
+    expected = put_develop_on_origin_only(main_repo)
+    declared(main_repo, True, base_branch="develop")
+    second = main_repo / ".worktrees" / "fix" / "y"
+    git(main_repo, "worktree", "add", "-q", "-b", "fix/y", str(second))
+
+    run_session(main_repo)
+
+    assert head_of(main_repo) == expected
+    assert branch_of(main_repo) == ""
+
+
 def test_dirty_main_dir_is_not_followed(main_repo: Path, worktree: Path) -> None:
     declared(main_repo, True)
     git(worktree, "commit", "-q", "--allow-empty", "-m", "work")

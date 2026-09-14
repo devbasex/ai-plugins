@@ -45,6 +45,12 @@ def test_detached_worktree_is_not_followed() -> None:
     assert follow("/repo/.worktrees/tmp\t", "0") == "default"
 
 
+def test_detached_worktree_is_excluded_from_branch_count() -> None:
+    """detached が併存しても、ブランチを持つ 1 件だけを追従先にする。"""
+    listing = f"{ONE}\n/repo/.worktrees/tmp\t"
+    assert follow(listing, "0") == "detach feature/x"
+
+
 # --- 一覧の取得（受け入れ条件 15） ------------------------------------------
 
 
