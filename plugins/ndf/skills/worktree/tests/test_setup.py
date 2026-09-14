@@ -31,13 +31,18 @@ def declaration(main_repo: Path) -> Path:
     return main_repo / ".ndf" / "worktree.json"
 
 
+def assert_canonical_declaration(main_repo: Path) -> None:
+    """正本の宣言の要点（version==1 と $schema が worktree.schema.json で終わる）を確かめる。"""
+    body = json.loads(declaration(main_repo).read_text(encoding="utf-8"))
+    assert body["version"] == 1
+    assert body["$schema"].endswith("worktree.schema.json")
+
+
 def test_init_creates_a_readable_declaration(main_repo: Path) -> None:
     result = run(["init"], cwd=main_repo)
 
     assert result["rc"] == 0, result
-    body = json.loads(declaration(main_repo).read_text(encoding="utf-8"))
-    assert body["version"] == 1
-    assert body["$schema"].endswith("worktree.schema.json")
+    assert_canonical_declaration(main_repo)
 
 
 def test_no_subcommand_defaults_to_init(main_repo: Path) -> None:
@@ -46,9 +51,7 @@ def test_no_subcommand_defaults_to_init(main_repo: Path) -> None:
     result = run([], cwd=main_repo)
 
     assert result["rc"] == 0, result
-    body = json.loads(declaration(main_repo).read_text(encoding="utf-8"))
-    assert body["version"] == 1
-    assert body["$schema"].endswith("worktree.schema.json")
+    assert_canonical_declaration(main_repo)
 
 
 def test_init_makes_the_guard_active(main_repo: Path) -> None:
@@ -223,9 +226,7 @@ def test_init_accepts_double_dash(main_repo: Path) -> None:
     result = run(["init", "--"], cwd=main_repo)
 
     assert result["rc"] == 0, result
-    body = json.loads(declaration(main_repo).read_text(encoding="utf-8"))
-    assert body["version"] == 1
-    assert body["$schema"].endswith("worktree.schema.json")
+    assert_canonical_declaration(main_repo)
 
 
 def test_double_dash_does_not_stop_force_parsing(main_repo: Path) -> None:
