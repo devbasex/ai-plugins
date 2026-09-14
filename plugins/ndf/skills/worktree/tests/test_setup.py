@@ -10,6 +10,8 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from worktree_helpers import GUARD, SESSION, SCRIPTS_DIR, git, run_lib, write_declaration
 
 SETUP = SCRIPTS_DIR / "worktree-setup.sh"
@@ -486,3 +488,141 @@ def test_slot_touch_updates_last_used_at_and_keeps_released_at_null(main_repo: P
     assignment = after["assignments"][0]
     assert assignment["last_used_at"] != "2020-01-01T00:00:00Z"
     assert assignment["released_at"] is None
+
+
+# --- init: 読めない宣言を失敗として報告する（#573） ---------------------------
+
+WORKTREE_SKILL = SCRIPTS_DIR.parent / "skills" / "worktree" / "SKILL.md"
+
+UNREADABLE_FORMS = ["broken_json", "unsupported_version", "empty_file", "directory", "unreadable_permission"]
+
+
+def make_unreadable(main_repo: Path, form: str) -> Path:
+    """`wt_declaration_state` が `unreadable` を返す形を作る。"""
+    path = declaration(main_repo)
+    if form == "broken_json":
+        write_declaration(main_repo, "{ not json")
+    elif form == "unsupported_version":
+        write_declaration(main_repo, json.dumps({"version": 99}))
+    elif form == "empty_file":
+        write_declaration(main_repo, "")
+    elif form == "directory":
+        path.mkdir(parents=True)
+    elif form == "unreadable_permission":
+        if os.geteuid() == 0:
+            pytest.skip("root は権限 000 のファイルも読めるため、この形を作れない")
+        write_declaration(main_repo, json.dumps({"version": 1}))
+        path.chmod(0)
+    else:
+        raise AssertionError(form)
+    return path
+
+
+def snapshot(path: Path) -> tuple:
+    """宣言の中身（ディレクトリなら一覧）と権限。init の前後で比べる。"""
+    mode = path.lstat().st_mode
+    if path.is_dir():
+        return mode, sorted(p.name for p in path.iterdir())
+    return mode, path.read_bytes() if os.access(path, os.R_OK) else None
+
+
+@pytest.mark.parametrize("form", UNREADABLE_FORMS)
+def test_init_fails_on_an_unreadable_declaration(main_repo: Path, form: str) -> None:
+    """受け入れ条件 1 / 4: 読めない宣言は 1 で終わり、「既にあります」を出さない。"""
+    make_unreadable(main_repo, form)
+
+    result = run(["init"], cwd=main_repo)
+
+    assert result["rc"] == 1, result
+    assert "既にあります" not in result["out"], result["out"]
+    assert result["out"] == "", result["out"]
+
+
+@pytest.mark.parametrize("form", UNREADABLE_FORMS)
+def test_init_prints_the_same_declaration_line_as_status_and_check(main_repo: Path, form: str) -> None:
+    """受け入れ条件 2 / 4: 標準エラーの 1 行目は status / check の宣言の行と一字一句同じ。"""
+    make_unreadable(main_repo, form)
+
+    result = run(["init"], cwd=main_repo)
+    status_line, check_line, _ = _declaration_line_pair(main_repo)
+
+    assert result["err"].splitlines()[0] == BROKEN_LINE == status_line == check_line, result["err"]
+
+
+def test_init_tells_the_user_to_fix_or_remove_and_does_not_suggest_force(main_repo: Path) -> None:
+    """受け入れ条件 3: 直すか消してから init をもう一度。--force は勧めない。"""
+    write_declaration(main_repo, "{ not json")
+
+    result = run(["init"], cwd=main_repo)
+
+    assert ".ndf/worktree.json を消してから" in result["err"], result["err"]
+    assert "init" in result["err"], result["err"]
+    assert "--force" not in result["err"], result["err"]
+
+
+@pytest.mark.parametrize("form", UNREADABLE_FORMS)
+def test_init_leaves_an_unreadable_declaration_untouched(main_repo: Path, form: str) -> None:
+    """受け入れ条件 5: 読めない宣言の中身と権限を変えない。"""
+    path = make_unreadable(main_repo, form)
+    before = snapshot(path)
+
+    run(["init"], cwd=main_repo)
+
+    assert snapshot(path) == before
+
+
+def test_init_accepts_a_symlink_to_a_readable_declaration(main_repo: Path, tmp_path: Path) -> None:
+    """受け入れ条件 8: 読める宣言を指す symlink は、書き込まないので「既にあります」で 0。"""
+    outside = tmp_path / "outside.json"
+    body = json.dumps({"version": 1, "guard": {"allow_paths": ["notes/"]}})
+    outside.write_text(body, encoding="utf-8")
+    (main_repo / ".ndf").mkdir()
+    declaration(main_repo).symlink_to(outside)
+
+    result = run(["init"], cwd=main_repo)
+
+    assert result["rc"] == 0, result
+    assert "既にあります" in result["out"], result["out"]
+    assert outside.read_text(encoding="utf-8") == body, "指す先を変えない"
+
+
+@pytest.mark.parametrize("form", [f for f in UNREADABLE_FORMS if f != "directory"])
+def test_force_rebuilds_an_unreadable_declaration(main_repo: Path, form: str) -> None:
+    """受け入れ条件 9: --force は読めない宣言を作り直し、直後の check が 0。
+    ディレクトリの形は #628 が扱うため含めない。"""
+    make_unreadable(main_repo, form)
+
+    result = run(["init", "--force"], cwd=main_repo)
+
+    assert result["rc"] == 0, result
+    assert run(["check"], cwd=main_repo)["rc"] == 0
+
+
+@pytest.mark.parametrize("form", UNREADABLE_FORMS)
+def test_status_and_check_are_unchanged_for_unreadable_forms(main_repo: Path, form: str) -> None:
+    """受け入れ条件 12: status / check の出力と終了コードは変更前と同じ。"""
+    make_unreadable(main_repo, form)
+    status_line, check_line, rc = _declaration_line_pair(main_repo)
+    assert status_line == check_line == BROKEN_LINE
+    assert rc == 3
+    assert run(["status"], cwd=main_repo)["rc"] == 0
+
+
+def step0_section() -> str:
+    body = WORKTREE_SKILL.read_text(encoding="utf-8")
+    return body[body.index("## 0. 宣言ファイルを用意する"): body.index("## 1. 現在地を確かめる")]
+
+
+def test_step0_stops_when_init_fails() -> None:
+    """受け入れ条件 10: 手順 0 は init の終了コードを見て止まり、利用者が決める。"""
+    section = step0_section()
+    assert 'exit=$?' in section
+    assert "先へ進まない" in section
+    assert "利用者" in section
+
+
+def test_step0_limits_no_overwrite_to_readable_declarations() -> None:
+    """受け入れ条件 11: 上書きしないのは読める宣言に限り、読めない宣言では 1 で終わる。"""
+    section = step0_section()
+    assert "読める宣言" in section
+    assert "1 で終わる" in section
