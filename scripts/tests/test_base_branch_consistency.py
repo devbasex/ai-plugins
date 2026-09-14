@@ -244,3 +244,33 @@ def test_commands_do_not_hardcode_default_branch(name: str) -> None:
     text = (SKILLS / name / "SKILL.md").read_text(encoding="utf-8")
     hits = [line for line in text.splitlines() if COMMAND_LITERAL.match(line)]
     assert hits == [], f"{name}: {hits}"
+
+
+# --- 個人の宣言では起点が変わらない（#495 の AC17） --------------------------
+
+
+def write_local_declaration(repo: Path, body: dict) -> None:
+    """追跡しない個人の宣言 `.ndf/worktree.local.json` を書く。"""
+    ndf = repo / ".ndf"
+    ndf.mkdir(exist_ok=True)
+    (ndf / "worktree.local.json").write_text(json.dumps(body), encoding="utf-8")
+
+
+LOCAL_BASE_BRANCH = {"version": 1, "base_branch": "main"}
+
+
+@pytest.mark.parametrize("name", INLINE_SKILLS)
+@pytest.mark.parametrize("case", list(DECLARATIONS))
+def test_local_declaration_does_not_change_the_resolution(
+    name: str, case: str, repo: Path
+) -> None:
+    """起点は共有の宣言だけが決める。個人の宣言を置いても、手順と共通ライブラリの
+    解決結果は個人の宣言が無い木と一致する（#495 の決定 7）。"""
+    body = DECLARATIONS[case]
+    if body is not None:
+        write_declaration(repo, body)
+    before = (resolve_inline(name, repo), resolve_library(repo))
+
+    write_local_declaration(repo, LOCAL_BASE_BRANCH)
+
+    assert (resolve_inline(name, repo), resolve_library(repo)) == before
