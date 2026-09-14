@@ -37,6 +37,7 @@ command -v jq >/dev/null 2>&1 || { printf '%s\n' "jq が要ります" >&2; exit 
 
 MAIN_DIR=$(wt_main_dir) || { printf '%s\n' "git のリポジトリの中で実行してください" >&2; exit 1; }
 DECLARATION_FILE="$MAIN_DIR/.ndf/worktree.json"
+DECLARATION_REL="${DECLARATION_FILE#"$MAIN_DIR"/}"
 
 SCHEMA_URL="https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/ndf/skills/worktree/schemas/worktree.schema.json"
 
@@ -85,7 +86,7 @@ do_init() {
     case "$(wt_declaration_state "$MAIN_DIR")" in
       present)
         # **上書きしない。** 書き加えた内容を消さないため。
-        printf '宣言ファイルは既にあります: %s\n' "${DECLARATION_FILE#"$MAIN_DIR"/}"
+        printf '宣言ファイルは既にあります: %s\n' "$DECLARATION_REL"
         return 0
         ;;
       unreadable)
@@ -94,7 +95,7 @@ do_init() {
         # 形によって結果が分かれる（ディレクトリは #628）ため勧めない。
         print_declaration_line unreadable >&2
         printf '中身を直すか、書き加えた内容が要らなければ %s を消してから、もう一度 init を実行してください\n' \
-          "${DECLARATION_FILE#"$MAIN_DIR"/}" >&2
+          "$DECLARATION_REL" >&2
         return 1
         ;;
     esac
@@ -111,7 +112,7 @@ do_init() {
   }
 
   cat <<EOS
-宣言ファイルを作りました: ${DECLARATION_FILE#"$MAIN_DIR"/}
+宣言ファイルを作りました: $DECLARATION_REL
 
 これで、主ディレクトリの編集時の案内と、セッション開始時の逸脱検知・ブランチ追従が
 動きます。案内を出さないパスは組み込みの既定（issues/ docs/ 各ランタイムの設定
@@ -131,7 +132,7 @@ EOS
 # 言葉で書くと、どちらかの出力だけを見た利用者が別の状態と読みうる。
 print_declaration_line() {
   case "$1" in
-    present) printf '宣言ファイル: あり（%s）\n' "${DECLARATION_FILE#"$MAIN_DIR"/}" ;;
+    present) printf '宣言ファイル: あり（%s）\n' "$DECLARATION_REL" ;;
     unreadable) printf '宣言ファイル: 読めません（版が未対応か、JSON として壊れています）\n' ;;
     *) printf '宣言ファイル: なし。`worktree-setup.sh init` で作れます\n' ;;
   esac
