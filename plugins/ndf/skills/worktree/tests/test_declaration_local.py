@@ -356,6 +356,26 @@ def test_local_state_is_present_for_a_readable_file(shared: Path) -> None:
     assert local_state(shared) == "present"
 
 
+def test_local_state_distinguishes_readable_and_broken_symlinks(shared: Path) -> None:
+    local_path = shared / ".ndf" / "worktree.local.json"
+    target = shared / "local-overrides.json"
+    target.write_text(json.dumps({"version": 1}), encoding="utf-8")
+    local_path.symlink_to(target)
+
+    readable = run_lib(f'wt_declaration_local_state "{shared}"', cwd=shared)
+
+    assert readable.returncode == 0
+    assert readable.stdout == "present\n"
+
+    local_path.unlink()
+    local_path.symlink_to(shared / "missing-local-overrides.json")
+
+    broken = run_lib(f'wt_declaration_local_state "{shared}"', cwd=shared)
+
+    assert broken.returncode == 0
+    assert broken.stdout == "absent\n"
+
+
 @pytest.mark.parametrize("form", BROKEN_FORMS)
 def test_local_state_is_unreadable_for_broken_forms(shared: Path, form: str) -> None:
     make_broken_local(shared, form)
