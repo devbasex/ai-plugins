@@ -46,11 +46,6 @@ readonly NOTE_DECLARED="（宣言）"
 readonly NOTE_DEFAULT_BRANCH="（未宣言。既定ブランチ）"
 readonly NOTE_UNKNOWN_FALLBACK="不明（origin/HEAD が未設定）"
 
-# 表示に使う宣言ファイルの主ディレクトリ相対パス。求め方を変えるときはここだけを直す。
-rel_declaration() {
-  printf '%s' "${DECLARATION_FILE#"$MAIN_DIR"/}"
-}
-
 # --- init -------------------------------------------------------------------
 
 # 書き先が symlink なら断る。たどると、リポジトリの外を指した状態で --force を
@@ -96,7 +91,7 @@ do_init() {
     case "$(wt_declaration_state "$MAIN_DIR")" in
       present)
         # **上書きしない。** 書き加えた内容を消さないため。
-        printf '宣言ファイルは既にあります: %s\n' "$(rel_declaration)"
+        printf '宣言ファイルは既にあります: %s\n' "${DECLARATION_FILE#"$MAIN_DIR"/}"
         return 0
         ;;
       unreadable)
@@ -105,7 +100,7 @@ do_init() {
         # 形によって結果が分かれる（ディレクトリは #628）ため勧めない。
         print_declaration_line unreadable >&2
         printf '中身を直すか、書き加えた内容が要らなければ %s を消してから、もう一度 init を実行してください\n' \
-          "$(rel_declaration)" >&2
+          "${DECLARATION_FILE#"$MAIN_DIR"/}" >&2
         return 1
         ;;
     esac
@@ -122,7 +117,7 @@ do_init() {
   }
 
   cat <<EOS
-宣言ファイルを作りました: $(rel_declaration)
+宣言ファイルを作りました: ${DECLARATION_FILE#"$MAIN_DIR"/}
 
 これで、主ディレクトリの編集時の案内と、セッション開始時の逸脱検知・ブランチ追従が
 動きます。案内を出さないパスは組み込みの既定（issues/ docs/ 各ランタイムの設定
@@ -142,7 +137,7 @@ EOS
 # 言葉で書くと、どちらかの出力だけを見た利用者が別の状態と読みうる。
 print_declaration_line() {
   case "$1" in
-    present) printf '宣言ファイル: あり（%s）\n' "$(rel_declaration)" ;;
+    present) printf '宣言ファイル: あり（%s）\n' "${DECLARATION_FILE#"$MAIN_DIR"/}" ;;
     unreadable) printf '宣言ファイル: 読めません（版が未対応か、JSON として壊れています）\n' ;;
     *) printf '宣言ファイル: なし。`worktree-setup.sh init` で作れます\n' ;;
   esac
