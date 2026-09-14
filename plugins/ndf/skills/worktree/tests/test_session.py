@@ -162,6 +162,25 @@ def test_single_worktree_is_followed_detached(main_repo: Path, worktree: Path) -
     assert symbolic.returncode != 0, "detached HEAD であること"
 
 
+def test_already_at_target_commit_skips_checkout_and_guidance(
+    main_repo: Path, worktree: Path,
+) -> None:
+    """既に追従先のコミットにいるときは checkout を行わず案内も出さない。"""
+    declared(main_repo, True)
+    git(worktree, "commit", "-q", "--allow-empty", "-m", "work")
+    target = head_of(worktree)
+    git(main_repo, "checkout", "-q", "--detach", target)
+
+    before_head = head_of(main_repo)
+    before_checkouts = checkout_count(main_repo)
+
+    result = run_session(main_repo)
+
+    assert head_of(main_repo) == before_head
+    assert checkout_count(main_repo) == before_checkouts
+    assert "合わせました" not in context_of(result)
+
+
 def test_two_worktrees_fall_back_to_default(main_repo: Path, worktree: Path) -> None:
     declared(main_repo, True)
     second = main_repo / ".worktrees" / "fix" / "y"

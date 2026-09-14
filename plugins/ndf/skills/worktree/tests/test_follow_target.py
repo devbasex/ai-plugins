@@ -63,6 +63,21 @@ def test_dev_worktrees_lists_only_worktrees_dir(main_repo: Path, worktree: Path)
     assert branch == "feature/x"
 
 
+def test_dev_worktrees_multiple_worktrees(main_repo: Path, worktree: Path) -> None:
+    """作業ツリーが 2 つ以上のとき、各作業ツリーが 1 行ずつ出力される。"""
+    second = main_repo / ".worktrees" / "fix" / "y"
+    git(main_repo, "worktree", "add", "-q", "-b", "fix/y", str(second))
+
+    got = run_lib(f'wt_dev_worktrees "{main_repo}"', cwd=main_repo)
+    lines = [ln for ln in got.stdout.splitlines() if ln]
+
+    assert len(lines) == 2, got.stdout
+    for line in lines:
+        path, branch = line.split("\t")
+        assert (main_repo / ".worktrees").resolve() in Path(path).resolve().parents
+        assert branch != ""
+
+
 def test_review_worktree_is_excluded(main_repo: Path, worktree: Path, tmp_path: Path) -> None:
     """レビュー用の作業ツリーは `.worktrees/` の外にあり、追従の対象に入らない。"""
     outside = tmp_path / "review-worktree"
