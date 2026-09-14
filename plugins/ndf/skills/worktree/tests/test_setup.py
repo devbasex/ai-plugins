@@ -373,11 +373,16 @@ def test_check_ignores_branches_in_an_unreadable_declaration(main_repo: Path) ->
     assert result["out"].splitlines()[1] == "開発の起点: main（未宣言。既定ブランチ）", result["out"]
 
 
-def test_check_reports_an_unknown_default_branch(tmp_path: Path) -> None:
-    """origin/HEAD も main / master も無ければ「不明」と出す。"""
+def _init_trunk_repo(tmp_path: Path) -> Path:
     repo = tmp_path / "trunk"
     repo.mkdir()
     git(repo, "init", "-q", "-b", "trunk")
+    return repo
+
+
+def test_check_reports_an_unknown_default_branch(tmp_path: Path) -> None:
+    """origin/HEAD も main / master も無ければ「不明」と出す。"""
+    repo = _init_trunk_repo(tmp_path)
     result = run(["check"], cwd=repo)
     assert result["rc"] == 2, result
     assert result["out"].splitlines()[1:] == [
@@ -390,9 +395,7 @@ def test_check_mixes_declared_base_branch_with_an_unknown_default(tmp_path: Path
     """現状固定: base_branch だけを宣言し、origin/HEAD も main / master も無い
     リポジトリでは、開発の起点は宣言値、本番のチャネルは「不明」が混在して出る。
     宣言のキーは独立に判定され、片方の退避先が無くても rc は 0 のまま。"""
-    repo = tmp_path / "trunk"
-    repo.mkdir()
-    git(repo, "init", "-q", "-b", "trunk")
+    repo = _init_trunk_repo(tmp_path)
     write_declaration(repo, json.dumps({"version": 1, "base_branch": "develop"}))
 
     result = run(["check"], cwd=repo)

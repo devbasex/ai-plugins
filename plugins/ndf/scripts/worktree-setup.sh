@@ -166,17 +166,14 @@ do_status() {
 
 # --- check ------------------------------------------------------------------
 
-# 宣言のキーを行へ出す。**名前の実在は確かめない。** 確かめる wt_branch_exists は
-# origin へ問い合わせることがあり、起動のたびに通信が走る。実在の確認は、その名前を
-# 使う時点の wt_base_branch / wt_production_branch が持つ。
+# 宣言された値か、既定ブランチを行へ出す。**名前の実在は確かめない。** 確かめる
+# wt_branch_exists は origin へ問い合わせることがあり、起動のたびに通信が走る。
+# 実在の確認は、その名前を使う時点の wt_base_branch / wt_production_branch が持つ。
 print_branch_line() {
-  local label="$1" key="$2" decl="$3" name= fallback
-  if [ -n "$decl" ]; then
-    name=$(_wt_declaration_string "$decl" "$key")
-  fi
+  local label="$1" name="$2" fallback="$3"
   if [ -n "$name" ]; then
     printf '%s: %s%s\n' "$label" "$name" "$NOTE_DECLARED"
-  elif fallback=$(wt_default_branch "$MAIN_DIR"); then
+  elif [ -n "$fallback" ]; then
     printf '%s: %s%s\n' "$label" "$fallback" "$NOTE_DEFAULT_BRANCH"
   else
     printf '%s: %s\n' "$label" "$NOTE_UNKNOWN_FALLBACK"
@@ -184,13 +181,18 @@ print_branch_line() {
 }
 
 do_check() {
-  local state decl=
+  local state decl= base= prod= default_branch=
   state=$(wt_declaration_state "$MAIN_DIR") || return 1
-  [ "$state" = present ] && decl=$(wt_declaration "$MAIN_DIR")
+  if [ "$state" = present ]; then
+    decl=$(wt_declaration "$MAIN_DIR")
+    base=$(_wt_declaration_string "$decl" base_branch)
+    prod=$(_wt_declaration_string "$decl" production_branch)
+  fi
+  default_branch=$(wt_default_branch "$MAIN_DIR" 2>/dev/null) || default_branch=
 
   print_declaration_line "$state"
-  print_branch_line "開発の起点" base_branch "$decl"
-  print_branch_line "本番のチャネル" production_branch "$decl"
+  print_branch_line "開発の起点" "$base" "$default_branch"
+  print_branch_line "本番のチャネル" "$prod" "$default_branch"
 
   case "$state" in
     present) return 0 ;;
