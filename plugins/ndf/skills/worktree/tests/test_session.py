@@ -519,7 +519,11 @@ def test_default_does_not_contact_origin(main_repo: Path, tmp_path: Path) -> Non
 def test_dirty_changes_are_reported_regardless_of_follow(
     main_repo: Path, worktree: Path, follow: object,
 ) -> None:
-    """追跡対象の未コミット変更の件数と一覧は、`follow_branch` の値によらず出る（AC8）。"""
+    """追跡対象の未コミット変更の件数と一覧は、`follow_branch` の値によらず出る（AC8）。
+
+    追従の断りは追従を有効にしたときだけ付く。追従しないリポジトリへ「変更がある間は
+    追従しません」と伝えると、既定でも追従する前提だと読めてしまう。
+    """
     declared(main_repo, follow)
     git(worktree, "commit", "-q", "--allow-empty", "-m", "work")
     (main_repo / "README.md").write_text("changed\n", encoding="utf-8")
@@ -530,4 +534,5 @@ def test_dirty_changes_are_reported_regardless_of_follow(
     text = context_of(result)
     assert "1 件" in text, text
     assert "README.md" in text, text
+    assert ("追従しません" in text) is (follow is True), text
     assert head_of(main_repo) == before
