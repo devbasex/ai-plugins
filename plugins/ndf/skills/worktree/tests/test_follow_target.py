@@ -16,8 +16,9 @@ ONE = "/repo/.worktrees/feature/x\tfeature/x"
 TWO = "/repo/.worktrees/feature/x\tfeature/x\n/repo/.worktrees/fix/y\tfix/y"
 
 
-def follow(listing: str, dirty: str) -> str:
-    got = run_lib(f'wt_follow_target "{listing}" "{dirty}"')
+def follow(listing: str, dirty: str | None = None) -> str:
+    args = f'"{listing}"' if dirty is None else f'"{listing}" "{dirty}"'
+    got = run_lib(f"wt_follow_target {args}")
     return got.stdout.strip()
 
 
@@ -32,6 +33,19 @@ def follow(listing: str, dirty: str) -> str:
 def test_clean_main_dir(listing: str, expected: str) -> None:
     """未コミット変更が無いときは、作業ツリーの数で追従先が決まる。"""
     assert follow(listing, "0") == expected
+
+
+@pytest.mark.parametrize(
+    ("listing", "expected"),
+    [
+        ("", "default"),
+        (ONE, "detach feature/x"),
+        (TWO, "default"),
+    ],
+)
+def test_dirty_omitted_defaults_to_clean(listing: str, expected: str) -> None:
+    """第 2 引数を省略したときは dirty='0' と同じく未コミット変更なしとして扱われる。"""
+    assert follow(listing) == follow(listing, "0") == expected
 
 
 @pytest.mark.parametrize("listing", ["", ONE, TWO])
