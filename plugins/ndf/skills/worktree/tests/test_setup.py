@@ -260,6 +260,18 @@ BROKEN_LINE = "宣言ファイル: 読めません（版が未対応か、JSON �
 PRESENT_LINE = "宣言ファイル: あり（.ndf/worktree.json）"
 
 
+def declared_line(label: str, name: str) -> str:
+    return f"{label}: {name}（宣言）"
+
+
+def default_line(label: str, name: str) -> str:
+    return f"{label}: {name}（未宣言。既定ブランチ）"
+
+
+def unknown_line(label: str) -> str:
+    return f"{label}: 不明（origin/HEAD が未設定）"
+
+
 def first_declaration_line(out: str) -> str:
     return next(line for line in out.splitlines() if line.startswith("宣言ファイル:"))
 
@@ -317,8 +329,8 @@ def test_check_prints_undeclared_branches_as_default(main_repo: Path) -> None:
     """宣言が無いとき、2 行目と 3 行目は既定ブランチへ落ちていることを示す。"""
     result = run(["check"], cwd=main_repo)
     assert result["out"].splitlines()[1:] == [
-        "開発の起点: main（未宣言。既定ブランチ）",
-        "本番のチャネル: main（未宣言。既定ブランチ）",
+        default_line("開発の起点", "main"),
+        default_line("本番のチャネル", "main"),
     ], result["out"]
 
 
@@ -331,8 +343,8 @@ def test_check_prints_declared_branches(main_repo: Path) -> None:
     result = run(["check"], cwd=main_repo)
     assert result["rc"] == 0, result
     assert result["out"].splitlines()[1:] == [
-        "開発の起点: develop（宣言）",
-        "本番のチャネル: release（宣言）",
+        declared_line("開発の起点", "develop"),
+        declared_line("本番のチャネル", "release"),
     ], result["out"]
 
 
@@ -346,8 +358,8 @@ def test_check_prints_only_base_branch_declared(main_repo: Path) -> None:
     result = run(["check"], cwd=main_repo)
     assert result["rc"] == 0, result
     assert result["out"].splitlines()[1:] == [
-        "開発の起点: develop（宣言）",
-        "本番のチャネル: main（未宣言。既定ブランチ）",
+        declared_line("開発の起点", "develop"),
+        default_line("本番のチャネル", "main"),
     ], result["out"]
 
 
@@ -360,8 +372,8 @@ def test_check_prints_only_production_branch_declared(main_repo: Path) -> None:
     result = run(["check"], cwd=main_repo)
     assert result["rc"] == 0, result
     assert result["out"].splitlines()[1:] == [
-        "開発の起点: main（未宣言。既定ブランチ）",
-        "本番のチャネル: release（宣言）",
+        default_line("開発の起点", "main"),
+        declared_line("本番のチャネル", "release"),
     ], result["out"]
 
 
@@ -370,7 +382,7 @@ def test_check_ignores_branches_in_an_unreadable_declaration(main_repo: Path) ->
     write_declaration(main_repo, json.dumps({"version": 99, "base_branch": "develop"}))
     result = run(["check"], cwd=main_repo)
     assert result["rc"] == 3, result
-    assert result["out"].splitlines()[1] == "開発の起点: main（未宣言。既定ブランチ）", result["out"]
+    assert result["out"].splitlines()[1] == default_line("開発の起点", "main"), result["out"]
 
 
 def test_check_reports_an_unknown_default_branch(tmp_path: Path) -> None:
@@ -381,8 +393,8 @@ def test_check_reports_an_unknown_default_branch(tmp_path: Path) -> None:
     result = run(["check"], cwd=repo)
     assert result["rc"] == 2, result
     assert result["out"].splitlines()[1:] == [
-        "開発の起点: 不明（origin/HEAD が未設定）",
-        "本番のチャネル: 不明（origin/HEAD が未設定）",
+        unknown_line("開発の起点"),
+        unknown_line("本番のチャネル"),
     ], result["out"]
 
 
@@ -400,8 +412,8 @@ def test_check_mixes_declared_base_branch_with_an_unknown_default(tmp_path: Path
     assert result["rc"] == 0, result
     assert result["out"].splitlines() == [
         PRESENT_LINE,
-        "開発の起点: develop（宣言）",
-        "本番のチャネル: 不明（origin/HEAD が未設定）",
+        declared_line("開発の起点", "develop"),
+        unknown_line("本番のチャネル"),
     ], result["out"]
 
 
