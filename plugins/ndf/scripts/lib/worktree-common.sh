@@ -1300,6 +1300,24 @@ wt_extract_write_target() {
     [ -n "$target_dir" ] && dest=$target_dir
     _emit "$dest"
   }
+  # tee の被演算子から書き込み先を拾う。引数は `tee` の語の添字。
+  # tee は並べたファイルすべてへ書き込む。1 件目で止めない。
+  _wt_extract_tee_targets() {
+    local start=$1 j2 w2
+    for ((j2 = start + 1; j2 < n; j2++)); do
+      w2=${words[j2]}
+      if _redir_span "$j2"; then
+        j2=$_WT_REDIR_END
+        [ -n "$_WT_REDIR_HEAD" ] || continue
+        w2=$_WT_REDIR_HEAD
+      fi
+      if _wt_is_separator "$w2"; then break; fi
+      case "$w2" in
+        -*) continue ;;
+        *) _emit "$w2" ;;
+      esac
+    done
+  }
 
   for ((i = 0; i < n; i++)); do
     w=${words[i]}
@@ -1685,19 +1703,7 @@ wt_extract_write_target() {
         ;;
       tee)
         # tee は並べたファイルすべてへ書き込む。1 件目で止めない。
-        for ((j = i + 1; j < n; j++)); do
-          tw=${words[j]}
-          if _redir_span "$j"; then
-            j=$_WT_REDIR_END
-            [ -n "$_WT_REDIR_HEAD" ] || continue
-            tw=$_WT_REDIR_HEAD
-          fi
-          if _wt_is_separator "$tw"; then break; fi
-          case "$tw" in
-            -*) continue ;;
-            *) _emit "$tw" ;;
-          esac
-        done
+        _wt_extract_tee_targets "$i"
         ;;
       sed)
         # in-place の指定があるとき、操作対象のファイルをすべて拾う。
@@ -1712,8 +1718,8 @@ wt_extract_write_target() {
   done
 
   unset -f _emit _push_group _pop_group _push_subshell _pop_subshell _or_group_exits \
-    _or_exit_redirs _close_function_body _wt_extract_sed_targets _wt_extract_cp_mv_target \
-    _redir_span
+    _or_exit_redirs _close_function_body _wt_extract_tee_targets _wt_extract_sed_targets \
+    _wt_extract_cp_mv_target _redir_span
   [ "$found" = 1 ] || return 1
 }
 
