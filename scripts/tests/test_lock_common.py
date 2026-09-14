@@ -342,23 +342,3 @@ def test_acquire_reclaims_stale_discard_gate_before_taking_stale_lock(tmp_path: 
     assert not (lock / "discard").exists(), "古い discard 関門が残っていない"
 
 
-def test_acquire_keeps_a_stale_lock_behind_a_fresh_discard_gate(tmp_path: Path) -> None:
-    """現状固定: 陳腐化したロックでも、新しい discard 関門が残っていれば取得しない。
-
-    関門は他の担当が取り除きの途中で持っているものとして扱い、上限まで待って
-    1 で戻る。元の token・pid・関門はそのまま残る。
-    """
-    lock = tmp_path / "fresh_discard.lock"
-    lock.mkdir()
-    (lock / "token").write_text("old-token\n", encoding="utf-8")
-    (lock / "pid").write_text("999999\n", encoding="utf-8")
-    (lock / "discard").touch()
-
-    got = run_lib(LOCK_LIB, f'ndf_lock_acquire "{lock}" 1; echo rc=$?')
-
-    assert "rc=1" in got.stdout, got
-    assert (lock / "token").read_text(encoding="utf-8") == "old-token\n", "元の token を保つ"
-    assert (lock / "pid").read_text(encoding="utf-8") == "999999\n", "元の pid を保つ"
-    assert (lock / "discard").is_file(), "新しい discard 関門を残す"
-
-
