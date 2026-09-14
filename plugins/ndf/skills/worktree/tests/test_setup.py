@@ -586,9 +586,6 @@ def test_slot_touch_updates_last_used_at_and_keeps_released_at_null(main_repo: P
 
 WORKTREE_SKILL = SCRIPTS_DIR.parent / "skills" / "worktree" / "SKILL.md"
 
-UNREADABLE_FORMS = ["broken_json", "unsupported_version", "empty_file", "directory", "unreadable_permission"]
-
-
 def _make_broken_json(main_repo: Path, path: Path) -> None:
     write_declaration(main_repo, "{ not json")
 
@@ -619,6 +616,7 @@ _UNREADABLE_HANDLERS = {
     "directory": _make_directory,
     "unreadable_permission": _make_unreadable_permission,
 }
+UNREADABLE_FORMS = list(_UNREADABLE_HANDLERS.keys())
 
 
 def make_unreadable(main_repo: Path, form: str) -> Path:
