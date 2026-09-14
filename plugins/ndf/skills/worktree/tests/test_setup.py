@@ -27,13 +27,6 @@ def run(args: list[str], cwd: Path) -> dict:
     return {"rc": proc.returncode, "out": proc.stdout, "err": proc.stderr}
 
 
-def run_hook(script: Path, payload: dict, cwd: Path) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["bash", str(script)], input=json.dumps(payload),
-        cwd=str(cwd), capture_output=True, text=True,
-    )
-
-
 def declaration(main_repo: Path) -> Path:
     return main_repo / ".ndf" / "worktree.json"
 
@@ -69,7 +62,10 @@ def test_init_makes_the_guard_active(main_repo: Path) -> None:
         "tool_name": "Edit",
         "tool_input": {"file_path": str(main_repo / "plugins" / "ndf" / "README.md")},
     }
-    proc = run_hook(GUARD, payload, main_repo)
+    proc = subprocess.run(
+        ["bash", str(GUARD)], input=json.dumps(payload),
+        cwd=str(main_repo), capture_output=True, text=True,
+    )
     assert "plugins/ndf/README.md" in proc.stdout, proc.stdout
 
 
@@ -533,7 +529,10 @@ def test_hooks_stay_silent_without_a_declaration(main_repo: Path) -> None:
         }),
     ]
     for script, payload in cases:
-        proc = run_hook(script, payload, main_repo)
+        proc = subprocess.run(
+            ["bash", str(script)], input=json.dumps(payload),
+            cwd=str(main_repo), capture_output=True, text=True,
+        )
         assert proc.returncode == 0, (script.name, proc.stderr)
         assert proc.stdout == "", (script.name, proc.stdout)
     assert not (main_repo / ".ndf").exists()
