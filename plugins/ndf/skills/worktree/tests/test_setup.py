@@ -215,6 +215,22 @@ def test_init_accepts_double_dash(main_repo: Path) -> None:
     assert body["$schema"].endswith("worktree.schema.json")
 
 
+def test_double_dash_does_not_stop_force_parsing(main_repo: Path) -> None:
+    """現状固定: `--` は POSIX 慣習では以降を非オプションとして扱う区切りだが、
+    引数解析の loop は `--` の後の `--force` も引き続き解釈する。guard 付きの
+    既存宣言に対し `init -- --force` を渡すと rc=0 で上書きされ、guard が残らない。"""
+    write_declaration(
+        main_repo,
+        json.dumps({"version": 1, "guard": {"allow_paths": ["notes/"]}}),
+    )
+
+    result = run(["init", "--", "--force"], cwd=main_repo)
+
+    assert result["rc"] == 0, result
+    body = json.loads(declaration(main_repo).read_text(encoding="utf-8"))
+    assert "guard" not in body, "-- が --force の解釈を止めないため上書きされる"
+
+
 def test_unknown_subcommand_prints_usage(main_repo: Path) -> None:
     """現状固定: 知らない副コマンドは 1 で弾かれ、使い方は標準エラーへ出す。"""
     result = run(["bogus"], cwd=main_repo)
