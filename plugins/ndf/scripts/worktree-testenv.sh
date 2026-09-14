@@ -605,6 +605,34 @@ do_expose() {
 
 # --- reap -------------------------------------------------------------------
 
+# 実行中ロックや稼働状態を判定し、個別環境を停止する。
+reap_environment() {
+  local worktree="$1"
+  local environment="$2"
+  local slot="$3"
+  local lock
+
+  TARGET="$worktree"
+  ENVIRONMENT="$environment"
+  # `compose_env` はスロットも渡す。読まずに `compose` を呼ぶと、未定義の
+  # 変数を参照した時点で終了し（`set -u`）、コンテナが動いたまま残る。
+  SLOT="$slot"
+
+  # 実行中の作業ツリーはロックを握っている。握られていれば対象から外す。
+  lock=$(inuse_lock "$environment")
+  if wt_lock_is_held "$lock"; then
+    return 0
+  fi
+
+  # 起動していないものは止める必要がない。
+  if [ -z "$("$(docker_command)" ps -q --filter "label=com.docker.compose.project=$environment" 2>/dev/null)" ]; then
+    return 0
+  fi
+
+  printf '停止します: %s（%s）\n' "$environment" "$worktree"
+  compose stop
+}
+
 do_reap() {
   local idle_seconds
   idle_seconds=$(wt_duration_seconds "$IDLE") || {
@@ -613,28 +641,10 @@ do_reap() {
   }
   has_docker || return 0
 
-  local worktree environment slot lock
+  local worktree environment slot
   while IFS=$'\t' read -r worktree environment slot; do
     [ -n "$worktree" ] || continue
-    TARGET="$worktree"
-    ENVIRONMENT="$environment"
-    # `compose_env` はスロットも渡す。読まずに `compose` を呼ぶと、未定義の
-    # 変数を参照した時点で終了し（`set -u`）、コンテナが動いたまま残る。
-    SLOT="$slot"
-
-    # 実行中の作業ツリーはロックを握っている。握られていれば対象から外す。
-    lock=$(inuse_lock "$environment")
-    if wt_lock_is_held "$lock"; then
-      continue
-    fi
-
-    # 起動していないものは止める必要がない。
-    if [ -z "$("$(docker_command)" ps -q --filter "label=com.docker.compose.project=$environment" 2>/dev/null)" ]; then
-      continue
-    fi
-
-    printf '停止します: %s（%s）\n' "$environment" "$worktree"
-    compose stop
+    reap_environment "$worktree" "$environment" "$slot"
   done < <(wt_registry_visible "$(registry)" \
     | jq -r --argjson idle "$idle_seconds" '
       [.assignments[]
