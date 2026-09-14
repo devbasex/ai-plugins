@@ -129,6 +129,19 @@ def test_status_counts_worktrees(main_repo: Path, worktree: Path) -> None:
     assert "開発用の作業ツリー: 1 個" in result["out"], result["out"]
 
 
+def test_status_runs_from_inside_a_worktree(main_repo: Path, worktree: Path) -> None:
+    """現状固定: 作業ツリー内からでも、主ディレクトリの導入状態を報告する。"""
+    run(["init"], cwd=main_repo)
+
+    result = run(["status"], cwd=worktree)
+
+    assert result["rc"] == 0, result
+    assert f"主ディレクトリ: {main_repo}" in result["out"], result["out"]
+    assert PRESENT_LINE in result["out"], result["out"]
+    assert ".worktrees/ の登録: なし" in result["out"], result["out"]
+    assert "開発用の作業ツリー: 1 個" in result["out"], result["out"]
+
+
 def test_status_counts_zero_worktrees(main_repo: Path) -> None:
     """現状固定: 開発用の作業ツリーが無い境界では 0 個と報告する。"""
     result = run(["status"], cwd=main_repo)
