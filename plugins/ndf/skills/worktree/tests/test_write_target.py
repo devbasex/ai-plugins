@@ -85,6 +85,8 @@ def test_devnull_is_ignored() -> None:
     ("command", "expected"),
     [
         ("sed -i 's/a/b/' one.md two.md", ["one.md", "two.md"]),
+        ("sed --in-place 's/a/b/' one.md two.md", ["one.md", "two.md"]),
+        ("sed --in-place=.bak 's/a/b/' one.md two.md", ["one.md", "two.md"]),
         ("sed -i -e 's/a/b/' one.md two.md", ["one.md", "two.md"]),
         ("sed -i --expression='s/a/b/' one.md two.md", ["one.md", "two.md"]),
         ("sed -i 's/a b/c d/' one.md two.md", ["one.md", "two.md"]),
