@@ -18,8 +18,8 @@ from worktree_helpers import SCRIPTS_DIR, git, init_repo, write_declaration
 TESTENV = SCRIPTS_DIR / "worktree-testenv.sh"
 
 
-def run(args: list[str], cwd: Path) -> dict:
-    env = os.environ.copy()
+def run(args: list[str], cwd: Path, env: dict | None = None) -> dict:
+    env = dict(env) if env is not None else os.environ.copy()
     env["LC_ALL"] = "C"
     proc = subprocess.run(
         ["bash", str(TESTENV), *args],
@@ -1294,3 +1294,64 @@ def test_reap_leaves_an_environment_whose_lock_is_held(main_repo: Path, worktree
     assert result["rc"] == 0, result
     assert "停止します" not in result["out"], result
     assert not dump.exists(), "stop を呼ばない"
+
+
+# --- issue #315: 台帳の更新の失敗 --------------------------------------------
+
+
+def failing_jq(main_repo: Path, fail_on: str) -> dict:
+    """引数のどれかが `fail_on` を含む呼び出しだけ終了コード 5 で終わる偽の jq を置く。
+
+    それ以外の呼び出しは本物の jq へ渡す。`fail_on` には台帳を更新する jq の
+    代入式（`.ports = $ports` など）を渡し、狙った 1 か所だけを失敗させる。
+    戻り値は PATH の先頭に偽の jq を置いた環境変数である。
+    """
+    import shlex
+    import shutil
+
+    real = shutil.which("jq")
+    assert real, "本物の jq が要る"
+    bindir = main_repo.parent / "fake-jq"
+    bindir.mkdir(exist_ok=True)
+    script = bindir / "jq"
+    script.write_text(
+        "#!/bin/sh\n"
+        f"fail_on={shlex.quote(fail_on)}\n"
+        'for a in "$@"; do\n'
+        '  case "$a" in *"$fail_on"*) exit 5 ;; esac\n'
+        "done\n"
+        f'exec {shlex.quote(real)} "$@"\n',
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}:{env['PATH']}"
+    return env
+
+
+def test_env_fails_when_ports_cannot_be_recorded(main_repo: Path, worktree: Path) -> None:
+    """AC9: ポートを台帳へ書けなければ JSON を出さず、新しく取った割り当てを解放する。"""
+    declare(main_repo, testenv={"port_band": [20000, 29999], "port_roles": {"http": 0}})
+
+    result = run(["env", str(worktree)], cwd=main_repo, env=failing_jq(main_repo, ".ports = $ports"))
+
+    assert result["rc"] == 1, result
+    assert result["out"] == "", result
+    assert "ポートを台帳へ記録できませんでした" in result["err"], result
+    rows = registry(main_repo)["assignments"]
+    assert rows and all(row["released_at"] is not None for row in rows), rows
+
+
+def test_env_reports_when_the_release_after_a_band_overflow_fails(main_repo: Path, worktree: Path) -> None:
+    """AC10: 帯を超えた後の解放も書けなければ、割り当てが残ったことを知らせる。"""
+    declare(main_repo, testenv={"port_band": [20000, 20005], "port_roles": {"far": 9}})
+
+    result = run(
+        ["env", str(worktree)], cwd=main_repo, env=failing_jq(main_repo, ".released_at = (now"),
+    )
+
+    assert result["rc"] == 1, result
+    assert "採番が帯を超えました" in result["err"], result
+    assert "スロットの解放を台帳へ記録できませんでした" in result["err"], result
+    rows = registry(main_repo)["assignments"]
+    assert rows[0]["released_at"] is None, "解放は書けていない"

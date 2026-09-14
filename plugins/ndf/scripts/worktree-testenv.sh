@@ -110,6 +110,14 @@ do_tag() {
 
 # --- env --------------------------------------------------------------------
 
+# 失敗した env が新しく取った割り当てを返す。解放も台帳へ書けなければ、割り当てが
+# 残ったことを知らせる。排他を取れないことが原因なら、解放も同じ理由で失敗しうる。
+release_new_slot() {
+  wt_slot_release "$MAIN_DIR" "$TARGET" && return 0
+  printf '%s\n' "スロットの解放を台帳へ記録できませんでした。down を実行してください: $TARGET" >&2
+  return 1
+}
+
 do_env() {
   local branch environment slot band_low band_high ports role role_number port
   branch=$(target_branch) || true
@@ -136,12 +144,19 @@ do_env() {
       if [ -n "$band_high" ] && [ "$port" -gt "$band_high" ]; then
         printf '%s\n' "採番が帯を超えました（役割 $role のポート $port が上限 $band_high を超える）" >&2
         # 失敗した呼び出しがスロットを握ったままにしない。
-        [ "$had_slot" = 0 ] && wt_slot_release "$MAIN_DIR" "$TARGET"
+        [ "$had_slot" = 0 ] && release_new_slot
         return 1
       fi
       ports=$(printf '%s' "$ports" | jq --arg r "$role" --argjson p "$port" '. + {($r): $p}')
     done < <(decl_get '.testenv.port_roles // {} | to_entries[] | "\(.key)\t\(.value)"')
-    wt_slot_set_ports "$MAIN_DIR" "$TARGET" "$ports"
+    # 台帳に無いポートを JSON へ載せると、読む側はその値で起動を組み立てる。
+    # ポートの無い割り当てを残すと、次の env は「既にある」として同じスロットを
+    # 返し、ポートは {} のままになる。新しく取った割り当てなら解放する（#315）。
+    if ! wt_slot_set_ports "$MAIN_DIR" "$TARGET" "$ports"; then
+      printf '%s\n' "ポートを台帳へ記録できませんでした: $environment" >&2
+      [ "$had_slot" = 0 ] && release_new_slot
+      return 1
+    fi
   fi
 
   jq -n --arg environment "$environment" --argjson slot "$slot" \
