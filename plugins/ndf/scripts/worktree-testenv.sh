@@ -483,8 +483,9 @@ _close_record() {
     )' --arg wt "$TARGET"
 }
 
-do_expose() {
-  local enabled public_tag base_domain ttl loaded_tag host
+# 公開設定（有効化フラグ、公開基準タグ、ドメイン）を検証する。
+expose_validate_config() {
+  local enabled public_tag base_domain
   enabled=$(decl_get '.testenv.expose.enabled // false')
   if [ "$enabled" != "true" ]; then
     printf '拒否: testenv.expose.enabled が有効ではありません\n' >&2
@@ -497,11 +498,11 @@ do_expose() {
     printf '拒否: testenv.expose.public_tag と base_domain が要ります\n' >&2
     return 1
   fi
+}
 
-  load_assignment || { printf '拒否: 割り当てがありません\n' >&2; return 1; }
-
-  # 既に開いているなら、開ける手段を再実行しない。再実行が失敗すると、口が
-  # 開いたままで台帳だけ閉じることになる。
+# 既に開いている公開 URL を取得・判定する。開いていればその URL を表示して 0 を返し、
+# 開いていなければ 1 を返す。
+expose_existing_url() {
   local already
   already=$(wt_registry_visible "$(registry)" \
     | jq -r --arg wt "$TARGET" '[.assignments[] | select(.released_at == null and .worktree == $wt and .expose != null and .expose.closed_at == null)] | last | .expose.url // empty')
@@ -509,28 +510,16 @@ do_expose() {
     printf '%s\n' "$already"
     return 0
   fi
+  return 1
+}
 
-  loaded_tag=$(current_assignment | jq -r '.golden_tag // empty')
-  if [ "$loaded_tag" != "$public_tag" ]; then
-    printf '拒否: 載っている基準（%s）が公開を許す基準（%s）と一致しません\n' \
-      "${loaded_tag:-なし}" "$public_tag" >&2
-    return 1
-  fi
+# 折り返しを使う公開は先着 1 本で排他する。**判定を排他区間の中で行う。**
+# 区間の外で数えると、同時に走った 2 本が両方とも通り抜ける。
+expose_record_assignment() {
+  local host="$1"
+  local ttl="$2"
+  local url="https://$host"
 
-  ttl=$(decl_get '.testenv.expose.ttl // "8h"')
-  host="wt${SLOT}.${base_domain}"
-
-  # 実際に口を開ける手段はリポジトリごとに違う（共有の入口の設定、折り返しの
-  # 中継など）。宣言が無ければ、記録だけ残して公開したことにはしない。
-  local open_command
-  open_command=$(decl_get '.testenv.expose.open_command // empty')
-  if [ -z "$open_command" ]; then
-    printf '%s\n' "公開の手段が宣言されていません（testenv.expose.open_command）" >&2
-    return 2
-  fi
-
-  # 折り返しを使う公開は先着 1 本で排他する。**判定を排他区間の中で行う。**
-  # 区間の外で数えると、同時に走った 2 本が両方とも通り抜ける。
   wt_registry_update "$(registry)" '
     if ([.assignments[] | select(.expose != null and .expose.closed_at == null and .worktree != $wt)] | length) > 0
     then .
@@ -540,7 +529,7 @@ do_expose() {
           .expose = {url: $url, ttl: $ttl, opened_at: (now | todate), closed_at: null}
         else . end
       )
-    end' --arg wt "$TARGET" --arg url "https://$host" --arg ttl "$ttl" || return 1
+    end' --arg wt "$TARGET" --arg url "$url" --arg ttl "$ttl" || return 1
 
   local opened
   opened=$(current_assignment | jq -r '.expose.url // empty')
@@ -548,6 +537,45 @@ do_expose() {
     printf '拒否: 別のテスト環境が公開中です（同時に開けるのは 1 本）\n' >&2
     return 1
   fi
+
+  printf '%s\n' "$opened"
+}
+
+do_expose() {
+  expose_validate_config || return 1
+
+  load_assignment || { printf '拒否: 割り当てがありません\n' >&2; return 1; }
+
+  # 既に開いているなら、開ける手段を再実行しない。再実行が失敗すると、口が
+  # 開いたままで台帳だけ閉じることになる。
+  if expose_existing_url; then
+    return 0
+  fi
+
+  local public_tag loaded_tag
+  public_tag=$(decl_get '.testenv.expose.public_tag // empty')
+  loaded_tag=$(current_assignment | jq -r '.golden_tag // empty')
+  if [ "$loaded_tag" != "$public_tag" ]; then
+    printf '拒否: 載っている基準（%s）が公開を許す基準（%s）と一致しません\n' \
+      "${loaded_tag:-なし}" "$public_tag" >&2
+    return 1
+  fi
+
+  local base_domain ttl host open_command
+  base_domain=$(decl_get '.testenv.expose.base_domain // empty')
+  ttl=$(decl_get '.testenv.expose.ttl // "8h"')
+  host="wt${SLOT}.${base_domain}"
+
+  # 実際に口を開ける手段はリポジトリごとに違う（共有の入口の設定、折り返しの
+  # 中継など）。宣言が無ければ、記録だけ残して公開したことにはしない。
+  open_command=$(decl_get '.testenv.expose.open_command // empty')
+  if [ -z "$open_command" ]; then
+    printf '%s\n' "公開の手段が宣言されていません（testenv.expose.open_command）" >&2
+    return 2
+  fi
+
+  local opened
+  opened=$(expose_record_assignment "$host" "$ttl") || return 1
 
   # 記録を先に置くのは、先着 1 本の関門を通ったことを示すため。口を開けられ
   # なければ記録を戻す。残すと、次の公開が「別が公開中」で拒まれ続ける。
