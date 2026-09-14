@@ -36,8 +36,7 @@ command -v git >/dev/null 2>&1 || { printf '%s\n' "git が要ります" >&2; exi
 command -v jq >/dev/null 2>&1 || { printf '%s\n' "jq が要ります" >&2; exit 1; }
 
 MAIN_DIR=$(wt_main_dir) || { printf '%s\n' "git のリポジトリの中で実行してください" >&2; exit 1; }
-NDF_DIR="$MAIN_DIR/.ndf"
-DECLARATION_FILE="$NDF_DIR/worktree.json"
+DECLARATION_FILE="$MAIN_DIR/.ndf/worktree.json"
 
 SCHEMA_URL="https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/ndf/skills/worktree/schemas/worktree.schema.json"
 
@@ -52,7 +51,8 @@ readonly NOTE_UNKNOWN_FALLBACK="不明（origin/HEAD が未設定）"
 # 書き先が symlink なら断る。たどると、リポジトリの外を指した状態で --force を
 # 実行したときに外のファイルを書き換えてしまう。
 refuse_symlink() {
-  if [ -L "$NDF_DIR" ]; then
+  local ndf_dir="$MAIN_DIR/.ndf"
+  if [ -L "$ndf_dir" ]; then
     printf '%s\n' ".ndf が symlink です。たどらずに終わります" >&2
     return 1
   fi
@@ -69,9 +69,10 @@ refuse_symlink() {
 # 同じディレクトリの一時ファイルへ書いてから名前を付け替える。書いている途中で
 # 落ちても、中途半端な宣言が残らない。
 write_declaration() {
-  local tmp
-  mkdir -p "$NDF_DIR" 2>/dev/null || return 1
-  tmp=$(mktemp "$NDF_DIR/.worktree.json.XXXXXX" 2>/dev/null) || return 1
+  local dir tmp
+  dir=$(dirname "$DECLARATION_FILE")
+  mkdir -p "$dir" 2>/dev/null || return 1
+  tmp=$(mktemp "$dir/.worktree.json.XXXXXX" 2>/dev/null) || return 1
   cat >"$tmp" <<JSON
 {
   "\$schema": "$SCHEMA_URL",
