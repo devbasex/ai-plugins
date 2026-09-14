@@ -82,6 +82,22 @@ def test_env_outputs_name_slot_and_ports(main_repo: Path, worktree: Path) -> Non
     assert payload["ports"] == {"http": 20000, "db": 20001}
 
 
+def test_env_without_a_port_band_keeps_an_assignment(main_repo: Path, worktree: Path) -> None:
+    declare(main_repo, testenv={})
+
+    result = run(["env", str(worktree)], cwd=main_repo)
+
+    assert result["rc"] == 0, result
+    payload = json.loads(result["out"])
+    assert payload["environment"].startswith("main-wt-feature-x-")
+    assert payload["slot"] == 0
+    assert payload["worktree"] == str(worktree.resolve())
+    assert payload["branch"] == "feature/x"
+    assert payload["ports"] == {}
+    active = [row for row in registry(main_repo)["assignments"] if row["released_at"] is None]
+    assert len(active) == 1, active
+
+
 def test_env_is_stable_for_the_same_worktree(main_repo: Path, worktree: Path) -> None:
     declare(main_repo, testenv={"port_band": [20000, 29999], "port_roles": {"http": 0}})
     first = json.loads(run(["env", str(worktree)], cwd=main_repo)["out"])
