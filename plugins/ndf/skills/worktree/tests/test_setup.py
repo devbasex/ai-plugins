@@ -40,6 +40,17 @@ def test_init_creates_a_readable_declaration(main_repo: Path) -> None:
     assert body["$schema"].endswith("worktree.schema.json")
 
 
+def test_no_subcommand_defaults_to_init(main_repo: Path) -> None:
+    """現状固定: 副コマンドを渡さない呼び出しは既定で init として扱われ、
+    明示的な init と同じ宣言（version と $schema の要点）を rc=0 で作る。"""
+    result = run([], cwd=main_repo)
+
+    assert result["rc"] == 0, result
+    body = json.loads(declaration(main_repo).read_text(encoding="utf-8"))
+    assert body["version"] == 1
+    assert body["$schema"].endswith("worktree.schema.json")
+
+
 def test_init_makes_the_guard_active(main_repo: Path) -> None:
     """作った直後から、主ディレクトリの編集で案内が出る。"""
     run(["init"], cwd=main_repo)
