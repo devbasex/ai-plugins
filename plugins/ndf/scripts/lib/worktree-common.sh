@@ -1201,18 +1201,12 @@ wt_extract_write_target() {
     # 引用符の中に収まったものだけである。置換は印の両側へ空白を足すため、
     # 空白ごと戻す。元からあった空白は残る（`"b > c"` は `b > c` のまま）。
     local _emit_word=$1
-    # 印と復元後の字面の対応。連想配列は順序が不定なため、普通の配列（印 復元字面
-    # の並び）で順序を固定する。各印は「空白付き」を先に、続けて「空白なし」を戻す。
-    # 元からあった空白を残すため、空白付きを先に処理する順序を変えない。
-    local _emit_mark _emit_repl
-    set -- __WT_APPEND__ ">>" __WT_REDIR__ ">" __WT_ANDAND__ "&&"
-    while [ "$#" -ge 2 ]; do
-      _emit_mark=$1
-      _emit_repl=$2
-      _emit_word=${_emit_word// $_emit_mark /$_emit_repl}
-      _emit_word=${_emit_word//$_emit_mark/$_emit_repl}
-      shift 2
-    done
+    _emit_word=${_emit_word// __WT_APPEND__ />>}
+    _emit_word=${_emit_word// __WT_REDIR__ />}
+    _emit_word=${_emit_word// __WT_ANDAND__ /&&}
+    _emit_word=${_emit_word//__WT_APPEND__/>>}
+    _emit_word=${_emit_word//__WT_REDIR__/>}
+    _emit_word=${_emit_word//__WT_ANDAND__/&&}
     set -- "$_emit_word"
     _wt_is_not_target "$1" && return
     if [ -z "$base" ]; then
