@@ -175,6 +175,19 @@ def test_init_refuses_a_symlinked_ndf_directory(main_repo: Path, tmp_path: Path)
     assert not (outside / "worktree.json").exists(), "外へ書かない"
 
 
+def test_init_fails_when_ndf_is_a_regular_file(main_repo: Path) -> None:
+    """現状固定: .ndf が通常ファイルなら内容を変えず、宣言を作らずに 1 で終わる。"""
+    ndf = main_repo / ".ndf"
+    original = b"keep existing content\n"
+    ndf.write_bytes(original)
+
+    result = run(["init"], cwd=main_repo)
+
+    assert result["rc"] == 1, result
+    assert not declaration(main_repo).exists(), "宣言を作らない"
+    assert ndf.read_bytes() == original, ".ndf の内容を変えない"
+
+
 def test_init_leaves_no_temporary_file(main_repo: Path) -> None:
     run(["init"], cwd=main_repo)
     leftovers = [p.name for p in (main_repo / ".ndf").iterdir() if p.name != "worktree.json"]
