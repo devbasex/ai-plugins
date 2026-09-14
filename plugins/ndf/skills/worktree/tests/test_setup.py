@@ -160,6 +160,7 @@ def test_init_refuses_a_symlinked_ndf_directory(main_repo: Path, tmp_path: Path)
     result = run(["init", "--force"], cwd=main_repo)
 
     assert result["rc"] == 1, result
+    assert ".ndf" in result["err"], result["err"]
     assert not (outside / "worktree.json").exists(), "外へ書かない"
 
 
