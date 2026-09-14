@@ -60,6 +60,16 @@ def test_env_name_differs_per_branch(main_repo: Path) -> None:
     assert a != b
 
 
+def test_env_name_missing_arguments_returns_error(main_repo: Path) -> None:
+    empty_main = run_lib('wt_env_name "" "feature/x"', cwd=main_repo)
+    assert empty_main.returncode == 1
+    assert empty_main.stdout == ""
+
+    empty_branch = run_lib(f'wt_env_name "{main_repo}" ""', cwd=main_repo)
+    assert empty_branch.returncode == 1
+    assert empty_branch.stdout == ""
+
+
 # --- ポート -----------------------------------------------------------------
 
 

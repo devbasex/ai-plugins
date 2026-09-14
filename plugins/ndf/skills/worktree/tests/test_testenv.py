@@ -480,6 +480,15 @@ def test_duration_parsing(value: str, expected: str) -> None:
     assert got.stdout.strip() == expected, got.stderr
 
 
+@pytest.mark.parametrize("invalid", ["", "abc", "5x"])
+def test_duration_parsing_invalid_returns_error(invalid: str) -> None:
+    from worktree_helpers import run_lib
+
+    got = run_lib(f'wt_duration_seconds "{invalid}"')
+    assert got.returncode == 1
+    assert got.stdout == ""
+
+
 # --- 引数の扱い -------------------------------------------------------------
 
 

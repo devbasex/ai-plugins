@@ -198,6 +198,15 @@ def test_follow_enabled_reads_the_merged_declaration(main_repo: Path) -> None:
     assert got.stdout.strip() == "rc=0", got.stdout
 
 
+def test_follow_branch_can_be_disabled_locally(main_repo: Path) -> None:
+    write_declaration(main_repo, json.dumps({"version": 1, "follow_branch": True}))
+    local_json(main_repo, {"version": 1, "follow_branch": False})
+
+    body = merged(main_repo)
+
+    assert body.get("follow_branch") is False
+
+
 # --- AC15: リポジトリの運用は個人の宣言で変わらない -------------------------
 
 
