@@ -580,6 +580,120 @@ def test_takeover_does_not_break_a_fresh_lock(tmp_path: Path) -> None:
     assert lock.is_dir(), "戻すか、取り直した側が持っている"
 
 
+# --- issue #312: 保持の判定は陳腐化の判定の否定 ------------------------------
+
+
+def make_old(path: Path) -> None:
+    """更新時刻を 1 時間前にする。陳腐化の分数（5 分）を超える。"""
+    import time
+
+    old = time.time() - 3600
+    os.utime(path, (old, old))
+
+
+def test_an_old_lock_without_a_pid_is_not_held(tmp_path: Path) -> None:
+    """AC1: 持ち主を書く前に落ちたロックは、古くなれば握られていない。"""
+    from worktree_helpers import run_lib
+
+    lock = tmp_path / "i.lock"
+    lock.mkdir()
+    make_old(lock)
+    got = run_lib(
+        f'ndf_lock_is_held "{lock}"; echo ndf=$?; wt_lock_is_held "{lock}"; echo wt=$?'
+    )
+    assert "ndf=1" in got.stdout, got.stdout
+    assert "wt=1" in got.stdout, got.stdout
+
+
+def lock_state(tmp_path: Path, state: str) -> Path:
+    """`state` の名前が表す状態のロックを作る。"""
+    lock = tmp_path / "state.lock"
+    if state == "missing":
+        return lock
+    if state == "plain-file":
+        lock.write_text("x\n", encoding="utf-8")
+        return lock
+    lock.mkdir()
+    (lock / "token").write_text("tok\n", encoding="utf-8")
+    if state == "empty-with-held":
+        (lock / "held").write_text("", encoding="utf-8")
+    elif state == "empty-old":
+        make_old(lock)
+    elif state == "alive-pid":
+        (lock / "pid").write_text(f"{os.getpid()}\n", encoding="utf-8")
+    elif state == "alive-pid-old":
+        (lock / "pid").write_text(f"{os.getpid()}\n", encoding="utf-8")
+        make_old(lock)
+    elif state == "dead-pid":
+        (lock / "pid").write_text("999999\n", encoding="utf-8")
+    return lock
+
+
+@pytest.mark.parametrize("state", ["empty", "empty-with-held"])
+def test_a_fresh_lock_without_a_pid_is_held(tmp_path: Path, state: str) -> None:
+    """AC2: 作った直後の空のロックは、取得の途中と区別できないため握られている。"""
+    from worktree_helpers import run_lib
+
+    lock = lock_state(tmp_path, state)
+    got = run_lib(
+        f'ndf_lock_is_held "{lock}"; echo ndf=$?; wt_lock_is_held "{lock}"; echo wt=$?'
+    )
+    assert "ndf=0" in got.stdout and "wt=0" in got.stdout, got.stdout
+
+
+def test_a_living_owner_holds_the_lock_even_when_old(tmp_path: Path) -> None:
+    """AC3: 持ち主が生きていれば、更新時刻が古くても握られている。"""
+    from worktree_helpers import run_lib
+
+    lock = lock_state(tmp_path, "alive-pid-old")
+    got = run_lib(
+        f'ndf_lock_is_held "{lock}"; echo ndf=$?; wt_lock_is_held "{lock}"; echo wt=$?'
+    )
+    assert "ndf=0" in got.stdout and "wt=0" in got.stdout, got.stdout
+
+
+@pytest.mark.parametrize("state", ["dead-pid", "missing", "plain-file", "empty-arg"])
+def test_a_lock_without_a_living_owner_is_not_held(tmp_path: Path, state: str) -> None:
+    """AC4: 持ち主が消えた・無い・ディレクトリでない・空の引数は握られていない。"""
+    from worktree_helpers import run_lib
+
+    arg = "" if state == "empty-arg" else str(lock_state(tmp_path, state))
+    got = run_lib(
+        f'ndf_lock_is_held "{arg}"; echo ndf=$?; wt_lock_is_held "{arg}"; echo wt=$?'
+    )
+    assert "ndf=1" in got.stdout and "wt=1" in got.stdout, got.stdout
+
+
+@pytest.mark.parametrize(
+    "state", ["empty", "empty-with-held", "empty-old", "alive-pid", "alive-pid-old", "dead-pid"],
+)
+def test_held_is_the_negation_of_stale(tmp_path: Path, state: str) -> None:
+    """AC5: 判定の規則は 1 つ。保持の判定は陳腐化の判定の否定と一致する。"""
+    from worktree_helpers import run_lib
+
+    lock = lock_state(tmp_path, state)
+    got = run_lib(
+        f'ndf_lock_is_held "{lock}"; echo held=$?; '
+        f'_ndf_lock_is_stale "{lock}" "$(cat "{lock}/token")"; echo stale=$?'
+    )
+    values = dict(line.split("=") for line in got.stdout.split())
+    assert values["held"] != values["stale"], got.stdout
+
+
+def test_held_check_leaves_the_caller_shell_alone(tmp_path: Path) -> None:
+    """AC6: 呼び出し側の `$-` に `C` を残さず、標準出力へ書かない。"""
+    from worktree_helpers import run_lib
+
+    lock = lock_state(tmp_path, "empty-old")
+    got = run_lib(
+        f'out=$(ndf_lock_is_held "{lock}"; wt_lock_is_held "{lock}"); '
+        'case "$-" in *C*) echo noclobber=yes ;; *) echo noclobber=no ;; esac; '
+        'printf "out=[%s]\\n" "$out"'
+    )
+    assert "noclobber=no" in got.stdout, got.stdout
+    assert "out=[]" in got.stdout, got.stdout
+
+
 @pytest.mark.parametrize("bad", ["/tmp/elsewhere", "../outside", "evidence/../../outside"])
 def test_evidence_outside_the_worktree_is_refused(main_repo: Path, worktree: Path, bad: str) -> None:
     """外から渡された置き場所も、作業ツリーの中に収まるかを確かめる。"""
@@ -1120,3 +1234,63 @@ def test_tag_refuses_when_the_declared_paths_have_no_match(
 
     assert result["rc"] == 1, result
     assert result["out"].strip() == "", result["out"]
+
+
+# --- issue #312: reap と実行中のロック ---------------------------------------
+
+
+def reap_with_running_container(main_repo: Path, worktree: Path) -> tuple[dict, Path]:
+    """使われていない割り当てを 1 つ用意し、稼働中のコンテナを返す偽の実行系で reap する。
+
+    戻り値は環境名を含む `env` の出力と、偽の実行系が書き出したファイルである。
+    実行中のロックは呼び出し側が用意してから呼ぶ。
+    """
+    dump = main_repo.parent / "reap-env.txt"
+    env = os.environ.copy()
+    env["WT_DOCKER_COMMAND"] = str(stub_docker_with_running_container(main_repo, dump))
+    proc = subprocess.run(
+        ["bash", str(TESTENV), "reap", "--idle", "45m"],
+        cwd=str(main_repo), env=env, capture_output=True, text=True,
+    )
+    return {"rc": proc.returncode, "out": proc.stdout, "err": proc.stderr}, dump
+
+
+def idle_assignment(main_repo: Path, worktree: Path) -> Path:
+    """使われていない割り当てを作り、その実行中のロックの位置を返す。"""
+    (worktree / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+    declare(
+        main_repo,
+        testenv={"port_band": [20000, 29999], "port_roles": {"http": 0}},
+        localenv={"kind": "compose", "compose_files": ["docker-compose.yml"]},
+    )
+    environment = json.loads(run(["env", str(worktree)], cwd=main_repo)["out"])["environment"]
+    set_last_used(main_repo, worktree, "2020-01-01T00:00:00Z")
+    return main_repo / ".git" / "ndf" / f"{environment}.inuse.d"
+
+
+def test_reap_stops_an_environment_whose_lock_is_old_and_empty(main_repo: Path, worktree: Path) -> None:
+    """AC7: 持ち主を書く前に落ちたロックが古くなれば、停止の対象へ戻る。"""
+    lock = idle_assignment(main_repo, worktree)
+    lock.mkdir()
+    make_old(lock)
+
+    result, dump = reap_with_running_container(main_repo, worktree)
+
+    assert result["rc"] == 0, result
+    assert "停止します" in result["out"], result
+    assert dump.read_text().rstrip().endswith("stop"), dump.read_text()
+
+
+@pytest.mark.parametrize("state", ["fresh-empty", "alive-pid"])
+def test_reap_leaves_an_environment_whose_lock_is_held(main_repo: Path, worktree: Path, state: str) -> None:
+    """AC8: 作った直後の空のロックと、生きている持ち主のロックは止めない。"""
+    lock = idle_assignment(main_repo, worktree)
+    lock.mkdir()
+    if state == "alive-pid":
+        (lock / "pid").write_text(f"{os.getpid()}\n", encoding="utf-8")
+
+    result, dump = reap_with_running_container(main_repo, worktree)
+
+    assert result["rc"] == 0, result
+    assert "停止します" not in result["out"], result
+    assert not dump.exists(), "stop を呼ばない"
