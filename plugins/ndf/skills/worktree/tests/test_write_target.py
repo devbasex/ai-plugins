@@ -1995,6 +1995,19 @@ def test_a_heredoc_opener_is_not_an_operand(opener: str) -> None:
     assert set(targets) == {"x.md", "y.md"}, targets
 
 
+@pytest.mark.parametrize("opener", ["<<-EOF", "<<- EOF"])
+def test_a_tab_stripping_heredoc_opener_is_not_an_operand(opener: str) -> None:
+    """`<<-` の開始子（`_redir_span` の `<<-` の枝）を挟んでも、前後の被演算子だけが出る。
+
+    `<<-` は本文と終端の語の前の tab を無視する形で、開始子そのものは書き込み先では
+    ない。本文を tab で字下げした入力で、開始子が除外され `x.md` と `y.md` だけが
+    残ることを固定する。
+    """
+    targets, rc = extract(f"sed -i s/a/b/ x.md {opener} y.md\n\tbody\nEOF")
+    assert rc == 0
+    assert set(targets) == {"x.md", "y.md"}, targets
+
+
 @pytest.mark.parametrize("command", ["cp a b <in", "cp a b < in"])
 def test_an_input_file_is_not_the_destination(command: str) -> None:
     """AC8: 入力側のリダイレクトの被演算子は宛先にならない。"""
