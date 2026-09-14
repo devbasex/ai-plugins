@@ -443,52 +443,35 @@ do_test() {
 
 # --- expose / unexpose ------------------------------------------------------
 
-# 最新の未終了の公開記録を 1 件出す。無ければ何も出さない。
-# 公開の記録は、割り当てを解放した後にも残る。`down` の後で閉じることが
-# あるため、稼働中の割り当てを見る load_assignment には頼らない。
-current_exposure() {
-  local row
+do_unexpose() {
+  local close_command row url host environment slot
+  # 公開の記録は、割り当てを解放した後にも残る。`down` の後で閉じることが
+  # あるため、稼働中の割り当てを見る load_assignment には頼らない。
   row=$(wt_registry_visible "$(registry)" \
     | jq -c --arg wt "$TARGET" '[.assignments[] | select(.worktree == $wt and (.expose // {}).closed_at == null and .expose != null)] | last' 2>/dev/null)
-  if [ -n "$row" ] && [ "$row" != "null" ]; then
-    printf '%s\n' "$row"
-  fi
-}
-
-# 宣言された閉じる手段を実行する。宣言が無いか閉じる対象が無ければ何もしない。
-run_expose_close_command() {
-  local url="$1"
-  local environment="$2"
-  local slot="$3"
-  local close_command host
-  close_command=$(decl_get '.testenv.expose.close_command // empty')
-  [ -n "$close_command" ] && [ -n "$url" ] || return 0
-  # 開けるときと同じ値を渡す。URL だけでは、環境名やスロットを資源の名前に
-  # 使っている構成で後片付けの対象を特定できない。
-  host=${url#https://}
-  host=${host#http://}
-  (cd "$TARGET" && env "NDF_EXPOSE_URL=$url" "NDF_EXPOSE_HOST=$host" \
-    "NDF_EXPOSE_ENVIRONMENT=$environment" "NDF_EXPOSE_SLOT=$slot" \
-    sh -c "$close_command")
-}
-
-do_unexpose() {
-  local row url environment slot
-  row=$(current_exposure)
   url=""
   environment=""
   slot=""
-  if [ -n "$row" ]; then
+  if [ -n "$row" ] && [ "$row" != "null" ]; then
     url=$(printf '%s' "$row" | jq -r '.expose.url // empty')
     environment=$(printf '%s' "$row" | jq -r '.environment // empty')
     slot=$(printf '%s' "$row" | jq -r '.slot // empty')
   fi
 
-  run_expose_close_command "$url" "$environment" "$slot" || {
-    # 閉じられていないのに台帳だけ閉じると、口が開いたまま次の公開が通る。
-    printf '%s\n' "公開を閉じる手段が失敗しました。台帳は閉じていません: $url" >&2
-    return 1
-  }
+  close_command=$(decl_get '.testenv.expose.close_command // empty')
+  if [ -n "$close_command" ] && [ -n "$url" ]; then
+    # 開けるときと同じ値を渡す。URL だけでは、環境名やスロットを資源の名前に
+    # 使っている構成で後片付けの対象を特定できない。
+    host=${url#https://}
+    host=${host#http://}
+    if ! (cd "$TARGET" && env "NDF_EXPOSE_URL=$url" "NDF_EXPOSE_HOST=$host" \
+      "NDF_EXPOSE_ENVIRONMENT=$environment" "NDF_EXPOSE_SLOT=$slot" \
+      sh -c "$close_command"); then
+      # 閉じられていないのに台帳だけ閉じると、口が開いたまま次の公開が通る。
+      printf '%s\n' "公開を閉じる手段が失敗しました。台帳は閉じていません: $url" >&2
+      return 1
+    fi
+  fi
 
   # 閉じる手段は済んでいる。台帳を閉じられないと、次の公開が「別が公開中」で
   # 拒まれ続ける。再実行で台帳の側だけをやり直せる（#315）。
