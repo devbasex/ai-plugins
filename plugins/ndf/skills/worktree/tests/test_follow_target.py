@@ -88,6 +88,22 @@ def test_review_worktree_is_excluded(main_repo: Path, worktree: Path, tmp_path: 
     assert "review-worktree" not in got.stdout
 
 
+def test_branch_worktree_outside_worktrees_dir_is_excluded(
+    main_repo: Path, worktree: Path, tmp_path: Path,
+) -> None:
+    """`.worktrees/` の外にあるブランチ付きの作業ツリーも一覧に入らない（現状固定）。"""
+    outside = tmp_path / "outside-worktree"
+    git(main_repo, "worktree", "add", "-q", "-b", "outside/z", str(outside))
+    got = run_lib(f'wt_dev_worktrees "{main_repo}"', cwd=main_repo)
+    lines = [ln for ln in got.stdout.splitlines() if ln]
+    assert len(lines) == 1, got.stdout
+    path, branch = lines[0].split("\t")
+    assert Path(path).resolve() == worktree.resolve()
+    assert branch == "feature/x"
+    assert "outside/z" not in got.stdout
+    assert "outside-worktree" not in got.stdout
+
+
 def test_detached_worktree_in_worktrees_dir_has_empty_branch(main_repo: Path) -> None:
     """`.worktrees/` 配下に detached HEAD の作業ツリーがあると、タブ以降のブランチ名が空で出力される。"""
     detached = main_repo / ".worktrees" / "tmp"
