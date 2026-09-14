@@ -12,16 +12,9 @@ from worktree_helpers import run_lib
 
 
 def extract(command: str) -> tuple[list[str], int]:
-    # 改行を含むコマンドも渡せるよう、ヒアドキュメントで受け渡す。
-    # 引数へ埋めると、改行が字面の `\n` になって 1 行に潰れる。
-    snippet = (
-        "cmd=$(cat <<'WT_EOF'\n" + command + "\nWT_EOF\n)\n"
-        'wt_extract_write_target "$cmd"; echo rc=$?'
-    )
-    got = run_lib(snippet)
-    lines = [ln for ln in got.stdout.splitlines() if ln]
-    rc = int(lines.pop().removeprefix("rc="))
-    return lines, rc
+    # 起点を渡さない呼び方は、空の起点を渡す extract_at と同じである
+    # （wt_extract_write_target は第 2 引数が空でも未指定でも字面のまま返す）。
+    return extract_at(command, "")
 
 
 @pytest.mark.parametrize(
