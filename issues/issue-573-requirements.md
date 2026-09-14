@@ -87,8 +87,8 @@
 - [ ] AC12: `status` と `check` の出力と終了コードが、AC1・AC4・AC6〜AC8 のすべての形で変更前と同じである
 - [ ] AC13: `uv run --with pytest pytest scripts/tests plugins/ndf -q` が通る。既存の `test_setup.py` と
   `test_declaration_check.py` の期待値を変えない
-- [ ] AC14: `docs/specifications/ndf-workflow-unit-and-gates.md` の「`init` の後にもう一度 `check` を通す」の理由が、変更後の
-  `init` の終了コードと食い違わない
+- [ ] AC14: 仕様の文書が「`init` の後にもう一度 `check` を通す」に添える理由が、変更後の `init` の終了コードと
+  食い違わない。仕様の文書は `docs/specifications/ndf-workflow-unit-and-gates.md` である
 
 ## 対象範囲
 

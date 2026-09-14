@@ -160,8 +160,8 @@ docs/specifications/
 | 利用者が決めること | 宣言を直す・消す・`init --force` で作り直す |
 | 既存の箇条書きの直し | 「既にあれば上書きしない」を「読める宣言が既にあれば上書きしない。読めない宣言では 1 で終わる」へ |
 
-見出し「0. 宣言ファイルを用意する」と、`check` への案内の文は変えない（`test_declaration_check.py` が
-見出しと `worktree-setup.sh check` の文字列を本文から探す）。
+見出し「0. 宣言ファイルを用意する」と、`check` への案内の文は変えない。`test_declaration_check.py` が、
+この見出しと `worktree-setup.sh check` の文字列を本文から探すためである。
 
 ## 処理の流れ
 
@@ -241,7 +241,7 @@ SKILL.md は担当 D が #495 で宣言の説明を変える予定で、変更�
 
 ## テスト設計
 
-テストは `plugins/ndf/skills/worktree/tests/test_setup.py` に置き、既存の `run` と `write_declaration` と
+テストは `plugins/ndf/skills/worktree/tests/test_setup.py` に置く。既存の `run` と `write_declaration` と
 `main_repo` の fixture を使う。「変更前」は develop（f081502）での結果である。
 
 | 実行の場面 | コマンド |
@@ -266,10 +266,11 @@ SKILL.md は担当 D が #495 で宣言の説明を変える予定で、変更�
 | AC13 | テスト一式の実行。`test_setup.py` と `test_declaration_check.py` の既存テストの差分が追加だけであることを差分で確かめる | 通る |
 | AC14 | 仕様の文書の差分を読み、「読めるとは限らない」が残っていないことを `grep` で確かめる | 落ちる |
 
-試作（`do_init` の分岐と案内の文言だけを写しに当てたもの）で、`worktree/tests` 一式と
-`test_declaration_check.py` の 810 件のうち 809 件が通った。落ちた 1 件
-`test_this_repository_declares_the_production_branch` は、写しのディレクトリにリポジトリの `.ndf/` が無いことが
-原因で、作業ツリーでは通る。
+試作では、`do_init` の分岐と案内の文言だけを写しに当てた。`worktree/tests` 一式と
+`test_declaration_check.py` の 810 件のうち 809 件が通った。
+
+落ちた 1 件は `test_this_repository_declares_the_production_branch` である。写しのディレクトリにリポジトリの
+`.ndf/` が無いことが原因で、作業ツリーでは通る。
 
 ## 未確認のまま残ること
 
