@@ -321,3 +321,24 @@ def test_acquire_rejects_an_empty_directory_without_waiting() -> None:
 
     assert "rc=1" in got.stdout, got
     assert elapsed < 1, elapsed
+
+
+def test_acquire_reclaims_stale_discard_gate_before_taking_stale_lock(tmp_path: Path) -> None:
+    """古い所有者なしロックの古い discard 関門を回収してからロックを取得する。"""
+    lock = tmp_path / "stale_discard.lock"
+    lock.mkdir()
+    (lock / "pid").write_text("999999\n", encoding="utf-8")
+    discard = lock / "discard"
+    discard.touch()
+    old_time = time.time() - 600
+    os.utime(discard, (old_time, old_time))
+
+    got = run_lib(LOCK_LIB, f'ndf_lock_acquire "{lock}" 2; echo rc=$?')
+
+    assert "rc=0" in got.stdout, got
+    assert (lock / "token").is_file(), "新しい token が作られている"
+    assert (lock / "pid").is_file(), "新しい pid が作られている"
+    assert (lock / "held").is_file(), "新しい held が作られている"
+    assert not (lock / "discard").exists(), "古い discard 関門が残っていない"
+
+

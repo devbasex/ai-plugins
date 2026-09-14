@@ -228,6 +228,40 @@ def test_test_runs_in_the_worktree(main_repo: Path, worktree: Path) -> None:
     assert result["out"].strip() == str(worktree.resolve()), result
 
 
+def test_test_respects_inuse_lock_and_releases_after_failure(main_repo: Path, worktree: Path) -> None:
+    """同じ環境のロック取得失敗時は実行せず、失敗終了後もロックを解放する。"""
+    import shutil
+
+    record = worktree / "executed.txt"
+    declare(
+        main_repo,
+        testenv={
+            "port_band": [20000, 29999],
+            "test_kinds": {
+                "record": {"run": f"touch '{record}'"},
+                "fail": {"run": "exit 4"},
+            },
+        },
+    )
+    environment = json.loads(run(["env", str(worktree)], cwd=main_repo)["out"])["environment"]
+
+    lock = main_repo / ".git" / "ndf" / f"{environment}.inuse.d"
+    lock.mkdir(parents=True)
+    (lock / "held").touch()
+    (lock / "pid").write_text(f"{os.getpid()}\n", encoding="utf-8")
+    (lock / "token").write_text("held\n", encoding="utf-8")
+
+    result = run(["test", str(worktree), "--kind", "record"], cwd=main_repo)
+    assert result["rc"] == 1, result
+    assert not record.exists(), "実行中ロックがあるときはテストコマンドを実行しない"
+
+    shutil.rmtree(lock)
+    result = run(["test", str(worktree), "--kind", "fail"], cwd=main_repo)
+    assert result["rc"] == 4, result
+    assert not lock.exists(), "テストコマンド失敗後にも実行中ロックが残らない"
+
+
+
 # --- 外部公開の拒否 ---------------------------------------------------------
 
 
