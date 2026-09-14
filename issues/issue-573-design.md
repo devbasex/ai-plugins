@@ -45,6 +45,8 @@
 | 形 | `init --force` の結果 |
 | --- | --- |
 | JSON として壊れている | 0。宣言を作り直し、`check` は 0 |
+| `version` が `99` | 0。宣言を作り直し、`check` は 0 |
+| 空のファイル | 0。宣言を作り直し、`check` は 0 |
 | 権限 `000` のファイル | 0。宣言を作り直し、`check` は 0 |
 | ディレクトリ | 1「書いた宣言ファイルを読み取れません」。ディレクトリの中に一時ファイル `.worktree.json.XXXXXX` が残る（#628） |
 | 壊れた宣言を指す symlink | 1「symlink です」 |
@@ -210,7 +212,7 @@ graph TD
 
 ### 決定 4: 案内は「直すか、消してから init」とし、`--force` を勧めない
 
-`--force` は読めない宣言の形によって結果が分かれる。実測では、壊れた JSON と権限 `000` のファイルは作り
+`--force` は読めない宣言の形によって結果が分かれる。実測では、壊れた JSON・`version` が `99`・空のファイル・権限 `000` のファイルは作り
 直せたが、ディレクトリは中に一時ファイルを残して 1 で終わり（#628）、壊れた宣言を指す symlink は断られた。
 消してから `init` を実行する形は、試作でディレクトリと symlink の両方とも 0 で宣言を作れた。
 `development-workflow` も状態 3 では `init --force` を実行しない方針を取っている。
@@ -259,7 +261,7 @@ SKILL.md は担当 D が #495 で宣言の説明を変える予定で、変更�
 | AC6 | 既存の `test_init_does_not_overwrite` | 通る |
 | AC7 | 既存の `test_init_creates_a_readable_declaration` と `test_check_reports_a_readable_declaration` | 通る |
 | AC8 | 読める宣言を `tmp_path` に置いて symlink を張り、`init` が `rc == 0` で「既にあります」を出し、指す先の中身が変わらない | 落ちる |
-| AC9 | `{ not json` の木で `init --force` が 0 で、直後の `check` が 0。既存の `test_init_refuses_a_symlinked_declaration` と `test_init_refuses_a_symlinked_ndf_directory` | 通る |
+| AC9 | `{ not json`・`{"version": 99}`・空のファイル・権限 `000` を parametrize し、`init --force` が 0 で、直後の `check` が 0。権限の形は AC4 と同じく root のとき skip する。ディレクトリの形は #628 のため含めない。symlink は既存の `test_init_refuses_a_symlinked_declaration` と `test_init_refuses_a_symlinked_ndf_directory` | 通る |
 | AC10 | 手順 0 の節（見出しから「## 1.」の手前まで）に `exit=$?` と「先へ進まない」と「利用者」が入る | 落ちる |
 | AC11 | 同じ節に「読める宣言」と「1 で終わる」が入る | 落ちる |
 | AC12 | 既存の `test_status_*` / `test_check_*` / `test_a_directory_declaration_is_unreadable_in_both` が変わらず通る | 通る |
