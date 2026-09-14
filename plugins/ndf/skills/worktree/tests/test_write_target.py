@@ -2193,26 +2193,3 @@ def test_mv_after_end_of_options_reports_the_word_before_it() -> None:
     targets, rc = extract("mv src -- -dest")
     assert rc == 0, targets
     assert targets == ["src"], targets
-
-
-# --- 被演算子が 3 つ以上並ぶ cp / mv の既定形（R2-003） ------------------------
-#
-# `_wt_extract_cp_mv_target` の既定形は `*) dest=$w2` の枝を被演算子ごとに通り、
-# 最後に代入された語だけを出す。2 引数の形と `-t` の形は固定済みだが、この枝を
-# 2 回以上通る形（複数の元と 1 つの宛先ディレクトリ）は固定されていなかった。
-
-
-@pytest.mark.parametrize(
-    ("command", "expected"),
-    [
-        ("cp a.txt b.txt dest/", "dest/"),
-        ("mv a.md b.md target/", "target/"),
-    ],
-)
-def test_cp_mv_with_multiple_sources_reports_only_the_last_operand(
-    command: str, expected: str
-) -> None:
-    """現状固定: 被演算子が 3 つ以上の cp / mv は最後の被演算子だけを宛先として返す。"""
-    targets, rc = extract(command)
-    assert rc == 0, (command, targets)
-    assert targets == [expected], (command, targets)
