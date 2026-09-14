@@ -1940,6 +1940,22 @@ def test_a_redirect_does_not_become_the_option_argument(command: str) -> None:
     assert not {"a", "b", ">"} & set(targets), targets
 
 
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        ("sed -i -e >log 's/a/b/' x.md", {"x.md", "log"}),
+        ("sed -i -e <in 's/a/b/' x.md", {"x.md"}),
+    ],
+)
+def test_sed_expression_argument_waiting_across_redirect(
+    command: str, expected: set[str]
+) -> None:
+    """AC5: sed の `-e` が引数を待つ途中にリダイレクトを挟んでも引数待ちを維持する。"""
+    targets, rc = extract(command)
+    assert rc == 0
+    assert set(targets) == expected, targets
+
+
 def test_operands_after_a_redirect_follow_a_cd() -> None:
     """AC11: 起点を渡した呼び方でも、リダイレクトの後ろの語が `cd` の先で解決される。"""
     targets, rc = extract_at("cd sub && sed -i s/a/b/ x.md >log y.md", "/base")
