@@ -174,14 +174,20 @@ touch_or_warn() {
   return 0
 }
 
+# この作業ツリーの現在の割り当て（未解放の最後の 1 件）を 1 行の JSON で返す。
+# 無ければ `null`。「どの割り当てが現在有効か」の規則はここ 1 箇所が持つ。
+current_assignment() {
+  wt_registry_visible "$(registry)" \
+    | jq -c --arg wt "$TARGET" \
+      '[.assignments[] | select(.released_at == null and .worktree == $wt)] | last' 2>/dev/null
+}
+
 # 起動と停止で使う共通の値を変数へ入れる。
 load_assignment() {
   ENVIRONMENT=""
   SLOT=""
   local row
-  row=$(wt_registry_visible "$(registry)" \
-    | jq -c --arg wt "$TARGET" \
-      '[.assignments[] | select(.released_at == null and .worktree == $wt)] | last' 2>/dev/null)
+  row=$(current_assignment)
   [ -n "$row" ] && [ "$row" != "null" ] || return 1
   ENVIRONMENT=$(printf '%s' "$row" | jq -r '.environment')
   SLOT=$(printf '%s' "$row" | jq -r '.slot')
@@ -207,10 +213,8 @@ compose_env() {
     [ -n "$role" ] || continue
     role=$(printf '%s' "$role" | tr '[:lower:]' '[:upper:]' | sed 's/[^A-Z0-9]/_/g')
     COMPOSE_ENV+=("NDF_PORT_${role}=$port")
-  done < <(wt_registry_visible "$(registry)" \
-    | jq -r --arg wt "$TARGET" \
-      '[.assignments[] | select(.released_at == null and .worktree == $wt)] | last
-       | (.ports // {}) | to_entries[] | "\(.key)\t\(.value)"' 2>/dev/null)
+  done < <(current_assignment \
+    | jq -r '(.ports // {}) | to_entries[] | "\(.key)\t\(.value)"' 2>/dev/null)
 }
 
 compose() {
@@ -381,9 +385,7 @@ do_test() {
     # 入口の役割名は宣言で決める。`http` 以外の名前を使うリポジトリがある。
     local port_role http_port
     port_role=$(printf '%s' "$DECLARATION" | jq -r --arg k "$KIND" '.testenv.test_kinds[$k].port_role // "http"' 2>/dev/null)
-    http_port=$(wt_registry_visible "$(registry)" \
-      | jq -r --arg wt "$TARGET" --arg role "$port_role" \
-        '[.assignments[] | select(.released_at == null and .worktree == $wt)] | last | .ports[$role] // empty')
+    http_port=$(current_assignment | jq -r --arg role "$port_role" '.ports[$role] // empty')
     [ -n "$http_port" ] && env_pairs+=("$base_url_env=http://localhost:$http_port")
   fi
 
@@ -501,8 +503,7 @@ do_expose() {
     return 0
   fi
 
-  loaded_tag=$(wt_registry_visible "$(registry)" \
-    | jq -r --arg wt "$TARGET" '[.assignments[] | select(.released_at == null and .worktree == $wt)] | last | .golden_tag // empty')
+  loaded_tag=$(current_assignment | jq -r '.golden_tag // empty')
   if [ "$loaded_tag" != "$public_tag" ]; then
     printf '拒否: 載っている基準（%s）が公開を許す基準（%s）と一致しません\n' \
       "${loaded_tag:-なし}" "$public_tag" >&2
@@ -535,8 +536,7 @@ do_expose() {
     end' --arg wt "$TARGET" --arg url "https://$host" --arg ttl "$ttl" || return 1
 
   local opened
-  opened=$(wt_registry_visible "$(registry)" \
-    | jq -r --arg wt "$TARGET" '[.assignments[] | select(.released_at == null and .worktree == $wt)] | last | .expose.url // empty')
+  opened=$(current_assignment | jq -r '.expose.url // empty')
   if [ -z "$opened" ]; then
     printf '拒否: 別のテスト環境が公開中です（同時に開けるのは 1 本）\n' >&2
     return 1
