@@ -194,13 +194,21 @@ touch_or_warn() {
   return 0
 }
 
+# この作業ツリーの最新の割り当てレコードを、追加の抽出条件を付けて台帳から引く。
+# 条件に一致するものが無ければ `null` を返す。共通の骨組みを 1 箇所へ寄せる。
+_wt_latest_assignment() {
+  local predicate="${1:-true}"
+  wt_registry_visible "$(registry)" \
+    | jq -c --arg wt "$TARGET" \
+      "[.assignments[] | select(.worktree == \$wt and ($predicate))] | last" 2>/dev/null
+}
+
 # この作業ツリーの現在の割り当て（未解放の最後の 1 件）を 1 行の JSON で返す。
 # 無ければ `null`。「どの割り当てが現在有効か」の規則はここ 1 箇所が持つ。
 current_assignment() {
-  wt_registry_visible "$(registry)" \
-    | jq -c --arg wt "$TARGET" \
-      '[.assignments[] | select(.released_at == null and .worktree == $wt)] | last' 2>/dev/null
+  _wt_latest_assignment '.released_at == null'
 }
+
 
 # 起動と停止で使う共通の値を変数へ入れる。
 load_assignment() {
@@ -472,8 +480,7 @@ do_unexpose() {
   local close_command row url host environment slot
   # 公開の記録は、割り当てを解放した後にも残る。`down` の後で閉じることが
   # あるため、稼働中の割り当てを見る load_assignment には頼らない。
-  row=$(wt_registry_visible "$(registry)" \
-    | jq -c --arg wt "$TARGET" '[.assignments[] | select(.worktree == $wt and (.expose // {}).closed_at == null and .expose != null)] | last' 2>/dev/null)
+  row=$(_wt_latest_assignment '(.expose // {}).closed_at == null and .expose != null')
   url=""
   environment=""
   slot=""
@@ -535,9 +542,9 @@ expose_validate_config() {
 # 既に開いている公開 URL を取得・判定する。開いていればその URL を表示して 0 を返し、
 # 開いていなければ 1 を返す。
 expose_existing_url() {
-  local already
-  already=$(wt_registry_visible "$(registry)" \
-    | jq -r --arg wt "$TARGET" '[.assignments[] | select(.released_at == null and .worktree == $wt and .expose != null and .expose.closed_at == null)] | last | .expose.url // empty')
+  local row already
+  row=$(_wt_latest_assignment '.released_at == null and .expose != null and .expose.closed_at == null')
+  already=$(printf '%s' "$row" | jq -r '.expose.url // empty' 2>/dev/null)
   if [ -n "$already" ]; then
     printf '%s\n' "$already"
     return 0
