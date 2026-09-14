@@ -397,21 +397,14 @@ exclude_evidence() {
   printf '.ndf-evidence/\n' >>"$exclude" 2>/dev/null || true
 }
 
-do_test() {
-  [ -n "$KIND" ] || { printf '%s\n' '--kind が要ります' >&2; return 1; }
-  local run base_url_env out_env
-  run=$(test_kind_get '.testenv.test_kinds[$k].run // empty')
-  # 種類の宣言が無いリポジトリでは何もしない（受け入れ条件 39）。
-  [ -n "$run" ] || return 0
-
-  load_assignment || { do_env >/dev/null || return 1; load_assignment || return 1; }
-
-  local -a env_pairs=()
+build_test_env() {
+  local base_url_env out_env
+  TEST_ENV=()
   # 初期化を抑止する指定を渡す。渡さないと最初のテストが全体を作り直す構成がある。
   local key value
   while IFS=$'\t' read -r key value; do
     [ -n "$key" ] || continue
-    env_pairs+=("$key=$value")
+    TEST_ENV+=("$key=$value")
   done < <(test_kind_get \
     '.testenv.test_kinds[$k].skip_reset // {} | to_entries[] | "\(.key)\t\(.value)"')
 
@@ -421,7 +414,7 @@ do_test() {
     local port_role http_port
     port_role=$(test_kind_get '.testenv.test_kinds[$k].port_role // "http"')
     http_port=$(current_assignment | jq -r --arg role "$port_role" '.ports[$role] // empty')
-    [ -n "$http_port" ] && env_pairs+=("$base_url_env=http://localhost:$http_port")
+    [ -n "$http_port" ] && TEST_ENV+=("$base_url_env=http://localhost:$http_port")
   fi
 
   out_env=$(test_kind_get '.testenv.test_kinds[$k].out_env // empty')
@@ -441,8 +434,19 @@ do_test() {
     # 追跡対象に入ると差分が埋まる。その作業ツリー限りの除外へ登録する
     # （リポジトリの .gitignore は触らない）。
     exclude_evidence
-    env_pairs+=("$out_env=$OUT")
+    TEST_ENV+=("$out_env=$OUT")
   fi
+}
+
+do_test() {
+  [ -n "$KIND" ] || { printf '%s\n' '--kind が要ります' >&2; return 1; }
+  local run
+  run=$(test_kind_get '.testenv.test_kinds[$k].run // empty')
+  # 種類の宣言が無いリポジトリでは何もしない（受け入れ条件 39）。
+  [ -n "$run" ] || return 0
+
+  load_assignment || { do_env >/dev/null || return 1; load_assignment || return 1; }
+  build_test_env || return 1
 
   touch_or_warn
 
@@ -455,7 +459,7 @@ do_test() {
     printf '%s\n' "同じテスト環境で別の実行が動いています: $ENVIRONMENT" >&2
     return 1
   }
-  (cd "$TARGET" && env "${env_pairs[@]+"${env_pairs[@]}"}" sh -c "$run")
+  (cd "$TARGET" && env "${TEST_ENV[@]+"${TEST_ENV[@]}"}" sh -c "$run")
   rc=$?
   wt_lock_release "$lock"
   touch_or_warn
