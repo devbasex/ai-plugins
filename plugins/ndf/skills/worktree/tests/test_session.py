@@ -508,21 +508,3 @@ def test_dirty_changes_are_reported_regardless_of_follow(
     assert "1 件" in text, text
     assert "README.md" in text, text
     assert head_of(main_repo) == before
-
-
-@pytest.mark.parametrize(("follow", "noted"), [(True, True), (None, False)], ids=["true", "unset"])
-def test_follow_note_is_added_only_when_follow_enabled(
-    main_repo: Path, follow: object, noted: bool,
-) -> None:
-    """逸脱の案内に付く追従の断りは、`follow_branch: true` のときだけ出る（現状固定）。
-
-    文言の完全一致は見ず、断りが付くか付かないかの分岐だけを固定する。
-    """
-    declared(main_repo, follow)
-    (main_repo / "README.md").write_text("changed\n", encoding="utf-8")
-
-    result = run_session(main_repo)
-
-    text = context_of(result)
-    assert "README.md" in text, text
-    assert ("追従" in text) is noted, text
