@@ -929,7 +929,7 @@ wt_extract_write_target() {
   done
   words=("${kept[@]+"${kept[@]}"}")
 
-  local n=${#words[@]} i j w target found=0 prev="" at_cmd=0 dest="" k cmd_prefix=0 cd_end_of_options=0
+  local n=${#words[@]} i j w tw target found=0 prev="" at_cmd=0 dest="" k cmd_prefix=0 cd_end_of_options=0
   # `command` / `builtin` の被演算子を命令の位置として数えている間だけ 1。
   local cmd_wrapper=0 or_next=""
   # `||` の右辺のブレースグループが必ず後続へ進まないと判ったときに積む。まとまり
@@ -951,6 +951,8 @@ wt_extract_write_target() {
   local cmd_after_redir=-1
   # `_redir_target` の結果。書き込み先の語と、読み進めた最後の語の位置。
   local _WT_REDIR_DEST="" _WT_REDIR_END=0
+  # `_redir_span` の結果。語の中の `<` より前にあった被演算子（無ければ空）。
+  local _WT_REDIR_HEAD=""
   # 印 (`__WT_REDIR__` / `__WT_APPEND__`) の後ろの語から、実際に開かれる
   # ファイルを決める。`>&` には用法が 2 つある。
   #
@@ -982,6 +984,63 @@ wt_extract_write_target() {
         ;;
       *) _WT_REDIR_DEST=$nx ;;
     esac
+  }
+  # 被演算子を走査する枝（`sed` / `cp`・`mv` / `tee`）が、添字の語をリダイレクトとして
+  # 読み飛ばすかを決める。当たれば 0 を返し、リダイレクトの被演算子を読み終えた最後の
+  # 語の位置を `_WT_REDIR_END` に置く。書き込み先は出さない。出力側の印の書き込み先は
+  # 主の走査の印の枝が出すため、ここで出すと二度出る。
+  #
+  # bash はリダイレクトを引数の並びから取り除いてから命令を実行する。読み飛ばさないと、
+  # 出力側の印を区切りと読んで後ろの被演算子を落とす（`sed -i s/a/b/ x.md >log y.md`
+  # の `y.md`）。
+  #
+  # 入力側（`<` `<<<` `<<` `<<-` `<&` `<>`）は印へ置き換わらず語のまま残るため、語の中の
+  # 最初の `<` で見分ける。**語の頭ではなく中を見る**のは、字句解析が `b<in` を 1 語の
+  # まま渡すのに対し、bash は `b` と `in` に分けるためである。`<` より前を
+  # `_WT_REDIR_HEAD` に置き、枝はそれを今の語として扱う。前が数字だけなら記述子の番号
+  # （`2<in`）で、被演算子ではない。プロセス置換 `<(` は `/dev/fd/N` へ展開される
+  # 被演算子で、bash も並びに残すため読み飛ばさない。
+  _redir_span() {
+    local w2=${words[$1]} head rest
+    _WT_REDIR_HEAD=""
+    case "$w2" in
+      __WT_REDIR__|__WT_APPEND__) _redir_target "$1"; return 0 ;;
+      *"<"*) ;;
+      *) return 1 ;;
+    esac
+    head=${w2%%<*}
+    rest=${w2#"$head"}
+    case "$rest" in
+      "<("*) return 1 ;;
+      "<<<"*) rest=${rest#<<<} ;;
+      "<<-"*) rest=${rest#<<-} ;;
+      "<<"*) rest=${rest#<<} ;;
+      "<&"*) rest=${rest#<&} ;;
+      *) rest=${rest#<} ;;
+    esac
+    case "$head" in
+      *[!0-9]*) _WT_REDIR_HEAD=$head ;;
+    esac
+    if [ -n "$rest" ]; then
+      # `<in` `<<<word` のように被演算子が同じ語にある。
+      _WT_REDIR_END=$1
+    else
+      # 被演算子は次の語にある。`<>rw` は印への置き換えで `<` と印と `rw` に
+      # 分かれるため、印なら `_redir_target` にその先を読ませる。
+      case "${words[$1 + 1]:-}" in
+        __WT_REDIR__|__WT_APPEND__) _redir_target "$(($1 + 1))" ;;
+        *) _WT_REDIR_END=$(($1 + 1)) ;;
+      esac
+    fi
+    return 0
+  }
+  _wt_take_redirect_operand() {
+    local index_name=$1 word_name=$2 operand_index
+    eval "operand_index=\${$index_name}"
+    _redir_span "$operand_index" || return 0
+    printf -v "$index_name" '%s' "$_WT_REDIR_END"
+    [ -n "$_WT_REDIR_HEAD" ] || return 1
+    printf -v "$word_name" '%s' "$_WT_REDIR_HEAD"
   }
   # 複合コマンドの入口で `&` の復元先を積み、出口で戻す。
   _push_group() {
@@ -1175,13 +1234,17 @@ wt_extract_write_target() {
   # `sed` の語の添字。`-i` / `--in-place` があるときだけ書き込み先として出す。
   # `-e` / `-f` が現れなければ、最初の被演算子がスクリプトで残りがファイルである。
   _wt_extract_sed_targets() {
-    local start=$1 j2 target
+    local start=$1 j2 w2 target
     local has_inplace=0 seen_script=0 skip_next=0
     local -a files=()
     for ((j2 = start + 1; j2 < n; j2++)); do
+      w2=${words[j2]}
+      # リダイレクトはオプションの引数にならない（`sed -e >log s/a/b/` の `-e` は
+      # `s/a/b/` を受け取る）ため、`skip_next` より先に読み飛ばす。
+      _wt_take_redirect_operand j2 w2 || continue
       if [ "$skip_next" = 1 ]; then skip_next=0; continue; fi
-      if _wt_is_separator "${words[j2]}"; then break; fi
-      case "${words[j2]}" in
+      if _wt_is_separator "$w2"; then break; fi
+      case "$w2" in
         --in-place|--in-place=*) has_inplace=1 ;;
         -e|-f|--expression|--file) seen_script=1; skip_next=1 ;;
         --expression=*|--file=*) seen_script=1 ;;
@@ -1190,7 +1253,7 @@ wt_extract_write_target() {
         -e*|-f*) seen_script=1 ;;
         --) ;;
         -*)
-          if [[ ${words[j2]} =~ ^-[a-zA-Z]*i([a-zA-Z]*|\..*)$ ]]; then
+          if [[ $w2 =~ ^-[a-zA-Z]*i([a-zA-Z]*|\..*)$ ]]; then
             has_inplace=1
           fi
           ;;
@@ -1198,7 +1261,7 @@ wt_extract_write_target() {
           if [ "$seen_script" = 0 ]; then
             seen_script=1
           else
-            files+=("${words[j2]}")
+            files+=("$w2")
           fi
           ;;
       esac
@@ -1213,22 +1276,25 @@ wt_extract_write_target() {
   # 最後の被演算子が宛先だが、`-t <ディレクトリ>` を付けると宛先が先に来て、
   # 後ろの被演算子はすべて複製元になる。
   _wt_extract_cp_mv_target() {
-    local start=$1 j2
+    local start=$1 j2 w2
     local dest="" target_dir="" take_next=0
     for ((j2 = start + 1; j2 < n; j2++)); do
+      w2=${words[j2]}
+      # `-t >log dir` の `-t` は `dir` を受け取るため、`take_next` より先に読み飛ばす。
+      _wt_take_redirect_operand j2 w2 || continue
       if [ "$take_next" = 1 ]; then
-        target_dir=${words[j2]}
+        target_dir=$w2
         take_next=0
         continue
       fi
-      if _wt_is_separator "${words[j2]}"; then break; fi
-      case "${words[j2]}" in
+      if _wt_is_separator "$w2"; then break; fi
+      case "$w2" in
         -t|--target-directory) take_next=1 ;;
-        --target-directory=*) target_dir=${words[j2]#--target-directory=} ;;
+        --target-directory=*) target_dir=${w2#--target-directory=} ;;
         # `-t<ディレクトリ>` のように空白を挟まない形もある。
-        -t*) target_dir=${words[j2]#-t} ;;
+        -t*) target_dir=${w2#-t} ;;
         -*) continue ;;
-        *) dest=${words[j2]} ;;
+        *) dest=$w2 ;;
       esac
     done
     [ -n "$target_dir" ] && dest=$target_dir
@@ -1620,10 +1686,12 @@ wt_extract_write_target() {
       tee)
         # tee は並べたファイルすべてへ書き込む。1 件目で止めない。
         for ((j = i + 1; j < n; j++)); do
-          if _wt_is_separator "${words[j]}"; then break; fi
-          case "${words[j]}" in
+          tw=${words[j]}
+          _wt_take_redirect_operand j tw || continue
+          if _wt_is_separator "$tw"; then break; fi
+          case "$tw" in
             -*) continue ;;
-            *) _emit "${words[j]}" ;;
+            *) _emit "$tw" ;;
           esac
         done
         ;;
@@ -1640,7 +1708,8 @@ wt_extract_write_target() {
   done
 
   unset -f _emit _push_group _pop_group _push_subshell _pop_subshell _or_group_exits \
-    _or_exit_redirs _close_function_body _wt_extract_sed_targets _wt_extract_cp_mv_target
+    _or_exit_redirs _close_function_body _wt_extract_sed_targets _wt_extract_cp_mv_target \
+    _redir_span _wt_take_redirect_operand
   [ "$found" = 1 ] || return 1
 }
 
