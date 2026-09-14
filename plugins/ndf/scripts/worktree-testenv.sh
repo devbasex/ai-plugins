@@ -118,21 +118,9 @@ release_new_slot() {
   return 1
 }
 
-do_env() {
-  local branch environment slot band_low band_high ports role role_number port
-  branch=$(target_branch) || true
-  [ -n "$branch" ] || { printf '作業ツリーのブランチを取れません: %s\n' "$TARGET" >&2; return 1; }
-
-  environment=$(wt_env_name "$MAIN_DIR" "$branch") || return 1
-  # この呼び出しで新しく取ったかを覚えておく。採番に失敗したときに、
-  # 元からあった割り当てまで解放しないため。
-  local had_slot=0
-  wt_slot_of "$MAIN_DIR" "$TARGET" >/dev/null 2>&1 && had_slot=1
-  slot=$(wt_slot_acquire "$MAIN_DIR" "$TARGET" "$branch" "$environment") || {
-    printf '空きスロットがありません（上限 %s）\n' "$((WT_SLOT_MAX + 1))" >&2
-    return 1
-  }
-
+env_assign_ports() {
+  local slot=$1 had_slot=$2 environment=$3
+  local band_low band_high ports role role_number port
   band_low=$(decl_get '.testenv.port_band[0] // empty')
   band_high=$(decl_get '.testenv.port_band[1] // empty')
   ports="{}"
@@ -158,6 +146,25 @@ do_env() {
       return 1
     fi
   fi
+
+  printf '%s\n' "$ports"
+}
+
+do_env() {
+  local branch environment slot ports
+  branch=$(target_branch) || true
+  [ -n "$branch" ] || { printf '作業ツリーのブランチを取れません: %s\n' "$TARGET" >&2; return 1; }
+
+  environment=$(wt_env_name "$MAIN_DIR" "$branch") || return 1
+  # この呼び出しで新しく取ったかを覚えておく。採番に失敗したときに、
+  # 元からあった割り当てまで解放しないため。
+  local had_slot=0
+  wt_slot_of "$MAIN_DIR" "$TARGET" >/dev/null 2>&1 && had_slot=1
+  slot=$(wt_slot_acquire "$MAIN_DIR" "$TARGET" "$branch" "$environment") || {
+    printf '空きスロットがありません（上限 %s）\n' "$((WT_SLOT_MAX + 1))" >&2
+    return 1
+  }
+  ports=$(env_assign_ports "$slot" "$had_slot" "$environment") || return 1
 
   jq -n --arg environment "$environment" --argjson slot "$slot" \
         --arg worktree "$TARGET" --arg branch "$branch" --argjson ports "$ports" \
