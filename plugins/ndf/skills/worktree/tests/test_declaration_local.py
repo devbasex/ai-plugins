@@ -414,6 +414,13 @@ def test_ignored_lists_mistyped_keys(shared: Path) -> None:
     assert local_ignored(shared) == ["follow_branch", "testenv"]
 
 
+def test_ignored_lists_a_non_object_localenv(shared: Path) -> None:
+    """`localenv` 自体が非オブジェクト（文字列等）なら反映しない項目として報告する。"""
+    local_json(shared, {"version": 1, "localenv": "invalid_string"})
+
+    assert local_ignored(shared) == ["localenv"]
+
+
 def test_ignored_is_empty_when_everything_applies(shared: Path) -> None:
     local_json(shared, {"version": 1, "follow_branch": True,
                         "testenv": {"port_band": [40000, 40999]}})
