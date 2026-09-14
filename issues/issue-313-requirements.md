@@ -136,7 +136,7 @@
 
 | 項目 | 参照先 / 決めたこと |
 | --- | --- |
-| プロジェクト構造 | 抽出関数は `plugins/ndf/scripts/lib/worktree-common.sh` の中に閉じる。補助関数も関数の内側に定義し、末尾の `unset -f` へ足す（既存の `_redir_target` と同じ扱い） |
+| プロジェクト構造 | 抽出関数は `plugins/ndf/scripts/lib/worktree-common.sh` の中に閉じる。補助関数も関数の内側に定義し、末尾の `unset -f` へ足す（既存の `_wt_extract_sed_targets` / `_wt_extract_cp_mv_target` と同じ扱い） |
 | コーディング規約 | `AGENTS.md` の「最小限のコード実装」。コメントは日本語で、なぜその形かを書く（既存の枝と同じ） |
 | テスト戦略 | 抽出関数の単体テスト（`test_write_target.py` の `extract`）で受け入れ条件を 1 件ずつ確かめる。guard を通した結合は既存のテストに任せる |
 
