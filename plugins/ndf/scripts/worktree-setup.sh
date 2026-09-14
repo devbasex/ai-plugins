@@ -40,6 +40,12 @@ DECLARATION_FILE="$MAIN_DIR/.ndf/worktree.json"
 
 SCHEMA_URL="https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/ndf/skills/worktree/schemas/worktree.schema.json"
 
+# check の各行に付く注記。意味（宣言由来・既定ブランチへの退避・退避先不明）を
+# 名前で表す。文言を変えるときはここだけを直す。
+readonly NOTE_DECLARED="（宣言）"
+readonly NOTE_DEFAULT_BRANCH="（未宣言。既定ブランチ）"
+readonly NOTE_UNKNOWN_FALLBACK="不明（origin/HEAD が未設定）"
+
 # --- init -------------------------------------------------------------------
 
 # 書き先が symlink なら断る。たどると、リポジトリの外を指した状態で --force を
@@ -169,11 +175,11 @@ print_branch_line() {
     name=$(_wt_declaration_string "$decl" "$key")
   fi
   if [ -n "$name" ]; then
-    printf '%s: %s（宣言）\n' "$label" "$name"
+    printf '%s: %s%s\n' "$label" "$name" "$NOTE_DECLARED"
   elif fallback=$(wt_default_branch "$MAIN_DIR"); then
-    printf '%s: %s（未宣言。既定ブランチ）\n' "$label" "$fallback"
+    printf '%s: %s%s\n' "$label" "$fallback" "$NOTE_DEFAULT_BRANCH"
   else
-    printf '%s: 不明（origin/HEAD が未設定）\n' "$label"
+    printf '%s: %s\n' "$label" "$NOTE_UNKNOWN_FALLBACK"
   fi
 }
 

@@ -589,24 +589,46 @@ WORKTREE_SKILL = SCRIPTS_DIR.parent / "skills" / "worktree" / "SKILL.md"
 UNREADABLE_FORMS = ["broken_json", "unsupported_version", "empty_file", "directory", "unreadable_permission"]
 
 
+def _make_broken_json(main_repo: Path, path: Path) -> None:
+    write_declaration(main_repo, "{ not json")
+
+
+def _make_unsupported_version(main_repo: Path, path: Path) -> None:
+    write_declaration(main_repo, json.dumps({"version": 99}))
+
+
+def _make_empty_file(main_repo: Path, path: Path) -> None:
+    write_declaration(main_repo, "")
+
+
+def _make_directory(main_repo: Path, path: Path) -> None:
+    path.mkdir(parents=True)
+
+
+def _make_unreadable_permission(main_repo: Path, path: Path) -> None:
+    if os.geteuid() == 0:
+        pytest.skip("root は権限 000 のファイルも読めるため、この形を作れない")
+    write_declaration(main_repo, json.dumps({"version": 1}))
+    path.chmod(0)
+
+
+_UNREADABLE_HANDLERS = {
+    "broken_json": _make_broken_json,
+    "unsupported_version": _make_unsupported_version,
+    "empty_file": _make_empty_file,
+    "directory": _make_directory,
+    "unreadable_permission": _make_unreadable_permission,
+}
+
+
 def make_unreadable(main_repo: Path, form: str) -> Path:
     """`wt_declaration_state` が `unreadable` を返す形を作る。"""
     path = declaration(main_repo)
-    if form == "broken_json":
-        write_declaration(main_repo, "{ not json")
-    elif form == "unsupported_version":
-        write_declaration(main_repo, json.dumps({"version": 99}))
-    elif form == "empty_file":
-        write_declaration(main_repo, "")
-    elif form == "directory":
-        path.mkdir(parents=True)
-    elif form == "unreadable_permission":
-        if os.geteuid() == 0:
-            pytest.skip("root は権限 000 のファイルも読めるため、この形を作れない")
-        write_declaration(main_repo, json.dumps({"version": 1}))
-        path.chmod(0)
-    else:
+    try:
+        handler = _UNREADABLE_HANDLERS[form]
+    except KeyError:
         raise AssertionError(form)
+    handler(main_repo, path)
     return path
 
 
