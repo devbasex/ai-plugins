@@ -124,6 +124,23 @@ def test_objects_are_merged_deeply(shared: Path) -> None:
     assert merged(shared)["testenv"]["port_band"] == [20000, 29999]
 
 
+def test_sections_absent_in_shared_are_added_from_local(main_repo: Path) -> None:
+    write_declaration(main_repo, json.dumps({"version": 1}))
+    local_json(
+        main_repo,
+        {
+            "version": 1,
+            "localenv": {"kind": "compose"},
+            "testenv": {"port_band": [40000, 40999]},
+        },
+    )
+
+    body = merged(main_repo)
+
+    assert body["localenv"] == {"kind": "compose"}
+    assert body["testenv"] == {"port_band": [40000, 40999]}
+
+
 # --- AC13: 配列は置き換える -------------------------------------------------
 
 
