@@ -987,6 +987,27 @@ def test_unexpose_after_down_still_knows_the_environment(main_repo: Path, worktr
     assert slot == "0"
 
 
+def test_unexpose_without_an_open_record_changes_nothing(main_repo: Path, worktree: Path) -> None:
+    """開いている公開記録が 0 件のとき、何も変更せず正常終了する。"""
+    marker = main_repo / "closed.txt"
+    declare(main_repo, testenv={
+        "port_band": [20000, 29999],
+        "expose": {"enabled": True, "public_tag": "golden-public",
+                   "base_domain": "example.test", "open_command": "true",
+                   "close_command": f"touch {marker}"},
+    })
+    run(["env", str(worktree)], cwd=main_repo)
+    before = registry(main_repo)["assignments"]
+
+    result = run(["unexpose", str(worktree)], cwd=main_repo)
+
+    assert result["rc"] == 0, result
+    assert not marker.exists(), "閉じるコマンドは実行されない"
+    after = registry(main_repo)["assignments"]
+    assert after == before, (before, after)
+    assert after[0]["expose"] is None
+
+
 def test_normalize_does_not_expand_globs(tmp_path: Path) -> None:
     """`*` や `?` を含むパスが、実在するファイルの名前へ化けない。"""
     from worktree_helpers import run_lib
