@@ -148,6 +148,23 @@ def test_tag_is_out_of_scope_without_declared_paths(main_repo: Path, worktree: P
     assert result["rc"] == 2, result
 
 
+def test_bake_reports_when_every_golden_volume_already_exists(
+    main_repo: Path, worktree: Path,
+) -> None:
+    """同じタグの基準がすべて存在すると、新しく作らず 2 を返す。"""
+    declare(main_repo, testenv={"golden_volumes": {"source-data": "golden-data"}})
+    docker = main_repo.parent / "existing-volume-docker"
+    docker.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    docker.chmod(0o755)
+    env = os.environ.copy()
+    env["WT_DOCKER_COMMAND"] = str(docker)
+
+    result = run(["bake", str(worktree), "--tag", "same-tag"], cwd=main_repo, env=env)
+
+    assert result["rc"] == 2, result
+    assert result["out"] == "同じタグの基準が既にあります（1 件）\n", result
+
+
 # --- テストの実行 -----------------------------------------------------------
 
 

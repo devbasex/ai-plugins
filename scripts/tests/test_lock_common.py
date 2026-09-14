@@ -311,3 +311,13 @@ def test_the_common_file_leaves_no_noclobber_on_the_caller(tmp_path: Path) -> No
     assert len(reported) == 2, got
     for line in reported:
         assert "C" not in line.split("=", 1)[1], f"{line} に noclobber が残った"
+
+
+def test_acquire_rejects_an_empty_directory_without_waiting() -> None:
+    """空の対象ディレクトリは、待機へ入らず直ちに 1 で失敗する。"""
+    started = time.monotonic()
+    got = run_lib(LOCK_LIB, 'ndf_lock_acquire ""; echo rc=$?')
+    elapsed = time.monotonic() - started
+
+    assert "rc=1" in got.stdout, got
+    assert elapsed < 1, elapsed
