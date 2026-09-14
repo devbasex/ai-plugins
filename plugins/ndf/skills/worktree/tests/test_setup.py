@@ -333,6 +333,25 @@ def test_check_reports_an_unknown_default_branch(tmp_path: Path) -> None:
     ], result["out"]
 
 
+def test_check_mixes_declared_base_branch_with_an_unknown_default(tmp_path: Path) -> None:
+    """現状固定: base_branch だけを宣言し、origin/HEAD も main / master も無い
+    リポジトリでは、開発の起点は宣言値、本番のチャネルは「不明」が混在して出る。
+    宣言のキーは独立に判定され、片方の退避先が無くても rc は 0 のまま。"""
+    repo = tmp_path / "trunk"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "trunk")
+    write_declaration(repo, json.dumps({"version": 1, "base_branch": "develop"}))
+
+    result = run(["check"], cwd=repo)
+
+    assert result["rc"] == 0, result
+    assert result["out"].splitlines() == [
+        PRESENT_LINE,
+        "開発の起点: develop（宣言）",
+        "本番のチャネル: 不明（origin/HEAD が未設定）",
+    ], result["out"]
+
+
 def test_check_does_not_query_origin(main_repo: Path) -> None:
     """origin が到達できなくても、宣言に書かれた名前をそのまま出して終わる。"""
     git(main_repo, "remote", "add", "origin", "/nonexistent/origin.git")
