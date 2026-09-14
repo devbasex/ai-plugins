@@ -2157,3 +2157,39 @@ def test_boundary_cp_mv_single_operand_reports_as_dest(command: str) -> None:
     targets, rc = extract(command)
     assert rc == 0, (command, targets)
     assert targets == ["a"], (command, targets)
+
+
+# --- `--`（オプション終端）の後ろのハイフン始まりの被演算子（R2-002） ---------
+#
+# sed・cp・mv では `--` でオプションの解釈が止まり、後ろの `-file.md` / `-dest` は
+# オプションではなく被演算子になる。現状の実装は sed の `--` を素通しするだけで
+# 終端として扱わず、cp / mv には `--` の枝が無いため `-*) continue` で読み飛ばす。
+# 下記はその現状の振る舞いを固定する（仕様として正しいことを主張しない）。
+
+
+def test_sed_after_end_of_options_finds_no_target() -> None:
+    """現状固定: `sed -i -- 's/a/b/' -file.md` は対象なし（終了コード 1・空出力）。
+
+    `--` を終端として扱わないため、`-file.md` が被演算子として拾われない。
+    """
+    targets, rc = extract("sed -i -- 's/a/b/' -file.md")
+    assert rc == 1, targets
+    assert targets == [], targets
+
+
+def test_cp_after_end_of_options_reports_the_word_before_it() -> None:
+    """現状固定: `cp src -- -dest` は `--` より前の `src` を宛先として返す。
+
+    `--` の枝が無く `-dest` を `-*) continue` で読み飛ばすため、最後に残る
+    被演算子は `src` になる。
+    """
+    targets, rc = extract("cp src -- -dest")
+    assert rc == 0, targets
+    assert targets == ["src"], targets
+
+
+def test_mv_after_end_of_options_reports_the_word_before_it() -> None:
+    """現状固定: `mv src -- -dest` も `--` より前の `src` を宛先として返す。"""
+    targets, rc = extract("mv src -- -dest")
+    assert rc == 0, targets
+    assert targets == ["src"], targets
