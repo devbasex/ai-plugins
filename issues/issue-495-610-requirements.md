@@ -19,7 +19,7 @@
 - `worktree-session.sh` の追従を宣言の `follow_branch` で有効にする形へ変える（#610）
 - 共通層の `wt_declaration` に個人の宣言の重ね合わせを足す（#495）
 - `worktree-setup.sh` の `init` / `status` / `check` の個人の宣言の扱い（#495）
-- 文書（SKILL.md / declaration.md / schema / README / AGENTS.md）とテスト
+- 文書（SKILL.md / declaration.md / schema / README / AGENTS.md / KIRO.md）とテスト
 
 含まない:
 
@@ -63,16 +63,18 @@
 
 文書:
 
-- [ ] AC10: 次の 5 か所が、既定で追従しないことと `follow_branch` で有効にする方法を書く。
-  `grep -rn "ブランチ追従が動きます" plugins/ndf` が 0 件になる
+- [ ] AC10: 次の 6 か所が、既定で追従しないことと `follow_branch` で有効にする方法を書く。6 ファイルを
+  並べた `grep -L follow_branch` が何も出力せず、`grep -n "ブランチ追従"` も何も出力しない（変更前は
+  前者が 6 件、後者が SKILL.md:68 と worktree-setup.sh:99 の 2 件）
 
-  | 場所 |
-  | --- |
-  | `worktree` の SKILL.md「主ディレクトリのブランチ」 |
-  | `references/declaration.md` |
-  | `schemas/worktree.schema.json` |
-  | `plugins/ndf/README.md` の hook の表 |
-  | `init` の完了の文言 |
+  | 場所 | ファイル |
+  | --- | --- |
+  | `worktree` の SKILL.md「主ディレクトリのブランチ」と手順 0 の完了の説明 | `plugins/ndf/skills/worktree/SKILL.md` |
+  | 宣言の項目の説明 | `plugins/ndf/skills/worktree/references/declaration.md` |
+  | スキーマ | `plugins/ndf/skills/worktree/schemas/worktree.schema.json` |
+  | hook の表 | `plugins/ndf/README.md` |
+  | `init` の完了の文言 | `plugins/ndf/scripts/worktree-setup.sh` |
+  | Kiro の `agentSpawn` の表 | `KIRO.md` |
 
 ## 受け入れ条件（#495: 反映される値と、変わらない運用）
 
@@ -88,7 +90,7 @@
 
 リポジトリの運用は個人の宣言で変わらない:
 
-- [ ] AC15: 個人の宣言に `base_branch` / `production_branch` / `guard` / `version` / 未知の項目を書く。
+- [ ] AC15: 個人の宣言に `base_branch` / `production_branch` / `guard` / 未知の項目を書く。
   `wt_base_branch` / `wt_production_branch` / `wt_allow_paths` の出力が、共有の宣言だけのときと一致する
 - [ ] AC16: 個人の `testenv.expose` は反映されない。共有が `expose.enabled: false` なら、重ね合わせた
   宣言でも `false` のままである
@@ -106,7 +108,8 @@
   `check` の終了コードは個人の宣言が無いときと同じである
 - [ ] AC20: 個人の宣言で `testenv` / `localenv` がオブジェクトでない、または `follow_branch` が真偽値でない。
   このときその項目だけが反映されず、他の上書きできる項目は反映される
-- [ ] AC21: AC15・AC16・AC20 で反映しなかった項目の名前が、`status` と `check` の 1 行に並ぶ
+- [ ] AC21: AC15・AC16・AC20 で反映しなかった項目の名前が、`status` と `check` の 1 行に並ぶ。
+  必須の `version` と `$schema` は並ばない（反映しないが、報告の対象でもない）
 
 共有の宣言が無い・読めない:
 

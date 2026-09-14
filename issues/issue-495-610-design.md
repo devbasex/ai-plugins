@@ -253,7 +253,7 @@ jq 1.8.1 と git で確かめた。
 | `wt_declaration_local_ignored`（新設） | 個人の宣言のうち反映しない項目名を 1 行 1 件で返す | 2 |
 | `worktree-setup.sh` | `status` / `check` へ個人の宣言の行を足す。`init` が `.ndf/.gitignore` を作る | 1（文言）/ 2 |
 | `.ndf/.gitignore`（このリポジトリ） | `worktree.local.json` を追跡から外す | 2 |
-| 文書（SKILL.md / declaration.md / schema / README / AGENTS.md） | 既定と有効にする方法、個人の宣言の規則を書く | 1 / 2 |
+| 文書（SKILL.md / declaration.md / schema / README / AGENTS.md / KIRO.md） | 既定と有効にする方法、個人の宣言の規則を書く | 1 / 2 |
 
 ```mermaid
 graph TD
@@ -314,7 +314,7 @@ graph TD
 
 | 項目 | 必須 | 反映 |
 | --- | --- | --- |
-| `version` | 必須。値は `1` | 反映しない。読めるかの判定に使う |
+| `version` | 必須。値は `1` | 反映しない。読めるかの判定だけに使い、報告もしない |
 | `localenv` | 任意。オブジェクト | 共有の `localenv` へ深く併合する |
 | `testenv` | 任意。オブジェクト | `expose` を除いて、共有の `testenv` へ深く併合する |
 | `follow_branch` | 任意。真偽値 | 共有の値を置き換える |
@@ -341,13 +341,13 @@ worktree.local.json
 | `wt_declaration` | 主ディレクトリ | 重ね合わせた宣言を 1 行の JSON で | 共有の宣言が無い・読めない・版が違うとき 1。**個人の宣言の状態では失敗しない** |
 | `_wt_local_overrides` | 主ディレクトリ | 反映する部分だけの 1 行の JSON | 通常のファイルでない・JSON でない・空・オブジェクトでない・`version` が 1 でないとき 1 |
 | `wt_declaration_local_state` | 主ディレクトリ | `absent` / `present` / `unreadable` / `unused` のいずれか 1 語 | 引数が空なら 1 |
-| `wt_declaration_local_ignored` | 主ディレクトリ | 反映しない項目名を 1 行 1 件（`base_branch` / `testenv.expose` など） | 状態が `present` でなければ何も出さず 0 |
+| `wt_declaration_local_ignored` | 主ディレクトリ | 反映しない項目名を 1 行 1 件（`base_branch` / `testenv.expose` など。`version` と `$schema` は出さない） | 状態が `present` でなければ何も出さず 0 |
 
 状態の判定は次の順で行う。
 
 | 順 | 条件 | 状態 |
 | --- | --- | --- |
-| 1 | `[ -e .ndf/worktree.local.json ]` が偽 | `absent` |
+| 1 | `[ -e "$main_dir/.ndf/worktree.local.json" ]` が偽（カレントディレクトリから相対にしない） | `absent` |
 | 2 | `wt_declaration_state` が `present` でない | `unused` |
 | 3 | `_wt_local_overrides` が 1 | `unreadable` |
 | 4 | それ以外 | `present` |
@@ -434,6 +434,7 @@ plugins/ndf/
 ├── skills/development-workflow/SKILL.md # 1: base_branch の説明の「追従先」
 └── README.md                           # 1: hook の表
 AGENTS.md                               # 1: Git 運用ルールの「主ディレクトリの追従先」
+KIRO.md                                 # 1: agentSpawn の表
 scripts/tests/
 ├── test_pr_base_guard.py               # 2
 └── test_base_branch_consistency.py     # 2
@@ -465,13 +466,13 @@ Pull Request 1 を載せ、Pull Request 2 は Pull Request 1 の後に載せる�
 | AC6 | origin の URL を到達できないものへ変え、hook の後に `.git/FETCH_HEAD` が無い | `test_session.py` |
 | AC7 | 既存の追従のテストの宣言に `follow_branch: true` を足す。期待値は変えない | `test_session.py` |
 | AC8、AC9 | 追跡対象を変えた主ディレクトリで `follow_branch` の有無を並べ、提示と終了コード 0 | `test_session.py` |
-| AC10 | `grep -rn "ブランチ追従が動きます" plugins/ndf` が 0 件。文書の中身はレビューで見る | 手動 |
+| AC10 | 6 ファイルを並べた `grep -L follow_branch` と `grep -n "ブランチ追従"` が何も出力しない。変更前の文言は「ブランチ追従が」の直後で改行しており、文を丸ごと探すと変更前でも 0 件になる。文書の中身はレビューで見る | 手動 |
 | AC11 | 個人の `port_band` を置き、`worktree-testenv.sh env` の JSON の `ports` が帯の中 | `test_declaration_local.py` |
 | AC12〜AC14 | `wt_declaration` の出力を jq で読み、該当の値を比べる。AC14 は hook で detach を見る | `test_declaration_local.py` |
 | AC15、AC16 | 個人の宣言の有無で `wt_base_branch` / `wt_production_branch` / `wt_allow_paths` / `expose` を比べる | `test_declaration_local.py` |
 | AC17 | 既存のパラメータに「個人の宣言に `base_branch: main`」を足す | `test_pr_base_guard.py` / `test_base_branch_consistency.py` |
 | AC18 | 5 つの壊れた形でパラメータ化し、hook・`localenv mode`・`testenv env` の出力と終了コードを個人の宣言なしと比べる | `test_declaration_local.py` |
-| AC19、AC21〜AC23 | `status` / `check` の出力の行と終了コード | `test_setup.py` |
+| AC19、AC21〜AC23 | `status` / `check` の出力の行と終了コード。AC21 は `version` と `$schema` が並ばないことも見る | `test_setup.py` |
 | AC20 | 型の合わない 3 項目と正しい 1 項目を同時に置き、正しい項目だけが反映される | `test_declaration_local.py` |
 | AC24〜AC26 | `init` の後の `.ndf/.gitignore` と `git check-ignore`、既存の `.ndf/.gitignore` の内容が変わらない、登録の行 | `test_setup.py` |
 | AC27 | `git -C <作業ツリー> check-ignore -q .ndf/worktree.local.json` の終了コード 0 | 手動 |
