@@ -40,6 +40,10 @@ DECLARATION_FILE="$MAIN_DIR/.ndf/worktree.json"
 
 SCHEMA_URL="https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/ndf/skills/worktree/schemas/worktree.schema.json"
 
+readonly WT_CHECK_PRESENT=0
+readonly WT_CHECK_ABSENT=2
+readonly WT_CHECK_UNREADABLE=3
+
 # --- init -------------------------------------------------------------------
 
 # 書き先が symlink なら断る。たどると、リポジトリの外を指した状態で --force を
@@ -187,9 +191,9 @@ do_check() {
   print_branch_line "本番のチャネル" production_branch "$decl"
 
   case "$state" in
-    present) return 0 ;;
-    absent) return 2 ;;
-    *) return 3 ;;
+    present) return "$WT_CHECK_PRESENT" ;;
+    absent) return "$WT_CHECK_ABSENT" ;;
+    *) return "$WT_CHECK_UNREADABLE" ;;
   esac
 }
 
