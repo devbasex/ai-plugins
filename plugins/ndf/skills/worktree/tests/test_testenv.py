@@ -18,8 +18,8 @@ from worktree_helpers import SCRIPTS_DIR, git, init_repo, write_declaration
 TESTENV = SCRIPTS_DIR / "worktree-testenv.sh"
 
 
-def run(args: list[str], cwd: Path) -> dict:
-    env = os.environ.copy()
+def run(args: list[str], cwd: Path, env: dict | None = None) -> dict:
+    env = dict(env) if env is not None else os.environ.copy()
     env["LC_ALL"] = "C"
     proc = subprocess.run(
         ["bash", str(TESTENV), *args],
@@ -80,6 +80,22 @@ def test_env_outputs_name_slot_and_ports(main_repo: Path, worktree: Path) -> Non
     assert payload["branch"] == "feature/x"
     assert payload["environment"].startswith("main-wt-feature-x-")
     assert payload["ports"] == {"http": 20000, "db": 20001}
+
+
+def test_env_without_a_port_band_keeps_an_assignment(main_repo: Path, worktree: Path) -> None:
+    declare(main_repo, testenv={})
+
+    result = run(["env", str(worktree)], cwd=main_repo)
+
+    assert result["rc"] == 0, result
+    payload = json.loads(result["out"])
+    assert payload["environment"].startswith("main-wt-feature-x-")
+    assert payload["slot"] == 0
+    assert payload["worktree"] == str(worktree.resolve())
+    assert payload["branch"] == "feature/x"
+    assert payload["ports"] == {}
+    active = [row for row in registry(main_repo)["assignments"] if row["released_at"] is None]
+    assert len(active) == 1, active
 
 
 def test_env_is_stable_for_the_same_worktree(main_repo: Path, worktree: Path) -> None:
@@ -148,6 +164,23 @@ def test_tag_is_out_of_scope_without_declared_paths(main_repo: Path, worktree: P
     assert result["rc"] == 2, result
 
 
+def test_bake_reports_when_every_golden_volume_already_exists(
+    main_repo: Path, worktree: Path,
+) -> None:
+    """同じタグの基準がすべて存在すると、新しく作らず 2 を返す。"""
+    declare(main_repo, testenv={"golden_volumes": {"source-data": "golden-data"}})
+    docker = main_repo.parent / "existing-volume-docker"
+    docker.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    docker.chmod(0o755)
+    env = os.environ.copy()
+    env["WT_DOCKER_COMMAND"] = str(docker)
+
+    result = run(["bake", str(worktree), "--tag", "same-tag"], cwd=main_repo, env=env)
+
+    assert result["rc"] == 2, result
+    assert result["out"] == "同じタグの基準が既にあります（1 件）\n", result
+
+
 # --- テストの実行 -----------------------------------------------------------
 
 
@@ -211,6 +244,40 @@ def test_test_runs_in_the_worktree(main_repo: Path, worktree: Path) -> None:
     assert result["out"].strip() == str(worktree.resolve()), result
 
 
+def test_test_respects_inuse_lock_and_releases_after_failure(main_repo: Path, worktree: Path) -> None:
+    """同じ環境のロック取得失敗時は実行せず、失敗終了後もロックを解放する。"""
+    import shutil
+
+    record = worktree / "executed.txt"
+    declare(
+        main_repo,
+        testenv={
+            "port_band": [20000, 29999],
+            "test_kinds": {
+                "record": {"run": f"touch '{record}'"},
+                "fail": {"run": "exit 4"},
+            },
+        },
+    )
+    environment = json.loads(run(["env", str(worktree)], cwd=main_repo)["out"])["environment"]
+
+    lock = main_repo / ".git" / "ndf" / f"{environment}.inuse.d"
+    lock.mkdir(parents=True)
+    (lock / "held").touch()
+    (lock / "pid").write_text(f"{os.getpid()}\n", encoding="utf-8")
+    (lock / "token").write_text("held\n", encoding="utf-8")
+
+    result = run(["test", str(worktree), "--kind", "record"], cwd=main_repo)
+    assert result["rc"] == 1, result
+    assert not record.exists(), "実行中ロックがあるときはテストコマンドを実行しない"
+
+    shutil.rmtree(lock)
+    result = run(["test", str(worktree), "--kind", "fail"], cwd=main_repo)
+    assert result["rc"] == 4, result
+    assert not lock.exists(), "テストコマンド失敗後にも実行中ロックが残らない"
+
+
+
 # --- 外部公開の拒否 ---------------------------------------------------------
 
 
@@ -227,6 +294,31 @@ def test_expose_is_refused_by_default(main_repo: Path, worktree: Path) -> None:
     declare(main_repo, testenv={"port_band": [20000, 29999]})
     result = run(["expose", str(worktree)], cwd=main_repo)
     assert result["rc"] == 1, result
+
+
+@pytest.mark.parametrize(
+    "expose_conf",
+    [
+        {"enabled": True, "base_domain": "example.test"},
+        {"enabled": True, "public_tag": "golden-public"},
+    ],
+)
+def test_expose_is_refused_when_public_tag_or_base_domain_is_missing(
+    main_repo: Path, worktree: Path, expose_conf: dict
+) -> None:
+    marker = main_repo / "opened.txt"
+    declare(main_repo, testenv={
+        "port_band": [20000, 29999],
+        "expose": {**expose_conf, "open_command": f'printf "%s" "$NDF_EXPOSE_URL" > {marker}'},
+    })
+    run(["env", str(worktree)], cwd=main_repo)
+
+    result = run(["expose", str(worktree)], cwd=main_repo)
+
+    assert result["rc"] == 1, result
+    assert "public_tag と base_domain が要ります" in result["err"], result["err"]
+    assert not marker.exists(), "公開コマンドは実行されない"
+    assert registry(main_repo)["assignments"][0]["expose"] is None
 
 
 def test_expose_is_refused_when_the_golden_tag_differs(main_repo: Path, worktree: Path) -> None:
@@ -386,6 +478,15 @@ def test_duration_parsing(value: str, expected: str) -> None:
 
     got = run_lib(f'wt_duration_seconds "{value}"')
     assert got.stdout.strip() == expected, got.stderr
+
+
+@pytest.mark.parametrize("invalid", ["", "abc", "5x"])
+def test_duration_parsing_invalid_returns_error(invalid: str) -> None:
+    from worktree_helpers import run_lib
+
+    got = run_lib(f'wt_duration_seconds "{invalid}"')
+    assert got.returncode == 1
+    assert got.stdout == ""
 
 
 # --- 引数の扱い -------------------------------------------------------------
@@ -578,6 +679,120 @@ def test_takeover_does_not_break_a_fresh_lock(tmp_path: Path) -> None:
     )
     assert "rc=1" in got.stdout, got.stdout
     assert lock.is_dir(), "戻すか、取り直した側が持っている"
+
+
+# --- issue #312: 保持の判定は陳腐化の判定の否定 ------------------------------
+
+
+def make_old(path: Path) -> None:
+    """更新時刻を 1 時間前にする。陳腐化の分数（5 分）を超える。"""
+    import time
+
+    old = time.time() - 3600
+    os.utime(path, (old, old))
+
+
+def test_an_old_lock_without_a_pid_is_not_held(tmp_path: Path) -> None:
+    """AC1: 持ち主を書く前に落ちたロックは、古くなれば握られていない。"""
+    from worktree_helpers import run_lib
+
+    lock = tmp_path / "i.lock"
+    lock.mkdir()
+    make_old(lock)
+    got = run_lib(
+        f'ndf_lock_is_held "{lock}"; echo ndf=$?; wt_lock_is_held "{lock}"; echo wt=$?'
+    )
+    assert "ndf=1" in got.stdout, got.stdout
+    assert "wt=1" in got.stdout, got.stdout
+
+
+def lock_state(tmp_path: Path, state: str) -> Path:
+    """`state` の名前が表す状態のロックを作る。"""
+    lock = tmp_path / "state.lock"
+    if state == "missing":
+        return lock
+    if state == "plain-file":
+        lock.write_text("x\n", encoding="utf-8")
+        return lock
+    lock.mkdir()
+    (lock / "token").write_text("tok\n", encoding="utf-8")
+    if state == "empty-with-held":
+        (lock / "held").write_text("", encoding="utf-8")
+    elif state == "empty-old":
+        make_old(lock)
+    elif state == "alive-pid":
+        (lock / "pid").write_text(f"{os.getpid()}\n", encoding="utf-8")
+    elif state == "alive-pid-old":
+        (lock / "pid").write_text(f"{os.getpid()}\n", encoding="utf-8")
+        make_old(lock)
+    elif state == "dead-pid":
+        (lock / "pid").write_text("999999\n", encoding="utf-8")
+    return lock
+
+
+@pytest.mark.parametrize("state", ["empty", "empty-with-held"])
+def test_a_fresh_lock_without_a_pid_is_held(tmp_path: Path, state: str) -> None:
+    """AC2: 作った直後の空のロックは、取得の途中と区別できないため握られている。"""
+    from worktree_helpers import run_lib
+
+    lock = lock_state(tmp_path, state)
+    got = run_lib(
+        f'ndf_lock_is_held "{lock}"; echo ndf=$?; wt_lock_is_held "{lock}"; echo wt=$?'
+    )
+    assert "ndf=0" in got.stdout and "wt=0" in got.stdout, got.stdout
+
+
+def test_a_living_owner_holds_the_lock_even_when_old(tmp_path: Path) -> None:
+    """AC3: 持ち主が生きていれば、更新時刻が古くても握られている。"""
+    from worktree_helpers import run_lib
+
+    lock = lock_state(tmp_path, "alive-pid-old")
+    got = run_lib(
+        f'ndf_lock_is_held "{lock}"; echo ndf=$?; wt_lock_is_held "{lock}"; echo wt=$?'
+    )
+    assert "ndf=0" in got.stdout and "wt=0" in got.stdout, got.stdout
+
+
+@pytest.mark.parametrize("state", ["dead-pid", "missing", "plain-file", "empty-arg"])
+def test_a_lock_without_a_living_owner_is_not_held(tmp_path: Path, state: str) -> None:
+    """AC4: 持ち主が消えた・無い・ディレクトリでない・空の引数は握られていない。"""
+    from worktree_helpers import run_lib
+
+    arg = "" if state == "empty-arg" else str(lock_state(tmp_path, state))
+    got = run_lib(
+        f'ndf_lock_is_held "{arg}"; echo ndf=$?; wt_lock_is_held "{arg}"; echo wt=$?'
+    )
+    assert "ndf=1" in got.stdout and "wt=1" in got.stdout, got.stdout
+
+
+@pytest.mark.parametrize(
+    "state", ["empty", "empty-with-held", "empty-old", "alive-pid", "alive-pid-old", "dead-pid"],
+)
+def test_held_is_the_negation_of_stale(tmp_path: Path, state: str) -> None:
+    """AC5: 判定の規則は 1 つ。保持の判定は陳腐化の判定の否定と一致する。"""
+    from worktree_helpers import run_lib
+
+    lock = lock_state(tmp_path, state)
+    got = run_lib(
+        f'ndf_lock_is_held "{lock}"; echo held=$?; '
+        f'_ndf_lock_is_stale "{lock}" "$(cat "{lock}/token")"; echo stale=$?'
+    )
+    values = dict(line.split("=") for line in got.stdout.split())
+    assert values["held"] != values["stale"], got.stdout
+
+
+def test_held_check_leaves_the_caller_shell_alone(tmp_path: Path) -> None:
+    """AC6: 呼び出し側の `$-` に `C` を残さず、標準出力へ書かない。"""
+    from worktree_helpers import run_lib
+
+    lock = lock_state(tmp_path, "empty-old")
+    got = run_lib(
+        f'out=$(ndf_lock_is_held "{lock}"; wt_lock_is_held "{lock}"); '
+        'case "$-" in *C*) echo noclobber=yes ;; *) echo noclobber=no ;; esac; '
+        'printf "out=[%s]\\n" "$out"'
+    )
+    assert "noclobber=no" in got.stdout, got.stdout
+    assert "out=[]" in got.stdout, got.stdout
 
 
 @pytest.mark.parametrize("bad", ["/tmp/elsewhere", "../outside", "evidence/../../outside"])
@@ -781,6 +996,27 @@ def test_unexpose_after_down_still_knows_the_environment(main_repo: Path, worktr
     assert slot == "0"
 
 
+def test_unexpose_without_an_open_record_changes_nothing(main_repo: Path, worktree: Path) -> None:
+    """開いている公開記録が 0 件のとき、何も変更せず正常終了する。"""
+    marker = main_repo / "closed.txt"
+    declare(main_repo, testenv={
+        "port_band": [20000, 29999],
+        "expose": {"enabled": True, "public_tag": "golden-public",
+                   "base_domain": "example.test", "open_command": "true",
+                   "close_command": f"touch {marker}"},
+    })
+    run(["env", str(worktree)], cwd=main_repo)
+    before = registry(main_repo)["assignments"]
+
+    result = run(["unexpose", str(worktree)], cwd=main_repo)
+
+    assert result["rc"] == 0, result
+    assert not marker.exists(), "閉じるコマンドは実行されない"
+    after = registry(main_repo)["assignments"]
+    assert after == before, (before, after)
+    assert after[0]["expose"] is None
+
+
 def test_normalize_does_not_expand_globs(tmp_path: Path) -> None:
     """`*` や `?` を含むパスが、実在するファイルの名前へ化けない。"""
     from worktree_helpers import run_lib
@@ -832,6 +1068,30 @@ def test_up_passes_the_numbered_values_to_compose(main_repo: Path, worktree: Pat
     assert "NDF_SHARED_NETWORK=ndf-shared" in body, body
     assert "NDF_ENVIRONMENT=main-wt-feature-x-" in body, body
     assert "compose -p main-wt-feature-x-" in body, body
+
+
+def test_up_passes_the_profile_services_to_compose(main_repo: Path, worktree: Path) -> None:
+    """`--profile` を渡すと、その profile の宣言のサービスを宣言順で compose up へ渡す。"""
+    (worktree / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+    declare(
+        main_repo,
+        testenv={"port_band": [20000, 29999], "port_roles": {"http": 0},
+                 "profiles": {"minimal": ["web", "api"]}},
+        localenv={"kind": "compose", "compose_files": ["docker-compose.yml"]},
+    )
+    dump = main_repo.parent / "compose-profile.txt"
+    stub = stub_docker(main_repo, dump)
+
+    env = os.environ.copy()
+    env["WT_DOCKER_COMMAND"] = str(stub)
+    proc = subprocess.run(
+        ["bash", str(TESTENV), "up", str(worktree), "--profile", "minimal"],
+        cwd=str(main_repo), env=env, capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc
+
+    body = dump.read_text()
+    assert body.rstrip().endswith("up -d web api"), body
 
 
 def test_role_names_become_upper_case_variables(main_repo: Path, worktree: Path) -> None:
@@ -1120,3 +1380,265 @@ def test_tag_refuses_when_the_declared_paths_have_no_match(
 
     assert result["rc"] == 1, result
     assert result["out"].strip() == "", result["out"]
+
+
+# --- issue #312: reap と実行中のロック ---------------------------------------
+
+
+def reap_with_running_container(main_repo: Path, worktree: Path) -> tuple[dict, Path]:
+    """使われていない割り当てを 1 つ用意し、稼働中のコンテナを返す偽の実行系で reap する。
+
+    戻り値は環境名を含む `env` の出力と、偽の実行系が書き出したファイルである。
+    実行中のロックは呼び出し側が用意してから呼ぶ。
+    """
+    dump = main_repo.parent / "reap-env.txt"
+    env = os.environ.copy()
+    env["WT_DOCKER_COMMAND"] = str(stub_docker_with_running_container(main_repo, dump))
+    proc = subprocess.run(
+        ["bash", str(TESTENV), "reap", "--idle", "45m"],
+        cwd=str(main_repo), env=env, capture_output=True, text=True,
+    )
+    return {"rc": proc.returncode, "out": proc.stdout, "err": proc.stderr}, dump
+
+
+def idle_assignment(main_repo: Path, worktree: Path) -> Path:
+    """使われていない割り当てを作り、その実行中のロックの位置を返す。"""
+    (worktree / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+    declare(
+        main_repo,
+        testenv={"port_band": [20000, 29999], "port_roles": {"http": 0}},
+        localenv={"kind": "compose", "compose_files": ["docker-compose.yml"]},
+    )
+    environment = json.loads(run(["env", str(worktree)], cwd=main_repo)["out"])["environment"]
+    set_last_used(main_repo, worktree, "2020-01-01T00:00:00Z")
+    return main_repo / ".git" / "ndf" / f"{environment}.inuse.d"
+
+
+def test_reap_stops_an_environment_whose_lock_is_old_and_empty(main_repo: Path, worktree: Path) -> None:
+    """AC7: 持ち主を書く前に落ちたロックが古くなれば、停止の対象へ戻る。"""
+    lock = idle_assignment(main_repo, worktree)
+    lock.mkdir()
+    make_old(lock)
+
+    result, dump = reap_with_running_container(main_repo, worktree)
+
+    assert result["rc"] == 0, result
+    assert "停止します" in result["out"], result
+    assert dump.read_text().rstrip().endswith("stop"), dump.read_text()
+
+
+@pytest.mark.parametrize("state", ["fresh-empty", "alive-pid"])
+def test_reap_leaves_an_environment_whose_lock_is_held(main_repo: Path, worktree: Path, state: str) -> None:
+    """AC8: 作った直後の空のロックと、生きている持ち主のロックは止めない。"""
+    lock = idle_assignment(main_repo, worktree)
+    lock.mkdir()
+    if state == "alive-pid":
+        (lock / "pid").write_text(f"{os.getpid()}\n", encoding="utf-8")
+
+    result, dump = reap_with_running_container(main_repo, worktree)
+
+    assert result["rc"] == 0, result
+    assert "停止します" not in result["out"], result
+    assert not dump.exists(), "stop を呼ばない"
+
+
+# --- issue #315: 台帳の更新の失敗 --------------------------------------------
+
+
+def failing_jq(main_repo: Path, fail_on: str) -> dict:
+    """引数のどれかが `fail_on` を含む呼び出しだけ終了コード 5 で終わる偽の jq を置く。
+
+    それ以外の呼び出しは本物の jq へ渡す。`fail_on` には台帳を更新する jq の
+    代入式（`.ports = $ports` など）を渡し、狙った 1 か所だけを失敗させる。
+    戻り値は PATH の先頭に偽の jq を置いた環境変数である。
+    """
+    import shlex
+    import shutil
+
+    real = shutil.which("jq")
+    assert real, "本物の jq が要る"
+    bindir = main_repo.parent / "fake-jq"
+    bindir.mkdir(exist_ok=True)
+    script = bindir / "jq"
+    script.write_text(
+        "#!/bin/sh\n"
+        f"fail_on={shlex.quote(fail_on)}\n"
+        'for a in "$@"; do\n'
+        '  case "$a" in *"$fail_on"*) exit 5 ;; esac\n'
+        "done\n"
+        f'exec {shlex.quote(real)} "$@"\n',
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}:{env['PATH']}"
+    return env
+
+
+def test_env_fails_when_ports_cannot_be_recorded(main_repo: Path, worktree: Path) -> None:
+    """AC9: ポートを台帳へ書けなければ JSON を出さず、新しく取った割り当てを解放する。"""
+    declare(main_repo, testenv={"port_band": [20000, 29999], "port_roles": {"http": 0}})
+
+    result = run(["env", str(worktree)], cwd=main_repo, env=failing_jq(main_repo, ".ports = $ports"))
+
+    assert result["rc"] == 1, result
+    assert result["out"] == "", result
+    assert "ポートを台帳へ記録できませんでした" in result["err"], result
+    rows = registry(main_repo)["assignments"]
+    assert rows and all(row["released_at"] is not None for row in rows), rows
+
+
+def test_env_reports_when_the_release_after_a_band_overflow_fails(main_repo: Path, worktree: Path) -> None:
+    """AC10: 帯を超えた後の解放も書けなければ、割り当てが残ったことを知らせる。"""
+    declare(main_repo, testenv={"port_band": [20000, 20005], "port_roles": {"far": 9}})
+
+    result = run(
+        ["env", str(worktree)], cwd=main_repo, env=failing_jq(main_repo, ".released_at = (now"),
+    )
+
+    assert result["rc"] == 1, result
+    assert "採番が帯を超えました" in result["err"], result
+    assert "スロットの解放を台帳へ記録できませんでした" in result["err"], result
+    rows = registry(main_repo)["assignments"]
+    assert rows[0]["released_at"] is None, "解放は書けていない"
+
+
+def compose_ready(main_repo: Path, worktree: Path) -> Path:
+    """compose の定義と宣言を置き、割り当てを 1 つ作る。偽の実行系の書き出し先を返す。"""
+    (worktree / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+    declare(
+        main_repo,
+        testenv={"port_band": [20000, 29999], "port_roles": {"http": 0}},
+        localenv={"kind": "compose", "compose_files": ["docker-compose.yml"]},
+    )
+    run(["env", str(worktree)], cwd=main_repo)
+    return main_repo.parent / "compose-env.txt"
+
+
+def test_up_does_not_start_when_the_golden_tag_cannot_be_recorded(main_repo: Path, worktree: Path) -> None:
+    """AC11: 基準のタグを台帳へ書けなければ、起動せずに 1 を返す。"""
+    dump = compose_ready(main_repo, worktree)
+    env = failing_jq(main_repo, ".golden_tag = $tag")
+    env["WT_DOCKER_COMMAND"] = str(stub_docker(main_repo, dump))
+
+    result = run(["up", str(worktree), "--tag", "abc"], cwd=main_repo, env=env)
+
+    assert result["rc"] == 1, result
+    assert "基準のタグを台帳へ記録できませんでした" in result["err"], result
+    assert not dump.exists(), "compose up を呼ばない"
+
+
+def test_up_does_not_start_when_the_registry_lock_is_held(main_repo: Path, worktree: Path) -> None:
+    """AC12: 台帳の排他を取れないときも起動しない。待ちは 1 回分（上限 5 秒）で終わる。"""
+    import time
+
+    dump = compose_ready(main_repo, worktree)
+    lock = main_repo / ".git" / "ndf" / "worktree-registry.json.lockdir"
+    lock.mkdir()
+    (lock / "held").write_text("", encoding="utf-8")
+    (lock / "token").write_text("tok\n", encoding="utf-8")
+    (lock / "pid").write_text(f"{os.getpid()}\n", encoding="utf-8")
+    env = os.environ.copy()
+    env["WT_DOCKER_COMMAND"] = str(stub_docker(main_repo, dump))
+
+    started = time.monotonic()
+    result = run(["up", str(worktree), "--tag", "abc"], cwd=main_repo, env=env)
+    elapsed = time.monotonic() - started
+
+    assert result["rc"] == 1, result
+    assert "基準のタグを台帳へ記録できませんでした" in result["err"], result
+    assert not dump.exists(), "compose up を呼ばない"
+    assert elapsed < 8, elapsed
+
+
+def test_up_warns_but_starts_when_the_last_used_time_cannot_be_recorded(main_repo: Path, worktree: Path) -> None:
+    """AC16（up）: 最後に使った時刻を書けなくても、警告を出して起動する。"""
+    dump = compose_ready(main_repo, worktree)
+    env = failing_jq(main_repo, ".last_used_at = (now")
+    env["WT_DOCKER_COMMAND"] = str(stub_docker(main_repo, dump))
+
+    result = run(["up", str(worktree)], cwd=main_repo, env=env)
+
+    assert result["rc"] == 0, result
+    assert "警告" in result["err"] and "最後に使った時刻" in result["err"], result
+    assert dump.read_text().rstrip().endswith("up -d"), dump.read_text()
+
+
+def test_test_warns_and_keeps_the_command_exit_code(main_repo: Path, worktree: Path) -> None:
+    """AC16（test）: 最後に使った時刻を書けなくても、実行したコマンドの終了コードを返す。"""
+    declare(main_repo, testenv={"port_band": [20000, 29999], "test_kinds": {"unit": {"run": "exit 3"}}})
+    run(["env", str(worktree)], cwd=main_repo)
+
+    result = run(
+        ["test", str(worktree), "--kind", "unit"],
+        cwd=main_repo, env=failing_jq(main_repo, ".last_used_at = (now"),
+    )
+
+    assert result["rc"] == 3, result
+    assert "警告" in result["err"] and "最後に使った時刻" in result["err"], result
+
+
+def test_down_reports_when_the_release_cannot_be_recorded(main_repo: Path, worktree: Path) -> None:
+    """AC13: 破棄はしたが解放を書けなければ、1 を返して再実行を案内する。"""
+    dump = compose_ready(main_repo, worktree)
+    env = failing_jq(main_repo, ".released_at = (now")
+    env["WT_DOCKER_COMMAND"] = str(stub_docker(main_repo, dump))
+
+    result = run(["down", str(worktree)], cwd=main_repo, env=env)
+
+    assert result["rc"] == 1, result
+    assert "スロットの解放を台帳へ記録できませんでした" in result["err"], result
+    assert "down を再実行" in result["err"], result
+    assert dump.read_text().rstrip().endswith("down"), "破棄はしている"
+    assert registry(main_repo)["assignments"][0]["released_at"] is None
+
+
+def exposed(main_repo: Path, worktree: Path, **expose: str) -> None:
+    """公開を許す基準が載った割り当てを作り、公開する。"""
+    declare(main_repo, testenv={
+        "port_band": [20000, 29999],
+        "expose": {"enabled": True, "public_tag": "golden-public",
+                   "base_domain": "example.test", "open_command": "true", **expose},
+    })
+    run(["env", str(worktree)], cwd=main_repo)
+    golden(main_repo, worktree)
+    assert run(["expose", str(worktree)], cwd=main_repo)["rc"] == 0
+
+
+def test_unexpose_reports_when_the_record_cannot_be_closed(main_repo: Path, worktree: Path) -> None:
+    """AC14: 閉じる手段は実行したが台帳を閉じられなければ、1 を返して再実行を案内する。"""
+    marker = main_repo / "closed.txt"
+    exposed(main_repo, worktree, close_command=f"touch {marker}")
+
+    result = run(
+        ["unexpose", str(worktree)], cwd=main_repo,
+        env=failing_jq(main_repo, ".expose.closed_at = (now"),
+    )
+
+    assert result["rc"] == 1, result
+    assert "台帳を閉じられませんでした" in result["err"], result
+    assert "unexpose を再実行" in result["err"], result
+    assert marker.exists(), "閉じる手段は実行している"
+    assert registry(main_repo)["assignments"][0]["expose"]["closed_at"] is None
+
+
+def test_expose_reports_when_the_rollback_fails(main_repo: Path, worktree: Path) -> None:
+    """AC15: 公開の手段が失敗し、記録も戻せなければ、戻したとは言わず unexpose を案内する。"""
+    declare(main_repo, testenv={
+        "port_band": [20000, 29999],
+        "expose": {"enabled": True, "public_tag": "golden-public",
+                   "base_domain": "example.test", "open_command": "exit 1"},
+    })
+    run(["env", str(worktree)], cwd=main_repo)
+    golden(main_repo, worktree)
+
+    result = run(
+        ["expose", str(worktree)], cwd=main_repo,
+        env=failing_jq(main_repo, ".expose.closed_at = (now"),
+    )
+
+    assert result["rc"] == 1, result
+    assert "記録を戻しました" not in result["err"], result
+    assert "記録も戻せませんでした" in result["err"], result
+    assert "unexpose で閉じて" in result["err"], result
+    assert registry(main_repo)["assignments"][0]["expose"]["closed_at"] is None

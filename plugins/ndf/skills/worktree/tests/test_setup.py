@@ -10,6 +10,8 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from worktree_helpers import GUARD, SESSION, SCRIPTS_DIR, git, run_lib, write_declaration
 
 SETUP = SCRIPTS_DIR / "worktree-setup.sh"
@@ -31,6 +33,17 @@ def declaration(main_repo: Path) -> Path:
 
 def test_init_creates_a_readable_declaration(main_repo: Path) -> None:
     result = run(["init"], cwd=main_repo)
+
+    assert result["rc"] == 0, result
+    body = json.loads(declaration(main_repo).read_text(encoding="utf-8"))
+    assert body["version"] == 1
+    assert body["$schema"].endswith("worktree.schema.json")
+
+
+def test_no_subcommand_defaults_to_init(main_repo: Path) -> None:
+    """現状固定: 副コマンドを渡さない呼び出しは既定で init として扱われ、
+    明示的な init と同じ宣言（version と $schema の要点）を rc=0 で作る。"""
+    result = run([], cwd=main_repo)
 
     assert result["rc"] == 0, result
     body = json.loads(declaration(main_repo).read_text(encoding="utf-8"))
@@ -116,6 +129,27 @@ def test_status_counts_worktrees(main_repo: Path, worktree: Path) -> None:
     assert "開発用の作業ツリー: 1 個" in result["out"], result["out"]
 
 
+def test_status_runs_from_inside_a_worktree(main_repo: Path, worktree: Path) -> None:
+    """現状固定: 作業ツリー内からでも、主ディレクトリの導入状態を報告する。"""
+    run(["init"], cwd=main_repo)
+
+    result = run(["status"], cwd=worktree)
+
+    assert result["rc"] == 0, result
+    assert f"主ディレクトリ: {main_repo}" in result["out"], result["out"]
+    assert PRESENT_LINE in result["out"], result["out"]
+    assert ".worktrees/ の登録: なし" in result["out"], result["out"]
+    assert "開発用の作業ツリー: 1 個" in result["out"], result["out"]
+
+
+def test_status_counts_zero_worktrees(main_repo: Path) -> None:
+    """現状固定: 開発用の作業ツリーが無い境界では 0 個と報告する。"""
+    result = run(["status"], cwd=main_repo)
+
+    assert result["rc"] == 0, result
+    assert "開発用の作業ツリー: 0 個" in result["out"], result["out"]
+
+
 def test_status_reports_the_gitignore_registration(main_repo: Path) -> None:
     result = run(["status"], cwd=main_repo)
     assert ".worktrees/ の登録: なし" in result["out"], result["out"]
@@ -150,12 +184,28 @@ def test_init_refuses_a_symlinked_ndf_directory(main_repo: Path, tmp_path: Path)
     result = run(["init", "--force"], cwd=main_repo)
 
     assert result["rc"] == 1, result
+    assert ".ndf" in result["err"], result["err"]
     assert not (outside / "worktree.json").exists(), "外へ書かない"
 
 
+def test_init_fails_when_ndf_is_a_regular_file(main_repo: Path) -> None:
+    """現状固定: .ndf が通常ファイルなら内容を変えず、宣言を作らずに 1 で終わる。"""
+    ndf = main_repo / ".ndf"
+    original = b"keep existing content\n"
+    ndf.write_bytes(original)
+
+    result = run(["init"], cwd=main_repo)
+
+    assert result["rc"] == 1, result
+    assert not declaration(main_repo).exists(), "宣言を作らない"
+    assert ndf.read_bytes() == original, ".ndf の内容を変えない"
+
+
 def test_init_leaves_no_temporary_file(main_repo: Path) -> None:
+    """init が置くのは宣言と `.gitignore`（#495 の AC24）の 2 つだけである。"""
     run(["init"], cwd=main_repo)
-    leftovers = [p.name for p in (main_repo / ".ndf").iterdir() if p.name != "worktree.json"]
+    written = {"worktree.json", ".gitignore"}
+    leftovers = [p.name for p in (main_repo / ".ndf").iterdir() if p.name not in written]
     assert leftovers == [], leftovers
 
 
@@ -167,6 +217,33 @@ def test_init_rejects_unknown_argument(main_repo: Path) -> None:
     assert result["out"] == "", result
     assert result["err"].strip(), result
     assert not declaration(main_repo).exists(), "引数解析で弾かれたときは宣言を作らない"
+
+
+def test_init_accepts_double_dash(main_repo: Path) -> None:
+    """現状固定: 引数解析で -- を受理して処理を続け、
+    明示的な init と同じ宣言（version と $schema の要点）を rc=0 で作る。"""
+    result = run(["init", "--"], cwd=main_repo)
+
+    assert result["rc"] == 0, result
+    body = json.loads(declaration(main_repo).read_text(encoding="utf-8"))
+    assert body["version"] == 1
+    assert body["$schema"].endswith("worktree.schema.json")
+
+
+def test_double_dash_does_not_stop_force_parsing(main_repo: Path) -> None:
+    """現状固定: `--` は POSIX 慣習では以降を非オプションとして扱う区切りだが、
+    引数解析の loop は `--` の後の `--force` も引き続き解釈する。guard 付きの
+    既存宣言に対し `init -- --force` を渡すと rc=0 で上書きされ、guard が残らない。"""
+    write_declaration(
+        main_repo,
+        json.dumps({"version": 1, "guard": {"allow_paths": ["notes/"]}}),
+    )
+
+    result = run(["init", "--", "--force"], cwd=main_repo)
+
+    assert result["rc"] == 0, result
+    body = json.loads(declaration(main_repo).read_text(encoding="utf-8"))
+    assert "guard" not in body, "-- が --force の解釈を止めないため上書きされる"
 
 
 def test_unknown_subcommand_prints_usage(main_repo: Path) -> None:
@@ -307,6 +384,25 @@ def test_check_reports_an_unknown_default_branch(tmp_path: Path) -> None:
     assert result["rc"] == 2, result
     assert result["out"].splitlines()[1:] == [
         "開発の起点: 不明（origin/HEAD が未設定）",
+        "本番のチャネル: 不明（origin/HEAD が未設定）",
+    ], result["out"]
+
+
+def test_check_mixes_declared_base_branch_with_an_unknown_default(tmp_path: Path) -> None:
+    """現状固定: base_branch だけを宣言し、origin/HEAD も main / master も無い
+    リポジトリでは、開発の起点は宣言値、本番のチャネルは「不明」が混在して出る。
+    宣言のキーは独立に判定され、片方の退避先が無くても rc は 0 のまま。"""
+    repo = tmp_path / "trunk"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "trunk")
+    write_declaration(repo, json.dumps({"version": 1, "base_branch": "develop"}))
+
+    result = run(["check"], cwd=repo)
+
+    assert result["rc"] == 0, result
+    assert result["out"].splitlines() == [
+        PRESENT_LINE,
+        "開発の起点: develop（宣言）",
         "本番のチャネル: 不明（origin/HEAD が未設定）",
     ], result["out"]
 
@@ -486,3 +582,361 @@ def test_slot_touch_updates_last_used_at_and_keeps_released_at_null(main_repo: P
     assignment = after["assignments"][0]
     assert assignment["last_used_at"] != "2020-01-01T00:00:00Z"
     assert assignment["released_at"] is None
+
+
+# --- init: 読めない宣言を失敗として報告する（#573） ---------------------------
+
+WORKTREE_SKILL = SCRIPTS_DIR.parent / "skills" / "worktree" / "SKILL.md"
+
+UNREADABLE_FORMS = ["broken_json", "unsupported_version", "empty_file", "directory", "unreadable_permission"]
+
+
+def _make_broken_json(main_repo: Path, path: Path) -> None:
+    write_declaration(main_repo, "{ not json")
+
+
+def _make_unsupported_version(main_repo: Path, path: Path) -> None:
+    write_declaration(main_repo, json.dumps({"version": 99}))
+
+
+def _make_empty_file(main_repo: Path, path: Path) -> None:
+    write_declaration(main_repo, "")
+
+
+def _make_directory(main_repo: Path, path: Path) -> None:
+    path.mkdir(parents=True)
+
+
+def _make_unreadable_permission(main_repo: Path, path: Path) -> None:
+    if os.geteuid() == 0:
+        pytest.skip("root は権限 000 のファイルも読めるため、この形を作れない")
+    write_declaration(main_repo, json.dumps({"version": 1}))
+    path.chmod(0)
+
+
+_UNREADABLE_HANDLERS = {
+    "broken_json": _make_broken_json,
+    "unsupported_version": _make_unsupported_version,
+    "empty_file": _make_empty_file,
+    "directory": _make_directory,
+    "unreadable_permission": _make_unreadable_permission,
+}
+
+
+def make_unreadable(main_repo: Path, form: str) -> Path:
+    """`wt_declaration_state` が `unreadable` を返す形を作る。"""
+    path = declaration(main_repo)
+    try:
+        handler = _UNREADABLE_HANDLERS[form]
+    except KeyError:
+        raise AssertionError(form)
+    handler(main_repo, path)
+    return path
+
+
+def snapshot(path: Path) -> tuple:
+    """宣言の中身（ディレクトリなら一覧）と権限。init の前後で比べる。"""
+    mode = path.lstat().st_mode
+    if path.is_dir():
+        return mode, sorted(p.name for p in path.iterdir())
+    return mode, path.read_bytes() if os.access(path, os.R_OK) else None
+
+
+@pytest.mark.parametrize("form", UNREADABLE_FORMS)
+def test_init_fails_on_an_unreadable_declaration(main_repo: Path, form: str) -> None:
+    """受け入れ条件 1 / 4: 読めない宣言は 1 で終わり、「既にあります」を出さない。"""
+    make_unreadable(main_repo, form)
+
+    result = run(["init"], cwd=main_repo)
+
+    assert result["rc"] == 1, result
+    assert "既にあります" not in result["out"], result["out"]
+    assert result["out"] == "", result["out"]
+
+
+@pytest.mark.parametrize("form", UNREADABLE_FORMS)
+def test_init_prints_the_same_declaration_line_as_status_and_check(main_repo: Path, form: str) -> None:
+    """受け入れ条件 2 / 4: 標準エラーの 1 行目は status / check の宣言の行と一字一句同じ。"""
+    make_unreadable(main_repo, form)
+
+    result = run(["init"], cwd=main_repo)
+    status_line, check_line, _ = _declaration_line_pair(main_repo)
+
+    assert result["err"].splitlines()[0] == BROKEN_LINE == status_line == check_line, result["err"]
+
+
+def test_init_tells_the_user_to_fix_or_remove_and_does_not_suggest_force(main_repo: Path) -> None:
+    """受け入れ条件 3: 直すか消してから init をもう一度。--force は勧めない。"""
+    write_declaration(main_repo, "{ not json")
+
+    result = run(["init"], cwd=main_repo)
+
+    assert ".ndf/worktree.json を消してから" in result["err"], result["err"]
+    assert "init" in result["err"], result["err"]
+    assert "--force" not in result["err"], result["err"]
+
+
+@pytest.mark.parametrize("form", UNREADABLE_FORMS)
+def test_init_leaves_an_unreadable_declaration_untouched(main_repo: Path, form: str) -> None:
+    """受け入れ条件 5: 読めない宣言の中身と権限を変えない。"""
+    path = make_unreadable(main_repo, form)
+    before = snapshot(path)
+
+    run(["init"], cwd=main_repo)
+
+    assert snapshot(path) == before
+
+
+def test_init_accepts_a_symlink_to_a_readable_declaration(main_repo: Path, tmp_path: Path) -> None:
+    """受け入れ条件 8: 読める宣言を指す symlink は、書き込まないので「既にあります」で 0。"""
+    outside = tmp_path / "outside.json"
+    body = json.dumps({"version": 1, "guard": {"allow_paths": ["notes/"]}})
+    outside.write_text(body, encoding="utf-8")
+    (main_repo / ".ndf").mkdir()
+    declaration(main_repo).symlink_to(outside)
+
+    result = run(["init"], cwd=main_repo)
+
+    assert result["rc"] == 0, result
+    assert "既にあります" in result["out"], result["out"]
+    assert outside.read_text(encoding="utf-8") == body, "指す先を変えない"
+
+
+@pytest.mark.parametrize("form", [f for f in UNREADABLE_FORMS if f != "directory"])
+def test_force_rebuilds_an_unreadable_declaration(main_repo: Path, form: str) -> None:
+    """受け入れ条件 9: --force は読めない宣言を作り直し、直後の check が 0。
+    ディレクトリの形は #628 が扱うため含めない。"""
+    make_unreadable(main_repo, form)
+
+    result = run(["init", "--force"], cwd=main_repo)
+
+    assert result["rc"] == 0, result
+    assert run(["check"], cwd=main_repo)["rc"] == 0
+
+
+@pytest.mark.parametrize("form", UNREADABLE_FORMS)
+def test_status_and_check_are_unchanged_for_unreadable_forms(main_repo: Path, form: str) -> None:
+    """受け入れ条件 12: status / check の出力と終了コードは変更前と同じ。"""
+    make_unreadable(main_repo, form)
+    status_line, check_line, rc = _declaration_line_pair(main_repo)
+    assert status_line == check_line == BROKEN_LINE
+    assert rc == 3
+    assert run(["status"], cwd=main_repo)["rc"] == 0
+
+
+def step0_section() -> str:
+    body = WORKTREE_SKILL.read_text(encoding="utf-8")
+    return body[body.index("## 0. 宣言ファイルを用意する"): body.index("## 1. 現在地を確かめる")]
+
+
+def test_step0_stops_when_init_fails() -> None:
+    """受け入れ条件 10: 手順 0 は init の終了コードを見て止まり、利用者が決める。"""
+    section = step0_section()
+    assert 'exit=$?' in section
+    assert "先へ進まない" in section
+    assert "利用者" in section
+
+
+def test_step0_limits_no_overwrite_to_readable_declarations() -> None:
+    """受け入れ条件 11: 上書きしないのは読める宣言に限り、読めない宣言では 1 で終わる。"""
+    section = step0_section()
+    assert "読める宣言" in section
+    assert "1 で終わる" in section
+
+
+# --- 個人の宣言の報告と追跡からの除外（#495 の AC19、AC21〜AC26） -------------
+
+LOCAL_PRESENT_LINE = "個人の宣言: あり（.ndf/worktree.local.json）"
+LOCAL_UNREADABLE_LINE = (
+    "個人の宣言: 読めません（版が未対応か、JSON として壊れています。共有の宣言だけで動きます）"
+)
+LOCAL_UNUSED_LINE = "個人の宣言: 使っていません（共有の宣言ファイルが無いか、読めません）"
+LOCAL_REGISTER_LINE = (
+    "個人の宣言の登録: なし。.ndf/.gitignore へ worktree.local.json を足してください"
+)
+
+LOCAL_BROKEN_FORMS = ["broken_json", "empty", "top_level_array", "unsupported_version", "directory"]
+
+
+def local_declaration(main_repo: Path) -> Path:
+    return main_repo / ".ndf" / "worktree.local.json"
+
+
+def write_local(main_repo: Path, body: str) -> Path:
+    path = local_declaration(main_repo)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def make_broken_local(main_repo: Path, form: str) -> None:
+    if form == "broken_json":
+        write_local(main_repo, "{broken")
+    elif form == "empty":
+        write_local(main_repo, "")
+    elif form == "top_level_array":
+        write_local(main_repo, "[1]")
+    elif form == "unsupported_version":
+        write_local(main_repo, json.dumps({"version": 2}))
+    elif form == "directory":
+        local_declaration(main_repo).mkdir(parents=True)
+    else:  # pragma: no cover - 綴りの誤りを黙って通さない
+        raise AssertionError(form)
+
+
+def local_lines(out: str) -> list[str]:
+    return [line for line in out.splitlines() if line.startswith("個人の宣言")]
+
+
+def test_local_declaration_line_follows_the_shared_one(main_repo: Path) -> None:
+    """AC19 / AC21: 個人の宣言の行は「宣言ファイル:」の直後に置く。"""
+    run(["init"], cwd=main_repo)
+    write_local(main_repo, json.dumps({"version": 1}))
+
+    for args in (["status"], ["check"]):
+        lines = run(args, cwd=main_repo)["out"].splitlines()
+        shared_at = lines.index(PRESENT_LINE)
+        assert lines[shared_at + 1] == LOCAL_PRESENT_LINE, lines
+
+
+@pytest.mark.parametrize("form", LOCAL_BROKEN_FORMS)
+def test_unreadable_local_declaration_is_reported(main_repo: Path, form: str) -> None:
+    """AC19: 読めない個人の宣言は status と check の両方が同じ行で伝える。"""
+    run(["init"], cwd=main_repo)
+    make_broken_local(main_repo, form)
+
+    status = run(["status"], cwd=main_repo)
+    check = run(["check"], cwd=main_repo)
+
+    assert LOCAL_UNREADABLE_LINE in status["out"], status["out"]
+    assert LOCAL_UNREADABLE_LINE in check["out"], check["out"]
+    assert check["rc"] == 0, check
+
+
+@pytest.mark.parametrize("form", LOCAL_BROKEN_FORMS)
+def test_unreadable_local_declaration_keeps_the_check_exit_code(main_repo: Path, form: str) -> None:
+    """AC19 / AC23: check の終了コードは共有の宣言の状態だけで決まる。"""
+    make_broken_local(main_repo, form)
+    assert run(["check"], cwd=main_repo)["rc"] == 2
+
+    write_declaration(main_repo, "{ not json")
+    assert run(["check"], cwd=main_repo)["rc"] == 3
+
+    write_declaration(main_repo, json.dumps({"version": 1}))
+    assert run(["check"], cwd=main_repo)["rc"] == 0
+
+
+def test_ignored_keys_are_listed_in_one_line(main_repo: Path) -> None:
+    """AC21: 反映しない項目が 1 行に並ぶ。version と $schema は並ばない。"""
+    run(["init"], cwd=main_repo)
+    write_local(
+        main_repo,
+        json.dumps(
+            {
+                "$schema": "https://example.com/worktree.schema.json",
+                "version": 1,
+                "base_branch": "main",
+                "guard": {"allow_paths": ["/"]},
+                "testenv": {"port_band": [40000, 40999], "expose": {"enabled": True}},
+            }
+        ),
+    )
+
+    for args in (["status"], ["check"]):
+        out = run(args, cwd=main_repo)["out"]
+        assert "個人の宣言で反映しない項目: base_branch, guard, testenv.expose" in out, out
+        assert "version" not in out, out
+        assert "$schema" not in out, out
+
+
+def test_no_ignored_line_when_everything_applies(main_repo: Path) -> None:
+    """AC21: 反映しない項目が無いときは行を足さない。"""
+    run(["init"], cwd=main_repo)
+    write_local(main_repo, json.dumps({"version": 1, "follow_branch": True}))
+
+    for args in (["status"], ["check"]):
+        assert local_lines(run(args, cwd=main_repo)["out"]) == [LOCAL_PRESENT_LINE]
+
+
+def test_local_only_declaration_is_unused(main_repo: Path) -> None:
+    """AC22: 共有の宣言が無く個人の宣言だけがあるとき、check は 2 で status が伝える。"""
+    write_local(main_repo, json.dumps({"version": 1}))
+
+    status = run(["status"], cwd=main_repo)
+    check = run(["check"], cwd=main_repo)
+
+    assert LOCAL_UNUSED_LINE in status["out"], status["out"]
+    assert check["rc"] == 2, check
+
+
+def test_local_declaration_is_unused_when_the_shared_one_is_unreadable(main_repo: Path) -> None:
+    """AC23: 共有の宣言が読めないときは、個人の宣言の状態によらず 3。"""
+    write_declaration(main_repo, "{ not json")
+    write_local(main_repo, json.dumps({"version": 1}))
+
+    status = run(["status"], cwd=main_repo)
+    check = run(["check"], cwd=main_repo)
+
+    assert LOCAL_UNUSED_LINE in status["out"], status["out"]
+    assert check["rc"] == 3, check
+
+
+def test_init_creates_the_ndf_gitignore(main_repo: Path) -> None:
+    """AC24: init が .ndf/.gitignore を作り、個人の宣言だけを追跡から外す。"""
+    result = run(["init"], cwd=main_repo)
+
+    assert result["rc"] == 0, result
+    gitignore = main_repo / ".ndf" / ".gitignore"
+    assert gitignore.exists(), "init が .ndf/.gitignore を作っていない"
+    assert "worktree.local.json" in gitignore.read_text(encoding="utf-8")
+    assert ignored(main_repo, ".ndf/worktree.local.json") == 0
+    assert ignored(main_repo, ".ndf/worktree.json") == 1
+
+
+def ignored(repo: Path, path: str) -> int:
+    return subprocess.run(
+        ["git", "check-ignore", "-q", path],
+        cwd=str(repo), capture_output=True, text=True,
+    ).returncode
+
+
+def test_init_does_not_overwrite_an_existing_ndf_gitignore(main_repo: Path) -> None:
+    """AC25: 既にある .ndf/.gitignore は書き換えない。"""
+    (main_repo / ".ndf").mkdir()
+    gitignore = main_repo / ".ndf" / ".gitignore"
+    body = "# 利用者が書いた内容\nlocal-notes\n"
+    gitignore.write_text(body, encoding="utf-8")
+
+    result = run(["init"], cwd=main_repo)
+
+    assert result["rc"] == 0, result
+    assert gitignore.read_text(encoding="utf-8") == body
+
+
+def test_status_asks_to_register_an_untracked_local_declaration(main_repo: Path) -> None:
+    """AC26: 個人の宣言が追跡から外れていないとき、status が登録の案内を出す。"""
+    write_declaration(main_repo, json.dumps({"version": 1}))
+    write_local(main_repo, json.dumps({"version": 1}))
+
+    status = run(["status"], cwd=main_repo)
+    check = run(["check"], cwd=main_repo)
+
+    assert LOCAL_REGISTER_LINE in status["out"], status["out"]
+    assert LOCAL_REGISTER_LINE not in check["out"], "check は登録の案内を出さない"
+
+
+def test_status_omits_the_registration_line_once_ignored(main_repo: Path) -> None:
+    run(["init"], cwd=main_repo)
+    write_local(main_repo, json.dumps({"version": 1}))
+
+    status = run(["status"], cwd=main_repo)
+
+    assert LOCAL_REGISTER_LINE not in status["out"], status["out"]
+
+
+def test_no_local_lines_without_the_file(main_repo: Path) -> None:
+    """AC28: 個人の宣言が無いときは行を足さない。"""
+    run(["init"], cwd=main_repo)
+
+    for args in (["status"], ["check"]):
+        assert local_lines(run(args, cwd=main_repo)["out"]) == []

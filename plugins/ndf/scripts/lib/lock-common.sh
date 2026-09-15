@@ -131,13 +131,17 @@ ndf_lock_release() {
   return 0
 }
 
-# 生きている持ち主がロックを握っていれば 0 を返す。
+# ロックが握られていれば 0 を返す。**「握られている」は「陳腐化していない」と同じ
+# 意味である。** 取得の側（`ndf_lock_acquire`）が捨ててよいと読むロックを、ここが
+# 握られていると読むと、持ち主を書く前に落ちたロックが時間が経っても対象へ戻らない
+# （#312）。判定の規則は `_ndf_lock_is_stale` の 1 か所に置き、ここはその否定だけを返す。
+#
+# 作った直後の `pid` の無いロックは 0 になる。取得の途中にも `pid` の無い時間があり、
+# 落ちた持ち主のものと区別できない。5 分を過ぎたものだけが 1 へ変わる。
 ndf_lock_is_held() {
-  local dir="${1:-}" owner
+  local dir="${1:-}"
   [ -n "$dir" ] && [ -d "$dir" ] || return 1
-  owner=$(cat "$dir/pid" 2>/dev/null)
-  [ -n "$owner" ] || return 0
-  kill -0 "$owner" 2>/dev/null
+  ! _ndf_lock_is_stale "$dir" "$(cat "$dir/token" 2>/dev/null)"
 }
 
 # **`set -C` が効かないシェルで読み込まれたときは、取得できなかったものとして扱う。**

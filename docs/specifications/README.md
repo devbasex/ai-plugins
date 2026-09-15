@@ -12,6 +12,8 @@
 | [ndf-workflow-blockers.md](ndf-workflow-blockers.md) | 工程が止まる 2 か所の直しと push の退避。手順は各 Skill の SKILL.md が正 |
 | [ndf-documentation-mode.md](ndf-documentation-mode.md) | ビジネス文書のワークフロー（`documentation` モード）。3 つの軸と 2 つの関門。手順は各 Skill の `SKILL.md` が正 |
 | [doc-consistency-checks.md](doc-consistency-checks.md) | リンクの検査（見出しへの参照・`issues/` の走査・インラインコード）と、版と配布の正本の検査 J（版数の例を例どうしで比べる規則）。書き方は正本と検査スクリプトが正 |
+| [ndf-worktree-declaration-and-entry-points.md](ndf-worktree-declaration-and-entry-points.md) | 宣言を共有と個人に分ける重ね合わせ、追従を既定で止めること、読めない宣言と `init` の終了コード、編集の案内が読む書き込み先の抽出。手順は `worktree` の SKILL.md と `references/declaration.md` が正 |
+| [ndf-testenv-lock-and-registry.md](ndf-testenv-lock-and-registry.md) | テスト環境の排他の判定を陳腐化の規則へ揃えたこと、台帳へ書けなかったときの扱い。手順は `worktree` の `references/test-execution.md` が正 |
 | [cross-review-evidence-based.md](cross-review-evidence-based.md) | 証拠ベースのレビューと効果の測定。状態ファイルの契約と決定の理由。手順は `cross-review` の `SKILL.md` が正 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。

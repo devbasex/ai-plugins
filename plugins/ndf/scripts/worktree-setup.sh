@@ -36,9 +36,18 @@ command -v git >/dev/null 2>&1 || { printf '%s\n' "git が要ります" >&2; exi
 command -v jq >/dev/null 2>&1 || { printf '%s\n' "jq が要ります" >&2; exit 1; }
 
 MAIN_DIR=$(wt_main_dir) || { printf '%s\n' "git のリポジトリの中で実行してください" >&2; exit 1; }
-DECLARATION_FILE="$MAIN_DIR/.ndf/worktree.json"
+DECLARATION_FILE="$MAIN_DIR/$WT_DECLARATION_FILE"
+# 個人の宣言を追跡から外す登録。宣言と同じディレクトリで完結させ、根の .gitignore の
+# 既存の内容と並びに触れない（#495 の決定 15）。
+NDF_GITIGNORE_FILE="$MAIN_DIR/.ndf/.gitignore"
 
 SCHEMA_URL="https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/ndf/skills/worktree/schemas/worktree.schema.json"
+
+# check の各行に付く注記。意味（宣言由来・既定ブランチへの退避・退避先不明）を
+# 名前で表す。文言を変えるときはここだけを直す。
+readonly NOTE_DECLARED="（宣言）"
+readonly NOTE_DEFAULT_BRANCH="（未宣言。既定ブランチ）"
+readonly NOTE_UNKNOWN_FALLBACK="不明（origin/HEAD が未設定）"
 
 # --- init -------------------------------------------------------------------
 
@@ -76,14 +85,50 @@ JSON
   mv "$tmp" "$DECLARATION_FILE" 2>/dev/null || { rm -f "$tmp"; return 1; }
 }
 
-do_init() {
-  refuse_symlink || return 1
-
-  if [ -e "$DECLARATION_FILE" ] && [ "$FORCE" = 0 ]; then
-    # **上書きしない。** 書き加えた内容を消さないため。
-    printf '宣言ファイルは既にあります: %s\n' "${DECLARATION_FILE#"$MAIN_DIR"/}"
+# 個人の宣言を追跡から外す `.ndf/.gitignore` を作る。**既にあれば触らない。**
+# 書き加えた内容を消さないためで、symlink もたどらずにそのまま残す。
+# 書き方は宣言と同じく、同じディレクトリの一時ファイルへ書いてから名前を付け替える。
+write_local_gitignore() {
+  local dir tmp
+  # 壊れた symlink は `[ -e ]` が偽になる。`mv` は symlink をたどらずに置き換えるが、
+  # 利用者が置いたものを消さないため `[ -L ]` でも触らない。
+  if [ -e "$NDF_GITIGNORE_FILE" ] || [ -L "$NDF_GITIGNORE_FILE" ]; then
     return 0
   fi
+  dir=$(dirname "$NDF_GITIGNORE_FILE")
+  tmp=$(mktemp "$dir/.gitignore.XXXXXX" 2>/dev/null) || return 1
+  cat >"$tmp" <<EOS
+# 個人の宣言。各自の機械の値を書き、コミットしない（worktree Skill の references/declaration.md）
+${WT_DECLARATION_LOCAL_FILE##*/}
+EOS
+  mv "$tmp" "$NDF_GITIGNORE_FILE" 2>/dev/null || { rm -f "$tmp"; return 1; }
+}
+
+do_init() {
+  # --force が無ければ、書く前に宣言の状態を読む。状態は status / check と同じ関数で
+  # 決める（基準を書き写すと、同じ宣言を別の状態として報告する経路が再び生まれる）。
+  # refuse_symlink より前に置くのは、読むだけの枝ではリポジトリの外を書き換えないため。
+  # 後に置くと、読める宣言を指す symlink で「symlink です」と断ってしまう。
+  if [ "$FORCE" = 0 ]; then
+    case "$(wt_declaration_state "$MAIN_DIR")" in
+      present)
+        # **上書きしない。** 書き加えた内容を消さないため。
+        printf '宣言ファイルは既にあります: %s\n' "${DECLARATION_FILE#"$MAIN_DIR"/}"
+        return 0
+        ;;
+      unreadable)
+        # 読めない宣言は「既にある」ではない。運用は宣言を読めないと何もしないため、
+        # 用意できなかったとして 1 で終わる。直すか消すかは利用者が決める。--force は
+        # 形によって結果が分かれる（ディレクトリは #628）ため勧めない。
+        print_declaration_line unreadable >&2
+        printf '中身を直すか、書き加えた内容が要らなければ %s を消してから、もう一度 init を実行してください\n' \
+          "${DECLARATION_FILE#"$MAIN_DIR"/}" >&2
+        return 1
+        ;;
+    esac
+  fi
+
+  refuse_symlink || return 1
 
   write_declaration || { printf '%s\n' "宣言ファイルを書けませんでした" >&2; return 1; }
 
@@ -93,18 +138,28 @@ do_init() {
     return 1
   }
 
+  # 追跡から外す登録が書けなくても、宣言そのものは作れている。init の目的は果たした
+  # ため終了コードは変えず、気づけるように理由だけを標準エラーへ出す。
+  write_local_gitignore || printf '%s\n' \
+    "${NDF_GITIGNORE_FILE#"$MAIN_DIR"/} を書けませんでした。個人の宣言を使うなら手で登録してください" >&2
+
   cat <<EOS
 宣言ファイルを作りました: ${DECLARATION_FILE#"$MAIN_DIR"/}
 
-これで、主ディレクトリの編集時の案内と、セッション開始時の逸脱検知・ブランチ追従が
-動きます。案内を出さないパスは組み込みの既定（issues/ docs/ 各ランタイムの設定
-.serena/ .ndf/ .gitignore）を使います。
+これで、主ディレクトリの編集時の案内と、セッション開始時の逸脱検知が動きます。
+案内を出さないパスは組み込みの既定（issues/ docs/ 各ランタイムの設定 .serena/ .ndf/
+.gitignore）を使います。主ディレクトリのブランチは既定では動かしません。稼働中の
+作業ツリーへ追従させるなら follow_branch: true を足します。
 
 **このファイルはコミットしてください。** リポジトリの設定であり、他の開発者にも
 同じ運用が要ります。
 
 ローカル環境での動作検証やテスト実行の分離を使うときは、localenv / testenv を
 足します。書き方は worktree Skill の references/declaration.md にあります。
+
+機械ごとに違う値（ポートの帯・持ち込み物・追従の有無）は ${WT_DECLARATION_LOCAL_FILE}
+へ書きます。**このファイルはコミットしません。** ${NDF_GITIGNORE_FILE#"$MAIN_DIR"/} で
+追跡から外してあります。
 EOS
 }
 
@@ -120,10 +175,51 @@ print_declaration_line() {
   esac
 }
 
+# 個人の宣言の行を出す。**ファイルが無いときは何も出さない**（#495 の決定 16）。
+# 個人の宣言を使わない利用者の出力を変えないためで、既存の出力に依存する手順と
+# テストがこの変更で壊れない。**status と check は同じ行を出す。**
+print_local_declaration_lines() {
+  local state list= name
+  state=$(wt_declaration_local_state "$MAIN_DIR") || return 0
+  case "$state" in
+    absent) return 0 ;;
+    present) printf '個人の宣言: あり（%s）\n' "$WT_DECLARATION_LOCAL_FILE" ;;
+    unreadable)
+      printf '個人の宣言: 読めません（版が未対応か、JSON として壊れています。共有の宣言だけで動きます）\n'
+      return 0
+      ;;
+    *)
+      printf '個人の宣言: 使っていません（共有の宣言ファイルが無いか、読めません）\n'
+      return 0
+      ;;
+  esac
+
+  # 反映しなかった項目を 1 行へ並べる。無ければ行を足さない。
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    if [ -n "$list" ]; then
+      list="$list, $name"
+    else
+      list="$name"
+    fi
+  done < <(wt_declaration_local_ignored "$MAIN_DIR")
+  [ -n "$list" ] && printf '個人の宣言で反映しない項目: %s\n' "$list"
+  return 0
+}
+
 do_status() {
   printf '主ディレクトリ: %s\n' "$MAIN_DIR"
 
   print_declaration_line "$(wt_declaration_state "$MAIN_DIR")"
+  print_local_declaration_lines
+
+  # 追跡されたままの個人の宣言は、各自の値が差分に載る。**status だけが出す。**
+  # check は分岐に使われるため、終了コードに現れない行を増やさない。
+  if [ -e "$MAIN_DIR/$WT_DECLARATION_LOCAL_FILE" ] &&
+     ! git -C "$MAIN_DIR" check-ignore -q "$WT_DECLARATION_LOCAL_FILE" 2>/dev/null; then
+    printf '個人の宣言の登録: なし。%s へ %s を足してください\n' \
+      "${NDF_GITIGNORE_FILE#"$MAIN_DIR"/}" "${WT_DECLARATION_LOCAL_FILE##*/}"
+  fi
 
   if git -C "$MAIN_DIR" check-ignore -q "$WT_WORKTREE_DIR/" 2>/dev/null; then
     printf '%s/ の登録: あり\n' "$WT_WORKTREE_DIR"
@@ -152,11 +248,11 @@ print_branch_line() {
     name=$(_wt_declaration_string "$decl" "$key")
   fi
   if [ -n "$name" ]; then
-    printf '%s: %s（宣言）\n' "$label" "$name"
+    printf '%s: %s%s\n' "$label" "$name" "$NOTE_DECLARED"
   elif fallback=$(wt_default_branch "$MAIN_DIR"); then
-    printf '%s: %s（未宣言。既定ブランチ）\n' "$label" "$fallback"
+    printf '%s: %s%s\n' "$label" "$fallback" "$NOTE_DEFAULT_BRANCH"
   else
-    printf '%s: 不明（origin/HEAD が未設定）\n' "$label"
+    printf '%s: %s\n' "$label" "$NOTE_UNKNOWN_FALLBACK"
   fi
 }
 
@@ -166,6 +262,7 @@ do_check() {
   [ "$state" = present ] && decl=$(wt_declaration "$MAIN_DIR")
 
   print_declaration_line "$state"
+  print_local_declaration_lines
   print_branch_line "開発の起点" base_branch "$decl"
   print_branch_line "本番のチャネル" production_branch "$decl"
 

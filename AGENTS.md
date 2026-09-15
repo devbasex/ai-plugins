@@ -17,8 +17,8 @@
   **`develop`**（開発版チャネル）。`main`（正式版チャネル）へ進めるのは配布の工程だけ
   （「版と配布の方針」）
   - **起点は `.ndf/worktree.json` の `base_branch` が宣言する。** 作業ツリーの起点と、
-    主ディレクトリの追従先と、宛先の検査がこの宣言を読む。宣言が無いリポジトリは
-    既定ブランチのまま動く
+    宛先の検査がこの宣言を読む（`follow_branch: true` のときは主ディレクトリの追従先にも
+    なる）。宣言が無いリポジトリは既定ブランチのまま動く
   - **`--base develop` の付け忘れは継続的統合が塞ぐ。** `main` 宛の Pull Request は
     `develop` から出たものだけを通す（`scripts/check-pr-base.sh`）。判定は宣言に起点が
     書かれていて、そのブランチが origin にあるときだけ働く
@@ -125,7 +125,7 @@ ai-plugins/
 
 ## NDFプラグインについて
 
-**NDFプラグイン**は、このマーケットプレイスの主要プラグインです（v10.11.0）。plugin 名は全ランタイムで `ndf` を維持し、配布物は `plugins/ndf/` の1ディレクトリにまとまっています。
+**NDFプラグイン**は、このマーケットプレイスの主要プラグインです（v10.12.0）。plugin 名は全ランタイムで `ndf` を維持し、配布物は `plugins/ndf/` の1ディレクトリにまとまっています。
 - Skill の実体は `plugins/ndf/skills/` の1箇所。配布先は `plugins/ndf/manifests/*-skills.txt` が決める
 - Claude Code版は 8個の専門サブエージェント、公開Skills、PreToolUse/SessionStart/Stopフックを提供
 - Codex版は Codex向け公開Skillsと任意Slack通知hookを提供

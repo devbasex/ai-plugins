@@ -89,3 +89,36 @@ def test_missing_argument_fails(origin_repo: Path) -> None:
     )
     assert got.returncode == 2
     assert "使い方" in got.stdout + got.stderr
+
+
+# --- 個人の宣言では判定が変わらない（#495 の AC17） --------------------------
+
+
+def declare_local(repo: Path, body: dict) -> None:
+    """追跡しない個人の宣言 `.ndf/worktree.local.json` を書く。"""
+    ndf = repo / ".ndf"
+    ndf.mkdir(exist_ok=True)
+    (ndf / "worktree.local.json").write_text(json.dumps(body), encoding="utf-8")
+
+
+LOCAL_BASE_BRANCH = {"version": 1, "base_branch": "main"}
+
+
+def test_local_declaration_does_not_change_the_verdict(origin_repo: Path) -> None:
+    """起点は共有の宣言だけが決める。個人の宣言で検査の宛先は動かない。"""
+    declare(origin_repo, {"version": 1, "base_branch": "develop"})
+    push_branch(origin_repo, "develop")
+    declare_local(origin_repo, LOCAL_BASE_BRANCH)
+
+    assert guard(origin_repo, "develop").returncode == 0
+    got = guard(origin_repo, "feature/x")
+    assert got.returncode != 0
+    assert "develop" in got.stdout + got.stderr
+
+
+def test_local_declaration_alone_does_not_enable_the_guard(origin_repo: Path) -> None:
+    """共有の宣言が無ければ検査しない。個人の宣言だけでは有効にならない。"""
+    declare_local(origin_repo, LOCAL_BASE_BRANCH)
+    push_branch(origin_repo, "main2")
+
+    assert guard(origin_repo, "feature/x").returncode == 0
