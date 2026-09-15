@@ -19,24 +19,26 @@
 
 set -euo pipefail
 
-RUNTIME=${1:?runtime required}
-STATE_PR=${2:?STATE_PR required}
-ROUND=${3:?ROUND required}
-case "$RUNTIME" in
-  claude|codex|agy|kiro) ;;
-  *) echo "未知のランタイムです: $RUNTIME" >&2; exit 1 ;;
-esac
-
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=_tmpdir.sh
 . "$SCRIPT_DIR/_tmpdir.sh"
-TMP_DIR=$(tmpdir)
 
-STATE=$TMP_DIR/cross-review-pr$STATE_PR-state.json
-[ -s "$STATE" ] || { echo "state.json not found: $STATE" >&2; exit 1; }
+load_context() {
+  RUNTIME=${1:?runtime required}
+  STATE_PR=${2:?STATE_PR required}
+  ROUND=${3:?ROUND required}
+  case "$RUNTIME" in
+    claude|codex|agy|kiro) ;;
+    *) echo "未知のランタイムです: $RUNTIME" >&2; exit 1 ;;
+  esac
+  TMP_DIR=$(tmpdir)
+  STATE=$TMP_DIR/cross-review-pr$STATE_PR-state.json
+  [ -s "$STATE" ] || { echo "state.json not found: $STATE" >&2; exit 1; }
+  WORKTREE=$(jq -r '.worktree_path' "$STATE")
+  PR=$(jq -r '.current_pr' "$STATE")
+}
 
-WORKTREE=$(jq -r '.worktree_path' "$STATE")
-PR=$(jq -r '.current_pr' "$STATE")
+load_context "$@"
 
 STEM=$TMP_DIR/$RUNTIME-critique-pr$STATE_PR
 # **前のラウンドの pid ファイルを先に捨てる。** 監視は `<stem>.pid` の有無で起動を
@@ -50,6 +52,7 @@ rm -f "$STEM.pid"
 # **`verification` を落とさない。** 反証は実行検証の後にあり、担当は直前に実行した
 # コマンド・終了コード・再現の結果を読んだうえで賛否を決める（`docs/06-evidence.md` の
 # 「走らせる順序」）。射影から外すと、担当は結果を見ないまま賛否を返すことになる。
+select_targets() {
 TARGETS=$(jq -r --arg agent "$RUNTIME" --argjson round "$ROUND" '
   [ (.review_findings // [])[]
     | select(.round == $round)
@@ -62,10 +65,14 @@ if [ "$(printf '%s' "$TARGETS" | jq 'length')" = "0" ]; then
   echo "⏭ $RUNTIME: 反証の対象がありません（すべて自分の指摘）"
   exit 0
 fi
+}
+
+select_targets
 
 OUT=$TMP_DIR/$RUNTIME-critique-pr$STATE_PR-round$ROUND.json
 rm -f "$OUT"
 
+render_critique_prompt() {
 PROMPT=$STEM-prompt.md
 cat > "$PROMPT" <<EOF
 # 反証: PR #$PR round $ROUND
@@ -129,10 +136,14 @@ $TARGETS
 - **対象の全件へ 1 つずつ返す。** 判断できないものは \`insufficient_evidence\` にする
 - 投稿は行わない。ファイルを書くだけである
 EOF
+}
+
+render_critique_prompt
 
 # 実行時間の上限。既定は工程名 `critique` を渡し、共通層が上限の表から「監視の上限 + 120 秒」を
 # 導く。`NDF_CRITIQUE_PRINT_TIMEOUT` はそれより短くできない。短いと CLI が監視より先に
 # 打ち切り、結果ファイルが残らない（#598 / #537）。
+resolve_print_timeout() {
 PRINT_TIMEOUT=critique
 case "${NDF_CRITIQUE_PRINT_TIMEOUT:-}" in
   '') ;;
@@ -147,6 +158,9 @@ case "${NDF_CRITIQUE_PRINT_TIMEOUT:-}" in
       PRINT_TIMEOUT=$NDF_CRITIQUE_PRINT_TIMEOUT
     fi ;;
 esac
+}
+
+resolve_print_timeout
 
 # **接頭辞は絶対パスで渡す。** `launch-cli.sh` は作業ツリーへ `cd` してから
 # `<stem>.pid` と `<stem>-stdout.log` を作る。相対の値を渡すと、作業ツリーの直下に

@@ -136,7 +136,7 @@ TEMPLATE=$PROMPTS/$PHASE.md
 # **渡すのは進行中の適用ラウンド（群）の項目だけである。** 群の中の項目は書き換える
 # ファイルが重ならず、まとめて 1 コミットにできる。群をまたいで渡すと、まだ適用して
 # いない項目まで 1 コミットへ入れさせることになる。
-collect_prompt_materials() {
+collect_round_materials() {
 ITEMS_JSON='[]'
 APPLY_ROUND=0
 # ラウンドの種類。適用と修正では、項目が改善項目かテスト項目かで手順が変わる。
@@ -149,6 +149,9 @@ if [ "$PHASE" = "apply" ] || [ "$PHASE" = "fix" ] || [ "$PHASE" = "judge-test-ch
     '[.items[] | select(.round == $r) | select($a == 0 or (.apply_round // 1) == $a)]' \
     "$STATE")
 fi
+}
+
+collect_excluded_items() {
 # 見送った提案は「対象外」として渡し、毎ラウンド同じ提案が出続けるのを防ぐ。
 # **見送りの記録は種類で形が違う。** 改善項目は `path#symbol`（兆候）、テスト項目は
 # `target`（固定する経路）で指す。null をそのまま並べると読めない一覧になる。
@@ -158,7 +161,9 @@ EXCLUDED=$(jq -r '[.deferred_items[]
     else "- \(.path)#\(.symbol) （\(.smell)）: \(.defer_reason // "見送り")"
     end] | join("\n")' "$STATE")
 [ -n "$EXCLUDED" ] || EXCLUDED="（なし）"
+}
 
+build_skill_block() {
 SKILL_BLOCK="（この実行では手順書を配置していません）"
 if [ -n "$SKILL_BASE" ]; then
   SKILL_BLOCK=$(cat <<SKILL_EOF
@@ -173,26 +178,24 @@ if [ -n "$SKILL_BASE" ]; then
 SKILL_EOF
 )
 fi
-
-export RF_REPO=$REPO RF_PR=$PR RF_ROUND=${ROUND:-} RF_RUNTIME=$RUNTIME
-export RF_MODEL=${MODEL:-default} RF_WORKDIR=$WORKDIR RF_STEM=$STEM
-export RF_SCOPE=$SCOPE RF_HEAD_BRANCH=$HEAD_BRANCH RF_BASE_BRANCH=$BASE_BRANCH
-export RF_BASELINE_TEST=$BASELINE_TEST RF_MAX_ITEMS=$MAX_ITEMS
-export RF_SKILL_BLOCK=$SKILL_BLOCK RF_EXCLUDED=$EXCLUDED RF_SKILL_BASE=$SKILL_BASE
+}
 
 # 語彙の許容値。**手順書を読ませるだけでは足りない。** 手順書の見出しは日本語なので、
 # 「語彙に限定する」とだけ書くと読んだ側が日本語を語彙と解釈し、語彙外の降格規則で
 # 全件が見送りになる（実測）。検証側が持つ集合を状態ファイル経由で受け取り、
 # **許容値をそのまま列挙する**。
+collect_refactoring_vocabulary() {
 VOCAB_SMELLS=$(jq -r '(.vocabulary.smells // {}) | to_entries[] | "- `\(.key)` — \(.value)"' "$STATE")
 VOCAB_TECHNIQUES=$(jq -r '(.vocabulary.techniques // {}) | to_entries[] | "- `\(.key)` — \(.value)"' "$STATE")
 VOCAB_SEVERITIES=$(jq -r '(.vocabulary.severities // []) | map("`" + . + "`") | join(" / ")' "$STATE")
 [ -n "$VOCAB_SMELLS" ] || VOCAB_SMELLS="（状態ファイルに語彙がありません。手順書の語彙に従うこと）"
 [ -n "$VOCAB_TECHNIQUES" ] || VOCAB_TECHNIQUES="（同上）"
 [ -n "$VOCAB_SEVERITIES" ] || VOCAB_SEVERITIES="\`critical\` / \`major\` / \`minor\`"
+}
 
 # テスト整備ラウンドの語彙。**構造改善と同じく許容値をそのまま列挙する。**
 # 手順書を読ませるだけでは足りず、語彙外の値が返ると全件が対象外になる。
+collect_test_vocabulary() {
 VOCAB_CASES=$(jq -r '(.test_vocabulary.cases // {}) | to_entries[] | "- `\(.key)` — \(.value)"' "$STATE")
 VOCAB_LEVELS=$(jq -r '(.test_vocabulary.levels // {}) | to_entries[] | "- `\(.key)` — \(.value)"' "$STATE")
 [ -n "$VOCAB_CASES" ] || VOCAB_CASES="- \`normal\` — 代表的な正常系
@@ -204,7 +207,20 @@ VOCAB_LEVELS=$(jq -r '(.test_vocabulary.levels // {}) | to_entries[] | "- `\(.ke
 - \`contract\` — 契約
 - \`e2e\` — 端から端まで"
 export RF_VOCAB_CASES=$VOCAB_CASES RF_VOCAB_LEVELS=$VOCAB_LEVELS
+}
 
+collect_prompt_materials() {
+collect_round_materials
+collect_excluded_items
+build_skill_block
+collect_refactoring_vocabulary
+collect_test_vocabulary
+
+export RF_REPO=$REPO RF_PR=$PR RF_ROUND=${ROUND:-} RF_RUNTIME=$RUNTIME
+export RF_MODEL=${MODEL:-default} RF_WORKDIR=$WORKDIR RF_STEM=$STEM
+export RF_SCOPE=$SCOPE RF_HEAD_BRANCH=$HEAD_BRANCH RF_BASE_BRANCH=$BASE_BRANCH
+export RF_BASELINE_TEST=$BASELINE_TEST RF_MAX_ITEMS=$MAX_ITEMS
+export RF_SKILL_BLOCK=$SKILL_BLOCK RF_EXCLUDED=$EXCLUDED RF_SKILL_BASE=$SKILL_BASE
 export RF_ITEMS=$ITEMS_JSON RF_TMP_DIR=$TMP_DIR
 export RF_APPLY_ROUND=$APPLY_ROUND
 RF_ROUND_NOTE="この適用ラウンドの項目は**構造改善**です。振る舞いを変えずに構造だけを直します。"
