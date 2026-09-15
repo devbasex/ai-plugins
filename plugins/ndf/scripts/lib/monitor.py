@@ -700,104 +700,6 @@ def _update_progress(
     return last_progress_size, last_progress
 
 
-def _await_pid(
-    paths: AgentPaths, status: AgentStatus, log_prefix: str, agent: str
-) -> "AgentStatus | int":
-    """pidfile を待ち、pid を返す。起動失敗なら PIDFILE_BAD の AgentStatus を返す。
-
-    起動チェック: 30 秒待っても pidfile が無ければ起動失敗とみなす。
-    """
-    grace_end = time.monotonic() + 30
-    while time.monotonic() < grace_end:
-        if paths.pidfile.exists():
-            break
-        time.sleep(2)
-    pid = _read_pidfile(paths.pidfile)
-    if pid is None:
-        return _finish_monitor(
-            status,
-            ("PIDFILE_BAD", 6, f"pidfile not found: {paths.pidfile}"),
-            (log_prefix, agent),
-        )
-    status.pid = pid
-    return pid
-
-
-def _validate_cmdline(
-    paths: AgentPaths, status: AgentStatus, pid: int, agent: str,
-    log_prefix: str,
-) -> "tuple[AgentStatus | None, bool]":
-    """生存中プロセスの cmdline を検証する。`(終了状態 or None, 検証できたか)`。
-
-    cmdline が agent と一致しなければ PID 再利用とみなし、kill して PIDFILE_BAD を返す。
-    /proc が読めない環境（None）は検証不能として扱い、検証済みには倒さない。
-    """
-    cmdline_ok = _pid_cmdline_matches(pid, agent)
-    if cmdline_ok is False:
-        _kill_pid(pid)
-        return _finish_monitor(
-            status,
-            ("PIDFILE_BAD", 6,
-             f"pid {pid} cmdline does not contain '{agent}' (stale pidfile?)"),
-            (log_prefix, agent),
-        ), False
-    return None, cmdline_ok is True
-
-
-def _judge_timeout(
-    status: AgentStatus, pid: int, alive: bool, elapsed: float, timeout: int,
-    log_prefix: str, agent: str,
-) -> "AgentStatus | None":
-    """hard timeout を超えていれば kill して TIMEOUT を返す。"""
-    if elapsed < timeout:
-        return None
-    if alive:
-        _kill_pid(pid)
-    return _finish_monitor(
-        status,
-        ("TIMEOUT", 2, f"hard timeout {timeout}s reached (pid {pid})"),
-        (log_prefix, agent),
-    )
-
-
-def _judge_exited(
-    paths: AgentPaths, status: AgentStatus, require_result: bool,
-    log_prefix: str, agent: str,
-) -> AgentStatus:
-    """プロセス終了後に result.json を確認して OK / NO_RESULT を返す。"""
-    status.result_exists = paths.result.exists() and paths.result.stat().st_size > 0
-    if status.result_exists or not require_result:
-        outcome = (
-            "OK",
-            0,
-            f"process exited; sentinel={status.sentinel_seen}; "
-            f"result_exists={status.result_exists}",
-        )
-    else:
-        outcome = (
-            "NO_RESULT",
-            3,
-            f"process exited but result.json missing: {paths.result}",
-        )
-    return _finish_monitor(status, outcome, (log_prefix, agent))
-
-
-def _judge_stall(
-    status: AgentStatus, pid: int, alive: bool, stall_timeout: int,
-    last_progress_size: int, log_prefix: str, agent: str,
-) -> "AgentStatus | None":
-    """ログの無進捗が stall_timeout を超えていれば kill して STALLED を返す。"""
-    if status.idle_seconds < stall_timeout:
-        return None
-    if alive:
-        _kill_pid(pid)
-    detail = (
-        f"no log progress for {stall_timeout}s "
-        f"(pid {pid}, last size {last_progress_size}B)"
-    )
-    return _finish_monitor(status, ("STALLED", 5, detail), (log_prefix, agent))
-
-
 def monitor_agent(
     agent: str,
     pr: int,
@@ -818,10 +720,21 @@ def monitor_agent(
     status = AgentStatus(agent=agent)
     started = time.monotonic()
 
-    pid = _await_pid(paths, status, log_prefix, agent)
-    if isinstance(pid, AgentStatus):
-        return pid
+    # 起動チェック: 30 秒待っても pidfile が無ければ起動失敗
+    grace_end = started + 30
+    while time.monotonic() < grace_end:
+        if paths.pidfile.exists():
+            break
+        time.sleep(2)
+    pid = _read_pidfile(paths.pidfile)
+    if pid is None:
+        return _finish_monitor(
+            status,
+            ("PIDFILE_BAD", 6, f"pidfile not found: {paths.pidfile}"),
+            (log_prefix, agent),
+        )
 
+    status.pid = pid
     # cmdline 検証 (PID 再利用対策) は **プロセスが生きていると確認できたときのみ** 行う。
     # 起動直後に既にプロセスが exit していると /proc/<pid> が消えるか、別プロセスに
     # 再利用されている可能性があり、ここで PIDFILE_BAD を返すと「完了している（result.json は出ている）」
@@ -868,18 +781,26 @@ def monitor_agent(
         if alive and not cmdline_validated:
             # cmdline 検証は alive 確認後に 1 回だけ。生きていない瞬間に proc/<pid> を読むと
             # ファイル不在で None 扱いになり判定不能のため。
-            bad, cmdline_validated = _validate_cmdline(
-                paths, status, pid, agent, log_prefix
-            )
-            if bad is not None:
-                return bad
+            cmdline_ok = _pid_cmdline_matches(pid, agent)
+            if cmdline_ok is False:
+                _kill_pid(pid)
+                return _finish_monitor(
+                    status,
+                    ("PIDFILE_BAD", 6, f"pid {pid} cmdline does not contain '{agent}' (stale pidfile?)"),
+                    (log_prefix, agent),
+                )
+            if cmdline_ok is True:
+                cmdline_validated = True
 
         # 2. hard timeout
-        timed_out = _judge_timeout(
-            status, pid, alive, elapsed, timeout, log_prefix, agent
-        )
-        if timed_out is not None:
-            return timed_out
+        if elapsed >= timeout:
+            if alive:
+                _kill_pid(pid)
+            return _finish_monitor(
+                status,
+                ("TIMEOUT", 2, f"hard timeout {timeout}s reached (pid {pid})"),
+                (log_prefix, agent),
+            )
 
         # 3. early error
         # 明確な致命 (FATAL) のみ kill する。曖昧パターン (生 Error: / Traceback) は
@@ -905,7 +826,21 @@ def monitor_agent(
 
         if not alive:
             # プロセス終了 — result.json を確認
-            return _judge_exited(paths, status, require_result, log_prefix, agent)
+            status.result_exists = paths.result.exists() and paths.result.stat().st_size > 0
+            if status.result_exists or not require_result:
+                outcome = (
+                    "OK",
+                    0,
+                    f"process exited; sentinel={status.sentinel_seen}; "
+                    f"result_exists={status.result_exists}",
+                )
+            else:
+                outcome = (
+                    "NO_RESULT",
+                    3,
+                    f"process exited but result.json missing: {paths.result}",
+                )
+            return _finish_monitor(status, outcome, (log_prefix, agent))
 
         # 4. stall detection (err.log / stdout.log / progress.log をモニタ。
         # agy は stdout 側だけ進捗が出るケースがあり、progress.log には
@@ -914,12 +849,16 @@ def monitor_agent(
         last_progress_size, last_progress = _update_progress(
             paths, status, last_progress_size, last_progress
         )
-        stalled = _judge_stall(
-            status, pid, alive, stall_timeout, last_progress_size,
-            log_prefix, agent,
-        )
-        if stalled is not None:
-            return stalled
+        if status.idle_seconds >= stall_timeout:
+            if alive:
+                _kill_pid(pid)
+            detail = (
+                f"no log progress for {stall_timeout}s "
+                f"(pid {pid}, last size {last_progress_size}B)"
+            )
+            return _finish_monitor(
+                status, ("STALLED", 5, detail), (log_prefix, agent)
+            )
 
         # poll 中の進捗ログ
         _emit_progress(log_prefix, agent, status)
