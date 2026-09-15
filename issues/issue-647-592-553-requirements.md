@@ -115,7 +115,7 @@
   `merge-fix` を呼ぶ。agy の結果が取り込まれ、`fix_rounds` が 1 になる
 - [ ] AC18: 修正の結果ファイルが無い状態で `merge-fix` を呼ぶと、終了コード 2 で終わり、`fix_rounds` が
   1 進む。`--max-fix-rounds` 回続けた後の `should-abandon` は終了コード 0（見送りへ移る）を返す
-- [ ] AC19: AC18 の直後に、`verify-round` を挟まず `merge-fix` をもう一度呼んでも、`fix_rounds` は進まない
+- [ ] AC19: AC18 の直後に、`verify-round` を挟まず `merge-fix` をもう一度呼んでも、`fix_rounds` は進まない。その間に修正の結果ファイルが現れても進まない
 
 ## 受け入れ条件（#553: 帰属行の後ろのトレーラー）
 
@@ -140,7 +140,7 @@
 ## 受け入れ条件（無進捗の打ち切り）
 
 - [ ] AC28: `init` の出力に `IMPL_STALL_TIMEOUT` が入り、値が `--test-timeout` の値 + 900 である
-  （既定で 1800）
+  （既定で 1800）。`--test-timeout` は 2700 以下を前提とする（超えると許容がハード上限 3600 を上回る）
 - [ ] AC29: `SKILL.md` の骨組みで、適用・修正・最終ゲートの修正の 3 つの `monitor.py` の呼び出しが
   `--stall-timeout "$IMPL_STALL_TIMEOUT"` と `--timeout 3600` を渡す
 - [ ] AC30: 適用・修正・最終ゲートの修正の雛形（`prompts/apply.md` / `fix.md` / `final-fix.md`）が進捗マーカーを

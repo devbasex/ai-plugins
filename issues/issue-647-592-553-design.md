@@ -95,7 +95,7 @@
 | `gate._final_fix_impl`（`gate.py:128` を置き換える） | 最終ゲートの修正担当 |
 
 置き場所を `rounds.py` にするのは、`apply.py` と `gate.py` の両方が読む層だからである（`commands` どうしの取り込みを作らない）。
- D-B が除外（#478）を足すとき、変える呼び出しは 1 か所で済む。`assignment.py` は変えない。
+D-B が除外（#478）を足すとき、変える呼び出しは 1 か所で済む。`assignment.py` は変えない。
 
 `setup.cmd_start_round`（`setup.py:467`）の `assignment.assign` は通さない。引くのは提案ラウンドの記録上の担当で、
 骨組みは適用の前に `next-apply-round` が返す群の担当で `IMPL` を上書きするため、この担当は CLI を起動しない。
@@ -151,6 +151,9 @@ git の標準の読み方でも取れる。
 雛形の進捗マーカーは、次に STALLED が出たときに担当が動いていたかを読むためにも足す。rf646 の agy のログは作業ツリーとともに消えており、
 この設計の時点では確かめられなかった（未確認 1）。
 
+**`--test-timeout` は 2700 以下を前提にする。** 超えると許容がハード上限 3600 を上回り、ハード上限で打ち切られる。ハード上限も同じ値から
+導く形は採らない。監視の `--timeout` と `launch-cli.sh` の `PRINT_TIMEOUT` を同時に変えることになり、適用の所要の実測も無い（未確認 7）。
+
 進捗マーカーだけで足りるとする形は採らない。テストの実行中はマーカーを書けない。 `MONITOR_STALL_AGY` などの環境変数に委ねる形も採らない。
 担当ごとに値を覚えさせることになり、cross-review にも効く。
 
@@ -173,7 +176,7 @@ git の標準の読み方でも取れる。
 ### 範囲へ入れたもの: `merge-fix` が提案ラウンドの担当を読む
 
 群の担当 agy、提案ラウンドの担当 codex で `agy-fix-r1-result.json` を置き、`cmd_merge_fix` を 3 回呼んだ。
- 3 回とも終了コード 2 で `❌ codex の結果ファイルがありません`、`fix_rounds` は 0 のままだった。 `merge-fix` は `entry["impl"]`（`converge.py:463`）を読み、
+3 回とも終了コード 2 で `❌ codex の結果ファイルがありません`、`fix_rounds` は 0 のままだった。 `merge-fix` は `entry["impl"]`（`converge.py:463`）を読み、
 骨組みは `launch-cli.sh "$IMPL" fix` で群の担当を起動する。
 
 ### #592: 採用 0 件で項目の無い群が開く
@@ -318,13 +321,7 @@ plugins/ndf/skills/cross-refactoring/
 | `impl` / `impl_model` | 既存 | 担当を替えたときに書き換える。**前の担当は `failed_attempts[].impl` に残る** | — |
 
 `impl` を書き換えても、どの担当がどの試行で失敗したかは `failed_attempts` から読める。群を取り消したときの見送りの理由（`deferred_items[].defer_reason`）は、
-次の形にする。
-
-```text
-実装担当が結果を残しませんでした（agy: stalled → codex: missing）
-```
-
-この理由は、改修計画の「見送った項目」の表にそのまま出る。
+`実装担当が結果を残しませんでした（agy: stalled → codex: missing）` の形にし、改修計画の「見送った項目」の表にそのまま出る。
 
 ラウンドの項目（`rounds[]`）は `fix_merged_keys` に `"<fix_attempts>:missing"` の形の鍵を足す（AC19）。
 
@@ -435,10 +432,10 @@ graph TD
 
 ### `merge-fix`
 
-担当は `current_group(entry)["impl"]`（無ければ `entry["impl"]`）から読む。`load_result` が読めなければ、
- `fix_merged_keys` に `"<fix_attempts>:missing"` があるときは何もせず 2 を返す。無ければ、
-範囲（`fix_base_sha`..HEAD）にコミットがあるときだけ `revert_unverified_range` で取り消す。続けて鍵を足し、
- `fix_rounds` を 1 進めて保存し、2 を返す。範囲を確定できないときの既存の扱い（`_resolve_fix_range`）と同じ形である。
+担当は `current_group(entry)["impl"]`（無ければ `entry["impl"]`）から読む。`fix_merged_keys` に `"<fix_attempts>:missing"` が
+あれば、結果ファイルを読まずに 2 を返す（`merge-apply` の決定 5 と同じ理由。欠落の後に遅れて書かれた結果を取り込まない）。
+無ければ `load_result` を呼び、読めなければ範囲（`fix_base_sha`..HEAD）にコミットがあるときだけ `revert_unverified_range` で
+取り消し、鍵を足し、`fix_rounds` を 1 進めて保存し、2 を返す。範囲を確定できないときの既存の扱い（`_resolve_fix_range`）と同じ形である。
 
 ## 非機能の実現方式
 
@@ -498,3 +495,4 @@ graph TD
 | 4 | 担当を替えた後の担当も結果を残さない割合 | 2 回目で救える群の数は測っていない。#662 の計測で `failed_attempts` を数えて見る | 配布後 |
 | 5 | Claude Code 以外の担当が帰属行を足すか | codex / agy / kiro のコミットで帰属行の段落を見ていない。決定 11 は誰が足しても同じに読む | 確かめなくてよい |
 | 6 | 帰属行を同じ段落に続ける指示に claude が従うか | 決定 12 は補助で、従わなくても決定 11 で検証は通る | 実装後の最初の実行 |
+| 7 | `--test-timeout` が 2700 を超える利用 | 適用・修正の所要を測っていない。#662 の計測で工程ごとの所要が取れたら、ハード上限を導く形を見直す | 配布後 |
