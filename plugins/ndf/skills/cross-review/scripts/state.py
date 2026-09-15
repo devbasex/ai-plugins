@@ -34,6 +34,7 @@ sys.path.insert(
 import assignment  # noqa: E402
 import auth  # noqa: E402
 import post_queue  # noqa: E402
+import run_metrics  # noqa: E402  実行の要約（#662）
 
 
 # ---------------- helpers ----------------
@@ -1337,6 +1338,18 @@ def _save(pr: int, state: dict[str, Any]) -> None:
     tmp = p.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
     tmp.replace(p)
+    # **保存のたびに実行の要約を書き直す**（#662 の決定 5）。失敗しても進行は止めない。
+    run_metrics.after_save(p, state, "cross-review", _summary_extra)
+
+
+def _summary_extra(path: pathlib.Path, state: dict[str, Any],
+                   launches: list[dict[str, Any]]) -> dict[str, Any]:
+    """cross-review の要約だけが持つ鍵。`measure.py` の出力をそのまま置く（決定 8）。"""
+    scripts = str(pathlib.Path(__file__).resolve().parent)
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    import measure
+    return {"measure": measure.measure(state)}
 
 
 def _sh(cmd: list[str], check: bool = True) -> str:
@@ -4198,6 +4211,9 @@ def cmd_report(args: argparse.Namespace) -> None:
     _print_sweep(st)
     _print_deferred_nits(st)
     _print_rejected(st)
+    # **最後の行に置く**（#662 の AC23）。作業ツリーを消した後に要約を探す手がかりになる。
+    print()
+    print(run_metrics.report_line(_state_path(pr), st, "cross-review", _summary_extra))
 
 
 # ---------------- main ----------------

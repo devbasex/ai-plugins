@@ -8,6 +8,8 @@
    すると、テストの 9 割以上が消えても終了コード 0 で終わる
 3. テストの実行中だけ git の全体設定と system の設定を空へ向ける。身元を用意していない
    テストは、実行した人の設定に関わらずその場で落ちる
+4. テストの実行中だけ実行の要約の置き場所（`NDF_METRICS_DIR`）を一時ディレクトリへ向ける。
+   状態を保存するテストが、実行した人の状態ディレクトリへ要約を書かない（#662 の AC72）
 
 `playwright-kit-ops` のディレクトリを起点にした実行では、このファイルは読まれない。
 `pytester` はそのディレクトリの `pyproject.toml` の `addopts` が読み込む。
@@ -115,6 +117,29 @@ def _isolated_git_identity() -> object:
         os.environ["GIT_CONFIG_SYSTEM"] = os.devnull
         try:
             yield empty
+        finally:
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _isolated_metrics_dir() -> object:
+    """テストの実行中だけ、実行の要約の置き場所を一時ディレクトリへ向ける（#662）。
+
+    状態を保存する副コマンドは、保存のたびに要約を書く。向けないと、テストを回すたびに
+    実行した人の `~/.local/state/ndf/metrics` へ偽の実行が積もり、集計を汚す。
+    **`NDF_METRICS=0` にはしない。** 書き出しの経路そのものをテストで通すためである。
+    子プロセスは環境変数を受け継ぐため、同じ向け先へ書く。
+    """
+    with tempfile.TemporaryDirectory(prefix="ndf-tests-metrics-") as tmp:
+        saved = {k: os.environ.get(k) for k in ("NDF_METRICS_DIR", "NDF_METRICS")}
+        os.environ["NDF_METRICS_DIR"] = tmp
+        os.environ.pop("NDF_METRICS", None)
+        try:
+            yield Path(tmp)
         finally:
             for key, value in saved.items():
                 if value is None:
