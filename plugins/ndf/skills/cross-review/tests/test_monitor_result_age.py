@@ -69,10 +69,12 @@ def test_agy_result_age_fallback_triggers_ok(monitor_mod, tmp_path):
         mock.patch("time.sleep", side_effect=fake_sleep),
         mock.patch("time.time", side_effect=fake_time),
     ):
-        st = monitor_mod.monitor_agent(
-            agent=agent, pr=pr,
+        config = monitor_mod.MonitorConfig(
             timeout=420, stall_timeout=480, poll=15,
             require_result=True, no_early_error=True,
+        )
+        st = monitor_mod.monitor_agent(
+            agent=agent, pr=pr, config=config,
         )
 
     assert st.status == "OK"
@@ -118,10 +120,12 @@ def test_agy_result_age_too_young_continues(monitor_mod, tmp_path):
         mock.patch.object(monitor_mod, "_pid_cmdline_matches", return_value=None),
         mock.patch("time.sleep", side_effect=fake_sleep),
     ):
-        st = monitor_mod.monitor_agent(
-            agent=agent, pr=pr,
+        config = monitor_mod.MonitorConfig(
             timeout=420, stall_timeout=480, poll=15,
             require_result=True, no_early_error=True,
+        )
+        st = monitor_mod.monitor_agent(
+            agent=agent, pr=pr, config=config,
         )
 
     # result.json は young なので fallback せず、プロセス終了後の通常 OK になる
@@ -178,10 +182,12 @@ def test_fresh_but_young_result_continues_monitoring(monitor_mod, tmp_path):
         mock.patch("time.sleep", side_effect=fake_sleep),
         mock.patch("time.time", side_effect=fake_time),
     ):
-        st = monitor_mod.monitor_agent(
-            agent=agent, pr=pr,
+        config = monitor_mod.MonitorConfig(
             timeout=420, stall_timeout=480, poll=15,
             require_result=True, no_early_error=True,
+        )
+        st = monitor_mod.monitor_agent(
+            agent=agent, pr=pr, config=config,
         )
 
     # age < 30s なので fallback せず、プロセス終了後の通常 OK
@@ -222,10 +228,12 @@ def test_codex_sentinel_takes_priority(monitor_mod, tmp_path):
         mock.patch.object(monitor_mod, "_pid_cmdline_matches", return_value=None),
         mock.patch("time.sleep"),
     ):
-        st = monitor_mod.monitor_agent(
-            agent=agent, pr=pr,
+        config = monitor_mod.MonitorConfig(
             timeout=420, stall_timeout=180, poll=15,
             require_result=True, no_early_error=True,
+        )
+        st = monitor_mod.monitor_agent(
+            agent=agent, pr=pr, config=config,
         )
 
     assert st.status == "OK"
@@ -271,10 +279,12 @@ def test_stale_result_json_from_previous_round_ignored(monitor_mod, tmp_path):
         mock.patch.object(monitor_mod, "_pid_cmdline_matches", return_value=True),
         mock.patch("time.sleep", side_effect=fake_sleep),
     ):
-        st = monitor_mod.monitor_agent(
-            agent=agent, pr=pr,
+        config = monitor_mod.MonitorConfig(
             timeout=420, stall_timeout=480, poll=15,
             require_result=True, no_early_error=True,
+        )
+        st = monitor_mod.monitor_agent(
+            agent=agent, pr=pr, config=config,
         )
 
     # stale result.json なので fallback せず、プロセス終了後の通常 OK
@@ -319,10 +329,12 @@ def test_cmdline_not_validated_skips_fallback(monitor_mod, tmp_path):
         mock.patch.object(monitor_mod, "_pid_cmdline_matches", return_value=None),
         mock.patch("time.sleep", side_effect=fake_sleep),
     ):
-        st = monitor_mod.monitor_agent(
-            agent=agent, pr=pr,
+        config = monitor_mod.MonitorConfig(
             timeout=420, stall_timeout=480, poll=15,
             require_result=True, no_early_error=True,
+        )
+        st = monitor_mod.monitor_agent(
+            agent=agent, pr=pr, config=config,
         )
 
     # cmdline 未検証なので fallback せず、プロセス終了後の通常 OK

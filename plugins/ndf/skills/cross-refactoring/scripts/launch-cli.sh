@@ -49,8 +49,24 @@ load_common_state() {
 
 load_common_state
 
-# CLI 側の実行時間の上限。**フェーズごとの監視の上限に合わせる。** 短いと CLI が
-# 先に打ち切り、結果ファイルが残らなかった場合と区別が付かなくなる。
+require_round() {
+  [ "$ROUND" -ge 1 ] 2>/dev/null || { echo "$PHASE には ROUND が必要です" >&2; exit 1; }
+}
+
+configure_judge_diff() {
+  # APPLY_ROUND は共通の読み取りより後で決まるため、stem を組む前に先読みする。
+  JUDGE_GROUP=$(jq -r --argjson r "$ROUND" \
+    '[.rounds[] | select(.round == $r)][0].apply_round // 1' "$STATE")
+  RF_TEST_DIFF_PATH=$TMP_DIR/test-diff-r$ROUND-g$JUDGE_GROUP.diff
+  [ -s "$RF_TEST_DIFF_PATH" ] || {
+    echo "判定する差分がありません: $RF_TEST_DIFF_PATH" >&2; exit 1; }
+  export RF_TEST_DIFF_PATH
+}
+
+# CLI 側の実行時間の上限は **工程名** で共通層へ渡す。共通層が上限の表（`lib/limits.py`）から
+# 「監視の上限 + 120 秒」を導く。短いと CLI が先に打ち切り、結果ファイルが残らなかった
+# 場合と区別が付かなくなる（#598 / #537）。**工程名は上限の表の名前へ正規化して渡す**
+# （`propose-tests` は `propose`）。表は別名を持たない。
 configure_phase() {
 case "$PHASE" in
   propose|propose-tests)
@@ -60,35 +76,29 @@ case "$PHASE" in
     # **結果ファイルの名前はテスト整備でも変えない。** ラウンド番号は種類を
     # またいで通しなので衝突せず、監視の雛形（`{agent}-propose-rf{id}-r<N>`）を
     # そのまま使える。
-    [ "$ROUND" -ge 1 ] 2>/dev/null || { echo "$PHASE には ROUND が必要です" >&2; exit 1; }
+    require_round
     STEM=$TMP_DIR/$RUNTIME-propose-rf$ID-r$ROUND
     WORKDIR=$ROOT/$RUNTIME
-    PRINT_TIMEOUT=900
+    PRINT_TIMEOUT=propose
     ;;
   apply|fix)
-    [ "$ROUND" -ge 1 ] 2>/dev/null || { echo "$PHASE には ROUND が必要です" >&2; exit 1; }
+    require_round
     STEM=$TMP_DIR/$RUNTIME-$PHASE-r$ROUND
     # 適用と修正は常に work/ の中だけで行う。並列適用はしない。
     WORKDIR=$WORK
-    PRINT_TIMEOUT=3600
+    PRINT_TIMEOUT=$PHASE
     ;;
   judge-test-changes)
     # **テストの差分が振る舞いの変更を含むかの判定**（#443）。機械で決まらない差分だけを
-    # 渡すため、対象は小さい。判定だけを返させるので上限は提案と同じでよい。
-    [ "$ROUND" -ge 1 ] 2>/dev/null || { echo "$PHASE には ROUND が必要です" >&2; exit 1; }
+    # 渡すため、対象は小さい。判定だけを返させるので上限は提案と同じ値（上限の表）でよい。
+    require_round
     # **名前に適用群を入れる。** 同じ提案ラウンドで複数の群が段 2 を通ると、
     # 前の群の差分と結果を上書きする。**この時点では `APPLY_ROUND` が未設定である
     # ため、ここで先に読む**（下の共通の読み取りは `STEM` の後にある）。
-    JUDGE_GROUP=$(jq -r --argjson r "$ROUND" \
-      '[.rounds[] | select(.round == $r)][0].apply_round // 1' "$STATE")
+    configure_judge_diff
     STEM=$TMP_DIR/$RUNTIME-judge-test-changes-r$ROUND-g$JUDGE_GROUP
     WORKDIR=$WORK
-    PRINT_TIMEOUT=900
-    # 判定の対象は、進行側が先に書き出す。**無ければ起動しない**（渡すものが無い）。
-    RF_TEST_DIFF_PATH=$TMP_DIR/test-diff-r$ROUND-g$JUDGE_GROUP.diff
-    [ -s "$RF_TEST_DIFF_PATH" ] || {
-      echo "判定する差分がありません: $RF_TEST_DIFF_PATH" >&2; exit 1; }
-    export RF_TEST_DIFF_PATH
+    PRINT_TIMEOUT=judge-test-changes
     ;;
   final-fix)
     # **ラウンド番号を名前に入れない。** 最終ゲートは提案ラウンドの外にあり、
@@ -96,7 +106,7 @@ case "$PHASE" in
     # 読める名前になる。取り込み側（`merge-final-fix`）もこの名前で探す。
     STEM=$TMP_DIR/$RUNTIME-final-fix
     WORKDIR=$WORK
-    PRINT_TIMEOUT=3600
+    PRINT_TIMEOUT=final-fix
     ;;
   *)
     echo "未知のフェーズです: $PHASE" >&2
@@ -134,7 +144,7 @@ TEMPLATE=$PROMPTS/$PHASE.md
 # **渡すのは進行中の適用ラウンド（群）の項目だけである。** 群の中の項目は書き換える
 # ファイルが重ならず、まとめて 1 コミットにできる。群をまたいで渡すと、まだ適用して
 # いない項目まで 1 コミットへ入れさせることになる。
-collect_prompt_materials() {
+collect_round_materials() {
 ITEMS_JSON='[]'
 APPLY_ROUND=0
 # ラウンドの種類。適用と修正では、項目が改善項目かテスト項目かで手順が変わる。
@@ -147,6 +157,9 @@ if [ "$PHASE" = "apply" ] || [ "$PHASE" = "fix" ] || [ "$PHASE" = "judge-test-ch
     '[.items[] | select(.round == $r) | select($a == 0 or (.apply_round // 1) == $a)]' \
     "$STATE")
 fi
+}
+
+collect_excluded_items() {
 # 見送った提案は「対象外」として渡し、毎ラウンド同じ提案が出続けるのを防ぐ。
 # **見送りの記録は種類で形が違う。** 改善項目は `path#symbol`（兆候）、テスト項目は
 # `target`（固定する経路）で指す。null をそのまま並べると読めない一覧になる。
@@ -156,7 +169,9 @@ EXCLUDED=$(jq -r '[.deferred_items[]
     else "- \(.path)#\(.symbol) （\(.smell)）: \(.defer_reason // "見送り")"
     end] | join("\n")' "$STATE")
 [ -n "$EXCLUDED" ] || EXCLUDED="（なし）"
+}
 
+build_skill_block() {
 SKILL_BLOCK="（この実行では手順書を配置していません）"
 if [ -n "$SKILL_BASE" ]; then
   SKILL_BLOCK=$(cat <<SKILL_EOF
@@ -171,26 +186,24 @@ if [ -n "$SKILL_BASE" ]; then
 SKILL_EOF
 )
 fi
-
-export RF_REPO=$REPO RF_PR=$PR RF_ROUND=${ROUND:-} RF_RUNTIME=$RUNTIME
-export RF_MODEL=${MODEL:-default} RF_WORKDIR=$WORKDIR RF_STEM=$STEM
-export RF_SCOPE=$SCOPE RF_HEAD_BRANCH=$HEAD_BRANCH RF_BASE_BRANCH=$BASE_BRANCH
-export RF_BASELINE_TEST=$BASELINE_TEST RF_MAX_ITEMS=$MAX_ITEMS
-export RF_SKILL_BLOCK=$SKILL_BLOCK RF_EXCLUDED=$EXCLUDED RF_SKILL_BASE=$SKILL_BASE
+}
 
 # 語彙の許容値。**手順書を読ませるだけでは足りない。** 手順書の見出しは日本語なので、
 # 「語彙に限定する」とだけ書くと読んだ側が日本語を語彙と解釈し、語彙外の降格規則で
 # 全件が見送りになる（実測）。検証側が持つ集合を状態ファイル経由で受け取り、
 # **許容値をそのまま列挙する**。
+collect_refactoring_vocabulary() {
 VOCAB_SMELLS=$(jq -r '(.vocabulary.smells // {}) | to_entries[] | "- `\(.key)` — \(.value)"' "$STATE")
 VOCAB_TECHNIQUES=$(jq -r '(.vocabulary.techniques // {}) | to_entries[] | "- `\(.key)` — \(.value)"' "$STATE")
 VOCAB_SEVERITIES=$(jq -r '(.vocabulary.severities // []) | map("`" + . + "`") | join(" / ")' "$STATE")
 [ -n "$VOCAB_SMELLS" ] || VOCAB_SMELLS="（状態ファイルに語彙がありません。手順書の語彙に従うこと）"
 [ -n "$VOCAB_TECHNIQUES" ] || VOCAB_TECHNIQUES="（同上）"
 [ -n "$VOCAB_SEVERITIES" ] || VOCAB_SEVERITIES="\`critical\` / \`major\` / \`minor\`"
+}
 
 # テスト整備ラウンドの語彙。**構造改善と同じく許容値をそのまま列挙する。**
 # 手順書を読ませるだけでは足りず、語彙外の値が返ると全件が対象外になる。
+collect_test_vocabulary() {
 VOCAB_CASES=$(jq -r '(.test_vocabulary.cases // {}) | to_entries[] | "- `\(.key)` — \(.value)"' "$STATE")
 VOCAB_LEVELS=$(jq -r '(.test_vocabulary.levels // {}) | to_entries[] | "- `\(.key)` — \(.value)"' "$STATE")
 [ -n "$VOCAB_CASES" ] || VOCAB_CASES="- \`normal\` — 代表的な正常系
@@ -202,16 +215,36 @@ VOCAB_LEVELS=$(jq -r '(.test_vocabulary.levels // {}) | to_entries[] | "- `\(.ke
 - \`contract\` — 契約
 - \`e2e\` — 端から端まで"
 export RF_VOCAB_CASES=$VOCAB_CASES RF_VOCAB_LEVELS=$VOCAB_LEVELS
+}
 
-export RF_ITEMS=$ITEMS_JSON RF_TMP_DIR=$TMP_DIR
-export RF_APPLY_ROUND=$APPLY_ROUND
+build_round_note() {
 RF_ROUND_NOTE="この適用ラウンドの項目は**構造改善**です。振る舞いを変えずに構造だけを直します。"
 [ "$ROUND_KIND" != "test" ] || RF_ROUND_NOTE="この適用ラウンドの項目は**テスト整備**です。\
 足すのは現状固定テストだけで、**対象のコードは変更しません**。項目の \`target\` が固定する入口、\
 \`case\` が固定する経路の種類、\`level\` がどの階層で固定するかを示します。"
+}
+
+export_prompt_env() {
+export RF_REPO=$REPO RF_PR=$PR RF_ROUND=${ROUND:-} RF_RUNTIME=$RUNTIME
+export RF_MODEL=${MODEL:-default} RF_WORKDIR=$WORKDIR RF_STEM=$STEM
+export RF_SCOPE=$SCOPE RF_HEAD_BRANCH=$HEAD_BRANCH RF_BASE_BRANCH=$BASE_BRANCH
+export RF_BASELINE_TEST=$BASELINE_TEST RF_MAX_ITEMS=$MAX_ITEMS
+export RF_SKILL_BLOCK=$SKILL_BLOCK RF_EXCLUDED=$EXCLUDED RF_SKILL_BASE=$SKILL_BASE
+export RF_ITEMS=$ITEMS_JSON RF_TMP_DIR=$TMP_DIR
+export RF_APPLY_ROUND=$APPLY_ROUND
 export RF_ROUND_KIND=$ROUND_KIND RF_ROUND_NOTE=$RF_ROUND_NOTE
 export RF_VOCAB_SMELLS=$VOCAB_SMELLS RF_VOCAB_TECHNIQUES=$VOCAB_TECHNIQUES
 export RF_VOCAB_SEVERITIES=$VOCAB_SEVERITIES
+}
+
+collect_prompt_materials() {
+collect_round_materials
+collect_excluded_items
+build_skill_block
+build_round_note
+collect_refactoring_vocabulary
+collect_test_vocabulary
+export_prompt_env
 }
 
 collect_prompt_materials

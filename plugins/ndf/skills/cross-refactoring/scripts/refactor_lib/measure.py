@@ -21,7 +21,7 @@ import run_metrics
 from .rounds import entry_kind
 
 # stem から工程とラウンドを読む規則（契約の文書の「stem から工程を読む規則」）。
-# P2 で監視の記録に `phase` が入ったら、そちらを優先する。
+# 監視の記録が `phase` を持つとき（P2 以降の記録）は、工程だけはそちらを優先する。
 _STEM = re.compile(
     r"^(?:codex|agy|claude|kiro)-(?:"
     r"(?P<propose>propose)-rf\d+-r(?P<propose_round>\d+)"
@@ -32,14 +32,24 @@ _STEM = re.compile(
 )
 
 
-def _phase_of(stem: str) -> Optional[tuple[str, Optional[int]]]:
-    m = _STEM.match(stem)
+# 記録の `phase` として受ける工程（cross-refactoring の監視が渡す名前）。
+_PHASES = ("propose", "apply", "fix", "judge-test-changes", "final-fix")
+
+
+def _phase_of(launch: dict[str, Any]) -> Optional[tuple[str, Optional[int]]]:
+    """起動 1 回の工程とラウンド。ラウンドは stem から、工程は記録の `phase` を優先して読む。"""
+    m = _STEM.match(str(launch.get("stem") or ""))
     if m is None:
         return None
+    parsed: tuple[str, Optional[int]] = ("final-fix", None)
     for name in ("propose", "apply", "judge"):
         if m.group(name):
-            return m.group(name), int(m.group(f"{name}_round"))
-    return "final-fix", None
+            parsed = m.group(name), int(m.group(f"{name}_round"))
+            break
+    recorded = launch.get("phase")
+    if recorded in _PHASES:
+        return recorded, None if recorded == "final-fix" else parsed[1]
+    return parsed
 
 
 def _before(a: Any, b: Any) -> bool:
@@ -69,12 +79,13 @@ def phases(state: dict[str, Any], launches: list[dict[str, Any]]) -> dict[str, A
     """
     rounds = [r for r in state.get("rounds") or [] if isinstance(r, dict)]
     kind_of = {r.get("round"): entry_kind(r) for r in rounds}
+    kinds = list(dict.fromkeys(kind_of.values()))
     out: dict[str, Any] = {}
-    for kind in dict.fromkeys(kind_of.values()):
+    for kind in kinds:
         out[kind] = {}
     cli_by_round: dict[int, float] = {}
     for launch in launches:
-        parsed = _phase_of(str(launch.get("stem") or ""))
+        parsed = _phase_of(launch)
         if parsed is None:
             continue
         phase, round_no = parsed
@@ -88,7 +99,7 @@ def phases(state: dict[str, Any], launches: list[dict[str, Any]]) -> dict[str, A
         elapsed = launch.get("elapsed")
         if isinstance(elapsed, (int, float)):
             cli_by_round[round_no] = cli_by_round.get(round_no, 0.0) + float(elapsed)
-    for kind in dict.fromkeys(kind_of.values()):
+    for kind in kinds:
         out[kind]["other_seconds"] = _other_seconds(state, kind, cli_by_round)
     return out
 

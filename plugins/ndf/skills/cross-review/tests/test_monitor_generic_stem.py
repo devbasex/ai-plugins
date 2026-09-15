@@ -55,10 +55,13 @@ def test_monitor_agent_uses_stem_template(monitor_mod, tmp_path):
         mock.patch.object(monitor_mod, "_tmp_dir", return_value=tmp_path),
         mock.patch.object(monitor_mod, "_pid_alive", return_value=False),
     ):
-        st = monitor_mod.monitor_agent(
-            agent="claude", pr=1, timeout=420, stall_timeout=900, poll=1,
+        config = monitor_mod.MonitorConfig(
+            timeout=420, stall_timeout=900, poll=1,
             require_result=True, no_early_error=True,
             stem_template="{agent}-apply-r{id}",
+        )
+        st = monitor_mod.monitor_agent(
+            agent="claude", pr=1, config=config,
         )
     assert st.status == "OK"
     assert st.result_exists is True

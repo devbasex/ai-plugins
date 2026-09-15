@@ -9,7 +9,7 @@
 eval "$("$SCRIPTS/refactor.py" next-apply-round "$ID" "$ROUND")"  # 1 = 群が尽きた
 "$SCRIPTS/launch-cli.sh" "$IMPL" apply "$ID" "$ROUND"
 "$LIB/monitor.py" "$ID" --agents "$IMPL" --tmp-dir "$TMP_DIR" \
-    --stem-template "{agent}-apply-r$ROUND" --timeout 3600
+    --stem-template "{agent}-apply-r$ROUND" --phase apply
 "$SCRIPTS/refactor.py" merge-apply "$ID" "$ROUND"   # 2 = この群を取り消した / 4 = 中断
 ```
 
@@ -79,7 +79,7 @@ if [ -n "$PENDING" ]; then
   #    **起動は背景で走るため、待たずに次へ進むと結果が無い。**
   "$SCRIPTS/launch-cli.sh" "$IMPL" judge-test-changes "$ID" "$ROUND"
   "$LIB/monitor.py" "$ID" --agents "$IMPL" --tmp-dir "$TMP_DIR" \
-      --stem-template "{agent}-judge-test-changes-r$ROUND-g$APPLY_ROUND" --timeout 900
+      --stem-template "{agent}-judge-test-changes-r$ROUND-g$APPLY_ROUND" --phase judge-test-changes
 
   # 4. 答えを取り込む（終了コード 2 は「取り消した」を表す）
   "$SCRIPTS/refactor.py" merge-test-judgements "$ID" "$ROUND"

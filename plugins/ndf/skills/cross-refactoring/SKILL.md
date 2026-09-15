@@ -301,11 +301,11 @@ while :; do
   for a in $RUNTIMES; do
     "$SCRIPTS/launch-cli.sh" "$a" "$PROPOSE_PHASE" "$ID" "$ROUND"
   done
-  # 提案の所要は参加ランタイムと回線状況で振れる（実測 90〜285 秒）。既定の
-  # 打ち切りに任せず、明示する。**結果ファイルの名前は種類で変えない**ので、
-  # 監視の雛形はテスト整備ラウンドでもそのまま使える。
+  # 監視の上限は `--phase` の工程で上限の表（`lib/limits.py`）が決める。秒数を書かない。
+  # **結果ファイルの名前は種類で変えない**ので、監視の雛形と工程（`propose`）は
+  # テスト整備ラウンドでもそのまま使える。
   "$LIB/monitor.py" "$ID" --agents "$RUNTIMES_CSV" --tmp-dir "$TMP_DIR" \
-      --stem-template "{agent}-propose-rf{id}-r$ROUND" --timeout 900
+      --stem-template "{agent}-propose-rf{id}-r$ROUND" --phase propose
   # 終了コード 2 = 構造改善の採用 0 件（繰り返しを終える）。テスト整備の採用 0 件は
   # 終了ではないので 0 が返り、切り替えは `advance` が決める
   rf merge-proposals "$ID" || break
@@ -314,7 +314,7 @@ while :; do
     rf_eval next-apply-round "$ID" "$ROUND" || break   # 終了コード 1 = 群が尽きた
     "$SCRIPTS/launch-cli.sh" "$IMPL" apply "$ID" "$ROUND"
     "$LIB/monitor.py" "$ID" --agents "$IMPL" --tmp-dir "$TMP_DIR" \
-        --stem-template "{agent}-apply-r$ROUND" --timeout 3600
+        --stem-template "{agent}-apply-r$ROUND" --phase apply
     # 終了コード 2 = 適用が通らずこの群を取り消した。修正ラウンドは回さない
     rf merge-apply "$ID" "$ROUND" || continue
 
@@ -325,7 +325,7 @@ while :; do
       fi
       "$SCRIPTS/launch-cli.sh" "$IMPL" fix "$ID" "$ROUND"
       "$LIB/monitor.py" "$ID" --agents "$IMPL" --tmp-dir "$TMP_DIR" \
-          --stem-template "{agent}-fix-r$ROUND"
+          --stem-template "{agent}-fix-r$ROUND" --phase fix
       rf merge-fix "$ID" "$ROUND"
     done
     # 次の群と、次のラウンドの提案に備えて読み取り用を同期する
@@ -346,7 +346,7 @@ while :; do
     1) echo "⚠ 最終ゲートが通らないまま修正の上限に達しました" >&2; break ;;
     2) "$SCRIPTS/launch-cli.sh" "$FINAL_FIX_IMPL" final-fix "$ID"
        "$LIB/monitor.py" "$ID" --agents "$FINAL_FIX_IMPL" --tmp-dir "$TMP_DIR" \
-           --stem-template "{agent}-final-fix"
+           --stem-template "{agent}-final-fix" --phase final-fix
        rf merge-final-fix "$ID" ;;
     *) exit $gate ;;
   esac

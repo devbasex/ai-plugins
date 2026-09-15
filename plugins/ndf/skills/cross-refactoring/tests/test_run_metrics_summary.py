@@ -119,6 +119,27 @@ def test_phases_of_an_unfinished_round_have_no_other_seconds(rf_measure):
     assert phases["test"]["propose"]["launches"] == 1
 
 
+def test_the_recorded_phase_wins_over_the_stem(rf_measure):
+    """P2 からは監視の記録が `phase` を持つ。stem の規則より記録を優先する（#598 / #537）。
+
+    ラウンドは stem から読む（記録の `phase` はラウンドを持たない）。
+    """
+    state = {"final": None, "rounds": [{"round": 1, "kind": "structure", "started_at": _t(0)}]}
+    fix_in_apply_stem = {**_launch("claude-apply-r1", _t(1), _t(3), 120.0), "phase": "fix"}
+    without_phase = {**_launch("codex-apply-r1", _t(4), _t(5), 60.0), "phase": None}
+
+    phases = rf_measure.phases(state, [fix_in_apply_stem, without_phase])
+
+    assert phases["structure"]["fix"]["launches"] == 1
+    assert phases["structure"]["apply"]["launches"] == 1
+
+
+def test_a_recorded_phase_outside_the_table_falls_back_to_the_stem(rf_measure):
+    state = {"final": None, "rounds": [{"round": 1, "kind": "structure", "started_at": _t(0)}]}
+    launch = {**_launch("claude-apply-r1", _t(1), _t(3), 120.0), "phase": "review"}
+    assert set(rf_measure.phases(state, [launch])["structure"]) == {"apply", "other_seconds"}
+
+
 # ---------- AC16 ----------
 
 def test_summary_failure_keeps_exit_code_and_stdout(
