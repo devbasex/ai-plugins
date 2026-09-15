@@ -32,7 +32,7 @@
 | --- | --- |
 | `plugins/ndf/scripts/lib/monitor.py` の変更（429 の検知・理由の語彙・結果の記録） | D-A（#662 #619 #584 #583）が所有する。D-C は消費する側 |
 | `plugins/ndf/scripts/lib/assignment.py` と除外の引数 | D-B（#624 #478 #648）が所有する |
-| 監視の工程ごとの所要時間の計測の呼び出し | D-A（P1）が骨組みへ足す |
+| 工程ごとの所要時間の計測 | D-A（P1）が監視の記録と `statefile.save` の差し込み口から組み立てる。骨組みと `refactor_lib` の取り込みには足さない |
 | 利用上限（429）で進行全体を止めること | 担当を替えて 1 回だけ再試行する扱いに含める（設計文書の決定 3） |
 | 取り込み済みの群を開き直したときに適用担当を起動し直す無駄 | 回数は 1 回で有限。繰り返しにはならない |
 | 骨組みの bash を `scripts/` へ出すこと | #560 |
@@ -94,8 +94,8 @@
 
 理由の記録:
 
-- [ ] AC12: 監視の結果の記録（D-A が P1 で足す）がその担当・その段の理由を持つとき、失敗した試行の記録と
-  見送りの理由にその理由の名前（例 `stalled`）が入る。記録が無いときは `missing` が入る
+- [ ] AC12: 監視の結果ファイル（D-A が P1 で足す）がその担当・その段の理由を持つとき、失敗した試行の記録と
+  見送りの理由にその理由の名前（例 `stalled`）が入る。ファイルが無いときは `missing` が入る
 
 ## 受け入れ条件（#592: 採用 0 件と項目の無い群）
 
@@ -189,7 +189,7 @@
 
 | # | 前提 |
 | --- | --- |
-| 1 | D-A の P1（監視の結果の記録）、P2（`--phase` と `lib/limits.py` による監視の上限）、P3（理由の語彙）が先に `develop` へ入る。理由の名前は #619 の提案（`timeout` / `cli_timeout` / `usage_limit` / `early_error` / `stalled` / `not_posted` / `missing`）を基本とする |
+| 1 | D-A の P1（監視の結果ファイルと `monitor_outcome.read_outcome`）、P2（`--phase` と `lib/limits.py` による監視の上限）、P3（理由の語彙）が先に `develop` へ入る。D-A の申し送り（cross-refactoring の監視の引数は P2 が変え、D-C は上限の値を書かない）と決定 10（無進捗の許容は担当の軸だけで決める）に、適用・修正・最終ゲートの修正の `--stall-timeout "$IMPL_STALL_TIMEOUT"` を D-C が渡す例外が書き足される。理由の名前は #619 の提案（`timeout` / `cli_timeout` / `usage_limit` / `early_error` / `stalled` / `not_posted` / `missing`）を基本とする |
 | 2 | 監視の終了コード（2 = TIMEOUT / 3 = NO_RESULT / 4 = EARLY_ERROR / 5 = STALLED / 6 = PIDFILE_BAD）の意味は変わらない |
 | 3 | `assignment.assign(seq, host)` の実装担当は 4 者の輪番で、`seq` を 1 ずつ進めれば 3 回以内に失敗した担当と別のランタイムが出る。D-B が除外を足した後も、除外されない者が 2 者以上いる |
 | 4 | Claude Code が足す帰属行は、メッセージの末尾に独立した段落として付く（#553 の実測 `26a0fff`） |
@@ -226,7 +226,7 @@
 | 群 | 適用ラウンド。書き換えるファイルが重ならない項目の集まりで、状態の `apply_rounds[]` の 1 件 |
 | 試行 | 1 つの群に対して適用担当を起動し、`merge-apply` で取り込もうとした 1 回 |
 | 結果を残さない | 結果ファイルが無い、JSON として読めない、JSON オブジェクトでない、のいずれか |
-| 監視の結果の記録 | D-A が P1 で足す、監視が担当ごとの状態と理由をファイルへ残したもの |
+| 監視の結果ファイル | D-A が P1 で足す `<stem>-monitor.json`。監視が担当 1 者ごとの状態と理由を残し、`monitor_outcome.read_outcome` で読む |
 | 帰属行 | Claude Code がコミットメッセージへ足す `Co-Authored-By:` / `Claude-Session:` の行 |
 | トレーラーの段落 | `git interpret-trailers --parse` がトレーラーとして読む段落 |
 
