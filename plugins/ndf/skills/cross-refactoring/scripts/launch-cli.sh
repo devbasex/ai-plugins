@@ -49,6 +49,10 @@ load_common_state() {
 
 load_common_state
 
+require_round() {
+  [ "$ROUND" -ge 1 ] 2>/dev/null || { echo "$PHASE には ROUND が必要です" >&2; exit 1; }
+}
+
 # CLI 側の実行時間の上限は **工程名** で共通層へ渡す。共通層が上限の表（`lib/limits.py`）から
 # 「監視の上限 + 120 秒」を導く。短いと CLI が先に打ち切り、結果ファイルが残らなかった
 # 場合と区別が付かなくなる（#598 / #537）。**工程名は上限の表の名前へ正規化して渡す**
@@ -62,13 +66,13 @@ case "$PHASE" in
     # **結果ファイルの名前はテスト整備でも変えない。** ラウンド番号は種類を
     # またいで通しなので衝突せず、監視の雛形（`{agent}-propose-rf{id}-r<N>`）を
     # そのまま使える。
-    [ "$ROUND" -ge 1 ] 2>/dev/null || { echo "$PHASE には ROUND が必要です" >&2; exit 1; }
+    require_round
     STEM=$TMP_DIR/$RUNTIME-propose-rf$ID-r$ROUND
     WORKDIR=$ROOT/$RUNTIME
     PRINT_TIMEOUT=propose
     ;;
   apply|fix)
-    [ "$ROUND" -ge 1 ] 2>/dev/null || { echo "$PHASE には ROUND が必要です" >&2; exit 1; }
+    require_round
     STEM=$TMP_DIR/$RUNTIME-$PHASE-r$ROUND
     # 適用と修正は常に work/ の中だけで行う。並列適用はしない。
     WORKDIR=$WORK
@@ -77,7 +81,7 @@ case "$PHASE" in
   judge-test-changes)
     # **テストの差分が振る舞いの変更を含むかの判定**（#443）。機械で決まらない差分だけを
     # 渡すため、対象は小さい。判定だけを返させるので上限は提案と同じ値（上限の表）でよい。
-    [ "$ROUND" -ge 1 ] 2>/dev/null || { echo "$PHASE には ROUND が必要です" >&2; exit 1; }
+    require_round
     # **名前に適用群を入れる。** 同じ提案ラウンドで複数の群が段 2 を通ると、
     # 前の群の差分と結果を上書きする。**この時点では `APPLY_ROUND` が未設定である
     # ため、ここで先に読む**（下の共通の読み取りは `STEM` の後にある）。

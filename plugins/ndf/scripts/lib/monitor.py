@@ -447,6 +447,20 @@ def _pid_cmdline_matches(pid: int, expected: str) -> Optional[bool]:
         return None
 
 
+def _read_tail(path: pathlib.Path, limit: int) -> Optional[str]:
+    """末尾 `limit` バイトを utf-8 で読み出す（存在しない場合や OSError は None）。"""
+    if not path.exists():
+        return None
+    try:
+        sz = path.stat().st_size
+        with path.open("rb") as f:
+            if sz > limit:
+                f.seek(sz - limit)
+            return f.read().decode("utf-8", errors="replace")
+    except OSError:
+        return None
+
+
 def _scan_patterns(
     path: pathlib.Path,
     patterns: list[re.Pattern[str]],
@@ -466,15 +480,8 @@ def _scan_patterns(
     扱いしてしまった (例: `Error in: mcpServers.serena\\n...\\nTraceback ...` で
     Traceback が誤抑制された)。
     """
-    if not path.exists():
-        return None
-    try:
-        sz = path.stat().st_size
-        with path.open("rb") as f:
-            if sz > 200 * 1024:
-                f.seek(sz - 200 * 1024)
-            data = f.read().decode("utf-8", errors="replace")
-    except OSError:
+    data = _read_tail(path, 200 * 1024)
+    if data is None:
         return None
     data = _strip_ansi(data)
     benign_patterns = EARLY_ERROR_BENIGN if benign is None else benign
@@ -523,16 +530,10 @@ def _scan_claude_stdout_fatal(path: pathlib.Path) -> Optional[str]:
     行うが、JSON は 1 行に多数の引用符を含むため、パリティ判定が「引用の内側」を
     誤って真にして致命を取りこぼす。
     """
-    if not path.exists():
+    data = _read_tail(path, 200 * 1024)
+    if data is None:
         return None
-    try:
-        sz = path.stat().st_size
-        with path.open("rb") as f:
-            if sz > 200 * 1024:
-                f.seek(sz - 200 * 1024)
-            data = _strip_ansi(f.read().decode("utf-8", errors="replace"))
-    except OSError:
-        return None
+    data = _strip_ansi(data)
     for pat in CLAUDE_STDOUT_FATAL:
         m = pat.search(data)
         if m:
@@ -541,16 +542,8 @@ def _scan_claude_stdout_fatal(path: pathlib.Path) -> Optional[str]:
 
 
 def _scan_codex_sentinel(path: pathlib.Path) -> bool:
-    if not path.exists():
-        return False
-    try:
-        # 末尾 64KB を読む（sentinel は最後の方に出る）
-        sz = path.stat().st_size
-        with path.open("rb") as f:
-            if sz > 64 * 1024:
-                f.seek(sz - 64 * 1024)
-            tail = f.read().decode("utf-8", errors="replace")
-    except OSError:
+    tail = _read_tail(path, 64 * 1024)
+    if tail is None:
         return False
     return bool(CODEX_SENTINEL.search(tail))
 
@@ -568,17 +561,10 @@ def _tail_last_nonempty_line(path: pathlib.Path, limit: int = 4096) -> str:
     委譲先に書かせるのは短いフェーズマーカーだけなので、末尾数 KB で十分。
     壊れた UTF-8 や読み取り競合があっても monitor 自体は落とさない。
     """
-    if not path.exists():
+    data = _read_tail(path, limit)
+    if data is None:
         return ""
-    try:
-        sz = path.stat().st_size
-        with path.open("rb") as f:
-            if sz > limit:
-                f.seek(sz - limit)
-            data = f.read().decode("utf-8", errors="replace")
-    except OSError:
-        return ""
-    if sz > limit and "\n" in data:
+    if _safe_size(path) > limit and "\n" in data:
         data = data.split("\n", 1)[1]
     for line in reversed(data.splitlines()):
         stripped = line.strip()
