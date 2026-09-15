@@ -136,3 +136,14 @@ def test_escaped_double_quotes_do_not_quote_a_fatal_match(tmp_path, monitor_mod)
 
     log = _write(tmp_path / "err.log", f"{line}\n")
     assert monitor_mod._scan_early_fatal(log) is not None
+
+
+def test_fatal_detected_after_preceding_benign_hit(tmp_path, monitor_mod):
+    """先行する benign 引用行があっても走査を継続し、後続の本物 fatal 行を検出する。"""
+    content = (
+        "| doc | explanation of `quota exceeded` pattern |\n"
+        "quota exceeded: please upgrade\n"
+    )
+    log = _write(tmp_path / "err.log", content)
+    assert monitor_mod._scan_early_fatal(log) == "quota exceeded: please upgrade"
+
