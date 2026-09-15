@@ -400,7 +400,7 @@ graph TD
 | AC17・AC18 | 使える者 1 者・0 者の `init` | `test_state_review_pool.py` |
 | AC19 | `available_reviewers` を持たない状態 / `host` も持たない状態で `_round_reviewers` | `test_state_review_pool.py` |
 | AC20 | 既存の `assign` の期待値と、`check_auth` の失敗で `die` が呼ばれるテスト | `cross-refactoring/tests/test_assignment.py` / `cross-refactoring/tests/test_init.py` |
-| AC21 | 3 つの一覧を持つ状態ファイルで `cmd_report` の出力を見る | `test_state_review_pool.py` |
+| AC21 | 3 つの一覧と `resume_changes` を持つ状態ファイルで `cmd_report` の出力の 4 行を見る | `test_state_review_pool.py` |
 | AC22〜AC27 | 状態ファイルを置いた作業ツリーを渡して `cmd_init` を呼び、状態ファイルと標準エラーを見る（実測の G） | `test_state_resume_args.py`（新設） |
 | AC28 | 2 ファイルの `ONLY` を含む行を数えるテスト | `test_skill_layout.py` |
 | AC29 | `verdict` の無い前ラウンドで `cmd_start_round` の終了コード 5 を見る（実測の I） | `test_state_round_guard.py` |
