@@ -224,8 +224,8 @@ git 2.53.0 の一時リポジトリでコミットを作り、2 つの読み方�
 | `apply._close_failed_attempt`（新設） | 範囲のコミットを取り消し、失敗した試行を記録する。上限未満なら担当を替え、上限なら群を取り消して項目を見送る | #647 |
 | `rounds.impl_for_seq`（新設） | 輪番の通し番号から担当と要求モデルを返す。作業を任せる担当を決める呼び出しはすべてこれを通す（決定 8） | #647 |
 | `gate._final_fix_impl`（変更） | 最終ゲートの修正担当を `rounds.impl_for_seq` で引く | #647 |
-| `apply._monitor_reason`（新設） | `monitor_outcome.read_outcome(tmp_dir, "<impl>-apply-r<ROUND>")` の `reason` を返す。無い・読めないときは `missing` | #647 |
-| `gitfacts.load_result`（新設） | 結果ファイルを読み、`(payload, problem)` を返す。中断しない | #647 |
+| `apply._monitor_reason`（新設） | `monitor_outcome.read_outcome(tmp_dir, "<impl>-apply-r<ROUND>")` の `reason` が `timeout` / `stalled` / `early_error` / `usage_limit` / `cli_timeout` / `pidfile_bad` ならその値を返す。`ok` / `missing` / ファイルなしなら `load_result` の問題（`missing` / `unparsable`）を返す（D-A の AC55 と同じ規則） | #647 |
+| `gitfacts.load_result`（新設） | 結果ファイルを読み、`(payload, problem)` を返す。問題は `missing`（無い）/ `unparsable`（JSON として読めない・オブジェクトでない）。中断しない | #647 |
 | `gitfacts.read_result`（変更なし） | 最終ゲートの修正（`gate.py`）が引き続き使う | — |
 | `converge.cmd_merge_fix`（変更） | 群の担当の結果を読む。結果を読めなければ範囲を取り消し、修正ラウンドを 1 つ進めて 2 で終わる | 範囲へ入れたもの |
 | `gitfacts.commit_trailers`（変更） | 末尾から続くトレーラーの段落を読む（決定 11） | #553 |
@@ -317,7 +317,7 @@ plugins/ndf/skills/cross-refactoring/
 | --- | --- | --- | --- |
 | `attempt` | 整数 | いま開いている試行の番号。1 から | 鍵なし = 0（まだ開いていない）。`merge-apply` は 0 を 1 回目として記録し、値を 1 に書く（変更前の版で開いた群を再開したとき） |
 | `failed_attempts` | 配列 | 結果を残さなかった試行。1 件 = `{attempt, impl, reason, at, reverted}` | 鍵なし = 失敗なし |
-| `failed_attempts[].reason` | 文字列 | 監視の理由の名前（`stalled` など）。記録が無ければ `missing` | — |
+| `failed_attempts[].reason` | 文字列 | 監視の理由の名前（`stalled` など）。監視が `ok` / `missing` か結果ファイルが無ければ `load_result` の問題（`missing` / `unparsable`） | — |
 | `failed_attempts[].reverted` | 整数 | その試行の範囲から取り消したコミットの数 | 0 = コミットなし |
 | `drop_reason` | 文字列 | `no_result`（試行の上限）/ `empty`（項目なし） | 鍵なし = 既存の経路で取り消した、または取り消していない |
 | `impl` / `impl_model` | 既存 | 担当を替えたときに書き換える。**前の担当は `failed_attempts[].impl` に残る** | — |
@@ -449,9 +449,9 @@ graph TD
 
 | 相手 | 契約 | D-C の扱い |
 | --- | --- | --- |
-| D-A（P1） | 監視が担当ごとの結果を `<stem>-monitor.json` へ残し、`monitor_outcome.read_outcome(tmp_dir, stem)` で読める（D-A の契約の文書） | `_monitor_reason` だけが `read_outcome(tmp_dir, "<impl>-apply-r<ROUND>")` の `reason` を読む。ファイルが無い・読めないときは `missing` を返し、振る舞いは変えない。追記だけの `monitor-outcomes.jsonl` は読まない |
+| D-A（P1） | 監視が担当ごとの結果を `<stem>-monitor.json` へ残し、`monitor_outcome.read_outcome(tmp_dir, stem)` で読める（D-A の契約の文書） | `_monitor_reason` だけが `read_outcome(tmp_dir, "<impl>-apply-r<ROUND>")` の `reason` を読む。`ok` / `missing` / ファイルなしは `load_result` の問題へ置き換える（D-A の AC55 と同じ規則。壊れた JSON は監視から見ると `ok`）。振る舞いは変えない。追記だけの `monitor-outcomes.jsonl` は読まない |
 | D-A（P3） | 理由の名前は #619 の語彙を基本とし、claude の `"api_error_status":429` を `usage_limit` として早期に打ち切る | 名前を解釈しない。記録へ写すだけ |
-| D-A（P1 の計測） | 工程の所要は監視の記録と `refactor.py` の `statefile.save` の差し込み口から組み立て、骨組みと `refactor_lib` の取り込みには足さない（D-A の決定 9） | 計測の呼び出しを置かない。`refactor.py` の差し込み口と `commands/report.py` の要約の行は D-A が足すため、P6 はその上に載せる |
+| D-A（P1 の計測） | 工程の所要は監視の記録と `refactor.py` の `statefile.save` の差し込み口から組み立て、骨組みと `refactor_lib` の取り込みには足さない（D-A の決定 9） | 計測の呼び出しを置かない。`refactor.py` の差し込み口と `commands/report.py` の要約の行は D-A が足すため、P6 はその上に載せる。**要約の `apply_attempts` は、群ごとの `attempt` と `failed_attempts` の件数を状態ファイルから持つ**（D-A の AC14 の「群ごとの試行回数」の出どころ）ことを前提 1 に含める |
 | D-A（P2） | 監視の上限は `--phase` と `lib/limits.py` が工程で決め、cross-refactoring の 8 か所は `--timeout` を渡さない（D-A の AC37）。修正と最終ゲートの修正の 420 秒の打ち切りも P2 が直す。8 か所の引数は P2 が変え、D-C は上限の値を書かない（D-A の申し送り） | `--timeout` を足さず、`--phase` が `apply` / `fix` / `final-fix` の呼び出しに `--stall-timeout` だけを足す。**これは申し送りと D-A の決定 10（無進捗の許容は担当の軸だけで決め、既定値は `limits.py` の表だけが持つ）に対する例外である。** 工程（テスト 1 回を含む適用・修正）に依存する許容を、D-C が骨組みの引数で渡す。D-A の申し送りの行と決定 10 へ同じ例外を書き足すことを前提 1 に含める。許容が監視の上限以上になる組は P2 の警告（D-A の AC33）に任せる |
 | D-A（全体） | 監視の終了コードの意味（2 / 3 / 4 / 5 / 6）と `--stall-timeout` の引数は変えない | 骨組みは終了コードで分岐しない（決定 4） |
 | D-B（P4 / P5） | 除外（#478）は `assignment.assign` か、その呼び出し側に入る | 適用・交代・最終ゲートの修正の担当を決める呼び出しは `rounds.impl_for_seq` の 1 か所（決定 8）。D-B が先に入れば P6 がそこへ寄せ、P6 が先なら D-B がそこを変える。`setup.py:467` の提案ラウンドの担当は CLI を起動しないため対象外 |
@@ -469,7 +469,7 @@ graph TD
 | AC8 | `commits_in_range` が 1 件返す状態で、`no_git` の記録に `git revert` が出て、群の `base_sha` が変わる | `test_apply_attempts.py` |
 | AC9、AC10 | 着手前テスト `red`、`commits_in_range` が `None` で、`SystemExit` の値が 4 | `test_apply_attempts.py` |
 | AC11 | 4 つの経路でパラメータ化し、終了コード 2 の後の群が `dropped` か失敗の記録付き `pending` | `test_apply_attempts.py` |
-| AC12 | `<impl>-apply-r<ROUND>-monitor.json` に `reason: stalled` を置いた場合と、ファイルが無い場合 | `test_apply_attempts.py` |
+| AC12 | `<impl>-apply-r<ROUND>-monitor.json` に `reason: stalled` を置いた場合、ファイルが無い場合、`reason: ok` で結果ファイルが壊れた JSON の場合 | `test_apply_attempts.py` |
 | AC13 | テスト整備ラウンドの採用 0 件から `merge-proposals` → `next-apply-round` が 1、`apply_rounds == []` | `test_apply_rounds.py` |
 | AC14 | `apply_rounds` の鍵を消した状態で群が 1 つ作られる（既存のテストを確かめ直す） | `test_apply_rounds.py` |
 | AC15 | rf587 の形の状態で `merge-apply` → 2、群 `dropped`、`next-apply-round` → 1 | `test_apply_rounds.py` |
@@ -493,7 +493,7 @@ graph TD
 | --- | --- | --- | --- |
 | 1 | rf646 で agy が打ち切りの時点で動いていたか | ログは作業ツリーとともに消えていた（`find / -name 'agy-apply-r*'` で該当なし）。決定 13 は動いていた場合も止まっていた場合も成り立つ | 次の実行で `progress.log` を読む |
 | 2 | 担当が雛形の進捗マーカーに従うか | cross-review の agy は従っている（heartbeat に作業段階が出る）。claude / codex / kiro の適用で従うかは起動して確かめていない。従わなくても決定 13 の許容で打ち切られないのはテスト 1 回分まで | 実装後の最初の実行 |
-| 3 | 担当を替えた後の担当も結果を残さない割合 | 2 回目で救える群の数は測っていない。#662 の計測で `failed_attempts` を数えて見る | 配布後 |
+| 3 | 担当を替えた後の担当も結果を残さない割合 | 2 回目で救える群の数は測っていない。実行の要約の `apply_attempts`（群ごとの `attempt` と `failed_attempts` の件数）で数える | 配布後 |
 | 4 | Claude Code 以外の担当が帰属行を足すか | codex / agy / kiro のコミットで帰属行の段落を見ていない。決定 11 は誰が足しても同じに読む | 確かめなくてよい |
 | 5 | 帰属行を同じ段落に続ける指示に claude が従うか | 決定 12 は補助で、従わなくても決定 11 で検証は通る | 実装後の最初の実行 |
 | 6 | `--test-timeout` が監視の上限 − 900（既定 2700）を超える利用 | 適用・修正の所要を測っていない。#662 の計測で工程ごとの所要が取れたら、P2 の上限の表と合わせて見直す | 配布後 |
