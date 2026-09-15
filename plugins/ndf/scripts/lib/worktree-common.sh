@@ -156,7 +156,9 @@ wt_in_worktree() {
 # 型の合わない項目は、その項目だけを落とす（決定 10）。**null も反映しない。**
 # 個人の宣言から共有の節を消せる形にすると、仕組みが手元でだけ黙って止まる。
 # `testenv.expose` は落とす（決定 8）。追跡されないファイルから外部への公開を
-# 有効にできる状態を作らない。
+# 有効にできる状態を作らない。**`expose` を落として空になった `testenv` は節ごと
+# 反映しない。** 空の節を重ねると、`testenv` を宣言していないリポジトリで
+# `worktree-testenv.sh` の起動判定が off から on へ変わる。
 _wt_local_analysis() {
   local main_dir="${1:-}" file json
   [ -n "$main_dir" ] || return 1
@@ -173,7 +175,10 @@ _wt_local_analysis() {
       {
         overrides:
           ((if (.localenv | type) == "object" then {localenv: .localenv} else {} end)
-           + (if (.testenv | type) == "object" then {testenv: (.testenv | del(.expose))} else {} end)
+           + (if (.testenv | type) == "object"
+              then ((.testenv | del(.expose)) as $t
+                    | if ($t | length) > 0 then {testenv: $t} else {} end)
+              else {} end)
            + (if (.follow_branch | type) == "boolean" then {follow_branch: .follow_branch} else {} end)),
         ignored:
           ([to_entries[] |

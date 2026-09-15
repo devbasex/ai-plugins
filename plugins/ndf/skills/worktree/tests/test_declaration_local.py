@@ -257,6 +257,20 @@ def test_expose_is_never_taken_from_the_local_declaration(shared: Path) -> None:
     assert expose == {"enabled": False, "public_tag": "golden-public"}, expose
 
 
+def test_expose_only_local_testenv_does_not_add_a_testenv_section(main_repo: Path) -> None:
+    """`expose` だけの個人の `testenv` は、共有に無い `testenv` 節を作らない（決定 8）。
+
+    `expose` を落とした結果が空になる節を重ねると、`testenv` を宣言していない
+    リポジトリで `worktree-testenv.sh` の起動判定が off から on へ変わる。
+    """
+    write_declaration(main_repo, json.dumps({"version": 1}))
+    local_json(main_repo, {"version": 1, "testenv": {"expose": {"enabled": True}}})
+
+    body = merged(main_repo)
+
+    assert "testenv" not in body, body
+
+
 # --- AC18: 壊れた個人の宣言では共有の宣言だけで動く -------------------------
 
 
@@ -444,6 +458,14 @@ def test_ignored_lists_operational_and_expose_keys(shared: Path) -> None:
     )
 
     assert local_ignored(shared) == ["base_branch", "guard", "testenv.expose"]
+
+
+def test_ignored_lists_expose_when_it_is_the_only_testenv_key(main_repo: Path) -> None:
+    """節が空になっても `testenv.expose` は反映しない項目として報告する。"""
+    write_declaration(main_repo, json.dumps({"version": 1}))
+    local_json(main_repo, {"version": 1, "testenv": {"expose": {"enabled": True}}})
+
+    assert local_ignored(main_repo) == ["testenv.expose"]
 
 
 def test_ignored_lists_mistyped_keys(shared: Path) -> None:
