@@ -41,7 +41,9 @@ AI エージェントも「使うかどうか」ではなく「どう付き合�
 - `/goal` は Claude Code のコマンドで、「この条件を満たすまで作業を止めない」ことを指示できます
 - `/ndf:development-workflow` は ai-plugins（社内で開発している Claude Code 向けのプラグイン集）の NDF プラグインに含まれる Skill で、変更の中身を見て、どの工程を通すかを決めます
 
-NDF には全部で 45 個の Skill があり、development-workflow はそれらを工程の順に呼び出す進行役にあたります。
+NDF は ai-plugins の中心となるプラグインです。PR の運用やレビュー、実装計画、要求定義・テスト駆動・構造改善・完了判定といった開発の進め方そのものを、Skill としてまとめています。Claude Code だけでなく Codex・Kiro CLI・agy にも同じ Skill を配っており、Claude Code 向けには 45 個の Skill と 8 個の専門サブエージェントが入っています。
+
+development-workflow は、その Skill たちを工程の順に呼び出す進行役にあたります。
 
 変更の種類は 5 つのモードに分けています。すべての変更にフルコースの工程を課すと、誤字を 1 つ直すためにも設計書が必要になってしまうからです。
 
