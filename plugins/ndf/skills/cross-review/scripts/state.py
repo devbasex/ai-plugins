@@ -1334,7 +1334,11 @@ def _load(pr: int) -> dict[str, Any]:
 
 
 def _save(pr: int, state: dict[str, Any]) -> None:
-    p = _state_path(pr)
+    _write_state(_state_path(pr), state)
+
+
+def _write_state(p: pathlib.Path, state: dict[str, Any]) -> None:
+    """状態ファイルを書く唯一の経路。`init` と再開の入口もここを通す（AC8）。"""
     tmp = p.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
     tmp.replace(p)
@@ -1583,10 +1587,7 @@ def _resume_from_state(
     if _record_carried_over(st, st.get("repo") or repo, st.get("current_pr") or pr):
         state_changed = True
     if state_changed:
-        resume_state_file.write_text(
-            json.dumps(st, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        _write_state(resume_state_file, st)
         info("↻ 追加レビュー観点を state に反映して再開")
     # 待ち行列を流すのは、手元の `st` を書き戻した**後**である。流した結果
     # （`queued` の解除と、届かなかった投稿の結果なし）は `_confirm_flushed` が
@@ -1850,7 +1851,7 @@ def _init_new_state(
             pr, pr_ctx, review_ctx, ws_ctx, initial_assignment, manual_extra_review
         )
         state = _build_initial_review_state(args, context)
-        ws_ctx.state_file.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
+        _write_state(ws_ctx.state_file, state)
         info(f"✅ state 初期化: {ws_ctx.state_file}")
         _print_init_result(
             pr,

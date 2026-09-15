@@ -156,3 +156,53 @@ def test_report_says_why_it_did_not_write(state_mod, review_dirs, monkeypatch, c
     last = capsys.readouterr().out.rstrip("\n").splitlines()[-1]
     assert last == "計測の要約: 書いていません（NDF_METRICS=0）"
     assert _summaries(metrics) == []
+
+
+# ---------- AC8: init の保存も要約を書く ----------
+
+def _init_args(worktree: pathlib.Path, **over) -> argparse.Namespace:
+    args = dict(pr=PR, max_rounds=12, rotate_after=8, only=None, worktree=str(worktree),
+                focus=None, extra_instructions_file=None, host="claude")
+    args.update(over)
+    return argparse.Namespace(**args)
+
+
+def test_new_init_writes_the_summary(state_mod, review_dirs, monkeypatch):
+    """`init` が初期状態を保存した直後に要約がある。start-round を待たない。"""
+    worktree, tmp_dir, metrics = review_dirs
+    monkeypatch.setattr(state_mod, "_repo_from_git", lambda: "devbasex/ai-plugins")
+    monkeypatch.setattr(
+        state_mod, "_fetch_pr_metadata",
+        lambda pr, repo=None: state_mod.PrMetadata(
+            "devbasex/ai-plugins", "takemi", "feat/x", "abc123", "develop", True, 4000, None))
+    monkeypatch.setattr(state_mod, "_fetch_changed_files", lambda pr, repo: [])
+    monkeypatch.setattr(state_mod, "_is_registered_worktree", lambda wt: True)
+    monkeypatch.setattr(state_mod, "_sync_worktree", lambda *a, **k: None)
+    monkeypatch.setattr(state_mod, "_sh", lambda cmd, check=True: "takemi")
+    monkeypatch.setattr(
+        state_mod.subprocess, "run",
+        lambda cmd, *a, **k: subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""))
+    monkeypatch.setenv("NDF_SKIP_AUTH_CHECK", "1")
+
+    state_mod.cmd_init(_init_args(worktree))
+
+    assert (tmp_dir / f"cross-review-pr{PR}-state.json").exists()
+    [path] = _summaries(metrics)
+    assert json.loads(path.read_text())["kind"] == "cross-review"
+
+
+def test_resume_that_updates_the_state_rewrites_the_summary(state_mod, review_dirs, monkeypatch):
+    """再開の入口で状態を書き戻すときも、同じ保存の経路を通る。"""
+    worktree, tmp_dir, metrics = review_dirs
+    state = _state(tmp_dir)
+    state.update(auto_review_instructions="", worktree_path=str(worktree))
+    (tmp_dir / f"cross-review-pr{PR}-state.json").write_text(
+        json.dumps(state, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(state_mod, "_repo_from_git", lambda: "devbasex/ai-plugins")
+    monkeypatch.setattr(state_mod, "_fetch_unresolved_threads", lambda repo, pr: [])
+    monkeypatch.setattr(state_mod, "_sync_worktree", lambda *a, **k: None)
+
+    state_mod.cmd_init(_init_args(worktree, focus="追加の観点"))
+
+    [path] = _summaries(metrics)
+    assert json.loads(path.read_text())["kind"] == "cross-review"
