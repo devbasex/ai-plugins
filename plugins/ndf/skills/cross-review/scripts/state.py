@@ -1668,6 +1668,20 @@ class _InitWorkspaceContext(NamedTuple):
     state_file: pathlib.Path
 
 
+class _InitialAssignment(NamedTuple):
+    host: str
+    host_source: str
+
+
+class _InitialStateContext(NamedTuple):
+    pr: object
+    pr_ctx: _InitPRContext
+    review_ctx: _InitReviewContext
+    ws_ctx: _InitWorkspaceContext
+    assignment: _InitialAssignment
+    manual_extra_review: str
+
+
 def _init_new_state(
     args: argparse.Namespace,
     pr: object,
@@ -1765,14 +1779,8 @@ def _init_new_state(
             state_file=state_file,
         )
 
-    def _finalize_initial_state(
-        args: argparse.Namespace,
-        pr: object,
-        pr_ctx: _InitPRContext,
-        review_ctx: _InitReviewContext,
-        ws_ctx: _InitWorkspaceContext,
-        manual_extra_review: str,
-    ) -> None:
+    def _prepare_initial_assignment(args: argparse.Namespace) -> _InitialAssignment:
+        """担当ホストを確定し、起動対象の認証を検査する。"""
         # **ホストを先に確定する。** 誤ると母集合が狂い、ホストが自分自身をレビューする。
         # 推定できないときに既定を置かない（間違ったまま一周してしまう）。
         try:
@@ -1784,57 +1792,64 @@ def _init_new_state(
         info(f"ホスト: {host}（{host_source}） / レビュワーの母集合: {' / '.join(reviewers)}")
         _validate_only(args.only, host)
         # 未認証の CLI は起動から短時間で終わり、結果を残さないまま担当から欠ける。
-        # **確かめるのは実際に起動する担当だけである。** `--only` で 1 者へ絞ったとき、
-        # 母集合の全員を確かめると、そのラウンドで起動しない CLI の未認証で初期化が失敗する。
+        # **確かめるのは実際に起動する担当だけである。**
         auth.check_auth(_auth_targets(args.only, host), info=info, die=lambda m: die(m))
+        return _InitialAssignment(host=host, host_source=host_source)
 
-        state = {
+    def _build_initial_review_state(
+        args: argparse.Namespace,
+        ctx: _InitialStateContext,
+    ) -> dict[str, Any]:
+        """確定済みの材料から、副作用なしに初期状態を組み立てる。"""
+        host, host_source = ctx.assignment
+        return {
             "started_at": _now(),
             "host": host,
             "host_source": host_source,
             "max_rounds": args.max_rounds,
             "rotate_after": args.rotate_after,
             "only": args.only,
-            "current_pr": pr,
-            "worktree_path": pr_ctx.worktree,
-            "tmp_dir": str(ws_ctx.tmp_dir),
-            "repo": pr_ctx.repo,
-            "head_branch": pr_ctx.meta.head_branch,
-            "base_branch": pr_ctx.meta.base_branch,
-            "pr_author": pr_ctx.author,
-            # 自分のログイン名は変わらない値である。一度取って持ち、以降は読まない。
-            # 待ち行列の冪等の照合が「投稿者が自分か」を見るために使う。
-            "viewer_login": pr_ctx.me,
-            "is_own_pr": pr_ctx.is_own,
-            "event_downgrade": pr_ctx.event_downgrade,
-            "changed_files": review_ctx.changed_files,
-            "auto_review_categories": review_ctx.auto_review_categories,
-            "auto_review_instructions": review_ctx.auto_review,
-            "manual_extra_review_instructions": manual_extra_review,
-            # 後方互換: 旧 key は manual 指示を保持する。
-            "extra_review_instructions": manual_extra_review,
-            "review_instructions": review_ctx.review_instructions,
-            "pr_history": [{"pr": pr, "opened_at": _now(), "closed_at": None, "rounds": 0}],
+            "current_pr": ctx.pr,
+            "worktree_path": ctx.pr_ctx.worktree,
+            "tmp_dir": str(ctx.ws_ctx.tmp_dir),
+            "repo": ctx.pr_ctx.repo,
+            "head_branch": ctx.pr_ctx.meta.head_branch,
+            "base_branch": ctx.pr_ctx.meta.base_branch,
+            "pr_author": ctx.pr_ctx.author,
+            "viewer_login": ctx.pr_ctx.me,
+            "is_own_pr": ctx.pr_ctx.is_own,
+            "event_downgrade": ctx.pr_ctx.event_downgrade,
+            "changed_files": ctx.review_ctx.changed_files,
+            "auto_review_categories": ctx.review_ctx.auto_review_categories,
+            "auto_review_instructions": ctx.review_ctx.auto_review,
+            "manual_extra_review_instructions": ctx.manual_extra_review,
+            "extra_review_instructions": ctx.manual_extra_review,
+            "review_instructions": ctx.review_ctx.review_instructions,
+            "pr_history": [{"pr": ctx.pr, "opened_at": _now(), "closed_at": None, "rounds": 0}],
             "rounds": [],
             "deferred_nits": [],
-            # 却下した指摘は per-item で残す（#156）。件数だけでは、次のラウンドへ
-            # 渡しても同じ指摘だと判定できない。
             "rejected_findings": [],
-            # 取り込んだ指摘は per-item で残す（#156）。`payload.json` の 1 件に
-            # `pr` / `round` / `agent` と `has_evidence` を添えた形で積む。
             "review_findings": [],
-            # 証拠集約（統合・実行検証・反証）を通ったラウンドの番号（#156）。**収束の
-            # 判定はこの印で母集合を決める。** `review_findings` の有無では、旧い状態
-            # ファイルのラウンドと区別できない（`_evidence_completed`）。
             "evidence_rounds": [],
-            # 実行検証の許しは起動した側が渡す（#156）。**渡されなければ実行しない。**
-            # ラウンドごとに `verify-findings` が読むため、状態ファイルへ持つ。
             "verify_commands": list(getattr(args, "verify_command", None) or []),
             "verify_exit_codes": list(getattr(args, "verify_exit_code", None) or []),
-            # 引き継いだ指摘は再開の時点で決まる。新規の開始では空にする。
             "carried_over": None,
             "final": None,
         }
+
+    def _finalize_initial_state(
+        args: argparse.Namespace,
+        pr: object,
+        pr_ctx: _InitPRContext,
+        review_ctx: _InitReviewContext,
+        ws_ctx: _InitWorkspaceContext,
+        manual_extra_review: str,
+    ) -> None:
+        initial_assignment = _prepare_initial_assignment(args)
+        context = _InitialStateContext(
+            pr, pr_ctx, review_ctx, ws_ctx, initial_assignment, manual_extra_review
+        )
+        state = _build_initial_review_state(args, context)
         ws_ctx.state_file.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
         info(f"✅ state 初期化: {ws_ctx.state_file}")
         _print_init_result(

@@ -25,28 +25,33 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 LIB=$SCRIPT_DIR/../../../scripts/lib
 PROMPTS=$SCRIPT_DIR/../prompts
 
-command -v jq >/dev/null 2>&1 || { echo "jq が必要です" >&2; exit 1; }
+load_common_state() {
+  command -v jq >/dev/null 2>&1 || { echo "jq が必要です" >&2; exit 1; }
 
-TMP_DIR=${CROSS_REFACTORING_TMP_DIR:?CROSS_REFACTORING_TMP_DIR を export してください}
-STATE=$TMP_DIR/cross-refactoring-rf$ID-state.json
-[ -s "$STATE" ] || { echo "状態ファイルがありません: $STATE" >&2; exit 1; }
+  TMP_DIR=${CROSS_REFACTORING_TMP_DIR:?CROSS_REFACTORING_TMP_DIR を export してください}
+  STATE=$TMP_DIR/cross-refactoring-rf$ID-state.json
+  [ -s "$STATE" ] || { echo "状態ファイルがありません: $STATE" >&2; exit 1; }
 
-REPO=$(jq -r '.repo' "$STATE")
-PR=$(jq -r '.current_pr' "$STATE")
-ROOT=$(jq -r '.worktree_root' "$STATE")
-WORK=$(jq -r '.worktrees.work' "$STATE")
-HEAD_BRANCH=$(jq -r '.head_branch' "$STATE")
-BASE_BRANCH=$(jq -r '.base_branch' "$STATE")
-SCOPE=$(jq -r '.target_scope | join(" ")' "$STATE")
-MODEL=$(jq -r --arg rt "$RUNTIME" '.models[$rt] // ""' "$STATE")
-BASELINE_TEST=$(jq -r '.baseline_test.command // ""' "$STATE")
-MAX_ITEMS=$(jq -r '.max_items_per_round' "$STATE")
+  REPO=$(jq -r '.repo' "$STATE")
+  PR=$(jq -r '.current_pr' "$STATE")
+  ROOT=$(jq -r '.worktree_root' "$STATE")
+  WORK=$(jq -r '.worktrees.work' "$STATE")
+  HEAD_BRANCH=$(jq -r '.head_branch' "$STATE")
+  BASE_BRANCH=$(jq -r '.base_branch' "$STATE")
+  SCOPE=$(jq -r '.target_scope | join(" ")' "$STATE")
+  MODEL=$(jq -r --arg rt "$RUNTIME" '.models[$rt] // ""' "$STATE")
+  BASELINE_TEST=$(jq -r '.baseline_test.command // ""' "$STATE")
+  MAX_ITEMS=$(jq -r '.max_items_per_round' "$STATE")
 
-# ラウンド番号は表示と項目の絞り込みに使う。未指定なら開いている最新ラウンドを採る。
-[ -n "$ROUND" ] || ROUND=$(jq -r '.rounds | length' "$STATE")
+  # ラウンド番号は表示と項目の絞り込みに使う。未指定なら開いている最新ラウンドを採る。
+  [ -n "$ROUND" ] || ROUND=$(jq -r '.rounds | length' "$STATE")
+}
+
+load_common_state
 
 # CLI 側の実行時間の上限。**フェーズごとの監視の上限に合わせる。** 短いと CLI が
 # 先に打ち切り、結果ファイルが残らなかった場合と区別が付かなくなる。
+configure_phase() {
 case "$PHASE" in
   propose|propose-tests)
     # **提案にもラウンド番号を入れる。** 起動時に同名の結果ファイルを消すため、
@@ -98,10 +103,14 @@ case "$PHASE" in
     exit 1
     ;;
 esac
+}
+
+configure_phase
 
 # Skill の配置先はランタイムで違う。**プロンプトに明示パスを必ず書く**ため、
 # ここで解決して雛形へ渡す。kiro は配置しただけでは SKILL.md 本文を読まない。
 # `set -u` 下で未定義参照にならないよう、分岐の前に必ず初期化する。
+resolve_skill_base() {
 SKILL_BASE=
 case "$RUNTIME" in
   claude) SKILL_BASE=.claude/skills ;;
@@ -112,6 +121,9 @@ case "$RUNTIME" in
   agy)    SKILL_BASE=.agents/skills ;;
   *)      echo "未知のランタイムです: $RUNTIME" >&2; exit 1 ;;
 esac
+}
+
+resolve_skill_base
 
 PROMPT=$STEM-prompt.md
 TEMPLATE=$PROMPTS/$PHASE.md
@@ -122,6 +134,7 @@ TEMPLATE=$PROMPTS/$PHASE.md
 # **渡すのは進行中の適用ラウンド（群）の項目だけである。** 群の中の項目は書き換える
 # ファイルが重ならず、まとめて 1 コミットにできる。群をまたいで渡すと、まだ適用して
 # いない項目まで 1 コミットへ入れさせることになる。
+collect_prompt_materials() {
 ITEMS_JSON='[]'
 APPLY_ROUND=0
 # ラウンドの種類。適用と修正では、項目が改善項目かテスト項目かで手順が変わる。
@@ -199,9 +212,13 @@ RF_ROUND_NOTE="この適用ラウンドの項目は**構造改善**です。振�
 export RF_ROUND_KIND=$ROUND_KIND RF_ROUND_NOTE=$RF_ROUND_NOTE
 export RF_VOCAB_SMELLS=$VOCAB_SMELLS RF_VOCAB_TECHNIQUES=$VOCAB_TECHNIQUES
 export RF_VOCAB_SEVERITIES=$VOCAB_SEVERITIES
+}
+
+collect_prompt_materials
 
 # 雛形は `${RF_*}` を展開するだけの素の Markdown。コマンド置換は展開しない
 # （プロンプト本文に `$(...)` や backtick が現れても実行させないため）。
+render_prompt() {
 python3 - "$TEMPLATE" > "$PROMPT" <<'PY'
 import os
 import string
@@ -210,11 +227,18 @@ import sys
 template = string.Template(open(sys.argv[1], encoding="utf-8").read())
 sys.stdout.write(template.safe_substitute(os.environ))
 PY
+}
+
+render_prompt
 
 # agy は現在地を作業領域にしない。結果ファイルの置き場所は全ランタイム共通の
 # 一時ディレクトリなので、作業領域へ明示的に追加する。
+launch_cli() {
 EXTRA_DIR=
 [ "$RUNTIME" = "agy" ] && EXTRA_DIR=$TMP_DIR
 
 "$LIB/launch-cli.sh" "$RUNTIME" "$WORKDIR" "$PROMPT" "$STEM" "$MODEL" "$EXTRA_DIR" \
   "$PRINT_TIMEOUT"
+}
+
+launch_cli

@@ -12,6 +12,7 @@ import re
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from typing import Any, Iterable, Optional
 
 import assignment
@@ -165,21 +166,25 @@ def _plan_mode_of(plan_file: Optional[str]) -> str:
     return PLAN_FILE if str(plan_file).strip() else PLAN_NONE
 
 
+@dataclass(frozen=True)
+class InitialContext:
+    repo: str
+    base_branch: str
+    head_branch: str
+    root: pathlib.Path
+    work: pathlib.Path
+    tmp_dir: pathlib.Path
+    host: str
+    detection: str
+    runtimes: list[str]
+    impl_capable: list[str]
+    model_spec: dict[str, Optional[str]]
+    auth: dict[str, dict[str, Any]]
+    baseline: dict[str, Any]
+
+
 def _build_initial_state(
-    args: argparse.Namespace,
-    repo: str,
-    base_branch: str,
-    head_branch: str,
-    root: pathlib.Path,
-    work: pathlib.Path,
-    tmp_dir: pathlib.Path,
-    host: str,
-    detection: str,
-    runtimes: list[str],
-    impl_capable: list[str],
-    model_spec: dict[str, Optional[str]],
-    auth: dict[str, dict[str, Any]],
-    baseline: dict[str, Any],
+    args: argparse.Namespace, ctx: InitialContext
 ) -> dict[str, Any]:
     """確定済みの材料から、初期の状態を組み立てて返す。
 
@@ -191,20 +196,23 @@ def _build_initial_state(
     return {
         "id": args.pr,
         "started_at": statefile.now(),
-        "repo": repo,
+        "repo": ctx.repo,
         "current_pr": args.pr,
-        "base_branch": base_branch,
-        "head_branch": head_branch,
-        "worktree_root": str(root),
-        "worktrees": {"work": str(work), **{r: str(root / r) for r in runtimes}},
-        "tmp_dir": str(tmp_dir),
+        "base_branch": ctx.base_branch,
+        "head_branch": ctx.head_branch,
+        "worktree_root": str(ctx.root),
+        "worktrees": {
+            "work": str(ctx.work),
+            **{r: str(ctx.root / r) for r in ctx.runtimes},
+        },
+        "tmp_dir": str(ctx.tmp_dir),
         "target_scope": list(args.scope),
-        "host": host,
-        "host_detection": detection,
-        "runtimes": runtimes,
-        "impl_capable": impl_capable,
-        "models": model_spec,
-        "auth": auth,
+        "host": ctx.host,
+        "host_detection": ctx.detection,
+        "runtimes": ctx.runtimes,
+        "impl_capable": ctx.impl_capable,
+        "models": ctx.model_spec,
+        "auth": ctx.auth,
         # 提案プロンプトへ許容値をそのまま列挙するために持たせる。
         # 定義は検証側（この CLI）にあり、状態ファイル経由で起動側へ渡す。
         "vocabulary": vocabulary(),
@@ -225,7 +233,7 @@ def _build_initial_state(
         # 「テストが通ること」を検証に使えない（Step 5 の判定はテストで決まる）。
         "round_kind": TEST,
         "severity_threshold": args.severity_threshold,
-        "baseline_test": baseline,
+        "baseline_test": ctx.baseline,
         # 生成物の同期は**進行側の責務**。push の直前に実行する。
         "sync_command": args.sync_command,
         # **改修計画の既定は Pull Request のコメント 1 件である**（#436 決定 6）。
@@ -305,10 +313,22 @@ def cmd_init(args: argparse.Namespace) -> None:
 
     baseline = _run_baseline_test(args.baseline_test, work, args.test_timeout)
 
-    state = _build_initial_state(
-        args, repo, base_branch, head_branch, root, work, tmp_dir,
-        host, detection, runtimes, impl_capable, model_spec, auth, baseline,
+    context = InitialContext(
+        repo=repo,
+        base_branch=base_branch,
+        head_branch=head_branch,
+        root=root,
+        work=work,
+        tmp_dir=tmp_dir,
+        host=host,
+        detection=detection,
+        runtimes=runtimes,
+        impl_capable=impl_capable,
+        model_spec=model_spec,
+        auth=auth,
+        baseline=baseline,
     )
+    state = _build_initial_state(args, context)
     # GitHub は自分の Pull Request への `APPROVE` と `REQUEST_CHANGES` を
     # `HTTP 422` で拒む。判定はそのまま結果ファイルへ残し、**投稿の event だけ**
     # を倒す。収束判定は結果ファイルの判定を見るので、倒しても進行は変わらない。
