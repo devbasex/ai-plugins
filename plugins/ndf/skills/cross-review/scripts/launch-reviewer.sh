@@ -38,6 +38,7 @@ TMP_DIR=$(tmpdir)
 STATE=$TMP_DIR/cross-review-pr$STATE_PR-state.json
 [ -s "$STATE" ] || { echo "state.json not found: $STATE" >&2; exit 1; }
 
+load_context() {
 WORKTREE=$(jq -r '.worktree_path' "$STATE")
 REPO=$(jq -r '.repo' "$STATE")
 EVENT_DOWNGRADE=$(jq -r '.event_downgrade // false' "$STATE")
@@ -50,7 +51,9 @@ PR=$(jq -r '.current_pr' "$STATE")
 # 前の版の state.json から再開したときだけ、従来の `gh pr view` へ落ちる。
 SHA=$(jq -r '(.rounds[-1].head_sha // "")' "$STATE")
 [ -n "$SHA" ] || SHA=$(gh pr view "$PR" --json headRefOid -q .headRefOid)
+}
 
+prepare_prompt_context() {
 # 前ラウンドの結果を残さない。投稿失敗などで今ラウンドの result.json が
 # 書かれなかったとき、state.py read-result が**前ラウンドの結果を読んで**
 # 同じ判定を繰り返す事故を防ぐ。
@@ -83,7 +86,9 @@ $EXTRA_REVIEW_INSTRUCTIONS
 EXTRA_EOF
 )
 fi
+}
 
+render_review_prompt() {
 cat > "$PROMPT" <<EOF
 # /ndf:pr-review 実行 (cross-review $RUNTIME / round $ROUND)
 
@@ -200,7 +205,9 @@ $EXTRA_REVIEW_BLOCK
 - worktree 外のパスは触らない
 - gh api 失敗時は err.log にエラー詳細を残し、**result.json を書いてから**終了する
 EOF
+}
 
+launch_reviewer() {
 # 結果ファイルの置き場所が作業ツリーの外にあるときだけ、作業領域へ足す。
 # `<worktree>/.cross_review/` を使う既定の配置では足さない。
 WORKTREE_ABS=$(cd "$WORKTREE" && pwd -P)
@@ -215,3 +222,9 @@ esac
 # 打ち切りの判断を監視の側へ一本化する（#598 / #537）。
 "$SCRIPT_DIR/../../../scripts/lib/launch-cli.sh" "$RUNTIME" "$WORKTREE_ABS" "$PROMPT" "$STEM" "" \
   "$EXTRA_DIR" review
+}
+
+load_context
+prepare_prompt_context
+render_review_prompt
+launch_reviewer

@@ -340,6 +340,26 @@ class AgentPaths:
         )
 
 
+@dataclass(frozen=True)
+class MonitorOutcome:
+    status: str
+    exit_code: int
+    icon: str
+    detail: str
+
+    @classmethod
+    def create(cls, status: str, detail: str) -> "MonitorOutcome":
+        exit_code, icon = {
+            "OK": (0, "✅"),
+            "TIMEOUT": (2, "⏰"),
+            "NO_RESULT": (3, "❌"),
+            "EARLY_ERROR": (4, "💥"),
+            "STALLED": (5, "🛑"),
+            "PIDFILE_BAD": (6, "❓"),
+        }[status]
+        return cls(status, exit_code, icon, detail)
+
+
 @dataclass
 class AgentStatus:
     agent: str
@@ -361,6 +381,7 @@ class AgentStatus:
     launched_at: Optional[str] = None
     started_at: Optional[str] = None
     ended_at: Optional[str] = None
+    outcome: Optional[MonitorOutcome] = None
 
 
 # ---------- 監視ロジック ----------
@@ -575,10 +596,13 @@ def _tail_last_nonempty_line(path: pathlib.Path, limit: int = 4096) -> str:
 
 def _finish_monitor(
     status: AgentStatus,
-    outcome: tuple[str, int, str],
+    outcome: MonitorOutcome,
     log_context: tuple[str, str],
 ) -> AgentStatus:
-    status.status, status.exit_code, status.detail = outcome
+    status.outcome = outcome
+    status.status = outcome.status
+    status.exit_code = outcome.exit_code
+    status.detail = outcome.detail
     _emit_log(*log_context, status)
     return status
 
@@ -662,14 +686,14 @@ def _initialize_monitor(
 
 def _validate_pid_cmdline(
     pid: int, agent: str, alive: bool, validated: bool
-) -> tuple[bool, tuple[str, int, str] | None]:
+) -> tuple[bool, MonitorOutcome | None]:
     if not alive or validated:
         return validated, None
     cmdline_ok = _pid_cmdline_matches(pid, agent)
     if cmdline_ok is False:
         _kill_pid(pid)
-        return validated, (
-            "PIDFILE_BAD", 6,
+        return validated, MonitorOutcome.create(
+            "PIDFILE_BAD",
             f"pid {pid} cmdline does not contain '{agent}' (stale pidfile?)",
         )
     return cmdline_ok is True, None
@@ -677,49 +701,53 @@ def _validate_pid_cmdline(
 
 def _timeout_outcome(
     elapsed: float, timeout: int, alive: bool, pid: int
-) -> tuple[str, int, str] | None:
+) -> MonitorOutcome | None:
     if elapsed < timeout:
         return None
     if alive:
         _kill_pid(pid)
-    return "TIMEOUT", 2, f"hard timeout {timeout}s reached (pid {pid})"
+    return MonitorOutcome.create("TIMEOUT", f"hard timeout {timeout}s reached (pid {pid})")
 
 
 def _early_error_outcome(
     paths: AgentPaths, status: AgentStatus, alive: bool, disabled: bool
-) -> tuple[tuple[str, int, str] | None, str | None]:
+) -> tuple[MonitorOutcome | None, str | None]:
     fatal, warning = _early_error(paths, status.agent, disabled)
     if not fatal:
         return None, warning
     if alive:
         _kill_pid(status.pid)
     source, message = fatal
-    return ("EARLY_ERROR", 4, f"early error (fatal) in {source}: {message[:200]}"), warning
+    return MonitorOutcome.create(
+        "EARLY_ERROR", f"early error (fatal) in {source}: {message[:200]}"
+    ), warning
 
 
 def _process_exit_outcome(
     paths: AgentPaths, status: AgentStatus, alive: bool, require_result: bool
-) -> tuple[str, int, str] | None:
+) -> MonitorOutcome | None:
     if alive:
         return None
     status.result_exists = paths.result.exists() and paths.result.stat().st_size > 0
     if status.result_exists or not require_result:
-        return (
-            "OK", 0,
+        return MonitorOutcome.create(
+            "OK",
             f"process exited; sentinel={status.sentinel_seen}; "
             f"result_exists={status.result_exists}",
         )
-    return "NO_RESULT", 3, f"process exited but result.json missing: {paths.result}"
+    return MonitorOutcome.create(
+        "NO_RESULT", f"process exited but result.json missing: {paths.result}"
+    )
 
 
 def _stall_outcome(
     status: AgentStatus, stall_timeout: int, pid: int, last_progress_size: int
-) -> tuple[str, int, str] | None:
+) -> MonitorOutcome | None:
     if status.idle_seconds < stall_timeout:
         return None
     _kill_pid(pid)
-    return (
-        "STALLED", 5,
+    return MonitorOutcome.create(
+        "STALLED",
         f"no log progress for {stall_timeout}s "
         f"(pid {pid}, last size {last_progress_size}B)",
     )
@@ -745,7 +773,7 @@ def monitor_agent(
     if pid is None:
         return _finish_monitor(
             status,
-            ("PIDFILE_BAD", 6, f"pidfile not found: {paths.pidfile}"),
+            MonitorOutcome.create("PIDFILE_BAD", f"pidfile not found: {paths.pidfile}"),
             (log_prefix, agent),
         )
 
@@ -783,7 +811,7 @@ def monitor_agent(
             completion_detail = _lingering_completion(paths, status, pid, started_wall)
         if completion_detail is not None:
             return _finish_monitor(
-                status, ("OK", 0, completion_detail), (log_prefix, agent)
+                status, MonitorOutcome.create("OK", completion_detail), (log_prefix, agent)
             )
 
         # result.json が書かれた後もプロセスがハングするケース (実測:
@@ -852,10 +880,7 @@ def _emit_progress(prefix: str, agent: str, st: AgentStatus) -> None:
 
 
 def _emit_log(prefix: str, agent: str, st: AgentStatus) -> None:
-    icon = {
-        "OK": "✅", "TIMEOUT": "⏰", "NO_RESULT": "❌",
-        "EARLY_ERROR": "💥", "STALLED": "🛑", "PIDFILE_BAD": "❓",
-    }.get(st.status, "?")
+    icon = st.outcome.icon if st.outcome else "?"
     print(
         f"{prefix}{icon} {agent} {st.status} ({st.elapsed:.0f}s) — {st.detail}",
         file=sys.stderr, flush=True,

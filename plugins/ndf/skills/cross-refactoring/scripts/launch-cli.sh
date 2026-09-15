@@ -53,6 +53,16 @@ require_round() {
   [ "$ROUND" -ge 1 ] 2>/dev/null || { echo "$PHASE には ROUND が必要です" >&2; exit 1; }
 }
 
+configure_judge_diff() {
+  # APPLY_ROUND は共通の読み取りより後で決まるため、stem を組む前に先読みする。
+  JUDGE_GROUP=$(jq -r --argjson r "$ROUND" \
+    '[.rounds[] | select(.round == $r)][0].apply_round // 1' "$STATE")
+  RF_TEST_DIFF_PATH=$TMP_DIR/test-diff-r$ROUND-g$JUDGE_GROUP.diff
+  [ -s "$RF_TEST_DIFF_PATH" ] || {
+    echo "判定する差分がありません: $RF_TEST_DIFF_PATH" >&2; exit 1; }
+  export RF_TEST_DIFF_PATH
+}
+
 # CLI 側の実行時間の上限は **工程名** で共通層へ渡す。共通層が上限の表（`lib/limits.py`）から
 # 「監視の上限 + 120 秒」を導く。短いと CLI が先に打ち切り、結果ファイルが残らなかった
 # 場合と区別が付かなくなる（#598 / #537）。**工程名は上限の表の名前へ正規化して渡す**
@@ -85,16 +95,10 @@ case "$PHASE" in
     # **名前に適用群を入れる。** 同じ提案ラウンドで複数の群が段 2 を通ると、
     # 前の群の差分と結果を上書きする。**この時点では `APPLY_ROUND` が未設定である
     # ため、ここで先に読む**（下の共通の読み取りは `STEM` の後にある）。
-    JUDGE_GROUP=$(jq -r --argjson r "$ROUND" \
-      '[.rounds[] | select(.round == $r)][0].apply_round // 1' "$STATE")
+    configure_judge_diff
     STEM=$TMP_DIR/$RUNTIME-judge-test-changes-r$ROUND-g$JUDGE_GROUP
     WORKDIR=$WORK
     PRINT_TIMEOUT=judge-test-changes
-    # 判定の対象は、進行側が先に書き出す。**無ければ起動しない**（渡すものが無い）。
-    RF_TEST_DIFF_PATH=$TMP_DIR/test-diff-r$ROUND-g$JUDGE_GROUP.diff
-    [ -s "$RF_TEST_DIFF_PATH" ] || {
-      echo "判定する差分がありません: $RF_TEST_DIFF_PATH" >&2; exit 1; }
-    export RF_TEST_DIFF_PATH
     ;;
   final-fix)
     # **ラウンド番号を名前に入れない。** 最終ゲートは提案ラウンドの外にあり、
