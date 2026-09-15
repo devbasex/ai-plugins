@@ -140,9 +140,9 @@
 ## 受け入れ条件（無進捗の打ち切り）
 
 - [ ] AC28: `init` の出力に `IMPL_STALL_TIMEOUT` が入り、値が `--test-timeout` の値 + 900 である
-  （既定で 1800）。`--test-timeout` は 2700 以下を前提とする（超えると許容がハード上限 3600 を上回る）
-- [ ] AC29: `SKILL.md` の骨組みで、適用・修正・最終ゲートの修正の 3 つの `monitor.py` の呼び出しが
-  `--stall-timeout "$IMPL_STALL_TIMEOUT"` と `--timeout 3600` を渡す
+  （既定で 1800）。`--test-timeout` は `apply` / `fix` / `final-fix` の監視の上限 − 900 以下（P2 の既定なら 2700 以下）を前提とする
+- [ ] AC29: `SKILL.md` の骨組みで、`--phase apply` / `fix` / `final-fix` の 3 つの `monitor.py` の呼び出しが
+  `--stall-timeout "$IMPL_STALL_TIMEOUT"` を持ち、`--timeout` を持たない
 - [ ] AC30: 適用・修正・最終ゲートの修正の雛形（`prompts/apply.md` / `fix.md` / `final-fix.md`）が進捗マーカーを
   書く。作業段階ごとに `$RF_STEM-progress.log` へ 1 行追記する指示である
 
@@ -152,7 +152,7 @@
   上限（2 回）を書く。「適用ラウンドに別の上限を置かない」の段落は無くなる。
   `grep -n "別の上限を置かない\|別に置かない" SKILL.md` が何も出力しない
 - [ ] AC32: `docs/02-apply-and-review.md` の Step 4 と `docs/04-fix-and-report.md` の Step 6 の骨組みが、`SKILL.md` の
-  同じ呼び出しと同じ `monitor.py` の引数を持つ
+  同じ呼び出しと同じ `monitor.py` の引数を持つ（`--phase` と `--stall-timeout "$IMPL_STALL_TIMEOUT"` を持ち、`--timeout` を持たない）
 - [ ] AC33: `docs/02-apply-and-review.md` のトレーラーの節が 2 つを書く。`git log --format='%(trailers:…)'` が
   最後の段落しか読まないことと、進行側の読み方である
 
@@ -189,7 +189,7 @@
 
 | # | 前提 |
 | --- | --- |
-| 1 | D-A の P1（監視の結果の記録）と P3（理由の語彙）が先に `develop` へ入る。理由の名前は #619 の提案（`timeout` / `cli_timeout` / `usage_limit` / `early_error` / `stalled` / `not_posted` / `missing`）を基本とする |
+| 1 | D-A の P1（監視の結果の記録）、P2（`--phase` と `lib/limits.py` による監視の上限）、P3（理由の語彙）が先に `develop` へ入る。理由の名前は #619 の提案（`timeout` / `cli_timeout` / `usage_limit` / `early_error` / `stalled` / `not_posted` / `missing`）を基本とする |
 | 2 | 監視の終了コード（2 = TIMEOUT / 3 = NO_RESULT / 4 = EARLY_ERROR / 5 = STALLED / 6 = PIDFILE_BAD）の意味は変わらない |
 | 3 | `assignment.assign(seq, host)` の実装担当は 4 者の輪番で、`seq` を 1 ずつ進めれば 3 回以内に失敗した担当と別のランタイムが出る。D-B が除外を足した後も、除外されない者が 2 者以上いる |
 | 4 | Claude Code が足す帰属行は、メッセージの末尾に独立した段落として付く（#553 の実測 `26a0fff`） |

@@ -144,15 +144,17 @@ git の標準の読み方でも取れる。
 のため、完了まで出力しない（監視の既定の許容 900 秒はこのため）。 2 つを足した値が、正常に動いていても出力が無い最長の時間になる。`init` がこの値を `IMPL_STALL_TIMEOUT`
 として出し、骨組みの適用・修正・最終ゲートの修正の監視が `--stall-timeout` に渡す。`monitor.py` は変えない。
 
-修正と最終ゲートの修正の監視には、適用と同じ `--timeout 3600` も足す。いまは `--timeout` を渡しておらず（`SKILL.md:327-328` / `:348-349`）、
-監視の既定のハード上限 420 秒で打ち切られる。無進捗の許容だけ延ばしても、テストの実行中に TIMEOUT で落ちる。3600 は `launch-cli.sh` が修正に渡す CLI
-の上限と同じ値である。
+**監視の上限（`--timeout`）は渡さない。** 上限は D-A の P2 が `--phase` と `lib/limits.py` で工程ごとに決め（既定 3600 秒）、修正と
+最終ゲートの修正が 420 秒で打ち切られる件も P2 が直す。P6 は P2 が入れた `--phase` の呼び出しに `--stall-timeout` だけを足す。
 
 雛形の進捗マーカーは、次に STALLED が出たときに担当が動いていたかを読むためにも足す。rf646 の agy のログは作業ツリーとともに消えており、
 この設計の時点では確かめられなかった（未確認 1）。
 
-**`--test-timeout` は 2700 以下を前提にする。** 超えると許容がハード上限 3600 を上回り、ハード上限で打ち切られる。ハード上限も同じ値から
-導く形は採らない。監視の `--timeout` と `launch-cli.sh` の `PRINT_TIMEOUT` を同時に変えることになり、適用の所要の実測も無い（未確認 7）。
+**`--test-timeout` は、`apply` / `fix` / `final-fix` の監視の上限 − 900 以下を前提にする**（P2 の既定 3600 秒なら 2700 以下）。
+監視の上限は `MONITOR_TIMEOUT_<担当>` / `MONITOR_TIMEOUT` で上書きされうる。超えると許容が監視の上限以上になり、監視の上限で
+打ち切られ、P2 の監視が担当名と 2 つの値を警告する（D-A の AC33）。D-A の AC31 が固定する「無進捗の許容 < 監視の上限」は担当ごとの
+既定の許容の組で、この許容（既定 1800 < 3600）はその順序を崩さない。監視の上限を許容から導く形は採らない。上限の表は P2 の
+`limits.py` が 1 つだけ持ち、適用の所要の実測も無い（未確認 7）。
 
 進捗マーカーだけで足りるとする形は採らない。テストの実行中はマーカーを書けない。 `MONITOR_STALL_AGY` などの環境変数に委ねる形も採らない。
 担当ごとに値を覚えさせることになり、cross-review にも効く。
@@ -367,14 +369,13 @@ stateDiagram-v2
 
 ```bash
     "$LIB/monitor.py" "$ID" --agents "$IMPL" --tmp-dir "$TMP_DIR" \
-        --stem-template "{agent}-apply-r$ROUND" --timeout 3600 \
+        --stem-template "{agent}-apply-r$ROUND" --phase apply \
         --stall-timeout "$IMPL_STALL_TIMEOUT"
     # 終了コード 2 = この群を取り消した、または担当を替えて開き直す。修正ラウンドは回さない
     rf merge-apply "$ID" "$ROUND" || continue
 ```
 
-修正（`{agent}-fix-r$ROUND`）と最終ゲートの修正（`{agent}-final-fix`）の監視にも、同じ `--stall-timeout` と `--timeout 3600`
-を足す。
+差分は `--stall-timeout` の 1 行だけで（`--phase apply` は P2 の形）、修正と最終ゲートの修正の監視にも同じ行を足す。`--timeout` は渡さない。
 
 ### 雛形に足す文
 
@@ -451,6 +452,7 @@ graph TD
 | D-A（P1） | 監視が担当ごとの状態と理由をファイルへ残す。**D-C は置き場所と形に依存する** | `_monitor_reason` だけが読む。記録が無い・読めない・該当が無いときは `missing` を返し、振る舞いは変えない |
 | D-A（P3） | 理由の名前は #619 の語彙を基本とし、claude の `"api_error_status":429` を `usage_limit` として早期に打ち切る | 名前を解釈しない。記録へ写すだけ |
 | D-A（P1 の計測） | 骨組みの監視の呼び出しの前後に計測を足す | P6 は P3 の後に載せるため、D-A の変更の上で `--stall-timeout` を足す |
+| D-A（P2） | 監視の上限は `--phase` と `lib/limits.py` が工程で決め、cross-refactoring の 8 か所は `--timeout` を渡さない（D-A の AC37）。修正と最終ゲートの修正の 420 秒の打ち切りも P2 が直す | `--timeout` を足さず、`--phase` が `apply` / `fix` / `final-fix` の呼び出しに `--stall-timeout` だけを足す。許容が監視の上限以上になる組は P2 の警告（D-A の AC33）に任せる |
 | D-A（全体） | 監視の終了コードの意味（2 / 3 / 4 / 5 / 6）と `--stall-timeout` の引数は変えない | 骨組みは終了コードで分岐しない（決定 4） |
 | D-B（P4 / P5） | 除外（#478）は `assignment.assign` か、その呼び出し側に入る | 適用・交代・最終ゲートの修正の担当を決める呼び出しは `rounds.impl_for_seq` の 1 か所（決定 8）。D-B が先に入れば P6 がそこへ寄せ、P6 が先なら D-B がそこを変える。`setup.py:467` の提案ラウンドの担当は CLI を起動しないため対象外 |
 
@@ -478,8 +480,8 @@ graph TD
 | AC26 | 同じ一時リポジトリで、題名が `Round: …` の形で本文がトレーラーの段落だけのコミットを作り、`Round` が題名の値にならない | `test_commit_trailers_git.py` |
 | AC27、AC30 | 雛形の文言を `grep` で探す | `test_skill_terms.py` |
 | AC28 | `_emit_init` の出力に `IMPL_STALL_TIMEOUT=1800`（`test_timeout` 900 の状態） | `test_init.py` |
-| AC29、AC31 | `SKILL.md` の骨組みから `monitor.py` の呼び出し 4 つを取り出し、提案以外の 3 つが `--stall-timeout "$IMPL_STALL_TIMEOUT"` と `--timeout 3600` を持つ。語の表の行と段落の有無 | `test_skill_terms.py` |
-| AC32 | `docs/02-apply-and-review.md` の Step 4 と `docs/04-fix-and-report.md` の Step 6 の `monitor.py` の引数が、`SKILL.md` の同じ呼び出しと一致する | `test_skill_terms.py` |
+| AC29、AC31 | `SKILL.md` の骨組みから `monitor.py` の呼び出し 4 つを取り出し、`--phase` が `apply` / `fix` / `final-fix` の 3 つが `--stall-timeout "$IMPL_STALL_TIMEOUT"` を持ち、`--timeout` を持たない。語の表の行と段落の有無 | `test_skill_terms.py` |
+| AC32 | `docs/02-apply-and-review.md` の Step 4 と `docs/04-fix-and-report.md` の Step 6 の `monitor.py` の引数（`--phase` と `--stall-timeout`、`--timeout` なし）が、`SKILL.md` の同じ呼び出しと一致する | `test_skill_terms.py` |
 | AC33 | トレーラーの節の記載をレビューで見る | 手動 |
 | AC34 | 既存の `test_a_verified_apply_round_marks_every_item_applied` に `failed_attempts` が無いことを足す | `test_merge_apply.py` |
 | AC35、AC36 | 全体のテスト、`bash scripts/build-runtime-plugins.sh --check`、`claude plugin validate .`、`python3 scripts/check-skill-frontmatter.py` | 手動 |
@@ -495,4 +497,4 @@ graph TD
 | 4 | 担当を替えた後の担当も結果を残さない割合 | 2 回目で救える群の数は測っていない。#662 の計測で `failed_attempts` を数えて見る | 配布後 |
 | 5 | Claude Code 以外の担当が帰属行を足すか | codex / agy / kiro のコミットで帰属行の段落を見ていない。決定 11 は誰が足しても同じに読む | 確かめなくてよい |
 | 6 | 帰属行を同じ段落に続ける指示に claude が従うか | 決定 12 は補助で、従わなくても決定 11 で検証は通る | 実装後の最初の実行 |
-| 7 | `--test-timeout` が 2700 を超える利用 | 適用・修正の所要を測っていない。#662 の計測で工程ごとの所要が取れたら、ハード上限を導く形を見直す | 配布後 |
+| 7 | `--test-timeout` が監視の上限 − 900（既定 2700）を超える利用 | 適用・修正の所要を測っていない。#662 の計測で工程ごとの所要が取れたら、P2 の上限の表と合わせて見直す | 配布後 |
