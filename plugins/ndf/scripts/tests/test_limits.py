@@ -129,6 +129,20 @@ def test_the_phase_default_applies_without_overrides(limits) -> None:
     assert limits.monitor_timeout("fix", "claude") == 3600
 
 
+def test_an_explicit_zero_is_returned_as_is(limits, monkeypatch) -> None:
+    """現状固定。0 は未指定として扱われず、環境変数と表より優先してそのまま返る。"""
+    monkeypatch.setenv("MONITOR_TIMEOUT_AGY", "700")
+    monkeypatch.setenv("MONITOR_TIMEOUT", "800")
+    assert limits.monitor_timeout("review", "agy", 0) == 0
+
+
+@pytest.mark.parametrize("name", ["MONITOR_TIMEOUT_AGY", "MONITOR_TIMEOUT"])
+def test_a_zero_environment_is_returned_as_is(limits, monkeypatch, name: str) -> None:
+    """現状固定。環境変数の文字列 "0" も表の値へ落ちず、0 がそのまま返る。"""
+    monkeypatch.setenv(name, "0")
+    assert limits.monitor_timeout("review", "agy") == 0
+
+
 def test_a_non_numeric_environment_falls_back(limits, monkeypatch, capsys) -> None:
     monkeypatch.setenv("MONITOR_TIMEOUT", "abc")
     assert limits.monitor_timeout("review", "agy") == 1200
