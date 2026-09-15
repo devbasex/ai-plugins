@@ -38,7 +38,7 @@ PR を**ホストを除く 3 者から選んだ 2 者**にレビューさせ、*
 - [scripts/monitor.py](scripts/monitor.py) — codex/agy プロセス多軸監視 (sentinel / pidfile / 早期エラー / stall / hard timeout / result.json)
 - [scripts/wait-review.sh](scripts/wait-review.sh) — `monitor.py` の薄ラッパ（互換用）
 - [scripts/rotate-pr.sh](scripts/rotate-pr.sh) — PR ローテーション
-- [scripts/measure.py](scripts/measure.py) — 効果の測定（状態ファイル 1 つを読む。収束ループの外にあり、手順の途中では呼ばない）
+- [scripts/measure.py](scripts/measure.py) — 効果の測定（状態ファイル 1 つを読む）。**状態を保存するたびに実行の要約として呼ばれ**、出力が作業ツリーの外の要約の `measure` に残る（#662。手順から手で呼ぶ必要は無い）
 
 メインセッションからは `$SCRIPTS/state.py <subcommand>` 形式で呼ぶだけで、
 state.json の読み書きや AI launcher 起動・完了待ちは全て委譲される。

@@ -155,3 +155,13 @@ def test_the_git_identity_is_isolated_during_the_run() -> None:
         text=True,
     )
     assert out.stdout.strip() == ""
+
+
+def test_metrics_dir_points_to_a_temporary_directory_during_tests() -> None:
+    """状態を保存するテストが、実行した人の状態ディレクトリへ要約を書かない（#662 の AC72）。"""
+    import tempfile
+
+    metrics = os.environ.get("NDF_METRICS_DIR", "")
+    assert metrics, "NDF_METRICS_DIR が設定されていない"
+    assert Path(metrics).resolve().is_relative_to(Path(tempfile.gettempdir()).resolve())
+    assert "NDF_METRICS" not in os.environ

@@ -99,6 +99,8 @@ fi
    | システムの一時ディレクトリ配下 | レビュー用。`cross-review` / `cross-refactoring` が作る | `pr<PR番号>` |
 
    開発用はブランチ名で、レビュー用は PR 番号で探す。レビュー用は削除すると中の `.cross_review/` も一緒に消える。空になった `.worktrees/` の中間ディレクトリ（`feature/` など）も削除する
+
+   **レビュー用を消しても、cross-review / cross-refactoring の実行の要約は残る。** 要約は作業ツリーの外（`NDF_METRICS_DIR` → `$XDG_STATE_HOME/ndf/metrics` → `~/.local/state/ndf/metrics`）に置かれ、状態ファイルと監視の記録だけが作業ツリーとともに消える。所要の集計は `run_metrics.py aggregate` で後から読める
 5. **ブランチ削除**: 削除するブランチ名を提示して同意を得てから `git branch -d <feature-branch>`
 6. **マージ済みブランチの整理**: 下記の手順で残存ブランチをまとめて削除
 7. **閉じ忘れた issue を閉じる**: 下記「閉じ忘れた issue を閉じる」の手順で、マージした PR の本文が指す issue のうち **まだ OPEN のもの** を閉じる

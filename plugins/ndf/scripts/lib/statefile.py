@@ -12,7 +12,23 @@ import json
 import pathlib
 import shlex
 import sys
-from typing import Any
+from typing import Any, Callable
+
+# 保存の後に呼ぶ関数（#662）。**共通層は呼ぶだけで、何をするかは知らない。**
+# cross-refactoring の `refactor.py` が実行の要約の書き出しを登録する。
+AfterSave = Callable[[pathlib.Path, dict[str, Any]], None]
+_AFTER_SAVE: list[AfterSave] = []
+
+
+def register_after_save(hook: AfterSave) -> None:
+    """保存の後に呼ぶ関数を登録する。同じ関数を 2 度登録しても 1 度だけ呼ぶ。"""
+    if hook not in _AFTER_SAVE:
+        _AFTER_SAVE.append(hook)
+
+
+def unregister_after_save(hook: AfterSave) -> None:
+    if hook in _AFTER_SAVE:
+        _AFTER_SAVE.remove(hook)
 
 
 def now() -> str:
@@ -35,6 +51,12 @@ def save(path: pathlib.Path, state: dict[str, Any]) -> None:
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
     tmp.replace(path)
+    # **差し込み口の失敗で保存の呼び出し側を止めない。** 状態は既に書けている。
+    for hook in list(_AFTER_SAVE):
+        try:
+            hook(path, state)
+        except Exception as exc:  # noqa: BLE001
+            info(f"⚠ 保存の後の処理が失敗しました: {exc}")
 
 
 def emit(**values: Any) -> None:

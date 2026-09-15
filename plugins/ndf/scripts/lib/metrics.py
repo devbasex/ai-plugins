@@ -79,17 +79,9 @@ def aggregate(state: dict[str, Any]) -> dict[str, Any]:
                 impl, entry, items_by_id, impl_runtime, requested, reviews
             )
 
-        reviewer_models = entry.get("reviewer_models") or {}
-        for name in entry.get("reviewers", []):
-            spec = reviewer_models.get(name) or {}
-            r_requested = spec.get("requested")
-            r_observed = spec.get("observed")
-            _append_model_measurement_warnings(
-                unmeasured, assumed, round_no, name, r_requested, r_observed,
-                "レビュー担当"
-            )
-            if _models.is_measurable(name, r_requested):
-                _aggregate_reviewer_round(reviewer, entry, name, r_requested, reviews)
+        _aggregate_round_reviewers(
+            reviewer, entry, round_no, reviews, unmeasured, assumed
+        )
 
     return {
         "impl": {k: _finish_impl(v) for k, v in sorted(impl.items())},
@@ -97,6 +89,26 @@ def aggregate(state: dict[str, Any]) -> dict[str, Any]:
         "unmeasured": unmeasured,
         "assumed": assumed,
     }
+
+
+def _aggregate_round_reviewers(
+    reviewer: dict[str, dict[str, Any]],
+    entry: dict[str, Any],
+    round_no: Any,
+    reviews: list[dict[str, Any]],
+    unmeasured: list[str],
+    assumed: list[str],
+) -> None:
+    reviewer_models = entry.get("reviewer_models") or {}
+    for name in entry.get("reviewers", []):
+        spec = reviewer_models.get(name) or {}
+        requested = spec.get("requested")
+        observed = spec.get("observed")
+        _append_model_measurement_warnings(
+            unmeasured, assumed, round_no, name, requested, observed, "レビュー担当"
+        )
+        if _models.is_measurable(name, requested):
+            _aggregate_reviewer_round(reviewer, entry, name, requested, reviews)
 
 
 def _aggregate_impl_round(
@@ -240,38 +252,60 @@ def _fmt(value: Any) -> str:
     return str(value)
 
 
+def _emit_table(
+    lines: list[str],
+    title: str,
+    headers: tuple[str, str],
+    rows: list[str],
+) -> None:
+    """見出しと Markdown 表を出力する。行がなければ記録なしと示す。"""
+    lines += [f"## {title}", ""]
+    if not rows:
+        lines.append("（記録なし）")
+        return
+    lines += [*headers, *rows]
+
+
 def format_report(metrics: dict[str, Any]) -> str:
     """人が読む形へ整形する。比較の限界を必ず添える。"""
-    lines: list[str] = ["## 実装担当", ""]
-    if metrics["impl"]:
-        lines += [
+    lines: list[str] = []
+    impl_rows = [
+        (
+            f"| {key} | {m['rounds']} | {m['applied']} | {m['abandoned']} | "
+            f"{_fmt(m['first_review_approval_rate'])} | {_fmt(m['avg_fix_rounds'])} | "
+            f"{_fmt(m['budget_exceeded_rate'])} | {_fmt(m['test_failure_rate'])} | "
+            f"{m['seconds']:.0f} |"
+        )
+        for key, m in metrics["impl"].items()
+    ]
+    _emit_table(
+        lines,
+        "実装担当",
+        (
             "| ランタイム / モデル | 担当R | 適用 | 見送り | 初回承認率 | 平均修正R | 予算超過率 | テスト失敗率 | 所要秒 |",
             "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
-        ]
-        for key, m in metrics["impl"].items():
-            lines.append(
-                f"| {key} | {m['rounds']} | {m['applied']} | {m['abandoned']} | "
-                f"{_fmt(m['first_review_approval_rate'])} | {_fmt(m['avg_fix_rounds'])} | "
-                f"{_fmt(m['budget_exceeded_rate'])} | {_fmt(m['test_failure_rate'])} | "
-                f"{m['seconds']:.0f} |"
-            )
-    else:
-        lines.append("（記録なし）")
+        ),
+        impl_rows,
+    )
 
-    lines += ["", "## レビュー担当", ""]
-    if metrics["reviewer"]:
-        lines += [
+    reviewer_rows = [
+        (
+            f"| {key} | {m['reviews']} | {m['findings']} | "
+            f"{_fmt(m['resolution_rate'])} | {_fmt(m['agreement_rate'])} | "
+            f"{m['seconds']:.0f} |"
+        )
+        for key, m in metrics["reviewer"].items()
+    ]
+    lines.append("")
+    _emit_table(
+        lines,
+        "レビュー担当",
+        (
             "| ランタイム / モデル | レビュー回数 | 指摘 | 修正に至った率 | 判定一致率 | 所要秒 |",
             "| --- | ---: | ---: | ---: | ---: | ---: |",
-        ]
-        for key, m in metrics["reviewer"].items():
-            lines.append(
-                f"| {key} | {m['reviews']} | {m['findings']} | "
-                f"{_fmt(m['resolution_rate'])} | {_fmt(m['agreement_rate'])} | "
-                f"{m['seconds']:.0f} |"
-            )
-    else:
-        lines.append("（記録なし）")
+        ),
+        reviewer_rows,
+    )
 
     if metrics["unmeasured"]:
         lines += ["", "## 集計から分離したラウンド", ""]

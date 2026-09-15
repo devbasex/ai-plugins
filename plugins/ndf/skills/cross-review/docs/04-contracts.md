@@ -229,6 +229,25 @@ launcher が生成するプロンプトに以下を強制している:
 `/ndf:pr-review` の result.json 出力規約に `posted_as` フィールドを含むこと
 （自分PR ダウングレード時に GitHub に実際送った event。デフォルトは `event` と同値）。
 
+## 監視と計測が残すファイル
+
+監視（`monitor.py`）と状態の保存が、AI の書き出しとは別に残す（#662）。
+
+| ファイル | 置き場所 | 中身 | いつ書くか |
+|---|---|---|---|
+| `<stem>-monitor.json` | `$TMP_DIR` | その担当の**最後の**監視の結果（`status` / `reason` / 時刻など 14 個のキー） | 担当 1 者の監視を終えたとき。起動（`launch-cli.sh`）の前に消す |
+| `monitor-outcomes.jsonl` | `$TMP_DIR` | 監視の結果を 1 行 1 つで**追記だけ**で積む | 同上。消さない |
+| `cross-review-pr<PR>-<開始時刻の UTC>.json` | 要約の置き場所の `<owner>--<repo>/` | 実行の要約（所要・結末・ラウンド・起動と `measure`）。**本文・`detail` を含まない** | 状態を保存するたび（同じ実行は上書き） |
+
+`reason` は `status` から決まる（`OK`→`ok` / `TIMEOUT`→`timeout` / `STALLED`→`stalled` /
+`EARLY_ERROR`→`early_error` / `NO_RESULT`→`missing` / `PIDFILE_BAD`→`pidfile_bad`）。
+監視の標準出力と終了コードは変わらない。
+
+**要約の置き場所は作業ツリーの外である。** `NDF_METRICS_DIR` → `$XDG_STATE_HOME/ndf/metrics` →
+`$HOME/.local/state/ndf/metrics` の順に決まり、`NDF_METRICS=0` のときは書かない。`state.py report`
+の最後の行が、書いた要約のパスか書かなかった理由を出す。束ねるのは共通層の `run_metrics.py aggregate`
+（`--since` / `--until` / `--repo` / `--kind` / `--version` / `--by total|round-count|reason`）である。
+
 ## `<worktree-base>` の解決順
 
 `state.py init` は worktree の親ディレクトリを以下の優先順で解決する:
