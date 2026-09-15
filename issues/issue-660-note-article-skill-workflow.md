@@ -65,7 +65,7 @@
 | 項目 | 手段 |
 | --- | --- |
 | 分量 | 本文の文字数を `wc -m` で測る |
-| 名前の実在 | 記事内の Skill 名を `plugins/ndf/manifests/` と `plugins/ndf/skills/` で検索する |
+| 名前の実在 | Skill 名は `plugins/ndf/manifests/claude-skills.txt` を `grep -x`、モード名・工程名は `plugins/ndf/skills/development-workflow/SKILL.md` の工程表を `grep -F` で照合する。`/goal` は Claude Code の組み込みコマンドとして Skill と区別して書かれていることを目視で確かめる |
 | 出典 | 出典の記録の各項目が埋まっていることを目視で確認する |
 | リンク | 記事内の URL を `curl -sI` で開き、200 を返すことを確かめる |
 | 体裁 | note のエディタへ貼った状態を大浜が目視で確認する（体裁レビュー） |

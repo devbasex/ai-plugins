@@ -109,7 +109,7 @@ documentation モードの説明が抽象になりやすく、実例として最
 | 4 standard が documentation より前 | `grep -n '^## '` の並び |
 | 5 気づき 4 点 | `grep -n '^### '` で節 5-1〜5-4 の 4 見出しがあること |
 | 6 数値の出典 | 本文の数値ごとに「出典 N」があり、`## 出典` の表に N があること |
-| 7 名前の実在 | 本文に出る Skill 名を `plugins/ndf/manifests/claude-skills.txt` で `grep -x` |
+| 7 名前の実在 | 名前の種類ごとに手段を分ける。Skill 名は `plugins/ndf/manifests/claude-skills.txt` を `grep -x`。モード名と工程名は `plugins/ndf/skills/development-workflow/SKILL.md`（出典 9）の「モードごとに起動する Skill」の表を `grep -F`。`/goal` は Skill ではなく Claude Code の組み込みコマンドなので、記事中で Skill と区別して書かれていることを目視 |
 | 8 分量 | `## 出典` より前を `wc -m` |
 | 9 文体 | cross-review の観点に「大浜の既出記事（出典 8）の文体との差」を渡す |
 | 10 触れない範囲 | cross-review の観点に要求の「含まない」を渡す |
