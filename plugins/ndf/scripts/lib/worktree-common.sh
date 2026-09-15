@@ -728,6 +728,59 @@ _wt_scan_expanded_line() {
   done
 }
 
+# ヒアドキュメントの開始記号 `<<` の直後（位置 $2）から、終端の語を読む。
+# 結果は呼び出し側が `local` で宣言した変数へ書く。
+#   _WT_DELIM     終端の語（空なら開始記号ではない）
+#   _WT_STRIP     `<<-` なら 1（本文の行頭のタブを落とす）
+#   _WT_EXPAND    本文が展開されるなら 1
+#   _WT_DELIM_END 読み終えた位置（区切りの文字、または行末）
+_wt_heredoc_parse_delim() {
+  local line="${1:-}" i="${2:-0}" n c delim="" quoted=0 dq="" strip=0
+  n=${#line}
+  if [ "${line:i:1}" = "-" ]; then strip=1; i=$((i + 1)); fi
+  while [ "${line:i:1}" = " " ] || [ "${line:i:1}" = $'\t' ]; do i=$((i + 1)); done
+  # 終端の語。引用符は書き方の違いで、語そのものには含まれない。
+  # 引用符を 1 つでも使えば、本文は展開されない。
+  # **引用符の中では区切りで切らない。** `<<"EOF X"` のように空白や記号を
+  # 含む語を、途中で切ると終端を見つけられない。
+  while [ "$i" -lt "$n" ]; do
+    c=${line:i:1}
+    if [ -n "$dq" ]; then
+      # `"` の中の `\"` は引用を閉じない。閉じたと読むと終端の語を取り違え、
+      # 本文の終わりを見つけられない（後続の命令まで本文として落とす）。
+      # 落とす `\` と残す `\` の別は `_wt_tokenize` と同じ。
+      # `'` の中では `\` は字面で、エスケープにならない。
+      if [ "$dq" = '"' ] && [ "$c" = '\' ] && [ -n "${line:i+1:1}" ]; then
+        case "${line:i+1:1}" in
+          '$'|'`'|'"'|'\') delim+="${line:i+1:1}" ;;
+          *) delim+="$c${line:i+1:1}" ;;
+        esac
+        i=$((i + 2))
+        continue
+      fi
+      if [ "$c" = "$dq" ]; then dq=""; else delim+="$c"; fi
+      i=$((i + 1))
+      continue
+    fi
+    case "$c" in
+      " "|$'\t'|";"|"|"|"&"|">"|"<") break ;;
+      "'"|'"') dq="$c"; quoted=1 ;;
+      # 引用符の外の `\` は次の 1 文字を字面にする。終端の語には `\` を
+      # 含めない (`<<E\OF` の終端は `EOF`)。展開は止まるため `quoted` を立てる。
+      '\')
+        quoted=1
+        if [ -n "${line:i+1:1}" ]; then delim+="${line:i+1:1}"; i=$((i + 1)); fi
+        ;;
+      *) delim+="$c" ;;
+    esac
+    i=$((i + 1))
+  done
+  _WT_DELIM="$delim"
+  _WT_STRIP="$strip"
+  _WT_EXPAND=$((1 - quoted))
+  _WT_DELIM_END="$i"
+}
+
 # ヒアドキュメントの本文を落とす。本文はコマンドとして実行される部分ではないため、
 # 中の `>` や語を書き込み先として拾わない。引用符の中の `<<` と、行の入力を渡す
 # `<<<` は本文の始まりとして扱わない。
@@ -738,7 +791,9 @@ _wt_scan_expanded_line() {
 _wt_strip_heredocs() {
   local text="${1:-}"
   local -a lines=() delims=() strips=() expands=()
-  local line candidate out="" n i c delim strip quoted dq
+  local line candidate out="" n i c
+  # 終端の語の解析結果。_wt_heredoc_parse_delim が書き込む。
+  local _WT_DELIM="" _WT_STRIP=0 _WT_EXPAND=1 _WT_DELIM_END=0
   # 展開される本文の中で、コマンド置換が続いているかを行をまたいで持つ。
   # 走査は _wt_scan_expanded_line が行う。`local` で宣言すると、bash の動的
   # スコープにより呼び出し先からも読み書きできる。グローバルへは残らない。
@@ -810,53 +865,12 @@ _wt_strip_heredocs() {
         i=$((i + 1))
         continue
       fi
-      i=$((i + 2))
-      strip=0
-      if [ "${line:i:1}" = "-" ]; then strip=1; i=$((i + 1)); fi
-      while [ "${line:i:1}" = " " ] || [ "${line:i:1}" = $'\t' ]; do i=$((i + 1)); done
-      # 終端の語。引用符は書き方の違いで、語そのものには含まれない。
-      # 引用符を 1 つでも使えば、本文は展開されない。
-      # **引用符の中では区切りで切らない。** `<<"EOF X"` のように空白や記号を
-      # 含む語を、途中で切ると終端を見つけられない。
-      delim=""
-      quoted=0
-      dq=""
-      while [ "$i" -lt "$n" ]; do
-        c=${line:i:1}
-        if [ -n "$dq" ]; then
-          # `"` の中の `\"` は引用を閉じない。閉じたと読むと終端の語を取り違え、
-          # 本文の終わりを見つけられない（後続の命令まで本文として落とす）。
-          # 落とす `\` と残す `\` の別は `_wt_tokenize` と同じ。
-          # `'` の中では `\` は字面で、エスケープにならない。
-          if [ "$dq" = '"' ] && [ "$c" = '\' ] && [ -n "${line:i+1:1}" ]; then
-            case "${line:i+1:1}" in
-              '$'|'`'|'"'|'\') delim+="${line:i+1:1}" ;;
-              *) delim+="$c${line:i+1:1}" ;;
-            esac
-            i=$((i + 2))
-            continue
-          fi
-          if [ "$c" = "$dq" ]; then dq=""; else delim+="$c"; fi
-          i=$((i + 1))
-          continue
-        fi
-        case "$c" in
-          " "|$'\t'|";"|"|"|"&"|">"|"<") break ;;
-          "'"|'"') dq="$c"; quoted=1 ;;
-          # 引用符の外の `\` は次の 1 文字を字面にする。終端の語には `\` を
-          # 含めない (`<<E\OF` の終端は `EOF`)。展開は止まるため `quoted` を立てる。
-          '\')
-            quoted=1
-            if [ -n "${line:i+1:1}" ]; then delim+="${line:i+1:1}"; i=$((i + 1)); fi
-            ;;
-          *) delim+="$c" ;;
-        esac
-        i=$((i + 1))
-      done
-      if [ -n "$delim" ]; then
-        delims+=("$delim")
-        strips+=("$strip")
-        expands+=("$((1 - quoted))")
+      _wt_heredoc_parse_delim "$line" "$((i + 2))"
+      i=$_WT_DELIM_END
+      if [ -n "$_WT_DELIM" ]; then
+        delims+=("$_WT_DELIM")
+        strips+=("$_WT_STRIP")
+        expands+=("$_WT_EXPAND")
       fi
     done
     out+="$line"$'\n'
