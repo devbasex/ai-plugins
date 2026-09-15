@@ -298,3 +298,33 @@ def test_launch_cli_removes_stale_outcome_but_keeps_journal(tmp_path):
     assert proc.returncode == 0, proc.stderr
     assert not (tmp_dir / "codex-review-pr7-monitor.json").exists()
     assert (tmp_dir / "monitor-outcomes.jsonl").read_text() == '{"reason": "timeout"}\n'
+
+
+# ---------- read_outcome ----------
+
+def test_read_outcome_returns_dict_for_valid_file(tmp_path):
+    mod = _load_outcome_mod()
+    stem = "codex-review-pr7"
+    payload = {"agent": "codex", "status": "OK", "reason": "ok"}
+    (tmp_path / f"{stem}-monitor.json").write_text(
+        json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+    )
+    assert mod.read_outcome(tmp_path, stem) == payload
+
+
+def test_read_outcome_returns_none_for_missing_broken_or_non_dict_file(tmp_path):
+    mod = _load_outcome_mod()
+    # 存在しない stem
+    assert mod.read_outcome(tmp_path, "missing-stem") is None
+
+    # 壊れた JSON
+    (tmp_path / "broken-monitor.json").write_text("{invalid json", encoding="utf-8")
+    assert mod.read_outcome(tmp_path, "broken") is None
+
+    # 辞書以外の JSON（リスト形式など）
+    (tmp_path / "list-monitor.json").write_text(json.dumps(["not", "a", "dict"]), encoding="utf-8")
+    assert mod.read_outcome(tmp_path, "list") is None
+
+    (tmp_path / "scalar-monitor.json").write_text('"string"', encoding="utf-8")
+    assert mod.read_outcome(tmp_path, "scalar") is None
+
