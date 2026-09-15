@@ -41,6 +41,7 @@
 | [#417](https://github.com/devbasex/ai-plugins/issues/417) | v10.5.0 の事後レビューで出た 8 件を直す | [issue-417-post-review-defects.md](issue-417-post-review-defects.md) |
 | [#418](https://github.com/devbasex/ai-plugins/issues/418) / [#420](https://github.com/devbasex/ai-plugins/issues/420) / [#422](https://github.com/devbasex/ai-plugins/issues/422) | 判定の単位を Pull Request にし、`light` にもレビューと gate を課す | [issue-418-417-workflow-gate/](issue-418-417-workflow-gate/01-requirements.md) / [issue-418-workflow-stage-matrix.md](issue-418-workflow-stage-matrix.md) |
 | [#424](https://github.com/devbasex/ai-plugins/issues/424) | 並行開発へ対応し、承認を 2 つの関門へ集約する | [issue-424-gate-and-approval.md](issue-424-gate-and-approval.md) |
+| [#312](https://github.com/devbasex/ai-plugins/issues/312) / [#315](https://github.com/devbasex/ai-plugins/issues/315) / [#313](https://github.com/devbasex/ai-plugins/issues/313) / [#573](https://github.com/devbasex/ai-plugins/issues/573) / [#610](https://github.com/devbasex/ai-plugins/issues/610) / [#495](https://github.com/devbasex/ai-plugins/issues/495) | 作業ツリー運用の残課題（まとまり「04 worktree 運用の残課題」）。確定仕様は [ndf-worktree-declaration-and-entry-points.md](../../docs/specifications/ndf-worktree-declaration-and-entry-points.md) と [ndf-testenv-lock-and-registry.md](../../docs/specifications/ndf-testenv-lock-and-registry.md) | [milestone-04-worktree/](milestone-04-worktree/issue-312-315-requirements.md) |
 
 ## 計画と調査資料
 
