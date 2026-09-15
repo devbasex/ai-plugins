@@ -295,3 +295,31 @@ def test_apply_groups_wraps_a_legacy_entry_into_one_group(rounds):
     # entry 側にも群と進行の目印を書き戻す
     assert entry["apply_rounds"] == groups
     assert entry["apply_round"] == 1
+
+
+# ---------- R2-004: 群を終えた後のフェーズ（phase_after_group） ----------
+
+def test_phase_after_group_continues_applying_while_a_group_is_pending(rounds):
+    """現状固定: `pending` の群が残るあいだは適用を続ける。"""
+    groups = _two_groups()
+    groups[0]["status"] = "verified"
+    entry = _round_with_groups(groups, apply_round=1)
+
+    assert rounds.phase_after_group(entry) == "apply"
+
+
+def test_phase_after_group_returns_to_propose_when_every_group_is_verified(rounds):
+    """現状固定: 全群が `verified` なら次の提案ラウンドへ戻る。"""
+    groups = _two_groups()
+    for g in groups:
+        g["status"] = "verified"
+    entry = _round_with_groups(groups, apply_round=2)
+
+    assert rounds.phase_after_group(entry) == "propose"
+
+
+def test_phase_after_group_returns_to_propose_when_there_is_no_group(rounds):
+    """現状固定: 群が空なら適用するものが無く、提案へ戻る。"""
+    entry = _round_with_groups([], items=())
+
+    assert rounds.phase_after_group(entry) == "propose"
