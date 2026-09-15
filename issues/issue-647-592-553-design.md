@@ -90,11 +90,22 @@ P4・P5 とは並行してよい。
 
 試行の上限へ含める形は採らない。全ての群が 2 回ずつ同じ理由で落ち、全件が見送りになってから気づく。
 
-### 決定 8: 担当の決定は 1 つの補助関数を通す
+### 決定 8: 作業を任せる担当の決定は `rounds.impl_for_seq` の 1 つを通す
 
-`_impl_for_seq(state, seq)` を新設し、`assignment.assign` を呼ぶのはその中だけにする。群を割り当てるとき
-（`_assign_apply_rounds_to_state`）と担当を替えるときの両方が、これを呼ぶ。D-B が除外（#478）を足すとき、変える呼び出しは 1 か所で済む。
-`assignment.py` は変えない。
+`rounds.impl_for_seq(state, seq)` を新設し、輪番の通し番号から担当を引く呼び出しはその中だけにする。
+呼ぶのは次の 3 か所で、いずれも `apply_seq` を進めて CLI に作業を任せる担当を決める。
+
+| 呼び出し元 | 決めるもの |
+| --- | --- |
+| `apply._assign_apply_rounds_to_state` | 群を割り当てたときの担当 |
+| `apply._close_failed_attempt` | 結果を残さなかった群の交代先 |
+| `gate._final_fix_impl`（`gate.py:128` を置き換える） | 最終ゲートの修正担当 |
+
+置き場所を `rounds.py` にするのは、`apply.py` と `gate.py` の両方が読む層だからである（`commands` どうしの取り込みを作らない）。
+D-B が除外（#478）を足すとき、変える呼び出しは 1 か所で済む。`assignment.py` は変えない。
+
+`setup.cmd_start_round`（`setup.py:467`）の `assignment.assign` は通さない。引くのは提案ラウンドの記録上の担当で、
+骨組みは適用の前に `next-apply-round` が返す群の担当で `IMPL` を上書きするため、この担当は CLI を起動しない。
 
 ### 決定 9: 採用 0 件の提案ラウンドでは群を作らない
 
@@ -210,7 +221,8 @@ git 2.53.0 の一時リポジトリでコミットを作り、2 つの読み方�
 | `apply.cmd_next_apply_round`（変更） | 項目の無い `pending` の群を取り消して飛ばす。開くときに試行番号を進める（決定 5） | #647 #592 |
 | `apply.cmd_merge_apply`（変更） | 取り込み済みで採用 0 件の群を取り消しへ直す。着手前テストと範囲の検査を結果の読み取りより前に置き、4 で中断する。結果を読めなければ `_close_failed_attempt` へ渡す | #647 #592 |
 | `apply._close_failed_attempt`（新設） | 範囲のコミットを取り消し、失敗した試行を記録する。上限未満なら担当を替え、上限なら群を取り消して項目を見送る | #647 |
-| `apply._impl_for_seq`（新設） | 輪番の通し番号から担当と要求モデルを返す。`assignment.assign` を呼ぶ唯一の場所 | #647 |
+| `rounds.impl_for_seq`（新設） | 輪番の通し番号から担当と要求モデルを返す。作業を任せる担当を決める呼び出しはすべてこれを通す（決定 8） | #647 |
+| `gate._final_fix_impl`（変更） | 最終ゲートの修正担当を `rounds.impl_for_seq` で引く | #647 |
 | `apply._monitor_reason`（新設） | 監視の結果の記録から、担当と段に当たる理由の名前を返す。無ければ `missing` | #647 |
 | `gitfacts.load_result`（新設） | 結果ファイルを読み、`(payload, problem)` を返す。中断しない | #647 |
 | `gitfacts.read_result`（変更なし） | 最終ゲートの修正（`gate.py`）が引き続き使う | — |
@@ -230,7 +242,7 @@ graph TD
     A --> LR[gitfacts.load_result]
     F[merge-fix] --> LR
     A --> C[_close_failed_attempt]
-    C --> S[_impl_for_seq]
+    C --> S[rounds.impl_for_seq]
     S --> AS[assignment.assign]
 ```
 
@@ -274,12 +286,13 @@ plugins/ndf/skills/cross-refactoring/
 ├── prompts/fix.md                        # 同上
 ├── prompts/final-fix.md                  # 進捗マーカー
 ├── scripts/refactor_lib/
-│   ├── rounds.py                         # apply_groups / current_group
+│   ├── rounds.py                         # apply_groups / current_group / impl_for_seq
 │   ├── gitfacts.py                       # load_result / commit_trailers
 │   ├── vocabulary.py                     # MAX_APPLY_ATTEMPTS / IMPL_STALL_MARGIN
 │   └── commands/
 │       ├── apply.py                      # next-apply-round / merge-apply / 補助 3 つ
 │       ├── converge.py                   # merge-fix
+│       ├── gate.py                       # _final_fix_impl
 │       └── setup.py                      # _emit_init
 └── tests/
     ├── test_apply_attempts.py            # 新設: AC1〜AC12、AC16
@@ -288,6 +301,7 @@ plugins/ndf/skills/cross-refactoring/
     ├── test_commit_trailers_git.py       # 新設: AC20〜AC25（一時リポジトリ）
     ├── test_init.py                      # AC27
     ├── test_merge_apply.py               # AC33
+    ├── test_final_fix.py                 # AC36
     └── test_skill_terms.py               # AC26、AC28〜AC31
 # dev.kiro / dev.agy の配布物は bash scripts/build-runtime-plugins.sh で同期する
 ```
@@ -415,7 +429,7 @@ graph TD
 
 1. 範囲にコミットがあれば全範囲を新しい順に取り消し、群と記録の起点を取り消し後の HEAD にする（push の印を先に立てる）
 2. `failed_attempts` へ `{attempt, impl, reason: _monitor_reason(...), at, reverted}` を足す（`attempt` が 0 なら 1 として記録する）
-3. `attempt < MAX_APPLY_ATTEMPTS` なら、`apply_seq` を 1 ずつ進めて `_impl_for_seq` を引き、`failed_attempts[].impl` のどれとも違う担当が出たらその担当と要求モデルで `impl` / `impl_model` を書き換える。4 回進めても出なければ（除外で候補が 1 者しかない）、手順 4 と同じく群を取り消す
+3. `attempt < MAX_APPLY_ATTEMPTS` なら、`apply_seq` を 1 ずつ進めて `rounds.impl_for_seq` を引き、`failed_attempts[].impl` のどれとも違う担当が出たらその担当と要求モデルで `impl` / `impl_model` を書き換える。4 回進めても出なければ（除外で候補が 1 者しかない）、手順 4 と同じく群を取り消す
 4. `attempt >= MAX_APPLY_ATTEMPTS` なら群の項目を `abandoned` にして `deferred_items` へ入れる。群は `dropped`（`drop_reason: no_result`）にし、`apply.merged_at` を立て、局面を `phase_after_group` にする
 5. 保存し、取り消しがあったときだけ push する（`push_with_retry_marker`）
 
@@ -441,7 +455,7 @@ graph TD
 | D-A（P3） | 理由の名前は #619 の語彙を基本とし、claude の `"api_error_status":429` を `usage_limit` として早期に打ち切る | 名前を解釈しない。記録へ写すだけ |
 | D-A（P1 の計測） | 骨組みの監視の呼び出しの前後に計測を足す | P6 は P3 の後に載せるため、D-A の変更の上で `--stall-timeout` を足す |
 | D-A（全体） | 監視の終了コードの意味（2 / 3 / 4 / 5 / 6）と `--stall-timeout` の引数は変えない | 骨組みは終了コードで分岐しない（決定 4） |
-| D-B（P4 / P5） | 除外（#478）は `assignment.assign` か、その呼び出し側に入る | 担当を決める呼び出しは `_impl_for_seq` の 1 か所。D-B が先に入れば P6 がそこへ寄せ、P6 が先なら D-B がそこを変える |
+| D-B（P4 / P5） | 除外（#478）は `assignment.assign` か、その呼び出し側に入る | 適用・交代・最終ゲートの修正の担当を決める呼び出しは `rounds.impl_for_seq` の 1 か所（決定 8）。D-B が先に入れば P6 がそこへ寄せ、P6 が先なら D-B がそこを変える。`setup.py:467` の提案ラウンドの担当は CLI を起動しないため対象外 |
 
 ## テスト設計
 
@@ -471,6 +485,7 @@ graph TD
 | AC32 | トレーラーの節の記載をレビューで見る | 手動 |
 | AC33 | 既存の `test_a_verified_apply_round_marks_every_item_applied` に `failed_attempts` が無いことを足す | `test_merge_apply.py` |
 | AC34、AC35 | 全体のテスト、`bash scripts/build-runtime-plugins.sh --check`、`claude plugin validate .`、`python3 scripts/check-skill-frontmatter.py` | 手動 |
+| AC36 | `impl_for_seq` を差し替え、群の割り当て・担当の交代・最終ゲートの修正担当の 3 つが差し替えた担当になる | `test_final_fix.py` / `test_apply_attempts.py` |
 
 ## 未確認のまま残ること
 
