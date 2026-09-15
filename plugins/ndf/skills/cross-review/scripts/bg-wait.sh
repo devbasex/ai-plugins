@@ -43,7 +43,8 @@ case "$MODE" in
     [ $# -gt 0 ] || usage
     mkdir -p "$(dirname -- "$RC")"
     # **古い rc ファイルを先に消す。** 残っていると、前の起動の終了コードを今回のものと読む。
-    rm -f "$RC" "$RC.tmp" "$RC.pid"
+    # **ログも消す。** 残っていると、背景が起動に失敗した回の `wait` が前回のログを出す。
+    rm -f "$RC" "$RC.tmp" "$RC.pid" "$RC.log"
     # rc ファイルは一時ファイルへ書いてから置き換える（読みかけの空のファイルを返さない）。
     nohup bash -c '"${@:2}" > "$1.log" 2>&1; echo $? > "$1.tmp" && mv -f "$1.tmp" "$1"' \
       bg-wait "$RC" "$@" < /dev/null > /dev/null 2>&1 &

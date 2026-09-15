@@ -120,6 +120,7 @@ def test_an_omitted_value_takes_the_apply_value(tmp_path) -> None:
 def test_an_unknown_phase_name_exits_1_without_launching(tmp_path, name: str) -> None:
     r = _launch_lib(tmp_path, name)
     assert r.returncode == 1
+    assert name in r.stderr, "案内が渡された工程名を出していない"
     time.sleep(0.3)
     assert not (tmp_path / "args.txt").exists()
     assert not (tmp_path / "out" / "agy-review-pr1.pid").exists()

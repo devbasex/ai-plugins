@@ -68,6 +68,16 @@ def test_run_removes_a_stale_rc_file_first(tmp_path) -> None:
     assert _bg("wait", str(rc), "--max-wait", "10").returncode == 3
 
 
+def test_run_removes_a_stale_log_first(tmp_path) -> None:
+    """前回のログが残っていると、起動に失敗した回の `wait` が前回の出力を出す。"""
+    rc = tmp_path / "job.rc"
+    _run(rc, "echo 前回の出力")
+    assert _bg("wait", str(rc), "--max-wait", "10").returncode == 0
+    _run(rc, "sleep 2; exit 0")
+    log = pathlib.Path(f"{rc}.log")
+    assert "前回の出力" not in (log.read_text() if log.exists() else "")
+
+
 def test_run_rejects_a_missing_command(tmp_path) -> None:
     assert _bg("run", str(tmp_path / "job.rc"), "--").returncode == 1
 

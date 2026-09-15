@@ -62,10 +62,12 @@ mkdir -p "$(dirname "$STEM")"
 resolve_print_timeout() {
   case "$PRINT_TIMEOUT" in
     ''|*[!0-9]*)
-      local limits
+      # **工程名を先に控える。** 代入に使うと、コマンド置換が失敗した時点で
+      # `PRINT_TIMEOUT` が空になり、案内が渡された工程名ではなく既定の `apply` を出す。
+      local limits phase=${PRINT_TIMEOUT:-apply}
       limits=$(dirname -- "${BASH_SOURCE[0]}")/limits.py
-      PRINT_TIMEOUT=$(python3 "$limits" cli-timeout "$PRINT_TIMEOUT" "$RUNTIME") || {
-        echo "CLI の上限を決められません（工程: ${PRINT_TIMEOUT:-apply}）" >&2; exit 1; }
+      PRINT_TIMEOUT=$(python3 "$limits" cli-timeout "$phase" "$RUNTIME") || {
+        echo "CLI の上限を決められません（工程: $phase）" >&2; exit 1; }
       ;;
   esac
 }
