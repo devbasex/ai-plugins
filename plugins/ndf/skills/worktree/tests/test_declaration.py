@@ -18,6 +18,18 @@ def read_declaration(main_repo: Path) -> tuple[str, int]:
     return "\n".join(lines), rc
 
 
+def test_declaration_without_arguments_is_silent() -> None:
+    got = run_lib("wt_declaration")
+    assert got.returncode == 1
+    assert got.stdout == ""
+
+
+def test_declaration_empty_argument_is_silent() -> None:
+    got = run_lib('wt_declaration ""')
+    assert got.returncode == 1
+    assert got.stdout == ""
+
+
 def test_missing_declaration_is_silent(main_repo: Path) -> None:
     body, rc = read_declaration(main_repo)
     assert rc == 1

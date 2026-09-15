@@ -202,8 +202,10 @@ def test_init_fails_when_ndf_is_a_regular_file(main_repo: Path) -> None:
 
 
 def test_init_leaves_no_temporary_file(main_repo: Path) -> None:
+    """init が置くのは宣言と `.gitignore`（#495 の AC24）の 2 つだけである。"""
     run(["init"], cwd=main_repo)
-    leftovers = [p.name for p in (main_repo / ".ndf").iterdir() if p.name != "worktree.json"]
+    written = {"worktree.json", ".gitignore"}
+    leftovers = [p.name for p in (main_repo / ".ndf").iterdir() if p.name not in written]
     assert leftovers == [], leftovers
 
 
@@ -740,3 +742,201 @@ def test_step0_limits_no_overwrite_to_readable_declarations() -> None:
     section = step0_section()
     assert "読める宣言" in section
     assert "1 で終わる" in section
+
+
+# --- 個人の宣言の報告と追跡からの除外（#495 の AC19、AC21〜AC26） -------------
+
+LOCAL_PRESENT_LINE = "個人の宣言: あり（.ndf/worktree.local.json）"
+LOCAL_UNREADABLE_LINE = (
+    "個人の宣言: 読めません（版が未対応か、JSON として壊れています。共有の宣言だけで動きます）"
+)
+LOCAL_UNUSED_LINE = "個人の宣言: 使っていません（共有の宣言ファイルが無いか、読めません）"
+LOCAL_REGISTER_LINE = (
+    "個人の宣言の登録: なし。.ndf/.gitignore へ worktree.local.json を足してください"
+)
+
+LOCAL_BROKEN_FORMS = ["broken_json", "empty", "top_level_array", "unsupported_version", "directory"]
+
+
+def local_declaration(main_repo: Path) -> Path:
+    return main_repo / ".ndf" / "worktree.local.json"
+
+
+def write_local(main_repo: Path, body: str) -> Path:
+    path = local_declaration(main_repo)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def make_broken_local(main_repo: Path, form: str) -> None:
+    if form == "broken_json":
+        write_local(main_repo, "{broken")
+    elif form == "empty":
+        write_local(main_repo, "")
+    elif form == "top_level_array":
+        write_local(main_repo, "[1]")
+    elif form == "unsupported_version":
+        write_local(main_repo, json.dumps({"version": 2}))
+    elif form == "directory":
+        local_declaration(main_repo).mkdir(parents=True)
+    else:  # pragma: no cover - 綴りの誤りを黙って通さない
+        raise AssertionError(form)
+
+
+def local_lines(out: str) -> list[str]:
+    return [line for line in out.splitlines() if line.startswith("個人の宣言")]
+
+
+def test_local_declaration_line_follows_the_shared_one(main_repo: Path) -> None:
+    """AC19 / AC21: 個人の宣言の行は「宣言ファイル:」の直後に置く。"""
+    run(["init"], cwd=main_repo)
+    write_local(main_repo, json.dumps({"version": 1}))
+
+    for args in (["status"], ["check"]):
+        lines = run(args, cwd=main_repo)["out"].splitlines()
+        shared_at = lines.index(PRESENT_LINE)
+        assert lines[shared_at + 1] == LOCAL_PRESENT_LINE, lines
+
+
+@pytest.mark.parametrize("form", LOCAL_BROKEN_FORMS)
+def test_unreadable_local_declaration_is_reported(main_repo: Path, form: str) -> None:
+    """AC19: 読めない個人の宣言は status と check の両方が同じ行で伝える。"""
+    run(["init"], cwd=main_repo)
+    make_broken_local(main_repo, form)
+
+    status = run(["status"], cwd=main_repo)
+    check = run(["check"], cwd=main_repo)
+
+    assert LOCAL_UNREADABLE_LINE in status["out"], status["out"]
+    assert LOCAL_UNREADABLE_LINE in check["out"], check["out"]
+    assert check["rc"] == 0, check
+
+
+@pytest.mark.parametrize("form", LOCAL_BROKEN_FORMS)
+def test_unreadable_local_declaration_keeps_the_check_exit_code(main_repo: Path, form: str) -> None:
+    """AC19 / AC23: check の終了コードは共有の宣言の状態だけで決まる。"""
+    make_broken_local(main_repo, form)
+    assert run(["check"], cwd=main_repo)["rc"] == 2
+
+    write_declaration(main_repo, "{ not json")
+    assert run(["check"], cwd=main_repo)["rc"] == 3
+
+    write_declaration(main_repo, json.dumps({"version": 1}))
+    assert run(["check"], cwd=main_repo)["rc"] == 0
+
+
+def test_ignored_keys_are_listed_in_one_line(main_repo: Path) -> None:
+    """AC21: 反映しない項目が 1 行に並ぶ。version と $schema は並ばない。"""
+    run(["init"], cwd=main_repo)
+    write_local(
+        main_repo,
+        json.dumps(
+            {
+                "$schema": "https://example.com/worktree.schema.json",
+                "version": 1,
+                "base_branch": "main",
+                "guard": {"allow_paths": ["/"]},
+                "testenv": {"port_band": [40000, 40999], "expose": {"enabled": True}},
+            }
+        ),
+    )
+
+    for args in (["status"], ["check"]):
+        out = run(args, cwd=main_repo)["out"]
+        assert "個人の宣言で反映しない項目: base_branch, guard, testenv.expose" in out, out
+        assert "version" not in out, out
+        assert "$schema" not in out, out
+
+
+def test_no_ignored_line_when_everything_applies(main_repo: Path) -> None:
+    """AC21: 反映しない項目が無いときは行を足さない。"""
+    run(["init"], cwd=main_repo)
+    write_local(main_repo, json.dumps({"version": 1, "follow_branch": True}))
+
+    for args in (["status"], ["check"]):
+        assert local_lines(run(args, cwd=main_repo)["out"]) == [LOCAL_PRESENT_LINE]
+
+
+def test_local_only_declaration_is_unused(main_repo: Path) -> None:
+    """AC22: 共有の宣言が無く個人の宣言だけがあるとき、check は 2 で status が伝える。"""
+    write_local(main_repo, json.dumps({"version": 1}))
+
+    status = run(["status"], cwd=main_repo)
+    check = run(["check"], cwd=main_repo)
+
+    assert LOCAL_UNUSED_LINE in status["out"], status["out"]
+    assert check["rc"] == 2, check
+
+
+def test_local_declaration_is_unused_when_the_shared_one_is_unreadable(main_repo: Path) -> None:
+    """AC23: 共有の宣言が読めないときは、個人の宣言の状態によらず 3。"""
+    write_declaration(main_repo, "{ not json")
+    write_local(main_repo, json.dumps({"version": 1}))
+
+    status = run(["status"], cwd=main_repo)
+    check = run(["check"], cwd=main_repo)
+
+    assert LOCAL_UNUSED_LINE in status["out"], status["out"]
+    assert check["rc"] == 3, check
+
+
+def test_init_creates_the_ndf_gitignore(main_repo: Path) -> None:
+    """AC24: init が .ndf/.gitignore を作り、個人の宣言だけを追跡から外す。"""
+    result = run(["init"], cwd=main_repo)
+
+    assert result["rc"] == 0, result
+    gitignore = main_repo / ".ndf" / ".gitignore"
+    assert gitignore.exists(), "init が .ndf/.gitignore を作っていない"
+    assert "worktree.local.json" in gitignore.read_text(encoding="utf-8")
+    assert ignored(main_repo, ".ndf/worktree.local.json") == 0
+    assert ignored(main_repo, ".ndf/worktree.json") == 1
+
+
+def ignored(repo: Path, path: str) -> int:
+    return subprocess.run(
+        ["git", "check-ignore", "-q", path],
+        cwd=str(repo), capture_output=True, text=True,
+    ).returncode
+
+
+def test_init_does_not_overwrite_an_existing_ndf_gitignore(main_repo: Path) -> None:
+    """AC25: 既にある .ndf/.gitignore は書き換えない。"""
+    (main_repo / ".ndf").mkdir()
+    gitignore = main_repo / ".ndf" / ".gitignore"
+    body = "# 利用者が書いた内容\nlocal-notes\n"
+    gitignore.write_text(body, encoding="utf-8")
+
+    result = run(["init"], cwd=main_repo)
+
+    assert result["rc"] == 0, result
+    assert gitignore.read_text(encoding="utf-8") == body
+
+
+def test_status_asks_to_register_an_untracked_local_declaration(main_repo: Path) -> None:
+    """AC26: 個人の宣言が追跡から外れていないとき、status が登録の案内を出す。"""
+    write_declaration(main_repo, json.dumps({"version": 1}))
+    write_local(main_repo, json.dumps({"version": 1}))
+
+    status = run(["status"], cwd=main_repo)
+    check = run(["check"], cwd=main_repo)
+
+    assert LOCAL_REGISTER_LINE in status["out"], status["out"]
+    assert LOCAL_REGISTER_LINE not in check["out"], "check は登録の案内を出さない"
+
+
+def test_status_omits_the_registration_line_once_ignored(main_repo: Path) -> None:
+    run(["init"], cwd=main_repo)
+    write_local(main_repo, json.dumps({"version": 1}))
+
+    status = run(["status"], cwd=main_repo)
+
+    assert LOCAL_REGISTER_LINE not in status["out"], status["out"]
+
+
+def test_no_local_lines_without_the_file(main_repo: Path) -> None:
+    """AC28: 個人の宣言が無いときは行を足さない。"""
+    run(["init"], cwd=main_repo)
+
+    for args in (["status"], ["check"]):
+        assert local_lines(run(args, cwd=main_repo)["out"]) == []

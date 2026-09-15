@@ -84,6 +84,12 @@ bash "$SCRIPTS/worktree-setup.sh" init; echo "exit=$?"
 ローカル環境での動作検証やテスト実行の分離を使うときは `localenv` / `testenv` を足す。
 書き方は [references/declaration.md](references/declaration.md) にある。
 
+**機械ごとに違う値は共有の宣言へ書かない。** ポートの帯・持ち込み物・追従の有無は、
+コミットしない `.ndf/worktree.local.json` へ書く（`init` が `.ndf/.gitignore` で追跡から
+外す）。上書きできる項目と重ね合わせの規則は
+[references/declaration.md](references/declaration.md) の「機械ごとに違う値は個人の宣言へ
+書く」にある。
+
 ## 1. 現在地を確かめる
 
 作業ツリーの中では `git rev-parse --show-toplevel` が作業ツリー自身を返す。主ディレクトリを
