@@ -81,27 +81,37 @@ def _check_phase(phase: str) -> None:
         raise KeyError(f"上限の表に無い工程です: {phase!r}（{' / '.join(PHASE_TIMEOUT)}）")
 
 
+def _resolve_timeout(
+    explicit: Optional[int], per_agent_env: str, shared_env: str, builtin: int
+) -> int:
+    """明示値 → 担当別環境変数 → 共通環境変数 → 組み込み値の順で解決する。
+
+    監視の上限（`monitor_timeout`）と無進捗の許容（`stall_timeout`）は同じ優先順位で
+    解決するため、順序をこの 1 か所に持つ。非数値の環境変数は `safe_int_env` が
+    組み込み値へ戻す。
+    """
+    if explicit is not None:
+        return explicit
+    if per_agent_env in os.environ:
+        return safe_int_env(per_agent_env, builtin)
+    return safe_int_env(shared_env, builtin)
+
+
 def monitor_timeout(phase: str, agent: str, explicit: Optional[int] = None) -> int:
     """監視の上限。`explicit`（`--timeout`）→ `MONITOR_TIMEOUT_<担当>` → `MONITOR_TIMEOUT` → 表。"""
     _check_phase(phase)
-    if explicit is not None:
-        return explicit
-    builtin = PHASE_TIMEOUT[phase]
-    per_agent = f"MONITOR_TIMEOUT_{agent.upper()}"
-    if per_agent in os.environ:
-        return safe_int_env(per_agent, builtin)
-    return safe_int_env("MONITOR_TIMEOUT", builtin)
+    return _resolve_timeout(
+        explicit, f"MONITOR_TIMEOUT_{agent.upper()}", "MONITOR_TIMEOUT",
+        PHASE_TIMEOUT[phase],
+    )
 
 
 def stall_timeout(agent: str, explicit: Optional[int] = None) -> int:
     """無進捗の許容。`explicit`（`--stall-timeout`）→ `MONITOR_STALL_<担当>` → `MONITOR_STALL` → 表。"""
-    if explicit is not None:
-        return explicit
-    builtin = AGENT_STALL.get(agent, DEFAULT_STALL)
-    per_agent = f"MONITOR_STALL_{agent.upper()}"
-    if per_agent in os.environ:
-        return safe_int_env(per_agent, builtin)
-    return safe_int_env("MONITOR_STALL", builtin)
+    return _resolve_timeout(
+        explicit, f"MONITOR_STALL_{agent.upper()}", "MONITOR_STALL",
+        AGENT_STALL.get(agent, DEFAULT_STALL),
+    )
 
 
 def cli_timeout(phase: str, agent: str) -> int:

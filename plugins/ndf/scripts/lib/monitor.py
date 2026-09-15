@@ -961,21 +961,39 @@ def main() -> None:
         sys.exit(1)
     phase = args.phase or limits.DEFAULT_PHASE
 
-    if args.agents:
-        agents = [a.strip() for a in args.agents.split(",") if a.strip()]
-        if not agents:
-            p.error("--agents が空です")
-    elif args.target:
-        agents = ["codex", "agy"] if args.target == "both" else [args.target]
-    else:
-        p.error("target か --agents のどちらかを指定してください")
+    agents = _resolve_agents(args, p)
 
     if args.tmp_dir:
         global _TMP_DIR_OVERRIDE
         _TMP_DIR_OVERRIDE = pathlib.Path(args.tmp_dir).resolve()
 
-    require_result = not args.no_require_result
+    results = _run_all(agents, args, phase)
+    _emit_results(agents, results)
 
+    # exit code: 全エージェントの最大値（OK=0 が最良、それ以外は失敗）
+    sys.exit(max(results[a].exit_code for a in agents))
+
+
+def _resolve_agents(args: argparse.Namespace, parser: argparse.ArgumentParser) -> list[str]:
+    """`--agents`（カンマ区切り）か位置引数 `target` から担当リストを決める。
+
+    `both` はこれまでの 2 者（codex / agy）を指す省略形。どちらも無ければ USAGE で拒む。
+    """
+    if args.agents:
+        agents = [a.strip() for a in args.agents.split(",") if a.strip()]
+        if not agents:
+            parser.error("--agents が空です")
+        return agents
+    if args.target:
+        return ["codex", "agy"] if args.target == "both" else [args.target]
+    parser.error("target か --agents のどちらかを指定してください")
+
+
+def _run_all(
+    agents: list[str], args: argparse.Namespace, phase: str
+) -> dict[str, AgentStatus]:
+    """各担当をスレッドで並列監視し、担当名から結果を引ける辞書を返す。"""
+    require_result = not args.no_require_result
     results: dict[str, AgentStatus] = {}
 
     def run(agent: str) -> None:
@@ -1005,8 +1023,11 @@ def main() -> None:
         t.start()
     for t in threads:
         t.join()
+    return results
 
-    # 結果出力: 1 行 1 JSON
+
+def _emit_results(agents: list[str], results: dict[str, AgentStatus]) -> None:
+    """各担当の最終ステータスを 1 行 1 JSON で標準出力へ書く。"""
     for agent in agents:
         st = results[agent]
         print(json.dumps({
@@ -1024,9 +1045,6 @@ def main() -> None:
             "result_exists": st.result_exists,
             "sentinel_seen": st.sentinel_seen,
         }, ensure_ascii=False))
-
-    # exit code: 全エージェントの最大値（OK=0 が最良、それ以外は失敗）
-    sys.exit(max(results[a].exit_code for a in agents))
 
 
 if __name__ == "__main__":

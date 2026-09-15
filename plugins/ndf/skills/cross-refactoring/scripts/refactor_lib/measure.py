@@ -79,8 +79,9 @@ def phases(state: dict[str, Any], launches: list[dict[str, Any]]) -> dict[str, A
     """
     rounds = [r for r in state.get("rounds") or [] if isinstance(r, dict)]
     kind_of = {r.get("round"): entry_kind(r) for r in rounds}
+    kinds = list(dict.fromkeys(kind_of.values()))
     out: dict[str, Any] = {}
-    for kind in dict.fromkeys(kind_of.values()):
+    for kind in kinds:
         out[kind] = {}
     cli_by_round: dict[int, float] = {}
     for launch in launches:
@@ -98,7 +99,7 @@ def phases(state: dict[str, Any], launches: list[dict[str, Any]]) -> dict[str, A
         elapsed = launch.get("elapsed")
         if isinstance(elapsed, (int, float)):
             cli_by_round[round_no] = cli_by_round.get(round_no, 0.0) + float(elapsed)
-    for kind in dict.fromkeys(kind_of.values()):
+    for kind in kinds:
         out[kind]["other_seconds"] = _other_seconds(state, kind, cli_by_round)
     return out
 
