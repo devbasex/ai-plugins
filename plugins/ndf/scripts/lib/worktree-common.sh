@@ -1108,7 +1108,7 @@ wt_extract_write_target() {
   # ため、命令の位置にこの名前が現れたら相対パスを出さない（決定 3）。
   local func_moving="|"
 
-  local n=${#words[@]} i j w tw target found=0 prev="" at_cmd=0 dest="" k cmd_prefix=0 cd_end_of_options=0
+  local n=${#words[@]} i j w tw target found=0 prev="" at_cmd=0 cmd_prefix=0
   # `command` / `builtin` の被演算子を命令の位置として数えている間だけ 1。
   local cmd_wrapper=0 or_next=""
   # `||` の右辺のブレースグループが必ず後続へ進まないと判ったときに積む。まとまり
@@ -1132,6 +1132,8 @@ wt_extract_write_target() {
   local _WT_REDIR_DEST="" _WT_REDIR_END=0
   # `_redir_span` の結果。語の中の `<` より前にあった被演算子（無ければ空）。
   local _WT_REDIR_HEAD=""
+  # `_wt_extract_cd_target` の結果。`cd` の移動先の語（無ければ空）。
+  local _WT_CD_DEST=""
   # 印 (`__WT_REDIR__` / `__WT_APPEND__`) の後ろの語から、実際に開かれる
   # ファイルを決める。`>&` には用法が 2 つある。
   #
@@ -1479,6 +1481,45 @@ wt_extract_write_target() {
     [ -n "$target_dir" ] && dest=$target_dir
     _emit "$dest"
   }
+  # cd の被演算子から移動先の語を拾い、`_WT_CD_DEST` に置く。引数は `cd` の語の添字。
+  # 移動先の語と、この `cd` に付いたリダイレクトを 1 回の走査で拾う。
+  # **リダイレクト先は移動する前の位置で開かれる。** シェルはリダイレクトを
+  # 開いてから命令を実行するためである。移動後の位置で解決すると、主
+  # ディレクトリ側への書き込みを作業ツリー側と取り違えて案内を出さない
+  # （検知漏れになる）。まだ `cwd` を更新していない時点で呼ぶ。
+  _wt_extract_cd_target() {
+    local start=$1 k end_of_options=0
+    _WT_CD_DEST=""
+    for ((k = start + 1; k < n; k++)); do
+      case "${words[k]}" in
+        __WT_REDIR__|__WT_APPEND__)
+          _redir_target "$k"
+          _emit "$_WT_REDIR_DEST"
+          k=$_WT_REDIR_END
+          continue
+          ;;
+      esac
+      if _wt_is_separator "${words[k]}"; then break; fi
+      case "${words[k]}" in
+        # `--` 以降はオプションの解釈を止める。`cd -- -dir` の `-dir` は
+        # 移動先であって `cd -` ではない。止めないと読み飛ばして、後続の
+        # 相対パスを抑止する。
+        --) [ "$end_of_options" = 1 ] || { end_of_options=1; continue; } ;;
+        # **`-` だけは `--` の後でも直前の位置を指す。** bash では `-` が
+        # オプションではなく被演算子の綴りとして扱われるためで、`-` という
+        # 名前のディレクトリがあっても `$OLDPWD` へ移る（実測で確認）。
+        # 字面からは追えないため、移動先を決めない。
+        -) continue ;;
+        # `cd -` と同じく、オプションは移動先ではない。
+        -*) [ "$end_of_options" = 1 ] || continue ;;
+      esac
+      # 移動先は最初の被演算子である。リダイレクトを拾い切るため、
+      # 見つけても区切りまで走査を続ける。
+      [ -n "$_WT_CD_DEST" ] || _WT_CD_DEST=${words[k]}
+    done
+    # 走査が届いた位置を控える。`__WT_REDIR__` の枝が同じ語を二度拾わない。
+    resolved_redir_end=$k
+  }
 
   for ((i = 0; i < n; i++)); do
     w=${words[i]}
@@ -1804,54 +1845,20 @@ wt_extract_write_target() {
         [ "$at_cmd" = 1 ] && [ -n "$base" ] || continue
         # 部分シェルの中でも移動は追う。中の相対パスはここで解決する。親の位置は
         # `)` で `_pop_subshell` が戻すため、この移動は外へ漏れない。
-        # 移動先の語と、この `cd` に付いたリダイレクトを 1 回の走査で拾う。
-        # **リダイレクト先は移動する前の位置で開かれる。** シェルはリダイレクトを
-        # 開いてから命令を実行するためである。移動後の位置で解決すると、主
-        # ディレクトリ側への書き込みを作業ツリー側と取り違えて案内を出さない
-        # （検知漏れになる）。まだ `cwd` を更新していないここで解決する。
-        dest=""
-        cd_end_of_options=0
-        for ((k = i + 1; k < n; k++)); do
-          case "${words[k]}" in
-            __WT_REDIR__|__WT_APPEND__)
-              _redir_target "$k"
-              _emit "$_WT_REDIR_DEST"
-              k=$_WT_REDIR_END
-              continue
-              ;;
-          esac
-          if _wt_is_separator "${words[k]}"; then break; fi
-          case "${words[k]}" in
-            # `--` 以降はオプションの解釈を止める。`cd -- -dir` の `-dir` は
-            # 移動先であって `cd -` ではない。止めないと読み飛ばして、後続の
-            # 相対パスを抑止する。
-            --) [ "$cd_end_of_options" = 1 ] || { cd_end_of_options=1; continue; } ;;
-            # **`-` だけは `--` の後でも直前の位置を指す。** bash では `-` が
-            # オプションではなく被演算子の綴りとして扱われるためで、`-` という
-            # 名前のディレクトリがあっても `$OLDPWD` へ移る（実測で確認）。
-            # 字面からは追えないため、移動先を決めない。
-            -) continue ;;
-            # `cd -` と同じく、オプションは移動先ではない。
-            -*) [ "$cd_end_of_options" = 1 ] || continue ;;
-          esac
-          # 移動先は最初の被演算子である。リダイレクトを拾い切るため、
-          # 見つけても区切りまで走査を続ける。
-          [ -n "$dest" ] || dest=${words[k]}
-        done
-        # 走査が届いた位置を控える。`__WT_REDIR__` の枝が同じ語を二度拾わない。
-        resolved_redir_end=$k
+        # 移動先とリダイレクトは、まだ `cwd` を更新していないここで拾う。
+        _wt_extract_cd_target "$i"
         # `||` の右辺で戻せるかどうかの判定に使う。
         list_cds=$((list_cds + 1)); cd_is_last=1
         # `&&` を跨いだ先の `cd` は、走ったかどうかが左辺の成否で決まる。
         [ "$list_and_uncertain" = 0 ] || list_cond_cd=1
         # 複合コマンドを閉じるときの比較に使う。
         cds=$((cds + 1))
-        case "$dest" in
+        case "$_WT_CD_DEST" in
           # 引数なし (ホーム)・`cd -`・展開前の変数・チルダ展開。いずれも
           # コマンドの字面からは移動先を決められない。
           ""|*'$'*|"~"*) cwd_known=0 ;;
-          /*) cwd=$(wt_normalize_path "$dest" "/"); cwd_known=1 ;;
-          *) [ "$cwd_known" = 1 ] && cwd=$(wt_normalize_path "$dest" "$cwd") ;;
+          /*) cwd=$(wt_normalize_path "$_WT_CD_DEST" "/"); cwd_known=1 ;;
+          *) [ "$cwd_known" = 1 ] && cwd=$(wt_normalize_path "$_WT_CD_DEST" "$cwd") ;;
         esac
         ;;
       __WT_REDIR__|__WT_APPEND__)
@@ -1888,7 +1895,7 @@ wt_extract_write_target() {
 
   unset -f _emit _push_group _pop_group _push_subshell _pop_subshell _or_group_exits \
     _or_exit_redirs _close_function_body _wt_extract_sed_targets _wt_extract_cp_mv_target \
-    _redir_span _wt_take_redirect_operand
+    _wt_extract_cd_target _redir_span _wt_take_redirect_operand
   [ "$found" = 1 ] || return 1
 }
 
