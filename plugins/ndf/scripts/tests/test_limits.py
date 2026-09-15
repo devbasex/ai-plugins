@@ -176,3 +176,13 @@ def test_an_unknown_phase_exits_1(phase: str) -> None:
     r = _run("cli-timeout", phase, "agy")
     assert r.returncode == 1
     assert r.stdout == ""
+
+
+@pytest.mark.parametrize("args", [(), ("bogus",), ("cli-timeout",)])
+def test_an_argv_matching_no_form_prints_usage_to_stderr(args: tuple[str, ...]) -> None:
+    """どの形にも当たらない argv（引数なし・未知のコマンド・引数不足）は、使い方を
+    標準エラーへ出して終了コード 1 を返す。標準出力は空にする。"""
+    r = _run(*args)
+    assert r.returncode == 1
+    assert r.stdout == ""
+    assert "monitor-timeout" in r.stderr

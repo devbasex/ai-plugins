@@ -124,6 +124,19 @@ def test_max_wait_defaults_to_540(tmp_path) -> None:
     assert "最大 540 秒" in _bg("wait", str(rc)).stderr
 
 
+def test_max_wait_0_returns_124_at_once_then_the_code_later(tmp_path) -> None:
+    """許容される最小値 0 秒は待たずに 124 を返す（deadline 比較の境界）。
+    続けて十分な上限で待つと、背景コマンド本来の終了コードを取得できる。"""
+    rc = tmp_path / "job.rc"
+    _run(rc, "sleep 3; exit 7")
+    started = time.monotonic()
+    first = _bg("wait", str(rc), "--max-wait", "0")
+    assert first.returncode == 124
+    assert time.monotonic() - started < 2
+    second = _bg("wait", str(rc), "--max-wait", "20")
+    assert second.returncode == 7
+
+
 @pytest.mark.parametrize("bad", ["", "abc", "-1"])
 def test_a_bad_max_wait_is_a_usage_error(tmp_path, bad: str) -> None:
     rc = tmp_path / "job.rc"

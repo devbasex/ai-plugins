@@ -104,3 +104,25 @@ def test_the_print_timeout_is_the_monitor_timeout_plus_120(tmp_path, phase: str)
     """CLI の上限は上限の表から導く（#598 / #537 の AC36）。"""
     args, _ = _launch(tmp_path, phase)
     assert args[args.index("--print-timeout") + 1] == f"{CLI_TIMEOUT[phase]}s"
+
+
+# フェーズごとの作業領域と生成される stem。propose・apply・fix は既存のテストが固定する。
+# ここは残る propose-tests・judge-test-changes・final-fix を固定する。
+#   workdir  --add-dir の先頭。担当 worktree（RUNTIME）か work か
+#   stem     生成されるファイル名の接頭辞（`<stem>-prompt.md` を観測する）
+WORKDIR_AND_STEM = {
+    "propose-tests": (RUNTIME, "agy-propose-rf130-r1"),
+    "judge-test-changes": ("work", "agy-judge-test-changes-r1-g1"),
+    "final-fix": ("work", "agy-final-fix"),
+}
+
+
+@pytest.mark.parametrize("phase", sorted(WORKDIR_AND_STEM))
+def test_the_workspace_and_stem_for_the_remaining_phases(tmp_path, phase: str) -> None:
+    """propose-tests は担当 worktree、judge-test-changes と final-fix は work worktree を
+    使い、各フェーズ固有の stem を生成する。"""
+    args, state_path = _launch(tmp_path, phase)
+    workdir_name, stem = WORKDIR_AND_STEM[phase]
+    added = [args[i + 1] for i, a in enumerate(args) if a == "--add-dir"]
+    assert added == [str(tmp_path / workdir_name), str(state_path.parent)]
+    assert (state_path.parent / f"{stem}-prompt.md").is_file()
