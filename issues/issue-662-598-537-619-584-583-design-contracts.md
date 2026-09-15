@@ -188,7 +188,7 @@ classDiagram
 | `launches[]` | 配列 | 監視の記録の各行から `detail` を除いたもの |
 | `measure` | オブジェクト | cross-review だけ。`measure.py` の出力 |
 | `phases` | オブジェクト | cross-refactoring だけ。下の表 |
-| `apply_attempts` | オブジェクト | cross-refactoring だけ。`"r<ラウンド>"` → 適用の起動回数 |
+| `apply_attempts` | オブジェクト | cross-refactoring だけ。**D-C の P6（#665）が足し、P1 の時点では無い。** 下の形 |
 
 `phases` の形（cross-refactoring）:
 
@@ -198,6 +198,14 @@ classDiagram
  "structure": {…},
  "final-fix": {…}}
 ```
+
+`apply_attempts` の形（cross-refactoring、P6 から）:
+
+| 鍵 | 値 | 出どころ（状態ファイルの `rounds[].apply_rounds[]`） |
+| --- | --- | --- |
+| `"r<ラウンド>-g<群>"` | `{"attempts": 整数, "failed": 整数, "dropped_reason": 文字列または null}` | `attempt` / `failed_attempts` の件数 / `drop_reason`（P6 が足す） |
+
+監視の記録からは作らない。群の番号を持たない stem（`{agent}-apply-r<R>`）からは群を引けないためである。
 
 `other_seconds` はその種類のラウンドの所要の合計から `cli_seconds` の合計を引いた値で、進行側のテスト・取り込み・同期の時間である（決定 9）。
 
@@ -342,13 +350,13 @@ conftest.py              P1（NDF_METRICS_DIR）
 | AC8 / AC9 / AC11 / AC12 / AC15 | 一時ディレクトリの状態ファイルで `state.py start-round` と `refactor.py start-round` を呼び、要約のパスとキー。作業ツリーの相当ディレクトリを消した後に読む |
 | AC10 | 3 つの環境変数の組み合わせ 4 通りと `NDF_METRICS=0` |
 | AC13 / AC18 | 要約の `measure` と、`measure.py` を別に呼んだ出力が一致する。既存の `test_measure.py` を変更せずに通す |
-| AC14 | 監視の記録を手で書いた一時ディレクトリで `refactor_lib.measure` を呼び、工程ごとの起動回数・秒・群の試行回数 |
+| AC14 | 監視の記録を手で書いた一時ディレクトリで `refactor_lib.measure` を呼び、工程ごとの起動回数・秒。要約に `apply_attempts` の鍵が無い（P6 が足す） |
 | AC16 | 差し込み口が例外を投げるよう差し替え、`state.py judge` の終了コードと標準出力が同じ |
 | AC17 | 要約の JSON 全体に、状態ファイルの `review_instructions` と記録の `detail` の文字列が含まれない |
 | AC19〜AC22 | 手で作った要約 6 件（壊れた 1 件を含む）で `aggregate` の表の値 |
 | AC23 / AC24 | `report` の最後の行。文書の文言を `grep` するテスト |
 | AC30 / AC31 | `limits.py check` の終了コード 0 と、表の全 28 組を並べるテスト |
-| AC32 / AC33 | 環境変数と `--timeout` の組み合わせで `monitor.py` の標準エラーの `hard timeout` の値と警告の行 |
+| AC32 / AC33 | 環境変数と `--timeout` / `--stall-timeout` の組み合わせで `monitor.py` の標準エラーの `hard timeout` の値と警告の行。`--phase apply --stall-timeout 1800` で警告なし、`--phase apply --stall-timeout 3600` で警告あり |
 | AC34 / AC35 / AC36 | 引数を書き出す偽の agy で `--print-timeout` の値（`test_launch_agy_phases.py` の形を共通層にも） |
 | AC37 / AC38 / AC42 | 文書の `grep` の件数 |
 | AC39 / AC40 | `bg-wait.sh` を `sleep` のコマンドで起動し、124・終了コード・541 の丸め |
