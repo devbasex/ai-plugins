@@ -226,7 +226,7 @@ git 2.53.0 の一時リポジトリでコミットを作り、2 つの読み方�
 | `gate._final_fix_impl`（変更） | 最終ゲートの修正担当を `rounds.impl_for_seq` で引く | #647 |
 | `apply._monitor_reason`（新設） | `monitor_outcome.read_outcome(tmp_dir, "<impl>-apply-r<ROUND>")` の `reason` が `timeout` / `stalled` / `early_error` / `usage_limit` / `cli_timeout` / `pidfile_bad` ならその値を返す。`ok` / `missing` / ファイルなしなら `load_result` の問題（`missing` / `unparsable`）を返す（D-A の AC55 と同じ規則） | #647 |
 | `gitfacts.load_result`（新設） | 結果ファイルを読み、`(payload, problem)` を返す。問題は `missing`（無い）/ `unparsable`（JSON として読めない・オブジェクトでない）。中断しない | #647 |
-| `gitfacts.read_result`（変更なし） | 最終ゲートの修正（`gate.py`）が引き続き使う | — |
+| `gitfacts.read_result`（変更なし） | 最終ゲートの修正（`gate.py`）が引き続き使う。結果が無いときの扱いは #674 | — |
 | `converge.cmd_merge_fix`（変更） | 群の担当の結果を読む。結果を読めなければ範囲を取り消し、修正ラウンドを 1 つ進めて 2 で終わる | 範囲へ入れたもの |
 | `gitfacts.commit_trailers`（変更） | 末尾から続くトレーラーの段落を読む（決定 11） | #553 |
 | `vocabulary.py`（変更） | `MAX_APPLY_ATTEMPTS = 2` と `IMPL_STALL_MARGIN = 900` | #647 |
@@ -255,8 +255,7 @@ graph TD
     R --> MR
 ```
 
-上の図は群の判定、下の図は監視との関係を描く。雛形・文書と、`commit_trailers`（`merge-apply` の検証が呼ぶ 1 本だけ）は含めない。
-`assignment.assign` と監視の結果ファイルは変えない要素である。
+上の図は群の判定、下の図は監視との関係を描く。雛形・文書と、`commit_trailers`（`merge-apply` の検証が呼ぶ 1 本だけ）は含めない。`assignment.assign` と監視の結果ファイルは変えない要素である。
 
 ### 文脈と配置
 
@@ -274,8 +273,7 @@ graph TD
     RF --> 記録
 ```
 
-**配置は変えない。** すべて利用者の機械のホストのセッションから起動するプロセスで、常駐しない。図は状態ファイルと Pull Request への push を含めない。
-この変更で増える辺は、`refactor.py` が監視の結果ファイルを読む 1 本だけである。
+**配置は変えない。** すべて利用者の機械のホストのセッションから起動するプロセスで、常駐しない。図は状態ファイルと Pull Request への push を含めない。この変更で増える辺は、`refactor.py` が監視の結果ファイルを読む 1 本だけである。
 
 ### 変わるファイル
 
@@ -353,9 +351,12 @@ stateDiagram-v2
 
 | コマンド | 0 | 1 | 2 | 4 |
 | --- | --- | --- | --- | --- |
-| `next-apply-round` | 群を開いた（変更なし） | 残りの群が無い（変更なし） | — | 群が無いラウンドで `current_group` を呼んだ（新） |
-| `merge-apply` | 取り込んだ（変更なし） | — | **この群を取り消した、または担当を替えて開き直す**（意味を広げる） | 着手前テストが `green` でない・範囲を確定できない（2 から変更） |
-| `merge-fix` | 取り込んだ（変更なし） | — | 範囲を確定できない（変更なし）・**結果を読めない（新。修正ラウンドは進む）** | — |
+| `next-apply-round` | 群を開いた（変更なし） | 残りの群が無い（変更なし。群が無いラウンドも含む） | — | — |
+| `merge-apply` | 取り込んだ（変更なし） | — | **この群を取り消した、または担当を替えて開き直す**（意味を広げる） | 着手前テストが `green` でない・範囲を確定できない（2 から変更）・群が無い（新） |
+| `merge-fix` | 取り込んだ（変更なし） | — | 範囲を確定できない（変更なし）・**結果を読めない（新。修正ラウンドは進む）** | 群が無い（新） |
+| `verify-round` / `abandon-items` / `merge-test-judgements` | 変更なし | — | 変更なし | 群が無い（新） |
+
+「群が無い（新）」は、群が 1 つも無いラウンドで `current_group` を呼んだときの中断である。`next-apply-round` は `current_group` を呼ばない。
 
 骨組みは `merge-apply` の 2 で `continue` し、`merge-fix` の終了コードを見ない。**どちらも変えない。**
 
