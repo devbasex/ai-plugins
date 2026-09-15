@@ -139,13 +139,14 @@ classDiagram
 それ以外は従来の `missing` / `unparsable` / `no_verdict` / `not_posted` である。
 `not_posted` は結果ファイルはあるが投稿が届いていないときで、監視は知りえないため監視の語彙に入れない。
 
-**P3 で足す文言**（`EARLY_ERROR_FATAL` と同じ引用・表の除外を掛ける）:
+**P3 で足す文言**（`EARLY_ERROR_FATAL` と同じ引用・表の除外を掛ける。**claude の stdout.log だけは除外を掛けない。** 決定 20 のとおり、既存の `CLAUDE_STDOUT_FATAL` と同じ JSON 向けの照合で見る）:
 
 | 理由 | 見るファイル | 文言（正規表現） |
 | --- | --- | --- |
 | `usage_limit` | err.log | `Monthly request limit reached` |
 | `usage_limit` | claude の err.log と stdout.log | `"api_error_status"\s*:\s*429` |
 | `usage_limit` | err.log（既存の一致を付け替え） | `quota exceeded` / `rate limit exceeded` / `^HTTP/\d\S* 429 ` |
+| `early_error` | err.log（既存の一致を分ける） | `^HTTP/\d\S* (?:401\|403) ` |
 | `cli_timeout` | err.log（終了後だけ） | `print timeout after \S+ with turn in progress` |
 
 ### 上限の表（P2）
@@ -249,8 +250,10 @@ limits.py check                          # 表の順序を検査する。崩れ�
 | 渡す値 | CLI の上限 |
 | --- | --- |
 | 空 | `apply` の値（変更前の既定 3600 秒を覆う） |
-| 工程名 | `limits.py cli-timeout <工程> <担当>` |
+| 工程名 | `limits.py cli-timeout <工程> <担当>`。`limits.py` が受けるのは上限の表の 7 つの名前だけで、それ以外は終了コード 1 |
 | 数字 | その秒数（従来どおり） |
+
+**工程名の正規化は呼び出し側が行う。** cross-refactoring の `launch-cli.sh` はフェーズ `propose-tests` を `propose` に置き換えてから第 7 引数へ渡す。骨組みの `monitor.py` にも `--phase propose` を渡す（テスト整備の提案と構造改善の提案は同じ上限を使う）。`limits.py` に別名を持たせないのは、表の名前と実際に効く上限を 1 対 1 に保つためである。
 
 ### `bg-wait.sh`（P2）
 
@@ -267,7 +270,7 @@ bg-wait.sh wait <rc ファイル> [--max-wait <秒>]       # 既定 540、上限
 | --- | --- |
 | `report` | 末尾に `計測の要約: <絶対パス>` か `計測の要約: 書いていません（<理由>）`（P1）。ラウンド表で `<担当>=NO_RESULT(<理由>)`（P3） |
 | `read-result` | 結果なしの記録に `no_result_reason` の理由・`monitor_detail`・`prior_review_url`（P3）。終了コードは変えない |
-| `judge` | `NO_RESULT_REASONS='<担当>=<理由> …'` を結果なしがあるとき出す。`usage_limit` を含めば `final=error` と終了コード 1（P3） |
+| `judge` | `NO_RESULT_REASONS='<担当>=<理由> …'` を結果なしがあるとき出す。`usage_limit` を含めば `final=error` と終了コード 1（P3）。終了コード 0 / 2 / 7 / 8 と 8 の `flush` の枝は変えない |
 
 ### `launch-reviewer.sh` の記録だけの起動（P3）
 
@@ -355,6 +358,6 @@ conftest.py              P1（NDF_METRICS_DIR）
 | AC56〜AC59 | 状態ファイルを作って `judge` と `report` を呼ぶ |
 | AC60〜AC62 | 3 秒後に子が書く偽の CLI を `launch-cli.sh` で起動し、pgid と、監視の上限 2 秒で止めた後の結果ファイルの有無。先頭でない pid では `os.killpg` が呼ばれない |
 | AC63 / AC65 / AC66 | 偽の `gh` のレビュー一覧（見出しの一致・ラウンド違い・担当違い）で `prior_review_url` と、`launch-reviewer.sh` のプロンプトの文言 |
-| AC67 | `SKILL.md` の骨組みで、起動の行から判定の行までの間に `verify-findings` と `critique-round.sh` があり、起動し直しの専用の分岐が無い |
+| AC67 | `SKILL.md` の骨組みで、起動の行から判定の行までの間に `verify-findings` と `critique-round.sh` があり、起動し直しの専用の分岐が無い。各判定の直後に終了コード 8 の `flush` の枝がある |
 | AC68 / AC69 | 文書の `grep` |
 | AC70〜AC72 | 検証手段の表のコマンド。AC72 はテストの前後で `find` |
