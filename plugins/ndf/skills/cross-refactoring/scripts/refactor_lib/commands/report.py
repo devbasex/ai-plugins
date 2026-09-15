@@ -11,10 +11,12 @@ from typing import Any
 
 import metrics as metrics_lib
 import models as models_lib
+import run_metrics
 import statefile
 
 from .. import info
 from ..gitfacts import safe_int
+from ..measure import summary_extra
 from ..outbound import plan_reference
 from ..paths import load_state
 from ..proposals import duplicate_rate
@@ -113,7 +115,7 @@ def cmd_status(args: argparse.Namespace) -> None:
 
 def cmd_report(args: argparse.Namespace) -> None:
     """Step 8 — ラウンド表・項目表・見送り項目・指標を出す。"""
-    _, state = load_state(args.id)
+    path, state = load_state(args.id)
     print(f"# cross-refactoring 実行報告 — {state['repo']} #{state['current_pr']}")
     print()
     print(f"- ホスト: {state['host']}（{state['host_detection']}）")
@@ -152,6 +154,9 @@ def cmd_report(args: argparse.Namespace) -> None:
         print("# 指標")
         print()
         print(metrics_lib.format_report(metrics_lib.aggregate(state)))
+    # **最後の行に置く**（#662 の AC23）。作業ツリーを消した後に要約を探す手がかりになる。
+    print()
+    print(run_metrics.report_line(path, state, "cross-refactoring", summary_extra))
 
 
 def _round_table(state: dict[str, Any]) -> str:
