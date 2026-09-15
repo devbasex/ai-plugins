@@ -65,6 +65,8 @@
 | 6 | 節 6-3 | 2026-09-04 に open 43 件を実物と突き合わせ、24 件の本文が現状と食い違っていた | https://github.com/devbasex/ai-plugins/issues/331 の本文「現状」の節 | 画面 |
 | 7 | 節 1 | ai-plugins と cross-review の紹介 | https://note.com/nyle_engineer/n/nbc43fa926104 | 画面 |
 | 8 | 節 4 | この記事の設計 PR のレビューが 3 ラウンドで収束し、企画承認で差し戻された | https://github.com/devbasex/ai-plugins/pull/661 | 画面 |
+| 9 | 気づき「並列開発」（2026-09-15 に追加） | v10.11.0: 課題 16 件、期間中にマージした PR 33 本、同時に開いていた PR 最大 9 本 | マイルストーン v10.11.0（closed_issues）。PR は `mergedAt` が v10.10.0 のマイルストーンを閉じた 2026-09-12T13:23Z から v10.11.0 を閉じた 2026-09-13T18:14Z までのもの。同時数は `createdAt`〜`mergedAt` の重なりの最大 | GitHub API |
+| 10 | 気づき「並列開発」（2026-09-15 に追加） | サブエージェント 5〜6 本の並列でメモリが尽き全担当が中断、以後 3 本に制限 | 2026-09-13 のマイルストーン進行時の `/sys/fs/cgroup/memory.events` の `oom_kill`（開発者の作業メモ） | 実測 |
 
 ## 決定の記録
 
