@@ -26,7 +26,7 @@
 | 項目 | 型 | 意味 |
 | --- | --- | --- |
 | `at` | 文字列（ISO 8601） | 再開した時刻（`_now()`） |
-| `field` | 文字列 | 変えた項目の名前（`max_rounds` / `rotate_after` / `only` / `verify_commands` / `verify_exit_codes` / `excluded_reviewers` / `available_reviewers` / `unavailable_reviewers` / `require_all`） |
+| `field` | 文字列 | 変えた項目の名前（`max_rounds` / `rotate_after` / `only` / `verify_commands` / `verify_exit_codes` / `excluded_reviewers` / `available_reviewers` / `unavailable_reviewers` / `require_all` / `auth_skipped`）。値が変わった項目だけを積む |
 | `from` | 任意 | 変える前の値。項目が無かったときは `null` |
 | `to` | 任意 | 変えた後の値 |
 
