@@ -57,7 +57,11 @@ ERR_LOG=$STEM-err.log
 PID_FILE=$STEM.pid
 
 # 前回実行の残骸を消してから起動する。残っていると監視側が古い結果を拾う。
-rm -f "$STDOUT_LOG" "$ERR_LOG" "$PID_FILE" "$STEM-result.json" "$STEM-progress.log"
+# **監視の結果ファイル（`<stem>-monitor.json`）も消す。** 読む側は stem から 1 つに引くため、
+# 残っていると前の起動の理由を今回のものと読む。追記だけの記録
+# （`monitor-outcomes.jsonl`）は過去を残すためのものなので消さない（#662）。
+rm -f "$STDOUT_LOG" "$ERR_LOG" "$PID_FILE" "$STEM-result.json" "$STEM-progress.log" \
+  "$STEM-monitor.json"
 
 # モデル指定。全 4 CLI が `--model` を受ける。空なら CLI の既定へ委ねる。
 MODEL_ARGS=()

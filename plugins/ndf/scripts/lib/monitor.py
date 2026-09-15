@@ -70,6 +70,21 @@ from dataclasses import dataclass
 from typing import Optional
 
 
+def _lib_dir() -> pathlib.Path:
+    """この実体が置かれたディレクトリ。
+
+    **`__file__` を使わない。** cross-review のシム（`scripts/monitor.py`）はこの実体を
+    `exec` で読み込むため、`__file__` はシムの位置を指す。`compile` に渡した実体の
+    パスは関数のコードオブジェクトが持つので、どちらの経路でも実体の隣を指せる。
+    """
+    return pathlib.Path(_lib_dir.__code__.co_filename).resolve().parent
+
+
+if str(_lib_dir()) not in sys.path:
+    sys.path.insert(0, str(_lib_dir()))
+import monitor_outcome  # noqa: E402  監視の結果の語彙と読み書き（#662）
+
+
 # ---------- 設定 ----------
 
 # 既定値は import 時に **固定数値** で保持する。env (`MONITOR_TIMEOUT` /
@@ -380,6 +395,12 @@ class AgentStatus:
     idle_seconds: float = 0.0
     result_exists: bool = False
     sentinel_seen: bool = False
+    # 監視の結果ファイルだけに書く欄（#662）。**標準出力の JSON には載せない**
+    # （標準出力のキーは上の欄から明示で組み立てる）。
+    reason: str = ""
+    launched_at: Optional[str] = None
+    started_at: Optional[str] = None
+    ended_at: Optional[str] = None
 
 
 # ---------- 監視ロジック ----------
@@ -845,6 +866,49 @@ def _emit_log(prefix: str, agent: str, st: AgentStatus) -> None:
     )
 
 
+def _record_outcome(
+    agent: str, pr: int, stem_template: str, st: AgentStatus, started_at: str,
+) -> None:
+    """担当 1 者の監視の結果を、結果ファイルと記録へ書く（#662）。
+
+    **書けなくても監視の結果は変えない。** 終了コードと標準出力は呼び出し側の分岐が
+    読むため、書き出しの失敗は標準エラーへ 1 行出すだけにする。
+    """
+    stem = stem_template.format(agent=agent, id=pr)
+    try:
+        paths = AgentPaths.for_(agent, pr, stem_template)
+        st.reason = monitor_outcome.reason_for(st.status)
+        st.started_at = started_at
+        st.ended_at = monitor_outcome.now_iso()
+        try:
+            st.launched_at = monitor_outcome.iso_from_timestamp(
+                paths.pidfile.stat().st_mtime)
+        except OSError:
+            st.launched_at = None
+        outcome = {
+            "agent": agent,
+            "stem": stem,
+            "status": st.status,
+            "exit_code": st.exit_code,
+            "reason": st.reason,
+            "detail": st.detail,
+            "launched_at": st.launched_at,
+            "started_at": st.started_at,
+            "ended_at": st.ended_at,
+            "elapsed": round(st.elapsed, 1),
+            "idle_seconds": round(st.idle_seconds, 1),
+            "progress_tail": st.progress_tail,
+            "result_exists": st.result_exists,
+            "pid": st.pid,
+        }
+        tmp_dir = paths.pidfile.parent
+        monitor_outcome.write_outcome(tmp_dir, stem, outcome)
+        monitor_outcome.append_journal(tmp_dir, outcome)
+    except Exception as exc:  # noqa: BLE001  書き出しの失敗で監視を落とさない
+        print(f"[{agent}] ⚠ 監視の結果を書けません（{stem}）: {exc}",
+              file=sys.stderr, flush=True)
+
+
 # ---------- CLI ----------
 
 def main() -> None:
@@ -907,6 +971,7 @@ def main() -> None:
     def run(agent: str) -> None:
         stall = args.stall_timeout if args.stall_timeout is not None \
             else _agent_stall_default(agent)
+        started_at = monitor_outcome.now_iso()
         results[agent] = monitor_agent(
             agent=agent, pr=args.pr,
             timeout=args.timeout, stall_timeout=stall,
@@ -915,6 +980,7 @@ def main() -> None:
             log_prefix=f"[{agent}] ",
             stem_template=args.stem_template,
         )
+        _record_outcome(agent, args.pr, args.stem_template, results[agent], started_at)
 
     threads = [threading.Thread(target=run, args=(a,), daemon=False) for a in agents]
     for t in threads:
