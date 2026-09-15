@@ -141,7 +141,7 @@
 ## 受け入れ条件（無進捗の打ち切り）
 
 - [ ] AC28: `init` の出力に `IMPL_STALL_TIMEOUT` が入り、値が `--test-timeout` の値 + 900 である
-  （既定で 1800）。`--test-timeout` は `apply` / `fix` / `final-fix` の監視の上限 − 900 以下（P2 の既定なら 2700 以下）を前提とする
+  （既定で 1800）。`--test-timeout` は `apply` / `fix` / `final-fix` の監視の上限 − 900 未満（P2 の既定なら 2700 未満）を前提とする
 - [ ] AC29: `SKILL.md` の骨組みで、`--phase apply` / `fix` / `final-fix` の 3 つの `monitor.py` の呼び出しが
   `--stall-timeout "$IMPL_STALL_TIMEOUT"` を持ち、`--timeout` を持たない
 - [ ] AC30: 適用・修正・最終ゲートの修正の雛形（`prompts/apply.md` / `fix.md` / `final-fix.md`）が進捗マーカーを
@@ -190,7 +190,7 @@
 
 | # | 前提 |
 | --- | --- |
-| 1 | D-A の P1（監視の結果ファイルと `monitor_outcome.read_outcome`）、P2（`--phase` と `lib/limits.py` による監視の上限）、P3（理由の語彙）が先に `develop` へ入る。D-A の申し送り（cross-refactoring の監視の引数は P2 が変え、D-C は上限の値を書かない）と決定 10（無進捗の許容は担当の軸だけで決める）に、適用・修正・最終ゲートの修正の `--stall-timeout "$IMPL_STALL_TIMEOUT"` を D-C が渡す例外が書き足される。D-A の実行の要約の `apply_attempts` が、群ごとの `attempt` と `failed_attempts` の件数を状態ファイルから持つ。理由の名前は #619 の提案（`timeout` / `cli_timeout` / `usage_limit` / `early_error` / `stalled` / `not_posted` / `missing`）を基本とする |
+| 1 | D-A の P1（監視の結果ファイルと `monitor_outcome.read_outcome`）、P2（`--phase` と `lib/limits.py` による監視の上限）、P3（理由の語彙）が先に `develop` へ入る。D-A の申し送り（cross-refactoring の監視の引数は P2 が変え、D-C は上限の値を書かない）と決定 10（無進捗の許容は担当の軸だけで決める）に、適用・修正・最終ゲートの修正の `--stall-timeout "$IMPL_STALL_TIMEOUT"` を D-C が渡す例外が書き足される。D-A の実行の要約の `apply_attempts` が、鍵 `"r<ラウンド>-g<群>"` → `{"attempts": 整数, "failed": 整数, "dropped_reason": 文字列または null}` を状態ファイルの群から作る。理由の名前は #619 の提案（`timeout` / `cli_timeout` / `usage_limit` / `early_error` / `stalled` / `not_posted` / `missing`）を基本とする |
 | 2 | 監視の終了コード（2 = TIMEOUT / 3 = NO_RESULT / 4 = EARLY_ERROR / 5 = STALLED / 6 = PIDFILE_BAD）の意味は変わらない |
 | 3 | `assignment.assign(seq, host)` の実装担当は 4 者の輪番で、`seq` を 1 ずつ進めれば 3 回以内に失敗した担当と別のランタイムが出る。D-B が除外を足した後も、除外されない者が 2 者以上いる |
 | 4 | Claude Code が足す帰属行は、メッセージの末尾に独立した段落として付く（#553 の実測 `26a0fff`） |
