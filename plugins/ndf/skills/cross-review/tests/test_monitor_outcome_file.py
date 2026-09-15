@@ -34,6 +34,8 @@ OUTCOME_KEYS = {
     "agent", "stem", "status", "exit_code", "reason", "detail",
     "launched_at", "started_at", "ended_at", "elapsed", "idle_seconds",
     "progress_tail", "result_exists", "pid",
+    # P2（#598 / #537）で足した `--phase` の値。省いたときは null
+    "phase",
 }
 STDOUT_KEYS = {
     "agent": str, "status": str, "exit_code": int, "pid": (int, type(None)),
@@ -81,7 +83,7 @@ def _is_iso_with_tz(value: str) -> bool:
 
 # ---------- AC1 / AC3 / AC4 ----------
 
-def test_outcome_file_has_the_14_keys_and_tz_aware_times(tmp_path):
+def test_outcome_file_has_the_contract_keys_and_tz_aware_times(tmp_path):
     stem = "codex-review-pr7"
     pid = _finished(tmp_path, stem, result=True)
     os.utime(tmp_path / f"{stem}.pid", (1_700_000_000, 1_700_000_000))

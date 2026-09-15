@@ -24,11 +24,12 @@ cross-refactoring は `{agent}-propose-rf{id}` のような別の命名を渡す
      - `--no-early-error` / `MONITOR_NO_EARLY_ERROR=1` で検知自体を無効化可
   4. **result.json**: プロセス終了後に `<worktree>/.cross_review/<agent>-review-pr<PR>-result.json` が
      生成されていなければ失敗扱い
-  5. **hard timeout**: 既定 7 分。`--timeout` または `MONITOR_TIMEOUT` で上書き可
+  5. **hard timeout**: 既定は `--phase` の工程で上限の表（`limits.py`）から引く
+     （省略時は `review`）。`--timeout` → `MONITOR_TIMEOUT_<AGENT>` → `MONITOR_TIMEOUT` の順で上書き可
   6. **stall timeout**: err.log + stdout.log の合計サイズが一定時間変化しなければ
-     STALLED として中断。既定は agent 別 (codex=180s, agy=480s。agy は err.log
-     にほぼ進捗を出さないため大きめ)。`--stall-timeout` で CLI 明示、
-     `MONITOR_STALL_<AGENT>` env で per-agent 上書き、`MONITOR_STALL` env で共通上書き可
+     STALLED として中断。既定は agent 別で上限の表から引く。`--stall-timeout` で CLI 明示、
+     `MONITOR_STALL_<AGENT>` env で per-agent 上書き、`MONITOR_STALL` env で共通上書き可。
+     解決した許容が監視の上限以上になった担当は、標準エラーへ警告を 1 行出す
   7. **progress.log heartbeat**: agent が任意で書く短いフェーズマーカーを stderr に表示。
      stdout/stderr が静かな時間でも、内部推論ではなく監視用の作業段階を確認できる
   8. **result.json + age fallback**: sentinel を持たない agent (agy) 向け。
@@ -39,6 +40,7 @@ cross-refactoring は `{agent}-propose-rf{id}` のような別の命名を渡す
 Usage:
   monitor.py <PR> <target>          target ∈ {codex, agy, both}
   monitor.py <PR> both --timeout 1200 --stall-timeout 600
+  monitor.py <PR> --agents agy,kiro --phase critique --stem-template '{agent}-critique-pr{id}'
   monitor.py <PR> both --no-early-error    # EARLY_ERROR 検知を完全無効化
   monitor.py <ID> --agents claude,kiro --tmp-dir DIR \
       --stem-template '{agent}-propose-rf{id}'
@@ -82,32 +84,21 @@ def _lib_dir() -> pathlib.Path:
 
 if str(_lib_dir()) not in sys.path:
     sys.path.insert(0, str(_lib_dir()))
+import limits  # noqa: E402  上限の表（#598 / #537）
 import monitor_outcome  # noqa: E402  監視の結果の語彙と読み書き（#662）
 
 
 # ---------- 設定 ----------
 
-# 既定値は import 時に **固定数値** で保持する。env (`MONITOR_TIMEOUT` /
-# `MONITOR_STALL` / `MONITOR_POLL`) の解釈は **呼び出し時** に try/except
-# 付きで行い、非数値 env でも import / 監視プロセスがクラッシュしないようにする。
+# **上限の既定値はこの監視に持たない。** 上限の表（`limits.py`）だけが持ち、ここの名前は
+# 表を指す別名である（#598 / #537）。env (`MONITOR_TIMEOUT` / `MONITOR_STALL` /
+# `MONITOR_POLL`) の解釈は **呼び出し時** に try/except 付きで行い、非数値 env でも
+# import / 監視プロセスがクラッシュしないようにする。
 # (codex round 5 指摘: import 時の `int(os.environ.get(...))` は
-#  `MONITOR_STALL=abc` のような誤設定で `_agent_stall_default()` に到達する前に
-#  ValueError で落ちてしまうため)
-DEFAULT_TIMEOUT = 420    # 7 min — `--timeout` / env `MONITOR_TIMEOUT` で上書き可
-# 既定 stall timeout (後方互換のため env MONITOR_STALL は残す)。
-# 両 agent 共通のデフォルトとして引き続き受け付ける (解釈は `_agent_stall_default()` 内)。
-DEFAULT_STALL = 180       # 3 min no progress
-# per-agent 上書き: agy は err.log がほぼ無音なため大きめに取る。
-# 解決順は `_agent_stall_default()` 参照。
-DEFAULT_STALL_AGENT_BUILTIN = {
-    "codex": 180,    # 推論ログを逐次出すので 3 min で十分
-    "agy": 480,      # err.log が静かなため 8 min まで許容
-    # `claude -p --output-format json` は **完了まで 1 バイトも出さない**。
-    # 進捗を見て打ち切ると必ず誤検知になるため、ログ無進捗の許容を最も長く取る。
-    "claude": 900,
-    # kiro-cli は逐次出力するが、ツール実行の待ちで数分沈黙することがある。
-    "kiro": 480,
-}
+#  `MONITOR_STALL=abc` のような誤設定で落ちてしまうため)
+DEFAULT_TIMEOUT = limits.PHASE_TIMEOUT[limits.DEFAULT_PHASE]
+DEFAULT_STALL = limits.DEFAULT_STALL
+DEFAULT_STALL_AGENT_BUILTIN = limits.AGENT_STALL
 DEFAULT_POLL = 15          # 15 sec — env `MONITOR_POLL` で上書き可
 # result.json が書き込まれた後もプロセスがハングするケース (実測) の
 # fallback: mtime から RESULT_AGE_GRACE 秒以上経過していれば完了とみなす。
@@ -255,54 +246,23 @@ CLAUDE_STDOUT_FATAL = [
 ]
 
 
-def _safe_int_env(name: str, fallback: int) -> int:
-    """env を safe に int parse する。
-
-    非数値時は warn を stderr に出して fallback 値を返す。
-    `_agent_stall_default()` と同じく、env 設定ミスでプロセスを落とさないため。
-
-    Note (codex round 5 指摘): `MONITOR_STALL` 等の env を import 時 / 呼び出し時に
-    生の `int(...)` で読むと、非数値設定で監視プロセスが起動できなくなる。
-    `DEFAULT_TIMEOUT` / `DEFAULT_POLL` も同じ問題を持つため、共通ヘルパに集約。
-    """
-    if name not in os.environ:
-        return fallback
-    raw = os.environ[name]
-    try:
-        return int(raw)
-    except (ValueError, TypeError):
-        print(
-            f"⚠ env {name}={raw!r} が int に変換できません — {fallback} を使用",
-            file=sys.stderr, flush=True,
-        )
-        return fallback
+# env を safe に int parse する。非数値時は warn を stderr に出して fallback 値を返す。
+# 上限の表と同じ規則で読むため、表の側の実装を使う。
+_safe_int_env = limits.safe_int_env
 
 
 def _agent_stall_default(agent: str) -> int:
     """agent ごとの既定 stall timeout を解決する。
 
-    解決順:
+    解決順（`limits.stall_timeout`）:
       1. env `MONITOR_STALL_<AGENT>` (per-agent 明示)
-      2. env `MONITOR_STALL` (両 agent 共通)
-      3. `DEFAULT_STALL_AGENT_BUILTIN[agent]` (codex=180, agy=480)
-      4. `DEFAULT_STALL` (フォールバック)
+      2. env `MONITOR_STALL` (全 agent 共通)
+      3. 上限の表の `AGENT_STALL[agent]`
+      4. `DEFAULT_STALL` (表に無い agent)
 
-    Note (codex round 3 指摘): 2 は **呼び出し時** に `os.environ["MONITOR_STALL"]`
-    を再評価する。`DEFAULT_STALL` モジュール定数は import 時に env を読むため
-    プロセス起動後の env 変更に追随できず、テストの monkeypatch も効かない。
-
-    Note (gemini round 4 指摘): env が非数値だった場合 (`int(...)` で
-    `ValueError` / `TypeError` が裸で上がる) は warn を出して
-    `DEFAULT_STALL_AGENT_BUILTIN` / `DEFAULT_STALL` にフォールバックする。
-    監視プロセスを env 設定ミスでクラッシュさせない。
+    env は **呼び出し時** に再評価し、非数値なら warn を出して表の値に戻す。
     """
-    builtin = DEFAULT_STALL_AGENT_BUILTIN.get(agent, DEFAULT_STALL)
-    env_key = f"MONITOR_STALL_{agent.upper()}"
-    if env_key in os.environ:
-        return _safe_int_env(env_key, builtin)
-    if "MONITOR_STALL" in os.environ:
-        return _safe_int_env("MONITOR_STALL", builtin)
-    return builtin
+    return limits.stall_timeout(agent)
 
 
 # `--tmp-dir` で明示指定された一時ディレクトリ。CLI の解析時にだけ設定する。
@@ -890,6 +850,7 @@ def _emit_log(prefix: str, agent: str, st: AgentStatus) -> None:
 
 def _record_outcome(
     agent: str, pr: int, stem_template: str, st: AgentStatus, started_at: str,
+    phase: Optional[str] = None,
 ) -> None:
     """担当 1 者の監視の結果を、結果ファイルと記録へ書く（#662）。
 
@@ -922,6 +883,8 @@ def _record_outcome(
             "progress_tail": st.progress_tail,
             "result_exists": st.result_exists,
             "pid": st.pid,
+            # `--phase` の値。省いたときは null（#598 / #537）
+            "phase": phase,
         }
         tmp_dir = paths.pidfile.parent
         monitor_outcome.write_outcome(tmp_dir, stem, outcome)
@@ -952,16 +915,20 @@ def main() -> None:
     p.add_argument("--stem-template", default=DEFAULT_STEM_TEMPLATE,
                    help="一時ファイル名の骨格。`{agent}` と `{id}` を埋める "
                         f"(default: {DEFAULT_STEM_TEMPLATE})")
-    # env (MONITOR_TIMEOUT / MONITOR_POLL) は呼び出し時に safe parse で読む。
-    # 非数値設定でも fixed default (`DEFAULT_TIMEOUT` / `DEFAULT_POLL`) に戻す。
-    timeout_default = _safe_int_env("MONITOR_TIMEOUT", DEFAULT_TIMEOUT)
+    # env (MONITOR_TIMEOUT / MONITOR_STALL / MONITOR_POLL) は呼び出し時に safe parse で読む。
+    # 非数値設定でも上限の表の値 / `DEFAULT_POLL` に戻す。
     poll_default = _safe_int_env("MONITOR_POLL", DEFAULT_POLL)
-    p.add_argument("--timeout", type=int, default=timeout_default,
-                   help=f"hard timeout in seconds (default: {timeout_default})")
+    phases = " / ".join(f"{k}={v}" for k, v in limits.PHASE_TIMEOUT.items())
+    p.add_argument("--phase", default=None,
+                   help="監視の上限を上限の表から引く工程。"
+                        f"省略時は {limits.DEFAULT_PHASE} の値 ({phases})")
+    p.add_argument("--timeout", type=int, default=None,
+                   help="hard timeout in seconds。未指定時は env MONITOR_TIMEOUT_<AGENT> / "
+                        "MONITOR_TIMEOUT、無ければ --phase の工程の値")
+    stalls = ", ".join(f"{k}={v}" for k, v in limits.AGENT_STALL.items())
     p.add_argument("--stall-timeout", type=int, default=None,
                    help="stall timeout (err.log no progress) in seconds. "
-                        "未指定時は agent 別既定 (codex=180, agy=480) または "
-                        "env MONITOR_STALL_<AGENT> / MONITOR_STALL を参照")
+                        f"未指定時は env MONITOR_STALL_<AGENT> / MONITOR_STALL、無ければ agent 別既定 ({stalls})")
     p.add_argument("--poll", type=int, default=poll_default,
                    help=f"poll interval in seconds (default: {poll_default})")
     p.add_argument("--no-require-result", action="store_true",
@@ -972,6 +939,13 @@ def main() -> None:
                         "(hard timeout / stall / sentinel / result.json のみで判定) "
                         f"[env: MONITOR_NO_EARLY_ERROR; default: {DEFAULT_NO_EARLY_ERROR}]")
     args = p.parse_args()
+    # **表に無い工程は USAGE（終了コード 1）で拒む。** `choices` にすると argparse の
+    # 終了コード 2（TIMEOUT と同じ値）になる。
+    if args.phase is not None and args.phase not in limits.PHASE_TIMEOUT:
+        print(f"monitor.py: 上限の表に無い工程です: {args.phase!r} "
+              f"（{' / '.join(limits.PHASE_TIMEOUT)}）", file=sys.stderr, flush=True)
+        sys.exit(1)
+    phase = args.phase or limits.DEFAULT_PHASE
 
     if args.agents:
         agents = [a.strip() for a in args.agents.split(",") if a.strip()]
@@ -991,18 +965,26 @@ def main() -> None:
     results: dict[str, AgentStatus] = {}
 
     def run(agent: str) -> None:
-        stall = args.stall_timeout if args.stall_timeout is not None \
-            else _agent_stall_default(agent)
+        timeout = limits.monitor_timeout(phase, agent, args.timeout)
+        stall = limits.stall_timeout(agent, args.stall_timeout)
+        print(f"[{agent}] ▶ hard timeout {timeout}s / stall {stall}s (phase {phase})",
+              file=sys.stderr, flush=True)
+        if stall >= timeout:
+            # 上書きの結果、無進捗の許容が効かない組になった。止めはしない（AC33）。
+            print(f"[{agent}] ⚠ 無進捗の許容 {stall}s が監視の上限 {timeout}s 以上です"
+                  "（無進捗では止まらず、監視の上限で止まります）",
+                  file=sys.stderr, flush=True)
         started_at = monitor_outcome.now_iso()
         results[agent] = monitor_agent(
             agent=agent, pr=args.pr,
-            timeout=args.timeout, stall_timeout=stall,
+            timeout=timeout, stall_timeout=stall,
             poll=args.poll, require_result=require_result,
             no_early_error=args.no_early_error,
             log_prefix=f"[{agent}] ",
             stem_template=args.stem_template,
         )
-        _record_outcome(agent, args.pr, args.stem_template, results[agent], started_at)
+        _record_outcome(agent, args.pr, args.stem_template, results[agent], started_at,
+                        args.phase)
 
     threads = [threading.Thread(target=run, args=(a,), daemon=False) for a in agents]
     for t in threads:
