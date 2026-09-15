@@ -28,8 +28,16 @@ for a in "$@"; do printf '%s\\0' "$a" >> "$NDF_TEST_ARGS_FILE.tmp"; done
 mv "$NDF_TEST_ARGS_FILE.tmp" "$NDF_TEST_ARGS_FILE"
 """
 
-# フェーズごとの監視の上限（`SKILL.md` の `--timeout`）。起動時の上限はこれ以上にする。
-MONITOR_TIMEOUT = {"propose": 900, "apply": 3600, "fix": 3600}
+# フェーズごとの監視の上限（上限の表 `lib/limits.py`。`SKILL.md` は `--phase` で渡す）。
+# 起動時の上限はこれより長くする。
+MONITOR_TIMEOUT = {"propose": 1200, "apply": 3600, "fix": 3600}
+
+# フェーズごとの CLI の上限（#598 / #537 の AC36）。監視の上限 + 120 秒。
+# `propose-tests` は `propose` の上限を使う（起動側が工程名を正規化する）。
+CLI_TIMEOUT = {
+    "propose": 1320, "propose-tests": 1320, "judge-test-changes": 1320,
+    "apply": 3720, "fix": 3720, "final-fix": 3720,
+}
 
 
 def _launch(tmp_path: pathlib.Path, phase: str) -> tuple[list[str], pathlib.Path]:
@@ -43,11 +51,16 @@ def _launch(tmp_path: pathlib.Path, phase: str) -> tuple[list[str], pathlib.Path
     stub.write_text(STUB, encoding="utf-8")
     stub.chmod(0o755)
 
+    if phase == "judge-test-changes":
+        # 判定の対象の差分は進行側が先に書き出す。無いと起動しない。
+        (state_path.parent / "test-diff-r1-g1.diff").write_text("diff\n", encoding="utf-8")
+
     args_file = tmp_path / "args.txt"
     subprocess.run(
         [str(LAUNCH), RUNTIME, phase, "130", "1"],
         env={
-            **os.environ,
+            # 実行した人の `MONITOR_*` で上限が変わらないよう外す（#678）。
+            **{k: v for k, v in os.environ.items() if not k.startswith("MONITOR_")},
             "CROSS_REFACTORING_TMP_DIR": str(state_path.parent),
             "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
             "NDF_TEST_ARGS_FILE": str(args_file),
@@ -84,3 +97,10 @@ def test_the_print_timeout_covers_the_monitor_timeout(tmp_path, phase: str) -> N
     args, _ = _launch(tmp_path, phase)
     value = int(args[args.index("--print-timeout") + 1].rstrip("s"))
     assert value >= MONITOR_TIMEOUT[phase], f"{phase} の上限が監視より短い"
+
+
+@pytest.mark.parametrize("phase", sorted(CLI_TIMEOUT))
+def test_the_print_timeout_is_the_monitor_timeout_plus_120(tmp_path, phase: str) -> None:
+    """CLI の上限は上限の表から導く（#598 / #537 の AC36）。"""
+    args, _ = _launch(tmp_path, phase)
+    assert args[args.index("--print-timeout") + 1] == f"{CLI_TIMEOUT[phase]}s"

@@ -211,9 +211,7 @@ case "$TMP_ABS/" in
   *) EXTRA_DIR=$TMP_ABS ;;
 esac
 
-# 実行時間の上限。監視の hard timeout (既定 420 秒) より長く取り、打ち切りの判断を
-# 監視の側へ一本化する。
-PRINT_TIMEOUT=600
-
+# 実行時間の上限は工程名で渡す。共通層が上限の表から「監視の上限 + 120 秒」を導き、
+# 打ち切りの判断を監視の側へ一本化する（#598 / #537）。
 "$SCRIPT_DIR/../../../scripts/lib/launch-cli.sh" "$RUNTIME" "$WORKTREE_ABS" "$PROMPT" "$STEM" "" \
-  "$EXTRA_DIR" "$PRINT_TIMEOUT"
+  "$EXTRA_DIR" review

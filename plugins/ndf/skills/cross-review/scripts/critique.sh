@@ -130,8 +130,23 @@ $TARGETS
 - 投稿は行わない。ファイルを書くだけである
 EOF
 
-# 実行時間の上限。監視の hard timeout より長く取り、打ち切りの判断を監視の側へ一本化する。
-PRINT_TIMEOUT=${NDF_CRITIQUE_PRINT_TIMEOUT:-1800}
+# 実行時間の上限。既定は工程名 `critique` を渡し、共通層が上限の表から「監視の上限 + 120 秒」を
+# 導く。`NDF_CRITIQUE_PRINT_TIMEOUT` はそれより短くできない。短いと CLI が監視より先に
+# 打ち切り、結果ファイルが残らない（#598 / #537）。
+PRINT_TIMEOUT=critique
+case "${NDF_CRITIQUE_PRINT_TIMEOUT:-}" in
+  '') ;;
+  *[!0-9]*)
+    echo "⚠ NDF_CRITIQUE_PRINT_TIMEOUT=$NDF_CRITIQUE_PRINT_TIMEOUT は秒数ではないため、監視の上限から導いた値を使います" >&2 ;;
+  *)
+    DERIVED=$(python3 "$SCRIPT_DIR/../../../scripts/lib/limits.py" cli-timeout critique "$RUNTIME")
+    if [ "$NDF_CRITIQUE_PRINT_TIMEOUT" -lt "$DERIVED" ]; then
+      echo "⚠ NDF_CRITIQUE_PRINT_TIMEOUT=$NDF_CRITIQUE_PRINT_TIMEOUT は監視の上限から導いた値より短いため、${DERIVED} 秒を使います" >&2
+      PRINT_TIMEOUT=$DERIVED
+    else
+      PRINT_TIMEOUT=$NDF_CRITIQUE_PRINT_TIMEOUT
+    fi ;;
+esac
 
 # **接頭辞は絶対パスで渡す。** `launch-cli.sh` は作業ツリーへ `cd` してから
 # `<stem>.pid` と `<stem>-stdout.log` を作る。相対の値を渡すと、作業ツリーの直下に

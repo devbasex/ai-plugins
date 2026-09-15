@@ -12,9 +12,13 @@
 #   model        省略可。空文字なら CLI の既定モデルへ委ねる
 #   extra-dir    省略可。agy のときだけ作業領域へ追加する（結果ファイルの置き場所が
 #                作業ディレクトリの外にある場合）
-#   timeout      省略可。agy の `--print-timeout` へ渡す秒数。**フェーズの監視の上限
-#                以上**にする。CLI が先に打ち切ると結果ファイルが残らず、監視からは
-#                起動できなかった場合と区別が付かない
+#   timeout      省略可。agy の `--print-timeout`（CLI の上限）。次のどれかを渡す
+#                  工程名  上限の表（`limits.py`）の工程。`limits.py cli-timeout <工程> <runtime>`
+#                          の値（環境変数で解決した監視の上限 + 120 秒）を使う
+#                  数字    その秒数（従来どおり）
+#                  空      `apply` の工程名と同じ（いちばん長い工程を覆う）
+#                **CLI の上限は監視の上限より長くする。** CLI が先に打ち切ると結果ファイルが
+#                残らず、監視からは起動できなかった場合と区別が付かない（#598 / #537）
 #
 # **ホストか否かで分岐してはいけない。** ランタイム名だけで分岐する。ホストと同じ
 # ランタイムが実装担当になるラウンドでも、ホストのサブエージェント機能は使わず
@@ -45,12 +49,23 @@ PROMPT=${3:?prompt file required}
 STEM=${4:?output stem required}
 MODEL=${5:-}
 EXTRA_DIR=${6:-}
-# 既定は、いちばん長いフェーズ（適用・修正の 3600 秒）を覆う値にする。
-PRINT_TIMEOUT=${7:-3600}
+# 空なら、いちばん長い工程（適用・修正）を覆う値にする。
+PRINT_TIMEOUT=${7:-apply}
 
 [ -d "$WORKDIR" ] || { echo "作業ディレクトリがありません: $WORKDIR" >&2; exit 1; }
 [ -s "$PROMPT" ] || { echo "プロンプトが空です: $PROMPT" >&2; exit 1; }
 mkdir -p "$(dirname "$STEM")"
+
+# 工程名を CLI の上限の秒数へ解決する。**表に無い名前は起動せずに終える。**
+# 上限の表は `limits.py` だけが持つ（値を使うのは agy だけだが、名前の検査は全ランタイムで行う）。
+# **`cd` で登らない。** 表の位置は文字列のまま渡す（Kiro CLI の symlink を字句で畳まない）。
+case "$PRINT_TIMEOUT" in
+  ''|*[!0-9]*)
+    LIMITS=$(dirname -- "${BASH_SOURCE[0]}")/limits.py
+    PRINT_TIMEOUT=$(python3 "$LIMITS" cli-timeout "$PRINT_TIMEOUT" "$RUNTIME") || {
+      echo "CLI の上限を決められません（工程: ${7:-apply}）" >&2; exit 1; }
+    ;;
+esac
 
 STDOUT_LOG=$STEM-stdout.log
 ERR_LOG=$STEM-err.log

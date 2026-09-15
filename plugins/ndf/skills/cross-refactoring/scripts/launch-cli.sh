@@ -49,8 +49,10 @@ load_common_state() {
 
 load_common_state
 
-# CLI 側の実行時間の上限。**フェーズごとの監視の上限に合わせる。** 短いと CLI が
-# 先に打ち切り、結果ファイルが残らなかった場合と区別が付かなくなる。
+# CLI 側の実行時間の上限は **工程名** で共通層へ渡す。共通層が上限の表（`lib/limits.py`）から
+# 「監視の上限 + 120 秒」を導く。短いと CLI が先に打ち切り、結果ファイルが残らなかった
+# 場合と区別が付かなくなる（#598 / #537）。**工程名は上限の表の名前へ正規化して渡す**
+# （`propose-tests` は `propose`）。表は別名を持たない。
 configure_phase() {
 case "$PHASE" in
   propose|propose-tests)
@@ -63,18 +65,18 @@ case "$PHASE" in
     [ "$ROUND" -ge 1 ] 2>/dev/null || { echo "$PHASE には ROUND が必要です" >&2; exit 1; }
     STEM=$TMP_DIR/$RUNTIME-propose-rf$ID-r$ROUND
     WORKDIR=$ROOT/$RUNTIME
-    PRINT_TIMEOUT=900
+    PRINT_TIMEOUT=propose
     ;;
   apply|fix)
     [ "$ROUND" -ge 1 ] 2>/dev/null || { echo "$PHASE には ROUND が必要です" >&2; exit 1; }
     STEM=$TMP_DIR/$RUNTIME-$PHASE-r$ROUND
     # 適用と修正は常に work/ の中だけで行う。並列適用はしない。
     WORKDIR=$WORK
-    PRINT_TIMEOUT=3600
+    PRINT_TIMEOUT=$PHASE
     ;;
   judge-test-changes)
     # **テストの差分が振る舞いの変更を含むかの判定**（#443）。機械で決まらない差分だけを
-    # 渡すため、対象は小さい。判定だけを返させるので上限は提案と同じでよい。
+    # 渡すため、対象は小さい。判定だけを返させるので上限は提案と同じ値（上限の表）でよい。
     [ "$ROUND" -ge 1 ] 2>/dev/null || { echo "$PHASE には ROUND が必要です" >&2; exit 1; }
     # **名前に適用群を入れる。** 同じ提案ラウンドで複数の群が段 2 を通ると、
     # 前の群の差分と結果を上書きする。**この時点では `APPLY_ROUND` が未設定である
@@ -83,7 +85,7 @@ case "$PHASE" in
       '[.rounds[] | select(.round == $r)][0].apply_round // 1' "$STATE")
     STEM=$TMP_DIR/$RUNTIME-judge-test-changes-r$ROUND-g$JUDGE_GROUP
     WORKDIR=$WORK
-    PRINT_TIMEOUT=900
+    PRINT_TIMEOUT=judge-test-changes
     # 判定の対象は、進行側が先に書き出す。**無ければ起動しない**（渡すものが無い）。
     RF_TEST_DIFF_PATH=$TMP_DIR/test-diff-r$ROUND-g$JUDGE_GROUP.diff
     [ -s "$RF_TEST_DIFF_PATH" ] || {
@@ -96,7 +98,7 @@ case "$PHASE" in
     # 読める名前になる。取り込み側（`merge-final-fix`）もこの名前で探す。
     STEM=$TMP_DIR/$RUNTIME-final-fix
     WORKDIR=$WORK
-    PRINT_TIMEOUT=3600
+    PRINT_TIMEOUT=final-fix
     ;;
   *)
     echo "未知のフェーズです: $PHASE" >&2
