@@ -521,6 +521,17 @@ _wt_tokenize() {
   # 見出しを閉じる `)` は部分シェルの終わりではない。数だけで決めると、部分
   # シェルの中の見出し (`( case $x in a) ... )`) で親の段を戻してしまう。
   local case_depth=0 case_states=""
+  # 見出しを閉じる語の直前で `cur` を 1 語として確定する。`_wt_tok_emit` は
+  # 直前の語（`prev_out`）を見て case の深さと状態を更新するため、確定と同時に
+  # その同期も行う。`out` / `cur` / `case_depth` / `case_states` は動的スコープで
+  # 共有する（末尾で unset -f する）。`cur` が空なら何もしない。
+  _wt_tok_flush_word() {
+    [ -n "$cur" ] || return 0
+    prev_out=""; ((${#out[@]} > 0)) && prev_out=${out[${#out[@]} - 1]}
+    _wt_tok_emit "$cur" "$prev_out" "$case_depth" "$case_states"
+    case_depth=$_WT_TOK_CASE_DEPTH; case_states=$_WT_TOK_CASE_STATES
+    out+=("$cur"); cur=""
+  }
   for ((i = 0; i < n; i++)); do
     c=${s:i:1}
     # `\` は次の 1 文字をエスケープする。**シングルクォートの中を除く。** 中では
@@ -550,12 +561,7 @@ _wt_tokenize() {
         # 出口から始めるが、`__WT_SEP__` と `&` の 2 語へ割ると、後者が背景実行の
         # 演算子として読まれて現在地がまとまりの入口へ戻る。走査の側でフォール
         # スルーと背景実行を見分けられるよう、専用の印を出す。
-        if [ -n "$cur" ]; then
-          prev_out=""; ((${#out[@]} > 0)) && prev_out=${out[${#out[@]} - 1]}
-          _wt_tok_emit "$cur" "$prev_out" "$case_depth" "$case_states"
-          case_depth=$_WT_TOK_CASE_DEPTH; case_states=$_WT_TOK_CASE_STATES
-          out+=("$cur"); cur=""
-        fi
+        _wt_tok_flush_word
         _wt_tok_separator "$c" "${s:i+1:2}" "$case_depth"
         if [ -n "$_WT_TOK_CASE_STATE" ]; then
           if [ "$case_depth" -gt 1 ]; then case_states="${case_states%,*},$_WT_TOK_CASE_STATE"
@@ -577,12 +583,7 @@ _wt_tokenize() {
             __WT_REDIR__|__WT_APPEND__) continue ;;
           esac
         fi
-        if [ -n "$cur" ]; then
-          prev_out=""; ((${#out[@]} > 0)) && prev_out=${out[${#out[@]} - 1]}
-          _wt_tok_emit "$cur" "$prev_out" "$case_depth" "$case_states"
-          case_depth=$_WT_TOK_CASE_DEPTH; case_states=$_WT_TOK_CASE_STATES
-          out+=("$cur"); cur=""
-        fi
+        _wt_tok_flush_word
         ;;
       # 演算子は空白で囲まれているとは限らない。切り出さないと
       # `cp a b||echo c` の `b||echo` が 1 語になり、区切りとして見えない
@@ -600,12 +601,7 @@ _wt_tokenize() {
         if [ -n "$_WT_TOK_TEXT" ]; then
           cur+="$_WT_TOK_TEXT"
         else
-          if [ -n "$cur" ]; then
-            prev_out=""; ((${#out[@]} > 0)) && prev_out=${out[${#out[@]} - 1]}
-            _wt_tok_emit "$cur" "$prev_out" "$case_depth" "$case_states"
-            case_depth=$_WT_TOK_CASE_DEPTH; case_states=$_WT_TOK_CASE_STATES
-            out+=("$cur"); cur=""
-          fi
+          _wt_tok_flush_word
           out+=("$_WT_TOK_TOKEN")
           i=$((i + _WT_TOK_ADVANCE))
         fi
@@ -641,24 +637,14 @@ _wt_tokenize() {
         case "$_WT_TOK_KIND" in
           inword) inword=$((inword - 1)); cur+="$c" ;;
           pattern)
-            if [ -n "$cur" ]; then
-              prev_out=""; ((${#out[@]} > 0)) && prev_out=${out[${#out[@]} - 1]}
-              _wt_tok_emit "$cur" "$prev_out" "$case_depth" "$case_states"
-              case_depth=$_WT_TOK_CASE_DEPTH; case_states=$_WT_TOK_CASE_STATES
-              out+=("$cur"); cur=""
-            fi
+            _wt_tok_flush_word
             if [ "$case_depth" -gt 1 ]; then case_states="${case_states%,*},body"
             else case_states=body
             fi
             out+=("__WT_CASE_END__")
             ;;
           subshell)
-            if [ -n "$cur" ]; then
-              prev_out=""; ((${#out[@]} > 0)) && prev_out=${out[${#out[@]} - 1]}
-              _wt_tok_emit "$cur" "$prev_out" "$case_depth" "$case_states"
-              case_depth=$_WT_TOK_CASE_DEPTH; case_states=$_WT_TOK_CASE_STATES
-              out+=("$cur"); cur=""
-            fi
+            _wt_tok_flush_word
             out+=("__WT_SUBSHELL_END__")
             subshells=$((subshells - 1))
             ;;
@@ -673,6 +659,7 @@ _wt_tokenize() {
     _wt_tok_emit "$cur" "$prev_out" "$case_depth" "$case_states"
     out+=("$cur")
   fi
+  unset -f _wt_tok_flush_word
   printf '%s\n' "${out[@]+"${out[@]}"}"
 }
 
