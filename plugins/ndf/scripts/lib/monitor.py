@@ -373,6 +373,18 @@ def _read_pidfile(p: pathlib.Path) -> Optional[int]:
         return None
 
 
+def _proc_state(pid: int) -> Optional[str]:
+    """`/proc/<pid>/status` の State 行の値。読めない・State 行が無いときは None。"""
+    try:
+        status_text = pathlib.Path(f"/proc/{pid}/status").read_text()
+    except (FileNotFoundError, PermissionError, OSError):
+        return None
+    for line in status_text.splitlines():
+        if line.startswith("State:"):
+            return line[len("State:"):]
+    return None
+
+
 def _pid_alive(pid: int) -> bool:
     """`kill -0` + ゾンビ検出。
 
@@ -386,26 +398,14 @@ def _pid_alive(pid: int) -> bool:
         return False
     except OSError:
         return False
-    try:
-        status_text = pathlib.Path(f"/proc/{pid}/status").read_text()
-        for line in status_text.splitlines():
-            if line.startswith("State:"):
-                return "Z" not in line
-    except (FileNotFoundError, PermissionError, OSError):
-        pass
-    return True
+    state = _proc_state(pid)
+    return state is None or "Z" not in state
 
 
 def _is_zombie(pid: int) -> bool:
     """PID がゾンビかどうか。_pid_alive() とは独立に呼べるユーティリティ。"""
-    try:
-        status_text = pathlib.Path(f"/proc/{pid}/status").read_text()
-        for line in status_text.splitlines():
-            if line.startswith("State:"):
-                return "Z" in line
-    except (FileNotFoundError, PermissionError, OSError):
-        pass
-    return False
+    state = _proc_state(pid)
+    return state is not None and "Z" in state
 
 
 def _kill_pid(pid: int, sigterm_grace: float = 3.0) -> None:
