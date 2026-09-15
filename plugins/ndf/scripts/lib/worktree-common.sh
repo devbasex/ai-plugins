@@ -145,7 +145,7 @@ wt_in_worktree() {
 
 # --- 宣言ファイル -----------------------------------------------------------
 
-# 個人の宣言から反映する部分だけを 1 行の JSON として出力する。
+# 個人の宣言を検査し、反映する部分と反映しない項目を 1 つの JSON として出力する。
 # 通常のファイルでない / JSON として読めない / 空 / オブジェクトでない / 版が未対応の
 # いずれでも、何も出力せず 1 を返す。
 #
@@ -157,7 +157,7 @@ wt_in_worktree() {
 # 個人の宣言から共有の節を消せる形にすると、仕組みが手元でだけ黙って止まる。
 # `testenv.expose` は落とす（決定 8）。追跡されないファイルから外部への公開を
 # 有効にできる状態を作らない。
-_wt_local_overrides() {
+_wt_local_analysis() {
   local main_dir="${1:-}" file json
   [ -n "$main_dir" ] || return 1
   file="$main_dir/$WT_DECLARATION_LOCAL_FILE"
@@ -170,12 +170,33 @@ _wt_local_overrides() {
     if type != "object" then empty
     elif .version != $ver then empty
     else
-      (if (.localenv | type) == "object" then {localenv: .localenv} else {} end)
-      + (if (.testenv | type) == "object" then {testenv: (.testenv | del(.expose))} else {} end)
-      + (if (.follow_branch | type) == "boolean" then {follow_branch: .follow_branch} else {} end)
+      {
+        overrides:
+          ((if (.localenv | type) == "object" then {localenv: .localenv} else {} end)
+           + (if (.testenv | type) == "object" then {testenv: (.testenv | del(.expose))} else {} end)
+           + (if (.follow_branch | type) == "boolean" then {follow_branch: .follow_branch} else {} end)),
+        ignored:
+          ([to_entries[] |
+            if (.key == "version" or .key == "$schema") then empty
+            elif .key == "localenv" then (if (.value | type) == "object" then empty else .key end)
+            elif .key == "testenv" then
+              (if (.value | type) != "object" then .key
+               elif (.value | has("expose")) then "testenv.expose"
+               else empty end)
+            elif .key == "follow_branch" then (if (.value | type) == "boolean" then empty else .key end)
+            else .key
+            end] | sort)
+      }
     end' "$file" 2>/dev/null) || return 1
   [ -n "$json" ] || return 1
   printf '%s\n' "$json"
+}
+
+# 個人の宣言から反映する部分だけを 1 行の JSON として出力する。
+_wt_local_overrides() {
+  local analysis
+  analysis=$(_wt_local_analysis "${1:-}") || return 1
+  printf '%s' "$analysis" | jq -c '.overrides'
 }
 
 # 主ディレクトリの .ndf/worktree.json に .ndf/worktree.local.json を重ねて、
@@ -257,21 +278,11 @@ wt_declaration_local_state() {
 # **`version` と `$schema` は出さない。** 反映しないが、報告の対象でもない。
 # 並びは項目名の順に揃える（出力を突き合わせる手順とテストが並び順に依存しないため）。
 wt_declaration_local_ignored() {
-  local main_dir="${1:-}"
+  local main_dir="${1:-}" analysis
   [ -n "$main_dir" ] || return 1
-  [ "$(wt_declaration_local_state "$main_dir")" = present ] || return 0
-  jq -r '
-    to_entries | sort_by(.key) | map(
-      if (.key == "version" or .key == "$schema") then empty
-      elif .key == "localenv" then (if (.value | type) == "object" then empty else .key end)
-      elif .key == "testenv" then
-        (if (.value | type) != "object" then .key
-         elif (.value | has("expose")) then "testenv.expose"
-         else empty end)
-      elif .key == "follow_branch" then (if (.value | type) == "boolean" then empty else .key end)
-      else .key
-      end
-    ) | .[]' "$main_dir/$WT_DECLARATION_LOCAL_FILE" 2>/dev/null
+  [ "$(wt_declaration_state "$main_dir")" = present ] || return 0
+  analysis=$(_wt_local_analysis "$main_dir") || return 0
+  printf '%s' "$analysis" | jq -r '.ignored[]'
   return 0
 }
 
