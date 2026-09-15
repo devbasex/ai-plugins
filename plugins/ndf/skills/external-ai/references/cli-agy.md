@@ -93,9 +93,9 @@ $ agy --print-timeout 900 --output-format text -p="ping"
 invalid value "900" for flag -print-timeout: time: missing unit in duration "900"
 ```
 
-既定の 5 分は、収束ループの監視の上限（`cross-review` は 420 秒、`cross-refactoring` は
-900 秒と 3600 秒）より短い。**CLI が先に打ち切ると結果ファイルが残らず、起動できなかった
-場合と区別が付かない。** 呼び出し側がフェーズの上限以上の値を渡す。
+既定の 5 分は、収束ループの監視の上限（上限の表 `scripts/lib/limits.py`。レビュー・反証・提案は
+1200 秒、適用・修正は 3600 秒）より短い。**CLI が先に打ち切ると結果ファイルが残らず、起動できなかった
+場合と区別が付かない。** 収束ループは `launch-cli.sh` へ工程名を渡し、監視の上限 + 120 秒を使う。
 
 ## 出力ストリーム
 
