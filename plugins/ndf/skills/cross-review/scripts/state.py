@@ -3782,53 +3782,12 @@ def _read_fix_result(
         (legacy_tmp_path, False),
     ]
 
-    ffile: pathlib.Path | None = None
-    fix: dict[str, Any] | None = None
     if explicit is not None:
-        # codex round 4 指摘: `--file` 明示時は fallback 探索に進まず即時失敗させる。
-        # ユーザーが特定ファイルを指定しているのに、それが存在しない / 空 / JSON 不正
-        # だった場合、無言で fallback に流れて別実行の戻り値を誤マージすると事故になる。
-        if not explicit.exists():
-            die(
-                f"--file で指定されたパスが存在しません: {explicit}",
-                code=3,
-            )
-        if explicit.stat().st_size == 0:
-            die(
-                f"--file で指定されたファイルが空です: {explicit}",
-                code=3,
-            )
-        try:
-            fix = json.loads(explicit.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            die(
-                f"--file 指定の fix 戻り値ファイルの読み取り / parse に失敗 "
-                f"({explicit}): {exc}",
-                code=3,
-            )
-        # gemini round 3 指摘: `--file` で `list` 等の non-dict JSON が渡されると
-        # 後続の `fix.get(...)` でクラッシュする。即時 die(code=3) で中断。
-        if not isinstance(fix, dict):
-            die(
-                f"--file 指定の fix 戻り値ファイルが dict ではない "
-                f"({explicit}, type={type(fix).__name__})。"
-                " fix サブエージェント出力の形式不正。",
-                code=3,
-            )
-        ffile = explicit
-        # 明示指定は stale 検証スキップ
-    else:
-        for c, is_canonical in fallback_candidates:
-            if not (c.exists() and c.stat().st_size > 0):
-                continue
-            is_fresh, parsed = _is_fresh_fix_result(c, pr, round_started_ts, is_canonical=is_canonical)
-            if not is_fresh:
-                continue
-            ffile = c
-            fix = parsed  # 既にパース済みのデータを再利用 (gemini round 2 指摘の性能改善)
-            break
+        return _read_explicit_fix_result(explicit)
 
-    if ffile is None or fix is None:
+    fix = _find_fallback_fix_result(fallback_candidates, pr, round_started_ts)
+
+    if fix is None:
         checked = ([str(explicit)] if explicit else []) + [str(c) for c, _ in fallback_candidates]
         die(
             "fix サブエージェントが戻り値ファイルを生成しなかった "
@@ -3837,6 +3796,47 @@ def _read_fix_result(
         )
 
     return fix
+
+
+def _read_explicit_fix_result(explicit: pathlib.Path) -> dict[str, Any]:
+    """明示された fix 戻り値を読み、形式不正なら fallback せず終了する。"""
+    if not explicit.exists():
+        die(f"--file で指定されたパスが存在しません: {explicit}", code=3)
+    if explicit.stat().st_size == 0:
+        die(f"--file で指定されたファイルが空です: {explicit}", code=3)
+    try:
+        fix = json.loads(explicit.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        die(
+            f"--file 指定の fix 戻り値ファイルの読み取り / parse に失敗 "
+            f"({explicit}): {exc}",
+            code=3,
+        )
+    if not isinstance(fix, dict):
+        die(
+            f"--file 指定の fix 戻り値ファイルが dict ではない "
+            f"({explicit}, type={type(fix).__name__})。"
+            " fix サブエージェント出力の形式不正。",
+            code=3,
+        )
+    return fix
+
+
+def _find_fallback_fix_result(
+    candidates: list[tuple[pathlib.Path, bool]],
+    pr: int | str,
+    round_started_ts: float | None,
+) -> dict[str, Any] | None:
+    """canonical、legacy の順に fresh な fix 戻り値を探す。"""
+    for candidate, is_canonical in candidates:
+        if not (candidate.exists() and candidate.stat().st_size > 0):
+            continue
+        is_fresh, parsed = _is_fresh_fix_result(
+            candidate, pr, round_started_ts, is_canonical=is_canonical
+        )
+        if is_fresh:
+            return parsed
+    return None
 
 
 def _normalize_dict_items(raw: object) -> list[dict]:

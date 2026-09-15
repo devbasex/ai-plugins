@@ -79,17 +79,9 @@ def aggregate(state: dict[str, Any]) -> dict[str, Any]:
                 impl, entry, items_by_id, impl_runtime, requested, reviews
             )
 
-        reviewer_models = entry.get("reviewer_models") or {}
-        for name in entry.get("reviewers", []):
-            spec = reviewer_models.get(name) or {}
-            r_requested = spec.get("requested")
-            r_observed = spec.get("observed")
-            _append_model_measurement_warnings(
-                unmeasured, assumed, round_no, name, r_requested, r_observed,
-                "レビュー担当"
-            )
-            if _models.is_measurable(name, r_requested):
-                _aggregate_reviewer_round(reviewer, entry, name, r_requested, reviews)
+        _aggregate_round_reviewers(
+            reviewer, entry, round_no, reviews, unmeasured, assumed
+        )
 
     return {
         "impl": {k: _finish_impl(v) for k, v in sorted(impl.items())},
@@ -97,6 +89,26 @@ def aggregate(state: dict[str, Any]) -> dict[str, Any]:
         "unmeasured": unmeasured,
         "assumed": assumed,
     }
+
+
+def _aggregate_round_reviewers(
+    reviewer: dict[str, dict[str, Any]],
+    entry: dict[str, Any],
+    round_no: Any,
+    reviews: list[dict[str, Any]],
+    unmeasured: list[str],
+    assumed: list[str],
+) -> None:
+    reviewer_models = entry.get("reviewer_models") or {}
+    for name in entry.get("reviewers", []):
+        spec = reviewer_models.get(name) or {}
+        requested = spec.get("requested")
+        observed = spec.get("observed")
+        _append_model_measurement_warnings(
+            unmeasured, assumed, round_no, name, requested, observed, "レビュー担当"
+        )
+        if _models.is_measurable(name, requested):
+            _aggregate_reviewer_round(reviewer, entry, name, requested, reviews)
 
 
 def _aggregate_impl_round(

@@ -627,6 +627,79 @@ def _tail_last_nonempty_line(path: pathlib.Path, limit: int = 4096) -> str:
     return ""
 
 
+def _finish_monitor(
+    status: AgentStatus,
+    outcome: tuple[str, int, str],
+    log_context: tuple[str, str],
+) -> AgentStatus:
+    status.status, status.exit_code, status.detail = outcome
+    _emit_log(*log_context, status)
+    return status
+
+
+def _lingering_completion(
+    paths: AgentPaths,
+    status: AgentStatus,
+    pid: int,
+    started_wall: float,
+) -> str | None:
+    has_result = paths.result.exists() and paths.result.stat().st_size > 0
+    if status.agent == "codex" and status.sentinel_seen and has_result:
+        _kill_pid(pid)
+        status.result_exists = True
+        return f"codex sentinel + result.json detected; killed lingering pid {pid}"
+    if status.sentinel_seen or not has_result:
+        return None
+    result_mtime = paths.result.stat().st_mtime
+    if result_mtime < started_wall:
+        return None
+    result_age = time.time() - result_mtime
+    if result_age < RESULT_AGE_GRACE:
+        return None
+    _kill_pid(pid)
+    status.result_exists = True
+    return (
+        f"result.json exists for {result_age:.0f}s without process exit; "
+        f"killed lingering pid {pid}"
+    )
+
+
+def _early_error(
+    paths: AgentPaths,
+    agent: str,
+    disabled: bool,
+) -> tuple[tuple[str, str] | None, str | None]:
+    if disabled:
+        return None, None
+    fatal_err = _scan_early_fatal(paths.err_log)
+    fatal_source = "err.log"
+    if not fatal_err and agent == "claude":
+        fatal_err = _scan_claude_stdout_fatal(paths.stdout_log)
+        fatal_source = "stdout.log"
+    fatal = (fatal_source, fatal_err) if fatal_err else None
+    return fatal, _scan_early_warn(paths.err_log)
+
+
+def _update_progress(
+    paths: AgentPaths,
+    status: AgentStatus,
+    last_progress_size: int,
+    last_progress: float,
+) -> tuple[int, float]:
+    status.err_log_size = _safe_size(paths.err_log)
+    status.stdout_log_size = _safe_size(paths.stdout_log)
+    status.progress_log_size = _safe_size(paths.progress_log)
+    status.progress_tail = _tail_last_nonempty_line(paths.progress_log)
+    progress_size = (
+        status.err_log_size + status.stdout_log_size + status.progress_log_size
+    )
+    if progress_size != last_progress_size:
+        last_progress_size = progress_size
+        last_progress = time.monotonic()
+    status.idle_seconds = time.monotonic() - last_progress
+    return last_progress_size, last_progress
+
+
 def monitor_agent(
     agent: str,
     pr: int,
@@ -655,11 +728,11 @@ def monitor_agent(
         time.sleep(2)
     pid = _read_pidfile(paths.pidfile)
     if pid is None:
-        status.status = "PIDFILE_BAD"
-        status.exit_code = 6
-        status.detail = f"pidfile not found: {paths.pidfile}"
-        _emit_log(log_prefix, agent, status)
-        return status
+        return _finish_monitor(
+            status,
+            ("PIDFILE_BAD", 6, f"pidfile not found: {paths.pidfile}"),
+            (log_prefix, agent),
+        )
 
     status.pid = pid
     # cmdline 検証 (PID 再利用対策) は **プロセスが生きていると確認できたときのみ** 行う。
@@ -690,22 +763,13 @@ def monitor_agent(
         # ケースがある (実機で観測)。result.json は正常に書かれているのに alive=True の
         # まま stall_timeout に達して STALLED 化してしまう。sentinel + result.json が
         # 揃った瞬間に対象プロセスを kill して OK 判定で返す。
-        if (
-            agent == "codex"
-            and alive
-            and status.sentinel_seen
-            and paths.result.exists()
-            and paths.result.stat().st_size > 0
-        ):
-            _kill_pid(pid)
-            status.result_exists = True
-            status.status = "OK"
-            status.exit_code = 0
-            status.detail = (
-                f"codex sentinel + result.json detected; killed lingering pid {pid}"
+        completion_detail = None
+        if alive and (status.sentinel_seen or cmdline_validated):
+            completion_detail = _lingering_completion(paths, status, pid, started_wall)
+        if completion_detail is not None:
+            return _finish_monitor(
+                status, ("OK", 0, completion_detail), (log_prefix, agent)
             )
-            _emit_log(log_prefix, agent, status)
-            return status
 
         # result.json が書かれた後もプロセスがハングするケース (実測:
         # MCP サーバー切断待ち等��� exit しない)。sentinel 機構を持たない agent 向け
@@ -714,39 +778,17 @@ def monitor_agent(
         # 安全条件:
         #   - cmdline_validated: PID 再利用でない (または検証不能環境) ことを確認済み
         #   - mtime >= started_wall: 前 round の stale result.json を拾わない
-        if (
-            alive
-            and not status.sentinel_seen
-            and cmdline_validated
-            and paths.result.exists()
-            and paths.result.stat().st_size > 0
-        ):
-            result_mtime = paths.result.stat().st_mtime
-            if result_mtime >= started_wall:
-                result_age = time.time() - result_mtime
-                if result_age >= RESULT_AGE_GRACE:
-                    _kill_pid(pid)
-                    status.result_exists = True
-                    status.status = "OK"
-                    status.exit_code = 0
-                    status.detail = (
-                        f"result.json exists for {result_age:.0f}s without process exit; "
-                        f"killed lingering pid {pid}"
-                    )
-                    _emit_log(log_prefix, agent, status)
-                    return status
-
         if alive and not cmdline_validated:
             # cmdline 検証は alive 確認後に 1 回だけ。生きていない瞬間に proc/<pid> を読むと
             # ファイル不在で None 扱いになり判定不能のため。
             cmdline_ok = _pid_cmdline_matches(pid, agent)
             if cmdline_ok is False:
                 _kill_pid(pid)
-                status.status = "PIDFILE_BAD"
-                status.exit_code = 6
-                status.detail = f"pid {pid} cmdline does not contain '{agent}' (stale pidfile?)"
-                _emit_log(log_prefix, agent, status)
-                return status
+                return _finish_monitor(
+                    status,
+                    ("PIDFILE_BAD", 6, f"pid {pid} cmdline does not contain '{agent}' (stale pidfile?)"),
+                    (log_prefix, agent),
+                )
             if cmdline_ok is True:
                 cmdline_validated = True
 
@@ -754,89 +796,69 @@ def monitor_agent(
         if elapsed >= timeout:
             if alive:
                 _kill_pid(pid)
-            status.status = "TIMEOUT"
-            status.exit_code = 2
-            status.detail = f"hard timeout {timeout}s reached (pid {pid})"
-            _emit_log(log_prefix, agent, status)
-            return status
+            return _finish_monitor(
+                status,
+                ("TIMEOUT", 2, f"hard timeout {timeout}s reached (pid {pid})"),
+                (log_prefix, agent),
+            )
 
         # 3. early error
         # 明確な致命 (FATAL) のみ kill する。曖昧パターン (生 Error: / Traceback) は
         # WARN として警告ログのみ。codex がレビュー対象 diff の test コード片を
         # echo するケースで誤 kill されるのを防ぐ。
-        if not no_early_error:
-            fatal_err = _scan_early_fatal(paths.err_log)
-            fatal_source = "err.log"
-            if not fatal_err and agent == "claude":
-                # claude は承認失敗・実行失敗を標準出力の JSON に載せる。
-                fatal_err = _scan_claude_stdout_fatal(paths.stdout_log)
-                fatal_source = "stdout.log"
-            if fatal_err:
-                if alive:
-                    _kill_pid(pid)
-                status.status = "EARLY_ERROR"
-                status.exit_code = 4
-                # 検知元を書く。err.log と決め打ちすると、標準出力から検知したときに
-                # 存在しない行を探させることになる。
-                status.detail = (
-                    f"early error (fatal) in {fatal_source}: {fatal_err[:200]}"
-                )
-                _emit_log(log_prefix, agent, status)
-                return status
-
-            if not warned_early_error:
-                warn_err = _scan_early_warn(paths.err_log)
-                if warn_err:
-                    print(
-                        f"{log_prefix}⚠️  {agent} early-error WARN "
-                        f"(non-fatal, not killing): {warn_err[:200]}",
-                        file=sys.stderr, flush=True,
-                    )
-                    warned_early_error = True
+        fatal, warn_err = _early_error(paths, agent, no_early_error)
+        if fatal:
+            if alive:
+                _kill_pid(pid)
+            fatal_source, fatal_err = fatal
+            return _finish_monitor(
+                status,
+                ("EARLY_ERROR", 4, f"early error (fatal) in {fatal_source}: {fatal_err[:200]}"),
+                (log_prefix, agent),
+            )
+        if not warned_early_error and warn_err:
+            print(
+                f"{log_prefix}⚠️  {agent} early-error WARN "
+                f"(non-fatal, not killing): {warn_err[:200]}",
+                file=sys.stderr, flush=True,
+            )
+            warned_early_error = True
 
         if not alive:
             # プロセス終了 — result.json を確認
             status.result_exists = paths.result.exists() and paths.result.stat().st_size > 0
             if status.result_exists or not require_result:
-                status.status = "OK"
-                status.exit_code = 0
-                status.detail = (
+                outcome = (
+                    "OK",
+                    0,
                     f"process exited; sentinel={status.sentinel_seen}; "
-                    f"result_exists={status.result_exists}"
+                    f"result_exists={status.result_exists}",
                 )
             else:
-                status.status = "NO_RESULT"
-                status.exit_code = 3
-                status.detail = f"process exited but result.json missing: {paths.result}"
-            _emit_log(log_prefix, agent, status)
-            return status
+                outcome = (
+                    "NO_RESULT",
+                    3,
+                    f"process exited but result.json missing: {paths.result}",
+                )
+            return _finish_monitor(status, outcome, (log_prefix, agent))
 
         # 4. stall detection (err.log / stdout.log / progress.log をモニタ。
         # agy は stdout 側だけ進捗が出るケースがあり、progress.log には
         # launcher が要求した短いフェーズマーカーが出るため、いずれかが
         # 更新されれば progress として扱う)
-        status.err_log_size = _safe_size(paths.err_log)
-        status.stdout_log_size = _safe_size(paths.stdout_log)
-        status.progress_log_size = _safe_size(paths.progress_log)
-        status.progress_tail = _tail_last_nonempty_line(paths.progress_log)
-        progress_size = (
-            status.err_log_size + status.stdout_log_size + status.progress_log_size
+        last_progress_size, last_progress = _update_progress(
+            paths, status, last_progress_size, last_progress
         )
-        if progress_size != last_progress_size:
-            last_progress_size = progress_size
-            last_progress = time.monotonic()
-        status.idle_seconds = time.monotonic() - last_progress
         if status.idle_seconds >= stall_timeout:
             if alive:
                 _kill_pid(pid)
-            status.status = "STALLED"
-            status.exit_code = 5
-            status.detail = (
+            detail = (
                 f"no log progress for {stall_timeout}s "
                 f"(pid {pid}, last size {last_progress_size}B)"
             )
-            _emit_log(log_prefix, agent, status)
-            return status
+            return _finish_monitor(
+                status, ("STALLED", 5, detail), (log_prefix, agent)
+            )
 
         # poll 中の進捗ログ
         _emit_progress(log_prefix, agent, status)

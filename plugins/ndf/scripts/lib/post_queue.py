@@ -334,6 +334,34 @@ def _by_actor(row: dict[str, Any], actor: str | None) -> bool:
     return str((row.get("user") or {}).get("login") or "") == actor
 
 
+def _comment_match(match: dict[str, Any], actor: str | None):
+    return lambda row: _by_actor(row, actor) and row.get("body") == match.get("body")
+
+
+def _review_match(match: dict[str, Any], actor: str | None):
+    want = _REVIEW_STATE.get(str(match.get("event") or ""), "")
+    head = str(match.get("body") or "")[:BODY_MATCH_CHARS]
+    return lambda row: (
+        _by_actor(row, actor)
+        and str(row.get("state") or "") == want
+        and str(row.get("body") or "")[:BODY_MATCH_CHARS] == head
+    )
+
+
+def _reply_match(match: dict[str, Any], actor: str | None):
+    return lambda row: (
+        str(row.get("in_reply_to_id") or "") == str(match.get("in_reply_to"))
+        and row.get("body") == match.get("body")
+    )
+
+
+_POSTED_MATCH_RULES = {
+    "pr-comment": ("repos/{repo}/issues/{pr}/comments", _comment_match),
+    "review-post": ("repos/{repo}/pulls/{pr}/reviews", _review_match),
+    "review-reply": ("repos/{repo}/pulls/{pr}/comments", _reply_match),
+}
+
+
 def posted_match(item: dict[str, Any]) -> tuple[bool | None, dict[str, Any] | None]:
     """同じ内容が既に GitHub 側にあるか。あるときは、その投稿そのものも返す。
 
@@ -358,28 +386,18 @@ def posted_match(item: dict[str, Any]) -> tuple[bool | None, dict[str, Any] | No
         found = next((r for r in rows if pred(r)), None)
         return (found is not None), found
 
-    if kind == "pr-comment":
-        return _first(
-            _list_all(f"repos/{repo}/issues/{pr}/comments"),
-            lambda r: _by_actor(r, actor) and r.get("body") == match.get("body"))
-    if kind == "review-post":
-        want = _REVIEW_STATE.get(str(match.get("event") or ""), "")
-        head = str(match.get("body") or "")[:BODY_MATCH_CHARS]
-        return _first(
-            _list_all(f"repos/{repo}/pulls/{pr}/reviews"),
-            lambda r: (_by_actor(r, actor)
-                       and str(r.get("state") or "") == want
-                       and str(r.get("body") or "")[:BODY_MATCH_CHARS] == head))
-    if kind == "review-reply":
-        return _first(
-            _list_all(f"repos/{repo}/pulls/{pr}/comments"),
-            lambda r: (str(r.get("in_reply_to_id") or "") == str(match.get("in_reply_to"))
-                       and r.get("body") == match.get("body")))
     if kind == "thread-resolve":
         ids = unresolved_thread_ids(repo, pr)
         if ids is None:
             return None, None
         return (str(match.get("thread_id")) not in ids), None
+    rule = _POSTED_MATCH_RULES.get(kind)
+    if rule is not None:
+        path_template, predicate_factory = rule
+        return _first(
+            _list_all(path_template.format(repo=repo, pr=pr)),
+            predicate_factory(match, actor),
+        )
     return None, None
 
 
