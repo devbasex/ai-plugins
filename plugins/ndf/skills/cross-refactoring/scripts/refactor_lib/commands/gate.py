@@ -149,20 +149,12 @@ def cmd_merge_final_fix(args: argparse.Namespace) -> None:
     """
     path, state = load_state(args.id)
     gate = state.setdefault("final_gate", {"fix_rounds": 0, "checks": []})
-    impl = str(gate.get("impl") or "")
-    if not impl:
-        die(
-            "最終ゲートの修正担当が記録されていません。"
-            "先に `final-gate` を実行してください",
-            code=4,
-        )
+    impl, payload = _resolve_final_fix_target(state, gate)
 
     work = str(state["worktrees"]["work"])
     discard_impl_leftovers(state, work)
     flush_pending_push(path, state, gate)
 
-    result = result_path(state, impl, stem_for(impl, "final-fix", state["id"]))
-    payload = read_result(result, impl)
     head_now = git_out(work, ["rev-parse", "HEAD"]) or ""
     ordered_range = commits_in_range(work, gate.get("fix_base_sha"), head_now)
     if ordered_range is None:
@@ -174,10 +166,56 @@ def cmd_merge_final_fix(args: argparse.Namespace) -> None:
             code=2,
         )
 
+    unassigned, problems = _verify_final_fix_range(
+        state, work, payload, ordered_range
+    )
+    _apply_final_fix_range(
+        path, state, gate, head_now, ordered_range, unassigned, problems
+    )
+
+    gate.setdefault("durations", {})["fix"] = (
+        gate.get("durations", {}).get("fix", 0)
+        + safe_int(payload.get("elapsed_seconds"))
+    )
+    statefile.save(path, state)
+    # **取り消したかどうかに関わらず公開する。** 最終ゲートは push 済みの地点なので、
+    # 公開しないと Pull Request の内容と手元の HEAD が食い違ったまま次の判定へ入る。
+    # `--ci-check` の実行では、push しないと読む対象の検査そのものが動かない。
+    push_with_retry_marker(path, state, gate)
+
+
+def _resolve_final_fix_target(
+    state: dict[str, Any], gate: dict[str, Any]
+) -> tuple[str, dict[str, Any]]:
+    """修正担当と、その担当の結果ファイルの中身を解決する。
+
+    担当が記録されていなければ（`final-gate` を通っていない）進行ごと止める。
+    """
+    impl = str(gate.get("impl") or "")
+    if not impl:
+        die(
+            "最終ゲートの修正担当が記録されていません。"
+            "先に `final-gate` を実行してください",
+            code=4,
+        )
+    result = result_path(state, impl, stem_for(impl, "final-fix", state["id"]))
+    return impl, read_result(result, impl)
+
+
+def _verify_final_fix_range(
+    state: dict[str, Any],
+    work: str,
+    payload: dict[str, Any],
+    ordered_range: list[str],
+) -> tuple[list[str], list[str]]:
+    """範囲のコミットから、未申告のコミットと問題の一覧を作る。
+
+    HEAD・`ordered_range`・申告された sha・commit facts を突き合わせる。
+    **テストコマンドは渡さない。** 合否は `final-gate` が採った側で 1 度だけ見る
+    （`--ci-check` を指定した実行で手元のテストを走らせないため）。
+    """
     claimed_shas = reported_shas(payload)
     unassigned = unassigned_fix_commits(work, claimed_shas, ordered_range)
-    # **テストコマンドは渡さない。** 合否は `final-gate` が採った側で 1 度だけ見る
-    # （`--ci-check` を指定した実行で手元のテストを走らせないため）。
     facts = collect_commit_facts(
         work, claimed_shas, set(ordered_range), "", state["head_branch"],
     )
@@ -187,7 +225,19 @@ def cmd_merge_final_fix(args: argparse.Namespace) -> None:
             for c in facts
         ) if p
     ]
+    return unassigned, problems
 
+
+def _apply_final_fix_range(
+    path: Any,
+    state: dict[str, Any],
+    gate: dict[str, Any],
+    head_now: str,
+    ordered_range: list[str],
+    unassigned: list[str],
+    problems: list[str],
+) -> None:
+    """検証の結果に応じて、範囲を取り消すか採用の記録を更新する。"""
     if unassigned:
         info(
             f"❌ どの申告にも含まれていない修正コミットが {len(unassigned)} 件あります"
@@ -208,16 +258,6 @@ def cmd_merge_final_fix(args: argparse.Namespace) -> None:
         gate["fix_base_sha"] = head_now
         gate.setdefault("fix_commits", []).extend(ordered_range)
         info(f"修正を取り込みました（{len(ordered_range)} コミット）")
-
-    gate.setdefault("durations", {})["fix"] = (
-        gate.get("durations", {}).get("fix", 0)
-        + safe_int(payload.get("elapsed_seconds"))
-    )
-    statefile.save(path, state)
-    # **取り消したかどうかに関わらず公開する。** 最終ゲートは push 済みの地点なので、
-    # 公開しないと Pull Request の内容と手元の HEAD が食い違ったまま次の判定へ入る。
-    # `--ci-check` の実行では、push しないと読む対象の検査そのものが動かない。
-    push_with_retry_marker(path, state, gate)
 
 
 def _local_gate(state: dict[str, Any]) -> tuple[bool, str]:

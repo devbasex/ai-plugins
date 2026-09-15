@@ -3087,42 +3087,94 @@ def _verify_findings(
     ran: dict[tuple[str, ...], Optional[int]] = {}
 
     for finding in targets:
-        check = str(finding.get("suggested_check") or "")
-        record: dict[str, Any] = {
-            "command": check, "finding_id": finding.get("finding_id"),
-            "exit_code": None, "result": "not_run", "ran_at": None,
-        }
-        argv = _verify_argv(check, allowed, work) if allowed else None
-        if argv is not None:
-            key = tuple(argv)
-            if key in ran:
-                code = ran[key]
-            else:
-                code = run(argv, work)
-                ran[key] = code
-            record["exit_code"] = code
-            record["ran_at"] = _now()
-            if code in codes:
-                record["result"] = "reproduced"
-            elif code == 0:
-                record["result"] = "not_reproduced"
-        finding["verification"] = record
+        finding["verification"] = _verify_one_finding(
+            finding, allowed, work, codes, run, ran)
 
-    # 代表は組から選び直す。**実行し直さない**（記録済みの結果を選ぶだけである）。
     for rep in targets:
-        if rep.get("merged_into"):
+        _adopt_group_verification(rep, targets, by_id)
+
+
+def _initial_verification_record(finding: dict[str, Any]) -> dict[str, Any]:
+    """finding から実行前の verification レコードを作る。
+
+    **`ran_at` は結果を受け取った記録にだけ入れる。** 初期化で入れると、実行していない
+    `not_run` の記録にも時刻が残り、実行済みに見える。
+    """
+    return {
+        "command": str(finding.get("suggested_check") or ""),
+        "finding_id": finding.get("finding_id"),
+        "exit_code": None, "result": "not_run", "ran_at": None,
+    }
+
+
+def _run_verify_cached(
+    argv: list[str],
+    work: str,
+    codes: set,
+    run: Any,
+    ran: dict[tuple[str, ...], Optional[int]],
+) -> tuple[Optional[int], str]:
+    """許可済みコマンドをキャッシュ付きで実行し、`(終了コード, 結果区分)` を返す。
+
+    **同じコマンドは 1 度しか実行しない。** 組の全員が同じ `suggested_check` を書くのは
+    普通に起こり（統合の条件は本文の一致である）、そのたびに走らせると実行が増える。
+    """
+    key = tuple(argv)
+    if key in ran:
+        code = ran[key]
+    else:
+        code = run(argv, work)
+        ran[key] = code
+    if code in codes:
+        return code, "reproduced"
+    if code == 0:
+        return code, "not_reproduced"
+    return code, "not_run"
+
+
+def _verify_one_finding(
+    finding: dict[str, Any],
+    allowed: list[str],
+    work: str,
+    codes: set,
+    run: Any,
+    ran: dict[tuple[str, ...], Optional[int]],
+) -> dict[str, Any]:
+    """1 件の finding の `suggested_check` を実行し、verification レコードを返す。"""
+    record = _initial_verification_record(finding)
+    argv = _verify_argv(record["command"], allowed, work) if allowed else None
+    if argv is not None:
+        code, result = _run_verify_cached(argv, work, codes, run, ran)
+        record["exit_code"] = code
+        record["ran_at"] = _now()
+        record["result"] = result
+    return record
+
+
+def _adopt_group_verification(
+    rep: dict[str, Any],
+    targets: list[dict[str, Any]],
+    by_id: dict[Any, dict[str, Any]],
+) -> None:
+    """`merged_into` をたどる組から、最上位の verification を代表へ写す。
+
+    `reproduced` > `not_reproduced` > `not_run` の順で最初に当たった 1 件を採り、
+    出所を `verification.finding_id` へ残す。**実行し直さない**（記録済みの結果を
+    選ぶだけである）。
+    """
+    if rep.get("merged_into"):
+        return
+    best = rep["verification"]
+    for member in targets:
+        if member is rep or not member.get("merged_into"):
             continue
-        best = rep["verification"]
-        for member in targets:
-            if member is rep or not member.get("merged_into"):
-                continue
-            if _merged_root(member, by_id) is not rep:
-                continue
-            if _VERIFY_RANK.get(_verify_result(member), -1) > \
-               _VERIFY_RANK.get(str(best.get("result") or "not_run"), -1):
-                best = member["verification"]
-        if best is not rep["verification"]:
-            rep["verification"] = dict(best)
+        if _merged_root(member, by_id) is not rep:
+            continue
+        if _VERIFY_RANK.get(_verify_result(member), -1) > \
+           _VERIFY_RANK.get(str(best.get("result") or "not_run"), -1):
+            best = member["verification"]
+    if best is not rep["verification"]:
+        rep["verification"] = dict(best)
 
 
 def cmd_verify_findings(args: argparse.Namespace) -> None:
