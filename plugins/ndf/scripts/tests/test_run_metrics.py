@@ -142,6 +142,30 @@ def test_summary_has_common_keys_and_launches_without_detail(rm, tmp_path):
     assert "秘密のレビュー観点" not in text
 
 
+def test_summary_ignores_malformed_and_non_object_journal_rows(rm, tmp_path):
+    tmp_dir = tmp_path / "tmp"
+    tmp_dir.mkdir()
+    launch = _launch(
+        "agy", "agy-review-pr665", "ok",
+        "2026-09-15T10:01:00+09:00", "2026-09-15T10:02:00+09:00",
+    )
+    (tmp_dir / "monitor-outcomes.jsonl").write_text(
+        "{not json\n" + json.dumps(["not", "an", "object"]) + "\n"
+        + json.dumps(launch) + "\n",
+        encoding="utf-8",
+    )
+
+    summary = rm.build_summary(
+        tmp_dir / "cross-review-pr665-state.json",
+        _review_state(tmp_dir),
+        "cross-review",
+    )
+
+    assert summary["launches"] == [
+        {key: value for key, value in launch.items() if key != "detail"}
+    ]
+
+
 def test_unfinished_run_has_null_end_and_last_saved_at(rm, tmp_path):
     state = _review_state(tmp_path, final=None)
     state.pop("ended_at")

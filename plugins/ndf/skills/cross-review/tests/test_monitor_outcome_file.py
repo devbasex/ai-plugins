@@ -140,6 +140,11 @@ def test_reason_follows_status(status, reason):
     assert _load_outcome_mod().reason_for(status) == reason
 
 
+def test_reason_rejects_unknown_status():
+    with pytest.raises(ValueError, match="UNKNOWN"):
+        _load_outcome_mod().reason_for("UNKNOWN")
+
+
 def test_pidfile_bad_outcome_has_null_launched_at(monitor_mod, tmp_path, monkeypatch, capsys):
     """pid ファイルを 30 秒待つ猶予を省くため、監視の本体だけを差し替えて CLI を通す。"""
     def fake_monitor_agent(**kwargs):
