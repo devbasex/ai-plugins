@@ -55,16 +55,28 @@ def test_each_long_runner_is_started_by_bg_wait_run(index: int) -> None:
 
 
 @pytest.mark.parametrize("index", range(3))
-def test_each_run_is_followed_by_a_wait_loop_on_the_same_rc(index: int) -> None:
+def test_each_run_is_followed_by_one_wait_on_the_same_rc(index: int) -> None:
+    """**待ちは 1 回の呼び出しに 1 つだけ書く。** 繰り返しを 1 回の Bash へ書くと、
+    2 回目の待ちに入った時点で合計が 600 秒を超え、ホストに打ち切られる（#683 round 2）。"""
     lines = _skeleton()
     i, line = _long_runner_lines()[index]
     rc = re.search(r'"\$SCRIPTS/bg-wait\.sh" run ("[^"]+")', line).group(1)
     following = next(l for l in lines[i + 1:] if l.strip() and not l.lstrip().startswith("#"))
     assert re.search(
-        rf'while "\$SCRIPTS/bg-wait\.sh" wait {re.escape(rc)}( --max-wait (\d+))?; '
-        r'\[ \$\? -eq 124 \]; do :; done', following), following
+        rf'^\s*"\$SCRIPTS/bg-wait\.sh" wait {re.escape(rc)}( --max-wait (\d+))?\s*(#|$)',
+        following), following
+    assert not re.search(r"\b(while|until|for)\b", following), following
     max_wait = re.search(r"--max-wait (\d+)", following)
     assert max_wait is None or int(max_wait.group(1)) <= 540
+    # 呼び直すことが、その場（行内か直前の注記）に書かれている
+    context = "\n".join(lines[max(0, i - 6):i + 2])
+    assert "124" in context and "呼び直す" in context, context
+
+
+def test_the_skeleton_has_no_wait_loop_in_a_single_call() -> None:
+    for line in _skeleton():
+        if "bg-wait.sh\" wait" in line or 'bg-wait.sh" wait' in line:
+            assert not line.lstrip().startswith(("while", "until")), line
 
 
 def test_the_review_monitor_passes_the_review_phase() -> None:

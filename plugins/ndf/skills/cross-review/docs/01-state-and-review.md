@@ -170,8 +170,10 @@ done
 # monitor.py が多軸で完了判定。exit code で失敗種別を分岐。上限は `--phase review`（1200 秒）。
 # ⚠ 位置引数の `both` は codex / agy の 2 者だけを指す。担当の一覧は `--agents` で渡す。
 "$SCRIPTS/bg-wait.sh" run "$TMP_DIR/review.rc" -- "$SCRIPTS/monitor.py" "$STATE_PR" --phase review --agents "${ONLY:-$REVIEWERS_CSV}"
-while "$SCRIPTS/bg-wait.sh" wait "$TMP_DIR/review.rc"; RC=$?; [ "$RC" -eq 124 ]; do :; done
-if [ "$RC" -ne 0 ]; then
+# 待ちは 1 回 540 秒以内。**124 が返るあいだ、この 2 行を別の Bash の呼び出しとして呼び直す。**
+# 繰り返しを 1 回の呼び出しへ書くと、2 回目の待ちで合計が 600 秒を超えてホストに打ち切られる。
+"$SCRIPTS/bg-wait.sh" wait "$TMP_DIR/review.rc"; RC=$?
+if [ "$RC" -ne 0 ] && [ "$RC" -ne 124 ]; then
   case $RC in
     2) echo "❌ timeout"      ;;  # hard timeout 超過
     3) echo "❌ no result"    ;;  # プロセス終了したが result.json 未生成

@@ -230,10 +230,11 @@ while :; do
     "$SCRIPTS/launch-reviewer.sh" "$r" "$STATE_PR" "$ROUND"
   done
   # 監視: 上限は上限の表（review 1200 秒 / stall は担当別 codex 180・agy 480・kiro 480・claude 900）。失敗時は kill して返す。
-  #   Bash の 1 回 600 秒に収まらないため背景で起動し、wait（1 回 540 秒以内）を 124 のあいだ **別の Bash の呼び出しで** 呼び直す（docs/01）。
+  #   Bash の 1 回 600 秒に収まらないため背景で起動し、wait（1 回 540 秒以内）を 124 のあいだ **別の Bash の呼び出しで** 呼び直す。
+  #   **繰り返しを 1 回の呼び出しへ書かない**（2 回目の待ちに入った時点で合計が 600 秒を超え、ホストに打ち切られる。docs/01）。
   #   監視と取り込みの終了コードは読まない。結果なしは NO_RESULT として state に残り、Step 3 が受け取る。担当は `--agents` で渡す（`both` は 2 者だけ）。
   "$SCRIPTS/bg-wait.sh" run "$TMP_DIR/review.rc" -- "$SCRIPTS/monitor.py" "$STATE_PR" --phase review --agents "${ONLY:-$REVIEWERS_CSV}"
-  while "$SCRIPTS/bg-wait.sh" wait "$TMP_DIR/review.rc"; [ $? -eq 124 ]; do :; done
+  "$SCRIPTS/bg-wait.sh" wait "$TMP_DIR/review.rc"   # 124 = まだ。**この 1 行を別の Bash の呼び出しとして呼び直す**
   for r in $REVIEWERS; do
     [ -z "$ONLY" ] || [ "$ONLY" = "$r" ] || continue
     "$SCRIPTS/state.py" read-result "$STATE_PR" "$r" || true
@@ -246,7 +247,7 @@ while :; do
   #   ときに同じラウンドで 1 度だけ取り直すことを、この 1 本が引き受ける。
   "$SCRIPTS/state.py" verify-findings "$STATE_PR"
   "$SCRIPTS/bg-wait.sh" run "$TMP_DIR/critique.rc" -- "$SCRIPTS/critique-round.sh" "$STATE_PR" "$ROUND" ${ONLY:-$REVIEWERS}
-  while "$SCRIPTS/bg-wait.sh" wait "$TMP_DIR/critique.rc"; [ $? -eq 124 ]; do :; done
+  "$SCRIPTS/bg-wait.sh" wait "$TMP_DIR/critique.rc"  # 同上。124 のあいだ、別の呼び出しとして呼び直す
 
   # Step 3: 判定 (0=収束 / 2=修正へ / 7=結果なし / 8=待ち行列に残あり / 1=中断)。引き継いだ指摘が残っていれば、
   #   両者が承認しても 2 を返して修正の工程へ回す。置換の終了コードは変数で受けてから読む。
@@ -254,7 +255,7 @@ while :; do
   if [ "$JUDGE_RC" -eq 7 ]; then  # 名前の出た担当だけを、同じラウンドで 1 度起動し直す
     for a in $RELAUNCH_AGENTS; do "$SCRIPTS/launch-reviewer.sh" "$a" "$STATE_PR" "$ROUND"; done
     "$SCRIPTS/bg-wait.sh" run "$TMP_DIR/review.rc" -- "$SCRIPTS/monitor.py" "$STATE_PR" --phase review --agents "$RELAUNCH_AGENTS_CSV"
-    while "$SCRIPTS/bg-wait.sh" wait "$TMP_DIR/review.rc"; [ $? -eq 124 ]; do :; done
+    "$SCRIPTS/bg-wait.sh" wait "$TMP_DIR/review.rc"  # 同上。124 のあいだ、別の呼び出しとして呼び直す
     for a in $RELAUNCH_AGENTS; do "$SCRIPTS/state.py" read-result "$STATE_PR" "$a" || true; done
     JUDGE_VARS=$("$SCRIPTS/state.py" judge "$STATE_PR"); JUDGE_RC=$?; eval "$JUDGE_VARS"
   fi
