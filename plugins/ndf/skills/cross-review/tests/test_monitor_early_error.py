@@ -124,3 +124,15 @@ def test_match_is_quoted_helper(monitor_mod):
 
     line_raw = "quota exceeded happened"
     assert not monitor_mod._match_is_quoted(line_raw, 0, len("quota exceeded"))
+
+
+def test_escaped_double_quotes_do_not_quote_a_fatal_match(tmp_path, monitor_mod):
+    """現状固定: `\\"` は引用符を開かず、後続の fatal を隠さない。"""
+    line = r'x = \"a\"; quota exceeded: upgrade'
+    start = line.index("quota exceeded")
+    end = start + len("quota exceeded")
+
+    assert not monitor_mod._match_is_quoted(line, start, end)
+
+    log = _write(tmp_path / "err.log", f"{line}\n")
+    assert monitor_mod._scan_early_fatal(log) is not None
