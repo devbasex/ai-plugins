@@ -358,3 +358,14 @@ def test_the_final_fix_prompt_does_not_ask_for_an_item_id(tmp_path):
     text = _launch_final_fix(tmp_path)
     assert "Impl-Runtime:" in text
     assert "Item-Id:" not in text
+
+
+# ---------- R2-002: 提案フェーズの命名 ----------
+
+def test_the_propose_result_file_carries_the_round_number(paths):
+    """**提案にもラウンド番号を入れる。** 監視の `--stem-template` と揃える。
+
+    現状固定: `stem_for` の propose 分岐。ラウンド番号が無いと 2 巡目の提案が
+    始まった時点で 1 巡目の提案内容が失われる。
+    """
+    assert paths.stem_for("codex", "propose", 130, 2) == "codex-propose-rf130-r2"

@@ -263,3 +263,35 @@ def test_next_apply_round_reopens_a_group_that_was_applied_but_not_verified(patc
     saved = read_state(state_path)["rounds"][0]
     assert saved["apply_base_sha"] == "BASE_OF_GROUP_1"
     assert saved["fix_rounds"] == 2
+
+
+# ---------- R2-003: 群を持たない旧状態の後方互換 ----------
+
+def test_apply_groups_wraps_a_legacy_entry_into_one_group(rounds):
+    """群を持たない状態ファイル（この版より前）を 1 つの群として読む。
+
+    現状固定: `apply_groups` の後方互換の分岐（`apply_rounds` が無い経路）。
+    ラウンド全体を 1 群へ包み、その場で `entry` へ記録する。中断から再開しても
+    群の単位が実行のたびに変わらないようにするため。
+    """
+    entry = {
+        "round": 1,
+        "impl": "codex",
+        "items": ["R1-001", "R1-002"],
+        "apply_base_sha": "BASE0",
+        "fix_rounds": 2,
+    }
+
+    groups = rounds.apply_groups(entry)
+
+    assert len(groups) == 1
+    group = groups[0]
+    assert group["apply_round"] == 1
+    assert group["items"] == ["R1-001", "R1-002"]
+    assert group["status"] == "pending"
+    assert group["base_sha"] == "BASE0"
+    # impl_model は控えが無ければ requested/observed とも None で補う
+    assert group["impl_model"] == {"requested": None, "observed": None}
+    # entry 側にも群と進行の目印を書き戻す
+    assert entry["apply_rounds"] == groups
+    assert entry["apply_round"] == 1
