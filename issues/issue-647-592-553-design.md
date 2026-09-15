@@ -41,7 +41,12 @@ P4・P5 とは並行してよい。
 
 結果を残さない原因の多くは担当の CLI の側にある（rf646 の agy の STALLED 4 回、claude の 429 の 3729 回）。
 同じ担当で開き直しても直らない。担当を替えれば、壊れた CLI が 1 者でも他の者が群を適用できる。
-替える先は `apply_seq` を 1 進めた輪番の担当で、群を割り当てたときと同じ式を通す（決定 8）。
+替える先は、`apply_seq` を 1 ずつ進めて輪番の担当を引き、その群で失敗した担当のどれとも違う担当が出た最初の番号の担当である。
+引く式は群を割り当てたときと同じものを通す（決定 8）。
+
+1 つ進めるだけにしない。`apply_seq` は提案ラウンドの全群を割り当てた後の番号で、群自身の番号ではない。
+輪番は 4 者で 1 周するため、群が 4 つあり先頭の群が失敗すると、次の番号の担当は失敗した担当と同じになる
+（`assign(1)` と `assign(5)` はどちらも codex。「実測」の節）。
 
 利用上限（429）で進行全体を止める形は採らない。止めると他の 3 者で進められる群まで止まり、再開すると同じ者に
 また当たる。429 は監視が早期の致命として 15 秒前後で打ち切る（D-A の P3）ため、担当を替える 1 回の費用は小さい。
@@ -61,7 +66,10 @@ P4・P5 とは並行してよい。
 `next-apply-round` が `pending` の群を開くとき、失敗した試行の記録の数が試行番号と等しければ試行番号を
 1 進める。等しくなければ（取り込みの前に進行が止まった再開）そのまま開く。
 
-`merge-apply` は同じ試行番号の失敗の記録が既にあれば、記録を足さずに同じ終了コード 2 を返す。進行は
+`merge-apply` は同じ試行番号の失敗の記録が既にあれば、結果ファイルを読まずに、記録を足さず同じ終了コード 2 を返す。
+読んでから判定する形は採らない。結果ファイルの名前（`{agent}-apply-r<提案ラウンド>`）は群の番号を持たず、
+消すのは `launch-cli.sh` の起動時だけである。担当を替えた直後に叩き直すと、替えた先の担当が同じ提案ラウンドの
+先行の群で残した結果を読み、検証へ進んで群を落とす。進行は
 どこで止まっても叩き直せることが前提である（`docs/02-apply-and-review.md`「叩き直しても同じ判定を返す」）。
 叩き直しを 2 回目の試行と数えると、1 回の失敗で群を落とす。
 
@@ -154,6 +162,10 @@ claude は `--output-format json` のため、完了まで出力しない（監�
 | 群 2 つ（agy / codex）、結果ファイルなし | `[1, 1, 1, 1]` | `[2, 2, 2, 2]` | `pending`, `pending` |
 | 同上で着手前テストが `red`（2 回） | `[1, 1]` | `[2, 2]` | `pending`, `pending`（項目は `blocked`） |
 
+輪番の担当は `plugins/ndf/scripts/lib/assignment.py` の `assign` を `seq` 1〜8（ホスト claude）で引くと
+`codex, agy, kiro, claude, codex, agy, kiro, claude` だった。4 で 1 周するため、`apply_seq` を 1 進めるだけでは
+失敗した担当へ戻ることがある（決定 3）。
+
 ### 範囲へ入れたもの: `merge-fix` が提案ラウンドの担当を読む
 
 群の担当 agy、提案ラウンドの担当 codex で `agy-fix-r1-result.json` を置き、`cmd_merge_fix` を 3 回呼んだ。
@@ -209,7 +221,7 @@ git 2.53.0 の一時リポジトリでコミットを作り、2 つの読み方�
 | `prompts/apply.md` / `fix.md`（変更） | 必須トレーラーを最後の段落に置く。進捗マーカー | #553 #647 |
 | `prompts/final-fix.md`（変更） | 進捗マーカー | #647 |
 | `SKILL.md`（変更） | 語の表の適用ラウンドの上限、「別の上限を置かない」の段落の削除、骨組みの監視の引数と終了コード 2 の注記 | #647 |
-| `docs/02-apply-and-review.md` / `docs/04-fix-and-report.md`（変更） | Step 4 の骨組みと開き直しの規則、トレーラーの読み方、修正の結果が無いとき | 全体 |
+| `docs/02-apply-and-review.md` / `docs/04-fix-and-report.md`（変更） | Step 4 と Step 6 の骨組みの監視の引数、開き直しの規則、トレーラーの読み方、修正の結果が無いとき | 全体 |
 
 ```mermaid
 graph TD
@@ -257,7 +269,7 @@ graph TD
 plugins/ndf/skills/cross-refactoring/
 ├── SKILL.md                              # 語の表・段落の削除・骨組み
 ├── docs/02-apply-and-review.md           # Step 4 の骨組み・開き直し・トレーラー
-├── docs/04-fix-and-report.md             # 修正の結果が無いとき
+├── docs/04-fix-and-report.md             # Step 6 の骨組みの監視の引数・修正の結果が無いとき
 ├── prompts/apply.md                      # トレーラーの段落・進捗マーカー
 ├── prompts/fix.md                        # 同上
 ├── prompts/final-fix.md                  # 進捗マーカー
@@ -388,22 +400,22 @@ graph TD
     B[置き土産を捨てる / 取り消しと push の再開] --> G{取り込み済みか}
     G -->|採用あり| R0[終了コード 0]
     G -->|採用 0 件| DR[群が dropped でなければ dropped] --> R2[終了コード 2]
-    G -->|未取り込み| BL{着手前テストが green}
+    G -->|未取り込み| DUP{同じ attempt の失敗の記録がある}
+    DUP -->|はい| R2
+    DUP -->|いいえ| BL{着手前テストが green}
     BL -->|いいえ| A4[終了コード 4]
     BL -->|はい| RG{範囲を確定できる}
     RG -->|いいえ| A4
     RG -->|はい| LD{load_result が読めた}
     LD -->|はい| V[既存の検証と取り込み]
-    LD -->|いいえ| DUP{同じ attempt の失敗の記録がある}
-    DUP -->|はい| R2
-    DUP -->|いいえ| CF[_close_failed_attempt] --> R2
+    LD -->|いいえ| CF[_close_failed_attempt] --> R2
 ```
 
 `_close_failed_attempt` は次の順で行う。
 
 1. 範囲にコミットがあれば全範囲を新しい順に取り消し、群と記録の起点を取り消し後の HEAD にする（push の印を先に立てる）
 2. `failed_attempts` へ `{attempt, impl, reason: _monitor_reason(...), at, reverted}` を足す（`attempt` が 0 なら 1 として記録する）
-3. `attempt < MAX_APPLY_ATTEMPTS` なら `apply_seq` を 1 進め、`_impl_for_seq` の担当と要求モデルで `impl` / `impl_model` を書き換える
+3. `attempt < MAX_APPLY_ATTEMPTS` なら、`apply_seq` を 1 ずつ進めて `_impl_for_seq` を引き、`failed_attempts[].impl` のどれとも違う担当が出たらその担当と要求モデルで `impl` / `impl_model` を書き換える。4 回進めても出なければ（除外で候補が 1 者しかない）、手順 4 と同じく群を取り消す
 4. `attempt >= MAX_APPLY_ATTEMPTS` なら群の項目を `abandoned` にして `deferred_items` へ入れる。群は `dropped`（`drop_reason: no_result`）にし、`apply.merged_at` を立て、局面を `phase_after_group` にする
 5. 保存し、取り消しがあったときだけ push する（`push_with_retry_marker`）
 
@@ -438,9 +450,9 @@ graph TD
 
 | 受け入れ条件 | 何で確かめるか | 置き場所 |
 | --- | --- | --- |
-| AC1、AC2、AC4、AC5 | 群 2 つの状態で結果ファイルを置かずに（AC4 は壊れた JSON と配列で）呼び、`status` / `impl` / `failed_attempts` / `apply_seq` / `deferred_items` を見る | `test_apply_attempts.py` |
+| AC1、AC2、AC4、AC5 | 群 2 つの状態で結果ファイルを置かずに（AC4 は壊れた JSON と配列で）呼び、`status` / `impl` / `failed_attempts` / `apply_seq` / `deferred_items` を見る。AC5 は群 4 つ（`apply_seq` 4）で先頭の群を失敗させる | `test_apply_attempts.py` |
 | AC3 | `next-apply-round` が 1 を返すまで繰り返し、呼び出し回数 5 と両群の `dropped` | `test_apply_attempts.py` |
-| AC6、AC7 | `merge-apply` の 2 度呼び、`next-apply-round` の 2 度呼びで、記録の件数と `attempt` が変わらない | `test_apply_attempts.py` |
+| AC6、AC7 | `merge-apply` の 2 度呼び、`next-apply-round` の 2 度呼びで、記録の件数と `attempt` が変わらない。AC6 は替えた先の担当の古い結果ファイルを置いた状態でも確かめる | `test_apply_attempts.py` |
 | AC8 | `commits_in_range` が 1 件返す状態で、`no_git` の記録に `git revert` が出て、群の `base_sha` が変わる | `test_apply_attempts.py` |
 | AC9、AC10 | 着手前テスト `red`、`commits_in_range` が `None` で、`SystemExit` の値が 4 | `test_apply_attempts.py` |
 | AC11 | 4 つの経路でパラメータ化し、終了コード 2 の後の群が `dropped` か失敗の記録付き `pending` | `test_apply_attempts.py` |
@@ -455,7 +467,7 @@ graph TD
 | AC26、AC29 | 雛形の文言を `grep` で探す | `test_skill_terms.py` |
 | AC27 | `_emit_init` の出力に `IMPL_STALL_TIMEOUT=1800`（`test_timeout` 900 の状態） | `test_init.py` |
 | AC28、AC30 | `SKILL.md` の骨組みから `monitor.py` の呼び出し 4 つを取り出し、提案以外の 3 つが `--stall-timeout "$IMPL_STALL_TIMEOUT"` を持つ。語の表の行と段落の有無 | `test_skill_terms.py` |
-| AC31 | `docs/02-apply-and-review.md` の Step 4 の `monitor.py` の引数が `SKILL.md` と一致する | `test_skill_terms.py` |
+| AC31 | `docs/02-apply-and-review.md` の Step 4 と `docs/04-fix-and-report.md` の Step 6 の `monitor.py` の引数が、`SKILL.md` の同じ呼び出しと一致する | `test_skill_terms.py` |
 | AC32 | トレーラーの節の記載をレビューで見る | 手動 |
 | AC33 | 既存の `test_a_verified_apply_round_marks_every_item_applied` に `failed_attempts` が無いことを足す | `test_merge_apply.py` |
 | AC34、AC35 | 全体のテスト、`bash scripts/build-runtime-plugins.sh --check`、`claude plugin validate .`、`python3 scripts/check-skill-frontmatter.py` | 手動 |

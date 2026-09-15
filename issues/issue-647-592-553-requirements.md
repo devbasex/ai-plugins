@@ -64,12 +64,14 @@
   `merge-apply` を繰り返す。`next-apply-round` の呼び出しは 5 回（開く 4 回 + 尽きた 1 回）で終わり、
   両方の群が `dropped` になる
 - [ ] AC4: 結果ファイルが JSON として読めない場合と、JSON の配列の場合も、AC1 と同じ状態になる
-- [ ] AC5: 担当を替えるとき、状態の `apply_seq` が 1 だけ進み、他の群の担当は変わらない
+- [ ] AC5: 群が 4 つ（`apply_seq` 4）あり、先頭の群（担当 codex）が結果を残さない。担当を替えた後の担当は codex
+  以外で、`apply_seq` は進めた分だけ進み、他の群の担当は変わらない
 
 叩き直しと中断からの再開:
 
-- [ ] AC6: AC1 の直後に、`next-apply-round` を挟まず `merge-apply` をもう一度呼ぶ。終了コード 2 で終わり、
-  失敗した試行の記録は 1 件のまま、担当と `apply_seq` も変わらない
+- [ ] AC6: AC1 の直後に、`next-apply-round` を挟まず `merge-apply` をもう一度呼ぶ。替えた先の担当の結果ファイルが
+  同じ提案ラウンドの先行の群のものとして残っていても、終了コード 2 で終わる。失敗した試行の記録は 1 件のまま、
+  担当と `apply_seq` も変わらない
 - [ ] AC7: `next-apply-round` を `merge-apply` を挟まず 2 回呼ぶ（取り込みの前に進行が止まった再開）。
   群の試行番号は 1 のまま進まない
 
@@ -148,8 +150,8 @@
 - [ ] AC30: `SKILL.md` の「この Skill で使う語」の適用ラウンドの行が、上限を決めるものとして同じ群の試行の
   上限（2 回）を書く。「適用ラウンドに別の上限を置かない」の段落は無くなる。
   `grep -n "別の上限を置かない\|別に置かない" SKILL.md` が何も出力しない
-- [ ] AC31: `docs/02-apply-and-review.md` の Step 4 の骨組みが、`SKILL.md` の骨組みと同じ
-  `monitor.py` の引数を持つ
+- [ ] AC31: `docs/02-apply-and-review.md` の Step 4 と `docs/04-fix-and-report.md` の Step 6 の骨組みが、`SKILL.md` の
+  同じ呼び出しと同じ `monitor.py` の引数を持つ
 - [ ] AC32: `docs/02-apply-and-review.md` のトレーラーの節が 2 つを書く。`git log --format='%(trailers:…)'` が
   最後の段落しか読まないことと、進行側の読み方である
 
@@ -183,7 +185,7 @@
 | --- | --- |
 | 1 | D-A の P1（監視の結果の記録）と P3（理由の語彙）が先に `develop` へ入る。理由の名前は #619 の提案（`timeout` / `cli_timeout` / `usage_limit` / `early_error` / `stalled` / `not_posted` / `missing`）を基本とする |
 | 2 | 監視の終了コード（2 = TIMEOUT / 3 = NO_RESULT / 4 = EARLY_ERROR / 5 = STALLED / 6 = PIDFILE_BAD）の意味は変わらない |
-| 3 | `assignment.assign(seq, host)` の実装担当は `seq` を 1 進めると必ず別のランタイムになる（4 者の輪番）。D-B が除外を足した後も、除外されない者が 2 者以上いる |
+| 3 | `assignment.assign(seq, host)` の実装担当は 4 者の輪番で、`seq` を 1 ずつ進めれば 3 回以内に失敗した担当と別のランタイムが出る。D-B が除外を足した後も、除外されない者が 2 者以上いる |
 | 4 | Claude Code が足す帰属行は、メッセージの末尾に独立した段落として付く（#553 の実測 `26a0fff`） |
 
 ## 検証手段
