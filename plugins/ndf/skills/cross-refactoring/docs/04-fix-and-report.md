@@ -10,7 +10,7 @@ if "$SCRIPTS/refactor.py" should-abandon "$ID" "$ROUND"; then
 else
   "$SCRIPTS/launch-cli.sh" "$IMPL" fix "$ID" "$ROUND"
   "$LIB/monitor.py" "$ID" --agents "$IMPL" --tmp-dir "$TMP_DIR" \
-      --stem-template "{agent}-fix-r$ROUND"
+      --stem-template "{agent}-fix-r$ROUND" --phase fix
   "$SCRIPTS/refactor.py" merge-fix "$ID" "$ROUND"
   # 修正後の状態を次の提案へ届ける
   "$SCRIPTS/prepare-worktrees.sh" "$ID" sync "$(git -C "$WORK" rev-parse HEAD)"
