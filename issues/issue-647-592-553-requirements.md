@@ -130,48 +130,49 @@
   その行を読まない
 - [ ] AC24: 同じ鍵が 2 つの段落にあるとき、末尾に近い段落の値を返す
 - [ ] AC25: AC20 の形のコミットを申告した適用ラウンドが、トレーラーの欠落で取り消されない
+- [ ] AC26: 本文がトレーラーの段落 1 つだけで、題名が `Round: 本文の題名` の形のコミットで、題名を読まない
 
 雛形:
 
-- [ ] AC26: `prompts/apply.md` と `prompts/fix.md` のコミットの規約が、必須トレーラーをメッセージの
+- [ ] AC27: `prompts/apply.md` と `prompts/fix.md` のコミットの規約が、必須トレーラーをメッセージの
   最後の段落に置くことを書く
 
 ## 受け入れ条件（無進捗の打ち切り）
 
-- [ ] AC27: `init` の出力に `IMPL_STALL_TIMEOUT` が入り、値が `--test-timeout` の値 + 900 である
+- [ ] AC28: `init` の出力に `IMPL_STALL_TIMEOUT` が入り、値が `--test-timeout` の値 + 900 である
   （既定で 1800）
-- [ ] AC28: `SKILL.md` の骨組みで、適用・修正・最終ゲートの修正の 3 つの `monitor.py` の呼び出しが
-  `--stall-timeout "$IMPL_STALL_TIMEOUT"` を渡す
-- [ ] AC29: 適用・修正・最終ゲートの修正の雛形（`prompts/apply.md` / `fix.md` / `final-fix.md`）が進捗マーカーを
+- [ ] AC29: `SKILL.md` の骨組みで、適用・修正・最終ゲートの修正の 3 つの `monitor.py` の呼び出しが
+  `--stall-timeout "$IMPL_STALL_TIMEOUT"` と `--timeout 3600` を渡す
+- [ ] AC30: 適用・修正・最終ゲートの修正の雛形（`prompts/apply.md` / `fix.md` / `final-fix.md`）が進捗マーカーを
   書く。作業段階ごとに `$RF_STEM-progress.log` へ 1 行追記する指示である
 
 ## 受け入れ条件（文書）
 
-- [ ] AC30: `SKILL.md` の「この Skill で使う語」の適用ラウンドの行が、上限を決めるものとして同じ群の試行の
+- [ ] AC31: `SKILL.md` の「この Skill で使う語」の適用ラウンドの行が、上限を決めるものとして同じ群の試行の
   上限（2 回）を書く。「適用ラウンドに別の上限を置かない」の段落は無くなる。
   `grep -n "別の上限を置かない\|別に置かない" SKILL.md` が何も出力しない
-- [ ] AC31: `docs/02-apply-and-review.md` の Step 4 と `docs/04-fix-and-report.md` の Step 6 の骨組みが、`SKILL.md` の
+- [ ] AC32: `docs/02-apply-and-review.md` の Step 4 と `docs/04-fix-and-report.md` の Step 6 の骨組みが、`SKILL.md` の
   同じ呼び出しと同じ `monitor.py` の引数を持つ
-- [ ] AC32: `docs/02-apply-and-review.md` のトレーラーの節が 2 つを書く。`git log --format='%(trailers:…)'` が
+- [ ] AC33: `docs/02-apply-and-review.md` のトレーラーの節が 2 つを書く。`git log --format='%(trailers:…)'` が
   最後の段落しか読まないことと、進行側の読み方である
 
 ## 受け入れ条件（退行しない）
 
-- [ ] AC33: 結果ファイルがあり検証を通る適用ラウンドは、変更前と同じく 1 回目の試行で取り込まれ、
+- [ ] AC34: 結果ファイルがあり検証を通る適用ラウンドは、変更前と同じく 1 回目の試行で取り込まれ、
   失敗した試行の記録を持たない
-- [ ] AC34: `uv run --with pytest pytest scripts/tests plugins/ndf -q` が通る
-- [ ] AC35: 配布物の同期・定義・frontmatter の 3 つの検査が終了コード 0 で終わる（コマンドは「検証手段」の表）
+- [ ] AC35: `uv run --with pytest pytest scripts/tests plugins/ndf -q` が通る
+- [ ] AC36: 配布物の同期・定義・frontmatter の 3 つの検査が終了コード 0 で終わる（コマンドは「検証手段」の表）
 
 ## 受け入れ条件（他の設計との契約）
 
-- [ ] AC36: `rounds.impl_for_seq` を差し替えると、群を割り当てたときの担当・結果を残さなかった群の交代先・最終ゲートの
+- [ ] AC37: `rounds.impl_for_seq` を差し替えると、群を割り当てたときの担当・結果を残さなかった群の交代先・最終ゲートの
   修正担当の 3 つが、差し替えた関数の返す担当になる
 
 ## 非機能の条件
 
 | 大項目 | 条件 |
 | --- | --- |
-| 性能・拡張性 | 1 つの提案ラウンドで適用担当を起動する回数が、群の数 × 2 回を超えない。修正担当を起動する回数が、群の数 × `--max-fix-rounds` 回を超えない |
+| 性能・拡張性 | 中断と再開を挟まない実行で、1 つの提案ラウンドで適用担当を起動する回数が群の数 × 2 回を超えない。修正担当を起動する回数も群の数 × `--max-fix-rounds` 回を超えない。取り込み済みの群の開き直しと、`merge-apply` の前に止まった再開は、その回数だけ起動が増える |
 | 運用・保守性 | 群を取り消した理由（担当 2 者と、監視の理由の名前）が、改修計画の「見送った項目」の表から読める |
 
 ## 影響
