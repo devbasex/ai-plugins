@@ -3928,14 +3928,21 @@ def _normalize_dict_items(raw: object) -> list[dict]:
 
 def _merge_fix_records(st: dict, fix: dict, pr: int) -> dict:
     """fix の戻り値を正規化して記録へ反映し、ラウンドの fix 辞書を返す。"""
+    normalized = _normalize_fix_result(fix)
+    st["rounds"][-1]["fix"] = _build_round_fix(normalized)
+    st["rounds"][-1]["ended_at"] = _now()
+    _record_fix_history(st, normalized, pr)
+    return st["rounds"][-1]["fix"]
+
+
+def _normalize_fix_result(fix: dict) -> dict[str, Any]:
+    """fix の戻り値から別名と劣化表現を吸収し、記録へ写す値にそろえる。"""
     # key 名 fallback (サブエージェントが別名で書いた場合の救済)。
     # 正規は fix_commit / fixed_count、別名は commit_sha / fixed のみ受理する。
     fix_commit = fix.get("fix_commit") or fix.get("commit_sha")
     fixed_count = fix.get("fixed_count")
     if fixed_count is None:
         fixed_count = fix.get("fixed", 0)
-
-    round_no = st["rounds"][-1]["round"]
 
     # deferred は list が正だが、LLM がスキーマを無視して文字列リスト
     # (例: ["nit: ..."]) や単一 dict、int(件数) を返すケースがある。後段の
@@ -3958,45 +3965,66 @@ def _merge_fix_records(st: dict, fix: dict, pr: int) -> dict:
     # ため、そのときは記録を空にし、件数は `_count()` の値で残す。
     _rejected_items = _normalize_dict_items(fix.get("rejected"))
 
-    st["rounds"][-1]["fix"] = {
+    return {
         "commit": fix_commit,
         "fixed": fixed_count,
+        "deferred": _deferred_count,
+        "deferred_nits": _deferred_nits,
+        "rejected": _count(fix.get("rejected")),
+        "rejected_items": _rejected_items,
+        "resolved_threads": fix.get("resolved_threads"),
+        "ci": fix.get("ci_status"),
+        "ci_failed_checks": fix.get("ci_failed_checks", []) or [],
+        "ci_note": fix.get("ci_note"),
+        "by_severity": fix.get("by_severity", {}),
+    }
+
+
+def _build_round_fix(normalized: dict[str, Any]) -> dict[str, Any]:
+    """正規化済みの値から `rounds[-1].fix` に置く辞書を作る。"""
+    resolved_threads = normalized["resolved_threads"]
+    return {
+        "commit": normalized["commit"],
+        "fixed": normalized["fixed"],
         # deferred は上記の単一整合ルールで算出した件数を保存する。
         # resolved_threads は件数しか保存せず後段ループが無いため _count() で可。
         # **rejected は per-item の記録を持つが、件数は raw のまま数える**（#156）。
         # dict にできない要素も却下 1 件であり、記録に残せないことと、却下が
         # 何件あったかを失うことは別である。そのため deferred と違い、この件数と
         # `rejected_findings` の件数は一致しないことがある。
-        "deferred": _deferred_count,
-        "rejected": _count(fix.get("rejected")),
-        "resolved_threads": _count(fix.get("resolved_threads")),
+        "deferred": normalized["deferred"],
+        "rejected": normalized["rejected"],
+        "resolved_threads": _count(resolved_threads),
         # 次のラウンドの開始時に、申告どおり Resolve されたかを突き合わせる。
-        "resolved_thread_ids": _thread_ids(fix.get("resolved_threads")),
+        "resolved_thread_ids": _thread_ids(resolved_threads),
         # **位置は効果の測定だけが読む**（#156）。収束ループの判断は増やさない。
         # ここで写さないと、上限の方式（`oracle`）を後から計算できない。
-        "resolved_thread_positions": _thread_positions(fix.get("resolved_threads")),
-        "ci": fix.get("ci_status"),
-        "ci_failed_checks": fix.get("ci_failed_checks", []) or [],
-        "ci_note": fix.get("ci_note"),
-        "by_severity": fix.get("by_severity", {}),
+        "resolved_thread_positions": _thread_positions(resolved_threads),
+        "ci": normalized["ci"],
+        "ci_failed_checks": normalized["ci_failed_checks"],
+        "ci_note": normalized["ci_note"],
+        "by_severity": normalized["by_severity"],
     }
-    st["rounds"][-1]["ended_at"] = _now()
+
+
+def _record_fix_history(st: dict, normalized: dict[str, Any], pr: int) -> None:
+    """引き継ぎの消化と、見送り・却下の項目別履歴を state へ積む。"""
+    round_no = st["rounds"][-1]["round"]
     # 引き継いだ指摘は、修正の工程を 1 度通した時点で収束の抑止から外す。
     # 残りは最終スイープ (Step 7.5) が受け持つ。
     carried = _carried_over_pending(st)
     if carried is not None:
         carried["fixed_in_round"] = round_no
         info(f"↻ 引き継いだ指摘を round {round_no} の修正の工程へ通しました")
-    for d in _deferred_nits:
+    for d in normalized["deferred_nits"]:
         st["deferred_nits"].append({**d, "pr": pr, "round": round_no})
 
     # **却下した指摘も per-item で残す**（#156）。`rounds[].fix.rejected` の件数は
     # ラウンドごとの報告が読むため残し、こちらは理由と位置を持つ記録として積む。
     # **項目が欠けた要素も落とさない。** 落とすと却下そのものが記録から消える。
     rejected_findings = st.setdefault("rejected_findings", [])
-    for r in _rejected_items:
+    for r in normalized["rejected_items"]:
         rejected_findings.append({**r, "pr": pr, "round": round_no})
-    return st["rounds"][-1]["fix"]
 
 
 def cmd_merge_fix(args: argparse.Namespace) -> None:
