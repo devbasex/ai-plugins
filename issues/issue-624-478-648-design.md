@@ -291,7 +291,7 @@ plugins/ndf/
     │   ├── scripts/state.py              # P4 / P5
     │   └── tests/           # P4: test_classify_findings.py / test_critiques.py に追記
     │                        # P5: test_state_review_pool.py に追記、test_state_resume_args.py を新設
-    └── cross-refactoring/tests/test_assignment.py   # P5: review_assign の呼び方を変える
+    └── cross-refactoring/tests/test_assignment.py   # P5: review_assign の呼び方を変え、AC15・AC16 のテストを足す
 ```
 
 `dev.kiro` / `dev.agy` は `skills/` を symlink で参照するため、書き写す配布物は無い。
@@ -374,7 +374,7 @@ graph TD
 | D-A（P1〜P3） | `SKILL.md` の骨組みで D-B が触るのは Step 0 の `init` の引数、Step 2 の起動・監視・取り込みの 3 つのループ、Step 2.5 の `critique-round.sh` の引数である。Step 3 の `JUDGE_RC -eq 7` の分岐は D-A が持つ。P5 は P3 の後に載せるため、衝突は P5 の側で解く |
 | D-A（P1〜P3） | `_no_result_agents` と `_handle_no_result_round` の中身（`NO_RESULT` の理由）は D-A が持つ。P5 は `_guard_previous_round` から呼ぶときに担当の一覧を渡すだけにする |
 | D-A（#619） | 利用上限などの分類を、担当を外す判断へつなぐのは後続に回す（決定 19）。つなぐ場合の入口は再開の `--exclude` である |
-| D-C | `refactor_lib` に触らない。共通層の `assign()` と `check_auth()` の振る舞いを変えない（決定 10）。`review_assign` の引数の変更で直すのは `cross-refactoring/tests/test_assignment.py` の呼び出しだけで、`refactor_lib` は `review_assign` を呼ばない |
+| D-C | `refactor_lib` に触らない。共通層の `assign()` と `check_auth()` の振る舞いを変えない（決定 10）。`review_assign` のテストは共通層のテストの置き場所 `cross-refactoring/tests/test_assignment.py` にある。P5 はそこで既存の呼び出しを直し、AC15・AC16 のテストを足す。`refactor_lib` は `review_assign` を呼ばない |
 
 **D-A の決定に依存する点:**
 
@@ -385,6 +385,9 @@ graph TD
 
 ## テスト設計
 
+置き場所は、`cross-refactoring/` で始まるもの以外は `plugins/ndf/skills/cross-review/tests/` の下である。
+`cross-refactoring/` で始まるものは `plugins/ndf/skills/` の下にある。
+
 | 受け入れ条件 | 何で確かめるか | 置き場所 |
 | --- | --- | --- |
 | AC1〜AC4 | 状態ファイルを組み、`_new_finding_count` と `cmd_judge` の終了コードを見る（実測の A / B と、A の `minor` / 根拠なし） | `test_classify_findings.py` |
@@ -393,10 +396,10 @@ graph TD
 | AC8 | 既存のテストを期待値を変えずに通す | 既存のまま |
 | AC9 | `grep` の行を検査するテスト | `test_skill_layout.py` |
 | AC10〜AC14 | `probe_auth` を差し替えて `_init_new_state` を呼ぶ（GitHub を呼ぶ関数は `conftest.py` の既存の差し替え）。状態ファイルの有無と終了コードを見る | `test_state_review_pool.py` |
-| AC15・AC16 | `review_assign` を 4 ホスト × 12 ラウンドと 2 者の一覧で呼ぶ。AC15 は変更前の式を期待値として持つ | `test_assignment.py` |
+| AC15・AC16 | `review_assign` を 4 ホスト × 12 ラウンドと 2 者の一覧で呼ぶ。AC15 は変更前の式を期待値として持つ | `cross-refactoring/tests/test_assignment.py` |
 | AC17・AC18 | 使える者 1 者・0 者の `init` | `test_state_review_pool.py` |
 | AC19 | `available_reviewers` を持たない状態 / `host` も持たない状態で `_round_reviewers` | `test_state_review_pool.py` |
-| AC20 | 既存の `test_assignment.py` の `assign` の期待値と、`check_auth` の失敗で `die` が呼ばれるテスト | `test_assignment.py` / `cross-refactoring/tests/test_init.py` |
+| AC20 | 既存の `assign` の期待値と、`check_auth` の失敗で `die` が呼ばれるテスト | `cross-refactoring/tests/test_assignment.py` / `cross-refactoring/tests/test_init.py` |
 | AC21 | 3 つの一覧を持つ状態ファイルで `cmd_report` の出力を見る | `test_state_review_pool.py` |
 | AC22〜AC27 | 状態ファイルを置いた作業ツリーを渡して `cmd_init` を呼び、状態ファイルと標準エラーを見る（実測の G） | `test_state_resume_args.py`（新設） |
 | AC28 | 2 ファイルの `ONLY` を含む行を数えるテスト | `test_skill_layout.py` |

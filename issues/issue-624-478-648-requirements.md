@@ -108,7 +108,7 @@
 
 - [ ] AC19: `available_reviewers` を持たない状態ファイルは、この変更の前に始めた実行である。このとき `start-round` が
   返す担当は変更前と同じになる。`host` も持たない状態ファイルは `codex` / `agy` のままである
-- [ ] AC20: `cross-refactoring` の担当と認証の関門が変わらない。`tests/test_assignment.py` の `assign` の期待値
+- [ ] AC20: `cross-refactoring` の担当と認証の関門が変わらない。`cross-refactoring/tests/test_assignment.py` の `assign` の期待値
   （`EXPECTED_FOR_CLAUDE`）が変えずに通る。`check_auth` は失敗が 1 件でもあれば中断させる
 
 報告:
@@ -124,9 +124,13 @@
   反映したことが `12 → 20` の形で 1 行出る。`resume_changes` には `field: "max_rounds"` / `from: 12` / `to: 20` の
   要素が 1 件積まれる。`--rotate-after` / `--verify-command` / `--verify-exit-code` も同じく反映される。
   `--verify-command` と `--verify-exit-code` は置き換え、継ぎ足さない
-- [ ] AC23: 再開の `init` に `--max-rounds` などを渡さない。このとき状態ファイルの 7 項目が変わらず、
-  `max_rounds: 20` の状態ファイルが 12 へ戻らない。7 項目は `max_rounds` / `rotate_after` / `only` /
-  `verify_commands` / `verify_exit_codes` / `excluded_reviewers` / `available_reviewers` である
+- [ ] AC23: 再開の `init` に `--max-rounds` などの引数を渡さない。このとき状態ファイルの次の 10 項目が変わらず、
+  `max_rounds: 20` の状態ファイルが 12 へ戻らない
+
+  | 区分 | 項目 |
+  | --- | --- |
+  | 進め方 | `max_rounds` / `rotate_after` / `verify_commands` / `verify_exit_codes` |
+  | 担当 | `only` / `excluded_reviewers` / `available_reviewers` / `unavailable_reviewers` / `require_all` / `auth_skipped` |
 - [ ] AC24: `only: null` の状態ファイルで、再開の `init` に `--only codex` を渡す。`only` が `codex` になり、次の
   `start-round` が `codex` だけを返す。記録を持つ過去のラウンドの `_round_reviewers` は記録のまま変わらない
 - [ ] AC25: `only: "codex"` の状態ファイルで、再開の `init` に `--only none` を渡す。`only` が `null` になり、使える者が
