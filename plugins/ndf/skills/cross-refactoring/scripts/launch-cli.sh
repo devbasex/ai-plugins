@@ -217,13 +217,14 @@ VOCAB_LEVELS=$(jq -r '(.test_vocabulary.levels // {}) | to_entries[] | "- `\(.ke
 export RF_VOCAB_CASES=$VOCAB_CASES RF_VOCAB_LEVELS=$VOCAB_LEVELS
 }
 
-collect_prompt_materials() {
-collect_round_materials
-collect_excluded_items
-build_skill_block
-collect_refactoring_vocabulary
-collect_test_vocabulary
+build_round_note() {
+RF_ROUND_NOTE="この適用ラウンドの項目は**構造改善**です。振る舞いを変えずに構造だけを直します。"
+[ "$ROUND_KIND" != "test" ] || RF_ROUND_NOTE="この適用ラウンドの項目は**テスト整備**です。\
+足すのは現状固定テストだけで、**対象のコードは変更しません**。項目の \`target\` が固定する入口、\
+\`case\` が固定する経路の種類、\`level\` がどの階層で固定するかを示します。"
+}
 
+export_prompt_env() {
 export RF_REPO=$REPO RF_PR=$PR RF_ROUND=${ROUND:-} RF_RUNTIME=$RUNTIME
 export RF_MODEL=${MODEL:-default} RF_WORKDIR=$WORKDIR RF_STEM=$STEM
 export RF_SCOPE=$SCOPE RF_HEAD_BRANCH=$HEAD_BRANCH RF_BASE_BRANCH=$BASE_BRANCH
@@ -231,13 +232,19 @@ export RF_BASELINE_TEST=$BASELINE_TEST RF_MAX_ITEMS=$MAX_ITEMS
 export RF_SKILL_BLOCK=$SKILL_BLOCK RF_EXCLUDED=$EXCLUDED RF_SKILL_BASE=$SKILL_BASE
 export RF_ITEMS=$ITEMS_JSON RF_TMP_DIR=$TMP_DIR
 export RF_APPLY_ROUND=$APPLY_ROUND
-RF_ROUND_NOTE="この適用ラウンドの項目は**構造改善**です。振る舞いを変えずに構造だけを直します。"
-[ "$ROUND_KIND" != "test" ] || RF_ROUND_NOTE="この適用ラウンドの項目は**テスト整備**です。\
-足すのは現状固定テストだけで、**対象のコードは変更しません**。項目の \`target\` が固定する入口、\
-\`case\` が固定する経路の種類、\`level\` がどの階層で固定するかを示します。"
 export RF_ROUND_KIND=$ROUND_KIND RF_ROUND_NOTE=$RF_ROUND_NOTE
 export RF_VOCAB_SMELLS=$VOCAB_SMELLS RF_VOCAB_TECHNIQUES=$VOCAB_TECHNIQUES
 export RF_VOCAB_SEVERITIES=$VOCAB_SEVERITIES
+}
+
+collect_prompt_materials() {
+collect_round_materials
+collect_excluded_items
+build_skill_block
+build_round_note
+collect_refactoring_vocabulary
+collect_test_vocabulary
+export_prompt_env
 }
 
 collect_prompt_materials

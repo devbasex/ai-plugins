@@ -315,6 +315,18 @@ def _tmp_dir() -> pathlib.Path:
 DEFAULT_STEM_TEMPLATE = "{agent}-review-pr{id}"
 
 
+@dataclass(frozen=True)
+class MonitorConfig:
+    """1 agent の監視実行設定。"""
+    timeout: int
+    stall_timeout: int
+    poll: int
+    require_result: bool
+    no_early_error: bool = False
+    log_prefix: str = ""
+    stem_template: str = DEFAULT_STEM_TEMPLATE
+
+
 @dataclass
 class AgentPaths:
     agent: str
@@ -756,25 +768,19 @@ def _stall_outcome(
 def monitor_agent(
     agent: str,
     pr: int,
-    timeout: int,
-    stall_timeout: int,
-    poll: int,
-    require_result: bool,
-    no_early_error: bool = False,
-    log_prefix: str = "",
-    stem_template: str = DEFAULT_STEM_TEMPLATE,
+    config: MonitorConfig,
 ) -> AgentStatus:
     """1 agent を監視する。
 
-    `no_early_error=True` のとき、EARLY_ERROR 検知 (FATAL/WARN とも) を完全に無効化し、
+    `config.no_early_error=True` のとき、EARLY_ERROR 検知 (FATAL/WARN とも) を完全に無効化し、
     hard timeout / stall / sentinel / result.json のみで判定する。
     """
-    paths, status, started, pid = _initialize_monitor(agent, pr, stem_template)
+    paths, status, started, pid = _initialize_monitor(agent, pr, config.stem_template)
     if pid is None:
         return _finish_monitor(
             status,
             MonitorOutcome.create("PIDFILE_BAD", f"pidfile not found: {paths.pidfile}"),
-            (log_prefix, agent),
+            (config.log_prefix, agent),
         )
 
     status.pid = pid
@@ -811,11 +817,11 @@ def monitor_agent(
             completion_detail = _lingering_completion(paths, status, pid, started_wall)
         if completion_detail is not None:
             return _finish_monitor(
-                status, MonitorOutcome.create("OK", completion_detail), (log_prefix, agent)
+                status, MonitorOutcome.create("OK", completion_detail), (config.log_prefix, agent)
             )
 
         # result.json が書かれた後もプロセスがハングするケース (実測:
-        # MCP サーバー切断待ち等��� exit しない)。sentinel 機構を持たない agent 向け
+        # MCP サーバー切断待ち等で exit しない)。sentinel 機構を持たない agent 向け
         # の fallback: result.json の mtime が RESULT_AGE_GRACE 秒以上前であれば
         # 完了とみなし、プロセスを kill → OK。
         # 安全条件:
@@ -825,31 +831,31 @@ def monitor_agent(
             pid, agent, alive, cmdline_validated
         )
         if outcome:
-            return _finish_monitor(status, outcome, (log_prefix, agent))
+            return _finish_monitor(status, outcome, (config.log_prefix, agent))
 
         # 2. hard timeout
-        outcome = _timeout_outcome(elapsed, timeout, alive, pid)
+        outcome = _timeout_outcome(elapsed, config.timeout, alive, pid)
         if outcome:
-            return _finish_monitor(status, outcome, (log_prefix, agent))
+            return _finish_monitor(status, outcome, (config.log_prefix, agent))
 
         # 3. early error
         # 明確な致命 (FATAL) のみ kill する。曖昧パターン (生 Error: / Traceback) は
         # WARN として警告ログのみ。codex がレビュー対象 diff の test コード片を
         # echo するケースで誤 kill されるのを防ぐ。
-        outcome, warn_err = _early_error_outcome(paths, status, alive, no_early_error)
+        outcome, warn_err = _early_error_outcome(paths, status, alive, config.no_early_error)
         if outcome:
-            return _finish_monitor(status, outcome, (log_prefix, agent))
+            return _finish_monitor(status, outcome, (config.log_prefix, agent))
         if not warned_early_error and warn_err:
             print(
-                f"{log_prefix}⚠️  {agent} early-error WARN "
+                f"{config.log_prefix}⚠️  {agent} early-error WARN "
                 f"(non-fatal, not killing): {warn_err[:200]}",
                 file=sys.stderr, flush=True,
             )
             warned_early_error = True
 
-        outcome = _process_exit_outcome(paths, status, alive, require_result)
+        outcome = _process_exit_outcome(paths, status, alive, config.require_result)
         if outcome:
-            return _finish_monitor(status, outcome, (log_prefix, agent))
+            return _finish_monitor(status, outcome, (config.log_prefix, agent))
 
         # 4. stall detection (err.log / stdout.log / progress.log をモニタ。
         # agy は stdout 側だけ進捗が出るケースがあり、progress.log には
@@ -858,13 +864,13 @@ def monitor_agent(
         last_progress_size, last_progress = _update_progress(
             paths, status, last_progress_size, last_progress
         )
-        outcome = _stall_outcome(status, stall_timeout, pid, last_progress_size)
+        outcome = _stall_outcome(status, config.stall_timeout, pid, last_progress_size)
         if outcome:
-            return _finish_monitor(status, outcome, (log_prefix, agent))
+            return _finish_monitor(status, outcome, (config.log_prefix, agent))
 
         # poll 中の進捗ログ
-        _emit_progress(log_prefix, agent, status)
-        time.sleep(poll)
+        _emit_progress(config.log_prefix, agent, status)
+        time.sleep(config.poll)
 
 
 def _emit_progress(prefix: str, agent: str, st: AgentStatus) -> None:
@@ -1032,13 +1038,19 @@ def _run_all(
                   "（無進捗では止まらず、監視の上限で止まります）",
                   file=sys.stderr, flush=True)
         started_at = monitor_outcome.now_iso()
-        results[agent] = monitor_agent(
-            agent=agent, pr=args.pr,
-            timeout=timeout, stall_timeout=stall,
-            poll=args.poll, require_result=require_result,
+        config = MonitorConfig(
+            timeout=timeout,
+            stall_timeout=stall,
+            poll=args.poll,
+            require_result=require_result,
             no_early_error=args.no_early_error,
             log_prefix=f"[{agent}] ",
             stem_template=args.stem_template,
+        )
+        results[agent] = monitor_agent(
+            agent=agent,
+            pr=args.pr,
+            config=config,
         )
         _record_outcome(agent, args.pr, args.stem_template, results[agent], started_at,
                         args.phase)
