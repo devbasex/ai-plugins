@@ -19,8 +19,6 @@ import subprocess
 
 import pytest
 
-from _markdown import plain, section, table
-
 SKILLS = pathlib.Path(__file__).resolve().parents[2]
 RETROSPECTIVE = SKILLS / "retrospective" / "SKILL.md"
 PROBLEM_SOLVING = SKILLS / "problem-solving" / "SKILL.md"
@@ -29,6 +27,37 @@ OUT_OF_SCOPE = SKILLS / "out-of-scope" / "SKILL.md"
 
 def read(path: pathlib.Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+def plain(text: str) -> str:
+    """強調の印と折り返しの改行を除く。言い回しの位置ではなく文を照合する。"""
+    return text.replace("\n", "").replace("**", "")
+
+
+def section(text: str, heading: str) -> str:
+    """見出しから、同じ深さか浅い次の見出しまでを返す。囲みの中の `#` は見出しとして数えない。"""
+    depth = len(heading.split(" ", 1)[0])
+    lines = text.split("\n")
+    start = lines.index(heading)
+    fenced = False
+    for end in range(start + 1, len(lines)):
+        line = lines[end]
+        if line.startswith("```"):
+            fenced = not fenced
+            continue
+        match = re.match(r"^(#+) ", line)
+        if not fenced and match and len(match.group(1)) <= depth:
+            return "\n".join(lines[start:end])
+    return "\n".join(lines[start:])
+
+
+def rows(text: str, header: str) -> list[list[str]]:
+    """見出し行で始まる表の、データ行のセルを返す。太字の印は外す。"""
+    block = text[text.index(header):]
+    block = block[:block.index("\n\n")] if "\n\n" in block else block
+    lines = [line for line in block.split("\n")[2:] if line.startswith("|")]
+    return [[cell.strip().replace("**", "") for cell in line.strip().strip("|").split("|")]
+            for line in lines]
 
 
 def bash_blocks(text: str) -> list[str]:
@@ -160,7 +189,7 @@ def test_retrospective_asks_when_not_exactly_one_pull_request() -> None:
     text = plain(section(read(RETROSPECTIVE), PR_SECTION))
     assert "起点が 1 件の issue なら、番号はそのまま使える" in text
     assert "絞った結果が 1 件でないときは、推測で投稿せず番号を利用者に聞く" in text
-    cases = {row[0]: row[1] for row in table(section(read(RETROSPECTIVE), PR_SECTION),
+    cases = {row[0]: row[1] for row in rows(section(read(RETROSPECTIVE), PR_SECTION),
                                             "| 場合 | 起点にするコミット |")}
     assert set(cases) == {"起点の issue を持たない変更", "まとまり"}
     assert "`base_branch`" in cases["起点の issue を持たない変更"]
@@ -175,7 +204,7 @@ TYPE_SECTION = "### 型不一致の検出パターン"
 def test_problem_solving_lists_the_risky_type_pairs() -> None:
     """危険な組み合わせ 3 つと、そのリスクと対策。"""
     part = section(read(PROBLEM_SOLVING), TYPE_SECTION)
-    pairs = table(part, "| ローカルキー型 | 外部キー型 | リスク |")
+    pairs = rows(part, "| ローカルキー型 | 外部キー型 | リスク |")
     assert [(row[0], row[1]) for row in pairs] == [
         ("VARCHAR", "INT"), ("INT", "VARCHAR"), ("string", "integer"),
     ]
@@ -187,11 +216,11 @@ def test_problem_solving_lists_the_risky_type_pairs() -> None:
 def test_problem_solving_points_at_type_mismatch_from_two_places() -> None:
     """見逃しパターンの 2WD/4WD の行と、チェックリストの型の行が型不一致を扱う。"""
     body = read(PROBLEM_SOLVING)
-    missed = {row[0]: row for row in table(body, "| 症状 | 表層の「原因」 | 真の根本原因 |")}
+    missed = {row[0]: row for row in rows(body, "| 症状 | 表層の「原因」 | 真の根本原因 |")}
     assert list(missed) == ["料金が異常値", "レコードの2WD/4WD逆転", "一部ユーザーで通知が届かない"]
     cause = missed["レコードの2WD/4WD逆転"][2]
     assert "リレーション型不一致" in cause and "Eager Load" in cause
-    checks = {row[0]: row[1] for row in table(body, "| チェック項目 | 方法 |")}
+    checks = {row[0]: row[1] for row in rows(body, "| チェック項目 | 方法 |")}
     assert "DB定義" in checks["型が一致するか"]
     assert "`$casts`" in checks["型が一致するか"]
 
@@ -202,8 +231,8 @@ def test_problem_solving_keeps_the_type_pairs_in_one_table() -> None:
     part = section(body, TYPE_SECTION)
     outside = body.replace(part, "")
     assert not re.search(r"(?<![A-Za-z])(VARCHAR|INT|string|integer)(?![A-Za-z])", outside), "表の外に型の組み合わせがある"
-    missed = {row[0]: row for row in table(body, "| 症状 | 表層の「原因」 | 真の根本原因 |")}
-    checks = {row[0]: row[1] for row in table(body, "| チェック項目 | 方法 |")}
+    missed = {row[0]: row for row in rows(body, "| 症状 | 表層の「原因」 | 真の根本原因 |")}
+    checks = {row[0]: row[1] for row in rows(body, "| チェック項目 | 方法 |")}
     for cell in (missed["レコードの2WD/4WD逆転"][2], checks["型が一致するか"]):
         assert "「型不一致の検出パターン」" in cell, cell
 
