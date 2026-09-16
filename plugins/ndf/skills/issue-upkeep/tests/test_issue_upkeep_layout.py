@@ -505,3 +505,33 @@ def test_grouping_rereads_the_stated_fix() -> None:
         assert f"「{word}」" in text, word
     assert "何が直るのか" in text
     assert "まだ原因に届いていない" in text
+
+
+# ---------- 他のリポジトリで動くこと ----------
+
+
+def test_other_repositories_define_fallback_behaviors() -> None:
+    """マイルストーン・サブイシュー API・重要度ラベル・wontfix ラベル欠落時の振る舞いを固定する。
+
+    前提にしてよいのは gh と issue だけであり、4 つの機能欠落時における
+    フォールバック動作の分岐が定義されていることを検証する。
+    """
+    body = SKILL.read_text(encoding="utf-8")
+    part = section(body, "## 他のリポジトリで動くこと")
+    rows = table(part, "| 無いもの | 振る舞い |")
+    mapping = {row[0].replace("`", ""): row[1] for row in rows}
+
+    assert "マイルストーン" in mapping
+    assert "段 1 の 3 つ目の経路と、扱うこと 2 を飛ばす" in mapping["マイルストーン"]
+
+    assert "サブイシューの API" in mapping
+    assert "子 issue の結び付けを、すべて子 issue の本文の 1 行で行う" in mapping["サブイシューの API"]
+
+    assert "重要度ラベル" in mapping
+    assert "gh label list" in mapping["重要度ラベル"]
+    assert "説明が無ければ付け替えない" in mapping["重要度ラベル"]
+
+    assert "wontfix にあたるラベル" in mapping
+    assert "ラベルを付けずに閉じる" in mapping["wontfix にあたるラベル"]
+    assert "理由と再燃の条件は本文に残る" in mapping["wontfix にあたるラベル"]
+
