@@ -81,7 +81,7 @@ description: "Fix bugs and data inconsistencies upstream at the root cause. Use 
 | 症状 | 表層の「原因」 | 真の根本原因 |
 |------|-------------|-------------|
 | 料金が異常値 | 計算ロジックのバグ | 上流の取り込み時に異常値が混入、バリデーション欠如 |
-| レコードの2WD/4WD逆転 | 割当ロジックの不具合 | ORM（Eloquent等）のリレーション型不一致（VARCHAR↔INT）でEager Loadマッチングずれ |
+| レコードの2WD/4WD逆転 | 割当ロジックの不具合 | ORM（Eloquent等）のリレーション型不一致でEager Loadマッチングずれ（組み合わせは下記「型不一致の検出パターン」） |
 | 一部ユーザーで通知が届かない | 通知送信ロジックの問題 | 論理削除フラグの扱いが `delete()` と `forceDelete()` で異なる |
 
 ## 2. ハルシネーション防止チェック
@@ -96,7 +96,7 @@ description: "Fix bugs and data inconsistencies upstream at the root cause. Use 
 |------------|------|
 | カラム/フィールドが存在するか | `SHOW COLUMNS` / スキーマ定義ファイル確認（コード読みだけで判断しない） |
 | データが存在するか | `SELECT COUNT(*) FROM table WHERE ...` / サンプル取得 |
-| 型が一致するか | DB定義（INT/VARCHAR等）とコード側（`$casts`, dataclass 等）の両方を確認 |
+| 型が一致するか | DB定義とコード側（`$casts`, dataclass 等）の両方を確認（危険な組み合わせは下記「型不一致の検出パターン」） |
 | 外部キー/制約が存在するか | マイグレーション履歴を追跡（追加→削除→再追加の変遷を確認） |
 | 論理削除ポリシーは何か | `SoftDeletes` / `deleted_at` の有無を確認（`delete()` と `forceDelete()` の挙動が異なる） |
 | 環境差異がないか | dev/staging/prod で同じクエリを実行して比較 |
@@ -110,7 +110,7 @@ description: "Fix bugs and data inconsistencies upstream at the root cause. Use 
 
 ### 型不一致の検出パターン
 
-ORMリレーションで以下の組み合わせは危険:
+ORMリレーションで以下の組み合わせは危険（型不一致の組み合わせと対策の正本はこの表）:
 
 | ローカルキー型 | 外部キー型 | リスク |
 |--------------|----------|-------|

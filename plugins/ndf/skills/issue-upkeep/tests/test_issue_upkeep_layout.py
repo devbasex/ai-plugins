@@ -25,11 +25,42 @@ VERDICTS = [
     "そのまま", "追記が要る", "書き直しが要る", "閉じてよい",
     "やらない", "重複", "ルートコーズ", "要判断",
 ]
+VERDICT_HEADER = "| 判定 | 選ぶ条件 | 段 3 での対応 |"
 
 
 def flat(text: str) -> str:
     """折り返しの改行を除く。日本語の文は改行の位置で語が割れるため、照合の前に繋ぐ。"""
     return text.replace("\n", "")
+
+
+def plain(text: str) -> str:
+    """折り返しの改行に加えて強調の印を除く。太字の付け外しで同じ契約が落ちないようにする。"""
+    return text.replace("\n", "").replace("**", "")
+
+
+def contains(text: str, fragment: str) -> bool:
+    """強調の印と改行の位置によらず、文が本文にあるか。"""
+    return plain(fragment) in plain(text)
+
+
+def locate(text: str, fragment: str) -> int:
+    """強調の印を除いた文の、本文での位置。切り出しの起点に使う。"""
+    return text.index(plain(fragment))
+
+
+def row_starting(text: str, header: str, first_cell: str) -> str:
+    """見出し行で始まる表から、先頭のセルで行を探す。先頭のセルの太字の有無は問わない。
+
+    探すのは見出し行より後だけである。同じ語を先頭に持つ別の表（用語の表など）の行を拾わない。
+    """
+    return next(line for line in text[text.index(header):].split("\n")
+                if plain(line).startswith(plain(first_cell)))
+
+
+def links_to(text: str, target: str, base: pathlib.Path = SKILL_DIR) -> bool:
+    """本文のリンクが `target` を指し、その先のファイルが実在するか。"""
+    found = [link.split("#", 1)[0] for link in re.findall(r"\]\(([^)]+)\)", text)]
+    return target in found and (base / target).is_file()
 
 
 def section(text: str, heading: str) -> str:
@@ -78,9 +109,8 @@ def test_the_verdict_table_lists_eight_in_order() -> None:
 def test_no_work_is_reachable_from_the_verdict_table() -> None:
     """「やらない」の行から参照を指す。判断の基準はそちらにある。"""
     body = SKILL.read_text(encoding="utf-8")
-    row = next(line for line in body.split("\n")
-               if line.startswith("| **やらない**"))
-    assert "references/no-work.md" in row
+    row = row_starting(body, VERDICT_HEADER, "| **やらない**")
+    assert links_to(row, "references/no-work.md"), row
 
 
 def test_no_work_has_two_necessary_conditions() -> None:
@@ -96,39 +126,39 @@ def test_no_work_has_two_necessary_conditions() -> None:
     assert "同じ原因の他の課題へ寄せられない" in body
     rows = table(body, "| # | 条件 | 確かめ方 | 欠けたときの行き先 |")
     second = next(row for row in rows if row[0] == "2")
-    assert "重複とルートコーズの両方の突き合わせの結果" in flat(second[2])
+    assert "重複とルートコーズの両方の突き合わせの結果" in plain(second[2])
     assert second[2].index("重複") < second[2].index("ルートコーズ")
     for outcome in ("重複", "ルートコーズ", "寄せ先が無く、条件は欠けていない"):
         assert outcome in second[3], outcome
     assert "どちらも見積りである" not in flat(body)
-    assert "条件 1 は見積りである" in flat(body)
+    assert "条件 1 は見積りである" in plain(body)
 
 
 def test_no_work_shows_both_kinds_of_reactivation_condition() -> None:
     """再燃の条件は観測できる形で書く。観測できない書き方の例も示す。"""
     body = NO_WORK.read_text(encoding="utf-8")
-    assert "**観測できる**" in body
+    assert contains(body, "**観測できる**")
     assert "観測できない" in body
 
 
 def test_closing_and_not_planned_are_separate_verdicts() -> None:
     """「やらない」と「閉じてよい」を別の判定として区別する。"""
     body = SKILL.read_text(encoding="utf-8")
-    assert "**「閉じてよい」とは\n別である。**" in NO_WORK.read_text(encoding="utf-8")
-    assert "| 閉じてよい |" in body
-    assert "| **やらない** |" in body
+    assert contains(NO_WORK.read_text(encoding="utf-8"), "**「閉じてよい」とは\n別である。**")
+    assert contains(body, "| 閉じてよい |")
+    assert contains(body, "| **やらない** |")
 
 
 def test_milestones_reflect_only_the_earlier_direction() -> None:
     """早める方向だけを自動で反映する。"""
     body = MILESTONES.read_text(encoding="utf-8")
-    assert "**早める方向だけを自動で反映する。**" in body
-    assert "**要判断**" in body
+    assert contains(body, "**早める方向だけを自動で反映する。**")
+    assert contains(body, "**要判断**")
 
 
 def test_milestones_are_not_created_for_a_single_issue() -> None:
     """1 件しか残らないときは作らない。"""
-    assert "**1 件しか残らないときは作らない。**" in MILESTONES.read_text(encoding="utf-8")
+    assert contains(MILESTONES.read_text(encoding="utf-8"), "**1 件しか残らないときは作らない。**")
 
 
 @pytest.mark.parametrize(("priority", "when_no_matching_subject"), [
@@ -149,9 +179,9 @@ def test_unassigned_issues_branch_by_priority_when_no_subject_matches(
 
 def test_unassigned_issue_with_multiple_matching_subjects_needs_judgement() -> None:
     """主題が複数に当てはまるときは、自動で割り当てず要判断へ倒す。"""
-    part = flat(section(MILESTONES.read_text(encoding="utf-8"),
-                        "## 設定されていない課題を割り当てる"))
-    assert "主題が複数に当てはまるときは**要判断**へ倒す" in part
+    part = section(MILESTONES.read_text(encoding="utf-8"),
+                   "## 設定されていない課題を割り当てる")
+    assert contains(part, "主題が複数に当てはまるときは**要判断**へ倒す")
 
 
 @pytest.mark.parametrize("caller,marker", [
@@ -190,7 +220,7 @@ def test_zero_targets_skip_to_reporting_with_the_reason() -> None:
     assert [row[0] for row in target_rows] == [
         "機械の候補", "担当が足す", "マイルストーン", "親 issue",
     ]
-    assert "段 1 で対象が 0 件なら、そこで飛ばす" in flat(procedure)
+    assert "段 1 で対象が 0 件なら、そこで飛ばす" in plain(procedure)
     target_report = next(row for row in report_rows if row[0] == "対象")
     assert "0 件なら飛ばしたことと理由" in target_report[1]
 
@@ -201,14 +231,14 @@ def test_the_target_is_decided_only_by_the_milestone() -> None:
     絞ると、未設定のまま溜まる課題を誰も見ないことになる。
     """
     body = SKILL.read_text(encoding="utf-8")
-    assert "マイルストーンの付いていない open の課題すべて" in body
-    assert "**起票者は問わない。**" in body
+    assert contains(body, "マイルストーンの付いていない open の課題すべて")
+    assert contains(body, "**起票者は問わない。**")
 
 
 def test_the_target_query_filters_only_by_milestone() -> None:
     """未設定の課題を拾う例が、マイルストーンの有無だけで絞っていること。"""
     body = SKILL.read_text(encoding="utf-8")
-    block = body[body.index("**起票者は問わない。**"):]
+    block = body[locate(body, "**起票者は問わない。**"):]
     start = block.index("```bash")
     block = block[start:block.index("```", start + len("```bash")) + 3]
     assert "--author" not in block, "投稿者で絞る例になっている"
@@ -232,7 +262,7 @@ def test_stage_1_expands_to_all_open_issues_on_pervasive_changes() -> None:
         "ブランチ戦略の変更",
         "識別子の一括改名",
     ]
-    text = flat(part)
+    text = plain(part)
     assert "全体に影響する変更では、触った領域では足りない" in text
     assert "次のいずれかに当たるときは対象をopen の全件へ広げる（`--all`）" in text
 
@@ -242,9 +272,8 @@ def test_stage_1_expands_to_all_open_issues_on_pervasive_changes() -> None:
 def test_cluster_is_reachable_from_the_verdict_table() -> None:
     """「ルートコーズ」の行から参照を指す。条件と書き方はそちらにある。"""
     body = SKILL.read_text(encoding="utf-8")
-    row = next(line for line in body.split("\n")
-               if line.startswith("| **ルートコーズ**"))
-    assert "references/grouping.md" in row
+    row = row_starting(body, VERDICT_HEADER, "| **ルートコーズ**")
+    assert links_to(row, "references/grouping.md"), row
 
 
 def test_creating_the_parent_needs_approval() -> None:
@@ -285,8 +314,8 @@ def test_upkeep_returns_ambiguous_changes_to_a_human(change: str) -> None:
     rows = table(part, "| 変更 | 自動で反映してよいか |")
     row = next(row for row in rows if row[0] == change)
     assert row[1] == "返す"
-    assert "判断の材料が本文の外にあるかどうか" in flat(part)
-    assert "決まらないものだけを返す" in flat(part)
+    assert "判断の材料が本文の外にあるかどうか" in plain(part)
+    assert "決まらないものだけを返す" in plain(part)
 
 
 def test_upkeep_handles_four_things() -> None:
@@ -297,7 +326,7 @@ def test_upkeep_handles_four_things() -> None:
     rows = table(part, "| # | 扱うこと | 決めること |")
     assert [row[0] for row in rows] == ["1", "2", "3", "4"]
     assert "根本原因の場所で直す" in rows[3][2]
-    assert "references/grouping.md" in part
+    assert links_to(part, "references/grouping.md")
     terms = table(body, "| 語 | この文書での意味 |")
     assert "8 つの区分" in next(row for row in terms if row[0] == "判定")[1]
 
@@ -313,13 +342,13 @@ def test_stage_1_picks_up_children_of_a_closed_parent() -> None:
     rows = table(part, "| 経路 | 取り方 | 拾えるもの |")
     assert len(rows) == 4
     assert "閉じた親 issue の子 issue" in rows[3][1]
-    assert "閉じない" in flat(part)
+    assert "閉じない" in plain(part)
 
 
 def test_stage_2a_records_the_shared_cause() -> None:
     """段 2A は現象レイヤーと修正レイヤーを控え、クラスタは決めない。"""
     part = section(SKILL.read_text(encoding="utf-8"), "### 段 2A: 課題ごとに調べる")
-    text = flat(part)
+    text = plain(part)
     assert "確かめるのは 6 点である" in text
     assert "修正レイヤーが現象レイヤーと違うか" in text
     rows = table(part, "| 控える項目 | 何に使うか |")
@@ -336,21 +365,21 @@ def test_stage_2b_matches_issues_by_shared_cause() -> None:
     assert "同じ原因を持つクラスタ" in names
     assert "同じ前提の変化を受けた課題群" in names
     assert names.index("重複と判定された組") < names.index("同じ原因を持つクラスタ")
-    assert "言い回しを揃える" in flat(part)
+    assert "言い回しを揃える" in plain(part)
 
 
 def test_stage_2b_note_branches_to_cluster() -> None:
     """起点が同じ組は、直した後に個別の作業が残るかで重複と親 issue へ分かれる。"""
     body = SKILL.read_text(encoding="utf-8")
-    note = flat(body[body.index("**重複の判定では、起点が同じことと同じ課題であることを分ける。**"):
-                     body.index("**「やらない」の候補は")])
+    note = plain(body[locate(body, "**重複の判定では、起点が同じことと同じ課題であることを分ける。**"):
+                      locate(body, "**「やらない」の候補は")])
     assert "個別の作業が残る" in note
     assert "ルートコーズ" in note and "親 issue" in note
 
 
 def test_cluster_separates_itself_from_duplication() -> None:
     """重複との境目は、原因を直した後に個別の作業が残るかである。"""
-    text = flat(GROUPING.read_text(encoding="utf-8"))
+    text = plain(GROUPING.read_text(encoding="utf-8"))
     assert "原因を直しても各課題に個別の作業が残るならルートコーズ、残らないなら重複である" in text
 
 
@@ -361,7 +390,7 @@ def test_root_cause_has_one_condition() -> None:
     assert len(rows) == 1
     assert "修正レイヤーが現象レイヤーと違う" in rows[0][0]
     assert "既存の判定のまま" in rows[0][2]
-    text = flat(body)
+    text = plain(body)
     assert "件数は条件ではない" in text
     assert "件数が決めるのは" in text
 
@@ -374,13 +403,13 @@ def test_stage_3_has_three_outcomes() -> None:
     assert "本文へ" in rows[0][2]
     assert "親 issue" in rows[1][2]
     assert "重複" in rows[2][2]
-    assert "3 行目が重複との境目である" in flat(body)
+    assert "3 行目が重複との境目である" in plain(body)
 
 
 def test_cluster_keeps_the_child_issues_open() -> None:
     """子 issue を閉じない。結び付けはサブイシュー関係を既定にし、例外だけ本文の 1 行にする。"""
     body = GROUPING.read_text(encoding="utf-8")
-    text = flat(body)
+    text = plain(body)
     assert "子 issue を閉じない" in text
     assert "固有の再現手順" in text and "個別の適用が残る" in text
     assert "サブイシュー関係" in text
@@ -391,7 +420,7 @@ def test_cluster_keeps_the_child_issues_open() -> None:
 
 def test_cluster_shows_the_body_of_the_parent_issue() -> None:
     """親 issue に書く 4 つを挙げ、子 issue の中身は写さない。"""
-    text = flat(GROUPING.read_text(encoding="utf-8"))
+    text = plain(GROUPING.read_text(encoding="utf-8"))
     for item in ("修正レイヤー", "採る手", "現象レイヤーと観測", "完了条件"):
         assert item in text, item
     assert "見出しの形は決めない" in text
@@ -401,7 +430,7 @@ def test_cluster_shows_the_body_of_the_parent_issue() -> None:
 
 def test_an_issue_may_join_two_clusters() -> None:
     """1 件が複数のクラスタへ属してよく、やり直しの見分けは親 issue の側から引く。"""
-    text = flat(GROUPING.read_text(encoding="utf-8"))
+    text = plain(GROUPING.read_text(encoding="utf-8"))
     assert "1 件が複数のクラスタへ属してよい" in text
     assert "親 issue どうしが同じ箇所を直すなら、それは 1 つのクラスタである" in text
     assert "親 issue の側から引く" in text
@@ -409,7 +438,7 @@ def test_an_issue_may_join_two_clusters() -> None:
 
 def test_cluster_does_not_gate_on_size() -> None:
     """層がまたがっても判定は変わらず、採る手は判定の条件ではない。"""
-    text = flat(GROUPING.read_text(encoding="utf-8"))
+    text = plain(GROUPING.read_text(encoding="utf-8"))
     assert "修正レイヤーが 2 つ以上にまたがっても、判定は変わらない" in text
     assert "マイルストーンの割り当てと実装計画" in text
     assert "手は判定の条件ではない" in text
@@ -418,9 +447,9 @@ def test_cluster_does_not_gate_on_size() -> None:
 
 def test_parent_takes_the_highest_priority_in_the_cluster() -> None:
     """親 issue の重要度はクラスタの最高値を採り、重要度の規則を先に効かせてから最も早いものを採る。"""
-    assert "クラスタの中で最も高いもの" in flat(GROUPING.read_text(encoding="utf-8"))
-    assert "milestones.md" in GROUPING.read_text(encoding="utf-8")
-    part = flat(section(MILESTONES.read_text(encoding="utf-8"), "## 親 issue を割り当てる"))
+    assert "クラスタの中で最も高いもの" in plain(GROUPING.read_text(encoding="utf-8"))
+    assert links_to(GROUPING.read_text(encoding="utf-8"), "milestones.md", GROUPING.parent)
+    part = plain(section(MILESTONES.read_text(encoding="utf-8"), "## 親 issue を割り当てる"))
     assert "重要度が「高い」" in part
     assert part.index("重要度が「高い」") < part.index("最も早いもの")
     assert "子 issue のマイルストーンは動かさない" in part
@@ -429,7 +458,7 @@ def test_parent_takes_the_highest_priority_in_the_cluster() -> None:
 def test_upkeep_files_only_the_parent_issue() -> None:
     """「手入れ」は起票を含まず、例外は親 issue 1 つだけである。"""
     body = SKILL.read_text(encoding="utf-8")
-    text = flat(body)
+    text = plain(body)
     assert "「手入れ」は起票を含まない" in text
     assert "例外は親 issue の起票 1 つだけである" in text
     assert "発見の瞬間しか見ない" in text
@@ -454,8 +483,8 @@ def test_the_boundary_table_covers_both_judgements() -> None:
     structure = next(row for row in rows if row[0].startswith("構造"))
     assert "「やらない」" in value[2]
     assert "「ルートコーズ」" in structure[2]
-    part = flat(section((SKILLS / "out-of-scope" / "SKILL.md").read_text(encoding="utf-8"),
-                        "## 蓄積した課題との境界"))
+    part = plain(section((SKILLS / "out-of-scope" / "SKILL.md").read_text(encoding="utf-8"),
+                         "## 蓄積した課題との境界"))
     assert "`issue-upkeep` の「やらない」" in part
     assert "`issue-upkeep` の「ルートコーズ」" in part
 
@@ -464,13 +493,13 @@ def test_problem_solving_separates_upstream_from_cluster() -> None:
     """「上流で直す」と棚卸の「ルートコーズ」の違いを、件数ではなく見る対象で書く。"""
     body = (SKILLS / "problem-solving" / "SKILL.md").read_text(encoding="utf-8")
     paragraph = next(p for p in body.split("\n\n") if "ルートコーズ" in p)
-    assert "../issue-upkeep/SKILL.md" in paragraph
+    assert links_to(paragraph, "../issue-upkeep/SKILL.md", SKILLS / "problem-solving"), paragraph
     assert "件数" not in paragraph and "複数" not in paragraph
 
 
 def test_retrospective_declines_cluster_discovery() -> None:
     """振り返りはクラスタの発見を担わない。1 回の変更を見るためクラスタが見えない。"""
-    text = flat((SKILLS / "retrospective" / "SKILL.md").read_text(encoding="utf-8"))
+    text = plain((SKILLS / "retrospective" / "SKILL.md").read_text(encoding="utf-8"))
     assert "クラスタの発見を担わない" in text
     assert "1 回の変更を見る" in text
 
@@ -500,7 +529,7 @@ def test_milestones_use_one_word_for_the_timing() -> None:
 
 def test_milestones_pick_the_nearest_by_sequence() -> None:
     """直近と順序は名前の先頭の連番で決める。open のマイルストーンは版数を持たない。"""
-    text = flat(MILESTONES.read_text(encoding="utf-8"))
+    text = plain(MILESTONES.read_text(encoding="utf-8"))
     assert "版数が最も小さい" not in text
     assert "版数の順序" not in text
     assert "連番が最も小さい" in text
@@ -519,7 +548,7 @@ def test_grouping_separates_the_two_layers() -> None:
     phenomena = [row[0] for row in rows]
     for example in ("各コントローラ", "各サブクラス", "移譲している側", "各スクリプト"):
         assert example in phenomena, example
-    text = flat(body)
+    text = plain(body)
     assert "さかのぼる段数を決めない" in text
     assert "そこを直せば、現象レイヤーの各所が同じ形で直るか" in text
     assert "修正レイヤーが現象レイヤーと同じこともある" in text
@@ -545,7 +574,7 @@ def test_cluster_never_defers_to_a_human() -> None:
     """ルートコーズの分岐は段 2A の控えだけで決まるため、「要判断」へ倒さない。"""
     body = GROUPING.read_text(encoding="utf-8")
     assert "要判断" not in body
-    text = flat(body)
+    text = plain(body)
     for outcome in ("ルートコーズ", "既存の判定のまま", "本文へ", "親 issue を 1 件つくり", "重複として正本へ寄せる"):
         assert outcome in text, outcome
 
@@ -563,7 +592,7 @@ def test_grouping_rereads_the_stated_fix() -> None:
     body = GROUPING.read_text(encoding="utf-8")
     part = section(body, "## 課題が書いている直し方をそのまま採らない")
     assert table(part, "| 本文が書いていること | 棚卸が確かめること |")
-    text = flat(part)
+    text = plain(part)
     assert "起票は現象を見て書かれる" in text
     for word in ("まとめる", "整理する", "統一する", "揃える"):
         assert f"「{word}」" in text, word
@@ -587,12 +616,12 @@ def test_stage_3_reconciles_right_before_reflecting(path: str, outcome: str) -> 
     要約値を見るのは `updated_at` が変わったときだけで、不変ならそのまま反映へ進む。
     要約値が同じなら反映を続け、変わっていればその課題だけを段 2A へ戻す。
     """
-    part = flat(section(SKILL.read_text(encoding="utf-8"), "### 段 3: 反映する"))
+    part = plain(section(SKILL.read_text(encoding="utf-8"), "### 段 3: 反映する"))
     assert "段 3 は反映の直前に照合する" in part
-    gate = part.index(STAGE_3_GATE)
+    gate = part.index(plain(STAGE_3_GATE))
     assert "要約値" not in part[:gate], "updated_at より先に要約値を見ている"
-    assert outcome in part, path
-    assert part.index(outcome) >= gate, path
+    assert plain(outcome) in part, path
+    assert part.index(plain(outcome)) >= gate, path
 
 
 # ---------- 外部への書き込みの制限 ----------
@@ -620,7 +649,7 @@ def test_rate_limit_branches_by_response(situation: str, handling: str) -> None:
 
 def test_rate_limit_takes_the_wait_from_the_response() -> None:
     """待つ長さは応答から取り、固定の間隔で待たないことを明記している。"""
-    part = flat(section(SKILL.read_text(encoding="utf-8"), "## 外部への書き込みの制限"))
+    part = plain(section(SKILL.read_text(encoding="utf-8"), "## 外部への書き込みの制限"))
     assert "待つ長さは応答から取る" in part
     assert "固定の間隔で待たない" in part
 
@@ -678,7 +707,7 @@ def test_priority_change_branches_by_harm_observation() -> None:
     assert "実害の観測が変わったか" in row[1]
     assert "ラベルの説明" in row[2]
 
-    text = flat(part)
+    text = plain(part)
     assert "重要度は、ラベルの説明が持つ区分へ当てはめる" in text
     assert "実害の観測が本文へ追記された課題は上げ" in text
     assert "実害が起きない経路だと分かった課題は下げ" in text
@@ -698,7 +727,7 @@ def test_question_restructuring_branches_by_premise_and_gist() -> None:
     assert "前提が反転したか" in row[1]
     assert "本文が指す実物の状態" in row[2]
 
-    text = flat(part)
+    text = plain(part)
     assert "問いを立て直すのは、前提が反転したときに限る" in text
     assert "立て直すのは問いの形であって、主旨ではない" in text
     assert "何が困るかは変えない" in text
@@ -728,7 +757,7 @@ def test_out_of_scope_issue_target_needed_only_when_filing() -> None:
 
     起票先が要る分岐は 3 択のうち 1 つだけである。
     """
-    text = flat(section(OUT_OF_SCOPE.read_text(encoding="utf-8"), "### 3. 起票先を決める"))
+    text = plain(section(OUT_OF_SCOPE.read_text(encoding="utf-8"), "### 3. 起票先を決める"))
     assert "「起票する」を選んだときだけ行う" in text
     assert "残る 2 つの判断には起票先が要らない" in text
 
