@@ -133,10 +133,15 @@ issue と Pull Request の両方で検索する。**
 この工程は `merged` の後に来るため、ブランチも作業ツリーも残っていない。番号はマージ先の
 先頭のコミットから引く。
 
-| 場合 | 起点にするコミット |
-| --- | --- |
-| 起点の issue を持たない変更 | その変更をマージした先のブランチ（起点。`.ndf/worktree.json` の `base_branch`）の先頭 |
-| まとまり | そのまとまりを配布した先（正式版のチャネルのブランチ）の先頭 |
+**番号は 3 段で引く。各段は直前の段の出力を受け取る。**
+
+| 段 | 入力 | 出力 | 止まる条件 |
+| --- | --- | --- | --- |
+| 1. 開発の起点を解決する | `.ndf/worktree.json` の `base_branch`、origin | `$dev_base` | 宣言したブランチが origin にもローカルにも無い |
+| 2. 記録対象の基準ブランチを決める | 下表の場合、`$dev_base`（起点の issue を持たない変更だけが使う） | `$record_base` | まとまりを配布した先のブランチを判別できない |
+| 3. 基準コミットから Pull Request を引く | `$record_base`、`$RECORD_REPO` | マージ済みの Pull Request 1 件の番号 | マージ済みへ絞った結果が 1 件でない |
+
+**段 1: 開発の起点を解決する**
 
 **起点のブランチは対象リポジトリが決める。** 字面で書かず、`merged` / `deploy` /
 `pr-review` / `cherry-pick-pr` と同じ解決を使う。
@@ -180,6 +185,13 @@ else
 fi
 ```
 
+**段 2: 記録対象の基準ブランチを決める**
+
+| 場合 | 起点にするコミット |
+| --- | --- |
+| 起点の issue を持たない変更 | その変更をマージした先のブランチ（起点。`.ndf/worktree.json` の `base_branch`）の先頭 |
+| まとまり | そのまとまりを配布した先（正式版のチャネルのブランチ）の先頭 |
+
 **まとまりを対象にする場合は、`$dev_base` ではなくそのまとまりを配布した先を使う。**
 `$dev_base` は開発の起点であり、配布した先とは限らない。開発の起点と配布の先が別の
 ブランチであるリポジトリで `$dev_base` のまま引くと、配布の Pull Request ではなく起点の
@@ -202,7 +214,9 @@ record_base=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | se
 }
 ```
 
-決めた `$record_base` で番号を引く。
+**段 3: 基準コミットから Pull Request を引く**
+
+段 2 で決めた `$record_base` の先頭のコミットで番号を引く。
 
 ```bash
 gh api "/repos/$RECORD_REPO/commits/$(git rev-parse "origin/$record_base")/pulls" \
@@ -284,6 +298,10 @@ gh issue edit <issue番号> --repo "$RECORD_REPO" --body-file /tmp/issue-body.md
 取りこぼしである。**変更をまたいで溜まった課題そのもの**は対象にしていない。
 
 対象が 0 件ならその Skill 自身が飛ばす。
+
+**振り返りはクラスタの発見を担わない。** クラスタは、同じ修正レイヤーを指す課題の集まりで
+ある。振り返りは 1 回の変更を見るため、変更をまたいで溜まった課題どうしの関係が見えない。
+見つけるのは `issue-upkeep` の「ルートコーズ」である。
 
 ## 関連
 

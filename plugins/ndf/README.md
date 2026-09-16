@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.13.0）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.14.0）
 ```
 
 ### agy
@@ -119,26 +119,27 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.13.0 へ更新するとき
+## v10.14.0 へ更新するとき
 
-**収束ループの打ち切りを、工程ごとの上限の表で決めるようにしました。** 修正の工程が 420 秒で
-打ち切られていた不具合（#598 #537）が直り、1 回の実行が何分かかりどう終わったかを作業ツリーを
-消した後にも集計できます（#662）。変更点の一覧は [CHANGELOG.md](../../CHANGELOG.md) にあります。
+**溜まった課題の棚卸で、課題を根本原因の場所で直すと決められるようにしました**（#712 #713）。
+`issue-upkeep` の判定が 7 つから 8 つに増えます。破壊的な変更はなく、記録の移行も要りません。
+変更点の一覧は [CHANGELOG.md](../../CHANGELOG.md) にあります。
 
-**正式版です。** この版は開発版（接尾辞の付いた版）を出さずに `main` へ載せました。
+**正式版です。** 開発版 `10.14.0-dev.1` と中身は同じで、`main` に載ります。
 
-**既定の上限が変わります。** `/ndf:cross-review` と `/ndf:cross-refactoring` の監視は、工程に
-応じた上限で打ち切ります。環境変数（`MONITOR_TIMEOUT` / `MONITOR_TIMEOUT_<担当>`）で上書き
-していた場合は、これまでどおりそちらが優先されます。
+**棚卸が課題を 1 件起票することがあります。** 同じ根本原因を指す課題が 2 件以上あり、直しても
+個別の作業が残るときに、原因を直すための親 issue をつくります。起票と結び付けは一括で提示し、
+承認を得てから行います。**既存の課題（子 issue）は閉じません。**
 
 | 変わったこと | 中身 |
 | --- | --- |
-| **上限の順序を 1 か所で決めます** | 監視の上限・CLI の上限・無進捗の許容を `scripts/lib/limits.py` の表だけが持ちます。監視の上限は工程ごと（レビュー / 批評 / 提案 / 判定は 1200 秒、適用 / 修正 / 最終ゲートの修正は 3600 秒）、無進捗の許容は担当ごと（codex 180 / agy 480 / kiro 480 / claude 900）、CLI の上限は「解決した監視の上限 + 120 秒」です。全 28 組で「許容 < 監視 < CLI」をテストで固定しています |
-| **修正の工程が途中で打ち切られなくなりました** | cross-refactoring の修正と最終ゲートの修正は 420 秒で打ち切られていました。工程ごとの上限（3600 秒）を使います |
-| **agy が監視より先に諦めなくなりました** | agy へ渡す `--print-timeout` を監視の上限から導くため、CLI 側が先に打ち切ることがなくなります。上書きした監視の上限にも追随します |
-| **600 秒を超える監視を区切って待てます** | `cross-review/scripts/bg-wait.sh` が背景で起動し、540 秒ずつ区切って待ちます（124 はまだ終わっていない印）。Claude Code の Bash の 1 回の上限（600 秒）に収まります |
-| **実行の要約が作業ツリーの外に残ります** | 保存先は `NDF_METRICS_DIR` → `$XDG_STATE_HOME/ndf/metrics` → `~/.local/state/ndf/metrics` の順で決まります。レビュー用の作業ツリーを消した後も、所要時間と終わり方を後から読めます |
-| 監視の記録に工程が入ります | 監視の結果ファイルと記録へ `phase` が増えます。標準出力と終了コードは変わりません |
+| **判定「ルートコーズ」が増えました** | 課題が現れている場所（現象レイヤー）と、原因を直すべき場所（修正レイヤー）を分けて控え、2 つが違う課題に付けます。**条件はこの 1 つで、件数は条件ではありません。** 分岐は「要判断」へ倒さず、段 2A の控えだけで行き先が決まります。条件・直し方の 5 つの手・親子の結び付け方は新設の `references/grouping.md` にあります |
+| **同じ修正レイヤーを指す件数で記録の持ち方が決まります** | 1 件ならその課題の本文へ書き、2 件以上で個別の作業が残るなら親 issue をつくって GitHub のサブイシュー関係で結び付け、残らないなら重複として正本へ寄せます。段 2B は重複の突き合わせを先に行います |
+| 段 1 の経路が 4 つになりました | このまとまりで閉じた親 issue の子 issue を拾います。子 issue は親と別のマイルストーンにいることがあり、ほかの経路では拾えません |
+| 「やらない」の条件 2 の行き先が 3 つになりました | 寄せ先が同じ課題なら重複、同じ修正レイヤーを指すものが 2 件以上なら「ルートコーズ」、どちらでもなければ条件は欠けていません。「要判断」へ倒すのは見積りである条件 1 だけです |
+| 直近のマイルストーンを連番で決めます | open のうち名前の先頭の連番が最も小さいものです。説明が別の着手の順序を書いていれば説明を採ります。`milestones.md` の「まとまり」は「マイルストーン」へ揃え、親 issue の割り当て方を足しました |
+| 構造の判断の担い手を書きました | 価値（やるか）と構造（どこを直すか）の判断を、発見の瞬間と溜まった課題に分けた表を `issue-upkeep` に置き、`out-of-scope` / `problem-solving` / `retrospective` はその表を指します |
+| 手順の書き方の整理 | `retrospective` の Pull Request 番号の引き方を 3 段に分け、`problem-solving` の型不一致の組み合わせを 1 つの表へ、`out-of-scope` の由来の形を 1 か所へ寄せました。振る舞いは変わりません |
 
 正式版のチャネル（ref を指定せずに登録した取得元）なら、次で入れ替わります。**動いているセッションには
 反映されない**ため、更新したあとは起動し直してください。開発版を試すために `develop` を登録した
@@ -155,15 +156,14 @@ codex plugin add ndf@ai-plugins
 
 ### 手元で確かめる
 
-どちらも読むだけで、状態も記録も書き換えません。`$SCRIPTS` はプラグインの `scripts/` の
+どちらも読むだけで、課題もファイルも書き換えません。`$SCRIPTS` はプラグインの `scripts/` の
 絶対パスで、決め方は
 [development-workflow/references/scripts-lookup.md](skills/development-workflow/references/scripts-lookup.md)
 にあります。
 
 ```bash
-python3 "$SCRIPTS/lib/limits.py" check; echo "exit=$?"              # 0 なら表の 28 組の順序が保たれている
-python3 "$SCRIPTS/lib/limits.py" monitor-timeout apply agy          # 工程と担当を渡すと秒数を 1 行で出す
-python3 "$SCRIPTS/lib/run_metrics.py" aggregate; echo "exit=$?"     # 残っている実行の要約を束ねて表で出す
+test -f "$SCRIPTS/../skills/issue-upkeep/references/grouping.md"; echo "exit=$?"   # 0 なら新しい版の Skill が入っている
+grep -c '^| \*\*ルートコーズ\*\* |' "$SCRIPTS/../skills/issue-upkeep/SKILL.md"          # 判定の表に行があれば 1
 ```
 
 ## Playwright テストについて
@@ -305,7 +305,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.13.0/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.14.0/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -327,14 +327,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.13.0/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.14.0/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.13.0  <path>
+# => ndf@ai-plugins  installed, enabled  10.14.0  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。

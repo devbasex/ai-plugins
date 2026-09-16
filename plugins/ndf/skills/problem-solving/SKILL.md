@@ -39,6 +39,11 @@ description: "Fix bugs and data inconsistencies upstream at the root cause. Use 
 上流で直すことと、この変更で直すことは別である。**起票先のリポジトリもその Skill が
 決める。** 上流の原因は、別のリポジトリの課題であることがある。
 
+**「上流で直す」と、棚卸の「ルートコーズ」は見る対象が違う。** ここで上流をたどるのは、
+見つけて直している最中の不具合である。起票済みの課題を一覧で見比べ、現れている場所ではなく
+根本原因の場所で直すと決めるのは、課題の棚卸の「ルートコーズ」である
+（[issue-upkeep](../issue-upkeep/SKILL.md)）。
+
 ### 再現テストを先に書く（必須）
 
 **修正の前に、不具合を再現する失敗テストを追加する。** 再現できないまま修正すると、
@@ -76,7 +81,7 @@ description: "Fix bugs and data inconsistencies upstream at the root cause. Use 
 | 症状 | 表層の「原因」 | 真の根本原因 |
 |------|-------------|-------------|
 | 料金が異常値 | 計算ロジックのバグ | 上流の取り込み時に異常値が混入、バリデーション欠如 |
-| レコードの2WD/4WD逆転 | 割当ロジックの不具合 | ORM（Eloquent等）のリレーション型不一致（VARCHAR↔INT）でEager Loadマッチングずれ |
+| レコードの2WD/4WD逆転 | 割当ロジックの不具合 | ORM（Eloquent等）のリレーション型不一致でEager Loadマッチングずれ（組み合わせは下記「型不一致の検出パターン」） |
 | 一部ユーザーで通知が届かない | 通知送信ロジックの問題 | 論理削除フラグの扱いが `delete()` と `forceDelete()` で異なる |
 
 ## 2. ハルシネーション防止チェック
@@ -91,7 +96,7 @@ description: "Fix bugs and data inconsistencies upstream at the root cause. Use 
 |------------|------|
 | カラム/フィールドが存在するか | `SHOW COLUMNS` / スキーマ定義ファイル確認（コード読みだけで判断しない） |
 | データが存在するか | `SELECT COUNT(*) FROM table WHERE ...` / サンプル取得 |
-| 型が一致するか | DB定義（INT/VARCHAR等）とコード側（`$casts`, dataclass 等）の両方を確認 |
+| 型が一致するか | DB定義とコード側（`$casts`, dataclass 等）の両方を確認（危険な組み合わせは下記「型不一致の検出パターン」） |
 | 外部キー/制約が存在するか | マイグレーション履歴を追跡（追加→削除→再追加の変遷を確認） |
 | 論理削除ポリシーは何か | `SoftDeletes` / `deleted_at` の有無を確認（`delete()` と `forceDelete()` の挙動が異なる） |
 | 環境差異がないか | dev/staging/prod で同じクエリを実行して比較 |
@@ -105,7 +110,7 @@ description: "Fix bugs and data inconsistencies upstream at the root cause. Use 
 
 ### 型不一致の検出パターン
 
-ORMリレーションで以下の組み合わせは危険:
+ORMリレーションで以下の組み合わせは危険（型不一致の組み合わせと対策の正本はこの表）:
 
 | ローカルキー型 | 外部キー型 | リスク |
 |--------------|----------|-------|
@@ -198,3 +203,4 @@ SQLクエリ結果をそのまま貼り、「コードを読んだ推測」と�
 - `/ndf:cherry-pick-pr` — 複数ブランチへの修正適用戦略
 - `/ndf:logging-guidelines` — ログ設計（原因特定を容易にする）
 - `/ndf:out-of-scope` — 根本原因が今回の範囲の外にあったときの起票と、起票先のリポジトリの判断
+- `/ndf:issue-upkeep` — 溜まった課題を、根本原因の場所で直すと決める（ルートコーズ）
