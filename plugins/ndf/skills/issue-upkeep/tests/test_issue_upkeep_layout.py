@@ -216,6 +216,27 @@ def test_the_target_query_filters_only_by_milestone() -> None:
     assert "select(.milestone == null)" in block
 
 
+def test_stage_1_expands_to_all_open_issues_on_pervasive_changes() -> None:
+    """全体に影響する変更における open 全件への拡張（--all）の 4 条件を固定する。
+
+    ディレクトリの移動・統合、対応する実行環境の増減、ブランチ戦略の変更、
+    識別子の一括改名のいずれかに当たるときは、対象を open 全件（--all）へ広げる。
+    """
+    body = SKILL.read_text(encoding="utf-8")
+    part = body[body.index("### 段 1: 対象を選ぶ"):body.index("### 段 2A: 課題ごとに調べる")]
+    rows = table(part, "| 全体に影響する変更 | 例 |")
+
+    assert [row[0] for row in rows] == [
+        "ディレクトリの移動・統合",
+        "対応する実行環境の増減",
+        "ブランチ戦略の変更",
+        "識別子の一括改名",
+    ]
+    text = flat(part)
+    assert "全体に影響する変更では、触った領域では足りない" in text
+    assert "次のいずれかに当たるときは対象をopen の全件へ広げる（`--all`）" in text
+
+
 # ---------- ルートコーズの判定（#712） ----------
 
 def test_cluster_is_reachable_from_the_verdict_table() -> None:
