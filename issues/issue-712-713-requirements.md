@@ -257,7 +257,7 @@
   検査している
 - [ ] AC18: `test_issue_upkeep_layout.py` が、クラスタ判定の行から参照へたどれることを検査する
 - [ ] AC19: `test_issue_upkeep_layout.py` が、参照の条件の節・子 issue を閉じないこと・
-  歯止め・複数のクラスタへの所属を検査する
+  結び付け方・複数のクラスタへの所属を検査する
 - [ ] AC20: `test_issue_upkeep_layout.py` が、段 2B の表に「同じ原因を持つクラスタ」の行が
   あることを検査する
 - [ ] AC21: `uv run --with pytest pytest plugins/ndf/skills/issue-upkeep/tests -q` が通る
