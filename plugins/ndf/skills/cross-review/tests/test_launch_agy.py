@@ -23,7 +23,8 @@ LAUNCH = LIB / "launch-cli.sh"
 
 # この束（`cross-review/tests`）は外部コマンドを前提にしない一覧に入っている。
 # 起動スクリプトを走らせるこのファイルだけが例外なので、前提はここで宣言する。
-LAUNCH_COMMANDS = ("bash", "cat", "dirname", "mkdir", "mv", "rm")
+# `python3` は工程名から CLI の上限を引く（`limits.py`、#598 / #537）。
+LAUNCH_COMMANDS = ("bash", "cat", "dirname", "mkdir", "mv", "python3", "rm")
 pytestmark = pytest.mark.skipif(
     any(shutil.which(c) is None for c in LAUNCH_COMMANDS),
     reason=f"起動スクリプトが使う外部コマンドが無い（{' / '.join(LAUNCH_COMMANDS)}）",

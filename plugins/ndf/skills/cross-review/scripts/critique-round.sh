@@ -42,8 +42,9 @@ for _attempt in 1 2; do
 
   if [ ${#LAUNCHED[@]} -gt 0 ]; then
     # 反証の結果は `<stem>-result.json` ではないため `--no-require-result` で待つ。
+    # 監視の上限は上限の表の `critique`（#598 / #537）。
     "$SCRIPT_DIR/monitor.py" "$STATE_PR" \
-      --agents "$(IFS=,; echo "${LAUNCHED[*]}")" \
+      --agents "$(IFS=,; echo "${LAUNCHED[*]}")" --phase critique \
       --stem-template '{agent}-critique-pr{id}' --no-require-result || true
   fi
 

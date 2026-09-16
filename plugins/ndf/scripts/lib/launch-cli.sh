@@ -12,9 +12,13 @@
 #   model        省略可。空文字なら CLI の既定モデルへ委ねる
 #   extra-dir    省略可。agy のときだけ作業領域へ追加する（結果ファイルの置き場所が
 #                作業ディレクトリの外にある場合）
-#   timeout      省略可。agy の `--print-timeout` へ渡す秒数。**フェーズの監視の上限
-#                以上**にする。CLI が先に打ち切ると結果ファイルが残らず、監視からは
-#                起動できなかった場合と区別が付かない
+#   timeout      省略可。agy の `--print-timeout`（CLI の上限）。次のどれかを渡す
+#                  工程名  上限の表（`limits.py`）の工程。`limits.py cli-timeout <工程> <runtime>`
+#                          の値（環境変数で解決した監視の上限 + 120 秒）を使う
+#                  数字    その秒数（従来どおり）
+#                  空      `apply` の工程名と同じ（いちばん長い工程を覆う）
+#                **CLI の上限は監視の上限より長くする。** CLI が先に打ち切ると結果ファイルが
+#                残らず、監視からは起動できなかった場合と区別が付かない（#598 / #537）
 #
 # **ホストか否かで分岐してはいけない。** ランタイム名だけで分岐する。ホストと同じ
 # ランタイムが実装担当になるラウンドでも、ホストのサブエージェント機能は使わず
@@ -45,19 +49,88 @@ PROMPT=${3:?prompt file required}
 STEM=${4:?output stem required}
 MODEL=${5:-}
 EXTRA_DIR=${6:-}
-# 既定は、いちばん長いフェーズ（適用・修正の 3600 秒）を覆う値にする。
-PRINT_TIMEOUT=${7:-3600}
+# 空なら、いちばん長い工程（適用・修正）を覆う値にする。
+PRINT_TIMEOUT=${7:-apply}
 
 [ -d "$WORKDIR" ] || { echo "作業ディレクトリがありません: $WORKDIR" >&2; exit 1; }
 [ -s "$PROMPT" ] || { echo "プロンプトが空です: $PROMPT" >&2; exit 1; }
 mkdir -p "$(dirname "$STEM")"
 
-STDOUT_LOG=$STEM-stdout.log
-ERR_LOG=$STEM-err.log
-PID_FILE=$STEM.pid
+# 工程名を CLI の上限の秒数へ解決する。**表に無い名前は起動せずに終える。**
+# 上限の表は `limits.py` だけが持つ（値を使うのは agy だけだが、名前の検査は全ランタイムで行う）。
+# **`cd` で登らない。** 表の位置は文字列のまま渡す（Kiro CLI の symlink を字句で畳まない）。
+resolve_print_timeout() {
+  case "$PRINT_TIMEOUT" in
+    ''|*[!0-9]*)
+      # **工程名を先に控える。** 代入に使うと、コマンド置換が失敗した時点で
+      # `PRINT_TIMEOUT` が空になり、案内が渡された工程名ではなく既定の `apply` を出す。
+      local limits phase=${PRINT_TIMEOUT:-apply}
+      limits=$(dirname -- "${BASH_SOURCE[0]}")/limits.py
+      PRINT_TIMEOUT=$(python3 "$limits" cli-timeout "$phase" "$RUNTIME") || {
+        echo "CLI の上限を決められません（工程: $phase）" >&2; exit 1; }
+      ;;
+  esac
+}
 
-# 前回実行の残骸を消してから起動する。残っていると監視側が古い結果を拾う。
-rm -f "$STDOUT_LOG" "$ERR_LOG" "$PID_FILE" "$STEM-result.json" "$STEM-progress.log"
+# stem に属する出力パスを決め、前回実行の残骸を消す。残っていると監視側が古い結果を拾う。
+# **監視の結果ファイル（`<stem>-monitor.json`）も消す。** 読む側は stem から 1 つに引くため、
+# 残っていると前の起動の理由を今回のものと読む。追記だけの記録
+# （`monitor-outcomes.jsonl`）は過去を残すためのものなので消さない（#662）。
+prepare_artifacts() {
+  STDOUT_LOG=$STEM-stdout.log
+  ERR_LOG=$STEM-err.log
+  PID_FILE=$STEM.pid
+  rm -f "$STDOUT_LOG" "$ERR_LOG" "$PID_FILE" "$STEM-result.json" "$STEM-progress.log" \
+    "$STEM-monitor.json"
+}
+
+# ランタイム名で分岐して nohup で背景起動し、PID を `PID` へ入れる。
+# **ホストか否かで分岐してはいけない。** ランタイム名だけで分岐する。ホストと同じ
+# ランタイムが実装担当になるラウンドでも、ホストのサブエージェント機能は使わず
+# 別プロセスの CLI として起動する。これにより「実装した者と評価する者が別」という
+# 構造と、ホストセッションの作業文脈を汚さない性質の両方が保たれる。
+launch_runtime() {
+  case "$RUNTIME" in
+    codex)
+      nohup codex exec --dangerously-bypass-approvals-and-sandbox \
+        --config reasoning.effort=medium -C "$WORKDIR" "${MODEL_ARGS[@]}" \
+        < "$PROMPT" > "$STDOUT_LOG" 2> "$ERR_LOG" &
+      PID=$!
+      ;;
+    agy)
+      # 作業領域は作業ディレクトリと、結果ファイルの置き場所だけを宣言する。
+      local add_dir_args=(--add-dir "$WORKDIR")
+      [ -n "$EXTRA_DIR" ] && add_dir_args+=(--add-dir "$EXTRA_DIR")
+      # `--print-timeout` は単位付きの時間を取る（数字だけでは `missing unit` で落ちる）。
+      nohup agy --dangerously-skip-permissions --output-format text \
+        --print-timeout "${PRINT_TIMEOUT}s" "${MODEL_ARGS[@]}" "${add_dir_args[@]}" \
+        -p="$(cat "$PROMPT")" \
+        < /dev/null > "$STDOUT_LOG" 2> "$ERR_LOG" &
+      PID=$!
+      ;;
+    claude)
+      nohup claude -p \
+        --permission-mode acceptEdits \
+        --allowed-tools "$CLAUDE_ALLOWED_TOOLS" \
+        --output-format json "${MODEL_ARGS[@]}" \
+        < "$PROMPT" > "$STDOUT_LOG" 2> "$ERR_LOG" &
+      PID=$!
+      ;;
+    kiro)
+      nohup kiro-cli chat --no-interactive --trust-all-tools "${MODEL_ARGS[@]}" \
+        < "$PROMPT" > "$STDOUT_LOG" 2> "$ERR_LOG" &
+      PID=$!
+      ;;
+    *)
+      echo "未知のランタイムです: $RUNTIME" >&2
+      exit 1
+      ;;
+  esac
+}
+
+resolve_print_timeout
+
+prepare_artifacts
 
 # モデル指定。全 4 CLI が `--model` を受ける。空なら CLI の既定へ委ねる。
 MODEL_ARGS=()
@@ -68,42 +141,7 @@ CLAUDE_ALLOWED_TOOLS=${NDF_CLAUDE_ALLOWED_TOOLS:-Bash,Read,Write,Edit,Glob,Grep}
 
 cd "$WORKDIR"
 
-case "$RUNTIME" in
-  codex)
-    nohup codex exec --dangerously-bypass-approvals-and-sandbox \
-      --config reasoning.effort=medium -C "$WORKDIR" "${MODEL_ARGS[@]}" \
-      < "$PROMPT" > "$STDOUT_LOG" 2> "$ERR_LOG" &
-    PID=$!
-    ;;
-  agy)
-    # 作業領域は作業ディレクトリと、結果ファイルの置き場所だけを宣言する。
-    ADD_DIR_ARGS=(--add-dir "$WORKDIR")
-    [ -n "$EXTRA_DIR" ] && ADD_DIR_ARGS+=(--add-dir "$EXTRA_DIR")
-    # `--print-timeout` は単位付きの時間を取る（数字だけでは `missing unit` で落ちる）。
-    nohup agy --dangerously-skip-permissions --output-format text \
-      --print-timeout "${PRINT_TIMEOUT}s" "${MODEL_ARGS[@]}" "${ADD_DIR_ARGS[@]}" \
-      -p="$(cat "$PROMPT")" \
-      < /dev/null > "$STDOUT_LOG" 2> "$ERR_LOG" &
-    PID=$!
-    ;;
-  claude)
-    nohup claude -p \
-      --permission-mode acceptEdits \
-      --allowed-tools "$CLAUDE_ALLOWED_TOOLS" \
-      --output-format json "${MODEL_ARGS[@]}" \
-      < "$PROMPT" > "$STDOUT_LOG" 2> "$ERR_LOG" &
-    PID=$!
-    ;;
-  kiro)
-    nohup kiro-cli chat --no-interactive --trust-all-tools "${MODEL_ARGS[@]}" \
-      < "$PROMPT" > "$STDOUT_LOG" 2> "$ERR_LOG" &
-    PID=$!
-    ;;
-  *)
-    echo "未知のランタイムです: $RUNTIME" >&2
-    exit 1
-    ;;
-esac
+launch_runtime
 
 echo "$PID" > "$PID_FILE"
 disown 2>/dev/null || true

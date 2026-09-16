@@ -8,7 +8,8 @@ monitor.py の import そのものが落ち、監視プロセスが起動でき�
 
 修正方針:
   - `DEFAULT_TIMEOUT` / `DEFAULT_STALL` / `DEFAULT_POLL` は import 時に
-    **固定数値** (420 / 180 / 15) で保持する
+    **固定数値** で保持する。監視の上限と許容は上限の表（`lib/limits.py`）の値
+    （review の 1200 / 表に無い担当の 180）を指す別名である（#598 / #537）
   - env の解釈は `_agent_stall_default()` / `_safe_int_env()` 内で
     try/except 付きで行う (既に round 4 で実装済み)
 
@@ -60,9 +61,9 @@ def test_import_succeeds_with_non_numeric_monitor_timeout(monkeypatch):
     monkeypatch.setenv("MONITOR_TIMEOUT", "xxx")
     mod = _fresh_import_monitor("cross_review_monitor_fresh_timeout")
     # 固定 default が保たれる
-    assert mod.DEFAULT_TIMEOUT == 420
+    assert mod.DEFAULT_TIMEOUT == 1200
     # safe parse ヘルパも fallback を返す
-    assert mod._safe_int_env("MONITOR_TIMEOUT", mod.DEFAULT_TIMEOUT) == 420
+    assert mod._safe_int_env("MONITOR_TIMEOUT", mod.DEFAULT_TIMEOUT) == 1200
 
 
 def test_import_succeeds_with_non_numeric_monitor_poll(monkeypatch):
@@ -80,7 +81,7 @@ def test_import_succeeds_with_all_non_numeric_envs(monkeypatch):
     monkeypatch.setenv("MONITOR_POLL", "???")
     mod = _fresh_import_monitor("cross_review_monitor_fresh_all")
     assert mod.DEFAULT_STALL == 180
-    assert mod.DEFAULT_TIMEOUT == 420
+    assert mod.DEFAULT_TIMEOUT == 1200
     assert mod.DEFAULT_POLL == 15
 
 

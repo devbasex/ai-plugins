@@ -38,7 +38,7 @@ PR を**ホストを除く 3 者から選んだ 2 者**にレビューさせ、*
 - [scripts/monitor.py](scripts/monitor.py) — codex/agy プロセス多軸監視 (sentinel / pidfile / 早期エラー / stall / hard timeout / result.json)
 - [scripts/wait-review.sh](scripts/wait-review.sh) — `monitor.py` の薄ラッパ（互換用）
 - [scripts/rotate-pr.sh](scripts/rotate-pr.sh) — PR ローテーション
-- [scripts/measure.py](scripts/measure.py) — 効果の測定（状態ファイル 1 つを読む。収束ループの外にあり、手順の途中では呼ばない）
+- [scripts/measure.py](scripts/measure.py) — 効果の測定（状態ファイル 1 つを読む）。**状態を保存するたびに実行の要約として呼ばれ**、出力が作業ツリーの外の要約の `measure` に残る（#662。手順から手で呼ぶ必要は無い）
 
 メインセッションからは `$SCRIPTS/state.py <subcommand>` 形式で呼ぶだけで、
 state.json の読み書きや AI launcher 起動・完了待ちは全て委譲される。
@@ -229,11 +229,12 @@ while :; do
     [ -z "$ONLY" ] || [ "$ONLY" = "$r" ] || continue
     "$SCRIPTS/launch-reviewer.sh" "$r" "$STATE_PR" "$ROUND"
   done
-  # 監視: 既定 timeout=7 分 / stall=3 分。失敗時は対象プロセスを kill して返す。監視と取り込みの
-  #   終了コードは読まない。結果なしは NO_RESULT として state に残り、Step 3 が受け取る（docs/01）。
-  # ⚠ 位置引数の `both` は codex / agy の 2 者だけを指す。担当は 4 つの名前を取りうるため、
-  #   `start-round` が返した一覧を `--agents` で渡す。
-  "$SCRIPTS/monitor.py" "$STATE_PR" --agents "${ONLY:-$REVIEWERS_CSV}" || true
+  # 監視: 上限は上限の表（review 1200 秒 / stall は担当別 codex 180・agy 480・kiro 480・claude 900）。失敗時は kill して返す。
+  #   Bash の 1 回 600 秒に収まらないため背景で起動し、wait（1 回 540 秒以内）を 124 のあいだ **別の Bash の呼び出しで** 呼び直す。
+  #   **繰り返しを 1 回の呼び出しへ書かない**（2 回目の待ちに入った時点で合計が 600 秒を超え、ホストに打ち切られる。docs/01）。
+  #   監視と取り込みの終了コードは読まない。結果なしは NO_RESULT として state に残り、Step 3 が受け取る。担当は `--agents` で渡す（`both` は 2 者だけ）。
+  "$SCRIPTS/bg-wait.sh" run "$TMP_DIR/review.rc" -- "$SCRIPTS/monitor.py" "$STATE_PR" --phase review --agents "${ONLY:-$REVIEWERS_CSV}"
+  "$SCRIPTS/bg-wait.sh" wait "$TMP_DIR/review.rc"   # 124 = まだ。**この 1 行を別の Bash の呼び出しとして呼び直す**
   for r in $REVIEWERS; do
     [ -z "$ONLY" ] || [ "$ONLY" = "$r" ] || continue
     "$SCRIPTS/state.py" read-result "$STATE_PR" "$r" || true
@@ -245,14 +246,16 @@ while :; do
   #   （渡すと 30 秒待って PIDFILE_BAD (exit 6) が返る）ことと、有効な反証が揃わない
   #   ときに同じラウンドで 1 度だけ取り直すことを、この 1 本が引き受ける。
   "$SCRIPTS/state.py" verify-findings "$STATE_PR"
-  "$SCRIPTS/critique-round.sh" "$STATE_PR" "$ROUND" ${ONLY:-$REVIEWERS}
+  "$SCRIPTS/bg-wait.sh" run "$TMP_DIR/critique.rc" -- "$SCRIPTS/critique-round.sh" "$STATE_PR" "$ROUND" ${ONLY:-$REVIEWERS}
+  "$SCRIPTS/bg-wait.sh" wait "$TMP_DIR/critique.rc"  # 同上。124 のあいだ、別の呼び出しとして呼び直す
 
   # Step 3: 判定 (0=収束 / 2=修正へ / 7=結果なし / 8=待ち行列に残あり / 1=中断)。引き継いだ指摘が残っていれば、
   #   両者が承認しても 2 を返して修正の工程へ回す。置換の終了コードは変数で受けてから読む。
   JUDGE_VARS=$("$SCRIPTS/state.py" judge "$STATE_PR"); JUDGE_RC=$?; eval "$JUDGE_VARS"
   if [ "$JUDGE_RC" -eq 7 ]; then  # 名前の出た担当だけを、同じラウンドで 1 度起動し直す
     for a in $RELAUNCH_AGENTS; do "$SCRIPTS/launch-reviewer.sh" "$a" "$STATE_PR" "$ROUND"; done
-    "$SCRIPTS/monitor.py" "$STATE_PR" --agents "$RELAUNCH_AGENTS_CSV" || true
+    "$SCRIPTS/bg-wait.sh" run "$TMP_DIR/review.rc" -- "$SCRIPTS/monitor.py" "$STATE_PR" --phase review --agents "$RELAUNCH_AGENTS_CSV"
+    "$SCRIPTS/bg-wait.sh" wait "$TMP_DIR/review.rc"  # 同上。124 のあいだ、別の呼び出しとして呼び直す
     for a in $RELAUNCH_AGENTS; do "$SCRIPTS/state.py" read-result "$STATE_PR" "$a" || true; done
     JUDGE_VARS=$("$SCRIPTS/state.py" judge "$STATE_PR"); JUDGE_RC=$?; eval "$JUDGE_VARS"
   fi

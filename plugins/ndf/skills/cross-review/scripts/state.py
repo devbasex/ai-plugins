@@ -34,6 +34,7 @@ sys.path.insert(
 import assignment  # noqa: E402
 import auth  # noqa: E402
 import post_queue  # noqa: E402
+import run_metrics  # noqa: E402  実行の要約（#662）
 
 
 # ---------------- helpers ----------------
@@ -1333,10 +1334,26 @@ def _load(pr: int) -> dict[str, Any]:
 
 
 def _save(pr: int, state: dict[str, Any]) -> None:
-    p = _state_path(pr)
+    _write_state(_state_path(pr), state)
+
+
+def _write_state(p: pathlib.Path, state: dict[str, Any]) -> None:
+    """状態ファイルを書く唯一の経路。`init` と再開の入口もここを通す（AC8）。"""
     tmp = p.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
     tmp.replace(p)
+    # **保存のたびに実行の要約を書き直す**（#662 の決定 5）。失敗しても進行は止めない。
+    run_metrics.after_save(p, state, "cross-review", _summary_extra)
+
+
+def _summary_extra(path: pathlib.Path, state: dict[str, Any],
+                   launches: list[dict[str, Any]]) -> dict[str, Any]:
+    """cross-review の要約だけが持つ鍵。`measure.py` の出力をそのまま置く（決定 8）。"""
+    scripts = str(pathlib.Path(__file__).resolve().parent)
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    import measure
+    return {"measure": measure.measure(state)}
 
 
 def _sh(cmd: list[str], check: bool = True) -> str:
@@ -1570,10 +1587,7 @@ def _resume_from_state(
     if _record_carried_over(st, st.get("repo") or repo, st.get("current_pr") or pr):
         state_changed = True
     if state_changed:
-        resume_state_file.write_text(
-            json.dumps(st, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        _write_state(resume_state_file, st)
         info("↻ 追加レビュー観点を state に反映して再開")
     # 待ち行列を流すのは、手元の `st` を書き戻した**後**である。流した結果
     # （`queued` の解除と、届かなかった投稿の結果なし）は `_confirm_flushed` が
@@ -1633,6 +1647,42 @@ def cmd_init(args: argparse.Namespace) -> None:
     _init_new_state(args, pr, repo, worktree, manual_extra_review)
 
 
+class _InitPRContext(NamedTuple):
+    repo: str
+    worktree: str
+    meta: PrMetadata
+    me: str
+    author: str
+    is_own: bool
+    event_downgrade: bool
+
+
+class _InitReviewContext(NamedTuple):
+    changed_files: list[str]
+    auto_review_categories: list[str]
+    auto_review: str
+    review_instructions: str
+
+
+class _InitWorkspaceContext(NamedTuple):
+    tmp_dir: pathlib.Path
+    state_file: pathlib.Path
+
+
+class _InitialAssignment(NamedTuple):
+    host: str
+    host_source: str
+
+
+class _InitialStateContext(NamedTuple):
+    pr: object
+    pr_ctx: _InitPRContext
+    review_ctx: _InitReviewContext
+    ws_ctx: _InitWorkspaceContext
+    assignment: _InitialAssignment
+    manual_extra_review: str
+
+
 def _init_new_state(
     args: argparse.Namespace,
     pr: object,
@@ -1641,141 +1691,192 @@ def _init_new_state(
     manual_extra_review: str,
 ) -> None:
     """新規 init 経路: プリチェック → worktree 作成 → state 構築 → 出力。"""
-    # 新規 init: プリチェック。
-    # **作成者・head・base は REST の 1 回でまとめて取る。** 項目ごとに `gh pr view` を
-    # 投げていた分（GraphQL 3 点）と、リポジトリ名の解決（同 1 点）が 0 点になる。
-    meta = _fetch_pr_metadata(pr, repo)
-    if meta is None:
-        die(f"PR #{pr} のメタデータを取得できません（リポジトリ名: {repo}）")
+
+    def _resolve_pr_and_ownership(
+        pr: object, repo: str, worktree: str, args_worktree: str | None
+    ) -> _InitPRContext | None:
+        # 新規 init: プリチェック。
+        # **作成者・head・base は REST の 1 回でまとめて取る。** 項目ごとに `gh pr view` を
+        # 投げていた分（GraphQL 3 点）と、リポジトリ名の解決（同 1 点）が 0 点になる。
+        meta = _fetch_pr_metadata(pr, repo)
+        if meta is None:
+            die(f"PR #{pr} のメタデータを取得できません（リポジトリ名: {repo}）")
+            return None
+        if meta.repo != repo:
+            repo = meta.repo
+            if not args_worktree:
+                worktree = str(_default_worktree_base() / _repo_slug(repo) / f"pr{pr}")
+        if meta.rate_remaining is not None:
+            info(f"ℹ GitHub REST の残量: {meta.rate_remaining}")
+
+        me = _sh(["gh", "api", "user", "--jq", ".login"])
+        author = meta.author
+        is_own = (me == author)
+        event_downgrade = is_own
+        if is_own:
+            info(f"⚠ 自分の PR (author={me}) — REQUEST_CHANGES → COMMENT 強制ダウングレード")
+
+        return _InitPRContext(
+            repo=repo,
+            worktree=worktree,
+            meta=meta,
+            me=me,
+            author=author,
+            is_own=is_own,
+            event_downgrade=event_downgrade,
+        )
+
+    def _prepare_review_instructions(
+        pr: object, repo: str, manual_extra_review: str
+    ) -> _InitReviewContext:
+        changed_files = _fetch_changed_files(pr, repo)
+        auto_review_categories = _classify_changed_files(changed_files)
+        auto_review = _auto_review_instructions(auto_review_categories)
+        review_instructions = _combined_review_instructions(auto_review, manual_extra_review)
+        return _InitReviewContext(
+            changed_files=changed_files,
+            auto_review_categories=auto_review_categories,
+            auto_review=auto_review,
+            review_instructions=review_instructions,
+        )
+
+    def _prepare_worktree_and_comments(
+        worktree: str, pr: object, head_branch: str, repo: str
+    ) -> _InitWorkspaceContext:
+        # worktree 分離 — _tmp_dir() より先に worktree を作成/確認する
+        if not pathlib.Path(worktree).exists():
+            _create_worktree(worktree, pr, head_branch)
+        elif _is_registered_worktree(worktree):
+            info(f"↻ 既存 worktree 流用: {worktree}")
+            _sync_worktree(worktree, pr, head_branch)
+        else:
+            # パスは存在するが現リポジトリの worktree ではない (別リポジトリの残骸等)。
+            # 流用すると git 操作が壊れるため退避して作り直す。
+            stale = f"{worktree}.stale-{time.strftime('%Y%m%d%H%M%S')}"
+            pathlib.Path(worktree).rename(stale)
+            info(f"⚠ 現リポジトリの worktree でないため退避: {stale}")
+            _create_worktree(worktree, pr, head_branch)
+
+        # worktree 作成/確認後に _tmp_dir() を呼ぶ (ここで .cross_review/ が作られる)
+        tmp_dir = _tmp_dir(worktree)
+        state_file = tmp_dir / f"cross-review-pr{pr}-state.json"
+
+        # 既存コメントスナップショット（重複指摘防止）。
+        # 3 ソース (インラインコメント / レビュー body / PR レベルコメント) を
+        # fix skill の共有スクリプトで一括取得する。
+        fetch_script = pathlib.Path(__file__).resolve().parent.parent.parent / "fix" / "scripts" / "fetch-pr-comments.sh"
+        r = subprocess.run(
+            [str(fetch_script), repo, str(pr)],
+            capture_output=True, text=True,
+        )
+        existing_path = tmp_dir / f"cross-review-pr{pr}-existing-comments.txt"
+        if r.returncode == 0:
+            existing_path.write_text(r.stdout, encoding="utf-8")
+        else:
+            die(f"既存コメント取得失敗 (重複検出無効のため中断): {r.stderr.strip()[:200]}")
+
+        return _InitWorkspaceContext(
+            tmp_dir=tmp_dir,
+            state_file=state_file,
+        )
+
+    def _prepare_initial_assignment(args: argparse.Namespace) -> _InitialAssignment:
+        """担当ホストを確定し、起動対象の認証を検査する。"""
+        # **ホストを先に確定する。** 誤ると母集合が狂い、ホストが自分自身をレビューする。
+        # 推定できないときに既定を置かない（間違ったまま一周してしまう）。
+        try:
+            host, host_source = assignment.detect_host(getattr(args, "host", None))
+        except assignment.AssignmentError as e:
+            die(str(e))
+            raise
+        reviewers = assignment.review_pool(host)
+        info(f"ホスト: {host}（{host_source}） / レビュワーの母集合: {' / '.join(reviewers)}")
+        _validate_only(args.only, host)
+        # 未認証の CLI は起動から短時間で終わり、結果を残さないまま担当から欠ける。
+        # **確かめるのは実際に起動する担当だけである。**
+        auth.check_auth(_auth_targets(args.only, host), info=info, die=lambda m: die(m))
+        return _InitialAssignment(host=host, host_source=host_source)
+
+    def _build_initial_review_state(
+        args: argparse.Namespace,
+        ctx: _InitialStateContext,
+    ) -> dict[str, Any]:
+        """確定済みの材料から、副作用なしに初期状態を組み立てる。"""
+        host, host_source = ctx.assignment
+        return {
+            "started_at": _now(),
+            "host": host,
+            "host_source": host_source,
+            "max_rounds": args.max_rounds,
+            "rotate_after": args.rotate_after,
+            "only": args.only,
+            "current_pr": ctx.pr,
+            "worktree_path": ctx.pr_ctx.worktree,
+            "tmp_dir": str(ctx.ws_ctx.tmp_dir),
+            "repo": ctx.pr_ctx.repo,
+            "head_branch": ctx.pr_ctx.meta.head_branch,
+            "base_branch": ctx.pr_ctx.meta.base_branch,
+            "pr_author": ctx.pr_ctx.author,
+            "viewer_login": ctx.pr_ctx.me,
+            "is_own_pr": ctx.pr_ctx.is_own,
+            "event_downgrade": ctx.pr_ctx.event_downgrade,
+            "changed_files": ctx.review_ctx.changed_files,
+            "auto_review_categories": ctx.review_ctx.auto_review_categories,
+            "auto_review_instructions": ctx.review_ctx.auto_review,
+            "manual_extra_review_instructions": ctx.manual_extra_review,
+            "extra_review_instructions": ctx.manual_extra_review,
+            "review_instructions": ctx.review_ctx.review_instructions,
+            "pr_history": [{"pr": ctx.pr, "opened_at": _now(), "closed_at": None, "rounds": 0}],
+            "rounds": [],
+            "deferred_nits": [],
+            "rejected_findings": [],
+            "review_findings": [],
+            "evidence_rounds": [],
+            "verify_commands": list(getattr(args, "verify_command", None) or []),
+            "verify_exit_codes": list(getattr(args, "verify_exit_code", None) or []),
+            "carried_over": None,
+            "final": None,
+        }
+
+    def _finalize_initial_state(
+        args: argparse.Namespace,
+        pr: object,
+        pr_ctx: _InitPRContext,
+        review_ctx: _InitReviewContext,
+        ws_ctx: _InitWorkspaceContext,
+        manual_extra_review: str,
+    ) -> None:
+        initial_assignment = _prepare_initial_assignment(args)
+        context = _InitialStateContext(
+            pr, pr_ctx, review_ctx, ws_ctx, initial_assignment, manual_extra_review
+        )
+        state = _build_initial_review_state(args, context)
+        _write_state(ws_ctx.state_file, state)
+        info(f"✅ state 初期化: {ws_ctx.state_file}")
+        _print_init_result(
+            pr,
+            pr_ctx.worktree,
+            ws_ctx.tmp_dir,
+            pr_ctx.repo,
+            pr_ctx.meta.head_branch,
+            pr_ctx.meta.base_branch,
+            pr_ctx.is_own,
+            pr_ctx.event_downgrade,
+            bool(review_ctx.review_instructions),
+            0,
+            False,
+        )
+
+    pr_ctx = _resolve_pr_and_ownership(pr, repo, worktree, args.worktree)
+    if pr_ctx is None:
         return
-    if meta.repo != repo:
-        repo = meta.repo
-        if not args.worktree:
-            worktree = str(_default_worktree_base() / _repo_slug(repo) / f"pr{pr}")
-    if meta.rate_remaining is not None:
-        info(f"ℹ GitHub REST の残量: {meta.rate_remaining}")
 
-    me = _sh(["gh", "api", "user", "--jq", ".login"])
-    author = meta.author
-    is_own = (me == author)
-    event_downgrade = is_own
-    if is_own:
-        info(f"⚠ 自分の PR (author={me}) — REQUEST_CHANGES → COMMENT 強制ダウングレード")
-
-    # worktree 分離 — _tmp_dir() より先に worktree を作成/確認する
-    head_branch = meta.head_branch
-    base_branch = meta.base_branch
-    changed_files = _fetch_changed_files(pr, repo)
-    auto_review_categories = _classify_changed_files(changed_files)
-    auto_review = _auto_review_instructions(auto_review_categories)
-    review_instructions = _combined_review_instructions(auto_review, manual_extra_review)
-    if not pathlib.Path(worktree).exists():
-        _create_worktree(worktree, pr, head_branch)
-    elif _is_registered_worktree(worktree):
-        info(f"↻ 既存 worktree 流用: {worktree}")
-        _sync_worktree(worktree, pr, head_branch)
-    else:
-        # パスは存在するが現リポジトリの worktree ではない (別リポジトリの残骸等)。
-        # 流用すると git 操作が壊れるため退避して作り直す。
-        stale = f"{worktree}.stale-{time.strftime('%Y%m%d%H%M%S')}"
-        pathlib.Path(worktree).rename(stale)
-        info(f"⚠ 現リポジトリの worktree でないため退避: {stale}")
-        _create_worktree(worktree, pr, head_branch)
-
-    # worktree 作成/確認後に _tmp_dir() を呼ぶ (ここで .cross_review/ が作られる)
-    tmp_dir = _tmp_dir(worktree)
-    state_file = tmp_dir / f"cross-review-pr{pr}-state.json"
-
-    # 既存コメントスナップショット（重複指摘防止）。
-    # 3 ソース (インラインコメント / レビュー body / PR レベルコメント) を
-    # fix skill の共有スクリプトで一括取得する。
-    fetch_script = pathlib.Path(__file__).resolve().parent.parent.parent / "fix" / "scripts" / "fetch-pr-comments.sh"
-    r = subprocess.run(
-        [str(fetch_script), repo, str(pr)],
-        capture_output=True, text=True,
+    review_ctx = _prepare_review_instructions(pr, pr_ctx.repo, manual_extra_review)
+    ws_ctx = _prepare_worktree_and_comments(
+        pr_ctx.worktree, pr, pr_ctx.meta.head_branch, pr_ctx.repo
     )
-    existing_path = tmp_dir / f"cross-review-pr{pr}-existing-comments.txt"
-    if r.returncode == 0:
-        existing_path.write_text(r.stdout, encoding="utf-8")
-    else:
-        die(f"既存コメント取得失敗 (重複検出無効のため中断): {r.stderr.strip()[:200]}")
-
-    # **ホストを先に確定する。** 誤ると母集合が狂い、ホストが自分自身をレビューする。
-    # 推定できないときに既定を置かない（間違ったまま一周してしまう）。
-    try:
-        host, host_source = assignment.detect_host(getattr(args, "host", None))
-    except assignment.AssignmentError as e:
-        die(str(e))
-        raise
-    reviewers = assignment.review_pool(host)
-    info(f"ホスト: {host}（{host_source}） / レビュワーの母集合: {' / '.join(reviewers)}")
-    _validate_only(args.only, host)
-    # 未認証の CLI は起動から短時間で終わり、結果を残さないまま担当から欠ける。
-    # **確かめるのは実際に起動する担当だけである。** `--only` で 1 者へ絞ったとき、
-    # 母集合の全員を確かめると、そのラウンドで起動しない CLI の未認証で初期化が失敗する。
-    auth.check_auth(_auth_targets(args.only, host), info=info, die=lambda m: die(m))
-
-    state = {
-        "started_at": _now(),
-        "host": host,
-        "host_source": host_source,
-        "max_rounds": args.max_rounds,
-        "rotate_after": args.rotate_after,
-        "only": args.only,
-        "current_pr": pr,
-        "worktree_path": worktree,
-        "tmp_dir": str(tmp_dir),
-        "repo": repo,
-        "head_branch": head_branch,
-        "base_branch": base_branch,
-        "pr_author": author,
-        # 自分のログイン名は変わらない値である。一度取って持ち、以降は読まない。
-        # 待ち行列の冪等の照合が「投稿者が自分か」を見るために使う。
-        "viewer_login": me,
-        "is_own_pr": is_own,
-        "event_downgrade": event_downgrade,
-        "changed_files": changed_files,
-        "auto_review_categories": auto_review_categories,
-        "auto_review_instructions": auto_review,
-        "manual_extra_review_instructions": manual_extra_review,
-        # 後方互換: 旧 key は manual 指示を保持する。
-        "extra_review_instructions": manual_extra_review,
-        "review_instructions": review_instructions,
-        "pr_history": [{"pr": pr, "opened_at": _now(), "closed_at": None, "rounds": 0}],
-        "rounds": [],
-        "deferred_nits": [],
-        # 却下した指摘は per-item で残す（#156）。件数だけでは、次のラウンドへ
-        # 渡しても同じ指摘だと判定できない。
-        "rejected_findings": [],
-        # 取り込んだ指摘は per-item で残す（#156）。`payload.json` の 1 件に
-        # `pr` / `round` / `agent` と `has_evidence` を添えた形で積む。
-        "review_findings": [],
-        # 証拠集約（統合・実行検証・反証）を通ったラウンドの番号（#156）。**収束の
-        # 判定はこの印で母集合を決める。** `review_findings` の有無では、旧い状態
-        # ファイルのラウンドと区別できない（`_evidence_completed`）。
-        "evidence_rounds": [],
-        # 実行検証の許しは起動した側が渡す（#156）。**渡されなければ実行しない。**
-        # ラウンドごとに `verify-findings` が読むため、状態ファイルへ持つ。
-        "verify_commands": list(getattr(args, "verify_command", None) or []),
-        "verify_exit_codes": list(getattr(args, "verify_exit_code", None) or []),
-        # 引き継いだ指摘は再開の時点で決まる。新規の開始では空にする。
-        "carried_over": None,
-        "final": None,
-    }
-    state_file.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
-    info(f"✅ state 初期化: {state_file}")
-    _print_init_result(
-        pr,
-        worktree,
-        tmp_dir,
-        repo,
-        head_branch,
-        base_branch,
-        is_own,
-        event_downgrade,
-        bool(review_instructions),
-        0,
-        False,
+    _finalize_initial_state(
+        args, pr, pr_ctx, review_ctx, ws_ctx, manual_extra_review
     )
 
 
@@ -3769,53 +3870,12 @@ def _read_fix_result(
         (legacy_tmp_path, False),
     ]
 
-    ffile: pathlib.Path | None = None
-    fix: dict[str, Any] | None = None
     if explicit is not None:
-        # codex round 4 指摘: `--file` 明示時は fallback 探索に進まず即時失敗させる。
-        # ユーザーが特定ファイルを指定しているのに、それが存在しない / 空 / JSON 不正
-        # だった場合、無言で fallback に流れて別実行の戻り値を誤マージすると事故になる。
-        if not explicit.exists():
-            die(
-                f"--file で指定されたパスが存在しません: {explicit}",
-                code=3,
-            )
-        if explicit.stat().st_size == 0:
-            die(
-                f"--file で指定されたファイルが空です: {explicit}",
-                code=3,
-            )
-        try:
-            fix = json.loads(explicit.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            die(
-                f"--file 指定の fix 戻り値ファイルの読み取り / parse に失敗 "
-                f"({explicit}): {exc}",
-                code=3,
-            )
-        # gemini round 3 指摘: `--file` で `list` 等の non-dict JSON が渡されると
-        # 後続の `fix.get(...)` でクラッシュする。即時 die(code=3) で中断。
-        if not isinstance(fix, dict):
-            die(
-                f"--file 指定の fix 戻り値ファイルが dict ではない "
-                f"({explicit}, type={type(fix).__name__})。"
-                " fix サブエージェント出力の形式不正。",
-                code=3,
-            )
-        ffile = explicit
-        # 明示指定は stale 検証スキップ
-    else:
-        for c, is_canonical in fallback_candidates:
-            if not (c.exists() and c.stat().st_size > 0):
-                continue
-            is_fresh, parsed = _is_fresh_fix_result(c, pr, round_started_ts, is_canonical=is_canonical)
-            if not is_fresh:
-                continue
-            ffile = c
-            fix = parsed  # 既にパース済みのデータを再利用 (gemini round 2 指摘の性能改善)
-            break
+        return _read_explicit_fix_result(explicit)
 
-    if ffile is None or fix is None:
+    fix = _find_fallback_fix_result(fallback_candidates, pr, round_started_ts)
+
+    if fix is None:
         checked = ([str(explicit)] if explicit else []) + [str(c) for c, _ in fallback_candidates]
         die(
             "fix サブエージェントが戻り値ファイルを生成しなかった "
@@ -3824,6 +3884,47 @@ def _read_fix_result(
         )
 
     return fix
+
+
+def _read_explicit_fix_result(explicit: pathlib.Path) -> dict[str, Any]:
+    """明示された fix 戻り値を読み、形式不正なら fallback せず終了する。"""
+    if not explicit.exists():
+        die(f"--file で指定されたパスが存在しません: {explicit}", code=3)
+    if explicit.stat().st_size == 0:
+        die(f"--file で指定されたファイルが空です: {explicit}", code=3)
+    try:
+        fix = json.loads(explicit.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        die(
+            f"--file 指定の fix 戻り値ファイルの読み取り / parse に失敗 "
+            f"({explicit}): {exc}",
+            code=3,
+        )
+    if not isinstance(fix, dict):
+        die(
+            f"--file 指定の fix 戻り値ファイルが dict ではない "
+            f"({explicit}, type={type(fix).__name__})。"
+            " fix サブエージェント出力の形式不正。",
+            code=3,
+        )
+    return fix
+
+
+def _find_fallback_fix_result(
+    candidates: list[tuple[pathlib.Path, bool]],
+    pr: int | str,
+    round_started_ts: float | None,
+) -> dict[str, Any] | None:
+    """canonical、legacy の順に fresh な fix 戻り値を探す。"""
+    for candidate, is_canonical in candidates:
+        if not (candidate.exists() and candidate.stat().st_size > 0):
+            continue
+        is_fresh, parsed = _is_fresh_fix_result(
+            candidate, pr, round_started_ts, is_canonical=is_canonical
+        )
+        if is_fresh:
+            return parsed
+    return None
 
 
 def _normalize_dict_items(raw: object) -> list[dict]:
@@ -3843,14 +3944,21 @@ def _normalize_dict_items(raw: object) -> list[dict]:
 
 def _merge_fix_records(st: dict, fix: dict, pr: int) -> dict:
     """fix の戻り値を正規化して記録へ反映し、ラウンドの fix 辞書を返す。"""
+    normalized = _normalize_fix_result(fix)
+    st["rounds"][-1]["fix"] = _build_round_fix(normalized)
+    st["rounds"][-1]["ended_at"] = _now()
+    _record_fix_history(st, normalized, pr)
+    return st["rounds"][-1]["fix"]
+
+
+def _normalize_fix_result(fix: dict) -> dict[str, Any]:
+    """fix の戻り値から別名と劣化表現を吸収し、記録へ写す値にそろえる。"""
     # key 名 fallback (サブエージェントが別名で書いた場合の救済)。
     # 正規は fix_commit / fixed_count、別名は commit_sha / fixed のみ受理する。
     fix_commit = fix.get("fix_commit") or fix.get("commit_sha")
     fixed_count = fix.get("fixed_count")
     if fixed_count is None:
         fixed_count = fix.get("fixed", 0)
-
-    round_no = st["rounds"][-1]["round"]
 
     # deferred は list が正だが、LLM がスキーマを無視して文字列リスト
     # (例: ["nit: ..."]) や単一 dict、int(件数) を返すケースがある。後段の
@@ -3873,45 +3981,66 @@ def _merge_fix_records(st: dict, fix: dict, pr: int) -> dict:
     # ため、そのときは記録を空にし、件数は `_count()` の値で残す。
     _rejected_items = _normalize_dict_items(fix.get("rejected"))
 
-    st["rounds"][-1]["fix"] = {
+    return {
         "commit": fix_commit,
         "fixed": fixed_count,
+        "deferred": _deferred_count,
+        "deferred_nits": _deferred_nits,
+        "rejected": _count(fix.get("rejected")),
+        "rejected_items": _rejected_items,
+        "resolved_threads": fix.get("resolved_threads"),
+        "ci": fix.get("ci_status"),
+        "ci_failed_checks": fix.get("ci_failed_checks", []) or [],
+        "ci_note": fix.get("ci_note"),
+        "by_severity": fix.get("by_severity", {}),
+    }
+
+
+def _build_round_fix(normalized: dict[str, Any]) -> dict[str, Any]:
+    """正規化済みの値から `rounds[-1].fix` に置く辞書を作る。"""
+    resolved_threads = normalized["resolved_threads"]
+    return {
+        "commit": normalized["commit"],
+        "fixed": normalized["fixed"],
         # deferred は上記の単一整合ルールで算出した件数を保存する。
         # resolved_threads は件数しか保存せず後段ループが無いため _count() で可。
         # **rejected は per-item の記録を持つが、件数は raw のまま数える**（#156）。
         # dict にできない要素も却下 1 件であり、記録に残せないことと、却下が
         # 何件あったかを失うことは別である。そのため deferred と違い、この件数と
         # `rejected_findings` の件数は一致しないことがある。
-        "deferred": _deferred_count,
-        "rejected": _count(fix.get("rejected")),
-        "resolved_threads": _count(fix.get("resolved_threads")),
+        "deferred": normalized["deferred"],
+        "rejected": normalized["rejected"],
+        "resolved_threads": _count(resolved_threads),
         # 次のラウンドの開始時に、申告どおり Resolve されたかを突き合わせる。
-        "resolved_thread_ids": _thread_ids(fix.get("resolved_threads")),
+        "resolved_thread_ids": _thread_ids(resolved_threads),
         # **位置は効果の測定だけが読む**（#156）。収束ループの判断は増やさない。
         # ここで写さないと、上限の方式（`oracle`）を後から計算できない。
-        "resolved_thread_positions": _thread_positions(fix.get("resolved_threads")),
-        "ci": fix.get("ci_status"),
-        "ci_failed_checks": fix.get("ci_failed_checks", []) or [],
-        "ci_note": fix.get("ci_note"),
-        "by_severity": fix.get("by_severity", {}),
+        "resolved_thread_positions": _thread_positions(resolved_threads),
+        "ci": normalized["ci"],
+        "ci_failed_checks": normalized["ci_failed_checks"],
+        "ci_note": normalized["ci_note"],
+        "by_severity": normalized["by_severity"],
     }
-    st["rounds"][-1]["ended_at"] = _now()
+
+
+def _record_fix_history(st: dict, normalized: dict[str, Any], pr: int) -> None:
+    """引き継ぎの消化と、見送り・却下の項目別履歴を state へ積む。"""
+    round_no = st["rounds"][-1]["round"]
     # 引き継いだ指摘は、修正の工程を 1 度通した時点で収束の抑止から外す。
     # 残りは最終スイープ (Step 7.5) が受け持つ。
     carried = _carried_over_pending(st)
     if carried is not None:
         carried["fixed_in_round"] = round_no
         info(f"↻ 引き継いだ指摘を round {round_no} の修正の工程へ通しました")
-    for d in _deferred_nits:
+    for d in normalized["deferred_nits"]:
         st["deferred_nits"].append({**d, "pr": pr, "round": round_no})
 
     # **却下した指摘も per-item で残す**（#156）。`rounds[].fix.rejected` の件数は
     # ラウンドごとの報告が読むため残し、こちらは理由と位置を持つ記録として積む。
     # **項目が欠けた要素も落とさない。** 落とすと却下そのものが記録から消える。
     rejected_findings = st.setdefault("rejected_findings", [])
-    for r in _rejected_items:
+    for r in normalized["rejected_items"]:
         rejected_findings.append({**r, "pr": pr, "round": round_no})
-    return st["rounds"][-1]["fix"]
 
 
 def cmd_merge_fix(args: argparse.Namespace) -> None:
@@ -4198,6 +4327,9 @@ def cmd_report(args: argparse.Namespace) -> None:
     _print_sweep(st)
     _print_deferred_nits(st)
     _print_rejected(st)
+    # **最後の行に置く**（#662 の AC23）。作業ツリーを消した後に要約を探す手がかりになる。
+    print()
+    print(run_metrics.report_line(_state_path(pr), st, "cross-review", _summary_extra))
 
 
 # ---------------- main ----------------

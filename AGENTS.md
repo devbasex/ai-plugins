@@ -119,13 +119,14 @@ ai-plugins/
 | [docs/ndf-plugin-reference.md](docs/ndf-plugin-reference.md) | NDFプラグイン詳細リファレンス |
 | [docs/specifications/](docs/specifications/) | 完了済みplan/issue由来の確定仕様 |
 | [docs/presentations/](docs/presentations/) | 勉強会などで使うスライド資料（Marp形式）とビルド手順。**発表日時点の記録で、以後の構成変更には追随しない** |
+| [docs/articles/](docs/articles/README.md) | 社外ブログへ載せる記事の正本。**書いた日時点の記録で、以後の構成変更には追随しない** |
 | [docs/claude-code-skills-survey/](docs/claude-code-skills-survey/01-findings.md) | Claude Code Skills調査レポート（3 本） |
 | [docs/development-history/](docs/development-history/) | 2026-09-02 までの開発履歴と知見。**以降の振り返りは、起点の issue か Pull Request のコメントに残す**（`/ndf:retrospective`） |
 | [plugins/ndf/README.md](plugins/ndf/README.md) | NDFプラグイン（4ランタイム共通） |
 
 ## NDFプラグインについて
 
-**NDFプラグイン**は、このマーケットプレイスの主要プラグインです（v10.12.0）。plugin 名は全ランタイムで `ndf` を維持し、配布物は `plugins/ndf/` の1ディレクトリにまとまっています。
+**NDFプラグイン**は、このマーケットプレイスの主要プラグインです（v10.13.0）。plugin 名は全ランタイムで `ndf` を維持し、配布物は `plugins/ndf/` の1ディレクトリにまとまっています。
 - Skill の実体は `plugins/ndf/skills/` の1箇所。配布先は `plugins/ndf/manifests/*-skills.txt` が決める
 - Claude Code版は 8個の専門サブエージェント、公開Skills、PreToolUse/SessionStart/Stopフックを提供
 - Codex版は Codex向け公開Skillsと任意Slack通知hookを提供

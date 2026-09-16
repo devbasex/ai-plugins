@@ -95,6 +95,29 @@ def _record_verify_pass(
     info(f"   {plan_line(state)}")
 
 
+def _record_verify_fail(
+    path: pathlib.Path,
+    state: dict[str, Any],
+    entry: dict[str, Any],
+    command: str,
+    code: int,
+    timed_out: bool,
+    timeout: int,
+) -> None:
+    """失敗した適用ラウンドを修正フェーズへ移し、結果を出力する。"""
+    # **修正ラウンドの起点をここで記録する。** 記録せずに戻すと `merge-fix` が
+    # 範囲を確定できずに弾かれ、`fix_rounds` が進まない。`should-abandon` は
+    # `fix_rounds` で見送りを決めるため、上限へ永久に到達しなくなる。
+    prepare_fix_phase(state, entry)
+    statefile.save(path, state)
+    if timed_out:
+        info(f"❌ テストが {timeout} 秒で終わりませんでした（{command}）")
+    else:
+        info(f"❌ テストが失敗しました（{command} / 終了コード {code}）")
+    info(f"   {plan_line(state)}")
+    sys.exit(2)
+
+
 def cmd_verify_round(args: argparse.Namespace) -> None:
     """Step 5 — 適用ラウンドの結果を**テストで**検証する。
 
@@ -134,17 +157,7 @@ def cmd_verify_round(args: argparse.Namespace) -> None:
         _record_verify_pass(path, state, entry, group, applied, command)
         return
 
-    # **修正ラウンドの起点をここで記録する。** 記録せずに戻すと `merge-fix` が
-    # 範囲を確定できずに弾かれ、`fix_rounds` が進まない。`should-abandon` は
-    # `fix_rounds` で見送りを決めるため、上限へ永久に到達しなくなる。
-    prepare_fix_phase(state, entry)
-    statefile.save(path, state)
-    if timed_out:
-        info(f"❌ テストが {timeout} 秒で終わりませんでした（{command}）")
-    else:
-        info(f"❌ テストが失敗しました（{command} / 終了コード {code}）")
-    info(f"   {plan_line(state)}")
-    sys.exit(2)
+    _record_verify_fail(path, state, entry, command, code, timed_out, timeout)
 
 
 def cmd_should_abandon(args: argparse.Namespace) -> None:

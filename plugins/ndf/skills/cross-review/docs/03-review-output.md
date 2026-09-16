@@ -101,7 +101,7 @@ pint / larastan / test / build などは **中断** を原則とする。
 - ❌ **`pgrep -fa <prompt>` で完了判定** — agy は長いプロンプトが引数に乗り検知失敗。pidfile 必須
 - ❌ **sentinel 単独で完了判定** — codex がクラッシュすると永遠に出ない。`monitor.py` の多軸判定 (pidfile / sentinel / 早期エラー / stall / hard timeout / result.json) を使うこと
 - ❌ **投稿に失敗したまま result.json を書かずに終了する** — 収束ループは前ラウンドの結果を読むか、結果なしで止まる。エラー時ほど `post_error` 付きの result.json が要る（launcher が起動時に前ラウンドの result / payload を消すため、書かれなければ「結果なし」として扱われる）
-- ❌ **タイムアウトなしで wait** — ハング検知不能。`monitor.py` の hard timeout (30 分既定) + stall timeout (10 分既定) を必ず効かせる
+- ❌ **タイムアウトなしで wait** — ハング検知不能。`monitor.py` の hard timeout (上限の表の工程の値。review / critique は 1200 秒既定) + stall timeout (担当別。codex 180 / agy 480 / kiro 480 / claude 900 秒既定) を必ず効かせる。1200 秒は Bash の 1 回に収まらないため `bg-wait.sh` で区切って待つ
 - ❌ **EARLY_ERROR の曖昧パターンで kill する** — 行頭の生 `Error:` / `Traceback` は codex がレビュー対象 diff の test コード片を echo するケースで誤検知する。明確な致命 (auth / quota / sandbox / HTTP 401-403-429) **のみ** kill 対象とし、曖昧パターンは警告ログに留める。誤検知が再発する場合は `--no-early-error` / `MONITOR_NO_EARLY_ERROR=1` で検知自体を無効化する (sentinel / result.json / timeout で十分判定可能)
 
 ## monitor.py が誤って kill する場合の手順

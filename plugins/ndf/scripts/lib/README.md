@@ -19,9 +19,12 @@
 | [projects-common.sh](projects-common.sh) | GitHub Projects の盤面への記録 | `development-workflow` |
 | [lock-common.sh](lock-common.sh) | 排他の取得と解放（#293） | 上の 2 つと `development-workflow` |
 | [monitor.py](monitor.py) | 別プロセスの多軸監視。対象と命名規則を引数で受ける | 収束ループの 2 つ |
+| [limits.py](limits.py) | 監視の上限（工程ごと）・無進捗の許容（担当ごと）・CLI の上限（監視の上限 + 120 秒）の表。既定値はここだけが持つ（#598 / #537） | 同上 |
+| [monitor_outcome.py](monitor_outcome.py) | 監視の結果の理由の語彙と、結果ファイル・監視の記録の読み書き（#662） | 同上 |
 | [launch-cli.sh](launch-cli.sh) | claude / codex / agy / kiro をランタイム名で分岐して背景起動する | 同上 |
 | [_tmpdir.sh](_tmpdir.sh) | 一時ディレクトリの解決。環境変数名とディレクトリ名を引数で受ける | 同上 |
-| [statefile.py](statefile.py) | 状態ファイルの読み書きと KEY=VALUE 出力 | 同上 |
+| [statefile.py](statefile.py) | 状態ファイルの読み書きと KEY=VALUE 出力、保存の後の差し込み口 | 同上 |
+| [run_metrics.py](run_metrics.py) | 実行の要約を作業ツリーの外へ書き、束ねて出す（`aggregate`、#662） | 同上 |
 | [assignment.py](assignment.py) | ホスト判定、役割ごとの母集合の確定、担当の輪番 | 同上 |
 | [models.py](models.py) | `--model` の解析、フラグ生成、実測値の突き合わせ | 同上 |
 | [metrics.py](metrics.py) | 担当ごとの指標算出と報告の整形 | 同上 |

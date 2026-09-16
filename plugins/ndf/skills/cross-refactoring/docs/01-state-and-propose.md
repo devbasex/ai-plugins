@@ -254,7 +254,7 @@ for a in $RUNTIMES; do
   "$SCRIPTS/launch-cli.sh" "$a" propose "$ID" "$ROUND"
 done
 "$LIB/monitor.py" "$ID" --agents "$RUNTIMES_CSV" --tmp-dir "$TMP_DIR" \
-    --stem-template "{agent}-propose-rf{id}-r$ROUND" --timeout 900
+    --stem-template "{agent}-propose-rf{id}-r$ROUND" --phase propose
 ```
 
 3 CLI を並列で起動し、同一のプロンプトで提案させる。**提案フェーズにホストは現れない**

@@ -62,6 +62,20 @@ from refactor_lib.commands.report import (  # noqa: E402
     cmd_status,
 )
 from refactor_lib.commands.setup import cmd_init, cmd_start_round  # noqa: E402
+from refactor_lib.measure import summary_extra  # noqa: E402
+
+import run_metrics  # noqa: E402
+import statefile  # noqa: E402
+
+
+def _write_run_summary(path: pathlib.Path, state: dict) -> None:
+    """状態を保存するたびに実行の要約を書き直す（#662 の決定 5）。"""
+    run_metrics.after_save(path, state, "cross-refactoring", summary_extra)
+
+
+# **読み込んだ時点で登録する。** 副コマンドはすべて `statefile.save` を通るため、
+# 入口で 1 度登録すれば取り込み（`commands/`）へ呼び出しを足さずに済む。
+statefile.register_after_save(_write_run_summary)
 from refactor_lib.vocabulary import (  # noqa: E402
     DEFAULT_MAX_TEST_ROUNDS,
     DEFAULT_SEVERITY_THRESHOLD,

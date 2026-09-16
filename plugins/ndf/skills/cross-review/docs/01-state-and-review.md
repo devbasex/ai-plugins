@@ -12,6 +12,7 @@
 | `scripts/launch-reviewer.sh` | Step 2 — レビュワー起動の入口（4 ランタイム共通） |
 | `scripts/monitor.py` | Step 2 — レビュワーのプロセス多軸監視（`--agents` で担当を渡す） |
 | `scripts/wait-review.sh` | Step 2 — `monitor.py` の薄ラッパ（互換用） |
+| `scripts/bg-wait.sh` | Step 2 / 2.5 — Bash の 1 回（600 秒）に収まらない監視と反証を背景で起動し、540 秒以内の wait を 124 のあいだ**別の Bash の呼び出しで**呼び直す |
 | `scripts/state.py read-result` | Step 2.4 — result.json マージ |
 | `scripts/state.py unresolved-threads` | PR 上の未解決の指摘を数える（順序を持たない補助） |
 | `scripts/state.py judge` | Step 3 — intent + 引き継いだ指摘の判定 |
@@ -166,10 +167,14 @@ for r in $REVIEWERS; do
   "$SCRIPTS/launch-reviewer.sh" "$r" "$STATE_PR" "$ROUND"
 done
 
-# monitor.py が多軸で完了判定。exit code で失敗種別を分岐。
+# monitor.py が多軸で完了判定。exit code で失敗種別を分岐。上限は `--phase review`（1200 秒）。
 # ⚠ 位置引数の `both` は codex / agy の 2 者だけを指す。担当の一覧は `--agents` で渡す。
-if ! "$SCRIPTS/monitor.py" "$STATE_PR" --agents "${ONLY:-$REVIEWERS_CSV}"; then
-  case $? in
+"$SCRIPTS/bg-wait.sh" run "$TMP_DIR/review.rc" -- "$SCRIPTS/monitor.py" "$STATE_PR" --phase review --agents "${ONLY:-$REVIEWERS_CSV}"
+# 待ちは 1 回 540 秒以内。**124 が返るあいだ、この 2 行を別の Bash の呼び出しとして呼び直す。**
+# 繰り返しを 1 回の呼び出しへ書くと、2 回目の待ちで合計が 600 秒を超えてホストに打ち切られる。
+"$SCRIPTS/bg-wait.sh" wait "$TMP_DIR/review.rc"; RC=$?
+if [ "$RC" -ne 0 ] && [ "$RC" -ne 124 ]; then
+  case $RC in
     2) echo "❌ timeout"      ;;  # hard timeout 超過
     3) echo "❌ no result"    ;;  # プロセス終了したが result.json 未生成
     4) echo "💥 early error"  ;;  # err.log に致命的パターン
@@ -187,8 +192,8 @@ fi
 | pidfile + `kill -0` | プロセス生存確認。alive 確認後に `/proc/<pid>/cmdline` で agent 名一致も検証 (PID 再利用対策)。**プロセスが既に死んでいる場合は result.json の有無のみで OK 判定**する (死亡直後 cmdline 不一致で誤検知しないため) |
 | codex sentinel | err.log に `^tokens used$` 出現で正常完了マーク |
 | early-error | **行頭限定** で `^Error:` / `^FATAL:` / `^panic:` / `^Traceback ` / `^HTTP/1.1 401\|403\|429` / `^Approval mode overridden to "default"` / `^Authentication failed` / 「quota exceeded」「rate limit exceeded」「API key not found/missing/invalid」「sandbox error」を含む行を検出 (diff/doc 引用文中の同語句は誤検知しないよう anchor + benign フィルタ併用) |
-| stall timeout | err.log + stdout.log + progress.log の合計サイズが一定時間変化しなければ STALLED で中断。既定は **agent 別** (codex=**180s** / agy=**480s**)。agy は err.log がほぼ無音のため大きめに取る。codex 側既定は不変。上書き方法: CLI `--stall-timeout` (明示優先) > env `MONITOR_STALL_<AGENT>` (per-agent) > env `MONITOR_STALL` (両 agent 共通) > agent 別ビルトイン |
-| hard timeout | 既定 **7 分**。`--timeout` or `MONITOR_TIMEOUT` env で上書き |
+| stall timeout | err.log + stdout.log + progress.log の合計サイズが一定時間変化しなければ STALLED で中断。既定は **agent 別** (codex=**180s** / agy=**480s** / kiro=**480s** / claude=**900s**、上限の表)。agy は err.log がほぼ無音のため大きめに取る。上書き方法: CLI `--stall-timeout` (明示優先) > env `MONITOR_STALL_<AGENT>` (per-agent) > env `MONITOR_STALL` (両 agent 共通) > agent 別ビルトイン |
+| hard timeout | 既定は `--phase` の工程の値で、上限の表（`scripts/lib/limits.py`）が持つ（review / critique は **1200 秒**）。上書きは `--timeout` > env `MONITOR_TIMEOUT_<AGENT>` > env `MONITOR_TIMEOUT`。agy の CLI の上限（`--print-timeout`）は同じ解決の値 + 120 秒で、監視より先に打ち切らない。解決した stall が hard timeout 以上なら担当ごとに警告する |
 | progress.log heartbeat | launcher が任意で `<agent>-review-pr<PR>-progress.log` への短いフェーズマーカー出力を要求し、monitor が最終行を stderr の heartbeat に表示する。内部推論ではなく `scan` / `analyze` / `post` / `done` などの監視用ステータスだけを出す |
 | result.json 存在 | プロセス終了後、result.json が無ければ NO_RESULT (exit 3) |
 | **result.json + age fallback** | sentinel を持たない agent (agy) 向け。プロセスが alive のまま result.json の mtime が **30 秒以上前**なら完了とみなし kill → OK。結果を書いた後にプロセスが終わらないケースに対応 (codex は sentinel チェックが先に発火するため影響なし) |

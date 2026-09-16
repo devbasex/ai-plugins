@@ -24,11 +24,12 @@ cross-refactoring は `{agent}-propose-rf{id}` のような別の命名を渡す
      - `--no-early-error` / `MONITOR_NO_EARLY_ERROR=1` で検知自体を無効化可
   4. **result.json**: プロセス終了後に `<worktree>/.cross_review/<agent>-review-pr<PR>-result.json` が
      生成されていなければ失敗扱い
-  5. **hard timeout**: 既定 7 分。`--timeout` または `MONITOR_TIMEOUT` で上書き可
+  5. **hard timeout**: 既定は `--phase` の工程で上限の表（`limits.py`）から引く
+     （省略時は `review`）。`--timeout` → `MONITOR_TIMEOUT_<AGENT>` → `MONITOR_TIMEOUT` の順で上書き可
   6. **stall timeout**: err.log + stdout.log の合計サイズが一定時間変化しなければ
-     STALLED として中断。既定は agent 別 (codex=180s, agy=480s。agy は err.log
-     にほぼ進捗を出さないため大きめ)。`--stall-timeout` で CLI 明示、
-     `MONITOR_STALL_<AGENT>` env で per-agent 上書き、`MONITOR_STALL` env で共通上書き可
+     STALLED として中断。既定は agent 別で上限の表から引く。`--stall-timeout` で CLI 明示、
+     `MONITOR_STALL_<AGENT>` env で per-agent 上書き、`MONITOR_STALL` env で共通上書き可。
+     解決した許容が監視の上限以上になった担当は、標準エラーへ警告を 1 行出す
   7. **progress.log heartbeat**: agent が任意で書く短いフェーズマーカーを stderr に表示。
      stdout/stderr が静かな時間でも、内部推論ではなく監視用の作業段階を確認できる
   8. **result.json + age fallback**: sentinel を持たない agent (agy) 向け。
@@ -39,6 +40,7 @@ cross-refactoring は `{agent}-propose-rf{id}` のような別の命名を渡す
 Usage:
   monitor.py <PR> <target>          target ∈ {codex, agy, both}
   monitor.py <PR> both --timeout 1200 --stall-timeout 600
+  monitor.py <PR> --agents agy,kiro --phase critique --stem-template '{agent}-critique-pr{id}'
   monitor.py <PR> both --no-early-error    # EARLY_ERROR 検知を完全無効化
   monitor.py <ID> --agents claude,kiro --tmp-dir DIR \
       --stem-template '{agent}-propose-rf{id}'
@@ -70,29 +72,33 @@ from dataclasses import dataclass
 from typing import Optional
 
 
+def _lib_dir() -> pathlib.Path:
+    """この実体が置かれたディレクトリ。
+
+    **`__file__` を使わない。** cross-review のシム（`scripts/monitor.py`）はこの実体を
+    `exec` で読み込むため、`__file__` はシムの位置を指す。`compile` に渡した実体の
+    パスは関数のコードオブジェクトが持つので、どちらの経路でも実体の隣を指せる。
+    """
+    return pathlib.Path(_lib_dir.__code__.co_filename).resolve().parent
+
+
+if str(_lib_dir()) not in sys.path:
+    sys.path.insert(0, str(_lib_dir()))
+import limits  # noqa: E402  上限の表（#598 / #537）
+import monitor_outcome  # noqa: E402  監視の結果の語彙と読み書き（#662）
+
+
 # ---------- 設定 ----------
 
-# 既定値は import 時に **固定数値** で保持する。env (`MONITOR_TIMEOUT` /
-# `MONITOR_STALL` / `MONITOR_POLL`) の解釈は **呼び出し時** に try/except
-# 付きで行い、非数値 env でも import / 監視プロセスがクラッシュしないようにする。
+# **上限の既定値はこの監視に持たない。** 上限の表（`limits.py`）だけが持ち、ここの名前は
+# 表を指す別名である（#598 / #537）。env (`MONITOR_TIMEOUT` / `MONITOR_STALL` /
+# `MONITOR_POLL`) の解釈は **呼び出し時** に try/except 付きで行い、非数値 env でも
+# import / 監視プロセスがクラッシュしないようにする。
 # (codex round 5 指摘: import 時の `int(os.environ.get(...))` は
-#  `MONITOR_STALL=abc` のような誤設定で `_agent_stall_default()` に到達する前に
-#  ValueError で落ちてしまうため)
-DEFAULT_TIMEOUT = 420    # 7 min — `--timeout` / env `MONITOR_TIMEOUT` で上書き可
-# 既定 stall timeout (後方互換のため env MONITOR_STALL は残す)。
-# 両 agent 共通のデフォルトとして引き続き受け付ける (解釈は `_agent_stall_default()` 内)。
-DEFAULT_STALL = 180       # 3 min no progress
-# per-agent 上書き: agy は err.log がほぼ無音なため大きめに取る。
-# 解決順は `_agent_stall_default()` 参照。
-DEFAULT_STALL_AGENT_BUILTIN = {
-    "codex": 180,    # 推論ログを逐次出すので 3 min で十分
-    "agy": 480,      # err.log が静かなため 8 min まで許容
-    # `claude -p --output-format json` は **完了まで 1 バイトも出さない**。
-    # 進捗を見て打ち切ると必ず誤検知になるため、ログ無進捗の許容を最も長く取る。
-    "claude": 900,
-    # kiro-cli は逐次出力するが、ツール実行の待ちで数分沈黙することがある。
-    "kiro": 480,
-}
+#  `MONITOR_STALL=abc` のような誤設定で落ちてしまうため)
+DEFAULT_TIMEOUT = limits.PHASE_TIMEOUT[limits.DEFAULT_PHASE]
+DEFAULT_STALL = limits.DEFAULT_STALL
+DEFAULT_STALL_AGENT_BUILTIN = limits.AGENT_STALL
 DEFAULT_POLL = 15          # 15 sec — env `MONITOR_POLL` で上書き可
 # result.json が書き込まれた後もプロセスがハングするケース (実測) の
 # fallback: mtime から RESULT_AGE_GRACE 秒以上経過していれば完了とみなす。
@@ -240,54 +246,23 @@ CLAUDE_STDOUT_FATAL = [
 ]
 
 
-def _safe_int_env(name: str, fallback: int) -> int:
-    """env を safe に int parse する。
-
-    非数値時は warn を stderr に出して fallback 値を返す。
-    `_agent_stall_default()` と同じく、env 設定ミスでプロセスを落とさないため。
-
-    Note (codex round 5 指摘): `MONITOR_STALL` 等の env を import 時 / 呼び出し時に
-    生の `int(...)` で読むと、非数値設定で監視プロセスが起動できなくなる。
-    `DEFAULT_TIMEOUT` / `DEFAULT_POLL` も同じ問題を持つため、共通ヘルパに集約。
-    """
-    if name not in os.environ:
-        return fallback
-    raw = os.environ[name]
-    try:
-        return int(raw)
-    except (ValueError, TypeError):
-        print(
-            f"⚠ env {name}={raw!r} が int に変換できません — {fallback} を使用",
-            file=sys.stderr, flush=True,
-        )
-        return fallback
+# env を safe に int parse する。非数値時は warn を stderr に出して fallback 値を返す。
+# 上限の表と同じ規則で読むため、表の側の実装を使う。
+_safe_int_env = limits.safe_int_env
 
 
 def _agent_stall_default(agent: str) -> int:
     """agent ごとの既定 stall timeout を解決する。
 
-    解決順:
+    解決順（`limits.stall_timeout`）:
       1. env `MONITOR_STALL_<AGENT>` (per-agent 明示)
-      2. env `MONITOR_STALL` (両 agent 共通)
-      3. `DEFAULT_STALL_AGENT_BUILTIN[agent]` (codex=180, agy=480)
-      4. `DEFAULT_STALL` (フォールバック)
+      2. env `MONITOR_STALL` (全 agent 共通)
+      3. 上限の表の `AGENT_STALL[agent]`
+      4. `DEFAULT_STALL` (表に無い agent)
 
-    Note (codex round 3 指摘): 2 は **呼び出し時** に `os.environ["MONITOR_STALL"]`
-    を再評価する。`DEFAULT_STALL` モジュール定数は import 時に env を読むため
-    プロセス起動後の env 変更に追随できず、テストの monkeypatch も効かない。
-
-    Note (gemini round 4 指摘): env が非数値だった場合 (`int(...)` で
-    `ValueError` / `TypeError` が裸で上がる) は warn を出して
-    `DEFAULT_STALL_AGENT_BUILTIN` / `DEFAULT_STALL` にフォールバックする。
-    監視プロセスを env 設定ミスでクラッシュさせない。
+    env は **呼び出し時** に再評価し、非数値なら warn を出して表の値に戻す。
     """
-    builtin = DEFAULT_STALL_AGENT_BUILTIN.get(agent, DEFAULT_STALL)
-    env_key = f"MONITOR_STALL_{agent.upper()}"
-    if env_key in os.environ:
-        return _safe_int_env(env_key, builtin)
-    if "MONITOR_STALL" in os.environ:
-        return _safe_int_env("MONITOR_STALL", builtin)
-    return builtin
+    return limits.stall_timeout(agent)
 
 
 # `--tmp-dir` で明示指定された一時ディレクトリ。CLI の解析時にだけ設定する。
@@ -340,6 +315,18 @@ def _tmp_dir() -> pathlib.Path:
 DEFAULT_STEM_TEMPLATE = "{agent}-review-pr{id}"
 
 
+@dataclass(frozen=True)
+class MonitorConfig:
+    """1 agent の監視実行設定。"""
+    timeout: int
+    stall_timeout: int
+    poll: int
+    require_result: bool
+    no_early_error: bool = False
+    log_prefix: str = ""
+    stem_template: str = DEFAULT_STEM_TEMPLATE
+
+
 @dataclass
 class AgentPaths:
     agent: str
@@ -365,6 +352,26 @@ class AgentPaths:
         )
 
 
+@dataclass(frozen=True)
+class MonitorOutcome:
+    status: str
+    exit_code: int
+    icon: str
+    detail: str
+
+    @classmethod
+    def create(cls, status: str, detail: str) -> "MonitorOutcome":
+        exit_code, icon = {
+            "OK": (0, "✅"),
+            "TIMEOUT": (2, "⏰"),
+            "NO_RESULT": (3, "❌"),
+            "EARLY_ERROR": (4, "💥"),
+            "STALLED": (5, "🛑"),
+            "PIDFILE_BAD": (6, "❓"),
+        }[status]
+        return cls(status, exit_code, icon, detail)
+
+
 @dataclass
 class AgentStatus:
     agent: str
@@ -380,6 +387,13 @@ class AgentStatus:
     idle_seconds: float = 0.0
     result_exists: bool = False
     sentinel_seen: bool = False
+    # 監視の結果ファイルだけに書く欄（#662）。**標準出力の JSON には載せない**
+    # （標準出力のキーは上の欄から明示で組み立てる）。
+    reason: str = ""
+    launched_at: Optional[str] = None
+    started_at: Optional[str] = None
+    ended_at: Optional[str] = None
+    outcome: Optional[MonitorOutcome] = None
 
 
 # ---------- 監視ロジック ----------
@@ -390,6 +404,18 @@ def _read_pidfile(p: pathlib.Path) -> Optional[int]:
         return int(s) if s else None
     except (FileNotFoundError, ValueError):
         return None
+
+
+def _proc_state(pid: int) -> Optional[str]:
+    """`/proc/<pid>/status` の State 行の値。読めない・State 行が無いときは None。"""
+    try:
+        status_text = pathlib.Path(f"/proc/{pid}/status").read_text()
+    except (FileNotFoundError, PermissionError, OSError):
+        return None
+    for line in status_text.splitlines():
+        if line.startswith("State:"):
+            return line[len("State:"):]
+    return None
 
 
 def _pid_alive(pid: int) -> bool:
@@ -405,26 +431,14 @@ def _pid_alive(pid: int) -> bool:
         return False
     except OSError:
         return False
-    try:
-        status_text = pathlib.Path(f"/proc/{pid}/status").read_text()
-        for line in status_text.splitlines():
-            if line.startswith("State:"):
-                return "Z" not in line
-    except (FileNotFoundError, PermissionError, OSError):
-        pass
-    return True
+    state = _proc_state(pid)
+    return state is None or "Z" not in state
 
 
 def _is_zombie(pid: int) -> bool:
     """PID がゾンビかどうか。_pid_alive() とは独立に呼べるユーティリティ。"""
-    try:
-        status_text = pathlib.Path(f"/proc/{pid}/status").read_text()
-        for line in status_text.splitlines():
-            if line.startswith("State:"):
-                return "Z" in line
-    except (FileNotFoundError, PermissionError, OSError):
-        pass
-    return False
+    state = _proc_state(pid)
+    return state is not None and "Z" in state
 
 
 def _kill_pid(pid: int, sigterm_grace: float = 3.0) -> None:
@@ -466,6 +480,20 @@ def _pid_cmdline_matches(pid: int, expected: str) -> Optional[bool]:
         return None
 
 
+def _read_tail(path: pathlib.Path, limit: int) -> Optional[str]:
+    """末尾 `limit` バイトを utf-8 で読み出す（存在しない場合や OSError は None）。"""
+    if not path.exists():
+        return None
+    try:
+        sz = path.stat().st_size
+        with path.open("rb") as f:
+            if sz > limit:
+                f.seek(sz - limit)
+            return f.read().decode("utf-8", errors="replace")
+    except OSError:
+        return None
+
+
 def _scan_patterns(
     path: pathlib.Path,
     patterns: list[re.Pattern[str]],
@@ -485,15 +513,8 @@ def _scan_patterns(
     扱いしてしまった (例: `Error in: mcpServers.serena\\n...\\nTraceback ...` で
     Traceback が誤抑制された)。
     """
-    if not path.exists():
-        return None
-    try:
-        sz = path.stat().st_size
-        with path.open("rb") as f:
-            if sz > 200 * 1024:
-                f.seek(sz - 200 * 1024)
-            data = f.read().decode("utf-8", errors="replace")
-    except OSError:
+    data = _read_tail(path, 200 * 1024)
+    if data is None:
         return None
     data = _strip_ansi(data)
     benign_patterns = EARLY_ERROR_BENIGN if benign is None else benign
@@ -542,16 +563,10 @@ def _scan_claude_stdout_fatal(path: pathlib.Path) -> Optional[str]:
     行うが、JSON は 1 行に多数の引用符を含むため、パリティ判定が「引用の内側」を
     誤って真にして致命を取りこぼす。
     """
-    if not path.exists():
+    data = _read_tail(path, 200 * 1024)
+    if data is None:
         return None
-    try:
-        sz = path.stat().st_size
-        with path.open("rb") as f:
-            if sz > 200 * 1024:
-                f.seek(sz - 200 * 1024)
-            data = _strip_ansi(f.read().decode("utf-8", errors="replace"))
-    except OSError:
-        return None
+    data = _strip_ansi(data)
     for pat in CLAUDE_STDOUT_FATAL:
         m = pat.search(data)
         if m:
@@ -560,16 +575,8 @@ def _scan_claude_stdout_fatal(path: pathlib.Path) -> Optional[str]:
 
 
 def _scan_codex_sentinel(path: pathlib.Path) -> bool:
-    if not path.exists():
-        return False
-    try:
-        # 末尾 64KB を読む（sentinel は最後の方に出る）
-        sz = path.stat().st_size
-        with path.open("rb") as f:
-            if sz > 64 * 1024:
-                f.seek(sz - 64 * 1024)
-            tail = f.read().decode("utf-8", errors="replace")
-    except OSError:
+    tail = _read_tail(path, 64 * 1024)
+    if tail is None:
         return False
     return bool(CODEX_SENTINEL.search(tail))
 
@@ -587,17 +594,10 @@ def _tail_last_nonempty_line(path: pathlib.Path, limit: int = 4096) -> str:
     委譲先に書かせるのは短いフェーズマーカーだけなので、末尾数 KB で十分。
     壊れた UTF-8 や読み取り競合があっても monitor 自体は落とさない。
     """
-    if not path.exists():
+    data = _read_tail(path, limit)
+    if data is None:
         return ""
-    try:
-        sz = path.stat().st_size
-        with path.open("rb") as f:
-            if sz > limit:
-                f.seek(sz - limit)
-            data = f.read().decode("utf-8", errors="replace")
-    except OSError:
-        return ""
-    if sz > limit and "\n" in data:
+    if _safe_size(path) > limit and "\n" in data:
         data = data.split("\n", 1)[1]
     for line in reversed(data.splitlines()):
         stripped = line.strip()
@@ -606,39 +606,182 @@ def _tail_last_nonempty_line(path: pathlib.Path, limit: int = 4096) -> str:
     return ""
 
 
-def monitor_agent(
-    agent: str,
-    pr: int,
-    timeout: int,
-    stall_timeout: int,
-    poll: int,
-    require_result: bool,
-    no_early_error: bool = False,
-    log_prefix: str = "",
-    stem_template: str = DEFAULT_STEM_TEMPLATE,
+def _finish_monitor(
+    status: AgentStatus,
+    outcome: MonitorOutcome,
+    log_context: tuple[str, str],
 ) -> AgentStatus:
-    """1 agent を監視する。
+    status.outcome = outcome
+    status.status = outcome.status
+    status.exit_code = outcome.exit_code
+    status.detail = outcome.detail
+    _emit_log(*log_context, status)
+    return status
 
-    `no_early_error=True` のとき、EARLY_ERROR 検知 (FATAL/WARN とも) を完全に無効化し、
-    hard timeout / stall / sentinel / result.json のみで判定する。
-    """
+
+def _lingering_completion(
+    paths: AgentPaths,
+    status: AgentStatus,
+    pid: int,
+    started_wall: float,
+) -> str | None:
+    has_result = paths.result.exists() and paths.result.stat().st_size > 0
+    if status.agent == "codex" and status.sentinel_seen and has_result:
+        _kill_pid(pid)
+        status.result_exists = True
+        return f"codex sentinel + result.json detected; killed lingering pid {pid}"
+    if status.sentinel_seen or not has_result:
+        return None
+    result_mtime = paths.result.stat().st_mtime
+    if result_mtime < started_wall:
+        return None
+    result_age = time.time() - result_mtime
+    if result_age < RESULT_AGE_GRACE:
+        return None
+    _kill_pid(pid)
+    status.result_exists = True
+    return (
+        f"result.json exists for {result_age:.0f}s without process exit; "
+        f"killed lingering pid {pid}"
+    )
+
+
+def _early_error(
+    paths: AgentPaths,
+    agent: str,
+    disabled: bool,
+) -> tuple[tuple[str, str] | None, str | None]:
+    if disabled:
+        return None, None
+    fatal_err = _scan_early_fatal(paths.err_log)
+    fatal_source = "err.log"
+    if not fatal_err and agent == "claude":
+        fatal_err = _scan_claude_stdout_fatal(paths.stdout_log)
+        fatal_source = "stdout.log"
+    fatal = (fatal_source, fatal_err) if fatal_err else None
+    return fatal, _scan_early_warn(paths.err_log)
+
+
+def _update_progress(
+    paths: AgentPaths,
+    status: AgentStatus,
+    last_progress_size: int,
+    last_progress: float,
+) -> tuple[int, float]:
+    status.err_log_size = _safe_size(paths.err_log)
+    status.stdout_log_size = _safe_size(paths.stdout_log)
+    status.progress_log_size = _safe_size(paths.progress_log)
+    status.progress_tail = _tail_last_nonempty_line(paths.progress_log)
+    progress_size = (
+        status.err_log_size + status.stdout_log_size + status.progress_log_size
+    )
+    if progress_size != last_progress_size:
+        last_progress_size = progress_size
+        last_progress = time.monotonic()
+    status.idle_seconds = time.monotonic() - last_progress
+    return last_progress_size, last_progress
+
+
+def _initialize_monitor(
+    agent: str, pr: int, stem_template: str
+) -> tuple[AgentPaths, AgentStatus, float, int | None]:
     paths = AgentPaths.for_(agent, pr, stem_template)
     status = AgentStatus(agent=agent)
     started = time.monotonic()
-
-    # 起動チェック: 30 秒待っても pidfile が無ければ起動失敗
     grace_end = started + 30
     while time.monotonic() < grace_end:
         if paths.pidfile.exists():
             break
         time.sleep(2)
-    pid = _read_pidfile(paths.pidfile)
+    return paths, status, started, _read_pidfile(paths.pidfile)
+
+
+def _validate_pid_cmdline(
+    pid: int, agent: str, alive: bool, validated: bool
+) -> tuple[bool, MonitorOutcome | None]:
+    if not alive or validated:
+        return validated, None
+    cmdline_ok = _pid_cmdline_matches(pid, agent)
+    if cmdline_ok is False:
+        _kill_pid(pid)
+        return validated, MonitorOutcome.create(
+            "PIDFILE_BAD",
+            f"pid {pid} cmdline does not contain '{agent}' (stale pidfile?)",
+        )
+    return cmdline_ok is True, None
+
+
+def _timeout_outcome(
+    elapsed: float, timeout: int, alive: bool, pid: int
+) -> MonitorOutcome | None:
+    if elapsed < timeout:
+        return None
+    if alive:
+        _kill_pid(pid)
+    return MonitorOutcome.create("TIMEOUT", f"hard timeout {timeout}s reached (pid {pid})")
+
+
+def _early_error_outcome(
+    paths: AgentPaths, status: AgentStatus, alive: bool, disabled: bool
+) -> tuple[MonitorOutcome | None, str | None]:
+    fatal, warning = _early_error(paths, status.agent, disabled)
+    if not fatal:
+        return None, warning
+    if alive:
+        _kill_pid(status.pid)
+    source, message = fatal
+    return MonitorOutcome.create(
+        "EARLY_ERROR", f"early error (fatal) in {source}: {message[:200]}"
+    ), warning
+
+
+def _process_exit_outcome(
+    paths: AgentPaths, status: AgentStatus, alive: bool, require_result: bool
+) -> MonitorOutcome | None:
+    if alive:
+        return None
+    status.result_exists = paths.result.exists() and paths.result.stat().st_size > 0
+    if status.result_exists or not require_result:
+        return MonitorOutcome.create(
+            "OK",
+            f"process exited; sentinel={status.sentinel_seen}; "
+            f"result_exists={status.result_exists}",
+        )
+    return MonitorOutcome.create(
+        "NO_RESULT", f"process exited but result.json missing: {paths.result}"
+    )
+
+
+def _stall_outcome(
+    status: AgentStatus, stall_timeout: int, pid: int, last_progress_size: int
+) -> MonitorOutcome | None:
+    if status.idle_seconds < stall_timeout:
+        return None
+    _kill_pid(pid)
+    return MonitorOutcome.create(
+        "STALLED",
+        f"no log progress for {stall_timeout}s "
+        f"(pid {pid}, last size {last_progress_size}B)",
+    )
+
+
+def monitor_agent(
+    agent: str,
+    pr: int,
+    config: MonitorConfig,
+) -> AgentStatus:
+    """1 agent を監視する。
+
+    `config.no_early_error=True` のとき、EARLY_ERROR 検知 (FATAL/WARN とも) を完全に無効化し、
+    hard timeout / stall / sentinel / result.json のみで判定する。
+    """
+    paths, status, started, pid = _initialize_monitor(agent, pr, config.stem_template)
     if pid is None:
-        status.status = "PIDFILE_BAD"
-        status.exit_code = 6
-        status.detail = f"pidfile not found: {paths.pidfile}"
-        _emit_log(log_prefix, agent, status)
-        return status
+        return _finish_monitor(
+            status,
+            MonitorOutcome.create("PIDFILE_BAD", f"pidfile not found: {paths.pidfile}"),
+            (config.log_prefix, agent),
+        )
 
     status.pid = pid
     # cmdline 検証 (PID 再利用対策) は **プロセスが生きていると確認できたときのみ** 行う。
@@ -669,157 +812,65 @@ def monitor_agent(
         # ケースがある (実機で観測)。result.json は正常に書かれているのに alive=True の
         # まま stall_timeout に達して STALLED 化してしまう。sentinel + result.json が
         # 揃った瞬間に対象プロセスを kill して OK 判定で返す。
-        if (
-            agent == "codex"
-            and alive
-            and status.sentinel_seen
-            and paths.result.exists()
-            and paths.result.stat().st_size > 0
-        ):
-            _kill_pid(pid)
-            status.result_exists = True
-            status.status = "OK"
-            status.exit_code = 0
-            status.detail = (
-                f"codex sentinel + result.json detected; killed lingering pid {pid}"
+        completion_detail = None
+        if alive and (status.sentinel_seen or cmdline_validated):
+            completion_detail = _lingering_completion(paths, status, pid, started_wall)
+        if completion_detail is not None:
+            return _finish_monitor(
+                status, MonitorOutcome.create("OK", completion_detail), (config.log_prefix, agent)
             )
-            _emit_log(log_prefix, agent, status)
-            return status
 
         # result.json が書かれた後もプロセスがハングするケース (実測:
-        # MCP サーバー切断待ち等��� exit しない)。sentinel 機構を持たない agent 向け
+        # MCP サーバー切断待ち等で exit しない)。sentinel 機構を持たない agent 向け
         # の fallback: result.json の mtime が RESULT_AGE_GRACE 秒以上前であれば
         # 完了とみなし、プロセスを kill → OK。
         # 安全条件:
         #   - cmdline_validated: PID 再利用でない (または検証不能環境) ことを確認済み
         #   - mtime >= started_wall: 前 round の stale result.json を拾わない
-        if (
-            alive
-            and not status.sentinel_seen
-            and cmdline_validated
-            and paths.result.exists()
-            and paths.result.stat().st_size > 0
-        ):
-            result_mtime = paths.result.stat().st_mtime
-            if result_mtime >= started_wall:
-                result_age = time.time() - result_mtime
-                if result_age >= RESULT_AGE_GRACE:
-                    _kill_pid(pid)
-                    status.result_exists = True
-                    status.status = "OK"
-                    status.exit_code = 0
-                    status.detail = (
-                        f"result.json exists for {result_age:.0f}s without process exit; "
-                        f"killed lingering pid {pid}"
-                    )
-                    _emit_log(log_prefix, agent, status)
-                    return status
-
-        if alive and not cmdline_validated:
-            # cmdline 検証は alive 確認後に 1 回だけ。生きていない瞬間に proc/<pid> を読むと
-            # ファイル不在で None 扱いになり判定不能のため。
-            cmdline_ok = _pid_cmdline_matches(pid, agent)
-            if cmdline_ok is False:
-                _kill_pid(pid)
-                status.status = "PIDFILE_BAD"
-                status.exit_code = 6
-                status.detail = f"pid {pid} cmdline does not contain '{agent}' (stale pidfile?)"
-                _emit_log(log_prefix, agent, status)
-                return status
-            if cmdline_ok is True:
-                cmdline_validated = True
+        cmdline_validated, outcome = _validate_pid_cmdline(
+            pid, agent, alive, cmdline_validated
+        )
+        if outcome:
+            return _finish_monitor(status, outcome, (config.log_prefix, agent))
 
         # 2. hard timeout
-        if elapsed >= timeout:
-            if alive:
-                _kill_pid(pid)
-            status.status = "TIMEOUT"
-            status.exit_code = 2
-            status.detail = f"hard timeout {timeout}s reached (pid {pid})"
-            _emit_log(log_prefix, agent, status)
-            return status
+        outcome = _timeout_outcome(elapsed, config.timeout, alive, pid)
+        if outcome:
+            return _finish_monitor(status, outcome, (config.log_prefix, agent))
 
         # 3. early error
         # 明確な致命 (FATAL) のみ kill する。曖昧パターン (生 Error: / Traceback) は
         # WARN として警告ログのみ。codex がレビュー対象 diff の test コード片を
         # echo するケースで誤 kill されるのを防ぐ。
-        if not no_early_error:
-            fatal_err = _scan_early_fatal(paths.err_log)
-            fatal_source = "err.log"
-            if not fatal_err and agent == "claude":
-                # claude は承認失敗・実行失敗を標準出力の JSON に載せる。
-                fatal_err = _scan_claude_stdout_fatal(paths.stdout_log)
-                fatal_source = "stdout.log"
-            if fatal_err:
-                if alive:
-                    _kill_pid(pid)
-                status.status = "EARLY_ERROR"
-                status.exit_code = 4
-                # 検知元を書く。err.log と決め打ちすると、標準出力から検知したときに
-                # 存在しない行を探させることになる。
-                status.detail = (
-                    f"early error (fatal) in {fatal_source}: {fatal_err[:200]}"
-                )
-                _emit_log(log_prefix, agent, status)
-                return status
+        outcome, warn_err = _early_error_outcome(paths, status, alive, config.no_early_error)
+        if outcome:
+            return _finish_monitor(status, outcome, (config.log_prefix, agent))
+        if not warned_early_error and warn_err:
+            print(
+                f"{config.log_prefix}⚠️  {agent} early-error WARN "
+                f"(non-fatal, not killing): {warn_err[:200]}",
+                file=sys.stderr, flush=True,
+            )
+            warned_early_error = True
 
-            if not warned_early_error:
-                warn_err = _scan_early_warn(paths.err_log)
-                if warn_err:
-                    print(
-                        f"{log_prefix}⚠️  {agent} early-error WARN "
-                        f"(non-fatal, not killing): {warn_err[:200]}",
-                        file=sys.stderr, flush=True,
-                    )
-                    warned_early_error = True
-
-        if not alive:
-            # プロセス終了 — result.json を確認
-            status.result_exists = paths.result.exists() and paths.result.stat().st_size > 0
-            if status.result_exists or not require_result:
-                status.status = "OK"
-                status.exit_code = 0
-                status.detail = (
-                    f"process exited; sentinel={status.sentinel_seen}; "
-                    f"result_exists={status.result_exists}"
-                )
-            else:
-                status.status = "NO_RESULT"
-                status.exit_code = 3
-                status.detail = f"process exited but result.json missing: {paths.result}"
-            _emit_log(log_prefix, agent, status)
-            return status
+        outcome = _process_exit_outcome(paths, status, alive, config.require_result)
+        if outcome:
+            return _finish_monitor(status, outcome, (config.log_prefix, agent))
 
         # 4. stall detection (err.log / stdout.log / progress.log をモニタ。
         # agy は stdout 側だけ進捗が出るケースがあり、progress.log には
         # launcher が要求した短いフェーズマーカーが出るため、いずれかが
         # 更新されれば progress として扱う)
-        status.err_log_size = _safe_size(paths.err_log)
-        status.stdout_log_size = _safe_size(paths.stdout_log)
-        status.progress_log_size = _safe_size(paths.progress_log)
-        status.progress_tail = _tail_last_nonempty_line(paths.progress_log)
-        progress_size = (
-            status.err_log_size + status.stdout_log_size + status.progress_log_size
+        last_progress_size, last_progress = _update_progress(
+            paths, status, last_progress_size, last_progress
         )
-        if progress_size != last_progress_size:
-            last_progress_size = progress_size
-            last_progress = time.monotonic()
-        status.idle_seconds = time.monotonic() - last_progress
-        if status.idle_seconds >= stall_timeout:
-            if alive:
-                _kill_pid(pid)
-            status.status = "STALLED"
-            status.exit_code = 5
-            status.detail = (
-                f"no log progress for {stall_timeout}s "
-                f"(pid {pid}, last size {last_progress_size}B)"
-            )
-            _emit_log(log_prefix, agent, status)
-            return status
+        outcome = _stall_outcome(status, config.stall_timeout, pid, last_progress_size)
+        if outcome:
+            return _finish_monitor(status, outcome, (config.log_prefix, agent))
 
         # poll 中の進捗ログ
-        _emit_progress(log_prefix, agent, status)
-        time.sleep(poll)
+        _emit_progress(config.log_prefix, agent, status)
+        time.sleep(config.poll)
 
 
 def _emit_progress(prefix: str, agent: str, st: AgentStatus) -> None:
@@ -835,14 +886,57 @@ def _emit_progress(prefix: str, agent: str, st: AgentStatus) -> None:
 
 
 def _emit_log(prefix: str, agent: str, st: AgentStatus) -> None:
-    icon = {
-        "OK": "✅", "TIMEOUT": "⏰", "NO_RESULT": "❌",
-        "EARLY_ERROR": "💥", "STALLED": "🛑", "PIDFILE_BAD": "❓",
-    }.get(st.status, "?")
+    icon = st.outcome.icon if st.outcome else "?"
     print(
         f"{prefix}{icon} {agent} {st.status} ({st.elapsed:.0f}s) — {st.detail}",
         file=sys.stderr, flush=True,
     )
+
+
+def _record_outcome(
+    agent: str, pr: int, stem_template: str, st: AgentStatus, started_at: str,
+    phase: Optional[str] = None,
+) -> None:
+    """担当 1 者の監視の結果を、結果ファイルと記録へ書く（#662）。
+
+    **書けなくても監視の結果は変えない。** 終了コードと標準出力は呼び出し側の分岐が
+    読むため、書き出しの失敗は標準エラーへ 1 行出すだけにする。
+    """
+    stem = stem_template.format(agent=agent, id=pr)
+    try:
+        paths = AgentPaths.for_(agent, pr, stem_template)
+        st.reason = monitor_outcome.reason_for(st.status)
+        st.started_at = started_at
+        st.ended_at = monitor_outcome.now_iso()
+        try:
+            st.launched_at = monitor_outcome.iso_from_timestamp(
+                paths.pidfile.stat().st_mtime)
+        except OSError:
+            st.launched_at = None
+        outcome = {
+            "agent": agent,
+            "stem": stem,
+            "status": st.status,
+            "exit_code": st.exit_code,
+            "reason": st.reason,
+            "detail": st.detail,
+            "launched_at": st.launched_at,
+            "started_at": st.started_at,
+            "ended_at": st.ended_at,
+            "elapsed": round(st.elapsed, 1),
+            "idle_seconds": round(st.idle_seconds, 1),
+            "progress_tail": st.progress_tail,
+            "result_exists": st.result_exists,
+            "pid": st.pid,
+            # `--phase` の値。省いたときは null（#598 / #537）
+            "phase": phase,
+        }
+        tmp_dir = paths.pidfile.parent
+        monitor_outcome.write_outcome(tmp_dir, stem, outcome)
+        monitor_outcome.append_journal(tmp_dir, outcome)
+    except Exception as exc:  # noqa: BLE001  書き出しの失敗で監視を落とさない
+        print(f"[{agent}] ⚠ 監視の結果を書けません（{stem}）: {exc}",
+              file=sys.stderr, flush=True)
 
 
 # ---------- CLI ----------
@@ -866,16 +960,20 @@ def main() -> None:
     p.add_argument("--stem-template", default=DEFAULT_STEM_TEMPLATE,
                    help="一時ファイル名の骨格。`{agent}` と `{id}` を埋める "
                         f"(default: {DEFAULT_STEM_TEMPLATE})")
-    # env (MONITOR_TIMEOUT / MONITOR_POLL) は呼び出し時に safe parse で読む。
-    # 非数値設定でも fixed default (`DEFAULT_TIMEOUT` / `DEFAULT_POLL`) に戻す。
-    timeout_default = _safe_int_env("MONITOR_TIMEOUT", DEFAULT_TIMEOUT)
+    # env (MONITOR_TIMEOUT / MONITOR_STALL / MONITOR_POLL) は呼び出し時に safe parse で読む。
+    # 非数値設定でも上限の表の値 / `DEFAULT_POLL` に戻す。
     poll_default = _safe_int_env("MONITOR_POLL", DEFAULT_POLL)
-    p.add_argument("--timeout", type=int, default=timeout_default,
-                   help=f"hard timeout in seconds (default: {timeout_default})")
+    phases = " / ".join(f"{k}={v}" for k, v in limits.PHASE_TIMEOUT.items())
+    p.add_argument("--phase", default=None,
+                   help="監視の上限を上限の表から引く工程。"
+                        f"省略時は {limits.DEFAULT_PHASE} の値 ({phases})")
+    p.add_argument("--timeout", type=int, default=None,
+                   help="hard timeout in seconds。未指定時は env MONITOR_TIMEOUT_<AGENT> / "
+                        "MONITOR_TIMEOUT、無ければ --phase の工程の値")
+    stalls = ", ".join(f"{k}={v}" for k, v in limits.AGENT_STALL.items())
     p.add_argument("--stall-timeout", type=int, default=None,
                    help="stall timeout (err.log no progress) in seconds. "
-                        "未指定時は agent 別既定 (codex=180, agy=480) または "
-                        "env MONITOR_STALL_<AGENT> / MONITOR_STALL を参照")
+                        f"未指定時は env MONITOR_STALL_<AGENT> / MONITOR_STALL、無ければ agent 別既定 ({stalls})")
     p.add_argument("--poll", type=int, default=poll_default,
                    help=f"poll interval in seconds (default: {poll_default})")
     p.add_argument("--no-require-result", action="store_true",
@@ -886,43 +984,87 @@ def main() -> None:
                         "(hard timeout / stall / sentinel / result.json のみで判定) "
                         f"[env: MONITOR_NO_EARLY_ERROR; default: {DEFAULT_NO_EARLY_ERROR}]")
     args = p.parse_args()
+    # **表に無い工程は USAGE（終了コード 1）で拒む。** `choices` にすると argparse の
+    # 終了コード 2（TIMEOUT と同じ値）になる。
+    if args.phase is not None and args.phase not in limits.PHASE_TIMEOUT:
+        print(f"monitor.py: 上限の表に無い工程です: {args.phase!r} "
+              f"（{' / '.join(limits.PHASE_TIMEOUT)}）", file=sys.stderr, flush=True)
+        sys.exit(1)
+    phase = args.phase or limits.DEFAULT_PHASE
 
-    if args.agents:
-        agents = [a.strip() for a in args.agents.split(",") if a.strip()]
-        if not agents:
-            p.error("--agents が空です")
-    elif args.target:
-        agents = ["codex", "agy"] if args.target == "both" else [args.target]
-    else:
-        p.error("target か --agents のどちらかを指定してください")
+    agents = _resolve_agents(args, p)
 
     if args.tmp_dir:
         global _TMP_DIR_OVERRIDE
         _TMP_DIR_OVERRIDE = pathlib.Path(args.tmp_dir).resolve()
 
-    require_result = not args.no_require_result
+    results = _run_all(agents, args, phase)
+    _emit_results(agents, results)
 
+    # exit code: 全エージェントの最大値（OK=0 が最良、それ以外は失敗）
+    sys.exit(max(results[a].exit_code for a in agents))
+
+
+def _resolve_agents(args: argparse.Namespace, parser: argparse.ArgumentParser) -> list[str]:
+    """`--agents`（カンマ区切り）か位置引数 `target` から担当リストを決める。
+
+    `both` はこれまでの 2 者（codex / agy）を指す省略形。どちらも無ければ USAGE で拒む。
+    """
+    if args.agents:
+        agents = [a.strip() for a in args.agents.split(",") if a.strip()]
+        if not agents:
+            parser.error("--agents が空です")
+        return agents
+    if args.target:
+        return ["codex", "agy"] if args.target == "both" else [args.target]
+    parser.error("target か --agents のどちらかを指定してください")
+
+
+def _run_all(
+    agents: list[str], args: argparse.Namespace, phase: str
+) -> dict[str, AgentStatus]:
+    """各担当をスレッドで並列監視し、担当名から結果を引ける辞書を返す。"""
+    require_result = not args.no_require_result
     results: dict[str, AgentStatus] = {}
 
     def run(agent: str) -> None:
-        stall = args.stall_timeout if args.stall_timeout is not None \
-            else _agent_stall_default(agent)
-        results[agent] = monitor_agent(
-            agent=agent, pr=args.pr,
-            timeout=args.timeout, stall_timeout=stall,
-            poll=args.poll, require_result=require_result,
+        timeout = limits.monitor_timeout(phase, agent, args.timeout)
+        stall = limits.stall_timeout(agent, args.stall_timeout)
+        print(f"[{agent}] ▶ hard timeout {timeout}s / stall {stall}s (phase {phase})",
+              file=sys.stderr, flush=True)
+        if stall >= timeout:
+            # 上書きの結果、無進捗の許容が効かない組になった。止めはしない（AC33）。
+            print(f"[{agent}] ⚠ 無進捗の許容 {stall}s が監視の上限 {timeout}s 以上です"
+                  "（無進捗では止まらず、監視の上限で止まります）",
+                  file=sys.stderr, flush=True)
+        started_at = monitor_outcome.now_iso()
+        config = MonitorConfig(
+            timeout=timeout,
+            stall_timeout=stall,
+            poll=args.poll,
+            require_result=require_result,
             no_early_error=args.no_early_error,
             log_prefix=f"[{agent}] ",
             stem_template=args.stem_template,
         )
+        results[agent] = monitor_agent(
+            agent=agent,
+            pr=args.pr,
+            config=config,
+        )
+        _record_outcome(agent, args.pr, args.stem_template, results[agent], started_at,
+                        args.phase)
 
     threads = [threading.Thread(target=run, args=(a,), daemon=False) for a in agents]
     for t in threads:
         t.start()
     for t in threads:
         t.join()
+    return results
 
-    # 結果出力: 1 行 1 JSON
+
+def _emit_results(agents: list[str], results: dict[str, AgentStatus]) -> None:
+    """各担当の最終ステータスを 1 行 1 JSON で標準出力へ書く。"""
     for agent in agents:
         st = results[agent]
         print(json.dumps({
@@ -940,9 +1082,6 @@ def main() -> None:
             "result_exists": st.result_exists,
             "sentinel_seen": st.sentinel_seen,
         }, ensure_ascii=False))
-
-    # exit code: 全エージェントの最大値（OK=0 が最良、それ以外は失敗）
-    sys.exit(max(results[a].exit_code for a in agents))
 
 
 if __name__ == "__main__":

@@ -127,3 +127,15 @@ def test_the_report_still_names_each_item_with_its_symbol(refactor, tmp_path,
     env_tmp_dir(path)
     refactor.cmd_report(type("A", (), {"id": 130, "metrics": False})())
     assert "src/foo.py#Foo.handle" in capsys.readouterr().out
+
+
+# ---------- R2-001: 状態に無い項目のフォールバック ----------
+
+def test_an_unknown_item_id_is_returned_without_a_label(outbound, tmp_path):
+    """`item_id` が `state['items']` に無ければ、ラベルを付けず ID だけを返す。
+
+    現状固定: `by_id.get(item_id)` が `None` を返す経路。ファイル名やシンボル名の
+    参照をスキップし `str(item_id)` をそのまま返すフォールバックを固定する。
+    """
+    _, state = _state(tmp_path, items=[])
+    assert outbound.item_lines(state, ["R1-099"]) == ["R1-099"]
