@@ -180,6 +180,21 @@ def test_the_skill_is_distributed(runtime: str) -> None:
 
 # ---------- 対象の範囲 ----------
 
+def test_zero_targets_skip_to_reporting_with_the_reason() -> None:
+    """4 経路で集めた対象が 0 件なら、判定・反映をせず報告へ理由を残す。"""
+    body = SKILL.read_text(encoding="utf-8")
+    procedure = section(body, "## 手順")
+    target_rows = table(procedure, "| 経路 | 取り方 | 拾えるもの |")
+    report_rows = table(body, "| 項目 | 何を書くか |")
+
+    assert [row[0] for row in target_rows] == [
+        "機械の候補", "担当が足す", "マイルストーン", "親 issue",
+    ]
+    assert "段 1 で対象が 0 件なら、そこで飛ばす" in flat(procedure)
+    target_report = next(row for row in report_rows if row[0] == "対象")
+    assert "0 件なら飛ばしたことと理由" in target_report[1]
+
+
 def test_the_target_is_decided_only_by_the_milestone() -> None:
     """段 1 の 3 つ目の経路が、マイルストーンの有無だけで対象を決めることを明記している。
 
