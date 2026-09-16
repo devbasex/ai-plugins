@@ -225,6 +225,34 @@ def test_creating_the_parent_needs_approval() -> None:
         assert "一括で提示し、承認を得てから行う" in row[1], row
 
 
+def test_every_upkeep_change_has_one_of_the_three_dispositions() -> None:
+    """変更操作は、自動反映・承認後に反映・人へ返す、の 3 区分だけを持つ。"""
+    part = section(SKILL.read_text(encoding="utf-8"),
+                   "## 自動で反映してよい変更と、返す変更")
+    rows = table(part, "| 変更 | 自動で反映してよいか |")
+    dispositions = {row[1] for row in rows}
+    assert dispositions == {
+        "よい",
+        "一括で提示し、承認を得てから行う",
+        "返す",
+    }
+
+
+@pytest.mark.parametrize("change", [
+    "起票の意図が現在も要るかを判断できない",
+    "正しい読み方が複数ある",
+])
+def test_upkeep_returns_ambiguous_changes_to_a_human(change: str) -> None:
+    """本文の外に判断材料が要る 2 つの安全弁は、自動反映せず人へ返す。"""
+    part = section(SKILL.read_text(encoding="utf-8"),
+                   "## 自動で反映してよい変更と、返す変更")
+    rows = table(part, "| 変更 | 自動で反映してよいか |")
+    row = next(row for row in rows if row[0] == change)
+    assert row[1] == "返す"
+    assert "判断の材料が本文の外にあるかどうか" in flat(part)
+    assert "決まらないものだけを返す" in flat(part)
+
+
 def test_upkeep_handles_four_things() -> None:
     """扱うことが 4 つになり、4 つ目が根本原因の場所で直す判断である。"""
     body = SKILL.read_text(encoding="utf-8")
@@ -596,4 +624,3 @@ def test_other_repositories_define_fallback_behaviors() -> None:
     assert "wontfix にあたるラベル" in mapping
     assert "ラベルを付けずに閉じる" in mapping["wontfix にあたるラベル"]
     assert "理由と再燃の条件は本文に残る" in mapping["wontfix にあたるラベル"]
-
