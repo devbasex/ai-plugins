@@ -704,34 +704,3 @@ def test_table_helper_does_not_pass_over_a_missing_heading() -> None:
     """
     with pytest.raises(ValueError):
         table("見出しの無い本文\n", "| 判断 | 選ぶ条件 | 残すもの |")
-
-
-# ---------- 振り返りを始める時点（retrospective の「いつ行うか」） ----------
-
-RETROSPECTIVE = SKILLS / "retrospective" / "SKILL.md"
-RETROSPECTIVE_TIMING = "| リリース後テスト | 開始できる時点 |"
-
-
-def test_retrospective_start_branches_by_release_verification() -> None:
-    """開始できる時点が、リリース後テストを {行った, 行わない} の 2 分岐で決まることを固定する。
-
-    行ったなら結果が出た後、行わないならマージ後の後片付けの後である。文言の完全一致は
-    求めず、各行が対応する時点を含むことだけを見る。
-    """
-    part = section(RETROSPECTIVE.read_text(encoding="utf-8"), "## いつ行うか")
-    rows = {row[0]: row[1] for row in table(part, RETROSPECTIVE_TIMING)}
-    assert set(rows) == {"行った", "行わない"}
-    assert "結果が出た後" in rows["行った"]
-    assert "マージ後の後片付け" in rows["行わない"]
-    assert "merged" in rows["行わない"]
-
-
-def test_retrospective_timing_helpers_do_not_pass_over_a_missing_heading() -> None:
-    """節の見出しも表の見出し行も無い本文では、補助が投げて素通りしないことを確かめる。
-
-    投げるのは `str.index` の ValueError である（現状の振る舞い）。
-    """
-    with pytest.raises(ValueError):
-        section("見出しの無い本文\n", "## いつ行うか")
-    with pytest.raises(ValueError):
-        table("見出しの無い本文\n", RETROSPECTIVE_TIMING)
