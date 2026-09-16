@@ -166,16 +166,40 @@ issue もマイルストーンを持たないときだけ、既存の表がそ�
 唯一の場所であり、そこから採る。当てはまる手法が無いのは新設だけで、そのときは完了条件が
 作る対象を名指しする。
 
-### 決定 15: 親子の結び付きは本文のリンクで持ち、サブイシュー機能を使わない
+### 決定 15: 親子の結び付きはサブイシュー関係で持つ
 
-用語は GitHub の語彙から採るが、関係の実体は子 issue の本文へ足す 1 行である。
-**サブイシューでは子 1 件が持てる親が 1 件だけであり、決定 6（1 件が複数のクラスタへ属して
-よい）を扱えない。** 追加の API が既存の親を置き換える `replace_parent` を持つことが、
-親が 1 件であることを示している。
+**多数のケースは 1 対多である。** 1 件の親 issue に複数の子 issue が付く形で、サブイシュー
+関係がそのまま当てはまる。関係を張れば、GitHub の画面と API から親子をたどれる。
 
-サブイシューの関連付けを併せて作る案は採らない。2 つ目のクラスタへ入れるときに 1 つ目の親が
-外れ、本文のリンクと関連付けが食い違う。片方だけを正としても、どちらを読むかが担当ごとに
-変わる。
+| 状況 | 持ち方 |
+| --- | --- |
+| 子 issue が属するクラスタが 1 つ | **サブイシュー関係** |
+| 2 つ目以降のクラスタ | 本文の 1 行で親 issue を指す |
+| サブイシューの API を持たないリポジトリ | すべて本文の 1 行 |
+
+**2 つ目以降だけを本文へ逃がす。** 子 1 件が持てる親は 1 件だけであり（下の実測）、決定 6
+（1 件が複数のクラスタへ属してよい）を関係だけでは扱えない。**例外の側を本文へ寄せる。**
+すべてを本文の 1 行にする案は採らない。少数のケースのために、多数のケースが画面から
+たどれなくなる。
+
+実測で確かめたこと。
+
+```console
+$ gh api repos/devbasex/ai-plugins/issues/712/sub_issues --jq 'length'
+0
+$ gh api --method POST repos/devbasex/ai-plugins/issues/712/sub_issues
+{"message":"Invalid request.\n\nInvalid input: data cannot be null.",
+ "documentation_url":"https://docs.github.com/rest/issues/sub-issues#add-sub-issue","status":"422"}
+$ gh api graphql -f query='{repository(owner:"devbasex",name:"ai-plugins")
+    {issue(number:712){number parent{number}}}}'
+{"data":{"repository":{"issue":{"number":712,"parent":null}}}}
+$ gh api repos/devbasex/ai-plugins/issues/671 --jq '{number, id}'
+{"id":5462992209,"number":671}
+```
+
+読み取れること。**親から子は REST の一覧で引ける。子から親は GraphQL の `parent` で引け、
+単数である**（複数の親を持てない）。付けるときに渡すのは issue の番号ではなく
+データベースの ID である。
 
 ### 決定 16: 段 2B は重複の突き合わせを先に行う
 
