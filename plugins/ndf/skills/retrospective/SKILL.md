@@ -116,13 +116,18 @@ issue と Pull Request の両方で検索する。**
 **記録の本体はコメント 1 件である。** 同じ内容を複数の場所へ投稿しない。後から直したときに
 片方が古くなる。
 
-#### 投稿先を決める
+#### 起点ごとの投稿先を決める
 
-| 起点 | 記録の本体を置く場所 | 辿る経路 |
-| --- | --- | --- |
-| 1 件の issue | その issue へのコメント | その issue の本文末尾へ 1 行 |
-| 複数の issue（まとまり） | そのまとまりを配布した Pull Request へのコメント | 対象のすべての issue の本文末尾へ 1 行 |
-| 起点の issue を持たない変更 | その変更の Pull Request へのコメント | 追加の 1 行は要らない |
+**起点の種類が、投稿先・実行コマンド・辿る経路のすべてを決める。** 以降の「投稿する」と
+「辿る経路を作る」はこの表を指し、分岐を書き直さない。`<記録のファイル>` は投稿する本文、
+`<コメントの URL>` は投稿したコメントの URL、`<番号>` は下の「Pull Request の番号を特定する」で
+引いた番号である。
+
+| 起点 | 記録の本体を置く場所 | 実行コマンド | 辿る経路 |
+| --- | --- | --- | --- |
+| 1 件の issue | その issue へのコメント | `gh issue comment <番号> --repo "$RECORD_REPO" --body-file <記録のファイル>` | その issue の本文末尾へ 1 行 |
+| 複数の issue（まとまり） | そのまとまりを配布した Pull Request へのコメント | `gh pr comment <番号> --repo "$RECORD_REPO" --body-file <記録のファイル>` | 対象のすべての issue の本文末尾へ 1 行 |
+| 起点の issue を持たない変更 | その変更の Pull Request へのコメント | `gh pr comment <番号> --repo "$RECORD_REPO" --body-file <記録のファイル>` | 追加の 1 行は要らない |
 
 **閉じた issue にもコメントは投稿できる。** GitHub が拒むのは locked のときだけである。
 投稿が失敗したときは、別の場所へ回さずに止めて利用者に伝える。
@@ -240,14 +245,16 @@ gh api "/repos/$RECORD_REPO/commits/$(git rev-parse "origin/$record_base")/pulls
 | #NNN | ... | 実装中 / レビュー中 |
 ```
 
-```bash
-gh issue comment <issue番号> --repo "$RECORD_REPO" --body-file <記録のファイル>   # 起点が 1 件の issue
-gh pr comment <PR番号> --repo "$RECORD_REPO" --body-file <記録のファイル>         # まとまり / 起点の issue を持たない変更
-```
+投稿は、「起点ごとの投稿先を決める」表の「実行コマンド」列で行う。起点の種類ごとに
+コマンドが変わる。
 
 #### 辿る経路を作る
 
-対象の issue の本文末尾へ、投稿したコメントの URL を 1 行足す。
+**辿る経路は「起点ごとの投稿先を決める」表の「辿る経路」列が決める。** 1 件の issue と
+まとまりでは対象の issue の本文末尾へ URL を 1 行足し、起点の issue を持たない変更では
+この手順が要らない（記録は Pull Request 自身に付いている）。
+
+対象の issue の本文末尾へは、投稿したコメントの URL を 1 行足す。
 
 ```text
 振り返り: https://github.com/<所有者>/<リポジトリ>/issues/<番号>#issuecomment-<識別子>
@@ -261,8 +268,7 @@ printf '\n振り返り: %s\n' "<コメントの URL>" >> /tmp/issue-body.md
 gh issue edit <issue番号> --repo "$RECORD_REPO" --body-file /tmp/issue-body.md
 ```
 
-まとまりでは、対象のすべての issue へ同じ URL の 1 行を足す。起点の issue を持たない変更では
-この手順が要らない。記録は Pull Request 自身に付いている。
+まとまりでは、対象のすべての issue へ同じ URL の 1 行を足す。
 
 **設計判断の理由と実測の結果を残す。** Skill の挙動そのものは各 `SKILL.md` が正であり、
 ここに書き写さない。書くのは、そこに書かない理由と、判断の材料になった実測である。
