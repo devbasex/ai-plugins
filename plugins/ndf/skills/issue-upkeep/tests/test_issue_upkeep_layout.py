@@ -420,6 +420,7 @@ def test_milestones_pick_the_nearest_by_sequence() -> None:
     assert "連番の順序と食い違うとき" in text
     assert "後の連番にあるなら" in text
     assert "`<2 桁の連番> <主題>`" in text
+    assert "説明が連番と別の着手の順序を書いているときは、説明を採る" in text
 
 
 # ---------- 上位の分解 ----------
