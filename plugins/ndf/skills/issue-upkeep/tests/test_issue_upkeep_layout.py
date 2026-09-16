@@ -624,3 +624,48 @@ def test_other_repositories_define_fallback_behaviors() -> None:
     assert "wontfix にあたるラベル" in mapping
     assert "ラベルを付けずに閉じる" in mapping["wontfix にあたるラベル"]
     assert "理由と再燃の条件は本文に残る" in mapping["wontfix にあたるラベル"]
+
+
+# ---------- 重要度と問いの形を変えるときの基準 ----------
+
+
+def test_priority_change_branches_by_harm_observation() -> None:
+    """重要度変更の 3 経路（実害観測追記で上げる／実害なし判明で下げる／説明なしラベルは維持）を固定する。
+
+    重要度はラベルの説明の区分へ当てはめ、実害観測が本文へ追記されたら上げ、
+    実害が起きない経路だと分かったら下げ、説明のないラベルへは付け替えない。
+    """
+    part = section(SKILL.read_text(encoding="utf-8"),
+                   "### 重要度と問いの形を変えるときの基準")
+    rows = table(part, "| 変えるもの | 基準 | 材料の在り処 |")
+    row = next(row for row in rows if row[0] == "重要度")
+    assert "実害の観測が変わったか" in row[1]
+    assert "ラベルの説明" in row[2]
+
+    text = flat(part)
+    assert "重要度は、ラベルの説明が持つ区分へ当てはめる" in text
+    assert "実害の観測が本文へ追記された課題は上げ" in text
+    assert "実害が起きない経路だと分かった課題は下げ" in text
+    assert "説明の無いラベルへは付け替えない" in text
+
+
+def test_question_restructuring_branches_by_premise_and_gist() -> None:
+    """問いの形変更の 2 経路（前提反転時のみ立て直す／主旨変更時は人へ返す）を固定する。
+
+    問いを立て直すのは前提反転時のみで主旨や困りごとは変えず、
+    主旨まで変わる場合は新起票判断として人へ返す。
+    """
+    part = section(SKILL.read_text(encoding="utf-8"),
+                   "### 重要度と問いの形を変えるときの基準")
+    rows = table(part, "| 変えるもの | 基準 | 材料の在り処 |")
+    row = next(row for row in rows if row[0] == "問いの形")
+    assert "前提が反転したか" in row[1]
+    assert "本文が指す実物の状態" in row[2]
+
+    text = flat(part)
+    assert "問いを立て直すのは、前提が反転したときに限る" in text
+    assert "立て直すのは問いの形であって、主旨ではない" in text
+    assert "何が困るかは変えない" in text
+    assert "主旨まで変わるなら、それは別の課題である" in text
+    assert "元の課題を閉じて新しく起票する判断になるため、返す" in text
+
