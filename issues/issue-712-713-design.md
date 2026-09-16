@@ -236,7 +236,7 @@ flowchart TD
 | `no-work.md` の条件 2 の確かめ方 | 「段 2B の重複の突き合わせの結果を使う」 | 重複とクラスタ化の両方の突き合わせの結果を使う（重複が先、クラスタ化が後） |
 | `SKILL.md` 段 2B の注記 | 起点が同じ 2 件を重複の枠で説明する | 3 件以上で個別の作業が残るものはクラスタ化へ倒す分岐を足す |
 
-**判定とは別の理由で直すものが 2 か所ある。** 親 issue の入れ先を決めるのは `milestones.md` の
+**判定とは別の理由で直すものが 3 か所ある。** 親 issue の入れ先を決めるのは `milestones.md` の
 「直近のマイルストーン」だが、その判定が版数を読む形になっている。このリポジトリの open の
 マイルストーンは版数を持たず、2 桁の連番で順序を表す（`AGENTS.md` の「版と配布の方針」）。
 実測でも open は `03 研究基盤` `14 利用者を増やす` のような連番の名前で、版数の名前を持つのは
@@ -246,6 +246,7 @@ closed だけである。**直さないと親 issue の入れ先が決まらな�
 | --- | --- | --- |
 | `milestones.md` の「直近」の判定 | open のうち版数が最も小さいもの | open のうち、名前の先頭の連番が最も小さいもの |
 | `milestones.md` の「新しく作るとき」の版数 | 既存の最大の次の版数（`v10.9.0` があれば `v10.10.0`） | 既存の最大の次の連番。名前は `<2 桁の連番> <主題>` |
+| `milestones.md` の「順序を直すとき」の基準 | 「依存の記述が版数の順序と食い違うとき」「A が後の版にあるなら」 | 「依存の記述が連番の順序と食い違うとき」「A が後の連番にあるなら」 |
 
 ## 4 つの Skill の境界
 
@@ -276,7 +277,7 @@ closed だけである。**直さないと親 issue の入れ先が決まらな�
 | `issue-upkeep/SKILL.md` の境界の節 | **2 × 2 の表の正本** |
 | `issue-upkeep/references/grouping.md`（新設） | クラスタ化の条件・修正レイヤーの決め方・採る手の 5 つ・親 issue の書き方・子 issue の扱い・歯止め |
 | `issue-upkeep/references/no-work.md` | 条件 2 の行き先と確かめ方を直す |
-| `issue-upkeep/references/milestones.md` | 親 issue の割り当てを足し、着手の時期を指す語を揃え、直近の判定を連番基準へ直す |
+| `issue-upkeep/references/milestones.md` | 親 issue の割り当てを足し、着手の時期を指す語を揃え、直近と順序の判定を連番基準へ直す |
 | `out-of-scope/SKILL.md` の境界の節 | 及ぶ先を示す |
 | `problem-solving/SKILL.md` | 上流で直すこととの違いを示す |
 | `retrospective/SKILL.md` | クラスタの発見を担わないことを示す |
@@ -320,7 +321,7 @@ plugins/ndf/skills/
 │   ├── references/
 │   │   ├── grouping.md                  # 新設
 │   │   ├── no-work.md                   # 条件 2 の行き先と確かめ方を直す
-│   │   └── milestones.md                # 親 issue の割り当てと、直近の判定を直す
+│   │   └── milestones.md                # 親 issue の割り当てと、直近・順序の判定を直す
 │   └── tests/
 │       └── test_issue_upkeep_layout.py  # 並び・参照・配線・用語
 ├── out-of-scope/SKILL.md                # 境界の節
@@ -391,11 +392,12 @@ graph LR
 | AC37 | 上の 2 つ。手法の呼び名が `refactoring/references/vocabulary.md` に実在することも照合する |
 | AC33 | `test_milestones_use_one_word_for_the_timing` |
 | AC34 | **手動確認。** `gh issue view 712` / `gh issue view 713` |
-| AC38 / AC39 | `test_milestones_pick_the_nearest_by_sequence`（直近を連番で決め、「版数が最も小さい」が残っていないこと） |
+| AC38 / AC39 / AC40 | `test_milestones_pick_the_nearest_by_sequence`（直近と順序を連番で決め、「版数が最も小さい」「版数の順序」が残っていないこと） |
+| AC41 / AC42 | `test_no_work_has_two_necessary_conditions`（条件 2 の行き先の 3 分岐と、確かめ方の文言） |
 
-**`no-work.md` の条件 2 の行き先（決定 10）も検査する。** 既存の
-`test_no_work_has_two_necessary_conditions` が条件の文言を照合しているため、行き先の列も
-同じテストで見る。
+**`no-work.md` へ新しいテストを足さない。** 既存の
+`test_no_work_has_two_necessary_conditions` が条件の文言を照合しており、行き先の列も
+同じ表の中にある。
 
 ## 未確認のまま残ること
 
