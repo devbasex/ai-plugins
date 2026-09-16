@@ -131,6 +131,29 @@ def test_milestones_are_not_created_for_a_single_issue() -> None:
     assert "**1 件しか残らないときは作らない。**" in MILESTONES.read_text(encoding="utf-8")
 
 
+@pytest.mark.parametrize(("priority", "when_no_matching_subject"), [
+    ("高い（実害・安全機構の欠落）", "直近のマイルストーンへ、主題によらず入れる"),
+    ("中くらい（保守性・設計一貫性）", "末尾に新しく作る（下記）"),
+    ("低い（余力があれば）", "未設定のまま残す"),
+])
+def test_unassigned_issues_branch_by_priority_when_no_subject_matches(
+        priority: str, when_no_matching_subject: str) -> None:
+    """主題の合うものが無いときの割り当て先を、重要度の 3 区分ごとに固定する。"""
+    part = section(MILESTONES.read_text(encoding="utf-8"),
+                   "## 設定されていない課題を割り当てる")
+    rows = table(part, "| 重要度 | 入れる先 | 主題の合うものが無いとき |")
+    normalized = [[cell.replace("**", "") for cell in row] for row in rows]
+    row = next(row for row in normalized if row[0] == priority)
+    assert row[2] == when_no_matching_subject
+
+
+def test_unassigned_issue_with_multiple_matching_subjects_needs_judgement() -> None:
+    """主題が複数に当てはまるときは、自動で割り当てず要判断へ倒す。"""
+    part = flat(section(MILESTONES.read_text(encoding="utf-8"),
+                        "## 設定されていない課題を割り当てる"))
+    assert "主題が複数に当てはまるときは**要判断**へ倒す" in part
+
+
 @pytest.mark.parametrize("caller,marker", [
     ("retrospective", "issue-upkeep"),
     ("release", "issue-upkeep"),
