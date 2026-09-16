@@ -9,6 +9,49 @@
 **開発版（接尾辞の付いた版）は載せない。** `9.8.0` は `9.8.0-dev.1` までしか出ておらず、
 その内容は `10.0.0` で届いている。
 
+## [ndf 10.13.0] - 2026-09-16
+
+### 追加
+
+- **上限の表 `plugins/ndf/scripts/lib/limits.py` を新設した**（#598 #537）。監視の上限・CLI の
+  上限・無進捗の許容の既定値をこの 1 つの表だけが持つ。監視の上限は工程ごと（review /
+  critique / propose / judge-test-changes は 1200 秒、apply / fix / final-fix は 3600 秒）、
+  無進捗の許容は担当ごと（codex 180 / agy 480 / kiro 480 / claude 900）、CLI の上限は
+  「環境変数で解決した監視の上限 + 120 秒」。**全 28 組で「許容 < 監視 < CLI」をテストで固定する**
+- `monitor.py --phase <工程>` を足した（#598 #537）。上限は `--timeout` →
+  `MONITOR_TIMEOUT_<担当>` → `MONITOR_TIMEOUT` → 表の順で解決し、省略時は review の値になる。
+  解決後に許容 ≥ 上限になった担当を標準エラーへ 1 行で警告する（**終了コードと標準出力は
+  変えない**）。監視の結果ファイルと記録へ `phase` が増える
+- `launch-cli.sh` の第 7 引数に工程名を足した（#598）。agy の `--print-timeout` を表から導く
+- **`cross-review/scripts/bg-wait.sh` を新設した**（#537）。`run` が背景で起動して終了コードを
+  rc ファイルへ残し、`wait` が 540 秒以内で区切って待つ（124 = まだ終わっていない）。
+  Claude Code の Bash の 1 回の上限（600 秒）を超える監視を待てる
+- **監視の結果と実行の要約を作業ツリーの外へ残すようにした**（#662）。監視が担当ごとに
+  `<stem>-monitor.json` と追記だけの `monitor-outcomes.jsonl` を残し、理由の語彙と読み書きは
+  新設の共通層 `lib/monitor_outcome.py` が持つ。実行の要約は `lib/run_metrics.py` が
+  `NDF_METRICS_DIR` → `$XDG_STATE_HOME/ndf/metrics` → `~/.local/state/ndf/metrics` の順で
+  決めた先へ書き直す。**レビュー用の作業ツリーを消した後も集計できる**
+- `run_metrics.py aggregate` を足した（#662）。要約を種類・ラウンド数・理由で束ねて表で出す。
+  `state.py report` の最後の行が要約のパスを出す
+
+### 変更
+
+- cross-refactoring の監視 8 か所を `--phase` にした（#598）。`--timeout` を外し、工程の所要の
+  判定は記録の `phase` を優先する
+
+### 修正
+
+- **cross-refactoring の修正と最終ゲートの修正が 420 秒で打ち切られていた**（#598）。工程ごとの
+  上限（3600 秒）を使う。あわせて `cross-review` の agy がハードタイムアウト 420 秒で常に
+  打ち切られ、無進捗の許容の既定 480 秒へ到達できなかった状態を解いた
+- **agy へ渡す `--print-timeout` が 600 秒固定で、大きな差分のレビューが終わらなかった**（#537）。
+  利用者が上書きした監視の上限からも + 120 秒で導くため、CLI が監視より先に打ち切らない
+
+### 削除
+
+- `docs/id_rsa.pub` を削除した（#688）。GitHub Pages の公開元が `main` の `docs/` であるため
+  取得できる状態だった。公開鍵で秘密情報ではないが、知識を置く `docs/` にある理由が読み取れない
+
 ## [ndf 10.12.0] - 2026-09-15
 
 ### 追加
