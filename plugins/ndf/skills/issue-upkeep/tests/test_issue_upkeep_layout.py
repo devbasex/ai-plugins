@@ -507,6 +507,44 @@ def test_grouping_rereads_the_stated_fix() -> None:
     assert "まだ原因に届いていない" in text
 
 
+# ---------- 外部への書き込みの制限 ----------
+
+
+@pytest.mark.parametrize(("situation", "handling"), [
+    ("応答が `Retry-After` を返す", "その秒数だけ待つ"),
+    ("上限の回復時刻を返す", "その時刻まで待つ"),
+    ("どちらも無い（作成の二次的な制限）", "間隔を倍にしながら待つ"),
+    ("一定の回数を超えた",
+     "部分的に終わった状態として止め、何が済んだかを報告へ残す"),
+])
+def test_rate_limit_branches_by_response(situation: str, handling: str) -> None:
+    """GitHub のレート制限に当たったときの 4 つの状況ごとの待ち方・停止を固定する。
+
+    待つ長さは応答から取り、固定の間隔で待たない。`Retry-After` は秒数、回復時刻は時刻、
+    どちらも無ければ倍にしながら待ち、一定の回数を超えたら部分終了として止める。
+    """
+    part = section(SKILL.read_text(encoding="utf-8"), "## 外部への書き込みの制限")
+    rows = table(part, "| 状況 | 待ち方 |")
+    mapping = {flat(row[0]): flat(row[1]) for row in rows}
+    assert flat(situation) in mapping, situation
+    assert flat(handling) == mapping[flat(situation)]
+
+
+def test_rate_limit_takes_the_wait_from_the_response() -> None:
+    """待つ長さは応答から取り、固定の間隔で待たないことを明記している。"""
+    part = flat(section(SKILL.read_text(encoding="utf-8"), "## 外部への書き込みの制限"))
+    assert "待つ長さは応答から取る" in part
+    assert "固定の間隔で待たない" in part
+
+
+def test_rate_limit_reports_the_wait_count() -> None:
+    """完了報告に、制限へ当たった回数と待った長さを残す行がある。"""
+    rows = table(SKILL.read_text(encoding="utf-8"), "| 項目 | 何を書くか |")
+    row = next(row for row in rows if row[0] == "待った回数")
+    assert "外部への書き込みの制限に当たった回数" in row[1]
+    assert "待った長さ" in row[1]
+
+
 # ---------- 他のリポジトリで動くこと ----------
 
 
