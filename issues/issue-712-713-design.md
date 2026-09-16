@@ -44,7 +44,7 @@
 ### 段 2B — 全体で突き合わせる（分担しない）
 
 **重複の突き合わせを先に行う。** 既存の段 2B は、重複と判定された組の正本をここで決める。
-ルートコーズの条件 2 は「同じ課題ではない」ことを確かめるため、その結果を材料にする。
+段 3 の対応は「同じ課題ではない」ことを前提にするため、その結果を材料にする。
 
 **6 件とも、修正レイヤーが現象レイヤーと違う。** 現れているのは記録のスクリプトや検査の
 設定だが、直すべきは失敗の扱いを決める共通の層である。条件はこれだけなので、6 件の判定は
@@ -57,9 +57,9 @@
 **採る手は新設である。** 失敗を届ける層そのものが無い。既にある層へ責務を寄せるなら移動、
 複数の場所に散っているなら統合になる。
 
-**各所への当てはめは、クラスタを分ける理由にならない。** 6 か所それぞれに残る作業は
-条件 2 が残ると定めたものである。当てはめ先がスクリプトと設定に分かれても、直す層は
-1 つのままである。
+**各所への当てはめは、クラスタを分ける理由にならない。** 6 か所それぞれに作業が残ることは、
+段 3 の対応が親 issue をつくる側に置いた条件である。当てはめ先がスクリプトと設定に分かれても、
+直す層は 1 つのままである。
 
 ### 段 3 — 反映する
 
@@ -275,7 +275,7 @@ gh api graphql -f query='{repository(owner:"<所有者>",name:"<リポジトリ>
 
 | 箇所 | 現状 | 直す形 |
 | --- | --- | --- |
-| `no-work.md` の条件 2 の行き先 | 「重複」固定 | 寄せ先が同じ課題なら「重複」。同じ課題ではなく、同じ修正レイヤーを指すものが 2 件以上あって 2 条件を満たすなら「ルートコーズ」。どちらでもないなら寄せ先が無く、条件は欠けていない |
+| `no-work.md` の条件 2 の行き先 | 「重複」固定 | 寄せ先が同じ課題なら「重複」。同じ課題ではなく、同じ修正レイヤーを指すものが 2 件以上あって条件（修正レイヤーが現象レイヤーと違う）を満たすなら「ルートコーズ」。どちらでもないなら寄せ先が無く、条件は欠けていない |
 | `no-work.md` の条件 2 の確かめ方 | 「段 2B の重複の突き合わせの結果を使う」 | 重複とルートコーズの両方の突き合わせの結果を使う（重複が先、ルートコーズが後） |
 | `SKILL.md` 段 2B の注記 | 起点が同じ 2 件を重複の枠で説明する | 個別の作業が残るものはルートコーズへ倒す分岐を足す |
 
@@ -291,6 +291,15 @@ closed だけである。**直さないと親 issue の入れ先が決まらな�
 | `milestones.md` の「新しく作るとき」の版数 | 既存の最大の次の版数（`v10.9.0` があれば `v10.10.0`） | 既存の最大の次の連番。名前は `<2 桁の連番> <主題>` |
 | `milestones.md` の「順序を直すとき」の基準 | 「依存の記述が版数の順序と食い違うとき」「A が後の版にあるなら」 | 「依存の記述が連番の順序と食い違うとき」「A が後の連番にあるなら」 |
 
+**閉じた親 issue の子 issue を拾う経路が無い。** 子 issue は閉じない（決定 4）ため、原因が
+直って親 issue が閉じた後も open のまま残る。子 issue は親と別のマイルストーンにいることが
+あり、段 1 の 3 つの経路はそれを名指ししていない。**直さないと、原因が直ったことを子 issue へ
+反映する機会が来ない。**
+
+| 箇所 | 現状 | 直す形 |
+| --- | --- | --- |
+| `SKILL.md` 段 1 の経路 | 機械の候補・担当が足す・マイルストーンの 3 つ | 4 つ目として「このまとまりで閉じた親 issue の子 issue」を足す |
+
 ## 4 つの Skill の境界
 
 **2 × 2 の表の正本を `issue-upkeep` に置く。** 他の 3 つはそこを指す。
@@ -304,7 +313,7 @@ closed だけである。**直さないと親 issue の入れ先が決まらな�
 | --- | --- |
 | `issue-upkeep` | 上の表そのもの。価値と構造の両方について担い手を示す |
 | `out-of-scope` | 「蓄積した課題には及ばない」の及ぶ先が `issue-upkeep` であること |
-| `problem-solving` | 「上流で直す」（1 件の不具合の上流）と「ルートコーズ」（複数の課題の共通の原因）の違いと、`issue-upkeep` へのリンク |
+| `problem-solving` | 「上流で直す」（見つけて直している最中の 1 件）と「ルートコーズ」（溜まった課題の棚卸）の違いが、件数ではなく見る対象で分かれること。`issue-upkeep` へのリンク |
 | `retrospective` | クラスタの発見を担わないことと、その理由 |
 
 ## 構成要素
@@ -313,7 +322,8 @@ closed だけである。**直さないと親 issue の入れ先が決まらな�
 | --- | --- |
 | `issue-upkeep/SKILL.md` の判定の表 | **8 つの判定の並びの正本。** 他の箇所はこの並びを参照する |
 | `issue-upkeep/SKILL.md` の用語の表 | **ルートコーズ / クラスタ / 親 issue / 子 issue の定義の正本** |
-| `issue-upkeep/SKILL.md` の段 2A | 控える項目に「現象レイヤー」と「修正レイヤー」を足す |
+| `issue-upkeep/SKILL.md` の段 1 | 閉じた親 issue の子 issue を拾う経路を足す |
+| `issue-upkeep/SKILL.md` の段 2A | 控える項目に「現象レイヤー」と「修正レイヤー」を足し、確かめる点を 6 点にする |
 | `issue-upkeep/SKILL.md` の段 2B | 突き合わせの表に「同じ原因を持つクラスタ」を足し、注記へ分岐を足す |
 | `issue-upkeep/SKILL.md` の段 3 | 親 issue を作って子 issue を結び付ける手順と、2 度行わない見分け方 |
 | `issue-upkeep/SKILL.md` の「扱う 3 つ」 | 4 つ目としてクラスタを扱う判断を足す |
@@ -360,7 +370,7 @@ graph TD
 ```text
 plugins/ndf/skills/
 ├── issue-upkeep/
-│   ├── SKILL.md                         # 判定の表・用語・段 2A/2B/3・境界・完了報告
+│   ├── SKILL.md                         # 判定の表・用語・段 1/2A/2B/3・境界・完了報告
 │   ├── references/
 │   │   ├── grouping.md                  # 新設
 │   │   ├── no-work.md                   # 条件 2 の行き先と確かめ方を直す
@@ -401,7 +411,7 @@ graph LR
 ## 決定の記録
 
 **[issue-712-713-decisions.md](issue-712-713-decisions.md) にある。**
-決定が 17 件あり、設計文書が 500 行を超えるため分けた。
+決定が 21 件あり、設計文書が 500 行を超えるため分けた。
 
 ## テスト設計
 
@@ -415,12 +425,11 @@ graph LR
 | AC6 | `test_stage_2b_matches_issues_by_shared_cause` |
 | AC7 | `test_stage_2b_note_branches_to_cluster` |
 | AC8 | `test_cluster_separates_itself_from_duplication` |
-| AC9 | `test_cluster_has_three_conditions` |
+| AC9 | `test_root_cause_has_one_condition`（条件が 1 つであること、件数が条件でないこと） |
 | AC10 | `test_cluster_keeps_the_child_issues_open` |
 | AC11 | `test_cluster_shows_the_body_of_the_parent_issue` |
 | AC12 | `test_an_issue_may_join_two_clusters` |
 | AC13 | `test_cluster_does_not_gate_on_size`（層がまたがっても判定が変わらないこと、手が条件でないこと） |
-| AC43 / AC44 | `test_cluster_never_defers_to_a_human`（`grouping.md` に `要判断` が無く、行き先が 3 つに決まること） |
 | AC14 | `test_parent_takes_the_highest_priority_in_the_cluster` |
 | AC15 | `test_upkeep_files_only_the_parent_issue` |
 | AC16 | `test_the_report_counts_the_clusters` |
@@ -439,8 +448,9 @@ graph LR
 | AC34 | **手動確認。** `gh issue view 712` / `gh issue view 713` |
 | AC38 / AC39 / AC40 | `test_milestones_pick_the_nearest_by_sequence`（直近と順序を連番で決め、「版数が最も小さい」「版数の順序」が残っていないこと） |
 | AC41 / AC42 | `test_no_work_has_two_necessary_conditions`（条件 2 の行き先の 3 分岐と、確かめ方の文言） |
-| AC43 / AC44 | `test_cluster_never_defers_to_a_human`（`grouping.md` に `要判断` が無く、行き先が決まること） |
+| AC43 / AC44 | `test_cluster_never_defers_to_a_human`（`grouping.md` に `要判断` が無く、判定の行き先 2 つと段 3 での対応の 3 つがそろっていること） |
 | AC45 | `test_the_skill_carries_only_what_it_must`（書式の雛形が無いこと） |
+| AC50 | `test_stage_1_picks_up_children_of_a_closed_parent` |
 | AC46 | `test_stage_3_has_three_outcomes`（件数と個別の作業の有無で 3 つに分かれること） |
 | AC47 / AC48 / AC49 | `test_grouping_rereads_the_stated_fix`（本文の直し方をそのまま採らないこと、手段の語で終わる本文の読み方） |
 
@@ -452,6 +462,6 @@ graph LR
 
 | 項目 | 内容 |
 | --- | --- |
-| クラスタの下限 3 件の妥当性 | 2026-09-16 の棚卸の 4 クラスタ（6 / 4 / 4 / 3 件）だけが材料である。2 件のクラスタが繰り返し現れるなら下げる判断が要る |
+| 親 issue をつくる下限 2 件の妥当性 | 2026-09-16 の棚卸の 4 クラスタ（6 / 4 / 4 / 3 件）だけが材料で、2 件のクラスタを実際に扱った例が無い |
 | 原因が直った後の閉じ方 | 「閉じてよい」の判定で閉じる想定だが、原因が直るのは別のマイルストーンであり、この変更では確かめられない |
 | 4 クラスタのうち処理しない 2 つ | 完了条件は 2 つ以上である。残りを次の棚卸が同じ手順で扱えるかは、その棚卸で分かる |
