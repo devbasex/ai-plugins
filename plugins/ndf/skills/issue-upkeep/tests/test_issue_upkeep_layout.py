@@ -507,6 +507,30 @@ def test_grouping_rereads_the_stated_fix() -> None:
     assert "まだ原因に届いていない" in text
 
 
+# ---------- 段 3 の反映直前の照合 ----------
+
+STAGE_3_GATE = "**`updated_at` が変わっていれば本文の要約値を見る。**"
+
+
+@pytest.mark.parametrize(("path", "outcome"), [
+    ("updated_at が不変", STAGE_3_GATE),
+    ("updated_at は変わったが要約値は同じ", "同じならそのまま反映する"),
+    ("要約値も変わった", "要約値も変わっていればその課題だけを段 2A へ戻し"),
+])
+def test_stage_3_reconciles_right_before_reflecting(path: str, outcome: str) -> None:
+    """反映直前の照合を、`updated_at` と本文の要約値の 3 経路ごとに固定する。
+
+    要約値を見るのは `updated_at` が変わったときだけで、不変ならそのまま反映へ進む。
+    要約値が同じなら反映を続け、変わっていればその課題だけを段 2A へ戻す。
+    """
+    part = flat(section(SKILL.read_text(encoding="utf-8"), "### 段 3: 反映する"))
+    assert "段 3 は反映の直前に照合する" in part
+    gate = part.index(STAGE_3_GATE)
+    assert "要約値" not in part[:gate], "updated_at より先に要約値を見ている"
+    assert outcome in part, path
+    assert part.index(outcome) >= gate, path
+
+
 # ---------- 外部への書き込みの制限 ----------
 
 
