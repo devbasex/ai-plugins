@@ -19,13 +19,15 @@
 | 要素 | 責務 |
 | --- | --- |
 | `issue-upkeep/SKILL.md` の判定の表 | **8 つの判定の並びの正本。** 他の箇所はこの並びを参照する |
+| `issue-upkeep/SKILL.md` の用語の表と「扱う 3 つ」の節 | 判定の数を 8 つへ改め、節を「扱う 4 つ」へ改めて 4 つ目に束ねる判断を置き、案内文へ `grouping.md` を足す |
 | `issue-upkeep/SKILL.md` の段 2A | 控える項目に「この課題が指す上位原因」を足す |
 | `issue-upkeep/SKILL.md` の段 2B | 突き合わせの表に「同じ原因を持つ課題群」を足す |
+| `issue-upkeep/SKILL.md` の段 2B の注記 | 「起点が同じことと同じ課題であることを分ける」へ、束ねるとの分岐を足す |
 | `issue-upkeep/SKILL.md` の段 3 | 上位の課題を作る手順と、2 度作らない仕組み |
 | `issue-upkeep/SKILL.md` の境界の節 | **2 × 2 の表の正本。** 価値 / 構造 × 発見の瞬間 / 蓄積した課題 |
 | `issue-upkeep/references/grouping.md`（新設） | 束ねてよい必要条件・上位の課題の書き方・元の課題の扱い・歯止め |
-| `issue-upkeep/references/no-work.md` | **条件 2 の欠けたときの行き先を直す**（「重複」固定を「重複 / 束ねる」へ） |
-| `issue-upkeep/references/milestones.md` | 上位の課題の重要度とマイルストーンの決め方を足す |
+| `issue-upkeep/references/no-work.md` | **条件 2 の欠けたときの行き先と確かめ方を直す**（行き先は「重複」固定を「重複 / 束ねる」へ、確かめ方は重複の突き合わせを束ねるの突き合わせも含む形へ） |
+| `issue-upkeep/references/milestones.md` | 上位の課題の重要度とマイルストーンの決め方を足し、既存の「束ねる」の語を言い換える |
 | `out-of-scope/SKILL.md` の境界の節 | 「蓄積した課題には及ばない」の及ぶ先を示す |
 | `problem-solving/SKILL.md` | 「上流で直す」と「束ねる」の違いを示し、`issue-upkeep` を指す |
 | `retrospective/SKILL.md` | 群の発見を担わないことと、その理由を示す |
@@ -84,7 +86,7 @@ plugins/ndf/skills/
 │   ├── references/
 │   │   ├── grouping.md                  # 新設
 │   │   ├── no-work.md                   # 条件 2 の行き先を直す
-│   │   └── milestones.md                # 上位の課題の割り当てを足す
+│   │   └── milestones.md                # 上位の課題の割り当てと、語の言い換え
 │   └── tests/
 │       └── test_issue_upkeep_layout.py  # 並び・参照・配線
 ├── out-of-scope/SKILL.md                # 境界の節
@@ -163,7 +165,8 @@ plugins/ndf/skills/
 ```
 
 置き場所は本文の「関連」の節、無ければ末尾である。**この 1 行が、段 3 をやり直したときに
-上位の課題を 2 度作らないための探索キーになる。**
+上位の課題を 2 度作らないための探索キーになる。** 探索は群の単位で 1 度行い、追記は 1 行を
+持たない課題だけへ行う。
 
 ## 処理の流れ
 
@@ -171,20 +174,24 @@ plugins/ndf/skills/
 flowchart TD
     A["段 2A: 課題ごとに調べる<br/>『この課題が指す上位原因』を控える"] --> B["段 2B: 控えを並べる"]
     B --> C{"同じ『無いもの』を<br/>指す課題が 3 件以上か"}
-    C -->|いいえ| D["重複の突き合わせへ"]
+    C -->|いいえ| D["重複の突き合わせへ<br/>重複でなければ既存の判定のまま"]
     C -->|はい| E{"上位を直しても<br/>個別の作業が残るか"}
     E -->|残らない| D
     E -->|残る| F{"受け入れ条件が<br/>作るもの 1 つで書けるか"}
     F -->|書けない| G["要判断へ倒す"]
     F -->|書ける| H["判定 = 束ねる"]
     H --> I["候補を一括で提示し承認を得る"]
-    I --> J{"元の課題に<br/>上位を指す 1 行があるか"}
-    J -->|ある| K["作成済みとして飛ばす"]
+    I --> J{"群のどれかの課題に<br/>上位を指す 1 行があるか"}
+    J -->|ある| K["その 1 行が指す上位の課題を採る<br/>起票は飛ばす"]
     J -->|ない| L["上位の課題を起票する"]
-    L --> M["元の課題すべてへ 1 行を足す"]
+    L --> M["1 行を持たない元の課題を<br/>1 件ずつ見て足す"]
+    K --> M
     M --> N["完了報告へ群の数を書く"]
-    K --> N
 ```
+
+**起票を飛ばすことと、1 行を足すことを分ける。** 一部の課題にだけ 1 行が入った状態で
+止まると、群の全体を「作成済み」として飛ばしたときに残りの課題へ 1 行が入らない。
+起票の重複は群に 1 度だけ見て、1 行の有無は課題ごとに見る。
 
 **承認は段 2B の後、段 3 の反映の前に 1 度だけ求める。** 「やらない」の候補と同じ時点で
 あり、同じ提示にまとめる。件ごとに聞かない。
@@ -194,7 +201,7 @@ flowchart TD
 | 項目 | 条件 | 実現方式 |
 | --- | --- | --- |
 | 外部への書き込みの量 | 1 群につき起票 1 件と、元の課題 3 件以上の本文の更新が増える | 既存の「外部への書き込みの制限」の待ち方をそのまま使う。**束ねる群の数に上限を置かない** |
-| 中断からの再開 | 書き込みの制限で途中で止まっても、やり直しで上位の課題が 2 件にならない | 元の課題の本文の 1 行を探索キーにし、あれば作成を飛ばす |
+| 中断からの再開 | 書き込みの制限で途中で止まっても、やり直しで上位の課題が 2 件にならず、1 行の入っていない元の課題が残らない | 元の課題の本文の 1 行を探索キーにする。**起票は群に 1 度だけ、1 行の追記は課題ごとに見る** |
 | マイルストーンを持たないリポジトリ | 上位の課題の割り当て先が無い | 既存の「他のリポジトリで動くこと」の規則（扱うこと 2 を飛ばす）がそのまま覆う。**表に行を足さない** |
 | 重要度ラベルを持たないリポジトリ | 群の最高値を採れない | `gh label list` の説明が無ければ付け替えないという既存の規則が覆う。上位の課題は重要度なしで作る |
 
@@ -216,7 +223,7 @@ flowchart TD
 
 | # | 条件 | 欠けたときの行き先 |
 | --- | --- | --- |
-| 1 | 3 件以上が、同じ 1 つの「無いもの」を指す | 2 件以下なら**重複**の突き合わせへ。1 文で書けないなら**要判断** |
+| 1 | 3 件以上が、同じ 1 つの「無いもの」を指す | 2 件以下なら**重複**の突き合わせへ。そこで重複と決まらなければ**既存の判定のまま**。1 文で書けないなら**要判断** |
 | 2 | 上位を直しても、各課題に個別の作業が残る | 残らないなら**重複** |
 | 3 | 上位の課題の受け入れ条件が、作るもの 1 つで書ける | 書けないなら**要判断** |
 
@@ -250,11 +257,17 @@ flowchart TD
 **上位の課題どうしが同じ箇所を直すなら、それは 1 つの群である。** 段 2B で上位の課題の
 完了条件を並べ、作るものが同じなら統合する。
 
-### 決定 7: 上位の課題の重要度は群の最高値を採り、マイルストーンは既存の表で決める
+### 決定 7: 上位の課題の重要度は群の最高値を採り、マイルストーンは群の中で最も早いものを採る
 
-**新しい規則を作らない。** 重要度が決まれば `milestones.md` の既存の表が入れ先を決め、
-高い重要度は直近のまとまりへ入る。群がマイルストーンをまたいでも、最も早いまとまりへ
-入る結果になる。
+**重要度が決まれば `milestones.md` の既存の表が入れ先を決める。** 高い重要度は主題に
+よらず直近のまとまりへ入る。
+
+**主題で決まる重要度では、群の課題が既に属するマイルストーンのうち最も早いものを採る。**
+既存の表は主題が複数に当てはまるときを**要判断**へ倒すが、群は 1 つの上位原因で括られて
+おり、選ぶのは主題ではなく着手の時期である。最も早いものを採るのは、上位を直すまで群の
+どの課題も直らないためで、遅い側に合わせると早いマイルストーンの課題が待つ。群のどの課題も
+マイルストーンを持たないときだけ、既存の表がそのまま決める。この 1 行を `milestones.md` へ
+足す。
 
 **元の課題のマイルストーンは動かさない。** 動かすことは他の課題の着手の順序を早めるか
 遅らせるかの判断にあたり、`milestones.md` が**要判断**へ倒すと定めている。
@@ -276,11 +289,20 @@ flowchart TD
 `out-of-scope` の 3 択を 4 択へ増やす案は採らない。発見の瞬間には指摘の周辺しか見えておらず、
 群を判定する材料が無い。
 
-### 決定 10: `no-work.md` の条件 2 の行き先へ「束ねる」を足す
+### 決定 10: 重複を固定の行き先とする既存の 2 箇所へ「束ねる」を足す
 
-**既存の規則が、新しい値に当てはまらないまま残る箇所である。** 条件 2「同じ原因の他の課題へ
-寄せられない」の欠けたときの行き先は「重複」固定だが、寄せ先が同じ課題でなければ行き先は
-「束ねる」になる。直さないと、群の候補が「重複」へ流れて片方が閉じられる。
+**既存の規則が、新しい値に当てはまらないまま残る箇所である。** 直さないと、群の候補が
+「重複」へ流れて片方が閉じられる。
+
+| 箇所 | 現状 | 直す形 |
+| --- | --- | --- |
+| `no-work.md` の条件 2 の行き先 | 「重複」固定 | 寄せ先が同じ課題でなければ「束ねる」 |
+| `no-work.md` の条件 2 の確かめ方 | 「段 2B の重複の突き合わせの結果を使う」 | 重複と束ねるの両方の突き合わせの結果を使う |
+| `SKILL.md` 段 2B の注記 | 起点が同じ 2 件を重複の枠で説明する | 3 件以上で個別の作業が残るものは束ねるへ倒す分岐を足す |
+
+**注記も同じ軸を扱っている。** 注記は「起点が同じでも片方が残るなら重複ではない」と
+述べており、束ねるの必要条件 2 と同じ判断をしている。行き先を書かないままにすると、
+注記を読んだ担当が 3 件以上の群を重複として分断する。
 
 ### 決定 11: 2 × 2 の表の正本を `issue-upkeep` に置き、他の 3 つは指す
 
@@ -298,6 +320,17 @@ flowchart TD
 すでに起票された課題どうしの関係は対象にしていない。担わないことを書き残す。書かないと、
 次に読む人が同じ検討を繰り返す。
 
+### 決定 13: `milestones.md` の既存の「束ねる」を「一緒に直す」へ言い換える
+
+`milestones.md` は主題の説明で「どれと束ねるか」という語を使っている。判定の名前を
+「束ねる」にすると、同じファイルの中で 2 つの意味が並ぶ。決定 7 でこのファイルへ上位の
+課題の割り当てを足すため、並ぶことが避けられない。
+
+**判定の側を残し、説明の側を言い換える。** 判定の名前は #712 / #713 の本文が使っており
+（前提 1）、変えると課題の本文と食い違う。説明の側は同じ表が既に「どの課題と一緒に直すか」
+と書いており、言い換えても意味が変わらない。言い換えると、`束ねる` の検索が判定だけを
+返す（前提 2 が求める区別）。
+
 ## テスト設計
 
 | 受け入れ条件 | 何で確かめるか |
@@ -305,27 +338,35 @@ flowchart TD
 | AC1 | `test_the_verdict_table_lists_eight_in_order`（`VERDICTS` を 8 つへ） |
 | AC2 | `test_grouping_is_reachable_from_the_verdict_table` |
 | AC3 | `test_grouping_needs_approval`（自動で反映してよい変更の表の行を照合） |
-| AC4 | `test_stage_2b_matches_issues_by_shared_cause` |
-| AC5 | `test_grouping_separates_itself_from_duplication` |
-| AC6 | `test_grouping_has_three_necessary_conditions` |
-| AC7 | `test_grouping_keeps_the_original_issues_open` |
-| AC8 | `test_grouping_shows_the_body_of_the_umbrella_issue` |
-| AC9 | `test_grouping_allows_an_issue_in_two_groups` |
-| AC10 | `test_grouping_has_a_brake_on_size` |
-| AC11 | `test_grouping_takes_the_highest_priority_in_the_group` |
-| AC12 | `test_upkeep_files_only_the_umbrella_issue` |
-| AC13 | `test_the_report_counts_the_groups` |
-| AC14〜AC17 | 上記の各テスト |
-| AC18 | `uv run --with pytest pytest plugins/ndf/skills/issue-upkeep/tests -q` |
-| AC19〜AC21 | **手動確認。** `gh issue view` の出力を Pull Request の本文へ残す |
-| AC22〜AC24 | `test_the_boundary_table_covers_both_judgements` |
-| AC25 | `test_problem_solving_separates_upstream_from_grouping` |
-| AC26 | `test_retrospective_declines_group_discovery` |
-| AC27 | `test_the_callers_point_here`（対象へ `problem-solving` を足す） |
+| AC4 | `test_the_four_topics_include_grouping`（節の見出し・4 行目・案内文・用語の「8 つ」を照合） |
+| AC5 | `test_stage_2a_records_the_upper_cause` |
+| AC6 | `test_stage_2b_matches_issues_by_shared_cause` |
+| AC7 | `test_stage_2b_separates_duplication_from_grouping` |
+| AC8 | `test_grouping_separates_itself_from_duplication` |
+| AC9 | `test_grouping_has_three_necessary_conditions` |
+| AC10 | `test_grouping_keeps_the_original_issues_open` |
+| AC11 | `test_grouping_shows_the_body_of_the_umbrella_issue` |
+| AC12 | `test_grouping_allows_an_issue_in_two_groups` |
+| AC13 | `test_grouping_has_a_brake_on_size` |
+| AC14 | `test_grouping_takes_the_highest_priority_in_the_group` |
+| AC15 | `test_upkeep_files_only_the_umbrella_issue` |
+| AC16 | `test_the_report_counts_the_groups` |
+| AC17〜AC20 | 上記の各テスト |
+| AC21 | `uv run --with pytest pytest plugins/ndf/skills/issue-upkeep/tests -q` |
+| AC22〜AC24 | **手動確認。** `gh issue view` の出力を Pull Request の本文へ残す |
+| AC25〜AC27 | `test_the_boundary_table_covers_both_judgements` |
+| AC28 | `test_problem_solving_separates_upstream_from_grouping` |
+| AC29 | `test_retrospective_declines_group_discovery` |
+| AC30 | `test_the_callers_point_here`（対象は `retrospective` / `release` / `out-of-scope` / `problem-solving`） |
 
-**`no-work.md` の条件 2 の行き先（決定 10）も検査する。** 既存の
-`test_no_work_has_two_necessary_conditions` が条件の文言を照合しているため、行き先の列も
-同じテストで見る。
+**`no-work.md` の条件 2 の行き先と確かめ方（決定 10）も検査する。** 既存の
+`test_no_work_has_two_necessary_conditions` が条件の文言を照合しているため、行き先の列と
+確かめ方の列も同じテストで見る。
+
+**`milestones.md` の語の言い換え（決定 13）も検査する。**
+`test_milestones_separate_grouping_from_the_theme` を足し、主題の説明が「どれと一緒に
+直すか」であることと、`milestones.md` に残る「束ねる」が決定 7 の足す上位の課題の割り当ての
+文だけであることを見る。
 
 ## 未確認のまま残ること
 
