@@ -285,6 +285,10 @@ gh issue edit <issue番号> --repo "$RECORD_REPO" --body-file /tmp/issue-body.md
 
 対象が 0 件ならその Skill 自身が飛ばす。
 
+**振り返りはクラスタの発見を担わない。** クラスタは、同じ修正レイヤーを指す課題の集まりで
+ある。振り返りは 1 回の変更を見るため、変更をまたいで溜まった課題どうしの関係が見えない。
+見つけるのは `issue-upkeep` の「ルートコーズ」である。
+
 ## 関連
 
 - `/ndf:release-verification` — この工程の前に行うリリース後テスト
