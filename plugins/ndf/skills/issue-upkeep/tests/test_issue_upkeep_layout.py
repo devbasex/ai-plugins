@@ -669,3 +669,38 @@ def test_question_restructuring_branches_by_premise_and_gist() -> None:
     assert "主旨まで変わるなら、それは別の課題である" in text
     assert "元の課題を閉じて新しく起票する判断になるため、返す" in text
 
+
+
+# ---------- 発見の瞬間の 3 択（out-of-scope の段 2） ----------
+
+OUT_OF_SCOPE = SKILLS / "out-of-scope" / "SKILL.md"
+
+
+def test_out_of_scope_stage_2_offers_exactly_three_choices() -> None:
+    """段 2 の判断が {起票する, 範囲内へ入れる, 起票しない} の 3 分岐だけであることを固定する。
+
+    表示文字列の完全一致ではなく、判断の列を集合として比較する。この 3 分岐は発見の瞬間の
+    判断の中心で、後の構造改善で表を触る対象になる。
+    """
+    part = section(OUT_OF_SCOPE.read_text(encoding="utf-8"), "### 2. 3 択で決める")
+    rows = table(part, "| 判断 | 選ぶ条件 | 残すもの |")
+    assert {row[0] for row in rows} == {"起票する", "範囲内へ入れる", "起票しない"}
+
+
+def test_out_of_scope_issue_target_needed_only_when_filing() -> None:
+    """「起票先を決める」段が『起票する』を選んだときだけ要ることを固定する。
+
+    起票先が要る分岐は 3 択のうち 1 つだけである。
+    """
+    text = flat(section(OUT_OF_SCOPE.read_text(encoding="utf-8"), "### 3. 起票先を決める"))
+    assert "「起票する」を選んだときだけ行う" in text
+    assert "残る 2 つの判断には起票先が要らない" in text
+
+
+def test_table_helper_does_not_pass_over_a_missing_heading() -> None:
+    """見出し（表）が無い本文では table 補助が投げ、素通りしないことを確かめる。
+
+    段 2 の表を消したときに固定テストが黙って通ってしまわないための番犬。
+    """
+    with pytest.raises(ValueError):
+        table("見出しの無い本文\n", "| 判断 | 選ぶ条件 | 残すもの |")
