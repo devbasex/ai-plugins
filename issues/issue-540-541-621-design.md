@@ -128,8 +128,8 @@ Pull Request どうしの間で起きる。
 
 **起動してよい本数は `min(上限, ⌊(空きメモリ − 予備) ÷ 1 本の見込み⌋)` である。** スワップの空きが
 全体の 25% を下回れば 1 減らし、OOM Killer の回数が実行計画に控えた起点から増えていれば、
-いま動いている本数 − 1 以下に抑える。**どの場合も 1 を下回らない。** 0 本では進行が止まり、
-逐次で進めた過去 11 版で本体は落ちていない。
+いま動いている本数 − 1 以下に抑える。**OOM Killer の回数が増えた見直しを除き、1 を下回らない。** 0 本では進行が止まり、
+逐次で進めた過去 11 版で本体は落ちていない。増えた見直しは 0 を許し、起点を更新した次の見直しで 1 以上に戻る。
 **起点は、増えたのを見た見直しで今の値へ更新する。** 更新しないと以後の見直しがすべて「増えた」になり、
 進行が再開しない。増えた見直しでは起動せず、次の見直しからは新しい起点と比べる。
 
@@ -143,9 +143,10 @@ Pull Request どうしの間で起きる。
 **初期値はコマンドの中の 1 か所だけが持ち、引数で上書きできる。** 実行計画の「測った値」の表が
 起動のたびの値と結果を残し、初期値を直す根拠になる。
 
-**空きメモリは `/proc/meminfo` の `MemAvailable` から取る。** このホストの cgroup の上限は `max` で、
-落ちる境目を決めるのは VM 全体の空きだからである。cgroup に上限があるホストでは、その残りの方が
-小さいことがある。その扱いは未確認として残す（U2）。
+**空きメモリは、VM 全体の空き（`/proc/meminfo` の `MemAvailable`）と cgroup の残り（`memory.max − memory.current`）の
+小さい方を使う。** cgroup に上限があるホストでは、VM に空きがあっても cgroup の残りを超えた時点で落ちる。
+このホストは cgroup の上限が `max` で、VM 全体の空きが決める。cgroup の残りは `capacity` の出力に
+`cgroup_available_mib` として出す。
 
 ### 決定 8: 測定はコマンドが行い、起動の拒否はしない
 
@@ -238,7 +239,7 @@ graph TD
 | --- | --- | --- |
 | 進行側 | 利用者の端末の Claude Code（G3 の親） | 実行計画を書く唯一の主体 |
 | 担当 | 進行側と同じプロセスのサブエージェント | 実行計画を書き換えない。報告で状態を返す |
-| `parallel-measure.py capacity` | 進行側の Bash | `/proc/meminfo` と cgroup の `memory.events` を読むだけ。ネットワークを使わない |
+| `parallel-measure.py capacity` | 進行側の Bash | `/proc/meminfo` と cgroup の `memory.events`・`memory.max`・`memory.current` を読むだけ。ネットワークを使わない |
 | `parallel-measure.py concurrency` | 同上 | `gh pr view` で読むだけ。GitHub へ書き込まない |
 | 実行計画 | 主ディレクトリの `issues/` | 作業ツリーから絶対パスで読める。コミットしない |
 
@@ -334,7 +335,7 @@ graph LR
 | 可用性 | 本数を決める値が OOM Killer の発生より前に出る。再起動した後も読み直せる | 起動の前に毎回 `capacity` を測る（決定 7）。実行計画をディスクに置き、`oom_kill` の起点を控える（決定 5） | 実行計画の「測った値」の表に起動ごとの行がある |
 | 運用・保守性 | 初期値を直す場所が 1 か所。測った値が残る | 初期値は `parallel-measure.py` の定数だけが持ち、文書は値を写さない（決定 7） | 文書に初期値の数値が無いことをテストで見る |
 | セキュリティ | 書き込まない。本文・トークンを出さない | 2 つの副コマンドは読み取りだけを行い、出力は数値と時刻だけにする | 偽の `gh` が受けた引数が `pr view` だけであることをテストで見る |
-| システム環境 | Linux で測れる。測れない環境でも止まらない | `/proc/meminfo` が無ければ終了コード 3。`memory.events` が無ければ `oom_kill=unknown` で続ける。3 のときは実行計画に「測れない」と書き、上限の 3 ではなく 1 本で進める | 入力のファイルを消したテスト |
+| システム環境 | Linux で測れる。測れない環境でも止まらない | `/proc/meminfo` が無ければ終了コード 3。cgroup のディレクトリ（`--cgroup-dir`）に `memory.events` が無ければ `oom_kill=unknown`、`memory.max` か `memory.current` を読めなければ `cgroup_available_mib=unknown` で続ける。3 のときは実行計画に「測れない」と書き、上限の 3 ではなく 1 本で進める | 入力のファイルを消したテスト |
 
 ## テスト設計
 
@@ -346,8 +347,9 @@ graph LR
 | AC14 | 完了判定で `git diff --stat origin/develop -- plugins/ndf/skills/development-workflow/SKILL.md` が空であること。既存の `test_every_stage_says_which_unit_it_moves_in` が通ること |
 | AC20〜AC22・AC24 | `test_issue_upkeep_layout.py`: `milestones.md` に「組を書く」の節、組の表の列（契約の文書）、修正レイヤーと依存する課題の番号から写す文、見込みであり確定は実行計画が持つ文があること。既存の名前と連番のテストがそのまま通ること。段 2A の控える項目の表の行数が変わらないこと |
 | AC31・AC33・AC34 | `test_parallel_measure.py`: 空き 9742MiB・スワップ 2047/310MiB の入力で `allowed=2`、スワップが十分な入力で `allowed=3`、空き 3000MiB で `allowed=1`（下限の 1）、`--per-lane-mib 1024 --max 8` の上書きで値が変わること |
-| AC32 | 同上: `--meminfo` に存在しないパスを渡すと終了コード 3 で、標準出力に `allowed=` を出さないこと。`--memory-events` が無いときは終了コード 0 で `oom_kill=unknown` |
-| AC35 | 同上: `--oom-baseline 1 --running 3` と `oom_kill 2` の入力で `oom_kill_increased=yes` と `allowed=2`、増えていない入力で `oom_kill_increased=no`。`test_execution_plan_doc.py`: `execution-plan.md` に、増えていたらその見直しでは起動しない文と、起点を今の値へ更新して見直しの表へ 1 行足す文があること |
+| AC31・AC33（cgroup の残り） | 同上: `--cgroup-dir` に `memory.max` が数値で cgroup の残りが VM の空きより小さい入力を渡すと、`cgroup_available_mib` がその値になり `by_memory` がそちらで決まること。`memory.max` が `max` の入力では `cgroup_available_mib=max` で VM の空きで決まること。`memory.max` と `memory.current` が無い入力では `cgroup_available_mib=unknown` で VM の空きで決まり、終了コード 0 |
+| AC32 | 同上: `--meminfo` に存在しないパスを渡すと終了コード 3 で、標準出力に `allowed=` を出さないこと。`--cgroup-dir` に `memory.events` が無いときは終了コード 0 で `oom_kill=unknown` |
+| AC35 | 同上: `--oom-baseline 1 --running 3` と `oom_kill 2` の入力で `oom_kill_increased=yes` と `allowed=2`、増えていない入力で `oom_kill_increased=no`。境界として、`oom_kill` が増えた入力に `--running 0` と `--running 1` を渡すと、どちらも `allowed=0` で `limited_by` に `floor` が付かないこと。`test_execution_plan_doc.py`: `execution-plan.md` に、増えていたらその見直しでは起動しない文と、起点を今の値へ更新して見直しの表へ 1 行足す文があること |
 | AC40 | 同上: `--input` に 3 本の区間（重なりあり・端が接するだけ・開いたまま）を渡し、`overlap_minutes`・`concurrency_pct`・`max_open` を固定する。端が接するだけの組は重ならない |
 | AC42 | 同上: `PATH` の先頭に置いた偽の `gh` が受けた引数を記録し、`pr view` 以外が無いこと |
 | AC50〜AC52 | リリース後テスト。次に複数の束を持つまとまりを進めた進行側が、閉じた実行計画のコメント（見直しの表・測った値・閉じたときの測定）と振り返りを読む |
@@ -374,7 +376,6 @@ graph LR
 | # | 項目 | 内容 | いつ決まるか |
 | --- | --- | --- | --- |
 | U1 | 1 本の見込み 2048MiB が CLI を起動した担当の実際に合うか | 5〜6 本のときの cgroup の最大使用量からの推定で、CLI ごとの常駐の値は測っていない。合わなければ実行計画の測った値の表から直す | リリース後テスト |
-| U2 | cgroup の上限が `max` でないホストで、`memory.max − memory.current` を空きと比べて小さい方を採るか | このホストでは上限が `max` で確かめられない。採るなら `capacity` の出力へ `cgroup_available_mib` を足し、`by_memory` の元にする | 本数の測定の Pull Request の実装 |
 | U3 | `scripts/build-runtime-plugins.sh` と `validate-runtime-plugins.sh` が `plugins/ndf/scripts/` の新しいファイルを一覧で持つか | 一覧で持つなら同じ Pull Request で足す | 同上 |
 | U4 | 閉じた実行計画のコメントが、GitHub のコメントの長さの上限に収まるか | 行が数十本のまとまりで超えるなら、`<details>` で見直しの表だけを畳む | 実行計画の Pull Request の実装 |
 | U5 | `issue-plan-strategy` の `description` に実行計画の語を足すか | 足すと発動の候補が変わる。`AUTHORING.md` の規約と `check-skill-frontmatter.py` で判断する | 同上 |

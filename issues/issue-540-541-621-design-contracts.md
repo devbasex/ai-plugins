@@ -41,9 +41,9 @@ oom_kill の起点: 1
 
 ## 測った値
 
-| 時刻 | 空き（MiB） | スワップの空き（MiB） | oom_kill | 動いている本数 | 起動してよい本数 | 起動した行 |
-| --- | ---: | ---: | --- | ---: | ---: | --- |
-| 2026-09-17T03:00Z | 9742 | 310 | 1 | 0 | 2 | G2-設計 |
+| 時刻 | 空き（MiB） | cgroup の残り（MiB） | スワップの空き（MiB） | oom_kill | 動いている本数 | 起動してよい本数 | 決めた条件 | 起動した行 |
+| --- | ---: | ---: | ---: | --- | ---: | ---: | --- | --- |
+| 2026-09-17T03:00Z | 9742 | max | 310 | 1 | 0 | 2 | memory,max,swap_low | G2-設計 |
 
 ## 見直し
 
@@ -67,7 +67,7 @@ oom_kill の起点: 1
 | 確度 | `見込み` / `確定`。設計のレビューが収束した見直しで、その束の行を `確定` にする |
 | 設計の依存・実装の依存 | `なし`、または `<行>:収束` / `<行>:マージ` を読点で並べる。設計の行の「実装の依存」は `—` |
 | 状態 | `待ち` / `着手できる` / `動いている` / `承認待ち` / `止まった` / `マージ済み` |
-| 測った値の各列 | `parallel-measure.py capacity` の出力の値をそのまま写す。測れなかった行は空きの列に `測れない` と書く |
+| 測った値の各列 | `parallel-measure.py capacity` の出力のうち、次のキーの値をそのまま写す。空き=`mem_available_mib`、cgroup の残り=`cgroup_available_mib`、スワップの空き=`swap_free_mib`、oom_kill=`oom_kill`、動いている本数=`running`、起動してよい本数=`allowed`、決めた条件=`limited_by`。`swap_total_mib`・`oom_kill_increased`・`by_memory` は写さない（起動のたびに変わらないか、他の列から導ける）。測れなかった行は空きの列に `測れない` と書く |
 | 閉じたときの測定 | `parallel-measure.py concurrency` の出力と、`oom_kill` の最後の値 − 測った値の表の最初の行の `oom_kill`（起点は見直しで更新されるため、開始時の値から数える） |
 
 ### 見直しの手順
@@ -150,7 +150,7 @@ oom_kill の起点: 1
 | `--max N` | `3` | 上限 |
 | `--swap-free-min-pct N` | `25` | スワップの空きの閾値（%） |
 | `--meminfo PATH` | `/proc/meminfo` | 空きとスワップを読む元 |
-| `--memory-events PATH` | `/sys/fs/cgroup/memory.events`。無ければ `/proc/self/cgroup` の `0::<path>` から導いたパス | `oom_kill` を読む元 |
+| `--cgroup-dir DIR` | `/sys/fs/cgroup`。そこに `memory.events` が無ければ `/proc/self/cgroup` の `0::<path>` から導いた `/sys/fs/cgroup<path>` | `memory.events`（`oom_kill`）・`memory.max`・`memory.current` を読む元 |
 
 **既定値を持つのはこの表の実装（スクリプトの定数）だけである。** 文書は値を写さず、引数の名前だけを書く。
 
@@ -160,19 +160,23 @@ oom_kill の起点: 1
 | --- | --- |
 | `mem_available_mib` | `MemAvailable` ÷ 1024 の切り捨て |
 | `swap_total_mib` / `swap_free_mib` | `SwapTotal` / `SwapFree` ÷ 1024 の切り捨て |
+| `cgroup_available_mib` | `memory.max` が数値なら `(memory.max − memory.current) ÷ 1048576` の切り捨て（負なら 0）。`memory.max` が `max` なら `max`。読めなければ `unknown` |
 | `oom_kill` | `memory.events` の値。読めなければ `unknown` |
 | `oom_kill_increased` | `yes` / `no` / `unknown`（起点が無い、または `oom_kill` が `unknown`） |
 | `running` | `--running` の値 |
-| `by_memory` | `⌊(mem_available_mib − reserve) ÷ per_lane⌋`。負なら 0 |
+| `by_memory` | `⌊(min(mem_available_mib, cgroup_available_mib) − reserve) ÷ per_lane⌋`。`cgroup_available_mib` が `max` / `unknown` のときは `mem_available_mib` だけを使う。負なら 0 |
 | `allowed` | 下の式の結果 |
 | `limited_by` | `allowed` を決めた条件を `,` で並べる。`memory` / `max` / `swap_low` / `oom_kill_increased` / `floor` |
 
 ```text
 allowed = min(max, by_memory)
 swap_total > 0 かつ swap_free × 100 < swap_total × swap_free_min_pct なら allowed -= 1
-oom_kill_increased = yes なら allowed = min(allowed, running - 1)
-allowed = max(allowed, 1)
+oom_kill_increased = yes なら allowed = max(0, min(allowed, running - 1))（下限の 1 を当てない）
+それ以外なら allowed = max(allowed, 1)
 ```
+
+**OOM Killer の回数が増えた見直しだけは 0 を許す。** `running` が 0 か 1 のとき、下限の 1 を当てると
+「今の本数 − 1 以下」を満たせない。その見直しで起点を今の値へ更新するため、次の見直しでは下限の 1 に戻る。
 
 **`limited_by` には、次の条件を満たした値を表の順に `,` で並べる。** `memory` と `max` の少なくとも一方は必ず付く。
 
@@ -181,8 +185,8 @@ allowed = max(allowed, 1)
 | `memory` | `by_memory ≤ max`（空きメモリが `min` を決めた。等しいときも付ける） |
 | `max` | `max ≤ by_memory`（上限が `min` を決めた。等しいときも付ける） |
 | `swap_low` | スワップの減算を行った |
-| `oom_kill_increased` | `running - 1` を当てて値が下がった |
-| `floor` | 最後の `max(allowed, 1)` で値が上がった |
+| `oom_kill_increased` | `max(0, min(allowed, running - 1))` を当てて値が下がった |
+| `floor` | `oom_kill_increased` が `yes` でない見直しで、最後の `max(allowed, 1)` を当てて値が上がった |
 
 **2026-09-17 のこのホストの値での出力（`--running 0`）:**
 
@@ -190,6 +194,7 @@ allowed = max(allowed, 1)
 mem_available_mib=9742
 swap_total_mib=2047
 swap_free_mib=310
+cgroup_available_mib=max
 oom_kill=1
 oom_kill_increased=unknown
 running=0
@@ -200,7 +205,7 @@ limited_by=memory,max,swap_low
 
 | 終了コード | いつ |
 | ---: | --- |
-| 0 | 測れた（`oom_kill` が `unknown` でも 0） |
+| 0 | 測れた（`oom_kill` や `cgroup_available_mib` が `unknown` でも 0） |
 | 2 | 引数の誤り（未知の引数・整数でない値・負の値） |
 | 3 | `--meminfo` を読めない、または `MemAvailable` が無い。標準出力に何も出さず、標準エラーに理由を 1 行出す |
 
