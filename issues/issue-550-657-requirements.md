@@ -190,8 +190,9 @@ working on when the limit was reached; do not repeat work that is already comple
   記録が合成の応答で始まっても、固定費は最初の合成でない応答の値になる
 - [ ] AC25: 終わり方は `completed` / `in_progress` / `rate_limit` / `api_error` のいずれかで、判定は順序を持つ。
   429 で中断した後に `SendMessage` で続けた記録は `in_progress` または `completed` になり、中断の回数が別の列に出る
-- [ ] AC26: 層は記録の深さで決まる（0 = president、1 = supervisor、2 = worker）。
-  持ち場と作業の種類は起動時の `description`（`.meta.json`）から取り、設計文書が決める語彙で始まらないものは `その他` になる
+- [ ] AC26: 層は記録の深さと `description` で決まる。0 = president、2 以上 = worker。
+  **深さ 1 は、`description` の先頭語が作業の種類の語彙なら worker、それ以外は supervisor** になる（president が読解の worker を直接起動するため）。
+  持ち場（supervisor）と作業の種類（worker）は `description` の先頭語から取り、その層の語彙で始まらないものは `その他` になる
 - [ ] AC27: `--session <セッション ID>` で 1 つのセッション（president とその配下のすべての層）に絞れる。繰り返して複数を渡せる
 - [ ] AC28: 応答が 3 回に満たない記録は分布の集計から外れ、外した件数が 1 行出る
 - [ ] AC29: 層と持ち場（worker は作業の種類）とモデルの組ごとに、件数・固定費の中央値・実作業の中央値・
@@ -299,6 +300,7 @@ working on when the limit was reached; do not repeat work that is already comple
 | U4 | `SendMessage` による再開が、president のセッションを `--resume` で開き直した後も効くか | 実機で確かめる。効かなければ AC42 の後段（工程の頭から新しい supervisor）へ落とす | 実装（C の Pull Request） |
 | U5 | 層ごとにモデルを変えたとき、上限を共有しない場合があるか | `quotaLimits.rateLimitType` の値の種類を記録から集める | 実装（C の Pull Request） |
 | U6 | supervisor が落ちている間に worker が動き続けられるか（worker の再開を president が肩代わりせずに済むか） | 実機で、supervisor だけが 429 で落ちた実行の記録を読む | リリース後テスト |
+| U7 | supervisor が自分の `agent_id` を環境から取れないこと（`CLAUDE_AGENT_ID` は存在しない。このサブエージェントの環境で確かめた）を前提に、**起動の結果に出る `agentId` を context window で持ち回る**形で足りるか | 実機で、worker を 3 つ起動した supervisor が全部を再開できるかを見る | 実装（C の Pull Request） |
 
 ## 用語
 

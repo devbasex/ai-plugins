@@ -215,7 +215,7 @@ president は目を覚ますたびに 1 回行う（契機は設計文書の処�
 
 | 順 | 行うこと | 使うもの |
 | ---: | --- | --- |
-| 1 | 自分が起動した worker のうち中断したものを一覧する | `interrupted --session "$CLAUDE_CODE_SESSION_ID" --layer worker --parent "$CLAUDE_AGENT_ID"`。`--parent` を取れない環境では、自分の context window にある `agent_id` で絞る |
+| 1 | 自分が起動した worker のうち中断したものを一覧する | `interrupted --session "$CLAUDE_CODE_SESSION_ID" --layer worker --agent <id> …`。**`<id>` は worker を起動したときの結果に出た `agentId` で、supervisor が自分の context window に持っている。** `CLAUDE_AGENT_ID` のような環境変数は無い（このサブエージェントの環境で確かめた）ため、自分の `agent_id` からは絞らない |
 | 2 | `resets_passed` が真の worker を `SendMessage` で続けさせる | `agent_id` |
 | 3 | 続けられない worker は、同じ作業をもう一度 `Agent` で起動する（作業は 1 つに絞ってあるため、やり直しの費用は持ち場より小さい） | 起動の指示を作り直す |
 
@@ -230,7 +230,7 @@ president は目を覚ますたびに 1 回行う（契機は設計文書の処�
 | コマンド | 引数 | 出力 | 終了コード |
 | --- | --- | --- | --- |
 | `list` | `--session <ID>`（必須、繰り返し可）/ `--layer <層>`（省くと全層）/ `--format md\|json` | そのセッションの 3 層すべての `AgentRecord` | 0。記録が 1 件も無ければ 0 で空の一覧と理由 1 行 |
-| `interrupted` | `--session <ID>` / `--layer <層>` / `--depth <数>` / `--parent <agent_id>` / `--now <ISO 8601>`（テスト用）/ `--format md\|json` | `ending` が `rate_limit` の記録だけ。`resets_passed`（真偽）を足す。`--depth 1` は president の直下（supervisor と直接起動した worker）を返す | 0 |
+| `interrupted` | `--session <ID>` / `--layer <層>` / `--depth <数>` / `--agent <agent_id>`（繰り返し可）/ `--parent <agent_id>` / `--now <ISO 8601>`（テスト用）/ `--format md\|json` | `ending` が `rate_limit` の記録だけ。`resets_passed`（真偽）を足す。`--depth 1` は president の直下（supervisor と直接起動した worker）を返す | 0 |
 | `wait-reset` | `--session <ID>` / `--layer <層>` / `--depth <数>` / `--margin <秒>`（既定 60）/ `--max-sleep <秒>`（既定なし） | 眠った秒数と、起きた時点の中断した記録の数を 1 行。**眠るのは、まだ来ていない解除時刻のうち最も早いもの + `--margin` まで**である | 0 = 解除時刻を過ぎた。3 = `--max-sleep` で区切った（まだ解除前）。2 = 引数の誤り |
 
 **読めない行・壊れたファイルは飛ばし、飛ばした件数を標準エラーへ 1 行出す。** 終了コードは変えない。引数の誤りだけが 2 を返す。
@@ -244,14 +244,14 @@ president は目を覚ますたびに 1 回行う（契機は設計文書の処�
 
 `~/.claude` は環境変数 `CLAUDE_CONFIG_DIR` があればそちらを使う。
 
-**起動元は `toolUseId` でたどる。** `.meta.json` の `toolUseId` と同じ id の `tool_use`（`name` が `Agent`）を含む記録が起動元である。実測（`95dd816c…` のセッション、19 件）で、深さ 1 の 4 件は president の記録に、深さ 2 の 15 件はそれぞれの supervisor の記録に当たった。`--parent` の絞り込みと `role_usage` の集計はこの値を使う。
+**起動元は `toolUseId` でたどる。** `.meta.json` の `toolUseId` と同じ id の `tool_use`（`name` が `Agent`）を含む記録が起動元である。実測（`95dd816c…` のセッション、19 件）で、深さ 1 の 4 件は president の記録に、深さ 2 の 15 件はそれぞれの supervisor の記録に当たった。`--parent` の絞り込みと `role_usage` の集計はこの値を使う。**supervisor が自分の worker を絞るときは `--agent` を使う**（自分の `agent_id` を環境から取れないため）。
 
 ### `AgentRecord` の値
 
 | キー | 型 | 取り方 |
 | --- | --- | --- |
 | `layer` | 文字列 | 深さと `description` から決める。0 = `president`。2 以上 = `worker`。1 は、先頭語が作業の種類の語彙にあれば `worker`、それ以外は `supervisor` |
-| `role` | 文字列 | president は `-`。ほかは `.meta.json` の `description` の最初の `: ` より前が層の語彙にあればその値、無ければ `その他` |
+| `role` | 文字列 | president は `-`。supervisor は `.meta.json` の `description` の最初の `: ` より前が**持ち場**の語彙にあればその値。worker は同じ位置が**作業の種類**の語彙にあればその値。当たらなければ `その他` |
 | `agent_id` | 文字列 / null | ファイル名の `agent-<ID>`。president は null |
 | `depth` | 整数 | president 0。ほかは `spawnDepth` |
 | `model` | 文字列 / null | 合成でない応答の `message.model` のうち最も多いもの |
