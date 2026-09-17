@@ -64,6 +64,7 @@
 | 2 | 同じブランチで、リモートのブランチを消して `fetch --prune` した後に `git branch -d` | `error: the branch 'feat/x' is not fully merged` / 終了コード 1 |
 | 3 | 未追跡ファイルを持つ worktree を `git worktree remove` | `fatal: '.worktrees/feat/y' contains modified or untracked files, use --force to delete it` / 終了コード 128 |
 | 4 | **無視されたファイルだけを持つ worktree を `git worktree remove`** | **終了コード 0。無視されたファイルは確認なしに消える** |
+| 5 | 無視されたファイル（`.env` と `scripts/__pycache__/a.pyc`）を持つ worktree で、`git status --ignored --porcelain` の `!!` の行（`.env` / `scripts/`）を共通の git ディレクトリの下の退避先へ同じ相対パスで `mv` した後に `git worktree remove` | 終了コード 0。退避先に 2 ファイルが残る |
 
 **2 行目と 4 行目は #561 の本文に無い境界である。**
 
@@ -83,7 +84,7 @@
 | `development-workflow/references/stage-notes.md` の後片付けの段落 | #561 |
 | 実行前確認を持つ他の Skill（`pr` / `release` / `out-of-scope` / `official-skills-autoloader` / `issue-upkeep` の「やらない」）の分類し直し。**手順は変えない** | #561 の判断が要る点 1 |
 | squash / rebase でマージしたブランチと、無視されたファイルを持つ worktree の扱い | 上の実測 |
-| まとまりの課題を閉じる時点の決定と、それを書く Skill（`progress-tracking` / `release` / `retrospective` / `merged`） | #623 |
+| まとまりの課題を閉じる時点の決定と、それを書く Skill（`progress-tracking` / `release` / `release-verification` / `retrospective` / `merged`） | #623 |
 | まとまりの工程を誰がどの課題へ記録するか | #623 のコメント 1 |
 | コミットメッセージの閉じる語による自動クローズの揺れ（`pr`） | #623 の案 4 |
 
@@ -124,8 +125,8 @@
       「マージ済みブランチの整理」で見つかり、Pull Request の head と対応付かないリモートブランチの扱いが書かれている
 - [ ] A7: squash / rebase でマージしたために `git branch -d` が拒むブランチの扱いが `merged/SKILL.md` に書かれている。
       その扱いが A5 を破らない
-- [ ] A8: 作業ツリーに無視されたファイル（`git status --ignored --short` の `!!` の行）があるときの扱いが
-      `merged/SKILL.md` に書かれている
+- [ ] A8: 作業ツリーに無視されたファイル（`git status --ignored --short` の `!!` の行）があるとき、消さずに退避してから
+      作業ツリーを消すことと、退避先が作業完了報告に載ることが `merged/SKILL.md` に書かれている
 - [ ] A9: 作業完了報告に、消した対象ごとの復元の手段が載る
 
       | 対象 | 復元の手段 |
@@ -157,20 +158,21 @@
 ### C. まとまりの課題を閉じる時点（#623）
 
 - [ ] C1: 設計文書の「決定の記録」に、チャネルを分けたリポジトリでまとまりの課題を閉じる時点の決定がある。#623 の 4 案を比べた理由も書かれている
-- [ ] C2: 決めた時点が、`merged` / `progress-tracking` / `release` / `retrospective` の 4 つの `SKILL.md` で食い違わない。
+- [ ] C2: 決めた時点が、`merged` / `progress-tracking` / `release` / `release-verification` / `retrospective` の 5 つの `SKILL.md` で食い違わない。
       **課題を閉じる手順を持つのは 1 か所だけで、ほかはそこを指す**
-- [ ] C3: 終わりの工程が振り返りでないモード（`light`、振り返りを通らない `operation`）でも、課題を閉じる手順へ辿り着く。
+- [ ] C3: 終わりの工程が振り返りでないモード（`light`、リリース後テストだけを通る `operation`、どちらも通らない `operation`）でも、課題を閉じる手順へ辿り着く。
       そのモードの終わりの工程の Skill に、閉じる手順を呼ぶ記述がある
 - [ ] C4: 盤面の宣言があるリポジトリと無いリポジトリで、閉じる時点が同じである。
       `Auto-close issue` が有効でも無効でも、終わりの工程を通った後に OPEN の課題が残らない
 - [ ] C5: チャネルを分けていないリポジトリで、既定ブランチへのマージによる自動クローズが先に閉じた場合の扱いが書かれている。
       二重に閉じようとしても結果が変わらない
 - [ ] C6: `issue-upkeep` の段 1 が読む「このまとまりで閉じた課題」が、`issue-upkeep` を呼ぶ時点で閉じている。
-      閉じる手順が `issue-upkeep` の呼び出しより前に置かれている
+      `release`・`release-verification`・`retrospective` のどれでも、閉じる手順が `issue-upkeep` の呼び出しより前に置かれている
 - [ ] C7: コミットメッセージの閉じる語による自動クローズの扱いが決まり、`pr/SKILL.md` に書かれている
 - [ ] C8: 課題を閉じるときに利用者の入力を求めない。閉じた課題と reopen の手段が、閉じた工程の完了報告に載る
 - [ ] C9: `progress-tracking/SKILL.md` に、工程に入った時点で呼ぶ記録と、終わりの工程を出るときに行う「まとまりを閉じる」が
-      別の契機であることが書かれている。後者の手順の正本がこの Skill にあり、`release` と `retrospective` が呼ぶ
+      別の契機であることが書かれている。後者の手順の正本がこの Skill にあり、`release`・`release-verification`・`retrospective` が呼ぶ
+- [ ] C10: 閉じられなかった課題が 1 件でもあれば、終わりの工程の完了報告にその課題と理由とやり直すコマンドが載り、完了と報告しない
 
 ### D. まとまりの工程の記録（#623 のコメント 1）
 
@@ -249,6 +251,6 @@
 | 取り消せる操作 | 失う状態を git 自身が拒むか、事後の手段（ハッシュからの復元・Restore branch・reopen）で元へ戻せる操作 |
 | まとまり | 1 回の配布で出す変更の集合（`parallel-work.md` の定義。マイルストーンがこれに当たる）。単独の変更は 1 件のまとまり |
 | まとまりの課題 | まとまりに含まれる Pull Request の本文が、閉じる語で指す課題 |
-| 終わりの工程 | モードの経路の最後の工程（`standard` なら振り返り、`light` なら配布） |
+| 終わりの工程 | そのモードの経路で最後に通る工程。振り返りを通るなら振り返り（`retrospective`）、通らずリリース後テストを通るならリリース後テスト（`release-verification`）、どちらも通らなければ配布（`release`） |
 | 進行側 | まとまりの最後のマージを行う側（`release` の「担い手」） |
 | チャネルを分けたリポジトリ | 開発の起点（`base_branch`）と本番のチャネル（`production_branch`、無ければ既定ブランチ）が別のブランチであるリポジトリ |

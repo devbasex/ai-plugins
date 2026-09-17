@@ -9,8 +9,8 @@
 | --- | --- | --- |
 | F1 | 実行前確認を置くかどうかを、操作が実際に取り消せるかで決める基準 | Skill の書き手 |
 | F2 | マージ後の後片付けを、git が拒むときだけ止めて通す | マージした側（担当・進行側） |
-| F3 | 止めずに消した対象と、その戻し方を作業完了報告に並べる | 運用者 |
-| F4 | まとまりの課題を、まとまりの終わりの工程を通った時点で閉じる | 進行側 |
+| F3 | 止めずに消した対象と、その戻し方（退避した無視されたファイルを含む）を作業完了報告に並べる | 運用者 |
+| F4 | まとまりの課題を、まとまりの終わりの工程を通った時点で閉じ、閉じられなければ止まる | 進行側 |
 | F5 | まとまり単位・Pull Request 単位の工程を、単位に含まれる課題すべてへ記録する | 工程を行った側 |
 | F6 | コミットメッセージに閉じる語を書かず、既定ブランチへのマージで課題が割れて閉じないようにする | `pr` を使う全員 |
 
@@ -24,7 +24,8 @@
 | `plugins/ndf/skills/AUTHORING.md` | 実行前確認の要否を決める 3 つの問いと、守り方 3 つ、適用表を持つ | F1 | 「`allowed-tools` の意味と付け方」の 1 行、「取り消しの難しい操作をどちらで守るか」（見出しごと書き換える） |
 | `plugins/ndf/skills/merged/SKILL.md` | 後片付けの操作と、止まる条件と、戻し方の報告を持つ。**課題を閉じない** | F2 F3 F5 | frontmatter の `description`、「削除前の同意取得（必須）」、「クリーンアップの手順」4〜8、「閉じ忘れた issue を閉じる」（節ごと差し替える）、「マージ済みブランチの整理」、「作業完了報告」、「次の工程」の 2 段落目と 3 段落目、末尾の進行の記録の 1 行 |
 | `plugins/ndf/skills/progress-tracking/SKILL.md` | まとまりの課題の集め方、単位ごとの記録の担い手、**まとまりを閉じる唯一の手順**を持つ | F4 F5 | 冒頭の「この Skill は順序を持たない」の段落（例外として終わりの記録を足す）、「呼び方」の `status` の段落、新設「工程の単位と記録する課題」、新設「まとまりを閉じる」 |
-| `plugins/ndf/skills/release/SKILL.md` | 振り返りを通らない変更で、課題の手入れの前にまとまりを閉じる。まとまりの範囲の確認を開始条件に持つ。配布の Pull Request の本文に `まとまり:` の行を置く | F4 | 「開始条件」、手順 3 の配布の Pull Request の本文、「蓄積した課題を手入れする」 |
+| `plugins/ndf/skills/release/SKILL.md` | 後にリリース後テストも振り返りも続かない変更で、課題の手入れの前にまとまりを閉じる（「蓄積した課題を手入れする」の条件が「振り返りを通らない変更」からこれに変わる）。まとまりの範囲の確認を開始条件に持つ。配布の Pull Request の本文に `まとまり:` の行を置く | F4 | 「開始条件」、手順 3 の配布の Pull Request の本文、「蓄積した課題を手入れする」 |
+| `plugins/ndf/skills/release-verification/SKILL.md` | 後に振り返りが続かない変更で、まとまりを閉じてから `issue-upkeep` を呼ぶ | F4 | 末尾の進行の記録の近くに節を 1 つ新設 |
 | `plugins/ndf/skills/retrospective/SKILL.md` | 振り返りの後、課題の手入れの前にまとまりを閉じる | F4 | 進行の記録の 1 行（「この工程で終わるため…Done にする」） |
 | `plugins/ndf/skills/pr/SKILL.md` | コミットメッセージに閉じる語を書かない | F6 | 手順の `git commit` の行の直後（2 か所）に 1 行ずつ |
 | `plugins/ndf/skills/development-workflow/SKILL.md` | 関門の外で工程の側が実行前確認を足さない原則を持つ | F1 | **「人手の承認を求める関門」の冒頭の 2 段落だけ。行数を増やさない**（決定 11）。「`/goal` の引数として呼ばれたとき」は触らない |
@@ -46,6 +47,7 @@ graph TD
   subgraph 工程の Skill
     MG[merged]
     RL[release]
+    RV[release-verification]
     RT[retrospective]
     PR[pr]
   end
@@ -57,7 +59,8 @@ graph TD
   SN --> AU
   MG --> AU
   MG -->|後片付けを記録| PT
-  RL -->|振り返りを通らないとき| PT
+  RL -->|後に工程が続かないとき| PT
+  RV -->|振り返りが続かないとき| PT
   RT -->|振り返りの後| PT
   PT --> CI
   PR -.->|閉じる語は本文だけ| CI
@@ -113,6 +116,7 @@ plugins/ndf/
     ├── pr/SKILL.md                            # 変える
     ├── progress-tracking/SKILL.md             # 変える
     ├── release/SKILL.md                       # 変える
+    ├── release-verification/SKILL.md          # 変える
     └── retrospective/SKILL.md                 # 変える
 ```
 
@@ -156,7 +160,7 @@ plugins/ndf/
 
 | 対象 | 止めずに行う | 止まる（一覧で示し、同意の無い対象を消さない） | 触らない（報告に「対象外」） |
 | --- | --- | --- | --- |
-| 作業ツリー | `git worktree remove <path>` が 0 で終わる | 同じコマンドが 0 以外で終わる | — |
+| 作業ツリー | `git -C <path> status --porcelain` が空で、無視されたファイルを退避した後の `git worktree remove <path>` が 0 で終わる（決定 5） | `status --porcelain` が空でない、または `git worktree remove` が 0 以外で終わる | — |
 | ローカルブランチ | `git branch -d <name>` が 0 で終わる | 同じコマンドが 0 以外で終わる | 起点・本番のチャネル・現在のブランチ |
 | リモートブランチ | マージ済み Pull Request の head で、同じリポジトリにあり、先端が `headRefOid` と一致する | 先端が `headRefOid` と違う、対応する Pull Request が見つからない | 起点・本番のチャネル・fork の head |
 | 課題 | **閉じない**（まとまりの課題の OPEN の一覧を報告に載せるだけ） | — | — |
@@ -175,7 +179,7 @@ plugins/ndf/
 | --- | --- |
 | 消したローカルブランチ | `<名前>`（`<削除時のハッシュ>`）— 戻すなら `git branch <名前> <ハッシュ>` |
 | 消したリモートブランチ | `origin/<名前>` — 戻すなら `<Pull Request の URL>` の Restore branch |
-| 消した作業ツリー | `<パス>`。**消えた無視されたファイル**があれば、その上位のパスと件数（戻せない。決定 5） |
+| 消した作業ツリー | `<パス>`。無視されたファイルを退避したなら、退避先のパスと容量（`du -sh <退避先>`）— 戻すなら `mv <退避先>/<パス> <作業ツリーを作り直した先>/<パス>`（決定 5） |
 | 対象外 | 名前と理由（起点 / 本番のチャネル / 現在のブランチ / fork） |
 | 止まった対象 | 上の「止まったときの一覧」と、同意の結果 |
 | まとまりの課題 | このマージの閉じる語が指す課題のうち OPEN のもの。「閉じるのはまとまりの終わりの工程（`progress-tracking` の「まとまりを閉じる」）」と添える |
@@ -186,43 +190,60 @@ plugins/ndf/
 ### `progress-tracking` の「まとまりを閉じる」
 
 **工程に入った時点で呼ぶ記録とは契機が違う。** この手順は終わりの工程を出るときに 1 度だけ行い、
-正本をこの Skill に置いて `release` と `retrospective` から呼ぶ。
+正本をこの Skill に置いて終わりの工程の Skill から呼ぶ。**終わりの工程は、そのモードの経路で最後に通る工程である**
+（工程表は `development-workflow/SKILL.md` の「モードごとに起動する Skill」。`operation` のリリース後テストと振り返りはそれぞれ条件付き）。
 
 ```bash
 RECORD_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 
 # 1. まとまりの Pull Request の一覧を得る。同じ実行の中なら release が承認の提示に並べた一覧を使う。
 #    別の実行なら、配布の Pull Request（retrospective の「Pull Request の番号を特定する」が引くもの）の本文から取る
-gh pr view <配布のPR番号> --repo "$RECORD_REPO" --json body -q .body \
-  | sed -n 's/^まとまり: //p' | grep -oE '#[0-9]+' | tr -d '#'
+bundle_prs=$(gh pr view <配布のPR番号> --repo "$RECORD_REPO" --json body -q .body \
+  | sed -n 's/^まとまり: //p' | grep -oE '#[0-9]+' | tr -d '#')
+[ -n "$bundle_prs" ] || echo "まとまりの行が無い。推測せず運用者に一覧を聞く" >&2
 
 # 2. まとまりの課題を集める。1 の Pull Request ごとに
 gh pr view <PR番号> --repo "$RECORD_REPO" --json body -q .body | bash "$SCRIPTS/lib/closing-issues.sh"
 # → <所有者>/<リポジトリ><TAB><番号> の行。重複は 1 つにする
 
-# 3. 課題ごとに、盤面を Done にしてから、まだ OPEN なら閉じる。盤面は記録のリポジトリの課題だけ
+# 3. 課題ごとに、盤面を Done にしてから、まだ OPEN なら閉じ、読み直して CLOSED を確かめる。盤面は記録のリポジトリの課題だけ
 [ "<所有者>/<リポジトリ>" = "$RECORD_REPO" ] && bash "$SCRIPTS/projects-sync.sh" <番号> status "Done"
 gh issue view <番号> --repo <所有者>/<リポジトリ> --json state -q .state        # OPEN / CLOSED
 gh issue close <番号> --repo <所有者>/<リポジトリ> --comment "まとまり（<マイルストーン>）の<工程名>を通りました"
+gh issue view <番号> --repo <所有者>/<リポジトリ> --json state -q .state        # CLOSED なら「閉じた」
 ```
 
 | 呼ぶ Skill | 呼ぶ時点 | 呼ぶ条件 |
 | --- | --- | --- |
-| `retrospective` | 記録を投稿した後、`issue-upkeep` を呼ぶ前 | 振り返りを通る変更 |
-| `release` | 「蓄積した課題を手入れする」の `issue-upkeep` を呼ぶ前 | 振り返りを通らない変更（`light`、振り返りを通らない `operation`） |
+| `retrospective` | 記録を投稿した後 | 振り返りを通る変更 |
+| `release-verification` | 検証結果を記録した後 | 後に振り返りが続かない変更（振り返りを通らない `operation`） |
+| `release` | 「蓄積した課題を手入れする」の前 | 後にリリース後テストも振り返りも続かない変更（`light`、どちらも通らない `operation`） |
+
+**いずれも「まとまりを閉じる → `issue-upkeep`」の順で呼ぶ。**
 
 - **一覧の取得元は配布の Pull Request の本文である。** `release` は配布の Pull Request を作る形で、出力物の
   `まとまり: PR #<番号> / …` の行を本文にも置く（決定 10）
-- **一覧の行が無ければ推測しない。** 手順 1 の `grep` が 1 で終わったら、運用者に一覧を聞く（`retrospective` の段 3 と同じ扱い）
+- **一覧の行が無ければ推測しない。** 手順 1 の出力が空なら、運用者に一覧を聞く（`retrospective` の段 3 と同じ扱い）。
+  終了コードで見ないのは、パイプの終了コードが最後のコマンド（`tr`）のもので、`pipefail` の有無で変わるためである
 - **他のリポジトリの課題には盤面を書かない。** `projects-sync.sh` は `--repo` を取らず、実行したリポジトリの
   `.ndf/projects.json` の盤面で番号を引く。他のリポジトリの番号を渡すと、同じ番号の別の課題を更新する。
   一致しないときは `gh issue close --repo` だけを行う
 - **盤面を先に書き、閉じるのは OPEN のときだけ。** `Auto-close issue` が有効なら Done で閉じ、
   無効なら `gh issue close` が閉じる。どちらでも終わりの状態は同じになる
-- 既に CLOSED なら何もしない（既定ブランチへのマージで GitHub が先に閉じた場合を含む）
-- 閉じた課題の番号と、戻し方 `gh issue reopen <番号> --repo <所有者>/<リポジトリ>` を完了報告へ載せる
 - 閉じる語の注意（番号ごとに要る・大小を区別しない・`gh issue close` は `owner/repo#番号` を受け取らない）は
   `merged` から移す
+
+**課題の状態は必須、盤面は報告だけである。** 盤面（`projects-sync.sh`）は失敗しても 0 で返る今の契約のまま使い、
+出た NOTE の行を報告へそのまま載せる。課題ごとの結果は次の 3 つのどれかにする。
+
+| 結果 | 条件 | 報告に載せるもの |
+| --- | --- | --- |
+| `閉じた` | 手順 3 の読み直しが CLOSED | 番号と戻し方 `gh issue reopen <番号> --repo <所有者>/<リポジトリ>` |
+| `既に閉じていた` | 手順 3 の最初の読み取りが CLOSED（既定ブランチへのマージで GitHub が先に閉じた場合を含む） | 番号 |
+| `失敗（理由）` | 読み取り・`gh issue close` が 0 以外で終わった、または読み直しが CLOSED でない | 番号・理由・やり直すコマンド `gh issue close <番号> --repo <所有者>/<リポジトリ>` |
+
+**`失敗` が 1 件でもあれば、終わりの工程を完了と報告せず、`issue-upkeep` を呼ばずに止まる。** 報告には
+失敗した課題・理由・やり直すコマンドを載せる。手順 1 の出力が空で一覧が取れないときも同じ扱いにする（決定 8）。
 
 ### `progress-tracking` の「工程の単位と記録する課題」
 
@@ -246,9 +267,12 @@ Pull Request の作成の時点と後片付けの報告だけ**で、後片付�
 ```mermaid
 flowchart TD
   A[1 マージを確かめる] --> B[2 退避 / 3 起点を更新]
-  B --> C{4 worktree remove}
-  C -->|0| C1[消えた無視ファイルを控える]
-  C -->|拒否| S[止まる対象へ積む]
+  B --> C0{4 status --porcelain が空か}
+  C0 -->|空でない| S[止まる対象へ積む]
+  C0 -->|空| CV[無視されたファイルを退避]
+  CV --> C{worktree remove}
+  C -->|0| C1[退避先と容量を控える]
+  C -->|拒否| S
   C1 --> D{5a 起点・本番・現在か}
   S --> D
   D -->|はい| X[対象外へ積む]
@@ -278,7 +302,7 @@ flowchart TD
 ```mermaid
 stateDiagram-v2
   [*] --> OPEN
-  OPEN --> OPEN: 起点へのマージ / 後片付け / 配布 / リリース後テスト
+  OPEN --> OPEN: 起点へのマージ / 後片付け / 終わりの工程より前の工程
   OPEN --> CLOSED: まとまりを閉じる（終わりの工程の後）
   OPEN --> CLOSED: 既定ブランチへのマージ（チャネルを分けないリポジトリ）
   CLOSED --> OPEN: gh issue reopen
@@ -289,30 +313,31 @@ stateDiagram-v2
 
 ### まとまりの終わり
 
-進行側が `release` を起動し、振り返りを通る変更では続けて `retrospective` を起動する。
+進行側が `release` を起動し、そのモードの経路に続く工程があれば続けて起動する。まとまりを閉じるのは、最後に通った工程の Skill である。
 
 ```mermaid
-sequenceDiagram
-  participant RL as release
-  participant RT as retrospective
-  participant PT as progress-tracking
-  participant UP as issue-upkeep
-  RL->>PT: 配布を記録（まとまりの課題すべて）
-  alt 振り返りを通る
-    RL->>RT: リリース後テストを経て振り返りへ
-    RT->>PT: まとまりを閉じる
-    RT->>UP: 課題を手入れする
-  else 通らない
-    RL->>PT: まとまりを閉じる
-    RL->>UP: 課題を手入れする
-  end
+graph TD
+  RL[release: 配布を記録] --> Q1{リリース後テストを通るか}
+  Q1 -->|通る| RV[release-verification]
+  Q1 -->|通らない| Q2{振り返りを通るか}
+  RV --> Q3{振り返りを通るか}
+  Q2 -->|通る| RT[retrospective]
+  Q3 -->|通る| RT
+  Q2 -->|通らない| C1[release が まとまりを閉じる]
+  Q3 -->|通らない| C2[release-verification が まとまりを閉じる]
+  RT --> C3[retrospective が まとまりを閉じる]
+  C1 --> UP[issue-upkeep]
+  C2 --> UP
+  C3 --> UP
 ```
+
+**`失敗` が 1 件でもあれば `issue-upkeep` へ進まない**（「まとまりを閉じる」の結果の表）。
 
 ## 非機能の実現方式
 
 | 大項目 | 条件（要求側） | 実現方式 |
 | --- | --- | --- |
-| 運用・保守性 | 止まらずに行った削除とクローズが、すべて戻し方つきで報告に残る | 完了報告の項目を表で固定する（`merged` の報告・「まとまりを閉じる」の報告）。ハッシュは `git branch -d` の出力 `Deleted branch <名前> (was <ハッシュ>).` から取る |
+| 運用・保守性 | 止まらずに行った削除とクローズが、すべて戻し方つきで報告に残る | 完了報告の項目を表で固定する（`merged` の報告・「まとまりを閉じる」の報告）。ハッシュは `git branch -d` の出力 `Deleted branch <名前> (was <ハッシュ>).` から取る。**無視されたファイルの退避先は自動では消さない。** 容量を報告に載せ、消すのは利用者である |
 | セキュリティ | 同意なしに消せるリモートブランチを限る | `gh pr view <PR番号> --json headRefName,headRefOid,headRepositoryOwner` と `git ls-remote origin refs/heads/<名前>` を突き合わせ、同じリポジトリで先端が一致するときだけ消す（決定 4） |
 
 ## 決定の記録
@@ -348,12 +373,22 @@ NDF の判定を安全の網にすると #561 が問題にした二重の確認�
 `headRefOid`）。「マージ済みブランチの整理」で見つかるブランチも同じ扱いにする。`gh pr list --state merged --head <名前>`
 で Pull Request を引き、先端が一致すれば消す。引けなければ止まる側へ積む。
 
-### 決定 5: 作業ツリーの無視されたファイルでは止めず、消えたものを報告へ載せる
+### 決定 5: 作業ツリーの無視されたファイルは、消さずに退避してから作業ツリーを消す
 
-`git worktree remove` は無視されたファイルを確認なしに消す（要求文書の実測 4 行目）。止める条件にすると、
-依存物や `__pycache__` を持つほぼすべての作業ツリーで止まり、A2 が成り立たない。持ち込み物は主ディレクトリ
-からの複製（`worktree-localenv.sh setup`）で、元が残る。従来の同意の提示（`git status --short`）にも
-載っておらず、止めないことで失うものは増えない。
+`git worktree remove` は無視されたファイルを拒まずに消し（要求文書の実測 4 行目）、その複製元があるとは限らない
+（`.env` の手直し・生成途中の成果物）。止める条件にすると `__pycache__` を持つほぼすべての作業ツリーで止まる
+（このリポジトリのレビュー用の作業ツリーでも `git status --ignored --short` が `!! plugins/ndf/scripts/lib/__pycache__/` を出す）。
+そこで消さずに退避し、戻せる操作にする。手順は次の 3 つである。
+
+1. `git -C <path> status --porcelain` が空でなければ止まる側へ積む（git が拒む条件と同じ。退避より先に見る）
+2. `git -C <path> status --ignored --porcelain` の `!!` の行（最上位のパス）を、
+   `<共通の git ディレクトリ>/ndf/worktree-trash/<ブランチ名の / を __ に置換>-<YYYYmmddHHMMSS>/`
+   へ同じ相対パスで `mv` する。共通の git ディレクトリの絶対パスは `worktree-common.sh` の `wt_common_git_dir` で得る。
+   開発用の作業ツリーと同じファイルシステムにあることが多く、`mv` が名前の付け替えで済む（テスト環境の台帳も同じ `ndf/` に置いている）
+3. `git worktree remove <path>`（要求文書の実測 5 行目）
+
+「止める」は採らなかった。通常の経路で止まる。「`localenv.copy_from_main` にあるものだけ自動で消す」も採らなかった。
+宣言の無いリポジトリで常に止まる。
 
 ### 決定 6: 後片付けは、まとまりの最後か判断できなくても待たない
 
@@ -374,16 +409,17 @@ NDF の判定を安全の網にすると #561 が問題にした二重の確認�
 ことだけである。**この移動は指示の文面（`merged` の手順で閉じる）から外れるため、ドキュメントレビューの
 承認で確かめる。**
 
-単独の変更は 1 件のまとまりで、終わりの工程は配布（`light`）か振り返り（`standard`）である。チャネルを
+単独の変更は 1 件のまとまりで、終わりの工程は配布（`light`）・リリース後テスト（リリース後テストだけを通る `operation`）・振り返り（`standard`）のどれかである。チャネルを
 分けないリポジトリでは既定ブランチへのマージで GitHub が先に閉じ、「まとまりを閉じる」は何もしない。
 
 ### 決定 8: 閉じる手順は `progress-tracking` の 1 か所に置き、盤面を Done にしてから OPEN のものだけを閉じる
 
-閉じる時点は終わりの工程で、終わりの工程はモードで `release` と `retrospective` に分かれる。どちらかへ
-置くと、もう片方へ写しが要る。`progress-tracking` は既に「終わりの工程の後に Done を書く」を持ち、
+閉じる時点は終わりの工程で、終わりの工程はモードで `release`・`release-verification`・`retrospective` の 3 つに分かれる。
+どれかへ置くと、残りへ写しが要る。`progress-tracking` は既に「終わりの工程の後に Done を書く」を持ち、
 どの工程からも呼ばれる。盤面を先に書くのは、`Auto-close issue` の有無によらず終わりの状態を揃えるため
 である。新しいスクリプトは作らない。手順は `closing-issues.sh` と `gh` で足りる。盤面を書くのは記録のリポジトリの
-課題だけである。
+課題だけである。**失敗の契約は通常の進行の記録と分け、閉じられなければ止まる。** 進行の記録は失敗しても
+工程を止めないが、閉じる操作は #623 の目的そのもので、黙って通すと OPEN が残ったまま終わりに見える。
 
 ### 決定 9: コミットメッセージに閉じる語を書かない
 
@@ -422,13 +458,15 @@ Pull Request にマイルストーンが付くとは限らないため採らな�
 | B7 B8 | `grep -n '同意を取ってから消す' plugins/ndf/skills/development-workflow/references/stage-notes.md` が 0 件 / README の段落の目視 |
 | C1 | 決定 7 |
 | C2 | 新設テスト `test_only_progress_tracking_closes_issues`（`plugins/ndf/skills/*/SKILL.md` のうち `gh issue close` を含むものが `progress-tracking` だけ。`references/` の 2 件は対象外） |
-| C3 C6 | `release` と `retrospective` で、「まとまりを閉じる」への参照が `issue-upkeep` の呼び出しより前の行にある |
+| C3 C6 | `release`・`release-verification`・`retrospective` で、「まとまりを閉じる」への参照が `issue-upkeep` の呼び出しより前の行にある |
 | C4 C5 C8 | リリース後テスト。このマイルストーンの課題の ClosedEvent が、起点へのマージではなく終わりの工程の後に来る（`gh api graphql` の `closer` と時刻） |
 | C7 | `pr/SKILL.md` の差分の目視 |
 | D1 D3 | 「工程の単位と記録する課題」の表 |
-| C9 | `progress-tracking/SKILL.md` の冒頭の段落・「呼び方」と「まとまりを閉じる」の突き合わせ（文面）。`release` と `retrospective` がその節を指す |
+| C9 | `progress-tracking/SKILL.md` の冒頭の段落・「呼び方」と「まとまりを閉じる」の突き合わせ（文面）。`release`・`release-verification`・`retrospective` がその節を指す |
+| C10 | 「まとまりを閉じる」の結果の表と、`失敗` のとき完了と報告せず `issue-upkeep` を呼ばない記述の突き合わせ（文面） |
 | D2 | `gh pr view 717 --json body -q .body \| bash plugins/ndf/scripts/lib/closing-issues.sh` が `devbasex/ai-plugins 712` と `devbasex/ai-plugins 713` を出す（設計の時点で実測済み） |
-| D2（まとまりの行の取り出し） | `gh pr view <配布のPR番号> --json body -q .body \| sed -n 's/^まとまり: //p' \| grep -oE '#[0-9]+' \| tr -d '#'`。本文に `まとまり: PR #717 / #718 / #720` があれば 717 718 720 を出し終了コード 0、行が無ければ何も出さず `grep` が 1（設計の時点で実測済み） |
+| D2（まとまりの行の取り出し） | `gh pr view <配布のPR番号> --json body -q .body \| sed -n 's/^まとまり: //p' \| grep -oE '#[0-9]+' \| tr -d '#'`。本文に `まとまり: PR #717 / #718 / #720` があれば 717 718 720 を出し、行が無ければ出力が空（パイプの終了コードはどちらも 0。設計の時点で実測済み） |
+| A8（退避） | 要求文書の実測 5 行目。実装の検証で、無視されたファイルを持つ作業ツリーに対して再現する |
 | E1 | 移した `test_the_merged_skill_closes_issues_with_their_repository`（読む先を `progress-tracking` にする）を含む `uv run --with pytest pytest scripts/tests plugins/ndf -q` |
 | E2 E3 E4 E5 | 要求文書の検証手段のコマンド |
 
@@ -440,4 +478,6 @@ Pull Request にマイルストーンが付くとは限らないため採らな�
 | `development-workflow/SKILL.md` の行数の取り合い | #550 #657 の設計も同じファイルへ足す。この変更は差し引き 0 行にするが、あちらの余地は増えない | 並行の調整（進行側） |
 | Codex / Kiro / agy の確認の仕組み | 各ランタイムが自分の承認設定で `git push --delete` などを止めることがある。NDF の手順が止めなくても、ランタイムの設定で止まる回数は変わらない | リリース後テスト（Claude Code だけで確かめる） |
 | 人が書いたコミットメッセージの閉じる語 | 決定 9 は `pr` を通るコミットだけに効く。手で書いたコミットに閉じる語があると、既定ブランチへのマージで早く閉じる | 残る（直す手段が閉じる語の検査の新設になり、範囲外） |
+| 退避先の容量 | 無視されたファイルの退避先は自動で消さないため、増え続ける。いつ消すかは利用者が決める | 残る（利用者） |
+| レビュー用の作業ツリーの退避 | システムの一時ディレクトリにある作業ツリーは共通の git ディレクトリと別のファイルシステムのことがあり、`mv` が複製になる（`.cross_review/` は小さい） | 実装（実測する） |
 | 盤面に `Item closed` だけが有効なリポジトリ | 閉じると Done になるだけで、「まとまりを閉じる」は Done を先に書くため食い違わない。実物では確かめていない | 他のリポジトリで使われた時点 |
