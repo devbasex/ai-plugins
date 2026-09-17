@@ -219,7 +219,7 @@ president は目を覚ますたびに 1 回行う（契機は設計文書の処�
 | ---: | --- | --- |
 | 1 | 中断した worker を一覧する。**起動し直された supervisor の初回は `--parent <旧 agent_id>`**（起動の指示で渡される）、**自分で worker を起動した後は `--agent <id> …`** を使う | `interrupted --session "$CLAUDE_CODE_SESSION_ID" --layer worker --parent <旧 agent_id>` / `… --agent <id> …`。**`<id>` は worker を起動したときの結果に出た `agentId` で、supervisor が自分の context window に持っている。** `CLAUDE_AGENT_ID` のような環境変数は無い（このサブエージェントの環境で確かめた）ため、自分の `agent_id` からは絞らない |
 | 2 | `resets_passed` が真の worker を `SendMessage` で続けさせる | `agent_id` |
-| 3 | 続けられない worker は、同じ作業をもう一度 `Agent` で起動する（作業は 1 つに絞ってあるため、やり直しの費用は持ち場より小さい） | 起動の指示を作り直す |
+| 3 | 続けられない worker は、同じ作業をもう一度 `Agent` で起動する（作業は 1 つに絞ってあるため、やり直しの費用は持ち場より小さい）。**起動の指示に「旧 worker が外部へ書いたもの（push・コメント・Pull Request）を先に確かめ、済んでいる分はやり直さない」を入れる**（AC48） | 起動の指示を作り直す |
 
 **president が再開するのは自分の直下だけである**（決定 19）。supervisor の下の worker は、再開した supervisor が点検する。president が supervisor の下の worker を直接再開しない。
 
