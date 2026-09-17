@@ -65,6 +65,7 @@
 | 3 | 未追跡ファイルを持つ worktree を `git worktree remove` | `fatal: '.worktrees/feat/y' contains modified or untracked files, use --force to delete it` / 終了コード 128 |
 | 4 | **無視されたファイルだけを持つ worktree を `git worktree remove`** | **終了コード 0。無視されたファイルは確認なしに消える** |
 | 5 | 無視されたファイル（`.env` と `scripts/__pycache__/a.pyc`）を持つ worktree で、`git status --ignored --porcelain` の `!!` の行（`.env` / `scripts/`）を共通の git ディレクトリの下の退避先へ同じ相対パスで `mv` した後に `git worktree remove` | 終了コード 0。退避先に 2 ファイルが残る |
+| 6 | 追跡されたディレクトリ `a/b/` の配下に無視された `a/b/__pycache__/x.pyc` を持つ worktree で、`!!` の行（`a/b/__pycache__/`。ディレクトリは末尾に `/` が付く）を、退避先に親を作らずに `mv` | `mv: cannot move '…/wt/a/b/__pycache__' to '…/a/b/__pycache__': No such file or directory` / 終了コード 1。`mkdir -p "$(dirname "<退避先>/<相対パス>")"` の後の `mv` と、続く `git worktree remove` はどちらも終了コード 0。`dirname` は末尾の `/` の有無で同じ親を返し、`mv` も末尾の `/` 付きで終了コード 0（git 2.53.0 / GNU coreutils） |
 
 **2 行目と 4 行目は #561 の本文に無い境界である。**
 

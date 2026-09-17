@@ -390,9 +390,16 @@ NDF の判定を安全の網にすると #561 が問題にした二重の確認�
 そこで消さずに退避し、戻せる操作にする。手順は次の 3 つである。
 
 1. `git -C <path> status --porcelain` が空でなければ止まる側へ積む（git が拒む条件と同じ。退避より先に見る）
-2. `git -C <path> status --ignored --porcelain` の `!!` の行（最上位のパス。作業ツリーからの相対パス）を、
-   `<退避先>/<退避した相対パス>` へ `mv` する。`<退避先>` は
-   `<共通の git ディレクトリ>/ndf/worktree-trash/<ブランチ名の / を __ に置換>-<YYYYmmddHHMMSS>/` である。共通の git ディレクトリの絶対パスは `worktree-common.sh` の `wt_common_git_dir` で得る。
+2. `git -C <path> status --ignored --porcelain` の `!!` の行（作業ツリーからの相対パス）を、同じ相対パスで
+   `<退避先>` の下へ移す。**先に退避先の親を作る。** 追跡されたディレクトリの配下のパス（`a/b/__pycache__/`）は
+   親が退避先に無く、そのまま `mv` すると終了コード 1 になる（要求文書の実測 6 行目）。末尾の `/` は外さなくてよい（同じ行）
+   ```bash
+   git -C "$path" status --ignored --porcelain | sed -n 's/^!! //p' | while IFS= read -r rel; do
+     mkdir -p "$(dirname "$trash/$rel")" && mv "$path/$rel" "$trash/$rel" || exit 1
+   done
+   ```
+   `$trash` は `<共通の git ディレクトリ>/ndf/worktree-trash/<ブランチ名の / を __ に置換>-<YYYYmmddHHMMSS>` で、
+   共通の git ディレクトリの絶対パスは `worktree-common.sh` の `wt_common_git_dir "$path"` で得る（引数が空なら終了コード 1）。
    開発用の作業ツリーと同じファイルシステムにあることが多く、`mv` が名前の付け替えで済む（テスト環境の台帳も同じ `ndf/` に置いている）
 3. `git worktree remove <path>`（要求文書の実測 5 行目）
 
@@ -475,7 +482,7 @@ Pull Request にマイルストーンが付くとは限らないため採らな�
 | C10 | 「まとまりを閉じる」の結果の表と、`失敗` のとき完了と報告せず `issue-upkeep` を呼ばない記述の突き合わせ（文面） |
 | D2 | `gh pr view 717 --json body -q .body \| bash plugins/ndf/scripts/lib/closing-issues.sh` が `devbasex/ai-plugins 712` と `devbasex/ai-plugins 713` を出す（設計の時点で実測済み） |
 | D2（まとまりの行の取り出し） | `gh pr view <配布のPR番号> --json body -q .body \| sed -n 's/^まとまり: //p' \| grep -oE '#[0-9]+' \| tr -d '#'`。本文に `まとまり: PR #717 / #718 / #720` があれば 717 718 720 を出し、行が無ければ出力が空（パイプの終了コードはどちらも 0。設計の時点で実測済み） |
-| A8（退避） | 要求文書の実測 5 行目。実装の検証で、無視されたファイルを持つ作業ツリーに対して再現する |
+| A8（退避） | 要求文書の実測 5 行目と 6 行目。実装の検証で、直下の無視されたファイル（`.env`）と、追跡されたディレクトリの配下の無視されたパス（`a/b/__pycache__/`）の両方を持つ作業ツリーに対して再現する |
 | E1 | 移した `test_the_merged_skill_closes_issues_with_their_repository`（読む先を `progress-tracking` にする）を含む `uv run --with pytest pytest scripts/tests plugins/ndf -q` |
 | E2 E3 E4 E5 | 要求文書の検証手段のコマンド |
 
