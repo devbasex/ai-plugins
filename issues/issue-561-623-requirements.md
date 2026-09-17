@@ -133,7 +133,8 @@
       | --- | --- |
       | ローカルブランチ | 削除時のハッシュと `git branch <名前> <ハッシュ>` |
       | リモートブランチ | Pull Request の URL と Restore branch |
-      | 課題 | `gh issue reopen <番号> --repo <所有者>/<リポジトリ>` |
+
+      `merged` は課題を閉じないため、課題の reopen の手段は C8（閉じた終わりの工程の完了報告）が持つ
 
 - [ ] A10: `merged` の frontmatter の `description` から "after listing them for approval" が消える。
       `python3 scripts/check-skill-frontmatter.py` が終了コード 0 で終わる
