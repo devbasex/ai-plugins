@@ -16,6 +16,13 @@
 
 **Draft を開く位置は既存の規約のとおりである。** `stage-notes.md` の構造改善の節が「工程表で後にある `pr` を構造改善の前に 1 度呼び、Draft で開く。行は増やさない」と定めている。窓の表は、その 1 度の呼び出しを実装の窓の終わりに置いただけで、工程表の順序（構造改善 → 実装レビュー → 完了判定 → Pull Request）を変えない。**構造改善を通さないモードでは Draft を開かず、実装の窓は差分を push して終わる。** Pull Request は検査の窓の Pull Request の工程で開く。
 
+**複数の Pull Request に分けるまとまりでは、`issue-plan-strategy` の Step 3〜4 に従う。** 誰がいつ作るかは次のとおりで、同じ Draft を 2 度作らない。
+
+| 経路 | release ブランチと Draft の release PR（Step 3） | 個別の Draft PR（Step 4） | 実装の窓の始まりの条件に足すもの |
+| --- | --- | --- | --- |
+| 1 本の Pull Request | 作らない | 実装の窓の終わりに `pr` を Draft で呼ぶ（上の段落） | なし |
+| 複数の Pull Request | 親が、関門 1 の承認とマージの後、最初の実装の窓を起動する前に作る | 各実装の窓が、作業場所の用意の直後に作る（Step 4 の形。空のコミットで開く）。**終わりでは `pr` を呼ばず、その Draft へ push する** | release ブランチがある。窓の起点ブランチは release ブランチ |
+
 ### モードごとの組み方
 
 **表の窓の名前は変えない。** モードは、各窓がどの工程を含むかと、関門を返すかだけを変える。
@@ -166,7 +173,7 @@
 | `started_at` / `ended_at` | ISO 8601 | 記録の最初と最後の `timestamp` |
 | `duration_seconds` | 整数 | `ended_at - started_at` |
 | `ending` | 文字列 | 下の表 |
-| `interruptions` | 整数 | 合成の応答（`isApiErrorMessage`）のうち、後ろに合成でない応答が続くものの数 |
+| `interruptions` | 整数 | `apiErrorStatus` が 429 の合成の応答のうち、後ろに合成でない応答が続くものの数（上限の中断から続けた回数）。500 / 529 / 認証の失敗は数えない |
 | `resets_at` | ISO 8601 / null | `ending` が `rate_limit` のとき、最後の合成の応答の `quotaLimits.resetsAt` |
 | `rate_limit_type` | 文字列 / null | 同じ応答の `quotaLimits.rateLimitType` |
 
