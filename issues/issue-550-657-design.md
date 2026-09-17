@@ -423,15 +423,15 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    A[president が目を覚ます<br/>failed の通知 / 自動の継続 / 待ちの終わり / 人の 1 通] --> B[interrupted --layer supervisor]
-    B --> C{中断した supervisor があるか}
+    A[president が目を覚ます<br/>failed の通知 / 自動の継続 / 待ちの終わり / 人の 1 通] --> B[interrupted --depth 1<br/>supervisor と直接起動した worker]
+    B --> C{中断した相手があるか}
     C -->|無い| Z[運転へ戻る]
     C -->|ある| D{解除時刻を過ぎたか}
     D -->|過ぎた| E[SendMessage で続けさせる]
     D -->|まだ| F[wait-reset を背景で起動して終える]
     E --> G{成功したか}
-    G -->|成功| H[再開した supervisor が<br/>interrupted --layer worker で<br/>自分の worker を点検する]
-    G -->|失敗| I[進行の記録が指す工程の頭から<br/>新しい supervisor を起動]
+    G -->|成功| H[再開した supervisor が<br/>interrupted --layer worker --agent で<br/>自分の worker を点検する]
+    G -->|失敗| I[supervisor は進行の記録が指す工程の頭から<br/>直接起動した worker は同じ作業で起動し直す]
     H --> Z
     I --> Z
     F -.終わりの通知.-> A

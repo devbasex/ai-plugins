@@ -147,7 +147,7 @@ working on when the limit was reached; do not repeat work that is already comple
 - [ ] AC4: supervisor の報告は設計文書の「supervisor の報告の形」が決める項目を持つ。報告の中に次に起動する持ち場の名前が入り、
   president は工程表を読まずに次の supervisor を起動できる
 - [ ] AC5: 上の層は、報告の形を持たずに終わった下の層（待ちで応答を終えたなど）を完了として扱わず、`SendMessage` で続けさせる。
-  同じ相手へ上限の回数まで続けさせても報告が出なければ、失敗として止まり、相手の名前と理由を上へ報告する。
+  **同じ相手へ 3 回続けさせても**報告が出なければ、4 回目は送らずに失敗として止まり、相手の名前と理由を上へ報告する。
   president の報告（到達したときも止まったときも）には、持ち場ごとに続けさせた回数が載る
 - [ ] AC6: president の context window には、着手の判定の材料・supervisor の報告・承認の提示物だけが載る。
   **president のセッションで起動される Skill は `development-workflow` と `issue-plan-strategy` に限られる。**
@@ -207,7 +207,7 @@ working on when the limit was reached; do not repeat work that is already comple
   束ねる候補・割る候補・worker を使いすぎの判断が載る
 - [ ] AC34: どの値も外部へ送信されない（ネットワークを使わない）
 - [ ] AC35: 複数のセッションを渡しても、AC29 の判定は記録ごとの比で行われ、セッションをまたいだ固定費の中央値を判定に使わない
-- [ ] AC36: **層ごとの合計が出る。** 層ごとの件数・固定費の合計・実作業の合計と、3 層の総消費（固定費の合計 + 実作業の合計）が 1 つの表になる。
+- [ ] AC36: **層ごとの合計が出る。** 層ごとの件数・固定費の合計・実作業の合計と、3 層を合算した `合計` の行（総消費 = 固定費の合計 + 実作業の合計）が 1 つの表になる。
   層を増やしたことで増えた固定費が、この表から読める
 - [ ] AC37: 1 つの持ち場について、**その supervisor と配下の worker の固定費の合計が supervisor の実作業を上回る**とき、
   その持ち場に「worker を使いすぎ」の印が付く
