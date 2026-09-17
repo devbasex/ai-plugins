@@ -217,7 +217,7 @@ president は目を覚ますたびに 1 回行う（契機は設計文書の処�
 
 | 順 | 行うこと | 使うもの |
 | ---: | --- | --- |
-| 1 | 自分が起動した worker のうち中断したものを一覧する | `interrupted --session "$CLAUDE_CODE_SESSION_ID" --layer worker --agent <id> …`。**`<id>` は worker を起動したときの結果に出た `agentId` で、supervisor が自分の context window に持っている。** `CLAUDE_AGENT_ID` のような環境変数は無い（このサブエージェントの環境で確かめた）ため、自分の `agent_id` からは絞らない |
+| 1 | 中断した worker を一覧する。**起動し直された supervisor の初回は `--parent <旧 agent_id>`**（起動の指示で渡される）、**自分で worker を起動した後は `--agent <id> …`** を使う | `interrupted --session "$CLAUDE_CODE_SESSION_ID" --layer worker --parent <旧 agent_id>` / `… --agent <id> …`。**`<id>` は worker を起動したときの結果に出た `agentId` で、supervisor が自分の context window に持っている。** `CLAUDE_AGENT_ID` のような環境変数は無い（このサブエージェントの環境で確かめた）ため、自分の `agent_id` からは絞らない |
 | 2 | `resets_passed` が真の worker を `SendMessage` で続けさせる | `agent_id` |
 | 3 | 続けられない worker は、同じ作業をもう一度 `Agent` で起動する（作業は 1 つに絞ってあるため、やり直しの費用は持ち場より小さい） | 起動の指示を作り直す |
 
@@ -337,7 +337,7 @@ president は目を覚ますたびに 1 回行う（契機は設計文書の処�
 | 持ち場 | supervisor | supervisor の実作業 | worker の件数 | supervisor と worker の固定費の合計 | 印 |
 ```
 
-**行は起動元（`parent_agent_id`）ごとに 1 つである。** 同じ持ち場を工程の頭からやり直したときは、supervisor が 2 つになるため 2 行になる。`supervisor` の列には `agent_id` の先頭 7 文字を出す。
+**行は起動元（`parent_agent_id`）ごとに 1 つである。** 同じ持ち場を工程の頭からやり直したときは、supervisor が 2 つになるため 2 行になる。`supervisor` の列には**持ち場の中の連番**（起動の早い順に 1, 2, …）を出す。`agent_id` は出さない（投稿する表に識別子を載せないため）。
 
 | 印 | 条件 |
 | --- | --- |
