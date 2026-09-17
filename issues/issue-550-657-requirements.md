@@ -196,7 +196,8 @@ working on when the limit was reached; do not repeat work that is already comple
   **深さ 1 は、`description` の先頭語が作業の種類の語彙なら worker、それ以外は supervisor** になる（president が読解の worker を直接起動するため）。
   持ち場（supervisor）と作業の種類（worker）は `description` の先頭語から取り、その層の語彙で始まらないものは `その他` になる
 - [ ] AC27: `--session <セッション ID>` で 1 つのセッション（president とその配下のすべての層）に絞れる。繰り返して複数を渡せる
-- [ ] AC28: 応答が 3 回に満たない記録は分布の集計から外れ、外した件数が 1 行出る
+- [ ] AC28: 応答が 3 回に満たない記録は**束ねの表（AC29）からだけ**外れ、外した件数が 1 行出る。
+  **層ごとの合計（AC36）と持ち場ごとの worker の使い方（AC37）には、外した記録も含める**（短命な記録も固定費を使うため）
 - [ ] AC29: 層と持ち場（worker は作業の種類）とモデルの組ごとに、件数・固定費の中央値・実作業の中央値・
   実作業が固定費を下回った件数・最大充填の最大を束ねて出せる。判定は記録ごとの比で行う。
   **束ねる候補の印は supervisor の行にだけ付く**（実作業が同じ記録の固定費を下回った記録が過半数のとき。
@@ -244,6 +245,8 @@ working on when the limit was reached; do not repeat work that is already comple
   worker を使いすぎの持ち場が無いか）を判定した結果が、#550 #657 のまとまりの振り返りに残っている。
   AC60 の `light` の課題は振り返りを通らないため、記録するのはこのまとまりの振り返りの工程である。
   この文書や #550 の本文の値とは突き合わせない
+- [ ] AC65: **`standard` の課題を含むまとまりを `/goal` で通し、2 つの関門と振り返りまでを人間の入力なしで通したことを、president のセッションの記録で確かめてある。**
+  AC60 の `light` の 1 件では、設計 Pull Request の関門と振り返りの経路を通らない。この確認は、次のまとまりの配布の後に行う
 - [ ] AC62: 関門の数（2）と、承認の止まり方（`AskUserQuestion`）・提示物（`approval-request.md`）が変わっていない
 - [ ] AC63: `python3 scripts/check-skill-frontmatter.py`、`python3 scripts/check-doc-line-limit.py`、
   `uv run --with pytest pytest scripts/tests plugins/ndf -q` が通る

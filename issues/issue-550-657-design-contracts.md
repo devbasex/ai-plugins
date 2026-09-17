@@ -208,12 +208,12 @@ president は目を覚ますたびに 1 回行う（契機は設計文書の処�
 | ---: | --- | --- |
 | 1 | 中断した supervisor と、president が直接起動した worker を一覧する | `python3 "$SCRIPTS/lib/transcript_agents.py" interrupted --session "$CLAUDE_CODE_SESSION_ID" --depth 1 --format json` |
 | 2 | `resets_passed` が真の記録ごとに `SendMessage` で続けさせる。supervisor への文面は「利用上限で中断していた。解除されたので続ける。書く前に既に書いたものを確かめる。自分の worker の中断も点検する」、直接起動した worker への文面は同じ作業を続ける指示にする | `agent_id` |
-| 3 | 2 が失敗した相手の後段は層で分かれる。**supervisor** は `最後に記録した工程`（進行の記録）の頭から、同じ持ち場の名前で起動し直す。**直接起動した worker** は、同じ作業の起動の指示をもう一度組んで起動する。**失敗とは、`SendMessage` の結果が `"success": true` を持たないこと**である | issue の `## 進行` |
+| 3 | 2 が失敗した相手の後段は層で分かれる。**supervisor** は `最後に記録した工程`（進行の記録）の頭から、同じ持ち場の名前で起動し直す。**起動の指示に旧 supervisor の `agent_id` を渡し、新しい supervisor は最初に `interrupted --layer worker --parent <旧 agent_id>` で旧 worker を点検する**（残っていれば、同じ作業をやり直させず、書き込みが済んでいるかだけを確かめる）。**直接起動した worker** は、同じ作業の起動の指示をもう一度組んで起動する。**失敗とは、`SendMessage` の結果が `"success": true` を持たないこと**である | issue の `## 進行` |
 | 4 | まだ過ぎていない相手（supervisor でも、直接起動した worker でも）があれば、待ちを背景で起動して応答を終える | `python3 "$SCRIPTS/lib/transcript_agents.py" wait-reset --session "$CLAUDE_CODE_SESSION_ID" --depth 1`（`run_in_background`） |
 
 **手順 4 は `--max-sleep` を付けない。** 背景の待ちを数時間続けられないと分かったとき（設計文書の未確認 U3）だけ、`--max-sleep 540` を付ける。そのときは終了コード 3 で起きるたびに手順 1 と手順 4 だけを行い、解除前に `SendMessage` しない。
 
-**再開した supervisor は、同じ点検を worker に対して行う。**
+**再開した supervisor は、同じ点検を worker に対して行う。** 起動し直された supervisor は、自分が起動した worker（`--agent`）に加えて、`--parent <旧 agent_id>` で旧 supervisor の worker も見る。
 
 | 順 | 行うこと | 使うもの |
 | ---: | --- | --- |
@@ -303,7 +303,7 @@ president は目を覚ますたびに 1 回行う（契機は設計文書の処�
 | 層 | 持ち場 | 深さ | モデル | 固定費 | 最大充填 | 実作業 | 応答数 | 所要（分） | 終わり方 | 中断 |
 ```
 
-2 つ目の表は**層と持ち場（worker は作業の種類）とモデルの組**ごとの束ね。**応答数が 3 に満たない記録は外し、外した件数を表の下に 1 行出す。**
+2 つ目の表は**層と持ち場（worker は作業の種類）とモデルの組**ごとの束ね。**応答数が 3 に満たない記録はこの表からだけ外し、外した件数を表の下に 1 行出す。3 つ目と 4 つ目の表は外さない**（短命な記録も固定費を使うため、外すと総消費が過少に出る）。
 
 ```text
 | 層 | 持ち場 | モデル | 件数 | 固定費の中央値 | 実作業の中央値 | 実作業 < 固定費 | 最大充填の最大 | 印 |
@@ -327,13 +327,17 @@ president は目を覚ますたびに 1 回行う（契機は設計文書の処�
 | 合計 | 18 | … | … | … |
 ```
 
+**この表の件数は、応答数で外す前の全件である**（例の 18 は記録の総数）。
+
 `json` の `layer_totals` は層ごとの行の配列で、合算は `totals`（`records` / `fixed_sum` / `work_sum` / `total_spend`）が持つ。
 
 4 つ目の表は**持ち場ごとの worker の使い方**である。`--session` のときだけ出す。
 
 ```text
-| 持ち場 | supervisor の実作業 | worker の件数 | supervisor と worker の固定費の合計 | 印 |
+| 持ち場 | supervisor | supervisor の実作業 | worker の件数 | supervisor と worker の固定費の合計 | 印 |
 ```
+
+**行は起動元（`parent_agent_id`）ごとに 1 つである。** 同じ持ち場を工程の頭からやり直したときは、supervisor が 2 つになるため 2 行になる。`supervisor` の列には `agent_id` の先頭 7 文字を出す。
 
 | 印 | 条件 |
 | --- | --- |
@@ -361,8 +365,8 @@ president は目を覚ますたびに 1 回行う（契機は設計文書の処�
 4 つ目の表（`role_usage`）も同じ場所へ貼る。
 
 ```markdown
-| 持ち場 | supervisor の実作業 | worker の件数 | supervisor と worker の固定費の合計 | 印 |
-| --- | ---: | ---: | ---: | --- |
+| 持ち場 | supervisor | supervisor の実作業 | worker の件数 | supervisor と worker の固定費の合計 | 印 |
+| --- | --- | ---: | ---: | ---: | --- |
 ```
 
 **まとまりを複数のセッションで通したときは、`--session` を繰り返して 1 つの表にする。** 印の判定は記録ごとの比で行うため、固定費の違うセッションを束ねても判定の意味は変わらない。中央値と合計の列は分布の目安として読み、判定には使わない。

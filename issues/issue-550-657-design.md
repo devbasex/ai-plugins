@@ -452,7 +452,7 @@ president 自身が上限に当たっているときは、B より前で応答�
 
 | 受け入れ条件 | 何で確かめるか |
 | --- | --- |
-| AC1・AC2・AC5・AC6・AC7・AC60 | リリース後テストで `light` の課題 1 件を `/goal` で通し、president のセッションの記録を読む（人の入力の数、`skill-stats --session`（`--agents` なし）が president の記録だけで数えた Skill の呼び出し数、president の報告の持ち場の一覧と記録の `SendMessage` の数の一致、issue の `## 進行`） |
+| AC1・AC2・AC5・AC6・AC7・AC60・AC65 | リリース後テストで `light` の課題 1 件を `/goal` で通し（AC60）、**次のまとまりで `standard` を含む複数の課題を関門 2 つと振り返りまで通し**（AC65）、president のセッションの記録を読む（人の入力の数、`skill-stats --session`（`--agents` なし）が president の記録だけで数えた Skill の呼び出し数、president の報告の持ち場の一覧と記録の `SendMessage` の数の一致、issue の `## 進行`） |
 | AC3・AC4・AC4b・AC9・AC10・AC12・AC14・AC15・AC17・AC18・AC19 | `test_agent_layers_doc.py`: `agent-layers.md` に 3 層の責務の表・止まるときに持ち場の一覧を出す 3 つの時点・持ち場の表（5 つと関門の列）・supervisor の報告の 10 項目・worker の報告の 5 項目・続けさせる回数 3・モデルの基準 2 つ・委譲しない 5 つ・「worker の報告を president へ転送しない」の文があること。規約の文書に固定費の実測値が無いこと |
 | AC8・AC62 | 既存の `test_approval_gates.py` / `test_workflow_guard.py` がそのまま通ること |
 | AC11 | `test_agent_layers_doc.py`: `cross-review/SKILL.md` の「メイン」の定義が supervisor を指すこと |
