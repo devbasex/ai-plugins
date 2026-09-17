@@ -202,7 +202,8 @@ working on when the limit was reached; do not repeat work that is already comple
 ## 受け入れ条件（3 つとも）
 
 - [ ] AC60: `light` の課題 1 件を `/goal` で無人で通し、人間の入力が関門で求めた回数だけであることを、親のセッションの記録で確かめてある
-- [ ] AC61: AC60 の実行の窓の測定を `skill-stats` で出し、**そのリポジトリでの粒度の妥当性**（実作業が固定費を下回る窓が無いか）を判定した結果が振り返りに残っている。
+- [ ] AC61: AC60 の実行の窓の測定を `skill-stats` で出し、**そのリポジトリでの粒度の妥当性**（実作業が固定費を下回る窓が無いか）を判定した結果が、#550 #657 のまとまりの振り返りに残っている。
+  AC60 の `light` の課題は振り返りを通らないため、記録するのはこのまとまりの振り返りの工程である。
   この文書や #550 の本文の値とは突き合わせない
 - [ ] AC62: 関門の数（2）と、承認の止まり方（`AskUserQuestion`）・提示物（`approval-request.md`）が変わっていない
 - [ ] AC63: `python3 scripts/check-skill-frontmatter.py` と、`uv run --with pytest pytest scripts/tests plugins/ndf -q` が通る
