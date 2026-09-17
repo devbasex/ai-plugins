@@ -10,12 +10,12 @@
 
 | # | すること | 受け入れ条件 |
 | --- | --- | --- |
-| 1 | `.ndf/instructions.json` を置く（「データ構造」の例のとおり） | AC44 / AC45 |
-| 2 | `.github/workflows/runtime-plugin-validate.yml` へジョブ `instruction-files-check` を足す。Pull Request では絞り込まずに起動し、push の絞り込みへ `CHANGELOG.md` と `.ndf/**` を足す | AC46 / AC47 |
-| 3 | `CLAUDE.md` の「版ごとの判断の記録」へ、版が決まる前の印と検査のコマンドを書く | AC48 |
-| 4 | `docs/versioning-and-distribution.md` の「バージョン更新時の手順」へ検査を足し、手順 4 の置き場所を直す | AC49 |
-| 5 | `CHANGELOG.md` の冒頭の置き場所を直す | AC51 |
-| 6 | ruleset（`protect main and develop`）の必須の検査へ `instruction-files-check` を入れ、**同じ時点で** `docs/versioning-and-distribution.md` の「必須の検査 11 個」の数を直す | **実装の差分に入らない。** 入れると決まっており（利用者の判断）、実行は実装 Pull Request のマージ後に進行側が行う（AC50） |
+| 1 | `.ndf/instructions.json` を置く（「データ構造」の例のとおり） | AC45 / AC46 |
+| 2 | `.github/workflows/runtime-plugin-validate.yml` へジョブ `instruction-files-check` を足す。Pull Request では絞り込まずに起動し、push の絞り込みへ `CHANGELOG.md` と `.ndf/**` を足す | AC47 / AC48 |
+| 3 | `CLAUDE.md` の「版ごとの判断の記録」へ、版が決まる前の印と検査のコマンドを書く | AC49 |
+| 4 | `docs/versioning-and-distribution.md` の「バージョン更新時の手順」へ検査を足し、手順 4 の置き場所を直す | AC50 |
+| 5 | `CHANGELOG.md` の冒頭の置き場所を直す | AC52 |
+| 6 | ruleset（`protect main and develop`）の必須の検査へ `instruction-files-check` を入れ、**同じ時点で** `docs/versioning-and-distribution.md` の「必須の検査 11 個」の数を直す | **実装の差分に入らない。** 入れると決まっており（利用者の判断）、実行は実装 Pull Request のマージ後に進行側が行う（AC51） |
 
 **数と ruleset は同じ時点で変える。** 文書が「12 個」と書いて ruleset が 11 個しか求めない状態では、
 `main` へ進めるときの断りの文言（`X of 11 required status checks …`）と文書が食い違う。

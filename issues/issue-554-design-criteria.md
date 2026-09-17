@@ -138,6 +138,8 @@
      "sources": ["config-smells"]},
     {"id": "read-size", "aspect": 1, "enforce": "report", "needs": [],
      "sources": ["claude-code-memory", "codex-agents-md", "context-rot"]},
+    {"id": "read-size-budget", "aspect": 1, "enforce": "error", "needs": ["budget"],
+     "sources": ["claude-code-memory", "codex-agents-md"]},
     {"id": "instruction-count", "aspect": 2, "enforce": "report", "needs": [],
      "sources": ["ifscale"]}
   ],
@@ -153,6 +155,7 @@
 | `checked_at`（上位） | **最後に調べ直した日。** 古くなると検査が `NOTE:` を出す |
 | `criteria[].enforce` | `error`（落とす） / `report`（数えて出すだけ） |
 | `criteria[].needs` | その観点が要る宣言の項目。`[]` は宣言が無くても動く |
+| 同じ観点の 2 行 | 量は `report`（常に数える）と `error`（`budget` を宣言したときだけ落とす）を**別の行**に持つ。1 行に強さを 2 つ持たせない |
 | `criteria[].aspect` | 観点の番号（調査の記録に対応）。**根拠をたどる入口** |
 | `criteria[].sources` / `sources[]` | 出典の名前・URL・参照日。**値そのものは持たない**（決定 13） |
 
