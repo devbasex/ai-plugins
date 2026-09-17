@@ -14,7 +14,7 @@
 | 取り込み | 確定仕様化 / 実装 Pull Request のマージ / 後片付け / 配布（検証まで） | まとまり | まとまりの Pull Request がすべて検査を終えた | 検証への配布が済んだ。本番への配布が要らないリポジトリでは配布が済んだ | 本番の系へ届く操作（要るときだけ） |
 | 仕上げ | 配布（本番）/ リリース後テスト / 振り返り | まとまり | 本番への承認を受け取った。要らないリポジトリでは取り込みが終わった | 振り返りの記録を投稿した | なし |
 
-**Draft を開く位置は既存の規約のとおりである。** `stage-notes.md` の構造改善の節が「工程表で後にある `pr` を構造改善の前に 1 度呼び、Draft で開く。行は増やさない」と定めている。窓の表は、その 1 度の呼び出しを実装の窓の終わりに置いただけで、工程表の順序（構造改善 → 実装レビュー → 完了判定 → Pull Request）を変えない。**構造改善を通さないモードでは Draft を開かず、実装の窓は差分を push して終わる。** Pull Request は検査の窓の Pull Request の工程で開く。
+**Draft を開く位置は既存の規約のとおりである。** `stage-notes.md` の構造改善の節が「工程表で後にある `pr` を構造改善の前に 1 度呼び、Draft で開く。行は増やさない」と定めている。窓の表は、その 1 度の呼び出しを実装の窓の終わりに置いただけで、工程表の順序（構造改善 → 実装レビュー → 完了判定 → Pull Request）を変えない。**構造改善を通さないモードでも、実装の窓の終わりに Draft を開く。** 検査の窓の実装レビューは `cross-review` で、Pull Request の上で回るためである（`legacy-refactor` の `pr-review` も Pull Request を対象にする）。検査の窓の Pull Request の工程は、どのモードでも Draft を外すことを指す。
 
 **複数の Pull Request に分けるまとまりでは、`issue-plan-strategy` の Step 3〜4 に従う。** 誰がいつ作るかは次のとおりで、同じ Draft を 2 度作らない。
 
@@ -149,7 +149,7 @@
 | 順 | 行うこと | 使うもの |
 | ---: | --- | --- |
 | 1 | 中断した窓を一覧する | `python3 "$SCRIPTS/lib/transcript_windows.py" interrupted --session "$CLAUDE_CODE_SESSION_ID" --format json` |
-| 2 | `resets_at` を過ぎた窓ごとに `SendMessage` で続けさせる。文面は「利用上限で中断していた。解除されたので続ける。書く前に既に書いたものを確かめる」 | `agent_id` |
+| 2 | `resets_passed` が真の窓ごとに `SendMessage` で続けさせる。文面は「利用上限で中断していた。解除されたので続ける。書く前に既に書いたものを確かめる」 | `agent_id` |
 | 3 | 2 が失敗した窓は、`最後に記録した工程`（進行の記録）の頭から、同じ窓の名前で新しい窓を起動する。**失敗とは、`SendMessage` の結果が `"success": true` を持たないこと**である（成功した結果は `{"success":true,"message":"Resuming agent …"}` の形で返ることを実測した） | issue の `## 進行` |
 | 4 | まだ過ぎていない窓があれば、待ちを背景で起動して応答を終える | `python3 "$SCRIPTS/lib/transcript_windows.py" wait-reset --session "$CLAUDE_CODE_SESSION_ID"`（`run_in_background`） |
 
