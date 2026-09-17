@@ -24,8 +24,8 @@
 | `plugins/ndf/skills/AUTHORING.md` | 実行前確認の要否を決める 3 つの問いと、守り方 3 つ、適用表を持つ | F1 | 「`allowed-tools` の意味と付け方」の 1 行、「取り消しの難しい操作をどちらで守るか」（見出しごと書き換える） |
 | `plugins/ndf/skills/merged/SKILL.md` | 後片付けの操作と、止まる条件と、戻し方の報告を持つ。**課題を閉じない** | F2 F3 F5 | frontmatter の `description`、「削除前の同意取得（必須）」、「クリーンアップの手順」4〜8、「閉じ忘れた issue を閉じる」（節ごと差し替える）、「マージ済みブランチの整理」、「作業完了報告」、「次の工程」の 2 段落目と 3 段落目、末尾の進行の記録の 1 行 |
 | `plugins/ndf/skills/progress-tracking/SKILL.md` | まとまりの課題の集め方、単位ごとの記録の担い手、**まとまりを閉じる唯一の手順**を持つ | F4 F5 | 冒頭の「この Skill は順序を持たない」の段落（例外として終わりの記録を足す）、「呼び方」の `status` の段落、新設「工程の単位と記録する課題」、新設「まとまりを閉じる」 |
-| `plugins/ndf/skills/release/SKILL.md` | 後にリリース後テストも振り返りも続かない変更で、課題の手入れの前にまとまりを閉じる（「蓄積した課題を手入れする」の条件が「振り返りを通らない変更」からこれに変わる）。まとまりの範囲の確認を開始条件に持つ。配布の Pull Request の本文に `まとまり:` の行を置く | F4 | 「開始条件」、手順 3 の配布の Pull Request の本文、「蓄積した課題を手入れする」 |
-| `plugins/ndf/skills/release-verification/SKILL.md` | 後に振り返りが続かない変更で、まとまりを閉じてから `issue-upkeep` を呼ぶ | F4 | 手順 4「合否を判定する」の「合否によらず、記録を残して `retrospective` へ進む」を、振り返りを通る変更に限る条件へ直す。末尾の進行の記録の近くに節を 1 つ新設 |
+| `plugins/ndf/skills/release/SKILL.md` | 後にリリース後テストも振り返りも続かない変更で、課題の手入れの前にまとまりを閉じる（「蓄積した課題を手入れする」の条件が「振り返りを通らない変更」からこれに変わる）。まとまりの範囲の確認を開始条件に持つ。**配布の記録を置く:** 配布の Pull Request の本文に `段階:` と `まとまり:` の 2 行を置き、Pull Request を作らない形ではまとまりの最後にマージした Pull Request へ出力物のブロックをコメントで投稿する | F4 | 「開始条件」、手順 3 の配布の Pull Request の本文、「出力物」（置き場所の文を足す）、「蓄積した課題を手入れする」 |
+| `plugins/ndf/skills/release-verification/SKILL.md` | 後に振り返りが続かない変更で、まとまりを閉じてから `issue-upkeep` を呼ぶ。出力物の「## リリース後テスト」のブロックを、配布の記録を置いた Pull Request へコメントで投稿する | F4 | 手順 4「合否を判定する」の「合否によらず、記録を残して `retrospective` へ進む」を、振り返りを通る変更に限る条件へ直す。「出力物」の置き場所の文（配布の記録の Pull Request へ変える）。末尾の進行の記録の近くに節を 1 つ新設 |
 | `plugins/ndf/skills/retrospective/SKILL.md` | 振り返りの後、課題の手入れの前にまとまりを閉じる | F4 | 進行の記録の 1 行（「この工程で終わるため…Done にする」） |
 | `plugins/ndf/skills/pr/SKILL.md` | コミットメッセージに閉じる語を書かない | F6 | 手順の `git commit` の行の直後（2 か所）に 1 行ずつ |
 | `plugins/ndf/skills/development-workflow/SKILL.md` | 関門の外で工程の側が実行前確認を足さない原則を持つ | F1 | **「人手の承認を求める関門」の冒頭の 2 段落だけ。行数を増やさない**（決定 11）。「`/goal` の引数として呼ばれたとき」は触らない |
@@ -204,8 +204,8 @@ checkout されたままで、git も拒む）。リモートブランチは上�
 RECORD_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 
 # 1. まとまりの Pull Request の一覧を得る。同じ実行の中なら release が承認の提示に並べた一覧を使う。
-#    別の実行なら、配布の Pull Request（retrospective の「Pull Request の番号を特定する」が引くもの）の本文から取る
-bundle_prs=$(gh pr view <配布のPR番号> --repo "$RECORD_REPO" --json body -q .body \
+#    別の実行なら、配布の記録の Pull Request（下の「配布の記録」）の本文とコメントから取る
+bundle_prs=$(gh pr view <記録のPR番号> --repo "$RECORD_REPO" --json body,comments -q '.body, .comments[].body' \
   | sed -n 's/^まとまり: //p' | grep -oE '#[0-9]+' | tr -d '#')
 [ -n "$bundle_prs" ] || echo "まとまりの行が無い。推測せず運用者に一覧を聞く" >&2
 
@@ -219,10 +219,11 @@ gh pr view <PR番号> --repo "$RECORD_REPO" --json body -q .body | bash "$SCRIPT
 before=$(gh issue view <番号> --repo <所有者>/<リポジトリ> --json state -q .state)
 # (b) 記録のリポジトリの課題なら盤面を Done にする
 [ "<所有者>/<リポジトリ>" = "$RECORD_REPO" ] && bash "$SCRIPTS/projects-sync.sh" <番号> status "Done"
-# (c) 状態を読み直し、OPEN のときだけ閉じる（(b) の自動化が閉じていれば CLOSED なので行わない）
+# (c) 状態を読み直し、OPEN のときだけ閉じる（(b) の自動化が閉じていれば CLOSED なので行わない）。
+#     終了コードでは結果を決めない。出力は報告に載せる
 now=$(gh issue view <番号> --repo <所有者>/<リポジトリ> --json state -q .state)
-[ "$now" = OPEN ] && gh issue close <番号> --repo <所有者>/<リポジトリ> --comment "まとまり（<マイルストーン>）の<工程名>を通りました"
-# (d) もう一度読み直して CLOSED を確かめる
+[ "$now" = OPEN ] && close_out=$(gh issue close <番号> --repo <所有者>/<リポジトリ> --comment "まとまり（<マイルストーン>）の<工程名>を通りました" 2>&1)
+# (d) もう一度読み直して CLOSED を確かめる。結果はこの値で決める
 after=$(gh issue view <番号> --repo <所有者>/<リポジトリ> --json state -q .state)
 ```
 
@@ -238,11 +239,29 @@ after=$(gh issue view <番号> --repo <所有者>/<リポジトリ> --json state
 
 | # | 条件 | 満たさないとき |
 | --- | --- | --- |
-| 1 | **本番への配布まで済んでいる。** `release` の出力物の `段階:` が `本番`（検証の段階が無く、最初の配布が本番だった場合を含む）。同じ実行なら出力物を、別の実行なら配布の記録を読む | まとまりの課題すべてを OPEN のまま残し、報告に「本番への配布の後に閉じる」と載せる。段階を読み取れないときも同じ |
-| 2 | **リリース後テストを通る経路では、その課題の受け入れ条件がすべて `合格`**（`release-verification` の判定） | `不合格`・`保留` の条件を持つ課題を OPEN のまま残し、判定と理由を報告に載せる。条件と課題の対応を読み取れないときは、まとまりの課題すべてを OPEN のまま残す（推測で閉じない） |
+| 1 | **本番への配布まで済んでいる。** `release` の出力物の `段階:` が `本番`（検証の段階が無く、最初の配布が本番だった場合を含む）。同じ実行なら出力物を、別の実行なら下の「配布の記録」を読む | まとまりの課題すべてを OPEN のまま残し、報告に「本番への配布の後に閉じる」と載せる。`段階:` の行が無いときは `開いたまま（配布の記録が読めない）` にする（推測で閉じない） |
+| 2 | **リリース後テストを通る経路では、その課題の受け入れ条件がすべて `合格`**（`release-verification` の判定） | `不合格`・`保留` の条件を持つ課題を OPEN のまま残し、判定と理由を報告に載せる。条件と課題の対応を読み取れないときは、まとまりの課題すべてを OPEN のまま残す（推測で閉じない）。別の実行で「## リリース後テスト」の表が無いときは `開いたまま（配布の記録が読めない）` にする |
 
-- **一覧の取得元は配布の Pull Request の本文である。** `release` は配布の Pull Request を作る形で、出力物の
-  `まとまり: PR #<番号> / …` の行を本文にも置く（決定 10）
+**配布の記録は Pull Request に置く。** `release` の出力物は会話に出るだけで、別の実行からは読めない。
+
+| 記録 | 置く側 | 置き場所 |
+| --- | --- | --- |
+| `段階: <検証 / 本番>` と `まとまり: PR #<番号> / …` の 2 行 | `release` | 配布の Pull Request の本文（手順 3）。配布の形が Pull Request を作らないときは、まとまりの最後にマージした Pull Request へ出力物のブロックをコメントで投稿する |
+| 出力物の「## リリース後テスト」のブロック（受け入れ条件ごとの結果の表） | `release-verification` | 上と同じ Pull Request へコメントで投稿する |
+
+別の実行は、その Pull Request の番号を `retrospective` の「Pull Request の番号を特定する」と同じくマージ先の先頭のコミットから引き、
+本文とコメントを 1 つの出力として読む（`gh pr view 719` と `gh pr view 739` で、
+本文とコメントの本文が出て終了コード 0 になることを確かめた）。
+
+```bash
+record=$(gh pr view <記録のPR番号> --repo "$RECORD_REPO" --json body,comments -q '.body, .comments[].body')
+stage=$(printf '%s\n' "$record" | sed -n 's/^段階: //p' | tail -n 1)   # 最後の行が最新（本文 → コメントの時刻順）
+printf '%s\n' "$record" | sed -n 's/^まとまり: //p'                  # 手順 1 と同じ行
+printf '%s\n' "$record" | sed -n '/^## リリース後テスト/,/^合否:/p'    # 条件ごとの結果の表
+```
+
+- **`段階:` の行・リリース後テストの表が無ければ推測で閉じない。** `stage` が空、または別の実行で「## リリース後テスト」の表が無いときは、
+  まとまりの課題すべてを `開いたまま（配布の記録が読めない）` にする（決定 7）
 - **一覧の行が無ければ推測しない。** 手順 1 の出力が空なら、運用者に一覧を聞く（`retrospective` の段 3 と同じ扱い）。
   終了コードで見ないのは、パイプの終了コードが最後のコマンド（`tr`）のもので、`pipefail` の有無で変わるためである
 - **他のリポジトリの課題には盤面を書かない。** `projects-sync.sh` は `--repo` を取らず、実行したリポジトリの
@@ -251,10 +270,10 @@ after=$(gh issue view <番号> --repo <所有者>/<リポジトリ> --json state
 - **盤面を書く前に状態を読み、盤面を先に書き、閉じるのは OPEN のときだけ。** `Auto-close issue` が有効なら Done で閉じ、
   無効なら `gh issue close` が閉じる。どちらでも終わりの状態は同じになる。(a) を (b) の後に読むと、Done で閉じた課題が
   `既に閉じていた` になり reopen の手段が報告から落ちる
-- **(c) で読み直してから閉じる。** (a) の `before` のまま `gh issue close` へ進むと、(b) の `Auto-close issue` が閉じた経路を
-  コマンド列から判別できない。盤面の自動化は非同期で反映が遅れることがあり、(c) の時点で OPEN なら `gh issue close` を実行してよい。
-  既に閉じた課題に `gh issue close` が何を返すかは一時的な検証用の課題を作らずに確かめる手段が無いため、「(c) の読み直しが
-  CLOSED なら実行しない」で足りる
+- **(c) で読み直してから閉じ、結果は (d) の読み直しで決める。** (a) の `before` のまま `gh issue close` へ進むと、(b) の
+  `Auto-close issue` が閉じた経路をコマンド列から判別できない。盤面の自動化は非同期で反映が遅れるため、(c) の `now=OPEN` の
+  直後に自動化が閉じると `gh issue close` が 0 以外を返しうる。**(c) の `gh issue close` の終了コードでは結果を決めず、**
+  (d) の `after` が CLOSED なら `閉じた` にする（close が 0 以外でも）。close の出力は報告に載せる
 - 閉じる語の注意（番号ごとに要る・大小を区別しない・`gh issue close` は `owner/repo#番号` を受け取らない）は
   `merged` から移す
 
@@ -263,10 +282,10 @@ after=$(gh issue view <番号> --repo <所有者>/<リポジトリ> --json state
 
 | 結果 | 条件 | 報告に載せるもの |
 | --- | --- | --- |
-| `閉じた` | 手順 3 の (a) の `before` が OPEN で、(d) の `after` が CLOSED（(c) の `now` が CLOSED で `gh issue close` を行わなかった、つまり (b) の盤面の自動化が閉じた場合を含む） | 番号と戻し方 `gh issue reopen <番号> --repo <所有者>/<リポジトリ>` |
+| `閉じた` | 手順 3 の (a) の `before` が OPEN で、(d) の `after` が CLOSED（(c) の `now` が CLOSED で `gh issue close` を行わなかった、つまり (b) の盤面の自動化が閉じた場合と、(c) の `gh issue close` が 0 以外で終わった場合を含む） | 番号と戻し方 `gh issue reopen <番号> --repo <所有者>/<リポジトリ>`。(c) で close を行ったなら、その出力 |
 | `既に閉じていた` | 手順 3 の (a) の `before` が CLOSED（既定ブランチへのマージで GitHub が先に閉じた場合を含む） | 番号 |
-| `失敗（理由）` | (a) (c) (d) の読み取り・(c) の `gh issue close` が 0 以外で終わった、または (d) の `after` が CLOSED でない | 番号・理由・やり直すコマンド `gh issue close <番号> --repo <所有者>/<リポジトリ>` |
-| `開いたまま（理由）` | 閉じる条件に当たらない（本番への配布の前 / リリース後テストが `不合格`・`保留` / 対応を読み取れない） | 番号と理由（条件の判定と、いつ閉じるか） |
+| `失敗（理由）` | (d) の読み直しが CLOSED でない、または (a) (d) の読み取りが 0 以外で終わった | 番号・理由（(c) の close の出力を含む）・やり直すコマンド `gh issue close <番号> --repo <所有者>/<リポジトリ>` |
+| `開いたまま（理由）` | 閉じる条件に当たらない（本番への配布の前 / リリース後テストが `不合格`・`保留` / 対応を読み取れない / 配布の記録が読めない） | 番号と理由（条件の判定と、いつ閉じるか） |
 
 **`失敗` が 1 件でもあれば、終わりの工程を完了と報告せず、`issue-upkeep` を呼ばずに止まる。** 報告には
 失敗した課題・理由・やり直すコマンドを載せる。手順 1 の出力が空で一覧が取れないときも同じ扱いにする（決定 8）。
@@ -401,9 +420,9 @@ graph TD
 | C11 | 「まとまりを閉じる」の閉じる条件の表・結果の表の `開いたまま` と、`release-verification` の手順 4 の突き合わせ（文面） |
 | C11（手動確認） | リリース後テスト。このマイルストーンが検証への配布だけの時点で終わりの工程を通したとき、課題が OPEN のままで、報告に `開いたまま` と理由が載る |
 | D2 | `gh pr view 717 --json body -q .body \| bash plugins/ndf/scripts/lib/closing-issues.sh` が `devbasex/ai-plugins 712` と `devbasex/ai-plugins 713` を出す（設計の時点で実測済み） |
-| D2（まとまりの行の取り出し） | `gh pr view <配布のPR番号> --json body -q .body \| sed -n 's/^まとまり: //p' \| grep -oE '#[0-9]+' \| tr -d '#'`。本文に `まとまり: PR #717 / #718 / #720` があれば 717 718 720 を出し、行が無ければ出力が空（パイプの終了コードはどちらも 0。設計の時点で実測済み） |
+| D2（まとまりの行の取り出し） | `gh pr view <記録のPR番号> --json body,comments -q '.body, .comments[].body' \| sed -n 's/^まとまり: //p' \| grep -oE '#[0-9]+' \| tr -d '#'`。本文に `まとまり: PR #717 / #718 / #720` があれば 717 718 720 を出し、行が無ければ出力が空（パイプの終了コードはどちらも 0。設計の時点で `sed` 以降を実測済み。`gh pr view 719` / `739` の本文とコメントの取得は終了コード 0） |
 | A12 | 実装の検証で、要求文書の実測 7 行目を再現する。書き込めない退避先（`chmod a-w` した親）への `mv` が失敗する作業ツリーを一時リポジトリに作り、手順が `git worktree remove`（`--force` を含む）へ進まず作業ツリーが残り、同意を求める一覧にその作業ツリーが載らず、退避済みのパスが退避先に残り、報告の「未完了」に載ることを確かめる |
-| A8（退避） | 要求文書の実測 5 行目と 6 行目。実装の検証で、直下の無視されたファイル（`.env`）と、追跡されたディレクトリの配下の無視されたパス（`a/b/__pycache__/`）の両方を持つ作業ツリーに対して再現する |
+| A8（退避） | 要求文書の実測 5 行目・6 行目・8 行目。実装の検証で、直下の無視されたファイル（`.env`）と、追跡されたディレクトリの配下の無視されたパス（`a/b/__pycache__/`）と、空白・改行を含むパス（`my file.env` / `new⏎line.env`）を持つ作業ツリーに対して再現し、すべてが同じ相対パスで退避先へ移って `git worktree remove` が終了コード 0 で終わることを確かめる |
 | E1 | 移した `test_the_merged_skill_closes_issues_with_their_repository`（読む先を `progress-tracking` にする）を含む `uv run --with pytest pytest scripts/tests plugins/ndf -q` |
 | E2 E3 E4 E5 | 要求文書の検証手段のコマンド |
 

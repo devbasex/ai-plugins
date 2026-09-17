@@ -67,6 +67,7 @@
 | 5 | 無視されたファイル（`.env` と `scripts/__pycache__/a.pyc`）を持つ worktree で、`git status --ignored --porcelain` の `!!` の行（`.env` / `scripts/`）を共通の git ディレクトリの下の退避先へ同じ相対パスで `mv` した後に `git worktree remove` | 終了コード 0。退避先に 2 ファイルが残る |
 | 6 | 追跡されたディレクトリ `a/b/` の配下に無視された `a/b/__pycache__/x.pyc` を持つ worktree で、`!!` の行（`a/b/__pycache__/`。ディレクトリは末尾に `/` が付く）を、退避先に親を作らずに `mv` | `mv: cannot move '…/wt/a/b/__pycache__' to '…/a/b/__pycache__': No such file or directory` / 終了コード 1。`mkdir -p "$(dirname "<退避先>/<相対パス>")"` の後の `mv` と、続く `git worktree remove` はどちらも終了コード 0。`dirname` は末尾の `/` の有無で同じ親を返し、`mv` も末尾の `/` 付きで終了コード 0（git 2.53.0 / GNU coreutils） |
 | 7 | 無視された `.env` と `a/b/__pycache__/x.pyc` を持つ worktree で、退避先に `a/b/` を先に作って `chmod a-w` し（uid 1000 で実行）、決定 5 の退避のループ（`mkdir -p … && mv … \|\| exit 1`）の後に `&& git worktree remove` | 1 件目の `.env` は退避先へ移り、2 件目で `mv: cannot move '…/wt/a/b/__pycache__/' to '…/worktree-trash/feat__z-…/a/b/__pycache__/': Permission denied` / パイプの終了コード 1（`pipefail` なし）。`git worktree remove` は実行されず、`git worktree list` に作業ツリーが残り、`a/b/__pycache__/x.pyc` も作業ツリーに残る |
+| 8 | 無視された `my file.env`・改行を含む `new⏎line.env`・`quo"te.env`・`ünï.log`・`.env`・`a/b/__pycache__/m.pyc` を持つ worktree で、(1) 改行区切りのループ（`status --ignored --porcelain \| sed -n 's/^!! //p' \| while IFS= read -r rel`）と、(2) 決定 5 の NUL 区切りのループ（`status --ignored --porcelain=v1 -z` を `read -r -d ''` で読み、サブシェルで囲む）の後に `&& git worktree remove`（bash 5.3.9） | (1) git が `"my file.env"` `"new\nline.env"` `"quo\"te.env"` `"\303\274n\303\257.log"` と引用して出し、`a/b/__pycache__/` の次の `mv: cannot stat '…/wt/"my file.env"': No such file or directory` で終了コード 1、残り 4 件は作業ツリーに残る。(2) 6 件すべてが同じ相対パスで退避先へ移り、`git worktree remove` まで終了コード 0。7 行目の条件でも (2) は 1 件目の `.env` を移した後 `Permission denied` で終了コード 1、作業ツリーが残る。`-z` の名前の変更は `R  a/b/!! t.txt` と `a/b/t.txt` の 2 値になるが、そのとき `status --porcelain` が空でないため手順 1 で止まる。(2) を `sh`（dash）で実行すると `Syntax error: redirection unexpected` / 終了コード 2 |
 
 **2 行目と 4 行目は #561 の本文に無い境界である。**
 
@@ -127,7 +128,7 @@
       「マージ済みブランチの整理」で見つかり、Pull Request の head と対応付かないリモートブランチの扱いが書かれている
 - [ ] A7: squash / rebase でマージしたために `git branch -d` が拒むブランチの扱いが `merged/SKILL.md` に書かれている。
       その扱いが A5 を破らない
-- [ ] A8: 作業ツリーに無視されたファイル（`git status --ignored --porcelain` の `!!` の行）があるとき、消さずに退避してから
+- [ ] A8: 作業ツリーに無視されたファイル（`git status --ignored --porcelain=v1 -z` の `!! ` で始まる値）があるとき、消さずに退避してから
       作業ツリーを消すことと、退避先が作業完了報告に載ることが `merged/SKILL.md` に書かれている
 - [ ] A9: 作業完了報告に、消した対象ごとの復元の手段が載る
 
