@@ -1,77 +1,78 @@
-# #550 / #657: 契約（window の表・起動の指示・報告の形・測定の出力）
+# #550 / #657: 契約（worker の表・起動の指示・報告の形・測定の出力）
 
 設計の本体と決定の理由は [issue-550-657-design.md](issue-550-657-design.md) にある。この文書は、実装とテストがそのまま写す形だけを持つ。
+用語（supervisor / worker / context window）は、要求の文書の「用語」の表が持つ。
 
-## window の表
+## worker の表
 
-### `standard` の window
+### `standard` の worker
 
-| window | 通す工程（工程表の行） | 単位 | 始まりの条件 | 終わりの条件 | 返す関門 |
+| worker | 通す工程（工程表の行） | 単位 | 始まりの条件 | 終わりの条件 | 返す関門 |
 | --- | --- | --- | --- | --- | --- |
-| 設計 | 要求と受け入れ条件 / 作業場所の用意 / 設計 / ドキュメント再構成 / ドキュメントレビュー（Pull Request を出して cross-review が収束するまで） | Pull Request | 親がモードと課題を渡した | 設計 Pull Request の cross-review が収束した | 設計 Pull Request のマージ |
+| 設計 | 要求と受け入れ条件 / 作業場所の用意 / 設計 / ドキュメント再構成 / ドキュメントレビュー（Pull Request を出して cross-review が収束するまで） | Pull Request | supervisor がモードと課題を渡した | 設計 Pull Request の cross-review が収束した | 設計 Pull Request のマージ |
 | 実装 | ドキュメントレビューの後片付け（`merged`）/ 作業場所の用意（実装用）/ 計画 / 実装。終わりに `pr` を Draft で 1 度呼ぶ（工程表の行は増やさない） | Pull Request | 設計 Pull Request がマージ済み | 実装を載せた Draft の Pull Request を出した | なし |
 | 検査 | 構造改善 / 実装レビュー / 完了判定 / Pull Request（Draft を外す） | Pull Request | Draft の Pull Request がある | 実装レビューが収束し、Pull Request をレビュー待ちにした | なし |
 | 取り込み | 確定仕様化 / 実装 Pull Request のマージ / 後片付け / 配布（検証まで） | まとまり | まとまりの Pull Request がすべて検査を終えた | 検証への配布が済んだ。本番への配布が要らないリポジトリでは配布が済んだ | 本番の系へ届く操作（要るときだけ） |
 | 仕上げ | 配布（本番）/ リリース後テスト / 振り返り | まとまり | 本番への承認を受け取った。要らないリポジトリでは取り込みが終わった | 振り返りの記録を投稿した | なし |
 
-**Draft を開く位置は既存の規約のとおりである。** `stage-notes.md` の構造改善の節が「工程表で後にある `pr` を構造改善の前に 1 度呼び、Draft で開く。行は増やさない」と定めている。window の表は、その 1 度の呼び出しを実装の window の終わりに置いただけで、工程表の順序（構造改善 → 実装レビュー → 完了判定 → Pull Request）を変えない。**構造改善を通さないモードでも、実装の window の終わりに Draft を開く。** 検査の window の実装レビューは `cross-review` で、Pull Request の上で回るためである（`legacy-refactor` の `pr-review` も Pull Request を対象にする）。検査の window の Pull Request の工程は、どのモードでも Draft を外すことを指す。
+**Draft を開く位置は既存の規約のとおりである。** `stage-notes.md` の構造改善の節が「工程表で後にある `pr` を構造改善の前に 1 度呼び、Draft で開く。行は増やさない」と定めている。worker の表は、その 1 度の呼び出しを実装の worker の終わりに置いただけで、工程表の順序（構造改善 → 実装レビュー → 完了判定 → Pull Request）を変えない。**構造改善を通さないモードでも、実装の worker の終わりに Draft を開く。** 検査の worker の実装レビューは `cross-review` で、Pull Request の上で回るためである（`legacy-refactor` の `pr-review` も Pull Request を対象にする）。検査の worker の Pull Request の工程は、どのモードでも Draft を外すことを指す。
 
 **複数の Pull Request に分けるまとまりでは、`issue-plan-strategy` の Step 3〜4 に従う。** 誰がいつ作るかは次のとおりで、同じ Draft を 2 度作らない。
 
-| 経路 | release ブランチと Draft の release PR（Step 3） | 個別の Draft PR（Step 4） | 実装の window の始まりの条件に足すもの |
+| 経路 | release ブランチと Draft の release PR（Step 3） | 個別の Draft PR（Step 4） | 実装の worker の始まりの条件に足すもの |
 | --- | --- | --- | --- |
-| 1 本の Pull Request | 作らない | 実装の window の終わりに `pr` を Draft で呼ぶ（上の段落） | なし |
-| 複数の Pull Request | 親が、関門 1 の承認とマージの後、最初の実装の window を起動する前に作る | 各実装の window が、作業場所の用意の直後に作る（Step 4 の形。空のコミットで開く）。**終わりでは `pr` を呼ばず、その Draft へ push する** | release ブランチがある。window の起点ブランチは release ブランチ |
+| 1 本の Pull Request | 作らない | 実装の worker の終わりに `pr` を Draft で呼ぶ（上の段落） | なし |
+| 複数の Pull Request | supervisor が、関門 1 の承認とマージの後、最初の実装の worker を起動する前に作る | 各実装の worker が、作業場所の用意の直後に作る（Step 4 の形。空のコミットで開く）。**終わりでは `pr` を呼ばず、その Draft へ push する** | release ブランチがある。worker の起点ブランチは release ブランチ |
 
 ### モードごとの組み方
 
-**表の window の名前は変えない。** モードは、各 window がどの工程を含むかと、関門を返すかだけを変える。
+**表の worker の名前は変えない。** モードは、各 worker がどの工程を含むかと、関門を返すかだけを変える。
 
 | モード | 設計 | 実装 | 検査 | 取り込み | 仕上げ |
 | --- | --- | --- | --- | --- | --- |
 | `standard` | 上の表 | 上の表 | 上の表 | 上の表 | 上の表 |
 | `documentation` | 素材の収集と出典の確定を、設計とドキュメント再構成の間に含む | 実装の代わりに執筆 | 構造改善を含まない | 上の表 | 体裁レビューを配布とリリース後テストの間に含む |
 | `legacy-refactor`（設計 Pull Request を分ける） | 要求と受け入れ条件を含まない | 実装の代わりに現状固定テストと段階的改善 | 上の表（実装レビューは `pr-review`） | 確定仕様化を含まない | 上の表 |
-| `legacy-refactor`（分けない） | **作らない**。作業場所の用意と設計は実装の window の先頭に入る | 同上 | 同上 | 同上 | 同上 |
-| `light` | **作らない**。要求と受け入れ条件・作業場所の用意・条件付きの設計は実装の window の先頭に入る | 計画を含まない | 構造改善を含まない | 確定仕様化を含まない | リリース後テストと振り返りを含まない。**本番の承認が要らなければ作らない** |
+| `legacy-refactor`（分けない） | **作らない**。作業場所の用意と設計は実装の worker の先頭に入る | 同上 | 同上 | 同上 | 同上 |
+| `light` | **作らない**。要求と受け入れ条件・作業場所の用意・条件付きの設計は実装の worker の先頭に入る | 計画を含まない | 構造改善を含まない | 確定仕様化を含まない | リリース後テストと振り返りを含まない。**本番の承認が要らなければ作らない** |
 | `operation` | 要求と受け入れ条件・作業場所の用意・条件付きの設計・計画。**本番の系へ届く実行の前で関門を返す** | 実行（`operation-run.md`） | 構造改善を含まない | 確定仕様化は条件に当たるときだけ | 条件に当たる工程だけ。当たる工程が無ければ作らない |
 
-**作らない window の工程は、次の window の先頭へ入る。始まりの条件も一緒に移る。** 次の window の始まりの条件は、作らない window の始まりの条件に置き換わる。関門を返す window は、中身が少なくても作る（決定 3）。
+**作らない worker の工程は、次の worker の先頭へ入る。始まりの条件も一緒に移る。** 次の worker の始まりの条件は、作らない worker の始まりの条件に置き換わる。関門を返す worker は、中身が少なくても作る（決定 3）。
 
-| 作らない window | 次の window | 置き換わった始まりの条件 |
+| 作らない worker | 次の worker | 置き換わった始まりの条件 |
 | --- | --- | --- |
-| 設計（`light` / 設計 Pull Request を分けない `legacy-refactor`） | 実装 | 親がモードと課題を渡した。先頭のドキュメントレビューの後片付けは通らない |
-| 仕上げ（`light` / `operation` で当たる工程が無い） | — | 取り込みの window の終わりが到達点になる |
+| 設計（`light` / 設計 Pull Request を分けない `legacy-refactor`） | 実装 | supervisor がモードと課題を渡した。先頭のドキュメントレビューの後片付けは通らない |
+| 仕上げ（`light` / `operation` で当たる工程が無い） | — | 取り込みの worker の終わりが到達点になる |
 
-### window の名前の語彙
+### worker の名前の語彙
 
-`設計` / `実装` / `検査` / `取り込み` / `仕上げ` の 5 つである。測定では、親のセッションを `親`、語彙で始まらないサブエージェントを `工程外` とする。
+`設計` / `実装` / `検査` / `取り込み` / `仕上げ` の 5 つである。測定では、supervisor のセッションを `supervisor`、語彙で始まらないサブエージェントを `工程外` とする。
 
 ## 起動の指示
 
-親は `Agent` を次の値で呼ぶ。
+supervisor は `Agent` を次の値で呼ぶ。
 
 | 引数 | 値 |
 | --- | --- |
-| `description` | `<window の名前>: <課題番号を空白区切り>`（例 `設計: #550 #657`）。window の名前の後ろは半角の `:` と空白 1 つ |
+| `description` | `<worker の名前>: <課題番号を空白区切り>`（例 `設計: #550 #657`）。worker の名前の後ろは半角の `:` と空白 1 つ |
 | `subagent_type` | 省く（`general-purpose`） |
-| `model` | 省く（親と同じ）。落とすのは決定 10 の 2 条件を両方満たす window だけ |
+| `model` | 省く（supervisor と同じ）。落とすのは決定 10 の 2 条件を両方満たす worker だけ |
 | `prompt` | 下の 8 項目と、守る規則 9 つ |
 
 `prompt` に必ず入れる項目:
 
 | 項目 | 中身 |
 | --- | --- |
-| window | window の名前と、通す工程の一覧（window の表から写す） |
+| worker | worker の名前と、通す工程の一覧（worker の表から写す） |
 | 課題 | 課題番号 |
-| モード | 親が判定したモード |
+| モード | supervisor が判定したモード |
 | 作業場所 | 作業ツリーのパスとブランチ（まだ無ければ「無し」） |
-| 前の window の報告 | 直前の window の `## window の報告` の本文をそのまま |
+| 前の worker の報告 | 直前の worker の `## worker の報告` の本文をそのまま |
 | 承認 | 関門の承認を受けた後なら、承認した内容と承認した時刻。無ければ「無し」 |
-| 到達点 | 置き直した到達点（`stage-windows.md` の「到達点を置き直す」）。置き直していなければ「ゴール条件のとおり」 |
-| 提示物の置き場所 | 関門を返すときに提示物を書くファイルの絶対パス（親と window が共有する一時ディレクトリの下） |
+| 到達点 | 置き直した到達点（`stage-workers.md` の「到達点を置き直す」）。置き直していなければ「ゴール条件のとおり」 |
+| 提示物の置き場所 | 関門を返すときに提示物を書くファイルの絶対パス（supervisor と worker が共有する一時ディレクトリの下） |
 
-守る規則（文言は `stage-windows.md` が持つ。ここでは項目だけを固定する）:
+守る規則（文言は `stage-workers.md` が持つ。ここでは項目だけを固定する）:
 
 1. 関門に達したら承認を求めずに `結果: 関門` で返す。設計 Pull Request をマージしない。本番の系へ届く操作を、`承認` が無いまま行わない
 2. 関門以外の Skill の確認は、提示して進める
@@ -79,22 +80,22 @@
 4. 待ちで応答を終えない。待ちの道具から戻った後、同じ応答の中で次の段へ進む
 5. 外部へ書く前に、既に書いたものがあるかを確かめる（Pull Request・コメント・進行の記録）
 6. 範囲外の課題は `out-of-scope` で起票する
-7. 最後の応答の末尾に `## window の報告` を置く
+7. 最後の応答の末尾に `## worker の報告` を置く
 8. モードを上げるべきだと分かったら、進めずに `結果: 止まった` で返す
-9. `到達点` が置き直されていて（マージに他者の承認が要る）、その到達点に達したら、関門を返さずに `結果: 完了`・`次の window: 無し` で返す。マージしない
+9. `到達点` が置き直されていて（マージに他者の承認が要る）、その到達点に達したら、関門を返さずに `結果: 完了`・`次の worker: 無し` で返す。マージしない
 
 ## 報告の形
 
-window の最後の応答の**末尾**に置く。見出しの後ろに他の見出しを置かない。
+worker の最後の応答の**末尾**に置く。見出しの後ろに他の見出しを置かない。
 
 ```markdown
-## window の報告
+## worker の報告
 
-- window: 設計
+- worker: 設計
 - 課題: #550 #657
 - 結果: 関門
 - 関門: 設計 Pull Request のマージ
-- 次の window: 実装
+- 次の worker: 実装
 - Pull Request: https://github.com/<所有者>/<リポジトリ>/pull/<番号>
 - 最後に記録した工程: ドキュメントレビュー
 - 提示物: /tmp/claude-1000/<…>/scratchpad/approval-550-657.md
@@ -103,71 +104,71 @@ window の最後の応答の**末尾**に置く。見出しの後ろに他の見
 
 | 項目 | 値 | 空のとき |
 | --- | --- | --- |
-| window | window の名前の語彙のどれか | 空にしない |
+| worker | worker の名前の語彙のどれか | 空にしない |
 | 課題 | `#番号` を空白区切り | 空にしない |
 | 結果 | `完了` / `関門` / `止まった` | 空にしない |
 | 関門 | `設計 Pull Request のマージ` / `本番の系へ届く操作` | `無し`（結果が関門でないとき） |
-| 次の window | window の名前の語彙のどれか | `無し`（最後の window、または止まったとき） |
+| 次の worker | worker の名前の語彙のどれか | `無し`（最後の worker、または止まったとき） |
 | Pull Request | URL を空白区切り | `無し` |
 | 最後に記録した工程 | 工程表の行名 | 空にしない |
 | 提示物 | 絶対パス。`approval-request.md` の 2 層を持つ | `無し`（結果が関門でないとき） |
 | 理由 | 1 行 | `無し`（結果が止まったでないとき） |
 
-**親が見るのは、見出しの有無と `結果` の 2 つである。** 残りの項目は、次に何を渡すかを決めるときに読む。
+**supervisor が見るのは、見出しの有無と `結果` の 2 つである。** 残りの項目は、次に何を渡すかを決めるときに読む。
 
-| 見出しの有無 | `結果` | 親の動き |
+| 見出しの有無 | `結果` | supervisor の動き |
 | --- | --- | --- |
-| 無い | — | `SendMessage` で続けさせる。同じ window で 3 回続けさせても報告が出なければ、4 回目は送らずに止まる |
-| ある | `完了` | `次の window` を起動する。`無し` なら到達の報告。到達点を置き直していたときは、`SKILL.md` の「到達点を置き直す」のとおり止まった理由と再開の手順を添える（移した後は `stage-windows.md`） |
-| ある | `関門` | `提示物` を読み、`AskUserQuestion` で承認を求める。承認の後の動きは `関門` の値で決める。`設計 Pull Request のマージ` なら親がマージしてから `次の window` を起動する。`本番の系へ届く操作` ならマージせずに `次の window` を起動する（`operation` では設計の window がこの値を返す）。親はモードや window の名前から分岐しない |
+| 無い | — | `SendMessage` で続けさせる。同じ worker で 3 回続けさせても報告が出なければ、4 回目は送らずに止まる |
+| ある | `完了` | `次の worker` を起動する。`無し` なら到達の報告。到達点を置き直していたときは、`SKILL.md` の「到達点を置き直す」のとおり止まった理由と再開の手順を添える（移した後は `stage-workers.md`） |
+| ある | `関門` | `提示物` を読み、`AskUserQuestion` で承認を求める。承認の後の動きは `関門` の値で決める。`設計 Pull Request のマージ` なら supervisor がマージしてから `次の worker` を起動する。`本番の系へ届く操作` ならマージせずに `次の worker` を起動する（`operation` では設計の worker がこの値を返す）。supervisor はモードや worker の名前から分岐しない |
 | ある | `止まった` | `理由` を添えて利用者へ報告し、終える |
 
-## 親の報告
+## supervisor の報告
 
-親は到達したときと止まったときに、利用者への報告の末尾へ次の表を置く。**続けさせた回数は記録から見分けられないため、親が window を起動してから `SendMessage` を送るたびに window ごとに数えて持つ。**
+supervisor は到達したときと止まったときに、利用者への報告の末尾へ次の表を置く。**続けさせた回数は記録から見分けられないため、supervisor が worker を起動してから `SendMessage` を送るたびに worker ごとに数えて持つ。**
 
 ```markdown
-## window の一覧
+## worker の一覧
 
-| window | 課題 | 結果 | 報告なしで続けさせた回数 | 上限の中断から再開した回数 |
+| worker | 課題 | 結果 | 報告なしで続けさせた回数 | 上限の中断から再開した回数 |
 | --- | --- | --- | ---: | ---: |
 | 設計 | #550 #657 | 関門 | 0 | 0 |
 ```
 
 | 列 | 値 |
 | --- | --- |
-| window・課題・結果 | その window の最後の `## window の報告` の値。報告が無いまま止まった window は `結果` を `報告なし` にする |
+| worker・課題・結果 | その worker の最後の `## worker の報告` の値。報告が無いまま止まった worker は `結果` を `報告なし` にする |
 | 報告なしで続けさせた回数 | 報告の形の表の「見出しが無い」で送った `SendMessage` の数（0〜3） |
 | 上限の中断から再開した回数 | 中断の点検の手順 2 で送った `SendMessage` の数 |
 
-**同じ window の名前を工程の頭から起動し直したときは、別の行にする。**
+**同じ worker の名前を工程の頭から起動し直したときは、別の行にする。**
 
 ## 中断の点検
 
-親は目を覚ますたびに 1 回行う（契機は設計文書の処理の流れ）。
+supervisor は目を覚ますたびに 1 回行う（契機は設計文書の処理の流れ）。
 
 | 順 | 行うこと | 使うもの |
 | ---: | --- | --- |
-| 1 | 中断した window を一覧する | `python3 "$SCRIPTS/lib/transcript_windows.py" interrupted --session "$CLAUDE_CODE_SESSION_ID" --format json` |
-| 2 | `resets_passed` が真の window ごとに `SendMessage` で続けさせる。文面は「利用上限で中断していた。解除されたので続ける。書く前に既に書いたものを確かめる」 | `agent_id` |
-| 3 | 2 が失敗した window は、`最後に記録した工程`（進行の記録）の頭から、同じ window の名前で新しい window を起動する。**失敗とは、`SendMessage` の結果が `"success": true` を持たないこと**である（成功した結果は `{"success":true,"message":"Resuming agent …"}` の形で返ることを実測した） | issue の `## 進行` |
-| 4 | まだ過ぎていない window があれば、待ちを背景で起動して応答を終える | `python3 "$SCRIPTS/lib/transcript_windows.py" wait-reset --session "$CLAUDE_CODE_SESSION_ID"`（`run_in_background`） |
+| 1 | 中断した worker を一覧する | `python3 "$SCRIPTS/lib/transcript_workers.py" interrupted --session "$CLAUDE_CODE_SESSION_ID" --format json` |
+| 2 | `resets_passed` が真の worker ごとに `SendMessage` で続けさせる。文面は「利用上限で中断していた。解除されたので続ける。書く前に既に書いたものを確かめる」 | `agent_id` |
+| 3 | 2 が失敗した worker は、`最後に記録した工程`（進行の記録）の頭から、同じ worker の名前で新しい worker を起動する。**失敗とは、`SendMessage` の結果が `"success": true` を持たないこと**である（成功した結果は `{"success":true,"message":"Resuming agent …"}` の形で返ることを実測した） | issue の `## 進行` |
+| 4 | まだ過ぎていない worker があれば、待ちを背景で起動して応答を終える | `python3 "$SCRIPTS/lib/transcript_workers.py" wait-reset --session "$CLAUDE_CODE_SESSION_ID"`（`run_in_background`） |
 
 **手順 4 は `--max-sleep` を付けない。** 背景の待ちを数時間続けられないと分かったとき（設計文書の未確認 U3）だけ、`--max-sleep 540` を付ける。そのときは終了コード 3 で起きるたびに手順 1 と手順 4 だけを行い、解除前に `SendMessage` しない。
 
-**親が再開するのは、自分が起動した window （深さ 1）だけである。** 孫の中断は、その孫を起動した window が再開された後に、自分の window にある孫の `agent_id` へ同じ手順 2〜3 を行う。親が孫を直接再開すると、再開された window と孫が同じ作業や外部への書き込みを重ねる。
+**supervisor が再開するのは、自分が起動した worker （深さ 1）だけである。** 孫の中断は、その孫を起動した worker が再開された後に、自分の worker にある孫の `agent_id` へ同じ手順 2〜3 を行う。supervisor が孫を直接再開すると、再開された worker と孫が同じ作業や外部への書き込みを重ねる。
 
-`CLAUDE_CODE_SESSION_ID` は、親でもサブエージェントでも親のセッションの ID を持つ（このサブエージェントの環境で確かめた）。取れないときは、`Agent` の起動の結果に出る `output_file` のパスの `<セッション>` の部分を渡す。
+`CLAUDE_CODE_SESSION_ID` は、supervisor でもサブエージェントでも supervisor のセッションの ID を持つ（このサブエージェントの環境で確かめた）。取れないときは、`Agent` の起動の結果に出る `output_file` のパスの `<セッション>` の部分を渡す。
 
-## window の記録を読む部品（`transcript_windows.py`）
+## worker の記録を読む部品（`transcript_workers.py`）
 
 ### コマンド
 
 | コマンド | 引数 | 出力 | 終了コード |
 | --- | --- | --- | --- |
-| `list` | `--session <ID>`（必須）/ `--format md\|json` | そのセッションの親と配下のすべての window の `WindowRecord` | 0。記録が 1 件も無ければ 0 で空の一覧と理由 1 行 |
-| `interrupted` | `--session <ID>` / `--format md\|json` / `--now <ISO 8601>`（テスト用） | `ending` が `rate_limit` で、**深さが 1 の window だけ**（孫は返さない）。`resets_passed`（真偽）を足す | 0 |
-| `wait-reset` | `--session <ID>` / `--margin <秒>`（既定 60）/ `--max-sleep <秒>`（既定なし） | 眠った秒数と、起きた時点の中断した window の数を 1 行。**眠るのは、まだ来ていない解除時刻のうち最も早いもの + `--margin` まで**である。起きた親は解除された window だけを再開し、残りがあれば手順 4 で待ち直す | 0 = 解除時刻を過ぎた。3 = `--max-sleep` で区切った（まだ解除前）。2 = 引数の誤り |
+| `list` | `--session <ID>`（必須）/ `--format md\|json` | そのセッションの supervisor と配下のすべての worker の `WorkerRecord` | 0。記録が 1 件も無ければ 0 で空の一覧と理由 1 行 |
+| `interrupted` | `--session <ID>` / `--format md\|json` / `--now <ISO 8601>`（テスト用） | `ending` が `rate_limit` で、**深さが 1 の worker だけ**（孫は返さない）。`resets_passed`（真偽）を足す | 0 |
+| `wait-reset` | `--session <ID>` / `--margin <秒>`（既定 60）/ `--max-sleep <秒>`（既定なし） | 眠った秒数と、起きた時点の中断した worker の数を 1 行。**眠るのは、まだ来ていない解除時刻のうち最も早いもの + `--margin` まで**である。起きた supervisor は解除された worker だけを再開し、残りがあれば手順 4 で待ち直す | 0 = 解除時刻を過ぎた。3 = `--max-sleep` で区切った（まだ解除前）。2 = 引数の誤り |
 
 **読めない行・壊れたファイルは飛ばし、飛ばした件数を標準エラーへ 1 行出す。** 終了コードは変えない。引数の誤りだけが 2 を返す。
 
@@ -175,18 +176,18 @@ window の最後の応答の**末尾**に置く。見出しの後ろに他の見
 
 | 対象 | パス |
 | --- | --- |
-| 親 | `~/.claude/projects/*/<セッション>.jsonl` |
-| window と孫 | `~/.claude/projects/*/<セッション>/subagents/agent-<ID>.jsonl` と `agent-<ID>.meta.json` |
+| supervisor | `~/.claude/projects/*/<セッション>.jsonl` |
+| worker と孫 | `~/.claude/projects/*/<セッション>/subagents/agent-<ID>.jsonl` と `agent-<ID>.meta.json` |
 
 `~/.claude` は環境変数 `CLAUDE_CONFIG_DIR` があればそちらを使う。孫は `.meta.json` の `spawnDepth` で `depth` が 2 以上になる。
 
-### `WindowRecord` の値
+### `WorkerRecord` の値
 
 | キー | 型 | 取り方 |
 | --- | --- | --- |
-| `window` | 文字列 | 親は `親`。window は `.meta.json` の `description` の最初の `: ` より前が語彙にあればその値、無ければ `工程外` |
-| `agent_id` | 文字列 / null | ファイル名の `agent-<ID>`。親は null |
-| `depth` | 整数 | 親 0。window は `spawnDepth` |
+| `worker` | 文字列 | supervisor は `supervisor`。worker は `.meta.json` の `description` の最初の `: ` より前が語彙にあればその値、無ければ `工程外` |
+| `agent_id` | 文字列 / null | ファイル名の `agent-<ID>`。supervisor は null |
+| `depth` | 整数 | supervisor 0。worker は `spawnDepth` |
 | `model` | 文字列 / null | 合成でない応答の `message.model` のうち最も多いもの |
 | `fixed` | 整数 / null | 合成でない最初の応答の `input_tokens + cache_read_input_tokens + cache_creation_input_tokens` |
 | `peak` | 整数 / null | 合成でない応答の同じ合計の最大 |
@@ -201,7 +202,7 @@ window の最後の応答の**末尾**に置く。見出しの後ろに他の見
 
 `fixed` / `peak` / `work` / `model` は、合成でない応答が 1 件も無いとき null になる。
 
-**表の上から順に判定し、最初に当たった値にする。** 429 で中断した window へ `SendMessage` した直後は、最後の assistant の行が 429 の合成の応答のまま `user` の行が追記される。`in_progress` を先に判定するため、この状態の window は `interrupted` に再び現れない。
+**表の上から順に判定し、最初に当たった値にする。** 429 で中断した worker へ `SendMessage` した直後は、最後の assistant の行が 429 の合成の応答のまま `user` の行が追記される。`in_progress` を先に判定するため、この状態の worker は `interrupted` に再び現れない。
 
 | 順 | `ending` | 条件 |
 | ---: | --- | --- |
@@ -212,15 +213,15 @@ window の最後の応答の**末尾**に置く。見出しの後ろに他の見
 
 **出力に含めないもの:** `description` の `: ` より後ろ、ファイルのパス、プロンプト、応答とツールの本文、`requestId`、`cwd`、`gitBranch`。`agent_id` は `list` と `interrupted` にだけ出し、`skill-stats` の集計には出さない。
 
-## `skill-stats` の window の測定
+## `skill-stats` の測定（worker ごとの context window）
 
 ### 引数
 
 | 引数 | 意味 | 既定 |
 | --- | --- | --- |
-| `--windows` | window の測定を出す。付けないと従来の Skill の統計だけを出す | 付けない |
-| `--session <ID>` | セッションに絞る。繰り返して複数を渡せる。`--windows` と組み合わせると window の測定を絞る。**`--windows` を付けないと、Skill の統計をそのセッションの親の記録（`<セッション>.jsonl`）だけで数える**（window の中の起動は含めない） | 絞らない |
-| `--from` / `--to` / `--days` / `--project` | 従来どおり。`--windows` では記録の更新時刻とプロジェクトで絞る | 従来どおり |
+| `--workers` | context window の測定を出す。付けないと従来の Skill の統計だけを出す | 付けない |
+| `--session <ID>` | セッションに絞る。繰り返して複数を渡せる。`--workers` と組み合わせると context window の測定を絞る。**`--workers` を付けないと、Skill の統計をそのセッションの supervisor の記録（`<セッション>.jsonl`）だけで数える**（worker の中の起動は含めない） | 絞らない |
+| `--from` / `--to` / `--days` / `--project` | 従来どおり。`--workers` では記録の更新時刻とプロジェクトで絞る | 従来どおり |
 | `--window-limit <トークン>` | 割る候補の印を付ける最大充填の目安 | `context-window.md` の「遅くとも切る」値（200000）。**モデルに依る値であり、`context-window.md` の目安が書き換わったときはこの既定も揃える。** 一致はテストが固定する。`context-window.md` は目安を 1 つだけ持つため、既定は全モデルに同じ値を当てる。モデルごとに目安を変えるときは、モデルの行ごとに `--window-limit` を渡し直して読む |
 | `--format md\|json` | 従来どおり | `md` |
 
@@ -229,36 +230,36 @@ window の最後の応答の**末尾**に置く。見出しの後ろに他の見
 1 つ目の表は記録 1 件につき 1 行（`--session` のときだけ出す。複数のセッションにまたがるときは 2 つ目の表だけ）。
 
 ```text
-| window | 深さ | モデル | 固定費 | 最大充填 | 実作業 | 応答数 | 所要（分） | 終わり方 | 中断 |
+| worker | 深さ | モデル | 固定費 | 最大充填 | 実作業 | 応答数 | 所要（分） | 終わり方 | 中断 |
 ```
 
-2 つ目の表は**window の名前とモデルの組**ごとの束ね。window ごとにモデルを変えられる（決定 10）ため、同じ window の名前でもモデルが違えば別の行にする。**応答数が 3 に満たない記録は外し、外した件数を表の下に 1 行出す。**
+2 つ目の表は**worker の名前とモデルの組**ごとの束ね。worker ごとにモデルを変えられる（決定 10）ため、同じ worker の名前でもモデルが違えば別の行にする。**応答数が 3 に満たない記録は外し、外した件数を表の下に 1 行出す。**
 
 ```text
-| window | モデル | 件数 | 固定費の中央値 | 実作業の中央値 | 実作業 < 固定費 | 最大充填の最大 | 印 |
+| worker | モデル | 件数 | 固定費の中央値 | 実作業の中央値 | 実作業 < 固定費 | 最大充填の最大 | 印 |
 ```
 
 `実作業 < 固定費` は、実作業が**同じ記録の**固定費を下回った記録の件数である。中央値どうしは比べない。
 
 | 印 | 条件 |
 | --- | --- |
-| `束ねる候補` | `実作業 < 固定費` の件数 > 件数の半分。**window の名前が `設計` の window には付けない**（設計の window は、作るときはどのモードでも必ず関門を返す。`operation` では関門 2）。`取り込み` は関門 2 を返すかがリポジトリで変わり、記録はそれを持たないため、名前では除かない |
+| `束ねる候補` | `実作業 < 固定費` の件数 > 件数の半分。**worker の名前が `設計` の worker には付けない**（設計の worker は、作るときはどのモードでも必ず関門を返す。`operation` では関門 2）。`取り込み` は関門 2 を返すかがリポジトリで変わり、記録はそれを持たないため、名前では除かない |
 | `割る候補` | 最大充填の最大 > `--window-limit` |
 | 空 | どちらでもない |
 
-`json` では `windows`（1 つ目の表の行の配列、`agent_id` を除く）と `window_summary`（2 つ目の表の行の配列）と `excluded`（外した件数）を持つ。
+`json` では `workers`（1 つ目の表の行の配列、`agent_id` を除く）と `worker_summary`（2 つ目の表の行の配列）と `excluded`（外した件数）を持つ。
 
 ## 振り返りの記録へ足す表
 
-`retrospective` の記録の雛形の「何が起きたか」の後ろに置く。値は `skill-stats --windows --session <親のセッション>` の 2 つ目の表をそのまま貼る。
+`retrospective` の記録の雛形の「何が起きたか」の後ろに置く。値は `skill-stats --workers --session <supervisor のセッション>` の 2 つ目の表をそのまま貼る。
 
 ```markdown
-## window の大きさ
+## context window の大きさ
 
-| window | モデル | 件数 | 固定費の中央値 | 実作業の中央値 | 実作業 < 固定費 | 最大充填の最大 | 印 |
+| worker | モデル | 件数 | 固定費の中央値 | 実作業の中央値 | 実作業 < 固定費 | 最大充填の最大 | 印 |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
 
-（印の付いた window ごとに、束ねる・割る・そのままのどれにするかと理由を 1 行）
+（印の付いた worker ごとに、束ねる・割る・そのままのどれにするかと理由を 1 行）
 ```
 
 **まとまりを複数のセッションで通したときは、`--session` を繰り返して 1 つの表にする。** 印の判定は記録ごとの比で行うため、固定費の違うセッションを束ねても判定の意味は変わらない。中央値の列は分布の目安として読み、判定には使わない。
