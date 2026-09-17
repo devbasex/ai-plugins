@@ -445,7 +445,7 @@ president 自身が上限に当たっているときは、B より前で応答�
 | --- | --- | --- |
 | 性能・拡張性 | supervisor 1 つの最大充填が目安を超えない。層を増やした費用を見られる | 持ち場の境を関門と切れ目に合わせる（決定 3）。粒度の基準を supervisor に当て、worker には固定費の合計の印を置く（決定 16）。層ごとの合計を出す（決定 17）。目安は `--window-limit` で渡し、既定は `context-window.md` の「遅くとも切る」値に合わせる |
 | 運用・保守性 | 中断・再開・続けさせた回数が残る | 上限の中断と再開は記録の `interruptions` と `ending` に出る（決定 15）。報告なしで続けさせた回数は記録から見分けられないため、president が到達の報告に持ち場ごとに載せる（決定 10） |
-| セキュリティ | 送信しない。出力にパス・本文・プロンプトを含めない | 部品は標準ライブラリだけで、ネットワークを呼ばない。出力の列は契約の文書の表に限り、`description` は語彙の値だけを出す（決定 14）。`agent_id` は `list` と `interrupted` の出力にだけ出す |
+| セキュリティ | 部品が送信の経路を持たない。出力にパス・本文・プロンプトを含めない | 部品は標準ライブラリだけで、ネットワークを呼ばない。振り返りのコメントへ載る値は AC30 の列に限る。出力の列は契約の文書の表に限り、`description` は語彙の値だけを出す（決定 14）。`agent_id` は `list` と `interrupted` の出力にだけ出す |
 | システム環境 | 自動の継続が無い版でも工程が失われない | 決定 20 の段 3。記録はファイルに残るため、どの段で起きても同じ点検で再開できる |
 
 ## テスト設計
@@ -462,7 +462,7 @@ president 自身が上限に当たっているときは、B より前で応答�
 | AC30 | 同上: 出力の JSON に `description` の後ろ半分・パス・本文が含まれないこと |
 | AC21・AC27・AC29・AC32・AC35・AC36・AC37 | `test_agents_report.py`: president の行、複数セッション、**2 つの supervisor の worker が混ざるフィクスチャで `role_usage` が起動元ごとに分かれること**、層ごとの合計の表、束ねる候補が supervisor の行にだけ付くこと、worker を使いすぎの印（supervisor と worker の固定費の合計 > supervisor の実作業）、`--agents` を付けない既定の出力が変わらないこと |
 | AC33 | `test_context_window_section.py`: 手順 2 の表に「context window」の行、雛形に 3 つの表（束ね・層ごとの合計・持ち場ごとの worker の使い方）があること |
-| AC34 | `test_transcript_agents.py`: `socket` を塞いだ状態でコマンドが終了コード 0 で終わる |
+| AC34 | `test_transcript_agents.py`: `socket` を塞いだ状態でコマンドが終了コード 0 で終わる。`test_context_window_section.py`: 振り返りの雛形が AC30 の列だけを持ち、パス・本文の列を持たないこと |
 | AC40・AC41・AC46・AC47・AC49 | `test_transcript_agents.py`: 中断した supervisor が 2 本・中断した worker が 1 本・完了した記録が 1 本のセッションで、`interrupted --layer supervisor` が supervisor の 2 本だけを `resets_at` 付きで返し、`--layer worker --agent <id>` が指定した worker だけを返す。429 の後に `user` の行が追記された記録は `in_progress` になり、どちらにも現れない。`test_agent_layers_doc.py` で 3 通りの表の存在を固定する |
 | AC42・AC43・AC45・AC48 | 自動の継続が入った後の点検は決定的である（`interrupted` の出力と `SendMessage` の結果だけで分岐する）。`test_transcript_agents.py` で、自動の継続の行（`origin.kind` が `auto-continuation`）が追記された president の記録から `interrupted` が解除済みを返すことを固定する。`test_agent_layers_doc.py` で点検の契機と手順を固定する。実際の再開はリリース後テストで記録を読む |
 | AC44 | `test_transcript_agents.py`: `wait-reset --depth 1` が解除時刻を過ぎていれば直ちに終わり、未来の時刻なら差の秒数だけ眠る。解除時刻の違う 2 件では早い方まで眠る。**president が直接起動した worker だけが中断しているときも眠る**（眠る関数を差し替えて秒数を見る） |
