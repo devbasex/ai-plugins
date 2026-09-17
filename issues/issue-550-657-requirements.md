@@ -189,7 +189,7 @@ working on when the limit was reached; do not repeat work that is already comple
   `server_error`（500 / 529）と `authentication_failed` は、これと区別して扱う
 - [ ] AC41: 上限の中断の解除時刻を、応答の記録（`quotaLimits.resetsAt`）から取る。**固定の間隔で待たない**
 - [ ] AC42: 解除の後、親は中断した窓を `SendMessage` で同じ窓のまま続けさせる。
-  続けられない（窓が見つからない）ときは、`progress-tracking` の記録が指す工程の頭から新しい窓を起動する
+  続けられないとき（`SendMessage` の結果が `"success": true` を持たない）は、`progress-tracking` の記録が指す工程の頭から新しい窓を起動する
 - [ ] AC43: 親も上限に当たり、解除時刻に自動の継続が入ったとき、**人間の入力なしに** AC42 の再開が行われる
 - [ ] AC44: 親が上限に当たらずに窓だけが中断したとき、親は解除時刻を過ぎるまで再開しない。
   待つ間に `/goal` の見回りが尽きても、解除時刻の後に親が目を覚ます経路がある
