@@ -453,7 +453,7 @@ president 自身が上限に当たっているときは、B より前で応答�
 | 受け入れ条件 | 何で確かめるか |
 | --- | --- |
 | AC1・AC2・AC5・AC6・AC7・AC60 | リリース後テストで `light` の課題 1 件を `/goal` で通し、president のセッションの記録を読む（人の入力の数、`skill-stats --session`（`--agents` なし）が president の記録だけで数えた Skill の呼び出し数、president の報告の持ち場の一覧と記録の `SendMessage` の数の一致、issue の `## 進行`） |
-| AC3・AC4・AC9・AC10・AC12・AC14・AC15・AC17・AC18・AC19 | `test_agent_layers_doc.py`: `agent-layers.md` に 3 層の責務の表・持ち場の表（5 つと関門の列）・supervisor の報告の 10 項目・worker の報告の 5 項目・続けさせる回数 3・モデルの基準 2 つ・委譲しない 5 つ・「worker の報告を president へ転送しない」の文があること。規約の文書に固定費の実測値が無いこと |
+| AC3・AC4・AC4b・AC9・AC10・AC12・AC14・AC15・AC17・AC18・AC19 | `test_agent_layers_doc.py`: `agent-layers.md` に 3 層の責務の表・止まるときに持ち場の一覧を出す 3 つの時点・持ち場の表（5 つと関門の列）・supervisor の報告の 10 項目・worker の報告の 5 項目・続けさせる回数 3・モデルの基準 2 つ・委譲しない 5 つ・「worker の報告を president へ転送しない」の文があること。規約の文書に固定費の実測値が無いこと |
 | AC8・AC62 | 既存の `test_approval_gates.py` / `test_workflow_guard.py` がそのまま通ること |
 | AC11 | `test_agent_layers_doc.py`: `cross-review/SKILL.md` の「メイン」の定義が supervisor を指すこと |
 | AC13 | 同上: `context-window.md` に「モデルに依る」と「リポジトリに依る」の両方の語と、比の基準（supervisor に当てる）の文があること。`--window-limit` の既定値が `context-window.md` の「遅くとも N 万で切る」の N × 10000 と一致すること |
@@ -490,4 +490,5 @@ president 自身が上限に当たっているときは、B より前で応答�
 | U4 | president を `--resume` で開き直した後も `SendMessage` が効くか | 効かなければ決定 19 の後段（工程の頭から新しい supervisor）へ落ちる | 同上 |
 | U5 | 層ごとにモデルを変えたとき、上限を共有しない場合があるか | `rateLimitType` の値の種類を集める | 同上 |
 | U6 | supervisor が落ちている間に worker が動き続けられるか | 動き続けるなら、supervisor の再開の後に worker の点検を 1 度行えば足りる。止まるなら 2 段の再開が必ず要る | リリース後テスト |
-| U7 | 深さ 3（worker がサブエージェントを起動する形）が動くか | 動くかどうかに関わらず、この設計では worker を葉にする。測るのは記録の `spawnDepth` で足りる | 扱わない（対象範囲の「含まない」） |
+| U7 | supervisor が自分の `agent_id` を環境から取れない（`CLAUDE_AGENT_ID` は無い。実測）。**起動の結果に出る `agentId` を context window で持ち回る**形で、worker の点検（`interrupted --agent`）が足りるか | 実機で、worker を 3 つ起動した supervisor が全部を再開できるかを見る | 中断と再開の Pull Request の実装 |
+| U8 | 深さ 3（worker がサブエージェントを起動する形）が動くか | 動くかどうかに関わらず、この設計では worker を葉にする。測るのは記録の `spawnDepth` で足りる | 扱わない（対象範囲の「含まない」） |
