@@ -378,6 +378,6 @@ graph LR
 | # | 項目 | 内容 | いつ決まるか |
 | --- | --- | --- | --- |
 | U1 | 1 本の見込み 2048MiB が CLI を起動した担当の実際に合うか | 5〜6 本のときの cgroup の最大使用量からの推定で、CLI ごとの常駐の値は測っていない。合わなければ実行計画の測った値の表から直す | リリース後テスト |
-| U3 | `scripts/build-runtime-plugins.sh` と `validate-runtime-plugins.sh` が `plugins/ndf/scripts/` の新しいファイルを一覧で持つか | 一覧で持つなら同じ Pull Request で足す | 同上 |
+| U3 | `scripts/build-runtime-plugins.sh` と `validate-runtime-plugins.sh` が `plugins/ndf/scripts/` の新しいファイルを一覧で持つか | 一覧で持つなら同じ Pull Request で足す | 本数の測定の Pull Request の実装 |
 | U4 | 閉じた実行計画のコメントが、GitHub のコメントの長さの上限に収まるか | 行が数十本のまとまりで超えるなら、`<details>` で見直しの表だけを畳む | 実行計画の Pull Request の実装 |
 | U5 | `issue-plan-strategy` の `description` に実行計画の語を足すか | 足すと発動の候補が変わる。`AUTHORING.md` の規約と `check-skill-frontmatter.py` で判断する | 同上 |
