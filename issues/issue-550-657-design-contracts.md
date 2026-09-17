@@ -204,7 +204,7 @@ president は目を覚ますたびに 1 回行う（契機は設計文書の処�
 
 | 順 | 行うこと | 使うもの |
 | ---: | --- | --- |
-| 1 | 中断した supervisor を一覧する | `python3 "$SCRIPTS/lib/transcript_agents.py" interrupted --session "$CLAUDE_CODE_SESSION_ID" --layer supervisor --format json` |
+| 1 | 中断した supervisor と、president が直接起動した worker を一覧する | `python3 "$SCRIPTS/lib/transcript_agents.py" interrupted --session "$CLAUDE_CODE_SESSION_ID" --depth 1 --format json` |
 | 2 | `resets_passed` が真の supervisor ごとに `SendMessage` で続けさせる。文面は「利用上限で中断していた。解除されたので続ける。書く前に既に書いたものを確かめる。自分の worker の中断も点検する」 | `agent_id` |
 | 3 | 2 が失敗した supervisor は、`最後に記録した工程`（進行の記録）の頭から、同じ持ち場の名前で新しい supervisor を起動する。**失敗とは、`SendMessage` の結果が `"success": true` を持たないこと**である | issue の `## 進行` |
 | 4 | まだ過ぎていない supervisor があれば、待ちを背景で起動して応答を終える | `python3 "$SCRIPTS/lib/transcript_agents.py" wait-reset --session "$CLAUDE_CODE_SESSION_ID" --layer supervisor`（`run_in_background`） |
@@ -230,7 +230,7 @@ president は目を覚ますたびに 1 回行う（契機は設計文書の処�
 | コマンド | 引数 | 出力 | 終了コード |
 | --- | --- | --- | --- |
 | `list` | `--session <ID>`（必須、繰り返し可）/ `--layer <層>`（省くと全層）/ `--format md\|json` | そのセッションの 3 層すべての `AgentRecord` | 0。記録が 1 件も無ければ 0 で空の一覧と理由 1 行 |
-| `interrupted` | `--session <ID>` / `--layer <層>`（既定 `supervisor`）/ `--parent <agent_id>` / `--now <ISO 8601>`（テスト用）/ `--format md\|json` | `ending` が `rate_limit` の記録だけ。`resets_passed`（真偽）を足す | 0 |
+| `interrupted` | `--session <ID>` / `--layer <層>` / `--depth <数>` / `--parent <agent_id>` / `--now <ISO 8601>`（テスト用）/ `--format md\|json` | `ending` が `rate_limit` の記録だけ。`resets_passed`（真偽）を足す。`--depth 1` は president の直下（supervisor と直接起動した worker）を返す | 0 |
 | `wait-reset` | `--session <ID>` / `--layer <層>` / `--margin <秒>`（既定 60）/ `--max-sleep <秒>`（既定なし） | 眠った秒数と、起きた時点の中断した記録の数を 1 行。**眠るのは、まだ来ていない解除時刻のうち最も早いもの + `--margin` まで**である | 0 = 解除時刻を過ぎた。3 = `--max-sleep` で区切った（まだ解除前）。2 = 引数の誤り |
 
 **読めない行・壊れたファイルは飛ばし、飛ばした件数を標準エラーへ 1 行出す。** 終了コードは変えない。引数の誤りだけが 2 を返す。
@@ -248,7 +248,7 @@ president は目を覚ますたびに 1 回行う（契機は設計文書の処�
 
 | キー | 型 | 取り方 |
 | --- | --- | --- |
-| `layer` | 文字列 | 深さから決める。0 = `president`、1 = `supervisor`、2 以上 = `worker` |
+| `layer` | 文字列 | 深さと `description` から決める。0 = `president`。2 以上 = `worker`。1 は、先頭語が作業の種類の語彙にあれば `worker`、それ以外は `supervisor` |
 | `role` | 文字列 | president は `-`。ほかは `.meta.json` の `description` の最初の `: ` より前が層の語彙にあればその値、無ければ `その他` |
 | `agent_id` | 文字列 / null | ファイル名の `agent-<ID>`。president は null |
 | `depth` | 整数 | president 0。ほかは `spawnDepth` |
@@ -345,6 +345,13 @@ president は目を覚ますたびに 1 回行う（契機は設計文書の処�
 | --- | ---: | ---: | ---: | ---: |
 
 （印の付いた行ごとに、束ねる・割る・worker を減らす・そのままのどれにするかと理由を 1 行）
+```
+
+4 つ目の表（`role_usage`）も同じ場所へ貼る。
+
+```markdown
+| 持ち場 | supervisor の実作業 | worker の件数 | supervisor と worker の固定費の合計 | 印 |
+| --- | ---: | ---: | ---: | --- |
 ```
 
 **まとまりを複数のセッションで通したときは、`--session` を繰り返して 1 つの表にする。** 印の判定は記録ごとの比で行うため、固定費の違うセッションを束ねても判定の意味は変わらない。中央値と合計の列は分布の目安として読み、判定には使わない。

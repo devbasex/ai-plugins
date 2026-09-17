@@ -98,7 +98,7 @@ worker は「作業の報告」（5 項目）を supervisor へ返し、supervis
 
 課題の束ね方・Pull Request ごとのモード・到達点の置き直しは、president が最初の supervisor を起動する前に決める。どの持ち場を作り、どこで関門を返させるかがモードで決まるためである。`context-window.md` の「モード判定は委譲しない」とも合う。
 
-課題が多く本文の読解が president の context window を埋めるときは、**読解だけを worker へ出す**（president が直接 worker を起動する唯一の場面である）。判定そのものは president が行う。
+課題が多く本文の読解が president の context window を埋めるときは、**読解だけを worker へ出す**（president が直接 worker を起動する唯一の場面である）。この worker は深さ 1 に現れるため、層は `description` の先頭語で分ける（決定 14）。判定そのものは president が行う。
 
 **設計の持ち場でモードを上げるべきだと分かったら、supervisor は `結果: 止まった` と理由を返す。** president が判定をやり直す。supervisor は判定を変えない。
 
@@ -156,8 +156,10 @@ cross-review / cross-refactoring の待ちで応答を終える事象（#656）�
 | 層 | 決め方 | `description` の形 |
 | --- | --- | --- |
 | president | `<セッション>.jsonl`（深さ 0） | — |
-| supervisor | `spawnDepth` が 1 | `<持ち場>: <課題番号…>`（例 `設計: #550 #657`） |
-| worker | `spawnDepth` が 2 以上 | `<作業の種類>: <一言>`（例 `調査: 既存の規約の突き合わせ`） |
+| supervisor | `spawnDepth` が 1 で、先頭語が**持ち場**の語彙にある | `<持ち場>: <課題番号…>`（例 `設計: #550 #657`） |
+| worker | `spawnDepth` が 2 以上、または `spawnDepth` が 1 で先頭語が**作業の種類**の語彙にある | `<作業の種類>: <一言>`（例 `調査: 既存の規約の突き合わせ`） |
+
+**深さ 1 で語彙が決められないときは supervisor とする。** president が直接起動する worker（決定 6 の読解）は深さ 1 に現れるため、深さだけでは分けられない。`description` の先頭語が作業の種類の語彙にあることを、その 1 つの手がかりにする。
 
 先頭語（最初の `: ` より前）が語彙に無ければ `その他` とする。**集計に出すのは語彙の値だけで、`: ` の後ろは出さない**（#159）。
 
@@ -187,7 +189,7 @@ cross-review / cross-refactoring の待ちで応答を終える事象（#656）�
 
 ### 決定 19: 再開は直下だけを見る
 
-**上の層は、自分が起動した相手だけを再開する。** president は supervisor（深さ 1）を、supervisor は worker（深さ 2）を再開する。president が worker を直接再開すると、再開した supervisor と worker が同じ作業や外部への書き込みを重ねる。
+**上の層は、自分が起動した相手だけを再開する。** president は supervisor と、自分が直接起動した worker（決定 6 の読解）を再開する。supervisor は自分が起動した worker を再開する。president が supervisor の下の worker を直接再開すると、再開した supervisor と worker が同じ作業や外部への書き込みを重ねる。
 
 | 落ちた層 | 検知する側 | 再開する側 | 起こす手段 |
 | --- | --- | --- | --- |
@@ -455,10 +457,10 @@ president 自身が上限に当たっているときは、B より前で応答�
 | AC11 | `test_agent_layers_doc.py`: `cross-review/SKILL.md` の「メイン」の定義が supervisor を指すこと |
 | AC13 | 同上: `context-window.md` に「モデルに依る」と「リポジトリに依る」の両方の語と、比の基準（supervisor に当てる）の文があること。`--window-limit` の既定値が `context-window.md` の「遅くとも N 万で切る」の N × 10000 と一致すること |
 | AC16 | 同上: `SKILL.md`・`context-window.md`・`agent-layers.md` の本文に「窓」と「親」が現れないこと |
-| AC20〜AC26・AC28・AC31 | `test_transcript_agents.py`: フィクスチャ（深さ 0 / 1 / 2・重複行 3 行・先頭の合成の応答・429 で終わる記録・続けて完了した記録・壊れた行・語彙に無い `description`）で各列の値を固定する |
+| AC20〜AC26・AC28・AC31 | `test_transcript_agents.py`: フィクスチャ（深さ 0 / 1 / 2・深さ 1 の worker（president が直接起動した読解）・重複行 3 行・先頭の合成の応答・429 で終わる記録・続けて完了した記録・壊れた行・語彙に無い `description`）で各列の値を固定する |
 | AC30 | 同上: 出力の JSON に `description` の後ろ半分・パス・本文が含まれないこと |
 | AC21・AC27・AC29・AC32・AC35・AC36・AC37 | `test_agents_report.py`: president の行、複数セッション、層ごとの合計の表、束ねる候補が supervisor の行にだけ付くこと、worker を使いすぎの印（supervisor と worker の固定費の合計 > supervisor の実作業）、`--agents` を付けない既定の出力が変わらないこと |
-| AC33 | `test_context_window_section.py`: 手順 2 の表に「context window」の行、雛形に 2 つの表があること |
+| AC33 | `test_context_window_section.py`: 手順 2 の表に「context window」の行、雛形に 3 つの表（束ね・層ごとの合計・持ち場ごとの worker の使い方）があること |
 | AC34 | `test_transcript_agents.py`: `socket` を塞いだ状態でコマンドが終了コード 0 で終わる |
 | AC40・AC41・AC46・AC47・AC49 | `test_transcript_agents.py`: 中断した supervisor が 2 本・中断した worker が 1 本・完了した記録が 1 本のセッションで、`interrupted --layer supervisor` が supervisor の 2 本だけを `resets_at` 付きで返し、`--layer worker` が worker の 1 本を返す。429 の後に `user` の行が追記された記録は `in_progress` になり、どちらにも現れない。`test_agent_layers_doc.py` で 3 通りの表の存在を固定する |
 | AC42・AC43・AC45・AC48 | 自動の継続が入った後の点検は決定的である（`interrupted` の出力と `SendMessage` の結果だけで分岐する）。`test_transcript_agents.py` で、自動の継続の行（`origin.kind` が `auto-continuation`）が追記された president の記録から `interrupted` が解除済みを返すことを固定する。`test_agent_layers_doc.py` で点検の契機と手順を固定する。実際の再開はリリース後テストで記録を読む |

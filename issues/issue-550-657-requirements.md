@@ -202,7 +202,7 @@ working on when the limit was reached; do not repeat work that is already comple
   `description` の持ち場以外の部分を含まない（#159）
 - [ ] AC31: 壊れた行・読めない記録があっても、飛ばした件数を 1 行出して終了コード 0 で終わる
 - [ ] AC32: 既存の `skill-stats` の出力（Skill の呼び出し数・ヒット率）と既定の引数での振る舞いが変わらない
-- [ ] AC33: `retrospective` の手順 2 の観点に「context window」が加わり、記録の雛形に AC29 と AC36 の表と、
+- [ ] AC33: `retrospective` の手順 2 の観点に「context window」が加わり、記録の雛形に AC29・AC36・AC37 の 3 つの表と、
   束ねる候補・割る候補・worker を使いすぎの判断が載る
 - [ ] AC34: どの値も外部へ送信されない（ネットワークを使わない）
 - [ ] AC35: 複数のセッションを渡しても、AC29 の判定は記録ごとの比で行われ、セッションをまたいだ固定費の中央値を判定に使わない
@@ -217,8 +217,9 @@ working on when the limit was reached; do not repeat work that is already comple
   人の入力・背景の待ちの終わりの 4 つである。最後の応答が `apiErrorStatus: 429` の合成の応答である記録を、**上限の中断**として分類する。
   `server_error`（500 / 529）と `authentication_failed` は、これと区別して扱う
 - [ ] AC41: 上限の中断の解除時刻を、応答の記録（`quotaLimits.resetsAt`）から取る。**固定の間隔で待たない**
-- [ ] AC42: 解除の後、**上の層が自分の直下だけを** `SendMessage` で続けさせる。president は supervisor を、supervisor は worker を再開する。
-  続けられないとき（`SendMessage` の結果が `"success": true` を持たない）は、`progress-tracking` の記録が指す工程の頭から新しい supervisor を起動する
+- [ ] AC42: 解除の後、**上の層が自分の直下だけを** `SendMessage` で続けさせる。president は supervisor（と自分が直接起動した worker）を、supervisor は自分の worker を再開する。
+  続けられないとき（`SendMessage` の結果が `"success": true` を持たない）の後段は層で分かれる。
+  **supervisor は** `progress-tracking` の記録が指す工程の頭から新しい supervisor を起動する。**worker は**同じ作業の worker をもう一度起動する
 - [ ] AC43: president も上限に当たり、解除時刻に自動の継続が入ったとき、**人間の入力なしに** AC42 の再開が行われる。
   自動の継続が入ること自体は Claude Code の振る舞いで、この課題の条件にしない（未確認 U2）。条件にするのは、入った後の点検で再開が行われることである
 - [ ] AC44: 上の層が上限に当たらずに下の層だけが中断したとき、上の層は解除時刻を過ぎるまで再開しない。
