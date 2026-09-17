@@ -89,31 +89,32 @@
 - [ ] AC14: 許可していない先（`@docs/foo.md`）を空白の直後・強調の中に書くと、それぞれ指摘される
 - [ ] AC15: コードスパン（`` `npm install -g @openai/codex` ``）とコードブロック（`KIRO.md` の `<@U0123456789>`）の中の `@` は指摘されない
 - [ ] AC16: メールアドレスの形（`user@example.com`）は指摘されない
-- [ ] AC17: 許可の一覧に載せた先のファイルが存在しないと、許可そのものが古いとして終了コード 1 になる
+- [ ] AC17: 参照の直後に句読点が続く `@docs/foo.md。` は、名前 `docs/foo.md` の参照として指摘される
+- [ ] AC18: 許可の一覧に載せた先のファイルが存在しないと、許可そのものが古いとして終了コード 1 になる
 
 ### 読み取れないとき
 
-- [ ] AC18: `CHANGELOG.md` が無い、または `## [ndf X.Y.Z]` の節が 1 つも読めないとき、終了コード 2 で終わり、理由が標準エラーへ出る
-- [ ] AC19: 指示書 3 本のいずれかが無いとき、終了コード 2 で終わる
+- [ ] AC19: `CHANGELOG.md` が無い、または `## [ndf X.Y.Z]` の節が 1 つも読めないとき、終了コード 2 で終わり、理由が標準エラーへ出る
+- [ ] AC20: 指示書 3 本のいずれかが無いとき、終了コード 2 で終わる
 
 ### 継続的統合と手順
 
-- [ ] AC20: `.github/workflows/runtime-plugin-validate.yml` に検査のジョブがあり、Pull Request では絞り込まずに起動する。push の絞り込みに `CHANGELOG.md` が入る
-- [ ] AC21: この課題の実装の Pull Request で、そのジョブが pass する
-- [ ] AC22: `CLAUDE.md` の「版ごとの判断の記録」に、版が決まる前の書き出しの形と、検査のコマンドが書かれている
-- [ ] AC23: `docs/versioning-and-distribution.md` の「バージョン更新時の手順」に検査のコマンドがある。手順 4 は判断の理由の置き場所を `docs/ndf-version-decisions.md` と書く
-- [ ] AC24: `CHANGELOG.md` の冒頭が、判断の理由の置き場所を `docs/ndf-version-decisions.md` と書く
+- [ ] AC21: `.github/workflows/runtime-plugin-validate.yml` に検査のジョブがあり、Pull Request では絞り込まずに起動する。push の絞り込みに `CHANGELOG.md` が入る
+- [ ] AC22: この課題の実装の Pull Request で、そのジョブが pass する
+- [ ] AC23: `CLAUDE.md` の「版ごとの判断の記録」に、版が決まる前の書き出しの形と、検査のコマンドが書かれている
+- [ ] AC24: `docs/versioning-and-distribution.md` の「バージョン更新時の手順」に検査のコマンドがある。手順 4 は判断の理由の置き場所を `docs/ndf-version-decisions.md` と書く
+- [ ] AC25: `CHANGELOG.md` の冒頭が、判断の理由の置き場所を `docs/ndf-version-decisions.md` と書く
 
 ### 退行しないこと
 
-- [ ] AC25: 既存の検査 5 本が終了コード 0 のまま。対象は `check-doc-line-limit.py` / `check-markdown-links.py` / `check-doc-staleness.py` / `check-skill-repo-assumptions.py` / `check-skill-frontmatter.py`
-- [ ] AC26: `uv run --with pytest pytest scripts/tests -q` で、足したテストを含めて失敗が増えない
+- [ ] AC26: 既存の検査 5 本が終了コード 0 のまま。対象は `check-doc-line-limit.py` / `check-markdown-links.py` / `check-doc-staleness.py` / `check-skill-repo-assumptions.py` / `check-skill-frontmatter.py`
+- [ ] AC27: `uv run --with pytest pytest scripts/tests -q` で、足したテストを含めて失敗が増えない
 
 ## 非機能の条件
 
 | 大項目 | 条件 |
 | --- | --- |
-| 運用・保守性 | 指摘は `ERROR: <ファイル>:<行>: <理由>` の 1 行で、直し方（退避先・許可の一覧）を含む。外部への通信・CLI の認証を要さない |
+| 運用・保守性 | 指摘は `ERROR: <ファイル>:<行>: <理由>`（行を持たない指摘は `ERROR: <理由>`）の 1 行で、直し方（退避先・許可の一覧）を含む。外部への通信・CLI の認証を要さない |
 | システム環境 | Python 3 の標準ライブラリだけで動く。`actions/checkout` の既定（浅い clone・タグなし）で動く |
 
 ## 影響
