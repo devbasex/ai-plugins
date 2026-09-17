@@ -164,7 +164,7 @@ oom_kill の起点: 1
 | `oom_kill` | `memory.events` の値。読めなければ `unknown` |
 | `oom_kill_increased` | `yes` / `no` / `unknown`（起点が無い、または `oom_kill` が `unknown`） |
 | `running` | `--running` の値 |
-| `by_memory` | `⌊(min(mem_available_mib, cgroup_available_mib) − reserve) ÷ per_lane⌋`。`cgroup_available_mib` が `max` / `unknown` のときは `mem_available_mib` だけを使う。負なら 0 |
+| `by_memory` | `running + ⌊(min(mem_available_mib, cgroup_available_mib) − reserve) ÷ per_lane⌋`。床の項が負なら 0 として足す。`cgroup_available_mib` が `max` / `unknown` のときは `mem_available_mib` だけを使う。空きは動いている担当の使用量を引いた後の値なので、空きから導いた本数は追加できる本数である。`running` を足して総本数にしてから上限と比べる |
 | `allowed` | 下の式の結果 |
 | `limited_by` | `allowed` を決めた条件を `,` で並べる。`memory` / `max` / `swap_low` / `oom_kill_increased` / `floor` |
 

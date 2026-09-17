@@ -126,7 +126,9 @@ Pull Request どうしの間で起きる。
 
 ### 決定 7: 本数は空きメモリから導き、スワップと OOM Killer で下げ、上限で抑える
 
-**起動してよい本数は `min(上限, ⌊(空きメモリ − 予備) ÷ 1 本の見込み⌋)` である。** スワップの空きが
+**起動してよい本数は `min(上限, 動いている本数 + ⌊(空きメモリ − 予備) ÷ 1 本の見込み⌋)` である。** 空きメモリは
+動いている担当の使用量を引いた後の値なので、割った値は追加できる本数であり、動いている本数を足して総本数にする。
+起動した直後で使用量の山に届いていない担当の分は、予備が受ける。スワップの空きが
 全体の 25% を下回れば 1 減らし、OOM Killer の回数が実行計画に控えた起点から増えていれば、
 いま動いている本数 − 1 以下に抑える。**OOM Killer の回数が増えた見直しを除き、1 を下回らない。** 0 本では進行が止まり、
 逐次で進めた過去 11 版で本体は落ちていない。増えた見直しは 0 を許し、起点を更新した次の見直しで 1 以上に戻る。
@@ -346,7 +348,7 @@ graph LR
 | AC12・AC13 | 既存の `test_approval_gates.py`（関門の数・下限 F5〜F7・機械の振り分け）がそのまま通ること |
 | AC14 | 完了判定で `git diff --stat origin/develop -- plugins/ndf/skills/development-workflow/SKILL.md` が空であること。既存の `test_every_stage_says_which_unit_it_moves_in` が通ること |
 | AC20〜AC22・AC24 | `test_issue_upkeep_layout.py`: `milestones.md` に「組を書く」の節、組の表の列（契約の文書）、修正レイヤーと依存する課題の番号から写す文、見込みであり確定は実行計画が持つ文があること。既存の名前と連番のテストがそのまま通ること。段 2A の控える項目の表の行数が変わらないこと |
-| AC31・AC33・AC34 | `test_parallel_measure.py`: 空き 9742MiB・スワップ 2047/310MiB の入力で `allowed=2`、スワップが十分な入力で `allowed=3`、空き 3000MiB で `allowed=1`（下限の 1）、`--per-lane-mib 1024 --max 8` の上書きで値が変わること |
+| AC31・AC33・AC34 | `test_parallel_measure.py`: 空き 9742MiB・スワップ 2047/310MiB の入力で `allowed=2`、スワップが十分な入力で `allowed=3`、空き 3000MiB で `allowed=1`（下限の 1）、`--running 2`・空き 6144MiB・既定値で `by_memory=4`・`allowed=3`（追加できるのは 1 本）、`--per-lane-mib 1024 --max 8` の上書きで値が変わること |
 | AC31・AC33（cgroup の残り） | 同上: `--cgroup-dir` に `memory.max` が数値で cgroup の残りが VM の空きより小さい入力を渡すと、`cgroup_available_mib` がその値になり `by_memory` がそちらで決まること。`memory.max` が `max` の入力では `cgroup_available_mib=max` で VM の空きで決まること。`memory.max` と `memory.current` が無い入力では `cgroup_available_mib=unknown` で VM の空きで決まり、終了コード 0 |
 | AC32 | 同上: `--meminfo` に存在しないパスを渡すと終了コード 3 で、標準出力に `allowed=` を出さないこと。`--cgroup-dir` に `memory.events` が無いときは終了コード 0 で `oom_kill=unknown` |
 | AC35 | 同上: `--oom-baseline 1 --running 3` と `oom_kill 2` の入力で `oom_kill_increased=yes` と `allowed=2`、増えていない入力で `oom_kill_increased=no`。境界として、`oom_kill` が増えた入力に `--running 0` と `--running 1` を渡すと、どちらも `allowed=0` で `limited_by` に `floor` が付かないこと。`test_execution_plan_doc.py`: `execution-plan.md` に、増えていたらその見直しでは起動しない文と、起点を今の値へ更新して見直しの表へ 1 行足す文があること |
