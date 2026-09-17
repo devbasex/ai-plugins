@@ -359,7 +359,7 @@ flowchart TD
 
 | 受け入れ条件 | 何で確かめるか |
 | --- | --- |
-| AC1・AC2・AC6・AC7・AC60 | リリース後テストで `light` の課題 1 件を `/goal` で通し、親のセッションの記録を読む（人の入力の数、`skill-stats --windows --session` の親の行の Skill 起動、issue の `## 進行`） |
+| AC1・AC2・AC6・AC7・AC60 | リリース後テストで `light` の課題 1 件を `/goal` で通し、親のセッションの記録を読む（人の入力の数、`skill-stats --session`（`--windows` なし）が親の記録だけで数えた Skill の呼び出し数、issue の `## 進行`）。`--session` を付けた Skill の統計が親の記録だけを数えることは `test_windows_report.py` で固定する |
 | AC3・AC4・AC5・AC9・AC10・AC12・AC14・AC15 | `test_stage_windows_doc.py`: `stage-windows.md` に窓の表（5 つの窓と関門の列）・報告の 9 項目・続けさせる回数 3・モデルの基準 2 つ・関門以外の確認の扱いがあること。規約の文書に `固定費` と並ぶ 5 桁以上の数値が無いこと。`/goal` の節に窓へ出すのは `/goal` のときだけと書かれていること |
 | AC8・AC62 | 既存の `test_approval_gates.py` / `test_workflow_guard.py` がそのまま通ること。関門の数を数える既存のテスト |
 | AC11 | `test_stage_windows_doc.py`: `cross-review/SKILL.md` に「メイン」の定義の文があること |

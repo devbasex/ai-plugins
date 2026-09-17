@@ -137,7 +137,7 @@ working on when the limit was reached; do not repeat work that is already comple
   同じ窓で続けさせる回数には上限があり、超えたら失敗として止まり、窓の名前と理由を報告する
 - [ ] AC6: 親の窓には、着手の判定の材料・報告・承認の提示物だけが載る。
   **親のセッションで起動される Skill は `development-workflow` と `issue-plan-strategy` に限られる。**
-  `issue-plan-strategy` は複数の課題を束ねるときだけ起動する。確かめ方は `skill-stats` で親のセッションを数えることである
+  `issue-plan-strategy` は複数の課題を束ねるときだけ起動する。確かめ方は `skill-stats --session <親のセッション>`（`--windows` を付けない）の呼び出し数の表である。この表は親の記録だけを数え、窓の中の起動を含めない
 - [ ] AC7: 工程の窓は、工程に入った時点で `progress-tracking` の記録を 1 回の Bash 実行につき 1 件ずつ積む。
   1 課題を通した後、issue の本文の `## 進行` の、そのモードの必須の工程にチェックが入っている
 - [ ] AC8: 設計 Pull Request のマージは、承認の印（`design-approved`）が無い限り拒否される状態が保たれる
