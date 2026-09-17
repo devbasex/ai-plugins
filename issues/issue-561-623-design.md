@@ -160,7 +160,7 @@ plugins/ndf/
 
 | 対象 | 止めずに行う | 止まる（一覧で示し、同意の無い対象を消さない） | 触らない（報告に「対象外」） |
 | --- | --- | --- | --- |
-| 作業ツリー | `git -C <path> status --porcelain` が空で、無視されたファイルを退避した後の `git worktree remove <path>` が 0 で終わる（決定 5） | `status --porcelain` が空でない、または `git worktree remove` が 0 以外で終わる | — |
+| 作業ツリー | `git -C <path> status --porcelain` が空で、無視されたファイルを退避した後の `git worktree remove <path>` が 0 で終わる（決定 5） | `status --porcelain` が空でない、無視されたファイルの退避が 1 件でも 0 以外で終わる（`git worktree remove` を行わない）、または `git worktree remove` が 0 以外で終わる | — |
 | ローカルブランチ | `git branch -d <name>` が 0 で終わる | 同じコマンドが 0 以外で終わる | 起点・本番のチャネル・現在のブランチ |
 | リモートブランチ | マージ済み Pull Request の head で、同じリポジトリにあり、先端が `headRefOid` と一致する | 先端が `headRefOid` と違う、対応する Pull Request が見つからない | 起点・本番のチャネル・fork の head |
 | 課題 | **閉じない**（まとまりの課題の OPEN の一覧を報告に載せるだけ） | — | — |
@@ -181,7 +181,7 @@ plugins/ndf/
 | 消したリモートブランチ | `origin/<名前>` — 戻すなら `<Pull Request の URL>` の Restore branch |
 | 消した作業ツリー | `<パス>`。無視されたファイルを退避したなら、退避先のパスと容量（`du -sh <退避先>`）— 戻すなら `mv <退避先>/<退避した相対パス> <作業ツリーを作り直した先>/<退避した相対パス>`、まとめて戻すなら `cp -a <退避先>/. <作業ツリーを作り直した先>/`（決定 5） |
 | 対象外 | 名前と理由（起点 / 本番のチャネル / 現在のブランチ / fork） |
-| 止まった対象 | 上の「止まったときの一覧」と、同意の結果 |
+| 止まった対象 | 上の「止まったときの一覧」と、同意の結果。退避が失敗した作業ツリーは、退避先・退避済みのパス・失敗したパスと `mv` の出力（退避済みのものは退避先に残す。戻すなら同じ `mv` の逆） |
 | まとまりの課題 | このマージの閉じる語が指す課題のうち OPEN のもの。「閉じるのはまとまりの終わりの工程（`progress-tracking` の「まとまりを閉じる」）」と添える |
 | まとまりの最後か | 最後 / 残りあり / **判断できない**（待たない。決定 6） |
 
@@ -210,14 +210,15 @@ gh pr view <PR番号> --repo "$RECORD_REPO" --json body -q .body | bash "$SCRIPT
 
 # 3. 閉じる条件（下の表）を満たす課題ごとに (a)〜(d) の順で行う。満たさない課題は行わず `開いたまま` にする。
 #    盤面を書く前に状態を読むのは、Auto-close issue が Done で閉じた課題を「既に閉じていた」と数えないため
-# (a) 盤面を書く前に状態を読んで控える
-gh issue view <番号> --repo <所有者>/<リポジトリ> --json state -q .state        # OPEN / CLOSED
+# (a) 盤面を書く前に状態を読んで控える（OPEN / CLOSED）
+before=$(gh issue view <番号> --repo <所有者>/<リポジトリ> --json state -q .state)
 # (b) 記録のリポジトリの課題なら盤面を Done にする
 [ "<所有者>/<リポジトリ>" = "$RECORD_REPO" ] && bash "$SCRIPTS/projects-sync.sh" <番号> status "Done"
-# (c) まだ OPEN なら閉じる（(b) の自動化が閉じていれば行わない）
-gh issue close <番号> --repo <所有者>/<リポジトリ> --comment "まとまり（<マイルストーン>）の<工程名>を通りました"
-# (d) 読み直して CLOSED を確かめる
-gh issue view <番号> --repo <所有者>/<リポジトリ> --json state -q .state
+# (c) 状態を読み直し、OPEN のときだけ閉じる（(b) の自動化が閉じていれば CLOSED なので行わない）
+now=$(gh issue view <番号> --repo <所有者>/<リポジトリ> --json state -q .state)
+[ "$now" = OPEN ] && gh issue close <番号> --repo <所有者>/<リポジトリ> --comment "まとまり（<マイルストーン>）の<工程名>を通りました"
+# (d) もう一度読み直して CLOSED を確かめる
+after=$(gh issue view <番号> --repo <所有者>/<リポジトリ> --json state -q .state)
 ```
 
 | 呼ぶ Skill | 呼ぶ時点 | 呼ぶ条件 |
@@ -245,6 +246,10 @@ gh issue view <番号> --repo <所有者>/<リポジトリ> --json state -q .sta
 - **盤面を書く前に状態を読み、盤面を先に書き、閉じるのは OPEN のときだけ。** `Auto-close issue` が有効なら Done で閉じ、
   無効なら `gh issue close` が閉じる。どちらでも終わりの状態は同じになる。(a) を (b) の後に読むと、Done で閉じた課題が
   `既に閉じていた` になり reopen の手段が報告から落ちる
+- **(c) で読み直してから閉じる。** (a) の `before` のまま `gh issue close` へ進むと、(b) の `Auto-close issue` が閉じた経路を
+  コマンド列から判別できない。盤面の自動化は非同期で反映が遅れることがあり、(c) の時点で OPEN なら `gh issue close` を実行してよい。
+  既に閉じた課題に `gh issue close` が何を返すかは一時的な検証用の課題を作らずに確かめる手段が無いため、「(c) の読み直しが
+  CLOSED なら実行しない」で足りる
 - 閉じる語の注意（番号ごとに要る・大小を区別しない・`gh issue close` は `owner/repo#番号` を受け取らない）は
   `merged` から移す
 
@@ -253,9 +258,9 @@ gh issue view <番号> --repo <所有者>/<リポジトリ> --json state -q .sta
 
 | 結果 | 条件 | 報告に載せるもの |
 | --- | --- | --- |
-| `閉じた` | 手順 3 の (a) の読み取りが OPEN で、(d) の読み直しが CLOSED（(b) の盤面の自動化が閉じた場合を含む） | 番号と戻し方 `gh issue reopen <番号> --repo <所有者>/<リポジトリ>` |
-| `既に閉じていた` | 手順 3 の (a) の読み取りが CLOSED（既定ブランチへのマージで GitHub が先に閉じた場合を含む） | 番号 |
-| `失敗（理由）` | (a) (d) の読み取り・(c) の `gh issue close` が 0 以外で終わった、または (d) の読み直しが CLOSED でない | 番号・理由・やり直すコマンド `gh issue close <番号> --repo <所有者>/<リポジトリ>` |
+| `閉じた` | 手順 3 の (a) の `before` が OPEN で、(d) の `after` が CLOSED（(c) の `now` が CLOSED で `gh issue close` を行わなかった、つまり (b) の盤面の自動化が閉じた場合を含む） | 番号と戻し方 `gh issue reopen <番号> --repo <所有者>/<リポジトリ>` |
+| `既に閉じていた` | 手順 3 の (a) の `before` が CLOSED（既定ブランチへのマージで GitHub が先に閉じた場合を含む） | 番号 |
+| `失敗（理由）` | (a) (c) (d) の読み取り・(c) の `gh issue close` が 0 以外で終わった、または (d) の `after` が CLOSED でない | 番号・理由・やり直すコマンド `gh issue close <番号> --repo <所有者>/<リポジトリ>` |
 | `開いたまま（理由）` | 閉じる条件に当たらない（本番への配布の前 / リリース後テストが `不合格`・`保留` / 対応を読み取れない） | 番号と理由（条件の判定と、いつ閉じるか） |
 
 **`失敗` が 1 件でもあれば、終わりの工程を完了と報告せず、`issue-upkeep` を呼ばずに止まる。** 報告には
@@ -287,7 +292,9 @@ flowchart TD
   B --> C0{4 status --porcelain が空か}
   C0 -->|空でない| S[止まる対象へ積む]
   C0 -->|空| CV[無視されたファイルを退避]
-  CV --> C{worktree remove}
+  CV --> CV0{退避の mv がすべて 0 か}
+  CV0 -->|1 件でも 0 以外| S
+  CV0 -->|すべて 0| C{worktree remove}
   C -->|0| C1[退避先と容量を控える]
   C -->|拒否| S
   C1 --> D{5a 起点・本番・現在か}
@@ -388,6 +395,7 @@ graph TD
 | C11（手動確認） | リリース後テスト。このマイルストーンが検証への配布だけの時点で終わりの工程を通したとき、課題が OPEN のままで、報告に `開いたまま` と理由が載る |
 | D2 | `gh pr view 717 --json body -q .body \| bash plugins/ndf/scripts/lib/closing-issues.sh` が `devbasex/ai-plugins 712` と `devbasex/ai-plugins 713` を出す（設計の時点で実測済み） |
 | D2（まとまりの行の取り出し） | `gh pr view <配布のPR番号> --json body -q .body \| sed -n 's/^まとまり: //p' \| grep -oE '#[0-9]+' \| tr -d '#'`。本文に `まとまり: PR #717 / #718 / #720` があれば 717 718 720 を出し、行が無ければ出力が空（パイプの終了コードはどちらも 0。設計の時点で実測済み） |
+| A12 | 実装の検証で、要求文書の実測 7 行目を再現する。書き込めない退避先（`chmod a-w` した親）への `mv` が失敗する作業ツリーを一時リポジトリに作り、手順が `git worktree remove` へ進まず作業ツリーが残り、退避済みのパスが退避先に残ることを確かめる |
 | A8（退避） | 要求文書の実測 5 行目と 6 行目。実装の検証で、直下の無視されたファイル（`.env`）と、追跡されたディレクトリの配下の無視されたパス（`a/b/__pycache__/`）の両方を持つ作業ツリーに対して再現する |
 | E1 | 移した `test_the_merged_skill_closes_issues_with_their_repository`（読む先を `progress-tracking` にする）を含む `uv run --with pytest pytest scripts/tests plugins/ndf -q` |
 | E2 E3 E4 E5 | 要求文書の検証手段のコマンド |

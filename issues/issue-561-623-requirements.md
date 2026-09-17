@@ -66,6 +66,7 @@
 | 4 | **無視されたファイルだけを持つ worktree を `git worktree remove`** | **終了コード 0。無視されたファイルは確認なしに消える** |
 | 5 | 無視されたファイル（`.env` と `scripts/__pycache__/a.pyc`）を持つ worktree で、`git status --ignored --porcelain` の `!!` の行（`.env` / `scripts/`）を共通の git ディレクトリの下の退避先へ同じ相対パスで `mv` した後に `git worktree remove` | 終了コード 0。退避先に 2 ファイルが残る |
 | 6 | 追跡されたディレクトリ `a/b/` の配下に無視された `a/b/__pycache__/x.pyc` を持つ worktree で、`!!` の行（`a/b/__pycache__/`。ディレクトリは末尾に `/` が付く）を、退避先に親を作らずに `mv` | `mv: cannot move '…/wt/a/b/__pycache__' to '…/a/b/__pycache__': No such file or directory` / 終了コード 1。`mkdir -p "$(dirname "<退避先>/<相対パス>")"` の後の `mv` と、続く `git worktree remove` はどちらも終了コード 0。`dirname` は末尾の `/` の有無で同じ親を返し、`mv` も末尾の `/` 付きで終了コード 0（git 2.53.0 / GNU coreutils） |
+| 7 | 無視された `.env` と `a/b/__pycache__/x.pyc` を持つ worktree で、退避先に `a/b/` を先に作って `chmod a-w` し（uid 1000 で実行）、決定 5 の退避のループ（`mkdir -p … && mv … \|\| exit 1`）の後に `&& git worktree remove` | 1 件目の `.env` は退避先へ移り、2 件目で `mv: cannot move '…/wt/a/b/__pycache__/' to '…/worktree-trash/feat__z-…/a/b/__pycache__/': Permission denied` / パイプの終了コード 1（`pipefail` なし）。`git worktree remove` は実行されず、`git worktree list` に作業ツリーが残り、`a/b/__pycache__/x.pyc` も作業ツリーに残る |
 
 **2 行目と 4 行目は #561 の本文に無い境界である。**
 
@@ -141,6 +142,8 @@
       `python3 scripts/check-skill-frontmatter.py` が終了コード 0 で終わる
 - [ ] A11: このマージがまとまりの最後か判断できないときに、`merged` が運用者の回答を待たない。
       判断できないことを報告へ書いて終わる。まとまりの範囲の確認は `release` の開始条件が持つ
+- [ ] A12: 無視されたファイルの退避が 1 件でも失敗したとき、`git worktree remove` を実行せずに止まり、退避済みのパスと
+      失敗したパスが報告に載ることが `merged/SKILL.md` に書かれている
 
 ### B. 実行前確認の基準（#561）
 
@@ -243,7 +246,7 @@
 | --- | --- |
 | まとまりの課題を閉じる時点（C1） | 決定 7 |
 | squash / rebase のブランチ（A7） | 決定 2 |
-| 無視されたファイル（A8） | 決定 5 |
+| 無視されたファイル（A8）と退避の失敗（A12） | 決定 5 |
 | Pull Request の head と対応付かないリモートブランチ（A6） | 決定 4 |
 
 ## 用語
