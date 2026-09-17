@@ -205,8 +205,8 @@ president は目を覚ますたびに 1 回行う（契機は設計文書の処�
 | 順 | 行うこと | 使うもの |
 | ---: | --- | --- |
 | 1 | 中断した supervisor と、president が直接起動した worker を一覧する | `python3 "$SCRIPTS/lib/transcript_agents.py" interrupted --session "$CLAUDE_CODE_SESSION_ID" --depth 1 --format json` |
-| 2 | `resets_passed` が真の supervisor ごとに `SendMessage` で続けさせる。文面は「利用上限で中断していた。解除されたので続ける。書く前に既に書いたものを確かめる。自分の worker の中断も点検する」 | `agent_id` |
-| 3 | 2 が失敗した supervisor は、`最後に記録した工程`（進行の記録）の頭から、同じ持ち場の名前で新しい supervisor を起動する。**失敗とは、`SendMessage` の結果が `"success": true` を持たないこと**である | issue の `## 進行` |
+| 2 | `resets_passed` が真の記録ごとに `SendMessage` で続けさせる。supervisor への文面は「利用上限で中断していた。解除されたので続ける。書く前に既に書いたものを確かめる。自分の worker の中断も点検する」、直接起動した worker への文面は同じ作業を続ける指示にする | `agent_id` |
+| 3 | 2 が失敗した相手の後段は層で分かれる。**supervisor** は `最後に記録した工程`（進行の記録）の頭から、同じ持ち場の名前で起動し直す。**直接起動した worker** は、同じ作業の起動の指示をもう一度組んで起動する。**失敗とは、`SendMessage` の結果が `"success": true` を持たないこと**である | issue の `## 進行` |
 | 4 | まだ過ぎていない supervisor があれば、待ちを背景で起動して応答を終える | `python3 "$SCRIPTS/lib/transcript_agents.py" wait-reset --session "$CLAUDE_CODE_SESSION_ID" --layer supervisor`（`run_in_background`） |
 
 **手順 4 は `--max-sleep` を付けない。** 背景の待ちを数時間続けられないと分かったとき（設計文書の未確認 U3）だけ、`--max-sleep 540` を付ける。そのときは終了コード 3 で起きるたびに手順 1 と手順 4 だけを行い、解除前に `SendMessage` しない。
@@ -219,7 +219,7 @@ president は目を覚ますたびに 1 回行う（契機は設計文書の処�
 | 2 | `resets_passed` が真の worker を `SendMessage` で続けさせる | `agent_id` |
 | 3 | 続けられない worker は、同じ作業をもう一度 `Agent` で起動する（作業は 1 つに絞ってあるため、やり直しの費用は持ち場より小さい） | 起動の指示を作り直す |
 
-**president は worker を直接再開しない**（決定 19）。
+**president が再開するのは自分の直下だけである**（決定 19）。supervisor の下の worker は、再開した supervisor が点検する。president が supervisor の下の worker を直接再開しない。
 
 `CLAUDE_CODE_SESSION_ID` は、president でもサブエージェントでも president のセッションの ID を持つ（このサブエージェントの環境で確かめた）。取れないときは、`Agent` の起動の結果に出る `output_file` のパスの `<セッション>` の部分を渡す。
 
@@ -244,6 +244,8 @@ president は目を覚ますたびに 1 回行う（契機は設計文書の処�
 
 `~/.claude` は環境変数 `CLAUDE_CONFIG_DIR` があればそちらを使う。
 
+**起動元は `toolUseId` でたどる。** `.meta.json` の `toolUseId` と同じ id の `tool_use`（`name` が `Agent`）を含む記録が起動元である。実測（`95dd816c…` のセッション、19 件）で、深さ 1 の 4 件は president の記録に、深さ 2 の 15 件はそれぞれの supervisor の記録に当たった。`--parent` の絞り込みと `role_usage` の集計はこの値を使う。
+
 ### `AgentRecord` の値
 
 | キー | 型 | 取り方 |
@@ -263,6 +265,7 @@ president は目を覚ますたびに 1 回行う（契機は設計文書の処�
 | `interruptions` | 整数 | `apiErrorStatus` が 429 の合成の応答のうち、後ろに合成でない応答が続くものの数（上限の中断から続けた回数）。500 / 529 / 認証の失敗は数えない |
 | `resets_at` | ISO 8601 / null | `ending` が `rate_limit` のとき、最後の合成の応答の `quotaLimits.resetsAt` |
 | `rate_limit_type` | 文字列 / null | 同じ応答の `quotaLimits.rateLimitType` |
+| `parent_agent_id` | 文字列 / null | **起動元**。`.meta.json` の `toolUseId` と同じ id を持つ `tool_use`（`name` が `Agent`）を含む記録の `agent_id`。president の記録に見つかったときと、見つからないときは null |
 
 `fixed` / `peak` / `work` / `model` は、合成でない応答が 1 件も無いとき null になる。
 

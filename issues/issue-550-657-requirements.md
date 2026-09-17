@@ -219,7 +219,8 @@ working on when the limit was reached; do not repeat work that is already comple
 - [ ] AC41: 上限の中断の解除時刻を、応答の記録（`quotaLimits.resetsAt`）から取る。**固定の間隔で待たない**
 - [ ] AC42: 解除の後、**上の層が自分の直下だけを** `SendMessage` で続けさせる。president は supervisor（と自分が直接起動した worker）を、supervisor は自分の worker を再開する。
   続けられないとき（`SendMessage` の結果が `"success": true` を持たない）の後段は層で分かれる。
-  **supervisor は** `progress-tracking` の記録が指す工程の頭から新しい supervisor を起動する。**worker は**同じ作業の worker をもう一度起動する
+  **supervisor が続けられないときは president が**、`progress-tracking` の記録が指す工程の頭から新しい supervisor を起動する。
+  **worker が続けられないときはその起動元（supervisor、または president が直接起動した worker なら president）が**、同じ作業の worker をもう一度起動する
 - [ ] AC43: president も上限に当たり、解除時刻に自動の継続が入ったとき、**人間の入力なしに** AC42 の再開が行われる。
   自動の継続が入ること自体は Claude Code の振る舞いで、この課題の条件にしない（未確認 U2）。条件にするのは、入った後の点検で再開が行われることである
 - [ ] AC44: 上の層が上限に当たらずに下の層だけが中断したとき、上の層は解除時刻を過ぎるまで再開しない。
@@ -228,7 +229,7 @@ working on when the limit was reached; do not repeat work that is already comple
   **この 1 通は承認ではなく、関門の数に数えない**
 - [ ] AC46: 複数の相手が同時に中断したとき、中断したすべての相手が再開される。完了していた相手は再開しない
 - [ ] AC47: president の context window が中断の通知を失っても（自動の要約の後など）、`--session` で中断した記録（終わり方 `rate_limit`）を
-  層ごとに一覧でき、解除時刻が読める
+  層ごと・起動元ごとに一覧でき、解除時刻が読める
 - [ ] AC48: 再開した相手は、既に済んだ外部への書き込み（Pull Request の作成・コメントの投稿・進行の記録）を重ねない
 - [ ] AC49: **落ちた層ごとの検知と再開の割り当てが、3 通りの表として規約にある**（worker が落ちた / supervisor が落ちた / president が落ちた）
 

@@ -147,7 +147,7 @@ cross-review / cross-refactoring の待ちで応答を終える事象（#656）�
 
 会話の記録を層の単位で読む処理は `plugins/ndf/scripts/lib/transcript_agents.py` に置く。`skill-stats` が集計に使い、`development-workflow` が中断した記録の一覧と解除の待ちに使う。別の Skill の `scripts/` を呼ぶと、配る Skill を絞る配布先で解決できない（`scripts/check-cross-skill-refs.py`）。
 
-新しい台帳（起動のたびに書くファイル）は作らない。記録（`<セッション>.jsonl` と `subagents/agent-<id>.jsonl` と `.meta.json`）が層・持ち場・モデル・トークン・時刻・中断をすべて持つ。
+新しい台帳（起動のたびに書くファイル）は作らない。記録（`<セッション>.jsonl` と `subagents/agent-<id>.jsonl` と `.meta.json`）が層・持ち場・モデル・トークン・時刻・中断をすべて持つ。**起動元も記録から取れる**（`.meta.json` の `toolUseId` と同じ id の `tool_use` を含む記録が起動元である。19 件で確かめた）。
 
 ### 決定 14: 層は深さで決め、持ち場と作業の種類は `description` の先頭語から取る
 
@@ -344,6 +344,7 @@ classDiagram
         +str role
         +int depth
         +str agent_id
+        +str parent_agent_id
         +str model
         +int fixed
         +int peak
@@ -459,7 +460,7 @@ president 自身が上限に当たっているときは、B より前で応答�
 | AC16 | 同上: `SKILL.md`・`context-window.md`・`agent-layers.md` の本文に「窓」と「親」が現れないこと |
 | AC20〜AC26・AC28・AC31 | `test_transcript_agents.py`: フィクスチャ（深さ 0 / 1 / 2・深さ 1 の worker（president が直接起動した読解）・重複行 3 行・先頭の合成の応答・429 で終わる記録・続けて完了した記録・壊れた行・語彙に無い `description`）で各列の値を固定する |
 | AC30 | 同上: 出力の JSON に `description` の後ろ半分・パス・本文が含まれないこと |
-| AC21・AC27・AC29・AC32・AC35・AC36・AC37 | `test_agents_report.py`: president の行、複数セッション、層ごとの合計の表、束ねる候補が supervisor の行にだけ付くこと、worker を使いすぎの印（supervisor と worker の固定費の合計 > supervisor の実作業）、`--agents` を付けない既定の出力が変わらないこと |
+| AC21・AC27・AC29・AC32・AC35・AC36・AC37 | `test_agents_report.py`: president の行、複数セッション、**2 つの supervisor の worker が混ざるフィクスチャで `role_usage` が起動元ごとに分かれること**、層ごとの合計の表、束ねる候補が supervisor の行にだけ付くこと、worker を使いすぎの印（supervisor と worker の固定費の合計 > supervisor の実作業）、`--agents` を付けない既定の出力が変わらないこと |
 | AC33 | `test_context_window_section.py`: 手順 2 の表に「context window」の行、雛形に 3 つの表（束ね・層ごとの合計・持ち場ごとの worker の使い方）があること |
 | AC34 | `test_transcript_agents.py`: `socket` を塞いだ状態でコマンドが終了コード 0 で終わる |
 | AC40・AC41・AC46・AC47・AC49 | `test_transcript_agents.py`: 中断した supervisor が 2 本・中断した worker が 1 本・完了した記録が 1 本のセッションで、`interrupted --layer supervisor` が supervisor の 2 本だけを `resets_at` 付きで返し、`--layer worker` が worker の 1 本を返す。429 の後に `user` の行が追記された記録は `in_progress` になり、どちらにも現れない。`test_agent_layers_doc.py` で 3 通りの表の存在を固定する |
