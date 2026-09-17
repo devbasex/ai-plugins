@@ -143,55 +143,57 @@
 - [ ] AC24: `--refresh` はどのファイルも書き換えない（実行の前後でファイルの内容とタイムスタンプが変わらない）
 - [ ] AC25: 通信できない環境で `--refresh` は終了コード 2 で終わり、**`--refresh` を付けない検査は同じ環境で終了コード 0 になる**
 - [ ] AC26: `--refresh` が取得に失敗した出典を、黙って落とさずに一覧へ出す
+- [ ] AC27: 出典の一部だけが取得に失敗したとき、一覧は全件を出したうえで終了コード 2 を返す（成功した分を理由に 0 にしない）
 
 ### 宣言があるときの判定
 
-- [ ] AC27: 宣言に `$schema` を書いても、書かない宣言と同じに読まれる（読み取り側は参照しない）
-- [ ] AC28: `imports` を宣言すると、許可の外の `@` は参照先が存在しても終了コード 1 になる。キーはリポジトリの根からの相対パスで、同じ名前の別の指示書には効かない
-- [ ] AC29: `"imports": {}`（許可が 1 つも無い）を書くと、参照がすべて指摘される。未指定のときは許可の判定が動かない
-- [ ] AC30: `imports` の指し先が存在しないと終了コード 1 になる（宣言の陳腐化）。存在を判定しないパス（`~`・作業ツリーの外）の許可は、存在しないことを理由に指摘しない
-- [ ] AC31: `released` に変更履歴の文書と見出しの形を宣言すると、最新以下の版数で書き出した段落と見出しが指摘される
-- [ ] AC32: 段落の 2 行目以降が版数で始まっても指摘されない（折り返した行は段落の書き出しではない）。連続する箇条書きの 2 件目以降は段落の先頭として指摘される
-- [ ] AC33: 同じ宣言で、最新より新しい版数で始まる段落は指摘されない
-- [ ] AC34: `released` にタグの形を宣言すると、タグの最大値を最新として同じ判定をする
-- [ ] AC35: 最大値は数字 3 つの組として決まる。`10.9.0` と `10.10.0` があるとき、最新は `10.10.0` になる
-- [ ] AC36: `pattern` に名前付きの捕捉 `(?P<version>…)` が無いとき、終了コード 2 で終わる
-- [ ] AC37: 捕捉した値が版数の形（数字 3 つ＋任意の接尾辞）でないとき、終了コード 2 で終わる
-- [ ] AC38: `released` の宣言から版を 1 つも取れないとき、走査の前に終了コード 2 で終わる（壊れた即時読み込みの指摘も出さずに止まる）
-- [ ] AC39: `pending_marker` を宣言すると、その印で書き出した段落は基底が最新**未満**のときだけ指摘される
-- [ ] AC40: 出た版の段落の指摘に、宣言の `decisions` が指す退避先が出る
-- [ ] AC41: `budget.bytes` を宣言し、**根の指示書 1 本の**合計がそれを超えると終了コード 1 になる
-- [ ] AC42: 宣言の構造が不正なとき、終了コード 2 で終わる。対象は JSON として読めない・`version` が無いか未対応・項目の型が違う（`files` が配列でない）・`pattern` が正規表現として読めないの 4 つ
+- [ ] AC28: 宣言に `$schema` を書いても、書かない宣言と同じに読まれる（読み取り側は参照しない）。解決できない値でも検査の結果は変わらない
+- [ ] AC29: `release` の参照が、`$schema` に**版を固定した公開の URL** を書く例を持つ（導入先がランタイムごとに違うため、相対パスにしない）
+- [ ] AC30: `imports` を宣言すると、許可の外の `@` は参照先が存在しても終了コード 1 になる。キーはリポジトリの根からの相対パスで、同じ名前の別の指示書には効かない
+- [ ] AC31: `"imports": {}`（許可が 1 つも無い）を書くと、参照がすべて指摘される。未指定のときは許可の判定が動かない
+- [ ] AC32: `imports` の指し先が存在しないと終了コード 1 になる（宣言の陳腐化）。存在を判定しないパス（`~`・作業ツリーの外）の許可は、存在しないことを理由に指摘しない
+- [ ] AC33: `released` に変更履歴の文書と見出しの形を宣言すると、最新以下の版数で書き出した段落と見出しが指摘される
+- [ ] AC34: 段落の 2 行目以降が版数で始まっても指摘されない（折り返した行は段落の書き出しではない）。連続する箇条書きの 2 件目以降は段落の先頭として指摘される
+- [ ] AC35: 同じ宣言で、最新より新しい版数で始まる段落は指摘されない
+- [ ] AC36: `released` にタグの形を宣言すると、タグの最大値を最新として同じ判定をする
+- [ ] AC37: 最大値は数字 3 つの組として決まる。`10.9.0` と `10.10.0` があるとき、最新は `10.10.0` になる
+- [ ] AC38: `pattern` に名前付きの捕捉 `(?P<version>…)` が無いとき、終了コード 2 で終わる
+- [ ] AC39: 捕捉した値が版数の形（数字 3 つ＋任意の接尾辞）でないとき、終了コード 2 で終わる
+- [ ] AC40: `released` の宣言から版を 1 つも取れないとき、走査の前に終了コード 2 で終わる（壊れた即時読み込みの指摘も出さずに止まる）
+- [ ] AC41: `pending_marker` を宣言すると、その印で書き出した段落は基底が最新**未満**のときだけ指摘される
+- [ ] AC42: 出た版の段落の指摘に、宣言の `decisions` が指す退避先が出る
+- [ ] AC43: `budget.bytes` を宣言し、**根の指示書 1 本の**合計がそれを超えると終了コード 1 になる
+- [ ] AC44: 宣言の構造が不正なとき、終了コード 2 で終わる。対象は JSON として読めない・`version` が無いか未対応・項目の型が違う（`files` が配列でない）・`pattern` が正規表現として読めないの 4 つ
 
 ### 出力と終了コード
 
-- [ ] AC43: 指摘は 1 件 1 行で、行を持つものは `ERROR: <ファイル>:<行>: <理由>`、持たないものは `ERROR: <理由>` になる
-- [ ] AC44: 指摘が 1 件も無ければ終了コード 0 で、走査した本数と根の指示書ごとの読み込みの量が標準出力に出る
-- [ ] AC45: 知らない引数を渡すと終了コード 3 で終わり、使い方が標準エラーへ出る
+- [ ] AC45: 指摘は 1 件 1 行で、行を持つものは `ERROR: <ファイル>:<行>: <理由>`、持たないものは `ERROR: <理由>` になる
+- [ ] AC46: 指摘が 1 件も無ければ終了コード 0 で、走査した本数と根の指示書ごとの読み込みの量が標準出力に出る
+- [ ] AC47: 知らない引数を渡すと終了コード 3 で終わり、使い方が標準エラーへ出る
 
 ### 配布と規約
 
-- [ ] AC46: 検査の実体は `plugins/ndf/scripts/` にある。新しい Skill は足さない（配る先の一覧の行数が変わらない）
-- [ ] AC47: `release` の退避の手順から検査を呼ぶ記載があり、宣言の書き方と判定の一覧を書いた参照が 1 本ある。呼び出しは `$SCRIPTS` を解決してから行う形で書かれている
-- [ ] AC48: 4 ランタイムの導入先それぞれからスクリプトを起動し、一時リポジトリを `--root` に渡して終了コード 0 になる。手順に書いたブロックをそのまま実行すると、検査が 0 / 1 / 2 / 3 を返す 4 通りでブロックの終了コードが一致する
-- [ ] AC49: `python3 scripts/check-skill-repo-assumptions.py` が終了コード 0 のまま（Skill の本文にこのリポジトリ固有の語を書かない）
-- [ ] AC50: 生成物の確認と配布物の検証が終了コード 0。4 ランタイムへ同じ実体が届く（`bash scripts/build-runtime-plugins.sh --check` / `bash scripts/validate-runtime-plugins.sh`）
+- [ ] AC48: 検査の実体は `plugins/ndf/scripts/` にある。新しい Skill は足さない（配る先の一覧の行数が変わらない）
+- [ ] AC49: `release` の退避の手順から検査を呼ぶ記載があり、宣言の書き方と判定の一覧を書いた参照が 1 本ある。呼び出しは `$SCRIPTS` を解決してから行う形で書かれている
+- [ ] AC50: 4 ランタイムの導入先それぞれからスクリプトを起動し、一時リポジトリを `--root` に渡して終了コード 0 になる。手順に書いたブロックをそのまま実行すると、検査が 0 / 1 / 2 / 3 を返す 4 通りでブロックの終了コードが一致する
+- [ ] AC51: `python3 scripts/check-skill-repo-assumptions.py` が終了コード 0 のまま（Skill の本文にこのリポジトリ固有の語を書かない）
+- [ ] AC52: 生成物の確認と配布物の検証が終了コード 0。4 ランタイムへ同じ実体が届く（`bash scripts/build-runtime-plugins.sh --check` / `bash scripts/validate-runtime-plugins.sh`）
 
 ### このリポジトリへの適用
 
-- [ ] AC51: `.ndf/instructions.json` を置き、リポジトリの根で検査を走らせると終了コード 0 になる
-- [ ] AC52: `f56c90d9` の指示書と `CHANGELOG.md` を一時ディレクトリへ展開し、同じ宣言で走らせる。終了コード 1 で、出た版の段落 7 件と許可していない即時読み込み 1 件の計 8 件が出る
-- [ ] AC53: `.github/workflows/runtime-plugin-validate.yml` に検査のジョブがあり、Pull Request では絞り込まずに起動する
-- [ ] AC54: そのジョブが実装の Pull Request で pass する
-- [ ] AC55: `CLAUDE.md` の「版ごとの判断の記録」に、版が決まる前の書き出しの印と、検査のコマンドが書かれている
-- [ ] AC56: `docs/versioning-and-distribution.md` の「バージョン更新時の手順」に検査のコマンドがある。手順 4 は判断の理由の置き場所を `docs/ndf-version-decisions.md` と書く
-- [ ] AC57: 同じ文書の「必須の検査 11 個」の記載が、ruleset へ `instruction-files-check` を足すのと**同じ時点で**新しい数になる（実装 Pull Request の差分には入れない）
-- [ ] AC58: `CHANGELOG.md` の冒頭が、判断の理由の置き場所を `docs/ndf-version-decisions.md` と書く
+- [ ] AC53: `.ndf/instructions.json` を置き、リポジトリの根で検査を走らせると終了コード 0 になる
+- [ ] AC54: `f56c90d9` の指示書と `CHANGELOG.md` を一時ディレクトリへ展開し、同じ宣言で走らせる。終了コード 1 で、出た版の段落 7 件と許可していない即時読み込み 1 件の計 8 件が出る
+- [ ] AC55: `.github/workflows/runtime-plugin-validate.yml` に検査のジョブがあり、Pull Request では絞り込まずに起動する
+- [ ] AC56: そのジョブが実装の Pull Request で pass する
+- [ ] AC57: `CLAUDE.md` の「版ごとの判断の記録」に、版が決まる前の書き出しの印と、検査のコマンドが書かれている
+- [ ] AC58: `docs/versioning-and-distribution.md` の「バージョン更新時の手順」に検査のコマンドがある。手順 4 は判断の理由の置き場所を `docs/ndf-version-decisions.md` と書く
+- [ ] AC59: 同じ文書の「必須の検査 11 個」の記載が、ruleset へ `instruction-files-check` を足すのと**同じ時点で**新しい数になる（実装 Pull Request の差分には入れない）
+- [ ] AC60: `CHANGELOG.md` の冒頭が、判断の理由の置き場所を `docs/ndf-version-decisions.md` と書く
 
 ### 退行しないこと
 
-- [ ] AC59: 既存の検査 6 本が終了コード 0 のまま。対象は継続的統合が走らせる `check-doc-line-limit.py` / `check-markdown-links.py` / `check-skill-repo-assumptions.py` / `check-skill-frontmatter.py` / `check-skill-shell-vars.py` と、配布物の検証から呼ばれる `check-doc-staleness.py`
-- [ ] AC60: `uv run --with pytest pytest scripts/tests plugins/ndf -q` で、足したテストを含めて失敗が増えない
+- [ ] AC61: 既存の検査 6 本が終了コード 0 のまま。対象は継続的統合が走らせる `check-doc-line-limit.py` / `check-markdown-links.py` / `check-skill-repo-assumptions.py` / `check-skill-frontmatter.py` / `check-skill-shell-vars.py` と、配布物の検証から呼ばれる `check-doc-staleness.py`
+- [ ] AC62: `uv run --with pytest pytest scripts/tests plugins/ndf -q` で、足したテストを含めて失敗が増えない
 
 ## 非機能の条件
 
@@ -216,7 +218,7 @@
 | 検査 | `python3 plugins/ndf/scripts/instructions-check.py --root .` |
 | 調べ直し | `python3 plugins/ndf/scripts/instructions-check.py --refresh`（通信する唯一の経路） |
 | テスト | `uv run --with pytest pytest plugins/ndf/scripts/tests/test_instructions_check.py -q` |
-| 過去の状態での再現（AC52） | `git archive f56c90d9 CLAUDE.md AGENTS.md KIRO.md CHANGELOG.md` を一時ディレクトリへ展開し、`git init` と `git add -A` で追跡させ、宣言を置いて `--root` で渡す（走査は追跡対象から集めるため、展開しただけでは対象が 0 本になる） |
+| 過去の状態での再現（AC54） | `git archive f56c90d9 CLAUDE.md AGENTS.md KIRO.md CHANGELOG.md` を一時ディレクトリへ展開し、`git init` と `git add -A` で追跡させ、宣言を置いて `--root` で渡す（走査は追跡対象から集めるため、展開しただけでは対象が 0 本になる） |
 | 配布 | `bash scripts/build-runtime-plugins.sh --check` / `bash scripts/validate-runtime-plugins.sh` |
 | 継続的統合 | 実装の Pull Request の checks でジョブの結果を見る |
 
