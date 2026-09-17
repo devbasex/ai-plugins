@@ -137,7 +137,7 @@
 
 - [ ] AC30: 検査の実体は `plugins/ndf/scripts/` にある。新しい Skill は足さない（配る先の一覧の行数が変わらない）
 - [ ] AC31: `release` の退避の手順から検査を呼ぶ記載があり、宣言の書き方と判定の一覧を書いた参照が 1 本ある。呼び出しは `$SCRIPTS` を解決してから行う形で書かれている
-- [ ] AC32: 4 ランタイムの導入先それぞれからスクリプトを起動し、一時リポジトリを `--root` に渡して終了コード 0 になる
+- [ ] AC32: 4 ランタイムの導入先それぞれからスクリプトを起動し、一時リポジトリを `--root` に渡して終了コード 0 になる。手順に書いた呼び出しの形は、検査の終了コード（0 / 1 / 2 / 3）をそのまま返す
 - [ ] AC33: `python3 scripts/check-skill-repo-assumptions.py` が終了コード 0 のまま（Skill の本文にこのリポジトリ固有の語を書かない）
 - [ ] AC34: 生成物の確認と配布物の検証が終了コード 0。4 ランタイムへ同じ実体が届く（`bash scripts/build-runtime-plugins.sh --check` / `bash scripts/validate-runtime-plugins.sh`）
 
