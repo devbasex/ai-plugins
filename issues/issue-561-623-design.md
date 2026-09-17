@@ -23,8 +23,8 @@
 | --- | --- | --- | --- |
 | `plugins/ndf/skills/AUTHORING.md` | 実行前確認の要否を決める 3 つの問いと、守り方 3 つ、適用表を持つ | F1 | 「`allowed-tools` の意味と付け方」の 1 行、「取り消しの難しい操作をどちらで守るか」（見出しごと書き換える） |
 | `plugins/ndf/skills/merged/SKILL.md` | 後片付けの操作と、止まる条件と、戻し方の報告を持つ。**課題を閉じない** | F2 F3 F5 | frontmatter の `description`、「削除前の同意取得（必須）」、「クリーンアップの手順」4〜8、「閉じ忘れた issue を閉じる」（節ごと差し替える）、「マージ済みブランチの整理」、「作業完了報告」、「次の工程」の 2 段落目と 3 段落目、末尾の進行の記録の 1 行 |
-| `plugins/ndf/skills/progress-tracking/SKILL.md` | まとまりの課題の集め方、単位ごとの記録の担い手、**まとまりを閉じる唯一の手順**を持つ | F4 F5 | 「呼び方」の `status` の段落、新設「工程の単位と記録する課題」、新設「まとまりを閉じる」 |
-| `plugins/ndf/skills/release/SKILL.md` | 振り返りを通らない変更で、課題の手入れの前にまとまりを閉じる。まとまりの範囲の確認を開始条件に持つ | F4 | 「開始条件」、「蓄積した課題を手入れする」 |
+| `plugins/ndf/skills/progress-tracking/SKILL.md` | まとまりの課題の集め方、単位ごとの記録の担い手、**まとまりを閉じる唯一の手順**を持つ | F4 F5 | 冒頭の「この Skill は順序を持たない」の段落（例外として終わりの記録を足す）、「呼び方」の `status` の段落、新設「工程の単位と記録する課題」、新設「まとまりを閉じる」 |
+| `plugins/ndf/skills/release/SKILL.md` | 振り返りを通らない変更で、課題の手入れの前にまとまりを閉じる。まとまりの範囲の確認を開始条件に持つ。配布の Pull Request の本文に `まとまり:` の行を置く | F4 | 「開始条件」、手順 3 の配布の Pull Request の本文、「蓄積した課題を手入れする」 |
 | `plugins/ndf/skills/retrospective/SKILL.md` | 振り返りの後、課題の手入れの前にまとまりを閉じる | F4 | 進行の記録の 1 行（「この工程で終わるため…Done にする」） |
 | `plugins/ndf/skills/pr/SKILL.md` | コミットメッセージに閉じる語を書かない | F6 | 手順の `git commit` の行の直後（2 か所）に 1 行ずつ |
 | `plugins/ndf/skills/development-workflow/SKILL.md` | 関門の外で工程の側が実行前確認を足さない原則を持つ | F1 | **「人手の承認を求める関門」の冒頭の 2 段落だけ。行数を増やさない**（決定 11）。「`/goal` の引数として呼ばれたとき」は触らない |
@@ -185,13 +185,23 @@ plugins/ndf/
 
 ### `progress-tracking` の「まとまりを閉じる」
 
+**工程に入った時点で呼ぶ記録とは契機が違う。** この手順は終わりの工程を出るときに 1 度だけ行い、
+正本をこの Skill に置いて `release` と `retrospective` から呼ぶ。
+
 ```bash
-# 1. まとまりの課題を集める。まとまりの Pull Request（release が承認の提示に並べた一覧）ごとに
-gh pr view <PR番号> --repo <所有者>/<リポジトリ> --json body -q .body | bash "$SCRIPTS/lib/closing-issues.sh"
+RECORD_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+
+# 1. まとまりの Pull Request の一覧を得る。同じ実行の中なら release が承認の提示に並べた一覧を使う。
+#    別の実行なら、配布の Pull Request（retrospective の「Pull Request の番号を特定する」が引くもの）の本文から取る
+gh pr view <配布のPR番号> --repo "$RECORD_REPO" --json body -q .body \
+  | sed -n 's/^まとまり: //p' | grep -oE '#[0-9]+' | tr -d '#'
+
+# 2. まとまりの課題を集める。1 の Pull Request ごとに
+gh pr view <PR番号> --repo "$RECORD_REPO" --json body -q .body | bash "$SCRIPTS/lib/closing-issues.sh"
 # → <所有者>/<リポジトリ><TAB><番号> の行。重複は 1 つにする
 
-# 2. 課題ごとに、盤面を Done にしてから、まだ OPEN なら閉じる
-bash "$SCRIPTS/projects-sync.sh" <番号> status "Done"
+# 3. 課題ごとに、盤面を Done にしてから、まだ OPEN なら閉じる。盤面は記録のリポジトリの課題だけ
+[ "<所有者>/<リポジトリ>" = "$RECORD_REPO" ] && bash "$SCRIPTS/projects-sync.sh" <番号> status "Done"
 gh issue view <番号> --repo <所有者>/<リポジトリ> --json state -q .state        # OPEN / CLOSED
 gh issue close <番号> --repo <所有者>/<リポジトリ> --comment "まとまり（<マイルストーン>）の<工程名>を通りました"
 ```
@@ -201,6 +211,12 @@ gh issue close <番号> --repo <所有者>/<リポジトリ> --comment "まと�
 | `retrospective` | 記録を投稿した後、`issue-upkeep` を呼ぶ前 | 振り返りを通る変更 |
 | `release` | 「蓄積した課題を手入れする」の `issue-upkeep` を呼ぶ前 | 振り返りを通らない変更（`light`、振り返りを通らない `operation`） |
 
+- **一覧の取得元は配布の Pull Request の本文である。** `release` は配布の Pull Request を作る形で、出力物の
+  `まとまり: PR #<番号> / …` の行を本文にも置く（決定 10）
+- **一覧の行が無ければ推測しない。** 手順 1 の `grep` が 1 で終わったら、運用者に一覧を聞く（`retrospective` の段 3 と同じ扱い）
+- **他のリポジトリの課題には盤面を書かない。** `projects-sync.sh` は `--repo` を取らず、実行したリポジトリの
+  `.ndf/projects.json` の盤面で番号を引く。他のリポジトリの番号を渡すと、同じ番号の別の課題を更新する。
+  一致しないときは `gh issue close --repo` だけを行う
 - **盤面を先に書き、閉じるのは OPEN のときだけ。** `Auto-close issue` が有効なら Done で閉じ、
   無効なら `gh issue close` が閉じる。どちらでも終わりの状態は同じになる
 - 既に CLOSED なら何もしない（既定ブランチへのマージで GitHub が先に閉じた場合を含む）
@@ -220,7 +236,8 @@ gh issue close <番号> --repo <所有者>/<リポジトリ> --comment "まと�
 最初の記録しか読まず、課題番号を変数で書いた記録は読まない（#487）。**控えを読む検査は
 Pull Request の作成の時点と後片付けの報告だけ**で、後片付けより後の工程を読まない
 （`stage-completeness.md`）。そのため配布以降を並べても判定は変わらない。**後片付けまでの記録は
-課題ごとに 1 回の実行にする**（控えへ入れるため）。
+課題ごとに 1 回の実行にする**（控えへ入れるため）。**他のリポジトリの課題へは `progress-record.sh --repo` だけを使い、
+`projects-sync.sh` を呼ばない**（理由は「まとまりを閉じる」の箇条書き）。
 
 ## 処理の流れ
 
@@ -365,7 +382,8 @@ NDF の判定を安全の網にすると #561 が問題にした二重の確認�
 閉じる時点は終わりの工程で、終わりの工程はモードで `release` と `retrospective` に分かれる。どちらかへ
 置くと、もう片方へ写しが要る。`progress-tracking` は既に「終わりの工程の後に Done を書く」を持ち、
 どの工程からも呼ばれる。盤面を先に書くのは、`Auto-close issue` の有無によらず終わりの状態を揃えるため
-である。新しいスクリプトは作らない。手順は `closing-issues.sh` と `gh` の 3 行で足りる。
+である。新しいスクリプトは作らない。手順は `closing-issues.sh` と `gh` で足りる。盤面を書くのは記録のリポジトリの
+課題だけである。
 
 ### 決定 9: コミットメッセージに閉じる語を書かない
 
@@ -379,7 +397,9 @@ v10.11.0 では、コミットメッセージに `Closes` を持つ 2 件だけ�
 v10.11.0 では、担当が記録した工程で止まり、進行側が行った工程が 14 件とも空欄だった。記録の担い手を
 「行った側」と決めれば、工程表の単位の表から一意に決まる。集め方にマイルストーンを使う案は採らなかった。
 マイルストーンには、このまとまりで直さない課題も割り当てられ得る。閉じる語は `merged` と作成の時点の
-案内が既に使う指し方である。
+案内が既に使う指し方である。**まとまりの Pull Request の一覧は、配布の Pull Request の本文の `まとまり:` の行から取る。**
+別の実行の `retrospective` からも読め、`release` の出力物に既にある形を再利用できる。マイルストーンから引く案は、
+Pull Request にマイルストーンが付くとは限らないため採らなかった。
 
 ### 決定 11: 関門の節には原則を 1 文で足し、`development-workflow/SKILL.md` の行数を増やさない
 
@@ -406,7 +426,9 @@ v10.11.0 では、担当が記録した工程で止まり、進行側が行っ�
 | C4 C5 C8 | リリース後テスト。このマイルストーンの課題の ClosedEvent が、起点へのマージではなく終わりの工程の後に来る（`gh api graphql` の `closer` と時刻） |
 | C7 | `pr/SKILL.md` の差分の目視 |
 | D1 D3 | 「工程の単位と記録する課題」の表 |
+| C9 | `progress-tracking/SKILL.md` の冒頭の段落・「呼び方」と「まとまりを閉じる」の突き合わせ（文面）。`release` と `retrospective` がその節を指す |
 | D2 | `gh pr view 717 --json body -q .body \| bash plugins/ndf/scripts/lib/closing-issues.sh` が `devbasex/ai-plugins 712` と `devbasex/ai-plugins 713` を出す（設計の時点で実測済み） |
+| D2（まとまりの行の取り出し） | `gh pr view <配布のPR番号> --json body -q .body \| sed -n 's/^まとまり: //p' \| grep -oE '#[0-9]+' \| tr -d '#'`。本文に `まとまり: PR #717 / #718 / #720` があれば 717 718 720 を出し終了コード 0、行が無ければ何も出さず `grep` が 1（設計の時点で実測済み） |
 | E1 | 移した `test_the_merged_skill_closes_issues_with_their_repository`（読む先を `progress-tracking` にする）を含む `uv run --with pytest pytest scripts/tests plugins/ndf -q` |
 | E2 E3 E4 E5 | 要求文書の検証手段のコマンド |
 

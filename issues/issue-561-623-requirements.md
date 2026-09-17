@@ -78,7 +78,7 @@
 | 対象 | 課題 |
 | --- | --- |
 | `AUTHORING.md` の「取り消しの難しい操作をどちらで守るか」の基準と適用表 | #561 |
-| `merged` の「削除前の同意取得」・クリーンアップの手順 4〜7・「閉じ忘れた issue を閉じる」・「マージ済みブランチの整理」・作業完了報告・frontmatter の `description` | #561 #623 |
+| `merged` の「削除前の同意取得」・クリーンアップの手順 4〜8・「閉じ忘れた issue を閉じる」・「マージ済みブランチの整理」・作業完了報告・frontmatter の `description` | #561 #623 |
 | `development-workflow/SKILL.md` の「人手の承認を求める関門」の節への原則の追記 | #561 |
 | `development-workflow/references/stage-notes.md` の後片付けの段落 | #561 |
 | 実行前確認を持つ他の Skill（`pr` / `release` / `out-of-scope` / `official-skills-autoloader` / `issue-upkeep` の「やらない」）の分類し直し。**手順は変えない** | #561 の判断が要る点 1 |
@@ -169,6 +169,8 @@
       閉じる手順が `issue-upkeep` の呼び出しより前に置かれている
 - [ ] C7: コミットメッセージの閉じる語による自動クローズの扱いが決まり、`pr/SKILL.md` に書かれている
 - [ ] C8: 課題を閉じるときに利用者の入力を求めない。閉じた課題と reopen の手段が、閉じた工程の完了報告に載る
+- [ ] C9: `progress-tracking/SKILL.md` に、工程に入った時点で呼ぶ記録と、終わりの工程を出るときに行う「まとまりを閉じる」が
+      別の契機であることが書かれている。後者の手順の正本がこの Skill にあり、`release` と `retrospective` が呼ぶ
 
 ### D. まとまりの工程の記録（#623 のコメント 1）
 
