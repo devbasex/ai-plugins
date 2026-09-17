@@ -57,9 +57,9 @@ errors 0
 | コードの除外（`scripts/lib/markdown_code.py`） | 1 行からコードスパンを取り除く。リンクの検査と共有する | 新設（`check-markdown-links.py` から移す） |
 | リンクの検査（`scripts/check-markdown-links.py`） | コードスパンの除去を共有の定義から読む。振る舞いは変えない | 変更 |
 | 版数の書式（`scripts/lib/version_pattern.py`） | 版数の正規表現を持つ。検査はここから読む | 変更なし（読むだけ） |
-| 継続的統合のジョブ（`runtime-plugin-validate.yml` の `instruction-files-check`） | Pull Request ごとに検査を走らせる | 変更（ジョブを足す） |
+| 継続的統合のジョブ（`runtime-plugin-validate.yml` の `instruction-files-check`） | Pull Request ごとに検査を走らせる。必須の検査に入れる | 変更（ジョブを足す） |
 | 規約（`CLAUDE.md` の「版ごとの判断の記録」） | 版が決まる前の書き出しの形と、検査のコマンドを書く | 変更 |
-| 版を上げる手順（`docs/versioning-and-distribution.md`） | 手順へ検査を足し、判断の置き場所の記載を直す | 変更 |
+| 版を上げる手順（`docs/versioning-and-distribution.md`） | 手順へ検査を足し、判断の置き場所と必須の検査の数の記載を直す | 変更 |
 | 変更履歴の冒頭（`CHANGELOG.md`） | 判断の置き場所の記載を直す | 変更 |
 | テスト（`scripts/tests/test_check_instruction_files.py`） | AC1〜AC20 の判定を固定する | 新設 |
 
@@ -70,10 +70,10 @@ graph TD
     開発者[開発者と AI] -->|指示書を編集| 検査[指示書の検査]
     配布担当[配布の担当] -->|版の節を足す| 検査
     検査 -->|終了コード| CI[GitHub Actions]
-    CI -->|必須にするかは利用者が決める| RS[ruleset]
+    CI -->|必須の検査に入れる| RS[ruleset]
 ```
 
-**外部の系は GitHub Actions と ruleset の 2 つである。** ruleset はこの変更で触らない（「利用者の確認が要る事項」）。
+**外部の系は GitHub Actions と ruleset の 2 つである。** ruleset の変更は実装の差分に入らず、マージの後に進行側が行う（「リポジトリ設定の変更」）。
 
 ### 構成要素図
 
@@ -329,13 +329,15 @@ graph TD
 
 `check-markdown-links.py` は `from markdown_code import strip_inline_code` で読む。`module.strip_inline_code` を呼ぶ既存のテストはそのまま通る。
 
-### 決定 8: 検査は `runtime-plugin-validate.yml` の新しいジョブにし、必須にするかは利用者が決める
+### 決定 8: 検査は `runtime-plugin-validate.yml` の新しいジョブにし、必須の検査にする
 
 既存の文書の検査（`markdown-link-check` / `doc-line-limit-check`）と同じワークフローに足す。ジョブの形も同じく `checkout` → `setup-python` → 1 行の `run` にする。
 Pull Request では絞り込まずに起動する（ワークフロー冒頭の注記のとおり、必須にしたときに結果を返す必要がある）。push の絞り込みには `CHANGELOG.md` を足す
 （上限の入力であり、今は一覧に無い）。
 
-**ruleset の必須の一覧へ足すのはリポジトリ設定の変更で、この課題では行わない。** ジョブを足しても必須に入れなければ、落ちてもマージできる（#653 が同じ状態の 3 つを扱う）。
+**必須の一覧へ入れる。** ジョブを足しても必須に入れなければ、落ちてもマージできる（#653 が同じ状態の 3 つを扱う）。
+一覧の変更はリポジトリ設定の変更にあたるため、**実行は実装 Pull Request のマージ後に進行側が行う**。あわせて
+`docs/versioning-and-distribution.md` の「必須の検査 11 個」の数を直す（AC25）。
 
 ### 決定 9: `release` Skill は変えず、リポジトリ側の手順へ検査を書く
 
@@ -366,9 +368,9 @@ Pull Request では絞り込まずに起動する（ワークフロー冒頭の�
 | AC20 | テスト: `KIRO.md` を置かない根で終了コード 2 |
 | AC21 | 手順: ワークフローの差分を読み、`on.pull_request` に絞り込みが無く、`push.paths` に `CHANGELOG.md` があることを確かめる |
 | AC22 | 手順: 実装の Pull Request の checks で `instruction-files-check` が pass |
-| AC23 / AC24 / AC25 | 手順: 差分を読む。加えて `check-markdown-links.py` と `check-doc-line-limit.py` が終了コード 0 |
-| AC26 | 手順: 5 つの検査を実行して終了コード 0 |
-| AC27 | 手順: `uv run --with pytest pytest scripts/tests -q` の失敗の件数が `develop` と同じ（既知の環境要因の 6 件を除く） |
+| AC23 / AC24 / AC25 / AC26 | 手順: 差分を読む。加えて `check-markdown-links.py` と `check-doc-line-limit.py` が終了コード 0 |
+| AC27 | 手順: 5 つの検査を実行して終了コード 0 |
+| AC28 | 手順: `uv run --with pytest pytest scripts/tests -q` の失敗の件数が `develop` と同じ（既知の環境要因の 6 件を除く） |
 
 ## 未確認のまま残ること
 
@@ -380,11 +382,12 @@ Pull Request では絞り込まずに起動する（ワークフロー冒頭の�
 | 出力の文言 | 入出力の契約の表の文言は形の例で、句読点と語順は実装で決める | 実装 |
 | `markdown_code.py` の関数名 | `strip_inline_code` を保つか、公開名を変えるか | 実装（既存テストが `module.strip_inline_code` を呼ぶため、少なくともリンクの検査の側の名前は残す） |
 
-## 利用者の確認が要る事項
+## リポジトリ設定の変更
 
-| 事項 | 内容 | この設計での扱い |
+| 事項 | 内容 | 扱い |
 | --- | --- | --- |
-| ruleset の必須の一覧へ `instruction-files-check` を足すか | `protect main and develop`（id 22332172）の `required_status_checks` の変更。足さなければ、落ちてもマージできる | **実行しない。** 実装の Pull Request のマージ前に利用者へ確認する。足すなら `docs/versioning-and-distribution.md` の「必須の検査 11 個」の数も直す（#653 と同じ箇所） |
+| ruleset の必須の一覧へ `instruction-files-check` を入れる | `protect main and develop`（id 22332172）の `required_status_checks` へ 1 つ足す | **入れると決まった**（利用者の判断）。**実行は実装 Pull Request のマージ後に進行側が行う。** 実装の差分には入らない |
+| `docs/versioning-and-distribution.md` の「必須の検査 11 個」 | 足した後の数へ直す | 実装の差分に入る（AC25）。#653 が同じ箇所を持つ |
 
 ## 実装の分け方と他の束との関係
 
