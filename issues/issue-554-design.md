@@ -8,7 +8,10 @@
 
 ```console
 $ python3 plugins/ndf/scripts/instructions-check.py --root .
-指示書 5 本（根 3 / 配下 2）/ 毎回の読み込み 12,480 バイト
+指示書 5 本（根 3 / 配下 2）
+AGENTS.md          6,240 バイト（参照先 1 本を含む）
+CLAUDE.md          4,010 バイト（参照先 1 本を含む）
+KIRO.md            2,230 バイト
 NOTE: 宣言（.ndf/instructions.json）が無いため、出た版と許可の判定は動かない
 ERROR: docs/AGENTS.md:12: @docs/none.md の参照先が無い。参照を消すか実在するパスへ直す
 ```
@@ -171,6 +174,9 @@ classDiagram
 | `pending_marker` | 文字列 | 無し | 版が決まる前の段落の印（例: `の次の版で`） |
 | `budget` | オブジェクト | 無し | `{"bytes": 20000}`。毎回の読み込みの上限 |
 
+**`imports` のキーは、リポジトリの根からの相対パスである。** 根の指示書は `CLAUDE.md`、配下の指示書は
+`docs/AGENTS.md` と書く。**ファイル名だけにしない** ── 同じ名前の指示書が複数あると、許可が別の場所へも効く。
+
 **`imports` の値は理由を持つ。** 許可を足す人が、毎回読ませる理由を書かずに足せない
 （既存の除外の宣言が理由を必須にしているのと同じ形）。
 
@@ -220,11 +226,11 @@ graph TD
     D -->|壊れている| E2[終了コード 2]
     D -->|無い| DEF[既定の Declaration]
     D -->|ある| USE[宣言の Declaration]
-    DEF --> COL[git の追跡から指示書を集める]
-    USE --> COL
-    COL --> MAX{released の宣言から最新の版を取れるか}
+    DEF --> MAX{released の宣言から最新の版を取れるか}
+    USE --> MAX
     MAX -->|宣言があり取れない| E2
-    MAX -->|取れた・宣言が無い| N{指示書が 1 本以上あるか}
+    MAX -->|取れた・宣言が無い| COL[git の追跡から指示書を集める]
+    COL --> N{指示書が 1 本以上あるか}
     N -->|無い| E0[終了コード 0・対象なし]
     N -->|ある| IMP[即時読み込みを見る]
     IMP --> VER[版の段落と見出しを見る]
@@ -302,7 +308,7 @@ graph TD
 | --- | --- |
 | 参照先が存在しない | 常に指摘する（F2。宣言は要らない） |
 | `imports` が空でなく、その指示書の許可に無い | 指摘する（F3） |
-| `imports` に書いた許可の指し先が存在しない | 指摘する（宣言の陳腐化） |
+| `imports` に書いた許可の指し先が存在しない | 指摘する（宣言の陳腐化）。**存在を判定するパスに限る** ── `~` と作業ツリーの外を指す許可は、存在しないことを理由に指摘しない |
 
 ### 版の段落を見る
 
@@ -317,8 +323,9 @@ graph TD
 
 | 形 | 例 |
 | --- | --- |
+| ファイルの 1 行目 | 前の行が無い |
 | 直前が空行・見出し・フェンスの終わりのいずれか | 段落の 1 行目 |
-| **箇条書きの項目の始まり**（`- ` / `* ` / `1. ` で始まる行） | 連続する項目の 2 件目以降も含む |
+| **箇条書きの項目の始まり**（先行する空白を許し、`- ` / `* ` / `+ ` / `1. ` で始まる行） | 連続する項目の 2 件目以降と、字下げした項目も含む |
 | 表の行・引用の行 | 段落の先頭として扱わない（判定に入れない） |
 
 **段落の途中の行を見ない。** 段落は複数行に折り返され、折り返した先の行が版数で始まることがある。
@@ -357,9 +364,12 @@ graph TD
 | 1 | `.ndf/instructions.json` を置く（「データ構造」の例のとおり） | AC31 / AC32 |
 | 2 | `.github/workflows/runtime-plugin-validate.yml` へジョブ `instruction-files-check` を足す。Pull Request では絞り込まずに起動し、push の絞り込みへ `CHANGELOG.md` と `.ndf/**` を足す | AC33 / AC34 |
 | 3 | `CLAUDE.md` の「版ごとの判断の記録」へ、版が決まる前の印と検査のコマンドを書く | AC35 |
-| 4 | `docs/versioning-and-distribution.md` の「バージョン更新時の手順」へ検査を足し、手順 4 の置き場所を直し、「必須の検査 11 個」の数を直す | AC36 / AC37 |
+| 4 | `docs/versioning-and-distribution.md` の「バージョン更新時の手順」へ検査を足し、手順 4 の置き場所を直す | AC36 |
 | 5 | `CHANGELOG.md` の冒頭の置き場所を直す | AC38 |
-| 6 | ruleset（`protect main and develop`）の必須の検査へ `instruction-files-check` を入れる | **実装の差分に入らない。** 入れると決まっており（利用者の判断）、実行は実装 Pull Request のマージ後に進行側が行う |
+| 6 | ruleset（`protect main and develop`）の必須の検査へ `instruction-files-check` を入れ、**同じ時点で** `docs/versioning-and-distribution.md` の「必須の検査 11 個」の数を直す | **実装の差分に入らない。** 入れると決まっており（利用者の判断）、実行は実装 Pull Request のマージ後に進行側が行う（AC37） |
+
+**数と ruleset は同じ時点で変える。** 文書が「12 個」と書いて ruleset が 11 個しか求めない状態では、
+`main` へ進めるときの断りの文言（`X of 11 required status checks …`）と文書が食い違う。
 
 **4 と 5 は、規則と逆のことを書いている記載を直す。** どちらも「判断の理由は `CLAUDE.md` に置く」と書いており、
 #551 で決めた置き場所（`docs/ndf-version-decisions.md`）と食い違う。
@@ -392,7 +402,8 @@ graph TD
 | AC29 / AC30 / AC39 | 手順: 既存の検査とビルドの確認を実行し、終了コード 0 を見る |
 | AC31 / AC32 | 手順: このリポジトリの根での実行と、`git archive f56c90d9 …` を展開した一時ディレクトリでの実行 |
 | AC33 / AC34 | 手順: ワークフローの差分を読み、実装の Pull Request の checks を見る |
-| AC35 / AC36 / AC37 / AC38 | 手順: 差分を読む |
+| AC35 / AC36 / AC38 | 手順: 差分を読む |
+| AC37 | 手順: ruleset へ足した後に、その一覧の件数と文書の数字を突き合わせる（実装 Pull Request の差分には入らない） |
 | AC40 | 手順: `uv run --with pytest pytest scripts/tests plugins/ndf -q` の失敗の件数が `develop` と同じ（既知の環境要因の 6 件を除く） |
 
 ## 未確認のまま残ること
