@@ -1,4 +1,4 @@
-# #550 / #657: 工程を president / supervisor / worker の 3 層で通し、context window を測る
+# #550 / #657: 工程を conductor / supervisor / worker の 3 層で通し、context window を測る
 
 設計は [issue-550-657-design.md](issue-550-657-design.md) にある。この文書は「何を満たすか」だけを扱う。
 
@@ -7,7 +7,7 @@
 
 | 主題 | 課題 | 中身 |
 | --- | --- | --- |
-| A 無人の運転 | #550 | `/goal` の工程を 3 層（president / supervisor / worker）へ出し、2 つの関門以外を人間の入力なしで通す |
+| A 無人の運転 | #550 | `/goal` の工程を 3 層（conductor / supervisor / worker）へ出し、2 つの関門以外を人間の入力なしで通す |
 | B context window の測定 | #550 | 層ごとの固定費・最大充填・実作業を会話の記録から測り、振り返りへ集計を出す |
 | C 中断と再開 | #657 | 利用上限（429）で落ちた層を上の層が見分け、解除を待って再開する |
 
@@ -22,7 +22,7 @@
 
 | 層 | 何者か | 人間へ問えるか | 起動する相手 |
 | --- | --- | --- | --- |
-| president | 人間と対話しているセッション。`/goal` を受ける | **問える**（`AskUserQuestion`） | supervisor |
+| conductor | 人間と対話しているセッション。`/goal` を受ける | **問える**（`AskUserQuestion`） | supervisor |
 | supervisor | 1 つの持ち場（連続する工程の束）を通すサブエージェント | 問えない | worker |
 | worker | 1 つの作業（調査・読解・修正・テストの実行・集計）を行うサブエージェント | 問えない | 起動しない |
 
@@ -31,7 +31,7 @@
 **#550 の本文の実測に、#657 のための実測を足した。** 走査したのは
 `~/.claude/projects/-work-ai-plugins/` の記録である（2026-09-17 時点）。**記録を取った時点の運転は
 2 層（人間と対話するセッションと、その下のサブエージェント）だった。** 下の実測の「上の層」は
-いまの president、「下の層」は supervisor と worker の両方に当たる。
+いまの conductor、「下の層」は supervisor と worker の両方に当たる。
 
 ### 下の層が利用上限で落ちたとき、上の層に何が届くか
 
@@ -95,7 +95,7 @@ working on when the limit was reached; do not repeat work that is already comple
 | # | 前提 |
 | --- | --- |
 | 1 | 無人の運転は Claude Code の `/goal` と `Agent` / `SendMessage` ツールで行う。他の 3 ランタイムの非対話起動は扱わない（#550 の「含まない」） |
-| 2 | サブエージェントは孫を起動でき、Skill を起動でき、`AskUserQuestion` を持たない（#550 の実測 3 点）。**深さ 2（president → supervisor → worker）までは実測で確かめてある** |
+| 2 | サブエージェントは孫を起動でき、Skill を起動でき、`AskUserQuestion` を持たない（#550 の実測 3 点）。**深さ 2（conductor → supervisor → worker）までは実測で確かめてある** |
 | 3 | 固定費は導入したリポジトリとモデルで変わる。**規約は値を持たず、比の基準だけを持つ** |
 | 4 | 境界の 4 点（`context-window.md`）は上限ではなく初期値である。測った結果で束ねも割りもする |
 | 5 | 利用上限は 3 層で共有される。下の層だけが当たる場合（モデルごとの上限など）もありうるが、実例はまだ無い |
@@ -122,7 +122,7 @@ working on when the limit was reached; do not repeat work that is already comple
 | 扱わないもの | 理由 |
 | --- | --- |
 | 外部のランナー（シェル・予約実行が工程ごとにプロセスを起動する形） | 承認を外部の印へ移す必要があり、規約の骨格を触る（#550） |
-| 承認を表すラベルの新設（`design-approved` 以外） | president が問える以上、印は要らない（#550） |
+| 承認を表すラベルの新設（`design-approved` 以外） | conductor が問える以上、印は要らない（#550） |
 | 4 ランタイムの非対話起動を吸収する層 | #550 |
 | 統計の送信 | #159 |
 | 関門の数・承認の形・提示物の変更 | 変えない。`SKILL.md` の「人手の承認を求める関門」の節は G1（#561 #623）が触る |
@@ -140,32 +140,32 @@ working on when the limit was reached; do not repeat work that is already comple
 
 - [ ] AC1: `/goal /ndf:development-workflow <指示>` が、**2 つの関門と、失敗で止まる場合以外で人間の入力を求めずに**、
   複数の課題を設計から振り返りまで通す
-- [ ] AC2: 関門では president が `AskUserQuestion` で止まり、承認の後に次の supervisor が起動する。
+- [ ] AC2: 関門では conductor が `AskUserQuestion` で止まり、承認の後に次の supervisor が起動する。
   **人間は `/clear` も再開のコマンドもラベルの付与も要らない**
 - [ ] AC3: supervisor は関門に達すると、承認を求めずに報告を返して終わる。
   supervisor も worker も、設計 Pull Request をマージせず、本番の系へ届く操作を承認なしに行わない
 - [ ] AC4: supervisor の報告は設計文書の「supervisor の報告の形」が決める項目を持つ。報告の中に次に起動する持ち場の名前が入り、
-  president は工程表を読まずに次の supervisor を起動できる
-- [ ] AC4b: president は、**止まるとき**（失敗・到達点の置き直し・上限で待つとき）に、利用者への応答へ「持ち場の一覧」（契約の文書の president の報告）を 1 回出す。
+  conductor は工程表を読まずに次の supervisor を起動できる
+- [ ] AC4b: conductor は、**止まるとき**（失敗・到達点の置き直し・上限で待つとき）に、利用者への応答へ「持ち場の一覧」（契約の文書の conductor の報告）を 1 回出す。
   出す時点は、`AskUserQuestion` を出す前・失敗を報告する前・背景の待ちを起動して応答を終える前の 3 つである
 - [ ] AC5: 上の層は、報告の形を持たずに終わった下の層（待ちで応答を終えたなど）を完了として扱わず、`SendMessage` で続けさせる。
   **同じ相手へ 3 回続けさせても**報告が出なければ、4 回目は送らずに失敗として止まり、相手の名前と理由を上へ報告する。
-  president の報告（到達したときも止まったときも）には、持ち場ごとに続けさせた回数が載る
-- [ ] AC6: president の context window には、着手の判定の材料・supervisor の報告・承認の提示物だけが載る。
-  **president のセッションで起動される Skill は `development-workflow` と `issue-plan-strategy` に限られる。**
+  conductor の報告（到達したときも止まったときも）には、持ち場ごとに続けさせた回数が載る
+- [ ] AC6: conductor の context window には、着手の判定の材料・supervisor の報告・承認の提示物だけが載る。
+  **conductor のセッションで起動される Skill は `development-workflow` と `issue-plan-strategy` に限られる。**
   `issue-plan-strategy` は複数の課題を束ねるときだけ起動する。確かめ方は
-  `skill-stats --session <president のセッション>`（`--agents` を付けない）の呼び出し数の表である。この表は president の記録だけを数える
+  `skill-stats --session <conductor のセッション>`（`--agents` を付けない）の呼び出し数の表である。この表は conductor の記録だけを数える
 - [ ] AC7: 進行の記録（`progress-tracking`）は supervisor が行う。工程に入った時点で 1 回の Bash 実行につき 1 件ずつ積む。
   worker は進行を記録しない。1 課題を通した後、issue の本文の `## 進行` の、そのモードの必須の工程にチェックが入っている
 - [ ] AC8: 設計 Pull Request のマージは、承認の印（`design-approved`）が無い限り拒否される状態が保たれる
 - [ ] AC15: supervisor と worker の中では、関門以外の Skill の確認（`pr` の提示・`merged` の一覧など）を提示して進め、確認待ちで止まらない
 - [ ] AC16: 実装で触る規約の文書（`development-workflow/SKILL.md`・`references/context-window.md`・新設の `references/agent-layers.md`）で、
-  **3 層の語が `president` / `supervisor` / `worker`、量を指す語が `context window` に揃っている。**
+  **3 層の語が `conductor` / `supervisor` / `worker`、量を指す語が `context window` に揃っている。**
   これらの文書に「窓」と「親」（実行の主体の意味）が残っていない。ファイル名（`context-window.md`）は変えない。あの文書は量の側を扱う
 - [ ] AC17: worker は人間へ問わず、別のサブエージェントを起動せず、「worker の報告の形」で supervisor へ返す
-- [ ] AC18: worker の報告は president へ転送されない。**president が 1 つの持ち場について読む報告は 1 件である**
+- [ ] AC18: worker の報告は conductor へ転送されない。**conductor が 1 つの持ち場について読む報告は 1 件である**
 - [ ] AC19: `context-window.md` の「委譲しない」の 5 つ（モード判定・関門の判断・収束の判定・設計の決定と理由の記録・受け入れ条件の書き換え）は、
-  worker へ出されない。supervisor か president が持つ
+  worker へ出されない。supervisor か conductor が持つ
 
 規約:
 
@@ -182,20 +182,20 @@ working on when the limit was reached; do not repeat work that is already comple
 
 ## 受け入れ条件（B: context window の測定 #550）
 
-- [ ] AC20: `skill-stats` で、会話の記録 1 件につき 1 行を出せる。記録は president の `<セッション>.jsonl` と
+- [ ] AC20: `skill-stats` で、会話の記録 1 件につき 1 行を出せる。記録は conductor の `<セッション>.jsonl` と
   `<セッション>/subagents/agent-<識別子>.jsonl` である。行が持つ項目は次の 11 個で、並びと列名は契約の文書の出力表が決める。
   層 / 持ち場（または作業の種類）/ 深さ / モデル / 固定費 / 最大充填 / 実作業 / 応答数 / 所要 / 終わり方 / 中断の回数
-- [ ] AC21: president の行も同じ 11 項目で出る（層は `president`、深さは 0）
+- [ ] AC21: conductor の行も同じ 11 項目で出る（層は `conductor`、深さは 0）
 - [ ] AC22: 固定費と実作業が別の列で出る。実作業は最大充填 − 固定費に一致する
 - [ ] AC23: 応答数は `message.id` の異なる応答の数である。同じ `message.id` の行が 3 行あっても 1 と数える
 - [ ] AC24: 合成の応答（`message.model` が `<synthetic>`）は、固定費・最大充填・応答数・モデルの計算に入らない。
   記録が合成の応答で始まっても、固定費は最初の合成でない応答の値になる
 - [ ] AC25: 終わり方は `completed` / `in_progress` / `rate_limit` / `api_error` のいずれかで、判定は順序を持つ。
   429 で中断した後に `SendMessage` で続けた記録は `in_progress` または `completed` になり、中断の回数が別の列に出る
-- [ ] AC26: 層は記録の深さと `description` で決まる。0 = president、2 以上 = worker。
-  **深さ 1 は、`description` の先頭語が作業の種類の語彙なら worker、それ以外は supervisor** になる（president が読解の worker を直接起動するため）。
+- [ ] AC26: 層は記録の深さと `description` で決まる。0 = conductor、2 以上 = worker。
+  **深さ 1 は、`description` の先頭語が作業の種類の語彙なら worker、それ以外は supervisor** になる（conductor が読解の worker を直接起動するため）。
   持ち場（supervisor）と作業の種類（worker）は `description` の先頭語から取り、その層の語彙で始まらないものは `その他` になる
-- [ ] AC27: `--session <セッション ID>` で 1 つのセッション（president とその配下のすべての層）に絞れる。繰り返して複数を渡せる
+- [ ] AC27: `--session <セッション ID>` で 1 つのセッション（conductor とその配下のすべての層）に絞れる。繰り返して複数を渡せる
 - [ ] AC28: 応答が 3 回に満たない記録は**束ねの表（AC29）からだけ**外れ、外した件数が 1 行出る。
   **層ごとの合計（AC36）と持ち場ごとの worker の使い方（AC37）には、外した記録も含める**（短命な記録も固定費を使うため）
 - [ ] AC29: 層と持ち場（worker は作業の種類）とモデルの組ごとに、件数・固定費の中央値・実作業の中央値・
@@ -222,30 +222,30 @@ working on when the limit was reached; do not repeat work that is already comple
   人の入力・背景の待ちの終わりの 4 つである。最後の応答が `apiErrorStatus: 429` の合成の応答である記録を、**上限の中断**として分類する。
   `server_error`（500 / 529）と `authentication_failed` は、これと区別して扱う
 - [ ] AC41: 上限の中断の解除時刻を、応答の記録（`quotaLimits.resetsAt`）から取る。**固定の間隔で待たない**
-- [ ] AC42: 解除の後、**上の層が自分の直下だけを** `SendMessage` で続けさせる。president は supervisor（と自分が直接起動した worker）を、supervisor は自分の worker を再開する。
+- [ ] AC42: 解除の後、**上の層が自分の直下だけを** `SendMessage` で続けさせる。conductor は supervisor（と自分が直接起動した worker）を、supervisor は自分の worker を再開する。
   続けられないとき（`SendMessage` の結果が `"success": true` を持たない）の後段は層で分かれる。
-  **supervisor が続けられないときは president が**、`progress-tracking` の記録が指す工程の頭から新しい supervisor を起動する。
-  **worker が続けられないときはその起動元（supervisor、または president が直接起動した worker なら president）が**、同じ作業の worker をもう一度起動する
-- [ ] AC43: president も上限に当たり、解除時刻に自動の継続が入ったとき、**人間の入力なしに** AC42 の再開が行われる。
+  **supervisor が続けられないときは conductor が**、`progress-tracking` の記録が指す工程の頭から新しい supervisor を起動する。
+  **worker が続けられないときはその起動元（supervisor、または conductor が直接起動した worker なら conductor）が**、同じ作業の worker をもう一度起動する
+- [ ] AC43: conductor も上限に当たり、解除時刻に自動の継続が入ったとき、**人間の入力なしに** AC42 の再開が行われる。
   自動の継続が入ること自体は Claude Code の振る舞いで、この課題の条件にしない（未確認 U2）。条件にするのは、入った後の点検で再開が行われることである
 - [ ] AC44: 上の層が上限に当たらずに下の層だけが中断したとき、上の層は解除時刻を過ぎるまで再開しない。
-  待つ間に `/goal` の見回りが尽きても、解除時刻の後に president が目を覚ます経路がある
+  待つ間に `/goal` の見回りが尽きても、解除時刻の後に conductor が目を覚ます経路がある
 - [ ] AC45: 自動の継続が起きなかったとき、人間が送る 1 通（例:「続けて」）で AC42 と同じ手順が走ることが規約に書かれている。
   **この 1 通は承認ではなく、関門の数に数えない**
 - [ ] AC46: 複数の相手が同時に中断したとき、中断したすべての相手が再開される。完了していた相手は再開しない
-- [ ] AC47: president の context window が中断の通知を失っても（自動の要約の後など）、`--session` で中断した記録（終わり方 `rate_limit`）を
+- [ ] AC47: conductor の context window が中断の通知を失っても（自動の要約の後など）、`--session` で中断した記録（終わり方 `rate_limit`）を
   層ごと・起動元ごとに一覧でき、解除時刻が読める
 - [ ] AC48: 再開した相手は、既に済んだ外部への書き込み（Pull Request の作成・コメントの投稿・進行の記録）を重ねない
-- [ ] AC49: **落ちた層ごとの検知と再開の割り当てが、3 通りの表として規約にある**（worker が落ちた / supervisor が落ちた / president が落ちた）
+- [ ] AC49: **落ちた層ごとの検知と再開の割り当てが、3 通りの表として規約にある**（worker が落ちた / supervisor が落ちた / conductor が落ちた）
 
 ## 受け入れ条件（3 つとも）
 
-- [ ] AC60: `light` の課題 1 件を `/goal` で無人で通し、人間の入力が関門で求めた回数だけであることを、president のセッションの記録で確かめてある
+- [ ] AC60: `light` の課題 1 件を `/goal` で無人で通し、人間の入力が関門で求めた回数だけであることを、conductor のセッションの記録で確かめてある
 - [ ] AC61: AC60 の実行の測定を `skill-stats` で出し、**そのリポジトリでの粒度の妥当性**（実作業が固定費を下回る supervisor が無いか、
   worker を使いすぎの持ち場が無いか）を判定した結果が、#550 #657 のまとまりの振り返りに残っている。
   AC60 の `light` の課題は振り返りを通らないため、記録するのはこのまとまりの振り返りの工程である。
   この文書や #550 の本文の値とは突き合わせない
-- [ ] AC65: **`standard` の課題を含むまとまりを `/goal` で通し、2 つの関門での承認以外に人間の入力が無いまま、振り返りまで到達したことを president のセッションの記録で確かめてある。**
+- [ ] AC65: **`standard` の課題を含むまとまりを `/goal` で通し、2 つの関門での承認以外に人間の入力が無いまま、振り返りまで到達したことを conductor のセッションの記録で確かめてある。**
   記録で数えるのは、`AskUserQuestion` への応答以外の人間の入力が 0 件であることである。
   AC60 の `light` の 1 件では、設計 Pull Request の関門と振り返りの経路を通らない。この確認は、次のまとまりの配布の後に行う
 - [ ] AC62: 関門の数（2）と、承認の止まり方（`AskUserQuestion`）・提示物（`approval-request.md`）が変わっていない
@@ -259,7 +259,7 @@ working on when the limit was reached; do not repeat work that is already comple
 | 大項目 | 条件 |
 | --- | --- |
 | 性能・拡張性 | supervisor 1 つの最大充填が、モデルに依る目安を超えない運用を既定にする。**層を増やすと固定費の合計が増える**ことを受け入れ、増え方は AC36 の表で見る |
-| 運用・保守性 | 上限の中断と再開の回数が測定に残る。報告なしで続けさせた回数が president の報告に持ち場ごとに残る。見回りが尽きたことに人が気づけるよう、president は止まる前に現在地を 1 回出す（AC4b） |
+| 運用・保守性 | 上限の中断と再開の回数が測定に残る。報告なしで続けさせた回数が conductor の報告に持ち場ごとに残る。見回りが尽きたことに人が気づけるよう、conductor は止まる前に現在地を 1 回出す（AC4b） |
 | セキュリティ | 測定の部品は会話の記録をローカルで読むだけで、送信の経路を持たない。出力にパス・本文・プロンプトを含めない（#159）。振り返りのコメントへ載るのは AC30 が許す値だけである |
 | システム環境 | Claude Code の `/goal`・`Agent`・`SendMessage` を前提にする。深さは 2 までとする（前提 2）。自動の継続が無い版でも、AC45 の経路で工程が失われない |
 
@@ -303,10 +303,10 @@ working on when the limit was reached; do not repeat work that is already comple
 | --- | --- | --- | --- |
 | U1 | Skill の frontmatter が登録する `PreToolUse` の判定（`workflow-guard.sh`）が、サブエージェントの Bash にも掛かるか | 実機で supervisor から記録のコマンドを打ち、通過工程の控えに積まれるかを見る | 実装（A の Pull Request） |
 | U2 | 自動の継続が 5 時間の上限でも入るか。`/goal` の見回りが止まった後でも入るか | 発生した実行の記録を読む。発生しなければ AC45 の経路で運用する | リリース後テスト |
-| U3 | 背景の Bash の待ちを、数時間（週次の上限の解除まで）続けられるか | 実機で解除時刻まで待つ背景の実行を置き、終わりの通知で president が起きるかを見る | 実装（C の Pull Request） |
-| U4 | `SendMessage` による再開が、president のセッションを `--resume` で開き直した後も効くか | 実機で確かめる。効かなければ AC42 の後段（工程の頭から新しい supervisor）へ落とす | 実装（C の Pull Request） |
+| U3 | 背景の Bash の待ちを、数時間（週次の上限の解除まで）続けられるか | 実機で解除時刻まで待つ背景の実行を置き、終わりの通知で conductor が起きるかを見る | 実装（C の Pull Request） |
+| U4 | `SendMessage` による再開が、conductor のセッションを `--resume` で開き直した後も効くか | 実機で確かめる。効かなければ AC42 の後段（工程の頭から新しい supervisor）へ落とす | 実装（C の Pull Request） |
 | U5 | 層ごとにモデルを変えたとき、上限を共有しない場合があるか | `quotaLimits.rateLimitType` の値の種類を記録から集める | 実装（C の Pull Request） |
-| U6 | supervisor が落ちている間に worker が動き続けられるか（worker の再開を president が肩代わりせずに済むか） | 実機で、supervisor だけが 429 で落ちた実行の記録を読む | リリース後テスト |
+| U6 | supervisor が落ちている間に worker が動き続けられるか（worker の再開を conductor が肩代わりせずに済むか） | 実機で、supervisor だけが 429 で落ちた実行の記録を読む | リリース後テスト |
 | U7 | supervisor が自分の `agent_id` を環境から取れないこと（`CLAUDE_AGENT_ID` は存在しない。このサブエージェントの環境で確かめた）を前提に、**起動の結果に出る `agentId` を context window で持ち回る**形で足りるか | 実機で、worker を 3 つ起動した supervisor が全部を再開できるかを見る | 実装（C の Pull Request） |
 
 ## 用語
@@ -314,7 +314,7 @@ working on when the limit was reached; do not repeat work that is already comple
 | 語 | この文書での意味 |
 | --- | --- |
 | セッション | 会話を保持しているプロセス。1 つのセッションが 1 つの context window を持つ |
-| president | 人間と対話しているセッション。`/goal` を受け、supervisor を起動し、報告を受け取り、関門で人間に問う |
+| conductor | 人間と対話しているセッション。`/goal` を受け、supervisor を起動し、報告を受け取り、関門で人間に問う |
 | supervisor | 1 つの持ち場（連続する工程の束）を通すサブエージェント。工程の Skill を起動し、進行を記録し、worker を起動する |
 | worker | 1 つの作業を行うサブエージェント。終われば消え、supervisor には作業の報告だけが残る。別のサブエージェントを起動しない |
 | 持ち場 | supervisor 1 つが通す工程の束。`設計` / `実装` / `検査` / `取り込み` / `仕上げ` の 5 つを初期値にする |
@@ -326,10 +326,10 @@ working on when the limit was reached; do not repeat work that is already comple
 | 合成の応答 | API を呼ばずに Claude Code が記録へ書いた応答。`message.model` が `<synthetic>` |
 | 中断 | 層が API の失敗で途中で終わること。利用上限（429）による中断を**上限の中断**と呼ぶ |
 | 解除時刻 | 上限が解ける時刻。通知の文言と記録の `quotaLimits.resetsAt` が持つ |
-| 自動の継続 | 解除時刻に Claude Code が president へ積む入力（`origin.kind` が `auto-continuation`） |
+| 自動の継続 | 解除時刻に Claude Code が conductor へ積む入力（`origin.kind` が `auto-continuation`） |
 | 報告 | 下の層が最後に返す、項目の決まった結果。supervisor と worker で形が違う |
 
-**この用語は実装で触る規約の文書にも当てる**（AC16）。層の語は `president` / `supervisor` / `worker`、
+**この用語は実装で触る規約の文書にも当てる**（AC16）。層の語は `conductor` / `supervisor` / `worker`、
 量を指す語は `context window` と書く。`monitor.py` の文脈窓や窓口のように別のものを指す語は対象外である。
 
 ## 依頼（原文）
@@ -351,6 +351,8 @@ working on when the limit was reached; do not repeat work that is already comple
 >     → worker（作業実行者）
 >
 > 用語の置き換えではなく、**設計そのものの見直し**として扱ってください。層が 1 つ増えるため、責務の割り当て・報告の経路・測定・中断と再開のすべてを設計し直す必要があります。
+
+**最上位の層の名前は、この引用の後に `president` から `conductor` へ決め直された。** 引用は原文のまま残す。この文書の本文と表は `conductor` を使う。
 
 ### #550 の受け入れ条件（原文）
 
@@ -375,7 +377,7 @@ working on when the limit was reached; do not repeat work that is already comple
 | 原文 | この文書 |
 | --- | --- |
 | #550「2 つの関門以外で人間の入力を求めずに」 | AC1。**失敗で止まる場合**を足した（上限・続けさせる回数の超過は承認ではないが、人の判断が要る） |
-| #550「関門では親が `AskUserQuestion` で止まり」 | AC2。「親」は president に当たる。3 層のうち人間へ問えるのは president だけである |
+| #550「関門では親が `AskUserQuestion` で止まり」 | AC2。原文の「親」は conductor に当たる。3 層のうち人間へ問えるのは conductor だけである |
 | #550「6 項目が記録される」 | AC20〜AC26。**層・持ち場・深さ・終わり方・中断の回数**を足して 11 項目にした（3 層を分けるためと、#657 の中断を同じ記録で数えるため）。「記録される」は、会話の記録から**いつでも出せる**ことと読む（新しい保存先を作らない） |
 | #550「retrospective の出力に集計として現れる」 | AC29・AC33・AC35・AC36・AC37 |
 | #550「粒度の基準が値ではなく比で」 | AC12。**基準を当てる層は supervisor である**と決めた。worker は使い捨ての読解であり、実作業が固定費を下回ってよい。代わりに AC37 の印を置く |

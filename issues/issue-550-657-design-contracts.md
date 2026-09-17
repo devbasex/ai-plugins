@@ -1,7 +1,7 @@
 # #550 / #657: 契約（持ち場の表・起動の指示・報告の形・測定の出力）
 
 設計の本体と決定の理由は [issue-550-657-design.md](issue-550-657-design.md) にある。この文書は、実装とテストがそのまま写す形だけを持つ。
-用語（president / supervisor / worker / 持ち場 / context window）は、要求の文書の「用語」の表が持つ。
+用語（conductor / supervisor / worker / 持ち場 / context window）は、要求の文書の「用語」の表が持つ。
 
 ## 持ち場の表
 
@@ -9,7 +9,7 @@
 
 | 持ち場 | 通す工程（工程表の行） | 単位 | 始まりの条件 | 終わりの条件 | 返す関門 |
 | --- | --- | --- | --- | --- | --- |
-| 設計 | 要求と受け入れ条件 / 作業場所の用意 / 設計 / ドキュメント再構成 / ドキュメントレビュー（Pull Request を出して cross-review が収束するまで） | Pull Request | president がモードと課題を渡した | 設計 Pull Request の cross-review が収束した | 設計 Pull Request のマージ |
+| 設計 | 要求と受け入れ条件 / 作業場所の用意 / 設計 / ドキュメント再構成 / ドキュメントレビュー（Pull Request を出して cross-review が収束するまで） | Pull Request | conductor がモードと課題を渡した | 設計 Pull Request の cross-review が収束した | 設計 Pull Request のマージ |
 | 実装 | ドキュメントレビューの後片付け（`merged`）/ 作業場所の用意（実装用）/ 計画 / 実装。終わりに `pr` を Draft で 1 度呼ぶ（工程表の行は増やさない） | Pull Request | 設計 Pull Request がマージ済み | 実装を載せた Draft の Pull Request を出した | なし |
 | 検査 | 構造改善 / 実装レビュー / 完了判定 / Pull Request（Draft を外す） | Pull Request | Draft の Pull Request がある | 実装レビューが収束し、Pull Request をレビュー待ちにした | なし |
 | 取り込み | 確定仕様化 / 実装 Pull Request のマージ / 後片付け / 配布（検証まで） | まとまり | まとまりの Pull Request がすべて検査を終えた | 検証への配布が済んだ。本番への配布が要らないリポジトリでは配布が済んだ | 本番の系へ届く操作（要るときだけ） |
@@ -22,7 +22,7 @@
 | 経路 | release ブランチと Draft の release PR（Step 3） | 個別の Draft PR（Step 4） | 実装の持ち場の始まりの条件に足すもの |
 | --- | --- | --- | --- |
 | 1 本の Pull Request | 作らない | 実装の持ち場の終わりに `pr` を Draft で呼ぶ | なし |
-| 複数の Pull Request | president が、関門 1 の承認とマージの後、最初の実装の持ち場を起動する前に作る | 各実装の持ち場が、作業場所の用意の直後に作る（Step 4 の形。空のコミットで開く）。**終わりでは `pr` を呼ばず、その Draft へ push する** | release ブランチがある。起点ブランチは release ブランチ |
+| 複数の Pull Request | conductor が、関門 1 の承認とマージの後、最初の実装の持ち場を起動する前に作る | 各実装の持ち場が、作業場所の用意の直後に作る（Step 4 の形。空のコミットで開く）。**終わりでは `pr` を呼ばず、その Draft へ push する** | release ブランチがある。起点ブランチは release ブランチ |
 
 ### モードごとの組み方
 
@@ -41,27 +41,27 @@
 
 | 作らない持ち場 | 次の持ち場 | 置き換わった始まりの条件 |
 | --- | --- | --- |
-| 設計（`light` / 設計 Pull Request を分けない `legacy-refactor`） | 実装 | president がモードと課題を渡した。先頭のドキュメントレビューの後片付けは通らない |
+| 設計（`light` / 設計 Pull Request を分けない `legacy-refactor`） | 実装 | conductor がモードと課題を渡した。先頭のドキュメントレビューの後片付けは通らない |
 | 仕上げ（`light` / `operation` で当たる工程が無い） | — | 取り込みの持ち場の終わりが到達点になる |
 
 ### 語彙
 
 | 種類 | 値 |
 | --- | --- |
-| 層（`layer`） | `president` / `supervisor` / `worker` |
+| 層（`layer`） | `conductor` / `supervisor` / `worker` |
 | 持ち場（supervisor の `role`） | `設計` / `実装` / `検査` / `取り込み` / `仕上げ` |
 | 作業の種類（worker の `role`） | `調査` / `修正` / `検証` / `集計` |
 | どちらにも当たらないとき | `その他` |
 
 ## 起動の指示
 
-### president → supervisor
+### conductor → supervisor
 
 | 引数 | 値 |
 | --- | --- |
 | `description` | `<持ち場>: <課題番号を空白区切り>`（例 `設計: #550 #657`）。持ち場の後ろは半角の `:` と空白 1 つ |
 | `subagent_type` | 省く（`general-purpose`） |
-| `model` | 省く（president と同じ）。落とすのは決定 11 の 2 条件を両方満たす相手だけで、supervisor は満たさない |
+| `model` | 省く（conductor と同じ）。落とすのは決定 11 の 2 条件を両方満たす相手だけで、supervisor は満たさない |
 | `prompt` | 下の 8 項目と、守る規則 10 個 |
 
 `prompt` に必ず入れる項目:
@@ -70,7 +70,7 @@
 | --- | --- |
 | 持ち場 | 持ち場の名前と、通す工程の一覧（持ち場の表から写す） |
 | 課題 | 課題番号 |
-| モード | president が判定したモード |
+| モード | conductor が判定したモード |
 | 作業場所 | 作業ツリーのパスとブランチ（まだ無ければ「無し」） |
 | 前の持ち場の報告 | 直前の supervisor の `## 持ち場の報告` の本文をそのまま |
 | 承認 | 関門の承認を受けた後なら、承認した内容と承認した時刻。無ければ「無し」 |
@@ -86,7 +86,7 @@
 5. 外部へ書く前に、既に書いたものがあるかを確かめる（Pull Request・コメント・進行の記録）
 6. 範囲外の課題は `out-of-scope` で起票する
 7. **委譲してよい作業は worker へ出す。委譲しない 5 つ（モード判定・関門の判断・収束の判定・設計の決定と理由の記録・受け入れ条件の書き換え）は自分で行う**
-8. **worker の報告をそのまま president へ渡さない。** 持ち場の報告へ畳む
+8. **worker の報告をそのまま conductor へ渡さない。** 持ち場の報告へ畳む
 9. 最後の応答の末尾に `## 持ち場の報告` を置く
 10. モードを上げるべきだと分かったら、進めずに `結果: 止まった` で返す。`到達点` が置き直されていてその到達点に達したときは、関門を返さずに `結果: 完了`・`次の持ち場: 無し` で返す
 
@@ -134,7 +134,7 @@
 | 置き場所 | 長い出力のファイルの絶対パス | `無し` |
 | 次にすること | supervisor が続けて行うことの候補を 1 行 | `無し` |
 
-### supervisor → president（10 項目）
+### supervisor → conductor（10 項目）
 
 supervisor の最後の応答の**末尾**に置く。見出しの後ろに他の見出しを置かない。
 
@@ -166,22 +166,22 @@ supervisor の最後の応答の**末尾**に置く。見出しの後ろに他�
 | 提示物 | 絶対パス。`approval-request.md` の 2 層を持つ | `無し`（結果が関門でないとき） |
 | 理由 | 1 行 | `無し`（結果が止まったでないとき） |
 
-**president は、止まるときに「持ち場の一覧」を 1 回出す**（AC4b）。出す時点は、`AskUserQuestion` を出す前・失敗を報告する前・背景の待ちを起動して応答を終える前の 3 つである。
+**conductor は、止まるときに「持ち場の一覧」を 1 回出す**（AC4b）。出す時点は、`AskUserQuestion` を出す前・失敗を報告する前・背景の待ちを起動して応答を終える前の 3 つである。
 
-**president が見るのは、見出しの有無と `結果` の 2 つである。** 残りの項目は、次に何を渡すかを決めるときに読む。
+**conductor が見るのは、見出しの有無と `結果` の 2 つである。** 残りの項目は、次に何を渡すかを決めるときに読む。
 
-| 見出しの有無 | `結果` | president の動き |
+| 見出しの有無 | `結果` | conductor の動き |
 | --- | --- | --- |
 | 無い | — | `SendMessage` で続けさせる。同じ supervisor へ 3 回続けさせても報告が出なければ、4 回目は送らずに止まる |
 | ある | `完了` | `次の持ち場` を起動する。`無し` なら到達の報告。到達点を置き直していたときは、止まった理由と再開の手順を添える |
-| ある | `関門` | `提示物` を読み、`AskUserQuestion` で承認を求める。承認の後の動きは `関門` の値で決める。`設計 Pull Request のマージ` なら president がマージしてから `次の持ち場` を起動する。`本番の系へ届く操作` ならマージせずに `次の持ち場` を起動する（`operation` では設計の持ち場がこの値を返す）。president はモードや持ち場の名前から分岐しない |
+| ある | `関門` | `提示物` を読み、`AskUserQuestion` で承認を求める。承認の後の動きは `関門` の値で決める。`設計 Pull Request のマージ` なら conductor がマージしてから `次の持ち場` を起動する。`本番の系へ届く操作` ならマージせずに `次の持ち場` を起動する（`operation` では設計の持ち場がこの値を返す）。conductor はモードや持ち場の名前から分岐しない |
 | ある | `止まった` | `理由` を添えて利用者へ報告し、終える |
 
 **supervisor が worker の報告を見るときも同じ規則を使う。** 見出し（`## 作業の報告`）が無ければ `SendMessage` で 3 回まで続けさせ、`結果: 判断が要る` は supervisor が自分で判断する。
 
-## president の報告
+## conductor の報告
 
-president は到達したときと止まったときに、利用者への報告の末尾へ次の表を置く。**続けさせた回数は記録から見分けられないため、president が `SendMessage` を送るたびに持ち場ごとに数えて持つ。**
+conductor は到達したときと止まったときに、利用者への報告の末尾へ次の表を置く。**続けさせた回数は記録から見分けられないため、conductor が `SendMessage` を送るたびに持ち場ごとに数えて持つ。**
 
 ```markdown
 ## 持ち場の一覧
@@ -202,11 +202,11 @@ president は到達したときと止まったときに、利用者への報告�
 
 ## 中断の点検
 
-president は目を覚ますたびに 1 回行う（契機は設計文書の処理の流れ）。
+conductor は目を覚ますたびに 1 回行う（契機は設計文書の処理の流れ）。
 
 | 順 | 行うこと | 使うもの |
 | ---: | --- | --- |
-| 1 | 中断した supervisor と、president が直接起動した worker を一覧する | `python3 "$SCRIPTS/lib/transcript_agents.py" interrupted --session "$CLAUDE_CODE_SESSION_ID" --depth 1 --format json` |
+| 1 | 中断した supervisor と、conductor が直接起動した worker を一覧する | `python3 "$SCRIPTS/lib/transcript_agents.py" interrupted --session "$CLAUDE_CODE_SESSION_ID" --depth 1 --format json` |
 | 2 | `resets_passed` が真の記録ごとに `SendMessage` で続けさせる。supervisor への文面は「利用上限で中断していた。解除されたので続ける。書く前に既に書いたものを確かめる。自分の worker の中断も点検する」、直接起動した worker への文面は同じ作業を続ける指示にする | `agent_id` |
 | 3 | 2 が失敗した相手の後段は層で分かれる。**supervisor** は `最後に記録した工程`（進行の記録）の頭から、同じ持ち場の名前で起動し直す。**起動の指示に旧 supervisor の `agent_id` を渡し、新しい supervisor は最初に `interrupted --layer worker --parent <旧 agent_id>` で旧 worker を点検する**（残っていれば、同じ作業をやり直させず、書き込みが済んでいるかだけを確かめる）。**直接起動した worker** は、同じ作業の起動の指示をもう一度組んで起動する。**失敗とは、`SendMessage` の結果が `"success": true` を持たないこと**である | issue の `## 進行` |
 | 4 | まだ過ぎていない相手（supervisor でも、直接起動した worker でも）があれば、待ちを背景で起動して応答を終える | `python3 "$SCRIPTS/lib/transcript_agents.py" wait-reset --session "$CLAUDE_CODE_SESSION_ID" --depth 1`（`run_in_background`） |
@@ -221,9 +221,9 @@ president は目を覚ますたびに 1 回行う（契機は設計文書の処�
 | 2 | `resets_passed` が真の worker を `SendMessage` で続けさせる | `agent_id` |
 | 3 | 続けられない worker は、同じ作業をもう一度 `Agent` で起動する（作業は 1 つに絞ってあるため、やり直しの費用は持ち場より小さい）。**起動の指示に「旧 worker が外部へ書いたもの（push・コメント・Pull Request）を先に確かめ、済んでいる分はやり直さない」を入れる**（AC48） | 起動の指示を作り直す |
 
-**president が再開するのは自分の直下だけである**（決定 19）。supervisor の下の worker は、再開した supervisor が点検する。president が supervisor の下の worker を直接再開しない。
+**conductor が再開するのは自分の直下だけである**（決定 19）。supervisor の下の worker は、再開した supervisor が点検する。conductor が supervisor の下の worker を直接再開しない。
 
-`CLAUDE_CODE_SESSION_ID` は、president でもサブエージェントでも president のセッションの ID を持つ（このサブエージェントの環境で確かめた）。取れないときは、`Agent` の起動の結果に出る `output_file` のパスの `<セッション>` の部分を渡す。
+`CLAUDE_CODE_SESSION_ID` は、conductor でもサブエージェントでも conductor のセッションの ID を持つ（このサブエージェントの環境で確かめた）。取れないときは、`Agent` の起動の結果に出る `output_file` のパスの `<セッション>` の部分を渡す。
 
 ## 記録を読む部品（`transcript_agents.py`）
 
@@ -232,7 +232,7 @@ president は目を覚ますたびに 1 回行う（契機は設計文書の処�
 | コマンド | 引数 | 出力 | 終了コード |
 | --- | --- | --- | --- |
 | `list` | `--session <ID>`（必須、繰り返し可）/ `--layer <層>`（省くと全層）/ `--format md\|json` | そのセッションの 3 層すべての `AgentRecord` | 0。記録が 1 件も無ければ 0 で空の一覧と理由 1 行 |
-| `interrupted` | `--session <ID>` / `--layer <層>` / `--depth <数>` / `--agent <agent_id>`（繰り返し可）/ `--parent <agent_id>` / `--now <ISO 8601>`（テスト用）/ `--format md\|json` | `ending` が `rate_limit` の記録だけ。`resets_passed`（真偽）を足す。`--depth 1` は president の直下（supervisor と直接起動した worker）を返す | 0 |
+| `interrupted` | `--session <ID>` / `--layer <層>` / `--depth <数>` / `--agent <agent_id>`（繰り返し可）/ `--parent <agent_id>` / `--now <ISO 8601>`（テスト用）/ `--format md\|json` | `ending` が `rate_limit` の記録だけ。`resets_passed`（真偽）を足す。`--depth 1` は conductor の直下（supervisor と直接起動した worker）を返す | 0 |
 | `wait-reset` | `--session <ID>` / `--layer <層>` / `--depth <数>` / `--margin <秒>`（既定 60）/ `--max-sleep <秒>`（既定なし） | 眠った秒数と、起きた時点の中断した記録の数を 1 行。**眠るのは、まだ来ていない解除時刻のうち最も早いもの + `--margin` まで**である | 0 = 解除時刻を過ぎた。3 = `--max-sleep` で区切った（まだ解除前）。2 = 引数の誤り |
 
 **読めない行・壊れたファイルは飛ばし、飛ばした件数を標準エラーへ 1 行出す。** 終了コードは変えない。引数の誤りだけが 2 を返す。
@@ -241,21 +241,21 @@ president は目を覚ますたびに 1 回行う（契機は設計文書の処�
 
 | 対象 | パス |
 | --- | --- |
-| president | `~/.claude/projects/*/<セッション>.jsonl` |
+| conductor | `~/.claude/projects/*/<セッション>.jsonl` |
 | supervisor / worker | `~/.claude/projects/*/<セッション>/subagents/agent-<ID>.jsonl` と `agent-<ID>.meta.json` |
 
 `~/.claude` は環境変数 `CLAUDE_CONFIG_DIR` があればそちらを使う。
 
-**起動元は `toolUseId` でたどる。** `.meta.json` の `toolUseId` と同じ id の `tool_use`（`name` が `Agent`）を含む記録が起動元である。実測（`95dd816c…` のセッション、19 件）で、深さ 1 の 4 件は president の記録に、深さ 2 の 15 件はそれぞれの supervisor の記録に当たった。`--parent` の絞り込みと `role_usage` の集計はこの値を使う。**supervisor が自分の worker を絞るときは `--agent` を使う**（自分の `agent_id` を環境から取れないため）。
+**起動元は `toolUseId` でたどる。** `.meta.json` の `toolUseId` と同じ id の `tool_use`（`name` が `Agent`）を含む記録が起動元である。実測（`95dd816c…` のセッション、19 件）で、深さ 1 の 4 件は conductor の記録に、深さ 2 の 15 件はそれぞれの supervisor の記録に当たった。`--parent` の絞り込みと `role_usage` の集計はこの値を使う。**supervisor が自分の worker を絞るときは `--agent` を使う**（自分の `agent_id` を環境から取れないため）。
 
 ### `AgentRecord` の値
 
 | キー | 型 | 取り方 |
 | --- | --- | --- |
-| `layer` | 文字列 | 深さと `description` から決める。0 = `president`。2 以上 = `worker`。1 は、先頭語が作業の種類の語彙にあれば `worker`、それ以外は `supervisor` |
-| `role` | 文字列 | president は `-`。supervisor は `.meta.json` の `description` の最初の `: ` より前が**持ち場**の語彙にあればその値。worker は同じ位置が**作業の種類**の語彙にあればその値。当たらなければ `その他` |
-| `agent_id` | 文字列 / null | ファイル名の `agent-<ID>`。president は null |
-| `depth` | 整数 | president 0。ほかは `spawnDepth` |
+| `layer` | 文字列 | 深さと `description` から決める。0 = `conductor`。2 以上 = `worker`。1 は、先頭語が作業の種類の語彙にあれば `worker`、それ以外は `supervisor` |
+| `role` | 文字列 | conductor は `-`。supervisor は `.meta.json` の `description` の最初の `: ` より前が**持ち場**の語彙にあればその値。worker は同じ位置が**作業の種類**の語彙にあればその値。当たらなければ `その他` |
+| `agent_id` | 文字列 / null | ファイル名の `agent-<ID>`。conductor は null |
+| `depth` | 整数 | conductor 0。ほかは `spawnDepth` |
 | `model` | 文字列 / null | 合成でない応答の `message.model` のうち最も多いもの |
 | `fixed` | 整数 / null | 合成でない最初の応答の `input_tokens + cache_read_input_tokens + cache_creation_input_tokens` |
 | `peak` | 整数 / null | 合成でない応答の同じ合計の最大 |
@@ -267,7 +267,7 @@ president は目を覚ますたびに 1 回行う（契機は設計文書の処�
 | `interruptions` | 整数 | `apiErrorStatus` が 429 の合成の応答のうち、後ろに合成でない応答が続くものの数（上限の中断から続けた回数）。500 / 529 / 認証の失敗は数えない |
 | `resets_at` | ISO 8601 / null | `ending` が `rate_limit` のとき、最後の合成の応答の `quotaLimits.resetsAt` |
 | `rate_limit_type` | 文字列 / null | 同じ応答の `quotaLimits.rateLimitType` |
-| `parent_agent_id` | 文字列 / null | **起動元**。`.meta.json` の `toolUseId` と同じ id を持つ `tool_use`（`name` が `Agent`）を含む記録の `agent_id`。president の記録に見つかったときと、見つからないときは null |
+| `parent_agent_id` | 文字列 / null | **起動元**。`.meta.json` の `toolUseId` と同じ id を持つ `tool_use`（`name` が `Agent`）を含む記録の `agent_id`。conductor の記録に見つかったときと、見つからないときは null |
 
 `fixed` / `peak` / `work` / `model` は、合成でない応答が 1 件も無いとき null になる。
 
@@ -289,7 +289,7 @@ president は目を覚ますたびに 1 回行う（契機は設計文書の処�
 | 引数 | 意味 | 既定 |
 | --- | --- | --- |
 | `--agents` | 3 層の測定を出す。付けないと従来の Skill の統計だけを出す | 付けない |
-| `--session <ID>` | セッションに絞る。繰り返して複数を渡せる。**`--agents` を付けないと、Skill の統計をそのセッションの president の記録（`<セッション>.jsonl`）だけで数える** | 絞らない |
+| `--session <ID>` | セッションに絞る。繰り返して複数を渡せる。**`--agents` を付けないと、Skill の統計をそのセッションの conductor の記録（`<セッション>.jsonl`）だけで数える** | 絞らない |
 | `--layer <層>` | `--agents` の出力を 1 つの層に絞る | 全層 |
 | `--from` / `--to` / `--days` / `--project` | 従来どおり | 従来どおり |
 | `--window-limit <トークン>` | 割る候補の印を付ける最大充填の目安 | `context-window.md` の「遅くとも切る」値（200000）。**モデルに依る値であり、`context-window.md` の目安が書き換わったときはこの既定も揃える。** 一致はテストが固定する |
@@ -321,7 +321,7 @@ president は目を覚ますたびに 1 回行う（契機は設計文書の処�
 
 ```text
 | 層 | 件数 | 固定費の合計 | 実作業の合計 | 総消費（固定費 + 実作業） |
-| president | 1 | … | … | … |
+| conductor | 1 | … | … | … |
 | supervisor | 5 | … | … | … |
 | worker | 12 | … | … | … |
 | 合計 | 18 | … | … | … |
@@ -348,7 +348,7 @@ president は目を覚ますたびに 1 回行う（契機は設計文書の処�
 
 ## 振り返りの記録へ足す表
 
-`retrospective` の記録の雛形の「何が起きたか」の後ろに置く。値は `skill-stats --agents --session <president のセッション>` の **2 つ目・3 つ目・4 つ目の表**（束ね・層ごとの合計・持ち場ごとの worker の使い方）をそのまま貼る。
+`retrospective` の記録の雛形の「何が起きたか」の後ろに置く。値は `skill-stats --agents --session <conductor のセッション>` の **2 つ目・3 つ目・4 つ目の表**（束ね・層ごとの合計・持ち場ごとの worker の使い方）をそのまま貼る。
 
 ```markdown
 ## context window の大きさ
