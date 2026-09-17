@@ -261,7 +261,7 @@ G2（#540 #541 #621）の実行計画は「担当 1 本」をホストのメモ�
 | `scripts/lib/README.md` | 変更 | 置いてあるものの表の 1 行 |
 | `skill-stats/scripts/skill-stats.py` | 変更 | `--agents` / `--session` / `--window-limit` と、層・持ち場・モデルの組ごとの束ね、層ごとの合計 |
 | `skill-stats/SKILL.md` | 変更 | 3 層の測定の使い方と集計項目 |
-| `retrospective/SKILL.md` | 変更 | 手順 2 の観点「context window」、記録の雛形の 2 つの表 |
+| `retrospective/SKILL.md` | 変更 | 手順 2 の観点「context window」、記録の雛形の 3 つの表（束ね・層ごとの合計・持ち場ごとの worker の使い方） |
 
 ```mermaid
 graph TD
@@ -465,7 +465,7 @@ president 自身が上限に当たっているときは、B より前で応答�
 | AC34 | `test_transcript_agents.py`: `socket` を塞いだ状態でコマンドが終了コード 0 で終わる |
 | AC40・AC41・AC46・AC47・AC49 | `test_transcript_agents.py`: 中断した supervisor が 2 本・中断した worker が 1 本・完了した記録が 1 本のセッションで、`interrupted --layer supervisor` が supervisor の 2 本だけを `resets_at` 付きで返し、`--layer worker` が worker の 1 本を返す。429 の後に `user` の行が追記された記録は `in_progress` になり、どちらにも現れない。`test_agent_layers_doc.py` で 3 通りの表の存在を固定する |
 | AC42・AC43・AC45・AC48 | 自動の継続が入った後の点検は決定的である（`interrupted` の出力と `SendMessage` の結果だけで分岐する）。`test_transcript_agents.py` で、自動の継続の行（`origin.kind` が `auto-continuation`）が追記された president の記録から `interrupted` が解除済みを返すことを固定する。`test_agent_layers_doc.py` で点検の契機と手順を固定する。実際の再開はリリース後テストで記録を読む |
-| AC44 | `test_transcript_agents.py`: `wait-reset` が解除時刻を過ぎていれば直ちに終わり、未来の時刻なら差の秒数だけ眠る。解除時刻の違う 2 件では早い方まで眠る（眠る関数を差し替えて秒数を見る） |
+| AC44 | `test_transcript_agents.py`: `wait-reset --depth 1` が解除時刻を過ぎていれば直ちに終わり、未来の時刻なら差の秒数だけ眠る。解除時刻の違う 2 件では早い方まで眠る。**president が直接起動した worker だけが中断しているときも眠る**（眠る関数を差し替えて秒数を見る） |
 | AC61 | #550 #657 のまとまりの振り返りの記録に、AC60 の実行の 2 つの表と判断があること |
 | AC64 | `test_agent_layers_doc.py`: 並行の本数を数える単位が supervisor であることと、同時に動かす worker の既定が書かれていること |
 | AC63 | `python3 scripts/check-skill-frontmatter.py`・`uv run --with pytest pytest scripts/tests plugins/ndf -q`・`python3 scripts/check-doc-line-limit.py` |

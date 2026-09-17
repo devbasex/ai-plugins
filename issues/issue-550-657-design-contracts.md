@@ -207,7 +207,7 @@ president は目を覚ますたびに 1 回行う（契機は設計文書の処�
 | 1 | 中断した supervisor と、president が直接起動した worker を一覧する | `python3 "$SCRIPTS/lib/transcript_agents.py" interrupted --session "$CLAUDE_CODE_SESSION_ID" --depth 1 --format json` |
 | 2 | `resets_passed` が真の記録ごとに `SendMessage` で続けさせる。supervisor への文面は「利用上限で中断していた。解除されたので続ける。書く前に既に書いたものを確かめる。自分の worker の中断も点検する」、直接起動した worker への文面は同じ作業を続ける指示にする | `agent_id` |
 | 3 | 2 が失敗した相手の後段は層で分かれる。**supervisor** は `最後に記録した工程`（進行の記録）の頭から、同じ持ち場の名前で起動し直す。**直接起動した worker** は、同じ作業の起動の指示をもう一度組んで起動する。**失敗とは、`SendMessage` の結果が `"success": true` を持たないこと**である | issue の `## 進行` |
-| 4 | まだ過ぎていない supervisor があれば、待ちを背景で起動して応答を終える | `python3 "$SCRIPTS/lib/transcript_agents.py" wait-reset --session "$CLAUDE_CODE_SESSION_ID" --layer supervisor`（`run_in_background`） |
+| 4 | まだ過ぎていない相手（supervisor でも、直接起動した worker でも）があれば、待ちを背景で起動して応答を終える | `python3 "$SCRIPTS/lib/transcript_agents.py" wait-reset --session "$CLAUDE_CODE_SESSION_ID" --depth 1`（`run_in_background`） |
 
 **手順 4 は `--max-sleep` を付けない。** 背景の待ちを数時間続けられないと分かったとき（設計文書の未確認 U3）だけ、`--max-sleep 540` を付ける。そのときは終了コード 3 で起きるたびに手順 1 と手順 4 だけを行い、解除前に `SendMessage` しない。
 
@@ -231,7 +231,7 @@ president は目を覚ますたびに 1 回行う（契機は設計文書の処�
 | --- | --- | --- | --- |
 | `list` | `--session <ID>`（必須、繰り返し可）/ `--layer <層>`（省くと全層）/ `--format md\|json` | そのセッションの 3 層すべての `AgentRecord` | 0。記録が 1 件も無ければ 0 で空の一覧と理由 1 行 |
 | `interrupted` | `--session <ID>` / `--layer <層>` / `--depth <数>` / `--parent <agent_id>` / `--now <ISO 8601>`（テスト用）/ `--format md\|json` | `ending` が `rate_limit` の記録だけ。`resets_passed`（真偽）を足す。`--depth 1` は president の直下（supervisor と直接起動した worker）を返す | 0 |
-| `wait-reset` | `--session <ID>` / `--layer <層>` / `--margin <秒>`（既定 60）/ `--max-sleep <秒>`（既定なし） | 眠った秒数と、起きた時点の中断した記録の数を 1 行。**眠るのは、まだ来ていない解除時刻のうち最も早いもの + `--margin` まで**である | 0 = 解除時刻を過ぎた。3 = `--max-sleep` で区切った（まだ解除前）。2 = 引数の誤り |
+| `wait-reset` | `--session <ID>` / `--layer <層>` / `--depth <数>` / `--margin <秒>`（既定 60）/ `--max-sleep <秒>`（既定なし） | 眠った秒数と、起きた時点の中断した記録の数を 1 行。**眠るのは、まだ来ていない解除時刻のうち最も早いもの + `--margin` まで**である | 0 = 解除時刻を過ぎた。3 = `--max-sleep` で区切った（まだ解除前）。2 = 引数の誤り |
 
 **読めない行・壊れたファイルは飛ばし、飛ばした件数を標準エラーへ 1 行出す。** 終了コードは変えない。引数の誤りだけが 2 を返す。
 

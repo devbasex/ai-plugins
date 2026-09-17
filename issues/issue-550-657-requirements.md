@@ -241,7 +241,8 @@ working on when the limit was reached; do not repeat work that is already comple
   AC60 の `light` の課題は振り返りを通らないため、記録するのはこのまとまりの振り返りの工程である。
   この文書や #550 の本文の値とは突き合わせない
 - [ ] AC62: 関門の数（2）と、承認の止まり方（`AskUserQuestion`）・提示物（`approval-request.md`）が変わっていない
-- [ ] AC63: `python3 scripts/check-skill-frontmatter.py` と、`uv run --with pytest pytest scripts/tests plugins/ndf -q` が通る
+- [ ] AC63: `python3 scripts/check-skill-frontmatter.py`、`python3 scripts/check-doc-line-limit.py`、
+  `uv run --with pytest pytest scripts/tests plugins/ndf -q` が通る
 - [ ] AC64: 並行の本数を数える単位が supervisor（1 本 = 1 つの作業ツリー）であることが規約に書かれ、
   同時に走る worker が、その本数の見込み（G2 の 1 本あたりのメモリ）の中に収まるように既定が決まっている
 
