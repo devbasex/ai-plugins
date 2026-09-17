@@ -189,7 +189,7 @@ Claude Code 2.1.273 は、API の失敗で応答が終わったときに `StopFa
 
 | 要素 | 新設 / 変更 | 責務 |
 | --- | --- | --- |
-| `development-workflow/references/stage-windows.md` | 新設 | 窓の表・親の責務・起動の指示・報告の形・続けさせる回数・モデルの基準・中断と再開・到達点の置き直し |
+| `development-workflow/references/stage-windows.md` | 新設 | 窓の表・親の責務・起動の指示・報告の形・続けさせる回数・モデルの基準・中断と再開・到達点の置き直し。**500 行以下に収める**（`check-doc-line-limit.py`）。超えるときは中断と再開を `stage-interruptions.md` へ分ける |
 | `development-workflow/SKILL.md` の「`/goal` の引数として呼ばれたとき」 | 変更 | 窓へ出すことと参照先。到達点の置き直しを移した後の入口 |
 | `development-workflow/SKILL.md` の「参照」 | 変更 | `stage-windows.md` の 1 行 |
 | `development-workflow/references/context-window.md` | 変更 | 比の基準、モデルに依る目安とリポジトリに依る固定費の区別、窓の運転への参照 |
@@ -378,12 +378,12 @@ flowchart TD
 | AC13 | 同上: `context-window.md` に「モデルに依る」と「リポジトリに依る」の両方の語と、比の基準の文があること。`skill-stats` の `--window-limit` の既定値が `context-window.md` の「遅くとも N 万で切る」の N × 10000 と一致すること（片方だけ書き換わったら落ちる） |
 | AC20〜AC25・AC27・AC31 | `test_transcript_windows.py`: フィクスチャ（重複行 3 行・先頭の合成の応答・429 で終わる記録・続けて完了した記録・孫・壊れた行）で各列の値を固定する |
 | AC26・AC30 | 同上: `description` が窓の名前で始まるもの・始まらないもの・`:` の後ろに課題番号を持つもの。出力の JSON に `description` の後ろ半分・パス・本文が含まれないこと |
-| AC21・AC28・AC29・AC32・AC35 | `test_windows_report.py`: 親の行、応答 3 回未満の除外件数、束ねる候補（関門を返す窓には付かない）と割る候補の印、固定費の違う 2 セッションを渡しても判定が記録ごとの比で決まること、`--windows` を付けない既定の出力が変わらないこと（既定の出力の見出し行の一致） |
+| AC21・AC28・AC29・AC32・AC35 | `test_windows_report.py`: 親の行、同じ窓の名前でモデルの違う記録が別の行になること、応答 3 回未満の除外件数、束ねる候補（関門を返す窓には付かない）と割る候補の印、固定費の違う 2 セッションを渡しても判定が記録ごとの比で決まること、`--windows` を付けない既定の出力が変わらないこと（既定の出力の見出し行の一致） |
 | AC33 | `test_windows_section.py`: 手順 2 の表に「窓」の行、雛形に窓の表があること |
 | AC34 | `test_transcript_windows.py`: `socket` を塞いだ状態でコマンドが終了コード 0 で終わる |
 | AC40・AC41・AC46・AC47 | `test_transcript_windows.py`: 中断した窓が 2 本・完了した窓が 1 本のセッションで、`interrupted` が 2 本だけを `resets_at` 付きで返す。429 の後に `user` の行が追記された窓は `in_progress` になり、`interrupted` に現れない |
 | AC44 | 同上: `wait-reset` が解除時刻を過ぎていれば直ちに終わり、未来の時刻なら差の秒数だけ眠る。解除時刻の違う 2 つの窓では、早い方の時刻まで眠る（眠る関数を差し替えて秒数を見る） |
-| AC42・AC43・AC45・AC48 | `test_stage_windows_doc.py` で手順の存在を固定し、実際の再開はリリース後テストで発生した実行の記録を読む。発生しなければ未確認として残す |
+| AC42・AC43・AC45・AC48 | 自動の継続が入った後の点検は決定的である（`interrupted` の出力と `SendMessage` の結果だけで分岐する）。`test_transcript_windows.py` で、自動の継続の行（`origin.kind` が `auto-continuation`）が追記された親の記録と 429 で止まった窓の記録から、`interrupted` が解除済みの窓を返すことを固定する。`test_stage_windows_doc.py` で、点検の契機に自動の継続・人の 1 通・待ちの終わりが並ぶことと手順 1〜4 を固定する。自動の継続の発火そのもの（U2）と実際の再開は、リリース後テストで発生した実行の記録を読む |
 | AC61 | #550 #657 のまとまりの振り返り（このまとまり自体は `standard` で、振り返りの工程を通る）の記録に、AC60 の実行の窓の表と判断があること |
 | AC63 | `python3 scripts/check-skill-frontmatter.py`・`uv run --with pytest pytest scripts/tests plugins/ndf -q`・`python3 scripts/check-doc-line-limit.py` |
 
