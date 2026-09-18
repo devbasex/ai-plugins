@@ -1155,3 +1155,19 @@ def test_broken_scope_imports_shape_exits_two(tmp_path):
         "user": [{"path": str(tmp_path / "home"), "imports": {"CLAUDE.md": 1}}]}})
     proc = run(root)
     assert proc.returncode == 2, proc.stdout + proc.stderr
+
+
+@pytest.mark.parametrize("value", [[123], ["CLAUDE.md", None], [{"a": 1}]])
+def test_non_string_import_syntax_exits_two(tmp_path, value):
+    root = make_repo(tmp_path, {"CLAUDE.md": "# c\n"})
+    declare(root, {"version": 1, "import_syntax": value})
+    proc = run(root)
+    assert proc.returncode == 2, proc.stdout + proc.stderr
+
+
+@pytest.mark.parametrize("value", [[123], ["AGENTS.md", None]])
+def test_non_string_files_exits_two(tmp_path, value):
+    root = make_repo(tmp_path, {"CLAUDE.md": "# c\n"})
+    declare(root, {"version": 1, "files": value})
+    proc = run(root)
+    assert proc.returncode == 2, proc.stdout + proc.stderr

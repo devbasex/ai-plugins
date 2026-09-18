@@ -200,6 +200,8 @@ def _populate_declaration(raw: dict) -> Declaration:
     decl.budget = _typed(raw, "budget", dict, None)
     decl.scopes = _typed(raw, "scopes", dict, {})
     decl.import_syntax = _typed(raw, "import_syntax", list, decl.import_syntax)
+    if any(not isinstance(name, str) for name in decl.import_syntax):
+        raise CheckError("宣言の import_syntax は文字列の配列である")
     decl.reviewed_at = _typed(raw, "reviewed_at", str, None)
     return decl
 
