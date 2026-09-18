@@ -341,6 +341,69 @@ def test_the_target_reset_table_maps_results_to_targets(layers: str) -> None:
     assert rows["判定できない"] == "ゴール条件が指す工程まで進み、マージが拒否された時点で置き直す"
 
 
+# ---------- 報告から conductor の次動作への対応表（AC4・AC5） ----------
+
+def _conductor_action_rows(layers: str) -> dict[tuple[str, str], str]:
+    """「conductor が見るのは、…」の表を (見出しの有無, 結果) → 動き で読み取る。"""
+    section = layers.split("conductor が見るのは、見出しの有無と", 1)[1]
+    section = section.split("\n**supervisor が worker", 1)[0]
+    rows: dict[tuple[str, str], str] = {}
+    for line in section.splitlines():
+        if not line.startswith("|"):
+            continue
+        parts = [cell.strip() for cell in line.split("|")[1:-1]]
+        if len(parts) != 3:
+            continue
+        if parts[0] in ("見出しの有無", "---"):
+            continue
+        rows[(parts[0], parts[1])] = parts[2]
+    return rows
+
+
+def test_the_conductor_action_table_covers_the_four_results(layers: str) -> None:
+    """見出し無し・完了・関門・止まったの 4 入力が表にそろっている。"""
+    rows = _conductor_action_rows(layers)
+    assert set(rows.keys()) == {
+        ("無い", "—"),
+        ("ある", "`完了`"),
+        ("ある", "`関門`"),
+        ("ある", "`止まった`"),
+    }
+
+
+def test_the_conductor_resends_when_the_heading_is_missing(layers: str) -> None:
+    """見出しが無いときは SendMessage で続けさせる現状を固定する。"""
+    rows = _conductor_action_rows(layers)
+    assert rows[("無い", "—")] == (
+        "`SendMessage` で続けさせる（下の「報告が無いまま終わったとき」）")
+
+
+def test_the_conductor_launches_the_next_post_on_done(layers: str) -> None:
+    """完了では次の持ち場を起動し、無しなら到達の報告に至る現状を固定する。"""
+    rows = _conductor_action_rows(layers)
+    assert rows[("ある", "`完了`")] == (
+        "`次の持ち場` を起動する。`無し` なら到達の報告")
+
+
+def test_the_conductor_reports_and_ends_when_stopped(layers: str) -> None:
+    """止まったでは理由を添えて利用者へ報告し終える現状を固定する。"""
+    rows = _conductor_action_rows(layers)
+    assert rows[("ある", "`止まった`")] == "`理由` を添えて利用者へ報告し、終える"
+
+
+def test_the_gate_branches_on_the_gate_value_not_the_mode(layers: str) -> None:
+    """関門では設計 Pull Request のマージと本番操作の二経路が関門値で分かれる。"""
+    action = _conductor_action_rows(layers)[("ある", "`関門`")]
+    assert "`AskUserQuestion` で承認を求める" in action
+    # 設計 Pull Request のマージは conductor がマージしてから次の持ち場を起動する
+    assert ("`設計 Pull Request のマージ` なら conductor がマージしてから "
+            "`次の持ち場` を起動する") in action
+    # 本番の系へ届く操作はマージせずに次の持ち場を起動する
+    assert ("`本番の系へ届く操作` ならマージせずに `次の持ち場` を起動する") in action
+    # 分岐の基準はモード名でも持ち場の名前でもなく、関門値である
+    assert "モードや持ち場の名前から分岐しない" in action
+
+
 # ---------- AC13: モデルに依る目安とリポジトリに依る固定費 ----------
 
 def test_the_window_doc_separates_the_model_guideline_from_the_repository_cost(window: str) -> None:
