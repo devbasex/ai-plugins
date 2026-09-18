@@ -22,10 +22,22 @@ import json
 import os
 import pathlib
 import re
+import statistics
 import sys
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from typing import Iterable
+
+# 会話の記録を層の単位で読む部品は共通層にある（#550 の決定 13）。Kiro CLI が Skill を
+# symlink にするため、`.resolve()` を通してからプラグインルートへ登る（`scripts/lib/README.md`）。
+sys.path.insert(
+    0, str(pathlib.Path(__file__).resolve().parents[3] / "scripts" / "lib"),
+)
+import transcript_agents  # noqa: E402
+
+# 割る候補の印を付ける目安。`development-workflow/references/context-window.md` の
+# 「遅くとも切る」値と揃える。**モデルに依る値であり、あの文書が書き換わったら揃え直す。**
+DEFAULT_WINDOW_LIMIT = 200000
 
 
 def plugin_root_default() -> pathlib.Path:
@@ -56,7 +68,7 @@ def iter_transcripts(
 
     Priority: explicit --from/--to > --days (if neither given and days>0, use days).
     """
-    root = pathlib.Path.home() / ".claude" / "projects"
+    root = transcript_agents.config_root() / "projects"
     if not root.exists():
         return
 
@@ -485,6 +497,201 @@ def format_markdown(rows: list[dict], total: dict, heading: str | None = None) -
     return "\n".join(lines)
 
 
+# ---------- 3 層の context window の測定（#550 の AC20〜AC37） ----------
+
+_LAYER_ORDER = {"conductor": 0, "supervisor": 1, "worker": 2}
+_ROLE_ORDER = {
+    name: i for i, name in enumerate(
+        ("-",) + transcript_agents.POSTS + transcript_agents.TASKS
+        + (transcript_agents.OTHER,)
+    )
+}
+
+
+def _order(layer: str, role: str) -> tuple[int, int, str]:
+    return (_LAYER_ORDER.get(layer, 9), _ROLE_ORDER.get(role, 9), role)
+
+
+def _median(values: list[int]) -> int:
+    """中央値。**分布の目安として読む列であり、判定には使わない**（決定 16）。"""
+    return int(round(statistics.median(values))) if values else 0
+
+
+def measured_records(records: list) -> list:
+    """束ねの表に載せる記録。応答が 3 に満たないものはここからだけ外す（AC28）。"""
+    return [r for r in records if r.responses >= 3 and r.fixed is not None]
+
+
+def summarize_agents(records: list, window_limit: int) -> tuple[list[dict], int]:
+    """層と持ち場（worker は作業の種類）とモデルの組ごとに束ねる（AC29）。"""
+    kept = measured_records(records)
+    groups: dict[tuple[str, str, str], list] = defaultdict(list)
+    for r in kept:
+        groups[(r.layer, r.role, r.model or "-")].append(r)
+
+    rows: list[dict] = []
+    for (layer, role, model), items in groups.items():
+        below = sum(1 for r in items if r.work < r.fixed)
+        peak_max = max(r.peak for r in items)
+        marks: list[str] = []
+        # **束ねる候補は supervisor の行にだけ付く。** 設計の持ち場は、作るときはどの
+        # モードでも必ず関門を返すため対象にしない（契約の印の表）。
+        if layer == "supervisor" and role != "設計" and below > len(items) / 2:
+            marks.append("束ねる候補")
+        if peak_max > window_limit:
+            marks.append("割る候補")
+        rows.append({
+            "layer": layer,
+            "role": role,
+            "model": model,
+            "records": len(items),
+            "fixed_median": _median([r.fixed for r in items]),
+            "work_median": _median([r.work for r in items]),
+            "work_below_fixed": below,
+            "peak_max": peak_max,
+            "mark": "・".join(marks),
+        })
+    rows.sort(key=lambda r: (_order(r["layer"], r["role"]), r["model"]))
+    return rows, len(records) - len(kept)
+
+
+def layer_totals(records: list) -> tuple[list[dict], dict]:
+    """層ごとの合計と、3 層を合算した総消費（AC36）。**外した記録も含める。**"""
+    rows: list[dict] = []
+    total = {"records": 0, "fixed_sum": 0, "work_sum": 0, "total_spend": 0}
+    for layer in transcript_agents.LAYERS:
+        items = [r for r in records if r.layer == layer]
+        if not items:
+            continue
+        fixed_sum = sum(r.fixed or 0 for r in items)
+        work_sum = sum(r.work or 0 for r in items)
+        rows.append({
+            "layer": layer,
+            "records": len(items),
+            "fixed_sum": fixed_sum,
+            "work_sum": work_sum,
+            "total_spend": fixed_sum + work_sum,
+        })
+        total["records"] += len(items)
+        total["fixed_sum"] += fixed_sum
+        total["work_sum"] += work_sum
+        total["total_spend"] += fixed_sum + work_sum
+    return rows, total
+
+
+def role_usage(records: list) -> list[dict]:
+    """持ち場ごとの worker の使い方（AC37）。**行は起動元ごとに 1 つである。**"""
+    supervisors = [r for r in records if r.layer == "supervisor"]
+    supervisors.sort(key=lambda r: (r.started_at or "", r.agent_id or ""))
+    workers: dict[str, list] = defaultdict(list)
+    for r in records:
+        if r.layer == "worker" and r.parent_agent_id:
+            workers[r.parent_agent_id].append(r)
+
+    seq: Counter = Counter()
+    rows: list[dict] = []
+    for s in supervisors:
+        seq[s.role] += 1
+        mine = workers.get(s.agent_id or "", [])
+        if not mine:
+            continue
+        fixed_sum = (s.fixed or 0) + sum(w.fixed or 0 for w in mine)
+        work = s.work or 0
+        rows.append({
+            "role": s.role,
+            "supervisor": seq[s.role],   # 持ち場の中の連番。識別子は出さない
+            "supervisor_work": work,
+            "workers": len(mine),
+            "fixed_sum": fixed_sum,
+            "mark": "worker を使いすぎ" if fixed_sum > work else "",
+        })
+    rows.sort(key=lambda r: (_ROLE_ORDER.get(r["role"], 9), r["supervisor"]))
+    return rows
+
+
+def format_agents_markdown(
+    records: list, summary: list[dict], excluded: int,
+    totals_rows: list[dict], totals: dict, usage: list[dict],
+    with_session: bool,
+) -> str:
+    lines: list[str] = []
+    if with_session:
+        lines.append("## 記録ごとの context window")
+        lines.append("")
+        lines.append(transcript_agents.format_list(records, with_agent_id=False))
+        lines.append("")
+    lines.append("## 層・持ち場・モデルごとの束ね")
+    lines.append("")
+    lines.extend([
+        "| 層 | 持ち場 | モデル | 件数 | 固定費の中央値 | 実作業の中央値 "
+        "| 実作業 < 固定費 | 最大充填の最大 | 印 |",
+        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |",
+    ])
+    for r in summary:
+        lines.append(
+            f"| {r['layer']} | {r['role']} | {r['model']} | {r['records']} | "
+            f"{r['fixed_median']} | {r['work_median']} | {r['work_below_fixed']} | "
+            f"{r['peak_max']} | {r['mark']} |"
+        )
+    lines.append("")
+    lines.append(f"束ねの表から外した記録: {excluded} 件（応答が 3 に満たない）")
+    lines.append("")
+    lines.append("## 層ごとの合計")
+    lines.append("")
+    lines.extend([
+        "| 層 | 件数 | 固定費の合計 | 実作業の合計 | 総消費 |",
+        "| --- | ---: | ---: | ---: | ---: |",
+    ])
+    for r in totals_rows:
+        lines.append(
+            f"| {r['layer']} | {r['records']} | {r['fixed_sum']} | "
+            f"{r['work_sum']} | {r['total_spend']} |"
+        )
+    lines.append(
+        f"| 合計 | {totals['records']} | {totals['fixed_sum']} | "
+        f"{totals['work_sum']} | {totals['total_spend']} |"
+    )
+    if with_session:
+        lines.append("")
+        lines.append("## 持ち場ごとの worker の使い方")
+        lines.append("")
+        lines.extend([
+            "| 持ち場 | supervisor | supervisor の実作業 | worker の件数 "
+            "| supervisor と worker の固定費の合計 | 印 |",
+            "| --- | ---: | ---: | ---: | ---: | --- |",
+        ])
+        for r in usage:
+            lines.append(
+                f"| {r['role']} | {r['supervisor']} | {r['supervisor_work']} | "
+                f"{r['workers']} | {r['fixed_sum']} | {r['mark']} |"
+            )
+    return "\n".join(lines)
+
+
+def collect_agents(sessions: list[str], layer: str | None) -> tuple[list, int]:
+    """指定のセッションの記録を読む。セッションを渡さなければ全セッションを読む。"""
+    counter: dict = {}
+    if sessions:
+        records = transcript_agents.read_sessions(sessions, counter=counter)
+    else:
+        records = []
+        for session in all_session_ids():
+            records.extend(transcript_agents.read_session(session, counter=counter))
+    if layer:
+        records = [r for r in records if r.layer == layer]
+    return records, counter.get("skipped", 0)
+
+
+def all_session_ids() -> list[str]:
+    root = transcript_agents.config_root() / "projects"
+    if not root.is_dir():
+        return []
+    return sorted(
+        p.stem for project in root.iterdir() if project.is_dir()
+        for p in project.glob("*.jsonl")
+    )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="NDF skill usage statistics from Claude Code transcripts",
@@ -509,6 +716,14 @@ def main() -> int:
                     help="各skillに抽出されたトリガーキーワードを出力")
     ap.add_argument("--include-fallback", action="store_true",
                     help="Triggers欄が無いskillでも description から語彙抽出してマッチ (ノイズ多)")
+    ap.add_argument("--agents", action="store_true",
+                    help="3 層（conductor / supervisor / worker）の context window を出す")
+    ap.add_argument("--session", action="append", default=[],
+                    help="セッション ID で絞る (繰り返し可)")
+    ap.add_argument("--layer", choices=transcript_agents.LAYERS, default=None,
+                    help="--agents の出力を 1 つの層に絞る")
+    ap.add_argument("--window-limit", type=int, default=DEFAULT_WINDOW_LIMIT,
+                    help=f"割る候補の印を付ける最大充填の目安 (default: {DEFAULT_WINDOW_LIMIT})")
     args = ap.parse_args()
 
     plugin_root = pathlib.Path(args.plugin_root) if args.plugin_root else plugin_root_default()
@@ -528,7 +743,30 @@ def main() -> int:
     if args.skill:
         skills = [s for s in skills if args.skill in s["name"]]
 
-    transcripts = list(iter_transcripts(effective_days, date_from, date_to))
+    if args.session:
+        # **`--session` は Skill の統計をそのセッションの conductor の記録だけで数える**
+        # （AC6 の確かめ方）。配下の記録は `--agents` の表が扱う。
+        transcripts = [
+            path for path in (
+                transcript_agents.session_paths(s)[0] for s in args.session
+            ) if path is not None
+        ]
+    else:
+        transcripts = list(iter_transcripts(effective_days, date_from, date_to))
+
+    agents: list = []
+    agent_summary: list[dict] = []
+    totals_rows: list[dict] = []
+    totals: dict = {}
+    usage: list[dict] = []
+    excluded = 0
+    if args.agents:
+        agents, skipped = collect_agents(args.session, args.layer)
+        if skipped:
+            print(f"[skill-stats] 読めない行を飛ばした: {skipped} 件", file=sys.stderr)
+        agent_summary, excluded = summarize_agents(agents, args.window_limit)
+        totals_rows, totals = layer_totals(agents)
+        usage = role_usage(agents) if args.session else []
 
     # Header summary
     window = []
@@ -578,6 +816,16 @@ def main() -> int:
             "grand_skills": grand_rows,
             "projects": projects_json,
         }
+        if args.agents:
+            out["meta"]["window_limit"] = args.window_limit
+            out.update({
+                "agents": [r.as_row() for r in agents],
+                "agent_summary": agent_summary,
+                "layer_totals": totals_rows,
+                "totals": totals,
+                "role_usage": usage,
+                "excluded": excluded,
+            })
         print(json.dumps(out, ensure_ascii=False, indent=2))
     else:
         if args.by_project:
@@ -600,6 +848,13 @@ def main() -> int:
             for s in sorted(skills, key=lambda x: x["name"]):
                 kw = ", ".join(s["triggers"]) or "-"
                 print(f"- `ndf:{s['name']}`: {kw}")
+
+        if args.agents:
+            print()
+            print(format_agents_markdown(
+                agents, agent_summary, excluded, totals_rows, totals, usage,
+                with_session=bool(args.session),
+            ))
 
     return 0
 
