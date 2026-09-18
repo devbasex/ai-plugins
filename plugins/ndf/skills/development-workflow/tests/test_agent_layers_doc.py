@@ -1,7 +1,7 @@
 """3 層（conductor / supervisor / worker）の規約の文書を固定する（#550 の 2 本目）。
 
-要求は `issues/issue-550-657-requirements.md` の AC3・AC4・AC4b・AC9〜AC19・AC64、
-形は `issues/issue-550-657-design-contracts.md` が持つ。
+要求は `issues/old/milestone-18-unattended/issue-550-657-requirements.md` の AC3・AC4・AC4b・AC9〜AC19・AC64、
+形は `docs/specifications/ndf-agent-layers-unattended-run.md` が持つ。
 
 **規約は文書にしか無い。** 運転そのものは Claude Code の `/goal` と `Agent` が行うため、
 このテストが確かめられるのは「規約が形を持って書かれていること」だけである。実機での

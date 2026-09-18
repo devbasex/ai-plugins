@@ -1,7 +1,7 @@
 """3 層の context window の集計（#550 の AC21・AC27〜AC29・AC32・AC35〜AC37）。
 
-`skill-stats --agents` が出す 4 つの表を、`issues/issue-550-657-design-contracts.md` の
-「`skill-stats` の測定」の形で固定する。記録は `scripts/tests/fixtures/transcript_agents/`
+`skill-stats --agents` が出す 4 つの表を、`docs/specifications/ndf-context-window-metrics.md` の
+「`skill-stats --agents`」の形で固定する。記録は `scripts/tests/fixtures/transcript_agents/`
 の最小の記録で、そこには 2 つの supervisor が同じ持ち場（実装）を通した例が入っている。
 """
 from __future__ import annotations

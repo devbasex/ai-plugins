@@ -1,7 +1,7 @@
 """振り返りに context window の集計が載ること（#550 の AC33・AC34）。
 
-固定するのは、観点の表に `context window` の行があることと、記録の雛形が契約の文書
-（`issues/issue-550-657-design-contracts.md`「振り返りの記録へ足す表」）の 3 つの表を
+固定するのは、観点の表に `context window` の行があることと、記録の雛形が確定仕様
+（`docs/specifications/ndf-context-window-metrics.md`「振り返りの記録へ貼る表」）の 3 つの表を
 持つことである。**雛形へ載せてよい値は AC30 が許す列だけで、パス・本文・`agent_id` は
 載せない**（投稿されるため）。
 """
