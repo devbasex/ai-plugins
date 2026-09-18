@@ -158,10 +158,21 @@
 | `criteria[].enforce` | `error`（落とす） / `report`（数えて出すだけ） |
 | `criteria[].needs` | その観点が要る宣言の項目。`[]` は宣言が無くても動く |
 | 同じ観点の 2 行 | 量は `report`（常に数える）と `error`（`budget` を宣言したときだけ落とす）を**別の行**に持つ。1 行に強さを 2 つ持たせない |
+| `criteria[].id` | **判定の手続きへ結び付く名前**（下の対応表）。表に無い `id` があれば終了コード 2 |
 | `criteria[].aspect` | 観点の番号（調査の記録に対応）。**根拠をたどる入口** |
 | `criteria[].sources` / `sources[]` | 出典の名前・URL・参照日・**その出典から取った主張**（`claim`）・**前回取得した本文の指紋**（`fingerprint`）。**値そのものは持たない**（決定 12） |
 
-**このファイルが読めなければ終了コード 2 で止まる。** 何を見るかが決まらないまま走らせない。
+**`id` と判定の手続きの対応。**
+
+| `id` | 呼ぶ手続き |
+| --- | --- |
+| `broken-import` / `unlisted-import` | `import_findings` |
+| `released-version-paragraph` | `version_findings` |
+| `read-size` / `read-size-budget` | `budget_findings` |
+| `instruction-count` | `count_findings` |
+
+**このファイルが読めなければ終了コード 2 で止まる。** 行を消せばその判定は動かず、`enforce` を変えれば
+落とすか報告するかが変わる（設定であって、説明ではない）。 何を見るかが決まらないまま走らせない。
 
 **利用者がこのファイルを書き換える前提は置かない。** 配布物であり、更新は NDF の側で行う。リポジトリごとの
 違いは宣言（`.ndf/instructions.json`）が持つ。
