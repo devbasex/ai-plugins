@@ -35,6 +35,23 @@ def monitor(tmp_path, monkeypatch):
     return mod
 
 
+@pytest.mark.parametrize(
+    ("line", "match_start", "match_end", "expected"),
+    [
+        ("`quota exceeded`", 1, 15, True),
+        ("「quota exceeded」", 1, 15, True),
+        ('"quota exceeded"', 1, 15, True),
+        ("'quota exceeded'", 1, 15, True),
+        ('"escaped \\" text" quota exceeded', 19, 33, False),
+        ("fatal: quota exceeded", 7, 21, False),
+    ],
+)
+def test_match_is_quoted_current_behavior(
+    monitor, line, match_start, match_end, expected,
+):
+    assert monitor._match_is_quoted(line, match_start, match_end) is expected
+
+
 def test_monitor_agent_pidfile_bad_when_empty(monitor, tmp_path):
     paths = monitor.AgentPaths.for_("agy", 1)
     paths.pidfile.write_text("", encoding="utf-8")

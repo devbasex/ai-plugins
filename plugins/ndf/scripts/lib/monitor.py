@@ -69,7 +69,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 
 
 def _lib_dir() -> pathlib.Path:
@@ -174,6 +174,15 @@ EARLY_ERROR_BENIGN_KEEP_WARNINGS = [
 ]
 
 
+def _balanced_quote(
+    before: str,
+    after: str,
+    quote: str,
+    counter: Callable[[str, str], int],
+) -> bool:
+    return counter(before, quote) % 2 == 1 and quote in after
+
+
 def _match_is_quoted(line: str, match_start: int, match_end: int) -> bool:
     """マッチ位置がドキュメント引用 / コード文字列リテラルに囲まれているか判定。
 
@@ -190,18 +199,16 @@ def _match_is_quoted(line: str, match_start: int, match_end: int) -> bool:
     """
     before = line[:match_start]
     after = line[match_end:]
-    if before.count("`") % 2 == 1 and "`" in after:
+    parity_quotes = (
+        ("`", str.count),
+        ('"', _unescaped_count),
+        ("'", _unescaped_count),
+    )
+    if any(_balanced_quote(before, after, quote, counter)
+           for quote, counter in parity_quotes):
         return True
     if before.rfind("「") > before.rfind("」") and "」" in after:
         return True
-    # コード文字列リテラル (ダブル / シングルクォート)。
-    # エスケープされたクォート (`\"` / `\'`) はリテラルを開閉しないため
-    # パリティ計算から除外する。これを数えると、文字列内にエスケープ
-    # クォートを含む行で「引用内/外」の判定がずれ、本物のエラー行を
-    # 誤って benign 扱い (= FATAL 見逃し) する恐れがある。
-    for q in ('"', "'"):
-        if _unescaped_count(before, q) % 2 == 1 and q in after:
-            return True
     return False
 
 
