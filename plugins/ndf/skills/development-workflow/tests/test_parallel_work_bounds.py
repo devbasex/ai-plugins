@@ -21,6 +21,11 @@ def parallel() -> str:
     return PARALLEL.read_text(encoding="utf-8")
 
 
+def flat(text: str) -> str:
+    """折り返しの改行を除く。日本語の文は改行の位置で語が割れる。"""
+    return text.replace("\n", "").replace("**", "")
+
+
 # --- 下限 6: ホストのメモリ（AC30 / AC36） ----------------------------------
 
 
@@ -85,3 +90,100 @@ def test_the_script_holds_the_defaults() -> None:
     for name in ("DEFAULT_RESERVE_MIB", "DEFAULT_PER_LANE_MIB", "DEFAULT_MAX_LANES",
                  "DEFAULT_SWAP_FREE_MIN_PCT"):
         assert re.search(rf"^{name} = \d+$", source, re.MULTILINE), name
+
+
+# --- 下限 4: 依存は工程の対で見る（AC5） -----------------------------------
+
+
+def test_the_fourth_bound_is_a_pair_of_stages() -> None:
+    """依存は「B のどの工程が、A のどの時点を入力にするか」で決まる（決定 2）。"""
+    body = flat(parallel())
+    assert "依存する工程が終わる前に、それを入力にする工程を始めない" in body
+    assert "B の設計が A の決定を読むなら A の設計の収束を" in body
+    assert "B の実装が A の実装を前提にするなら A の実装のマージを待つ" in body
+
+
+def test_an_implementation_order_does_not_block_the_next_design() -> None:
+    """v10.11.0 の後半 3 回は、この 2 つを区別しなかったために設計が実装を待った。"""
+    assert "実装の順序の依存は、B の設計を止めない" in flat(parallel())
+
+
+# --- 下限 5 と重なりの目安（AC6 / AC7 / AC8） -------------------------------
+
+
+def test_the_fifth_bound_is_about_the_resolved_diff() -> None:
+    """守るものは「レビューした差分と入る差分が食い違わない」ことである（決定 3）。"""
+    body = flat(parallel())
+    assert "競合を解いた差分を、レビューを通さずにマージしない" in body
+    assert "同じファイルを触るものを並行させない" not in body
+
+
+def test_the_later_merge_resolves_the_conflict() -> None:
+    """先にマージした側は、解く時点で既に閉じている（決定 3）。"""
+    body = flat(parallel())
+    assert "後からマージする側が解き、解いた後の head でレビューを収束させる" in body
+
+
+def test_there_is_a_section_for_the_overlap_guide() -> None:
+    assert "## 重なりの目安" in parallel()
+
+
+def test_the_overlap_guide_has_three_kinds() -> None:
+    """区分は設計の時点で分かる最も細かい単位（節）で切る（決定 4）。"""
+    table = _overlap_table()
+    assert [row[0] for row in table] == ["別の節", "足すだけ", "書き換え"], table
+
+
+def test_the_overlap_guide_says_whether_each_kind_runs_in_parallel() -> None:
+    """区分ごとに、並行してよいかと、並行しないときに何を待つかが一意に決まる。"""
+    header, *rows = _overlap_rows()
+    assert header == ["区分", "何が当たるか", "並行", "待つもの"], header
+    verdicts = {row[0]: (row[2], row[3]) for row in rows}
+    assert verdicts["別の節"] == ("してよい", "なし")
+    assert verdicts["足すだけ"][0] == "してよい"
+    assert "実装はしない" in verdicts["書き換え"][0]
+    assert "先の Pull Request のマージ" in verdicts["書き換え"][1]
+
+
+def test_designs_run_in_parallel_whatever_the_kind() -> None:
+    """設計文書は束ごとに別のファイルへ書く（AC8）。"""
+    body = flat(parallel())
+    assert "設計の工程どうしは、どの区分でも並行してよい" in body
+
+
+def test_the_kind_is_fixed_after_the_design() -> None:
+    """着手の時点の触る場所は見込みで、確定の値は実行計画が持つ（決定 4）。"""
+    body = flat(parallel())
+    assert "区分は設計の後に確定する" in body
+    assert "実行計画" in body
+
+
+def _overlap_rows() -> list[list[str]]:
+    lines = parallel().splitlines()
+    start = next(i for i, ln in enumerate(lines) if ln.strip() == "## 重なりの目安")
+    rows: list[list[str]] = []
+    for line in lines[start + 1:]:
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            break
+        if not stripped.startswith("|"):
+            continue
+        cells = [c.strip() for c in stripped.strip("|").split("|")]
+        if set("".join(cells)) <= set("-: "):
+            continue
+        rows.append(cells)
+    return rows
+
+
+def _overlap_table() -> list[list[str]]:
+    return _overlap_rows()[1:]
+
+
+# --- `issue-plan-strategy` との境界（決定 5） -------------------------------
+
+
+def test_the_execution_plan_belongs_to_issue_plan_strategy() -> None:
+    """置き場所・形・見直す時点・閉じ方は `issue-plan-strategy` が持つ。"""
+    body = flat(parallel())
+    assert "実行計画" in body
+    assert "issue-plan-strategy" in body
