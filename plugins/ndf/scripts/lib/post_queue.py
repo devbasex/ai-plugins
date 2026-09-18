@@ -424,42 +424,6 @@ def _read_item(path: pathlib.Path) -> dict[str, Any] | None:
     return item if isinstance(item, dict) else None
 
 
-class _ItemResult(NamedTuple):
-    """1 項目の flush 結果。"""
-
-    sent: dict[str, Any] | None = None
-    skipped: dict[str, Any] | None = None
-    failed: dict[str, Any] | None = None
-    rate_limited: bool = False
-
-
-def flush_item(path: pathlib.Path, item: dict[str, Any]) -> _ItemResult:
-    """読み取り済みの 1 項目を照合・送信・永続化する。"""
-    found, row = posted_match(item)
-    if found is True:
-        # **送った場合と同じ形で返す。** 呼び出し側は届いたことを応答から
-        # 確かめるため、既に届いていた項目にも見つけた投稿を積んで渡す。
-        if row is not None:
-            item["response"] = row
-        path.unlink(missing_ok=True)
-        return _ItemResult(skipped=item)
-
-    attempt = send(item)
-    if attempt.ok:
-        try:
-            item["response"] = json.loads(attempt.stdout or "null")
-        except json.JSONDecodeError:
-            item["response"] = None
-        path.unlink(missing_ok=True)
-        return _ItemResult(sent=item)
-
-    item["attempts"] = int(item.get("attempts") or 0) + 1
-    item["last_error"] = attempt.summary()
-    path.write_text(json.dumps(item, indent=2, ensure_ascii=False),
-                    encoding="utf-8")
-    return _ItemResult(failed=item, rate_limited=is_rate_limited(attempt))
-
-
 class FlushResult(NamedTuple):
     """流した結果。"""
 
@@ -523,8 +487,6 @@ class Queue:
                 json.dump(item, f, indent=2, ensure_ascii=False)
             return path
 
-    flush_item = staticmethod(flush_item)
-
     def flush(self) -> FlushResult:
         """積んだ項目を連番の順に送る。
 
@@ -547,15 +509,31 @@ class Queue:
                     "last_error": f"待ち行列の項目を読めない ({path.name})",
                 }
                 break
-            res = flush_item(path, item)
-            if res.skipped is not None:
-                skipped.append(res.skipped)
-            elif res.sent is not None:
-                sent.append(res.sent)
-            else:
-                failed = res.failed
-                rate_limited = res.rate_limited
-                break
+            found, row = posted_match(item)
+            if found is True:
+                # **送った場合と同じ形で返す。** 呼び出し側は届いたことを応答から
+                # 確かめるため、既に届いていた項目にも見つけた投稿を積んで渡す。
+                if row is not None:
+                    item["response"] = row
+                path.unlink(missing_ok=True)
+                skipped.append(item)
+                continue
+            attempt = send(item)
+            if attempt.ok:
+                try:
+                    item["response"] = json.loads(attempt.stdout or "null")
+                except json.JSONDecodeError:
+                    item["response"] = None
+                path.unlink(missing_ok=True)
+                sent.append(item)
+                continue
+            item["attempts"] = int(item.get("attempts") or 0) + 1
+            item["last_error"] = attempt.summary()
+            path.write_text(json.dumps(item, indent=2, ensure_ascii=False),
+                            encoding="utf-8")
+            failed = item
+            rate_limited = is_rate_limited(attempt)
+            break
         return FlushResult(sent, skipped, failed, self.count(), rate_limited)
 
 

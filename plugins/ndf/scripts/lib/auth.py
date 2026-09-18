@@ -33,26 +33,6 @@ UNAUTHENTICATED_MARKERS = (
 SKIP_ENV = "NDF_SKIP_AUTH_CHECK"
 
 
-def probe_runtime(
-    probe: tuple[str, ...],
-    timeout: int = AUTH_PROBE_TIMEOUT,
-) -> dict[str, Any]:
-    """1 つの probe コマンドを実行し、結果辞書（command, ok, detail）を返す。"""
-    try:
-        r = subprocess.run(list(probe), capture_output=True, text=True,
-                           timeout=timeout)
-        merged = f"{r.stdout}\n{r.stderr}".lower()
-        ok = r.returncode == 0 and not any(
-            m in merged for m in UNAUTHENTICATED_MARKERS
-        )
-        detail = (r.stderr.strip() or r.stdout.strip())[:200]
-    except FileNotFoundError:
-        ok, detail = False, "コマンドが見つかりません"
-    except subprocess.TimeoutExpired:
-        ok, detail = False, f"{timeout} 秒で応答しませんでした"
-    return {"command": " ".join(probe), "ok": ok, "detail": detail}
-
-
 def check_auth(
     runtimes: Iterable[str],
     *,
@@ -79,11 +59,22 @@ def check_auth(
         probe = AUTH_PROBES.get(runtime)
         if probe is None:
             continue
-        res = probe_runtime(probe)
-        results[runtime] = res
-        info(f"{'✅' if res['ok'] else '❌'} {runtime}: {res['command']}")
-        if not res["ok"]:
-            failed.append(f"{runtime}（{res['detail']}）")
+        try:
+            r = subprocess.run(list(probe), capture_output=True, text=True,
+                               timeout=AUTH_PROBE_TIMEOUT)
+            merged = f"{r.stdout}\n{r.stderr}".lower()
+            ok = r.returncode == 0 and not any(
+                m in merged for m in UNAUTHENTICATED_MARKERS
+            )
+            detail = (r.stderr.strip() or r.stdout.strip())[:200]
+        except FileNotFoundError:
+            ok, detail = False, "コマンドが見つかりません"
+        except subprocess.TimeoutExpired:
+            ok, detail = False, f"{AUTH_PROBE_TIMEOUT} 秒で応答しませんでした"
+        results[runtime] = {"command": " ".join(probe), "ok": ok, "detail": detail}
+        info(f"{'✅' if ok else '❌'} {runtime}: {' '.join(probe)}")
+        if not ok:
+            failed.append(f"{runtime}（{detail}）")
 
     if failed:
         die(
