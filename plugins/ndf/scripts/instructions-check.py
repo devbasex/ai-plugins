@@ -907,6 +907,18 @@ class Measurements:
     breakdowns: dict[str, list[tuple[str, int]]] = field(default_factory=dict)
 
 
+@dataclass
+class ReportInput:
+    """報告に必要な対象・計測結果・判定条件。"""
+
+    targets: list[Target]
+    measurements: Measurements
+    notes: list[str]
+    criteria: Criteria
+    in_ndf_repo: bool
+    with_report: bool
+
+
 def resolve_latest(root: Path, decl: Declaration, criteria: Criteria) -> str | None:
     """`released` の宣言から最新の版を解く。**取れなければ止まる。**"""
     # **止まるなら、何も判定する前に止まる。** 版を取れないことは走査の前に分かる。
@@ -981,9 +993,14 @@ def check(root: Path, decl: Declaration, criteria: Criteria, args) -> int:
     result = measure_targets(targets, latest, decl, criteria)
     notes = finalize(scope_roots, targets, result, decl, criteria)
 
-    return report(targets, result.sizes, result.counts, result.breakdowns,
-                  result.findings, notes, criteria,
-                  in_development_repo(root), args.report)
+    return report(ReportInput(
+        targets=targets,
+        measurements=result,
+        notes=notes,
+        criteria=criteria,
+        in_ndf_repo=in_development_repo(root),
+        with_report=args.report,
+    ))
 
 
 def criteria_is_stale(criteria: Criteria, decl: Declaration) -> str | None:
@@ -998,32 +1015,33 @@ def criteria_is_stale(criteria: Criteria, decl: Declaration) -> str | None:
     return anchor if age > decl.review_interval_days else None
 
 
-def report(targets, sizes, counts, breakdowns, findings, notes, criteria,
-           in_ndf_repo: bool, with_report: bool) -> int:
+def report(report_input: ReportInput) -> int:
+    targets = report_input.targets
+    measurements = report_input.measurements
     roots = [t for t in targets if t.is_root_file]
     print(f"指示書 {len(targets)} 本（根 {len(roots)} / 配下 {len(targets) - len(roots)}）")
-    show_size = criteria.enabled("read-size")
-    show_count = criteria.enabled("instruction-count")
+    show_size = report_input.criteria.enabled("read-size")
+    show_count = report_input.criteria.enabled("instruction-count")
     for target in targets:
         key = display_path(target)
         parts = [key]
         if show_size and target.is_root_file:
-            parts.append(f"{sizes[key]:,} バイト")
+            parts.append(f"{measurements.sizes[key]:,} バイト")
         if show_count:
-            parts.append(f"指示 {counts[key]}")
+            parts.append(f"指示 {measurements.counts[key]}")
         if len(parts) > 1:
             print("  ".join(parts))
-        if with_report and show_size and target.is_root_file:
-            for rel, size in breakdowns[key]:
+        if report_input.with_report and show_size and target.is_root_file:
+            for rel, size in measurements.breakdowns[key]:
                 print(f"    {rel}  {size:,} バイト")
-    for note in notes:
+    for note in report_input.notes:
         print(note)
 
     failed = 0
-    for finding in findings:
-        action = action_of(finding, in_ndf_repo)
-        line = format_finding(finding, action, criteria)
-        if criteria.is_error(finding.criterion_id):
+    for finding in measurements.findings:
+        action = action_of(finding, report_input.in_ndf_repo)
+        line = format_finding(finding, action, report_input.criteria)
+        if report_input.criteria.is_error(finding.criterion_id):
             print(line, file=sys.stderr)
             failed += 1
         else:
