@@ -971,3 +971,92 @@ def test_group_timing_branches_and_actions(
     action = plain(row[1])
     for expected in expected_actions:
         assert expected in action, f"{timing_pattern} の行うことに '{expected}' が含まれていない"
+
+
+# ---------- やり直しで 2 度行わない（grouping.md） ----------
+
+REDO_SECTION = "## やり直しで 2 度行わない"
+
+
+def redo_section() -> str:
+    return section(GROUPING.read_text(encoding="utf-8"), REDO_SECTION)
+
+
+def redo_commands() -> list[str]:
+    """やり直しの節が持つ判定材料の取り方（bash の例）を、出てくる順に返す。"""
+    return re.findall(r"```bash\n(.*?)```", redo_section(), re.DOTALL)
+
+
+def test_redo_takes_its_materials_from_two_lookups() -> None:
+    """現状固定: 起票と結び付けを分けて見分け、材料は親の側と子の側の 2 つの取り方で引く。
+
+    まとめて扱うと、書き込みの制限で途中で止まったときに、起票済みを理由として残りの
+    結び付けが飛ぶ。親の側からは子の一覧を、子の側からは親の番号を引く。
+    """
+    text = plain(redo_section())
+    assert "起票と結び付けを分けて見分ける" in text
+    assert "起票はクラスタに 1 度、結び付けは課題ごとに行う" in text
+    assert "起票済みを理由として残りの結び付けが飛ぶ" in text
+
+    from_parent, from_child = redo_commands()
+    assert "/issues/<親の番号>/sub_issues" in from_parent
+    assert "--jq '.[].number'" in from_parent
+    assert "gh api graphql" in from_child
+    assert "issue(number:<子の番号>){parent{number}}" in from_child
+
+
+@pytest.mark.parametrize(("decision", "material"), [
+    ("起票の要否", "この修正レイヤーを指す親 issue を探して起票の要否を決め"),
+    ("結び付けの要否", "その親 issue の子の一覧で結び付けの要否を決める"),
+])
+def test_redo_decides_filing_and_linking_from_the_parent_side(
+        decision: str, material: str) -> None:
+    """現状固定: 起票の要否は親 issue の有無で、結び付けの要否は親の子の一覧で決める。
+
+    親が作成済みなら起票を飛ばし、子の一覧に無い子だけを結び付ける経路になる。
+    子の本文の 1 行だけでは決めない。複数のクラスタへ属する課題では別の親を指す。
+    """
+    text = plain(redo_section())
+    assert "見分けは親 issue の側から引く" in text
+    assert material in text, decision
+    assert "子の本文の 1 行だけでは決めない" in text
+    assert "1 行が別の親 issue を指していることがある" in text
+
+
+def test_the_parent_side_lookup_lists_the_linked_children() -> None:
+    """現状固定: 親の側の jq を実際に流し、結び付け済みの子の番号だけが並ぶことを固定する。
+
+    この一覧に無い子が、やり直しで結び付ける残りである。番号以外の項目は落ちる。
+    """
+    from_parent, _ = redo_commands()
+    expression = re.search(r"--jq '([^']*)'", from_parent).group(1)
+
+    sub_issues = [
+        {"id": 1001, "number": 12, "title": "child a"},
+        {"id": 1002, "number": 34, "title": "child b"},
+    ]
+    done = subprocess.run(["jq", "-r", expression], input=json.dumps(sub_issues),
+                          capture_output=True, text=True, check=True)
+    assert done.stdout.splitlines() == ["12", "34"]
+
+    # branch: 子が 1 件も結び付いていない親では、一覧が空で返る。
+    done = subprocess.run(["jq", "-r", expression], input="[]",
+                          capture_output=True, text=True, check=True)
+    assert done.stdout.splitlines() == []
+
+
+def test_a_child_with_another_parent_is_linked_by_a_body_line() -> None:
+    """現状固定: 子が既に別の親を持つかは子の側から引き、値があれば本文の 1 行で指す。
+
+    親は単数で返るため、2 つ目のクラスタはサブイシュー関係では結べない。
+    結び付け方の節が、その例外を本文の 1 行として定める。
+    """
+    body = GROUPING.read_text(encoding="utf-8")
+    text = plain(redo_section())
+    assert "子 issue が既に別の親を持つかは、子の側から引く" in text
+    assert "親は単数で返る" in text
+    assert "値があれば 2 つ目のクラスタであり、本文の 1 行で指す" in text
+
+    linking = plain(section(body, "### 結び付け方"))
+    assert ("2 つ目以降のクラスタと、サブイシューの API を持たないリポジトリでは、"
+            "子 issue の本文へ親 issue を指す 1 行を足す") in linking
