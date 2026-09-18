@@ -163,7 +163,7 @@ agy plugin uninstall ndf && agy plugin install <clone>/plugins/ndf/dev.agy
 
 **`git push origin develop:main` は使えない。** `main` / `develop` を守る ruleset の bypass は
 `pull_request` で作ってあり、**このモードは Pull Request のマージだけを通し、直接 push は
-管理者でも拒む**。必須の検査 11 個は Pull Request で走るため、`develop` の先端のコミットには
+管理者でも拒む**。必須の検査 12 個は Pull Request で走るため、`develop` の先端のコミットには
 `push` 起動の 1 個しか結果が付いていない。
 
 ```console
@@ -173,6 +173,9 @@ remote: - 10 of 11 required status checks have not succeeded: .
 remote:
  ! [remote rejected] develop -> main (push declined due to repository rule violations)
 ```
+
+この例は必須の検査が 11 個だったときの観測である。`instruction-files-check` を足して 12 個に
+なった後は `11 of 12` になる。
 
 **この手順では `main` に `develop` へ無いマージコミットが 1 つ積まれる。** そのため `main` は
 `develop` の fast-forward ではなくなる。**それでよい。** 配布した版を指すのは `main` の先端で
