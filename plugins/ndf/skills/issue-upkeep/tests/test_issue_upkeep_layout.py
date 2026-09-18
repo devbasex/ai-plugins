@@ -12,6 +12,8 @@ import subprocess
 
 import pytest
 
+from helpers import plain, section, table
+
 SKILL_DIR = pathlib.Path(__file__).resolve().parents[1]
 SKILLS = SKILL_DIR.parent
 ROOT = SKILLS.parents[2]
@@ -33,11 +35,6 @@ VERDICT_HEADER = "| 判定 | 選ぶ条件 | 段 3 での対応 |"
 def flat(text: str) -> str:
     """折り返しの改行を除く。日本語の文は改行の位置で語が割れるため、照合の前に繋ぐ。"""
     return text.replace("\n", "")
-
-
-def plain(text: str) -> str:
-    """折り返しの改行に加えて強調の印を除く。太字の付け外しで同じ契約が落ちないようにする。"""
-    return text.replace("\n", "").replace("**", "")
 
 
 def contains(text: str, fragment: str) -> bool:
@@ -63,25 +60,6 @@ def links_to(text: str, target: str, base: pathlib.Path = SKILL_DIR) -> bool:
     """本文のリンクが `target` を指し、その先のファイルが実在するか。"""
     found = [link.split("#", 1)[0] for link in re.findall(r"\]\(([^)]+)\)", text)]
     return target in found and (base / target).is_file()
-
-
-def section(text: str, heading: str) -> str:
-    """見出しから、同じ深さか浅い次の見出しまでを返す。"""
-    level = heading.split(" ", 1)[0]
-    start = text.index(heading + "\n")
-    rest = text[start + len(heading):]
-    ends = [m.start() for m in re.finditer(r"^(#+) ", rest, re.MULTILINE)
-            if len(m.group(1)) <= len(level)]
-    return heading + (rest[:ends[0]] if ends else rest)
-
-
-def table(text: str, header: str) -> list[list[str]]:
-    """見出し行で始まる表の、データ行のセルを返す。太字の印は外す。"""
-    block = text[text.index(header):]
-    block = block[:block.index("\n\n")] if "\n\n" in block else block
-    rows = [line for line in block.split("\n")[2:] if line.startswith("|")]
-    return [[cell.strip().strip("*").strip() for cell in row.strip("|").split("|")]
-            for row in rows]
 
 
 def test_the_references_exist() -> None:
