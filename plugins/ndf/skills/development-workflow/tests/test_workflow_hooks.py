@@ -63,6 +63,16 @@ def frontmatter() -> str:
     return found.group(1)
 
 
+def test_frontmatter_rejects_body_without_delimiters(tmp_path, monkeypatch) -> None:
+    """現状固定: 境界記号が無い本文は既存の AssertionError で拒否する。"""
+    skill = tmp_path / "SKILL.md"
+    skill.write_text("# frontmatter の無い本文\n", encoding="utf-8")
+    monkeypatch.setitem(globals(), "SKILL", skill)
+
+    with pytest.raises(AssertionError, match="frontmatter を読み取れない"):
+        frontmatter()
+
+
 def hook_command() -> str:
     """frontmatter が登録する hook のコマンドを、YAML の引用を解いて返す。
 
