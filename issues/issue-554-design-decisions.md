@@ -2,7 +2,7 @@
 
 設計は [issue-554-design.md](issue-554-design.md)、要求と受け入れ条件は
 [issue-554-requirements.md](issue-554-requirements.md) にある。この文書は決定だけを持つ
-（設計文書が 500 行の基準を超えたため分けた）。
+（決定だけを読む場面があるため分けた）。
 
 ## 決定の記録
 
