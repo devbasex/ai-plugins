@@ -27,48 +27,38 @@
 # 値を別の語で取るのは `-R` / `--repo` の 2 つに限られる。**それ以外の `-` で始まる語は
 # その語だけを飛ばす。** 値まで飛ばすと、続く語が `pr` であっても見落とす。
 wf_merge_target() {
-  local cmd="${1:-}" tok num="" state=0 found=1 rest
-  while IFS= read -r -d '' tok; do
-    # 区切り（#565）。マージを見つける前なら `gh` の探索をやり直し、見つけた後なら
-    # 読むのを止める。越えて読むと `gh pr merge; echo 268` の 268 を番号に取る。
-    if [ -z "$tok" ]; then
-      [ "$found" -ne 0 ] || break
-      state=0
-      continue
-    fi
-    # REST の経路。`pulls/<番号>/merge` を指す語は、方式を問わずマージの意図と見なす。
-    case "$tok" in
-      *pulls/*/merge|*pulls/*/merge/*)
-        rest=${tok##*pulls/}
-        rest=${rest%%/*}
-        case "$rest" in
-          ''|*[!0-9]*) ;;
-          *) num="$rest"; found=0 ;;
-        esac
-        ;;
-    esac
-    if [ "$state" -ne 3 ]; then
-      state=$(_wf_seek_gh_verb "$state" "$tok" "merge")
-      [ "$state" = "3" ] && found=0
-    fi
-    case "$state" in
-      3)
-        [ -n "$num" ] && continue
-        case "$tok" in
-          */pull/*)
-            rest=${tok##*/pull/}
-            rest=${rest%%/*}
-            case "$rest" in ''|*[!0-9]*) ;; *) num="$rest" ;; esac
-            ;;
-          ''|*[!0-9]*) ;;
-          *) num="$tok" ;;
-        esac
-        ;;
-    esac
-  done < <(wf_split "$cmd")
-  [ "$found" -eq 0 ] || return 1
+  local cmd="${1:-}" num=""
+  # 区切りの扱い（#565）は `_wf_scan_gh_verb` が持つ。
+  _wf_scan_gh_verb "$cmd" "merge" _wf_merge_target_token || return 1
   printf '%s\n' "$num"
   return 0
+}
+
+# `wf_merge_target` の 1 語分。`num` は呼び出し元のものを書き換える。
+_wf_merge_target_token() {
+  local tok="${1:-}" rest
+  # REST の経路。`pulls/<番号>/merge` を指す語は、方式を問わずマージの意図と見なす。
+  case "$tok" in
+    *pulls/*/merge|*pulls/*/merge/*)
+      rest=${tok##*pulls/}
+      rest=${rest%%/*}
+      case "$rest" in
+        ''|*[!0-9]*) ;;
+        *) num="$rest"; found=0 ;;
+      esac
+      ;;
+  esac
+  [ "$state" = "3" ] || return 0
+  [ -n "$num" ] && return 0
+  case "$tok" in
+    */pull/*)
+      rest=${tok##*/pull/}
+      rest=${rest%%/*}
+      case "$rest" in ''|*[!0-9]*) ;; *) num="$rest" ;; esac
+      ;;
+    ''|*[!0-9]*) ;;
+    *) num="$tok" ;;
+  esac
 }
 
 # jq や awk で読み解けない入力のための、粗い見分け。**判定の対象を広く採る側へ倒す。**

@@ -30,6 +30,30 @@ WORKFLOW_TABLE_HEADING = "## モードごとに起動する Skill"
 
 
 @pytest.mark.parametrize(
+    ("mode", "expected"),
+    [
+        ("light", "1"),
+        ("operation", "2"),
+        ("legacy-refactor", "3"),
+        ("standard", "4"),
+        ("documentation", "5"),
+    ],
+)
+def test_mode_height_for_each_known_mode(mode: str, expected: str) -> None:
+    """現状固定: 5 モードそれぞれの高さの実測値を固定する。"""
+    result = run_lib(f"wf_mode_height {shlex.quote(mode)}")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == expected
+
+
+def test_mode_height_for_unknown_mode() -> None:
+    """現状固定: 未知のモードは 0 を出力し、非 0 で終了する。"""
+    result = run_lib("wf_mode_height unknown-mode")
+    assert result.returncode != 0
+    assert result.stdout.strip() == "0"
+
+
+@pytest.mark.parametrize(
     ("first", "second", "expected"),
     [
         ("", "standard", "standard"),
