@@ -735,7 +735,6 @@ def test_question_restructuring_branches_by_premise_and_gist() -> None:
     assert "元の課題を閉じて新しく起票する判断になるため、返す" in text
 
 
-
 # ---------- 発見の瞬間の 3 択（out-of-scope の段 2） ----------
 
 OUT_OF_SCOPE = SKILLS / "out-of-scope" / "SKILL.md"
