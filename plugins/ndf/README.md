@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.15.0-dev.1）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.15.0）
 ```
 
 ### agy
@@ -119,14 +119,13 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.15.0-dev.1 へ更新するとき
+## v10.15.0 へ更新するとき
 
 **無人で運転できる範囲を広げ、工程を測れるようにしました**（#540 #541 #550 #554 #561 #621
 #623 #657）。Skill の数は変わらず、新しい Skill も足していません。破壊的な変更はなく、記録の移行も
 要りません。変更点の一覧は [CHANGELOG.md](../../CHANGELOG.md) にあります。
 
-**開発版です。** `develop` にだけ載ります。取得元へ `#develop` を足す手順は
-[docs/versioning-and-distribution.md の「開発版を試す」](../../docs/versioning-and-distribution.md#開発版を試す)にあります。
+**正式版です。** 開発版 `10.15.0-dev.1` と中身は同じで、`main` に載ります。
 
 **`/ndf:merged` は削除の前に同意を求めなくなります。** 止まるのは git が削除を拒んだときだけで、
 起点・本番のチャネル・現在のブランチは同意を求めずに対象から外します。リモートブランチは先端が
@@ -146,8 +145,10 @@ Pull Request の `headRefOid` と一致するものだけを消し、無視さ�
 | **実行計画を初めに作ります**（#540） | `issue-plan-strategy/references/execution-plan.md` に置き場所・行の形・見直す契機を置きました。`parallel-work.md` の下限 4 は「依存する工程が終わる前に、それを入力にする工程を始めない」、下限 5 は「競合を解いた差分を、レビューを通さずにマージしない」へ変わり、重なりの目安の節が増えました |
 | **マイルストーンの説明へ組を書きます**（#541） | 課題を入れる時点で、触る場所の見込みと依存を `issue-upkeep/references/milestones.md` の手順で説明の末尾へ書きます。既存の説明は一括で書き直しません |
 
-開発版のチャネルを登録済みなら、次で入れ替わります。**動いているセッションには反映されない**
-ため、更新したあとは起動し直してください。
+正式版のチャネル（ref を指定せずに登録した取得元）なら、次で入れ替わります。**動いているセッションには
+反映されない**ため、更新したあとは起動し直してください。開発版を試すために `develop` を登録した
+場合は、[docs/versioning-and-distribution.md の「ランタイムごとの取得と導入」](../../docs/versioning-and-distribution.md#ランタイムごとの取得と導入)
+の手順で ref を指定せずに登録し直してから導入します。
 
 ```bash
 claude plugin marketplace update ai-plugins
@@ -311,7 +312,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.15.0-dev.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.15.0/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -333,14 +334,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.15.0-dev.1/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.15.0/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.15.0-dev.1  <path>
+# => ndf@ai-plugins  installed, enabled  10.15.0  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
