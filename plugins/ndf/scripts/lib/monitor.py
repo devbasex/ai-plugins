@@ -965,7 +965,7 @@ def _record_outcome(
 
 # ---------- CLI ----------
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("pr", type=int)
     # 後方互換: cross-review は位置引数 `target` で codex / agy / both を渡す。
@@ -1007,6 +1007,11 @@ def main() -> None:
                    help="EARLY_ERROR 検知を無効化 "
                         "(hard timeout / stall / sentinel / result.json のみで判定) "
                         f"[env: MONITOR_NO_EARLY_ERROR; default: {DEFAULT_NO_EARLY_ERROR}]")
+    return p
+
+
+def main() -> None:
+    p = build_parser()
     args = p.parse_args()
     # **表に無い工程は USAGE（終了コード 1）で拒む。** `choices` にすると argparse の
     # 終了コード 2（TIMEOUT と同じ値）になる。

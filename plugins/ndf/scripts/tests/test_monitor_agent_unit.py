@@ -111,3 +111,41 @@ def test_monitor_agent_stalled(monitor, tmp_path):
     finally:
         p.kill()
         p.wait()
+
+
+def _run_cli(*args: str, **env: str) -> subprocess.CompletedProcess[str]:
+    import os
+    return subprocess.run(
+        [sys.executable, str(MONITOR_PATH), *args],
+        capture_output=True, text=True, env={**os.environ, **env},
+    )
+
+
+def test_cli_help_lists_the_options_and_the_table_values():
+    r = _run_cli("--help", MONITOR_POLL="7")
+    assert r.returncode == 0
+    for opt in ("--agents", "--tmp-dir", "--stem-template", "--phase", "--timeout",
+                "--stall-timeout", "--poll", "--no-require-result", "--no-early-error"):
+        assert opt in r.stdout
+    assert "{claude,codex,agy,kiro,both}" in r.stdout
+    assert "(default: 7)" in r.stdout
+    assert "review=1200" in r.stdout
+    assert "codex=180" in r.stdout
+
+
+def test_cli_unknown_phase_exits_1():
+    r = _run_cli("1", "codex", "--phase", "bogus")
+    assert r.returncode == 1
+    assert "上限の表に無い工程です: 'bogus'" in r.stderr
+
+
+def test_cli_without_target_or_agents_exits_2():
+    r = _run_cli("1")
+    assert r.returncode == 2
+    assert "target か --agents のどちらかを指定してください" in r.stderr
+
+
+def test_cli_empty_agents_exits_2():
+    r = _run_cli("1", "--agents", " , ")
+    assert r.returncode == 2
+    assert "--agents が空です" in r.stderr
