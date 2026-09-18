@@ -11,16 +11,25 @@
 コマンド:
 
     python3 transcript_agents.py list --session <ID> [--layer 層] [--format md|json]
+    python3 transcript_agents.py interrupted --session <ID> [--layer 層] [--depth N]
+                                             [--agent <id>...] [--parent <id>]
+                                             [--now <ISO 8601>] [--format md|json]
+    python3 transcript_agents.py wait-reset --session <ID> [--layer 層] [--depth N]
+                                            [--margin 秒] [--max-sleep 秒]
 
-`interrupted` と `wait-reset` は中断と再開の実装（設計の決定 1 の 3 本目）が足す。
+**上限の中断は通知ではなく記録で見分ける**（#657 の決定 18）。通知の本文は人が読む文言で
+書式を約束していないが、記録の合成の応答は `apiErrorStatus` と `quotaLimits.resetsAt` を値
+として持つ。`wait-reset` が眠る長さも**記録の解除時刻から取る**。固定の間隔で待たない。
 """
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import pathlib
 import sys
+import time
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -309,6 +318,30 @@ def _calculate_duration(rows: list[dict]) -> tuple[str | None, str | None, int]:
     )
 
 
+def _fill_rate_limit(rows: list[dict], record: AgentRecord) -> None:
+    """上限の中断のとき、最後の合成の応答から解除時刻と上限の種類を取る。
+
+    見るのは**最後の合成の応答 1 件だけ**である。1 つの記録が 2 度中断していても、
+    次に待つのは最後の解除時刻だからである。
+    """
+    if record.ending != "rate_limit":
+        return
+    for row in reversed(rows):
+        if row.get("type") != "assistant" or not _is_synthetic(row):
+            continue
+        quota = row.get("quotaLimits")
+        if isinstance(quota, dict):
+            resets = quota.get("resetsAt")
+            if isinstance(resets, (int, float)) and not isinstance(resets, bool):
+                record.resets_at = datetime.fromtimestamp(
+                    int(resets), tz=timezone.utc,
+                ).isoformat()
+            limit_type = quota.get("rateLimitType")
+            if isinstance(limit_type, str):
+                record.rate_limit_type = limit_type
+        break
+
+
 def read_file(path: pathlib.Path, meta: dict | None = None) -> tuple[AgentRecord, int]:
     """記録 1 件を読む。返すのは `AgentRecord` と飛ばした行の数である。"""
     meta = meta or {}
@@ -335,21 +368,7 @@ def read_file(path: pathlib.Path, meta: dict | None = None) -> tuple[AgentRecord
     _aggregate_token_metrics(rows, record)
     record.interruptions = _count_interruptions(rows)
 
-    if record.ending == "rate_limit":
-        for row in reversed(rows):
-            if row.get("type") != "assistant" or not _is_synthetic(row):
-                continue
-            quota = row.get("quotaLimits")
-            if isinstance(quota, dict):
-                resets = quota.get("resetsAt")
-                if isinstance(resets, (int, float)) and not isinstance(resets, bool):
-                    record.resets_at = datetime.fromtimestamp(
-                        int(resets), tz=timezone.utc,
-                    ).isoformat()
-                limit_type = quota.get("rateLimitType")
-                if isinstance(limit_type, str):
-                    record.rate_limit_type = limit_type
-            break
+    _fill_rate_limit(rows, record)
 
     record.started_at, record.ended_at, record.duration_seconds = (
         _calculate_duration(rows)
@@ -459,32 +478,208 @@ def format_list(records: list[AgentRecord], with_agent_id: bool = True) -> str:
     return "\n".join(lines)
 
 
-def main(argv: list[str] | None = None) -> int:
+# ---------- 中断と再開（#657） ----------
+
+def parse_now(value: str | None = None) -> datetime:
+    """`--now` の値を読む。省いたときは現在時刻（UTC）を返す。"""
+    if not value:
+        return datetime.now(timezone.utc)
+    parsed = _parse_time(value)
+    if parsed is None:
+        raise ValueError(f"時刻として読めない: {value}")
+    return parsed
+
+
+def resets_passed(record: AgentRecord, now: datetime | None = None) -> bool:
+    """上限が解けたかを返す。
+
+    **解除時刻を持たない上限の中断は真にする。** 待つ先が無いまま止まるのを避けるため
+    である。記録から取れないだけで、上限そのものは解けているかもしれない。
+    """
+    reset = _parse_time(record.resets_at)
+    if reset is None:
+        return True
+    return reset <= (now or datetime.now(timezone.utc))
+
+
+def interrupted(
+    records: list[AgentRecord],
+    layer: str | None = None,
+    depth: int | None = None,
+    agents: list[str] | None = None,
+    parent: str | None = None,
+) -> list[AgentRecord]:
+    """上限の中断（`ending` が `rate_limit`）だけを、指定の絞り込みで返す。
+
+    `server_error`（500 / 529）と `authentication_failed` は `ending` が `api_error` に
+    なるため、ここには現れない（AC40）。続けさせた直後の記録は `in_progress` であり、
+    再び現れない（契約の終わり方の表）。
+    """
+    picked = set(agents or ())
+    out: list[AgentRecord] = []
+    for record in records:
+        if record.ending != "rate_limit":
+            continue
+        if layer is not None and record.layer != layer:
+            continue
+        if depth is not None and record.depth != depth:
+            continue
+        if picked and record.agent_id not in picked:
+            continue
+        if parent is not None and record.parent_agent_id != parent:
+            continue
+        out.append(record)
+    return out
+
+
+INTERRUPTED_HEADER = (
+    "| 層 | 持ち場 | 深さ | 終わり方 | 上限の種類 | 解除時刻 | 解除済み "
+    "| 起動元 | agent_id |"
+)
+INTERRUPTED_RULE = "| --- | --- | ---: | --- | --- | --- | --- | --- | --- |"
+
+
+def format_interrupted(
+    records: list[AgentRecord], now: datetime | None = None,
+) -> str:
+    """中断した記録の一覧を返す。**解除時刻と起動元が読める**（AC47）。"""
+    lines = [INTERRUPTED_HEADER, INTERRUPTED_RULE]
+    for r in records:
+        passed = "済" if resets_passed(r, now) else "まだ"
+        lines.append(
+            f"| {r.layer} | {r.role} | {r.depth} | {r.ending} | "
+            f"{_cell(r.rate_limit_type)} | {_cell(r.resets_at)} | {passed} | "
+            f"{_cell(r.parent_agent_id)} | {_cell(r.agent_id)} |"
+        )
+    return "\n".join(lines)
+
+
+def _sleep(seconds: float) -> None:
+    """眠る。テストはこの関数を差し替えて秒数だけを見る。"""
+    time.sleep(seconds)
+
+
+def wait_reset(
+    sessions: list[str],
+    root: pathlib.Path | str | None = None,
+    layer: str | None = None,
+    depth: int | None = None,
+    margin: int = 60,
+    max_sleep: int | None = None,
+    now: datetime | None = None,
+    sleeper=None,
+) -> tuple[int, int, int]:
+    """解除まで眠る。返すのは（眠った秒数、起きた時点の中断の件数、終了コード）である。
+
+    **眠るのは、まだ来ていない解除時刻のうち最も早いもの + `margin` までである。**
+    固定の間隔で待たない（AC41）。終了コードは 0 = 解除時刻を過ぎた、
+    3 = `max_sleep` で区切った（まだ解除前）。
+    """
+    sleeper = sleeper or _sleep
+    now = now or datetime.now(timezone.utc)
+
+    def pick() -> list[AgentRecord]:
+        return interrupted(
+            read_sessions(sessions, root=root), layer=layer, depth=depth,
+        )
+
+    futures = [
+        t for t in (_parse_time(r.resets_at) for r in pick()) if t and t > now
+    ]
+    slept = 0
+    cut = False
+    if futures:
+        # **切り上げる。** 端数を捨てると解除時刻より早く起きてしまい、`--margin 0` では
+        # 解除の前に再開してよいと読める答えを返す（AC44）。
+        seconds = math.ceil((min(futures) - now).total_seconds()) + int(margin)
+        slept = max(seconds, 0)
+        if max_sleep is not None and slept > max_sleep:
+            slept = int(max_sleep)
+            cut = True
+        sleeper(slept)
+    return slept, len(pick()), 3 if cut else 0
+
+
+def _now_argument(value: str) -> datetime:
+    try:
+        return parse_now(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
+def _non_negative_int(value: str) -> int:
+    """秒数の引数を読む。**負の値は引数の誤り（終了コード 2）にする。**
+
+    負の `--max-sleep` は `time.sleep` が拒み、負の `--margin` は解除の前に待ちを
+    終わらせる。どちらも待ちの保証（AC44）を壊すため、眠る前に弾く。
+    """
+    try:
+        seconds = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"整数として読めない: {value}") from exc
+    if seconds < 0:
+        raise argparse.ArgumentTypeError(f"負の秒数は受け付けない: {value}")
+    return seconds
+
+
+def _add_session_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--session", action="append", default=[], required=True,
+                        help="セッション ID（繰り返して複数を渡せる）")
+
+
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="会話の記録を conductor / supervisor / worker の層で読む",
     )
     sub = parser.add_subparsers(dest="command", required=True)
+
     listing = sub.add_parser("list", help="そのセッションの 3 層すべての記録を出す")
-    listing.add_argument("--session", action="append", default=[], required=True,
-                         help="セッション ID（繰り返して複数を渡せる）")
+    _add_session_argument(listing)
     listing.add_argument("--layer", choices=LAYERS, default=None,
                          help="1 つの層に絞る")
     listing.add_argument("--format", choices=["md", "json"], default="md")
-    args = parser.parse_args(argv)
 
+    stuck = sub.add_parser("interrupted", help="上限の中断だけを出す")
+    _add_session_argument(stuck)
+    stuck.add_argument("--layer", choices=LAYERS, default=None, help="1 つの層に絞る")
+    stuck.add_argument("--depth", type=int, default=None,
+                       help="深さで絞る。1 は conductor の直下")
+    stuck.add_argument("--agent", action="append", default=[],
+                       help="agent_id で絞る（繰り返して複数を渡せる）")
+    stuck.add_argument("--parent", default=None, help="起動元の agent_id で絞る")
+    stuck.add_argument("--now", type=_now_argument, default=None,
+                       help="解除済みの判定に使う時刻（試験用。既定は現在時刻）")
+    stuck.add_argument("--format", choices=["md", "json"], default="md")
+
+    waiting = sub.add_parser("wait-reset", help="解除時刻まで眠る")
+    _add_session_argument(waiting)
+    waiting.add_argument("--layer", choices=LAYERS, default=None, help="1 つの層に絞る")
+    waiting.add_argument("--depth", type=int, default=None, help="深さで絞る")
+    waiting.add_argument("--margin", type=_non_negative_int, default=60,
+                         help="解除時刻の後に置く余白の秒数（既定 60）")
+    waiting.add_argument("--max-sleep", type=_non_negative_int, default=None,
+                         help="1 度に眠る上限の秒数。区切ったときは終了コード 3")
+    return parser
+
+
+def _report_skipped(counter: dict, sessions: list[str], found: bool) -> int:
+    skipped = counter.get("skipped", 0)
+    if skipped:
+        print(f"[transcript-agents] 読めない行を飛ばした: {skipped} 件", file=sys.stderr)
+    if not found:
+        print(
+            "[transcript-agents] 記録が見つからない: "
+            f"{' '.join(sessions)}", file=sys.stderr,
+        )
+    return skipped
+
+
+def _run_list(args) -> int:
     counter: dict = {}
     records = read_sessions(args.session, counter=counter)
     if args.layer:
         records = [r for r in records if r.layer == args.layer]
-
-    skipped = counter.get("skipped", 0)
-    if skipped:
-        print(f"[transcript-agents] 読めない行を飛ばした: {skipped} 件", file=sys.stderr)
-    if not records:
-        print(
-            "[transcript-agents] 記録が見つからない: "
-            f"{' '.join(args.session)}", file=sys.stderr,
-        )
+    skipped = _report_skipped(counter, args.session, bool(records))
 
     if args.format == "json":
         print(json.dumps(
@@ -494,6 +689,50 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(format_list(records))
     return 0
+
+
+def _run_interrupted(args) -> int:
+    counter: dict = {}
+    all_records = read_sessions(args.session, counter=counter)
+    records = interrupted(
+        all_records, layer=args.layer, depth=args.depth,
+        agents=args.agent, parent=args.parent,
+    )
+    skipped = _report_skipped(counter, args.session, bool(all_records))
+    now = args.now or datetime.now(timezone.utc)
+
+    if args.format == "json":
+        rows = []
+        for record in records:
+            row = record.as_json()
+            row["resets_passed"] = resets_passed(record, now)
+            rows.append(row)
+        print(json.dumps(
+            {"agents": rows, "skipped": skipped}, ensure_ascii=False, indent=2,
+        ))
+    else:
+        print(format_interrupted(records, now))
+    return 0
+
+
+def _run_wait_reset(args) -> int:
+    slept, remaining, code = wait_reset(
+        args.session, layer=args.layer, depth=args.depth,
+        margin=args.margin, max_sleep=args.max_sleep,
+    )
+    print(
+        f"[transcript-agents] 眠った: {slept} 秒 / 中断した記録: {remaining} 件"
+    )
+    return code
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _build_parser().parse_args(argv)
+    if args.command == "interrupted":
+        return _run_interrupted(args)
+    if args.command == "wait-reset":
+        return _run_wait_reset(args)
+    return _run_list(args)
 
 
 if __name__ == "__main__":

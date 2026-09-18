@@ -453,3 +453,204 @@ def test_cross_review_points_at_the_definition() -> None:
     skill = CROSS_REVIEW.read_text(encoding="utf-8")
     assert "「メイン」が何を指すか" in skill
     assert "references/context-budget.md" in skill
+
+
+# ========== #657: 中断と再開（AC40〜AC49） ==========
+
+def _interruption_section(layers: str) -> str:
+    block = layers.split("## 中断と再開", 1)
+    assert len(block) > 1, "`## 中断と再開` の節が無い"
+    return block[1]
+
+
+def _conductor_interruption_check_section(layers: str) -> str:
+    section = _interruption_section(layers)
+    block = section.split("### conductor の中断の点検", 1)
+    assert len(block) > 1, "`### conductor の中断の点検` の節が無い"
+    return block[1].split("\n### ", 1)[0]
+
+
+# ---------- AC40: 通知ではなく記録で見分け、契機は 4 つ ----------
+
+def test_the_interruption_is_told_apart_by_the_record_not_the_notification(
+        layers: str) -> None:
+    section = _interruption_section(layers)
+    assert "通知ではなく記録で見分ける" in section
+    assert "apiErrorStatus" in section
+    assert "429" in section
+
+
+@pytest.mark.parametrize("trigger", (
+    "<status>failed</status>", "自動の継続", "人の入力", "背景の待ちの終わり",
+))
+def test_the_check_has_four_triggers(layers: str, trigger: str) -> None:
+    assert trigger in _interruption_section(layers), trigger
+
+
+def test_the_other_api_errors_are_kept_apart_from_the_rate_limit(layers: str) -> None:
+    section = _interruption_section(layers)
+    assert "server_error" in section
+    assert "authentication_failed" in section
+
+
+# ---------- AC41: 解除時刻は記録から取る。固定の間隔で待たない ----------
+
+def test_the_reset_time_comes_from_the_record(layers: str) -> None:
+    section = _interruption_section(layers)
+    assert "quotaLimits.resetsAt" in section or "resets_at" in section
+    assert "固定の間隔で待たない" in section
+
+
+def test_the_conductor_normally_waits_without_a_max_sleep(layers: str) -> None:
+    section = _conductor_interruption_check_section(layers)
+    assert "手順 4 は `--max-sleep` を付けない" in section
+
+
+def test_the_conductor_rechecks_only_steps_one_and_four_when_waiting_is_cut(
+        layers: str) -> None:
+    section = _conductor_interruption_check_section(layers)
+    exception = section.split("背景の待ちを数時間続けられないと分かったときだけ", 1)
+    assert len(exception) > 1, "長時間待機できない場合の例外が無い"
+    rule = exception[1].split("。", 1)[0]
+    assert "`--max-sleep 540`" in rule
+    assert "終了コード 3" in rule
+    assert "手順 1 と手順 4 だけ" in rule
+    assert "手順 2" not in rule and "手順 3" not in rule
+
+
+# ---------- AC49: 落ちた層ごとの 3 通りの表 ----------
+
+def _fallen_layer_rows(layers: str) -> dict[str, list[str]]:
+    """「落ちた層」の表を 落ちた層 → 残りの列 で読み取る。"""
+    section = _interruption_section(layers)
+    rows: dict[str, list[str]] = {}
+    for line in section.splitlines():
+        if not line.startswith("| "):
+            continue
+        parts = [cell.strip() for cell in line.split("|")[1:-1]]
+        if len(parts) != 4 or parts[0] in ("落ちた層", "---"):
+            continue
+        if parts[0] in ("worker", "supervisor", "conductor"):
+            rows[parts[0]] = parts[1:]
+    return rows
+
+
+def test_the_three_fallen_layers_have_a_row_each(layers: str) -> None:
+    assert set(_fallen_layer_rows(layers)) == {"worker", "supervisor", "conductor"}
+
+
+def test_the_fallen_layer_table_names_its_four_columns(layers: str) -> None:
+    section = _interruption_section(layers)
+    header = next(line for line in section.splitlines()
+                  if line.startswith("| 落ちた層 |"))
+    for column in ("落ちた層", "検知する側", "再開する側", "起こす手段"):
+        assert column in header, column
+
+
+def test_the_supervisor_is_resumed_by_the_conductor(layers: str) -> None:
+    detects, resumes, how = _fallen_layer_rows(layers)["supervisor"]
+    assert "conductor" in detects and "conductor" in resumes
+    assert "SendMessage" in how
+
+
+def test_the_worker_is_resumed_by_its_launcher(layers: str) -> None:
+    _, resumes, _ = _fallen_layer_rows(layers)["worker"]
+    assert "supervisor" in resumes
+
+
+def test_the_conductor_is_woken_from_outside(layers: str) -> None:
+    detects, _, how = _fallen_layer_rows(layers)["conductor"]
+    assert "人" in detects or "Claude Code" in detects
+    assert "自動の継続" in how
+
+
+# ---------- AC42: 再開は直下だけ。続けられないときの後段は層で分かれる ----------
+
+def test_the_upper_layer_resumes_only_its_direct_partners(layers: str) -> None:
+    section = _interruption_section(layers)
+    assert "直下だけ" in section
+    assert "--depth 1" in section
+
+
+def test_the_conductor_does_not_reach_the_workers_of_a_supervisor(layers: str) -> None:
+    assert "conductor が supervisor の下の worker を直接再開しない" in (
+        _interruption_section(layers))
+
+
+def test_the_fallback_differs_by_layer(layers: str) -> None:
+    section = _interruption_section(layers)
+    # supervisor は進行の記録が指す工程の頭から起動し直す
+    assert "最後に記録した工程" in section or "進行の記録が指す工程の頭" in section
+    # worker は同じ作業でもう一度起動する
+    assert "同じ作業" in section
+    # 失敗の判定は SendMessage の結果である
+    assert '"success": true' in section
+
+
+# ---------- AC44: 解除まで再開しない。見回りに頼らない ----------
+
+def test_the_upper_layer_waits_until_the_reset_time(layers: str) -> None:
+    section = _interruption_section(layers)
+    assert "wait-reset" in section
+    assert "見回り" in section
+
+
+# ---------- 決定 20: 解除を待つ手段が 3 段 ----------
+
+def _waiting_steps(layers: str) -> dict[str, str]:
+    block = _interruption_section(layers).split("### 解除を待つ手段", 1)
+    assert len(block) > 1, "「解除を待つ手段」の小節が無い"
+    section = block[1].split("\n### ", 1)[0]
+    rows: dict[str, str] = {}
+    for line in section.splitlines():
+        if not line.startswith("| "):
+            continue
+        parts = [cell.strip() for cell in line.split("|")[1:-1]]
+        if len(parts) == 3 and parts[0] in ("1", "2", "3"):
+            rows[parts[0]] = parts[1]
+    return rows
+
+
+def test_the_wait_has_three_steps(layers: str) -> None:
+    steps = _waiting_steps(layers)
+    assert set(steps) == {"1", "2", "3"}
+    assert "自動の継続" in steps["1"]
+    assert "wait-reset" in steps["2"] or "背景" in steps["2"]
+    assert "1 通" in steps["3"]
+
+
+# ---------- AC45: 人の 1 通は承認ではない ----------
+
+def test_the_single_message_from_the_human_is_not_an_approval(layers: str) -> None:
+    section = _interruption_section(layers)
+    assert "承認ではなく" in section
+    assert "関門の数に数えない" in section or "関門に数えない" in section
+
+
+# ---------- AC48: 済んだ外部への書き込みを重ねない ----------
+
+def test_the_resumed_partner_does_not_write_twice(layers: str) -> None:
+    section = _interruption_section(layers)
+    assert "既に書いたもの" in section
+    for written in ("Pull Request", "コメント", "進行の記録"):
+        assert written in section, written
+
+
+# ---------- 決定 21: StopFailure フックを使わない ----------
+
+def test_the_stop_failure_hook_is_not_used(layers: str) -> None:
+    assert "StopFailure" in _interruption_section(layers)
+
+
+# ---------- conductor の報告に「上限の中断から再開した回数」の列が入る ----------
+
+def test_the_post_list_counts_the_resumptions_after_a_rate_limit(layers: str) -> None:
+    header = next(line for line in layers.splitlines()
+                  if line.startswith("| 持ち場 |") and "報告なしで続けさせた回数" in line)
+    assert "上限の中断から再開した回数" in header
+
+
+# ---------- この規約は無人でない進行にも効く（決定 22） ----------
+
+def test_the_interruption_rule_applies_to_any_launched_partner(layers: str) -> None:
+    assert "上の層が起動した相手" in _interruption_section(layers)
