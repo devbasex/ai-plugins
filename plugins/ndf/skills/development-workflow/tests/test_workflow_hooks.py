@@ -314,6 +314,42 @@ FAKE_SYNC = """#!/usr/bin/env bash
 printf 'projects-sync %s\\n' "$*" >>"$FAKE_DIR/calls"
 """
 
+# 複数世代の配布記録。最後の配布と、その本番版に一致する最後のリリース後テストを
+# 選ぶことを確かめるための入力。旧版の記録・同版の先行記録・異なる版（dev 接尾辞）を
+# 混ぜ、末尾の「選ぶ記録」だけが選ばれることを示す。
+MULTI_GENERATION_RECORD = """## 配布の記録
+
+段階: 本番（2026-09-01 10:00 に承認）
+版: 10.13.0 → 10.14.0（MINOR: 旧まとまり）
+まとまり: PR #700
+
+## リリース後テスト
+
+対象の版: 10.14.0（2026-09-01 11:00）
+合否: 合格（旧版）
+
+## 配布の記録
+
+段階: 本番（2026-09-18 10:00 に承認）
+版: 10.14.0 → 10.15.0（MINOR: 新まとまり）
+まとまり: PR #717 / #718
+
+## リリース後テスト
+
+対象の版: 10.15.0（2026-09-18 11:00）
+合否: 合格（同版の先行記録）
+
+## リリース後テスト
+
+対象の版: 10.15.0-dev.1（2026-09-18 12:00）
+合否: 合格（異なる版）
+
+## リリース後テスト
+
+対象の版: 10.15.0（2026-09-18 13:00）
+合否: 合格（選ぶ記録）
+"""
+
 # 本番への配布の記録と、全条件が合格したリリース後テストの記録。
 DISTRIBUTION_RECORD = """## 概要
 
@@ -351,40 +387,12 @@ def closing_bash(heading: str) -> str:
     return found[0]
 
 
-def test_the_record_reader_selects_the_latest_distribution_and_matching_release_test() -> None:
-    """現状固定: 最後の配布と、その本番版に一致する最後のリリース後テストを選ぶ。"""
-    record = """## 配布の記録
+def run_record_reader(record: str) -> str:
+    """「配布の記録」の読み取り手順を、記録を差し替えて実行し標準出力を返す。
 
-段階: 本番（2026-09-01 10:00 に承認）
-版: 10.13.0 → 10.14.0（MINOR: 旧まとまり）
-まとまり: PR #700
-
-## リリース後テスト
-
-対象の版: 10.14.0（2026-09-01 11:00）
-合否: 合格（旧版）
-
-## 配布の記録
-
-段階: 本番（2026-09-18 10:00 に承認）
-版: 10.14.0 → 10.15.0（MINOR: 新まとまり）
-まとまり: PR #717 / #718
-
-## リリース後テスト
-
-対象の版: 10.15.0（2026-09-18 11:00）
-合否: 合格（同版の先行記録）
-
-## リリース後テスト
-
-対象の版: 10.15.0-dev.1（2026-09-18 12:00）
-合否: 合格（異なる版）
-
-## リリース後テスト
-
-対象の版: 10.15.0（2026-09-18 13:00）
-合否: 合格（選ぶ記録）
-"""
+    手順書の `record=$(gh pr view ...)` を環境変数 `RECORD` の読み取りへ置き換え、
+    末尾に計測用の区切りで `selected` / `last` / `fields` を書き出す。
+    """
     script = closing_bash("配布の記録")
     script = re.sub(
         r"^record=\$\(gh pr view .*\)$",
@@ -405,20 +413,33 @@ def test_the_record_reader_selects_the_latest_distribution_and_matching_release_
         text=True,
         timeout=60,
     )
-
     assert done.returncode == 0, done.stderr
-    selected, remainder = done.stdout.split("\n---last---\n", maxsplit=1)
+    return done.stdout
+
+
+def parse_record_reader_output(stdout: str) -> tuple[str, str, str]:
+    """計測用の区切りで区切られた出力を `(selected, last, fields)` の 3 値へ分解する。"""
+    selected, remainder = stdout.split("\n---last---\n", maxsplit=1)
     last, fields = remainder.split("\n---fields---\n", maxsplit=1)
-    assert selected.strip() == """## リリース後テスト
+    return selected.strip(), last.strip(), fields.strip()
+
+
+def test_the_record_reader_selects_the_latest_distribution_and_matching_release_test() -> None:
+    """現状固定: 最後の配布と、その本番版に一致する最後のリリース後テストを選ぶ。"""
+    selected, last, fields = parse_record_reader_output(
+        run_record_reader(MULTI_GENERATION_RECORD)
+    )
+
+    assert selected == """## リリース後テスト
 
 対象の版: 10.15.0（2026-09-18 13:00）
 合否: 合格（選ぶ記録）"""
-    assert last.strip() == """## 配布の記録
+    assert last == """## 配布の記録
 
 段階: 本番（2026-09-18 10:00 に承認）
 版: 10.14.0 → 10.15.0（MINOR: 新まとまり）
 まとまり: PR #717 / #718"""
-    assert fields.strip() == "本番（2026-09-18 10:00 に承認）|10.15.0|717\n718"
+    assert fields == "本番（2026-09-18 10:00 に承認）|10.15.0|717\n718"
 
 
 def test_the_closing_step_closes_an_open_issue_after_the_board_is_done(tmp_path) -> None:
