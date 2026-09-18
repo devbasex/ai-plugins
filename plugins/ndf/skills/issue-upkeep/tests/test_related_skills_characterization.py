@@ -68,23 +68,20 @@ def bash_blocks(text: str) -> list[str]:
 
 PR_SECTION = "#### Pull Request の番号を特定する"
 
-ROLE_MATCHERS = [
-    ("dev_base", lambda b: "dev_base=$(jq" in b),
-    ("no_issue", lambda b: re.search(r"^record_base=\$dev_base$", b, re.M) is not None),
-    ("group", lambda b: "record_base=$(git symbolic-ref" in b),
-    ("pulls", lambda b: "/pulls" in b),
-]
-
 
 def pr_blocks() -> dict[str, tuple[int, str]]:
     """番号を引く節の bash を、役割ごとに本文での位置と一緒に返す。"""
     blocks = bash_blocks(section(read(RETROSPECTIVE), PR_SECTION))
     found: dict[str, tuple[int, str]] = {}
     for index, block in enumerate(blocks):
-        for role, matcher in ROLE_MATCHERS:
-            if matcher(block):
-                found[role] = (index, block)
-                break
+        if "dev_base=$(jq" in block:
+            found["dev_base"] = (index, block)
+        elif re.search(r"^record_base=\$dev_base$", block, re.M):
+            found["no_issue"] = (index, block)
+        elif "record_base=$(git symbolic-ref" in block:
+            found["group"] = (index, block)
+        elif "/pulls" in block:
+            found["pulls"] = (index, block)
     assert set(found) == {"dev_base", "no_issue", "group", "pulls"}, found
     return found
 
