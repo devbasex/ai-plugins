@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import subprocess
@@ -18,6 +19,20 @@ from pathlib import Path
 import pytest
 
 SCRIPT = Path(__file__).resolve().parents[1] / "parallel-measure.py"
+
+
+def _load_module():
+    """`--cgroup-dir` の既定の解決だけは関数を直に呼んで検査する。
+
+    ファイル名に `-` を含むため `import` できない。`__main__` の分岐は走らない。
+    """
+    spec = importlib.util.spec_from_file_location("parallel_measure", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+parallel_measure = _load_module()
 
 
 # --- 入力の組み立て ----------------------------------------------------------
@@ -245,6 +260,66 @@ def test_capacity_floors_the_cgroup_remainder_at_zero(tmp_path: Path) -> None:
     assert keys(proc.stdout)["cgroup_available_mib"] == "0"
 
 
+# --- capacity: `--cgroup-dir` の既定の解決 -----------------------------------
+# 自分の cgroup を測るための解決である。ホストでは `/sys/fs/cgroup` が kernel の根で、
+# `memory.events` を持たない（`CFTYPE_NOT_ON_ROOT`）ため `/proc/self/cgroup` へ回る。
+# コンテナの中では `/sys/fs/cgroup` がすでに自分の cgroup なのでそのまま使う。
+
+def proc_cgroup(tmp_path: Path, path: str, *, name: str = "proc-cgroup") -> Path:
+    """`/proc/self/cgroup`（cgroup v2）の体裁の入力。"""
+    target = tmp_path / name
+    target.write_text(f"0::{path}\n", encoding="utf-8")
+    return target
+
+
+def test_resolve_cgroup_dir_returns_the_given_directory(tmp_path: Path) -> None:
+    """`--cgroup-dir` が渡されたら、どちらの入力も読まない。"""
+    given = tmp_path / "given"
+    assert parallel_measure.resolve_cgroup_dir(
+        str(given),
+        root=cgroup(tmp_path, oom_kill=1, name="root"),
+        proc_cgroup=proc_cgroup(tmp_path, "/user.slice/session.scope"),
+    ) == given
+
+
+def test_resolve_cgroup_dir_uses_the_root_when_it_holds_memory_events(
+        tmp_path: Path) -> None:
+    """`memory.events` がある `/sys/fs/cgroup` は、すでに自分の cgroup である。"""
+    root = cgroup(tmp_path, oom_kill=1, name="root")
+    assert parallel_measure.resolve_cgroup_dir(
+        None, root=root,
+        proc_cgroup=proc_cgroup(tmp_path, "/user.slice/session.scope"),
+    ) == root
+
+
+def test_resolve_cgroup_dir_derives_from_proc_when_the_root_has_no_events(
+        tmp_path: Path) -> None:
+    """kernel の根には `memory.events` が無い。`0::<path>` の下を測る。"""
+    root = tmp_path / "root"
+    leaf = cgroup(root, oom_kill=2, name="user.slice")
+    assert parallel_measure.resolve_cgroup_dir(
+        None, root=root, proc_cgroup=proc_cgroup(tmp_path, "/user.slice"),
+    ) == leaf
+
+
+def test_resolve_cgroup_dir_uses_the_root_when_proc_says_the_root(
+        tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    assert parallel_measure.resolve_cgroup_dir(
+        None, root=root, proc_cgroup=proc_cgroup(tmp_path, "/"),
+    ) == root
+
+
+def test_resolve_cgroup_dir_uses_the_root_when_proc_is_unreadable(
+        tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    assert parallel_measure.resolve_cgroup_dir(
+        None, root=root, proc_cgroup=tmp_path / "none",
+    ) == root
+
+
 # --- capacity: 測れない環境（AC32） -----------------------------------------
 
 def test_capacity_exits_three_when_meminfo_is_absent(tmp_path: Path) -> None:
@@ -443,6 +518,19 @@ def test_concurrency_rejects_an_empty_argument_list(tmp_path: Path) -> None:
 
 def test_concurrency_rejects_an_unreadable_input(tmp_path: Path) -> None:
     assert run("concurrency", "--input", str(tmp_path / "none.json")).returncode == 2
+
+
+@pytest.mark.parametrize("data", [[1], ["x"], [None], [{"createdAt": "2026-09-01T00:00:00Z"}, 2]])
+def test_concurrency_rejects_a_non_object_element(tmp_path: Path, data: list) -> None:
+    """要素が object でない入力は、入力の誤りとして終了コード 2 で弾く。
+
+    素通しすると `record.get` が `AttributeError` を出し、`gh pr view` の失敗と
+    同じ終了コード 1 で落ちる。
+    """
+    proc = concurrency(tmp_path, data=data)
+    assert proc.returncode == 2, proc.stderr
+    assert "Traceback" not in proc.stderr, proc.stderr
+    assert "--input" in proc.stderr
 
 
 # --- concurrency: `gh` は読むだけ（AC42） -----------------------------------

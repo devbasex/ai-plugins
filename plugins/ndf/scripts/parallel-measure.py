@@ -50,6 +50,7 @@ DEFAULT_SWAP_FREE_MIN_PCT = 25
 
 DEFAULT_MEMINFO = "/proc/meminfo"
 DEFAULT_CGROUP_DIR = "/sys/fs/cgroup"
+DEFAULT_PROC_CGROUP = "/proc/self/cgroup"
 GH_JSON_FIELDS = "number,createdAt,mergedAt,closedAt"
 
 UNKNOWN = "unknown"
@@ -103,19 +104,27 @@ def read_meminfo(path: Path) -> dict[str, int]:
     return values
 
 
-def resolve_cgroup_dir(given: Optional[str]) -> Path:
+def resolve_cgroup_dir(given: Optional[str], *, root: Optional[Path] = None,
+                       proc_cgroup: Optional[Path] = None) -> Path:
     """`--cgroup-dir` が無いときだけ、自分の cgroup の位置を導く。
 
     コンテナの中では `/sys/fs/cgroup` がそのまま自分の cgroup だが、ホストでは
     `/proc/self/cgroup` の `0::<path>` が指す下にある。
+
+    **`memory.events` の有無でこの 2 つを見分けられる。** kernel は `memory.*` を
+    `CFTYPE_NOT_ON_ROOT` で置くため、cgroup v2 の根には `memory.events` が無い。
+    あるということは、その位置がすでに根ではない＝自分の cgroup である。
+
+    `root` と `proc_cgroup` は検査のための差し替え口で、既定は上の 2 つの定数である。
     """
     if given is not None:
         return Path(given)
-    root = Path(DEFAULT_CGROUP_DIR)
+    root = Path(DEFAULT_CGROUP_DIR) if root is None else Path(root)
+    proc_cgroup = Path(DEFAULT_PROC_CGROUP) if proc_cgroup is None else Path(proc_cgroup)
     if (root / "memory.events").exists():
         return root
     try:
-        for line in Path("/proc/self/cgroup").read_text(encoding="utf-8").splitlines():
+        for line in proc_cgroup.read_text(encoding="utf-8").splitlines():
             if line.startswith("0::"):
                 relative = line[3:].strip().lstrip("/")
                 if relative:
@@ -358,6 +367,10 @@ def run_concurrency(args: argparse.Namespace) -> int:
             raise Usage(f"--input が JSON ではない: {exc}")
         if not isinstance(records, list) or not records:
             raise Usage("--input は 1 件以上の配列である")
+        if not all(isinstance(record, dict) for record in records):
+            # 素通しすると `intervals` の `record.get` が `AttributeError` を出し、
+            # `gh pr view` の失敗と同じ終了コード 1 で落ちる。
+            raise Usage("--input の要素は object である")
     else:
         if not args.numbers:
             raise Usage("Pull Request の番号を 1 つ以上渡す")
