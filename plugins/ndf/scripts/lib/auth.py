@@ -33,34 +33,14 @@ UNAUTHENTICATED_MARKERS = (
 SKIP_ENV = "NDF_SKIP_AUTH_CHECK"
 
 
-CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
-
-
-def default_runner(
-    cmd: list[str],
-    *,
-    timeout: int = AUTH_PROBE_TIMEOUT,
-    **kwargs: Any,
-) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        **kwargs,
-    )
-
-
 def probe_runtime(
     probe: tuple[str, ...],
     timeout: int = AUTH_PROBE_TIMEOUT,
-    *,
-    runner: Optional[CommandRunner] = None,
 ) -> dict[str, Any]:
     """1 つの probe コマンドを実行し、結果辞書（command, ok, detail）を返す。"""
-    run_cmd = runner or default_runner
     try:
-        r = run_cmd(list(probe), timeout=timeout)
+        r = subprocess.run(list(probe), capture_output=True, text=True,
+                           timeout=timeout)
         merged = f"{r.stdout}\n{r.stderr}".lower()
         ok = r.returncode == 0 and not any(
             m in merged for m in UNAUTHENTICATED_MARKERS
@@ -79,7 +59,6 @@ def check_auth(
     info: Callable[[str], None],
     die: Callable[[str], None],
     env: Optional[dict[str, str]] = None,
-    runner: Optional[CommandRunner] = None,
 ) -> dict[str, dict[str, Any]]:
     """参加する CLI の認証状態を確かめる。1 つでも欠けたら呼び出し側を中断させる。
 
@@ -100,7 +79,7 @@ def check_auth(
         probe = AUTH_PROBES.get(runtime)
         if probe is None:
             continue
-        res = probe_runtime(probe, runner=runner)
+        res = probe_runtime(probe)
         results[runtime] = res
         info(f"{'✅' if res['ok'] else '❌'} {runtime}: {res['command']}")
         if not res["ok"]:
