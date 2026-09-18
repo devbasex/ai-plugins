@@ -769,3 +769,80 @@ def test_table_helper_does_not_pass_over_a_missing_heading() -> None:
     """
     with pytest.raises(ValueError):
         table("見出しの無い本文\n", "| 判断 | 選ぶ条件 | 残すもの |")
+
+
+# --- 並列の組（#541） --------------------------------------------------------
+#
+# **組は、マイルストーンへ課題を入れる時点で書く見込みである。** 確定した触る場所は
+# 実行計画（`issue-plan-strategy`）が持ち、説明へ書き戻さない（設計の決定 10）。
+
+GROUP_SECTION = "## 並列の組を説明へ書く"
+GROUP_TABLE_HEADER = "| 組 | 課題 | 触る場所の見込み | 依存 |"
+
+
+def group_section() -> str:
+    return section(MILESTONES.read_text(encoding="utf-8"), GROUP_SECTION)
+
+
+def test_milestones_have_a_section_for_the_parallel_groups() -> None:
+    """AC20: マイルストーンへ課題を入れるときに、その課題の組を説明へ書く。"""
+    part = group_section()
+    assert contains(part, "課題をマイルストーンへ入れるときに、その課題の組を説明へ書く")
+    assert "### 並列の組（見込み）" in part, "説明へ置く見出しの形が無い"
+    assert GROUP_TABLE_HEADER in part
+
+
+def test_the_group_row_is_written_when_an_issue_enters_a_milestone() -> None:
+    """AC20: 新しく作る・既存へ足す・直近へ移すの 3 つが同じ時点として扱われる。"""
+    rows = table(group_section(), "| 時点 | 行うこと |")
+    moments = [row[0] for row in rows]
+    assert any("入れる" in m and "新しく作る" in m and "足す" in m and "移す" in m
+               for m in moments), moments
+    assert any("別のマイルストーンへ移す" in m for m in moments), moments
+    assert any("閉じた" in m for m in moments), moments
+
+
+def test_the_group_is_copied_from_what_stage_2a_already_records() -> None:
+    """AC21: 触る場所は段 2A の修正レイヤーから、依存は依存する課題の番号から写す。"""
+    part = plain(group_section())
+    assert "修正レイヤー" in part
+    assert "依存する課題の番号" in part
+    assert "新しく調べる項目を増やさない" in part
+
+
+def test_stage_2a_records_the_same_six_items() -> None:
+    """AC21: 段 2A の控える項目は増えない。
+
+    組のために段 2A へ項目を足すと、棚卸の 1 課題あたりの費用が上がる。
+    """
+    rows = table(SKILL.read_text(encoding="utf-8"), "| 控える項目 | 何に使うか |")
+    assert len(rows) == 6, [row[0] for row in rows]
+    assert rows[-1][0] == "修正レイヤー"
+
+
+def test_groups_are_parallel_between_and_sequential_within() -> None:
+    """AC22: 組の間は並列、組の中は 1 本へ束ねるか順に進める見込みである。"""
+    part = plain(group_section())
+    assert "組の間は並列にできる見込み" in part
+    assert "組の中は同じ Pull Request へ束ねるか順に進める見込み" in part
+
+
+def test_the_group_is_only_an_estimate() -> None:
+    """AC22: 確定は設計の後に実行計画が持ち、説明へ書き戻さない。"""
+    part = plain(group_section())
+    assert "見込みであり、確定は設計の後に実行計画が持つ" in part
+    assert "書き戻さない" in part
+
+
+def test_the_group_does_not_change_the_milestone_structure() -> None:
+    """AC24: 組のために既存のマイルストーンを分けたり束ね直したりしない。"""
+    part = plain(group_section())
+    assert "既存のマイルストーンを分けたり束ね直したりしない" in part
+    assert "組の番号は詰めない" in part
+
+
+def test_milestones_without_a_group_table_are_not_rewritten_at_once() -> None:
+    """決定 11: 既存の説明を一括で書き直さず、足した課題の行だけを載せる。"""
+    part = plain(group_section())
+    assert "一括で書き直さない" in part
+    assert "表が無ければ見出しと表を作る" in part
