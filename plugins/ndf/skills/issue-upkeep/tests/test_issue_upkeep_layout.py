@@ -861,3 +861,36 @@ def test_milestones_without_a_group_table_are_not_rewritten_at_once() -> None:
     part = plain(group_section())
     assert "一括で書き直さない" in part
     assert "表が無ければ見出しと表を作る" in part
+
+
+def test_group_partition_rule_by_fix_layer() -> None:
+    """現状固定: 同じ修正レイヤーの課題は同じ組、違えば別組にする規則を固定する。"""
+    part = plain(group_section())
+    assert "同じ修正レイヤーの課題は同じ組、違えば別の組にする" in part
+
+
+@pytest.mark.parametrize(("timing_pattern", "expected_actions"), [
+    ("課題をマイルストーンへ入れる", [
+        "修正レイヤーが既存の組と同じなら、その組の「課題」へ番号を足す",
+        "違えば組を 1 つ足す",
+        "表が無ければ見出しと表を作る",
+    ]),
+    ("別のマイルストーンへ移す", [
+        "元の説明の表から番号を消す",
+        "課題が 0 件になった組は行を消し",
+        "組の番号は詰めない",
+    ]),
+    ("課題が閉じた", [
+        "何もしない",
+        "実行計画が状態を持つ",
+    ]),
+])
+def test_group_timing_branches_and_actions(
+        timing_pattern: str, expected_actions: list[str]) -> None:
+    """現状固定: マイルストーンへの追加（一致・不一致）、移動、完了の各分岐における動作対応を固定する。"""
+    rows = table(group_section(), "| 時点 | 行うこと |")
+    row = next(r for r in rows if timing_pattern in r[0])
+    action = plain(row[1])
+    for expected in expected_actions:
+        assert expected in action, f"{timing_pattern} の行うことに '{expected}' が含まれていない"
+
