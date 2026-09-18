@@ -211,6 +211,34 @@ def test_milestones_are_not_created_for_a_single_issue() -> None:
     assert contains(MILESTONES.read_text(encoding="utf-8"), "**1 件しか残らないときは作らない。**")
 
 
+def test_new_milestone_is_appended_with_the_next_number() -> None:
+    """通常の追加は既存の順序を動かさず、過去最大の着手順序の次を採る。"""
+    part = section(MILESTONES.read_text(encoding="utf-8"),
+                   "## 新しく作るとき")
+    assert contains(part, "**末尾に置く。**")
+    assert contains(part, "連番は現在の最大の次にする")
+
+
+def test_inserting_a_new_milestone_between_existing_ones_needs_judgement() -> None:
+    """既存の間への差し込みは他の課題の着手順序を変えるため、要判断へ倒す。"""
+    part = section(MILESTONES.read_text(encoding="utf-8"),
+                   "## 新しく作るとき")
+    assert contains(part, "既存の間へ差し込むことは、他の課題の着手の順序を早めるか遅らせるかの判断")
+    assert contains(part, "**要判断**へ倒す")
+
+
+def test_new_milestone_number_is_not_reused_after_closing() -> None:
+    """閉じたマイルストーンを含む過去最大の着手順序から、再利用しない連番を決める。"""
+    part = section(MILESTONES.read_text(encoding="utf-8"),
+                   "## 新しく作るとき")
+    rows = table(part, "| 決めること | 決め方 |")
+    name = next(row[1] for row in rows if row[0] == "名前")
+    assert "これまでに付けた最大の次" in name
+    assert "再利用しない" in name
+    assert "閉じたマイルストーンは版数へ改名される" in name
+    assert "着手の順序: N 番目" in name
+
+
 @pytest.mark.parametrize(("priority", "when_no_matching_subject"), [
     ("高い（実害・安全機構の欠落）", "直近のマイルストーンへ、主題によらず入れる"),
     ("中くらい（保守性・設計一貫性）", "末尾に新しく作る（下記）"),
