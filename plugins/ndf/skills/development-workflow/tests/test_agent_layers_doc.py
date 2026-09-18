@@ -320,6 +320,27 @@ def test_the_goal_target_reset_moved_to_the_layers_doc(layers: str) -> None:
     assert "gh api" in layers
 
 
+def test_the_target_reset_table_maps_results_to_targets(layers: str) -> None:
+    """他者承認が要る・要らない・判定できないの 3 結果と到達点の対応を固定する。"""
+    section = layers.split("## 到達点を置き直す", 1)[1].split("\n## ", 1)[0]
+    # 1. 到達点の判定表を行単位で読み取る
+    rows = {
+        parts[0].strip(): parts[1].strip()
+        for line in section.splitlines()
+        if line.startswith("|")
+        for parts in [line.split("|")[1:-1]]
+        if len(parts) == 2 and parts[0].strip() not in ("結果", "---")
+    }
+    assert set(rows.keys()) == {"承認が要る", "要らない", "判定できない"}
+
+    # 2. 承認が要る場合は Pull Request の提出とレビュー収束へ置き直す現状を比較する
+    assert rows["承認が要る"] == "**Pull Request の提出とレビューの収束**へ置き直す"
+
+    # 3. 承認不要の場合と判定不能の場合は元のゴールまで進み、判定不能ではマージ拒否時に置き直す現状を比較する
+    assert rows["要らない"] == "ゴール条件が指す工程まで"
+    assert rows["判定できない"] == "ゴール条件が指す工程まで進み、マージが拒否された時点で置き直す"
+
+
 # ---------- AC13: モデルに依る目安とリポジトリに依る固定費 ----------
 
 def test_the_window_doc_separates_the_model_guideline_from_the_repository_cost(window: str) -> None:
