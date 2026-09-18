@@ -289,12 +289,18 @@ gh issue edit <issue番号> --repo "$RECORD_REPO" --body-file /tmp/issue-body.md
 | 成果物の良し悪し | 実装レビューの工程が扱う |
 | 経緯の時系列そのもの | git の履歴と Pull Request に残っている |
 
-この工程に入ったら `/ndf:progress-tracking <issue番号> "振り返り"` を呼ぶ（記録の手順はその Skill が持つ）。 この工程で終わるため、あわせて盤面の `status` を `Done` にする（手段は progress-tracking の「呼び方」にある）。
+この工程に入ったら `/ndf:progress-tracking <issue番号> "振り返り"` を呼ぶ（記録の手順はその Skill が持つ）。 **入口のこの記録では盤面の `Status` を書かない。** 先に `Done` にすると、盤面の `Auto-close issue` が課題を閉じ、reopen の手段が報告から落ちる。
 
+## まとまりを閉じる
+
+**振り返りを通る変更では、この工程がその実行の終わりの工程である。** 記録を投稿した後に、
+`progress-tracking` の「まとまりを閉じる」を行う。**手順はそこが正本で、ここには写さない。**
+盤面の `Status` を `Done` にするのも、課題を閉じるのも、その手順の中で行う。
 
 ## 蓄積した課題を手入れする
 
-**この工程の最後に `/ndf:issue-upkeep` を呼ぶ。** 振り返りが拾うのは、この変更から出た
+**「まとまりを閉じる」の後に `/ndf:issue-upkeep` を呼ぶ。** 順序を逆にすると、`issue-upkeep` の
+段 1 が読む「このまとまりで閉じた課題」がまだ閉じていない。振り返りが拾うのは、この変更から出た
 取りこぼしである。**変更をまたいで溜まった課題そのもの**は対象にしていない。
 
 対象が 0 件ならその Skill 自身が飛ばす。
@@ -308,4 +314,5 @@ gh issue edit <issue番号> --repo "$RECORD_REPO" --body-file /tmp/issue-body.md
 - `/ndf:release-verification` — この工程の前に行うリリース後テスト
 - `/ndf:out-of-scope` — 取りこぼしを見つけたときの起票
 - `/ndf:plan-to-spec` — 決まった仕様の永続化（振り返りとは別の出力物）
+- `/ndf:progress-tracking` — 「まとまりを閉じる」の正本
 - `/ndf:issue-upkeep` — 蓄積した課題の手入れ（この工程の最後に呼ぶ）

@@ -19,6 +19,11 @@ TRACKING = SKILL_DIR / "references/projects-tracking.md"
 LOOKUP = SKILL_DIR / "references/scripts-lookup.md"
 COMPLETENESS = SKILL_DIR / "references/stage-completeness.md"
 MERGED = SKILL_DIR.parent / "merged/SKILL.md"
+SKILLS_DIR = SKILL_DIR.parent
+PROGRESS_TRACKING = SKILLS_DIR / "progress-tracking/SKILL.md"
+
+# まとまりを閉じる手順を呼ぶ、終わりの工程の Skill（#623 の決定 8）。
+CLOSING_CALLERS = ("release", "release-verification", "retrospective")
 
 # プラグインの根。`${CLAUDE_PLUGIN_ROOT}` が指す先で、Skill の実体はこの下の
 # `skills/<名前>/` にある。
@@ -208,8 +213,68 @@ def test_the_merged_report_carries_the_stage_report() -> None:
     assert "report" in body
 
 
-def test_the_merged_skill_closes_issues_with_their_repository() -> None:
-    """#229-2: 取り出した 2 つの値を `--repo` へ渡す書き方であること。"""
-    body = MERGED.read_text(encoding="utf-8")
+def test_the_closing_step_closes_issues_with_their_repository() -> None:
+    """#229-2: 取り出した 2 つの値を `--repo` へ渡す書き方であること。
+
+    閉じる手順は `merged` から `progress-tracking` の「まとまりを閉じる」へ移した
+    （#623 の決定 7）。読む先だけを移し、確かめる書き方は変えない。
+    """
+    body = PROGRESS_TRACKING.read_text(encoding="utf-8")
 
     assert "gh issue close <番号> --repo <所有者>/<リポジトリ>" in body
+
+
+def test_only_progress_tracking_closes_issues() -> None:
+    """課題を閉じる手順を持つ `SKILL.md` は 1 つだけにする（#623 の C2 / C6 / C13）。
+
+    3 つの終わりの工程（`release` / `release-verification` / `retrospective`）へ写しを
+    置くと、どれを読んだかで閉じる時点が変わる。**正本は `progress-tracking` の
+    「まとまりを閉じる」だけで、ほかはそこを指す。**
+
+    `references/` の下は対象にしない。`issue-upkeep` の「やらない」と `out-of-scope` の
+    起票先は、まとまりの工程とは別の契機で閉じる手順である。
+
+    盤面の `Done` も同じ 1 か所に寄せる（C13）。工程の入口の進行の記録で `Done` を書くと、
+    `Auto-close issue` が先に閉じて reopen の手段が報告から落ちる。
+    """
+    closes = sorted(
+        path.relative_to(SKILLS_DIR).as_posix()
+        for path in SKILLS_DIR.glob("*/SKILL.md")
+        if "gh issue close" in path.read_text(encoding="utf-8")
+    )
+    assert closes == ["progress-tracking/SKILL.md"], closes
+
+    done = sorted(
+        path.relative_to(SKILLS_DIR).as_posix()
+        for path in SKILLS_DIR.glob("*/SKILL.md")
+        if 'status "Done"' in path.read_text(encoding="utf-8")
+    )
+    assert done == ["progress-tracking/SKILL.md"], done
+
+    # 呼ぶ側は「まとまりを閉じる」を `issue-upkeep` より前に置く（C6）。後に置くと、
+    # `issue-upkeep` の段 1 が読む「このまとまりで閉じた課題」がまだ閉じていない。
+    for name in CLOSING_CALLERS:
+        body = (SKILLS_DIR / name / "SKILL.md").read_text(encoding="utf-8")
+        closing = body.find("まとまりを閉じる")
+        upkeep = body.find("/ndf:issue-upkeep")
+        assert closing >= 0, f"{name}: 「まとまりを閉じる」への参照が無い"
+        assert upkeep >= 0, f"{name}: `issue-upkeep` の呼び出しが無い"
+        assert closing < upkeep, f"{name}: 閉じる手順が `issue-upkeep` より後にある"
+
+
+def test_the_gates_stay_two() -> None:
+    """関門は 2 つのままで、工程の側が関門の外へ実行前確認を足さない（#561 の B5 / B6）。
+
+    実行前確認の要否は `AUTHORING.md` の基準が決める。関門の節はその原則を指すだけで、
+    基準の中身を写さない（決定 11。このファイルは 500 行の上限に達している）。
+    """
+    body = SKILL.read_text(encoding="utf-8")
+    section = body.split("## 人手の承認を求める関門")[1].split("\n### ")[0]
+
+    assert "**関門は 2 つで、増やさない。**" in section
+    assert "関門の外で工程の側が実行前確認を足さない" in section
+    assert "AUTHORING.md" in section
+
+    rows = [line for line in section.splitlines() if line.startswith("| ") and " | " in line]
+    # 見出しの行と区切りの行を除いた残りが関門そのものである。
+    assert len(rows) - 2 == 2, rows
