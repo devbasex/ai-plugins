@@ -250,6 +250,7 @@ classDiagram
         +line: int | None
         +scope: str
         +criterion_id: str
+        +source: Source | None
         +message: str
     }
     class Declaration {
@@ -268,7 +269,7 @@ classDiagram
     }
     class 検査 {
         +collect_files(root, decl) list~Target~
-        +action_of(scope, in_ndf_repo) str
+        +action_of(finding, in_ndf_repo) str
         +import_findings(path, text, decl) list~Finding~
         +version_findings(path, text, released_max, decl) list~Finding~
         +budget_findings(files, decl) list~Finding~
@@ -279,9 +280,19 @@ classDiagram
         +path: Path
         +scope: str
         +root: Path
+        +source: Source | None
+    }
+    class Source {
+        +name: str
+        +version: str
+        +origin: str
+        +update: str
+        +ndf: bool
     }
     検査 ..> Declaration: 読む
     検査 ..> Target: 集める
+    Target ..> Source: 配布元
+    Finding ..> Source: 配布元
     検査 "1" --> "*" Finding: 返す
 ```
 
@@ -296,7 +307,8 @@ NDF の開発リポジトリかどうか**の 2 つで決まるため、判定�
 | --- | --- |
 | `Target` | 走査する 1 本。**どのスコープから集めたか**と、そのスコープの根を持つ |
 | `Finding.scope` | その指摘がどのスコープの対象で出たか |
-| `action_of(scope, in_ndf_repo)` | スコープの表（[issue-554-design-scope.md](issue-554-design-scope.md)）を引いて扱いを返す |
+| `Finding.source` | プラグインのスコープの指摘が持つ配布元（名前・版・取得元・更新の手立て・`ndf`）。ほかのスコープでは `None` |
+| `action_of(finding, in_ndf_repo)` | スコープの表（[issue-554-design-scope.md](issue-554-design-scope.md)）を引いて扱いを返す。**プラグインのスコープでは `source.ndf` が `起票` と `報告` を分ける** |
 
 **判定の関数はスコープを知らなくてよい。** 受け取るのは `Target` で、指摘を作るときにそのスコープを写す。
 **扱いを決めるのは出力の直前の 1 か所だけ**である（`main`）。
