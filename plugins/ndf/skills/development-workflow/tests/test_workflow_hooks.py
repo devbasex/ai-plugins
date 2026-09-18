@@ -7,8 +7,10 @@ hook が実際に登録されることは会話の単位を起こさないと確
 from __future__ import annotations
 
 import json
+import os
 import re
 import shlex
+import subprocess
 
 import pytest
 
@@ -288,3 +290,131 @@ def test_the_gates_stay_two() -> None:
     rows = [line for line in section.splitlines() if line.startswith("| ") and " | " in line]
     # 見出しの行と区切りの行を除いた残りが関門そのものである。
     assert len(rows) - 2 == 2, rows
+
+
+# 疑似の `gh`。呼び出しを 1 行ずつ控え、課題の状態をファイルで持つ。通信しない。
+FAKE_GH = r"""#!/usr/bin/env bash
+printf 'gh %s\n' "$*" >>"$FAKE_DIR/calls"
+case "$1 $2" in
+  "repo view") echo "$FAKE_REPO" ;;
+  "pr view")
+    case " $* " in
+      *" body,comments "*) cat "$FAKE_DIR/record" ;;
+      *) cat "$FAKE_DIR/pr-body" ;;
+    esac ;;
+  "issue view") cat "$FAKE_DIR/state-$3" ;;
+  "issue close") echo CLOSED >"$FAKE_DIR/state-$3"; echo "Closed issue #$3" ;;
+  *) exit 1 ;;
+esac
+"""
+
+# 疑似の `projects-sync.sh`。盤面の自動化は閉じない（`gh issue close` が閉じる経路）。
+FAKE_SYNC = """#!/usr/bin/env bash
+printf 'projects-sync %s\\n' "$*" >>"$FAKE_DIR/calls"
+"""
+
+# 本番への配布の記録と、全条件が合格したリリース後テストの記録。
+DISTRIBUTION_RECORD = """## 概要
+
+版を上げる。
+
+## 配布の記録
+
+段階: 本番（2026-09-18 10:00 に承認）
+版: 10.14.0 → 10.15.0（MINOR: 機能追加）
+まとまり: PR #717
+
+## リリース後テスト
+
+対象の版: 10.15.0（2026-09-18 11:00）
+
+| 課題 | 受け入れ条件 | 実行したこと | 実行時刻 | 結果 |
+| --- | --- | --- | --- | --- |
+| #12 | 閉じる | 手順を通した | 11:05 | 合格 |
+| #12 | 報告する | 報告を読んだ | 11:06 | 合格 |
+
+合否: 合格
+"""
+
+
+def closing_section(heading: str) -> str:
+    """「まとまりを閉じる」の下の `### <heading>` 節を返す。"""
+    body = PROGRESS_TRACKING.read_text(encoding="utf-8")
+    closing = body.split("\n## まとまりを閉じる\n")[1].split("\n## ")[0]
+    return closing.split(f"\n### {heading}\n")[1].split("\n### ")[0]
+
+
+def closing_bash(heading: str) -> str:
+    found = re.findall(r"^```bash\n(.*?)^```$", closing_section(heading), re.MULTILINE | re.DOTALL)
+    assert len(found) == 1, f"{heading} の bash が 1 つでない: {len(found)} 個"
+    return found[0]
+
+
+def test_the_closing_step_closes_an_open_issue_after_the_board_is_done(tmp_path) -> None:
+    """現状固定: 本番へ配布し全条件が合格した OPEN の課題を、盤面の Done の後で閉じる。
+
+    手順書の 2 つのコード例（「配布の記録」の読み取りと「手順」）を、疑似の `gh` と
+    `projects-sync.sh` へ向けてそのまま実行する。置き換えるのは `<...>` の差し込み口だけ。
+    """
+    fake = tmp_path / "fake"
+    (fake / "bin").mkdir(parents=True)
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "lib").symlink_to(PLUGIN_ROOT / "scripts/lib")
+    for path, text in ((fake / "bin/gh", FAKE_GH), (scripts / "projects-sync.sh", FAKE_SYNC)):
+        path.write_text(text, encoding="utf-8")
+        path.chmod(0o755)
+    (fake / "record").write_text(DISTRIBUTION_RECORD, encoding="utf-8")
+    (fake / "pr-body").write_text("Fixes devbasex/ai-plugins#12\n", encoding="utf-8")
+    (fake / "state-12").write_text("OPEN\n", encoding="utf-8")
+
+    script = closing_bash("配布の記録") + closing_bash("手順")
+    for placeholder, value in {
+        "<記録のPR番号>": "717",
+        "<PR番号>": "$bundle_prs",
+        "<所有者>/<リポジトリ>": "devbasex/ai-plugins",
+        "<番号>": "12",
+        "<マイルストーン>": "01 テスト",
+        "<工程名>": "振り返り",
+    }.items():
+        script = script.replace(placeholder, value)
+    script += '\nprintf "stage=%s\\nver=%s\\nbefore=%s\\nnow=%s\\nafter=%s\\n" "$stage" "$ver" "$before" "$now" "$after"\n'
+
+    env = {
+        "PATH": f"{fake / 'bin'}:{os.environ.get('PATH', '')}",
+        "SCRIPTS": str(scripts),
+        "FAKE_DIR": str(fake),
+        "FAKE_REPO": "devbasex/ai-plugins",
+        "LC_ALL": "C.UTF-8",
+    }
+    done = subprocess.run(
+        ["bash", "-c", script], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60
+    )
+    assert done.returncode == 0, done.stderr
+    out = done.stdout.splitlines()
+
+    # 閉じる条件: 本番への配布で、本番の版のリリース後テストの行がすべて合格。
+    assert "stage=本番（2026-09-18 10:00 に承認）" in out, out
+    assert "ver=10.15.0" in out, out
+    rows = [line for line in out if line.startswith("| #12 ")]
+    assert len(rows) == 2 and all(row.split("|")[5].strip().startswith("合格") for row in rows), out
+    # まとまりの課題はリポジトリまで含めて取り出される。
+    assert "devbasex/ai-plugins\t12" in out, out
+
+    calls = (fake / "calls").read_text(encoding="utf-8").splitlines()
+    views = [i for i, call in enumerate(calls) if call.startswith("gh issue view 12 ")]
+    board = calls.index("projects-sync 12 status Done")
+    close = next(i for i, call in enumerate(calls) if call.startswith("gh issue close 12 "))
+    # (a) 状態を読む → (b) 盤面を Done → (c) 読み直す → 閉じる → (d) 読み直す。
+    assert len(views) == 3, calls
+    assert views[0] < board < views[1] < close < views[2], calls
+    assert "--repo devbasex/ai-plugins" in calls[close], calls[close]
+    assert "before=OPEN" in out and "now=OPEN" in out and "after=CLOSED" in out, out
+
+    # 結果の報告: before が OPEN で after が CLOSED なら `閉じた`。戻し方を載せる。
+    report = closing_section("結果の報告")
+    closed = [line for line in report.splitlines() if line.startswith("| `閉じた` |")]
+    assert len(closed) == 1, report
+    condition, carried = [cell.strip() for cell in closed[0].strip("|").split("|")][1:3]
+    assert "`before` が OPEN" in condition and "`after` が CLOSED" in condition, condition
+    assert "`gh issue reopen <番号> --repo <所有者>/<リポジトリ>`" in carried, carried

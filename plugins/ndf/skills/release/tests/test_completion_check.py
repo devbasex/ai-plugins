@@ -484,3 +484,46 @@ def test_an_empty_completion_fact_is_not_passed_over() -> None:
 def test_a_missing_table_is_not_passed_over() -> None:
     with pytest.raises(AssertionError):
         table_rows(f"{RULES_SECTION}\n\n表の無い本文。\n", RULES_SECTION)
+
+
+# --- 配布の記録: 配布を飛ばした経路 --------------------------------------------------
+
+
+RECORD_HEADING = "## 配布の記録"
+
+
+def record_fields(block: str) -> dict[str, str]:
+    """「配布の記録」のブロックを、見出しの直後に並ぶ `<項目>: <値>` の対応として返す。"""
+    lines = [line for line in block.splitlines() if line.strip()]
+    assert lines and lines[0] == RECORD_HEADING, f"見出しで始まらない: {lines[:1]}"
+    fields: dict[str, str] = {}
+    for line in lines[1:]:
+        found = re.match(r"(段階|版|まとまり): (.+)$", line)
+        assert found, f"項目の行として読めない: {line}"
+        fields[found.group(1)] = found.group(2)
+    return fields
+
+
+def test_the_skipped_distribution_record_starts_without_distribution_and_has_no_version() -> None:
+    """現状固定: 配布を飛ばしたときは `段階: 配布なし` と `まとまり:` の 2 行だけを置く。
+
+    規則は出力物の節の本文から取り、通常の例と同じ読み取りへ通して項目ごとに比べる。
+    """
+    output = section(read(SKILL), OUTPUT)
+    examples = [
+        block for block in fenced_blocks(output, "markdown") if block.startswith(RECORD_HEADING)
+    ]
+    assert len(examples) == 1, f"配布の記録の例が 1 つでない: {len(examples)} 個"
+    normal = record_fields(examples[0])
+    assert list(normal) == ["段階", "版", "まとまり"], normal
+    assert normal["段階"].startswith("本番"), normal
+
+    flat = output.replace("\n", "")
+    stage = re.search(r"`(段階: 配布なし（[^`]+）)`", flat)
+    assert stage, "配布を飛ばしたときの `段階:` の書き方が無い"
+    assert "`まとまり:` の 2 行だけを書き（`版:` は書かない）" in flat
+
+    skipped = record_fields(f"{RECORD_HEADING}\n\n{stage.group(1)}\nまとまり: {normal['まとまり']}\n")
+    assert skipped["段階"].startswith("配布なし"), skipped
+    assert "版" not in skipped, skipped
+    assert skipped["まとまり"] == normal["まとまり"], skipped
