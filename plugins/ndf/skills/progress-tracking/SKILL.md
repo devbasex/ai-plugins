@@ -157,17 +157,22 @@ RECORD_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 # 1. まとまりの Pull Request の一覧を得る。同じ実行の中なら release が承認の提示に並べた
 #    一覧を使う。別の実行なら、下の「配布の記録」のコード例の bundle_prs
 #    （最後の「## 配布の記録」ブロックの `まとまり:` の行）を使う
-[ -n "$bundle_prs" ] || echo "まとまりの行が無い。推測せず運用者に一覧を聞く" >&2
+#    空なら手順 2 へ進まない。番号を省いた `gh pr view` は現在のブランチの Pull Request を
+#    選ぶため、別のまとまりの課題を閉じうる
+[ -n "$bundle_prs" ] || { echo "まとまりの行が無い。推測せず運用者に一覧を聞く" >&2; exit 1; }
 
-# 2. まとまりの課題を集める。1 の Pull Request ごとに
+# 2. まとまりの課題を集める。1 の Pull Request ごとに。**番号を省かない**
 gh pr view <PR番号> --repo "$RECORD_REPO" --json body -q .body | bash "$SCRIPTS/lib/closing-issues.sh"
 # → <所有者>/<リポジトリ><TAB><番号> の行。重複は 1 つにする
 
 # 3. 閉じる条件（下の表）を満たす課題ごとに (a)〜(d) の順で行う。満たさない課題は行わず
 #    `開いたまま` にする。盤面を書く前に状態を読むのは、Auto-close issue が Done で閉じた
 #    課題を「既に閉じていた」と数えないため
-# (a) 盤面を書く前に状態を読んで控える（OPEN / CLOSED）
-before=$(gh issue view <番号> --repo <所有者>/<リポジトリ> --json state -q .state)
+# (a) 盤面を書く前に状態を読んで控える（OPEN / CLOSED）。
+#     **読めなければ (b) へ進まず、その課題を `失敗（before を読めない）` にする。**
+#     状態を確かめないまま盤面を Done にすると、Auto-close が有効なリポジトリでは
+#     結果を 4 つのどれにも分類できないまま課題が閉じる
+before=$(gh issue view <番号> --repo <所有者>/<リポジトリ> --json state -q .state) || continue
 # (b) 記録のリポジトリの課題なら盤面を Done にする
 [ "<所有者>/<リポジトリ>" = "$RECORD_REPO" ] && bash "$SCRIPTS/projects-sync.sh" <番号> status "Done"
 # (c) 状態を読み直し、OPEN のときだけ閉じる（(b) の自動化が閉じていれば CLOSED なので行わない）。

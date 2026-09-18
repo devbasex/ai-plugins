@@ -11,6 +11,7 @@ import os
 import re
 import shlex
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -510,6 +511,99 @@ def test_the_closing_step_closes_an_open_issue_after_the_board_is_done(tmp_path)
     condition, carried = [cell.strip() for cell in closed[0].strip("|").split("|")][1:3]
     assert "`before` が OPEN" in condition and "`after` が CLOSED" in condition, condition
     assert "`gh issue reopen <番号> --repo <所有者>/<リポジトリ>`" in carried, carried
+
+
+def closing_fake(tmp_path, *, pr_body: str, state_12: str, record: str) -> tuple[Path, dict]:
+    """「手順」のコード例を疑似の `gh` / `projects-sync.sh` へ向けて実行する土台を作る。
+
+    返すのは `(呼び出しを控える先, 環境)` である。呼び出しの並びを見て、止まるはずの
+    経路がその先のコマンドを呼んでいないことを確かめる。
+    """
+    fake = tmp_path / "fake"
+    (fake / "bin").mkdir(parents=True)
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "lib").symlink_to(PLUGIN_ROOT / "scripts/lib")
+    for path, text in ((fake / "bin/gh", FAKE_GH), (scripts / "projects-sync.sh", FAKE_SYNC)):
+        path.write_text(text, encoding="utf-8")
+        path.chmod(0o755)
+    (fake / "record").write_text(record, encoding="utf-8")
+    (fake / "pr-body").write_text(pr_body, encoding="utf-8")
+    if state_12 is not None:
+        (fake / "state-12").write_text(state_12, encoding="utf-8")
+    env = {
+        "PATH": f"{fake / 'bin'}:{os.environ.get('PATH', '')}",
+        "SCRIPTS": str(scripts),
+        "FAKE_DIR": str(fake),
+        "FAKE_REPO": "devbasex/ai-plugins",
+        "LC_ALL": "C.UTF-8",
+    }
+    return fake, env
+
+
+def test_the_closing_step_stops_when_the_bundle_list_is_empty(tmp_path) -> None:
+    """まとまりの一覧が空なら、手順 2 の `gh pr view` を呼ばずに止まる。
+
+    番号を省いた `gh pr view` は現在のブランチの Pull Request を選ぶ。空のまま進むと、
+    **別のまとまりの課題を閉じうる**（#747 のレビュー指摘）。
+    """
+    fake, env = closing_fake(
+        tmp_path, pr_body="Fixes devbasex/ai-plugins#12\n", state_12="OPEN\n",
+        record="（配布の記録が無い）\n",
+    )
+    script = 'bundle_prs=""\n' + closing_bash("手順").replace("<PR番号>", "$bundle_prs")
+
+    done = subprocess.run(
+        ["bash", "-c", script], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60
+    )
+
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert "推測せず運用者に一覧を聞く" in done.stderr, done.stderr
+    calls = (fake / "calls").read_text(encoding="utf-8") if (fake / "calls").exists() else ""
+    assert "gh pr view" not in calls, calls
+    assert "gh issue close" not in calls, calls
+
+
+def test_the_closing_step_does_not_touch_the_board_when_the_first_read_fails(tmp_path) -> None:
+    """(a) の状態を読めなければ、盤面も課題も変えない。
+
+    読めないまま盤面を Done にすると、`Auto-close issue` が有効なリポジトリでは結果を
+    4 つのどれにも分類できないまま課題が閉じる（#747 のレビュー指摘）。
+    """
+    fake, env = closing_fake(
+        tmp_path, pr_body="Fixes devbasex/ai-plugins#12\n", state_12=None,
+        record="（配布の記録が無い）\n",
+    )
+    # 手順 3 の (a)〜(d) だけを、条件を満たした 1 件に対して実行する。
+    script = "for n in 12; do\n" + "\n".join(
+        line for line in closing_bash("手順").splitlines()
+        if line.startswith(("before=", "[ \"<所有者>", "now=", "[ \"$now\"", "after="))
+    ) + "\ndone\nprintf 'end=%s\\n' \"${after-未設定}\""
+    for placeholder, value in {
+        "<所有者>/<リポジトリ>": "devbasex/ai-plugins",
+        "<番号>": "12",
+        "<マイルストーン>": "01 テスト",
+        "<工程名>": "振り返り",
+    }.items():
+        script = script.replace(placeholder, value)
+    script = 'RECORD_REPO=devbasex/ai-plugins\n' + script
+
+    done = subprocess.run(
+        ["bash", "-c", script], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60
+    )
+
+    calls = (fake / "calls").read_text(encoding="utf-8") if (fake / "calls").exists() else ""
+    assert "projects-sync" not in calls, calls
+    assert "gh issue close" not in calls, calls
+    assert "end=未設定" in done.stdout, done.stdout + done.stderr
+
+    # 結果の報告: 読み取りが 0 以外で終わった課題は `失敗`。やり直すコマンドを載せる。
+    report = closing_section("結果の報告")
+    failed = [line for line in report.splitlines() if line.startswith("| `失敗（理由）` |")]
+    assert len(failed) == 1, report
+    condition, carried = [cell.strip() for cell in failed[0].strip("|").split("|")][1:3]
+    assert "読み取りが 0 以外で終わった" in condition, condition
+    assert "`gh issue close <番号> --repo <所有者>/<リポジトリ>`" in carried, carried
 
 
 def release_verification_output_template() -> str:
