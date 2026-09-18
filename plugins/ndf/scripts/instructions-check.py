@@ -362,42 +362,51 @@ def collect_project(root: Path, decl: Declaration) -> ScopeRoot:
     return scope_root
 
 
+def _collect_scope_entry(
+    entry: dict, scope: str, root: Path, decl: Declaration,
+) -> ScopeRoot | None:
+    """`scopes` の 1 件から集める。位置が無ければ `None` を返す。"""
+    raw_path = entry.get("path")
+    if not isinstance(raw_path, str):
+        raise CheckError(f"宣言の scopes.{scope} の path が無いか文字列ではない")
+    located = _expand(raw_path, root)
+    source = None
+    if scope == "plugins":
+        source = Source(
+            name=str(entry.get("name", "")), version=str(entry.get("version", "")),
+            origin=str(entry.get("origin", "")), update=str(entry.get("update", "")),
+            ndf=bool(entry.get("ndf", False)),
+        )
+    allow = entry.get("imports")
+    if allow is not None and not isinstance(allow, dict):
+        raise CheckError(f"宣言の scopes.{scope} の imports がオブジェクトではない")
+
+    if located.is_file():
+        scope_root = ScopeRoot(located.parent, scope, allow, source)
+        files = [located]
+    elif located.is_dir():
+        scope_root = ScopeRoot(located, scope, allow, source)
+        files = sorted(p for p in located.rglob("*") if p.is_file())
+    else:
+        return None
+    for path in files:
+        rel = path.relative_to(scope_root.root).as_posix()
+        if located.is_dir() and not _matches(rel, decl.files):
+            continue
+        scope_root.targets.append(Target(
+            path=path, rel=rel, scope=scope, root=scope_root.root,
+            is_root_file="/" not in rel, imports=allow, source=source,
+        ))
+    return scope_root
+
+
 def collect_declared(scope: str, root: Path, decl: Declaration) -> list[ScopeRoot]:
     """`scopes` が挙げた位置から集める。**宣言に無ければそのスコープは走査しない。**"""
     roots: list[ScopeRoot] = []
     for entry in decl.scopes.get(scope) or []:
-        raw_path = entry.get("path")
-        if not isinstance(raw_path, str):
-            raise CheckError(f"宣言の scopes.{scope} の path が無いか文字列ではない")
-        located = _expand(raw_path, root)
-        source = None
-        if scope == "plugins":
-            source = Source(
-                name=str(entry.get("name", "")), version=str(entry.get("version", "")),
-                origin=str(entry.get("origin", "")), update=str(entry.get("update", "")),
-                ndf=bool(entry.get("ndf", False)),
-            )
-        allow = entry.get("imports")
-        if allow is not None and not isinstance(allow, dict):
-            raise CheckError(f"宣言の scopes.{scope} の imports がオブジェクトではない")
-
-        if located.is_file():
-            scope_root = ScopeRoot(located.parent, scope, allow, source)
-            files = [located]
-        elif located.is_dir():
-            scope_root = ScopeRoot(located, scope, allow, source)
-            files = sorted(p for p in located.rglob("*") if p.is_file())
-        else:
-            continue
-        for path in files:
-            rel = path.relative_to(scope_root.root).as_posix()
-            if located.is_dir() and not _matches(rel, decl.files):
-                continue
-            scope_root.targets.append(Target(
-                path=path, rel=rel, scope=scope, root=scope_root.root,
-                is_root_file="/" not in rel, imports=allow, source=source,
-            ))
-        roots.append(scope_root)
+        scope_root = _collect_scope_entry(entry, scope, root, decl)
+        if scope_root is not None:
+            roots.append(scope_root)
     return roots
 
 
