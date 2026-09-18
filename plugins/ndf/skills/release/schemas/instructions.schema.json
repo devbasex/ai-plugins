@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/ndf/skills/release/schemas/instructions.schema.json",
+  "title": "NDF 指示書の宣言",
+  "description": "リポジトリ側の .ndf/instructions.json。指示書の検査（instructions-check.py）の判定の強さを決める。無ければ既定の判定だけが動く。",
+  "type": "object",
+  "required": ["version"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "この定義ファイルへの参照。版を固定した公開の URL を書く。読み取り側は参照しない"
+    },
+    "version": { "type": "integer", "enum": [1], "description": "宣言の形の版" },
+    "files": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "走査する指示書の名前。/ を含まない値はファイル名の一致、含む値は根からの相対パスの一致。書くと既定の 3 つ（AGENTS.md / CLAUDE.md / KIRO.md）を置き換える"
+    },
+    "imports": {
+      "type": "object",
+      "description": "許可する即時読み込み。キーは根からの相対パス、値は {参照先: 理由}。書けば許可の外を指摘する。{} は「許可が 1 つも無い」で、未指定とは別の値",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": { "type": "string", "description": "毎回読ませる理由" }
+      }
+    },
+    "released": {
+      "type": "object",
+      "description": "出た版の取り出し方。pattern は名前付きの捕捉 (?P<version>…) を 1 つ持つ",
+      "required": ["source", "pattern"],
+      "additionalProperties": false,
+      "properties": {
+        "source": { "type": "string", "enum": ["changelog", "tags"] },
+        "path": { "type": "string", "description": "changelog のときの文書。根の中に収まること" },
+        "pattern": { "type": "string" }
+      }
+    },
+    "decisions": { "type": "string", "description": "退避先の文書。指摘の文面に出す" },
+    "pending_marker": {
+      "type": "string",
+      "minLength": 1,
+      "description": "版が決まる前の段落の印（例: の次の版で）。空文字列は宣言の不正"
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bytes": { "type": "integer", "minimum": 1, "description": "根の指示書 1 本あたりの読み込みの上限" }
+      }
+    },
+    "scopes": {
+      "type": "object",
+      "description": "--scope user / --scope plugins で見に行く先。無ければそのスコープは走査されない",
+      "additionalProperties": false,
+      "properties": {
+        "user": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["path"],
+            "additionalProperties": false,
+            "properties": {
+              "path": { "type": "string", "description": "走査する位置。先頭の ~ は home へ、相対は --root からの相対" },
+              "imports": { "type": "object", "description": "この位置の許可。キーはこの位置からの相対パス" }
+            }
+          }
+        },
+        "plugins": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["path"],
+            "additionalProperties": false,
+            "properties": {
+              "path": { "type": "string" },
+              "name": { "type": "string", "description": "報告に載せるプラグインの名前" },
+              "version": { "type": "string", "description": "報告に載せる版" },
+              "origin": { "type": "string", "description": "起票先のリポジトリ" },
+              "update": { "type": "string", "description": "報告に載せる更新の手立て" },
+              "ndf": { "type": "boolean", "description": "NDF が配るものか。true なら扱いは起票、false なら報告" },
+              "imports": { "type": "object" }
+            }
+          }
+        }
+      }
+    },
+    "import_syntax": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "即時読み込みの記法を解釈する指示書。既定は [\"CLAUDE.md\"]"
+    },
+    "import_depth": { "type": "integer", "minimum": 1, "description": "たどる深さの上限。既定 4" },
+    "refresh_timeout_seconds": { "type": "integer", "minimum": 1, "description": "--refresh が出典 1 件を取りに行くときの待ち。既定 10" },
+    "review_interval_days": { "type": "integer", "minimum": 1, "description": "観点の一覧が古いと知らせるまでの日数。既定 90" },
+    "reviewed_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "description": "そのリポジトリが観点の一覧を最後に見直した日。書けば日数の起点がこちらになる"
+    }
+  }
+}
