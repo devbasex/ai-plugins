@@ -287,6 +287,19 @@ def test_capacity_rejects_an_unknown_argument(tmp_path: Path) -> None:
     assert proc.returncode == 2
 
 
+def test_capacity_rejects_per_lane_mib_zero(tmp_path: Path) -> None:
+    """現状固定: 型検査を通る --per-lane-mib 0 は run_capacity が拒否する。
+
+    `non_negative_int` は 0 を通すため、0 を弾くのは run_capacity の
+    `--per-lane-mib は 1 以上である` である。終了コード 2・標準出力は空・
+    エラーが当該引数を識別できることを固定する。
+    """
+    proc = capacity(tmp_path, "--per-lane-mib", "0")
+    assert proc.returncode == 2
+    assert proc.stdout.strip() == ""
+    assert "--per-lane-mib" in proc.stderr
+
+
 # --- capacity: OOM Killer の回数（AC35） ------------------------------------
 
 def test_capacity_lowers_the_count_when_oom_kill_increased(tmp_path: Path) -> None:
