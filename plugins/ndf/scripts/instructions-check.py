@@ -179,6 +179,15 @@ def _declaration_from(raw: dict) -> Declaration:
     if version not in SUPPORTED_DECLARATION_VERSIONS:
         raise CheckError(f"宣言の version が無いか未対応である: {version!r}")
 
+    decl = _populate_declaration(raw)
+    _apply_field_constraints(raw, decl)
+    if decl.released is not None:
+        _validate_released(decl.released)
+    _validate_scopes(decl.scopes)
+    return decl
+
+
+def _populate_declaration(raw: dict) -> Declaration:
     decl = Declaration(present=True)
     decl.files = _typed(raw, "files", list, decl.files)
     if any(not isinstance(name, str) for name in decl.files):
@@ -190,7 +199,10 @@ def _declaration_from(raw: dict) -> Declaration:
     decl.scopes = _typed(raw, "scopes", dict, {})
     decl.import_syntax = _typed(raw, "import_syntax", list, decl.import_syntax)
     decl.reviewed_at = _typed(raw, "reviewed_at", str, None)
+    return decl
 
+
+def _apply_field_constraints(raw: dict, decl: Declaration) -> None:
     if "pending_marker" in raw:
         marker = _typed(raw, "pending_marker", str, None)
         # **空文字列はすべての段落へ当たり、出た版の判定が働かなくなる。**
@@ -208,15 +220,15 @@ def _declaration_from(raw: dict) -> Declaration:
         decl.budget["bytes"] = _positive(decl.budget, "bytes", 0)
     if decl.reviewed_at is not None:
         _parse_date(decl.reviewed_at, "reviewed_at")
-    if decl.released is not None:
-        _validate_released(decl.released)
+
+
+def _validate_scopes(scopes: dict) -> None:
     for name in ("user", "plugins"):
-        entries = decl.scopes.get(name)
+        entries = scopes.get(name)
         if entries is None:
             continue
         if not isinstance(entries, list) or any(not isinstance(e, dict) for e in entries):
             raise CheckError(f"宣言の scopes.{name} はオブジェクトの配列である")
-    return decl
 
 
 def _typed(raw: dict, key: str, kind: type, fallback):
