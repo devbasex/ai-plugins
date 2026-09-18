@@ -168,6 +168,42 @@ def lanes_by_memory(available_mib: int, running: int, reserve_mib: int,
     return running + max(0, (available_mib - reserve_mib) // per_lane_mib)
 
 
+def adjust_by_limits(by_memory: int, max_lanes: int) -> tuple[int, list[str]]:
+    """空きから導いた本数と上限の小さい方。どちらで決まったかも返す。"""
+    allowed = min(max_lanes, by_memory)
+    limited_by: list[str] = []
+    if by_memory <= max_lanes:
+        limited_by.append("memory")
+    if max_lanes <= by_memory:
+        limited_by.append(NO_LIMIT)
+    return allowed, limited_by
+
+
+def apply_swap_penalty(allowed: int, limited_by: list[str], swap_total_mib: int,
+                       swap_free_mib: int, min_pct: int) -> int:
+    """swap の空き率が下限を割っていれば 1 本減らす。"""
+    if swap_total_mib > 0 and swap_free_mib * 100 < swap_total_mib * min_pct:
+        allowed -= 1
+        limited_by.append("swap_low")
+    return allowed
+
+
+def apply_oom_floor(allowed: int, limited_by: list[str], oom_kill_increased: object,
+                    running: int) -> int:
+    """oom_kill が増えていれば今の本数未満へ下げ、増えていなければ下限の 1 を当てる。"""
+    if oom_kill_increased == "yes":
+        # 増えた見直しだけは 0 を許す。`running` が 0 か 1 のとき、下限の 1 を当てると
+        # 「今の本数 − 1 以下」を満たせない。
+        lowered = max(0, min(allowed, running - 1))
+        if lowered < allowed:
+            limited_by.append("oom_kill_increased")
+        return lowered
+    if allowed < 1:
+        limited_by.append("floor")
+        return 1
+    return allowed
+
+
 def run_capacity(args: argparse.Namespace) -> int:
     if args.per_lane_mib <= 0:
         raise Usage("--per-lane-mib は 1 以上である")
@@ -192,28 +228,10 @@ def run_capacity(args: argparse.Namespace) -> int:
 
     by_memory = lanes_by_memory(budget_mib, args.running, args.reserve_mib,
                                 args.per_lane_mib)
-    allowed = min(args.max_lanes, by_memory)
-    limited_by: list[str] = []
-    if by_memory <= args.max_lanes:
-        limited_by.append("memory")
-    if args.max_lanes <= by_memory:
-        limited_by.append(NO_LIMIT)
-
-    if swap_total_mib > 0 and swap_free_mib * 100 < swap_total_mib * args.swap_free_min_pct:
-        allowed -= 1
-        limited_by.append("swap_low")
-
-    if oom_kill_increased == "yes":
-        # 増えた見直しだけは 0 を許す。`running` が 0 か 1 のとき、下限の 1 を当てると
-        # 「今の本数 − 1 以下」を満たせない。
-        lowered = max(0, min(allowed, args.running - 1))
-        if lowered < allowed:
-            limited_by.append("oom_kill_increased")
-        allowed = lowered
-    else:
-        if allowed < 1:
-            allowed = 1
-            limited_by.append("floor")
+    allowed, limited_by = adjust_by_limits(by_memory, args.max_lanes)
+    allowed = apply_swap_penalty(allowed, limited_by, swap_total_mib, swap_free_mib,
+                                 args.swap_free_min_pct)
+    allowed = apply_oom_floor(allowed, limited_by, oom_kill_increased, args.running)
 
     emit([
         ("mem_available_mib", mem_available_mib),
