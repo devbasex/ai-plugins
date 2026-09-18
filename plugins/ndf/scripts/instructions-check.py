@@ -374,14 +374,9 @@ def collect_project(root: Path, decl: Declaration) -> ScopeRoot:
     return scope_root
 
 
-def _collect_scope_entry(
-    entry: dict, scope: str, root: Path, decl: Declaration,
-) -> ScopeRoot | None:
-    """`scopes` の 1 件から集める。位置が無ければ `None` を返す。"""
-    raw_path = entry.get("path")
-    if not isinstance(raw_path, str):
-        raise CheckError(f"宣言の scopes.{scope} の path が無いか文字列ではない")
-    located = _expand(raw_path, root)
+def _build_scope_metadata(
+    entry: dict, scope: str,
+) -> tuple[Source | None, dict | None]:
     source = None
     if scope == "plugins":
         source = Source(
@@ -392,15 +387,34 @@ def _collect_scope_entry(
     allow = entry.get("imports")
     if allow is not None and not isinstance(allow, dict):
         raise CheckError(f"宣言の scopes.{scope} の imports がオブジェクトではない")
+    return source, allow
 
+
+def _enumerate_scope_files(
+    located: Path, scope: str, allow: dict | None, source: Source | None,
+) -> tuple[ScopeRoot, list[Path]] | None:
     if located.is_file():
-        scope_root = ScopeRoot(located.parent, scope, allow, source)
-        files = [located]
-    elif located.is_dir():
+        return ScopeRoot(located.parent, scope, allow, source), [located]
+    if located.is_dir():
         scope_root = ScopeRoot(located, scope, allow, source)
         files = sorted(p for p in located.rglob("*") if p.is_file())
-    else:
+        return scope_root, files
+    return None
+
+
+def _collect_scope_entry(
+    entry: dict, scope: str, root: Path, decl: Declaration,
+) -> ScopeRoot | None:
+    """`scopes` の 1 件から集める。位置が無ければ `None` を返す。"""
+    raw_path = entry.get("path")
+    if not isinstance(raw_path, str):
+        raise CheckError(f"宣言の scopes.{scope} の path が無いか文字列ではない")
+    located = _expand(raw_path, root)
+    source, allow = _build_scope_metadata(entry, scope)
+    found = _enumerate_scope_files(located, scope, allow, source)
+    if found is None:
         return None
+    scope_root, files = found
     for path in files:
         rel = path.relative_to(scope_root.root).as_posix()
         if located.is_dir() and not _matches(rel, decl.files):
