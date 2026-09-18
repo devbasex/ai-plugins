@@ -188,18 +188,6 @@ def quota_remaining() -> int | None:
         return None
 
 
-def _rate_limited_by_words(attempt: Attempt) -> bool:
-    """本文または標準エラーに上限を指す語があるか。"""
-    return _has_rate_words(f"{attempt.message} {attempt.stderr}")
-
-
-def _rate_limited_by_quota(status: int | None) -> bool:
-    """状態が上限系のとき、残り回数が 0 なら上限とみなす。"""
-    if status not in (403, 429):
-        return False
-    return quota_remaining() == 0
-
-
 def is_rate_limited(attempt: Attempt) -> bool:
     """この失敗が上限によるものか。
 
@@ -215,7 +203,11 @@ def is_rate_limited(attempt: Attempt) -> bool:
     status = attempt.http
     if status is not None and status not in (403, 429):
         return False
-    return _rate_limited_by_words(attempt) or _rate_limited_by_quota(status)
+    if _has_rate_words(f"{attempt.message} {attempt.stderr}"):
+        return True
+    if status in (403, 429):
+        return quota_remaining() == 0
+    return False
 
 
 # ---------------- 送る内容の組み立て ----------------
