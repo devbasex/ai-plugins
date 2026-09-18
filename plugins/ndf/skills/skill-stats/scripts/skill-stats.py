@@ -692,6 +692,129 @@ def all_session_ids() -> list[str]:
     )
 
 
+def select_transcripts(
+    args: argparse.Namespace,
+    date_from: datetime | None,
+    date_to: datetime | None,
+    effective_days: int | None,
+) -> list[pathlib.Path]:
+    """集計対象の transcript を決める。
+
+    `--session` を渡したときはそのセッションの conductor の記録だけを数える（AC6）。
+    渡さないときは日数・日付範囲で mtime を絞る。
+    """
+    if args.session:
+        # **`--session` は Skill の統計をそのセッションの conductor の記録だけで数える**
+        # （AC6 の確かめ方）。配下の記録は `--agents` の表が扱う。
+        return [
+            path for path in (
+                transcript_agents.session_paths(s)[0] for s in args.session
+            ) if path is not None
+        ]
+    return list(iter_transcripts(effective_days, date_from, date_to))
+
+
+def filter_projects(
+    per_project: dict[str, tuple[Counter, Counter, Counter, Counter]],
+    needle: str,
+) -> dict[str, tuple[Counter, Counter, Counter, Counter]]:
+    """プロジェクト名の部分一致でテーブルを絞る。"""
+    needle = needle.lower()
+    return {
+        k: v for k, v in per_project.items() if needle in k.lower()
+    }
+
+
+def emit_json(
+    skills: list[dict],
+    per_project: dict[str, tuple[Counter, Counter, Counter, Counter]],
+    args: argparse.Namespace,
+    effective_days: int | None,
+    plugin_root: pathlib.Path,
+    transcripts: list[pathlib.Path],
+    agents: list,
+    agent_summary: list[dict],
+    totals_rows: list[dict],
+    totals: dict,
+    usage: list[dict],
+    excluded: int,
+) -> None:
+    projects_json = []
+    for project, (auto, explicit, trig, hits) in sorted(per_project.items()):
+        rows, total = build_rows(skills, auto, explicit, trig, hits)
+        projects_json.append({
+            "project": project,
+            "total": total,
+            "skills": rows,
+        })
+    grand_rows, grand_total = build_rows(skills, *merge_counters(per_project))
+    out = {
+        "meta": {
+            "days": effective_days,
+            "date_from": args.date_from,
+            "date_to": args.date_to,
+            "transcripts": len(transcripts),
+            "plugin_root": str(plugin_root),
+            "by_project": args.by_project,
+            "project_filter": args.project,
+        },
+        "total": grand_total,
+        "grand_skills": grand_rows,
+        "projects": projects_json,
+    }
+    if args.agents:
+        out["meta"]["window_limit"] = args.window_limit
+        out.update({
+            "agents": [r.as_row() for r in agents],
+            "agent_summary": agent_summary,
+            "layer_totals": totals_rows,
+            "totals": totals,
+            "role_usage": usage,
+            "excluded": excluded,
+        })
+    print(json.dumps(out, ensure_ascii=False, indent=2))
+
+
+def emit_markdown(
+    skills: list[dict],
+    per_project: dict[str, tuple[Counter, Counter, Counter, Counter]],
+    args: argparse.Namespace,
+    agents: list,
+    agent_summary: list[dict],
+    totals_rows: list[dict],
+    totals: dict,
+    usage: list[dict],
+    excluded: int,
+) -> None:
+    if args.by_project:
+        for project, (auto, explicit, trig, hits) in sorted(per_project.items()):
+            rows, total = build_rows(skills, auto, explicit, trig, hits)
+            if total["invocations"] == 0 and total["triggers"] == 0:
+                continue  # skip silent projects
+            print()
+            print(format_markdown(rows, total, heading=f"## {project}"))
+        # grand total
+        grand_rows, grand_total = build_rows(skills, *merge_counters(per_project))
+        print()
+        print(format_markdown(grand_rows, grand_total, heading="## 全プロジェクト合計"))
+    else:
+        rows, total = build_rows(skills, *merge_counters(per_project))
+        print(format_markdown(rows, total))
+
+    if args.show_keywords:
+        print("\n## 抽出トリガーキーワード")
+        for s in sorted(skills, key=lambda x: x["name"]):
+            kw = ", ".join(s["triggers"]) or "-"
+            print(f"- `ndf:{s['name']}`: {kw}")
+
+    if args.agents:
+        print()
+        print(format_agents_markdown(
+            agents, agent_summary, excluded, totals_rows, totals, usage,
+            with_session=bool(args.session),
+        ))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="NDF skill usage statistics from Claude Code transcripts",
@@ -743,16 +866,7 @@ def main() -> int:
     if args.skill:
         skills = [s for s in skills if args.skill in s["name"]]
 
-    if args.session:
-        # **`--session` は Skill の統計をそのセッションの conductor の記録だけで数える**
-        # （AC6 の確かめ方）。配下の記録は `--agents` の表が扱う。
-        transcripts = [
-            path for path in (
-                transcript_agents.session_paths(s)[0] for s in args.session
-            ) if path is not None
-        ]
-    else:
-        transcripts = list(iter_transcripts(effective_days, date_from, date_to))
+    transcripts = select_transcripts(args, date_from, date_to, effective_days)
 
     agents: list = []
     agent_summary: list[dict] = []
@@ -784,77 +898,21 @@ def main() -> int:
 
     per_project = aggregate_by_project(transcripts, skills, all_skill_names)
     if args.project:
-        needle = args.project.lower()
-        per_project = {
-            k: v for k, v in per_project.items() if needle in k.lower()
-        }
+        per_project = filter_projects(per_project, args.project)
         if not per_project:
             print(f"[skill-stats] no projects matched: {args.project}", file=sys.stderr)
             return 0
 
     if args.format == "json":
-        projects_json = []
-        for project, (auto, explicit, trig, hits) in sorted(per_project.items()):
-            rows, total = build_rows(skills, auto, explicit, trig, hits)
-            projects_json.append({
-                "project": project,
-                "total": total,
-                "skills": rows,
-            })
-        grand_rows, grand_total = build_rows(skills, *merge_counters(per_project))
-        out = {
-            "meta": {
-                "days": effective_days,
-                "date_from": args.date_from,
-                "date_to": args.date_to,
-                "transcripts": len(transcripts),
-                "plugin_root": str(plugin_root),
-                "by_project": args.by_project,
-                "project_filter": args.project,
-            },
-            "total": grand_total,
-            "grand_skills": grand_rows,
-            "projects": projects_json,
-        }
-        if args.agents:
-            out["meta"]["window_limit"] = args.window_limit
-            out.update({
-                "agents": [r.as_row() for r in agents],
-                "agent_summary": agent_summary,
-                "layer_totals": totals_rows,
-                "totals": totals,
-                "role_usage": usage,
-                "excluded": excluded,
-            })
-        print(json.dumps(out, ensure_ascii=False, indent=2))
+        emit_json(
+            skills, per_project, args, effective_days, plugin_root, transcripts,
+            agents, agent_summary, totals_rows, totals, usage, excluded,
+        )
     else:
-        if args.by_project:
-            for project, (auto, explicit, trig, hits) in sorted(per_project.items()):
-                rows, total = build_rows(skills, auto, explicit, trig, hits)
-                if total["invocations"] == 0 and total["triggers"] == 0:
-                    continue  # skip silent projects
-                print()
-                print(format_markdown(rows, total, heading=f"## {project}"))
-            # grand total
-            grand_rows, grand_total = build_rows(skills, *merge_counters(per_project))
-            print()
-            print(format_markdown(grand_rows, grand_total, heading="## 全プロジェクト合計"))
-        else:
-            rows, total = build_rows(skills, *merge_counters(per_project))
-            print(format_markdown(rows, total))
-
-        if args.show_keywords:
-            print("\n## 抽出トリガーキーワード")
-            for s in sorted(skills, key=lambda x: x["name"]):
-                kw = ", ".join(s["triggers"]) or "-"
-                print(f"- `ndf:{s['name']}`: {kw}")
-
-        if args.agents:
-            print()
-            print(format_agents_markdown(
-                agents, agent_summary, excluded, totals_rows, totals, usage,
-                with_session=bool(args.session),
-            ))
+        emit_markdown(
+            skills, per_project, args,
+            agents, agent_summary, totals_rows, totals, usage, excluded,
+        )
 
     return 0
 

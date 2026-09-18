@@ -255,6 +255,60 @@ def _tool_use_ids(rows: list[dict]) -> list[str]:
     return ids
 
 
+def _aggregate_token_metrics(rows: list[dict], record: AgentRecord) -> None:
+    """固定費・最大充填・応答数・モデルを合成でない応答だけで数える（AC24）。
+
+    `record` の `fixed` / `peak` / `work` / `responses` / `model` を埋める。
+    """
+    seen: set[str] = set()
+    models: Counter = Counter()
+    for row in rows:
+        if row.get("type") != "assistant" or _is_synthetic(row):
+            continue
+        total = _input_total(row)
+        if total is not None:
+            if record.fixed is None:
+                record.fixed = total
+            record.peak = total if record.peak is None else max(record.peak, total)
+        message_id = _message(row).get("id")
+        if isinstance(message_id, str) and message_id and message_id not in seen:
+            seen.add(message_id)
+            model = _message(row).get("model")
+            if isinstance(model, str) and model:
+                models[model] += 1
+    record.responses = len(seen)
+    if record.fixed is not None and record.peak is not None:
+        record.work = record.peak - record.fixed
+    if models:
+        record.model = models.most_common(1)[0][0]
+
+
+def _count_interruptions(rows: list[dict]) -> int:
+    """上限の中断から続けた回数（429 の合成の応答のうち、後ろに合成でない応答が続くもの）。"""
+    interruptions = 0
+    pending = 0
+    for row in rows:
+        if row.get("type") != "assistant":
+            continue
+        if _is_synthetic(row):
+            if _error_status(row) == "429":
+                pending += 1
+            continue
+        interruptions += pending
+        pending = 0
+    return interruptions
+
+
+def _calculate_duration(rows: list[dict]) -> tuple[str | None, str | None, int]:
+    """タイムスタンプ走査で開始/終了時刻と所要時間（秒）を返す。"""
+    times = [t for t in (_parse_time(row.get("timestamp")) for row in rows) if t]
+    if not times:
+        return None, None, 0
+    return times[0].isoformat(), times[-1].isoformat(), int(
+        (times[-1] - times[0]).total_seconds()
+    )
+
+
 def read_file(path: pathlib.Path, meta: dict | None = None) -> tuple[AgentRecord, int]:
     """記録 1 件を読む。返すのは `AgentRecord` と飛ばした行の数である。"""
     meta = meta or {}
@@ -278,40 +332,8 @@ def read_file(path: pathlib.Path, meta: dict | None = None) -> tuple[AgentRecord
         tool_use_ids=_tool_use_ids(rows),
     )
 
-    # 固定費・最大充填・応答数・モデルは、合成でない応答だけで数える（AC24）
-    seen: set[str] = set()
-    models: Counter = Counter()
-    for row in rows:
-        if row.get("type") != "assistant" or _is_synthetic(row):
-            continue
-        total = _input_total(row)
-        if total is not None:
-            if record.fixed is None:
-                record.fixed = total
-            record.peak = total if record.peak is None else max(record.peak, total)
-        message_id = _message(row).get("id")
-        if isinstance(message_id, str) and message_id and message_id not in seen:
-            seen.add(message_id)
-            model = _message(row).get("model")
-            if isinstance(model, str) and model:
-                models[model] += 1
-    record.responses = len(seen)
-    if record.fixed is not None and record.peak is not None:
-        record.work = record.peak - record.fixed
-    if models:
-        record.model = models.most_common(1)[0][0]
-
-    # 上限の中断から続けた回数（429 の合成の応答のうち、後ろに合成でない応答が続くもの）
-    pending = 0
-    for row in rows:
-        if row.get("type") != "assistant":
-            continue
-        if _is_synthetic(row):
-            if _error_status(row) == "429":
-                pending += 1
-            continue
-        record.interruptions += pending
-        pending = 0
+    _aggregate_token_metrics(rows, record)
+    record.interruptions = _count_interruptions(rows)
 
     if record.ending == "rate_limit":
         for row in reversed(rows):
@@ -329,11 +351,9 @@ def read_file(path: pathlib.Path, meta: dict | None = None) -> tuple[AgentRecord
                     record.rate_limit_type = limit_type
             break
 
-    times = [t for t in (_parse_time(row.get("timestamp")) for row in rows) if t]
-    if times:
-        record.started_at = times[0].isoformat()
-        record.ended_at = times[-1].isoformat()
-        record.duration_seconds = int((times[-1] - times[0]).total_seconds())
+    record.started_at, record.ended_at, record.duration_seconds = (
+        _calculate_duration(rows)
+    )
     return record, skipped
 
 
