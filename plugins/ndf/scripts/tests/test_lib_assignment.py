@@ -118,3 +118,23 @@ def test_assign_rejects_an_unknown_host(assignment):
         match=r"^ホストになれないランタイムです: unknown$",
     ):
         assignment.assign(1, "unknown")
+
+
+def test_review_assign_rotates_dropped_runtime_across_rounds(assignment):
+    """現状固定: ホスト（claude）に対してラウンド番号 1, 2, 3 で外れるランタイムが順に切り替わる。"""
+    round1 = assignment.review_assign(1, "claude")
+    round2 = assignment.review_assign(2, "claude")
+    round3 = assignment.review_assign(3, "claude")
+
+    assert round1 == ["agy", "kiro"]
+    assert round2 == ["codex", "kiro"]
+    assert round3 == ["codex", "agy"]
+
+    pool = assignment.review_pool("claude")
+    dropped = [
+        set(pool) - set(round1),
+        set(pool) - set(round2),
+        set(pool) - set(round3),
+    ]
+    assert dropped == [{"codex"}, {"agy"}, {"kiro"}]
+
