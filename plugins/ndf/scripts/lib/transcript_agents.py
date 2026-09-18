@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import pathlib
 import sys
@@ -588,7 +589,9 @@ def wait_reset(
     slept = 0
     cut = False
     if futures:
-        seconds = int((min(futures) - now).total_seconds()) + int(margin)
+        # **切り上げる。** 端数を捨てると解除時刻より早く起きてしまい、`--margin 0` では
+        # 解除の前に再開してよいと読める答えを返す（AC44）。
+        seconds = math.ceil((min(futures) - now).total_seconds()) + int(margin)
         slept = max(seconds, 0)
         if max_sleep is not None and slept > max_sleep:
             slept = int(max_sleep)

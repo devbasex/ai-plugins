@@ -592,3 +592,15 @@ def test_a_negative_margin_or_max_sleep_ends_with_two() -> None:
     for bad in (("--margin", "-1"), ("--max-sleep", "-1")):
         p = run("wait-reset", "--session", "sess-d", "--depth", "1", *bad)
         assert p.returncode == 2, (bad, p.stdout, p.stderr)
+
+
+def test_wait_reset_never_wakes_before_the_reset_time(mod) -> None:
+    """端数を切り捨てると解除時刻より早く起きる。`--margin 0` でも前に戻らない。"""
+    sleeper = Sleeper()
+    slept, _, code = mod.wait_reset(
+        ["sess-c"], root=FIXTURES, margin=0, sleeper=sleeper,
+        now=mod.parse_now("2026-09-17T08:59:59.500000+00:00"))
+    # 解除は 09:00:00。0.5 秒を捨てると 0 秒になり、解除の前に戻る
+    assert slept == 1
+    assert sleeper.slept == [1]
+    assert code == 0
