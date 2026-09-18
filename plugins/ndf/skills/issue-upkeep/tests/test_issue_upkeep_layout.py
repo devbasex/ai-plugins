@@ -884,6 +884,7 @@ def test_table_helper_does_not_pass_over_a_missing_heading() -> None:
 
 GROUP_SECTION = "## 並列の組を説明へ書く"
 GROUP_TABLE_HEADER = "| 組 | 課題 | 触る場所の見込み | 依存 |"
+GROUP_TIMING_TABLE_HEADER = "| 時点 | 行うこと |"
 
 
 def group_section() -> str:
@@ -900,7 +901,7 @@ def test_milestones_have_a_section_for_the_parallel_groups() -> None:
 
 def test_the_group_row_is_written_when_an_issue_enters_a_milestone() -> None:
     """AC20: 新しく作る・既存へ足す・直近へ移すの 3 つが同じ時点として扱われる。"""
-    rows = table(group_section(), "| 時点 | 行うこと |")
+    rows = table(group_section(), GROUP_TIMING_TABLE_HEADER)
     moments = [row[0] for row in rows]
     assert any("入れる" in m and "新しく作る" in m and "足す" in m and "移す" in m
                for m in moments), moments
@@ -954,7 +955,7 @@ def test_an_empty_group_row_is_removed_without_renumbering_the_remaining_groups(
     group_column = next(row for row in column_rows if row[0] == "組")
     assert group_column[1] == "1 から始まる連番。説明の中で一意"
 
-    timing_rows = table(part, "| 時点 | 行うこと |")
+    timing_rows = table(part, GROUP_TIMING_TABLE_HEADER)
     moving = next(row for row in timing_rows if row[0] == "課題を別のマイルストーンへ移す")
     assert plain(moving[1]) == (
         "元の説明の表から番号を消す。課題が 0 件になった組は行を消し、"
@@ -994,7 +995,7 @@ def test_group_partition_rule_by_fix_layer() -> None:
 def test_group_timing_branches_and_actions(
         timing_pattern: str, expected_actions: list[str]) -> None:
     """現状固定: マイルストーンへの追加（一致・不一致）、移動、完了の各分岐における動作対応を固定する。"""
-    rows = table(group_section(), "| 時点 | 行うこと |")
+    rows = table(group_section(), GROUP_TIMING_TABLE_HEADER)
     row = next(r for r in rows if timing_pattern in r[0])
     action = plain(row[1])
     for expected in expected_actions:
