@@ -100,3 +100,21 @@ def test_assign_keeps_the_eight_round_rotation(assignment, host):
     assert any(impl != host for impl, _ in actual)
     assert all(len(reviewers) == 2 for _, reviewers in actual)
     assert all(impl not in reviewers for impl, reviewers in actual)
+
+
+def test_assign_rejects_round_zero(assignment):
+    """現状固定: ラウンド 0 は不正な値を含む AssignmentError にする。"""
+    with pytest.raises(
+        assignment.AssignmentError,
+        match=r"^ラウンド番号は 1 以上です: 0$",
+    ):
+        assignment.assign(0, "codex")
+
+
+def test_assign_rejects_an_unknown_host(assignment):
+    """現状固定: 未知のホストはその値を含む AssignmentError にする。"""
+    with pytest.raises(
+        assignment.AssignmentError,
+        match=r"^ホストになれないランタイムです: unknown$",
+    ):
+        assignment.assign(1, "unknown")

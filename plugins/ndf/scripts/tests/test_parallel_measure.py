@@ -142,6 +142,22 @@ def test_capacity_never_goes_below_one_lane(tmp_path: Path) -> None:
     assert values["limited_by"] == "memory,floor"
 
 
+def test_capacity_accepts_zero_max_but_floors_allowed_at_one(tmp_path: Path) -> None:
+    """現状固定: 上限 0 も受理するが、通常時の allowed は 1 を下回らない。"""
+    proc = capacity(
+        tmp_path,
+        "--max", "0",
+        available_mib=2048,
+        swap_free_mib=2047,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    values = keys(proc.stdout)
+    assert values["by_memory"] == "0"
+    assert values["allowed"] == "1"
+    assert values["limited_by"] == "memory,max,floor"
+
+
 def test_capacity_counts_running_lanes_into_the_total(tmp_path: Path) -> None:
     """空きは動いている担当の使用量を引いた後の値なので、`running` を足して総本数にする。"""
     proc = capacity(tmp_path, "--running", "2", available_mib=6144, swap_free_mib=2047)
