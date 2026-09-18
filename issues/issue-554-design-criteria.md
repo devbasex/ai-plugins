@@ -234,7 +234,7 @@ graph TD
 
 - **書き込みをしない。** 取り消せない操作を自動で行わない（決定 14）
 - **通信するのはこの経路だけである。** 既定の検査は通信しない。通信できない環境でも検査は動く
-- **出典ごとに有限の待ちを置く**（既定 10 秒。接続と読み取りの両方）。**待ちを越えたら取得の失敗として扱い**、
+- **出典ごとに有限の待ちを置く**（引数 `--refresh-timeout` > 宣言の `refresh_timeout_seconds` > 既定 10 秒。接続と読み取りの両方）。**待ちを越えたら取得の失敗として扱い**、
   一覧へ理由付きで残す。パケットを捨てる相手でも止まらない
 - **取れなかった URL を黙って落とさない。** 取得に失敗した出典を一覧へ残す（調査の記録が「取得できなかったページ」を残しているのと同じ形）
 
@@ -259,6 +259,7 @@ classDiagram
         +budget: dict | None
         +import_syntax: list~str~
         +import_depth: int
+        +refresh_timeout_seconds: int
         +review_interval_days: int
         +reviewed_at: str | None
         +load(root) Declaration
