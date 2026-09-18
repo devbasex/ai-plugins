@@ -421,10 +421,11 @@ def test_the_record_reader_selects_the_latest_distribution_and_matching_release_
     assert fields.strip() == "本番（2026-09-18 10:00 に承認）|10.15.0|717\n718"
 
 
-def _setup_closing_environment(tmp_path):
-    """疑似の `gh` / `projects-sync.sh`、記録、issue の状態を配置し、実行環境を返す。
+def test_the_closing_step_closes_an_open_issue_after_the_board_is_done(tmp_path) -> None:
+    """現状固定: 本番へ配布し全条件が合格した OPEN の課題を、盤面の Done の後で閉じる。
 
-    返すのは (fake ディレクトリ, subprocess.run へ渡す env) の組。
+    手順書の 2 つのコード例（「配布の記録」の読み取りと「手順」）を、疑似の `gh` と
+    `projects-sync.sh` へ向けてそのまま実行する。置き換えるのは `<...>` の差し込み口だけ。
     """
     fake = tmp_path / "fake"
     (fake / "bin").mkdir(parents=True)
@@ -438,18 +439,6 @@ def _setup_closing_environment(tmp_path):
     (fake / "pr-body").write_text("Fixes devbasex/ai-plugins#12\n", encoding="utf-8")
     (fake / "state-12").write_text("OPEN\n", encoding="utf-8")
 
-    env = {
-        "PATH": f"{fake / 'bin'}:{os.environ.get('PATH', '')}",
-        "SCRIPTS": str(scripts),
-        "FAKE_DIR": str(fake),
-        "FAKE_REPO": "devbasex/ai-plugins",
-        "LC_ALL": "C.UTF-8",
-    }
-    return fake, env
-
-
-def _run_closing_examples(tmp_path, env):
-    """2 つの bash 例へプレースホルダーを適用し、実行結果を返す。"""
     script = closing_bash("配布の記録") + closing_bash("手順")
     for placeholder, value in {
         "<記録のPR番号>": "717",
@@ -462,13 +451,20 @@ def _run_closing_examples(tmp_path, env):
         script = script.replace(placeholder, value)
     script += '\nprintf "stage=%s\\nver=%s\\nbefore=%s\\nnow=%s\\nafter=%s\\n" "$stage" "$ver" "$before" "$now" "$after"\n'
 
-    return subprocess.run(
+    env = {
+        "PATH": f"{fake / 'bin'}:{os.environ.get('PATH', '')}",
+        "SCRIPTS": str(scripts),
+        "FAKE_DIR": str(fake),
+        "FAKE_REPO": "devbasex/ai-plugins",
+        "LC_ALL": "C.UTF-8",
+    }
+    done = subprocess.run(
         ["bash", "-c", script], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60
     )
+    assert done.returncode == 0, done.stderr
+    out = done.stdout.splitlines()
 
-
-def _assert_closing_conditions(out) -> None:
-    """標準出力から、閉じる条件（本番配布・全条件合格）を検証する。"""
+    # 閉じる条件: 本番への配布で、本番の版のリリース後テストの行がすべて合格。
     assert "stage=本番（2026-09-18 10:00 に承認）" in out, out
     assert "ver=10.15.0" in out, out
     rows = [line for line in out if line.startswith("| #12 ")]
@@ -476,9 +472,6 @@ def _assert_closing_conditions(out) -> None:
     # まとまりの課題はリポジトリまで含めて取り出される。
     assert "devbasex/ai-plugins\t12" in out, out
 
-
-def _assert_close_order(fake, out) -> None:
-    """calls から、状態を読む→盤面 Done→閉じる、の遷移順を検証する。"""
     calls = (fake / "calls").read_text(encoding="utf-8").splitlines()
     views = [i for i, call in enumerate(calls) if call.startswith("gh issue view 12 ")]
     board = calls.index("projects-sync 12 status Done")
@@ -489,35 +482,13 @@ def _assert_close_order(fake, out) -> None:
     assert "--repo devbasex/ai-plugins" in calls[close], calls[close]
     assert "before=OPEN" in out and "now=OPEN" in out and "after=CLOSED" in out, out
 
-
-def _assert_result_report() -> None:
-    """結果報告表の `閉じた` の行が、条件と戻し方を持つことを検証する。"""
+    # 結果の報告: before が OPEN で after が CLOSED なら `閉じた`。戻し方を載せる。
     report = closing_section("結果の報告")
     closed = [line for line in report.splitlines() if line.startswith("| `閉じた` |")]
     assert len(closed) == 1, report
     condition, carried = [cell.strip() for cell in closed[0].strip("|").split("|")][1:3]
     assert "`before` が OPEN" in condition and "`after` が CLOSED" in condition, condition
     assert "`gh issue reopen <番号> --repo <所有者>/<リポジトリ>`" in carried, carried
-
-
-def test_the_closing_step_closes_an_open_issue_after_the_board_is_done(tmp_path) -> None:
-    """現状固定: 本番へ配布し全条件が合格した OPEN の課題を、盤面の Done の後で閉じる。
-
-    手順書の 2 つのコード例（「配布の記録」の読み取りと「手順」）を、疑似の `gh` と
-    `projects-sync.sh` へ向けてそのまま実行する。置き換えるのは `<...>` の差し込み口だけ。
-    """
-    # arrange
-    fake, env = _setup_closing_environment(tmp_path)
-
-    # act
-    done = _run_closing_examples(tmp_path, env)
-
-    # assert
-    assert done.returncode == 0, done.stderr
-    out = done.stdout.splitlines()
-    _assert_closing_conditions(out)
-    _assert_close_order(fake, out)
-    _assert_result_report()
 
 
 def release_verification_output_template() -> str:

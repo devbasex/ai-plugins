@@ -109,16 +109,16 @@ _wf_mode_column() {
 
 # ある工程がそのモードで必須か（R / C / -）を返す。
 wf_stage_class() {
-  local mode="${1:-}" stage="${2:-}" column line
-  local -a cols
+  local mode="${1:-}" stage="${2:-}" column line name
   column=$(_wf_mode_column "$mode") || return 1
   while IFS= read -r line; do
-    IFS=$'\t' read -r -a cols <<<"$line"
-    [ "${cols[0]}" = "$stage" ] || continue
-    # column は 1 始まりで、cols[0] が工程名、cols[column] がその列の値。
-    # 範囲外（未知の列番号）は何も出さずに return 1 する経路を保つ。
-    [ "$column" -lt "${#cols[@]}" ] || return 1
-    printf '%s\n' "${cols[column]}"
+    IFS=$'\t' read -r name c1 c2 c3 c4 c5 <<<"$line"
+    [ "$name" = "$stage" ] || continue
+    case "$column" in
+      1) printf '%s\n' "$c1" ;; 2) printf '%s\n' "$c2" ;;
+      3) printf '%s\n' "$c3" ;; 4) printf '%s\n' "$c4" ;;
+      5) printf '%s\n' "$c5" ;;
+    esac
     return 0
   done <<<"$WF_STAGE_MATRIX"
   return 1
@@ -224,31 +224,21 @@ wf_is_candidate() {
     <<<"${text//$'\\\n'/ }"
 }
 
-# gh の語の並びを読む状態機械の状態。呼び出し側（wf_merge_target / _wf_pr_create_body）は
-# WF_SEEK_INIT のやり直しと WF_SEEK_FOUND の比較で「gh pr <verb> を見つけた」を判定する。
-# **値は数字文字列のまま持つ。** 呼び出し側が [ "$state" = "3" ] のような文字列比較を保てる
-# ようにするためである。
-WF_SEEK_INIT=0       # gh をまだ見ていない
-WF_SEEK_AFTER_GH=1   # gh を見た（次に pr / -R / --repo / その他のオプションが来る）
-WF_SEEK_AFTER_PR=2   # gh pr まで見た（次に verb が来る）
-WF_SEEK_FOUND=3      # gh pr <verb> を見つけた
-WF_SEEK_AFTER_REPO=4 # -R / --repo を見た（次の語が slug なので読み飛ばす）
-
 _wf_seek_gh_verb() {
-  local state="${1:-$WF_SEEK_INIT}" tok="${2:-}" verb="${3:-}"
+  local state="${1:-0}" tok="${2:-}" verb="${3:-}"
   case "$state" in
-    "$WF_SEEK_INIT") [ "$tok" = "gh" ] && printf '%s\n' "$WF_SEEK_AFTER_GH" || printf '%s\n' "$WF_SEEK_INIT" ;;
-    "$WF_SEEK_AFTER_GH")
+    0) [ "$tok" = "gh" ] && printf '1\n' || printf '0\n' ;;
+    1)
       case "$tok" in
-        pr) printf '%s\n' "$WF_SEEK_AFTER_PR" ;;
-        gh) printf '%s\n' "$WF_SEEK_AFTER_GH" ;;
-        -R|--repo) printf '%s\n' "$WF_SEEK_AFTER_REPO" ;;
-        -*) printf '%s\n' "$WF_SEEK_AFTER_GH" ;;
-        *) printf '%s\n' "$WF_SEEK_INIT" ;;
+        pr) printf '2\n' ;;
+        gh) printf '1\n' ;;
+        -R|--repo) printf '4\n' ;;
+        -*) printf '1\n' ;;
+        *) printf '0\n' ;;
       esac
       ;;
-    "$WF_SEEK_AFTER_PR") [ "$tok" = "$verb" ] && printf '%s\n' "$WF_SEEK_FOUND" || printf '%s\n' "$WF_SEEK_INIT" ;;
-    "$WF_SEEK_AFTER_REPO") printf '%s\n' "$WF_SEEK_AFTER_GH" ;;
+    2) [ "$tok" = "$verb" ] && printf '3\n' || printf '0\n' ;;
+    4) printf '1\n' ;;
     *) printf '%s\n' "$state" ;;
   esac
 }
@@ -297,12 +287,12 @@ _wf_read_file() {
 #
 # 本文の渡し方は 2 つある（`--body` と `--body-file`）。**短い形も見る**（`-b` / `-F`）。
 _wf_pr_create_body() {
-  local cmd="${1:-}" tok want="" body="" state=$WF_SEEK_INIT found=1
+  local cmd="${1:-}" tok want="" body="" state=0 found=1
   while IFS= read -r -d '' tok; do
     # 区切り。作成を見つける前なら探索をやり直し、見つけた後なら読むのを止める。
     if [ -z "$tok" ]; then
       [ "$found" -ne 0 ] || break
-      state=$WF_SEEK_INIT
+      state=0
       continue
     fi
     if [ -n "$want" ]; then
@@ -314,7 +304,7 @@ _wf_pr_create_body() {
       continue
     fi
     state=$(_wf_seek_gh_verb "$state" "$tok" "create")
-    [ "$state" = "$WF_SEEK_FOUND" ] && found=0
+    [ "$state" = "3" ] && found=0
     [ "$found" -eq 0 ] || continue
     case "$tok" in
       --body|-b) want=text ;;

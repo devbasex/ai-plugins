@@ -27,13 +27,13 @@
 # 値を別の語で取るのは `-R` / `--repo` の 2 つに限られる。**それ以外の `-` で始まる語は
 # その語だけを飛ばす。** 値まで飛ばすと、続く語が `pr` であっても見落とす。
 wf_merge_target() {
-  local cmd="${1:-}" tok num="" state=$WF_SEEK_INIT found=1 rest
+  local cmd="${1:-}" tok num="" state=0 found=1 rest
   while IFS= read -r -d '' tok; do
     # 区切り（#565）。マージを見つける前なら `gh` の探索をやり直し、見つけた後なら
     # 読むのを止める。越えて読むと `gh pr merge; echo 268` の 268 を番号に取る。
     if [ -z "$tok" ]; then
       [ "$found" -ne 0 ] || break
-      state=$WF_SEEK_INIT
+      state=0
       continue
     fi
     # REST の経路。`pulls/<番号>/merge` を指す語は、方式を問わずマージの意図と見なす。
@@ -47,12 +47,12 @@ wf_merge_target() {
         esac
         ;;
     esac
-    if [ "$state" -ne "$WF_SEEK_FOUND" ]; then
+    if [ "$state" -ne 3 ]; then
       state=$(_wf_seek_gh_verb "$state" "$tok" "merge")
-      [ "$state" = "$WF_SEEK_FOUND" ] && found=0
+      [ "$state" = "3" ] && found=0
     fi
     case "$state" in
-      "$WF_SEEK_FOUND")
+      3)
         [ -n "$num" ] && continue
         case "$tok" in
           */pull/*)
