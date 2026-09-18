@@ -63,6 +63,29 @@ def test_every_record_carries_the_eleven_columns(records) -> None:
         }, name
 
 
+def test_as_json_carries_the_eighteen_contract_fields(records) -> None:
+    assert records["s1"].as_json() == {
+        "layer": "supervisor",
+        "role": "設計",
+        "depth": 1,
+        "model": "claude-opus-5",
+        "fixed": 60000,
+        "peak": 90000,
+        "work": 30000,
+        "responses": 3,
+        "duration_seconds": 1800,
+        "ending": "completed",
+        "interruptions": 0,
+        "agent_id": "s1",
+        "parent_agent_id": None,
+        "session": "sess-a",
+        "started_at": "2026-09-17T10:01:00+00:00",
+        "ended_at": "2026-09-17T10:31:00+00:00",
+        "resets_at": None,
+        "rate_limit_type": None,
+    }
+
+
 def test_the_conductor_is_depth_zero_and_has_no_role(records) -> None:
     c = records["conductor"]
     assert (c.layer, c.depth, c.role, c.agent_id) == ("conductor", 0, "-", None)

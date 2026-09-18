@@ -143,6 +143,27 @@ def test_the_layer_totals_add_up_to_the_grand_total(report) -> None:
     }
 
 
+def test_layer_narrows_every_agents_table_to_supervisors() -> None:
+    p = run(
+        "--agents", "--session", "sess-a", "--layer", "supervisor",
+        "--format", "json",
+    )
+    assert p.returncode == 0, p.stderr
+    out = json.loads(p.stdout)
+
+    assert {r["layer"] for r in out["agents"]} == {"supervisor"}
+    assert {r["layer"] for r in out["agent_summary"]} == {"supervisor"}
+    assert out["layer_totals"] == [{
+        "layer": "supervisor", "records": 5, "fixed_sum": 250000,
+        "work_sum": 195000, "total_spend": 445000,
+    }]
+    assert out["totals"] == {
+        "records": 5, "fixed_sum": 250000, "work_sum": 195000,
+        "total_spend": 445000,
+    }
+    assert out["role_usage"] == []
+
+
 # ---------- AC37: 持ち場ごとの worker の使い方 ----------
 
 def test_the_role_usage_splits_by_the_supervisor_that_launched(report) -> None:
