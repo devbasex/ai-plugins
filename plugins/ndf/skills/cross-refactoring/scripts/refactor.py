@@ -84,14 +84,9 @@ from refactor_lib.vocabulary import (  # noqa: E402
 )
 
 
-# ---------------- main ----------------
+# ---------------- CLI parser ----------------
 
-def main() -> None:
-    p = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    )
-    sub = p.add_subparsers(dest="cmd", required=True)
-
+def _add_init_parser(sub: argparse._SubParsersAction) -> None:
     init = sub.add_parser(
         "init",
         help="Step 0 — ホスト確定 / 母集合の確定 / 作業ディレクトリ root / 状態初期化")
@@ -154,6 +149,8 @@ def main() -> None:
     init.add_argument("--worktree-root", default=None)
     init.set_defaults(func=cmd_init)
 
+
+def _add_single_id_parsers(sub: argparse._SubParsersAction) -> None:
     for name, func, help_ in (
         ("start-round", cmd_start_round,
          "Step 2 — 提案ラウンドを開く。実装担当とレビュー担当を返す"),
@@ -171,6 +168,8 @@ def main() -> None:
         sp.add_argument("id", type=int)
         sp.set_defaults(func=func)
 
+
+def _add_id_round_parsers(sub: argparse._SubParsersAction) -> None:
     for name, func, help_ in (
         ("next-apply-round", cmd_next_apply_round,
          "Step 4 — 次の適用ラウンド（群）を開く。実装担当と対象の項目を返す"),
@@ -187,6 +186,8 @@ def main() -> None:
         sp.add_argument("round", type=int)
         sp.set_defaults(func=func)
 
+
+def _add_destructive_parsers(sub: argparse._SubParsersAction) -> None:
     # コミットを取り消しうる 2 つは、実行前に何が消えるかを確かめられるようにする。
     for name, func, help_ in (
         ("merge-apply", cmd_merge_apply,
@@ -201,6 +202,8 @@ def main() -> None:
                         help="取り消すコミットを表示するだけで実行しない")
         sp.set_defaults(func=func)
 
+
+def _add_report_parser(sub: argparse._SubParsersAction) -> None:
     rp = sub.add_parser(
         "report", help="Step 8 — ラウンド表・項目表・見送り・指標")
     rp.add_argument("id", type=int)
@@ -208,7 +211,22 @@ def main() -> None:
                     help="ランタイムとモデルの組で指標を集計する")
     rp.set_defaults(func=cmd_report)
 
-    args = p.parse_args()
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    _add_init_parser(sub)
+    _add_single_id_parsers(sub)
+    _add_id_round_parsers(sub)
+    _add_destructive_parsers(sub)
+    _add_report_parser(sub)
+    return parser
+
+
+def main() -> None:
+    args = build_parser().parse_args()
     args.func(args)
 
 

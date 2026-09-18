@@ -66,6 +66,8 @@ WF_PR_EXEMPT_STAGE='実装レビュー'
 WF_APPROVAL_LABEL='design-approved'
 # 設計 Pull Request を見分ける head のブランチ名の接頭辞。
 WF_DESIGN_PREFIX='design/'
+# PreToolUse hook の出力であることを JSON に載せる。
+WF_HOOK_EVENT='PreToolUse'
 
 # 工程の並びを 1 行 1 件で返す。
 #
@@ -520,7 +522,7 @@ wf_json_escape() {
 }
 
 wf_emit_deny() {
-  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny",'
+  printf '{"hookSpecificOutput":{"hookEventName":"%s","permissionDecision":"deny",' "$WF_HOOK_EVENT"
   printf '"permissionDecisionReason":"%s"}}\n' "$(wf_json_escape "${1:-}")"
 }
 
@@ -528,7 +530,7 @@ wf_emit_context() {
   local text
   text=$(wf_json_escape "${1:-}")
   printf '{"systemMessage":"%s",' "$text"
-  printf '"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"%s"}}\n' "$text"
+  printf '"hookSpecificOutput":{"hookEventName":"%s","additionalContext":"%s"}}\n' "$WF_HOOK_EVENT" "$text"
 }
 
 # --- リポジトリと控えの置き場所 ---------------------------------------------

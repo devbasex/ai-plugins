@@ -505,6 +505,14 @@ def release_verification_output_template() -> str:
     return found.group(1)
 
 
+def _cells(row: str) -> list[str]:
+    return [cell.strip() for cell in row.strip("|").split("|")]
+
+
+def _is_separator(row: str) -> bool:
+    return all(set(cell) == {"-"} for cell in _cells(row))
+
+
 def test_the_release_verification_template_carries_the_target_version_once() -> None:
     """現状固定: 雛形は `対象の版:` の行を 1 つ持つ。
 
@@ -529,7 +537,7 @@ def test_the_release_verification_template_starts_the_table_with_the_issue_colum
     # 見出しの行・区切りの行・各データ行。
     assert len(rows) >= 3, rows
 
-    header = [cell.strip() for cell in rows[0].strip("|").split("|")]
+    header = _cells(rows[0])
     assert header[0] == "課題", header
     assert header[-1] == "結果", header
     assert "受け入れ条件" in header, header
@@ -543,19 +551,14 @@ def test_the_release_verification_template_maps_each_condition_to_an_issue() -> 
     """
     template = release_verification_output_template()
     rows = [line for line in template.splitlines() if line.startswith("| ")]
-    header = [cell.strip() for cell in rows[0].strip("|").split("|")]
+    header = _cells(rows[0])
     issue_at = header.index("課題")
     result_at = header.index("結果")
 
-    # 見出しの行と区切りの行（各セルが `---`）を除いた残りがデータ行。
-    def is_separator(row: str) -> bool:
-        cells = [cell.strip() for cell in row.strip("|").split("|")]
-        return all(set(cell) == {"-"} for cell in cells)
-
     data = [
-        [cell.strip() for cell in row.strip("|").split("|")]
+        _cells(row)
         for row in rows[1:]
-        if not is_separator(row)
+        if not _is_separator(row)
     ]
     assert data, rows
 

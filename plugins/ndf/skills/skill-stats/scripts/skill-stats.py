@@ -485,7 +485,7 @@ def format_markdown(rows: list[dict], total: dict, heading: str | None = None) -
     return "\n".join(lines)
 
 
-def main() -> int:
+def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(
         description="NDF skill usage statistics from Claude Code transcripts",
     )
@@ -509,18 +509,19 @@ def main() -> int:
                     help="各skillに抽出されたトリガーキーワードを出力")
     ap.add_argument("--include-fallback", action="store_true",
                     help="Triggers欄が無いskillでも description から語彙抽出してマッチ (ノイズ多)")
-    args = ap.parse_args()
+    return ap.parse_args()
 
+
+def load_inputs(
+    args: argparse.Namespace,
+) -> tuple[pathlib.Path, datetime | None, datetime | None, int | None, list[dict], set[str], list[pathlib.Path]]:
     plugin_root = pathlib.Path(args.plugin_root) if args.plugin_root else plugin_root_default()
     if not (plugin_root / "skills").is_dir():
-        print(f"[skill-stats] plugin root not found: {plugin_root}", file=sys.stderr)
-        return 2
+        raise FileNotFoundError(plugin_root)
 
     date_from = _parse_date(args.date_from)
     date_to = _parse_date(args.date_to)
-    # When explicit date range is given, days becomes informational only
     effective_days = args.days if (date_from is None and date_to is None) else None
-
     skills = load_skills(plugin_root, include_fallback=args.include_fallback)
     # Slash boundaries must be detected across every skill, not just the ones
     # left after --skill narrowing.
@@ -529,6 +530,105 @@ def main() -> int:
         skills = [s for s in skills if args.skill in s["name"]]
 
     transcripts = list(iter_transcripts(effective_days, date_from, date_to))
+    return (
+        plugin_root,
+        date_from,
+        date_to,
+        effective_days,
+        skills,
+        all_skill_names,
+        transcripts,
+    )
+
+
+def filter_projects(
+    per_project: dict[str, tuple[Counter, Counter, Counter, Counter]],
+    project_filter: str | None,
+) -> dict[str, tuple[Counter, Counter, Counter, Counter]]:
+    if not project_filter:
+        return per_project
+    needle = project_filter.lower()
+    return {k: v for k, v in per_project.items() if needle in k.lower()}
+
+
+def render_json(
+    args: argparse.Namespace,
+    plugin_root: pathlib.Path,
+    effective_days: int | None,
+    transcripts: list[pathlib.Path],
+    skills: list[dict],
+    per_project: dict[str, tuple[Counter, Counter, Counter, Counter]],
+) -> str:
+    projects_json = []
+    for project, (auto, explicit, trig, hits) in sorted(per_project.items()):
+        rows, total = build_rows(skills, auto, explicit, trig, hits)
+        projects_json.append({
+            "project": project,
+            "total": total,
+            "skills": rows,
+        })
+    grand_rows, grand_total = build_rows(skills, *merge_counters(per_project))
+    out = {
+        "meta": {
+            "days": effective_days,
+            "date_from": args.date_from,
+            "date_to": args.date_to,
+            "transcripts": len(transcripts),
+            "plugin_root": str(plugin_root),
+            "by_project": args.by_project,
+            "project_filter": args.project,
+        },
+        "total": grand_total,
+        "grand_skills": grand_rows,
+        "projects": projects_json,
+    }
+    return json.dumps(out, ensure_ascii=False, indent=2)
+
+
+def render_markdown(
+    args: argparse.Namespace,
+    skills: list[dict],
+    per_project: dict[str, tuple[Counter, Counter, Counter, Counter]],
+) -> str:
+    sections: list[str] = []
+    if args.by_project:
+        for project, (auto, explicit, trig, hits) in sorted(per_project.items()):
+            rows, total = build_rows(skills, auto, explicit, trig, hits)
+            if total["invocations"] == 0 and total["triggers"] == 0:
+                continue
+            sections.append("\n" + format_markdown(rows, total, heading=f"## {project}"))
+        grand_rows, grand_total = build_rows(skills, *merge_counters(per_project))
+        sections.append(
+            "\n" + format_markdown(grand_rows, grand_total, heading="## 全プロジェクト合計")
+        )
+    else:
+        rows, total = build_rows(skills, *merge_counters(per_project))
+        sections.append(format_markdown(rows, total))
+
+    if args.show_keywords:
+        keywords = ["\n## 抽出トリガーキーワード"]
+        for skill in sorted(skills, key=lambda x: x["name"]):
+            words = ", ".join(skill["triggers"]) or "-"
+            keywords.append(f"- `ndf:{skill['name']}`: {words}")
+        sections.append("\n".join(keywords))
+    return "\n".join(sections)
+
+
+def main() -> int:
+    args = parse_args()
+    try:
+        (
+            plugin_root,
+            date_from,
+            date_to,
+            effective_days,
+            skills,
+            all_skill_names,
+            transcripts,
+        ) = load_inputs(args)
+    except FileNotFoundError as exc:
+        print(f"[skill-stats] plugin root not found: {exc.args[0]}", file=sys.stderr)
+        return 2
 
     # Header summary
     window = []
@@ -545,61 +645,15 @@ def main() -> int:
     )
 
     per_project = aggregate_by_project(transcripts, skills, all_skill_names)
-    if args.project:
-        needle = args.project.lower()
-        per_project = {
-            k: v for k, v in per_project.items() if needle in k.lower()
-        }
-        if not per_project:
-            print(f"[skill-stats] no projects matched: {args.project}", file=sys.stderr)
-            return 0
+    per_project = filter_projects(per_project, args.project)
+    if args.project and not per_project:
+        print(f"[skill-stats] no projects matched: {args.project}", file=sys.stderr)
+        return 0
 
     if args.format == "json":
-        projects_json = []
-        for project, (auto, explicit, trig, hits) in sorted(per_project.items()):
-            rows, total = build_rows(skills, auto, explicit, trig, hits)
-            projects_json.append({
-                "project": project,
-                "total": total,
-                "skills": rows,
-            })
-        grand_rows, grand_total = build_rows(skills, *merge_counters(per_project))
-        out = {
-            "meta": {
-                "days": effective_days,
-                "date_from": args.date_from,
-                "date_to": args.date_to,
-                "transcripts": len(transcripts),
-                "plugin_root": str(plugin_root),
-                "by_project": args.by_project,
-                "project_filter": args.project,
-            },
-            "total": grand_total,
-            "grand_skills": grand_rows,
-            "projects": projects_json,
-        }
-        print(json.dumps(out, ensure_ascii=False, indent=2))
+        print(render_json(args, plugin_root, effective_days, transcripts, skills, per_project))
     else:
-        if args.by_project:
-            for project, (auto, explicit, trig, hits) in sorted(per_project.items()):
-                rows, total = build_rows(skills, auto, explicit, trig, hits)
-                if total["invocations"] == 0 and total["triggers"] == 0:
-                    continue  # skip silent projects
-                print()
-                print(format_markdown(rows, total, heading=f"## {project}"))
-            # grand total
-            grand_rows, grand_total = build_rows(skills, *merge_counters(per_project))
-            print()
-            print(format_markdown(grand_rows, grand_total, heading="## 全プロジェクト合計"))
-        else:
-            rows, total = build_rows(skills, *merge_counters(per_project))
-            print(format_markdown(rows, total))
-
-        if args.show_keywords:
-            print("\n## 抽出トリガーキーワード")
-            for s in sorted(skills, key=lambda x: x["name"]):
-                kw = ", ".join(s["triggers"]) or "-"
-                print(f"- `ndf:{s['name']}`: {kw}")
+        print(render_markdown(args, skills, per_project))
 
     return 0
 
