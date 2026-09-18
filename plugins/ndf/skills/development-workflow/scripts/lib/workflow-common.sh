@@ -424,6 +424,19 @@ _wf_read_packed() {
   return 0
 }
 
+_wf_unpack_collected() {
+  local _wf_uc_targets_name="${1:-}" _wf_uc_modes_name="${2:-}" _wf_uc_modes_str_name="${3:-}"
+  local _wf_uc_line _wf_uc_index=0
+  shift 3
+
+  _wf_read_packed "$@"
+  for _wf_uc_line in ${_WF_PACKED_REST[@]+"${_WF_PACKED_REST[@]}"}; do
+    printf -v "${_wf_uc_targets_name}[$_wf_uc_index]" '%s' "$_wf_uc_line"
+    _wf_uc_index=$((_wf_uc_index + 1))
+  done
+  read -r -a "$_wf_uc_modes_name" <<<"${!_wf_uc_modes_str_name}"
+}
+
 _wf_collect_targets() {
   local parsed collected effective modes_str line conflict=0
   local -a raw_targets=() modes=()
@@ -431,9 +444,7 @@ _wf_collect_targets() {
   parsed=$(_wf_parse_targets) || return 1
   [ -n "$parsed" ] || return 1
   collected=$(printf '%s\n' "$parsed" | _wf_collect_target_modes) || return 1
-  _wf_read_packed effective modes_str <<<"$collected"
-  raw_targets=(${_WF_PACKED_REST[@]+"${_WF_PACKED_REST[@]}"})
-  read -r -a modes <<<"$modes_str"
+  _wf_unpack_collected raw_targets modes modes_str effective modes_str <<<"$collected"
   [ "${#modes[@]}" -gt 1 ] && conflict=1
 
   printf '%s\n' "$effective"
@@ -508,9 +519,7 @@ wf_evidence_report() {
   command -v jq >/dev/null 2>&1 || return 1
 
   collected=$(_wf_collect_targets) || return 1
-  _wf_read_packed effective conflict modes_str <<<"$collected"
-  targets=(${_WF_PACKED_REST[@]+"${_WF_PACKED_REST[@]}"})
-  read -r -a modes <<<"$modes_str"
+  _wf_unpack_collected targets modes modes_str effective conflict modes_str <<<"$collected"
 
   for line in "${targets[@]}"; do
     IFS=$'\t' read -r repo issue <<<"$line"
