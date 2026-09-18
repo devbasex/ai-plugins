@@ -20,13 +20,13 @@ AGENTS.md          6,240 バイト
 CLAUDE.md          4,010 バイト（`@AGENTS.md` の分を含む）
 KIRO.md            2,230 バイト
 NOTE: 宣言（.ndf/instructions.json）が無いため、出た版と許可の判定は動かない
-ERROR: docs/AGENTS.md:12: @docs/none.md の参照先が無い。参照を消すか実在するパスへ直す
+ERROR: [直す] docs/AGENTS.md:12: @docs/none.md の参照先が無い。参照を消すか実在するパスへ直す
 ```
 
 ```console
 $ python3 plugins/ndf/scripts/instructions-check.py --root .   # 宣言があるリポジトリ
-ERROR: CLAUDE.md:38: v10.0.0 の段落が残っている（最新は 10.9.1）。次の見出しまでを docs/ndf-version-decisions.md へ移す
-ERROR: CLAUDE.md:36: @docs/ndf-version-decisions.md は許可していない即時読み込み。@ を外すか imports へ理由とともに足す
+ERROR: [直す] CLAUDE.md:38: v10.0.0 の段落が残っている（最新は 10.9.1）。次の見出しまでを docs/ndf-version-decisions.md へ移す
+ERROR: [直す] CLAUDE.md:36: @docs/ndf-version-decisions.md は許可していない即時読み込み。@ を外すか imports へ理由とともに足す
 ```
 
 **2 つ目は `ai-plugins` の `f56c90d9` で実際に出る形である**（AC69）。
@@ -72,6 +72,7 @@ ERROR: CLAUDE.md:36: @docs/ndf-version-decisions.md は許可していない即�
 | --- | --- | --- |
 | 指示書の検査（`plugins/ndf/scripts/instructions-check.py`） | 指示書を集め、宣言を読み、F1〜F5 の指摘を出して終了コードを返す | 新設 |
 | 宣言の読み取り（同じスクリプトの中） | `.ndf/instructions.json` を読み、無ければ既定へ倒す。壊れていれば止める | 新設 |
+| 調べ直しの部品（`plugins/ndf/scripts/lib/`） | 出典の取得・指紋の比較・一覧の提示・待ちの扱い。#743 と共有する（決定 18） | 新設 |
 | 観点と出典のデータ（`plugins/ndf/scripts/data/instruction-criteria.json`） | 見る観点・落とすか報告か・宣言が要るか・出典と参照日・最後に調べ直した日 | 新設 |
 | 宣言の定義（`plugins/ndf/skills/release/schemas/instructions.schema.json`） | 宣言の項目と型を持つ。編集時の補完に使う | 新設 |
 | 参照（`plugins/ndf/skills/release/references/instruction-files.md`） | 宣言の書き方・判定の一覧・落ちたときの直し方 | 新設 |
@@ -149,6 +150,7 @@ plugins/ndf/
 ├── scripts/
 │   ├── instructions-check.py                 # 新設（実体）
 │   ├── data/instruction-criteria.json        # 新設（観点・出典・調べ直した日）
+│   ├── lib/                                  # 調べ直しの部品（#743 と共有）
 │   └── tests/
 │       └── test_instructions_check.py        # 新設
 └── skills/release/
@@ -246,7 +248,7 @@ Pull Request の時点では、版を固定した URL が解決できない（�
 | 名前 | `python3 <プラグインの scripts>/instructions-check.py [--root <リポジトリの根>] [--report] [--refresh]` |
 | 入力 | `--root`（既定は現在地）。**`--scope <project|user|plugins>`（重ねて指定でき、既定は `project`）**。`--report` はファイルごとの内訳を足す。**`--refresh` は観点の一覧を外部の一次情報と突き合わせて提示する**（通信するのはこの経路だけ）。**`--refresh-timeout <秒>` が出典 1 件あたりの待ちを決める**（優先順位は引数 > 宣言の `refresh_timeout_seconds` > 既定 10 秒）。越えたら取得の失敗として扱う |
 | 成功 | 終了コード 0。標準出力に本数と、**指示書ごとの 1 セッションの読み込みの量**と**指示の数**。宣言が無ければ動かない判定を `NOTE:` で 1 行。観点の一覧が古ければ、その `NOTE:` も 1 行 |
-| 指摘あり | 終了コード 1。標準エラーへ 1 件 1 行。**先頭に扱いの印（`[直す]` / `[起票]` / `[報告]`）が付く**。形は 3 つで、**持っている値で決まる**。行まで持つものは `ERROR: <ファイル>:<行>: <理由>`、ファイルだけのものは `ERROR: <ファイル>: <理由>`、どちらも持たないもの（宣言の陳腐化など）は `ERROR: <理由>` |
+| 指摘あり | 終了コード 1。標準エラーへ 1 件 1 行。形は `ERROR: [<扱い>] <位置>: <理由>` で、**`<扱い>` は `直す` / `起票` / `報告` のどれか**。`<位置>` は持っている値で決まり、行まで持つものは `<ファイル>:<行>`、ファイルだけのものは `<ファイル>`、どちらも持たないもの（宣言の陳腐化など）は `<位置>: ` ごと省く |
 | 読み取れない | 終了コード 2。宣言の構造が不正（JSON として読めない・`version` が無いか未対応・項目の型が違う・`pattern` が名前付きの捕捉を持たない / 正規表現として読めない）・**観点のデータを読めない**・`released` から版を 1 つも取れない・`git` が使えない。**`--refresh` は、通信できないときと、1 件でも取得に失敗したときがこの値**（一覧は全件を出したうえで 2 を返す） |
 | 呼び出しの誤り | 終了コード 3。知らない引数。標準エラーへ使い方 |
 | 対象が無い | 終了コード 0。指示書が 1 本も無いことを 1 行出す（AC3） |
