@@ -183,6 +183,8 @@ def _declaration_from(raw: dict) -> Declaration:
     _apply_field_constraints(raw, decl)
     if decl.released is not None:
         _validate_released(decl.released)
+    if decl.imports is not None:
+        _validate_imports(decl.imports, "imports")
     _validate_scopes(decl.scopes)
     return decl
 
@@ -229,6 +231,27 @@ def _validate_scopes(scopes: dict) -> None:
             continue
         if not isinstance(entries, list) or any(not isinstance(e, dict) for e in entries):
             raise CheckError(f"宣言の scopes.{name} はオブジェクトの配列である")
+        for index, entry in enumerate(entries):
+            allow = entry.get("imports")
+            if allow is not None:
+                _validate_imports(allow, f"scopes.{name}[{index}].imports")
+
+
+def _validate_imports(allow, label: str) -> None:
+    """許可の形を `{指示書: {参照先: 理由}}` まで見る。
+
+    **読み取りの時点で止める。** 途中まで判定してから型の誤りで落ちると、宣言の不正が
+    終了コード 2 ではなく未捕捉の例外として現れる。
+    """
+    if not isinstance(allow, dict):
+        raise CheckError(f"宣言の {label} はオブジェクトである")
+    for key, entries in allow.items():
+        if not isinstance(entries, dict):
+            raise CheckError(f"宣言の {label}.{key} は "
+                             "{参照先: 理由} のオブジェクトである")
+        for name, reason in entries.items():
+            if not isinstance(reason, str):
+                raise CheckError(f"宣言の {label}.{key}.{name} の理由は文字列である")
 
 
 def _typed(raw: dict, key: str, kind: type, fallback):
@@ -365,7 +388,9 @@ def collect_project(root: Path, decl: Declaration) -> ScopeRoot:
         if not _matches(rel, decl.files):
             continue
         path = root / rel
-        if not path.is_file():
+        # **追跡されていても、実体が根の外を指す symlink は読まない。** 字句の上では
+        # 中にある指示書でも、開いた先は作業ツリーの外である。
+        if not path.is_file() or not _inside_root(str(path), root):
             continue
         scope_root.targets.append(Target(
             path=path, rel=rel, scope="project", root=root,
@@ -418,6 +443,8 @@ def _collect_scope_entry(
     for path in files:
         rel = path.relative_to(scope_root.root).as_posix()
         if located.is_dir() and not _matches(rel, decl.files):
+            continue
+        if not _inside_root(str(path), scope_root.root):
             continue
         scope_root.targets.append(Target(
             path=path, rel=rel, scope=scope, root=scope_root.root,

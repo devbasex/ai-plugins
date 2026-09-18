@@ -47,15 +47,28 @@ def fingerprint(body: bytes) -> str:
     return "sha256:" + hashlib.sha256(body).hexdigest()
 
 
-def _set_socket_timeout(response, seconds: float) -> None:
-    """読み取りの残り時間を socket へ渡す。渡せない相手では何もしない。"""
-    for attr in ("fp",):
-        stream = getattr(response, attr, None)
-        raw = getattr(stream, "raw", None) if stream is not None else None
-        sock = getattr(raw, "_sock", None) if raw is not None else None
-        if sock is not None and hasattr(sock, "settimeout"):
-            sock.settimeout(max(0.001, seconds))
-            return
+def _set_socket_timeout(response, seconds: float) -> bool:
+    """読み取りの残り時間を socket へ渡す。**渡せたかどうかを返す。**
+
+    渡せない相手では、1 回の読み取りの**最中**は期限を見張れない。呼ぶ側が真偽を
+    受け取り、越えたときの理由へその事実を残す（黙って「総経過時間で止まる」と
+    言わないため）。
+    """
+    stream = getattr(response, "fp", None)
+    candidates = [
+        getattr(getattr(stream, "raw", None), "_sock", None),
+        getattr(stream, "_sock", None),
+        stream,
+    ]
+    for sock in candidates:
+        setter = getattr(sock, "settimeout", None)
+        if callable(setter):
+            try:
+                setter(max(0.001, seconds))
+            except (OSError, ValueError):
+                continue
+            return True
+    return False
 
 
 def fetch(url: str, timeout: float, opener=None) -> FetchResult:
@@ -73,12 +86,15 @@ def fetch(url: str, timeout: float, opener=None) -> FetchResult:
         return FetchResult(url=url, ok=False, error=_reason(exc))
 
     chunks: list[bytes] = []
+    bounded = True
     try:
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise FetchTimeout(f"{timeout} 秒を越えた")
-            _set_socket_timeout(response, remaining)
+                raise FetchTimeout(_timeout_reason(timeout, bounded))
+            # **読み取りの最中も期限を見張る。** 渡せなかったときは、その事実を
+            # 越えたときの理由へ残す。
+            bounded = _set_socket_timeout(response, remaining) and bounded
             chunk = response.read(CHUNK_BYTES)
             if not chunk:
                 break
@@ -91,6 +107,13 @@ def fetch(url: str, timeout: float, opener=None) -> FetchResult:
             close()
 
     return FetchResult(url=url, ok=True, fingerprint=fingerprint(b"".join(chunks)))
+
+
+def _timeout_reason(timeout: float, bounded: bool) -> str:
+    if bounded:
+        return f"{timeout} 秒を越えた"
+    return (f"{timeout} 秒を越えた"
+            "（読み取りの最中は上限を掛けられなかった。socket へ届いていない）")
 
 
 def _reason(exc: Exception) -> str:

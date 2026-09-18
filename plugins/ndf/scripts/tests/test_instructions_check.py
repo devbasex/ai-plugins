@@ -1030,3 +1030,128 @@ def test_ac74_block_keeps_the_exit_code(tmp_path, files, decl, extra, expected):
     )
     assert proc.returncode == expected, proc.stdout + proc.stderr
     assert f"exit={expected}" in proc.stdout
+
+
+# --- 待ちの見張りと、走査の実体のパス（レビューの指摘） ----------------------
+
+class SlowOnceResponse:
+    """1 回の読み取りが待ちを越える相手。socket を持たない。"""
+
+    def __init__(self, seconds: float):
+        self._seconds = seconds
+
+    def read(self, size: int) -> bytes:
+        time.sleep(self._seconds)
+        return b"x" * 16
+
+    def close(self) -> None:
+        pass
+
+
+class SocketResponse:
+    """socket へ `settimeout` が届く相手。渡された値を控える。"""
+
+    class _Sock:
+        def __init__(self):
+            self.values: list[float] = []
+
+        def settimeout(self, seconds: float) -> None:
+            self.values.append(seconds)
+
+    class _Raw:
+        def __init__(self, sock):
+            self._sock = sock
+
+    class _Fp:
+        def __init__(self, sock):
+            self.raw = SocketResponse._Raw(sock)
+
+    def __init__(self, body: bytes = b"body"):
+        self.sock = SocketResponse._Sock()
+        self.fp = SocketResponse._Fp(self.sock)
+        self._body = body
+        self._done = False
+
+    def read(self, size: int) -> bytes:
+        if self._done:
+            return b""
+        self._done = True
+        return self._body
+
+    def close(self) -> None:
+        pass
+
+
+def _refresh_lib():
+    sys.path.insert(0, str(SCRIPT.parent / "lib"))
+    import refresh as module
+    return module
+
+
+def test_single_read_over_the_deadline_is_a_failure():
+    """1 回の読み取りが待ちを越えても、取得の失敗として返る。"""
+    lib = _refresh_lib()
+    result = lib.fetch("https://example.invalid/slow", 0.2,
+                       opener=lambda url, timeout: SlowOnceResponse(0.5))
+    assert not result.ok
+    assert "待ち" in (result.error or "")
+
+
+def test_unbounded_read_is_named_in_the_reason():
+    """socket へ届かなかったことを、越えたときの理由に残す。"""
+    lib = _refresh_lib()
+    result = lib.fetch("https://example.invalid/slow", 0.2,
+                       opener=lambda url, timeout: SlowOnceResponse(0.5))
+    assert "socket" in (result.error or "")
+
+
+def test_socket_timeout_is_delivered_when_available():
+    """socket を持つ相手では `settimeout` が呼ばれ、理由に但し書きが付かない。"""
+    lib = _refresh_lib()
+    response = SocketResponse()
+    result = lib.fetch("https://example.invalid/ok", 5,
+                       opener=lambda url, timeout: response)
+    assert result.ok
+    assert response.sock.values, "settimeout が呼ばれていない"
+    assert all(0 < value <= 5 for value in response.sock.values)
+
+
+def test_set_socket_timeout_returns_false_without_a_socket():
+    lib = _refresh_lib()
+    assert lib._set_socket_timeout(SocketResponse(), 1.0) is True
+    assert lib._set_socket_timeout(SlowOnceResponse(0), 1.0) is False
+
+
+def test_tracked_instruction_file_outside_root_is_skipped(tmp_path):
+    """追跡されていても、実体が根の外を指す指示書は走査しない。"""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "real.md").write_text("@none.md\n" + "x" * 3000, encoding="utf-8")
+    root = make_repo(tmp_path, {"AGENTS.md": "# a\n"}, track=False)
+    (root / "CLAUDE.md").symlink_to(outside / "real.md")
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "t")
+    proc = run(root)
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    assert "1 本" in proc.stdout
+    assert "CLAUDE.md" not in proc.stdout
+
+
+@pytest.mark.parametrize("imports", [
+    {"CLAUDE.md": 1},
+    {"CLAUDE.md": {"x.md": 1}},
+    {"CLAUDE.md": ["x.md"]},
+])
+def test_broken_imports_shape_exits_two(tmp_path, imports):
+    root = make_repo(tmp_path, {"CLAUDE.md": "# c\n"})
+    declare(root, {"version": 1, "imports": imports})
+    proc = run(root)
+    assert proc.returncode == 2, proc.stdout + proc.stderr
+
+
+def test_broken_scope_imports_shape_exits_two(tmp_path):
+    root = make_repo(tmp_path, {"CLAUDE.md": "# c\n"})
+    declare(root, {"version": 1, "scopes": {
+        "user": [{"path": str(tmp_path / "home"), "imports": {"CLAUDE.md": 1}}]}})
+    proc = run(root)
+    assert proc.returncode == 2, proc.stdout + proc.stderr
