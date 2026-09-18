@@ -388,6 +388,13 @@ def test_an_interruption_without_a_reset_time_counts_as_passed(mod) -> None:
     assert mod.resets_passed(record, mod.parse_now(BEFORE)) is True
 
 
+def test_resets_passed_when_now_matches_resets_at_exactly(mod) -> None:
+    """解除時刻と now が完全に等しい境界で解除済みになる経路を固定する。"""
+    record = mod.AgentRecord(layer="supervisor", role="設計", depth=1,
+                             ending="rate_limit", resets_at=EARLY)
+    assert mod.resets_passed(record, mod.parse_now(EARLY)) is True
+
+
 # ---------- AC43: 自動の継続の後の点検が解除済みを返す ----------
 
 def test_after_the_auto_continuation_the_check_returns_the_released_partners(ic) -> None:
