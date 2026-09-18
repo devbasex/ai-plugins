@@ -376,7 +376,6 @@ def read_session(
     records: list[AgentRecord] = []
     subs: list[tuple[AgentRecord, dict]] = []
     skipped = 0
-    by_tool_use: dict[str, AgentRecord] = {}
 
     if conductor_path is not None:
         record, n = read_file(conductor_path, {"spawnDepth": 0})
@@ -390,6 +389,17 @@ def read_session(
         skipped += n
         records.append(record)
         subs.append((record, meta))
+    _link_parent_agents(records, subs)
+
+    if counter is not None:
+        counter["skipped"] = counter.get("skipped", 0) + skipped
+    return records
+
+
+def _link_parent_agents(
+    records: list[AgentRecord], subs: list[tuple[AgentRecord, dict]],
+) -> None:
+    by_tool_use: dict[str, AgentRecord] = {}
     for record in records:
         for tool_use_id in record.tool_use_ids:
             by_tool_use[tool_use_id] = record
@@ -400,10 +410,6 @@ def read_session(
         launcher = by_tool_use.get(tool_use_id) if isinstance(tool_use_id, str) else None
         if launcher is not None and launcher.layer != "conductor":
             record.parent_agent_id = launcher.agent_id
-
-    if counter is not None:
-        counter["skipped"] = counter.get("skipped", 0) + skipped
-    return records
 
 
 def read_sessions(

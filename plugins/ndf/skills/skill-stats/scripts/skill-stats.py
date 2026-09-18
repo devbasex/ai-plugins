@@ -609,6 +609,60 @@ def role_usage(records: list) -> list[dict]:
     return rows
 
 
+def format_agent_summary_section(summary: list[dict], excluded: int) -> list[str]:
+    lines = [
+        "## 層・持ち場・モデルごとの束ね",
+        "",
+        "| 層 | 持ち場 | モデル | 件数 | 固定費の中央値 | 実作業の中央値 "
+        "| 実作業 < 固定費 | 最大充填の最大 | 印 |",
+        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |",
+    ]
+    for r in summary:
+        lines.append(
+            f"| {r['layer']} | {r['role']} | {r['model']} | {r['records']} | "
+            f"{r['fixed_median']} | {r['work_median']} | {r['work_below_fixed']} | "
+            f"{r['peak_max']} | {r['mark']} |"
+        )
+    lines.append("")
+    lines.append(f"束ねの表から外した記録: {excluded} 件（応答が 3 に満たない）")
+    return lines
+
+
+def format_layer_totals_section(totals_rows: list[dict], totals: dict) -> list[str]:
+    lines = [
+        "## 層ごとの合計",
+        "",
+        "| 層 | 件数 | 固定費の合計 | 実作業の合計 | 総消費 |",
+        "| --- | ---: | ---: | ---: | ---: |",
+    ]
+    for r in totals_rows:
+        lines.append(
+            f"| {r['layer']} | {r['records']} | {r['fixed_sum']} | "
+            f"{r['work_sum']} | {r['total_spend']} |"
+        )
+    lines.append(
+        f"| 合計 | {totals['records']} | {totals['fixed_sum']} | "
+        f"{totals['work_sum']} | {totals['total_spend']} |"
+    )
+    return lines
+
+
+def format_role_usage_section(usage: list[dict]) -> list[str]:
+    lines = [
+        "## 持ち場ごとの worker の使い方",
+        "",
+        "| 持ち場 | supervisor | supervisor の実作業 | worker の件数 "
+        "| supervisor と worker の固定費の合計 | 印 |",
+        "| --- | ---: | ---: | ---: | ---: | --- |",
+    ]
+    for r in usage:
+        lines.append(
+            f"| {r['role']} | {r['supervisor']} | {r['supervisor_work']} | "
+            f"{r['workers']} | {r['fixed_sum']} | {r['mark']} |"
+        )
+    return lines
+
+
 def format_agents_markdown(
     records: list, summary: list[dict], excluded: int,
     totals_rows: list[dict], totals: dict, usage: list[dict],
@@ -620,51 +674,12 @@ def format_agents_markdown(
         lines.append("")
         lines.append(transcript_agents.format_list(records, with_agent_id=False))
         lines.append("")
-    lines.append("## 層・持ち場・モデルごとの束ね")
+    lines.extend(format_agent_summary_section(summary, excluded))
     lines.append("")
-    lines.extend([
-        "| 層 | 持ち場 | モデル | 件数 | 固定費の中央値 | 実作業の中央値 "
-        "| 実作業 < 固定費 | 最大充填の最大 | 印 |",
-        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |",
-    ])
-    for r in summary:
-        lines.append(
-            f"| {r['layer']} | {r['role']} | {r['model']} | {r['records']} | "
-            f"{r['fixed_median']} | {r['work_median']} | {r['work_below_fixed']} | "
-            f"{r['peak_max']} | {r['mark']} |"
-        )
-    lines.append("")
-    lines.append(f"束ねの表から外した記録: {excluded} 件（応答が 3 に満たない）")
-    lines.append("")
-    lines.append("## 層ごとの合計")
-    lines.append("")
-    lines.extend([
-        "| 層 | 件数 | 固定費の合計 | 実作業の合計 | 総消費 |",
-        "| --- | ---: | ---: | ---: | ---: |",
-    ])
-    for r in totals_rows:
-        lines.append(
-            f"| {r['layer']} | {r['records']} | {r['fixed_sum']} | "
-            f"{r['work_sum']} | {r['total_spend']} |"
-        )
-    lines.append(
-        f"| 合計 | {totals['records']} | {totals['fixed_sum']} | "
-        f"{totals['work_sum']} | {totals['total_spend']} |"
-    )
+    lines.extend(format_layer_totals_section(totals_rows, totals))
     if with_session:
         lines.append("")
-        lines.append("## 持ち場ごとの worker の使い方")
-        lines.append("")
-        lines.extend([
-            "| 持ち場 | supervisor | supervisor の実作業 | worker の件数 "
-            "| supervisor と worker の固定費の合計 | 印 |",
-            "| --- | ---: | ---: | ---: | ---: | --- |",
-        ])
-        for r in usage:
-            lines.append(
-                f"| {r['role']} | {r['supervisor']} | {r['supervisor_work']} | "
-                f"{r['workers']} | {r['fixed_sum']} | {r['mark']} |"
-            )
+        lines.extend(format_role_usage_section(usage))
     return "\n".join(lines)
 
 
