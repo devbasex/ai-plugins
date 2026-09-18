@@ -129,7 +129,7 @@
 - [ ] AC14: たどる深さは既定 4 段までで、5 段目以降は量に入らない。宣言の `import_depth` で上限を変えられる
 - [ ] AC15: 宣言が無いとき、出た版の判定と許可の判定は動かず、動かないことが出力に出る
 
-- [ ] AC16: 指示書ごとに、箇条書きの項目と行頭から始まる文の数（指示の数）が出力に出る。コードブロックと表の行は数えない
+- [ ] AC16: 指示書ごとに、箇条書きの項目と段落の文の数（指示の数）が出力に出る。箇条書きは字下げしたものも数え、段落は連結してから句点で区切る。見出しは 1 行 1 つ。表・引用・コードブロック・HTML の行は数えない
 - [ ] AC17: 観点のデータ（`instruction-criteria.json`）を読めないとき、終了コード 2 で終わる
 - [ ] AC18: 観点のデータで `enforce` が `report` の観点は、値が大きくても終了コード 0 のまま
 - [ ] AC19: 観点のデータの `checked_at` が既定の日数（90 日）より古いと、`NOTE:` が 1 行出る。終了コードは変わらない
@@ -159,41 +159,42 @@
 - [ ] AC37: 最大値は数字 3 つの組として決まる。`10.9.0` と `10.10.0` があるとき、最新は `10.10.0` になる
 - [ ] AC38: `pattern` に名前付きの捕捉 `(?P<version>…)` が無いとき、終了コード 2 で終わる
 - [ ] AC39: 捕捉した値が版数の形（数字 3 つ＋任意の接尾辞）でないとき、終了コード 2 で終わる
-- [ ] AC40: `released` の宣言から版を 1 つも取れないとき、走査の前に終了コード 2 で終わる（壊れた即時読み込みの指摘も出さずに止まる）
-- [ ] AC41: `pending_marker` を宣言すると、その印で書き出した段落は基底が最新**未満**のときだけ指摘される
-- [ ] AC42: 出た版の段落の指摘に、宣言の `decisions` が指す退避先が出る
-- [ ] AC43: `budget.bytes` を宣言し、**根の指示書 1 本の**合計がそれを超えると終了コード 1 になる
-- [ ] AC44: 宣言の構造が不正なとき、終了コード 2 で終わる。対象は JSON として読めない・`version` が無いか未対応・項目の型が違う（`files` が配列でない）・`pattern` が正規表現として読めないの 4 つ
+- [ ] AC40: `released.path` が根の外を指すとき（`../` や根の外への symlink）、終了コード 2 で終わる
+- [ ] AC41: `released` の宣言から版を 1 つも取れないとき、走査の前に終了コード 2 で終わる（壊れた即時読み込みの指摘も出さずに止まる）
+- [ ] AC42: `pending_marker` を宣言すると、その印で書き出した段落は基底が最新**未満**のときだけ指摘される
+- [ ] AC43: 出た版の段落の指摘に、宣言の `decisions` が指す退避先が出る
+- [ ] AC44: `budget.bytes` を宣言し、**根の指示書 1 本の**合計がそれを超えると終了コード 1 になる
+- [ ] AC45: 宣言の構造が不正なとき、終了コード 2 で終わる。対象は JSON として読めない・`version` が無いか未対応・項目の型が違う（`files` が配列でない）・`pattern` が正規表現として読めないの 4 つ
 
 ### 出力と終了コード
 
-- [ ] AC45: 指摘は 1 件 1 行で、行を持つものは `ERROR: <ファイル>:<行>: <理由>`、持たないものは `ERROR: <理由>` になる
-- [ ] AC46: 指摘が 1 件も無ければ終了コード 0 で、走査した本数と根の指示書ごとの読み込みの量が標準出力に出る
-- [ ] AC47: 知らない引数を渡すと終了コード 3 で終わり、使い方が標準エラーへ出る
+- [ ] AC46: 指摘は 1 件 1 行で、行を持つものは `ERROR: <ファイル>:<行>: <理由>`、持たないものは `ERROR: <理由>` になる
+- [ ] AC47: 指摘が 1 件も無ければ終了コード 0 で、走査した本数と根の指示書ごとの読み込みの量が標準出力に出る
+- [ ] AC48: 知らない引数を渡すと終了コード 3 で終わり、使い方が標準エラーへ出る
 
 ### 配布と規約
 
-- [ ] AC48: 検査の実体は `plugins/ndf/scripts/` にある。新しい Skill は足さない（配る先の一覧の行数が変わらない）
-- [ ] AC49: `release` の退避の手順から検査を呼ぶ記載があり、宣言の書き方と判定の一覧を書いた参照が 1 本ある。呼び出しは `$SCRIPTS` を解決してから行う形で書かれている
-- [ ] AC50: 4 ランタイムの導入先それぞれからスクリプトを起動し、一時リポジトリを `--root` に渡して終了コード 0 になる。手順に書いたブロックをそのまま実行すると、検査が 0 / 1 / 2 / 3 を返す 4 通りでブロックの終了コードが一致する
-- [ ] AC51: `python3 scripts/check-skill-repo-assumptions.py` が終了コード 0 のまま（Skill の本文にこのリポジトリ固有の語を書かない）
-- [ ] AC52: 生成物の確認と配布物の検証が終了コード 0。4 ランタイムへ同じ実体が届く（`bash scripts/build-runtime-plugins.sh --check` / `bash scripts/validate-runtime-plugins.sh`）
+- [ ] AC49: 検査の実体は `plugins/ndf/scripts/` にある。新しい Skill は足さない（配る先の一覧の行数が変わらない）
+- [ ] AC50: `release` の退避の手順から検査を呼ぶ記載があり、宣言の書き方と判定の一覧を書いた参照が 1 本ある。呼び出しは `$SCRIPTS` を解決してから行う形で書かれている
+- [ ] AC51: 4 ランタイムの導入先それぞれからスクリプトを起動し、一時リポジトリを `--root` に渡して終了コード 0 になる。手順に書いたブロックをそのまま実行すると、検査が 0 / 1 / 2 / 3 を返す 4 通りでブロックの終了コードが一致する
+- [ ] AC52: `python3 scripts/check-skill-repo-assumptions.py` が終了コード 0 のまま（Skill の本文にこのリポジトリ固有の語を書かない）
+- [ ] AC53: 生成物の確認と配布物の検証が終了コード 0。4 ランタイムへ同じ実体が届く（`bash scripts/build-runtime-plugins.sh --check` / `bash scripts/validate-runtime-plugins.sh`）
 
 ### このリポジトリへの適用
 
-- [ ] AC53: `.ndf/instructions.json` を置き、リポジトリの根で検査を走らせると終了コード 0 になる
-- [ ] AC54: `f56c90d9` の指示書と `CHANGELOG.md` を一時ディレクトリへ展開し、同じ宣言で走らせる。終了コード 1 で、出た版の段落 7 件と許可していない即時読み込み 1 件の計 8 件が出る
-- [ ] AC55: `.github/workflows/runtime-plugin-validate.yml` に検査のジョブがあり、Pull Request では絞り込まずに起動する
-- [ ] AC56: そのジョブが実装の Pull Request で pass する
-- [ ] AC57: `CLAUDE.md` の「版ごとの判断の記録」に、版が決まる前の書き出しの印と、検査のコマンドが書かれている
-- [ ] AC58: `docs/versioning-and-distribution.md` の「バージョン更新時の手順」に検査のコマンドがある。手順 4 は判断の理由の置き場所を `docs/ndf-version-decisions.md` と書く
-- [ ] AC59: 同じ文書の「必須の検査 11 個」の記載が、ruleset へ `instruction-files-check` を足すのと**同じ時点で**新しい数になる（実装 Pull Request の差分には入れない）
-- [ ] AC60: `CHANGELOG.md` の冒頭が、判断の理由の置き場所を `docs/ndf-version-decisions.md` と書く
+- [ ] AC54: `.ndf/instructions.json` を置き、リポジトリの根で検査を走らせると終了コード 0 になる
+- [ ] AC55: `f56c90d9` の指示書と `CHANGELOG.md` を一時ディレクトリへ展開し、同じ宣言で走らせる。終了コード 1 で、出た版の段落 7 件と許可していない即時読み込み 1 件の計 8 件が出る
+- [ ] AC56: `.github/workflows/runtime-plugin-validate.yml` に検査のジョブがあり、Pull Request では絞り込まずに起動する
+- [ ] AC57: そのジョブが実装の Pull Request で pass する
+- [ ] AC58: `CLAUDE.md` の「版ごとの判断の記録」に、版が決まる前の書き出しの印と、検査のコマンドが書かれている
+- [ ] AC59: `docs/versioning-and-distribution.md` の「バージョン更新時の手順」に検査のコマンドがある。手順 4 は判断の理由の置き場所を `docs/ndf-version-decisions.md` と書く
+- [ ] AC60: 同じ文書の「必須の検査 11 個」の記載が、ruleset へ `instruction-files-check` を足すのと**同じ時点で**新しい数になる（実装 Pull Request の差分には入れない）
+- [ ] AC61: `CHANGELOG.md` の冒頭が、判断の理由の置き場所を `docs/ndf-version-decisions.md` と書く
 
 ### 退行しないこと
 
-- [ ] AC61: 既存の検査 6 本が終了コード 0 のまま。対象は継続的統合が走らせる `check-doc-line-limit.py` / `check-markdown-links.py` / `check-skill-repo-assumptions.py` / `check-skill-frontmatter.py` / `check-skill-shell-vars.py` と、配布物の検証から呼ばれる `check-doc-staleness.py`
-- [ ] AC62: `uv run --with pytest pytest scripts/tests plugins/ndf -q` で、足したテストを含めて失敗が増えない
+- [ ] AC62: 既存の検査 6 本が終了コード 0 のまま。対象は継続的統合が走らせる `check-doc-line-limit.py` / `check-markdown-links.py` / `check-skill-repo-assumptions.py` / `check-skill-frontmatter.py` / `check-skill-shell-vars.py` と、配布物の検証から呼ばれる `check-doc-staleness.py`
+- [ ] AC63: `uv run --with pytest pytest scripts/tests plugins/ndf -q` で、足したテストを含めて失敗が増えない
 
 ## 非機能の条件
 
@@ -218,7 +219,7 @@
 | 検査 | `python3 plugins/ndf/scripts/instructions-check.py --root .` |
 | 調べ直し | `python3 plugins/ndf/scripts/instructions-check.py --refresh`（通信する唯一の経路） |
 | テスト | `uv run --with pytest pytest plugins/ndf/scripts/tests/test_instructions_check.py -q` |
-| 過去の状態での再現（AC54） | `git archive f56c90d9 CLAUDE.md AGENTS.md KIRO.md CHANGELOG.md` を一時ディレクトリへ展開し、`git init` と `git add -A` で追跡させ、宣言を置いて `--root` で渡す（走査は追跡対象から集めるため、展開しただけでは対象が 0 本になる） |
+| 過去の状態での再現（AC55） | `git archive f56c90d9 CLAUDE.md AGENTS.md KIRO.md CHANGELOG.md` を一時ディレクトリへ展開し、`git init` と `git add -A` で追跡させ、宣言を置いて `--root` で渡す（走査は追跡対象から集めるため、展開しただけでは対象が 0 本になる） |
 | 配布 | `bash scripts/build-runtime-plugins.sh --check` / `bash scripts/validate-runtime-plugins.sh` |
 | 継続的統合 | 実装の Pull Request の checks でジョブの結果を見る |
 
