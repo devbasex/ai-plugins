@@ -248,6 +248,7 @@ classDiagram
     class Finding {
         +path: str | None
         +line: int | None
+        +scope: str
         +message: str
     }
     class Declaration {
@@ -265,17 +266,36 @@ classDiagram
         +load(root) Declaration
     }
     class 検査 {
-        +collect_files(root, decl) list~Path~
+        +collect_files(root, decl) list~Target~
+        +action_of(scope, in_ndf_repo) str
         +import_findings(path, text, decl) list~Finding~
         +version_findings(path, text, released_max, decl) list~Finding~
         +budget_findings(files, decl) list~Finding~
         +count_findings(path, text) list~Finding~
         +main() int
     }
+    class Target {
+        +path: Path
+        +scope: str
+        +root: Path
+    }
     検査 ..> Declaration: 読む
+    検査 ..> Target: 集める
     検査 "1" --> "*" Finding: 返す
 ```
 
 **`Declaration` は宣言が無くても作る。** 省略した項目は既定値（`files` は 3 つの名前、残りは `None`）を
 持ち、**`None` の項目に対応する判定は動かない**（決定 2）。`imports` も省略時は `None`（未指定）で、
 `{}`（許可が 1 つも無い）とは別の値である。
+
+**`Finding` は対象のスコープを持つ。** 扱い（`直す` / `起票` / `報告`）は**スコープと、実行しているリポジトリが
+NDF の開発リポジトリかどうか**の 2 つで決まるため、判定の関数は指摘へスコープを載せ、`action_of` が扱いを返す。
+
+| 何が持つか | 値 |
+| --- | --- |
+| `Target` | 走査する 1 本。**どのスコープから集めたか**と、そのスコープの根を持つ |
+| `Finding.scope` | その指摘がどのスコープの対象で出たか |
+| `action_of(scope, in_ndf_repo)` | スコープの表（[issue-554-design-scope.md](issue-554-design-scope.md)）を引いて扱いを返す |
+
+**判定の関数はスコープを知らなくてよい。** 受け取るのは `Target` で、指摘を作るときにそのスコープを写す。
+**扱いを決めるのは出力の直前の 1 か所だけ**である（`main`）。
