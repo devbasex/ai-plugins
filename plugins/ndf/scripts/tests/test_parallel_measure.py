@@ -105,6 +105,22 @@ def test_capacity_allows_three_when_swap_is_free(tmp_path: Path) -> None:
     assert "swap_low" not in keys(proc.stdout)["limited_by"]
 
 
+def test_capacity_does_not_limit_swap_at_the_free_percentage_boundary(
+        tmp_path: Path) -> None:
+    """現状固定: 空き swap が閾値と等しい場合は swap_low にしない。"""
+    proc = capacity(
+        tmp_path,
+        "--swap-free-min-pct", "25",
+        swap_total_mib=2000,
+        swap_free_mib=500,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    values = keys(proc.stdout)
+    assert values["allowed"] == "3"
+    assert values["limited_by"] == "memory,max"
+
+
 def test_capacity_never_goes_below_one_lane(tmp_path: Path) -> None:
     """空きが 1 本分に足りなくても 1 を下回らない。0 本では進行が止まる。"""
     proc = capacity(tmp_path, available_mib=3000, swap_free_mib=2047)

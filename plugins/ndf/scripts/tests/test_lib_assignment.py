@@ -60,6 +60,37 @@ def assignment():
     return mod
 
 
+def test_detect_host_prefers_an_explicit_host(assignment):
+    assert assignment.detect_host(explicit="codex", env={"CLAUDECODE": "1"}) == (
+        "codex", "explicit")
+
+
+def test_detect_host_rejects_an_unknown_explicit_host(assignment):
+    with pytest.raises(
+        assignment.AssignmentError,
+        match=(
+            r"^--host には claude/codex/agy/kiro のいずれかを"
+            r"指定してください: unknown$"
+        ),
+    ):
+        assignment.detect_host(explicit="unknown", env={})
+
+
+def test_detect_host_uses_the_first_environment_hint(assignment):
+    assert assignment.detect_host(env={"CODEX_HOME": "x"}) == ("codex", "env")
+
+
+def test_detect_host_rejects_an_environment_without_a_hint(assignment):
+    with pytest.raises(
+        assignment.AssignmentError,
+        match=(
+            r"^ホストを推定できませんでした。"
+            r"`--host claude\|codex\|agy\|kiro` で明示してください$"
+        ),
+    ):
+        assignment.detect_host(env={})
+
+
 @pytest.mark.parametrize("host", EXPECTED)
 def test_assign_keeps_the_eight_round_rotation(assignment, host):
     actual = [assignment.assign(round_no, host) for round_no in range(1, 9)]
