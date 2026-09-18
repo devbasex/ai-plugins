@@ -141,7 +141,17 @@ fi
 とする。共通の git ディレクトリの絶対パスは `wt_common_git_dir "$path"` で得る
 （`$SCRIPTS/lib/worktree-common.sh`。引数が空なら終了コード 1）。
 
+**退避先を組み立ててから退避のループへ入る。** `$trash` を決めずにループを回すと、
+`mv` の宛先が `/<相対パス>` になり、権限しだいでファイルシステムの直下へ移した後に
+作業ツリーを消す。
+
 ```bash
+path=<作業ツリーの絶対パス>
+. "$SCRIPTS/lib/worktree-common.sh"
+common=$(wt_common_git_dir "$path") || exit 1   # 共通の git ディレクトリの絶対パス
+branch=$(git -C "$path" branch --show-current)  # detached なら空になる
+trash="$common/ndf/worktree-trash/${branch//\//__}-$(date +%Y%m%d%H%M%S)"
+mkdir -p "$trash" || exit 1
 (
   while IFS= read -r -d '' ent; do
     case "$ent" in
@@ -160,6 +170,9 @@ fi
 - **手順は bash で実行する。** `read -d ''` と `< <(…)` は `sh`（dash）に無く、
   `Syntax error: redirection unexpected` で終了コード 2 になる
 - ループをサブシェルで囲むのは、`exit 1` で手順全体を終わらせず、次の作業ツリーへ進むためである
+- **`branch` が空（detached）なら、作業ツリーのパスの最後の 2 階層など、その作業ツリーを
+  一意に指せる名前へ置き換える。** 空のままだと退避先が `-<時刻>` だけになり、別の
+  作業ツリーの退避先と見分けが付かない
 - **退避先は自動では消さない。** 容量（`du -sh <退避先>`）を報告に載せ、消すのは利用者である
 
 **退避が 1 件でも 0 以外で終わった作業ツリーは「未完了」にする。** この実行では、
