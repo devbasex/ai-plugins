@@ -249,6 +249,7 @@ classDiagram
         +path: str | None
         +line: int | None
         +scope: str
+        +criterion_id: str
         +message: str
     }
     class Declaration {
@@ -299,3 +300,11 @@ NDF の開発リポジトリかどうか**の 2 つで決まるため、判定�
 
 **判定の関数はスコープを知らなくてよい。** 受け取るのは `Target` で、指摘を作るときにそのスコープを写す。
 **扱いを決めるのは出力の直前の 1 か所だけ**である（`main`）。
+
+**`Finding` は観点の id を持つ。** 起票の重複の判定（題名の印）と、報告に載せる出典は、この id から引く。
+
+| 何に使うか | どう引くか |
+| --- | --- |
+| 起票の題名の印 | `[instructions] <criterion_id> <対象のパス>` |
+| 報告の出典 | 観点のデータの `criteria[].sources` から `sources[]` を引き、名前と参照日を出す |
+| 指摘の並べ替え・絞り込み | 呼び出し側が id で束ねられる |

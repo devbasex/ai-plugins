@@ -67,18 +67,22 @@
 
 ```json
 "scopes": {
+  "user": ["~/.claude/CLAUDE.md"],
   "plugins": [
     {"path": "~/.claude/plugins/cache/devbasex--ai-plugins/ndf",
-     "name": "ndf", "origin": "devbasex/ai-plugins",
+     "name": "ndf", "version": "10.14.0", "origin": "devbasex/ai-plugins",
      "update": "claude plugin update ndf", "ndf": true}
   ]
 }
 ```
 
+**`user` と `plugins` は形が違う。** `user` は位置の文字列の配列で、`plugins` は下の項目を持つオブジェクトの配列である。
+
 | 項目 | 何に使うか |
 | --- | --- |
 | `path` | 走査する位置。**そのスコープの根**になる |
-| `name` / `origin` | 報告と起票の宛先。`origin` が起票先のリポジトリ |
+| `name` / `version` | 報告に載せる、そのプラグインの名前と版 |
+| `origin` | 起票先のリポジトリ |
 | `update` | 報告に載せる更新の手立て |
 | `ndf` | **NDF が配るものか。** `true` なら扱いは `起票`、`false`（既定）なら `報告` |
 
@@ -134,7 +138,7 @@ echo "exit=$rc"
 全体にも起きるため、**末尾で検査の値へ戻す**。値を変数へ受けてから表示し、判定にはその値を使う。
 
 **`$SCRIPTS` を解決せずに相対パスで書かない。** ランタイムごとに導入先が違い、相対パスでは 1 つでしか
-当たらない。**実装では 4 ランタイムの導入先それぞれから起動して確かめる**（AC67）。
+当たらない。**実装では 4 ランタイムの導入先それぞれから起動して確かめる**（AC68）。
 
 ### 観点と出典のデータ
 
