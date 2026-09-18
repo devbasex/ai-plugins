@@ -19,6 +19,8 @@ import subprocess
 
 import pytest
 
+from issue_upkeep_helpers import bash_blocks, plain, rows, section, table
+
 SKILLS = pathlib.Path(__file__).resolve().parents[2]
 RETROSPECTIVE = SKILLS / "retrospective" / "SKILL.md"
 PROBLEM_SOLVING = SKILLS / "problem-solving" / "SKILL.md"
@@ -27,41 +29,6 @@ OUT_OF_SCOPE = SKILLS / "out-of-scope" / "SKILL.md"
 
 def read(path: pathlib.Path) -> str:
     return path.read_text(encoding="utf-8")
-
-
-def plain(text: str) -> str:
-    """強調の印と折り返しの改行を除く。言い回しの位置ではなく文を照合する。"""
-    return text.replace("\n", "").replace("**", "")
-
-
-def section(text: str, heading: str) -> str:
-    """見出しから、同じ深さか浅い次の見出しまでを返す。囲みの中の `#` は見出しとして数えない。"""
-    depth = len(heading.split(" ", 1)[0])
-    lines = text.split("\n")
-    start = lines.index(heading)
-    fenced = False
-    for end in range(start + 1, len(lines)):
-        line = lines[end]
-        if line.startswith("```"):
-            fenced = not fenced
-            continue
-        match = re.match(r"^(#+) ", line)
-        if not fenced and match and len(match.group(1)) <= depth:
-            return "\n".join(lines[start:end])
-    return "\n".join(lines[start:])
-
-
-def rows(text: str, header: str) -> list[list[str]]:
-    """見出し行で始まる表の、データ行のセルを返す。太字の印は外す。"""
-    block = text[text.index(header):]
-    block = block[:block.index("\n\n")] if "\n\n" in block else block
-    lines = [line for line in block.split("\n")[2:] if line.startswith("|")]
-    return [[cell.strip().replace("**", "") for cell in line.strip().strip("|").split("|")]
-            for line in lines]
-
-
-def bash_blocks(text: str) -> list[str]:
-    return re.findall(r"^```bash\n(.*?)^```$", text, re.S | re.M)
 
 
 # ---------- retrospective: Pull Request の番号を引く ----------

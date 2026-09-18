@@ -12,6 +12,8 @@ import subprocess
 
 import pytest
 
+from issue_upkeep_helpers import bash_blocks, plain, section, table
+
 SKILL_DIR = pathlib.Path(__file__).resolve().parents[1]
 SKILLS = SKILL_DIR.parent
 ROOT = SKILLS.parents[2]
@@ -33,11 +35,6 @@ VERDICT_HEADER = "| 判定 | 選ぶ条件 | 段 3 での対応 |"
 def flat(text: str) -> str:
     """折り返しの改行を除く。日本語の文は改行の位置で語が割れるため、照合の前に繋ぐ。"""
     return text.replace("\n", "")
-
-
-def plain(text: str) -> str:
-    """折り返しの改行に加えて強調の印を除く。太字の付け外しで同じ契約が落ちないようにする。"""
-    return text.replace("\n", "").replace("**", "")
 
 
 def contains(text: str, fragment: str) -> bool:
@@ -63,25 +60,6 @@ def links_to(text: str, target: str, base: pathlib.Path = SKILL_DIR) -> bool:
     """本文のリンクが `target` を指し、その先のファイルが実在するか。"""
     found = [link.split("#", 1)[0] for link in re.findall(r"\]\(([^)]+)\)", text)]
     return target in found and (base / target).is_file()
-
-
-def section(text: str, heading: str) -> str:
-    """見出しから、同じ深さか浅い次の見出しまでを返す。"""
-    level = heading.split(" ", 1)[0]
-    start = text.index(heading + "\n")
-    rest = text[start + len(heading):]
-    ends = [m.start() for m in re.finditer(r"^(#+) ", rest, re.MULTILINE)
-            if len(m.group(1)) <= len(level)]
-    return heading + (rest[:ends[0]] if ends else rest)
-
-
-def table(text: str, header: str) -> list[list[str]]:
-    """見出し行で始まる表の、データ行のセルを返す。太字の印は外す。"""
-    block = text[text.index(header):]
-    block = block[:block.index("\n\n")] if "\n\n" in block else block
-    rows = [line for line in block.split("\n")[2:] if line.startswith("|")]
-    return [[cell.strip().strip("*").strip() for cell in row.strip("|").split("|")]
-            for row in rows]
 
 
 def test_the_references_exist() -> None:
@@ -877,6 +855,55 @@ def test_table_helper_does_not_pass_over_a_missing_heading() -> None:
         table("見出しの無い本文\n", "| 判断 | 選ぶ条件 | 残すもの |")
 
 
+def test_markdown_helper_characterization() -> None:
+    """現状固定: 見出し欠落、同階層の次見出し、fenced code block 内の #、太字セルを正しく扱う。"""
+    # 1. 見出し欠落
+    with pytest.raises(ValueError):
+        section("## 見出し\n本文\n", "## 存在しない見出し")
+    with pytest.raises(ValueError):
+        table("見出しの無い本文\n", "| 判断 | 選ぶ条件 | 残すもの |")
+
+    # 2. 同階層の次見出し
+    doc_with_next = (
+        "## 見出しA\n"
+        "本文A1\n"
+        "本文A2\n"
+        "## 見出しB\n"
+        "本文B\n"
+    )
+    part_a = section(doc_with_next, "## 見出しA")
+    assert "本文A1" in part_a
+    assert "本文A2" in part_a
+    assert "見出しB" not in part_a
+    assert "本文B" not in part_a
+
+    # 3. fenced code block 内の #
+    doc_with_code = (
+        "## 見出しA\n"
+        "本文前\n"
+        "```bash\n"
+        "# コメントであり見出しではない\n"
+        "echo 1\n"
+        "```\n"
+        "本文後\n"
+        "## 見出しB\n"
+        "本文B\n"
+    )
+    part_code = section(doc_with_code, "## 見出しA")
+    assert "# コメントであり見出しではない" in part_code
+    assert "本文後" in part_code
+    assert "見出しB" not in part_code
+
+    # 4. 太字セル
+    table_text = (
+        "| 列1 | 列2 |\n"
+        "| --- | --- |\n"
+        "| **太字1** | 通常 **太字2** |\n"
+    )
+    parsed = table(table_text, "| 列1 | 列2 |")
+    assert parsed == [["太字1", "通常 太字2"]]
+
+
 # --- 並列の組（#541） --------------------------------------------------------
 #
 # **組は、マイルストーンへ課題を入れる時点で書く見込みである。** 確定した触る場所は
@@ -1012,7 +1039,7 @@ def redo_section() -> str:
 
 def redo_commands() -> list[str]:
     """やり直しの節が持つ判定材料の取り方（bash の例）を、出てくる順に返す。"""
-    return re.findall(r"```bash\n(.*?)```", redo_section(), re.DOTALL)
+    return bash_blocks(redo_section())
 
 
 def test_redo_takes_its_materials_from_two_lookups() -> None:
