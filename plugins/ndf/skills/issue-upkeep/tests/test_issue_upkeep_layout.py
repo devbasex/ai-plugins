@@ -101,10 +101,7 @@ def test_the_verdict_table_lists_eight_in_order() -> None:
     「ルートコーズ」は課題をまたいで決まるため「重複」の隣に置く。「要判断」は受け皿として末尾に残す。
     """
     body = SKILL.read_text(encoding="utf-8")
-    table = body[body.index("| 判定 | 選ぶ条件 | 段 3 での対応 |"):]
-    table = table[:table.index("\n\n")]
-    found = [re.match(r"\| \*?\*?([^|*]+?)\*?\*?(?: \|| ).*", line).group(1).strip()
-             for line in table.split("\n")[2:] if line.startswith("|")]
+    found = [row[0] for row in table(body, VERDICT_HEADER)]
     assert found == VERDICTS, found
 
 
