@@ -121,6 +121,17 @@ def test_capacity_does_not_limit_swap_at_the_free_percentage_boundary(
     assert values["limited_by"] == "memory,max"
 
 
+def test_capacity_skips_swap_check_when_swap_total_is_zero(tmp_path: Path) -> None:
+    """現状固定: SwapTotal が 0 のときはスワップ判定を省き、allowed を減らさない。"""
+    proc = capacity(tmp_path, swap_total_mib=0, swap_free_mib=0)
+    assert proc.returncode == 0, proc.stderr
+    values = keys(proc.stdout)
+    assert values["cgroup_available_mib"] == "max"
+    assert values["oom_kill"] == "1"
+    assert values["allowed"] == "3"
+    assert values["limited_by"] == "memory,max"
+
+
 def test_capacity_never_goes_below_one_lane(tmp_path: Path) -> None:
     """空きが 1 本分に足りなくても 1 を下回らない。0 本では進行が止まる。"""
     proc = capacity(tmp_path, available_mib=3000, swap_free_mib=2047)
@@ -184,6 +195,31 @@ def test_capacity_continues_when_the_cgroup_files_are_absent(tmp_path: Path) -> 
     assert values["by_memory"] == "3"
 
 
+def test_capacity_continues_when_memory_max_is_not_numeric(tmp_path: Path) -> None:
+    """現状固定: memory.max が数値でないときは unknown として継続する。"""
+    proc = capacity(tmp_path, swap_free_mib=2047, memory_max="not-a-number")
+    assert proc.returncode == 0, proc.stderr
+    values = keys(proc.stdout)
+    assert values["cgroup_available_mib"] == "unknown"
+    assert values["oom_kill"] == "1"
+    assert values["allowed"] == "3"
+    assert values["limited_by"] == "memory,max"
+
+
+def test_capacity_continues_when_memory_current_is_not_numeric(tmp_path: Path) -> None:
+    """現状固定: memory.current が数値でないときは unknown として継続する。"""
+    cg = cgroup(tmp_path, oom_kill=1, memory_max=str(8 * 1024 * 1024 * 1024))
+    (cg / "memory.current").write_text("not-a-number\n", encoding="utf-8")
+    mem = meminfo(tmp_path, available_mib=9742, swap_total_mib=2047, swap_free_mib=2047)
+    proc = run("capacity", "--meminfo", str(mem), "--cgroup-dir", str(cg))
+    assert proc.returncode == 0, proc.stderr
+    values = keys(proc.stdout)
+    assert values["cgroup_available_mib"] == "unknown"
+    assert values["oom_kill"] == "1"
+    assert values["allowed"] == "3"
+    assert values["limited_by"] == "memory,max"
+
+
 def test_capacity_floors_the_cgroup_remainder_at_zero(tmp_path: Path) -> None:
     """使用量が上限を超えている（負の残り）ときも 0 として扱い、落ちない。"""
     proc = capacity(tmp_path, swap_free_mib=2047,
@@ -220,6 +256,20 @@ def test_capacity_continues_when_memory_events_is_absent(tmp_path: Path) -> None
     assert values["oom_kill"] == "unknown"
     assert values["oom_kill_increased"] == "unknown"
     assert values["allowed"] == "3"
+
+
+def test_capacity_continues_when_oom_kill_is_not_numeric(tmp_path: Path) -> None:
+    """現状固定: memory.events の oom_kill が数値でないときは unknown として継続する。"""
+    cg = cgroup(tmp_path, memory_max="max", memory_current=0)
+    (cg / "memory.events").write_text("oom_kill not-a-number\n", encoding="utf-8")
+    mem = meminfo(tmp_path, available_mib=9742, swap_total_mib=2047, swap_free_mib=2047)
+    proc = run("capacity", "--meminfo", str(mem), "--cgroup-dir", str(cg))
+    assert proc.returncode == 0, proc.stderr
+    values = keys(proc.stdout)
+    assert values["cgroup_available_mib"] == "max"
+    assert values["oom_kill"] == "unknown"
+    assert values["allowed"] == "3"
+    assert values["limited_by"] == "memory,max"
 
 
 def test_capacity_rejects_a_negative_argument(tmp_path: Path) -> None:
