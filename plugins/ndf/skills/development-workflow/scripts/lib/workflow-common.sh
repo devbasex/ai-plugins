@@ -684,7 +684,7 @@ _wf_read_mode() {
 # 飛ばしても終了コード 0 で返って工程は続き、飛ばした工程は報告の「記録なし」に含まれる。
 wf_record() {
   local slug="${1:-}" issue="${2:-}" key="${3:-}" value="${4:-}"
-  local file lock content updated now update_expr
+  local file lock content updated now
   command -v jq >/dev/null 2>&1 || return 0
   file=$(wf_state_file "$slug" "$issue") || return 0
   lock="$file.lockdir"
@@ -695,13 +695,14 @@ wf_record() {
   content=$(wf_state_read "$file")
   now=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null) || now=""
   case "$key" in
-    stage) update_expr='.stages += [$v]' ;;
-    mode)  update_expr='.mode = $v' ;;
+    stage) updated=$(printf '%s' "$content" \
+      | jq --arg r "$slug" --argjson i "$issue" --arg v "$value" --arg t "$now" \
+        '.repo = $r | .issue = $i | .stages = ((.stages // []) + [$v]) | .updated_at = $t' 2>/dev/null) ;;
+    mode) updated=$(printf '%s' "$content" \
+      | jq --arg r "$slug" --argjson i "$issue" --arg v "$value" --arg t "$now" \
+        '.repo = $r | .issue = $i | .mode = $v | .stages = (.stages // []) | .updated_at = $t' 2>/dev/null) ;;
     *) wf_lock_release "$lock"; return 0 ;;
   esac
-  updated=$(printf '%s' "$content" \
-    | jq --arg r "$slug" --argjson i "$issue" --arg v "$value" --arg t "$now" \
-      ".repo = \$r | .issue = \$i | .stages = (.stages // []) | $update_expr | .updated_at = \$t" 2>/dev/null)
   if [ -n "$updated" ]; then
     if printf '%s\n' "$updated" >"$file.tmp.$$" 2>/dev/null; then
       mv "$file.tmp.$$" "$file" 2>/dev/null || rm -f "$file.tmp.$$" 2>/dev/null

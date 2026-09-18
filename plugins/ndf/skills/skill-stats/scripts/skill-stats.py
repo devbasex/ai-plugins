@@ -342,43 +342,6 @@ def build_timeline(
     return timeline, project
 
 
-def _hit_in_window(
-    timeline: list[tuple[str, object]],
-    start: int,
-    qualified: str,
-    cap: int,
-) -> bool:
-    """先読み窓を走査して同じ skill の auto invocation を探す。"""
-    end = min(start + 1 + cap, len(timeline))
-    for j in range(start + 1, end):
-        k2, d2 = timeline[j]
-        if k2 in ("user", "slash"):
-            break
-        if k2 == "skill" and d2 == qualified:
-            return True
-    return False
-
-
-def _tally_user_message(
-    text: str,
-    index: int,
-    timeline: list[tuple[str, object]],
-    skill_triggers: list[tuple[str, list[str]]],
-    trig_h: Counter,
-    hits: Counter,
-    lookahead_cap: int,
-) -> None:
-    """1 件の user メッセージに対するトリガー合致とヒットの集計を行う。"""
-    text_l = text.lower()
-    for qualified, trs in skill_triggers:
-        if not trs:
-            continue
-        if any(t in text_l for t in trs):
-            trig_h[qualified] += 1
-            if _hit_in_window(timeline, index, qualified, lookahead_cap):
-                hits[qualified] += 1
-
-
 def aggregate_by_project(
     transcripts: list[pathlib.Path],
     skills: list[dict],
@@ -416,9 +379,20 @@ def aggregate_by_project(
                 continue
             if kind != "user":
                 continue
-            _tally_user_message(
-                str(data), i, tl, skill_triggers, trig_h, hits, lookahead_cap
-            )
+            text_l = str(data).lower()
+            for qualified, trs in skill_triggers:
+                if not trs:
+                    continue
+                if any(t in text_l for t in trs):
+                    trig_h[qualified] += 1
+                    end = min(i + 1 + lookahead_cap, len(tl))
+                    for j in range(i + 1, end):
+                        k2, d2 = tl[j]
+                        if k2 in ("user", "slash"):
+                            break
+                        if k2 == "skill" and d2 == qualified:
+                            hits[qualified] += 1
+                            break
     return result
 
 
