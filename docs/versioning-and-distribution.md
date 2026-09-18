@@ -294,13 +294,16 @@ claude plugin tag plugins/ndf --push      # ndf--v<版> を作って origin へ�
 2. 変更内容をドキュメント化
 3. `plugins/ndf/README.md` の「v&lt;版&gt; へ更新するとき」の節を開き、**本文をその版の変更内容へ書き直す**。見出しの版数だけを置き換えて、本文を前の版の説明のまま残さない
 4. `CHANGELOG.md` の先頭へその版の節を足す。書式は Keep a Changelog に従い、変更点を
-   `追加` / `変更` / `修正` / `削除` へ分類して 1〜2 行で書く。判断の理由は `CLAUDE.md` の側に置く
+   `追加` / `変更` / `修正` / `削除` へ分類して 1〜2 行で書く。判断の理由は
+   `docs/ndf-version-decisions.md` へ置く
 5. Skill の数が増減した場合は、`README.md` と `plugins/ndf/README.md` に書かれた数を書き直す
 6. `python3 scripts/check-doc-staleness.py --root .` を実行し、説明文書に残った古い版数を
    出力の行番号のとおりに直す
-7. 破壊的変更がある場合は明示
-8. テストを実行
-9. **正式版として `main` を進めた後、リリースタグを打つ**
+7. `python3 plugins/ndf/scripts/instructions-check.py --root .` を実行し、出た版の段落が
+   指示書に残っていないかを見る。落ちた段落は `docs/ndf-version-decisions.md` へ移す
+8. 破壊的変更がある場合は明示
+9. テストを実行
+10. **正式版として `main` を進めた後、リリースタグを打つ**
 
 **すべての版数を機械的に置換しない。** 履歴（`docs/ndf-version-decisions.md`、`CLAUDE.md` の
 現行版の段落、`docs/development-history/`）、記録（`issues/`）、意図的に前の版を指す文（取り消しの説明）は

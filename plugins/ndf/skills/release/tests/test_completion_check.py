@@ -56,7 +56,9 @@ RULES_SECTION = COMPLETION_SECTIONS[0]
 TEMPLATE_SECTION = COMPLETION_SECTIONS[1]
 LIMIT_SECTION = COMPLETION_SECTIONS[2]
 
-SKILL_MD_MAX_LINES = 320
+# #554 が退避の手順へ指示書の検査を足した分（4 行）を含む。**詳細は
+# `references/instruction-files.md` が持ち、本文には呼び出しと参照への案内だけを置く。**
+SKILL_MD_MAX_LINES = 325
 MARKDOWN_MAX_LINES = 500
 
 
