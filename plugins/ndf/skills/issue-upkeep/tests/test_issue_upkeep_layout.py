@@ -156,6 +156,29 @@ def test_milestones_reflect_only_the_earlier_direction() -> None:
     assert contains(body, "**要判断**")
 
 
+@pytest.mark.parametrize(("situation", "response"), [
+    ("重要度が高いのに、直近でないマイルストーンにある", "直近へ移す"),
+    ("重要度が低いのに、直近のマイルストーンにある", "要判断。 後ろへ移すと着手が遅れる"),
+    ("重要度と位置が合っている", "何もしない"),
+])
+def test_existing_milestones_branch_by_priority_and_position(
+        situation: str, response: str) -> None:
+    """重要度と現在位置の食い違いに応じた 3 つの対応を固定する。"""
+    part = section(MILESTONES.read_text(encoding="utf-8"),
+                   "## 既に設定されているものを振り直す")
+    rows = table(part, "| 状況 | 対応 |")
+    row = next(row for row in rows if row[0] == situation)
+    assert plain(row[1]) == response
+
+
+def test_existing_milestones_explain_why_only_earlier_moves_are_automatic() -> None:
+    """早める判断には実害の根拠があり、遅らせる判断は価値判断なので自動化しない。"""
+    part = section(MILESTONES.read_text(encoding="utf-8"),
+                   "## 既に設定されているものを振り直す")
+    assert contains(part, "早める判断は実害の記述が根拠になる")
+    assert contains(part, "遅らせる判断は\n「今やらなくてよい」という価値の判断")
+
+
 def test_milestones_are_not_created_for_a_single_issue() -> None:
     """1 件しか残らないときは作らない。"""
     assert contains(MILESTONES.read_text(encoding="utf-8"), "**1 件しか残らないときは作らない。**")
@@ -892,4 +915,3 @@ def test_group_timing_branches_and_actions(
     action = plain(row[1])
     for expected in expected_actions:
         assert expected in action, f"{timing_pattern} の行うことに '{expected}' が含まれていない"
-
