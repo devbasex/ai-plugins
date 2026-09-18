@@ -283,8 +283,10 @@ def intervals(records: list[dict], now: _dt.datetime) -> list[tuple[_dt.datetime
     return spans
 
 
-def measure(spans: list[tuple[_dt.datetime, _dt.datetime]]) -> dict[str, object]:
-    """開いている本数を時刻順に数え、2 本以上だった秒を足す。
+def build_events(
+        spans: list[tuple[_dt.datetime, _dt.datetime]],
+) -> list[tuple[_dt.datetime, int]]:
+    """区間を開始と終了の事象列に変換する。
 
     同じ時刻に閉じる区間と開く区間は重ならない。閉じるほうを先に数えるため、
     事象の並びで終わり（−1）を始まり（+1）より前に置く。
@@ -294,7 +296,11 @@ def measure(spans: list[tuple[_dt.datetime, _dt.datetime]]) -> dict[str, object]
         events.append((start, 1))
         events.append((end, -1))
     events.sort(key=lambda event: (event[0], event[1]))
+    return events
 
+
+def scan_events(events: list[tuple[_dt.datetime, int]]) -> tuple[int, float]:
+    """開いている本数を時刻順に数え、2 本以上だった秒を足す。"""
     open_count = 0
     max_open = 0
     overlap_seconds = 0.0
@@ -305,7 +311,15 @@ def measure(spans: list[tuple[_dt.datetime, _dt.datetime]]) -> dict[str, object]
         open_count += delta
         max_open = max(max_open, open_count)
         previous = moment
+    return max_open, overlap_seconds
 
+
+def summarize_measurement(
+        spans: list[tuple[_dt.datetime, _dt.datetime]],
+        max_open: int,
+        overlap_seconds: float,
+) -> dict[str, object]:
+    """区間と走査結果を表示用の集計値に整形する。"""
     start = min(span[0] for span in spans)
     end = max(span[1] for span in spans)
     span_seconds = (end - start).total_seconds()
@@ -322,6 +336,13 @@ def measure(spans: list[tuple[_dt.datetime, _dt.datetime]]) -> dict[str, object]
         "concurrency_pct": pct,
         "max_open": max_open,
     }
+
+
+def measure(spans: list[tuple[_dt.datetime, _dt.datetime]]) -> dict[str, object]:
+    """区間を並行度の集計値へ変換する。"""
+    events = build_events(spans)
+    max_open, overlap_seconds = scan_events(events)
+    return summarize_measurement(spans, max_open, overlap_seconds)
 
 
 def run_concurrency(args: argparse.Namespace) -> int:
