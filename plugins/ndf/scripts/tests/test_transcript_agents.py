@@ -585,3 +585,10 @@ def test_no_fixed_interval_is_written_into_the_waiting() -> None:
     assert "time.sleep(" in text
     # 眠る秒数は解除時刻から計算する。定数の秒数で眠る呼び出しを持たない
     assert not re.search(r"time\.sleep\(\s*[0-9]", text)
+
+
+def test_a_negative_margin_or_max_sleep_ends_with_two() -> None:
+    """負の秒数は待ちの保証を壊すため、眠る前に引数の誤りとして弾く。"""
+    for bad in (("--margin", "-1"), ("--max-sleep", "-1")):
+        p = run("wait-reset", "--session", "sess-d", "--depth", "1", *bad)
+        assert p.returncode == 2, (bad, p.stdout, p.stderr)

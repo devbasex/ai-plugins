@@ -604,6 +604,21 @@ def _now_argument(value: str) -> datetime:
         raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
+def _non_negative_int(value: str) -> int:
+    """秒数の引数を読む。**負の値は引数の誤り（終了コード 2）にする。**
+
+    負の `--max-sleep` は `time.sleep` が拒み、負の `--margin` は解除の前に待ちを
+    終わらせる。どちらも待ちの保証（AC44）を壊すため、眠る前に弾く。
+    """
+    try:
+        seconds = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"整数として読めない: {value}") from exc
+    if seconds < 0:
+        raise argparse.ArgumentTypeError(f"負の秒数は受け付けない: {value}")
+    return seconds
+
+
 def _add_session_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--session", action="append", default=[], required=True,
                         help="セッション ID（繰り返して複数を渡せる）")
@@ -637,9 +652,9 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_session_argument(waiting)
     waiting.add_argument("--layer", choices=LAYERS, default=None, help="1 つの層に絞る")
     waiting.add_argument("--depth", type=int, default=None, help="深さで絞る")
-    waiting.add_argument("--margin", type=int, default=60,
+    waiting.add_argument("--margin", type=_non_negative_int, default=60,
                          help="解除時刻の後に置く余白の秒数（既定 60）")
-    waiting.add_argument("--max-sleep", type=int, default=None,
+    waiting.add_argument("--max-sleep", type=_non_negative_int, default=None,
                          help="1 度に眠る上限の秒数。区切ったときは終了コード 3")
     return parser
 

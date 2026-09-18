@@ -405,7 +405,8 @@ python3 "$SCRIPTS/lib/transcript_agents.py" interrupted \
 **再開するのは直下だけである。** conductor は supervisor と、自分が直接起動した worker を
 再開する。supervisor は自分が起動した worker を再開する。
 **conductor が supervisor の下の worker を直接再開しない。**
-起こされた supervisor と worker が、同じ作業と同じ書き込みを重ねる。
+直接再開すると、起こされた supervisor と worker が同じ作業と同じ書き込みを
+重ねてしまうためである。
 
 ### 解除を待つ手段
 
