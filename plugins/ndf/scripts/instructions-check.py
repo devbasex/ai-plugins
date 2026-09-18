@@ -897,51 +897,67 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
 
-def check(root: Path, decl: Declaration, criteria: Criteria, args) -> int:
-    scopes = args.scope or ["project"]
-    notes: list[str] = []
+@dataclass
+class Measurements:
+    """対象ごとの計測と判定の結果。段の間で持ち回る。"""
 
+    findings: list[Finding] = field(default_factory=list)
+    sizes: dict[str, int] = field(default_factory=dict)
+    counts: dict[str, int] = field(default_factory=dict)
+    breakdowns: dict[str, list[tuple[str, int]]] = field(default_factory=dict)
+
+
+def resolve_latest(root: Path, decl: Declaration, criteria: Criteria) -> str | None:
+    """`released` の宣言から最新の版を解く。**取れなければ止まる。**"""
     # **止まるなら、何も判定する前に止まる。** 版を取れないことは走査の前に分かる。
-    latest = None
-    if decl.released is not None and criteria.enabled("released-version-paragraph"):
-        versions = released_versions(root, decl.released)
-        if not versions:
-            raise CheckError("released の宣言から版を 1 つも取れない")
-        latest = max(versions, key=version_key)
+    if decl.released is None or not criteria.enabled("released-version-paragraph"):
+        return None
+    versions = released_versions(root, decl.released)
+    if not versions:
+        raise CheckError("released の宣言から版を 1 つも取れない")
+    return max(versions, key=version_key)
 
+
+def collect_scope_roots(root: Path, decl: Declaration,
+                        scopes: list[str]) -> list[ScopeRoot]:
+    """走査するスコープの根と、その配下の対象を集める。"""
     scope_roots: list[ScopeRoot] = []
     if "project" in scopes:
         scope_roots.append(collect_project(root, decl))
     for scope in ("user", "plugins"):
         if scope in scopes:
             scope_roots.extend(collect_declared(scope, root, decl))
+    return scope_roots
 
-    targets = [t for sr in scope_roots for t in sr.targets]
-    if not targets:
-        print("対象の指示書が 1 本も無い")
-        return 0
 
-    findings: list[Finding] = []
-    sizes: dict[str, int] = {}
-    counts: dict[str, int] = {}
-    breakdowns: dict[str, list[tuple[str, int]]] = {}
-
+def measure_targets(targets: list[Target], latest: str | None,
+                    decl: Declaration, criteria: Criteria) -> Measurements:
+    """対象ごとの findings・sizes・counts・breakdowns を作る。"""
+    result = Measurements()
     for target in targets:
         text = target.path.read_text(encoding="utf-8", errors="replace")
-        findings.extend(import_findings(target, text, decl, criteria))
+        result.findings.extend(import_findings(target, text, decl, criteria))
         if latest is not None and target.scope == "project":
             # 版の段落の判定はプロジェクトのスコープだけに掛ける。`released` は
             # そのリポジトリの版を指すため、他の製品の版数を古いとは言わない。
-            findings.extend(version_findings(target, text, latest, decl, criteria))
+            result.findings.extend(
+                version_findings(target, text, latest, decl, criteria))
         total, breakdown = read_size(target, decl)
-        sizes[display_path(target)] = total
-        breakdowns[display_path(target)] = breakdown
-        counts[display_path(target)] = count_findings(target, text)
+        result.sizes[display_path(target)] = total
+        result.breakdowns[display_path(target)] = breakdown
+        result.counts[display_path(target)] = count_findings(target, text)
+    return result
 
+
+def finalize(scope_roots: list[ScopeRoot], targets: list[Target],
+             result: Measurements, decl: Declaration,
+             criteria: Criteria) -> list[str]:
+    """スコープ横断の findings を足し、注記を作る。注記を返す。"""
     for scope_root in scope_roots:
-        findings.extend(stale_allowance_findings(scope_root, decl, criteria))
-    findings.extend(budget_findings(sizes, targets, decl, criteria))
+        result.findings.extend(stale_allowance_findings(scope_root, decl, criteria))
+    result.findings.extend(budget_findings(result.sizes, targets, decl, criteria))
 
+    notes: list[str] = []
     if not decl.present:
         notes.append(f"NOTE: 宣言（{DECLARATION_RELATIVE_PATH}）が無いため、"
                      "出た版と許可の判定は動かない")
@@ -949,8 +965,24 @@ def check(root: Path, decl: Declaration, criteria: Criteria, args) -> int:
     if stale:
         notes.append(f"NOTE: 観点の一覧を最後に調べ直したのは {stale} である"
                      "（--refresh で出典を読み直す）")
+    return notes
 
-    return report(targets, sizes, counts, breakdowns, findings, notes, criteria,
+
+def check(root: Path, decl: Declaration, criteria: Criteria, args) -> int:
+    scopes = args.scope or ["project"]
+
+    latest = resolve_latest(root, decl, criteria)
+    scope_roots = collect_scope_roots(root, decl, scopes)
+    targets = [t for sr in scope_roots for t in sr.targets]
+    if not targets:
+        print("対象の指示書が 1 本も無い")
+        return 0
+
+    result = measure_targets(targets, latest, decl, criteria)
+    notes = finalize(scope_roots, targets, result, decl, criteria)
+
+    return report(targets, result.sizes, result.counts, result.breakdowns,
+                  result.findings, notes, criteria,
                   in_development_repo(root), args.report)
 
 
