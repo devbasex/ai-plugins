@@ -114,6 +114,44 @@ def test_the_measurement_does_not_refuse_a_launch() -> None:
     assert "起動は拒否しない" in parallel()
 
 
+def test_bounds_1_to_3_are_watched_by_machine() -> None:
+    """下限 1〜3 は Pull Request 作成時に機械が案内する。"""
+    by_bound = {row[0]: row[2] for row in _watcher_rows()}
+    for bound in ("1", "2", "3"):
+        assert "機械" in by_bound[bound]
+
+
+def test_bounds_4_and_5_are_watched_by_procedure() -> None:
+    """下限 4・5 は手順（実行計画・後からマージする側の実装レビュー）が見る。"""
+    by_bound = {row[0]: row[2] for row in _watcher_rows()}
+    for bound in ("4", "5"):
+        assert "手順" in by_bound[bound]
+
+
+def test_bound_6_splits_measurement_and_judgement() -> None:
+    """下限 6 は測定をスクリプトが行い、判断を担当自身が下す。"""
+    by_bound = {row[0]: row[2] for row in _watcher_rows()}
+    assert "測定は機械、判断は手順" in by_bound["6"]
+
+
+def _watcher_rows() -> list[list[str]]:
+    lines = parallel().splitlines()
+    start = next(i for i, line in enumerate(lines)
+                 if line.strip() == "## 機械が見るものと、手順として書くもの")
+    rows: list[list[str]] = []
+    for line in lines[start + 1:]:
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            break
+        if not stripped.startswith("|"):
+            continue
+        cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+        if cells == ["#", "下限", "誰が見るか", "どこで"] or set("".join(cells)) <= set("-: "):
+            continue
+        rows.append(cells)
+    return rows
+
+
 # --- 初期値を持つのは 1 か所だけ（AC33 / 決定 7） ---------------------------
 
 
