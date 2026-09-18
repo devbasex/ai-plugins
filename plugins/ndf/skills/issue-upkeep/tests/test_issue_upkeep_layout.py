@@ -149,6 +149,31 @@ def test_closing_and_not_planned_are_separate_verdicts() -> None:
     assert contains(body, "| **やらない** |")
 
 
+@pytest.mark.parametrize(("priority", "holding_cost", "candidate"), [
+    ("高い（実害・安全機構の欠落）", "大きい", "原則ならない。 候補にするなら、実害が稀であることを実測で示す"),
+    ("中くらい（保守性・設計一貫性）", "中くらい", "直す費用が大きければ候補になる"),
+    ("低い（余力があれば）", "小さい", "候補になりやすい"),
+])
+def test_no_work_branches_by_priority(
+        priority: str, holding_cost: str, candidate: str) -> None:
+    """重要度の 3 区分に応じた「やらない」候補判定の分岐を固定する。"""
+    part = section(NO_WORK.read_text(encoding="utf-8"),
+                   "## 重要度が、抱える費用の目安になる")
+    rows = table(part, "| 重要度 | 抱える費用 | 候補になるか |")
+    normalized = [[plain(cell) for cell in row] for row in rows]
+    row = next(r for r in normalized if r[0] == priority)
+    assert row[1] == holding_cost
+    assert row[2] == candidate
+
+
+def test_no_work_high_priority_requires_frequency_measurement_or_needs_judgement() -> None:
+    """重要度「高い」を候補にするには頻度の実測が必要で、示せなければ要判断へ倒す規則を固定する。"""
+    part = plain(section(NO_WORK.read_text(encoding="utf-8"),
+                         "## 重要度が、抱える費用の目安になる"))
+    assert "高いものを候補にするときは、頻度を実測で示す" in part
+    assert "示せなければ要判断へ倒す" in part
+
+
 def test_milestones_reflect_only_the_earlier_direction() -> None:
     """早める方向だけを自動で反映する。"""
     body = MILESTONES.read_text(encoding="utf-8")
