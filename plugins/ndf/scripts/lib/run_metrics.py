@@ -362,22 +362,30 @@ def _table(header: list[str], rows: list[list[str]]) -> str:
     return "\n".join(lines)
 
 
-def _by_total(rows: list[dict]) -> str:
+def _finished_rows(rows: list[dict]) -> list[list[str]]:
     out: list[list[str]] = []
-    unfinished: list[list[str]] = []
     for kind in KINDS:
-        of_kind = [r for r in rows if r.get("kind") == kind]
-        minutes = sorted(m for r in of_kind if (m := _minutes(r)) is not None)
+        minutes = sorted(m for r in rows if r.get("kind") == kind and (m := _minutes(r)) is not None)
         if minutes:
             out.append([kind, str(len(minutes)), _fmt(_quantile(minutes, 0.5)),
                         _fmt(_quantile(minutes, 0.75)), _fmt(_quantile(minutes, 0.9)),
                         _fmt(minutes[-1]), _fmt(sum(minutes))])
-        pending = [r for r in of_kind if r.get("final") is None]
+    return out
+
+
+def _unfinished_rows(rows: list[dict]) -> list[list[str]]:
+    out: list[list[str]] = []
+    for kind in KINDS:
+        pending = [r for r in rows if r.get("kind") == kind and r.get("final") is None]
         if pending:
-            unfinished.append([f"終わっていない（{kind}）", str(len(pending)),
-                               "—", "—", "—", "—", "—"])
+            out.append([f"終わっていない（{kind}）", str(len(pending)),
+                        "—", "—", "—", "—", "—"])
+    return out
+
+
+def _by_total(rows: list[dict]) -> str:
     return _table(["種類", "件数", "中央値（分）", "p75（分）", "p90（分）", "最大（分）", "合計（分）"],
-                  out + unfinished)
+                  _finished_rows(rows) + _unfinished_rows(rows))
 
 
 def _by_round_count(rows: list[dict]) -> str:

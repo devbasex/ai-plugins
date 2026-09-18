@@ -5,8 +5,10 @@
 """
 from __future__ import annotations
 
+import json
 import pathlib
 import re
+import subprocess
 
 import pytest
 
@@ -149,6 +151,31 @@ def test_closing_and_not_planned_are_separate_verdicts() -> None:
     assert contains(body, "| **やらない** |")
 
 
+@pytest.mark.parametrize(("priority", "holding_cost", "candidate"), [
+    ("高い（実害・安全機構の欠落）", "大きい", "原則ならない。 候補にするなら、実害が稀であることを実測で示す"),
+    ("中くらい（保守性・設計一貫性）", "中くらい", "直す費用が大きければ候補になる"),
+    ("低い（余力があれば）", "小さい", "候補になりやすい"),
+])
+def test_no_work_branches_by_priority(
+        priority: str, holding_cost: str, candidate: str) -> None:
+    """重要度の 3 区分に応じた「やらない」候補判定の分岐を固定する。"""
+    part = section(NO_WORK.read_text(encoding="utf-8"),
+                   "## 重要度が、抱える費用の目安になる")
+    rows = table(part, "| 重要度 | 抱える費用 | 候補になるか |")
+    normalized = [[plain(cell) for cell in row] for row in rows]
+    row = next(r for r in normalized if r[0] == priority)
+    assert row[1] == holding_cost
+    assert row[2] == candidate
+
+
+def test_no_work_high_priority_requires_frequency_measurement_or_needs_judgement() -> None:
+    """重要度「高い」を候補にするには頻度の実測が必要で、示せなければ要判断へ倒す規則を固定する。"""
+    part = plain(section(NO_WORK.read_text(encoding="utf-8"),
+                         "## 重要度が、抱える費用の目安になる"))
+    assert "高いものを候補にするときは、頻度を実測で示す" in part
+    assert "示せなければ要判断へ倒す" in part
+
+
 def test_milestones_reflect_only_the_earlier_direction() -> None:
     """早める方向だけを自動で反映する。"""
     body = MILESTONES.read_text(encoding="utf-8")
@@ -156,9 +183,60 @@ def test_milestones_reflect_only_the_earlier_direction() -> None:
     assert contains(body, "**要判断**")
 
 
+@pytest.mark.parametrize(("situation", "response"), [
+    ("重要度が高いのに、直近でないマイルストーンにある", "直近へ移す"),
+    ("重要度が低いのに、直近のマイルストーンにある", "要判断。 後ろへ移すと着手が遅れる"),
+    ("重要度と位置が合っている", "何もしない"),
+])
+def test_existing_milestones_branch_by_priority_and_position(
+        situation: str, response: str) -> None:
+    """重要度と現在位置の食い違いに応じた 3 つの対応を固定する。"""
+    part = section(MILESTONES.read_text(encoding="utf-8"),
+                   "## 既に設定されているものを振り直す")
+    rows = table(part, "| 状況 | 対応 |")
+    row = next(row for row in rows if row[0] == situation)
+    assert plain(row[1]) == response
+
+
+def test_existing_milestones_explain_why_only_earlier_moves_are_automatic() -> None:
+    """早める判断には実害の根拠があり、遅らせる判断は価値判断なので自動化しない。"""
+    part = section(MILESTONES.read_text(encoding="utf-8"),
+                   "## 既に設定されているものを振り直す")
+    assert contains(part, "早める判断は実害の記述が根拠になる")
+    assert contains(part, "遅らせる判断は\n「今やらなくてよい」という価値の判断")
+
+
 def test_milestones_are_not_created_for_a_single_issue() -> None:
     """1 件しか残らないときは作らない。"""
     assert contains(MILESTONES.read_text(encoding="utf-8"), "**1 件しか残らないときは作らない。**")
+
+
+def test_new_milestone_is_appended_with_the_next_number() -> None:
+    """通常の追加は既存の順序を動かさず、過去最大の着手順序の次を採る。"""
+    part = section(MILESTONES.read_text(encoding="utf-8"),
+                   "## 新しく作るとき")
+    assert contains(part, "**末尾に置く。**")
+    assert contains(part, "連番は現在の最大の次にする")
+
+
+def test_inserting_a_new_milestone_between_existing_ones_needs_judgement() -> None:
+    """既存の間への差し込みは他の課題の着手順序を変えるため、要判断へ倒す。"""
+    part = section(MILESTONES.read_text(encoding="utf-8"),
+                   "## 新しく作るとき")
+    assert contains(part, "既存の間へ差し込むことは、他の課題の着手の順序を早めるか遅らせるかの判断")
+    assert contains(part, "**要判断**へ倒す")
+
+
+def test_new_milestone_number_is_not_reused_after_closing() -> None:
+    """閉じたマイルストーンを含む過去最大の着手順序から、再利用しない連番を決める。"""
+    part = section(MILESTONES.read_text(encoding="utf-8"),
+                   "## 新しく作るとき")
+    rows = table(part, "| 決めること | 決め方 |")
+    name = next(row[1] for row in rows if row[0] == "名前")
+    assert "これまでに付けた最大の次" in name
+    assert "再利用しない" in name
+    assert "閉じたマイルストーンは版数へ改名される" in name
+    assert "着手の順序: N 番目" in name
 
 
 @pytest.mark.parametrize(("priority", "when_no_matching_subject"), [
@@ -244,6 +322,35 @@ def test_the_target_query_filters_only_by_milestone() -> None:
     assert "--author" not in block, "投稿者で絞る例になっている"
     assert "created:" not in block, "起票の時期で絞る例になっている"
     assert "select(.milestone == null)" in block
+
+
+def test_the_target_query_keeps_only_null_milestone_issues() -> None:
+    """段 1 の jq を実際に流し、milestone が null の課題だけを残すことを固定する。
+
+    現状固定: 期待値の根拠は仕様ではなく、抽出手順が返す jq 式の振る舞いである。
+    文字列の存在（別の現状固定テスト）ではなく、分岐そのものを流して固定する。
+    """
+    body = SKILL.read_text(encoding="utf-8")
+    block = body[locate(body, "**起票者は問わない。**"):]
+    start = block.index("```bash")
+    block = block[start:block.index("```", start + len("```bash")) + 3]
+    expression = re.search(r"--jq '([^']*)'", block).group(1)
+
+    issues = [
+        {"number": 10, "title": "foo", "milestone": None},
+        {"number": 20, "title": "bar", "milestone": {"title": "m1"}},
+        {"number": 30, "title": "baz baz", "milestone": None},
+    ]
+    done = subprocess.run(["jq", "-r", expression], input=json.dumps(issues),
+                          capture_output=True, text=True, check=True)
+    lines = done.stdout.splitlines()
+
+    # branch: milestone が null の 2 件だけが残り、milestone を持つ課題は落ちる。
+    assert lines == ["#10 foo", "#30 baz baz"]
+    # 整形の形: 各行は "#<number> <title>" である（表示文言ではなく形として見る）。
+    for line, issue in zip(lines, [issues[0], issues[2]]):
+        assert line.startswith(f"#{issue['number']} ")
+        assert line == f"#{issue['number']} {issue['title']}"
 
 
 def test_stage_1_expands_to_all_open_issues_on_pervasive_changes() -> None:
@@ -735,7 +842,6 @@ def test_question_restructuring_branches_by_premise_and_gist() -> None:
     assert "元の課題を閉じて新しく起票する判断になるため、返す" in text
 
 
-
 # ---------- 発見の瞬間の 3 択（out-of-scope の段 2） ----------
 
 OUT_OF_SCOPE = SKILLS / "out-of-scope" / "SKILL.md"
@@ -769,3 +875,216 @@ def test_table_helper_does_not_pass_over_a_missing_heading() -> None:
     """
     with pytest.raises(ValueError):
         table("見出しの無い本文\n", "| 判断 | 選ぶ条件 | 残すもの |")
+
+
+# --- 並列の組（#541） --------------------------------------------------------
+#
+# **組は、マイルストーンへ課題を入れる時点で書く見込みである。** 確定した触る場所は
+# 実行計画（`issue-plan-strategy`）が持ち、説明へ書き戻さない（設計の決定 10）。
+
+GROUP_SECTION = "## 並列の組を説明へ書く"
+GROUP_TABLE_HEADER = "| 組 | 課題 | 触る場所の見込み | 依存 |"
+
+
+def group_section() -> str:
+    return section(MILESTONES.read_text(encoding="utf-8"), GROUP_SECTION)
+
+
+def test_milestones_have_a_section_for_the_parallel_groups() -> None:
+    """AC20: マイルストーンへ課題を入れるときに、その課題の組を説明へ書く。"""
+    part = group_section()
+    assert contains(part, "課題をマイルストーンへ入れるときに、その課題の組を説明へ書く")
+    assert "### 並列の組（見込み）" in part, "説明へ置く見出しの形が無い"
+    assert GROUP_TABLE_HEADER in part
+
+
+def test_the_group_row_is_written_when_an_issue_enters_a_milestone() -> None:
+    """AC20: 新しく作る・既存へ足す・直近へ移すの 3 つが同じ時点として扱われる。"""
+    rows = table(group_section(), "| 時点 | 行うこと |")
+    moments = [row[0] for row in rows]
+    assert any("入れる" in m and "新しく作る" in m and "足す" in m and "移す" in m
+               for m in moments), moments
+    assert any("別のマイルストーンへ移す" in m for m in moments), moments
+    assert any("閉じた" in m for m in moments), moments
+
+
+def test_the_group_is_copied_from_what_stage_2a_already_records() -> None:
+    """AC21: 触る場所は段 2A の修正レイヤーから、依存は依存する課題の番号から写す。"""
+    part = plain(group_section())
+    assert "修正レイヤー" in part
+    assert "依存する課題の番号" in part
+    assert "新しく調べる項目を増やさない" in part
+
+
+def test_stage_2a_records_the_same_six_items() -> None:
+    """AC21: 段 2A の控える項目は増えない。
+
+    組のために段 2A へ項目を足すと、棚卸の 1 課題あたりの費用が上がる。
+    """
+    rows = table(SKILL.read_text(encoding="utf-8"), "| 控える項目 | 何に使うか |")
+    assert len(rows) == 6, [row[0] for row in rows]
+    assert rows[-1][0] == "修正レイヤー"
+
+
+def test_groups_are_parallel_between_and_sequential_within() -> None:
+    """AC22: 組の間は並列、組の中は 1 本へ束ねるか順に進める見込みである。"""
+    part = plain(group_section())
+    assert "組の間は並列にできる見込み" in part
+    assert "組の中は同じ Pull Request へ束ねるか順に進める見込み" in part
+
+
+def test_the_group_is_only_an_estimate() -> None:
+    """AC22: 確定は設計の後に実行計画が持ち、説明へ書き戻さない。"""
+    part = plain(group_section())
+    assert "見込みであり、確定は設計の後に実行計画が持つ" in part
+    assert "書き戻さない" in part
+
+
+def test_the_group_does_not_change_the_milestone_structure() -> None:
+    """AC24: 組のために既存のマイルストーンを分けたり束ね直したりしない。"""
+    part = plain(group_section())
+    assert "既存のマイルストーンを分けたり束ね直したりしない" in part
+    assert "組の番号は詰めない" in part
+
+
+def test_an_empty_group_row_is_removed_without_renumbering_the_remaining_groups() -> None:
+    """現状固定: 移動で 0 件になった組は消すが、残る組の番号は詰めない。"""
+    part = group_section()
+    column_rows = table(part, "| 列 | 値 | 写す元 |")
+    group_column = next(row for row in column_rows if row[0] == "組")
+    assert group_column[1] == "1 から始まる連番。説明の中で一意"
+
+    timing_rows = table(part, "| 時点 | 行うこと |")
+    moving = next(row for row in timing_rows if row[0] == "課題を別のマイルストーンへ移す")
+    assert plain(moving[1]) == (
+        "元の説明の表から番号を消す。課題が 0 件になった組は行を消し、"
+        "組の番号は詰めない"
+    )
+
+
+def test_milestones_without_a_group_table_are_not_rewritten_at_once() -> None:
+    """決定 11: 既存の説明を一括で書き直さず、足した課題の行だけを載せる。"""
+    part = plain(group_section())
+    assert "一括で書き直さない" in part
+    assert "表が無ければ見出しと表を作る" in part
+
+
+def test_group_partition_rule_by_fix_layer() -> None:
+    """現状固定: 同じ修正レイヤーの課題は同じ組、違えば別組にする規則を固定する。"""
+    part = plain(group_section())
+    assert "同じ修正レイヤーの課題は同じ組、違えば別の組にする" in part
+
+
+@pytest.mark.parametrize(("timing_pattern", "expected_actions"), [
+    ("課題をマイルストーンへ入れる", [
+        "修正レイヤーが既存の組と同じなら、その組の「課題」へ番号を足す",
+        "違えば組を 1 つ足す",
+        "表が無ければ見出しと表を作る",
+    ]),
+    ("別のマイルストーンへ移す", [
+        "元の説明の表から番号を消す",
+        "課題が 0 件になった組は行を消し",
+        "組の番号は詰めない",
+    ]),
+    ("課題が閉じた", [
+        "何もしない",
+        "実行計画が状態を持つ",
+    ]),
+])
+def test_group_timing_branches_and_actions(
+        timing_pattern: str, expected_actions: list[str]) -> None:
+    """現状固定: マイルストーンへの追加（一致・不一致）、移動、完了の各分岐における動作対応を固定する。"""
+    rows = table(group_section(), "| 時点 | 行うこと |")
+    row = next(r for r in rows if timing_pattern in r[0])
+    action = plain(row[1])
+    for expected in expected_actions:
+        assert expected in action, f"{timing_pattern} の行うことに '{expected}' が含まれていない"
+
+
+# ---------- やり直しで 2 度行わない（grouping.md） ----------
+
+REDO_SECTION = "## やり直しで 2 度行わない"
+
+
+def redo_section() -> str:
+    return section(GROUPING.read_text(encoding="utf-8"), REDO_SECTION)
+
+
+def redo_commands() -> list[str]:
+    """やり直しの節が持つ判定材料の取り方（bash の例）を、出てくる順に返す。"""
+    return re.findall(r"```bash\n(.*?)```", redo_section(), re.DOTALL)
+
+
+def test_redo_takes_its_materials_from_two_lookups() -> None:
+    """現状固定: 起票と結び付けを分けて見分け、材料は親の側と子の側の 2 つの取り方で引く。
+
+    まとめて扱うと、書き込みの制限で途中で止まったときに、起票済みを理由として残りの
+    結び付けが飛ぶ。親の側からは子の一覧を、子の側からは親の番号を引く。
+    """
+    text = plain(redo_section())
+    assert "起票と結び付けを分けて見分ける" in text
+    assert "起票はクラスタに 1 度、結び付けは課題ごとに行う" in text
+    assert "起票済みを理由として残りの結び付けが飛ぶ" in text
+
+    from_parent, from_child = redo_commands()
+    assert "/issues/<親の番号>/sub_issues" in from_parent
+    assert "--jq '.[].number'" in from_parent
+    assert "gh api graphql" in from_child
+    assert "issue(number:<子の番号>){parent{number}}" in from_child
+
+
+@pytest.mark.parametrize(("decision", "material"), [
+    ("起票の要否", "この修正レイヤーを指す親 issue を探して起票の要否を決め"),
+    ("結び付けの要否", "その親 issue の子の一覧で結び付けの要否を決める"),
+])
+def test_redo_decides_filing_and_linking_from_the_parent_side(
+        decision: str, material: str) -> None:
+    """現状固定: 起票の要否は親 issue の有無で、結び付けの要否は親の子の一覧で決める。
+
+    親が作成済みなら起票を飛ばし、子の一覧に無い子だけを結び付ける経路になる。
+    子の本文の 1 行だけでは決めない。複数のクラスタへ属する課題では別の親を指す。
+    """
+    text = plain(redo_section())
+    assert "見分けは親 issue の側から引く" in text
+    assert material in text, decision
+    assert "子の本文の 1 行だけでは決めない" in text
+    assert "1 行が別の親 issue を指していることがある" in text
+
+
+def test_the_parent_side_lookup_lists_the_linked_children() -> None:
+    """現状固定: 親の側の jq を実際に流し、結び付け済みの子の番号だけが並ぶことを固定する。
+
+    この一覧に無い子が、やり直しで結び付ける残りである。番号以外の項目は落ちる。
+    """
+    from_parent, _ = redo_commands()
+    expression = re.search(r"--jq '([^']*)'", from_parent).group(1)
+
+    sub_issues = [
+        {"id": 1001, "number": 12, "title": "child a"},
+        {"id": 1002, "number": 34, "title": "child b"},
+    ]
+    done = subprocess.run(["jq", "-r", expression], input=json.dumps(sub_issues),
+                          capture_output=True, text=True, check=True)
+    assert done.stdout.splitlines() == ["12", "34"]
+
+    # branch: 子が 1 件も結び付いていない親では、一覧が空で返る。
+    done = subprocess.run(["jq", "-r", expression], input="[]",
+                          capture_output=True, text=True, check=True)
+    assert done.stdout.splitlines() == []
+
+
+def test_a_child_with_another_parent_is_linked_by_a_body_line() -> None:
+    """現状固定: 子が既に別の親を持つかは子の側から引き、値があれば本文の 1 行で指す。
+
+    親は単数で返るため、2 つ目のクラスタはサブイシュー関係では結べない。
+    結び付け方の節が、その例外を本文の 1 行として定める。
+    """
+    body = GROUPING.read_text(encoding="utf-8")
+    text = plain(redo_section())
+    assert "子 issue が既に別の親を持つかは、子の側から引く" in text
+    assert "親は単数で返る" in text
+    assert "値があれば 2 つ目のクラスタであり、本文の 1 行で指す" in text
+
+    linking = plain(section(body, "### 結び付け方"))
+    assert ("2 つ目以降のクラスタと、サブイシューの API を持たないリポジトリでは、"
+            "子 issue の本文へ親 issue を指す 1 行を足す") in linking

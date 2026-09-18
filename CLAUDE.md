@@ -45,6 +45,18 @@ Skill の配布は `plugins/ndf/manifests/` が唯一の基準（数と内訳は
 **`CLAUDE.md` に残すのは現行版で決めたことだけである。** 版を配布した時点でその段落は過去の
 記録になるため、退避先へ移す（手順は `release` にある）。
 
+**版が決まる前の段落は「の次の版で」で書き出す。** 版数はまとまりをマージするまで決まらない
+ため、書く時点では直前の正式版しか書けない。この印を付けておくと、配布で新しい版が出た
+時点で検査が拾う（`.ndf/instructions.json` の `pending_marker`）。
+
+```bash
+python3 plugins/ndf/scripts/instructions-check.py --root .
+```
+
+出た版の段落・許可していない即時読み込み・読み込みの量の上限を見る。判定の強さは
+`.ndf/instructions.json` が決め、宣言の書き方は `release` の
+`references/instruction-files.md` にある。
+
 ## cross-refactoring
 
 `/ndf:cross-refactoring` は codex / agy / kiro / claude のうち **ホストを除く 3 者**に構造改善を提案させ、**参加する 4 者**から輪番で選んだ 1 者が適用し、残り 2 者がレビューする。新しい提案が出なくなるまで繰り返す。

@@ -95,6 +95,17 @@ issue と Pull Request の両方で検索する。**
 | 見落とし | リリース後テストの結果 | マージ前に踏めなかった経路 |
 | 範囲 | 計画ファイルと起票した課題 | 範囲を広げた判断、外した判断 |
 | 工程 | 実際に通った工程 | 飛ばした工程と、その結果 |
+| context window | `/ndf:skill-stats --agents --session <conductor のセッション>` | 層ごとの固定費と実作業、束ねる候補・割る候補・worker を使いすぎの印 |
+
+**context window の値は測って取る。** 記憶や体感で書かない。まとまりを複数のセッションで
+通したときは `--session` を繰り返して 1 つの表にする。**印の判定は記録ごとの比で行われる**
+ため、固定費の水準が違うセッションを束ねても判定の意味は変わらない。中央値と合計の列は
+分布の目安として読む。
+
+```bash
+python3 "$CLAUDE_PLUGIN_ROOT/skills/skill-stats/scripts/skill-stats.py" \
+  --agents --session "$CLAUDE_CODE_SESSION_ID"
+```
 
 ### 3. 次に変えることを決める
 
@@ -241,6 +252,20 @@ gh api "/repos/$RECORD_REPO/commits/$(git rev-parse "origin/$record_base")/pulls
 
 （観点ごとに集めた事実。手戻りの回数、見落とした経路など）
 
+## context window の大きさ
+
+| 層 | 持ち場 | モデル | 件数 | 固定費の中央値 | 実作業の中央値 | 実作業 < 固定費 | 最大充填の最大 | 印 |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+
+| 層 | 件数 | 固定費の合計 | 実作業の合計 | 総消費 |
+| --- | ---: | ---: | ---: | ---: |
+
+| 持ち場 | supervisor | supervisor の実作業 | worker の件数 | supervisor と worker の固定費の合計 | 印 |
+| --- | ---: | ---: | ---: | ---: | --- |
+
+（`束ねる候補` / `割る候補` / `worker を使いすぎ` の印が付いた行ごとに、束ねる・割る・
+worker を減らす・そのままのどれにするかと、その理由を 1 行）
+
 ## 次に変えること
 
 | 変えること | 落とし先 | 状態 |
@@ -253,6 +278,11 @@ gh api "/repos/$RECORD_REPO/commits/$(git rev-parse "origin/$record_base")/pulls
 | --- | --- | --- |
 | #NNN | ... | 実装中 / レビュー中 |
 ```
+
+**context window の表は貼るだけにする。** 載せてよいのは測定が出す値（数値・層・持ち場・
+作業の種類・モデル名・終わり方・持ち場の中の連番）と、そこから導いた印と判断の理由の文
+だけである。**プロンプト・応答の本文・ファイルのパス・サブエージェントの識別子は投稿しない**
+（#159）。測定の出力はこの列だけを持つため、加工せずに貼れば足りる。
 
 ```bash
 gh issue comment <issue番号> --repo "$RECORD_REPO" --body-file <記録のファイル>   # 起点が 1 件の issue
@@ -289,12 +319,18 @@ gh issue edit <issue番号> --repo "$RECORD_REPO" --body-file /tmp/issue-body.md
 | 成果物の良し悪し | 実装レビューの工程が扱う |
 | 経緯の時系列そのもの | git の履歴と Pull Request に残っている |
 
-この工程に入ったら `/ndf:progress-tracking <issue番号> "振り返り"` を呼ぶ（記録の手順はその Skill が持つ）。 この工程で終わるため、あわせて盤面の `status` を `Done` にする（手段は progress-tracking の「呼び方」にある）。
+この工程に入ったら `/ndf:progress-tracking <issue番号> "振り返り"` を呼ぶ（記録の手順はその Skill が持つ）。 **入口のこの記録では盤面の `Status` を書かない。** 先に `Done` にすると、盤面の `Auto-close issue` が課題を閉じ、reopen の手段が報告から落ちる。
 
+## まとまりを閉じる
+
+**振り返りを通る変更では、この工程がその実行の終わりの工程である。** 記録を投稿した後に、
+`progress-tracking` の「まとまりを閉じる」を行う。**手順はそこが正本で、ここには写さない。**
+盤面の `Status` を `Done` にするのも、課題を閉じるのも、その手順の中で行う。
 
 ## 蓄積した課題を手入れする
 
-**この工程の最後に `/ndf:issue-upkeep` を呼ぶ。** 振り返りが拾うのは、この変更から出た
+**「まとまりを閉じる」の後に `/ndf:issue-upkeep` を呼ぶ。** 順序を逆にすると、`issue-upkeep` の
+段 1 が読む「このまとまりで閉じた課題」がまだ閉じていない。振り返りが拾うのは、この変更から出た
 取りこぼしである。**変更をまたいで溜まった課題そのもの**は対象にしていない。
 
 対象が 0 件ならその Skill 自身が飛ばす。
@@ -308,4 +344,5 @@ gh issue edit <issue番号> --repo "$RECORD_REPO" --body-file /tmp/issue-body.md
 - `/ndf:release-verification` — この工程の前に行うリリース後テスト
 - `/ndf:out-of-scope` — 取りこぼしを見つけたときの起票
 - `/ndf:plan-to-spec` — 決まった仕様の永続化（振り返りとは別の出力物）
+- `/ndf:progress-tracking` — 「まとまりを閉じる」の正本
 - `/ndf:issue-upkeep` — 蓄積した課題の手入れ（この工程の最後に呼ぶ）

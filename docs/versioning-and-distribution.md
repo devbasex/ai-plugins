@@ -57,15 +57,15 @@ semver の順序で除外されるのは、プラグイン間の依存解決（`
 
 | 版 | 形 | 意味 |
 | --- | --- | --- |
-| 正式版 | `10.14.0` | 利用者が常用してよい |
-| 開発版 | `10.15.0-dev.1` | 検証中。入れたくない利用者は取得を控えられる |
-| 公開前の確認版 | `10.15.0-rc.1` | 正式版の候補。残るのは確認だけ |
+| 正式版 | `10.15.0` | 利用者が常用してよい |
+| 開発版 | `10.16.0-dev.1` | 検証中。入れたくない利用者は取得を控えられる |
+| 公開前の確認版 | `10.16.0-rc.1` | 正式版の候補。残るのは確認だけ |
 
-- 接尾辞は**次に出す正式版の版数へ付ける**。`10.14.0` の次を開発するなら `10.15.0-dev.1`
+- 接尾辞は**次に出す正式版の版数へ付ける**。`10.15.0` の次を開発するなら `10.16.0-dev.1`
 - 連番は開発版を出すたびに増やす。**同じ版数で中身を差し替えない**。差し替えると、利用者の
   手元にある版と `main` の版が同じ番号で別物になり、何を確かめたのかが分からなくなる
-- **正式版を出すときは接尾辞を外す。** `10.15.0-dev.3` の次は `10.15.0`
-- 順序は semver に従い `10.15.0-dev.1` < `10.15.0-rc.1` < `10.15.0` になる
+- **正式版を出すときは接尾辞を外す。** `10.16.0-dev.3` の次は `10.16.0`
+- 順序は semver に従い `10.16.0-dev.1` < `10.16.0-rc.1` < `10.16.0` になる
 
 ## ランタイムごとの取得と導入
 
@@ -163,7 +163,7 @@ agy plugin uninstall ndf && agy plugin install <clone>/plugins/ndf/dev.agy
 
 **`git push origin develop:main` は使えない。** `main` / `develop` を守る ruleset の bypass は
 `pull_request` で作ってあり、**このモードは Pull Request のマージだけを通し、直接 push は
-管理者でも拒む**。必須の検査 11 個は Pull Request で走るため、`develop` の先端のコミットには
+管理者でも拒む**。必須の検査 12 個は Pull Request で走るため、`develop` の先端のコミットには
 `push` 起動の 1 個しか結果が付いていない。
 
 ```console
@@ -173,6 +173,9 @@ remote: - 10 of 11 required status checks have not succeeded: .
 remote:
  ! [remote rejected] develop -> main (push declined due to repository rule violations)
 ```
+
+この例は必須の検査が 11 個だったときの観測である。`instruction-files-check` を足して 12 個に
+なった後は `11 of 12` になる。
 
 **この手順では `main` に `develop` へ無いマージコミットが 1 つ積まれる。** そのため `main` は
 `develop` の fast-forward ではなくなる。**それでよい。** 配布した版を指すのは `main` の先端で
@@ -294,13 +297,16 @@ claude plugin tag plugins/ndf --push      # ndf--v<版> を作って origin へ�
 2. 変更内容をドキュメント化
 3. `plugins/ndf/README.md` の「v&lt;版&gt; へ更新するとき」の節を開き、**本文をその版の変更内容へ書き直す**。見出しの版数だけを置き換えて、本文を前の版の説明のまま残さない
 4. `CHANGELOG.md` の先頭へその版の節を足す。書式は Keep a Changelog に従い、変更点を
-   `追加` / `変更` / `修正` / `削除` へ分類して 1〜2 行で書く。判断の理由は `CLAUDE.md` の側に置く
+   `追加` / `変更` / `修正` / `削除` へ分類して 1〜2 行で書く。判断の理由は
+   `docs/ndf-version-decisions.md` へ置く
 5. Skill の数が増減した場合は、`README.md` と `plugins/ndf/README.md` に書かれた数を書き直す
 6. `python3 scripts/check-doc-staleness.py --root .` を実行し、説明文書に残った古い版数を
    出力の行番号のとおりに直す
-7. 破壊的変更がある場合は明示
-8. テストを実行
-9. **正式版として `main` を進めた後、リリースタグを打つ**
+7. `python3 plugins/ndf/scripts/instructions-check.py --root .` を実行し、出た版の段落が
+   指示書に残っていないかを見る。落ちた段落は `docs/ndf-version-decisions.md` へ移す
+8. 破壊的変更がある場合は明示
+9. テストを実行
+10. **正式版として `main` を進めた後、リリースタグを打つ**
 
 **すべての版数を機械的に置換しない。** 履歴（`docs/ndf-version-decisions.md`、`CLAUDE.md` の
 現行版の段落、`docs/development-history/`）、記録（`issues/`）、意図的に前の版を指す文（取り消しの説明）は

@@ -5,9 +5,80 @@
 版の見出しにプラグイン名を含める。** 版が動くのは主に `ndf` と `playwright-kit` で、MCP プラグインは変更があった版だけ載せる。
 
 **ここに書くのは「何が変わったか」である。** 「なぜそう変えたか」と、その版で決めた規約は
-`CLAUDE.md` の版ごとの段落に、詳細な経緯は `issues/` の記録と Pull Request にある。
+`docs/ndf-version-decisions.md` に、詳細な経緯は `issues/` の記録と Pull Request にある。
 **開発版（接尾辞の付いた版）は載せない。** `9.8.0` は `9.8.0-dev.1` までしか出ておらず、
 その内容は `10.0.0` で届いている。
+
+## [ndf 10.15.0] - 2026-09-18
+
+### 追加
+
+- **エージェント向け指示書を適切に保つ検査 `scripts/instructions-check.py` を配る**（#554）。
+  `AGENTS.md` / `CLAUDE.md` / `KIRO.md` の参照先の無い即時読み込み・許可していない即時読み込み・
+  出た版の段落・読み込みの量の上限の 4 つで落とし、読み込みの量と指示の数を報告する。閾値は
+  配布物に持たず、リポジトリの `.ndf/instructions.json` が判定の強さを決める。観点と出典は
+  `scripts/data/instruction-criteria.json` が持ち、`--refresh` で出典を調べ直す。宣言の書き方と
+  落ちたときの直し方は `release/references/instruction-files.md`、宣言の定義は
+  `release/schemas/instructions.schema.json` にある
+- **`development-workflow/references/agent-layers.md` を新設した**（#550 #657）。`/goal` を
+  conductor / supervisor / worker の 3 層で運転するときの責務・持ち場の表・起動の指示・報告の形・
+  報告なしで続けさせる回数・モデルの基準・委譲しない 5 つの判断・並行の本数の単位・到達点の
+  置き直し・中断と再開を持つ。`cross-review` の「メイン」を収束ループを駆動している supervisor と
+  定義した（`references/context-budget.md`）
+- **`scripts/lib/transcript_agents.py` を新設した**（#550 #657）。会話の記録を 3 層で読み、
+  `list` が層・持ち場・固定費・最大充填・実作業・終わり方を出す。`interrupted` が利用上限（429）で
+  終わった記録だけを解除時刻つきで出し、`wait-reset` が最も早い解除時刻まで眠る
+- **`skill-stats --agents` を足した**（#550）。`--session` / `--layer` / `--window-limit` で絞り、
+  記録ごと・束ね・層ごとの合計・持ち場ごとの worker の使い方の 4 つの表を出す。`retrospective` の
+  手順 2 の観点と記録の雛形に context window を足した
+- **`scripts/parallel-measure.py` を新設した**（#621）。`capacity` が空きメモリ・cgroup の残り・
+  スワップの空き・`oom_kill` から起動してよい本数を出し（測るだけで起動は止めない）、
+  `concurrency` が Pull Request の一覧から並行度・最大同時本数・期間を出す。本数の初期値は
+  このスクリプトの定数だけが持つ
+- **`issue-plan-strategy/references/execution-plan.md` を新設した**（#540）。進行側が最初の担当を
+  起動する前に書く実行計画の置き場所（`issues/execution-plan-<キー>.md`、開いている間は
+  コミットしない）・行と測った値の形・組の列との対応・見直す 5 つの契機・閉じ方を持つ
+- `issue-upkeep/references/milestones.md` に、課題をマイルストーンへ入れる時点で組（触る場所の
+  見込みと依存）を説明の末尾へ書く手順を足した（#541）。触る場所は段 2A の修正レイヤーから写し、
+  既存の説明は一括で書き直さない
+- `progress-tracking` に「工程の単位と記録する課題」と「まとまりを閉じる」を足した（#623）。
+  課題を閉じる唯一の手順と、配布の記録の読み方を持つ
+- `release` の配布の Pull Request の本文に `## 配布の記録` のブロックを置く（#623）。飛ばした
+  ときも `段階: 配布なし（<理由>）` で残す
+- `development-workflow/references/parallel-work.md` に「重なりの目安」の節（別の節 / 足すだけ /
+  書き換え）を足し、下限 6 の理由にホストのメモリと実測を書いた（#540 #621）
+- `development-workflow/SKILL.md` の関門の節に「関門の外で工程の側が実行前確認を足さない」
+  原則を足した（#561）
+
+### 変更
+
+- **`merged` が削除の前に同意を求めなくなった**（#561）。「削除前の同意取得（必須）」を
+  「止まる条件」に置き換え、止まるのは git が削除を拒んだ対象だけにした。起点・本番のチャネル・
+  現在のブランチは同意を求めずに対象外にする。リモートブランチは先端が Pull Request の
+  `headRefOid` と一致するものだけを消し、無視されたファイルは消さずに退避する（退避が失敗した
+  ものは「未完了」として消さない）。**課題を閉じない**
+- **課題を閉じる時点を、起点へのマージからその実行の終わりの工程の後へ移した**（#623）。
+  `release` / `release-verification` / `retrospective` のうち最後に通る工程が「まとまりを閉じる」を
+  行い、その後に `issue-upkeep` を呼ぶ。`retrospective` の入口の進行の記録から `Done` を外し、
+  `release-verification` の記録の置き場所を配布の記録の Pull Request にした。`pr` は
+  コミットメッセージに閉じる語を書かない
+- **`AUTHORING.md` の実行前確認の要否を、3 つの問い（戻せないものを拒まれずに消すか・新しい
+  内容を外へ出すか・判断を問うか）で決める基準にした**（#561）。守り方に「自動発動 + 事後の
+  報告」を足し、適用表を 7 行にした
+- `development-workflow/SKILL.md` の `/goal` の節を入口だけにし、「他者の承認が要るときは、
+  到達点を置き直す」を `agent-layers.md` へ移した（#550）。`references/context-window.md` に
+  モデルに依る目安とリポジトリに依る固定費の区別、粒度の比の基準を足した。3 つの規約の文書から
+  「窓」と「親」の語を無くし、`conductor` / `supervisor` / `worker` と `context window` に揃えた
+- `parallel-work.md` の下限 4 を「依存する工程が終わる前に、それを入力にする工程を始めない」へ、
+  下限 5 を「競合を解いた差分を、レビューを通さずにマージしない」へ書き換えた（#540）
+- `issue-plan-strategy/SKILL.md` の Step 1 の「PR 分割計画」の列を工程の対の依存へ、Step 5 の
+  「レビュー観点で分担」を重なりの目安へ置き換え、`description` に `実行計画を作って` などの
+  トリガ語を足した（#540）
+- `release/SKILL.md` の開始条件に、どこまでがまとまりかを確かめるのはこの工程であることを足した
+  （#623）。退避の直後に指示書の検査を実行する（#554）
+- `development-workflow/scripts/lib/workflow-common.sh` / `workflow-merge.sh`、
+  `scripts/lib/run_metrics.py` に構造改善を入れた（振る舞いは変えていない）。
+  `scripts/lib/README.md` の表に `refresh.py` / `transcript_agents.py` を足した
 
 ## [ndf 10.14.0] - 2026-09-16
 

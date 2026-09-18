@@ -1,6 +1,6 @@
 ---
 name: issue-plan-strategy
-description: "Turn an issue into a plan and run it through a release branch and multiple PRs. Use when designing or executing a plan（issueのplanを作って・planを実行・multi-PRで進めて）."
+description: "Turn an issue into a plan, write the execution plan for several issues, and run them through a release branch and multiple PRs. Use when designing or executing a plan, or when several issues are handed over at once（issueのplanを作って・planを実行・multi-PRで進めて・実行計画を作って・複数の課題をまとめて進めて）."
 argument-hint: "[issue-path-or-url] (例: issues/i16.md, https://github.com/org/repo/issues/123)"
 allowed-tools:
   - Bash
@@ -31,6 +31,20 @@ allowed-tools:
 - ファイルパス (`issues/PLANxx_*.md`): 直接 Read
 - GitHub Issue URL / `#番号`: `gh issue view <num> --json title,body,labels` で取得
 - それ以外の文字列: そのまま issue 本文として扱う
+
+## 実行計画
+
+**複数の課題を渡されたら、最初の担当を起動する前に実行計画を書く。** 束ごとの依存・触るファイルと
+節・起動してよい本数を 1 つの表に置き、工程の終わりごとに読み直して、着手できる行を起動する。
+**課題が 1 件で Pull Request も 1 本のときは書かない。**
+
+置き場所（主ディレクトリの `issues/execution-plan-<キー>.md`、開いている間はコミットしない）・
+行と測った値の形・見直す 5 つの契機と手順・閉じ方は
+[references/execution-plan.md](references/execution-plan.md) が持つ。
+
+**並行の可否そのものはこの Skill が決めない。** 依存の下限・重なりの目安（別の節 / 足すだけ /
+書き換え）・本数の下限は
+[parallel-work.md](../development-workflow/references/parallel-work.md) にある。
 
 ## Step 0: 作成フェーズか実行フェーズか判定
 
@@ -90,15 +104,19 @@ plan の構造は `/ndf:implementation-plan` を参照。本 skill では multi-
 ```markdown
 ## PR 分割計画
 
-| PR # | branch 名 | 概要 | 依存 | 並行可否 |
-|---|---|---|---|---|
-| 1 | feature/PLAN42-schema | スキーマ追加 | なし | ○ |
-| 2 | feature/PLAN42-api    | API 実装    | PR1 | × (PR1 merge 後) |
-| 3 | feature/PLAN42-ui     | UI 実装     | PR1 | ○ (mock で開始可) |
+| PR # | branch 名 | 概要 | 触るファイルと節 | 設計の依存 | 実装の依存 |
+|---|---|---|---|---|---|
+| 1 | feature/PLAN42-schema | スキーマ追加 | `db/schema.sql`「注文」 | なし | なし |
+| 2 | feature/PLAN42-api    | API 実装    | `api/orders.py` | PR1:収束 | PR1:マージ |
+| 3 | feature/PLAN42-ui     | UI 実装     | `ui/orders.tsx` | PR1:収束 | なし |
 
 release branch: `release/PLAN42`
 base branch: `main`
 ```
+
+**依存は工程の対で書く。** 「B の設計が A の決定を読む」（`A:収束`）と「B の実装が A の実装を
+前提にする」（`A:マージ`）は別の依存で、**後者は B の設計を止めない**。この表は実行計画の
+「行」の初期値になる（[references/execution-plan.md](references/execution-plan.md)）。
 
 ## Step 2: 単一 PR で足りるか判定
 
@@ -226,8 +244,11 @@ git worktree add "$main_dir/.worktrees/feature/<PLAN-ID>-ui"     feature/<PLAN-I
 
 ガイドライン:
 
-- **依存のある PR は順次着手**する (PR1 merge → PR2 開始)
-- 並行 PR 間で同じファイルを触る場合は事前にレビュー観点で分担を明確化する
+- **依存は工程の対で見る。** PR2 の実装が PR1 のマージを待つ場合でも、PR2 の**設計は待たない**
+- **同じファイルを触っても、重なりが「別の節」か「足すだけ」なら並行してよい。** 同じ節を
+  書き換える・移す・消す組だけ、後の PR の実装を先の PR のマージまで待つ（区分は
+  [parallel-work.md](../development-workflow/references/parallel-work.md) の「重なりの目安」）
+- **競合は後からマージする側が解き、解いた後の head でレビューを収束させてからマージする**
 - 終わった worktree は `git worktree remove <path>` で片付ける。マージ後の後片付けは
   `/ndf:merged` が扱う
 - Claude Code から並行開発を指示する場合、Agent tool の `isolation: "worktree"` も検討する
@@ -359,6 +380,8 @@ git checkout release/<PLAN-ID>
 ## 関連 skill
 
 - `/ndf:implementation-plan` — plan ファイルのフォーマット (本 skill が依存)
+- `/ndf:development-workflow` — 並行の下限と重なりの目安（`references/parallel-work.md`）
+- `/ndf:issue-upkeep` — マイルストーンの説明へ書く「組」（実行計画の束の初期値）
 - `/ndf:pr` — 通常の PR 作成 / 更新
 - `/ndf:cherry-pick-pr` — 検証ブランチへの cherry-pick PR とブランチ汚染を避ける原則
 - `/ndf:pr-review` / `/ndf:cross-review` — レビュー（`--branch` で PR 前のセルフレビュー）

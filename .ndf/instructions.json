@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "files": ["AGENTS.md", "CLAUDE.md", "KIRO.md"],
+  "imports": {
+    "CLAUDE.md": {"AGENTS.md": "現行の規約そのもので、毎回要る"}
+  },
+  "released": {
+    "source": "changelog",
+    "path": "CHANGELOG.md",
+    "pattern": "^## \\[ndf (?P<version>\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?)\\]"
+  },
+  "decisions": "docs/ndf-version-decisions.md",
+  "pending_marker": "の次の版で",
+  "budget": {"bytes": 24000}
+}
