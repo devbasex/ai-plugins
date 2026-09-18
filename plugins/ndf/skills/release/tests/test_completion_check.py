@@ -504,15 +504,22 @@ def record_fields(block: str) -> dict[str, str]:
     return fields
 
 
-def test_the_production_distribution_record_exposes_the_three_reader_fields_in_order() -> None:
-    """現状固定: 通常の本番配布は段階・版・まとまりを見出し直後に各 1 行置く。"""
+def sole_distribution_record_fields() -> dict[str, str]:
+    """出力物の節から唯一の「配布の記録」の markdown 例を取り出し、record_fields を返す。
+
+    例が無い・複数あるときは既存と同じ失敗条件（例が 1 つでない）で落とす。
+    """
     output = section(read(SKILL), OUTPUT)
     examples = [
         block for block in fenced_blocks(output, "markdown") if block.startswith(RECORD_HEADING)
     ]
     assert len(examples) == 1, f"配布の記録の例が 1 つでない: {len(examples)} 個"
+    return record_fields(examples[0])
 
-    fields = record_fields(examples[0])
+
+def test_the_production_distribution_record_exposes_the_three_reader_fields_in_order() -> None:
+    """現状固定: 通常の本番配布は段階・版・まとまりを見出し直後に各 1 行置く。"""
+    fields = sole_distribution_record_fields()
 
     assert list(fields.items()) == [
         ("段階", "本番（2026-09-18 10:00 に承認）"),
@@ -526,16 +533,11 @@ def test_the_skipped_distribution_record_starts_without_distribution_and_has_no_
 
     規則は出力物の節の本文から取り、通常の例と同じ読み取りへ通して項目ごとに比べる。
     """
-    output = section(read(SKILL), OUTPUT)
-    examples = [
-        block for block in fenced_blocks(output, "markdown") if block.startswith(RECORD_HEADING)
-    ]
-    assert len(examples) == 1, f"配布の記録の例が 1 つでない: {len(examples)} 個"
-    normal = record_fields(examples[0])
+    normal = sole_distribution_record_fields()
     assert list(normal) == ["段階", "版", "まとまり"], normal
     assert normal["段階"].startswith("本番"), normal
 
-    flat = output.replace("\n", "")
+    flat = section(read(SKILL), OUTPUT).replace("\n", "")
     stage = re.search(r"`(段階: 配布なし（[^`]+）)`", flat)
     assert stage, "配布を飛ばしたときの `段階:` の書き方が無い"
     assert "`まとまり:` の 2 行だけを書き（`版:` は書かない）" in flat
