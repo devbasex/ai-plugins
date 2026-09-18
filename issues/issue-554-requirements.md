@@ -188,7 +188,7 @@
 - [ ] AC57: そのジョブが実装の Pull Request で pass する
 - [ ] AC58: `CLAUDE.md` の「版ごとの判断の記録」に、版が決まる前の書き出しの印と、検査のコマンドが書かれている
 - [ ] AC59: `docs/versioning-and-distribution.md` の「バージョン更新時の手順」に検査のコマンドがある。手順 4 は判断の理由の置き場所を `docs/ndf-version-decisions.md` と書く
-- [ ] AC60: 同じ文書の「必須の検査 11 個」の記載が、ruleset へ `instruction-files-check` を足すのと**同じ時点で**新しい数になる（実装 Pull Request の差分には入れない）
+- [ ] AC60: 同じ文書で**必須の検査の数を持つ箇所すべて**が、ruleset へ `instruction-files-check` を足すのと**同じ時点で**新しい数になる。対象は散文の「必須の検査 11 個」と、`remote: - 10 of 11 required status checks have not succeeded` のコンソールの例の 2 か所である（実装 Pull Request の差分には入れない）
 - [ ] AC61: `CHANGELOG.md` の冒頭が、判断の理由の置き場所を `docs/ndf-version-decisions.md` と書く
 
 ### 退行しないこと

@@ -14,10 +14,11 @@
 | 3 | `CLAUDE.md` の「版ごとの判断の記録」へ、版が決まる前の印と検査のコマンドを書く | AC58 |
 | 4 | `docs/versioning-and-distribution.md` の「バージョン更新時の手順」へ検査を足し、手順 4 の置き場所を直す | AC59 |
 | 5 | `CHANGELOG.md` の冒頭の置き場所を直す | AC61 |
-| 6 | ruleset（`protect main and develop`）の必須の検査へ `instruction-files-check` を入れ、**同じ時点で** `docs/versioning-and-distribution.md` の「必須の検査 11 個」の数を直す | **実装の差分に入らない。** 入れると決まっており（利用者の判断）、実行は実装 Pull Request のマージ後に進行側が行う（AC60） |
+| 6 | ruleset（`protect main and develop`）の必須の検査へ `instruction-files-check` を入れ、**同じ時点で** `docs/versioning-and-distribution.md` の**必須の検査の数を持つ 2 か所**（散文と、断りの文言のコンソールの例）を直す | **実装の差分に入らない。** 入れると決まっており（利用者の判断）、実行は実装 Pull Request のマージ後に進行側が行う（AC60） |
 
 **数と ruleset は同じ時点で変える。** 文書が「12 個」と書いて ruleset が 11 個しか求めない状態では、
-`main` へ進めるときの断りの文言（`X of 11 required status checks …`）と文書が食い違う。
+`main` へ進めるときの断りの文言と文書が食い違う。**その断りの文言は同じ文書へコンソールの例として載っている**ため、
+散文と例の 2 か所を同時に直す。
 
 **4 と 5 は、規則と逆のことを書いている記載を直す。** どちらも「判断の理由は `CLAUDE.md` に置く」と書いており、
 #551 で決めた置き場所（`docs/ndf-version-decisions.md`）と食い違う。
@@ -85,5 +86,5 @@
 | AC54 / AC55 | 手順: このリポジトリの根での実行と、`git archive f56c90d9 …` を展開した一時ディレクトリでの実行 |
 | AC56 / AC57 | 手順: ワークフローの差分を読み、実装の Pull Request の checks を見る |
 | AC58 / AC59 / AC61 | 手順: 差分を読む |
-| AC60 | 手順: ruleset へ足した後に、その一覧の件数と文書の数字を突き合わせる（実装 Pull Request の差分には入らない） |
+| AC60 | 手順: ruleset へ足した後に、その一覧の件数と、文書の散文・コンソールの例の 2 か所を突き合わせる |
 | AC63 | 手順: `uv run --with pytest pytest scripts/tests plugins/ndf -q` の失敗の件数が `develop` と同じ（既知の環境要因の 6 件を除く） |
