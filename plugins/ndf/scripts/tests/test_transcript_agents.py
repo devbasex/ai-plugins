@@ -10,6 +10,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import pathlib
+import re
 import subprocess
 import sys
 
@@ -297,3 +298,251 @@ def test_the_module_imports_no_network_library() -> None:
     text = SCRIPT.read_text(encoding="utf-8")
     for name in ("import socket", "urllib", "http.client", "requests", "subprocess"):
         assert name not in text, name
+
+
+# ========== #657: 中断と再開（AC40〜AC44・AC46・AC47） ==========
+#
+# フィクスチャ `sess-c` は、中断した supervisor 2 本（`c1` / `c2`）・中断した worker 1 本
+# （`c3`）・完了した記録 1 本（`c4`）・429 の後に `user` の行が追記された記録（`c6`）・
+# 500 で終わった記録（`c7`）・認証の失敗で終わった記録（`c8`）を持つ。conductor は 429 の
+# 後に自動の継続（`origin.kind` が `auto-continuation`）が追記されている。
+#
+# フィクスチャ `sess-d` は、conductor が直接起動した worker（深さ 1）だけが、遠い未来の
+# 解除時刻で中断している。
+
+# sess-c の解除時刻（フィクスチャの `quotaLimits.resetsAt`）
+EARLY = "2026-09-17T09:00:00+00:00"   # c1 / c3
+LATE = "2026-09-17T12:00:00+00:00"    # c2
+# 早い方は過ぎ、遅い方はまだ来ていない時点
+BETWEEN = "2026-09-17T10:00:00+00:00"
+# どちらもまだ来ていない時点
+BEFORE = "2026-09-17T08:35:00+00:00"
+# どちらも過ぎた時点
+AFTER = "2026-09-18T00:00:00+00:00"
+
+
+@pytest.fixture()
+def ic(mod):
+    """sess-c の記録を `agent_id` で引ける形にする。"""
+    return {r.agent_id or "conductor": r for r in mod.read_session("sess-c", root=FIXTURES)}
+
+
+def interrupted_ids(*args: str) -> set[str]:
+    p = run("interrupted", *args, "--format", "json")
+    assert p.returncode == 0, p.stderr
+    return {r["agent_id"] for r in json.loads(p.stdout)["agents"]}
+
+
+# ---------- AC40: 上限の中断だけを拾い、500 と認証の失敗と区別する ----------
+
+def test_only_the_rate_limit_records_are_listed_as_interrupted() -> None:
+    assert interrupted_ids("--session", "sess-c") == {"c1", "c2", "c3"}
+
+
+def test_a_server_error_is_not_a_rate_limit_interruption(ic) -> None:
+    assert ic["c7"].ending == "api_error"
+    assert "c7" not in interrupted_ids("--session", "sess-c")
+
+
+def test_an_authentication_failure_is_not_a_rate_limit_interruption(ic) -> None:
+    assert ic["c8"].ending == "api_error"
+    assert "c8" not in interrupted_ids("--session", "sess-c")
+
+
+def test_a_record_already_continued_is_not_listed_again(ic) -> None:
+    # 429 の後に `user` の行が追記された記録は `in_progress` であり、再び現れない
+    assert ic["c6"].ending == "in_progress"
+    assert "c6" not in interrupted_ids("--session", "sess-c")
+
+
+# ---------- AC46: 中断したすべての相手が返り、完了した相手は返らない ----------
+
+def test_every_interrupted_partner_is_listed_and_the_finished_one_is_not(ic) -> None:
+    assert ic["c4"].ending == "completed"
+    listed = interrupted_ids("--session", "sess-c")
+    assert {"c1", "c2", "c3"} <= listed
+    assert "c4" not in listed
+
+
+# ---------- AC41: 解除時刻は記録から取る。固定の間隔で待たない ----------
+
+def test_the_reset_time_comes_from_the_record(ic) -> None:
+    assert ic["c1"].resets_at == EARLY
+    assert ic["c2"].resets_at == LATE
+    assert (ic["c1"].rate_limit_type, ic["c2"].rate_limit_type) == (
+        "five_hour", "seven_day")
+
+
+def test_resets_passed_compares_the_reset_time_with_now() -> None:
+    p = run("interrupted", "--session", "sess-c", "--now", BETWEEN, "--format", "json")
+    assert p.returncode == 0, p.stderr
+    passed = {r["agent_id"]: r["resets_passed"] for r in json.loads(p.stdout)["agents"]}
+    assert passed == {"c1": True, "c2": False, "c3": True}
+
+
+def test_an_interruption_without_a_reset_time_counts_as_passed(mod) -> None:
+    """解除時刻を持たない上限の中断は、待ち先が無いため再開に回す。"""
+    record = mod.AgentRecord(layer="supervisor", role="設計", depth=1,
+                             ending="rate_limit")
+    assert mod.resets_passed(record, mod.parse_now(BEFORE)) is True
+
+
+# ---------- AC43: 自動の継続の後の点検が解除済みを返す ----------
+
+def test_after_the_auto_continuation_the_check_returns_the_released_partners(ic) -> None:
+    # conductor 自身は自動の継続の行が追記されたため `in_progress` である
+    assert ic["conductor"].ending == "in_progress"
+    p = run("interrupted", "--session", "sess-c", "--depth", "1",
+            "--now", "2026-09-17T09:01:00+00:00", "--format", "json")
+    assert p.returncode == 0, p.stderr
+    rows = {r["agent_id"]: r["resets_passed"] for r in json.loads(p.stdout)["agents"]}
+    assert rows == {"c1": True, "c2": False}
+
+
+def test_the_conductor_transcript_carries_the_auto_continuation() -> None:
+    path = (FIXTURES / "projects" / "-work-sample" / "sess-c.jsonl")
+    assert '"auto-continuation"' in path.read_text(encoding="utf-8")
+
+
+# ---------- AC42・AC47: 層ごと・起動元ごと・直下だけに絞れる ----------
+
+def test_the_supervisors_alone_can_be_listed() -> None:
+    assert interrupted_ids("--session", "sess-c", "--layer", "supervisor") == {"c1", "c2"}
+
+
+def test_one_worker_can_be_picked_by_its_agent_id() -> None:
+    assert interrupted_ids(
+        "--session", "sess-c", "--layer", "worker", "--agent", "c3") == {"c3"}
+
+
+def test_the_agent_filter_takes_more_than_one_id() -> None:
+    assert interrupted_ids(
+        "--session", "sess-c", "--agent", "c1", "--agent", "c3") == {"c1", "c3"}
+
+
+def test_the_workers_of_one_launcher_can_be_listed() -> None:
+    assert interrupted_ids("--session", "sess-c", "--parent", "c2") == {"c3"}
+
+
+def test_depth_one_returns_the_direct_partners_of_the_conductor() -> None:
+    # supervisor（sess-c）も、conductor が直接起動した worker（sess-d）も深さ 1 である
+    assert interrupted_ids("--session", "sess-c", "--depth", "1") == {"c1", "c2"}
+    assert interrupted_ids("--session", "sess-d", "--depth", "1") == {"d1"}
+
+
+def test_the_interrupted_table_shows_the_reset_time() -> None:
+    p = run("interrupted", "--session", "sess-c")
+    assert p.returncode == 0, p.stderr
+    header = next(line for line in p.stdout.splitlines() if line.startswith("| 層 "))
+    assert header.split("|")[1:-1] == [
+        " 層 ", " 持ち場 ", " 深さ ", " 終わり方 ", " 上限の種類 ",
+        " 解除時刻 ", " 解除済み ", " 起動元 ", " agent_id ",
+    ]
+    assert EARLY in p.stdout and LATE in p.stdout
+
+
+def test_an_uninterrupted_session_ends_with_zero_and_an_empty_list() -> None:
+    p = run("interrupted", "--session", "sess-b", "--format", "json")
+    assert p.returncode == 0
+    assert json.loads(p.stdout)["agents"] == []
+
+
+# ---------- AC30: 中断の一覧にも本文・パス・description の後ろ半分を載せない ----------
+
+def test_the_interrupted_output_carries_no_text_no_path_and_no_description_tail() -> None:
+    p = run("interrupted", "--session", "sess-c", "--session", "sess-d",
+            "--format", "json")
+    assert p.returncode == 0, p.stderr
+    for forbidden in (
+        "#657", "中断の見分け方", "収束の指摘の反映", "差分の数え上げ",
+        "/work/sample", "req_", "develop", "起動の指示",
+    ):
+        assert forbidden not in p.stdout, forbidden
+
+
+# ---------- AC44: 解除まで眠る。固定の間隔で待たない ----------
+
+class Sleeper:
+    """眠った秒数を控えるだけの差し替え。"""
+
+    def __init__(self) -> None:
+        self.slept: list[float] = []
+
+    def __call__(self, seconds: float) -> None:
+        self.slept.append(seconds)
+
+
+def test_wait_reset_returns_at_once_when_every_reset_time_has_passed(mod) -> None:
+    sleeper = Sleeper()
+    slept, remaining, code = mod.wait_reset(
+        ["sess-c"], root=FIXTURES, now=mod.parse_now(AFTER), sleeper=sleeper)
+    assert (slept, code) == (0, 0)
+    assert sleeper.slept in ([], [0])
+    assert remaining == 3
+
+
+def test_wait_reset_sleeps_until_the_earliest_reset_time_plus_the_margin(mod) -> None:
+    sleeper = Sleeper()
+    slept, _, code = mod.wait_reset(
+        ["sess-c"], root=FIXTURES, now=mod.parse_now(BEFORE), sleeper=sleeper)
+    # 08:35:00 から 09:00:00（早い方）+ 60 秒の余白まで
+    assert slept == 25 * 60 + 60
+    assert sleeper.slept == [slept]
+    assert code == 0
+
+
+def test_wait_reset_takes_the_margin_from_the_argument(mod) -> None:
+    slept, _, code = mod.wait_reset(
+        ["sess-c"], root=FIXTURES, now=mod.parse_now(BEFORE), margin=0,
+        sleeper=Sleeper())
+    assert (slept, code) == (25 * 60, 0)
+
+
+def test_wait_reset_sleeps_for_a_lone_worker_launched_by_the_conductor(mod) -> None:
+    """conductor が直接起動した worker だけが中断しているときも眠る。"""
+    sleeper = Sleeper()
+    slept, remaining, code = mod.wait_reset(
+        ["sess-d"], root=FIXTURES, depth=1, now=mod.parse_now(BEFORE),
+        sleeper=sleeper)
+    assert slept > 0 and sleeper.slept == [slept]
+    assert (remaining, code) == (1, 0)
+
+
+def test_wait_reset_stops_at_the_max_sleep_and_returns_three(mod) -> None:
+    sleeper = Sleeper()
+    slept, _, code = mod.wait_reset(
+        ["sess-d"], root=FIXTURES, depth=1, now=mod.parse_now(BEFORE),
+        max_sleep=540, sleeper=sleeper)
+    assert (slept, code) == (540, 3)
+    assert sleeper.slept == [540]
+
+
+def test_wait_reset_ends_with_zero_when_nothing_is_interrupted(mod) -> None:
+    slept, remaining, code = mod.wait_reset(
+        ["sess-b"], root=FIXTURES, now=mod.parse_now(BEFORE), sleeper=Sleeper())
+    assert (slept, remaining, code) == (0, 0, 0)
+
+
+def test_the_wait_reset_command_returns_zero_when_the_reset_has_passed() -> None:
+    # sess-c の解除時刻はどちらも過去である（実時間で判定する）
+    p = run("wait-reset", "--session", "sess-c")
+    assert p.returncode == 0, p.stderr
+    assert "眠った" in p.stdout
+
+
+def test_the_wait_reset_command_returns_three_when_cut_by_max_sleep() -> None:
+    p = run("wait-reset", "--session", "sess-d", "--depth", "1", "--max-sleep", "0")
+    assert p.returncode == 3, p.stdout + p.stderr
+
+
+def test_a_bad_argument_of_wait_reset_ends_with_two() -> None:
+    p = run("wait-reset", "--session", "sess-d", "--layer", "president")
+    assert p.returncode == 2
+
+
+def test_no_fixed_interval_is_written_into_the_waiting() -> None:
+    """待ちの長さは記録から取る。固定の間隔を持たない（AC41）。"""
+    text = SCRIPT.read_text(encoding="utf-8")
+    assert "time.sleep(" in text
+    # 眠る秒数は解除時刻から計算する。定数の秒数で眠る呼び出しを持たない
+    assert not re.search(r"time\.sleep\(\s*[0-9]", text)
