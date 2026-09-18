@@ -1,6 +1,6 @@
 """会話の記録を層の単位で読む部品（#550 の AC20〜AC28・AC30・AC31・AC34）。
 
-固定するのは、契約の文書（`issues/issue-550-657-design-contracts.md`）の
+固定するのは、確定仕様（`docs/specifications/ndf-context-window-metrics.md`）の
 「`AgentRecord` の値」と「コマンド」の表である。フィクスチャは実物の記録を最小化したもので、
 深さ 0 / 1 / 2・conductor が直接起動した worker・同じ `message.id` の重複行・先頭の合成の
 応答・429 で終わる記録・続けて完了した記録・壊れた行・語彙に無い `description` を含む。

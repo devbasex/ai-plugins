@@ -4,7 +4,7 @@
 **読むだけの部品である。** ローカルの会話の記録（`~/.claude/projects/`）を開き、記録 1 件に
 つき 1 つの `AgentRecord` を返す。ネットワークを開かず、送信先を持たない（AC34）。
 
-値の取り方は `issues/issue-550-657-design-contracts.md` の「`AgentRecord` の値」が正本で
+値の取り方は `docs/specifications/ndf-context-window-metrics.md` の「`AgentRecord` の値」が正本で
 ある。**出力に載せないもの**もそこが決めている（`description` の `: ` より後ろ・ファイルの
 パス・プロンプト・応答とツールの本文・`requestId`・`cwd`・`gitBranch`）。
 
