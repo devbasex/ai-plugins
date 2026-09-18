@@ -43,3 +43,71 @@ def test_probe_timeout_is_reported(monkeypatch):
     assert results["codex"]["ok"] is False
     assert str(auth.AUTH_PROBE_TIMEOUT) in results["codex"]["detail"]
     assert len(failures) == 1
+
+
+def test_command_not_found_is_reported(monkeypatch):
+    auth = _load_auth()
+    messages: list[str] = []
+    failures: list[str] = []
+
+    def not_found(*args, **kwargs):
+        raise FileNotFoundError()
+
+    monkeypatch.setattr(auth.subprocess, "run", not_found)
+    results = auth.check_auth(["agy"], info=messages.append, die=failures.append, env={})
+
+    assert results["agy"]["ok"] is False
+    assert results["agy"]["detail"] == "コマンドが見つかりません"
+    assert "agy（コマンドが見つかりません）" in failures[0]
+
+
+def test_nonzero_exit_is_reported(monkeypatch):
+    auth = _load_auth()
+    messages: list[str] = []
+    failures: list[str] = []
+
+    def nonzero(*args, **kwargs):
+        return subprocess.CompletedProcess(args[0], returncode=1, stdout="", stderr="error detail")
+
+    monkeypatch.setattr(auth.subprocess, "run", nonzero)
+    results = auth.check_auth(["claude"], info=messages.append, die=failures.append, env={})
+
+    assert results["claude"]["ok"] is False
+    assert results["claude"]["detail"] == "error detail"
+    assert "claude（error detail）" in failures[0]
+
+
+def test_unauthenticated_marker_is_reported(monkeypatch):
+    auth = _load_auth()
+    messages: list[str] = []
+    failures: list[str] = []
+
+    def unauth(*args, **kwargs):
+        return subprocess.CompletedProcess(args[0], returncode=0, stdout="not logged in", stderr="")
+
+    monkeypatch.setattr(auth.subprocess, "run", unauth)
+    results = auth.check_auth(["kiro"], info=messages.append, die=failures.append, env={})
+
+    assert results["kiro"]["ok"] is False
+    assert results["kiro"]["detail"] == "not logged in"
+    assert "kiro（not logged in）" in failures[0]
+
+
+def test_multiple_failures_aggregation(monkeypatch):
+    auth = _load_auth()
+    messages: list[str] = []
+    failures: list[str] = []
+
+    def fail_probe(*args, **kwargs):
+        cmd = args[0]
+        if "codex" in cmd:
+            return subprocess.CompletedProcess(cmd, returncode=1, stdout="", stderr="codex err")
+        if "agy" in cmd:
+            return subprocess.CompletedProcess(cmd, returncode=1, stdout="", stderr="agy err")
+        return subprocess.CompletedProcess(cmd, returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(auth.subprocess, "run", fail_probe)
+    results = auth.check_auth(["codex", "agy"], info=messages.append, die=failures.append, env={})
+
+    assert len(failures) == 1
+    assert "認証されていない CLI があります: codex（codex err） / agy（agy err）。" in failures[0]

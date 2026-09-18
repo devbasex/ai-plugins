@@ -765,6 +765,95 @@ def _stall_outcome(
     )
 
 
+@dataclass
+class _PollState:
+    last_progress_size: int
+    last_progress: float
+    cmdline_validated: bool = False
+    warned_early_error: bool = False
+
+
+def _poll_once(
+    agent: str,
+    pid: int,
+    paths: AgentPaths,
+    status: AgentStatus,
+    config: MonitorConfig,
+    started: float,
+    started_wall: float,
+    state: _PollState,
+) -> Optional[MonitorOutcome]:
+    elapsed = time.monotonic() - started
+    status.elapsed = elapsed
+
+    # 1. プロセス生存確認 → 死んでいたら最終判定へ (result.json 存在をチェック)
+    alive = _pid_alive(pid)
+    if agent == "codex":
+        status.sentinel_seen = _scan_codex_sentinel(paths.err_log)
+
+    # codex は `tokens used` sentinel を出した後もプロセスが exit せず常駐し続ける
+    # ケースがある (実機で観測)。result.json は正常に書かれているのに alive=True の
+    # まま stall_timeout に達して STALLED 化してしまう。sentinel + result.json が
+    # 揃った瞬間に対象プロセスを kill して OK 判定で返す。
+    completion_detail = None
+    if alive and (status.sentinel_seen or state.cmdline_validated):
+        completion_detail = _lingering_completion(paths, status, pid, started_wall)
+    if completion_detail is not None:
+        return MonitorOutcome.create("OK", completion_detail)
+
+    # result.json が書かれた後もプロセスがハングするケース (実測:
+    # MCP サーバー切断待ち等で exit しない)。sentinel 機構を持たない agent 向け
+    # の fallback: result.json の mtime が RESULT_AGE_GRACE 秒以上前であれば
+    # 完了とみなし、プロセスを kill → OK。
+    # 安全条件:
+    #   - cmdline_validated: PID 再利用でない (または検証不能環境) ことを確認済み
+    #   - mtime >= started_wall: 前 round の stale result.json を拾わない
+    state.cmdline_validated, outcome = _validate_pid_cmdline(
+        pid, agent, alive, state.cmdline_validated
+    )
+    if outcome:
+        return outcome
+
+    # 2. hard timeout
+    outcome = _timeout_outcome(elapsed, config.timeout, alive, pid)
+    if outcome:
+        return outcome
+
+    # 3. early error
+    # 明確な致命 (FATAL) のみ kill する。曖昧パターン (生 Error: / Traceback) は
+    # WARN として警告ログのみ。codex がレビュー対象 diff の test コード片を
+    # echo するケースで誤 kill されるのを防ぐ。
+    outcome, warn_err = _early_error_outcome(paths, status, alive, config.no_early_error)
+    if outcome:
+        return outcome
+    if not state.warned_early_error and warn_err:
+        print(
+            f"{config.log_prefix}⚠️  {agent} early-error WARN "
+            f"(non-fatal, not killing): {warn_err[:200]}",
+            file=sys.stderr, flush=True,
+        )
+        state.warned_early_error = True
+
+    outcome = _process_exit_outcome(paths, status, alive, config.require_result)
+    if outcome:
+        return outcome
+
+    # 4. stall detection (err.log / stdout.log / progress.log をモニタ。
+    # agy は stdout 側だけ進捗が出るケースがあり、progress.log には
+    # launcher が要求した短いフェーズマーカーが出るため、いずれかが
+    # 更新されれば progress として扱う)
+    state.last_progress_size, state.last_progress = _update_progress(
+        paths, status, state.last_progress_size, state.last_progress
+    )
+    outcome = _stall_outcome(status, config.stall_timeout, pid, state.last_progress_size)
+    if outcome:
+        return outcome
+
+    # poll 中の進捗ログ
+    _emit_progress(config.log_prefix, agent, status)
+    return None
+
+
 def monitor_agent(
     agent: str,
     pr: int,
@@ -790,86 +879,21 @@ def monitor_agent(
     # ケースを誤って失敗にしてしまう。alive=True と確認した瞬間のみ cmdline 一致を検証する。
 
     started_wall = time.time()
-    last_progress_size = (
-        _safe_size(paths.err_log)
-        + _safe_size(paths.stdout_log)
-        + _safe_size(paths.progress_log)
+    state = _PollState(
+        last_progress_size=(
+            _safe_size(paths.err_log)
+            + _safe_size(paths.stdout_log)
+            + _safe_size(paths.progress_log)
+        ),
+        last_progress=time.monotonic(),
     )
-    last_progress = time.monotonic()
-    cmdline_validated = False
-    warned_early_error = False
 
     while True:
-        elapsed = time.monotonic() - started
-        status.elapsed = elapsed
-
-        # 1. プロセス生存確認 → 死んでいたら最終判定へ (result.json 存在をチェック)
-        alive = _pid_alive(pid)
-        if agent == "codex":
-            status.sentinel_seen = _scan_codex_sentinel(paths.err_log)
-
-        # codex は `tokens used` sentinel を出した後もプロセスが exit せず常駐し続ける
-        # ケースがある (実機で観測)。result.json は正常に書かれているのに alive=True の
-        # まま stall_timeout に達して STALLED 化してしまう。sentinel + result.json が
-        # 揃った瞬間に対象プロセスを kill して OK 判定で返す。
-        completion_detail = None
-        if alive and (status.sentinel_seen or cmdline_validated):
-            completion_detail = _lingering_completion(paths, status, pid, started_wall)
-        if completion_detail is not None:
-            return _finish_monitor(
-                status, MonitorOutcome.create("OK", completion_detail), (config.log_prefix, agent)
-            )
-
-        # result.json が書かれた後もプロセスがハングするケース (実測:
-        # MCP サーバー切断待ち等で exit しない)。sentinel 機構を持たない agent 向け
-        # の fallback: result.json の mtime が RESULT_AGE_GRACE 秒以上前であれば
-        # 完了とみなし、プロセスを kill → OK。
-        # 安全条件:
-        #   - cmdline_validated: PID 再利用でない (または検証不能環境) ことを確認済み
-        #   - mtime >= started_wall: 前 round の stale result.json を拾わない
-        cmdline_validated, outcome = _validate_pid_cmdline(
-            pid, agent, alive, cmdline_validated
+        outcome = _poll_once(
+            agent, pid, paths, status, config, started, started_wall, state
         )
-        if outcome:
+        if outcome is not None:
             return _finish_monitor(status, outcome, (config.log_prefix, agent))
-
-        # 2. hard timeout
-        outcome = _timeout_outcome(elapsed, config.timeout, alive, pid)
-        if outcome:
-            return _finish_monitor(status, outcome, (config.log_prefix, agent))
-
-        # 3. early error
-        # 明確な致命 (FATAL) のみ kill する。曖昧パターン (生 Error: / Traceback) は
-        # WARN として警告ログのみ。codex がレビュー対象 diff の test コード片を
-        # echo するケースで誤 kill されるのを防ぐ。
-        outcome, warn_err = _early_error_outcome(paths, status, alive, config.no_early_error)
-        if outcome:
-            return _finish_monitor(status, outcome, (config.log_prefix, agent))
-        if not warned_early_error and warn_err:
-            print(
-                f"{config.log_prefix}⚠️  {agent} early-error WARN "
-                f"(non-fatal, not killing): {warn_err[:200]}",
-                file=sys.stderr, flush=True,
-            )
-            warned_early_error = True
-
-        outcome = _process_exit_outcome(paths, status, alive, config.require_result)
-        if outcome:
-            return _finish_monitor(status, outcome, (config.log_prefix, agent))
-
-        # 4. stall detection (err.log / stdout.log / progress.log をモニタ。
-        # agy は stdout 側だけ進捗が出るケースがあり、progress.log には
-        # launcher が要求した短いフェーズマーカーが出るため、いずれかが
-        # 更新されれば progress として扱う)
-        last_progress_size, last_progress = _update_progress(
-            paths, status, last_progress_size, last_progress
-        )
-        outcome = _stall_outcome(status, config.stall_timeout, pid, last_progress_size)
-        if outcome:
-            return _finish_monitor(status, outcome, (config.log_prefix, agent))
-
-        # poll 中の進捗ログ
-        _emit_progress(config.log_prefix, agent, status)
         time.sleep(config.poll)
 
 

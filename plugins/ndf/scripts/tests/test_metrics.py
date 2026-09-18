@@ -49,3 +49,29 @@ def test_aggregate_review_without_findings_has_no_resolution_rate(metrics):
 
     assert result["reviewer"]["codex / default"]["findings"] == 0
     assert result["reviewer"]["codex / default"]["resolution_rate"] is None
+
+
+def test_format_report_empty(metrics):
+    data = metrics.aggregate({})
+    report = metrics.format_report(data)
+    assert "## 実装担当\n\n（記録なし）" in report
+    assert "## レビュー担当\n\n（記録なし）" in report
+    assert "## 比較として読むときの限界" in report
+
+
+def test_format_report_with_data(metrics):
+    state = {
+        "rounds": [{
+            "round": 1,
+            "impl": "claude",
+            "impl_model": {"requested": "sonnet", "observed": "sonnet"},
+            "reviewers": ["codex"],
+            "reviewer_models": {"codex": {"requested": "default"}},
+            "reviews": [{"codex": "APPROVE", "findings": []}],
+        }],
+        "items": [],
+    }
+    data = metrics.aggregate(state)
+    report = metrics.format_report(data)
+    assert "| claude / sonnet | 1 | 0 | 0 | 1.00 | 0.00 | — | — | 0 |" in report
+    assert "| codex / default | 1 | 0 | — | — | 0 |" in report
