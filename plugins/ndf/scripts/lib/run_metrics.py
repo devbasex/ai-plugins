@@ -314,27 +314,24 @@ def _bound(value: Optional[str], *, upper: bool) -> Optional[_dt.datetime]:
     return parsed
 
 
-def _matches(row: dict, since: Optional[_dt.datetime], until: Optional[_dt.datetime],
-             until_exclusive: bool, args: argparse.Namespace) -> bool:
-    """1 行が期間・repo・kind・version の絞り込みをすべて満たすか。"""
-    started = _parse_time(row.get("started_at"))
-    if since and (started is None or started < since):
-        return False
-    if until and (started is None or (started >= until if until_exclusive else started > until)):
-        return False
-    if args.repo and row.get("repo") != args.repo:
-        return False
-    if args.kind and row.get("kind") != args.kind:
-        return False
-    if args.version and row.get("ndf_version") != args.version:
-        return False
-    return True
-
-
 def _select(rows: list[dict], args: argparse.Namespace) -> list[dict]:
     since, until = _bound(args.since, upper=False), _bound(args.until, upper=True)
     until_exclusive = bool(args.until and re.fullmatch(r"\d{4}-\d{2}-\d{2}", args.until))
-    return [row for row in rows if _matches(row, since, until, until_exclusive, args)]
+    out = []
+    for row in rows:
+        started = _parse_time(row.get("started_at"))
+        if since and (started is None or started < since):
+            continue
+        if until and (started is None or (started >= until if until_exclusive else started > until)):
+            continue
+        if args.repo and row.get("repo") != args.repo:
+            continue
+        if args.kind and row.get("kind") != args.kind:
+            continue
+        if args.version and row.get("ndf_version") != args.version:
+            continue
+        out.append(row)
+    return out
 
 
 def _quantile(sorted_values: list[float], q: float) -> float:
