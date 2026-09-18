@@ -44,6 +44,12 @@ def test_a_single_pull_request_needs_no_plan() -> None:
     assert "書かない" in flat(plan())
 
 
+def test_a_single_issue_split_into_pull_requests_needs_a_plan_per_pull_request() -> None:
+    rows = _section_table_rows(plan(), "## 作る時点と、作らないとき")
+    row = next(row for row in rows if row[0] == "1 件の課題を複数の Pull Request に分ける")
+    assert row[1] == "書く。行は Pull Request の単位である"
+
+
 # --- AC2: 行の形 -------------------------------------------------------------
 
 ROW_COLUMNS = [
@@ -250,3 +256,21 @@ def _tables(text: str) -> list[list[str]]:
             continue
         headers.append([c.strip() for c in stripped.strip("|").split("|")])
     return headers
+
+
+def _section_table_rows(text: str, heading: str) -> list[list[str]]:
+    """指定した節にある表の本文を、行ごとのセルとして返す。"""
+    lines = text.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.strip() == heading)
+    rows: list[list[str]] = []
+    for line in lines[start + 1:]:
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            break
+        if not stripped.startswith("|"):
+            continue
+        cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+        if cells == ["状況", "実行計画"] or set("".join(cells)) <= set("-: "):
+            continue
+        rows.append(cells)
+    return rows

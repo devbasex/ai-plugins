@@ -62,6 +62,44 @@ def test_only_one_lane_runs_container_checks() -> None:
     assert "コンテナを起動する検査を持つ担当は同時に 1 本にする" in parallel()
 
 
+# --- 工程が動く単位 ----------------------------------------------------------
+
+
+def test_stage_units_have_the_three_current_values() -> None:
+    rows = _stage_unit_rows()
+    assert {row[1] for row in rows} == {"課題", "Pull Request", "まとまり"}
+
+
+def test_the_release_group_stages_move_as_one_group() -> None:
+    rows = _stage_unit_rows()
+    assert {row[0] for row in rows if row[1] == "まとまり"} == {
+        "確定仕様化", "配布", "体裁レビュー", "リリース後テスト", "振り返り",
+    }
+
+
+def test_requirements_and_acceptance_criteria_move_per_issue() -> None:
+    rows = _stage_unit_rows()
+    assert {row[0] for row in rows if row[1] == "課題"} == {"要求と受け入れ条件"}
+
+
+def _stage_unit_rows() -> list[list[str]]:
+    lines = parallel().splitlines()
+    start = next(i for i, line in enumerate(lines)
+                 if line.strip() == "## 工程が動く単位")
+    rows: list[list[str]] = []
+    for line in lines[start + 1:]:
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            break
+        if not stripped.startswith("|"):
+            continue
+        cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+        if cells == ["工程", "単位", "理由"] or set("".join(cells)) <= set("-: "):
+            continue
+        rows.append(cells)
+    return rows
+
+
 # --- 振り分け: 測定は機械、判断は手順（決定 8） ------------------------------
 
 
