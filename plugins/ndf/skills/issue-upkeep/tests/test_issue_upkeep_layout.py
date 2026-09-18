@@ -841,6 +841,21 @@ def test_the_group_does_not_change_the_milestone_structure() -> None:
     assert "組の番号は詰めない" in part
 
 
+def test_an_empty_group_row_is_removed_without_renumbering_the_remaining_groups() -> None:
+    """現状固定: 移動で 0 件になった組は消すが、残る組の番号は詰めない。"""
+    part = group_section()
+    column_rows = table(part, "| 列 | 値 | 写す元 |")
+    group_column = next(row for row in column_rows if row[0] == "組")
+    assert group_column[1] == "1 から始まる連番。説明の中で一意"
+
+    timing_rows = table(part, "| 時点 | 行うこと |")
+    moving = next(row for row in timing_rows if row[0] == "課題を別のマイルストーンへ移す")
+    assert plain(moving[1]) == (
+        "元の説明の表から番号を消す。課題が 0 件になった組は行を消し、"
+        "組の番号は詰めない"
+    )
+
+
 def test_milestones_without_a_group_table_are_not_rewritten_at_once() -> None:
     """決定 11: 既存の説明を一括で書き直さず、足した課題の行だけを載せる。"""
     part = plain(group_section())
