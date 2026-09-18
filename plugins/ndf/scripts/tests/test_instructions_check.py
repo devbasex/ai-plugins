@@ -255,8 +255,68 @@ def test_ac32_instruction_count_is_reported(tmp_path):
     root = make_repo(tmp_path, {"CLAUDE.md": body})
     proc = run(root)
     assert proc.returncode == 0, proc.stderr
-    # 見出し 1 + 文 3 + 箇条書き 2 = 6
     assert "指示 6" in proc.stdout
+
+
+def test_count_instructions_html_and_fences_ignored(module):
+    text = (
+        "<div class=\"note\">\n"
+        "段落の文である。\n"
+        "</div>\n"
+        "<!-- コメント行 -->\n"
+        "<span>1 行だけのタグ</span>\n"
+        "~~~\n"
+        "# コード内の見出し\n"
+        "- コード内の箇条書き\n"
+        "コード内の文。\n"
+        "~~~\n"
+        "```python\n"
+        "x = 1\n"
+        "```\n"
+    )
+    # HTML 行と波線・バッククォートのコードブロック内の行は除外され、
+    # 通常の段落の文「段落の文である。」のみがカウントされる。
+    assert module.count_instructions(text) == 1
+
+
+def test_count_instructions_punctuation_splitting(module):
+    # 各種文末記号（。！？!?）による文分割
+    text = "句点である。感嘆符である！疑問符である？ASCII感嘆符!ASCII疑問符?"
+    assert module.count_instructions(text) == 5
+
+    # 連続する文末記号があっても空の文はカウントしない
+    consecutive = "二重の感嘆符！？\n感嘆符と疑問符!?\n最後の文。"
+    assert module.count_instructions(consecutive) == 3
+
+
+def test_count_instructions_paragraphs_without_punctuation(module):
+    # 句点のない単一文段落
+    assert module.count_instructions("句点のない単一文段落") == 1
+
+    # 句点のない複数段落
+    two_paragraphs = "1 つ目の段落\n\n2 つ目の段落"
+    assert module.count_instructions(two_paragraphs) == 2
+
+    # 複数行に折り返された文の結合
+    wrapped = "折り返しの 1 行目\n折り返しの 2 行目。\n"
+    assert module.count_instructions(wrapped) == 1
+
+
+def test_count_instructions_headings_and_bullets(module):
+    text = (
+        "# 見出し 1\n"
+        "## 見出し 2\n\n"
+        "- ハイフン箇条書き\n"
+        "* アスタリスク箇条書き\n"
+        "+ プラス箇条書き\n"
+        "1. 番号付き箇条書き\n\n"
+        "| 表見出し | 列 |\n"
+        "| --- | --- |\n\n"
+        "> 引用行\n\n"
+        "段落の文である。\n"
+    )
+    # 見出し 2 + 箇条書き 4 + 文 1 = 7（表・引用は除外）
+    assert module.count_instructions(text) == 7
 
 
 def test_ac33_missing_criteria_data_exits_two(tmp_path):
