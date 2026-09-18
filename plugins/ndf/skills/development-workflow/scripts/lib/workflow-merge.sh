@@ -103,13 +103,11 @@ wf_deny_undetermined() {
 }
 
 _wf_require_merge_tools() {
-  local num="${1:-}"
-  command -v jq >/dev/null 2>&1 || {
-    wf_deny_undetermined "$num" '承認の印（判定に要る jq が無い）'; return 1; }
-  command -v git >/dev/null 2>&1 || {
-    wf_deny_undetermined "$num" '承認の印（判定に要る git が無い）'; return 1; }
-  command -v gh >/dev/null 2>&1 || {
-    wf_deny_undetermined "$num" '承認の印（判定に要る gh が無い）'; return 1; }
+  local num="${1:-}" tool
+  for tool in jq git gh; do
+    command -v "$tool" >/dev/null 2>&1 || {
+      wf_deny_undetermined "$num" "承認の印（判定に要る $tool が無い）"; return 1; }
+  done
   return 0
 }
 

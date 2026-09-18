@@ -757,31 +757,29 @@ _wf_classify_stages() {
   done < <(wf_stages)
 }
 
-# 通過工程を報告する。**終了コードで工程を止めない。**
-wf_report() {
-  local slug="${1:-}" issue="${2:-}" file content mode stage class frontier
-  local -a recorded=() present=() missing=() conditional=()
+# frontier までの工程を分類し、'class<TAB>stage' を 1 行 1 件で標準出力へ流す。
+# 読む側（_wf_print_report）はクラスの札で 3 群へ振り分ける。空の群は行が出ない
+# だけで、空行を境目に使わないため群の取り違えが起きない。
+# recorded 配列・mode・frontier を引数で受け取る。
+_wf_collect_report_classes() {
+  local mode="$1" frontier="$2"
+  shift 2
+  local -a recorded=("$@")
+  _wf_classify_stages "$mode" "$frontier" ${recorded[@]+"${recorded[@]}"}
+}
 
-  command -v jq >/dev/null 2>&1 || { wf_report_empty "$issue"; return 0; }
-  file=$(wf_state_file "$slug" "$issue") || { wf_report_empty "$issue"; return 0; }
-  content=$(wf_state_read "$file")
-  while IFS= read -r stage; do
-    recorded+=("$stage")
-  done < <(_wf_recorded_lines "$content")
-  if [ "${#recorded[@]}" -eq 0 ]; then
-    wf_report_empty "$issue"
-    return 0
-  fi
-  mode=$(_wf_read_mode "$content")
-  frontier=$(_wf_frontier "${recorded[@]}")
-
+# 分類結果と mode を受け取り、通過工程の報告を印字する。**終了コードで工程を止めない。**
+# 標準入力は 'class<TAB>stage' の並び（_wf_collect_report_classes の出力）。
+_wf_print_report() {
+  local issue="${1:-}" mode="${2:-}" class stage
+  local -a present=() missing=() conditional=()
   while IFS=$'\t' read -r class stage; do
     case "$class" in
       "$WF_CLASS_PRESENT") present+=("$stage") ;;
       "$WF_CLASS_MISSING") missing+=("$stage") ;;
       "$WF_CLASS_CONDITIONAL") conditional+=("$stage") ;;
     esac
-  done < <(_wf_classify_stages "$mode" "$frontier" "${recorded[@]}")
+  done
 
   if [ -n "$mode" ]; then
     printf '#%s の通過工程（%s）\n' "$issue" "$mode"
@@ -801,6 +799,29 @@ wf_report() {
       printf '  bash "$SCRIPTS/projects-sync.sh" %s stage "%s"\n' "$issue" "$stage"
     done
   fi
+  return 0
+}
+
+# 通過工程を報告する。**終了コードで工程を止めない。**
+wf_report() {
+  local slug="${1:-}" issue="${2:-}" file content mode stage frontier
+  local -a recorded=()
+
+  command -v jq >/dev/null 2>&1 || { wf_report_empty "$issue"; return 0; }
+  file=$(wf_state_file "$slug" "$issue") || { wf_report_empty "$issue"; return 0; }
+  content=$(wf_state_read "$file")
+  while IFS= read -r stage; do
+    recorded+=("$stage")
+  done < <(_wf_recorded_lines "$content")
+  if [ "${#recorded[@]}" -eq 0 ]; then
+    wf_report_empty "$issue"
+    return 0
+  fi
+  mode=$(_wf_read_mode "$content")
+  frontier=$(_wf_frontier "${recorded[@]}")
+
+  _wf_collect_report_classes "$mode" "$frontier" "${recorded[@]}" \
+    | _wf_print_report "$issue" "$mode"
   return 0
 }
 
