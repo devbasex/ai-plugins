@@ -50,13 +50,6 @@ def locate(text: str, fragment: str) -> int:
     return text.index(plain(fragment))
 
 
-def bash_block_after(text: str, marker: str) -> str:
-    """マーカー直後の bash コードブロックを返す。"""
-    block = text[locate(text, marker):]
-    start = block.index("```bash")
-    return block[start:block.index("```", start + len("```bash")) + 3]
-
-
 def row_starting(text: str, header: str, first_cell: str) -> str:
     """見出し行で始まる表から、先頭のセルで行を探す。先頭のセルの太字の有無は問わない。
 
@@ -323,7 +316,9 @@ def test_the_target_is_decided_only_by_the_milestone() -> None:
 def test_the_target_query_filters_only_by_milestone() -> None:
     """未設定の課題を拾う例が、マイルストーンの有無だけで絞っていること。"""
     body = SKILL.read_text(encoding="utf-8")
-    block = bash_block_after(body, "**起票者は問わない。**")
+    block = body[locate(body, "**起票者は問わない。**"):]
+    start = block.index("```bash")
+    block = block[start:block.index("```", start + len("```bash")) + 3]
     assert "--author" not in block, "投稿者で絞る例になっている"
     assert "created:" not in block, "起票の時期で絞る例になっている"
     assert "select(.milestone == null)" in block
@@ -336,7 +331,9 @@ def test_the_target_query_keeps_only_null_milestone_issues() -> None:
     文字列の存在（別の現状固定テスト）ではなく、分岐そのものを流して固定する。
     """
     body = SKILL.read_text(encoding="utf-8")
-    block = bash_block_after(body, "**起票者は問わない。**")
+    block = body[locate(body, "**起票者は問わない。**"):]
+    start = block.index("```bash")
+    block = block[start:block.index("```", start + len("```bash")) + 3]
     expression = re.search(r"--jq '([^']*)'", block).group(1)
 
     issues = [
