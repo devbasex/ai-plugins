@@ -146,8 +146,7 @@ graph TD
 plugins/ndf/
 ├── scripts/
 │   ├── instructions-check.py                 # 新設（実体）
-│   ├── data/
-│   │   └── instruction-criteria.json         # 新設（観点・出典・調べ直した日）
+│   ├── data/instruction-criteria.json        # 新設（観点・出典・調べ直した日）
 │   └── tests/
 │       └── test_instructions_check.py        # 新設
 └── skills/release/
