@@ -487,3 +487,17 @@ def test_concurrency_exits_one_when_gh_fails(tmp_path: Path) -> None:
     proc = run("concurrency", "7", env=env)
     assert proc.returncode == 1
     assert "7" in proc.stderr
+
+
+def test_concurrency_exits_one_when_gh_is_absent(tmp_path: Path) -> None:
+    """`gh` が `PATH` に無いときも、`gh` の失敗と同じ終了コード 1 で終わる。
+
+    空の配列を `measure` へ渡すと `min()` が `ValueError` を投げ、traceback で落ちる。
+    """
+    empty_bin = tmp_path / "empty-bin"
+    empty_bin.mkdir()
+    env = dict(os.environ, PATH=str(empty_bin))
+    proc = run("concurrency", "1", env=env)
+    assert proc.returncode == 1, proc.stderr
+    assert "Traceback" not in proc.stderr, proc.stderr
+    assert "gh" in proc.stderr

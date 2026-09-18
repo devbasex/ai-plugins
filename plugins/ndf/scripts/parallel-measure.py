@@ -256,8 +256,10 @@ def fetch_pull_requests(numbers: list[int], repo: Optional[str]) -> list[dict]:
         try:
             proc = subprocess.run(command, capture_output=True, text=True)
         except OSError as exc:
+            # 起動できないのも `gh pr view` の失敗である。空の配列を返すと
+            # `measure` の `min()` が空列で落ちるため、ここで終了コード 1 にする。
             print(f"gh を実行できない: {exc}", file=sys.stderr)
-            return []
+            raise SystemExit(1)
         if proc.returncode != 0:
             print(f"gh pr view {number} が失敗した: {proc.stderr.strip()}", file=sys.stderr)
             raise SystemExit(1)
