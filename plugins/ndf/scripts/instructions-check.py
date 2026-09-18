@@ -467,21 +467,24 @@ def references(text: str) -> list[tuple[int, str]]:
     return found
 
 
+def _inside_root(candidate: str, root: Path) -> bool:
+    """字句のパスと実体のパスが、どちらも根の中に収まるか。"""
+    try:
+        Path(candidate).relative_to(root)
+        # **読む前に実体のパスが根の中に収まることを確かめる。** 字句の上では中でも、
+        # 追跡された symlink が外を指していれば、開いた先は作業ツリーの外である。
+        Path(os.path.realpath(candidate)).relative_to(Path(os.path.realpath(root)))
+    except ValueError:
+        return False
+    return True
+
+
 def resolve(name: str, base: Path, root: Path) -> Path | None:
     """参照先を解く。**解けないもの（`~`・根の外）は `None`** で、存在を判定しない。"""
     if name.startswith("~") or name.startswith("/"):
         return None
     candidate = os.path.normpath(str(base / name))
-    try:
-        Path(candidate).relative_to(root)
-    except ValueError:
-        return None
-    # **読む前に実体のパスが根の中に収まることを確かめる。** 字句の上では中でも、
-    # 追跡された symlink が外を指していれば、開いた先は作業ツリーの外である。
-    real = Path(os.path.realpath(candidate))
-    try:
-        real.relative_to(Path(os.path.realpath(root)))
-    except ValueError:
+    if not _inside_root(candidate, root):
         return None
     return Path(candidate)
 
@@ -673,11 +676,8 @@ def base_triple(version: str) -> tuple[int, int, int]:
 
 def _read_changelog_lines(root: Path, raw: str) -> list[str]:
     candidate = os.path.normpath(str(root / raw))
-    try:
-        Path(candidate).relative_to(root)
-        Path(os.path.realpath(candidate)).relative_to(Path(os.path.realpath(root)))
-    except ValueError as exc:
-        raise CheckError(f"released.path が根の外を指す: {raw}") from exc
+    if not _inside_root(candidate, root):
+        raise CheckError(f"released.path が根の外を指す: {raw}")
     try:
         return Path(candidate).read_text(encoding="utf-8").splitlines()
     except OSError as exc:
