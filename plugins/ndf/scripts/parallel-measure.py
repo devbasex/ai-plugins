@@ -241,7 +241,11 @@ def run_capacity(args: argparse.Namespace) -> int:
 
 # --- concurrency ------------------------------------------------------------
 
-def parse_time(value: str, *, what: str) -> _dt.datetime:
+def parse_time(value: object, *, what: str) -> _dt.datetime:
+    if not isinstance(value, str):
+        # `--input` の JSON は数値も真偽も配列も持てる。素通しすると `value.strip()`
+        # が `AttributeError` を出し、`gh pr view` の失敗と同じ終了コード 1 で落ちる。
+        raise Usage(f"{what} が文字列ではない: {value!r}")
     try:
         parsed = _dt.datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
     except ValueError:

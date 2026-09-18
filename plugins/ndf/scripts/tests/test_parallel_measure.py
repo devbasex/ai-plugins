@@ -533,6 +533,25 @@ def test_concurrency_rejects_a_non_object_element(tmp_path: Path, data: list) ->
     assert "--input" in proc.stderr
 
 
+@pytest.mark.parametrize("record", [
+    {"number": 1, "createdAt": 20260901, "mergedAt": None, "closedAt": None},
+    {"number": 1, "createdAt": "2026-09-01T00:00:00Z", "mergedAt": 20260901,
+     "closedAt": None},
+    {"number": 1, "createdAt": "2026-09-01T00:00:00Z", "mergedAt": None,
+     "closedAt": ["2026-09-01T01:00:00Z"]},
+    {"number": 1, "createdAt": True, "mergedAt": None, "closedAt": None},
+])
+def test_concurrency_rejects_a_non_string_time(tmp_path: Path, record: dict) -> None:
+    """時刻の欄が文字列でない入力も、入力の誤りとして終了コード 2 で弾く。
+
+    素通しすると `parse_time` の `value.strip()` が `AttributeError` を出し、
+    `gh pr view` の失敗と同じ終了コード 1 で落ちる。
+    """
+    proc = concurrency(tmp_path, data=[record])
+    assert proc.returncode == 2, proc.stderr
+    assert "Traceback" not in proc.stderr, proc.stderr
+
+
 # --- concurrency: `gh` は読むだけ（AC42） -----------------------------------
 
 def fake_gh(tmp_path: Path, *, fail: bool = False) -> tuple[dict, Path]:
