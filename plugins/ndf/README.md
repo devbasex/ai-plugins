@@ -289,7 +289,9 @@ agy models   # 認証の確認
 | `cherry-pick-pr` | 環境ブランチへの cherry-pick PR 作成 |
 | `deploy` | 環境ブランチ (qa/staging, release/v2 等) への deploy PR 作成 |
 
-`merged` / `pr` / `pr-tests` / `pr-review` は日常的に自然文で依頼されるため、v5.0.0 で暗黙起動を許可しました。代わりに、取り消しの難しい手順 (push、PR 作成、ブランチ・worktree の削除) の直前に対象を提示して同意を得ることを各 Skill の本文で必須化しています。
+`merged` / `pr` / `pr-tests` / `pr-review` は日常的に自然文で依頼されるため、v5.0.0 で暗黙起動を許可しました。代わりに、実行前確認が要ると決まった手順 (push、PR 作成) の直前に対象を提示して同意を得ることを各 Skill の本文で必須化しています。要否は `skills/AUTHORING.md` の「実行前確認の要否を決める 3 つの問い」が決めます。
+
+**`merged` のブランチ・worktree の削除は止まりません。** どれも事後に戻せる (ハッシュからの復元・Restore branch) ため実行前確認を置かず、消した対象と戻し方を作業完了報告へ載せます。止まるのは `git` が拒んだ対象だけです。`pr` の push と PR 作成の同意は残ります。
 
 ### 利用者への影響と起動方法
 

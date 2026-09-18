@@ -243,6 +243,29 @@ _wf_seek_gh_verb() {
   esac
 }
 
+# `gh pr <verb>` を探しながら語を読み、空でない語ごとに `<each> <語>` を呼ぶ。
+# 見つけたら 0、見つからなければ 1 を返す。
+#
+# 区切りに来たら、見つける前なら `gh` の探索をやり直し、見つけた後なら読むのを止める。
+# 越えて読むと `gh pr merge; echo 268` の 268 を拾う。
+#
+# `<each>` は `state`（3 が見つけた状態）と `found`（0 が見つけた）を読み書きできる。
+# 呼ぶ時点で、その語までの探索は済んでいる。
+_wf_scan_gh_verb() {
+  local cmd="${1:-}" verb="${2:-}" each="${3:-}" tok state=0 found=1
+  while IFS= read -r -d '' tok; do
+    if [ -z "$tok" ]; then
+      [ "$found" -ne 0 ] || break
+      state=0
+      continue
+    fi
+    state=$(_wf_seek_gh_verb "$state" "$tok" "$verb")
+    [ "$state" = "3" ] && found=0
+    "$each" "$tok"
+  done < <(wf_split "$cmd")
+  [ "$found" -eq 0 ]
+}
+
 # 進行の記録のコマンドなら、課題番号・キー・値をタブ区切りで出す。
 #
 # 見分けは `projects-sync.sh` で終わる語である。呼び出し側は `$SCRIPTS` を展開してから
@@ -287,37 +310,32 @@ _wf_read_file() {
 #
 # 本文の渡し方は 2 つある（`--body` と `--body-file`）。**短い形も見る**（`-b` / `-F`）。
 _wf_pr_create_body() {
-  local cmd="${1:-}" tok want="" body="" state=0 found=1
-  while IFS= read -r -d '' tok; do
-    # 区切り。作成を見つける前なら探索をやり直し、見つけた後なら読むのを止める。
-    if [ -z "$tok" ]; then
-      [ "$found" -ne 0 ] || break
-      state=0
-      continue
-    fi
-    if [ -n "$want" ]; then
-      case "$want" in
-        text) body="$tok" ;;
-        file) body=$(_wf_read_file "$tok") ;;
-      esac
-      want=""
-      continue
-    fi
-    state=$(_wf_seek_gh_verb "$state" "$tok" "create")
-    [ "$state" = "3" ] && found=0
-    [ "$found" -eq 0 ] || continue
-    case "$tok" in
-      --body|-b) want=text ;;
-      --body-file|-F) want=file ;;
-      --body=*) body="${tok#--body=}" ;;
-      --body-file=*)
-        body=$(_wf_read_file "${tok#--body-file=}")
-        ;;
-    esac
-  done < <(wf_split "$cmd")
-  [ "$found" -eq 0 ] || return 1
+  local cmd="${1:-}" want="" body=""
+  _wf_scan_gh_verb "$cmd" "create" _wf_pr_create_body_token || return 1
   [ -n "$body" ] || return 1
   printf '%s\n' "$body"
+}
+
+# `_wf_pr_create_body` の 1 語分。`want` と `body` は呼び出し元のものを書き換える。
+_wf_pr_create_body_token() {
+  local tok="${1:-}"
+  if [ -n "$want" ]; then
+    case "$want" in
+      text) body="$tok" ;;
+      file) body=$(_wf_read_file "$tok") ;;
+    esac
+    want=""
+    return 0
+  fi
+  [ "$found" -eq 0 ] || return 0
+  case "$tok" in
+    --body|-b) want=text ;;
+    --body-file|-F) want=file ;;
+    --body=*) body="${tok#--body=}" ;;
+    --body-file=*)
+      body=$(_wf_read_file "${tok#--body-file=}")
+      ;;
+  esac
 }
 
 # `gh pr create` の本文から、閉じる語が指す `<所有者>/<リポジトリ>` と `<番号>` の組を
@@ -391,6 +409,34 @@ _wf_collect_target_modes() {
   done
 }
 
+# 先頭の行を引数で名指しした変数へ 1 行ずつ読み、残りの空でない行を _WF_PACKED_REST へ読む。
+# bash は配列を戻せないため、標準出力へ積んだスカラと行の並びをこの形で解く。
+_wf_read_packed() {
+  local _wf_pk_name _wf_pk_line
+  _WF_PACKED_REST=()
+  for _wf_pk_name in "$@"; do
+    IFS= read -r _wf_pk_line
+    printf -v "$_wf_pk_name" '%s' "$_wf_pk_line"
+  done
+  while IFS= read -r _wf_pk_line; do
+    [ -n "$_wf_pk_line" ] && _WF_PACKED_REST+=("$_wf_pk_line")
+  done
+  return 0
+}
+
+_wf_unpack_collected() {
+  local _wf_uc_targets_name="${1:-}" _wf_uc_modes_name="${2:-}" _wf_uc_modes_str_name="${3:-}"
+  local _wf_uc_line _wf_uc_index=0
+  shift 3
+
+  _wf_read_packed "$@"
+  for _wf_uc_line in ${_WF_PACKED_REST[@]+"${_WF_PACKED_REST[@]}"}; do
+    printf -v "${_wf_uc_targets_name}[$_wf_uc_index]" '%s' "$_wf_uc_line"
+    _wf_uc_index=$((_wf_uc_index + 1))
+  done
+  read -r -a "$_wf_uc_modes_name" <<<"${!_wf_uc_modes_str_name}"
+}
+
 _wf_collect_targets() {
   local parsed collected effective modes_str line conflict=0
   local -a raw_targets=() modes=()
@@ -398,14 +444,7 @@ _wf_collect_targets() {
   parsed=$(_wf_parse_targets) || return 1
   [ -n "$parsed" ] || return 1
   collected=$(printf '%s\n' "$parsed" | _wf_collect_target_modes) || return 1
-  {
-    IFS= read -r effective
-    IFS= read -r modes_str
-    while IFS= read -r line; do
-      [ -n "$line" ] && raw_targets+=("$line")
-    done
-  } <<<"$collected"
-  read -r -a modes <<<"$modes_str"
+  _wf_unpack_collected raw_targets modes modes_str effective modes_str <<<"$collected"
   [ "${#modes[@]}" -gt 1 ] && conflict=1
 
   printf '%s\n' "$effective"
@@ -480,15 +519,7 @@ wf_evidence_report() {
   command -v jq >/dev/null 2>&1 || return 1
 
   collected=$(_wf_collect_targets) || return 1
-  {
-    IFS= read -r effective
-    IFS= read -r conflict
-    IFS= read -r modes_str
-    while IFS= read -r line; do
-      [ -n "$line" ] && targets+=("$line")
-    done
-  } <<<"$collected"
-  read -r -a modes <<<"$modes_str"
+  _wf_unpack_collected targets modes modes_str effective conflict modes_str <<<"$collected"
 
   for line in "${targets[@]}"; do
     IFS=$'\t' read -r repo issue <<<"$line"

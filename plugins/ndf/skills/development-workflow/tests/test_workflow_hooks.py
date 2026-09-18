@@ -7,8 +7,11 @@ hook が実際に登録されることは会話の単位を起こさないと確
 from __future__ import annotations
 
 import json
+import os
 import re
 import shlex
+import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -19,6 +22,12 @@ TRACKING = SKILL_DIR / "references/projects-tracking.md"
 LOOKUP = SKILL_DIR / "references/scripts-lookup.md"
 COMPLETENESS = SKILL_DIR / "references/stage-completeness.md"
 MERGED = SKILL_DIR.parent / "merged/SKILL.md"
+SKILLS_DIR = SKILL_DIR.parent
+PROGRESS_TRACKING = SKILLS_DIR / "progress-tracking/SKILL.md"
+RELEASE_VERIFICATION = SKILLS_DIR / "release-verification/SKILL.md"
+
+# まとまりを閉じる手順を呼ぶ、終わりの工程の Skill（#623 の決定 8）。
+CLOSING_CALLERS = ("release", "release-verification", "retrospective")
 
 # プラグインの根。`${CLAUDE_PLUGIN_ROOT}` が指す先で、Skill の実体はこの下の
 # `skills/<名前>/` にある。
@@ -56,6 +65,16 @@ def frontmatter() -> str:
     found = re.match(r"\A---\s*\n(.*?)\n---\s*\n", body, re.DOTALL)
     assert found, "frontmatter を読み取れない"
     return found.group(1)
+
+
+def test_frontmatter_rejects_body_without_delimiters(tmp_path, monkeypatch) -> None:
+    """現状固定: 境界記号が無い本文は既存の AssertionError で拒否する。"""
+    skill = tmp_path / "SKILL.md"
+    skill.write_text("# frontmatter の無い本文\n", encoding="utf-8")
+    monkeypatch.setitem(globals(), "SKILL", skill)
+
+    with pytest.raises(AssertionError, match="frontmatter を読み取れない"):
+        frontmatter()
 
 
 def hook_command() -> str:
@@ -208,8 +227,461 @@ def test_the_merged_report_carries_the_stage_report() -> None:
     assert "report" in body
 
 
-def test_the_merged_skill_closes_issues_with_their_repository() -> None:
-    """#229-2: 取り出した 2 つの値を `--repo` へ渡す書き方であること。"""
-    body = MERGED.read_text(encoding="utf-8")
+def test_the_closing_step_closes_issues_with_their_repository() -> None:
+    """#229-2: 取り出した 2 つの値を `--repo` へ渡す書き方であること。
+
+    閉じる手順は `merged` から `progress-tracking` の「まとまりを閉じる」へ移した
+    （#623 の決定 7）。読む先だけを移し、確かめる書き方は変えない。
+    """
+    body = PROGRESS_TRACKING.read_text(encoding="utf-8")
 
     assert "gh issue close <番号> --repo <所有者>/<リポジトリ>" in body
+
+
+def test_only_progress_tracking_closes_issues() -> None:
+    """課題を閉じる手順を持つ `SKILL.md` は 1 つだけにする（#623 の C2 / C6 / C13）。
+
+    3 つの終わりの工程（`release` / `release-verification` / `retrospective`）へ写しを
+    置くと、どれを読んだかで閉じる時点が変わる。**正本は `progress-tracking` の
+    「まとまりを閉じる」だけで、ほかはそこを指す。**
+
+    `references/` の下は対象にしない。`issue-upkeep` の「やらない」と `out-of-scope` の
+    起票先は、まとまりの工程とは別の契機で閉じる手順である。
+
+    盤面の `Done` も同じ 1 か所に寄せる（C13）。工程の入口の進行の記録で `Done` を書くと、
+    `Auto-close issue` が先に閉じて reopen の手段が報告から落ちる。
+    """
+    closes = sorted(
+        path.relative_to(SKILLS_DIR).as_posix()
+        for path in SKILLS_DIR.glob("*/SKILL.md")
+        if "gh issue close" in path.read_text(encoding="utf-8")
+    )
+    assert closes == ["progress-tracking/SKILL.md"], closes
+
+    done = sorted(
+        path.relative_to(SKILLS_DIR).as_posix()
+        for path in SKILLS_DIR.glob("*/SKILL.md")
+        if 'status "Done"' in path.read_text(encoding="utf-8")
+    )
+    assert done == ["progress-tracking/SKILL.md"], done
+
+    # 呼ぶ側は「まとまりを閉じる」を `issue-upkeep` より前に置く（C6）。後に置くと、
+    # `issue-upkeep` の段 1 が読む「このまとまりで閉じた課題」がまだ閉じていない。
+    for name in CLOSING_CALLERS:
+        body = (SKILLS_DIR / name / "SKILL.md").read_text(encoding="utf-8")
+        closing = body.find("まとまりを閉じる")
+        upkeep = body.find("/ndf:issue-upkeep")
+        assert closing >= 0, f"{name}: 「まとまりを閉じる」への参照が無い"
+        assert upkeep >= 0, f"{name}: `issue-upkeep` の呼び出しが無い"
+        assert closing < upkeep, f"{name}: 閉じる手順が `issue-upkeep` より後にある"
+
+
+def test_the_gates_stay_two() -> None:
+    """関門は 2 つのままで、工程の側が関門の外へ実行前確認を足さない（#561 の B5 / B6）。
+
+    実行前確認の要否は `AUTHORING.md` の基準が決める。関門の節はその原則を指すだけで、
+    基準の中身を写さない（決定 11。このファイルは 500 行の上限に達している）。
+    """
+    body = SKILL.read_text(encoding="utf-8")
+    section = body.split("## 人手の承認を求める関門")[1].split("\n### ")[0]
+
+    assert "**関門は 2 つで、増やさない。**" in section
+    assert "関門の外で工程の側が実行前確認を足さない" in section
+    assert "AUTHORING.md" in section
+
+    rows = [line for line in section.splitlines() if line.startswith("| ") and " | " in line]
+    # 見出しの行と区切りの行を除いた残りが関門そのものである。
+    assert len(rows) - 2 == 2, rows
+
+
+# 疑似の `gh`。呼び出しを 1 行ずつ控え、課題の状態をファイルで持つ。通信しない。
+FAKE_GH = r"""#!/usr/bin/env bash
+printf 'gh %s\n' "$*" >>"$FAKE_DIR/calls"
+case "$1 $2" in
+  "repo view") echo "$FAKE_REPO" ;;
+  "pr view")
+    case " $* " in
+      *" body,comments "*) cat "$FAKE_DIR/record" ;;
+      *) cat "$FAKE_DIR/pr-body" ;;
+    esac ;;
+  "issue view") cat "$FAKE_DIR/state-$3" ;;
+  "issue close") echo CLOSED >"$FAKE_DIR/state-$3"; echo "Closed issue #$3" ;;
+  *) exit 1 ;;
+esac
+"""
+
+# 疑似の `projects-sync.sh`。盤面の自動化は閉じない（`gh issue close` が閉じる経路）。
+FAKE_SYNC = """#!/usr/bin/env bash
+printf 'projects-sync %s\\n' "$*" >>"$FAKE_DIR/calls"
+"""
+
+# 複数世代の配布記録。最後の配布と、その本番版に一致する最後のリリース後テストを
+# 選ぶことを確かめるための入力。旧版の記録・同版の先行記録・異なる版（dev 接尾辞）を
+# 混ぜ、末尾の「選ぶ記録」だけが選ばれることを示す。
+MULTI_GENERATION_RECORD = """## 配布の記録
+
+段階: 本番（2026-09-01 10:00 に承認）
+版: 10.13.0 → 10.14.0（MINOR: 旧まとまり）
+まとまり: PR #700
+
+## リリース後テスト
+
+対象の版: 10.14.0（2026-09-01 11:00）
+合否: 合格（旧版）
+
+## 配布の記録
+
+段階: 本番（2026-09-18 10:00 に承認）
+版: 10.14.0 → 10.15.0（MINOR: 新まとまり）
+まとまり: PR #717 / #718
+
+## リリース後テスト
+
+対象の版: 10.15.0（2026-09-18 11:00）
+合否: 合格（同版の先行記録）
+
+## リリース後テスト
+
+対象の版: 10.15.0-dev.1（2026-09-18 12:00）
+合否: 合格（異なる版）
+
+## リリース後テスト
+
+対象の版: 10.15.0（2026-09-18 13:00）
+合否: 合格（選ぶ記録）
+"""
+
+# 本番への配布の記録と、全条件が合格したリリース後テストの記録。
+DISTRIBUTION_RECORD = """## 概要
+
+版を上げる。
+
+## 配布の記録
+
+段階: 本番（2026-09-18 10:00 に承認）
+版: 10.14.0 → 10.15.0（MINOR: 機能追加）
+まとまり: PR #717
+
+## リリース後テスト
+
+対象の版: 10.15.0（2026-09-18 11:00）
+
+| 課題 | 受け入れ条件 | 実行したこと | 実行時刻 | 結果 |
+| --- | --- | --- | --- | --- |
+| #12 | 閉じる | 手順を通した | 11:05 | 合格 |
+| #12 | 報告する | 報告を読んだ | 11:06 | 合格 |
+
+合否: 合格
+"""
+
+
+def closing_section(heading: str) -> str:
+    """「まとまりを閉じる」の下の `### <heading>` 節を返す。"""
+    body = PROGRESS_TRACKING.read_text(encoding="utf-8")
+    closing = body.split("\n## まとまりを閉じる\n")[1].split("\n## ")[0]
+    return closing.split(f"\n### {heading}\n")[1].split("\n### ")[0]
+
+
+def closing_bash(heading: str) -> str:
+    found = re.findall(r"^```bash\n(.*?)^```$", closing_section(heading), re.MULTILINE | re.DOTALL)
+    assert len(found) == 1, f"{heading} の bash が 1 つでない: {len(found)} 個"
+    return found[0]
+
+
+def run_record_reader(record: str) -> str:
+    """「配布の記録」の読み取り手順を、記録を差し替えて実行し標準出力を返す。
+
+    手順書の `record=$(gh pr view ...)` を環境変数 `RECORD` の読み取りへ置き換え、
+    末尾に計測用の区切りで `selected` / `last` / `fields` を書き出す。
+    """
+    script = closing_bash("配布の記録")
+    script = re.sub(
+        r"^record=\$\(gh pr view .*\)$",
+        'record="$RECORD"',
+        script,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    script += (
+        '\nprintf "\\n---last---\\n%s\\n---fields---\\n%s|%s|%s\\n" '
+        '"$last" "$stage" "$ver" "$bundle_prs"\n'
+    )
+
+    done = subprocess.run(
+        ["bash", "-c", script],
+        env={**os.environ, "RECORD": record},
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert done.returncode == 0, done.stderr
+    return done.stdout
+
+
+def parse_record_reader_output(stdout: str) -> tuple[str, str, str]:
+    """計測用の区切りで区切られた出力を `(selected, last, fields)` の 3 値へ分解する。"""
+    selected, remainder = stdout.split("\n---last---\n", maxsplit=1)
+    last, fields = remainder.split("\n---fields---\n", maxsplit=1)
+    return selected.strip(), last.strip(), fields.strip()
+
+
+def test_the_record_reader_selects_the_latest_distribution_and_matching_release_test() -> None:
+    """現状固定: 最後の配布と、その本番版に一致する最後のリリース後テストを選ぶ。"""
+    selected, last, fields = parse_record_reader_output(
+        run_record_reader(MULTI_GENERATION_RECORD)
+    )
+
+    assert selected == """## リリース後テスト
+
+対象の版: 10.15.0（2026-09-18 13:00）
+合否: 合格（選ぶ記録）"""
+    assert last == """## 配布の記録
+
+段階: 本番（2026-09-18 10:00 に承認）
+版: 10.14.0 → 10.15.0（MINOR: 新まとまり）
+まとまり: PR #717 / #718"""
+    assert fields == "本番（2026-09-18 10:00 に承認）|10.15.0|717\n718"
+
+
+def test_the_closing_step_closes_an_open_issue_after_the_board_is_done(tmp_path) -> None:
+    """現状固定: 本番へ配布し全条件が合格した OPEN の課題を、盤面の Done の後で閉じる。
+
+    手順書の 2 つのコード例（「配布の記録」の読み取りと「手順」）を、疑似の `gh` と
+    `projects-sync.sh` へ向けてそのまま実行する。置き換えるのは `<...>` の差し込み口だけ。
+    """
+    fake = tmp_path / "fake"
+    (fake / "bin").mkdir(parents=True)
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "lib").symlink_to(PLUGIN_ROOT / "scripts/lib")
+    for path, text in ((fake / "bin/gh", FAKE_GH), (scripts / "projects-sync.sh", FAKE_SYNC)):
+        path.write_text(text, encoding="utf-8")
+        path.chmod(0o755)
+    (fake / "record").write_text(DISTRIBUTION_RECORD, encoding="utf-8")
+    (fake / "pr-body").write_text("Fixes devbasex/ai-plugins#12\n", encoding="utf-8")
+    (fake / "state-12").write_text("OPEN\n", encoding="utf-8")
+
+    script = closing_bash("配布の記録") + closing_bash("手順")
+    for placeholder, value in {
+        "<記録のPR番号>": "717",
+        "<PR番号>": "$bundle_prs",
+        "<所有者>/<リポジトリ>": "devbasex/ai-plugins",
+        "<番号>": "12",
+        "<マイルストーン>": "01 テスト",
+        "<工程名>": "振り返り",
+    }.items():
+        script = script.replace(placeholder, value)
+    script += '\nprintf "stage=%s\\nver=%s\\nbefore=%s\\nnow=%s\\nafter=%s\\n" "$stage" "$ver" "$before" "$now" "$after"\n'
+
+    env = {
+        "PATH": f"{fake / 'bin'}:{os.environ.get('PATH', '')}",
+        "SCRIPTS": str(scripts),
+        "FAKE_DIR": str(fake),
+        "FAKE_REPO": "devbasex/ai-plugins",
+        "LC_ALL": "C.UTF-8",
+    }
+    done = subprocess.run(
+        ["bash", "-c", script], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60
+    )
+    assert done.returncode == 0, done.stderr
+    out = done.stdout.splitlines()
+
+    # 閉じる条件: 本番への配布で、本番の版のリリース後テストの行がすべて合格。
+    assert "stage=本番（2026-09-18 10:00 に承認）" in out, out
+    assert "ver=10.15.0" in out, out
+    rows = [line for line in out if line.startswith("| #12 ")]
+    assert len(rows) == 2 and all(row.split("|")[5].strip().startswith("合格") for row in rows), out
+    # まとまりの課題はリポジトリまで含めて取り出される。
+    assert "devbasex/ai-plugins\t12" in out, out
+
+    calls = (fake / "calls").read_text(encoding="utf-8").splitlines()
+    views = [i for i, call in enumerate(calls) if call.startswith("gh issue view 12 ")]
+    board = calls.index("projects-sync 12 status Done")
+    close = next(i for i, call in enumerate(calls) if call.startswith("gh issue close 12 "))
+    # (a) 状態を読む → (b) 盤面を Done → (c) 読み直す → 閉じる → (d) 読み直す。
+    assert len(views) == 3, calls
+    assert views[0] < board < views[1] < close < views[2], calls
+    assert "--repo devbasex/ai-plugins" in calls[close], calls[close]
+    assert "before=OPEN" in out and "now=OPEN" in out and "after=CLOSED" in out, out
+
+    # 結果の報告: before が OPEN で after が CLOSED なら `閉じた`。戻し方を載せる。
+    report = closing_section("結果の報告")
+    closed = [line for line in report.splitlines() if line.startswith("| `閉じた` |")]
+    assert len(closed) == 1, report
+    condition, carried = [cell.strip() for cell in closed[0].strip("|").split("|")][1:3]
+    assert "`before` が OPEN" in condition and "`after` が CLOSED" in condition, condition
+    assert "`gh issue reopen <番号> --repo <所有者>/<リポジトリ>`" in carried, carried
+
+
+def closing_fake(tmp_path, *, pr_body: str, state_12: str, record: str) -> tuple[Path, dict]:
+    """「手順」のコード例を疑似の `gh` / `projects-sync.sh` へ向けて実行する土台を作る。
+
+    返すのは `(呼び出しを控える先, 環境)` である。呼び出しの並びを見て、止まるはずの
+    経路がその先のコマンドを呼んでいないことを確かめる。
+    """
+    fake = tmp_path / "fake"
+    (fake / "bin").mkdir(parents=True)
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "lib").symlink_to(PLUGIN_ROOT / "scripts/lib")
+    for path, text in ((fake / "bin/gh", FAKE_GH), (scripts / "projects-sync.sh", FAKE_SYNC)):
+        path.write_text(text, encoding="utf-8")
+        path.chmod(0o755)
+    (fake / "record").write_text(record, encoding="utf-8")
+    (fake / "pr-body").write_text(pr_body, encoding="utf-8")
+    if state_12 is not None:
+        (fake / "state-12").write_text(state_12, encoding="utf-8")
+    env = {
+        "PATH": f"{fake / 'bin'}:{os.environ.get('PATH', '')}",
+        "SCRIPTS": str(scripts),
+        "FAKE_DIR": str(fake),
+        "FAKE_REPO": "devbasex/ai-plugins",
+        "LC_ALL": "C.UTF-8",
+    }
+    return fake, env
+
+
+def test_the_closing_step_stops_when_the_bundle_list_is_empty(tmp_path) -> None:
+    """まとまりの一覧が空なら、手順 2 の `gh pr view` を呼ばずに止まる。
+
+    番号を省いた `gh pr view` は現在のブランチの Pull Request を選ぶ。空のまま進むと、
+    **別のまとまりの課題を閉じうる**（#747 のレビュー指摘）。
+    """
+    fake, env = closing_fake(
+        tmp_path, pr_body="Fixes devbasex/ai-plugins#12\n", state_12="OPEN\n",
+        record="（配布の記録が無い）\n",
+    )
+    script = 'bundle_prs=""\n' + closing_bash("手順").replace("<PR番号>", "$bundle_prs")
+
+    done = subprocess.run(
+        ["bash", "-c", script], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60
+    )
+
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert "推測せず運用者に一覧を聞く" in done.stderr, done.stderr
+    calls = (fake / "calls").read_text(encoding="utf-8") if (fake / "calls").exists() else ""
+    assert "gh pr view" not in calls, calls
+    assert "gh issue close" not in calls, calls
+
+
+def test_the_closing_step_does_not_touch_the_board_when_the_first_read_fails(tmp_path) -> None:
+    """(a) の状態を読めなければ、盤面も課題も変えない。
+
+    読めないまま盤面を Done にすると、`Auto-close issue` が有効なリポジトリでは結果を
+    4 つのどれにも分類できないまま課題が閉じる（#747 のレビュー指摘）。
+    """
+    fake, env = closing_fake(
+        tmp_path, pr_body="Fixes devbasex/ai-plugins#12\n", state_12=None,
+        record="（配布の記録が無い）\n",
+    )
+    # 手順 3 の (a)〜(d) だけを、条件を満たした 1 件に対して実行する。
+    script = "for n in 12; do\n" + "\n".join(
+        line for line in closing_bash("手順").splitlines()
+        if line.startswith(("before=", "[ \"<所有者>", "now=", "[ \"$now\"", "after="))
+    ) + "\ndone\nprintf 'end=%s\\nfailed=%s\\n' \"${after-未設定}\" \"${failed- }\""
+    for placeholder, value in {
+        "<所有者>/<リポジトリ>": "devbasex/ai-plugins",
+        "<番号>": "12",
+        "<マイルストーン>": "01 テスト",
+        "<工程名>": "振り返り",
+    }.items():
+        script = script.replace(placeholder, value)
+    script = 'RECORD_REPO=devbasex/ai-plugins\n' + script
+
+    done = subprocess.run(
+        ["bash", "-c", script], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60
+    )
+
+    calls = (fake / "calls").read_text(encoding="utf-8") if (fake / "calls").exists() else ""
+    assert "projects-sync" not in calls, calls
+    assert "gh issue close" not in calls, calls
+    assert "end=未設定" in done.stdout, done.stdout + done.stderr
+    # 黙って次の課題へ飛ばさない。`失敗` が 1 件でもあれば `issue-upkeep` を呼ばずに
+    # 止まるため、控えないとその規則が働かない。
+    assert "failed= 12" in done.stdout, done.stdout + done.stderr
+
+    # 結果の報告: 読み取りが 0 以外で終わった課題は `失敗`。やり直すコマンドを載せる。
+    report = closing_section("結果の報告")
+    failed = [line for line in report.splitlines() if line.startswith("| `失敗（理由）` |")]
+    assert len(failed) == 1, report
+    condition, carried = [cell.strip() for cell in failed[0].strip("|").split("|")][1:3]
+    assert "読み取りが 0 以外で終わった" in condition, condition
+    assert "`gh issue close <番号> --repo <所有者>/<リポジトリ>`" in carried, carried
+
+
+def release_verification_output_template() -> str:
+    """`release-verification` の「出力物」節にある markdown 雛形を返す。
+
+    節は `## 出力物` から次の実在の節見出しまで。**節の中の ```markdown``` の柵で
+    囲まれた雛形だけを取り出す。** 柵の中の `## リリース後テスト` は雛形の一部であり、
+    節の境目ではない。柵で切ると、その混同を避けられる。
+    """
+    body = RELEASE_VERIFICATION.read_text(encoding="utf-8")
+    section = body.split("\n## 出力物\n", maxsplit=1)[1]
+    found = re.search(r"^```markdown\n(.*?)^```$", section, re.MULTILINE | re.DOTALL)
+    assert found, f"出力物の markdown 雛形を読み取れない: {section[:200]}"
+    return found.group(1)
+
+
+def test_the_release_verification_template_carries_the_target_version_once() -> None:
+    """現状固定: 雛形は `対象の版:` の行を 1 つ持つ。
+
+    「まとまりを閉じる」の「配布の記録」の読み取りは、この行で本番の版のブロックを
+    選ぶ。行が無い・複数あると、どの版を確かめたのかが決まらない。
+    """
+    template = release_verification_output_template()
+    targets = [line for line in template.splitlines() if line.startswith("対象の版:")]
+
+    assert len(targets) == 1, template
+    assert "<配布した版>" in targets[0], targets[0]
+
+
+def test_the_release_verification_template_starts_the_table_with_the_issue_column() -> None:
+    """現状固定: 表の先頭の列が `課題` で、`結果` の列も持つ。
+
+    課題ごとに閉じる判定を読むため、行がどの課題の受け入れ条件だったかを先頭の列で
+    引く。結果の列が合否を持つ。どちらが欠けても課題別の閉じる判定へ渡せない。
+    """
+    template = release_verification_output_template()
+    rows = [line for line in template.splitlines() if line.startswith("| ")]
+    # 見出しの行・区切りの行・各データ行。
+    assert len(rows) >= 3, rows
+
+    header = [cell.strip() for cell in rows[0].strip("|").split("|")]
+    assert header[0] == "課題", header
+    assert header[-1] == "結果", header
+    assert "受け入れ条件" in header, header
+
+
+def test_the_release_verification_template_maps_each_condition_to_an_issue() -> None:
+    """現状固定: 各受け入れ条件の行が、課題の列と結果の列を対応付けて読める。
+
+    区切りの行を除いた各データ行で、先頭の課題の列が `#<番号>` の形を持ち、結果の列が
+    合格・保留のいずれかの語を持つ。これがまとまりの課題別の閉じる判定へ渡す形である。
+    """
+    template = release_verification_output_template()
+    rows = [line for line in template.splitlines() if line.startswith("| ")]
+    header = [cell.strip() for cell in rows[0].strip("|").split("|")]
+    issue_at = header.index("課題")
+    result_at = header.index("結果")
+
+    # 見出しの行と区切りの行（各セルが `---`）を除いた残りがデータ行。
+    def is_separator(row: str) -> bool:
+        cells = [cell.strip() for cell in row.strip("|").split("|")]
+        return all(set(cell) == {"-"} for cell in cells)
+
+    data = [
+        [cell.strip() for cell in row.strip("|").split("|")]
+        for row in rows[1:]
+        if not is_separator(row)
+    ]
+    assert data, rows
+
+    issues = set()
+    for cells in data:
+        assert re.match(r"^#\d+$", cells[issue_at]), cells
+        assert re.search(r"合格|保留", cells[result_at]), cells
+        issues.add(cells[issue_at])
+
+    # 雛形は複数の課題（#561 / #623）を、それぞれの受け入れ条件の行へ対応付けて示す。
+    assert issues == {"#561", "#623"}, issues
