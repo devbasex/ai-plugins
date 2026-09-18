@@ -11,6 +11,7 @@ import importlib.util
 import json
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 
@@ -489,6 +490,31 @@ def test_wait_reset_sleeps_until_the_earliest_reset_time_plus_the_margin(mod) ->
     assert slept == 25 * 60 + 60
     assert sleeper.slept == [slept]
     assert code == 0
+
+
+def test_wait_reset_uses_only_the_selected_layer(mod, tmp_path) -> None:
+    root = tmp_path / "transcript_agents"
+    shutil.copytree(FIXTURES, root)
+    worker = (
+        root / "projects" / "-work-sample" / "sess-c" / "subagents" / "agent-c3.jsonl"
+    )
+    worker.write_text(
+        worker.read_text(encoding="utf-8").replace(
+            '"resetsAt": 1789635600', '"resetsAt": 1789634700',
+        ),
+        encoding="utf-8",
+    )
+
+    sleeper = Sleeper()
+    slept, remaining, code = mod.wait_reset(
+        ["sess-c"], root=root, layer="supervisor", now=mod.parse_now(BEFORE),
+        sleeper=sleeper,
+    )
+
+    # worker の解除は 08:45、指定した supervisor の最初の解除は 09:00 である。
+    assert slept == 25 * 60 + 60
+    assert sleeper.slept == [slept]
+    assert (remaining, code) == (2, 0)
 
 
 def test_wait_reset_takes_the_margin_from_the_argument(mod) -> None:
