@@ -448,6 +448,12 @@ def test_an_uninterrupted_session_ends_with_zero_and_an_empty_list() -> None:
     assert json.loads(p.stdout)["agents"] == []
 
 
+def test_a_bad_now_of_interrupted_ends_with_two_and_an_input_error() -> None:
+    p = run("interrupted", "--session", "sess-c", "--now", "not-an-iso-time")
+    assert p.returncode == 2
+    assert "時刻として読めない" in p.stderr
+
+
 # ---------- AC30: 中断の一覧にも本文・パス・description の後ろ半分を載せない ----------
 
 def test_the_interrupted_output_carries_no_text_no_path_and_no_description_tail() -> None:

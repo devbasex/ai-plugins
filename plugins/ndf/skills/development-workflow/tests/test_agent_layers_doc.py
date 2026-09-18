@@ -463,6 +463,13 @@ def _interruption_section(layers: str) -> str:
     return block[1]
 
 
+def _conductor_interruption_check_section(layers: str) -> str:
+    section = _interruption_section(layers)
+    block = section.split("### conductor の中断の点検", 1)
+    assert len(block) > 1, "`### conductor の中断の点検` の節が無い"
+    return block[1].split("\n### ", 1)[0]
+
+
 # ---------- AC40: 通知ではなく記録で見分け、契機は 4 つ ----------
 
 def test_the_interruption_is_told_apart_by_the_record_not_the_notification(
@@ -492,6 +499,23 @@ def test_the_reset_time_comes_from_the_record(layers: str) -> None:
     section = _interruption_section(layers)
     assert "quotaLimits.resetsAt" in section or "resets_at" in section
     assert "固定の間隔で待たない" in section
+
+
+def test_the_conductor_normally_waits_without_a_max_sleep(layers: str) -> None:
+    section = _conductor_interruption_check_section(layers)
+    assert "手順 4 は `--max-sleep` を付けない" in section
+
+
+def test_the_conductor_rechecks_only_steps_one_and_four_when_waiting_is_cut(
+        layers: str) -> None:
+    section = _conductor_interruption_check_section(layers)
+    exception = section.split("背景の待ちを数時間続けられないと分かったときだけ", 1)
+    assert len(exception) > 1, "長時間待機できない場合の例外が無い"
+    rule = exception[1].split("。", 1)[0]
+    assert "`--max-sleep 540`" in rule
+    assert "終了コード 3" in rule
+    assert "手順 1 と手順 4 だけ" in rule
+    assert "手順 2" not in rule and "手順 3" not in rule
 
 
 # ---------- AC49: 落ちた層ごとの 3 通りの表 ----------
