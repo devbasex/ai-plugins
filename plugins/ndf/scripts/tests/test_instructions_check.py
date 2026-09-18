@@ -10,6 +10,7 @@ import json
 import os
 import subprocess
 import sys
+import urllib.error
 from pathlib import Path
 
 import pytest
@@ -911,6 +912,26 @@ def test_ac41_timeout_is_total_elapsed():
     assert not result.ok
     assert "待ち" in (result.error or "")
     assert elapsed < 2.0
+
+
+@pytest.mark.parametrize(("failure", "expected_error"), [
+    (urllib.error.HTTPError("https://example.invalid", 503, "unavailable", {}, None),
+     "HTTP 503"),
+    (urllib.error.URLError("name resolution failed"),
+     "接続できない（name resolution failed）"),
+])
+def test_fetch_returns_the_opener_error(failure, expected_error):
+    sys.path.insert(0, str(SCRIPT.parent / "lib"))
+    import refresh as refresh_lib
+
+    def failing_opener(url, timeout):
+        raise failure
+
+    result = refresh_lib.fetch(
+        "https://example.invalid/source", 1, opener=failing_opener)
+
+    assert result.ok is False
+    assert result.error == expected_error
 
 
 def test_ac44_refresh_writes_nothing(tmp_path):
