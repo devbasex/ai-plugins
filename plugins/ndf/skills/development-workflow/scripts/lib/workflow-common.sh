@@ -391,6 +391,21 @@ _wf_collect_target_modes() {
   done
 }
 
+# 先頭の行を引数で名指しした変数へ 1 行ずつ読み、残りの空でない行を _WF_PACKED_REST へ読む。
+# bash は配列を戻せないため、標準出力へ積んだスカラと行の並びをこの形で解く。
+_wf_read_packed() {
+  local _wf_pk_name _wf_pk_line
+  _WF_PACKED_REST=()
+  for _wf_pk_name in "$@"; do
+    IFS= read -r _wf_pk_line
+    printf -v "$_wf_pk_name" '%s' "$_wf_pk_line"
+  done
+  while IFS= read -r _wf_pk_line; do
+    [ -n "$_wf_pk_line" ] && _WF_PACKED_REST+=("$_wf_pk_line")
+  done
+  return 0
+}
+
 _wf_collect_targets() {
   local parsed collected effective modes_str line conflict=0
   local -a raw_targets=() modes=()
@@ -398,13 +413,8 @@ _wf_collect_targets() {
   parsed=$(_wf_parse_targets) || return 1
   [ -n "$parsed" ] || return 1
   collected=$(printf '%s\n' "$parsed" | _wf_collect_target_modes) || return 1
-  {
-    IFS= read -r effective
-    IFS= read -r modes_str
-    while IFS= read -r line; do
-      [ -n "$line" ] && raw_targets+=("$line")
-    done
-  } <<<"$collected"
+  _wf_read_packed effective modes_str <<<"$collected"
+  raw_targets=(${_WF_PACKED_REST[@]+"${_WF_PACKED_REST[@]}"})
   read -r -a modes <<<"$modes_str"
   [ "${#modes[@]}" -gt 1 ] && conflict=1
 
@@ -480,14 +490,8 @@ wf_evidence_report() {
   command -v jq >/dev/null 2>&1 || return 1
 
   collected=$(_wf_collect_targets) || return 1
-  {
-    IFS= read -r effective
-    IFS= read -r conflict
-    IFS= read -r modes_str
-    while IFS= read -r line; do
-      [ -n "$line" ] && targets+=("$line")
-    done
-  } <<<"$collected"
+  _wf_read_packed effective conflict modes_str <<<"$collected"
+  targets=(${_WF_PACKED_REST[@]+"${_WF_PACKED_REST[@]}"})
   read -r -a modes <<<"$modes_str"
 
   for line in "${targets[@]}"; do
