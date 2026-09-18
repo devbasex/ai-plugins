@@ -313,17 +313,12 @@ def test_the_target_is_decided_only_by_the_milestone() -> None:
     assert contains(body, "**起票者は問わない。**")
 
 
-def target_query_command() -> str:
-    """SKILL.md から未設定課題抽出の bash コードブロックを返す。"""
+def test_the_target_query_filters_only_by_milestone() -> None:
+    """未設定の課題を拾う例が、マイルストーンの有無だけで絞っていること。"""
     body = SKILL.read_text(encoding="utf-8")
     block = body[locate(body, "**起票者は問わない。**"):]
     start = block.index("```bash")
-    return block[start:block.index("```", start + len("```bash")) + 3]
-
-
-def test_the_target_query_filters_only_by_milestone() -> None:
-    """未設定の課題を拾う例が、マイルストーンの有無だけで絞っていること。"""
-    block = target_query_command()
+    block = block[start:block.index("```", start + len("```bash")) + 3]
     assert "--author" not in block, "投稿者で絞る例になっている"
     assert "created:" not in block, "起票の時期で絞る例になっている"
     assert "select(.milestone == null)" in block
@@ -335,7 +330,10 @@ def test_the_target_query_keeps_only_null_milestone_issues() -> None:
     現状固定: 期待値の根拠は仕様ではなく、抽出手順が返す jq 式の振る舞いである。
     文字列の存在（別の現状固定テスト）ではなく、分岐そのものを流して固定する。
     """
-    block = target_query_command()
+    body = SKILL.read_text(encoding="utf-8")
+    block = body[locate(body, "**起票者は問わない。**"):]
+    start = block.index("```bash")
+    block = block[start:block.index("```", start + len("```bash")) + 3]
     expression = re.search(r"--jq '([^']*)'", block).group(1)
 
     issues = [
