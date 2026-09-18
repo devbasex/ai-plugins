@@ -121,6 +121,35 @@ def test_the_layers_doc_keeps_the_gate_count_at_two(layers: str) -> None:
     assert "関門は 2 つ" in layers
 
 
+# ---------- モードごとの持ち場の組み方 ----------
+
+MODE_POST_COMPOSITIONS = (
+    ("standard", "上の表のまま"),
+    ("documentation", "設計に素材の収集と出典の確定、仕上げに体裁レビューが入る。"
+     "実装は執筆、検査は構造改善を含まない"),
+    ("legacy-refactor", "設計 Pull Request を分けないときは設計の持ち場を作らない。"
+     "実装は現状固定テストと段階的改善、実装レビューは `pr-review`"),
+    ("light", "設計の持ち場を作らない。実装は計画を含まず、検査は構造改善を含まない。"
+     "本番の承認が要らなければ仕上げも作らない"),
+    ("operation", "設計が**本番の系へ届く実行の前で関門を返す**。"
+     "実装は実行（[operation-run.md](operation-run.md)）"),
+)
+
+
+@pytest.mark.parametrize(("mode", "composition"), MODE_POST_COMPOSITIONS)
+def test_each_mode_keeps_its_current_post_composition(
+        layers: str, mode: str, composition: str) -> None:
+    """各モードで省略・追加する持ち場、工程、関門の現状を固定する。"""
+    assert f"| `{mode}` | {composition} |" in layers
+
+
+def test_omitted_post_work_and_start_condition_move_together(layers: str) -> None:
+    """作らない持ち場の工程と開始条件は、次の持ち場へ一緒に移る。"""
+    assert ("作らない持ち場の工程は、次の持ち場の先頭へ入る。"
+            "始まりの条件も一緒に移る。") in layers
+    assert "関門を返す\n持ち場は、中身が少なくても作る。" in layers
+
+
 # ---------- AC4: supervisor の報告の 10 項目 ----------
 
 SUPERVISOR_REPORT = (
