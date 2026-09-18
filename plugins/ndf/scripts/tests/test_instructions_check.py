@@ -990,6 +990,16 @@ def test_ac47_partial_failure_lists_all_and_exits_two(module, tmp_path, capsys):
     assert "取れる" in out[0] and "取れない" in out[1]
 
 
+def test_git_unavailable_root_exits_two(tmp_path):
+    """git 管理外のディレクトリを --root に渡すと、git ls-files が失敗して終了コード 2。"""
+    root = tmp_path / "not-a-repo"
+    root.mkdir()
+    (root / "CLAUDE.md").write_text("# c\n", encoding="utf-8")
+    proc = run(root)
+    assert proc.returncode == 2, proc.stdout + proc.stderr
+    assert any("git が使えない" in line for line in errors(proc))
+
+
 # --- 呼び方（AC74 のブロックの終了コード） -----------------------------------
 
 BLOCK = """
