@@ -1171,3 +1171,64 @@ def test_non_string_files_exits_two(tmp_path, value):
     declare(root, {"version": 1, "files": value})
     proc = run(root)
     assert proc.returncode == 2, proc.stdout + proc.stderr
+
+
+# --- 行の分類（count_instructions / paragraph_starts の現状固定、R5-002） -----
+#
+# 両関数が同じ Markdown 行分類を使うようにまとめる前後で、件数・行番号・本文・
+# 見出しフラグが変わらないことを固定する。**特に HTML 行（行頭 `<`）の扱いが 2 つの
+# 関数で違う**（数えるほうは無視し、段落先頭のほうは通常文として扱う）ことを明示する。
+
+
+def _load_check_module():
+    spec = importlib.util.spec_from_file_location("ndf_instructions_check_fns", SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod
+    try:
+        spec.loader.exec_module(mod)
+    finally:
+        sys.modules.pop(spec.name, None)
+    return mod
+
+
+@pytest.mark.parametrize("text,expected", [
+    # 見出し + 文 3 + 箇条書き 2（AC32 と同じ本文）。
+    (
+        "# 見出し\n\n1 つ目の文である。2 つ目の文である。\n折り返した続きの文である。\n\n"
+        "- 箇条書き 1\n  - 字下げした箇条書き\n\n| 表 | の行 |\n| --- | --- |\n\n"
+        "> 引用の行\n\n```\nコードの行\n```\n",
+        6,
+    ),
+    # HTML 行（行頭 `<`）は数えない。前後の文は段落として数える。
+    ("文の一。\n\n<div>タグ</div>\n\nもう一つの文。\n", 2),
+    # フェンスの中の文は数えない。
+    ("外の文。\n\n```\n中の文である。二つ目。\n```\n\n後の文。\n", 2),
+    # 表・引用だけなら 0。
+    ("| a | b |\n| - | - |\n\n> 引用\n", 0),
+    # 空文字列は 0。
+    ("", 0),
+])
+def test_count_instructions_characterization(text, expected):
+    mod = _load_check_module()
+    assert mod.count_instructions(text) == expected
+
+
+@pytest.mark.parametrize("text,expected", [
+    # 見出しは (行番号, 見出し本文, True)。段落の先頭は (行番号, 本文, False)。
+    (
+        "# 見出し\n\n本文の一。\n続きの行。\n\n2 つ目の段落。\n",
+        [(1, "見出し", True), (3, "本文の一。", False), (6, "2 つ目の段落。", False)],
+    ),
+    # HTML 行（行頭 `<`）は段落の先頭として扱う（通常文と同じ）。
+    ("\n<div>タグ</div>\n", [(2, "<div>タグ</div>", False)]),
+    # 表・引用の行は段落の先頭にしない。直後の通常文は続き扱い。
+    ("| a | b |\n本文。\n", []),
+    ("> 引用\n本文。\n", []),
+    # 箇条書きは直前が空行でなくても先頭。先頭の記号と強調だけ読み飛ばす（末尾は残る）。
+    ("段落。\n- **項目**\n", [(1, "段落。", False), (2, "項目**", False)]),
+    # フェンスの中は段落の先頭にしない。閉じた後の文は段落の先頭になる。
+    ("```\n中の文。\n```\n直後の文。\n", [(4, "直後の文。", False)]),
+])
+def test_paragraph_starts_characterization(text, expected):
+    mod = _load_check_module()
+    assert mod.paragraph_starts(text) == expected
