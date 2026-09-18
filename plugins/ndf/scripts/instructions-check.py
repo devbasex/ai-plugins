@@ -41,7 +41,6 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterator
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import refresh as refresh_lib  # noqa: E402
@@ -649,55 +648,6 @@ def budget_findings(sizes: dict[str, int], targets: list[Target], decl: Declarat
 SENTENCE_END = "。！？!?"
 
 
-@dataclass
-class MarkdownLine:
-    """分類済みの 1 行。`count_instructions` と `paragraph_starts` が同じ規則で読む。"""
-
-    number: int
-    line: str
-    stripped: str
-    kind: str  # fence / blank / heading / table / quote / html / bullet / text
-    heading_text: str = ""
-
-
-def classify_markdown_lines(text: str) -> Iterator[MarkdownLine]:
-    """Markdown の各行をフェンス状態を追いながら種別へ分類する。
-
-    フェンスの中の行 (`fence` 自身を含む) は返さない。両関数が別々に持っていた
-    フェンス・空行・見出し・表・引用・HTML・箇条書き・通常文の分類規則を 1 か所に
-    まとめる。`html`（行頭が `<`）は種別として区別し、数え方の違いは呼び出し側が決める。
-    """
-    in_fence = False
-    for number, line in enumerate(text.splitlines(), start=1):
-        if FENCE_RE.match(line):
-            in_fence = not in_fence
-            yield MarkdownLine(number, line, "", "fence")
-            continue
-        if in_fence:
-            continue
-        stripped = line.strip()
-        if not stripped:
-            yield MarkdownLine(number, line, "", "blank")
-            continue
-        heading = HEADING_RE.match(line)
-        if heading:
-            yield MarkdownLine(number, line, stripped, "heading", heading.group(2))
-            continue
-        if stripped.startswith("|"):
-            yield MarkdownLine(number, line, stripped, "table")
-            continue
-        if stripped.startswith(">"):
-            yield MarkdownLine(number, line, stripped, "quote")
-            continue
-        if stripped.startswith("<"):
-            yield MarkdownLine(number, line, stripped, "html")
-            continue
-        if BULLET_RE.match(line):
-            yield MarkdownLine(number, line, stripped, "bullet")
-            continue
-        yield MarkdownLine(number, line, stripped, "text")
-
-
 def count_instructions(text: str) -> int:
     """箇条書きの項目と段落の文を数える。**表・引用・コードブロック・HTML は数えない。**"""
     count = 0
@@ -711,14 +661,30 @@ def count_instructions(text: str) -> int:
         paragraph.clear()
         return len(parts)
 
-    for item in classify_markdown_lines(text):
-        if item.kind == "text":
-            paragraph.append(item.stripped)
+    in_fence = False
+    for line in text.splitlines():
+        if FENCE_RE.match(line):
+            count += flush()
+            in_fence = not in_fence
             continue
-        # フェンス・空行・見出し・表・引用・HTML・箇条書きはいずれも段落を区切る。
-        count += flush()
-        if item.kind in ("heading", "bullet"):
+        if in_fence:
+            continue
+        stripped = line.strip()
+        if not stripped:
+            count += flush()
+            continue
+        if HEADING_RE.match(line):
+            count += flush()
             count += 1
+            continue
+        if stripped.startswith("|") or stripped.startswith(">") or stripped.startswith("<"):
+            count += flush()
+            continue
+        if BULLET_RE.match(line):
+            count += flush()
+            count += 1
+            continue
+        paragraph.append(stripped)
     count += flush()
     return count
 
@@ -808,25 +774,29 @@ def paragraph_starts(text: str) -> list[tuple[int, str, bool]]:
     """（行番号, 本文, 見出しか）。**段落の先頭行と見出しだけ**を返す。"""
     starts: list[tuple[int, str, bool]] = []
     previous = "blank"
-    for item in classify_markdown_lines(text):
-        if item.kind == "fence":
-            # 開きフェンスの次は段落の先頭になりうる、閉じフェンスの次は続き扱い。
-            previous = "fence" if previous != "fence" else "blank"
+    in_fence = False
+    for number, line in enumerate(text.splitlines(), start=1):
+        if FENCE_RE.match(line):
+            in_fence = not in_fence
+            previous = "blank" if not in_fence else "fence"
             continue
-        if item.kind == "blank":
+        if in_fence:
+            continue
+        stripped = line.strip()
+        if not stripped:
             previous = "blank"
             continue
-        if item.kind == "heading":
-            starts.append((item.number, item.heading_text, True))
+        heading = HEADING_RE.match(line)
+        if heading:
+            starts.append((number, heading.group(2), True))
             previous = "blank"
             continue
-        if item.kind in ("table", "quote"):
+        if stripped.startswith("|") or stripped.startswith(">"):
             # 表の行・引用の行は段落の先頭として扱わない。
             previous = "other"
             continue
-        # 箇条書き・通常文・HTML（行頭 `<`）。箇条書きか直前が空行なら段落の先頭。
-        if item.kind == "bullet" or previous == "blank":
-            starts.append((item.number, LEAD_RE.sub("", item.line, count=1), False))
+        if BULLET_RE.match(line) or previous == "blank":
+            starts.append((number, LEAD_RE.sub("", line, count=1), False))
         previous = "text"
     return starts
 

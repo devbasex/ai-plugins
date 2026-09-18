@@ -773,43 +773,6 @@ class _PollState:
     warned_early_error: bool = False
 
 
-def _completion_outcome(
-    agent: str,
-    pid: int,
-    paths: AgentPaths,
-    status: AgentStatus,
-    started_wall: float,
-    state: "_PollState",
-    alive: bool,
-) -> Optional[MonitorOutcome]:
-    """sentinel 走査と lingering completion 判定をまとめる。
-
-    codex は sentinel を出した後もプロセスが常駐し続けるケースがある（実機で観測）。
-    result.json が書かれた後もハングするケースもある。sentinel 走査（codex のみ）と
-    `_lingering_completion` を続けて行い、完了と判れば OK を返す。
-    """
-    if agent == "codex":
-        status.sentinel_seen = _scan_codex_sentinel(paths.err_log)
-    if alive and (status.sentinel_seen or state.cmdline_validated):
-        completion_detail = _lingering_completion(paths, status, pid, started_wall)
-        if completion_detail is not None:
-            return MonitorOutcome.create("OK", completion_detail)
-    return None
-
-
-def _warn_early_error(
-    agent: str, config: MonitorConfig, state: "_PollState", warn_err: str | None
-) -> None:
-    """曖昧な early-error を、まだ出していなければ WARN として一度だけ知らせる。"""
-    if not state.warned_early_error and warn_err:
-        print(
-            f"{config.log_prefix}⚠️  {agent} early-error WARN "
-            f"(non-fatal, not killing): {warn_err[:200]}",
-            file=sys.stderr, flush=True,
-        )
-        state.warned_early_error = True
-
-
 def _poll_once(
     agent: str,
     pid: int,
@@ -825,13 +788,18 @@ def _poll_once(
 
     # 1. プロセス生存確認 → 死んでいたら最終判定へ (result.json 存在をチェック)
     alive = _pid_alive(pid)
+    if agent == "codex":
+        status.sentinel_seen = _scan_codex_sentinel(paths.err_log)
 
-    # codex の sentinel 走査と、常駐したまま完了しているケースの判定。
-    outcome = _completion_outcome(
-        agent, pid, paths, status, started_wall, state, alive
-    )
-    if outcome is not None:
-        return outcome
+    # codex は `tokens used` sentinel を出した後もプロセスが exit せず常駐し続ける
+    # ケースがある (実機で観測)。result.json は正常に書かれているのに alive=True の
+    # まま stall_timeout に達して STALLED 化してしまう。sentinel + result.json が
+    # 揃った瞬間に対象プロセスを kill して OK 判定で返す。
+    completion_detail = None
+    if alive and (status.sentinel_seen or state.cmdline_validated):
+        completion_detail = _lingering_completion(paths, status, pid, started_wall)
+    if completion_detail is not None:
+        return MonitorOutcome.create("OK", completion_detail)
 
     # result.json が書かれた後もプロセスがハングするケース (実測:
     # MCP サーバー切断待ち等で exit しない)。sentinel 機構を持たない agent 向け
@@ -858,7 +826,13 @@ def _poll_once(
     outcome, warn_err = _early_error_outcome(paths, status, alive, config.no_early_error)
     if outcome:
         return outcome
-    _warn_early_error(agent, config, state, warn_err)
+    if not state.warned_early_error and warn_err:
+        print(
+            f"{config.log_prefix}⚠️  {agent} early-error WARN "
+            f"(non-fatal, not killing): {warn_err[:200]}",
+            file=sys.stderr, flush=True,
+        )
+        state.warned_early_error = True
 
     outcome = _process_exit_outcome(paths, status, alive, config.require_result)
     if outcome:
