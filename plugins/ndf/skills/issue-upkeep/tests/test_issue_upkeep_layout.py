@@ -50,6 +50,14 @@ def locate(text: str, fragment: str) -> int:
     return text.index(plain(fragment))
 
 
+def run_jq(source: str, payload) -> list[str]:
+    """コマンド例の jq 式へ JSON を渡し、出力行を返す。"""
+    expression = re.search(r"--jq '([^']*)'", source).group(1)
+    done = subprocess.run(["jq", "-r", expression], input=json.dumps(payload),
+                          capture_output=True, text=True, check=True)
+    return done.stdout.splitlines()
+
+
 def row_starting(text: str, header: str, first_cell: str) -> str:
     """見出し行で始まる表から、先頭のセルで行を探す。先頭のセルの太字の有無は問わない。
 
@@ -334,16 +342,13 @@ def test_the_target_query_keeps_only_null_milestone_issues() -> None:
     block = body[locate(body, "**起票者は問わない。**"):]
     start = block.index("```bash")
     block = block[start:block.index("```", start + len("```bash")) + 3]
-    expression = re.search(r"--jq '([^']*)'", block).group(1)
 
     issues = [
         {"number": 10, "title": "foo", "milestone": None},
         {"number": 20, "title": "bar", "milestone": {"title": "m1"}},
         {"number": 30, "title": "baz baz", "milestone": None},
     ]
-    done = subprocess.run(["jq", "-r", expression], input=json.dumps(issues),
-                          capture_output=True, text=True, check=True)
-    lines = done.stdout.splitlines()
+    lines = run_jq(block, issues)
 
     # branch: milestone が null の 2 件だけが残り、milestone を持つ課題は落ちる。
     assert lines == ["#10 foo", "#30 baz baz"]
@@ -1057,20 +1062,15 @@ def test_the_parent_side_lookup_lists_the_linked_children() -> None:
     この一覧に無い子が、やり直しで結び付ける残りである。番号以外の項目は落ちる。
     """
     from_parent, _ = redo_commands()
-    expression = re.search(r"--jq '([^']*)'", from_parent).group(1)
 
     sub_issues = [
         {"id": 1001, "number": 12, "title": "child a"},
         {"id": 1002, "number": 34, "title": "child b"},
     ]
-    done = subprocess.run(["jq", "-r", expression], input=json.dumps(sub_issues),
-                          capture_output=True, text=True, check=True)
-    assert done.stdout.splitlines() == ["12", "34"]
+    assert run_jq(from_parent, sub_issues) == ["12", "34"]
 
     # branch: 子が 1 件も結び付いていない親では、一覧が空で返る。
-    done = subprocess.run(["jq", "-r", expression], input="[]",
-                          capture_output=True, text=True, check=True)
-    assert done.stdout.splitlines() == []
+    assert run_jq(from_parent, []) == []
 
 
 def test_a_child_with_another_parent_is_linked_by_a_body_line() -> None:
