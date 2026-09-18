@@ -120,6 +120,24 @@ def test_assign_rejects_an_unknown_host(assignment):
         assignment.assign(1, "unknown")
 
 
+def test_review_assign_rejects_round_zero(assignment):
+    """現状固定: ラウンド 0 は不正な値を含む AssignmentError にする。"""
+    with pytest.raises(
+        assignment.AssignmentError,
+        match=r"^ラウンド番号は 1 以上です: 0$",
+    ):
+        assignment.review_assign(0, "claude")
+
+
+def test_review_assign_rejects_an_unknown_host(assignment):
+    """現状固定: 未知のホストはその値を含む AssignmentError にする。"""
+    with pytest.raises(
+        assignment.AssignmentError,
+        match=r"^ホストになれないランタイムです: unknown$",
+    ):
+        assignment.review_assign(1, "unknown")
+
+
 def test_review_assign_rotates_dropped_runtime_across_rounds(assignment):
     """現状固定: ホスト（claude）に対してラウンド番号 1, 2, 3 で外れるランタイムが順に切り替わる。"""
     round1 = assignment.review_assign(1, "claude")
