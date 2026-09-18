@@ -192,6 +192,15 @@ def test_the_plan_reads_the_milestone_groups() -> None:
     assert "束の初期値として読む" in body
 
 
+def test_the_group_columns_are_mapped_to_the_row_columns() -> None:
+    """書く側の手順が入る前でも、読む側だけで組を行へ移せる。"""
+    assert ["組の列", "読み方"] in _tables(plan()), _tables(plan())
+    body = flat(plan())
+    for column in ("組", "課題", "触る場所の見込み", "依存"):
+        assert column in body, column
+    assert "書く側の手順が入る前でも動く" in body
+
+
 def test_there_is_a_way_to_start_without_groups() -> None:
     """マイルストーンを使わないリポジトリでも実行計画を作れる。"""
     body = flat(plan())

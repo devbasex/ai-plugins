@@ -92,8 +92,18 @@ oom_kill の起点: 1
 ## 行を置く（束の初期値）
 
 **マイルストーンの説明に「### 並列の組（見込み）」の表があれば、その組を束の初期値として読む。**
-組 1 つが束 1 つで、組の「依存」は束の間の依存になる（組の形は `issue-upkeep` の
-[milestones.md](../../issue-upkeep/references/milestones.md) が持つ）。
+組 1 つが束 1 つで、組の「依存」は束の間の依存になる。
+
+| 組の列 | 読み方 |
+| --- | --- |
+| 組 | 束の名前にする |
+| 課題 | その束の設計の行の「課題」にする |
+| 触る場所の見込み | その束の設計の行の「触るファイルと節」にし、確度を `見込み` にする |
+| 依存 | 束の間の依存。設計の行の「設計の依存」へ `<先の束>-設計:収束` として写す |
+
+**表を書く側は `issue-upkeep` の
+[milestones.md](../../issue-upkeep/references/milestones.md) である。** 読む側のこの手順は、
+書く側の手順が入る前でも動く（表が無ければ次の段落の作り方へ落ちる）。
 
 ```bash
 gh api "repos/{owner}/{repo}/milestones" --jq '.[] | select(.title | startswith("10 ")) | .description'
