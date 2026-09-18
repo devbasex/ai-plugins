@@ -76,7 +76,7 @@ when_to_use: "Claude Code 向けの追加トリガのみ。description で足り
 トリガ語は **`Use when` の文末の全角丸括弧に `・` 区切りで並べる**。
 
 ```yaml
-description: "Delete merged branches and worktrees after listing them for approval, then update main. Use when a PR was merged（マージ後の後片付け・ブランチを整理・worktreeを削除）."
+description: "Delete merged branches and worktrees, stopping only where git refuses, then update the base branch. Use when a PR was merged（マージ後の後片付け・ブランチを整理・worktreeを削除）."
 ```
 
 **旧書式（`Triggers: 'a', 'b'` / `明示トリガ:`）は廃止した。** 残っていると
