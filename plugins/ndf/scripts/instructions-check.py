@@ -790,8 +790,6 @@ def version_findings(target: Target, text: str, latest: str,
             hit = base_triple(version) < latest_base
             reason = (f"{version} は版が決まる前の段落で、基底が最新（{latest}）未満である")
         else:
-            if decl.pending_marker and rest.startswith(decl.pending_marker):
-                continue
             hit = base_triple(version) <= latest_base
             reason = f"{version} の段落が残っている（最新は {latest}）"
         if not hit:
@@ -840,16 +838,17 @@ def format_finding(finding: Finding, action: str, criteria: Criteria) -> str:
     line = f"ERROR: [{action}] {where}{finding.message}"
     if action == ACTION_REPORT:
         # **報告だけで終わらせない。** 何を更新すればよいかと、助言の出どころを添える。
+        # **持っている値だけを `/` で連ねる** ── 配布元を持たない指摘で区切りだけが残らない。
+        parts: list[str] = []
         if finding.source is not None:
-            line += (f"（配布元 {finding.source.name} {finding.source.version} /"
-                     f" {finding.source.origin} / 更新: {finding.source.update}")
-        else:
-            line += "（"
-        line += f" / 観点 {finding.criterion_id}"
+            parts.append(f"配布元 {finding.source.name} {finding.source.version}")
+            parts.append(finding.source.origin)
+            parts.append(f"更新: {finding.source.update}")
+        parts.append(f"観点 {finding.criterion_id}")
         origins = criteria.origins_of(finding.criterion_id)
         if origins:
-            line += " / 出典 " + "、".join(origins)
-        line += "）"
+            parts.append("出典 " + "、".join(origins))
+        line += "（" + " / ".join(parts) + "）"
     if action == ACTION_FILE and finding.source is not None:
         line += f"（起票 {issue_title(finding)} / 宛先 {finding.source.origin}）"
     return line
