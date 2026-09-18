@@ -1,7 +1,7 @@
 # #554: 指示書はどうあるのが適切か（観点と採否）
 
-この文書が持つのは 4 つである。**観点をどこから導いたか。入れたもの・入れないもの。観点のデータの形。
-調べ直しの仕組み。**
+この文書が持つのは 5 つである。**観点をどこから導いたか。入れたもの・入れないもの。観点のデータの形。
+調べ直しの仕組み。型と判定の手続き。**
 
 | 関連する文書 | 中身 |
 | --- | --- |
@@ -231,3 +231,44 @@ graph TD
 - **書き込みをしない。** 取り消せない操作を自動で行わない（決定 14）
 - **通信するのはこの経路だけである。** 既定の検査は通信しない。通信できない環境でも検査は動く
 - **取れなかった URL を黙って落とさない。** 取得に失敗した出典を一覧へ残す（調査の記録が「取得できなかったページ」を残しているのと同じ形）
+
+## 型と判定の手続き
+
+
+**型は指摘と宣言の 2 つである。** 判定の関数は指摘の一覧を返し、終了コードは `main` だけが決める。
+
+```mermaid
+classDiagram
+    class Finding {
+        +path: str | None
+        +line: int | None
+        +message: str
+    }
+    class Declaration {
+        +files: list~str~
+        +imports: dict | None
+        +released: dict | None
+        +decisions: str | None
+        +pending_marker: str | None
+        +budget: dict | None
+        +import_syntax: list~str~
+        +import_depth: int
+        +review_interval_days: int
+        +reviewed_at: str | None
+        +load(root) Declaration
+    }
+    class 検査 {
+        +collect_files(root, decl) list~Path~
+        +import_findings(path, text, decl) list~Finding~
+        +version_findings(path, text, released_max, decl) list~Finding~
+        +budget_findings(files, decl) list~Finding~
+        +count_findings(path, text) list~Finding~
+        +main() int
+    }
+    検査 ..> Declaration: 読む
+    検査 "1" --> "*" Finding: 返す
+```
+
+**`Declaration` は宣言が無くても作る。** 省略した項目は既定値（`files` は 3 つの名前、残りは `None`）を
+持ち、**`None` の項目に対応する判定は動かない**（決定 2）。`imports` も省略時は `None`（未指定）で、
+`{}`（許可が 1 つも無い）とは別の値である。
