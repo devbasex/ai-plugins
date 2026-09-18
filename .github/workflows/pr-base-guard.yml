@@ -10,7 +10,7 @@ jobs:
   guard:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Check the branch this pull request came from
         # 宛先が既定ブランチでなければ、検査は行わずに成功で終わる。既定ブランチの名前は
         # ワークフローへ書かず、リポジトリの設定から受け取る
