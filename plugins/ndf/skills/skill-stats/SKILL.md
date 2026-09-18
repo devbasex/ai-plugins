@@ -42,6 +42,12 @@ Claude Code の transcript JSONL ファイル (`~/.claude/projects/*.jsonl`) を
 # --include-fallback: Triggers 未定義 skill でも description から語彙抽出してマッチ
 # (ノイズが多いので通常は不要)
 /ndf:skill-stats --include-fallback
+
+# --- 3 層の context window の測定 (#550) ---
+/ndf:skill-stats --agents --session <conductor のセッション>   # 4 つの表を出す
+/ndf:skill-stats --agents --session A --session B              # まとまりを 1 つの表にする
+/ndf:skill-stats --agents --layer supervisor                   # 1 つの層に絞る
+/ndf:skill-stats --agents --session A --window-limit 150000    # 割る候補の目安を変える
 ```
 
 内部的には以下のコマンドを実行する:
@@ -83,6 +89,48 @@ transcript JSONL 先頭の `cwd` フィールドを優先してプロジェク�
 ...
 | **合計** | | **56** | **14** | **42** | **142** | **45** | **31.7%** |
 ```
+
+## 3 層の context window の測定
+
+`--agents` は、会話の記録（conductor の `<セッション>.jsonl` と
+`<セッション>/subagents/agent-<識別子>.jsonl`）を **conductor / supervisor / worker** の
+層の単位で読み、4 つの表を出す。読むのは `scripts/lib/transcript_agents.py` で、**ローカルの
+記録を読むだけで送信の経路を持たない**（#159）。
+
+| 表 | 何が出るか | `--session` が要るか |
+| --- | --- | --- |
+| 記録ごと | 記録 1 件につき 1 行（層・持ち場・深さ・モデル・固定費・最大充填・実作業・応答数・所要・終わり方・中断） | 要る |
+| 束ね | 層と持ち場（worker は作業の種類）とモデルの組ごとの件数・中央値・`実作業 < 固定費` の件数・最大充填の最大・印 | 要らない |
+| 層ごとの合計 | 層ごとの件数・固定費の合計・実作業の合計と、3 層を合算した総消費 | 要らない |
+| 持ち場ごとの worker の使い方 | supervisor 1 つと、その配下の worker の固定費の合計 | 要る |
+
+| 語 | 意味 |
+| --- | --- |
+| 固定費 | 作業を始める前に既に埋まっている量。**合成でない最初の応答の入力トークン**（`input_tokens` + `cache_read_input_tokens` + `cache_creation_input_tokens`） |
+| 最大充填 | 応答ごとの同じ合計の最大 |
+| 実作業 | 最大充填 − 固定費 |
+| 応答数 | 合成でない応答の `message.id` の異なる数（同じ id の行が並んでも 1 と数える） |
+| 終わり方 | `completed` / `in_progress` / `rate_limit` / `api_error` |
+| 中断 | 利用上限（429）で中断した後に続けた回数 |
+
+| 印 | 条件 |
+| --- | --- |
+| `束ねる候補` | **supervisor の行にだけ付く。** 実作業が同じ記録の固定費を下回った記録が過半数。持ち場が `設計` の行には付けない |
+| `割る候補` | 最大充填の最大が `--window-limit`（既定 200000）を超えた |
+| `worker を使いすぎ` | supervisor と配下の worker の固定費の合計が、その supervisor の実作業を上回った |
+
+**判定は記録ごとの比で行う。** 中央値どうしを比べないため、固定費の水準が違うセッションを
+束ねても判定の意味は変わらない。中央値と合計の列は分布の目安である。
+
+**応答が 3 に満たない記録は束ねの表からだけ外す。** 層ごとの合計と持ち場ごとの表には含める
+（短命な記録も固定費を使うため）。外した件数は表の下に 1 行出る。
+
+**出力は数値と語彙だけを持つ。** プロンプト・応答の本文・ファイルのパス・`description` の
+持ち場以外の部分を出さない。サブエージェントの識別子は
+`python3 ${CLAUDE_PLUGIN_ROOT}/scripts/lib/transcript_agents.py list --session <ID>` にだけ出る。
+
+`--session` は `--agents` を付けないときにも効く。そのときは **Skill の統計をその
+セッションの conductor の記録だけで数える**（conductor がどの Skill を起動したかを見る）。
 
 ## 前提条件
 
