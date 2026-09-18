@@ -559,28 +559,61 @@ class Queue:
         return FlushResult(sent, skipped, failed, self.count(), rate_limited)
 
 
+def _direct_item(kind: str, repo: str, pr: int, fields: dict[str, Any],
+                 actor: str | None = None) -> dict[str, Any]:
+    built = request_for(kind, repo, int(pr), fields)
+    return {
+        "kind": kind,
+        "repo": repo,
+        "pr": int(pr),
+        "actor": actor,
+        "request": built["request"],
+        "match": built["match"],
+    }
+
+
 def enqueue(queue: Queue, kind: str, repo: str, pr: int, fields: dict[str, Any],
             actor: str | None = None, extra: dict[str, Any] | None = None,
             last_error: str = "", attempts: int = 0) -> pathlib.Path:
     """投稿する内容を 1 件積む。"""
     if kind not in KINDS:
         raise ValueError(f"未知の種別: {kind}")
-    built = request_for(kind, repo, int(pr), fields)
     item = {
         "seq": 0,
-        "kind": kind,
-        "repo": repo,
-        "pr": int(pr),
-        "actor": actor,
+        **_direct_item(kind, repo, pr, fields, actor=actor),
         "created_at": _dt.datetime.now(_dt.timezone.utc).astimezone().isoformat(
             timespec="seconds"),
         "attempts": attempts,
         "last_error": last_error,
-        "request": built["request"],
-        "match": built["match"],
         "extra": extra or {},
     }
     return queue.add(item, extra.get("ident") if extra else pr)
+
+
+def _queue_if_pending(queue: Queue, kind: str, repo: str, pr: int,
+                      fields: dict[str, Any], actor: str | None = None,
+                      extra: dict[str, Any] | None = None
+                      ) -> tuple[str, Attempt | None] | None:
+    if queue.count():
+        queue.flush()
+    if queue.count():
+        enqueue(queue, kind, repo, pr, fields, actor=actor, extra=extra)
+        return QUEUED, None
+    return None
+
+
+def _classify_send_result(queue: Queue, attempt: Attempt, kind: str,
+                          repo: str, pr: int, fields: dict[str, Any],
+                          actor: str | None = None,
+                          extra: dict[str, Any] | None = None
+                          ) -> tuple[str, Attempt]:
+    if attempt.ok:
+        return POSTED, attempt
+    if is_rate_limited(attempt):
+        enqueue(queue, kind, repo, pr, fields, actor=actor, extra=extra,
+                last_error=attempt.summary(), attempts=1)
+        return QUEUED, attempt
+    return FAILED, attempt
 
 
 def post(queue: Queue, kind: str, repo: str, pr: int, fields: dict[str, Any],
@@ -591,22 +624,12 @@ def post(queue: Queue, kind: str, repo: str, pr: int, fields: dict[str, Any],
     **待ち行列に先客がいるときは、送らずに積む。** 先に流してから送らないと、
     Pull Request 上での順序が入れ替わる。
     """
-    if queue.count():
-        queue.flush()
-    if queue.count():
-        enqueue(queue, kind, repo, pr, fields, actor=actor, extra=extra)
-        return QUEUED, None
-    built = request_for(kind, repo, int(pr), fields)
-    item = {"kind": kind, "repo": repo, "pr": int(pr), "actor": actor,
-            "request": built["request"], "match": built["match"]}
+    pending = _queue_if_pending(queue, kind, repo, pr, fields, actor=actor, extra=extra)
+    if pending is not None:
+        return pending
+    item = _direct_item(kind, repo, pr, fields, actor=actor)
     attempt = send(item)
-    if attempt.ok:
-        return POSTED, attempt
-    if is_rate_limited(attempt):
-        enqueue(queue, kind, repo, pr, fields, actor=actor, extra=extra,
-                last_error=attempt.summary(), attempts=1)
-        return QUEUED, attempt
-    return FAILED, attempt
+    return _classify_send_result(queue, attempt, kind, repo, pr, fields, actor=actor, extra=extra)
 
 
 # ---------------- 上限のときに待って再実行する ----------------
