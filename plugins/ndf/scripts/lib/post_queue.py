@@ -612,14 +612,6 @@ def post(queue: Queue, kind: str, repo: str, pr: int, fields: dict[str, Any],
 # ---------------- 上限のときに待って再実行する ----------------
 
 
-def _should_wait(attempt: Attempt, waited: float, interval: float,
-                 max_wait: float) -> bool:
-    """待って再実行するか。上限による失敗で、次の待ちが予算に収まるときだけ真。"""
-    if attempt.ok or not is_rate_limited(attempt):
-        return False
-    return not (interval <= 0 or waited + interval > max_wait)
-
-
 def retry(cmd: list[str], max_wait: float = 900.0, interval: float = 30.0,
           stdin: str | None = None, sleep=time.sleep) -> Attempt:
     """上限のときだけ待って再実行する。ほかの失敗はそのまま返す。
@@ -632,7 +624,9 @@ def retry(cmd: list[str], max_wait: float = 900.0, interval: float = 30.0,
     waited = 0.0
     while True:
         attempt = run(cmd, stdin=stdin)
-        if not _should_wait(attempt, waited, interval, max_wait):
+        if attempt.ok or not is_rate_limited(attempt):
+            return attempt
+        if interval <= 0 or waited + interval > max_wait:
             return attempt
         print(f"⏳ 上限のため {interval:g} 秒待って再実行します: {' '.join(cmd)}",
               file=sys.stderr)
