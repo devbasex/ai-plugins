@@ -1,5 +1,16 @@
 # メイン context 節約の工夫
 
+## 「メイン」が指すもの
+
+**この Skill の「メイン」は、収束ループを駆動している supervisor を指す。** `state.py` の
+骨組みを回している層のことであり、conductor（人間と対話しているセッション）ではない。
+3 層で通すとき `cross-review` を回すのは設計と検査の持ち場の supervisor である（3 層の
+責務は `development-workflow` の `references/agent-layers.md` にある）。3 層へ出さない進行
+では、骨組みを回している会話そのものがこれに当たる。
+
+**修正は worker（`general-purpose` のサブエージェント）で行う。**
+**supervisor の context window に diff を載せない。** 収束の判定は supervisor が持つ。
+
 `cross-review` は 1 回の進行で外部 AI を何度も起動し、そのたびに差分・投稿の本文・
 エラー出力が生まれる。これらをメインの会話へ載せると、ラウンドを重ねるほど本来の
 レビューに使える余地が減る。設計は次の 5 つでこれを抑えている。
