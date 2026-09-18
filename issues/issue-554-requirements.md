@@ -184,45 +184,46 @@
 - [ ] AC54: 同じ宣言で、最新より新しい版数で始まる段落は指摘されない
 - [ ] AC55: `released` にタグの形を宣言すると、タグの最大値を最新として同じ判定をする
 - [ ] AC56: 最大値は数字 3 つの組と接尾辞の有無で決まる。`10.9.0` と `10.10.0` では `10.10.0`、`10.15.0-dev.1` と `10.15.0` では `10.15.0` が最新になる
-- [ ] AC57: `pattern` に名前付きの捕捉 `(?P<version>…)` が無いとき、終了コード 2 で終わる
-- [ ] AC58: 捕捉した値が版数の形（数字 3 つ＋任意の接尾辞）でないとき、終了コード 2 で終わる
-- [ ] AC59: `released.path` が根の外を指すとき（`../` や根の外への symlink）、終了コード 2 で終わる
-- [ ] AC60: `released` の宣言から版を 1 つも取れないとき、走査の前に終了コード 2 で終わる（壊れた即時読み込みの指摘も出さずに止まる）
-- [ ] AC61: `pending_marker` を宣言すると、その印で書き出した段落は基底が最新**未満**のときだけ指摘される
-- [ ] AC62: 出た版の段落の指摘に、宣言の `decisions` が指す退避先が出る
-- [ ] AC63: `budget.bytes` を宣言し、**根の指示書 1 本の**合計がそれを超えると終了コード 1 になる
-- [ ] AC64: 宣言の構造が不正なとき、終了コード 2 で終わる。対象は JSON として読めない・`version` が無いか未対応・項目の型が違う（`files` が配列でない）・`pattern` が正規表現として読めない・`pending_marker` が空文字列の 5 つ
-- [ ] AC65: 数の項目（`import_depth` / `refresh_timeout_seconds` / `review_interval_days` / `budget.bytes`）が 0 以下のとき、`reviewed_at` が日付として読めないとき、終了コード 2 で終わる
+- [ ] AC57: 接尾辞どうしは、`.` で割った要素を数として（読めなければ文字として）比べる。`10.15.0-dev.2` は `10.15.0-dev.10` より前になる
+- [ ] AC58: `pattern` に名前付きの捕捉 `(?P<version>…)` が無いとき、終了コード 2 で終わる
+- [ ] AC59: 捕捉した値が版数の形（数字 3 つ＋任意の接尾辞）でないとき、終了コード 2 で終わる
+- [ ] AC60: `released.path` が根の外を指すとき（`../` や根の外への symlink）、終了コード 2 で終わる
+- [ ] AC61: `released` の宣言から版を 1 つも取れないとき、走査の前に終了コード 2 で終わる（壊れた即時読み込みの指摘も出さずに止まる）
+- [ ] AC62: `pending_marker` を宣言すると、その印で書き出した段落は基底が最新**未満**のときだけ指摘される
+- [ ] AC63: 出た版の段落の指摘に、宣言の `decisions` が指す退避先が出る
+- [ ] AC64: `budget.bytes` を宣言し、**根の指示書 1 本の**合計がそれを超えると終了コード 1 になる
+- [ ] AC65: 宣言の構造が不正なとき、終了コード 2 で終わる。対象は JSON として読めない・`version` が無いか未対応・項目の型が違う（`files` が配列でない）・`pattern` が正規表現として読めない・`pending_marker` が空文字列の 5 つ
+- [ ] AC66: 数の項目（`import_depth` / `refresh_timeout_seconds` / `review_interval_days` / `budget.bytes`）が 0 以下のとき、`reviewed_at` が日付として読めないとき、終了コード 2 で終わる
 
 ### 出力と終了コード
 
-- [ ] AC66: 指摘は 1 件 1 行で、`<位置>` は持っている値で決まる。行まで持つものは `<ファイル>:<行>`、ファイルだけのものは `<ファイル>`、どちらも持たないものは `<位置>: ` ごと省く
-- [ ] AC67: 指摘が 1 件も無ければ終了コード 0 で、走査した本数と根の指示書ごとの読み込みの量が標準出力に出る
-- [ ] AC68: 知らない引数を渡すと終了コード 3 で終わり、使い方が標準エラーへ出る
+- [ ] AC67: 指摘は 1 件 1 行で、`<位置>` は持っている値で決まる。行まで持つものは `<ファイル>:<行>`、ファイルだけのものは `<ファイル>`、どちらも持たないものは `<位置>: ` ごと省く
+- [ ] AC68: 指摘が 1 件も無ければ終了コード 0 で、走査した本数と根の指示書ごとの読み込みの量が標準出力に出る
+- [ ] AC69: 知らない引数を渡すと終了コード 3 で終わり、使い方が標準エラーへ出る
 
 ### 配布と規約
 
-- [ ] AC69: 検査の実体は `plugins/ndf/scripts/` にあり、調べ直しの部品は `plugins/ndf/scripts/lib/` にある。新しい Skill は足さない（配る先の一覧の行数が変わらない）
-- [ ] AC70: `release` の退避の手順から検査を呼ぶ記載があり、宣言の書き方と判定の一覧を書いた参照が 1 本ある。呼び出しは `$SCRIPTS` を解決してから行う形で書かれている
-- [ ] AC71: 4 ランタイムの導入先それぞれからスクリプトを起動し、一時リポジトリを `--root` に渡して終了コード 0 になる。手順に書いたブロックをそのまま実行すると、検査が 0 / 1 / 2 / 3 を返す 4 通りでブロックの終了コードが一致する
-- [ ] AC72: `python3 scripts/check-skill-repo-assumptions.py` が終了コード 0 のまま（Skill の本文にこのリポジトリ固有の語を書かない）
-- [ ] AC73: 生成物の確認と配布物の検証が終了コード 0。4 ランタイムへ同じ実体が届く（`bash scripts/build-runtime-plugins.sh --check` / `bash scripts/validate-runtime-plugins.sh`）
+- [ ] AC70: 検査の実体は `plugins/ndf/scripts/` にあり、調べ直しの部品は `plugins/ndf/scripts/lib/` にある。新しい Skill は足さない（配る先の一覧の行数が変わらない）
+- [ ] AC71: `release` の退避の手順から検査を呼ぶ記載があり、宣言の書き方と判定の一覧を書いた参照が 1 本ある。呼び出しは `$SCRIPTS` を解決してから行う形で書かれている
+- [ ] AC72: 4 ランタイムの導入先それぞれからスクリプトを起動し、一時リポジトリを `--root` に渡して終了コード 0 になる。手順に書いたブロックをそのまま実行すると、検査が 0 / 1 / 2 / 3 を返す 4 通りでブロックの終了コードが一致する
+- [ ] AC73: `python3 scripts/check-skill-repo-assumptions.py` が終了コード 0 のまま（Skill の本文にこのリポジトリ固有の語を書かない）
+- [ ] AC74: 生成物の確認と配布物の検証が終了コード 0。4 ランタイムへ同じ実体が届く（`bash scripts/build-runtime-plugins.sh --check` / `bash scripts/validate-runtime-plugins.sh`）
 
 ### このリポジトリへの適用
 
-- [ ] AC74: `.ndf/instructions.json` を置き、リポジトリの根で検査を走らせると終了コード 0 になる
-- [ ] AC75: `f56c90d9` の指示書と `CHANGELOG.md` を一時ディレクトリへ展開し、同じ宣言で走らせる。終了コード 1 で、出た版の段落 7 件と許可していない即時読み込み 1 件の計 8 件が出る
-- [ ] AC76: `.github/workflows/runtime-plugin-validate.yml` に検査のジョブがあり、Pull Request では絞り込まずに起動する
-- [ ] AC77: そのジョブが実装の Pull Request で pass する
-- [ ] AC78: `CLAUDE.md` の「版ごとの判断の記録」に、版が決まる前の書き出しの印と、検査のコマンドが書かれている
-- [ ] AC79: `docs/versioning-and-distribution.md` の「バージョン更新時の手順」に検査のコマンドがある。手順 4 は判断の理由の置き場所を `docs/ndf-version-decisions.md` と書く
-- [ ] AC80: **必須の検査の数を持つ箇所すべて**が、ruleset へ `instruction-files-check` を足すのと**同じ時点で**新しい数になる。対象は `docs/versioning-and-distribution.md` の散文「必須の検査 11 個」とコンソールの例、`docs/ndf-version-decisions.md` の「必須にする検査は job の単位で 11 個ある」の 3 か所である（実装 Pull Request の差分には入れない）
-- [ ] AC81: `CHANGELOG.md` の冒頭が、判断の理由の置き場所を `docs/ndf-version-decisions.md` と書く
+- [ ] AC75: `.ndf/instructions.json` を置き、リポジトリの根で検査を走らせると終了コード 0 になる
+- [ ] AC76: `f56c90d9` の指示書と `CHANGELOG.md` を一時ディレクトリへ展開し、同じ宣言で走らせる。終了コード 1 で、出た版の段落 7 件と許可していない即時読み込み 1 件の計 8 件が出る
+- [ ] AC77: `.github/workflows/runtime-plugin-validate.yml` に検査のジョブがあり、Pull Request では絞り込まずに起動する
+- [ ] AC78: そのジョブが実装の Pull Request で pass する
+- [ ] AC79: `CLAUDE.md` の「版ごとの判断の記録」に、版が決まる前の書き出しの印と、検査のコマンドが書かれている
+- [ ] AC80: `docs/versioning-and-distribution.md` の「バージョン更新時の手順」に検査のコマンドがある。手順 4 は判断の理由の置き場所を `docs/ndf-version-decisions.md` と書く
+- [ ] AC81: **必須の検査の数を持つ箇所すべて**が、ruleset へ `instruction-files-check` を足すのと**同じ時点で**新しい数になる。対象は `docs/versioning-and-distribution.md` の散文「必須の検査 11 個」とコンソールの例、`docs/ndf-version-decisions.md` の「必須にする検査は job の単位で 11 個ある」の 3 か所である（実装 Pull Request の差分には入れない）
+- [ ] AC82: `CHANGELOG.md` の冒頭が、判断の理由の置き場所を `docs/ndf-version-decisions.md` と書く
 
 ### 退行しないこと
 
-- [ ] AC82: 既存の検査 7 本が終了コード 0 のまま。対象は継続的統合が走らせる `check-doc-line-limit.py` / `check-markdown-links.py` / `check-skill-repo-assumptions.py` / `check-skill-frontmatter.py` / `check-skill-shell-vars.py` と、配布物の検証から呼ばれる `check-doc-staleness.py` / `check-cross-skill-refs.py`
-- [ ] AC83: `uv run --with pytest pytest scripts/tests plugins/ndf -q` で、足したテストを含めて失敗が増えない
+- [ ] AC83: 既存の検査 7 本が終了コード 0 のまま。対象は継続的統合が走らせる `check-doc-line-limit.py` / `check-markdown-links.py` / `check-skill-repo-assumptions.py` / `check-skill-frontmatter.py` / `check-skill-shell-vars.py` と、配布物の検証から呼ばれる `check-doc-staleness.py` / `check-cross-skill-refs.py`
+- [ ] AC84: `uv run --with pytest pytest scripts/tests plugins/ndf -q` で、足したテストを含めて失敗が増えない
 
 ## 非機能の条件
 
@@ -247,7 +248,7 @@
 | 検査 | `python3 plugins/ndf/scripts/instructions-check.py --root .` |
 | 調べ直し | `python3 plugins/ndf/scripts/instructions-check.py --refresh`（通信する唯一の経路） |
 | テスト | `uv run --with pytest pytest plugins/ndf/scripts/tests/test_instructions_check.py -q` |
-| 過去の状態での再現（AC75） | `git archive f56c90d9 CLAUDE.md AGENTS.md KIRO.md CHANGELOG.md` を一時ディレクトリへ展開し、`git init` と `git add -A` で追跡させ、宣言を置いて `--root` で渡す（走査は追跡対象から集めるため、展開しただけでは対象が 0 本になる） |
+| 過去の状態での再現（AC76） | `git archive f56c90d9 CLAUDE.md AGENTS.md KIRO.md CHANGELOG.md` を一時ディレクトリへ展開し、`git init` と `git add -A` で追跡させ、宣言を置いて `--root` で渡す（走査は追跡対象から集めるため、展開しただけでは対象が 0 本になる） |
 | 配布 | `bash scripts/build-runtime-plugins.sh --check` / `bash scripts/validate-runtime-plugins.sh` |
 | 継続的統合 | 実装の Pull Request の checks でジョブの結果を見る |
 

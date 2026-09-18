@@ -67,7 +67,10 @@
 
 ```json
 "scopes": {
-  "user": ["~/.claude/CLAUDE.md"],
+  "user": [
+    {"path": "~/.claude/CLAUDE.md",
+     "imports": {"CLAUDE.md": {"memo.md": "利用者が毎回読ませている控え"}}}
+  ],
   "plugins": [
     {"path": "~/.claude/plugins/cache/devbasex--ai-plugins/ndf",
      "name": "ndf", "version": "10.14.0", "origin": "devbasex/ai-plugins",
@@ -76,7 +79,7 @@
 }
 ```
 
-**`user` と `plugins` は形が違う。** `user` は位置の文字列の配列で、`plugins` は下の項目を持つオブジェクトの配列である。
+**`user` と `plugins` はどちらもオブジェクトの配列である。** `user` が持つのは `path` と、その位置の許可（`imports`）だけで、`plugins` は下の項目を足して持つ。
 
 | 項目 | 何に使うか |
 | --- | --- |
@@ -138,7 +141,7 @@ echo "exit=$rc"
 全体にも起きるため、**末尾で検査の値へ戻す**。値を変数へ受けてから表示し、判定にはその値を使う。
 
 **`$SCRIPTS` を解決せずに相対パスで書かない。** ランタイムごとに導入先が違い、相対パスでは 1 つでしか
-当たらない。**実装では 4 ランタイムの導入先それぞれから起動して確かめる**（AC71）。
+当たらない。**実装では 4 ランタイムの導入先それぞれから起動して確かめる**（AC72）。
 
 ### 観点と出典のデータ
 
