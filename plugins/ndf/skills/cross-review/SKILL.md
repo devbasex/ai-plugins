@@ -372,7 +372,7 @@ bash ループは Agent tool を呼べないため、light モードでは Step 
 
 ## メイン context 節約の工夫
 
-設計がこの形になっている理由は
+**「メイン」が何を指すか**と、設計がこの形になっている理由は
 [references/context-budget.md](references/context-budget.md) にある。
 
 ## 作業完了報告（必須）
