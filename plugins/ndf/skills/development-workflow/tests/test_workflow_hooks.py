@@ -578,7 +578,7 @@ def test_the_closing_step_does_not_touch_the_board_when_the_first_read_fails(tmp
     script = "for n in 12; do\n" + "\n".join(
         line for line in closing_bash("手順").splitlines()
         if line.startswith(("before=", "[ \"<所有者>", "now=", "[ \"$now\"", "after="))
-    ) + "\ndone\nprintf 'end=%s\\n' \"${after-未設定}\""
+    ) + "\ndone\nprintf 'end=%s\\nfailed=%s\\n' \"${after-未設定}\" \"${failed- }\""
     for placeholder, value in {
         "<所有者>/<リポジトリ>": "devbasex/ai-plugins",
         "<番号>": "12",
@@ -596,6 +596,9 @@ def test_the_closing_step_does_not_touch_the_board_when_the_first_read_fails(tmp
     assert "projects-sync" not in calls, calls
     assert "gh issue close" not in calls, calls
     assert "end=未設定" in done.stdout, done.stdout + done.stderr
+    # 黙って次の課題へ飛ばさない。`失敗` が 1 件でもあれば `issue-upkeep` を呼ばずに
+    # 止まるため、控えないとその規則が働かない。
+    assert "failed= 12" in done.stdout, done.stdout + done.stderr
 
     # 結果の報告: 読み取りが 0 以外で終わった課題は `失敗`。やり直すコマンドを載せる。
     report = closing_section("結果の報告")

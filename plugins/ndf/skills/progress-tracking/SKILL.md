@@ -169,10 +169,11 @@ gh pr view <PR番号> --repo "$RECORD_REPO" --json body -q .body | bash "$SCRIPT
 #    `開いたまま` にする。盤面を書く前に状態を読むのは、Auto-close issue が Done で閉じた
 #    課題を「既に閉じていた」と数えないため
 # (a) 盤面を書く前に状態を読んで控える（OPEN / CLOSED）。
-#     **読めなければ (b) へ進まず、その課題を `失敗（before を読めない）` にする。**
+#     **読めなければ (b) へ進まず、その課題を `失敗（before を読めない）` へ控える。**
 #     状態を確かめないまま盤面を Done にすると、Auto-close が有効なリポジトリでは
-#     結果を 4 つのどれにも分類できないまま課題が閉じる
-before=$(gh issue view <番号> --repo <所有者>/<リポジトリ> --json state -q .state) || continue
+#     結果を 4 つのどれにも分類できないまま課題が閉じる。**黙って次の課題へ飛ばさない**
+#     （`失敗` が 1 件でもあれば `issue-upkeep` を呼ばずに止まるため、控えないと規則が働かない）
+before=$(gh issue view <番号> --repo <所有者>/<リポジトリ> --json state -q .state) || { failed="$failed <番号>"; continue; }
 # (b) 記録のリポジトリの課題なら盤面を Done にする
 [ "<所有者>/<リポジトリ>" = "$RECORD_REPO" ] && bash "$SCRIPTS/projects-sync.sh" <番号> status "Done"
 # (c) 状態を読み直し、OPEN のときだけ閉じる（(b) の自動化が閉じていれば CLOSED なので行わない）。
