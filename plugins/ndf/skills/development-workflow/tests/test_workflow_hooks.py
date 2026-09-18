@@ -350,6 +350,76 @@ def closing_bash(heading: str) -> str:
     return found[0]
 
 
+def test_the_record_reader_selects_the_latest_distribution_and_matching_release_test() -> None:
+    """現状固定: 最後の配布と、その本番版に一致する最後のリリース後テストを選ぶ。"""
+    record = """## 配布の記録
+
+段階: 本番（2026-09-01 10:00 に承認）
+版: 10.13.0 → 10.14.0（MINOR: 旧まとまり）
+まとまり: PR #700
+
+## リリース後テスト
+
+対象の版: 10.14.0（2026-09-01 11:00）
+合否: 合格（旧版）
+
+## 配布の記録
+
+段階: 本番（2026-09-18 10:00 に承認）
+版: 10.14.0 → 10.15.0（MINOR: 新まとまり）
+まとまり: PR #717 / #718
+
+## リリース後テスト
+
+対象の版: 10.15.0（2026-09-18 11:00）
+合否: 合格（同版の先行記録）
+
+## リリース後テスト
+
+対象の版: 10.15.0-dev.1（2026-09-18 12:00）
+合否: 合格（異なる版）
+
+## リリース後テスト
+
+対象の版: 10.15.0（2026-09-18 13:00）
+合否: 合格（選ぶ記録）
+"""
+    script = closing_bash("配布の記録")
+    script = re.sub(
+        r"^record=\$\(gh pr view .*\)$",
+        'record="$RECORD"',
+        script,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    script += (
+        '\nprintf "\\n---last---\\n%s\\n---fields---\\n%s|%s|%s\\n" '
+        '"$last" "$stage" "$ver" "$bundle_prs"\n'
+    )
+
+    done = subprocess.run(
+        ["bash", "-c", script],
+        env={**os.environ, "RECORD": record},
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    assert done.returncode == 0, done.stderr
+    selected, remainder = done.stdout.split("\n---last---\n", maxsplit=1)
+    last, fields = remainder.split("\n---fields---\n", maxsplit=1)
+    assert selected.strip() == """## リリース後テスト
+
+対象の版: 10.15.0（2026-09-18 13:00）
+合否: 合格（選ぶ記録）"""
+    assert last.strip() == """## 配布の記録
+
+段階: 本番（2026-09-18 10:00 に承認）
+版: 10.14.0 → 10.15.0（MINOR: 新まとまり）
+まとまり: PR #717 / #718"""
+    assert fields.strip() == "本番（2026-09-18 10:00 に承認）|10.15.0|717\n718"
+
+
 def test_the_closing_step_closes_an_open_issue_after_the_board_is_done(tmp_path) -> None:
     """現状固定: 本番へ配布し全条件が合格した OPEN の課題を、盤面の Done の後で閉じる。
 

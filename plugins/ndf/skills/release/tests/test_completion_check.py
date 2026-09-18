@@ -504,6 +504,23 @@ def record_fields(block: str) -> dict[str, str]:
     return fields
 
 
+def test_the_production_distribution_record_exposes_the_three_reader_fields_in_order() -> None:
+    """現状固定: 通常の本番配布は段階・版・まとまりを見出し直後に各 1 行置く。"""
+    output = section(read(SKILL), OUTPUT)
+    examples = [
+        block for block in fenced_blocks(output, "markdown") if block.startswith(RECORD_HEADING)
+    ]
+    assert len(examples) == 1, f"配布の記録の例が 1 つでない: {len(examples)} 個"
+
+    fields = record_fields(examples[0])
+
+    assert list(fields.items()) == [
+        ("段階", "本番（2026-09-18 10:00 に承認）"),
+        ("版", "10.14.0 → 10.15.0（MINOR: 機能追加）"),
+        ("まとまり", "PR #717 / #718 / #720"),
+    ]
+
+
 def test_the_skipped_distribution_record_starts_without_distribution_and_has_no_version() -> None:
     """現状固定: 配布を飛ばしたときは `段階: 配布なし` と `まとまり:` の 2 行だけを置く。
 
