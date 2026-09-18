@@ -243,6 +243,29 @@ _wf_seek_gh_verb() {
   esac
 }
 
+# `gh pr <verb>` を探しながら語を読み、空でない語ごとに `<each> <語>` を呼ぶ。
+# 見つけたら 0、見つからなければ 1 を返す。
+#
+# 区切りに来たら、見つける前なら `gh` の探索をやり直し、見つけた後なら読むのを止める。
+# 越えて読むと `gh pr merge; echo 268` の 268 を拾う。
+#
+# `<each>` は `state`（3 が見つけた状態）と `found`（0 が見つけた）を読み書きできる。
+# 呼ぶ時点で、その語までの探索は済んでいる。
+_wf_scan_gh_verb() {
+  local cmd="${1:-}" verb="${2:-}" each="${3:-}" tok state=0 found=1
+  while IFS= read -r -d '' tok; do
+    if [ -z "$tok" ]; then
+      [ "$found" -ne 0 ] || break
+      state=0
+      continue
+    fi
+    state=$(_wf_seek_gh_verb "$state" "$tok" "$verb")
+    [ "$state" = "3" ] && found=0
+    "$each" "$tok"
+  done < <(wf_split "$cmd")
+  [ "$found" -eq 0 ]
+}
+
 # 進行の記録のコマンドなら、課題番号・キー・値をタブ区切りで出す。
 #
 # 見分けは `projects-sync.sh` で終わる語である。呼び出し側は `$SCRIPTS` を展開してから
@@ -287,37 +310,32 @@ _wf_read_file() {
 #
 # 本文の渡し方は 2 つある（`--body` と `--body-file`）。**短い形も見る**（`-b` / `-F`）。
 _wf_pr_create_body() {
-  local cmd="${1:-}" tok want="" body="" state=0 found=1
-  while IFS= read -r -d '' tok; do
-    # 区切り。作成を見つける前なら探索をやり直し、見つけた後なら読むのを止める。
-    if [ -z "$tok" ]; then
-      [ "$found" -ne 0 ] || break
-      state=0
-      continue
-    fi
-    if [ -n "$want" ]; then
-      case "$want" in
-        text) body="$tok" ;;
-        file) body=$(_wf_read_file "$tok") ;;
-      esac
-      want=""
-      continue
-    fi
-    state=$(_wf_seek_gh_verb "$state" "$tok" "create")
-    [ "$state" = "3" ] && found=0
-    [ "$found" -eq 0 ] || continue
-    case "$tok" in
-      --body|-b) want=text ;;
-      --body-file|-F) want=file ;;
-      --body=*) body="${tok#--body=}" ;;
-      --body-file=*)
-        body=$(_wf_read_file "${tok#--body-file=}")
-        ;;
-    esac
-  done < <(wf_split "$cmd")
-  [ "$found" -eq 0 ] || return 1
+  local cmd="${1:-}" want="" body=""
+  _wf_scan_gh_verb "$cmd" "create" _wf_pr_create_body_token || return 1
   [ -n "$body" ] || return 1
   printf '%s\n' "$body"
+}
+
+# `_wf_pr_create_body` の 1 語分。`want` と `body` は呼び出し元のものを書き換える。
+_wf_pr_create_body_token() {
+  local tok="${1:-}"
+  if [ -n "$want" ]; then
+    case "$want" in
+      text) body="$tok" ;;
+      file) body=$(_wf_read_file "$tok") ;;
+    esac
+    want=""
+    return 0
+  fi
+  [ "$found" -eq 0 ] || return 0
+  case "$tok" in
+    --body|-b) want=text ;;
+    --body-file|-F) want=file ;;
+    --body=*) body="${tok#--body=}" ;;
+    --body-file=*)
+      body=$(_wf_read_file "${tok#--body-file=}")
+      ;;
+  esac
 }
 
 # `gh pr create` の本文から、閉じる語が指す `<所有者>/<リポジトリ>` と `<番号>` の組を
