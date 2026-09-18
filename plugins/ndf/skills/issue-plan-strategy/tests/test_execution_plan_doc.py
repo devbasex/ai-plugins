@@ -30,8 +30,6 @@ def flat(text: str) -> str:
 
 # --- AC1: 作る時点と、作らないとき ------------------------------------------
 
-TIMING_COLUMNS = ["状況", "実行計画"]
-
 
 def test_the_plan_is_written_before_the_first_lane_starts() -> None:
     """長い待ちを契機にしないため、起動の前に依存と本数を置いておく。"""
@@ -272,7 +270,7 @@ def _section_table_rows(text: str, heading: str) -> list[list[str]]:
         if not stripped.startswith("|"):
             continue
         cells = [cell.strip() for cell in stripped.strip("|").split("|")]
-        if cells == TIMING_COLUMNS or set("".join(cells)) <= set("-: "):
+        if cells == ["状況", "実行計画"] or set("".join(cells)) <= set("-: "):
             continue
         rows.append(cells)
     return rows
