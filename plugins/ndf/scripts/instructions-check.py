@@ -659,29 +659,36 @@ def base_triple(version: str) -> tuple[int, int, int]:
     return (int(major), int(minor), int(patch))
 
 
+def _read_changelog_lines(root: Path, raw: str) -> list[str]:
+    candidate = os.path.normpath(str(root / raw))
+    try:
+        Path(candidate).relative_to(root)
+        Path(os.path.realpath(candidate)).relative_to(Path(os.path.realpath(root)))
+    except ValueError as exc:
+        raise CheckError(f"released.path が根の外を指す: {raw}") from exc
+    try:
+        return Path(candidate).read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        raise CheckError(f"released.path を読めない: {raw}（{exc}）") from exc
+
+
+def _read_tag_lines(root: Path) -> list[str]:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "tag"],
+            capture_output=True, text=True, check=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise CheckError(f"git tag を読めない: {exc}") from exc
+    return result.stdout.splitlines()
+
+
 def released_versions(root: Path, released: dict) -> list[str]:
     pattern = re.compile(released["pattern"])
     if released["source"] == "changelog":
-        raw = released["path"]
-        candidate = os.path.normpath(str(root / raw))
-        try:
-            Path(candidate).relative_to(root)
-            Path(os.path.realpath(candidate)).relative_to(Path(os.path.realpath(root)))
-        except ValueError as exc:
-            raise CheckError(f"released.path が根の外を指す: {raw}") from exc
-        try:
-            lines = Path(candidate).read_text(encoding="utf-8").splitlines()
-        except OSError as exc:
-            raise CheckError(f"released.path を読めない: {raw}（{exc}）") from exc
+        lines = _read_changelog_lines(root, released["path"])
     else:
-        try:
-            result = subprocess.run(
-                ["git", "-C", str(root), "tag"],
-                capture_output=True, text=True, check=True,
-            )
-        except (OSError, subprocess.CalledProcessError) as exc:
-            raise CheckError(f"git tag を読めない: {exc}") from exc
-        lines = result.stdout.splitlines()
+        lines = _read_tag_lines(root)
 
     versions: list[str] = []
     for line in lines:
