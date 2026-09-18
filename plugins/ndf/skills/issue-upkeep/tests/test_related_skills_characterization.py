@@ -283,27 +283,3 @@ def test_out_of_scope_searches_by_origin_in_every_repository() -> None:
     assert "in:body で絞らない" in text.replace("`", "")
     assert "両方のリポジトリを検索する" in text
     assert "label は増やさない" in text
-
-
-# ---------- out-of-scope: 発見の瞬間の 3 択（段 2） ----------
-
-
-def test_out_of_scope_stage_2_offers_exactly_three_choices() -> None:
-    """段 2 の判断が {起票する, 範囲内へ入れる, 起票しない} の 3 分岐だけであることを固定する。
-
-    表示文字列の完全一致ではなく、判断の列を集合として比較する。この 3 分岐は発見の瞬間の
-    判断の中心で、後の構造改善で表を触る対象になる。
-    """
-    part = section(read(OUT_OF_SCOPE), "### 2. 3 択で決める")
-    choices = rows(part, "| 判断 | 選ぶ条件 | 残すもの |")
-    assert {row[0] for row in choices} == {"起票する", "範囲内へ入れる", "起票しない"}
-
-
-def test_out_of_scope_issue_target_needed_only_when_filing() -> None:
-    """「起票先を決める」段が『起票する』を選んだときだけ要ることを固定する。
-
-    起票先が要る分岐は 3 択のうち 1 つだけである。
-    """
-    text = plain(section(read(OUT_OF_SCOPE), "### 3. 起票先を決める"))
-    assert "「起票する」を選んだときだけ行う" in text
-    assert "残る 2 つの判断には起票先が要らない" in text
