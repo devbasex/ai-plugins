@@ -317,6 +317,30 @@ def _calculate_duration(rows: list[dict]) -> tuple[str | None, str | None, int]:
     )
 
 
+def _fill_rate_limit(rows: list[dict], record: AgentRecord) -> None:
+    """上限の中断のとき、最後の合成の応答から解除時刻と上限の種類を取る。
+
+    見るのは**最後の合成の応答 1 件だけ**である。1 つの記録が 2 度中断していても、
+    次に待つのは最後の解除時刻だからである。
+    """
+    if record.ending != "rate_limit":
+        return
+    for row in reversed(rows):
+        if row.get("type") != "assistant" or not _is_synthetic(row):
+            continue
+        quota = row.get("quotaLimits")
+        if isinstance(quota, dict):
+            resets = quota.get("resetsAt")
+            if isinstance(resets, (int, float)) and not isinstance(resets, bool):
+                record.resets_at = datetime.fromtimestamp(
+                    int(resets), tz=timezone.utc,
+                ).isoformat()
+            limit_type = quota.get("rateLimitType")
+            if isinstance(limit_type, str):
+                record.rate_limit_type = limit_type
+        break
+
+
 def read_file(path: pathlib.Path, meta: dict | None = None) -> tuple[AgentRecord, int]:
     """記録 1 件を読む。返すのは `AgentRecord` と飛ばした行の数である。"""
     meta = meta or {}
@@ -343,21 +367,7 @@ def read_file(path: pathlib.Path, meta: dict | None = None) -> tuple[AgentRecord
     _aggregate_token_metrics(rows, record)
     record.interruptions = _count_interruptions(rows)
 
-    if record.ending == "rate_limit":
-        for row in reversed(rows):
-            if row.get("type") != "assistant" or not _is_synthetic(row):
-                continue
-            quota = row.get("quotaLimits")
-            if isinstance(quota, dict):
-                resets = quota.get("resetsAt")
-                if isinstance(resets, (int, float)) and not isinstance(resets, bool):
-                    record.resets_at = datetime.fromtimestamp(
-                        int(resets), tz=timezone.utc,
-                    ).isoformat()
-                limit_type = quota.get("rateLimitType")
-                if isinstance(limit_type, str):
-                    record.rate_limit_type = limit_type
-            break
+    _fill_rate_limit(rows, record)
 
     record.started_at, record.ended_at, record.duration_seconds = (
         _calculate_duration(rows)
