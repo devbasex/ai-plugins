@@ -247,6 +247,19 @@ def test_the_markdown_output_has_the_contract_columns() -> None:
     ]
 
 
+def test_format_list_omits_agent_id_column_when_disabled(mod, records) -> None:
+    rec_list = list(records.values())
+    text = mod.format_list(rec_list, with_agent_id=False)
+    lines = text.splitlines()
+    assert lines[0] == mod.LIST_HEADER
+    assert lines[1] == mod.LIST_RULE
+    assert "agent_id" not in lines[0]
+    expected_col_count = len(mod.LIST_HEADER.split("|")[1:-1])
+    for line in lines[2:]:
+        cols = line.split("|")[1:-1]
+        assert len(cols) == expected_col_count
+
+
 # ---------- AC31: 壊れた行があっても 0 で終わる ----------
 
 def test_a_broken_line_is_skipped_and_reported_once() -> None:
