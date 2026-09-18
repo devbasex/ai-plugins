@@ -147,6 +147,10 @@
     {"id": "claude-code-memory", "name": "Claude Code docs: memory",
      "url": "https://code.claude.com/docs/en/memory", "checked_at": "2026-09-17",
      "claim": "指示書の分量の目安と、超えたときの読み飛ばし",
+     "fingerprint": "sha256:<前回取得した本文のハッシュ>"},
+    {"id": "config-smells", "name": "Configuration Smells in AGENTS.md Files (arXiv)",
+     "url": "https://arxiv.org/abs/2606.15828", "checked_at": "2026-09-17",
+     "claim": "参照切れ・肥大・陳腐化を smell として分類し、出現率を測った",
      "fingerprint": "sha256:<前回取得した本文のハッシュ>"}
   ]
 }
