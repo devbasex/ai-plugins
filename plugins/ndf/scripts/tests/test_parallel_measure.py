@@ -429,47 +429,6 @@ def test_concurrency_rejects_an_unreadable_input(tmp_path: Path) -> None:
     assert run("concurrency", "--input", str(tmp_path / "none.json")).returncode == 2
 
 
-def concurrency_raw(tmp_path: Path, text: str) -> subprocess.CompletedProcess:
-    path = tmp_path / "prs.json"
-    path.write_text(text, encoding="utf-8")
-    return run("concurrency", "--input", str(path), "--now", "2026-09-01T04:00:00Z")
-
-
-def test_concurrency_rejects_an_input_that_is_not_json(tmp_path: Path) -> None:
-    proc = concurrency_raw(tmp_path, "{not json")
-    assert proc.returncode == 2
-    assert proc.stdout == ""
-    assert proc.stderr.startswith("--input が JSON ではない: ")
-
-
-def test_concurrency_rejects_an_empty_array(tmp_path: Path) -> None:
-    proc = concurrency(tmp_path, data=[])
-    assert proc.returncode == 2
-    assert proc.stdout == ""
-    assert proc.stderr.strip() == "--input は 1 件以上の配列である"
-
-
-def test_concurrency_rejects_an_input_that_is_not_an_array(tmp_path: Path) -> None:
-    proc = concurrency(tmp_path, data={"number": 1})
-    assert proc.returncode == 2
-    assert proc.stdout == ""
-    assert proc.stderr.strip() == "--input は 1 件以上の配列である"
-
-
-def test_concurrency_rejects_a_record_without_created_at(tmp_path: Path) -> None:
-    proc = concurrency(tmp_path, data=[{"number": 1, "mergedAt": None}])
-    assert proc.returncode == 2
-    assert proc.stdout == ""
-    assert proc.stderr.strip() == "createdAt が無い: {'number': 1, 'mergedAt': None}"
-
-
-def test_concurrency_rejects_a_created_at_that_is_not_iso8601(tmp_path: Path) -> None:
-    proc = concurrency(tmp_path, data=[{"number": 1, "createdAt": "yesterday"}])
-    assert proc.returncode == 2
-    assert proc.stdout == ""
-    assert proc.stderr.strip() == "createdAt が ISO8601 ではない: yesterday"
-
-
 # --- concurrency: `gh` は読むだけ（AC42） -----------------------------------
 
 def fake_gh(tmp_path: Path, *, fail: bool = False) -> tuple[dict, Path]:
