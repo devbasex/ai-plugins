@@ -2770,7 +2770,34 @@ def _round_ci(st: dict[str, Any], last: dict[str, Any], pr: int) -> dict[str, An
 def _handle_no_result_round(
     pr: int, st: dict[str, Any], last: dict[str, Any], no_result: list[str]
 ) -> None:
+    """結果なしの担当があるラウンドの出口を決める。
+
+    先に理由の行（`NO_RESULT_REASONS`）を出す。どの出口でも進行側が理由を読めるようにする
+    ためである（#729 の AC14）。**起動し直しの可否は結末の共通層だけが決める**
+    （`monitor_outcome.relaunch_same_agent`）。可否が偽の理由が 1 つでもあれば、誰も起動し直さず
+    誤りの終わりへ進む。起動し直しても解けない理由で待つのは、相手の CLI の枠と時間を使うだけ
+    である（#619）。骨組みは既存の 1 の枝で受けるため、終了コードは増えない（決定 12）。
+    """
     last["verdict"] = "no_result"
+    reasons = {
+        a: (last.get(a) or {}).get("no_result_reason") or "missing" for a in no_result
+    }
+    print(f"NO_RESULT_REASONS='{' '.join(f'{a}={r}' for a, r in reasons.items())}'")
+    blocked = [a for a, r in reasons.items()
+               if not monitor_outcome.relaunch_same_agent(r)]
+    if blocked:
+        st["final"] = "error"
+        st["ended_at"] = _now()
+        _save(pr, st)
+        for a in blocked:
+            detail = (last.get(a) or {}).get("monitor_detail")
+            info(f"  {a}: reason={reasons[a]}" + (f" detail={detail}" if detail else ""))
+        die(
+            f"起動し直しても解けない理由で結果が残りませんでした: {' '.join(blocked)}。"
+            " 同じラウンドで起動し直さずに中断します。最終スイープを通してから"
+            "完了報告へ進んでください",
+            code=1,
+        )
     relaunched = last.get("relaunched") or []
     pending = [a for a in no_result if a not in relaunched]
     if not pending:
@@ -4250,7 +4277,10 @@ def _print_round_summary(rounds: list) -> None:
         parts = []
         for name in reviewers:
             entry = r.get(name) or {}
-            if entry:
+            if entry.get("intent") == NO_RESULT:
+                # 結果なしは投稿の数を持たない。括弧には理由を出す（#729 の AC17）
+                parts.append(f"{name}=NO_RESULT({entry.get('no_result_reason', '-')})")
+            elif entry:
                 parts.append(f"{name}={entry.get('intent', '-')} ({entry.get('comments', '-')})")
             else:
                 parts.append(f"{name}=-")
