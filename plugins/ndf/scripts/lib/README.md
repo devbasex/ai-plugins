@@ -23,9 +23,10 @@
 | [monitor_outcome.py](monitor_outcome.py) | 監視の結果の理由の語彙と、結果ファイル・監視の記録の読み書き（#662） | 同上 |
 | [launch-cli.sh](launch-cli.sh) | claude / codex / agy / kiro をランタイム名で分岐して背景起動する | 同上 |
 | [_tmpdir.sh](_tmpdir.sh) | 一時ディレクトリの解決。環境変数名とディレクトリ名を引数で受ける | 同上 |
-| [statefile.py](statefile.py) | 状態ファイルの読み書きと KEY=VALUE 出力、保存の後の差し込み口 | 同上 |
+| [statefile.py](statefile.py) | 状態ファイルの読み書きと KEY=VALUE 出力、保存の後の差し込み口、再開で渡した引数の反映（#727） | 同上 |
+| [auth.py](auth.py) | 参加する CLI の認証の確認。止めずに結果だけを返す形を持つ（#727） | 同上 |
 | [run_metrics.py](run_metrics.py) | 実行の要約を作業ツリーの外へ書き、束ねて出す（`aggregate`、#662） | 同上 |
-| [assignment.py](assignment.py) | ホスト判定、役割ごとの母集合の確定、担当の輪番 | 同上 |
+| [assignment.py](assignment.py) | ホスト判定、母集合の確定、使える者の解決、席の埋め方と席の名前、担当の輪番（#727） | 同上 |
 | [models.py](models.py) | `--model` の解析、フラグ生成、実測値の突き合わせ | 同上 |
 | [metrics.py](metrics.py) | 担当ごとの指標算出と報告の整形 | 同上 |
 | [post_queue.py](post_queue.py) | 上限のときに投稿を積む待ち行列と、上限の見分け（#291） | 同上 |
