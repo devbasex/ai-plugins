@@ -434,13 +434,6 @@ class FlushResult(NamedTuple):
     rate_limited: bool
 
 
-class _FlushItemResult(NamedTuple):
-    """読み取り済み項目 1 件の処理結果。"""
-
-    status: str
-    rate_limited: bool
-
-
 class Queue:
     """1 つの Pull Request 分の待ち行列。"""
 
@@ -496,7 +489,7 @@ class Queue:
 
     def _flush_item(
         self, path: pathlib.Path, item: dict[str, Any]
-    ) -> _FlushItemResult:
+    ) -> tuple[str, bool]:
         """読み取り済み項目を 1 件処理する（既投稿・送信成功・送信失敗）。
 
         戻り値は `(状態, rate_limited)`。状態は 'skipped', 'sent', 'failed'。
@@ -508,7 +501,7 @@ class Queue:
             if row is not None:
                 item["response"] = row
             path.unlink(missing_ok=True)
-            return _FlushItemResult("skipped", False)
+            return "skipped", False
         attempt = send(item)
         if attempt.ok:
             try:
@@ -516,12 +509,12 @@ class Queue:
             except json.JSONDecodeError:
                 item["response"] = None
             path.unlink(missing_ok=True)
-            return _FlushItemResult("sent", False)
+            return "sent", False
         item["attempts"] = int(item.get("attempts") or 0) + 1
         item["last_error"] = attempt.summary()
         path.write_text(json.dumps(item, indent=2, ensure_ascii=False),
                         encoding="utf-8")
-        return _FlushItemResult("failed", is_rate_limited(attempt))
+        return "failed", is_rate_limited(attempt)
 
     def flush(self) -> FlushResult:
         """積んだ項目を連番の順に送る。
@@ -545,14 +538,14 @@ class Queue:
                     "last_error": f"待ち行列の項目を読めない ({path.name})",
                 }
                 break
-            result = self._flush_item(path, item)
-            if result.status == "skipped":
+            status, item_rate_limited = self._flush_item(path, item)
+            if status == "skipped":
                 skipped.append(item)
-            elif result.status == "sent":
+            elif status == "sent":
                 sent.append(item)
             else:
                 failed = item
-                rate_limited = result.rate_limited
+                rate_limited = item_rate_limited
                 break
         return FlushResult(sent, skipped, failed, self.count(), rate_limited)
 

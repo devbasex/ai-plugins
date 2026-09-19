@@ -275,7 +275,7 @@ def _emit_bullet_section(
     if not items:
         return
     lines += ["", f"## {title}", ""]
-    lines += [f"- {item}" for item in dict.fromkeys(items)]
+    lines += [f"- {w}" for w in dict.fromkeys(items)]
 
 
 def format_report(metrics: dict[str, Any]) -> str:
