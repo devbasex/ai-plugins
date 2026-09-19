@@ -117,7 +117,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| error | integration | — | agy / kiro | 検証中 | 1 |
+| error | integration | — | agy / kiro | 採用 | 1 |
 
 **なぜ**: load_state は state.json が不在または空のときに終了コード 1 と state.json not found を返して中断するが、rotate-pr.sh の公開入口を経由してこのエラー経路を通すテストが無い。launch-reviewer.sh 等では固定されているが rotate-pr.sh では未固定である
 
@@ -141,6 +141,133 @@
 4. 直前の現在 PR に closed_at が記録され、rounds がその PR のラウンド数と一致することを確かめる
 5. 新 PR エントリが closed_at: None、rounds: 0 で末尾に追加されることを確かめる
 
+## ラウンド 3（実装 kiro / レビュー codex / agy）
+
+### R3-001 — `plugins/ndf/skills/cross-review/scripts/state.py#_verify_findings`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_method | extract_method | major | codex | 未着手 | 0 |
+
+**なぜ**: 検証コマンドの正規化・重複実行の抑止・実行結果の分類・各 finding への記録・統合グループ代表の最良結果選択という独立した段階が 1 関数に連続し、実行キャッシュと統合関係の走査を同時に追う必要がある。
+
+**手順**: 1. 1 finding の verification record を生成し、コマンド実行キャッシュを利用して結果を分類する helper を抽出する
+2. merged_into の関係をたどって代表へ最良の verification を選ぶ処理を別 helper へ抽出する
+3. _verify_findings は対象抽出、各 finding の検証、代表結果の集約という 3 段階だけを並べる
+4. test_verify_findings.py と findings pipeline の既存テストで、同一コマンドの実行回数、結果優先順位、finding_id、ran_at が不変であることを確認する
+
+### R3-002 — `plugins/ndf/skills/cross-review/scripts/state.py#_resume_from_state`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_method | extract_method | major | codex | 未着手 | 0 |
+
+**なぜ**: 再開 state の探索・互換フィールドの補完・未解決指摘の引き継ぎ・待ち行列の flush・worktree 同期・結果出力という複数段階が 1 関数に同居し、書き戻しと flush の順序制約まで同じ本体で管理している。
+
+**手順**: 1. state の互換フィールド補完と review_instructions 再構成を、state と変更有無を返す helper へ抽出する
+2. 書き戻し後の auto-flush と worktree 同期を、順序を保持した再開準備 helper へ抽出する
+3. _resume_from_state は state の有無・完了判定、各 helper の呼び出し、既存の _print_init_result だけを順に行う構成へ縮める
+4. 既存の再開・carried-over・worktree 同期・run metrics のテストで出力と副作用順が不変であることを確認する
+
+### R3-003 — `plugins/ndf/skills/cross-review/scripts/state.py#_thread_ids`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| duplication | consolidate_duplication | minor | agy | 未着手 | 0 |
+
+**なぜ**: _thread_ids における入力データ（リスト、単一辞書、数値等）の辞書要素抽出・正規化ロジックが、同モジュール内の共通関数 _normalize_dict_items と同じ関心をインラインで再実装しており重複している。_thread_positions と同様に _normalize_dict_items を呼び出す形に統一することで、入力値の正規化処理を一元化し一貫性と保守性を高められる。
+
+**手順**: 1. _thread_ids 内の辞書要素抽出処理を _normalize_dict_items(value) の呼び出しに置き換える
+2. 既存の test_state_thread_ids.py を実行し、各種入力に対する戻り値が変わらないことを確認する
+
+### R3-004 — `plugins/ndf/skills/cross-review/scripts/state.py#_is_generated_path`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| magic_value | introduce_named_constant | minor | agy | 未着手 | 0 |
+
+**なぜ**: パス分類判定関数群（_is_dependency_path, _is_config_ci_path, _is_infra_path 等）がモジュール定数（DEPENDENCY_FILENAMES, CONFIG_CI_FILENAMES, INFRA_FILENAMES 等）を参照しているのに対し、_is_generated_path 内にのみロックファイル名の一覧 set リテラルがハードコードされている。名前付きモジュール定数 GENERATED_LOCK_FILENAMES を定義して参照させることで、定数管理の一貫性と保守性を向上できる。
+
+**手順**: 1. モジュール定数 GENERATED_LOCK_FILENAMES を定義する
+2. _is_generated_path 内の set リテラルを GENERATED_LOCK_FILENAMES の参照に置き換える
+3. 既存テストでパス分類の判定動作が不変であることを確認する
+
+### R3-005 — `plugins/ndf/skills/cross-review/scripts/state.py#_absorb`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| duplication | consolidate_duplication | minor | kiro | 未着手 | 0 |
+
+**なぜ**: 「2 つの指摘のうち検証結果 (reproduced > not_reproduced > not_run) が高い方を採る」という同じ業務ルールが _absorb (3645-3646 行) と _verify_findings の代表選び直しループ (3137-3138 行) の 2 箇所に _VERIFY_RANK.get(...) > _VERIFY_RANK.get(...) の比較として書かれている。_VERIFY_RANK の順位定義を変えるときや、片方だけ result の取り出し方 (_verify_result vs best.get('result')) を直したときに、もう片方だけ取り残される。両者の docstring がどちらも同じ順位を根拠に挙げており、同じ理由で一緒に変わる重複である。
+
+**手順**: 1. _VERIFY_RANK 定義の直後に、2 つの verification dict を受け取り順位の高い方を返すヘルパー _higher_ranked_verification(current, candidate) を追加する（rank は _verify_result で正規化して比較する）
+2. _verify_findings の代表選び直しループ (3135-3140) を、best と member['verification'] をヘルパーへ渡して best を更新する形へ置き換える
+3. _absorb の verification 継承部 (3644-3648) を、同じヘルパーで rep['verification'] を更新する形へ置き換える
+4. test_verify_findings.py / test_merge_duplicates.py / test_state_merge_fix.py を実行し、reproduced/not_reproduced/not_run の組で代表が採る値が変わらないことを確認する
+
+## ラウンド 4（実装 claude / レビュー codex / kiro）
+
+### R4-001 — `plugins/ndf/skills/cross-review/scripts/state.py#COUNTED_CLASSIFICATIONS`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| scattered_config | centralize_configuration | major | codex | 検証中 | 1 |
+
+**なぜ**: 収束判定が数える区分の組が state.py と measure.py に重複し、両者の一致をテストで監視している。区分追加時に片方だけ変わると、実行時の収束判定と事後測定が異なる集合を数える。
+
+**手順**: 1. scripts 配下の小さな共有モジュールへ COUNTED_CLASSIFICATIONS を移す
+2. state.py と measure.py は共有定義を import して各判定に使う
+3. 値そのものと両経路の既存出力を既存テストで固定する
+
+### R4-002 — `plugins/ndf/skills/cross-review/scripts/state.py#_finding_keys`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_method | split_into_pipeline | major | codex | 未着手 | 0 |
+
+**なぜ**: レビュワーごとのファイル解決、JSON 読み込み、payload と comments の境界検証、path・line・本文の正規化が1つの二重ループに入り、入力境界の失敗とキー変換の責務が分離されていない。
+
+**手順**: 1. payload ファイルの読み込みと dict 検証を第1段へ抽出する
+2. comments 要素の検証と3要素キーへの変換を第2段へ抽出する
+3. _finding_keys はレビュワー列挙から各段をつなぐ処理だけにする
+4. 不正 payload・不正 comment・欠損位置・正常な振動照合の既存テストを各段階で実行する
+
+### R4-003 — `plugins/ndf/skills/cross-review/scripts/state.py#_init_new_state`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_method | extract_method | major | codex | 未着手 | 0 |
+
+**なぜ**: 新規初期化の1関数内に PR 所有権解決、レビュー条件作成、worktree と既存コメントの準備、担当認証、初期 state 構築、保存と表示がネスト関数として同居し、各段階を単独で参照・テストできない。
+
+**手順**: 1. ネストされた各段階を同じ入出力のモジュールレベル関数へ順に移す
+2. _init_new_state はコンテキストを段階間で受け渡すオーケストレーションだけにする
+3. init の再開・新規作成・既存 worktree・コメント取得失敗の既存テストを各抽出後に実行する
+
+### R4-004 — `plugins/ndf/skills/cross-review/tests/conftest.py#_no_github`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| test_bypasses_module_boundary | move_responsibility | minor | codex | 検証中 | 1 |
+
+**なぜ**: autouse fixture が state_mod を引数に取るため、monitor.py や measure.py だけを検査するテストまで state.py を共通入口から読み込み、GitHub 照会の内部関数を一律に差し替えている。
+
+**手順**: 1. subprocess の gh 実行ガードと state.py の既定差し替えを別 fixture に分ける
+2. state.py の差し替えは state_mod を利用するテスト経路だけが要求する形へ移す
+3. monitor・measure のテストが state.py を読み込まず、state 系テストでは従来どおり実 GitHub 呼び出しを防ぐことを確認する
+
+### R4-005 — `plugins/ndf/skills/cross-review/scripts/measure.py#_proposed`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_method | extract_method | minor | codex | 検証中 | 1 |
+
+**なぜ**: 証拠ラウンドの検査、採用 finding 集合の作成、oracle のラウンド別分母への絞り込み、出力メタデータ付与を1関数が連続して担い、分母規則だけを独立に検証しにくい。
+
+**手順**: 1. finding_id から round を引き分母を絞る処理を _scoped_oracle_ids として抽出する
+2. oracle が未計算の場合と evidence_rounds が一部だけの場合の戻り値を明示する
+3. _proposed は採用集合の作成と出力組み立てだけに残し、既存の measure テストを実行する
+
 ## 見送った項目
 
 | ラウンド | 対象 | 兆候・経路 | 理由 |
@@ -153,3 +280,6 @@
 | 1 | `plugins/ndf/skills/cross-review/scripts/state.py#cmd_verify_findings` | error | 1 ラウンドの採用上限 5 件を超えた |
 | 2 | `plugins/ndf/skills/cross-review/scripts/launch-reviewer.sh#launch_reviewer` | branch | 1 ラウンドの採用上限 5 件を超えた |
 | 2 | `plugins/ndf/skills/cross-review/scripts/rotate-pr.sh#execute_light` | branch | コミット 4cd469bc388e45e7c6e77f0793dc45cbad66c08c にトレーラーが欠けています: Item-Id, Round, Impl-Runtime, Impl-Model |
+| 3 | `plugins/ndf/skills/cross-review/scripts/state.py#_apply_classification` | long_method | 1 ラウンドの採用上限 5 件を超えた |
+| 4 | `plugins/ndf/skills/cross-review/scripts/state.py#_finding_keys` | duplication | 1 ラウンドの採用上限 5 件を超えた |
+| 4 | `plugins/ndf/skills/cross-review/scripts/state.py#_print_init_result` | long_parameter_list | 1 ラウンドの採用上限 5 件を超えた |
