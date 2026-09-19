@@ -291,7 +291,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| long_method | extract_method | minor | codex | 検証中 | 1 |
+| long_method | extract_method | minor | codex | 採用 | 1 |
 
 **なぜ**: init の多数のオプション定義と、ラウンド進行・結果取込・検証・報告に属する 11 個の副コマンド登録が 1 関数に連続しており、個別コマンドの引数変更でも 125 行の構築処理全体を読む必要がある。副コマンドごとに独立した名前を付けられる段階になっている。
 
@@ -299,6 +299,58 @@
 2. 各副コマンドの parser 作成・引数追加・set_defaults を用途別の小さな登録関数へ抽出する
 3. build_parser はトップレベル parser と subparsers を作り、登録関数を順に呼んで返すだけにする
 4. test_state_subcommand_help.py、test_state_review_pool.py、test_findings_pipeline_wiring.py で選択肢・help・func の対応が不変であることを確認する
+
+## ラウンド 6（実装 agy / レビュー codex / kiro）
+
+### R6-001 — `plugins/ndf/scripts/lib/auth.py#check_auth`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_method | extract_method | major | codex | 検証中 | 1 |
+
+**なぜ**: スキップ判定、CLI ごとの subprocess 実行、例外の認証結果への変換、結果の集約、全体の失敗通知が 1 関数に同居しており、個別 CLI のプローブ規則と複数 CLI の制御を別々に読めない。既存の test_auth_probe.py が未知 runtime、成功、未認証マーカー、コマンド不在を公開入口から固定している。
+
+**手順**: 1. 1 runtime の probe 実行と FileNotFoundError・TimeoutExpired の認証結果への変換を、runtime と probe を受け取る補助関数へ抽出する
+2. ok・detail・command の結果を check_auth が受け取り、既存どおり info 出力、failed 集約、die 判定を行う形へ置き換える
+3. test_auth_probe.py を実行し、戻り値、通知文、die 呼び出しが不変であることを確認する
+
+### R6-002 — `plugins/ndf/skills/cross-review/scripts/state.py#_confirm_flushed`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_method | extract_method | major | codex | 検証中 | 1 |
+
+**なぜ**: 待ち行列項目の適用可否判定、response からの URL 復元、対象ラウンド探索、GitHub 到達確認、結果なしまたは成功状態への更新、永続化が 1 関数に直列で同居している。投稿確認は収束可否に関わるため、対象特定と状態遷移を独立した名前で読める構造にする価値が高く、test_state_queue_judge.py が送信済み・冪等スキップ・未到達の経路を固定している。
+
+**手順**: 1. item の kind・extra・response を解釈して agent、round、review URL を返す処理を補助関数へ抽出する
+2. state の rounds から書き戻し対象を探す処理を補助関数へ抽出する
+3. _confirm_flushed は早期 return、到達確認、既存と同じ target 更新、_save の順序だけを担うよう置き換える
+4. test_state_queue_judge.py を実行し、queued、review_url、not_posted、保存回数を含む観測結果が不変であることを確認する
+
+### R6-003 — `plugins/ndf/skills/cross-review/scripts/state.py#_guard_previous_round`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_method | extract_method | major | codex | 未着手 | 0 |
+
+**なぜ**: 旧形式 state の verdict 復元、修正記録の必須判定、申告済み Resolve の GitHub 照会、未解決 ID の検出という独立した 2 つのガードが 1 関数に同居している。各ガードは異なる理由で変更され、test_state_round_guard.py が修正記録なし、照会不能、未解決残存、正常通過を固定している。
+
+**手順**: 1. 保存済み verdict が無い場合の no_result・pass からの復元を補助関数へ抽出する
+2. fix の resolved_thread_ids と対象 PR を受け、照会不能時の通知または未解決 ID を判定する補助関数へ抽出する
+3. _guard_previous_round は修正記録ガードと Resolve 状態ガードを順に呼ぶ構成へ置き換える
+4. test_state_round_guard.py を実行し、終了コード、GitHub 照会先、警告、正常通過が不変であることを確認する
+
+### R6-004 — `plugins/ndf/skills/cross-review/scripts/state.py#_is_generated_path`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| scattered_config | centralize_configuration | minor | kiro | 未着手 | 0 |
+
+**なぜ**: 兄弟の判定述語（_is_dependency_path は DEPENDENCY_FILENAMES、_is_infra_path は INFRA_FILENAMES、_is_generated_path 自身も GENERATED_MARKERS）はいずれもモジュール定数を引くのに、_is_generated_path だけ lockfile 名の集合（package-lock.json / go.sum / cargo.lock など 9 件）を関数本体へじか書きしている。うち package-lock.json 等は DEPENDENCY_FILENAMES にも重複して載っており、lockfile を足すとき 2 か所を直す必要があるうえ、どこに定義があるか読み手が探す。定義を 1 か所へ寄せて兄弟と同じ形にする。
+
+**手順**: 1. モジュール定数群（DEPENDENCY_FILENAMES / GENERATED_MARKERS / INFRA_FILENAMES の並び）へ GENERATED_LOCKFILES を新設し、現在インラインにある 9 件の集合をそのまま移す
+2. _is_generated_path の本体を `name in GENERATED_LOCKFILES` へ置き換え、インラインの集合リテラルを消す
+3. test_gap を埋めるため、先に go.sum / cargo.lock（DEPENDENCY_FILENAMES に無く、インライン集合にだけある名前）で generated カテゴリが立つ現状固定テストを test_state_auto_review_templates.py に追加し、移動の前後で同じ結果になることを確認する
 
 ## 見送った項目
 
