@@ -1,10 +1,14 @@
-# #732 / #624 / #706: cross-review の「数えない」区分を棄却に限る
+# cross-review: 反証する担当がいない・実行検証が無い・支持が付かない major が数えられず、修正の要る指摘を残して approved になる → 誤りを示された指摘と minor だけを数えない（#732 #624 #706 の要求）
 
-設計は [issue-732-624-706-design.md](issue-732-624-706-design.md) にある。この文書は「何を満たすか」だけを扱う。
+## 目的
 
-**この文書は、既存の設計 [issue-624-478-648-requirements.md](issue-624-478-648-requirements.md) の P4（AC1〜AC9）を置き換える。** 対応は末尾の「既存の受け入れ条件との対応」にある。P5（#478 #648）は #727 の設計が持ち、この文書は触らない。#583 は #730 の設計が持つ。
+cross-review の収束の判定が、誰にも誤りを示されていない `major` の指摘を「数えない」区分へ落とし、新しい指摘 0 件として `approved` で終わる。反証する担当がいない 1 者のループ（#624）、実行検証も支持も無い指摘（#706）、起動し直した担当の指摘（#583 の収束の部分）でこの形になり、修正の要る指摘が修正の工程へ渡らない。
+
+この変更の後、数えないのは棄却された指摘（実行して再現しなかった・`refute` を受けた）と `minor` 以下の指摘だけになる。誰にも誤りを示されていない `major` は、担当の数・反証の有無・根拠の項目の有無によらず新しい指摘として残り、修正の工程へ渡る。上の 3 つの場面は同じ 1 つの直しで数えられ、`insufficient_evidence` が 2 つの意味を兼ねる状態が解けて、区分を読めば未解決の理由が分かる。
 
 ## 依頼（原文）
+
+3 件の依頼はいずれも、指摘が数えない区分へ落ちたまま収束する現象を報告している。#732 が根本原因と採る手を定め、#624 と #706 がそれぞれの再現を持つ。
 
 ### #732（根本原因の親）
 
@@ -51,27 +55,18 @@
 >
 > 対処の候補: 実行検証ができない指摘は `insufficient_evidence` ではなく別の区分（未検証）として新規性に数える、または他の担当の `support` が付いた指摘は区分によらず数える。
 
-## 目的
-
-- 収束の判定が数えないのは、棄却された指摘（実行して再現しなかった・`refute` を受けた）と `minor` 以下の指摘だけになる。誰にも誤りを示されていない `major` は、担当の数・反証の有無・根拠の項目の有無によらず新しい指摘として残り、修正の工程へ渡る
-- `insufficient_evidence` が「反証の機会があって支持されなかった」と「立証の機会が無かった」の 2 つを兼ねる状態を解き、区分を読めば未解決の理由が分かる
-- 1 者で回したループ（#624）と、起動し直した担当の指摘（#583 の収束の部分）と、実行検証も支持も無い指摘（#706）が、同じ 1 つの直しで数えられる
-
-## 前提
-
-- 前提 1: 修正の工程（`fix`）は Pull Request の未解決のスレッドを区分によらず全件読む。区分は収束の判定と測定だけが読む（`plugins/ndf/skills/fix/` と `docs/02-fix-and-rotation.md` に区分を読む箇所が無い。`grep -rn classification` が 0 件）。**この前提が崩れると、数えるだけで修正へ渡らない指摘が生まれ、同じ指摘が毎ラウンド新規に見える**
-- 前提 2: 却下した指摘は `rejected_findings` に位置と理由つきで残り、次のラウンドのレビュープロンプトへ渡る（#156 の 1 本目）。数える区分が増えても、同じ論点が戻ることはこの記録が止める
-- 前提 3: 新規性の一致（位置・近傍・本文）は変えない。前のラウンドと一致する指摘は、区分によらず新規に数えない
-
 ## 対象範囲
+
+変えるのは、区分の判定と数える集合、印の外し方、それらの説明と確定仕様、テストである。`--only` の扱い・投稿の経路・終了コードは並行する設計が持つ。
 
 含む:
 
 - `state.py` の区分の判定（`_classify_finding` / `_apply_classification`）と、数える区分の集合（`COUNTED_CLASSIFICATIONS`。`measure.py` の同名の定数も）
 - `state.py` の反証が揃わないときの印の外し方（`_handle_incomplete_critiques`）
 - 反証のプロンプト（`critique.sh`）の `insufficient_evidence` の説明
-- `cross-review` の `docs/04` / `docs/05` / `docs/06` と、確定仕様 `docs/specifications/cross-review-evidence-based.md` の区分の表
-- テスト（`tests/test_classify_findings.py` / `tests/test_critiques.py` / `tests/test_measure.py` / `tests/test_skill_layout.py`）
+- `cross-review` の `docs/04` / `docs/05` / `docs/06` の区分の表
+- 確定仕様 `docs/specifications/cross-review-evidence-based.md` の区分の表
+- テスト 4 ファイル（`tests/test_classify_findings.py` / `tests/test_critiques.py` / `tests/test_measure.py` / `tests/test_skill_layout.py`）
 
 含まない:
 
@@ -87,6 +82,16 @@
 | クラス図・型の追加 | 型を追加・変更しない（関数と辞書で組んだ状態ファイルを扱う）。状態ファイルの形は設計文書の「データ構造」が持つ |
 | システムの文脈・配置の図 | 動くのは `state.py` の 1 プロセスで、外部との出入り（`gh`）は変わらない |
 | `CHANGELOG.md` と版数 | 配布の工程が書く |
+
+## 前提
+
+数える区分を増やしても、修正の工程が全件を読み、却下の記録が同じ論点を止め、新規性の一致が前のラウンドの指摘を新規に数えない。この 3 つが成り立つことを前提にする。
+
+| # | 前提 | 崩れたときに起きること |
+| --- | --- | --- |
+| 1 | 修正の工程（`fix`）は Pull Request の未解決のスレッドを区分によらず全件読む。区分は収束の判定と測定だけが読む（`plugins/ndf/skills/fix/` と `docs/02-fix-and-rotation.md` に区分を読む箇所が無い。`grep -rn classification` が 0 件） | 数えるだけで修正へ渡らない指摘が生まれ、同じ指摘が毎ラウンド新規に見える |
+| 2 | 却下した指摘は `rejected_findings` に位置と理由つきで残り、次のラウンドのレビュープロンプトへ渡る（#156 の 1 本目） | 数える区分が増えたとき、同じ論点が戻る。この記録がそれを止める |
+| 3 | 新規性の一致（位置・近傍・本文）は変えない。前のラウンドと一致する指摘は、区分によらず新規に数えない | — |
 
 ## 用語
 
@@ -104,22 +109,28 @@
 
 ## 受け入れ条件
 
+22 件である。区分 12 件（AC1〜AC12）、印 1 件（AC13）、退行しない 4 件（AC14〜AC17）、文書 3 件（AC18〜AC20）、全体 2 件（AC21〜AC22）。#624 の再現は AC1、#706 の再現は AC5 と AC7、#583 の収束の部分は AC4 が確かめる。
+
 ### 区分（#624 / #706 / #583 の収束の部分）
 
-- [ ] AC1: 前提: 担当が 1 者（`only: "codex"`）で、印の付いたラウンドが 1 つあり、そのラウンドに根拠の 2 項目を持つ `major` の指摘が 1 件、反証は 0 件、前のラウンドは無い
+- [ ] AC1: 前提: 担当が 1 者（`only: "codex"`）で、印の付いたラウンドが 1 つある。そのラウンドに根拠の 2 項目を持つ `major` の指摘が 1 件、反証は 0 件、前のラウンドは無い
       操作: `_new_finding_count` と `judge` を呼ぶ
       結果: `_new_finding_count` が `(1, True)` を返し、`judge` が終了コード 2 で終わる。指摘の `classification` は `unrefuted`（変更前は `(0, True)` と終了コード 0。#624 の再現）
-- [ ] AC2: AC1 の指摘が根拠の 2 項目のどちらかを欠く（`has_evidence` が偽）とき、`_new_finding_count` は `(1, True)` を返し、`classification` は `unrefuted`、`has_evidence` は偽のまま残る
-- [ ] AC3: AC1 の指摘が `minor` のとき、`_new_finding_count` は `(0, True)` を返し、`classification` は `insufficient_evidence` である
-- [ ] AC4: 前提: 担当が `agy` + `kiro` で印の付いたラウンドに、`kiro` の指摘は反証を持ち、`agy` の根拠を持つ `major` が反証 0 件のまま入っている（起動し直した担当の指摘が、反証を取り込んだ後に取り込まれた形）
+- [ ] AC2: 前提: AC1 の指摘が根拠の 2 項目のどちらかを欠く（`has_evidence` が偽）
+      結果: `_new_finding_count` は `(1, True)` を返す。`classification` は `unrefuted` で、`has_evidence` は偽のまま残る
+- [ ] AC3: 前提: AC1 の指摘が `minor` である
+      結果: `_new_finding_count` は `(0, True)` を返し、`classification` は `insufficient_evidence` である
+- [ ] AC4: 前提: 担当が `agy` + `kiro` で、印の付いたラウンドがある。そのラウンドで `kiro` の指摘は反証を持ち、`agy` の根拠を持つ `major` は反証 0 件のまま入っている（起動し直した担当の指摘が、反証を取り込んだ後に取り込まれた形）
       結果: `_new_finding_count` が `agy` の 1 件を数える。`classification` は `unrefuted`（#583 の収束の部分）
-- [ ] AC5: 担当 2 者で、相手が根拠を持つ `major` へ `insufficient_evidence` を返し、`support` も `refute` も無いとき、`classification` は `unrefuted` で、数える（変更前は `insufficient_evidence` で数えない。#706 の「反証の担当が `support` を返さなかった」）
+- [ ] AC5: 前提: 担当 2 者で、相手が根拠を持つ `major` へ `insufficient_evidence` を返し、`support` も `refute` も無い
+      結果: `classification` は `unrefuted` で、数える（変更前は `insufficient_evidence` で数えない。#706 の「反証の担当が `support` を返さなかった」）
 - [ ] AC6: AC5 で相手が `out_of_scope` を返したときも、`classification` は `unrefuted` で、数える
-- [ ] AC7: `major` の指摘に `support` が 1 件以上あるとき、`has_evidence` の真偽によらず `classification` は `needs_human_judgment` である（変更前は `has_evidence` が偽なら `insufficient_evidence`。#706 の「`support` が付いていても根拠の 2 項目の欠落で落ちる」）
+- [ ] AC7: 前提: `major` の指摘に `support` が 1 件以上ある
+      結果: `has_evidence` の真偽によらず `classification` は `needs_human_judgment` である。変更前は `has_evidence` が偽なら `insufficient_evidence` だった（#706 の「`support` が付いていても根拠の 2 項目の欠落で落ちる」）
 - [ ] AC8: `origin_runtimes` が 2 者以上の `major` は、`has_evidence` の真偽によらず `needs_human_judgment` である
 - [ ] AC9: `refute` が 1 件以上、または実行検証が `not_reproduced` の指摘は `rejected` になり、`unrefuted` より先に当たる。`reproduced` の指摘は `verified_blocking` / `verified_non_blocking` になる（変更前と同じ）
-- [ ] AC10: `unrefuted` の指摘は `unrefuted_reason` を持ち、値は `no_critique`（反証を返した担当が 0 者）か `not_supported`（反証はあるが `support` も `refute` も無い）のどちらかである。他の区分の指摘は `unrefuted_reason` を持たない（区分が変わったときは消える）
-- [ ] AC11: `COUNTED_CLASSIFICATIONS` は `verified_blocking` / `needs_human_judgment` / `unrefuted` の 3 つで、`state.py` と `measure.py` の値が一致する
+- [ ] AC10: `unrefuted` の指摘は `unrefuted_reason` を持つ。値は `no_critique`（反証を返した担当が 0 者）か `not_supported`（反証はあるが `support` も `refute` も無い）のどちらかである。他の区分の指摘は `unrefuted_reason` を持たない（区分が変わったときは消える）
+- [ ] AC11: `COUNTED_CLASSIFICATIONS` は `verified_blocking` / `needs_human_judgment` / `unrefuted` の 3 つである。`state.py` と `measure.py` の値が一致する
 - [ ] AC12: `measure.py` の方式 `proposed` は、印のあるラウンドの `unrefuted` の指摘を `found` に数える
 
 ### 反証の取り直しで揃わないときは印を外す
@@ -135,11 +146,11 @@
 - [ ] AC16: `tests/test_classify_findings.py` の既存のテストのうち、期待値を変えるのは旧い区分を固定した 4 件だけである。それ以外は期待値を変えずに通る。4 件は次のとおり
       `test_support_without_evidence_is_insufficient` / `test_nothing_matched_is_insufficient` /
       `test_a_finding_without_verification_is_readable` / `test_only_two_classifications_are_counted`
-- [ ] AC17: `judge` の終了コード（0 / 2 / 7 / 8 / 1）と標準出力の変数（`REVIEWER_INTENTS` / `NEW_FINDINGS` / `CARRIED_OVER_THREADS` / `PENDING_POSTS` / `RELAUNCH_AGENTS`）は変わらない。`cmd_judge` の本体の行を書き換えない
+- [ ] AC17: `judge` の終了コード（0 / 2 / 7 / 8 / 1）は変わらない。標準出力の変数（`REVIEWER_INTENTS` / `NEW_FINDINGS` / `CARRIED_OVER_THREADS` / `PENDING_POSTS` / `RELAUNCH_AGENTS`）も変わらない。`cmd_judge` の本体の行を書き換えない
 
 ### 文書
 
-- [ ] AC18: `docs/06-evidence.md` の区分の表が 6 行になり、`unrefuted` の行と「数えるのは 3 つ」を持つ。`docs/04-contracts.md` の `classification` の項が 6 区分と数える 3 つを書く。`docs/05-pool-and-convergence.md` の終了基準が、担当 1 者と起動し直した担当の指摘の数え方を書く。次の 4 つがそれぞれ 1 行以上を出す
+- [ ] AC18: 規約の 3 文書が新しい区分を書く。`docs/06-evidence.md` の区分の表が 6 行になり、`unrefuted` の行と「数えるのは 3 つ」を持つ。`docs/04-contracts.md` の `classification` の項が 6 区分と数える 3 つを書く。`docs/05-pool-and-convergence.md` の終了基準が、担当 1 者と起動し直した担当の指摘の数え方を書く。次の 4 つがそれぞれ 1 行以上を出す
 
   ```bash
   grep -n "unrefuted" plugins/ndf/skills/cross-review/docs/06-evidence.md
@@ -149,7 +160,7 @@
   ```
 
 - [ ] AC19: `critique.sh` のプロンプトが「`insufficient_evidence` を返しても指摘は数から落ちない。誤りを示せるなら `refute` を返す」ことを書く。`grep -n "数から落ち" plugins/ndf/skills/cross-review/scripts/critique.sh` が 1 行以上を出す
-- [ ] AC20: `docs/specifications/cross-review-evidence-based.md` の区分の表と区分ごとの行き先の表が、`docs/06-evidence.md` と同じ 6 区分を持つ。`grep -c "unrefuted" docs/specifications/cross-review-evidence-based.md` が 2 以上を出す
+- [ ] AC20: 確定仕様 `docs/specifications/cross-review-evidence-based.md` が `docs/06-evidence.md` と同じ 6 区分を持つ。持つのは区分の表と区分ごとの行き先の表である。`grep -c "unrefuted" docs/specifications/cross-review-evidence-based.md` が 2 以上を出す
 
 ### 全体
 
@@ -209,9 +220,9 @@
 | --- | --- | --- |
 | `unrefuted` を数えることで収束までのラウンド数がどれだけ増えるか | 実装の後の運用で `measure.py` の出力を見る | 配布後 |
 
-## 既存の受け入れ条件との対応
+## 置き換える既存の受け入れ条件との対応
 
-既存の設計（PR #667、2026-09-15）の P4 の受け入れ条件 AC1〜AC9 との対応である。
+**この文書は、既存の設計 [issue-624-478-648-requirements.md](issue-624-478-648-requirements.md) の P4（AC1〜AC9。PR #667、2026-09-15）を置き換える。** P5（#478 #648）は #727 の設計が持ち、この文書は触らない。#583 の投稿の重なりは #730 の設計が持つ。
 
 | 既存 | この文書 | 扱い |
 | --- | --- | --- |
@@ -224,3 +235,12 @@
 | AC7（`origin_runtimes` 2 者の区分は変わらない） | AC8 | 引き継ぐ。根拠の条件は外す |
 | AC8（印なしのラウンドと実行検証の区分は変わらない） | AC9 / AC15 / AC16 | 引き継ぐ。期待値を変える既存のテスト 4 件を名指しする |
 | AC9（文書の 3 つの grep） | AC18 | 引き継ぐ。語を `unrefuted` に変える |
+
+## 関連する文書
+
+この文書は「何を満たすか」だけを扱う。
+
+| 文書 | 何を持つか |
+| --- | --- |
+| [issue-732-624-706-design.md](issue-732-624-706-design.md) | どう作るか（決定の記録・実測・データ構造・契約・処理の流れ・テスト設計） |
+| [issue-624-478-648-requirements.md](issue-624-478-648-requirements.md) | 置き換える前の受け入れ条件（P4）。P5 は #727 の設計が持つ |
