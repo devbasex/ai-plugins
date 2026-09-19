@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.15.1-dev.1）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.15.1）
 ```
 
 ### agy
@@ -119,7 +119,7 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.15.1-dev.1 へ更新するとき
+## v10.15.1 へ更新するとき
 
 **`agent-layers.md` の「並行の本数」の節で、実行計画の持ち主の記載を直しました**（#762）。
 「本数の測り方と実行計画は `parallel-work.md` が持つ」と書いていた 1 文を、「本数を抑える下限は
@@ -128,8 +128,7 @@ agy plugin list
 変わるのは参照文書の 1 文だけで、Skill の数・手順・スクリプトは v10.15.0 のままです。破壊的な
 変更はなく、記録の移行も要りません。変更点の一覧は [CHANGELOG.md](../../CHANGELOG.md) にあります。
 
-**開発版です。** `develop` にだけ載ります。取得元へ `#develop` を足す手順は
-[docs/versioning-and-distribution.md の「開発版を試す」](../../docs/versioning-and-distribution.md#開発版を試す)にあります。
+**正式版です。** 開発版 `10.15.1-dev.1` と中身は同じで、`main` に載ります。
 
 正式版のチャネル（ref を指定せずに登録した取得元）なら、次で入れ替わります。**動いているセッションには
 反映されない**ため、更新したあとは起動し直してください。開発版を試すために `develop` を登録した
@@ -296,7 +295,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.15.1-dev.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.15.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -318,14 +317,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.15.1-dev.1/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.15.1/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.15.1-dev.1  <path>
+# => ndf@ai-plugins  installed, enabled  10.15.1  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
