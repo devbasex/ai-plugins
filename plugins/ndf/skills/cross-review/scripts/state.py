@@ -1546,20 +1546,15 @@ def _print_init_result(result: _InitResult) -> None:
     print(f"RESUMED={'1' if result.resumed else '0'}")
 
 
-def _resume_from_state(
-    pr: object,
-    repo: str,
-    worktree: str,
-    manual_extra_review: str,
-) -> bool:
-    """既存 state からの再開経路。
+def _find_resumable_state(
+    pr: object, worktree: str,
+) -> tuple[dict[str, Any], pathlib.Path] | None:
+    """既存 state を探し、再開できるものだけを (state, path) で返す。
 
-    再開に該当し出力まで済ませたら True、該当する state が無ければ False を返す。
-    False のとき cmd_init は新規 init へ進む。
+    再開に該当しなければ `None`。**探索の入口は `_tmp_dir()` を使わない**（mkdir の
+    副作用でパスが作られてしまう）。`CROSS_REVIEW_TMP_DIR` があればそれを、無ければ
+    `<worktree>/.cross_review/` を直接組む。`final` が確定した state は再開しない。
     """
-    # 再開チェック: CROSS_REVIEW_TMP_DIR が設定されている場合はそちらを優先し、
-    # 未設定なら <worktree>/.cross_review/ を直接パスとして組む。
-    # _tmp_dir() は mkdir 副作用があるため使用せず、パス解決のみ行う。
     env_tmp = os.environ.get("CROSS_REVIEW_TMP_DIR")
     if env_tmp:
         resume_dir = pathlib.Path(env_tmp).resolve()
@@ -1567,10 +1562,21 @@ def _resume_from_state(
         resume_dir = pathlib.Path(worktree) / ".cross_review"
     resume_state_file = resume_dir / f"cross-review-pr{pr}-state.json"
     if not resume_state_file.exists():
-        return False
+        return None
     st = json.loads(resume_state_file.read_text(encoding="utf-8"))
     if st.get("final") is not None:
-        return False
+        return None
+    return st, resume_state_file
+
+
+def _refresh_resume_state(
+    st: dict[str, Any], pr: object, repo: str, manual_extra_review: str,
+) -> bool:
+    """再開する state を最新化し、書き換えたかどうかを返す。
+
+    旧形式の補完・manual 指示の反映・`review_instructions` の再計算・引き継ぎの記録を
+    行う。**保存はしない**（呼び出し側が変更有無を見て 1 度だけ書く）。
+    """
     state_changed = False
     if "auto_review_instructions" not in st:
         changed_files = _fetch_changed_files(pr, st.get("repo") or repo)
@@ -1595,29 +1601,56 @@ def _resume_from_state(
     # 再開した時点で残っている未解決の指摘を引き継ぎとして記録する。
     if _record_carried_over(st, st.get("repo") or repo, st.get("current_pr") or pr):
         state_changed = True
-    if state_changed:
-        _write_state(resume_state_file, st)
-        info("↻ 追加レビュー観点を state に反映して再開")
-    # 待ち行列を流すのは、手元の `st` を書き戻した**後**である。流した結果
-    # （`queued` の解除と、届かなかった投稿の結果なし）は `_confirm_flushed` が
-    # 状態ファイルへ直接書く。先に流すと、この関数がその後に書き戻す古い `st` が
-    # それらを消す。再開の入口で流すこと自体は変えないため、回復した後の
-    # 1 本目のコマンドで届く。
-    # 渡すのは状態ファイルの鍵（`args.pr`）で、`current_pr` ではない。待ち行列も
-    # 状態ファイルも鍵で引くため、巻き直しの後に `current_pr` を渡すと引けない。
+    return state_changed
+
+
+def _sync_resume_worktree(st: dict[str, Any], pr: object, worktree: str) -> pathlib.Path:
+    """保存後の副作用（待ち行列の flush → tmp_dir 解決 → 作業ツリー同期）を順に行う。
+
+    順序に意味がある:
+    1. **待ち行列を流すのは、手元の `st` を書き戻した後である。** 流した結果
+       （`queued` の解除と、届かなかった投稿の結果なし）は `_confirm_flushed` が
+       状態ファイルへ直接書く。先に流すと、この後の書き戻しが古い `st` でそれらを
+       消す。渡すのは状態ファイルの鍵（`args.pr`）で、`current_pr` ではない。
+    2. `tmp_dir` を解決して返す（`_print_init_result` が使う）。
+    3. **再開でも同期する。** 中断から再開までの間に head が進んでいることがあり、
+       そのまま次のラウンドを回すと古い差分をレビューさせる。
+    """
     _auto_flush(pr)
     tmp_dir = _tmp_dir(worktree)
     wt = st.get("worktree_path") or ""
-    # 再開でも同期する。中断から再開までの間に head が進んでいることがあり、
-    # そのまま次のラウンドを回すと古い差分をレビューさせる。
     resume_head = str(st.get("head_branch") or "")
     if wt and resume_head and _is_registered_worktree(str(wt)):
         _sync_worktree(str(wt), int(st.get("current_pr") or pr), resume_head)
+    return tmp_dir
+
+
+def _resume_from_state(
+    pr: object,
+    repo: str,
+    worktree: str,
+    manual_extra_review: str,
+) -> bool:
+    """既存 state からの再開経路。
+
+    再開に該当し出力まで済ませたら True、該当する state が無ければ False を返す。
+    False のとき cmd_init は新規 init へ進む。
+    """
+    found = _find_resumable_state(pr, worktree)
+    if found is None:
+        return False
+    st, resume_state_file = found
+
+    if _refresh_resume_state(st, pr, repo, manual_extra_review):
+        _write_state(resume_state_file, st)
+        info("↻ 追加レビュー観点を state に反映して再開")
+
+    tmp_dir = _sync_resume_worktree(st, pr, worktree)
     info(f"↻ 前回中断 state から再開（round={len(st.get('rounds', []))}）")
     _print_init_result(
         _InitResult(
             pr=st["current_pr"],
-            worktree=wt,
+            worktree=st.get("worktree_path") or "",
             tmp_dir=tmp_dir,
             repo=st.get("repo") or "",
             head_branch=st.get("head_branch") or "",
