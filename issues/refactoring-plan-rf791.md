@@ -222,7 +222,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| long_method | extract_method | minor | kiro | 未着手 | 0 |
+| long_method | extract_method | minor | kiro | 検証中 | 1 |
 
 **なぜ**: 1 関数に (a) 別名 fallback（fix_commit/commit_sha、fixed_count/fixed）、(b) deferred の list/dict/int による件数の場合分けと dict 要素への正規化、(c) rejected の同じ正規化、(d) 記録用辞書の組み立て、が同居する。deferred と rejected はどちらも _normalize_dict_items + 件数決定という同型の処理で、片方だけ直すと食い違いうる。test_state_merge_fix.py と test_state_ci_classification.py が cmd_merge_fix 経由で通す。
 
