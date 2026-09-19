@@ -1507,35 +1507,43 @@ def cmd_flush(args: argparse.Namespace) -> None:
         info(f"✅ 待ち行列は空です（送った {len(result.sent)} 件）")
 
 
-def _print_init_result(
-    pr: object,
-    worktree: object,
-    tmp_dir: object,
-    repo: object,
-    head_branch: object,
-    base_branch: object,
-    is_own: bool,
-    event_downgrade: bool,
-    has_extra: bool,
-    carried_count: int,
-    resumed: bool,
-) -> None:
+class _InitResult(NamedTuple):
+    """cmd_init が標準出力の機械可読ブロックへ書く初期化結果。
+
+    再開経路と新規経路が同じ組を渡すため、位置引数の並びではなく名前付きの
+    フィールドで受け渡す。
+    """
+
+    pr: object
+    worktree: object
+    tmp_dir: object
+    repo: object
+    head_branch: object
+    base_branch: object
+    is_own: bool
+    event_downgrade: bool
+    has_extra: bool
+    carried_count: int
+    resumed: bool
+
+
+def _print_init_result(result: _InitResult) -> None:
     """cmd_init の 2 経路（再開・新規）が共有する末尾の出力ブロック。
 
     出力形式は再開側・新規側で同一のため 1 箇所へ寄せる。PR 番号だけは
     元の両分岐に合わせて quote しない（数値のため）。
     """
-    print(f"PR={pr}")
-    print(f'WORKTREE={shlex.quote(str(worktree))}')
-    print(f'TMP_DIR={shlex.quote(str(tmp_dir))}')
-    print(f'REPO={shlex.quote(str(repo))}')
-    print(f'HEAD_BRANCH={shlex.quote(str(head_branch))}')
-    print(f'BASE_BRANCH={shlex.quote(str(base_branch))}')
-    print(f"IS_OWN_PR={'1' if is_own else '0'}")
-    print(f"EVENT_DOWNGRADE={'1' if event_downgrade else '0'}")
-    print(f"HAS_EXTRA_REVIEW_INSTRUCTIONS={'1' if has_extra else '0'}")
-    print(f"CARRIED_OVER_THREADS={carried_count}")
-    print(f"RESUMED={'1' if resumed else '0'}")
+    print(f"PR={result.pr}")
+    print(f'WORKTREE={shlex.quote(str(result.worktree))}')
+    print(f'TMP_DIR={shlex.quote(str(result.tmp_dir))}')
+    print(f'REPO={shlex.quote(str(result.repo))}')
+    print(f'HEAD_BRANCH={shlex.quote(str(result.head_branch))}')
+    print(f'BASE_BRANCH={shlex.quote(str(result.base_branch))}')
+    print(f"IS_OWN_PR={'1' if result.is_own else '0'}")
+    print(f"EVENT_DOWNGRADE={'1' if result.event_downgrade else '0'}")
+    print(f"HAS_EXTRA_REVIEW_INSTRUCTIONS={'1' if result.has_extra else '0'}")
+    print(f"CARRIED_OVER_THREADS={result.carried_count}")
+    print(f"RESUMED={'1' if result.resumed else '0'}")
 
 
 def _resume_from_state(
@@ -1607,17 +1615,19 @@ def _resume_from_state(
         _sync_worktree(str(wt), int(st.get("current_pr") or pr), resume_head)
     info(f"↻ 前回中断 state から再開（round={len(st.get('rounds', []))}）")
     _print_init_result(
-        st["current_pr"],
-        wt,
-        tmp_dir,
-        st.get("repo") or "",
-        st.get("head_branch") or "",
-        st.get("base_branch") or "",
-        bool(st.get("is_own_pr")),
-        bool(st.get("event_downgrade")),
-        bool(st.get("review_instructions")),
-        (st.get("carried_over") or {}).get("count", 0),
-        True,
+        _InitResult(
+            pr=st["current_pr"],
+            worktree=wt,
+            tmp_dir=tmp_dir,
+            repo=st.get("repo") or "",
+            head_branch=st.get("head_branch") or "",
+            base_branch=st.get("base_branch") or "",
+            is_own=bool(st.get("is_own_pr")),
+            event_downgrade=bool(st.get("event_downgrade")),
+            has_extra=bool(st.get("review_instructions")),
+            carried_count=(st.get("carried_over") or {}).get("count", 0),
+            resumed=True,
+        )
     )
     return True
 
@@ -1855,17 +1865,19 @@ def _init_new_state(
         _write_state(ws_ctx.state_file, state)
         info(f"✅ state 初期化: {ws_ctx.state_file}")
         _print_init_result(
-            pr,
-            pr_ctx.worktree,
-            ws_ctx.tmp_dir,
-            pr_ctx.repo,
-            pr_ctx.meta.head_branch,
-            pr_ctx.meta.base_branch,
-            pr_ctx.is_own,
-            pr_ctx.event_downgrade,
-            bool(review_ctx.review_instructions),
-            0,
-            False,
+            _InitResult(
+                pr=pr,
+                worktree=pr_ctx.worktree,
+                tmp_dir=ws_ctx.tmp_dir,
+                repo=pr_ctx.repo,
+                head_branch=pr_ctx.meta.head_branch,
+                base_branch=pr_ctx.meta.base_branch,
+                is_own=pr_ctx.is_own,
+                event_downgrade=pr_ctx.event_downgrade,
+                has_extra=bool(review_ctx.review_instructions),
+                carried_count=0,
+                resumed=False,
+            )
         )
 
     pr_ctx = _resolve_pr_and_ownership(pr, repo, worktree, args.worktree)
