@@ -78,7 +78,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| branch | unit | — | codex / agy | 検証中 | 1 |
+| branch | unit | — | codex / agy | 採用 | 1 |
 
 **なぜ**: measure の oracle 算出において、resolved_thread_positions の要素が辞書形式である経路は固定されているが、リスト内に非辞書要素（文字列や null など）が混在した場合にそれを unmatched として数えて測定を継続する分岐が未固定である
 
@@ -90,7 +90,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| boundary | integration | — | agy / kiro | 検証中 | 1 |
+| boundary | integration | — | agy / kiro | 採用 | 1 |
 
 **なぜ**: cmd_execute の引数解析は不正な --mode 値と未知フラグ（exit 2）は固定済みだが、--mode の直後に値が無いとき ${2:?--mode requires light|squash} で落ちる境界と、そもそも引数が 0 個のときの entrypoint の usage（exit 2）は固定されていない。
 
@@ -102,7 +102,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| branch | integration | — | agy / kiro | 未着手 | 0 |
+| branch | integration | — | agy / kiro | 取り消し | 1 |
 
 **なぜ**: execute_light は prepare.json / newtext.json の有無と title/body の null を 4 本の分岐で弾くが、既存テストは prepare.json と newtext.json が両方揃った成功・失敗経路（_Rotation）しか通していない。前提ファイルが欠ける分岐と、newtext.json の title が空・body が null になる分岐はどのテストも到達していない。
 
@@ -131,7 +131,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| branch | unit | — | codex / agy | 検証中 | 1 |
+| branch | unit | — | codex / agy | 採用 | 1 |
 
 **なぜ**: cmd_set_current_pr において、pr_history に既に複数の履歴（過去に閉じた PR と現在開いている PR）が存在する場合に、過去 PR のエントリを変更せず直前の現在 PR のみ closed_at と rounds を更新して新 PR エントリを追加する分岐が未固定である
 
@@ -152,3 +152,4 @@
 | 1 | `plugins/ndf/skills/cross-review/scripts/state.py#cmd_collect_critiques` | error | 1 ラウンドの採用上限 5 件を超えた |
 | 1 | `plugins/ndf/skills/cross-review/scripts/state.py#cmd_verify_findings` | error | 1 ラウンドの採用上限 5 件を超えた |
 | 2 | `plugins/ndf/skills/cross-review/scripts/launch-reviewer.sh#launch_reviewer` | branch | 1 ラウンドの採用上限 5 件を超えた |
+| 2 | `plugins/ndf/skills/cross-review/scripts/rotate-pr.sh#execute_light` | branch | コミット 4cd469bc388e45e7c6e77f0793dc45cbad66c08c にトレーラーが欠けています: Item-Id, Round, Impl-Runtime, Impl-Model |
