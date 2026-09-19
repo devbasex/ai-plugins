@@ -12,7 +12,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| boundary | unit | — | codex / agy | 検証中 | 1 |
+| boundary | unit | — | codex / agy | 採用 | 1 |
 
 **なぜ**: measure 関数に None や辞書以外の型が渡されたとき、空辞書にフォールバックして例外なく指標辞書（pr, prs, rounds, methods, cost, convergence）を返す境界値の振る舞いが固定されていない
 
@@ -24,7 +24,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| branch | integration | — | kiro | 検証中 | 1 |
+| branch | integration | — | kiro | 採用 | 1 |
 
 **なぜ**: run_round を通す既存テストは 2 本とも指摘 0 件で、collect-critiques が 1 回目に 0 を返して 1 回で抜ける経路しか固定していない。exit 7 と CRITIQUE_RETRY_AGENTS を受けて 2 回目の起動を回すループ本体（for _attempt in 1 2）はどのテストも通っていない。
 
@@ -38,7 +38,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| error | integration | — | kiro | 未着手 | 0 |
+| error | integration | — | kiro | 検証中 | 1 |
 
 **なぜ**: collect-critiques が 7 以外を返したときに exit "$COLLECT_RC" でその終了コードを素通しする分岐が固定されていない。既存テストは 0 で抜ける経路だけを見ており、失敗の終了コードがラウンドの外へ伝わるかを誰も確かめていない。
 
@@ -52,7 +52,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| normal | integration | — | codex | 検証中 | 1 |
+| normal | integration | — | codex | 採用 | 1 |
 
 **なぜ**: 公開入口 prepare は state、GitHub の PR メタデータ、git log/diff をつないで prepare.json と eval 用の出力を作るが、既存テストは生成済み prepare.json を与えるだけで、この経路を実行していない
 
@@ -64,7 +64,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| error | integration | — | codex | 未着手 | 0 |
+| error | integration | — | codex | 検証中 | 1 |
 
 **なぜ**: 新 PR 作成失敗時に旧 PR を reopen する経路は light モードだけ固定され、同じ ERR trap を使う squash モードでは未固定である
 
