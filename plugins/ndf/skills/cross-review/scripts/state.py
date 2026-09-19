@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
+import functools
 import json
 import os
 import pathlib
@@ -34,6 +35,7 @@ sys.path.insert(
 import assignment  # noqa: E402
 import auth  # noqa: E402
 import post_queue  # noqa: E402
+import statefile  # noqa: E402  再開の反映（#727 / #648）
 import run_metrics  # noqa: E402  実行の要約（#662）
 
 
@@ -1537,11 +1539,80 @@ def _print_init_result(
     print(f"RESUMED={'1' if resumed else '0'}")
 
 
+# 再開で渡した引数の反映の表（#727 / #648 の決定 13）。**状態ファイルに載る引数は、
+# この表のどちらかに必ず載る。** 載らないのは状態に載らない 3 つ（作業ツリー・観点・
+# 追加指示のファイル）だけである。`replace` は状態へ書いて記録へ積み、`notify` は
+# 状態と違うときだけ「反映しない」と知らせる。
+REVIEW_RESUME_FIELDS = (
+    statefile.ResumeField("max_rounds", "max_rounds", "replace"),
+    statefile.ResumeField("rotate_after", "rotate_after", "replace"),
+    statefile.ResumeField("only", "only", "replace"),
+    statefile.ResumeField("verify_command", "verify_commands", "replace"),
+    statefile.ResumeField("verify_exit_code", "verify_exit_codes", "replace"),
+    statefile.ResumeField("host", "host", "notify"),
+)
+
+# 参加者を作り直す引数（決定 14）。どれかを渡した再開だけが確認をやり直す。
+PARTICIPANT_ARGS = ("only", "include", "exclude", "require_all")
+
+
+def _apply_resume_args_block(st: dict[str, Any], args: argparse.Namespace) -> bool:
+    """再開で渡した引数を状態へ反映し、何か変えたら True を返す（#727 / #648）。
+
+    担当に関わる引数（`--only` / `--include` / `--exclude` / `--require-all`）を渡した
+    ときだけ、**渡さなかった引数を状態ファイルの値で補って**使える者の解決をやり直す
+    （決定 14）。作り直しの失敗は状態を書き換える前に起きる（`_resolve_reviewers` を
+    先に呼び、通ってから `st` を書く）。
+    """
+    only, include, exclude = _normalize_participant_args(args)
+    before = len(st.get("resume_changes") or [])
+
+    # **`--only none` はここで処理する。** 正規化した `None` を表へ渡すと「未指定」と
+    # 区別できず、指定を外す操作が黙って捨てられる（決定 15）。
+    args_copy = argparse.Namespace(**vars(args))
+    args_copy.only = only
+    if getattr(args, "only", None) == NONE_WORD:
+        args_copy.only = None
+        if st.get("only") is not None:
+            old = st.get("only")
+            st["only"] = None
+            st.setdefault("resume_changes", []).append(
+                {"at": statefile.now(), "field": "only", "from": old, "to": None})
+            info(f"↻ only: {old} → None")
+
+    for line in statefile.apply_resume_args(st, args_copy, REVIEW_RESUME_FIELDS):
+        info(line)
+
+    if any(getattr(args, name, None) is not None for name in PARTICIPANT_ARGS):
+        old_participants = st.get("participants")
+        recorded = old_participants or {}
+        try:
+            host = st.get("host") or assignment.detect_host(getattr(args, "host", None))[0]
+        except assignment.AssignmentError as e:
+            die(str(e), code=1)
+            raise
+        rebuild = argparse.Namespace(
+            only=st.get("only"),
+            include=include if include is not None else list(recorded.get("included") or []),
+            exclude=exclude if exclude is not None else list(recorded.get("excluded") or []),
+            require_all=(args.require_all if getattr(args, "require_all", None) is not None
+                         else bool(recorded.get("require_all"))),
+        )
+        participants = _resolve_reviewers(host, rebuild)
+        st["participants"] = participants
+        st.setdefault("resume_changes", []).append(
+            {"at": statefile.now(), "field": "participants",
+             "from": old_participants, "to": participants})
+
+    return len(st.get("resume_changes") or []) > before
+
+
 def _resume_from_state(
     pr: object,
     repo: str,
     worktree: str,
     manual_extra_review: str,
+    args: argparse.Namespace,
 ) -> bool:
     """既存 state からの再開経路。
 
@@ -1563,6 +1634,10 @@ def _resume_from_state(
     if st.get("final") is not None:
         return False
     state_changed = False
+    # 再開で渡した引数の反映（#727 / #648）。状態ファイルを読んだ直後に行い、
+    # 作り直しの失敗はここで終了コードへ出る（以降の書き込みへ進まない）。
+    if _apply_resume_args_block(st, args):
+        state_changed = True
     if "auto_review_instructions" not in st:
         changed_files = _fetch_changed_files(pr, st.get("repo") or repo)
         categories = _classify_changed_files(changed_files)
@@ -1641,7 +1716,7 @@ def cmd_init(args: argparse.Namespace) -> None:
     # worktree ディレクトリが副作用で作成され exists() が常に true になる。
     # そのため _tmp_dir() 呼び出しは worktree 作成/確認の後に行う。
 
-    if _resume_from_state(pr, repo, worktree, manual_extra_review):
+    if _resume_from_state(pr, repo, worktree, manual_extra_review, args):
         return
 
     _init_new_state(args, pr, repo, worktree, manual_extra_review)
@@ -1672,6 +1747,7 @@ class _InitWorkspaceContext(NamedTuple):
 class _InitialAssignment(NamedTuple):
     host: str
     host_source: str
+    participants: dict[str, Any]
 
 
 class _InitialStateContext(NamedTuple):
@@ -1789,27 +1865,30 @@ def _init_new_state(
         except assignment.AssignmentError as e:
             die(str(e))
             raise
-        reviewers = assignment.review_pool(host)
-        info(f"ホスト: {host}（{host_source}） / レビュワーの母集合: {' / '.join(reviewers)}")
-        _validate_only(args.only, host)
-        # 未認証の CLI は起動から短時間で終わり、結果を残さないまま担当から欠ける。
-        # **確かめるのは実際に起動する担当だけである。**
-        auth.check_auth(_auth_targets(args.only, host), info=info, die=lambda m: die(m))
-        return _InitialAssignment(host=host, host_source=host_source)
+        info(f"ホストの判定: {host}（{host_source}）")
+        # 使える者の解決は共通層が持つ（#727）。通らない者は外して続け、席が 2 つに
+        # 満たなければホストで埋め合わせる。名前の矛盾と 0 者は終了コード 1。
+        participants = _resolve_reviewers(host, args)
+        return _InitialAssignment(
+            host=host, host_source=host_source, participants=participants)
 
     def _build_initial_review_state(
         args: argparse.Namespace,
         ctx: _InitialStateContext,
     ) -> dict[str, Any]:
         """確定済みの材料から、副作用なしに初期状態を組み立てる。"""
-        host, host_source = ctx.assignment
+        host, host_source, participants = ctx.assignment
+        only, _include, _exclude = _normalize_participant_args(args)
         return {
             "started_at": _now(),
             "host": host,
             "host_source": host_source,
-            "max_rounds": args.max_rounds,
-            "rotate_after": args.rotate_after,
-            "only": args.only,
+            # 引数の既定は未指定（`None`）で、新規の経路がここで定数を置く（決定 13）
+            "max_rounds": args.max_rounds if args.max_rounds is not None else 12,
+            "rotate_after": args.rotate_after if args.rotate_after is not None else 8,
+            "only": only,
+            "participants": participants,
+            "resume_changes": [],
             "current_pr": ctx.pr,
             "worktree_path": ctx.pr_ctx.worktree,
             "tmp_dir": str(ctx.ws_ctx.tmp_dir),
@@ -1891,56 +1970,156 @@ NO_RESULT = "NO_RESULT"
 
 
 def _round_reviewers(st: dict[str, Any], round_no: int) -> list[str]:
-    """そのラウンドのレビュー担当を返す。
+    """そのラウンドのレビュー担当（席の名前）を返す。
 
-    **先に当たったものを採る。** ラウンドに記録があればそれを、無ければホストからの
-    輪番を、ホストも無ければこれまでの 2 者を返す。
+    **先に当たったものを採る**（設計の決定 11）。ラウンドの記録を 1 者指定より先に
+    見るのは、再開で 1 者指定を変えても過去のラウンドの担当が変わらないようにする
+    ためである。
 
-    | 状態 | 返る担当 |
-    | --- | --- |
-    | ラウンドに `reviewers` がある | その値 |
-    | 状態ファイルに `host` がある | `assignment.review_assign(round_no, host)` |
-    | どちらも無い（古い状態ファイル） | `LEGACY_AGENTS` |
+    | 順 | 状態 | 返る担当 |
+    | ---: | --- | --- |
+    | 1 | ラウンドに `reviewers` がある | その値 |
+    | 2 | `only` がある | `[only]` |
+    | 3 | `participants` がある | `assignment.review_seats(round_no, available, fallback)` |
+    | 4 | `host` がある | `assignment.review_seats(round_no, review_pool(host), [])`（変更前の輪番と同じ値） |
+    | 5 | どれも無い（古い状態ファイル） | `LEGACY_AGENTS` |
     """
+    for entry in st.get("rounds") or []:
+        if entry.get("round") == round_no and entry.get("reviewers"):
+            return list(entry["reviewers"])
     # **`--only` は担当そのものを絞る。** 輪番が返す 2 者を担当のまま残すと、指定した
     # 1 者が含まれないラウンドで誰も起動されない。そのとき全員が「指定によるスキップ」
     # として扱われ、レビューが行われていないのに収束する。
     only = st.get("only")
     if only:
         return [only]
-    for entry in st.get("rounds") or []:
-        if entry.get("round") == round_no and entry.get("reviewers"):
-            return list(entry["reviewers"])
+    participants = st.get("participants")
+    if participants:
+        return assignment.review_seats(
+            max(round_no, 1),
+            list(participants.get("available") or []),
+            list(participants.get("fallback") or []),
+        )
     host = st.get("host")
     if host:
-        return assignment.review_assign(max(round_no, 1), host)
+        return assignment.review_seats(
+            max(round_no, 1), assignment.review_pool(host), [])
     return list(LEGACY_AGENTS)
 
 
-def _auth_targets(only: str | None, host: str) -> list[str]:
-    """認証を確かめる相手。**実際に起動する担当だけを返す。**
+# ---------- 参加者の引数と使える者の解決（#727） ----------
+#
+# 名前の検査は 2 段に分かれる。綴り（4 つの名前か `none`）は argparse の型が弾き
+# （終了コード 2）、母集合との関係は共通層の `resolve_participants` が弾く（終了コード 1）。
 
-    `--only` で 1 者へ絞ったときに母集合の全員を確かめると、そのラウンドで起動しない
-    CLI の未認証で初期化が失敗する。
+NONE_WORD = "none"
+
+
+def _runtime_or_none(value: str) -> str:
+    """`--only` の型。4 つの名前か `none`（決定 15: 再開で指定を外す予約語）。"""
+    if value == NONE_WORD or value in assignment.ALL_RUNTIMES:
+        return value
+    raise argparse.ArgumentTypeError(
+        f"{'/'.join(assignment.ALL_RUNTIMES)} か {NONE_WORD} を指定してください: {value}")
+
+
+def _runtime_list(value: str) -> list[str]:
+    """`--exclude` / `--include` の型。カンマ区切りの 4 つの名前、または `none`。
+
+    `none` は `["none"]` のまま返し、`_normalize_participant_args` が空の一覧へ直す。
     """
-    return [only] if only else assignment.review_pool(host)
+    names = [n.strip() for n in value.split(",") if n.strip()]
+    for n in names:
+        _runtime_or_none(n)
+    if not names:
+        raise argparse.ArgumentTypeError("名前を 1 つ以上指定してください")
+    return names
 
 
-def _validate_only(only: str | None, host: str) -> str | None:
-    """`--only` が母集合に含まれることを確かめる。含まなければ起動する前に弾く。
+def _seat_arg(value: str) -> str:
+    """席の名前の型（`read-result` の担当）。形は `assignment.SEAT_PATTERN`。"""
+    try:
+        assignment.seat_runtime(value)
+    except assignment.AssignmentError as e:
+        raise argparse.ArgumentTypeError(str(e))
+    return value
 
-    ホスト自身や、参加しないランタイムを指定しても、そのラウンドは 1 者も起動しない。
-    **起動してから気づくと、レビューの無いラウンドが記録に残る。**
+
+def _normalize_participant_args(
+    args: argparse.Namespace,
+) -> tuple[str | None, list[str] | None, list[str] | None]:
+    """`--only` / `--include` / `--exclude` を読み手の形へ直し `(only, include, exclude)` を返す。
+
+    `only` の `none` は `None`。`include` / `exclude` は `action="append"` の入れ子を
+    平らにし（`--exclude agy --exclude kiro` と `--exclude agy,kiro` が同じになる）、
+    `none` を含めば `[]`。未指定は `None` のまま返す（再開の経路が「渡さなかった」と
+    読むため）。`none` と名前の混在は終了コード 1。
     """
-    if only is None:
-        return None
-    pool = assignment.review_pool(host)
-    if only not in pool:
-        die(
-            f"--only に指定できるのはレビュワーの母集合だけです: {' / '.join(pool)}"
-            f"（指定: {only}、ホスト: {host}）"
+    only = getattr(args, "only", None)
+    if only == NONE_WORD:
+        only = None
+
+    def _flatten(option: str) -> list[str] | None:
+        raw = getattr(args, option, None)
+        if raw is None:
+            return None
+        names: list[str] = []
+        for group in raw:
+            names.extend(group if isinstance(group, list) else [group])
+        if NONE_WORD in names:
+            if len(names) > 1:
+                die(f"--{option} に {NONE_WORD} と名前を同時に指定できません: {', '.join(names)}")
+            return []
+        return names
+
+    return only, _flatten("include"), _flatten("exclude")
+
+
+def _resolve_reviewers(host: str, args: argparse.Namespace) -> dict[str, Any]:
+    """使える者を決め、状態ファイルの `participants`（`fallback` を含む 8 項目）を返す。
+
+    母集合は `review_pool(host)`。確認は止めない確認（`auth.probe_auth`）で、通らない者は
+    外して続ける。使える者が 2 者に満たなければホストを確かめ、通れば `fallback` に
+    置く（決定 9）。1 者指定があればホストを確かめず `fallback` は空。名前の矛盾・
+    `--require-all` で欠け・0 者で埋め合わせも無い、は終了コード 1（状態ファイルは
+    この関数の後に書かれるため作られない）。
+    """
+    only, include, exclude = _normalize_participant_args(args)
+    probe = functools.partial(auth.probe_auth, info=info)
+    try:
+        pool = assignment.review_pool(host)
+        resolved = assignment.resolve_participants(
+            pool, host=host, include=include or [], exclude=exclude or [], only=only,
+            probe=probe, require_all=bool(getattr(args, "require_all", None)),
         )
-    return only
+    except assignment.AssignmentError as e:
+        die(str(e), code=1)
+        raise
+    available = resolved.available
+    info(f"ホスト: {host} / 母集合: {' / '.join(pool)}"
+         f" / 使える者: {' / '.join(available) or 'なし'}")
+    for name, reason in resolved.unavailable.items():
+        info(f"⚠ {name} を担当から外しました（{reason}）")
+
+    fallback: list[str] = []
+    if only is None and len(available) < 2:
+        results, skipped = auth.probe_auth([host], info=info)
+        if skipped or results.get(host, {}).get("ok", False):
+            fallback = [host]
+        if not available and not fallback:
+            die(f"使える者がいません: 母集合 {' / '.join(pool)} の全員が確認を通らず、"
+                f"ホスト {host} も通りません（{results.get(host, {}).get('detail', '')}）",
+                code=1)
+        if fallback and host not in available:
+            info(f"⚠ 使える者が {len(available)} 者のため、席をホスト（{host}）で埋めます"
+                 "（観点が減ります）")
+        else:
+            info(f"⚠ 使える者が {len(available)} 者のため、席を同じランタイムの 2 つ目で"
+                 "埋めます（観点が減ります）")
+
+    state = resolved.to_state()
+    state["fallback"] = fallback
+    return state
 
 
 def _is_pass(intent: str | None, severity: dict[str, int] | None) -> bool:
@@ -2028,10 +2207,15 @@ def _guard_previous_round(st: dict[str, Any], prev: dict[str, Any]) -> None:
     if verdict is None:
         # 判定の結果を持たない古い状態ファイルは、保存された重要度から判定し直す。
         # 項目が欠けたラウンドは結果なしであり、修正の記録を求める対象ではない。
-        if _no_result_agents(prev, st.get("only")):
+        # **数える相手はそのラウンドの担当である**（決定 11）。`codex` / `agy` で数えると、
+        # 担当が `agy` + `kiro` のラウンドで `codex` を結果なしと読み、修正の記録が
+        # 無いまま次のラウンドへ通す。
+        reviewers = prev.get("reviewers") or _round_reviewers(st, prev.get("round") or 1)
+        if _no_result_agents(prev, st.get("only"), reviewers):
             verdict = "no_result"
         else:
-            verdict = "approved" if _round_passes(prev, st.get("only")) else "changes_requested"
+            verdict = ("approved" if _round_passes(prev, st.get("only"), reviewers)
+                       else "changes_requested")
     fix = prev.get("fix")
     if verdict == "changes_requested" and not fix:
         die(
@@ -4258,6 +4442,60 @@ def _print_round_summary(rounds: list) -> None:
     print()
 
 
+def _print_participants(st: dict) -> None:
+    """cmd_report の「参加した者」の節を出す（#727 の AC24）。
+
+    途中から誰を外したか・誰が確認を通らなかったかを、完了報告だけで読めるようにする。
+    参加者の記録を持たない状態ファイル（この変更の前に始めた実行）では「記録なし」と出す。
+    """
+    print("## 参加した者")
+    p = st.get("participants")
+    if not p:
+        print("- 使える者: 記録なし")
+        print()
+        return
+
+    def _names(values) -> str:
+        return " / ".join(values) if values else "なし"
+
+    unavailable = p.get("unavailable") or {}
+    if unavailable:
+        failed = " / ".join(f"{n}（{d}）" for n, d in unavailable.items())
+    elif p.get("probe_skipped"):
+        failed = "確認を飛ばした（NDF_SKIP_AUTH_CHECK）"
+    else:
+        failed = "なし"
+
+    print(f"- 母集合: {_names(p.get('pool'))}")
+    print(f"- 使える者: {_names(p.get('available'))}")
+    print(f"- --exclude で外した者: {_names(p.get('excluded'))}")
+    print(f"- --include で足した者: {_names(p.get('included'))}")
+    print(f"- 確認を通らなかった者: {failed}")
+    print(f"- 席の埋め合わせ: {_names(p.get('fallback'))}")
+
+    changes = st.get("resume_changes") or []
+    if not changes:
+        print("- 再開で変えた値: なし")
+    else:
+        print("- 再開で変えた値:")
+        for c in changes:
+            print(f"  - {c.get('at')} {c.get('field')}: "
+                  f"{_resume_value(c.get('from'))} → {_resume_value(c.get('to'))}")
+    print()
+
+
+def _resume_value(value: object) -> str:
+    """再開で変えた値の 1 つを 1 行へ収める。参加者の記録は使える者だけを出す。"""
+    if isinstance(value, dict):
+        available = value.get("available")
+        if available is not None:
+            return f"使える者={'/'.join(available) or 'なし'}"
+        return "…"
+    if isinstance(value, list):
+        return ",".join(str(v) for v in value) or "なし"
+    return str(value)
+
+
 def _print_sweep(st: dict) -> None:
     """cmd_report の最終スイープの節を出す。"""
     sweep = st.get("sweep")
@@ -4323,6 +4561,7 @@ def cmd_report(args: argparse.Namespace) -> None:
         state_str = "closed" if h.get("closed_at") else "open"
         print(f"- #{h['pr']} ({state_str}, {h.get('rounds', 0)} rounds)")
     print()
+    _print_participants(st)
     _print_round_summary(st["rounds"])
     _print_sweep(st)
     _print_deferred_nits(st)
@@ -4349,11 +4588,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("init", help="Step 0 — state 初期化 or 再開")
     sp.add_argument("pr", type=int)
-    sp.add_argument("--max-rounds", type=int, default=12)
-    sp.add_argument("--rotate-after", type=int, default=8)
+    sp.add_argument("--max-rounds", type=int, default=None)
+    sp.add_argument("--rotate-after", type=int, default=None)
     sp.add_argument(
-        "--only", choices=list(assignment.ALL_RUNTIMES), default=None,
+        "--only", type=_runtime_or_none, default=None,
         help="片方だけで回す（デバッグ用）")
+    sp.add_argument(
+        "--exclude", action="append", type=_runtime_list, default=None,
+        help="母集合から外す者。カンマ区切り・繰り返し可。再開で `none` を渡すと空へ戻す")
+    sp.add_argument(
+        "--include", action="append", type=_runtime_list, default=None,
+        help="母集合に足す者（ホストも足せる）。カンマ区切り・繰り返し可。`none` で空へ戻す")
+    sp.add_argument(
+        "--require-all", dest="require_all",
+        action=argparse.BooleanOptionalAction, default=None,
+        help="確認を通らない者が 1 者でもいれば失敗する（従来の関門）。既定は外して続ける")
     sp.add_argument(
         "--host", choices=list(assignment.HOST_RUNTIMES), default=None,
         help="この収束ループを起動している CLI。省略時は環境変数から推定する")
@@ -4386,7 +4635,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("read-result", help="Step 2.4 — review result を state にマージ")
     sp.add_argument("pr", type=int)
-    sp.add_argument("agent", choices=list(assignment.ALL_RUNTIMES))
+    sp.add_argument("agent", type=_seat_arg)
     sp.add_argument("--file", default=None)
     sp.set_defaults(func=cmd_read_result)
 
