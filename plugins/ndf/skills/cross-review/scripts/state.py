@@ -35,6 +35,7 @@ import assignment  # noqa: E402
 import auth  # noqa: E402
 import post_queue  # noqa: E402
 import run_metrics  # noqa: E402  実行の要約（#662）
+import monitor_outcome  # noqa: E402  起動 1 回の結末（#729）
 
 
 # ---------------- helpers ----------------
@@ -2404,11 +2405,16 @@ def cmd_unresolved_threads(args: argparse.Namespace) -> None:
         info(f"- {t['id']} {t.get('path', '')}:{t.get('line', '')}")
 
 
-def _record_no_result(pr: int, agent: str, reason: str) -> None:
+def _record_no_result(
+    pr: int, agent: str, reason: str, monitor_detail: str | None = None,
+) -> None:
     """使える結果が残らなかったことを、そのラウンドへ残す。
 
     判定（`cmd_judge`）はこの記録を読んで、起動し直しか中断かを決める。記録が無い
     ラウンドも結果なしとして読むため、ここで書けなかった場合も収束はしない。
+
+    `monitor_detail` は監視の `detail`（#729）。**鍵が無い = 監視の結果ファイルが
+    無かった**を保つため、`None` と空文字では鍵を書かない。
 
     状態ファイルを読めないときとラウンドがまだ無いときは、何も書かずに戻る。呼び出し
     元はこの直後に die するため、ここで新たに止める理由が無い。
@@ -2422,7 +2428,7 @@ def _record_no_result(pr: int, agent: str, reason: str) -> None:
         return
     if not isinstance(st, dict) or not st.get("rounds"):
         return
-    st["rounds"][-1][agent] = {
+    entry: dict[str, Any] = {
         "intent": NO_RESULT,
         "no_result_reason": reason,
         "posted_as": None,
@@ -2430,6 +2436,9 @@ def _record_no_result(pr: int, agent: str, reason: str) -> None:
         "review_url": None,
         "by_severity": {},
     }
+    if monitor_detail:
+        entry["monitor_detail"] = monitor_detail
+    st["rounds"][-1][agent] = entry
     _save(pr, st)
 
 
@@ -2440,33 +2449,30 @@ def _die_no_result(pr: int, agent: str, reason: str, msg: str, code: int = 1) ->
 
 
 def _read_review_result_file(pr: int, agent: str, rfile: pathlib.Path) -> dict[str, Any]:
-    if not rfile.exists() or rfile.stat().st_size == 0:
-        _die_no_result(pr, agent, "missing", f"{agent}: result 未生成 ({rfile})")
+    """結果ファイルを、結末の共通層の値として読む（#729 の決定 2）。
 
-    try:
-        r = json.loads(rfile.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        _die_no_result(
-            pr,
-            agent,
-            "unparsable",
-            f"{agent}: result.json の parse に失敗 ({rfile}): {exc}",
+    結果ファイルを自前で開かない。監視の結果ファイル（`<stem>-monitor.json`）と突き合わせて
+    使える結果か理由かを決めるのは `read_launch_outcome` で、ここが決めるのは終了コードだけ
+    である（読めない結果は 3、それ以外は 1。変更前と同じ）。理由の語彙も起動し直しの可否も
+    ここには置かない。
+    """
+    outcome = monitor_outcome.read_launch_outcome(
+        _resolve_tmp_dir(pr), f"{agent}-review-pr{pr}", rfile)
+    if outcome.payload is not None:
+        return outcome.payload
+    reason = outcome.reason or "missing"
+    # 監視の結果ファイルがあるときだけ、その `detail` を残す（無いときの `outcome.detail` は
+    # 読めなかった理由の 1 文で、監視の詳細ではない）
+    monitor_detail = str(outcome.monitor.get("detail") or "") if outcome.monitor else None
+    _record_no_result(pr, agent, reason, monitor_detail)
+    if reason == "unparsable":
+        # 結果ファイルはあるが JSON の dict として parse できない。launcher の出力形式不正
+        die(
+            f"{agent}: result.json の parse に失敗、または dict ではない ({rfile}):"
+            f" {outcome.detail}",
             code=3,
         )
-
-    # gemini round 4 指摘: result.json は本来 dict だが、launcher の出力バグや
-    # 別実行の残骸で list / str が入り込むと `r.get(...)` で AttributeError になる。
-    # 不正な review result はバグなので即時 die(code=3) で停止させる。
-    if not isinstance(r, dict):
-        _die_no_result(
-            pr,
-            agent,
-            "unparsable",
-            f"{agent}: result.json が dict ではない "
-            f"({rfile}, type={type(r).__name__})。review launcher の出力形式不正。",
-            code=3,
-        )
-    return r
+    die(f"{agent}: 使える結果が無い (reason={reason}, {rfile}): {outcome.detail}")
 
 
 def _verify_review_arrival(
