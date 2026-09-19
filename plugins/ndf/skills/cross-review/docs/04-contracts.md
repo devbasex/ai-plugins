@@ -22,6 +22,17 @@
   "pr_author": "someone",
   "is_own_pr": false,
   "event_downgrade": false,
+  "participants": {
+    "pool": ["codex", "agy", "kiro"],
+    "included": [], "excluded": ["agy"],
+    "available": ["codex"],
+    "unavailable": {"kiro": "kiro-cli が見つかりません"},
+    "probe_skipped": false, "require_all": false,
+    "fallback": ["claude"]
+  },
+  "resume_changes": [
+    {"at": "...", "field": "max_rounds", "from": 12, "to": 4}
+  ],
   "pr_history": [
     {"pr": 123, "opened_at": "...", "closed_at": null, "rounds": 2}
   ],
@@ -43,10 +54,11 @@
       "pr": 123,
       "started_at": "...",
       "verdict": "changes_requested",
+      "reviewers": ["codex", "claude-2"],
       "codex":  {"intent": "REQUEST_CHANGES", "posted_as": "COMMENT",
                  "comments": 5, "review_url": "...",
                  "by_severity": {"critical": 0, "major": 3, "minor": 2, "nit": 0}},
-      "agy": {"intent": "REQUEST_CHANGES", "posted_as": "COMMENT",
+      "claude-2": {"intent": "REQUEST_CHANGES", "posted_as": "COMMENT",
                  "comments": 3, "review_url": "...",
                  "by_severity": {"critical": 0, "major": 2, "minor": 1, "nit": 0}},
       "fix":    {"commit": "abc1234", "fixed": 6, "deferred": 2, "rejected": 0,
@@ -84,6 +96,24 @@
 ```
 
 `final` 値: `approved` / `max_rounds` / `oscillation` / `error`
+
+### 席の名前
+
+**担当の単位は席の名前である。** 形は `<ランタイム名>` か `<ランタイム名>-<2〜9>` で、
+正規表現にすると `^(claude|codex|agy|kiro)(-[2-9])?$`（共通層の `assignment.SEAT_PATTERN`）。
+接尾辞の付いた名前は、使える者が足りないラウンドで立てる**同じランタイムの 2 つ目**を指す。
+
+| 現れる場所 | 値の例 |
+| --- | --- |
+| `rounds[].reviewers` | `["codex", "claude-2"]` |
+| `rounds[].<席の名前>` の鍵 | `claude-2` |
+| `review_findings[].agent` と `finding_id` の接頭 | `claude-2` / `claude-2-r1-0` |
+| 結果ファイルの stem | `<席の名前>-review-pr<番号>` |
+
+起動する CLI はハイフンの手前を取って選ぶ（シェルは `${SEAT%%-*}`、Python は
+`assignment.seat_runtime`）。ランタイム名にハイフンを含むものが無いため、両者は同じ
+規則になる。**1 つ目の席の名前はランタイム名そのままである**ため、埋め合わせが要らない
+実行ではこの変更の前と同じ名前しか現れない。
 
 ### 重要なフィールド
 
@@ -124,7 +154,16 @@
   （`fix` が int を返す経路）があるためである。** そのときは記録が空になり、件数だけが残る。
   **項目が欠けた要素も落とさない**（落とすと却下そのものが記録から消える）
 - `host_source` — `explicit`（`--host`）または `env`（環境変数からの推定）
-- `rounds[].reviewers` — そのラウンドのレビュー担当 2 者。**ラウンドを開くときに決めて残す**
+- `participants` — 使える者の解決の結果（#727）。`pool`（母集合の既定）/ `included` /
+  `excluded` / `available`（使える者）/ `unavailable`（名前 → 確認が通らなかった理由）/
+  `probe_skipped`（確認を飛ばしたか）/ `require_all` / `fallback`（席の埋め合わせに使える
+  相手）の 8 項目。**この項目を持たない状態ファイルは、この変更の前に始めた実行である**
+  （読み方は `05-pool-and-convergence.md`）。`unavailable` が空である理由は 2 つあり、
+  `probe_skipped` がそれを分ける（全員が通った / 確認を飛ばした）
+- `resume_changes` — 再開で変えた値の記録（#727）。要素は `at` / `field` / `to` / `from` で、
+  `field` は状態ファイルの鍵である。**追記だけを行う。** 参加者の記録を作り直したときは
+  `participants` の 1 件として積む（中の項目ごとには積まない）
+- `rounds[].reviewers` — そのラウンドのレビュー担当 2 席。**ラウンドを開くときに決めて残す**
 - `worktree_path` — 並行セッションとの分離。サブエージェントへの cwd 指示にも使う
 - `is_own_pr` / `event_downgrade` — 自分の PR の場合 `REQUEST_CHANGES → COMMENT` 強制ダウングレード
 - `rounds[].<担当>.intent` — AI の本来判定。**ループ判定はこれを見る**。担当ごとのキーの

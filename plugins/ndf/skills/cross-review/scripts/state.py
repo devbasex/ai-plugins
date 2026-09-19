@@ -4592,7 +4592,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--rotate-after", type=int, default=None)
     sp.add_argument(
         "--only", type=_runtime_or_none, default=None,
-        help="片方だけで回す（デバッグ用）")
+        help="1 者だけで回す。席の埋め合わせを行わない。none で指定を外す")
     sp.add_argument(
         "--exclude", action="append", type=_runtime_list, default=None,
         help="母集合から外す者。カンマ区切り・繰り返し可。再開で `none` を渡すと空へ戻す")

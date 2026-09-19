@@ -121,3 +121,30 @@ def test_the_procedure_points_at_the_contract_document() -> None:
 
 def test_the_skill_points_at_the_contract_document() -> None:
     assert "docs/04-contracts.md" in SKILL.read_text(encoding="utf-8")
+
+
+# ---- 1 者指定のシェル変数で絞らない（#727 の AC30） ----
+#
+# ラウンドの開始が返す担当の一覧は、1 者指定と席の埋め合わせを反映済みである。
+# シェル変数でもう一度絞ると、状態ファイルとシェル変数がずれたときに起動も監視も
+# 誰にも当たらない（設計の決定 17）。1 者指定のシェル変数は初期化へ渡す 1 行にだけ残す。
+
+ONLY_DOCS = (SKILL, PROCEDURE)
+
+
+@pytest.mark.parametrize("doc", ONLY_DOCS, ids=lambda p: p.name)
+def test_the_only_variable_appears_only_where_it_is_passed_to_init(doc: pathlib.Path) -> None:
+    offenders = [
+        f"{doc.name}:{no}: {line.strip()}"
+        for no, line in enumerate(doc.read_text(encoding="utf-8").splitlines(), 1)
+        if "ONLY" in line and "--only" not in line
+    ]
+    assert offenders == [], offenders
+
+
+@pytest.mark.parametrize("doc", ONLY_DOCS, ids=lambda p: p.name)
+def test_the_reviewers_returned_by_the_round_are_used(doc: pathlib.Path) -> None:
+    """起動・監視・取り込み・反証は、ラウンドの開始が返す一覧を使う。"""
+    body = doc.read_text(encoding="utf-8")
+    assert "$REVIEWERS_CSV" in body
+    assert "${ONLY:-" not in body

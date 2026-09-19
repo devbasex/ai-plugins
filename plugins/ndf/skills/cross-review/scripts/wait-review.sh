@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# Wait for codex / agy review processes — monitor.py の薄いラッパ。
+# レビューの席の完了待ち — monitor.py の薄いラッパ。
 #
-# Usage: wait-review.sh <PR> [codex|agy|both] [--timeout SEC] [--stall-timeout SEC]
+# Usage: wait-review.sh <PR> [<席の名前>|both] [--timeout SEC] [--stall-timeout SEC]
+#
+#   席の名前   claude | codex | agy | kiro（同じランタイムの 2 つ目は `-2`〜`-9` を付ける）
+#   both       これまでの 2 者（codex / agy）を指す省略形
 #
 # 既定値（上限の表 `scripts/lib/limits.py` が持つ。#598 / #537）:
 #   timeout       1200s (= 20 min、工程 review)  env MONITOR_TIMEOUT_<AGENT> / MONITOR_TIMEOUT で上書き
-#   stall-timeout 担当別 codex 180s / agy 480s / kiro 480s / claude 900s
+#   stall-timeout 席のランタイム別 codex 180s / agy 480s / kiro 480s / claude 900s
 #                                              env MONITOR_STALL_<AGENT> / MONITOR_STALL で上書き
 #   poll          15s                          env MONITOR_POLL で上書き
 #

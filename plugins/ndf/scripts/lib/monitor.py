@@ -14,6 +14,9 @@
 `--stem-template` で決まる（既定は cross-review の `{agent}-review-pr{id}`）。
 cross-refactoring は `{agent}-propose-rf{id}` のような別の命名を渡す。
 
+**担当の名前は席の名前を取りうる**（`claude-2` のような同じランタイムの 2 つ目。#727）。
+一時ファイルの名前はその名前のまま組み、CLI ごとの検査だけ `_agent_runtime` で選ぶ。
+
 監視軸:
   1. **pidfile** + `kill -0` でプロセス生存確認
      - 可能なら `/proc/<pid>/cmdline` で codex/agy であることを再確認 (PID 再利用対策)
@@ -84,8 +87,37 @@ def _lib_dir() -> pathlib.Path:
 
 if str(_lib_dir()) not in sys.path:
     sys.path.insert(0, str(_lib_dir()))
+import assignment  # noqa: E402  席の名前の規則（#727）
 import limits  # noqa: E402  上限の表（#598 / #537）
 import monitor_outcome  # noqa: E402  監視の結果の語彙と読み書き（#662）
+
+
+def _agent_runtime(agent: str) -> str:
+    """担当の名前からランタイムを引く（CLI ごとの検査を選ぶために使う）。
+
+    担当の単位は席の名前（`assignment.SEAT_PATTERN`。`claude-2` のように同じランタイムの
+    2 つ目を表す）である。**席の形に合わない名前はそのまま返す。** cross-refactoring は
+    任意の骨格（`--stem-template`）で担当名を渡せるため、形で弾くとその経路が壊れる。
+    """
+    try:
+        return assignment.seat_runtime(agent)
+    except assignment.AssignmentError:
+        return agent
+
+
+def _seat_or_both(value: str) -> str:
+    """位置引数 `target` の型。席の名前か `both` だけを通す。
+
+    通らなければ argparse が終了コード 2 で終わる。`both` はこれまでの 2 者
+    （codex / agy）を指す省略形である。
+    """
+    if value == "both":
+        return value
+    try:
+        assignment.seat_runtime(value)
+    except assignment.AssignmentError as e:
+        raise argparse.ArgumentTypeError(f"{e}。または both") from e
+    return value
 
 
 # ---------- 設定 ----------
@@ -626,7 +658,7 @@ def _lingering_completion(
     started_wall: float,
 ) -> str | None:
     has_result = paths.result.exists() and paths.result.stat().st_size > 0
-    if status.agent == "codex" and status.sentinel_seen and has_result:
+    if _agent_runtime(status.agent) == "codex" and status.sentinel_seen and has_result:
         _kill_pid(pid)
         status.result_exists = True
         return f"codex sentinel + result.json detected; killed lingering pid {pid}"
@@ -655,7 +687,7 @@ def _early_error(
         return None, None
     fatal_err = _scan_early_fatal(paths.err_log)
     fatal_source = "err.log"
-    if not fatal_err and agent == "claude":
+    if not fatal_err and _agent_runtime(agent) == "claude":
         fatal_err = _scan_claude_stdout_fatal(paths.stdout_log)
         fatal_source = "stdout.log"
     fatal = (fatal_source, fatal_err) if fatal_err else None
@@ -805,7 +837,7 @@ def monitor_agent(
 
         # 1. プロセス生存確認 → 死んでいたら最終判定へ (result.json 存在をチェック)
         alive = _pid_alive(pid)
-        if agent == "codex":
+        if _agent_runtime(agent) == "codex":
             status.sentinel_seen = _scan_codex_sentinel(paths.err_log)
 
         # codex は `tokens used` sentinel を出した後もプロセスが exit せず常駐し続ける
@@ -945,12 +977,11 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("pr", type=int)
     # 後方互換: cross-review は位置引数 `target` で codex / agy / both を渡す。
-    # 4 ランタイム任意の組み合わせは `--agents` で渡す（どちらか一方だけを使う）。
-    # **担当は 4 つの名前を取りうる。** `both` はこれまでの 2 者を指す省略形として残す
-    # （既存の呼び出し側が使い続けられるようにする）。3 者以上を監視するときは
-    # `--agents` を使う。
-    p.add_argument("target", nargs="?",
-                   choices=["claude", "codex", "agy", "kiro", "both"])
+    # 2 者より多い組み合わせは `--agents` で渡す（どちらか一方だけを使う）。
+    # **担当は席の名前を取りうる**（`claude-2` のような同じランタイムの 2 つ目。#727）。
+    # `both` はこれまでの 2 者を指す省略形として残す（既存の呼び出し側が使い続けられる
+    # ようにする）。3 者以上を監視するときは `--agents` を使う。
+    p.add_argument("target", nargs="?", type=_seat_or_both)
     p.add_argument("--agents", default=None,
                    help="監視対象をカンマ区切りで指定 (例: claude,kiro)。"
                         "位置引数 target の代わりに使う")
