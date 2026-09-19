@@ -27,7 +27,8 @@ cross-refactoring は `{agent}-propose-rf{id}` のような別の命名を渡す
      - **WARN** (生の `Error:` / `Traceback` 等の曖昧パターン): 警告ログのみ、kill せず通常判定を継続
      - `--no-early-error` / `MONITOR_NO_EARLY_ERROR=1` で検知自体を無効化可
   4. **result.json**: プロセス終了後に `<worktree>/.cross_review/<agent>-review-pr<PR>-result.json` が
-     生成されていなければ失敗扱い
+     生成されていなければ失敗扱い。err.log に CLI 自身の上限の文言（agy の
+     `print timeout after <時間> with turn in progress`）があれば理由 `cli_timeout`（#729）
   5. **hard timeout**: 既定は `--phase` の工程で上限の表（`limits.py`）から引く
      （省略時は `review`）。`--timeout` → `MONITOR_TIMEOUT_<AGENT>` → `MONITOR_TIMEOUT` の順で上書き可
   6. **stall timeout**: err.log + stdout.log の合計サイズが一定時間変化しなければ
@@ -139,6 +140,14 @@ EARLY_ERROR_FATAL = [
     re.compile(r"\bAPI key (?:not found|missing|invalid)\b", re.IGNORECASE),
     # codex 固有: sandbox エラー
     re.compile(r"\bsandbox error\b", re.IGNORECASE),
+]
+
+# **CLI 自身の上限** で結果を書かずに終わったことを示す文言（理由は `cli_timeout`）。
+# **終了した後、結果ファイルが無いときだけ** 照合する。生きている間に見ると途中の警告を
+# 致命と読み、結果ファイルがあれば上限に当たっても書き終えているので使える（#729 の決定 5）。
+CLI_TIMEOUT_AFTER_EXIT = [
+    # agy の `--print-timeout` の打ち切り（#598 / #537 の実物）
+    re.compile(r"print timeout after \S+ with turn in progress"),
 ]
 
 # **警告の見た目で出る致命** パターン。`EARLY_ERROR_FATAL` と違い、行頭の
@@ -819,6 +828,15 @@ def _process_exit_outcome(
             "OK",
             f"process exited; sentinel={status.sentinel_seen}; "
             f"result_exists={status.result_exists}",
+        )
+    # 結果なしの理由を err.log から引く。CLI の上限の文言があれば `cli_timeout`、無ければ
+    # 状態からの既定（`missing`）に落ちる。
+    cli_timeout = _scan_patterns(paths.err_log, CLI_TIMEOUT_AFTER_EXIT)
+    if cli_timeout:
+        return MonitorOutcome.create(
+            "NO_RESULT",
+            f"process exited but result.json missing (CLI timeout): {cli_timeout[:200]}",
+            reason="cli_timeout",
         )
     return MonitorOutcome.create(
         "NO_RESULT", f"process exited but result.json missing: {paths.result}"

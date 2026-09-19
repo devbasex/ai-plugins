@@ -8,6 +8,8 @@
 - AC3: `"api_error_status":429`（claude）は err.log（全担当）と stdout.log（claude だけ）で拾う
 - AC4: 既存の `quota exceeded` / `rate limit exceeded` / `HTTP/x 429` は `usage_limit`、
   `HTTP/x 401` / `403` と他の致命は `early_error` のまま
+- AC5: 結果ファイル無しで終わり err.log に `print timeout after <時間> with turn in progress`
+  → `NO_RESULT` / `cli_timeout`。結果ファイルがあれば `OK` / `ok`
 - AC6: 表・引用・バッククォート・grep 形式の中の文言は一致しない。stdout.log の JSON は除外を掛けない
 - AC7: `usage_limit` は監視の結果ファイルと記録の `reason` に入り、標準出力のキーは変わらない
 - 照合の順序は利用上限 → 致命 → 警告の見た目の致命（設計文書の未確認 5 を固定する）
@@ -45,19 +47,19 @@ AGY_PRINT_TIMEOUT = "[agy] print timeout after 10m0s with turn in progress; retu
 IN_GREP = ('plugins/ndf/skills/cross-review/tests/test_monitor_usage_limit.py:12:'
            '    KIRO_LIMIT = "Monthly request limit reached"')
 
-# (見出し, 行, 利用上限の表の一致, 利用上限を除いた致命の表の一致)
+# (見出し, 行, 利用上限の表の一致, CLI の上限の表の一致, 利用上限を除いた致命の表の一致)
 # 設計文書の「現行fatal」は変更前の表で測った値。HTTP 429 はこの変更で利用上限の表へ移る（AC4）。
 TEN_LINES = [
-    ("kiro 実物", KIRO_LIMIT, True, False),
-    ("claude 429 JSON 1 行", CLAUDE_429, True, False),
-    ("claude 429 空白あり", CLAUDE_429_SPACED, True, False),
-    ("HTTP 429 行", HTTP_429, True, False),
-    ("HTTP 401 行", HTTP_401, False, True),
-    ("表の中", IN_TABLE, False, False),
-    ("バッククォート", IN_BACKTICKS, False, False),
-    ("引用行", IN_QUOTE, False, False),
-    ("agy print timeout", AGY_PRINT_TIMEOUT, False, False),
-    ("grep 形式", IN_GREP, False, False),
+    ("kiro 実物", KIRO_LIMIT, True, False, False),
+    ("claude 429 JSON 1 行", CLAUDE_429, True, False, False),
+    ("claude 429 空白あり", CLAUDE_429_SPACED, True, False, False),
+    ("HTTP 429 行", HTTP_429, True, False, False),
+    ("HTTP 401 行", HTTP_401, False, False, True),
+    ("表の中", IN_TABLE, False, False, False),
+    ("バッククォート", IN_BACKTICKS, False, False, False),
+    ("引用行", IN_QUOTE, False, False, False),
+    ("agy print timeout", AGY_PRINT_TIMEOUT, False, True, False),
+    ("grep 形式", IN_GREP, False, False, False),
 ]
 
 
@@ -68,12 +70,13 @@ def _write(path: pathlib.Path, text: str) -> pathlib.Path:
 
 # ---------- 照合の単体（AC4 / AC6） ----------
 
-@pytest.mark.parametrize(("label", "line", "usage_hit", "fatal_hit"), TEN_LINES,
+@pytest.mark.parametrize(("label", "line", "usage_hit", "cli_timeout_hit", "fatal_hit"), TEN_LINES,
                          ids=[t[0] for t in TEN_LINES])
 def test_ten_measured_lines_match_as_the_design_records(tmp_path, monitor_mod, label, line,
-                                                        usage_hit, fatal_hit):
+                                                        usage_hit, cli_timeout_hit, fatal_hit):
     log = _write(tmp_path / "err.log", line)
     assert (monitor_mod._scan_patterns(log, monitor_mod.USAGE_LIMIT_FATAL) is not None) is usage_hit
+    assert (monitor_mod._scan_patterns(log, monitor_mod.CLI_TIMEOUT_AFTER_EXIT) is not None) is cli_timeout_hit
     assert (monitor_mod._scan_patterns(log, monitor_mod.EARLY_ERROR_FATAL) is not None) is fatal_hit
     # 止めるべき文言があるかを返す `_scan_early_fatal` は、どちらの表の一致も拾う（既存テストの契約）
     assert (monitor_mod._scan_early_fatal(log) is not None) is (usage_hit or fatal_hit)
@@ -245,3 +248,36 @@ def test_quoted_usage_limit_in_err_log_is_not_a_hit(tmp_path):
 
     assert proc.returncode == 0, proc.stderr
     assert _outcome(tmp_path, stem)["reason"] == "ok"
+
+
+# ---------- CLI の上限（AC5） ----------
+
+def test_cli_timeout_without_result_is_no_result_with_reason_cli_timeout(tmp_path):
+    stem = _finished(tmp_path, "agy", err=AGY_PRINT_TIMEOUT)
+
+    proc = _run_monitor(tmp_path, "agy")
+
+    assert proc.returncode == 3, proc.stderr
+    outcome = _outcome(tmp_path, stem)
+    assert (outcome["status"], outcome["reason"]) == ("NO_RESULT", "cli_timeout")
+    rows = [json.loads(l) for l in (tmp_path / "monitor-outcomes.jsonl").read_text().splitlines()]
+    assert rows[-1]["reason"] == "cli_timeout"
+
+
+def test_cli_timeout_with_result_is_still_ok(tmp_path):
+    """上限に当たっても結果を書き終えていれば使える。"""
+    stem = _finished(tmp_path, "agy", err=AGY_PRINT_TIMEOUT, result=True)
+
+    proc = _run_monitor(tmp_path, "agy")
+
+    assert proc.returncode == 0, proc.stderr
+    assert (_outcome(tmp_path, stem)["status"], _outcome(tmp_path, stem)["reason"]) == ("OK", "ok")
+
+
+def test_cli_timeout_in_a_table_row_is_not_a_hit(tmp_path):
+    stem = _finished(tmp_path, "agy", err=f"| cli_timeout | {AGY_PRINT_TIMEOUT} |")
+
+    proc = _run_monitor(tmp_path, "agy")
+
+    assert proc.returncode == 3
+    assert _outcome(tmp_path, stem)["reason"] == "missing"
