@@ -122,6 +122,8 @@ classDiagram
 
 ### 理由の語彙
 
+**P3 の語彙と「P3 で足す文言」は、結果なしの理由を共通層の 1 か所で読む設計 [issue-729-619-584-design.md](issue-729-619-584-design.md) の「理由の語彙」「データ構造」「入出力の契約」へ移した。** 以下は 2026-09-15 時点の記録として残す（`unparsable` の追加と起動し直しの可否は新しい設計だけが持つ）。
+
 **監視が書く理由**（`monitor_outcome.REASONS`）:
 
 | 理由 | 状態 | 入る Pull Request | 何が起きたか |
@@ -144,7 +146,7 @@ classDiagram
 | 理由 | 見るファイル | 文言（正規表現） |
 | --- | --- | --- |
 | `usage_limit` | err.log | `Monthly request limit reached` |
-| `usage_limit` | claude の err.log と stdout.log | `"api_error_status"\s*:\s*429` |
+| `usage_limit` | claude の err.log と stdout.log（新しい設計では全担当の err.log） | `"api_error_status"\s*:\s*429` |
 | `usage_limit` | err.log（既存の一致を付け替え） | `quota exceeded` / `rate limit exceeded` / `^HTTP/\d\S* 429 ` |
 | `early_error` | err.log（既存の一致を分ける） | `^HTTP/\d\S* (?:401\|403) ` |
 | `cli_timeout` | err.log（終了後だけ） | `print timeout after \S+ with turn in progress` |
