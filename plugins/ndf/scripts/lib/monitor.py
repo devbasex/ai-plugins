@@ -40,7 +40,9 @@ cross-refactoring は `{agent}-propose-rf{id}` のような別の命名を渡す
   8. **result.json + age fallback**: sentinel を持たない agent (agy) 向け。
      result.json の mtime が 30 秒以上前なら完了とみなし kill → OK
   9. **失敗時 kill**: TIMEOUT / STALLED / EARLY_ERROR (FATAL のみ) / PIDFILE_BAD で
-     返るとき、対象プロセスを SIGTERM (3 秒後に SIGKILL) で停止する
+     返るとき、対象プロセスを SIGTERM (3 秒後に SIGKILL) で停止する。対象がプロセス
+     グループの先頭（`launch-cli.sh` は `set -m` で起動する）なら、グループへ送って
+     子プロセスも止める（#584）。監視自身のグループへは送らない
 
 Usage:
   monitor.py <PR> <target>          target ∈ {codex, agy, both}
@@ -483,6 +485,20 @@ def _is_zombie(pid: int) -> bool:
     return state is not None and "Z" in state
 
 
+def _leads_own_group(pid: int) -> bool:
+    """pid がプロセスグループの先頭で、かつ監視自身のグループではないか。
+
+    `launch-cli.sh` は `set -m` で起動するため CLI の pid = pgid になる。そうでない pid
+    （古い起動の手順・別の経路）は先頭でないか、監視と同じグループに居る。**監視自身の
+    グループへ送ると、進行側のシェルまで止まる**（#584 の候補で退けた形）。
+    """
+    try:
+        pgid = os.getpgid(pid)
+    except OSError:
+        return False
+    return pgid == pid and pgid != os.getpgrp()
+
+
 def _kill_pid(pid: int, sigterm_grace: float = 3.0) -> None:
     """対象プロセスに SIGTERM、`sigterm_grace` 秒後も生きていたら SIGKILL。
 
@@ -490,13 +506,18 @@ def _kill_pid(pid: int, sigterm_grace: float = 3.0) -> None:
     だと後から `gh api` 投稿や result.json 書き込みを実行してメインフローと
     競合する。失敗扱いで返るときは必ず停止させる。
     ゾンビプロセスにはシグナルを送れないためスキップする。
+
+    対象がプロセスグループの先頭なら **グループへ送る**（#584 / #729 の決定 10）。pid だけへ
+    送ると、CLI の子プロセスが残って止めた後に結果ファイルを書く。生存の確認は先頭の pid で見る。
     """
     if pid <= 0:
         return
     if _is_zombie(pid):
         return
+    send = (lambda sig: os.killpg(pid, sig)) if _leads_own_group(pid) else (
+        lambda sig: os.kill(pid, sig))
     try:
-        os.kill(pid, signal.SIGTERM)
+        send(signal.SIGTERM)
     except OSError:
         return
     deadline = time.monotonic() + sigterm_grace
@@ -505,7 +526,7 @@ def _kill_pid(pid: int, sigterm_grace: float = 3.0) -> None:
             return
         time.sleep(0.5)
     try:
-        os.kill(pid, signal.SIGKILL)
+        send(signal.SIGKILL)
     except OSError:
         pass
 
