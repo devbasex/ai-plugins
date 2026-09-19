@@ -324,6 +324,50 @@ def test_oracle_counts_a_thread_without_a_position_as_unmatched(measure_mod):
         "found": 0, "unmatched": 1, "ambiguous": 0}
 
 
+def test_oracle_counts_a_non_dict_position_as_unmatched(measure_mod):
+    """現状固定（R2-001）。位置の一覧に非辞書要素（文字列・null）が混じっても、
+
+    落とさずに `unmatched` へ数え、例外を出さずに測定結果を返す。
+    `_resolved_position` は辞書でない要素へ `(None, None)` を返し、
+    `_add_oracle_match` がそれを `unmatched + 1` として扱う経路を固定する。
+    """
+    fix = {
+        "commit": "abc1234", "fixed": 1, "resolved_threads": 1,
+        "resolved_thread_ids": ["T1"],
+        "resolved_thread_positions": ["not-a-dict"],
+    }
+    st = _state(
+        rounds=[_round(1, fix=fix)],
+        review_findings=[_finding("codex-r1-0", 1, "a.py", 10)],
+    )
+
+    result = measure_mod.measure(st)
+
+    assert result["methods"]["oracle"] == {
+        "found": 0, "unmatched": 1, "ambiguous": 0}
+
+
+def test_oracle_counts_a_null_position_as_unmatched(measure_mod):
+    """現状固定（R2-001）。位置の一覧に `null` が混じっても `unmatched` に数える。
+
+    非辞書要素の代表として `None`（JSON の null）でも同じ経路を通ることを固定する。
+    """
+    fix = {
+        "commit": "abc1234", "fixed": 1, "resolved_threads": 1,
+        "resolved_thread_ids": ["T1"],
+        "resolved_thread_positions": [None],
+    }
+    st = _state(
+        rounds=[_round(1, fix=fix)],
+        review_findings=[_finding("codex-r1-0", 1, "a.py", 10)],
+    )
+
+    result = measure_mod.measure(st)
+
+    assert result["methods"]["oracle"] == {
+        "found": 0, "unmatched": 1, "ambiguous": 0}
+
+
 def test_oracle_does_not_count_a_finding_without_an_id(measure_mod):
     """`finding_id` を持たない指摘は結ばない（#558 レビュー）。
 

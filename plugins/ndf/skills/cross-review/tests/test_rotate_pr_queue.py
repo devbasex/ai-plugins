@@ -329,6 +329,36 @@ def test_an_unknown_flag_is_rejected() -> None:
     assert "unknown arg: --unknown-flag" in out.stderr
 
 
+def test_mode_without_a_value_is_rejected() -> None:
+    """現状固定（R2-002）。`--mode` の直後に値が無いと `${2:?...}` で落ちる。
+
+    state.json も newtext.json も用意せず、gh/git を呼ぶ前の引数解析だけで止まる。
+    `${2:?...}` は set -u と相まって execute のループに入る前に落ちるため、
+    load_state（state.json 読み込み）にも到達しない。
+    """
+    out = subprocess.run(
+        ["bash", str(ROTATE), "execute", "123", "--mode"],
+        capture_output=True, text=True, timeout=60,
+    )
+
+    assert out.returncode != 0
+    assert "--mode requires light|squash" in out.stderr
+
+
+def test_no_arguments_prints_usage() -> None:
+    """現状固定（R2-002）。引数が 0 個のとき entrypoint は usage を出して exit 2。
+
+    state.json を用意せず、引数解析だけで止まることを確かめる。
+    """
+    out = subprocess.run(
+        ["bash", str(ROTATE)],
+        capture_output=True, text=True, timeout=60,
+    )
+
+    assert out.returncode == 2
+    assert "Usage:" in out.stderr
+
+
 def test_prepare_connects_state_pr_metadata_and_git_summary(tmp_path) -> None:
     """現状固定: 公開 CLI が prepare.json と eval 用の代入を組み立てる。"""
     state_pr = 41
