@@ -146,7 +146,7 @@ classDiagram
 | 理由 | 見るファイル | 文言（正規表現） |
 | --- | --- | --- |
 | `usage_limit` | err.log | `Monthly request limit reached` |
-| `usage_limit` | claude の err.log と stdout.log | `"api_error_status"\s*:\s*429` |
+| `usage_limit` | claude の err.log と stdout.log（新しい設計では全担当の err.log） | `"api_error_status"\s*:\s*429` |
 | `usage_limit` | err.log（既存の一致を付け替え） | `quota exceeded` / `rate limit exceeded` / `^HTTP/\d\S* 429 ` |
 | `early_error` | err.log（既存の一致を分ける） | `^HTTP/\d\S* (?:401\|403) ` |
 | `cli_timeout` | err.log（終了後だけ） | `print timeout after \S+ with turn in progress` |

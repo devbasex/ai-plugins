@@ -452,16 +452,16 @@ sequenceDiagram
 
 | 受け入れ条件 | 何で確かめるか |
 | --- | --- |
-| AC1 | `REASONS` の 9 語と、6 つの状態の `reason_for` の返り値を固定する（`scripts/tests/test_monitor_outcome_unit.py`） |
-| AC2〜AC5 | 各文言を 1 行書いた err.log / stdout.log と、終わったプロセスの pid ファイルで `monitor_agent` を呼び、状態・終了コード・結果ファイルの `reason`（`cross-review/tests/test_monitor_usage_limit.py` 新設）。AC5 は結果ファイルあり・なしの 2 通り |
-| AC6 | 「実測」の 10 行をそのまま入力にし、表・引用・バッククォート・grep 形式で一致しないこと。claude の stdout.log の JSON で一致すること（`test_monitor_early_error.py` の形に倣う） |
-| AC7 | 既存の `test_monitor_outcome_file.py` の標準出力のキーの検査を変更せずに通す。記録の行の `reason` を読む |
-| AC8〜AC11 | 一時ディレクトリに監視の結果ファイル（各理由・壊れた JSON・無し）と結果ファイル（オブジェクト・配列・壊れた JSON・空・無し）を組み合わせて置き、`read_launch_outcome` の 5 つの欄。`capsys` で標準出力・標準エラーが空（`test_monitor_outcome_unit.py`） |
+| AC1 | `REASONS` の 9 語と、6 つの状態の `reason_for` の返り値を固定する（`plugins/ndf/scripts/tests/test_monitor_outcome_unit.py`） |
+| AC2〜AC5 | 各文言を 1 行書いた err.log / stdout.log と、終わったプロセスの pid ファイルで `monitor_agent` を呼び、状態・終了コード・結果ファイルの `reason`（`plugins/ndf/skills/cross-review/tests/test_monitor_usage_limit.py` 新設）。AC5 は結果ファイルあり・なしの 2 通り |
+| AC6 | 「実測」の 10 行をそのまま入力にし、表・引用・バッククォート・grep 形式で一致しないこと。claude の stdout.log の JSON で一致すること（`plugins/ndf/skills/cross-review/tests/test_monitor_early_error.py` の形に倣う） |
+| AC7 | 既存の `plugins/ndf/skills/cross-review/tests/test_monitor_outcome_file.py` の標準出力のキーの検査を変更せずに通す。記録の行の `reason` を読む |
+| AC8〜AC11 | 一時ディレクトリに監視の結果ファイル（各理由・壊れた JSON・無し）と結果ファイル（オブジェクト・配列・壊れた JSON・空・無し）を組み合わせて置き、`read_launch_outcome` の 5 つの欄。`capsys` で標準出力・標準エラーが空（`plugins/ndf/scripts/tests/test_monitor_outcome_unit.py`） |
 | AC12 | `git grep -n 'usage_limit' -- plugins/ndf/skills` の一致行が、文書とテストとテンプレートの文言だけである（テスト化せず、レビューの手順） |
-| AC13 | 結果ファイル無し + 監視の結果ファイル（各理由）/ 無しで `read-result` を呼び、状態ファイルの `no_result_reason` と `monitor_detail` と終了コード（`cross-review/tests/test_read_result_reason.py` 新設） |
-| AC14〜AC17 | 状態ファイルを作って `judge` と `report` を呼ぶ。`usage_limit` を含む / 含まない / 2 度目の 3 通り（`test_judge_no_result_reason.py` 新設） |
+| AC13 | 結果ファイル無し + 監視の結果ファイル（各理由）/ 無しで `read-result` を呼び、状態ファイルの `no_result_reason` と `monitor_detail` と終了コード（`plugins/ndf/skills/cross-review/tests/test_read_result_reason.py` 新設） |
+| AC14〜AC17 | 状態ファイルを作って `judge` と `report` を呼ぶ。`usage_limit` を含む / 含まない / 2 度目の 3 通り（`plugins/ndf/skills/cross-review/tests/test_judge_no_result_reason.py` 新設） |
 | AC18 | 文書の `grep`（10 語と「見分け方」の節） |
-| AC19〜AC21 | 3 秒後に子が書く偽の CLI を `launch-cli.sh` で起動し、`os.getpgid` と、監視の上限 2 秒で止めた後の結果ファイルの有無。先頭でない pid では `os.killpg` が呼ばれないことを `mock` で見る（`test_launch_cli_process_group.py` 新設） |
+| AC19〜AC21 | 3 秒後に子が書く偽の CLI を `launch-cli.sh` で起動し、`os.getpgid` と、監視の上限 2 秒で止めた後の結果ファイルの有無。先頭でない pid では `os.killpg` が呼ばれないことを `mock` で見る（`plugins/ndf/skills/cross-review/tests/test_launch_cli_process_group.py` 新設） |
 | AC22〜AC23 | 検証手段の表のコマンド |
 | AC24 | `SKILL.md` の骨組みの該当行（`bg-wait.sh run` から `case $JUDGE_RC` まで）を変更前と `diff` して差が無い |
 
