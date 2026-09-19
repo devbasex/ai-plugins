@@ -115,7 +115,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| scattered_config | centralize_configuration | major | kiro | 検証中 | 1 |
+| scattered_config | centralize_configuration | major | kiro | 採用 | 1 |
 
 **なぜ**: 監視の結果ファイルのキーの一覧が 3 か所に散っている。monitor_outcome.OUTCOME_KEYS（14 個・runtime では未使用）と、実際に辞書を組み立てる monitor.py の _record_outcome（`phase` を含む 15 個）と、test_monitor_outcome_file.py の独自コピー（15 個）である。正本のはずの OUTCOME_KEYS が `phase` を欠いており既に食い違っている。キーを足すたびにどこかが古くなる。
 
@@ -127,7 +127,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| long_method | extract_method | major | codex | 検証中 | 1 |
+| long_method | extract_method | major | codex | 採用 | 1 |
 
 **なぜ**: 1 関数に理由の集約と出力、再起動不能時の終了処理、再起動済み時の終了処理、再起動対象の記録とシェル向け出力という別々の段階が同居し、状態保存と終了条件が複数箇所に散っている。
 
@@ -140,7 +140,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| long_parameter_list | introduce_parameter_object | major | codex | 未着手 | 0 |
+| long_parameter_list | introduce_parameter_object | major | codex | 検証中 | 1 |
 
 **なぜ**: 初期化結果という同じ概念を表す 11 引数を位置で受け取り、特に連続する 3 個の bool と末尾の件数・再開フラグは呼び出し側で順序を取り違えても検出しにくい。新規初期化と再開の 2 経路が同じ組を渡している。
 
@@ -153,7 +153,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| duplication | consolidate_duplication | minor | codex | 検証中 | 1 |
+| duplication | consolidate_duplication | minor | codex | 採用 | 1 |
 
 **なぜ**: 監視ループの 5 つの終了分岐が、同じ _finish_monitor(status, outcome, (config.log_prefix, agent)) 呼び出しを繰り返している。終了時に渡すログ文脈を変更すると各分岐を同時に直す必要がある。
 
