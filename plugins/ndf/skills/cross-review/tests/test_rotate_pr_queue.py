@@ -345,6 +345,37 @@ def test_mode_without_a_value_is_rejected() -> None:
     assert "--mode requires light|squash" in out.stderr
 
 
+def test_execute_stops_when_state_json_is_missing(tmp_path) -> None:
+    """現状固定（R2-004）。state 不在なら外部コマンドを呼ばずに終了する。"""
+    tmp_dir = tmp_path / "tmp"
+    bin_dir = tmp_path / "bin"
+    calls = tmp_path / "calls.log"
+    tmp_dir.mkdir()
+    bin_dir.mkdir()
+    calls.write_text("", encoding="utf-8")
+
+    fake_command = "#!/usr/bin/env bash\nprintf '%s\\n' \"$0 $*\" >> \"$CALLS\"\n"
+    for command in ("gh", "git"):
+        executable = bin_dir / command
+        executable.write_text(fake_command, encoding="utf-8")
+        executable.chmod(0o755)
+
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "CROSS_REVIEW_TMP_DIR": str(tmp_dir),
+        "CALLS": str(calls),
+    }
+    out = subprocess.run(
+        ["bash", str(ROTATE), "execute", str(_STATE_PR)],
+        capture_output=True, text=True, timeout=60, env=env,
+    )
+
+    assert out.returncode == 1
+    assert "state.json not found" in out.stderr
+    assert calls.read_text(encoding="utf-8") == ""
+
+
 def test_no_arguments_prints_usage() -> None:
     """現状固定（R2-002）。引数が 0 個のとき entrypoint は usage を出して exit 2。
 
