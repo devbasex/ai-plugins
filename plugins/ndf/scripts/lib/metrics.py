@@ -266,6 +266,18 @@ def _emit_table(
     lines += [*headers, *rows]
 
 
+def _emit_bullet_section(
+    lines: list[str],
+    title: str,
+    items: list[str],
+) -> None:
+    """箇条書きの節を出力する。項目がなければ出力しない。"""
+    if not items:
+        return
+    lines += ["", f"## {title}", ""]
+    lines += [f"- {w}" for w in dict.fromkeys(items)]
+
+
 def format_report(metrics: dict[str, Any]) -> str:
     """人が読む形へ整形する。比較の限界を必ず添える。"""
     lines: list[str] = []
@@ -307,13 +319,8 @@ def format_report(metrics: dict[str, Any]) -> str:
         reviewer_rows,
     )
 
-    if metrics["unmeasured"]:
-        lines += ["", "## 集計から分離したラウンド", ""]
-        lines += [f"- {w}" for w in dict.fromkeys(metrics["unmeasured"])]
-
-    if metrics.get("assumed"):
-        lines += ["", "## 指定値で代用したラウンド", ""]
-        lines += [f"- {w}" for w in dict.fromkeys(metrics["assumed"])]
+    _emit_bullet_section(lines, "集計から分離したラウンド", metrics["unmeasured"])
+    _emit_bullet_section(lines, "指定値で代用したラウンド", metrics.get("assumed") or [])
 
     lines += ["", "## 比較として読むときの限界", ""]
     lines += [f"- {c}" for c in COMPARISON_CAVEATS]

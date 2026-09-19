@@ -534,16 +534,16 @@ sequenceDiagram
 
 ## 未確認のまま残ること
 
-6 件。実装で決めるものが 4 件、確かめないまま進めるものが 2 件（どちらでも設計が塞ぐ）である。
+6 件。実装で決めたものが 4 件（1・3・5・6。決めた結果を「決める時点」の列に残す）、確かめないまま進めるものが 2 件（2・4。どちらでも設計が塞ぐ）である。
 
 | # | 項目 | 内容 | 決める時点 |
 | --- | --- | --- | --- |
-| 1 | claude の 429 の出る先 | `"api_error_status":429` が err.log と stdout.log のどちらに出るか。実物のログが手元に無い。両方を見るためどちらでも拾える | 実装で偽の claude を両方の形で試す。実物は次に上限に当たったときの記録で確かめる |
+| 1 | claude の 429 の出る先 | `"api_error_status":429` が err.log と stdout.log のどちらに出るか。実物のログが手元に無い。両方を見るためどちらでも拾える | 実装で偽の claude を err.log と stdout.log の両方の形で試し、どちらでも `EARLY_ERROR` / `usage_limit` になることをテストで固定した（`test_monitor_usage_limit.py` の `test_usage_limit_stops_the_agent_as_early_error_with_reason_usage_limit`）。実物の出る先は次に上限に当たったときの記録で確かめる |
 | 2 | kiro の利用上限のときの終わり方 | プロセスが直ちに終わるのか、待ち続けるのか。#619 の実物では `err.log` に 1 行出て `NO_RESULT` になった（直ちに終わったと読める） | どちらでも監視は巡回で文言を拾い `usage_limit` にする。実装で確かめない |
-| 3 | macOS の bash 3.2 の `set -m` | Linux の bash 5.3 だけで確かめた | 実装で確かめる。成り立たなければ pid だけの停止に落ちる（構造は同じ） |
+| 3 | macOS の bash 3.2 の `set -m` | Linux の bash 5.3 だけで確かめた | 一次資料で確かめた。GNU の配布物 bash-3.2 の `doc/bash.1`（2006-09-28）の `set` の `-m` の項に「Background processes run in a separate process group」とあり、`CHANGES` の bash-2.01 の節に `set -m` の修正の記載がある（2.01 の時点で存在する）。手元の bash 5.3.9 では非対話・tty 無しで pid = pgid になり、標準エラーへジョブ制御の通知は出ない。macOS の実機では未確認のまま。成り立たなければ `_leads_own_group` が偽になり pid だけの停止に落ちる（構造は同じ） |
 | 4 | agy が子プロセスで結果を書くか | #584 の事例が止めた後の書き出しだったかは確かめられていない | 確かめないまま進める（グループで止めればどちらでも塞がる） |
-| 5 | 利用上限と他の致命が同じ err.log に並ぶ順序 | 上限の後に別の致命が続く形を想定して利用上限を先に見る。逆の順で並ぶ実物は未確認 | 実装で順序を固定し、逆の実物が出たら見直す |
-| 6 | `read_launch_outcome` に渡す stem の組み立て | cross-review は `<agent>-review-pr<N>`、cross-refactoring は `stem_for` の値。監視の `--stem-template` と食い違うと監視の結果ファイルを引けない | 実装で、`launch-*.sh` と `monitor.py` の呼び出しの stem を突き合わせるテストを置く |
+| 5 | 利用上限と他の致命が同じ err.log に並ぶ順序 | 上限の後に別の致命が続く形を想定して利用上限を先に見る。逆の順で並ぶ実物は未確認 | 照合の順序を利用上限 → 致命 → 警告の見た目の致命に固定し、err.log の並びがどちらの順でも理由が `usage_limit` になることをテストで固定した（`test_usage_limit_wins_over_other_fatal_lines_in_either_order`）。逆の順で並ぶ実物が出ても結果は変わらない |
+| 6 | `read_launch_outcome` に渡す stem の組み立て | cross-review は `<agent>-review-pr<N>`、cross-refactoring は `stem_for` の値。監視の `--stem-template` と食い違うと監視の結果ファイルを引けない | cross-review の 3 か所（`launch-reviewer.sh` の `STEM=` の行・監視の `DEFAULT_STEM_TEMPLATE`・取り込みが渡す stem）が同じ形であることを 1 つのテストで固定した（`test_read_result_reason.py` の `test_the_three_stems_have_the_same_shape`）。cross-refactoring の `stem_for` との突き合わせは G4 が `read_result` を置き換えるときに同じ形のテストを置く |
 
 ## 申し送り（並行する設計との境界）
 

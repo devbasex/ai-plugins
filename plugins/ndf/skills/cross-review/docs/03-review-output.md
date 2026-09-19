@@ -120,7 +120,23 @@ pint / larastan / test / build などは **中断** を原則とする。
    環境変数) で EARLY_ERROR 検知自体を無効化し、hard timeout / stall / sentinel / result.json
    のみで判定するモードに切り替える
 3. **新しい致命パターンを観測した場合**: `EARLY_ERROR_FATAL` に追記する (PR で plugin に反映)。
-   曖昧パターンは `EARLY_ERROR_WARN` 側に置き、kill 対象にはしない
+   曖昧パターンは `EARLY_ERROR_WARN` 側に置き、kill 対象にはしない。利用上限の文言は
+   `USAGE_LIMIT_FATAL`（claude の JSON は `CLAUDE_STDOUT_USAGE_LIMIT`）に置く
+
+### 上限に当たった場合の見分け方
+
+止めたのが監視の上限か、担当の CLI の利用上限か、CLI 自身の上限かは、監視が書いた理由で
+見分ける。`err.log` の目視より先にこれを読む（#619 #729）。
+
+| 読む場所 | 何が分かるか |
+| --- | --- |
+| `$TMP_DIR/<agent>-review-pr<PR>-monitor.json` の `reason` | その担当の**最後の**起動の理由。`usage_limit` なら利用上限、`cli_timeout` なら CLI 自身の上限、`timeout` なら監視の上限、`missing` なら文言の無い結果なし |
+| 同じファイルの `detail` | 一致した文言を含む err.log / stdout.log の抜粋（最大 200 文字） |
+| `$TMP_DIR/monitor-outcomes.jsonl` | 起動ごとに 1 行が追記だけで積まれる。起動し直した担当の **1 回目の理由**はここに残る（`<stem>-monitor.json` は 2 回目で上書きされる）。`reason` と `ended_at` で並べて読む |
+| 状態ファイルの `rounds[-1].<agent>.no_result_reason` / `monitor_detail` | `read-result` が写した値。`state.py report` のラウンド表には `<agent>=NO_RESULT(<理由>)` の形で出る |
+
+`usage_limit` は起動し直しても解けないため、判定は同じラウンドで起動し直さず終了コード 1
+で終える。枠が戻るまで待つか、その担当を外して回すかは進行側が決める。
 - ❌ **fix サブエージェントが Resolve をスキップ** — reply だけでは未対応扱い。Resolve まで実行
 - ❌ **review body に identifier prefix を付け忘れる** — GitHub UI 上で誰のレビューか不明になる
 
