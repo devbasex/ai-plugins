@@ -1,64 +1,16 @@
-# #729 / #619 / #584: 担当 1 回の起動の結末を共通の語彙で読む
-
-設計は [issue-729-619-584-design.md](issue-729-619-584-design.md) にある。この文書は「何を満たすか」だけを扱う。
-
-**この文書は、既存の設計 [issue-662-598-537-619-584-583-requirements.md](issue-662-598-537-619-584-583-requirements.md) の P3（AC50〜AC62、AC68〜AC69）を置き換える。** 対応は末尾の「既存の受け入れ条件との対応」にある。P1（#662）と P2（#598 #537）は v10.13.0 で配布済みで、この文書は触らない。#583 は #730 の設計が持つ。
-
-## 依頼（原文）
-
-### #729（根本原因の親）
-
-> **担当 1 回の起動の結末（結果ファイルの有無と、監視が打ち切った理由）を読み、起動し直してよいかを返す契約。**
->
-> - 結末の語彙は `plugins/ndf/scripts/lib/monitor_outcome.py`、早期の致命の検知は `monitor.py` の `EARLY_ERROR_FATAL` にある
-> - cross-review の `state.py`（`_read_review_result_file`）も cross-refactoring の `refactor_lib/gitfacts.py`（`read_result`）も語彙を読まず、結果ファイルの有無だけで判断する（Skill 側で `monitor_outcome` を読むコードは 0 件）
-> - `EARLY_ERROR_FATAL` は `Monthly request limit reached` や `"api_error_status":429` の行に一致しない
->
-> `read_result` が `die` で進行を決める向きは #728 が持つ。
->
-> ## 採る手
->
-> - 移動（`move_responsibility`）: 結果なしの判断を、各 Skill の結果ファイルの読み取りから共通層の結末へ移す
-> - 新設: 利用上限（`usage_limit`）の語彙と検知の文言
->
-> ## 完了条件
->
-> - 両 Skill が共通層の結末を読み、利用上限を理由として出し、同じラウンドでの起動し直しを止める
-> - 利用上限の実際の出力（上の 2 形式）を検知することを検査が確かめる
-> - 各子 issue の再現手順を実行し、現象が出ないことを確かめる
-
-### #619
-
-> **監視の結果（状態と `detail`）を担当ごとにファイルへ残し、`read-result` が `NO_RESULT` の理由に使う。**
-> 理由は、監視の上限（timeout）・CLI 自身の上限（cli_timeout）・利用上限（usage_limit）・早期エラー（early_error）・未投稿（not_posted）・結果ファイル無し（missing）を区別する。
->
-> - 利用上限は起動し直しても解けないため、理由が `usage_limit` のときは起動し直さずに止めて報告する判断もここに置ける（cross-refactoring の #647 と共通）
-
-### #584
-
-> 移動（`move_responsibility`）。停止の単位を pid からプロセスグループへ移す。`launch-cli.sh` は CLI を新しいプロセスグループとして起動し、`_kill_pid` はそのグループへ SIGTERM / SIGKILL を送る。
->
-> 止めた理由を読む側（結果なしの理由の語彙）は、担当 1 回の起動の結末を共通の語彙で読む #729 が持つ。
+# cross-review: 利用上限で止まった担当が missing と報告されて空振りの起動し直しで待たされ、止めた担当が後から結果を書く → 上限を理由に報告して同じラウンドで起動し直さず、止めた後は書かせない（要求と受け入れ条件 / #729 #619 #584）
 
 ## 目的
 
-- 担当の CLI が利用上限で落ちたとき、進行側と利用者に届く理由が `usage_limit` になり、同じラウンドで同じ担当を起動し直さない
-- 結果ファイルが無いときに「監視が打ち切った」「CLI が自分の上限で終わった」「終わったが結果を書かなかった」を、結末の語彙 1 つで区別できる
-- 結果なしの判断と起動し直しの可否を共通層の 1 か所が持ち、cross-review と cross-refactoring がその値を読む（両 Skill が同じ判断を別々に書かない）
-- 監視が止めた担当の子プロセスが、止めた後に結果ファイルを書かない
+**起きていること。** 担当の CLI（kiro / claude）が月間の利用上限に当たると、監視はその文言を読めず、結果なしの理由が `missing` に畳まれる。進行側は同じ担当を同じラウンドで起動し直し、監視の上限 1 回分（レビューで 1200 秒）を待ってから `error` で終わる（#619。#647 では 3729 回の空振り）。また、監視が止めた担当の子プロセスが、止めた後に結果ファイルを書く（#584）。
 
-## 前提
+**困る人。** 収束ループを回す進行側と、結果を待つ利用者。届く理由が `missing` のため、上限に当たったのか、監視の上限で打ち切られたのかを判別できない。
 
-| # | 前提 |
-| --- | --- |
-| 1 | claude の利用上限の文言の実物は `"api_error_status":429` を含む行である（#647 の本文）。err.log と stdout.log のどちらに出るかは未確認のため、両方を見る |
-| 2 | kiro の利用上限の文言の実物は err.log の `Monthly request limit reached` である（#619 の本文、PR #601 の round 2） |
-| 3 | P1（監視の結果ファイル `<stem>-monitor.json` と `monitor_outcome.read_outcome`）と P2（`limits.py`、`--phase`）は v10.13.0 で `develop` に入っている。この変更はその上に載せる |
-| 4 | cross-refactoring の側の実装（`gitfacts.read_result` と 3 つの取り込み）は #728（G4）が行う。この変更が決めるのは `read_result` が従う契約だけである |
-| 5 | 利用上限で止まった担当を外して残りの担当で回す判断は #478（D-B）が持つ。この変更は「同じ担当を起動し直さずに止めて理由を報告する」までである |
-| 6 | 監視の終了コード 0〜6 と標準出力の 13 個のキーは変えない（既存の設計の決定 16。G4 の骨組みがこれを前提にする） |
+**直すと成り立つこと。** 理由が `usage_limit` として進行側と利用者に届き、同じラウンドで同じ担当を起動し直さない。結果ファイルが無いときの「監視が打ち切った」「CLI が自分の上限で終わった」「終わったが結果を書かなかった」を、結末の語彙 1 つで区別できる。結果なしの判断と起動し直しの可否は共通層の 1 か所が持ち、cross-review と cross-refactoring がその値を読む（両 Skill が同じ判断を別々に書かない）。監視が止めた担当の子プロセスは、止めた後に結果ファイルを書かない。
 
 ## 対象範囲
+
+変えるのは共通層の 3 ファイルと cross-review で、cross-refactoring は契約だけを決める。
 
 含む:
 
@@ -87,6 +39,8 @@
 
 ## 用語
 
+受け入れ条件はこの表の語で書く。
+
 | 用語 | 意味 |
 | --- | --- |
 | 担当 | レビュー・反証・適用・修正を行う CLI（codex / agy / kiro / claude） |
@@ -100,9 +54,22 @@
 | 利用上限 | 担当の CLI の月間・週間の利用枠に達し、起動し直しても解けない状態 |
 | CLI の上限 | 担当の CLI 自身の実行時間の上限（agy の `--print-timeout`） |
 
+## 前提
+
+利用上限の文言の実物は 2 つで、配布済みの P1 / P2 の上に載せる。
+
+| # | 前提 |
+| --- | --- |
+| 1 | claude の利用上限の文言の実物は `"api_error_status":429` を含む行である（#647 の本文）。err.log と stdout.log のどちらに出るかは未確認のため、両方を見る |
+| 2 | kiro の利用上限の文言の実物は err.log の `Monthly request limit reached` である（#619 の本文、PR #601 の round 2） |
+| 3 | P1（監視の結果ファイル `<stem>-monitor.json` と `monitor_outcome.read_outcome`）と P2（`limits.py`、`--phase`）は v10.13.0 で `develop` に入っている。この変更はその上に載せる |
+| 4 | cross-refactoring の側の実装（`gitfacts.read_result` と 3 つの取り込み）は #728（G4）が行う。この変更が決めるのは `read_result` が従う契約だけである |
+| 5 | 利用上限で止まった担当を外して残りの担当で回す判断は #478（D-B）が持つ。この変更は「同じ担当を起動し直さずに止めて理由を報告する」までである |
+| 6 | 監視の終了コード 0〜6 と標準出力の 13 個のキーは変えない（既存の設計の決定 16。G4 の骨組みがこれを前提にする） |
+
 ## 受け入れ条件
 
-文言の一覧は設計文書の「入出力の契約」の「検知の文言」にある。
+24 件を 5 つの群に分ける。文言の一覧は設計文書の「入出力の契約」の「検知の文言」にある。
 
 語彙と検知（監視、#619）:
 
@@ -113,15 +80,15 @@
   | `ok` / `timeout` / `stalled` / `early_error` / `missing` / `pidfile_bad` | `usage_limit` / `cli_timeout` / `unparsable` |
 
 - [ ] AC2: err.log に `Monthly request limit reached` の行が出ると、監視は担当を止めて `EARLY_ERROR`（終了コード 4）を返す。監視の結果ファイルの `reason` は `usage_limit` である
-- [ ] AC3: err.log（全担当）か stdout.log（claude だけ）に `"api_error_status"` と `429` を `:` で結んだ行が出ると、AC2 と同じく `usage_limit` になる。`:` の前後の空白の有無は問わない
+- [ ] AC3: err.log（全担当）か stdout.log（claude だけ）に、`"api_error_status"` と `429` を `:` で結んだ行が出たときも AC2 と同じである。`reason` は `usage_limit` になる。`:` の前後の空白の有無は問わない
 - [ ] AC4: 既存の一致のうち `quota exceeded` / `rate limit exceeded` / `HTTP/<版> 429` の `reason` は `usage_limit` になる。`HTTP/<版> 401` / `HTTP/<版> 403` とそれ以外の致命の一致は `early_error` のままである
-- [ ] AC5: 担当が結果ファイル無しで終わり、err.log に `print timeout after <時間> with turn in progress` があるとき、監視は `NO_RESULT`（終了コード 3）を返す。`reason` は `cli_timeout` である。同じ文言があっても結果ファイルがあれば `OK` / `ok` である
+- [ ] AC5: 担当が結果ファイル無しで終わり、err.log に `print timeout after <時間> with turn in progress` がある場合を扱う。監視は `NO_RESULT`（終了コード 3）を返し、`reason` は `cli_timeout` である。同じ文言があっても結果ファイルがあれば `OK` / `ok` である
 - [ ] AC6: AC2〜AC5 の文言が err.log で markdown の表の行・引用・バッククォート・grep 形式の引用の中にあるときは一致しない。claude の stdout.log は JSON 向けの照合で見るため、この除外を掛けない
 - [ ] AC7: `usage_limit` / `cli_timeout` は監視の結果ファイルと監視の記録の `reason` に入る。監視の標準出力の 13 個のキーと値の型、終了コードは変更前と同じである
 
 結末を 1 つの値として読む（共通層、#729）:
 
-- [ ] AC8: 結果ファイルが JSON オブジェクトとして読めるとき、`monitor_outcome.read_launch_outcome(tmp_dir, stem, result_path)` はその辞書を `payload` に持つ。`reason` は `None`、`relaunch_same_agent` は `True` である。監視の結果ファイルの `reason` が何であっても同じである
+- [ ] AC8: `monitor_outcome.read_launch_outcome(tmp_dir, stem, result_path)` を呼ぶ。結果ファイルが JSON オブジェクトとして読めるとき、返り値はその辞書を `payload` に持つ。`reason` は `None`、`relaunch_same_agent` は `True` である。監視の結果ファイルの `reason` が何であっても同じである
 - [ ] AC9: 使える結果が無いとき、`reason` は次の表で決まる
 
   | 監視の結果ファイルの `reason` | 結果ファイル | `reason` |
@@ -141,7 +108,7 @@ cross-review が値を読む（#619）:
 - [ ] AC15: 結果なしの担当の理由に `relaunch_same_agent` が偽のもの（`usage_limit`）があるとき、`judge` は起動し直さない。`final=error` として終了コード 1 で終わり、標準エラーに担当・理由・`monitor_detail` が出る
 - [ ] AC16: 理由がすべて起動し直してよいものなら、`judge` は変更前と同じく終了コード 7 で `RELAUNCH_AGENTS` を返し、2 度目の結果なしで `final=error` になる。終了コード 0 / 2 / 8 の枝は変更前と同じである
 - [ ] AC17: `state.py report` のラウンド表で、結果なしの担当は `kiro=NO_RESULT(usage_limit)` の形で出る
-- [ ] AC18: `docs/01-state-and-review.md` の理由の表に 10 個の理由が載る。10 個は AC1 の 9 語から `ok` を除いた 8 語に、`no_verdict` / `not_posted` を足したものである。`docs/03-review-output.md` の「monitor.py が誤って kill する場合の手順」に、上限に当たった場合の見分け方（`reason` と `monitor-outcomes.jsonl` の読み方）が載る
+- [ ] AC18: `docs/01-state-and-review.md` の理由の表に 10 個の理由が載る。10 個は AC1 の 9 語から `ok` を除いた 8 語に、`no_verdict` / `not_posted` を足したものである。`docs/03-review-output.md` の「monitor.py が誤って kill する場合の手順」に、上限に当たった場合の見分け方が載る。見分け方は `reason` と `monitor-outcomes.jsonl` の読み方である
 
 止めた後に書かせない（#584）:
 
@@ -164,6 +131,8 @@ cross-review が値を読む（#619）:
 | システム環境 | macOS の bash 3.2 でも AC19 が成り立つこと（未確認。設計文書の「未確認のまま残ること」） |
 
 ## 影響
+
+監視の終了コードと標準出力は変わらず、増えるのは理由の値と状態ファイルの鍵である。
 
 | 対象 | 影響 |
 | --- | --- |
@@ -208,6 +177,44 @@ cross-review が値を読む（#619）:
 | --- | --- | --- |
 | `gitfacts.read_result` を共通の関数の薄い包みとして残すか、呼び出し側が共通の関数を直接呼ぶか | G4（#728）の設計 | G4 の設計 Pull Request |
 
+## 依頼（原文）
+
+3 つの issue の本文を、書かれたままの形で引く。
+
+### #729（根本原因の親）
+
+> **担当 1 回の起動の結末（結果ファイルの有無と、監視が打ち切った理由）を読み、起動し直してよいかを返す契約。**
+>
+> - 結末の語彙は `plugins/ndf/scripts/lib/monitor_outcome.py`、早期の致命の検知は `monitor.py` の `EARLY_ERROR_FATAL` にある
+> - cross-review の `state.py`（`_read_review_result_file`）も cross-refactoring の `refactor_lib/gitfacts.py`（`read_result`）も語彙を読まず、結果ファイルの有無だけで判断する（Skill 側で `monitor_outcome` を読むコードは 0 件）
+> - `EARLY_ERROR_FATAL` は `Monthly request limit reached` や `"api_error_status":429` の行に一致しない
+>
+> `read_result` が `die` で進行を決める向きは #728 が持つ。
+>
+> ## 採る手
+>
+> - 移動（`move_responsibility`）: 結果なしの判断を、各 Skill の結果ファイルの読み取りから共通層の結末へ移す
+> - 新設: 利用上限（`usage_limit`）の語彙と検知の文言
+>
+> ## 完了条件
+>
+> - 両 Skill が共通層の結末を読み、利用上限を理由として出し、同じラウンドでの起動し直しを止める
+> - 利用上限の実際の出力（上の 2 形式）を検知することを検査が確かめる
+> - 各子 issue の再現手順を実行し、現象が出ないことを確かめる
+
+### #619
+
+> **監視の結果（状態と `detail`）を担当ごとにファイルへ残し、`read-result` が `NO_RESULT` の理由に使う。**
+> 理由は、監視の上限（timeout）・CLI 自身の上限（cli_timeout）・利用上限（usage_limit）・早期エラー（early_error）・未投稿（not_posted）・結果ファイル無し（missing）を区別する。
+>
+> - 利用上限は起動し直しても解けないため、理由が `usage_limit` のときは起動し直さずに止めて報告する判断もここに置ける（cross-refactoring の #647 と共通）
+
+### #584
+
+> 移動（`move_responsibility`）。停止の単位を pid からプロセスグループへ移す。`launch-cli.sh` は CLI を新しいプロセスグループとして起動し、`_kill_pid` はそのグループへ SIGTERM / SIGKILL を送る。
+>
+> 止めた理由を読む側（結果なしの理由の語彙）は、担当 1 回の起動の結末を共通の語彙で読む #729 が持つ。
+
 ## 既存の受け入れ条件との対応
 
 既存の設計（PR #666）の P3 の受け入れ条件を、この文書のどこが引き継ぐかを示す。
@@ -230,3 +237,9 @@ cross-review が値を読む（#619）:
 | AC69 | AC18 | 同じ |
 | — | AC1、AC8、AC10〜AC12 | 新設（結末を 1 つの値として読む契約） |
 | — | AC24 | 新設（骨組みを変えない） |
+
+## この文書の位置づけ
+
+この文書は「何を満たすか」だけを扱う。設計は [issue-729-619-584-design.md](issue-729-619-584-design.md) にある。
+
+**既存の要求 [issue-662-598-537-619-584-583-requirements.md](issue-662-598-537-619-584-583-requirements.md) の P3 を置き換える。** 置き換える受け入れ条件は AC50〜AC62 と AC68〜AC69 で、対応は「既存の受け入れ条件との対応」にある。P1（#662）と P2（#598 #537）は v10.13.0 で配布済みで、この文書は触らない。#583 は #730 の設計が持つ。
