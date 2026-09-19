@@ -205,3 +205,72 @@ def test_review_assign_rejects_a_bad_round(assignment):
 def test_review_assign_rejects_an_unknown_host(assignment):
     with pytest.raises(assignment.AssignmentError):
         assignment.review_assign(1, "gemini")
+
+
+# ---------- 席の埋め方と席の名前（#727。cross-review が使う） ----------
+#
+# 変更前の席の割り当て（`review_assign`）を期待値に使えるよう、同じファイルに置く。
+# `review_assign` のテストは P7 で消す。
+
+def test_review_seats_match_review_assign_for_three_available(assignment):
+    """AC8: 使える者が 3 者のとき、変更前の輪番と同じ値になる（4 ホスト × ラウンド 1〜12）。"""
+    for host in assignment.HOST_RUNTIMES:
+        pool = assignment.review_pool(host)
+        for round_no in range(1, 13):
+            assert assignment.review_seats(round_no, pool, []) == \
+                assignment.review_assign(round_no, host), f"host={host} round={round_no}"
+
+
+def test_review_seats_with_four_available_give_each_two_turns(assignment):
+    """AC9: 使える者が 4 者なら毎ラウンド 2 席で、ラウンド 1〜4 で各者がちょうど 2 回。"""
+    available = list(assignment.ALL_RUNTIMES)
+    seats = [assignment.review_seats(r, available, []) for r in range(1, 5)]
+    assert all(len(s) == 2 for s in seats)
+    counts = {name: sum(name in s for s in seats) for name in available}
+    assert counts == {name: 2 for name in available}
+
+
+def test_review_seats_with_two_available_return_both_every_round(assignment):
+    """AC10"""
+    for round_no in range(1, 5):
+        assert assignment.review_seats(round_no, ["codex", "kiro"], []) == ["codex", "kiro"]
+
+
+def test_review_seats_with_one_available_fill_from_fallback_or_second_seat(assignment):
+    """AC11"""
+    assert assignment.review_seats(1, ["codex"], ["claude"]) == ["codex", "claude"]
+    assert assignment.review_seats(1, ["codex"], []) == ["codex", "codex-2"]
+
+
+def test_review_seats_skip_a_fallback_that_is_already_available(assignment):
+    """埋め合わせの候補が使える者に含まれるときは飛ばす（同じ席の名前を 2 つ返さない）。"""
+    assert assignment.review_seats(1, ["claude"], ["claude"]) == ["claude", "claude-2"]
+
+
+def test_review_seats_with_none_available_use_fallback_twice(assignment):
+    """AC12"""
+    assert assignment.review_seats(1, [], ["claude"]) == ["claude", "claude-2"]
+    with pytest.raises(assignment.AssignmentError):
+        assignment.review_seats(1, [], [])
+
+
+def test_review_seats_reject_a_bad_round(assignment):
+    with pytest.raises(assignment.AssignmentError):
+        assignment.review_seats(0, ["codex", "kiro"], [])
+
+
+def test_seat_runtime_strips_the_suffix(assignment):
+    """AC13"""
+    assert assignment.seat_runtime("kiro-2") == "kiro"
+    assert assignment.seat_runtime("kiro") == "kiro"
+
+
+@pytest.mark.parametrize("seat", ["gemini", "kiro-1", "kiro-10", "kiro-2-3"])
+def test_seat_runtime_rejects_a_malformed_seat(assignment, seat):
+    """AC13"""
+    with pytest.raises(assignment.AssignmentError):
+        assignment.seat_runtime(seat)
+
+
+def test_seat_pattern_matches_the_documented_form(assignment):
+    assert assignment.SEAT_PATTERN.pattern == r"^(claude|codex|agy|kiro)(-[2-9])?$"
