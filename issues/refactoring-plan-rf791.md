@@ -180,7 +180,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| long_method | extract_method | major | codex | 検証中 | 1 |
+| long_method | extract_method | major | codex | 採用 | 1 |
 
 **なぜ**: 既存stateの探索、旧形式の補完、追加レビュー観点の再計算、引き継ぎ記録、保存、待ち行列flush、worktree同期、機械可読出力までが1関数に直列で置かれ、副作用の順序を長い本体とコメントから追う必要がある。各段階には独立した終了条件と入出力があり、名前を付けて分離できる。
 
@@ -194,7 +194,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| long_method | extract_method | major | codex | 未着手 | 0 |
+| long_method | extract_method | major | codex | 取り消し | 1 |
 
 **なぜ**: 新規初期化の1関数に、PR所有権の解決、レビュー観点の構築、worktreeと既存コメントの準備、認証確認、state構築、永続化と出力が同居し、さらに5個のローカル関数が本体を約200行へ広げている。各段階は既に名前と入出力を持つため、モジュールレベルへ抽出すれば段階単位で読めて個別にテストできる。
 
@@ -242,3 +242,4 @@
 | 1 | `plugins/ndf/skills/cross-review/scripts/state.py#cmd_read_result` | error | 1 ラウンドの採用上限 5 件を超えた |
 | 2 | `plugins/ndf/scripts/lib/refresh.py#fetch` | error | テストの期待する振る舞いが変わっています（plugins/ndf/scripts/tests/test_refresh.py）。構造改善では期待出力を変えません。振る舞いの変更は別の変更に分けてください |
 | 3 | `plugins/ndf/scripts/lib/monitor.py#_record_outcome` | long_method | 1 ラウンドの採用上限 5 件を超えた |
+| 4 | `plugins/ndf/skills/cross-review/scripts/state.py#_init_new_state` | long_method | テストの期待する振る舞いが変わっています（plugins/ndf/skills/cross-review/tests/test_init_body_not_duplicated.py）。構造改善では期待出力を変えません。振る舞いの変更は別の変更に分けてください |
