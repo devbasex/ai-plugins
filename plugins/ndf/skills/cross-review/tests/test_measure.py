@@ -142,6 +142,17 @@ def test_empty_state_does_not_crash(measure_mod):
     assert "methods" in result
 
 
+@pytest.mark.parametrize("state", [None, [], "not-a-state"])
+def test_non_mapping_state_falls_back_to_an_empty_state(measure_mod, state):
+    """現状固定: 辞書以外の入力も空の状態として指標の全キーを返す。"""
+    result = measure_mod.measure(state)
+
+    assert set(result) == {"pr", "prs", "rounds", "methods", "cost", "convergence"}
+    assert result["pr"] is None
+    assert result["prs"] == []
+    assert result["rounds"] == 0
+
+
 def test_wall_clock_is_null_while_the_run_has_not_ended(measure_mod):
     """終わっていない実行では実時間を出さない。**0 で埋めない。**"""
     st = _state(rounds=[_round(1)])
@@ -571,6 +582,27 @@ def test_proposed_reports_all_rounds_when_every_round_is_marked(measure_mod):
     assert measure_mod.measure(st)["methods"]["proposed"] == {
         "found": 2, "matched": 2, "of_oracle": 1.0,
         "oracle_scope": "all_rounds", "oracle_base": 2}
+
+
+def test_proposed_normalizes_duplicate_and_invalid_evidence_rounds(measure_mod):
+    """現状固定: 有効な番号は型をそろえて一つの印にし、不正値は無視する。"""
+    st = _state(
+        evidence_rounds=["1", 1, "invalid", None],
+        rounds=[
+            _round(1, fix=_fix(_position("T1", "a.py", 10))),
+            _round(2, fix=_fix(_position("T2", "b.py", 20))),
+        ],
+        review_findings=[
+            _finding("codex-r1-0", 1, "a.py", 10,
+                     classification="verified_blocking"),
+            _finding("codex-r2-0", 2, "b.py", 20,
+                     classification="verified_blocking"),
+        ],
+    )
+
+    assert measure_mod.measure(st)["methods"]["proposed"] == {
+        "found": 1, "matched": 1, "of_oracle": 1.0,
+        "oracle_scope": "evidence_rounds", "oracle_base": 1}
 
 
 def test_proposed_takes_only_the_three_counted_classifications(measure_mod):

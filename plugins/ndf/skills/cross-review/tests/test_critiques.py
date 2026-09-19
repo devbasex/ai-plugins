@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+import shutil
 
 import pytest
 
@@ -571,6 +572,50 @@ def test_a_stale_pidfile_is_not_read_as_a_launch(tmp_dir, tmp_path):
     assert result.returncode == 0, result.stderr
     assert not stale.exists(), "前のラウンドの pid ファイルが残っている"
     assert elapsed < ROUND_TIME_LIMIT, f"{elapsed:.1f} 秒かかった（監視が待っている）"
+
+
+def test_a_retry_launches_only_the_agents_requested_by_collect(tmp_path):
+    """現状固定: 終了コード 7 の再取得では不足した担当だけを起動し直す。"""
+    script_dir = tmp_path / "scripts"
+    script_dir.mkdir()
+    shutil.copy2(SCRIPTS / "critique-round.sh", script_dir / "critique-round.sh")
+    calls = tmp_path / "critique-calls.txt"
+    collects = tmp_path / "collect-count.txt"
+
+    (script_dir / "_tmpdir.sh").write_text(
+        'tmpdir() { printf "%s\\n" "$CROSS_REVIEW_TMP_DIR"; }\n', encoding="utf-8")
+    (script_dir / "critique.sh").write_text(
+        "#!/usr/bin/env bash\n"
+        'printf "%s\\n" "$1" >> "$CRITIQUE_CALLS"\n'
+        'touch "$CROSS_REVIEW_TMP_DIR/$1-critique-pr$2.pid"\n', encoding="utf-8")
+    (script_dir / "monitor.py").write_text(
+        "#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    (script_dir / "state.py").write_text(
+        "#!/usr/bin/env bash\n"
+        'count=0; [ ! -f "$COLLECT_COUNT" ] || count=$(cat "$COLLECT_COUNT")\n'
+        'count=$((count + 1)); printf "%s\\n" "$count" > "$COLLECT_COUNT"\n'
+        'if [ "$count" -eq 1 ]; then\n'
+        "  printf \"CRITIQUE_RETRY_AGENTS='kiro'\\n\"\n"
+        "  exit 7\n"
+        "fi\n"
+        "exit 0\n", encoding="utf-8")
+    for name in ("critique.sh", "monitor.py", "state.py"):
+        (script_dir / name).chmod(0o755)
+
+    env = dict(
+        os.environ,
+        CROSS_REVIEW_TMP_DIR=str(tmp_path),
+        CRITIQUE_CALLS=str(calls),
+        COLLECT_COUNT=str(collects),
+    )
+    result = subprocess.run(
+        ["bash", str(script_dir / "critique-round.sh"), str(PR), "1", "agy", "kiro"],
+        capture_output=True, text=True, env=env, check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert calls.read_text(encoding="utf-8").splitlines() == ["agy", "kiro", "kiro"]
+    assert collects.read_text(encoding="utf-8").strip() == "2"
 
 
 def test_the_stale_pidfile_is_removed_even_without_targets(tmp_dir, tmp_path):

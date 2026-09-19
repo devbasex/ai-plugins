@@ -297,3 +297,77 @@ def test_an_unknown_flag_is_rejected() -> None:
 
     assert out.returncode == 2
     assert "unknown arg: --unknown-flag" in out.stderr
+
+
+def test_prepare_connects_state_pr_metadata_and_git_summary(tmp_path) -> None:
+    """現状固定: 公開 CLI が prepare.json と eval 用の代入を組み立てる。"""
+    state_pr = 41
+    current_pr = 43
+    tmp_dir = tmp_path / "tmp"
+    worktree = tmp_path / "worktree"
+    bin_dir = tmp_path / "bin"
+    tmp_dir.mkdir()
+    worktree.mkdir()
+    bin_dir.mkdir()
+    (tmp_dir / f"cross-review-pr{state_pr}-state.json").write_text(json.dumps({
+        "worktree_path": str(worktree),
+        "current_pr": current_pr,
+        "repo": "o/r",
+        "viewer_login": "tester",
+        "rounds": [
+            {"round": 1, "pr": 40},
+            {"round": 2, "pr": current_pr},
+            {"round": 3, "pr": current_pr},
+        ],
+    }), encoding="utf-8")
+    (bin_dir / "gh").write_text(
+        "#!/usr/bin/env bash\n"
+        "printf '%s\\n' '{\"number\":43,\"url\":\"https://github.com/o/r/pull/43\","
+        "\"title\":\"Current title\",\"body\":\"Current body\","
+        "\"headRefName\":\"feature/prepare\",\"baseRefName\":\"develop\","
+        "\"isDraft\":true}'\n", encoding="utf-8")
+    (bin_dir / "git").write_text(
+        "#!/usr/bin/env bash\n"
+        "case \"$1\" in\n"
+        "  fetch|rev-parse) exit 0 ;;\n"
+        "  log) printf 'abc123 First commit\\ndef456 Second commit\\n' ;;\n"
+        "  diff) printf ' a.py | 2 ++\\n 1 file changed, 2 insertions(+)\\n' ;;\n"
+        "  *) exit 3 ;;\n"
+        "esac\n", encoding="utf-8")
+    for command in ("gh", "git"):
+        (bin_dir / command).chmod(0o755)
+
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "CROSS_REVIEW_TMP_DIR": str(tmp_dir),
+    }
+    out = subprocess.run(
+        ["bash", str(ROTATE), "prepare", str(state_pr)],
+        capture_output=True, text=True, env=env, check=False,
+    )
+
+    assert out.returncode == 0, out.stderr
+    evaluated = subprocess.run(
+        ["bash", "-c",
+         'eval "$1"; printf "%s\\n" "$PREPARE_JSON" "$OLD_PR" "$HEAD_BRANCH" '
+         '"$BASE_BRANCH" "$IS_DRAFT"', "bash", out.stdout],
+        capture_output=True, text=True, check=True,
+    ).stdout.splitlines()
+    prepare_path = tmp_dir / f"rotate-pr{state_pr}-prepare.json"
+    assert evaluated == [
+        str(prepare_path), str(current_pr), "feature/prepare", "develop", "true"]
+    assert json.loads(prepare_path.read_text(encoding="utf-8")) == {
+        "state_pr": state_pr,
+        "old_pr": current_pr,
+        "old_pr_url": "https://github.com/o/r/pull/43",
+        "worktree_path": str(worktree),
+        "head_branch": "feature/prepare",
+        "base_branch": "develop",
+        "is_draft": True,
+        "round_in_pr": 2,
+        "old_title": "Current title",
+        "old_body": "Current body",
+        "git_log": "abc123 First commit\ndef456 Second commit",
+        "git_diff_stat": " a.py | 2 ++\n 1 file changed, 2 insertions(+)",
+    }
