@@ -2636,18 +2636,6 @@ def _has_evidence(finding: dict[str, Any]) -> bool:
     )
 
 
-def _reject_payload(agent: str, path: pathlib.Path, detail: str) -> None:
-    """形式不正の payload を、共通の警告文とともに退ける。**常に None を返す。**
-
-    dict でない payload と list でない `comments` の 2 経路が、型名を含む `detail` の
-    違いだけで同じ警告を出していた。末尾の定型句（0 件・判定は中断）を 1 か所へ集約し、
-    片方の文言だけが動いて 2 経路が食い違うのを防ぐ。
-    """
-    info(f"⚠ {agent}: {detail}（{path}）。指摘の記録は 0 件です。"
-         " review launcher の出力形式不正で、判定は中断します")
-    return None
-
-
 def _load_payload(agent: str, path: pathlib.Path) -> list[dict[str, Any]] | None:
     """payload.json を読み、検証して dict のリストとして返す。読めない・不正なときは None を返す。"""
     try:
@@ -2659,14 +2647,16 @@ def _load_payload(agent: str, path: pathlib.Path) -> list[dict[str, Any]] | None
     if not isinstance(payload, dict):
         # 実測: dict 以外（`[]` / `null` / 文字列 / 数値）を渡すと
         # `payload.get(...)` が AttributeError で落ち、取り込みが例外で終わっていた。
-        return _reject_payload(
-            agent, path,
-            f"payload.json が dict ではありません, type={type(payload).__name__}")
+        info(f"⚠ {agent}: payload.json が dict ではありません"
+             f"（{path}, type={type(payload).__name__}）。指摘の記録は 0 件です。"
+             " review launcher の出力形式不正で、判定は中断します")
+        return None
     raw = payload.get("comments")
     if not isinstance(raw, list):
-        return _reject_payload(
-            agent, path,
-            f"payload.comments が list ではありません, type={type(raw).__name__}")
+        info(f"⚠ {agent}: payload.comments が list ではありません"
+             f"（{path}, type={type(raw).__name__}）。指摘の記録は 0 件です。"
+             " review launcher の出力形式不正で、判定は中断します")
+        return None
     items = [c for c in raw if isinstance(c, dict)]
     if len(items) != len(raw):
         info(f"⚠ {agent}: payload.comments に dict でないエントリが"
