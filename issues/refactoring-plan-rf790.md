@@ -211,7 +211,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| scattered_config | centralize_configuration | major | codex | 検証中 | 1 |
+| scattered_config | centralize_configuration | major | codex | 採用 | 1 |
 
 **なぜ**: 収束判定が数える区分の組が state.py と measure.py に重複し、両者の一致をテストで監視している。区分追加時に片方だけ変わると、実行時の収束判定と事後測定が異なる集合を数える。
 
@@ -223,7 +223,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| long_method | split_into_pipeline | major | codex | 未着手 | 0 |
+| long_method | split_into_pipeline | major | codex | 検証中 | 1 |
 
 **なぜ**: レビュワーごとのファイル解決、JSON 読み込み、payload と comments の境界検証、path・line・本文の正規化が1つの二重ループに入り、入力境界の失敗とキー変換の責務が分離されていない。
 
@@ -248,7 +248,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| test_bypasses_module_boundary | move_responsibility | minor | codex | 検証中 | 1 |
+| test_bypasses_module_boundary | move_responsibility | minor | codex | 採用 | 1 |
 
 **なぜ**: autouse fixture が state_mod を引数に取るため、monitor.py や measure.py だけを検査するテストまで state.py を共通入口から読み込み、GitHub 照会の内部関数を一律に差し替えている。
 
@@ -260,7 +260,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| long_method | extract_method | minor | codex | 検証中 | 1 |
+| long_method | extract_method | minor | codex | 採用 | 1 |
 
 **なぜ**: 証拠ラウンドの検査、採用 finding 集合の作成、oracle のラウンド別分母への絞り込み、出力メタデータ付与を1関数が連続して担い、分母規則だけを独立に検証しにくい。
 
