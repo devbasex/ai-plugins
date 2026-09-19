@@ -31,6 +31,19 @@ def test_read_journal_ignores_malformed_and_non_object_rows(tmp_path):
     assert _load_monitor_outcome().read_journal(tmp_path) == [valid]
 
 
+def test_append_journal_preserves_order_and_utf8_content(tmp_path):
+    mod = _load_monitor_outcome()
+    outcomes = [
+        {"agent": "codex", "status": "OK", "detail": "完了"},
+        {"agent": "kiro", "status": "EARLY_ERROR", "detail": "認証が必要"},
+    ]
+
+    for outcome in outcomes:
+        mod.append_journal(tmp_path, outcome)
+
+    assert mod.read_journal(tmp_path) == outcomes
+
+
 # ---------- 理由の語彙と起動し直しの可否（#729 の AC1 / AC10） ----------
 
 import pytest  # noqa: E402
