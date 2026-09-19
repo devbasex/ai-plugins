@@ -238,7 +238,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| long_method | extract_method | major | codex | 取り消し | 0 |
+| long_method | extract_method | major | codex | 取り消し | 1 |
 
 **なぜ**: 1 件の処理の中に、壊れた JSON の停止判定、既投稿の照合と削除、送信成功時の応答保存と削除、送信失敗時の再試行情報保存と rate limit 判定が直列に並び、flush 自体が順序制御と各項目の状態遷移の両方を担っている。
 
@@ -251,7 +251,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| long_method | extract_method | major | codex | 取り消し | 0 |
+| long_method | extract_method | major | codex | 取り消し | 1 |
 
 **なぜ**: PR head の取得方法の決定、strict 時の同期済み判定と失敗処理、worktree の reset・未追跡ファイル掃除、同期結果の表示という独立した段階が 1 関数に同居している。HeadRef と旧来の文字列 head の分岐も取得段階に閉じず、後続の制御へ have_base・target・label の組で持ち越されている。
 
@@ -277,7 +277,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| duplication | consolidate_duplication | minor | kiro | 取り消し | 0 |
+| duplication | consolidate_duplication | minor | kiro | 取り消し | 1 |
 
 **なぜ**: unmeasured と assumed の 2 節が同じ形（見出し + 空行を lines へ足し、dict.fromkeys で重複を除いた項目を `- {w}` で並べる）で並んでいる。片方だけ書式を変えると 2 節の見た目が食い違う。同じ業務ルール（分離・代用の一覧の出し方）に由来し、変わるときは一緒に変わる。既存テスト test_models_and_metrics.py が format_report の出力を固定している。
 
@@ -306,7 +306,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| long_method | extract_method | major | codex | 検証中 | 1 |
+| long_method | extract_method | major | codex | 採用 | 1 |
 
 **なぜ**: スキップ判定、CLI ごとの subprocess 実行、例外の認証結果への変換、結果の集約、全体の失敗通知が 1 関数に同居しており、個別 CLI のプローブ規則と複数 CLI の制御を別々に読めない。既存の test_auth_probe.py が未知 runtime、成功、未認証マーカー、コマンド不在を公開入口から固定している。
 
@@ -318,7 +318,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| long_method | extract_method | major | codex | 検証中 | 1 |
+| long_method | extract_method | major | codex | 採用 | 1 |
 
 **なぜ**: 待ち行列項目の適用可否判定、response からの URL 復元、対象ラウンド探索、GitHub 到達確認、結果なしまたは成功状態への更新、永続化が 1 関数に直列で同居している。投稿確認は収束可否に関わるため、対象特定と状態遷移を独立した名前で読める構造にする価値が高く、test_state_queue_judge.py が送信済み・冪等スキップ・未到達の経路を固定している。
 
