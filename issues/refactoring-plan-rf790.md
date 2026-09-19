@@ -117,7 +117,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| error | integration | — | agy / kiro | 未着手 | 0 |
+| error | integration | — | agy / kiro | 検証中 | 1 |
 
 **なぜ**: load_state は state.json が不在または空のときに終了コード 1 と state.json not found を返して中断するが、rotate-pr.sh の公開入口を経由してこのエラー経路を通すテストが無い。launch-reviewer.sh 等では固定されているが rotate-pr.sh では未固定である
 
