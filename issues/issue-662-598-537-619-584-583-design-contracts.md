@@ -122,6 +122,8 @@ classDiagram
 
 ### 理由の語彙
 
+**P3 の語彙と「P3 で足す文言」は [issue-729-619-584-design.md](issue-729-619-584-design.md) の「データ構造」「入出力の契約」へ移した。** 以下は 2026-09-15 時点の記録として残す（`unparsable` の追加と起動し直しの可否は新しい設計だけが持つ）。
+
 **監視が書く理由**（`monitor_outcome.REASONS`）:
 
 | 理由 | 状態 | 入る Pull Request | 何が起きたか |
