@@ -186,7 +186,7 @@ graph TD
         J[judge]
         RP[report]
     end
-    subgraph cross-refactoring（G4 が実装）
+    subgraph CR["cross-refactoring（G4 が実装）"]
         GF[取り込み merge-apply / merge-fix / merge-final-fix]
     end
     L -->|pgid = pid| M
