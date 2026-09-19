@@ -756,6 +756,62 @@ def _clean_untracked_files(worktree: str, exclusions: list[str], code: int) -> N
         die(f"追跡対象外のファイルを消せない: {clean.stderr.strip()}", code=code)
 
 
+def _resolve_sync_target(
+    worktree: str,
+    pr: int,
+    head: str | HeadRef,
+) -> tuple[bool, str, str]:
+    """HeadRef と文字列 head から have_base・target・label を解決する。"""
+    if isinstance(head, HeadRef):
+        have_base = _fetch_head(worktree, pr, head)
+        target = head.oid
+        label = head.branch
+    else:
+        # 旧来の呼び出し（ブランチ名だけを渡す経路）。基準は `origin/<branch>` になる。
+        fetch = subprocess.run(
+            ["git", "fetch", "origin", head],
+            capture_output=True, text=True,
+        )
+        have_base = fetch.returncode == 0
+        target = f"origin/{head}"
+        label = head
+    return have_base, target, label
+
+
+def _can_skip_sync(
+    worktree: str,
+    pr: int,
+    head: str | HeadRef,
+    have_base: bool,
+    target: str,
+    label: str,
+    exclusions: list[str],
+    *,
+    strict: bool,
+    code: int,
+) -> bool:
+    """strict 時の同期済み早期終了と基準取得失敗を判定する。
+
+    同期済みで作業が不要な場合は `True` を返す。
+    """
+    if have_base:
+        if strict and isinstance(head, HeadRef) and _is_synced(
+                worktree, pr, head, exclusions, code):
+            return True
+    elif strict:
+        # HEAD を動かす前に、何が失われるかを数える材料が無い（基準が手元に無いのだから、
+        # 未 push のコミットを数えられない）。判定できない状態でフォールバックしない。
+        die(
+            f"PR #{pr} の基準のコミット {target[:7]} を取り込めない。"
+            " ネットワークか権限を確認してください",
+            code=code,
+        )
+    else:
+        # フォーク PR は origin に head branch が無い。作成時と同じ経路で合わせる。
+        info(f"⚠ git fetch origin {label} 失敗 (フォーク PR の可能性) — gh pr checkout でフォールバック")
+    return False
+
+
 def _sync_worktree(
     worktree: str,
     pr: int,
@@ -789,35 +845,12 @@ def _sync_worktree(
     """
     code = 8 if strict else 1
     exclusions = _sync_exclusions(worktree)
-    if isinstance(head, HeadRef):
-        have_base = _fetch_head(worktree, pr, head)
-        target = head.oid
-        label = head.branch
-    else:
-        # 旧来の呼び出し（ブランチ名だけを渡す経路）。基準は `origin/<branch>` になる。
-        fetch = subprocess.run(
-            ["git", "fetch", "origin", head],
-            capture_output=True, text=True,
-        )
-        have_base = fetch.returncode == 0
-        target = f"origin/{head}"
-        label = head
-
-    if have_base:
-        if strict and isinstance(head, HeadRef) and _is_synced(
-                worktree, pr, head, exclusions, code):
-            return
-    elif strict:
-        # HEAD を動かす前に、何が失われるかを数える材料が無い（基準が手元に無いのだから、
-        # 未 push のコミットを数えられない）。判定できない状態でフォールバックしない。
-        die(
-            f"PR #{pr} の基準のコミット {target[:7]} を取り込めない。"
-            " ネットワークか権限を確認してください",
-            code=code,
-        )
-    else:
-        # フォーク PR は origin に head branch が無い。作成時と同じ経路で合わせる。
-        info(f"⚠ git fetch origin {label} 失敗 (フォーク PR の可能性) — gh pr checkout でフォールバック")
+    have_base, target, label = _resolve_sync_target(worktree, pr, head)
+    if _can_skip_sync(
+        worktree, pr, head, have_base, target, label, exclusions,
+        strict=strict, code=code,
+    ):
+        return
     _reset_worktree_head(worktree, pr, target if have_base else None, code)
     _clean_untracked_files(worktree, exclusions, code)
     rev = subprocess.run(
