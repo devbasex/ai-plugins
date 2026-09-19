@@ -223,7 +223,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| long_method | split_into_pipeline | major | codex | 検証中 | 1 |
+| long_method | split_into_pipeline | major | codex | 採用 | 1 |
 
 **なぜ**: レビュワーごとのファイル解決、JSON 読み込み、payload と comments の境界検証、path・line・本文の正規化が1つの二重ループに入り、入力境界の失敗とキー変換の責務が分離されていない。
 
@@ -236,7 +236,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| long_method | extract_method | major | codex | 未着手 | 0 |
+| long_method | extract_method | major | codex | 取り消し | 1 |
 
 **なぜ**: 新規初期化の1関数内に PR 所有権解決、レビュー条件作成、worktree と既存コメントの準備、担当認証、初期 state 構築、保存と表示がネスト関数として同居し、各段階を単独で参照・テストできない。
 
@@ -283,3 +283,4 @@
 | 3 | `plugins/ndf/skills/cross-review/scripts/state.py#_apply_classification` | long_method | 1 ラウンドの採用上限 5 件を超えた |
 | 4 | `plugins/ndf/skills/cross-review/scripts/state.py#_finding_keys` | duplication | 1 ラウンドの採用上限 5 件を超えた |
 | 4 | `plugins/ndf/skills/cross-review/scripts/state.py#_print_init_result` | long_parameter_list | 1 ラウンドの採用上限 5 件を超えた |
+| 4 | `plugins/ndf/skills/cross-review/scripts/state.py#_init_new_state` | long_method | テストの期待する振る舞いが変わっています（plugins/ndf/skills/cross-review/tests/test_init_body_not_duplicated.py）。構造改善では期待出力を変えません。振る舞いの変更は別の変更に分けてください |
