@@ -3065,6 +3065,55 @@ def _merged_root(
     return current
 
 
+def _verify_one_finding(
+    finding: dict[str, Any],
+    allowed: list[str],
+    work: str,
+    codes: set[int],
+    run: Any,
+    ran: dict[tuple[str, ...], Optional[int]],
+) -> dict[str, Any]:
+    """1 つの指摘の suggested_check を検証し、verification レコードを生成する。"""
+    check = str(finding.get("suggested_check") or "")
+    record: dict[str, Any] = {
+        "command": check, "finding_id": finding.get("finding_id"),
+        "exit_code": None, "result": "not_run", "ran_at": None,
+    }
+    argv = _verify_argv(check, allowed, work) if allowed else None
+    if argv is not None:
+        key = tuple(argv)
+        if key in ran:
+            code = ran[key]
+        else:
+            code = run(argv, work)
+            ran[key] = code
+        record["exit_code"] = code
+        record["ran_at"] = _now()
+        if code in codes:
+            record["result"] = "reproduced"
+        elif code == 0:
+            record["result"] = "not_reproduced"
+    return record
+
+
+def _select_best_verification(
+    rep: dict[str, Any],
+    targets: list[dict[str, Any]],
+    by_id: dict[Any, dict[str, Any]],
+) -> dict[str, Any]:
+    """merged_into の関係をたどり、代表へ最良の verification を選ぶ。"""
+    best = rep["verification"]
+    for member in targets:
+        if member is rep or not member.get("merged_into"):
+            continue
+        if _merged_root(member, by_id) is not rep:
+            continue
+        if _VERIFY_RANK.get(_verify_result(member), -1) > \
+           _VERIFY_RANK.get(str(best.get("result") or "not_run"), -1):
+            best = member["verification"]
+    return best
+
+
 def _verify_findings(
     st: dict[str, Any],
     round_no: int,
@@ -3103,40 +3152,15 @@ def _verify_findings(
     ran: dict[tuple[str, ...], Optional[int]] = {}
 
     for finding in targets:
-        check = str(finding.get("suggested_check") or "")
-        record: dict[str, Any] = {
-            "command": check, "finding_id": finding.get("finding_id"),
-            "exit_code": None, "result": "not_run", "ran_at": None,
-        }
-        argv = _verify_argv(check, allowed, work) if allowed else None
-        if argv is not None:
-            key = tuple(argv)
-            if key in ran:
-                code = ran[key]
-            else:
-                code = run(argv, work)
-                ran[key] = code
-            record["exit_code"] = code
-            record["ran_at"] = _now()
-            if code in codes:
-                record["result"] = "reproduced"
-            elif code == 0:
-                record["result"] = "not_reproduced"
-        finding["verification"] = record
+        finding["verification"] = _verify_one_finding(
+            finding, allowed, work, codes, run, ran,
+        )
 
     # 代表は組から選び直す。**実行し直さない**（記録済みの結果を選ぶだけである）。
     for rep in targets:
         if rep.get("merged_into"):
             continue
-        best = rep["verification"]
-        for member in targets:
-            if member is rep or not member.get("merged_into"):
-                continue
-            if _merged_root(member, by_id) is not rep:
-                continue
-            if _VERIFY_RANK.get(_verify_result(member), -1) > \
-               _VERIFY_RANK.get(str(best.get("result") or "not_run"), -1):
-                best = member["verification"]
+        best = _select_best_verification(rep, targets, by_id)
         if best is not rep["verification"]:
             rep["verification"] = dict(best)
 
