@@ -264,7 +264,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| duplication | consolidate_duplication | minor | kiro | 未着手 | 0 |
+| duplication | consolidate_duplication | minor | kiro | 取り消し | 0 |
 
 **なぜ**: payload が dict でない場合と comments が list でない場合の 2 経路が、`info(f"⚠ {agent}: ...形式不正で、判定は中断します")` を出して `return None` する同じ形で並ぶ。返す条件（dict でない / list でない）と型名の埋め込みが繰り返され、警告文の末尾の定型句も重複する。片方の文言だけ直すと 2 経路のメッセージが食い違う。test_review_findings.py が不正 payload での 0 件記録を固定している。
 
@@ -315,3 +315,4 @@
 | 5 | `plugins/ndf/scripts/lib/post_queue.py#Queue.flush` | long_method | どの改善項目にも割り当てられていないコミットが 1 件（311bf7f）。検証を回避した変更や、状態と実差分の食い違いを Pull Request に残さないため、この適用ラウンドを取り消します |
 | 5 | `plugins/ndf/skills/cross-review/scripts/state.py#_sync_worktree` | long_method | どの改善項目にも割り当てられていないコミットが 1 件（311bf7f）。検証を回避した変更や、状態と実差分の食い違いを Pull Request に残さないため、この適用ラウンドを取り消します |
 | 5 | `plugins/ndf/scripts/lib/metrics.py#format_report` | duplication | どの改善項目にも割り当てられていないコミットが 1 件（311bf7f）。検証を回避した変更や、状態と実差分の食い違いを Pull Request に残さないため、この適用ラウンドを取り消します |
+| 5 | `plugins/ndf/skills/cross-review/scripts/state.py#_load_payload` | duplication | どの改善項目にも割り当てられていないコミットが 1 件（1e8216f）。検証を回避した変更や、状態と実差分の食い違いを Pull Request に残さないため、この適用ラウンドを取り消します |
