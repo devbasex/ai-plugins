@@ -1,46 +1,32 @@
-# #727 / #687 / #478 / #664 / #648: 使える者を共通層が決め、担当が揃わなくても 2 席で回す
-
-設計は [issue-727-687-478-664-648-design.md](issue-727-687-478-664-648-design.md) にある。この文書は
-「何を満たすか」だけを扱う。
-
-**この文書は、既存の設計 [issue-624-478-648-requirements.md](issue-624-478-648-requirements.md) の
-P5（AC10〜AC30）を置き換える。** 対応は末尾の「既存の受け入れ条件との対応」にある。P4（#624）は
-#732 の設計が持つ。既存の設計文書の本体は触らない。
+# cross-review / cross-refactoring: 参加する CLI が 1 者でも使えないと収束ループを開始できず、再開で渡した引数が黙って無視される → 使える者だけで開始し、cross-review は毎ラウンド 2 席を確保し、再開で渡した引数は反映されるか反映しないと知らされる（要求 / #727 #687 #478 #664 #648）
 
 ## 目的
 
-- 参加する CLI のどれか 1 者が使えなくても、収束ループ（cross-review / cross-refactoring）を開始でき、
-  使える者だけで回る。使えない者と理由は出力と状態ファイルに残る
-- cross-review は、使える者が 2 者に満たなくても、各ラウンドに 2 席を確保する。席の埋め方の規則は
-  1 つで、両 Skill が共有する共通層が持つ
-- cross-refactoring の既定の参加者は codex / kiro とホスト（ホストが codex / kiro なら 2 者、それ以外なら 3 者）
-  になり、agy は既定から外れる。
-  外す・戻す手段は引数で持つ
-- 中断した収束ループを、引数で進め方を変えて再開できる。反映しなかった引数は出力で分かる。
-  この規則も共通層が 1 か所で持つ
+- **壊れていること**: 参加する CLI のどれか 1 者が導入・認証されていないと、cross-review / cross-refactoring の `init` が止まり、収束ループを開始できない（#478 / #687）。cross-refactoring には担当から agy を外す引数が無く、使える者が 2 者だとレビュー担当が 1 者になる（#664）。中断した収束ループを `--only` などの引数を変えて再開しても、引数が黙って無視される（#648）
+- **困る人**: 4 つの CLI が揃っていない環境で収束ループを回す利用者と、中断したループを進め方を変えて再開する利用者
+- **直すと成り立つこと**: 使える者だけで開始でき、使えない者と理由が出力と状態ファイルに残る。cross-review は使える者が 2 者に満たなくても、ホスト、次に同じランタイムの 2 つ目で各ラウンドに 2 席を確保する。cross-refactoring の既定の参加者は codex / kiro とホストになる（ホストが codex / kiro なら 2 者、それ以外なら 3 者）。agy は `--include` で戻す。再開で渡した引数は反映されるか、反映しないと知らされる。これらの規則は両 Skill が共有する共通層が 1 か所で持つ
 
-## 前提
+## 文書の位置づけ
 
-| # | 前提 |
-| --- | --- |
-| 1 | cross-refactoring のレビュー工程は #436 で消えており（Step 7 の `cross-review` が担う）、`assign()` が返すレビュー担当は状態ファイルへの記録と表示にしか使われない |
-| 2 | 使える者の確認は、認証の確認コマンド（`AUTH_PROBES`）のままである。モデルを引く最小の呼び出しへ替える判断は #461 が持つ。この変更が作るのは、確認の結果で使える者を決める入口である |
-| 3 | 再開の `init` の後、骨組みは必ず `start-round` で新しいラウンドを開く。開いたまま中断したラウンドの担当を書き換える必要は無い |
-| 4 | G2（#732）が同じ `state.py` の `_classify_finding` を、G3（#729）が `_read_review_result_file` / `_record_no_result` / `report` を、G5（#730）が投稿の経路を触る。この変更が触る節は `init` / 再開 / `_round_reviewers` / `start-round` / `read-result` の担当名の受け口 / `report` の参加者の節である |
-| 5 | 同じランタイムの 2 つの CLI プロセスは、別の作業文脈を持てば独立した意見として扱う（#687 の利用者の指示） |
+設計は [issue-727-687-478-664-648-design.md](issue-727-687-478-664-648-design.md) にある。この文書は「何を満たすか」だけを扱う。
+
+**既存の設計 [issue-624-478-648-requirements.md](issue-624-478-648-requirements.md) の P5（AC10〜AC30）は、この文書が置き換える。** 対応は末尾の「既存の受け入れ条件との対応」にある。P4（#624）は #732 の設計が持つ。既存の設計文書の本体は触らない。
 
 ## 対象範囲
 
+変えるのは共通層の 3 ファイルと、両 Skill の初期化・担当・報告・文書である。指摘の数え方・監視・適用の取り込みは他の設計が持つ。
+
 含む:
 
-- 共通層 `lib/assignment.py`: 既定の母集合（Skill ごと）、使える者の解決、席の埋め方、適用の輪番、席の名前
-- 共通層 `lib/auth.py`: 止めない確認（`probe_auth`）。1 件の失敗で `die` する `check_auth` を消す
-- 共通層 `lib/statefile.py`: 再開で明示的に渡した引数だけを状態へ重ね、反映しない引数を知らせる
-- cross-review の `init`（新規と再開）、`start-round` の担当、`read-result` と起動スクリプトの席の受け口、`report`、
-  `SKILL.md` と `docs/`（01 / 04 / 05）
-- cross-refactoring の `init`（新規と再開）、`start-round` と適用の輪番、`report` / 改修計画の表示、`SKILL.md` と `docs/01`
-- `CLAUDE.md` の cross-refactoring と cross-review の節
-- テスト（共通層・両 Skill）
+| 場所 | 中身 |
+| --- | --- |
+| 共通層 `lib/assignment.py` | 既定の母集合（Skill ごと）、使える者の解決、席の埋め方、適用の輪番、席の名前 |
+| 共通層 `lib/auth.py` | 止めない確認（`probe_auth`）。1 件の失敗で `die` する `check_auth` を消す |
+| 共通層 `lib/statefile.py` | 再開で明示的に渡した引数だけを状態へ重ね、反映しない引数を知らせる |
+| cross-review | `init`（新規と再開）、`start-round` の担当、`read-result` と起動スクリプトの席の受け口、`report`、`SKILL.md` と `docs/`（01 / 04 / 05） |
+| cross-refactoring | `init`（新規と再開）、`start-round` と適用の輪番、`report` / 改修計画の表示、`SKILL.md` と `docs/01` |
+| リポジトリ | `CLAUDE.md` の cross-refactoring と cross-review の節 |
+| テスト | 共通層と両 Skill |
 
 含まない:
 
@@ -56,7 +42,36 @@ P5（AC10〜AC30）を置き換える。** 対応は末尾の「既存の受け�
 | クラス図 | 型を追加するのは `Participants` 1 つで、関係を持つ型が無い。形は契約文書のデータ構造が持つ |
 | `CHANGELOG.md` と版数 | 配布の工程が書く |
 
+## 影響
+
+変わるのは `init` の振る舞い、既定の参加者、状態ファイルの形、`init` の引数、共通層の関数、担当名の形である。
+
+| 対象 | 影響 |
+| --- | --- |
+| 認証に失敗する CLI がある利用者 | どちらの `init` も止まらず、使える者で回る。従来の関門は `--require-all` で選べる |
+| cross-refactoring の既定の参加者 | agy が既定から外れ、ホストが提案と適用に入る。`--include agy` で戻せる。提案者と適用者が同じランタイムになりうる |
+| cross-review で使える者が 2 者に満たない利用者 | ホスト、次に同じランタイムの 2 つ目が席を埋める。1 者で回るのは `--only` を渡したときだけになる |
+| 状態ファイルの形 | 両 Skill の最上位に `participants` と `resume_changes` が増える。cross-refactoring の `impl_capable` とラウンドの `reviewers` / `reviewer_models` が新規の状態から消える。無い項目は従来の読み方で読む |
+| `init` の引数 | 両 Skill に `--exclude` / `--include` / `--require-all` が増える。cross-review の `--only` が `none` を取る。既定値は変わらない |
+| 共通層の関数 | `check_auth` / `impl_pool` / `review_assign` / `assign` が消え、`probe_auth` / `resolve_participants` / `review_seats` / `impl_assign` / `seat_runtime` / `refactor_pool` が入る。呼び出し側は両 Skill だけである |
+| 担当名の形 | ランタイム名に `-2`〜`-9` の接尾辞を持つ席の名前が、結果ファイルの stem と状態ファイルの鍵に現れうる |
+| 再開で修正の記録の無い前ラウンドがある実行 | 担当が `codex` / `agy` 以外のラウンドでも、前ラウンドの検査が止める（AC23） |
+
+## 前提
+
+この要求は次の 5 つを前提に書いている。
+
+| # | 前提 |
+| --- | --- |
+| 1 | cross-refactoring のレビュー工程は #436 で消えており（Step 7 の `cross-review` が担う）、`assign()` が返すレビュー担当は状態ファイルへの記録と表示にしか使われない |
+| 2 | 使える者の確認は、認証の確認コマンド（`AUTH_PROBES`）のままである。モデルを引く最小の呼び出しへ替える判断は #461 が持つ。この変更が作るのは、確認の結果で使える者を決める入口である |
+| 3 | 再開の `init` の後、骨組みは必ず `start-round` で新しいラウンドを開く。開いたまま中断したラウンドの担当を書き換える必要は無い |
+| 4 | G2（#732）が同じ `state.py` の `_classify_finding` を、G3（#729）が `_read_review_result_file` / `_record_no_result` / `report` を、G5（#730）が投稿の経路を触る。この変更が触る節は `init` / 再開 / `_round_reviewers` / `start-round` / `read-result` の担当名の受け口 / `report` の参加者の節である |
+| 5 | 同じランタイムの 2 つの CLI プロセスは、別の作業文脈を持てば独立した意見として扱う（#687 の利用者の指示） |
+
 ## 用語
+
+受け入れ条件で使う語の意味を先に決める。
 
 | 用語 | 意味 |
 | --- | --- |
@@ -70,118 +85,92 @@ P5（AC10〜AC30）を置き換える。** 対応は末尾の「既存の受け�
 | 埋め合わせ | 使える者が 2 席に足りないとき、ホスト、次に同じランタイムの 2 つ目で席を埋めること |
 | 再開 | 状態ファイルが残り `final` が `null` のときの `init` |
 
+## 前提とする取り決め
+
+実装が従う置き場所・書き方・テストの形である。
+
+| 項目 | 参照先 / 決めたこと |
+| --- | --- |
+| プロジェクト構造 | 担当の決め方は `plugins/ndf/scripts/lib/assignment.py`、確認は `lib/auth.py`、再開の反映は `lib/statefile.py` に置く。判定と状態の鍵は各 Skill の `state.py` / `refactor_lib` が持ち、骨組みは結果を使うだけにする |
+| コーディング規約 | 状態ファイルを最小の形で組み、関数を直接呼んで確かめる（`AGENTS.md` の DO）。分岐は表（データ）で持つ（`refactoring` の「分岐をデータ化」） |
+| テスト戦略 | 共通層は `plugins/ndf/scripts/tests/` の関数テスト、Skill は既存の形（`conftest.py` の `state_mod` / `crossref_helpers`）で GitHub と CLI の起動を差し替える |
+
+## 境界
+
+承認なしに行うこと・確認してから行うこと・行わないことを分ける。
+
+| 区分 | 内容 |
+| --- | --- |
+| 常に行う | 既存テストの実行、配布物の同期の検査、文書の検査 |
+| 確認してから行う | `init` の既定を「確認の失敗で止める」から「使える者で回す」へ変えること。cross-refactoring の既定から agy を外すこと。どちらも設計 Pull Request の承認で確認する |
+| 行わない | 監視・起動・投稿の経路の変更、`refactor_lib` の適用の取り込みの変更、確認コマンドの差し替え |
+
 ## 受け入れ条件
+
+50 件を、共通層・cross-review・cross-refactoring・文書・子 issue の再現・全体の 9 つの塊に分ける。
 
 ### 共通層: 使える者の解決（`lib/assignment.py` / `lib/auth.py`）
 
-- [ ] AC1: 母集合 3 者のうち 1 者の確認が失敗する `probe` を `resolve_participants` に渡す。返る値の `available` は
-      残り 2 者（母集合の順）、`unavailable` はその 1 者と理由を持ち、例外は上がらない
-- [ ] AC2: AC1 と同じ入力で `require_all=True` を渡すと `AssignmentError` が上がり、メッセージに欠けた者の名前と
-      理由が含まれる
-- [ ] AC3: `exclude` に含めた者に対して `probe` が呼ばれない。`include` で足した者は呼ばれる（呼び出しの回数と
-      引数で確かめる）
-- [ ] AC4: 次の 4 つはいずれも `AssignmentError` になる。`include` と `exclude` に同じ名前 / `ALL_RUNTIMES` に無い
-      名前 / `only` が `exclude` に含まれる / `only` が参加者に無い
-- [ ] AC5: `NDF_SKIP_AUTH_CHECK` が立つと、`available` は参加者の全員、`probe_skipped` は真で、確認コマンドは
-      1 回も呼ばれない
-- [ ] AC6: `probe_auth` は失敗で例外を上げず、`ok: false` と理由（`コマンドが見つかりません` / 時間切れ / 終了コード
-      非 0 / 未認証の文言）を返す。成功は `ok: true`
-- [ ] AC7: P7 の後、`check_auth` / `impl_pool` / `review_assign` / `assign` の 4 つを `git grep -n` で探す。
-      `plugins/ndf/scripts/lib/` と両 Skill の `scripts/` で 0 件になる
+- [ ] AC1: 母集合 3 者のうち 1 者の確認が失敗する `probe` を `resolve_participants` に渡す。返る値の `available` は残り 2 者（母集合の順）、`unavailable` はその 1 者と理由を持ち、例外は上がらない
+- [ ] AC2: AC1 と同じ入力で `require_all=True` を渡すと `AssignmentError` が上がり、メッセージに欠けた者の名前と理由が含まれる
+- [ ] AC3: `exclude` に含めた者に対して `probe` が呼ばれない。`include` で足した者は呼ばれる（呼び出しの回数と引数で確かめる）
+- [ ] AC4: 次の 4 つはいずれも `AssignmentError` になる。`include` と `exclude` に同じ名前 / `ALL_RUNTIMES` に無い名前 / `only` が `exclude` に含まれる / `only` が参加者に無い
+- [ ] AC5: `NDF_SKIP_AUTH_CHECK` が立つと、`available` は参加者の全員、`probe_skipped` は真で、確認コマンドは 1 回も呼ばれない
+- [ ] AC6: `probe_auth` は失敗で例外を上げず、`ok: false` と理由（`コマンドが見つかりません` / 時間切れ / 終了コード非 0 / 未認証の文言）を返す。成功は `ok: true`
+- [ ] AC7: P7 の後、`check_auth` / `impl_pool` / `review_assign` / `assign` の 4 つを `git grep -n` で探す。`plugins/ndf/scripts/lib/` と両 Skill の `scripts/` で 0 件になる
 
 ### 共通層: 席の埋め方（cross-review の規則）
 
-- [ ] AC8: 使える者が 3 者のとき、`review_seats(r, available, [])` は変更前の `review_assign(r, host)` と一致する。
-      4 つのホスト × ラウンド 1〜12 の全組で確かめる
-- [ ] AC9: 使える者が 4 者（`--include` でホストを足した）のとき、毎ラウンド 2 席で、ラウンド 1〜4 で各者が
-      ちょうど 2 回担当になる
+- [ ] AC8: 使える者が 3 者のとき、`review_seats(r, available, [])` は変更前の `review_assign(r, host)` と一致する。4 つのホスト × ラウンド 1〜12 の全組で確かめる
+- [ ] AC9: 使える者が 4 者（`--include` でホストを足した）のとき、毎ラウンド 2 席で、ラウンド 1〜4 で各者がちょうど 2 回担当になる
 - [ ] AC10: 使える者が 2 者のとき、ラウンド 1〜4 の全部でその 2 者が返る
-- [ ] AC11: 使える者が 1 者（`codex`）のとき、埋め合わせに `["claude"]` を渡すと `["codex", "claude"]`、空を渡すと
-      `["codex", "codex-2"]` が返る
-- [ ] AC12: 使える者が 0 者のとき、埋め合わせに `["claude"]` を渡すと `["claude", "claude-2"]`、空を渡すと
-      `AssignmentError` になる
-- [ ] AC13: `seat_runtime("kiro-2")` と `seat_runtime("kiro")` は `kiro` を返す。`gemini` / `kiro-1` / `kiro-10` /
-      `kiro-2-3` は `AssignmentError` になる
+- [ ] AC11: 使える者が 1 者（`codex`）のとき、埋め合わせに `["claude"]` を渡すと `["codex", "claude"]`、空を渡すと `["codex", "codex-2"]` が返る
+- [ ] AC12: 使える者が 0 者のとき、埋め合わせに `["claude"]` を渡すと `["claude", "claude-2"]`、空を渡すと `AssignmentError` になる
+- [ ] AC13: `seat_runtime("kiro-2")` と `seat_runtime("kiro")` は `kiro` を返す。`gemini` / `kiro-1` / `kiro-10` / `kiro-2-3` は `AssignmentError` になる
 
 ### cross-review: 新規の `init`
 
-- [ ] AC14: ホスト `claude` で `kiro` の確認が失敗する。`init` は終了コード 0 で状態ファイルを作る。
-      `participants.available` は `["codex", "agy"]` で、`participants.unavailable.kiro` に理由が入る。標準エラーに
-      `kiro` を外したことが 1 行出る
+- [ ] AC14: ホスト `claude` で `kiro` の確認が失敗する。`init` は終了コード 0 で状態ファイルを作る。`participants.available` は `["codex", "agy"]` で、`participants.unavailable.kiro` に理由が入る。標準エラーに `kiro` を外したことが 1 行出る
 - [ ] AC15: AC14 と同じ状態で `--require-all` を付けると、`init` は終了コード 1 で終わり、状態ファイルを作らない
-- [ ] AC16: `--exclude agy` を渡すと `agy` の確認を行わない。`participants.excluded` が `["agy"]`、`available` が
-      `["codex", "kiro"]` になる。`--exclude agy --exclude kiro` と `--exclude agy,kiro` は同じ状態ファイルを作る
+- [ ] AC16: `--exclude agy` を渡すと `agy` の確認を行わない。`participants.excluded` が `["agy"]`、`available` が `["codex", "kiro"]` になる。`--exclude agy --exclude kiro` と `--exclude agy,kiro` は同じ状態ファイルを作る
 - [ ] AC17: ホスト `claude` で `--include claude` を渡すと、`available` が 4 者になり、`start-round` が 2 席を返す
-- [ ] AC18: 使える者が `codex` の 1 者で、ホストの確認が通る。`init` は終了コード 0 で終わり、観点が減ることを 1 行出す。
-      `participants.fallback` は `["claude"]`、`start-round` は `codex claude` を返す。`--only codex` のときはホストを
-      確かめず、`participants.fallback` は空で、`start-round` は `codex` だけを返す（確認コマンドの呼び出しは `codex` の 1 回）
-- [ ] AC19: 使える者が 0 者でホストの確認が通ると、`init` は終了コード 0 で終わり、`start-round` は `claude claude-2`
-      を返す。ホストの確認も通らないと `init` は終了コード 1 で終わり、状態ファイルを作らない
-- [ ] AC20: 次の 3 つはいずれも終了コード 1 で終わり、状態ファイルを作らない。`--exclude claude`（ホスト）/
-      `--only codex --exclude codex` / `--include agy --exclude agy`
-- [ ] AC21: `read-result <pr> claude-2` が受け付けられ、`rounds[-1]["claude-2"]` に結果を書く。
-      `launch-reviewer.sh claude-2 <pr> <round>` は `claude` の CLI を起動し、stem は `claude-2-review-pr<N>` になる
-      （起動は差し替えて確かめる）
-- [ ] AC22: `participants` を持たない状態ファイルで、`host` があれば `start-round` は変更前の輪番を返す。
-      `host` も無ければ `codex` / `agy` を返す
-- [ ] AC23: 前のラウンドが `verdict` を持たず、担当 `agy` + `kiro` の両者が `REQUEST_CHANGES` で修正の記録が無い。
-      このとき `start-round` は終了コード 5 で止まる
-- [ ] AC24: `report` が「参加した者」の節を出す。行は 6 つで、使える者 / `--exclude` で外した者 / `--include` で
-      足した者 / 確認を通らなかった者（理由つき）/ 埋め合わせ / 再開で変えた値である。`participants` を持たない
-      状態ファイルでは「記録なし」と出す
+- [ ] AC18: 使える者が `codex` の 1 者で、ホストの確認が通る。`init` は終了コード 0 で終わり、観点が減ることを 1 行出す。`participants.fallback` は `["claude"]`、`start-round` は `codex claude` を返す。`--only codex` のときはホストを確かめない。`participants.fallback` は空で、`start-round` は `codex` だけを返す（確認コマンドの呼び出しは `codex` の 1 回）
+- [ ] AC19: 使える者が 0 者でホストの確認が通ると、`init` は終了コード 0 で終わり、`start-round` は `claude claude-2` を返す。ホストの確認も通らないと `init` は終了コード 1 で終わり、状態ファイルを作らない
+- [ ] AC20: 次の 3 つはいずれも終了コード 1 で終わり、状態ファイルを作らない。`--exclude claude`（ホスト）/ `--only codex --exclude codex` / `--include agy --exclude agy`
+- [ ] AC21: `read-result <pr> claude-2` が受け付けられ、`rounds[-1]["claude-2"]` に結果を書く。`launch-reviewer.sh claude-2 <pr> <round>` は `claude` の CLI を起動する。stem は `claude-2-review-pr<N>` になる（起動は差し替えて確かめる）
+- [ ] AC22: `participants` を持たない状態ファイルで、`host` があれば `start-round` は変更前の輪番を返す。`host` も無ければ `codex` / `agy` を返す
+- [ ] AC23: 前のラウンドが `verdict` を持たず、担当 `agy` + `kiro` の両者が `REQUEST_CHANGES` で修正の記録が無い。このとき `start-round` は終了コード 5 で止まる
+- [ ] AC24: `report` が「参加した者」の節を出す。行は 6 つで、使える者 / `--exclude` で外した者 / `--include` で足した者 / 確認を通らなかった者（理由つき）/ 埋め合わせ / 再開で変えた値である。`participants` を持たない状態ファイルでは「記録なし」と出す
 
 ### cross-review: 再開の `init`
 
-- [ ] AC25: `max_rounds: 12` の状態ファイルへ `--max-rounds 20` を渡す。`max_rounds` が 20 になり、`12 → 20` の
-      形で 1 行出る。`resume_changes` に `{field: "max_rounds", from: 12, to: 20}` が 1 件積まれる。
-      `--rotate-after` / `--verify-command` / `--verify-exit-code` も同じく反映され、後の 2 つは置き換える
-- [ ] AC26: 引数を渡さない再開では、次の 6 項目が変わらず、確認コマンドは 1 回も呼ばれない。`max_rounds` /
-      `rotate_after` / `verify_commands` / `verify_exit_codes` / `only` / `participants`
-- [ ] AC27: `only: null` の状態ファイルへ `--only codex` を渡すと `only` が `codex` になり、次の `start-round` が
-      `codex` だけを返す。記録を持つ過去のラウンドの `reviewers` は変わらない。`--only none` は `only` を `null` へ戻す
-- [ ] AC28: `--exclude agy` を渡した再開では、参加者の確認をやり直し、`available` から `agy` が消え、次の
-      `start-round` が `agy` を返さない。`--exclude none` は除外を空へ戻す。`participants.included` が `["claude"]` の状態へ
-      `--exclude agy` だけを渡すと、`included` は `["claude"]` のまま残り、`excluded` が `["agy"]` になる（渡さなかった引数は
-      状態ファイルの値で補う）
-- [ ] AC29: `host: "claude"` の状態ファイルへ `--host codex` を渡すと `host` は変わらず、反映しないことが 1 行出る。
-      `--host claude` では何も出ない
-- [ ] AC30: `SKILL.md` と `docs/01-state-and-review.md` で `grep -n 'ONLY'` が当たる行は、`init` へ引数を渡す行と
-      引数の説明の行だけになる。起動・監視・取り込み・反証の担当は `$REVIEWERS` / `$REVIEWERS_CSV` を使う
+- [ ] AC25: `max_rounds: 12` の状態ファイルへ `--max-rounds 20` を渡す。`max_rounds` が 20 になり、`12 → 20` の形で 1 行出る。`resume_changes` に `{field: "max_rounds", from: 12, to: 20}` が 1 件積まれる。`--rotate-after` / `--verify-command` / `--verify-exit-code` も同じく反映され、後の 2 つは置き換える
+- [ ] AC26: 引数を渡さない再開では、次の 6 項目が変わらず、確認コマンドは 1 回も呼ばれない。`max_rounds` / `rotate_after` / `verify_commands` / `verify_exit_codes` / `only` / `participants`
+- [ ] AC27: `only: null` の状態ファイルへ `--only codex` を渡すと `only` が `codex` になり、次の `start-round` が `codex` だけを返す。記録を持つ過去のラウンドの `reviewers` は変わらない。`--only none` は `only` を `null` へ戻す
+- [ ] AC28: `--exclude agy` を渡した再開では、参加者の確認をやり直し、`available` から `agy` が消え、次の `start-round` が `agy` を返さない。`--exclude none` は除外を空へ戻す。`participants.included` が `["claude"]` の状態へ `--exclude agy` だけを渡すと、`included` は `["claude"]` のまま残る。`excluded` が `["agy"]` になる（渡さなかった引数は状態ファイルの値で補う）
+- [ ] AC29: `host: "claude"` の状態ファイルへ `--host codex` を渡すと `host` は変わらず、反映しないことが 1 行出る。`--host claude` では何も出ない
+- [ ] AC30: `SKILL.md` と `docs/01-state-and-review.md` で `grep -n 'ONLY'` が当たる行は、`init` へ引数を渡す行と引数の説明の行だけになる。起動・監視・取り込み・反証の担当は `$REVIEWERS` / `$REVIEWERS_CSV` を使う
 
 ### cross-refactoring: 母集合と担当
 
-- [ ] AC31: ホスト `claude` の新規の `init` で、状態ファイルの `runtimes` は `["claude", "codex", "kiro"]` になり、
-      `agy` の確認は行われない。状態ファイルに `impl_capable` は無く、標準出力に `IMPL_POOL=` の行は無い
+- [ ] AC31: ホスト `claude` の新規の `init` で、状態ファイルの `runtimes` は `["claude", "codex", "kiro"]` になり、`agy` の確認は行われない。状態ファイルに `impl_capable` は無く、標準出力に `IMPL_POOL=` の行は無い
 - [ ] AC32: ホスト `codex` では `runtimes` が `["codex", "kiro"]`、ホスト `agy` では `["codex", "agy", "kiro"]` になる
-- [ ] AC33: `--include agy` で `runtimes` が 4 者に、`--exclude kiro` で 2 者になる。ホスト `claude` で `--exclude claude` を
-      渡すと `runtimes` が `["codex", "kiro"]` になり、`init` は終了コード 0 で終わる（ホストは母集合に含まれるため外せる）
-- [ ] AC34: `impl_assign(r, ["claude", "codex", "kiro"])` をラウンド 1〜6 で呼ぶ。返る値は `codex` / `kiro` / `claude` /
-      `codex` / `kiro` / `claude` である。`start-round` は `REVIEWERS` / `REVIEWERS_CSV` を出さない。ラウンドの記録に
-      `reviewers` / `reviewer_models` が無い
-- [ ] AC35: `kiro` の確認が失敗しても `init` は終了コード 0 で終わる。`participants.unavailable.kiro` に理由が入り、
-      `runtimes` は 2 者になる。`--require-all` を付けると終了コード 4 で終わり、状態ファイルを作らない
+- [ ] AC33: `--include agy` で `runtimes` が 4 者に、`--exclude kiro` で 2 者になる。ホスト `claude` で `--exclude claude` を渡すと `runtimes` が `["codex", "kiro"]` になる。`init` は終了コード 0 で終わる（ホストは母集合に含まれるため外せる）
+- [ ] AC34: `impl_assign(r, ["claude", "codex", "kiro"])` をラウンド 1〜6 で呼ぶ。返る値は `codex` / `kiro` / `claude` / `codex` / `kiro` / `claude` である。`start-round` は `REVIEWERS` / `REVIEWERS_CSV` を出さない。ラウンドの記録に `reviewers` / `reviewer_models` が無い
+- [ ] AC35: `kiro` の確認が失敗しても `init` は終了コード 0 で終わる。`participants.unavailable.kiro` に理由が入り、`runtimes` は 2 者になる。`--require-all` を付けると終了コード 4 で終わり、状態ファイルを作らない
 - [ ] AC36: 使える者が 0 者のとき `init` は終了コード 4 で終わり、状態ファイルを作らない
-- [ ] AC37: `report` と改修計画の表示にレビュー担当の列が無く、母集合を 1 行で出す（「提案・レビュー」と「適用の母集合」の
-      2 行に分けない）
+- [ ] AC37: `report` と改修計画の表示にレビュー担当の列が無く、母集合を 1 行で出す（「提案・レビュー」と「適用の母集合」の 2 行に分けない）
 
 ### cross-refactoring: 再開の `init`
 
-- [ ] AC38: `max_outer_rounds: 3` の状態ファイルへ `--max-outer-rounds 5` を渡す。5 になり、`3 → 5` の形で 1 行出て、
-      `resume_changes` に 1 件積まれる。`--max-test-rounds` / `--max-fix-rounds` / `--max-items-per-round` も同じ
-- [ ] AC39: 再開で `--model codex=x` / `--host codex` / `--scope other` を渡すと、状態は変わらず、反映しないことが
-      引数ごとに 1 行出る。状態に載る他の引数（`--baseline-test` など。契約文書の表）も同じ扱いである。引数を渡さない
-      再開では、上限 4 項目と `models` と `runtimes` が変わらない
-- [ ] AC40: 再開で `--exclude kiro` を渡すと参加者の確認をやり直す。`runtimes` から `kiro` が消え、次の `start-round` の
-      `RUNTIMES` に `kiro` が無い。`--include agy` で始めた状態へ `--exclude kiro` だけを渡すと、`included` の `agy` は残る
-- [ ] AC41: `impl_capable` を持ち `participants` を持たない状態ファイル（この変更の前に始めた実行）を、`start-round` /
-      `report` が読める。適用の輪番は `runtimes` から決まる
+- [ ] AC38: `max_outer_rounds: 3` の状態ファイルへ `--max-outer-rounds 5` を渡す。5 になり、`3 → 5` の形で 1 行出て、`resume_changes` に 1 件積まれる。`--max-test-rounds` / `--max-fix-rounds` / `--max-items-per-round` も同じ
+- [ ] AC39: 再開で `--model codex=x` / `--host codex` / `--scope other` を渡すと、状態は変わらず、反映しないことが引数ごとに 1 行出る。状態に載る他の引数（`--baseline-test` など。契約文書の表）も同じ扱いである。引数を渡さない再開では、上限 4 項目と `models` と `runtimes` が変わらない
+- [ ] AC40: 再開で `--exclude kiro` を渡すと参加者の確認をやり直す。`runtimes` から `kiro` が消え、次の `start-round` の `RUNTIMES` に `kiro` が無い。`--include agy` で始めた状態へ `--exclude kiro` だけを渡すと、`included` の `agy` は残る
+- [ ] AC41: `impl_capable` を持ち `participants` を持たない状態ファイル（この変更の前に始めた実行）を、`start-round` / `report` が読める。適用の輪番は `runtimes` から決まる
 
 ### 文書
 
-- [ ] AC42: `CLAUDE.md` の cross-refactoring の節が「codex / kiro とホスト（ホストが codex / kiro なら 2 者）」と
-      「適用担当は参加者の数のラウンドで 1 周する」を
-      書く。「ホストを除く 3 者」「参加する 4 者」を含まない。cross-review の節が「codex / agy の両方」を含まない。
-      次の 3 つがいずれも 0 行を出す
+- [ ] AC42: `CLAUDE.md` の cross-refactoring の節が「codex / kiro とホスト（ホストが codex / kiro なら 2 者）」を書く。同じ節が「適用担当は参加者の数のラウンドで 1 周する」を書く。「ホストを除く 3 者」「参加する 4 者」を含まない。cross-review の節が「codex / agy の両方」を含まない。次の 3 つがいずれも 0 行を出す
 
   ```bash
   grep -n "ホストを除く 3 者" CLAUDE.md
@@ -189,10 +178,7 @@ P5（AC10〜AC30）を置き換える。** 対応は末尾の「既存の受け�
   grep -n "codex / agy の両方" CLAUDE.md
   ```
 
-- [ ] AC43: cross-refactoring の `SKILL.md` の「担当の決め方」が母集合を 1 つの表で書く。引数の表と `argument-hint` に
-      `--exclude` / `--include` / `--require-all` がある。「前提」から「すべてログイン済み」が消える。ホストごとに要る
-      CLI の表が `codex` / `kiro-cli`（ホストが codex / kiro ならもう 1 つ）になる。`docs/01-state-and-propose.md` の
-      `init` が返す変数の表に `IMPL_POOL` が無い
+- [ ] AC43: cross-refactoring の `SKILL.md` の「担当の決め方」が母集合を 1 つの表で書く。引数の表と `argument-hint` に `--exclude` / `--include` / `--require-all` がある。「前提」から「すべてログイン済み」が消える。ホストごとに要る CLI の表が `codex` / `kiro-cli`（ホストが codex / kiro ならもう 1 つ）になる。`docs/01-state-and-propose.md` の `init` が返す変数の表に `IMPL_POOL` が無い
 - [ ] AC44: cross-review の次の 4 ファイルが、それぞれの内容を書く
 
   | ファイル | 書く内容 |
@@ -204,12 +190,10 @@ P5（AC10〜AC30）を置き換える。** 対応は末尾の「既存の受け�
 
 ### 子 issue の再現手順
 
-- [ ] AC45: #478 の再現（`kiro-cli` が無い環境で `init`）で、`init` が終了コード 0 で終わる。#687 の場面 3
-      （`codex` が使えない）で、`--exclude codex` を付けずに `init` が開始できる
+- [ ] AC45: #478 の再現（`kiro-cli` が無い環境で `init`）で、`init` が終了コード 0 で終わる。#687 の場面 3（`codex` が使えない）で、`--exclude codex` を付けずに `init` が開始できる
 - [ ] AC46: #648 の再現（再開の `init` に `--only codex`）で、次の `start-round` が `codex` だけを返す
 - [ ] AC47: #664 の再現（`git grep -n '"--exclude"' -- plugins/ndf/skills/cross-refactoring`）が 1 行以上を出す
-- [ ] AC48: #461 の再現（モデルを引けない CLI が確認を通る）は、この変更の後も現象が残ることを確かめて記録する
-      （直す判断は #461 が持つ）
+- [ ] AC48: #461 の再現（モデルを引けない CLI が確認を通る）は、この変更の後も現象が残ることを確かめて記録する（直す判断は #461 が持つ）
 
 ### 全体
 
@@ -227,6 +211,8 @@ P5（AC10〜AC30）を置き換える。** 対応は末尾の「既存の受け�
 
 ## 非機能の条件
 
+受け入れ条件のうち可用性・性能・運用・移行に当たるものを、大項目で束ねる。
+
 | 大項目 | 条件 |
 | --- | --- |
 | 可用性 | 母集合の 1 者が使えないことで、どちらの収束ループも開始できない状態にならない（AC14、AC35） |
@@ -234,20 +220,9 @@ P5（AC10〜AC30）を置き換える。** 対応は末尾の「既存の受け�
 | 運用・保守性 | 担当が欠けたまま収束したこと、席を埋め合わせたこと、再開で反映しなかった引数が、`report` と `init` の出力だけで分かる（AC24、AC29、AC39） |
 | 移行性 | この変更の前に始めた実行の状態ファイルを、書き換えずに読める（AC22、AC41） |
 
-## 影響
-
-| 対象 | 影響 |
-| --- | --- |
-| 認証に失敗する CLI がある利用者 | どちらの `init` も止まらず、使える者で回る。従来の関門は `--require-all` で選べる |
-| cross-refactoring の既定の参加者 | agy が既定から外れ、ホストが提案と適用に入る。`--include agy` で戻せる。提案者と適用者が同じランタイムになりうる |
-| cross-review で使える者が 2 者に満たない利用者 | ホスト、次に同じランタイムの 2 つ目が席を埋める。1 者で回るのは `--only` を渡したときだけになる |
-| 状態ファイルの形 | 両 Skill の最上位に `participants` と `resume_changes` が増える。cross-refactoring の `impl_capable` とラウンドの `reviewers` / `reviewer_models` が新規の状態から消える。無い項目は従来の読み方で読む |
-| `init` の引数 | 両 Skill に `--exclude` / `--include` / `--require-all` が増える。cross-review の `--only` が `none` を取る。既定値は変わらない |
-| 共通層の関数 | `check_auth` / `impl_pool` / `review_assign` / `assign` が消え、`probe_auth` / `resolve_participants` / `review_seats` / `impl_assign` / `seat_runtime` / `refactor_pool` が入る。呼び出し側は両 Skill だけである |
-| 担当名の形 | ランタイム名に `-2`〜`-9` の接尾辞を持つ席の名前が、結果ファイルの stem と状態ファイルの鍵に現れうる |
-| 再開で修正の記録の無い前ラウンドがある実行 | 担当が `codex` / `agy` 以外のラウンドでも、前ラウンドの検査が止める（AC23） |
-
 ## 検証手段
+
+テスト・配布物の同期・文書の検査・手動確認の 4 つで確かめる。
 
 | 項目 | 手段 |
 | --- | --- |
@@ -256,23 +231,9 @@ P5（AC10〜AC30）を置き換える。** 対応は末尾の「既存の受け�
 | 定義と文書の検査 | AC50 の 6 つ |
 | 手動確認 | P7 の後、ホスト claude で `--exclude codex` を付けた cross-review と、既定の cross-refactoring を 1 本ずつ回し、`report` で参加者と席を見る |
 
-## 前提とする取り決め
-
-| 項目 | 参照先 / 決めたこと |
-| --- | --- |
-| プロジェクト構造 | 担当の決め方は `plugins/ndf/scripts/lib/assignment.py`、確認は `lib/auth.py`、再開の反映は `lib/statefile.py` に置く。判定と状態の鍵は各 Skill の `state.py` / `refactor_lib` が持ち、骨組みは結果を使うだけにする |
-| コーディング規約 | 状態ファイルを最小の形で組み、関数を直接呼んで確かめる（`AGENTS.md` の DO）。分岐は表（データ）で持つ（`refactoring` の「分岐をデータ化」） |
-| テスト戦略 | 共通層は `plugins/ndf/scripts/tests/` の関数テスト、Skill は既存の形（`conftest.py` の `state_mod` / `crossref_helpers`）で GitHub と CLI の起動を差し替える |
-
-## 境界
-
-| 区分 | 内容 |
-| --- | --- |
-| 常に行う | 既存テストの実行、配布物の同期の検査、文書の検査 |
-| 確認してから行う | `init` の既定を「確認の失敗で止める」から「使える者で回す」へ変えること。cross-refactoring の既定から agy を外すこと。どちらも設計 Pull Request の承認で確認する |
-| 行わない | 監視・起動・投稿の経路の変更、`refactor_lib` の適用の取り込みの変更、確認コマンドの差し替え |
-
 ## 未決
+
+この変更の外で決まる 2 件を残す。
 
 | 項目 | 誰が決めるか | 期限 |
 | --- | --- | --- |
@@ -313,6 +274,8 @@ P5（AC10〜AC30）を置き換える。** 対応は末尾の「既存の受け�
 | — | AC45〜AC48 | 新設（子 issue の再現手順） |
 
 ## 依頼（原文）
+
+各 issue の本文から抜粋した原文である。全文は `gh issue view 727` / `687` / `478` / `664` / `648` で読む。
 
 ### #727（根本原因の親）
 
@@ -382,5 +345,3 @@ P5（AC10〜AC30）を置き換える。** 対応は末尾の「既存の受け�
 > ## 修正レイヤー
 >
 > `plugins/ndf/scripts/lib/statefile.py` に置く、再開時の引数の反映の契約。「明示的に渡された引数だけを状態へ重ね、反映しない引数は渡されたら知らせる」を 1 か所で持つ。
-
-（各 issue の本文から抜粋。全文は `gh issue view 727` / `687` / `478` / `664` / `648`）
