@@ -165,7 +165,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| long_method | extract_method | minor | kiro | 検証中 | 1 |
+| long_method | extract_method | minor | kiro | 採用 | 1 |
 
 **なぜ**: 1 つの関数が 2 つの独立した段を通しで行う。前段は各指摘の suggested_check を（重複を除いて）実行し verification を記録する反復、後段は束ねた組の代表へ最良の結果を選び直す反復である。段ごとに名前が付き、共有するのは targets と by_id だけである。
 
@@ -173,6 +173,64 @@
 2. 後段を _propagate_best_verification(targets, by_id) として抽出する
 3. _verify_findings は codes / run / targets / by_id を用意し、2 つを順に呼ぶだけにする
 4. test_verify_findings.py を実行して verification の記録が変わらないことを確かめる
+
+## ラウンド 4（実装 claude / レビュー codex / kiro）
+
+### R4-001 — `plugins/ndf/skills/cross-review/scripts/state.py#_resume_from_state`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_method | extract_method | major | codex | 検証中 | 1 |
+
+**なぜ**: 既存stateの探索、旧形式の補完、追加レビュー観点の再計算、引き継ぎ記録、保存、待ち行列flush、worktree同期、機械可読出力までが1関数に直列で置かれ、副作用の順序を長い本体とコメントから追う必要がある。各段階には独立した終了条件と入出力があり、名前を付けて分離できる。
+
+**手順**: 1. cmd_initを通る既存の再開テストで、stateなし、final済み、旧形式補完、追加観点更新、引き継ぎ、flush後の同期と出力を現状固定する
+2. stateファイルの探索と再開可否判定を、stateとpathを返す関数へ抽出する
+3. 旧形式の補完、manual指示の反映、review_instructions再計算、carried_over記録を、変更有無も返す関数へ抽出する
+4. 保存後のauto_flush、tmp_dir解決、登録済みworktree同期を副作用順序が見える関数へ抽出する
+5. _resume_from_stateを各段階の呼び出しと_print_init_resultだけにし、再開関連テストと全体テストで出力と保存順序が不変であることを確認する
+
+### R4-002 — `plugins/ndf/skills/cross-review/scripts/state.py#_init_new_state`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_method | extract_method | major | codex | 未着手 | 0 |
+
+**なぜ**: 新規初期化の1関数に、PR所有権の解決、レビュー観点の構築、worktreeと既存コメントの準備、認証確認、state構築、永続化と出力が同居し、さらに5個のローカル関数が本体を約200行へ広げている。各段階は既に名前と入出力を持つため、モジュールレベルへ抽出すれば段階単位で読めて個別にテストできる。
+
+**手順**: 1. 既存の入口テストで、新規worktree、既存worktree、変更ファイル取得fallback、認証失敗、初期state出力の経路を現状固定する
+2. _resolve_pr_and_ownership と _prepare_review_instructions をモジュールレベル関数へ抽出し、既存のcontext型を入出力に使う
+3. _prepare_worktree_and_comments をモジュールレベル関数へ抽出し、worktree作成より後に_tmp_dirを呼ぶ順序とコメント取得失敗時の停止を保つ
+4. _prepare_initial_assignment、_build_initial_review_state、_finalize_initial_state をモジュールレベルへ抽出し、_init_new_stateを段階を順に呼ぶオーケストレーションだけにする
+5. 初期化関連テストと全体テストを実行し、標準出力、stateの内容、副作用の順序が不変であることを確認する
+
+### R4-003 — `plugins/ndf/skills/cross-review/scripts/state.py#cmd_check_oscillation`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| conditional_chain | replace_with_lookup_table | minor | kiro | 未着手 | 0 |
+
+**なぜ**: 現ラウンドの各指摘について _finding_match_kind の戻り値 ("exact"/"near"/"body") を if/elif で数えている。種別ごとの集計は種別を増やすたびに分岐を足すことになる。あわせて、collect_keys クロージャは _finding_keys(st, pr, round_no) をそのまま呼ぶだけの指標なしの間接参照で、読み手が本体を追う負荷を増やしている。test_state_check_oscillation.py と test_state_oscillation_matching.py が cmd_check_oscillation / _finding_match_kind を通す。
+
+**手順**: 1. exact/near/same_body の 3 変数と if/elif/elif の加算を、collections.Counter に対する `Counter(_finding_match_kind(k, prev) for k in curr)` へ置き換える
+2. overlap_count は None 以外の合計として counts の値の総和から出す
+3. info の表示は counts.get("exact", 0) 等から読む
+4. collect_keys クロージャを消し、呼び出し 2 箇所を _finding_keys(st, pr, prev_round_no) / (curr_round_no) の直接呼び出しに戻す
+5. テストを実行して振る舞い不変を確認する
+
+### R4-004 — `plugins/ndf/skills/cross-review/scripts/state.py#_normalize_fix_result`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_method | extract_method | minor | kiro | 未着手 | 0 |
+
+**なぜ**: 1 関数に (a) 別名 fallback（fix_commit/commit_sha、fixed_count/fixed）、(b) deferred の list/dict/int による件数の場合分けと dict 要素への正規化、(c) rejected の同じ正規化、(d) 記録用辞書の組み立て、が同居する。deferred と rejected はどちらも _normalize_dict_items + 件数決定という同型の処理で、片方だけ直すと食い違いうる。test_state_merge_fix.py と test_state_ci_classification.py が cmd_merge_fix 経由で通す。
+
+**手順**: 1. 「_normalize_dict_items した項目」と「保存する件数」を組で返す小関数 _normalize_deferred_like(raw) を抽出する（list/dict は展開件数、劣化表現の int/str は _count の値、という現在の規則をそのまま移す）
+2. deferred と rejected の両方をこの関数で得る（現状 rejected の件数は常に _count なので、raw の型で分岐する現在の deferred 規則へ揃える形にはせず、抽出関数は deferred の規則を表し、rejected は従来どおり _count を使うなら別に保つ。振る舞いを変えないため、まず deferred 経路だけを抽出する）
+3. 別名 fallback（fix_commit/fixed_count）を _resolve_fix_aliases として抽出する
+4. 末尾の辞書組み立てを、抽出した値を差し込む形へ整える
+5. テストを実行して出力の辞書が不変であることを確認する
 
 ## 見送った項目
 
