@@ -140,7 +140,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| long_parameter_list | introduce_parameter_object | major | codex | 検証中 | 1 |
+| long_parameter_list | introduce_parameter_object | major | codex | 採用 | 1 |
 
 **なぜ**: 初期化結果という同じ概念を表す 11 引数を位置で受け取り、特に連続する 3 個の bool と末尾の件数・再開フラグは呼び出し側で順序を取り違えても検出しにくい。新規初期化と再開の 2 経路が同じ組を渡している。
 
@@ -165,7 +165,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| long_method | extract_method | minor | kiro | 未着手 | 0 |
+| long_method | extract_method | minor | kiro | 検証中 | 1 |
 
 **なぜ**: 1 つの関数が 2 つの独立した段を通しで行う。前段は各指摘の suggested_check を（重複を除いて）実行し verification を記録する反復、後段は束ねた組の代表へ最良の結果を選び直す反復である。段ごとに名前が付き、共有するのは targets と by_id だけである。
 
