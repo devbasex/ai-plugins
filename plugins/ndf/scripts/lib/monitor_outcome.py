@@ -13,14 +13,21 @@
 
 キーと値の形は `issues/issue-662-598-537-619-584-583-design-contracts.md` の
 「監視の結果ファイル」にある。
-"""
-from __future__ import annotations
 
+**起動 1 回の結末を 1 つの値として読むのもここである（#729）。** `read_launch_outcome` が
+結果ファイルの有無・読めるかと監視の結果を突き合わせ、使える結果（`payload`）か理由
+（`reason`）と起動し直しの可否（`relaunch_same_agent`）を返す。結果なしの判断と可否の表を
+cross-review / cross-refactoring がそれぞれ持つと、語彙を足すたびに片方が古くなる。
+"""
+# `from __future__ import annotations` を置かない。注釈が文字列になると `dataclass` が
+# `sys.modules[<モジュール名>]` を引くが、読む側の多くはこのファイルを `importlib` で
+# `sys.modules` に登録せずに読み込むため落ちる。実行時に評価できる形（3.10 以上）で書く。
 import datetime as _dt
 import json
 import os
 import pathlib
 import threading
+from dataclasses import dataclass
 from typing import Any, Optional
 
 try:  # Windows には無い。無ければスレッドの排他だけで書く。
@@ -28,9 +35,23 @@ try:  # Windows には無い。無ければスレッドの排他だけで書く�
 except ImportError:  # pragma: no cover - POSIX では通らない
     fcntl = None  # type: ignore[assignment]
 
-# 監視が書く理由。**状態（`status`）からの対応だけで決まる。** `usage_limit` と
-# `cli_timeout` は P3 で足す（それまでは `early_error` と `missing` に落ちる）。
-REASONS = ("ok", "timeout", "stalled", "early_error", "missing", "pidfile_bad")
+# 理由の語彙。先頭の 6 語は監視の状態（`status`）から決まる。`usage_limit` / `cli_timeout` は
+# 監視が文言の照合で結末に添えたときだけ現れ、`unparsable` は読む側（`read_launch_outcome`）
+# だけが書く（#729 の決定 7）。
+REASONS = (
+    "ok", "timeout", "stalled", "early_error", "missing", "pidfile_bad",
+    "usage_limit", "cli_timeout", "unparsable",
+)
+
+# 同じ担当を同じ条件で起動し直しても解けない理由。利用上限は起動のたびに待ちと相手の
+# 枠を使うだけで直らない（#619）。それ以外は対象や負荷で変わりうるので 1 度は起動し直せる。
+# **理由を足すときはこの集合だけを見直す。** 偽のときに何をするかは Skill が決める。
+NO_RELAUNCH_REASONS = frozenset({"usage_limit"})
+
+# 監視がこの理由を書いていれば、監視が止めたか、結果を書けない終わり方をしたと分かっている。
+# 結果ファイルの状態を見ずにその値を採る（`ok` / `missing` は結果ファイルの側で決め直す）。
+_MONITOR_DECIDED_REASONS = frozenset(
+    {"timeout", "stalled", "early_error", "usage_limit", "cli_timeout", "pidfile_bad"})
 
 _STATUS_REASON = {
     "OK": "ok",
@@ -75,8 +96,18 @@ def reason_for(status: str) -> str:
         raise ValueError(f"監視の状態として知らない値です: {status!r}") from None
 
 
+def relaunch_same_agent(reason: Optional[str]) -> bool:
+    """同じ担当を同じ条件で起動し直せば解けるか。`NO_RELAUNCH_REASONS` に無ければ可。"""
+    return reason not in NO_RELAUNCH_REASONS
+
+
 def outcome_path(tmp_dir: os.PathLike[str] | str, stem: str) -> pathlib.Path:
     return pathlib.Path(tmp_dir) / f"{stem}-monitor.json"
+
+
+def default_result_path(tmp_dir: os.PathLike[str] | str, stem: str) -> pathlib.Path:
+    """結果ファイルの既定の置き場所。`launch-cli.sh` の `<stem>-result.json` と同じ形。"""
+    return pathlib.Path(tmp_dir) / f"{stem}-result.json"
 
 
 def journal_path(tmp_dir: os.PathLike[str] | str) -> pathlib.Path:
@@ -103,6 +134,65 @@ def read_outcome(tmp_dir: os.PathLike[str] | str, stem: str) -> Optional[dict[st
     except (OSError, ValueError):
         return None
     return data if isinstance(data, dict) else None
+
+
+@dataclass(frozen=True)
+class LaunchOutcome:
+    """起動 1 回の結末。`payload` があれば使える結果、無ければ `reason` が理由。"""
+    payload: Optional[dict[str, Any]]
+    reason: Optional[str]
+    detail: str
+    monitor: Optional[dict[str, Any]]
+    relaunch_same_agent: bool
+
+
+def _read_result_file(path: pathlib.Path) -> tuple[Optional[dict[str, Any]], str]:
+    """結果ファイルを読む。使える辞書か、無ければ結果なしの理由（`missing` / `unparsable`）。"""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, ValueError):
+        return None, "missing"
+    if not text.strip():
+        return None, "missing"
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return None, "unparsable"
+    return (data, "") if isinstance(data, dict) else (None, "unparsable")
+
+
+def read_launch_outcome(tmp_dir: os.PathLike[str] | str, stem: str,
+                        result_path: Optional[os.PathLike[str] | str] = None) -> LaunchOutcome:
+    """起動 1 回の結末を 1 つの値として読む（#729 の決定 2）。
+
+    **結果ファイルが JSON オブジェクトとして読めれば使える結果が勝つ。** 監視が止めた後にも
+    結果ファイルが残っていれば、止める前に書き終えていた結果である。無いときの理由は、監視が
+    理由を知っていればその値、知らなければ結果ファイルの状態（無い・空 → `missing`、あるが
+    読めない → `unparsable`）で決める。
+
+    **失敗しない。** 例外・`SystemExit`・標準出力/標準エラーへの出力を出さない。壊れた監視の
+    結果ファイルは無いものとして扱う。読む側（両 Skill の取り込み）が終了コードを決める。
+    """
+    path = (pathlib.Path(result_path) if result_path is not None
+            else default_result_path(tmp_dir, stem))
+    payload, result_reason = _read_result_file(path)
+    monitor = read_outcome(tmp_dir, stem)
+    monitor_detail = str(monitor.get("detail") or "") if monitor else ""
+    if payload is not None:
+        return LaunchOutcome(payload=payload, reason=None, detail=monitor_detail,
+                             monitor=monitor, relaunch_same_agent=True)
+    monitor_reason = monitor.get("reason") if monitor else None
+    reason = monitor_reason if monitor_reason in _MONITOR_DECIDED_REASONS else result_reason
+    detail = monitor_detail or _unusable_detail(path, result_reason)
+    return LaunchOutcome(payload=None, reason=reason, detail=detail, monitor=monitor,
+                         relaunch_same_agent=relaunch_same_agent(reason))
+
+
+def _unusable_detail(path: pathlib.Path, result_reason: str) -> str:
+    """監視の詳細が無いときに `detail` へ置く、結果を読めなかった理由の 1 文。"""
+    if result_reason == "missing":
+        return f"結果ファイルが無い、または空です: {path}"
+    return f"結果ファイルが JSON オブジェクトとして読めません: {path}"
 
 
 def append_journal(tmp_dir: os.PathLike[str] | str, outcome: dict[str, Any]) -> None:
