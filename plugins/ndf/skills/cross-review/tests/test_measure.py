@@ -573,10 +573,10 @@ def test_proposed_reports_all_rounds_when_every_round_is_marked(measure_mod):
         "oracle_scope": "all_rounds", "oracle_base": 2}
 
 
-def test_proposed_takes_only_the_two_counted_classifications(measure_mod):
-    """採るのは `verified_blocking` と `needs_human_judgment` の 2 つだけである。
+def test_proposed_takes_only_the_three_counted_classifications(measure_mod):
+    """採るのは `verified_blocking` / `needs_human_judgment` / `unrefuted` の 3 つである（#732）。
 
-    棄却した指摘と立証できなかった指摘は採らない。
+    棄却した指摘と軽微な指摘（立証不足）は採らない。
     """
     st = _state(
         evidence_rounds=[1],
@@ -588,10 +588,23 @@ def test_proposed_takes_only_the_two_counted_classifications(measure_mod):
                      classification="insufficient_evidence"),
             _finding("agy-r1-0", 1, "d.py", 40, agent="agy",
                      classification="needs_human_judgment"),
+            _finding("agy-r1-1", 1, "e.py", 50, agent="agy",
+                     classification="unrefuted", unrefuted_reason="no_critique"),
         ],
     )
 
-    assert measure_mod.measure(st)["methods"]["proposed"]["found"] == 2
+    assert measure_mod.measure(st)["methods"]["proposed"]["found"] == 3
+
+
+def test_the_counted_classifications_match_the_state_script(measure_mod, state_mod):
+    """**収束の判定と測定は同じ指摘を数える**（#732 の AC11）。
+
+    片方だけに `unrefuted` を足すと、判定が数えた指摘を測定が採らず、この方式の再現率が
+    実際より低く出る。
+    """
+    assert measure_mod.COUNTED_CLASSIFICATIONS == state_mod.COUNTED_CLASSIFICATIONS
+    assert set(measure_mod.COUNTED_CLASSIFICATIONS) == {
+        "verified_blocking", "needs_human_judgment", "unrefuted"}
 
 
 def test_proposed_ignores_findings_from_unmarked_rounds(measure_mod):

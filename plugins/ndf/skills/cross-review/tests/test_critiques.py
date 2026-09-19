@@ -351,6 +351,51 @@ def test_the_retry_happens_once_per_round(tmp_dir, state_mod):
     assert st.get("evidence_rounds", []) == []
 
 
+def test_an_incomplete_collection_removes_an_existing_marker(tmp_dir, state_mod):
+    """**反証が揃わない取り込みは、先に付いていた印を外す**（#732 の AC13）。
+
+    印が残ると「印を付けないため、このラウンドは全件を数えます」の出力と実際の数え方が
+    食い違い、反証が届いていない `major` が区分の絞り込みへ掛かる。
+    """
+    _write(tmp_dir, _state([_finding("agy-r1-0", "agy")], evidence_rounds=[1]))
+    (tmp_dir / f"agy-review-pr{PR}-round1-payload.json").write_text(json.dumps(
+        {"comments": [{"path": "a.py", "line": 1, "body": "x",
+                       "severity": "major"}]}))
+
+    collect(state_mod, expect_rc=7)
+
+    st = _read(tmp_dir)
+    assert st["evidence_rounds"] == []
+    assert state_mod._evidence_completed(st, 1) is False
+    count, measurable = state_mod._new_finding_count(st, PR)
+    assert (count, measurable) == (1, True)   # payload の全件を数える
+
+
+def test_a_marker_stays_off_after_the_second_incomplete_collection(tmp_dir, state_mod):
+    """取り直した後も揃わないとき（2 度目）も印は付かない。"""
+    _write(tmp_dir, _state([_finding("codex-r1-0", "codex")], evidence_rounds=[1]))
+
+    collect(state_mod, expect_rc=7)
+    collect(state_mod, expect_rc=0)
+
+    st = _read(tmp_dir)
+    assert st["evidence_rounds"] == []
+    assert sorted(st["rounds"][0]["critique_relaunched"]) == ["agy", "kiro"]
+
+
+def test_an_incomplete_collection_keeps_other_rounds_markers(tmp_dir, state_mod):
+    """外すのはそのラウンドの番号だけである。前のラウンドの印は残る。"""
+    _write(tmp_dir, _state(
+        [_finding("codex-r2-0", "codex", round=2)],
+        rounds=[{"round": 1, "pr": PR}, {"round": 2, "pr": PR}],
+        evidence_rounds=[1, 2],
+    ))
+
+    collect(state_mod, expect_rc=7)
+
+    assert _read(tmp_dir)["evidence_rounds"] == [1]
+
+
 def test_a_proposer_only_round_is_marked_without_any_file(tmp_dir, state_mod):
     """**反証の対象が無い担当は不足に数えない。** 全員が提案者なら印が付く。"""
     _write(tmp_dir, _state([
