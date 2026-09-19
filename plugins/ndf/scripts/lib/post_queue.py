@@ -487,35 +487,6 @@ class Queue:
                 json.dump(item, f, indent=2, ensure_ascii=False)
             return path
 
-    def _flush_item(
-        self, path: pathlib.Path, item: dict[str, Any]
-    ) -> tuple[str, bool]:
-        """読み取り済み項目を 1 件処理する（既投稿・送信成功・送信失敗）。
-
-        戻り値は `(状態, rate_limited)`。状態は 'skipped', 'sent', 'failed'。
-        """
-        found, row = posted_match(item)
-        if found is True:
-            # **送った場合と同じ形で返す。** 呼び出し側は届いたことを応答から
-            # 確かめるため、既に届いていた項目にも見つけた投稿を積んで渡す。
-            if row is not None:
-                item["response"] = row
-            path.unlink(missing_ok=True)
-            return "skipped", False
-        attempt = send(item)
-        if attempt.ok:
-            try:
-                item["response"] = json.loads(attempt.stdout or "null")
-            except json.JSONDecodeError:
-                item["response"] = None
-            path.unlink(missing_ok=True)
-            return "sent", False
-        item["attempts"] = int(item.get("attempts") or 0) + 1
-        item["last_error"] = attempt.summary()
-        path.write_text(json.dumps(item, indent=2, ensure_ascii=False),
-                        encoding="utf-8")
-        return "failed", is_rate_limited(attempt)
-
     def flush(self) -> FlushResult:
         """積んだ項目を連番の順に送る。
 
@@ -538,15 +509,31 @@ class Queue:
                     "last_error": f"待ち行列の項目を読めない ({path.name})",
                 }
                 break
-            status, item_rate_limited = self._flush_item(path, item)
-            if status == "skipped":
+            found, row = posted_match(item)
+            if found is True:
+                # **送った場合と同じ形で返す。** 呼び出し側は届いたことを応答から
+                # 確かめるため、既に届いていた項目にも見つけた投稿を積んで渡す。
+                if row is not None:
+                    item["response"] = row
+                path.unlink(missing_ok=True)
                 skipped.append(item)
-            elif status == "sent":
+                continue
+            attempt = send(item)
+            if attempt.ok:
+                try:
+                    item["response"] = json.loads(attempt.stdout or "null")
+                except json.JSONDecodeError:
+                    item["response"] = None
+                path.unlink(missing_ok=True)
                 sent.append(item)
-            else:
-                failed = item
-                rate_limited = item_rate_limited
-                break
+                continue
+            item["attempts"] = int(item.get("attempts") or 0) + 1
+            item["last_error"] = attempt.summary()
+            path.write_text(json.dumps(item, indent=2, ensure_ascii=False),
+                            encoding="utf-8")
+            failed = item
+            rate_limited = is_rate_limited(attempt)
+            break
         return FlushResult(sent, skipped, failed, self.count(), rate_limited)
 
 
