@@ -76,7 +76,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| branch | unit | — | kiro | 検証中 | 1 |
+| branch | unit | — | kiro | 採用 | 1 |
 
 **なぜ**: compare は取得失敗・前回記録なし・一致・不一致の 4 分岐を返す純関数だが、対象範囲のどこでも固定されていない。instructions-check の既存テストは refresh.fetch をスタブへ差し替えるため、compare 本体は一度も通らない
 
@@ -88,7 +88,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| error | unit | — | kiro | 未着手 | 0 |
+| error | unit | — | kiro | 取り消し | 1 |
 
 **なぜ**: fetch は取得の失敗を例外にせず FetchResult(ok=False, error=...) へ畳む分岐を持ち、error の文言は _reason が例外の種類ごとに書き分ける。この経路は未固定で、instructions-check のテストは fetch 自体を差し替えるため通らない。opener は差し替え用に設計された引数である
 
@@ -117,3 +117,4 @@
 | 1 | `plugins/ndf/scripts/lib/statefile.py#save` | normal | 1 ラウンドの採用上限 5 件を超えた |
 | 1 | `plugins/ndf/skills/cross-review/scripts/state.py#cmd_read_result` | boundary | 1 ラウンドの採用上限 5 件を超えた |
 | 1 | `plugins/ndf/skills/cross-review/scripts/state.py#cmd_read_result` | error | 1 ラウンドの採用上限 5 件を超えた |
+| 2 | `plugins/ndf/scripts/lib/refresh.py#fetch` | error | テストの期待する振る舞いが変わっています（plugins/ndf/scripts/tests/test_refresh.py）。構造改善では期待出力を変えません。振る舞いの変更は別の変更に分けてください |
