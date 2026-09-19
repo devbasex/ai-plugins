@@ -2,15 +2,41 @@
 
 ## 目的
 
-- **壊れていること**: cross-refactoring の実装担当が結果ファイルを残さずに終わると、取り込みが下位の読み取りの `die` で止まり、同じ群が上限なしに開き直される。担当が作ったコミットは検証を受けずに残る。テスト整備の採用 0 件では項目の無い群を起動し続け、claude が担当の群は帰属行のためトレーラーが読めずに落ちる
+- **壊れていること**: cross-refactoring の実装担当が結果ファイルを残さずに終わることがある。このとき取り込みは、下位の読み取りがプロセスを終わらせるため止まる。同じ群が上限なしに開き直される。担当が作ったコミットは検証を受けずに残る。テスト整備の採用 0 件では項目の無い群を起動し続ける。claude が担当の群は帰属行のためトレーラーが読めずに落ちる
 - **困る人**: cross-refactoring を回す進行側（手で止めるまで CLI の起動と利用料が続く）と、その Pull Request を読む人（未検証の差分が混じる）
-- **直すと成り立つこと**: 3 つの取り込み（適用・修正・最終ゲートの修正）が結果なしを同じ手順で受け、未検証のコミットを取り消して結末を記録し、終了コードを返す。適用ラウンドの繰り返しは有限回で終わり、群は開いた回数と前回の結末で開き直すか・担当を替えるか・取り消すかが決まる。採用 0 件では群を作らない。起動し直しても解けない結末（利用上限）では同じ担当を同じ工程で起動し直さない。帰属行の後ろでもトレーラーが読める
+- **直すと成り立つこと**: 3 つの取り込み（適用・修正・最終ゲートの修正）が結果なしを同じ手順で受ける。未検証のコミットを取り消し、結末を記録し、終了コードを返す。適用ラウンドの繰り返しは有限回で終わる。群は開いた回数と前回の結末で、開き直すか・担当を替えるか・取り消すかが決まる。採用 0 件では群を作らない。起動し直しても解けない結末（利用上限）では、同じ担当を同じ工程で起動し直さない。帰属行の後ろでもトレーラーが読める
 
-## 文書の位置づけ
+この文書は「何を満たすか」だけを扱う。設計、置き換える既存の要求、範囲に入れる子 issue は末尾の「関連文書と前後関係」にある。
 
-設計は [issue-728-647-592-553-design.md](issue-728-647-592-553-design.md) にある。この文書は「何を満たすか」だけを扱う。
+## 用語
 
-**この文書は既存の要求 [issue-647-592-553-requirements.md](issue-647-592-553-requirements.md)（PR #665）を置き換える。** 対応は末尾の「既存の受け入れ条件との対応」にある。親 #728 が根本原因の場所（結果の読み取りの向きと、3 つの取り込みの重複）を定め直したため、受け入れ条件を親の名前で改めて置く。#674（最終ゲートの修正）は #728 の子として範囲に入れる。閉じるのは棚卸に任せる。
+本文は左の用語で書く。右の識別子は、引用・表・受け入れ条件の判定値で使う。
+
+| 用語 | 意味 |
+| --- | --- |
+| 取り込み | 担当の CLI が作ったコミットを、進行側が検証して受け入れるコマンド。適用の取り込み `merge-apply` / 修正の取り込み `merge-fix` / 最終ゲートの修正の取り込み `merge-final-fix` の 3 つ |
+| 群を開く | `next-apply-round`。次に適用する群を選んで担当を出す |
+| 最終ゲート | `final-gate`。全体のテストを実行して判定する |
+| 結末の読み取り | `gitfacts.read_result`。担当の結果ファイルを読む |
+| 共通層の読み取り | `lib/monitor_outcome.py` の `read_launch_outcome`。G3 が作る |
+| 群 | 適用ラウンド。書き換えるファイルが重ならない項目の集まりで、状態の `rounds[].apply_rounds[]` の 1 件 |
+| 試行 | 1 つの群に対して適用担当を起動し、適用の取り込みで取り込もうとした 1 回。番号は `attempt` |
+| 結末 | 担当 1 回の起動の終わり方。G3 の `LaunchOutcome`（使える結果か、結果なしの理由か） |
+| 結果なし | `LaunchOutcome.payload` が `None`。理由は `reason`（`missing` / `unparsable` / `stalled` など） |
+| 起動し直しの可否 | `LaunchOutcome.relaunch_same_agent`。偽は同じ担当を同じ条件で起動しても解けない（`usage_limit`） |
+| 結末の記録 | `failed_attempts[]`。結果を残さなかった起動の記録で、群と最終ゲートの記録（`final_gate`）が持つ |
+| 取り消しの理由 | 群の `drop_reason`（`no_result` / `empty`） |
+| 開き直しの判定 | `rounds.group_reopening` |
+| 輪番から担当を引く関数 | `rounds.impl_for_seq` |
+| 取り込みの共通手順 | 新設の `refactor_lib/intake.py`。取り消しの本体は `intake.discard_unverified` |
+| 範囲 | 取り込みが検査するコミットの列。起点（`apply_base_sha` / `fix_base_sha`）から HEAD まで |
+| 未検証のコミット | 範囲にあるが、結果なしで検証を受けられなかったコミット |
+| 修正ラウンドの数と上限 | `fix_rounds` と `--max-fix-rounds` |
+| 無進捗の許容 | `init` が出す `IMPL_STALL_TIMEOUT`。テストの制限時間（`--test-timeout`）+ 900 秒 |
+| 帰属行 | Claude Code がコミットメッセージへ足す `Co-Authored-By:` / `Claude-Session:` の行 |
+| トレーラーの段落 | `git interpret-trailers --parse` がトレーラーとして読む段落 |
+| トレーラーの読み取り | `gitfacts.commit_trailers` |
+| G1 / G3 | 実行計画の束の名前。G1 = 参加者の決め方（#727、PR #782）、G3 = 結末の読み取りの共通層（#729、PR #781） |
 
 ## 依頼（原文）
 
@@ -68,18 +94,20 @@
 
 含む:
 
-- `gitfacts.read_result` の契約の置き換え（結果なしを値で返す。`die` しない）
-- 3 つの取り込みの「範囲の確定 → 未検証コミットの取り消し → 結末の記録」の共通化（`refactor_lib/intake.py` の新設）
-- 取り消しの本体の一本化（`gitfacts.revert_unverified_range` と `apply._revert_unverified_apply_round` の 2 つを 1 つに）
-- 群の開き直しの判定の一本化（`rounds.group_reopening`）と、群が持つ試行の記録（`attempt` / `failed_attempts` / `drop_reason`）
-- 同じ群の試行の上限（2 回）と、2 回目の担当の交代
-- 採用 0 件の提案ラウンドで群を作らないこと。項目の無い群を開かないこと（#592）
-- `merge-fix` が読む結果の担当と、結果が無いときの修正ラウンドの数え方
-- `merge-final-fix` が結果なしで未検証のコミットを取り消すこと（#674）
-- 起動し直せない結末（`relaunch_same_agent` が偽）のときの 3 つの取り込みの振る舞い
-- `commit_trailers` の読み方と、適用・修正の雛形のコミットの規約（#553）
-- 適用・修正・最終ゲートの修正の監視に渡す無進捗の許容と、雛形の進捗マーカー（#647 の STALLED 対策。既存の設計から引き継ぐ）
-- `SKILL.md` の語の表・「別の上限を置かない」の段落・骨組みの監視の引数、`docs/02-apply-and-review.md` / `docs/04-fix-and-report.md` の対応箇所
+| 変えるもの | 内容 |
+| --- | --- |
+| 結末の読み取りの契約 | 結果なしを値で返す。プロセスを終わらせない（`die` しない） |
+| 取り込みの共通手順の新設 | 3 つの取り込みの「範囲の確定 → 未検証コミットの取り消し → 結末の記録」を共通化する（`refactor_lib/intake.py`） |
+| 取り消しの本体の一本化 | `gitfacts.revert_unverified_range` と `apply._revert_unverified_apply_round` の 2 つを 1 つにする |
+| 群の開き直しの判定の一本化 | 開き直しの判定（`rounds.group_reopening`）と、群が持つ試行の記録（`attempt` / `failed_attempts` / `drop_reason`） |
+| 試行の上限と担当の交代 | 同じ群の試行の上限（2 回）と、2 回目の担当の交代 |
+| 採用 0 件の扱い | 採用 0 件の提案ラウンドで群を作らない。項目の無い群を開かない（#592） |
+| 修正の取り込みが読む担当 | 修正の取り込みが読む結果の担当と、結果が無いときの修正ラウンドの数え方 |
+| 最終ゲートの修正の結果なし | 最終ゲートの修正の取り込みが、結果なしで未検証のコミットを取り消す（#674） |
+| 起動し直せない結末 | 起動し直しの可否が偽のときの 3 つの取り込みの振る舞い |
+| トレーラーの読み方 | トレーラーの読み取りの読み方と、適用・修正の雛形のコミットの規約（#553） |
+| 無進捗の許容 | 適用・修正・最終ゲートの修正の監視に渡す無進捗の許容と、雛形の進捗マーカー（#647 の無進捗の対策。既存の設計から引き継ぐ） |
+| 手順書 | `SKILL.md` の語の表・「別の上限を置かない」の段落・骨組みの監視の引数、`docs/02-apply-and-review.md` / `docs/04-fix-and-report.md` の対応箇所 |
 
 含まない:
 
@@ -95,111 +123,96 @@
 | `CHANGELOG.md` と版数 | 配布の工程が書く |
 | クラス図 | 設計文書の「構造」に触る型（`LaunchOutcome` / `IntakeScope` / `ClosedAttempt`）だけを載せる |
 
-## 用語
-
-| 用語 | 意味 |
-| --- | --- |
-| 取り込み | 担当の CLI が作ったコミットを、進行側が検証して受け入れるコマンド。`merge-apply` / `merge-fix` / `merge-final-fix` の 3 つ |
-| 群 | 適用ラウンド。書き換えるファイルが重ならない項目の集まりで、状態の `rounds[].apply_rounds[]` の 1 件 |
-| 試行 | 1 つの群に対して適用担当を起動し、`merge-apply` で取り込もうとした 1 回。番号は `attempt` |
-| 結末 | 担当 1 回の起動の終わり方。G3 の `LaunchOutcome`（使える結果か、結果なしの理由か） |
-| 結果なし | `LaunchOutcome.payload` が `None`。理由は `reason`（`missing` / `unparsable` / `stalled` など） |
-| 起動し直しの可否 | `LaunchOutcome.relaunch_same_agent`。偽は同じ担当を同じ条件で起動しても解けない（`usage_limit`） |
-| 範囲 | 取り込みが検査するコミットの列。起点（`apply_base_sha` / `fix_base_sha`）から HEAD まで |
-| 未検証のコミット | 範囲にあるが、結果なしで検証を受けられなかったコミット |
-| 帰属行 | Claude Code がコミットメッセージへ足す `Co-Authored-By:` / `Claude-Session:` の行 |
-| トレーラーの段落 | `git interpret-trailers --parse` がトレーラーとして読む段落 |
-
 ## 受け入れ条件（結末の読み取り）
 
-- [ ] AC1: 結果ファイルが無い状態で `gitfacts.read_result` を呼ぶと、`SystemExit` を出さず、標準出力・標準エラーに書かず、`payload` が `None` で `reason` が `missing` の値を返す
-- [ ] AC2: 監視の結果ファイル（`<impl>-apply-r<R>-monitor.json`）に `reason: stalled` があるとき、`read_result` の `reason` は `stalled`、`relaunch_same_agent` は真である。`reason: usage_limit` のとき `relaunch_same_agent` は偽である
-- [ ] AC3: `read_result` に渡す stem は、監視の `--stem-template`（`{agent}-apply-r$ROUND` / `{agent}-fix-r$ROUND` / `{agent}-final-fix`）を担当名で埋めた値と一致する。`paths.stem_for` の 3 つの工程の値を骨組みの雛形から作った値と突き合わせる
+- [ ] AC1: 結果ファイルが無い状態で結末の読み取り（`gitfacts.read_result`）を呼ぶと、例外（`SystemExit`）を出さず、標準出力・標準エラーに書かない。結果なしの値（`payload` が `None`、`reason` が `missing`）を返す
+- [ ] AC2: 監視の結果ファイル（`<impl>-apply-r<R>-monitor.json`）に無進捗の理由（`reason: stalled`）があるとき、結末の読み取りの理由は `stalled`、起動し直しの可否は真である。利用上限の理由（`reason: usage_limit`）のとき、可否は偽である
+- [ ] AC3: 結末の読み取りに渡す結果ファイルの名前の幹（stem）は、監視の名前の雛形（`--stem-template`: `{agent}-apply-r$ROUND` / `{agent}-fix-r$ROUND` / `{agent}-final-fix`）を担当名で埋めた値と一致する。幹を組む関数（`paths.stem_for`）の 3 つの工程の値を、骨組みの雛形から作った値と突き合わせる
 
 ## 受け入れ条件（共通の手順）
 
 - [ ] AC4: 前提: 結果なしで、起点から HEAD までにコミットが 1 件以上ある
       操作: 3 つの取り込みのいずれかを呼ぶ
       結果: そのコミットは取り消され、起点（`apply_base_sha` と群の `base_sha` / `fix_base_sha` / `final_gate.fix_base_sha`）は取り消し後の HEAD になる
-- [ ] AC5: 結果なしのとき、3 つの取り込みのいずれでも、記録の辞書（群 / `final_gate`）の `failed_attempts` に `{phase, attempt, impl, reason, detail, at, reverted}` の 1 件が足される。`reason` は `read_result` の値、`reverted` は取り消したコミットの数である
+- [ ] AC5: 結果なしのとき、3 つの取り込みのいずれでも、記録の辞書（群 / `final_gate`）の結末の記録（`failed_attempts`）に 1 件（`{phase, attempt, impl, reason, detail, at, reverted}`）が足される。理由（`reason`）は結末の読み取りの値、取り消した数（`reverted`）は取り消したコミットの数である
 - [ ] AC6: 結果なしで範囲にコミットが無いとき、`git revert` も `git push` も実行されない
-- [ ] AC7: 結果なしの取り込みを、同じ試行番号でもう一度呼ぶと、結果ファイルを読まずに前回と同じ終了コード 2 を返し、`failed_attempts` の件数は増えない。その間に結果ファイルが現れても読まない
-- [ ] AC8: 3 つの取り込みで範囲を確定できないとき（起点が無い、または git が範囲を返さない）の終了コードは、`merge-apply` は 4、`merge-fix` は修正ラウンドを 1 進めて 2、`merge-final-fix` は 2 である
+- [ ] AC7: 結果なしの取り込みを、同じ試行番号でもう一度呼ぶと、結果ファイルを読まずに前回と同じ終了コード 2 を返す。結末の記録の件数は増えない。その間に結果ファイルが現れても読まない
+- [ ] AC8: 3 つの取り込みで範囲を確定できないとき（起点が無い、または git が範囲を返さない）の終了コードは次のとおりである。適用の取り込みは 4、修正の取り込みは修正ラウンドを 1 進めて 2、最終ゲートの修正の取り込みは 2
 
 ## 受け入れ条件（#647: 適用ラウンド）
 
-- [ ] AC9: 群が 2 つ（1 つ目の担当 agy、2 つ目の担当 codex）の状態で、1 つ目の結果ファイルを置かずに `next-apply-round` → `merge-apply` を呼ぶ。終了コードは 2。1 つ目の群は `status: pending` のまま担当が agy 以外に替わり、`attempt` は 1、`failed_attempts` は 1 件（`phase: apply`、`attempt: 1`、`impl: agy`）である
-- [ ] AC10: AC9 の後、替わった担当の結果ファイルも置かずにもう一度 `next-apply-round` → `merge-apply` を呼ぶ。1 つ目の群は `status: dropped`・`drop_reason: no_result`、項目は `abandoned`、`deferred_items` に `実装担当が結果を残しませんでした（agy: missing → codex: missing）` の形の理由で入る
-- [ ] AC11: 結果ファイルを 1 つも置かずに `next-apply-round` が 1 を返すまで繰り返す。`next-apply-round` の呼び出しは 5 回（開く 4 回 + 尽きた 1 回）で終わり、両方の群が `dropped` になる
-- [ ] AC12: 結果ファイルが JSON として読めない場合と JSON の配列の場合も AC9 と同じ状態になり、`failed_attempts[].reason` は `unparsable` である
-- [ ] AC13: 群が 4 つ（`apply_seq` 4）あり先頭の群（担当 codex）が結果を残さない。替えた後の担当は codex 以外で、`apply_seq` は進めた分だけ進み、他の群の担当は変わらない
-- [ ] AC14: 監視の結果ファイルの `reason` が `usage_limit` で、`rounds.impl_for_seq` の差し替えにより交代先が無い状態では、1 回目の失敗で群が `dropped`（`drop_reason: no_result`）になる。`reason` が `missing` で交代先が無い状態では、同じ担当で 2 回目を開く
-- [ ] AC15: `next-apply-round` を `merge-apply` を挟まず 2 回呼ぶ（取り込みの前に進行が止まった再開）。群の `attempt` は 1 のまま進まない
-- [ ] AC16: 着手前のテストの状態が `green` でない状態で `merge-apply` を呼ぶと、結果ファイルを読まずに終了コード 4 で終わる
-- [ ] AC17: `merge-apply` が終了コード 2 で終わった後の群は、`dropped` か、`failed_attempts` を持つ `pending` のどちらかである。確かめる経路は 4 つ（結果なし / 未割当のコミット / 適用の検証の失敗 / 取り込み済みで採用 0 件）
-- [ ] AC18: `rounds.group_reopening` を差し替えると、`next-apply-round` の開き方（開く・再開・開かない）と `merge-apply` の結果なしの後の扱い（担当の交代・取り消し）の両方が、差し替えた関数の返す値に従う
+- [ ] AC9: 群が 2 つ（1 つ目の担当 agy、2 つ目の担当 codex）の状態で、1 つ目の結果ファイルを置かずに群を開く → 適用の取り込みを呼ぶ。終了コードは 2。1 つ目の群は未着手（`status: pending`）のまま担当が agy 以外に替わる。試行の番号（`attempt`）は 1、結末の記録は 1 件（`phase: apply`、`attempt: 1`、`impl: agy`）である
+- [ ] AC10: AC9 の後、替わった担当の結果ファイルも置かずにもう一度、群を開く → 適用の取り込みを呼ぶ。1 つ目の群は取り消し済み（`status: dropped`・`drop_reason: no_result`）、項目は `abandoned` になる。見送り（`deferred_items`）に `実装担当が結果を残しませんでした（agy: missing → codex: missing）` の形の理由で入る
+- [ ] AC11: 結果ファイルを 1 つも置かずに、群を開く操作が 1 を返すまで繰り返す。群を開く操作の呼び出しは 5 回（開く 4 回 + 尽きた 1 回）で終わり、両方の群が取り消し済み（`dropped`）になる
+- [ ] AC12: 結果ファイルが JSON として読めない場合と JSON の配列の場合も AC9 と同じ状態になり、結末の記録の理由（`failed_attempts[].reason`）は `unparsable` である
+- [ ] AC13: 群が 4 つ（輪番の通し番号 `apply_seq` が 4）あり、先頭の群（担当 codex）が結果を残さない。替えた後の担当は codex 以外である。輪番の通し番号は進めた分だけ進み、他の群の担当は変わらない
+- [ ] AC14: 監視の結果ファイルの理由が `usage_limit` で、輪番から担当を引く関数（`rounds.impl_for_seq`）の差し替えにより交代先が無い状態では、1 回目の失敗で群が取り消し済み（`dropped`、`drop_reason: no_result`）になる。理由が `missing` で交代先が無い状態では、同じ担当で 2 回目を開く
+- [ ] AC15: 群を開く操作を、適用の取り込みを挟まず 2 回呼ぶ（取り込みの前に進行が止まった再開）。群の試行の番号は 1 のまま進まない
+- [ ] AC16: 着手前のテストの状態が `green` でない状態で適用の取り込みを呼ぶと、結果ファイルを読まずに終了コード 4 で終わる
+- [ ] AC17: 適用の取り込みが終了コード 2 で終わった後の群は、取り消し済み（`dropped`）か、結末の記録を持つ未着手（`pending`）のどちらかである。確かめる経路は 4 つ（結果なし / 未割当のコミット / 適用の検証の失敗 / 取り込み済みで採用 0 件）
+- [ ] AC18: 開き直しの判定（`rounds.group_reopening`）を差し替えると、群を開く側の開き方（開く・再開・開かない）と、適用の取り込みの結果なしの後の扱い（担当の交代・取り消し）の両方が、差し替えた関数の返す値に従う
 
 ## 受け入れ条件（#592: 採用 0 件と項目の無い群）
 
-- [ ] AC19: テスト整備ラウンドで提案が 0 件の状態で `merge-proposals` を呼んだ後、`next-apply-round` を呼ぶ。1 回目で終了コード 1 を返し、そのラウンドの `apply_rounds` は空の配列のままである
-- [ ] AC20: `apply_rounds` の鍵を持たない状態ファイル（群を導入する前の版）では、`next-apply-round` が従来どおりラウンド全体を 1 つの群として開く
+- [ ] AC19: テスト整備ラウンドで提案が 0 件の状態で提案の取り込み（`merge-proposals`）を呼んだ後、群を開く操作を呼ぶ。1 回目で終了コード 1 を返し、そのラウンドの群の配列（`apply_rounds`）は空のままである
+- [ ] AC20: 群の配列の鍵（`apply_rounds`）を持たない状態ファイル（群を導入する前の版）では、群を開く操作が従来どおりラウンド全体を 1 つの群として開く
 - [ ] AC21: 前提: rf587 で残った形の群（`status: applied`・`items: []`・`apply.merged_at` あり・`applied: []`）
-      操作: `merge-apply` を呼ぶ
-      結果: 終了コード 2 で終わり、群が `dropped`（`drop_reason: empty`）になる。続く `next-apply-round` は 1 を返す
-- [ ] AC22: `status: pending`・`items: []` の群を持つ状態で `next-apply-round` を呼ぶ。その群は開かれずに `dropped`（`drop_reason: empty`）になり、次の群があればそれを開き、無ければ終了コード 1 を返す
+      操作: 適用の取り込みを呼ぶ
+      結果: 終了コード 2 で終わり、群が取り消し済み（`dropped`、`drop_reason: empty`）になる。続く群を開く操作は 1 を返す
+- [ ] AC22: 未着手で項目が無い群（`status: pending`・`items: []`）を持つ状態で、群を開く操作を呼ぶ。その群は開かれずに取り消し済み（`dropped`、`drop_reason: empty`）になる。次の群があればそれを開き、無ければ終了コード 1 を返す
 
 ## 受け入れ条件（修正ラウンド）
 
-- [ ] AC23: 群の担当が agy、提案ラウンドの担当が codex の状態で `agy-fix-r1-result.json` を置いて `merge-fix` を呼ぶ。agy の結果が取り込まれ、`fix_rounds` が 1 になる
-- [ ] AC24: 修正の結果ファイルが無い状態で `merge-fix` を呼ぶと、終了コード 2 で終わり、`fix_rounds` が 1 進み、群の `failed_attempts` に `phase: fix` の 1 件が足される。`--max-fix-rounds` 回続けた後の `should-abandon` は終了コード 0 を返す
-- [ ] AC25: AC24 の直後に `verify-round` を挟まず `merge-fix` をもう一度呼んでも `fix_rounds` は進まない（AC7 の修正ラウンドの形）
-- [ ] AC26: 修正の結果なしで監視の `reason` が `usage_limit` のとき、`merge-fix` は `fix_rounds` を `--max-fix-rounds` の値にし、続く `should-abandon` は終了コード 0 を返す
-- [ ] AC27: 修正の結果なしで起点から HEAD にコミットがあるとき、取り消され、`fix_base_sha` が取り消し後の HEAD になる（AC4 の修正ラウンドの形）
+- [ ] AC23: 群の担当が agy、提案ラウンドの担当が codex の状態で、agy の結果ファイル（`agy-fix-r1-result.json`）を置いて修正の取り込みを呼ぶ。agy の結果が取り込まれ、修正ラウンドの数（`fix_rounds`）が 1 になる
+- [ ] AC24: 修正の結果ファイルが無い状態で修正の取り込みを呼ぶと、終了コード 2 で終わり、修正ラウンドの数が 1 進む。群の結末の記録に `phase: fix` の 1 件が足される。上限（`--max-fix-rounds`）の回数だけ続けた後の見送りの判定（`should-abandon`）は終了コード 0 を返す
+- [ ] AC25: AC24 の直後に検証（`verify-round`）を挟まず修正の取り込みをもう一度呼んでも、修正ラウンドの数は進まない（AC7 の修正ラウンドの形）
+- [ ] AC26: 修正の結果なしで監視の理由が `usage_limit` のとき、修正の取り込みは修正ラウンドの数を上限の値にする。続く見送りの判定は終了コード 0 を返す
+- [ ] AC27: 修正の結果なしで起点から HEAD にコミットがあるとき、取り消され、起点（`fix_base_sha`）が取り消し後の HEAD になる（AC4 の修正ラウンドの形）
 
 ## 受け入れ条件（#674: 最終ゲートの修正）
 
-- [ ] AC28: 前提: 最終ゲートの修正の結果ファイルが無く、`final_gate.fix_base_sha` から HEAD にコミットが 1 件ある
-      操作: `merge-final-fix` を呼ぶ
-      結果: 終了コード 2。そのコミットは取り消され、`final_gate.fix_base_sha` は取り消し後の HEAD、`final_gate.failed_attempts` は 1 件（`phase: final-fix`）
-- [ ] AC29: AC28 の後に `final-gate` を呼ぶと、テストは取り消し後の HEAD で実行され、`fix_commits` に取り消したコミットは入らない
-- [ ] AC30: 最終ゲートの修正の結果なしで監視の `reason` が `usage_limit` のとき、`final_gate.fix_rounds` は `--max-fix-rounds` の値になり、続く `final-gate` はテストが落ちれば終了コード 1（取り消さず報告）で終わる
-- [ ] AC31: 結果ファイルがあり検証を通る最終ゲートの修正は、変更前と同じく取り込まれ、`final_gate.failed_attempts` を持たない
+- [ ] AC28: 前提: 最終ゲートの修正の結果ファイルが無く、最終ゲートの起点（`final_gate.fix_base_sha`）から HEAD にコミットが 1 件ある
+      操作: 最終ゲートの修正の取り込みを呼ぶ
+      結果: 終了コード 2。そのコミットは取り消され、最終ゲートの起点は取り消し後の HEAD になる。最終ゲートの結末の記録（`final_gate.failed_attempts`）は 1 件（`phase: final-fix`）
+- [ ] AC29: AC28 の後に最終ゲートを呼ぶと、テストは取り消し後の HEAD で実行され、修正のコミットの一覧（`fix_commits`）に取り消したコミットは入らない
+- [ ] AC30: 最終ゲートの修正の結果なしで監視の理由が `usage_limit` のとき、最終ゲートの修正ラウンドの数（`final_gate.fix_rounds`）は上限の値になる。続く最終ゲートは、テストが落ちれば終了コード 1（取り消さず報告）で終わる
+- [ ] AC31: 結果ファイルがあり検証を通る最終ゲートの修正は、変更前と同じく取り込まれ、最終ゲートの結末の記録を持たない
 
 ## 受け入れ条件（#553: 帰属行の後ろのトレーラー）
 
 一時リポジトリで実際にコミットを作って確かめる:
 
-- [ ] AC32: 必須トレーラー 4 つの段落の後に、空行を挟んで `Co-Authored-By:` の段落が付いたコミットで、`commit_trailers` が 4 つとも値を返す
+- [ ] AC32: 必須トレーラー 4 つの段落の後に、空行を挟んで `Co-Authored-By:` の段落が付いたコミットで、トレーラーの読み取りが 4 つとも値を返す
 - [ ] AC33: AC32 の段落の後に `Co-Authored-By:` と `Claude-Session:` の 2 行の段落が付いても、4 つとも返す
 - [ ] AC34: 必須トレーラーの段落と末尾の段落の間に散文の段落があるコミットで、散文より前にある `Round: …` の形の行を読まない
 - [ ] AC35: 末尾の段落に散文とトレーラーの形の行が混ざる（git がトレーラーの段落と判定しない）コミットで、その行を読まない
 - [ ] AC36: 同じ鍵が 2 つの段落にあるとき、末尾に近い段落の値を返す
 - [ ] AC37: AC32 の形のコミットを申告した適用ラウンドが、トレーラーの欠落で取り消されない
 - [ ] AC38: 本文がトレーラーの段落 1 つだけで、題名が `Round: 本文の題名` の形のコミットで、題名を読まない
-- [ ] AC39: `prompts/apply.md` と `prompts/fix.md` のコミットの規約が、必須トレーラーをメッセージの最後の段落に置くことを書く
+- [ ] AC39: 適用と修正の雛形（`prompts/apply.md` / `prompts/fix.md`）のコミットの規約が、必須トレーラーをメッセージの最後の段落に置くことを書く
 
 ## 受け入れ条件（無進捗の打ち切り）
 
-- [ ] AC40: `init` の出力に `IMPL_STALL_TIMEOUT` が入り、値が `--test-timeout` の値 + 900 である（既定で 1800）
-- [ ] AC41: `SKILL.md` の骨組みで、`--phase apply` / `fix` / `final-fix` の 3 つの `monitor.py` の呼び出しが `--stall-timeout "$IMPL_STALL_TIMEOUT"` を持ち、`--timeout` を持たない
-- [ ] AC42: 適用・修正・最終ゲートの修正の雛形（`prompts/apply.md` / `fix.md` / `final-fix.md`）が、作業段階ごとに `$RF_STEM-progress.log` へ 1 行追記する指示を持つ
+- [ ] AC40: 起動（`init`）の出力に無進捗の許容（`IMPL_STALL_TIMEOUT`）が入り、値がテストの制限時間（`--test-timeout`）の値 + 900 である（既定で 1800）
+- [ ] AC41: `SKILL.md` の骨組みで、適用・修正・最終ゲートの修正（`--phase apply` / `fix` / `final-fix`）の 3 つの監視（`monitor.py`）の呼び出しが `--stall-timeout "$IMPL_STALL_TIMEOUT"` を持ち、`--timeout` を持たない
+- [ ] AC42: 適用・修正・最終ゲートの修正の雛形（`prompts/apply.md` / `fix.md` / `final-fix.md`）が、作業段階ごとに進捗の記録（`$RF_STEM-progress.log`）へ 1 行追記する指示を持つ
 
 ## 受け入れ条件（文書）
 
 - [ ] AC43: `SKILL.md` の「この Skill で使う語」の適用ラウンドの行が、同じ群の試行の上限（2 回）を書く。`grep -n "別の上限を置かない\|別に置かない" SKILL.md` が何も出力しない
-- [ ] AC44: `docs/02-apply-and-review.md` の Step 4 と `docs/04-fix-and-report.md` の Step 6・Step 7 が 2 つを書く。結果なしのときの取り込みの振る舞い（取り消し・記録・終了コード）と、`SKILL.md` と同じ `monitor.py` の引数である
-- [ ] AC45: `docs/02-apply-and-review.md` のトレーラーの節が、`git log --format='%(trailers:…)'` が最後の段落しか読まないことと、進行側の読み方の 2 つを書く
+- [ ] AC44: `docs/02-apply-and-review.md` の Step 4 と `docs/04-fix-and-report.md` の Step 6・Step 7 が 2 つを書く。結果なしのときの取り込みの振る舞い（取り消し・記録・終了コード）と、`SKILL.md` と同じ監視の引数である
+- [ ] AC45: `docs/02-apply-and-review.md` のトレーラーの節が、git の標準の読み方（`git log --format='%(trailers:…)'`）が最後の段落しか読まないことと、進行側の読み方の 2 つを書く
 
 ## 受け入れ条件（退行しない）
 
-- [ ] AC46: 結果ファイルがあり検証を通る適用ラウンドは、変更前と同じく 1 回目の試行で取り込まれ、`failed_attempts` を持たない
+- [ ] AC46: 結果ファイルがあり検証を通る適用ラウンドは、変更前と同じく 1 回目の試行で取り込まれ、結末の記録を持たない
 - [ ] AC47: `uv run --with pytest pytest scripts/tests plugins/ndf -q` が通る
 - [ ] AC48: 配布物の同期・定義・frontmatter の 3 つの検査が終了コード 0 で終わる（コマンドは「検証手段」の表）
 
 ## 受け入れ条件（他の設計との契約）
 
-- [ ] AC49: `rounds.impl_for_seq` を差し替えると、群を割り当てたときの担当・結果を残さなかった群の交代先・最終ゲートの修正担当の 3 つが、差し替えた関数の返す担当になる
-- [ ] AC50: 取り消しの本体は `intake.discard_unverified` の 1 つになる。`gitfacts.revert_unverified_range` は無くなり、`apply._revert_unverified_apply_round` は `discard_unverified` を呼ぶ
+- [ ] AC49: 輪番から担当を引く関数（`rounds.impl_for_seq`）を差し替えると、群を割り当てたときの担当・結果を残さなかった群の交代先・最終ゲートの修正担当の 3 つが、差し替えた関数の返す担当になる
+- [ ] AC50: 取り消しの本体は取り込みの共通手順の 1 つ（`intake.discard_unverified`）になる。`gitfacts.revert_unverified_range` は無くなり、`apply._revert_unverified_apply_round` は `discard_unverified` を呼ぶ
 
 ## 非機能の条件
 
@@ -228,7 +241,7 @@
 | テスト | `uv run --with pytest pytest scripts/tests plugins/ndf -q`（cross-refactoring だけなら `plugins/ndf/skills/cross-refactoring/tests`） |
 | 配布物の同期 | `bash scripts/build-runtime-plugins.sh --check` |
 | 定義の検査 | `claude plugin validate .` と `python3 scripts/check-skill-frontmatter.py` |
-| 手動確認 | 次に cross-refactoring を回した実行で、`<impl>-apply-r*-progress.log` に作業段階が残るか。担当が結果を残さなかった群の `failed_attempts[].reason` が監視の結果ファイルの `reason` と一致するか |
+| 手動確認 | 次に cross-refactoring を回した実行で、進捗の記録（`<impl>-apply-r*-progress.log`）に作業段階が残るか。担当が結果を残さなかった群の結末の記録の理由が、監視の結果ファイルの理由と一致するか |
 
 ## 前提とする取り決め
 
@@ -271,3 +284,12 @@
 | AC34〜AC36 | AC46〜AC48 | 同じ |
 | AC37 | AC49 | 同じ |
 | — | AC1、AC3、AC14、AC18、AC26〜AC31、AC50 | 新設（結末の読み取り、起動し直しの可否、最終ゲート、開き直しの判定の一本化、取り消しの本体の一本化） |
+
+## 関連文書と前後関係
+
+| 項目 | 内容 |
+| --- | --- |
+| 設計 | [issue-728-647-592-553-design.md](issue-728-647-592-553-design.md)。この文書は「何を満たすか」だけを扱う |
+| 置き換える既存の要求 | [issue-647-592-553-requirements.md](issue-647-592-553-requirements.md)（PR #665）。**この文書が置き換える。** 対応は「既存の受け入れ条件との対応」にある |
+| 親の名前で置く理由 | 親 #728 が根本原因の場所（結果の読み取りの向きと、3 つの取り込みの重複）を定め直したため、受け入れ条件を親の名前で改めて置く |
+| 範囲に入れる子 issue | #674（最終ゲートの修正）は #728 の子として範囲に入れる。閉じるのは棚卸に任せる |
