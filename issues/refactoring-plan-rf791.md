@@ -208,7 +208,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| conditional_chain | replace_with_lookup_table | minor | kiro | 未着手 | 0 |
+| conditional_chain | replace_with_lookup_table | minor | kiro | 取り消し | 1 |
 
 **なぜ**: 現ラウンドの各指摘について _finding_match_kind の戻り値 ("exact"/"near"/"body") を if/elif で数えている。種別ごとの集計は種別を増やすたびに分岐を足すことになる。あわせて、collect_keys クロージャは _finding_keys(st, pr, round_no) をそのまま呼ぶだけの指標なしの間接参照で、読み手が本体を追う負荷を増やしている。test_state_check_oscillation.py と test_state_oscillation_matching.py が cmd_check_oscillation / _finding_match_kind を通す。
 
@@ -243,3 +243,4 @@
 | 2 | `plugins/ndf/scripts/lib/refresh.py#fetch` | error | テストの期待する振る舞いが変わっています（plugins/ndf/scripts/tests/test_refresh.py）。構造改善では期待出力を変えません。振る舞いの変更は別の変更に分けてください |
 | 3 | `plugins/ndf/scripts/lib/monitor.py#_record_outcome` | long_method | 1 ラウンドの採用上限 5 件を超えた |
 | 4 | `plugins/ndf/skills/cross-review/scripts/state.py#_init_new_state` | long_method | テストの期待する振る舞いが変わっています（plugins/ndf/skills/cross-review/tests/test_init_body_not_duplicated.py）。構造改善では期待出力を変えません。振る舞いの変更は別の変更に分けてください |
+| 4 | `plugins/ndf/skills/cross-review/scripts/state.py#cmd_check_oscillation` | conditional_chain | コミット 95387271f1b307d6c0a88f1cde8f6401fe3a6111 にトレーラーが欠けています: Item-Id, Round, Impl-Runtime, Impl-Model |
