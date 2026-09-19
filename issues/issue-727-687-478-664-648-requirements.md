@@ -140,7 +140,9 @@ P5（AC10〜AC30）を置き換える。** 対応は末尾の「既存の受け�
 - [ ] AC27: `only: null` の状態ファイルへ `--only codex` を渡すと `only` が `codex` になり、次の `start-round` が
       `codex` だけを返す。記録を持つ過去のラウンドの `reviewers` は変わらない。`--only none` は `only` を `null` へ戻す
 - [ ] AC28: `--exclude agy` を渡した再開では、参加者の確認をやり直し、`available` から `agy` が消え、次の
-      `start-round` が `agy` を返さない。`--exclude none` は除外を空へ戻す
+      `start-round` が `agy` を返さない。`--exclude none` は除外を空へ戻す。`participants.included` が `["claude"]` の状態へ
+      `--exclude agy` だけを渡すと、`included` は `["claude"]` のまま残り、`excluded` が `["agy"]` になる（渡さなかった引数は
+      状態ファイルの値で補う）
 - [ ] AC29: `host: "claude"` の状態ファイルへ `--host codex` を渡すと `host` は変わらず、反映しないことが 1 行出る。
       `--host claude` では何も出ない
 - [ ] AC30: `SKILL.md` と `docs/01-state-and-review.md` で `grep -n 'ONLY'` が当たる行は、`init` へ引数を渡す行と
@@ -170,7 +172,7 @@ P5（AC10〜AC30）を置き換える。** 対応は末尾の「既存の受け�
       引数ごとに 1 行出る。状態に載る他の引数（`--baseline-test` など。契約文書の表）も同じ扱いである。引数を渡さない
       再開では、上限 4 項目と `models` と `runtimes` が変わらない
 - [ ] AC40: 再開で `--exclude kiro` を渡すと参加者の確認をやり直す。`runtimes` から `kiro` が消え、次の `start-round` の
-      `RUNTIMES` に `kiro` が無い
+      `RUNTIMES` に `kiro` が無い。`--include agy` で始めた状態へ `--exclude kiro` だけを渡すと、`included` の `agy` は残る
 - [ ] AC41: `impl_capable` を持ち `participants` を持たない状態ファイル（この変更の前に始めた実行）を、`start-round` /
       `report` が読める。適用の輪番は `runtimes` から決まる
 
@@ -342,7 +344,7 @@ P5（AC10〜AC30）を置き換える。** 対応は末尾の「既存の受け�
 >
 > **置き場所も決める。** 規則が決まっても、置き場所が決まらなければ次に使う人へ届かない。
 >
-> **cross-refactoring では、既定の担当から agy を外し、ホストのランタイムを輪番へ入れる**と決めた（利用者の指示）。提案も適用も codex / kiro とホスト（ホストが codex / kiro なら 2 者）になる。
+> **cross-refactoring では、既定の担当から agy を外し、ホストのランタイムを輪番へ入れる**と決めた（利用者の指示）。提案も適用も codex / kiro / ホストの 3 者になる。
 
 ### #478
 
