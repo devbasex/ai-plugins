@@ -416,9 +416,10 @@ def _majority(representatives: list[dict[str, Any]],
     return _method_output(finding_ids, oracle_ids)
 
 
-# 3 本目の区分のうち、この変更の方式が採る 2 つ（`state.py` の
-# `COUNTED_CLASSIFICATIONS` と同じ）。**残る 3 つは採らない。**
-COUNTED_CLASSIFICATIONS = ("verified_blocking", "needs_human_judgment")
+# 3 本目の区分（#732 で 6 つ）のうち、この変更の方式が採る 3 つ（`state.py` の
+# `COUNTED_CLASSIFICATIONS` と同じ。一致は `test_measure.py` が固定する）。
+# **残る 3 つは採らない。**
+COUNTED_CLASSIFICATIONS = ("verified_blocking", "needs_human_judgment", "unrefuted")
 
 
 def _evidence_rounds(st: dict[str, Any]) -> set[int]:
