@@ -618,6 +618,46 @@ def test_a_retry_launches_only_the_agents_requested_by_collect(tmp_path):
     assert collects.read_text(encoding="utf-8").strip() == "2"
 
 
+def test_collect_failure_propagates_exit_code_without_retry(tmp_path):
+    """現状固定: collect-critiques が 7 以外（例: 5）を返したとき、終了コードを素通しして直ちに終了する。"""
+    script_dir = tmp_path / "scripts"
+    script_dir.mkdir()
+    shutil.copy2(SCRIPTS / "critique-round.sh", script_dir / "critique-round.sh")
+    calls = tmp_path / "critique-calls.txt"
+    collects = tmp_path / "collect-count.txt"
+
+    (script_dir / "_tmpdir.sh").write_text(
+        'tmpdir() { printf "%s\\n" "$CROSS_REVIEW_TMP_DIR"; }\n', encoding="utf-8")
+    (script_dir / "critique.sh").write_text(
+        "#!/usr/bin/env bash\n"
+        'printf "%s\\n" "$1" >> "$CRITIQUE_CALLS"\n'
+        'touch "$CROSS_REVIEW_TMP_DIR/$1-critique-pr$2.pid"\n', encoding="utf-8")
+    (script_dir / "monitor.py").write_text(
+        "#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    (script_dir / "state.py").write_text(
+        "#!/usr/bin/env bash\n"
+        'count=0; [ ! -f "$COLLECT_COUNT" ] || count=$(cat "$COLLECT_COUNT")\n'
+        'count=$((count + 1)); printf "%s\\n" "$count" > "$COLLECT_COUNT"\n'
+        "exit 5\n", encoding="utf-8")
+    for name in ("critique.sh", "monitor.py", "state.py"):
+        (script_dir / name).chmod(0o755)
+
+    env = dict(
+        os.environ,
+        CROSS_REVIEW_TMP_DIR=str(tmp_path),
+        CRITIQUE_CALLS=str(calls),
+        COLLECT_COUNT=str(collects),
+    )
+    result = subprocess.run(
+        ["bash", str(script_dir / "critique-round.sh"), str(PR), "1", "agy", "kiro"],
+        capture_output=True, text=True, env=env, check=False,
+    )
+
+    assert result.returncode == 5
+    assert collects.read_text(encoding="utf-8").strip() == "1"
+    assert calls.read_text(encoding="utf-8").splitlines() == ["agy", "kiro"]
+
+
 def test_the_stale_pidfile_is_removed_even_without_targets(tmp_dir, tmp_path):
     """捨てるのは、対象が無くて起動しない経路より前である。"""
     work = tmp_path / "work"

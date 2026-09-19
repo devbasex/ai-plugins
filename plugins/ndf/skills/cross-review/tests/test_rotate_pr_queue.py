@@ -221,7 +221,7 @@ class _Rotation:
             encoding="utf-8",
         )
 
-    def run(self, create_ok: bool) -> subprocess.CompletedProcess[str]:
+    def run(self, create_ok: bool, mode: str = "light") -> subprocess.CompletedProcess[str]:
         env = {
             **os.environ,
             "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}",
@@ -231,7 +231,7 @@ class _Rotation:
             "GH_CREATE": "ok" if create_ok else "fail",
         }
         return subprocess.run(
-            ["bash", str(ROTATE), "execute", str(_STATE_PR), "--mode", "light"],
+            ["bash", str(ROTATE), "execute", str(_STATE_PR), "--mode", mode],
             capture_output=True, text=True, timeout=180, env=env,
         )
 
@@ -264,6 +264,36 @@ def test_a_create_failure_leaves_the_old_pr_open_and_no_new_pr(rotation: _Rotati
 def test_a_create_success_closes_the_old_pr_and_opens_the_new_pr(rotation: _Rotation) -> None:
     """比較用: 作成が成功すると旧 PR は closed、新 PR は open、NEW_PR が作成結果を指す。"""
     out = rotation.run(create_ok=True)
+
+    assert out.returncode == 0, out.stderr
+    states = rotation.pr_states()
+    assert states[str(_OLD_PR)] == "closed"
+    assert states[str(_NEW_PR)] == "open"
+    assert f"NEW_PR={_NEW_PR}" in out.stdout
+    assert not any(c.startswith("pr reopen") for c in rotation.gh_calls())
+
+
+def test_a_create_failure_in_squash_mode_reopens_the_old_pr_and_emits_no_new_pr(
+    rotation: _Rotation,
+) -> None:
+    """現状固定: squash モードでも新 PR 作成が失敗すると非ゼロ終了で旧 PR が open へ戻り、NEW_PR は出ない。"""
+    out = rotation.run(create_ok=False, mode="squash")
+
+    assert out.returncode != 0, out.stderr
+    states = rotation.pr_states()
+    assert states[str(_OLD_PR)] == "open"          # reopen で戻る
+    assert str(_NEW_PR) not in states              # 新 PR は作られていない
+    assert "NEW_PR=" not in out.stdout             # 成功結果を出力していない
+    joined = rotation.gh_calls()
+    assert any(c.startswith(f"pr close {_OLD_PR}") for c in joined)
+    assert any(c.startswith(f"pr reopen {_OLD_PR}") for c in joined)
+
+
+def test_a_create_success_in_squash_mode_closes_the_old_pr_and_opens_the_new_pr(
+    rotation: _Rotation,
+) -> None:
+    """比較用: squash モードで作成が成功すると旧 PR は closed、新 PR は open、NEW_PR が作成結果を指す。"""
+    out = rotation.run(create_ok=True, mode="squash")
 
     assert out.returncode == 0, out.stderr
     states = rotation.pr_states()
