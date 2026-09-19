@@ -152,7 +152,7 @@ plugins/ndf/skills/cross-review/
 │   ├── measure.py                    # COUNTED_CLASSIFICATIONS に unrefuted を足す
 │   └── state.py                      # _classify_finding / _apply_classification / COUNTED_CLASSIFICATIONS / _handle_incomplete_critiques
 └── tests/
-    ├── test_classify_findings.py     # A〜K、AC10、期待値を変える 3 件
+    ├── test_classify_findings.py     # A〜K、AC10、期待値を変える 4 件
     ├── test_critiques.py             # AC13（印を外す）
     ├── test_measure.py               # AC11（一致）・AC12（proposed）
     └── test_skill_layout.py          # AC18〜AC20 の grep
@@ -260,7 +260,7 @@ graph TD
 | AC12 | 印のあるラウンドの `unrefuted` を `proposed` の `found` が数える | 同上（既存の `test_proposed_takes_only_the_two_counted_classifications` を 3 区分へ改める） |
 | AC13 | 印の付いた状態で `cmd_collect_critiques` を 2 回呼び、`evidence_rounds` と数え方を見る | `test_critiques.py` |
 | AC14・AC15 | 既存のテスト（`minor` の区分、印なしの数え方）を期待値を変えずに通す | 既存のまま |
-| AC16 | 3 件のテストの期待値を新しい区分へ改め、他は変えない | `test_classify_findings.py` |
+| AC16 | 4 件のテストの期待値を新しい区分へ改め、他は変えない | `test_classify_findings.py` |
 | AC17 | `cmd_judge` の既存のテストを期待値を変えずに通す。差分に `cmd_judge` の行が無いことをレビューで見る | 既存のまま・設計 Pull Request のレビュー |
 | AC18〜AC20 | 文書の語を `grep` するテスト | `test_skill_layout.py` |
 | AC21・AC22 | コマンドの終了コード | 継続的統合と手元 |
