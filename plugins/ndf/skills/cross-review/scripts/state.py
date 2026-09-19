@@ -4494,19 +4494,10 @@ def cmd_report(args: argparse.Namespace) -> None:
 
 # ---------------- main ----------------
 
-def build_parser() -> argparse.ArgumentParser:
-    """副コマンドの引数を組み立てる。**テストが選択肢を検査できるように分ける。**
+_Subparsers = argparse._SubParsersAction
 
-    実機で `kiro` の結果が `invalid choice` で弾かれた。担当が 4 つの名前を取りうる
-    以上、副コマンドの引数も同じ母集合を持たなければ、結果を残した担当が「結果なし」
-    として扱われる。
-    """
-    # 副コマンドの説明はここ（`help`）だけが持つ。**モジュールの docstring へ写さない。**
-    # 2 か所へ書くと片方だけが実装から離れる。振動の検知の基準は実装が 3 つの一致へ
-    # 変わった後も、docstring 側が古い基準を出し続けていた（#329）。
-    p = argparse.ArgumentParser(description=__doc__)
-    sub = p.add_subparsers(dest="cmd", required=True)
 
+def _add_init_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser("init", help="Step 0 — state 初期化 or 再開")
     sp.add_argument("pr", type=int)
     sp.add_argument("--max-rounds", type=int, default=12)
@@ -4537,6 +4528,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sp.set_defaults(func=cmd_init)
 
+
+def _add_start_round_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser(
         "start-round",
         help="Step 1 — round 開始判定 (1=上限到達/5=後始末の未了/8=同期できない)",
@@ -4544,12 +4537,16 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_start_round)
 
+
+def _add_read_result_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser("read-result", help="Step 2.4 — review result を state にマージ")
     sp.add_argument("pr", type=int)
     sp.add_argument("agent", choices=list(assignment.ALL_RUNTIMES))
     sp.add_argument("--file", default=None)
     sp.set_defaults(func=cmd_read_result)
 
+
+def _add_unresolved_threads_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser(
         "unresolved-threads",
         help="PR 上の未解決の指摘を数える (0=数えられた/1=取得できなかった)",
@@ -4557,10 +4554,14 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_unresolved_threads)
 
+
+def _add_flush_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser("flush", help="待ち行列に積んだ投稿を流す (常に 0)")
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_flush)
 
+
+def _add_judge_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser(
         "judge",
         help="Step 3 — intent ベース pass 判定 "
@@ -4569,6 +4570,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_judge)
 
+
+def _add_check_oscillation_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser(
         "check-oscillation",
         help="Step 4 — 同じ箇所を指す指摘の割合を計算 (2=続行/4=振動で中断)",
@@ -4576,27 +4579,37 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_check_oscillation)
 
+
+def _add_verify_findings_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser(
         "verify-findings",
         help="Step 2.5 前段 — 重複の統合（1 段目）と実行検証（#156）")
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_verify_findings)
 
+
+def _add_collect_critiques_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser(
         "collect-critiques",
         help="Step 2.5 後段 — 反証の結果を指摘へ結び、申告の重複を束ねる（#156）")
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_collect_critiques)
 
+
+def _add_merge_fix_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser("merge-fix", help="Step 5 post — fix 戻り値マージ + CI 分類")
     sp.add_argument("pr", type=int)
     sp.add_argument("--file", default=None)
     sp.set_defaults(func=cmd_merge_fix)
 
+
+def _add_should_rotate_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser("should-rotate", help="Step 6 — rotate 要否 (0=rotate/2=keep)")
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_should_rotate)
 
+
+def _add_set_current_pr_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser("set-current-pr", help="rotation 後の current_pr 更新")
     sp.add_argument(
         "--head-branch",
@@ -4607,6 +4620,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("new_pr", type=int)
     sp.set_defaults(func=cmd_set_current_pr)
 
+
+def _add_verify_sweep_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser(
         "verify-sweep",
         help="Step 7.5 後段 — 最終スイープ後の未解決の指摘を検証 (0=残なし/6=残あり)",
@@ -4615,9 +4630,46 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--file", default=None)
     sp.set_defaults(func=cmd_verify_sweep)
 
+
+def _add_report_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser("report", help="Step 8 — deferred nit + サマリ表示")
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_report)
+
+
+# 副コマンドの登録関数。**`--help` の一覧はこの順で出る**ため、並びを変えない。
+_SUBCOMMAND_REGISTRARS = (
+    _add_init_parser,
+    _add_start_round_parser,
+    _add_read_result_parser,
+    _add_unresolved_threads_parser,
+    _add_flush_parser,
+    _add_judge_parser,
+    _add_check_oscillation_parser,
+    _add_verify_findings_parser,
+    _add_collect_critiques_parser,
+    _add_merge_fix_parser,
+    _add_should_rotate_parser,
+    _add_set_current_pr_parser,
+    _add_verify_sweep_parser,
+    _add_report_parser,
+)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """副コマンドの引数を組み立てる。**テストが選択肢を検査できるように分ける。**
+
+    実機で `kiro` の結果が `invalid choice` で弾かれた。担当が 4 つの名前を取りうる
+    以上、副コマンドの引数も同じ母集合を持たなければ、結果を残した担当が「結果なし」
+    として扱われる。
+    """
+    # 副コマンドの説明は各登録関数の `help` だけが持つ。**モジュールの docstring へ写さない。**
+    # 2 か所へ書くと片方だけが実装から離れる。振動の検知の基準は実装が 3 つの一致へ
+    # 変わった後も、docstring 側が古い基準を出し続けていた（#329）。
+    p = argparse.ArgumentParser(description=__doc__)
+    sub = p.add_subparsers(dest="cmd", required=True)
+    for register in _SUBCOMMAND_REGISTRARS:
+        register(sub)
     return p
 
 
