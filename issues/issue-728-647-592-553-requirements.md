@@ -124,7 +124,7 @@
 - [ ] AC5: 結果なしのとき、3 つの取り込みのいずれでも、記録の辞書（群 / `final_gate`）の `failed_attempts` に `{phase, attempt, impl, reason, detail, at, reverted}` の 1 件が足される。`reason` は `read_result` の値、`reverted` は取り消したコミットの数である
 - [ ] AC6: 結果なしで範囲にコミットが無いとき、`git revert` も `git push` も実行されない
 - [ ] AC7: 結果なしの取り込みを、同じ試行番号でもう一度呼ぶと、結果ファイルを読まずに前回と同じ終了コード 2 を返し、`failed_attempts` の件数は増えない。その間に結果ファイルが現れても読まない
-- [ ] AC8: 3 つの取り込みで、範囲を確定できないとき（起点が無い、または git が範囲を返さない）の終了コードは変わらない（`merge-apply` は 4、`merge-fix` は修正ラウンドを 1 進めて 2、`merge-final-fix` は 2）
+- [ ] AC8: 3 つの取り込みで範囲を確定できないとき（起点が無い、または git が範囲を返さない）の終了コードは、`merge-apply` は 4、`merge-fix` は修正ラウンドを 1 進めて 2、`merge-final-fix` は 2 である
 
 ## 受け入れ条件（#647: 適用ラウンド）
 
