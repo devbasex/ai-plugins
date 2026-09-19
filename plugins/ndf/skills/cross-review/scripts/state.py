@@ -24,7 +24,6 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections import Counter
 from typing import Any, NamedTuple
 
 # 待ち行列は共通層に置く。指し方の契約は `plugins/ndf/scripts/lib/README.md` にある。
@@ -3905,20 +3904,30 @@ def cmd_check_oscillation(args: argparse.Namespace) -> None:
     prev_round_no = same_pr[-2]["round"]
     curr_round_no = same_pr[-1]["round"]
 
-    prev = _finding_keys(st, pr, prev_round_no)
-    curr = _finding_keys(st, pr, curr_round_no)
+    def collect_keys(round_no: int) -> list[tuple[str, int, str]]:
+        """そのラウンドの指摘を (ファイル, 行, 正規化した本文) の並びで返す。"""
+        return _finding_keys(st, pr, round_no)
+
+    prev = collect_keys(prev_round_no)
+    curr = collect_keys(curr_round_no)
     if not curr:
         info("⏭ 現ラウンドの payload なし: 振動検知スキップ")
         sys.exit(2)
 
-    # 一致種別ごとの件数。None は「一致なし」で、重なりには数えない
-    counts = Counter(_finding_match_kind(key, prev) for key in curr)
-    overlap_count = sum(n for kind, n in counts.items() if kind is not None)
+    exact = near = same_body = 0
+    for key in curr:
+        kind = _finding_match_kind(key, prev)
+        if kind == "exact":
+            exact += 1
+        elif kind == "near":
+            near += 1
+        elif kind == "body":
+            same_body += 1
+    overlap_count = exact + near + same_body
     ratio = overlap_count / len(curr)
     info(
         f"振動検知: overlap={overlap_count}/{len(curr)} ({ratio:.0%})"
-        f" 位置={counts.get('exact', 0)} 近傍={counts.get('near', 0)}"
-        f" 本文={counts.get('body', 0)}"
+        f" 位置={exact} 近傍={near} 本文={same_body}"
     )
 
     if ratio >= 0.5:
