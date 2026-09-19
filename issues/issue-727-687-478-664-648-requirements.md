@@ -13,7 +13,8 @@ P5（AC10〜AC30）を置き換える。** 対応は末尾の「既存の受け�
   使える者だけで回る。使えない者と理由は出力と状態ファイルに残る
 - cross-review は、使える者が 2 者に満たなくても、各ラウンドに 2 席を確保する。席の埋め方の規則は
   1 つで、両 Skill が共有する共通層が持つ
-- cross-refactoring の既定の参加者は codex / kiro / ホストの 3 者になり、agy は既定から外れる。
+- cross-refactoring の既定の参加者は codex / kiro とホスト（ホストが codex / kiro なら 2 者、それ以外なら 3 者）
+  になり、agy は既定から外れる。
   外す・戻す手段は引数で持つ
 - 中断した収束ループを、引数で進め方を変えて再開できる。反映しなかった引数は出力で分かる。
   この規則も共通層が 1 か所で持つ
@@ -112,7 +113,8 @@ P5（AC10〜AC30）を置き換える。** 対応は末尾の「既存の受け�
       `["codex", "kiro"]` になる。`--exclude agy --exclude kiro` と `--exclude agy,kiro` は同じ状態ファイルを作る
 - [ ] AC17: ホスト `claude` で `--include claude` を渡すと、`available` が 4 者になり、`start-round` が 2 席を返す
 - [ ] AC18: 使える者が `codex` の 1 者で、ホストの確認が通る。`init` は終了コード 0 で終わり、観点が減ることを 1 行出す。
-      `participants.fallback` は `["claude"]`、`start-round` は `codex claude` を返す
+      `participants.fallback` は `["claude"]`、`start-round` は `codex claude` を返す。`--only codex` のときはホストを
+      確かめず、`participants.fallback` は空で、`start-round` は `codex` だけを返す（確認コマンドの呼び出しは `codex` の 1 回）
 - [ ] AC19: 使える者が 0 者でホストの確認が通ると、`init` は終了コード 0 で終わり、`start-round` は `claude claude-2`
       を返す。ホストの確認も通らないと `init` は終了コード 1 で終わり、状態ファイルを作らない
 - [ ] AC20: 次の 3 つはいずれも終了コード 1 で終わり、状態ファイルを作らない。`--exclude claude`（ホスト）/
@@ -149,7 +151,8 @@ P5（AC10〜AC30）を置き換える。** 対応は末尾の「既存の受け�
 - [ ] AC31: ホスト `claude` の新規の `init` で、状態ファイルの `runtimes` は `["claude", "codex", "kiro"]` になり、
       `agy` の確認は行われない。状態ファイルに `impl_capable` は無く、標準出力に `IMPL_POOL=` の行は無い
 - [ ] AC32: ホスト `codex` では `runtimes` が `["codex", "kiro"]`、ホスト `agy` では `["codex", "agy", "kiro"]` になる
-- [ ] AC33: `--include agy` で `runtimes` が 4 者に、`--exclude kiro` で 2 者になる
+- [ ] AC33: `--include agy` で `runtimes` が 4 者に、`--exclude kiro` で 2 者になる。ホスト `claude` で `--exclude claude` を
+      渡すと `runtimes` が `["codex", "kiro"]` になり、`init` は終了コード 0 で終わる（ホストは母集合に含まれるため外せる）
 - [ ] AC34: `impl_assign(r, ["claude", "codex", "kiro"])` をラウンド 1〜6 で呼ぶ。返る値は `codex` / `kiro` / `claude` /
       `codex` / `kiro` / `claude` である。`start-round` は `REVIEWERS` / `REVIEWERS_CSV` を出さない。ラウンドの記録に
       `reviewers` / `reviewer_models` が無い
@@ -173,7 +176,8 @@ P5（AC10〜AC30）を置き換える。** 対応は末尾の「既存の受け�
 
 ### 文書
 
-- [ ] AC42: `CLAUDE.md` の cross-refactoring の節が「codex / kiro / ホストの 3 者」と「適用担当は 3 ラウンドで 1 周」を
+- [ ] AC42: `CLAUDE.md` の cross-refactoring の節が「codex / kiro とホスト（ホストが codex / kiro なら 2 者）」と
+      「適用担当は参加者の数のラウンドで 1 周する」を
       書く。「ホストを除く 3 者」「参加する 4 者」を含まない。cross-review の節が「codex / agy の両方」を含まない。
       次の 3 つがいずれも 0 行を出す
 
@@ -338,7 +342,7 @@ P5（AC10〜AC30）を置き換える。** 対応は末尾の「既存の受け�
 >
 > **置き場所も決める。** 規則が決まっても、置き場所が決まらなければ次に使う人へ届かない。
 >
-> **cross-refactoring では、既定の担当から agy を外し、ホストのランタイムを輪番へ入れる**と決めた（利用者の指示）。提案も適用も codex / kiro / ホストの 3 者になる。
+> **cross-refactoring では、既定の担当から agy を外し、ホストのランタイムを輪番へ入れる**と決めた（利用者の指示）。提案も適用も codex / kiro とホスト（ホストが codex / kiro なら 2 者）になる。
 
 ### #478
 
