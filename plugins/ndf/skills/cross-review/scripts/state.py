@@ -4067,31 +4067,39 @@ def _merge_fix_records(st: dict, fix: dict, pr: int) -> dict:
     return st["rounds"][-1]["fix"]
 
 
-def _normalize_fix_result(fix: dict) -> dict[str, Any]:
-    """fix の戻り値から別名と劣化表現を吸収し、記録へ写す値にそろえる。"""
-    # key 名 fallback (サブエージェントが別名で書いた場合の救済)。
-    # 正規は fix_commit / fixed_count、別名は commit_sha / fixed のみ受理する。
+def _resolve_fix_aliases(fix: dict) -> tuple[object, object]:
+    """fix の commit と fixed 件数を正規 key と別名から解決する。"""
     fix_commit = fix.get("fix_commit") or fix.get("commit_sha")
     fixed_count = fix.get("fixed_count")
     if fixed_count is None:
         fixed_count = fix.get("fixed", 0)
+    return fix_commit, fixed_count
+
+
+def _normalize_deferred_like(raw: object) -> tuple[list[dict], int]:
+    """deferred の項目と、劣化表現を考慮した保存件数を返す。"""
+    items = _normalize_dict_items(raw)
+    if isinstance(raw, (list, dict)):
+        return items, len(items)
+    return items, _count(raw)
+
+
+def _normalize_fix_result(fix: dict) -> dict[str, Any]:
+    """fix の戻り値から別名と劣化表現を吸収し、記録へ写す値にそろえる。"""
+    # key 名 fallback (サブエージェントが別名で書いた場合の救済)。
+    # 正規は fix_commit / fixed_count、別名は commit_sha / fixed のみ受理する。
+    fix_commit, fixed_count = _resolve_fix_aliases(fix)
 
     # deferred は list が正だが、LLM がスキーマを無視して文字列リスト
     # (例: ["nit: ..."]) や単一 dict、int(件数) を返すケースがある。後段の
     # deferred_nits 展開ループは dict 以外をスキップするため、まず dict 要素のみへ
     # 正規化する (単一 dict は 1 件として包む)。
-    _deferred_raw = fix.get("deferred")
-    _deferred_nits = _normalize_dict_items(_deferred_raw)
-
     # 保存件数の単一整合ルール:
     #   - 構造化データ (list / dict) は per-item を保持できるので、展開件数
     #     (len(_deferred_nits)) を保存し deferred_nits の件数と一致させる。
     #   - int / 数値文字列は per-item データを失った「劣化表現」なので、件数を
     #     失わないよう _count() の値を保存する (展開はできないので nits は空)。
-    if isinstance(_deferred_raw, (list, dict)):
-        _deferred_count = len(_deferred_nits)
-    else:
-        _deferred_count = _count(_deferred_raw)
+    _deferred_nits, _deferred_count = _normalize_deferred_like(fix.get("deferred"))
 
     # 却下も同じ正規化を通す。**件数だけが返る劣化表現（int）では per-item を作れない**
     # ため、そのときは記録を空にし、件数は `_count()` の値で残す。
