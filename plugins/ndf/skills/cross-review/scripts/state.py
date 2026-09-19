@@ -1436,6 +1436,33 @@ def _pending_posts(pr: int) -> int:
     return _queue(pr).count()
 
 
+def _flushed_review(item: dict[str, Any]) -> tuple[Any, Any, str] | None:
+    """待ち行列の項目から、確認するレビューの担当・ラウンド・URL を得る。"""
+    if item.get("kind") != "review-post":
+        return None
+    extra = item.get("extra") or {}
+    agent, round_no = extra.get("agent"), extra.get("round")
+    if not (agent and round_no):
+        return None
+    response = item.get("response")
+    response = response if isinstance(response, dict) else {}
+    url = str(response.get("html_url") or "")
+    if not url and response.get("id"):
+        url = f"#pullrequestreview-{response['id']}"
+    return agent, round_no, url
+
+
+def _flushed_review_target(
+        state: dict[str, Any], agent: Any, round_no: Any) -> dict[str, Any] | None:
+    """レビューを積んだラウンドから、担当の書き戻し先を探す。"""
+    return next(
+        (entry for entry in state.get("rounds", [])
+         if entry.get("round") == round_no
+         and isinstance(entry.get(agent), dict)),
+        None,
+    )
+
+
 def _confirm_flushed(pr: int, item: dict[str, Any]) -> None:
     """流した直後に、投稿が届いたことを 1 度だけ確かめる。
 
@@ -1449,24 +1476,14 @@ def _confirm_flushed(pr: int, item: dict[str, Any]) -> None:
     確認を促す側にも働かない**（判定は `queued` を見て照会を飛ばす）。共通層が
     見つけた投稿を `response` として渡すため、どちらも同じ経路で確かめられる。
     """
-    if item.get("kind") != "review-post":
+    review = _flushed_review(item)
+    if review is None:
         return
-    extra = item.get("extra") or {}
-    agent, round_no = extra.get("agent"), extra.get("round")
-    if not (agent and round_no):
-        return
-    resp = item.get("response") if isinstance(item.get("response"), dict) else {}
-    url = str(resp.get("html_url") or "")
-    if not url and resp.get("id"):
-        url = f"#pullrequestreview-{resp['id']}"
+    agent, round_no, url = review
     st = _load(pr)
     # **書き戻す先は、その項目が属するラウンドである。** 積んだラウンドと流した
     # ラウンドが同じとは限らないため、最後のラウンドへ書かない。
-    target = next(
-        (e for e in st.get("rounds", [])
-         if e.get("round") == round_no and isinstance(e.get(agent), dict)),
-        None,
-    )
+    target = _flushed_review_target(st, agent, round_no)
     if target is None:
         return
     exists = _review_exists(str(st.get("repo") or ""),
