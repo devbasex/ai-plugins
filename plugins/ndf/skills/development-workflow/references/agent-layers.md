@@ -315,9 +315,10 @@ conductor は到達したときと止まったときに、利用者への応答�
 当たる。** worker はその 1 本の中で動くため、別に数えない。
 
 **同時に動かす worker は、1 つの supervisor につき既定 1 つとする。** 増やすときは 1 本あたりの
-見込みを測り直してから増やす。**本数の測り方は [parallel-work.md](parallel-work.md)、実行計画は
-`issue-plan-strategy` の [references/execution-plan.md](../../issue-plan-strategy/references/execution-plan.md)
-が持つ。** この文書は数える単位だけを決める。
+見込みを測り直してから増やす。**本数を抑える下限は [parallel-work.md](parallel-work.md)、
+本数の測り方と実行計画は `issue-plan-strategy` の
+[references/execution-plan.md](../../issue-plan-strategy/references/execution-plan.md) が持つ。**
+この文書は数える単位だけを決める。
 
 ## 到達点を置き直す
 
