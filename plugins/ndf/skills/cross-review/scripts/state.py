@@ -2767,6 +2767,47 @@ def _round_ci(st: dict[str, Any], last: dict[str, Any], pr: int) -> dict[str, An
     return {"verdict": "success", "sha": sha}
 
 
+def _no_result_reasons(last: dict[str, Any], no_result: list[str]) -> dict[str, str]:
+    """結果なしの担当ごとの理由を集め、`NO_RESULT_REASONS` を出す。
+
+    どの出口でも進行側が理由を読めるように、先頭で 1 度だけ出す（#729 の AC14）。
+    """
+    reasons = {
+        a: (last.get(a) or {}).get("no_result_reason") or "missing" for a in no_result
+    }
+    print(f"NO_RESULT_REASONS='{' '.join(f'{a}={r}' for a, r in reasons.items())}'")
+    return reasons
+
+
+def _abort_no_result_round(pr: int, st: dict[str, Any], msg: str) -> None:
+    """結果なしのラウンドを異常終了させる共通処理。
+
+    `final=error` にして保存し、終了コード 1 で止める。最終スイープを通してから
+    完了報告へ進むよう促す文言は呼び出し側が渡す。
+    """
+    st["final"] = "error"
+    st["ended_at"] = _now()
+    _save(pr, st)
+    die(msg, code=1)
+
+
+def _record_relaunch(
+    pr: int, st: dict[str, Any], last: dict[str, Any], pending: list[str]
+) -> None:
+    """同じラウンドで起動し直す担当を記録し、シェル向けの出力を出す。"""
+    last["relaunched"] = (last.get("relaunched") or []) + pending
+    _save(pr, st)
+    print(f"RELAUNCH_AGENTS='{' '.join(pending)}'")
+    print(f"RELAUNCH_AGENTS_CSV={','.join(pending)}")
+    # 互換のために残す。**`both` は codex / agy の 2 者だけを指す語**であるため、
+    # 担当がそれ以外を含むラウンドでは CSV の側を使う。
+    print(f"RELAUNCH_TARGET={'both' if len(pending) == 2 else pending[0]}")
+    info(
+        f"→ 結果を残さなかったレビュアーがいる: {' '.join(pending)}。"
+        "同じラウンドで 1 度だけ起動し直す。"
+    )
+
+
 def _handle_no_result_round(
     pr: int, st: dict[str, Any], last: dict[str, Any], no_result: list[str]
 ) -> None:
@@ -2779,49 +2820,30 @@ def _handle_no_result_round(
     である（#619）。骨組みは既存の 1 の枝で受けるため、終了コードは増えない（決定 12）。
     """
     last["verdict"] = "no_result"
-    reasons = {
-        a: (last.get(a) or {}).get("no_result_reason") or "missing" for a in no_result
-    }
-    print(f"NO_RESULT_REASONS='{' '.join(f'{a}={r}' for a, r in reasons.items())}'")
+    reasons = _no_result_reasons(last, no_result)
     blocked = [a for a, r in reasons.items()
                if not monitor_outcome.relaunch_same_agent(r)]
     if blocked:
-        st["final"] = "error"
-        st["ended_at"] = _now()
-        _save(pr, st)
         for a in blocked:
             detail = (last.get(a) or {}).get("monitor_detail")
             info(f"  {a}: reason={reasons[a]}" + (f" detail={detail}" if detail else ""))
-        die(
+        _abort_no_result_round(
+            pr, st,
             f"起動し直しても解けない理由で結果が残りませんでした: {' '.join(blocked)}。"
             " 同じラウンドで起動し直さずに中断します。最終スイープを通してから"
             "完了報告へ進んでください",
-            code=1,
         )
     relaunched = last.get("relaunched") or []
     pending = [a for a in no_result if a not in relaunched]
     if not pending:
         # 2 度続けて結果が残らないのは、対象や負荷ではなく実行環境の側の事象である。
-        st["final"] = "error"
-        st["ended_at"] = _now()
-        _save(pr, st)
-        die(
+        _abort_no_result_round(
+            pr, st,
             f"起動し直した後も結果が残りませんでした: {' '.join(no_result)}。"
             " 実行環境の側の問題として中断します。最終スイープを通してから"
             "完了報告へ進んでください",
-            code=1,
         )
-    last["relaunched"] = relaunched + pending
-    _save(pr, st)
-    print(f"RELAUNCH_AGENTS='{' '.join(pending)}'")
-    print(f"RELAUNCH_AGENTS_CSV={','.join(pending)}")
-    # 互換のために残す。**`both` は codex / agy の 2 者だけを指す語**であるため、
-    # 担当がそれ以外を含むラウンドでは CSV の側を使う。
-    print(f"RELAUNCH_TARGET={'both' if len(pending) == 2 else pending[0]}")
-    info(
-        f"→ 結果を残さなかったレビュアーがいる: {' '.join(pending)}。"
-        "同じラウンドで 1 度だけ起動し直す。"
-    )
+    _record_relaunch(pr, st, last, pending)
     sys.exit(7)
 
 

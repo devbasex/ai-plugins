@@ -63,10 +63,12 @@ _STATUS_REASON = {
 }
 
 # 結果ファイルのキー。**並びも契約の文書の表と揃える**（読む人が突き合わせやすい）。
+# `phase` は P2（#598 / #537）で足した `--phase` の値。省いたときは null で、契約の文書の
+# とおり末尾に置く。
 OUTCOME_KEYS = (
     "agent", "stem", "status", "exit_code", "reason", "detail",
     "launched_at", "started_at", "ended_at", "elapsed", "idle_seconds",
-    "progress_tail", "result_exists", "pid",
+    "progress_tail", "result_exists", "pid", "phase",
 )
 
 JOURNAL_NAME = "monitor-outcomes.jsonl"
