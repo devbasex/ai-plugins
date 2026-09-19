@@ -222,7 +222,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| long_method | extract_method | minor | kiro | 検証中 | 1 |
+| long_method | extract_method | minor | kiro | 採用 | 1 |
 
 **なぜ**: 1 関数に (a) 別名 fallback（fix_commit/commit_sha、fixed_count/fixed）、(b) deferred の list/dict/int による件数の場合分けと dict 要素への正規化、(c) rejected の同じ正規化、(d) 記録用辞書の組み立て、が同居する。deferred と rejected はどちらも _normalize_dict_items + 件数決定という同型の処理で、片方だけ直すと食い違いうる。test_state_merge_fix.py と test_state_ci_classification.py が cmd_merge_fix 経由で通す。
 
@@ -231,6 +231,74 @@
 3. 別名 fallback（fix_commit/fixed_count）を _resolve_fix_aliases として抽出する
 4. 末尾の辞書組み立てを、抽出した値を差し込む形へ整える
 5. テストを実行して出力の辞書が不変であることを確認する
+
+## ラウンド 5（実装 codex / レビュー agy / kiro）
+
+### R5-001 — `plugins/ndf/scripts/lib/post_queue.py#Queue.flush`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_method | extract_method | major | codex | 取り消し | 0 |
+
+**なぜ**: 1 件の処理の中に、壊れた JSON の停止判定、既投稿の照合と削除、送信成功時の応答保存と削除、送信失敗時の再試行情報保存と rate limit 判定が直列に並び、flush 自体が順序制御と各項目の状態遷移の両方を担っている。
+
+**手順**: 1. 読み取り済み項目について既投稿・送信成功・送信失敗を処理する部分を Queue の補助メソッドへ抽出する
+2. 補助メソッドの戻り値で継続または停止と rate_limited を表し、flush は連番走査と集計だけを担うようにする
+3. 壊れた項目で停止する既存経路は flush 側に残し、項目順序と停止位置を変えない
+4. test_post_queue.py と cross-review/tests/test_queue_idempotency.py で skipped・sent・failed・remaining とファイル削除順を確認する
+
+### R5-002 — `plugins/ndf/skills/cross-review/scripts/state.py#_sync_worktree`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_method | extract_method | major | codex | 取り消し | 0 |
+
+**なぜ**: PR head の取得方法の決定、strict 時の同期済み判定と失敗処理、worktree の reset・未追跡ファイル掃除、同期結果の表示という独立した段階が 1 関数に同居している。HeadRef と旧来の文字列 head の分岐も取得段階に閉じず、後続の制御へ have_base・target・label の組で持ち越されている。
+
+**手順**: 1. HeadRef と文字列 head から have_base・target・label を解決する取得段階を補助関数へ抽出する
+2. strict 時の同期済み早期終了と基準取得失敗の判定を補助関数へ抽出する
+3. _sync_worktree は取得、判定、reset、clean、結果表示の順序だけを示す構成にする
+4. test_state_sync_worktree.py と test_state_offline_fetch.py で既存の strict／fallback／失敗時終了コードを確認する
+
+### R5-003 — `plugins/ndf/skills/cross-review/scripts/state.py#_load_payload`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| duplication | consolidate_duplication | minor | kiro | 未着手 | 0 |
+
+**なぜ**: payload が dict でない場合と comments が list でない場合の 2 経路が、`info(f"⚠ {agent}: ...形式不正で、判定は中断します")` を出して `return None` する同じ形で並ぶ。返す条件（dict でない / list でない）と型名の埋め込みが繰り返され、警告文の末尾の定型句も重複する。片方の文言だけ直すと 2 経路のメッセージが食い違う。test_review_findings.py が不正 payload での 0 件記録を固定している。
+
+**手順**: 1. `_reject_payload(agent: str, path: pathlib.Path, detail: str) -> None` を追加し、`info(f"⚠ {agent}: {detail}（{path}...）。指摘の記録は 0 件です。review launcher の出力形式不正で、判定は中断します")` を出して None を返す
+2. dict でない場合と comments が list でない場合の 2 経路を、type 名を含む detail 文字列を渡す呼び出しへ置き換える
+3. 部分不正（items != raw）は継続する経路のため対象にせず、そのまま残す
+4. `uv run --with pytest pytest plugins/ndf/skills/cross-review/tests/test_review_findings.py -q` で 0 件記録と警告が不変なことを確認する
+
+### R5-004 — `plugins/ndf/scripts/lib/metrics.py#format_report`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| duplication | consolidate_duplication | minor | kiro | 取り消し | 0 |
+
+**なぜ**: unmeasured と assumed の 2 節が同じ形（見出し + 空行を lines へ足し、dict.fromkeys で重複を除いた項目を `- {w}` で並べる）で並んでいる。片方だけ書式を変えると 2 節の見た目が食い違う。同じ業務ルール（分離・代用の一覧の出し方）に由来し、変わるときは一緒に変わる。既存テスト test_models_and_metrics.py が format_report の出力を固定している。
+
+**手順**: 1. `_emit_bullet_section(lines: list[str], title: str, items: list[str]) -> None` を追加し、items が空でなければ `['', f'## {title}', '']` と `[f'- {w}' for w in dict.fromkeys(items)]` を lines へ足す
+2. unmeasured の if ブロックを `_emit_bullet_section(lines, "集計から分離したラウンド", metrics["unmeasured"])` へ置き換える
+3. assumed の if ブロックを `_emit_bullet_section(lines, "指定値で代用したラウンド", metrics.get("assumed") or [])` へ置き換える
+4. 比較の限界（COMPARISON_CAVEATS）節は常に出るため対象外のまま残す
+5. `uv run --with pytest pytest scripts/tests plugins/ndf -q` で出力が不変なことを確認する
+
+### R5-005 — `plugins/ndf/skills/cross-review/scripts/state.py#build_parser`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_method | extract_method | minor | codex | 未着手 | 0 |
+
+**なぜ**: init の多数のオプション定義と、ラウンド進行・結果取込・検証・報告に属する 11 個の副コマンド登録が 1 関数に連続しており、個別コマンドの引数変更でも 125 行の構築処理全体を読む必要がある。副コマンドごとに独立した名前を付けられる段階になっている。
+
+**手順**: 1. init のパーサ設定を専用の補助関数へ抽出する
+2. 各副コマンドの parser 作成・引数追加・set_defaults を用途別の小さな登録関数へ抽出する
+3. build_parser はトップレベル parser と subparsers を作り、登録関数を順に呼んで返すだけにする
+4. test_state_subcommand_help.py、test_state_review_pool.py、test_findings_pipeline_wiring.py で選択肢・help・func の対応が不変であることを確認する
 
 ## 見送った項目
 
@@ -244,3 +312,6 @@
 | 3 | `plugins/ndf/scripts/lib/monitor.py#_record_outcome` | long_method | 1 ラウンドの採用上限 5 件を超えた |
 | 4 | `plugins/ndf/skills/cross-review/scripts/state.py#_init_new_state` | long_method | テストの期待する振る舞いが変わっています（plugins/ndf/skills/cross-review/tests/test_init_body_not_duplicated.py）。構造改善では期待出力を変えません。振る舞いの変更は別の変更に分けてください |
 | 4 | `plugins/ndf/skills/cross-review/scripts/state.py#cmd_check_oscillation` | conditional_chain | コミット 95387271f1b307d6c0a88f1cde8f6401fe3a6111 にトレーラーが欠けています: Item-Id, Round, Impl-Runtime, Impl-Model |
+| 5 | `plugins/ndf/scripts/lib/post_queue.py#Queue.flush` | long_method | どの改善項目にも割り当てられていないコミットが 1 件（311bf7f）。検証を回避した変更や、状態と実差分の食い違いを Pull Request に残さないため、この適用ラウンドを取り消します |
+| 5 | `plugins/ndf/skills/cross-review/scripts/state.py#_sync_worktree` | long_method | どの改善項目にも割り当てられていないコミットが 1 件（311bf7f）。検証を回避した変更や、状態と実差分の食い違いを Pull Request に残さないため、この適用ラウンドを取り消します |
+| 5 | `plugins/ndf/scripts/lib/metrics.py#format_report` | duplication | どの改善項目にも割り当てられていないコミットが 1 件（311bf7f）。検証を回避した変更や、状態と実差分の食い違いを Pull Request に残さないため、この適用ラウンドを取り消します |
