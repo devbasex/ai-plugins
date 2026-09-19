@@ -9,6 +9,15 @@
 **開発版（接尾辞の付いた版）は載せない。** `9.8.0` は `9.8.0-dev.1` までしか出ておらず、
 その内容は `10.0.0` で届いている。
 
+## [ndf 10.15.1] - 2026-09-19
+
+### 修正
+
+- **`development-workflow/references/agent-layers.md` の「並行の本数」の節で、実行計画の持ち主の
+  記載を直した**（#762）。「本数の測り方と実行計画は `parallel-work.md` が持つ」と書いていた 1 文を、
+  「本数を抑える下限は `parallel-work.md`、本数の測り方と実行計画は `issue-plan-strategy` の
+  `references/execution-plan.md` が持つ」へ改め、`parallel-work.md` の境界の表と揃えた
+
 ## [ndf 10.15.0] - 2026-09-18
 
 ### 追加
