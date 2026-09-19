@@ -6,8 +6,8 @@
 `auth.check_auth` が二重に走り、機械可読ブロック（`PR=…RESUMED=0`）が標準出力へ
 2 回出ていた。
 
-**経路そのものは `gh` を要するため実行では確かめない。** オーケストレーションの構造
-（同じ文が 2 回現れない・抽出した各段階が 1 回だけ）を構文木で見る。
+**経路そのものは `gh` を要するため実行では確かめない。** 関数の構造（同じ文が 2 回
+現れない・出力が 1 回だけ）を構文木で見る。
 """
 from __future__ import annotations
 
@@ -19,14 +19,12 @@ import pytest
 
 STATE_PY = pathlib.Path(__file__).resolve().parent.parent / "scripts" / "state.py"
 
-# `_init_new_state` が順に 1 回ずつ呼ぶ段階。各段階の内部にある副作用の重複は、
-# オーケストレーターから同じ段階を二重に呼ばないことで防ぐ。
+# 1 回しか呼んではいけないもの。**副作用を持つ**か、標準出力の機械可読ブロックを書く。
 SINGLE_CALL = (
-    "_resolve_pr_and_ownership",
-    "_prepare_review_instructions",
-    "_prepare_worktree_and_comments",
-    "_prepare_initial_assignment",
-    "_save_and_print_initial_state",
+    "_print_init_result",
+    "_fetch_pr_metadata",
+    "_fetch_changed_files",
+    "_tmp_dir",
 )
 
 
