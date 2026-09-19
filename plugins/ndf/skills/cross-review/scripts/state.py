@@ -3693,38 +3693,64 @@ def _finding_keys(
     keys: list[tuple[str, int, str]] = []
     for agent in _round_reviewers(st, round_no):
         p = _payload_path(agent, pr, round_no)
-        if not p.exists():
+        payload = _read_finding_payload(agent, p)
+        if payload is None:
             continue
-        try:
-            payload = json.loads(p.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            continue
-        # gemini round 4 指摘: payload は本来 dict (comments: [...]) だが、
-        # launcher のバグで list / str が入り込むと `payload.get(...)` で
-        # AttributeError になる。不正な review payload はバグなので
-        # 即時 die(code=3) で停止させる。
-        if not isinstance(payload, dict):
+        keys.extend(_comment_keys(agent, p, payload))
+    return keys
+
+
+def _read_finding_payload(agent: str, p: pathlib.Path) -> dict[str, Any] | None:
+    """判定の直前に読む payload.json を dict として返す（第 1 段: 入力境界）。
+
+    無い・JSON として読めないときは None を返して読み飛ばす。dict でないときは
+    launcher のバグとして `die(code=3)` で止める（`_load_payload` と違い、ここで
+    止めても失われる記録が無い）。
+    """
+    if not p.exists():
+        return None
+    try:
+        payload = json.loads(p.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    # gemini round 4 指摘: payload は本来 dict (comments: [...]) だが、
+    # launcher のバグで list / str が入り込むと `payload.get(...)` で
+    # AttributeError になる。不正な review payload はバグなので
+    # 即時 die(code=3) で停止させる。
+    if not isinstance(payload, dict):
+        die(
+            f"{agent}: payload.json が dict ではない "
+            f"({p}, type={type(payload).__name__})。"
+            " review launcher の出力形式不正。",
+            code=3,
+        )
+    return payload
+
+
+def _comment_keys(
+    agent: str, p: pathlib.Path, payload: dict[str, Any]
+) -> list[tuple[str, int, str]]:
+    """`comments[]` を (ファイル, 行, 正規化した本文) の 3 つ組へ変換する（第 2 段）。
+
+    要素が dict でなければ `die(code=3)`。位置（path / line）が欠ける要素と、行が
+    整数に読めない要素は読み飛ばす。
+    """
+    keys: list[tuple[str, int, str]] = []
+    for c in payload.get("comments", []):
+        if not isinstance(c, dict):
+            # comments エントリが dict でない場合も同様に致命扱い
             die(
-                f"{agent}: payload.json が dict ではない "
-                f"({p}, type={type(payload).__name__})。"
-                " review launcher の出力形式不正。",
+                f"{agent}: payload.comments のエントリが dict ではない "
+                f"({p}, type={type(c).__name__})。",
                 code=3,
             )
-        for c in payload.get("comments", []):
-            if not isinstance(c, dict):
-                # comments エントリが dict でない場合も同様に致命扱い
-                die(
-                    f"{agent}: payload.comments のエントリが dict ではない "
-                    f"({p}, type={type(c).__name__})。",
-                    code=3,
-                )
-            path = c.get("path")
-            line = c.get("line") or c.get("start_line")
-            if path and line is not None:
-                try:
-                    keys.append((str(path), int(line), _normalized_body(c.get("body"))))
-                except (TypeError, ValueError):
-                    continue
+        path = c.get("path")
+        line = c.get("line") or c.get("start_line")
+        if path and line is not None:
+            try:
+                keys.append((str(path), int(line), _normalized_body(c.get("body"))))
+            except (TypeError, ValueError):
+                continue
     return keys
 
 
