@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.15.0）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.15.1-dev.1）
 ```
 
 ### agy
@@ -119,31 +119,17 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.15.0 へ更新するとき
+## v10.15.1-dev.1 へ更新するとき
 
-**無人で運転できる範囲を広げ、工程を測れるようにしました**（#540 #541 #550 #554 #561 #621
-#623 #657）。Skill の数は変わらず、新しい Skill も足していません。破壊的な変更はなく、記録の移行も
-要りません。変更点の一覧は [CHANGELOG.md](../../CHANGELOG.md) にあります。
+**`agent-layers.md` の「並行の本数」の節で、実行計画の持ち主の記載を直しました**（#762）。
+「本数の測り方と実行計画は `parallel-work.md` が持つ」と書いていた 1 文を、「本数を抑える下限は
+`parallel-work.md`、本数の測り方と実行計画は `issue-plan-strategy` の
+`references/execution-plan.md` が持つ」へ改め、`parallel-work.md` の境界の表と揃えました。
+変わるのは参照文書の 1 文だけで、Skill の数・手順・スクリプトは v10.15.0 のままです。破壊的な
+変更はなく、記録の移行も要りません。変更点の一覧は [CHANGELOG.md](../../CHANGELOG.md) にあります。
 
-**正式版です。** 開発版 `10.15.0-dev.1` と中身は同じで、`main` に載ります。
-
-**`/ndf:merged` は削除の前に同意を求めなくなります。** 止まるのは git が削除を拒んだときだけで、
-起点・本番のチャネル・現在のブランチは同意を求めずに対象から外します。リモートブランチは先端が
-Pull Request の `headRefOid` と一致するものだけを消し、無視されたファイルは消さずに退避します。
-**課題は閉じません。** 閉じるのは終わりの工程を出るときで、手順は `progress-tracking` の
-「まとまりを閉じる」だけが持ちます。
-
-| 変わったこと | 中身 |
-| --- | --- |
-| **後片付けが止まらなくなりました**（#561） | `merged` の「削除前の同意取得」を「止まる条件」に置き換えました。止まった対象は一覧で示し、同意の無い対象は消しません。実行前確認の要否は `AUTHORING.md` の 3 つの問い（戻せないものを拒まれずに消すか・新しい内容を外へ出すか・判断を問うか）で決めます |
-| **課題を閉じる時点が終わりの工程の後になりました**（#623） | 配布の Pull Request の本文に `## 配布の記録` を置き、`release` / `release-verification` / `retrospective` のうちその実行で最後に通る工程が「まとまりを閉じる」を行います。検証への配布で止めた実行では課題は開いたままです。`pr` はコミットメッセージに閉じる語を書きません |
-| **指示書を適切に保つ検査を配ります**（#554） | `scripts/instructions-check.py` が `AGENTS.md` / `CLAUDE.md` / `KIRO.md` の即時読み込み・出た版の段落・読み込みの量を見ます。判定の強さはリポジトリの `.ndf/instructions.json` が決め、宣言が無ければ既定で動きます。書き方は `release/references/instruction-files.md` にあります |
-| **`/goal` を 3 層で運転します**（#550） | conductor / supervisor / worker の責務・持ち場の表・報告の形を `development-workflow/references/agent-layers.md` に置きました。3 層へ出すのは `/goal` だけで、関門の数と承認の形は変わりません。`cross-review` の「メイン」は収束ループを駆動している supervisor です |
-| **上限で中断した層を記録から見分けて再開します**（#657） | `scripts/lib/transcript_agents.py interrupted` が 429 で終わった記録を解除時刻つきで出し、`wait-reset` が最も早い解除時刻まで眠ります。再開の手順は `agent-layers.md` の「中断と再開」にあります |
-| **context window を層ごとに測ります**（#550） | `/ndf:skill-stats --agents` に `--session` / `--layer` / `--window-limit` が増え、層ごとの固定費と実作業の 4 つの表を出します。`retrospective` の記録に context window の観点が入ります |
-| **並列の本数を測ります**（#621） | `scripts/parallel-measure.py capacity` が空きメモリ・cgroup・スワップ・`oom_kill` から起動してよい本数を出し、`concurrency` が Pull Request の並行度を出します。`parallel-work.md` の下限 6 の理由にホストのメモリを書きました |
-| **実行計画を初めに作ります**（#540） | `issue-plan-strategy/references/execution-plan.md` に置き場所・行の形・見直す契機を置きました。`parallel-work.md` の下限 4 は「依存する工程が終わる前に、それを入力にする工程を始めない」、下限 5 は「競合を解いた差分を、レビューを通さずにマージしない」へ変わり、重なりの目安の節が増えました |
-| **マイルストーンの説明へ組を書きます**（#541） | 課題を入れる時点で、触る場所の見込みと依存を `issue-upkeep/references/milestones.md` の手順で説明の末尾へ書きます。既存の説明は一括で書き直しません |
+**開発版です。** `develop` にだけ載ります。取得元へ `#develop` を足す手順は
+[docs/versioning-and-distribution.md の「開発版を試す」](../../docs/versioning-and-distribution.md#開発版を試す)にあります。
 
 正式版のチャネル（ref を指定せずに登録した取得元）なら、次で入れ替わります。**動いているセッションには
 反映されない**ため、更新したあとは起動し直してください。開発版を試すために `develop` を登録した
@@ -160,15 +146,13 @@ codex plugin add ndf@ai-plugins
 
 ### 手元で確かめる
 
-どれも読むだけで、課題もファイルも書き換えません。`$SCRIPTS` はプラグインの `scripts/` の
+読むだけで、課題もファイルも書き換えません。`$SCRIPTS` はプラグインの `scripts/` の
 絶対パスで、決め方は
 [development-workflow/references/scripts-lookup.md](skills/development-workflow/references/scripts-lookup.md)
 にあります。
 
 ```bash
-test -f "$SCRIPTS/../skills/development-workflow/references/agent-layers.md"; echo "exit=$?"   # 0 なら新しい版の Skill が入っている
-python3 "$SCRIPTS/instructions-check.py" --root .; echo "exit=$?"                              # 指示書の検査。0 なら指摘なし
-python3 "$SCRIPTS/parallel-measure.py" capacity; echo "exit=$?"                                # 起動してよい本数。測れない環境では 3
+grep -q "execution-plan.md" "$SCRIPTS/../skills/development-workflow/references/agent-layers.md"; echo "exit=$?"   # 0 なら新しい版の参照文書が入っている
 ```
 
 ## Playwright テストについて
@@ -312,7 +296,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.15.0/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.15.1-dev.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -334,14 +318,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.15.0/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.15.1-dev.1/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.15.0  <path>
+# => ndf@ai-plugins  installed, enabled  10.15.1-dev.1  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
