@@ -19,7 +19,11 @@ cross-refactoring は `{agent}-propose-rf{id}` のような別の命名を渡す
      - 可能なら `/proc/<pid>/cmdline` で codex/agy であることを再確認 (PID 再利用対策)
   2. **sentinel** (codex のみ): err.log に `^tokens used$` 出現
   3. **early-error pattern**: err.log に既知の致命的キーワードが出たら即中断
-     - **FATAL** (auth/quota/sandbox 等の明確な致命): 検知時に kill
+     - **USAGE LIMIT** (利用上限。kiro の `Monthly request limit reached` / claude の
+       `"api_error_status":429` / HTTP 429 / quota・rate limit): 検知時に kill し、
+       状態は EARLY_ERROR のまま理由 `usage_limit` を結末に添える（#729 / #619）。
+       claude だけは stdout.log の JSON も見る
+     - **FATAL** (auth/sandbox 等の明確な致命): 検知時に kill
      - **WARN** (生の `Error:` / `Traceback` 等の曖昧パターン): 警告ログのみ、kill せず通常判定を継続
      - `--no-early-error` / `MONITOR_NO_EARLY_ERROR=1` で検知自体を無効化可
   4. **result.json**: プロセス終了後に `<worktree>/.cross_review/<agent>-review-pr<PR>-result.json` が
@@ -108,17 +112,29 @@ DEFAULT_NO_EARLY_ERROR = os.environ.get("MONITOR_NO_EARLY_ERROR", "").lower() in
     "1", "true", "yes", "on",
 }
 
-# err.log の行頭に近い形で出る **明確な致命** パターン (kill 対象)。
-# auth / quota / sandbox / HTTP 401-403-429 など、
-# プロセスが続行しても result を生成できないと判明しているケースだけを入れる。
-EARLY_ERROR_FATAL = [
-    # HTTP エラーステータス行 (`HTTP/1.1 401 Unauthorized` 等)
-    re.compile(r"^HTTP/\d\S* (?:401|403|429) ", re.MULTILINE),
-    # 認証 / 権限系（行頭限定）
-    re.compile(r"^(?:Authentication failed|Permission denied)", re.MULTILINE),
+# **利用上限** の文言 (kill 対象。理由は `usage_limit`)。起動し直しても解けないため、
+# 他の致命と区別して結末に理由を添える（#729 の決定 4）。err.log は全担当で見る。
+# 照合は致命の表より **先** に行う。上限で落ちた後に別の致命が続く形が普通で、上限のほうが原因。
+USAGE_LIMIT_FATAL = [
+    # kiro の実物（#619）
+    re.compile(r"Monthly request limit reached"),
+    # claude の `--output-format json` の結果行（#647）。`:` の前後の空白は問わない
+    re.compile(r'"api_error_status"\s*:\s*429'),
     # quota / rate limit （`m.start()` をキーワード位置に合わせるため `^.*` を付けない。
     # `_match_is_quoted()` が backtick / 「」 引用を判定するために match 開始位置を使うため）
     re.compile(r"\b(?:quota exceeded|rate limit exceeded)\b", re.IGNORECASE),
+    # HTTP 429 の状態行
+    re.compile(r"^HTTP/\d\S* 429 ", re.MULTILINE),
+]
+
+# err.log の行頭に近い形で出る **明確な致命** パターン (kill 対象。理由は `early_error`)。
+# auth / sandbox / HTTP 401-403 など、プロセスが続行しても result を生成できないと
+# 判明しているケースだけを入れる。利用上限は `USAGE_LIMIT_FATAL` の側。
+EARLY_ERROR_FATAL = [
+    # HTTP エラーステータス行 (`HTTP/1.1 401 Unauthorized` 等)
+    re.compile(r"^HTTP/\d\S* (?:401|403) ", re.MULTILINE),
+    # 認証 / 権限系（行頭限定）
+    re.compile(r"^(?:Authentication failed|Permission denied)", re.MULTILINE),
     # API key 系
     re.compile(r"\bAPI key (?:not found|missing|invalid)\b", re.IGNORECASE),
     # codex 固有: sandbox エラー
@@ -245,6 +261,12 @@ CLAUDE_STDOUT_FATAL = [
     re.compile(r'"is_error"\s*:\s*true'),
 ]
 
+# claude の stdout.log に出る利用上限（理由は `usage_limit`）。err.log と stdout.log の
+# どちらに出るか未確認のため両方を見る（#729 の決定 6）。JSON 向けの照合で除外を掛けない。
+CLAUDE_STDOUT_USAGE_LIMIT = [
+    re.compile(r'"api_error_status"\s*:\s*429'),
+]
+
 
 # env を safe に int parse する。非数値時は warn を stderr に出して fallback 値を返す。
 # 上限の表と同じ規則で読むため、表の側の実装を使う。
@@ -358,9 +380,12 @@ class MonitorOutcome:
     exit_code: int
     icon: str
     detail: str
+    # 状態からは決まらない理由（`usage_limit` / `cli_timeout`）。`None` なら結末を書くときに
+    # `monitor_outcome.reason_for(status)` へ落ちる（#729 の決定 8）。
+    reason: Optional[str] = None
 
     @classmethod
-    def create(cls, status: str, detail: str) -> "MonitorOutcome":
+    def create(cls, status: str, detail: str, reason: Optional[str] = None) -> "MonitorOutcome":
         exit_code, icon = {
             "OK": (0, "✅"),
             "TIMEOUT": (2, "⏰"),
@@ -369,7 +394,15 @@ class MonitorOutcome:
             "STALLED": (5, "🛑"),
             "PIDFILE_BAD": (6, "❓"),
         }[status]
-        return cls(status, exit_code, icon, detail)
+        return cls(status, exit_code, icon, detail, reason)
+
+
+@dataclass(frozen=True)
+class EarlyFatal:
+    """早期の致命の一致。どのファイルで・何が・理由は何か（`None` なら `early_error`）。"""
+    source: str
+    message: str
+    reason: Optional[str] = None
 
 
 @dataclass
@@ -538,7 +571,12 @@ def _scan_patterns(
 
 
 def _scan_early_fatal(path: pathlib.Path) -> Optional[str]:
-    hit = _scan_patterns(path, EARLY_ERROR_FATAL)
+    """err.log の致命の一致（kill 対象）。**利用上限も含む。**
+
+    理由（`usage_limit` か `early_error` か）の区別はここでは行わず、`_early_error` が
+    `USAGE_LIMIT_FATAL` を先に照合して決める。この関数は「止めるべき文言があるか」だけを返す。
+    """
+    hit = _scan_patterns(path, USAGE_LIMIT_FATAL) or _scan_patterns(path, EARLY_ERROR_FATAL)
     if hit:
         return hit
     return _scan_patterns(
@@ -552,12 +590,8 @@ def _scan_early_warn(path: pathlib.Path) -> Optional[str]:
     return _scan_patterns(path, EARLY_ERROR_WARN)
 
 
-def _scan_claude_stdout_fatal(path: pathlib.Path) -> Optional[str]:
-    """claude の JSON 出力から承認失敗・実行失敗を検出する。
-
-    `--output-format json` は完了時に 1 個の JSON を吐くため、
-    `permission_denials` が非空、または `is_error` が真であれば失敗が確定する。
-    err.log 側の行単位パターンでは拾えないので専用に見る。
+def _scan_claude_stdout(path: pathlib.Path, patterns: list[re.Pattern[str]]) -> Optional[str]:
+    """claude の JSON 出力を `patterns` で照合し、一致の前後 80 文字を返す。
 
     `_scan_patterns()` は使わない。あちらは行単位の benign 判定と引用符パリティ判定を
     行うが、JSON は 1 行に多数の引用符を含むため、パリティ判定が「引用の内側」を
@@ -567,11 +601,26 @@ def _scan_claude_stdout_fatal(path: pathlib.Path) -> Optional[str]:
     if data is None:
         return None
     data = _strip_ansi(data)
-    for pat in CLAUDE_STDOUT_FATAL:
+    for pat in patterns:
         m = pat.search(data)
         if m:
             return data[max(0, m.start() - 80):m.end() + 80].strip()
     return None
+
+
+def _scan_claude_stdout_fatal(path: pathlib.Path) -> Optional[str]:
+    """claude の JSON 出力から承認失敗・実行失敗を検出する。
+
+    `--output-format json` は完了時に 1 個の JSON を吐くため、
+    `permission_denials` が非空、または `is_error` が真であれば失敗が確定する。
+    err.log 側の行単位パターンでは拾えないので専用に見る。
+    """
+    return _scan_claude_stdout(path, CLAUDE_STDOUT_FATAL)
+
+
+def _scan_claude_stdout_usage_limit(path: pathlib.Path) -> Optional[str]:
+    """claude の JSON 出力から利用上限（`"api_error_status":429`）を検出する。"""
+    return _scan_claude_stdout(path, CLAUDE_STDOUT_USAGE_LIMIT)
 
 
 def _scan_codex_sentinel(path: pathlib.Path) -> bool:
@@ -646,19 +695,43 @@ def _lingering_completion(
     )
 
 
+def _scan_usage_limit(paths: AgentPaths, agent: str) -> EarlyFatal | None:
+    """利用上限の文言。err.log は全担当、stdout.log は claude だけ JSON 向けの照合で見る。"""
+    hit = _scan_patterns(paths.err_log, USAGE_LIMIT_FATAL)
+    if hit:
+        return EarlyFatal("err.log", hit, "usage_limit")
+    if agent == "claude":
+        hit = _scan_claude_stdout_usage_limit(paths.stdout_log)
+        if hit:
+            return EarlyFatal("stdout.log", hit, "usage_limit")
+    return None
+
+
+def _scan_fatal(paths: AgentPaths, agent: str) -> EarlyFatal | None:
+    """利用上限以外の致命（理由は `early_error`）。致命 → 警告の見た目の致命の順。"""
+    hit = _scan_early_fatal(paths.err_log)
+    if hit:
+        return EarlyFatal("err.log", hit)
+    if agent == "claude":
+        hit = _scan_claude_stdout_fatal(paths.stdout_log)
+        if hit:
+            return EarlyFatal("stdout.log", hit)
+    return None
+
+
 def _early_error(
     paths: AgentPaths,
     agent: str,
     disabled: bool,
-) -> tuple[tuple[str, str] | None, str | None]:
+) -> tuple[EarlyFatal | None, str | None]:
+    """早期の致命と警告。**照合の順序は利用上限 → 致命 → 警告の見た目の致命。**
+
+    同じ err.log に利用上限と他の致命が並んでいれば理由は `usage_limit` になる（#729 の
+    決定 6）。`disabled`（`--no-early-error`）は利用上限の検知も一緒に無効にする。
+    """
     if disabled:
         return None, None
-    fatal_err = _scan_early_fatal(paths.err_log)
-    fatal_source = "err.log"
-    if not fatal_err and agent == "claude":
-        fatal_err = _scan_claude_stdout_fatal(paths.stdout_log)
-        fatal_source = "stdout.log"
-    fatal = (fatal_source, fatal_err) if fatal_err else None
+    fatal = _scan_usage_limit(paths, agent) or _scan_fatal(paths, agent)
     return fatal, _scan_early_warn(paths.err_log)
 
 
@@ -729,9 +802,9 @@ def _early_error_outcome(
         return None, warning
     if alive:
         _kill_pid(status.pid)
-    source, message = fatal
     return MonitorOutcome.create(
-        "EARLY_ERROR", f"early error (fatal) in {source}: {message[:200]}"
+        "EARLY_ERROR", f"early error (fatal) in {fatal.source}: {fatal.message[:200]}",
+        reason=fatal.reason,
     ), warning
 
 
@@ -905,7 +978,9 @@ def _record_outcome(
     stem = stem_template.format(agent=agent, id=pr)
     try:
         paths = AgentPaths.for_(agent, pr, stem_template)
-        st.reason = monitor_outcome.reason_for(st.status)
+        # 結末が理由を持てばそれを、無ければ状態からの既定を書く（#729 の決定 8）
+        st.reason = (st.outcome.reason if st.outcome and st.outcome.reason
+                     else monitor_outcome.reason_for(st.status))
         st.started_at = started_at
         st.ended_at = monitor_outcome.now_iso()
         try:
