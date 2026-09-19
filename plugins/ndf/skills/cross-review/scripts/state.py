@@ -36,6 +36,11 @@ import auth  # noqa: E402
 import post_queue  # noqa: E402
 import run_metrics  # noqa: E402  実行の要約（#662）
 
+# 区分の定義は scripts 配下の共有モジュールに 1 か所だけ置く（#156、#732）。
+# `measure.py` も同じ定義を読み、両者の一致は `test_measure.py` が固定する。
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from classifications import COUNTED_CLASSIFICATIONS  # noqa: E402
+
 
 # ---------------- helpers ----------------
 
@@ -3462,12 +3467,6 @@ def _declared_duplicate_targets(finding: dict[str, Any]) -> set:
         if c.get("verdict") == "duplicate" and c.get("duplicate_of"):
             targets.add(c["duplicate_of"])
     return targets
-
-
-# 収束の判定が数える区分（#156、#732）。**残る 3 つは数えない。** 数えないのは、誤りだと
-# 示された棄却と、承認を妨げない軽微な指摘だけである。棄却した指摘を数えると、そのぶん
-# ラウンドが増える（#69 で同じ論点が 5 ラウンド続いた事象）。
-COUNTED_CLASSIFICATIONS = ("verified_blocking", "needs_human_judgment", "unrefuted")
 
 
 def _verdicts(finding: dict[str, Any], verdict: str) -> list[str]:
