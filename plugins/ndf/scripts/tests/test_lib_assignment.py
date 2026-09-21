@@ -196,3 +196,32 @@ def test_review_seats_rejects_a_bad_round(assignment):
     ):
         assignment.review_seats(-1, ["codex", "kiro"], [])
 
+
+# ---------- 席の名前の検証（#727。結果の受け口・起動・監視が使う） ----------
+
+@pytest.mark.parametrize(
+    "seat",
+    [
+        "kiro-1",  # 接尾辞の下限未満
+        "kiro-10",  # 接尾辞の上限超過
+        "claude_2",  # 区切りがアンダースコア
+        "kiro-2-3",  # 接尾辞の重複
+        "",  # 空文字列
+        "gemini",  # ALL_RUNTIMES 外
+        "gpt",  # ALL_RUNTIMES 外
+    ],
+)
+def test_seat_runtime_rejects_malformed_seat(assignment, seat):
+    """形に合わない席の名前は AssignmentError になる（R1-004）。
+
+    現状固定。`SEAT_PATTERN` の境界（接尾辞は -2〜-9 のみ、区切りはハイフン 1 つ）と、
+    未知のランタイム名が弾かれることを、例外の種類と理由の文言ごと固定する。
+    """
+    with pytest.raises(assignment.AssignmentError) as excinfo:
+        assignment.seat_runtime(seat)
+
+    assert str(excinfo.value) == (
+        f"席の名前の形が違います: {seat}"
+        "（claude/codex/agy/kiro か、その名前に -2〜-9 を付けた形）"
+    )
+
