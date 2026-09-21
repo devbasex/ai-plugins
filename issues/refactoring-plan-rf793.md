@@ -183,7 +183,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| duplication | consolidate_duplication | minor | kiro | 検証中 | 1 |
+| duplication | consolidate_duplication | minor | kiro | 採用 | 1 |
 
 **なぜ**: _state_file_pr と _prs が同じ pr_history 走査（dict 判定→_as_int(entry.get("pr"))→current_pr へのフォールバック）を別々に持つ。_state_file_pr は実質「_prs の先頭」で、片方だけ直すと状態ファイルの鍵の選び方が食い違う。同じ業務ルール（状態ファイルの鍵の決め方）に由来し、必ず一緒に変わる重複である。
 
@@ -202,6 +202,75 @@
 **手順**: 1. 読み取りループを `_read_until_deadline(response, deadline, timeout) -> bytes` として抽出し、bounded 判定と FetchTimeout の送出をその中へ移す
 2. fetch は opener 呼び出しと finally の close を残し、本文取得を抽出関数の呼び出しに置き換える
 3. test_refresh.py の refresh/fetch 経路のテストで退行を確認する
+
+## ラウンド 4（実装 claude / レビュー codex / kiro）
+
+### R4-001 — `plugins/ndf/scripts/lib/metrics.py#_aggregate_reviewer_round`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_method | extract_method | major | kiro | 検証中 | 1 |
+
+**なぜ**: 1 つの関数が 2 つの独立した集計を通しで行う。前半は review ごとの指摘件数と解決件数の集計、後半は entry.get('reviewers') を回して判定一致（verdict_pairs / verdict_agreements）を数える二重ループである。指摘の集計と判定一致の集計は変更理由が別で、後半のネストしたループが読む負荷を上げている。
+
+**手順**: 1. 後半の others ループ（verdict_pairs / verdict_agreements の加算）を _tally_verdict_agreement(rb, entry, review, name) として抽出する
+2. 抽出した関数は entry.get('reviewers') から name 以外を取り出し、_verdict を使って一致数を rb へ加算する
+3. _aggregate_reviewer_round のループ本体を、指摘集計＋抽出した関数の呼び出しに置き換える
+4. metrics.aggregate を通す既存テスト（cross-refactoring 側 test_models_and_metrics.py の resolution_rate / agreement_rate）で退行が無いことを確かめる
+
+### R4-002 — `plugins/ndf/skills/cross-review/scripts/rotate-pr.sh#execute_light / execute_squash`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| duplication | consolidate_duplication | major | codex | 検証中 | 1 |
+
+**なぜ**: 両モードが旧 PR へのコメント、close、ERR trap の設定、新 PR 作成、trap 解除、URL からの番号抽出、NEW_PR・NEW_PR_URL・NEW_BRANCH の出力を同じ順序で持つ。同じ障害対策のコメントが両方へ反映されており、変更理由も共通している。
+
+**手順**: 1. 既存の rotate-pr テストで light と squash の close、作成失敗時の reopen、成功時の出力を固定する
+2. モード固有処理から新 PR の head、base、title、body、draft を組み立てる部分だけを残す
+3. close から create、trap 管理、番号抽出、結果出力までを共通関数へ抽出する
+4. execute_light と execute_squash を共通関数呼び出しへ置き換える
+5. 両モードの既存テストを実行してコマンド順と標準出力が不変であることを確認する
+
+### R4-003 — `plugins/ndf/scripts/lib/worktree-common.sh#wt_extract_write_target`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_method | split_into_pipeline | major | codex | 検証中 | 1 |
+
+**なぜ**: 書き込み先抽出の入口に、ヒアドキュメント除去、字句化、作業ディレクトリと複合構文の状態追跡、sed・tee・cp・mv・リダイレクトの対象抽出が連続して同居している。多数の局所状態と入れ子の補助関数を一度に追う必要があり、各段を独立して固定できない。
+
+**手順**: 1. 対象テスト配下に wt_extract_write_target の公開入出力を通す現状固定テストを追加し、cd、パイプ、部分シェル、case、関数定義、各書き込み形式を固定する
+2. 前処理と字句化を、改行区切りの語列を返す段として独立させる
+3. 現在地と複合構文の追跡を、語列から走査状態を更新する段へ分ける
+4. 書き込み先候補の抽出と相対パス解決を最終段へ分け、入口は各段を順に接続するだけにする
+5. 各段の後と最後に現状固定テストおよび全体テストを実行する
+
+### R4-004 — `plugins/ndf/scripts/lib/run_metrics.py#_by_round_count`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| conditional_chain | extract_method | minor | kiro | 検証中 | 1 |
+
+**なぜ**: バケット鍵の決定が入れ子の三項式 key = "3 以上" if count >= 3 else str(count) if count in (1, 2) else None に埋まっている。ラウンド数から表示区分を導く判断がループ本体の 1 行に押し込まれ、境界（1 / 2 / 3 以上 / 対象外）が読み取りづらい。
+
+**手順**: 1. count から区分文字列（または None）を返す _round_count_bucket(count) を抽出する
+2. 分岐を if count >= 3 / elif count in (1, 2) / else None として平坦に書く
+3. _by_round_count のループ本体で key = _round_count_bucket(count) を呼ぶ形へ置き換える
+4. test_run_metrics.py::test_aggregate_by_round_count（1 / 2 / 3 以上 の 3 行）で退行が無いことを確かめる
+
+### R4-005 — `plugins/ndf/scripts/lib/run_metrics.py#_select`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| conditional_chain | extract_method | minor | kiro | 未着手 | 0 |
+
+**なぜ**: 行ごとの絞り込みが 5 本の連続した if ... continue と、until 判定に埋め込まれた入れ子の三項（started >= until if until_exclusive else started > until）で構成される。時刻の下限・上限・repo・kind・version という別々の観点が 1 つのループ本体に同居し、until_exclusive の分岐が特に読みづらい。
+
+**手順**: 1. 時刻の下限・上限の判定を _within_time_bound(started, since, until, until_exclusive) として抽出し、入れ子の三項をその中に閉じ込める
+2. _select は since/until を計算した後、_within_time_bound と残りの属性一致（repo / kind / version）で 1 行を通すか決める
+3. 属性一致も見通しが悪ければ _matches_filters(row, args) へまとめる
+4. test_run_metrics.py::test_aggregate_filters（since / until / repo / kind / version の 5 例）で退行が無いことを確かめる
 
 ## 見送った項目
 
@@ -222,3 +291,4 @@
 | 3 | `plugins/ndf/scripts/lib/assignment.py#resolve_participants` | long_method | どの改善項目にも割り当てられていないコミットが 1 件（1a81a1a）。検証を回避した変更や、状態と実差分の食い違いを Pull Request に残さないため、この適用ラウンドを取り消します |
 | 3 | `plugins/ndf/skills/cross-review/scripts/state.py#_init_new_state` | long_method | どの改善項目にも割り当てられていないコミットが 1 件（1a81a1a）。検証を回避した変更や、状態と実差分の食い違いを Pull Request に残さないため、この適用ラウンドを取り消します |
 | 3 | `plugins/ndf/scripts/lib/refresh.py#fetch` | long_method | どの改善項目にも割り当てられていないコミットが 1 件（1a81a1a）。検証を回避した変更や、状態と実差分の食い違いを Pull Request に残さないため、この適用ラウンドを取り消します |
+| 4 | `plugins/ndf/skills/cross-review/scripts/state.py#_sync_worktree` | long_method | 1 ラウンドの採用上限 5 件を超えた |
