@@ -341,6 +341,22 @@ def test_find_item_returns_none_for_a_missing_id_when_not_required(gitfacts):
     assert gitfacts.find_item(state, "R9-999", required=False) is None
 
 
+def test_scoped_item_ids_falls_back_to_all_items_when_apply_round_is_missing(
+    gitfacts,
+):
+    """現状固定: 現在の適用ラウンドの群がなければ entry 全体の項目を返す。"""
+    entry = {
+        "apply_round": 3,
+        "items": ["R2-003", "R2-001", "R2-002"],
+        "apply_rounds": [
+            {"apply_round": 1, "items": ["R2-001"]},
+            {"apply_round": 2, "items": ["R2-002"]},
+        ],
+    }
+
+    assert gitfacts.scoped_item_ids(entry) == ["R2-003", "R2-001", "R2-002"]
+
+
 def test_revert_item_commits_failure_message_includes_item_id(gitfacts, work, capsys):
     """現状固定: revert_item_commits 失敗時は項目 ID 接頭辞付きのエラー文を出して中断する。"""
     first = _commit(work, "one", {"src/a.py": "a = 1\n"})
@@ -374,4 +390,3 @@ def test_revert_range_failure_message_has_no_item_id_prefix(gitfacts, work, caps
     assert "を取り消せませんでした" in err
     assert f"（HEAD を {second} へ戻しました）" in err
     assert _git("rev-parse", "HEAD", cwd=work).stdout.strip() == second
-
