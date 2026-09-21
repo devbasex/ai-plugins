@@ -71,6 +71,23 @@ def _set_socket_timeout(response, seconds: float) -> bool:
     return False
 
 
+def _read_until_deadline(response, deadline: float, timeout: float) -> bytes:
+    chunks: list[bytes] = []
+    bounded = True
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise FetchTimeout(_timeout_reason(timeout, bounded))
+        # **読み取りの最中も期限を見張る。** 渡せなかったときは、その事実を
+        # 越えたときの理由へ残す。
+        bounded = _set_socket_timeout(response, remaining) and bounded
+        chunk = response.read(CHUNK_BYTES)
+        if not chunk:
+            break
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 def fetch(url: str, timeout: float, opener=None) -> FetchResult:
     """URL を取得する。**待ちは 1 件あたりの総経過時間**で数える。
 
@@ -85,20 +102,8 @@ def fetch(url: str, timeout: float, opener=None) -> FetchResult:
     except Exception as exc:  # noqa: BLE001 - 取得の失敗は理由として残す
         return FetchResult(url=url, ok=False, error=_reason(exc))
 
-    chunks: list[bytes] = []
-    bounded = True
     try:
-        while True:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise FetchTimeout(_timeout_reason(timeout, bounded))
-            # **読み取りの最中も期限を見張る。** 渡せなかったときは、その事実を
-            # 越えたときの理由へ残す。
-            bounded = _set_socket_timeout(response, remaining) and bounded
-            chunk = response.read(CHUNK_BYTES)
-            if not chunk:
-                break
-            chunks.append(chunk)
+        data = _read_until_deadline(response, deadline, timeout)
     except Exception as exc:  # noqa: BLE001
         return FetchResult(url=url, ok=False, error=_reason(exc))
     finally:
@@ -106,7 +111,7 @@ def fetch(url: str, timeout: float, opener=None) -> FetchResult:
         if callable(close):
             close()
 
-    return FetchResult(url=url, ok=True, fingerprint=fingerprint(b"".join(chunks)))
+    return FetchResult(url=url, ok=True, fingerprint=fingerprint(data))
 
 
 def _timeout_reason(timeout: float, bounded: bool) -> str:
