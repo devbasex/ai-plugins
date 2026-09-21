@@ -52,6 +52,15 @@ EXPECTED = {
     ],
 }
 
+# `review_assign` の 3 ラウンド周期（現状の出力を記録したもの）。母集合は
+# 全ランタイム − ホストの 3 者で、外す 1 者が (ラウンド番号 - 1) % 3 で回る。
+EXPECTED_REVIEW = {
+    "claude": [["agy", "kiro"], ["codex", "kiro"], ["codex", "agy"]],
+    "codex": [["agy", "kiro"], ["claude", "kiro"], ["claude", "agy"]],
+    "agy": [["codex", "kiro"], ["claude", "kiro"], ["claude", "codex"]],
+    "kiro": [["codex", "agy"], ["claude", "agy"], ["claude", "codex"]],
+}
+
 
 @pytest.fixture(scope="module")
 def assignment():
@@ -142,6 +151,20 @@ def test_review_assign_rejects_a_bad_round(assignment):
         ) as excinfo:
             assignment.review_assign(round_no, "claude")
         assert "ラウンド番号は 1 以上です" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("host", EXPECTED_REVIEW)
+def test_review_assign_keeps_the_three_round_rotation(assignment, host):
+    """現状固定: ホストごとに 3 ラウンド周期でレビュー担当が循環する（R2-004）。
+
+    期待値は現在の実装の出力を記録したもので、仕様を主張しない。母集合 3 者から
+    外す 1 者を回す各分岐（dropped = 0 / 1 / 2）を、2 周分で通す。
+    """
+    actual = [assignment.review_assign(round_no, host) for round_no in range(1, 7)]
+
+    assert actual == EXPECTED_REVIEW[host] * 2
+    assert all(len(reviewers) == 2 for reviewers in actual)
+    assert all(host not in reviewers for reviewers in actual)
 
 
 # ---------- 適用の輪番（#727。cross-refactoring が使う） ----------
