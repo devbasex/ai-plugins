@@ -323,3 +323,117 @@ def test_phase_after_group_returns_to_propose_when_there_is_no_group(rounds):
     entry = _round_with_groups([], items=())
 
     assert rounds.phase_after_group(entry) == "propose"
+
+
+# ---------- 採用 0 件と項目の無い群（#592） ----------
+
+def _empty_group(n, items=(), **over):
+    base = {
+        "apply_round": n, "impl": "codex",
+        "impl_model": {"requested": None, "observed": None},
+        "items": list(items), "status": "pending",
+        "base_sha": None, "head_sha": None, "fix_rounds": 0, "attempt": 0,
+    }
+    base.update(over)
+    return base
+
+
+def test_no_adopted_proposal_leaves_the_group_list_empty(
+    patch_lib, refactor, cmd_apply, tmp_path, env_tmp_dir, monkeypatch
+):
+    """AC19: 採用 0 件のテスト整備ラウンドでは群を作らず、開く操作が 1 回で尽きる。"""
+    state_path = make_state(
+        tmp_path, rounds=[{**round_of(), "kind": "test"}],
+        phase="propose", outer_round=1, round_kind="test",
+    )
+    env_tmp_dir(state_path)
+    patch_lib("git_out", lambda work, args, **k: "base0")
+    for runtime in ("codex", "agy", "kiro"):
+        write_result(state_path, f"{runtime}-propose-rf130-r1", {"items": []})
+    refactor.cmd_merge_proposals(type("A", (), {"id": 130})())
+
+    assert read_state(state_path)["rounds"][0]["apply_rounds"] == []
+
+    with pytest.raises(SystemExit) as e:
+        cmd_apply.cmd_next_apply_round(type("A", (), {"id": 130, "round": 1})())
+    assert e.value.code == 1
+    assert read_state(state_path)["rounds"][0]["apply_rounds"] == []
+
+
+def test_a_state_without_the_group_key_still_opens_the_whole_round(
+    patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, capsys
+):
+    """AC20: 群の鍵を持たない状態ファイルは、ラウンド全体を 1 群として開く。"""
+    entry = round_of(items=["R1-001"])
+    entry["impl"] = "codex"
+    state_path = make_state(tmp_path, rounds=[entry], phase="apply", outer_round=1)
+    env_tmp_dir(state_path)
+    patch_lib("git_out", lambda work, args, **k: "HEAD_NOW")
+
+    refactor.cmd_next_apply_round(type("A", (), {"id": 130, "round": 1})())
+
+    assert "APPLY_ROUND=1" in capsys.readouterr().out
+    groups = read_state(state_path)["rounds"][0]["apply_rounds"]
+    assert [g["items"] for g in groups] == [["R1-001"]]
+
+
+def test_a_merged_group_with_nothing_adopted_is_dropped_as_empty(
+    patch_lib, cmd_apply, tmp_path, env_tmp_dir, no_git
+):
+    """AC21: 取り込み済みで採用 0 件の群（項目なし）を取り消し済みに直す。"""
+    entry = round_of()
+    entry["apply_rounds"] = [_empty_group(
+        1, status="applied", base_sha="base0", attempt=1)]
+    entry["apply_round"] = 1
+    entry["apply"] = {"apply_round": 1, "applied": [], "failed": [],
+                      "base_sha": "base0", "head_sha": "h", "merged_at": "x"}
+    state_path = make_state(tmp_path, rounds=[entry], phase="apply", outer_round=1)
+    env_tmp_dir(state_path)
+    patch_lib("git_out", lambda work, args, **k: "HEAD_NOW")
+
+    with pytest.raises(SystemExit) as e:
+        cmd_apply.cmd_merge_apply(
+            type("A", (), {"id": 130, "round": 1, "dry_run": False})())
+    assert e.value.code == 2
+
+    group = read_state(state_path)["rounds"][0]["apply_rounds"][0]
+    assert (group["status"], group["drop_reason"]) == ("dropped", "empty")
+
+    with pytest.raises(SystemExit) as e:
+        cmd_apply.cmd_next_apply_round(type("A", (), {"id": 130, "round": 1})())
+    assert e.value.code == 1
+
+
+def test_a_pending_group_without_items_is_dropped_before_it_opens(
+    patch_lib, cmd_apply, tmp_path, env_tmp_dir, capsys
+):
+    """AC22: 項目の無い未着手の群は開かれず、次の群があればそちらを開く。"""
+    entry = round_of(items=["R1-002"])
+    entry["apply_rounds"] = [_empty_group(1), _empty_group(2, items=["R1-002"])]
+    state_path = make_state(tmp_path, rounds=[entry], phase="apply", outer_round=1)
+    env_tmp_dir(state_path)
+    patch_lib("git_out", lambda work, args, **k: "HEAD_NOW")
+
+    cmd_apply.cmd_next_apply_round(type("A", (), {"id": 130, "round": 1})())
+
+    assert "APPLY_ROUND=2" in capsys.readouterr().out
+    groups = read_state(state_path)["rounds"][0]["apply_rounds"]
+    assert (groups[0]["status"], groups[0]["drop_reason"]) == ("dropped", "empty")
+
+
+def test_a_round_whose_only_group_has_no_item_runs_out(
+    patch_lib, cmd_apply, tmp_path, env_tmp_dir
+):
+    """AC22: 項目の無い群だけなら、開く操作は 1 を返す。"""
+    entry = round_of()
+    entry["apply_rounds"] = [_empty_group(1)]
+    state_path = make_state(tmp_path, rounds=[entry], phase="apply", outer_round=1)
+    env_tmp_dir(state_path)
+    patch_lib("git_out", lambda work, args, **k: "HEAD_NOW")
+
+    with pytest.raises(SystemExit) as e:
+        cmd_apply.cmd_next_apply_round(type("A", (), {"id": 130, "round": 1})())
+
+    assert e.value.code == 1
+    group = read_state(state_path)["rounds"][0]["apply_rounds"][0]
+    assert (group["status"], group["drop_reason"]) == ("dropped", "empty")

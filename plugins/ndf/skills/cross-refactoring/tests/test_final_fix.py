@@ -369,3 +369,126 @@ def test_the_propose_result_file_carries_the_round_number(paths):
     始まった時点で 1 巡目の提案内容が失われる。
     """
     assert paths.stem_for("codex", "propose", 130, 2) == "codex-propose-rf130-r2"
+
+
+# ---------- 最終ゲートの修正で結果が無いとき（#674 / #728 の決定 11） ----------
+
+def test_a_missing_final_fix_result_reverts_and_moves_the_base(
+    cmd_gate, tmp_path, env_tmp_dir, merge_spy
+):
+    """AC28: 結果が無ければ取り消し、起点を取り消し後の先端へ進める。"""
+    state_path = _failing_gate_state(tmp_path)
+    env_tmp_dir(state_path)
+
+    with pytest.raises(SystemExit) as e:
+        cmd_gate.cmd_merge_final_fix(_args())
+
+    assert e.value.code == 2
+    gate = read_state(state_path)["final_gate"]
+    assert len(merge_spy["reverted"]) == 1
+    assert gate["fix_base_sha"] == "HEADSHA"
+    assert [(r["phase"], r["impl"], r["reason"]) for r in gate["failed_attempts"]] == [
+        ("final-fix", "codex", "missing")]
+    assert "fix_commits" not in gate
+
+
+def test_the_next_gate_does_not_see_the_reverted_commits(
+    patch_lib, cmd_gate, tmp_path, env_tmp_dir, merge_spy, gate_spy
+):
+    """AC29: 取り消した後の最終ゲートは、修正のコミットを数に入れない。"""
+    state_path = _failing_gate_state(tmp_path)
+    env_tmp_dir(state_path)
+    with pytest.raises(SystemExit):
+        cmd_gate.cmd_merge_final_fix(_args())
+
+    gate_spy["test_code"] = 0
+    cmd_gate.cmd_final_gate(_args())
+
+    gate = read_state(state_path)["final_gate"]
+    assert gate.get("fix_commits", []) == []
+    assert gate["status"] == "passed"
+
+
+def test_a_usage_limit_on_the_final_fix_jumps_to_the_cap(
+    cmd_gate, tmp_path, env_tmp_dir, merge_spy
+):
+    """AC30: 起動し直しても解けない結末では、修正ラウンドを上限の値にする。"""
+    state_path = _failing_gate_state(tmp_path)
+    env_tmp_dir(state_path)
+    (state_path.parent / "codex-final-fix-monitor.json").write_text(
+        __import__("json").dumps({"reason": "usage_limit", "detail": "上限"}),
+        encoding="utf-8")
+
+    with pytest.raises(SystemExit) as e:
+        cmd_gate.cmd_merge_final_fix(_args())
+
+    assert e.value.code == 2
+    assert read_state(state_path)["final_gate"]["fix_rounds"] == 3
+
+
+def test_the_gate_after_the_cap_reports_without_reverting(
+    cmd_gate, tmp_path, env_tmp_dir, merge_spy, gate_spy
+):
+    """AC30: 上限に達した後の最終ゲートは、落ちても取り消さず報告で終わる。"""
+    state_path = _failing_gate_state(tmp_path)
+    env_tmp_dir(state_path)
+    (state_path.parent / "codex-final-fix-monitor.json").write_text(
+        __import__("json").dumps({"reason": "usage_limit", "detail": "上限"}),
+        encoding="utf-8")
+    with pytest.raises(SystemExit):
+        cmd_gate.cmd_merge_final_fix(_args())
+
+    gate_spy["test_code"] = 1
+    with pytest.raises(SystemExit) as e:
+        cmd_gate.cmd_final_gate(_args())
+
+    assert e.value.code == 1
+    assert read_state(state_path)["final_gate"]["status"] == "failed"
+
+
+def test_a_verified_final_fix_keeps_no_failure_record(
+    cmd_gate, tmp_path, env_tmp_dir, merge_spy
+):
+    """AC31: 検証を通る修正は、変更前と同じく取り込まれ、記録を持たない。"""
+    state_path = _failing_gate_state(tmp_path)
+    env_tmp_dir(state_path)
+    write_result(state_path, "codex-final-fix",
+                 {"elapsed_seconds": 7, "commits": [{"sha": "C1FULL"}]})
+
+    cmd_gate.cmd_merge_final_fix(_args())
+
+    gate = read_state(state_path)["final_gate"]
+    assert "failed_attempts" not in gate
+    assert gate["fix_commits"] == ["C1FULL"]
+
+
+def test_the_same_final_fix_attempt_is_closed_only_once(
+    cmd_gate, tmp_path, env_tmp_dir, merge_spy
+):
+    """同じ修正ラウンドで叩き直しても、結果ファイルを読まずに同じ終了コードを返す。"""
+    state_path = _failing_gate_state(tmp_path)
+    env_tmp_dir(state_path)
+    with pytest.raises(SystemExit):
+        cmd_gate.cmd_merge_final_fix(_args())
+    write_result(state_path, "codex-final-fix", {"commits": [{"sha": "C1FULL"}]})
+
+    with pytest.raises(SystemExit) as e:
+        cmd_gate.cmd_merge_final_fix(_args())
+
+    assert e.value.code == 2
+    assert len(read_state(state_path)["final_gate"]["failed_attempts"]) == 1
+
+
+def test_the_final_fix_agent_comes_from_the_single_rotation_function(
+    patch_lib, cmd_gate, tmp_path, env_tmp_dir, gate_spy
+):
+    """AC49: 輪番から担当を引く関数を差し替えると、最終ゲートの修正担当も従う。"""
+    state_path = _gate_state(tmp_path)
+    env_tmp_dir(state_path)
+    gate_spy["test_code"] = 1
+    patch_lib("impl_for_seq", lambda state, seq: ("kiro", "auto"))
+
+    with pytest.raises(SystemExit):
+        cmd_gate.cmd_final_gate(_args())
+
+    assert read_state(state_path)["final_gate"]["impl"] == "kiro"
