@@ -259,6 +259,37 @@ def test_an_unverified_baseline_stops_before_reading_the_result(
     assert read_state(state_path)["items"][0]["status"] == "blocked"
 
 
+def test_a_closed_apply_attempt_stops_before_reading_the_result(
+    tmp_path, patch_lib, cmd_apply, env_tmp_dir, no_git
+):
+    """現状固定: 記録済みの試行を叩き直しても、結果を読み直さない。"""
+    group = _group(
+        1,
+        "agy",
+        ["R1-001"],
+        attempt=1,
+        failed_attempts=[{
+            "phase": "apply", "attempt": 1, "impl": "agy",
+            "reason": "missing", "detail": "", "at": "x", "reverted": 0,
+        }],
+    )
+    state_path = make_state(
+        tmp_path, items=[_item("R1-001")],
+        rounds=[_entry([group], ["R1-001"])], phase="apply", outer_round=1,
+    )
+    env_tmp_dir(state_path)
+    patch_lib("read_result", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("結果を読んではいけない")))
+    before = read_state(state_path)
+
+    code = _exit_code(cmd_apply.cmd_merge_apply, type("A", (), dict(_ARGS_MERGE))())
+
+    after = read_state(state_path)
+    assert code == 2
+    assert after == before
+    assert len(after["rounds"][0]["apply_rounds"][0]["failed_attempts"]) == 1
+
+
 def test_every_exit_2_leaves_the_group_dropped_or_pending_with_a_record(
     two_groups, run
 ):

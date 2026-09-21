@@ -392,6 +392,27 @@ def test_a_missing_final_fix_result_reverts_and_moves_the_base(
     assert "fix_commits" not in gate
 
 
+def test_a_missing_final_fix_with_an_unknown_range_keeps_the_attempt_open(
+    patch_lib, cmd_gate, tmp_path, env_tmp_dir, merge_spy
+):
+    """現状固定: 結果も範囲も無ければ、記録も取り消しも行わず止まる。"""
+    state_path = _failing_gate_state(tmp_path)
+    env_tmp_dir(state_path)
+    patch_lib("commits_in_range", lambda work, base, head: None)
+    before = read_state(state_path)["final_gate"]
+
+    with pytest.raises(SystemExit) as e:
+        cmd_gate.cmd_merge_final_fix(_args())
+
+    gate = read_state(state_path)["final_gate"]
+    assert e.value.code == 2
+    assert gate == before
+    assert gate["fix_rounds"] == 1
+    assert gate["fix_base_sha"] == "BASE"
+    assert "failed_attempts" not in gate
+    assert merge_spy["reverted"] == []
+
+
 def test_the_next_gate_does_not_see_the_reverted_commits(
     patch_lib, cmd_gate, tmp_path, env_tmp_dir, merge_spy, gate_spy
 ):
