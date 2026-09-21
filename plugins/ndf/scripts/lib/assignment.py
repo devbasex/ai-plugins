@@ -207,78 +207,6 @@ class Participants:
 Probe = Callable[[list[str]], tuple[dict[str, dict[str, Any]], bool]]
 
 
-def _validate_and_filter_participants(
-    pool: list[str],
-    include: list[str],
-    exclude: list[str],
-) -> list[str]:
-    """ランタイム名と集合制約を検証し、除外を適用した参加者を返す。"""
-    for name in (*include, *exclude):
-        if name not in ALL_RUNTIMES:
-            raise AssignmentError(
-                f"参加できないランタイムです: {name}（{'/'.join(ALL_RUNTIMES)} のいずれか）"
-            )
-    overlap = set(include) & set(exclude)
-    if overlap:
-        raise AssignmentError(
-            f"足す者と外す者に同じ名前があります: {', '.join(_in_fixed_order(overlap))}"
-        )
-    base = set(pool) | set(include)
-    outside = [n for n in exclude if n not in base]
-    if outside:
-        raise AssignmentError(
-            f"母集合に無い者は外せません: {', '.join(_in_fixed_order(outside))}"
-            f"（母集合: {', '.join(_in_fixed_order(base))}）"
-        )
-
-    return _in_fixed_order(base - set(exclude))
-
-
-def _apply_only(
-    participants: list[str],
-    exclude: list[str],
-    only: Optional[str],
-) -> list[str]:
-    """--only が指定されていれば検証した上でその 1 者のみを返す。"""
-    if only is None:
-        return list(participants)
-    if only in exclude:
-        raise AssignmentError(f"--only と --exclude が矛盾しています: {only}")
-    if only not in participants:
-        raise AssignmentError(
-            f"--only は参加者のいずれかを指定してください: {only}"
-            f"（参加者: {', '.join(participants)}）"
-        )
-    return [only]
-
-
-def _evaluate_probe_results(
-    targets: list[str],
-    probe: Probe,
-    require_all: bool,
-) -> tuple[list[str], dict[str, str], bool]:
-    """probe を実行し、available/unavailable の集計と require_all の判定を行う。"""
-    results, skipped = probe(list(targets))
-    if skipped:
-        available, unavailable = list(targets), {}
-    else:
-        unavailable = {
-            n: str(results.get(n, {}).get("detail", ""))
-            for n in targets
-            if not results.get(n, {}).get("ok", False)
-        }
-        available = [n for n in targets if n not in unavailable]
-
-    if require_all and unavailable:
-        failed = " / ".join(f"{n}（{d}）" for n, d in unavailable.items())
-        raise AssignmentError(
-            "認証されていない CLI があります: " + failed + "。"
-            "参加者が欠けたまま進むと、その者のレビューが無いまま収束します。"
-            "各 CLI でログインしてから再実行してください"
-        )
-    return available, unavailable, skipped
-
-
 def resolve_participants(
     pool: Iterable[str],
     *,
@@ -305,20 +233,63 @@ def resolve_participants(
     名前の綴りの検査（argparse の型）はこの前段で済んでいる前提だが、ここでも
     `ALL_RUNTIMES` に無い名前は弾く。
     """
-    pool_list = list(pool)
-    include_list = list(include)
-    exclude_list = list(exclude)
+    pool = list(pool)
+    include = list(include)
+    exclude = list(exclude)
 
-    participants = _validate_and_filter_participants(
-        pool_list, include_list, exclude_list)
-    targets = _apply_only(participants, exclude_list, only)
-    available, unavailable, skipped = _evaluate_probe_results(
-        targets, probe, require_all)
+    for name in (*include, *exclude):
+        if name not in ALL_RUNTIMES:
+            raise AssignmentError(
+                f"参加できないランタイムです: {name}（{'/'.join(ALL_RUNTIMES)} のいずれか）"
+            )
+    overlap = set(include) & set(exclude)
+    if overlap:
+        raise AssignmentError(
+            f"足す者と外す者に同じ名前があります: {', '.join(_in_fixed_order(overlap))}"
+        )
+    base = set(pool) | set(include)
+    outside = [n for n in exclude if n not in base]
+    if outside:
+        raise AssignmentError(
+            f"母集合に無い者は外せません: {', '.join(_in_fixed_order(outside))}"
+            f"（母集合: {', '.join(_in_fixed_order(base))}）"
+        )
+
+    participants = _in_fixed_order(base - set(exclude))
+
+    if only is not None:
+        if only in exclude:
+            raise AssignmentError(f"--only と --exclude が矛盾しています: {only}")
+        if only not in participants:
+            raise AssignmentError(
+                f"--only は参加者のいずれかを指定してください: {only}"
+                f"（参加者: {', '.join(participants)}）"
+            )
+        participants = [only]
+
+    results, skipped = probe(list(participants))
+    if skipped:
+        available, unavailable = list(participants), {}
+    else:
+        unavailable = {
+            n: str(results.get(n, {}).get("detail", ""))
+            for n in participants
+            if not results.get(n, {}).get("ok", False)
+        }
+        available = [n for n in participants if n not in unavailable]
+
+    if require_all and unavailable:
+        failed = " / ".join(f"{n}（{d}）" for n, d in unavailable.items())
+        raise AssignmentError(
+            "認証されていない CLI があります: " + failed + "。"
+            "参加者が欠けたまま進むと、その者のレビューが無いまま収束します。"
+            "各 CLI でログインしてから再実行してください"
+        )
 
     return Participants(
-        pool=pool_list,
-        included=_in_fixed_order(include_list),
-        excluded=_in_fixed_order(exclude_list),
+        pool=pool,
+        included=_in_fixed_order(include),
+        excluded=_in_fixed_order(exclude),
         available=available,
         unavailable=unavailable,
         probe_skipped=skipped,

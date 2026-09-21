@@ -175,13 +175,6 @@ class Oracle(NamedTuple):
     ambiguous: int
 
 
-class MatchKey(NamedTuple):
-    pr: int | None
-    round_no: int
-    path: str | None
-    line: int | None
-
-
 class ResolvedPositionSource(NamedTuple):
     round_no: int
     pr: int | None
@@ -200,7 +193,8 @@ def _representatives(st: dict[str, Any]) -> list[dict[str, Any]]:
     return [f for f in findings if isinstance(f, dict) and not f.get("merged_into")]
 
 
-def _matches(finding: dict[str, Any], key: MatchKey) -> bool:
+def _matches(finding: dict[str, Any], pr: int | None, round_no: int,
+             path: str, line: int) -> bool:
     """その解決が指しうる指摘かどうか。
 
     **同じ Pull Request の指摘に限る。** `review_findings[].round` は状態
@@ -211,11 +205,11 @@ def _matches(finding: dict[str, Any], key: MatchKey) -> bool:
     指摘は、解決した時点でまだ存在しない。
     """
     finding_round = _as_int(finding.get("round"))
-    if finding_round is None or finding_round > key.round_no:
+    if finding_round is None or finding_round > round_no:
         return False
-    if _as_int(finding.get("pr")) != key.pr:
+    if _as_int(finding.get("pr")) != pr:
         return False
-    return finding.get("path") == key.path and _as_int(finding.get("line")) == key.line
+    return finding.get("path") == path and _as_int(finding.get("line")) == line
 
 
 def _has_recorded_positions(st: dict[str, Any]) -> bool:
@@ -235,11 +229,14 @@ def _has_recorded_positions(st: dict[str, Any]) -> bool:
 
 def _find_best_match(
     representatives: list[dict[str, Any]],
-    key: MatchKey,
+    pr: int | None,
+    round_no: int,
+    path: str,
+    line: int,
 ) -> tuple[str | None, bool]:
     """解決位置に対応する指摘 ID と、曖昧だったかを返す。"""
     candidates = [
-        f for f in representatives if _matches(f, key)
+        f for f in representatives if _matches(f, pr, round_no, path, line)
     ]
     if not candidates:
         return None, False
@@ -288,13 +285,17 @@ def _resolved_position(position: Any) -> tuple[str | None, int | None]:
 def _add_oracle_match(
     oracle: Oracle,
     representatives: list[dict[str, Any]],
-    key: MatchKey,
+    pr: int | None,
+    round_no: int,
+    path: str | None,
+    line: int | None,
 ) -> Oracle:
     """1 件の resolved position を Oracle 集計へ反映する。"""
-    if key.path is None or key.line is None:
+    if path is None or line is None:
         # 位置の欠けた要素も落とさない（`_thread_positions` が残す）。
         return Oracle(oracle.finding_ids, oracle.unmatched + 1, oracle.ambiguous)
-    finding_id, is_ambiguous = _find_best_match(representatives, key)
+    finding_id, is_ambiguous = _find_best_match(
+        representatives, pr, round_no, path, line)
     if is_ambiguous:
         return Oracle(oracle.finding_ids, oracle.unmatched, oracle.ambiguous + 1)
     if finding_id is None:
@@ -322,8 +323,8 @@ def _oracle(st: dict[str, Any]) -> Oracle | None:
     for source in _resolved_position_sources(st):
         for position in source.positions:
             path, line = _resolved_position(position)
-            key = MatchKey(source.pr, source.round_no, path, line)
-            oracle = _add_oracle_match(oracle, representatives, key)
+            oracle = _add_oracle_match(
+                oracle, representatives, source.pr, source.round_no, path, line)
     return oracle
 
 
