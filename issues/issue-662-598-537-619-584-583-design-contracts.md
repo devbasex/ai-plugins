@@ -369,7 +369,7 @@ conftest.py              P1（NDF_METRICS_DIR）
 | AC60〜AC62 | 3 秒後に子が書く偽の CLI を `launch-cli.sh` で起動し、pgid と、監視の上限 2 秒で止めた後の結果ファイルの有無。先頭でない pid では `os.killpg` が呼ばれない |
 | AC63 / AC65 / AC66 | 偽の `gh` のレビュー一覧（見出しの一致・ラウンド違い・担当違い）で `prior_review_url` と、`launch-reviewer.sh` のプロンプトの文言 |
 | AC67 | `SKILL.md` の骨組みで、起動の行から判定の行までの間に `verify-findings` と `critique-round.sh` があり、起動し直しの専用の分岐が無い。各判定の直後に終了コード 8 の `flush` の枝がある |
-
-**AC63〜AC67 の確かめ方は、[issue-730-583-design.md](issue-730-583-design.md) の「テスト設計」が引き継いだ。** 担当が投稿しなくなるため、投稿済みのレビューを探す鍵（`prior_review_url`）を作らず、AC63〜AC65 の行は対象を失う。上の 2 行は 2026-09-15 時点の記録として残す。
 | AC68 / AC69 | 文書の `grep` |
 | AC70〜AC72 | 検証手段の表のコマンド。AC72 はテストの前後で `find` |
+
+**AC63〜AC67 の確かめ方は、[issue-730-583-design.md](issue-730-583-design.md) の「テスト設計」が引き継いだ。** 担当が投稿しなくなるため、投稿済みのレビューを探す鍵（`prior_review_url`）を作らず、AC63〜AC65 の行は対象を失う。上の 2 行は 2026-09-15 時点の記録として残す。
