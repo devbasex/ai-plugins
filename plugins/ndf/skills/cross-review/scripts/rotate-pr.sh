@@ -150,6 +150,44 @@ cmd_prepare() {
   printf 'IS_DRAFT=%q\n'    "$(jq -r '.isDraft' <<<"$pr_json")"
 }
 
+# 旧 PR の close から新 PR 作成・結果出力までの共通手順 (light / squash)。
+# モード固有なのは「旧 PR へ残すコメント」「新 PR の body」「NEW_BRANCH として出す名前」
+# 「gh pr create の引数」の 4 つだけで、順序と ERR trap の扱いは両モードで同じ。
+#
+#   rotate_close_and_create <コメント> <新 PR の body> <NEW_BRANCH> <gh pr create の引数...>
+rotate_close_and_create() {
+  local comment=$1 new_body=$2 new_branch=$3
+  shift 3
+  local create_args=("$@")
+
+  # 1. 旧 PR を close (コメント残し)
+  post_pr_comment "$OLD_PR" "$comment"
+  gh_retry gh pr close "$OLD_PR"
+
+  # close 後に create が失敗した場合は旧 PR を reopen して rotation の途中停止を回避する
+  # (関数定義は file 冒頭で共通化, gemini round 6 指摘)
+  trap reopen_old_pr_on_failure ERR
+
+  # 2. 新 PR 作成。body は --body-file - 経由で stdin から渡し、argv 長制限を回避する
+  #    (gemini 指摘)
+  local new_pr_url
+  new_pr_url=$(printf '%s' "$new_body" | gh_retry gh pr create "${create_args[@]}")
+
+  # gh pr create 成功直後に trap を解除し、後続の URL parse / echo 等が失敗しても
+  # 新旧 PR が重複して開く事態を避ける (gemini round 6 指摘)。
+  trap - ERR
+
+  # PR 番号は create 出力 URL の末尾セグメントから抽出 (gh pr view 追加呼び出しを削減,
+  # gemini round 6 指摘)。URL 形式: https://github.com/<owner>/<repo>/pull/<number>
+  local new_pr=${new_pr_url##*/}
+
+  echo "✅ 新 PR #$new_pr: $new_pr_url" >&2
+  # eval される契約。ブランチ名 / URL に shell メタ文字が混ざっても安全なよう %q で escape
+  printf 'NEW_PR=%q\n'      "$new_pr"
+  printf 'NEW_PR_URL=%q\n'  "$new_pr_url"
+  printf 'NEW_BRANCH=%q\n'  "$new_branch"
+}
+
 # light モード本体: 同ブランチで旧 PR を close → 同 head/base で新 PR 作成。
 execute_light() {
   local state_pr=$1
@@ -183,36 +221,18 @@ execute_light() {
   echo "🔼 git push origin HEAD:$head_branch (未 push commit が無ければ no-op)" >&2
   git push origin HEAD:"$head_branch"
 
-  # 2. 旧 PR を close (コメント残し)
-  post_pr_comment "$OLD_PR" "ℹ️ レビューコメント履歴整理のため本 PR を一度 close し、同じブランチ \`$head_branch\` で新 PR を作り直します。ブランチの内容・base は変えません。"
-  gh_retry gh pr close "$OLD_PR"
-
-  # close 後に create が失敗した場合は旧 PR を reopen して rotation の途中停止を回避する
-  # (関数定義は file 冒頭で共通化, gemini round 6 指摘)
-  trap reopen_old_pr_on_failure ERR
-
-  # 3. 新 PR を同 head/base で作成 (Draft 状態は元 PR から継承)。
-  #    body は --body-file - 経由で stdin から渡し、argv 長制限を回避する (gemini 指摘)。
+  # 2. 新 PR を同 head/base で作成 (Draft 状態は元 PR から継承)。
   local create_args=(--base "$base_branch" --head "$head_branch" --title "$new_title" --body-file -)
   if [ "$is_draft" = "true" ]; then
     create_args+=(--draft)
   fi
-  local new_pr_url
-  new_pr_url=$(printf '%s' "$new_body" | gh_retry gh pr create "${create_args[@]}")
 
-  # gh pr create 成功直後に trap を解除し、後続の URL parse / echo 等が失敗しても
-  # 新旧 PR が重複して開く事態を避ける (gemini round 6 指摘)。
-  trap - ERR
-
-  # PR 番号は create 出力 URL の末尾セグメントから抽出 (gh pr view 追加呼び出しを削減,
-  # gemini round 6 指摘)。URL 形式: https://github.com/<owner>/<repo>/pull/<number>
-  local new_pr=${new_pr_url##*/}
-
-  echo "✅ 新 PR #$new_pr: $new_pr_url" >&2
-  # eval される契約。head_branch / URL に shell メタ文字が混ざっても安全なよう %q で escape
-  printf 'NEW_PR=%q\n'      "$new_pr"
-  printf 'NEW_PR_URL=%q\n'  "$new_pr_url"
-  printf 'NEW_BRANCH=%q\n'  "$head_branch"
+  # 3. close → create → 結果出力は squash と共通。
+  rotate_close_and_create \
+    "ℹ️ レビューコメント履歴整理のため本 PR を一度 close し、同じブランチ \`$head_branch\` で新 PR を作り直します。ブランチの内容・base は変えません。" \
+    "$new_body" \
+    "$head_branch" \
+    "${create_args[@]}"
 }
 
 # squash モード本体。
@@ -283,17 +303,7 @@ execute_squash() {
     -m "(cross-review rotation: PR #$OLD_PR を squash 統合)"
   git push -u origin "$new_branch"
 
-  # 2. 旧 PR を close (コメント残し)
-  post_pr_comment "$OLD_PR" "🔄 cross-review ループ進行中のため、本 PR を close し新規 PR に巻き直します。 round_in_pr=$ROUND_IN_PR で長尺化を回避。"
-  gh_retry gh pr close "$OLD_PR"
-
-  # close 後に create が失敗した場合は旧 PR を reopen して rotation の途中停止を回避する
-  # (関数定義は file 冒頭で共通化, gemini round 6 指摘)
-  trap reopen_old_pr_on_failure ERR
-
-  # 3. 新 PR 作成
-  #    body は --body-file - 経由で stdin から渡し、argv 長制限を回避する
-  #    (execute_light と統一, gemini round 5 指摘)
+  # 2. 新 PR の body
   local new_body
   new_body=$(cat <<EOF
 ## Summary
@@ -304,22 +314,13 @@ execute_squash() {
 <!-- I want to review in Japanese. -->
 EOF
 )
-  local new_pr_url
-  new_pr_url=$(printf '%s' "$new_body" | gh_retry gh pr create --base "$base" --title "$new_title" --body-file -)
 
-  # gh pr create 成功直後に trap を解除し、後続の URL parse / echo 等が失敗しても
-  # 新旧 PR が重複して開く事態を避ける (gemini round 6 指摘)。
-  trap - ERR
-
-  # PR 番号は create 出力 URL の末尾セグメントから抽出 (gh pr view 追加呼び出しを削減,
-  # gemini round 6 指摘)。URL 形式: https://github.com/<owner>/<repo>/pull/<number>
-  local new_pr=${new_pr_url##*/}
-
-  echo "✅ 新 PR #$new_pr: $new_pr_url" >&2
-  # eval される契約。new_branch / URL に shell メタ文字が混ざっても安全なよう %q で escape
-  printf 'NEW_PR=%q\n'      "$new_pr"
-  printf 'NEW_PR_URL=%q\n'  "$new_pr_url"
-  printf 'NEW_BRANCH=%q\n'  "$new_branch"
+  # 3. close → create → 結果出力は light と共通。
+  rotate_close_and_create \
+    "🔄 cross-review ループ進行中のため、本 PR を close し新規 PR に巻き直します。 round_in_pr=$ROUND_IN_PR で長尺化を回避。" \
+    "$new_body" \
+    "$new_branch" \
+    --base "$base" --title "$new_title" --body-file -
 }
 
 cmd_execute() {

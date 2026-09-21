@@ -388,14 +388,22 @@ def _by_total(rows: list[dict]) -> str:
                   _finished_rows(rows) + _unfinished_rows(rows))
 
 
+def _round_count_bucket(count: int) -> Optional[str]:
+    """ラウンド数の表示区分。1 / 2 / 3 以上のどれでもなければ `None`（対象外）。"""
+    if count >= 3:
+        return "3 以上"
+    if count in (1, 2):
+        return str(count)
+    return None
+
+
 def _by_round_count(rows: list[dict]) -> str:
     buckets: dict[str, list[float]] = {"1": [], "2": [], "3 以上": []}
     for row in rows:
         minutes = _minutes(row)
         if row.get("kind") != "cross-review" or minutes is None:
             continue
-        count = len(row.get("rounds") or [])
-        key = "3 以上" if count >= 3 else str(count) if count in (1, 2) else None
+        key = _round_count_bucket(len(row.get("rounds") or []))
         if key is not None:
             buckets[key].append(minutes)
     table = [[k, str(len(v)), _fmt(_quantile(sorted(v), 0.5))] for k, v in buckets.items() if v]
