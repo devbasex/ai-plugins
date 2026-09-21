@@ -136,17 +136,27 @@
   **1 つの `(ラウンド, finding_id, 担当)` が持つ値は 1 つである。** 取り直した反証は
   古い値へ積まず置き換える（積むと、`refute` を `support` へ訂正しても両方が並び、
   区分の順で `refute` が先に当たって指摘が `rejected` のままになる）
-- `review_findings[].classification` — 5 つの区分（#156）。**収束の判定が数えるのは
-  `verified_blocking` と `needs_human_judgment` の 2 つだけである**
+- `review_findings[].classification` — 6 つの区分（#156、#732）。値は `verified_blocking` /
+  `verified_non_blocking` / `rejected` / `needs_human_judgment` / `unrefuted` /
+  `insufficient_evidence`。**収束の判定が数えるのは `verified_blocking` と
+  `needs_human_judgment` と `unrefuted` の 3 つである。** 数えないのは、誤りだと示された
+  棄却と、承認を妨げない `minor` 以下だけである
+- `review_findings[].unrefuted_reason` — 未反証の理由（#732）。**`classification` が
+  `unrefuted` のときだけ持つ。** 値は `no_critique`（反証を返した担当が 0 者）/
+  `not_supported`（反証はあるが支持も否定も無い）。区分が変わると消える（`rejection_reason`
+  と同じ扱い）
 - `unmatched_critiques` — 結び先の無い反証（#156）。**捨てない**（反証 0 件のラウンドと、
   結び先を誤ったラウンドを区別するため）
 - `evidence_rounds` — 証拠集約（統合・実行検証・反証）を通ったラウンドの番号（#156）。
-  **収束の判定はこの印で母集合を決める。** 印を持つラウンドだけを区分の 2 つへ絞り、
-  持たないラウンドは従来どおり全件を数える。**`review_findings` の有無では判定しない**
-  （取り込みはこの変更より前から要素を積むため、区分も `verification` も持たない旧い
-  ラウンドが絞り込みに掛かり、修正必須の `major` が `insufficient_evidence` へ落ちて
-  新規 0 件で収束する）。印を書くのは経路の最後（`collect-critiques`）で、**対象ごとに
-  有効な反証が揃ったときだけである**
+  **収束の判定はこの印で母集合を決める。** 印を持つラウンドだけを数える 3 区分へ絞り、
+  持たないラウンドは従来どおり全件を数える。印の役割は、取り込みだけを済ませた旧いラウンドと、
+  反証が届いていないラウンドを、棄却と `minor` 以下も含めて全件を数える側に置くことである
+  （`major` は誤りを示されていなければ `unrefuted` として数えられるが、否定が届いていない
+  かもしれないラウンドでは全件を数える側が安全である）。**`review_findings` の有無では判定
+  しない**（取り込みは印より前から要素を積むため、区分も `verification` も持たない旧い
+  ラウンドが絞り込みに掛かる）。印を書くのは経路の最後（`collect-critiques`）で、**対象
+  ごとに有効な反証が揃ったときだけである**。揃わないときは付けないだけでなく、**先に付いて
+  いたそのラウンドの印を外す**（取り直しの後も印が残ると、出力と実際の数え方が食い違う）
 - `rounds[].critique_relaunched` — 反証を取り直した担当（#549 レビュー対応）。
   **同じラウンドで 1 度だけ取り直す**ための控えである
 - `rejected_findings` — 却下した指摘を **per-item** で蓄積する。`rounds[].fix.rejected` は

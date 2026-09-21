@@ -89,7 +89,7 @@ def _default_host(monkeypatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _no_github(monkeypatch, state_mod) -> None:
+def _no_github(monkeypatch) -> None:
     """テストから GitHub を呼ばない。
 
     収束の判定は継続的統合を照会するようになった（#327）。差し替えを忘れると、
@@ -97,6 +97,10 @@ def _no_github(monkeypatch, state_mod) -> None:
     **差し替えていない `gh` の実行はその場で落とす。**
 
     `subprocess.run` そのものを差し替えるテストは、この見張りを上書きして先へ進む。
+
+    **state.py の内部関数の差し替えは持たない。** それは `state_mod` を利用する
+    テストだけが必要とする（`_no_github_state`）。ここに混ぜると、monitor.py や
+    measure.py だけを検査するテストまで state.py を読み込む。
     """
     real = subprocess.run
 
@@ -109,8 +113,22 @@ def _no_github(monkeypatch, state_mod) -> None:
         return real(cmd, *args, **kwargs)
 
     monkeypatch.setattr(subprocess, "run", _guard)
-    # 照会は既定で「確かめられなかった」に倒す。判定は収束を止めない側へ倒すため、
-    # 検査ジョブを見ない既存のテストは期待値を変えずに通る。
+
+
+@pytest.fixture(autouse=True)
+def _no_github_state(request, monkeypatch) -> None:
+    """state.py の GitHub 照会を既定で「確かめられなかった」に倒す。
+
+    **`state_mod` を要求するテストだけへ適用する。** monitor.py や measure.py だけを
+    検査するテストは `state_mod` を要求しないため、この差し替えを通らず state.py を
+    読み込まない。要求するテストでは従来どおり実 GitHub 呼び出しを防ぐ。
+
+    判定は収束を止めない側へ倒すため、検査ジョブを見ない既存のテストは期待値を
+    変えずに通る。
+    """
+    if "state_mod" not in request.fixturenames:
+        return
+    state_mod = request.getfixturevalue("state_mod")
     monkeypatch.setattr(state_mod, "_fetch_check_runs", lambda repo, sha: None)
     monkeypatch.setattr(state_mod, "_fetch_pr_metadata", lambda pr, repo=None: None)
 

@@ -39,6 +39,11 @@ import statefile  # noqa: E402  再開の反映（#727 / #648）
 import run_metrics  # noqa: E402  実行の要約（#662）
 import monitor_outcome  # noqa: E402  起動 1 回の結末（#729）
 
+# 区分の定義は scripts 配下の共有モジュールに 1 か所だけ置く（#156、#732）。
+# `measure.py` も同じ定義を読み、両者の一致は `test_measure.py` が固定する。
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from classifications import COUNTED_CLASSIFICATIONS  # noqa: E402
+
 
 # ---------------- helpers ----------------
 
@@ -3702,11 +3707,16 @@ def _handle_incomplete_critiques(
 ) -> None:
     """有効な反証が揃わなかったラウンドの扱い（#549 レビュー対応）。
 
-    **印は付けない。** 印の無いラウンドは従来どおり全件を数えるため、未検証の `major`
-    が区分の絞り込みで落ちて収束することがない。**取り直しは同じラウンドで 1 度だけ
+    **印は付けず、先に付いていた印は外す**（#732）。印の無いラウンドは従来どおり全件を
+    数えるため、反証が届いていない `major` が区分の絞り込みで落ちて収束することがない。
+    取り直しの後もそのラウンドに印が残ると、「印を付けないため、このラウンドは全件を
+    数えます」の出力と実際の数え方が食い違う。**取り直しは同じラウンドで 1 度だけ
     である**（`judge` の結果なしと同じ作法。2 度続けて揃わないのは対象ではなく実行
     環境の側の事象であり、そのときも印を付けないまま工程を進める）。
     """
+    st["evidence_rounds"] = [
+        r for r in st.get("evidence_rounds") or []
+        if not _same_round_no(r, round_no)]
     entry = next(
         (r for r in st.get("rounds") or [] if r.get("round") == round_no), None)
     relaunched = list((entry or {}).get("critique_relaunched") or [])
@@ -3724,6 +3734,15 @@ def _handle_incomplete_critiques(
     info(f"→ 有効な反証が揃っていない: {detail}。印を付けず、"
          f"同じラウンドで 1 度だけ取り直す: {' '.join(pending)}")
     sys.exit(7)
+
+
+def _same_round_no(value: Any, round_no: int) -> bool:
+    """印の番号がそのラウンドを指すか。**番号の読み方は `_evidence_completed` と同じ**
+    （`int` へ換算して比べ、旧い状態ファイルの文字列の番号も同じラウンドとして読む）。"""
+    try:
+        return int(value) == int(round_no)
+    except (TypeError, ValueError):
+        return False
 
 
 # 実行の結果の強さ。**組から選び直すときの順である。**
@@ -3744,11 +3763,6 @@ def _declared_duplicate_targets(finding: dict[str, Any]) -> set:
     return targets
 
 
-# 収束の判定が数える区分（#156）。**残る 3 つは数えない。** 棄却した指摘を数えると、
-# そのぶんラウンドが増える（#69 で同じ論点が 5 ラウンド続いた事象）。
-COUNTED_CLASSIFICATIONS = ("verified_blocking", "needs_human_judgment")
-
-
 def _verdicts(finding: dict[str, Any], verdict: str) -> list[str]:
     """その値を返した担当の一覧。"""
     return [
@@ -3759,11 +3773,16 @@ def _verdicts(finding: dict[str, Any], verdict: str) -> list[str]:
 
 
 def _classify_finding(finding: dict[str, Any]) -> str:
-    """1 件の指摘を 5 つの区分のいずれかへ分ける（#156）。
+    """1 件の指摘を 6 つの区分のいずれかへ分ける（#156、#732）。
 
     **上から順に見て、最初に当たった区分を採る。** 実行で再現した指摘を先に採ることで、
     「実行の結果を担当の支持より先に見る」を順序そのもので表す。順 3 を先に置くと、
     機械が再現した事実を担当の再評価が覆す。
+
+    **数えない側へ落とすのは、棄却（順 3）と `minor` 以下（順 6）だけである。** 誰にも
+    誤りを示されていない `major` は、反証の有無・担当の数・根拠の 2 項目の有無によらず
+    `unrefuted`（順 5）として数える。「立証できない」「範囲外」は誤りだという主張では
+    ない（#706）。担当 1 者で反証する相手がいない指摘も同じである（#624）。
     """
     result = _verify_result(finding)
     major = _SEVERITY_RANK.get(str(finding.get("severity")), -1) >= _SEVERITY_RANK["major"]
@@ -3774,18 +3793,32 @@ def _classify_finding(finding: dict[str, Any]) -> str:
     if result == "not_reproduced" or _verdicts(finding, "refute"):
         return "rejected"
     # **`minor` 以下は数えない。** 支持が 1 件付いただけでラウンドが増えるのを避ける。
-    if finding.get("has_evidence") and major and (
-        _verdicts(finding, "support")
-        or len(finding.get("origin_runtimes") or []) >= 2
-    ):
+    if not major:
+        return "insufficient_evidence"
+    # **根拠の 2 項目は見ない。** 別の担当が支持した、または 2 者が独立に出した時点で
+    # 「確かめる」目的は果たされている（#706 で支持つきの 2 件が根拠の欠けで落ちた）。
+    if _verdicts(finding, "support") or len(finding.get("origin_runtimes") or []) >= 2:
         return "needs_human_judgment"
-    return "insufficient_evidence"
+    return "unrefuted"
+
+
+def _unrefuted_reason(finding: dict[str, Any]) -> str:
+    """なぜ独立に確かめられていないか。**反証の記録は提案者以外の値だけを持つ。**
+
+    空は「反証を返した担当が 0 者」を表す（`no_critique`）。1 件以上あれば、反証は
+    あるが支持も否定も無い（`not_supported`）。
+    """
+    return "not_supported" if finding.get("critiques") else "no_critique"
 
 
 def _apply_classification(finding: dict[str, Any]) -> str:
-    """区分を決めて要素へ書く。**棄却したものには理由を残す。**"""
+    """区分を決めて要素へ書く。**棄却と未反証には理由を残し、他の区分では消す。**"""
     classification = _classify_finding(finding)
     finding["classification"] = classification
+    if classification == "unrefuted":
+        finding["unrefuted_reason"] = _unrefuted_reason(finding)
+    else:
+        finding.pop("unrefuted_reason", None)
     if classification != "rejected":
         finding.pop("rejection_reason", None)
         return classification
@@ -3810,9 +3843,9 @@ def _apply_classification(finding: dict[str, Any]) -> str:
 def _counted_finding_ids(st: dict[str, Any], round_no: int) -> list[str]:
     """新規性が数える指摘の `finding_id`（#156）。
 
-    **数えるのは `verified_blocking` と `needs_human_judgment` だけである。**
-    棄却した指摘を数えると、そのぶんラウンドが増える（#69 で同じ論点が 5 ラウンド
-    続いた事象）。どちらも `major` 以上で、修正の工程へ渡る。
+    **数えるのは `verified_blocking` と `needs_human_judgment` と `unrefuted` の 3 つ
+    である。** 棄却した指摘を数えると、そのぶんラウンドが増える（#69 で同じ論点が
+    5 ラウンド続いた事象）。いずれも `major` 以上で、修正の工程へ渡る。
     """
     ids: list[str] = []
     for finding in st.get("review_findings") or []:
@@ -3954,38 +3987,64 @@ def _finding_keys(
     keys: list[tuple[str, int, str]] = []
     for agent in _round_reviewers(st, round_no):
         p = _payload_path(agent, pr, round_no)
-        if not p.exists():
+        payload = _read_finding_payload(agent, p)
+        if payload is None:
             continue
-        try:
-            payload = json.loads(p.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            continue
-        # gemini round 4 指摘: payload は本来 dict (comments: [...]) だが、
-        # launcher のバグで list / str が入り込むと `payload.get(...)` で
-        # AttributeError になる。不正な review payload はバグなので
-        # 即時 die(code=3) で停止させる。
-        if not isinstance(payload, dict):
+        keys.extend(_comment_keys(agent, p, payload))
+    return keys
+
+
+def _read_finding_payload(agent: str, p: pathlib.Path) -> dict[str, Any] | None:
+    """判定の直前に読む payload.json を dict として返す（第 1 段: 入力境界）。
+
+    無い・JSON として読めないときは None を返して読み飛ばす。dict でないときは
+    launcher のバグとして `die(code=3)` で止める（`_load_payload` と違い、ここで
+    止めても失われる記録が無い）。
+    """
+    if not p.exists():
+        return None
+    try:
+        payload = json.loads(p.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    # gemini round 4 指摘: payload は本来 dict (comments: [...]) だが、
+    # launcher のバグで list / str が入り込むと `payload.get(...)` で
+    # AttributeError になる。不正な review payload はバグなので
+    # 即時 die(code=3) で停止させる。
+    if not isinstance(payload, dict):
+        die(
+            f"{agent}: payload.json が dict ではない "
+            f"({p}, type={type(payload).__name__})。"
+            " review launcher の出力形式不正。",
+            code=3,
+        )
+    return payload
+
+
+def _comment_keys(
+    agent: str, p: pathlib.Path, payload: dict[str, Any]
+) -> list[tuple[str, int, str]]:
+    """`comments[]` を (ファイル, 行, 正規化した本文) の 3 つ組へ変換する（第 2 段）。
+
+    要素が dict でなければ `die(code=3)`。位置（path / line）が欠ける要素と、行が
+    整数に読めない要素は読み飛ばす。
+    """
+    keys: list[tuple[str, int, str]] = []
+    for c in payload.get("comments", []):
+        if not isinstance(c, dict):
+            # comments エントリが dict でない場合も同様に致命扱い
             die(
-                f"{agent}: payload.json が dict ではない "
-                f"({p}, type={type(payload).__name__})。"
-                " review launcher の出力形式不正。",
+                f"{agent}: payload.comments のエントリが dict ではない "
+                f"({p}, type={type(c).__name__})。",
                 code=3,
             )
-        for c in payload.get("comments", []):
-            if not isinstance(c, dict):
-                # comments エントリが dict でない場合も同様に致命扱い
-                die(
-                    f"{agent}: payload.comments のエントリが dict ではない "
-                    f"({p}, type={type(c).__name__})。",
-                    code=3,
-                )
-            path = c.get("path")
-            line = c.get("line") or c.get("start_line")
-            if path and line is not None:
-                try:
-                    keys.append((str(path), int(line), _normalized_body(c.get("body"))))
-                except (TypeError, ValueError):
-                    continue
+        path = c.get("path")
+        line = c.get("line") or c.get("start_line")
+        if path and line is not None:
+            try:
+                keys.append((str(path), int(line), _normalized_body(c.get("body"))))
+            except (TypeError, ValueError):
+                continue
     return keys
 
 
@@ -4060,7 +4119,7 @@ def _new_finding_count(st: dict[str, Any], pr: int) -> tuple[int, bool]:
     # 「測れなかった」と扱うと、元の REQUEST_CHANGES のまま終わらない。
     if not curr:
         return 0, False
-    # **証拠集約を通ったラウンドだけを、数える 2 つへ絞る**（#156）。通っていない
+    # **証拠集約を通ったラウンドだけを、数える 3 つへ絞る**（#156、#732）。通っていない
     # ラウンドは従来どおり全件を数える（旧い状態ファイルと、3 本目より前に開いた
     # ラウンドがこれに当たる）。**`review_findings` の有無では判定しない**
     # （旧版でも取り込みの時点で積まれるため、区分も検証結果も持たない旧いラウンドが

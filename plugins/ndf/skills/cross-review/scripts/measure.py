@@ -30,6 +30,11 @@ import re
 import sys
 from typing import Any, NamedTuple
 
+# 区分の定義は scripts 配下の共有モジュールに 1 か所だけ置く（#156、#732）。
+# `state.py` も同じ定義を読み、両者の一致は `test_measure.py` が固定する。
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from classifications import COUNTED_CLASSIFICATIONS  # noqa: E402
+
 
 # 席の名前の形（`lib/assignment.py` の `SEAT_PATTERN` と同じ規則）。`reviewers` を持たない
 # 古い記録で、結果を残した担当を数えるために使う。**名前の一覧では数えない。** 使える者が
@@ -422,11 +427,6 @@ def _majority(representatives: list[dict[str, Any]],
     return _method_output(finding_ids, oracle_ids)
 
 
-# 3 本目の区分のうち、この変更の方式が採る 2 つ（`state.py` の
-# `COUNTED_CLASSIFICATIONS` と同じ）。**残る 3 つは採らない。**
-COUNTED_CLASSIFICATIONS = ("verified_blocking", "needs_human_judgment")
-
-
 def _evidence_rounds(st: dict[str, Any]) -> set[int]:
     """証拠集約（統合・実行検証・反証）を通ったラウンドの印。
 
@@ -451,6 +451,31 @@ def _all_rounds_marked(st: dict[str, Any], marked: set[int]) -> bool:
     return all(_round_no(rounds, i) in marked for i in range(len(rounds)))
 
 
+def _scoped_oracle_ids(
+    representatives: list[dict[str, Any]],
+    oracle_ids: set[str] | None,
+    marked: set[int],
+) -> set[str] | None:
+    """上限の方式の集合を、印のあるラウンドの指摘だけへ絞る（#156）。
+
+    分母を全ラウンドのままにすると、印の混ざった記録で再現率が過小に出る。分子と
+    同じ母集合（印のあるラウンド）へ絞るため、`finding_id` から `round` を引いて
+    `marked` に含まれるものだけを残す。
+
+    Returns:
+      - `oracle_ids` が `None`（上限を計算できない）なら `None` を返す。
+      - `marked` が全ラウンドを覆うなら、絞り込みの結果は `oracle_ids` と同じになる。
+      - 一部のラウンドだけが印を持つなら、そのラウンドの指摘だけが残る。
+    """
+    if oracle_ids is None:
+        return None
+    rounds_by_id = {
+        str(finding.get("finding_id")): _as_int(finding.get("round"))
+        for finding in representatives
+    }
+    return {fid for fid in oracle_ids if rounds_by_id.get(fid) in marked}
+
+
 def _proposed(st: dict[str, Any], representatives: list[dict[str, Any]],
               oracle_ids: set[str] | None) -> dict[str, Any]:
     """この変更の方式。**読むのは証拠集約を通ったラウンドだけである。**
@@ -458,10 +483,11 @@ def _proposed(st: dict[str, Any], representatives: list[dict[str, Any]],
     印の無いラウンドを母集合へ入れると、区分の付かない指摘が
     `insufficient_evidence` として落ち、方式の再現率が実際より低く出る。
 
-    **分母も印のあるラウンドに限る。** 分子だけを絞ると、印の混ざった記録で
-    再現率が過小に出る。印の無い round 1 と印のある round 2 に修正された指摘が
-    1 件ずつあるとき、採れるのは round 2 の 1 件だけであり、全ラウンドの上限
-    （2 件）で割ると**拾えるものを全部拾っても 0.5 にしかならない**。
+    **分母も印のあるラウンドに限る**（絞り込みは `_scoped_oracle_ids` が持つ）。
+    分子だけを絞ると、印の混ざった記録で再現率が過小に出る。印の無い round 1 と
+    印のある round 2 に修正された指摘が 1 件ずつあるとき、採れるのは round 2 の
+    1 件だけであり、全ラウンドの上限（2 件）で割ると**拾えるものを全部拾っても
+    0.5 にしかならない**。
 
     **分母が全ラウンドと違うことは出力へ出す。** 添えないと、読む側がこの方式の
     再現率を他の 3 つと同じ分母の値として読む。
@@ -479,16 +505,7 @@ def _proposed(st: dict[str, Any], representatives: list[dict[str, Any]],
         if _as_int(finding.get("round")) in marked
         and finding.get("classification") in COUNTED_CLASSIFICATIONS
     }
-    if oracle_ids is None:
-        base_ids = None
-    else:
-        rounds_by_id = {
-            str(finding.get("finding_id")): _as_int(finding.get("round"))
-            for finding in representatives
-        }
-        base_ids = {
-            fid for fid in oracle_ids if rounds_by_id.get(fid) in marked
-        }
+    base_ids = _scoped_oracle_ids(representatives, oracle_ids, marked)
     result = _method_output(finding_ids, base_ids)
     result["oracle_scope"] = (
         "all_rounds" if _all_rounds_marked(st, marked) else "evidence_rounds"
