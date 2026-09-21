@@ -144,6 +144,15 @@ def test_review_assign_rejects_a_bad_round(assignment):
         assert "ラウンド番号は 1 以上です" in str(excinfo.value)
 
 
+@pytest.mark.parametrize("host", ("gemini", "unknown"))
+def test_review_assign_rejects_a_host_outside_host_runtimes(assignment, host):
+    """HOST_RUNTIMES に含まれないホストを拒否する現状を固定する（R2-005）。"""
+    with pytest.raises(assignment.AssignmentError) as excinfo:
+        assignment.review_assign(1, host)
+
+    assert "ホストになれないランタイムです" in str(excinfo.value)
+
+
 # ---------- 適用の輪番（#727。cross-refactoring が使う） ----------
 
 def test_impl_assign_rotates_over_the_participants_starting_after_the_host(assignment):
