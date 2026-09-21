@@ -129,6 +129,21 @@ def test_assign_rejects_a_bad_round(assignment, host):
         assert "ラウンド番号は 1 以上です" in str(excinfo.value)
 
 
+def test_review_assign_rejects_a_bad_round(assignment):
+    """round_no < 1 の下限境界で AssignmentError が送出される（R2-003）。
+
+    同モジュールの `assign` / `review_seats` は下限境界を固定しているが、
+    `review_assign` だけ抜けていたため現状の振る舞いを固定する。
+    """
+    for round_no in (0, -1):
+        with pytest.raises(
+            assignment.AssignmentError,
+            match=r"^ラウンド番号は 1 以上です:",
+        ) as excinfo:
+            assignment.review_assign(round_no, "claude")
+        assert "ラウンド番号は 1 以上です" in str(excinfo.value)
+
+
 # ---------- 適用の輪番（#727。cross-refactoring が使う） ----------
 
 def test_impl_assign_rotates_over_the_participants_starting_after_the_host(assignment):
