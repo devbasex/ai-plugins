@@ -1,10 +1,11 @@
 """リポジトリの根の設定が持つ前提を固定する（#232 / #233 / #235）。
 
-3 つのことを確かめる。
+4 つのことを確かめる。
 
 1. 起点をリポジトリの根に置いても収集が中断しない（`pytest_plugins` の宣言の位置）
 2. 前提の外部コマンドが無いとき、読み飛ばさずに 0 以外の終了コードで終わる
 3. テストの実行中は git の全体設定と system の設定を読まない
+4. テストの実行中は監視の上限を指す環境変数を読まない（#678）
 
 前提の不足は、`PATH` を絞った子プロセスとして pytest を起動して確かめる。実行環境の
 `PATH` は書き換えない。
@@ -165,3 +166,61 @@ def test_metrics_dir_points_to_a_temporary_directory_during_tests() -> None:
     assert metrics, "NDF_METRICS_DIR が設定されていない"
     assert Path(metrics).resolve().is_relative_to(Path(tempfile.gettempdir()).resolve())
     assert "NDF_METRICS" not in os.environ
+
+
+# ---------- 監視の上限を指す環境変数の切り離し（#678） ----------
+
+
+def _root_conftest_module():
+    """根の設定を別名で読み込む。控えの辞書を汚さずに、外す側と戻す側を直接呼ぶ。"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("ndf_root_conftest", ROOT_CONFTEST)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_no_monitor_variable_survives_into_a_test() -> None:
+    """実行中は、監視の上限を指す環境変数が 1 つも残らない。"""
+    remaining = [k for k in os.environ if k.startswith("MONITOR_")]
+    assert remaining == [], remaining
+
+
+def test_a_test_can_still_set_its_own_monitor_variable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """個別に設定した値は打ち消されない。切り離しは実行の前に 1 度だけ効く。"""
+    monkeypatch.setenv("MONITOR_STALL_AGY", "600")
+    assert os.environ["MONITOR_STALL_AGY"] == "600"
+
+
+def test_the_child_process_does_not_inherit_a_monitor_variable() -> None:
+    """子プロセスにも同じ切り離しが効く（起動する側で外し直さなくてよい）。"""
+    out = subprocess.run(
+        [sys.executable, "-c",
+         "import os; print([k for k in os.environ if k.startswith('MONITOR_')])"],
+        capture_output=True, text=True,
+    )
+    assert out.stdout.strip() == "[]", out.stdout
+
+
+def test_the_values_are_put_back_after_the_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """外した値は、実行が終わったときに戻る。"""
+    mod = _root_conftest_module()
+    monkeypatch.setenv("MONITOR_STALL_AGY", "1800")
+
+    saved = mod._strip_monitor_env()
+
+    assert saved == {"MONITOR_STALL_AGY": "1800"}
+    assert "MONITOR_STALL_AGY" not in os.environ
+
+    os.environ.update(saved)
+
+    assert os.environ["MONITOR_STALL_AGY"] == "1800"
+
+
+def test_the_prefix_is_declared_once() -> None:
+    """接頭辞は根の設定だけが持つ。テストの側へ書き戻すと、同じ除去がまた散る。"""
+    body = _read_root_conftest()
+
+    assert 'MONITOR_ENV_PREFIX = "MONITOR_"' in body
+    assert "def pytest_unconfigure" in body
