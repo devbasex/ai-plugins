@@ -65,13 +65,75 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| normal | unit | — | agy | 検証中 | 1 |
+| normal | unit | — | agy | 採用 | 1 |
 
 **なぜ**: assignment.py で新設された seat_runtime(seat: str) は、席名から基底ランタイム名を取り出す共通層関数であり、結果受け口・起動スクリプト・監視処理で広く使われる。しかし共通層テスト（plugins/ndf/scripts/tests/）には単体テストが存在しない。接尾辞なしのランタイム名（claude, codex, agy, kiro）および同一ランタイムの副席名（-2〜-9 接尾辞）から正確にランタイム名が抽出される正常系の振る舞いを共通層単体テストとして固定する必要がある。
 
 **手順**: 1. plugins/ndf/scripts/tests/test_lib_assignment.py に test_seat_runtime_extracts_runtime_name を追加する。
 2. ALL_RUNTIMES の全ランタイム名（'claude', 'codex', 'agy', 'kiro'）をそのまま渡した場合に、同一のランタイム名が返ることを検証する。
 3. ハイフン付き席名（'kiro-2', 'claude-9', 'agy-3' 等）を渡した場合に、接尾辞を除去した基底ランタイム名が正しく返ることを検証する。
+
+## ラウンド 2（実装 agy / レビュー codex / kiro）
+
+### R2-001 — `plugins/ndf/scripts/lib/assignment.py#assign`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| error | unit | — | codex / agy | 検証中 | 1 |
+
+**なぜ**: assign は 8 ラウンド周期の割り当てを行う公開関数であり正常系は固定されているが、round_no < 1（0 や負数）が渡された場合に AssignmentError を送出するエラー経路が scripts/tests 内で固定されていない。
+
+**手順**: 1. 有効な各ホスト（claude, codex, agy, kiro）について assignment.assign(0, host) および assignment.assign(-1, host) を呼び出す
+2. どちらも assignment.AssignmentError が送出されることを検証する
+3. 送出された例外メッセージに「ラウンド番号は 1 以上です」が含まれることを検証する
+
+### R2-002 — `plugins/ndf/scripts/lib/assignment.py#resolve_participants`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| boundary | unit | — | codex / agy | 検証中 | 1 |
+
+**なぜ**: resolve_participants で母集合の全メンバーを exclude に指定し、参加可能なメンバーが 0 件になる下限境界の振る舞い（空一覧で認証確認が呼ばれ、available が空リスト、excluded が固定順で記録されること）が固定されていない。
+
+**手順**: 1. 母集合の全員（例: ['codex', 'agy', 'kiro']）を exclude に指定し、記録用プローブを渡して resolve_participants を呼び出す
+2. プローブが空の一覧 [] で 1 回だけ呼ばれることを検証する
+3. 戻り値の Participants において available が []、unavailable が {}、excluded が固定順（['codex', 'agy', 'kiro']）で保持されることを検証する
+
+### R2-003 — `plugins/ndf/scripts/lib/assignment.py#review_assign`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| boundary | unit | — | agy / kiro | 未着手 | 0 |
+
+**なぜ**: review_assign の round_no < 1 の下限境界条件で AssignmentError を送出する振る舞いが scripts/tests 内で固定されていない。同モジュールの impl_assign や review_seats には round_no < 1 の境界テストがあるが、review_assign だけ抜けている。
+
+**手順**: 1. test_lib_assignment.py で assignment.review_assign(0, "claude") および assignment.review_assign(-1, "claude") を呼び出す
+2. どちらの呼び出しでも assignment.AssignmentError が送出されることを検証する
+3. 例外メッセージに「ラウンド番号は 1 以上です」が含まれることを検証する
+
+### R2-004 — `plugins/ndf/scripts/lib/assignment.py#review_assign`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| branch | unit | — | agy / kiro | 未着手 | 0 |
+
+**なぜ**: review_assign は適用の役を持たない工程が使う公開入口だが、scripts/tests には直接の固定が無い。in-scope の test_lib_assignment.py は assign / impl_assign / review_seats を固定するだけで、この関数の輪番（母集合3者から dropped=(round_no-1)%3 を外す各分岐）は通っていない。out-of-scope の cross-review テストは _round_reviewers の照合オラクルとして呼ぶだけで、この関数自身の戻り値を固定していない。
+
+**手順**: 1. test_lib_assignment.py の assignment フィクスチャで各ホスト（claude, codex, agy, kiro）について review_assign(round_no, host) を round 1..6 で呼び出す
+2. 各ホストで返る担当ペアの一覧が 3 ラウンド周期で循環し、現状の決定結果（例: claude は [['agy', 'kiro'], ['codex', 'kiro'], ['codex', 'agy']] が 2 周する）と完全一致することを検証する
+3. 返されるレビュー担当が常に 2 者であり、指定したホスト自身を含まないことを併せて検証する
+
+### R2-005 — `plugins/ndf/scripts/lib/assignment.py#review_assign`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| error | unit | — | codex / agy | 未着手 | 0 |
+
+**なぜ**: review_assign に HOST_RUNTIMES に含まれない無効なホスト名が渡された場合、内部の review_pool から AssignmentError（「ホストになれないランタイムです」）が送出されるエラー経路が固定されていない。
+
+**手順**: 1. test_lib_assignment.py で assignment.review_assign(1, "gemini") や assignment.review_assign(1, "unknown") を呼び出す
+2. assignment.AssignmentError が送出されることを検証する
+3. 例外メッセージに「ホストになれないランタイムです」が含まれることを検証する
 
 ## 見送った項目
 
@@ -84,3 +146,5 @@
 | 1 | `plugins/ndf/scripts/lib/statefile.py#save` | error | 1 ラウンドの採用上限 5 件を超えた |
 | 1 | `plugins/ndf/skills/cross-review/scripts/critique.sh#select_targets` | branch | 1 ラウンドの採用上限 5 件を超えた |
 | 1 | `plugins/ndf/scripts/lib/assignment.py#seat_runtime` | boundary | コミット 36dd097d4dff427b0de545bcd0cdc0de0e7b74fb にトレーラーが欠けています: Item-Id, Round, Impl-Runtime, Impl-Model |
+| 2 | `plugins/ndf/scripts/lib/assignment.py#review_seats` | boundary | 1 ラウンドの採用上限 5 件を超えた |
+| 2 | `plugins/ndf/skills/cross-review/scripts/launch-reviewer.sh#main` | normal | 1 ラウンドの採用上限 5 件を超えた |
