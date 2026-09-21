@@ -134,3 +134,52 @@ def test_impl_assign_rejects_a_bad_round(assignment):
 def test_impl_assign_rejects_an_empty_list(assignment):
     with pytest.raises(assignment.AssignmentError):
         assignment.impl_assign(1, [])
+
+
+# ---------- レビュー席の割り当て（#727。cross-review が使う） ----------
+
+def test_review_seats_with_three_or_more_available_rotates_in_available_order(assignment):
+    """3者以上: available の順序を保った2席が輪番で選ばれる。"""
+    available = ["codex", "agy", "kiro"]
+    assert assignment.review_seats(1, available, []) == ["agy", "kiro"]
+    assert assignment.review_seats(2, available, []) == ["codex", "kiro"]
+    assert assignment.review_seats(3, available, []) == ["codex", "agy"]
+
+
+def test_review_seats_with_two_available_returns_both_every_round(assignment):
+    """2者: ラウンド番号によらず常にその2者が返る。"""
+    available = ["codex", "kiro"]
+    for round_no in range(1, 5):
+        assert assignment.review_seats(round_no, available, []) == ["codex", "kiro"]
+
+
+def test_review_seats_with_one_available_fills_from_fallback_or_second_seat(assignment):
+    """1者: fallback から補填、または fallback が空・重複時は <name>-2 補填。"""
+    assert assignment.review_seats(1, ["codex"], ["claude"]) == ["codex", "claude"]
+    assert assignment.review_seats(1, ["codex"], []) == ["codex", "codex-2"]
+    assert assignment.review_seats(1, ["codex"], ["codex"]) == ["codex", "codex-2"]
+
+
+def test_review_seats_with_zero_available_fills_from_fallback_or_raises(assignment):
+    """0者: fallback から2席割当、fallback も空の場合は AssignmentError。"""
+    assert assignment.review_seats(1, [], ["claude"]) == ["claude", "claude-2"]
+    with pytest.raises(
+        assignment.AssignmentError,
+        match=r"^使える者も席の埋め合わせに使える者もいません$",
+    ):
+        assignment.review_seats(1, [], [])
+
+
+def test_review_seats_rejects_a_bad_round(assignment):
+    """round_no < 1 の場合に AssignmentError が送出される。"""
+    with pytest.raises(
+        assignment.AssignmentError,
+        match=r"^ラウンド番号は 1 以上です: 0$",
+    ):
+        assignment.review_seats(0, ["codex", "kiro"], [])
+    with pytest.raises(
+        assignment.AssignmentError,
+        match=r"^ラウンド番号は 1 以上です: -1$",
+    ):
+        assignment.review_seats(-1, ["codex", "kiro"], [])
+
