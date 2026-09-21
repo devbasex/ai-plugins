@@ -40,7 +40,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| error | unit | — | codex | 検証中 | 1 |
+| error | unit | — | codex | 採用 | 1 |
 
 **なぜ**: 0 人でも fallback がある経路は状態初期化から固定されているが、available と fallback がともに空の公開入口が AssignmentError になる経路は未固定である。
 
@@ -52,7 +52,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| boundary | unit | — | agy | 未着手 | 0 |
+| boundary | unit | — | agy | 取り消し | 1 |
 
 **なぜ**: seat_runtime は正規表現 SEAT_PATTERN（^(claude|codex|agy|kiro)(-[2-9])?$）に従って席名を検証・抽出するが、共通層テストに境界値・異常値のテストが存在しない。接尾辞の数値境界（-1 は不可、-2〜-9 は可、-10 は不可）、区切り文字違い（_2）、未知のランタイム、空文字列等で AssignmentError が送出される境界値の振る舞いを単体レベルで固定する必要がある。
 
@@ -83,3 +83,4 @@
 | 1 | `plugins/ndf/scripts/lib/monitor.py#monitor_agent` | branch | 1 ラウンドの採用上限 5 件を超えた |
 | 1 | `plugins/ndf/scripts/lib/statefile.py#save` | error | 1 ラウンドの採用上限 5 件を超えた |
 | 1 | `plugins/ndf/skills/cross-review/scripts/critique.sh#select_targets` | branch | 1 ラウンドの採用上限 5 件を超えた |
+| 1 | `plugins/ndf/scripts/lib/assignment.py#seat_runtime` | boundary | コミット 36dd097d4dff427b0de545bcd0cdc0de0e7b74fb にトレーラーが欠けています: Item-Id, Round, Impl-Runtime, Impl-Model |
