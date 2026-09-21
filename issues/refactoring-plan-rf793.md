@@ -127,7 +127,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| error | unit | — | codex / agy | 未着手 | 0 |
+| error | unit | — | codex / agy | 検証中 | 1 |
 
 **なぜ**: review_assign に HOST_RUNTIMES に含まれない無効なホスト名が渡された場合、内部の review_pool から AssignmentError（「ホストになれないランタイムです」）が送出されるエラー経路が固定されていない。
 
