@@ -259,6 +259,25 @@ def test_an_unverified_baseline_stops_before_reading_the_result(
     assert read_state(state_path)["items"][0]["status"] == "blocked"
 
 
+def test_missing_result_with_undetermined_range_blocks_items_and_exits_4(
+    two_groups, run, patch_lib, no_git
+):
+    """現状固定: 結果がなく範囲を確定できないときは項目を blocked にして終了コード 4 で中断する。"""
+    open_round, merge = run(two_groups)
+    assert open_round() == 0
+
+    patch_lib("commits_in_range", lambda work, base, head_: None)
+
+    code = merge()
+
+    assert code == 4
+    state = read_state(two_groups)
+    assert state["items"][0]["status"] == "blocked"
+    group = state["rounds"][0]["apply_rounds"][0]
+    assert "failed_attempts" not in group
+    assert [c for c in no_git if c[:2] == ["git", "revert"]] == []
+
+
 def test_a_closed_apply_attempt_stops_before_reading_the_result(
     tmp_path, patch_lib, cmd_apply, env_tmp_dir, no_git
 ):
