@@ -4,6 +4,7 @@ import importlib.util
 import pathlib
 import subprocess
 import sys
+from types import SimpleNamespace
 
 
 LIB = pathlib.Path(__file__).resolve().parents[1] / "lib"
@@ -42,4 +43,23 @@ def test_probe_timeout_is_reported(monkeypatch):
 
     assert results["codex"]["ok"] is False
     assert str(auth.AUTH_PROBE_TIMEOUT) in results["codex"]["detail"]
+    assert len(failures) == 1
+
+
+def test_unauthenticated_marker_fails_even_when_probe_exits_zero(monkeypatch):
+    auth = _load_auth()
+    messages: list[str] = []
+    failures: list[str] = []
+
+    monkeypatch.setattr(
+        auth.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            returncode=0, stdout="Not logged in", stderr=""
+        ),
+    )
+
+    results = auth.check_auth(["codex"], info=messages.append, die=failures.append, env={})
+
+    assert results["codex"]["ok"] is False
     assert len(failures) == 1
