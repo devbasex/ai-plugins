@@ -350,3 +350,60 @@ def test_the_group_assignment_goes_through_the_single_rotation_function(
 
     assert impl in {"claude", "codex", "agy", "kiro"}
     assert requested == state["models"].get(impl)
+
+
+# ---------- 修正結果が無く範囲も確定できないとき（converge.cmd_merge_fix / R1-003） ----------
+#
+# **共通部品（intake.close_without_result）単体の範囲不明テストでは足りない。**
+# `cmd_merge_fix` はその戻り値を受けて、この呼び出し側固有の進行——修正ラウンドを
+# 1 つ進めて終了コード 2 を返す——を行う。ここではその呼び出し側の振る舞いを固定する。
+
+
+def _fix_entry(fix_base, fix_rounds=0, fix_attempts=1):
+    """修正フェーズに入った、担当と進行中の群を持つラウンド。"""
+    group = _group(1, "agy", ["R1-001"], status="applied",
+                   base_sha="base0", head_sha="sha1")
+    return {
+        "round": 1, "impl": "codex", "reviewers": ["agy", "kiro"],
+        "impl_model": {"requested": None, "observed": None},
+        "reviewer_models": {}, "proposed": {}, "merged": 1,
+        "adopted": 1, "deferred": 0,
+        "items": ["R1-001"],
+        "apply_rounds": [group], "apply_round": 1,
+        "apply": {"applied": ["R1-001"], "failed": [],
+                  "base_sha": "base0", "head_sha": "sha1"},
+        "fix_rounds": fix_rounds, "fix_attempts": fix_attempts,
+        "fix_base_sha": fix_base, "durations": {}, "reviews": [],
+    }
+
+
+def _fix_state(tmp_path, fix_base="fixbase0", fix_rounds=0):
+    item = _item("R1-001")
+    item["status"] = "applied"
+    return make_state(
+        tmp_path,
+        items=[item],
+        rounds=[_fix_entry(fix_base, fix_rounds=fix_rounds)],
+        phase="fix", outer_round=1,
+    )
+
+
+def test_a_missing_fix_result_with_an_unknown_range_advances_the_round_and_exits_2(
+    tmp_path, patch_lib, cmd_converge, env_tmp_dir, no_git
+):
+    """現状固定: 修正結果が無く範囲も確定できないと、修正ラウンドを 1 つ進めて
+    終了コード 2 で中断する。`failed_attempts` は足さず、取り消しも行わない。"""
+    state_path = _fix_state(tmp_path, fix_rounds=0)
+    env_tmp_dir(state_path)
+    patch_lib("git_out", lambda work, args, **k: "HEAD_NOW")
+    patch_lib("commits_in_range", lambda work, base, head_: None)
+
+    code = _exit_code(cmd_converge.cmd_merge_fix,
+                      type("A", (), {"id": 130, "round": 1})())
+
+    assert code == 2
+    entry = read_state(state_path)["rounds"][0]
+    assert entry["fix_rounds"] == 1, "修正ラウンドを 1 つ進める"
+    group = entry["apply_rounds"][0]
+    assert "failed_attempts" not in group, "範囲不明では失敗の記録を残さない"
+    assert [c for c in no_git if c[:2] == ["git", "revert"]] == [], "取り消さない"
