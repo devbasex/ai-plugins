@@ -236,9 +236,13 @@ def test_the_wider_factor_is_limited_to_the_vocabulary(vocabulary):
 # ---------- git から事実を取る ----------
 
 def test_commit_trailers_are_read_from_git(patch_lib, gitfacts, monkeypatch):
-    """結果ファイルではなく実際のコミットメッセージから読む。"""
+    """結果ファイルではなく実際のコミットメッセージから読む。
+
+    読むのは**題名の次の段落から後ろ**である。段落の切り分けそのものは実際の git で
+    確かめる（`test_commit_trailers_git.py`）。
+    """
     patch_lib("git_out",
-        lambda work, args, **_kw: "Item-Id: R1-001\nRound: 1\n"
+        lambda work, args, **_kw: "Refactor: 題名\n\nItem-Id: R1-001\nRound: 1\n"
                            "Impl-Runtime: codex\nImpl-Model: gpt-5.5",
     )
     assert gitfacts.commit_trailers("/w", "abc") == {
@@ -449,6 +453,10 @@ def test_a_verified_apply_round_marks_every_item_applied(
     assert state["rounds"][0]["apply"]["applied"] == ["R1-001", "R1-002"]
     assert all(i["status"] == "applied" for i in state["items"])
     assert state["phase"] == "verify", "次はテストによる検証へ進む"
+    # AC46: 結果があり検証を通る適用は、1 回目の試行で取り込まれ記録を残さない
+    group = state["rounds"][0]["apply_rounds"][0]
+    assert "failed_attempts" not in group
+    assert "drop_reason" not in group
 
 
 def test_all_failed_exits_2(refactor, tmp_path, env_tmp_dir, no_git, git_facts):

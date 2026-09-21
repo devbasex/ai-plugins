@@ -21,7 +21,7 @@ EXPECTED_CALLS = {
     "SKILL.md": 4,
     "docs/01-state-and-propose.md": 1,
     "docs/02-apply-and-review.md": 2,
-    "docs/04-fix-and-report.md": 1,
+    "docs/04-fix-and-report.md": 2,
 }
 
 # 監視の雛形（stem）から、渡すべき工程を決める。
@@ -74,11 +74,14 @@ def test_the_call_does_not_pass_a_timeout(rel: str, call: str) -> None:
 
 
 @pytest.mark.skipif(shutil.which("grep") is None, reason="grep が無い")
-def test_the_acceptance_grep_returns_8() -> None:
-    """要求の文書の AC38 のコマンドをそのまま実行する。"""
+def test_the_acceptance_grep_returns_9() -> None:
+    """要求の文書の AC38 のコマンドをそのまま実行する。
+
+    最終ゲートの修正の監視を修正の説明へも書いたため、9 件になる（#728）。
+    """
     command = (
         'grep -rn -A2 "monitor.py" plugins/ndf/skills/cross-refactoring/SKILL.md '
         'plugins/ndf/skills/cross-refactoring/docs | grep -c -- "--phase"'
     )
     r = subprocess.run(["bash", "-c", command], cwd=REPO, capture_output=True, text=True)
-    assert r.stdout.strip() == "8", r.stdout + r.stderr
+    assert r.stdout.strip() == "9", r.stdout + r.stderr
