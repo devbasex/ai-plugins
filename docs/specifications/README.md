@@ -16,6 +16,7 @@
 | [ndf-testenv-lock-and-registry.md](ndf-testenv-lock-and-registry.md) | テスト環境の排他の判定を陳腐化の規則へ揃えたこと、台帳へ書けなかったときの扱い。手順は `worktree` の `references/test-execution.md` が正 |
 | [ndf-issue-upkeep-root-cause.md](ndf-issue-upkeep-root-cause.md) | 溜まった課題を根本原因の場所で直す判定（ルートコーズ）と、構造の判断の担い手。親 issue とサブイシューの実測、マイルストーンを連番で読む理由。手順は `issue-upkeep` の SKILL.md と `references/` が正 |
 | [cross-review-evidence-based.md](cross-review-evidence-based.md) | 証拠ベースのレビューと効果の測定。状態ファイルの契約と決定の理由。手順は `cross-review` の `SKILL.md` が正 |
+| [cross-review-launch-outcome.md](cross-review-launch-outcome.md) | 起動 1 回の結末の語彙（理由 9 語）と起動し直しの可否、利用上限と CLI の上限の検知、プロセスグループでの起動と停止。手順は `cross-review` の `SKILL.md` と `docs/` が正 |
 | [ndf-cleanup-and-bundle-closing.md](ndf-cleanup-and-bundle-closing.md) | 後片付けが止まる条件（git の拒否だけ）、実行前確認の要否を決める 3 つの問い、まとまりの課題を終わりの工程で閉じる条件と結果の 4 値、配布の記録の形と読み方。手順は `merged` / `progress-tracking` / `release` の SKILL.md が正 |
 | [ndf-agent-layers-unattended-run.md](ndf-agent-layers-unattended-run.md) | `/goal` の工程を conductor / supervisor / worker の 3 層で通す運転。持ち場 5 つ、報告の 2 段、続けさせる回数、上限（429）で中断した層の再開。手順は `development-workflow` の `references/agent-layers.md` が正 |
 | [ndf-context-window-metrics.md](ndf-context-window-metrics.md) | 会話の記録から context window を 3 層で測る部品（`transcript_agents.py`）の値の取り方と、`skill-stats --agents` の 4 つの表と印。値の取り方はこの文書が正 |
