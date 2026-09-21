@@ -308,7 +308,7 @@ Pull Request では、検証手順を実行できなかった 3 件が立証不�
 | --- | --- |
 | `single` | 1 者だけの結果。担当ごとに 1 通り出す |
 | `majority` | `origin_runtimes` が 2 者以上の指摘 |
-| `proposed` | 区分が `verified_blocking` / `needs_human_judgment` / `unrefuted` の指摘。**数える区分の集合を持つのは共有モジュール 1 か所（`scripts/classifications.py`）で、収束の判定と効果の測定の両方がそれを読む** |
+| `proposed` | 区分が `verified_blocking` / `needs_human_judgment` / `unrefuted` の指摘。**数える区分の集合を持つのは共有モジュール 1 か所（`plugins/ndf/skills/cross-review/scripts/classifications.py`）で、収束の判定と効果の測定の両方がそれを読む** |
 | `oracle` | いずれかの担当が出した指摘のうち、**修正された**もの |
 
 **`origin_runtimes` を持たない指摘は、取り込み時の担当 1 者として読む。** この値は統合の
