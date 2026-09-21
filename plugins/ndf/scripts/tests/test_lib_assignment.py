@@ -136,6 +136,23 @@ def test_impl_assign_rejects_an_empty_list(assignment):
         assignment.impl_assign(1, [])
 
 
+# ---------- 席名からランタイム名への変換（#727） ----------
+
+def test_seat_runtime_extracts_runtime_name(assignment):
+    """現状固定: 基底席と副席から同じランタイム名を返す。"""
+    for runtime in assignment.ALL_RUNTIMES:
+        assert assignment.seat_runtime(runtime) == runtime
+
+    seats = {
+        "kiro-2": "kiro",
+        "agy-3": "agy",
+        "codex-5": "codex",
+        "claude-9": "claude",
+    }
+    for seat, runtime in seats.items():
+        assert assignment.seat_runtime(seat) == runtime
+
+
 # ---------- レビュー席の割り当て（#727。cross-review が使う） ----------
 
 def test_review_seats_with_three_or_more_available_rotates_in_available_order(assignment):
@@ -195,4 +212,3 @@ def test_review_seats_rejects_a_bad_round(assignment):
         match=r"^ラウンド番号は 1 以上です: -1$",
     ):
         assignment.review_seats(-1, ["codex", "kiro"], [])
-
