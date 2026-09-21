@@ -170,6 +170,19 @@ def test_review_seats_with_zero_available_fills_from_fallback_or_raises(assignme
         assignment.review_seats(1, [], [])
 
 
+def test_review_seats_raises_when_both_available_and_fallback_are_empty(assignment):
+    """0者かつ fallback も空: 公開入口が AssignmentError を送出する（R1-003）。
+
+    使える者と席の埋め合わせ候補がともに無いことを、利用者向けの理由が示す。
+    """
+    with pytest.raises(assignment.AssignmentError) as excinfo:
+        assignment.review_seats(1, [], [])
+
+    message = str(excinfo.value)
+    assert "使える者" in message
+    assert "席の埋め合わせに使える者" in message
+
+
 def test_review_seats_rejects_a_bad_round(assignment):
     """round_no < 1 の場合に AssignmentError が送出される。"""
     with pytest.raises(
