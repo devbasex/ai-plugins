@@ -73,12 +73,8 @@ def _state_file_pr(st: dict[str, Any]) -> int | None:
     **`current_pr` ではない。** ローテーションを経ると `current_pr` は進むが、
     状態ファイルの名前も `rounds[]` の並びも最初の番号のままである。
     """
-    for entry in st.get("pr_history") or []:
-        if isinstance(entry, dict):
-            pr = _as_int(entry.get("pr"))
-            if pr is not None:
-                return pr
-    return _as_int(st.get("current_pr"))
+    prs = _prs(st)
+    return prs[0] if prs else None
 
 
 def _prs(st: dict[str, Any]) -> list[int]:
