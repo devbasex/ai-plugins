@@ -25,7 +25,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| branch | unit | — | agy | 検証中 | 1 |
+| branch | unit | — | agy | 採用 | 1 |
 
 **なぜ**: assignment.py で新設された review_seats は、cross-review において各ラウンドのレビュワー2席を割り当てるコア関数である。しかし共通層テスト（plugins/ndf/scripts/tests/）には単体テストが一切存在しない（別スキル cross-refactoring のテスト側に暫定配置されているのみ）。len(available) の人数（3者以上の輪番、2者の固定、1者時の fallback または副席 <name>-2 補填、0者時の fallback 2席割当および fallback 空時の例外送出）の全分岐の振る舞いを共通層の単体テストとして固定する必要がある。
 
@@ -40,7 +40,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| error | unit | — | codex | 未着手 | 0 |
+| error | unit | — | codex | 検証中 | 1 |
 
 **なぜ**: 0 人でも fallback がある経路は状態初期化から固定されているが、available と fallback がともに空の公開入口が AssignmentError になる経路は未固定である。
 
