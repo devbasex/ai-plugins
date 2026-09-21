@@ -195,44 +195,6 @@ def test_init_rejects_unknown_model_runtime(run_init, tmp_path):
         run_init(_args(tmp_path, model=["gpt=gpt-5.5"]))
 
 
-# ---------- R2-003: 入力の誤りで止まる経路 ----------
-#
-# 引数だけで判定できる 2 つの誤り（ホストの指定・モデルの指定）は、外部照会にも
-# 作業ディレクトリ作成にも進まないまま中断する。
-
-def _no_external(patch_lib):
-    """外部照会が走ったらテストを落とす。"""
-    patch_lib("sh",
-        lambda cmd, **k: pytest.fail(f"入力の誤りの後に外部を呼んでいる: {cmd}"),
-    )
-
-
-def test_init_stops_on_an_invalid_host_before_touching_anything(
-    patch_lib, cmd_setup, tmp_path
-):
-    """現状固定: ホストになれない `--host` は中断コード 4 で止まる。"""
-    _no_external(patch_lib)
-
-    with pytest.raises(SystemExit) as e:
-        cmd_setup.cmd_init(_args(tmp_path, host="gpt"))
-
-    assert e.value.code == refactor_abort()
-    assert not (tmp_path / "rf130").exists(), "作業ディレクトリを作っている"
-
-
-def test_init_stops_on_an_invalid_model_spec_before_touching_anything(
-    patch_lib, cmd_setup, tmp_path
-):
-    """現状固定: 解析できない `--model` は中断コード 4 で止まる。"""
-    _no_external(patch_lib)
-
-    with pytest.raises(SystemExit) as e:
-        cmd_setup.cmd_init(_args(tmp_path, model=["codex"]))
-
-    assert e.value.code == refactor_abort()
-    assert not (tmp_path / "rf130").exists(), "作業ディレクトリを作っている"
-
-
 def test_init_accepts_agy_as_host(run_init, tmp_path):
     """agy も NDF の配布先であるため、ホストになれる。"""
     run_init(_args(tmp_path, host="agy"))

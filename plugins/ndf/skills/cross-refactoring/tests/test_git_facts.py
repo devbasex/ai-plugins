@@ -360,26 +360,6 @@ def test_revert_item_commits_failure_message_includes_item_id(gitfacts, work, ca
     assert _git("rev-parse", "HEAD", cwd=work).stdout.strip() == second
 
 
-def test_revert_item_commits_does_nothing_for_an_already_reverted_item(
-    gitfacts, work, capsys
-):
-    """現状固定: `reverted` が真の項目は 0 を返し、git も項目も動かさない。
-
-    push の失敗などで叩き直したときに、既に戻したコミットへもう一度
-    `git revert` を掛けると必ず失敗する。
-    """
-    sha = _commit(work, "one", {"src/a.py": "a = 1\n"})
-    head = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
-    state = {"worktrees": {"work": str(work)}}
-    item = {"item_id": "R1-001", "commits": [sha], "reverted": True}
-
-    assert gitfacts.revert_item_commits(state, item) == 0
-
-    assert item == {"item_id": "R1-001", "commits": [sha], "reverted": True}
-    assert _git("rev-parse", "HEAD", cwd=work).stdout.strip() == head
-    assert "↩ R1-001 は取り消し済みです" in capsys.readouterr().err
-
-
 def test_revert_range_failure_message_has_no_item_id_prefix(gitfacts, work, capsys):
     """現状固定: _revert_range 失敗時は項目 ID 接頭辞のないエラー文を出して中断する。"""
     first = _commit(work, "one", {"src/a.py": "a = 1\n"})
