@@ -15,6 +15,7 @@ from typing import Any, Optional
 
 import models as models_lib
 import statefile
+from monitor_outcome import LaunchOutcome, read_launch_outcome
 
 from . import die, info
 from .paths import git_out, sh, stem_for
@@ -448,40 +449,6 @@ def revert_item_commits(
     _revert_range(work, shas, before, prefix=f"{item['item_id']} の")
     item["reverted"] = True
     return len(shas)
-
-
-def revert_unverified_range(
-    path: pathlib.Path,
-    state: dict[str, Any],
-    entry: dict[str, Any],
-    ordered_range: list[str],
-    label: str,
-) -> None:
-    """検証を通らない範囲を取り消し、`entry` の起点を取り消し後の HEAD へ進める。
-
-    `entry` は**修正の控えを持つ辞書**である。適用ラウンドの控え（`rounds[]` の
-    要素）と最終ゲートの控え（`final_gate`）の両方が同じ 3 つの鍵
-    （`pending_push` / `fix_base_sha`）を持つため、どちらからも呼べる。
-    `label` は取り消しの単位を人が読むための名前で、git の操作には効かない。
-    """
-    work = state["worktrees"]["work"]
-    # **状態へ記録する前に取り消す。** 先に記録すると、取り消し済みのコミットが
-    # 状態ファイルに残り、後の見送り処理が同じコミットをもう一度取り消そうとする。
-    info("検証を通らない変更を残さないため、この修正ラウンドの範囲を取り消します")
-    # **取り消しへ着手する前に印を立てる。** 取り消しは済んだのに push できずに
-    # 終わると、未検証の変更が Pull Request に残ったままになる。
-    entry["pending_push"] = True
-    statefile.save(path, state)
-    revert_item_commits(
-        state,
-        {"item_id": label, "commits": list(ordered_range)},
-        dry_run=False,
-    )
-    # 取り消し後の状態を新しい起点にし、**その場で保存する**。ここで保存せずに
-    # 落ちると、次の実行は古い起点から範囲を取り直して取り消しコミット自体を
-    # 「未申告」と判定し、**取り消しを取り消して**しまう。
-    entry["fix_base_sha"] = git_out(work, ["rev-parse", "HEAD"])
-    statefile.save(path, state)
 
 
 def _reset_hard(work: str, sha: Optional[str]) -> None:
@@ -1079,26 +1046,22 @@ def find_item(
     return None
 
 
-def read_result(path: pathlib.Path, runtime: str) -> dict[str, Any]:
-    """結果ファイルを読む。**JSON オブジェクトでなければ失敗させる。**
+def read_result(
+    state: dict[str, Any], runtime: str, phase: str, round_no: Optional[int] = None
+) -> LaunchOutcome:
+    """起動 1 回の結末を読む。**失敗しない。**
 
-    配列や数値が返ってきたまま呼び出し側へ渡すと、`payload.get(...)` で
-    `AttributeError` になって進行が止まる。読み込みの時点で弾く。
+    結果ファイルの名前の幹をここで 1 度だけ組み、共通層（`read_launch_outcome`）へ
+    渡す。3 つの取り込みが同じ組み立てを通るため、監視へ渡した名前の雛形
+    （`--stem-template`）と食い違う幹で読むことがない。
+
+    **中断も出力もしない。** 結果を読めなかったときに何をするかは、読んだ側
+    （取り込み）が終了コードとして決める。ここで `die` すると、未検証のコミットが
+    取り消されないまま残る（#728）。
     """
-    if not path.exists():
-        die(f"{runtime} の結果ファイルがありません: {path}", code=2)
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as e:
-        die(f"{runtime} の結果ファイルが JSON として読めません: {e}", code=2)
-        raise SystemExit(2)
-    if not isinstance(payload, dict):
-        die(
-            f"{runtime} の結果ファイルが JSON オブジェクトではありません"
-            f"（{type(payload).__name__}）: {path}",
-            code=2,
-        )
-    return payload
+    return read_launch_outcome(
+        state["tmp_dir"], stem_for(runtime, phase, state["id"], round_no)
+    )
 
 
 def record_observed_model(

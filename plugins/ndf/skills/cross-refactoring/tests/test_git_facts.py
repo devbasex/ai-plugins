@@ -276,39 +276,58 @@ def test_cutting_off_kills_children_that_ignore_sigterm(gitfacts, work):
     assert not marker.exists(), "SIGTERM を無視する子が生き残っている"
 
 
-def test_read_result_aborts_when_the_file_is_missing(gitfacts, tmp_path):
-    """現状固定: 結果ファイルが無ければ終了コード 2 で中断する。
+def test_read_result_returns_a_value_when_the_file_is_missing(gitfacts, tmp_path, capsys):
+    """結果ファイルが無くても中断せず、結果なしの値を返す。
 
-    起動した CLI が結果を残さなかった場合であり、進行は次のラウンドへ進む。
+    中断すると、担当が作ったコミットが取り消されないまま Pull Request に残る
+    （#728）。何で終わるかは読んだ側（取り込み）が決める。
     """
-    with pytest.raises(SystemExit) as e:
-        gitfacts.read_result(tmp_path / "missing.json", "claude")
-    assert e.value.code == 2
+    state = {"id": 130, "tmp_dir": str(tmp_path)}
+    outcome = gitfacts.read_result(state, "claude", "apply", 1)
+
+    assert outcome.payload is None
+    assert outcome.reason == "missing"
+    assert outcome.relaunch_same_agent is True
+    captured = capsys.readouterr()
+    assert (captured.out, captured.err) == ("", "")
 
 
-def test_read_result_aborts_on_broken_json(gitfacts, tmp_path):
-    """現状固定: JSON として読めなければ終了コード 2 で中断する。"""
-    path = tmp_path / "result.json"
-    path.write_text('{"items": [', encoding="utf-8")
+def test_read_result_returns_unparsable_for_broken_json(gitfacts, tmp_path):
+    """JSON として読めない結果ファイルは、理由 `unparsable` の結果なしになる。"""
+    (tmp_path / "claude-apply-r1-result.json").write_text(
+        '{"items": [', encoding="utf-8")
+    state = {"id": 130, "tmp_dir": str(tmp_path)}
 
-    with pytest.raises(SystemExit) as e:
-        gitfacts.read_result(path, "claude")
-    assert e.value.code == 2
+    outcome = gitfacts.read_result(state, "claude", "apply", 1)
+
+    assert (outcome.payload, outcome.reason) == (None, "unparsable")
 
 
 @pytest.mark.parametrize("body", ['[{"item_id": "R1-001"}]', "42"])
-def test_read_result_aborts_when_the_json_is_not_an_object(gitfacts, tmp_path, body):
-    """現状固定: 配列や数値も終了コード 2 で中断する。
+def test_read_result_returns_unparsable_when_the_json_is_not_an_object(
+    gitfacts, tmp_path, body
+):
+    """配列や数値も結果なしとして返す。
 
-    呼び出し側は `payload.get(...)` を呼ぶため、読み込みの時点で弾かないと
-    `AttributeError` になって進行が止まる。
+    呼び出し側は `payload.get(...)` を呼ぶため、辞書でないものを渡すと
+    `AttributeError` になって進行が止まる。読み込みの時点で結果なしへ寄せる。
     """
-    path = tmp_path / "result.json"
-    path.write_text(body, encoding="utf-8")
+    (tmp_path / "claude-apply-r1-result.json").write_text(body, encoding="utf-8")
+    state = {"id": 130, "tmp_dir": str(tmp_path)}
 
-    with pytest.raises(SystemExit) as e:
-        gitfacts.read_result(path, "claude")
-    assert e.value.code == 2
+    outcome = gitfacts.read_result(state, "claude", "apply", 1)
+
+    assert (outcome.payload, outcome.reason) == (None, "unparsable")
+
+
+def test_read_result_reads_the_stem_of_each_phase(gitfacts, tmp_path):
+    """名前の幹は工程ごとに変わる。最終ゲートの修正だけラウンド番号を持たない。"""
+    (tmp_path / "codex-fix-r2-result.json").write_text('{"ok": 1}', encoding="utf-8")
+    (tmp_path / "codex-final-fix-result.json").write_text('{"ok": 2}', encoding="utf-8")
+    state = {"id": 130, "tmp_dir": str(tmp_path)}
+
+    assert gitfacts.read_result(state, "codex", "fix", 2).payload == {"ok": 1}
+    assert gitfacts.read_result(state, "codex", "final-fix").payload == {"ok": 2}
 
 
 def test_find_item_returns_none_for_a_missing_id_when_not_required(gitfacts):

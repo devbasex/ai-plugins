@@ -15,10 +15,10 @@
 from __future__ import annotations
 
 import argparse
+import pathlib
 import sys
 from typing import Any, Optional
 
-import assignment
 import statefile
 
 from .. import die, info
@@ -33,9 +33,15 @@ from ..gitfacts import (
     check_run_result,
     collect_commit_facts,
     commits_in_range,
-    revert_unverified_range,
 )
-from ..paths import git_out, load_state, result_path, stem_for
+from ..intake import (
+    IntakeScope,
+    already_closed,
+    close_without_result,
+    discard_unverified,
+)
+from ..paths import git_out, load_state
+from ..rounds import impl_for_seq
 from ..verify import verify_final_fix_commit
 from ..vocabulary import DEFAULT_TEST_TIMEOUT
 from ..verify import unassigned_fix_commits
@@ -125,10 +131,55 @@ def _final_fix_impl(state: dict[str, Any], gate: dict[str, Any]) -> str:
     if impl:
         return impl
     seq = safe_int(state.get("apply_seq")) + 1
-    impl, _ = assignment.assign(seq, state["host"])
+    impl, _ = impl_for_seq(state, seq)
     state["apply_seq"] = seq
     gate["impl"] = impl
     return impl
+
+
+def _final_fix_scope(gate: dict[str, Any], impl: str) -> IntakeScope:
+    """最終ゲートの修正の取り込み 1 回分の範囲の値。
+
+    起点も結末の記録も最終ゲートの控えが持つ。改善項目にも提案ラウンドにも
+    属さないため、群は関わらない。
+    """
+    rounds = safe_int(gate.get("fix_rounds"))
+    return IntakeScope(
+        holder=gate,
+        base_key="fix_base_sha",
+        records=gate,
+        phase="final-fix",
+        attempt=rounds,
+        impl=impl,
+        label=f"final-gate-fix{rounds}",
+    )
+
+
+def _close_failed_final_fix(
+    path: pathlib.Path,
+    state: dict[str, Any],
+    gate: dict[str, Any],
+    scope: IntakeScope,
+    outcome: Any,
+) -> None:
+    """最終ゲートの修正担当が結果を残さなかったときに、取り消して判定へ戻す。
+
+    **修正ラウンドは進めない。** 進めるのは次の最終ゲートで、そこが上限を見る。
+    起動し直しても解けない結末（利用上限）だけは上限の値まで進め、次の最終ゲートを
+    「取り消さず報告」で終わらせる（#728 の決定 11）。
+    """
+    closed = close_without_result(path, state, scope, outcome)
+    if closed.range_unknown:
+        statefile.save(path, state)
+        die(
+            "最終ゲートの修正の範囲を確定できませんでした"
+            f"（起点 {gate.get('fix_base_sha')}）。検証できない修正は採りません",
+            code=2,
+        )
+    if not closed.relaunch_same_agent:
+        gate["fix_rounds"] = safe_int(state.get("max_fix_rounds"), 3)
+    statefile.save(path, state)
+    sys.exit(2)
 
 
 def cmd_merge_final_fix(args: argparse.Namespace) -> None:
@@ -144,8 +195,13 @@ def cmd_merge_final_fix(args: argparse.Namespace) -> None:
     | 正常なコミットまで取り消される | 古い起点が残っていると、そこから HEAD までが範囲になる |
     | トレーラーが揃わず全件が不正になる | `Item-Id` を要求するが、最終ゲートの修正は項目に属さない |
 
-    終了コード: 0 = 取り込んだ / 2 = 取り込めなかった（範囲を確定できない）。
-    合否そのものは判定せず、**次の `final-gate` が採った側で 1 度だけ見る**。
+    終了コード: 0 = 取り込んだ / 2 = 取り込めなかった（範囲を確定できない、または
+    担当が結果を残さなかった）。合否そのものは判定せず、**次の `final-gate` が
+    採った側で 1 度だけ見る**。
+
+    **結果を残さなかったときも、作られたコミットは取り消す。** 取り消さずに抜けると、
+    次の最終ゲートがそのコミットを含む先端でテストし、落ちれば起点をそこへ置き直す。
+    未検証の差分が Pull Request に残る（#674）。
     """
     path, state = load_state(args.id)
     gate = state.setdefault("final_gate", {"fix_rounds": 0, "checks": []})
@@ -161,8 +217,15 @@ def cmd_merge_final_fix(args: argparse.Namespace) -> None:
     discard_impl_leftovers(state, work)
     flush_pending_push(path, state, gate)
 
-    result = result_path(state, impl, stem_for(impl, "final-fix", state["id"]))
-    payload = read_result(result, impl)
+    scope = _final_fix_scope(gate, impl)
+    if already_closed(scope):
+        info("↻ この最終ゲートの修正の試行は結果なしとして記録済みです")
+        sys.exit(2)
+
+    outcome = read_result(state, impl, "final-fix")
+    if outcome.payload is None:
+        _close_failed_final_fix(path, state, gate, scope, outcome)
+    payload = outcome.payload
     head_now = git_out(work, ["rev-parse", "HEAD"]) or ""
     ordered_range = commits_in_range(work, gate.get("fix_base_sha"), head_now)
     if ordered_range is None:
@@ -200,10 +263,7 @@ def cmd_merge_final_fix(args: argparse.Namespace) -> None:
         # **ここは取り消す。** 「上限に達しても取り消さない」のは*採用した改善項目*
         # の話で、検証を受けていない修正コミットは別である。取り消せば HEAD は
         # 最終ゲートが見た地点へ戻り、公開済みの内容と食い違わない。
-        revert_unverified_range(
-            path, state, gate, ordered_range,
-            f"final-gate-fix{safe_int(gate.get('fix_rounds'))}",
-        )
+        discard_unverified(path, state, scope, ordered_range)
     else:
         gate["fix_base_sha"] = head_now
         gate.setdefault("fix_commits", []).extend(ordered_range)
