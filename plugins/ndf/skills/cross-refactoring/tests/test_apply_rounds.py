@@ -437,3 +437,44 @@ def test_a_round_whose_only_group_has_no_item_runs_out(
     assert e.value.code == 1
     group = read_state(state_path)["rounds"][0]["apply_rounds"][0]
     assert (group["status"], group["drop_reason"]) == ("dropped", "empty")
+
+
+# ---------- R2-001: 群の開き直しの判定（group_reopening） ----------
+#
+# 4 本の分岐を返す純粋な判定関数だが、これまでは差し替えるだけで返り値そのものを
+# 固定した経路が無かった。**返り値の文字列だけ**を比較し、内部の数え方には触れない。
+
+def _reopening_group(items=("R1-001",), attempt=0, failed=0):
+    """`group_reopening` が読む鍵だけを持つ群。
+
+    判定に使うのは項目の有無・開いた回数（`attempt`）・結末の記録のうち工程が
+    適用のものの件数の 3 つである。
+    """
+    return _empty_group(
+        1, items=items, attempt=attempt,
+        failed_attempts=[{"phase": "apply"} for _ in range(failed)],
+    )
+
+
+def test_group_reopening_says_empty_when_the_group_has_no_item(rounds):
+    """現状固定: 項目が無い群は `empty`。"""
+    assert rounds.group_reopening(_reopening_group(items=())) == "empty"
+
+
+def test_group_reopening_says_exhausted_at_the_apply_attempt_cap(rounds):
+    """現状固定: 工程が適用の結末が上限に達した群は `exhausted`。"""
+    group = _reopening_group(attempt=rounds.MAX_APPLY_ATTEMPTS,
+                             failed=rounds.MAX_APPLY_ATTEMPTS)
+
+    assert rounds.group_reopening(group) == "exhausted"
+
+
+def test_group_reopening_says_resume_for_an_attempt_that_never_closed(rounds):
+    """現状固定: 開いた回数が結末の件数を上回る群は `resume`。"""
+    assert rounds.group_reopening(_reopening_group(attempt=1, failed=0)) == "resume"
+
+
+def test_group_reopening_says_open_when_every_attempt_is_closed(rounds):
+    """現状固定: 開いた回数が結末の件数以下の群は `open`。"""
+    assert rounds.group_reopening(_reopening_group(attempt=0, failed=0)) == "open"
+    assert rounds.group_reopening(_reopening_group(attempt=1, failed=1)) == "open"
