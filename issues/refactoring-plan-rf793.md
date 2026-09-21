@@ -209,7 +209,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| long_method | extract_method | major | kiro | 検証中 | 1 |
+| long_method | extract_method | major | kiro | 採用 | 1 |
 
 **なぜ**: 1 つの関数が 2 つの独立した集計を通しで行う。前半は review ごとの指摘件数と解決件数の集計、後半は entry.get('reviewers') を回して判定一致（verdict_pairs / verdict_agreements）を数える二重ループである。指摘の集計と判定一致の集計は変更理由が別で、後半のネストしたループが読む負荷を上げている。
 
@@ -222,7 +222,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| duplication | consolidate_duplication | major | codex | 検証中 | 1 |
+| duplication | consolidate_duplication | major | codex | 採用 | 1 |
 
 **なぜ**: 両モードが旧 PR へのコメント、close、ERR trap の設定、新 PR 作成、trap 解除、URL からの番号抽出、NEW_PR・NEW_PR_URL・NEW_BRANCH の出力を同じ順序で持つ。同じ障害対策のコメントが両方へ反映されており、変更理由も共通している。
 
@@ -236,7 +236,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| long_method | split_into_pipeline | major | codex | 検証中 | 1 |
+| long_method | split_into_pipeline | major | codex | 採用 | 1 |
 
 **なぜ**: 書き込み先抽出の入口に、ヒアドキュメント除去、字句化、作業ディレクトリと複合構文の状態追跡、sed・tee・cp・mv・リダイレクトの対象抽出が連続して同居している。多数の局所状態と入れ子の補助関数を一度に追う必要があり、各段を独立して固定できない。
 
@@ -250,7 +250,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| conditional_chain | extract_method | minor | kiro | 検証中 | 1 |
+| conditional_chain | extract_method | minor | kiro | 採用 | 1 |
 
 **なぜ**: バケット鍵の決定が入れ子の三項式 key = "3 以上" if count >= 3 else str(count) if count in (1, 2) else None に埋まっている。ラウンド数から表示区分を導く判断がループ本体の 1 行に押し込まれ、境界（1 / 2 / 3 以上 / 対象外）が読み取りづらい。
 
@@ -263,7 +263,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| conditional_chain | extract_method | minor | kiro | 未着手 | 0 |
+| conditional_chain | extract_method | minor | kiro | 検証中 | 1 |
 
 **なぜ**: 行ごとの絞り込みが 5 本の連続した if ... continue と、until 判定に埋め込まれた入れ子の三項（started >= until if until_exclusive else started > until）で構成される。時刻の下限・上限・repo・kind・version という別々の観点が 1 つのループ本体に同居し、until_exclusive の分岐が特に読みづらい。
 
