@@ -249,9 +249,19 @@ launcher が生成するプロンプトに以下を強制している:
 | `monitor-outcomes.jsonl` | `$TMP_DIR` | 監視の結果を 1 行 1 つで**追記だけ**で積む | 同上。消さない |
 | `cross-review-pr<PR>-<開始時刻の UTC>.json` | 要約の置き場所の `<owner>--<repo>/` | 実行の要約（所要・結末・ラウンド・起動と `measure`）。**本文・`detail` を含まない** | 状態を保存するたび（同じ実行は上書き） |
 
-`reason` は `status` から決まる（`OK`→`ok` / `TIMEOUT`→`timeout` / `STALLED`→`stalled` /
-`EARLY_ERROR`→`early_error` / `NO_RESULT`→`missing` / `PIDFILE_BAD`→`pidfile_bad`）。
+`reason` は既定では `status` から決まる（`OK`→`ok` / `TIMEOUT`→`timeout` / `STALLED`→`stalled` /
+`EARLY_ERROR`→`early_error` / `NO_RESULT`→`missing` / `PIDFILE_BAD`→`pidfile_bad`）。監視が
+文言で区別した 2 つだけが状態から決まらない: 利用上限は `EARLY_ERROR` のまま `usage_limit`、
+CLI 自身の上限で結果を書かずに終わったときは `NO_RESULT` のまま `cli_timeout`（#729）。
 監視の標準出力と終了コードは変わらない。
+
+結果の取り込みは結果ファイルを自前で開かず、共通層の `monitor_outcome.read_launch_outcome(tmp_dir,
+"<agent>-review-pr<PR>", result_path)` が返す値（使える結果 `payload` / 理由 `reason` / 監視の詳細
+`detail` / 起動し直しの可否 `relaunch_same_agent`）を読む。結果なしのときは
+`rounds[-1].<agent>` に `intent: "NO_RESULT"`、`no_result_reason: <reason>`、監視の結果ファイルが
+あれば `monitor_detail: <detail>` を書く（**鍵が無い** = 監視の結果ファイルが無かった。空文字は
+書かない）。理由の一覧は [01-state-and-review.md](01-state-and-review.md) の「結果を残さなかった
+レビュアーの扱い」にある。
 
 **要約の置き場所は作業ツリーの外である。** `NDF_METRICS_DIR` → `$XDG_STATE_HOME/ndf/metrics` →
 `$HOME/.local/state/ndf/metrics` の順に決まり、`NDF_METRICS=0` のときは書かない。`state.py report`

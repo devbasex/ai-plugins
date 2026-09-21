@@ -33,6 +33,26 @@ UNAUTHENTICATED_MARKERS = (
 SKIP_ENV = "NDF_SKIP_AUTH_CHECK"
 
 
+def _probe_auth(runtime: str, probe: tuple[str, ...]) -> tuple[bool, str, str]:
+    """1 つの CLI を確認し、集約に必要な結果へ変換する。"""
+    command = " ".join(probe)
+    try:
+        result = subprocess.run(
+            list(probe), capture_output=True, text=True,
+            timeout=AUTH_PROBE_TIMEOUT,
+        )
+        merged = f"{result.stdout}\n{result.stderr}".lower()
+        ok = result.returncode == 0 and not any(
+            marker in merged for marker in UNAUTHENTICATED_MARKERS
+        )
+        detail = (result.stderr.strip() or result.stdout.strip())[:200]
+    except FileNotFoundError:
+        ok, detail = False, "コマンドが見つかりません"
+    except subprocess.TimeoutExpired:
+        ok, detail = False, f"{AUTH_PROBE_TIMEOUT} 秒で応答しませんでした"
+    return ok, detail, command
+
+
 def check_auth(
     runtimes: Iterable[str],
     *,
@@ -59,20 +79,9 @@ def check_auth(
         probe = AUTH_PROBES.get(runtime)
         if probe is None:
             continue
-        try:
-            r = subprocess.run(list(probe), capture_output=True, text=True,
-                               timeout=AUTH_PROBE_TIMEOUT)
-            merged = f"{r.stdout}\n{r.stderr}".lower()
-            ok = r.returncode == 0 and not any(
-                m in merged for m in UNAUTHENTICATED_MARKERS
-            )
-            detail = (r.stderr.strip() or r.stdout.strip())[:200]
-        except FileNotFoundError:
-            ok, detail = False, "コマンドが見つかりません"
-        except subprocess.TimeoutExpired:
-            ok, detail = False, f"{AUTH_PROBE_TIMEOUT} 秒で応答しませんでした"
-        results[runtime] = {"command": " ".join(probe), "ok": ok, "detail": detail}
-        info(f"{'✅' if ok else '❌'} {runtime}: {' '.join(probe)}")
+        ok, detail, command = _probe_auth(runtime, probe)
+        results[runtime] = {"command": command, "ok": ok, "detail": detail}
+        info(f"{'✅' if ok else '❌'} {runtime}: {command}")
         if not ok:
             failed.append(f"{runtime}（{detail}）")
 

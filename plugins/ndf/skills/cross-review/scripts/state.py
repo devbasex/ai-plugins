@@ -35,6 +35,7 @@ import assignment  # noqa: E402
 import auth  # noqa: E402
 import post_queue  # noqa: E402
 import run_metrics  # noqa: E402  実行の要約（#662）
+import monitor_outcome  # noqa: E402  起動 1 回の結末（#729）
 
 # 区分の定義は scripts 配下の共有モジュールに 1 か所だけ置く（#156、#732）。
 # `measure.py` も同じ定義を読み、両者の一致は `test_measure.py` が固定する。
@@ -1407,6 +1408,33 @@ def _pending_posts(pr: int) -> int:
     return _queue(pr).count()
 
 
+def _flushed_review(item: dict[str, Any]) -> tuple[Any, Any, str] | None:
+    """待ち行列の項目から、確認するレビューの担当・ラウンド・URL を得る。"""
+    if item.get("kind") != "review-post":
+        return None
+    extra = item.get("extra") or {}
+    agent, round_no = extra.get("agent"), extra.get("round")
+    if not (agent and round_no):
+        return None
+    response = item.get("response")
+    response = response if isinstance(response, dict) else {}
+    url = str(response.get("html_url") or "")
+    if not url and response.get("id"):
+        url = f"#pullrequestreview-{response['id']}"
+    return agent, round_no, url
+
+
+def _flushed_review_target(
+        state: dict[str, Any], agent: Any, round_no: Any) -> dict[str, Any] | None:
+    """レビューを積んだラウンドから、担当の書き戻し先を探す。"""
+    return next(
+        (entry for entry in state.get("rounds", [])
+         if entry.get("round") == round_no
+         and isinstance(entry.get(agent), dict)),
+        None,
+    )
+
+
 def _confirm_flushed(pr: int, item: dict[str, Any]) -> None:
     """流した直後に、投稿が届いたことを 1 度だけ確かめる。
 
@@ -1420,24 +1448,14 @@ def _confirm_flushed(pr: int, item: dict[str, Any]) -> None:
     確認を促す側にも働かない**（判定は `queued` を見て照会を飛ばす）。共通層が
     見つけた投稿を `response` として渡すため、どちらも同じ経路で確かめられる。
     """
-    if item.get("kind") != "review-post":
+    review = _flushed_review(item)
+    if review is None:
         return
-    extra = item.get("extra") or {}
-    agent, round_no = extra.get("agent"), extra.get("round")
-    if not (agent and round_no):
-        return
-    resp = item.get("response") if isinstance(item.get("response"), dict) else {}
-    url = str(resp.get("html_url") or "")
-    if not url and resp.get("id"):
-        url = f"#pullrequestreview-{resp['id']}"
+    agent, round_no, url = review
     st = _load(pr)
     # **書き戻す先は、その項目が属するラウンドである。** 積んだラウンドと流した
     # ラウンドが同じとは限らないため、最後のラウンドへ書かない。
-    target = next(
-        (e for e in st.get("rounds", [])
-         if e.get("round") == round_no and isinstance(e.get(agent), dict)),
-        None,
-    )
+    target = _flushed_review_target(st, agent, round_no)
     if target is None:
         return
     exists = _review_exists(str(st.get("repo") or ""),
@@ -1511,51 +1529,54 @@ def cmd_flush(args: argparse.Namespace) -> None:
         info(f"✅ 待ち行列は空です（送った {len(result.sent)} 件）")
 
 
-def _print_init_result(
-    pr: object,
-    worktree: object,
-    tmp_dir: object,
-    repo: object,
-    head_branch: object,
-    base_branch: object,
-    is_own: bool,
-    event_downgrade: bool,
-    has_extra: bool,
-    carried_count: int,
-    resumed: bool,
-) -> None:
+class _InitResult(NamedTuple):
+    """cmd_init が標準出力の機械可読ブロックへ書く初期化結果。
+
+    再開経路と新規経路が同じ組を渡すため、位置引数の並びではなく名前付きの
+    フィールドで受け渡す。
+    """
+
+    pr: object
+    worktree: object
+    tmp_dir: object
+    repo: object
+    head_branch: object
+    base_branch: object
+    is_own: bool
+    event_downgrade: bool
+    has_extra: bool
+    carried_count: int
+    resumed: bool
+
+
+def _print_init_result(result: _InitResult) -> None:
     """cmd_init の 2 経路（再開・新規）が共有する末尾の出力ブロック。
 
     出力形式は再開側・新規側で同一のため 1 箇所へ寄せる。PR 番号だけは
     元の両分岐に合わせて quote しない（数値のため）。
     """
-    print(f"PR={pr}")
-    print(f'WORKTREE={shlex.quote(str(worktree))}')
-    print(f'TMP_DIR={shlex.quote(str(tmp_dir))}')
-    print(f'REPO={shlex.quote(str(repo))}')
-    print(f'HEAD_BRANCH={shlex.quote(str(head_branch))}')
-    print(f'BASE_BRANCH={shlex.quote(str(base_branch))}')
-    print(f"IS_OWN_PR={'1' if is_own else '0'}")
-    print(f"EVENT_DOWNGRADE={'1' if event_downgrade else '0'}")
-    print(f"HAS_EXTRA_REVIEW_INSTRUCTIONS={'1' if has_extra else '0'}")
-    print(f"CARRIED_OVER_THREADS={carried_count}")
-    print(f"RESUMED={'1' if resumed else '0'}")
+    print(f"PR={result.pr}")
+    print(f'WORKTREE={shlex.quote(str(result.worktree))}')
+    print(f'TMP_DIR={shlex.quote(str(result.tmp_dir))}')
+    print(f'REPO={shlex.quote(str(result.repo))}')
+    print(f'HEAD_BRANCH={shlex.quote(str(result.head_branch))}')
+    print(f'BASE_BRANCH={shlex.quote(str(result.base_branch))}')
+    print(f"IS_OWN_PR={'1' if result.is_own else '0'}")
+    print(f"EVENT_DOWNGRADE={'1' if result.event_downgrade else '0'}")
+    print(f"HAS_EXTRA_REVIEW_INSTRUCTIONS={'1' if result.has_extra else '0'}")
+    print(f"CARRIED_OVER_THREADS={result.carried_count}")
+    print(f"RESUMED={'1' if result.resumed else '0'}")
 
 
-def _resume_from_state(
-    pr: object,
-    repo: str,
-    worktree: str,
-    manual_extra_review: str,
-) -> bool:
-    """既存 state からの再開経路。
+def _find_resumable_state(
+    pr: object, worktree: str,
+) -> tuple[dict[str, Any], pathlib.Path] | None:
+    """既存 state を探し、再開できるものだけを (state, path) で返す。
 
-    再開に該当し出力まで済ませたら True、該当する state が無ければ False を返す。
-    False のとき cmd_init は新規 init へ進む。
+    再開に該当しなければ `None`。**探索の入口は `_tmp_dir()` を使わない**（mkdir の
+    副作用でパスが作られてしまう）。`CROSS_REVIEW_TMP_DIR` があればそれを、無ければ
+    `<worktree>/.cross_review/` を直接組む。`final` が確定した state は再開しない。
     """
-    # 再開チェック: CROSS_REVIEW_TMP_DIR が設定されている場合はそちらを優先し、
-    # 未設定なら <worktree>/.cross_review/ を直接パスとして組む。
-    # _tmp_dir() は mkdir 副作用があるため使用せず、パス解決のみ行う。
     env_tmp = os.environ.get("CROSS_REVIEW_TMP_DIR")
     if env_tmp:
         resume_dir = pathlib.Path(env_tmp).resolve()
@@ -1563,10 +1584,21 @@ def _resume_from_state(
         resume_dir = pathlib.Path(worktree) / ".cross_review"
     resume_state_file = resume_dir / f"cross-review-pr{pr}-state.json"
     if not resume_state_file.exists():
-        return False
+        return None
     st = json.loads(resume_state_file.read_text(encoding="utf-8"))
     if st.get("final") is not None:
-        return False
+        return None
+    return st, resume_state_file
+
+
+def _refresh_resume_state(
+    st: dict[str, Any], pr: object, repo: str, manual_extra_review: str,
+) -> bool:
+    """再開する state を最新化し、書き換えたかどうかを返す。
+
+    旧形式の補完・manual 指示の反映・`review_instructions` の再計算・引き継ぎの記録を
+    行う。**保存はしない**（呼び出し側が変更有無を見て 1 度だけ書く）。
+    """
     state_changed = False
     if "auto_review_instructions" not in st:
         changed_files = _fetch_changed_files(pr, st.get("repo") or repo)
@@ -1591,37 +1623,66 @@ def _resume_from_state(
     # 再開した時点で残っている未解決の指摘を引き継ぎとして記録する。
     if _record_carried_over(st, st.get("repo") or repo, st.get("current_pr") or pr):
         state_changed = True
-    if state_changed:
-        _write_state(resume_state_file, st)
-        info("↻ 追加レビュー観点を state に反映して再開")
-    # 待ち行列を流すのは、手元の `st` を書き戻した**後**である。流した結果
-    # （`queued` の解除と、届かなかった投稿の結果なし）は `_confirm_flushed` が
-    # 状態ファイルへ直接書く。先に流すと、この関数がその後に書き戻す古い `st` が
-    # それらを消す。再開の入口で流すこと自体は変えないため、回復した後の
-    # 1 本目のコマンドで届く。
-    # 渡すのは状態ファイルの鍵（`args.pr`）で、`current_pr` ではない。待ち行列も
-    # 状態ファイルも鍵で引くため、巻き直しの後に `current_pr` を渡すと引けない。
+    return state_changed
+
+
+def _sync_resume_worktree(st: dict[str, Any], pr: object, worktree: str) -> pathlib.Path:
+    """保存後の副作用（待ち行列の flush → tmp_dir 解決 → 作業ツリー同期）を順に行う。
+
+    順序に意味がある:
+    1. **待ち行列を流すのは、手元の `st` を書き戻した後である。** 流した結果
+       （`queued` の解除と、届かなかった投稿の結果なし）は `_confirm_flushed` が
+       状態ファイルへ直接書く。先に流すと、この後の書き戻しが古い `st` でそれらを
+       消す。渡すのは状態ファイルの鍵（`args.pr`）で、`current_pr` ではない。
+    2. `tmp_dir` を解決して返す（`_print_init_result` が使う）。
+    3. **再開でも同期する。** 中断から再開までの間に head が進んでいることがあり、
+       そのまま次のラウンドを回すと古い差分をレビューさせる。
+    """
     _auto_flush(pr)
     tmp_dir = _tmp_dir(worktree)
     wt = st.get("worktree_path") or ""
-    # 再開でも同期する。中断から再開までの間に head が進んでいることがあり、
-    # そのまま次のラウンドを回すと古い差分をレビューさせる。
     resume_head = str(st.get("head_branch") or "")
     if wt and resume_head and _is_registered_worktree(str(wt)):
         _sync_worktree(str(wt), int(st.get("current_pr") or pr), resume_head)
+    return tmp_dir
+
+
+def _resume_from_state(
+    pr: object,
+    repo: str,
+    worktree: str,
+    manual_extra_review: str,
+) -> bool:
+    """既存 state からの再開経路。
+
+    再開に該当し出力まで済ませたら True、該当する state が無ければ False を返す。
+    False のとき cmd_init は新規 init へ進む。
+    """
+    found = _find_resumable_state(pr, worktree)
+    if found is None:
+        return False
+    st, resume_state_file = found
+
+    if _refresh_resume_state(st, pr, repo, manual_extra_review):
+        _write_state(resume_state_file, st)
+        info("↻ 追加レビュー観点を state に反映して再開")
+
+    tmp_dir = _sync_resume_worktree(st, pr, worktree)
     info(f"↻ 前回中断 state から再開（round={len(st.get('rounds', []))}）")
     _print_init_result(
-        st["current_pr"],
-        wt,
-        tmp_dir,
-        st.get("repo") or "",
-        st.get("head_branch") or "",
-        st.get("base_branch") or "",
-        bool(st.get("is_own_pr")),
-        bool(st.get("event_downgrade")),
-        bool(st.get("review_instructions")),
-        (st.get("carried_over") or {}).get("count", 0),
-        True,
+        _InitResult(
+            pr=st["current_pr"],
+            worktree=st.get("worktree_path") or "",
+            tmp_dir=tmp_dir,
+            repo=st.get("repo") or "",
+            head_branch=st.get("head_branch") or "",
+            base_branch=st.get("base_branch") or "",
+            is_own=bool(st.get("is_own_pr")),
+            event_downgrade=bool(st.get("event_downgrade")),
+            has_extra=bool(st.get("review_instructions")),
+            carried_count=(st.get("carried_over") or {}).get("count", 0),
+            resumed=True,
+        )
     )
     return True
 
@@ -1859,17 +1920,19 @@ def _init_new_state(
         _write_state(ws_ctx.state_file, state)
         info(f"✅ state 初期化: {ws_ctx.state_file}")
         _print_init_result(
-            pr,
-            pr_ctx.worktree,
-            ws_ctx.tmp_dir,
-            pr_ctx.repo,
-            pr_ctx.meta.head_branch,
-            pr_ctx.meta.base_branch,
-            pr_ctx.is_own,
-            pr_ctx.event_downgrade,
-            bool(review_ctx.review_instructions),
-            0,
-            False,
+            _InitResult(
+                pr=pr,
+                worktree=pr_ctx.worktree,
+                tmp_dir=ws_ctx.tmp_dir,
+                repo=pr_ctx.repo,
+                head_branch=pr_ctx.meta.head_branch,
+                base_branch=pr_ctx.meta.base_branch,
+                is_own=pr_ctx.is_own,
+                event_downgrade=pr_ctx.event_downgrade,
+                has_extra=bool(review_ctx.review_instructions),
+                carried_count=0,
+                resumed=False,
+            )
         )
 
     pr_ctx = _resolve_pr_and_ownership(pr, repo, worktree, args.worktree)
@@ -2409,11 +2472,16 @@ def cmd_unresolved_threads(args: argparse.Namespace) -> None:
         info(f"- {t['id']} {t.get('path', '')}:{t.get('line', '')}")
 
 
-def _record_no_result(pr: int, agent: str, reason: str) -> None:
+def _record_no_result(
+    pr: int, agent: str, reason: str, monitor_detail: str | None = None,
+) -> None:
     """使える結果が残らなかったことを、そのラウンドへ残す。
 
     判定（`cmd_judge`）はこの記録を読んで、起動し直しか中断かを決める。記録が無い
     ラウンドも結果なしとして読むため、ここで書けなかった場合も収束はしない。
+
+    `monitor_detail` は監視の `detail`（#729）。**鍵が無い = 監視の結果ファイルが
+    無かった**を保つため、`None` と空文字では鍵を書かない。
 
     状態ファイルを読めないときとラウンドがまだ無いときは、何も書かずに戻る。呼び出し
     元はこの直後に die するため、ここで新たに止める理由が無い。
@@ -2427,7 +2495,7 @@ def _record_no_result(pr: int, agent: str, reason: str) -> None:
         return
     if not isinstance(st, dict) or not st.get("rounds"):
         return
-    st["rounds"][-1][agent] = {
+    entry: dict[str, Any] = {
         "intent": NO_RESULT,
         "no_result_reason": reason,
         "posted_as": None,
@@ -2435,6 +2503,9 @@ def _record_no_result(pr: int, agent: str, reason: str) -> None:
         "review_url": None,
         "by_severity": {},
     }
+    if monitor_detail:
+        entry["monitor_detail"] = monitor_detail
+    st["rounds"][-1][agent] = entry
     _save(pr, st)
 
 
@@ -2445,33 +2516,30 @@ def _die_no_result(pr: int, agent: str, reason: str, msg: str, code: int = 1) ->
 
 
 def _read_review_result_file(pr: int, agent: str, rfile: pathlib.Path) -> dict[str, Any]:
-    if not rfile.exists() or rfile.stat().st_size == 0:
-        _die_no_result(pr, agent, "missing", f"{agent}: result 未生成 ({rfile})")
+    """結果ファイルを、結末の共通層の値として読む（#729 の決定 2）。
 
-    try:
-        r = json.loads(rfile.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        _die_no_result(
-            pr,
-            agent,
-            "unparsable",
-            f"{agent}: result.json の parse に失敗 ({rfile}): {exc}",
+    結果ファイルを自前で開かない。監視の結果ファイル（`<stem>-monitor.json`）と突き合わせて
+    使える結果か理由かを決めるのは `read_launch_outcome` で、ここが決めるのは終了コードだけ
+    である（読めない結果は 3、それ以外は 1。変更前と同じ）。理由の語彙も起動し直しの可否も
+    ここには置かない。
+    """
+    outcome = monitor_outcome.read_launch_outcome(
+        _resolve_tmp_dir(pr), f"{agent}-review-pr{pr}", rfile)
+    if outcome.payload is not None:
+        return outcome.payload
+    reason = outcome.reason or "missing"
+    # 監視の結果ファイルがあるときだけ、その `detail` を残す（無いときの `outcome.detail` は
+    # 読めなかった理由の 1 文で、監視の詳細ではない）
+    monitor_detail = str(outcome.monitor.get("detail") or "") if outcome.monitor else None
+    _record_no_result(pr, agent, reason, monitor_detail)
+    if reason == "unparsable":
+        # 結果ファイルはあるが JSON の dict として parse できない。launcher の出力形式不正
+        die(
+            f"{agent}: result.json の parse に失敗、または dict ではない ({rfile}):"
+            f" {outcome.detail}",
             code=3,
         )
-
-    # gemini round 4 指摘: result.json は本来 dict だが、launcher の出力バグや
-    # 別実行の残骸で list / str が入り込むと `r.get(...)` で AttributeError になる。
-    # 不正な review result はバグなので即時 die(code=3) で停止させる。
-    if not isinstance(r, dict):
-        _die_no_result(
-            pr,
-            agent,
-            "unparsable",
-            f"{agent}: result.json が dict ではない "
-            f"({rfile}, type={type(r).__name__})。review launcher の出力形式不正。",
-            code=3,
-        )
-    return r
+    die(f"{agent}: 使える結果が無い (reason={reason}, {rfile}): {outcome.detail}")
 
 
 def _verify_review_arrival(
@@ -2766,24 +2834,35 @@ def _round_ci(st: dict[str, Any], last: dict[str, Any], pr: int) -> dict[str, An
     return {"verdict": "success", "sha": sha}
 
 
-def _handle_no_result_round(
-    pr: int, st: dict[str, Any], last: dict[str, Any], no_result: list[str]
+def _no_result_reasons(last: dict[str, Any], no_result: list[str]) -> dict[str, str]:
+    """結果なしの担当ごとの理由を集め、`NO_RESULT_REASONS` を出す。
+
+    どの出口でも進行側が理由を読めるように、先頭で 1 度だけ出す（#729 の AC14）。
+    """
+    reasons = {
+        a: (last.get(a) or {}).get("no_result_reason") or "missing" for a in no_result
+    }
+    print(f"NO_RESULT_REASONS='{' '.join(f'{a}={r}' for a, r in reasons.items())}'")
+    return reasons
+
+
+def _abort_no_result_round(pr: int, st: dict[str, Any], msg: str) -> None:
+    """結果なしのラウンドを異常終了させる共通処理。
+
+    `final=error` にして保存し、終了コード 1 で止める。最終スイープを通してから
+    完了報告へ進むよう促す文言は呼び出し側が渡す。
+    """
+    st["final"] = "error"
+    st["ended_at"] = _now()
+    _save(pr, st)
+    die(msg, code=1)
+
+
+def _record_relaunch(
+    pr: int, st: dict[str, Any], last: dict[str, Any], pending: list[str]
 ) -> None:
-    last["verdict"] = "no_result"
-    relaunched = last.get("relaunched") or []
-    pending = [a for a in no_result if a not in relaunched]
-    if not pending:
-        # 2 度続けて結果が残らないのは、対象や負荷ではなく実行環境の側の事象である。
-        st["final"] = "error"
-        st["ended_at"] = _now()
-        _save(pr, st)
-        die(
-            f"起動し直した後も結果が残りませんでした: {' '.join(no_result)}。"
-            " 実行環境の側の問題として中断します。最終スイープを通してから"
-            "完了報告へ進んでください",
-            code=1,
-        )
-    last["relaunched"] = relaunched + pending
+    """同じラウンドで起動し直す担当を記録し、シェル向けの出力を出す。"""
+    last["relaunched"] = (last.get("relaunched") or []) + pending
     _save(pr, st)
     print(f"RELAUNCH_AGENTS='{' '.join(pending)}'")
     print(f"RELAUNCH_AGENTS_CSV={','.join(pending)}")
@@ -2794,6 +2873,44 @@ def _handle_no_result_round(
         f"→ 結果を残さなかったレビュアーがいる: {' '.join(pending)}。"
         "同じラウンドで 1 度だけ起動し直す。"
     )
+
+
+def _handle_no_result_round(
+    pr: int, st: dict[str, Any], last: dict[str, Any], no_result: list[str]
+) -> None:
+    """結果なしの担当があるラウンドの出口を決める。
+
+    先に理由の行（`NO_RESULT_REASONS`）を出す。どの出口でも進行側が理由を読めるようにする
+    ためである（#729 の AC14）。**起動し直しの可否は結末の共通層だけが決める**
+    （`monitor_outcome.relaunch_same_agent`）。可否が偽の理由が 1 つでもあれば、誰も起動し直さず
+    誤りの終わりへ進む。起動し直しても解けない理由で待つのは、相手の CLI の枠と時間を使うだけ
+    である（#619）。骨組みは既存の 1 の枝で受けるため、終了コードは増えない（決定 12）。
+    """
+    last["verdict"] = "no_result"
+    reasons = _no_result_reasons(last, no_result)
+    blocked = [a for a, r in reasons.items()
+               if not monitor_outcome.relaunch_same_agent(r)]
+    if blocked:
+        for a in blocked:
+            detail = (last.get(a) or {}).get("monitor_detail")
+            info(f"  {a}: reason={reasons[a]}" + (f" detail={detail}" if detail else ""))
+        _abort_no_result_round(
+            pr, st,
+            f"起動し直しても解けない理由で結果が残りませんでした: {' '.join(blocked)}。"
+            " 同じラウンドで起動し直さずに中断します。最終スイープを通してから"
+            "完了報告へ進んでください",
+        )
+    relaunched = last.get("relaunched") or []
+    pending = [a for a in no_result if a not in relaunched]
+    if not pending:
+        # 2 度続けて結果が残らないのは、対象や負荷ではなく実行環境の側の事象である。
+        _abort_no_result_round(
+            pr, st,
+            f"起動し直した後も結果が残りませんでした: {' '.join(no_result)}。"
+            " 実行環境の側の問題として中断します。最終スイープを通してから"
+            "完了報告へ進んでください",
+        )
+    _record_relaunch(pr, st, last, pending)
     sys.exit(7)
 
 
@@ -3070,53 +3187,57 @@ def _merged_root(
     return current
 
 
-def _verify_one_finding(
-    finding: dict[str, Any],
+def _run_finding_checks(
+    targets: list[dict[str, Any]],
     allowed: list[str],
     work: str,
     codes: set[int],
     run: Any,
-    ran: dict[tuple[str, ...], Optional[int]],
-) -> dict[str, Any]:
-    """1 つの指摘の suggested_check を検証し、verification レコードを生成する。"""
-    check = str(finding.get("suggested_check") or "")
-    record: dict[str, Any] = {
-        "command": check, "finding_id": finding.get("finding_id"),
-        "exit_code": None, "result": "not_run", "ran_at": None,
-    }
-    argv = _verify_argv(check, allowed, work) if allowed else None
-    if argv is not None:
-        key = tuple(argv)
-        if key in ran:
-            code = ran[key]
-        else:
-            code = run(argv, work)
-            ran[key] = code
-        record["exit_code"] = code
-        record["ran_at"] = _now()
-        if code in codes:
-            record["result"] = "reproduced"
-        elif code == 0:
-            record["result"] = "not_reproduced"
-    return record
+) -> None:
+    """各指摘の検証コマンドを重複なく実行し、結果を記録する。"""
+    ran: dict[tuple[str, ...], Optional[int]] = {}
+
+    for finding in targets:
+        check = str(finding.get("suggested_check") or "")
+        record: dict[str, Any] = {
+            "command": check, "finding_id": finding.get("finding_id"),
+            "exit_code": None, "result": "not_run", "ran_at": None,
+        }
+        argv = _verify_argv(check, allowed, work) if allowed else None
+        if argv is not None:
+            key = tuple(argv)
+            if key in ran:
+                code = ran[key]
+            else:
+                code = run(argv, work)
+                ran[key] = code
+            record["exit_code"] = code
+            record["ran_at"] = _now()
+            if code in codes:
+                record["result"] = "reproduced"
+            elif code == 0:
+                record["result"] = "not_reproduced"
+        finding["verification"] = record
 
 
-def _select_best_verification(
-    rep: dict[str, Any],
-    targets: list[dict[str, Any]],
-    by_id: dict[Any, dict[str, Any]],
-) -> dict[str, Any]:
-    """merged_into の関係をたどり、代表へ最良の verification を選ぶ。"""
-    best = rep["verification"]
-    for member in targets:
-        if member is rep or not member.get("merged_into"):
+def _propagate_best_verification(
+    targets: list[dict[str, Any]], by_id: dict[Any, dict[str, Any]]
+) -> None:
+    """束ねた組から最良の検証結果を代表へ反映する。"""
+    for rep in targets:
+        if rep.get("merged_into"):
             continue
-        if _merged_root(member, by_id) is not rep:
-            continue
-        if _VERIFY_RANK.get(_verify_result(member), -1) > \
-           _VERIFY_RANK.get(str(best.get("result") or "not_run"), -1):
-            best = member["verification"]
-    return best
+        best = rep["verification"]
+        for member in targets:
+            if member is rep or not member.get("merged_into"):
+                continue
+            if _merged_root(member, by_id) is not rep:
+                continue
+            if _VERIFY_RANK.get(_verify_result(member), -1) > \
+               _VERIFY_RANK.get(str(best.get("result") or "not_run"), -1):
+                best = member["verification"]
+        if best is not rep["verification"]:
+            rep["verification"] = dict(best)
 
 
 def _verify_findings(
@@ -3154,20 +3275,8 @@ def _verify_findings(
         f for f in st.get("review_findings") or [] if f.get("round") == round_no
     ]
     by_id = {f.get("finding_id"): f for f in targets}
-    ran: dict[tuple[str, ...], Optional[int]] = {}
-
-    for finding in targets:
-        finding["verification"] = _verify_one_finding(
-            finding, allowed, work, codes, run, ran,
-        )
-
-    # 代表は組から選び直す。**実行し直さない**（記録済みの結果を選ぶだけである）。
-    for rep in targets:
-        if rep.get("merged_into"):
-            continue
-        best = _select_best_verification(rep, targets, by_id)
-        if best is not rep["verification"]:
-            rep["verification"] = dict(best)
+    _run_finding_checks(targets, allowed, work, codes, run)
+    _propagate_best_verification(targets, by_id)
 
 
 def cmd_verify_findings(args: argparse.Namespace) -> None:
@@ -4034,31 +4143,39 @@ def _merge_fix_records(st: dict, fix: dict, pr: int) -> dict:
     return st["rounds"][-1]["fix"]
 
 
-def _normalize_fix_result(fix: dict) -> dict[str, Any]:
-    """fix の戻り値から別名と劣化表現を吸収し、記録へ写す値にそろえる。"""
-    # key 名 fallback (サブエージェントが別名で書いた場合の救済)。
-    # 正規は fix_commit / fixed_count、別名は commit_sha / fixed のみ受理する。
+def _resolve_fix_aliases(fix: dict) -> tuple[object, object]:
+    """fix の commit と fixed 件数を正規 key と別名から解決する。"""
     fix_commit = fix.get("fix_commit") or fix.get("commit_sha")
     fixed_count = fix.get("fixed_count")
     if fixed_count is None:
         fixed_count = fix.get("fixed", 0)
+    return fix_commit, fixed_count
+
+
+def _normalize_deferred_like(raw: object) -> tuple[list[dict], int]:
+    """deferred の項目と、劣化表現を考慮した保存件数を返す。"""
+    items = _normalize_dict_items(raw)
+    if isinstance(raw, (list, dict)):
+        return items, len(items)
+    return items, _count(raw)
+
+
+def _normalize_fix_result(fix: dict) -> dict[str, Any]:
+    """fix の戻り値から別名と劣化表現を吸収し、記録へ写す値にそろえる。"""
+    # key 名 fallback (サブエージェントが別名で書いた場合の救済)。
+    # 正規は fix_commit / fixed_count、別名は commit_sha / fixed のみ受理する。
+    fix_commit, fixed_count = _resolve_fix_aliases(fix)
 
     # deferred は list が正だが、LLM がスキーマを無視して文字列リスト
     # (例: ["nit: ..."]) や単一 dict、int(件数) を返すケースがある。後段の
     # deferred_nits 展開ループは dict 以外をスキップするため、まず dict 要素のみへ
     # 正規化する (単一 dict は 1 件として包む)。
-    _deferred_raw = fix.get("deferred")
-    _deferred_nits = _normalize_dict_items(_deferred_raw)
-
     # 保存件数の単一整合ルール:
     #   - 構造化データ (list / dict) は per-item を保持できるので、展開件数
     #     (len(_deferred_nits)) を保存し deferred_nits の件数と一致させる。
     #   - int / 数値文字列は per-item データを失った「劣化表現」なので、件数を
     #     失わないよう _count() の値を保存する (展開はできないので nits は空)。
-    if isinstance(_deferred_raw, (list, dict)):
-        _deferred_count = len(_deferred_nits)
-    else:
-        _deferred_count = _count(_deferred_raw)
+    _deferred_nits, _deferred_count = _normalize_deferred_like(fix.get("deferred"))
 
     # 却下も同じ正規化を通す。**件数だけが返る劣化表現（int）では per-item を作れない**
     # ため、そのときは記録を空にし、件数は `_count()` の値で残す。
@@ -4327,7 +4444,10 @@ def _print_round_summary(rounds: list) -> None:
         parts = []
         for name in reviewers:
             entry = r.get(name) or {}
-            if entry:
+            if entry.get("intent") == NO_RESULT:
+                # 結果なしは投稿の数を持たない。括弧には理由を出す（#729 の AC17）
+                parts.append(f"{name}=NO_RESULT({entry.get('no_result_reason', '-')})")
+            elif entry:
                 parts.append(f"{name}={entry.get('intent', '-')} ({entry.get('comments', '-')})")
             else:
                 parts.append(f"{name}=-")
@@ -4417,19 +4537,10 @@ def cmd_report(args: argparse.Namespace) -> None:
 
 # ---------------- main ----------------
 
-def build_parser() -> argparse.ArgumentParser:
-    """副コマンドの引数を組み立てる。**テストが選択肢を検査できるように分ける。**
+_Subparsers = argparse._SubParsersAction
 
-    実機で `kiro` の結果が `invalid choice` で弾かれた。担当が 4 つの名前を取りうる
-    以上、副コマンドの引数も同じ母集合を持たなければ、結果を残した担当が「結果なし」
-    として扱われる。
-    """
-    # 副コマンドの説明はここ（`help`）だけが持つ。**モジュールの docstring へ写さない。**
-    # 2 か所へ書くと片方だけが実装から離れる。振動の検知の基準は実装が 3 つの一致へ
-    # 変わった後も、docstring 側が古い基準を出し続けていた（#329）。
-    p = argparse.ArgumentParser(description=__doc__)
-    sub = p.add_subparsers(dest="cmd", required=True)
 
+def _add_init_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser("init", help="Step 0 — state 初期化 or 再開")
     sp.add_argument("pr", type=int)
     sp.add_argument("--max-rounds", type=int, default=12)
@@ -4460,6 +4571,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sp.set_defaults(func=cmd_init)
 
+
+def _add_start_round_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser(
         "start-round",
         help="Step 1 — round 開始判定 (1=上限到達/5=後始末の未了/8=同期できない)",
@@ -4467,12 +4580,16 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_start_round)
 
+
+def _add_read_result_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser("read-result", help="Step 2.4 — review result を state にマージ")
     sp.add_argument("pr", type=int)
     sp.add_argument("agent", choices=list(assignment.ALL_RUNTIMES))
     sp.add_argument("--file", default=None)
     sp.set_defaults(func=cmd_read_result)
 
+
+def _add_unresolved_threads_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser(
         "unresolved-threads",
         help="PR 上の未解決の指摘を数える (0=数えられた/1=取得できなかった)",
@@ -4480,10 +4597,14 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_unresolved_threads)
 
+
+def _add_flush_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser("flush", help="待ち行列に積んだ投稿を流す (常に 0)")
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_flush)
 
+
+def _add_judge_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser(
         "judge",
         help="Step 3 — intent ベース pass 判定 "
@@ -4492,6 +4613,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_judge)
 
+
+def _add_check_oscillation_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser(
         "check-oscillation",
         help="Step 4 — 同じ箇所を指す指摘の割合を計算 (2=続行/4=振動で中断)",
@@ -4499,27 +4622,37 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_check_oscillation)
 
+
+def _add_verify_findings_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser(
         "verify-findings",
         help="Step 2.5 前段 — 重複の統合（1 段目）と実行検証（#156）")
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_verify_findings)
 
+
+def _add_collect_critiques_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser(
         "collect-critiques",
         help="Step 2.5 後段 — 反証の結果を指摘へ結び、申告の重複を束ねる（#156）")
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_collect_critiques)
 
+
+def _add_merge_fix_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser("merge-fix", help="Step 5 post — fix 戻り値マージ + CI 分類")
     sp.add_argument("pr", type=int)
     sp.add_argument("--file", default=None)
     sp.set_defaults(func=cmd_merge_fix)
 
+
+def _add_should_rotate_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser("should-rotate", help="Step 6 — rotate 要否 (0=rotate/2=keep)")
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_should_rotate)
 
+
+def _add_set_current_pr_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser("set-current-pr", help="rotation 後の current_pr 更新")
     sp.add_argument(
         "--head-branch",
@@ -4530,6 +4663,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("new_pr", type=int)
     sp.set_defaults(func=cmd_set_current_pr)
 
+
+def _add_verify_sweep_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser(
         "verify-sweep",
         help="Step 7.5 後段 — 最終スイープ後の未解決の指摘を検証 (0=残なし/6=残あり)",
@@ -4538,9 +4673,46 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--file", default=None)
     sp.set_defaults(func=cmd_verify_sweep)
 
+
+def _add_report_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser("report", help="Step 8 — deferred nit + サマリ表示")
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_report)
+
+
+# 副コマンドの登録関数。**`--help` の一覧はこの順で出る**ため、並びを変えない。
+_SUBCOMMAND_REGISTRARS = (
+    _add_init_parser,
+    _add_start_round_parser,
+    _add_read_result_parser,
+    _add_unresolved_threads_parser,
+    _add_flush_parser,
+    _add_judge_parser,
+    _add_check_oscillation_parser,
+    _add_verify_findings_parser,
+    _add_collect_critiques_parser,
+    _add_merge_fix_parser,
+    _add_should_rotate_parser,
+    _add_set_current_pr_parser,
+    _add_verify_sweep_parser,
+    _add_report_parser,
+)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """副コマンドの引数を組み立てる。**テストが選択肢を検査できるように分ける。**
+
+    実機で `kiro` の結果が `invalid choice` で弾かれた。担当が 4 つの名前を取りうる
+    以上、副コマンドの引数も同じ母集合を持たなければ、結果を残した担当が「結果なし」
+    として扱われる。
+    """
+    # 副コマンドの説明は各登録関数の `help` だけが持つ。**モジュールの docstring へ写さない。**
+    # 2 か所へ書くと片方だけが実装から離れる。振動の検知の基準は実装が 3 つの一致へ
+    # 変わった後も、docstring 側が古い基準を出し続けていた（#329）。
+    p = argparse.ArgumentParser(description=__doc__)
+    sub = p.add_subparsers(dest="cmd", required=True)
+    for register in _SUBCOMMAND_REGISTRARS:
+        register(sub)
     return p
 
 
