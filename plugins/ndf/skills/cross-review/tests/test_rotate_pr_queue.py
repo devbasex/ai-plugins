@@ -221,7 +221,7 @@ class _Rotation:
             encoding="utf-8",
         )
 
-    def run(self, create_ok: bool) -> subprocess.CompletedProcess[str]:
+    def run(self, create_ok: bool, mode: str = "light") -> subprocess.CompletedProcess[str]:
         env = {
             **os.environ,
             "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}",
@@ -231,7 +231,7 @@ class _Rotation:
             "GH_CREATE": "ok" if create_ok else "fail",
         }
         return subprocess.run(
-            ["bash", str(ROTATE), "execute", str(_STATE_PR), "--mode", "light"],
+            ["bash", str(ROTATE), "execute", str(_STATE_PR), "--mode", mode],
             capture_output=True, text=True, timeout=180, env=env,
         )
 
@@ -273,6 +273,36 @@ def test_a_create_success_closes_the_old_pr_and_opens_the_new_pr(rotation: _Rota
     assert not any(c.startswith("pr reopen") for c in rotation.gh_calls())
 
 
+def test_a_create_failure_in_squash_mode_reopens_the_old_pr_and_emits_no_new_pr(
+    rotation: _Rotation,
+) -> None:
+    """現状固定: squash モードでも新 PR 作成が失敗すると非ゼロ終了で旧 PR が open へ戻り、NEW_PR は出ない。"""
+    out = rotation.run(create_ok=False, mode="squash")
+
+    assert out.returncode != 0, out.stderr
+    states = rotation.pr_states()
+    assert states[str(_OLD_PR)] == "open"          # reopen で戻る
+    assert str(_NEW_PR) not in states              # 新 PR は作られていない
+    assert "NEW_PR=" not in out.stdout             # 成功結果を出力していない
+    joined = rotation.gh_calls()
+    assert any(c.startswith(f"pr close {_OLD_PR}") for c in joined)
+    assert any(c.startswith(f"pr reopen {_OLD_PR}") for c in joined)
+
+
+def test_a_create_success_in_squash_mode_closes_the_old_pr_and_opens_the_new_pr(
+    rotation: _Rotation,
+) -> None:
+    """比較用: squash モードで作成が成功すると旧 PR は closed、新 PR は open、NEW_PR が作成結果を指す。"""
+    out = rotation.run(create_ok=True, mode="squash")
+
+    assert out.returncode == 0, out.stderr
+    states = rotation.pr_states()
+    assert states[str(_OLD_PR)] == "closed"
+    assert states[str(_NEW_PR)] == "open"
+    assert f"NEW_PR={_NEW_PR}" in out.stdout
+    assert not any(c.startswith("pr reopen") for c in rotation.gh_calls())
+
+
 # ---- execute の引数検証（R2-004、現状固定） ----
 #
 # `--mode` の値検証と未知フラグの検出は gh/git を一切呼ばない純粋な引数解析であり、
@@ -297,3 +327,138 @@ def test_an_unknown_flag_is_rejected() -> None:
 
     assert out.returncode == 2
     assert "unknown arg: --unknown-flag" in out.stderr
+
+
+def test_mode_without_a_value_is_rejected() -> None:
+    """現状固定（R2-002）。`--mode` の直後に値が無いと `${2:?...}` で落ちる。
+
+    state.json も newtext.json も用意せず、gh/git を呼ぶ前の引数解析だけで止まる。
+    `${2:?...}` は set -u と相まって execute のループに入る前に落ちるため、
+    load_state（state.json 読み込み）にも到達しない。
+    """
+    out = subprocess.run(
+        ["bash", str(ROTATE), "execute", "123", "--mode"],
+        capture_output=True, text=True, timeout=60,
+    )
+
+    assert out.returncode != 0
+    assert "--mode requires light|squash" in out.stderr
+
+
+def test_execute_stops_when_state_json_is_missing(tmp_path) -> None:
+    """現状固定（R2-004）。state 不在なら外部コマンドを呼ばずに終了する。"""
+    tmp_dir = tmp_path / "tmp"
+    bin_dir = tmp_path / "bin"
+    calls = tmp_path / "calls.log"
+    tmp_dir.mkdir()
+    bin_dir.mkdir()
+    calls.write_text("", encoding="utf-8")
+
+    fake_command = "#!/usr/bin/env bash\nprintf '%s\\n' \"$0 $*\" >> \"$CALLS\"\n"
+    for command in ("gh", "git"):
+        executable = bin_dir / command
+        executable.write_text(fake_command, encoding="utf-8")
+        executable.chmod(0o755)
+
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "CROSS_REVIEW_TMP_DIR": str(tmp_dir),
+        "CALLS": str(calls),
+    }
+    out = subprocess.run(
+        ["bash", str(ROTATE), "execute", str(_STATE_PR)],
+        capture_output=True, text=True, timeout=60, env=env,
+    )
+
+    assert out.returncode == 1
+    assert "state.json not found" in out.stderr
+    assert calls.read_text(encoding="utf-8") == ""
+
+
+def test_no_arguments_prints_usage() -> None:
+    """現状固定（R2-002）。引数が 0 個のとき entrypoint は usage を出して exit 2。
+
+    state.json を用意せず、引数解析だけで止まることを確かめる。
+    """
+    out = subprocess.run(
+        ["bash", str(ROTATE)],
+        capture_output=True, text=True, timeout=60,
+    )
+
+    assert out.returncode == 2
+    assert "Usage:" in out.stderr
+
+
+def test_prepare_connects_state_pr_metadata_and_git_summary(tmp_path) -> None:
+    """現状固定: 公開 CLI が prepare.json と eval 用の代入を組み立てる。"""
+    state_pr = 41
+    current_pr = 43
+    tmp_dir = tmp_path / "tmp"
+    worktree = tmp_path / "worktree"
+    bin_dir = tmp_path / "bin"
+    tmp_dir.mkdir()
+    worktree.mkdir()
+    bin_dir.mkdir()
+    (tmp_dir / f"cross-review-pr{state_pr}-state.json").write_text(json.dumps({
+        "worktree_path": str(worktree),
+        "current_pr": current_pr,
+        "repo": "o/r",
+        "viewer_login": "tester",
+        "rounds": [
+            {"round": 1, "pr": 40},
+            {"round": 2, "pr": current_pr},
+            {"round": 3, "pr": current_pr},
+        ],
+    }), encoding="utf-8")
+    (bin_dir / "gh").write_text(
+        "#!/usr/bin/env bash\n"
+        "printf '%s\\n' '{\"number\":43,\"url\":\"https://github.com/o/r/pull/43\","
+        "\"title\":\"Current title\",\"body\":\"Current body\","
+        "\"headRefName\":\"feature/prepare\",\"baseRefName\":\"develop\","
+        "\"isDraft\":true}'\n", encoding="utf-8")
+    (bin_dir / "git").write_text(
+        "#!/usr/bin/env bash\n"
+        "case \"$1\" in\n"
+        "  fetch|rev-parse) exit 0 ;;\n"
+        "  log) printf 'abc123 First commit\\ndef456 Second commit\\n' ;;\n"
+        "  diff) printf ' a.py | 2 ++\\n 1 file changed, 2 insertions(+)\\n' ;;\n"
+        "  *) exit 3 ;;\n"
+        "esac\n", encoding="utf-8")
+    for command in ("gh", "git"):
+        (bin_dir / command).chmod(0o755)
+
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "CROSS_REVIEW_TMP_DIR": str(tmp_dir),
+    }
+    out = subprocess.run(
+        ["bash", str(ROTATE), "prepare", str(state_pr)],
+        capture_output=True, text=True, env=env, check=False,
+    )
+
+    assert out.returncode == 0, out.stderr
+    evaluated = subprocess.run(
+        ["bash", "-c",
+         'eval "$1"; printf "%s\\n" "$PREPARE_JSON" "$OLD_PR" "$HEAD_BRANCH" '
+         '"$BASE_BRANCH" "$IS_DRAFT"', "bash", out.stdout],
+        capture_output=True, text=True, check=True,
+    ).stdout.splitlines()
+    prepare_path = tmp_dir / f"rotate-pr{state_pr}-prepare.json"
+    assert evaluated == [
+        str(prepare_path), str(current_pr), "feature/prepare", "develop", "true"]
+    assert json.loads(prepare_path.read_text(encoding="utf-8")) == {
+        "state_pr": state_pr,
+        "old_pr": current_pr,
+        "old_pr_url": "https://github.com/o/r/pull/43",
+        "worktree_path": str(worktree),
+        "head_branch": "feature/prepare",
+        "base_branch": "develop",
+        "is_draft": True,
+        "round_in_pr": 2,
+        "old_title": "Current title",
+        "old_body": "Current body",
+        "git_log": "abc123 First commit\ndef456 Second commit",
+        "git_diff_stat": " a.py | 2 ++\n 1 file changed, 2 insertions(+)",
+    }

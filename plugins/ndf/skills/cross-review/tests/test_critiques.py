@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+import shutil
 
 import pytest
 
@@ -351,6 +352,51 @@ def test_the_retry_happens_once_per_round(tmp_dir, state_mod):
     assert st.get("evidence_rounds", []) == []
 
 
+def test_an_incomplete_collection_removes_an_existing_marker(tmp_dir, state_mod):
+    """**反証が揃わない取り込みは、先に付いていた印を外す**（#732 の AC13）。
+
+    印が残ると「印を付けないため、このラウンドは全件を数えます」の出力と実際の数え方が
+    食い違い、反証が届いていない `major` が区分の絞り込みへ掛かる。
+    """
+    _write(tmp_dir, _state([_finding("agy-r1-0", "agy")], evidence_rounds=[1]))
+    (tmp_dir / f"agy-review-pr{PR}-round1-payload.json").write_text(json.dumps(
+        {"comments": [{"path": "a.py", "line": 1, "body": "x",
+                       "severity": "major"}]}))
+
+    collect(state_mod, expect_rc=7)
+
+    st = _read(tmp_dir)
+    assert st["evidence_rounds"] == []
+    assert state_mod._evidence_completed(st, 1) is False
+    count, measurable = state_mod._new_finding_count(st, PR)
+    assert (count, measurable) == (1, True)   # payload の全件を数える
+
+
+def test_a_marker_stays_off_after_the_second_incomplete_collection(tmp_dir, state_mod):
+    """取り直した後も揃わないとき（2 度目）も印は付かない。"""
+    _write(tmp_dir, _state([_finding("codex-r1-0", "codex")], evidence_rounds=[1]))
+
+    collect(state_mod, expect_rc=7)
+    collect(state_mod, expect_rc=0)
+
+    st = _read(tmp_dir)
+    assert st["evidence_rounds"] == []
+    assert sorted(st["rounds"][0]["critique_relaunched"]) == ["agy", "kiro"]
+
+
+def test_an_incomplete_collection_keeps_other_rounds_markers(tmp_dir, state_mod):
+    """外すのはそのラウンドの番号だけである。前のラウンドの印は残る。"""
+    _write(tmp_dir, _state(
+        [_finding("codex-r2-0", "codex", round=2)],
+        rounds=[{"round": 1, "pr": PR}, {"round": 2, "pr": PR}],
+        evidence_rounds=[1, 2],
+    ))
+
+    collect(state_mod, expect_rc=7)
+
+    assert _read(tmp_dir)["evidence_rounds"] == [1]
+
+
 def test_a_proposer_only_round_is_marked_without_any_file(tmp_dir, state_mod):
     """**反証の対象が無い担当は不足に数えない。** 全員が提案者なら印が付く。"""
     _write(tmp_dir, _state([
@@ -526,6 +572,90 @@ def test_a_stale_pidfile_is_not_read_as_a_launch(tmp_dir, tmp_path):
     assert result.returncode == 0, result.stderr
     assert not stale.exists(), "前のラウンドの pid ファイルが残っている"
     assert elapsed < ROUND_TIME_LIMIT, f"{elapsed:.1f} 秒かかった（監視が待っている）"
+
+
+def test_a_retry_launches_only_the_agents_requested_by_collect(tmp_path):
+    """現状固定: 終了コード 7 の再取得では不足した担当だけを起動し直す。"""
+    script_dir = tmp_path / "scripts"
+    script_dir.mkdir()
+    shutil.copy2(SCRIPTS / "critique-round.sh", script_dir / "critique-round.sh")
+    calls = tmp_path / "critique-calls.txt"
+    collects = tmp_path / "collect-count.txt"
+
+    (script_dir / "_tmpdir.sh").write_text(
+        'tmpdir() { printf "%s\\n" "$CROSS_REVIEW_TMP_DIR"; }\n', encoding="utf-8")
+    (script_dir / "critique.sh").write_text(
+        "#!/usr/bin/env bash\n"
+        'printf "%s\\n" "$1" >> "$CRITIQUE_CALLS"\n'
+        'touch "$CROSS_REVIEW_TMP_DIR/$1-critique-pr$2.pid"\n', encoding="utf-8")
+    (script_dir / "monitor.py").write_text(
+        "#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    (script_dir / "state.py").write_text(
+        "#!/usr/bin/env bash\n"
+        'count=0; [ ! -f "$COLLECT_COUNT" ] || count=$(cat "$COLLECT_COUNT")\n'
+        'count=$((count + 1)); printf "%s\\n" "$count" > "$COLLECT_COUNT"\n'
+        'if [ "$count" -eq 1 ]; then\n'
+        "  printf \"CRITIQUE_RETRY_AGENTS='kiro'\\n\"\n"
+        "  exit 7\n"
+        "fi\n"
+        "exit 0\n", encoding="utf-8")
+    for name in ("critique.sh", "monitor.py", "state.py"):
+        (script_dir / name).chmod(0o755)
+
+    env = dict(
+        os.environ,
+        CROSS_REVIEW_TMP_DIR=str(tmp_path),
+        CRITIQUE_CALLS=str(calls),
+        COLLECT_COUNT=str(collects),
+    )
+    result = subprocess.run(
+        ["bash", str(script_dir / "critique-round.sh"), str(PR), "1", "agy", "kiro"],
+        capture_output=True, text=True, env=env, check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert calls.read_text(encoding="utf-8").splitlines() == ["agy", "kiro", "kiro"]
+    assert collects.read_text(encoding="utf-8").strip() == "2"
+
+
+def test_collect_failure_propagates_exit_code_without_retry(tmp_path):
+    """現状固定: collect-critiques が 7 以外（例: 5）を返したとき、終了コードを素通しして直ちに終了する。"""
+    script_dir = tmp_path / "scripts"
+    script_dir.mkdir()
+    shutil.copy2(SCRIPTS / "critique-round.sh", script_dir / "critique-round.sh")
+    calls = tmp_path / "critique-calls.txt"
+    collects = tmp_path / "collect-count.txt"
+
+    (script_dir / "_tmpdir.sh").write_text(
+        'tmpdir() { printf "%s\\n" "$CROSS_REVIEW_TMP_DIR"; }\n', encoding="utf-8")
+    (script_dir / "critique.sh").write_text(
+        "#!/usr/bin/env bash\n"
+        'printf "%s\\n" "$1" >> "$CRITIQUE_CALLS"\n'
+        'touch "$CROSS_REVIEW_TMP_DIR/$1-critique-pr$2.pid"\n', encoding="utf-8")
+    (script_dir / "monitor.py").write_text(
+        "#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    (script_dir / "state.py").write_text(
+        "#!/usr/bin/env bash\n"
+        'count=0; [ ! -f "$COLLECT_COUNT" ] || count=$(cat "$COLLECT_COUNT")\n'
+        'count=$((count + 1)); printf "%s\\n" "$count" > "$COLLECT_COUNT"\n'
+        "exit 5\n", encoding="utf-8")
+    for name in ("critique.sh", "monitor.py", "state.py"):
+        (script_dir / name).chmod(0o755)
+
+    env = dict(
+        os.environ,
+        CROSS_REVIEW_TMP_DIR=str(tmp_path),
+        CRITIQUE_CALLS=str(calls),
+        COLLECT_COUNT=str(collects),
+    )
+    result = subprocess.run(
+        ["bash", str(script_dir / "critique-round.sh"), str(PR), "1", "agy", "kiro"],
+        capture_output=True, text=True, env=env, check=False,
+    )
+
+    assert result.returncode == 5
+    assert collects.read_text(encoding="utf-8").strip() == "1"
+    assert calls.read_text(encoding="utf-8").splitlines() == ["agy", "kiro"]
 
 
 def test_the_stale_pidfile_is_removed_even_without_targets(tmp_dir, tmp_path):

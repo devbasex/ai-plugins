@@ -142,6 +142,17 @@ def test_empty_state_does_not_crash(measure_mod):
     assert "methods" in result
 
 
+@pytest.mark.parametrize("state", [None, [], "not-a-state"])
+def test_non_mapping_state_falls_back_to_an_empty_state(measure_mod, state):
+    """現状固定: 辞書以外の入力も空の状態として指標の全キーを返す。"""
+    result = measure_mod.measure(state)
+
+    assert set(result) == {"pr", "prs", "rounds", "methods", "cost", "convergence"}
+    assert result["pr"] is None
+    assert result["prs"] == []
+    assert result["rounds"] == 0
+
+
 def test_wall_clock_is_null_while_the_run_has_not_ended(measure_mod):
     """終わっていない実行では実時間を出さない。**0 で埋めない。**"""
     st = _state(rounds=[_round(1)])
@@ -310,6 +321,50 @@ def test_oracle_counts_a_thread_without_a_position_as_unmatched(measure_mod):
     )
 
     assert measure_mod.measure(st)["methods"]["oracle"] == {
+        "found": 0, "unmatched": 1, "ambiguous": 0}
+
+
+def test_oracle_counts_a_non_dict_position_as_unmatched(measure_mod):
+    """現状固定（R2-001）。位置の一覧に非辞書要素（文字列・null）が混じっても、
+
+    落とさずに `unmatched` へ数え、例外を出さずに測定結果を返す。
+    `_resolved_position` は辞書でない要素へ `(None, None)` を返し、
+    `_add_oracle_match` がそれを `unmatched + 1` として扱う経路を固定する。
+    """
+    fix = {
+        "commit": "abc1234", "fixed": 1, "resolved_threads": 1,
+        "resolved_thread_ids": ["T1"],
+        "resolved_thread_positions": ["not-a-dict"],
+    }
+    st = _state(
+        rounds=[_round(1, fix=fix)],
+        review_findings=[_finding("codex-r1-0", 1, "a.py", 10)],
+    )
+
+    result = measure_mod.measure(st)
+
+    assert result["methods"]["oracle"] == {
+        "found": 0, "unmatched": 1, "ambiguous": 0}
+
+
+def test_oracle_counts_a_null_position_as_unmatched(measure_mod):
+    """現状固定（R2-001）。位置の一覧に `null` が混じっても `unmatched` に数える。
+
+    非辞書要素の代表として `None`（JSON の null）でも同じ経路を通ることを固定する。
+    """
+    fix = {
+        "commit": "abc1234", "fixed": 1, "resolved_threads": 1,
+        "resolved_thread_ids": ["T1"],
+        "resolved_thread_positions": [None],
+    }
+    st = _state(
+        rounds=[_round(1, fix=fix)],
+        review_findings=[_finding("codex-r1-0", 1, "a.py", 10)],
+    )
+
+    result = measure_mod.measure(st)
+
+    assert result["methods"]["oracle"] == {
         "found": 0, "unmatched": 1, "ambiguous": 0}
 
 
@@ -573,10 +628,31 @@ def test_proposed_reports_all_rounds_when_every_round_is_marked(measure_mod):
         "oracle_scope": "all_rounds", "oracle_base": 2}
 
 
-def test_proposed_takes_only_the_two_counted_classifications(measure_mod):
-    """採るのは `verified_blocking` と `needs_human_judgment` の 2 つだけである。
+def test_proposed_normalizes_duplicate_and_invalid_evidence_rounds(measure_mod):
+    """現状固定: 有効な番号は型をそろえて一つの印にし、不正値は無視する。"""
+    st = _state(
+        evidence_rounds=["1", 1, "invalid", None],
+        rounds=[
+            _round(1, fix=_fix(_position("T1", "a.py", 10))),
+            _round(2, fix=_fix(_position("T2", "b.py", 20))),
+        ],
+        review_findings=[
+            _finding("codex-r1-0", 1, "a.py", 10,
+                     classification="verified_blocking"),
+            _finding("codex-r2-0", 2, "b.py", 20,
+                     classification="verified_blocking"),
+        ],
+    )
 
-    棄却した指摘と立証できなかった指摘は採らない。
+    assert measure_mod.measure(st)["methods"]["proposed"] == {
+        "found": 1, "matched": 1, "of_oracle": 1.0,
+        "oracle_scope": "evidence_rounds", "oracle_base": 1}
+
+
+def test_proposed_takes_only_the_three_counted_classifications(measure_mod):
+    """採るのは `verified_blocking` / `needs_human_judgment` / `unrefuted` の 3 つである（#732）。
+
+    棄却した指摘と軽微な指摘（立証不足）は採らない。
     """
     st = _state(
         evidence_rounds=[1],
@@ -588,10 +664,23 @@ def test_proposed_takes_only_the_two_counted_classifications(measure_mod):
                      classification="insufficient_evidence"),
             _finding("agy-r1-0", 1, "d.py", 40, agent="agy",
                      classification="needs_human_judgment"),
+            _finding("agy-r1-1", 1, "e.py", 50, agent="agy",
+                     classification="unrefuted", unrefuted_reason="no_critique"),
         ],
     )
 
-    assert measure_mod.measure(st)["methods"]["proposed"]["found"] == 2
+    assert measure_mod.measure(st)["methods"]["proposed"]["found"] == 3
+
+
+def test_the_counted_classifications_match_the_state_script(measure_mod, state_mod):
+    """**収束の判定と測定は同じ指摘を数える**（#732 の AC11）。
+
+    片方だけに `unrefuted` を足すと、判定が数えた指摘を測定が採らず、この方式の再現率が
+    実際より低く出る。
+    """
+    assert measure_mod.COUNTED_CLASSIFICATIONS == state_mod.COUNTED_CLASSIFICATIONS
+    assert set(measure_mod.COUNTED_CLASSIFICATIONS) == {
+        "verified_blocking", "needs_human_judgment", "unrefuted"}
 
 
 def test_proposed_ignores_findings_from_unmarked_rounds(measure_mod):

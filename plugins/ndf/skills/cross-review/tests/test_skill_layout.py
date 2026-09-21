@@ -121,3 +121,33 @@ def test_the_procedure_points_at_the_contract_document() -> None:
 
 def test_the_skill_points_at_the_contract_document() -> None:
     assert "docs/04-contracts.md" in SKILL.read_text(encoding="utf-8")
+
+
+# ---- 区分の 6 つ目「未反証」（#732） ----
+#
+# 誤りを示されていない `major` を `unrefuted` として数える。規約 3 文書・反証のプロンプト・
+# 確定仕様が同じ語で書いていることを固定する（AC18〜AC20）。
+
+CRITIQUE_SH = HERE / "scripts/critique.sh"
+EVIDENCE = DOCS / "06-evidence.md"
+POOL = DOCS / "05-pool-and-convergence.md"
+SPEC = HERE.parents[3] / "docs/specifications/cross-review-evidence-based.md"
+
+
+def test_the_critique_prompt_says_insufficient_evidence_does_not_drop_the_finding() -> None:
+    """「立証できない」を返しても指摘は数から落ちないことを、プロンプトが担当へ言う（AC19）。"""
+    assert "数から落ち" in CRITIQUE_SH.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("doc", (EVIDENCE, CONTRACTS, POOL), ids=lambda p: p.name)
+def test_the_review_docs_name_the_unrefuted_classification(doc: pathlib.Path) -> None:
+    assert "unrefuted" in doc.read_text(encoding="utf-8"), doc.name
+
+
+def test_the_evidence_doc_says_the_mark_is_removed_when_critiques_are_incomplete() -> None:
+    assert "印を外す" in EVIDENCE.read_text(encoding="utf-8")
+
+
+def test_the_specification_holds_the_same_six_classifications() -> None:
+    """区分の表と行き先の表の両方が `unrefuted` を持つ（AC20）。"""
+    assert SPEC.read_text(encoding="utf-8").count("unrefuted") >= 2
