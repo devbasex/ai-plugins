@@ -103,7 +103,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| boundary | unit | — | agy / kiro | 検証中 | 1 |
+| boundary | unit | — | agy / kiro | 採用 | 1 |
 
 **なぜ**: review_assign の round_no < 1 の下限境界条件で AssignmentError を送出する振る舞いが scripts/tests 内で固定されていない。同モジュールの impl_assign や review_seats には round_no < 1 の境界テストがあるが、review_assign だけ抜けている。
 
@@ -115,7 +115,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| branch | unit | — | agy / kiro | 未着手 | 0 |
+| branch | unit | — | agy / kiro | 取り消し | 1 |
 
 **なぜ**: review_assign は適用の役を持たない工程が使う公開入口だが、scripts/tests には直接の固定が無い。in-scope の test_lib_assignment.py は assign / impl_assign / review_seats を固定するだけで、この関数の輪番（母集合3者から dropped=(round_no-1)%3 を外す各分岐）は通っていない。out-of-scope の cross-review テストは _round_reviewers の照合オラクルとして呼ぶだけで、この関数自身の戻り値を固定していない。
 
@@ -148,3 +148,4 @@
 | 1 | `plugins/ndf/scripts/lib/assignment.py#seat_runtime` | boundary | コミット 36dd097d4dff427b0de545bcd0cdc0de0e7b74fb にトレーラーが欠けています: Item-Id, Round, Impl-Runtime, Impl-Model |
 | 2 | `plugins/ndf/scripts/lib/assignment.py#review_seats` | boundary | 1 ラウンドの採用上限 5 件を超えた |
 | 2 | `plugins/ndf/skills/cross-review/scripts/launch-reviewer.sh#main` | normal | 1 ラウンドの採用上限 5 件を超えた |
+| 2 | `plugins/ndf/scripts/lib/assignment.py#review_assign` | branch | コミット 0c3b60c7101ac9b439e0b13b677f8061b81eb851 にトレーラーが欠けています: Item-Id, Round, Impl-Runtime, Impl-Model |
