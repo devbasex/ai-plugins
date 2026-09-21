@@ -34,8 +34,7 @@ def _env(tmp_path: pathlib.Path, **over: str) -> dict[str, str]:
     stub = bin_dir / "agy"
     stub.write_text(STUB, encoding="utf-8")
     stub.chmod(0o755)
-    # 実行した人の `MONITOR_*` で値が変わらないよう外す（#678）。
-    env = {k: v for k, v in os.environ.items() if not k.startswith("MONITOR_")}
+    env = dict(os.environ)
     env.pop("NDF_CRITIQUE_PRINT_TIMEOUT", None)
     env.update({
         "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
