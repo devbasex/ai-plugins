@@ -63,6 +63,49 @@ def assignment():
     return mod
 
 
+@pytest.mark.parametrize("host", ("claude", "codex", "agy", "kiro"))
+def test_detect_host_accepts_an_explicit_host(assignment, host):
+    assert assignment.detect_host(host, {}) == (host, "explicit")
+
+
+def test_detect_host_rejects_an_unknown_explicit_host(assignment):
+    with pytest.raises(
+        assignment.AssignmentError,
+        match=r"^--host には claude/codex/agy/kiro .+ gemini$",
+    ):
+        assignment.detect_host("gemini", {})
+
+
+@pytest.mark.parametrize(
+    ("env", "expected_host"),
+    [
+        ({"CLAUDE_PLUGIN_ROOT": "/plugins/claude"}, "claude"),
+        ({"CODEX_HOME": "/home/codex"}, "codex"),
+        ({"KIRO_AGENT": "ndf"}, "kiro"),
+    ],
+)
+def test_detect_host_uses_environment_hints(assignment, env, expected_host):
+    assert assignment.detect_host(None, env) == (expected_host, "env")
+
+
+def test_detect_host_uses_the_first_environment_hint(assignment):
+    env = {
+        "KIRO_AGENT": "ndf",
+        "CODEX_HOME": "/home/codex",
+        "CLAUDE_PLUGIN_ROOT": "/plugins/claude",
+    }
+
+    assert assignment.detect_host(None, env) == ("claude", "env")
+
+
+def test_detect_host_rejects_an_environment_without_hints(assignment):
+    with pytest.raises(
+        assignment.AssignmentError,
+        match=r"^ホストを推定できませんでした。.*--host claude\|codex\|agy\|kiro.*$",
+    ):
+        assignment.detect_host(None, {})
+
+
 @pytest.mark.parametrize("host", EXPECTED)
 def test_assign_keeps_the_eight_round_rotation(assignment, host):
     actual = [assignment.assign(round_no, host) for round_no in range(1, 9)]
