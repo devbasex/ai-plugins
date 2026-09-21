@@ -105,26 +105,6 @@ def _merge_one(existing: dict[str, Any], incoming: dict[str, Any]) -> None:
     )
 
 
-def _accumulate_proposals(
-    proposals: dict[str, list[dict[str, Any]]],
-    normalize_fn: Callable[[dict[str, Any], str], Optional[dict[str, Any]]],
-    merge_fn: Callable[[dict[str, Any], dict[str, Any]], None],
-) -> dict[tuple[str, ...], dict[str, Any]]:
-    """各ランタイムの提案を正規化・重複排除しながら集約する。"""
-    merged: dict[tuple[str, ...], dict[str, Any]] = {}
-    for source, items in proposals.items():
-        for raw in items:
-            norm = normalize_fn(raw, source)
-            if norm is None:
-                continue
-            key = _dedupe_key(norm)
-            if key in merged:
-                merge_fn(merged[key], norm)
-            else:
-                merged[key] = norm
-    return merged
-
-
 def merge_proposals(
     proposals: dict[str, list[dict[str, Any]]],
     threshold: str = DEFAULT_SEVERITY_THRESHOLD,
@@ -140,7 +120,17 @@ def merge_proposals(
     `excluded_keys` には過去に見送った項目の鍵を渡す。見送った項目を毎ラウンド
     再提案されると収束しないため、対象外として落とす。
     """
-    merged = _accumulate_proposals(proposals, _normalize_proposal, _merge_one)
+    merged: dict[tuple[str, ...], dict[str, Any]] = {}
+    for source, items in proposals.items():
+        for raw in items:
+            norm = _normalize_proposal(raw, source)
+            if norm is None:
+                continue
+            key = _dedupe_key(norm)
+            if key in merged:
+                _merge_one(merged[key], norm)
+            else:
+                merged[key] = norm
 
     min_severity = SEVERITY_ORDER.get(
         threshold, SEVERITY_ORDER[DEFAULT_SEVERITY_THRESHOLD])
@@ -273,9 +263,17 @@ def merge_test_proposals(
 
     採否の詰めは `merge_proposals` と同じ `_select` が行う。
     """
-    merged = _accumulate_proposals(
-        proposals, _normalize_test_proposal, _merge_test_one
-    )
+    merged: dict[tuple[str, ...], dict[str, Any]] = {}
+    for source, items in proposals.items():
+        for raw in items:
+            norm = _normalize_test_proposal(raw, source)
+            if norm is None:
+                continue
+            key = _dedupe_key(norm)
+            if key in merged:
+                _merge_test_one(merged[key], norm)
+            else:
+                merged[key] = norm
 
     def reject(item: dict[str, Any]) -> Optional[str]:
         if item["case"] == "unknown" or item["level"] == "unknown":
