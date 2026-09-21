@@ -79,7 +79,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| error | unit | — | codex / agy | 検証中 | 1 |
+| error | unit | — | codex / agy | 採用 | 1 |
 
 **なぜ**: assign は 8 ラウンド周期の割り当てを行う公開関数であり正常系は固定されているが、round_no < 1（0 や負数）が渡された場合に AssignmentError を送出するエラー経路が scripts/tests 内で固定されていない。
 
@@ -91,7 +91,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| boundary | unit | — | codex / agy | 検証中 | 1 |
+| boundary | unit | — | codex / agy | 採用 | 1 |
 
 **なぜ**: resolve_participants で母集合の全メンバーを exclude に指定し、参加可能なメンバーが 0 件になる下限境界の振る舞い（空一覧で認証確認が呼ばれ、available が空リスト、excluded が固定順で記録されること）が固定されていない。
 
@@ -103,7 +103,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| boundary | unit | — | agy / kiro | 未着手 | 0 |
+| boundary | unit | — | agy / kiro | 検証中 | 1 |
 
 **なぜ**: review_assign の round_no < 1 の下限境界条件で AssignmentError を送出する振る舞いが scripts/tests 内で固定されていない。同モジュールの impl_assign や review_seats には round_no < 1 の境界テストがあるが、review_assign だけ抜けている。
 
