@@ -31,7 +31,7 @@ from ..paths import (
     tmp_dir_for,
 )
 from ..plan import PLAN_COMMENT, PLAN_FILE, PLAN_NONE, normalize_plan_file
-from ..rounds import finish_outer_rounds, STRUCTURE, TEST, entry_kind, round_kind
+from ..rounds import finish_outer_rounds, STRUCTURE, TEST, entry_kind, round_kind, rounds_of_kind
 from ..scope import require_scope_covers_tests
 from ..vocabulary import (
     DEFAULT_TEST_TIMEOUT,
@@ -460,11 +460,6 @@ def _run_baseline_test(
     return {"command": command, "status": status, "checked_at": statefile.now()}
 
 
-def rounds_of_kind(state: dict[str, Any], kind: str) -> list[dict[str, Any]]:
-    """その種類のラウンドだけを取り出す。上限はそれぞれ別に数える。"""
-    return [r for r in state.get("rounds") or [] if entry_kind(r) == kind]
-
-
 def cmd_start_round(args: argparse.Namespace) -> None:
     """Step 2 — ラウンドを開き、実装担当とレビュー担当を返す。
 
@@ -484,7 +479,7 @@ def cmd_start_round(args: argparse.Namespace) -> None:
 
     rounds = state["rounds"]
     kind = round_kind(state)
-    if kind == STRUCTURE and len(rounds_of_kind(state, STRUCTURE)) >= state["max_outer_rounds"]:
+    if kind == STRUCTURE and len(rounds_of_kind(rounds, STRUCTURE)) >= state["max_outer_rounds"]:
         finish_outer_rounds(path, state, "max_outer_rounds")
         sys.exit(1)
 
@@ -525,7 +520,7 @@ def cmd_start_round(args: argparse.Namespace) -> None:
     else:
         label = "提案ラウンド"
         limit = state["max_outer_rounds"]
-    seq = len(rounds_of_kind(state, kind))
+    seq = len(rounds_of_kind(rounds, kind))
     info(
         f"=== {label} {seq} / {limit} "
         f"（実装 {existing['impl']} / レビュー {' + '.join(existing['reviewers'])}）==="

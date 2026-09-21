@@ -82,23 +82,46 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
     })
 
     if passed:
-        gate["status"] = "passed"
-        statefile.save(path, state)
-        info(f"✅ 最終ゲートを通過しました（{detail}）")
-        statefile.emit(FINAL_GATE="passed")
+        _finish_passed(gate, path, state, detail)
         return
 
     limit = safe_int(state.get("max_fix_rounds"), 3)
     if safe_int(gate.get("fix_rounds")) >= limit:
-        gate["status"] = "failed"
-        statefile.save(path, state)
-        info(
-            f"❌ 最終ゲートが通らないまま修正の上限 {limit} に達しました（{detail}）。"
-            "**既に push してあるため取り消しません。** 失敗として報告します"
-        )
-        statefile.emit(FINAL_GATE="failed")
-        sys.exit(1)
+        _finish_failed(gate, path, state, limit, detail)
 
+    _start_fix_round(state, gate, path, detail)
+
+
+def _finish_passed(
+    gate: dict[str, Any], path: pathlib.Path, state: dict[str, Any], detail: str
+) -> None:
+    gate["status"] = "passed"
+    statefile.save(path, state)
+    info(f"✅ 最終ゲートを通過しました（{detail}）")
+    statefile.emit(FINAL_GATE="passed")
+
+
+def _finish_failed(
+    gate: dict[str, Any],
+    path: pathlib.Path,
+    state: dict[str, Any],
+    limit: int,
+    detail: str,
+) -> None:
+    gate["status"] = "failed"
+    statefile.save(path, state)
+    info(
+        f"❌ 最終ゲートが通らないまま修正の上限 {limit} に達しました（{detail}）。"
+        "**既に push してあるため取り消しません。** 失敗として報告します"
+    )
+    statefile.emit(FINAL_GATE="failed")
+    sys.exit(1)
+
+
+def _start_fix_round(
+    state: dict[str, Any], gate: dict[str, Any], path: pathlib.Path, detail: str
+) -> None:
+    limit = safe_int(state.get("max_fix_rounds"), 3)
     gate["fix_rounds"] = safe_int(gate.get("fix_rounds")) + 1
     gate["status"] = "failing"
     # **修正の起点と担当をここで記録する。** 記録しないと `merge-final-fix` が範囲を

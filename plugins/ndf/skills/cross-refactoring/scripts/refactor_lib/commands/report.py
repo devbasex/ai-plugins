@@ -20,7 +20,15 @@ from ..measure import summary_extra
 from ..outbound import plan_reference
 from ..paths import load_state
 from ..proposals import duplicate_rate
-from ..rounds import finish_outer_rounds, STRUCTURE, TEST, entry_kind, item_kind, item_label
+from ..rounds import (
+    STRUCTURE,
+    TEST,
+    entry_kind,
+    finish_outer_rounds,
+    item_kind,
+    item_label,
+    rounds_of_kind,
+)
 from ..vocabulary import DEFAULT_MAX_TEST_ROUNDS, DUPLICATE_RATE_THRESHOLD
 
 
@@ -47,13 +55,13 @@ def cmd_advance(args: argparse.Namespace) -> None:
     if entry_kind(last) == TEST:
         _advance_test_rounds(path, state, last)
         return
-    if len(_of_kind(rounds, STRUCTURE)) >= state["max_outer_rounds"]:
+    if len(rounds_of_kind(rounds, STRUCTURE)) >= state["max_outer_rounds"]:
         finish_outer_rounds(path, state, "max_outer_rounds")
         sys.exit(1)
     if last.get("adopted") == 0:
         finish_outer_rounds(path, state, "no_more_proposals")
         sys.exit(1)
-    previous = _of_kind(rounds[:-1], STRUCTURE)
+    previous = rounds_of_kind(rounds[:-1], STRUCTURE)
     if previous:
         # **同じ種類どうしで測る。** 鍵の形が種類で違うため、テスト整備ラウンドを
         # 相手にすると重なりが常に 0 になり、収束の判定が働かない。
@@ -67,11 +75,6 @@ def cmd_advance(args: argparse.Namespace) -> None:
             sys.exit(1)
 
 
-def _of_kind(rounds: list[dict[str, Any]], kind: str) -> list[dict[str, Any]]:
-    """その種類のラウンドだけを取り出す。上限はそれぞれ別に数える。"""
-    return [r for r in rounds if entry_kind(r) == kind]
-
-
 def _advance_test_rounds(
     path: pathlib.Path, state: dict[str, Any], last: dict[str, Any]
 ) -> None:
@@ -81,7 +84,7 @@ def _advance_test_rounds(
     残っていても移る。**どちらで移ったかを記録する**（収束して終わったのか、
     歯止めで止まったのかを報告で読み分けるため）。
     """
-    done = len(_of_kind(state["rounds"], TEST))
+    done = len(rounds_of_kind(state["rounds"], TEST))
     limit = safe_int(state.get("max_test_rounds"), DEFAULT_MAX_TEST_ROUNDS)
     if last.get("adopted") == 0:
         reason = "no_more_test_proposals"

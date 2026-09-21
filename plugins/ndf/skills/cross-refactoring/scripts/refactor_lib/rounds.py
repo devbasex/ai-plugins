@@ -36,6 +36,11 @@ def entry_kind(entry: dict[str, Any]) -> str:
     return TEST if entry.get("kind") == TEST else STRUCTURE
 
 
+def rounds_of_kind(rounds: list[dict[str, Any]], kind: str) -> list[dict[str, Any]]:
+    """その種類のラウンドだけを取り出す。上限はそれぞれ別に数える。"""
+    return [r for r in rounds if entry_kind(r) == kind]
+
+
 def item_kind(item: dict[str, Any]) -> str:
     """項目 1 件の種類。改善項目とテスト項目は同じ一覧に並ぶ。"""
     return TEST if item.get("kind") == TEST else STRUCTURE
