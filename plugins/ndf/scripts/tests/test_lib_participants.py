@@ -215,3 +215,20 @@ def test_included_and_excluded_are_kept_in_fixed_order(assignment):
     )
     assert p.excluded == ["agy", "kiro"]
     assert p.available == ["claude", "codex"]
+
+
+def test_excluding_all_pool_members_leaves_empty_available(assignment):
+    """母集合の全員を exclude に指定した下限境界の振る舞い（R2-002）。"""
+    probe = _probe()
+    p = assignment.resolve_participants(
+        ["codex", "agy", "kiro"],
+        host="claude",
+        exclude=["codex", "agy", "kiro"],
+        probe=probe,
+    )
+
+    assert probe.calls == [[]]
+    assert p.available == []
+    assert p.unavailable == {}
+    assert p.excluded == ["codex", "agy", "kiro"]
+

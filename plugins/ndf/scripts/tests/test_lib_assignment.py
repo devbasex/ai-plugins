@@ -117,6 +117,18 @@ def test_assign_keeps_the_eight_round_rotation(assignment, host):
     assert all(impl not in reviewers for impl, reviewers in actual)
 
 
+@pytest.mark.parametrize("host", ("claude", "codex", "agy", "kiro"))
+def test_assign_rejects_a_bad_round(assignment, host):
+    """round_no < 1 の場合に AssignmentError が送出される（R2-001）。"""
+    for round_no in (0, -1):
+        with pytest.raises(
+            assignment.AssignmentError,
+            match=r"^ラウンド番号は 1 以上です:",
+        ) as excinfo:
+            assignment.assign(round_no, host)
+        assert "ラウンド番号は 1 以上です" in str(excinfo.value)
+
+
 # ---------- 適用の輪番（#727。cross-refactoring が使う） ----------
 
 def test_impl_assign_rotates_over_the_participants_starting_after_the_host(assignment):
