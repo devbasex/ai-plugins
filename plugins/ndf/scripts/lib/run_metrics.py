@@ -314,15 +314,24 @@ def _bound(value: Optional[str], *, upper: bool) -> Optional[_dt.datetime]:
     return parsed
 
 
+def _within_time_bound(started: Optional[_dt.datetime],
+                       since: Optional[_dt.datetime],
+                       until: Optional[_dt.datetime],
+                       until_exclusive: bool) -> bool:
+    if since and (started is None or started < since):
+        return False
+    if until and (started is None or (started >= until if until_exclusive else started > until)):
+        return False
+    return True
+
+
 def _select(rows: list[dict], args: argparse.Namespace) -> list[dict]:
     since, until = _bound(args.since, upper=False), _bound(args.until, upper=True)
     until_exclusive = bool(args.until and re.fullmatch(r"\d{4}-\d{2}-\d{2}", args.until))
     out = []
     for row in rows:
         started = _parse_time(row.get("started_at"))
-        if since and (started is None or started < since):
-            continue
-        if until and (started is None or (started >= until if until_exclusive else started > until)):
+        if not _within_time_bound(started, since, until, until_exclusive):
             continue
         if args.repo and row.get("repo") != args.repo:
             continue
