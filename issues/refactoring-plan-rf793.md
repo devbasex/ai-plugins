@@ -183,7 +183,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| duplication | consolidate_duplication | minor | kiro | 未着手 | 0 |
+| duplication | consolidate_duplication | minor | kiro | 検証中 | 1 |
 
 **なぜ**: _state_file_pr と _prs が同じ pr_history 走査（dict 判定→_as_int(entry.get("pr"))→current_pr へのフォールバック）を別々に持つ。_state_file_pr は実質「_prs の先頭」で、片方だけ直すと状態ファイルの鍵の選び方が食い違う。同じ業務ルール（状態ファイルの鍵の決め方）に由来し、必ず一緒に変わる重複である。
 
