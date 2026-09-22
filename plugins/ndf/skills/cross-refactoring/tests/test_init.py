@@ -234,6 +234,18 @@ def test_contradicting_names_stop_the_init(run_init, tmp_path, over):
     assert not _state_path(tmp_path).exists()
 
 
+@pytest.mark.parametrize("over", [
+    {"exclude": [["none", "kiro"]]},
+    {"include": [["none", "agy"]]},
+])
+def test_none_mixed_with_runtime_names_stops_the_init(run_init, tmp_path, over):
+    """none とランタイム名の混在は中断（終了コード 4）し、状態ファイルを作らない。"""
+    with pytest.raises(SystemExit) as e:
+        run_init(_args(tmp_path, **over), probe={})
+    assert e.value.code == refactor_abort()
+    assert not _state_path(tmp_path).exists()
+
+
 def test_init_records_models(run_init, tmp_path):
     run_init(_args(tmp_path, model=["codex=gpt-5.5", "kiro=claude-opus-5"]))
     _, state = _state_of(tmp_path)
