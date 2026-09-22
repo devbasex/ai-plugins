@@ -415,6 +415,15 @@ def pending_test_judgements(facts: Iterable[dict[str, Any]]) -> list[str]:
     return undecidable_test_changes(changes)
 
 
+def _answers_by_path(verdicts: Iterable[dict[str, Any]]) -> dict[str, str]:
+    """段 2 の答えを、対象ファイルから引ける形にする。"""
+    return {
+        str(verdict.get("path")): str(verdict.get("verdict"))
+        for verdict in verdicts
+        if isinstance(verdict, dict) and verdict.get("path")
+    }
+
+
 def merge_test_judgements(
     pending: Iterable[str], verdicts: Iterable[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -428,10 +437,7 @@ def merge_test_judgements(
     **答えが欠けたものを `unchanged` に倒さない。** 倒すと、判定を返さないことが
     通過の手段になる。知らない答えも同じ扱いにする。
     """
-    answers = {
-        str(v.get("path")): str(v.get("verdict"))
-        for v in verdicts if isinstance(v, dict) and v.get("path")
-    }
+    answers = _answers_by_path(verdicts)
     changed = sorted(p for p in pending if answers.get(p) == "changed")
     if changed:
         return {
@@ -487,14 +493,10 @@ def apply_judgements_to_group(
     records = entry.get("pending_test_judgements")
     if not isinstance(records, dict):
         return []
-    answers = {
-        str(v.get("path")): str(v.get("verdict"))
-        for v in verdicts if isinstance(v, dict) and v.get("path")
-    }
+    answers = _answers_by_path(verdicts)
     remaining = sorted(
         path for path in records.get(str(group), [])
         if answers.get(path) != "unchanged"
     )
     record_pending_judgements(entry, group, remaining)
     return remaining
-
