@@ -9,7 +9,6 @@
 """
 from __future__ import annotations
 
-import concurrent.futures
 import os
 import subprocess
 from typing import Any, Callable, Iterable, Optional
@@ -64,25 +63,15 @@ def _run_probe(probe: tuple[str, ...]) -> tuple[bool, str]:
 
 
 def _probe_all(runtimes: Iterable[str], info: Callable[[str], None]) -> ProbeResult:
-    """`AUTH_PROBES` にある名前を有界な並行ワーカーで確かめ、名前 → 結果を返す。1 者 1 行を出力する。"""
-    unique_targets: list[tuple[str, tuple[str, ...]]] = []
-    seen = set()
-    for rt in runtimes:
-        if rt in AUTH_PROBES and rt not in seen:
-            seen.add(rt)
-            unique_targets.append((rt, AUTH_PROBES[rt]))
-
-    if not unique_targets:
-        return {}
-
-    max_workers = min(len(unique_targets), 4)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {rt: executor.submit(_run_probe, probe) for rt, probe in unique_targets}
-        results: ProbeResult = {}
-        for rt, probe in unique_targets:
-            ok, detail = futures[rt].result()
-            results[rt] = {"command": " ".join(probe), "ok": ok, "detail": detail}
-            info(f"{'✅' if ok else '❌'} {rt}: {' '.join(probe)}")
+    """`AUTH_PROBES` にある名前だけを順に確かめ、名前 → 結果を返す。1 者 1 行を出力する。"""
+    results: ProbeResult = {}
+    for runtime in runtimes:
+        probe = AUTH_PROBES.get(runtime)
+        if probe is None:
+            continue
+        ok, detail = _run_probe(probe)
+        results[runtime] = {"command": " ".join(probe), "ok": ok, "detail": detail}
+        info(f"{'✅' if ok else '❌'} {runtime}: {' '.join(probe)}")
     return results
 
 

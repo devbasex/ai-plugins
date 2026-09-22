@@ -235,92 +235,6 @@ execute_light() {
     "${create_args[@]}"
 }
 
-# PR メタ情報 (base / title) は、まず prepare.json があればそこから読み出し、
-# 無い場合のみ gh pr view にフォールバックする (execute_light と同じ方針で
-# 不要な API 呼び出しを排除, gemini round 8 指摘)。
-resolve_squash_pr_metadata() {
-  local prep=$1 old_pr=$2
-  local base="" title="" pr_meta=""
-
-  if [ -s "$prep" ]; then
-    base=$(jq -r '.base_branch // empty' "$prep")
-    title=$(jq -r '.old_title // empty'  "$prep")
-  fi
-  if [ -z "${base:-}" ] || [ -z "${title:-}" ]; then
-    pr_meta=$(gh pr view "$old_pr" --json headRefName,baseRefName,title)
-    [ -n "${base:-}" ]  || base=$(printf '%s'  "$pr_meta" | jq -r '.baseRefName')
-    [ -n "${title:-}" ] || title=$(printf '%s' "$pr_meta" | jq -r '.title')
-  fi
-  jq -nc --arg base "$base" --arg title "$title" --arg pr_meta "$pr_meta" \
-    '{base: $base, title: $title, pr_meta: $pr_meta}'
-}
-
-# state.py init は worktree を `git worktree add --detach origin/<head>` で作るため、
-# `git branch --show-current` は空文字を返す。空のまま new_branch を生成すると
-# `-rHHMMSS` だけのブランチ名になってしまうので、フォールバック順を以下に固定する:
-#   1. git branch --show-current (通常 worktree なら使える)
-#   2. prepare.json の head_branch (prepare 済みなら最も信頼できる)
-#   3. gh pr view --json headRefName (prepare 未実行でも復元可能)
-# (codex round 4 指摘)
-resolve_squash_head_branch() {
-  local prep=$1 old_pr=$2 pr_meta=${3:-}
-  local branch
-  branch=$(git branch --show-current)
-  if [ -z "$branch" ] && [ -s "$prep" ]; then
-    branch=$(jq -r '.head_branch // empty' "$prep")
-  fi
-  if [ -z "$branch" ]; then
-    [ -n "$pr_meta" ] || pr_meta=$(gh pr view "$old_pr" --json headRefName,baseRefName,title)
-    branch=$(printf '%s' "$pr_meta" | jq -r '.headRefName')
-  fi
-  [ -n "$branch" ] || { echo "head branch を復元できませんでした (detached worktree かつ prepare.json / gh pr view から取得失敗)" >&2; exit 1; }
-  printf '%s' "$branch"
-}
-
-# 既に title 末尾に "(rotated)" / "(rotated2)" 等が付いている場合は除去してから
-# "(rotated)" を 1 つだけ付与し、ローテーションのたびに suffix が重複しないようにする
-# (gemini round 8 指摘)。
-# 例:
-#   "Fix foo"                       → "Fix foo (rotated)"
-#   "Fix foo (rotated)"             → "Fix foo (rotated)"
-#   "Fix foo (rotated2)"            → "Fix foo (rotated)"
-#   "Fix foo (rotated)(rotated)"    → "Fix foo (rotated)"
-normalize_rotated_title() {
-  local title=$1
-  local title_stripped=$title
-  while [[ $title_stripped =~ [[:space:]]*\(rotated[0-9]*\)$ ]]; do
-    title_stripped=${title_stripped%"${BASH_REMATCH[0]}"}
-  done
-  printf '%s (rotated)' "$title_stripped"
-}
-
-# 既存ブランチを squash して新ブランチに commit & push
-create_and_push_squash_branch() {
-  local new_branch=$1 base=$2 title=$3 old_pr=$4
-  git checkout -b "$new_branch"
-  git reset --soft "origin/$base"
-  # commit message は -m を複数指定で分割して渡す。$(cat <<EOF ... $title ... EOF) 形式は
-  # PR title に $(...) や `...` が含まれる場合にコマンド置換として実行される脆弱性がある
-  # ため使わない (gemini round 7 指摘)。
-  git commit \
-    -m "$title" \
-    -m "(cross-review rotation: PR #$old_pr を squash 統合)"
-  git push -u origin "$new_branch"
-}
-
-# squash モードの新 PR 本文を組み立てる
-build_squash_body() {
-  local old_pr=$1 round_in_pr=$2
-  cat <<EOF
-## Summary
-旧 PR #$old_pr をベースに、cross-review クロスレビューループの継続。
-旧 PR は round_in_pr=$round_in_pr で巻き直しのため close 済み。
-旧 PR の resolved スレッドは既に修正済み事項。残った指摘はこの PR で再評価する。
-
-<!-- I want to review in Japanese. -->
-EOF
-}
-
 # squash モード本体。
 execute_squash() {
   local state_pr=$1
@@ -328,30 +242,78 @@ execute_squash() {
 
   cd "$WORKTREE"
 
-  local prep=$TMP_DIR/rotate-pr$state_pr-prepare.json
+  local branch base title new_branch pr_meta prep
+  prep=$TMP_DIR/rotate-pr$state_pr-prepare.json
 
-  local meta_json
-  meta_json=$(resolve_squash_pr_metadata "$prep" "$OLD_PR")
-  local base title pr_meta
-  base=$(jq -r '.base' <<<"$meta_json")
-  title=$(jq -r '.title' <<<"$meta_json")
-  pr_meta=$(jq -r '.pr_meta' <<<"$meta_json")
+  # PR メタ情報 (base / title / head) は、まず prepare.json があればそこから読み出し、
+  # 無い場合のみ gh pr view にフォールバックする (execute_light と同じ方針で
+  # 不要な API 呼び出しを排除, gemini round 8 指摘)。
+  if [ -s "$prep" ]; then
+    base=$(jq -r '.base_branch // empty' "$prep")
+    title=$(jq -r '.old_title // empty'  "$prep")
+  fi
+  if [ -z "${base:-}" ] || [ -z "${title:-}" ]; then
+    pr_meta=$(gh pr view "$OLD_PR" --json headRefName,baseRefName,title)
+    [ -n "${base:-}" ]  || base=$(printf '%s'  "$pr_meta" | jq -r '.baseRefName')
+    [ -n "${title:-}" ] || title=$(printf '%s' "$pr_meta" | jq -r '.title')
+  fi
 
-  local branch
-  branch=$(resolve_squash_head_branch "$prep" "$OLD_PR" "$pr_meta")
-  local new_branch="${branch}-r$(date +%H%M%S)"
+  # state.py init は worktree を `git worktree add --detach origin/<head>` で作るため、
+  # `git branch --show-current` は空文字を返す。空のまま new_branch を生成すると
+  # `-rHHMMSS` だけのブランチ名になってしまうので、フォールバック順を以下に固定する:
+  #   1. git branch --show-current (通常 worktree なら使える)
+  #   2. prepare.json の head_branch (prepare 済みなら最も信頼できる)
+  #   3. gh pr view --json headRefName (prepare 未実行でも復元可能)
+  # (codex round 4 指摘)
+  branch=$(git branch --show-current)
+  if [ -z "$branch" ] && [ -s "$prep" ]; then
+    branch=$(jq -r '.head_branch // empty' "$prep")
+  fi
+  if [ -z "$branch" ]; then
+    pr_meta=${pr_meta:-$(gh pr view "$OLD_PR" --json headRefName,baseRefName,title)}
+    branch=$(printf '%s' "$pr_meta" | jq -r '.headRefName')
+  fi
+  [ -n "$branch" ] || { echo "head branch を復元できませんでした (detached worktree かつ prepare.json / gh pr view から取得失敗)" >&2; exit 1; }
+  new_branch="${branch}-r$(date +%H%M%S)"
 
-  local new_title
-  new_title=$(normalize_rotated_title "$title")
+  # 既に title 末尾に "(rotated)" / "(rotated2)" 等が付いている場合は除去してから
+  # "(rotated)" を 1 つだけ付与し、ローテーションのたびに suffix が重複しないようにする
+  # (gemini round 8 指摘)。
+  # 例:
+  #   "Fix foo"                       → "Fix foo (rotated)"
+  #   "Fix foo (rotated)"             → "Fix foo (rotated)"
+  #   "Fix foo (rotated2)"            → "Fix foo (rotated)"
+  #   "Fix foo (rotated)(rotated)"    → "Fix foo (rotated)"
+  local title_stripped=$title
+  while [[ $title_stripped =~ [[:space:]]*\(rotated[0-9]*\)$ ]]; do
+    title_stripped=${title_stripped%"${BASH_REMATCH[0]}"}
+  done
+  local new_title="$title_stripped (rotated)"
 
   echo "🔄 PR #$OLD_PR rotation (squash): $branch → $new_branch (base=$base)" >&2
 
   # 1. 既存ブランチを squash して新ブランチに
-  create_and_push_squash_branch "$new_branch" "$base" "$title" "$OLD_PR"
+  git checkout -b "$new_branch"
+  git reset --soft "origin/$base"
+  # commit message は -m を複数指定で分割して渡す。$(cat <<EOF ... $title ... EOF) 形式は
+  # PR title に $(...) や `...` が含まれる場合にコマンド置換として実行される脆弱性がある
+  # ため使わない (gemini round 7 指摘)。
+  git commit \
+    -m "$title" \
+    -m "(cross-review rotation: PR #$OLD_PR を squash 統合)"
+  git push -u origin "$new_branch"
 
   # 2. 新 PR の body
   local new_body
-  new_body=$(build_squash_body "$OLD_PR" "$ROUND_IN_PR")
+  new_body=$(cat <<EOF
+## Summary
+旧 PR #$OLD_PR をベースに、cross-review クロスレビューループの継続。
+旧 PR は round_in_pr=$ROUND_IN_PR で巻き直しのため close 済み。
+旧 PR の resolved スレッドは既に修正済み事項。残った指摘はこの PR で再評価する。
+
+<!-- I want to review in Japanese. -->
+EOF
+)
 
   # 3. close → create → 結果出力は light と共通。
   rotate_close_and_create \
