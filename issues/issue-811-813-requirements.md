@@ -93,7 +93,7 @@ ndf 10.16.0 のリリース後テスト（PR #810 のコメント、2026-09-22�
 各条件の「利用上限として止まる」は、次の 3 つがそろうことを指す: 監視が担当を止めて早期の致命（終了コード 4）で終わる / 結末の理由が「利用上限」 / 起動し直しの可否が偽。
 
 - [ ] AC1: 標準エラーの記録に codex の利用上限の文言の 1 行が出ると、利用上限として止まる。文言は `You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage …` である。行頭の `ERROR: ` の有無を問わない
-- [ ] AC2: 標準エラーの記録に codex の再試行の上限の行が出て、最後の状態が 429 なら、利用上限として止まる。行は `exceeded retry limit, last status: 429 Too Many Requests` である。最後の状態が 429 以外（例 `503 Service Unavailable`）なら利用上限にならない
+- [ ] AC2: 標準エラーの記録に codex の再試行の上限の行が出て、最後の状態が 429 なら、利用上限として止まる。行は `exceeded retry limit, last status: 429` で始まる。最後の状態が 429 以外（例 `503 Service Unavailable`）なら利用上限にならない
 - [ ] AC3: 標準エラーの記録に claude の利用上限の文言が行頭から出ると、利用上限として止まる。確かめる形は設計の「実測」の claude の 5 形（週・セッション・個人の支出・月の支出・期間を書かない形）である。JSON 出力で起動した claude がこの文言を標準エラーへ書くかは確かめていない。起動した claude の上限は AC4 の JSON の状態コードで読む
 - [ ] AC4: 10.16.0 で合格した形は、引き続き利用上限として止まる。形は 4 つで、kiro の `Monthly request limit reached`、claude の JSON の上限の状態コード、HTTP 429 の状態行、`Quota exceeded` である
 - [ ] AC5: AC1〜AC3 の文言が、表・バッククォート・「」・リスト・引用・grep 形式・Python の文字列・差分の追加行と文脈行・文の途中に出たときは、利用上限として止まらない

@@ -46,6 +46,7 @@ claude 2.1.278（2026-09-22）。
 | CLI | 集めた経路 | 件数 | 見つかった形 |
 | --- | --- | --- | --- |
 | codex | `~/.codex/sessions` の記録の誤りの本文（`error.message`）。誤りの種別が `usage_limit_exceeded` のもの | 62（1 形、2026-09-15） | `You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at <日時>.` |
+| codex | この設計 Pull Request の cross-review のラウンド 2 で、codex が利用上限で止まった標準エラーの記録（2026-09-22 16:35 UTC、132 行） | 2 行（1 形） | `ERROR: You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 5:44 PM.` |
 | codex | 導入済みの実行ファイルに埋め込まれた文字列 | 6 形 | 上の形のほか、`You've hit your usage limit.` で始まる 3 形、`You've hit your usage limit for <モデル>.`、`exceeded retry limit, last status: <状態>` |
 | claude | `~/.claude/projects` の記録のうち、API の誤りの印（`isApiErrorMessage`）が真の本文 | 5,103（4 形、2026-09-01〜22） | 週 3,751 / セッション 758 / 個人の支出 593 / 月の支出 1（下の表） |
 | claude | 導入済みの実行ファイル | 期間を書かない形 `You've hit your limit` ほか | `You've hit your ` の後に期間や種類を差し込む作りである |
@@ -56,7 +57,7 @@ claude 2.1.278（2026-09-22）。
 
 **codex が誤りを標準エラーへ書く形は、行頭の印の後に誤りの本文を続けた 1 行である。** 存在しない
 モデルを指定して `codex exec` を実行し、標準エラーの記録に次の行が出ることを確かめた。記録の
-誤りの本文と同じ文字列である。利用上限の文言でこの形を見たわけではない（「未確認のまま残ること」）。
+誤りの本文と同じ文字列である。利用上限の文言でも同じ形になることを、上の表のラウンド 2 の記録で確かめた。この記録を今の照合の表で読むと一致せず、監視の結末は理由「結果ファイル無し」になった。足す 2 行を加えると、行頭の印の付いた行に一致する。
 
 ```text
 ERROR: {"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The 'ndf-no-such-model-xyz' model is not supported when using Codex with a ChatGPT account."}}
@@ -78,19 +79,21 @@ re.compile(r"^(?:ERROR:\s*)?exceeded retry limit, last status: 429\b", re.MULTIL
 | 区分 | 入力 | 今の利用上限 | 足した後 |
 | --- | --- | --- | --- |
 | 実物 | codex の利用上限（行頭の印あり / なし） | — | 一致 |
-| 実物 | codex の再試行の上限 `… last status: 429 Too Many Requests` | — | 一致 |
+| 実物（書き出し） | codex の再試行の上限 `ERROR: exceeded retry limit, last status: 429`。書き出しは実行ファイルの文字列、`429` は差し込まれる状態 | — | 一致 |
 | 実物 | codex の `Quota exceeded. Check your plan and billing details.` | 一致 | 一致 |
 | 実物 | claude の `You've hit your weekly limit · resets Sep 22, 6am (UTC)` | — | 一致 |
 | 実物 | claude の `You've hit your session limit · resets 6:30pm (UTC)` | — | 一致 |
 | 実物 | claude の `You've hit your individual spend limit · run /usage-credits …` | — | 一致 |
 | 実物 | claude の `You've hit your monthly spend limit. Run /usage-credits …` | — | 一致 |
-| 実物 | claude の `You've hit your limit · resets 3am (UTC)` | — | 一致 |
+| 実物 | claude の `You've hit your limit`（実行ファイルの文字列） | — | 一致 |
 | 実物 | kiro の `Monthly request limit reached` / HTTP 429 の状態行 | 一致 | 一致 |
 | 一致しない | codex の再試行の上限 `… last status: 503 Service Unavailable` | — | — |
 | 一致しない | codex の 400 の行（上のコードブロック） | — | — |
 | 誤検知 | 表（バッククォートあり / なし）、本文のバッククォート、本文の「」 | — | — |
 | 誤検知 | 文の途中、リスト、引用、grep 形式、Python の文字列 | — | — |
 | 誤検知 | 差分の追加行 `+ERROR: You've hit …`、差分の文脈行 | — | — |
+
+**実物に無い末尾は入力に足さない。** 再試行の上限の状態の後ろ（`Too Many Requests` など）と、claude の期間を書かない形の後ろ（`· resets 3am (UTC)`）は、#811 の表にある形で、記録にも実行ファイルにも無い。照合はどちらも末尾を読まないため、入力は実物の範囲で止める。
 
 ### 起動できないときの例外
 
@@ -244,9 +247,8 @@ graph TD
 
 | 項目 | 内容 |
 | --- | --- |
-| codex の利用上限の文言の行頭の形 | 400 の誤りで測った形（`ERROR: ` + 本文）からの類推。照合は行頭の印の有無を問わないため、印が別の形（時刻を前に置くなど）だと一致しない。10.16.1 の後に上限に当たった記録で確かめる |
 | claude の文言が標準エラーの記録へ出るか | 実測の claude の 5 形の出所は、会話の記録と実行ファイルである。JSON 出力で起動した claude が上限のときに標準エラーへ書いた記録は無い。起動した claude の上限は、標準出力の状態コード（10.16.0 で合格）で読む。10.16.1 の後に上限に当たった標準エラーの記録で確かめる |
-| codex の再試行の上限の状態の書き方 | 実行ファイルの文字列は `last status: ` までで、状態の後ろの書き方は記録に無い。照合は `429` の直後の語の区切りまでしか見ない |
+| codex の再試行の上限の状態の書き方 | 実行ファイルの文字列は `last status: ` までで、状態の後ろの書き方は記録に無い。テストの入力は `429` までにし、照合も `429` の直後の語の区切りまでしか見ない |
 | kiro と agy の利用上限の文言 | 手元の記録に 0 件。kiro は既存の #619 の実物、agy は照合なし |
 | claude の旧い形 | 記録にも実行ファイルにも 0 件のため足さない（決定 4） |
 | 行頭に固定しても残る誤検知 | 文言で始まる行をそのまま読み上げた場合（文書の本文の行頭に裸で置いた文言を `cat` したときなど）は一致する。この束の文書とテストでは、文言を表・バッククォート・文字列の中にだけ置く |
