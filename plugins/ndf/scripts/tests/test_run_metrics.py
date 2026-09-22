@@ -310,3 +310,34 @@ def test_aggregate_by_reason(metrics_tree):
 def test_aggregate_with_no_summaries(tmp_path):
     proc = _aggregate(tmp_path / "empty")
     assert proc.returncode == 0, proc.stderr
+
+
+# ---------- _select の等値の絞り込み（現状固定） ----------
+
+_SELECT_ROWS = [
+    {"id": "a", "repo": "o/x", "kind": "cross-review", "ndf_version": "1.0.0"},
+    {"id": "b", "repo": "o/y", "kind": "cross-review", "ndf_version": "1.0.0"},
+    {"id": "c", "repo": "o/x", "kind": "cross-refactoring", "ndf_version": "2.0.0"},
+    {"id": "d", "repo": "o/x", "kind": "cross-review", "ndf_version": "2.0.0"},
+]
+
+
+def _select_args(**over):
+    import argparse
+    base = {"since": None, "until": None, "repo": None, "kind": None, "version": None}
+    base.update(over)
+    return argparse.Namespace(**base)
+
+
+@pytest.mark.parametrize("over, expected", [
+    ({}, ["a", "b", "c", "d"]),
+    ({"repo": "o/x"}, ["a", "c", "d"]),
+    ({"kind": "cross-refactoring"}, ["c"]),
+    ({"version": "1.0.0"}, ["a", "b"]),
+    ({"repo": "o/x", "kind": "cross-review", "version": "2.0.0"}, ["d"]),
+    ({"repo": "o/z"}, []),
+    ({"repo": "", "kind": "", "version": ""}, ["a", "b", "c", "d"]),
+])
+def test_select_equality_filters(rm, over, expected):
+    picked = rm._select(_SELECT_ROWS, _select_args(**over))
+    assert [row["id"] for row in picked] == expected

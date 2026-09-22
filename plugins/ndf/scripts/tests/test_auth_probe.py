@@ -53,6 +53,61 @@ def test_probe_reports_a_missing_command(auth, monkeypatch):
     assert messages == ["❌ codex: codex login status"]
 
 
+def test_probe_reports_a_command_it_cannot_start_with_a_real_unreadable_path(
+        auth, monkeypatch, tmp_path):
+    """AC7: 読めないディレクトリだけの PATH で、確認コマンドが見つからないとき。
+
+    実際に権限を外したディレクトリを PATH に置いて再現する。権限が効かない実行者
+    （root）では条件が成り立たないため、その場合は飛ばす。同じ理由の文言は、例外を
+    差し込む次のテストがどちらの実行者でも確かめる。
+    """
+    unreadable = tmp_path / "unreadable"
+    unreadable.mkdir()
+    unreadable.chmod(0o000)
+    try:
+        try:
+            list(unreadable.iterdir())
+            pytest.skip("権限が効かない実行者のため、読めない PATH を再現できない")
+        except PermissionError:
+            pass
+        monkeypatch.setenv("PATH", str(unreadable))
+
+        results, _ = auth.probe_auth(["codex"], info=lambda _m: None, env={})
+    finally:
+        unreadable.chmod(0o700)
+
+    assert results["codex"]["ok"] is False
+    assert results["codex"]["detail"] == "コマンドを実行できません（Permission denied）"
+
+
+def test_probe_reports_a_command_it_cannot_start(auth, monkeypatch):
+    """AC7: 起動が権限の例外で終わるときも、例外を上げずに理由を返す。"""
+    def denied(*args, **kwargs):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(auth.subprocess, "run", denied)
+
+    results, _ = auth.probe_auth(["codex"], info=lambda _m: None, env={})
+
+    assert results["codex"]["ok"] is False
+    assert results["codex"]["detail"] == "コマンドを実行できません（Permission denied）"
+
+
+def test_probe_reports_a_command_that_is_not_an_executable_format(auth, monkeypatch, tmp_path):
+    """AC8: 実行形式でないファイルを確認コマンドにしたときも「通らない」を返す。"""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake = bin_dir / "codex"
+    fake.write_text("\x7fnot an executable\n", encoding="utf-8")
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bin_dir))
+
+    results, _ = auth.probe_auth(["codex"], info=lambda _m: None, env={})
+
+    assert results["codex"]["ok"] is False
+    assert results["codex"]["detail"] == "コマンドを実行できません（Exec format error）"
+
+
 def test_probe_reports_a_timeout(auth, monkeypatch):
     def time_out(*args, **kwargs):
         raise subprocess.TimeoutExpired(args[0], kwargs["timeout"])

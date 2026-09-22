@@ -161,6 +161,15 @@ USAGE_LIMIT_FATAL = [
     re.compile(r"\b(?:quota exceeded|rate limit exceeded)\b", re.IGNORECASE),
     # HTTP 429 の状態行
     re.compile(r"^HTTP/\d\S* 429 ", re.MULTILINE),
+    # codex と claude の実物（#811）。**行頭で始まる形だけを読む。** 担当は作業中の
+    # コマンドの出力（差分・ファイルの中身）も err.log へ書くため、文書やテストを
+    # 読み上げた行に一致させない。codex は誤りの行に `ERROR: ` を付ける。
+    # claude は `You've hit your ` の後に期間や種類（週・セッション・支出）を差し込む。
+    re.compile(r"^(?:ERROR:\s*)?You['’]ve hit your (?:[\w'’ ]+ )?(?:limit|budget)\b",
+               re.MULTILINE),
+    # codex の再試行の上限。**最後の状態が 429 のときだけ利用上限と読む**（503 などの
+    # 一時的な誤りは起動し直せば解けうる）。
+    re.compile(r"^(?:ERROR:\s*)?exceeded retry limit, last status: 429\b", re.MULTILINE),
 ]
 
 # err.log の行頭に近い形で出る **明確な致命** パターン (kill 対象。理由は `early_error`)。

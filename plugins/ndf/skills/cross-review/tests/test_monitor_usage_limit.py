@@ -62,6 +62,59 @@ TEN_LINES = [
 ]
 
 
+# 実物の行の逐語の正本（#811）。確定仕様
+# （docs/specifications/cross-review-launch-outcome.md）の「背景」は出所と形の種類だけを持ち、
+# 文言そのものはここにある。
+# 推測で作った文言は入れない。出所は記録（`~/.codex/sessions` / `~/.claude/projects`）と
+# 導入済みの実行ファイルの文字列である。
+CODEX_USAGE_LIMIT = ("You've hit your usage limit. Visit "
+                     "https://chatgpt.com/codex/settings/usage to purchase more credits "
+                     "or try again at 5:44 PM.")
+CODEX_USAGE_LIMIT_PREFIXED = f"ERROR: {CODEX_USAGE_LIMIT}"
+CODEX_RETRY_429 = "ERROR: exceeded retry limit, last status: 429"
+CODEX_RETRY_503 = "ERROR: exceeded retry limit, last status: 503 Service Unavailable"
+CODEX_BAD_REQUEST = ('ERROR: {"type":"error","status":400,"error":{"type":'
+                     '"invalid_request_error","message":"The \'ndf-no-such-model-xyz\' model '
+                     'is not supported when using Codex with a ChatGPT account."}}')
+CLAUDE_WEEKLY = "You've hit your weekly limit · resets Sep 22, 6am (UTC)"
+CLAUDE_SESSION = "You've hit your session limit · resets 6:30pm (UTC)"
+CLAUDE_INDIVIDUAL_SPEND = ("You've hit your individual spend limit · run /usage-credits "
+                           "to raise it, or visit claude.ai/admin-settings/usage")
+CLAUDE_MONTHLY_SPEND = ("You've hit your monthly spend limit. Run /usage-credits to manage "
+                        "your limit and keep using the model or switch models to continue "
+                        "this chat.")
+CLAUDE_BARE_LIMIT = "You've hit your limit"
+
+# 実物として一致すべき 7 行（codex 2 形 + claude 5 形）。行頭の印の有無は codex が決める。
+MEASURED_USAGE_LIMIT_LINES = [
+    ("codex 利用上限", CODEX_USAGE_LIMIT),
+    ("codex 利用上限 行頭の印あり", CODEX_USAGE_LIMIT_PREFIXED),
+    ("codex 再試行の上限 429", CODEX_RETRY_429),
+    ("claude 週", CLAUDE_WEEKLY),
+    ("claude セッション", CLAUDE_SESSION),
+    ("claude 個人の支出", CLAUDE_INDIVIDUAL_SPEND),
+    ("claude 月の支出", CLAUDE_MONTHLY_SPEND),
+    ("claude 期間なし", CLAUDE_BARE_LIMIT),
+]
+
+# 一致してはいけない行。状態が 429 でない再試行の上限・400 の行・引用と差分の形。
+NOT_USAGE_LIMIT_LINES = [
+    ("codex 再試行の上限 503", CODEX_RETRY_503),
+    ("codex 400 の行", CODEX_BAD_REQUEST),
+    ("表（バッククォートあり）", f"| usage_limit | `{CODEX_USAGE_LIMIT}` | 利用上限 |"),
+    ("表（バッククォートなし）", f"| usage_limit | {CLAUDE_WEEKLY} | 利用上限 |"),
+    ("本文のバッククォート", f"上限の文言は `{CLAUDE_SESSION}` である"),
+    ("本文の「」", f"上限の文言は「{CLAUDE_WEEKLY}」である"),
+    ("文の途中", f"担当は {CODEX_USAGE_LIMIT} を出して止まった"),
+    ("リスト", f"- {CLAUDE_MONTHLY_SPEND}"),
+    ("引用", f"> {CLAUDE_WEEKLY}"),
+    ("grep 形式", f"plugins/ndf/scripts/lib/monitor.py:160:    # {CLAUDE_BARE_LIMIT}"),
+    ("Python の文字列", f'    CLAUDE_WEEKLY = "{CLAUDE_WEEKLY}"'),
+    ("差分の追加行", f"+{CODEX_USAGE_LIMIT_PREFIXED}"),
+    ("差分の文脈行", f" {CLAUDE_SESSION}"),
+]
+
+
 def _write(path: pathlib.Path, text: str) -> pathlib.Path:
     path.write_text(text + "\n", encoding="utf-8")
     return path
@@ -79,6 +132,22 @@ def test_ten_measured_lines_match_as_the_design_records(tmp_path, monitor_mod, l
     assert (monitor_mod._scan_patterns(log, monitor_mod.EARLY_ERROR_FATAL) is not None) is fatal_hit
     # 止めるべき文言があるかを返す `_scan_early_fatal` は、どちらの表の一致も拾う（既存テストの契約）
     assert (monitor_mod._scan_early_fatal(log) is not None) is (usage_hit or fatal_hit)
+
+
+@pytest.mark.parametrize(("label", "line"), MEASURED_USAGE_LIMIT_LINES,
+                         ids=[t[0] for t in MEASURED_USAGE_LIMIT_LINES])
+def test_measured_codex_and_claude_lines_are_usage_limits(tmp_path, monitor_mod, label, line):
+    """AC1〜AC3 / AC6: 実測の実物の行は利用上限の表に一致する。"""
+    log = _write(tmp_path / "err.log", line)
+    assert monitor_mod._scan_patterns(log, monitor_mod.USAGE_LIMIT_FATAL) is not None
+
+
+@pytest.mark.parametrize(("label", "line"), NOT_USAGE_LIMIT_LINES,
+                         ids=[t[0] for t in NOT_USAGE_LIMIT_LINES])
+def test_quoted_and_non_limit_lines_are_not_usage_limits(tmp_path, monitor_mod, label, line):
+    """AC2 の後半 / AC5: 状態が 429 でない行と、引用・差分・文の途中は一致しない。"""
+    log = _write(tmp_path / "err.log", line)
+    assert monitor_mod._scan_patterns(log, monitor_mod.USAGE_LIMIT_FATAL) is None
 
 
 def test_claude_stdout_json_is_matched_without_the_quote_exclusion(tmp_path, monitor_mod):
@@ -215,6 +284,46 @@ def test_usage_limit_stops_the_agent_as_early_error_with_reason_usage_limit(tmp_
     # AC7: 標準出力のキーは変わらない
     out = [json.loads(l) for l in proc.stdout.splitlines() if l.strip()]
     assert len(out) == 1 and set(out[0]) == STDOUT_KEYS and out[0]["exit_code"] == 4
+
+
+@pytest.mark.parametrize(("agent", "err"), [
+    ("codex", CODEX_USAGE_LIMIT_PREFIXED),   # AC1
+    ("codex", CODEX_USAGE_LIMIT),            # AC1
+    ("codex", CODEX_RETRY_429),              # AC2
+    ("claude", CLAUDE_WEEKLY),               # AC3
+    ("claude", CLAUDE_SESSION),              # AC3
+])
+def test_measured_lines_stop_the_agent_with_reason_usage_limit(tmp_path, agent, err):
+    """AC1〜AC3: 実測の行で担当が止まり、理由は利用上限、終了コードは 4。"""
+    stem = _finished(tmp_path, agent, err=err)
+
+    proc = _run_monitor(tmp_path, agent)
+
+    assert proc.returncode == 4, proc.stderr
+    outcome = _outcome(tmp_path, stem)
+    assert (outcome["status"], outcome["reason"]) == ("EARLY_ERROR", "usage_limit")
+
+
+def test_the_retry_limit_with_another_status_is_not_a_usage_limit(tmp_path):
+    """AC2 の後半: 最後の状態が 429 以外なら利用上限にしない。"""
+    stem = _finished(tmp_path, "codex", err=CODEX_RETRY_503)
+
+    proc = _run_monitor(tmp_path, "codex")
+
+    assert proc.returncode == 3, proc.stderr
+    assert _outcome(tmp_path, stem)["reason"] == "missing"
+
+
+def test_quoted_measured_lines_do_not_stop_the_agent(tmp_path):
+    """AC5: 引用・差分・文の途中に出た実物の文言では止まらない。"""
+    stem = _finished(tmp_path, "codex",
+                     err="\n".join(line for _label, line in NOT_USAGE_LIMIT_LINES),
+                     result=True)
+
+    proc = _run_monitor(tmp_path, "codex")
+
+    assert proc.returncode == 0, proc.stderr
+    assert _outcome(tmp_path, stem)["reason"] == "ok"
 
 
 @pytest.mark.parametrize("err", [HTTP_401, "HTTP/1.1 403 Forbidden", "Permission denied"])

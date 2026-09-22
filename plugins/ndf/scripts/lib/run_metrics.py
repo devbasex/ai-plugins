@@ -328,16 +328,15 @@ def _within_time_bound(started: Optional[_dt.datetime],
 def _select(rows: list[dict], args: argparse.Namespace) -> list[dict]:
     since, until = _bound(args.since, upper=False), _bound(args.until, upper=True)
     until_exclusive = bool(args.until and re.fullmatch(r"\d{4}-\d{2}-\d{2}", args.until))
+    # (args の属性名, 行のキー)。指定の無い（偽の）軸は絞り込まない
+    equality_filters = (("repo", "repo"), ("kind", "kind"), ("version", "ndf_version"))
     out = []
     for row in rows:
         started = _parse_time(row.get("started_at"))
         if not _within_time_bound(started, since, until, until_exclusive):
             continue
-        if args.repo and row.get("repo") != args.repo:
-            continue
-        if args.kind and row.get("kind") != args.kind:
-            continue
-        if args.version and row.get("ndf_version") != args.version:
+        if any(getattr(args, attr) and row.get(key) != getattr(args, attr)
+               for attr, key in equality_filters):
             continue
         out.append(row)
     return out

@@ -49,6 +49,10 @@ def _run_probe(probe: tuple[str, ...]) -> tuple[bool, str]:
 
     理由は stderr か stdout の先頭 200 文字。終了コード 0 でも未認証の文言を含めば
     通らなかったものとする（kiro は成否を終了コードで表さない）。
+
+    **起動できない理由が何であっても「通らない」として返す**（#813）。PATH に読めない
+    ディレクトリがあると、コマンドがどこにも無いときに権限の例外が上がる。実行形式で
+    ないファイルも同じ形で落ちる。見つからない例外は下位にあるため先に捕まえる。
     """
     try:
         r = subprocess.run(list(probe), capture_output=True, text=True,
@@ -57,6 +61,8 @@ def _run_probe(probe: tuple[str, ...]) -> tuple[bool, str]:
         return False, "コマンドが見つかりません"
     except subprocess.TimeoutExpired:
         return False, f"{AUTH_PROBE_TIMEOUT} 秒で応答しませんでした"
+    except OSError as exc:
+        return False, f"コマンドを実行できません（{exc.strerror or exc}）"
     merged = f"{r.stdout}\n{r.stderr}".lower()
     ok = r.returncode == 0 and not any(m in merged for m in UNAUTHENTICATED_MARKERS)
     return ok, (r.stderr.strip() or r.stdout.strip())[:200]

@@ -71,6 +71,44 @@ pid だけへシグナルを送っており、CLI が起こした子プロセス
 
 **既存の致命の照合は、kiro の実物と claude の JSON に一致しない。** #619 が再現した形である。
 
+**codex と claude の上限の文言は、2026-09-22 に `develop`（90c0f06f、Python 3.14.4、
+codex-cli 0.154.0、claude 2.1.278）で集めた実物から採った。** 出所と件数は次のとおりである。
+
+| CLI | 集めた経路 | 絞り込みの条件 | 件数 |
+| --- | --- | --- | ---: |
+| codex | 記録（`~/.codex/sessions`）の誤りの本文（`error.message`） | 誤りの種別が `usage_limit_exceeded`。1 形 | 62 |
+| codex | 収束ループのラウンドで上限に当たった標準エラーの記録（2026-09-22 16:35 UTC、132 行） | 行頭に `ERROR: ` の印が付く。1 形 | 2 |
+| codex | 導入済みの実行ファイルに埋め込まれた文字列 | 書き出しが `You've hit your usage limit` または `exceeded retry limit` | 6 形 |
+| claude | 会話の記録（`~/.claude/projects`）の本文 | API の誤りの印（`isApiErrorMessage`）が真。対象期間 2026-09-01〜22。4 形 | 5,103 |
+| claude | 導入済みの実行ファイルに埋め込まれた文字列 | 期間を書かない形 | 1 形 |
+| kiro / agy | 手元の記録（`~/.kiro` / `~/.gemini` / `antigravity-cli/cli.log`） | 利用上限の実物 | 0 |
+
+**codex の 6 形は、照合では 2 形（利用上限・再試行の上限）に集約される。** 実行ファイルの
+6 形は、書き出しに続く案内文の違いまで数えた文字列の数である。照合が読むのは書き出しの
+2 通りだけで、続く案内文は読まない（「上限の検知」）。
+
+**claude の 5 形は、書き出しの後に差し込む期間と種類だけが違う。** 記録の 4 形と実行ファイルの
+1 形の内訳は次のとおりである。
+
+| 種類 | 記録の件数 |
+| --- | ---: |
+| 週 | 3,751 |
+| セッション | 758 |
+| 個人の支出 | 593 |
+| 月の支出 | 1 |
+| 期間を書かない形 | 0（出所は実行ファイルの文字列） |
+
+**逐語の文言の正本は、照合のテストの入力である**
+（`plugins/ndf/skills/cross-review/tests/test_monitor_usage_limit.py`）。この文書は出所と形の
+種類だけを持ち、文言そのものを写さない。同じ文言を 2 か所に置くと、CLI が文言を変えたときに
+片方だけが古くなり、どちらが実物かを読み手が決められなくなる。
+
+**claude の旧い形（`Claude AI usage limit reached`）は、記録にも実行ファイルにも 0 件である。**
+出所が無いため照合の表に置かない。記録に現れたら、同じ手順で出所を書いて足す。
+
+**JSON の形で起動した claude が上限のときに標準エラーの記録へ書いた実物は、手元に 0 件で
+ある。** 起動した claude の上限を読む経路は、標準出力の状態コードのままである。
+
 **プロセスグループの停止は 2026-09-15 に測った。** ジョブ制御を有効にして起動した CLI を
 グループへのシグナルで止めると、3 秒後に子プロセスが書く結果ファイルは書かれなかった。
 
@@ -86,6 +124,8 @@ pid だけへシグナルを送っており、CLI が起こした子プロセス
 | CLI 自身の上限は結果なしの状態のまま、理由だけを分ける | agy は自分の上限に当たると終了コード 0 で終わり、結果ファイルを書かない。監視から見れば「終わったが結果が無い」で正しい |
 | 利用上限の文言は、標準エラーの記録を全担当で見る | 既存の照合が引用・表・grep 形式を除外する。実測では claude の JSON もこの判定に飲み込まれなかった |
 | 標準出力の記録は claude だけ、JSON 向けの照合で見る | JSON は 1 行に引用符を多く含む。行単位の引用の判定が、引用の内側と判定してしまう |
+| 照合の表へ足す文言は、記録か導入済みの実行ファイルに出所を持つものだけにする | 出所の無い行は、合っているかをテストで確かめられない。書いた側の思い込みがテストの期待値にも入り、通ってしまう |
+| 利用上限の文言は、期間や種類を問わず 1 行の照合で読む | claude は書き出しの後に期間や種類（週・セッション・支出）を差し込み、codex も同じ書き出しで 5 形を持つ。形ごとに行を足すと、CLI が種類を増やすたびに照合が遅れる |
 | 読めない結果を共通の語彙に入れる | 結果ファイルが JSON として読めないことは、2 つの Skill が同じ形で見ている |
 | 判定の値が無い・未投稿は cross-review 固有に残す | 結果ファイルの中身とレビューの投稿の話で、監視も cross-refactoring も知りえない |
 | 監視の結末に理由の欄を持たせ、無ければ状態からの既定を使う | 利用上限と CLI の上限は、監視の状態からは決まらない |
@@ -152,9 +192,36 @@ pid だけへシグナルを送っており、CLI が起こした子プロセス
 | `usage_limit` | 標準エラーの記録（全担当） | 生きている間の巡回ごと | `Monthly request limit reached` |
 | `usage_limit` | 同上 | 同上 | `"api_error_status"\s*:\s*429` |
 | `usage_limit` | 同上 | 同上 | `quota exceeded` / `rate limit exceeded`（大文字小文字を問わない）、`^HTTP/\d\S* 429 ` |
+| `usage_limit` | 同上 | 同上 | 下の**利用上限の行**（codex と claude。期間や種類を差し込む形を 1 行で覆う） |
+| `usage_limit` | 同上 | 同上 | 下の**再試行の上限の行**（codex） |
 | `usage_limit` | claude の標準出力の記録 | 同上 | `"api_error_status"\s*:\s*429` |
-| `early_error` | 標準エラーの記録 | 同上 | `^HTTP/\d\S* (?:401\|403) ` と、残りの既存の致命 |
+| `early_error` | 標準エラーの記録 | 同上 | `^HTTP/\d\S* 401 ` / `^HTTP/\d\S* 403 ` と、残りの既存の致命 |
 | `cli_timeout` | 標準エラーの記録 | **終了した後、結果ファイルが無いときだけ** | `print timeout after \S+ with turn in progress` |
+
+**選択肢を持つ 2 行は、表の外に置く。** 表のセルに入れると縦棒を退避する必要があり、退避した
+縦棒は選択肢の区切りではなくリテラルの縦棒として読める。次の 2 行は実装
+（`plugins/ndf/scripts/lib/monitor.py`）の文字列と 1 字ずつ一致する。
+
+**利用上限の行**（codex と claude）:
+
+```text
+^(?:ERROR:\s*)?You['’]ve hit your (?:[\w'’ ]+ )?(?:limit|budget)\b
+```
+
+**再試行の上限の行**（codex）:
+
+```text
+^(?:ERROR:\s*)?exceeded retry limit, last status: 429\b
+```
+
+**codex と claude の上限の 2 行は、行頭で始まる形だけを読む。** 担当は作業中のコマンドの
+出力（差分・ファイルの中身）も標準エラーの記録へ書くため、文言を含む文書やテストを読み
+上げた行が記録に入る。行頭に固定すると、文の途中・差分の行・字下げした文字列は一致しない。
+codex は誤りの行の先頭に印（`ERROR: `）を付けるため、その印を省略できる形にしてある。
+**見逃しは 1 度起動し直すだけで済むが、誤検知は結果を書ける担当を止める。**
+
+**再試行の上限は、最後の状態が 429 のときだけ利用上限と読む。** 同じ文言は状態コードを
+差し込んで作られ、503 などの一時的な誤りでも出る。一時的な誤りは起動し直せば解けうる。
 
 **照合の順序は、利用上限 → 致命 → 警告の見た目の致命である。** 同じ記録に利用上限と他の
 致命が両方あれば、理由は利用上限になる。上限で落ちた後に別の文言が続く形が普通で、上限の
@@ -234,7 +301,8 @@ cross-refactoring の取り込みが従う契約を、ここで定める。**契
 | 観点 | 確かめ方 |
 | --- | --- |
 | 理由の語彙と起動し直しの可否が 1 か所にあり、結末を読む関数が失敗しないこと | `plugins/ndf/scripts/tests/test_monitor_outcome_unit.py` |
-| 利用上限の文言を検知し、引用・表・grep 形式で誤検知しないこと | `plugins/ndf/skills/cross-review/tests/test_monitor_usage_limit.py` |
+| 実物の行（codex の 2 形を行頭の印の有無で 3 行、claude の 5 形）が利用上限の照合に一致し、表・バッククォート・引用・grep 形式・差分・文の途中の行が一致しないこと。照合の関数を直接呼んで確かめる | `plugins/ndf/skills/cross-review/tests/test_monitor_usage_limit.py` |
+| 監視のプロセスを通したとき、codex の 3 行（2 形と行頭の印あり）と claude の週・セッションの 2 行で理由が利用上限・終了コード 4 になること。再試行の上限の 503 の行と、引用・差分の行では止まらないこと | 同上 |
 | CLI の上限の文言を、終了して結果ファイルが無いときだけ理由にすること | 同 `tests/test_launch_print_timeout.py` |
 | CLI が独立したプロセスグループで起動し、グループごと止まること | 同 `tests/test_launch_cli_process_group.py` |
 | 結果の取り込みが理由と監視の詳細を残し、終了コードを変えないこと | 同 `tests/test_read_result_reason.py` |
@@ -243,13 +311,30 @@ cross-refactoring の取り込みが従う契約を、ここで定める。**契
 | 文書の分量が分割の基準を超えないこと | `python3 scripts/check-doc-line-limit.py` |
 | 参照のリンクが解決できること | `python3 scripts/check-markdown-links.py` |
 
+### リリース後テストで確かめる観点
+
+**次の 3 つは、10.16.1 を配布した利用者の環境で確かめる。** 上の観点は監視へ文言を与えて
+結末を読むが、配布物を導入した先で同じ結末になることと、利用者の検索のパスで開始の手順が
+通ることは、配布した版を使う環境でしか確かめられない。
+
+| 観点 | 確かめ方 |
+| --- | --- |
+| CLI が 1 者欠けても、開始の手順が終了コード 0 で終わり、使える者だけで 2 席を埋めること | 利用者の検索のパス（`PATH`）から `kiro-cli` だけを隠し、読めない `/root/.local/bin` を含んだまま、検証用の Pull Request でクロスレビューの開始の手順を実行する。席の決め方は[参加者と席](cross-review-participants-and-seats.md)にある |
+| 導入先の監視で、codex の 2 形と claude の 5 形が理由「利用上限」・起動し直しの可否が偽になること | 導入先の監視へ実物の行を 1 つずつ標準エラーの記録として与え、結末を読む |
+| 10.16.0 で合格した kiro の 1 行と claude の JSON の上限の状態コードが、同じ理由・同じ可否のままであること | 同じ手順で、2 つの形を 1 つずつ与えて結末を読む |
+
+**JSON の形で起動した claude が上限のときに標準エラーの記録へ書く文言も、このときに確かめる。**
+手元の記録には 0 件のため、照合の表には足していない（「背景」）。
+
 ## 関連リンク
 
 - [issue #729](https://github.com/devbasex/ai-plugins/issues/729) — 結果なしの判断を共通層へ移す
 - [issue #619](https://github.com/devbasex/ai-plugins/issues/619) — 利用上限で止まった担当の空振りの起動し直し
 - [issue #584](https://github.com/devbasex/ai-plugins/issues/584) — 止めた担当が後から結果ファイルを書く
+- [issue #811](https://github.com/devbasex/ai-plugins/issues/811) — codex と claude の実物の文言が照合の表に無い
 - [結果なしの取り込みと開き直し](cross-refactoring-apply-intake.md) — cross-refactoring 側の読み取りを使う仕様
 - [PR #791](https://github.com/devbasex/ai-plugins/pull/791) — 実装
+- [PR #820](https://github.com/devbasex/ai-plugins/pull/820) — codex と claude の実物の文言を照合の表へ足す実装
 - [`cross-review` の状態ファイルと入出力の契約](../../plugins/ndf/skills/cross-review/docs/04-contracts.md)
 - [`cross-review` の状態とレビューの手順](../../plugins/ndf/skills/cross-review/docs/01-state-and-review.md)
 - [`cross-review` の手順](../../plugins/ndf/skills/cross-review/SKILL.md)
