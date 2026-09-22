@@ -16,9 +16,15 @@ transcript=$(echo "$input" | jq -r '.transcript_path // empty' 2>/dev/null)
 model_name=$(echo "$input" | jq -r '.model.display_name // .model.id // empty' 2>/dev/null | sed 's/ *(.*)//; s/ //g')
 ctx_label="${model_name:-ctx}"
 
+# 使用量がこの値を超えたら赤で知らせる。上限は出さないため、色で危険な水準を示す
+WARN_TOKENS=500000
+WARN_COLOR='\033[0;31m'
+
 ctx_info=""
 if [ -n "$total_input" ]; then
-  ctx_info=$(printf " \033[0;36m[%s %sk" "$ctx_label" "$((total_input / 1000))")
+  main_used="$((total_input / 1000))k"
+  [ "$total_input" -gt "$WARN_TOKENS" ] && main_used=$(printf "$WARN_COLOR%s\033[0;36m" "$main_used")
+  ctx_info=$(printf " \033[0;36m[%s %s" "$ctx_label" "$main_used")
 
   # 実行中のサブエージェントのコンテキスト使用量を並べる。statusLine の JSON は
   # メインセッションの値しか持たないため、サブエージェントの記録から読む。
@@ -51,21 +57,14 @@ if [ -n "$total_input" ]; then
         mtime=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null)
         [ -n "$mtime" ] && [ $((now - mtime)) -ge 30 ] && continue
       fi
-      # 説明の先頭を端末の 8 桁までに切ってラベルにする。種類名は general-purpose が
-      # ほとんどで見分けに使えない。全角は 2 桁を取るため、文字数ではなく桁数で切る
-      # （U+2E80 以降を全角とみなす近似）
-      label=$(jq -r '
-        def w: if . >= 11904 then 2 else 1 end;
-        .description // empty | gsub("\\s"; "") | explode as $c
-        | if ($c | map(w) | add // 0) <= 8 then .
-          else (reduce $c[] as $x ({s: [], n: 0, full: false};
-                  if .full or .n + ($x | w) > 7 then .full = true
-                  else .s += [$x] | .n += ($x | w) end)
-                | .s | implode) + "…" end' "${f%.jsonl}.meta.json" 2>/dev/null)
-      [ -n "$label" ] || { label=$(basename "$f" .jsonl); label=${label#agent-}; label=${label:0:7}; }
-      # 1M 未満のモデルは Haiku（200K）だけなので、150k を超えたら黄色で知らせる
+      # 説明の先頭 4 文字をラベルにする。種類名は general-purpose がほとんどで見分けに使えない
+      label=$(jq -r '.description // empty | gsub("\\s"; "") | .[0:4]' "${f%.jsonl}.meta.json" 2>/dev/null)
+      [ -n "$label" ] || { label=$(basename "$f" .jsonl); label=${label#agent-}; label=${label:0:4}; }
+      # 500k を超えたら赤で知らせる。1M 未満のモデルは Haiku（200K）だけなので、Haiku は 150k で知らせる
+      limit=$WARN_TOKENS
+      case "$model" in *haiku*) limit=150000 ;; esac
       warn=0
-      case "$model" in *haiku*) [ "$tokens" -gt 150000 ] && warn=1 ;; esac
+      [ "$tokens" -gt "$limit" ] && warn=1
       rows="$rows$tokens"$'\t'"$warn"$'\t'"$label"$'\n'
     done
   fi
@@ -77,7 +76,7 @@ if [ -n "$total_input" ]; then
       n=$((n + 1))
       [ "$n" -gt 3 ] && continue
       entry="$label $((tokens / 1000))k"
-      [ "$warn" = 1 ] && entry=$(printf "\033[0;33m%s\033[0;36m" "$entry")
+      [ "$warn" = 1 ] && entry=$(printf "$WARN_COLOR%s\033[0;36m" "$entry")
       subs="${subs:+$subs · }$entry"
     done < <(printf "%s" "$rows" | sort -t $'\t' -k1,1nr)
     [ "$n" -gt 3 ] && subs="$subs +$((n - 3))"

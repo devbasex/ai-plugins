@@ -103,9 +103,20 @@ update_settings() {
   fi
 }
 
+# 再描画の間隔 (秒)。メインが待機中でもイベントが起きず描き直されないため、
+# サブエージェントの使用量を追うには時間で描き直す必要がある
+NDF_REFRESH_INTERVAL=5
+
 set_ndf_statusline() {
-  update_settings --arg cmd "$NDF_COMMAND" \
-    '.statusLine = {type: "command", command: $cmd}'
+  update_settings --arg cmd "$NDF_COMMAND" --argjson ri "$NDF_REFRESH_INTERVAL" \
+    '.statusLine = {type: "command", command: $cmd, refreshInterval: $ri}'
+}
+
+# 既に NDF 標準を使っている設定へ、refreshInterval が無ければ足す。利用者が決めた値は残す
+ensure_refresh_interval() {
+  if [ "$(jq -r '.statusLine | has("refreshInterval")' "$SETTINGS" 2>/dev/null)" = false ]; then
+    update_settings --argjson ri "$NDF_REFRESH_INTERVAL" '.statusLine.refreshInterval = $ri'
+  fi
 }
 
 # NDF 由来の旧 statusline を検出した際に、既存設定をバックアップした上で
@@ -124,8 +135,9 @@ cmd_ensure() {
   deploy_script
   # 既に statusLine が設定されている場合
   if [ -n "$(jq -r '.statusLine // empty' "$SETTINGS" 2>/dev/null)" ]; then
-    # 正規パスを指していれば deploy_script で本体が追従済み (何もしない)
+    # 正規パスを指していれば deploy_script で本体が追従済み。再描画の間隔だけ補う
     if is_ndf_statusline; then
+      ensure_refresh_interval
       return 0
     fi
     # NDF が過去に配置したコピー (マーカー付き or レガシー statusline-command.sh) を
@@ -146,6 +158,7 @@ cmd_ensure() {
 cmd_set() {
   deploy_script
   if is_ndf_statusline; then
+    ensure_refresh_interval
     echo "[ndf:statusline] 既に NDF 標準 statusline が設定されています"
     return 0
   fi
