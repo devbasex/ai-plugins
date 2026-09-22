@@ -46,7 +46,6 @@ STATE=$TMP_DIR/cross-review-pr$STATE_PR-state.json
 load_context() {
 WORKTREE=$(jq -r '.worktree_path' "$STATE")
 REPO=$(jq -r '.repo' "$STATE")
-EVENT_DOWNGRADE=$(jq -r '.event_downgrade // false' "$STATE")
 EXTRA_REVIEW_INSTRUCTIONS=$(jq -r '.review_instructions // .extra_review_instructions // ""' "$STATE")
 # PR (=current_pr) は gh コマンドのレビュー対象 PR 番号として使う。
 # tmp パス側は STATE_PR で固定 (monitor.py / state.py との読み書き整合のため)。
@@ -59,11 +58,15 @@ SHA=$(jq -r '(.rounds[-1].head_sha // "")' "$STATE")
 }
 
 prepare_prompt_context() {
-# 前ラウンドの結果を残さない。投稿失敗などで今ラウンドの result.json が
+# 前ラウンドの結果を残さない。担当が止まって今ラウンドの result.json が
 # 書かれなかったとき、state.py read-result が**前ラウンドの結果を読んで**
 # 同じ判定を繰り返す事故を防ぐ。
+# 一時の名前のファイルも消す。前の起動が書きかけで止まった残りを、改名の対象に
+# しないため。
 rm -f "$TMP_DIR/$SEAT-review-pr$STATE_PR-result.json" \
+      "$TMP_DIR/$SEAT-review-pr$STATE_PR-result.json.tmp" \
       "$TMP_DIR/$SEAT-review-pr$STATE_PR-round$ROUND-payload.json" \
+      "$TMP_DIR/$SEAT-review-pr$STATE_PR-round$ROUND-payload.json.tmp" \
       "$TMP_DIR/$SEAT-review-pr$STATE_PR-round$ROUND-api-payload.json"
 
 STEM=$TMP_DIR/$SEAT-review-pr$STATE_PR
@@ -97,16 +100,14 @@ render_review_prompt() {
 cat > "$PROMPT" <<EOF
 # /ndf:pr-review 実行 (cross-review $SEAT / round $ROUND)
 
-PR #$PR を **$SEAT の観点でレビューし、gh api で直接 PR に投稿** してください。
+PR #$PR を **$SEAT の観点でレビューし、指摘を 2 つのファイルへ書いて** ください。
+**PR への投稿は行わない。** 投稿はレビューを回す側がこの 2 つのファイルから行う。
 
 ## 必須コンテキスト
 - repo: $REPO
 - PR: #$PR
 - commit_id (headRefOid): $SHA
 - worktree: $WORKTREE （**ファイル読み取りは必ず此処の絶対パスを使う**）
-- event_downgrade: $EVENT_DOWNGRADE
-  - true の場合: payload の \`event\` は \`COMMENT\` にすること。
-    body 先頭 prefix の \`<event>\` は本来の intent を書く。
 
 ## 既存コメントスナップショット（重複指摘禁止）
 workspace 外を読まなくて済むよう、以下にインライン展開する:
@@ -116,28 +117,24 @@ $EXISTING_INLINE
 \`\`\`
 $EXTRA_REVIEW_BLOCK
 
-## 出力契約
-- review body の **先頭行** に必ず以下を入れる:
-  \`\`\`
-  ## 🤖 cross-review | round $ROUND | $SEAT | <event(intent)>
-  \`\`\`
-  - \`<event>\` は **本来の intent** (REQUEST_CHANGES / APPROVE / COMMENT)
+## 指摘に **含めてはいけないもの**（Resolve 負荷を増やすため）
+- ❌ **「良い点」/「Strengths」/「評価できる点」** — 総評にも書かない
+- ❌ **対応アクションが無い指摘** — 観察・感想・現状説明だけは禁止
+- ❌ **nit / スタイル指摘** — 好みの問題は指摘にしない (無視する)
+- ❌ **コード引用 (\`\`\` ... \`\`\`) だけで指摘内容が無い指摘**
+- ❌ **判定 \`COMMENT\` での雑感** — 直すべき点が無ければ \`APPROVE\` にする
 
-### 出力に **含めてはいけないもの**（Resolve 負荷を増やすため）
-- ❌ **「良い点」/「Strengths」/「評価できる点」 section** — body にも書かない
-- ❌ **対応アクションが無いインラインコメント** — 観察・感想・現状説明だけは禁止
-- ❌ **nit / スタイル指摘のインライン化** — 好みの問題はコメント化しない (無視する)
-- ❌ **コード引用 (\`\`\` ... \`\`\`) だけで指摘内容が無いコメント**
-- ❌ **\`event=COMMENT\` での雑感投稿** — 直すべき点が無ければ \`APPROVE\` にする
-
-### インラインコメントの書式
+### 指摘の書式
 - \`[重要度 / カテゴリ]\` プレフィックス必須 (例: \`[major / 正確性]\`)
-- 重要度は \`critical\` / \`major\` / \`minor\` のみ使う (nit はインライン化しない)
-- 本文は **1 コメント = 1 修正アクション** で完結させる。1〜2 文で具体的な修正提案を書く
+- 重要度は \`critical\` / \`major\` / \`minor\` のみ使う (nit は指摘にしない)
+- 本文は **1 指摘 = 1 修正アクション** で完結させる。1〜2 文で具体的な修正提案を書く
+- 指す行が分かる指摘は \`path\` と \`line\` を埋める。**差分の外の行でもよい**
+  （差分の外を指す指摘は、投稿する側が総評へ移す）
+- 設計レベル・PR 横断の指摘で行を指せないものは、\`path\` / \`line\` を省く
 
-### body (総評) の書き方
+### 総評（\`summary\`）の書き方
 - 設計レベル・PR 横断の **修正提案のみ** 書く
-- 書くことが無ければ prefix 行 + 1 行サマリだけで良い (褒め言葉や評価文は不要)
+- 書くことが無ければ 1 行サマリだけで良い (褒め言葉や評価文は不要)
 
 ### 進捗マーカー（監視用）
 - 無言ハングと区別できるよう、作業フェーズが進むたびに
@@ -146,69 +143,53 @@ $EXTRA_REVIEW_BLOCK
   - \`start: review PR #$PR round $ROUND\`
   - \`scan: diff and existing comments\`
   - \`analyze: candidate findings\`
-  - \`post: submit review\`
+  - \`write: payload and result\`
   - \`done: result.json written\`
 
+## 書くファイル（2 つ）
 
-### インラインコメントを付けられる行（422 対策・必須）
-- インラインコメントは **この PR の差分に含まれる行にしか付けられない**。差分外の行を
-  指定すると GitHub が \`HTTP 422 Line could not be resolved\` を返し、**インラインだけで
-  なくレビュー本体も投稿されない**（指摘が丸ごと失われる）
-- 差分に無い箇所を指摘したいときは、インラインにせず **body に「ファイル名:行 + 指摘」
-  の形で書く**
-- それでも 422 が返ったときは、**該当インラインを body へ移して再投稿する**。
-  投稿を諦めない
+**どちらも一時の名前で書き終えてから、正式の名前へ改名する。改名の順序は控えが先、
+結果ファイルが後である。** 結果ファイルが正式の名前で現れたことが、2 つとも書き終えた
+印になる。途中で止まったときは正式の名前のファイルを残さない。
 
-### 投稿できなかった場合（必須）
-- gh api がエラーを返したら、err.log に詳細を残したうえで **result.json を必ず書いて
-  から終了する**。\`event\` は本来の intent、\`comments_count\` は 0、
-  \`"post_error"\` に失敗理由（HTTP status とメッセージ）を入れる:
-  \`\`\`json
-  {"event": "REQUEST_CHANGES", "posted_as": "COMMENT", "comments_count": 0,
-   "review_url": "", "by_severity": {"critical": 0, "major": 0, "minor": 0, "nit": 0},
-   "post_error": "422 Line could not be resolved"}
-  \`\`\`
-- result.json を書かずに終了すると、収束ループは**前ラウンドの結果を使うか、結果なしで
-  停止する**。エラー時ほど result.json が要る
-
-- 投稿後、サマリを **$STEM-result.json** に
-  **必ず以下のキーで** 書く:
-  \`\`\`json
-  {
-    "event": "APPROVE",
-    "posted_as": "COMMENT",
-    "comments_count": 3,
-    "review_url": "https://github.com/.../pull/$PR#pullrequestreview-...",
-    "by_severity": {"critical": 0, "major": 0, "minor": 0, "nit": 0}
-  }
-  \`\`\`
-  - \`intent\` / \`comment_count\` 等の別名は使わないこと
-  - \`event\` の値は \`APPROVE\` / \`REQUEST_CHANGES\` / \`COMMENT\` のいずれか
-  - \`event_downgrade=true\` のとき \`posted_as\` は \`COMMENT\` にダウングレード可
-- payload は **$STEM-round$ROUND-payload.json** に保存
-  （\`{ "comments": [{path, line, body, severity, evidence, falsification,
-  suggested_check, posted_to}, ...] }\` 形式）
-  - **\`comments[]\` に載せるのは、あなたが出した指摘の全件である。** 投稿したインラインの
-    写しではない。**差分の外を指すために body へ書いた指摘も、422 で body へ移した指摘も
-    載せる**（載せないと進行側から見えない）
-  - \`posted_to\` は \`inline\` / \`body\` のどちらへ投稿したか
-  - \`path\` / \`line\` は body へ書いたときも埋める（body でも「ファイル名:行 + 指摘」の
-    形で書くため、値は手元にある）
-  - \`evidence\` は根拠（対象のコードと到達経路）、\`falsification\` は反証条件
-    （これが成り立てば棄却できる）、\`suggested_check\` は実行できる検証手順
-  - **根拠と反証条件は、別の担当がその指摘を確かめるためのものである。** 確かめられない
-    書き方（「一般によくない」など）は根拠にならない
+1. 指摘の控えを **$STEM-round$ROUND-payload.json.tmp** に書く:
+   \`\`\`json
+   {
+     "summary": "総評（1〜数行）",
+     "comments": [
+       {"path": "src/foo.py", "line": 42, "body": "[major / 正確性] ...",
+        "severity": "major", "evidence": "...", "falsification": "...",
+        "suggested_check": "..."}
+     ]
+   }
+   \`\`\`
+   - **\`comments[]\` に載せるのは、あなたが出した指摘の全件である**
+   - \`evidence\` は根拠（対象のコードと到達経路）、\`falsification\` は反証条件
+     （これが成り立てば棄却できる）、\`suggested_check\` は実行できる検証手順
+   - **根拠と反証条件は、別の担当がその指摘を確かめるためのものである。** 確かめられない
+     書き方（「一般によくない」など）は根拠にならない
+2. 判定を **$STEM-result.json.tmp** に **必ず以下のキーだけで** 書く:
+   \`\`\`json
+   {
+     "event": "REQUEST_CHANGES",
+     "by_severity": {"critical": 0, "major": 1, "minor": 0, "nit": 0}
+   }
+   \`\`\`
+   - \`event\` は本来の判定で、\`APPROVE\` / \`REQUEST_CHANGES\` / \`COMMENT\` のいずれか。
+     \`intent\` などの別名は使わない
+3. 改名する（**この順で**）:
+   \`\`\`bash
+   mv "$STEM-round$ROUND-payload.json.tmp" "$STEM-round$ROUND-payload.json"
+   mv "$STEM-result.json.tmp" "$STEM-result.json"
+   \`\`\`
 
 ## 守るべきこと
 - **発見を終えるまで、参照してよい既存コメントは起動時に渡されたスナップショットに
-  限る。** 同じラウンドの他の担当が投稿した指摘・結果ファイル・進捗ログは参照しない
-  （指摘を出し終えて投稿するまでの間の話で、投稿の手順が既存コメントを引くことは妨げない）
-  - **担当は並列に起動する。** 先に投稿した担当の指摘を読むと、独立に見つけた指摘と
-    区別できなくなる。同じ指摘が 2 者から出たことに意味があるのは、互いを見ていない場合
-    だけである
-- **リポジトリ編集禁止**。gh api での投稿のみ許可
-- worktree 外のパスは触らない
-- gh api 失敗時は err.log にエラー詳細を残し、**result.json を書いてから**終了する
+  限る。** 同じラウンドの他の担当の結果ファイル・進捗ログは参照しない
+  - **担当は並列に起動する。** 他の担当の指摘を読むと、独立に見つけた指摘と区別できなく
+    なる。同じ指摘が 2 者から出たことに意味があるのは、互いを見ていない場合だけである
+- **リポジトリ編集禁止。PR・GitHub・git への書き込みもしない**
+- worktree 外のパスは、上の 2 つのファイルと進捗マーカー以外に触らない
 EOF
 }
 

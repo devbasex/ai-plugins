@@ -339,10 +339,16 @@ def test_a_failed_reimport_does_not_erase_what_was_taken(tmp_dir, state_mod):
 SKILL = pathlib.Path(__file__).resolve().parents[1]
 
 
-def test_the_prompt_asks_for_the_four_items():
+def test_the_prompt_asks_for_the_three_items():
     text = (SKILL / "scripts/launch-reviewer.sh").read_text(encoding="utf-8")
-    for key in ("evidence", "falsification", "suggested_check", "posted_to"):
+    for key in ("evidence", "falsification", "suggested_check"):
         assert key in text, key
+
+
+def test_the_prompt_does_not_ask_where_it_was_posted():
+    """送れた先（`posted_to`）は投稿する側が書く。担当には書かせない（#730）。"""
+    text = (SKILL / "scripts/launch-reviewer.sh").read_text(encoding="utf-8")
+    assert "posted_to" not in text
 
 
 def test_the_prompt_asks_for_body_only_findings():

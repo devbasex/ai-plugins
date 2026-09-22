@@ -213,3 +213,18 @@ def test_only_what_is_sent_is_downgraded_on_ones_own_pull_request(
     assert json.loads(sent[-1]["stdin"])["event"] == "COMMENT"
     entry = _entry(tmp_dir)
     assert entry["intent"] == "REQUEST_CHANGES" and entry["posted_as"] == "COMMENT"
+
+
+def test_a_reviewer_that_wrote_nothing_adds_no_review(
+        tmp_dir, state_mod, fake_gh) -> None:
+    """控えも結果も書かずに終わった担当では、レビューが 1 件も増えない（AC4）。"""
+    _seed(tmp_dir)
+    # 書きかけの一時の名前だけが残った状態も、正式の名前が無ければ結果なしである。
+    (tmp_dir / f"{AGENT}-review-pr{PR}-round{ROUND}-payload.json.tmp").write_text("{")
+    fake_gh.set_rules([_NO_PRIOR, _ACCEPT])
+
+    with pytest.raises(SystemExit):
+        state_mod.cmd_read_result(_args())
+
+    assert [c for c in fake_gh.joined() if "--method POST" in c] == []
+    assert _entry(tmp_dir)["intent"] == "NO_RESULT"
