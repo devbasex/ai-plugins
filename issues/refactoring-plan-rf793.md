@@ -263,7 +263,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| conditional_chain | extract_method | minor | kiro | 検証中 | 1 |
+| conditional_chain | extract_method | minor | kiro | 採用 | 1 |
 
 **なぜ**: 行ごとの絞り込みが 5 本の連続した if ... continue と、until 判定に埋め込まれた入れ子の三項（started >= until if until_exclusive else started > until）で構成される。時刻の下限・上限・repo・kind・version という別々の観点が 1 つのループ本体に同居し、until_exclusive の分岐が特に読みづらい。
 
@@ -271,6 +271,49 @@
 2. _select は since/until を計算した後、_within_time_bound と残りの属性一致（repo / kind / version）で 1 行を通すか決める
 3. 属性一致も見通しが悪ければ _matches_filters(row, args) へまとめる
 4. test_run_metrics.py::test_aggregate_filters（since / until / repo / kind / version の 5 例）で退行が無いことを確かめる
+
+## ラウンド 5（実装 codex / レビュー agy / kiro）
+
+### R5-001 — `plugins/ndf/scripts/lib/auth.py#_probe_all`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| one_by_one_iteration | replace_with_bulk_operation | major | codex / agy | 取り消し | 0 |
+
+**なぜ**: AUTH_PROBES に定義された各 CLI（最大4者）の認証確認コマンド（タイムアウト各120秒）を for ループ内で直列に実行しており、参加者数に比例して全体の待ち時間が累積する。入力順と出力順を維持したまま有界な並行実行（ThreadPoolExecutor 等）へ置き換えることで待ち時間を短縮できる。
+
+**手順**: 1. test_auth_probe.py で複数 CLI の確認順序・出力順序・戻り値構造を検証する既存テストを確認する
+2. _probe_all 内で AUTH_PROBES に存在する対象を抽出し、有界な並行ワーカー（concurrent.futures 等）で並行実行する
+3. 各ランタイムの結果を入力順に results へ格納し、info 出力も入力順に発出する
+4. pytest plugins/ndf/scripts/tests/test_auth_probe.py および全体テストで互換性と表示順を検証する
+
+### R5-002 — `plugins/ndf/skills/cross-review/scripts/state.py#_apply_resume_args_block`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_method | extract_method | major | codex / agy | 取り消し | 0 |
+
+**なぜ**: 1 つの関数内で、引数の正規化、--only none による特殊な状態解除と履歴追記、一般フィールドの反映、参加者再構築用の引数名前空間生成、_resolve_reviewers による再解決、成功時の状態・履歴更新という複数の段階が連続して書かれており、状態更新の原子性と各段階の責務が混在している。
+
+**手順**: 1. test_state_resume_args.py で --only none、通常引数反映、参加者再構築失敗時の原子性（ロールバック／非更新）がテストされていることを確認する
+2. --only none の状態解除と履歴追記を補助関数へ抽出する
+3. 既存の参加者情報と再開引数をマージして再解決用 Namespace を組み立てる処理を補助関数へ抽出する
+4. 参加者の解決成功後に状態と resume_changes を更新する処理を補助関数へ抽出する
+5. _apply_resume_args_block を各ステップの明瞭なオーケストレーションに再構成し、対象テストと全体テストを実行する
+
+### R5-003 — `plugins/ndf/skills/cross-review/scripts/rotate-pr.sh#execute_squash`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_method | extract_method | major | codex / agy | 取り消し | 0 |
+
+**なぜ**: 86行の関数内で、prepare.json や gh pr view からの PR メタ情報（base, title）解決、detached HEAD からの head ブランチ復元、タイトル末尾の (rotated) 接尾辞の正規化ループ、squash コミットの作成と push、新 PR 本文の組み立て、rotate_close_and_create 呼び出しが密結合しており、情報解決と Git/GitHub 副作用の分離が不明瞭になっている。
+
+**手順**: 1. test_rotate_pr_queue.py などの現状固定テストで squash モードの振る舞い（接尾辞正規化、ブランチ名解決など）を確認する
+2. PR メタ情報（base / title）のフォールバック取得処理を補助関数へ抽出する
+3. ブランチ復元（git branch --show-current / prepare.json / gh pr view）と (rotated) 接尾辞の正規化処理を補助関数へ抽出する
+4. squash コミット作成とリモート push の Git 操作を補助関数へ抽出する
+5. execute_squash を各抽出関数のパイプライン呼び出しに整理し、テストを実行する
 
 ## 見送った項目
 
@@ -292,3 +335,6 @@
 | 3 | `plugins/ndf/skills/cross-review/scripts/state.py#_init_new_state` | long_method | どの改善項目にも割り当てられていないコミットが 1 件（1a81a1a）。検証を回避した変更や、状態と実差分の食い違いを Pull Request に残さないため、この適用ラウンドを取り消します |
 | 3 | `plugins/ndf/scripts/lib/refresh.py#fetch` | long_method | どの改善項目にも割り当てられていないコミットが 1 件（1a81a1a）。検証を回避した変更や、状態と実差分の食い違いを Pull Request に残さないため、この適用ラウンドを取り消します |
 | 4 | `plugins/ndf/skills/cross-review/scripts/state.py#_sync_worktree` | long_method | 1 ラウンドの採用上限 5 件を超えた |
+| 5 | `plugins/ndf/scripts/lib/auth.py#_probe_all` | one_by_one_iteration | どの改善項目にも割り当てられていないコミットが 1 件（89bb86f）。検証を回避した変更や、状態と実差分の食い違いを Pull Request に残さないため、この適用ラウンドを取り消します |
+| 5 | `plugins/ndf/skills/cross-review/scripts/state.py#_apply_resume_args_block` | long_method | どの改善項目にも割り当てられていないコミットが 1 件（89bb86f）。検証を回避した変更や、状態と実差分の食い違いを Pull Request に残さないため、この適用ラウンドを取り消します |
+| 5 | `plugins/ndf/skills/cross-review/scripts/rotate-pr.sh#execute_squash` | long_method | どの改善項目にも割り当てられていないコミットが 1 件（89bb86f）。検証を回避した変更や、状態と実差分の食い違いを Pull Request に残さないため、この適用ラウンドを取り消します |
