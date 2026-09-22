@@ -315,6 +315,61 @@
 4. squash コミット作成とリモート push の Git 操作を補助関数へ抽出する
 5. execute_squash を各抽出関数のパイプライン呼び出しに整理し、テストを実行する
 
+## ラウンド 6（実装 agy / レビュー codex / kiro）
+
+### R6-001 — `plugins/ndf/scripts/lib/transcript_agents.py#_aggregate_token_metrics`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_method | extract_method | major | codex | 取り消し | 1 |
+
+**なぜ**: 1回の走査でトークンの固定費・最大値、応答IDの重複排除、モデル別件数を集め、その後に派生値と代表モデルまで確定している。異なる集計規則が同じ局所状態へ混在し、各規則を単独で追いにくい。
+
+**手順**: 1. 合成でない assistant 行を選ぶ処理を名前付きの反復単位へ抽出する
+2. トークン指標の更新を _update_token_metrics として抽出する
+3. 応答IDとモデル件数の更新を _collect_response_model として抽出する
+4. 呼び出し側は集計結果から responses・work・modelを従来どおり確定し、既存フィクスチャの契約値で退行確認する
+
+### R6-002 — `plugins/ndf/scripts/lib/metrics.py#format_report`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_method | extract_method | major | codex | 取り消し | 1 |
+
+**なぜ**: 実装担当表の行生成、レビュー担当表の行生成、計測不能・指定値代用の注記、比較上の注意の4段階を1関数が通しで組み立てており、表の列変更と注記構成の変更が同じ関数へ集中している。
+
+**手順**: 1. 実装担当の行生成を _format_impl_rows として抽出する
+2. レビュー担当の行生成を _format_reviewer_rows として抽出する
+3. 計測注記の追加を _append_measurement_notes として抽出する
+4. format_report は各段を順に呼び、既存の文字列出力が一致することを既存テストで確認する
+
+### R6-003 — `plugins/ndf/skills/cross-review/tests/conftest.py#_no_github_state`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| mock_targets_implementation_detail | fix_dependency_direction | major | codex | 取り消し | 1 |
+
+**なぜ**: autouse fixture が state.py の非公開関数 _fetch_check_runs と _fetch_pr_metadata を名前で直接差し替えるため、GitHub取得処理の抽出や改名だけで広範なテストが壊れる。実際の外部境界は _gh_rest と subprocess.run なのに、その内側の実装手順を全テストへ固定している。
+
+**手順**: 1. state.py が使うGitHub取得境界を明示した依存としてまとめる
+2. cmd系の入口からその境界を注入できる最小の既定値を置く
+3. _no_github_state は非公開取得関数ではなく境界の偽実装を注入する
+4. 実取得の契約テストは既存の fake gh と _gh_rest 差し替えを維持し、全テストで外部通信が発生しないことを確認する
+
+### R6-004 — `plugins/ndf/scripts/lib/metrics.py#_append_model_measurement_warnings`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_parameter_list | introduce_parameter_object | minor | kiro | 未着手 | 0 |
+
+**なぜ**: 引数が 7 個。うち unmeasured / assumed は出力の蓄積先、round_no / runtime / requested / observed / role_label は 1 ラウンド 1 担当の計測文脈で、常に組で渡り回る。2 つの呼び出し側（_aggregate（impl）と _aggregate_round_reviewers）で同じ 5 値をその順で並べており、順序を取り違えると requested と observed が入れ替わっても型が同じ str のため気付けない。
+
+**手順**: 1. runtime / requested / observed / role_label（と round_no）をまとめる NamedTuple もしくは dataclass（例 MeasurementContext）を metrics.py に定義する
+2. _append_model_measurement_warnings の署名を (unmeasured, assumed, ctx) へ変更し、本体の runtime 等の参照を ctx.runtime 等へ置き換える
+3. aggregate 内の impl 経路（round_no・impl_runtime・requested・observed・"実装担当"）で ctx を組み立てて渡す
+4. _aggregate_round_reviewers 内のレビュー担当経路（round_no・name・requested・observed・"レビュー担当"）でも ctx を組み立てて渡す
+5. cross-refactoring/tests/test_models_and_metrics.py（既存）で aggregate の出力（unmeasured / assumed の文言）が不変であることを確認する
+
 ## 見送った項目
 
 | ラウンド | 対象 | 兆候・経路 | 理由 |
@@ -338,3 +393,6 @@
 | 5 | `plugins/ndf/scripts/lib/auth.py#_probe_all` | one_by_one_iteration | どの改善項目にも割り当てられていないコミットが 1 件（89bb86f）。検証を回避した変更や、状態と実差分の食い違いを Pull Request に残さないため、この適用ラウンドを取り消します |
 | 5 | `plugins/ndf/skills/cross-review/scripts/state.py#_apply_resume_args_block` | long_method | どの改善項目にも割り当てられていないコミットが 1 件（89bb86f）。検証を回避した変更や、状態と実差分の食い違いを Pull Request に残さないため、この適用ラウンドを取り消します |
 | 5 | `plugins/ndf/skills/cross-review/scripts/rotate-pr.sh#execute_squash` | long_method | どの改善項目にも割り当てられていないコミットが 1 件（89bb86f）。検証を回避した変更や、状態と実差分の食い違いを Pull Request に残さないため、この適用ラウンドを取り消します |
+| 6 | `plugins/ndf/scripts/lib/transcript_agents.py#_aggregate_token_metrics` | long_method | 適用結果に項目がありません: R6-003（群の全項目を 1 つのコミットへまとめ、各項目へ同じ SHA を申告します） |
+| 6 | `plugins/ndf/scripts/lib/metrics.py#format_report` | long_method | 適用結果に項目がありません: R6-003（群の全項目を 1 つのコミットへまとめ、各項目へ同じ SHA を申告します） |
+| 6 | `plugins/ndf/skills/cross-review/tests/conftest.py#_no_github_state` | mock_targets_implementation_detail | 適用結果に項目がありません: R6-003（群の全項目を 1 つのコミットへまとめ、各項目へ同じ SHA を申告します） |
