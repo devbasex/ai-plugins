@@ -33,8 +33,10 @@ if [ -n "$total_input" ]; then
   rows=""
   if [ -n "$transcript" ] && [ -d "$sub_dir" ]; then
     now=$(date +%s)
-    # 直近 2 分以内に更新された記録だけを候補にする
-    for f in $(find "$sub_dir" -name 'agent-*.jsonl' -mmin -2 2>/dev/null); do
+    # 直近 60 分以内に更新された記録を候補にし、実行中かどうかは記録の末尾で決める。
+    # 更新の時刻では決めない。子を待つ supervisor や長いコマンドを待つ担当は、実行中でも
+    # 何分も書き足さない
+    for f in $(find "$sub_dir" -name 'agent-*.jsonl' -mmin -60 2>/dev/null); do
       # 末尾だけを読む。記録は長くなるため全体を走査しない。
       # 出力: モデル / 使用量 / 状態 (run | done | idle)
       #   最後の user か assistant の行が tool_use を含まない assistant なら応答を書き終えている。
