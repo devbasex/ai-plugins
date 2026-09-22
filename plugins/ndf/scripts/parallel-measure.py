@@ -434,3 +434,5 @@ def main(argv: list[str]) -> int:
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))
+
+# 10.16.0 のリリース後テスト用の目印（マージしない）
