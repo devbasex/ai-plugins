@@ -71,6 +71,24 @@ pid だけへシグナルを送っており、CLI が起こした子プロセス
 
 **既存の致命の照合は、kiro の実物と claude の JSON に一致しない。** #619 が再現した形である。
 
+**codex と claude の上限の文言は、2026-09-22 に `develop`（90c0f06f、Python 3.14.4、
+codex-cli 0.154.0、claude 2.1.278）で集めた実物から採った。** 出所と件数は次のとおりである。
+
+| CLI | 集めた経路 | 件数 |
+| --- | --- | ---: |
+| codex | 記録の誤りの本文のうち、種別が利用上限のもの（1 形） | 62 |
+| codex | 収束ループのラウンドで上限に当たった標準エラーの記録（1 形。行頭に印が付く） | 2 |
+| codex | 導入済みの実行ファイルに埋め込まれた文字列 | 6 形 |
+| claude | 会話の記録のうち、API の誤りの印が真の本文（4 形） | 5,103 |
+| claude | 導入済みの実行ファイルの文字列（期間を書かない形を含む） | 1 形 |
+| kiro / agy | 手元の記録 | 0 |
+
+**claude の旧い形（`Claude AI usage limit reached`）は、記録にも実行ファイルにも 0 件である。**
+出所が無いため照合の表に置かない。記録に現れたら、同じ手順で出所を書いて足す。
+
+**JSON の形で起動した claude が上限のときに標準エラーの記録へ書いた実物は、手元に 0 件で
+ある。** 起動した claude の上限を読む経路は、標準出力の状態コードのままである。
+
 **プロセスグループの停止は 2026-09-15 に測った。** ジョブ制御を有効にして起動した CLI を
 グループへのシグナルで止めると、3 秒後に子プロセスが書く結果ファイルは書かれなかった。
 
@@ -86,6 +104,8 @@ pid だけへシグナルを送っており、CLI が起こした子プロセス
 | CLI 自身の上限は結果なしの状態のまま、理由だけを分ける | agy は自分の上限に当たると終了コード 0 で終わり、結果ファイルを書かない。監視から見れば「終わったが結果が無い」で正しい |
 | 利用上限の文言は、標準エラーの記録を全担当で見る | 既存の照合が引用・表・grep 形式を除外する。実測では claude の JSON もこの判定に飲み込まれなかった |
 | 標準出力の記録は claude だけ、JSON 向けの照合で見る | JSON は 1 行に引用符を多く含む。行単位の引用の判定が、引用の内側と判定してしまう |
+| 照合の表へ足す文言は、記録か導入済みの実行ファイルに出所を持つものだけにする | 出所の無い行は、合っているかをテストで確かめられない。書いた側の思い込みがテストの期待値にも入り、通ってしまう |
+| 利用上限の文言は、期間や種類を問わず 1 行の照合で読む | claude は書き出しの後に期間や種類（週・セッション・支出）を差し込み、codex も同じ書き出しで 5 形を持つ。形ごとに行を足すと、CLI が種類を増やすたびに照合が遅れる |
 | 読めない結果を共通の語彙に入れる | 結果ファイルが JSON として読めないことは、2 つの Skill が同じ形で見ている |
 | 判定の値が無い・未投稿は cross-review 固有に残す | 結果ファイルの中身とレビューの投稿の話で、監視も cross-refactoring も知りえない |
 | 監視の結末に理由の欄を持たせ、無ければ状態からの既定を使う | 利用上限と CLI の上限は、監視の状態からは決まらない |
@@ -152,9 +172,20 @@ pid だけへシグナルを送っており、CLI が起こした子プロセス
 | `usage_limit` | 標準エラーの記録（全担当） | 生きている間の巡回ごと | `Monthly request limit reached` |
 | `usage_limit` | 同上 | 同上 | `"api_error_status"\s*:\s*429` |
 | `usage_limit` | 同上 | 同上 | `quota exceeded` / `rate limit exceeded`（大文字小文字を問わない）、`^HTTP/\d\S* 429 ` |
+| `usage_limit` | 同上 | 同上 | `^(?:ERROR:\s*)?You['’]ve hit your (?:[\w'’ ]+ )?(?:limit\|budget)\b`（codex と claude の上限。期間や種類を差し込む形を 1 行で覆う） |
+| `usage_limit` | 同上 | 同上 | `^(?:ERROR:\s*)?exceeded retry limit, last status: 429\b`（codex の再試行の上限） |
 | `usage_limit` | claude の標準出力の記録 | 同上 | `"api_error_status"\s*:\s*429` |
 | `early_error` | 標準エラーの記録 | 同上 | `^HTTP/\d\S* (?:401\|403) ` と、残りの既存の致命 |
 | `cli_timeout` | 標準エラーの記録 | **終了した後、結果ファイルが無いときだけ** | `print timeout after \S+ with turn in progress` |
+
+**codex と claude の上限の 2 行は、行頭で始まる形だけを読む。** 担当は作業中のコマンドの
+出力（差分・ファイルの中身）も標準エラーの記録へ書くため、文言を含む文書やテストを読み
+上げた行が記録に入る。行頭に固定すると、文の途中・差分の行・字下げした文字列は一致しない。
+codex は誤りの行の先頭に印（`ERROR: `）を付けるため、その印を省略できる形にしてある。
+**見逃しは 1 度起動し直すだけで済むが、誤検知は結果を書ける担当を止める。**
+
+**再試行の上限は、最後の状態が 429 のときだけ利用上限と読む。** 同じ文言は状態コードを
+差し込んで作られ、503 などの一時的な誤りでも出る。一時的な誤りは起動し直せば解けうる。
 
 **照合の順序は、利用上限 → 致命 → 警告の見た目の致命である。** 同じ記録に利用上限と他の
 致命が両方あれば、理由は利用上限になる。上限で落ちた後に別の文言が続く形が普通で、上限の
@@ -234,7 +265,7 @@ cross-refactoring の取り込みが従う契約を、ここで定める。**契
 | 観点 | 確かめ方 |
 | --- | --- |
 | 理由の語彙と起動し直しの可否が 1 か所にあり、結末を読む関数が失敗しないこと | `plugins/ndf/scripts/tests/test_monitor_outcome_unit.py` |
-| 利用上限の文言を検知し、引用・表・grep 形式で誤検知しないこと | `plugins/ndf/skills/cross-review/tests/test_monitor_usage_limit.py` |
+| 利用上限の文言を検知し、引用・表・grep 形式・差分の行で誤検知しないこと。実物の行を 1 つずつ標準エラーの記録へ書くと、理由が利用上限・起動し直しの可否が偽・終了コード 4 になること。再試行の上限の 503 の行が利用上限にならないこと | `plugins/ndf/skills/cross-review/tests/test_monitor_usage_limit.py` |
 | CLI の上限の文言を、終了して結果ファイルが無いときだけ理由にすること | 同 `tests/test_launch_print_timeout.py` |
 | CLI が独立したプロセスグループで起動し、グループごと止まること | 同 `tests/test_launch_cli_process_group.py` |
 | 結果の取り込みが理由と監視の詳細を残し、終了コードを変えないこと | 同 `tests/test_read_result_reason.py` |
@@ -248,8 +279,10 @@ cross-refactoring の取り込みが従う契約を、ここで定める。**契
 - [issue #729](https://github.com/devbasex/ai-plugins/issues/729) — 結果なしの判断を共通層へ移す
 - [issue #619](https://github.com/devbasex/ai-plugins/issues/619) — 利用上限で止まった担当の空振りの起動し直し
 - [issue #584](https://github.com/devbasex/ai-plugins/issues/584) — 止めた担当が後から結果ファイルを書く
+- [issue #811](https://github.com/devbasex/ai-plugins/issues/811) — codex と claude の実物の文言が照合の表に無い
 - [結果なしの取り込みと開き直し](cross-refactoring-apply-intake.md) — cross-refactoring 側の読み取りを使う仕様
 - [PR #791](https://github.com/devbasex/ai-plugins/pull/791) — 実装
+- [PR #820](https://github.com/devbasex/ai-plugins/pull/820) — codex と claude の実物の文言を照合の表へ足す実装
 - [`cross-review` の状態ファイルと入出力の契約](../../plugins/ndf/skills/cross-review/docs/04-contracts.md)
 - [`cross-review` の状態とレビューの手順](../../plugins/ndf/skills/cross-review/docs/01-state-and-review.md)
 - [`cross-review` の手順](../../plugins/ndf/skills/cross-review/SKILL.md)

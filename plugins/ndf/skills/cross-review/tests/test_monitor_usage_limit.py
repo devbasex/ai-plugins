@@ -62,7 +62,8 @@ TEN_LINES = [
 ]
 
 
-# 設計文書（issues/issue-811-813-design.md）の「実測」から写した実物の行（#811）。
+# 確定仕様（docs/specifications/cross-review-launch-outcome.md）の「背景」が出所を持つ
+# 実物の行（#811）。
 # 推測で作った文言は入れない。出所は記録（`~/.codex/sessions` / `~/.claude/projects`）と
 # 導入済みの実行ファイルの文字列である。
 CODEX_USAGE_LIMIT = ("You've hit your usage limit. Visit "
