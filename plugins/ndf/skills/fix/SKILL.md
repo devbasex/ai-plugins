@@ -76,6 +76,8 @@ python3 "$SCRIPTS/lib/result_posts.py" fix --pr <番号> --result <戻り値フ�
 
 `$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md` にある。
 `--repo` / `--head` / `--worktree` を省いたときは、いまいる作業ツリーと Pull Request から引く。
+**送り先のブランチを決められないときは、返信へ進まず終了コード 1 で止まる。** 送っていない
+修正へ「対応しました」と返信しないためである。
 このコマンドが現在の頭を送り先へ送り（`git push origin HEAD:<ブランチ名>`）、報告した
 コミットが送り先に載ったことを確かめてから、返信・決着・まとめを待ち行列を通して送る。
 出力は件数と参照だけで、本文を出さない。

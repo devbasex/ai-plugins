@@ -474,6 +474,9 @@ def _resolve_fix_inputs(args: argparse.Namespace) -> tuple[FixInputs | None, str
     head = args.head or _sh("gh", "pr", "view", str(args.pr), "-R", repo,
                             "--json", "headRefName", "-q", ".headRefName",
                             cwd=worktree)
+    if not head:
+        # 送れない修正へ「対応しました」と返信しないため、返信へ進まず止める。
+        return None, "送り先のブランチを決められない（--head を渡す）"
     result = pathlib.Path(args.result) if args.result else (
         pathlib.Path(os.environ.get("CROSS_REVIEW_TMP_DIR")
                      or str(worktree / TMP_DIRNAME)) / f"fix-pr{args.pr}-result.json")
@@ -490,13 +493,12 @@ def cmd_fix(args: argparse.Namespace) -> int:
         return 1
     worktree, repo, head, result, fix = inputs
 
-    if head:
-        pushed = push_fix(worktree, head, fix.get("fix_commit") or fix.get("commit_sha"))
-        print(f"PUSHED={1 if pushed.pushed else 0} "
-              f"COMMIT_ON_HEAD={1 if pushed.contains else 0}")
-        if not pushed.ok:
-            print(pushed.detail, file=sys.stderr)
-            return 1
+    pushed = push_fix(worktree, head, fix.get("fix_commit") or fix.get("commit_sha"))
+    print(f"PUSHED={1 if pushed.pushed else 0} "
+          f"COMMIT_ON_HEAD={1 if pushed.contains else 0}")
+    if not pushed.ok:
+        print(pushed.detail, file=sys.stderr)
+        return 1
 
     actor = args.actor or _sh("gh", "api", "user", "-q", ".login") or None
     outcome = post_fix(queue_for(worktree), result, repo, int(args.pr),

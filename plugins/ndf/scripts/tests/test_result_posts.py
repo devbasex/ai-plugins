@@ -610,3 +610,31 @@ def test_the_standalone_command_resolves_repo_and_head_in_the_worktree(
     assert (inputs.repo, inputs.head) == (REPO, "feat/x")
     pr_view = next(c for c, _ in calls if c[:3] == ["gh", "pr", "view"])
     assert pr_view[pr_view.index("-R") + 1] == REPO
+
+
+def test_the_standalone_command_stops_when_the_branch_is_not_known(
+        tmp_path, monkeypatch, capsys) -> None:
+    """送り先のブランチを決められないときは、返信へ進まず止める。
+
+    送っていない修正へ「対応しました」と返信しないため。
+    """
+    work = tmp_path / "work"
+    work.mkdir()
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kw):
+        calls.append(list(cmd))
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="no pr")
+
+    monkeypatch.setattr(result_posts.subprocess, "run", fake_run)
+    monkeypatch.delenv("CROSS_REVIEW_TMP_DIR", raising=False)
+    fix = _fix_file(tmp_path)
+    args = result_posts.argparse.Namespace(
+        repo=REPO, pr=str(PR), result=str(fix), head=None, worktree=str(work),
+        round=ROUND, actor=ACTOR)
+
+    assert result_posts.cmd_fix(args) == 1
+    assert "ブランチ" in capsys.readouterr().err
+    # 返信・決着・まとめは 1 件も呼ばず、待ち行列にも積まない。
+    assert [c for c in calls if c[:2] == ["gh", "api"]] == []
+    assert not (work / result_posts.TMP_DIRNAME).exists()
