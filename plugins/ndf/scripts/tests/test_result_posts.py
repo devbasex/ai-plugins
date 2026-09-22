@@ -390,6 +390,50 @@ def test_a_review_that_is_already_on_github_is_not_posted_again(
     assert [c for c in fake_gh.joined() if "--method POST" in c] == []
 
 
+_STARTED = "2026-09-22T12:00:00+09:00"
+
+
+def _earlier_run_review(submitted_at: str) -> dict:
+    """同じラウンド番号・同じ席の、先に出ていたレビュー。"""
+    head = f"## 🤖 cross-review | round {ROUND} | {SEAT} | APPROVE"
+    return {"match": "pulls/730/reviews?",
+            "stdout": json.dumps([{"user": {"login": ACTOR}, "state": "APPROVED",
+                                   "body": head + "\n\n前の実行", "id": 42,
+                                   "submitted_at": submitted_at,
+                                   "html_url": "https://x/pull/730#pullrequestreview-42"}])}
+
+
+def test_a_review_of_an_earlier_run_is_not_taken_as_this_one(tmp_path, fake_gh) -> None:
+    """回し直した実行では、ラウンドの開始より前のレビューを同じ投稿と読まない。
+
+    ラウンドの番号は実行ごとに 1 から数え直すため、番号と席だけでは実行をまたいで
+    一意にならない。
+    """
+    fake_gh.set_rules([_earlier_run_review("2026-09-22T02:59:59Z"), _ACCEPT])
+
+    payload, result = _files(tmp_path)
+    outcome = result_posts.post_review(
+        _queue(tmp_path), payload, result, repo=REPO, pr=PR, round_no=ROUND,
+        seat=SEAT, head_sha=SHA, is_own_pr=False, actor=ACTOR, since=_STARTED)
+
+    assert outcome.review_url == "https://x/pull/730#pullrequestreview-99"
+    assert len([c for c in fake_gh.joined() if "--method POST" in c]) == 1
+
+
+def test_a_review_sent_after_the_round_started_is_still_not_sent_again(
+        tmp_path, fake_gh) -> None:
+    """同じ実行の中で送った後に止まった分は、開始時刻で絞っても見つかる（AC12）。"""
+    fake_gh.set_rules([_earlier_run_review("2026-09-22T03:00:05Z")])
+
+    payload, result = _files(tmp_path)
+    outcome = result_posts.post_review(
+        _queue(tmp_path), payload, result, repo=REPO, pr=PR, round_no=ROUND,
+        seat=SEAT, head_sha=SHA, is_own_pr=False, actor=ACTOR, since=_STARTED)
+
+    assert outcome.review_url == "https://x/pull/730#pullrequestreview-42"
+    assert [c for c in fake_gh.joined() if "--method POST" in c] == []
+
+
 def test_a_note_with_findings_is_not_a_missing_result(tmp_path, fake_gh) -> None:
     """インラインとして送れたものが 0 件でも、その担当は結果なしにならない（AC17）。"""
     fake_gh.set_rules([

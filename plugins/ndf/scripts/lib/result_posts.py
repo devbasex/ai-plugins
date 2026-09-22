@@ -125,12 +125,16 @@ def _review_body(payload: dict[str, Any], round_no: int, seat: str, intent: str,
 def review_posts(payload_path: pathlib.Path | str, result_path: pathlib.Path | str,
                  repo: str, pr: int, round_no: int, seat: str,
                  head_sha: str | None, is_own_pr: bool,
-                 evacuate_all: bool = False) -> list[dict[str, Any]]:
+                 evacuate_all: bool = False,
+                 since: str | None = None) -> list[dict[str, Any]]:
     """指摘の控えと結果ファイルから、待ち行列へ積む項目の列を組み立てる。
 
     **判定の格下げはこの層が決める**（設計の決定 14）。自分の Pull Request へは変更を
     求めるレビューを送れないため、送る形だけを `COMMENT` へ落とす。本来の判定は
     先頭行と `extra` に残り、収束の判定はそちらを読む。
+
+    `since` はそのラウンドが始まった時刻である。二度書かない照合をこの時刻より後に
+    出たレビューへ絞るために、待ち行列の項目へ持たせる。
 
     `evacuate_all` が真のとき、位置を持つ指摘もすべて総評へ移す。送った要求が位置を
     解決できずに拒まれた後の送り直しで使う。
@@ -148,6 +152,8 @@ def review_posts(payload_path: pathlib.Path | str, result_path: pathlib.Path | s
     fields: dict[str, Any] = {"body": body, "event": posted_as}
     if head_sha:
         fields["commit_id"] = head_sha
+    if since:
+        fields["since"] = since
     if inline:
         fields["comments"] = [
             {"path": str(f.get("path")), "line": _line_no(f.get("line")),
@@ -216,7 +222,7 @@ def _write_destinations(payload_path: pathlib.Path | str, inline_count: int) -> 
 def post_review(queue: post_queue.Queue, payload_path: pathlib.Path | str,
                 result_path: pathlib.Path | str, repo: str, pr: int, round_no: int,
                 seat: str, head_sha: str | None, is_own_pr: bool,
-                actor: str | None = None) -> ReviewOutcome:
+                actor: str | None = None, since: str | None = None) -> ReviewOutcome:
     """レビューを 1 件、待ち行列を通して送る。
 
     **位置を解決できずに拒まれたら、その要求のインラインをすべて総評へ移して送り直す。**
@@ -230,7 +236,7 @@ def post_review(queue: post_queue.Queue, payload_path: pathlib.Path | str,
     """
     findings = len(_findings(_read_json(payload_path)))
     item = review_posts(payload_path, result_path, repo, pr, round_no, seat,
-                        head_sha, is_own_pr)[0]
+                        head_sha, is_own_pr, since=since)[0]
     path = post_queue.enqueue(queue, item["kind"], repo, pr, item["fields"],
                               actor=actor, extra=item["extra"])
     seq = (post_queue.read_item(path) or {}).get("seq")
@@ -240,7 +246,7 @@ def post_review(queue: post_queue.Queue, payload_path: pathlib.Path | str,
     if ours_failed and post_queue.rejected_by_position(flushed.failed):
         queue.drop(flushed.failed.get("seq"))
         item = review_posts(payload_path, result_path, repo, pr, round_no, seat,
-                            head_sha, is_own_pr, evacuate_all=True)[0]
+                            head_sha, is_own_pr, evacuate_all=True, since=since)[0]
         path = post_queue.enqueue(queue, item["kind"], repo, pr, item["fields"],
                                   actor=actor, extra=item["extra"])
         seq = (post_queue.read_item(path) or {}).get("seq")

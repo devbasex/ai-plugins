@@ -251,11 +251,16 @@ def _request_review_post(repo: str, pr: int, fields: dict[str, Any]) -> dict[str
         body["commit_id"] = fields["commit_id"]
     if fields.get("comments"):
         body["comments"] = fields["comments"]
+    match = {"event": fields["event"], "body": fields.get("body", "")}
+    # **照合をラウンドの開始より後へ絞る。** ラウンドの番号は実行ごとに 1 から数え
+    # 直すため、番号と席の鍵だけでは前の実行のレビューに一致する。
+    if fields.get("since"):
+        match["since"] = fields["since"]
     return {
         "request": {"method": "POST",
                     "path": f"repos/{repo}/pulls/{int(pr)}/reviews",
                     "fields": body},
-        "match": {"event": fields["event"], "body": fields.get("body", "")},
+        "match": match,
     }
 
 
@@ -377,11 +382,33 @@ def _comment_match(match: dict[str, Any], actor: str | None):
     return lambda row: _by_actor(row, actor) and _head(row.get("body")) == head
 
 
+def _parse_time(value: Any) -> _dt.datetime | None:
+    try:
+        parsed = _dt.datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else None
+
+
 def _review_match(match: dict[str, Any], actor: str | None):
+    """同じラウンド・同じ席のレビューか。
+
+    **開始時刻を持つときは、それより後に出たレビューだけを見る。** 同じ実行の中の
+    送り直しは見つかり、回し直す前の実行のレビューは外れる。開始時刻かレビューの
+    時刻のどちらかを読めないときは、番号と席だけの照合へ落とす（二重に送る側へ
+    倒さない）。
+    """
     key = review_match_key(match.get("body"))
+    since = _parse_time(match.get("since"))
+
+    def _in_this_run(row: dict[str, Any]) -> bool:
+        submitted = _parse_time(row.get("submitted_at"))
+        return since is None or submitted is None or submitted >= since
+
     return lambda row: (
         _by_actor(row, actor)
         and review_match_key(row.get("body")) == key
+        and _in_this_run(row)
     )
 
 

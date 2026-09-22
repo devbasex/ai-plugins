@@ -2886,6 +2886,7 @@ def cmd_read_result(args: argparse.Namespace) -> None:
         head_sha=str(last.get("head_sha") or ""),
         is_own_pr=bool(st.get("event_downgrade") or st.get("is_own_pr")),
         actor=str(st.get("viewer_login") or "") or None,
+        since=str(last.get("started_at") or "") or None,
     )
     if posted.failed:
         die(f"{agent}: レビューを投稿できませんでした ({posted.detail})")

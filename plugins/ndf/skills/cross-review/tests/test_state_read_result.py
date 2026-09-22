@@ -171,3 +171,27 @@ def test_invalid_json_result_file_dies(patched_tmp_dir, state_mod, capsys):
     assert e.value.code == 3
     captured = capsys.readouterr()
     assert "parse" in captured.err.lower() or "parse" in captured.err
+
+
+def test_the_take_in_passes_the_start_of_the_round(
+        patched_tmp_dir, state_mod, monkeypatch):
+    """取り込みは、二度書かない照合を絞るためにラウンドの開始時刻を渡す。
+
+    ラウンドの番号は回し直すと 1 から数え直すため、前の実行のレビューと取り違えない。
+    """
+    tmp_dir = patched_tmp_dir
+    _seed_state(tmp_dir)
+    rfile = tmp_dir / "result.json"
+    rfile.write_text(json.dumps({"event": "APPROVE", "comments_count": 0}))
+    seen = {}
+    offline = state_mod.result_posts.post_review
+
+    def _spy(*a, **kw):
+        seen["since"] = kw.get("since")
+        return offline(*a, **kw)
+
+    monkeypatch.setattr(state_mod.result_posts, "post_review", _spy)
+
+    state_mod.cmd_read_result(_make_args(rfile))
+
+    assert seen["since"] == "2026-05-21T00:00:00+00:00"

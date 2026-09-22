@@ -146,9 +146,9 @@ def _no_github_state(request, monkeypatch) -> None:
 def _post_review_offline(rp):
     """送信を行わず、組み立てた内容がそのまま届いたものとして結果を返す。"""
     def _post(queue, payload_path, result_path, repo, pr, round_no, seat, head_sha,
-              is_own_pr, actor=None):
+              is_own_pr, actor=None, since=None):
         item = rp.review_posts(payload_path, result_path, repo, pr, round_no, seat,
-                               head_sha, is_own_pr)[0]
+                               head_sha, is_own_pr, since=since)[0]
         extra = item["extra"]
         findings = len(rp._findings(rp._read_json(payload_path)))
         return rp.ReviewOutcome(
