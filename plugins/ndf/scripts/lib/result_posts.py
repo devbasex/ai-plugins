@@ -283,24 +283,22 @@ def fix_posts(result_path: pathlib.Path | str, repo: str, pr: int,
     rejected = _dict_items(fix.get("rejected"))
     commit = str(fix.get("fix_commit") or fix.get("commit_sha") or "")
 
+    # (要素の列, 返信の定型句, 理由を取り出すキー)。決着は理由の代わりにコミットを添える
+    reply_rules = (
+        (resolved, "対応しました。", None),
+        (deferred, "見送ります。", "reason_for_deferral"),
+        (rejected, "この指摘は採らない判断です。", "reason_for_rejection"),
+    )
     items: list[dict[str, Any]] = []
-    for entry in resolved:
-        body = "対応しました。" + (f"（{commit}）" if commit else "")
-        reply = _reply(entry.get("comment_id"), body)
-        if reply:
-            items.append(reply)
-    for entry in deferred:
-        reason = str(entry.get("reason_for_deferral") or entry.get("reason") or "")
-        reply = _reply(entry.get("comment_id"),
-                       f"見送ります。{reason}".strip())
-        if reply:
-            items.append(reply)
-    for entry in rejected:
-        reason = str(entry.get("reason_for_rejection") or entry.get("reason") or "")
-        reply = _reply(entry.get("comment_id"),
-                       f"この指摘は採らない判断です。{reason}".strip())
-        if reply:
-            items.append(reply)
+    for entries, lead, reason_key in reply_rules:
+        for entry in entries:
+            if reason_key is None:
+                note = f"（{commit}）" if commit else ""
+            else:
+                note = str(entry.get(reason_key) or entry.get("reason") or "")
+            reply = _reply(entry.get("comment_id"), f"{lead}{note}".strip())
+            if reply:
+                items.append(reply)
     # 見送り・却下は既定では決着させない（次のラウンドで見直す）。最終スイープは
     # スレッドを残さないため、要素の `resolve` を真にして決着まで求める。
     closing = resolved + [e for e in deferred + rejected if e.get("resolve")]
