@@ -301,25 +301,16 @@ def _reviewer_rows(metrics: dict[str, Any]) -> list[str]:
     ]
 
 
-# 表のヘッダ行と区切り行。同じ収束ループ共通層の `transcript_agents.py` が
-# LIST_HEADER / LIST_RULE などを定数へ寄せているのに合わせ、書式を 1 か所へ集める。
-IMPL_HEADER = (
-    "| ランタイム / モデル | 担当R | 適用 | 見送り | 初回承認率 | 平均修正R | 予算超過率 | テスト失敗率 | 所要秒 |"
-)
-IMPL_RULE = "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
-REVIEWER_HEADER = (
-    "| ランタイム / モデル | レビュー回数 | 指摘 | 修正に至った率 | 判定一致率 | 所要秒 |"
-)
-REVIEWER_RULE = "| --- | ---: | ---: | ---: | ---: | ---: |"
-
-
 def format_report(metrics: dict[str, Any]) -> str:
     """人が読む形へ整形する。比較の限界を必ず添える。"""
     lines: list[str] = []
     _emit_table(
         lines,
         "実装担当",
-        (IMPL_HEADER, IMPL_RULE),
+        (
+            "| ランタイム / モデル | 担当R | 適用 | 見送り | 初回承認率 | 平均修正R | 予算超過率 | テスト失敗率 | 所要秒 |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ),
         _impl_rows(metrics),
     )
 
@@ -327,7 +318,10 @@ def format_report(metrics: dict[str, Any]) -> str:
     _emit_table(
         lines,
         "レビュー担当",
-        (REVIEWER_HEADER, REVIEWER_RULE),
+        (
+            "| ランタイム / モデル | レビュー回数 | 指摘 | 修正に至った率 | 判定一致率 | 所要秒 |",
+            "| --- | ---: | ---: | ---: | ---: | ---: |",
+        ),
         _reviewer_rows(metrics),
     )
 

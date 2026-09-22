@@ -140,75 +140,6 @@ class Participants:
 Probe = Callable[[list[str]], tuple[dict[str, dict[str, Any]], bool]]
 
 
-def _validate_and_base(
-    pool: list[str], include: list[str], exclude: list[str]
-) -> set[str]:
-    """入力名と競合を検証し、検証済みの母集合（`pool` ∪ `include`）を返す。
-
-    `include` / `exclude` の名前が `ALL_RUNTIMES` にあること、両者が重ならないこと、
-    `exclude` が母集合の中の名前だけであることを確かめる（順序 1）。
-    """
-    for name in (*include, *exclude):
-        if name not in ALL_RUNTIMES:
-            raise AssignmentError(
-                f"参加できないランタイムです: {name}（{'/'.join(ALL_RUNTIMES)} のいずれか）"
-            )
-    overlap = set(include) & set(exclude)
-    if overlap:
-        raise AssignmentError(
-            f"足す者と外す者に同じ名前があります: {', '.join(_in_fixed_order(overlap))}"
-        )
-    base = set(pool) | set(include)
-    outside = [n for n in exclude if n not in base]
-    if outside:
-        raise AssignmentError(
-            f"母集合に無い者は外せません: {', '.join(_in_fixed_order(outside))}"
-            f"（母集合: {', '.join(_in_fixed_order(base))}）"
-        )
-    return base
-
-
-def _select_participants(
-    base: set[str], exclude: list[str], only: Optional[str]
-) -> list[str]:
-    """参加者を絞り込む（順序 2〜3）。
-
-    参加者 = 母集合 − `exclude`（`ALL_RUNTIMES` の順）。`only` があれば `exclude` と
-    矛盾せず参加者に含まれることを確かめ、その 1 者にする。
-    """
-    participants = _in_fixed_order(base - set(exclude))
-    if only is not None:
-        if only in exclude:
-            raise AssignmentError(f"--only と --exclude が矛盾しています: {only}")
-        if only not in participants:
-            raise AssignmentError(
-                f"--only は参加者のいずれかを指定してください: {only}"
-                f"（参加者: {', '.join(participants)}）"
-            )
-        participants = [only]
-    return participants
-
-
-def _classify_availability(
-    participants: list[str], probe: Probe
-) -> tuple[list[str], dict[str, str], bool]:
-    """`probe` の結果を使える者・使えない者へ分類する（順序 4）。
-
-    飛ばされたら全員を通ったものとして扱う。戻り値は
-    `(available, unavailable, probe_skipped)`。
-    """
-    results, skipped = probe(list(participants))
-    if skipped:
-        return list(participants), {}, True
-    unavailable = {
-        n: str(results.get(n, {}).get("detail", ""))
-        for n in participants
-        if not results.get(n, {}).get("ok", False)
-    }
-    available = [n for n in participants if n not in unavailable]
-    return available, unavailable, False
-
-
 def resolve_participants(
     pool: Iterable[str],
     *,
@@ -239,9 +170,46 @@ def resolve_participants(
     include = list(include)
     exclude = list(exclude)
 
-    base = _validate_and_base(pool, include, exclude)
-    participants = _select_participants(base, exclude, only)
-    available, unavailable, skipped = _classify_availability(participants, probe)
+    for name in (*include, *exclude):
+        if name not in ALL_RUNTIMES:
+            raise AssignmentError(
+                f"参加できないランタイムです: {name}（{'/'.join(ALL_RUNTIMES)} のいずれか）"
+            )
+    overlap = set(include) & set(exclude)
+    if overlap:
+        raise AssignmentError(
+            f"足す者と外す者に同じ名前があります: {', '.join(_in_fixed_order(overlap))}"
+        )
+    base = set(pool) | set(include)
+    outside = [n for n in exclude if n not in base]
+    if outside:
+        raise AssignmentError(
+            f"母集合に無い者は外せません: {', '.join(_in_fixed_order(outside))}"
+            f"（母集合: {', '.join(_in_fixed_order(base))}）"
+        )
+
+    participants = _in_fixed_order(base - set(exclude))
+
+    if only is not None:
+        if only in exclude:
+            raise AssignmentError(f"--only と --exclude が矛盾しています: {only}")
+        if only not in participants:
+            raise AssignmentError(
+                f"--only は参加者のいずれかを指定してください: {only}"
+                f"（参加者: {', '.join(participants)}）"
+            )
+        participants = [only]
+
+    results, skipped = probe(list(participants))
+    if skipped:
+        available, unavailable = list(participants), {}
+    else:
+        unavailable = {
+            n: str(results.get(n, {}).get("detail", ""))
+            for n in participants
+            if not results.get(n, {}).get("ok", False)
+        }
+        available = [n for n in participants if n not in unavailable]
 
     if require_all and unavailable:
         failed = " / ".join(f"{n}（{d}）" for n, d in unavailable.items())
