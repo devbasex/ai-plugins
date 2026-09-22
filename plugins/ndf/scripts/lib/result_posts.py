@@ -122,6 +122,31 @@ def _review_body(payload: dict[str, Any], round_no: int, seat: str, intent: str,
     return "\n\n".join(parts) + "\n"
 
 
+def _split_findings(findings: list[dict[str, Any]], evacuate_all: bool,
+                    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """指摘をインラインと総評へ振り分ける。"""
+    inline = [] if evacuate_all else [f for f in findings if _can_be_inline(f)]
+    evacuated = [f for f in findings if f not in inline]
+    return inline, evacuated
+
+
+def _review_fields(body: str, posted_as: str, inline: list[dict[str, Any]],
+                   head_sha: str | None, since: str | None) -> dict[str, Any]:
+    """レビュー API へ渡す fields を組み立てる。"""
+    fields: dict[str, Any] = {"body": body, "event": posted_as}
+    if head_sha:
+        fields["commit_id"] = head_sha
+    if since:
+        fields["since"] = since
+    if inline:
+        fields["comments"] = [
+            {"path": str(f.get("path")), "line": _line_no(f.get("line")),
+             "side": "RIGHT", "body": str(f.get("body") or "")}
+            for f in inline
+        ]
+    return fields
+
+
 def review_posts(payload_path: pathlib.Path | str, result_path: pathlib.Path | str,
                  repo: str, pr: int, round_no: int, seat: str,
                  head_sha: str | None, is_own_pr: bool,
@@ -145,21 +170,9 @@ def review_posts(payload_path: pathlib.Path | str, result_path: pathlib.Path | s
     intent = str(result.get("event") or result.get("intent") or "COMMENT")
     posted_as = "COMMENT" if is_own_pr else intent
 
-    inline = [] if evacuate_all else [f for f in findings if _can_be_inline(f)]
-    evacuated = [f for f in findings if f not in inline]
+    inline, evacuated = _split_findings(findings, evacuate_all)
     body = _review_body(payload, round_no, seat, intent, evacuated)
-
-    fields: dict[str, Any] = {"body": body, "event": posted_as}
-    if head_sha:
-        fields["commit_id"] = head_sha
-    if since:
-        fields["since"] = since
-    if inline:
-        fields["comments"] = [
-            {"path": str(f.get("path")), "line": _line_no(f.get("line")),
-             "side": "RIGHT", "body": str(f.get("body") or "")}
-            for f in inline
-        ]
+    fields = _review_fields(body, posted_as, inline, head_sha, since)
     extra = {"ident": f"{seat}-r{round_no}", "agent": seat, "seat": seat,
              "round": round_no,
              "intent": intent, "posted_as": posted_as,

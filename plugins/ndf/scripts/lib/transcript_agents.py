@@ -264,32 +264,46 @@ def _tool_use_ids(rows: list[dict]) -> list[str]:
     return ids
 
 
-def _aggregate_token_metrics(rows: list[dict], record: AgentRecord) -> None:
-    """固定費・最大充填・応答数・モデルを合成でない応答だけで数える（AC24）。
-
-    `record` の `fixed` / `peak` / `work` / `responses` / `model` を埋める。
-    """
-    seen: set[str] = set()
-    models: Counter = Counter()
+def _token_stats(rows: list[dict]) -> tuple[int | None, int | None, int | None]:
+    """合成でない応答から固定費・最大充填・実作業を返す。"""
+    fixed = None
+    peak = None
     for row in rows:
         if row.get("type") != "assistant" or _is_synthetic(row):
             continue
         total = _input_total(row)
         if total is not None:
-            if record.fixed is None:
-                record.fixed = total
-            record.peak = total if record.peak is None else max(record.peak, total)
+            if fixed is None:
+                fixed = total
+            peak = total if peak is None else max(peak, total)
+    work = peak - fixed if fixed is not None and peak is not None else None
+    return fixed, peak, work
+
+
+def _model_stats(rows: list[dict]) -> tuple[int, str | None]:
+    """合成でない応答から応答数と最頻出モデルを返す。"""
+    seen: set[str] = set()
+    models: Counter = Counter()
+    for row in rows:
+        if row.get("type") != "assistant" or _is_synthetic(row):
+            continue
         message_id = _message(row).get("id")
         if isinstance(message_id, str) and message_id and message_id not in seen:
             seen.add(message_id)
             model = _message(row).get("model")
             if isinstance(model, str) and model:
                 models[model] += 1
-    record.responses = len(seen)
-    if record.fixed is not None and record.peak is not None:
-        record.work = record.peak - record.fixed
-    if models:
-        record.model = models.most_common(1)[0][0]
+    model = models.most_common(1)[0][0] if models else None
+    return len(seen), model
+
+
+def _aggregate_token_metrics(rows: list[dict], record: AgentRecord) -> None:
+    """固定費・最大充填・応答数・モデルを合成でない応答だけで数える（AC24）。
+
+    `record` の `fixed` / `peak` / `work` / `responses` / `model` を埋める。
+    """
+    record.fixed, record.peak, record.work = _token_stats(rows)
+    record.responses, record.model = _model_stats(rows)
 
 
 def _count_interruptions(rows: list[dict]) -> int:
