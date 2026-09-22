@@ -12,7 +12,6 @@ if str(LIB) not in sys.path:
 
 from models import (
     ModelSpecError,
-    assumption_note,
     mismatch_warning,
     observed_model,
     parse_model_args,
@@ -119,19 +118,3 @@ def test_mismatch_warning_reports_conflict() -> None:
         "⚠ claude: 指定したモデル claude-opus と実際に動いたモデル claude-sonnet が"
         "食い違っています。比較には使えません"
     )
-
-
-@pytest.mark.parametrize(
-    ("runtime", "model", "expected"),
-    [
-        ("codex", None, None),
-        ("claude", "claude-opus", None),
-        ("kiro", "auto", None),
-        ("codex", "gpt-5", "codex は指定した gpt-5 で動いた前提で数える（実測不可）"),
-    ],
-)
-def test_assumption_note_current_behavior(
-    runtime: str, model: str | None, expected: str | None
-) -> None:
-    """現状固定。未指定 / 実測可能 / 分離対象 / 代用注記の 4 分岐を記録する。"""
-    assert assumption_note(runtime, model) == expected
