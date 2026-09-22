@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import json
 import subprocess
 
 import pytest
@@ -390,3 +391,90 @@ def test_revert_range_failure_message_has_no_item_id_prefix(gitfacts, work, caps
     assert "を取り消せませんでした" in err
     assert f"（HEAD を {second} へ戻しました）" in err
     assert _git("rev-parse", "HEAD", cwd=work).stdout.strip() == second
+
+
+def test_check_run_result_characterization(gitfacts, monkeypatch):
+    """check_run_result の公開契約を固定する現状固定テスト。"""
+    # 1. 引数が空なら None
+    assert gitfacts.check_run_result("", "sha", "ci") is None
+    assert gitfacts.check_run_result("repo", "", "ci") is None
+    assert gitfacts.check_run_result("repo", "sha", "") is None
+
+    # 2. gh api の実行失敗（sh が None または空）なら None
+    monkeypatch.setattr(gitfacts, "sh", lambda *args, **kwargs: None)
+    assert gitfacts.check_run_result("repo", "sha", "ci") is None
+
+    monkeypatch.setattr(gitfacts, "sh", lambda *args, **kwargs: "")
+    assert gitfacts.check_run_result("repo", "sha", "ci") is None
+
+    # 3. 不正 JSON なら None
+    monkeypatch.setattr(gitfacts, "sh", lambda *args, **kwargs: "not-json{")
+    assert gitfacts.check_run_result("repo", "sha", "ci") is None
+
+    # 4. check_runs 欠損（非 dict、または check_runs がリストでない）なら None
+    monkeypatch.setattr(gitfacts, "sh", lambda *args, **kwargs: "[]")
+    assert gitfacts.check_run_result("repo", "sha", "ci") is None
+
+    monkeypatch.setattr(gitfacts, "sh", lambda *args, **kwargs: json.dumps({"check_runs": "not-a-list"}))
+    assert gitfacts.check_run_result("repo", "sha", "ci") is None
+
+    # 5. 対象名なし（一致する name がない）なら None
+    monkeypatch.setattr(
+        gitfacts,
+        "sh",
+        lambda *args, **kwargs: json.dumps({
+            "check_runs": [{"name": "other", "status": "completed", "conclusion": "success"}]
+        }),
+    )
+    assert gitfacts.check_run_result("repo", "sha", "ci") is None
+
+    # 6. 未完了（status != completed）なら "pending"
+    monkeypatch.setattr(
+        gitfacts,
+        "sh",
+        lambda *args, **kwargs: json.dumps({
+            "check_runs": [
+                {"name": "ci", "status": "in_progress", "conclusion": None},
+                {"name": "ci", "status": "completed", "conclusion": "success"},
+            ]
+        }),
+    )
+    assert gitfacts.check_run_result("repo", "sha", "ci") == "pending"
+
+    # 7. 失敗（completed だが conclusion != success）ならその結論（または unknown）
+    monkeypatch.setattr(
+        gitfacts,
+        "sh",
+        lambda *args, **kwargs: json.dumps({
+            "check_runs": [
+                {"name": "ci", "status": "completed", "conclusion": "failure"},
+                {"name": "ci", "status": "completed", "conclusion": "success"},
+            ]
+        }),
+    )
+    assert gitfacts.check_run_result("repo", "sha", "ci") == "failure"
+
+    monkeypatch.setattr(
+        gitfacts,
+        "sh",
+        lambda *args, **kwargs: json.dumps({
+            "check_runs": [
+                {"name": "ci", "status": "completed", "conclusion": None},
+            ]
+        }),
+    )
+    assert gitfacts.check_run_result("repo", "sha", "ci") == "unknown"
+
+    # 8. 全成功なら "success"
+    monkeypatch.setattr(
+        gitfacts,
+        "sh",
+        lambda *args, **kwargs: json.dumps({
+            "check_runs": [
+                {"name": "ci", "status": "completed", "conclusion": "success"},
+                {"name": "ci", "status": "COMPLETED", "conclusion": "SUCCESS"},
+            ]
+        }),
+    )
+    assert gitfacts.check_run_result("repo", "sha", "ci") == "success"
+

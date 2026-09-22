@@ -183,6 +183,22 @@ def cmd_should_abandon(args: argparse.Namespace) -> None:
     sys.exit(2)
 
 
+def _record_deferred_abandoned_items(
+    state: dict[str, Any], targets: list[str]
+) -> None:
+    """取り消し対象項目の status を abandoned に更新し、未登録なら deferred_items に追記する。"""
+    already = {d.get("item_id") for d in state["deferred_items"]}
+    for item_id in targets:
+        item = find_item(state, item_id)
+        item["status"] = "abandoned"
+        item.setdefault(
+            "failure_reason", "修正ラウンドの上限に達してもテストが通らなかった")
+        if item_id in already:
+            continue
+        state["deferred_items"].append(
+            deferred_record(item, item_id, item["failure_reason"]))
+
+
 def cmd_abandon_items(args: argparse.Namespace) -> None:
     """Step 6 — テストが通らなかった適用ラウンドを取り消す。
 
@@ -224,16 +240,7 @@ def cmd_abandon_items(args: argparse.Namespace) -> None:
 
     run_drop(path, state, entry, targets)
 
-    already = {d.get("item_id") for d in state["deferred_items"]}
-    for item_id in targets:
-        item = find_item(state, item_id)
-        item["status"] = "abandoned"
-        item.setdefault(
-            "failure_reason", "修正ラウンドの上限に達してもテストが通らなかった")
-        if item_id in already:
-            continue
-        state["deferred_items"].append(
-            deferred_record(item, item_id, item["failure_reason"]))
+    _record_deferred_abandoned_items(state, targets)
 
     # 見送りの記録と印の解除を**同じ保存で**行う。保存してから push するので、
     # push が失敗しても記録とローカルの git が食い違わない。

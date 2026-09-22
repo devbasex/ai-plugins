@@ -206,6 +206,20 @@ def _select(
     return adopted, deferred
 
 
+def _degrade_test_value(
+    value: str,
+    allowed: Iterable[str],
+    source: str,
+    label: str,
+    target: str,
+) -> str:
+    """語彙集合に含まれないテスト提案の値を `unknown` へ降格する。"""
+    if value not in allowed:
+        info(f"⚠ {source}: 語彙外の{label} `{value}` — unknown へ降格 ({target})")
+        return "unknown"
+    return value
+
+
 def _normalize_test_proposal(
     raw: dict[str, Any], source: str
 ) -> Optional[dict[str, Any]]:
@@ -222,14 +236,20 @@ def _normalize_test_proposal(
         info(f"⚠ {source}: path / target の無いテスト項目を無視しました: {raw!r:.120}")
         return None
 
-    case = str(raw.get("case") or "").strip().lower()
-    level = str(raw.get("level") or "").strip().lower()
-    if case not in TEST_CASES:
-        info(f"⚠ {source}: 語彙外の経路 `{case}` — unknown へ降格 ({target})")
-        case = "unknown"
-    if level not in TEST_LEVELS:
-        info(f"⚠ {source}: 語彙外の階層 `{level}` — unknown へ降格 ({target})")
-        level = "unknown"
+    case = _degrade_test_value(
+        str(raw.get("case") or "").strip().lower(),
+        TEST_CASES,
+        source,
+        "経路",
+        target,
+    )
+    level = _degrade_test_value(
+        str(raw.get("level") or "").strip().lower(),
+        TEST_LEVELS,
+        source,
+        "階層",
+        target,
+    )
 
     return {
         "kind": TEST,

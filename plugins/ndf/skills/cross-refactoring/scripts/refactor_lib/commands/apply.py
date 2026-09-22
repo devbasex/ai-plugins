@@ -371,6 +371,83 @@ def cmd_next_apply_round(args: argparse.Namespace) -> None:
     )
 
 
+def _check_already_merged_apply(ctx: _ApplyExecutionContext) -> bool:
+    """取り込み済み判定を行い、再実行を制御する。処理済みなら True を返す。
+
+    **叩き直しても同じ判定を返す。** 取り込み済みで再実行すると、前回作った
+    取り消しコミットが「未割当」と判定され、群ごと取り消してしまう。
+    """
+    record = ctx.entry.get("apply") or {}
+    if record.get("merged_at") and record.get("apply_round", ctx.group["apply_round"]) \
+            == ctx.group["apply_round"]:
+        applied_before = record.get("applied") or []
+        info(
+            f"↻ 適用ラウンド {ctx.group['apply_round']} の適用は取り込み済みです"
+            f"（採用 {len(applied_before)} 件 / 失敗 "
+            f"{len(record.get('failed') or [])} 件）"
+        )
+        if not applied_before:
+            # **採用 0 件の群は取り消し済みに直す**（#592）。残したままだと、
+            # 次に群を開く操作がこの群を選び直して担当を起動し続ける。
+            ctx.group["status"] = "dropped"
+            ctx.group.setdefault("drop_reason", "empty")
+            ctx.state["phase"] = phase_after_group(ctx.entry)
+            if not ctx.args.dry_run:
+                statefile.save(ctx.path, ctx.state)
+            sys.exit(2)
+        return True
+    return False
+
+
+def _verify_baseline_test_gate(ctx: _ApplyExecutionContext) -> None:
+    """着手前テスト結果 (baseline) を検証し、成功でなければ適用をブロックする。
+
+    **着手前のテストの確認は、結果を読むより先に行う。** 成功と確認できていない
+    状態で採ると、壊したのか元から壊れていたのかを判別する手段が無い。`red` だけ
+    でなく `unknown`（確認していない）も拒否する。
+    """
+    baseline = ctx.state.get("baseline_test") or {}
+    if baseline.get("status") != "green":
+        _block_group_items(ctx)
+        die(
+            f"着手前のテストが成功と確認できていません（status={baseline.get('status')}）。"
+            "適用へ着手しません（全項目を blocked）",
+            code=4,
+        )
+
+
+def _finalize_apply_result(
+    ctx: _ApplyExecutionContext,
+    record: dict[str, Any],
+    failed: list[str],
+) -> None:
+    """検証結果に応じて状態更新、取り消し、または公開プッシュを反映する。"""
+    # `--dry-run` では git も状態ファイルも触らない。片方だけ進むと、確認の
+    # つもりで実行した利用者の進行が壊れる。
+    if ctx.args.dry_run:
+        if failed:
+            drop_items(ctx.state, ctx.entry, failed, dry_run=True)
+        info("（dry-run）状態ファイルは更新していません")
+        applied = list(record["applied"])
+    elif failed:
+        # `merged_at` は `_apply_drop` が取り消しの完了時点で立てる。
+        applied = _apply_drop(ctx.path, ctx.state, ctx.entry, ctx.group, failed)
+    else:
+        # **全項目が通ったときも進行側が公開する。** 実装担当は push しないため、
+        # ここで公開しないと Pull Request 上の差分が古いままになる。
+        ctx.group["status"] = "applied"
+        # 次は `verify-round` がテストで検証する。ここではまだ群を閉じない。
+        ctx.state["phase"] = "verify"
+        record["merged_at"] = statefile.now()
+        # 保留の印・保存・push・印の解除は 1 か所が持つ（`push_with_retry_marker`）。
+        push_with_retry_marker(ctx.path, ctx.state, ctx.entry)
+        applied = list(record["applied"])
+
+    if not applied:
+        info("この適用ラウンドは取り消しました。検証は行いません")
+        sys.exit(2)
+
+
 def cmd_merge_apply(args: argparse.Namespace) -> None:
     """Step 4 — 適用ラウンド 1 つ分の適用結果を検証して取り込む。
 
@@ -393,39 +470,10 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
         discard_impl_leftovers(state, state["worktrees"]["work"])
         _resume_incomplete_apply(path, state, entry)
 
-    # **叩き直しても同じ判定を返す。** 取り込み済みで再実行すると、前回作った
-    # 取り消しコミットが「未割当」と判定され、群ごと取り消してしまう。
-    record = entry.get("apply") or {}
-    if record.get("merged_at") and record.get("apply_round", group["apply_round"]) \
-            == group["apply_round"]:
-        applied_before = record.get("applied") or []
-        info(
-            f"↻ 適用ラウンド {group['apply_round']} の適用は取り込み済みです"
-            f"（採用 {len(applied_before)} 件 / 失敗 "
-            f"{len(record.get('failed') or [])} 件）"
-        )
-        if not applied_before:
-            # **採用 0 件の群は取り消し済みに直す**（#592）。残したままだと、
-            # 次に群を開く操作がこの群を選び直して担当を起動し続ける。
-            group["status"] = "dropped"
-            group.setdefault("drop_reason", "empty")
-            state["phase"] = phase_after_group(entry)
-            if not args.dry_run:
-                statefile.save(path, state)
-            sys.exit(2)
+    if _check_already_merged_apply(ctx):
         return
 
-    # **着手前のテストの確認は、結果を読むより先に行う。** 成功と確認できていない
-    # 状態で採ると、壊したのか元から壊れていたのかを判別する手段が無い。`red` だけ
-    # でなく `unknown`（確認していない）も拒否する。
-    baseline = state.get("baseline_test") or {}
-    if baseline.get("status") != "green":
-        _block_group_items(ctx)
-        die(
-            f"着手前のテストが成功と確認できていません（status={baseline.get('status')}）。"
-            "適用へ着手しません（全項目を blocked）",
-            code=4,
-        )
+    _verify_baseline_test_gate(ctx)
 
     scope = _apply_scope(ctx)
     if already_closed(scope):
@@ -449,30 +497,7 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
     )
 
     record = _record_apply_result(entry, group, commit_range, applied, failed, payload)
-
-    # `--dry-run` では git も状態ファイルも触らない。片方だけ進むと、確認の
-    # つもりで実行した利用者の進行が壊れる。
-    if args.dry_run:
-        if failed:
-            drop_items(state, entry, failed, dry_run=True)
-        info("（dry-run）状態ファイルは更新していません")
-        applied = list(record["applied"])
-    elif failed:
-        # `merged_at` は `_apply_drop` が取り消しの完了時点で立てる。
-        applied = _apply_drop(path, state, entry, group, failed)
-    else:
-        # **全項目が通ったときも進行側が公開する。** 実装担当は push しないため、
-        # ここで公開しないと Pull Request 上の差分が古いままになる。
-        group["status"] = "applied"
-        # 次は `verify-round` がテストで検証する。ここではまだ群を閉じない。
-        state["phase"] = "verify"
-        record["merged_at"] = statefile.now()
-        # 保留の印・保存・push・印の解除は 1 か所が持つ（`push_with_retry_marker`）。
-        push_with_retry_marker(path, state, entry)
-
-    if not applied:
-        info("この適用ラウンドは取り消しました。検証は行いません")
-        sys.exit(2)
+    _finalize_apply_result(ctx, record, failed)
 
 
 def _record_apply_result(

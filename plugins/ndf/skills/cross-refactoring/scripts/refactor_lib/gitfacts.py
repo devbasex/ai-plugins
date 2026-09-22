@@ -409,6 +409,43 @@ def resolved_threads_on_github(repo: str, pr: int) -> Optional[set[str]]:
 CHECK_RUNS_PER_PAGE = 100
 
 
+def _parse_check_runs(raw_json: Optional[str]) -> Optional[list[dict[str, Any]]]:
+    """API 出力から check_runs のリストを検証して返す。"""
+    if not raw_json:
+        return None
+    try:
+        body = json.loads(raw_json)
+    except json.JSONDecodeError:
+        return None
+    runs = body.get("check_runs") if isinstance(body, dict) else None
+    if not isinstance(runs, list):
+        return None
+    return [r for r in runs if isinstance(r, dict)]
+
+
+def _filter_check_runs_by_name(
+    runs: list[dict[str, Any]], name: str
+) -> list[dict[str, Any]]:
+    """名前が一致する run を選別する。"""
+    return [
+        r for r in runs
+        if str(r.get("name") or "") == name
+    ]
+
+
+def _aggregate_check_run_results(matched: list[dict[str, Any]]) -> Optional[str]:
+    """matched runs を pending・失敗結論・success の順で集約する。"""
+    if not matched:
+        return None
+    if any(str(r.get("status") or "").lower() != "completed" for r in matched):
+        return "pending"
+    for run in matched:
+        conclusion = str(run.get("conclusion") or "").lower()
+        if conclusion != "success":
+            return conclusion or "unknown"
+    return "success"
+
+
 def check_run_result(repo: str, sha: str, name: str) -> Optional[str]:
     """名前が一致した検査ジョブの結果を 1 つの語で返す。
 
@@ -427,28 +464,11 @@ def check_run_result(repo: str, sha: str, name: str) -> Optional[str]:
                       f"?per_page={CHECK_RUNS_PER_PAGE}"],
         check=False,
     )
-    if not out:
+    runs = _parse_check_runs(out)
+    if runs is None:
         return None
-    try:
-        body = json.loads(out)
-    except json.JSONDecodeError:
-        return None
-    runs = body.get("check_runs") if isinstance(body, dict) else None
-    if not isinstance(runs, list):
-        return None
-    matched = [
-        r for r in runs
-        if isinstance(r, dict) and str(r.get("name") or "") == name
-    ]
-    if not matched:
-        return None
-    if any(str(r.get("status") or "").lower() != "completed" for r in matched):
-        return "pending"
-    for run in matched:
-        conclusion = str(run.get("conclusion") or "").lower()
-        if conclusion != "success":
-            return conclusion or "unknown"
-    return "success"
+    matched = _filter_check_runs_by_name(runs, name)
+    return _aggregate_check_run_results(matched)
 
 
 def revert_item_commits(
