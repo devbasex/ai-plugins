@@ -181,10 +181,23 @@ def _root_conftest_module():
     return mod
 
 
-def test_no_monitor_variable_survives_into_a_test() -> None:
-    """実行中は、監視の上限を指す環境変数が 1 つも残らない。"""
-    remaining = [k for k in os.environ if k.startswith("MONITOR_")]
-    assert remaining == [], remaining
+def test_no_monitor_variable_survives_into_a_test(monkeypatch: pytest.MonkeyPatch) -> None:
+    """外す側を呼んだ後は、監視の上限を指す環境変数が 1 つも残らない。
+
+    **確かめる前に自分で 1 つ差し込む。** 周りのシェルが上限を持たないと、外す仕組みを
+    壊しても素通りする。差し込んでおけば、起動したシェルが何を持っていても同じことを
+    確かめられる。控えを汚さないよう、根の設定は別名で読み込む。
+    """
+    mod = _root_conftest_module()
+    monkeypatch.setenv("MONITOR_STALL_AGY", "1800")
+
+    try:
+        mod.pytest_configure(None)
+
+        remaining = [k for k in os.environ if k.startswith("MONITOR_")]
+        assert remaining == [], remaining
+    finally:
+        mod.pytest_unconfigure(None)
 
 
 def test_a_test_can_still_set_its_own_monitor_variable(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -193,14 +206,29 @@ def test_a_test_can_still_set_its_own_monitor_variable(monkeypatch: pytest.Monke
     assert os.environ["MONITOR_STALL_AGY"] == "600"
 
 
-def test_the_child_process_does_not_inherit_a_monitor_variable() -> None:
-    """子プロセスにも同じ切り離しが効く（起動する側で外し直さなくてよい）。"""
-    out = subprocess.run(
-        [sys.executable, "-c",
-         "import os; print([k for k in os.environ if k.startswith('MONITOR_')])"],
-        capture_output=True, text=True,
-    )
-    assert out.stdout.strip() == "[]", out.stdout
+def test_the_child_process_does_not_inherit_a_monitor_variable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """外した後に起動した子プロセスは、監視の上限を指す環境変数を受け継がない。
+
+    起動する側で外し直さなくてよいことを確かめる。**確かめる前に自分で 1 つ差し込む。**
+    周りのシェルが上限を持たないと、外す仕組みを壊しても素通りする。控えを汚さないよう、
+    根の設定は別名で読み込む。
+    """
+    mod = _root_conftest_module()
+    monkeypatch.setenv("MONITOR_STALL_AGY", "1800")
+
+    try:
+        mod.pytest_configure(None)
+
+        out = subprocess.run(
+            [sys.executable, "-c",
+             "import os; print([k for k in os.environ if k.startswith('MONITOR_')])"],
+            capture_output=True, text=True,
+        )
+        assert out.stdout.strip() == "[]", out.stdout
+    finally:
+        mod.pytest_unconfigure(None)
 
 
 def test_the_values_are_put_back_after_the_run(monkeypatch: pytest.MonkeyPatch) -> None:
