@@ -437,13 +437,21 @@ def queue_for(worktree: pathlib.Path) -> post_queue.Queue:
     return post_queue.Queue(pathlib.Path(base) / post_queue.QUEUE_DIRNAME)
 
 
-def cmd_fix(args: argparse.Namespace) -> int:
+class FixInputs(NamedTuple):
+    worktree: pathlib.Path
+    repo: str
+    head: str
+    result: pathlib.Path
+    fix: dict[str, Any]
+
+
+def _resolve_fix_inputs(args: argparse.Namespace) -> tuple[FixInputs | None, str]:
+    """単独 fix 命令の入力を引数と既定値から解決する。"""
     worktree = pathlib.Path(args.worktree or os.getcwd()).resolve()
     repo = args.repo or _sh("gh", "repo", "view", "--json", "nameWithOwner",
                             "-q", ".nameWithOwner")
     if not repo:
-        print("リポジトリを決められない（--repo を渡す）", file=sys.stderr)
-        return 1
+        return None, "リポジトリを決められない（--repo を渡す）"
     head = args.head or _sh("gh", "pr", "view", str(args.pr), "--json", "headRefName",
                             "-q", ".headRefName")
     result = pathlib.Path(args.result) if args.result else (
@@ -451,8 +459,16 @@ def cmd_fix(args: argparse.Namespace) -> int:
                      or str(worktree / TMP_DIRNAME)) / f"fix-pr{args.pr}-result.json")
     fix = _read_json(result)
     if not fix:
-        print(f"修正の結果ファイルを読めない: {result}", file=sys.stderr)
+        return None, f"修正の結果ファイルを読めない: {result}"
+    return FixInputs(worktree, repo, head, result, fix), ""
+
+
+def cmd_fix(args: argparse.Namespace) -> int:
+    inputs, error = _resolve_fix_inputs(args)
+    if inputs is None:
+        print(error, file=sys.stderr)
         return 1
+    worktree, repo, head, result, fix = inputs
 
     if head:
         pushed = push_fix(worktree, head, fix.get("fix_commit") or fix.get("commit_sha"))

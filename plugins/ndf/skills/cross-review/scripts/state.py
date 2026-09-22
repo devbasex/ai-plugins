@@ -2262,49 +2262,36 @@ def _round_passes(
     return True
 
 
-def _guard_previous_round(st: dict[str, Any], prev: dict[str, Any]) -> None:
-    """前のラウンドの後始末が終わっているかを確かめる。
-
-    進行側が手で修正して次のラウンドへ進めると、修正の工程（Step 5）が担う返信と
-    Resolve が飛ばされる。飛ばされたまま進むと、未解決の指摘が残ったまま承認へ到達する。
-
-    止めるのは次の 2 つ。
-
-    1. 前のラウンドが修正必須の判定なのに、修正の記録が無い
-    2. 前のラウンドで Resolve したと申告されたスレッドが、GitHub 側で未解決のまま
-
-    未解決の指摘を取得できないときは検査を行わず、確認できなかったことを残して進む。
-    取得の失敗で止めると、GitHub 側の一時的な不調でループが進まなくなる。
-
-    スレッドの状態は、申告が行われた Pull Request（`prev["pr"]`）へ問い合わせる。
-    ローテーションを挟んだラウンドでは Step 6 の `set-current-pr` が先に走るため、
-    `current_pr` は既に新しい Pull Request を指している。そちらへ問い合わせると、
-    旧 Pull Request のスレッドが未解決のままでも一覧に現れず検査が素通りする。
-    """
-    round_no = prev.get("round")
+def _resolve_previous_verdict(st: dict[str, Any], prev: dict[str, Any]) -> str | None:
+    """保存されていない旧形式の判定を、ラウンドの結果から復元する。"""
     verdict = prev.get("verdict")
-    if verdict is None:
-        # 判定の結果を持たない古い状態ファイルは、保存された重要度から判定し直す。
-        # 項目が欠けたラウンドは結果なしであり、修正の記録を求める対象ではない。
-        # **数える相手はそのラウンドの担当である**（決定 11）。`codex` / `agy` で数えると、
-        # 担当が `agy` + `kiro` のラウンドで `codex` を結果なしと読み、修正の記録が
-        # 無いまま次のラウンドへ通す。
-        reviewers = prev.get("reviewers") or _round_reviewers(st, prev.get("round") or 1)
-        if _no_result_agents(prev, st.get("only"), reviewers):
-            verdict = "no_result"
-        else:
-            verdict = ("approved" if _round_passes(prev, st.get("only"), reviewers)
-                       else "changes_requested")
-    fix = prev.get("fix")
-    if verdict == "changes_requested" and not fix:
-        die(
-            f"round {round_no} は修正必須の判定でしたが、修正の記録がありません。"
-            " 返信と Resolve が飛ばされている可能性があります。"
-            " `/ndf:fix` を実行して戻り値ファイルを作り、`merge-fix` を通してから"
-            " 次のラウンドを開始してください",
-            code=5,
-        )
+    if verdict is not None:
+        return verdict
+    reviewers = prev.get("reviewers") or _round_reviewers(st, prev.get("round") or 1)
+    if _no_result_agents(prev, st.get("only"), reviewers):
+        return "no_result"
+    return ("approved" if _round_passes(prev, st.get("only"), reviewers)
+            else "changes_requested")
 
+
+def _require_fix_for_changes(round_no: Any, verdict: str | None,
+                             fix: dict[str, Any] | None) -> None:
+    """修正必須の判定に修正記録が伴うことを確かめる。"""
+    if verdict != "changes_requested" or fix:
+        return
+    die(
+        f"round {round_no} は修正必須の判定でしたが、修正の記録がありません。"
+        " 返信と Resolve が飛ばされている可能性があります。"
+        " `/ndf:fix` を実行して戻り値ファイルを作り、`merge-fix` を通してから"
+        " 次のラウンドを開始してください",
+        code=5,
+    )
+
+
+def _verify_resolved_threads(st: dict[str, Any], prev: dict[str, Any],
+                             fix: dict[str, Any] | None) -> None:
+    """Resolve 済みとの申告を GitHub の未解決スレッドと突き合わせる。"""
+    round_no = prev.get("round")
     claimed = (fix or {}).get("resolved_thread_ids") or []
     if not claimed:
         return
@@ -2324,6 +2311,31 @@ def _guard_previous_round(st: dict[str, Any], prev: dict[str, Any]) -> None:
             f"{' '.join(still_open)}。返信と Resolve を済ませてから次のラウンドを開始してください",
             code=5,
         )
+
+
+def _guard_previous_round(st: dict[str, Any], prev: dict[str, Any]) -> None:
+    """前のラウンドの後始末が終わっているかを確かめる。
+
+    進行側が手で修正して次のラウンドへ進めると、修正の工程（Step 5）が担う返信と
+    Resolve が飛ばされる。飛ばされたまま進むと、未解決の指摘が残ったまま承認へ到達する。
+
+    止めるのは次の 2 つ。
+
+    1. 前のラウンドが修正必須の判定なのに、修正の記録が無い
+    2. 前のラウンドで Resolve したと申告されたスレッドが、GitHub 側で未解決のまま
+
+    未解決の指摘を取得できないときは検査を行わず、確認できなかったことを残して進む。
+    取得の失敗で止めると、GitHub 側の一時的な不調でループが進まなくなる。
+
+    スレッドの状態は、申告が行われた Pull Request（`prev["pr"]`）へ問い合わせる。
+    ローテーションを挟んだラウンドでは Step 6 の `set-current-pr` が先に走るため、
+    `current_pr` は既に新しい Pull Request を指している。そちらへ問い合わせると、
+    旧 Pull Request のスレッドが未解決のままでも一覧に現れず検査が素通りする。
+    """
+    fix = prev.get("fix")
+    verdict = _resolve_previous_verdict(st, prev)
+    _require_fix_for_changes(prev.get("round"), verdict, fix)
+    _verify_resolved_threads(st, prev, fix)
 
 
 def _sync_before_round(st: dict[str, Any], pr: int) -> HeadRef | None:

@@ -553,6 +553,41 @@ class Queue:
                 json.dump(item, f, indent=2, ensure_ascii=False)
             return path
 
+    def _item_to_send(
+        self, path: pathlib.Path
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None,
+               dict[str, Any] | None]:
+        """項目を読み、送る項目・既投稿・読込失敗のいずれかを返す。"""
+        item = _read_item(path)
+        if item is None:
+            return None, None, {
+                "path": str(path),
+                "last_error": f"待ち行列の項目を読めない ({path.name})",
+            }
+        found, row = posted_match(item)
+        if found is not True:
+            return item, None, None
+        if row is not None:
+            item["response"] = row
+        path.unlink(missing_ok=True)
+        return None, item, None
+
+    def _send_item(self, path: pathlib.Path, item: dict[str, Any]) -> tuple[bool, Any]:
+        """1 項目を送り、成功時の応答または失敗情報を項目へ反映する。"""
+        attempt = send(item)
+        if attempt.ok:
+            try:
+                item["response"] = json.loads(attempt.stdout or "null")
+            except json.JSONDecodeError:
+                item["response"] = None
+            path.unlink(missing_ok=True)
+            return True, attempt
+        item["attempts"] = int(item.get("attempts") or 0) + 1
+        item["last_error"] = attempt.summary()
+        item["last_status"] = attempt.http
+        path.write_text(json.dumps(item, indent=2, ensure_ascii=False), encoding="utf-8")
+        return False, attempt
+
     def flush(self) -> FlushResult:
         """積んだ項目を連番の順に送る。
 
@@ -564,42 +599,18 @@ class Queue:
         failed: dict[str, Any] | None = None
         rate_limited = False
         for path in self.paths():
-            item = _read_item(path)
-            if item is None:
-                # **読めない項目を黙って飛ばさない。** `count()` はファイルを数え
-                # 続けるため、飛ばすと送りも失敗の報告もしないまま件数だけが残り、
-                # 判定は終了コード 8 を返し続けて誰も直せない状態になる。ここで
-                # 止めて理由を返せば、その項目を捨てるか直すかを人が選べる。
-                failed = {
-                    "path": str(path),
-                    "last_error": f"待ち行列の項目を読めない ({path.name})",
-                }
+            item, already_posted, read_failure = self._item_to_send(path)
+            if read_failure is not None:
+                failed = read_failure
                 break
-            found, row = posted_match(item)
-            if found is True:
-                # **送った場合と同じ形で返す。** 呼び出し側は届いたことを応答から
-                # 確かめるため、既に届いていた項目にも見つけた投稿を積んで渡す。
-                if row is not None:
-                    item["response"] = row
-                path.unlink(missing_ok=True)
-                skipped.append(item)
+            if already_posted is not None:
+                skipped.append(already_posted)
                 continue
-            attempt = send(item)
-            if attempt.ok:
-                try:
-                    item["response"] = json.loads(attempt.stdout or "null")
-                except json.JSONDecodeError:
-                    item["response"] = None
-                path.unlink(missing_ok=True)
+            assert item is not None
+            ok, attempt = self._send_item(path, item)
+            if ok:
                 sent.append(item)
                 continue
-            item["attempts"] = int(item.get("attempts") or 0) + 1
-            item["last_error"] = attempt.summary()
-            # **状態も残す。** 拒まれ方の区別（位置を解決できない / それ以外）は、
-            # 流した後に項目だけを見て決める。
-            item["last_status"] = attempt.http
-            path.write_text(json.dumps(item, indent=2, ensure_ascii=False),
-                            encoding="utf-8")
             failed = item
             rate_limited = is_rate_limited(attempt)
             break
