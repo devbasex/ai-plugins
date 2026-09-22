@@ -10,6 +10,7 @@ import json
 import os
 import pathlib
 import subprocess
+import types
 
 import pytest
 
@@ -79,8 +80,11 @@ def run_init(refactor_lib, paths, patch_lib, refactor, origin_repo, monkeypatch)
     refactor_lib = sys.modules["refactor_lib"]
     probed: list[list[str]] = []
 
-    def _run(args, viewer="someone-else", probe=None):
-        """`probe` を渡すと確認を差し替える。`{ランタイム: 理由}` の者だけが通らない。"""
+    def _run(args, viewer="someone-else", probe=None, real_probe=False):
+        """`probe` を渡すと確認を差し替える。`{ランタイム: 理由}` の者だけが通らない。
+
+        `real_probe` を立てると差し替えず、止めない確認をそのまま走らせる（#813）。
+        """
         real_sh = paths.sh
 
         def fake_sh(cmd, cwd=None, check=True):
@@ -112,7 +116,9 @@ def run_init(refactor_lib, paths, patch_lib, refactor, origin_repo, monkeypatch)
         monkeypatch.delenv("CROSS_REFACTORING_TMP_DIR", raising=False)
         # 認証確認は実際の CLI を起動する。既定では飛ばし、`probe` を渡したときだけ
         # 止めない確認（`probe_auth`）を差し替えて結果を決める。
-        if probe is None:
+        if real_probe:
+            monkeypatch.delenv("NDF_SKIP_AUTH_CHECK", raising=False)
+        elif probe is None:
             monkeypatch.setenv("NDF_SKIP_AUTH_CHECK", "1")
         else:
             monkeypatch.delenv("NDF_SKIP_AUTH_CHECK", raising=False)
@@ -203,6 +209,59 @@ def test_a_failed_probe_drops_the_runtime_and_keeps_going(run_init, tmp_path, ca
     assert state["runtimes"] == ["claude", "codex"]
     assert state["participants"]["unavailable"] == {"kiro": "Not logged in"}
     assert "kiro を担当から外しました（Not logged in）" in capsys.readouterr().err
+
+
+def test_init_starts_when_an_unreadable_path_hides_a_missing_cli(
+        run_init, tmp_path, monkeypatch, capsys):
+    """AC11 — 読めないディレクトリを含む PATH で CLI が 1 つ欠けても始まる（#813）。
+
+    確認コマンドは、終わりが分かる短い実行ファイルへ差し替える。欠ける 1 者だけは
+    どこにも無い名前にし、読めないディレクトリを PATH の末尾へ足す。
+    """
+    cmd_setup = sys.modules["refactor_lib.commands.setup"]
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    stub = bin_dir / "ndf-stub-ok"
+    stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    stub.chmod(0o755)
+    unreadable = tmp_path / "unreadable"
+    unreadable.mkdir()
+    unreadable.chmod(0o000)
+    monkeypatch.setattr(cmd_setup.auth, "AUTH_PROBES", {
+        "claude": ("ndf-stub-ok",), "codex": ("ndf-stub-ok",),
+        "agy": ("ndf-stub-ok",), "kiro": ("ndf-stub-missing",),
+    })
+    monkeypatch.setenv("PATH", f"{os.environ['PATH']}:{bin_dir}:{unreadable}")
+    try:
+        run_init(_args(tmp_path), real_probe=True)
+    finally:
+        unreadable.chmod(0o700)
+
+    _, state = _state_of(tmp_path)
+    assert state["runtimes"] == ["claude", "codex"]
+    assert list(state["participants"]["unavailable"]) == ["kiro"]
+    assert "kiro を担当から外しました" in capsys.readouterr().err
+
+
+def test_init_starts_when_a_probe_cannot_be_launched(run_init, tmp_path, monkeypatch):
+    """AC11 — 起動できない例外は、権限が効かない実行者でも「外して続ける」になる。"""
+    cmd_setup = sys.modules["refactor_lib.commands.setup"]
+
+    def run(cmd, **kwargs):
+        if cmd[0] == "kiro-cli":
+            raise PermissionError(13, "Permission denied")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    # 差し替える先は認証の確認が見る名前だけにする。標準ライブラリの属性を差し替えると、
+    # 同じモジュールを使う git の呼び出しまで偽物になる。
+    monkeypatch.setattr(cmd_setup.auth, "subprocess", types.SimpleNamespace(
+        run=run, TimeoutExpired=subprocess.TimeoutExpired))
+    run_init(_args(tmp_path), real_probe=True)
+
+    _, state = _state_of(tmp_path)
+    assert state["runtimes"] == ["claude", "codex"]
+    assert state["participants"]["unavailable"] == {
+        "kiro": "コマンドを実行できません（Permission denied）"}
 
 
 def test_require_all_stops_without_writing_the_state(run_init, tmp_path):

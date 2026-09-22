@@ -9,8 +9,14 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import types
 
 import pytest
+
+# 子プロセスの起動の本物。テストのフィクスチャが差し替える前に控える（#813 の AC10 で
+# 認証の確認だけを本物のまま走らせるため）。
+_REAL_RUN = subprocess.run
 
 
 def _state(tmp_path, **over):
@@ -370,8 +376,9 @@ def new_init(state_mod, monkeypatch, tmp_path):
     monkeypatch.setattr(state_mod, "_sync_before_round", lambda st, pr: None)
     calls: list[list[str]] = []
 
-    def run(*argv: str, failing=None, only=None):
-        monkeypatch.setattr(state_mod.auth, "probe_auth", _fake_probe(failing or {}, calls))
+    def run(*argv: str, failing=None, only=None, real_probe=False):
+        if not real_probe:
+            monkeypatch.setattr(state_mod.auth, "probe_auth", _fake_probe(failing or {}, calls))
         state_mod.cmd_init(_init_args(tmp_path, *argv, only=only))
         return json.loads((tmp_path / f"cross-review-pr{PR_INIT}-state.json").read_text())
 
@@ -504,6 +511,68 @@ def test_the_second_seat_falls_back_to_a_second_copy_when_the_host_is_unavailabl
     assert st["participants"]["fallback"] == []
     assert "席を同じランタイムの 2 つ目で埋めます" in capsys.readouterr().err
     assert _start_round(state_mod, tmp_path) == ["codex", "codex-2"]
+
+
+# ---------- 読めないディレクトリを含む PATH（#813: AC10） ----------
+
+def _stub_cli(bin_dir, *names: str) -> None:
+    """確認コマンドが終了コード 0 で終わる短い実行ファイルを置く。"""
+    bin_dir.mkdir(exist_ok=True)
+    for name in names:
+        path = bin_dir / name
+        path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        path.chmod(0o755)
+
+
+def _real_subprocess(state_mod, monkeypatch):
+    """認証の確認だけを本物の起動に戻す。
+
+    `new_init` は子プロセスの起動を差し替える。差し替え先は標準ライブラリの同じ
+    モジュールのため、属性を戻すと開始の手順の側まで本物になる。認証の確認が見る
+    名前だけを別の入れ物へ向けて、2 つを分ける。
+    """
+    monkeypatch.setattr(state_mod.auth, "subprocess", types.SimpleNamespace(
+        run=_REAL_RUN, TimeoutExpired=subprocess.TimeoutExpired))
+
+
+def test_init_starts_when_an_unreadable_path_hides_a_missing_cli(
+        new_init, state_mod, monkeypatch, tmp_path, capsys):
+    """AC10: 読めないディレクトリを含む PATH で CLI が 1 つ欠けても、開始の手順は終わる。
+
+    権限が効かない実行者（root）では、欠けた CLI の理由が「コマンドが見つかりません」に
+    なる。外れて続くことは同じであり、理由の文言は認証の確認のテストが持つ。
+    """
+    _stub_cli(tmp_path / "bin", "codex", "agy")
+    unreadable = tmp_path / "unreadable"
+    unreadable.mkdir()
+    unreadable.chmod(0o000)
+    monkeypatch.setenv("PATH", f"{tmp_path / 'bin'}:{unreadable}")
+    _real_subprocess(state_mod, monkeypatch)
+    try:
+        st = new_init(real_probe=True)
+    finally:
+        unreadable.chmod(0o700)
+
+    assert st["participants"]["available"] == ["codex", "agy"]
+    assert list(st["participants"]["unavailable"]) == ["kiro"]
+    assert _start_round(state_mod, tmp_path) == ["codex", "agy"]
+
+
+def test_init_starts_when_a_probe_cannot_be_launched(new_init, state_mod, monkeypatch, tmp_path):
+    """AC10: 起動できない例外がどの実行者でも「外して続ける」になることを確かめる。"""
+    def run(cmd, **kwargs):
+        if cmd[0] == "kiro-cli":
+            raise PermissionError(13, "Permission denied")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(state_mod.auth, "subprocess", types.SimpleNamespace(
+        run=run, TimeoutExpired=subprocess.TimeoutExpired))
+
+    st = new_init(real_probe=True)
+
+    assert st["participants"]["available"] == ["codex", "agy"]
+    assert st["participants"]["unavailable"] == {
+        "kiro": "コマンドを実行できません（Permission denied）"}
 
 
 @pytest.mark.parametrize("argv", [
