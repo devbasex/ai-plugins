@@ -215,6 +215,63 @@ def test_the_runtime_of_a_seat_is_used_for_the_cli_specific_checks(monitor_mod):
     assert monitor_mod._agent_runtime("impl") == "impl"
 
 
+# ---------------- 監視の上限と無進捗の許容 ----------------
+
+@pytest.fixture()
+def no_limit_env(monkeypatch):
+    """上限の表を上書きする環境変数を外す。手元の設定でこの節が揺れないようにする。"""
+    for name in ("MONITOR_TIMEOUT", "MONITOR_STALL"):
+        monkeypatch.delenv(name, raising=False)
+        for runtime in ("CLAUDE", "CODEX", "AGY", "KIRO"):
+            monkeypatch.delenv(f"{name}_{runtime}", raising=False)
+
+
+@pytest.mark.parametrize("seat,expected", [
+    ("claude-2", 900), ("agy-2", 480), ("kiro-2", 480), ("codex-2", 180),
+])
+def test_a_second_seat_gets_the_allowance_of_its_runtime(
+    monitor_mod, no_limit_env, seat, expected
+):
+    """2 席目の無進捗の許容は、そのランタイムの値になる。
+
+    席の名前のまま上限の表を引くと表に無い担当として既定（180 秒）へ落ち、1 席目より
+    早く無進捗と判定される。
+    """
+    assert monitor_mod._agent_stall_default(seat) == expected
+
+
+def test_a_second_seat_reads_the_environment_variable_of_its_runtime(
+    monkeypatch, monitor_mod, no_limit_env
+):
+    """担当別の環境変数もランタイム名で引く（`MONITOR_STALL_CLAUDE-2` は書けない）。"""
+    monkeypatch.setenv("MONITOR_STALL_CLAUDE", "777")
+    assert monitor_mod._agent_stall_default("claude-2") == 777
+
+
+def test_both_seats_of_a_runtime_are_monitored_with_the_same_limits(
+    monkeypatch, monitor_mod, no_limit_env
+):
+    """並列監視の入口（`_run_all`）でも、2 席目が 1 席目と同じ上限で監視される。"""
+    seen: dict[str, object] = {}
+
+    def fake_monitor_agent(agent, pr, config):
+        seen[agent] = config
+        return monitor_mod.AgentStatus(agent=agent)
+
+    monkeypatch.setattr(monitor_mod, "monitor_agent", fake_monitor_agent)
+    monkeypatch.setattr(monitor_mod, "_record_outcome", lambda *a, **k: None)
+
+    args = argparse.Namespace(
+        timeout=None, stall_timeout=None, poll=1, no_require_result=False,
+        no_early_error=False, stem_template=monitor_mod.DEFAULT_STEM_TEMPLATE,
+        pr=1, phase="review",
+    )
+    monitor_mod._run_all(["claude", "claude-2"], args, "review")
+
+    assert seen["claude-2"].stall_timeout == seen["claude"].stall_timeout == 900
+    assert seen["claude-2"].timeout == seen["claude"].timeout
+
+
 # ---------------- 計測 ----------------
 
 def test_the_measure_counts_a_second_seat(measure_mod):

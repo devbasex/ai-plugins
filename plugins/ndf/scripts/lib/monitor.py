@@ -15,7 +15,8 @@
 cross-refactoring は `{agent}-propose-rf{id}` のような別の命名を渡す。
 
 **担当の名前は席の名前を取りうる**（`claude-2` のような同じランタイムの 2 つ目。#727）。
-一時ファイルの名前はその名前のまま組み、CLI ごとの検査だけ `_agent_runtime` で選ぶ。
+一時ファイルの名前はその名前のまま組み、CLI ごとの検査と**上限の表の参照**は
+`_agent_runtime` でランタイム名へ直してから行う。
 
 監視軸:
   1. **pidfile** + `kill -0` でプロセス生存確認
@@ -326,8 +327,12 @@ def _agent_stall_default(agent: str) -> int:
       4. `DEFAULT_STALL` (表に無い agent)
 
     env は **呼び出し時** に再評価し、非数値なら warn を出して表の値に戻す。
+
+    **席の名前はランタイム名へ直してから引く**（#727）。上限の表も担当別の環境変数も
+    ランタイム名で引くため、`claude-2` のまま渡すと表に無い担当として `DEFAULT_STALL`
+    へ落ち、1 席目より早く無進捗と判定される。
     """
-    return limits.stall_timeout(agent)
+    return limits.stall_timeout(_agent_runtime(agent))
 
 
 # `--tmp-dir` で明示指定された一時ディレクトリ。CLI の解析時にだけ設定する。
@@ -1179,8 +1184,11 @@ def _run_all(
     results: dict[str, AgentStatus] = {}
 
     def run(agent: str) -> None:
-        timeout = limits.monitor_timeout(phase, agent, args.timeout)
-        stall = limits.stall_timeout(agent, args.stall_timeout)
+        # 上限の表と担当別の環境変数はランタイム名で引く。席の名前（`claude-2`）のまま
+        # 渡すと表に無い担当として既定へ落ち、1 席目より早く無進捗と判定される（#727）。
+        runtime = _agent_runtime(agent)
+        timeout = limits.monitor_timeout(phase, runtime, args.timeout)
+        stall = limits.stall_timeout(runtime, args.stall_timeout)
         print(f"[{agent}] ▶ hard timeout {timeout}s / stall {stall}s (phase {phase})",
               file=sys.stderr, flush=True)
         if stall >= timeout:
