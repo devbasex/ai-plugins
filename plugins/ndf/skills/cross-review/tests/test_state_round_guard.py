@@ -207,3 +207,29 @@ def test_unavailable_count_does_not_stop_the_round(tmp_dir, state_mod, unresolve
 
     assert len(_read(tmp_dir)["rounds"]) == 2
     assert "確認できません" in capsys.readouterr().err
+
+
+# ---------------- 前ラウンドの担当で数える（#727: AC23） ----------------
+
+
+def test_the_guard_counts_the_reviewers_recorded_on_the_round(tmp_dir, state_mod, unresolved, capsys):
+    """AC23: 判定の結果を持たない前ラウンドは、そのラウンドの担当で数え直す。
+
+    担当を渡さず `codex` / `agy` で数えると、担当が `agy` + `kiro` のラウンドでは
+    `codex` を結果なしと読み、修正の記録が無いまま次のラウンドへ通す。
+    """
+    unresolved([])
+    prev = {
+        "round": 1, "pr": PR, "started_at": "2026-08-31T00:00:00+00:00",
+        "reviewers": ["agy", "kiro"],
+        "agy": {"intent": "REQUEST_CHANGES", "by_severity": {"major": 1}},
+        "kiro": {"intent": "REQUEST_CHANGES", "by_severity": {"major": 1}},
+    }
+    _write(tmp_dir, _state([prev], host="claude"))
+
+    with pytest.raises(SystemExit) as e:
+        state_mod.cmd_start_round(argparse.Namespace(pr=PR))
+
+    assert e.value.code == 5
+    assert "修正の記録" in capsys.readouterr().err
+    assert len(_read(tmp_dir)["rounds"]) == 1

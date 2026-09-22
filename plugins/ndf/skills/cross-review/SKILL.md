@@ -1,7 +1,7 @@
 ---
 name: cross-review
 description: "Review a PR with two CLIs picked from the runtimes other than the host, looping fixes until no new finding appears. Use when a converging multi-AI review is wanted（クロスレビュー・両AIレビュー・収束レビュー）."
-argument-hint: "[PR番号] [--host claude|codex|agy|kiro] [--max-rounds N] [--rotate-after K] [--rotate-mode light|squash] [--only RUNTIME] [--focus TEXT] [--extra-instructions-file PATH] [--verify-command CMD] [--verify-exit-code N]"
+argument-hint: "[PR番号] [--host claude|codex|agy|kiro] [--max-rounds N] [--rotate-after K] [--rotate-mode light|squash] [--only RUNTIME] [--exclude NAMES] [--include NAMES] [--require-all] [--focus TEXT] [--extra-instructions-file PATH] [--verify-command CMD] [--verify-exit-code N]"
 allowed-tools:
   - Bash
   - Read
@@ -16,9 +16,10 @@ allowed-tools:
 PR を**ホストを除く 3 者から選んだ 2 者**にレビューさせ、**新しい指摘が出なくなるまで**
 `/ndf:pr-review` と `/ndf:fix` を自動で回す。
 
-母集合は「全ランタイム − ホスト」で、担当はラウンドごとの輪番で決まる（`cross-refactoring`
-と同じ決め方で、実装は共通層の `lib/assignment.py` にある）。**ホストを名指しで固定しない**
-のは、固定するとホストが `codex` か `agy` のときに自分自身をレビュワーへ含めるためである。
+母集合は「全ランタイム − ホスト」で、そのうち使える者から毎ラウンド 2 席を埋める
+（実装は共通層の `lib/assignment.py`）。**1 者が使えなくても始まり**、席が足りなければ
+ホストと同じランタイムの 2 つ目で埋める（`docs/05`）。**ホストを名指しで固定しない**のは、
+固定するとホストが `codex` か `agy` のときに自分自身をレビュワーへ含めるためである。
 
 /goalの引数として呼ばれた場合は、新しい指摘が出なくなるまで/cross-reviewを繰り返す。
   * 担当のいずれかが不具合などで実行できなくなった場合は異常終了とする
@@ -59,7 +60,7 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 | 長尺PR対策 | **`--rotate-after` ラウンドで PR をローテーション**（default=light: 同ブランチで PR 巻き直し / squash: 新ブランチ + squash 統合） |
 | 振動検知 | 前のラウンドと**同じ箇所を指す指摘**が 50% 以上なら中断（測り方は `docs/01` の Step 4） |
 | 終了基準 | **新しい指摘が出なくなったら収束**。全員 `APPROVE` は最も止まらない参加者に律速される。3 つの層の順序は `docs/01` の「終了基準」 |
-| レビュワーの母集合 | **全ランタイム − ホスト**の 3 者から、輪番で 2 者。認証は `init` が起動前に確かめる |
+| レビュワーの母集合 | **全ランタイム − ホスト**の 3 者から、使える者を決めて毎ラウンド 2 席。使える者の解決と席の埋め方は `docs/05` |
 
 ## 引数
 
@@ -70,7 +71,10 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 | `--rotate-after K` | この round 数で未収束なら PR ローテーション | `8` |
 | `--rotate-mode light\|squash` | ローテーション方式。`light`: 同ブランチで旧 PR を close → 新 PR (title/body は現状の差分・実装から再生成)。`squash`: squash 統合 + 新ブランチ + `(rotated)` suffix | `light` |
 | `--host claude\|codex\|agy\|kiro` | この収束ループを起動している CLI。母集合から外れる | 環境変数から推定。**推定できなければ失敗する** |
-| `--only RUNTIME` | 1 者だけで回す（デバッグ用）。**そのラウンドの担当を 1 者へ絞る。** 母集合の外を指定したら `init` が弾く | 担当 2 者 |
+| `--only RUNTIME` | 1 者だけで回す。**そのラウンドの担当を 1 者へ絞り、席の埋め合わせを行わない。** 母集合の外を指定したときと、その 1 者が確認を通らないときは `init` が弾く | 担当 2 者 |
+| `--exclude NAMES` | 母集合から外す者。カンマ区切りで複数、繰り返しも可。再開で `none` を渡すと空へ戻す | なし |
+| `--include NAMES` | 母集合に足す者（ホストも足せる）。書き方は `--exclude` と同じ | なし |
+| `--require-all` | 確認を通らない者が 1 者でもいれば `init` を失敗させる。全員が揃わないなら始めたくない運用向け | 使える者で始める |
 | `--focus TEXT` | 自動レビュー観点に上乗せして**そのラウンドのレビュー担当 2 者**に渡す追加観点。短い重点チェック向け | なし |
 | `--extra-instructions-file PATH` | 自動レビュー観点に上乗せして**そのラウンドのレビュー担当 2 者**に渡す追加観点を UTF-8 テキストファイルから読む。長いチェックリスト向け | なし |
 | `--verify-command CMD` | 実行検証（Step 2.5）で実行してよいコマンド。**渡さなければ実行検証を行わない** | なし |
@@ -83,6 +87,7 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 /ndf:cross-review 123 --max-rounds 4 --rotate-after 2
 /ndf:cross-review 123 --rotate-mode squash
 /ndf:cross-review 123 --only codex
+/ndf:cross-review 123 --exclude agy --include claude --require-all
 /ndf:cross-review 123 --focus "ドキュメントとコードの整合性を重点的に確認"
 /ndf:cross-review 123 --extra-instructions-file /tmp/review-focus.md
 /ndf:cross-review 123 --verify-command "pytest" --verify-exit-code 1
@@ -121,7 +126,7 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 
 - `/ndf:pr-review` が **AI 直接投稿**（外部 AI 自身が `gh api` で投稿）に対応
 - `/ndf:fix` が **サブエージェント起動 + 重要度ベース自動修正 + Resolve Conversation** に対応
-- 担当になる CLI が動作し、`gh` CLI が認証済み（`init` が起動前に確かめる。誤検知するときは `NDF_SKIP_AUTH_CHECK=1`）
+- `gh` CLI が認証済み。担当になる CLI は `init` が起動前に確かめ、通らない者は外して続ける（誤検知するときは `NDF_SKIP_AUTH_CHECK=1`）
 - `Agent(subagent_type="general-purpose", ...)` でサブエージェントを起動可能
 
 ## 事前確認（`state.py init` が自動実施）
@@ -160,15 +165,12 @@ flowchart TD
     Start([事前確認 / loop 開始前に 1 回だけ]):::phase --> Init["worktree 作成 + state.json 初期化<br/>・自分の PR 判定 → event downgrade 設定<br/>・&lt;worktree-base&gt;/pr&lt;PR&gt; を用意<br/>・既存コメントスナップショット保存"]
     Init --> Round["Round N start<br/>current_pr = PR#"]:::phase
 
-    Round -.並列バックグラウンド.-> Codex["/ndf:pr-review &lt;PR&gt; codex<br/>(AI が gh api で直接投稿)<br/>body 先頭: cross-review / round N / codex / intent<br/>→ result.json (intent + posted_as)"]
-    Round -.並列バックグラウンド.-> Agy["/ndf:pr-review &lt;PR&gt; agy<br/>--add-dir で作業領域を宣言<br/>body 先頭: cross-review / round N / agy / intent<br/>→ result.json (intent + posted_as)"]
-
-    Codex --> Decide{"判定 (intent ベース)"}
-    Agy --> Decide
+    Round -.並列バックグラウンド.-> Seats["レビュー担当 2 席（start-round が返す）<br/>/ndf:pr-review &lt;PR&gt; &lt;席&gt; を席ごとに起動<br/>body 先頭: cross-review / round N / 席 / intent<br/>→ &lt;席&gt;-review-pr&lt;PR&gt;-result.json"]
+    Seats --> Decide{"判定 (intent ベース)"}
 
     Decide -->|"結果なし (2 度目は final = error)"| Relaunch["結果を残さなかった側だけ<br/>同じラウンドで 1 度起動し直す"]
     Relaunch --> Decide
-    Decide -->|"両方 APPROVE / --only で外した側"| Approved([final = approved]):::ok
+    Decide -->|"両席 APPROVE / --only で外した席"| Approved([final = approved]):::ok
     Decide -->|一方でも REQUEST_CHANGES| Fix["Agent (general-purpose)<br/>/ndf:fix &lt;PR&gt; --defer-nit を worktree 内で実行<br/>・critical/major/minor 修正 + push<br/>・reply + resolveReviewThread<br/>・deferred/rejected は reply のみ<br/>→ $TMP_DIR/fix-pr&lt;#&gt;-result.json"]
 
     Fix --> Check{収束チェック}
@@ -206,11 +208,12 @@ STATE_PR=$INITIAL_PR
 ROTATE_MODE=${ROTATE_MODE:-light}
 
 # Step 0: state 初期化 / 再開
-# ⚠ eval はコマンド置換の終了コードを潰す。変数で受けてから eval する（docs/01 参照）
+# ⚠ eval はコマンド置換の終了コードを潰す。変数で受けてから eval する（docs/01 参照）。**値のある引数だけを渡す**（常に渡すと、再開のたびに指定していない既定値で上書きする）。再開で渡した引数がどう扱われるか（反映する / 参加者を作り直す / 反映しない）は `docs/04-contracts.md` の「再開で渡した引数の扱い」にある。
 INIT_VARS=$("$SCRIPTS/state.py" init "$STATE_PR" \
-          --max-rounds "$MAX_ROUNDS" --rotate-after "$ROTATE_AFTER" \
+          ${MAX_ROUNDS:+--max-rounds "$MAX_ROUNDS"} ${ROTATE_AFTER:+--rotate-after "$ROTATE_AFTER"} \
           ${HOST:+--host "$HOST"} \
           ${ONLY:+--only "$ONLY"} \
+          ${EXCLUDE:+--exclude "$EXCLUDE"} ${INCLUDE:+--include "$INCLUDE"} ${REQUIRE_ALL:+--require-all} \
           ${FOCUS:+--focus "$FOCUS"} \
           ${VERIFY_COMMAND:+--verify-command "$VERIFY_COMMAND"} ${VERIFY_EXIT_CODE:+--verify-exit-code "$VERIFY_EXIT_CODE"} \
           ${EXTRA_INSTRUCTIONS_FILE:+--extra-instructions-file "$EXTRA_INSTRUCTIONS_FILE"}) || exit $?
@@ -225,28 +228,25 @@ while :; do
   eval "$ROUND_VARS"
 
   # Step 2: 並列レビュー（担当は start-round が REVIEWERS / REVIEWERS_CSV で返す）
+  # **シェル変数で絞り直さない。** 返る一覧は 1 者指定と席の埋め合わせを反映済みである。
   for r in $REVIEWERS; do
-    [ -z "$ONLY" ] || [ "$ONLY" = "$r" ] || continue
     "$SCRIPTS/launch-reviewer.sh" "$r" "$STATE_PR" "$ROUND"
   done
-  # 監視: 上限は上限の表（review 1200 秒 / stall は担当別 codex 180・agy 480・kiro 480・claude 900）。失敗時は kill して返す。
-  #   Bash の 1 回 600 秒に収まらないため背景で起動し、wait（1 回 540 秒以内）を 124 のあいだ **別の Bash の呼び出しで** 呼び直す。
-  #   **繰り返しを 1 回の呼び出しへ書かない**（2 回目の待ちに入った時点で合計が 600 秒を超え、ホストに打ち切られる。docs/01）。
-  #   監視と取り込みの終了コードは読まない。結果なしは NO_RESULT として state に残り、Step 3 が受け取る。担当は `--agents` で渡す（`both` は 2 者だけ）。
-  "$SCRIPTS/bg-wait.sh" run "$TMP_DIR/review.rc" -- "$SCRIPTS/monitor.py" "$STATE_PR" --phase review --agents "${ONLY:-$REVIEWERS_CSV}"
+  # 監視: 上限は上限の表（review 1200 秒 / stall は席のランタイム別 codex 180・agy 480・kiro 480・claude 900）。失敗時は kill して返す。担当は `--agents` で渡す。
+  #   Bash の 1 回 600 秒に収まらないため背景で起動し、wait（1 回 540 秒以内）を 124 のあいだ **別の Bash の呼び出しで** 呼び直す。**繰り返しを 1 回の呼び出しへ書かない**（2 回目の待ちで合計が 600 秒を超え、ホストに打ち切られる。docs/01）。
+  #   監視と取り込みの終了コードは読まない。結果なしは NO_RESULT として state に残り、Step 3 が受け取る。
+  "$SCRIPTS/bg-wait.sh" run "$TMP_DIR/review.rc" -- "$SCRIPTS/monitor.py" "$STATE_PR" --phase review --agents "$REVIEWERS_CSV"
   "$SCRIPTS/bg-wait.sh" wait "$TMP_DIR/review.rc"   # 124 = まだ。**この 1 行を別の Bash の呼び出しとして呼び直す**
   for r in $REVIEWERS; do
-    [ -z "$ONLY" ] || [ "$ONLY" = "$r" ] || continue
     "$SCRIPTS/state.py" read-result "$STATE_PR" "$r" || true
   done
 
   # Step 2.5: 根拠の検証（#156）。順序と理由は docs/06-evidence.md の「走らせる順序」。
   #   飛ばすと、判定が読む区分が統合も実行の結果も反映しないまま決まる。
   # ⚠ 起動 → 監視 → 取り込みは critique-round.sh が持つ。**未起動の担当を監視へ渡さない**
-  #   （渡すと 30 秒待って PIDFILE_BAD (exit 6) が返る）ことと、有効な反証が揃わない
-  #   ときに同じラウンドで 1 度だけ取り直すことを、この 1 本が引き受ける。
+  #   （渡すと 30 秒待って PIDFILE_BAD (exit 6) が返る）ことと、有効な反証が揃わないときに同じラウンドで 1 度だけ取り直すことを、この 1 本が引き受ける。
   "$SCRIPTS/state.py" verify-findings "$STATE_PR"
-  "$SCRIPTS/bg-wait.sh" run "$TMP_DIR/critique.rc" -- "$SCRIPTS/critique-round.sh" "$STATE_PR" "$ROUND" ${ONLY:-$REVIEWERS}
+  "$SCRIPTS/bg-wait.sh" run "$TMP_DIR/critique.rc" -- "$SCRIPTS/critique-round.sh" "$STATE_PR" "$ROUND" $REVIEWERS
   "$SCRIPTS/bg-wait.sh" wait "$TMP_DIR/critique.rc"  # 同上。124 のあいだ、別の呼び出しとして呼び直す
 
   # Step 3: 判定 (0=収束 / 2=修正へ / 7=結果なし / 8=待ち行列に残あり / 1=中断)。引き継いだ指摘が残っていれば、
@@ -390,8 +390,8 @@ bash ループは Agent tool を呼べないため、light モードでは Step 
   | 2 | #123 | codex=REQUEST_CHANGES (2) / kiro=APPROVE (0) | def456 (2 fixed) | ✅ |
   | 3 | #145 | codex=APPROVE (0) / agy=APPROVE (0) | — | — |
 
-  **担当はラウンドごとに変わる。** 4 つの名前を取りうるため、担当と判定を 1 つの列へ
-  まとめる。
+  **担当はラウンドごとに変わる。** 席の名前（`claude-2` のような 2 つ目を含む）を取りうる
+  ため、担当と判定を 1 つの列へまとめる。
 
 - **最終スイープ結果** (Step 7.5): `sweep-pr<STATE_PR>-result.json` の `resolved` /
   `fixed_in_sweep` / `remaining_open`。**`remaining_open` は 0 が正常**（残 open

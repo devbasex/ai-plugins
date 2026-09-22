@@ -25,14 +25,15 @@ def test_the_monitor_accepts_the_new_name(tmp_path) -> None:
     # 起動待ちの 30 秒を使い切らないよう、終了済みの pid を先に置く。
     (tmp_path / "agy-review-pr1.pid").write_text("2147483646\n", encoding="utf-8")
     r = _run("1", "agy", "--tmp-dir", str(tmp_path), "--timeout", "1", "--poll", "1")
-    assert "invalid choice" not in r.stderr
+    assert "席の名前の形が違います" not in r.stderr
     assert r.returncode != 2
 
 
 def test_the_monitor_rejects_the_old_name() -> None:
+    """綴りの検査は席の名前の形が行う（#727）。通らなければ終了コード 2。"""
     r = _run("1", "gemini")
     assert r.returncode == 2
-    assert "invalid choice" in r.stderr
+    assert "席の名前の形が違います" in r.stderr
 
 
 # ---------- 受け入れ条件 19（無進捗の許容時間） ----------

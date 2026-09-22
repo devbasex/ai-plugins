@@ -241,14 +241,21 @@ def test_only_narrows_the_round_reviewers(state_mod, tmp_path):
 
 
 def test_init_rejects_an_only_outside_the_pool(state_mod, tmp_path, monkeypatch):
-    """母集合の外を `--only` に指定したら、起動する前に弾く。
+    """母集合の外を `--only` に指定したら、起動する前に弾く（終了コード 1）。
 
     ホスト自身や、参加しないランタイムを指定しても、そのラウンドは 1 者も起動しない。
+    検査は共通層の `resolve_participants` が行い、`_resolve_reviewers` が終了コードへ写す。
     """
-    with pytest.raises(SystemExit):
-        state_mod._validate_only("claude", "claude")   # ホスト自身
-    assert state_mod._validate_only("codex", "claude") == "codex"
-    assert state_mod._validate_only(None, "claude") is None
+    calls: list[list[str]] = []
+    monkeypatch.setattr(state_mod.auth, "probe_auth", _fake_probe({}, calls))
+    with pytest.raises(SystemExit) as e:
+        state_mod._resolve_reviewers("claude", _init_args(tmp_path, only="claude"))
+    assert e.value.code == 1
+    assert calls == []
+    p = state_mod._resolve_reviewers("claude", _init_args(tmp_path, only="codex"))
+    assert p["available"] == ["codex"]
+    p = state_mod._resolve_reviewers("claude", _init_args(tmp_path))
+    assert p["available"] == ["codex", "agy", "kiro"]
 
 
 def test_judge_returns_the_relaunch_targets_as_a_list(state_mod, tmp_path, capsys):
@@ -263,17 +270,20 @@ def test_judge_returns_the_relaunch_targets_as_a_list(state_mod, tmp_path, capsy
     assert "RELAUNCH_AGENTS_CSV=kiro" in out
 
 
-def test_auth_check_covers_only_the_reviewers_that_run(state_mod, monkeypatch):
+def test_auth_check_covers_only_the_reviewers_that_run(state_mod, tmp_path, monkeypatch):
     """`--only` を指定したときは、実際に起動する 1 者だけを確かめる。
 
     母集合の全員を確かめると、そのラウンドで起動しない CLI の未認証で `init` が
-    失敗する。デバッグのために 1 者へ絞った意味が無くなる。
+    失敗する。デバッグのために 1 者へ絞った意味が無くなる。1 者指定は埋め合わせを
+    しないため、ホストも確かめない（AC18 後半）。
     """
-    checked: list[list[str]] = []
-    monkeypatch.setattr(state_mod.auth, "check_auth",
-                        lambda rs, **k: checked.append(list(rs)) or {})
-    assert state_mod._auth_targets("kiro", "claude") == ["kiro"]
-    assert state_mod._auth_targets(None, "claude") == ["codex", "agy", "kiro"]
+    calls: list[list[str]] = []
+    monkeypatch.setattr(state_mod.auth, "probe_auth", _fake_probe({}, calls))
+    state_mod._resolve_reviewers("claude", _init_args(tmp_path, only="kiro"))
+    assert calls == [["kiro"]]
+    calls.clear()
+    state_mod._resolve_reviewers("claude", _init_args(tmp_path))
+    assert calls == [["codex", "agy", "kiro"]]
 
 
 def test_init_fails_when_the_host_cannot_be_guessed(state_mod, monkeypatch):
@@ -303,3 +313,339 @@ def test_report_shows_every_reviewer_that_took_part(state_mod, tmp_path, capsys)
     assert "claude=APPROVE" in out
     assert "kiro=REQUEST_CHANGES" in out
     assert "agy=APPROVE" in out
+
+
+# ---------- 使える者の解決と新規の初期化（#727: AC14〜AC20） ----------
+
+PR_INIT = 500
+REPO_INIT = "acme/demo"
+
+
+def _fake_probe(failing: dict[str, str], calls: list[list[str]], skipped: bool = False):
+    """止めない確認の差し替え。`failing` の名前だけ通らず、理由を `detail` に入れる。"""
+    def probe(runtimes, *, info, env=None):
+        calls.append(list(runtimes))
+        if skipped:
+            return {}, True
+        return ({r: {"command": r, "ok": r not in failing, "detail": failing.get(r, "")}
+                 for r in runtimes}, False)
+    return probe
+
+
+def _init_args(tmp_path, *argv: str, only=None):
+    """`init` の引数を、実際の入口（`build_parser`）と同じ形で組む。"""
+    words = ["init", str(PR_INIT), "--host", "claude", "--worktree", str(tmp_path / "wt")]
+    if only is not None:
+        words += ["--only", only]
+    words += list(argv)
+    return state_mod_parser().parse_args(words)
+
+
+_PARSER = {}
+
+
+def state_mod_parser():
+    return _PARSER["p"]
+
+
+@pytest.fixture(autouse=True)
+def _parser(state_mod):
+    _PARSER["p"] = state_mod.build_parser()
+
+
+@pytest.fixture()
+def new_init(state_mod, monkeypatch, tmp_path):
+    """新規の初期化を GitHub と git に触れずに通す。"""
+    (tmp_path / "wt").mkdir(exist_ok=True)
+    monkeypatch.setattr(state_mod, "_repo_from_git", lambda: REPO_INIT)
+    monkeypatch.setattr(state_mod, "_fetch_pr_metadata", lambda pr, repo=None:
+                        state_mod.PrMetadata(REPO_INIT, "author", "feat/x", "abc",
+                                             "develop", False, 4000, None))
+    monkeypatch.setattr(state_mod, "_sh", lambda cmd, check=True: "viewer")
+    monkeypatch.setattr(state_mod, "_fetch_changed_files", lambda pr, repo: [])
+    monkeypatch.setattr(state_mod, "_is_registered_worktree", lambda path: True)
+    monkeypatch.setattr(state_mod, "_sync_worktree", lambda *a, **k: None)
+    monkeypatch.setattr(state_mod.subprocess, "run", lambda *a, **k:
+                        __import__("subprocess").CompletedProcess(a[0], 0, stdout="", stderr=""))
+    monkeypatch.setattr(state_mod, "_sync_before_round", lambda st, pr: None)
+    calls: list[list[str]] = []
+
+    def run(*argv: str, failing=None, only=None):
+        monkeypatch.setattr(state_mod.auth, "probe_auth", _fake_probe(failing or {}, calls))
+        state_mod.cmd_init(_init_args(tmp_path, *argv, only=only))
+        return json.loads((tmp_path / f"cross-review-pr{PR_INIT}-state.json").read_text())
+
+    run.calls = calls
+    run.state_file = tmp_path / f"cross-review-pr{PR_INIT}-state.json"
+    return run
+
+
+def _start_round(state_mod, tmp_path):
+    state_mod.cmd_start_round(type("A", (), {"pr": PR_INIT})())
+    st = json.loads((tmp_path / f"cross-review-pr{PR_INIT}-state.json").read_text())
+    return st["rounds"][-1]["reviewers"]
+
+
+def test_a_failing_reviewer_is_dropped_and_init_still_succeeds(new_init, capsys):
+    """AC14: 確認を通らない者は外して続ける。状態ファイルは作られ、理由が残る。"""
+    st = new_init(failing={"kiro": "コマンドが見つかりません"})
+    p = st["participants"]
+    assert p["available"] == ["codex", "agy"]
+    assert p["unavailable"] == {"kiro": "コマンドが見つかりません"}
+    assert p["pool"] == ["codex", "agy", "kiro"]
+    assert p["fallback"] == []
+    assert p["probe_skipped"] is False
+    assert p["require_all"] is False
+    assert st["resume_changes"] == []
+    assert st["max_rounds"] == 12 and st["rotate_after"] == 8
+    err = capsys.readouterr().err
+    assert err.count("⚠ kiro を担当から外しました（コマンドが見つかりません）") == 1
+
+
+def test_require_all_keeps_the_old_gate(new_init, capsys):
+    """AC15: `--require-all` では 1 者でも欠ければ終了コード 1 で、状態ファイルを作らない。"""
+    with pytest.raises(SystemExit) as e:
+        new_init("--require-all", failing={"kiro": "コマンドが見つかりません"})
+    assert e.value.code == 1
+    assert not new_init.state_file.exists()
+    assert "kiro" in capsys.readouterr().err
+
+
+def test_exclude_skips_the_probe_and_is_recorded(new_init):
+    """AC16: `--exclude agy` は agy を確かめず、`excluded` に残す。"""
+    st = new_init("--exclude", "agy")
+    assert new_init.calls == [["codex", "kiro"]]
+    assert st["participants"]["excluded"] == ["agy"]
+    assert st["participants"]["available"] == ["codex", "kiro"]
+
+
+def test_repeated_and_comma_separated_exclude_are_the_same(new_init):
+    """AC16 後半: `--exclude agy --exclude kiro` と `--exclude agy,kiro` は同じ状態を作る。"""
+    a = new_init("--exclude", "agy", "--exclude", "kiro")["participants"]
+    new_init.state_file.unlink()
+    b = new_init("--exclude", "agy,kiro")["participants"]
+    assert a == b
+    assert a["excluded"] == ["agy", "kiro"]
+    assert a["available"] == ["codex"]
+
+
+def test_include_adds_the_host_and_start_round_still_returns_two_seats(new_init, state_mod, tmp_path):
+    """AC17: `--include claude` で 4 者になり、席は 2 つのまま。"""
+    st = new_init("--include", "claude")
+    assert st["participants"]["available"] == ["claude", "codex", "agy", "kiro"]
+    assert st["participants"]["included"] == ["claude"]
+    assert len(_start_round(state_mod, tmp_path)) == 2
+
+
+def test_one_available_reviewer_is_backed_by_the_host(new_init, state_mod, tmp_path, capsys):
+    """AC18: 使える者が 1 者ならホストを確かめ、通れば席を埋める。"""
+    st = new_init(failing={"agy": "未認証", "kiro": "未認証"})
+    assert st["participants"]["available"] == ["codex"]
+    assert st["participants"]["fallback"] == ["claude"]
+    assert new_init.calls == [["codex", "agy", "kiro"], ["claude"]]
+    assert "⚠ 使える者が 1 者のため、席をホスト（claude）で埋めます（観点が減ります）" in capsys.readouterr().err
+    assert _start_round(state_mod, tmp_path) == ["codex", "claude"]
+
+
+def test_only_does_not_probe_the_host_and_keeps_one_seat(new_init, state_mod, tmp_path):
+    """AC18 後半: `--only codex` はホストを確かめず、席は 1 つ。"""
+    st = new_init(only="codex")
+    assert new_init.calls == [["codex"]]
+    assert st["only"] == "codex"
+    assert st["participants"]["fallback"] == []
+    assert _start_round(state_mod, tmp_path) == ["codex"]
+
+
+def test_only_fails_when_the_named_reviewer_does_not_pass_the_probe(new_init, capsys):
+    """1 者指定でも使える者が 0 者なら止める（終了コード 1、状態ファイルを作らない）。
+
+    1 者指定は席の埋め合わせをしないため、確認を通らない 1 者がそのまま席に座る。
+    起動しても結果が残らず、**レビューが行われていないのに収束する**。
+    """
+    with pytest.raises(SystemExit) as e:
+        new_init(only="codex", failing={"codex": "未認証"})
+    assert e.value.code == 1
+    assert not new_init.state_file.exists()
+    assert new_init.calls == [["codex"]]
+    err = capsys.readouterr().err
+    assert "1 者指定の codex が確認を通りません" in err
+    assert "未認証" in err
+
+
+def test_only_still_starts_when_the_probe_is_skipped(new_init, state_mod, tmp_path, monkeypatch):
+    """確認を飛ばした実行では、1 者指定はそのまま通る（通らなかった者がいない）。"""
+    calls: list[list[str]] = []
+    monkeypatch.setattr(state_mod.auth, "probe_auth", _fake_probe({}, calls, skipped=True))
+    p = state_mod._resolve_reviewers("claude", _init_args(tmp_path, only="codex"))
+    assert p["available"] == ["codex"]
+    assert p["probe_skipped"] is True
+
+
+def test_no_available_reviewer_fills_both_seats_with_the_host(new_init, state_mod, tmp_path, capsys):
+    """AC19: 使える者が 0 者でもホストが通れば、席はホストとその 2 つ目。"""
+    st = new_init(failing={"codex": "x", "agy": "x", "kiro": "x"})
+    assert st["participants"]["available"] == []
+    assert st["participants"]["fallback"] == ["claude"]
+    assert _start_round(state_mod, tmp_path) == ["claude", "claude-2"]
+
+
+def test_no_available_reviewer_and_no_host_fails(new_init, capsys):
+    """AC19 後半: ホストも通らなければ終了コード 1 で、状態ファイルを作らない。"""
+    with pytest.raises(SystemExit) as e:
+        new_init(failing={"codex": "x", "agy": "x", "kiro": "x", "claude": "x"})
+    assert e.value.code == 1
+    assert not new_init.state_file.exists()
+    assert "使える者がいません" in capsys.readouterr().err
+
+
+def test_the_second_seat_falls_back_to_a_second_copy_when_the_host_is_unavailable(new_init, state_mod, tmp_path, capsys):
+    """使える者が 1 者でホストも通らなければ、同じランタイムの 2 つ目で埋める。"""
+    st = new_init(failing={"agy": "x", "kiro": "x", "claude": "x"})
+    assert st["participants"]["fallback"] == []
+    assert "席を同じランタイムの 2 つ目で埋めます" in capsys.readouterr().err
+    assert _start_round(state_mod, tmp_path) == ["codex", "codex-2"]
+
+
+@pytest.mark.parametrize("argv", [
+    ("--exclude", "claude"),
+    ("--only", "codex", "--exclude", "codex"),
+    ("--include", "agy", "--exclude", "agy"),
+])
+def test_contradicting_names_fail_before_the_state_is_written(new_init, argv):
+    """AC20: 名前の矛盾は終了コード 1 で、状態ファイルを作らない。"""
+    with pytest.raises(SystemExit) as e:
+        new_init(*argv)
+    assert e.value.code == 1
+    assert not new_init.state_file.exists()
+    assert new_init.calls == []
+
+
+def test_none_mixed_with_a_name_is_rejected(new_init):
+    with pytest.raises(SystemExit) as e:
+        new_init("--exclude", "none,agy")
+    assert e.value.code == 1
+    assert not new_init.state_file.exists()
+
+
+def test_none_in_the_new_path_means_unspecified(new_init):
+    """決定 15: 新規の経路で `none` を渡すと、渡さないのと同じになる。"""
+    st = new_init("--only", "none", "--exclude", "none", "--include", "none")
+    assert st["only"] is None
+    assert st["participants"]["excluded"] == []
+    assert st["participants"]["included"] == []
+
+
+def test_a_misspelt_runtime_is_rejected_by_argparse(state_mod):
+    """名前の綴りは argparse の型が弾く（終了コード 2）。"""
+    for words in (["--only", "gemini"], ["--exclude", "gemini"], ["--include", "codex,gemini"]):
+        with pytest.raises(SystemExit) as e:
+            state_mod.build_parser().parse_args(["init", "1", *words])
+        assert e.value.code == 2
+
+
+# ---------- 担当の読み出し（#727: AC22） ----------
+
+def test_a_state_without_participants_keeps_the_old_rotation(state_mod, tmp_path):
+    """AC22: `participants` が無くても、`host` があれば変更前の輪番と同じ値を返す。"""
+    path = _state(tmp_path, host="codex")
+    st = json.loads(path.read_text(encoding="utf-8"))
+    for round_no in range(1, 7):
+        assert state_mod._round_reviewers(st, round_no) == \
+            state_mod.assignment.review_assign(round_no, "codex")
+    del st["host"]
+    assert state_mod._round_reviewers(st, 1) == ["codex", "agy"]
+
+
+def test_recorded_reviewers_win_over_only(state_mod, tmp_path):
+    """決定 11: 再開で 1 者指定を変えても、記録のあるラウンドの担当は変わらない。"""
+    path = _state(tmp_path, only="codex", rounds=[_round(1, ["agy", "kiro"], {})])
+    st = json.loads(path.read_text(encoding="utf-8"))
+    assert state_mod._round_reviewers(st, 1) == ["agy", "kiro"]
+    assert state_mod._round_reviewers(st, 2) == ["codex"]
+
+
+def test_participants_win_over_the_host_rotation(state_mod, tmp_path):
+    """記録された参加者があれば、席の埋め方はその一覧から決める。"""
+    path = _state(tmp_path, participants={
+        "pool": ["codex", "agy", "kiro"], "included": [], "excluded": ["agy"],
+        "available": ["codex", "kiro"], "unavailable": {}, "probe_skipped": False,
+        "require_all": False, "fallback": [],
+    })
+    st = json.loads(path.read_text(encoding="utf-8"))
+    assert state_mod._round_reviewers(st, 1) == ["codex", "kiro"]
+
+
+# ---------- 完了報告の「参加した者」（#727: AC24） ----------
+
+def _report(state_mod, tmp_path, capsys, **over) -> list[str]:
+    _state(tmp_path, final="approved", **over)
+    state_mod.cmd_report(type("A", (), {"pr": 500})())
+    out = capsys.readouterr().out
+    body = out.split("## 参加した者\n", 1)
+    assert len(body) == 2, out
+    lines = []
+    for line in body[1].splitlines():
+        if line.startswith("## "):
+            break
+        if line.strip():
+            lines.append(line)
+    return lines
+
+
+def test_the_report_lists_who_took_part(state_mod, tmp_path, capsys):
+    """AC24: 完了報告に「参加した者」の節が出る。"""
+    lines = _report(state_mod, tmp_path, capsys, participants={
+        "pool": ["codex", "agy", "kiro"], "included": [], "excluded": ["agy"],
+        "available": ["codex", "kiro"], "unavailable": {}, "probe_skipped": False,
+        "require_all": False, "fallback": [],
+    })
+    assert lines == [
+        "- 母集合: codex / agy / kiro",
+        "- 使える者: codex / kiro",
+        "- --exclude で外した者: agy",
+        "- --include で足した者: なし",
+        "- 確認を通らなかった者: なし",
+        "- 席の埋め合わせ: なし",
+        "- 再開で変えた値: なし",
+    ]
+
+
+def test_the_report_shows_the_reason_a_reviewer_was_dropped(state_mod, tmp_path, capsys):
+    lines = _report(state_mod, tmp_path, capsys, participants={
+        "pool": ["codex", "agy", "kiro"], "included": ["claude"], "excluded": [],
+        "available": ["claude", "codex"], "unavailable": {"kiro": "コマンドが見つかりません"},
+        "probe_skipped": False, "require_all": False, "fallback": ["claude"],
+    })
+    assert "- --include で足した者: claude" in lines
+    assert "- 確認を通らなかった者: kiro（コマンドが見つかりません）" in lines
+    assert "- 席の埋め合わせ: claude" in lines
+
+
+def test_the_report_says_the_probe_was_skipped(state_mod, tmp_path, capsys):
+    """確認を飛ばしたときは、通らなかった者が「なし」である理由を書き分ける。"""
+    lines = _report(state_mod, tmp_path, capsys, participants={
+        "pool": ["codex", "agy", "kiro"], "included": [], "excluded": [],
+        "available": ["codex", "agy", "kiro"], "unavailable": {},
+        "probe_skipped": True, "require_all": False, "fallback": [],
+    })
+    assert "- 確認を通らなかった者: 確認を飛ばした（NDF_SKIP_AUTH_CHECK）" in lines
+
+
+def test_the_report_lists_the_resume_changes(state_mod, tmp_path, capsys):
+    """再開で変えた値は 1 件 1 行で出す。"""
+    lines = _report(state_mod, tmp_path, capsys, participants={
+        "pool": ["codex", "agy", "kiro"], "included": [], "excluded": [],
+        "available": ["codex", "agy", "kiro"], "unavailable": {},
+        "probe_skipped": False, "require_all": False, "fallback": [],
+    }, resume_changes=[
+        {"at": "2026-09-19T12:00:00", "field": "max_rounds", "from": 12, "to": 20},
+        {"at": "2026-09-19T12:00:00", "field": "only", "from": None, "to": "codex"},
+    ])
+    assert "- 再開で変えた値:" in lines
+    assert "  - 2026-09-19T12:00:00 max_rounds: 12 → 20" in lines
+    assert "  - 2026-09-19T12:00:00 only: None → codex" in lines
+
+
+def test_a_state_without_participants_says_so(state_mod, tmp_path, capsys):
+    """AC24 後半: `participants` を持たない状態ファイルでは「記録なし」と出す。"""
+    assert _report(state_mod, tmp_path, capsys) == ["- 使える者: 記録なし"]

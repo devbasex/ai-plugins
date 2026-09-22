@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # cross-review レビュワー起動の入口（4 ランタイム共通）。
 #
-# Usage: launch-reviewer.sh <runtime> <STATE_PR> <ROUND>
+# Usage: launch-reviewer.sh <seat> <STATE_PR> <ROUND>
 #
-#   runtime      claude | codex | agy | kiro
+#   seat         claude | codex | agy | kiro（同じランタイムの 2 つ目は `-2`〜`-9` を付ける）
 #
 # 引数 STATE_PR は state.json の key (= 最初に init した PR 番号)。
 # レビュー対象の PR は state.json の `current_pr` を読む。
@@ -17,18 +17,23 @@
 #     作業領域の外を読ませずに済む。
 #   - 完了判定は monitor.py が pidfile + result.json で多軸判定する。
 #
-# 状態ファイル: $TMP_DIR/<runtime>-review-pr<STATE_PR>-{result,err,stdout,pid}.json
+# **席の名前で受ける。** 使える者が 2 者に満たないラウンドでは、同じランタイムの 2 つ目が
+# 席に入る（設計の決定 10）。起動する CLI は `${SEAT%%-*}` で選び、結果ファイルの名前は
+# 席の名前で組む。両者を分けないと、2 つの席の結果が同じファイルを奪い合う。
+#
+# 状態ファイル: $TMP_DIR/<seat>-review-pr<STATE_PR>-{result,err,stdout,pid}.json
 # (パスは STATE_PR ベースで固定 — monitor.py / state.py と一致させる。)
 
 set -euo pipefail
 
-RUNTIME=${1:?runtime required}
+SEAT=${1:?seat required}
 STATE_PR=${2:?STATE_PR required}
 ROUND=${3:?ROUND required}
-case "$RUNTIME" in
-  claude|codex|agy|kiro) ;;
-  *) echo "未知のランタイムです: $RUNTIME" >&2; exit 1 ;;
-esac
+# 席の名前の形（`lib/assignment.py` の `SEAT_PATTERN` と同じ規則）。
+if [[ ! $SEAT =~ ^(claude|codex|agy|kiro)(-[2-9])?$ ]]; then
+  echo "受け付けられない席の名前です: $SEAT" >&2; exit 1
+fi
+RUNTIME=${SEAT%%-*}
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=_tmpdir.sh
@@ -57,11 +62,11 @@ prepare_prompt_context() {
 # 前ラウンドの結果を残さない。投稿失敗などで今ラウンドの result.json が
 # 書かれなかったとき、state.py read-result が**前ラウンドの結果を読んで**
 # 同じ判定を繰り返す事故を防ぐ。
-rm -f "$TMP_DIR/$RUNTIME-review-pr$STATE_PR-result.json" \
-      "$TMP_DIR/$RUNTIME-review-pr$STATE_PR-round$ROUND-payload.json" \
-      "$TMP_DIR/$RUNTIME-review-pr$STATE_PR-round$ROUND-api-payload.json"
+rm -f "$TMP_DIR/$SEAT-review-pr$STATE_PR-result.json" \
+      "$TMP_DIR/$SEAT-review-pr$STATE_PR-round$ROUND-payload.json" \
+      "$TMP_DIR/$SEAT-review-pr$STATE_PR-round$ROUND-api-payload.json"
 
-STEM=$TMP_DIR/$RUNTIME-review-pr$STATE_PR
+STEM=$TMP_DIR/$SEAT-review-pr$STATE_PR
 PROMPT=$STEM-prompt.md
 # 既存コメントは **プロンプトにインライン埋め込み** する。
 # tmp dir は `<worktree>/.cross_review/` を使うが、埋め込みなら読み取りの往復が
@@ -90,9 +95,9 @@ fi
 
 render_review_prompt() {
 cat > "$PROMPT" <<EOF
-# /ndf:pr-review 実行 (cross-review $RUNTIME / round $ROUND)
+# /ndf:pr-review 実行 (cross-review $SEAT / round $ROUND)
 
-PR #$PR を **$RUNTIME の観点でレビューし、gh api で直接 PR に投稿** してください。
+PR #$PR を **$SEAT の観点でレビューし、gh api で直接 PR に投稿** してください。
 
 ## 必須コンテキスト
 - repo: $REPO
@@ -114,7 +119,7 @@ $EXTRA_REVIEW_BLOCK
 ## 出力契約
 - review body の **先頭行** に必ず以下を入れる:
   \`\`\`
-  ## 🤖 cross-review | round $ROUND | $RUNTIME | <event(intent)>
+  ## 🤖 cross-review | round $ROUND | $SEAT | <event(intent)>
   \`\`\`
   - \`<event>\` は **本来の intent** (REQUEST_CHANGES / APPROVE / COMMENT)
 

@@ -164,15 +164,25 @@ def _aggregate_reviewer_round(
         ]
         rb["findings"] += len(findings)
         rb["findings_resolved"] += sum(1 for f in findings if f.get("resolved"))
-        others = [o for o in entry.get("reviewers", []) if o != name]
-        for other in others:
-            other_verdict = _verdict(review, other)
-            if other_verdict is None:
-                continue
-            rb["verdict_pairs"] += 1
-            rb["verdict_agreements"] += (
-                1 if other_verdict == _verdict(review, name) else 0
-            )
+        _tally_verdict_agreement(rb, entry, review, name)
+
+
+def _tally_verdict_agreement(
+    rb: dict[str, Any],
+    entry: dict[str, Any],
+    review: dict[str, Any],
+    name: str,
+) -> None:
+    """同じレビューに判定を出した他の担当との一致を数える。"""
+    others = [o for o in entry.get("reviewers", []) if o != name]
+    for other in others:
+        other_verdict = _verdict(review, other)
+        if other_verdict is None:
+            continue
+        rb["verdict_pairs"] += 1
+        rb["verdict_agreements"] += (
+            1 if other_verdict == _verdict(review, name) else 0
+        )
 
 
 def _append_model_measurement_warnings(

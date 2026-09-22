@@ -55,13 +55,13 @@ done
 SCRIPTS="$SKILL_DIR/scripts"
 
 # state 初期化 / 再開（プリチェック・worktree 作成・既存コメントスナップショットを内部実行）
-# ⚠ `eval "$(スクリプト)"` は、スクリプトが異常終了しても出力が空なら終了コード 0 に
-# なる。コマンド置換の終了コードは eval 自身の終了コードにならないため、止まるべき
-# 場面で止まらない。**必ず変数で受け、終了コードを見てから eval する。**
+# ⚠ `eval "$(スクリプト)"` は、スクリプトが異常終了しても出力が空なら終了コード 0 になる。
+# コマンド置換の終了コードは eval 自身の終了コードにならないため、止まるべき場面で
+# 止まらない。**必ず変数で受け、終了コードを見てから eval する。**
+# **値のある引数だけを渡す**（渡すと再開で上書きする。04-contracts.md）。
 INIT_VARS=$("$SCRIPTS/state.py" init "$STATE_PR" \
-          --max-rounds "$MAX_ROUNDS" --rotate-after "$ROTATE_AFTER" \
-          ${ONLY:+--only "$ONLY"} \
-          ${FOCUS:+--focus "$FOCUS"} \
+          ${MAX_ROUNDS:+--max-rounds "$MAX_ROUNDS"} ${ROTATE_AFTER:+--rotate-after "$ROTATE_AFTER"} ${ONLY:+--only "$ONLY"} \
+          ${EXCLUDE:+--exclude "$EXCLUDE"} ${INCLUDE:+--include "$INCLUDE"} ${REQUIRE_ALL:+--require-all} ${FOCUS:+--focus "$FOCUS"} \
           ${EXTRA_INSTRUCTIONS_FILE:+--extra-instructions-file "$EXTRA_INSTRUCTIONS_FILE"}) || exit $?
 eval "$INIT_VARS"
 
@@ -98,6 +98,8 @@ cd "$WORKTREE"
 
 **重要**: 以降の全ステップで `cd $WORKTREE` を強制。
 サブエージェント（fix）を起動するときも、prompt 内で worktree path を明示する。
+
+再開で渡した引数の扱いは [04-contracts.md](04-contracts.md) の同じ名前の節にある。
 
 ## Step 1: Round 開始判定
 
@@ -161,15 +163,14 @@ eval "$ROUND_VARS"
 ### 2.1 launcher 起動 + monitor
 
 ```bash
-# 担当は `start-round` が $REVIEWERS / $REVIEWERS_CSV で返す。**名前で分岐しない。**
+# 担当は `start-round` が $REVIEWERS / $REVIEWERS_CSV で返す。**名前で分岐せず、シェル変数で絞り直さない**（絞ると状態ファイルとずれたときに誰にも当たらない。05-pool-and-convergence.md）。
 for r in $REVIEWERS; do
-  [ -z "$ONLY" ] || [ "$ONLY" = "$r" ] || continue
   "$SCRIPTS/launch-reviewer.sh" "$r" "$STATE_PR" "$ROUND"
 done
 
 # monitor.py が多軸で完了判定。exit code で失敗種別を分岐。上限は `--phase review`（1200 秒）。
 # ⚠ 位置引数の `both` は codex / agy の 2 者だけを指す。担当の一覧は `--agents` で渡す。
-"$SCRIPTS/bg-wait.sh" run "$TMP_DIR/review.rc" -- "$SCRIPTS/monitor.py" "$STATE_PR" --phase review --agents "${ONLY:-$REVIEWERS_CSV}"
+"$SCRIPTS/bg-wait.sh" run "$TMP_DIR/review.rc" -- "$SCRIPTS/monitor.py" "$STATE_PR" --phase review --agents "$REVIEWERS_CSV"
 # 待ちは 1 回 540 秒以内。**124 が返るあいだ、この 2 行を別の Bash の呼び出しとして呼び直す。**
 # 繰り返しを 1 回の呼び出しへ書くと、2 回目の待ちで合計が 600 秒を超えてホストに打ち切られる。
 "$SCRIPTS/bg-wait.sh" wait "$TMP_DIR/review.rc"; RC=$?
@@ -215,12 +216,11 @@ AI への入出力の契約（2.2）と、AI が書き出すファイルの契�
 
 ```bash
 for r in $REVIEWERS; do
-  [ -z "$ONLY" ] || [ "$ONLY" = "$r" ] || continue
   "$SCRIPTS/state.py" read-result "$STATE_PR" "$r"
 done
 ```
 
-`state.rounds[-1].<agent>` に `intent / posted_as / comments / review_url / by_severity` を分離保存する。
+`state.rounds[-1].<席の名前>` に `intent / posted_as / comments / review_url / by_severity` を分離保存する（席の名前の形は `04-contracts.md`）。
 
 #### 申告されたコメント数を GitHub 側と突き合わせる
 

@@ -223,8 +223,9 @@ def _launcher_stem_pattern() -> str:
 def test_the_three_stems_have_the_same_shape(tmp_dir, state_mod, monitor_mod):
     """起動の手順・監視・取り込みの stem が同じ形で、監視の結果ファイルを引ける。"""
     # 起動の手順（bash）: 変数名を置き換えて形を比べる
+    # 起動の手順が持つのは席の名前（`$SEAT`）である。CLI はそこから引く（#727）
     launcher = (_launcher_stem_pattern()
-                .replace("$RUNTIME", AGENT).replace("$STATE_PR", str(PR)))
+                .replace("$SEAT", AGENT).replace("$STATE_PR", str(PR)))
     # 監視（Python）: 既定の stem テンプレート
     monitor = monitor_mod.DEFAULT_STEM_TEMPLATE.format(agent=AGENT, id=PR)
     assert launcher == monitor == STEM
