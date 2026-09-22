@@ -55,13 +55,13 @@ done
 SCRIPTS="$SKILL_DIR/scripts"
 
 # state 初期化 / 再開（プリチェック・worktree 作成・既存コメントスナップショットを内部実行）
-# ⚠ `eval "$(スクリプト)"` は、スクリプトが異常終了しても出力が空なら終了コード 0 に
-# なる。コマンド置換の終了コードは eval 自身の終了コードにならないため、止まるべき
-# 場面で止まらない。**必ず変数で受け、終了コードを見てから eval する。**
+# ⚠ `eval "$(スクリプト)"` は、スクリプトが異常終了しても出力が空なら終了コード 0 になる。
+# コマンド置換の終了コードは eval 自身の終了コードにならないため、止まるべき場面で
+# 止まらない。**必ず変数で受け、終了コードを見てから eval する。**
+# **値のある引数だけを渡す**（渡すと再開で上書きする。04-contracts.md）。
 INIT_VARS=$("$SCRIPTS/state.py" init "$STATE_PR" \
-          --max-rounds "$MAX_ROUNDS" --rotate-after "$ROTATE_AFTER" \
-          ${ONLY:+--only "$ONLY"} \
-          ${FOCUS:+--focus "$FOCUS"} \
+          ${MAX_ROUNDS:+--max-rounds "$MAX_ROUNDS"} ${ROTATE_AFTER:+--rotate-after "$ROTATE_AFTER"} ${ONLY:+--only "$ONLY"} \
+          ${EXCLUDE:+--exclude "$EXCLUDE"} ${INCLUDE:+--include "$INCLUDE"} ${REQUIRE_ALL:+--require-all} ${FOCUS:+--focus "$FOCUS"} \
           ${EXTRA_INSTRUCTIONS_FILE:+--extra-instructions-file "$EXTRA_INSTRUCTIONS_FILE"}) || exit $?
 eval "$INIT_VARS"
 
@@ -98,6 +98,8 @@ cd "$WORKTREE"
 
 **重要**: 以降の全ステップで `cd $WORKTREE` を強制。
 サブエージェント（fix）を起動するときも、prompt 内で worktree path を明示する。
+
+再開で渡した引数の扱いは [04-contracts.md](04-contracts.md) の同じ名前の節にある。
 
 ## Step 1: Round 開始判定
 
@@ -152,24 +154,24 @@ eval "$ROUND_VARS"
 `--head-branch` で受け取った値を書き戻す。ラウンドの開始時にも取り直すのは、作業ツリーの
 外で行われた変更に追従するためである。
 
-## Step 2: レビュー担当 2 者の並列レビュー（AI 直接投稿）
+## Step 2: レビュー担当 2 者の並列レビュー
 
 **要点**: メインは launcher を **並列バックグラウンド** で起動するだけ。
-各 AI が `gh api` で投稿し `$TMP_DIR/<agent>-review-pr<PR>-result.json` に
-サマリを書く。**ペイロード本体はメイン context に載せない**。
+各担当は **投稿しない。** 指摘の控え（`<席>-review-pr<PR>-round<R>-payload.json`）と
+結果ファイル（`<席>-review-pr<PR>-result.json`）を一時の名前で書き、控え → 結果の順に
+改名する。投稿は取り込み（`read-result`）が行う（#730）。**本文はメイン context に載せない**。
 
 ### 2.1 launcher 起動 + monitor
 
 ```bash
-# 担当は `start-round` が $REVIEWERS / $REVIEWERS_CSV で返す。**名前で分岐しない。**
+# 担当は `start-round` が $REVIEWERS / $REVIEWERS_CSV で返す。**名前で分岐せず、シェル変数で絞り直さない**（絞ると状態ファイルとずれたときに誰にも当たらない。05-pool-and-convergence.md）。
 for r in $REVIEWERS; do
-  [ -z "$ONLY" ] || [ "$ONLY" = "$r" ] || continue
   "$SCRIPTS/launch-reviewer.sh" "$r" "$STATE_PR" "$ROUND"
 done
 
 # monitor.py が多軸で完了判定。exit code で失敗種別を分岐。上限は `--phase review`（1200 秒）。
 # ⚠ 位置引数の `both` は codex / agy の 2 者だけを指す。担当の一覧は `--agents` で渡す。
-"$SCRIPTS/bg-wait.sh" run "$TMP_DIR/review.rc" -- "$SCRIPTS/monitor.py" "$STATE_PR" --phase review --agents "${ONLY:-$REVIEWERS_CSV}"
+"$SCRIPTS/bg-wait.sh" run "$TMP_DIR/review.rc" -- "$SCRIPTS/monitor.py" "$STATE_PR" --phase review --agents "$REVIEWERS_CSV"
 # 待ちは 1 回 540 秒以内。**124 が返るあいだ、この 2 行を別の Bash の呼び出しとして呼び直す。**
 # 繰り返しを 1 回の呼び出しへ書くと、2 回目の待ちで合計が 600 秒を超えてホストに打ち切られる。
 "$SCRIPTS/bg-wait.sh" wait "$TMP_DIR/review.rc"; RC=$?
@@ -191,28 +193,22 @@ fi
 |---|---|
 | pidfile + `kill -0` | プロセス生存確認。alive 確認後に `/proc/<pid>/cmdline` で agent 名一致も検証 (PID 再利用対策)。**プロセスが既に死んでいる場合は result.json の有無のみで OK 判定**する (死亡直後 cmdline 不一致で誤検知しないため) |
 | codex sentinel | err.log に `^tokens used$` 出現で正常完了マーク |
-| early-error | **行頭限定** で `^Error:` / `^FATAL:` / `^panic:` / `^Traceback ` / `^HTTP/1.1 401\|403\|429` / `^Approval mode overridden to "default"` / `^Authentication failed` / 「quota exceeded」「rate limit exceeded」「API key not found/missing/invalid」「sandbox error」を含む行を検出 (diff/doc 引用文中の同語句は誤検知しないよう anchor + benign フィルタ併用) |
+| early-error | 致命の文言を検出して止める。**利用上限**（`Monthly request limit reached` / `"api_error_status":429` / 「quota exceeded」「rate limit exceeded」/ `^HTTP/1.1 429`）は理由 `usage_limit`、それ以外の致命（`^HTTP/1.1 401\|403` / `^Authentication failed` / 「API key not found/missing/invalid」「sandbox error」など）は理由 `early_error`。どちらも状態は `EARLY_ERROR`（終了コード 4）。err.log は全担当、stdout.log は claude だけ JSON 向けの照合で見る。diff / doc 引用文中の同語句は anchor + benign フィルタで除外する。`^Error:` / `^Traceback ` などは警告に留めて止めない |
 | stall timeout | err.log + stdout.log + progress.log の合計サイズが一定時間変化しなければ STALLED で中断。既定は **agent 別** (codex=**180s** / agy=**480s** / kiro=**480s** / claude=**900s**、上限の表)。agy は err.log がほぼ無音のため大きめに取る。上書き方法: CLI `--stall-timeout` (明示優先) > env `MONITOR_STALL_<AGENT>` (per-agent) > env `MONITOR_STALL` (両 agent 共通) > agent 別ビルトイン |
 | hard timeout | 既定は `--phase` の工程の値で、上限の表（`scripts/lib/limits.py`）が持つ（review / critique は **1200 秒**）。上書きは `--timeout` > env `MONITOR_TIMEOUT_<AGENT>` > env `MONITOR_TIMEOUT`。agy の CLI の上限（`--print-timeout`）は同じ解決の値 + 120 秒で、監視より先に打ち切らない。解決した stall が hard timeout 以上なら担当ごとに警告する |
 | progress.log heartbeat | launcher が任意で `<agent>-review-pr<PR>-progress.log` への短いフェーズマーカー出力を要求し、monitor が最終行を stderr の heartbeat に表示する。内部推論ではなく `scan` / `analyze` / `post` / `done` などの監視用ステータスだけを出す |
-| result.json 存在 | プロセス終了後、result.json が無ければ NO_RESULT (exit 3) |
+| result.json 存在 | プロセス終了後、result.json が無ければ NO_RESULT (exit 3)。err.log に CLI 自身の上限の文言（agy の `print timeout after … with turn in progress`）があれば理由は `cli_timeout`、無ければ `missing` |
 | **result.json + age fallback** | sentinel を持たない agent (agy) 向け。プロセスが alive のまま result.json の mtime が **30 秒以上前**なら完了とみなし kill → OK。結果を書いた後にプロセスが終わらないケースに対応 (codex は sentinel チェックが先に発火するため影響なし) |
-| **失敗時 kill** | TIMEOUT / STALLED / EARLY_ERROR / PIDFILE_BAD で返るときは対象プロセスに SIGTERM → 3 秒後 SIGKILL。残存プロセスが後から `gh api` 投稿や result.json 書き込みを行うのを防ぐ |
+| **失敗時 kill** | TIMEOUT / STALLED / EARLY_ERROR / PIDFILE_BAD で返るときは対象に SIGTERM → 3 秒後 SIGKILL。`launch-cli.sh` は CLI を独立したプロセスグループで起動する（`set -m`）ため、対象がグループの先頭なら**グループごと**止める。止めた後に子プロセスが `gh api` 投稿や result.json 書き込みを行うのを防ぐ（#584） |
 
-> ⚠ **罠**: `nohup ... &` でラッパーシェルは即終了し、ハーネスから
-> 「タスク完了」通知が飛んでくる。これに惑わされず、`monitor.py` で
-> 実プロセスの完了を pidfile / sentinel で確認すること。
->
-> ⚠ **`pgrep -fa <prompt>` で完了判定しない**: agy は long `-p` プロンプトを
-> 引数に持つため、`grep` のキーワード選定で誤検知する。**pidfile 必須**。
->
-> ⚠ **sentinel 単独で完了判定しない**: codex がクラッシュすると `tokens used` が
-> 永遠に出ない。`monitor.py` は sentinel と pidfile/result.json/err.log を併用する。
->
-> ⚠ **Docker 環境ではゾンビプロセスに注意**: `nohup ... & disown` で起動した
-> プロセスは、終了後にゾンビ化する (PID 1 が proper init でない場合)。
-> `monitor.py` は `/proc/<pid>/status` でゾンビを検出して dead 扱いする。
-> **推奨: Docker 実行時に `--init` フラグを付ける** (tini が PID 1 になりゾンビを reap する)。
+完了判定の罠を 4 つ挙げる。
+
+| 罠 | 守ること |
+|---|---|
+| `nohup ... &` でラッパーシェルは即終了し、ハーネスから「タスク完了」通知が飛んでくる | 惑わされず、`monitor.py` で実プロセスの完了を pidfile / sentinel で確認する |
+| agy は長い `-p` プロンプトを引数に持ち、`pgrep -fa <prompt>` はキーワード選定で誤検知する | `pgrep` で完了判定しない。**pidfile 必須** |
+| codex がクラッシュすると sentinel `tokens used` が永遠に出ない | sentinel 単独で完了判定しない。`monitor.py` は pidfile / result.json / err.log を併用する |
+| Docker では `nohup ... & disown` のプロセスが終了後にゾンビ化する（PID 1 が init でない場合） | `monitor.py` は `/proc/<pid>/status` でゾンビを検出して dead 扱いする。**Docker 実行時は `--init` を付ける**（tini がゾンビを回収する） |
 
 AI への入出力の契約（2.2）と、AI が書き出すファイルの契約（2.3）は
 [04-contracts.md](04-contracts.md) にある。
@@ -221,31 +217,27 @@ AI への入出力の契約（2.2）と、AI が書き出すファイルの契�
 
 ```bash
 for r in $REVIEWERS; do
-  [ -z "$ONLY" ] || [ "$ONLY" = "$r" ] || continue
   "$SCRIPTS/state.py" read-result "$STATE_PR" "$r"
 done
 ```
 
-`state.rounds[-1].<agent>` に `intent / posted_as / comments / review_url / by_severity` を分離保存する。
+`state.rounds[-1].<席の名前>` に `intent / posted_as / comments / review_url / by_severity` を分離保存する（席の名前の形は `04-contracts.md`）。
 
-#### 申告されたコメント数を GitHub 側と突き合わせる
+#### 取り込みがレビューを投稿する
 
-投稿は **AI 自身が `gh api` で行う**ため、失敗しても結果ファイルの申告だけは残る。
-申告のまま進むと、修正担当が読むべき指摘が GitHub 上に存在しないまま収束判定まで走る。
-実測では、2 件の申告に対しスレッドが 1 つも作られていなかった。
+**書き込みと記録を 1 つの部分命令に閉じる**（#730）。`read-result` は「控えを読む → 投稿を
+積む → 流す → 送信の応答を記録へ書き戻す → 指摘を取り込む」の順に進む。記録の参照は送信の
+応答から、件数（`comments`）は送れたインラインの数から取る。**担当の申告を GitHub の実数と
+突き合わせる処理は無い**（投稿する側と記録する側が同じになったため）。標準出力に足すのは
+件数・参照・状態の行（`POSTED review_url=` / `INLINE= BODY= QUEUED=` / `FINDINGS=`）だけである。
 
-`read-result` は申告が 1 件以上のとき、`review_url` の識別子から
-`repos/<repo>/pulls/<PR>/reviews/<id>/comments` を数えて突き合わせる。
-
-| 申告 | GitHub 側 | 扱い |
+| 止まった場所 | 待ち行列の項目 | 立て直し |
 | --- | --- | --- |
-| 0 件 | 見に行かない | 突き合わせる相手がいない |
-| n 件 | n 件以上 | 採用する。人の追記など申告以外の経路で増えうる |
-| n 件 | n 件未満 | **中断する。** 投稿が届いていない |
-| n 件 | 取得できない | 申告を採用し、確認できなかったことを出力へ残す |
+| 送る前（上限などで送れていない） | 残る | 判定の終了コード 8 の枝が流し直す |
+| 送った後・記録の前 | 残らない | 取り込みをもう一度呼ぶ。照合（ラウンドと席までの前方一致）が先客を見つけ、増えない |
 
-**「取得できなかった」と「0 件」を区別する。** 取得の失敗で止めると、GitHub 側の
-一時的な不調でループが進まなくなる。
+本文の先頭行は `## 🤖 cross-review | round <R> | <席> | <本来の判定>` である。自分の
+Pull Request では送る形だけを `COMMENT` へ落とし、記録の `intent` は本来の判定のまま残す。
 
 **誰がレビューし、いつ止めるかは [05-pool-and-convergence.md](05-pool-and-convergence.md)
 にある。** 母集合・担当の輪番・認証の確認と、終了基準の 3 つの層をそこで定める。
@@ -289,35 +281,45 @@ eval "$JUDGE_VARS"
 | `SKIP` | `--only` の指定で起動しなかった | 判定へ届かない（短絡する） |
 | `NO_RESULT` | 起動したが、使える結果が残らなかった | 通らない |
 
-`NO_RESULT` は `read-result` が書き込む。理由は `no_result_reason` に残る。
+`NO_RESULT` は `read-result` が書き込む。理由は `no_result_reason` に、監視が残した詳細（err.log の
+抜粋、最大 200 文字）は `monitor_detail` に残る（監視の結果ファイルがあったときだけ）。理由の語彙と
+起動し直しの可否を持つのは共通層の `monitor_outcome.py` だけで、`read-result` はその値を写す（#729）。
 
-| 理由 | 何が起きたか | `read-result` の終了コード |
-| --- | --- | --- |
-| `missing` | 結果ファイルが無い、または空 | 1 |
-| `unparsable` | JSON として読めない、または dict ではない | 3 |
-| `no_verdict` | `event` も `intent` も無い | 1 |
+| 理由 | 何が起きたか | 起動し直し | `read-result` の終了コード |
+| --- | --- | --- | --- |
+| `missing` | 結果ファイルが無い・空で、監視の理由の文言も無い | 可 | 1 |
+| `unparsable` | 結果ファイルがあるが JSON オブジェクトとして読めない | 可 | 3 |
+| `no_verdict` | `event` も `intent` も無い | 可 | 1 |
+| `not_posted` | 投稿が Pull Request に届いていない | 可 | 1 |
+| `timeout` | 監視の上限で打ち切った | 可 | 1 |
+| `stalled` | 無進捗の許容を超えて打ち切った | 可 | 1 |
+| `early_error` | 利用上限以外の致命の文言で止めた | 可 | 1 |
+| `usage_limit` | 担当の CLI の利用上限（月間・週間の枠）に達した | **否** | 1 |
+| `cli_timeout` | CLI 自身の上限（agy の `--print-timeout`）で結果を書かずに終わった | 可 | 1 |
+| `pidfile_bad` | pid ファイルが無い・別のプロセスを指す | 可 | 1 |
 
-**記録が無いラウンドも結果なしとして読む。** 骨組みが取り込みを呼び忘れても、判定は
-収束しない。
+**記録が無いラウンドも結果なしとして読む。** 骨組みが取り込みを呼び忘れても、判定は収束しない。
 
-終了コード 7 のとき、判定は次の 2 行を追加で出力し、対象を `rounds[-1].relaunched` へ
-記録する。**2 度目の判定は記録を見て中断へ回る。**
+結果なしの担当があると、判定は理由を `NO_RESULT_REASONS='<担当>=<理由> ...'` の 1 行で出す。
+**起動し直しても解けない理由（`usage_limit`）を含むときは起動し直さず**、`final=error` として終了
+コード 1 で終える（標準エラーに担当・理由・`monitor_detail`）。利用上限は同じ担当を何度起動しても
+解けず、待ちと相手の枠を消費するだけである（#619）。それ以外の理由なら終了コード 7 で次の 2 行を
+追加で出力し、対象を `rounds[-1].relaunched` へ記録する。**2 度目の判定は記録を見て中断へ回る。**
 
 ```text
+NO_RESULT_REASONS='agy=missing'
 RELAUNCH_AGENTS='agy'
 RELAUNCH_TARGET=agy
 ```
 
-`RELAUNCH_TARGET` は `codex` / `agy` / `both` のいずれかで、`monitor.py` へそのまま
-渡せる値である。起動し直しはラウンドの中で完結するため、**ラウンドの数え方と上限の
-意味は変わらない。** 回数を 1 度に限るのは、待ち時間の上限をラウンドあたり 2 回分に
-収めるためである。
+`RELAUNCH_TARGET` は `codex` / `agy` / `both` のいずれかで、`monitor.py` へそのまま渡せる値である。
+起動し直しはラウンドの中で完結するため、**ラウンドの数え方と上限の意味は変わらない。** 回数を
+1 度に限るのは、待ち時間の上限をラウンドあたり 2 回分に収めるためである。
 
 ### 判定へ入れる対象
 
-判定は 2 つの対象を別々に見る。**投稿数と未解決の指摘の数は一致しない。**
-投稿数はそのラウンドで外部の AI が新しく投稿した件数で、未解決の指摘は前のラウンドの
-分も含む Pull Request 上の総数である。
+判定は 2 つの対象を別々に見る。**投稿数と未解決の指摘の数は一致しない。** 投稿数はそのラウンドで
+外部の AI が新しく投稿した件数で、未解決の指摘は前のラウンドの分も含む Pull Request 上の総数である。
 
 | 対象 | 判定への入れ方 | 数え方 |
 |---|---|---|

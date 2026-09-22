@@ -60,11 +60,10 @@ def _dead_pid() -> int:
 
 def _run_monitor(tmp_dir: pathlib.Path, *extra: str, script: pathlib.Path = _MONITOR_LIB,
                  pr: int = 7, agents: str = "codex") -> subprocess.CompletedProcess:
-    env = {k: v for k, v in os.environ.items() if not k.startswith("MONITOR_")}
     return subprocess.run(
         [sys.executable, str(script), str(pr), "--agents", agents,
          "--tmp-dir", str(tmp_dir), "--poll", "1", *extra],
-        capture_output=True, text=True, env=env, timeout=60,
+        capture_output=True, text=True, timeout=60,
     )
 
 

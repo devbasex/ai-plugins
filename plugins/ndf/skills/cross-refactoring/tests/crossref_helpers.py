@@ -36,7 +36,6 @@ def make_state(tmp_path: pathlib.Path, **overrides: Any) -> pathlib.Path:
         "host": host,
         "host_detection": "explicit",
         "runtimes": runtimes,
-        "impl_capable": ["claude", "codex", "kiro"],
         "models": {"claude": None, "codex": None, "agy": None, "kiro": None},
         "skills": {"required": ["refactoring", "tdd-cycle", "quality-gates"]},
         "max_outer_rounds": 3,

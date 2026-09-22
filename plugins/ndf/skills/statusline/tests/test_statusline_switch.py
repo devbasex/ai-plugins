@@ -148,3 +148,58 @@ def test_unset_statusline_gets_ndf_default(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     assert _settings(tmp_path)["statusLine"]["command"] == NDF_COMMAND
+
+
+def test_unset_statusline_gets_refresh_interval(tmp_path: Path) -> None:
+    """新規設定では refreshInterval も書く。待機中もサブエージェントの表示を更新するため。"""
+    claude = _claude(tmp_path)
+    (claude / "settings.json").write_text("{}")
+
+    result = _run_ensure(tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert _settings(tmp_path)["statusLine"]["refreshInterval"] == 5
+
+
+def test_official_ndf_path_gets_missing_refresh_interval(tmp_path: Path) -> None:
+    """既に NDF 標準を使っていて refreshInterval が無ければ足す。"""
+    _claude(tmp_path)
+    _write_settings(tmp_path, NDF_COMMAND)
+
+    result = _run_ensure(tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert _settings(tmp_path)["statusLine"]["refreshInterval"] == 5
+
+
+def test_existing_refresh_interval_is_kept(tmp_path: Path) -> None:
+    """利用者が決めた refreshInterval は上書きしない。"""
+    claude = _claude(tmp_path)
+    (claude / "settings.json").write_text(
+        json.dumps(
+            {
+                "statusLine": {
+                    "type": "command",
+                    "command": NDF_COMMAND,
+                    "refreshInterval": 30,
+                }
+            }
+        )
+    )
+
+    result = _run_ensure(tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert _settings(tmp_path)["statusLine"]["refreshInterval"] == 30
+
+
+def test_user_custom_gets_no_refresh_interval(tmp_path: Path) -> None:
+    """利用者独自の statusline には refreshInterval を足さない。"""
+    claude = _claude(tmp_path)
+    (claude / "mybar.sh").write_text(CUSTOM)
+    _write_settings(tmp_path, "bash ~/.claude/mybar.sh")
+
+    result = _run_ensure(tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert "refreshInterval" not in _settings(tmp_path)["statusLine"]

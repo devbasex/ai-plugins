@@ -1,7 +1,7 @@
 ---
 name: cross-refactoring
 description: "Let several CLIs propose, apply, and review refactorings on a PR until no new proposal appears. Use when structural improvement should converge across runtimes（クロスリファクタリング・多AIリファクタリング・収束リファクタリング）."
-argument-hint: "[PR番号] --scope PATH... [--host claude|codex|agy|kiro] [--model RT=MODEL] [--baseline-test CMD] [--max-test-rounds N] [--max-outer-rounds N] [--max-fix-rounds N] [--max-items-per-round N] [--ci-check NAME] [--workflow-step]"
+argument-hint: "[PR番号] --scope PATH... [--host claude|codex|agy|kiro] [--exclude NAMES] [--include NAMES] [--require-all] [--model RT=MODEL] [--baseline-test CMD] [--max-test-rounds N] [--max-outer-rounds N] [--max-fix-rounds N] [--max-items-per-round N] [--ci-check NAME] [--workflow-step]"
 allowed-tools:
   - Bash
   - Read
@@ -44,24 +44,25 @@ allowed-tools:
 
 | 語 | 何の単位か | 上限を決めるもの |
 | --- | --- | --- |
-| テスト整備ラウンド | **足すべきテストを集める。** 3 者が提案し、採否を決める | `--max-test-rounds`（既定 2） |
-| 提案ラウンド | **構造改善の提案を集める。** 3 者が提案し、採否を決める | `--max-outer-rounds`（既定 3） |
-| 適用ラウンド | **同時に適用して検証する。** 書き換えるファイルが重ならない項目だけを含む。**上の 2 つのラウンドが共有する** | 別に置かない（`--max-items-per-round` が実質の上限） |
+| テスト整備ラウンド | **足すべきテストを集める。** 参加者が提案し、採否を決める | `--max-test-rounds`（既定 2） |
+| 提案ラウンド | **構造改善の提案を集める。** 参加者が提案し、採否を決める | `--max-outer-rounds`（既定 3） |
+| 適用ラウンド | **同時に適用して検証する。** 書き換えるファイルが重ならない項目だけを含む。**上の 2 つのラウンドが共有する** | 同じ群を開き直すのは 2 回まで（引数を持たない固定値）。件数は `--max-items-per-round` が実質の上限 |
 | 修正ラウンド | **検証の失敗を直す。上の 2 つのラウンドが共有する** | `--max-fix-rounds`（既定 3） |
 | 改善項目 | 構造改善の提案の 1 件。`<ファイル>#<シンボル>` と兆候で識別する | — |
 | テスト項目 | テスト整備の提案の 1 件。固定する入口（`target`）と経路の種類（`case`）で識別する | — |
 
 **「バッチ」「パッチ」の語は使わない。** 読み手が別の意味で知っている語である。
 
-**適用ラウンドに別の上限を置かない。** 採用件数の上限が既に群の数を切っている。
-上限を 2 つ置くと、どちらで止まったのかを読み解く必要が出る。
+**同じ群を開き直すのは 2 回までである。** 2 回目は別の担当が試す。2 回とも結果を
+残さなければ、担当ではなく群の側を疑える。止まった理由は群の記録（取り消しの理由と
+結末の記録）が持つ。
 
 ## 設計方針
 
 | 観点 | 方針 |
 | --- | --- |
 | 参加者 | **全員 CLI プロセス。** ホストのサブエージェント機能は使わない。ホストと同じランタイムが実装担当のラウンドでも別プロセスで起動する |
-| 役割の分離 | 提案は**ホストを除く 3 者**、適用は**参加する 4 者すべて**。両者は重なるが一致しない |
+| 参加者 | **提案と適用を同じ参加者で回す。** 既定は codex / kiro とホストで、`--exclude` / `--include` で名指しで変える。確認を通らない者は外して続ける |
 | 検証の単位 | **適用ラウンド（群）に対して 1 回。** 判定は `--baseline-test` の合否で決まり、レビュー CLI は起動しない |
 | 収束しない項目 | **捨てる。** リファクタリングは任意の作業なので、揉める提案を Pull Request に残さない |
 | コミットの単位 | **1 適用ラウンド = 1 コミット。** テストも適用ラウンドの単位で 1 回だけ求める |
@@ -86,6 +87,9 @@ allowed-tools:
 | `[PR番号]` | 対象の Pull Request | 必須 |
 | `--scope PATH...` | 対象範囲。**提案が無制限に広がらないよう必須。** 検証にも効くので、現状固定テストの置き場所も含める | 必須 |
 | `--host claude\|codex\|agy\|kiro` | ホストの明示指定。未指定時は環境変数から推定（agy は推定できないため明示する） | 推定 |
+| `--exclude NAMES` | 参加者から外す者（カンマ区切り・繰り返し可）。ホストも外せる。再開で `none` を渡すと空へ戻す | なし |
+| `--include NAMES` | 参加者に足す者（例: `--include agy`）。再開で `none` を渡すと空へ戻す | なし |
+| `--require-all` | 確認を通らない者が 1 者でもいれば中断する（終了コード 4）。付けなければ外して続ける | 外して続ける |
 | `--model RT=MODEL` | ランタイムごとのモデル。繰り返し指定できる | CLI の既定 |
 | `--baseline-test CMD` | 着手前と各コミットで実行するテスト。**振る舞い不変を示す手段が無い書き換えは構造改善ではないため必須** | 必須 |
 | `--max-test-rounds N` | **テスト整備ラウンド**の上限。到達したら採用が残っていても提案ラウンドへ進む | `2` |
@@ -104,40 +108,47 @@ allowed-tools:
 /ndf:cross-refactoring 130 --scope src --baseline-test "pytest -q" --sync-command "make generate"
 /ndf:cross-refactoring 130 --scope src --model codex=gpt-5.5 --model claude=claude-opus-5
 /ndf:cross-refactoring 130 --scope src --host codex --max-outer-rounds 1
+/ndf:cross-refactoring 130 --scope src tests --baseline-test "pytest -q" --include agy --exclude kiro
 ```
 
-**モデルを比べたいなら `--model <ランタイム>=<name>` を 4 つとも指定する。**
-実際に動いたモデルを取得できるのは claude だけで、残る 3 者は指定値で代用する。
+**モデルを比べたいなら `--model <ランタイム>=<name>` を参加者の全員に指定する。**
+実際に動いたモデルを取得できるのは claude だけで、残る者は指定値で代用する。
 指定が無いラウンドは何が動いたか分からないため、集計から分離される
 （kiro の既定 `auto` も同じ扱いになる）。
 
 ## 担当の決め方
 
-ホストセッションは**進行の制御に徹し、提案とレビューには参加しない**。
-ただし**適用だけはホストと同じランタイムも担当しうる**。その場合も CLI プロセスとして
-起動するため、ホストセッションの作業文脈からは切り離されている。
+ホストセッションは**進行の制御に徹する**。提案と適用はどちらも CLI プロセスとして
+起動するため、ホストと同じランタイムが担当するときもホストセッションの作業文脈からは
+切り離されている。
 
-| 母集合 | 定義 | 中身 |
+| 参加者（`runtimes`） | 決め方 | ホストごとの既定 |
 | --- | --- | --- |
-| 提案（`runtimes`） | 全ランタイム − ホスト | 常に 3 者 |
-| 適用（`impl_capable`） | 全ランタイム | 常に claude / codex / agy / kiro |
+| 提案と適用の両方 | 既定（codex / kiro とホスト）＋ `--include` − `--exclude`。確認を通らない者は外す | claude: claude / codex / kiro、codex: codex / kiro、agy: codex / agy / kiro、kiro: codex / kiro |
 
-- **適用から外す者はいない。** 4 者はいずれも NDF の配布先で、適用で読ませる
-  `refactoring` / `tdd-cycle` / `quality-gates` を配っている
-- **ホストは適用にだけ参加する。** 提案から外れているので、
-  「実装した者と提案した者が同一モデルにならない」構造は保たれる
-- **適用担当は適用ラウンドごとに輪番を進める。** 1 つの提案ラウンドが複数の群を
-  持てば、その分だけ輪番も進む。**`--max-outer-rounds` が切るのは提案の回数だけ**で、
-  輪番の 1 周とは対応しない
+- **agy は既定に入らない。** 起動の失敗が参加者の中で最も多く、提案の所要も最も長かった（#664）。
+  戻すときは `--include agy` を渡す
+- **確認を通らない者は外して続ける。** 外した者と理由は状態ファイルと完了報告に残る。
+  全員が揃わないなら始めたくないときは `--require-all` を付ける。使える者が 0 者なら
+  中断する（終了コード 4）
+- **適用担当は適用ラウンドごとに輪番を進め、参加者の数のラウンドで 1 周する。**
+  ラウンド 1 は参加者の 2 番目から始まるため、ホストが最初に適用する形にならない。
+  提案者と適用者が同じランタイムになることは避けない（適用の結果はテストと Step 7 が見る）
+- **`--max-outer-rounds` が切るのは提案の回数だけ**で、輪番の 1 周とは対応しない。
+  1 つの提案ラウンドが複数の群を持てば、その分だけ輪番も進む
+- **レビュー担当はいない。** レビューは Step 7 の `cross-review` が担う
 
 割り当ては `refactor.py start-round` が返し、状態ファイルへ記録する。**再開しても変わらない。**
+再開で `--exclude` / `--include` / `--require-all` を渡したときだけ確認をやり直し、
+次に開くラウンドから反映する。上限（`--max-*-rounds` と `--test-timeout`）は再開で渡せば
+反映し、状態に載る他の引数は状態と違えば「反映しない」と知らせる。
 
 ## 前提
 
 - `gh` CLI が認証済みで、`jq` と `uv`（または Python 3.10 以上）が使える
-- 参加する CLI が**すべてログイン済み**である。`init` が認証状態を確認し、1 つでも
-  未認証なら中断する（未認証の CLI は起動から 15 秒で終わり、結果を残さないまま
-  担当から脱落するため、確認しないと参加者が欠けた構成のまま進行する）
+- 参加者の CLI がログイン済みである。`init` が認証状態を確認し、通らない者を担当から
+  外して続ける（未認証の CLI は起動から 15 秒で終わり、結果を残さないまま担当から
+  脱落するため、確認しないと参加者が欠けた構成のまま進行する）
 
   | ランタイム | 確認コマンド |
   | --- | --- |
@@ -149,16 +160,17 @@ allowed-tools:
   確認コマンドは CLI の版で変わりうる。誤検知するときは `NDF_SKIP_AUTH_CHECK=1` で
   飛ばせる（飛ばしたことは出力に残る）
 
-- ホストごとに次の CLI が使える（不足していると初期化時に失敗する）
+- ホストごとに次の CLI が使える（使えない者は担当から外れる）
 
   | ホスト | 必要な CLI |
   | --- | --- |
-  | Claude Code | `codex` / `agy` / `kiro-cli` |
-  | Codex | `claude` / `agy` / `kiro-cli` |
-  | agy | `claude` / `codex` / `kiro-cli` |
-  | Kiro CLI | `claude` / `codex` / `agy` |
+  | Claude Code | `codex` / `kiro-cli` |
+  | Codex | `kiro-cli` |
+  | agy | `codex` / `kiro-cli` |
+  | Kiro CLI | `codex` |
 
-  適用にはホスト自身も参加するため、ホストのコマンドも起動できる必要がある。
+  ホスト自身も参加者に入るため、ホストのコマンドも起動できる必要がある。
+  `--include` で足した者の CLI も要る。
   **agy がホストのときは `--host agy` を明示する**（環境変数からは推定しない）
 
 - 対象の Pull Request が Draft で開いている（未作成なら `/ndf:pr` で先に作る）
@@ -282,6 +294,8 @@ rf_eval() {
 
 rf_eval init "$PR" --scope $SCOPE \
         --baseline-test "$BASELINE" ${HOST:+--host "$HOST"} \
+        ${EXCLUDE:+--exclude "$EXCLUDE"} ${INCLUDE:+--include "$INCLUDE"} \
+        ${REQUIRE_ALL:+--require-all} \
         --max-test-rounds "$MAX_TEST" --max-outer-rounds "$MAX_OUTER" \
         --max-fix-rounds "$MAX_FIX" --max-items-per-round "$MAX_ITEMS" \
         ${CI_CHECK:+--ci-check "$CI_CHECK"} ${WORKFLOW_STEP:+--workflow-step} \
@@ -302,6 +316,7 @@ while :; do
     "$SCRIPTS/launch-cli.sh" "$a" "$PROPOSE_PHASE" "$ID" "$ROUND"
   done
   # 監視の上限は `--phase` の工程で上限の表（`lib/limits.py`）が決める。秒数を書かない。
+  # 無進捗の許容だけは `init` が出す（テスト 1 回分の無出力で打ち切らないため）。
   # **結果ファイルの名前は種類で変えない**ので、監視の雛形と工程（`propose`）は
   # テスト整備ラウンドでもそのまま使える。
   "$LIB/monitor.py" "$ID" --agents "$RUNTIMES_CSV" --tmp-dir "$TMP_DIR" \
@@ -314,8 +329,9 @@ while :; do
     rf_eval next-apply-round "$ID" "$ROUND" || break   # 終了コード 1 = 群が尽きた
     "$SCRIPTS/launch-cli.sh" "$IMPL" apply "$ID" "$ROUND"
     "$LIB/monitor.py" "$ID" --agents "$IMPL" --tmp-dir "$TMP_DIR" \
-        --stem-template "{agent}-apply-r$ROUND" --phase apply
-    # 終了コード 2 = 適用が通らずこの群を取り消した。修正ラウンドは回さない
+        --stem-template "{agent}-apply-r$ROUND" --phase apply \
+        --stall-timeout "$IMPL_STALL_TIMEOUT"
+    # 終了コード 2 = この群を取り消した、または担当を替えて開き直す。修正ラウンドは回さない
     rf merge-apply "$ID" "$ROUND" || continue
 
     while :; do                               # 検証と修正の繰り返し
@@ -325,7 +341,8 @@ while :; do
       fi
       "$SCRIPTS/launch-cli.sh" "$IMPL" fix "$ID" "$ROUND"
       "$LIB/monitor.py" "$ID" --agents "$IMPL" --tmp-dir "$TMP_DIR" \
-          --stem-template "{agent}-fix-r$ROUND" --phase fix
+          --stem-template "{agent}-fix-r$ROUND" --phase fix \
+          --stall-timeout "$IMPL_STALL_TIMEOUT"
       rf merge-fix "$ID" "$ROUND"
     done
     # 次の群と、次のラウンドの提案に備えて読み取り用を同期する
@@ -346,7 +363,8 @@ while :; do
     1) echo "⚠ 最終ゲートが通らないまま修正の上限に達しました" >&2; break ;;
     2) "$SCRIPTS/launch-cli.sh" "$FINAL_FIX_IMPL" final-fix "$ID"
        "$LIB/monitor.py" "$ID" --agents "$FINAL_FIX_IMPL" --tmp-dir "$TMP_DIR" \
-           --stem-template "{agent}-final-fix" --phase final-fix
+           --stem-template "{agent}-final-fix" --phase final-fix \
+           --stall-timeout "$IMPL_STALL_TIMEOUT"
        rf merge-final-fix "$ID" ;;
     *) exit $gate ;;
   esac

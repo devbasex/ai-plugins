@@ -28,16 +28,16 @@ def round_of(round_no, **over):
 # ---------- start-round ----------
 
 def test_start_round_opens_and_records_assignment(refactor, tmp_path, env_tmp_dir):
-    state_path = make_state(tmp_path)
+    state_path = make_state(tmp_path, runtimes=["claude", "codex", "kiro"])
     env_tmp_dir(state_path)
     refactor.cmd_start_round(_args())
 
     state = read_state(state_path)
     assert len(state["rounds"]) == 1
     entry = state["rounds"][0]
+    # ラウンド 1 は参加者の 2 番目から始まり、ホストが最初に適用しない（#727 の決定 7）
     assert entry["impl"] == "codex"
-    assert entry["reviewers"] == ["agy", "kiro"]
-    assert entry["impl"] not in entry["reviewers"]
+    assert "reviewers" not in entry
     assert state["phase"] == "propose"
 
 
@@ -78,6 +78,16 @@ def test_start_round_stops_when_already_final(refactor, tmp_path, env_tmp_dir):
 
 
 # ---------- advance（収束判定） ----------
+
+def test_advance_with_no_rounds_leaves_the_state_unchanged(cmd_report, tmp_path, env_tmp_dir):
+    state_path = make_state(tmp_path, rounds=[], final=None)
+    env_tmp_dir(state_path)
+    before = read_state(state_path)
+
+    cmd_report.cmd_advance(_args())
+
+    assert read_state(state_path) == before
+
 
 def test_advance_continues_when_progress_is_made(cmd_report, tmp_path, env_tmp_dir):
     state_path = make_state(tmp_path, rounds=[round_of(1)])
@@ -156,10 +166,75 @@ def test_report_renders_tables(cmd_report, tmp_path, env_tmp_dir, capsys):
     assert "R1-001" in out
 
 
-def test_status_reports_cohorts(cmd_report, tmp_path, env_tmp_dir, capsys):
-    state_path = make_state(tmp_path)
+def test_status_reports_one_cohort(cmd_report, tmp_path, env_tmp_dir, capsys):
+    """AC37 — 母集合は 1 行で出す。提案と適用で分けない（#727 の決定 5）。"""
+    state_path = make_state(tmp_path, runtimes=["claude", "codex", "kiro"])
     env_tmp_dir(state_path)
     cmd_report.cmd_status(_args())
     out = capsys.readouterr().out
-    assert "提案・レビュー: codex / agy / kiro" in out
-    assert "適用の母集合: claude / codex / kiro" in out
+    assert "参加者（提案と適用）: claude / codex / kiro" in out
+    assert "提案・レビュー" not in out
+    assert "適用の母集合" not in out
+
+
+def test_status_reads_an_older_state_with_the_implementation_cohort(
+        cmd_report, tmp_path, env_tmp_dir, capsys):
+    """AC41 — 適用専用の母集合を持つ古い状態ファイルも読める。表示は参加者の一覧だけ。"""
+    state_path = make_state(tmp_path, impl_capable=["claude", "codex", "agy", "kiro"])
+    env_tmp_dir(state_path)
+    cmd_report.cmd_status(_args())
+    assert "参加者（提案と適用）: codex / agy / kiro" in capsys.readouterr().out
+
+
+def _report_args():
+    return type("A", (), {"id": 130, "metrics": False})()
+
+
+def test_report_has_no_reviewer_column(cmd_report, tmp_path, env_tmp_dir, capsys):
+    """AC37 — ラウンド表にレビュー担当の列が無い。古い記録にあっても出さない。"""
+    state_path = make_state(tmp_path, rounds=[{
+        "round": 1, "kind": "structure", "impl": "codex",
+        "impl_model": {"requested": None, "observed": None},
+        "reviewers": ["agy", "kiro"], "reviewer_models": {}, "adopted": 1,
+        "apply": {"applied": [], "failed": []}, "fix_rounds": 0, "reviews": [],
+    }])
+    env_tmp_dir(state_path)
+    cmd_report.cmd_report(_report_args())
+    out = capsys.readouterr().out
+    header = next(line for line in out.splitlines() if line.startswith("| R |"))
+    assert "レビュー担当" not in header
+    assert "| 1 | 構造改善 | codex |" in out
+    assert "agy / kiro" not in out
+
+
+def test_report_prints_the_participants(cmd_report, tmp_path, env_tmp_dir, capsys):
+    """F6 — 参加者・外した者・足した者・確認を通らなかった者・再開で変えた値を出す。"""
+    state_path = make_state(
+        tmp_path, runtimes=["claude", "codex"],
+        participants={
+            "pool": ["claude", "codex", "kiro"], "included": ["agy"],
+            "excluded": ["kiro"], "available": ["claude", "codex"],
+            "unavailable": {"agy": "Not logged in"},
+            "probe_skipped": False, "require_all": False,
+        },
+        resume_changes=[{"at": "2026-09-22T00:00:00", "field": "max_outer_rounds",
+                         "from": 3, "to": 5}],
+    )
+    env_tmp_dir(state_path)
+    cmd_report.cmd_report(_report_args())
+    out = capsys.readouterr().out
+    assert "## 参加した者" in out
+    assert "- 母集合: claude / codex / kiro" in out
+    assert "- 使える者: claude / codex" in out
+    assert "- --exclude で外した者: kiro" in out
+    assert "- --include で足した者: agy" in out
+    assert "- 確認を通らなかった者: agy（Not logged in）" in out
+    assert "max_outer_rounds: 3 → 5" in out
+
+
+def test_report_says_no_record_for_an_older_state(cmd_report, tmp_path, env_tmp_dir, capsys):
+    """AC41 — 参加者の記録を持たない古い状態ファイルでは「記録なし」と出す。"""
+    state_path = make_state(tmp_path, impl_capable=["claude", "codex", "agy", "kiro"])
+    env_tmp_dir(state_path)
+    cmd_report.cmd_report(_report_args())
+    assert "- 使える者: 記録なし" in capsys.readouterr().out

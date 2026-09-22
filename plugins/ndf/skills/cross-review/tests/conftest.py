@@ -89,7 +89,7 @@ def _default_host(monkeypatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _no_github(monkeypatch, state_mod) -> None:
+def _no_github(monkeypatch) -> None:
     """テストから GitHub を呼ばない。
 
     収束の判定は継続的統合を照会するようになった（#327）。差し替えを忘れると、
@@ -97,6 +97,10 @@ def _no_github(monkeypatch, state_mod) -> None:
     **差し替えていない `gh` の実行はその場で落とす。**
 
     `subprocess.run` そのものを差し替えるテストは、この見張りを上書きして先へ進む。
+
+    **state.py の内部関数の差し替えは持たない。** それは `state_mod` を利用する
+    テストだけが必要とする（`_no_github_state`）。ここに混ぜると、monitor.py や
+    measure.py だけを検査するテストまで state.py を読み込む。
     """
     real = subprocess.run
 
@@ -109,10 +113,50 @@ def _no_github(monkeypatch, state_mod) -> None:
         return real(cmd, *args, **kwargs)
 
     monkeypatch.setattr(subprocess, "run", _guard)
-    # 照会は既定で「確かめられなかった」に倒す。判定は収束を止めない側へ倒すため、
-    # 検査ジョブを見ない既存のテストは期待値を変えずに通る。
+
+
+@pytest.fixture(autouse=True)
+def _no_github_state(request, monkeypatch) -> None:
+    """state.py の GitHub 照会を既定で「確かめられなかった」に倒す。
+
+    **`state_mod` を要求するテストだけへ適用する。** monitor.py や measure.py だけを
+    検査するテストは `state_mod` を要求しないため、この差し替えを通らず state.py を
+    読み込まない。要求するテストでは従来どおり実 GitHub 呼び出しを防ぐ。
+
+    判定は収束を止めない側へ倒すため、検査ジョブを見ない既存のテストは期待値を
+    変えずに通る。
+    """
+    if "state_mod" not in request.fixturenames:
+        return
+    state_mod = request.getfixturevalue("state_mod")
     monkeypatch.setattr(state_mod, "_fetch_check_runs", lambda repo, sha: None)
     monkeypatch.setattr(state_mod, "_fetch_pr_metadata", lambda pr, repo=None: None)
+    # **取り込みはレビューを投稿する**（#730）。投稿を見ないテストでは、組み立てまでを
+    # 本物で通し、送信だけを「届いた」に置き換える。偽の `gh` を要求するテストは
+    # 送信も含めて検査するため置き換えない。
+    if "fake_gh" not in request.fixturenames:
+        rp = state_mod.result_posts
+        monkeypatch.setattr(rp, "post_review", _post_review_offline(rp))
+        monkeypatch.setattr(rp, "push_fix",
+                            lambda worktree, head, commit: rp.PushResult(
+                                True, bool(commit), True, ""))
+        monkeypatch.setattr(rp, "post_fix", _post_fix_offline(rp))
+
+
+def _post_review_offline(rp):
+    """送信を行わず、組み立てた内容がそのまま届いたものとして結果を返す。"""
+    def _post(queue, payload_path, result_path, repo, pr, round_no, seat, head_sha,
+              is_own_pr, actor=None, since=None):
+        item = rp.review_posts(payload_path, result_path, repo, pr, round_no, seat,
+                               head_sha, is_own_pr, since=since)[0]
+        extra = item["extra"]
+        findings = len(rp._findings(rp._read_json(payload_path)))
+        return rp.ReviewOutcome(
+            review_url=f"https://github.com/{repo}/pull/{pr}#pullrequestreview-1",
+            posted_inline=extra["inline"], posted_body=extra["body"], queued=0,
+            findings=findings, failed=False, posted_as=extra["posted_as"],
+            intent=extra["intent"], detail="")
+    return _post
 
 
 @pytest.fixture()
@@ -249,3 +293,14 @@ def fake_gh(monkeypatch, tmp_path) -> FakeGh:
 def queue_mod() -> types.ModuleType:
     """共通層の待ち行列モジュール（#291）。"""
     return _load_module("ndf_post_queue", _POST_QUEUE)
+
+
+def _post_fix_offline(rp):
+    """送信を行わず、組み立てた返信・決着・まとめがすべて届いたものとして返す。"""
+    def _post(queue, result_path, repo, pr, round_no=None, actor=None):
+        kinds = [i["kind"] for i in rp.fix_posts(result_path, repo, pr, round_no)]
+        return rp.FixOutcome(
+            summary_url=f"https://github.com/{repo}/pull/{pr}#issuecomment-1",
+            replied=kinds.count("review-reply"), resolved=kinds.count("thread-resolve"),
+            queued=0, failed=False, detail="")
+    return _post

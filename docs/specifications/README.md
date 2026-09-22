@@ -16,10 +16,16 @@
 | [ndf-testenv-lock-and-registry.md](ndf-testenv-lock-and-registry.md) | テスト環境の排他の判定を陳腐化の規則へ揃えたこと、台帳へ書けなかったときの扱い。手順は `worktree` の `references/test-execution.md` が正 |
 | [ndf-issue-upkeep-root-cause.md](ndf-issue-upkeep-root-cause.md) | 溜まった課題を根本原因の場所で直す判定（ルートコーズ）と、構造の判断の担い手。親 issue とサブイシューの実測、マイルストーンを連番で読む理由。手順は `issue-upkeep` の SKILL.md と `references/` が正 |
 | [cross-review-evidence-based.md](cross-review-evidence-based.md) | 証拠ベースのレビューと効果の測定。状態ファイルの契約と決定の理由。手順は `cross-review` の `SKILL.md` が正 |
+| [cross-review-launch-outcome.md](cross-review-launch-outcome.md) | 起動 1 回の結末の語彙（理由 9 語）と起動し直しの可否、利用上限と CLI の上限の検知、プロセスグループでの起動と停止。手順は `cross-review` の `SKILL.md` と `docs/` が正 |
+| [cross-review-participants-and-seats.md](cross-review-participants-and-seats.md) | 使える者だけで収束ループを始める共通層（認証の確認を止めない形・参加の母集合と足す者／外す者・毎ラウンド 2 席の埋め方・席の名前）と、再開で渡した引数の反映。手順は `cross-review` の `SKILL.md` と `docs/` が正 |
+| [cross-review-writes-to-conductor.md](cross-review-writes-to-conductor.md) | GitHub と git への書き込み（レビューの投稿・返信・決着・修正のまとめ・修正の送信）をレビューを回す側だけが行うこと、担当が書く 2 つのファイルと改名の順序、二度書かない照合、差分の外を指す指摘の退避、途中で止まったときの立て直し、起動し直しを初回と同じ経路へ通すこと。手順は `cross-review` の `SKILL.md` と `docs/` が正 |
+| [cross-refactoring-apply-intake.md](cross-refactoring-apply-intake.md) | 担当が結果を残さない起動を 3 つの取り込みが同じ手順で受けること（範囲の確定・未検証のコミットの取り消し・結末の記録）、適用ラウンドの開き直しの判定と試行の上限 2 回、項目の無い適用ラウンドを作らないこと、帰属の段落の後ろから必須の記名を読むこと。手順は `cross-refactoring` の `SKILL.md` と `docs/` が正 |
+| [cross-refactoring-participants.md](cross-refactoring-participants.md) | cross-refactoring の参加者（codex / kiro とホストを既定に足す者／外す者で変える・確認を通らない者を外して続ける）、提案と適用を同じ参加者で回す輪番、再開で渡した引数の反映、呼び手の無くなった共通層の旧関数の削除。手順は `cross-refactoring` の `SKILL.md` と `docs/` が正 |
 | [ndf-cleanup-and-bundle-closing.md](ndf-cleanup-and-bundle-closing.md) | 後片付けが止まる条件（git の拒否だけ）、実行前確認の要否を決める 3 つの問い、まとまりの課題を終わりの工程で閉じる条件と結果の 4 値、配布の記録の形と読み方。手順は `merged` / `progress-tracking` / `release` の SKILL.md が正 |
 | [ndf-agent-layers-unattended-run.md](ndf-agent-layers-unattended-run.md) | `/goal` の工程を conductor / supervisor / worker の 3 層で通す運転。持ち場 5 つ、報告の 2 段、続けさせる回数、上限（429）で中断した層の再開。手順は `development-workflow` の `references/agent-layers.md` が正 |
 | [ndf-context-window-metrics.md](ndf-context-window-metrics.md) | 会話の記録から context window を 3 層で測る部品（`transcript_agents.py`）の値の取り方と、`skill-stats --agents` の 4 つの表と印。値の取り方はこの文書が正 |
 | [ndf-execution-plan-and-parallel-capacity.md](ndf-execution-plan-and-parallel-capacity.md) | 並列の実行計画（依存を工程の対で書く・重なりの 3 区分・開いている間はコミットしない）、マイルストーンの組、メモリで見る本数（`parallel-measure.py`）。手順は `issue-plan-strategy` と `development-workflow` の `references/` が正 |
 | [ndf-instruction-files-check.md](ndf-instruction-files-check.md) | エージェント向け指示書の検査（`instructions-check.py`）。宣言 `.ndf/instructions.json` で決まる判定の強さ、即時読み込みと出た版の段落の判定、扱いの印、観点の調べ直し。呼び方と宣言の書き方は `release` の `references/instruction-files.md` が正 |
+| [test-monitor-env-isolation.md](test-monitor-env-isolation.md) | テストの実行中だけ監視の上限を指す環境変数（接頭辞 `MONITOR_`）をリポジトリの根の共通の前提で外すこと、外す時点と戻す時点、根の設定ファイルで基準のディレクトリを固定すること |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。

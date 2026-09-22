@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # cross-review 反証の起動（#156 の 3 本目）。
 #
-# Usage: critique.sh <runtime> <STATE_PR> <ROUND>
+# Usage: critique.sh <seat> <STATE_PR> <ROUND>
 #
-#   runtime      claude | codex | agy | kiro
+#   seat         claude | codex | agy | kiro（同じランタイムの 2 つ目は `-2`〜`-9` を付ける）
 #
 # **提案者以外の担当が、各指摘へ 1 つの値を返す。** 値は support / refute /
 # insufficient_evidence / duplicate / out_of_scope の 5 つで、`state.py
@@ -15,7 +15,10 @@
 # **同じラウンドの 2 段目として回す。** 新しいラウンドを足すと、収束の上限（12）の
 # 意味が変わる。
 #
-# 状態ファイル: $TMP_DIR/<runtime>-critique-pr<STATE_PR>-round<ROUND>.json
+# **席の名前で受ける。** 指摘に載る担当も席の名前であるため、提案者かどうかの判定には
+# 席の名前をそのまま使う。起動する CLI だけを `${SEAT%%-*}` で選ぶ（設計の決定 10）。
+#
+# 状態ファイル: $TMP_DIR/<seat>-critique-pr<STATE_PR>-round<ROUND>.json
 
 set -euo pipefail
 
@@ -24,13 +27,14 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 . "$SCRIPT_DIR/_tmpdir.sh"
 
 load_context() {
-  RUNTIME=${1:?runtime required}
+  SEAT=${1:?seat required}
   STATE_PR=${2:?STATE_PR required}
   ROUND=${3:?ROUND required}
-  case "$RUNTIME" in
-    claude|codex|agy|kiro) ;;
-    *) echo "未知のランタイムです: $RUNTIME" >&2; exit 1 ;;
-  esac
+  # 席の名前の形（`lib/assignment.py` の `SEAT_PATTERN` と同じ規則）。
+  if [[ ! $SEAT =~ ^(claude|codex|agy|kiro)(-[2-9])?$ ]]; then
+    echo "受け付けられない席の名前です: $SEAT" >&2; exit 1
+  fi
+  RUNTIME=${SEAT%%-*}
   TMP_DIR=$(tmpdir)
   STATE=$TMP_DIR/cross-review-pr$STATE_PR-state.json
   [ -s "$STATE" ] || { echo "state.json not found: $STATE" >&2; exit 1; }
@@ -40,7 +44,7 @@ load_context() {
 
 load_context "$@"
 
-STEM=$TMP_DIR/$RUNTIME-critique-pr$STATE_PR
+STEM=$TMP_DIR/$SEAT-critique-pr$STATE_PR
 # **前のラウンドの pid ファイルを先に捨てる。** 監視は `<stem>.pid` の有無で起動を
 # 見るため、残骸があると起動していない担当を起動済みと読む（`<stem>` はラウンドを
 # 名前に持たない）。対象が無くて起動しない経路より前に捨てる。
@@ -53,7 +57,7 @@ rm -f "$STEM.pid"
 # コマンド・終了コード・再現の結果を読んだうえで賛否を決める（`docs/06-evidence.md` の
 # 「走らせる順序」）。射影から外すと、担当は結果を見ないまま賛否を返すことになる。
 select_targets() {
-TARGETS=$(jq -r --arg agent "$RUNTIME" --argjson round "$ROUND" '
+TARGETS=$(jq -r --arg agent "$SEAT" --argjson round "$ROUND" '
   [ (.review_findings // [])[]
     | select(.round == $round)
     | select(has("merged_into") | not)
@@ -62,14 +66,14 @@ TARGETS=$(jq -r --arg agent "$RUNTIME" --argjson round "$ROUND" '
        suggested_check, verification} ]' "$STATE")
 
 if [ "$(printf '%s' "$TARGETS" | jq 'length')" = "0" ]; then
-  echo "⏭ $RUNTIME: 反証の対象がありません（すべて自分の指摘）"
+  echo "⏭ $SEAT: 反証の対象がありません（すべて自分の指摘）"
   exit 0
 fi
 }
 
 select_targets
 
-OUT=$TMP_DIR/$RUNTIME-critique-pr$STATE_PR-round$ROUND.json
+OUT=$TMP_DIR/$SEAT-critique-pr$STATE_PR-round$ROUND.json
 rm -f "$OUT"
 
 render_critique_prompt() {
@@ -95,6 +99,10 @@ cat > "$PROMPT" <<EOF
 
 **\`support\` は「確かにそう見える」では足りません。** 自分でコードを読み、同じ経路へ
 到達できたときだけ使ってください。到達できなければ \`insufficient_evidence\` です。
+
+**\`insufficient_evidence\` を返しても、指摘は数から落ちません。** 誰も誤りを示していない
+\`major\` は未反証として数えられ、修正の工程へ渡ります。誤りを示せるなら、何がそう言えるかを
+reason へ書いて \`refute\` を返してください。指摘を数から落とす手段は \`refute\` だけです。
 
 ## 対象の指摘
 

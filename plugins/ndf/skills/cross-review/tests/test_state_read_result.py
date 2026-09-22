@@ -71,7 +71,8 @@ def test_canonical_schema(patched_tmp_dir, state_mod):
     assert merged["intent"] == "APPROVE"
     assert merged["posted_as"] == "APPROVE"
     assert merged["comments"] == 0
-    assert merged["review_url"] == "https://example/pr/1#1"
+    # 参照は担当の申告ではなく送信の応答から取る（#730 AC15）。
+    assert merged["review_url"].endswith("#pullrequestreview-1")
     assert merged["by_severity"]["critical"] == 0
 
 
@@ -93,9 +94,10 @@ def test_alias_schema_intent_and_comment_count(patched_tmp_dir, state_mod):
     st = _read_state(tmp_dir)
     merged = st["rounds"][-1][AGENT]
     assert merged["intent"] == "APPROVE"
-    # posted_as は別名 result.json には存在しないので intent と同値にフォールバック
+    # posted_as は投稿する側が決める。自分の Pull Request でなければ intent と同じ
     assert merged["posted_as"] == "APPROVE"
-    assert merged["comments"] == 3
+    # 件数は担当の申告（comment_count）ではなく、送れたインラインの数（#730 AC15）
+    assert merged["comments"] == 0
 
 
 def test_missing_event_and_intent_dies(patched_tmp_dir, state_mod):
@@ -169,3 +171,27 @@ def test_invalid_json_result_file_dies(patched_tmp_dir, state_mod, capsys):
     assert e.value.code == 3
     captured = capsys.readouterr()
     assert "parse" in captured.err.lower() or "parse" in captured.err
+
+
+def test_the_take_in_passes_the_start_of_the_round(
+        patched_tmp_dir, state_mod, monkeypatch):
+    """取り込みは、二度書かない照合を絞るためにラウンドの開始時刻を渡す。
+
+    ラウンドの番号は回し直すと 1 から数え直すため、前の実行のレビューと取り違えない。
+    """
+    tmp_dir = patched_tmp_dir
+    _seed_state(tmp_dir)
+    rfile = tmp_dir / "result.json"
+    rfile.write_text(json.dumps({"event": "APPROVE", "comments_count": 0}))
+    seen = {}
+    offline = state_mod.result_posts.post_review
+
+    def _spy(*a, **kw):
+        seen["since"] = kw.get("since")
+        return offline(*a, **kw)
+
+    monkeypatch.setattr(state_mod.result_posts, "post_review", _spy)
+
+    state_mod.cmd_read_result(_make_args(rfile))
+
+    assert seen["since"] == "2026-05-21T00:00:00+00:00"

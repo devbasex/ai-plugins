@@ -314,15 +314,24 @@ def _bound(value: Optional[str], *, upper: bool) -> Optional[_dt.datetime]:
     return parsed
 
 
+def _within_time_bound(started: Optional[_dt.datetime],
+                       since: Optional[_dt.datetime],
+                       until: Optional[_dt.datetime],
+                       until_exclusive: bool) -> bool:
+    if since and (started is None or started < since):
+        return False
+    if until and (started is None or (started >= until if until_exclusive else started > until)):
+        return False
+    return True
+
+
 def _select(rows: list[dict], args: argparse.Namespace) -> list[dict]:
     since, until = _bound(args.since, upper=False), _bound(args.until, upper=True)
     until_exclusive = bool(args.until and re.fullmatch(r"\d{4}-\d{2}-\d{2}", args.until))
     out = []
     for row in rows:
         started = _parse_time(row.get("started_at"))
-        if since and (started is None or started < since):
-            continue
-        if until and (started is None or (started >= until if until_exclusive else started > until)):
+        if not _within_time_bound(started, since, until, until_exclusive):
             continue
         if args.repo and row.get("repo") != args.repo:
             continue
@@ -388,14 +397,22 @@ def _by_total(rows: list[dict]) -> str:
                   _finished_rows(rows) + _unfinished_rows(rows))
 
 
+def _round_count_bucket(count: int) -> Optional[str]:
+    """ラウンド数の表示区分。1 / 2 / 3 以上のどれでもなければ `None`（対象外）。"""
+    if count >= 3:
+        return "3 以上"
+    if count in (1, 2):
+        return str(count)
+    return None
+
+
 def _by_round_count(rows: list[dict]) -> str:
     buckets: dict[str, list[float]] = {"1": [], "2": [], "3 以上": []}
     for row in rows:
         minutes = _minutes(row)
         if row.get("kind") != "cross-review" or minutes is None:
             continue
-        count = len(row.get("rounds") or [])
-        key = "3 以上" if count >= 3 else str(count) if count in (1, 2) else None
+        key = _round_count_bucket(len(row.get("rounds") or []))
         if key is not None:
             buckets[key].append(minutes)
     table = [[k, str(len(v)), _fmt(_quantile(sorted(v), 0.5))] for k, v in buckets.items() if v]

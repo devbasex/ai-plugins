@@ -122,6 +122,8 @@ classDiagram
 
 ### 理由の語彙
 
+**P3 の語彙と「P3 で足す文言」は、結果なしの理由を共通層の 1 か所で読む設計（#729）へ移した。確定仕様は [起動 1 回の結末](../docs/specifications/cross-review-launch-outcome.md) の「結末の語彙」「データ・設定」にある。** 以下は 2026-09-15 時点の記録として残す（`unparsable` の追加と起動し直しの可否は新しい設計だけが持つ）。
+
 **監視が書く理由**（`monitor_outcome.REASONS`）:
 
 | 理由 | 状態 | 入る Pull Request | 何が起きたか |
@@ -144,7 +146,7 @@ classDiagram
 | 理由 | 見るファイル | 文言（正規表現） |
 | --- | --- | --- |
 | `usage_limit` | err.log | `Monthly request limit reached` |
-| `usage_limit` | claude の err.log と stdout.log | `"api_error_status"\s*:\s*429` |
+| `usage_limit` | claude の err.log と stdout.log（新しい設計では全担当の err.log） | `"api_error_status"\s*:\s*429` |
 | `usage_limit` | err.log（既存の一致を付け替え） | `quota exceeded` / `rate limit exceeded` / `^HTTP/\d\S* 429 ` |
 | `early_error` | err.log（既存の一致を分ける） | `^HTTP/\d\S* (?:401\|403) ` |
 | `cli_timeout` | err.log（終了後だけ） | `print timeout after \S+ with turn in progress` |
@@ -369,3 +371,5 @@ conftest.py              P1（NDF_METRICS_DIR）
 | AC67 | `SKILL.md` の骨組みで、起動の行から判定の行までの間に `verify-findings` と `critique-round.sh` があり、起動し直しの専用の分岐が無い。各判定の直後に終了コード 8 の `flush` の枝がある |
 | AC68 / AC69 | 文書の `grep` |
 | AC70〜AC72 | 検証手段の表のコマンド。AC72 はテストの前後で `find` |
+
+**AC63〜AC67 の確かめ方は、#730 の設計が引き継いだ。確定仕様は [書き込みを回す側へ集める仕様](../docs/specifications/cross-review-writes-to-conductor.md) の「テスト観点」にある。** 担当が投稿しなくなるため、投稿済みのレビューを探す鍵（`prior_review_url`）を作らず、AC63〜AC65 の行は対象を失う。上の 2 行は 2026-09-15 時点の記録として残す。

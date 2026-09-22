@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.15.1）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.16.0）
 ```
 
 ### agy
@@ -119,16 +119,32 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.15.1 へ更新するとき
+## v10.16.0 へ更新するとき
 
-**`agent-layers.md` の「並行の本数」の節で、実行計画の持ち主の記載を直しました**（#762）。
-「本数の測り方と実行計画は `parallel-work.md` が持つ」と書いていた 1 文を、「本数を抑える下限は
-`parallel-work.md`、本数の測り方と実行計画は `issue-plan-strategy` の
-`references/execution-plan.md` が持つ」へ改め、`parallel-work.md` の境界の表と揃えました。
-変わるのは参照文書の 1 文だけで、Skill の数・手順・スクリプトは v10.15.0 のままです。破壊的な
-変更はなく、記録の移行も要りません。変更点の一覧は [CHANGELOG.md](../../CHANGELOG.md) にあります。
+**`cross-review` と `cross-refactoring` の収束ループが、担当が揃わない・上限で止まる・結果を
+残さないときにも止まらず終わるようにしました**（マイルストーン 13「agy の打ち切りと止まらない
+収束ループ」、#478 #553 #583 #584 #592 #619 #624 #647 #648 #664 #678 #687 #706 #727 #728 #729
+#730 #732 #736）。Skill の数は変わりません。引数・Skill・スクリプトの削除や改名は無く、記録の
+移行も要りません（前の版で始めた状態ファイルはそのまま読めます）。変更点の一覧は
+[CHANGELOG.md](../../CHANGELOG.md) にあります。
 
-**正式版です。** 開発版 `10.15.1-dev.1` と中身は同じで、`main` に載ります。
+**正式版です。** `main` に載ります。開発版 `10.16.0-dev.1` の中身に、statusline の変更（#806）を
+加えました。statusline の変更は開発版を経ていません。
+
+**`cross-refactoring` の既定の参加者から agy が外れます。** 既定は codex / kiro とホストです。
+これまでどおり agy に提案と適用をさせるなら `--include agy` を渡します。
+
+| 変わったこと | 中身 |
+| --- | --- |
+| **使える者だけで始まります**（#478 #727 #664 #687） | 認証の確認を通らない CLI があっても `init` は止まらず、その者を外して続けます。外した者と理由は状態ファイルと完了報告に残ります。全員が揃わないなら始めたくないときは `--require-all` を付けます。`cross-review` は毎ラウンド 2 席を確保し、足りなければホスト、次に同じランタイムの 2 つ目（`codex-2` など）で埋めます |
+| **参加者を名指しで変えられます**（#664） | 両 Skill に `--exclude` / `--include` が増えました（カンマ区切り・繰り返し可）。`cross-refactoring` は提案と適用を同じ参加者で回し、レビュー担当の役を無くしました |
+| **再開で渡した引数が効きます**（#648） | 中断した収束ループを引数を変えて再開すると、上限は反映され、反映しない引数は「反映しない」と表示されます。黙って捨てられる引数はありません。指定を外すときは `none` を渡します |
+| **利用上限を理由として報告します**（#729 #619 #584） | 担当の CLI が利用上限で止まると「結果なし」ではなく理由「利用上限」として残り、同じラウンドで起動し直しません。監視が止めた担当の子プロセスは、止めた後に結果を書きません |
+| **未解決の重大な指摘を残して承認で終わりません**（#732 #624 #706） | 収束の判定で数えないのは、棄却した指摘と `minor` 以下の指摘だけになりました。誤りを示されていない `major` 以上は残る指摘として数えます |
+| **GitHub と git へ書くのはレビューを回す側だけです**（#730 #583） | レビューの担当は指摘の控えを書くだけで、投稿は取り込み（`state.py read-result`）が行います。修正の担当はコミットまでで、送信・返信・決着・まとめは `state.py merge-fix` が行います。同じ論点が 2 つのスレッドに分かれず、途中で止まってもやり直しで二度書きません。**`/ndf:fix` を単独で使うときは、最後に `lib/result_posts.py fix` の 1 行で送信と返信を行います**（手順は `fix` の SKILL.md にあります） |
+| **適用ラウンドが上限なしに開き直されません**（#728 #647 #592 #553） | 実装担当が結果を残さないと未検証のコミットを取り消し、同じ適用ラウンドは別の担当で 2 回まで試します。採用 0 件のラウンドでは担当を起動しません。帰属の段落が後ろに付いたコミットでも必須の記名を読みます |
+| **statusline にサブエージェントの使用量が並びます**（#806） | Claude Code の NDF 標準 statusline が、実行中のサブエージェントのコンテキスト使用量を多い順に 3 本まで並べます（残りは `+2` のように本数だけ）。500k（Haiku 4.5 は 150k）を超えると赤になります。メインの表示から上限・使用率・コンテナ名・ホスト名を外しました。NDF 標準の statusLine には `refreshInterval: 5` が足されます（利用者が書いた値は変えません） |
+| テストが監視の環境変数に左右されません（#678） | `MONITOR_` で始まる環境変数を延ばしたシェルから全体のテストを起動しても、同じ件数が通ります |
 
 正式版のチャネル（ref を指定せずに登録した取得元）なら、次で入れ替わります。**動いているセッションには
 反映されない**ため、更新したあとは起動し直してください。開発版を試すために `develop` を登録した
@@ -145,13 +161,15 @@ codex plugin add ndf@ai-plugins
 
 ### 手元で確かめる
 
-読むだけで、課題もファイルも書き換えません。`$SCRIPTS` はプラグインの `scripts/` の
-絶対パスで、決め方は
+どれも `--help` を読むだけで、課題もファイルも書き換えません。`$SCRIPTS` はプラグインの
+`scripts/` の絶対パスで、決め方は
 [development-workflow/references/scripts-lookup.md](skills/development-workflow/references/scripts-lookup.md)
 にあります。
 
 ```bash
-grep -q "execution-plan.md" "$SCRIPTS/../skills/development-workflow/references/agent-layers.md"; echo "exit=$?"   # 0 なら新しい版の参照文書が入っている
+python3 "$SCRIPTS/lib/result_posts.py" fix --help >/dev/null; echo "exit=$?"                                                 # 0 なら修正の送信を行う共通層が入っている
+python3 "$SCRIPTS/../skills/cross-review/scripts/state.py" init --help | grep -q -- '--require-all'; echo "exit=$?"         # 0 なら cross-review が使える者だけで始まる
+python3 "$SCRIPTS/../skills/cross-refactoring/scripts/refactor.py" init --help | grep -q -- '--include'; echo "exit=$?"     # 0 なら cross-refactoring の参加者を名指しで変えられる
 ```
 
 ## Playwright テストについて
@@ -295,7 +313,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.15.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.16.0/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -317,14 +335,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.15.1/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.16.0/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.15.1  <path>
+# => ndf@ai-plugins  installed, enabled  10.16.0  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。

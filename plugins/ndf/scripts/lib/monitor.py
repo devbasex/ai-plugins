@@ -14,16 +14,25 @@
 `--stem-template` で決まる（既定は cross-review の `{agent}-review-pr{id}`）。
 cross-refactoring は `{agent}-propose-rf{id}` のような別の命名を渡す。
 
+**担当の名前は席の名前を取りうる**（`claude-2` のような同じランタイムの 2 つ目。#727）。
+一時ファイルの名前はその名前のまま組み、CLI ごとの検査と**上限の表の参照**は
+`_agent_runtime` でランタイム名へ直してから行う。
+
 監視軸:
   1. **pidfile** + `kill -0` でプロセス生存確認
      - 可能なら `/proc/<pid>/cmdline` で codex/agy であることを再確認 (PID 再利用対策)
   2. **sentinel** (codex のみ): err.log に `^tokens used$` 出現
   3. **early-error pattern**: err.log に既知の致命的キーワードが出たら即中断
-     - **FATAL** (auth/quota/sandbox 等の明確な致命): 検知時に kill
+     - **USAGE LIMIT** (利用上限。kiro の `Monthly request limit reached` / claude の
+       `"api_error_status":429` / HTTP 429 / quota・rate limit): 検知時に kill し、
+       状態は EARLY_ERROR のまま理由 `usage_limit` を結末に添える（#729 / #619）。
+       claude だけは stdout.log の JSON も見る
+     - **FATAL** (auth/sandbox 等の明確な致命): 検知時に kill
      - **WARN** (生の `Error:` / `Traceback` 等の曖昧パターン): 警告ログのみ、kill せず通常判定を継続
      - `--no-early-error` / `MONITOR_NO_EARLY_ERROR=1` で検知自体を無効化可
   4. **result.json**: プロセス終了後に `<worktree>/.cross_review/<agent>-review-pr<PR>-result.json` が
-     生成されていなければ失敗扱い
+     生成されていなければ失敗扱い。err.log に CLI 自身の上限の文言（agy の
+     `print timeout after <時間> with turn in progress`）があれば理由 `cli_timeout`（#729）
   5. **hard timeout**: 既定は `--phase` の工程で上限の表（`limits.py`）から引く
      （省略時は `review`）。`--timeout` → `MONITOR_TIMEOUT_<AGENT>` → `MONITOR_TIMEOUT` の順で上書き可
   6. **stall timeout**: err.log + stdout.log の合計サイズが一定時間変化しなければ
@@ -35,7 +44,9 @@ cross-refactoring は `{agent}-propose-rf{id}` のような別の命名を渡す
   8. **result.json + age fallback**: sentinel を持たない agent (agy) 向け。
      result.json の mtime が 30 秒以上前なら完了とみなし kill → OK
   9. **失敗時 kill**: TIMEOUT / STALLED / EARLY_ERROR (FATAL のみ) / PIDFILE_BAD で
-     返るとき、対象プロセスを SIGTERM (3 秒後に SIGKILL) で停止する
+     返るとき、対象プロセスを SIGTERM (3 秒後に SIGKILL) で停止する。対象がプロセス
+     グループの先頭（`launch-cli.sh` は `set -m` で起動する）なら、グループへ送って
+     子プロセスも止める（#584）。監視自身のグループへは送らない
 
 Usage:
   monitor.py <PR> <target>          target ∈ {codex, agy, both}
@@ -84,8 +95,37 @@ def _lib_dir() -> pathlib.Path:
 
 if str(_lib_dir()) not in sys.path:
     sys.path.insert(0, str(_lib_dir()))
+import assignment  # noqa: E402  席の名前の規則（#727）
 import limits  # noqa: E402  上限の表（#598 / #537）
 import monitor_outcome  # noqa: E402  監視の結果の語彙と読み書き（#662）
+
+
+def _agent_runtime(agent: str) -> str:
+    """担当の名前からランタイムを引く（CLI ごとの検査を選ぶために使う）。
+
+    担当の単位は席の名前（`assignment.SEAT_PATTERN`。`claude-2` のように同じランタイムの
+    2 つ目を表す）である。**席の形に合わない名前はそのまま返す。** cross-refactoring は
+    任意の骨格（`--stem-template`）で担当名を渡せるため、形で弾くとその経路が壊れる。
+    """
+    try:
+        return assignment.seat_runtime(agent)
+    except assignment.AssignmentError:
+        return agent
+
+
+def _seat_or_both(value: str) -> str:
+    """位置引数 `target` の型。席の名前か `both` だけを通す。
+
+    通らなければ argparse が終了コード 2 で終わる。`both` はこれまでの 2 者
+    （codex / agy）を指す省略形である。
+    """
+    if value == "both":
+        return value
+    try:
+        assignment.seat_runtime(value)
+    except assignment.AssignmentError as e:
+        raise argparse.ArgumentTypeError(f"{e}。または both") from e
+    return value
 
 
 # ---------- 設定 ----------
@@ -108,21 +148,41 @@ DEFAULT_NO_EARLY_ERROR = os.environ.get("MONITOR_NO_EARLY_ERROR", "").lower() in
     "1", "true", "yes", "on",
 }
 
-# err.log の行頭に近い形で出る **明確な致命** パターン (kill 対象)。
-# auth / quota / sandbox / HTTP 401-403-429 など、
-# プロセスが続行しても result を生成できないと判明しているケースだけを入れる。
-EARLY_ERROR_FATAL = [
-    # HTTP エラーステータス行 (`HTTP/1.1 401 Unauthorized` 等)
-    re.compile(r"^HTTP/\d\S* (?:401|403|429) ", re.MULTILINE),
-    # 認証 / 権限系（行頭限定）
-    re.compile(r"^(?:Authentication failed|Permission denied)", re.MULTILINE),
+# **利用上限** の文言 (kill 対象。理由は `usage_limit`)。起動し直しても解けないため、
+# 他の致命と区別して結末に理由を添える（#729 の決定 4）。err.log は全担当で見る。
+# 照合は致命の表より **先** に行う。上限で落ちた後に別の致命が続く形が普通で、上限のほうが原因。
+USAGE_LIMIT_FATAL = [
+    # kiro の実物（#619）
+    re.compile(r"Monthly request limit reached"),
+    # claude の `--output-format json` の結果行（#647）。`:` の前後の空白は問わない
+    re.compile(r'"api_error_status"\s*:\s*429'),
     # quota / rate limit （`m.start()` をキーワード位置に合わせるため `^.*` を付けない。
     # `_match_is_quoted()` が backtick / 「」 引用を判定するために match 開始位置を使うため）
     re.compile(r"\b(?:quota exceeded|rate limit exceeded)\b", re.IGNORECASE),
+    # HTTP 429 の状態行
+    re.compile(r"^HTTP/\d\S* 429 ", re.MULTILINE),
+]
+
+# err.log の行頭に近い形で出る **明確な致命** パターン (kill 対象。理由は `early_error`)。
+# auth / sandbox / HTTP 401-403 など、プロセスが続行しても result を生成できないと
+# 判明しているケースだけを入れる。利用上限は `USAGE_LIMIT_FATAL` の側。
+EARLY_ERROR_FATAL = [
+    # HTTP エラーステータス行 (`HTTP/1.1 401 Unauthorized` 等)
+    re.compile(r"^HTTP/\d\S* (?:401|403) ", re.MULTILINE),
+    # 認証 / 権限系（行頭限定）
+    re.compile(r"^(?:Authentication failed|Permission denied)", re.MULTILINE),
     # API key 系
     re.compile(r"\bAPI key (?:not found|missing|invalid)\b", re.IGNORECASE),
     # codex 固有: sandbox エラー
     re.compile(r"\bsandbox error\b", re.IGNORECASE),
+]
+
+# **CLI 自身の上限** で結果を書かずに終わったことを示す文言（理由は `cli_timeout`）。
+# **終了した後、結果ファイルが無いときだけ** 照合する。生きている間に見ると途中の警告を
+# 致命と読み、結果ファイルがあれば上限に当たっても書き終えているので使える（#729 の決定 5）。
+CLI_TIMEOUT_AFTER_EXIT = [
+    # agy の `--print-timeout` の打ち切り（#598 / #537 の実物）
+    re.compile(r"print timeout after \S+ with turn in progress"),
 ]
 
 # **警告の見た目で出る致命** パターン。`EARLY_ERROR_FATAL` と違い、行頭の
@@ -245,6 +305,12 @@ CLAUDE_STDOUT_FATAL = [
     re.compile(r'"is_error"\s*:\s*true'),
 ]
 
+# claude の stdout.log に出る利用上限（理由は `usage_limit`）。err.log と stdout.log の
+# どちらに出るか未確認のため両方を見る（#729 の決定 6）。JSON 向けの照合で除外を掛けない。
+CLAUDE_STDOUT_USAGE_LIMIT = [
+    re.compile(r'"api_error_status"\s*:\s*429'),
+]
+
 
 # env を safe に int parse する。非数値時は warn を stderr に出して fallback 値を返す。
 # 上限の表と同じ規則で読むため、表の側の実装を使う。
@@ -261,8 +327,12 @@ def _agent_stall_default(agent: str) -> int:
       4. `DEFAULT_STALL` (表に無い agent)
 
     env は **呼び出し時** に再評価し、非数値なら warn を出して表の値に戻す。
+
+    **席の名前はランタイム名へ直してから引く**（#727）。上限の表も担当別の環境変数も
+    ランタイム名で引くため、`claude-2` のまま渡すと表に無い担当として `DEFAULT_STALL`
+    へ落ち、1 席目より早く無進捗と判定される。
     """
-    return limits.stall_timeout(agent)
+    return limits.stall_timeout(_agent_runtime(agent))
 
 
 # `--tmp-dir` で明示指定された一時ディレクトリ。CLI の解析時にだけ設定する。
@@ -358,9 +428,12 @@ class MonitorOutcome:
     exit_code: int
     icon: str
     detail: str
+    # 状態からは決まらない理由（`usage_limit` / `cli_timeout`）。`None` なら結末を書くときに
+    # `monitor_outcome.reason_for(status)` へ落ちる（#729 の決定 8）。
+    reason: Optional[str] = None
 
     @classmethod
-    def create(cls, status: str, detail: str) -> "MonitorOutcome":
+    def create(cls, status: str, detail: str, reason: Optional[str] = None) -> "MonitorOutcome":
         exit_code, icon = {
             "OK": (0, "✅"),
             "TIMEOUT": (2, "⏰"),
@@ -369,7 +442,15 @@ class MonitorOutcome:
             "STALLED": (5, "🛑"),
             "PIDFILE_BAD": (6, "❓"),
         }[status]
-        return cls(status, exit_code, icon, detail)
+        return cls(status, exit_code, icon, detail, reason)
+
+
+@dataclass(frozen=True)
+class EarlyFatal:
+    """早期の致命の一致。どのファイルで・何が・理由は何か（`None` なら `early_error`）。"""
+    source: str
+    message: str
+    reason: Optional[str] = None
 
 
 @dataclass
@@ -441,6 +522,20 @@ def _is_zombie(pid: int) -> bool:
     return state is not None and "Z" in state
 
 
+def _leads_own_group(pid: int) -> bool:
+    """pid がプロセスグループの先頭で、かつ監視自身のグループではないか。
+
+    `launch-cli.sh` は `set -m` で起動するため CLI の pid = pgid になる。そうでない pid
+    （古い起動の手順・別の経路）は先頭でないか、監視と同じグループに居る。**監視自身の
+    グループへ送ると、進行側のシェルまで止まる**（#584 の候補で退けた形）。
+    """
+    try:
+        pgid = os.getpgid(pid)
+    except OSError:
+        return False
+    return pgid == pid and pgid != os.getpgrp()
+
+
 def _kill_pid(pid: int, sigterm_grace: float = 3.0) -> None:
     """対象プロセスに SIGTERM、`sigterm_grace` 秒後も生きていたら SIGKILL。
 
@@ -448,13 +543,18 @@ def _kill_pid(pid: int, sigterm_grace: float = 3.0) -> None:
     だと後から `gh api` 投稿や result.json 書き込みを実行してメインフローと
     競合する。失敗扱いで返るときは必ず停止させる。
     ゾンビプロセスにはシグナルを送れないためスキップする。
+
+    対象がプロセスグループの先頭なら **グループへ送る**（#584 / #729 の決定 10）。pid だけへ
+    送ると、CLI の子プロセスが残って止めた後に結果ファイルを書く。生存の確認は先頭の pid で見る。
     """
     if pid <= 0:
         return
     if _is_zombie(pid):
         return
+    send = (lambda sig: os.killpg(pid, sig)) if _leads_own_group(pid) else (
+        lambda sig: os.kill(pid, sig))
     try:
-        os.kill(pid, signal.SIGTERM)
+        send(signal.SIGTERM)
     except OSError:
         return
     deadline = time.monotonic() + sigterm_grace
@@ -463,7 +563,7 @@ def _kill_pid(pid: int, sigterm_grace: float = 3.0) -> None:
             return
         time.sleep(0.5)
     try:
-        os.kill(pid, signal.SIGKILL)
+        send(signal.SIGKILL)
     except OSError:
         pass
 
@@ -538,7 +638,12 @@ def _scan_patterns(
 
 
 def _scan_early_fatal(path: pathlib.Path) -> Optional[str]:
-    hit = _scan_patterns(path, EARLY_ERROR_FATAL)
+    """err.log の致命の一致（kill 対象）。**利用上限も含む。**
+
+    理由（`usage_limit` か `early_error` か）の区別はここでは行わず、`_early_error` が
+    `USAGE_LIMIT_FATAL` を先に照合して決める。この関数は「止めるべき文言があるか」だけを返す。
+    """
+    hit = _scan_patterns(path, USAGE_LIMIT_FATAL) or _scan_patterns(path, EARLY_ERROR_FATAL)
     if hit:
         return hit
     return _scan_patterns(
@@ -552,12 +657,8 @@ def _scan_early_warn(path: pathlib.Path) -> Optional[str]:
     return _scan_patterns(path, EARLY_ERROR_WARN)
 
 
-def _scan_claude_stdout_fatal(path: pathlib.Path) -> Optional[str]:
-    """claude の JSON 出力から承認失敗・実行失敗を検出する。
-
-    `--output-format json` は完了時に 1 個の JSON を吐くため、
-    `permission_denials` が非空、または `is_error` が真であれば失敗が確定する。
-    err.log 側の行単位パターンでは拾えないので専用に見る。
+def _scan_claude_stdout(path: pathlib.Path, patterns: list[re.Pattern[str]]) -> Optional[str]:
+    """claude の JSON 出力を `patterns` で照合し、一致の前後 80 文字を返す。
 
     `_scan_patterns()` は使わない。あちらは行単位の benign 判定と引用符パリティ判定を
     行うが、JSON は 1 行に多数の引用符を含むため、パリティ判定が「引用の内側」を
@@ -567,11 +668,26 @@ def _scan_claude_stdout_fatal(path: pathlib.Path) -> Optional[str]:
     if data is None:
         return None
     data = _strip_ansi(data)
-    for pat in CLAUDE_STDOUT_FATAL:
+    for pat in patterns:
         m = pat.search(data)
         if m:
             return data[max(0, m.start() - 80):m.end() + 80].strip()
     return None
+
+
+def _scan_claude_stdout_fatal(path: pathlib.Path) -> Optional[str]:
+    """claude の JSON 出力から承認失敗・実行失敗を検出する。
+
+    `--output-format json` は完了時に 1 個の JSON を吐くため、
+    `permission_denials` が非空、または `is_error` が真であれば失敗が確定する。
+    err.log 側の行単位パターンでは拾えないので専用に見る。
+    """
+    return _scan_claude_stdout(path, CLAUDE_STDOUT_FATAL)
+
+
+def _scan_claude_stdout_usage_limit(path: pathlib.Path) -> Optional[str]:
+    """claude の JSON 出力から利用上限（`"api_error_status":429`）を検出する。"""
+    return _scan_claude_stdout(path, CLAUDE_STDOUT_USAGE_LIMIT)
 
 
 def _scan_codex_sentinel(path: pathlib.Path) -> bool:
@@ -626,7 +742,7 @@ def _lingering_completion(
     started_wall: float,
 ) -> str | None:
     has_result = paths.result.exists() and paths.result.stat().st_size > 0
-    if status.agent == "codex" and status.sentinel_seen and has_result:
+    if _agent_runtime(status.agent) == "codex" and status.sentinel_seen and has_result:
         _kill_pid(pid)
         status.result_exists = True
         return f"codex sentinel + result.json detected; killed lingering pid {pid}"
@@ -646,19 +762,43 @@ def _lingering_completion(
     )
 
 
+def _scan_usage_limit(paths: AgentPaths, agent: str) -> EarlyFatal | None:
+    """利用上限の文言。err.log は全担当、stdout.log は claude だけ JSON 向けの照合で見る。"""
+    hit = _scan_patterns(paths.err_log, USAGE_LIMIT_FATAL)
+    if hit:
+        return EarlyFatal("err.log", hit, "usage_limit")
+    if _agent_runtime(agent) == "claude":
+        hit = _scan_claude_stdout_usage_limit(paths.stdout_log)
+        if hit:
+            return EarlyFatal("stdout.log", hit, "usage_limit")
+    return None
+
+
+def _scan_fatal(paths: AgentPaths, agent: str) -> EarlyFatal | None:
+    """利用上限以外の致命（理由は `early_error`）。致命 → 警告の見た目の致命の順。"""
+    hit = _scan_early_fatal(paths.err_log)
+    if hit:
+        return EarlyFatal("err.log", hit)
+    if _agent_runtime(agent) == "claude":
+        hit = _scan_claude_stdout_fatal(paths.stdout_log)
+        if hit:
+            return EarlyFatal("stdout.log", hit)
+    return None
+
+
 def _early_error(
     paths: AgentPaths,
     agent: str,
     disabled: bool,
-) -> tuple[tuple[str, str] | None, str | None]:
+) -> tuple[EarlyFatal | None, str | None]:
+    """早期の致命と警告。**照合の順序は利用上限 → 致命 → 警告の見た目の致命。**
+
+    同じ err.log に利用上限と他の致命が並んでいれば理由は `usage_limit` になる（#729 の
+    決定 6）。`disabled`（`--no-early-error`）は利用上限の検知も一緒に無効にする。
+    """
     if disabled:
         return None, None
-    fatal_err = _scan_early_fatal(paths.err_log)
-    fatal_source = "err.log"
-    if not fatal_err and agent == "claude":
-        fatal_err = _scan_claude_stdout_fatal(paths.stdout_log)
-        fatal_source = "stdout.log"
-    fatal = (fatal_source, fatal_err) if fatal_err else None
+    fatal = _scan_usage_limit(paths, agent) or _scan_fatal(paths, agent)
     return fatal, _scan_early_warn(paths.err_log)
 
 
@@ -729,9 +869,9 @@ def _early_error_outcome(
         return None, warning
     if alive:
         _kill_pid(status.pid)
-    source, message = fatal
     return MonitorOutcome.create(
-        "EARLY_ERROR", f"early error (fatal) in {source}: {message[:200]}"
+        "EARLY_ERROR", f"early error (fatal) in {fatal.source}: {fatal.message[:200]}",
+        reason=fatal.reason,
     ), warning
 
 
@@ -746,6 +886,15 @@ def _process_exit_outcome(
             "OK",
             f"process exited; sentinel={status.sentinel_seen}; "
             f"result_exists={status.result_exists}",
+        )
+    # 結果なしの理由を err.log から引く。CLI の上限の文言があれば `cli_timeout`、無ければ
+    # 状態からの既定（`missing`）に落ちる。
+    cli_timeout = _scan_patterns(paths.err_log, CLI_TIMEOUT_AFTER_EXIT)
+    if cli_timeout:
+        return MonitorOutcome.create(
+            "NO_RESULT",
+            f"process exited but result.json missing (CLI timeout): {cli_timeout[:200]}",
+            reason="cli_timeout",
         )
     return MonitorOutcome.create(
         "NO_RESULT", f"process exited but result.json missing: {paths.result}"
@@ -776,11 +925,15 @@ def monitor_agent(
     hard timeout / stall / sentinel / result.json のみで判定する。
     """
     paths, status, started, pid = _initialize_monitor(agent, pr, config.stem_template)
+
+    def finish(outcome: MonitorOutcome) -> AgentStatus:
+        """status とログ文脈を閉じ込めて結末を確定する。終了時のログ文脈を変えるときは
+        ここ 1 か所を直せばよい（各終了分岐が同じ呼び出しを繰り返さない）。"""
+        return _finish_monitor(status, outcome, (config.log_prefix, agent))
+
     if pid is None:
-        return _finish_monitor(
-            status,
+        return finish(
             MonitorOutcome.create("PIDFILE_BAD", f"pidfile not found: {paths.pidfile}"),
-            (config.log_prefix, agent),
         )
 
     status.pid = pid
@@ -805,7 +958,7 @@ def monitor_agent(
 
         # 1. プロセス生存確認 → 死んでいたら最終判定へ (result.json 存在をチェック)
         alive = _pid_alive(pid)
-        if agent == "codex":
+        if _agent_runtime(agent) == "codex":
             status.sentinel_seen = _scan_codex_sentinel(paths.err_log)
 
         # codex は `tokens used` sentinel を出した後もプロセスが exit せず常駐し続ける
@@ -816,9 +969,7 @@ def monitor_agent(
         if alive and (status.sentinel_seen or cmdline_validated):
             completion_detail = _lingering_completion(paths, status, pid, started_wall)
         if completion_detail is not None:
-            return _finish_monitor(
-                status, MonitorOutcome.create("OK", completion_detail), (config.log_prefix, agent)
-            )
+            return finish(MonitorOutcome.create("OK", completion_detail))
 
         # result.json が書かれた後もプロセスがハングするケース (実測:
         # MCP サーバー切断待ち等で exit しない)。sentinel 機構を持たない agent 向け
@@ -831,12 +982,12 @@ def monitor_agent(
             pid, agent, alive, cmdline_validated
         )
         if outcome:
-            return _finish_monitor(status, outcome, (config.log_prefix, agent))
+            return finish(outcome)
 
         # 2. hard timeout
         outcome = _timeout_outcome(elapsed, config.timeout, alive, pid)
         if outcome:
-            return _finish_monitor(status, outcome, (config.log_prefix, agent))
+            return finish(outcome)
 
         # 3. early error
         # 明確な致命 (FATAL) のみ kill する。曖昧パターン (生 Error: / Traceback) は
@@ -844,7 +995,7 @@ def monitor_agent(
         # echo するケースで誤 kill されるのを防ぐ。
         outcome, warn_err = _early_error_outcome(paths, status, alive, config.no_early_error)
         if outcome:
-            return _finish_monitor(status, outcome, (config.log_prefix, agent))
+            return finish(outcome)
         if not warned_early_error and warn_err:
             print(
                 f"{config.log_prefix}⚠️  {agent} early-error WARN "
@@ -855,7 +1006,7 @@ def monitor_agent(
 
         outcome = _process_exit_outcome(paths, status, alive, config.require_result)
         if outcome:
-            return _finish_monitor(status, outcome, (config.log_prefix, agent))
+            return finish(outcome)
 
         # 4. stall detection (err.log / stdout.log / progress.log をモニタ。
         # agy は stdout 側だけ進捗が出るケースがあり、progress.log には
@@ -866,7 +1017,7 @@ def monitor_agent(
         )
         outcome = _stall_outcome(status, config.stall_timeout, pid, last_progress_size)
         if outcome:
-            return _finish_monitor(status, outcome, (config.log_prefix, agent))
+            return finish(outcome)
 
         # poll 中の進捗ログ
         _emit_progress(config.log_prefix, agent, status)
@@ -905,7 +1056,9 @@ def _record_outcome(
     stem = stem_template.format(agent=agent, id=pr)
     try:
         paths = AgentPaths.for_(agent, pr, stem_template)
-        st.reason = monitor_outcome.reason_for(st.status)
+        # 結末が理由を持てばそれを、無ければ状態からの既定を書く（#729 の決定 8）
+        st.reason = (st.outcome.reason if st.outcome and st.outcome.reason
+                     else monitor_outcome.reason_for(st.status))
         st.started_at = started_at
         st.ended_at = monitor_outcome.now_iso()
         try:
@@ -931,6 +1084,10 @@ def _record_outcome(
             # `--phase` の値。省いたときは null（#598 / #537）
             "phase": phase,
         }
+        # 組み立てたキー集合を正本（`monitor_outcome.OUTCOME_KEYS`）と突き合わせる。
+        # キーを片方だけへ足すと、ここで食い違いがその場で落ちる（#662）。
+        assert set(outcome) == set(monitor_outcome.OUTCOME_KEYS), (
+            set(outcome).symmetric_difference(monitor_outcome.OUTCOME_KEYS))
         tmp_dir = paths.pidfile.parent
         monitor_outcome.write_outcome(tmp_dir, stem, outcome)
         monitor_outcome.append_journal(tmp_dir, outcome)
@@ -945,12 +1102,11 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("pr", type=int)
     # 後方互換: cross-review は位置引数 `target` で codex / agy / both を渡す。
-    # 4 ランタイム任意の組み合わせは `--agents` で渡す（どちらか一方だけを使う）。
-    # **担当は 4 つの名前を取りうる。** `both` はこれまでの 2 者を指す省略形として残す
-    # （既存の呼び出し側が使い続けられるようにする）。3 者以上を監視するときは
-    # `--agents` を使う。
-    p.add_argument("target", nargs="?",
-                   choices=["claude", "codex", "agy", "kiro", "both"])
+    # 2 者より多い組み合わせは `--agents` で渡す（どちらか一方だけを使う）。
+    # **担当は席の名前を取りうる**（`claude-2` のような同じランタイムの 2 つ目。#727）。
+    # `both` はこれまでの 2 者を指す省略形として残す（既存の呼び出し側が使い続けられる
+    # ようにする）。3 者以上を監視するときは `--agents` を使う。
+    p.add_argument("target", nargs="?", type=_seat_or_both)
     p.add_argument("--agents", default=None,
                    help="監視対象をカンマ区切りで指定 (例: claude,kiro)。"
                         "位置引数 target の代わりに使う")
@@ -1028,8 +1184,11 @@ def _run_all(
     results: dict[str, AgentStatus] = {}
 
     def run(agent: str) -> None:
-        timeout = limits.monitor_timeout(phase, agent, args.timeout)
-        stall = limits.stall_timeout(agent, args.stall_timeout)
+        # 上限の表と担当別の環境変数はランタイム名で引く。席の名前（`claude-2`）のまま
+        # 渡すと表に無い担当として既定へ落ち、1 席目より早く無進捗と判定される（#727）。
+        runtime = _agent_runtime(agent)
+        timeout = limits.monitor_timeout(phase, runtime, args.timeout)
+        stall = limits.stall_timeout(runtime, args.stall_timeout)
         print(f"[{agent}] ▶ hard timeout {timeout}s / stall {stall}s (phase {phase})",
               file=sys.stderr, flush=True)
         if stall >= timeout:

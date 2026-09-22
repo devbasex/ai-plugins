@@ -11,12 +11,14 @@ from __future__ import annotations
 
 import pathlib
 
-from typing import Any
+from typing import Any, Optional
 
+import assignment
 import statefile
 
-from . import info
+from . import die, info
 from .paths import git_out
+from .vocabulary import MAX_APPLY_ATTEMPTS
 
 # ラウンドの種類。**宣言の無い状態ファイルは構造改善として読む**（この版より前で
 # 始めた実行を、再開の時点でテスト整備へ戻さないため）。
@@ -104,9 +106,13 @@ def apply_groups(entry: dict[str, Any]) -> list[dict[str, Any]]:
     群を持たない状態ファイル（この版より前）は、**ラウンド全体を 1 つの群**として
     読み、その場で記録する。中断から再開したときに、群の単位が実行のたびに
     変わらないようにするためである。
+
+    **鍵が無いときだけ作る。空の配列はそのまま返す。** 採用が 0 件だった提案
+    ラウンドは空の配列を書くため、ここで作ると項目が 1 件も無い群が生まれ、
+    担当を起動し続ける（#592）。
     """
     groups = entry.get("apply_rounds")
-    if groups:
+    if groups is not None:
         return groups
     entry["apply_rounds"] = [{
         "apply_round": 1,
@@ -124,11 +130,56 @@ def apply_groups(entry: dict[str, Any]) -> list[dict[str, Any]]:
 def current_group(entry: dict[str, Any]) -> dict[str, Any]:
     """進行中の適用ラウンド。まだ開いていなければ最初の群を返す。"""
     groups = apply_groups(entry)
+    if not groups:
+        die("このラウンドには適用ラウンド（群）がありません")
     current = entry.get("apply_round") or 1
     for group in groups:
         if group.get("apply_round") == current:
             return group
     return groups[-1]
+
+
+def attempt_of(group: dict[str, Any]) -> int:
+    """群がいま開いている試行の番号。鍵が無ければ 0（まだ開いていない）。"""
+    value = group.get("attempt")
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def group_reopening(group: dict[str, Any]) -> str:
+    """この群をどう扱うか。**中断からの再開と失敗のやり直しを区別する**（#647）。
+
+    | 値 | 意味 |
+    | --- | --- |
+    | `open` | 開いて試行の番号を進める |
+    | `resume` | 開いたまま閉じていない試行を再開する。番号を進めない |
+    | `exhausted` | 上限に達した。開かない |
+    | `empty` | 項目が無い |
+
+    判定に使うのは群が持つ 2 つだけである。開いた回数（`attempt`）と、結末の記録の
+    うち工程が適用のものの件数である。**開いた回数だけを数えない。** 進行側が落ちて
+    再開しただけで試行が進んでしまう。
+    """
+    if not (group.get("items") or []):
+        return "empty"
+    failed = len([
+        record for record in (group.get("failed_attempts") or [])
+        if record.get("phase") == "apply"
+    ])
+    if failed >= MAX_APPLY_ATTEMPTS:
+        return "exhausted"
+    return "resume" if attempt_of(group) > failed else "open"
+
+
+def impl_for_seq(state: dict[str, Any], seq: int) -> tuple[str, Optional[str]]:
+    """輪番の通し番号から、作業を任せる担当と要求するモデルを引く。
+
+    **輪番を引く呼び出しはここだけにする**（#728 の決定 9）。読むのは 4 か所
+    （ラウンドの開始・群の割り当て・結果なしの試行の交代先・最終ゲートの修正担当）
+    である。輪番は参加者の一覧（`runtimes`）の中で回す（#727 の決定 5・7）。この
+    変更の前に始めた実行の状態ファイルも、適用専用の母集合を読まずに同じ一覧で決める。
+    """
+    impl = assignment.impl_assign(seq, list(state["runtimes"]))
+    return impl, (state.get("models") or {}).get(impl)
 
 def phase_after_group(entry: dict[str, Any]) -> str:
     """この群を終えた後のフェーズ。残りの群があれば適用を続ける。"""

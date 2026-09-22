@@ -59,27 +59,28 @@ python3 plugins/ndf/scripts/instructions-check.py --root .
 
 ## cross-refactoring
 
-`/ndf:cross-refactoring` は codex / agy / kiro / claude のうち **ホストを除く 3 者**に構造改善を提案させ、**参加する 4 者**から輪番で選んだ 1 者が適用し、残り 2 者がレビューする。新しい提案が出なくなるまで繰り返す。
+`/ndf:cross-refactoring` は参加者に構造改善を提案させ、同じ参加者から輪番で選んだ 1 者が適用する。新しい提案が出なくなるまで繰り返す。参加者の既定は **codex / kiro とホスト（ホストが codex / kiro なら 2 者）** で、`--exclude` / `--include` で名指しで変える（agy は `--include agy` で戻す）。レビューは最終ゲートの `cross-review` が担う。
 
 ```bash
 /ndf:cross-refactoring 130 --scope src/services --baseline-test "pytest -q"
 /ndf:cross-refactoring 130 --scope src --model codex=gpt-5.5 --model claude=claude-opus-5
+/ndf:cross-refactoring 130 --scope src --include agy --exclude kiro
 ```
 
 - `--scope` は必須。提案が発散して PR が肥大するのを防ぐ。**検証にも効く**ので、現状固定テストの置き場所も含める
 - ホストと同じランタイムが適用担当になる場合も、サブエージェントではなく **CLI プロセス**として起動する
-- モデルを比べるなら `--model <ランタイム>=<name>` を 4 つとも指定する。実際に動いたモデルを取得できるのは claude だけで、残り 3 つは指定値で代用する。指定が無いラウンドは集計から分離される
-- 適用担当は 4 ラウンドで 1 周する。`--max-outer-rounds` の既定が 4 なのは、上限 3 では 4 者目の順番へ届かないため
+- モデルを比べるなら `--model <ランタイム>=<name>` を参加者の全員に指定する。実際に動いたモデルを取得できるのは claude だけで、残りは指定値で代用する。指定が無いラウンドは集計から分離される
+- 適用担当は参加者の数のラウンドで 1 周する。輪番は適用ラウンドごとに進むため、`--max-outer-rounds`（既定 3）が切る提案の回数とは対応しない
 - 収束しない改善項目は **項目単位で取り消す**。合意済みの項目は PR に残る。ただし同一ファイルの隣接行を触る項目どうしは git だけでは分離できないため、そのラウンドは全件取り消しへ退避する
 - 生成物・配布物の同期は **進行側の責務**。実装担当にはさせない（範囲外の変更になる）。同期の手順は `--sync-command "bash scripts/build-runtime-plugins.sh"` のように渡す
 - 公開するのは **進行側だけ**。実装担当は push しない。進行側が検証を通した後に push するので、未検証の変更が公開されない
 - 履歴に残るのは **1 改善項目 = 1 コミット**。現状固定テストが要る項目だけ 2 コミット。テストも項目の単位で 1 回だけ求める
 - 改修計画は `--plan-file`（既定 `issues/refactoring-plan-rf<PR>.md`）へ書き出され、生成物の同期と同じコミットで公開される
-- `init` が参加 CLI の認証状態を確認する。誤検知するときは `NDF_SKIP_AUTH_CHECK=1`
+- `init` が参加者の認証状態を確認し、通らない者を外して続ける。全員が揃わないなら止めたいときは `--require-all`。誤検知するときは `NDF_SKIP_AUTH_CHECK=1`
 
 ## cross-review
 
-`/ndf:cross-review` は codex / agy の両方に PR レビューを委譲し、両者が `APPROVE` するまで修正ループを回す。agy の progress log を heartbeat に表示するため、無言に見える時間でも `scan` / `analyze` / `post` / `done` などの作業段階を確認できる。
+`/ndf:cross-review` はホストを除く 3 つのランタイムのうち使える者から毎ラウンド 2 席を選んで PR レビューを委譲し、両席が `APPROVE` するまで修正ループを回す。使える者が 2 者に満たなければ、ホスト、次に同じランタイムの 2 つ目が席を埋める。agy の progress log を heartbeat に表示するため、無言に見える時間でも `scan` / `analyze` / `post` / `done` などの作業段階を確認できる。
 
 追加レビュー観点は以下のどちらかで渡す:
 
@@ -88,4 +89,4 @@ python3 plugins/ndf/scripts/instructions-check.py --root .
 /ndf:cross-review 123 --extra-instructions-file /tmp/review-focus.md
 ```
 
-PR の変更ファイルから docs only / code / DB migration / test / dependency / CI設定 / API契約 / 認証認可 / frontend / performance / deletion / generated / i18n / infra を自動分類し、該当するレビュー観点テンプレートも codex / agy 両方に渡す。
+PR の変更ファイルから docs only / code / DB migration / test / dependency / CI設定 / API契約 / 認証認可 / frontend / performance / deletion / generated / i18n / infra を自動分類し、該当するレビュー観点テンプレートも両席に渡す。

@@ -121,3 +121,97 @@ def test_the_procedure_points_at_the_contract_document() -> None:
 
 def test_the_skill_points_at_the_contract_document() -> None:
     assert "docs/04-contracts.md" in SKILL.read_text(encoding="utf-8")
+
+
+# ---- 1 者指定のシェル変数で絞らない（#727 の AC30） ----
+#
+# ラウンドの開始が返す担当の一覧は、1 者指定と席の埋め合わせを反映済みである。
+# シェル変数でもう一度絞ると、状態ファイルとシェル変数がずれたときに起動も監視も
+# 誰にも当たらない（設計の決定 17）。1 者指定のシェル変数は初期化へ渡す 1 行にだけ残す。
+
+ONLY_DOCS = (SKILL, PROCEDURE)
+
+
+@pytest.mark.parametrize("doc", ONLY_DOCS, ids=lambda p: p.name)
+def test_the_only_variable_appears_only_where_it_is_passed_to_init(doc: pathlib.Path) -> None:
+    offenders = [
+        f"{doc.name}:{no}: {line.strip()}"
+        for no, line in enumerate(doc.read_text(encoding="utf-8").splitlines(), 1)
+        if "ONLY" in line and "--only" not in line
+    ]
+    assert offenders == [], offenders
+
+
+@pytest.mark.parametrize("doc", ONLY_DOCS, ids=lambda p: p.name)
+def test_the_reviewers_returned_by_the_round_are_used(doc: pathlib.Path) -> None:
+    """起動・監視・取り込み・反証は、ラウンドの開始が返す一覧を使う。"""
+    body = doc.read_text(encoding="utf-8")
+    assert "$REVIEWERS_CSV" in body
+    assert "${ONLY:-" not in body
+
+
+# ---- 区分の 6 つ目「未反証」（#732） ----
+#
+# 誤りを示されていない `major` を `unrefuted` として数える。規約 3 文書・反証のプロンプト・
+# 確定仕様が同じ語で書いていることを固定する（AC18〜AC20）。
+
+CRITIQUE_SH = HERE / "scripts/critique.sh"
+EVIDENCE = DOCS / "06-evidence.md"
+POOL = DOCS / "05-pool-and-convergence.md"
+SPEC = HERE.parents[3] / "docs/specifications/cross-review-evidence-based.md"
+
+
+def test_the_critique_prompt_says_insufficient_evidence_does_not_drop_the_finding() -> None:
+    """「立証できない」を返しても指摘は数から落ちないことを、プロンプトが担当へ言う（AC19）。"""
+    assert "数から落ち" in CRITIQUE_SH.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("doc", (EVIDENCE, CONTRACTS, POOL), ids=lambda p: p.name)
+def test_the_review_docs_name_the_unrefuted_classification(doc: pathlib.Path) -> None:
+    assert "unrefuted" in doc.read_text(encoding="utf-8"), doc.name
+
+
+def test_the_evidence_doc_says_the_mark_is_removed_when_critiques_are_incomplete() -> None:
+    assert "印を外す" in EVIDENCE.read_text(encoding="utf-8")
+
+
+def test_the_specification_holds_the_same_six_classifications() -> None:
+    """区分の表と行き先の表の両方が `unrefuted` を持つ（AC20）。"""
+    assert SPEC.read_text(encoding="utf-8").count("unrefuted") >= 2
+
+
+# ---------- 起動し直しは初回と同じ経路を通る（#583 #730） ----------
+
+
+def _loop() -> str:
+    """骨組みの繰り返し（`while :; do` から `done` まで）。"""
+    text = SKILL.read_text(encoding="utf-8")
+    block = text.split("## 実行ステップ概要（メインの bash 骨組み）", 1)[1]
+    block = block.split("```bash", 1)[1].split("\n```", 1)[0]
+    return block.split("while :; do", 1)[1]
+
+
+@pytest.mark.parametrize("step", [
+    '"$SCRIPTS/launch-reviewer.sh"',
+    '"$SCRIPTS/state.py" read-result',
+    '"$SCRIPTS/state.py" verify-findings',
+    '"$SCRIPTS/critique-round.sh"',
+])
+def test_each_step_of_a_review_is_written_once(step: str) -> None:
+    """起動し直しの枝が自分の起動・取り込みを持たない。経路は 1 本である（AC18）。
+
+    枝が別に持つと、根拠の検証と反証を飛ばして 2 度目の判定へ進む。
+    """
+    assert _loop().count(step) == 1, step
+
+
+def test_the_relaunch_goes_back_to_the_head_of_the_review() -> None:
+    loop = _loop()
+    relaunch = loop.index('"$JUDGE_RC" -eq 7')
+    assert "continue" in loop[relaunch:loop.index("done", relaunch)]
+
+
+def test_the_queue_branch_is_seen_before_the_relaunch() -> None:
+    """待ち行列に残りがあるときの枝は、各判定の直後、7 より先に見る（AC19）。"""
+    loop = _loop()
+    assert loop.index('"$JUDGE_RC" -eq 8') < loop.index('"$JUDGE_RC" -eq 7')

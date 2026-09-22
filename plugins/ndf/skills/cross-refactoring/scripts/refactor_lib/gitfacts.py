@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
 import shutil
 import signal
 import subprocess
@@ -15,6 +16,7 @@ from typing import Any, Optional
 
 import models as models_lib
 import statefile
+from monitor_outcome import LaunchOutcome, read_launch_outcome
 
 from . import die, info
 from .paths import git_out, sh, stem_for
@@ -97,14 +99,49 @@ def commit_trailers(work: str, sha: str) -> dict[str, str]:
 
     **結果ファイルの `trailers` は使わない。** JSON 上は仕様どおりでも、実際の
     `git commit` でトレーラーを書き忘れていれば集計に使えない。
+
+    **末尾の段落から前へ 1 段落ずつ読む**（#553）。実行環境が帰属の段落を後ろへ
+    足すと、git の標準の読み方は最後の段落しか見ないため必須の記名が読めなくなる。
+    トレーラーの段落と判定しなかった段落で止めるので、散文の中にある記名の形の行は
+    拾わない。同じ鍵が 2 つの段落にあれば、末尾に近い段落の値を採る。
+
+    **1 段落目（題名）は掛けない。** 掛けると `Round: 本文の題名` の形の題名を
+    トレーラーとして読む。
     """
-    out = git_out(work, ["log", "-1", "--format=%(trailers:only,unfold)", sha])
+    body = git_out(work, ["log", "-1", "--format=%B", sha], strip=False)
+    paragraphs = re.split(r"\n[ \t]*\n", (body or "").strip("\n"))
     trailers: dict[str, str] = {}
-    for line in (out or "").splitlines():
+    for paragraph in reversed(paragraphs[1:]):
+        parsed = _parse_trailer_paragraph(paragraph)
+        if not parsed:
+            break
+        for key, value in parsed.items():
+            trailers.setdefault(key, value)
+    return trailers
+
+
+def _parse_trailer_paragraph(paragraph: str) -> dict[str, str]:
+    """1 つの段落を git の判定に掛け、トレーラーの段落なら鍵と値を返す。
+
+    **題名の行を補って渡す。** git はメッセージの 1 行目を題名として読むため、
+    段落だけを渡すと何も返らない（git 2.53.0 で実測）。判定そのものは git に委ね、
+    「何行以上なら記名の段落か」といった規則をこちら側に持たない。
+    """
+    if not paragraph.strip():
+        return {}
+    result = subprocess.run(
+        ["git", "interpret-trailers", "--parse"],
+        input=f"subject\n\n{paragraph}\n",
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        return {}
+    parsed: dict[str, str] = {}
+    for line in result.stdout.splitlines():
         key, sep, value = line.partition(":")
         if sep:
-            trailers[key.strip()] = value.strip()
-    return trailers
+            parsed[key.strip()] = value.strip()
+    return parsed
 
 
 def commit_diff_lines(work: str, sha: str) -> int:
@@ -372,6 +409,43 @@ def resolved_threads_on_github(repo: str, pr: int) -> Optional[set[str]]:
 CHECK_RUNS_PER_PAGE = 100
 
 
+def _parse_check_runs(raw_json: Optional[str]) -> Optional[list[dict[str, Any]]]:
+    """API 出力から check_runs のリストを検証して返す。"""
+    if not raw_json:
+        return None
+    try:
+        body = json.loads(raw_json)
+    except json.JSONDecodeError:
+        return None
+    runs = body.get("check_runs") if isinstance(body, dict) else None
+    if not isinstance(runs, list):
+        return None
+    return [r for r in runs if isinstance(r, dict)]
+
+
+def _filter_check_runs_by_name(
+    runs: list[dict[str, Any]], name: str
+) -> list[dict[str, Any]]:
+    """名前が一致する run を選別する。"""
+    return [
+        r for r in runs
+        if str(r.get("name") or "") == name
+    ]
+
+
+def _aggregate_check_run_results(matched: list[dict[str, Any]]) -> Optional[str]:
+    """matched runs を pending・失敗結論・success の順で集約する。"""
+    if not matched:
+        return None
+    if any(str(r.get("status") or "").lower() != "completed" for r in matched):
+        return "pending"
+    for run in matched:
+        conclusion = str(run.get("conclusion") or "").lower()
+        if conclusion != "success":
+            return conclusion or "unknown"
+    return "success"
+
+
 def check_run_result(repo: str, sha: str, name: str) -> Optional[str]:
     """名前が一致した検査ジョブの結果を 1 つの語で返す。
 
@@ -390,28 +464,11 @@ def check_run_result(repo: str, sha: str, name: str) -> Optional[str]:
                       f"?per_page={CHECK_RUNS_PER_PAGE}"],
         check=False,
     )
-    if not out:
+    runs = _parse_check_runs(out)
+    if runs is None:
         return None
-    try:
-        body = json.loads(out)
-    except json.JSONDecodeError:
-        return None
-    runs = body.get("check_runs") if isinstance(body, dict) else None
-    if not isinstance(runs, list):
-        return None
-    matched = [
-        r for r in runs
-        if isinstance(r, dict) and str(r.get("name") or "") == name
-    ]
-    if not matched:
-        return None
-    if any(str(r.get("status") or "").lower() != "completed" for r in matched):
-        return "pending"
-    for run in matched:
-        conclusion = str(run.get("conclusion") or "").lower()
-        if conclusion != "success":
-            return conclusion or "unknown"
-    return "success"
+    matched = _filter_check_runs_by_name(runs, name)
+    return _aggregate_check_run_results(matched)
 
 
 def revert_item_commits(
@@ -448,40 +505,6 @@ def revert_item_commits(
     _revert_range(work, shas, before, prefix=f"{item['item_id']} の")
     item["reverted"] = True
     return len(shas)
-
-
-def revert_unverified_range(
-    path: pathlib.Path,
-    state: dict[str, Any],
-    entry: dict[str, Any],
-    ordered_range: list[str],
-    label: str,
-) -> None:
-    """検証を通らない範囲を取り消し、`entry` の起点を取り消し後の HEAD へ進める。
-
-    `entry` は**修正の控えを持つ辞書**である。適用ラウンドの控え（`rounds[]` の
-    要素）と最終ゲートの控え（`final_gate`）の両方が同じ 3 つの鍵
-    （`pending_push` / `fix_base_sha`）を持つため、どちらからも呼べる。
-    `label` は取り消しの単位を人が読むための名前で、git の操作には効かない。
-    """
-    work = state["worktrees"]["work"]
-    # **状態へ記録する前に取り消す。** 先に記録すると、取り消し済みのコミットが
-    # 状態ファイルに残り、後の見送り処理が同じコミットをもう一度取り消そうとする。
-    info("検証を通らない変更を残さないため、この修正ラウンドの範囲を取り消します")
-    # **取り消しへ着手する前に印を立てる。** 取り消しは済んだのに push できずに
-    # 終わると、未検証の変更が Pull Request に残ったままになる。
-    entry["pending_push"] = True
-    statefile.save(path, state)
-    revert_item_commits(
-        state,
-        {"item_id": label, "commits": list(ordered_range)},
-        dry_run=False,
-    )
-    # 取り消し後の状態を新しい起点にし、**その場で保存する**。ここで保存せずに
-    # 落ちると、次の実行は古い起点から範囲を取り直して取り消しコミット自体を
-    # 「未申告」と判定し、**取り消しを取り消して**しまう。
-    entry["fix_base_sha"] = git_out(work, ["rev-parse", "HEAD"])
-    statefile.save(path, state)
 
 
 def _reset_hard(work: str, sha: Optional[str]) -> None:
@@ -672,6 +695,22 @@ def _record_drop_result(
             "reverted": len(ordered), "replayed": len(mapping)}
 
 
+def _drop_legacy_by_item(
+    state: dict[str, Any], pending: list[str], dry_run: bool = False,
+) -> dict[str, Any]:
+    """起点を記録していない状態ファイル（旧版）で、項目のコミットだけを戻す。
+
+    積み直しの起点（`apply_base_sha`）が無いため範囲を確定できない。従来どおり
+    項目のコミットを新しい順に取り消すだけで、残す項目の積み直しは行わない。
+    """
+    info("⚠ 適用の範囲を確定できないため、項目のコミットだけを取り消します")
+    reverted = 0
+    for item_id in pending:
+        reverted += revert_item_commits(state, find_item(state, item_id), dry_run)
+    return {"mode": "item", "dropped": pending,
+            "reverted": reverted, "replayed": 0}
+
+
 def drop_items(
     state: dict[str, Any], entry: dict[str, Any], drop_ids: list[str],
     dry_run: bool = False,
@@ -704,13 +743,7 @@ def drop_items(
     ordered = commits_in_range(work, entry.get("apply_base_sha"), head or "HEAD")
     if ordered is None:
         # 起点を記録していない状態ファイル（旧版）では積み直せない。
-        # 従来どおり項目のコミットだけを新しい順に戻す。
-        info("⚠ 適用の範囲を確定できないため、項目のコミットだけを取り消します")
-        reverted = 0
-        for item_id in pending:
-            reverted += revert_item_commits(state, find_item(state, item_id), dry_run)
-        return {"mode": "item", "dropped": pending,
-                "reverted": reverted, "replayed": 0}
+        return _drop_legacy_by_item(state, pending, dry_run)
 
     owner, keep_ids, replay = _drop_replay_plan(state, entry, pending, ordered)
 
@@ -1079,33 +1112,29 @@ def find_item(
     return None
 
 
-def read_result(path: pathlib.Path, runtime: str) -> dict[str, Any]:
-    """結果ファイルを読む。**JSON オブジェクトでなければ失敗させる。**
+def read_result(
+    state: dict[str, Any], runtime: str, phase: str, round_no: Optional[int] = None
+) -> LaunchOutcome:
+    """起動 1 回の結末を読む。**失敗しない。**
 
-    配列や数値が返ってきたまま呼び出し側へ渡すと、`payload.get(...)` で
-    `AttributeError` になって進行が止まる。読み込みの時点で弾く。
+    結果ファイルの名前の幹をここで 1 度だけ組み、共通層（`read_launch_outcome`）へ
+    渡す。3 つの取り込みが同じ組み立てを通るため、監視へ渡した名前の雛形
+    （`--stem-template`）と食い違う幹で読むことがない。
+
+    **中断も出力もしない。** 結果を読めなかったときに何をするかは、読んだ側
+    （取り込み）が終了コードとして決める。ここで `die` すると、未検証のコミットが
+    取り消されないまま残る（#728）。
     """
-    if not path.exists():
-        die(f"{runtime} の結果ファイルがありません: {path}", code=2)
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as e:
-        die(f"{runtime} の結果ファイルが JSON として読めません: {e}", code=2)
-        raise SystemExit(2)
-    if not isinstance(payload, dict):
-        die(
-            f"{runtime} の結果ファイルが JSON オブジェクトではありません"
-            f"（{type(payload).__name__}）: {path}",
-            code=2,
-        )
-    return payload
+    return read_launch_outcome(
+        state["tmp_dir"], stem_for(runtime, phase, state["id"], round_no)
+    )
 
 
 def record_observed_model(
-    entry: dict[str, Any], role: str, runtime: str,
+    entry: dict[str, Any], runtime: str,
     state: dict[str, Any], phase: str, round_no: Optional[int],
 ) -> None:
-    """CLI の出力から実際に使われたモデル名を拾って記録する。
+    """実装担当の CLI の出力から、実際に使われたモデル名を拾って記録する。
 
     取れるのは claude だけである。取れないランタイムは `None` のままにし、
     報告では既定モデルのラウンドとして集計から区別する。
@@ -1119,13 +1148,8 @@ def record_observed_model(
     )
     if not observed:
         return
-    if role == "impl":
-        entry["impl_model"]["observed"] = observed
-        requested = entry["impl_model"]["requested"]
-    else:
-        entry["reviewer_models"].setdefault(runtime, {"requested": None, "observed": None})
-        entry["reviewer_models"][runtime]["observed"] = observed
-        requested = entry["reviewer_models"][runtime]["requested"]
+    entry["impl_model"]["observed"] = observed
+    requested = entry["impl_model"]["requested"]
     warning = models_lib.mismatch_warning(runtime, requested, observed)
     if warning:
         info(warning)

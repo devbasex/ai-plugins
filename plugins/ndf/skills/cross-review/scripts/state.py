@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
+import functools
 import json
 import os
 import pathlib
@@ -34,7 +35,15 @@ sys.path.insert(
 import assignment  # noqa: E402
 import auth  # noqa: E402
 import post_queue  # noqa: E402
+import statefile  # noqa: E402  再開の反映（#727 / #648）
 import run_metrics  # noqa: E402  実行の要約（#662）
+import monitor_outcome  # noqa: E402  起動 1 回の結末（#729）
+import result_posts  # noqa: E402  結果ファイルを投稿へ変える層（#730）
+
+# 区分の定義は scripts 配下の共有モジュールに 1 か所だけ置く（#156、#732）。
+# `measure.py` も同じ定義を読み、両者の一致は `test_measure.py` が固定する。
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from classifications import COUNTED_CLASSIFICATIONS  # noqa: E402
 
 
 # ---------------- helpers ----------------
@@ -1402,6 +1411,33 @@ def _pending_posts(pr: int) -> int:
     return _queue(pr).count()
 
 
+def _flushed_review(item: dict[str, Any]) -> tuple[Any, Any, str] | None:
+    """待ち行列の項目から、確認するレビューの担当・ラウンド・URL を得る。"""
+    if item.get("kind") != "review-post":
+        return None
+    extra = item.get("extra") or {}
+    agent, round_no = extra.get("agent"), extra.get("round")
+    if not (agent and round_no):
+        return None
+    response = item.get("response")
+    response = response if isinstance(response, dict) else {}
+    url = str(response.get("html_url") or "")
+    if not url and response.get("id"):
+        url = f"#pullrequestreview-{response['id']}"
+    return agent, round_no, url
+
+
+def _flushed_review_target(
+        state: dict[str, Any], agent: Any, round_no: Any) -> dict[str, Any] | None:
+    """レビューを積んだラウンドから、担当の書き戻し先を探す。"""
+    return next(
+        (entry for entry in state.get("rounds", [])
+         if entry.get("round") == round_no
+         and isinstance(entry.get(agent), dict)),
+        None,
+    )
+
+
 def _confirm_flushed(pr: int, item: dict[str, Any]) -> None:
     """流した直後に、投稿が届いたことを 1 度だけ確かめる。
 
@@ -1415,24 +1451,14 @@ def _confirm_flushed(pr: int, item: dict[str, Any]) -> None:
     確認を促す側にも働かない**（判定は `queued` を見て照会を飛ばす）。共通層が
     見つけた投稿を `response` として渡すため、どちらも同じ経路で確かめられる。
     """
-    if item.get("kind") != "review-post":
+    review = _flushed_review(item)
+    if review is None:
         return
-    extra = item.get("extra") or {}
-    agent, round_no = extra.get("agent"), extra.get("round")
-    if not (agent and round_no):
-        return
-    resp = item.get("response") if isinstance(item.get("response"), dict) else {}
-    url = str(resp.get("html_url") or "")
-    if not url and resp.get("id"):
-        url = f"#pullrequestreview-{resp['id']}"
+    agent, round_no, url = review
     st = _load(pr)
     # **書き戻す先は、その項目が属するラウンドである。** 積んだラウンドと流した
     # ラウンドが同じとは限らないため、最後のラウンドへ書かない。
-    target = next(
-        (e for e in st.get("rounds", [])
-         if e.get("round") == round_no and isinstance(e.get(agent), dict)),
-        None,
-    )
+    target = _flushed_review_target(st, agent, round_no)
     if target is None:
         return
     exists = _review_exists(str(st.get("repo") or ""),
@@ -1464,8 +1490,9 @@ def _auto_flush(pr: int) -> None:
     実行していない場合に流れない。明示だけだと、進行側が忘れたときに待ち行列が残った
     まま収束の判定へ進む。流せなくても工程は止めない。
 
-    **入口は、書き戻し先が揃っている場所だけである。** 取り込み（`read-result`）の
-    入口では、そのラウンドの担当のエントリがまだ無い。詳細は `cmd_read_result` にある。
+    **入口は、書き戻し先が揃っている場所だけである。** 積むのは取り込み
+    （`read-result`）だけで、積んだ時点でその担当の記録を書くため、流す時点では
+    書き戻し先が揃っている。
     """
     q = _queue(pr)
     if not q.count():
@@ -1506,51 +1533,122 @@ def cmd_flush(args: argparse.Namespace) -> None:
         info(f"✅ 待ち行列は空です（送った {len(result.sent)} 件）")
 
 
-def _print_init_result(
-    pr: object,
-    worktree: object,
-    tmp_dir: object,
-    repo: object,
-    head_branch: object,
-    base_branch: object,
-    is_own: bool,
-    event_downgrade: bool,
-    has_extra: bool,
-    carried_count: int,
-    resumed: bool,
-) -> None:
+class _InitResult(NamedTuple):
+    """cmd_init が標準出力の機械可読ブロックへ書く初期化結果。
+
+    再開経路と新規経路が同じ組を渡すため、位置引数の並びではなく名前付きの
+    フィールドで受け渡す。
+    """
+
+    pr: object
+    worktree: object
+    tmp_dir: object
+    repo: object
+    head_branch: object
+    base_branch: object
+    is_own: bool
+    event_downgrade: bool
+    has_extra: bool
+    carried_count: int
+    resumed: bool
+
+
+def _print_init_result(result: _InitResult) -> None:
     """cmd_init の 2 経路（再開・新規）が共有する末尾の出力ブロック。
 
     出力形式は再開側・新規側で同一のため 1 箇所へ寄せる。PR 番号だけは
     元の両分岐に合わせて quote しない（数値のため）。
     """
-    print(f"PR={pr}")
-    print(f'WORKTREE={shlex.quote(str(worktree))}')
-    print(f'TMP_DIR={shlex.quote(str(tmp_dir))}')
-    print(f'REPO={shlex.quote(str(repo))}')
-    print(f'HEAD_BRANCH={shlex.quote(str(head_branch))}')
-    print(f'BASE_BRANCH={shlex.quote(str(base_branch))}')
-    print(f"IS_OWN_PR={'1' if is_own else '0'}")
-    print(f"EVENT_DOWNGRADE={'1' if event_downgrade else '0'}")
-    print(f"HAS_EXTRA_REVIEW_INSTRUCTIONS={'1' if has_extra else '0'}")
-    print(f"CARRIED_OVER_THREADS={carried_count}")
-    print(f"RESUMED={'1' if resumed else '0'}")
+    print(f"PR={result.pr}")
+    print(f'WORKTREE={shlex.quote(str(result.worktree))}')
+    print(f'TMP_DIR={shlex.quote(str(result.tmp_dir))}')
+    print(f'REPO={shlex.quote(str(result.repo))}')
+    print(f'HEAD_BRANCH={shlex.quote(str(result.head_branch))}')
+    print(f'BASE_BRANCH={shlex.quote(str(result.base_branch))}')
+    print(f"IS_OWN_PR={'1' if result.is_own else '0'}")
+    print(f"EVENT_DOWNGRADE={'1' if result.event_downgrade else '0'}")
+    print(f"HAS_EXTRA_REVIEW_INSTRUCTIONS={'1' if result.has_extra else '0'}")
+    print(f"CARRIED_OVER_THREADS={result.carried_count}")
+    print(f"RESUMED={'1' if result.resumed else '0'}")
 
 
-def _resume_from_state(
-    pr: object,
-    repo: str,
-    worktree: str,
-    manual_extra_review: str,
-) -> bool:
-    """既存 state からの再開経路。
+# 再開で渡した引数の反映の表（#727 / #648 の決定 13）。**状態ファイルに載る引数は、
+# この表のどちらかに必ず載る。** 載らないのは状態に載らない 3 つ（作業ツリー・観点・
+# 追加指示のファイル）だけである。`replace` は状態へ書いて記録へ積み、`notify` は
+# 状態と違うときだけ「反映しない」と知らせる。
+REVIEW_RESUME_FIELDS = (
+    statefile.ResumeField("max_rounds", "max_rounds", "replace"),
+    statefile.ResumeField("rotate_after", "rotate_after", "replace"),
+    statefile.ResumeField("only", "only", "replace"),
+    statefile.ResumeField("verify_command", "verify_commands", "replace"),
+    statefile.ResumeField("verify_exit_code", "verify_exit_codes", "replace"),
+    statefile.ResumeField("host", "host", "notify"),
+)
 
-    再開に該当し出力まで済ませたら True、該当する state が無ければ False を返す。
-    False のとき cmd_init は新規 init へ進む。
+# 参加者を作り直す引数（決定 14）。どれかを渡した再開だけが確認をやり直す。
+PARTICIPANT_ARGS = ("only", "include", "exclude", "require_all")
+
+
+def _apply_resume_args_block(st: dict[str, Any], args: argparse.Namespace) -> bool:
+    """再開で渡した引数を状態へ反映し、何か変えたら True を返す（#727 / #648）。
+
+    担当に関わる引数（`--only` / `--include` / `--exclude` / `--require-all`）を渡した
+    ときだけ、**渡さなかった引数を状態ファイルの値で補って**使える者の解決をやり直す
+    （決定 14）。作り直しの失敗は状態を書き換える前に起きる（`_resolve_reviewers` を
+    先に呼び、通ってから `st` を書く）。
     """
-    # 再開チェック: CROSS_REVIEW_TMP_DIR が設定されている場合はそちらを優先し、
-    # 未設定なら <worktree>/.cross_review/ を直接パスとして組む。
-    # _tmp_dir() は mkdir 副作用があるため使用せず、パス解決のみ行う。
+    only, include, exclude = _normalize_participant_args(args)
+    before = len(st.get("resume_changes") or [])
+
+    # **`--only none` はここで処理する。** 正規化した `None` を表へ渡すと「未指定」と
+    # 区別できず、指定を外す操作が黙って捨てられる（決定 15）。
+    args_copy = argparse.Namespace(**vars(args))
+    args_copy.only = only
+    if getattr(args, "only", None) == NONE_WORD:
+        args_copy.only = None
+        if st.get("only") is not None:
+            old = st.get("only")
+            st["only"] = None
+            st.setdefault("resume_changes", []).append(
+                {"at": statefile.now(), "field": "only", "from": old, "to": None})
+            info(f"↻ only: {old} → None")
+
+    for line in statefile.apply_resume_args(st, args_copy, REVIEW_RESUME_FIELDS):
+        info(line)
+
+    if any(getattr(args, name, None) is not None for name in PARTICIPANT_ARGS):
+        old_participants = st.get("participants")
+        recorded = old_participants or {}
+        try:
+            host = st.get("host") or assignment.detect_host(getattr(args, "host", None))[0]
+        except assignment.AssignmentError as e:
+            die(str(e), code=1)
+            raise
+        rebuild = argparse.Namespace(
+            only=st.get("only"),
+            include=include if include is not None else list(recorded.get("included") or []),
+            exclude=exclude if exclude is not None else list(recorded.get("excluded") or []),
+            require_all=(args.require_all if getattr(args, "require_all", None) is not None
+                         else bool(recorded.get("require_all"))),
+        )
+        participants = _resolve_reviewers(host, rebuild)
+        st["participants"] = participants
+        st.setdefault("resume_changes", []).append(
+            {"at": statefile.now(), "field": "participants",
+             "from": old_participants, "to": participants})
+
+    return len(st.get("resume_changes") or []) > before
+
+
+def _find_resumable_state(
+    pr: object, worktree: str,
+) -> tuple[dict[str, Any], pathlib.Path] | None:
+    """既存 state を探し、再開できるものだけを (state, path) で返す。
+
+    再開に該当しなければ `None`。**探索の入口は `_tmp_dir()` を使わない**（mkdir の
+    副作用でパスが作られてしまう）。`CROSS_REVIEW_TMP_DIR` があればそれを、無ければ
+    `<worktree>/.cross_review/` を直接組む。`final` が確定した state は再開しない。
+    """
     env_tmp = os.environ.get("CROSS_REVIEW_TMP_DIR")
     if env_tmp:
         resume_dir = pathlib.Path(env_tmp).resolve()
@@ -1558,11 +1656,27 @@ def _resume_from_state(
         resume_dir = pathlib.Path(worktree) / ".cross_review"
     resume_state_file = resume_dir / f"cross-review-pr{pr}-state.json"
     if not resume_state_file.exists():
-        return False
+        return None
     st = json.loads(resume_state_file.read_text(encoding="utf-8"))
     if st.get("final") is not None:
-        return False
+        return None
+    return st, resume_state_file
+
+
+def _refresh_resume_state(
+    st: dict[str, Any], pr: object, repo: str, manual_extra_review: str,
+    args: argparse.Namespace,
+) -> bool:
+    """再開する state を最新化し、書き換えたかどうかを返す。
+
+    旧形式の補完・manual 指示の反映・`review_instructions` の再計算・引き継ぎの記録を
+    行う。**保存はしない**（呼び出し側が変更有無を見て 1 度だけ書く）。
+    """
     state_changed = False
+    # 再開で渡した引数の反映（#727 / #648）。状態ファイルを読んだ直後に行い、
+    # 作り直しの失敗はここで終了コードへ出る（以降の書き込みへ進まない）。
+    if _apply_resume_args_block(st, args):
+        state_changed = True
     if "auto_review_instructions" not in st:
         changed_files = _fetch_changed_files(pr, st.get("repo") or repo)
         categories = _classify_changed_files(changed_files)
@@ -1586,37 +1700,67 @@ def _resume_from_state(
     # 再開した時点で残っている未解決の指摘を引き継ぎとして記録する。
     if _record_carried_over(st, st.get("repo") or repo, st.get("current_pr") or pr):
         state_changed = True
-    if state_changed:
-        _write_state(resume_state_file, st)
-        info("↻ 追加レビュー観点を state に反映して再開")
-    # 待ち行列を流すのは、手元の `st` を書き戻した**後**である。流した結果
-    # （`queued` の解除と、届かなかった投稿の結果なし）は `_confirm_flushed` が
-    # 状態ファイルへ直接書く。先に流すと、この関数がその後に書き戻す古い `st` が
-    # それらを消す。再開の入口で流すこと自体は変えないため、回復した後の
-    # 1 本目のコマンドで届く。
-    # 渡すのは状態ファイルの鍵（`args.pr`）で、`current_pr` ではない。待ち行列も
-    # 状態ファイルも鍵で引くため、巻き直しの後に `current_pr` を渡すと引けない。
+    return state_changed
+
+
+def _sync_resume_worktree(st: dict[str, Any], pr: object, worktree: str) -> pathlib.Path:
+    """保存後の副作用（待ち行列の flush → tmp_dir 解決 → 作業ツリー同期）を順に行う。
+
+    順序に意味がある:
+    1. **待ち行列を流すのは、手元の `st` を書き戻した後である。** 流した結果
+       （`queued` の解除と、届かなかった投稿の結果なし）は `_confirm_flushed` が
+       状態ファイルへ直接書く。先に流すと、この後の書き戻しが古い `st` でそれらを
+       消す。渡すのは状態ファイルの鍵（`args.pr`）で、`current_pr` ではない。
+    2. `tmp_dir` を解決して返す（`_print_init_result` が使う）。
+    3. **再開でも同期する。** 中断から再開までの間に head が進んでいることがあり、
+       そのまま次のラウンドを回すと古い差分をレビューさせる。
+    """
     _auto_flush(pr)
     tmp_dir = _tmp_dir(worktree)
     wt = st.get("worktree_path") or ""
-    # 再開でも同期する。中断から再開までの間に head が進んでいることがあり、
-    # そのまま次のラウンドを回すと古い差分をレビューさせる。
     resume_head = str(st.get("head_branch") or "")
     if wt and resume_head and _is_registered_worktree(str(wt)):
         _sync_worktree(str(wt), int(st.get("current_pr") or pr), resume_head)
+    return tmp_dir
+
+
+def _resume_from_state(
+    pr: object,
+    repo: str,
+    worktree: str,
+    manual_extra_review: str,
+    args: argparse.Namespace,
+) -> bool:
+    """既存 state からの再開経路。
+
+    再開に該当し出力まで済ませたら True、該当する state が無ければ False を返す。
+    False のとき cmd_init は新規 init へ進む。
+    """
+    found = _find_resumable_state(pr, worktree)
+    if found is None:
+        return False
+    st, resume_state_file = found
+
+    if _refresh_resume_state(st, pr, repo, manual_extra_review, args):
+        _write_state(resume_state_file, st)
+        info("↻ 追加レビュー観点を state に反映して再開")
+
+    tmp_dir = _sync_resume_worktree(st, pr, worktree)
     info(f"↻ 前回中断 state から再開（round={len(st.get('rounds', []))}）")
     _print_init_result(
-        st["current_pr"],
-        wt,
-        tmp_dir,
-        st.get("repo") or "",
-        st.get("head_branch") or "",
-        st.get("base_branch") or "",
-        bool(st.get("is_own_pr")),
-        bool(st.get("event_downgrade")),
-        bool(st.get("review_instructions")),
-        (st.get("carried_over") or {}).get("count", 0),
-        True,
+        _InitResult(
+            pr=st["current_pr"],
+            worktree=st.get("worktree_path") or "",
+            tmp_dir=tmp_dir,
+            repo=st.get("repo") or "",
+            head_branch=st.get("head_branch") or "",
+            base_branch=st.get("base_branch") or "",
+            is_own=bool(st.get("is_own_pr")),
+            event_downgrade=bool(st.get("event_downgrade")),
+            has_extra=bool(st.get("review_instructions")),
+            carried_count=(st.get("carried_over") or {}).get("count", 0),
+            resumed=True,
+        )
     )
     return True
 
@@ -1641,7 +1785,7 @@ def cmd_init(args: argparse.Namespace) -> None:
     # worktree ディレクトリが副作用で作成され exists() が常に true になる。
     # そのため _tmp_dir() 呼び出しは worktree 作成/確認の後に行う。
 
-    if _resume_from_state(pr, repo, worktree, manual_extra_review):
+    if _resume_from_state(pr, repo, worktree, manual_extra_review, args):
         return
 
     _init_new_state(args, pr, repo, worktree, manual_extra_review)
@@ -1672,6 +1816,7 @@ class _InitWorkspaceContext(NamedTuple):
 class _InitialAssignment(NamedTuple):
     host: str
     host_source: str
+    participants: dict[str, Any]
 
 
 class _InitialStateContext(NamedTuple):
@@ -1789,27 +1934,30 @@ def _init_new_state(
         except assignment.AssignmentError as e:
             die(str(e))
             raise
-        reviewers = assignment.review_pool(host)
-        info(f"ホスト: {host}（{host_source}） / レビュワーの母集合: {' / '.join(reviewers)}")
-        _validate_only(args.only, host)
-        # 未認証の CLI は起動から短時間で終わり、結果を残さないまま担当から欠ける。
-        # **確かめるのは実際に起動する担当だけである。**
-        auth.check_auth(_auth_targets(args.only, host), info=info, die=lambda m: die(m))
-        return _InitialAssignment(host=host, host_source=host_source)
+        info(f"ホストの判定: {host}（{host_source}）")
+        # 使える者の解決は共通層が持つ（#727）。通らない者は外して続け、席が 2 つに
+        # 満たなければホストで埋め合わせる。名前の矛盾と 0 者は終了コード 1。
+        participants = _resolve_reviewers(host, args)
+        return _InitialAssignment(
+            host=host, host_source=host_source, participants=participants)
 
     def _build_initial_review_state(
         args: argparse.Namespace,
         ctx: _InitialStateContext,
     ) -> dict[str, Any]:
         """確定済みの材料から、副作用なしに初期状態を組み立てる。"""
-        host, host_source = ctx.assignment
+        host, host_source, participants = ctx.assignment
+        only, _include, _exclude = _normalize_participant_args(args)
         return {
             "started_at": _now(),
             "host": host,
             "host_source": host_source,
-            "max_rounds": args.max_rounds,
-            "rotate_after": args.rotate_after,
-            "only": args.only,
+            # 引数の既定は未指定（`None`）で、新規の経路がここで定数を置く（決定 13）
+            "max_rounds": args.max_rounds if args.max_rounds is not None else 12,
+            "rotate_after": args.rotate_after if args.rotate_after is not None else 8,
+            "only": only,
+            "participants": participants,
+            "resume_changes": [],
             "current_pr": ctx.pr,
             "worktree_path": ctx.pr_ctx.worktree,
             "tmp_dir": str(ctx.ws_ctx.tmp_dir),
@@ -1854,17 +2002,19 @@ def _init_new_state(
         _write_state(ws_ctx.state_file, state)
         info(f"✅ state 初期化: {ws_ctx.state_file}")
         _print_init_result(
-            pr,
-            pr_ctx.worktree,
-            ws_ctx.tmp_dir,
-            pr_ctx.repo,
-            pr_ctx.meta.head_branch,
-            pr_ctx.meta.base_branch,
-            pr_ctx.is_own,
-            pr_ctx.event_downgrade,
-            bool(review_ctx.review_instructions),
-            0,
-            False,
+            _InitResult(
+                pr=pr,
+                worktree=pr_ctx.worktree,
+                tmp_dir=ws_ctx.tmp_dir,
+                repo=pr_ctx.repo,
+                head_branch=pr_ctx.meta.head_branch,
+                base_branch=pr_ctx.meta.base_branch,
+                is_own=pr_ctx.is_own,
+                event_downgrade=pr_ctx.event_downgrade,
+                has_extra=bool(review_ctx.review_instructions),
+                carried_count=0,
+                resumed=False,
+            )
         )
 
     pr_ctx = _resolve_pr_and_ownership(pr, repo, worktree, args.worktree)
@@ -1891,56 +2041,164 @@ NO_RESULT = "NO_RESULT"
 
 
 def _round_reviewers(st: dict[str, Any], round_no: int) -> list[str]:
-    """そのラウンドのレビュー担当を返す。
+    """そのラウンドのレビュー担当（席の名前）を返す。
 
-    **先に当たったものを採る。** ラウンドに記録があればそれを、無ければホストからの
-    輪番を、ホストも無ければこれまでの 2 者を返す。
+    **先に当たったものを採る**（設計の決定 11）。ラウンドの記録を 1 者指定より先に
+    見るのは、再開で 1 者指定を変えても過去のラウンドの担当が変わらないようにする
+    ためである。
 
-    | 状態 | 返る担当 |
-    | --- | --- |
-    | ラウンドに `reviewers` がある | その値 |
-    | 状態ファイルに `host` がある | `assignment.review_assign(round_no, host)` |
-    | どちらも無い（古い状態ファイル） | `LEGACY_AGENTS` |
+    | 順 | 状態 | 返る担当 |
+    | ---: | --- | --- |
+    | 1 | ラウンドに `reviewers` がある | その値 |
+    | 2 | `only` がある | `[only]` |
+    | 3 | `participants` がある | `assignment.review_seats(round_no, available, fallback)` |
+    | 4 | `host` がある | `assignment.review_seats(round_no, review_pool(host), [])`（変更前の輪番と同じ値） |
+    | 5 | どれも無い（古い状態ファイル） | `LEGACY_AGENTS` |
     """
+    for entry in st.get("rounds") or []:
+        if entry.get("round") == round_no and entry.get("reviewers"):
+            return list(entry["reviewers"])
     # **`--only` は担当そのものを絞る。** 輪番が返す 2 者を担当のまま残すと、指定した
     # 1 者が含まれないラウンドで誰も起動されない。そのとき全員が「指定によるスキップ」
     # として扱われ、レビューが行われていないのに収束する。
     only = st.get("only")
     if only:
         return [only]
-    for entry in st.get("rounds") or []:
-        if entry.get("round") == round_no and entry.get("reviewers"):
-            return list(entry["reviewers"])
+    participants = st.get("participants")
+    if participants:
+        return assignment.review_seats(
+            max(round_no, 1),
+            list(participants.get("available") or []),
+            list(participants.get("fallback") or []),
+        )
     host = st.get("host")
     if host:
-        return assignment.review_assign(max(round_no, 1), host)
+        return assignment.review_seats(
+            max(round_no, 1), assignment.review_pool(host), [])
     return list(LEGACY_AGENTS)
 
 
-def _auth_targets(only: str | None, host: str) -> list[str]:
-    """認証を確かめる相手。**実際に起動する担当だけを返す。**
+# ---------- 参加者の引数と使える者の解決（#727） ----------
+#
+# 名前の検査は 2 段に分かれる。綴り（4 つの名前か `none`）は argparse の型が弾き
+# （終了コード 2）、母集合との関係は共通層の `resolve_participants` が弾く（終了コード 1）。
 
-    `--only` で 1 者へ絞ったときに母集合の全員を確かめると、そのラウンドで起動しない
-    CLI の未認証で初期化が失敗する。
+NONE_WORD = "none"
+
+
+def _runtime_or_none(value: str) -> str:
+    """`--only` の型。4 つの名前か `none`（決定 15: 再開で指定を外す予約語）。"""
+    if value == NONE_WORD or value in assignment.ALL_RUNTIMES:
+        return value
+    raise argparse.ArgumentTypeError(
+        f"{'/'.join(assignment.ALL_RUNTIMES)} か {NONE_WORD} を指定してください: {value}")
+
+
+def _runtime_list(value: str) -> list[str]:
+    """`--exclude` / `--include` の型。カンマ区切りの 4 つの名前、または `none`。
+
+    `none` は `["none"]` のまま返し、`_normalize_participant_args` が空の一覧へ直す。
     """
-    return [only] if only else assignment.review_pool(host)
+    names = [n.strip() for n in value.split(",") if n.strip()]
+    for n in names:
+        _runtime_or_none(n)
+    if not names:
+        raise argparse.ArgumentTypeError("名前を 1 つ以上指定してください")
+    return names
 
 
-def _validate_only(only: str | None, host: str) -> str | None:
-    """`--only` が母集合に含まれることを確かめる。含まなければ起動する前に弾く。
+def _seat_arg(value: str) -> str:
+    """席の名前の型（`read-result` の担当）。形は `assignment.SEAT_PATTERN`。"""
+    try:
+        assignment.seat_runtime(value)
+    except assignment.AssignmentError as e:
+        raise argparse.ArgumentTypeError(str(e))
+    return value
 
-    ホスト自身や、参加しないランタイムを指定しても、そのラウンドは 1 者も起動しない。
-    **起動してから気づくと、レビューの無いラウンドが記録に残る。**
+
+def _normalize_participant_args(
+    args: argparse.Namespace,
+) -> tuple[str | None, list[str] | None, list[str] | None]:
+    """`--only` / `--include` / `--exclude` を読み手の形へ直し `(only, include, exclude)` を返す。
+
+    `only` の `none` は `None`。`include` / `exclude` は `action="append"` の入れ子を
+    平らにし（`--exclude agy --exclude kiro` と `--exclude agy,kiro` が同じになる）、
+    `none` を含めば `[]`。未指定は `None` のまま返す（再開の経路が「渡さなかった」と
+    読むため）。`none` と名前の混在は終了コード 1。
     """
-    if only is None:
-        return None
-    pool = assignment.review_pool(host)
-    if only not in pool:
-        die(
-            f"--only に指定できるのはレビュワーの母集合だけです: {' / '.join(pool)}"
-            f"（指定: {only}、ホスト: {host}）"
+    only = getattr(args, "only", None)
+    if only == NONE_WORD:
+        only = None
+
+    def _flatten(option: str) -> list[str] | None:
+        raw = getattr(args, option, None)
+        if raw is None:
+            return None
+        names: list[str] = []
+        for group in raw:
+            names.extend(group if isinstance(group, list) else [group])
+        if NONE_WORD in names:
+            if len(names) > 1:
+                die(f"--{option} に {NONE_WORD} と名前を同時に指定できません: {', '.join(names)}")
+            return []
+        return names
+
+    return only, _flatten("include"), _flatten("exclude")
+
+
+def _resolve_reviewers(host: str, args: argparse.Namespace) -> dict[str, Any]:
+    """使える者を決め、状態ファイルの `participants`（`fallback` を含む 8 項目）を返す。
+
+    母集合は `review_pool(host)`。確認は止めない確認（`auth.probe_auth`）で、通らない者は
+    外して続ける。使える者が 2 者に満たなければホストを確かめ、通れば `fallback` に
+    置く（決定 9）。1 者指定があればホストを確かめず `fallback` は空。名前の矛盾・
+    `--require-all` で欠け・0 者で埋め合わせも無い・1 者指定が確認を通らない、は終了
+    コード 1（状態ファイルはこの関数の後に書かれるため作られない）。
+    """
+    only, include, exclude = _normalize_participant_args(args)
+    probe = functools.partial(auth.probe_auth, info=info)
+    try:
+        pool = assignment.review_pool(host)
+        resolved = assignment.resolve_participants(
+            pool, host=host, include=include or [], exclude=exclude or [], only=only,
+            probe=probe, require_all=bool(getattr(args, "require_all", None)),
         )
-    return only
+    except assignment.AssignmentError as e:
+        die(str(e), code=1)
+        raise
+    available = resolved.available
+    info(f"ホスト: {host} / 母集合: {' / '.join(pool)}"
+         f" / 使える者: {' / '.join(available) or 'なし'}")
+    for name, reason in resolved.unavailable.items():
+        info(f"⚠ {name} を担当から外しました（{reason}）")
+
+    fallback: list[str] = []
+    # **1 者指定でも 0 者は通さない。** 指定した 1 者が確認を通らないと使える者が空に
+    # なるが、席は 1 者指定をそのまま返す（`_round_reviewers` の順 2）。確認を通らない
+    # 担当が席に座ると、レビューが行われないまま収束する。埋め合わせは 1 者指定では
+    # 行わないため（決定 9）、ここで止めるほかにない。
+    if only is not None and not available:
+        die(f"1 者指定の {only} が確認を通りません"
+            f"（{resolved.unavailable.get(only, '')}）。"
+            f"{only} で認証し直すか、1 者指定を外して再実行してください", code=1)
+    if only is None and len(available) < 2:
+        results, skipped = auth.probe_auth([host], info=info)
+        if skipped or results.get(host, {}).get("ok", False):
+            fallback = [host]
+        if not available and not fallback:
+            die(f"使える者がいません: 母集合 {' / '.join(pool)} の全員が確認を通らず、"
+                f"ホスト {host} も通りません（{results.get(host, {}).get('detail', '')}）",
+                code=1)
+        if fallback and host not in available:
+            info(f"⚠ 使える者が {len(available)} 者のため、席をホスト（{host}）で埋めます"
+                 "（観点が減ります）")
+        else:
+            info(f"⚠ 使える者が {len(available)} 者のため、席を同じランタイムの 2 つ目で"
+                 "埋めます（観点が減ります）")
+
+    state = resolved.to_state()
+    state["fallback"] = fallback
+    return state
 
 
 def _is_pass(intent: str | None, severity: dict[str, int] | None) -> bool:
@@ -2004,44 +2262,36 @@ def _round_passes(
     return True
 
 
-def _guard_previous_round(st: dict[str, Any], prev: dict[str, Any]) -> None:
-    """前のラウンドの後始末が終わっているかを確かめる。
-
-    進行側が手で修正して次のラウンドへ進めると、修正の工程（Step 5）が担う返信と
-    Resolve が飛ばされる。飛ばされたまま進むと、未解決の指摘が残ったまま承認へ到達する。
-
-    止めるのは次の 2 つ。
-
-    1. 前のラウンドが修正必須の判定なのに、修正の記録が無い
-    2. 前のラウンドで Resolve したと申告されたスレッドが、GitHub 側で未解決のまま
-
-    未解決の指摘を取得できないときは検査を行わず、確認できなかったことを残して進む。
-    取得の失敗で止めると、GitHub 側の一時的な不調でループが進まなくなる。
-
-    スレッドの状態は、申告が行われた Pull Request（`prev["pr"]`）へ問い合わせる。
-    ローテーションを挟んだラウンドでは Step 6 の `set-current-pr` が先に走るため、
-    `current_pr` は既に新しい Pull Request を指している。そちらへ問い合わせると、
-    旧 Pull Request のスレッドが未解決のままでも一覧に現れず検査が素通りする。
-    """
-    round_no = prev.get("round")
+def _resolve_previous_verdict(st: dict[str, Any], prev: dict[str, Any]) -> str | None:
+    """保存されていない旧形式の判定を、ラウンドの結果から復元する。"""
     verdict = prev.get("verdict")
-    if verdict is None:
-        # 判定の結果を持たない古い状態ファイルは、保存された重要度から判定し直す。
-        # 項目が欠けたラウンドは結果なしであり、修正の記録を求める対象ではない。
-        if _no_result_agents(prev, st.get("only")):
-            verdict = "no_result"
-        else:
-            verdict = "approved" if _round_passes(prev, st.get("only")) else "changes_requested"
-    fix = prev.get("fix")
-    if verdict == "changes_requested" and not fix:
-        die(
-            f"round {round_no} は修正必須の判定でしたが、修正の記録がありません。"
-            " 返信と Resolve が飛ばされている可能性があります。"
-            " `/ndf:fix` を実行して戻り値ファイルを作り、`merge-fix` を通してから"
-            " 次のラウンドを開始してください",
-            code=5,
-        )
+    if verdict is not None:
+        return verdict
+    reviewers = prev.get("reviewers") or _round_reviewers(st, prev.get("round") or 1)
+    if _no_result_agents(prev, st.get("only"), reviewers):
+        return "no_result"
+    return ("approved" if _round_passes(prev, st.get("only"), reviewers)
+            else "changes_requested")
 
+
+def _require_fix_for_changes(round_no: Any, verdict: str | None,
+                             fix: dict[str, Any] | None) -> None:
+    """修正必須の判定に修正記録が伴うことを確かめる。"""
+    if verdict != "changes_requested" or fix:
+        return
+    die(
+        f"round {round_no} は修正必須の判定でしたが、修正の記録がありません。"
+        " 返信と Resolve が飛ばされている可能性があります。"
+        " `/ndf:fix` を実行して戻り値ファイルを作り、`merge-fix` を通してから"
+        " 次のラウンドを開始してください",
+        code=5,
+    )
+
+
+def _verify_resolved_threads(st: dict[str, Any], prev: dict[str, Any],
+                             fix: dict[str, Any] | None) -> None:
+    """Resolve 済みとの申告を GitHub の未解決スレッドと突き合わせる。"""
+    round_no = prev.get("round")
     claimed = (fix or {}).get("resolved_thread_ids") or []
     if not claimed:
         return
@@ -2061,6 +2311,31 @@ def _guard_previous_round(st: dict[str, Any], prev: dict[str, Any]) -> None:
             f"{' '.join(still_open)}。返信と Resolve を済ませてから次のラウンドを開始してください",
             code=5,
         )
+
+
+def _guard_previous_round(st: dict[str, Any], prev: dict[str, Any]) -> None:
+    """前のラウンドの後始末が終わっているかを確かめる。
+
+    進行側が手で修正して次のラウンドへ進めると、修正の工程（Step 5）が担う返信と
+    Resolve が飛ばされる。飛ばされたまま進むと、未解決の指摘が残ったまま承認へ到達する。
+
+    止めるのは次の 2 つ。
+
+    1. 前のラウンドが修正必須の判定なのに、修正の記録が無い
+    2. 前のラウンドで Resolve したと申告されたスレッドが、GitHub 側で未解決のまま
+
+    未解決の指摘を取得できないときは検査を行わず、確認できなかったことを残して進む。
+    取得の失敗で止めると、GitHub 側の一時的な不調でループが進まなくなる。
+
+    スレッドの状態は、申告が行われた Pull Request（`prev["pr"]`）へ問い合わせる。
+    ローテーションを挟んだラウンドでは Step 6 の `set-current-pr` が先に走るため、
+    `current_pr` は既に新しい Pull Request を指している。そちらへ問い合わせると、
+    旧 Pull Request のスレッドが未解決のままでも一覧に現れず検査が素通りする。
+    """
+    fix = prev.get("fix")
+    verdict = _resolve_previous_verdict(st, prev)
+    _require_fix_for_changes(prev.get("round"), verdict, fix)
+    _verify_resolved_threads(st, prev, fix)
 
 
 def _sync_before_round(st: dict[str, Any], pr: int) -> HeadRef | None:
@@ -2152,32 +2427,6 @@ def _as_count(value: object) -> int:
         return 0
 
 
-def _posted_comment_count(repo: str, pr: int, review_url: str | None) -> int | None:
-    """レビューに実際にぶら下がっているインラインコメントの数。
-
-    取得できなければ `None` を返す。**「取得できなかった」と「0 件」を区別する。**
-    取得の失敗で中断すると、GitHub 側の一時的な不調でループが止まる。
-
-    投稿は AI 自身が `gh api` で行うため、失敗しても結果ファイルの申告だけは残る。
-    数え直す先は、申告された `review_url` の末尾にある識別子から決める。
-    """
-    if not repo or not review_url:
-        return None
-    m = re.search(r"pullrequestreview-(\d+)", str(review_url))
-    if not m:
-        return None
-    try:
-        out = _sh(
-            ["gh", "api", f"repos/{repo}/pulls/{pr}/reviews/{m.group(1)}/comments",
-             "--paginate", "--jq", "length"],
-            check=False,
-        )
-    except Exception:
-        return None
-    counts = [int(line) for line in str(out).split() if line.strip().isdigit()]
-    return sum(counts) if counts else None
-
-
 # Pull Request 上の未解決の指摘（Resolve されていない review thread）を数えるための問い合わせ。
 # `--paginate` に載せるため、カーソルと `pageInfo` を持たせる。
 _UNRESOLVED_THREADS_QUERY = """
@@ -2201,14 +2450,13 @@ _UNRESOLVED_THREADS_JQ = (
 
 
 def _review_exists(repo: str, pr: int, review_url: str | None) -> bool | None:
-    """申告された `review_url` の指すレビューが GitHub 側にあるか。
+    """`review_url` の指すレビューが GitHub 側にあるか。
 
     取得できなければ `None` を返す。**「取得できなかった」と「無い」を区別する。**
     取得の失敗で中断すると、GitHub 側の一時的な不調でループが止まる。
 
-    投稿は AI 自身が `gh api` で行うため、失敗しても結果ファイルには判定が残る。
-    判定だけを採ると、修正の担当が読むべき指摘が Pull Request に無いまま修正の工程が
-    起動する（実測: `review_url` が空、重要度別の件数もすべて 0）。
+    上限で積んだ投稿を後から流したとき、その直後に 1 度だけ呼ぶ（`_confirm_flushed`）。
+    取り込みが自分で送った投稿は、送信の応答をそのまま記録にするため照会しない（#730）。
     """
     if not repo or not review_url:
         return False
@@ -2404,11 +2652,16 @@ def cmd_unresolved_threads(args: argparse.Namespace) -> None:
         info(f"- {t['id']} {t.get('path', '')}:{t.get('line', '')}")
 
 
-def _record_no_result(pr: int, agent: str, reason: str) -> None:
+def _record_no_result(
+    pr: int, agent: str, reason: str, monitor_detail: str | None = None,
+) -> None:
     """使える結果が残らなかったことを、そのラウンドへ残す。
 
     判定（`cmd_judge`）はこの記録を読んで、起動し直しか中断かを決める。記録が無い
     ラウンドも結果なしとして読むため、ここで書けなかった場合も収束はしない。
+
+    `monitor_detail` は監視の `detail`（#729）。**鍵が無い = 監視の結果ファイルが
+    無かった**を保つため、`None` と空文字では鍵を書かない。
 
     状態ファイルを読めないときとラウンドがまだ無いときは、何も書かずに戻る。呼び出し
     元はこの直後に die するため、ここで新たに止める理由が無い。
@@ -2422,7 +2675,7 @@ def _record_no_result(pr: int, agent: str, reason: str) -> None:
         return
     if not isinstance(st, dict) or not st.get("rounds"):
         return
-    st["rounds"][-1][agent] = {
+    entry: dict[str, Any] = {
         "intent": NO_RESULT,
         "no_result_reason": reason,
         "posted_as": None,
@@ -2430,6 +2683,9 @@ def _record_no_result(pr: int, agent: str, reason: str) -> None:
         "review_url": None,
         "by_severity": {},
     }
+    if monitor_detail:
+        entry["monitor_detail"] = monitor_detail
+    st["rounds"][-1][agent] = entry
     _save(pr, st)
 
 
@@ -2440,81 +2696,30 @@ def _die_no_result(pr: int, agent: str, reason: str, msg: str, code: int = 1) ->
 
 
 def _read_review_result_file(pr: int, agent: str, rfile: pathlib.Path) -> dict[str, Any]:
-    if not rfile.exists() or rfile.stat().st_size == 0:
-        _die_no_result(pr, agent, "missing", f"{agent}: result 未生成 ({rfile})")
+    """結果ファイルを、結末の共通層の値として読む（#729 の決定 2）。
 
-    try:
-        r = json.loads(rfile.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        _die_no_result(
-            pr,
-            agent,
-            "unparsable",
-            f"{agent}: result.json の parse に失敗 ({rfile}): {exc}",
-            code=3,
-        )
-
-    # gemini round 4 指摘: result.json は本来 dict だが、launcher の出力バグや
-    # 別実行の残骸で list / str が入り込むと `r.get(...)` で AttributeError になる。
-    # 不正な review result はバグなので即時 die(code=3) で停止させる。
-    if not isinstance(r, dict):
-        _die_no_result(
-            pr,
-            agent,
-            "unparsable",
-            f"{agent}: result.json が dict ではない "
-            f"({rfile}, type={type(r).__name__})。review launcher の出力形式不正。",
-            code=3,
-        )
-    return r
-
-
-def _verify_review_arrival(
-    pr: int, agent: str, repo: str, result: dict[str, Any]
-) -> bool:
-    """投稿が Pull Request に届いたかを確かめ、待ち行列へ積んだかどうかを返す。
-
-    **投稿が届いたかを先に確かめる。** 判定だけが残り、指摘の中身が Pull Request に
-    無いまま修正の工程へ進む経路を塞ぐ（#261）。届いていないときは結果なしとして
-    記録し、判定の側の「同じラウンドで 1 度だけ起動し直す」経路へ乗せる。修正の担当
-    から見ると、結果が残らなかった場合と、結果はあるが指摘が届いていない場合は同じ
-    状態である（読むべき指摘が無い）。
-
-    **待ち行列へ積んだ投稿は、積んだ時点では届いていない。** ここで照会すると
-    結果なしになり、起動し直しで同じ内容が二重に積まれる。届いたことは流した直後に
-    1 度だけ確かめる（`_confirm_flushed`）。
+    結果ファイルを自前で開かない。監視の結果ファイル（`<stem>-monitor.json`）と突き合わせて
+    使える結果か理由かを決めるのは `read_launch_outcome` で、ここが決めるのは終了コードだけ
+    である（読めない結果は 3、それ以外は 1。変更前と同じ）。理由の語彙も起動し直しの可否も
+    ここには置かない。
     """
-    queued = bool(result.get("queued"))
-    if queued:
-        info(
-            f"⚠ {agent}: 投稿を待ち行列へ積んでいます。"
-            "届いたことの確認は流した直後に行います"
+    outcome = monitor_outcome.read_launch_outcome(
+        _resolve_tmp_dir(pr), f"{agent}-review-pr{pr}", rfile)
+    if outcome.payload is not None:
+        return outcome.payload
+    reason = outcome.reason or "missing"
+    # 監視の結果ファイルがあるときだけ、その `detail` を残す（無いときの `outcome.detail` は
+    # 読めなかった理由の 1 文で、監視の詳細ではない）
+    monitor_detail = str(outcome.monitor.get("detail") or "") if outcome.monitor else None
+    _record_no_result(pr, agent, reason, monitor_detail)
+    if reason == "unparsable":
+        # 結果ファイルはあるが JSON の dict として parse できない。launcher の出力形式不正
+        die(
+            f"{agent}: result.json の parse に失敗、または dict ではない ({rfile}):"
+            f" {outcome.detail}",
+            code=3,
         )
-    post_error = None if queued else result.get("post_error")
-    if post_error:
-        _die_no_result(
-            pr,
-            agent,
-            "not_posted",
-            f"{agent}: レビューの投稿に失敗しています (post_error={post_error})。"
-            " 指摘が Pull Request に届いていないため、結果なしとして扱います",
-        )
-    exists = None if queued else _review_exists(repo, pr, result.get("review_url"))
-    if exists is False:
-        _die_no_result(
-            pr,
-            agent,
-            "not_posted",
-            f"{agent}: 投稿されたレビューを確認できません "
-            f"(review_url={result.get('review_url')!r})。"
-            " 指摘が Pull Request に届いていないため、結果なしとして扱います",
-        )
-    if exists is None and not queued:
-        info(
-            f"⚠ {agent}: レビューの投稿を確認できませんでした。"
-            "申告をそのまま採用します"
-        )
-    return queued
+    die(f"{agent}: 使える結果が無い (reason={reason}, {rfile}): {outcome.detail}")
 
 
 # 指摘へ既定を与える項目。**持たない指摘も捨てない**（#156）。捨てると、4 項目へ
@@ -2621,70 +2826,34 @@ def _collect_review_findings(
     return len(items)
 
 
-def _resolve_result_aliases(r: dict[str, Any]) -> tuple[str | None, str | None, Any]:
-    """result.json の別名フィールドを正規のキーへ解決する。
-
-    `intent` / `comment_count` を使う変則 JSON を書き出す既知のケースに対応する。
-    仕様としては `event` / `comments_count` が正で、そちらを優先する。
-    """
-    intent = r.get("event") or r.get("intent")
-    posted_as = r.get("posted_as") or intent
-    comments = r.get("comments_count")
-    if comments is None:
-        comments = r.get("comment_count")
-    return intent, posted_as, comments
-
-
-def _verify_declared_comments(
-    repo: str,
-    pr: int,
-    agent: str,
-    comments: Any,
-    review_url: str | None,
-    queued: bool,
-) -> None:
-    """**申告を GitHub 側と突き合わせる。**
-
-    投稿は AI 自身が行うので、失敗しても結果ファイルには件数が残る。申告のまま進むと、
-    修正担当が読むべき指摘が GitHub 上に存在しないまま収束判定まで走る
-    （実測: 申告 2 件に対しスレッド 0）。
-    """
-    declared = _as_count(comments)
-    if declared > 0 and not queued:
-        actual = _posted_comment_count(repo, pr, review_url)
-        if actual is None:
-            info(
-                f"⚠ {agent}: 投稿されたコメント数を確認できませんでした。"
-                f"申告（{declared} 件）をそのまま採用します"
-            )
-        elif actual < declared:
-            die(
-                f"{agent}: インラインコメントの申告 {declared} 件に対し、"
-                f"GitHub 上には {actual} 件しかありません。投稿が届いていないため"
-                "中断します。レビューを投稿し直してから再実行してください"
-            )
-
-
 def cmd_read_result(args: argparse.Namespace) -> None:
-    """Step 2.4 — codex/agy の result.json を state にマージ。
+    """Step 2.4 — 担当の結果を読み、レビューを投稿して state にマージ。
 
     使える結果が残らなかったときは、`NO_RESULT` と理由をラウンドへ残してから止める。
     終了コードは現行のまま（無い・判定の値を持たないときは 1、JSON として読めない
     ときは 3）で、進む先を決めるのは次の判定である。
 
-    **ここでは待ち行列を流さない。** 流すと `review-post` の書き戻し先（そのラウンドの
-    担当のエントリ）がまだ無い時点で項目が消える。`_confirm_flushed` は書き戻せず、
-    この後の取り込みが `queued: true` だけを保存するため、待ち行列が空で `queued` の
-    ままの状態ができる。判定はその状態で収束してしまい、投稿の存在も参照も確かめない。
-    **両方の担当を取り込んだ後に流す**（`judge` の入口）。取り込みは判定の直前に
-    しかないため、流す時期が遅れるのは 1 コマンド分である。
+    **「読んで記録する」と「投稿する」を 1 つに閉じる**（#730 の決定 4）。順序は
+    「控えを読む → 投稿を積む → 流す → 送信の応答を記録へ書き戻す → 指摘を取り込む」
+    である。分けると「投稿したが記録していない」に加えて「記録したが投稿していない」が
+    もう 1 つ増える。1 つに閉じれば、途中で止まった状態は「送れていない」か
+    「送れたが記録が無い」の 2 つになる。
+
+    | 止まった場所 | 待ち行列の項目 | 立て直し |
+    | --- | --- | --- |
+    | 送る前（上限などで送れていない） | 残る | 判定の終了コード 8 の枝が流し直す |
+    | 送った後・記録の前 | 残らない | 取り込みをもう一度呼ぶ。照合が先客を見つける |
+
+    **担当の申告と GitHub の実数を突き合わせない。** 投稿する側と記録する側が同じに
+    なるため、確かめる対象が無い。記録に入る URL は送信の応答から取り、件数は送れた
+    インラインの数から取る。
     """
     agent = args.agent
     pr = args.pr
     rfile = pathlib.Path(args.file or _resolve_tmp_dir(pr) / f"{agent}-review-pr{pr}-result.json")
     r = _read_review_result_file(pr, agent, rfile)
 
-    intent, posted_as, comments = _resolve_result_aliases(r)
+    intent = r.get("event") or r.get("intent")
 
     if intent is None:
         _die_no_result(
@@ -2699,27 +2868,50 @@ def cmd_read_result(args: argparse.Namespace) -> None:
     if not st.get("rounds"):
         die(f"{agent}: state.rounds が空。`state.py start-round` を先に呼んでください")
 
-    repo = str(st.get("repo") or "")
+    # **先に残りを流す。** 残っているのは、前の取り込みで送れずに積んだ投稿だけで、
+    # その担当の記録は積んだ時点で書いてある。流した結果をその記録へ書き戻してから、
+    # この担当の投稿を後ろへ積む（Pull Request 上の順序を保つ）。
+    _auto_flush(pr)
+    st = _load(pr)
+    last = st["rounds"][-1]
+    round_no = last.get("round")
+    posted = result_posts.post_review(
+        _queue(pr),
+        _payload_path(agent, pr, round_no),
+        rfile,
+        repo=str(st.get("repo") or ""),
+        pr=int(st.get("current_pr") or pr),
+        round_no=int(round_no or 1),
+        seat=agent,
+        head_sha=str(last.get("head_sha") or ""),
+        is_own_pr=bool(st.get("event_downgrade") or st.get("is_own_pr")),
+        actor=str(st.get("viewer_login") or "") or None,
+        since=str(last.get("started_at") or "") or None,
+    )
+    if posted.failed:
+        die(f"{agent}: レビューを投稿できませんでした ({posted.detail})")
 
-    queued = _verify_review_arrival(pr, agent, repo, r)
-
-    _verify_declared_comments(repo, pr, agent, comments, r.get("review_url"), queued)
-
-    st["rounds"][-1][agent] = {
-        "intent": intent,
-        "posted_as": posted_as,
-        "comments": comments,
-        "review_url": r.get("review_url"),
+    last[agent] = {
+        "intent": posted.intent,
+        "posted_as": posted.posted_as,
+        "comments": posted.posted_inline,
+        "review_url": posted.review_url,
         "by_severity": r.get("by_severity", {}),
-        "queued": queued,
+        "queued": bool(posted.queued),
+        "posted_inline": posted.posted_inline,
+        "posted_body": posted.posted_body,
     }
-    # **指摘そのものは別に積む**（#156）。`comments` は投稿したインラインの数で、
-    # GitHub 側の実数との突き合わせに使う。総評だけへ書いた指摘はそこに現れない。
-    collected = _collect_review_findings(st, agent, pr, st["rounds"][-1]["round"])
+    # **指摘そのものは別に積む**（#156）。`comments` は送れたインラインの数で、
+    # 総評へ移した指摘はそこに現れない。
+    collected = _collect_review_findings(st, agent, pr, round_no)
     _save(pr, st)
-    info(f"✅ {agent}: intent={intent} posted_as={posted_as} comments={comments}")
-    if collected:
-        info(f"   指摘の記録: {collected} 件")
+    if posted.review_url:
+        print(f"POSTED review_url={posted.review_url}")
+    print(f"INLINE={posted.posted_inline} BODY={posted.posted_body}"
+          f" QUEUED={posted.queued}")
+    print(f"FINDINGS={collected}")
+    info(f"✅ {agent}: intent={posted.intent} posted_as={posted.posted_as}"
+         f" comments={posted.posted_inline}")
 
 
 def _round_ci(st: dict[str, Any], last: dict[str, Any], pr: int) -> dict[str, Any]:
@@ -2761,24 +2953,35 @@ def _round_ci(st: dict[str, Any], last: dict[str, Any], pr: int) -> dict[str, An
     return {"verdict": "success", "sha": sha}
 
 
-def _handle_no_result_round(
-    pr: int, st: dict[str, Any], last: dict[str, Any], no_result: list[str]
+def _no_result_reasons(last: dict[str, Any], no_result: list[str]) -> dict[str, str]:
+    """結果なしの担当ごとの理由を集め、`NO_RESULT_REASONS` を出す。
+
+    どの出口でも進行側が理由を読めるように、先頭で 1 度だけ出す（#729 の AC14）。
+    """
+    reasons = {
+        a: (last.get(a) or {}).get("no_result_reason") or "missing" for a in no_result
+    }
+    print(f"NO_RESULT_REASONS='{' '.join(f'{a}={r}' for a, r in reasons.items())}'")
+    return reasons
+
+
+def _abort_no_result_round(pr: int, st: dict[str, Any], msg: str) -> None:
+    """結果なしのラウンドを異常終了させる共通処理。
+
+    `final=error` にして保存し、終了コード 1 で止める。最終スイープを通してから
+    完了報告へ進むよう促す文言は呼び出し側が渡す。
+    """
+    st["final"] = "error"
+    st["ended_at"] = _now()
+    _save(pr, st)
+    die(msg, code=1)
+
+
+def _record_relaunch(
+    pr: int, st: dict[str, Any], last: dict[str, Any], pending: list[str]
 ) -> None:
-    last["verdict"] = "no_result"
-    relaunched = last.get("relaunched") or []
-    pending = [a for a in no_result if a not in relaunched]
-    if not pending:
-        # 2 度続けて結果が残らないのは、対象や負荷ではなく実行環境の側の事象である。
-        st["final"] = "error"
-        st["ended_at"] = _now()
-        _save(pr, st)
-        die(
-            f"起動し直した後も結果が残りませんでした: {' '.join(no_result)}。"
-            " 実行環境の側の問題として中断します。最終スイープを通してから"
-            "完了報告へ進んでください",
-            code=1,
-        )
-    last["relaunched"] = relaunched + pending
+    """同じラウンドで起動し直す担当を記録し、シェル向けの出力を出す。"""
+    last["relaunched"] = (last.get("relaunched") or []) + pending
     _save(pr, st)
     print(f"RELAUNCH_AGENTS='{' '.join(pending)}'")
     print(f"RELAUNCH_AGENTS_CSV={','.join(pending)}")
@@ -2789,6 +2992,44 @@ def _handle_no_result_round(
         f"→ 結果を残さなかったレビュアーがいる: {' '.join(pending)}。"
         "同じラウンドで 1 度だけ起動し直す。"
     )
+
+
+def _handle_no_result_round(
+    pr: int, st: dict[str, Any], last: dict[str, Any], no_result: list[str]
+) -> None:
+    """結果なしの担当があるラウンドの出口を決める。
+
+    先に理由の行（`NO_RESULT_REASONS`）を出す。どの出口でも進行側が理由を読めるようにする
+    ためである（#729 の AC14）。**起動し直しの可否は結末の共通層だけが決める**
+    （`monitor_outcome.relaunch_same_agent`）。可否が偽の理由が 1 つでもあれば、誰も起動し直さず
+    誤りの終わりへ進む。起動し直しても解けない理由で待つのは、相手の CLI の枠と時間を使うだけ
+    である（#619）。骨組みは既存の 1 の枝で受けるため、終了コードは増えない（決定 12）。
+    """
+    last["verdict"] = "no_result"
+    reasons = _no_result_reasons(last, no_result)
+    blocked = [a for a, r in reasons.items()
+               if not monitor_outcome.relaunch_same_agent(r)]
+    if blocked:
+        for a in blocked:
+            detail = (last.get(a) or {}).get("monitor_detail")
+            info(f"  {a}: reason={reasons[a]}" + (f" detail={detail}" if detail else ""))
+        _abort_no_result_round(
+            pr, st,
+            f"起動し直しても解けない理由で結果が残りませんでした: {' '.join(blocked)}。"
+            " 同じラウンドで起動し直さずに中断します。最終スイープを通してから"
+            "完了報告へ進んでください",
+        )
+    relaunched = last.get("relaunched") or []
+    pending = [a for a in no_result if a not in relaunched]
+    if not pending:
+        # 2 度続けて結果が残らないのは、対象や負荷ではなく実行環境の側の事象である。
+        _abort_no_result_round(
+            pr, st,
+            f"起動し直した後も結果が残りませんでした: {' '.join(no_result)}。"
+            " 実行環境の側の問題として中断します。最終スイープを通してから"
+            "完了報告へ進んでください",
+        )
+    _record_relaunch(pr, st, last, pending)
     sys.exit(7)
 
 
@@ -3065,6 +3306,59 @@ def _merged_root(
     return current
 
 
+def _run_finding_checks(
+    targets: list[dict[str, Any]],
+    allowed: list[str],
+    work: str,
+    codes: set[int],
+    run: Any,
+) -> None:
+    """各指摘の検証コマンドを重複なく実行し、結果を記録する。"""
+    ran: dict[tuple[str, ...], Optional[int]] = {}
+
+    for finding in targets:
+        check = str(finding.get("suggested_check") or "")
+        record: dict[str, Any] = {
+            "command": check, "finding_id": finding.get("finding_id"),
+            "exit_code": None, "result": "not_run", "ran_at": None,
+        }
+        argv = _verify_argv(check, allowed, work) if allowed else None
+        if argv is not None:
+            key = tuple(argv)
+            if key in ran:
+                code = ran[key]
+            else:
+                code = run(argv, work)
+                ran[key] = code
+            record["exit_code"] = code
+            record["ran_at"] = _now()
+            if code in codes:
+                record["result"] = "reproduced"
+            elif code == 0:
+                record["result"] = "not_reproduced"
+        finding["verification"] = record
+
+
+def _propagate_best_verification(
+    targets: list[dict[str, Any]], by_id: dict[Any, dict[str, Any]]
+) -> None:
+    """束ねた組から最良の検証結果を代表へ反映する。"""
+    for rep in targets:
+        if rep.get("merged_into"):
+            continue
+        best = rep["verification"]
+        for member in targets:
+            if member is rep or not member.get("merged_into"):
+                continue
+            if _merged_root(member, by_id) is not rep:
+                continue
+            if _VERIFY_RANK.get(_verify_result(member), -1) > \
+               _VERIFY_RANK.get(str(best.get("result") or "not_run"), -1):
+                best = member["verification"]
+        if best is not rep["verification"]:
+            rep["verification"] = dict(best)
+
+
 def _verify_findings(
     st: dict[str, Any],
     round_no: int,
@@ -3100,45 +3394,8 @@ def _verify_findings(
         f for f in st.get("review_findings") or [] if f.get("round") == round_no
     ]
     by_id = {f.get("finding_id"): f for f in targets}
-    ran: dict[tuple[str, ...], Optional[int]] = {}
-
-    for finding in targets:
-        check = str(finding.get("suggested_check") or "")
-        record: dict[str, Any] = {
-            "command": check, "finding_id": finding.get("finding_id"),
-            "exit_code": None, "result": "not_run", "ran_at": None,
-        }
-        argv = _verify_argv(check, allowed, work) if allowed else None
-        if argv is not None:
-            key = tuple(argv)
-            if key in ran:
-                code = ran[key]
-            else:
-                code = run(argv, work)
-                ran[key] = code
-            record["exit_code"] = code
-            record["ran_at"] = _now()
-            if code in codes:
-                record["result"] = "reproduced"
-            elif code == 0:
-                record["result"] = "not_reproduced"
-        finding["verification"] = record
-
-    # 代表は組から選び直す。**実行し直さない**（記録済みの結果を選ぶだけである）。
-    for rep in targets:
-        if rep.get("merged_into"):
-            continue
-        best = rep["verification"]
-        for member in targets:
-            if member is rep or not member.get("merged_into"):
-                continue
-            if _merged_root(member, by_id) is not rep:
-                continue
-            if _VERIFY_RANK.get(_verify_result(member), -1) > \
-               _VERIFY_RANK.get(str(best.get("result") or "not_run"), -1):
-                best = member["verification"]
-        if best is not rep["verification"]:
-            rep["verification"] = dict(best)
+    _run_finding_checks(targets, allowed, work, codes, run)
+    _propagate_best_verification(targets, by_id)
 
 
 def cmd_verify_findings(args: argparse.Namespace) -> None:
@@ -3346,11 +3603,7 @@ def cmd_collect_critiques(args: argparse.Namespace) -> None:
     if not st.get("rounds"):
         die("state.rounds が空。`state.py start-round` を先に呼んでください")
     round_no = st["rounds"][-1]["round"]
-    findings = {
-        f.get("finding_id"): f
-        for f in st.get("review_findings") or []
-        if f.get("round") == round_no
-    }
+    findings = _round_finding_index(st, round_no)
     reviewers = _round_reviewers(st, round_no)
     attached, covered = _attach_critiques(st, pr, round_no, findings, reviewers)
 
@@ -3364,11 +3617,7 @@ def cmd_collect_critiques(args: argparse.Namespace) -> None:
 
     # **揃っていない対象は統合の後に数える。** 束ねられた側は対象から外れるため、
     # 先に数えると、代表へ返された 1 件で足りる組を不足として扱う。
-    missing: dict[str, list[str]] = {}
-    for agent in reviewers:
-        unmet = sorted(_critique_targets(st, round_no, agent) - covered[agent])
-        if unmet:
-            missing[agent] = unmet
+    missing = _missing_critique_targets(st, round_no, reviewers, covered)
     if missing:
         _handle_incomplete_critiques(pr, st, round_no, missing)
         return
@@ -3379,16 +3628,47 @@ def cmd_collect_critiques(args: argparse.Namespace) -> None:
     _save(pr, st)
 
 
+def _round_finding_index(
+    st: dict[str, Any], round_no: int
+) -> dict[Any, dict[str, Any]]:
+    """そのラウンドの指摘を `finding_id` で引ける索引にする。"""
+    return {
+        f.get("finding_id"): f
+        for f in st.get("review_findings") or []
+        if f.get("round") == round_no
+    }
+
+
+def _missing_critique_targets(
+    st: dict[str, Any],
+    round_no: int,
+    reviewers: list[str],
+    covered: dict[str, set[str]],
+) -> dict[str, list[str]]:
+    """反証が揃っていない対象を、担当ごとに `finding_id` の並びで返す。"""
+    missing: dict[str, list[str]] = {}
+    for agent in reviewers:
+        unmet = sorted(_critique_targets(st, round_no, agent) - covered[agent])
+        if unmet:
+            missing[agent] = unmet
+    return missing
+
+
 def _handle_incomplete_critiques(
     pr: int, st: dict[str, Any], round_no: int, missing: dict[str, list[str]]
 ) -> None:
     """有効な反証が揃わなかったラウンドの扱い（#549 レビュー対応）。
 
-    **印は付けない。** 印の無いラウンドは従来どおり全件を数えるため、未検証の `major`
-    が区分の絞り込みで落ちて収束することがない。**取り直しは同じラウンドで 1 度だけ
+    **印は付けず、先に付いていた印は外す**（#732）。印の無いラウンドは従来どおり全件を
+    数えるため、反証が届いていない `major` が区分の絞り込みで落ちて収束することがない。
+    取り直しの後もそのラウンドに印が残ると、「印を付けないため、このラウンドは全件を
+    数えます」の出力と実際の数え方が食い違う。**取り直しは同じラウンドで 1 度だけ
     である**（`judge` の結果なしと同じ作法。2 度続けて揃わないのは対象ではなく実行
     環境の側の事象であり、そのときも印を付けないまま工程を進める）。
     """
+    st["evidence_rounds"] = [
+        r for r in st.get("evidence_rounds") or []
+        if not _same_round_no(r, round_no)]
     entry = next(
         (r for r in st.get("rounds") or [] if r.get("round") == round_no), None)
     relaunched = list((entry or {}).get("critique_relaunched") or [])
@@ -3406,6 +3686,15 @@ def _handle_incomplete_critiques(
     info(f"→ 有効な反証が揃っていない: {detail}。印を付けず、"
          f"同じラウンドで 1 度だけ取り直す: {' '.join(pending)}")
     sys.exit(7)
+
+
+def _same_round_no(value: Any, round_no: int) -> bool:
+    """印の番号がそのラウンドを指すか。**番号の読み方は `_evidence_completed` と同じ**
+    （`int` へ換算して比べ、旧い状態ファイルの文字列の番号も同じラウンドとして読む）。"""
+    try:
+        return int(value) == int(round_no)
+    except (TypeError, ValueError):
+        return False
 
 
 # 実行の結果の強さ。**組から選び直すときの順である。**
@@ -3426,11 +3715,6 @@ def _declared_duplicate_targets(finding: dict[str, Any]) -> set:
     return targets
 
 
-# 収束の判定が数える区分（#156）。**残る 3 つは数えない。** 棄却した指摘を数えると、
-# そのぶんラウンドが増える（#69 で同じ論点が 5 ラウンド続いた事象）。
-COUNTED_CLASSIFICATIONS = ("verified_blocking", "needs_human_judgment")
-
-
 def _verdicts(finding: dict[str, Any], verdict: str) -> list[str]:
     """その値を返した担当の一覧。"""
     return [
@@ -3441,11 +3725,16 @@ def _verdicts(finding: dict[str, Any], verdict: str) -> list[str]:
 
 
 def _classify_finding(finding: dict[str, Any]) -> str:
-    """1 件の指摘を 5 つの区分のいずれかへ分ける（#156）。
+    """1 件の指摘を 6 つの区分のいずれかへ分ける（#156、#732）。
 
     **上から順に見て、最初に当たった区分を採る。** 実行で再現した指摘を先に採ることで、
     「実行の結果を担当の支持より先に見る」を順序そのもので表す。順 3 を先に置くと、
     機械が再現した事実を担当の再評価が覆す。
+
+    **数えない側へ落とすのは、棄却（順 3）と `minor` 以下（順 6）だけである。** 誰にも
+    誤りを示されていない `major` は、反証の有無・担当の数・根拠の 2 項目の有無によらず
+    `unrefuted`（順 5）として数える。「立証できない」「範囲外」は誤りだという主張では
+    ない（#706）。担当 1 者で反証する相手がいない指摘も同じである（#624）。
     """
     result = _verify_result(finding)
     major = _SEVERITY_RANK.get(str(finding.get("severity")), -1) >= _SEVERITY_RANK["major"]
@@ -3456,18 +3745,32 @@ def _classify_finding(finding: dict[str, Any]) -> str:
     if result == "not_reproduced" or _verdicts(finding, "refute"):
         return "rejected"
     # **`minor` 以下は数えない。** 支持が 1 件付いただけでラウンドが増えるのを避ける。
-    if finding.get("has_evidence") and major and (
-        _verdicts(finding, "support")
-        or len(finding.get("origin_runtimes") or []) >= 2
-    ):
+    if not major:
+        return "insufficient_evidence"
+    # **根拠の 2 項目は見ない。** 別の担当が支持した、または 2 者が独立に出した時点で
+    # 「確かめる」目的は果たされている（#706 で支持つきの 2 件が根拠の欠けで落ちた）。
+    if _verdicts(finding, "support") or len(finding.get("origin_runtimes") or []) >= 2:
         return "needs_human_judgment"
-    return "insufficient_evidence"
+    return "unrefuted"
+
+
+def _unrefuted_reason(finding: dict[str, Any]) -> str:
+    """なぜ独立に確かめられていないか。**反証の記録は提案者以外の値だけを持つ。**
+
+    空は「反証を返した担当が 0 者」を表す（`no_critique`）。1 件以上あれば、反証は
+    あるが支持も否定も無い（`not_supported`）。
+    """
+    return "not_supported" if finding.get("critiques") else "no_critique"
 
 
 def _apply_classification(finding: dict[str, Any]) -> str:
-    """区分を決めて要素へ書く。**棄却したものには理由を残す。**"""
+    """区分を決めて要素へ書く。**棄却と未反証には理由を残し、他の区分では消す。**"""
     classification = _classify_finding(finding)
     finding["classification"] = classification
+    if classification == "unrefuted":
+        finding["unrefuted_reason"] = _unrefuted_reason(finding)
+    else:
+        finding.pop("unrefuted_reason", None)
     if classification != "rejected":
         finding.pop("rejection_reason", None)
         return classification
@@ -3492,9 +3795,9 @@ def _apply_classification(finding: dict[str, Any]) -> str:
 def _counted_finding_ids(st: dict[str, Any], round_no: int) -> list[str]:
     """新規性が数える指摘の `finding_id`（#156）。
 
-    **数えるのは `verified_blocking` と `needs_human_judgment` だけである。**
-    棄却した指摘を数えると、そのぶんラウンドが増える（#69 で同じ論点が 5 ラウンド
-    続いた事象）。どちらも `major` 以上で、修正の工程へ渡る。
+    **数えるのは `verified_blocking` と `needs_human_judgment` と `unrefuted` の 3 つ
+    である。** 棄却した指摘を数えると、そのぶんラウンドが増える（#69 で同じ論点が
+    5 ラウンド続いた事象）。いずれも `major` 以上で、修正の工程へ渡る。
     """
     ids: list[str] = []
     for finding in st.get("review_findings") or []:
@@ -3636,38 +3939,64 @@ def _finding_keys(
     keys: list[tuple[str, int, str]] = []
     for agent in _round_reviewers(st, round_no):
         p = _payload_path(agent, pr, round_no)
-        if not p.exists():
+        payload = _read_finding_payload(agent, p)
+        if payload is None:
             continue
-        try:
-            payload = json.loads(p.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            continue
-        # gemini round 4 指摘: payload は本来 dict (comments: [...]) だが、
-        # launcher のバグで list / str が入り込むと `payload.get(...)` で
-        # AttributeError になる。不正な review payload はバグなので
-        # 即時 die(code=3) で停止させる。
-        if not isinstance(payload, dict):
+        keys.extend(_comment_keys(agent, p, payload))
+    return keys
+
+
+def _read_finding_payload(agent: str, p: pathlib.Path) -> dict[str, Any] | None:
+    """判定の直前に読む payload.json を dict として返す（第 1 段: 入力境界）。
+
+    無い・JSON として読めないときは None を返して読み飛ばす。dict でないときは
+    launcher のバグとして `die(code=3)` で止める（`_load_payload` と違い、ここで
+    止めても失われる記録が無い）。
+    """
+    if not p.exists():
+        return None
+    try:
+        payload = json.loads(p.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    # gemini round 4 指摘: payload は本来 dict (comments: [...]) だが、
+    # launcher のバグで list / str が入り込むと `payload.get(...)` で
+    # AttributeError になる。不正な review payload はバグなので
+    # 即時 die(code=3) で停止させる。
+    if not isinstance(payload, dict):
+        die(
+            f"{agent}: payload.json が dict ではない "
+            f"({p}, type={type(payload).__name__})。"
+            " review launcher の出力形式不正。",
+            code=3,
+        )
+    return payload
+
+
+def _comment_keys(
+    agent: str, p: pathlib.Path, payload: dict[str, Any]
+) -> list[tuple[str, int, str]]:
+    """`comments[]` を (ファイル, 行, 正規化した本文) の 3 つ組へ変換する（第 2 段）。
+
+    要素が dict でなければ `die(code=3)`。位置（path / line）が欠ける要素と、行が
+    整数に読めない要素は読み飛ばす。
+    """
+    keys: list[tuple[str, int, str]] = []
+    for c in payload.get("comments", []):
+        if not isinstance(c, dict):
+            # comments エントリが dict でない場合も同様に致命扱い
             die(
-                f"{agent}: payload.json が dict ではない "
-                f"({p}, type={type(payload).__name__})。"
-                " review launcher の出力形式不正。",
+                f"{agent}: payload.comments のエントリが dict ではない "
+                f"({p}, type={type(c).__name__})。",
                 code=3,
             )
-        for c in payload.get("comments", []):
-            if not isinstance(c, dict):
-                # comments エントリが dict でない場合も同様に致命扱い
-                die(
-                    f"{agent}: payload.comments のエントリが dict ではない "
-                    f"({p}, type={type(c).__name__})。",
-                    code=3,
-                )
-            path = c.get("path")
-            line = c.get("line") or c.get("start_line")
-            if path and line is not None:
-                try:
-                    keys.append((str(path), int(line), _normalized_body(c.get("body"))))
-                except (TypeError, ValueError):
-                    continue
+        path = c.get("path")
+        line = c.get("line") or c.get("start_line")
+        if path and line is not None:
+            try:
+                keys.append((str(path), int(line), _normalized_body(c.get("body"))))
+            except (TypeError, ValueError):
+                continue
     return keys
 
 
@@ -3742,7 +4071,7 @@ def _new_finding_count(st: dict[str, Any], pr: int) -> tuple[int, bool]:
     # 「測れなかった」と扱うと、元の REQUEST_CHANGES のまま終わらない。
     if not curr:
         return 0, False
-    # **証拠集約を通ったラウンドだけを、数える 2 つへ絞る**（#156）。通っていない
+    # **証拠集約を通ったラウンドだけを、数える 3 つへ絞る**（#156、#732）。通っていない
     # ラウンドは従来どおり全件を数える（旧い状態ファイルと、3 本目より前に開いた
     # ラウンドがこれに当たる）。**`review_findings` の有無では判定しない**
     # （旧版でも取り込みの時点で積まれるため、区分も検証結果も持たない旧いラウンドが
@@ -3847,6 +4176,12 @@ def _count(v: Any) -> int:
     return 0
 
 
+# 読んだ修正の結果ファイルの場所。投稿の組み立ては本文を引数に取らず、ファイルの
+# パスを受け取る（#730 の決定 3）。記録へは写らない（`_normalize_fix_result` は
+# 決まった鍵だけを読む）。
+FIX_SOURCE_KEY = "_source_path"
+
+
 def _read_fix_result(
     pr: int | str,
     explicit_file: str | pathlib.Path | None,
@@ -3871,7 +4206,9 @@ def _read_fix_result(
     ]
 
     if explicit is not None:
-        return _read_explicit_fix_result(explicit)
+        fix = _read_explicit_fix_result(explicit)
+        fix.setdefault(FIX_SOURCE_KEY, str(explicit))
+        return fix
 
     fix = _find_fallback_fix_result(fallback_candidates, pr, round_started_ts)
 
@@ -3923,6 +4260,7 @@ def _find_fallback_fix_result(
             candidate, pr, round_started_ts, is_canonical=is_canonical
         )
         if is_fresh:
+            parsed.setdefault(FIX_SOURCE_KEY, str(candidate))
             return parsed
     return None
 
@@ -3951,31 +4289,39 @@ def _merge_fix_records(st: dict, fix: dict, pr: int) -> dict:
     return st["rounds"][-1]["fix"]
 
 
-def _normalize_fix_result(fix: dict) -> dict[str, Any]:
-    """fix の戻り値から別名と劣化表現を吸収し、記録へ写す値にそろえる。"""
-    # key 名 fallback (サブエージェントが別名で書いた場合の救済)。
-    # 正規は fix_commit / fixed_count、別名は commit_sha / fixed のみ受理する。
+def _resolve_fix_aliases(fix: dict) -> tuple[object, object]:
+    """fix の commit と fixed 件数を正規 key と別名から解決する。"""
     fix_commit = fix.get("fix_commit") or fix.get("commit_sha")
     fixed_count = fix.get("fixed_count")
     if fixed_count is None:
         fixed_count = fix.get("fixed", 0)
+    return fix_commit, fixed_count
+
+
+def _normalize_deferred_like(raw: object) -> tuple[list[dict], int]:
+    """deferred の項目と、劣化表現を考慮した保存件数を返す。"""
+    items = _normalize_dict_items(raw)
+    if isinstance(raw, (list, dict)):
+        return items, len(items)
+    return items, _count(raw)
+
+
+def _normalize_fix_result(fix: dict) -> dict[str, Any]:
+    """fix の戻り値から別名と劣化表現を吸収し、記録へ写す値にそろえる。"""
+    # key 名 fallback (サブエージェントが別名で書いた場合の救済)。
+    # 正規は fix_commit / fixed_count、別名は commit_sha / fixed のみ受理する。
+    fix_commit, fixed_count = _resolve_fix_aliases(fix)
 
     # deferred は list が正だが、LLM がスキーマを無視して文字列リスト
     # (例: ["nit: ..."]) や単一 dict、int(件数) を返すケースがある。後段の
     # deferred_nits 展開ループは dict 以外をスキップするため、まず dict 要素のみへ
     # 正規化する (単一 dict は 1 件として包む)。
-    _deferred_raw = fix.get("deferred")
-    _deferred_nits = _normalize_dict_items(_deferred_raw)
-
     # 保存件数の単一整合ルール:
     #   - 構造化データ (list / dict) は per-item を保持できるので、展開件数
     #     (len(_deferred_nits)) を保存し deferred_nits の件数と一致させる。
     #   - int / 数値文字列は per-item データを失った「劣化表現」なので、件数を
     #     失わないよう _count() の値を保存する (展開はできないので nits は空)。
-    if isinstance(_deferred_raw, (list, dict)):
-        _deferred_count = len(_deferred_nits)
-    else:
-        _deferred_count = _count(_deferred_raw)
+    _deferred_nits, _deferred_count = _normalize_deferred_like(fix.get("deferred"))
 
     # 却下も同じ正規化を通す。**件数だけが返る劣化表現（int）では per-item を作れない**
     # ため、そのときは記録を空にし、件数は `_count()` の値で残す。
@@ -4060,8 +4406,30 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
 
     fix = _read_fix_result(pr, args.file, round_started_ts)
 
+    # **送信と投稿は取り込む側が行う**（#730）。修正の担当はコミットまでで止まる。
+    # 送れない・報告されたコミットが送り先に載っていないときは、記録も投稿もせずに
+    # 止まる。同じ取り込みをやり直せば、同じ手順を最初から通る。
+    commit = fix.get("fix_commit") or fix.get("commit_sha")
+    pushed = result_posts.push_fix(str(st.get("worktree_path") or ""),
+                                   str(st.get("head_branch") or ""), commit)
+    if not pushed.ok:
+        die(f"修正を送れないか、報告されたコミットが送り先に載っていません: {pushed.detail}")
+    print(f"PUSHED={1 if pushed.pushed else 0} COMMIT_ON_HEAD={1 if pushed.contains else 0}")
+
     round_fix = _merge_fix_records(st, fix, pr)
     _save(pr, st)
+
+    posted = result_posts.post_fix(
+        _queue(pr), fix[FIX_SOURCE_KEY], str(st.get("repo") or ""),
+        int(st.get("current_pr") or pr), round_no=st["rounds"][-1].get("round"),
+        actor=str(st.get("viewer_login") or "") or None)
+    st["rounds"][-1]["fix"]["summary_comment_url"] = posted.summary_url
+    _save(pr, st)
+    if posted.summary_url:
+        print(f"POSTED summary_url={posted.summary_url}")
+    print(f"REPLIED={posted.replied} RESOLVED={posted.resolved} QUEUED={posted.queued}")
+    if posted.failed:
+        die(f"返信・決着・まとめを投稿できませんでした ({posted.detail})")
 
     # CI 分類
     if (fix.get("ci_status") or "").upper() != "FAILURE":
@@ -4244,7 +4612,10 @@ def _print_round_summary(rounds: list) -> None:
         parts = []
         for name in reviewers:
             entry = r.get(name) or {}
-            if entry:
+            if entry.get("intent") == NO_RESULT:
+                # 結果なしは投稿の数を持たない。括弧には理由を出す（#729 の AC17）
+                parts.append(f"{name}=NO_RESULT({entry.get('no_result_reason', '-')})")
+            elif entry:
                 parts.append(f"{name}={entry.get('intent', '-')} ({entry.get('comments', '-')})")
             else:
                 parts.append(f"{name}=-")
@@ -4256,6 +4627,60 @@ def _print_round_summary(rounds: list) -> None:
         ci_s = fix.get("ci") or "-"
         print(f"| {r['round']} | #{r['pr']} | {review_s} | {fix_s} | {ci_s} |")
     print()
+
+
+def _print_participants(st: dict) -> None:
+    """cmd_report の「参加した者」の節を出す（#727 の AC24）。
+
+    途中から誰を外したか・誰が確認を通らなかったかを、完了報告だけで読めるようにする。
+    参加者の記録を持たない状態ファイル（この変更の前に始めた実行）では「記録なし」と出す。
+    """
+    print("## 参加した者")
+    p = st.get("participants")
+    if not p:
+        print("- 使える者: 記録なし")
+        print()
+        return
+
+    def _names(values) -> str:
+        return " / ".join(values) if values else "なし"
+
+    unavailable = p.get("unavailable") or {}
+    if unavailable:
+        failed = " / ".join(f"{n}（{d}）" for n, d in unavailable.items())
+    elif p.get("probe_skipped"):
+        failed = "確認を飛ばした（NDF_SKIP_AUTH_CHECK）"
+    else:
+        failed = "なし"
+
+    print(f"- 母集合: {_names(p.get('pool'))}")
+    print(f"- 使える者: {_names(p.get('available'))}")
+    print(f"- --exclude で外した者: {_names(p.get('excluded'))}")
+    print(f"- --include で足した者: {_names(p.get('included'))}")
+    print(f"- 確認を通らなかった者: {failed}")
+    print(f"- 席の埋め合わせ: {_names(p.get('fallback'))}")
+
+    changes = st.get("resume_changes") or []
+    if not changes:
+        print("- 再開で変えた値: なし")
+    else:
+        print("- 再開で変えた値:")
+        for c in changes:
+            print(f"  - {c.get('at')} {c.get('field')}: "
+                  f"{_resume_value(c.get('from'))} → {_resume_value(c.get('to'))}")
+    print()
+
+
+def _resume_value(value: object) -> str:
+    """再開で変えた値の 1 つを 1 行へ収める。参加者の記録は使える者だけを出す。"""
+    if isinstance(value, dict):
+        available = value.get("available")
+        if available is not None:
+            return f"使える者={'/'.join(available) or 'なし'}"
+        return "…"
+    if isinstance(value, list):
+        return ",".join(str(v) for v in value) or "なし"
+    return str(value)
 
 
 def _print_sweep(st: dict) -> None:
@@ -4323,6 +4748,7 @@ def cmd_report(args: argparse.Namespace) -> None:
         state_str = "closed" if h.get("closed_at") else "open"
         print(f"- #{h['pr']} ({state_str}, {h.get('rounds', 0)} rounds)")
     print()
+    _print_participants(st)
     _print_round_summary(st["rounds"])
     _print_sweep(st)
     _print_deferred_nits(st)
@@ -4334,26 +4760,27 @@ def cmd_report(args: argparse.Namespace) -> None:
 
 # ---------------- main ----------------
 
-def build_parser() -> argparse.ArgumentParser:
-    """副コマンドの引数を組み立てる。**テストが選択肢を検査できるように分ける。**
+_Subparsers = argparse._SubParsersAction
 
-    実機で `kiro` の結果が `invalid choice` で弾かれた。担当が 4 つの名前を取りうる
-    以上、副コマンドの引数も同じ母集合を持たなければ、結果を残した担当が「結果なし」
-    として扱われる。
-    """
-    # 副コマンドの説明はここ（`help`）だけが持つ。**モジュールの docstring へ写さない。**
-    # 2 か所へ書くと片方だけが実装から離れる。振動の検知の基準は実装が 3 つの一致へ
-    # 変わった後も、docstring 側が古い基準を出し続けていた（#329）。
-    p = argparse.ArgumentParser(description=__doc__)
-    sub = p.add_subparsers(dest="cmd", required=True)
 
+def _add_init_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser("init", help="Step 0 — state 初期化 or 再開")
     sp.add_argument("pr", type=int)
-    sp.add_argument("--max-rounds", type=int, default=12)
-    sp.add_argument("--rotate-after", type=int, default=8)
+    sp.add_argument("--max-rounds", type=int, default=None)
+    sp.add_argument("--rotate-after", type=int, default=None)
     sp.add_argument(
-        "--only", choices=list(assignment.ALL_RUNTIMES), default=None,
-        help="片方だけで回す（デバッグ用）")
+        "--only", type=_runtime_or_none, default=None,
+        help="1 者だけで回す。席の埋め合わせを行わない。none で指定を外す")
+    sp.add_argument(
+        "--exclude", action="append", type=_runtime_list, default=None,
+        help="母集合から外す者。カンマ区切り・繰り返し可。再開で `none` を渡すと空へ戻す")
+    sp.add_argument(
+        "--include", action="append", type=_runtime_list, default=None,
+        help="母集合に足す者（ホストも足せる）。カンマ区切り・繰り返し可。`none` で空へ戻す")
+    sp.add_argument(
+        "--require-all", dest="require_all",
+        action=argparse.BooleanOptionalAction, default=None,
+        help="確認を通らない者が 1 者でもいれば失敗する（従来の関門）。既定は外して続ける")
     sp.add_argument(
         "--host", choices=list(assignment.HOST_RUNTIMES), default=None,
         help="この収束ループを起動している CLI。省略時は環境変数から推定する")
@@ -4377,6 +4804,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sp.set_defaults(func=cmd_init)
 
+
+def _add_start_round_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser(
         "start-round",
         help="Step 1 — round 開始判定 (1=上限到達/5=後始末の未了/8=同期できない)",
@@ -4384,12 +4813,16 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_start_round)
 
+
+def _add_read_result_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser("read-result", help="Step 2.4 — review result を state にマージ")
     sp.add_argument("pr", type=int)
-    sp.add_argument("agent", choices=list(assignment.ALL_RUNTIMES))
+    sp.add_argument("agent", type=_seat_arg)
     sp.add_argument("--file", default=None)
     sp.set_defaults(func=cmd_read_result)
 
+
+def _add_unresolved_threads_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser(
         "unresolved-threads",
         help="PR 上の未解決の指摘を数える (0=数えられた/1=取得できなかった)",
@@ -4397,10 +4830,14 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_unresolved_threads)
 
+
+def _add_flush_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser("flush", help="待ち行列に積んだ投稿を流す (常に 0)")
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_flush)
 
+
+def _add_judge_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser(
         "judge",
         help="Step 3 — intent ベース pass 判定 "
@@ -4409,6 +4846,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_judge)
 
+
+def _add_check_oscillation_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser(
         "check-oscillation",
         help="Step 4 — 同じ箇所を指す指摘の割合を計算 (2=続行/4=振動で中断)",
@@ -4416,27 +4855,37 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_check_oscillation)
 
+
+def _add_verify_findings_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser(
         "verify-findings",
         help="Step 2.5 前段 — 重複の統合（1 段目）と実行検証（#156）")
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_verify_findings)
 
+
+def _add_collect_critiques_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser(
         "collect-critiques",
         help="Step 2.5 後段 — 反証の結果を指摘へ結び、申告の重複を束ねる（#156）")
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_collect_critiques)
 
+
+def _add_merge_fix_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser("merge-fix", help="Step 5 post — fix 戻り値マージ + CI 分類")
     sp.add_argument("pr", type=int)
     sp.add_argument("--file", default=None)
     sp.set_defaults(func=cmd_merge_fix)
 
+
+def _add_should_rotate_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser("should-rotate", help="Step 6 — rotate 要否 (0=rotate/2=keep)")
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_should_rotate)
 
+
+def _add_set_current_pr_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser("set-current-pr", help="rotation 後の current_pr 更新")
     sp.add_argument(
         "--head-branch",
@@ -4447,6 +4896,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("new_pr", type=int)
     sp.set_defaults(func=cmd_set_current_pr)
 
+
+def _add_verify_sweep_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser(
         "verify-sweep",
         help="Step 7.5 後段 — 最終スイープ後の未解決の指摘を検証 (0=残なし/6=残あり)",
@@ -4455,9 +4906,46 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--file", default=None)
     sp.set_defaults(func=cmd_verify_sweep)
 
+
+def _add_report_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser("report", help="Step 8 — deferred nit + サマリ表示")
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=cmd_report)
+
+
+# 副コマンドの登録関数。**`--help` の一覧はこの順で出る**ため、並びを変えない。
+_SUBCOMMAND_REGISTRARS = (
+    _add_init_parser,
+    _add_start_round_parser,
+    _add_read_result_parser,
+    _add_unresolved_threads_parser,
+    _add_flush_parser,
+    _add_judge_parser,
+    _add_check_oscillation_parser,
+    _add_verify_findings_parser,
+    _add_collect_critiques_parser,
+    _add_merge_fix_parser,
+    _add_should_rotate_parser,
+    _add_set_current_pr_parser,
+    _add_verify_sweep_parser,
+    _add_report_parser,
+)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """副コマンドの引数を組み立てる。**テストが選択肢を検査できるように分ける。**
+
+    実機で `kiro` の結果が `invalid choice` で弾かれた。担当が 4 つの名前を取りうる
+    以上、副コマンドの引数も同じ母集合を持たなければ、結果を残した担当が「結果なし」
+    として扱われる。
+    """
+    # 副コマンドの説明は各登録関数の `help` だけが持つ。**モジュールの docstring へ写さない。**
+    # 2 か所へ書くと片方だけが実装から離れる。振動の検知の基準は実装が 3 つの一致へ
+    # 変わった後も、docstring 側が古い基準を出し続けていた（#329）。
+    p = argparse.ArgumentParser(description=__doc__)
+    sub = p.add_subparsers(dest="cmd", required=True)
+    for register in _SUBCOMMAND_REGISTRARS:
+        register(sub)
     return p
 
 

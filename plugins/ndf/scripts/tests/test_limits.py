@@ -26,26 +26,19 @@ STALLS = {"codex": 180, "agy": 480, "kiro": 480, "claude": 900}
 
 
 @pytest.fixture()
-def limits(monkeypatch):
-    # **表の既定値を読むテストである。** 実行した人の環境の `MONITOR_*` を外す（#678）。
-    for key in [k for k in os.environ if k.startswith("MONITOR_")]:
-        monkeypatch.delenv(key)
+def limits():
+    # 表の既定値を読むテストである。実行した人の環境の `MONITOR_*` は、根の
+    # `conftest.py` が実行中だけ外す（#678）。
     spec = importlib.util.spec_from_file_location("ndf_lib_limits", LIMITS)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
 
 
-def _clean_env(**over: str) -> dict[str, str]:
-    env = {k: v for k, v in os.environ.items() if not k.startswith("MONITOR_")}
-    env.update(over)
-    return env
-
-
 def _run(*args: str, **env: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(LIMITS), *args],
-        env=_clean_env(**env), capture_output=True, text=True,
+        env={**os.environ, **env}, capture_output=True, text=True,
     )
 
 

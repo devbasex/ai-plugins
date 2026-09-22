@@ -141,7 +141,15 @@ CLAUDE_ALLOWED_TOOLS=${NDF_CLAUDE_ALLOWED_TOOLS:-Bash,Read,Write,Edit,Glob,Grep}
 
 cd "$WORKDIR"
 
+# **CLI を独立したプロセスグループで起動する（#584 / #729 の決定 10）。** ジョブ制御を
+# 有効にして背景起動すると、CLI の pid がそのままプロセスグループの番号になる。監視は
+# 止めるときにグループへシグナルを送るので、CLI の子プロセスが止めた後に結果ファイルを
+# 書かない。`setsid` は macOS に標準で無いため使わない。起動の直後に戻し、この script の
+# 残りはジョブ制御の影響を受けない。`set -m` は bash 3.2（macOS）にもある（bash.1 の
+# 「Monitor mode. Job control is enabled.」）。
+set -m
 launch_runtime
+set +m
 
 echo "$PID" > "$PID_FILE"
 disown 2>/dev/null || true

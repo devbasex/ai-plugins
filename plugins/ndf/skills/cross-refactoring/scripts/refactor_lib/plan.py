@@ -199,10 +199,8 @@ def _plan_deferred_section(state: dict[str, Any]) -> list[str]:
 
 def _plan_round_section(state: dict[str, Any], entry: dict[str, Any]) -> list[str]:
     """1 ラウンド分の見出しと、そのラウンドの改善項目を並べる。"""
-    reviewers = " / ".join(entry.get("reviewers") or []) or "—"
     lines = [
-        f"## ラウンド {entry['round']}"
-        f"（実装 {entry.get('impl', '—')} / レビュー {reviewers}）",
+        f"## ラウンド {entry['round']}（実装 {entry.get('impl', '—')}）",
         "",
     ]
     items = [i for i in state.get("items") or [] if i.get("round") == entry["round"]]

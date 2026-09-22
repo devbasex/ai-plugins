@@ -181,11 +181,8 @@ def test_claude_stdout_scan_ignores_missing_file(monitor_mod, tmp_path):
 
 # ---------- 5. 追加ランタイムの stall 既定 ----------
 
-def test_stall_defaults_cover_claude_and_kiro(monitor_mod, monkeypatch):
+def test_stall_defaults_cover_claude_and_kiro(monitor_mod):
     """`claude -p` は完了まで無出力なので、最も長い既定を持つこと。"""
-    monkeypatch.delenv("MONITOR_STALL", raising=False)
-    monkeypatch.delenv("MONITOR_STALL_CLAUDE", raising=False)
-    monkeypatch.delenv("MONITOR_STALL_KIRO", raising=False)
     assert monitor_mod._agent_stall_default("claude") == 900
     assert monitor_mod._agent_stall_default("kiro") == 480
 

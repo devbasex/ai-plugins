@@ -1055,7 +1055,28 @@ wt_extract_write_target() {
   _wt_read_lines < <(_wt_extract_tokenize "$spaced")
   words=("${WT_LINES[@]+"${WT_LINES[@]}"}")
 
-  # 段 3: 現在地追跡と書き込み先抽出のメイン走査
+  # 段 3・段 4: 語列を 1 度読み通し、現在地を追いながら書き込み先を出す。
+  _wt_extract_scan "$base" ${words[@]+"${words[@]}"}
+}
+
+# 語列を 1 度だけ読み通す走査。第 1 引数は相対パスの起点、残りが語である。
+# 書き込み先を 1 件でも出せば 0、出せなければ 1 を返す。
+#
+# 語ごとの処理は 3 つに分かれる。
+#
+# | 段 | 関数 | 何を決めるか |
+# | --- | --- | --- |
+# | 命令の位置 | `_wt_scan_command_position` | その語が命令名か、関数定義の途中か |
+# | 段 3: 追跡 | `_wt_scan_track_word` | 現在地と複合構文の入れ子。当たれば次の語へ進む |
+# | 段 4: 抽出 | `_wt_scan_emit_word` | 書き込み先の語を出す |
+#
+# 状態は走査の全体で共有するため、各段はこの関数の局所変数を直接読み書きする。
+_wt_extract_scan() {
+  local base="$1"
+  shift
+  local -a words=()
+  words=("$@")
+
   # `cd` を追った現在地と、それが確かかどうか。起点を渡されない限り使わない。
   local cwd="$base" cwd_known=1
   # `cd` の効果が及ぶ範囲は、それが動くシェルの中に限られる。パイプの各区画と
@@ -1496,8 +1517,9 @@ wt_extract_write_target() {
     _emit "$dest"
   }
 
-  for ((i = 0; i < n; i++)); do
-    w=${words[i]}
+  # 今の語が命令の位置にあるかを決め、関数定義の見分けを進める。結果は `at_cmd` と
+  # `cmd_prefix` / `cmd_wrapper` / `func_stage` / `prev` に置く。書き込み先は出さない。
+  _wt_scan_command_position() {
     # コマンドの位置にある語だけを命令として扱う。`echo cd > f` の `cd` を
     # 移動として数えると、書き込み先の起点がずれる。
     at_cmd=0
@@ -1606,13 +1628,19 @@ wt_extract_write_target() {
       case "$func_moving" in *"|$w|"*) cwd_known=0 ;; esac
     fi
     prev="$w"
+  }
+
+  # 段 3: 現在地と複合構文の追跡。今の語が区切り・複合構文・`cd` のいずれかであれば
+  # 走査の状態を更新して 0 を返す（呼び出し側はその語で次へ進む）。当たらなければ 1 を
+  # 返し、段 4 が書き込み先を見る。
+  _wt_scan_track_word() {
     case "$w" in
       "|"|"|&")
         # パイプの各区画は部分シェルで動く。入口の位置へ戻す。
         cwd="$pipe_cwd"; cwd_known="$pipe_known"
         # 区画の中の `cd` は親の位置を変えない。`||` の判定に使う回数も戻す。
         list_cds="$pipe_cds"; cd_is_last=0
-        continue
+        return 0
         ;;
       "&")
         # 背景実行は処理のまとまりごと部分シェルへ入る。入口の位置へ戻す。
@@ -1622,7 +1650,7 @@ wt_extract_write_target() {
         list_cwd="$cwd"; list_known="$cwd_known"; list_cds=0; list_or=0
         list_and_uncertain=0; list_cond_cd=0
         cd_is_last=0
-        continue
+        return 0
         ;;
       "&&")
         # 左辺が成功したときに走る。移動の効果は残る。パイプの入口だけ引き直す。
@@ -1636,7 +1664,7 @@ wt_extract_write_target() {
         # ことが確かである。
         if [ "$list_or" = 1 ] && [ "$list_cds" != 0 ]; then cwd_known=0; fi
         pipe_cwd="$cwd"; pipe_known="$cwd_known"; pipe_cds="$list_cds"
-        continue
+        return 0
         ;;
       "||")
         # 右辺が**後続へ進まない命令**なら、そこを過ぎた時点で左辺の成功が確定
@@ -1667,7 +1695,7 @@ wt_extract_write_target() {
               list_cwd="$cwd"; list_known="$cwd_known"; list_cds=0
               list_and_uncertain=0; list_cond_cd=0; cd_is_last=0
               pipe_cwd="$cwd"; pipe_known="$cwd_known"; pipe_cds=0
-              continue
+              return 0
               ;;
             "{")
               # `cd dir || { echo ...; exit 1; }` は `|| exit` より広く使われる。
@@ -1699,7 +1727,7 @@ wt_extract_write_target() {
         fi
         list_or=1
         pipe_cwd="$cwd"; pipe_known="$cwd_known"; pipe_cds="$list_cds"
-        continue
+        return 0
         ;;
       __WT_SEP__|__WT_CASE_FALL__)
         # `;` と改行でも同じシェルが続く。両方の入口を引き直す。
@@ -1723,7 +1751,7 @@ wt_extract_write_target() {
         list_cwd="$cwd"; list_known="$cwd_known"; list_cds=0; list_or=0
         list_and_uncertain=0; list_cond_cd=0
         cd_is_last=0
-        continue
+        return 0
         ;;
       if|while|until|for|select|case)
         # 複合コマンドの入口。中で `cd` を追ったかを、閉じるときに比べるため控える。
@@ -1738,7 +1766,7 @@ wt_extract_write_target() {
             case_depth=$((case_depth + 1))
           fi
         fi
-        continue
+        return 0
         ;;
       "{"|"(")
         # 部分シェル (`(`) と、同じシェルで走るまとまり (`{`) の入口。どちらも
@@ -1764,7 +1792,7 @@ wt_extract_write_target() {
             func_stage=""
           fi
         fi
-        continue
+        return 0
         ;;
       "}")
         # `}` は予約語で、命令の位置にしか置けない。`echo }` の `}` は語である。
@@ -1781,7 +1809,7 @@ wt_extract_write_target() {
             pipe_cwd="$cwd"; pipe_known="$cwd_known"; pipe_cds=0
           fi
         fi
-        continue
+        return 0
         ;;
       __WT_SUBSHELL_END__)
         # 部分シェルの終わり。字句解析が切り出した `(` に対応するものだけが
@@ -1793,7 +1821,7 @@ wt_extract_write_target() {
         _close_function_body
         _pop_group
         _pop_subshell
-        continue
+        return 0
         ;;
       else|elif)
         # 条件が偽のときに走る。条件の中の `cd` は効いていない。
@@ -1801,7 +1829,7 @@ wt_extract_write_target() {
           [ "$cds" -gt "${block_cds[block_depth - 1]}" ]; then
           cwd_known=0
         fi
-        continue
+        return 0
         ;;
       fi|done|esac)
         # 本体が走ったかどうかは実行時に決まる。中で移動していたなら、閉じた後の
@@ -1814,65 +1842,77 @@ wt_extract_write_target() {
             case_depth=$((case_depth - 1))
           fi
         fi
-        continue
+        return 0
         ;;
-      cd)
-        [ "$at_cmd" = 1 ] && [ -n "$base" ] || continue
-        # 部分シェルの中でも移動は追う。中の相対パスはここで解決する。親の位置は
-        # `)` で `_pop_subshell` が戻すため、この移動は外へ漏れない。
-        # 移動先の語と、この `cd` に付いたリダイレクトを 1 回の走査で拾う。
-        # **リダイレクト先は移動する前の位置で開かれる。** シェルはリダイレクトを
-        # 開いてから命令を実行するためである。移動後の位置で解決すると、主
-        # ディレクトリ側への書き込みを作業ツリー側と取り違えて案内を出さない
-        # （検知漏れになる）。まだ `cwd` を更新していないここで解決する。
-        dest=""
-        cd_end_of_options=0
-        for ((k = i + 1; k < n; k++)); do
-          case "${words[k]}" in
-            __WT_REDIR__|__WT_APPEND__)
-              _redir_target "$k"
-              _emit "$_WT_REDIR_DEST"
-              k=$_WT_REDIR_END
-              continue
-              ;;
-          esac
-          if _wt_is_separator "${words[k]}"; then break; fi
-          case "${words[k]}" in
-            # `--` 以降はオプションの解釈を止める。`cd -- -dir` の `-dir` は
-            # 移動先であって `cd -` ではない。止めないと読み飛ばして、後続の
-            # 相対パスを抑止する。
-            --) [ "$cd_end_of_options" = 1 ] || { cd_end_of_options=1; continue; } ;;
-            # **`-` だけは `--` の後でも直前の位置を指す。** bash では `-` が
-            # オプションではなく被演算子の綴りとして扱われるためで、`-` という
-            # 名前のディレクトリがあっても `$OLDPWD` へ移る（実測で確認）。
-            # 字面からは追えないため、移動先を決めない。
-            -) continue ;;
-            # `cd -` と同じく、オプションは移動先ではない。
-            -*) [ "$cd_end_of_options" = 1 ] || continue ;;
-          esac
-          # 移動先は最初の被演算子である。リダイレクトを拾い切るため、
-          # 見つけても区切りまで走査を続ける。
-          [ -n "$dest" ] || dest=${words[k]}
-        done
-        # 走査が届いた位置を控える。`__WT_REDIR__` の枝が同じ語を二度拾わない。
-        resolved_redir_end=$k
-        # `||` の右辺で戻せるかどうかの判定に使う。
-        list_cds=$((list_cds + 1)); cd_is_last=1
-        # `&&` を跨いだ先の `cd` は、走ったかどうかが左辺の成否で決まる。
-        [ "$list_and_uncertain" = 0 ] || list_cond_cd=1
-        # 複合コマンドを閉じるときの比較に使う。
-        cds=$((cds + 1))
-        case "$dest" in
-          # 引数なし (ホーム)・`cd -`・展開前の変数・チルダ展開。いずれも
-          # コマンドの字面からは移動先を決められない。
-          ""|*'$'*|"~"*) cwd_known=0 ;;
-          /*) cwd=$(wt_normalize_path "$dest" "/"); cwd_known=1 ;;
-          *) [ "$cwd_known" = 1 ] && cwd=$(wt_normalize_path "$dest" "$cwd") ;;
-        esac
-        ;;
+      cd) _wt_scan_cd; return 0 ;;
+    esac
+    return 1
+  }
+
+  # `cd` の走査。移動先を現在地へ反映し、同じ命令に付いたリダイレクトを移動する前の
+  # 位置で解決する。命令の位置に無い `cd` と、起点を渡されない呼び方では何もしない。
+  _wt_scan_cd() {
+    [ "$at_cmd" = 1 ] && [ -n "$base" ] || return 0
+    # 部分シェルの中でも移動は追う。中の相対パスはここで解決する。親の位置は
+    # `)` で `_pop_subshell` が戻すため、この移動は外へ漏れない。
+    # 移動先の語と、この `cd` に付いたリダイレクトを 1 回の走査で拾う。
+    # **リダイレクト先は移動する前の位置で開かれる。** シェルはリダイレクトを
+    # 開いてから命令を実行するためである。移動後の位置で解決すると、主
+    # ディレクトリ側への書き込みを作業ツリー側と取り違えて案内を出さない
+    # （検知漏れになる）。まだ `cwd` を更新していないここで解決する。
+    dest=""
+    cd_end_of_options=0
+    for ((k = i + 1; k < n; k++)); do
+      case "${words[k]}" in
+        __WT_REDIR__|__WT_APPEND__)
+          _redir_target "$k"
+          _emit "$_WT_REDIR_DEST"
+          k=$_WT_REDIR_END
+          continue
+          ;;
+      esac
+      if _wt_is_separator "${words[k]}"; then break; fi
+      case "${words[k]}" in
+        # `--` 以降はオプションの解釈を止める。`cd -- -dir` の `-dir` は
+        # 移動先であって `cd -` ではない。止めないと読み飛ばして、後続の
+        # 相対パスを抑止する。
+        --) [ "$cd_end_of_options" = 1 ] || { cd_end_of_options=1; continue; } ;;
+        # **`-` だけは `--` の後でも直前の位置を指す。** bash では `-` が
+        # オプションではなく被演算子の綴りとして扱われるためで、`-` という
+        # 名前のディレクトリがあっても `$OLDPWD` へ移る（実測で確認）。
+        # 字面からは追えないため、移動先を決めない。
+        -) continue ;;
+        # `cd -` と同じく、オプションは移動先ではない。
+        -*) [ "$cd_end_of_options" = 1 ] || continue ;;
+      esac
+      # 移動先は最初の被演算子である。リダイレクトを拾い切るため、
+      # 見つけても区切りまで走査を続ける。
+      [ -n "$dest" ] || dest=${words[k]}
+    done
+    # 走査が届いた位置を控える。`__WT_REDIR__` の枝が同じ語を二度拾わない。
+    resolved_redir_end=$k
+    # `||` の右辺で戻せるかどうかの判定に使う。
+    list_cds=$((list_cds + 1)); cd_is_last=1
+    # `&&` を跨いだ先の `cd` は、走ったかどうかが左辺の成否で決まる。
+    [ "$list_and_uncertain" = 0 ] || list_cond_cd=1
+    # 複合コマンドを閉じるときの比較に使う。
+    cds=$((cds + 1))
+    case "$dest" in
+      # 引数なし (ホーム)・`cd -`・展開前の変数・チルダ展開。いずれも
+      # コマンドの字面からは移動先を決められない。
+      ""|*'$'*|"~"*) cwd_known=0 ;;
+      /*) cwd=$(wt_normalize_path "$dest" "/"); cwd_known=1 ;;
+      *) [ "$cwd_known" = 1 ] && cwd=$(wt_normalize_path "$dest" "$cwd") ;;
+    esac
+  }
+
+  # 段 4: 書き込み先の抽出。段 3 が扱わなかった語だけが渡る。出力は `_emit` が行い、
+  # 相対パスはそこで現在地から解決される。
+  _wt_scan_emit_word() {
+    case "$w" in
       __WT_REDIR__|__WT_APPEND__)
         # 移動前の位置で解決済みのリダイレクトは、その枝が拾い終えている。
-        if [ "$i" -lt "$resolved_redir_end" ]; then continue; fi
+        if [ "$i" -lt "$resolved_redir_end" ]; then return 0; fi
         _redir_target "$i"
         _emit "$_WT_REDIR_DEST"
         # 命令の位置で読んだなら、被演算子の次に命令名が続く。
@@ -1900,11 +1940,20 @@ wt_extract_write_target() {
         _wt_extract_cp_mv_target "$i"
         ;;
     esac
+  }
+
+  # 入口は各段を語ごとに順へ接続するだけにする。
+  for ((i = 0; i < n; i++)); do
+    w=${words[i]}
+    _wt_scan_command_position
+    if _wt_scan_track_word; then continue; fi
+    _wt_scan_emit_word
   done
 
   unset -f _emit _push_group _pop_group _push_subshell _pop_subshell _or_group_exits \
     _or_exit_redirs _close_function_body _wt_extract_sed_targets _wt_extract_cp_mv_target \
-    _redir_span _wt_take_redirect_operand
+    _redir_span _wt_take_redirect_operand \
+    _wt_scan_command_position _wt_scan_track_word _wt_scan_cd _wt_scan_emit_word
   [ "$found" = 1 ] || return 1
 }
 

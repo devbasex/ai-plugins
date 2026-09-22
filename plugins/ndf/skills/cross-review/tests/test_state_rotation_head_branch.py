@@ -105,6 +105,55 @@ def test_an_empty_lookup_keeps_the_previous_branch(tmp_dir, state_mod, monkeypat
     assert _state(tmp_dir)["head_branch"] == OLD_BRANCH
 
 
+def test_only_the_current_pr_entry_is_closed_when_history_has_past_prs(
+    tmp_dir, state_mod, monkeypatch
+):
+    """現状固定（R2-005）。過去に閉じた PR を含む履歴で、直前の現在 PR だけを閉じる。
+
+    `pr_history` に閉じた過去 PR（`closed_at` 設定済み）と現在の PR（`closed_at`
+    が None）を順に持たせて `cmd_set_current_pr` を実行する。過去 PR は変わらず、
+    直前の現在 PR に `closed_at` と `rounds` が入り、新 PR エントリが
+    `closed_at: None` / `rounds: 0` で末尾へ足される分岐を固定する。
+    """
+    past_pr = 4200
+    state = {
+        "current_pr": PR,
+        "repo": "o/r",
+        "head_branch": OLD_BRANCH,
+        "rounds": [
+            {"round": 1, "pr": past_pr},
+            {"round": 2, "pr": PR},
+            {"round": 3, "pr": PR},
+        ],
+        "pr_history": [
+            {"pr": past_pr, "opened_at": "t0", "closed_at": "t1", "rounds": 1},
+            {"pr": PR, "opened_at": "t2", "closed_at": None, "rounds": 0},
+        ],
+        "final": None,
+    }
+    (tmp_dir / f"cross-review-pr{PR}-state.json").write_text(json.dumps(state))
+    # 引数で枝名を渡し、GitHub を呼ばない経路で確かめる。
+    monkeypatch.setattr(
+        state_mod, "_sh", lambda cmd, check=True: pytest.fail("GitHub を呼んでいる")
+    )
+
+    state_mod.cmd_set_current_pr(_args(head_branch=NEW_BRANCH))
+
+    history = _state(tmp_dir)["pr_history"]
+    # 過去 PR は変わらない。
+    assert history[0] == {
+        "pr": past_pr, "opened_at": "t0", "closed_at": "t1", "rounds": 1}
+    # 直前の現在 PR に closed_at と rounds（その PR のラウンド数 2）が入る。
+    assert history[1]["pr"] == PR
+    assert history[1]["closed_at"] is not None
+    assert history[1]["rounds"] == 2
+    # 新 PR エントリが末尾に closed_at: None / rounds: 0 で足される。
+    assert history[2]["pr"] == NEW_PR
+    assert history[2]["closed_at"] is None
+    assert history[2]["rounds"] == 0
+    assert len(history) == 3
+
+
 def test_the_skeleton_passes_the_new_branch(state_mod) -> None:
     """手順書と参照の骨組みが `--head-branch` を渡していることを固定する。"""
     here = pathlib.Path(__file__).resolve().parent.parent

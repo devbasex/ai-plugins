@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import tempfile
 
 
 STATE_ID = 130
@@ -82,3 +83,18 @@ def test_it_uses_the_cwd_when_the_env_var_is_unset(paths, tmp_path, monkeypatch)
 
     assert path == cwd_path
     assert state["phase"] == "from-cwd"
+
+
+def test_the_explicit_worktree_base_is_resolved(paths, tmp_path, monkeypatch):
+    """現状固定: 明示した作業ディレクトリの親を絶対パスへ解決する。"""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("NDF_WORKTREE_BASE", "relative-worktrees")
+
+    assert paths.default_worktree_base() == (tmp_path / "relative-worktrees").resolve()
+
+
+def test_the_worktree_base_falls_back_to_the_system_tmpdir(paths, monkeypatch):
+    """現状固定: 明示指定が無ければシステム tmpdir 配下を使う。"""
+    monkeypatch.delenv("NDF_WORKTREE_BASE", raising=False)
+
+    assert paths.default_worktree_base() == pathlib.Path(tempfile.gettempdir()) / "ndf-worktrees"

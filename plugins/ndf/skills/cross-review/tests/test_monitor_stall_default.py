@@ -7,31 +7,26 @@
 
 agy は err.log にほぼ進捗を出さないため、ビルトイン既定を 480s と大きめに
 取って 1 度目の STALLED 誤検知を避ける。codex は従来通り 180s で変更なし。
+
+実行した人の `MONITOR_*` は、根の `conftest.py` が実行中だけ外す（#678）。
 """
 from __future__ import annotations
 
 import pytest
 
 
-def test_builtin_default_codex(monkeypatch, monitor_mod):
+def test_builtin_default_codex(monitor_mod):
     """codex のビルトイン既定は 180s。"""
-    monkeypatch.delenv("MONITOR_STALL", raising=False)
-    monkeypatch.delenv("MONITOR_STALL_CODEX", raising=False)
-    monkeypatch.delenv("MONITOR_STALL_AGY", raising=False)
     assert monitor_mod._agent_stall_default("codex") == 180
 
 
-def test_builtin_default_agy(monkeypatch, monitor_mod):
+def test_builtin_default_agy(monitor_mod):
     """agy のビルトイン既定は 480s (codex より大きい)。"""
-    monkeypatch.delenv("MONITOR_STALL", raising=False)
-    monkeypatch.delenv("MONITOR_STALL_CODEX", raising=False)
-    monkeypatch.delenv("MONITOR_STALL_AGY", raising=False)
     assert monitor_mod._agent_stall_default("agy") == 480
 
 
 def test_per_agent_env_overrides_builtin(monkeypatch, monitor_mod):
     """env `MONITOR_STALL_AGY` 設定で agy 既定が上書きされる。"""
-    monkeypatch.delenv("MONITOR_STALL", raising=False)
     monkeypatch.setenv("MONITOR_STALL_AGY", "600")
     assert monitor_mod._agent_stall_default("agy") == 600
     # codex は影響を受けない
@@ -46,8 +41,6 @@ def test_shared_env_applies_to_both(monkeypatch, monitor_mod):
     本テストは monkeypatch で `MONITOR_STALL=240` に書き換え、両 agent が 240 を
     返すことを確認する (= 共通 env が実際に反映されることの検証)。
     """
-    monkeypatch.delenv("MONITOR_STALL_CODEX", raising=False)
-    monkeypatch.delenv("MONITOR_STALL_AGY", raising=False)
     monkeypatch.setenv("MONITOR_STALL", "240")
     # 共通 env が両 agent に効く (per-agent 上書きなしの場合)
     assert monitor_mod._agent_stall_default("codex") == 240
@@ -58,16 +51,13 @@ def test_per_agent_env_takes_precedence_over_shared(monkeypatch, monitor_mod):
     """per-agent env > 共通 env の優先順位を確認する。"""
     monkeypatch.setenv("MONITOR_STALL", "240")
     monkeypatch.setenv("MONITOR_STALL_AGY", "777")
-    monkeypatch.delenv("MONITOR_STALL_CODEX", raising=False)
     assert monitor_mod._agent_stall_default("agy") == 777
     # codex 側は per-agent env が無いので 共通 env (= 240) にフォールバック
     assert monitor_mod._agent_stall_default("codex") == 240
 
 
-def test_unknown_agent_falls_back_to_default_stall(monkeypatch, monitor_mod):
+def test_unknown_agent_falls_back_to_default_stall(monitor_mod):
     """ビルトインに無い agent 名は `DEFAULT_STALL` にフォールバックする。"""
-    monkeypatch.delenv("MONITOR_STALL", raising=False)
-    monkeypatch.delenv("MONITOR_STALL_UNKNOWN", raising=False)
     assert monitor_mod._agent_stall_default("unknown") == monitor_mod.DEFAULT_STALL
 
 
@@ -80,8 +70,6 @@ def test_shared_env_non_numeric_falls_back_to_builtin(monkeypatch, monitor_mod, 
     gemini round 4 指摘: `int(os.environ[...])` は非数値で ValueError を出す。
     監視プロセスを env 設定ミスでクラッシュさせないため、try/except で builtin に戻す。
     """
-    monkeypatch.delenv("MONITOR_STALL_CODEX", raising=False)
-    monkeypatch.delenv("MONITOR_STALL_AGY", raising=False)
     monkeypatch.setenv("MONITOR_STALL", "abc")
     # codex / agy とも builtin 既定 (180 / 480) に戻る
     assert monitor_mod._agent_stall_default("codex") == 180
@@ -96,9 +84,7 @@ def test_per_agent_env_non_numeric_falls_back_to_builtin(
     monkeypatch, monitor_mod, capsys
 ):
     """env `MONITOR_STALL_<AGENT>` が非数値なら builtin にフォールバック。"""
-    monkeypatch.delenv("MONITOR_STALL", raising=False)
     monkeypatch.setenv("MONITOR_STALL_AGY", "not-a-number")
-    monkeypatch.delenv("MONITOR_STALL_CODEX", raising=False)
     # agy は builtin (480) にフォールバック
     assert monitor_mod._agent_stall_default("agy") == 480
     # codex は env 未設定なので builtin (180)
@@ -112,7 +98,6 @@ def test_per_agent_env_non_numeric_does_not_affect_other_agent(
     monkeypatch, monitor_mod
 ):
     """non-numeric な per-agent env は対象 agent だけに影響する。"""
-    monkeypatch.delenv("MONITOR_STALL", raising=False)
     monkeypatch.setenv("MONITOR_STALL_AGY", "xxx")
     monkeypatch.setenv("MONITOR_STALL_CODEX", "200")  # codex 側は正常
     assert monitor_mod._agent_stall_default("codex") == 200

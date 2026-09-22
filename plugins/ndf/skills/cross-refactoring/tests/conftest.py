@@ -46,7 +46,7 @@ def refactor() -> types.ModuleType:
 _MODULES = (
     "commands.apply", "commands.converge", "commands.gate",
     "commands.report", "commands.setup",
-    "gitfacts", "outbound", "paths", "plan", "proposals",
+    "gitfacts", "intake", "outbound", "paths", "plan", "proposals",
     "rounds", "scope", "verify", "vocabulary",
 )
 

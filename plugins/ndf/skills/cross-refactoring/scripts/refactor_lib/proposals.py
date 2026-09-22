@@ -21,6 +21,27 @@ from .vocabulary import (
 )
 
 
+def _degrade_if_unknown(
+    value: str,
+    allowed: Iterable[str],
+    source: str,
+    label: str,
+    location: str,
+) -> tuple[str, bool]:
+    """語彙集合に含まれない値を `unknown` へ降格する。
+
+    降格したときは警告を出し `(unknown, True)` を返す。含まれていれば値をそのまま
+    `(value, False)` で返す。`smell` / `technique` / `severity` の同じ降格ルールと、
+    テスト提案の `case` / `level` の降格を 1 箇所に集め、警告文や降格処理の変更が
+    散らばらないようにする。`location` は警告に添える位置表記で、構造改善側は
+    `path#symbol`、テスト側は `target` を渡す。
+    """
+    if value not in allowed:
+        info(f"⚠ {source}: 語彙外の{label} `{value}` — unknown へ降格 ({location})")
+        return "unknown", True
+    return value, False
+
+
 def _normalize_proposal(raw: dict[str, Any], source: str) -> Optional[dict[str, Any]]:
     """1 件の提案を正規化する。必須項目を欠くものは捨てる。
 
@@ -37,19 +58,13 @@ def _normalize_proposal(raw: dict[str, Any], source: str) -> Optional[dict[str, 
     smell = str(raw.get("smell") or "").strip()
     technique = str(raw.get("technique") or "").strip()
     severity = str(raw.get("severity") or "").strip().lower()
-    degraded = False
-    if smell not in SMELLS:
-        info(f"⚠ {source}: 語彙外の兆候 `{smell}` — unknown へ降格 ({path}#{symbol})")
-        smell = "unknown"
-        degraded = True
-    if technique not in TECHNIQUES:
-        info(f"⚠ {source}: 語彙外の手法 `{technique}` — unknown へ降格 ({path}#{symbol})")
-        technique = "unknown"
-        degraded = True
-    if severity not in SEVERITY_ORDER:
-        info(f"⚠ {source}: 語彙外の重要度 `{severity}` — unknown へ降格 ({path}#{symbol})")
-        severity = "unknown"
-        degraded = True
+    smell, smell_degraded = _degrade_if_unknown(
+        smell, SMELLS, source, "兆候", f"{path}#{symbol}")
+    technique, technique_degraded = _degrade_if_unknown(
+        technique, TECHNIQUES, source, "手法", f"{path}#{symbol}")
+    severity, severity_degraded = _degrade_if_unknown(
+        severity, SEVERITY_ORDER, source, "重要度", f"{path}#{symbol}")
+    degraded = smell_degraded or technique_degraded or severity_degraded
     if degraded:
         severity = "unknown"
 
@@ -120,17 +135,7 @@ def merge_proposals(
     `excluded_keys` には過去に見送った項目の鍵を渡す。見送った項目を毎ラウンド
     再提案されると収束しないため、対象外として落とす。
     """
-    merged: dict[tuple[str, ...], dict[str, Any]] = {}
-    for source, items in proposals.items():
-        for raw in items:
-            norm = _normalize_proposal(raw, source)
-            if norm is None:
-                continue
-            key = _dedupe_key(norm)
-            if key in merged:
-                _merge_one(merged[key], norm)
-            else:
-                merged[key] = norm
+    merged = _build_merged(proposals, _normalize_proposal, _merge_one)
 
     min_severity = SEVERITY_ORDER.get(
         threshold, SEVERITY_ORDER[DEFAULT_SEVERITY_THRESHOLD])
@@ -153,6 +158,30 @@ def merge_proposals(
         ),
         max_items=max_items,
     )
+
+
+def _build_merged(
+    proposals: dict[str, list[dict[str, Any]]],
+    normalize: Callable[[dict[str, Any], str], Optional[dict[str, Any]]],
+    merge_one: Callable[[dict[str, Any], dict[str, Any]], None],
+) -> dict[tuple[str, ...], dict[str, Any]]:
+    """提案を正規化し、重複排除の鍵ごとに統合した辞書を返す。**種類で分けない。**
+
+    正規化と統合の関数だけが種類ごとに違う。重複排除の基準（`_dedupe_key`）が
+    片方だけ直されて食い違わないよう 1 箇所に置く。
+    """
+    merged: dict[tuple[str, ...], dict[str, Any]] = {}
+    for source, items in proposals.items():
+        for raw in items:
+            norm = normalize(raw, source)
+            if norm is None:
+                continue
+            key = _dedupe_key(norm)
+            if key in merged:
+                merge_one(merged[key], norm)
+            else:
+                merged[key] = norm
+    return merged
 
 
 def _select(
@@ -208,14 +237,20 @@ def _normalize_test_proposal(
         info(f"⚠ {source}: path / target の無いテスト項目を無視しました: {raw!r:.120}")
         return None
 
-    case = str(raw.get("case") or "").strip().lower()
-    level = str(raw.get("level") or "").strip().lower()
-    if case not in TEST_CASES:
-        info(f"⚠ {source}: 語彙外の経路 `{case}` — unknown へ降格 ({target})")
-        case = "unknown"
-    if level not in TEST_LEVELS:
-        info(f"⚠ {source}: 語彙外の階層 `{level}` — unknown へ降格 ({target})")
-        level = "unknown"
+    case, _ = _degrade_if_unknown(
+        str(raw.get("case") or "").strip().lower(),
+        TEST_CASES,
+        source,
+        "経路",
+        target,
+    )
+    level, _ = _degrade_if_unknown(
+        str(raw.get("level") or "").strip().lower(),
+        TEST_LEVELS,
+        source,
+        "階層",
+        target,
+    )
 
     return {
         "kind": TEST,
@@ -263,17 +298,7 @@ def merge_test_proposals(
 
     採否の詰めは `merge_proposals` と同じ `_select` が行う。
     """
-    merged: dict[tuple[str, ...], dict[str, Any]] = {}
-    for source, items in proposals.items():
-        for raw in items:
-            norm = _normalize_test_proposal(raw, source)
-            if norm is None:
-                continue
-            key = _dedupe_key(norm)
-            if key in merged:
-                _merge_test_one(merged[key], norm)
-            else:
-                merged[key] = norm
+    merged = _build_merged(proposals, _normalize_test_proposal, _merge_test_one)
 
     def reject(item: dict[str, Any]) -> Optional[str]:
         if item["case"] == "unknown" or item["level"] == "unknown":

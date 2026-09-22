@@ -5,8 +5,8 @@
 
 | 段階 | #261 の検査 | 待ち行列を入れた後 |
 | --- | --- | --- |
-| 結果を取り込む | 投稿の失敗があれば結果なし | `queued` が真の結果はこの検査を通す |
-| 結果を取り込む | 投稿先の参照の存在を照会 | `queued` が真のときは照会しない（識別子がまだ無い） |
+| 結果を取り込む | 投稿の失敗があれば結果なし | 取り込みが自分で送る。上限で送れなければ積んで `queued` を真にする（#730） |
+| 結果を取り込む | 投稿先の参照の存在を照会 | 照会しない。参照は送信の応答から取る（#730） |
 | 流した直後 | — | 参照を書き戻し、存在を 1 度だけ確かめる |
 | 判定 | 収束 | 待ち行列が空のときだけ |
 """
@@ -186,51 +186,28 @@ def test_a_review_that_did_not_arrive_is_recorded_as_no_result(
 # ---- 受け入れ条件 13 ----
 
 
-def test_a_queued_result_skips_the_arrival_check(state_mod, tmp_dir,
-                                                 monkeypatch) -> None:
-    """積んだ時点では届いていない。照会すると結果なしになり、二重に積まれる。"""
+def test_a_post_refused_by_the_limit_is_queued_and_recorded(
+        state_mod, queue_mod, fake_gh, tmp_dir) -> None:
+    """上限で送れなかった投稿は積まれ、記録は `queued` になる（#730）。"""
     _seed(tmp_dir, rounds=[{"round": 1, "pr": PR,
                             "started_at": "2026-09-03T00:00:00+00:00"}])
-    called: list = []
-    monkeypatch.setattr(state_mod, "_review_exists",
-                        lambda *a: called.append(a) or True)
-    monkeypatch.setattr(state_mod, "_posted_comment_count",
-                        lambda *a: called.append(a) or 0)
     rfile = tmp_dir / "result.json"
-    rfile.write_text(json.dumps({
-        "event": "REQUEST_CHANGES", "posted_as": "COMMENT", "comments_count": 3,
-        "review_url": "", "queued": True,
-        "post_error": "API rate limit exceeded",
-        "by_severity": {"major": 3},
-    }), encoding="utf-8")
+    rfile.write_text(json.dumps({"event": "REQUEST_CHANGES",
+                                 "by_severity": {"major": 3}}), encoding="utf-8")
+    fake_gh.set_rules([
+        {"match": f"pulls/{PR}/reviews?", "stdout": "[]"},
+        {"match": f"pulls/{PR}/reviews", "exit": 1,
+         "stdout": '{"message":"API rate limit exceeded for user ID 1.","status":"403"}',
+         "stderr": "gh: API rate limit exceeded for user ID 1. (HTTP 403)\n"},
+    ])
 
     state_mod.cmd_read_result(argparse.Namespace(pr=PR, agent="codex",
                                                  file=str(rfile)))
 
-    assert called == []
     entry = _state(tmp_dir)["rounds"][0]["codex"]
     assert entry["intent"] == "REQUEST_CHANGES"
     assert entry["queued"] is True
-
-
-def test_a_normal_result_still_checks_the_arrival(state_mod, tmp_dir,
-                                                  monkeypatch) -> None:
-    """`queued` を持たない結果ファイルの扱いは変えない（#261 のまま）。"""
-    _seed(tmp_dir, rounds=[{"round": 1, "pr": PR,
-                            "started_at": "2026-09-03T00:00:00+00:00"}])
-    called: list = []
-    monkeypatch.setattr(state_mod, "_review_exists",
-                        lambda *a: called.append(a) or True)
-    rfile = tmp_dir / "result.json"
-    rfile.write_text(json.dumps({
-        "event": "APPROVE", "comments_count": 0, "review_url": REVIEW_URL,
-        "by_severity": {},
-    }), encoding="utf-8")
-
-    state_mod.cmd_read_result(argparse.Namespace(pr=PR, agent="codex",
-                                                 file=str(rfile)))
-
-    assert len(called) == 1
+    assert queue_mod.Queue(tmp_dir / "pending").count() == 1
 
 
 # ---- 流した結果を、再開の入口の書き戻しが消さない ----
@@ -275,34 +252,40 @@ def test_the_resume_keeps_what_the_flush_wrote_to_the_state(
     # 書き戻す側の変更も残る。どちらか一方だけが残る直し方にしない。
     assert saved["manual_extra_review_instructions"] == "重点観点"
     assert queue_mod.Queue(tmp_dir / "pending").count() == 0
-# ---- 取り込みの前に流さない ----
+# ---- 取り込みの入口で残りを流す ----
 
 
-def test_the_read_result_does_not_flush_the_queue(
-        state_mod, queue_mod, fake_gh, tmp_dir) -> None:
-    """取り込みの入口では流さない。**書き戻し先がまだ無い。**
+def test_the_take_in_flushes_what_was_left_before_posting(
+        state_mod, queue_mod, fake_gh, tmp_dir, monkeypatch) -> None:
+    """前の取り込みで積んだ投稿を先に流し、その担当の記録へ書き戻す（#730）。
 
-    流すと `_confirm_flushed` は書き戻せないまま項目が消え、この後の取り込みが
-    `queued: true` だけを保存する。待ち行列は空になるため判定は収束させ、投稿の
-    存在も参照も一度も確かめられない。
+    積むのは取り込みだけで、積んだ時点でその担当の記録を書くため、書き戻し先がある。
     """
     _seed(tmp_dir, rounds=[{"round": 1, "pr": PR,
-                            "started_at": "2026-09-03T00:00:00+00:00"}])
+                            "started_at": "2026-09-03T00:00:00+00:00",
+                            "agy": {"intent": "APPROVE", "queued": True,
+                                    "by_severity": {}}}])
     queue_mod.enqueue(
         queue_mod.Queue(tmp_dir / "pending"), "review-post", REPO, PR,
-        {"body": "指摘の本文", "event": "APPROVE"},
-        actor="me", extra={"agent": "codex", "round": 1})
+        {"body": "## 🤖 cross-review | round 1 | agy | APPROVE\n", "event": "APPROVE"},
+        actor="me", extra={"agent": "agy", "round": 1})
     rfile = tmp_dir / "result.json"
-    rfile.write_text(json.dumps({
-        "event": "APPROVE", "comments_count": 0, "review_url": "",
-        "queued": True, "by_severity": {},
-    }), encoding="utf-8")
+    rfile.write_text(json.dumps({"event": "APPROVE", "by_severity": {}}),
+                     encoding="utf-8")
+    fake_gh.set_rules([
+        {"match": f"pulls/{PR}/reviews?", "stdout": "[]"},
+        {"match": "", "stdout": json.dumps(
+            {"id": 4961230016, "html_url": REVIEW_URL})},
+    ])
+    monkeypatch.setattr(state_mod, "_review_exists", lambda repo, pr, url: True)
 
     state_mod.cmd_read_result(argparse.Namespace(pr=PR, agent="codex",
                                                  file=str(rfile)))
 
-    assert queue_mod.Queue(tmp_dir / "pending").count() == 1
-    assert fake_gh.joined() == []
+    rnd = _state(tmp_dir)["rounds"][0]
+    assert rnd["agy"]["queued"] is False and rnd["agy"]["review_url"] == REVIEW_URL
+    assert rnd["codex"]["queued"] is False
+    assert queue_mod.Queue(tmp_dir / "pending").count() == 0
 
 
 def test_the_queued_reviews_are_confirmed_once_both_results_are_taken_in(
