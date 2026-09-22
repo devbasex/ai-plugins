@@ -368,3 +368,108 @@ def test_a_queued_item_is_told_apart_by_its_status_and_words(
         item: dict[str, Any], expected: bool) -> None:
     """流した後に残った項目も、422 と位置の語がそろうときだけ位置の拒否と見る。"""
     assert post_queue.rejected_by_position(item) is expected
+
+
+# ---------------- 上限のときに待って再実行する（R1-005） ----------------
+
+_OK = post_queue.Attempt(0, '{"id": 1}', "")
+_RATE = post_queue.Attempt(1, "", "API rate limit exceeded (HTTP 429)")
+_NORMAL_FAIL = post_queue.Attempt(1, "", "permission denied (HTTP 403)")
+
+
+def _run_returning(responses: list[Any], calls: list[list[str]]):
+    """`run` の代わりに、応答列を順に返す疑似実装。呼ばれた cmd を記録する。"""
+    queue = list(responses)
+
+    def fake_run(cmd, stdin=None):
+        calls.append(cmd)
+        return queue.pop(0)
+
+    return fake_run
+
+
+def _recording_sleep(waits: list[float]):
+    """時間を進めず、待った秒数だけ記録する疑似 sleep。"""
+
+    def sleep(seconds):
+        waits.append(seconds)
+
+    return sleep
+
+
+def test_retry_returns_immediately_on_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """現状固定。最初の実行が成功したら、待たずにその結果を返す。"""
+    calls: list[list[str]] = []
+    waits: list[float] = []
+    monkeypatch.setattr(post_queue, "run", _run_returning([_OK], calls))
+    monkeypatch.setattr(post_queue, "quota_remaining", lambda: 0)
+
+    result = post_queue.retry(["gh", "pr", "create"], sleep=_recording_sleep(waits))
+
+    assert result is _OK
+    assert calls == [["gh", "pr", "create"]]
+    assert waits == []
+
+
+def test_retry_returns_immediately_on_a_normal_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """現状固定。上限でない失敗は、待たずにそのまま返す。"""
+    calls: list[list[str]] = []
+    waits: list[float] = []
+    monkeypatch.setattr(post_queue, "run", _run_returning([_NORMAL_FAIL], calls))
+    monkeypatch.setattr(post_queue, "quota_remaining", lambda: 100)
+
+    result = post_queue.retry(["gh", "pr", "create"], sleep=_recording_sleep(waits))
+
+    assert result is _NORMAL_FAIL
+    assert calls == [["gh", "pr", "create"]]
+    assert waits == []
+
+
+def test_retry_waits_and_re_runs_until_it_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """現状固定。上限のあいだ待って再実行し、成功したらその結果を返す。"""
+    calls: list[list[str]] = []
+    waits: list[float] = []
+    monkeypatch.setattr(
+        post_queue, "run", _run_returning([_RATE, _RATE, _OK], calls)
+    )
+
+    result = post_queue.retry(
+        ["gh", "pr", "create"],
+        max_wait=900.0,
+        interval=30.0,
+        sleep=_recording_sleep(waits),
+    )
+
+    assert result is _OK
+    assert len(calls) == 3
+    assert waits == [30.0, 30.0]
+    assert sum(waits) <= 900.0
+
+
+def test_retry_returns_the_last_rate_limited_attempt_when_the_wait_cap_is_reached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """現状固定。待機の上限に達したら、最後の上限応答を返す。"""
+    calls: list[list[str]] = []
+    waits: list[float] = []
+    last_rate = post_queue.Attempt(1, "", "API rate limit exceeded (HTTP 429)")
+    responses = [_RATE, _RATE, _RATE, last_rate]
+    monkeypatch.setattr(post_queue, "run", _run_returning(responses, calls))
+
+    result = post_queue.retry(
+        ["gh", "pr", "create"],
+        max_wait=90.0,
+        interval=30.0,
+        sleep=_recording_sleep(waits),
+    )
+
+    assert result is last_rate
+    assert len(calls) == 4
+    assert waits == [30.0, 30.0, 30.0]
+    assert sum(waits) <= 90.0
