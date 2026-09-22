@@ -612,6 +612,20 @@ def test_resume_with_exclude_rebuilds_the_participants(run_init, tmp_path):
     assert changes[0]["from"]["available"] == ["claude", "codex", "agy", "kiro"]
 
 
+def test_resume_with_include_adds_the_participant_worktree(run_init, tmp_path):
+    """足す者を渡した再開では参加者と作業ツリーの対応をともに補う。"""
+    run_init(_args(tmp_path), probe={})
+
+    run_init(_args(tmp_path, include=[["agy"]]), probe={})
+
+    _, state = _state_of(tmp_path)
+    assert state["runtimes"] == ["claude", "codex", "agy", "kiro"]
+    assert state["worktrees"]["agy"] == str(tmp_path / "rf130" / "agy")
+    changes = state["resume_changes"]
+    assert [change["field"] for change in changes] == ["participants"]
+    assert changes[0]["to"]["available"] == state["runtimes"]
+
+
 def test_resume_with_none_clears_the_recorded_names(run_init, tmp_path):
     """予約語 `none` は記録の一覧を空へ戻す（決定 15）。"""
     run_init(_args(tmp_path, exclude=[["kiro"]]), probe={})

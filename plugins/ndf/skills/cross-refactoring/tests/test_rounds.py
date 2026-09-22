@@ -79,6 +79,16 @@ def test_start_round_stops_when_already_final(refactor, tmp_path, env_tmp_dir):
 
 # ---------- advance（収束判定） ----------
 
+def test_advance_with_no_rounds_leaves_the_state_unchanged(cmd_report, tmp_path, env_tmp_dir):
+    state_path = make_state(tmp_path, rounds=[], final=None)
+    env_tmp_dir(state_path)
+    before = read_state(state_path)
+
+    cmd_report.cmd_advance(_args())
+
+    assert read_state(state_path) == before
+
+
 def test_advance_continues_when_progress_is_made(cmd_report, tmp_path, env_tmp_dir):
     state_path = make_state(tmp_path, rounds=[round_of(1)])
     env_tmp_dir(state_path)

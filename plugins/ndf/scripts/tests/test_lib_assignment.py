@@ -81,6 +81,16 @@ def test_impl_assign_rotates_over_the_participants_starting_after_the_host(assig
     assert actual == ["codex", "kiro", "claude", "codex", "kiro", "claude"]
 
 
+def test_impl_assign_with_one_participant_always_returns_that_participant(assignment):
+    participants = ["codex"]
+    assert [assignment.impl_assign(r, participants) for r in (1, 2)] == ["codex", "codex"]
+
+
+def test_impl_assign_with_two_participants_rotates_between_them(assignment):
+    participants = ["codex", "kiro"]
+    assert [assignment.impl_assign(r, participants) for r in (1, 2)] == ["kiro", "codex"]
+
+
 def test_impl_assign_rejects_a_bad_round(assignment):
     with pytest.raises(assignment.AssignmentError):
         assignment.impl_assign(0, ["claude", "codex"])
