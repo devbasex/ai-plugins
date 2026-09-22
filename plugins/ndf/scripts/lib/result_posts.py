@@ -217,6 +217,10 @@ def post_review(queue: post_queue.Queue, payload_path: pathlib.Path | str,
     応答はどの項目が原因かを指さないため、1 件ずつの特定はできない（実測）。
     同じ状態で返る別の拒まれ方（判定の値の誤り・基準のコミットの誤り）は退避せず、
     失敗として残す。
+
+    **退避するのは、今回積んだ項目が拒まれたときだけである。** 先に積まれていた項目
+    （先客）の拒まれ方を今回分のものと取り違えると、先客を消して今回分を二重に積む。
+    今回分が送れていない限り、控えへ送れた先を書かない。
     """
     findings = len(_findings(_read_json(payload_path)))
     item = review_posts(payload_path, result_path, repo, pr, round_no, seat,
@@ -226,7 +230,8 @@ def post_review(queue: post_queue.Queue, payload_path: pathlib.Path | str,
     seq = (post_queue.read_item(path) or {}).get("seq")
     flushed = queue.flush()
 
-    if flushed.failed and post_queue.rejected_by_position(flushed.failed):
+    ours_failed = flushed.failed is not None and flushed.failed.get("seq") == seq
+    if ours_failed and post_queue.rejected_by_position(flushed.failed):
         queue.drop(flushed.failed.get("seq"))
         item = review_posts(payload_path, result_path, repo, pr, round_no, seat,
                             head_sha, is_own_pr, evacuate_all=True)[0]
@@ -236,17 +241,17 @@ def post_review(queue: post_queue.Queue, payload_path: pathlib.Path | str,
         flushed = queue.flush()
 
     done = _find(flushed.sent, seq) or _find(flushed.skipped, seq)
-    failed = flushed.failed is not None and flushed.failed.get("seq") == seq
-    queued = 0 if done else 1
-    if not failed:
+    if done:
         _write_destinations(payload_path, item["extra"]["inline"])
     return ReviewOutcome(
         review_url=_response_url(done),
         posted_inline=item["extra"]["inline"] if done else 0,
         posted_body=item["extra"]["body"] if done else 0,
-        queued=queued if not failed else 1,
+        queued=0 if done else 1,
         findings=findings,
-        failed=bool(failed and not flushed.rate_limited),
+        # 先客に止められた場合も、今回分は送れていない。上限だけは待てば流れる。
+        failed=bool(not done and flushed.failed is not None
+                    and not flushed.rate_limited),
         posted_as=item["extra"]["posted_as"],
         intent=item["extra"]["intent"],
         detail=str((flushed.failed or {}).get("last_error") or ""),

@@ -285,6 +285,39 @@ def test_another_rejection_of_the_same_status_is_not_moved(tmp_path, fake_gh) ->
     assert outcome.review_url is None
 
 
+def test_a_position_rejection_of_an_earlier_item_is_not_taken_as_ours(
+        tmp_path, fake_gh) -> None:
+    """先に積まれた項目の位置エラーで、今回の分を退避しない。
+
+    先客を消して今回分を二重に積むと、未投稿のまま控えへ送れた先を書き、取り込みを
+    成功扱いにしてしまう。今回分が送れていない限り、失敗として残す。
+    """
+    earlier = post_queue.enqueue(
+        _queue(tmp_path), "review-post", REPO, PR,
+        {"body": f"## 🤖 cross-review | round {ROUND} | agy | COMMENT\n",
+         "event": "COMMENT",
+         "comments": [{"path": "c.py", "line": 9, "side": "RIGHT", "body": "先客"}]},
+        actor=ACTOR, extra={"ident": f"agy-r{ROUND}"})
+    earlier_seq = post_queue.read_item(earlier)["seq"]
+    fake_gh.set_rules([
+        {"match": "pulls/730/reviews?", "stdout": "[]"},
+        _REJECT_POSITION,
+    ])
+
+    outcome, payload = _post_review(tmp_path)
+
+    assert outcome.failed is True
+    assert outcome.queued == 1
+    assert outcome.review_url is None
+    note = json.loads(payload.read_text(encoding="utf-8"))
+    assert all("posted_to" not in comment for comment in note["comments"])
+    # 先客は残り、今回分は 1 件だけ（退避した写しを足さない）。
+    queued = [item for _, item in _queue(tmp_path).items()]
+    assert [i["seq"] for i in queued][0] == earlier_seq
+    assert len(queued) == 2
+    assert [i["extra"].get("agent") for i in queued] == [None, SEAT]
+
+
 def test_a_rate_limited_review_remains_queued_without_marking_the_note(
         tmp_path, fake_gh) -> None:
     """現状固定。上限時は失敗にせず、未投稿の要求と控えをそのまま残す。"""
