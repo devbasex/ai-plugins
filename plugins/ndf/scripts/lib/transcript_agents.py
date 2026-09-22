@@ -264,6 +264,37 @@ def _tool_use_ids(rows: list[dict]) -> list[str]:
     return ids
 
 
+def _real_assistant_rows(rows: list[dict]) -> list[dict]:
+    """合成でない assistant 行だけを返す（トークンとモデルの集計の対象）。"""
+    return [
+        row for row in rows
+        if row.get("type") == "assistant" and not _is_synthetic(row)
+    ]
+
+
+def _update_token_metrics(row: dict, record: AgentRecord) -> None:
+    """1 件の応答から固定費と最大充填を更新する。"""
+    total = _input_total(row)
+    if total is None:
+        return
+    if record.fixed is None:
+        record.fixed = total
+    record.peak = total if record.peak is None else max(record.peak, total)
+
+
+def _collect_response_model(
+    row: dict, seen: set[str], models: Counter,
+) -> None:
+    """応答 ID を重複排除しつつ、初出のモデルを 1 件として数える。"""
+    message_id = _message(row).get("id")
+    if not (isinstance(message_id, str) and message_id and message_id not in seen):
+        return
+    seen.add(message_id)
+    model = _message(row).get("model")
+    if isinstance(model, str) and model:
+        models[model] += 1
+
+
 def _aggregate_token_metrics(rows: list[dict], record: AgentRecord) -> None:
     """固定費・最大充填・応答数・モデルを合成でない応答だけで数える（AC24）。
 
@@ -271,20 +302,9 @@ def _aggregate_token_metrics(rows: list[dict], record: AgentRecord) -> None:
     """
     seen: set[str] = set()
     models: Counter = Counter()
-    for row in rows:
-        if row.get("type") != "assistant" or _is_synthetic(row):
-            continue
-        total = _input_total(row)
-        if total is not None:
-            if record.fixed is None:
-                record.fixed = total
-            record.peak = total if record.peak is None else max(record.peak, total)
-        message_id = _message(row).get("id")
-        if isinstance(message_id, str) and message_id and message_id not in seen:
-            seen.add(message_id)
-            model = _message(row).get("model")
-            if isinstance(model, str) and model:
-                models[model] += 1
+    for row in _real_assistant_rows(rows):
+        _update_token_metrics(row, record)
+        _collect_response_model(row, seen, models)
     record.responses = len(seen)
     if record.fixed is not None and record.peak is not None:
         record.work = record.peak - record.fixed
