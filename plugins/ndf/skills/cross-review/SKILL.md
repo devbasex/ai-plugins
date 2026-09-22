@@ -71,7 +71,7 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 | `--rotate-after K` | この round 数で未収束なら PR ローテーション | `8` |
 | `--rotate-mode light\|squash` | ローテーション方式。`light`: 同ブランチで旧 PR を close → 新 PR (title/body は現状の差分・実装から再生成)。`squash`: squash 統合 + 新ブランチ + `(rotated)` suffix | `light` |
 | `--host claude\|codex\|agy\|kiro` | この収束ループを起動している CLI。母集合から外れる | 環境変数から推定。**推定できなければ失敗する** |
-| `--only RUNTIME` | 1 者だけで回す。**そのラウンドの担当を 1 者へ絞り、席の埋め合わせを行わない。** 母集合の外を指定したら `init` が弾く | 担当 2 者 |
+| `--only RUNTIME` | 1 者だけで回す。**そのラウンドの担当を 1 者へ絞り、席の埋め合わせを行わない。** 母集合の外を指定したときと、その 1 者が確認を通らないときは `init` が弾く | 担当 2 者 |
 | `--exclude NAMES` | 母集合から外す者。カンマ区切りで複数、繰り返しも可。再開で `none` を渡すと空へ戻す | なし |
 | `--include NAMES` | 母集合に足す者（ホストも足せる）。書き方は `--exclude` と同じ | なし |
 | `--require-all` | 確認を通らない者が 1 者でもいれば `init` を失敗させる。全員が揃わないなら始めたくない運用向け | 使える者で始める |
@@ -208,7 +208,7 @@ STATE_PR=$INITIAL_PR
 ROTATE_MODE=${ROTATE_MODE:-light}
 
 # Step 0: state 初期化 / 再開
-# ⚠ eval はコマンド置換の終了コードを潰す。変数で受けてから eval する（docs/01 参照）。**値のある引数だけを渡す**（常に渡すと、再開のたびに指定していない既定値で上書きする）。
+# ⚠ eval はコマンド置換の終了コードを潰す。変数で受けてから eval する（docs/01 参照）。**値のある引数だけを渡す**（常に渡すと、再開のたびに指定していない既定値で上書きする）。再開で渡した引数がどう扱われるか（反映する / 参加者を作り直す / 反映しない）は `docs/04-contracts.md` の「再開で渡した引数の扱い」にある。
 INIT_VARS=$("$SCRIPTS/state.py" init "$STATE_PR" \
           ${MAX_ROUNDS:+--max-rounds "$MAX_ROUNDS"} ${ROTATE_AFTER:+--rotate-after "$ROTATE_AFTER"} \
           ${HOST:+--host "$HOST"} \

@@ -160,6 +160,27 @@ def test_only_is_replaced_and_narrows_the_next_round(resume, state_mod, tmp_path
     assert _seats(state_mod, tmp_path) == ["codex"]
 
 
+def test_only_that_cannot_be_reached_stops_before_writing(
+        resume, state_mod, tmp_path, monkeypatch, capsys):
+    """再開で渡した 1 者指定が確認を通らなければ、状態を書き換えずに終了コード 1。
+
+    1 者指定は状態へ反映する引数であると同時に、参加者を作り直す引数でもある。
+    作り直しが 0 者になったまま先へ進むと、確認を通らない 1 者が次のラウンドの席に座る。
+    """
+    path = _state(tmp_path)
+    before = path.read_text(encoding="utf-8")
+
+    def probe(runtimes, *, info, env=None):
+        return ({r: {"command": r, "ok": False, "detail": "未認証"} for r in runtimes}, False)
+
+    monkeypatch.setattr(state_mod.auth, "probe_auth", probe)
+    with pytest.raises(SystemExit) as e:
+        resume("--only", "kiro")
+    assert e.value.code == 1
+    assert path.read_text(encoding="utf-8") == before
+    assert "1 者指定の kiro が確認を通りません" in capsys.readouterr().err
+
+
 def test_only_none_clears_the_narrowing(resume, tmp_path, capsys):
     """AC27 後半: `--only none` は `only` を `null` へ戻す（決定 15）。"""
     _state(tmp_path, only="codex")

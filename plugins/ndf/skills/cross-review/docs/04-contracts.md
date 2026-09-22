@@ -216,9 +216,14 @@
 
 | 扱い | 引数 | 何が起きるか |
 | --- | --- | --- |
-| 反映する | `--max-rounds` / `--rotate-after` / `--only` / `--verify-command` / `--verify-exit-code` | 状態を書き換え、`resume_changes` へ 1 件積み、`↻ <項目>: <旧> → <新>` を出す |
-| 反映し、参加者を作り直す | `--exclude` / `--include` / `--require-all` | 使える者を解決し直して `participants` を置き換える。失敗したら状態を書き換えずに終了コード 1 |
+| 反映する | `--max-rounds` / `--rotate-after` / `--verify-command` / `--verify-exit-code` | 状態を書き換え、`resume_changes` へ 1 件積み、`↻ <項目>: <旧> → <新>` を出す |
+| 反映し、参加者を作り直す | `--only` | 状態を書き換えて記録へ積んだうえで、認証の確認をやり直して `participants` を置き換える。`none` を渡すと 1 者指定を外す |
+| 参加者を作り直す | `--exclude` / `--include` / `--require-all` | 使える者を解決し直して `participants` を置き換える。失敗したら状態を書き換えずに終了コード 1 |
 | 反映しない | `--host` | 状態と違うときだけ `ℹ --host は再開では反映しません` を出す |
+
+**1 者指定は 2 行にまたがる。** 1 者指定（`--only`）は状態ファイルに載る項目であると同時に、
+参加する実行主体を決め直す引数でもある（`PARTICIPANT_ARGS`）。渡した再開は、指定した 1 者の
+認証の確認をやり直し、通らなければ状態を書き換えずに終了コード 1 で止まる。
 
 ## AI への入出力契約（両 launcher 共通）
 

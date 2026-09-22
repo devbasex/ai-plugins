@@ -456,6 +456,31 @@ def test_only_does_not_probe_the_host_and_keeps_one_seat(new_init, state_mod, tm
     assert _start_round(state_mod, tmp_path) == ["codex"]
 
 
+def test_only_fails_when_the_named_reviewer_does_not_pass_the_probe(new_init, capsys):
+    """1 者指定でも使える者が 0 者なら止める（終了コード 1、状態ファイルを作らない）。
+
+    1 者指定は席の埋め合わせをしないため、確認を通らない 1 者がそのまま席に座る。
+    起動しても結果が残らず、**レビューが行われていないのに収束する**。
+    """
+    with pytest.raises(SystemExit) as e:
+        new_init(only="codex", failing={"codex": "未認証"})
+    assert e.value.code == 1
+    assert not new_init.state_file.exists()
+    assert new_init.calls == [["codex"]]
+    err = capsys.readouterr().err
+    assert "1 者指定の codex が確認を通りません" in err
+    assert "未認証" in err
+
+
+def test_only_still_starts_when_the_probe_is_skipped(new_init, state_mod, tmp_path, monkeypatch):
+    """確認を飛ばした実行では、1 者指定はそのまま通る（通らなかった者がいない）。"""
+    calls: list[list[str]] = []
+    monkeypatch.setattr(state_mod.auth, "probe_auth", _fake_probe({}, calls, skipped=True))
+    p = state_mod._resolve_reviewers("claude", _init_args(tmp_path, only="codex"))
+    assert p["available"] == ["codex"]
+    assert p["probe_skipped"] is True
+
+
 def test_no_available_reviewer_fills_both_seats_with_the_host(new_init, state_mod, tmp_path, capsys):
     """AC19: 使える者が 0 者でもホストが通れば、席はホストとその 2 つ目。"""
     st = new_init(failing={"codex": "x", "agy": "x", "kiro": "x"})

@@ -2150,8 +2150,8 @@ def _resolve_reviewers(host: str, args: argparse.Namespace) -> dict[str, Any]:
     母集合は `review_pool(host)`。確認は止めない確認（`auth.probe_auth`）で、通らない者は
     外して続ける。使える者が 2 者に満たなければホストを確かめ、通れば `fallback` に
     置く（決定 9）。1 者指定があればホストを確かめず `fallback` は空。名前の矛盾・
-    `--require-all` で欠け・0 者で埋め合わせも無い、は終了コード 1（状態ファイルは
-    この関数の後に書かれるため作られない）。
+    `--require-all` で欠け・0 者で埋め合わせも無い・1 者指定が確認を通らない、は終了
+    コード 1（状態ファイルはこの関数の後に書かれるため作られない）。
     """
     only, include, exclude = _normalize_participant_args(args)
     probe = functools.partial(auth.probe_auth, info=info)
@@ -2171,6 +2171,14 @@ def _resolve_reviewers(host: str, args: argparse.Namespace) -> dict[str, Any]:
         info(f"⚠ {name} を担当から外しました（{reason}）")
 
     fallback: list[str] = []
+    # **1 者指定でも 0 者は通さない。** 指定した 1 者が確認を通らないと使える者が空に
+    # なるが、席は 1 者指定をそのまま返す（`_round_reviewers` の順 2）。確認を通らない
+    # 担当が席に座ると、レビューが行われないまま収束する。埋め合わせは 1 者指定では
+    # 行わないため（決定 9）、ここで止めるほかにない。
+    if only is not None and not available:
+        die(f"1 者指定の {only} が確認を通りません"
+            f"（{resolved.unavailable.get(only, '')}）。"
+            f"{only} で認証し直すか、1 者指定を外して再実行してください", code=1)
     if only is None and len(available) < 2:
         results, skipped = auth.probe_auth([host], info=info)
         if skipped or results.get(host, {}).get("ok", False):
