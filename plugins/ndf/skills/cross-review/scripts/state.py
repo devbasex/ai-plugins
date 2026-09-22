@@ -3602,11 +3602,7 @@ def cmd_collect_critiques(args: argparse.Namespace) -> None:
     if not st.get("rounds"):
         die("state.rounds が空。`state.py start-round` を先に呼んでください")
     round_no = st["rounds"][-1]["round"]
-    findings = {
-        f.get("finding_id"): f
-        for f in st.get("review_findings") or []
-        if f.get("round") == round_no
-    }
+    findings = _round_finding_index(st, round_no)
     reviewers = _round_reviewers(st, round_no)
     attached, covered = _attach_critiques(st, pr, round_no, findings, reviewers)
 
@@ -3620,11 +3616,7 @@ def cmd_collect_critiques(args: argparse.Namespace) -> None:
 
     # **揃っていない対象は統合の後に数える。** 束ねられた側は対象から外れるため、
     # 先に数えると、代表へ返された 1 件で足りる組を不足として扱う。
-    missing: dict[str, list[str]] = {}
-    for agent in reviewers:
-        unmet = sorted(_critique_targets(st, round_no, agent) - covered[agent])
-        if unmet:
-            missing[agent] = unmet
+    missing = _missing_critique_targets(st, round_no, reviewers, covered)
     if missing:
         _handle_incomplete_critiques(pr, st, round_no, missing)
         return
@@ -3633,6 +3625,32 @@ def cmd_collect_critiques(args: argparse.Namespace) -> None:
     # 決める（`_evidence_completed`）。
     _mark_evidence_round(st, round_no)
     _save(pr, st)
+
+
+def _round_finding_index(
+    st: dict[str, Any], round_no: int
+) -> dict[Any, dict[str, Any]]:
+    """そのラウンドの指摘を `finding_id` で引ける索引にする。"""
+    return {
+        f.get("finding_id"): f
+        for f in st.get("review_findings") or []
+        if f.get("round") == round_no
+    }
+
+
+def _missing_critique_targets(
+    st: dict[str, Any],
+    round_no: int,
+    reviewers: list[str],
+    covered: dict[str, set[str]],
+) -> dict[str, list[str]]:
+    """反証が揃っていない対象を、担当ごとに `finding_id` の並びで返す。"""
+    missing: dict[str, list[str]] = {}
+    for agent in reviewers:
+        unmet = sorted(_critique_targets(st, round_no, agent) - covered[agent])
+        if unmet:
+            missing[agent] = unmet
+    return missing
 
 
 def _handle_incomplete_critiques(
