@@ -5,7 +5,7 @@
 - 要求と受け入れ条件: [issue-662-598-537-619-584-583-requirements.md](issue-662-598-537-619-584-583-requirements.md)（P2 は AC30〜AC42 と AC70〜AC72）
 - 設計文書: [issue-662-598-537-619-584-583-design.md](issue-662-598-537-619-584-583-design.md)（P2 は決定 10〜13。決定 10 の cross-refactoring の例外を含む）
 - 契約の文書: [issue-662-598-537-619-584-583-design-contracts.md](issue-662-598-537-619-584-583-design-contracts.md)（「上限の表（P2）」「`limits.py`（P2）」「`launch-cli.sh` の第 7 引数（P2）」「`bg-wait.sh`（P2）」）
-- 境界: [issue-647-592-553-design.md](issue-647-592-553-design.md) の決定 13 と「他の設計との契約」の D-A（P2）の行
+- 境界: #647 #592 #553 の設計（決定 13 と「他の設計との契約」の D-A（P2）の行。確定仕様は [適用の取り込み](../docs/specifications/cross-refactoring-apply-intake.md)）
 - 前段: P1（#662、PR #677、develop の d11c473）
 - 課題: #598 / #537（マイルストーン 21）
 
