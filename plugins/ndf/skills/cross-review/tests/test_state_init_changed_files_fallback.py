@@ -45,9 +45,9 @@ def stub_init_scaffolding(monkeypatch, state_mod, tmp_path):
     worktree.mkdir()
 
     monkeypatch.setattr(
-        state_mod, "_fetch_pr_metadata",
-        lambda pr, repo=None: state_mod.PrMetadata(
-            REPO, "takemi", "feat/x", "abc123", "develop", False, 4000, None),
+        state_mod, "GITHUB", state_mod.GITHUB._replace(
+            fetch_pr_metadata=lambda pr, repo=None: state_mod.PrMetadata(
+                REPO, "takemi", "feat/x", "abc123", "develop", False, 4000, None)),
     )
     monkeypatch.setattr(state_mod, "_sh", lambda cmd, check=True: "takemi")
     monkeypatch.setattr(state_mod, "_create_worktree", lambda *a: None)

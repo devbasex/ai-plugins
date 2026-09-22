@@ -48,6 +48,9 @@ import pytest
 
 
 # 既定で差し替える、GitHub を読みに行く関数。実物は `_REAL` へ退避する。
+# **境界（`state_mod.GITHUB`）越しに差し替える**（#801 R3-004）。非公開関数名を直接
+# monkeypatch すると、内部関数の抽出や移動だけでテスト基盤が壊れるため、入出力境界を
+# 通す。取得の実物を戻す `real_github` は `_REAL` から組み立て直す。
 _GITHUB_LOOKUPS = ("_fetch_check_runs", "_fetch_pr_metadata")
 _REAL: dict[str, object] = {}
 
@@ -129,18 +132,20 @@ def _no_github_state(request, monkeypatch) -> None:
     if "state_mod" not in request.fixturenames:
         return
     state_mod = request.getfixturevalue("state_mod")
-    monkeypatch.setattr(state_mod, "_fetch_check_runs", lambda repo, sha: None)
-    monkeypatch.setattr(state_mod, "_fetch_pr_metadata", lambda pr, repo=None: None)
-    # **取り込みはレビューを投稿する**（#730）。投稿を見ないテストでは、組み立てまでを
-    # 本物で通し、送信だけを「届いた」に置き換える。偽の `gh` を要求するテストは
-    # 送信も含めて検査するため置き換えない。
-    if "fake_gh" not in request.fixturenames:
-        rp = state_mod.result_posts
-        monkeypatch.setattr(rp, "post_review", _post_review_offline(rp))
-        monkeypatch.setattr(rp, "push_fix",
-                            lambda worktree, head, commit: rp.PushResult(
-                                True, bool(commit), True, ""))
-        monkeypatch.setattr(rp, "post_fix", _post_fix_offline(rp))
+    rp = state_mod.result_posts
+    # **境界（`GITHUB`）越しに差し替える**（#801 R3-004）。取得は「確かめられなかった」に
+    # 倒し、投稿は既定でオフライン実装を渡す。偽の `gh` を要求するテストは送信も含めて
+    # 検査するため、投稿だけは実物を残す。
+    offline = "fake_gh" not in request.fixturenames
+    gateway = state_mod.GitHubGateway(
+        fetch_pr_metadata=lambda pr, repo=None: None,
+        fetch_check_runs=lambda repo, sha: None,
+        post_review=_post_review_offline(rp) if offline else rp.post_review,
+        post_fix=_post_fix_offline(rp) if offline else rp.post_fix,
+        push_fix=(lambda worktree, head, commit: rp.PushResult(
+            True, bool(commit), True, "")) if offline else rp.push_fix,
+    )
+    monkeypatch.setattr(state_mod, "GITHUB", gateway)
 
 
 def _post_review_offline(rp):
@@ -165,9 +170,15 @@ def real_github(monkeypatch, state_mod):
 
     取得そのものの組み立てを見るテストが使う。GitHub へは `_gh_rest` か
     `subprocess.run` の差し替えで届かないようにする。
+
+    **境界（`GITHUB`）の取得だけを実物へ戻す**（#801 R3-004）。`_no_github_state` が先に
+    置いたオフラインの投稿はそのまま残す（`_replace` で取得の 2 つだけ差し替える）。
     """
-    for name in _GITHUB_LOOKUPS:
-        monkeypatch.setattr(state_mod, name, _REAL[name])
+    gateway = state_mod.GITHUB._replace(
+        fetch_pr_metadata=_REAL["_fetch_pr_metadata"],
+        fetch_check_runs=_REAL["_fetch_check_runs"],
+    )
+    monkeypatch.setattr(state_mod, "GITHUB", gateway)
 
 
 # ---- 模した `gh` を PATH の先頭へ置く（#291） ----

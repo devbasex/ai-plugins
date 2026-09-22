@@ -111,7 +111,8 @@ def test_the_judge_and_the_merge_share_one_classification(tmp_dir, state_mod, mo
         return real(runs)
 
     monkeypatch.setattr(state_mod, "_classify_ci", _spy)
-    monkeypatch.setattr(state_mod, "_fetch_check_runs", lambda repo, sha: [_run("pytest")])
+    monkeypatch.setattr(state_mod, "GITHUB", state_mod.GITHUB._replace(
+        fetch_check_runs=lambda repo, sha: [_run("pytest")]))
 
     # 修正の取り込み側: 申告された失敗の名前を読む
     approved = {

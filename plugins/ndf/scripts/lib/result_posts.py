@@ -203,22 +203,21 @@ def post_review(queue: post_queue.Queue, payload_path: pathlib.Path | str,
     同じ状態で返る別の拒まれ方（判定の値の誤り・基準のコミットの誤り）は退避せず、
     失敗として残す。
     """
-    findings = len(_findings(_read_json(payload_path)))
-    item = review_posts(payload_path, result_path, repo, pr, round_no, seat,
-                        head_sha, is_own_pr)[0]
-    path = post_queue.enqueue(queue, item["kind"], repo, pr, item["fields"],
-                              actor=actor, extra=item["extra"])
-    seq = (post_queue.read_item(path) or {}).get("seq")
-    flushed = queue.flush()
-
-    if flushed.failed and post_queue.rejected_by_position(flushed.failed):
-        queue.drop(flushed.failed.get("seq"))
+    def _enqueue_review(evacuate_all: bool) -> tuple[dict[str, Any], Any, Any]:
+        """投稿項目を組み立てて待ち行列へ積み、`(項目, seq, 流した結果)` を返す。"""
         item = review_posts(payload_path, result_path, repo, pr, round_no, seat,
-                            head_sha, is_own_pr, evacuate_all=True)[0]
+                            head_sha, is_own_pr, evacuate_all=evacuate_all)[0]
         path = post_queue.enqueue(queue, item["kind"], repo, pr, item["fields"],
                                   actor=actor, extra=item["extra"])
         seq = (post_queue.read_item(path) or {}).get("seq")
-        flushed = queue.flush()
+        return item, seq, queue.flush()
+
+    findings = len(_findings(_read_json(payload_path)))
+    item, seq, flushed = _enqueue_review(evacuate_all=False)
+
+    if flushed.failed and post_queue.rejected_by_position(flushed.failed):
+        queue.drop(flushed.failed.get("seq"))
+        item, seq, flushed = _enqueue_review(evacuate_all=True)
 
     done = _find(flushed.sent, seq) or _find(flushed.skipped, seq)
     failed = flushed.failed is not None and flushed.failed.get("seq") == seq

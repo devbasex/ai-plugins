@@ -45,7 +45,8 @@ def check_runs(monkeypatch, state_mod):
         def _fetch(repo, sha):
             calls.append((repo, sha))
             return runs
-        monkeypatch.setattr(state_mod, "_fetch_check_runs", _fetch)
+        monkeypatch.setattr(state_mod, "GITHUB",
+                            state_mod.GITHUB._replace(fetch_check_runs=_fetch))
         return calls
 
     _set.calls = calls  # type: ignore[attr-defined]
@@ -242,7 +243,8 @@ def test_the_head_commit_is_fetched_when_the_state_has_none(tmp_dir, state_mod, 
             base_branch="develop", is_fork=False, rate_remaining=None, rate_reset=None,
         )
 
-    monkeypatch.setattr(state_mod, "_fetch_pr_metadata", _meta)
+    monkeypatch.setattr(state_mod, "GITHUB",
+                        state_mod.GITHUB._replace(fetch_pr_metadata=_meta))
     round_ = _approved_round()
     del round_["head_sha"]
     _write(tmp_dir, _state([round_]))
