@@ -208,14 +208,41 @@ def test_the_values_are_put_back_after_the_run(monkeypatch: pytest.MonkeyPatch) 
     mod = _root_conftest_module()
     monkeypatch.setenv("MONITOR_STALL_AGY", "1800")
 
-    saved = mod._strip_monitor_env()
+    mod.pytest_configure(None)
 
-    assert saved == {"MONITOR_STALL_AGY": "1800"}
     assert "MONITOR_STALL_AGY" not in os.environ
+    assert mod._saved_monitor_env == {"MONITOR_STALL_AGY": "1800"}
 
-    os.environ.update(saved)
+    mod.pytest_unconfigure(None)
 
     assert os.environ["MONITOR_STALL_AGY"] == "1800"
+    assert mod._saved_monitor_env == {}
+
+
+def test_the_isolation_holds_from_a_bundle_directory() -> None:
+    """束のディレクトリを起点にしても切り離しが効く。
+
+    テストの基準のディレクトリ（rootdir）が起点で止まると、根の設定が読み込まれず、
+    上限を延ばしたシェルから起動したときだけ落ちる。根の設定ファイル（`pytest.ini`）が
+    基準をリポジトリの根へ固定していることを、実際の起動で確かめる。
+    **監視の環境変数は明示的に足す。** 実行中は根の設定が外した後のため、渡す環境へ
+    足さないと再現しない。
+    """
+    bundle = REPO_ROOT / "plugins/ndf/skills/cross-review/tests"
+    env = dict(os.environ)
+    env.pop("NDF_TESTS_ALLOW_MISSING_COMMANDS", None)
+    env.update({"MONITOR_STALL_AGY": "1800", "MONITOR_TIMEOUT": "1800"})
+
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "test_monitor_stall_default.py", "-q",
+         "--no-header", "-p", "no:cacheprovider"],
+        cwd=str(bundle),
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_the_prefix_is_declared_once() -> None:
