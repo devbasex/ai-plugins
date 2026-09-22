@@ -194,7 +194,7 @@
   | `SKILL.md` | 引数の表と `argument-hint` に `--exclude` / `--include` / `--require-all`。`--only` の説明から「デバッグ用」が消える。母集合の行が席の規則を指す |
   | `docs/05-pool-and-convergence.md` | 使える者の解決と席の埋め方（3 者以上 / 2 者 / 1 者 / 0 者）、`--exclude` / `--include`、確認が把握になったこと |
   | `docs/04-contracts.md` | 状態ファイルの `participants` と `resume_changes`、席の名前の形 |
-  | `docs/01-state-and-review.md` | 再開で反映する引数と、反映しない引数 |
+  | `docs/01-state-and-review.md` | 再開で渡した引数の扱いが `docs/04-contracts.md` にあることへの案内 |
 
 ### 子 issue の再現手順
 

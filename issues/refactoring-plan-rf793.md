@@ -1,0 +1,399 @@
+# 改修計画 — devbasex/ai-plugins #793
+
+`/ndf:cross-refactoring` が提案し、適用した改善項目の記録である。
+理由と手順は提案の時点でしか残らないため、公開の直前に書き出している。
+
+- 対象範囲: plugins/ndf/scripts/lib, plugins/ndf/skills/cross-review/scripts, plugins/ndf/scripts/tests, plugins/ndf/skills/cross-review/tests
+- 着手前のテスト: uv run --with pytest pytest scripts/tests plugins/ndf -q
+
+## ラウンド 1（実装 codex / レビュー agy / kiro）
+
+### R1-001 — `plugins/ndf/scripts/lib/assignment.py#detect_host`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| branch | unit | — | agy | 採用 | 1 |
+
+**なぜ**: detect_host は収束ループ共通層においてホストを確定する重要関数であり、誤判定すると母集合が狂う致命的な影響を持つ。しかし共通層テスト（plugins/ndf/scripts/tests/）には単体テストが全く存在しない。明示指定（explicit）、環境変数ヒント（HOST_ENV_HINTS）の順序による推定、および手掛かりがない場合の例外送出の各分岐を共通層単体テストとして固定する必要がある。
+
+**手順**: 1. plugins/ndf/scripts/tests/test_lib_assignment.py に test_detect_host_* を追加する。
+2. 明示指定分岐: HOST_RUNTIMES に含まれる名前を指定したときに (host, 'explicit') が返り、無効な名前を指定したときに AssignmentError が送出されることを検証する。
+3. 環境変数推定分岐: CLAUDE_PLUGIN_ROOT, CODEX_HOME, KIRO_AGENT 等の環境変数ヒントを含む辞書を渡し、正しいホスト名と 'env' が返ることを検証する。
+4. 推定不能分岐: 環境変数が空辞書（またはヒントなし）の場合に、既定値を勝手に置かず AssignmentError が送出されることを検証する。
+
+### R1-002 — `plugins/ndf/scripts/lib/assignment.py#review_seats`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| branch | unit | — | agy | 採用 | 1 |
+
+**なぜ**: assignment.py で新設された review_seats は、cross-review において各ラウンドのレビュワー2席を割り当てるコア関数である。しかし共通層テスト（plugins/ndf/scripts/tests/）には単体テストが一切存在しない（別スキル cross-refactoring のテスト側に暫定配置されているのみ）。len(available) の人数（3者以上の輪番、2者の固定、1者時の fallback または副席 <name>-2 補填、0者時の fallback 2席割当および fallback 空時の例外送出）の全分岐の振る舞いを共通層の単体テストとして固定する必要がある。
+
+**手順**: 1. plugins/ndf/scripts/tests/test_lib_assignment.py に test_review_seats_* を追加する。
+2. 3者以上: available=['codex', 'agy', 'kiro'] でラウンド1〜3を実行し、available の順序を保った2席が輪番で選ばれることを検証する。
+3. 2者: available=['codex', 'kiro'] で複数ラウンドを実行し、ラウンド番号によらず常にその2者が返ることを検証する。
+4. 1者: available=['codex'], fallback=['claude'] で ['codex', 'claude'] が返り、fallback が空または available と重複する場合は ['codex', 'codex-2'] が返ることを検証する。
+5. 0者: available=[], fallback=['claude'] で ['claude', 'claude-2'] が返り、fallback も空の場合は AssignmentError となることを検証する。
+6. round_no < 1 の場合に AssignmentError が送出されることを検証する。
+
+### R1-003 — `plugins/ndf/scripts/lib/assignment.py#review_seats`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| error | unit | — | codex | 採用 | 1 |
+
+**なぜ**: 0 人でも fallback がある経路は状態初期化から固定されているが、available と fallback がともに空の公開入口が AssignmentError になる経路は未固定である。
+
+**手順**: 1. round_no=1、available=[]、fallback=[] で公開入口を呼ぶ
+2. AssignmentError が送出されることを観測する
+3. 例外の利用者向け理由から、使える者と埋め合わせ候補がともに無いことを示す要点だけを確認する
+
+### R1-004 — `plugins/ndf/scripts/lib/assignment.py#seat_runtime`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| boundary | unit | — | agy | 取り消し | 1 |
+
+**なぜ**: seat_runtime は正規表現 SEAT_PATTERN（^(claude|codex|agy|kiro)(-[2-9])?$）に従って席名を検証・抽出するが、共通層テストに境界値・異常値のテストが存在しない。接尾辞の数値境界（-1 は不可、-2〜-9 は可、-10 は不可）、区切り文字違い（_2）、未知のランタイム、空文字列等で AssignmentError が送出される境界値の振る舞いを単体レベルで固定する必要がある。
+
+**手順**: 1. plugins/ndf/scripts/tests/test_lib_assignment.py に test_seat_runtime_rejects_malformed_seat を追加する。
+2. 接尾辞の数値境界: 'kiro-1'（下限未満）、'kiro-10'（上限超過）で AssignmentError が発生することを検証する。
+3. 区切り形式・重複の境界: 'claude_2'（アンダースコア）、'kiro-2-3'（ハイフン重複）、空文字列 '' で AssignmentError が発生することを検証する。
+4. 未知のランタイム: 'gemini', 'gpt' 等の ALL_RUNTIMES 外の名称で AssignmentError が発生することを検証する。
+
+### R1-005 — `plugins/ndf/scripts/lib/assignment.py#seat_runtime`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| normal | unit | — | agy | 採用 | 1 |
+
+**なぜ**: assignment.py で新設された seat_runtime(seat: str) は、席名から基底ランタイム名を取り出す共通層関数であり、結果受け口・起動スクリプト・監視処理で広く使われる。しかし共通層テスト（plugins/ndf/scripts/tests/）には単体テストが存在しない。接尾辞なしのランタイム名（claude, codex, agy, kiro）および同一ランタイムの副席名（-2〜-9 接尾辞）から正確にランタイム名が抽出される正常系の振る舞いを共通層単体テストとして固定する必要がある。
+
+**手順**: 1. plugins/ndf/scripts/tests/test_lib_assignment.py に test_seat_runtime_extracts_runtime_name を追加する。
+2. ALL_RUNTIMES の全ランタイム名（'claude', 'codex', 'agy', 'kiro'）をそのまま渡した場合に、同一のランタイム名が返ることを検証する。
+3. ハイフン付き席名（'kiro-2', 'claude-9', 'agy-3' 等）を渡した場合に、接尾辞を除去した基底ランタイム名が正しく返ることを検証する。
+
+## ラウンド 2（実装 agy / レビュー codex / kiro）
+
+### R2-001 — `plugins/ndf/scripts/lib/assignment.py#assign`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| error | unit | — | codex / agy | 採用 | 1 |
+
+**なぜ**: assign は 8 ラウンド周期の割り当てを行う公開関数であり正常系は固定されているが、round_no < 1（0 や負数）が渡された場合に AssignmentError を送出するエラー経路が scripts/tests 内で固定されていない。
+
+**手順**: 1. 有効な各ホスト（claude, codex, agy, kiro）について assignment.assign(0, host) および assignment.assign(-1, host) を呼び出す
+2. どちらも assignment.AssignmentError が送出されることを検証する
+3. 送出された例外メッセージに「ラウンド番号は 1 以上です」が含まれることを検証する
+
+### R2-002 — `plugins/ndf/scripts/lib/assignment.py#resolve_participants`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| boundary | unit | — | codex / agy | 採用 | 1 |
+
+**なぜ**: resolve_participants で母集合の全メンバーを exclude に指定し、参加可能なメンバーが 0 件になる下限境界の振る舞い（空一覧で認証確認が呼ばれ、available が空リスト、excluded が固定順で記録されること）が固定されていない。
+
+**手順**: 1. 母集合の全員（例: ['codex', 'agy', 'kiro']）を exclude に指定し、記録用プローブを渡して resolve_participants を呼び出す
+2. プローブが空の一覧 [] で 1 回だけ呼ばれることを検証する
+3. 戻り値の Participants において available が []、unavailable が {}、excluded が固定順（['codex', 'agy', 'kiro']）で保持されることを検証する
+
+### R2-003 — `plugins/ndf/scripts/lib/assignment.py#review_assign`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| boundary | unit | — | agy / kiro | 採用 | 1 |
+
+**なぜ**: review_assign の round_no < 1 の下限境界条件で AssignmentError を送出する振る舞いが scripts/tests 内で固定されていない。同モジュールの impl_assign や review_seats には round_no < 1 の境界テストがあるが、review_assign だけ抜けている。
+
+**手順**: 1. test_lib_assignment.py で assignment.review_assign(0, "claude") および assignment.review_assign(-1, "claude") を呼び出す
+2. どちらの呼び出しでも assignment.AssignmentError が送出されることを検証する
+3. 例外メッセージに「ラウンド番号は 1 以上です」が含まれることを検証する
+
+### R2-004 — `plugins/ndf/scripts/lib/assignment.py#review_assign`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| branch | unit | — | agy / kiro | 取り消し | 1 |
+
+**なぜ**: review_assign は適用の役を持たない工程が使う公開入口だが、scripts/tests には直接の固定が無い。in-scope の test_lib_assignment.py は assign / impl_assign / review_seats を固定するだけで、この関数の輪番（母集合3者から dropped=(round_no-1)%3 を外す各分岐）は通っていない。out-of-scope の cross-review テストは _round_reviewers の照合オラクルとして呼ぶだけで、この関数自身の戻り値を固定していない。
+
+**手順**: 1. test_lib_assignment.py の assignment フィクスチャで各ホスト（claude, codex, agy, kiro）について review_assign(round_no, host) を round 1..6 で呼び出す
+2. 各ホストで返る担当ペアの一覧が 3 ラウンド周期で循環し、現状の決定結果（例: claude は [['agy', 'kiro'], ['codex', 'kiro'], ['codex', 'agy']] が 2 周する）と完全一致することを検証する
+3. 返されるレビュー担当が常に 2 者であり、指定したホスト自身を含まないことを併せて検証する
+
+### R2-005 — `plugins/ndf/scripts/lib/assignment.py#review_assign`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| error | unit | — | codex / agy | 採用 | 1 |
+
+**なぜ**: review_assign に HOST_RUNTIMES に含まれない無効なホスト名が渡された場合、内部の review_pool から AssignmentError（「ホストになれないランタイムです」）が送出されるエラー経路が固定されていない。
+
+**手順**: 1. test_lib_assignment.py で assignment.review_assign(1, "gemini") や assignment.review_assign(1, "unknown") を呼び出す
+2. assignment.AssignmentError が送出されることを検証する
+3. 例外メッセージに「ホストになれないランタイムです」が含まれることを検証する
+
+## ラウンド 3（実装 kiro / レビュー codex / agy）
+
+### R3-001 — `plugins/ndf/skills/cross-review/scripts/measure.py#_matches`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_parameter_list | introduce_parameter_object | major | kiro | 取り消し | 0 |
+
+**なぜ**: 解決位置の突き合わせ鍵 (pr, round_no, path, line) の 4 引数が _matches・_find_best_match・_add_oracle_match の 3 関数を順に渡り回っている。呼び出し側で順序を取り違えても型で防げず、鍵の項目を増やすたびに 3 関数すべての引数を直すことになる。
+
+**手順**: 1. NamedTuple `MatchKey(pr, round_no, path, line)` を定義する
+2. _matches の引数を (finding, key: MatchKey) にし、本体を key.* へ書き換える
+3. _find_best_match・_add_oracle_match も MatchKey を受け取る形に変え、呼び出し側（_oracle のループ）で MatchKey を 1 度組み立てて渡す
+4. test_measure.py の oracle 系テストで退行を確認する
+
+### R3-002 — `plugins/ndf/scripts/lib/assignment.py#resolve_participants`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_method | split_into_pipeline | major | codex | 取り消し | 0 |
+
+**なぜ**: 入力の正規化、名前と集合制約の検証、only 適用、認証 probe、利用可否の集計、require_all 判定、結果生成が直列に並び、検証規則と外部 probe の境界を個別に読みにくい。
+
+**手順**: 1. test_lib_participants.py の既存ケースを現状固定として実行する
+2. pool/include/exclude の正規化と制約検証を独立した段へ抽出する
+3. only を適用して probe 対象を返す段を抽出する
+4. probe 結果を available と unavailable へ変換し require_all を判定する段を抽出する
+5. resolve_participants は各段の出力を次段へ渡して Participants を返す処理だけにする
+6. 対象テストと全体テストで例外文言、順序、probe 呼び出し、戻り値が不変であることを確認する
+
+### R3-003 — `plugins/ndf/skills/cross-review/scripts/state.py#_init_new_state`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_method | extract_method | major | codex | 取り消し | 0 |
+
+**なぜ**: 200 行の関数内に PR 所有者判定、レビュー指示生成、worktree と既存コメントの準備、担当決定、初期 state 構築、保存と表示が同居し、補助関数もすべてローカル定義のため各段階を単独で検証できない。
+
+**手順**: 1. 既存の init 経路テストを現状固定として実行する
+2. _resolve_pr_and_ownership と _prepare_review_instructions をモジュールレベルへ抽出する
+3. _prepare_worktree_and_comments と _prepare_initial_assignment をモジュールレベルへ抽出する
+4. _build_initial_review_state と _finalize_initial_state をモジュールレベルへ抽出し、_init_new_state は各段階を順に呼ぶ構成へ縮める
+5. init 関連テストと全体テストで公開入口の出力と副作用が不変であることを確認する
+
+### R3-004 — `plugins/ndf/skills/cross-review/scripts/measure.py#_state_file_pr`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| duplication | consolidate_duplication | minor | kiro | 採用 | 1 |
+
+**なぜ**: _state_file_pr と _prs が同じ pr_history 走査（dict 判定→_as_int(entry.get("pr"))→current_pr へのフォールバック）を別々に持つ。_state_file_pr は実質「_prs の先頭」で、片方だけ直すと状態ファイルの鍵の選び方が食い違う。同じ業務ルール（状態ファイルの鍵の決め方）に由来し、必ず一緒に変わる重複である。
+
+**手順**: 1. _prs を先に評価し、走査ロジックの唯一の持ち主にする
+2. _state_file_pr を `prs = _prs(st); return prs[0] if prs else None` へ置き換える
+3. test_measure.py の pr/prs を検査するテスト（test_identity_keys_report_state_file_key_and_all_prs 他）で退行を確認する
+
+### R3-005 — `plugins/ndf/scripts/lib/refresh.py#fetch`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_method | extract_method | minor | kiro | 取り消し | 0 |
+
+**なぜ**: fetch が opener 呼び出し・期限付き読み取りループ・socket への期限伝播・close の後始末を通しで行う。読み取りループ（deadline 判定・_set_socket_timeout の bounded 蓄積・chunk 蓄積）だけを名前付きの段へ分けると、読み取り部分と取得の骨格を別々に読める。
+
+**手順**: 1. 読み取りループを `_read_until_deadline(response, deadline, timeout) -> bytes` として抽出し、bounded 判定と FetchTimeout の送出をその中へ移す
+2. fetch は opener 呼び出しと finally の close を残し、本文取得を抽出関数の呼び出しに置き換える
+3. test_refresh.py の refresh/fetch 経路のテストで退行を確認する
+
+## ラウンド 4（実装 claude / レビュー codex / kiro）
+
+### R4-001 — `plugins/ndf/scripts/lib/metrics.py#_aggregate_reviewer_round`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_method | extract_method | major | kiro | 採用 | 1 |
+
+**なぜ**: 1 つの関数が 2 つの独立した集計を通しで行う。前半は review ごとの指摘件数と解決件数の集計、後半は entry.get('reviewers') を回して判定一致（verdict_pairs / verdict_agreements）を数える二重ループである。指摘の集計と判定一致の集計は変更理由が別で、後半のネストしたループが読む負荷を上げている。
+
+**手順**: 1. 後半の others ループ（verdict_pairs / verdict_agreements の加算）を _tally_verdict_agreement(rb, entry, review, name) として抽出する
+2. 抽出した関数は entry.get('reviewers') から name 以外を取り出し、_verdict を使って一致数を rb へ加算する
+3. _aggregate_reviewer_round のループ本体を、指摘集計＋抽出した関数の呼び出しに置き換える
+4. metrics.aggregate を通す既存テスト（cross-refactoring 側 test_models_and_metrics.py の resolution_rate / agreement_rate）で退行が無いことを確かめる
+
+### R4-002 — `plugins/ndf/skills/cross-review/scripts/rotate-pr.sh#execute_light / execute_squash`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| duplication | consolidate_duplication | major | codex | 採用 | 1 |
+
+**なぜ**: 両モードが旧 PR へのコメント、close、ERR trap の設定、新 PR 作成、trap 解除、URL からの番号抽出、NEW_PR・NEW_PR_URL・NEW_BRANCH の出力を同じ順序で持つ。同じ障害対策のコメントが両方へ反映されており、変更理由も共通している。
+
+**手順**: 1. 既存の rotate-pr テストで light と squash の close、作成失敗時の reopen、成功時の出力を固定する
+2. モード固有処理から新 PR の head、base、title、body、draft を組み立てる部分だけを残す
+3. close から create、trap 管理、番号抽出、結果出力までを共通関数へ抽出する
+4. execute_light と execute_squash を共通関数呼び出しへ置き換える
+5. 両モードの既存テストを実行してコマンド順と標準出力が不変であることを確認する
+
+### R4-003 — `plugins/ndf/scripts/lib/worktree-common.sh#wt_extract_write_target`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_method | split_into_pipeline | major | codex | 採用 | 1 |
+
+**なぜ**: 書き込み先抽出の入口に、ヒアドキュメント除去、字句化、作業ディレクトリと複合構文の状態追跡、sed・tee・cp・mv・リダイレクトの対象抽出が連続して同居している。多数の局所状態と入れ子の補助関数を一度に追う必要があり、各段を独立して固定できない。
+
+**手順**: 1. 対象テスト配下に wt_extract_write_target の公開入出力を通す現状固定テストを追加し、cd、パイプ、部分シェル、case、関数定義、各書き込み形式を固定する
+2. 前処理と字句化を、改行区切りの語列を返す段として独立させる
+3. 現在地と複合構文の追跡を、語列から走査状態を更新する段へ分ける
+4. 書き込み先候補の抽出と相対パス解決を最終段へ分け、入口は各段を順に接続するだけにする
+5. 各段の後と最後に現状固定テストおよび全体テストを実行する
+
+### R4-004 — `plugins/ndf/scripts/lib/run_metrics.py#_by_round_count`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| conditional_chain | extract_method | minor | kiro | 採用 | 1 |
+
+**なぜ**: バケット鍵の決定が入れ子の三項式 key = "3 以上" if count >= 3 else str(count) if count in (1, 2) else None に埋まっている。ラウンド数から表示区分を導く判断がループ本体の 1 行に押し込まれ、境界（1 / 2 / 3 以上 / 対象外）が読み取りづらい。
+
+**手順**: 1. count から区分文字列（または None）を返す _round_count_bucket(count) を抽出する
+2. 分岐を if count >= 3 / elif count in (1, 2) / else None として平坦に書く
+3. _by_round_count のループ本体で key = _round_count_bucket(count) を呼ぶ形へ置き換える
+4. test_run_metrics.py::test_aggregate_by_round_count（1 / 2 / 3 以上 の 3 行）で退行が無いことを確かめる
+
+### R4-005 — `plugins/ndf/scripts/lib/run_metrics.py#_select`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| conditional_chain | extract_method | minor | kiro | 採用 | 1 |
+
+**なぜ**: 行ごとの絞り込みが 5 本の連続した if ... continue と、until 判定に埋め込まれた入れ子の三項（started >= until if until_exclusive else started > until）で構成される。時刻の下限・上限・repo・kind・version という別々の観点が 1 つのループ本体に同居し、until_exclusive の分岐が特に読みづらい。
+
+**手順**: 1. 時刻の下限・上限の判定を _within_time_bound(started, since, until, until_exclusive) として抽出し、入れ子の三項をその中に閉じ込める
+2. _select は since/until を計算した後、_within_time_bound と残りの属性一致（repo / kind / version）で 1 行を通すか決める
+3. 属性一致も見通しが悪ければ _matches_filters(row, args) へまとめる
+4. test_run_metrics.py::test_aggregate_filters（since / until / repo / kind / version の 5 例）で退行が無いことを確かめる
+
+## ラウンド 5（実装 codex / レビュー agy / kiro）
+
+### R5-001 — `plugins/ndf/scripts/lib/auth.py#_probe_all`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| one_by_one_iteration | replace_with_bulk_operation | major | codex / agy | 取り消し | 0 |
+
+**なぜ**: AUTH_PROBES に定義された各 CLI（最大4者）の認証確認コマンド（タイムアウト各120秒）を for ループ内で直列に実行しており、参加者数に比例して全体の待ち時間が累積する。入力順と出力順を維持したまま有界な並行実行（ThreadPoolExecutor 等）へ置き換えることで待ち時間を短縮できる。
+
+**手順**: 1. test_auth_probe.py で複数 CLI の確認順序・出力順序・戻り値構造を検証する既存テストを確認する
+2. _probe_all 内で AUTH_PROBES に存在する対象を抽出し、有界な並行ワーカー（concurrent.futures 等）で並行実行する
+3. 各ランタイムの結果を入力順に results へ格納し、info 出力も入力順に発出する
+4. pytest plugins/ndf/scripts/tests/test_auth_probe.py および全体テストで互換性と表示順を検証する
+
+### R5-002 — `plugins/ndf/skills/cross-review/scripts/state.py#_apply_resume_args_block`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_method | extract_method | major | codex / agy | 取り消し | 0 |
+
+**なぜ**: 1 つの関数内で、引数の正規化、--only none による特殊な状態解除と履歴追記、一般フィールドの反映、参加者再構築用の引数名前空間生成、_resolve_reviewers による再解決、成功時の状態・履歴更新という複数の段階が連続して書かれており、状態更新の原子性と各段階の責務が混在している。
+
+**手順**: 1. test_state_resume_args.py で --only none、通常引数反映、参加者再構築失敗時の原子性（ロールバック／非更新）がテストされていることを確認する
+2. --only none の状態解除と履歴追記を補助関数へ抽出する
+3. 既存の参加者情報と再開引数をマージして再解決用 Namespace を組み立てる処理を補助関数へ抽出する
+4. 参加者の解決成功後に状態と resume_changes を更新する処理を補助関数へ抽出する
+5. _apply_resume_args_block を各ステップの明瞭なオーケストレーションに再構成し、対象テストと全体テストを実行する
+
+### R5-003 — `plugins/ndf/skills/cross-review/scripts/rotate-pr.sh#execute_squash`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_method | extract_method | major | codex / agy | 取り消し | 0 |
+
+**なぜ**: 86行の関数内で、prepare.json や gh pr view からの PR メタ情報（base, title）解決、detached HEAD からの head ブランチ復元、タイトル末尾の (rotated) 接尾辞の正規化ループ、squash コミットの作成と push、新 PR 本文の組み立て、rotate_close_and_create 呼び出しが密結合しており、情報解決と Git/GitHub 副作用の分離が不明瞭になっている。
+
+**手順**: 1. test_rotate_pr_queue.py などの現状固定テストで squash モードの振る舞い（接尾辞正規化、ブランチ名解決など）を確認する
+2. PR メタ情報（base / title）のフォールバック取得処理を補助関数へ抽出する
+3. ブランチ復元（git branch --show-current / prepare.json / gh pr view）と (rotated) 接尾辞の正規化処理を補助関数へ抽出する
+4. squash コミット作成とリモート push の Git 操作を補助関数へ抽出する
+5. execute_squash を各抽出関数のパイプライン呼び出しに整理し、テストを実行する
+
+## ラウンド 6（実装 agy / レビュー codex / kiro）
+
+### R6-001 — `plugins/ndf/scripts/lib/transcript_agents.py#_aggregate_token_metrics`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_method | extract_method | major | codex | 取り消し | 1 |
+
+**なぜ**: 1回の走査でトークンの固定費・最大値、応答IDの重複排除、モデル別件数を集め、その後に派生値と代表モデルまで確定している。異なる集計規則が同じ局所状態へ混在し、各規則を単独で追いにくい。
+
+**手順**: 1. 合成でない assistant 行を選ぶ処理を名前付きの反復単位へ抽出する
+2. トークン指標の更新を _update_token_metrics として抽出する
+3. 応答IDとモデル件数の更新を _collect_response_model として抽出する
+4. 呼び出し側は集計結果から responses・work・modelを従来どおり確定し、既存フィクスチャの契約値で退行確認する
+
+### R6-002 — `plugins/ndf/scripts/lib/metrics.py#format_report`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_method | extract_method | major | codex | 取り消し | 1 |
+
+**なぜ**: 実装担当表の行生成、レビュー担当表の行生成、計測不能・指定値代用の注記、比較上の注意の4段階を1関数が通しで組み立てており、表の列変更と注記構成の変更が同じ関数へ集中している。
+
+**手順**: 1. 実装担当の行生成を _format_impl_rows として抽出する
+2. レビュー担当の行生成を _format_reviewer_rows として抽出する
+3. 計測注記の追加を _append_measurement_notes として抽出する
+4. format_report は各段を順に呼び、既存の文字列出力が一致することを既存テストで確認する
+
+### R6-003 — `plugins/ndf/skills/cross-review/tests/conftest.py#_no_github_state`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| mock_targets_implementation_detail | fix_dependency_direction | major | codex | 取り消し | 1 |
+
+**なぜ**: autouse fixture が state.py の非公開関数 _fetch_check_runs と _fetch_pr_metadata を名前で直接差し替えるため、GitHub取得処理の抽出や改名だけで広範なテストが壊れる。実際の外部境界は _gh_rest と subprocess.run なのに、その内側の実装手順を全テストへ固定している。
+
+**手順**: 1. state.py が使うGitHub取得境界を明示した依存としてまとめる
+2. cmd系の入口からその境界を注入できる最小の既定値を置く
+3. _no_github_state は非公開取得関数ではなく境界の偽実装を注入する
+4. 実取得の契約テストは既存の fake gh と _gh_rest 差し替えを維持し、全テストで外部通信が発生しないことを確認する
+
+### R6-004 — `plugins/ndf/scripts/lib/metrics.py#_append_model_measurement_warnings`
+
+| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
+| --- | --- | --- | --- | --- | ---: |
+| long_parameter_list | introduce_parameter_object | minor | kiro | 取り消し | 1 |
+
+**なぜ**: 引数が 7 個。うち unmeasured / assumed は出力の蓄積先、round_no / runtime / requested / observed / role_label は 1 ラウンド 1 担当の計測文脈で、常に組で渡り回る。2 つの呼び出し側（_aggregate（impl）と _aggregate_round_reviewers）で同じ 5 値をその順で並べており、順序を取り違えると requested と observed が入れ替わっても型が同じ str のため気付けない。
+
+**手順**: 1. runtime / requested / observed / role_label（と round_no）をまとめる NamedTuple もしくは dataclass（例 MeasurementContext）を metrics.py に定義する
+2. _append_model_measurement_warnings の署名を (unmeasured, assumed, ctx) へ変更し、本体の runtime 等の参照を ctx.runtime 等へ置き換える
+3. aggregate 内の impl 経路（round_no・impl_runtime・requested・observed・"実装担当"）で ctx を組み立てて渡す
+4. _aggregate_round_reviewers 内のレビュー担当経路（round_no・name・requested・observed・"レビュー担当"）でも ctx を組み立てて渡す
+5. cross-refactoring/tests/test_models_and_metrics.py（既存）で aggregate の出力（unmeasured / assumed の文言）が不変であることを確認する
+
+## 見送った項目
+
+| ラウンド | 対象 | 兆候・経路 | 理由 |
+| --- | --- | --- | --- |
+| 1 | `plugins/ndf/scripts/lib/models.py#mismatch_warning` | branch | 1 ラウンドの採用上限 5 件を超えた |
+| 1 | `plugins/ndf/scripts/lib/models.py#observed_model` | branch | 1 ラウンドの採用上限 5 件を超えた |
+| 1 | `plugins/ndf/scripts/lib/models.py#separation_reason` | branch | 1 ラウンドの採用上限 5 件を超えた |
+| 1 | `plugins/ndf/scripts/lib/monitor.py#monitor_agent` | branch | 1 ラウンドの採用上限 5 件を超えた |
+| 1 | `plugins/ndf/scripts/lib/statefile.py#save` | error | 1 ラウンドの採用上限 5 件を超えた |
+| 1 | `plugins/ndf/skills/cross-review/scripts/critique.sh#select_targets` | branch | 1 ラウンドの採用上限 5 件を超えた |
+| 1 | `plugins/ndf/scripts/lib/assignment.py#seat_runtime` | boundary | コミット 36dd097d4dff427b0de545bcd0cdc0de0e7b74fb にトレーラーが欠けています: Item-Id, Round, Impl-Runtime, Impl-Model |
+| 2 | `plugins/ndf/scripts/lib/assignment.py#review_seats` | boundary | 1 ラウンドの採用上限 5 件を超えた |
+| 2 | `plugins/ndf/skills/cross-review/scripts/launch-reviewer.sh#main` | normal | 1 ラウンドの採用上限 5 件を超えた |
+| 2 | `plugins/ndf/scripts/lib/assignment.py#review_assign` | branch | コミット 0c3b60c7101ac9b439e0b13b677f8061b81eb851 にトレーラーが欠けています: Item-Id, Round, Impl-Runtime, Impl-Model |
+| 3 | `plugins/ndf/scripts/lib/post_queue.py#Queue.flush` | long_method | 1 ラウンドの採用上限 5 件を超えた |
+| 3 | `plugins/ndf/skills/cross-review/scripts/measure.py#_matches` | long_parameter_list | どの改善項目にも割り当てられていないコミットが 1 件（1a81a1a）。検証を回避した変更や、状態と実差分の食い違いを Pull Request に残さないため、この適用ラウンドを取り消します |
+| 3 | `plugins/ndf/scripts/lib/assignment.py#resolve_participants` | long_method | どの改善項目にも割り当てられていないコミットが 1 件（1a81a1a）。検証を回避した変更や、状態と実差分の食い違いを Pull Request に残さないため、この適用ラウンドを取り消します |
+| 3 | `plugins/ndf/skills/cross-review/scripts/state.py#_init_new_state` | long_method | どの改善項目にも割り当てられていないコミットが 1 件（1a81a1a）。検証を回避した変更や、状態と実差分の食い違いを Pull Request に残さないため、この適用ラウンドを取り消します |
+| 3 | `plugins/ndf/scripts/lib/refresh.py#fetch` | long_method | どの改善項目にも割り当てられていないコミットが 1 件（1a81a1a）。検証を回避した変更や、状態と実差分の食い違いを Pull Request に残さないため、この適用ラウンドを取り消します |
+| 4 | `plugins/ndf/skills/cross-review/scripts/state.py#_sync_worktree` | long_method | 1 ラウンドの採用上限 5 件を超えた |
+| 5 | `plugins/ndf/scripts/lib/auth.py#_probe_all` | one_by_one_iteration | どの改善項目にも割り当てられていないコミットが 1 件（89bb86f）。検証を回避した変更や、状態と実差分の食い違いを Pull Request に残さないため、この適用ラウンドを取り消します |
+| 5 | `plugins/ndf/skills/cross-review/scripts/state.py#_apply_resume_args_block` | long_method | どの改善項目にも割り当てられていないコミットが 1 件（89bb86f）。検証を回避した変更や、状態と実差分の食い違いを Pull Request に残さないため、この適用ラウンドを取り消します |
+| 5 | `plugins/ndf/skills/cross-review/scripts/rotate-pr.sh#execute_squash` | long_method | どの改善項目にも割り当てられていないコミットが 1 件（89bb86f）。検証を回避した変更や、状態と実差分の食い違いを Pull Request に残さないため、この適用ラウンドを取り消します |
+| 6 | `plugins/ndf/scripts/lib/transcript_agents.py#_aggregate_token_metrics` | long_method | 適用結果に項目がありません: R6-003（群の全項目を 1 つのコミットへまとめ、各項目へ同じ SHA を申告します） |
+| 6 | `plugins/ndf/scripts/lib/metrics.py#format_report` | long_method | 適用結果に項目がありません: R6-003（群の全項目を 1 つのコミットへまとめ、各項目へ同じ SHA を申告します） |
+| 6 | `plugins/ndf/skills/cross-review/tests/conftest.py#_no_github_state` | mock_targets_implementation_detail | 適用結果に項目がありません: R6-003（群の全項目を 1 つのコミットへまとめ、各項目へ同じ SHA を申告します） |
+| 6 | `plugins/ndf/scripts/lib/metrics.py#_append_model_measurement_warnings` | long_parameter_list | コミット 5f63640dff6dd7739738a8794edc5db43792f342 にトレーラーが欠けています: Item-Id, Round, Impl-Runtime, Impl-Model |

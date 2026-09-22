@@ -14,6 +14,10 @@
 `--stem-template` で決まる（既定は cross-review の `{agent}-review-pr{id}`）。
 cross-refactoring は `{agent}-propose-rf{id}` のような別の命名を渡す。
 
+**担当の名前は席の名前を取りうる**（`claude-2` のような同じランタイムの 2 つ目。#727）。
+一時ファイルの名前はその名前のまま組み、CLI ごとの検査と**上限の表の参照**は
+`_agent_runtime` でランタイム名へ直してから行う。
+
 監視軸:
   1. **pidfile** + `kill -0` でプロセス生存確認
      - 可能なら `/proc/<pid>/cmdline` で codex/agy であることを再確認 (PID 再利用対策)
@@ -91,8 +95,37 @@ def _lib_dir() -> pathlib.Path:
 
 if str(_lib_dir()) not in sys.path:
     sys.path.insert(0, str(_lib_dir()))
+import assignment  # noqa: E402  席の名前の規則（#727）
 import limits  # noqa: E402  上限の表（#598 / #537）
 import monitor_outcome  # noqa: E402  監視の結果の語彙と読み書き（#662）
+
+
+def _agent_runtime(agent: str) -> str:
+    """担当の名前からランタイムを引く（CLI ごとの検査を選ぶために使う）。
+
+    担当の単位は席の名前（`assignment.SEAT_PATTERN`。`claude-2` のように同じランタイムの
+    2 つ目を表す）である。**席の形に合わない名前はそのまま返す。** cross-refactoring は
+    任意の骨格（`--stem-template`）で担当名を渡せるため、形で弾くとその経路が壊れる。
+    """
+    try:
+        return assignment.seat_runtime(agent)
+    except assignment.AssignmentError:
+        return agent
+
+
+def _seat_or_both(value: str) -> str:
+    """位置引数 `target` の型。席の名前か `both` だけを通す。
+
+    通らなければ argparse が終了コード 2 で終わる。`both` はこれまでの 2 者
+    （codex / agy）を指す省略形である。
+    """
+    if value == "both":
+        return value
+    try:
+        assignment.seat_runtime(value)
+    except assignment.AssignmentError as e:
+        raise argparse.ArgumentTypeError(f"{e}。または both") from e
+    return value
 
 
 # ---------- 設定 ----------
@@ -294,8 +327,12 @@ def _agent_stall_default(agent: str) -> int:
       4. `DEFAULT_STALL` (表に無い agent)
 
     env は **呼び出し時** に再評価し、非数値なら warn を出して表の値に戻す。
+
+    **席の名前はランタイム名へ直してから引く**（#727）。上限の表も担当別の環境変数も
+    ランタイム名で引くため、`claude-2` のまま渡すと表に無い担当として `DEFAULT_STALL`
+    へ落ち、1 席目より早く無進捗と判定される。
     """
-    return limits.stall_timeout(agent)
+    return limits.stall_timeout(_agent_runtime(agent))
 
 
 # `--tmp-dir` で明示指定された一時ディレクトリ。CLI の解析時にだけ設定する。
@@ -705,7 +742,7 @@ def _lingering_completion(
     started_wall: float,
 ) -> str | None:
     has_result = paths.result.exists() and paths.result.stat().st_size > 0
-    if status.agent == "codex" and status.sentinel_seen and has_result:
+    if _agent_runtime(status.agent) == "codex" and status.sentinel_seen and has_result:
         _kill_pid(pid)
         status.result_exists = True
         return f"codex sentinel + result.json detected; killed lingering pid {pid}"
@@ -730,7 +767,7 @@ def _scan_usage_limit(paths: AgentPaths, agent: str) -> EarlyFatal | None:
     hit = _scan_patterns(paths.err_log, USAGE_LIMIT_FATAL)
     if hit:
         return EarlyFatal("err.log", hit, "usage_limit")
-    if agent == "claude":
+    if _agent_runtime(agent) == "claude":
         hit = _scan_claude_stdout_usage_limit(paths.stdout_log)
         if hit:
             return EarlyFatal("stdout.log", hit, "usage_limit")
@@ -742,7 +779,7 @@ def _scan_fatal(paths: AgentPaths, agent: str) -> EarlyFatal | None:
     hit = _scan_early_fatal(paths.err_log)
     if hit:
         return EarlyFatal("err.log", hit)
-    if agent == "claude":
+    if _agent_runtime(agent) == "claude":
         hit = _scan_claude_stdout_fatal(paths.stdout_log)
         if hit:
             return EarlyFatal("stdout.log", hit)
@@ -921,7 +958,7 @@ def monitor_agent(
 
         # 1. プロセス生存確認 → 死んでいたら最終判定へ (result.json 存在をチェック)
         alive = _pid_alive(pid)
-        if agent == "codex":
+        if _agent_runtime(agent) == "codex":
             status.sentinel_seen = _scan_codex_sentinel(paths.err_log)
 
         # codex は `tokens used` sentinel を出した後もプロセスが exit せず常駐し続ける
@@ -1065,12 +1102,11 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("pr", type=int)
     # 後方互換: cross-review は位置引数 `target` で codex / agy / both を渡す。
-    # 4 ランタイム任意の組み合わせは `--agents` で渡す（どちらか一方だけを使う）。
-    # **担当は 4 つの名前を取りうる。** `both` はこれまでの 2 者を指す省略形として残す
-    # （既存の呼び出し側が使い続けられるようにする）。3 者以上を監視するときは
-    # `--agents` を使う。
-    p.add_argument("target", nargs="?",
-                   choices=["claude", "codex", "agy", "kiro", "both"])
+    # 2 者より多い組み合わせは `--agents` で渡す（どちらか一方だけを使う）。
+    # **担当は席の名前を取りうる**（`claude-2` のような同じランタイムの 2 つ目。#727）。
+    # `both` はこれまでの 2 者を指す省略形として残す（既存の呼び出し側が使い続けられる
+    # ようにする）。3 者以上を監視するときは `--agents` を使う。
+    p.add_argument("target", nargs="?", type=_seat_or_both)
     p.add_argument("--agents", default=None,
                    help="監視対象をカンマ区切りで指定 (例: claude,kiro)。"
                         "位置引数 target の代わりに使う")
@@ -1148,8 +1184,11 @@ def _run_all(
     results: dict[str, AgentStatus] = {}
 
     def run(agent: str) -> None:
-        timeout = limits.monitor_timeout(phase, agent, args.timeout)
-        stall = limits.stall_timeout(agent, args.stall_timeout)
+        # 上限の表と担当別の環境変数はランタイム名で引く。席の名前（`claude-2`）のまま
+        # 渡すと表に無い担当として既定へ落ち、1 席目より早く無進捗と判定される（#727）。
+        runtime = _agent_runtime(agent)
+        timeout = limits.monitor_timeout(phase, runtime, args.timeout)
+        stall = limits.stall_timeout(runtime, args.stall_timeout)
         print(f"[{agent}] ▶ hard timeout {timeout}s / stall {stall}s (phase {phase})",
               file=sys.stderr, flush=True)
         if stall >= timeout:

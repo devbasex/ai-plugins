@@ -26,6 +26,7 @@ import argparse
 import datetime as _dt
 import json
 import pathlib
+import re
 import sys
 from typing import Any, NamedTuple
 
@@ -35,10 +36,14 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from classifications import COUNTED_CLASSIFICATIONS  # noqa: E402
 
 
-# **担当の名前は 4 つである。** `reviewers` を持たない古い記録で、結果を残した
-# 担当を数えるために使う（`state.py` の `LEGACY_AGENTS` は 2 者で、母集合を
-# 広げる前の既定値である。ここは記録にある値だけを数えるため一覧を広く取る）。
-AGENT_NAMES = ("codex", "agy", "claude", "kiro")
+# 席の名前の形（`lib/assignment.py` の `SEAT_PATTERN` と同じ規則）。`reviewers` を持たない
+# 古い記録で、結果を残した担当を数えるために使う。**名前の一覧では数えない。** 使える者が
+# 2 者に満たないラウンドには同じランタイムの 2 つ目（`claude-2`）が入り、一覧では
+# その結果が漏れる（#727）。
+#
+# **共通層を読み込まない。** この測定は状態ファイル 1 つを読むだけの自己完結スクリプトで、
+# 収束ループの外から単体で呼べることを保つ。
+SEAT_PATTERN = re.compile(r"^(claude|codex|agy|kiro)(-[2-9])?$")
 
 
 def _as_int(value: Any) -> int | None:
@@ -68,12 +73,8 @@ def _state_file_pr(st: dict[str, Any]) -> int | None:
     **`current_pr` ではない。** ローテーションを経ると `current_pr` は進むが、
     状態ファイルの名前も `rounds[]` の並びも最初の番号のままである。
     """
-    for entry in st.get("pr_history") or []:
-        if isinstance(entry, dict):
-            pr = _as_int(entry.get("pr"))
-            if pr is not None:
-                return pr
-    return _as_int(st.get("current_pr"))
+    prs = _prs(st)
+    return prs[0] if prs else None
 
 
 def _prs(st: dict[str, Any]) -> list[int]:
@@ -130,7 +131,8 @@ def _reviewer_count(round_rec: dict[str, Any]) -> int:
     reviewers = round_rec.get("reviewers")
     if isinstance(reviewers, list) and reviewers:
         return len(reviewers)
-    return sum(1 for name in AGENT_NAMES if isinstance(round_rec.get(name), dict))
+    return sum(1 for key, value in round_rec.items()
+               if SEAT_PATTERN.match(key) and isinstance(value, dict))
 
 
 def _cost(st: dict[str, Any]) -> dict[str, Any]:
