@@ -9,6 +9,7 @@ input=$(cat)
 claude_root=$(echo "$input" | jq -r '.workspace.project_dir // .workspace.current_dir // empty' 2>/dev/null)
 
 total_input=$(echo "$input" | jq -r '.context_window.total_input_tokens // empty' 2>/dev/null)
+ctx_size=$(echo "$input" | jq -r '.context_window.context_window_size // empty' 2>/dev/null)
 transcript=$(echo "$input" | jq -r '.transcript_path // empty' 2>/dev/null)
 
 # モデル表示名を取得（ラベルとして使用）。取れなければ "ctx" にフォールバック。
@@ -23,7 +24,10 @@ WARN_COLOR='\033[0;31m'
 ctx_info=""
 if [ -n "$total_input" ]; then
   main_used="$((total_input / 1000))k"
-  [ "$total_input" -gt "$WARN_TOKENS" ] && main_used=$(printf "$WARN_COLOR%s\033[0;36m" "$main_used")
+  # 上限が 200K 以下のモデル（Haiku 4.5）は 150k で知らせる。モデル名ではなく入力の上限で決める
+  main_limit=$WARN_TOKENS
+  [ -n "$ctx_size" ] && [ "$ctx_size" -le 200000 ] 2>/dev/null && main_limit=150000
+  [ "$total_input" -gt "$main_limit" ] && main_used=$(printf "$WARN_COLOR%s\033[0;36m" "$main_used")
   ctx_info=$(printf " \033[0;36m[%s %s" "$ctx_label" "$main_used")
 
   # 実行中のサブエージェントのコンテキスト使用量を並べる。statusLine の JSON は
@@ -36,7 +40,8 @@ if [ -n "$total_input" ]; then
     # 直近 60 分以内に更新された記録を候補にし、実行中かどうかは記録の末尾で決める。
     # 更新の時刻では決めない。子を待つ supervisor や長いコマンドを待つ担当は、実行中でも
     # 何分も書き足さない
-    for f in $(find "$sub_dir" -name 'agent-*.jsonl' -mmin -60 2>/dev/null); do
+    # NUL 区切りで読む。空白を含むパスでも 1 ファイルとして扱う
+    while IFS= read -r -d '' f; do
       # 末尾だけを読む。記録は長くなるため全体を走査しない。
       # 出力: モデル / 使用量 / 状態 (run | done | idle)
       #   最後の user か assistant の行が tool_use を含まない assistant なら応答を書き終えている。
@@ -68,7 +73,7 @@ if [ -n "$total_input" ]; then
       warn=0
       [ "$tokens" -gt "$limit" ] && warn=1
       rows="$rows$tokens"$'\t'"$warn"$'\t'"$label"$'\n'
-    done
+    done < <(find "$sub_dir" -name 'agent-*.jsonl' -mmin -60 -print0 2>/dev/null)
   fi
   # 使用量の多い順に 3 本まで並べ、残りは本数だけを出す。80 桁の端末に収めるため
   if [ -n "$rows" ]; then
