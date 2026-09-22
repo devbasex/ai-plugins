@@ -456,3 +456,22 @@ def test_the_standalone_command_pushes_and_posts_with_the_same_layer(
     assert "REPLIED=4 RESOLVED=2 QUEUED=0" in r.stdout
     # 本文は出さない。
     assert "好みの範囲" not in r.stdout
+
+
+def test_a_deferred_thread_marked_to_resolve_is_resolved(tmp_path) -> None:
+    """最終スイープは見送りも決着させる。要素の `resolve` が真なら決着を積む。"""
+    items = result_posts.fix_posts(
+        _fix_file(tmp_path, resolved_threads=[], rejected=[], deferred=[
+            {"comment_id": 333, "thread_id": "PRRT_c", "resolve": True,
+             "reason_for_deferral": "好みの範囲"}]),
+        repo=REPO, pr=PR)
+
+    assert [i["kind"] for i in items] == ["review-reply", "thread-resolve", "pr-comment"]
+    assert items[1]["fields"]["thread_id"] == "PRRT_c"
+
+
+def test_a_deferred_thread_is_not_resolved_by_default(tmp_path) -> None:
+    items = result_posts.fix_posts(
+        _fix_file(tmp_path, resolved_threads=[], rejected=[]), repo=REPO, pr=PR)
+
+    assert "thread-resolve" not in [i["kind"] for i in items]

@@ -98,7 +98,7 @@ fi
 
 render_review_prompt() {
 cat > "$PROMPT" <<EOF
-# /ndf:pr-review 実行 (cross-review $SEAT / round $ROUND)
+# cross-review のレビュー ($SEAT / round $ROUND)
 
 PR #$PR を **$SEAT の観点でレビューし、指摘を 2 つのファイルへ書いて** ください。
 **PR への投稿は行わない。** 投稿はレビューを回す側がこの 2 つのファイルから行う。

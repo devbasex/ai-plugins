@@ -301,7 +301,10 @@ def fix_posts(result_path: pathlib.Path | str, repo: str, pr: int,
                        f"この指摘は採らない判断です。{reason}".strip())
         if reply:
             items.append(reply)
-    for entry in resolved:
+    # 見送り・却下は既定では決着させない（次のラウンドで見直す）。最終スイープは
+    # スレッドを残さないため、要素の `resolve` を真にして決着まで求める。
+    closing = resolved + [e for e in deferred + rejected if e.get("resolve")]
+    for entry in closing:
         thread_id = entry.get("thread_id")
         if thread_id:
             items.append({"kind": "thread-resolve",
@@ -371,13 +374,28 @@ class PushResult(NamedTuple):
     detail: str
 
 
+# 認証の退避の値は共通層 1 か所が持つ（`git-credential.sh`）。ここへ写さない。
+_CREDENTIAL_LIB = pathlib.Path(__file__).resolve().parent / "git-credential.sh"
+
+
+def _credential_fallback_args() -> list[str]:
+    r = subprocess.run(
+        ["bash", "-c", f'. "{_CREDENTIAL_LIB}"; ndf_git_credential_fallback_args'],
+        capture_output=True, text=True)
+    return [line for line in r.stdout.split("\n") if line] if r.returncode == 0 else []
+
+
 def _git(worktree: pathlib.Path | str, *args: str) -> subprocess.CompletedProcess:
-    # 認証は `gh` の持ち物を使う。helper を空で 1 度挟むのは、応答を返さない helper が
-    # 先に当たると止まるためである。
-    cmd = ["git", "-C", str(worktree),
-           "-c", "credential.helper=",
-           "-c", "credential.helper=!gh auth git-credential", *args]
-    return subprocess.run(cmd, capture_output=True, text=True)
+    """git を 1 度実行し、認証で落ちたときだけ helper を退避して 1 度だけやり直す（#524）。"""
+    cmd = ["git", "-C", str(worktree), *args]
+    first = subprocess.run(cmd, capture_output=True, text=True)
+    if first.returncode == 0 or args[0] not in ("push", "fetch"):
+        return first
+    fallback = _credential_fallback_args()
+    if not fallback:
+        return first
+    return subprocess.run(["git", "-C", str(worktree), *fallback, *args],
+                          capture_output=True, text=True)
 
 
 def push_fix(worktree: pathlib.Path | str, head_branch: str,

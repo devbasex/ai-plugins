@@ -19,12 +19,15 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LIB = REPO_ROOT / "plugins/ndf/scripts/lib/git-credential.sh"
 
-# 退避を案内する手順書。`cross-refactoring` は実装が退避するため、案内の形が違う。
+# 退避を案内する手順書。`cross-refactoring` と `fix` は実装が退避するため、案内の形が
+# 違う（`fix` の送信は共通層の `result_posts.py` が行う、#730）。
 DOCS_WITH_COMMAND = (
     "plugins/ndf/skills/pr/SKILL.md",
+)
+DOCS_WITH_REFERENCE = (
+    "plugins/ndf/skills/cross-refactoring/SKILL.md",
     "plugins/ndf/skills/fix/SKILL.md",
 )
-DOCS_WITH_REFERENCE = ("plugins/ndf/skills/cross-refactoring/SKILL.md",)
 
 
 def fallback_args() -> list[str]:
