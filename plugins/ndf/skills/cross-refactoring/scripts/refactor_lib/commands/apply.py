@@ -283,6 +283,73 @@ def _item_summary(item: dict[str, Any]) -> str:
 
 
 
+def _find_group_to_open(
+    groups: list[dict[str, Any]],
+) -> tuple[Optional[dict[str, Any]], str]:
+    """次に開く群と、その開き直しの判定を返す。開ける群が無ければ `(None, "")`。
+
+    **`applied` の群も開き直す。** 適用は取り込んだが検証まで進めずに落ちた場合、
+    飛ばすとその群の項目が採用でも取り消しでもないまま残る。再開できることは
+    収束ループの前提である。
+
+    **未着手の群は、開き直しの判定へ掛ける**（#647）。無条件に開き直すと、結果を
+    残さない担当に当たり続けて上限なく起動する。項目が無い群と上限に達した群は、
+    ここで取り消し済みにして次を探す。
+    """
+    reopening = ""
+    for group in groups:
+        if group.get("status") not in {"pending", "applied"}:
+            continue
+        if group.get("status") == "applied":
+            return group, reopening
+        reopening = group_reopening(group)
+        if reopening in {"empty", "exhausted"}:
+            group["status"] = "dropped"
+            group.setdefault(
+                "drop_reason", "empty" if reopening == "empty" else "no_result"
+            )
+            info(
+                f"適用ラウンド {group['apply_round']} は開きません"
+                f"（{'項目なし' if reopening == 'empty' else '試行の上限'}）"
+            )
+            continue
+        return group, reopening
+    return None, reopening
+
+
+def _begin_apply_group(
+    state: dict[str, Any], entry: dict[str, Any],
+    opened: dict[str, Any], reopening: str,
+) -> None:
+    """開いた群に合わせて起点・試行の番号・適用の控えを整える。
+
+    初回の開始だけが起点と試行の番号を進める。未完の試行の再開と、取り込み済みの
+    群の開き直しは**どちらも動かさない**。
+    """
+    entry["apply_round"] = opened["apply_round"]
+    if opened.get("status") == "pending" and reopening == "open":
+        # 起点は**オーケストレータ側で**確定させる。実装担当の申告に委ねると、
+        # 欠落・不正時に範囲検査が無効になり、過去の任意のコミットが実在扱いになる。
+        head = git_out(state["worktrees"]["work"], ["rev-parse", "HEAD"])
+        opened["base_sha"] = head
+        opened["attempt"] = attempt_of(opened) + 1
+        entry["apply_base_sha"] = head
+        entry["fix_rounds"] = 0
+        entry["apply"] = {
+            "apply_round": opened["apply_round"],
+            "applied": [], "failed": [],
+            "base_sha": head, "head_sha": None, "merged_at": None,
+        }
+        return
+    if opened.get("status") == "pending":
+        # 開いたまま閉じていない試行の再開。**起点も試行の番号も動かさない。**
+        info(f"↻ 適用ラウンド {opened['apply_round']} の試行を再開します")
+    else:
+        # 取り込み済みの群を開き直した。**起点も修正の回数も動かさない。**
+        info(f"↻ 適用ラウンド {opened['apply_round']} は取り込み済みです（検証から再開）")
+    entry["apply_base_sha"] = opened.get("base_sha")
+
+
 def cmd_next_apply_round(args: argparse.Namespace) -> None:
     """Step 4 — 次の適用ラウンドを開き、実装担当と対象の項目を返す。
 
@@ -298,62 +365,13 @@ def cmd_next_apply_round(args: argparse.Namespace) -> None:
     entry = round_of(state, args.round)
     groups = apply_groups(entry)
 
-    # **`applied` の群も開き直す。** 適用は取り込んだが検証まで進めずに落ちた場合、
-    # 飛ばすとその群の項目が採用でも取り消しでもないまま残る。再開できることは
-    # 収束ループの前提である。
-    #
-    # **未着手の群は、開き直しの判定へ掛ける**（#647）。無条件に開き直すと、結果を
-    # 残さない担当に当たり続けて上限なく起動する。項目が無い群と上限に達した群は、
-    # ここで取り消し済みにして次を探す。
-    opened: Optional[dict[str, Any]] = None
-    reopening = ""
-    for group in groups:
-        if group.get("status") not in {"pending", "applied"}:
-            continue
-        if group.get("status") == "applied":
-            opened = group
-            break
-        reopening = group_reopening(group)
-        if reopening in {"empty", "exhausted"}:
-            group["status"] = "dropped"
-            group.setdefault(
-                "drop_reason", "empty" if reopening == "empty" else "no_result"
-            )
-            info(
-                f"適用ラウンド {group['apply_round']} は開きません"
-                f"（{'項目なし' if reopening == 'empty' else '試行の上限'}）"
-            )
-            continue
-        opened = group
-        break
-
+    opened, reopening = _find_group_to_open(groups)
     if opened is None:
         statefile.save(path, state)
         info(f"提案ラウンド {args.round} の適用ラウンドは残っていません")
         sys.exit(1)
 
-    entry["apply_round"] = opened["apply_round"]
-    if opened.get("status") == "pending" and reopening == "open":
-        # 起点は**オーケストレータ側で**確定させる。実装担当の申告に委ねると、
-        # 欠落・不正時に範囲検査が無効になり、過去の任意のコミットが実在扱いになる。
-        head = git_out(state["worktrees"]["work"], ["rev-parse", "HEAD"])
-        opened["base_sha"] = head
-        opened["attempt"] = attempt_of(opened) + 1
-        entry["apply_base_sha"] = head
-        entry["fix_rounds"] = 0
-        entry["apply"] = {
-            "apply_round": opened["apply_round"],
-            "applied": [], "failed": [],
-            "base_sha": head, "head_sha": None, "merged_at": None,
-        }
-    elif opened.get("status") == "pending":
-        # 開いたまま閉じていない試行の再開。**起点も試行の番号も動かさない。**
-        info(f"↻ 適用ラウンド {opened['apply_round']} の試行を再開します")
-        entry["apply_base_sha"] = opened.get("base_sha")
-    else:
-        # 取り込み済みの群を開き直した。**起点も修正の回数も動かさない。**
-        info(f"↻ 適用ラウンド {opened['apply_round']} は取り込み済みです（検証から再開）")
-        entry["apply_base_sha"] = opened.get("base_sha")
+    _begin_apply_group(state, entry, opened, reopening)
     state["phase"] = "apply"
     statefile.save(path, state)
 

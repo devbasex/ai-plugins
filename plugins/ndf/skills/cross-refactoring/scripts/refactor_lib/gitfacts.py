@@ -169,11 +169,13 @@ def commit_test_changes(work: str, sha: str) -> dict[str, tuple[list[str], list[
 
     **検証がテストの期待値を見るために要る**（#443）。差分ではなく前後の行を返すのは、
     判定が `assert` の行の集合を突き合わせる形だからである。
+
+    触れたファイルの列挙は `commit_files` が持つ。git の引数と空行の除外を 2 か所に
+    持つと、列挙の仕方を変えるときに片方だけが直される。
     """
-    out = git_out(work, ["show", "--name-only", "--format=", sha])
     changes: dict[str, tuple[list[str], list[str]]] = {}
-    for path in (out or "").splitlines():
-        if not path.strip() or not _is_test_path(path):
+    for path in commit_files(work, sha):
+        if not _is_test_path(path):
             continue
         before = git_out(work, ["show", f"{sha}^:{path}"]) or ""
         after = git_out(work, ["show", f"{sha}:{path}"]) or ""
