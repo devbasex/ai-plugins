@@ -56,19 +56,29 @@ PR: <PR番号>
 )
 ```
 
-サブエージェント側ではこの SKILL.md を読み込んで、自己完結で
-**修正 → コミット → push → reply → Resolve Conversation** まで実行する。
-メインへの戻り値は最小限のサマリのみ。
+サブエージェント側ではこの SKILL.md を読み込んで、**修正 → コミット → 戻り値ファイル**
+までを行う。メインへの戻り値は最小限のサマリのみ。
 
-**push が credential helper の不全で落ちたときは退避する**（#524）。`gh` が認証済みでも
-`git` だけが `Authentication failed` を返す環境がある。
+**修正の担当は GitHub と git へ書かない。** 送信・返信・スレッドの決着・まとめの投稿は、
+戻り値ファイルを読んだ側が行う（#730）。担当が送ると、送ったという報告と実物が食い違う
+状態（切り離された頭では、ブランチ名だけの送信が何も送らずに終了コード 0 で終わる）と、
+途中で止まったときに投稿だけが残る状態が作れる。
+
+| 起動のされ方 | 書き込みを行う側 |
+| --- | --- |
+| `/ndf:cross-review` から | 修正の取り込み（`state.py merge-fix`）が行う |
+| 単独で呼んだ | 戻り値ファイルを書いた後、次の 1 行を実行する |
 
 ```bash
-git -c credential.helper= -c credential.helper='!gh auth git-credential' push
+python3 "$SCRIPTS/lib/result_posts.py" fix --pr <番号> --result <戻り値ファイル> \
+  [--repo <所有者>/<リポジトリ>] [--head <ブランチ名>] [--worktree <作業ツリー>] [--round <R>]
 ```
 
-**空の値を先に置く。** `credential.helper` は複数の値を持てる設定で、`git` は宣言された
-順に問い合わせる。空の値だけが一覧を空へ戻す。
+`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md` にある。
+`--repo` / `--head` / `--worktree` を省いたときは、いまいる作業ツリーと Pull Request から引く。
+このコマンドが現在の頭を送り先へ送り（`git push origin HEAD:<ブランチ名>`）、報告した
+コミットが送り先に載ったことを確かめてから、返信・決着・まとめを待ち行列を通して送る。
+出力は件数と参照だけで、本文を出さない。
 
 ## コメントの取得（3 ソース）
 
@@ -203,14 +213,11 @@ GitHub MCP を使う場合は `mcp__github__get_pull_request_comments` を利用
 4. 問題点を修正。**コード行数が減る方向の修正は積極的に実施**（重複排除、不要分岐除去）
 5. **コミット前の再確認** — 作業中に新しいコメントが追加されていないか再取得し、CI 状態も
    現時点だけ確認する（完了待ちはしない）。新しい指摘・失敗があれば手順 3 に戻る
-6. コミット・プッシュ
-7. **PR レベルの Summary コメントを投稿**（対応件数 + deferred 件数を明記）
-8. 対応したインラインコメントに個別に返信
-9. **deferred スレッドには `[deferred / nit]` ラベル付き返信** を投稿（Resolve はしない）
-10. reviewer に再レビューを依頼
-11. 対応完了したスレッドを **Resolve Conversation** にする
-12. **本文の決めたことの節を設計文書に揃える**（**コミットの有無によらず**実行する。後述）
-13. **戻り値ファイルを書き出す**（後述）
+6. コミットする。**送らない**
+7. **本文の決めたことの節を設計文書に揃える**（**コミットの有無によらず**実行する。後述）
+8. **戻り値ファイルを書き出す**（後述）。対応したスレッド・見送り・却下をそれぞれの配列へ
+   入れる。返信・決着・まとめはこの配列から組み立てられる
+9. 単独で呼んだときだけ、「起動モード」の 1 行を実行して送信と投稿を終える
 
 ### 本文の決めたことの節を揃える
 
@@ -278,33 +285,30 @@ review 指摘と CI エラーは**同じ PR で一緒に修正**する。同じ�
 
 ## 返信と Resolve
 
-### 返信の書き分け
+**返信・決着・まとめは戻り値ファイルから組み立てる。** 担当が投稿の呼び出しを書かない。
+組み立てと送信は共通層（`lib/result_posts.py`）が 1 か所で持ち、`/ndf:cross-review` から
+呼んだときも単独で呼んだときも同じ実装を通る。
 
-| 状況 | 返信の型 |
-|---|---|
-| 修正した | `対応しました — <ファイル>:<行> で〇〇 (commit <SHA>)` |
-| 別 PR で対応 | `別 PR で対応予定です。PR 説明の「やらないこと」に記載のとおり、<理由>` |
-| deferred | `[deferred / nit] 後続 PR で対応予定` |
-| rejected | `bot 指摘は誤読です — 理由: ...` |
-| 対応不要 | `確認しました。<対応不要と判断した理由>` |
-| 範囲外 | `範囲外と判断し、#<番号> として残しました` — `/ndf:out-of-scope` で起票してから返信する。起票先のリポジトリもその Skill が決める（flaky テスト・CI の失敗は例外で、この PR で直す） |
+| 戻り値ファイルの配列 | 送られるもの |
+| --- | --- |
+| `resolved_threads` | 指摘への「対応しました（<コミット>）」の返信と、スレッドの決着 |
+| `deferred` | 見送りの理由（`reason_for_deferral`）の返信。決着しない |
+| `rejected` | 採らない理由（`reason_for_rejection`）の返信。決着しない |
+| （すべて） | 対応件数・決着・見送り・却下・CI を並べた Pull Request のまとめ |
 
-```bash
-# 特定のコメントに返信（in_reply_to にコメント ID を指定）
-gh api repos/{owner}/{repo}/pulls/{pr_number}/comments \
-  -f body="対応しました。" -F in_reply_to={comment_id}
-```
+- 返信の宛先は各要素の `comment_id`、決着の宛先は `thread_id`（`PRRT_...`）である。
+  `thread_id` はレビューコメントの `node_id`（`PRRC_...`）ではない。下の query の
+  `nodes[].id` から取る（次の節の query）
+- 同じ返信・同じまとめを 2 度送っても増えない（本文の先頭 80 文字で先客を照合する）。
+  すでに決着したスレッドをもう一度決着させても失敗にならない
 
-### Resolve Conversation
+### 対応の対象は未解決の指摘を数え直して決める（必須）
 
-**修正済みのスレッドのみ** Resolve する。`deferred` / `rejected` は次ラウンドで再評価する
-ため Resolve しない。
+**投稿数を対象の数として使わない。** レビュー結果の `comments_count` は
+そのラウンドで新しく投稿された件数であり、PR 上に残っている未解決の指摘の数ではない。
+前のラウンドの分や、中断の前に投稿された分がこの数の外にある。
 
-`resolveReviewThread` が要求するのは **review thread** の ID（`PRRT_...`）であり、
-レビューコメントの `node_id`（`PRRT_` ではなく `PRRC_...`）ではない。
-`repos/{owner}/{repo}/pulls/comments/<comment_id>` から引ける `node_id` はコメント側の ID
-なので **Resolve には使えない**。必ず下記 query の `nodes[].id` を使い、
-`comments.nodes[].databaseId`（返信に使ったコメント ID）または本文と突き合わせて特定する。
+スレッドの一覧は次の query で読む（読み取りだけで、書き込みはしない）。
 
 ```bash
 # スレッド一覧を thread ID (PRRT_...) 付きで取得
@@ -323,21 +327,9 @@ gh api graphql -f query='
   }' --jq '.data.repository.pullRequest.reviewThreads.nodes[]
            | select(.isResolved == false)
            | {thread_id: .id, path, line, comment_id: .comments.nodes[0].databaseId}'
-
-# 上で得た thread_id（PRRT_...）を THREAD_ID に入れて Resolve
-gh api graphql -f query='
-  mutation($id: ID!) {
-    resolveReviewThread(input: {threadId: $id}) { thread { isResolved } }
-  }' -f id="$THREAD_ID"
 ```
 
-### 対応の対象は未解決の指摘を数え直して決める（必須）
-
-**投稿数を対象の数として使わない。** レビュー結果の `comments_count` は
-そのラウンドで新しく投稿された件数であり、PR 上に残っている未解決の指摘の数ではない。
-前のラウンドの分や、中断の前に投稿された分がこの数の外にある。
-
-上の query を `isResolved == false` で絞った結果が対象の全量である。
+この query を `isResolved == false` で絞った結果が対象の全量である。
 `/ndf:cross-review` から呼ばれた場合は、次のコマンドでも同じ数を取れる（引数は state.json の
 キー、つまり最初に `init` した PR 番号を渡す。対象の PR は state.json 側で解決される）。
 
@@ -351,28 +343,15 @@ eval "$UNRESOLVED_VARS"
 `eval` 自身の終了コードが 0 になり、スクリプトの `exit 1` が消える。未解決の件数を
 取得できていないのに 0 件と読んで、対象が無いものとして先へ進むことになる。
 
-返信と Resolve を終えたら、**同じ query をもう一度実行して残数を確認する**。
+送信と投稿を終えたら、**同じ query をもう一度実行して残数を確認する**。
 deferred / rejected として意図的に残したもの以外が残っていれば、対応が漏れている。
 
 ### PR レベル Summary コメント（必須）
 
 インラインへの返信と Resolve **だけでは不十分**。PR ページの Conversation タブに
-まとめが出ないと、レビュアー視点で見落とされる。
-
-```bash
-gh pr comment <PR> --body "$(cat <<'EOMD'
-## 🔧 /ndf:fix サマリ
-
-対応件数: critical=X / major=Y / minor=Z (合計 N 件)
-deferred: D 件 / rejected: R 件
-commit: <SHA>
-CI: SUCCESS | FAILURE | NONE
-
-### 詳細
-- 各 thread の対応概要（行リンク付き）
-EOMD
-)"
-```
+まとめが出ないと、レビュアー視点で見落とされる。**まとめは戻り値ファイルから組み立てて
+送られる**（上の表の最後の行）。先頭行にラウンドとコミットが入るため、同じラウンドの
+まとめは 1 件だけになる。
 
 ## 戻り値フォーマット（必須）
 
@@ -401,11 +380,12 @@ EOMD
     {"comment_id": 3222849090, "path": "scripts/state.py", "line": 120,
      "severity": "minor", "summary": "heredoc を <<'JSON' にせよ",
      "reason_for_rejection": "$SHA を意図的に展開する必要があり、クオート化すると逆に壊れる"}
-  ],
-  "summary_comment_url": "https://github.com/.../pull/67#issuecomment-..."
+  ]
 }
 ```
 
+- **まとめの参照（`summary_comment_url`）は書かない。** 投稿する側が、まとめの投稿の応答から
+  記録へ書く
 - `resolved_threads` / `deferred` / `rejected` は **必ず配列**で返す（件数の int は誤り）。
   該当が無ければ空配列
 - **`rejected` の各要素は `path` / `line` / `severity` を持つ。** 却下した論点が次のラウンドで

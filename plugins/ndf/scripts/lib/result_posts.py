@@ -389,6 +389,9 @@ def push_fix(worktree: pathlib.Path | str, head_branch: str,
     """
     if not fix_commit:
         return PushResult(True, False, True, "コミットが無いため送らない")
+    if not (str(worktree or "") and head_branch):
+        return PushResult(False, False, False,
+                          "送る先（作業ツリーとブランチ）が分からない")
     pushed = _git(worktree, "push", "origin", f"HEAD:{head_branch}")
     if pushed.returncode != 0:
         return PushResult(False, False, False,

@@ -4145,6 +4145,12 @@ def _count(v: Any) -> int:
     return 0
 
 
+# 読んだ修正の結果ファイルの場所。投稿の組み立ては本文を引数に取らず、ファイルの
+# パスを受け取る（#730 の決定 3）。記録へは写らない（`_normalize_fix_result` は
+# 決まった鍵だけを読む）。
+FIX_SOURCE_KEY = "_source_path"
+
+
 def _read_fix_result(
     pr: int | str,
     explicit_file: str | pathlib.Path | None,
@@ -4169,7 +4175,9 @@ def _read_fix_result(
     ]
 
     if explicit is not None:
-        return _read_explicit_fix_result(explicit)
+        fix = _read_explicit_fix_result(explicit)
+        fix.setdefault(FIX_SOURCE_KEY, str(explicit))
+        return fix
 
     fix = _find_fallback_fix_result(fallback_candidates, pr, round_started_ts)
 
@@ -4221,6 +4229,7 @@ def _find_fallback_fix_result(
             candidate, pr, round_started_ts, is_canonical=is_canonical
         )
         if is_fresh:
+            parsed.setdefault(FIX_SOURCE_KEY, str(candidate))
             return parsed
     return None
 
@@ -4366,8 +4375,30 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
 
     fix = _read_fix_result(pr, args.file, round_started_ts)
 
+    # **送信と投稿は取り込む側が行う**（#730）。修正の担当はコミットまでで止まる。
+    # 送れない・報告されたコミットが送り先に載っていないときは、記録も投稿もせずに
+    # 止まる。同じ取り込みをやり直せば、同じ手順を最初から通る。
+    commit = fix.get("fix_commit") or fix.get("commit_sha")
+    pushed = result_posts.push_fix(str(st.get("worktree_path") or ""),
+                                   str(st.get("head_branch") or ""), commit)
+    if not pushed.ok:
+        die(f"修正を送れないか、報告されたコミットが送り先に載っていません: {pushed.detail}")
+    print(f"PUSHED={1 if pushed.pushed else 0} COMMIT_ON_HEAD={1 if pushed.contains else 0}")
+
     round_fix = _merge_fix_records(st, fix, pr)
     _save(pr, st)
+
+    posted = result_posts.post_fix(
+        _queue(pr), fix[FIX_SOURCE_KEY], str(st.get("repo") or ""),
+        int(st.get("current_pr") or pr), round_no=st["rounds"][-1].get("round"),
+        actor=str(st.get("viewer_login") or "") or None)
+    st["rounds"][-1]["fix"]["summary_comment_url"] = posted.summary_url
+    _save(pr, st)
+    if posted.summary_url:
+        print(f"POSTED summary_url={posted.summary_url}")
+    print(f"REPLIED={posted.replied} RESOLVED={posted.resolved} QUEUED={posted.queued}")
+    if posted.failed:
+        die(f"返信・決着・まとめを投稿できませんでした ({posted.detail})")
 
     # CI 分類
     if (fix.get("ci_status") or "").upper() != "FAILURE":

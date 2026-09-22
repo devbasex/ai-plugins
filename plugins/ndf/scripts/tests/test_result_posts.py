@@ -416,3 +416,43 @@ def test_nothing_is_pushed_when_no_commit_was_made(tmp_path) -> None:
     outcome = result_posts.push_fix(work, "main", None)
 
     assert outcome.ok is True and outcome.pushed is False
+
+
+def test_the_push_fails_without_a_destination() -> None:
+    outcome = result_posts.push_fix("", "", "abc1234")
+
+    assert outcome.ok is False and outcome.pushed is False
+
+
+# ---------------- 単独で使う口 ----------------
+
+def test_the_standalone_command_pushes_and_posts_with_the_same_layer(
+        tmp_path, fake_gh, monkeypatch) -> None:
+    """単独の `fix` も同じ層を使い、1 行のコマンドで送信と投稿を終える（AC21・AC22）。"""
+    work, remote = _repo_with_remote(tmp_path)
+    (work / "a.txt").write_text("2\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(work), "commit", "-am", "2"],
+                   check=True, capture_output=True)
+    fix = _fix_file(tmp_path, fix_commit=_head(work))
+    fake_gh.set_rules([
+        {"match": "issues/730/comments?", "stdout": "[]"},
+        {"match": "pulls/730/comments?", "stdout": "[]"},
+        {"match": "reviewThreads", "stdout": "PRRT_a\nPRRT_b\n"},
+        {"match": "issues/730/comments", "stdout": json.dumps(
+            {"id": 7, "html_url": "https://x/pull/730#issuecomment-7"})},
+        {"match": "", "stdout": "{}"},
+    ])
+    monkeypatch.delenv("CROSS_REVIEW_TMP_DIR", raising=False)
+
+    r = subprocess.run(
+        [sys.executable, str(LIB / "result_posts.py"), "fix", "--repo", REPO,
+         "--pr", str(PR), "--result", str(fix), "--head", "main",
+         "--worktree", str(work), "--round", str(ROUND), "--actor", ACTOR],
+        capture_output=True, text=True, env=os.environ.copy())
+
+    assert r.returncode == 0, r.stderr
+    assert "PUSHED=1 COMMIT_ON_HEAD=1" in r.stdout
+    assert "POSTED summary_url=https://x/pull/730#issuecomment-7" in r.stdout
+    assert "REPLIED=4 RESOLVED=2 QUEUED=0" in r.stdout
+    # 本文は出さない。
+    assert "好みの範囲" not in r.stdout
