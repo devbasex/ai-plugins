@@ -5,6 +5,8 @@ import importlib.util
 import pathlib
 import sys
 
+import pytest
+
 LIB = pathlib.Path(__file__).resolve().parents[1] / "lib"
 if str(LIB) not in sys.path:
     sys.path.insert(0, str(LIB))
@@ -103,6 +105,17 @@ def test_aggregate_current_metrics_for_representative_state() -> None:
             "round 1: agy は指定した gpt-5 で動いた前提で数える"
             "（実測不可）（レビュー担当）",
         ],
+    }
+
+
+@pytest.mark.parametrize("state", [{}, {"rounds": [], "items": []}])
+def test_aggregate_returns_empty_buckets_for_empty_state(state: dict) -> None:
+    """現状固定。rounds も items も空なら、空のバケットと空リストを返す。"""
+    assert metrics.aggregate(state) == {
+        "impl": {},
+        "reviewer": {},
+        "unmeasured": [],
+        "assumed": [],
     }
 
 
