@@ -441,8 +441,8 @@ def push_fix(worktree: pathlib.Path | str, head_branch: str,
 # ---------------- 部分命令 ----------------
 
 
-def _sh(*cmd: str) -> str:
-    r = subprocess.run(list(cmd), capture_output=True, text=True)
+def _sh(*cmd: str, cwd: pathlib.Path | str | None = None) -> str:
+    r = subprocess.run(list(cmd), capture_output=True, text=True, cwd=cwd)
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
@@ -461,14 +461,19 @@ class FixInputs(NamedTuple):
 
 
 def _resolve_fix_inputs(args: argparse.Namespace) -> tuple[FixInputs | None, str]:
-    """単独 fix 命令の入力を引数と既定値から解決する。"""
+    """単独 fix 命令の入力を引数と既定値から解決する。
+
+    **リポジトリと頭は作業ツリーの中で解決する。** 呼び出し元の cwd が作業ツリーの
+    外だと、`gh` が別のリポジトリを読むか解決に失敗し、頭が空のまま送信を飛ばす。
+    """
     worktree = pathlib.Path(args.worktree or os.getcwd()).resolve()
     repo = args.repo or _sh("gh", "repo", "view", "--json", "nameWithOwner",
-                            "-q", ".nameWithOwner")
+                            "-q", ".nameWithOwner", cwd=worktree)
     if not repo:
         return None, "リポジトリを決められない（--repo を渡す）"
-    head = args.head or _sh("gh", "pr", "view", str(args.pr), "--json", "headRefName",
-                            "-q", ".headRefName")
+    head = args.head or _sh("gh", "pr", "view", str(args.pr), "-R", repo,
+                            "--json", "headRefName", "-q", ".headRefName",
+                            cwd=worktree)
     result = pathlib.Path(args.result) if args.result else (
         pathlib.Path(os.environ.get("CROSS_REVIEW_TMP_DIR")
                      or str(worktree / TMP_DIRNAME)) / f"fix-pr{args.pr}-result.json")

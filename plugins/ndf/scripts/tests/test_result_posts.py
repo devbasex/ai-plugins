@@ -574,3 +574,39 @@ def test_a_deferred_thread_is_not_resolved_by_default(tmp_path) -> None:
 
     assert "thread-resolve" not in [i["kind"] for i in items]
 
+
+def test_the_standalone_command_resolves_repo_and_head_in_the_worktree(
+        tmp_path, monkeypatch) -> None:
+    """`--worktree` を渡したら、リポジトリと頭の解決も作業ツリーの中で行う。
+
+    呼び出し元の cwd が作業ツリーの外でも、`gh` が別のリポジトリを読まないため。
+    """
+    work = tmp_path / "work"
+    work.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.chdir(outside)
+    calls: list[tuple[list[str], str | None]] = []
+
+    def fake_run(cmd, **kw):
+        calls.append((list(cmd), kw.get("cwd")))
+        inside = kw.get("cwd") is not None and \
+            pathlib.Path(kw["cwd"]).resolve() == work.resolve()
+        out = ""
+        if inside and cmd[:3] == ["gh", "repo", "view"]:
+            out = REPO
+        elif inside and cmd[:3] == ["gh", "pr", "view"]:
+            out = "feat/x"
+        return subprocess.CompletedProcess(cmd, 0, stdout=out, stderr="")
+
+    monkeypatch.setattr(result_posts.subprocess, "run", fake_run)
+    fix = _fix_file(tmp_path)
+    args = result_posts.argparse.Namespace(
+        repo=None, pr=str(PR), result=str(fix), head=None, worktree=str(work))
+
+    inputs, error = result_posts._resolve_fix_inputs(args)
+
+    assert error == "" and inputs is not None
+    assert (inputs.repo, inputs.head) == (REPO, "feat/x")
+    pr_view = next(c for c, _ in calls if c[:3] == ["gh", "pr", "view"])
+    assert pr_view[pr_view.index("-R") + 1] == REPO
