@@ -203,8 +203,12 @@
   あいだは、両者が承認しても収束させない（[01-state-and-review.md](01-state-and-review.md) の Step 3 参照）
 - `viewer_login` — 自分のログイン名。一度取って持つ控えで、待ち行列の冪等の照合が
   「投稿者が自分か」を見るために使う
-- `rounds[].codex.queued` — その結果の投稿を待ち行列へ積んだかどうか。真のあいだは
-  届いたことの照会を飛ばす（[01-state-and-review.md](01-state-and-review.md) の待ち行列の節参照）
+- `rounds[].codex.queued` — 取り込みが送ったレビューが上限で送れず、待ち行列に残っているか。
+  流した直後に参照を書き戻して偽にする（[01-state-and-review.md](01-state-and-review.md) の待ち行列の節参照）
+- `rounds[].codex.review_url` — 送信の応答が返した参照。流し直しで先客が見つかったときは先客の参照
+- `rounds[].codex.posted_inline` / `posted_body` — インラインとして送れた件数と、差分の外を
+  理由に総評へ移した件数（#730）。`comments` は `posted_inline` と同じ値
+- `rounds[].fix.summary_comment_url` — 修正のまとめの投稿の応答が返した参照（#730）
 - `rounds[].verdict` の `queued` — 通ったが待ち行列に投稿が残っているラウンド。収束させない
 - `sweep` — 最終スイープ後の検証結果。`remaining_open` は GitHub 側で数え直した実数で、
   `declared_remaining_open` は結果ファイルの申告値。両者が食い違う場合は実数を採る
@@ -231,17 +235,19 @@ launcher が生成するプロンプトに以下を強制している:
 
 - **headRefOid (commit_id) を明示**: AI が自前で取得すると baseRefOid を誤って入れる事故が多発
 - **作業 worktree の絶対パス**: 「ファイル読み取りは必ず worktree 配下の絶対パスを使う」（実 path は state.json の `worktree_path` を参照。`<worktree-base>` は `NDF_WORKTREE_BASE` env > `<システム tmpdir>/ndf-worktrees` の優先順で解決）
-- **event ダウングレード警告**: `event_downgrade=true` のときは payload の `event` を `COMMENT` に
+- **投稿の手順を持たない**（#730）: 担当は投稿しない。判定の格下げ（`event_downgrade`）も
+  担当へ渡さず、投稿する側が送信の時点で行う
 - **既存コメント差分**: `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt` を読んで重複指摘禁止
 - **自動レビュー観点**: GitHub API の `pulls/<PR>/files --paginate` で変更ファイルを全件取得して分類し、`common` / `docs_only` / `code` / `db_migration` / `test` / `dependency` / `config_ci` / `api_contract` / `auth_security` / `frontend` / `performance` / `deletion_rename` / `generated` / `i18n` / `infra` の該当テンプレートを state.json の `auto_review_instructions` に保存する
 - **手動追加レビュー観点**: `--focus` / `--extra-instructions-file` が指定されていれば state.json の `manual_extra_review_instructions` に保存し、自動テンプレートの後ろに連結した `review_instructions` を codex / agy 両 launcher が同じ「追加レビュー観点」セクションとしてプロンプトに差し込む
 - **進捗マーカー**: agy には `$TMP_DIR/agy-review-pr<PR>-progress.log` へ短いフェーズ名を追記させ、monitor の heartbeat で表示する。内部推論や長文説明は書かせない
-- **review body 先頭 prefix**:
+- **review body 先頭 prefix**（投稿する側が組み立てる）:
   ```
-  ## 🤖 cross-review | round <N> | <agent> | <event(intent)>
+  ## 🤖 cross-review | round <N> | <席> | <event(intent)>
   ```
   `<event>` は **本来の intent**（`posted_as` ではない）。
   例: 自分PR で REQUEST_CHANGES を COMMENT にダウングロードしても、prefix は `REQUEST_CHANGES` のまま。
+  二度書かない照合はこの行の**席まで**の前方一致を鍵にする（判定の語を含めない）
 - **出力禁止事項**（SKILL.md「レビュー出力の制約」と一致）:
   - 「良い点」「Strengths」などの褒めセクションを body に書かない
   - 修正アクションを伴わないインラインコメントは作らない（nit はインライン化しない）
@@ -250,24 +256,27 @@ launcher が生成するプロンプトに以下を強制している:
 
 ## AI が書き出すファイル契約
 
-各 launcher は AI に以下 2 ファイルの書き出しを指示する:
+各 launcher は AI に以下 2 ファイルの書き出しを指示する。**どちらも一時の名前（末尾
+`.tmp`）で書き終えてから、控え → 結果ファイルの順に改名させる**（#730）。結果ファイルが
+正式の名前で現れたことが、2 つとも書き終えた印になる。控えだけが正式の名前で結果ファイルが
+無い状態は、結果なしとして扱い投稿を 0 件にする。
 
 | ファイル | 内容 |
 |---|---|
-| `$TMP_DIR/<agent>-review-pr<PR>-result.json` | `{event, posted_as, comments_count, review_url, by_severity}` のサマリ |
-| `$TMP_DIR/<agent>-review-pr<PR>-round<R>-payload.json` | `{comments: [{path, line, body, severity, evidence, falsification, suggested_check, posted_to}, ...]}` |
+| `$TMP_DIR/<席>-review-pr<PR>-result.json` | `{event, by_severity}`。担当が書くのはこの 2 つだけ |
+| `$TMP_DIR/<席>-review-pr<PR>-round<R>-payload.json` | `{summary, comments: [{path, line, body, severity, evidence, falsification, suggested_check}, ...]}` |
 
-**`comments[]` が持つのは、その担当が出した指摘の全件である**（#156）。投稿した
-インラインの写しではない。**差分の外を指すために総評へ書いた指摘も、`HTTP 422` で総評へ
-移した指摘も載る。** そのため `result.json` の `comments_count`（投稿したインラインの数）
-とは一致しない。
+**`comments[]` が持つのは、その担当が出した指摘の全件である**（#156）。位置を持つ指摘は
+インラインとして送られ、位置を持たない指摘と、差分の外を理由に拒まれた要求の指摘は総評へ
+入る。送れた先（`posted_to`）は投稿する側が控えへ書き戻す。記録の `comments` は送れた
+インラインの数で、指摘の件数とは一致しない。
 
 | 項目 | 何を書くか | 無いときの扱い |
 | --- | --- | --- |
 | `evidence` | 根拠。対象のコードと到達経路 | 空。`has_evidence` が偽になる |
 | `falsification` | 反証条件。これが成り立てば棄却できる | 同上 |
 | `suggested_check` | 実行できる検証手順 | 空 |
-| `posted_to` | `inline` / `body` のどちらへ投稿したか | `inline` として扱う |
+| `posted_to` | `inline` / `body` のどちらへ送れたか。**投稿する側が書く** | `inline` として扱う |
 
 **4 項目を持たない指摘も捨てない。** 捨てると、対応していない担当の指摘が記録から消える。
 
@@ -291,8 +300,25 @@ launcher が生成するプロンプトに以下を強制している:
 **落とすのは、書き込む中身が確定した後である。** 読めなかった再実行が、一度取り込めて
 いた記録を消さないようにする。
 
-`/ndf:pr-review` の result.json 出力規約に `posted_as` フィールドを含むこと
-（自分PR ダウングレード時に GitHub に実際送った event。デフォルトは `event` と同値）。
+## 投稿の種別ごとの契約
+
+**GitHub へ書くのはレビューを回す側だけで、すべて待ち行列（`scripts/lib/post_queue.py`）を
+通る**（#730）。組み立てと送信は共通層の `scripts/lib/result_posts.py` が持つ。送る前に同じ
+ものが先にあるかを照合し、あれば送らずに先客を応答として返す。
+
+| 種別 | 積む側 | 組み立ての元 | 二度書かない照合の鍵 |
+| --- | --- | --- | --- |
+| `review-post` | 指摘の取り込み（`read-result`） | 指摘の控えと結果ファイル | 投稿者と、本文の先頭行の `## 🤖 cross-review \| round <R> \| <席> \|` までの前方一致（判定の語を含めない） |
+| `review-reply` | 修正の取り込み（`merge-fix`）/ 単独の `fix` | 修正の結果ファイルの `resolved_threads` / `deferred` / `rejected` | 返信先の指摘の識別子と、本文の先頭 80 文字 |
+| `thread-resolve` | 同上 | `resolved_threads`（と、`resolve` が真の見送り・却下） | スレッドの識別子と、すでに決着しているかどうか |
+| `pr-comment` | 同上（修正のまとめ）/ 巻き直し（`rotate-pr.sh`） | 修正の結果ファイルの件数とコミット | 投稿者と、本文の先頭 80 文字（まとめはラウンドとコミットを含む） |
+
+**差分の外を指すインラインで拒まれたら、その要求のインラインをすべて総評へ移して送り直す。**
+契機は応答の `errors` が `could not be resolved` を含むときだけで、ほかの 422 は失敗として
+止める。すでに決着したスレッドの決着をもう一度送っても失敗にならない（実測）。
+
+修正の送信は `git push origin HEAD:<ブランチ名>` で行い、戻り値ファイルの `fix_commit` が
+送り先に載ったことを確かめる。載っていなければ取り込みは失敗として止まる。
 
 ## 監視と計測が残すファイル
 
