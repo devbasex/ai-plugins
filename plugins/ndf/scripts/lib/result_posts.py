@@ -74,13 +74,28 @@ def _dict_items(raw: Any) -> list[dict[str, Any]]:
 # ---------------- レビューの投稿 ----------------
 
 
+def _line_no(value: Any) -> int | None:
+    """行番号として読めるときだけ正の int を返す。
+
+    **行は担当が書き出す外部入力である。** `"L42"` や `"40-45"` を `int()` へ渡すと
+    例外でレビュー全体が失われるため、読めない値は位置を持たないものとして扱う。
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, str) and value.strip().isdecimal():
+        return int(value.strip()) or None
+    return None
+
+
 def _can_be_inline(finding: dict[str, Any]) -> bool:
     """指す先を持つか。**差分に含まれるかどうかは見ない。**
 
     含まれるかは送ってみた応答が決める（設計の決定 9）。ここで見るのは、そもそも
-    指す位置があるかどうかだけである。
+    指す位置があるかどうかだけである。行が数として読めない指摘は総評へ回す。
     """
-    return bool(finding.get("path")) and finding.get("line") is not None
+    return bool(finding.get("path")) and _line_no(finding.get("line")) is not None
 
 
 def _evacuated_line(finding: dict[str, Any]) -> str:
@@ -134,7 +149,7 @@ def review_posts(payload_path: pathlib.Path | str, result_path: pathlib.Path | s
         fields["commit_id"] = head_sha
     if inline:
         fields["comments"] = [
-            {"path": str(f.get("path")), "line": int(f.get("line")),
+            {"path": str(f.get("path")), "line": _line_no(f.get("line")),
              "side": "RIGHT", "body": str(f.get("body") or "")}
             for f in inline
         ]

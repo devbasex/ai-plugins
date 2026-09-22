@@ -194,6 +194,26 @@ def test_a_finding_without_a_position_goes_to_the_summary(tmp_path) -> None:
     assert items[0]["extra"]["body"] == 1
 
 
+@pytest.mark.parametrize("line", ["L42", "40-45", "", "  ", True, 1.5, [12]])
+def test_a_finding_whose_line_is_not_an_integer_goes_to_the_summary(
+        tmp_path, line) -> None:
+    """行が整数にならない指摘は、例外で落とさず総評へ入れる（外部入力のため）。"""
+    items = _review_items(tmp_path, comments=[
+        {"path": "a.py", "line": line, "body": "[major / 正確性] 行が壊れている",
+         "severity": "major"},
+        {"path": "b.py", "line": "34", "body": "[minor / 可読性] 名前を揃える",
+         "severity": "minor"},
+    ])
+
+    fields = items[0]["fields"]
+    assert fields["comments"] == [
+        {"path": "b.py", "line": 34, "side": "RIGHT",
+         "body": "[minor / 可読性] 名前を揃える"}]
+    assert "行が壊れている" in fields["body"]
+    assert items[0]["extra"]["inline"] == 1
+    assert items[0]["extra"]["body"] == 1
+
+
 # ---------------- 送信と退避 ----------------
 
 def _queue(tmp_path) -> post_queue.Queue:
@@ -553,3 +573,4 @@ def test_a_deferred_thread_is_not_resolved_by_default(tmp_path) -> None:
         _fix_file(tmp_path, resolved_threads=[], rejected=[]), repo=REPO, pr=PR)
 
     assert "thread-resolve" not in [i["kind"] for i in items]
+
