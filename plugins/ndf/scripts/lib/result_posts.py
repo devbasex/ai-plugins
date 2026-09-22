@@ -302,19 +302,9 @@ def _fix_summary_body(fix: dict[str, Any], round_no: int | None,
     return "\n".join(lines) + "\n"
 
 
-def fix_posts(result_path: pathlib.Path | str, repo: str, pr: int,
-              round_no: int | None = None) -> list[dict[str, Any]]:
-    """修正の結果ファイルから、待ち行列へ積む項目の列を組み立てる。
-
-    並びは「返信 → 決着 → まとめ」である。返信を先に置くのは、決着したスレッドが
-    畳まれた後に返信が届くと、読み手がその返信を開かないためである。
-    """
-    fix = _read_json(result_path)
-    resolved = _dict_items(fix.get("resolved_threads"))
-    deferred = _dict_items(fix.get("deferred"))
-    rejected = _dict_items(fix.get("rejected"))
-    commit = str(fix.get("fix_commit") or fix.get("commit_sha") or "")
-
+def _reply_items(resolved: list[dict[str, Any]], deferred: list[dict[str, Any]],
+                 rejected: list[dict[str, Any]], commit: str) -> list[dict[str, Any]]:
+    """決着・見送り・却下の各要素へ付ける返信の項目を、その順に組み立てる。"""
     # (要素の列, 返信の定型句, 理由を取り出すキー)。決着は理由の代わりにコミットを添える
     reply_rules = (
         (resolved, "対応しました。", None),
@@ -331,15 +321,40 @@ def fix_posts(result_path: pathlib.Path | str, repo: str, pr: int,
             reply = _reply(entry.get("comment_id"), f"{lead}{note}".strip())
             if reply:
                 items.append(reply)
+    return items
+
+
+def _closing_thread_items(resolved: list[dict[str, Any]], deferred: list[dict[str, Any]],
+                          rejected: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """スレッドを決着させる項目を組み立てる。"""
     # 見送り・却下は既定では決着させない（次のラウンドで見直す）。最終スイープは
     # スレッドを残さないため、要素の `resolve` を真にして決着まで求める。
     closing = resolved + [e for e in deferred + rejected if e.get("resolve")]
+    items: list[dict[str, Any]] = []
     for entry in closing:
         thread_id = entry.get("thread_id")
         if thread_id:
             items.append({"kind": "thread-resolve",
                           "fields": {"thread_id": str(thread_id)},
                           "extra": {"ident": f"resolve-{thread_id}"}})
+    return items
+
+
+def fix_posts(result_path: pathlib.Path | str, repo: str, pr: int,
+              round_no: int | None = None) -> list[dict[str, Any]]:
+    """修正の結果ファイルから、待ち行列へ積む項目の列を組み立てる。
+
+    並びは「返信 → 決着 → まとめ」である。返信を先に置くのは、決着したスレッドが
+    畳まれた後に返信が届くと、読み手がその返信を開かないためである。
+    """
+    fix = _read_json(result_path)
+    resolved = _dict_items(fix.get("resolved_threads"))
+    deferred = _dict_items(fix.get("deferred"))
+    rejected = _dict_items(fix.get("rejected"))
+    commit = str(fix.get("fix_commit") or fix.get("commit_sha") or "")
+
+    items = _reply_items(resolved, deferred, rejected, commit)
+    items += _closing_thread_items(resolved, deferred, rejected)
     items.append({
         "kind": "pr-comment",
         "fields": {"body": _fix_summary_body(fix, round_no, len(resolved),

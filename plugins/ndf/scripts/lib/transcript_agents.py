@@ -516,17 +516,17 @@ def interrupted(
     再び現れない（契約の終わり方の表）。
     """
     picked = set(agents or ())
+    # 記録の属性名 → 期待値。指定の無い（None の）軸は絞り込まない
+    wanted = {attr: value for attr, value in (("layer", layer), ("depth", depth),
+                                              ("parent_agent_id", parent))
+              if value is not None}
     out: list[AgentRecord] = []
     for record in records:
         if record.ending != "rate_limit":
             continue
-        if layer is not None and record.layer != layer:
-            continue
-        if depth is not None and record.depth != depth:
+        if any(getattr(record, attr) != value for attr, value in wanted.items()):
             continue
         if picked and record.agent_id not in picked:
-            continue
-        if parent is not None and record.parent_agent_id != parent:
             continue
         out.append(record)
     return out
