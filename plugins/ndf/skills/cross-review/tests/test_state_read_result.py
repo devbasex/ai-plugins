@@ -71,7 +71,8 @@ def test_canonical_schema(patched_tmp_dir, state_mod):
     assert merged["intent"] == "APPROVE"
     assert merged["posted_as"] == "APPROVE"
     assert merged["comments"] == 0
-    assert merged["review_url"] == "https://example/pr/1#1"
+    # 参照は担当の申告ではなく送信の応答から取る（#730 AC15）。
+    assert merged["review_url"].endswith("#pullrequestreview-1")
     assert merged["by_severity"]["critical"] == 0
 
 
@@ -93,9 +94,10 @@ def test_alias_schema_intent_and_comment_count(patched_tmp_dir, state_mod):
     st = _read_state(tmp_dir)
     merged = st["rounds"][-1][AGENT]
     assert merged["intent"] == "APPROVE"
-    # posted_as は別名 result.json には存在しないので intent と同値にフォールバック
+    # posted_as は投稿する側が決める。自分の Pull Request でなければ intent と同じ
     assert merged["posted_as"] == "APPROVE"
-    assert merged["comments"] == 3
+    # 件数は担当の申告（comment_count）ではなく、送れたインラインの数（#730 AC15）
+    assert merged["comments"] == 0
 
 
 def test_missing_event_and_intent_dies(patched_tmp_dir, state_mod):

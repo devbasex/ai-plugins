@@ -138,7 +138,8 @@ def review_posts(payload_path: pathlib.Path | str, result_path: pathlib.Path | s
              "side": "RIGHT", "body": str(f.get("body") or "")}
             for f in inline
         ]
-    extra = {"ident": f"{seat}-r{round_no}", "seat": seat, "round": round_no,
+    extra = {"ident": f"{seat}-r{round_no}", "agent": seat, "seat": seat,
+             "round": round_no,
              "intent": intent, "posted_as": posted_as,
              "inline": len(inline), "body": len(evacuated)}
     return [{"kind": "review-post", "fields": fields, "extra": extra}]

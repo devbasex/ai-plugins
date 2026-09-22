@@ -74,8 +74,7 @@ def tmp_dir(monkeypatch, tmp_path, state_mod):
 
 @pytest.fixture(autouse=True)
 def _no_github_checks(monkeypatch, state_mod):
-    """GitHub 側の突き合わせを通す。取り込みの形だけを見る。"""
-    monkeypatch.setattr(state_mod, "_posted_comment_count", lambda *a, **k: None)
+    """流した後の実在確認を通す。取り込みの形だけを見る。"""
     monkeypatch.setattr(state_mod, "_review_exists", lambda *a, **k: True)
 
 
@@ -203,14 +202,18 @@ def test_a_state_file_without_the_key_is_readable(tmp_dir, state_mod):
     assert len(_read(tmp_dir)["review_findings"]) == 1
 
 
-def test_the_comment_count_is_unchanged(tmp_dir, state_mod):
-    """`comments_count` は投稿したインラインの数のままにする。"""
+def test_the_comment_count_is_the_number_of_inlines_sent(tmp_dir, state_mod):
+    """件数は担当の申告ではなく、送れたインラインの数である（#730 AC15）。
+
+    送り先を決めるのは投稿する側で、控えの `posted_to` は読まない。位置を持つ指摘は
+    どちらもインラインとして送る。
+    """
     _write(tmp_dir, _state()); _result(tmp_dir, comments_count=3)
     _payload(tmp_dir, [FULL, {**FULL, "posted_to": "body"}])
 
     _read_result(state_mod)
 
-    assert _read(tmp_dir)["rounds"][-1][AGENT]["comments"] == 3
+    assert _read(tmp_dir)["rounds"][-1][AGENT]["comments"] == 2
 
 
 def test_a_missing_payload_does_not_break_the_import(tmp_dir, state_mod):

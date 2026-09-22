@@ -38,6 +38,7 @@ import post_queue  # noqa: E402
 import statefile  # noqa: E402  再開の反映（#727 / #648）
 import run_metrics  # noqa: E402  実行の要約（#662）
 import monitor_outcome  # noqa: E402  起動 1 回の結末（#729）
+import result_posts  # noqa: E402  結果ファイルを投稿へ変える層（#730）
 
 # 区分の定義は scripts 配下の共有モジュールに 1 か所だけ置く（#156、#732）。
 # `measure.py` も同じ定義を読み、両者の一致は `test_measure.py` が固定する。
@@ -1489,8 +1490,9 @@ def _auto_flush(pr: int) -> None:
     実行していない場合に流れない。明示だけだと、進行側が忘れたときに待ち行列が残った
     まま収束の判定へ進む。流せなくても工程は止めない。
 
-    **入口は、書き戻し先が揃っている場所だけである。** 取り込み（`read-result`）の
-    入口では、そのラウンドの担当のエントリがまだ無い。詳細は `cmd_read_result` にある。
+    **入口は、書き戻し先が揃っている場所だけである。** 積むのは取り込み
+    （`read-result`）だけで、積んだ時点でその担当の記録を書くため、流す時点では
+    書き戻し先が揃っている。
     """
     q = _queue(pr)
     if not q.count():
@@ -2413,32 +2415,6 @@ def _as_count(value: object) -> int:
         return 0
 
 
-def _posted_comment_count(repo: str, pr: int, review_url: str | None) -> int | None:
-    """レビューに実際にぶら下がっているインラインコメントの数。
-
-    取得できなければ `None` を返す。**「取得できなかった」と「0 件」を区別する。**
-    取得の失敗で中断すると、GitHub 側の一時的な不調でループが止まる。
-
-    投稿は AI 自身が `gh api` で行うため、失敗しても結果ファイルの申告だけは残る。
-    数え直す先は、申告された `review_url` の末尾にある識別子から決める。
-    """
-    if not repo or not review_url:
-        return None
-    m = re.search(r"pullrequestreview-(\d+)", str(review_url))
-    if not m:
-        return None
-    try:
-        out = _sh(
-            ["gh", "api", f"repos/{repo}/pulls/{pr}/reviews/{m.group(1)}/comments",
-             "--paginate", "--jq", "length"],
-            check=False,
-        )
-    except Exception:
-        return None
-    counts = [int(line) for line in str(out).split() if line.strip().isdigit()]
-    return sum(counts) if counts else None
-
-
 # Pull Request 上の未解決の指摘（Resolve されていない review thread）を数えるための問い合わせ。
 # `--paginate` に載せるため、カーソルと `pageInfo` を持たせる。
 _UNRESOLVED_THREADS_QUERY = """
@@ -2462,14 +2438,13 @@ _UNRESOLVED_THREADS_JQ = (
 
 
 def _review_exists(repo: str, pr: int, review_url: str | None) -> bool | None:
-    """申告された `review_url` の指すレビューが GitHub 側にあるか。
+    """`review_url` の指すレビューが GitHub 側にあるか。
 
     取得できなければ `None` を返す。**「取得できなかった」と「無い」を区別する。**
     取得の失敗で中断すると、GitHub 側の一時的な不調でループが止まる。
 
-    投稿は AI 自身が `gh api` で行うため、失敗しても結果ファイルには判定が残る。
-    判定だけを採ると、修正の担当が読むべき指摘が Pull Request に無いまま修正の工程が
-    起動する（実測: `review_url` が空、重要度別の件数もすべて 0）。
+    上限で積んだ投稿を後から流したとき、その直後に 1 度だけ呼ぶ（`_confirm_flushed`）。
+    取り込みが自分で送った投稿は、送信の応答をそのまま記録にするため照会しない（#730）。
     """
     if not repo or not review_url:
         return False
@@ -2735,54 +2710,6 @@ def _read_review_result_file(pr: int, agent: str, rfile: pathlib.Path) -> dict[s
     die(f"{agent}: 使える結果が無い (reason={reason}, {rfile}): {outcome.detail}")
 
 
-def _verify_review_arrival(
-    pr: int, agent: str, repo: str, result: dict[str, Any]
-) -> bool:
-    """投稿が Pull Request に届いたかを確かめ、待ち行列へ積んだかどうかを返す。
-
-    **投稿が届いたかを先に確かめる。** 判定だけが残り、指摘の中身が Pull Request に
-    無いまま修正の工程へ進む経路を塞ぐ（#261）。届いていないときは結果なしとして
-    記録し、判定の側の「同じラウンドで 1 度だけ起動し直す」経路へ乗せる。修正の担当
-    から見ると、結果が残らなかった場合と、結果はあるが指摘が届いていない場合は同じ
-    状態である（読むべき指摘が無い）。
-
-    **待ち行列へ積んだ投稿は、積んだ時点では届いていない。** ここで照会すると
-    結果なしになり、起動し直しで同じ内容が二重に積まれる。届いたことは流した直後に
-    1 度だけ確かめる（`_confirm_flushed`）。
-    """
-    queued = bool(result.get("queued"))
-    if queued:
-        info(
-            f"⚠ {agent}: 投稿を待ち行列へ積んでいます。"
-            "届いたことの確認は流した直後に行います"
-        )
-    post_error = None if queued else result.get("post_error")
-    if post_error:
-        _die_no_result(
-            pr,
-            agent,
-            "not_posted",
-            f"{agent}: レビューの投稿に失敗しています (post_error={post_error})。"
-            " 指摘が Pull Request に届いていないため、結果なしとして扱います",
-        )
-    exists = None if queued else _review_exists(repo, pr, result.get("review_url"))
-    if exists is False:
-        _die_no_result(
-            pr,
-            agent,
-            "not_posted",
-            f"{agent}: 投稿されたレビューを確認できません "
-            f"(review_url={result.get('review_url')!r})。"
-            " 指摘が Pull Request に届いていないため、結果なしとして扱います",
-        )
-    if exists is None and not queued:
-        info(
-            f"⚠ {agent}: レビューの投稿を確認できませんでした。"
-            "申告をそのまま採用します"
-        )
-    return queued
-
-
 # 指摘へ既定を与える項目。**持たない指摘も捨てない**（#156）。捨てると、4 項目へ
 # 対応していない担当の指摘が記録から消える。
 _FINDING_DEFAULTS: dict[str, Any] = {
@@ -2887,70 +2814,34 @@ def _collect_review_findings(
     return len(items)
 
 
-def _resolve_result_aliases(r: dict[str, Any]) -> tuple[str | None, str | None, Any]:
-    """result.json の別名フィールドを正規のキーへ解決する。
-
-    `intent` / `comment_count` を使う変則 JSON を書き出す既知のケースに対応する。
-    仕様としては `event` / `comments_count` が正で、そちらを優先する。
-    """
-    intent = r.get("event") or r.get("intent")
-    posted_as = r.get("posted_as") or intent
-    comments = r.get("comments_count")
-    if comments is None:
-        comments = r.get("comment_count")
-    return intent, posted_as, comments
-
-
-def _verify_declared_comments(
-    repo: str,
-    pr: int,
-    agent: str,
-    comments: Any,
-    review_url: str | None,
-    queued: bool,
-) -> None:
-    """**申告を GitHub 側と突き合わせる。**
-
-    投稿は AI 自身が行うので、失敗しても結果ファイルには件数が残る。申告のまま進むと、
-    修正担当が読むべき指摘が GitHub 上に存在しないまま収束判定まで走る
-    （実測: 申告 2 件に対しスレッド 0）。
-    """
-    declared = _as_count(comments)
-    if declared > 0 and not queued:
-        actual = _posted_comment_count(repo, pr, review_url)
-        if actual is None:
-            info(
-                f"⚠ {agent}: 投稿されたコメント数を確認できませんでした。"
-                f"申告（{declared} 件）をそのまま採用します"
-            )
-        elif actual < declared:
-            die(
-                f"{agent}: インラインコメントの申告 {declared} 件に対し、"
-                f"GitHub 上には {actual} 件しかありません。投稿が届いていないため"
-                "中断します。レビューを投稿し直してから再実行してください"
-            )
-
-
 def cmd_read_result(args: argparse.Namespace) -> None:
-    """Step 2.4 — codex/agy の result.json を state にマージ。
+    """Step 2.4 — 担当の結果を読み、レビューを投稿して state にマージ。
 
     使える結果が残らなかったときは、`NO_RESULT` と理由をラウンドへ残してから止める。
     終了コードは現行のまま（無い・判定の値を持たないときは 1、JSON として読めない
     ときは 3）で、進む先を決めるのは次の判定である。
 
-    **ここでは待ち行列を流さない。** 流すと `review-post` の書き戻し先（そのラウンドの
-    担当のエントリ）がまだ無い時点で項目が消える。`_confirm_flushed` は書き戻せず、
-    この後の取り込みが `queued: true` だけを保存するため、待ち行列が空で `queued` の
-    ままの状態ができる。判定はその状態で収束してしまい、投稿の存在も参照も確かめない。
-    **両方の担当を取り込んだ後に流す**（`judge` の入口）。取り込みは判定の直前に
-    しかないため、流す時期が遅れるのは 1 コマンド分である。
+    **「読んで記録する」と「投稿する」を 1 つに閉じる**（#730 の決定 4）。順序は
+    「控えを読む → 投稿を積む → 流す → 送信の応答を記録へ書き戻す → 指摘を取り込む」
+    である。分けると「投稿したが記録していない」に加えて「記録したが投稿していない」が
+    もう 1 つ増える。1 つに閉じれば、途中で止まった状態は「送れていない」か
+    「送れたが記録が無い」の 2 つになる。
+
+    | 止まった場所 | 待ち行列の項目 | 立て直し |
+    | --- | --- | --- |
+    | 送る前（上限などで送れていない） | 残る | 判定の終了コード 8 の枝が流し直す |
+    | 送った後・記録の前 | 残らない | 取り込みをもう一度呼ぶ。照合が先客を見つける |
+
+    **担当の申告と GitHub の実数を突き合わせない。** 投稿する側と記録する側が同じに
+    なるため、確かめる対象が無い。記録に入る URL は送信の応答から取り、件数は送れた
+    インラインの数から取る。
     """
     agent = args.agent
     pr = args.pr
     rfile = pathlib.Path(args.file or _resolve_tmp_dir(pr) / f"{agent}-review-pr{pr}-result.json")
     r = _read_review_result_file(pr, agent, rfile)
 
-    intent, posted_as, comments = _resolve_result_aliases(r)
+    intent = r.get("event") or r.get("intent")
 
     if intent is None:
         _die_no_result(
@@ -2965,27 +2856,49 @@ def cmd_read_result(args: argparse.Namespace) -> None:
     if not st.get("rounds"):
         die(f"{agent}: state.rounds が空。`state.py start-round` を先に呼んでください")
 
-    repo = str(st.get("repo") or "")
+    # **先に残りを流す。** 残っているのは、前の取り込みで送れずに積んだ投稿だけで、
+    # その担当の記録は積んだ時点で書いてある。流した結果をその記録へ書き戻してから、
+    # この担当の投稿を後ろへ積む（Pull Request 上の順序を保つ）。
+    _auto_flush(pr)
+    st = _load(pr)
+    last = st["rounds"][-1]
+    round_no = last.get("round")
+    posted = result_posts.post_review(
+        _queue(pr),
+        _payload_path(agent, pr, round_no),
+        rfile,
+        repo=str(st.get("repo") or ""),
+        pr=int(st.get("current_pr") or pr),
+        round_no=int(round_no or 1),
+        seat=agent,
+        head_sha=str(last.get("head_sha") or ""),
+        is_own_pr=bool(st.get("event_downgrade") or st.get("is_own_pr")),
+        actor=str(st.get("viewer_login") or "") or None,
+    )
+    if posted.failed:
+        die(f"{agent}: レビューを投稿できませんでした ({posted.detail})")
 
-    queued = _verify_review_arrival(pr, agent, repo, r)
-
-    _verify_declared_comments(repo, pr, agent, comments, r.get("review_url"), queued)
-
-    st["rounds"][-1][agent] = {
-        "intent": intent,
-        "posted_as": posted_as,
-        "comments": comments,
-        "review_url": r.get("review_url"),
+    last[agent] = {
+        "intent": posted.intent,
+        "posted_as": posted.posted_as,
+        "comments": posted.posted_inline,
+        "review_url": posted.review_url,
         "by_severity": r.get("by_severity", {}),
-        "queued": queued,
+        "queued": bool(posted.queued),
+        "posted_inline": posted.posted_inline,
+        "posted_body": posted.posted_body,
     }
-    # **指摘そのものは別に積む**（#156）。`comments` は投稿したインラインの数で、
-    # GitHub 側の実数との突き合わせに使う。総評だけへ書いた指摘はそこに現れない。
-    collected = _collect_review_findings(st, agent, pr, st["rounds"][-1]["round"])
+    # **指摘そのものは別に積む**（#156）。`comments` は送れたインラインの数で、
+    # 総評へ移した指摘はそこに現れない。
+    collected = _collect_review_findings(st, agent, pr, round_no)
     _save(pr, st)
-    info(f"✅ {agent}: intent={intent} posted_as={posted_as} comments={comments}")
-    if collected:
-        info(f"   指摘の記録: {collected} 件")
+    if posted.review_url:
+        print(f"POSTED review_url={posted.review_url}")
+    print(f"INLINE={posted.posted_inline} BODY={posted.posted_body}"
+          f" QUEUED={posted.queued}")
+    print(f"FINDINGS={collected}")
+    info(f"✅ {agent}: intent={posted.intent} posted_as={posted.posted_as}"
+         f" comments={posted.posted_inline}")
 
 
 def _round_ci(st: dict[str, Any], last: dict[str, Any], pr: int) -> dict[str, Any]:

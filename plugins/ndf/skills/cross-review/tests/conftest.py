@@ -131,6 +131,28 @@ def _no_github_state(request, monkeypatch) -> None:
     state_mod = request.getfixturevalue("state_mod")
     monkeypatch.setattr(state_mod, "_fetch_check_runs", lambda repo, sha: None)
     monkeypatch.setattr(state_mod, "_fetch_pr_metadata", lambda pr, repo=None: None)
+    # **取り込みはレビューを投稿する**（#730）。投稿を見ないテストでは、組み立てまでを
+    # 本物で通し、送信だけを「届いた」に置き換える。偽の `gh` を要求するテストは
+    # 送信も含めて検査するため置き換えない。
+    if "fake_gh" not in request.fixturenames:
+        monkeypatch.setattr(state_mod.result_posts, "post_review",
+                            _post_review_offline(state_mod.result_posts))
+
+
+def _post_review_offline(rp):
+    """送信を行わず、組み立てた内容がそのまま届いたものとして結果を返す。"""
+    def _post(queue, payload_path, result_path, repo, pr, round_no, seat, head_sha,
+              is_own_pr, actor=None):
+        item = rp.review_posts(payload_path, result_path, repo, pr, round_no, seat,
+                               head_sha, is_own_pr)[0]
+        extra = item["extra"]
+        findings = len(rp._findings(rp._read_json(payload_path)))
+        return rp.ReviewOutcome(
+            review_url=f"https://github.com/{repo}/pull/{pr}#pullrequestreview-1",
+            posted_inline=extra["inline"], posted_body=extra["body"], queued=0,
+            findings=findings, failed=False, posted_as=extra["posted_as"],
+            intent=extra["intent"], detail="")
+    return _post
 
 
 @pytest.fixture()
