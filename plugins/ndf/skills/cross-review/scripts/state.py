@@ -1587,6 +1587,55 @@ REVIEW_RESUME_FIELDS = (
 PARTICIPANT_ARGS = ("only", "include", "exclude", "require_all")
 
 
+def _handle_resume_only_none(st: dict[str, Any], args: argparse.Namespace) -> None:
+    """`--only none` による指定解除を反映し、履歴へ記録する（決定 15）。
+
+    正規化した `None` を表へ渡すと「未指定」と区別できず、指定を外す操作が黙って
+    捨てられるため、ここで明示的に処理する。
+    """
+    if getattr(args, "only", None) == NONE_WORD and st.get("only") is not None:
+        old = st.get("only")
+        st["only"] = None
+        st.setdefault("resume_changes", []).append(
+            {"at": statefile.now(), "field": "only", "from": old, "to": None}
+        )
+        info(f"↻ only: {old} → None")
+
+
+def _build_resume_rebuild_args(
+    st: dict[str, Any],
+    args: argparse.Namespace,
+    include: list[str] | None,
+    exclude: list[str] | None,
+) -> argparse.Namespace:
+    """状態ファイルの既存設定と再開引数をマージした再解決用 Namespace を組み立てる（決定 14）。"""
+    recorded = st.get("participants") or {}
+    return argparse.Namespace(
+        only=st.get("only"),
+        include=include if include is not None else list(recorded.get("included") or []),
+        exclude=exclude if exclude is not None else list(recorded.get("excluded") or []),
+        require_all=(
+            args.require_all
+            if getattr(args, "require_all", None) is not None
+            else bool(recorded.get("require_all"))
+        ),
+    )
+
+
+def _update_resume_participants(st: dict[str, Any], participants: dict[str, Any]) -> None:
+    """解決成功後の参加者情報を状態へ書き込み、変更履歴に記録する。"""
+    old_participants = st.get("participants")
+    st["participants"] = participants
+    st.setdefault("resume_changes", []).append(
+        {
+            "at": statefile.now(),
+            "field": "participants",
+            "from": old_participants,
+            "to": participants,
+        }
+    )
+
+
 def _apply_resume_args_block(st: dict[str, Any], args: argparse.Namespace) -> bool:
     """再開で渡した引数を状態へ反映し、何か変えたら True を返す（#727 / #648）。
 
@@ -1604,36 +1653,20 @@ def _apply_resume_args_block(st: dict[str, Any], args: argparse.Namespace) -> bo
     args_copy.only = only
     if getattr(args, "only", None) == NONE_WORD:
         args_copy.only = None
-        if st.get("only") is not None:
-            old = st.get("only")
-            st["only"] = None
-            st.setdefault("resume_changes", []).append(
-                {"at": statefile.now(), "field": "only", "from": old, "to": None})
-            info(f"↻ only: {old} → None")
+        _handle_resume_only_none(st, args)
 
     for line in statefile.apply_resume_args(st, args_copy, REVIEW_RESUME_FIELDS):
         info(line)
 
     if any(getattr(args, name, None) is not None for name in PARTICIPANT_ARGS):
-        old_participants = st.get("participants")
-        recorded = old_participants or {}
         try:
             host = st.get("host") or assignment.detect_host(getattr(args, "host", None))[0]
         except assignment.AssignmentError as e:
             die(str(e), code=1)
             raise
-        rebuild = argparse.Namespace(
-            only=st.get("only"),
-            include=include if include is not None else list(recorded.get("included") or []),
-            exclude=exclude if exclude is not None else list(recorded.get("excluded") or []),
-            require_all=(args.require_all if getattr(args, "require_all", None) is not None
-                         else bool(recorded.get("require_all"))),
-        )
+        rebuild = _build_resume_rebuild_args(st, args, include, exclude)
         participants = _resolve_reviewers(host, rebuild)
-        st["participants"] = participants
-        st.setdefault("resume_changes", []).append(
-            {"at": statefile.now(), "field": "participants",
-             "from": old_participants, "to": participants})
+        _update_resume_participants(st, participants)
 
     return len(st.get("resume_changes") or []) > before
 
