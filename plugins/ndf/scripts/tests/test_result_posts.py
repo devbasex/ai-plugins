@@ -318,6 +318,38 @@ def test_a_position_rejection_of_an_earlier_item_is_not_taken_as_ours(
     assert [i["extra"].get("agent") for i in queued] == [None, SEAT]
 
 
+def test_a_failed_write_of_the_note_keeps_it_whole_and_stops_the_take_in(
+        tmp_path, fake_gh, monkeypatch) -> None:
+    """控えの書き戻しが途中で落ちても控えは元のまま読め、取り込みは失敗として止まる。
+
+    半端な控えを残すと、再実行で読めずに空として扱われ、記録済みの指摘を 0 件で
+    置き換える。
+    """
+    fake_gh.set_rules([
+        {"match": "pulls/730/reviews?", "stdout": "[]"},
+        _ACCEPT,
+    ])
+    payload, result = _files(tmp_path)
+    original = payload.read_text(encoding="utf-8")
+    real_write = pathlib.Path.write_text
+
+    def half_write(self, data, *a, **kw):
+        if "posted_to" in data:
+            real_write(self, data[: len(data) // 2], *a, **kw)
+            raise OSError("disk full")
+        return real_write(self, data, *a, **kw)
+
+    monkeypatch.setattr(pathlib.Path, "write_text", half_write)
+    outcome = result_posts.post_review(
+        _queue(tmp_path), payload, result, repo=REPO, pr=PR, round_no=ROUND,
+        seat=SEAT, head_sha=SHA, is_own_pr=False, actor=ACTOR)
+
+    assert outcome.failed is True
+    assert "控え" in outcome.detail
+    assert payload.read_text(encoding="utf-8") == original
+    assert [p.name for p in payload.parent.iterdir() if p.name.endswith(".tmp")] == []
+
+
 def test_a_rate_limited_review_remains_queued_without_marking_the_note(
         tmp_path, fake_gh) -> None:
     """現状固定。上限時は失敗にせず、未投稿の要求と控えをそのまま残す。"""

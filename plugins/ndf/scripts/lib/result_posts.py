@@ -30,6 +30,7 @@ from typing import Any, NamedTuple
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import post_queue  # noqa: E402
+import statefile  # noqa: E402
 
 # レビューの本文の先頭行。**照合の鍵はラウンドと席までの前方一致である**ため、判定の
 # 語はこの行の末尾に置く（`post_queue.review_match_key`）。
@@ -190,21 +191,26 @@ def _response_url(item: dict[str, Any] | None) -> str | None:
     return None
 
 
-def _write_destinations(payload_path: pathlib.Path | str, inline_count: int) -> None:
-    """控えへ、送れた先を書き戻す。**決めるのは投稿する側である。**"""
+def _write_destinations(payload_path: pathlib.Path | str, inline_count: int) -> str:
+    """控えへ、送れた先を書き戻す。**決めるのは投稿する側である。**
+
+    **原子的に書き、失敗は呼び出し元へ返す。** 半端な控えが残ると、再実行で読めずに
+    空として扱われ、記録済みの指摘を 0 件で置き換える。戻り値は失敗の説明で、
+    書けたときは空文字である。
+    """
     path = pathlib.Path(payload_path)
     payload = _read_json(path)
     findings = _findings(payload)
     if not findings:
-        return
+        return ""
     inline_ids = {id(f) for f in findings if _can_be_inline(f)} if inline_count else set()
     for f in findings:
         f["posted_to"] = "inline" if id(f) in inline_ids else "body"
     try:
-        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2),
-                        encoding="utf-8")
-    except OSError:
-        return
+        statefile.write_json_atomic(path, payload)
+    except OSError as exc:
+        return f"控えへ送れた先を書けない ({path.name}: {exc})"
+    return ""
 
 
 def post_review(queue: post_queue.Queue, payload_path: pathlib.Path | str,
@@ -241,8 +247,8 @@ def post_review(queue: post_queue.Queue, payload_path: pathlib.Path | str,
         flushed = queue.flush()
 
     done = _find(flushed.sent, seq) or _find(flushed.skipped, seq)
-    if done:
-        _write_destinations(payload_path, item["extra"]["inline"])
+    # 送れた後に控えを書けなければ、取り込みを止める。再実行は既投稿として照合し直す。
+    note_error = _write_destinations(payload_path, item["extra"]["inline"]) if done else ""
     return ReviewOutcome(
         review_url=_response_url(done),
         posted_inline=item["extra"]["inline"] if done else 0,
@@ -250,11 +256,11 @@ def post_review(queue: post_queue.Queue, payload_path: pathlib.Path | str,
         queued=0 if done else 1,
         findings=findings,
         # 先客に止められた場合も、今回分は送れていない。上限だけは待てば流れる。
-        failed=bool(not done and flushed.failed is not None
-                    and not flushed.rate_limited),
+        failed=bool(note_error) or bool(not done and flushed.failed is not None
+                                        and not flushed.rate_limited),
         posted_as=item["extra"]["posted_as"],
         intent=item["extra"]["intent"],
-        detail=str((flushed.failed or {}).get("last_error") or ""),
+        detail=note_error or str((flushed.failed or {}).get("last_error") or ""),
     )
 
 
