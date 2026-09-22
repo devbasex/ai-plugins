@@ -134,6 +134,14 @@ def test_the_body_carries_the_marker_and_the_plan(plan, tmp_path):
     assert "R1-001" in body and "src/foo.py" in body
 
 
+def test_the_round_heading_has_no_reviewers(plan, tmp_path):
+    """AC37 — 改修計画のラウンドの見出しにレビュー担当を出さない。古い記録にあっても。"""
+    _, state = _state(tmp_path)
+    body = plan.plan_comment_body(state)
+    assert "## ラウンド 1（実装 codex）" in body
+    assert "レビュー" not in body.split("## ラウンド 1", 1)[1].splitlines()[0]
+
+
 def test_a_failed_post_does_not_stop_the_run(plan, tmp_path, gh):
     """記録が残らないことと、変更が検証を通っていないことは別である。"""
     _, state = _state(tmp_path)

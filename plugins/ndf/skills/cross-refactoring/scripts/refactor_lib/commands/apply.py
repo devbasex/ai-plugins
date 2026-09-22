@@ -80,6 +80,30 @@ class _ApplyCommitRange:
     in_range: set[str]
 
 
+def _read_runtime_proposal(
+    result: pathlib.Path,
+) -> Optional[list[dict[str, Any]]]:
+    runtime = result.name.split("-", 1)[0]
+    if not result.exists():
+        info(f"⚠ {runtime} の提案結果がありません: {result}")
+        return None
+    try:
+        payload = json.loads(result.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        info(f"⚠ {runtime} の提案結果が JSON として読めません: {e}")
+        return None
+    if not isinstance(payload, dict):
+        info(
+            f"⚠ {runtime} の提案結果が JSON オブジェクトではありません"
+            f"（{type(payload).__name__}）。提案なしとして扱います"
+        )
+        return []
+    items = payload.get("items")
+    if not isinstance(items, list):
+        return []
+    return [item for item in items if isinstance(item, dict)]
+
+
 def _load_runtime_proposals(
     state: dict[str, Any], entry: dict[str, Any]
 ) -> dict[str, list[dict[str, Any]]]:
@@ -94,28 +118,11 @@ def _load_runtime_proposals(
             state, runtime,
             stem_for(runtime, "propose", state["id"], entry["round"]),
         )
-        if not result.exists():
-            info(f"⚠ {runtime} の提案結果がありません: {result}")
+        runtime_proposals = _read_runtime_proposal(result)
+        if runtime_proposals is None:
             continue
-        try:
-            payload = json.loads(result.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as e:
-            info(f"⚠ {runtime} の提案結果が JSON として読めません: {e}")
-            continue
-        if not isinstance(payload, dict):
-            # 配列や数値のまま `payload.get(...)` を呼ぶと落ちる。
-            # 提案は無かったものとして続ける（1 者の不調で全体を止めない）。
-            info(
-                f"⚠ {runtime} の提案結果が JSON オブジェクトではありません"
-                f"（{type(payload).__name__}）。提案なしとして扱います"
-            )
-            proposals[runtime] = []
-            entry["proposed"][runtime] = 0
-            continue
-        items = payload.get("items")
-        proposals[runtime] = [i for i in items if isinstance(i, dict)] \
-            if isinstance(items, list) else []
-        entry["proposed"][runtime] = len(proposals[runtime])
+        proposals[runtime] = runtime_proposals
+        entry["proposed"][runtime] = len(runtime_proposals)
     return proposals
 
 
@@ -283,36 +290,25 @@ def _item_summary(item: dict[str, Any]) -> str:
 
 
 
-def cmd_next_apply_round(args: argparse.Namespace) -> None:
-    """Step 4 — 次の適用ラウンドを開き、実装担当と対象の項目を返す。
+def _select_next_apply_group(
+    groups: list[dict[str, Any]],
+) -> tuple[Optional[dict[str, Any]], str]:
+    """次に開く群と、その群の開き直しの判定を返す。無ければ群は None。
 
-    終了コード: 0 = 群を開いた / 1 = 残りの群が無い（提案ラウンドへ戻る）。
+    **`applied` の群も開き直す。** 適用は取り込んだが検証まで進めずに落ちた場合、
+    飛ばすとその群の項目が採用でも取り消しでもないまま残る。再開できることは
+    収束ループの前提である。
 
-    **群の起点はここで確定させる。** 後続の群は先行の群を適用した後の作業ツリーを
-    読むため、起点はその時点の HEAD になる。取り消しの範囲もこの起点で決まる。
-
-    **修正ラウンドの数え直しも群ごとである。** `--max-fix-rounds` は 1 つの適用
-    ラウンドあたりの上限だからである。
+    **未着手の群は、開き直しの判定へ掛ける**（#647）。無条件に開き直すと、結果を
+    残さない担当に当たり続けて上限なく起動する。項目が無い群と上限に達した群は、
+    ここで取り消し済みにして次を探す。
     """
-    path, state = load_state(args.id)
-    entry = round_of(state, args.round)
-    groups = apply_groups(entry)
-
-    # **`applied` の群も開き直す。** 適用は取り込んだが検証まで進めずに落ちた場合、
-    # 飛ばすとその群の項目が採用でも取り消しでもないまま残る。再開できることは
-    # 収束ループの前提である。
-    #
-    # **未着手の群は、開き直しの判定へ掛ける**（#647）。無条件に開き直すと、結果を
-    # 残さない担当に当たり続けて上限なく起動する。項目が無い群と上限に達した群は、
-    # ここで取り消し済みにして次を探す。
-    opened: Optional[dict[str, Any]] = None
     reopening = ""
     for group in groups:
         if group.get("status") not in {"pending", "applied"}:
             continue
         if group.get("status") == "applied":
-            opened = group
-            break
+            return group, reopening
         reopening = group_reopening(group)
         if reopening in {"empty", "exhausted"}:
             group["status"] = "dropped"
@@ -324,14 +320,15 @@ def cmd_next_apply_round(args: argparse.Namespace) -> None:
                 f"（{'項目なし' if reopening == 'empty' else '試行の上限'}）"
             )
             continue
-        opened = group
-        break
+        return group, reopening
+    return None, reopening
 
-    if opened is None:
-        statefile.save(path, state)
-        info(f"提案ラウンド {args.round} の適用ラウンドは残っていません")
-        sys.exit(1)
 
+def _prepare_apply_entry(
+    state: dict[str, Any], entry: dict[str, Any],
+    opened: dict[str, Any], reopening: str,
+) -> None:
+    """開いた群の状態に応じて、提案ラウンドの適用の状態を組み立てる。"""
     entry["apply_round"] = opened["apply_round"]
     if opened.get("status") == "pending" and reopening == "open":
         # 起点は**オーケストレータ側で**確定させる。実装担当の申告に委ねると、
@@ -354,6 +351,30 @@ def cmd_next_apply_round(args: argparse.Namespace) -> None:
         # 取り込み済みの群を開き直した。**起点も修正の回数も動かさない。**
         info(f"↻ 適用ラウンド {opened['apply_round']} は取り込み済みです（検証から再開）")
         entry["apply_base_sha"] = opened.get("base_sha")
+
+
+def cmd_next_apply_round(args: argparse.Namespace) -> None:
+    """Step 4 — 次の適用ラウンドを開き、実装担当と対象の項目を返す。
+
+    終了コード: 0 = 群を開いた / 1 = 残りの群が無い（提案ラウンドへ戻る）。
+
+    **群の起点はここで確定させる。** 後続の群は先行の群を適用した後の作業ツリーを
+    読むため、起点はその時点の HEAD になる。取り消しの範囲もこの起点で決まる。
+
+    **修正ラウンドの数え直しも群ごとである。** `--max-fix-rounds` は 1 つの適用
+    ラウンドあたりの上限だからである。
+    """
+    path, state = load_state(args.id)
+    entry = round_of(state, args.round)
+    groups = apply_groups(entry)
+
+    opened, reopening = _select_next_apply_group(groups)
+    if opened is None:
+        statefile.save(path, state)
+        info(f"提案ラウンド {args.round} の適用ラウンドは残っていません")
+        sys.exit(1)
+
+    _prepare_apply_entry(state, entry, opened, reopening)
     state["phase"] = "apply"
     statefile.save(path, state)
 
@@ -568,7 +589,7 @@ def _switch_apply_impl(state: dict[str, Any], group: dict[str, Any]) -> bool:
     }
     tried.add(group.get("impl"))
     seq = safe_int(state.get("apply_seq"))
-    for _ in range(len(state.get("impl_capable") or []) or 4):
+    for _ in range(len(state.get("runtimes") or [])):
         seq += 1
         impl, requested = impl_for_seq(state, seq)
         if impl in tried:
@@ -649,7 +670,7 @@ def _load_apply_context(
     ctx: _ApplyExecutionContext, payload: dict[str, Any],
 ) -> tuple[dict[str, Any], _ApplyCommitRange]:
     impl = ctx.group.get("impl") or ctx.entry["impl"]
-    record_observed_model(ctx.entry, "impl", impl, ctx.state, "apply", ctx.args.round)
+    record_observed_model(ctx.entry, impl, ctx.state, "apply", ctx.args.round)
 
     # 検証の材料は git から取る。結果ファイルから使うのは
     # 「どのコミットがこの群のものか」という対応付けだけ。
@@ -1028,6 +1049,82 @@ def _resume_incomplete_apply(
     flush_pending_push(path, state, entry)
 
 
+def _pending_judgements_for_round(
+    entry: dict[str, Any], group_no: int
+) -> list[str]:
+    """この群の保留を取り出す。**全ての群をまとめて解かない。**"""
+    records = entry.get("pending_test_judgements")
+    if isinstance(records, dict):
+        return list(records.get(str(group_no), []))
+    return []
+
+
+def _read_group_judge_verdicts(
+    state: dict[str, Any], impl: Optional[str], round_no: int, group_no: int,
+) -> list[dict[str, Any]]:
+    """この群を判定した担当の結果ファイルを読み、dict の verdict だけを返す。
+
+    **読むのは、この群を判定した担当の結果だけである。** 全ランタイムを読むと、
+    前の群で別の担当が返した古い答えが混ざり、今回の `changed` を打ち消す。
+    """
+    if not impl:
+        return []
+    result = result_path(
+        state, impl,
+        f"{impl}-judge-test-changes-r{round_no}-g{group_no}")
+    if not result.exists():
+        return []
+    try:
+        payload = json.loads(result.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        payload = {}
+    found = payload.get("verdicts")
+    if isinstance(found, list):
+        return [v for v in found if isinstance(v, dict)]
+    return []
+
+
+def _drop_round_on_changed_judgement(
+    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any],
+    group: dict[str, Any], problem: str,
+) -> None:
+    """`changed` があった群を取り消し、項目へ印を残す。**必ず終了する。**"""
+    failed = list(group.get("items") or [])
+    # **`entry["items"]` は項目 ID の並びである。** 実体は `state["items"]` にある。
+    for item_id in failed:
+        item = find_item(state, item_id, required=False)
+        if item:
+            item["status"] = "abandoned"
+            item["failure_reason"] = problem
+    _apply_drop(path, state, entry, group, failed)
+    # **取り消した群の保留だけを消す。** 先行する群でレビューへ引き継ぐと決めた
+    # 分まで捨てない。
+    record_pending_judgements(entry, group.get("apply_round") or 1, [])
+    statefile.save(path, state)
+    info(f"❌ 適用ラウンド {group.get('apply_round')}: {problem}")
+    # **終了コードは 2 にする。** 進行側は「取り消した」と読んで次の群へ進む。
+    sys.exit(2)
+
+
+def _apply_group_judgements(
+    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any],
+    group_no: int, verdicts: list[dict[str, Any]],
+) -> None:
+    """当該群だけへ判定を適用し、残りをレビューへ引き継ぐと知らせる。
+
+    **解くのは、判定が実際に見た群の保留だけである。** 段 2 へ渡すのはその群の
+    差分であるため、別の群で同じファイルが残っていてもそちらは解かない。
+    """
+    remaining = apply_judgements_to_group(entry, group_no, verdicts)
+    if remaining:
+        info(
+            f"{len(remaining)} 件はレビューへ引き継ぎます: " + ", ".join(remaining)
+        )
+    else:
+        info("この適用群のテストの差分は、期待する振る舞いを変えていません")
+    statefile.save(path, state)
+
+
 def cmd_merge_test_judgements(args: argparse.Namespace) -> None:
     """段 2（AI エージェント）の答えを取り込む（#443）。
 
@@ -1040,59 +1137,20 @@ def cmd_merge_test_judgements(args: argparse.Namespace) -> None:
     path, state = load_state(args.id)
     entry = round_of(state, args.round)
     # **判定の対象はこの群の保留である。** 全ての群をまとめて解かない。
-    records = entry.get("pending_test_judgements")
     group_of_round = (current_group(entry) or {}).get("apply_round") or 1
-    pending = list((records or {}).get(str(group_of_round), [])) \
-        if isinstance(records, dict) else []
+    pending = _pending_judgements_for_round(entry, group_of_round)
     if not pending:
         info("判定を待っているテストはありません")
         return
 
-    # **読むのは、この群を判定した担当の結果だけである。** 全ランタイムを読むと、
-    # 前の群で別の担当が返した古い答えが混ざり、今回の `changed` を打ち消す。
     impl = (current_group(entry) or {}).get("impl") or entry.get("impl")
-    verdicts: list[dict[str, Any]] = []
-    if impl:
-        result = result_path(
-            state, impl,
-            f"{impl}-judge-test-changes-r{args.round}-g{group_of_round}")
-        if result.exists():
-            try:
-                payload = json.loads(result.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                payload = {}
-            found = payload.get("verdicts")
-            if isinstance(found, list):
-                verdicts = [v for v in found if isinstance(v, dict)]
+    verdicts = _read_group_judge_verdicts(
+        state, impl, args.round, group_of_round)
 
     outcome = merge_test_judgements(pending, verdicts)
     if outcome["problem"]:
-        group = current_group(entry)
-        failed = list(group.get("items") or [])
-        # **`entry["items"]` は項目 ID の並びである。** 実体は `state["items"]` にある。
-        for item_id in failed:
-            item = find_item(state, item_id, required=False)
-            if item:
-                item["status"] = "abandoned"
-                item["failure_reason"] = outcome["problem"]
-        _apply_drop(path, state, entry, group, failed)
-        # **取り消した群の保留だけを消す。** 先行する群でレビューへ引き継ぐと決めた
-        # 分まで捨てない。
-        record_pending_judgements(entry, group.get("apply_round") or 1, [])
-        statefile.save(path, state)
-        info(f"❌ 適用ラウンド {group.get('apply_round')}: {outcome['problem']}")
-        # **終了コードは 2 にする。** 進行側は「取り消した」と読んで次の群へ進む。
-        sys.exit(2)
+        _drop_round_on_changed_judgement(
+            path, state, entry, current_group(entry), outcome["problem"])
 
-    # **解くのは、判定が実際に見た群の保留だけである。** 段 2 へ渡すのはその群の
-    # 差分であるため、別の群で同じファイルが残っていてもそちらは解かない。
-    group_no = (current_group(entry) or {}).get("apply_round") or 1
-    remaining = apply_judgements_to_group(entry, group_no, verdicts)
-    if remaining:
-        info(
-            f"{len(remaining)} 件はレビューへ引き継ぎます: " + ", ".join(remaining)
-        )
-    else:
-        info("この適用群のテストの差分は、期待する振る舞いを変えていません")
-    statefile.save(path, state)
+    _apply_group_judgements(path, state, entry, group_of_round, verdicts)
 

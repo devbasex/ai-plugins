@@ -276,10 +276,9 @@ def _emit_table(
     lines += [*headers, *rows]
 
 
-def format_report(metrics: dict[str, Any]) -> str:
-    """人が読む形へ整形する。比較の限界を必ず添える。"""
-    lines: list[str] = []
-    impl_rows = [
+def _impl_rows(metrics: dict[str, Any]) -> list[str]:
+    """実装担当の表の行を組む。"""
+    return [
         (
             f"| {key} | {m['rounds']} | {m['applied']} | {m['abandoned']} | "
             f"{_fmt(m['first_review_approval_rate'])} | {_fmt(m['avg_fix_rounds'])} | "
@@ -288,17 +287,11 @@ def format_report(metrics: dict[str, Any]) -> str:
         )
         for key, m in metrics["impl"].items()
     ]
-    _emit_table(
-        lines,
-        "実装担当",
-        (
-            "| ランタイム / モデル | 担当R | 適用 | 見送り | 初回承認率 | 平均修正R | 予算超過率 | テスト失敗率 | 所要秒 |",
-            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
-        ),
-        impl_rows,
-    )
 
-    reviewer_rows = [
+
+def _reviewer_rows(metrics: dict[str, Any]) -> list[str]:
+    """レビュー担当の表の行を組む。"""
+    return [
         (
             f"| {key} | {m['reviews']} | {m['findings']} | "
             f"{_fmt(m['resolution_rate'])} | {_fmt(m['agreement_rate'])} | "
@@ -306,6 +299,21 @@ def format_report(metrics: dict[str, Any]) -> str:
         )
         for key, m in metrics["reviewer"].items()
     ]
+
+
+def format_report(metrics: dict[str, Any]) -> str:
+    """人が読む形へ整形する。比較の限界を必ず添える。"""
+    lines: list[str] = []
+    _emit_table(
+        lines,
+        "実装担当",
+        (
+            "| ランタイム / モデル | 担当R | 適用 | 見送り | 初回承認率 | 平均修正R | 予算超過率 | テスト失敗率 | 所要秒 |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ),
+        _impl_rows(metrics),
+    )
+
     lines.append("")
     _emit_table(
         lines,
@@ -314,7 +322,7 @@ def format_report(metrics: dict[str, Any]) -> str:
             "| ランタイム / モデル | レビュー回数 | 指摘 | 修正に至った率 | 判定一致率 | 所要秒 |",
             "| --- | ---: | ---: | ---: | ---: | ---: |",
         ),
-        reviewer_rows,
+        _reviewer_rows(metrics),
     )
 
     if metrics["unmeasured"]:

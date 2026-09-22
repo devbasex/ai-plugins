@@ -61,7 +61,11 @@ from refactor_lib.commands.report import (  # noqa: E402
     cmd_report,
     cmd_status,
 )
-from refactor_lib.commands.setup import cmd_init, cmd_start_round  # noqa: E402
+from refactor_lib.commands.setup import (  # noqa: E402
+    cmd_init,
+    cmd_start_round,
+    runtime_list,
+)
 from refactor_lib.measure import summary_extra  # noqa: E402
 
 import run_metrics  # noqa: E402
@@ -83,6 +87,10 @@ from refactor_lib.vocabulary import (  # noqa: E402
     SEVERITY_ORDER,
 )
 
+# **状態ファイルに載る引数の既定は `None` にする**（#727 の決定 13）。既定値を引数に
+# 持たせると、再開で「渡さなかった」と「既定値を渡した」を区別できない。新規の
+# 初期化が `commands/setup.py` の `NEW_RUN_DEFAULTS` で置き換える。
+
 
 # ---------------- main ----------------
 
@@ -94,39 +102,51 @@ def main() -> None:
 
     init = sub.add_parser(
         "init",
-        help="Step 0 — ホスト確定 / 母集合の確定 / 作業ディレクトリ root / 状態初期化")
+        help="Step 0 — ホスト確定 / 参加者の確定 / 作業ディレクトリ root / 状態初期化・再開")
     init.add_argument("pr", type=int)
     init.add_argument("--scope", nargs="+", required=True,
                       help="対象範囲。提案が無制限に広がらないよう必須にしている")
     init.add_argument("--host", choices=list(assignment.HOST_RUNTIMES), default=None,
                       help="ホストの明示指定。未指定時は環境変数から推定する")
+    # **参加者は既定に足し引きして決める**（#727 の決定 4）。既定は codex / kiro と
+    # ホストで、使う側を並べる形にしないのは、ホストが変わるたびに書き直さずに済むため。
+    init.add_argument("--exclude", action="append", type=runtime_list, default=None,
+                      help="参加者から外す者（ホストも外せる）。カンマ区切り・繰り返し可。"
+                           "再開で none を渡すと空へ戻す")
+    init.add_argument("--include", action="append", type=runtime_list, default=None,
+                      help="参加者に足す者（例: agy）。カンマ区切り・繰り返し可。"
+                           "再開で none を渡すと空へ戻す")
+    init.add_argument("--require-all", dest="require_all",
+                      action=argparse.BooleanOptionalAction, default=None,
+                      help="確認を通らない者が 1 者でもいれば中断する。"
+                           "既定は外して続ける")
     # **切るのは提案の回数であって、適用できる件数ではない**（#436 決定 8）。
     # 適用ラウンドを分けたことで、1 回の提案で通せる件数は上限に縛られなくなった。
     # 取り消した項目は除外されるため、同じ提案が積み上がって回数を食うこともない。
     # **輪番の 1 周を根拠にしない。** 適用の担当は適用ラウンドごとに進むので、
     # 1 つの提案ラウンドが複数の群を持てば輪番は 1 周しうる。
-    init.add_argument("--max-outer-rounds", type=int, default=3,
-                      help="構造改善の提案ラウンドの上限")
+    init.add_argument("--max-outer-rounds", type=int, default=None,
+                      help="構造改善の提案ラウンドの上限 (default: 3)")
     # テスト整備は母集合が増えない（対象のコードを変えないため、テストが薄い経路の
     # 集合は最初から確定している）。2 回目に出るのは 1 回目の挙げ漏らしだけである。
-    init.add_argument("--max-test-rounds", type=int,
-                      default=DEFAULT_MAX_TEST_ROUNDS,
+    init.add_argument("--max-test-rounds", type=int, default=None,
                       help="テスト整備ラウンドの上限。到達したら採用が残っていても "
                            "構造改善の提案ラウンドへ進む "
                            f"(default: {DEFAULT_MAX_TEST_ROUNDS})")
-    init.add_argument("--max-fix-rounds", type=int, default=3,
-                      help="1 つの適用ラウンドあたりの修正ラウンドの上限")
-    init.add_argument("--max-items-per-round", type=int, default=5,
-                      help="1 つの提案ラウンド／テスト整備ラウンドの採用上限")
+    init.add_argument("--max-fix-rounds", type=int, default=None,
+                      help="1 つの適用ラウンドあたりの修正ラウンドの上限 (default: 3)")
+    init.add_argument("--max-items-per-round", type=int, default=None,
+                      help="1 つの提案ラウンド／テスト整備ラウンドの採用上限 (default: 5)")
     init.add_argument("--ci-check", default=None, metavar="NAME",
                       help="最終ゲートで手元のテストの代わりに見る検査の名前。"
                            "**指定すると手元のテストは実行しない**（排他）。"
                            "指定が無ければ手元のテストで判定する")
-    init.add_argument("--severity-threshold", default=DEFAULT_SEVERITY_THRESHOLD,
-                      choices=[s for s in SEVERITY_ORDER if s != "unknown"])
+    init.add_argument("--severity-threshold", default=None,
+                      choices=[s for s in SEVERITY_ORDER if s != "unknown"],
+                      help=f"この重要度未満は採用しない (default: {DEFAULT_SEVERITY_THRESHOLD})")
     init.add_argument("--model", action="append", metavar="RUNTIME=MODEL",
                       help="ランタイムごとのモデル指定。繰り返し指定できる")
-    init.add_argument("--test-timeout", type=int, default=DEFAULT_TEST_TIMEOUT,
+    init.add_argument("--test-timeout", type=int, default=None,
                       help="テスト 1 回あたりの上限秒数。超えたら失敗として扱う "
                            f"(default: {DEFAULT_TEST_TIMEOUT})")
     init.add_argument("--sync-command", default=None,
@@ -147,7 +167,7 @@ def main() -> None:
                            "振る舞い不変を示す手段が無い書き換えは構造改善ではないため必須")
     # **起動のされ方は引数で受け取る**（#436 決定 7）。環境変数や控えの読み取りは、
     # 起動元が違っても同じ値になりうる。呼ぶ側が明示すれば判定が 1 か所で済む。
-    init.add_argument("--workflow-step", action="store_true",
+    init.add_argument("--workflow-step", action="store_true", default=None,
                       help="`development-workflow` の 1 工程として起動したことを"
                            "伝える。Step 7 の `cross-review` を省き、"
                            "全体のテストで判定する")
@@ -156,7 +176,7 @@ def main() -> None:
 
     for name, func, help_ in (
         ("start-round", cmd_start_round,
-         "Step 2 — 提案ラウンドを開く。実装担当とレビュー担当を返す"),
+         "Step 2 — 提案ラウンドを開く。実装担当を返す"),
         ("merge-proposals", cmd_merge_proposals,
          "Step 3 — 提案の語彙検証・重複排除・優先度付け・採否"),
         ("advance", cmd_advance, "ラウンドの収束判定と、ラウンドの種類の切り替え"),

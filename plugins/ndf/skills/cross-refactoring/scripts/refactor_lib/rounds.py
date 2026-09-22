@@ -173,11 +173,12 @@ def group_reopening(group: dict[str, Any]) -> str:
 def impl_for_seq(state: dict[str, Any], seq: int) -> tuple[str, Optional[str]]:
     """輪番の通し番号から、作業を任せる担当と要求するモデルを引く。
 
-    **輪番を引く呼び出しはここだけにする**（#728 の決定 9）。参加者の決め方が
-    変わったとき（#727）に、変える場所がこの中だけで済む。読むのは 3 か所
-    （群の割り当て・結果なしの試行の交代先・最終ゲートの修正担当）である。
+    **輪番を引く呼び出しはここだけにする**（#728 の決定 9）。読むのは 4 か所
+    （ラウンドの開始・群の割り当て・結果なしの試行の交代先・最終ゲートの修正担当）
+    である。輪番は参加者の一覧（`runtimes`）の中で回す（#727 の決定 5・7）。この
+    変更の前に始めた実行の状態ファイルも、適用専用の母集合を読まずに同じ一覧で決める。
     """
-    impl, _reviewers = assignment.assign(seq, state["host"])
+    impl = assignment.impl_assign(seq, list(state["runtimes"]))
     return impl, (state.get("models") or {}).get(impl)
 
 def phase_after_group(entry: dict[str, Any]) -> str:

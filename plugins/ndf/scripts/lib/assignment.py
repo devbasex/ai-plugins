@@ -1,29 +1,17 @@
 """ホスト判定と担当の決定（収束ループ共通層）。
 
-**役割ごとに母集合が違う**ことがこの層の要点である。
+**母集合の既定は Skill ごとに違う**ことがこの層の要点である。
 
-| 母集合 | 定義 | 中身 |
+| Skill | 母集合の既定 | 中身 |
 | --- | --- | --- |
-| 提案・レビュー | 全ランタイム − ホスト | 常に 3 者 |
-| 適用 | 全ランタイム | 常に 4 者 |
-
-**担当の選び方は、適用の役があるかどうかで分かれる。** `assign()` は実装担当を先に決めて
-から残りを絞り、`review_assign()` は母集合から直接 2 者を選ぶ。どちらも返すレビュー担当は
-2 者である。
-
-参加する 4 者はいずれも NDF の配布先であるため、**適用から外す者はいない**。
-ホストは提案・レビューから外れるが適用には入るため、2 つの母集合は重なるが
-一致しない。輪番の式はホストによらず同じ形になる。
-
-## 使える者の解決と席の埋め方（#727）
+| cross-review | `review_pool(host)` | 全ランタイム − ホスト |
+| cross-refactoring | `refactor_pool(host)` | `DEFAULT_REFACTOR_RUNTIMES`（codex / kiro）とホスト |
 
 参加者は「母集合の既定 ∪ 足す者 − 外す者」で決め（`resolve_participants`）、確認を
-通った者だけを使える者（`available`）として記録する。cross-refactoring の母集合の
-既定は `refactor_pool(host)`（`DEFAULT_REFACTOR_RUNTIMES` とホスト）、cross-review は
-`review_pool(host)` のまま。担当の単位は席の名前（`SEAT_PATTERN`。`claude-2` のように
-同じランタイムの 2 つ目を表す）で、cross-review の 2 席は `review_seats` が、
-cross-refactoring の適用担当は `impl_assign` が決める。上の表と `impl_pool` /
-`review_assign` / `assign` は、母集合が 1 つになる次の Pull Request（P7）まで残す。
+通った者だけを使える者（`available`）として記録する。担当の単位は席の名前
+（`SEAT_PATTERN`。`claude-2` のように同じランタイムの 2 つ目を表す）で、cross-review の
+2 席は `review_seats` が、cross-refactoring の適用担当は `impl_assign` が決める（#727）。
+cross-refactoring は提案と適用を同じ参加者で回し、レビュー担当を持たない。
 """
 from __future__ import annotations
 
@@ -73,7 +61,7 @@ def detect_host(
     """ホストを確定し、`(ホスト名, 判定根拠)` を返す。
 
     判定根拠は `explicit`（`--host` の明示指定）か `env`（環境変数からの推定）。
-    誤検出すると**提案・レビューの母集合が狂う**（ホストが提案側に混ざる、
+    誤検出すると**母集合の既定が狂う**（ホストが cross-review の担当に混ざる、
     参加すべき者が外れる）ため、呼び出し側は結果を必ず出力と状態ファイルへ残す。
 
     推定できないときは例外を上げる。既定値を勝手に置くと、間違ったまま一周して
@@ -97,65 +85,10 @@ def detect_host(
 
 
 def review_pool(host: str) -> list[str]:
-    """提案・レビューの母集合（全ランタイム − ホスト）。常に 3 者になる。"""
+    """cross-review の母集合の既定（全ランタイム − ホスト）。常に 3 者になる。"""
     if host not in HOST_RUNTIMES:
         raise AssignmentError(f"ホストになれないランタイムです: {host}")
     return [r for r in ALL_RUNTIMES if r != host]
-
-
-def impl_pool() -> list[str]:
-    """適用の母集合（全ランタイム）。ホストによらず常に同じ。
-
-    **関数として残す。** 呼び出し側が提案・レビューの母集合と適用の母集合を
-    別々に確定する構造を保つためである。両者は依然として一致しない
-    （適用はホストを含み、提案・レビューは含まない）。
-    """
-    return list(ALL_RUNTIMES)
-
-
-def review_assign(round_no: int, host: str) -> list[str]:
-    """ラウンド番号から**レビュー担当 2 者**を決める。適用の役を持たない工程が使う。
-
-    母集合は `review_pool(host)` の 3 者で、外す 1 者をラウンドごとに回す。
-
-        レビュー担当 = 母集合 − 母集合[(ラウンド番号 - 1) % 3]
-
-    `assign()` と分けているのは、**適用の役があるかどうかで選び方が変わる**ためである。
-    `assign()` は先に実装担当を決めてから残りを絞るが、この工程には適用が無く、母集合から
-    直接 2 者を選ぶ。3 者すべてを毎ラウンド起動しないのは、起動回数が 1.5 倍になるためで、
-    ラウンドを重ねれば 3 者とも差分を見る。
-    """
-    if round_no < 1:
-        raise AssignmentError(f"ラウンド番号は 1 以上です: {round_no}")
-    pool = review_pool(host)
-    dropped = (round_no - 1) % len(pool)
-    return [r for i, r in enumerate(pool) if i != dropped]
-
-
-def assign(round_no: int, host: str) -> tuple[str, list[str]]:
-    """ラウンド番号から `(実装担当, レビュー担当 2 者)` を決める。
-
-    輪番の単位は**ラウンド**である。1 ラウンドの適用を 1 者へ集約することで、
-    レビュー担当を「実装担当以外」から機械的に決められる。
-
-        実装担当   = 適用候補[ラウンド番号 % 4]
-        候補       = 提案・レビュー − 実装担当
-        レビュー担当 = 候補が 2 者ならそのまま
-                     3 者なら 候補[(ラウンド番号 // 4) % 3] を除いた 2 者
-
-    実装担当がホストと同じランタイムのとき、その者は提案・レビューの母集合に
-    含まれないため候補が 3 者残る。**レビュー担当は常に 2 者**とし（起動回数を
-    抑える方針と揃える）、余る 1 者はラウンドを跨いで順に外して負荷を均す。
-    """
-    if round_no < 1:
-        raise AssignmentError(f"ラウンド番号は 1 以上です: {round_no}")
-    pool = impl_pool()
-    impl = pool[round_no % len(pool)]
-    candidates = [r for r in review_pool(host) if r != impl]
-    if len(candidates) > 2:
-        dropped = (round_no // len(pool)) % len(candidates)
-        candidates = [r for i, r in enumerate(candidates) if i != dropped]
-    return impl, candidates
 
 
 def _in_fixed_order(names: Iterable[str]) -> list[str]:
@@ -323,7 +256,7 @@ def review_seats(round_no: int, available: list[str], fallback: list[str]) -> li
     | 0 | `fallback[0]` と `<fallback[0]>-2`。`fallback` が空なら `AssignmentError` |
 
     `available` の並びは `ALL_RUNTIMES` の順（`resolve_participants` が保つ）。n = 3 の値は
-    変更前の `review_assign` と一致する。埋め合わせの候補は使える者に含まれない者だけを
+    この関数より前の輪番（外す 1 者を `(round_no - 1) % 3` で回す式）と一致する。埋め合わせの候補は使える者に含まれない者だけを
     使い、含まれる者は飛ばす（同じ席の名前を 2 つ返さないため）。`only` の処理は呼び出し側が
     先に行う（1 者指定は埋め合わせをしない）。
     """
@@ -347,7 +280,8 @@ def review_seats(round_no: int, available: list[str], fallback: list[str]) -> li
 def impl_assign(round_no: int, participants: list[str]) -> str:
     """cross-refactoring の適用担当 1 者を決める: `participants[round_no % len]`。
 
-    式は変更前の `assign()` と同じで、除数だけを参加者の数にする（設計の決定 7）。
+    式はこの関数より前の輪番（4 者の固定の順を `round_no % 4` で引く式）と同じで、
+    除数だけを参加者の数にする（設計の決定 7）。
     ラウンド 1 が `participants[1]` から始まるため、ホスト claude の既定
     （claude / codex / kiro）でもホストが最初に適用する形にならない。
     """

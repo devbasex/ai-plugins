@@ -322,3 +322,24 @@ def test_the_identifier_still_has_to_be_an_integer() -> None:
     out = _monitor("10.2.0", "--agents", "deploy")
     assert out.returncode != 0
     assert "invalid int value" in out.stderr
+
+
+# ---------- 呼び手の無くなった旧関数（#727 の AC7） ----------
+
+# 使える者の解決と席・適用の割り当てが共通層の新しい関数へ移り、呼び手が無くなった 4 つ。
+# **片方の Skill にだけ古い形が残らない**（親 #727 の完了条件）ことを、名前が残らない
+# ことで固定する。部品（`scripts/`）だけを見る。テストと文書は古い値を期待値や経緯として
+# 持ちうる。
+RETIRED_FUNCTIONS = ("check_auth", "impl_pool", "review_assign", "assign")
+
+
+def test_the_retired_assignment_functions_are_gone() -> None:
+    result = subprocess.run(
+        ["git", "grep", "-n", "-w",
+         *[arg for name in RETIRED_FUNCTIONS for arg in ("-e", name)],
+         "--", "plugins/ndf/scripts/lib/",
+         "plugins/ndf/skills/cross-review/scripts/",
+         "plugins/ndf/skills/cross-refactoring/scripts/"],
+        cwd=ROOT, capture_output=True, text=True,
+    )
+    assert result.returncode == 1, f"旧関数の名前が残っている:\n{result.stdout}"

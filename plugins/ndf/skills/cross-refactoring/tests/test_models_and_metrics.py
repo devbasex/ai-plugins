@@ -343,8 +343,7 @@ def test_models_are_fixed_across_rounds(cmd_setup, tmp_path, env_tmp_dir):
         state = read_state(state_path)
         entry = state["rounds"][-1]
         assert entry["impl_model"]["requested"] == state["models"][entry["impl"]]
-        for r in entry["reviewers"]:
-            assert entry["reviewer_models"][r]["requested"] == state["models"][r]
+        assert "reviewer_models" not in entry
         # 次のラウンドを開けるように、いま開いたラウンドを閉じる
         entry["adopted"] = 1
         state_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")

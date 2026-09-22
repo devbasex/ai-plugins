@@ -9,50 +9,6 @@ import pytest
 
 ASSIGNMENT = Path(__file__).resolve().parents[1] / "lib" / "assignment.py"
 
-EXPECTED = {
-    "claude": [
-        ("codex", ["agy", "kiro"]),
-        ("agy", ["codex", "kiro"]),
-        ("kiro", ["codex", "agy"]),
-        ("claude", ["codex", "kiro"]),
-        ("codex", ["agy", "kiro"]),
-        ("agy", ["codex", "kiro"]),
-        ("kiro", ["codex", "agy"]),
-        ("claude", ["codex", "agy"]),
-    ],
-    "codex": [
-        ("codex", ["agy", "kiro"]),
-        ("agy", ["claude", "kiro"]),
-        ("kiro", ["claude", "agy"]),
-        ("claude", ["agy", "kiro"]),
-        ("codex", ["claude", "kiro"]),
-        ("agy", ["claude", "kiro"]),
-        ("kiro", ["claude", "agy"]),
-        ("claude", ["agy", "kiro"]),
-    ],
-    "agy": [
-        ("codex", ["claude", "kiro"]),
-        ("agy", ["codex", "kiro"]),
-        ("kiro", ["claude", "codex"]),
-        ("claude", ["codex", "kiro"]),
-        ("codex", ["claude", "kiro"]),
-        ("agy", ["claude", "kiro"]),
-        ("kiro", ["claude", "codex"]),
-        ("claude", ["codex", "kiro"]),
-    ],
-    "kiro": [
-        ("codex", ["claude", "agy"]),
-        ("agy", ["claude", "codex"]),
-        ("kiro", ["codex", "agy"]),
-        ("claude", ["codex", "agy"]),
-        ("codex", ["claude", "agy"]),
-        ("agy", ["claude", "codex"]),
-        ("kiro", ["claude", "agy"]),
-        ("claude", ["codex", "agy"]),
-    ],
-}
-
-
 @pytest.fixture(scope="module")
 def assignment():
     spec = importlib.util.spec_from_file_location("ndf_lib_assignment", ASSIGNMENT)
@@ -106,49 +62,12 @@ def test_detect_host_rejects_an_environment_without_hints(assignment):
         assignment.detect_host(None, {})
 
 
-@pytest.mark.parametrize("host", EXPECTED)
-def test_assign_keeps_the_eight_round_rotation(assignment, host):
-    actual = [assignment.assign(round_no, host) for round_no in range(1, 9)]
-
-    assert actual == EXPECTED[host]
-    assert any(impl == host for impl, _ in actual)
-    assert any(impl != host for impl, _ in actual)
-    assert all(len(reviewers) == 2 for _, reviewers in actual)
-    assert all(impl not in reviewers for impl, reviewers in actual)
-
-
-@pytest.mark.parametrize("host", ("claude", "codex", "agy", "kiro"))
-def test_assign_rejects_a_bad_round(assignment, host):
-    """round_no < 1 の場合に AssignmentError が送出される（R2-001）。"""
-    for round_no in (0, -1):
-        with pytest.raises(
-            assignment.AssignmentError,
-            match=r"^ラウンド番号は 1 以上です:",
-        ) as excinfo:
-            assignment.assign(round_no, host)
-        assert "ラウンド番号は 1 以上です" in str(excinfo.value)
-
-
-def test_review_assign_rejects_a_bad_round(assignment):
-    """round_no < 1 の下限境界で AssignmentError が送出される（R2-003）。
-
-    同モジュールの `assign` / `review_seats` は下限境界を固定しているが、
-    `review_assign` だけ抜けていたため現状の振る舞いを固定する。
-    """
-    for round_no in (0, -1):
-        with pytest.raises(
-            assignment.AssignmentError,
-            match=r"^ラウンド番号は 1 以上です:",
-        ) as excinfo:
-            assignment.review_assign(round_no, "claude")
-        assert "ラウンド番号は 1 以上です" in str(excinfo.value)
-
-
 @pytest.mark.parametrize("host", ("gemini", "unknown"))
-def test_review_assign_rejects_a_host_outside_host_runtimes(assignment, host):
-    """HOST_RUNTIMES に含まれないホストを拒否する現状を固定する（R2-005）。"""
+@pytest.mark.parametrize("pool", ("review_pool", "refactor_pool"))
+def test_the_default_pools_reject_a_host_outside_host_runtimes(assignment, pool, host):
+    """HOST_RUNTIMES に含まれないホストを、どちらの母集合の既定も拒否する。"""
     with pytest.raises(assignment.AssignmentError) as excinfo:
-        assignment.review_assign(1, host)
+        getattr(assignment, pool)(host)
 
     assert "ホストになれないランタイムです" in str(excinfo.value)
 
@@ -160,6 +79,16 @@ def test_impl_assign_rotates_over_the_participants_starting_after_the_host(assig
     participants = ["claude", "codex", "kiro"]
     actual = [assignment.impl_assign(r, participants) for r in range(1, 7)]
     assert actual == ["codex", "kiro", "claude", "codex", "kiro", "claude"]
+
+
+def test_impl_assign_with_one_participant_always_returns_that_participant(assignment):
+    participants = ["codex"]
+    assert [assignment.impl_assign(r, participants) for r in (1, 2)] == ["codex", "codex"]
+
+
+def test_impl_assign_with_two_participants_rotates_between_them(assignment):
+    participants = ["codex", "kiro"]
+    assert [assignment.impl_assign(r, participants) for r in (1, 2)] == ["kiro", "codex"]
 
 
 def test_impl_assign_rejects_a_bad_round(assignment):
