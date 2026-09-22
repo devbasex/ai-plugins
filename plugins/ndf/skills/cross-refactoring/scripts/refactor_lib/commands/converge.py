@@ -525,6 +525,69 @@ def _close_failed_fix(
     sys.exit(2)
 
 
+def _fetch_fix_result(
+    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any],
+    scope: IntakeScope, impl: str, round_no: int,
+) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    """修正結果を取得し、`(payload, merge_key)` を返す。
+
+    結果を残さなかった試行は `_close_failed_fix` が終了させる。取り込み済みの
+    結果なら `(None, None)` を返し、呼び出し側が何もせず戻れるようにする。
+    """
+    outcome = read_result(state, impl, "fix", round_no)
+    if outcome.payload is None:
+        _close_failed_fix(path, state, entry, scope, outcome)
+    payload = outcome.payload
+
+    result = result_path(state, impl, stem_for(impl, "fix", state["id"], round_no))
+    merge_key = _fix_merge_key(entry, result)
+    if _already_merged_fix_result(entry, merge_key):
+        return None, None
+    return payload, merge_key
+
+
+def _confirm_and_settle_fix(
+    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any],
+    scope: IntakeScope, work: str, head_now: str, payload: dict[str, Any],
+) -> set[str]:
+    """Git 範囲を確定し、修正コミットを検証して取り消すか受理する。
+
+    採用した解決スレッドの集合を返す（取り込みの通知に使う）。
+    """
+    resolved = _resolved_fix_thread_ids(payload, state["repo"], state["current_pr"])
+    baseline = state.get("baseline_test") or {}
+    ordered_range = _resolve_fix_range(path, state, entry, work, head_now)
+    unassigned, problems, accepted = _inspect_fix_commits(
+        state, work, payload, baseline, ordered_range
+    )
+    _settle_fix_round(
+        path, state, entry, scope, ordered_range, resolved, unassigned, problems,
+        accepted,
+    )
+    return resolved
+
+
+def _record_and_publish_fix(
+    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any],
+    merge_key: str, payload: dict[str, Any], resolved: set[str],
+) -> None:
+    """取り込み済みの鍵・修正回数・所要時間を記録し、保存して公開する。"""
+    entry["fix_merged_keys"].append(merge_key)
+    entry["fix_rounds"] += 1
+    entry.setdefault("durations", {})["fix"] = (
+        entry.get("durations", {}).get("fix", 0)
+        + safe_int(payload.get("elapsed_seconds"))
+    )
+    statefile.save(path, state)
+    # **取り消したかどうかに関わらず公開する。** 実装担当は push しないため、
+    # ここで公開しないと再レビューが Pull Request 上の差分を見られない。
+    push_with_retry_marker(path, state, entry)
+    info(
+        f"修正を取り込みました（解決 {len(resolved)} スレッド / "
+        f"修正ラウンド {entry['fix_rounds']}）。{plan_line(state)}"
+    )
+
+
 def cmd_merge_fix(args: argparse.Namespace) -> None:
     """Step 6 — 修正結果を取り込み、修正ラウンドを 1 つ進める。
 
@@ -544,43 +607,15 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         info("↻ この修正の試行は結果なしとして記録済みです")
         sys.exit(2)
 
-    outcome = read_result(state, impl, "fix", args.round)
-    if outcome.payload is None:
-        _close_failed_fix(path, state, entry, scope, outcome)
-    payload = outcome.payload
+    payload, merge_key = _fetch_fix_result(
+        path, state, entry, scope, impl, args.round
+    )
+    if payload is None:
+        return
 
     work = state["worktrees"]["work"]
     head_now = git_out(work, ["rev-parse", "HEAD"]) or ""
-    result = result_path(state, impl, stem_for(impl, "fix", state["id"], args.round))
-    merge_key = _fix_merge_key(entry, result)
-    if _already_merged_fix_result(entry, merge_key):
-        return
-    merged_keys = entry["fix_merged_keys"]
-
-    resolved = _resolved_fix_thread_ids(payload, state["repo"], state["current_pr"])
-
-    baseline = state.get("baseline_test") or {}
-    ordered_range = _resolve_fix_range(path, state, entry, work, head_now)
-    unassigned, problems, accepted = _inspect_fix_commits(
-        state, work, payload, baseline, ordered_range
+    resolved = _confirm_and_settle_fix(
+        path, state, entry, scope, work, head_now, payload
     )
-    _settle_fix_round(
-        path, state, entry, scope, ordered_range, resolved, unassigned, problems,
-        accepted,
-    )
-
-    merged_keys.append(merge_key)
-    entry["fix_rounds"] += 1
-
-    entry.setdefault("durations", {})["fix"] = (
-        entry.get("durations", {}).get("fix", 0)
-        + safe_int(payload.get("elapsed_seconds"))
-    )
-    statefile.save(path, state)
-    # **取り消したかどうかに関わらず公開する。** 実装担当は push しないため、
-    # ここで公開しないと再レビューが Pull Request 上の差分を見られない。
-    push_with_retry_marker(path, state, entry)
-    info(
-        f"修正を取り込みました（解決 {len(resolved)} スレッド / "
-        f"修正ラウンド {entry['fix_rounds']}）。{plan_line(state)}"
-    )
+    _record_and_publish_fix(path, state, entry, merge_key, payload, resolved)

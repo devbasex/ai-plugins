@@ -837,22 +837,17 @@ def _record_apply_progress(
     })
 
 
-def _verify_apply_group(
+def _collect_apply_group_facts(
     ctx: _ApplyExecutionContext,
     commit_range: _ApplyCommitRange,
     reported: dict[str, dict[str, Any]],
-) -> tuple[list[str], list[str]]:
-    """適用ラウンドをまとめて検証し `(採用, 失敗)` を返す。
+) -> tuple[list[str], list[str], list[dict[str, Any]]]:
+    """群の申告から `(欠落項目, 申告 SHA, コミット事実)` を組み立てる。
 
-    **判定は全件同時である**（決定 3）。群の中は 1 コミットなので、失敗を項目まで
-    特定しても取り消しは分離できない。
+    **群の全項目が同じコミットを申告する。** 申告の無い項目は、適用されたことを
+    確かめる手がかりが無い。群の中は 1 コミットなので、1 件の欠落が群の全件を
+    巻き込む（「群の中の道連れ」）。
     """
-    scope = ctx.state.get("target_scope") or []
-    items = [find_item(ctx.state, i) for i in ctx.group["items"]]
-
-    # **群の全項目が同じコミットを申告する。** 申告の無い項目は、適用されたことを
-    # 確かめる手がかりが無い。群の中は 1 コミットなので、1 件の欠落が群の全件を
-    # 巻き込む（「群の中の道連れ」）。
     missing = [
         i for i in ctx.group["items"] if not reported_shas(reported.get(i) or {})
     ]
@@ -863,14 +858,33 @@ def _verify_apply_group(
         commit_range.work, shas, commit_range.in_range, "", ctx.state["head_branch"],
         safe_int(ctx.state.get("test_timeout"), DEFAULT_TEST_TIMEOUT),
     )
+    return missing, shas, facts
+
+
+def _determine_apply_problem(
+    ctx: _ApplyExecutionContext,
+    items: list[dict[str, Any]],
+    missing: list[str],
+    facts: list[dict[str, Any]],
+) -> str:
+    """欠落と `verify_apply_round` から、この適用ラウンドの問題点を決める。"""
     if missing:
-        problem = (
+        return (
             f"適用結果に項目がありません: {', '.join(missing)}"
             "（群の全項目を 1 つのコミットへまとめ、各項目へ同じ SHA を申告します）"
         )
-    else:
-        problem = verify_apply_round(items, facts, scope)
+    scope = ctx.state.get("target_scope") or []
+    return verify_apply_round(items, facts, scope)
 
+
+def _record_apply_group_outcome(
+    ctx: _ApplyExecutionContext,
+    items: list[dict[str, Any]],
+    shas: list[str],
+    facts: list[dict[str, Any]],
+    problem: str,
+) -> None:
+    """保留判断・項目状態・進捗を記録し、結果を出力して保存する。"""
     # **機械で決まらなかったテストの差分を記録する**（#443）。落とさないが、
     # 通ったものとしても扱わない。進行側がこれを見て段 2（`judge-test-changes`）を
     # 起動する。**空でないまま収束させない。**
@@ -893,6 +907,22 @@ def _verify_apply_group(
         )
     if not ctx.args.dry_run:
         statefile.save(ctx.path, ctx.state)
+
+
+def _verify_apply_group(
+    ctx: _ApplyExecutionContext,
+    commit_range: _ApplyCommitRange,
+    reported: dict[str, dict[str, Any]],
+) -> tuple[list[str], list[str]]:
+    """適用ラウンドをまとめて検証し `(採用, 失敗)` を返す。
+
+    **判定は全件同時である**（決定 3）。群の中は 1 コミットなので、失敗を項目まで
+    特定しても取り消しは分離できない。
+    """
+    items = [find_item(ctx.state, i) for i in ctx.group["items"]]
+    missing, shas, facts = _collect_apply_group_facts(ctx, commit_range, reported)
+    problem = _determine_apply_problem(ctx, items, missing, facts)
+    _record_apply_group_outcome(ctx, items, shas, facts, problem)
     if problem:
         return [], list(ctx.group["items"])
     return list(ctx.group["items"]), []

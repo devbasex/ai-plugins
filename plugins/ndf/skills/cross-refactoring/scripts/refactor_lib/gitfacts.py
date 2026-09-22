@@ -695,6 +695,22 @@ def _record_drop_result(
             "reverted": len(ordered), "replayed": len(mapping)}
 
 
+def _drop_legacy_by_item(
+    state: dict[str, Any], pending: list[str], dry_run: bool = False,
+) -> dict[str, Any]:
+    """起点を記録していない状態ファイル（旧版）で、項目のコミットだけを戻す。
+
+    積み直しの起点（`apply_base_sha`）が無いため範囲を確定できない。従来どおり
+    項目のコミットを新しい順に取り消すだけで、残す項目の積み直しは行わない。
+    """
+    info("⚠ 適用の範囲を確定できないため、項目のコミットだけを取り消します")
+    reverted = 0
+    for item_id in pending:
+        reverted += revert_item_commits(state, find_item(state, item_id), dry_run)
+    return {"mode": "item", "dropped": pending,
+            "reverted": reverted, "replayed": 0}
+
+
 def drop_items(
     state: dict[str, Any], entry: dict[str, Any], drop_ids: list[str],
     dry_run: bool = False,
@@ -727,13 +743,7 @@ def drop_items(
     ordered = commits_in_range(work, entry.get("apply_base_sha"), head or "HEAD")
     if ordered is None:
         # 起点を記録していない状態ファイル（旧版）では積み直せない。
-        # 従来どおり項目のコミットだけを新しい順に戻す。
-        info("⚠ 適用の範囲を確定できないため、項目のコミットだけを取り消します")
-        reverted = 0
-        for item_id in pending:
-            reverted += revert_item_commits(state, find_item(state, item_id), dry_run)
-        return {"mode": "item", "dropped": pending,
-                "reverted": reverted, "replayed": 0}
+        return _drop_legacy_by_item(state, pending, dry_run)
 
     owner, keep_ids, replay = _drop_replay_plan(state, entry, pending, ordered)
 

@@ -116,6 +116,28 @@ def cmd_status(args: argparse.Namespace) -> None:
 def cmd_report(args: argparse.Namespace) -> None:
     """Step 8 — ラウンド表・項目表・見送り項目・指標を出す。"""
     path, state = load_state(args.id)
+    _print_header(state)
+    print()
+    print("## ラウンド")
+    print()
+    print(_round_table(state))
+    print()
+    print("## 改善項目")
+    print()
+    print(_item_table(state))
+    # **取り消した項目の内訳は書かない**（#436 決定 6-b）。件数だけ述べ、内訳は
+    # 改修計画へ譲る。同じ一覧を 2 か所に置くと、片方だけが古くなる。
+    print()
+    _print_deferred(state)
+    if args.metrics:
+        _print_metrics(state)
+    # **最後の行に置く**（#662 の AC23）。作業ツリーを消した後に要約を探す手がかりになる。
+    print()
+    _print_run_metrics(path, state)
+
+
+def _print_header(state: dict[str, Any]) -> None:
+    """見出し行と実行メタ情報（対象範囲・終了理由・改修計画・着手前テスト等）を出す。"""
     print(f"# cross-refactoring 実行報告 — {state['repo']} #{state['current_pr']}")
     print()
     print(f"- ホスト: {state['host']}（{state['host_detection']}）")
@@ -134,28 +156,26 @@ def cmd_report(args: argparse.Namespace) -> None:
         print(f"- 最終ゲート: {gate.get('mode') or '—'}"
               f"（{gate.get('status') or '未実行'}"
               f" / 修正 {gate.get('fix_rounds', 0)} 回）")
-    print()
-    print("## ラウンド")
-    print()
-    print(_round_table(state))
-    print()
-    print("## 改善項目")
-    print()
-    print(_item_table(state))
-    # **取り消した項目の内訳は書かない**（#436 決定 6-b）。件数だけ述べ、内訳は
-    # 改修計画へ譲る。同じ一覧を 2 か所に置くと、片方だけが古くなる。
-    print()
+
+
+def _print_deferred(state: dict[str, Any]) -> None:
+    """見送り節（件数と改修計画への参照）を出す。"""
     print("## 見送った提案")
     print()
     print(f"- 件数: {len(state['deferred_items'])} 件")
     print(f"- 内訳: 改修計画にある — {plan_reference(state)}")
-    if args.metrics:
-        print()
-        print("# 指標")
-        print()
-        print(metrics_lib.format_report(metrics_lib.aggregate(state)))
-    # **最後の行に置く**（#662 の AC23）。作業ツリーを消した後に要約を探す手がかりになる。
+
+
+def _print_metrics(state: dict[str, Any]) -> None:
+    """指標節を出す（`args.metrics` が真のときだけ呼ぶ）。"""
     print()
+    print("# 指標")
+    print()
+    print(metrics_lib.format_report(metrics_lib.aggregate(state)))
+
+
+def _print_run_metrics(path: pathlib.Path, state: dict[str, Any]) -> None:
+    """run_metrics の要約 1 行を出す。"""
     print(run_metrics.report_line(path, state, "cross-refactoring", summary_extra))
 
 
