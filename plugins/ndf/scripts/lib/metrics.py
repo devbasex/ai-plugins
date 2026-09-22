@@ -7,7 +7,7 @@
 """
 from __future__ import annotations
 
-from typing import Any, NamedTuple, Optional
+from typing import Any, Optional
 
 import models as _models
 
@@ -26,20 +26,6 @@ COMPARISON_CAVEATS = [
     "公平に比べたいなら、同じ対象・同じ範囲で --model だけ変えて複数回走らせる。"
     "1 回の実行内での比較は参考値にとどまる",
 ]
-
-
-class MeasurementContext(NamedTuple):
-    """1 ラウンド 1 担当の計測文脈。
-
-    **常に組で渡り回る 5 値をまとめる。** `requested` と `observed` はどちらも
-    モデル名の文字列で、並べて渡すと取り違えても型では気付けない。
-    """
-
-    round_no: Any
-    runtime: str
-    requested: Optional[str]
-    observed: Optional[str]
-    role_label: str
 
 
 def _key(runtime: str, model: Optional[str]) -> str:
@@ -84,15 +70,7 @@ def aggregate(state: dict[str, Any]) -> dict[str, Any]:
         observed = impl_model.get("observed")
 
         _append_model_measurement_warnings(
-            unmeasured,
-            assumed,
-            MeasurementContext(
-                round_no=round_no,
-                runtime=impl_runtime,
-                requested=requested,
-                observed=observed,
-                role_label="実装担当",
-            ),
+            unmeasured, assumed, round_no, impl_runtime, requested, observed, "実装担当"
         )
 
         reviews = _round_reviews(entry)
@@ -127,15 +105,7 @@ def _aggregate_round_reviewers(
         requested = spec.get("requested")
         observed = spec.get("observed")
         _append_model_measurement_warnings(
-            unmeasured,
-            assumed,
-            MeasurementContext(
-                round_no=round_no,
-                runtime=name,
-                requested=requested,
-                observed=observed,
-                role_label="レビュー担当",
-            ),
+            unmeasured, assumed, round_no, name, requested, observed, "レビュー担当"
         )
         if _models.is_measurable(name, requested):
             _aggregate_reviewer_round(reviewer, entry, name, requested, reviews)
@@ -218,20 +188,24 @@ def _tally_verdict_agreement(
 def _append_model_measurement_warnings(
     unmeasured: list[str],
     assumed: list[str],
-    ctx: MeasurementContext,
+    round_no: Any,
+    runtime: str,
+    requested: Optional[str],
+    observed: Optional[str],
+    role_label: str,
 ) -> None:
-    warning = _models.mismatch_warning(ctx.runtime, ctx.requested, ctx.observed)
+    warning = _models.mismatch_warning(runtime, requested, observed)
     if warning:
-        unmeasured.append(f"round {ctx.round_no}: {warning}")
+        unmeasured.append(f"round {round_no}: {warning}")
     # 分離するかと、その理由はランタイムごとに違う。判断も文言も models.py が持つ。
-    reason = _models.separation_reason(ctx.runtime, ctx.requested)
+    reason = _models.separation_reason(runtime, requested)
     if reason:
         unmeasured.append(
-            f"round {ctx.round_no}: {reason}ため、{ctx.role_label}の集計から分離する"
+            f"round {round_no}: {reason}ため、{role_label}の集計から分離する"
         )
-    note = _models.assumption_note(ctx.runtime, ctx.requested)
+    note = _models.assumption_note(runtime, requested)
     if note:
-        assumed.append(f"round {ctx.round_no}: {note}（{ctx.role_label}）")
+        assumed.append(f"round {round_no}: {note}（{role_label}）")
 
 
 def _duration(entry: dict[str, Any], phases: tuple[str, ...]) -> float:
