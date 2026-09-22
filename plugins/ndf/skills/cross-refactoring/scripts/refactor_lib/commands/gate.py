@@ -182,6 +182,88 @@ def _close_failed_final_fix(
     sys.exit(2)
 
 
+def _collect_final_fix_range(
+    path: pathlib.Path,
+    state: dict[str, Any],
+    gate: dict[str, Any],
+    scope: IntakeScope,
+    impl: str,
+    work: str,
+) -> tuple[dict[str, Any], str, list[str]]:
+    """修正担当の結果と、取り込む範囲（HEAD と起点からのコミット）を確定する。
+
+    結果が無いとき・範囲を確定できないときは、ここで終了する。
+    """
+    outcome = read_result(state, impl, "final-fix")
+    if outcome.payload is None:
+        _close_failed_final_fix(path, state, gate, scope, outcome)
+    payload = outcome.payload
+    head_now = git_out(work, ["rev-parse", "HEAD"]) or ""
+    ordered_range = commits_in_range(work, gate.get("fix_base_sha"), head_now)
+    if ordered_range is None:
+        statefile.save(path, state)
+        die(
+            "最終ゲートの修正の範囲を確定できませんでした"
+            f"（起点 {gate.get('fix_base_sha')} / HEAD {head_now}）。"
+            "検証できない修正は採りません",
+            code=2,
+        )
+    return payload, head_now, ordered_range
+
+
+def _verify_final_fix_commits(
+    state: dict[str, Any],
+    work: str,
+    payload: dict[str, Any],
+    ordered_range: list[str],
+) -> tuple[list[str], list[str]]:
+    """申告されたコミットを検証し、未申告のコミットと問題の一覧を返す。"""
+    claimed_shas = reported_shas(payload)
+    unassigned = unassigned_fix_commits(work, claimed_shas, ordered_range)
+    # **テストコマンドは渡さない。** 合否は `final-gate` が採った側で 1 度だけ見る
+    # （`--ci-check` を指定した実行で手元のテストを走らせないため）。
+    facts = collect_commit_facts(
+        work, claimed_shas, set(ordered_range), "", state["head_branch"],
+    )
+    problems = [
+        p for p in (
+            verify_final_fix_commit(c, state.get("target_scope") or [])
+            for c in facts
+        ) if p
+    ]
+    return unassigned, problems
+
+
+def _apply_final_fix_verdict(
+    path: pathlib.Path,
+    state: dict[str, Any],
+    gate: dict[str, Any],
+    scope: IntakeScope,
+    head_now: str,
+    ordered_range: list[str],
+    unassigned: list[str],
+    problems: list[str],
+) -> None:
+    """検証の結果に応じて、修正を取り消すか最終ゲートの記録へ取り込む。"""
+    if unassigned:
+        info(
+            f"❌ どの申告にも含まれていない修正コミットが {len(unassigned)} 件あります"
+            f"（{', '.join(s[:7] for s in unassigned[:5])}）"
+        )
+    for problem in problems:
+        info(f"❌ {problem}")
+
+    if unassigned or problems:
+        # **ここは取り消す。** 「上限に達しても取り消さない」のは*採用した改善項目*
+        # の話で、検証を受けていない修正コミットは別である。取り消せば HEAD は
+        # 最終ゲートが見た地点へ戻り、公開済みの内容と食い違わない。
+        discard_unverified(path, state, scope, ordered_range)
+    else:
+        gate["fix_base_sha"] = head_now
+        gate.setdefault("fix_commits", []).extend(ordered_range)
+        info(f"修正を取り込みました（{len(ordered_range)} コミット）")
+
+
 def cmd_merge_final_fix(args: argparse.Namespace) -> None:
     """Step 7 — 最終ゲートの修正結果を取り込む。
 
@@ -222,52 +304,15 @@ def cmd_merge_final_fix(args: argparse.Namespace) -> None:
         info("↻ この最終ゲートの修正の試行は結果なしとして記録済みです")
         sys.exit(2)
 
-    outcome = read_result(state, impl, "final-fix")
-    if outcome.payload is None:
-        _close_failed_final_fix(path, state, gate, scope, outcome)
-    payload = outcome.payload
-    head_now = git_out(work, ["rev-parse", "HEAD"]) or ""
-    ordered_range = commits_in_range(work, gate.get("fix_base_sha"), head_now)
-    if ordered_range is None:
-        statefile.save(path, state)
-        die(
-            "最終ゲートの修正の範囲を確定できませんでした"
-            f"（起点 {gate.get('fix_base_sha')} / HEAD {head_now}）。"
-            "検証できない修正は採りません",
-            code=2,
-        )
-
-    claimed_shas = reported_shas(payload)
-    unassigned = unassigned_fix_commits(work, claimed_shas, ordered_range)
-    # **テストコマンドは渡さない。** 合否は `final-gate` が採った側で 1 度だけ見る
-    # （`--ci-check` を指定した実行で手元のテストを走らせないため）。
-    facts = collect_commit_facts(
-        work, claimed_shas, set(ordered_range), "", state["head_branch"],
+    payload, head_now, ordered_range = _collect_final_fix_range(
+        path, state, gate, scope, impl, work,
     )
-    problems = [
-        p for p in (
-            verify_final_fix_commit(c, state.get("target_scope") or [])
-            for c in facts
-        ) if p
-    ]
-
-    if unassigned:
-        info(
-            f"❌ どの申告にも含まれていない修正コミットが {len(unassigned)} 件あります"
-            f"（{', '.join(s[:7] for s in unassigned[:5])}）"
-        )
-    for problem in problems:
-        info(f"❌ {problem}")
-
-    if unassigned or problems:
-        # **ここは取り消す。** 「上限に達しても取り消さない」のは*採用した改善項目*
-        # の話で、検証を受けていない修正コミットは別である。取り消せば HEAD は
-        # 最終ゲートが見た地点へ戻り、公開済みの内容と食い違わない。
-        discard_unverified(path, state, scope, ordered_range)
-    else:
-        gate["fix_base_sha"] = head_now
-        gate.setdefault("fix_commits", []).extend(ordered_range)
-        info(f"修正を取り込みました（{len(ordered_range)} コミット）")
+    unassigned, problems = _verify_final_fix_commits(
+        state, work, payload, ordered_range,
+    )
+    _apply_final_fix_verdict(
+        path, state, gate, scope, head_now, ordered_range, unassigned, problems,
+    )
 
     gate.setdefault("durations", {})["fix"] = (
         gate.get("durations", {}).get("fix", 0)

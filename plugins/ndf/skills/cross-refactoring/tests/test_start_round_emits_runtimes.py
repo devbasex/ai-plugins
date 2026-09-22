@@ -1,10 +1,11 @@
-"""`start-round` が提案・レビューの母集合を返すこと（#518-1）。
+"""`start-round` が参加者の一覧と実装担当を返すこと（#518-1 / #727）。
 
 **繰り返しの中で使う値は、繰り返しの中で得られる。** 母集合を `init` だけが返すと、
 状態ファイルから再開する経路と、骨組みを抜粋して写す経路の両方で未定義になる。
 """
 from __future__ import annotations
 
+import json
 import shlex
 
 import pytest
@@ -56,18 +57,33 @@ def test_existing_values_are_untouched(refactor, tmp_path, env_tmp_dir, capsys):
 
     emitted = _emitted(capsys)
     for key in (
-        "ROUND", "ROUND_KIND", "PROPOSE_PHASE", "IMPL", "IMPL_MODEL",
-        "REVIEWERS", "REVIEWERS_CSV", "MAX_FIX_ROUNDS",
+        "ROUND", "ROUND_KIND", "PROPOSE_PHASE", "IMPL", "IMPL_MODEL", "MAX_FIX_ROUNDS",
     ):
         assert key in emitted, f"{key} が出力から消えている"
 
 
-def test_the_pool_is_wider_than_the_reviewers(refactor, tmp_path, env_tmp_dir, capsys):
-    """`REVIEWERS` で代用すると提案する者が 1 人減る。"""
-    state_path = make_state(tmp_path, runtimes=["codex", "agy", "kiro"])
+def test_start_round_has_no_reviewers(refactor, tmp_path, env_tmp_dir, capsys):
+    """AC34 — レビュー工程は #436 で消えた。存在しない役を出力にも記録にも残さない。"""
+    state_path = make_state(tmp_path, runtimes=["claude", "codex", "kiro"])
     env_tmp_dir(state_path)
     refactor.cmd_start_round(_args())
 
     emitted = _emitted(capsys)
-    assert len(emitted["RUNTIMES"].split()) == 3
-    assert len(emitted["REVIEWERS"].split()) == 2
+    assert "REVIEWERS" not in emitted
+    assert "REVIEWERS_CSV" not in emitted
+    entry = json.loads(state_path.read_text(encoding="utf-8"))["rounds"][0]
+    assert "reviewers" not in entry
+    assert "reviewer_models" not in entry
+
+
+def test_the_implementer_rotates_within_the_participants(
+        refactor, tmp_path, env_tmp_dir, capsys):
+    """AC34 / AC41 — 実装担当は参加者の一覧から決まる。適用専用の母集合は読まない。"""
+    state_path = make_state(tmp_path, runtimes=["claude", "codex", "kiro"],
+                            impl_capable=["claude", "codex", "agy", "kiro"])
+    env_tmp_dir(state_path)
+    impls = []
+    for _ in range(3):
+        refactor.cmd_start_round(_args())
+        impls.append(_emitted(capsys)["IMPL"])
+    assert impls == ["codex", "kiro", "claude"]

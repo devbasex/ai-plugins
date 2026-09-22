@@ -10,6 +10,11 @@
    テストは、実行した人の設定に関わらずその場で落ちる
 4. テストの実行中だけ実行の要約の置き場所（`NDF_METRICS_DIR`）を一時ディレクトリへ向ける。
    状態を保存するテストが、実行した人の状態ディレクトリへ要約を書かない（#662 の AC72）
+5. テストの実行中だけ監視の上限を指す環境変数（接頭辞 `MONITOR_`）を外す。上限を延ばした
+   シェルから起動しても、既定値を前提にするテストが同じ結果になる（#678）
+
+どの束のディレクトリを起点にしても読まれるよう、テストの基準のディレクトリ（rootdir）は
+根の設定ファイル（`pytest.ini`）がリポジトリの根へ固定する。
 
 `playwright-kit-ops` のディレクトリを起点にした実行では、このファイルは読まれない。
 `pytester` はそのディレクトリの `pyproject.toml` の `addopts` が読み込む。
@@ -80,6 +85,41 @@ def _missing(bundles: set[str]) -> dict[str, list[str]]:
         if lacking:
             found[bundle] = lacking
     return found
+
+
+# 監視の上限を指す環境変数の接頭辞（#678）。担当ごとの指定・共通の指定のどちらもこの
+# 接頭辞を持つため、接頭辞だけで一致させる。名前を並べると、上限の種類が増えるたびに
+# ここへ足し忘れる。
+MONITOR_ENV_PREFIX = "MONITOR_"
+
+# `pytest_configure` で外した値の控え。実行が終わったときに戻す。
+_saved_monitor_env: dict[str, str] = {}
+
+
+def _strip_monitor_env() -> dict[str, str]:
+    """接頭辞の環境変数を外し、外した値を返す。"""
+    return {k: os.environ.pop(k) for k in list(os.environ) if k.startswith(MONITOR_ENV_PREFIX)}
+
+
+def pytest_configure(config) -> None:
+    """テストの実行中だけ、監視の上限を指す環境変数を外す（#678）。
+
+    無進捗の許容と打ち切りの上限は環境変数で延ばせる。運用で延ばしたシェルから起動すると、
+    表の既定値を前提にするテストが既定値ではなくその値を読み、変更の中身と関係なく落ちる。
+    収束ループの初期化は着手前のテストの通過を条件にするため、そこで止まる。
+
+    **収集より前に外す。** テストの本体を読み込む時点で上限を決めてしまう実装があり、
+    セッションの前提（fixture）では間に合わない。子プロセスは環境変数を受け継ぐため、
+    テストが起動する別プロセスにも同じ切り離しが効く。**個別に設定するテストは打ち消さない。**
+    `monkeypatch` も、別プロセスへ渡す上書きも、この後に効く。
+    """
+    _saved_monitor_env.update(_strip_monitor_env())
+
+
+def pytest_unconfigure(config) -> None:
+    """実行が終わったら、外した環境変数を戻す。"""
+    os.environ.update(_saved_monitor_env)
+    _saved_monitor_env.clear()
 
 
 def pytest_collection_modifyitems(config, items) -> None:

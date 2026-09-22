@@ -104,8 +104,8 @@ def cmd_status(args: argparse.Namespace) -> None:
     _, state = load_state(args.id)
     print(f"# cross-refactoring rf{state['id']}（{state['repo']} #{state['current_pr']}）")
     print(f"ホスト: {state['host']}（{state['host_detection']}）")
-    print(f"提案・レビュー: {' / '.join(state['runtimes'])}")
-    print(f"適用の母集合: {' / '.join(state['impl_capable'])}")
+    # **母集合は 1 つである**（#727 の決定 5）。提案と適用は同じ参加者で回す。
+    print(f"参加者（提案と適用）: {' / '.join(state['runtimes'])}")
     print(f"局面: {state['phase']} / 提案ラウンド {state['outer_round']} "
           f"/ {state['max_outer_rounds']}")
     print(f"終了理由: {state.get('final') or '（未終了）'}")
@@ -125,6 +125,8 @@ def cmd_report(args: argparse.Namespace) -> None:
     print("## 改善項目")
     print()
     print(_item_table(state))
+    print()
+    _print_participants(state)
     # **取り消した項目の内訳は書かない**（#436 決定 6-b）。件数だけ述べ、内訳は
     # 改修計画へ譲る。同じ一覧を 2 か所に置くと、片方だけが古くなる。
     print()
@@ -158,6 +160,54 @@ def _print_header(state: dict[str, Any]) -> None:
               f" / 修正 {gate.get('fix_rounds', 0)} 回）")
 
 
+def _print_participants(state: dict[str, Any]) -> None:
+    """「参加した者」の節を出す（#727 の F6）。
+
+    途中から誰を外したか・誰が確認を通らなかったかを、完了報告だけで読めるように
+    する。参加者の記録を持たない状態ファイル（この変更の前に始めた実行）では
+    「記録なし」と出す。
+    """
+    print("## 参加した者")
+    print()
+    p = state.get("participants")
+    if not p:
+        print("- 使える者: 記録なし")
+        print()
+        return
+
+    def _names(values: Any) -> str:
+        return " / ".join(values) if values else "なし"
+
+    unavailable = p.get("unavailable") or {}
+    if unavailable:
+        failed = " / ".join(f"{n}（{d}）" for n, d in unavailable.items())
+    elif p.get("probe_skipped"):
+        failed = "確認を飛ばした（NDF_SKIP_AUTH_CHECK）"
+    else:
+        failed = "なし"
+    print(f"- 母集合: {_names(p.get('pool'))}")
+    print(f"- 使える者: {_names(p.get('available'))}")
+    print(f"- --exclude で外した者: {_names(p.get('excluded'))}")
+    print(f"- --include で足した者: {_names(p.get('included'))}")
+    print(f"- 確認を通らなかった者: {failed}")
+    changes = state.get("resume_changes") or []
+    if not changes:
+        print("- 再開で変えた値: なし")
+    else:
+        print("- 再開で変えた値:")
+        for c in changes:
+            print(f"  - {c.get('at')} {c.get('field')}: "
+                  f"{_change_value(c.get('from'))} → {_change_value(c.get('to'))}")
+    print()
+
+
+def _change_value(value: Any) -> str:
+    """再開で変えた値の 1 つを 1 行へ収める。参加者の記録は使える者だけを出す。"""
+    if isinstance(value, dict) and "available" in value:
+        return " / ".join(value.get("available") or []) or "なし"
+    return str(value)
+
+
 def _print_deferred(state: dict[str, Any]) -> None:
     """見送り節（件数と改修計画への参照）を出す。"""
     print("## 見送った提案")
@@ -180,29 +230,22 @@ def _print_run_metrics(path: pathlib.Path, state: dict[str, Any]) -> None:
 
 
 def _round_table(state: dict[str, Any]) -> str:
+    """ラウンド表。**レビュー担当の列を持たない**（#727 の決定 6）。
+
+    レビュー工程は #436 で消えた。古い状態ファイルがレビュー担当を持っていても出さない。
+    """
     lines = [
-        "| R | 種類 | 実装担当 | モデル | レビュー担当 | モデル | 採用 | 適用 | 見送り | 修正 | 初回承認 |",
-        "| --- | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | --- |",
+        "| R | 種類 | 実装担当 | モデル | 採用 | 適用 | 見送り | 修正 |",
+        "| --- | --- | --- | --- | ---: | ---: | ---: | ---: |",
     ]
     for entry in state["rounds"]:
-        reviewers = entry.get("reviewers", [])
-        reviewer_models = entry.get("reviewer_models") or {}
-        reviews = entry.get("reviews") or []
-        first_approved = "—"
-        if reviews:
-            first_approved = (
-                "はい" if all(reviews[0].get(r) == "APPROVE" for r in reviewers) else "いいえ"
-            )
         lines.append(
             f"| {entry['round']} | "
             f"{'テスト整備' if entry_kind(entry) == TEST else '構造改善'} | "
             f"{entry.get('impl', '—')} | "
             f"{models_lib.label((entry.get('impl_model') or {}).get('requested'))} | "
-            f"{' / '.join(reviewers) or '—'} | "
-            f"{' / '.join(models_lib.label((reviewer_models.get(r) or {}).get('requested')) for r in reviewers) or '—'} | "
             f"{entry.get('adopted', 0)} | {len(entry.get('apply', {}).get('applied', []))} | "
-            f"{len(entry.get('apply', {}).get('failed', []))} | {entry.get('fix_rounds', 0)} | "
-            f"{first_approved} |"
+            f"{len(entry.get('apply', {}).get('failed', []))} | {entry.get('fix_rounds', 0)} |"
         )
     return "\n".join(lines) if state["rounds"] else "（ラウンドなし）"
 

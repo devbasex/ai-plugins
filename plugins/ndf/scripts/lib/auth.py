@@ -75,38 +75,6 @@ def _probe_all(runtimes: Iterable[str], info: Callable[[str], None]) -> ProbeRes
     return results
 
 
-def check_auth(
-    runtimes: Iterable[str],
-    *,
-    info: Callable[[str], None],
-    die: Callable[[str], None],
-    env: Optional[dict[str, str]] = None,
-) -> ProbeResult:
-    """参加する CLI の認証状態を確かめる。1 つでも欠けたら呼び出し側を中断させる。
-
-    **出力と中断の手段は呼び出し側から受け取る。** 工程ごとに終了コードの意味が違う
-    （`cross-refactoring` の中断は 4、`cross-review` は 1）ため、この層で決めない。
-
-    確認コマンドは CLI の版で変わりうるので、`NDF_SKIP_AUTH_CHECK` で飛ばせるように
-    しておく。飛ばしたことは必ず出力へ残す（黙って劣化させない）。
-
-    P7 で消す。止めない確認は `probe_auth`、止めるかの判断は
-    `assignment.resolve_participants` の `require_all` が持つ。
-    """
-    if _skipped(env, info):
-        return {}
-
-    results = _probe_all(runtimes, info)
-    failed = [f"{name}（{r['detail']}）" for name, r in results.items() if not r["ok"]]
-    if failed:
-        die(
-            "認証されていない CLI があります: " + " / ".join(failed) + "。"
-            "参加者が欠けたまま進むと、その者のレビューが無いまま収束します。"
-            "各 CLI でログインしてから再実行してください"
-        )
-    return results
-
-
 def probe_auth(
     runtimes: Iterable[str],
     *,
@@ -119,7 +87,7 @@ def probe_auth(
     **例外を上げず、呼び出し側も中断させない。** 通らなかった者を外して続けるか、
     全員を要して止めるかは、使える者の解決（`assignment.resolve_participants`）が
     決める。確認コマンド・未認証の文言・時間切れの秒数・飛ばす環境変数は
-    `check_auth` と同じものを使う。
+    この層の定数（`AUTH_PROBES` ほか）が持つ。
 
     `NDF_SKIP_AUTH_CHECK` が立てば確認コマンドを 1 回も呼ばず `({}, True)` を返す。
     飛ばしたことは出力へ残す（黙って劣化させない）。

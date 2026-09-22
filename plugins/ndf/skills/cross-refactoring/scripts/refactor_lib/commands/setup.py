@@ -1,7 +1,7 @@
 """ラウンドの入口。`init` と `start-round` を持つ。
 
-対象の Pull Request の文脈・参加する CLI の認証・作業ツリーの用意・状態ファイルの
-初期化と、提案ラウンドの開始を扱う。
+対象の Pull Request の文脈・参加者の決定・作業ツリーの用意・状態ファイルの
+初期化と再開と、提案ラウンドの開始を扱う。
 """
 from __future__ import annotations
 
@@ -31,9 +31,18 @@ from ..paths import (
     tmp_dir_for,
 )
 from ..plan import PLAN_COMMENT, PLAN_FILE, PLAN_NONE, normalize_plan_file
-from ..rounds import finish_outer_rounds, STRUCTURE, TEST, entry_kind, round_kind
+from ..rounds import (
+    STRUCTURE,
+    TEST,
+    entry_kind,
+    finish_outer_rounds,
+    impl_for_seq,
+    round_kind,
+)
 from ..scope import require_scope_covers_tests
 from ..vocabulary import (
+    DEFAULT_MAX_TEST_ROUNDS,
+    DEFAULT_SEVERITY_THRESHOLD,
     DEFAULT_TEST_TIMEOUT,
     IMPL_STALL_MARGIN,
     REQUIRED_SKILLS,
@@ -42,14 +51,103 @@ from ..vocabulary import (
 )
 
 
-def check_auth(runtimes: Iterable[str]) -> dict[str, dict[str, Any]]:
-    """参加する CLI の認証状態を確かめる。1 つでも欠けたら初期化を中断する。
+# 再開で指定を外す予約語（#727 の決定 15）。足す者・外す者に渡すと一覧を空へ戻す。
+NONE_WORD = "none"
 
-    実装は共通層（`lib/auth.py`）にある。**この工程の中断は終了コード 4 である**ため、
-    出力と中断の手段をここから渡す。
+# 新規の初期化で、未指定の引数を置き換える現行の既定。**引数の既定は `None` にする。**
+# 既定値を引数に持たせると、再開で「渡さなかった」と「既定値を渡した」を区別できない
+# （#727 の決定 13）。
+NEW_RUN_DEFAULTS: dict[str, Any] = {
+    "max_outer_rounds": 3,
+    "max_test_rounds": DEFAULT_MAX_TEST_ROUNDS,
+    "max_fix_rounds": 3,
+    "max_items_per_round": 5,
+    "test_timeout": DEFAULT_TEST_TIMEOUT,
+    "severity_threshold": DEFAULT_SEVERITY_THRESHOLD,
+    "workflow_step": False,
+}
+
+# 再開で渡した引数の反映の表（#727 の決定 13）。**状態ファイルに載る引数は、この 2 つの
+# 表のどちらかに必ず載る。** `replace` は状態へ書いて記録へ積み、`notify` は状態と違う
+# ときだけ「反映しない」と知らせる。
+RESUME_REPLACE_FIELDS = tuple(
+    statefile.ResumeField(key, key, "replace")
+    for key in ("max_outer_rounds", "max_test_rounds", "max_fix_rounds",
+                "max_items_per_round", "test_timeout")
+)
+RESUME_NOTIFY_FIELDS = (
+    statefile.ResumeField("host", "host", "notify"),
+    statefile.ResumeField("scope", "target_scope", "notify"),
+    statefile.ResumeField("model", "models", "notify"),
+    statefile.ResumeField("baseline_test", "baseline_test", "notify"),
+    statefile.ResumeField("ci_check", "ci_check", "notify"),
+    statefile.ResumeField("severity_threshold", "severity_threshold", "notify"),
+    statefile.ResumeField("sync_command", "sync_command", "notify"),
+    statefile.ResumeField("plan_file", "plan_file", "notify"),
+    statefile.ResumeField("workflow_step", "workflow_step", "notify"),
+    statefile.ResumeField("worktree_root", "worktree_root", "notify"),
+)
+
+
+def runtime_list(value: str) -> list[str]:
+    """`--exclude` / `--include` の型。カンマ区切りの 4 つの名前、または `none`。"""
+    names = [n.strip() for n in value.split(",") if n.strip()]
+    if not names:
+        raise argparse.ArgumentTypeError("名前を 1 つ以上指定してください")
+    for name in names:
+        if name != NONE_WORD and name not in assignment.ALL_RUNTIMES:
+            raise argparse.ArgumentTypeError(
+                f"{'/'.join(assignment.ALL_RUNTIMES)} か {NONE_WORD} を指定してください: {name}")
+    return names
+
+
+def _names_arg(args: argparse.Namespace, option: str) -> Optional[list[str]]:
+    """`--include` / `--exclude` を平らな一覧へ直す。未指定は `None`、`none` は空。
+
+    `action="append"` の入れ子を平らにし、`--exclude agy --exclude kiro` と
+    `--exclude agy,kiro` を同じにする。`none` と名前の混在は中断する。
     """
-    return auth.check_auth(runtimes, info=info, die=die)
+    raw = getattr(args, option, None)
+    if raw is None:
+        return None
+    names: list[str] = []
+    for group in raw:
+        names.extend(group if isinstance(group, list) else [group])
+    if NONE_WORD in names:
+        if len(names) > 1:
+            die(f"--{option} に {NONE_WORD} と名前を同時に指定できません: {', '.join(names)}")
+        return []
+    return names
 
+
+def resolve_participants(
+    host: str, include: list[str], exclude: list[str], require_all: bool,
+) -> dict[str, Any]:
+    """参加者を決め、状態ファイルの `participants` を返す（#727 の決定 2〜5）。
+
+    母集合の既定は `refactor_pool(host)`（codex / kiro とホスト）。確認は止めない確認
+    （`auth.probe_auth`）で、通らない者は外して続ける。名前の矛盾・全員を要する指定で
+    欠け・使える者が 0 者は、この工程の中断（終了コード 4）へ写す。状態ファイルは
+    この関数の後に書かれるため、失敗したときは作られも書き換えられもしない。
+    """
+    try:
+        pool = assignment.refactor_pool(host)
+        resolved = assignment.resolve_participants(
+            pool, host=host, include=include, exclude=exclude,
+            probe=lambda names: auth.probe_auth(names, info=info),
+            require_all=require_all,
+        )
+    except assignment.AssignmentError as e:
+        die(str(e))
+        raise
+    info(f"ホスト: {host} / 母集合: {' / '.join(pool)}"
+         f" / 使える者: {' / '.join(resolved.available) or 'なし'}")
+    for name, reason in resolved.unavailable.items():
+        info(f"⚠ {name} を担当から外しました（{reason}）")
+    if not resolved.available:
+        die(f"使える者がいません: 参加者の全員が確認を通りませんでした"
+            f"（{' / '.join(f'{n}: {d}' for n, d in resolved.unavailable.items())}）")
+    return resolved.to_state()
 
 
 def _apply_post_event(state: dict[str, Any], is_own_pr: bool) -> None:
@@ -177,10 +275,8 @@ class InitialContext:
     tmp_dir: pathlib.Path
     host: str
     detection: str
-    runtimes: list[str]
-    impl_capable: list[str]
+    participants: dict[str, Any]
     model_spec: dict[str, Optional[str]]
-    auth: dict[str, dict[str, Any]]
     baseline: dict[str, Any]
 
 
@@ -194,6 +290,7 @@ def _build_initial_state(
     （`cmd_init`）が済ませたうえで値として渡す。この関数が持つのは、状態ファイルに
     何という鍵で何を残すかだけである。
     """
+    runtimes = list(ctx.participants["available"])
     return {
         "id": args.pr,
         "started_at": statefile.now(),
@@ -204,16 +301,17 @@ def _build_initial_state(
         "worktree_root": str(ctx.root),
         "worktrees": {
             "work": str(ctx.work),
-            **{r: str(ctx.root / r) for r in ctx.runtimes},
+            **{r: str(ctx.root / r) for r in runtimes},
         },
         "tmp_dir": str(ctx.tmp_dir),
         "target_scope": list(args.scope),
         "host": ctx.host,
         "host_detection": ctx.detection,
-        "runtimes": ctx.runtimes,
-        "impl_capable": ctx.impl_capable,
+        # **提案の対象と適用の輪番が同じ一覧を読む**（#727 の決定 5）。使える者と同じ値。
+        "runtimes": runtimes,
+        "participants": ctx.participants,
+        "resume_changes": [],
         "models": ctx.model_spec,
-        "auth": ctx.auth,
         # 提案プロンプトへ許容値をそのまま列挙するために持たせる。
         # 定義は検証側（この CLI）にあり、状態ファイル経由で起動側へ渡す。
         "vocabulary": vocabulary(),
@@ -254,10 +352,11 @@ def _build_initial_state(
 
 
 def cmd_init(args: argparse.Namespace) -> None:
-    """Step 0 — ホストと母集合を確定し、作業ディレクトリ root と状態を用意する。
+    """Step 0 — ホストと参加者を確定し、作業ディレクトリ root と状態を用意する。
 
-    **提案・レビューの母集合（全 − ホスト）と適用の母集合（全 − agy）を
-    別々に確定する。** 両者は重なるが一致しない。
+    **母集合は 1 つである**（#727 の決定 5）。提案と適用は同じ参加者で回す。参加者は
+    codex / kiro とホストを既定とし、足す者・外す者で変える。確認を通らない者は外して
+    続ける。前回の状態が残っていれば再開し、渡した引数を反映の表に従って扱う。
     """
     try:
         host, detection = assignment.detect_host(args.host)
@@ -269,16 +368,8 @@ def cmd_init(args: argparse.Namespace) -> None:
     except models_lib.ModelSpecError as e:
         die(str(e))
         return
-
-    runtimes = assignment.review_pool(host)
-    impl_capable = assignment.impl_pool()
-    if host in runtimes:
-        die(f"提案・レビューの母集合にホスト {host} が含まれています（判定の誤り）")
-    _warn_unmeasurable_models(model_spec, set(runtimes) | set(impl_capable))
-
-    # **認証は作業ディレクトリを作る前に確かめる。** 未認証のまま進むと、
-    # 参加者が欠けた構成のまま最後まで走り切ってしまう。
-    auth = check_auth(sorted(set(runtimes) | set(impl_capable)))
+    include = _names_arg(args, "include")
+    exclude = _names_arg(args, "exclude")
 
     # リポジトリ名は git の設定から求め、Pull Request の応答で確かめる（#271）。
     repo, base_branch, head_branch, is_own_pr, author = _fetch_pr_context(args.pr)
@@ -306,11 +397,18 @@ def cmd_init(args: argparse.Namespace) -> None:
     if state_file.exists():
         state = statefile.load(state_file)
         if state.get("final") is None:
-            info(f"↻ 前回中断した状態から再開します（提案ラウンド {state.get('outer_round', 0)}）")
-            _apply_post_event(state, is_own_pr)
-            statefile.save(state_file, state)
-            _emit_init(state)
+            _resume(state_file, state, args, model_spec, include, exclude, is_own_pr)
             return
+
+    for key, value in NEW_RUN_DEFAULTS.items():
+        if getattr(args, key, None) is None:
+            setattr(args, key, value)
+
+    # **確認は着手前のテストより先に行う。** 使える者がいなければ、テストに時間を
+    # 使わずに止める。
+    participants = resolve_participants(
+        host, include or [], exclude or [], bool(getattr(args, "require_all", None)))
+    _warn_unmeasurable_models(model_spec, participants["available"])
 
     baseline = _run_baseline_test(args.baseline_test, work, args.test_timeout)
 
@@ -323,10 +421,8 @@ def cmd_init(args: argparse.Namespace) -> None:
         tmp_dir=tmp_dir,
         host=host,
         detection=detection,
-        runtimes=runtimes,
-        impl_capable=impl_capable,
+        participants=participants,
         model_spec=model_spec,
-        auth=auth,
         baseline=baseline,
     )
     state = _build_initial_state(args, context)
@@ -337,9 +433,79 @@ def cmd_init(args: argparse.Namespace) -> None:
     statefile.save(state_file, state)
     info(f"✅ 状態を初期化しました: {state_file}")
     info(f"   ホスト: {host}（{detection}）")
-    info(f"   提案・レビュー: {' / '.join(runtimes)}")
-    info(f"   適用の母集合: {' / '.join(impl_capable)}")
+    info(f"   参加者（提案と適用）: {' / '.join(state['runtimes'])}")
     _emit_init(state)
+
+
+def _resume(
+    state_file: pathlib.Path,
+    state: dict[str, Any],
+    args: argparse.Namespace,
+    model_spec: dict[str, Optional[str]],
+    include: Optional[list[str]],
+    exclude: Optional[list[str]],
+    is_own_pr: bool,
+) -> None:
+    """前回中断した状態から再開する（#727 / #648 の決定 13〜16）。
+
+    上限は渡せば反映し、状態に載る他の引数は状態と違えば知らせる。足す者・外す者・
+    全員を要する指定のどれかを渡したときだけ確かめ直し、**渡さなかった値は記録から
+    補う**。作り直しは `resume_changes` に 1 件として積む。作り直しが失敗したときは
+    書き込みの前に中断するため、状態ファイルは変わらない。
+    """
+    info(f"↻ 前回中断した状態から再開します（提案ラウンド {state.get('outer_round', 0)}）")
+    for line in statefile.apply_resume_args(state, args, RESUME_REPLACE_FIELDS):
+        info(line)
+    view, given = _notify_view(state, args, model_spec)
+    for line in statefile.apply_resume_args(view, given, RESUME_NOTIFY_FIELDS):
+        info(line)
+
+    require_all = getattr(args, "require_all", None)
+    if include is not None or exclude is not None or require_all is not None:
+        recorded = state.get("participants") or {}
+        participants = resolve_participants(
+            str(state["host"]),
+            include if include is not None else list(recorded.get("included") or []),
+            exclude if exclude is not None else list(recorded.get("excluded") or []),
+            bool(require_all) if require_all is not None else bool(recorded.get("require_all")),
+        )
+        state.setdefault("resume_changes", []).append({
+            "at": statefile.now(), "field": "participants",
+            "from": state.get("participants"), "to": participants,
+        })
+        state["participants"] = participants
+        state["runtimes"] = list(participants["available"])
+        worktrees = state.setdefault("worktrees", {})
+        for runtime in state["runtimes"]:
+            worktrees.setdefault(runtime, str(pathlib.Path(state["worktree_root"]) / runtime))
+
+    _apply_post_event(state, is_own_pr)
+    statefile.save(state_file, state)
+    _emit_init(state)
+
+
+def _notify_view(
+    state: dict[str, Any], args: argparse.Namespace,
+    model_spec: dict[str, Optional[str]],
+) -> tuple[dict[str, Any], argparse.Namespace]:
+    """「知らせる」の比較を、状態と引数の形を揃えて行うための写しを返す。
+
+    状態は着手前のテストを `{command, status, checked_at}` で、モデルを全ランタイムの
+    辞書で、作業ディレクトリ root を解決済みのパスで持つ。引数の形のまま比べると、
+    同じ値でも「違う」と知らせてしまう。
+    """
+    view = dict(state)
+    view["baseline_test"] = (state.get("baseline_test") or {}).get("command")
+    given = argparse.Namespace(**{f.arg: getattr(args, f.arg, None) for f in RESUME_NOTIFY_FIELDS})
+    if given.model is not None:
+        given.model = model_spec
+    if given.worktree_root is not None:
+        given.worktree_root = str(pathlib.Path(given.worktree_root).resolve())
+    if given.plan_file is not None:
+        given.plan_file = normalize_plan_file(given.plan_file)
+    if given.scope is not None:
+        given.scope = list(given.scope)
+    return view, given
 
 
 def _emit_init(state: dict[str, Any]) -> None:
@@ -349,7 +515,6 @@ def _emit_init(state: dict[str, Any]) -> None:
         HOST=state["host"],
         RUNTIMES=" ".join(state["runtimes"]),
         RUNTIMES_CSV=",".join(state["runtimes"]),
-        IMPL_POOL=" ".join(state["impl_capable"]),
         WORKTREE_ROOT=state["worktree_root"],
         WORK=state["worktrees"]["work"],
         TMP_DIR=state["tmp_dir"],
@@ -466,7 +631,10 @@ def rounds_of_kind(state: dict[str, Any], kind: str) -> list[dict[str, Any]]:
 
 
 def cmd_start_round(args: argparse.Namespace) -> None:
-    """Step 2 — ラウンドを開き、実装担当とレビュー担当を返す。
+    """Step 2 — ラウンドを開き、実装担当を返す。
+
+    **レビュー担当は返さない**（#727 の決定 6）。レビュー工程は #436 で消え、Step 7 の
+    cross-review が担う。
 
     終了コード: 0 = ラウンドを開いた / 1 = 繰り返しが終了済み。
 
@@ -491,8 +659,7 @@ def cmd_start_round(args: argparse.Namespace) -> None:
     round_no = len(rounds) + 1
     existing = next((r for r in rounds if r["round"] == round_no), None)
     if existing is None:
-        impl, reviewers = assignment.assign(round_no, state["host"])
-        models = state["models"]
+        impl, requested = impl_for_seq(state, round_no)
         existing = {
             "round": round_no,
             # **種類はラウンドごとに残す。** 上限を別々に数えるためと、提案の
@@ -500,11 +667,7 @@ def cmd_start_round(args: argparse.Namespace) -> None:
             "kind": kind,
             "started_at": statefile.now(),
             "impl": impl,
-            "impl_model": {"requested": models.get(impl), "observed": None},
-            "reviewers": reviewers,
-            "reviewer_models": {
-                r: {"requested": models.get(r), "observed": None} for r in reviewers
-            },
+            "impl_model": {"requested": requested, "observed": None},
             "proposed": {},
             "merged": 0, "adopted": 0, "deferred": 0,
             "items": [],
@@ -528,7 +691,7 @@ def cmd_start_round(args: argparse.Namespace) -> None:
     seq = len(rounds_of_kind(state, kind))
     info(
         f"=== {label} {seq} / {limit} "
-        f"（実装 {existing['impl']} / レビュー {' + '.join(existing['reviewers'])}）==="
+        f"（実装 {existing['impl']}）==="
     )
     statefile.emit(
         ROUND=round_no,
@@ -543,7 +706,5 @@ def cmd_start_round(args: argparse.Namespace) -> None:
         PROPOSE_PHASE="propose-tests" if kind == TEST else "propose",
         IMPL=existing["impl"],
         IMPL_MODEL=existing["impl_model"]["requested"],
-        REVIEWERS=" ".join(existing["reviewers"]),
-        REVIEWERS_CSV=",".join(existing["reviewers"]),
         MAX_FIX_ROUNDS=state["max_fix_rounds"],
     )

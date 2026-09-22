@@ -58,14 +58,70 @@ def test_every_cap_appears_in_the_argument_table(skill):
         assert f"`{cap} N`" in skill, f"引数の表に {cap} が無い"
 
 
-def test_the_defaults_match_the_implementation(refactor, vocabulary, skill):
-    """既定値は 1 か所（`refactor.py`）が持ち、表はそれを写す。"""
+def test_the_defaults_match_the_implementation(cmd_setup, vocabulary, skill):
+    """既定値は 1 か所（新規の初期化が置き換える表）が持ち、手順書の表はそれを写す。"""
     assert "| `--max-test-rounds N` | " in skill
-    for cap, default in (("--max-test-rounds", 2), ("--max-outer-rounds", 3),
-                         ("--max-fix-rounds", 3), ("--max-items-per-round", 5)):
+    for cap in CAPS:
+        default = cmd_setup.NEW_RUN_DEFAULTS[cap[2:].replace("-", "_")]
         row = next(l for l in skill.splitlines() if l.startswith(f"| `{cap} N`"))
         assert f"`{default}`" in row, f"{cap} の既定が表と実装で食い違う"
     assert vocabulary.DEFAULT_MAX_TEST_ROUNDS == 2
+
+
+# ---------- 参加者と担当の決め方（#727 の AC42 / AC43） ----------
+
+PARTICIPANT_ARGS = ("--exclude", "--include", "--require-all")
+DOC01 = SKILL.parent / "docs" / "01-state-and-propose.md"
+CLAUDE_MD = SKILL.parents[4] / "CLAUDE.md"
+
+
+def test_the_participant_arguments_are_documented(skill):
+    """AC43 — 引数の表と `argument-hint` に 3 つの引数がある。"""
+    hint = next(l for l in skill.splitlines() if l.startswith("argument-hint:"))
+    rows = [l for l in skill.splitlines() if l.startswith("| `--")]
+    for arg in PARTICIPANT_ARGS:
+        assert arg in hint, f"argument-hint に {arg} が無い"
+        assert any(r.startswith(f"| `{arg}") for r in rows), f"引数の表に {arg} が無い"
+
+
+def test_the_assignment_section_has_one_cohort(skill):
+    """AC43 — 担当の決め方は母集合を 1 つの表で書き、適用専用の母集合を持たない。"""
+    lines = skill.splitlines()
+    start = lines.index("## 担当の決め方")
+    end = next(i for i, l in enumerate(lines[start + 1:], start + 1) if l.startswith("## "))
+    section = "\n".join(lines[start:end])
+    assert "impl_capable" not in section
+    assert sum(1 for l in lines[start:end] if l.startswith("| ---")) == 1
+    assert "codex / kiro" in section and "--include agy" in section
+
+
+def test_the_prerequisites_no_longer_demand_every_cli(skill):
+    """AC43 — 前提から「すべてログイン済み」が消え、要る CLI は codex / kiro-cli になる。"""
+    lines = skill.splitlines()
+    start = lines.index("## 前提")
+    end = next(i for i, l in enumerate(lines[start + 1:], start + 1) if l.startswith("## "))
+    section = "\n".join(lines[start:end])
+    assert "すべてログイン済み" not in section
+    assert "| Claude Code | `codex` / `kiro-cli` |" in section
+
+
+def test_init_variables_do_not_list_the_implementation_cohort():
+    """AC43 — `init` が返す変数の表に適用専用の母集合が無い。"""
+    assert "IMPL_POOL" not in DOC01.read_text(encoding="utf-8")
+
+
+def test_claude_md_describes_the_participants_and_the_rotation():
+    """AC42 — 指示書の cross-refactoring の節が新しい母集合と輪番を書く（#736 を含む）。"""
+    text = CLAUDE_MD.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    start = lines.index("## cross-refactoring")
+    end = next(i for i, l in enumerate(lines[start + 1:], start + 1) if l.startswith("## "))
+    section = "\n".join(lines[start:end])
+    assert "codex / kiro とホスト（ホストが codex / kiro なら 2 者）" in section
+    assert "適用担当は参加者の数のラウンドで 1 周する" in section
+    for stale in ("ホストを除く 3 者", "参加する 4 者", "codex / agy の両方",
+                  "既定が 4"):
+        assert stale not in text, f"CLAUDE.md に {stale} が残っている"
 
 
 # ---------- 実行のコマンド列（A1 / B6） ----------

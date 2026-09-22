@@ -2,7 +2,6 @@
 
 主題は止めない確認 `probe_auth`（#727）である。失敗しても例外を上げず、`ok` と理由を
 返し、`NDF_SKIP_AUTH_CHECK` が立てば確認コマンドを 1 回も呼ばない（AC5 / AC6）。
-従来の `check_auth` のテストは、その関数を消す Pull Request（P7）まで末尾に残す。
 """
 from __future__ import annotations
 
@@ -166,51 +165,3 @@ def test_probe_never_raises_and_returns_every_runtime(auth, monkeypatch):
 
     assert results["codex"]["ok"] is False
     assert results["agy"]["ok"] is True
-
-
-# ---------- check_auth（従来の確認。P7 で消す） ----------
-
-def test_unknown_runtime_is_ignored():
-    auth = _load_auth()
-    messages: list[str] = []
-    failures: list[str] = []
-
-    results = auth.check_auth(["unknown"], info=messages.append, die=failures.append, env={})
-
-    assert "unknown" not in results
-    assert failures == []
-
-
-def test_probe_timeout_is_reported(monkeypatch):
-    auth = _load_auth()
-    messages: list[str] = []
-    failures: list[str] = []
-
-    def time_out(*args, **kwargs):
-        raise subprocess.TimeoutExpired(args[0], kwargs["timeout"])
-
-    monkeypatch.setattr(auth.subprocess, "run", time_out)
-    results = auth.check_auth(["codex"], info=messages.append, die=failures.append, env={})
-
-    assert results["codex"]["ok"] is False
-    assert str(auth.AUTH_PROBE_TIMEOUT) in results["codex"]["detail"]
-    assert len(failures) == 1
-
-
-def test_unauthenticated_marker_fails_even_when_probe_exits_zero(monkeypatch):
-    auth = _load_auth()
-    messages: list[str] = []
-    failures: list[str] = []
-
-    monkeypatch.setattr(
-        auth.subprocess,
-        "run",
-        lambda *args, **kwargs: SimpleNamespace(
-            returncode=0, stdout="Not logged in", stderr=""
-        ),
-    )
-
-    results = auth.check_auth(["codex"], info=messages.append, die=failures.append, env={})
-
-    assert results["codex"]["ok"] is False
-    assert len(failures) == 1

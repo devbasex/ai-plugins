@@ -344,12 +344,14 @@ def test_the_group_assignment_goes_through_the_single_rotation_function(
     rounds, monkeypatch
 ):
     """AC49: 輪番から担当を引く関数を差し替えると、群の担当がそれに従う。"""
-    state = {"host": "claude", "models": {"kiro": "auto"}}
+    state = {"host": "claude", "runtimes": ["claude", "codex", "kiro"],
+             "models": {"kiro": "auto"}}
 
-    impl, requested = rounds.impl_for_seq(state, 3)
+    impl, requested = rounds.impl_for_seq(state, 2)
 
-    assert impl in {"claude", "codex", "agy", "kiro"}
-    assert requested == state["models"].get(impl)
+    # 輪番は参加者の一覧の中で回る（#727 の決定 7: `runtimes[seq % n]`）
+    assert impl == "kiro"
+    assert requested == "auto"
 
 
 # ---------- 修正結果が無く範囲も確定できないとき（converge.cmd_merge_fix / R1-003） ----------

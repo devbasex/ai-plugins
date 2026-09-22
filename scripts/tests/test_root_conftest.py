@@ -1,10 +1,11 @@
 """リポジトリの根の設定が持つ前提を固定する（#232 / #233 / #235）。
 
-3 つのことを確かめる。
+4 つのことを確かめる。
 
 1. 起点をリポジトリの根に置いても収集が中断しない（`pytest_plugins` の宣言の位置）
 2. 前提の外部コマンドが無いとき、読み飛ばさずに 0 以外の終了コードで終わる
 3. テストの実行中は git の全体設定と system の設定を読まない
+4. テストの実行中は監視の上限を指す環境変数を読まない（#678）
 
 前提の不足は、`PATH` を絞った子プロセスとして pytest を起動して確かめる。実行環境の
 `PATH` は書き換えない。
@@ -165,3 +166,116 @@ def test_metrics_dir_points_to_a_temporary_directory_during_tests() -> None:
     assert metrics, "NDF_METRICS_DIR が設定されていない"
     assert Path(metrics).resolve().is_relative_to(Path(tempfile.gettempdir()).resolve())
     assert "NDF_METRICS" not in os.environ
+
+
+# ---------- 監視の上限を指す環境変数の切り離し（#678） ----------
+
+
+def _root_conftest_module():
+    """根の設定を別名で読み込む。控えの辞書を汚さずに、外す側と戻す側を直接呼ぶ。"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("ndf_root_conftest", ROOT_CONFTEST)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_no_monitor_variable_survives_into_a_test(monkeypatch: pytest.MonkeyPatch) -> None:
+    """外す側を呼んだ後は、監視の上限を指す環境変数が 1 つも残らない。
+
+    **確かめる前に自分で 1 つ差し込む。** 周りのシェルが上限を持たないと、外す仕組みを
+    壊しても素通りする。差し込んでおけば、起動したシェルが何を持っていても同じことを
+    確かめられる。控えを汚さないよう、根の設定は別名で読み込む。
+    """
+    mod = _root_conftest_module()
+    monkeypatch.setenv("MONITOR_STALL_AGY", "1800")
+
+    try:
+        mod.pytest_configure(None)
+
+        remaining = [k for k in os.environ if k.startswith("MONITOR_")]
+        assert remaining == [], remaining
+    finally:
+        mod.pytest_unconfigure(None)
+
+
+def test_a_test_can_still_set_its_own_monitor_variable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """個別に設定した値は打ち消されない。切り離しは実行の前に 1 度だけ効く。"""
+    monkeypatch.setenv("MONITOR_STALL_AGY", "600")
+    assert os.environ["MONITOR_STALL_AGY"] == "600"
+
+
+def test_the_child_process_does_not_inherit_a_monitor_variable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """外した後に起動した子プロセスは、監視の上限を指す環境変数を受け継がない。
+
+    起動する側で外し直さなくてよいことを確かめる。**確かめる前に自分で 1 つ差し込む。**
+    周りのシェルが上限を持たないと、外す仕組みを壊しても素通りする。控えを汚さないよう、
+    根の設定は別名で読み込む。
+    """
+    mod = _root_conftest_module()
+    monkeypatch.setenv("MONITOR_STALL_AGY", "1800")
+
+    try:
+        mod.pytest_configure(None)
+
+        out = subprocess.run(
+            [sys.executable, "-c",
+             "import os; print([k for k in os.environ if k.startswith('MONITOR_')])"],
+            capture_output=True, text=True,
+        )
+        assert out.stdout.strip() == "[]", out.stdout
+    finally:
+        mod.pytest_unconfigure(None)
+
+
+def test_the_values_are_put_back_after_the_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """外した値は、実行が終わったときに戻る。"""
+    mod = _root_conftest_module()
+    monkeypatch.setenv("MONITOR_STALL_AGY", "1800")
+
+    mod.pytest_configure(None)
+
+    assert "MONITOR_STALL_AGY" not in os.environ
+    assert mod._saved_monitor_env == {"MONITOR_STALL_AGY": "1800"}
+
+    mod.pytest_unconfigure(None)
+
+    assert os.environ["MONITOR_STALL_AGY"] == "1800"
+    assert mod._saved_monitor_env == {}
+
+
+def test_the_isolation_holds_from_a_bundle_directory() -> None:
+    """束のディレクトリを起点にしても切り離しが効く。
+
+    テストの基準のディレクトリ（rootdir）が起点で止まると、根の設定が読み込まれず、
+    上限を延ばしたシェルから起動したときだけ落ちる。根の設定ファイル（`pytest.ini`）が
+    基準をリポジトリの根へ固定していることを、実際の起動で確かめる。
+    **監視の環境変数は明示的に足す。** 実行中は根の設定が外した後のため、渡す環境へ
+    足さないと再現しない。
+    """
+    bundle = REPO_ROOT / "plugins/ndf/skills/cross-review/tests"
+    env = dict(os.environ)
+    env.pop("NDF_TESTS_ALLOW_MISSING_COMMANDS", None)
+    env.update({"MONITOR_STALL_AGY": "1800", "MONITOR_TIMEOUT": "1800"})
+
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "test_monitor_stall_default.py", "-q",
+         "--no-header", "-p", "no:cacheprovider"],
+        cwd=str(bundle),
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_the_prefix_is_declared_once() -> None:
+    """接頭辞は根の設定だけが持つ。テストの側へ書き戻すと、同じ除去がまた散る。"""
+    body = _read_root_conftest()
+
+    assert 'MONITOR_ENV_PREFIX = "MONITOR_"' in body
+    assert "def pytest_unconfigure" in body
