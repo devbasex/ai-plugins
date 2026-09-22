@@ -11,7 +11,7 @@ import argparse
 import hashlib
 import pathlib
 import sys
-from typing import Any
+from typing import Any, Optional
 
 import statefile
 
