@@ -202,3 +202,44 @@ def test_format_report_current_structure() -> None:
 
     # 全体の行数を現状の値で固定する
     assert len(report.splitlines()) == 29
+
+
+def test_format_report_empty_tables_emits_no_records() -> None:
+    """現状固定。impl と reviewer が空のときに「（記録なし）」が出力されることを記録する。"""
+    report_metrics = {
+        "impl": {},
+        "reviewer": {},
+        "unmeasured": [],
+        "assumed": [],
+    }
+
+    report = metrics.format_report(report_metrics)
+
+    # 実装担当とレビュー担当の見出し直後に「（記録なし）」が出ること
+    assert "## 実装担当\n\n（記録なし）" in report
+    assert "## レビュー担当\n\n（記録なし）" in report
+
+    # unmeasured / assumed が空のときは見出しが出ないこと
+    assert "## 集計から分離したラウンド" not in report
+    assert "## 指定値で代用したラウンド" not in report
+
+    # 比較の限界の見出しと注意書きが残ること
+    assert "## 比較として読むときの限界" in report
+    for caveat in metrics.COMPARISON_CAVEATS:
+        assert f"- {caveat}" in report
+
+    # 完全な出力行の一致を固定する
+    expected_lines = [
+        "## 実装担当",
+        "",
+        "（記録なし）",
+        "",
+        "## レビュー担当",
+        "",
+        "（記録なし）",
+        "",
+        "## 比較として読むときの限界",
+        "",
+        *[f"- {caveat}" for caveat in metrics.COMPARISON_CAVEATS],
+    ]
+    assert report.splitlines() == expected_lines
