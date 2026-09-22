@@ -276,33 +276,47 @@ def _emit_table(
     lines += [*headers, *rows]
 
 
-def _format_impl_rows(impl: dict[str, Any]) -> list[str]:
-    """実装担当の表の行を作る。"""
-    return [
+def format_report(metrics: dict[str, Any]) -> str:
+    """人が読む形へ整形する。比較の限界を必ず添える。"""
+    lines: list[str] = []
+    impl_rows = [
         (
             f"| {key} | {m['rounds']} | {m['applied']} | {m['abandoned']} | "
             f"{_fmt(m['first_review_approval_rate'])} | {_fmt(m['avg_fix_rounds'])} | "
             f"{_fmt(m['budget_exceeded_rate'])} | {_fmt(m['test_failure_rate'])} | "
             f"{m['seconds']:.0f} |"
         )
-        for key, m in impl.items()
+        for key, m in metrics["impl"].items()
     ]
+    _emit_table(
+        lines,
+        "実装担当",
+        (
+            "| ランタイム / モデル | 担当R | 適用 | 見送り | 初回承認率 | 平均修正R | 予算超過率 | テスト失敗率 | 所要秒 |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ),
+        impl_rows,
+    )
 
-
-def _format_reviewer_rows(reviewer: dict[str, Any]) -> list[str]:
-    """レビュー担当の表の行を作る。"""
-    return [
+    reviewer_rows = [
         (
             f"| {key} | {m['reviews']} | {m['findings']} | "
             f"{_fmt(m['resolution_rate'])} | {_fmt(m['agreement_rate'])} | "
             f"{m['seconds']:.0f} |"
         )
-        for key, m in reviewer.items()
+        for key, m in metrics["reviewer"].items()
     ]
+    lines.append("")
+    _emit_table(
+        lines,
+        "レビュー担当",
+        (
+            "| ランタイム / モデル | レビュー回数 | 指摘 | 修正に至った率 | 判定一致率 | 所要秒 |",
+            "| --- | ---: | ---: | ---: | ---: | ---: |",
+        ),
+        reviewer_rows,
+    )
 
-
-def _append_measurement_notes(lines: list[str], metrics: dict[str, Any]) -> None:
-    """計測不能・指定値代用の注記と、比較上の注意を末尾へ足す。"""
     if metrics["unmeasured"]:
         lines += ["", "## 集計から分離したラウンド", ""]
         lines += [f"- {w}" for w in dict.fromkeys(metrics["unmeasured"])]
@@ -313,31 +327,4 @@ def _append_measurement_notes(lines: list[str], metrics: dict[str, Any]) -> None
 
     lines += ["", "## 比較として読むときの限界", ""]
     lines += [f"- {c}" for c in COMPARISON_CAVEATS]
-
-
-def format_report(metrics: dict[str, Any]) -> str:
-    """人が読む形へ整形する。比較の限界を必ず添える。"""
-    lines: list[str] = []
-    _emit_table(
-        lines,
-        "実装担当",
-        (
-            "| ランタイム / モデル | 担当R | 適用 | 見送り | 初回承認率 | 平均修正R | 予算超過率 | テスト失敗率 | 所要秒 |",
-            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
-        ),
-        _format_impl_rows(metrics["impl"]),
-    )
-
-    lines.append("")
-    _emit_table(
-        lines,
-        "レビュー担当",
-        (
-            "| ランタイム / モデル | レビュー回数 | 指摘 | 修正に至った率 | 判定一致率 | 所要秒 |",
-            "| --- | ---: | ---: | ---: | ---: | ---: |",
-        ),
-        _format_reviewer_rows(metrics["reviewer"]),
-    )
-
-    _append_measurement_notes(lines, metrics)
     return "\n".join(lines)
