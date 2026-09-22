@@ -402,6 +402,36 @@ def test_include_and_exclude_parse_names_and_none(patch_lib, refactor, monkeypat
     assert e.value.code == 2
 
 
+@pytest.mark.parametrize("empty", ["", "   ", ","])
+def test_empty_include_is_rejected_before_init_runs(
+        patch_lib, refactor, monkeypatch, empty):
+    """R1-004 — 空の `--include` は argparse の型が弾き、初期化へ進まない。
+
+    `runtime_list` が空の値で `ArgumentTypeError` を上げ、argparse が終了コード 2 で
+    止める。`cmd_init` は差し替えた入口を通らないため、捕えた引数は空のままになる。
+    """
+    captured = {}
+    monkeypatch.setattr(refactor, "cmd_init",
+                        lambda args: captured.update(vars(args)))
+    monkeypatch.setattr(
+        refactor.sys, "argv",
+        ["refactor.py", "init", "130", "--scope", "src", "--host", "claude",
+         "--baseline-test", "true", "--include", empty],
+    )
+    with pytest.raises(SystemExit) as e:
+        refactor.main()
+    assert e.value.code == 2
+    assert captured == {}, "初期化処理へ進んでいる"
+
+
+def test_none_mixed_with_a_runtime_name_in_exclude_stops_the_init(run_init, tmp_path):
+    """R1-004 — none と実行者名を混在させた `--exclude` は中断し、状態を作らない。"""
+    with pytest.raises(SystemExit) as e:
+        run_init(_args(tmp_path, exclude=[["none", "kiro"]]), probe={})
+    assert e.value.code == refactor_abort()
+    assert not _state_path(tmp_path).exists()
+
+
 def test_the_ci_check_is_not_set_by_default(patch_lib, refactor, monkeypatch):
     """指定が無ければ代替しない。**手元のテストで判定する**（決定 7 の排他）。"""
     assert _parsed_init_args(patch_lib, refactor, monkeypatch)["ci_check"] is None
