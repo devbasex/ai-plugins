@@ -360,7 +360,7 @@
 
 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |
 | --- | --- | --- | --- | --- | ---: |
-| long_parameter_list | introduce_parameter_object | minor | kiro | 未着手 | 0 |
+| long_parameter_list | introduce_parameter_object | minor | kiro | 取り消し | 1 |
 
 **なぜ**: 引数が 7 個。うち unmeasured / assumed は出力の蓄積先、round_no / runtime / requested / observed / role_label は 1 ラウンド 1 担当の計測文脈で、常に組で渡り回る。2 つの呼び出し側（_aggregate（impl）と _aggregate_round_reviewers）で同じ 5 値をその順で並べており、順序を取り違えると requested と observed が入れ替わっても型が同じ str のため気付けない。
 
@@ -396,3 +396,4 @@
 | 6 | `plugins/ndf/scripts/lib/transcript_agents.py#_aggregate_token_metrics` | long_method | 適用結果に項目がありません: R6-003（群の全項目を 1 つのコミットへまとめ、各項目へ同じ SHA を申告します） |
 | 6 | `plugins/ndf/scripts/lib/metrics.py#format_report` | long_method | 適用結果に項目がありません: R6-003（群の全項目を 1 つのコミットへまとめ、各項目へ同じ SHA を申告します） |
 | 6 | `plugins/ndf/skills/cross-review/tests/conftest.py#_no_github_state` | mock_targets_implementation_detail | 適用結果に項目がありません: R6-003（群の全項目を 1 つのコミットへまとめ、各項目へ同じ SHA を申告します） |
+| 6 | `plugins/ndf/scripts/lib/metrics.py#_append_model_measurement_warnings` | long_parameter_list | コミット 5f63640dff6dd7739738a8794edc5db43792f342 にトレーラーが欠けています: Item-Id, Round, Impl-Runtime, Impl-Model |
