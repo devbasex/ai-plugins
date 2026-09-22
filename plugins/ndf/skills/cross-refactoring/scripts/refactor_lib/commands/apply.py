@@ -283,36 +283,25 @@ def _item_summary(item: dict[str, Any]) -> str:
 
 
 
-def cmd_next_apply_round(args: argparse.Namespace) -> None:
-    """Step 4 — 次の適用ラウンドを開き、実装担当と対象の項目を返す。
+def _select_next_apply_group(
+    groups: list[dict[str, Any]],
+) -> tuple[Optional[dict[str, Any]], str]:
+    """次に開く群と、その群の開き直しの判定を返す。無ければ群は None。
 
-    終了コード: 0 = 群を開いた / 1 = 残りの群が無い（提案ラウンドへ戻る）。
+    **`applied` の群も開き直す。** 適用は取り込んだが検証まで進めずに落ちた場合、
+    飛ばすとその群の項目が採用でも取り消しでもないまま残る。再開できることは
+    収束ループの前提である。
 
-    **群の起点はここで確定させる。** 後続の群は先行の群を適用した後の作業ツリーを
-    読むため、起点はその時点の HEAD になる。取り消しの範囲もこの起点で決まる。
-
-    **修正ラウンドの数え直しも群ごとである。** `--max-fix-rounds` は 1 つの適用
-    ラウンドあたりの上限だからである。
+    **未着手の群は、開き直しの判定へ掛ける**（#647）。無条件に開き直すと、結果を
+    残さない担当に当たり続けて上限なく起動する。項目が無い群と上限に達した群は、
+    ここで取り消し済みにして次を探す。
     """
-    path, state = load_state(args.id)
-    entry = round_of(state, args.round)
-    groups = apply_groups(entry)
-
-    # **`applied` の群も開き直す。** 適用は取り込んだが検証まで進めずに落ちた場合、
-    # 飛ばすとその群の項目が採用でも取り消しでもないまま残る。再開できることは
-    # 収束ループの前提である。
-    #
-    # **未着手の群は、開き直しの判定へ掛ける**（#647）。無条件に開き直すと、結果を
-    # 残さない担当に当たり続けて上限なく起動する。項目が無い群と上限に達した群は、
-    # ここで取り消し済みにして次を探す。
-    opened: Optional[dict[str, Any]] = None
     reopening = ""
     for group in groups:
         if group.get("status") not in {"pending", "applied"}:
             continue
         if group.get("status") == "applied":
-            opened = group
-            break
+            return group, reopening
         reopening = group_reopening(group)
         if reopening in {"empty", "exhausted"}:
             group["status"] = "dropped"
@@ -324,14 +313,15 @@ def cmd_next_apply_round(args: argparse.Namespace) -> None:
                 f"（{'項目なし' if reopening == 'empty' else '試行の上限'}）"
             )
             continue
-        opened = group
-        break
+        return group, reopening
+    return None, reopening
 
-    if opened is None:
-        statefile.save(path, state)
-        info(f"提案ラウンド {args.round} の適用ラウンドは残っていません")
-        sys.exit(1)
 
+def _prepare_apply_entry(
+    state: dict[str, Any], entry: dict[str, Any],
+    opened: dict[str, Any], reopening: str,
+) -> None:
+    """開いた群の状態に応じて、提案ラウンドの適用の状態を組み立てる。"""
     entry["apply_round"] = opened["apply_round"]
     if opened.get("status") == "pending" and reopening == "open":
         # 起点は**オーケストレータ側で**確定させる。実装担当の申告に委ねると、
@@ -354,6 +344,30 @@ def cmd_next_apply_round(args: argparse.Namespace) -> None:
         # 取り込み済みの群を開き直した。**起点も修正の回数も動かさない。**
         info(f"↻ 適用ラウンド {opened['apply_round']} は取り込み済みです（検証から再開）")
         entry["apply_base_sha"] = opened.get("base_sha")
+
+
+def cmd_next_apply_round(args: argparse.Namespace) -> None:
+    """Step 4 — 次の適用ラウンドを開き、実装担当と対象の項目を返す。
+
+    終了コード: 0 = 群を開いた / 1 = 残りの群が無い（提案ラウンドへ戻る）。
+
+    **群の起点はここで確定させる。** 後続の群は先行の群を適用した後の作業ツリーを
+    読むため、起点はその時点の HEAD になる。取り消しの範囲もこの起点で決まる。
+
+    **修正ラウンドの数え直しも群ごとである。** `--max-fix-rounds` は 1 つの適用
+    ラウンドあたりの上限だからである。
+    """
+    path, state = load_state(args.id)
+    entry = round_of(state, args.round)
+    groups = apply_groups(entry)
+
+    opened, reopening = _select_next_apply_group(groups)
+    if opened is None:
+        statefile.save(path, state)
+        info(f"提案ラウンド {args.round} の適用ラウンドは残っていません")
+        sys.exit(1)
+
+    _prepare_apply_entry(state, entry, opened, reopening)
     state["phase"] = "apply"
     statefile.save(path, state)
 
