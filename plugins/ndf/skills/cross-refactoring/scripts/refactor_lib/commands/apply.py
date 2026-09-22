@@ -1049,6 +1049,82 @@ def _resume_incomplete_apply(
     flush_pending_push(path, state, entry)
 
 
+def _pending_judgements_for_round(
+    entry: dict[str, Any], group_no: int
+) -> list[str]:
+    """この群の保留を取り出す。**全ての群をまとめて解かない。**"""
+    records = entry.get("pending_test_judgements")
+    if isinstance(records, dict):
+        return list(records.get(str(group_no), []))
+    return []
+
+
+def _read_group_judge_verdicts(
+    state: dict[str, Any], impl: Optional[str], round_no: int, group_no: int,
+) -> list[dict[str, Any]]:
+    """この群を判定した担当の結果ファイルを読み、dict の verdict だけを返す。
+
+    **読むのは、この群を判定した担当の結果だけである。** 全ランタイムを読むと、
+    前の群で別の担当が返した古い答えが混ざり、今回の `changed` を打ち消す。
+    """
+    if not impl:
+        return []
+    result = result_path(
+        state, impl,
+        f"{impl}-judge-test-changes-r{round_no}-g{group_no}")
+    if not result.exists():
+        return []
+    try:
+        payload = json.loads(result.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        payload = {}
+    found = payload.get("verdicts")
+    if isinstance(found, list):
+        return [v for v in found if isinstance(v, dict)]
+    return []
+
+
+def _drop_round_on_changed_judgement(
+    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any],
+    group: dict[str, Any], problem: str,
+) -> None:
+    """`changed` があった群を取り消し、項目へ印を残す。**必ず終了する。**"""
+    failed = list(group.get("items") or [])
+    # **`entry["items"]` は項目 ID の並びである。** 実体は `state["items"]` にある。
+    for item_id in failed:
+        item = find_item(state, item_id, required=False)
+        if item:
+            item["status"] = "abandoned"
+            item["failure_reason"] = problem
+    _apply_drop(path, state, entry, group, failed)
+    # **取り消した群の保留だけを消す。** 先行する群でレビューへ引き継ぐと決めた
+    # 分まで捨てない。
+    record_pending_judgements(entry, group.get("apply_round") or 1, [])
+    statefile.save(path, state)
+    info(f"❌ 適用ラウンド {group.get('apply_round')}: {problem}")
+    # **終了コードは 2 にする。** 進行側は「取り消した」と読んで次の群へ進む。
+    sys.exit(2)
+
+
+def _apply_group_judgements(
+    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any],
+    group_no: int, verdicts: list[dict[str, Any]],
+) -> None:
+    """当該群だけへ判定を適用し、残りをレビューへ引き継ぐと知らせる。
+
+    **解くのは、判定が実際に見た群の保留だけである。** 段 2 へ渡すのはその群の
+    差分であるため、別の群で同じファイルが残っていてもそちらは解かない。
+    """
+    remaining = apply_judgements_to_group(entry, group_no, verdicts)
+    if remaining:
+        info(
+            f"{len(remaining)} 件はレビューへ引き継ぎます: " + ", ".join(remaining)
+        )
+    else:
+        info("この適用群のテストの差分は、期待する振る舞いを変えていません")
+    statefile.save(path, state)
+
+
 def cmd_merge_test_judgements(args: argparse.Namespace) -> None:
     """段 2（AI エージェント）の答えを取り込む（#443）。
 
@@ -1061,59 +1137,20 @@ def cmd_merge_test_judgements(args: argparse.Namespace) -> None:
     path, state = load_state(args.id)
     entry = round_of(state, args.round)
     # **判定の対象はこの群の保留である。** 全ての群をまとめて解かない。
-    records = entry.get("pending_test_judgements")
     group_of_round = (current_group(entry) or {}).get("apply_round") or 1
-    pending = list((records or {}).get(str(group_of_round), [])) \
-        if isinstance(records, dict) else []
+    pending = _pending_judgements_for_round(entry, group_of_round)
     if not pending:
         info("判定を待っているテストはありません")
         return
 
-    # **読むのは、この群を判定した担当の結果だけである。** 全ランタイムを読むと、
-    # 前の群で別の担当が返した古い答えが混ざり、今回の `changed` を打ち消す。
     impl = (current_group(entry) or {}).get("impl") or entry.get("impl")
-    verdicts: list[dict[str, Any]] = []
-    if impl:
-        result = result_path(
-            state, impl,
-            f"{impl}-judge-test-changes-r{args.round}-g{group_of_round}")
-        if result.exists():
-            try:
-                payload = json.loads(result.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                payload = {}
-            found = payload.get("verdicts")
-            if isinstance(found, list):
-                verdicts = [v for v in found if isinstance(v, dict)]
+    verdicts = _read_group_judge_verdicts(
+        state, impl, args.round, group_of_round)
 
     outcome = merge_test_judgements(pending, verdicts)
     if outcome["problem"]:
-        group = current_group(entry)
-        failed = list(group.get("items") or [])
-        # **`entry["items"]` は項目 ID の並びである。** 実体は `state["items"]` にある。
-        for item_id in failed:
-            item = find_item(state, item_id, required=False)
-            if item:
-                item["status"] = "abandoned"
-                item["failure_reason"] = outcome["problem"]
-        _apply_drop(path, state, entry, group, failed)
-        # **取り消した群の保留だけを消す。** 先行する群でレビューへ引き継ぐと決めた
-        # 分まで捨てない。
-        record_pending_judgements(entry, group.get("apply_round") or 1, [])
-        statefile.save(path, state)
-        info(f"❌ 適用ラウンド {group.get('apply_round')}: {outcome['problem']}")
-        # **終了コードは 2 にする。** 進行側は「取り消した」と読んで次の群へ進む。
-        sys.exit(2)
+        _drop_round_on_changed_judgement(
+            path, state, entry, current_group(entry), outcome["problem"])
 
-    # **解くのは、判定が実際に見た群の保留だけである。** 段 2 へ渡すのはその群の
-    # 差分であるため、別の群で同じファイルが残っていてもそちらは解かない。
-    group_no = (current_group(entry) or {}).get("apply_round") or 1
-    remaining = apply_judgements_to_group(entry, group_no, verdicts)
-    if remaining:
-        info(
-            f"{len(remaining)} 件はレビューへ引き継ぎます: " + ", ".join(remaining)
-        )
-    else:
-        info("この適用群のテストの差分は、期待する振る舞いを変えていません")
-    statefile.save(path, state)
+    _apply_group_judgements(path, state, entry, group_of_round, verdicts)
 
