@@ -319,6 +319,23 @@ def test_a_note_with_findings_is_not_a_missing_result(tmp_path, fake_gh) -> None
     assert outcome.failed is False
 
 
+def test_post_review_falls_back_to_fragment_url_when_response_has_id_only(
+        tmp_path, fake_gh) -> None:
+    """現状固定。応答に html_url がなく id だけのとき、review_url をフラグメントで補う。"""
+    fake_gh.set_rules([
+        {"match": "pulls/730/reviews?", "stdout": "[]"},
+        {"match": "pulls/730/reviews", "stdout": json.dumps({"id": 99})},
+    ])
+
+    outcome, _ = _post_review(tmp_path)
+
+    assert outcome.review_url == "#pullrequestreview-99"
+    assert outcome.posted_inline == 2
+    assert outcome.posted_body == 0
+    assert outcome.queued == 0
+    assert outcome.failed is False
+
+
 # ---------------- 修正の投稿 ----------------
 
 def _fix_file(tmp_path, **over) -> pathlib.Path:

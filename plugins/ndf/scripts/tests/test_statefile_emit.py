@@ -61,3 +61,24 @@ def test_register_after_save_calls_the_same_hook_only_once(mod, tmp_path) -> Non
         mod.unregister_after_save(hook)
 
     assert calls == [(path, state)]
+
+
+def test_save_writes_state_creates_parent_directory_and_calls_registered_hook(mod, tmp_path) -> None:
+    """現状固定。未作成の親ディレクトリを作って保存し、登録した差し込み口へ引数を渡す。"""
+    calls = []
+
+    def hook(path, state):
+        calls.append((path, state))
+
+    mod.register_after_save(hook)
+    try:
+        path = tmp_path / "nested" / "parent" / "state.json"
+        state = {"a": 1}
+        mod.save(path, state)
+        loaded = mod.load(path)
+    finally:
+        mod.unregister_after_save(hook)
+
+    assert loaded == state
+    assert calls == [(path, state)]
+
