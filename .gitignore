@@ -50,6 +50,8 @@ __pycache__/
 ${SERENA_HOME}/
 .serena/logs/
 .serena/cache/
+# 利用者ごとの設定。認証の秘密を持つため追跡しない
+.serena/serena_config.yml
 .cross_review_pr22_diff.patch
 
 # pytest が実行のたびに作る作業領域
