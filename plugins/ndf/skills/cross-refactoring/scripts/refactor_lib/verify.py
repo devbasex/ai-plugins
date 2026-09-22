@@ -189,76 +189,6 @@ def diff_budget_factor(technique: Optional[str]) -> int:
     return DIFF_BUDGET_FACTOR
 
 
-def _verify_all_commits(
-    facts: list[dict[str, Any]], scope: Optional[Iterable[str]],
-) -> Optional[str]:
-    """群の全コミットが手順を満たしているか。満たさないものがあれば理由を返す。"""
-    for commit in facts:
-        problem = _verify_commit_basics(
-            commit,
-            scope,
-            f"コミット {commit.get('sha', '?')} が base..head の範囲にありません"
-            "（申告だけで実体がありません）",
-            check_test=False,
-        )
-        if problem:
-            return problem
-    return None
-
-
-def _verify_characterization_test(
-    items: list[dict[str, Any]], facts: list[dict[str, Any]],
-) -> Optional[str]:
-    """テストが乏しい項目に、現状固定テストの追加が伴っているか。
-
-    テストが乏しいと申告された項目は、現状固定テストの追加が先行していること。
-    「テストを足した」かどうかは、そのコミットがテストの置き場所を触ったかで見る。
-    """
-    if not any(i.get("test_gap") for i in items):
-        return None
-    if facts[0].get("touches_tests"):
-        return None
-    return (
-        "テストが乏しい項目を含むのに、現状固定テストの追加が伴っていません"
-        f"（先頭コミット {facts[0].get('sha', '?')} がテストを触っていません）"
-    )
-
-
-def _verify_diff_budget(
-    items: list[dict[str, Any]], facts: list[dict[str, Any]],
-) -> Optional[str]:
-    """実差分が見積と手法の倍率から決まる予算に収まっているか。"""
-    estimated = sum(safe_int(i.get("estimated_diff_lines")) for i in items)
-    factor = max(
-        (diff_budget_factor(i.get("technique")) for i in items),
-        default=DIFF_BUDGET_FACTOR,
-    )
-    budget = estimated * factor
-    actual = sum(int(c.get("diff_lines") or 0) for c in facts)
-    if budget and actual > budget:
-        return (
-            f"実差分 {actual} 行が差分予算 {budget} 行"
-            f"（見積 {estimated} 行 × {factor}）を超えました（範囲の逸脱）"
-        )
-    return None
-
-
-def _verify_apply_commit_count(facts: list[dict[str, Any]]) -> Optional[str]:
-    """群が 1 コミットに収まっているか。
-
-    数えるのは**実在するコミットの数**である。同じコミットを群の全項目が
-    申告するのは正しい形なので、重ねた申告では落とさない。
-    """
-    count = len({c.get("sha") for c in facts})
-    if count > 1:
-        return (
-            f"適用ラウンドのコミットが {count} 件あります"
-            "（残すのは適用ラウンド = 1 コミット。"
-            "群の中の項目はまとめて 1 つのコミットにします）"
-        )
-    return None
-
-
 def verify_apply_round(
     items: list[dict[str, Any]], facts: list[dict[str, Any]],
     scope: Optional[Iterable[str]] = None,
@@ -273,11 +203,6 @@ def verify_apply_round(
     `facts` は `collect_commit_facts()` が git から作る。振る舞い不変そのものは
     ここでは確かめない（テストは `verify-round` が実行する）が、**手順が守られたかは
     結果から確かめられる**。
-
-    **検査の順序は変えない。** 粒度は最後に見る。トレーラーや範囲の問題を粒度の
-    失敗で覆い隠さないためである。テストの期待値の検査（#443）は段 1（機械）で
-    決まるものだけを落とし、決まらないものは `pending_test_judgements` が集めて
-    進行側が段 2（AI エージェント）へ渡す。
     """
     if not facts:
         return (
@@ -285,13 +210,58 @@ def verify_apply_round(
             "（適用ラウンド = 1 コミットの前提を満たしていません）"
         )
 
-    return (
-        _verify_all_commits(facts, scope)
-        or _verify_characterization_test(items, facts)
-        or verify_test_changes(collect_test_changes(facts))
-        or _verify_diff_budget(items, facts)
-        or _verify_apply_commit_count(facts)
+    for commit in facts:
+        problem = _verify_commit_basics(
+            commit,
+            scope,
+            f"コミット {commit.get('sha', '?')} が base..head の範囲にありません"
+            "（申告だけで実体がありません）",
+            check_test=False,
+        )
+        if problem:
+            return problem
+
+    if any(i.get("test_gap") for i in items):
+        # テストが乏しいと申告された項目は、現状固定テストの追加が先行していること。
+        # 「テストを足した」かどうかは、そのコミットがテストの置き場所を触ったかで見る。
+        if not facts[0].get("touches_tests"):
+            return (
+                "テストが乏しい項目を含むのに、現状固定テストの追加が伴っていません"
+                f"（先頭コミット {facts[0].get('sha', '?')} がテストを触っていません）"
+            )
+
+    # **テストの期待値が変わっていないか**（#443）。段 1（機械）で決まるものだけを
+    # ここで落とす。決まらないものは `pending_test_judgements` が集め、進行側が
+    # 段 2（AI エージェント）へ渡す。
+    changes = collect_test_changes(facts)
+    problem = verify_test_changes(changes)
+    if problem:
+        return problem
+
+    estimated = sum(safe_int(i.get("estimated_diff_lines")) for i in items)
+    factor = max(
+        (diff_budget_factor(i.get("technique")) for i in items),
+        default=DIFF_BUDGET_FACTOR,
     )
+    budget = estimated * factor
+    actual = sum(int(c.get("diff_lines") or 0) for c in facts)
+    if budget and actual > budget:
+        return (
+            f"実差分 {actual} 行が差分予算 {budget} 行"
+            f"（見積 {estimated} 行 × {factor}）を超えました（範囲の逸脱）"
+        )
+
+    # 粒度は最後に見る。トレーラーや範囲の問題を粒度の失敗で覆い隠さない。
+    # 数えるのは**実在するコミットの数**である。同じコミットを群の全項目が
+    # 申告するのは正しい形なので、重ねた申告では落とさない。
+    count = len({c.get("sha") for c in facts})
+    if count > 1:
+        return (
+            f"適用ラウンドのコミットが {count} 件あります"
+            "（残すのは適用ラウンド = 1 コミット。"
+            "群の中の項目はまとめて 1 つのコミットにします）"
+        )
+    return None
 
 
 def commit_limit_for(item: dict[str, Any]) -> int:
