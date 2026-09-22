@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 import json
-import os
 import pathlib
 import subprocess
 import sys
@@ -170,11 +169,10 @@ def _dead_pid() -> int:
 
 
 def _run_monitor(tmp_dir: pathlib.Path, agent: str, *extra: str) -> subprocess.CompletedProcess:
-    env = {k: v for k, v in os.environ.items() if not k.startswith("MONITOR_")}
     return subprocess.run(
         [sys.executable, str(_MONITOR_LIB), "7", "--agents", agent,
          "--tmp-dir", str(tmp_dir), "--poll", "1", *extra],
-        capture_output=True, text=True, env=env, timeout=60,
+        capture_output=True, text=True, timeout=60,
     )
 
 

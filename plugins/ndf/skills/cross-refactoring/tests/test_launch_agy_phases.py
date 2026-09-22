@@ -59,8 +59,7 @@ def _launch(tmp_path: pathlib.Path, phase: str) -> tuple[list[str], pathlib.Path
     subprocess.run(
         [str(LAUNCH), RUNTIME, phase, "130", "1"],
         env={
-            # 実行した人の `MONITOR_*` で上限が変わらないよう外す（#678）。
-            **{k: v for k, v in os.environ.items() if not k.startswith("MONITOR_")},
+            **os.environ,
             "CROSS_REFACTORING_TMP_DIR": str(state_path.parent),
             "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
             "NDF_TEST_ARGS_FILE": str(args_file),

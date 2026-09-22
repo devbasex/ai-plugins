@@ -32,11 +32,10 @@ def _run(tmp_dir: pathlib.Path, *extra: str, agents: str = "agy",
     for agent in agents.split(","):
         (tmp_dir / f"{agent}-review-pr7.pid").write_text(str(_dead_pid()))
         (tmp_dir / f"{agent}-review-pr7-result.json").write_text('{"event": "APPROVE"}')
-    base = {k: v for k, v in os.environ.items() if not k.startswith("MONITOR_")}
     return subprocess.run(
         [sys.executable, str(_MONITOR_LIB), "7", "--agents", agents,
          "--tmp-dir", str(tmp_dir), "--poll", "1", *extra],
-        capture_output=True, text=True, env={**base, **(env or {})}, timeout=60,
+        capture_output=True, text=True, env={**os.environ, **(env or {})}, timeout=60,
     )
 
 
