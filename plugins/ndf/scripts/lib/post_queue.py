@@ -449,7 +449,7 @@ def already_posted(item: dict[str, Any]) -> bool | None:
 _SEQ_RE = re.compile(r"^(\d{4})-")
 
 
-def _read_item(path: pathlib.Path) -> dict[str, Any] | None:
+def read_item(path: pathlib.Path) -> dict[str, Any] | None:
     """待ち行列の項目を 1 件読む。読めなければ `None`。
 
     項目は作成先の JSON ファイルへ直接書かれるため、書き込みの途中で終了すると
@@ -460,6 +460,20 @@ def _read_item(path: pathlib.Path) -> dict[str, Any] | None:
     except (OSError, json.JSONDecodeError):
         return None
     return item if isinstance(item, dict) else None
+
+
+_read_item = read_item
+
+
+def rejected_by_position(item: dict[str, Any]) -> bool:
+    """待ち行列に残った項目が、指した位置を解決できずに拒まれたものか。
+
+    流した後に呼ぶ。`is_position_unresolved` と同じ判定を、項目へ残した状態と説明から
+    行う（流す側は `Attempt` を返さないため）。
+    """
+    if int(item.get("last_status") or 0) != 422:
+        return False
+    return _POSITION_WORD in str(item.get("last_error") or "").lower()
 
 
 class FlushResult(NamedTuple):
@@ -499,6 +513,20 @@ class Queue:
             if item is not None:
                 out.append((p, item))
         return out
+
+    def drop(self, seq: Any) -> bool:
+        """連番で指した項目を 1 件取り除く。
+
+        送れなかった項目を、送る内容を変えて積み直すときに使う（差分の外を指す指摘の
+        退避）。**そのまま積み足すと、同じ論点の要求が 2 件並ぶ。**
+        """
+        if seq is None:
+            return False
+        for path, item in self.items():
+            if item.get("seq") == seq:
+                path.unlink(missing_ok=True)
+                return True
+        return False
 
     def _next_seq(self) -> int:
         seqs = [int(m.group(1)) for m in
@@ -567,6 +595,9 @@ class Queue:
                 continue
             item["attempts"] = int(item.get("attempts") or 0) + 1
             item["last_error"] = attempt.summary()
+            # **状態も残す。** 拒まれ方の区別（位置を解決できない / それ以外）は、
+            # 流した後に項目だけを見て決める。
+            item["last_status"] = attempt.http
             path.write_text(json.dumps(item, indent=2, ensure_ascii=False),
                             encoding="utf-8")
             failed = item
