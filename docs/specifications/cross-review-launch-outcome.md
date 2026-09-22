@@ -83,6 +83,10 @@ codex-cli 0.154.0、claude 2.1.278）で集めた実物から採った。** 出�
 | claude | 導入済みの実行ファイルに埋め込まれた文字列 | 期間を書かない形 | 1 形 |
 | kiro / agy | 手元の記録（`~/.kiro` / `~/.gemini` / `antigravity-cli/cli.log`） | 利用上限の実物 | 0 |
 
+**codex の 6 形は、照合では 2 形（利用上限・再試行の上限）に集約される。** 実行ファイルの
+6 形は、書き出しに続く案内文の違いまで数えた文字列の数である。照合が読むのは書き出しの
+2 通りだけで、続く案内文は読まない（「上限の検知」）。
+
 **claude の 5 形は、書き出しの後に差し込む期間と種類だけが違う。** 記録の 4 形と実行ファイルの
 1 形の内訳は次のとおりである。
 
@@ -188,11 +192,27 @@ codex-cli 0.154.0、claude 2.1.278）で集めた実物から採った。** 出�
 | `usage_limit` | 標準エラーの記録（全担当） | 生きている間の巡回ごと | `Monthly request limit reached` |
 | `usage_limit` | 同上 | 同上 | `"api_error_status"\s*:\s*429` |
 | `usage_limit` | 同上 | 同上 | `quota exceeded` / `rate limit exceeded`（大文字小文字を問わない）、`^HTTP/\d\S* 429 ` |
-| `usage_limit` | 同上 | 同上 | `^(?:ERROR:\s*)?You['’]ve hit your (?:[\w'’ ]+ )?(?:limit\|budget)\b`（codex と claude の上限。期間や種類を差し込む形を 1 行で覆う） |
-| `usage_limit` | 同上 | 同上 | `^(?:ERROR:\s*)?exceeded retry limit, last status: 429\b`（codex の再試行の上限） |
+| `usage_limit` | 同上 | 同上 | 下の**利用上限の行**（codex と claude。期間や種類を差し込む形を 1 行で覆う） |
+| `usage_limit` | 同上 | 同上 | 下の**再試行の上限の行**（codex） |
 | `usage_limit` | claude の標準出力の記録 | 同上 | `"api_error_status"\s*:\s*429` |
-| `early_error` | 標準エラーの記録 | 同上 | `^HTTP/\d\S* (?:401\|403) ` と、残りの既存の致命 |
+| `early_error` | 標準エラーの記録 | 同上 | `^HTTP/\d\S* 401 ` / `^HTTP/\d\S* 403 ` と、残りの既存の致命 |
 | `cli_timeout` | 標準エラーの記録 | **終了した後、結果ファイルが無いときだけ** | `print timeout after \S+ with turn in progress` |
+
+**選択肢を持つ 2 行は、表の外に置く。** 表のセルに入れると縦棒を退避する必要があり、退避した
+縦棒は選択肢の区切りではなくリテラルの縦棒として読める。次の 2 行は実装
+（`plugins/ndf/scripts/lib/monitor.py`）の文字列と 1 字ずつ一致する。
+
+**利用上限の行**（codex と claude）:
+
+```text
+^(?:ERROR:\s*)?You['’]ve hit your (?:[\w'’ ]+ )?(?:limit|budget)\b
+```
+
+**再試行の上限の行**（codex）:
+
+```text
+^(?:ERROR:\s*)?exceeded retry limit, last status: 429\b
+```
 
 **codex と claude の上限の 2 行は、行頭で始まる形だけを読む。** 担当は作業中のコマンドの
 出力（差分・ファイルの中身）も標準エラーの記録へ書くため、文言を含む文書やテストを読み
@@ -281,7 +301,8 @@ cross-refactoring の取り込みが従う契約を、ここで定める。**契
 | 観点 | 確かめ方 |
 | --- | --- |
 | 理由の語彙と起動し直しの可否が 1 か所にあり、結末を読む関数が失敗しないこと | `plugins/ndf/scripts/tests/test_monitor_outcome_unit.py` |
-| 利用上限の文言を検知し、引用・表・grep 形式・差分の行で誤検知しないこと。実物の行を 1 つずつ標準エラーの記録へ書くと、理由が利用上限・起動し直しの可否が偽・終了コード 4 になること。再試行の上限の 503 の行が利用上限にならないこと | `plugins/ndf/skills/cross-review/tests/test_monitor_usage_limit.py` |
+| 実物の行（codex の 2 形を行頭の印の有無で 3 行、claude の 5 形）が利用上限の照合に一致し、表・バッククォート・引用・grep 形式・差分・文の途中の行が一致しないこと。照合の関数を直接呼んで確かめる | `plugins/ndf/skills/cross-review/tests/test_monitor_usage_limit.py` |
+| 監視のプロセスを通したとき、codex の 3 行（2 形と行頭の印あり）と claude の週・セッションの 2 行で理由が利用上限・終了コード 4 になること。再試行の上限の 503 の行と、引用・差分の行では止まらないこと | 同上 |
 | CLI の上限の文言を、終了して結果ファイルが無いときだけ理由にすること | 同 `tests/test_launch_print_timeout.py` |
 | CLI が独立したプロセスグループで起動し、グループごと止まること | 同 `tests/test_launch_cli_process_group.py` |
 | 結果の取り込みが理由と監視の詳細を残し、終了コードを変えないこと | 同 `tests/test_read_result_reason.py` |
