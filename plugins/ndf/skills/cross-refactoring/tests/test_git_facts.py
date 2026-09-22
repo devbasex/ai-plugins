@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import json
 import subprocess
 
 import pytest
@@ -276,39 +277,58 @@ def test_cutting_off_kills_children_that_ignore_sigterm(gitfacts, work):
     assert not marker.exists(), "SIGTERM を無視する子が生き残っている"
 
 
-def test_read_result_aborts_when_the_file_is_missing(gitfacts, tmp_path):
-    """現状固定: 結果ファイルが無ければ終了コード 2 で中断する。
+def test_read_result_returns_a_value_when_the_file_is_missing(gitfacts, tmp_path, capsys):
+    """結果ファイルが無くても中断せず、結果なしの値を返す。
 
-    起動した CLI が結果を残さなかった場合であり、進行は次のラウンドへ進む。
+    中断すると、担当が作ったコミットが取り消されないまま Pull Request に残る
+    （#728）。何で終わるかは読んだ側（取り込み）が決める。
     """
-    with pytest.raises(SystemExit) as e:
-        gitfacts.read_result(tmp_path / "missing.json", "claude")
-    assert e.value.code == 2
+    state = {"id": 130, "tmp_dir": str(tmp_path)}
+    outcome = gitfacts.read_result(state, "claude", "apply", 1)
+
+    assert outcome.payload is None
+    assert outcome.reason == "missing"
+    assert outcome.relaunch_same_agent is True
+    captured = capsys.readouterr()
+    assert (captured.out, captured.err) == ("", "")
 
 
-def test_read_result_aborts_on_broken_json(gitfacts, tmp_path):
-    """現状固定: JSON として読めなければ終了コード 2 で中断する。"""
-    path = tmp_path / "result.json"
-    path.write_text('{"items": [', encoding="utf-8")
+def test_read_result_returns_unparsable_for_broken_json(gitfacts, tmp_path):
+    """JSON として読めない結果ファイルは、理由 `unparsable` の結果なしになる。"""
+    (tmp_path / "claude-apply-r1-result.json").write_text(
+        '{"items": [', encoding="utf-8")
+    state = {"id": 130, "tmp_dir": str(tmp_path)}
 
-    with pytest.raises(SystemExit) as e:
-        gitfacts.read_result(path, "claude")
-    assert e.value.code == 2
+    outcome = gitfacts.read_result(state, "claude", "apply", 1)
+
+    assert (outcome.payload, outcome.reason) == (None, "unparsable")
 
 
 @pytest.mark.parametrize("body", ['[{"item_id": "R1-001"}]', "42"])
-def test_read_result_aborts_when_the_json_is_not_an_object(gitfacts, tmp_path, body):
-    """現状固定: 配列や数値も終了コード 2 で中断する。
+def test_read_result_returns_unparsable_when_the_json_is_not_an_object(
+    gitfacts, tmp_path, body
+):
+    """配列や数値も結果なしとして返す。
 
-    呼び出し側は `payload.get(...)` を呼ぶため、読み込みの時点で弾かないと
-    `AttributeError` になって進行が止まる。
+    呼び出し側は `payload.get(...)` を呼ぶため、辞書でないものを渡すと
+    `AttributeError` になって進行が止まる。読み込みの時点で結果なしへ寄せる。
     """
-    path = tmp_path / "result.json"
-    path.write_text(body, encoding="utf-8")
+    (tmp_path / "claude-apply-r1-result.json").write_text(body, encoding="utf-8")
+    state = {"id": 130, "tmp_dir": str(tmp_path)}
 
-    with pytest.raises(SystemExit) as e:
-        gitfacts.read_result(path, "claude")
-    assert e.value.code == 2
+    outcome = gitfacts.read_result(state, "claude", "apply", 1)
+
+    assert (outcome.payload, outcome.reason) == (None, "unparsable")
+
+
+def test_read_result_reads_the_stem_of_each_phase(gitfacts, tmp_path):
+    """名前の幹は工程ごとに変わる。最終ゲートの修正だけラウンド番号を持たない。"""
+    (tmp_path / "codex-fix-r2-result.json").write_text('{"ok": 1}', encoding="utf-8")
+    (tmp_path / "codex-final-fix-result.json").write_text('{"ok": 2}', encoding="utf-8")
+    state = {"id": 130, "tmp_dir": str(tmp_path)}
+
+    assert gitfacts.read_result(state, "codex", "fix", 2).payload == {"ok": 1}
+    assert gitfacts.read_result(state, "codex", "final-fix").payload == {"ok": 2}
 
 
 def test_find_item_returns_none_for_a_missing_id_when_not_required(gitfacts):
@@ -320,6 +340,22 @@ def test_find_item_returns_none_for_a_missing_id_when_not_required(gitfacts):
     state = {"items": [{"item_id": "R1-001"}, {"item_id": "R1-002"}]}
 
     assert gitfacts.find_item(state, "R9-999", required=False) is None
+
+
+def test_scoped_item_ids_falls_back_to_all_items_when_apply_round_is_missing(
+    gitfacts,
+):
+    """現状固定: 現在の適用ラウンドの群がなければ entry 全体の項目を返す。"""
+    entry = {
+        "apply_round": 3,
+        "items": ["R2-003", "R2-001", "R2-002"],
+        "apply_rounds": [
+            {"apply_round": 1, "items": ["R2-001"]},
+            {"apply_round": 2, "items": ["R2-002"]},
+        ],
+    }
+
+    assert gitfacts.scoped_item_ids(entry) == ["R2-003", "R2-001", "R2-002"]
 
 
 def test_revert_item_commits_failure_message_includes_item_id(gitfacts, work, capsys):
@@ -355,4 +391,90 @@ def test_revert_range_failure_message_has_no_item_id_prefix(gitfacts, work, caps
     assert "を取り消せませんでした" in err
     assert f"（HEAD を {second} へ戻しました）" in err
     assert _git("rev-parse", "HEAD", cwd=work).stdout.strip() == second
+
+
+def test_check_run_result_characterization(gitfacts, monkeypatch):
+    """check_run_result の公開契約を固定する現状固定テスト。"""
+    # 1. 引数が空なら None
+    assert gitfacts.check_run_result("", "sha", "ci") is None
+    assert gitfacts.check_run_result("repo", "", "ci") is None
+    assert gitfacts.check_run_result("repo", "sha", "") is None
+
+    # 2. gh api の実行失敗（sh が None または空）なら None
+    monkeypatch.setattr(gitfacts, "sh", lambda *args, **kwargs: None)
+    assert gitfacts.check_run_result("repo", "sha", "ci") is None
+
+    monkeypatch.setattr(gitfacts, "sh", lambda *args, **kwargs: "")
+    assert gitfacts.check_run_result("repo", "sha", "ci") is None
+
+    # 3. 不正 JSON なら None
+    monkeypatch.setattr(gitfacts, "sh", lambda *args, **kwargs: "not-json{")
+    assert gitfacts.check_run_result("repo", "sha", "ci") is None
+
+    # 4. check_runs 欠損（非 dict、または check_runs がリストでない）なら None
+    monkeypatch.setattr(gitfacts, "sh", lambda *args, **kwargs: "[]")
+    assert gitfacts.check_run_result("repo", "sha", "ci") is None
+
+    monkeypatch.setattr(gitfacts, "sh", lambda *args, **kwargs: json.dumps({"check_runs": "not-a-list"}))
+    assert gitfacts.check_run_result("repo", "sha", "ci") is None
+
+    # 5. 対象名なし（一致する name がない）なら None
+    monkeypatch.setattr(
+        gitfacts,
+        "sh",
+        lambda *args, **kwargs: json.dumps({
+            "check_runs": [{"name": "other", "status": "completed", "conclusion": "success"}]
+        }),
+    )
+    assert gitfacts.check_run_result("repo", "sha", "ci") is None
+
+    # 6. 未完了（status != completed）なら "pending"
+    monkeypatch.setattr(
+        gitfacts,
+        "sh",
+        lambda *args, **kwargs: json.dumps({
+            "check_runs": [
+                {"name": "ci", "status": "in_progress", "conclusion": None},
+                {"name": "ci", "status": "completed", "conclusion": "success"},
+            ]
+        }),
+    )
+    assert gitfacts.check_run_result("repo", "sha", "ci") == "pending"
+
+    # 7. 失敗（completed だが conclusion != success）ならその結論（または unknown）
+    monkeypatch.setattr(
+        gitfacts,
+        "sh",
+        lambda *args, **kwargs: json.dumps({
+            "check_runs": [
+                {"name": "ci", "status": "completed", "conclusion": "failure"},
+                {"name": "ci", "status": "completed", "conclusion": "success"},
+            ]
+        }),
+    )
+    assert gitfacts.check_run_result("repo", "sha", "ci") == "failure"
+
+    monkeypatch.setattr(
+        gitfacts,
+        "sh",
+        lambda *args, **kwargs: json.dumps({
+            "check_runs": [
+                {"name": "ci", "status": "completed", "conclusion": None},
+            ]
+        }),
+    )
+    assert gitfacts.check_run_result("repo", "sha", "ci") == "unknown"
+
+    # 8. 全成功なら "success"
+    monkeypatch.setattr(
+        gitfacts,
+        "sh",
+        lambda *args, **kwargs: json.dumps({
+            "check_runs": [
+                {"name": "ci", "status": "completed", "conclusion": "success"},
+                {"name": "ci", "status": "COMPLETED", "conclusion": "SUCCESS"},
+            ]
+        }),
+    )
+    assert gitfacts.check_run_result("repo", "sha", "ci") == "success"
 

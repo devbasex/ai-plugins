@@ -21,7 +21,7 @@ import models as models_lib
 import statefile
 
 from .. import ABORT, die, info
-from ..gitfacts import run_with_timeout
+from ..gitfacts import run_with_timeout, safe_int
 from ..paths import (
     default_worktree_base,
     load_state,
@@ -35,6 +35,7 @@ from ..rounds import finish_outer_rounds, STRUCTURE, TEST, entry_kind, round_kin
 from ..scope import require_scope_covers_tests
 from ..vocabulary import (
     DEFAULT_TEST_TIMEOUT,
+    IMPL_STALL_MARGIN,
     REQUIRED_SKILLS,
     test_vocabulary,
     vocabulary,
@@ -355,6 +356,12 @@ def _emit_init(state: dict[str, Any]) -> None:
         HEAD_BRANCH=state["head_branch"],
         BASE_BRANCH=state["base_branch"],
         SCOPE=" ".join(state["target_scope"]),
+        # 適用・修正・最終ゲートの修正の担当はテストを 1 回実行し、その間は何も
+        # 出力しない。テストの制限時間そのままでは、実行中に打ち切られる（#553）。
+        IMPL_STALL_TIMEOUT=(
+            safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT)
+            + IMPL_STALL_MARGIN
+        ),
     )
 
 

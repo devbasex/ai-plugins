@@ -21,6 +21,27 @@ from .vocabulary import (
 )
 
 
+def _degrade_if_unknown(
+    value: str,
+    allowed: Iterable[str],
+    source: str,
+    label: str,
+    location: str,
+) -> tuple[str, bool]:
+    """語彙集合に含まれない値を `unknown` へ降格する。
+
+    降格したときは警告を出し `(unknown, True)` を返す。含まれていれば値をそのまま
+    `(value, False)` で返す。`smell` / `technique` / `severity` の同じ降格ルールと、
+    テスト提案の `case` / `level` の降格を 1 箇所に集め、警告文や降格処理の変更が
+    散らばらないようにする。`location` は警告に添える位置表記で、構造改善側は
+    `path#symbol`、テスト側は `target` を渡す。
+    """
+    if value not in allowed:
+        info(f"⚠ {source}: 語彙外の{label} `{value}` — unknown へ降格 ({location})")
+        return "unknown", True
+    return value, False
+
+
 def _normalize_proposal(raw: dict[str, Any], source: str) -> Optional[dict[str, Any]]:
     """1 件の提案を正規化する。必須項目を欠くものは捨てる。
 
@@ -37,19 +58,13 @@ def _normalize_proposal(raw: dict[str, Any], source: str) -> Optional[dict[str, 
     smell = str(raw.get("smell") or "").strip()
     technique = str(raw.get("technique") or "").strip()
     severity = str(raw.get("severity") or "").strip().lower()
-    degraded = False
-    if smell not in SMELLS:
-        info(f"⚠ {source}: 語彙外の兆候 `{smell}` — unknown へ降格 ({path}#{symbol})")
-        smell = "unknown"
-        degraded = True
-    if technique not in TECHNIQUES:
-        info(f"⚠ {source}: 語彙外の手法 `{technique}` — unknown へ降格 ({path}#{symbol})")
-        technique = "unknown"
-        degraded = True
-    if severity not in SEVERITY_ORDER:
-        info(f"⚠ {source}: 語彙外の重要度 `{severity}` — unknown へ降格 ({path}#{symbol})")
-        severity = "unknown"
-        degraded = True
+    smell, smell_degraded = _degrade_if_unknown(
+        smell, SMELLS, source, "兆候", f"{path}#{symbol}")
+    technique, technique_degraded = _degrade_if_unknown(
+        technique, TECHNIQUES, source, "手法", f"{path}#{symbol}")
+    severity, severity_degraded = _degrade_if_unknown(
+        severity, SEVERITY_ORDER, source, "重要度", f"{path}#{symbol}")
+    degraded = smell_degraded or technique_degraded or severity_degraded
     if degraded:
         severity = "unknown"
 
@@ -208,14 +223,20 @@ def _normalize_test_proposal(
         info(f"⚠ {source}: path / target の無いテスト項目を無視しました: {raw!r:.120}")
         return None
 
-    case = str(raw.get("case") or "").strip().lower()
-    level = str(raw.get("level") or "").strip().lower()
-    if case not in TEST_CASES:
-        info(f"⚠ {source}: 語彙外の経路 `{case}` — unknown へ降格 ({target})")
-        case = "unknown"
-    if level not in TEST_LEVELS:
-        info(f"⚠ {source}: 語彙外の階層 `{level}` — unknown へ降格 ({target})")
-        level = "unknown"
+    case, _ = _degrade_if_unknown(
+        str(raw.get("case") or "").strip().lower(),
+        TEST_CASES,
+        source,
+        "経路",
+        target,
+    )
+    level, _ = _degrade_if_unknown(
+        str(raw.get("level") or "").strip().lower(),
+        TEST_LEVELS,
+        source,
+        "階層",
+        target,
+    )
 
     return {
         "kind": TEST,

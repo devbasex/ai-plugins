@@ -236,9 +236,13 @@ def test_the_wider_factor_is_limited_to_the_vocabulary(vocabulary):
 # ---------- git から事実を取る ----------
 
 def test_commit_trailers_are_read_from_git(patch_lib, gitfacts, monkeypatch):
-    """結果ファイルではなく実際のコミットメッセージから読む。"""
+    """結果ファイルではなく実際のコミットメッセージから読む。
+
+    読むのは**題名の次の段落から後ろ**である。段落の切り分けそのものは実際の git で
+    確かめる（`test_commit_trailers_git.py`）。
+    """
     patch_lib("git_out",
-        lambda work, args, **_kw: "Item-Id: R1-001\nRound: 1\n"
+        lambda work, args, **_kw: "Refactor: 題名\n\nItem-Id: R1-001\nRound: 1\n"
                            "Impl-Runtime: codex\nImpl-Model: gpt-5.5",
     )
     assert gitfacts.commit_trailers("/w", "abc") == {
@@ -449,6 +453,10 @@ def test_a_verified_apply_round_marks_every_item_applied(
     assert state["rounds"][0]["apply"]["applied"] == ["R1-001", "R1-002"]
     assert all(i["status"] == "applied" for i in state["items"])
     assert state["phase"] == "verify", "次はテストによる検証へ進む"
+    # AC46: 結果があり検証を通る適用は、1 回目の試行で取り込まれ記録を残さない
+    group = state["rounds"][0]["apply_rounds"][0]
+    assert "failed_attempts" not in group
+    assert "drop_reason" not in group
 
 
 def test_all_failed_exits_2(refactor, tmp_path, env_tmp_dir, no_git, git_facts):
@@ -934,7 +942,7 @@ def test_unverified_baseline_blocks_every_item(refactor, tmp_path, env_tmp_dir):
         refactor.cmd_merge_apply(
             type("A", (), {"id": 130, "round": 1, "dry_run": False})()
         )
-    assert e.value.code == 2
+    assert e.value.code == 4
     assert read_state(state_path)["items"][0]["status"] == "blocked"
 
 
@@ -955,7 +963,7 @@ def test_unknown_baseline_also_blocks(refactor, tmp_path, env_tmp_dir):
         refactor.cmd_merge_apply(
             type("A", (), {"id": 130, "round": 1, "dry_run": False})()
         )
-    assert e.value.code == 2
+    assert e.value.code == 4
     assert read_state(state_path)["items"][0]["status"] == "blocked"
 
 
@@ -1005,7 +1013,7 @@ def test_range_that_cannot_be_determined_fails_closed(patch_lib, refactor, tmp_p
         refactor.cmd_merge_apply(
             type("A", (), {"id": 130, "round": 1, "dry_run": False})()
         )
-    assert e.value.code == 2
+    assert e.value.code == 4
     assert read_state(state_path)["items"][0]["status"] == "blocked"
 
 
@@ -1101,10 +1109,27 @@ def test_broken_apply_result_does_not_crash(
     assert read_state(state_path)["items"][0]["status"] == "abandoned"
 
 
-def test_non_object_result_file_fails(refactor, tmp_path, env_tmp_dir, no_git):
-    """結果が JSON オブジェクトでなければ、読み込みの時点で弾く。"""
+def test_non_object_result_file_is_a_missing_result(
+    refactor, tmp_path, env_tmp_dir, no_git
+):
+    """結果が JSON オブジェクトでなければ、結果なしとして扱う。
+
+    呼び出し側は `payload.get(...)` を呼ぶため、辞書でないものを渡すと進行が
+    止まる。取り消しと記録を通し、理由 `unparsable` を残して次の試行へ渡す。
+    """
     items = [item(item_id="R1-001")]
-    state_path = _state_with_items(tmp_path, items)
+    state_path = _state_with_items(
+        tmp_path, items,
+        rounds_override=[{
+            "apply_round": 1, "impl": "codex",
+            "impl_model": {"requested": "gpt-5.5", "observed": None},
+            "items": ["R1-001"], "status": "pending",
+            "base_sha": "base0", "head_sha": None, "fix_rounds": 0, "attempt": 1,
+        }],
+    )
+    state = read_state(state_path)
+    state["rounds"][0]["apply_base_sha"] = "base0"
+    state_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
     env_tmp_dir(state_path)
     write_result(state_path, "codex-apply-r1", ["配列で返ってきた"])
     with pytest.raises(SystemExit) as e:
@@ -1112,6 +1137,9 @@ def test_non_object_result_file_fails(refactor, tmp_path, env_tmp_dir, no_git):
             type("A", (), {"id": 130, "round": 1, "dry_run": False})()
         )
     assert e.value.code == 2
+
+    group = read_state(state_path)["rounds"][0]["apply_rounds"][0]
+    assert [r["reason"] for r in group["failed_attempts"]] == ["unparsable"]
 
 
 def test_the_group_sharing_one_commit_is_accepted(paths, patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, git_facts):

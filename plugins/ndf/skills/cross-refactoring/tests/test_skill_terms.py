@@ -108,3 +108,57 @@ def test_the_command_sequence_does_not_launch_reviewers(skill):
     block = _run_block(skill)
     assert " review " not in block
     assert "verify-round" in block
+
+
+# ---------- 結果なしと無進捗の許容（#728 / #647 / #553） ----------
+
+DOCS = SKILL.parent / "docs"
+
+
+def test_the_apply_round_row_states_the_attempt_cap(skill):
+    """AC43: 適用ラウンドの行が、同じ群を開き直す上限（2 回）を書く。"""
+    row = next(r for r in _terms_table(skill) if "適用ラウンド" in r)
+
+    assert "2 回" in row
+
+
+def test_the_single_cap_paragraph_is_gone(skill):
+    """AC43: 上限を 1 つに保つとしていた段落が残っていないこと。"""
+    assert "別の上限を置かない" not in skill
+    assert "別に置かない" not in skill
+
+
+def test_every_implementer_phase_passes_the_stall_timeout(skill):
+    """AC41: 適用・修正・最終ゲートの修正の監視が、無進捗の許容だけを受け取る。"""
+    for phase in ("apply", "fix", "final-fix"):
+        block = skill.split(f"--phase {phase}", 1)[1].split("\n\n", 1)[0]
+        assert '--stall-timeout "$IMPL_STALL_TIMEOUT"' in block, phase
+        assert "--timeout " not in block, phase
+
+
+def test_the_apply_document_describes_a_missing_result(skill):
+    """AC44: 適用の説明が、結果なしのときの取り消し・記録・終了コードを書く。"""
+    text = (DOCS / "02-apply-and-review.md").read_text(encoding="utf-8")
+
+    assert "実装担当が結果を残さなかったとき" in text
+    assert "failed_attempts" in text
+    assert "終了コード" in text
+    assert '--stall-timeout "$IMPL_STALL_TIMEOUT"' in text
+
+
+def test_the_fix_document_describes_a_missing_result(skill):
+    """AC44: 修正と最終ゲートの説明が、同じ 2 つを書く。"""
+    text = (DOCS / "04-fix-and-report.md").read_text(encoding="utf-8")
+
+    assert text.count('--stall-timeout "$IMPL_STALL_TIMEOUT"') == 2
+    assert "修正の担当が結果を残さなかったときも、修正ラウンドは進める" in text
+    assert "修正の担当が結果を残さなかったときも同じ手順を通る" in text
+
+
+def test_the_trailer_section_states_both_ways_of_reading(skill):
+    """AC45: 記名の節が、人の集計と進行側の検証の 2 つの読み方を書く。"""
+    text = (DOCS / "02-apply-and-review.md").read_text(encoding="utf-8")
+    section = text.split("### コミットトレーラーの形式", 1)[1].split("\n### ", 1)[0]
+
+    assert "最後の段落だけ" in section
+    assert "git interpret-trailers --parse" in section

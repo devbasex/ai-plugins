@@ -10,9 +10,8 @@ from dataclasses import dataclass
 import json
 import pathlib
 import sys
-from typing import Any
+from typing import Any, Optional
 
-import assignment
 import statefile
 
 from .. import die, info
@@ -27,20 +26,28 @@ from ..gitfacts import (
     read_result,
     record_observed_model,
     reported_shas,
-    revert_item_commits,
     round_of,
     safe_int,
     collect_commit_facts,
     commits_in_range,
+)
+from ..intake import (
+    IntakeScope,
+    already_closed,
+    close_without_result,
+    discard_unverified,
 )
 from ..paths import git_out, load_state, result_path, stem_for
 from ..proposals import assign_apply_rounds, merge_proposals, merge_test_proposals
 from ..rounds import (
     TEST,
     apply_groups,
+    attempt_of,
     current_group,
     deferred_record,
     entry_kind,
+    group_reopening,
+    impl_for_seq,
     item_key,
     item_kind,
     item_label,
@@ -131,18 +138,19 @@ def _assign_apply_rounds_to_state(
     seq = safe_int(state.get("apply_seq"))
     for n, group in enumerate(assign_apply_rounds(adopted), start=1):
         seq += 1
-        impl, _ = assignment.assign(seq, state["host"])
+        impl, requested = impl_for_seq(state, seq)
         for item in group:
             item["apply_round"] = n
         entry["apply_rounds"].append({
             "apply_round": n,
             "impl": impl,
-            "impl_model": {"requested": state["models"].get(impl), "observed": None},
+            "impl_model": {"requested": requested, "observed": None},
             "items": [i["item_id"] for i in group],
             "status": "pending",
             "base_sha": None,
             "head_sha": None,
             "fix_rounds": 0,
+            "attempt": 0,
         })
     state["apply_seq"] = seq
 
@@ -293,19 +301,44 @@ def cmd_next_apply_round(args: argparse.Namespace) -> None:
     # **`applied` の群も開き直す。** 適用は取り込んだが検証まで進めずに落ちた場合、
     # 飛ばすとその群の項目が採用でも取り消しでもないまま残る。再開できることは
     # 収束ループの前提である。
-    opened = next(
-        (g for g in groups if g.get("status") in {"pending", "applied"}), None
-    )
+    #
+    # **未着手の群は、開き直しの判定へ掛ける**（#647）。無条件に開き直すと、結果を
+    # 残さない担当に当たり続けて上限なく起動する。項目が無い群と上限に達した群は、
+    # ここで取り消し済みにして次を探す。
+    opened: Optional[dict[str, Any]] = None
+    reopening = ""
+    for group in groups:
+        if group.get("status") not in {"pending", "applied"}:
+            continue
+        if group.get("status") == "applied":
+            opened = group
+            break
+        reopening = group_reopening(group)
+        if reopening in {"empty", "exhausted"}:
+            group["status"] = "dropped"
+            group.setdefault(
+                "drop_reason", "empty" if reopening == "empty" else "no_result"
+            )
+            info(
+                f"適用ラウンド {group['apply_round']} は開きません"
+                f"（{'項目なし' if reopening == 'empty' else '試行の上限'}）"
+            )
+            continue
+        opened = group
+        break
+
     if opened is None:
+        statefile.save(path, state)
         info(f"提案ラウンド {args.round} の適用ラウンドは残っていません")
         sys.exit(1)
 
     entry["apply_round"] = opened["apply_round"]
-    if opened.get("status") == "pending":
+    if opened.get("status") == "pending" and reopening == "open":
         # 起点は**オーケストレータ側で**確定させる。実装担当の申告に委ねると、
         # 欠落・不正時に範囲検査が無効になり、過去の任意のコミットが実在扱いになる。
         head = git_out(state["worktrees"]["work"], ["rev-parse", "HEAD"])
         opened["base_sha"] = head
+        opened["attempt"] = attempt_of(opened) + 1
         entry["apply_base_sha"] = head
         entry["fix_rounds"] = 0
         entry["apply"] = {
@@ -313,6 +346,10 @@ def cmd_next_apply_round(args: argparse.Namespace) -> None:
             "applied": [], "failed": [],
             "base_sha": head, "head_sha": None, "merged_at": None,
         }
+    elif opened.get("status") == "pending":
+        # 開いたまま閉じていない試行の再開。**起点も試行の番号も動かさない。**
+        info(f"↻ 適用ラウンド {opened['apply_round']} の試行を再開します")
+        entry["apply_base_sha"] = opened.get("base_sha")
     else:
         # 取り込み済みの群を開き直した。**起点も修正の回数も動かさない。**
         info(f"↻ 適用ラウンド {opened['apply_round']} は取り込み済みです（検証から再開）")
@@ -334,10 +371,89 @@ def cmd_next_apply_round(args: argparse.Namespace) -> None:
     )
 
 
+def _check_already_merged_apply(ctx: _ApplyExecutionContext) -> bool:
+    """取り込み済み判定を行い、再実行を制御する。処理済みなら True を返す。
+
+    **叩き直しても同じ判定を返す。** 取り込み済みで再実行すると、前回作った
+    取り消しコミットが「未割当」と判定され、群ごと取り消してしまう。
+    """
+    record = ctx.entry.get("apply") or {}
+    if record.get("merged_at") and record.get("apply_round", ctx.group["apply_round"]) \
+            == ctx.group["apply_round"]:
+        applied_before = record.get("applied") or []
+        info(
+            f"↻ 適用ラウンド {ctx.group['apply_round']} の適用は取り込み済みです"
+            f"（採用 {len(applied_before)} 件 / 失敗 "
+            f"{len(record.get('failed') or [])} 件）"
+        )
+        if not applied_before:
+            # **採用 0 件の群は取り消し済みに直す**（#592）。残したままだと、
+            # 次に群を開く操作がこの群を選び直して担当を起動し続ける。
+            ctx.group["status"] = "dropped"
+            ctx.group.setdefault("drop_reason", "empty")
+            ctx.state["phase"] = phase_after_group(ctx.entry)
+            if not ctx.args.dry_run:
+                statefile.save(ctx.path, ctx.state)
+            sys.exit(2)
+        return True
+    return False
+
+
+def _verify_baseline_test_gate(ctx: _ApplyExecutionContext) -> None:
+    """着手前テスト結果 (baseline) を検証し、成功でなければ適用をブロックする。
+
+    **着手前のテストの確認は、結果を読むより先に行う。** 成功と確認できていない
+    状態で採ると、壊したのか元から壊れていたのかを判別する手段が無い。`red` だけ
+    でなく `unknown`（確認していない）も拒否する。
+    """
+    baseline = ctx.state.get("baseline_test") or {}
+    if baseline.get("status") != "green":
+        _block_group_items(ctx)
+        die(
+            f"着手前のテストが成功と確認できていません（status={baseline.get('status')}）。"
+            "適用へ着手しません（全項目を blocked）",
+            code=4,
+        )
+
+
+def _finalize_apply_result(
+    ctx: _ApplyExecutionContext,
+    record: dict[str, Any],
+    failed: list[str],
+) -> None:
+    """検証結果に応じて状態更新、取り消し、または公開プッシュを反映する。"""
+    # `--dry-run` では git も状態ファイルも触らない。片方だけ進むと、確認の
+    # つもりで実行した利用者の進行が壊れる。
+    if ctx.args.dry_run:
+        if failed:
+            drop_items(ctx.state, ctx.entry, failed, dry_run=True)
+        info("（dry-run）状態ファイルは更新していません")
+        applied = list(record["applied"])
+    elif failed:
+        # `merged_at` は `_apply_drop` が取り消しの完了時点で立てる。
+        applied = _apply_drop(ctx.path, ctx.state, ctx.entry, ctx.group, failed)
+    else:
+        # **全項目が通ったときも進行側が公開する。** 実装担当は push しないため、
+        # ここで公開しないと Pull Request 上の差分が古いままになる。
+        ctx.group["status"] = "applied"
+        # 次は `verify-round` がテストで検証する。ここではまだ群を閉じない。
+        ctx.state["phase"] = "verify"
+        record["merged_at"] = statefile.now()
+        # 保留の印・保存・push・印の解除は 1 か所が持つ（`push_with_retry_marker`）。
+        push_with_retry_marker(ctx.path, ctx.state, ctx.entry)
+        applied = list(record["applied"])
+
+    if not applied:
+        info("この適用ラウンドは取り消しました。検証は行いません")
+        sys.exit(2)
+
+
 def cmd_merge_apply(args: argparse.Namespace) -> None:
     """Step 4 — 適用ラウンド 1 つ分の適用結果を検証して取り込む。
 
-    終了コード: 0 = 取り込んだ / 2 = この群を取り消した（次の群へ進む）。
+    終了コード: 0 = 取り込んだ / 2 = この群を取り消した、または担当を替えて開き直す
+    （次の群へ進む） / 4 = 着手前のテストが成功と確認できていない・範囲を確定
+    できない・群が無い。
 
     **適用そのものが通らないときは修正ラウンドを回さない**（競合・対象が消えて
     いる・手順を外れた）。修正ラウンドはテストの失敗を直す工程であり、前提その
@@ -354,22 +470,21 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
         discard_impl_leftovers(state, state["worktrees"]["work"])
         _resume_incomplete_apply(path, state, entry)
 
-    # **叩き直しても同じ判定を返す。** 取り込み済みで再実行すると、前回作った
-    # 取り消しコミットが「未割当」と判定され、群ごと取り消してしまう。
-    record = entry.get("apply") or {}
-    if record.get("merged_at") and record.get("apply_round", group["apply_round"]) \
-            == group["apply_round"]:
-        applied_before = record.get("applied") or []
-        info(
-            f"↻ 適用ラウンド {group['apply_round']} の適用は取り込み済みです"
-            f"（採用 {len(applied_before)} 件 / 失敗 "
-            f"{len(record.get('failed') or [])} 件）"
-        )
-        if not applied_before:
-            sys.exit(2)
+    if _check_already_merged_apply(ctx):
         return
 
-    payload, commit_range = _load_apply_context(ctx)
+    _verify_baseline_test_gate(ctx)
+
+    scope = _apply_scope(ctx)
+    if already_closed(scope):
+        info("↻ この試行は結果なしとして記録済みです")
+        sys.exit(2)
+
+    outcome = read_result(state, scope.impl, "apply", args.round)
+    if outcome.payload is None:
+        _close_failed_attempt(ctx, scope, outcome)
+
+    payload, commit_range = _load_apply_context(ctx, outcome.payload)
 
     reported, unknown_ids = _collect_apply_reports(payload, group)
 
@@ -382,30 +497,7 @@ def cmd_merge_apply(args: argparse.Namespace) -> None:
     )
 
     record = _record_apply_result(entry, group, commit_range, applied, failed, payload)
-
-    # `--dry-run` では git も状態ファイルも触らない。片方だけ進むと、確認の
-    # つもりで実行した利用者の進行が壊れる。
-    if args.dry_run:
-        if failed:
-            drop_items(state, entry, failed, dry_run=True)
-        info("（dry-run）状態ファイルは更新していません")
-        applied = list(record["applied"])
-    elif failed:
-        # `merged_at` は `_apply_drop` が取り消しの完了時点で立てる。
-        applied = _apply_drop(path, state, entry, group, failed)
-    else:
-        # **全項目が通ったときも進行側が公開する。** 実装担当は push しないため、
-        # ここで公開しないと Pull Request 上の差分が古いままになる。
-        group["status"] = "applied"
-        # 次は `verify-round` がテストで検証する。ここではまだ群を閉じない。
-        state["phase"] = "verify"
-        record["merged_at"] = statefile.now()
-        # 保留の印・保存・push・印の解除は 1 か所が持つ（`push_with_retry_marker`）。
-        push_with_retry_marker(path, state, entry)
-
-    if not applied:
-        info("この適用ラウンドは取り消しました。検証は行いません")
-        sys.exit(2)
+    _finalize_apply_result(ctx, record, failed)
 
 
 def _record_apply_result(
@@ -444,26 +536,120 @@ def _block_group_items(ctx: _ApplyExecutionContext) -> None:
         statefile.save(ctx.path, ctx.state)
 
 
-def _load_apply_context(
-    ctx: _ApplyExecutionContext,
-) -> tuple[dict[str, Any], _ApplyCommitRange]:
-    impl = ctx.group.get("impl") or ctx.entry["impl"]
-    result = result_path(ctx.state, impl, stem_for(impl, "apply", ctx.state["id"], ctx.args.round))
-    payload = read_result(result, impl)
+def _apply_scope(ctx: _ApplyExecutionContext) -> IntakeScope:
+    """適用の取り込み 1 回分の範囲の値。
 
-    record_observed_model(ctx.entry, "impl", impl, ctx.state, "apply", ctx.args.round)
+    起点は提案ラウンドの控えが持ち、群の起点も同じ値へ揃える。結末の記録は群が
+    持つ。**試行の番号が 0 なら 1 として扱う**（この版より前に開いた群の再開）。
+    """
+    group = ctx.group
+    return IntakeScope(
+        holder=ctx.entry,
+        base_key="apply_base_sha",
+        records=group,
+        phase="apply",
+        attempt=attempt_of(group) or 1,
+        impl=group.get("impl") or ctx.entry["impl"],
+        label=f"R{ctx.entry['round']}-A{group['apply_round']}",
+        mirror=group,
+    )
 
-    # 着手前のテストが**成功と確認できていない限り**適用結果を採らない。
-    # `red` だけでなく `unknown`（確認していない）も拒否する。確認していない状態を
-    # 通すと、「壊したのか元から壊れていたのか」を判別する手段が無いまま進む。
-    baseline = ctx.state.get("baseline_test") or {}
-    if baseline.get("status") != "green":
+
+def _switch_apply_impl(state: dict[str, Any], group: dict[str, Any]) -> bool:
+    """結果を残さなかった群の担当を、次の輪番の別の担当へ替える。替えたら真。
+
+    **1 つ進めるだけにしない。** 輪番は参加者の数で 1 周するため、1 つ先が同じ担当
+    になることがある。その群で失敗した担当のどれとも違う担当が出た最初の番号を採る。
+    参加者の数だけ進めても出なければ、替える先が無い（#728 の決定 8）。
+    """
+    tried = {
+        record.get("impl") for record in (group.get("failed_attempts") or [])
+        if record.get("phase") == "apply"
+    }
+    tried.add(group.get("impl"))
+    seq = safe_int(state.get("apply_seq"))
+    for _ in range(len(state.get("impl_capable") or []) or 4):
+        seq += 1
+        impl, requested = impl_for_seq(state, seq)
+        if impl in tried:
+            continue
+        state["apply_seq"] = seq
+        group["impl"] = impl
+        group["impl_model"] = {"requested": requested, "observed": None}
+        info(f"↻ 適用ラウンド {group['apply_round']} の担当を {impl} へ替えます")
+        return True
+    return False
+
+
+def _no_result_reason(group: dict[str, Any]) -> str:
+    """見送りの理由。どの担当がどの理由で結果を残さなかったかを並べる。"""
+    trail = " → ".join(
+        f"{record.get('impl')}: {record.get('reason')}"
+        for record in (group.get("failed_attempts") or [])
+        if record.get("phase") == "apply"
+    )
+    return f"実装担当が結果を残しませんでした（{trail}）"
+
+
+def _drop_group_without_result(ctx: _ApplyExecutionContext) -> None:
+    """結果を残せないまま上限に達した群を取り消し、項目を見送りへ入れる。"""
+    reason = _no_result_reason(ctx.group)
+    info(f"❌ {reason}")
+    for item_id in ctx.group["items"]:
+        item = find_item(ctx.state, item_id, required=False)
+        if item is None:
+            continue
+        item["status"] = "abandoned"
+        item["failure_reason"] = reason
+    ctx.group["status"] = "dropped"
+    ctx.group["drop_reason"] = "no_result"
+    ctx.entry["apply"] = {
+        "apply_round": ctx.group["apply_round"],
+        "applied": [], "failed": list(ctx.group["items"]),
+        "base_sha": ctx.entry.get("apply_base_sha"),
+        "head_sha": None,
+        "merged_at": statefile.now(),
+    }
+    ctx.state["phase"] = phase_after_group(ctx.entry)
+    _defer_abandoned_items(ctx.state, ctx.group)
+
+
+def _close_failed_attempt(
+    ctx: _ApplyExecutionContext, scope: IntakeScope, outcome: Any
+) -> None:
+    """適用担当が結果を残さなかった試行を閉じる。**必ず終了する。**
+
+    取り消しと記録を共通の手順へ通したあと、開き直しの判定で担当を替えるか群ごと
+    取り消すかを決める。替える先が無いときだけ、起動し直しの可否で決める。
+    """
+    if ctx.args.dry_run:
+        info("（dry-run）適用結果がありません。状態ファイルは更新していません")
+        sys.exit(2)
+    closed = close_without_result(ctx.path, ctx.state, scope, outcome)
+    if closed.range_unknown:
         _block_group_items(ctx)
         die(
-            f"着手前のテストが成功と確認できていません（status={baseline.get('status')}）。"
-            "適用へ着手しません（全項目を blocked）",
-            code=2,
+            "適用の範囲を確定できませんでした"
+            f"（起点 {ctx.entry.get('apply_base_sha')}）。検証できない適用は採りません",
+            code=4,
         )
+    ctx.group["attempt"] = scope.attempt
+    drop = group_reopening(ctx.group) != "open"
+    if not drop and not _switch_apply_impl(ctx.state, ctx.group):
+        # 替える先が無い。起動し直しても解けない結末（利用上限）なら、同じ担当で
+        # もう一度起動しても待ちと相手の枠を使うだけなので、ここで取り消す。
+        drop = not closed.relaunch_same_agent
+    if drop:
+        _drop_group_without_result(ctx)
+    statefile.save(ctx.path, ctx.state)
+    sys.exit(2)
+
+
+def _load_apply_context(
+    ctx: _ApplyExecutionContext, payload: dict[str, Any],
+) -> tuple[dict[str, Any], _ApplyCommitRange]:
+    impl = ctx.group.get("impl") or ctx.entry["impl"]
+    record_observed_model(ctx.entry, "impl", impl, ctx.state, "apply", ctx.args.round)
 
     # 検証の材料は git から取る。結果ファイルから使うのは
     # 「どのコミットがこの群のものか」という対応付けだけ。
@@ -479,7 +665,7 @@ def _load_apply_context(
             "適用の範囲を確定できませんでした"
             f"（起点 {ctx.entry.get('apply_base_sha')} / HEAD {head_sha}）。"
             "検証できない適用は採りません",
-            code=2,
+            code=4,
         )
     return payload, _ApplyCommitRange(work, head_sha, ordered_range, in_range)
 
@@ -560,23 +746,12 @@ def _revert_unverified_apply_round(
 ) -> None:
     """検証を通らない適用ラウンドの範囲を取り消し、状態と公開を反映する。"""
     # 範囲全体を取り消す。どのコミットが安全かを決められない以上、
-    # 起点まで戻すのが最も確実である。順序は `revert_item_commits` が
-    # git の履歴から決め直す。
-    whole_round = {
-        "item_id": f"R{ctx.entry['round']}-A{ctx.group['apply_round']}",
-        "commits": list(commit_range.ordered_range),
-    }
-    if not ctx.args.dry_run:
-        # **取り消しへ着手する前に印を立てる。** 取り消しは済んだのに push
-        # できずに終わると、未検証の変更が Pull Request に残ったままになる。
-        ctx.entry["pending_push"] = True
-        statefile.save(ctx.path, ctx.state)
-    revert_item_commits(ctx.state, whole_round, ctx.args.dry_run)
-    if not ctx.args.dry_run:
-        # 取り消し後の状態を新しい起点にする。叩き直しても範囲が空になり、
-        # 取り消しコミット自体を「未割当」として再び戻すことがない。
-        ctx.entry["apply_base_sha"] = git_out(commit_range.work, ["rev-parse", "HEAD"])
-        ctx.group["base_sha"] = ctx.entry["apply_base_sha"]
+    # 起点まで戻すのが最も確実である。取り消しの本体は 3 つの取り込みで共有する
+    # （`intake.discard_unverified`）。印を立てる順序も起点の更新もそちらが持つ。
+    discard_unverified(
+        ctx.path, ctx.state, _apply_scope(ctx), commit_range.ordered_range,
+        dry_run=ctx.args.dry_run,
+    )
     ctx.entry["apply"] = {
         "apply_round": ctx.group["apply_round"],
         "applied": [], "failed": list(ctx.group["items"]),
@@ -662,22 +837,17 @@ def _record_apply_progress(
     })
 
 
-def _verify_apply_group(
+def _collect_apply_group_facts(
     ctx: _ApplyExecutionContext,
     commit_range: _ApplyCommitRange,
     reported: dict[str, dict[str, Any]],
-) -> tuple[list[str], list[str]]:
-    """適用ラウンドをまとめて検証し `(採用, 失敗)` を返す。
+) -> tuple[list[str], list[str], list[dict[str, Any]]]:
+    """群の申告から `(欠落項目, 申告 SHA, コミット事実)` を組み立てる。
 
-    **判定は全件同時である**（決定 3）。群の中は 1 コミットなので、失敗を項目まで
-    特定しても取り消しは分離できない。
+    **群の全項目が同じコミットを申告する。** 申告の無い項目は、適用されたことを
+    確かめる手がかりが無い。群の中は 1 コミットなので、1 件の欠落が群の全件を
+    巻き込む（「群の中の道連れ」）。
     """
-    scope = ctx.state.get("target_scope") or []
-    items = [find_item(ctx.state, i) for i in ctx.group["items"]]
-
-    # **群の全項目が同じコミットを申告する。** 申告の無い項目は、適用されたことを
-    # 確かめる手がかりが無い。群の中は 1 コミットなので、1 件の欠落が群の全件を
-    # 巻き込む（「群の中の道連れ」）。
     missing = [
         i for i in ctx.group["items"] if not reported_shas(reported.get(i) or {})
     ]
@@ -688,14 +858,33 @@ def _verify_apply_group(
         commit_range.work, shas, commit_range.in_range, "", ctx.state["head_branch"],
         safe_int(ctx.state.get("test_timeout"), DEFAULT_TEST_TIMEOUT),
     )
+    return missing, shas, facts
+
+
+def _determine_apply_problem(
+    ctx: _ApplyExecutionContext,
+    items: list[dict[str, Any]],
+    missing: list[str],
+    facts: list[dict[str, Any]],
+) -> str:
+    """欠落と `verify_apply_round` から、この適用ラウンドの問題点を決める。"""
     if missing:
-        problem = (
+        return (
             f"適用結果に項目がありません: {', '.join(missing)}"
             "（群の全項目を 1 つのコミットへまとめ、各項目へ同じ SHA を申告します）"
         )
-    else:
-        problem = verify_apply_round(items, facts, scope)
+    scope = ctx.state.get("target_scope") or []
+    return verify_apply_round(items, facts, scope)
 
+
+def _record_apply_group_outcome(
+    ctx: _ApplyExecutionContext,
+    items: list[dict[str, Any]],
+    shas: list[str],
+    facts: list[dict[str, Any]],
+    problem: str,
+) -> None:
+    """保留判断・項目状態・進捗を記録し、結果を出力して保存する。"""
     # **機械で決まらなかったテストの差分を記録する**（#443）。落とさないが、
     # 通ったものとしても扱わない。進行側がこれを見て段 2（`judge-test-changes`）を
     # 起動する。**空でないまま収束させない。**
@@ -718,6 +907,22 @@ def _verify_apply_group(
         )
     if not ctx.args.dry_run:
         statefile.save(ctx.path, ctx.state)
+
+
+def _verify_apply_group(
+    ctx: _ApplyExecutionContext,
+    commit_range: _ApplyCommitRange,
+    reported: dict[str, dict[str, Any]],
+) -> tuple[list[str], list[str]]:
+    """適用ラウンドをまとめて検証し `(採用, 失敗)` を返す。
+
+    **判定は全件同時である**（決定 3）。群の中は 1 コミットなので、失敗を項目まで
+    特定しても取り消しは分離できない。
+    """
+    items = [find_item(ctx.state, i) for i in ctx.group["items"]]
+    missing, shas, facts = _collect_apply_group_facts(ctx, commit_range, reported)
+    problem = _determine_apply_problem(ctx, items, missing, facts)
+    _record_apply_group_outcome(ctx, items, shas, facts, problem)
     if problem:
         return [], list(ctx.group["items"])
     return list(ctx.group["items"]), []

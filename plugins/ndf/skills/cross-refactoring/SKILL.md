@@ -46,15 +46,16 @@ allowed-tools:
 | --- | --- | --- |
 | テスト整備ラウンド | **足すべきテストを集める。** 3 者が提案し、採否を決める | `--max-test-rounds`（既定 2） |
 | 提案ラウンド | **構造改善の提案を集める。** 3 者が提案し、採否を決める | `--max-outer-rounds`（既定 3） |
-| 適用ラウンド | **同時に適用して検証する。** 書き換えるファイルが重ならない項目だけを含む。**上の 2 つのラウンドが共有する** | 別に置かない（`--max-items-per-round` が実質の上限） |
+| 適用ラウンド | **同時に適用して検証する。** 書き換えるファイルが重ならない項目だけを含む。**上の 2 つのラウンドが共有する** | 同じ群を開き直すのは 2 回まで（引数を持たない固定値）。件数は `--max-items-per-round` が実質の上限 |
 | 修正ラウンド | **検証の失敗を直す。上の 2 つのラウンドが共有する** | `--max-fix-rounds`（既定 3） |
 | 改善項目 | 構造改善の提案の 1 件。`<ファイル>#<シンボル>` と兆候で識別する | — |
 | テスト項目 | テスト整備の提案の 1 件。固定する入口（`target`）と経路の種類（`case`）で識別する | — |
 
 **「バッチ」「パッチ」の語は使わない。** 読み手が別の意味で知っている語である。
 
-**適用ラウンドに別の上限を置かない。** 採用件数の上限が既に群の数を切っている。
-上限を 2 つ置くと、どちらで止まったのかを読み解く必要が出る。
+**同じ群を開き直すのは 2 回までである。** 2 回目は別の担当が試す。2 回とも結果を
+残さなければ、担当ではなく群の側を疑える。止まった理由は群の記録（取り消しの理由と
+結末の記録）が持つ。
 
 ## 設計方針
 
@@ -302,6 +303,7 @@ while :; do
     "$SCRIPTS/launch-cli.sh" "$a" "$PROPOSE_PHASE" "$ID" "$ROUND"
   done
   # 監視の上限は `--phase` の工程で上限の表（`lib/limits.py`）が決める。秒数を書かない。
+  # 無進捗の許容だけは `init` が出す（テスト 1 回分の無出力で打ち切らないため）。
   # **結果ファイルの名前は種類で変えない**ので、監視の雛形と工程（`propose`）は
   # テスト整備ラウンドでもそのまま使える。
   "$LIB/monitor.py" "$ID" --agents "$RUNTIMES_CSV" --tmp-dir "$TMP_DIR" \
@@ -314,8 +316,9 @@ while :; do
     rf_eval next-apply-round "$ID" "$ROUND" || break   # 終了コード 1 = 群が尽きた
     "$SCRIPTS/launch-cli.sh" "$IMPL" apply "$ID" "$ROUND"
     "$LIB/monitor.py" "$ID" --agents "$IMPL" --tmp-dir "$TMP_DIR" \
-        --stem-template "{agent}-apply-r$ROUND" --phase apply
-    # 終了コード 2 = 適用が通らずこの群を取り消した。修正ラウンドは回さない
+        --stem-template "{agent}-apply-r$ROUND" --phase apply \
+        --stall-timeout "$IMPL_STALL_TIMEOUT"
+    # 終了コード 2 = この群を取り消した、または担当を替えて開き直す。修正ラウンドは回さない
     rf merge-apply "$ID" "$ROUND" || continue
 
     while :; do                               # 検証と修正の繰り返し
@@ -325,7 +328,8 @@ while :; do
       fi
       "$SCRIPTS/launch-cli.sh" "$IMPL" fix "$ID" "$ROUND"
       "$LIB/monitor.py" "$ID" --agents "$IMPL" --tmp-dir "$TMP_DIR" \
-          --stem-template "{agent}-fix-r$ROUND" --phase fix
+          --stem-template "{agent}-fix-r$ROUND" --phase fix \
+          --stall-timeout "$IMPL_STALL_TIMEOUT"
       rf merge-fix "$ID" "$ROUND"
     done
     # 次の群と、次のラウンドの提案に備えて読み取り用を同期する
@@ -346,7 +350,8 @@ while :; do
     1) echo "⚠ 最終ゲートが通らないまま修正の上限に達しました" >&2; break ;;
     2) "$SCRIPTS/launch-cli.sh" "$FINAL_FIX_IMPL" final-fix "$ID"
        "$LIB/monitor.py" "$ID" --agents "$FINAL_FIX_IMPL" --tmp-dir "$TMP_DIR" \
-           --stem-template "{agent}-final-fix" --phase final-fix
+           --stem-template "{agent}-final-fix" --phase final-fix \
+           --stall-timeout "$IMPL_STALL_TIMEOUT"
        rf merge-final-fix "$ID" ;;
     *) exit $gate ;;
   esac

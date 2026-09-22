@@ -326,6 +326,30 @@ def test_init_emits_shell_assignments(run_init, tmp_path, capsys):
     assert "TMP_DIR=" in out and "WORK=" in out
 
 
+def test_init_emits_the_stall_timeout_for_the_implementer(run_init, tmp_path, capsys):
+    """AC40: 無進捗の許容は、テストの制限時間に 900 秒を足した値である。
+
+    適用と修正の担当はテストを 1 回実行し、その間は何も出力しない。制限時間
+    そのままでは実行中に打ち切られる。
+    """
+    args = _args(tmp_path)
+    args.test_timeout = 900          # `--test-timeout` の既定
+
+    run_init(args)
+
+    assert "IMPL_STALL_TIMEOUT=1800" in capsys.readouterr().out
+
+
+def test_the_stall_timeout_follows_the_test_timeout(run_init, tmp_path, capsys):
+    """AC40: テストの制限時間を変えると、無進捗の許容も一緒に動く。"""
+    args = _args(tmp_path)
+    args.test_timeout = 1200
+
+    run_init(args)
+
+    assert "IMPL_STALL_TIMEOUT=2100" in capsys.readouterr().out
+
+
 def test_existing_worktree_is_synced_to_origin(run_init, tmp_path, origin_repo):
     """再開までに head が進んでいたら、追いついてから始めること。
 

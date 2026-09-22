@@ -987,3 +987,147 @@ def test_the_drop_is_reported_as_a_count_only(
     assert "取り消し 2 件" in out
     assert "内訳は改修計画にある" in out
     assert "R1-001 を見送りました" not in out
+
+
+# ---------- 修正の担当が結果を残さないとき（#728 の決定 10） ----------
+
+def _fix_state_with_group_impl(tmp_path, group_impl="agy", fix_rounds=0):
+    """群の担当と提案ラウンドの担当が違う状態。"""
+    state_path = _state(tmp_path, [_finding("R1-001")], groups=[{
+        "apply_round": 1, "impl": group_impl,
+        "impl_model": {"requested": None, "observed": None},
+        "items": ["R1-001", "R1-002"], "status": "applied",
+        "base_sha": "base0", "head_sha": None, "fix_rounds": fix_rounds,
+        "attempt": 1,
+    }])
+    state = read_state(state_path)
+    state["rounds"][0]["fix_rounds"] = fix_rounds
+    state["rounds"][0]["fix_base_sha"] = "FIX_BASE"
+    state["rounds"][0]["fix_attempts"] = 1
+    state_path.write_text(__import__("json").dumps(state), encoding="utf-8")
+    return state_path
+
+
+def _fix_args():
+    return type("A", (), {"id": 130, "round": 1})()
+
+
+def test_merge_fix_reads_the_result_of_the_group_agent(
+    patch_lib, cmd_converge, tmp_path, env_tmp_dir, no_git
+):
+    """AC23: 群の担当の結果を読む。提案ラウンドの担当の結果ではない。"""
+    state_path = _fix_state_with_group_impl(tmp_path)
+    env_tmp_dir(state_path)
+    fact = _fix_commit()
+    patch_lib("git_out", lambda work, args, **k: (
+        args[-1].replace("^{commit}", "")
+        if args[:2] == ["rev-parse", "--verify"] else "HEAD_NOW"))
+    patch_lib("commits_in_range", lambda work, base, head: [fact["sha"]])
+    patch_lib("collect_commit_facts",
+              lambda work, shas, rng, cmd, branch, timeout=None: [fact])
+    patch_lib("resolved_threads_on_github", lambda repo, pr: set())
+    write_result(state_path, "agy-fix-r1", {
+        "resolved_thread_ids": [], "elapsed_seconds": 3,
+        "commits": [{"sha": fact["sha"]}],
+    })
+
+    cmd_converge.cmd_merge_fix(_fix_args())
+
+    assert read_state(state_path)["rounds"][0]["fix_rounds"] == 1
+
+
+def test_a_missing_fix_result_advances_the_fix_round(
+    patch_lib, cmd_converge, tmp_path, env_tmp_dir, no_git
+):
+    """AC24: 修正の結果が無ければ、記録を残して修正ラウンドを 1 進める。"""
+    state_path = _fix_state_with_group_impl(tmp_path)
+    env_tmp_dir(state_path)
+    patch_lib("git_out", lambda work, args, **k: "HEAD_NOW")
+    patch_lib("commits_in_range", lambda work, base, head: [])
+
+    with pytest.raises(SystemExit) as e:
+        cmd_converge.cmd_merge_fix(_fix_args())
+
+    assert e.value.code == 2
+    entry = read_state(state_path)["rounds"][0]
+    assert entry["fix_rounds"] == 1
+    records = entry["apply_rounds"][0]["failed_attempts"]
+    assert [(r["phase"], r["impl"], r["reason"]) for r in records] == [
+        ("fix", "agy", "missing")]
+
+
+def test_the_abandon_check_passes_after_the_fix_rounds_run_out(
+    patch_lib, cmd_converge, tmp_path, env_tmp_dir, no_git
+):
+    """AC24: 上限の回数だけ結果が無ければ、見送りの判定が 0 を返す。"""
+    state_path = _fix_state_with_group_impl(tmp_path)
+    env_tmp_dir(state_path)
+    patch_lib("git_out", lambda work, args, **k: "HEAD_NOW")
+    patch_lib("commits_in_range", lambda work, base, head: [])
+
+    for attempt in range(1, 4):
+        state = read_state(state_path)
+        state["rounds"][0]["fix_attempts"] = attempt
+        state_path.write_text(__import__("json").dumps(state), encoding="utf-8")
+        with pytest.raises(SystemExit):
+            cmd_converge.cmd_merge_fix(_fix_args())
+
+    assert read_state(state_path)["rounds"][0]["fix_rounds"] == 3
+    cmd_converge.cmd_should_abandon(_fix_args())
+
+
+def test_the_same_fix_attempt_does_not_advance_the_round_twice(
+    patch_lib, cmd_converge, tmp_path, env_tmp_dir, no_git
+):
+    """AC25: 検証を挟まず叩き直しても、修正ラウンドは進まない。"""
+    state_path = _fix_state_with_group_impl(tmp_path)
+    env_tmp_dir(state_path)
+    patch_lib("git_out", lambda work, args, **k: "HEAD_NOW")
+    patch_lib("commits_in_range", lambda work, base, head: [])
+
+    for _ in range(2):
+        with pytest.raises(SystemExit) as e:
+            cmd_converge.cmd_merge_fix(_fix_args())
+        assert e.value.code == 2
+
+    entry = read_state(state_path)["rounds"][0]
+    assert entry["fix_rounds"] == 1
+    assert len(entry["apply_rounds"][0]["failed_attempts"]) == 1
+
+
+def test_a_usage_limit_on_the_fix_jumps_to_the_cap(
+    patch_lib, cmd_converge, tmp_path, env_tmp_dir, no_git
+):
+    """AC26: 起動し直しても解けない結末では、修正ラウンドを上限の値にする。"""
+    state_path = _fix_state_with_group_impl(tmp_path)
+    env_tmp_dir(state_path)
+    patch_lib("git_out", lambda work, args, **k: "HEAD_NOW")
+    patch_lib("commits_in_range", lambda work, base, head: [])
+    (state_path.parent / "agy-fix-r1-monitor.json").write_text(
+        __import__("json").dumps({"reason": "usage_limit", "detail": "上限"}),
+        encoding="utf-8")
+
+    with pytest.raises(SystemExit) as e:
+        cmd_converge.cmd_merge_fix(_fix_args())
+
+    assert e.value.code == 2
+    assert read_state(state_path)["rounds"][0]["fix_rounds"] == 3
+    cmd_converge.cmd_should_abandon(_fix_args())
+
+
+def test_a_missing_fix_result_reverts_the_commits_in_range(
+    patch_lib, cmd_converge, tmp_path, env_tmp_dir, no_git
+):
+    """AC27: 結果が無くても、起点から先端までのコミットは取り消す。"""
+    state_path = _fix_state_with_group_impl(tmp_path)
+    env_tmp_dir(state_path)
+    patch_lib("git_out", lambda work, args, **k: "AFTER_REVERT")
+    patch_lib("commits_in_range", lambda work, base, head: ["fix2", "fix1"])
+
+    with pytest.raises(SystemExit):
+        cmd_converge.cmd_merge_fix(_fix_args())
+
+    assert [c[-1] for c in no_git if c[:2] == ["git", "revert"]] == ["fix2", "fix1"]
+    entry = read_state(state_path)["rounds"][0]
+    assert entry["fix_base_sha"] == "AFTER_REVERT"
+    assert entry["apply_rounds"][0]["failed_attempts"][0]["reverted"] == 2
