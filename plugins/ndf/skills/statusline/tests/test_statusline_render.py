@@ -118,6 +118,14 @@ def test_label_from_description_or_id(tmp_path):
     assert "wxyz 11k" in out
 
 
+def test_control_chars_in_description_are_dropped(tmp_path):
+    # 説明に ESC などの制御文字があっても端末へ出さない（画面消去などを実行させない）
+    write_agent(tmp_path, "aaaa1111", tokens=21_000, description="\u001b[2J\u009b画面消去")
+    out = render(tmp_path)
+    assert "\u001b[2J" not in out
+    assert "\u009b" not in out
+    assert "[2J画 21k" in plain(out)
+
 def test_path_with_spaces(tmp_path):
     root = tmp_path / "my project dir"
     write_agent(root, "aaaa1111", tokens=33_000, description="空白下")

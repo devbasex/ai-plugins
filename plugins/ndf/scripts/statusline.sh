@@ -64,8 +64,9 @@ if [ -n "$total_input" ]; then
         mtime=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null)
         [ -n "$mtime" ] && [ $((now - mtime)) -ge 30 ] && continue
       fi
-      # 説明の先頭 4 文字をラベルにする。種類名は general-purpose がほとんどで見分けに使えない
-      label=$(jq -r '.description // empty | gsub("\\s"; "") | .[0:4]' "${f%.jsonl}.meta.json" 2>/dev/null)
+      # 説明の先頭 4 文字をラベルにする。種類名は general-purpose がほとんどで見分けに使えない。
+      # 空白と制御文字（\p{Cc} = U+0000-001F / U+007F-009F）を除く。ESC などを端末へ出さないため
+      label=$(jq -r '.description // empty | gsub("[\\p{Cc}\\s]"; "") | .[0:4]' "${f%.jsonl}.meta.json" 2>/dev/null)
       [ -n "$label" ] || { label=$(basename "$f" .jsonl); label=${label#agent-}; label=${label:0:4}; }
       # 500k を超えたら赤で知らせる。1M 未満のモデルは Haiku（200K）だけなので、Haiku は 150k で知らせる
       limit=$WARN_TOKENS
