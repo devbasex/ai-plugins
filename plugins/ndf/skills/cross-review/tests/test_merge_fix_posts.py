@@ -70,8 +70,8 @@ def calls(monkeypatch, state_mod):
         seen["post"].append([i["kind"] for i in items])
         return rp.FixOutcome("https://x/pull/5850#issuecomment-9", 1, 1, 0, False, "")
 
-    monkeypatch.setattr(state_mod, "GITHUB",
-                        state_mod.GITHUB._replace(push_fix=push, post_fix=post))
+    monkeypatch.setattr(rp, "push_fix", push)
+    monkeypatch.setattr(rp, "post_fix", post)
     return seen
 
 

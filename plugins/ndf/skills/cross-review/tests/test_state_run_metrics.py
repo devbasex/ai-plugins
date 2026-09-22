@@ -172,9 +172,9 @@ def test_new_init_writes_the_summary(state_mod, review_dirs, monkeypatch):
     worktree, tmp_dir, metrics = review_dirs
     monkeypatch.setattr(state_mod, "_repo_from_git", lambda: "devbasex/ai-plugins")
     monkeypatch.setattr(
-        state_mod, "GITHUB", state_mod.GITHUB._replace(
-            fetch_pr_metadata=lambda pr, repo=None: state_mod.PrMetadata(
-                "devbasex/ai-plugins", "takemi", "feat/x", "abc123", "develop", True, 4000, None)))
+        state_mod, "_fetch_pr_metadata",
+        lambda pr, repo=None: state_mod.PrMetadata(
+            "devbasex/ai-plugins", "takemi", "feat/x", "abc123", "develop", True, 4000, None))
     monkeypatch.setattr(state_mod, "_fetch_changed_files", lambda pr, repo: [])
     monkeypatch.setattr(state_mod, "_is_registered_worktree", lambda wt: True)
     monkeypatch.setattr(state_mod, "_sync_worktree", lambda *a, **k: None)

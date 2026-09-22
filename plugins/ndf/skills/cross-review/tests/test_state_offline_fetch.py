@@ -125,10 +125,9 @@ def test_the_viewer_login_is_kept_in_the_state(state_mod, tmp_dir, monkeypatch,
     """一度取ったログイン名を状態ファイルへ持つ。待ち行列の冪等の照合が使う。"""
     worktree = tmp_path / "wt"
     worktree.mkdir()
-    monkeypatch.setattr(state_mod, "GITHUB", state_mod.GITHUB._replace(
-        fetch_pr_metadata=lambda pr, repo=None:
-        state_mod.PrMetadata(REPO, "takemi", "feat/x", "abc",
-                             "develop", False, 4000, None)))
+    monkeypatch.setattr(state_mod, "_fetch_pr_metadata", lambda pr, repo=None:
+                        state_mod.PrMetadata(REPO, "takemi", "feat/x", "abc",
+                                             "develop", False, 4000, None))
     monkeypatch.setattr(state_mod, "_fetch_changed_files", lambda pr, repo: [])
     monkeypatch.setattr(state_mod, "_sh", lambda cmd, check=True: "takemi")
     monkeypatch.setattr(state_mod, "_create_worktree", lambda *a: None)

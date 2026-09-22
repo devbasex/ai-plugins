@@ -77,9 +77,9 @@ def stub_init_scaffolding(monkeypatch, state_mod, tmp_path):
     worktree = tmp_path / "wt-not-created-yet"  # 存在しないパス（新規作成扱い）
 
     monkeypatch.setattr(
-        state_mod, "GITHUB", state_mod.GITHUB._replace(
-            fetch_pr_metadata=lambda pr, repo=None: state_mod.PrMetadata(
-                REPO, "takemi", HEAD_BRANCH, "abc123", "develop", True, 4000, None)),
+        state_mod, "_fetch_pr_metadata",
+        lambda pr, repo=None: state_mod.PrMetadata(
+            REPO, "takemi", HEAD_BRANCH, "abc123", "develop", True, 4000, None),
     )
     monkeypatch.setattr(state_mod, "_fetch_changed_files", lambda pr, repo: [])
     monkeypatch.setattr(state_mod, "_repo_from_git", lambda: REPO)

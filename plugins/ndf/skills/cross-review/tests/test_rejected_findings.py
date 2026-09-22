@@ -83,10 +83,9 @@ def test_init_stores_an_empty_rejected_findings_list(tmp_dir, state_mod, monkeyp
     worktree = tmp_dir / "worktree"
     worktree.mkdir()
     monkeypatch.setattr(state_mod, "_repo_from_git", lambda: REPO)
-    monkeypatch.setattr(state_mod, "GITHUB", state_mod.GITHUB._replace(
-        fetch_pr_metadata=lambda pr, repo:
-        state_mod.PrMetadata(REPO, "author", "feature/test", "abc",
-                             "develop", False, 4000, None)))
+    monkeypatch.setattr(state_mod, "_fetch_pr_metadata", lambda pr, repo:
+                        state_mod.PrMetadata(REPO, "author", "feature/test", "abc",
+                                             "develop", False, 4000, None))
     monkeypatch.setattr(state_mod, "_sh", lambda cmd, check=True: "viewer")
     monkeypatch.setattr(state_mod, "_fetch_changed_files", lambda pr, repo: [])
     monkeypatch.setattr(state_mod, "_is_registered_worktree", lambda path: True)

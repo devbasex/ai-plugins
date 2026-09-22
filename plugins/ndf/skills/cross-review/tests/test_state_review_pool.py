@@ -358,10 +358,9 @@ def new_init(state_mod, monkeypatch, tmp_path):
     """新規の初期化を GitHub と git に触れずに通す。"""
     (tmp_path / "wt").mkdir(exist_ok=True)
     monkeypatch.setattr(state_mod, "_repo_from_git", lambda: REPO_INIT)
-    monkeypatch.setattr(state_mod, "GITHUB", state_mod.GITHUB._replace(
-        fetch_pr_metadata=lambda pr, repo=None:
-        state_mod.PrMetadata(REPO_INIT, "author", "feat/x", "abc",
-                             "develop", False, 4000, None)))
+    monkeypatch.setattr(state_mod, "_fetch_pr_metadata", lambda pr, repo=None:
+                        state_mod.PrMetadata(REPO_INIT, "author", "feat/x", "abc",
+                                             "develop", False, 4000, None))
     monkeypatch.setattr(state_mod, "_sh", lambda cmd, check=True: "viewer")
     monkeypatch.setattr(state_mod, "_fetch_changed_files", lambda pr, repo: [])
     monkeypatch.setattr(state_mod, "_is_registered_worktree", lambda path: True)
