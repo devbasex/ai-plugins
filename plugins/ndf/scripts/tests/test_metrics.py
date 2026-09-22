@@ -104,3 +104,55 @@ def test_aggregate_current_metrics_for_representative_state() -> None:
             "（実測不可）（レビュー担当）",
         ],
     }
+
+
+def test_format_report_current_structure() -> None:
+    """現状固定。format_report の見出し・表の行・注意書きを含む出力構造を記録する。"""
+    report_metrics = {
+        "impl": {
+            "codex / gpt-5": {
+                "rounds": 1,
+                "applied": 1,
+                "abandoned": 0,
+                "first_review_approval_rate": 1.0,
+                "avg_fix_rounds": 0.0,
+                "budget_exceeded_rate": 0.0,
+                "test_failure_rate": 0.0,
+                "seconds": 120.0,
+            }
+        },
+        "reviewer": {
+            "claude / sonnet": {
+                "reviews": 1,
+                "findings": 2,
+                "resolution_rate": 0.5,
+                "agreement_rate": 1.0,
+                "seconds": 30.0,
+            }
+        },
+        "unmeasured": ["round 2: kiro の auto は分離"],
+        "assumed": ["round 1: codex は前提で数える"],
+    }
+
+    report = metrics.format_report(report_metrics)
+
+    # 見出しが含まれること
+    assert "## 実装担当" in report
+    assert "## レビュー担当" in report
+    assert "## 集計から分離したラウンド" in report
+    assert "## 指定値で代用したラウンド" in report
+    assert "## 比較として読むときの限界" in report
+
+    # 各表の要点（行データ）が含まれること
+    assert "| codex / gpt-5 |" in report
+    assert "| claude / sonnet |" in report
+
+    # unmeasured / assumed / caveats のリスト項目が含まれること
+    assert "- round 2: kiro の auto は分離" in report
+    assert "- round 1: codex は前提で数える" in report
+    for caveat in metrics.COMPARISON_CAVEATS:
+        assert f"- {caveat}" in report
+
+    # 全体の行数を現状の値で固定する
+    assert len(report.splitlines()) == 29
+

@@ -10,7 +10,12 @@ LIB = pathlib.Path(__file__).resolve().parents[1] / "lib"
 if str(LIB) not in sys.path:
     sys.path.insert(0, str(LIB))
 
-from models import ModelSpecError, observed_model, parse_model_args
+from models import (
+    ModelSpecError,
+    observed_model,
+    parse_model_args,
+    separation_reason,
+)
 
 
 @pytest.mark.parametrize(
@@ -58,3 +63,33 @@ def test_observed_model_selects_model_with_most_input_tokens() -> None:
     }"""
 
     assert observed_model("claude", stdout_text) == "claude-opus"
+
+
+@pytest.mark.parametrize(
+    ("runtime", "model", "expected"),
+    [
+        (
+            "kiro",
+            None,
+            "kiro の auto はラウンドごとに違うモデルが動きうる",
+        ),
+        (
+            "kiro",
+            "auto",
+            "kiro の auto はラウンドごとに違うモデルが動きうる",
+        ),
+        (
+            "codex",
+            None,
+            "codex はモデルを指定しておらず、実際に動いたモデルも取得できない",
+        ),
+        ("claude", None, None),
+        ("kiro", "claude-sonnet", None),
+        ("codex", "gpt-5", None),
+    ],
+)
+def test_separation_reason_current_behavior(
+    runtime: str, model: str | None, expected: str | None
+) -> None:
+    """現状固定。kiro の auto / 未指定かつ実測不可 / 分離しないの 3 分岐を記録する。"""
+    assert separation_reason(runtime, model) == expected
