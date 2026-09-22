@@ -128,6 +128,29 @@ def test_flush_stops_at_corrupt_json_and_keeps_following_items(
     ]
 
 
+def test_drop_removes_only_the_item_with_the_requested_sequence(
+    tmp_path: pathlib.Path,
+) -> None:
+    """現状固定。指定した連番の項目だけを取り除く。"""
+    paths = [_write_item(tmp_path, seq) for seq in range(1, 4)]
+    queue = post_queue.Queue(tmp_path)
+
+    assert queue.drop(2) is True
+    assert [path.name for path in queue.paths()] == [paths[0].name, paths[2].name]
+
+
+@pytest.mark.parametrize("seq", [None, 99])
+def test_drop_keeps_items_when_the_sequence_does_not_match(
+    tmp_path: pathlib.Path, seq: int | None
+) -> None:
+    """現状固定。連番が無い場合は何も取り除かない。"""
+    paths = [_write_item(tmp_path, item_seq) for item_seq in range(1, 3)]
+    queue = post_queue.Queue(tmp_path)
+
+    assert queue.drop(seq) is False
+    assert [path.name for path in queue.paths()] == [path.name for path in paths]
+
+
 def test_post_succeeds_directly_when_queue_is_empty(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

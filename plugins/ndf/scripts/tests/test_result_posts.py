@@ -222,6 +222,11 @@ _REJECT_EVENT = {
 }
 _ACCEPT = {"match": "pulls/730/reviews", "stdout": json.dumps(
     {"id": 99, "html_url": "https://x/pull/730#pullrequestreview-99"})}
+_RATE_LIMITED = {
+    "match": "pulls/730/reviews", "exit": 1,
+    "stdout": json.dumps({"message": "API rate limit exceeded"}),
+    "stderr": "gh: API rate limit exceeded (HTTP 429)\n",
+}
 
 
 def test_the_inlines_move_to_the_summary_when_the_position_is_not_resolved(
@@ -258,6 +263,29 @@ def test_another_rejection_of_the_same_status_is_not_moved(tmp_path, fake_gh) ->
 
     assert outcome.failed is True
     assert outcome.review_url is None
+
+
+def test_a_rate_limited_review_remains_queued_without_marking_the_note(
+        tmp_path, fake_gh) -> None:
+    """現状固定。上限時は失敗にせず、未投稿の要求と控えをそのまま残す。"""
+    fake_gh.set_rules([
+        {"match": "pulls/730/reviews?", "stdout": "[]"},
+        _RATE_LIMITED,
+    ])
+
+    outcome, payload = _post_review(tmp_path)
+
+    assert outcome.queued == 1
+    assert outcome.failed is False
+    assert outcome.review_url is None
+    assert outcome.posted_inline == 0
+    assert outcome.posted_body == 0
+    note = json.loads(payload.read_text(encoding="utf-8"))
+    assert all("posted_to" not in comment for comment in note["comments"])
+    queued = _queue(tmp_path).items()
+    assert len(queued) == 1
+    assert queued[0][1]["kind"] == "review-post"
+    assert queued[0][1]["attempts"] == 1
 
 
 def test_a_review_that_is_already_on_github_is_not_posted_again(
