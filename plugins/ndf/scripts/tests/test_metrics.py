@@ -106,6 +106,53 @@ def test_aggregate_current_metrics_for_representative_state() -> None:
     }
 
 
+def test_aggregate_current_metrics_for_unmeasured_models_and_missing_verdicts() -> None:
+    """現状固定。分離理由と判定なしレビューを担当ごとに記録する。"""
+    state = {
+        "items": [{"item_id": "R2-001", "status": "done"}],
+        "rounds": [
+            {
+                "round": 2,
+                "impl": "claude",
+                "impl_model": {
+                    "requested": "claude-opus",
+                    "observed": "claude-sonnet",
+                },
+                "reviewers": ["claude", "agy", "kiro", "codex"],
+                "reviewer_models": {
+                    "claude": {"requested": "claude-sonnet", "observed": "claude-sonnet"},
+                    "agy": {"requested": "gpt-5", "observed": None},
+                    "kiro": {"requested": "auto", "observed": None},
+                    "codex": {"requested": None, "observed": None},
+                },
+                "items": ["R2-001"],
+                "reviews": [
+                    {"claude": "APPROVE", "findings": []},
+                    {"claude": "APPROVE", "agy": "APPROVE", "findings": []},
+                ],
+            }
+        ],
+    }
+
+    result = metrics.aggregate(state)
+
+    # モデル不一致は警告されるが、現状では指定モデルの実装集計に残る。
+    assert list(result["impl"]) == ["claude / claude-opus"]
+    assert result["unmeasured"] == [
+        "round 2: ⚠ claude: 指定したモデル claude-opus と実際に動いたモデル "
+        "claude-sonnet が食い違っています。比較には使えません",
+        "round 2: kiro の auto はラウンドごとに違うモデルが動きうるため、"
+        "レビュー担当の集計から分離する",
+        "round 2: codex はモデルを指定しておらず、実際に動いたモデルも取得できないため、"
+        "レビュー担当の集計から分離する",
+    ]
+    assert set(result["reviewer"]) == {"agy / gpt-5", "claude / claude-sonnet"}
+    assert result["reviewer"]["claude / claude-sonnet"]["reviews"] == 2
+    assert result["reviewer"]["agy / gpt-5"]["reviews"] == 1
+    assert result["reviewer"]["claude / claude-sonnet"]["agreement_rate"] == 1.0
+    assert result["reviewer"]["agy / gpt-5"]["agreement_rate"] == 1.0
+
+
 def test_format_report_current_structure() -> None:
     """現状固定。format_report の見出し・表の行・注意書きを含む出力構造を記録する。"""
     report_metrics = {
@@ -155,4 +202,3 @@ def test_format_report_current_structure() -> None:
 
     # 全体の行数を現状の値で固定する
     assert len(report.splitlines()) == 29
-

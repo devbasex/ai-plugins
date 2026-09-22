@@ -12,6 +12,7 @@ if str(LIB) not in sys.path:
 
 from models import (
     ModelSpecError,
+    is_measurable,
     mismatch_warning,
     observed_model,
     parse_model_args,
@@ -94,6 +95,23 @@ def test_separation_reason_current_behavior(
 ) -> None:
     """現状固定。kiro の auto / 未指定かつ実測不可 / 分離しないの 3 分岐を記録する。"""
     assert separation_reason(runtime, model) == expected
+
+
+@pytest.mark.parametrize(
+    ("runtime", "model", "expected"),
+    [
+        ("claude", None, True),
+        ("codex", "gpt-5", True),
+        ("kiro", "auto", False),
+        ("kiro", None, False),
+        ("codex", None, False),
+    ],
+)
+def test_is_measurable_current_behavior(
+    runtime: str, model: str | None, expected: bool
+) -> None:
+    """現状固定。分離理由の有無に対応する計測可否を記録する。"""
+    assert is_measurable(runtime, model) is expected
 
 
 @pytest.mark.parametrize(
