@@ -42,3 +42,22 @@ def test_emit_joins_a_list_into_one_space_separated_word(mod, capsys) -> None:
     mod.emit(VALUES=["a b", "c"])
 
     assert shlex.split(capsys.readouterr().out) == ["VALUES=a b c"]
+
+
+def test_register_after_save_calls_the_same_hook_only_once(mod, tmp_path) -> None:
+    """現状固定。同じ差し込み口を 2 度登録しても保存後に 1 度だけ呼ぶ。"""
+    calls = []
+
+    def hook(path, state):
+        calls.append((path, state))
+
+    mod.register_after_save(hook)
+    mod.register_after_save(hook)
+    try:
+        path = tmp_path / "state.json"
+        state = {"round": 2}
+        mod.save(path, state)
+    finally:
+        mod.unregister_after_save(hook)
+
+    assert calls == [(path, state)]

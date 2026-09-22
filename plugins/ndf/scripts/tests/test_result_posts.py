@@ -385,6 +385,27 @@ def test_a_fix_without_threads_still_posts_the_summary(tmp_path) -> None:
     assert [i["kind"] for i in items] == ["pr-comment"]
 
 
+def test_fix_posts_skips_replies_with_non_numeric_comment_ids(tmp_path) -> None:
+    """現状固定。不正な返信先を飛ばしても、決着とまとめは組み立てる。"""
+    items = result_posts.fix_posts(
+        _fix_file(
+            tmp_path,
+            resolved_threads=[{"comment_id": "invalid", "thread_id": "PRRT_a"}],
+            deferred=[{"comment_id": "invalid", "thread_id": "PRRT_b"}],
+            rejected=[{"comment_id": "invalid", "thread_id": "PRRT_c"}],
+        ),
+        repo=REPO,
+        pr=PR,
+        round_no=ROUND,
+    )
+
+    assert [item["kind"] for item in items] == ["thread-resolve", "pr-comment"]
+    assert items[0]["fields"] == {"thread_id": "PRRT_a"}
+    assert items[0]["extra"] == {"ident": "resolve-PRRT_a"}
+    assert items[1]["extra"] == {"ident": f"fix-summary-{ROUND}"}
+    assert "決着: 1 件 / 見送り: 1 件 / 却下: 1 件" in items[1]["fields"]["body"]
+
+
 # ---------------- 送信 ----------------
 
 def _repo_with_remote(tmp_path) -> tuple[pathlib.Path, pathlib.Path]:

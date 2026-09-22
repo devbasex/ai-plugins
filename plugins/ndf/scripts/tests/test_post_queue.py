@@ -473,3 +473,23 @@ def test_retry_returns_the_last_rate_limited_attempt_when_the_wait_cap_is_reache
     assert len(calls) == 4
     assert waits == [30.0, 30.0, 30.0]
     assert sum(waits) <= 90.0
+
+
+def test_retry_returns_the_first_rate_limited_attempt_when_interval_is_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """現状固定。待機間隔が 0 なら、待機も再実行もせず最初の応答を返す。"""
+    calls: list[list[str]] = []
+    waits: list[float] = []
+    first_rate = post_queue.Attempt(1, "", "API rate limit exceeded (HTTP 429)")
+    monkeypatch.setattr(post_queue, "run", _run_returning([first_rate], calls))
+
+    result = post_queue.retry(
+        ["gh", "pr", "create"],
+        interval=0,
+        sleep=_recording_sleep(waits),
+    )
+
+    assert result is first_rate
+    assert calls == [["gh", "pr", "create"]]
+    assert waits == []
