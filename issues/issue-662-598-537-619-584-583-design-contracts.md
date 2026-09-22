@@ -371,3 +371,5 @@ conftest.py              P1（NDF_METRICS_DIR）
 | AC67 | `SKILL.md` の骨組みで、起動の行から判定の行までの間に `verify-findings` と `critique-round.sh` があり、起動し直しの専用の分岐が無い。各判定の直後に終了コード 8 の `flush` の枝がある |
 | AC68 / AC69 | 文書の `grep` |
 | AC70〜AC72 | 検証手段の表のコマンド。AC72 はテストの前後で `find` |
+
+**AC63〜AC67 の確かめ方は、[issue-730-583-design.md](issue-730-583-design.md) の「テスト設計」が引き継いだ。** 担当が投稿しなくなるため、投稿済みのレビューを探す鍵（`prior_review_url`）を作らず、AC63〜AC65 の行は対象を失う。上の 2 行は 2026-09-15 時点の記録として残す。
