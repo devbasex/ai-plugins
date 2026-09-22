@@ -200,8 +200,8 @@ pid だけへシグナルを送っており、CLI が起こした子プロセス
 
 ### cross-refactoring の読み取りの契約
 
-cross-refactoring の取り込みが従う契約を、ここで定める。**この契約の実装は #728 にあり、
-この時点では入っていない。**
+cross-refactoring の取り込みが従う契約を、ここで定める。**契約を守る側の仕様は
+[結果なしの取り込みと開き直し](cross-refactoring-apply-intake.md)にある。**
 
 | 項目 | 契約 |
 | --- | --- |
@@ -248,7 +248,7 @@ cross-refactoring の取り込みが従う契約を、ここで定める。**こ
 - [issue #729](https://github.com/devbasex/ai-plugins/issues/729) — 結果なしの判断を共通層へ移す
 - [issue #619](https://github.com/devbasex/ai-plugins/issues/619) — 利用上限で止まった担当の空振りの起動し直し
 - [issue #584](https://github.com/devbasex/ai-plugins/issues/584) — 止めた担当が後から結果ファイルを書く
-- [issue #728](https://github.com/devbasex/ai-plugins/issues/728) — cross-refactoring 側の読み取りの実装
+- [結果なしの取り込みと開き直し](cross-refactoring-apply-intake.md) — cross-refactoring 側の読み取りを使う仕様
 - [PR #791](https://github.com/devbasex/ai-plugins/pull/791) — 実装
 - [`cross-review` の状態ファイルと入出力の契約](../../plugins/ndf/skills/cross-review/docs/04-contracts.md)
 - [`cross-review` の状態とレビューの手順](../../plugins/ndf/skills/cross-review/docs/01-state-and-review.md)
