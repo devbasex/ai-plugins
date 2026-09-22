@@ -1,7 +1,7 @@
 """cross-review の骨組みは 600 秒を超える監視を区切って待つ（#598 / #537 の AC41 / AC42）。
 
 レビューの監視の上限は 1200 秒で、Claude Code の Bash ツールの 1 回（600 秒）に収まらない。
-骨組みはレビューの監視（起動し直しを含む）と `critique-round.sh` を `bg-wait.sh run` で
+骨組みはレビューの監視（起動し直しも同じ行を通る、#583）と `critique-round.sh` を `bg-wait.sh run` で
 背景に回し、`bg-wait.sh wait`（1 回 540 秒以内）を 124 のあいだ繰り返す。
 """
 from __future__ import annotations
@@ -38,15 +38,15 @@ def _long_runner_lines() -> list[tuple[int, str]]:
             if not line.lstrip().startswith("#") and any(r in line for r in LONG_RUNNERS)]
 
 
-def test_the_skeleton_has_the_three_long_runners() -> None:
-    """レビューの監視・起動し直しの監視・反証の 1 ラウンド。"""
+def test_the_skeleton_has_the_two_long_runners() -> None:
+    """レビューの監視と反証の 1 ラウンド。起動し直しは同じ監視の行を通る（#583）。"""
     found = _long_runner_lines()
-    assert len(found) == 3
-    assert sum('"$SCRIPTS/monitor.py"' in line for _, line in found) == 2
+    assert len(found) == 2
+    assert sum('"$SCRIPTS/monitor.py"' in line for _, line in found) == 1
     assert sum('"$SCRIPTS/critique-round.sh"' in line for _, line in found) == 1
 
 
-@pytest.mark.parametrize("index", range(3))
+@pytest.mark.parametrize("index", range(2))
 def test_each_long_runner_is_started_by_bg_wait_run(index: int) -> None:
     _, line = _long_runner_lines()[index]
     runner = next(r for r in LONG_RUNNERS if r in line)
@@ -54,7 +54,7 @@ def test_each_long_runner_is_started_by_bg_wait_run(index: int) -> None:
     assert re.search(r'"\$SCRIPTS/bg-wait\.sh" run "[^"]+" -- $', head), line
 
 
-@pytest.mark.parametrize("index", range(3))
+@pytest.mark.parametrize("index", range(2))
 def test_each_run_is_followed_by_one_wait_on_the_same_rc(index: int) -> None:
     """**待ちは 1 回の呼び出しに 1 つだけ書く。** 繰り返しを 1 回の Bash へ書くと、
     2 回目の待ちに入った時点で合計が 600 秒を超え、ホストに打ち切られる（#683 round 2）。"""

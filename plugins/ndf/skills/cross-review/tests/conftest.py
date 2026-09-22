@@ -131,6 +131,32 @@ def _no_github_state(request, monkeypatch) -> None:
     state_mod = request.getfixturevalue("state_mod")
     monkeypatch.setattr(state_mod, "_fetch_check_runs", lambda repo, sha: None)
     monkeypatch.setattr(state_mod, "_fetch_pr_metadata", lambda pr, repo=None: None)
+    # **取り込みはレビューを投稿する**（#730）。投稿を見ないテストでは、組み立てまでを
+    # 本物で通し、送信だけを「届いた」に置き換える。偽の `gh` を要求するテストは
+    # 送信も含めて検査するため置き換えない。
+    if "fake_gh" not in request.fixturenames:
+        rp = state_mod.result_posts
+        monkeypatch.setattr(rp, "post_review", _post_review_offline(rp))
+        monkeypatch.setattr(rp, "push_fix",
+                            lambda worktree, head, commit: rp.PushResult(
+                                True, bool(commit), True, ""))
+        monkeypatch.setattr(rp, "post_fix", _post_fix_offline(rp))
+
+
+def _post_review_offline(rp):
+    """送信を行わず、組み立てた内容がそのまま届いたものとして結果を返す。"""
+    def _post(queue, payload_path, result_path, repo, pr, round_no, seat, head_sha,
+              is_own_pr, actor=None, since=None):
+        item = rp.review_posts(payload_path, result_path, repo, pr, round_no, seat,
+                               head_sha, is_own_pr, since=since)[0]
+        extra = item["extra"]
+        findings = len(rp._findings(rp._read_json(payload_path)))
+        return rp.ReviewOutcome(
+            review_url=f"https://github.com/{repo}/pull/{pr}#pullrequestreview-1",
+            posted_inline=extra["inline"], posted_body=extra["body"], queued=0,
+            findings=findings, failed=False, posted_as=extra["posted_as"],
+            intent=extra["intent"], detail="")
+    return _post
 
 
 @pytest.fixture()
@@ -267,3 +293,14 @@ def fake_gh(monkeypatch, tmp_path) -> FakeGh:
 def queue_mod() -> types.ModuleType:
     """共通層の待ち行列モジュール（#291）。"""
     return _load_module("ndf_post_queue", _POST_QUEUE)
+
+
+def _post_fix_offline(rp):
+    """送信を行わず、組み立てた返信・決着・まとめがすべて届いたものとして返す。"""
+    def _post(queue, result_path, repo, pr, round_no=None, actor=None):
+        kinds = [i["kind"] for i in rp.fix_posts(result_path, repo, pr, round_no)]
+        return rp.FixOutcome(
+            summary_url=f"https://github.com/{repo}/pull/{pr}#issuecomment-1",
+            replied=kinds.count("review-reply"), resolved=kinds.count("thread-resolve"),
+            queued=0, failed=False, detail="")
+    return _post

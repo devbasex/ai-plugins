@@ -178,3 +178,40 @@ def test_the_evidence_doc_says_the_mark_is_removed_when_critiques_are_incomplete
 def test_the_specification_holds_the_same_six_classifications() -> None:
     """区分の表と行き先の表の両方が `unrefuted` を持つ（AC20）。"""
     assert SPEC.read_text(encoding="utf-8").count("unrefuted") >= 2
+
+
+# ---------- 起動し直しは初回と同じ経路を通る（#583 #730） ----------
+
+
+def _loop() -> str:
+    """骨組みの繰り返し（`while :; do` から `done` まで）。"""
+    text = SKILL.read_text(encoding="utf-8")
+    block = text.split("## 実行ステップ概要（メインの bash 骨組み）", 1)[1]
+    block = block.split("```bash", 1)[1].split("\n```", 1)[0]
+    return block.split("while :; do", 1)[1]
+
+
+@pytest.mark.parametrize("step", [
+    '"$SCRIPTS/launch-reviewer.sh"',
+    '"$SCRIPTS/state.py" read-result',
+    '"$SCRIPTS/state.py" verify-findings',
+    '"$SCRIPTS/critique-round.sh"',
+])
+def test_each_step_of_a_review_is_written_once(step: str) -> None:
+    """起動し直しの枝が自分の起動・取り込みを持たない。経路は 1 本である（AC18）。
+
+    枝が別に持つと、根拠の検証と反証を飛ばして 2 度目の判定へ進む。
+    """
+    assert _loop().count(step) == 1, step
+
+
+def test_the_relaunch_goes_back_to_the_head_of_the_review() -> None:
+    loop = _loop()
+    relaunch = loop.index('"$JUDGE_RC" -eq 7')
+    assert "continue" in loop[relaunch:loop.index("done", relaunch)]
+
+
+def test_the_queue_branch_is_seen_before_the_relaunch() -> None:
+    """待ち行列に残りがあるときの枝は、各判定の直後、7 より先に見る（AC19）。"""
+    loop = _loop()
+    assert loop.index('"$JUDGE_RC" -eq 8') < loop.index('"$JUDGE_RC" -eq 7')

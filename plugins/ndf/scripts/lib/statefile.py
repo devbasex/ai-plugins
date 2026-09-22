@@ -41,16 +41,26 @@ def load(path: pathlib.Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def save(path: pathlib.Path, state: dict[str, Any]) -> None:
-    """状態ファイルを原子的に書く。
+def write_json_atomic(path: pathlib.Path, data: Any) -> None:
+    """JSON を原子的に書く。
 
     同じディレクトリへ一時ファイルを書いてから `replace` する。途中で落ちても
-    半端な JSON が残らないため、再開時に必ず読める。
+    半端な JSON が残らないため、再開時に必ず読める。失敗は例外で返し、一時
+    ファイルは残さない。
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
-    tmp.replace(path)
+    try:
+        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def save(path: pathlib.Path, state: dict[str, Any]) -> None:
+    """状態ファイルを原子的に書く（`write_json_atomic`）。"""
+    write_json_atomic(path, state)
     # **差し込み口の失敗で保存の呼び出し側を止めない。** 状態は既に書けている。
     for hook in list(_AFTER_SAVE):
         try:

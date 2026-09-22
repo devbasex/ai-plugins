@@ -128,6 +128,29 @@ def test_flush_stops_at_corrupt_json_and_keeps_following_items(
     ]
 
 
+def test_drop_removes_only_the_item_with_the_requested_sequence(
+    tmp_path: pathlib.Path,
+) -> None:
+    """現状固定。指定した連番の項目だけを取り除く。"""
+    paths = [_write_item(tmp_path, seq) for seq in range(1, 4)]
+    queue = post_queue.Queue(tmp_path)
+
+    assert queue.drop(2) is True
+    assert [path.name for path in queue.paths()] == [paths[0].name, paths[2].name]
+
+
+@pytest.mark.parametrize("seq", [None, 99])
+def test_drop_keeps_items_when_the_sequence_does_not_match(
+    tmp_path: pathlib.Path, seq: int | None
+) -> None:
+    """現状固定。連番が無い場合は何も取り除かない。"""
+    paths = [_write_item(tmp_path, item_seq) for item_seq in range(1, 3)]
+    queue = post_queue.Queue(tmp_path)
+
+    assert queue.drop(seq) is False
+    assert [path.name for path in queue.paths()] == [path.name for path in paths]
+
+
 def test_post_succeeds_directly_when_queue_is_empty(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -267,3 +290,206 @@ def test_post_enqueues_behind_unflushed_items_preserving_order(
     assert len(sent_items) == 1
     assert sent_items[0]["seq"] == 1
 
+
+
+# ---------------- 拒まれ方の区別（#730） ----------------
+
+# 実測した応答（2026-09-22、Pull Request #794）。要求ごとに全件が拒まれ、
+# `errors` は語をつないだ 1 つの文字列で、どの項目かは指さない。
+_UNRESOLVED_LINE = json.dumps({
+    "message": "Unprocessable Entity",
+    "errors": ["Line could not be resolved"],
+    "status": "422",
+})
+_UNRESOLVED_MANY = json.dumps({
+    "message": "Unprocessable Entity",
+    "errors": ["Line could not be resolved, Path could not be resolved,"
+               " and Line could not be resolved"],
+    "status": "422",
+})
+_BAD_EVENT = json.dumps({
+    "message": "Unprocessable Entity",
+    "errors": ["Variable $event of type PullRequestReviewEvent"
+               " was provided invalid value"],
+    "status": "422",
+})
+_BAD_COMMIT = json.dumps({
+    "message": "Unprocessable Entity",
+    "errors": ["The commitOID is not part of the pull request"],
+    "status": "422",
+})
+_STDERR_422 = "gh: Unprocessable Entity (HTTP 422)\n"
+
+
+def _attempt(stdout: str, stderr: str = _STDERR_422) -> Any:
+    return post_queue.Attempt(1, stdout, stderr)
+
+
+@pytest.mark.parametrize("stdout", [_UNRESOLVED_LINE, _UNRESOLVED_MANY])
+def test_a_rejection_that_cannot_resolve_the_position_is_told_apart(stdout: str) -> None:
+    """行やファイルを解決できない拒まれ方だけを、退避の契機として見分ける。"""
+    assert post_queue.is_position_unresolved(_attempt(stdout)) is True
+
+
+@pytest.mark.parametrize("stdout", [_BAD_EVENT, _BAD_COMMIT])
+def test_another_rejection_of_the_same_status_is_not_a_reason_to_move(stdout: str) -> None:
+    """判定の値の誤りと基準のコミットの誤りは、退避せず失敗として残す。"""
+    assert post_queue.is_position_unresolved(_attempt(stdout)) is False
+
+
+def test_a_rejection_of_another_status_is_not_a_reason_to_move() -> None:
+    assert post_queue.is_position_unresolved(
+        post_queue.Attempt(1, '{"message":"Not Found"}', "gh: Not Found (HTTP 404)")
+    ) is False
+
+
+def test_a_success_is_not_a_rejection() -> None:
+    assert post_queue.is_position_unresolved(post_queue.Attempt(0, "{}", "")) is False
+
+
+@pytest.mark.parametrize("stdout", [_UNRESOLVED_LINE, _BAD_EVENT])
+def test_the_words_of_the_rejection_are_readable(stdout: str) -> None:
+    """応答の `errors` が文字列の列でも、失敗の説明に語が残る。"""
+    assert "could not be resolved" in _attempt(_UNRESOLVED_LINE).message
+    assert _attempt(stdout).message != ""
+
+
+def test_a_rejection_that_cannot_resolve_the_position_is_not_a_rate_limit() -> None:
+    assert post_queue.is_rate_limited(_attempt(_UNRESOLVED_LINE)) is False
+
+
+@pytest.mark.parametrize("item, expected", [
+    ({"last_status": 422, "last_error": "Line could not be resolved"}, True),
+    ({"last_status": 422, "last_error": "Invalid event"}, False),
+    ({"last_status": 404, "last_error": "Line could not be resolved"}, False),
+    ({"last_status": None, "last_error": "Line could not be resolved"}, False),
+])
+def test_a_queued_item_is_told_apart_by_its_status_and_words(
+        item: dict[str, Any], expected: bool) -> None:
+    """流した後に残った項目も、422 と位置の語がそろうときだけ位置の拒否と見る。"""
+    assert post_queue.rejected_by_position(item) is expected
+
+
+# ---------------- 上限のときに待って再実行する（R1-005） ----------------
+
+_OK = post_queue.Attempt(0, '{"id": 1}', "")
+_RATE = post_queue.Attempt(1, "", "API rate limit exceeded (HTTP 429)")
+_NORMAL_FAIL = post_queue.Attempt(1, "", "permission denied (HTTP 403)")
+
+
+def _run_returning(responses: list[Any], calls: list[list[str]]):
+    """`run` の代わりに、応答列を順に返す疑似実装。呼ばれた cmd を記録する。"""
+    queue = list(responses)
+
+    def fake_run(cmd, stdin=None):
+        calls.append(cmd)
+        return queue.pop(0)
+
+    return fake_run
+
+
+def _recording_sleep(waits: list[float]):
+    """時間を進めず、待った秒数だけ記録する疑似 sleep。"""
+
+    def sleep(seconds):
+        waits.append(seconds)
+
+    return sleep
+
+
+def test_retry_returns_immediately_on_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """現状固定。最初の実行が成功したら、待たずにその結果を返す。"""
+    calls: list[list[str]] = []
+    waits: list[float] = []
+    monkeypatch.setattr(post_queue, "run", _run_returning([_OK], calls))
+    monkeypatch.setattr(post_queue, "quota_remaining", lambda: 0)
+
+    result = post_queue.retry(["gh", "pr", "create"], sleep=_recording_sleep(waits))
+
+    assert result is _OK
+    assert calls == [["gh", "pr", "create"]]
+    assert waits == []
+
+
+def test_retry_returns_immediately_on_a_normal_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """現状固定。上限でない失敗は、待たずにそのまま返す。"""
+    calls: list[list[str]] = []
+    waits: list[float] = []
+    monkeypatch.setattr(post_queue, "run", _run_returning([_NORMAL_FAIL], calls))
+    monkeypatch.setattr(post_queue, "quota_remaining", lambda: 100)
+
+    result = post_queue.retry(["gh", "pr", "create"], sleep=_recording_sleep(waits))
+
+    assert result is _NORMAL_FAIL
+    assert calls == [["gh", "pr", "create"]]
+    assert waits == []
+
+
+def test_retry_waits_and_re_runs_until_it_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """現状固定。上限のあいだ待って再実行し、成功したらその結果を返す。"""
+    calls: list[list[str]] = []
+    waits: list[float] = []
+    monkeypatch.setattr(
+        post_queue, "run", _run_returning([_RATE, _RATE, _OK], calls)
+    )
+
+    result = post_queue.retry(
+        ["gh", "pr", "create"],
+        max_wait=900.0,
+        interval=30.0,
+        sleep=_recording_sleep(waits),
+    )
+
+    assert result is _OK
+    assert len(calls) == 3
+    assert waits == [30.0, 30.0]
+    assert sum(waits) <= 900.0
+
+
+def test_retry_returns_the_last_rate_limited_attempt_when_the_wait_cap_is_reached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """現状固定。待機の上限に達したら、最後の上限応答を返す。"""
+    calls: list[list[str]] = []
+    waits: list[float] = []
+    last_rate = post_queue.Attempt(1, "", "API rate limit exceeded (HTTP 429)")
+    responses = [_RATE, _RATE, _RATE, last_rate]
+    monkeypatch.setattr(post_queue, "run", _run_returning(responses, calls))
+
+    result = post_queue.retry(
+        ["gh", "pr", "create"],
+        max_wait=90.0,
+        interval=30.0,
+        sleep=_recording_sleep(waits),
+    )
+
+    assert result is last_rate
+    assert len(calls) == 4
+    assert waits == [30.0, 30.0, 30.0]
+    assert sum(waits) <= 90.0
+
+
+def test_retry_returns_the_first_rate_limited_attempt_when_interval_is_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """現状固定。待機間隔が 0 なら、待機も再実行もせず最初の応答を返す。"""
+    calls: list[list[str]] = []
+    waits: list[float] = []
+    first_rate = post_queue.Attempt(1, "", "API rate limit exceeded (HTTP 429)")
+    monkeypatch.setattr(post_queue, "run", _run_returning([first_rate], calls))
+
+    result = post_queue.retry(
+        ["gh", "pr", "create"],
+        interval=0,
+        sleep=_recording_sleep(waits),
+    )
+
+    assert result is first_rate
+    assert calls == [["gh", "pr", "create"]]
+    assert waits == []

@@ -20,21 +20,21 @@
 **メインセッションでは修正コードを書かない。** `/ndf:fix` を
 `general-purpose` サブエージェントで起動する。
 
-**サブエージェントの責務（必須 6 点）**:
+**サブエージェントの責務（必須 4 点）**:
 
-1. critical / major / minor の修正コミット
+1. critical / major / minor の修正コミット（**送らない**）
 2. 修正テストの追加・実行
-3. 修正対象の thread に **reply 投稿** + **`resolveReviewThread` で Resolve**
-4. nit / 判断が割れる minor は **修正せず deferred 記録**（reply は `[deferred / nit]` ラベル付き、Resolve しない）
-5. **PR レベルの Summary コメントを `gh pr comment` で投稿**（対応件数 / 重要度別 / deferred 件数 / rejected 件数 / commit SHA を含む）
-6. 戻り値ファイル `$TMP_DIR/fix-pr<PR>-result.json` を必ず書き出す
+3. nit / 判断が割れる minor は **修正せず deferred 記録**
+4. 戻り値ファイル `$TMP_DIR/fix-pr<PR>-result.json` を必ず書き出す
    （`$TMP_DIR` は env `CROSS_REVIEW_TMP_DIR` > `<worktree>/.cross_review/` の順で解決。
    詳細は `scripts/state.py _tmp_dir()` 参照。`/tmp/` 直書きでも `state.py merge-fix` は legacy fallback で拾う）
 
-> ⚠ inline thread への reply + Resolve **だけでは不十分**。PR ページの
-> conversation タブに表示される **PR レベルコメント** がレビュアーへの
-> サマリ通知として必須（`/ndf:fix` SKILL.md の手順 7 で規定）。
-> サブエージェント起動プロンプトでも明示的に指示すること。
+**送信・返信・決着・まとめは取り込み（`state.py merge-fix`）が行う**（#730）。サブエージェントは
+GitHub と git へ書かない。取り込みは現在の頭を指定して送り（`git push origin HEAD:<ブランチ名>`）、
+戻り値ファイルが報告したコミットが送り先に載ったことを確かめてから、`resolved_threads` /
+`deferred` / `rejected` の配列から返信と決着を、件数からまとめを組み立てて待ち行列で送る。
+載っていなければ記録も投稿もせずに止まる。担当が送ると、切り離された頭ではブランチ名だけの
+送信が何も送らずに終了コード 0 で終わり、送ったという報告と実物が食い違う。
 
 ### サブエージェント起動例
 
@@ -101,47 +101,15 @@ worktree 外を触ると競合します。
    `total_count: 0` を返す（実測）。保留として読むと、承認されたラウンドが収束しない。
 4. critical/major + 該当 minor/nit の修正コミット（worktree 内のみ）
 5. `./pint-changed.sh && ./larastan-changed.sh` 等の品質チェック
-6. push: `git push origin {HEAD_BRANCH}` （--force / --no-verify 禁止）
-7. **CI 再実行は待たない**（push 後の `--watch` 等は行わない、`ci_status` は push 時点での既知失敗のみ反映）
-8. **各 thread に reply 投稿**:
-   - 修正済み: 「対応しました — <ファイル>:<行> で〇〇 (commit <SHA>)」
-   - deferred: 「[deferred / nit] 後続 PR で対応予定」
-   - rejected: 「bot 指摘は誤読です — 理由: ...」
-9. **修正済み thread を `resolveReviewThread` で Resolve**:
-   ```bash
-   # thread_id は GraphQL で取得
-   gh api graphql -f query='
-     query {{ repository(owner:"...", name:"...") {{
-       pullRequest(number: {PR}) {{ reviewThreads(first:100) {{
-         nodes {{ id isResolved path line }}
-       }} }}
-     }} }}'
-   # 修正済みのみ resolve
-   gh api graphql -f query='
-     mutation($id: ID!) {{
-       resolveReviewThread(input: {{threadId: $id}}) {{ thread {{ isResolved }} }}
-     }}' -f id="$THREAD_ID"
-   ```
-   - deferred / rejected の thread は **Resolve しない**
-10. **PR レベル Summary コメントを投稿**（必須・inline reply とは別物）:
-    ```bash
-    gh pr comment {PR} --body "$(cat <<'EOMD'
-    ## 🔧 /ndf:fix サマリ (round N)
-
-    対応件数: critical=X / major=Y / minor=Z (合計 N 件)
-    deferred: D 件 / rejected: R 件
-    commit: <SHA>
-    CI: SUCCESS | FAILURE | NONE
-
-    ### 詳細
-    - 各 thread の対応概要（行リンク付き）
-    EOMD
-    )"
-    ```
-    - inline reply + Resolve だけでは「PR ページの Conversation タブ」に
-      まとめが出ず、レビュアー視点で見落とされる。**必ず投稿する**
-11. 戻り値ファイル書き出し（下記フォーマット）。`summary_comment_url` には
-    手順 10 の URL を入れる
+6. コミットする。**送らない**（送信は取り込みが行う）
+7. **CI 再実行は待たない**（`ci_status` はコミット時点での既知失敗のみ反映）
+8. 各 thread の扱いを戻り値ファイルの配列へ入れる。**返信・決着・まとめは投稿しない**
+   （取り込みが配列から組み立てる）:
+   - 修正済み: `resolved_threads`（`thread_id` と `comment_id`）
+   - deferred: `deferred`（`comment_id` と `reason_for_deferral`）
+   - rejected: `rejected`（`comment_id` と `reason_for_rejection`）
+9. 戻り値ファイル書き出し（下記フォーマット）。`summary_comment_url` は書かない
+   （取り込みがまとめの投稿の応答から記録へ書く）
 
 ## 戻り値ファイル $TMP_DIR/fix-pr{PR}-result.json
 
@@ -381,13 +349,15 @@ while ループ脱出後にメインが以下のプロンプトでサブエー�
 >
 > PR の **全 open review thread**（インライン / レビュー body / PR レベルコメント）を
 > `gh api` で洗い出し、cross-review の codex/agy が残したものを中心に **すべて解消**せよ:
-> 1. 修正可能な `minor`/`nit` → コード修正 + push（同ブランチ、main へは push しない）し、
->    reply + GraphQL `resolveReviewThread` で Resolve。
-> 2. 修正しない（好み・判断保留）`nit` → 「[deferred / nit] 対応見送り: <理由>」を日本語で
->    reply した上で **Resolve まで実行**（スレッドを open のまま残さない）。
-> 3. bot 誤指摘 → 却下理由を reply して Resolve。
+> 1. 修正可能な `minor`/`nit` → コード修正 + コミット（**送らない**）し、`resolved_threads` へ入れる。
+> 2. 修正しない（好み・判断保留）`nit` → 見送りの理由を添えて `deferred` へ入れ、
+>    **`"resolve": true`** を付ける（スレッドを open のまま残さない）。
+> 3. bot 誤指摘 → 却下理由を添えて `rejected` へ入れ、`"resolve": true` を付ける。
 >
-> **修正で push した場合は、対象リポジトリの検証を 1 度通すこと。** 何を実行するかは
+> **GitHub と git へ書かない。** 返信・決着・送信は、メインがこの結果ファイルを読んで
+> 共通層の 1 行（`result_posts.py fix`）で行う。
+>
+> **修正をコミットした場合は、対象リポジトリの検証を 1 度通すこと。** 何を実行するかは
 > 対象リポジトリを見て決める。**コマンドを推測して組み立てない。**
 >
 > 1. 実行手段を探す。`Makefile` の `test` / `lint` / `check` ターゲット、`package.json` の
@@ -399,7 +369,7 @@ while ループ脱出後にメインが以下のプロンプトでサブエー�
 > 3. 1 つも見つからないときは実行しない
 >
 > **終了コードが 0 でない実行を残したまま完了としない。** その修正が原因なら直して
-> push し直し、もう一度実行して 0 を確かめる。修正の前から落ちていたなら直さず、
+> コミットし直し、もう一度実行して 0 を確かめる。修正の前から落ちていたなら直さず、
 > 何が落ちているかを最終メッセージへ書く（この工程の範囲外である）。どちらの場合も
 > `commands` には**最後に実行した結果**を残す。
 >
@@ -408,15 +378,16 @@ while ループ脱出後にメインが以下のプロンプトでサブエー�
 > メッセージへ書く。
 >
 > 完了後、上の**結果ファイル**（`$TMP_DIR/sweep-pr<STATE_PR>-result.json`）に
-> `{"resolved": N, "fixed_in_sweep": M, "commit": "<SHA|null>", "remaining_open": K,
+> `{"resolved": N, "fixed_in_sweep": M, "commit": "<SHA|null>", "fix_commit": "<SHA|null>",
+>   "resolved_threads": [...], "deferred": [...], "rejected": [...], "remaining_open": K,
 >   "remaining_reason": "<K>0 のときの理由|null>", "items": ["<1行要約>", ...],
 >   "verification": {"commands": [{"command": "<実行したコマンド>", "exit": <終了コード>}],
 >                    "skipped_reason": "<実行しなかった理由|null>"}}` を
 > 書き出し、最終メッセージで内訳を日本語報告せよ。
 > 検証を実行したときは `commands` に実行順で並べ、`skipped_reason` を `null` にする。
 > 実行手段が見つからなかったときは `commands` を空にし、`skipped_reason` に**何を探して
-> 見つからなかったか**を書く。push しなかったラウンドも `commands` を空にし、
-> `skipped_reason` に「push なし」と書く。
+> 見つからなかったか**を書く。コミットしなかったときも `commands` を空にし、
+> `skipped_reason` に「コミットなし」と書く。
 > **`remaining_open` は 0 とする。** 0 にできない場合は `remaining_reason` に理由を書く。
 > この値は申告であり、次の `verify-sweep` が GitHub 側の実数と突き合わせる。
 

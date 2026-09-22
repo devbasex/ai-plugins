@@ -75,13 +75,6 @@ POSTED = "posted"
 QUEUED = "queued"
 FAILED = "failed"
 
-# レビューの判定と、GitHub 側に残る状態の対応。
-_REVIEW_STATE = {
-    "APPROVE": "APPROVED",
-    "REQUEST_CHANGES": "CHANGES_REQUESTED",
-    "COMMENT": "COMMENTED",
-}
-
 # 未解決のスレッドの識別子だけを読む問い合わせ。**解決の冪等はこの一覧だけで決まる**
 # （一覧に無ければ、既に解決されている）。
 _UNRESOLVED_QUERY = """
@@ -115,6 +108,9 @@ mutation($threadId: ID!) {
 _HTTP_RE = re.compile(r"\(HTTP (\d{3})\)")
 # 上限を指す語。一次・二次・GraphQL の 3 つの言い回しを拾う。
 _RATE_WORDS = ("rate limit", "rate_limited", "abuse detection")
+# 指した位置を差分の中に見つけられないことを表す語。実測した応答は
+# `Line could not be resolved` と `Path could not be resolved` の 2 つ。
+_POSITION_WORD = "could not be resolved"
 
 
 class Attempt(NamedTuple):
@@ -149,6 +145,10 @@ class Attempt(NamedTuple):
             for e in errors:
                 if isinstance(e, dict):
                     parts += [str(e.get("message") or ""), str(e.get("type") or "")]
+                elif isinstance(e, str):
+                    # レビューの作成が拒まれたときは、語をつないだ文字列が並ぶ
+                    # （実測: `["Line could not be resolved"]`）。
+                    parts.append(e)
         return " ".join(p for p in parts if p)
 
     def summary(self) -> str:
@@ -210,6 +210,24 @@ def is_rate_limited(attempt: Attempt) -> bool:
     return False
 
 
+def is_position_unresolved(attempt: Attempt) -> bool:
+    """この失敗が「指した位置を差分の中に見つけられない」ことによるものか。
+
+    **レビューの作成は要求ごとに全件が拒まれる。** 差分の外の行やファイルを指した
+    インラインが 1 件でもあると、正しいインラインも総評も作られない（実測、
+    2026-09-22）。応答は語をつないだ 1 つの文字列で、どの項目かは指さないため、
+    呼び出し側は要求のインラインをまとめて総評へ移して送り直す。
+
+    **同じ状態で返る別の拒まれ方と分ける。** 判定の値の誤り
+    （`Variable $event ... was provided invalid value`）と基準のコミットの誤り
+    （`The commitOID is not part of the pull request`）はこの語を持たない。
+    区別しないと、別の不具合が退避として飲み込まれる。
+    """
+    if attempt.ok or attempt.http != 422:
+        return False
+    return _POSITION_WORD in f"{attempt.message} {attempt.stderr}".lower()
+
+
 # ---------------- 送る内容の組み立て ----------------
 
 
@@ -233,11 +251,16 @@ def _request_review_post(repo: str, pr: int, fields: dict[str, Any]) -> dict[str
         body["commit_id"] = fields["commit_id"]
     if fields.get("comments"):
         body["comments"] = fields["comments"]
+    match = {"event": fields["event"], "body": fields.get("body", "")}
+    # **照合をラウンドの開始より後へ絞る。** ラウンドの番号は実行ごとに 1 から数え
+    # 直すため、番号と席の鍵だけでは前の実行のレビューに一致する。
+    if fields.get("since"):
+        match["since"] = fields["since"]
     return {
         "request": {"method": "POST",
                     "path": f"repos/{repo}/pulls/{int(pr)}/reviews",
                     "fields": body},
-        "match": {"event": fields["event"], "body": fields.get("body", "")},
+        "match": match,
     }
 
 
@@ -334,24 +357,66 @@ def _by_actor(row: dict[str, Any], actor: str | None) -> bool:
     return str((row.get("user") or {}).get("login") or "") == actor
 
 
+def _head(body: Any) -> str:
+    return str(body or "")[:BODY_MATCH_CHARS]
+
+
+def review_match_key(body: Any) -> str:
+    """レビューの本文から、同じ投稿かどうかを決める鍵を作る。
+
+    先頭行は `## 🤖 cross-review | round <R> | <席> | <判定>` である。**鍵に取るのは
+    席までで、判定の語を含めない。** 含めると、起動し直して判定が変わったときに別の
+    投稿と読まれ、同じラウンド・同じ席のレビューが 2 件になる（#730 #583）。
+
+    先頭行がこの形でないときは、本文の先頭 `BODY_MATCH_CHARS` 文字へ落とす。
+    """
+    first = str(body or "").splitlines()[0] if str(body or "") else ""
+    parts = first.split("|")
+    if len(parts) < 4:
+        return _head(body)
+    return "|".join(parts[:3]).strip() + "|"
+
+
 def _comment_match(match: dict[str, Any], actor: str | None):
-    return lambda row: _by_actor(row, actor) and row.get("body") == match.get("body")
+    head = _head(match.get("body"))
+    return lambda row: _by_actor(row, actor) and _head(row.get("body")) == head
+
+
+def _parse_time(value: Any) -> _dt.datetime | None:
+    try:
+        parsed = _dt.datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else None
 
 
 def _review_match(match: dict[str, Any], actor: str | None):
-    want = _REVIEW_STATE.get(str(match.get("event") or ""), "")
-    head = str(match.get("body") or "")[:BODY_MATCH_CHARS]
+    """同じラウンド・同じ席のレビューか。
+
+    **開始時刻を持つときは、それより後に出たレビューだけを見る。** 同じ実行の中の
+    送り直しは見つかり、回し直す前の実行のレビューは外れる。開始時刻かレビューの
+    時刻のどちらかを読めないときは、番号と席だけの照合へ落とす（二重に送る側へ
+    倒さない）。
+    """
+    key = review_match_key(match.get("body"))
+    since = _parse_time(match.get("since"))
+
+    def _in_this_run(row: dict[str, Any]) -> bool:
+        submitted = _parse_time(row.get("submitted_at"))
+        return since is None or submitted is None or submitted >= since
+
     return lambda row: (
         _by_actor(row, actor)
-        and str(row.get("state") or "") == want
-        and str(row.get("body") or "")[:BODY_MATCH_CHARS] == head
+        and review_match_key(row.get("body")) == key
+        and _in_this_run(row)
     )
 
 
 def _reply_match(match: dict[str, Any], actor: str | None):
+    head = _head(match.get("body"))
     return lambda row: (
         str(row.get("in_reply_to_id") or "") == str(match.get("in_reply_to"))
-        and row.get("body") == match.get("body")
+        and _head(row.get("body")) == head
     )
 
 
@@ -411,7 +476,7 @@ def already_posted(item: dict[str, Any]) -> bool | None:
 _SEQ_RE = re.compile(r"^(\d{4})-")
 
 
-def _read_item(path: pathlib.Path) -> dict[str, Any] | None:
+def read_item(path: pathlib.Path) -> dict[str, Any] | None:
     """待ち行列の項目を 1 件読む。読めなければ `None`。
 
     項目は作成先の JSON ファイルへ直接書かれるため、書き込みの途中で終了すると
@@ -422,6 +487,20 @@ def _read_item(path: pathlib.Path) -> dict[str, Any] | None:
     except (OSError, json.JSONDecodeError):
         return None
     return item if isinstance(item, dict) else None
+
+
+_read_item = read_item
+
+
+def rejected_by_position(item: dict[str, Any]) -> bool:
+    """待ち行列に残った項目が、指した位置を解決できずに拒まれたものか。
+
+    流した後に呼ぶ。`is_position_unresolved` と同じ判定を、項目へ残した状態と説明から
+    行う（流す側は `Attempt` を返さないため）。
+    """
+    if int(item.get("last_status") or 0) != 422:
+        return False
+    return _POSITION_WORD in str(item.get("last_error") or "").lower()
 
 
 class FlushResult(NamedTuple):
@@ -462,6 +541,20 @@ class Queue:
                 out.append((p, item))
         return out
 
+    def drop(self, seq: Any) -> bool:
+        """連番で指した項目を 1 件取り除く。
+
+        送れなかった項目を、送る内容を変えて積み直すときに使う（差分の外を指す指摘の
+        退避）。**そのまま積み足すと、同じ論点の要求が 2 件並ぶ。**
+        """
+        if seq is None:
+            return False
+        for path, item in self.items():
+            if item.get("seq") == seq:
+                path.unlink(missing_ok=True)
+                return True
+        return False
+
     def _next_seq(self) -> int:
         seqs = [int(m.group(1)) for m in
                 (_SEQ_RE.match(p.name) for p in self.paths()) if m]
@@ -487,6 +580,41 @@ class Queue:
                 json.dump(item, f, indent=2, ensure_ascii=False)
             return path
 
+    def _item_to_send(
+        self, path: pathlib.Path
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None,
+               dict[str, Any] | None]:
+        """項目を読み、送る項目・既投稿・読込失敗のいずれかを返す。"""
+        item = _read_item(path)
+        if item is None:
+            return None, None, {
+                "path": str(path),
+                "last_error": f"待ち行列の項目を読めない ({path.name})",
+            }
+        found, row = posted_match(item)
+        if found is not True:
+            return item, None, None
+        if row is not None:
+            item["response"] = row
+        path.unlink(missing_ok=True)
+        return None, item, None
+
+    def _send_item(self, path: pathlib.Path, item: dict[str, Any]) -> tuple[bool, Any]:
+        """1 項目を送り、成功時の応答または失敗情報を項目へ反映する。"""
+        attempt = send(item)
+        if attempt.ok:
+            try:
+                item["response"] = json.loads(attempt.stdout or "null")
+            except json.JSONDecodeError:
+                item["response"] = None
+            path.unlink(missing_ok=True)
+            return True, attempt
+        item["attempts"] = int(item.get("attempts") or 0) + 1
+        item["last_error"] = attempt.summary()
+        item["last_status"] = attempt.http
+        path.write_text(json.dumps(item, indent=2, ensure_ascii=False), encoding="utf-8")
+        return False, attempt
+
     def flush(self) -> FlushResult:
         """積んだ項目を連番の順に送る。
 
@@ -498,39 +626,18 @@ class Queue:
         failed: dict[str, Any] | None = None
         rate_limited = False
         for path in self.paths():
-            item = _read_item(path)
-            if item is None:
-                # **読めない項目を黙って飛ばさない。** `count()` はファイルを数え
-                # 続けるため、飛ばすと送りも失敗の報告もしないまま件数だけが残り、
-                # 判定は終了コード 8 を返し続けて誰も直せない状態になる。ここで
-                # 止めて理由を返せば、その項目を捨てるか直すかを人が選べる。
-                failed = {
-                    "path": str(path),
-                    "last_error": f"待ち行列の項目を読めない ({path.name})",
-                }
+            item, already_posted, read_failure = self._item_to_send(path)
+            if read_failure is not None:
+                failed = read_failure
                 break
-            found, row = posted_match(item)
-            if found is True:
-                # **送った場合と同じ形で返す。** 呼び出し側は届いたことを応答から
-                # 確かめるため、既に届いていた項目にも見つけた投稿を積んで渡す。
-                if row is not None:
-                    item["response"] = row
-                path.unlink(missing_ok=True)
-                skipped.append(item)
+            if already_posted is not None:
+                skipped.append(already_posted)
                 continue
-            attempt = send(item)
-            if attempt.ok:
-                try:
-                    item["response"] = json.loads(attempt.stdout or "null")
-                except json.JSONDecodeError:
-                    item["response"] = None
-                path.unlink(missing_ok=True)
+            assert item is not None
+            ok, attempt = self._send_item(path, item)
+            if ok:
                 sent.append(item)
                 continue
-            item["attempts"] = int(item.get("attempts") or 0) + 1
-            item["last_error"] = attempt.summary()
-            path.write_text(json.dumps(item, indent=2, ensure_ascii=False),
-                            encoding="utf-8")
             failed = item
             rate_limited = is_rate_limited(attempt)
             break

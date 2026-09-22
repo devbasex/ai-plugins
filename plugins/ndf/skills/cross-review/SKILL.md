@@ -50,8 +50,8 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 
 | 観点 | 方針 |
 |---|---|
-| レビュー投稿 | **AI 自身が `gh api` で PR に直接投稿**。メインはペイロードを保持しない |
-| 投稿の確認 | **申告されたコメント数を GitHub 側と突き合わせる**。投稿が届いていなければ中断する（取得できない場合は申告を採用） |
+| 投稿の担い手 | **GitHub と git へ書くのはレビューを回す側だけ**（#730）。担当は指摘の控えと結果ファイルを書き、取り込み（`read-result`）が組み立てて待ち行列から送る。修正の担当はコミットまでで、送信・返信・決着・まとめは `merge-fix` が行う。書き込みと記録が同じ手順で続くため、担当が途中で止まっても投稿だけが残らない |
+| 投稿の記録 | 参照は送信の応答から、件数は送れたインラインの数から取る。本文は取り込みのプロセスの中だけを通り、メインの応答に載らない |
 | 修正 | **必ずサブエージェント (`general-purpose`) で実行**。メイン context に diff は載せない |
 | ユーザ問い合わせ | 自動判断を最大化（`critical`/`major`/`minor` は自動修正、ループ中の `nit` は deferred） |
 | 取りこぼし防止 | **ループ終了時（approved / max_rounds / oscillation / error いずれも）に最終スイープを必須実行**。`/ndf:fix` を再実行し、残った open review thread（最終 APPROVE ラウンドの minor/nit インラインコメント含む）を **全て解消**。修正可能なものは修正 + push、判断保留 nit も reply + resolveReviewThread して **open thread 0 で終了**。件数は `state.py verify-sweep` が GitHub 側の実数で確認する |
@@ -124,7 +124,6 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 
 ## 前提
 
-- `/ndf:pr-review` が **AI 直接投稿**（外部 AI 自身が `gh api` で投稿）に対応
 - `/ndf:fix` が **サブエージェント起動 + 重要度ベース自動修正 + Resolve Conversation** に対応
 - `gh` CLI が認証済み。担当になる CLI は `init` が起動前に確かめ、通らない者は外して続ける（誤検知するときは `NDF_SKIP_AUTH_CHECK=1`）
 - `Agent(subagent_type="general-purpose", ...)` でサブエージェントを起動可能
@@ -151,11 +150,12 @@ GitHub は **自分の PR には `REQUEST_CHANGES` でレビューを投稿で�
 ```json
 "codex": {
   "intent": "REQUEST_CHANGES",   // AI の本来判定。ループ収束判定に使う
-  "posted_as": "COMMENT",        // 422 回避でダウングレードした結果
+  "posted_as": "COMMENT",        // 投稿する側が送信の時点で落とした形
   "comments": 5, "review_url": "..."
 }
 ```
 
+格下げは投稿する側（取り込み）が送信の時点で行う。担当は本来の判定だけを書く。
 `state.py judge` は `intent` を見るので、ダウングレード投稿してもループは続行する。
 
 ## 全体フロー
@@ -165,13 +165,13 @@ flowchart TD
     Start([事前確認 / loop 開始前に 1 回だけ]):::phase --> Init["worktree 作成 + state.json 初期化<br/>・自分の PR 判定 → event downgrade 設定<br/>・&lt;worktree-base&gt;/pr&lt;PR&gt; を用意<br/>・既存コメントスナップショット保存"]
     Init --> Round["Round N start<br/>current_pr = PR#"]:::phase
 
-    Round -.並列バックグラウンド.-> Seats["レビュー担当 2 席（start-round が返す）<br/>/ndf:pr-review &lt;PR&gt; &lt;席&gt; を席ごとに起動<br/>body 先頭: cross-review / round N / 席 / intent<br/>→ &lt;席&gt;-review-pr&lt;PR&gt;-result.json"]
+    Round -.並列バックグラウンド.-> Seats["レビュー担当 2 席（start-round が返す）<br/>launch-reviewer.sh &lt;席&gt; を席ごとに起動<br/>→ 指摘の控え + &lt;席&gt;-review-pr&lt;PR&gt;-result.json<br/>read-result が組み立てて投稿（先頭: round N / 席 / intent）"]
     Seats --> Decide{"判定 (intent ベース)"}
 
     Decide -->|"結果なし (2 度目は final = error)"| Relaunch["結果を残さなかった側だけ<br/>同じラウンドで 1 度起動し直す"]
     Relaunch --> Decide
     Decide -->|"両席 APPROVE / --only で外した席"| Approved([final = approved]):::ok
-    Decide -->|一方でも REQUEST_CHANGES| Fix["Agent (general-purpose)<br/>/ndf:fix &lt;PR&gt; --defer-nit を worktree 内で実行<br/>・critical/major/minor 修正 + push<br/>・reply + resolveReviewThread<br/>・deferred/rejected は reply のみ<br/>→ $TMP_DIR/fix-pr&lt;#&gt;-result.json"]
+    Decide -->|一方でも REQUEST_CHANGES| Fix["Agent (general-purpose)<br/>/ndf:fix &lt;PR&gt; --defer-nit を worktree 内で実行<br/>・critical/major/minor 修正 + コミット（送らない）<br/>→ $TMP_DIR/fix-pr&lt;#&gt;-result.json<br/>merge-fix が送信・返信・決着・まとめ"]
 
     Fix --> Check{収束チェック}
     Check -->|max-rounds 到達| MaxR([final = max_rounds]):::stop
@@ -182,7 +182,7 @@ flowchart TD
     Check -->|それ以外| Round
     Rotate --> Round
 
-    Approved --> Sweep["最終スイープ (必須)<br/>Agent (general-purpose)<br/>/ndf:fix &lt;PR&gt; を再実行<br/>・残 open review thread を全て確認<br/>・修正可能な minor/nit は修正 + push<br/>・判断保留 nit も reply + resolveReviewThread<br/>→ open thread 0 で終了"]
+    Approved --> Sweep["最終スイープ (必須)<br/>Agent (general-purpose)<br/>/ndf:fix &lt;PR&gt; を再実行<br/>・残 open review thread を全て確認<br/>・修正可能な minor/nit は修正 + コミット<br/>・判断保留 nit も決着を求める<br/>→ 共通層が送信・返信・決着 → open thread 0"]
     MaxR --> Sweep
     Osc --> Sweep
     Err --> Sweep
@@ -229,17 +229,17 @@ while :; do
 
   # Step 2: 並列レビュー（担当は start-round が REVIEWERS / REVIEWERS_CSV で返す）
   # **シェル変数で絞り直さない。** 返る一覧は 1 者指定と席の埋め合わせを反映済みである。
-  for r in $REVIEWERS; do
-    "$SCRIPTS/launch-reviewer.sh" "$r" "$STATE_PR" "$ROUND"
-  done
+  # **起動し直しも同じ経路を通す**（#583）。7 のときは名前の出た担当だけを入れて先頭へ戻る。
+  AGENTS=$REVIEWERS; AGENTS_CSV=$REVIEWERS_CSV; RELAUNCHED=
+  while :; do
+  for r in $AGENTS; do "$SCRIPTS/launch-reviewer.sh" "$r" "$STATE_PR" "$ROUND"; done
   # 監視: 上限は上限の表（review 1200 秒 / stall は席のランタイム別 codex 180・agy 480・kiro 480・claude 900）。失敗時は kill して返す。担当は `--agents` で渡す。
   #   Bash の 1 回 600 秒に収まらないため背景で起動し、wait（1 回 540 秒以内）を 124 のあいだ **別の Bash の呼び出しで** 呼び直す。**繰り返しを 1 回の呼び出しへ書かない**（2 回目の待ちで合計が 600 秒を超え、ホストに打ち切られる。docs/01）。
   #   監視と取り込みの終了コードは読まない。結果なしは NO_RESULT として state に残り、Step 3 が受け取る。
-  "$SCRIPTS/bg-wait.sh" run "$TMP_DIR/review.rc" -- "$SCRIPTS/monitor.py" "$STATE_PR" --phase review --agents "$REVIEWERS_CSV"
+  "$SCRIPTS/bg-wait.sh" run "$TMP_DIR/review.rc" -- "$SCRIPTS/monitor.py" "$STATE_PR" --phase review --agents "$AGENTS_CSV"
   "$SCRIPTS/bg-wait.sh" wait "$TMP_DIR/review.rc"   # 124 = まだ。**この 1 行を別の Bash の呼び出しとして呼び直す**
-  for r in $REVIEWERS; do
-    "$SCRIPTS/state.py" read-result "$STATE_PR" "$r" || true
-  done
+  # 取り込みがレビューを投稿する（担当は投稿しない、#730）。出力は件数と参照だけ。
+  for r in $AGENTS; do "$SCRIPTS/state.py" read-result "$STATE_PR" "$r" || true; done
 
   # Step 2.5: 根拠の検証（#156）。順序と理由は docs/06-evidence.md の「走らせる順序」。
   #   飛ばすと、判定が読む区分が統合も実行の結果も反映しないまま決まる。
@@ -252,17 +252,15 @@ while :; do
   # Step 3: 判定 (0=収束 / 2=修正へ / 7=結果なし / 8=待ち行列に残あり / 1=中断)。引き継いだ指摘が残っていれば、
   #   両者が承認しても 2 を返して修正の工程へ回す。置換の終了コードは変数で受けてから読む。
   JUDGE_VARS=$("$SCRIPTS/state.py" judge "$STATE_PR"); JUDGE_RC=$?; eval "$JUDGE_VARS"
-  if [ "$JUDGE_RC" -eq 7 ]; then  # 名前の出た担当だけを、同じラウンドで 1 度起動し直す
-    for a in $RELAUNCH_AGENTS; do "$SCRIPTS/launch-reviewer.sh" "$a" "$STATE_PR" "$ROUND"; done
-    "$SCRIPTS/bg-wait.sh" run "$TMP_DIR/review.rc" -- "$SCRIPTS/monitor.py" "$STATE_PR" --phase review --agents "$RELAUNCH_AGENTS_CSV"
-    "$SCRIPTS/bg-wait.sh" wait "$TMP_DIR/review.rc"  # 同上。124 のあいだ、別の呼び出しとして呼び直す
-    for a in $RELAUNCH_AGENTS; do "$SCRIPTS/state.py" read-result "$STATE_PR" "$a" || true; done
-    JUDGE_VARS=$("$SCRIPTS/state.py" judge "$STATE_PR"); JUDGE_RC=$?; eval "$JUDGE_VARS"
-  fi
-  if [ "$JUDGE_RC" -eq 8 ]; then  # 上限で積んだ投稿が残っている。流してから判定し直す
+  if [ "$JUDGE_RC" -eq 8 ]; then  # 上限で積んだ投稿が残っている。流してから判定し直す（7 より先に見る）
     "$SCRIPTS/state.py" flush "$STATE_PR"
     JUDGE_VARS=$("$SCRIPTS/state.py" judge "$STATE_PR"); JUDGE_RC=$?; eval "$JUDGE_VARS"
   fi
+  if [ "$JUDGE_RC" -eq 7 ] && [ -z "$RELAUNCHED" ]; then  # 同じラウンドで 1 度だけ起動し直す
+    AGENTS=$RELAUNCH_AGENTS; AGENTS_CSV=$RELAUNCH_AGENTS_CSV; RELAUNCHED=1; continue
+  fi
+  break
+  done
   case $JUDGE_RC in 0) break ;; 2) : ;; *) exit "$JUDGE_RC" ;; esac   # 1=結果なしのまま中断
   # 8 のまま残るのは上限が続いているとき。state は残るので、回復後に同じ引数で再開する。
 
@@ -312,12 +310,12 @@ while :; do
   fi
 done
 
-# Step 7.5: 最終スイープ (必須) — どの終了経路 (approved / max_rounds / oscillation /
-#   error) でも、ループを抜けた直後に **メインが Agent(general-purpose) を起動** して
-#   /ndf:fix $STATE_PR を再実行し、$TMP_DIR/sweep-pr$STATE_PR-result.json を書かせる
-#   (bash 単体では Agent ツールを呼べない。プロンプトは docs/02 の Step 7.5)。
-#   最終 APPROVE ラウンドの minor/nit はループ内 fix を経由しないため、ここで拾わないと
-#   PR 上に未解決スレッドが残る。sweep 結果はメインが Step 8 の報告へ折り込む。
+# Step 7.5: 最終スイープ (必須) — どの終了経路でも、ループを抜けた直後に **メインが
+#   Agent(general-purpose) を起動** して /ndf:fix を再実行し、$TMP_DIR/sweep-pr$STATE_PR-result.json
+#   を書かせる（プロンプトは docs/02 の Step 7.5）。担当はコミットまでで、送信・返信・決着は
+#   次の 1 行が行う（#730）。最終 APPROVE ラウンドの minor/nit はここで拾う。
+python3 "$SCRIPTS/../../../scripts/lib/result_posts.py" fix --pr "${CURRENT_PR:-$PR}" \
+  --result "$TMP_DIR/sweep-pr$STATE_PR-result.json" --worktree "$WORKTREE" || exit $?
 
 # Step 7.5 後段: 最終スイープの結果を GitHub 側の実数で検証する (必須)
 #   exit 0 = 未解決の指摘なし / exit 6 = 残っている (件数と理由を完了報告へ含めて続行)
