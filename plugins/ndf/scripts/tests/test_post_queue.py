@@ -267,3 +267,69 @@ def test_post_enqueues_behind_unflushed_items_preserving_order(
     assert len(sent_items) == 1
     assert sent_items[0]["seq"] == 1
 
+
+
+# ---------------- 拒まれ方の区別（#730） ----------------
+
+# 実測した応答（2026-09-22、Pull Request #794）。要求ごとに全件が拒まれ、
+# `errors` は語をつないだ 1 つの文字列で、どの項目かは指さない。
+_UNRESOLVED_LINE = json.dumps({
+    "message": "Unprocessable Entity",
+    "errors": ["Line could not be resolved"],
+    "status": "422",
+})
+_UNRESOLVED_MANY = json.dumps({
+    "message": "Unprocessable Entity",
+    "errors": ["Line could not be resolved, Path could not be resolved,"
+               " and Line could not be resolved"],
+    "status": "422",
+})
+_BAD_EVENT = json.dumps({
+    "message": "Unprocessable Entity",
+    "errors": ["Variable $event of type PullRequestReviewEvent"
+               " was provided invalid value"],
+    "status": "422",
+})
+_BAD_COMMIT = json.dumps({
+    "message": "Unprocessable Entity",
+    "errors": ["The commitOID is not part of the pull request"],
+    "status": "422",
+})
+_STDERR_422 = "gh: Unprocessable Entity (HTTP 422)\n"
+
+
+def _attempt(stdout: str, stderr: str = _STDERR_422) -> Any:
+    return post_queue.Attempt(1, stdout, stderr)
+
+
+@pytest.mark.parametrize("stdout", [_UNRESOLVED_LINE, _UNRESOLVED_MANY])
+def test_a_rejection_that_cannot_resolve_the_position_is_told_apart(stdout: str) -> None:
+    """行やファイルを解決できない拒まれ方だけを、退避の契機として見分ける。"""
+    assert post_queue.is_position_unresolved(_attempt(stdout)) is True
+
+
+@pytest.mark.parametrize("stdout", [_BAD_EVENT, _BAD_COMMIT])
+def test_another_rejection_of_the_same_status_is_not_a_reason_to_move(stdout: str) -> None:
+    """判定の値の誤りと基準のコミットの誤りは、退避せず失敗として残す。"""
+    assert post_queue.is_position_unresolved(_attempt(stdout)) is False
+
+
+def test_a_rejection_of_another_status_is_not_a_reason_to_move() -> None:
+    assert post_queue.is_position_unresolved(
+        post_queue.Attempt(1, '{"message":"Not Found"}', "gh: Not Found (HTTP 404)")
+    ) is False
+
+
+def test_a_success_is_not_a_rejection() -> None:
+    assert post_queue.is_position_unresolved(post_queue.Attempt(0, "{}", "")) is False
+
+
+@pytest.mark.parametrize("stdout", [_UNRESOLVED_LINE, _BAD_EVENT])
+def test_the_words_of_the_rejection_are_readable(stdout: str) -> None:
+    """応答の `errors` が文字列の列でも、失敗の説明に語が残る。"""
+    assert "could not be resolved" in _attempt(_UNRESOLVED_LINE).message
+    assert _attempt(stdout).message != ""
+
+
+def test_a_rejection_that_cannot_resolve_the_position_is_not_a_rate_limit() -> None:
+    assert post_queue.is_rate_limited(_attempt(_UNRESOLVED_LINE)) is False
