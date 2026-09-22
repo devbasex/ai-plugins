@@ -568,7 +568,7 @@ def _switch_apply_impl(state: dict[str, Any], group: dict[str, Any]) -> bool:
     }
     tried.add(group.get("impl"))
     seq = safe_int(state.get("apply_seq"))
-    for _ in range(len(state.get("impl_capable") or []) or 4):
+    for _ in range(len(state.get("runtimes") or [])):
         seq += 1
         impl, requested = impl_for_seq(state, seq)
         if impl in tried:
@@ -649,7 +649,7 @@ def _load_apply_context(
     ctx: _ApplyExecutionContext, payload: dict[str, Any],
 ) -> tuple[dict[str, Any], _ApplyCommitRange]:
     impl = ctx.group.get("impl") or ctx.entry["impl"]
-    record_observed_model(ctx.entry, "impl", impl, ctx.state, "apply", ctx.args.round)
+    record_observed_model(ctx.entry, impl, ctx.state, "apply", ctx.args.round)
 
     # 検証の材料は git から取る。結果ファイルから使うのは
     # 「どのコミットがこの群のものか」という対応付けだけ。

@@ -92,7 +92,8 @@ def test_init_stores_an_empty_rejected_findings_list(tmp_dir, state_mod, monkeyp
     monkeypatch.setattr(state_mod, "_sync_worktree", lambda *args: None)
     monkeypatch.setattr(state_mod.subprocess, "run", lambda *args, **kwargs:
                         subprocess.CompletedProcess(args[0], 0, stdout="", stderr=""))
-    monkeypatch.setattr(state_mod.auth, "check_auth", lambda *args, **kwargs: None)
+    monkeypatch.setattr(state_mod.auth, "probe_auth", lambda runtimes, **kwargs: (
+        {r: {"command": r, "ok": True, "detail": ""} for r in runtimes}, False))
 
     state_mod.cmd_init(argparse.Namespace(
         pr=PR, max_rounds=12, rotate_after=8, only=None, worktree=str(worktree),

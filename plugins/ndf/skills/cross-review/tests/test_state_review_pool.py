@@ -549,9 +549,10 @@ def test_a_state_without_participants_keeps_the_old_rotation(state_mod, tmp_path
     """AC22: `participants` が無くても、`host` があれば変更前の輪番と同じ値を返す。"""
     path = _state(tmp_path, host="codex")
     st = json.loads(path.read_text(encoding="utf-8"))
+    # 変更前の輪番: 母集合 claude / agy / kiro から `(round_no - 1) % 3` の者を外した 2 者
+    previous = [["agy", "kiro"], ["claude", "kiro"], ["claude", "agy"]]
     for round_no in range(1, 7):
-        assert state_mod._round_reviewers(st, round_no) == \
-            state_mod.assignment.review_assign(round_no, "codex")
+        assert state_mod._round_reviewers(st, round_no) == previous[(round_no - 1) % 3]
     del st["host"]
     assert state_mod._round_reviewers(st, 1) == ["codex", "agy"]
 

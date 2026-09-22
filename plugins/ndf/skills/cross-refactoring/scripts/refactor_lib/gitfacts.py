@@ -1131,10 +1131,10 @@ def read_result(
 
 
 def record_observed_model(
-    entry: dict[str, Any], role: str, runtime: str,
+    entry: dict[str, Any], runtime: str,
     state: dict[str, Any], phase: str, round_no: Optional[int],
 ) -> None:
-    """CLI の出力から実際に使われたモデル名を拾って記録する。
+    """実装担当の CLI の出力から、実際に使われたモデル名を拾って記録する。
 
     取れるのは claude だけである。取れないランタイムは `None` のままにし、
     報告では既定モデルのラウンドとして集計から区別する。
@@ -1148,13 +1148,8 @@ def record_observed_model(
     )
     if not observed:
         return
-    if role == "impl":
-        entry["impl_model"]["observed"] = observed
-        requested = entry["impl_model"]["requested"]
-    else:
-        entry["reviewer_models"].setdefault(runtime, {"requested": None, "observed": None})
-        entry["reviewer_models"][runtime]["observed"] = observed
-        requested = entry["reviewer_models"][runtime]["requested"]
+    entry["impl_model"]["observed"] = observed
+    requested = entry["impl_model"]["requested"]
     warning = models_lib.mismatch_warning(runtime, requested, observed)
     if warning:
         info(warning)
