@@ -12,6 +12,7 @@ if str(LIB) not in sys.path:
 
 from models import (
     ModelSpecError,
+    mismatch_warning,
     observed_model,
     parse_model_args,
     separation_reason,
@@ -93,3 +94,27 @@ def test_separation_reason_current_behavior(
 ) -> None:
     """現状固定。kiro の auto / 未指定かつ実測不可 / 分離しないの 3 分岐を記録する。"""
     assert separation_reason(runtime, model) == expected
+
+
+@pytest.mark.parametrize(
+    ("requested", "observed"),
+    [
+        ("gpt-5", None),
+        (None, "gpt-5"),
+        (None, None),
+        ("gpt-5", "gpt-5"),
+    ],
+)
+def test_mismatch_warning_returns_none_when_no_conflict(
+    requested: str | None, observed: str | None
+) -> None:
+    """現状固定。実測なし / 指定なし / 両方なし / 一致では None を返す。"""
+    assert mismatch_warning("claude", requested, observed) is None
+
+
+def test_mismatch_warning_reports_conflict() -> None:
+    """現状固定。指定値と実測値が食い違うと警告文字列を返す。"""
+    assert mismatch_warning("claude", "claude-opus", "claude-sonnet") == (
+        "⚠ claude: 指定したモデル claude-opus と実際に動いたモデル claude-sonnet が"
+        "食い違っています。比較には使えません"
+    )
