@@ -452,6 +452,18 @@ def test_the_push_fails_without_a_destination() -> None:
     assert outcome.ok is False and outcome.pushed is False
 
 
+def test_a_rejected_push_stops_before_checking_the_branch(tmp_path) -> None:
+    """送信そのものが拒まれたら、載ったかを確かめずに理由を残して止まる。"""
+    work, _ = _repo_with_remote(tmp_path)
+    subprocess.run(["git", "-C", str(work), "remote", "set-url", "origin",
+                    str(tmp_path / "missing.git")], check=True)
+
+    outcome = result_posts.push_fix(work, "main", _head(work))
+
+    assert outcome[:3] == (False, False, False)
+    assert outcome.detail != ""
+
+
 # ---------------- 単独で使う口 ----------------
 
 def test_the_standalone_command_pushes_and_posts_with_the_same_layer(

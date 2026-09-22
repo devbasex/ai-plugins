@@ -356,3 +356,15 @@ def test_the_words_of_the_rejection_are_readable(stdout: str) -> None:
 
 def test_a_rejection_that_cannot_resolve_the_position_is_not_a_rate_limit() -> None:
     assert post_queue.is_rate_limited(_attempt(_UNRESOLVED_LINE)) is False
+
+
+@pytest.mark.parametrize("item, expected", [
+    ({"last_status": 422, "last_error": "Line could not be resolved"}, True),
+    ({"last_status": 422, "last_error": "Invalid event"}, False),
+    ({"last_status": 404, "last_error": "Line could not be resolved"}, False),
+    ({"last_status": None, "last_error": "Line could not be resolved"}, False),
+])
+def test_a_queued_item_is_told_apart_by_its_status_and_words(
+        item: dict[str, Any], expected: bool) -> None:
+    """流した後に残った項目も、422 と位置の語がそろうときだけ位置の拒否と見る。"""
+    assert post_queue.rejected_by_position(item) is expected
