@@ -646,20 +646,30 @@ def _scan_patterns(
     return None
 
 
+# 致命の照合の並び。`(patterns, benign)` を優先順位の順に並べる。**利用上限を先に置く。**
+# 上限で落ちた後に別の致命が続く形が普通で、上限のほうが原因（#729 の決定 4）。種類を
+# 足すときはこの表へ 1 行足す。`benign` が `None` のときは `_scan_patterns` の既定
+# （`EARLY_ERROR_BENIGN`）を使う。
+_EARLY_FATAL_SCANS: tuple[tuple[list[re.Pattern[str]], Optional[list[re.Pattern[str]]]], ...] = (
+    (USAGE_LIMIT_FATAL, None),
+    (EARLY_ERROR_FATAL, None),
+    (EARLY_ERROR_FATAL_WARNING_SHAPED, EARLY_ERROR_BENIGN_KEEP_WARNINGS),
+)
+
+
 def _scan_early_fatal(path: pathlib.Path) -> Optional[str]:
     """err.log の致命の一致（kill 対象）。**利用上限も含む。**
 
     理由（`usage_limit` か `early_error` か）の区別はここでは行わず、`_early_error` が
     `USAGE_LIMIT_FATAL` を先に照合して決める。この関数は「止めるべき文言があるか」だけを返す。
+
+    照合は `_EARLY_FATAL_SCANS` の順に行い、最初のヒットを返す。
     """
-    hit = _scan_patterns(path, USAGE_LIMIT_FATAL) or _scan_patterns(path, EARLY_ERROR_FATAL)
-    if hit:
-        return hit
-    return _scan_patterns(
-        path,
-        EARLY_ERROR_FATAL_WARNING_SHAPED,
-        benign=EARLY_ERROR_BENIGN_KEEP_WARNINGS,
-    )
+    for patterns, benign in _EARLY_FATAL_SCANS:
+        hit = _scan_patterns(path, patterns, benign=benign)
+        if hit:
+            return hit
+    return None
 
 
 def _scan_early_warn(path: pathlib.Path) -> Optional[str]:

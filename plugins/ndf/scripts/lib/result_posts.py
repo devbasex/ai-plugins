@@ -181,6 +181,19 @@ class ReviewOutcome(NamedTuple):
     detail: str
 
 
+def _enqueue_seq(queue: post_queue.Queue, item: dict[str, Any], repo: str, pr: int,
+                 actor: str | None) -> tuple[pathlib.Path, Any]:
+    """項目を 1 件積み、積んだファイルと連番を返す。
+
+    「積む → 読み直す → 連番を取り出す」の 3 行はレビューの初回・退避の送り直し・
+    修正のループで同じ形で繰り返す。連番の取り出し方を 1 か所へ寄せる。
+    """
+    path = post_queue.enqueue(queue, item["kind"], repo, pr, item["fields"],
+                              actor=actor, extra=item["extra"])
+    seq = (post_queue.read_item(path) or {}).get("seq")
+    return path, seq
+
+
 def _find(items: list[dict[str, Any]], seq: Any) -> dict[str, Any] | None:
     return next((i for i in items if i.get("seq") == seq), None)
 
@@ -237,9 +250,7 @@ def post_review(queue: post_queue.Queue, payload_path: pathlib.Path | str,
     findings = len(_findings(_read_json(payload_path)))
     item = review_posts(payload_path, result_path, repo, pr, round_no, seat,
                         head_sha, is_own_pr, since=since)[0]
-    path = post_queue.enqueue(queue, item["kind"], repo, pr, item["fields"],
-                              actor=actor, extra=item["extra"])
-    seq = (post_queue.read_item(path) or {}).get("seq")
+    _, seq = _enqueue_seq(queue, item, repo, pr, actor)
     flushed = queue.flush()
 
     ours_failed = flushed.failed is not None and flushed.failed.get("seq") == seq
@@ -247,9 +258,7 @@ def post_review(queue: post_queue.Queue, payload_path: pathlib.Path | str,
         queue.drop(flushed.failed.get("seq"))
         item = review_posts(payload_path, result_path, repo, pr, round_no, seat,
                             head_sha, is_own_pr, evacuate_all=True, since=since)[0]
-        path = post_queue.enqueue(queue, item["kind"], repo, pr, item["fields"],
-                                  actor=actor, extra=item["extra"])
-        seq = (post_queue.read_item(path) or {}).get("seq")
+        _, seq = _enqueue_seq(queue, item, repo, pr, actor)
         flushed = queue.flush()
 
     done = _find(flushed.sent, seq) or _find(flushed.skipped, seq)
@@ -366,9 +375,7 @@ def post_fix(queue: post_queue.Queue, result_path: pathlib.Path | str, repo: str
     """返信・決着・まとめを待ち行列へ積んで流す。"""
     seqs: dict[int, str] = {}
     for item in fix_posts(result_path, repo, pr, round_no):
-        path = post_queue.enqueue(queue, item["kind"], repo, pr, item["fields"],
-                                  actor=actor, extra=item["extra"])
-        seq = (post_queue.read_item(path) or {}).get("seq")
+        _, seq = _enqueue_seq(queue, item, repo, pr, actor)
         if seq is not None:
             seqs[int(seq)] = item["kind"]
     flushed = queue.flush()
