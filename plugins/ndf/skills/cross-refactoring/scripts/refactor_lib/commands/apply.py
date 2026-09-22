@@ -80,6 +80,30 @@ class _ApplyCommitRange:
     in_range: set[str]
 
 
+def _read_runtime_proposal(
+    result: pathlib.Path,
+) -> Optional[list[dict[str, Any]]]:
+    runtime = result.name.split("-", 1)[0]
+    if not result.exists():
+        info(f"⚠ {runtime} の提案結果がありません: {result}")
+        return None
+    try:
+        payload = json.loads(result.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        info(f"⚠ {runtime} の提案結果が JSON として読めません: {e}")
+        return None
+    if not isinstance(payload, dict):
+        info(
+            f"⚠ {runtime} の提案結果が JSON オブジェクトではありません"
+            f"（{type(payload).__name__}）。提案なしとして扱います"
+        )
+        return []
+    items = payload.get("items")
+    if not isinstance(items, list):
+        return []
+    return [item for item in items if isinstance(item, dict)]
+
+
 def _load_runtime_proposals(
     state: dict[str, Any], entry: dict[str, Any]
 ) -> dict[str, list[dict[str, Any]]]:
@@ -94,28 +118,11 @@ def _load_runtime_proposals(
             state, runtime,
             stem_for(runtime, "propose", state["id"], entry["round"]),
         )
-        if not result.exists():
-            info(f"⚠ {runtime} の提案結果がありません: {result}")
+        runtime_proposals = _read_runtime_proposal(result)
+        if runtime_proposals is None:
             continue
-        try:
-            payload = json.loads(result.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as e:
-            info(f"⚠ {runtime} の提案結果が JSON として読めません: {e}")
-            continue
-        if not isinstance(payload, dict):
-            # 配列や数値のまま `payload.get(...)` を呼ぶと落ちる。
-            # 提案は無かったものとして続ける（1 者の不調で全体を止めない）。
-            info(
-                f"⚠ {runtime} の提案結果が JSON オブジェクトではありません"
-                f"（{type(payload).__name__}）。提案なしとして扱います"
-            )
-            proposals[runtime] = []
-            entry["proposed"][runtime] = 0
-            continue
-        items = payload.get("items")
-        proposals[runtime] = [i for i in items if isinstance(i, dict)] \
-            if isinstance(items, list) else []
-        entry["proposed"][runtime] = len(proposals[runtime])
+        proposals[runtime] = runtime_proposals
+        entry["proposed"][runtime] = len(runtime_proposals)
     return proposals
 
 
