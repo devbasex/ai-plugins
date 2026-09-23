@@ -89,6 +89,19 @@ def test_advance_with_no_rounds_leaves_the_state_unchanged(cmd_report, tmp_path,
     assert read_state(state_path) == before
 
 
+def test_advance_stops_when_already_final(cmd_report, tmp_path, env_tmp_dir):
+    """終了済みなら状態を書き換えずに終了コード 1 で止まる（R2-002 の現状固定）。"""
+    state_path = make_state(tmp_path, final="no_more_proposals", rounds=[round_of(1)])
+    env_tmp_dir(state_path)
+    before = read_state(state_path)
+
+    with pytest.raises(SystemExit) as e:
+        cmd_report.cmd_advance(_args())
+
+    assert e.value.code == 1
+    assert read_state(state_path) == before
+
+
 def test_advance_continues_when_progress_is_made(cmd_report, tmp_path, env_tmp_dir):
     state_path = make_state(tmp_path, rounds=[round_of(1)])
     env_tmp_dir(state_path)

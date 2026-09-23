@@ -139,3 +139,35 @@ def test_init_fetch_is_not_strict(state_mod, tmp_path, fake_fetch, monkeypatch):
     assert path.read_text(encoding="utf-8").startswith("[PR-COMMENT]")
     monkeypatch.setenv("FAKE_RC", "1")
     assert state_mod._fetch_existing_comments(REPO, PR, path, strict=False)
+
+
+def test_init_aborts_without_a_state_file_when_the_fetch_fails(
+        state_mod, tmp_path, fake_fetch, monkeypatch):
+    """`init` は控えの取得に失敗すると中断し、状態ファイルを作らない（R2-005 の現状固定）。
+
+    重複検出が無効のままレビューを始めないためである。取得は `--strict` を付けない 1 回。
+    """
+    monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
+    monkeypatch.setenv("NDF_SKIP_AUTH_CHECK", "1")
+    monkeypatch.setenv("FAKE_RC", "1")
+    worktree = tmp_path / "wt-new"
+    monkeypatch.setattr(
+        state_mod, "_fetch_pr_metadata",
+        lambda pr, repo=None: state_mod.PrMetadata(
+            REPO, "someone", "feat/x", "abc123", "develop", True, 4000, None))
+    monkeypatch.setattr(state_mod, "_fetch_changed_files", lambda pr, repo: [])
+    monkeypatch.setattr(state_mod, "_repo_from_git", lambda: REPO)
+    monkeypatch.setattr(state_mod, "_create_worktree",
+                        lambda wt, pr, head: pathlib.Path(wt).mkdir())
+    monkeypatch.setattr(state_mod, "_sh", lambda cmd, check=True: "me")
+    args = type("A", (), {
+        "pr": PR, "max_rounds": 12, "rotate_after": 8, "only": None,
+        "worktree": str(worktree), "focus": None, "extra_instructions_file": None,
+        "host": "claude"})()
+
+    with pytest.raises(SystemExit) as e:
+        state_mod.cmd_init(args)
+
+    assert e.value.code != 0
+    assert not (tmp_path / f"cross-review-pr{PR}-state.json").exists()
+    assert fake_fetch() == [f"{REPO} {PR}"]

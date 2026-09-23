@@ -258,3 +258,20 @@ def test_excluding_all_pool_members_leaves_empty_available(assignment):
     assert p.unavailable == {}
     assert p.excluded == ["codex", "agy", "kiro"]
 
+
+
+def test_participant_missing_from_probe_results_is_unavailable_with_empty_reason(assignment):
+    """確認の結果に名前が無い者は、理由が空の `unavailable` になる（R2-001 の現状固定）。
+
+    明示的に `ok=False` を返す経路とは別の分岐である。結果がある成功者だけが残る。
+    """
+    def probe(names):
+        return {"codex": {"command": "codex probe", "ok": True, "detail": ""}}, False
+
+    p = assignment.resolve_participants(
+        ["codex", "agy", "kiro"], host="claude", probe=probe,
+    )
+
+    assert p.available == ["codex"]
+    assert p.unavailable == {"agy": "", "kiro": ""}
+    assert p.probe_skipped is False

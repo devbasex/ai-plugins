@@ -755,6 +755,19 @@ def test_resume_include_wins_over_an_ignored_exclusion(run_init, tmp_path):
     assert state["runtimes"] == ["claude", "codex", "agy", "kiro"]
 
 
+def test_resume_include_of_a_real_exclusion_still_conflicts(run_init, tmp_path):
+    """実際に外した者を `--include` で渡すと、矛盾として中断し状態を書き換えない（R2-003 の現状固定）。"""
+    run_init(_args(tmp_path, exclude=[["kiro"]]), probe={})
+    path, state = _state_of(tmp_path)
+    assert state["participants"]["excluded"] == ["kiro"]
+    before = path.read_text(encoding="utf-8")
+
+    with pytest.raises(SystemExit) as e:
+        run_init(_args(tmp_path, include=[["kiro"]]), probe={})
+    assert e.value.code == refactor_abort()
+    assert path.read_text(encoding="utf-8") == before
+
+
 def test_resume_with_include_adds_the_participant_worktree(run_init, tmp_path):
     """足す者を渡した再開では参加者と作業ツリーの対応をともに補う。"""
     run_init(_args(tmp_path), probe={})
