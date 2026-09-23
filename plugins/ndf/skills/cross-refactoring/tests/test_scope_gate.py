@@ -198,6 +198,26 @@ def test_a_test_file_is_a_round_test_root(scope, tmp_path):
         "tests/services/test_one.py"]
 
 
+@pytest.mark.parametrize("command", [
+    "pytest tests/services/test_one.py::test_a",
+    "pytest tests/services/test_one.py::TestA::test_b -q",
+])
+def test_a_node_id_counts_its_file_as_a_round_test_root(scope, tmp_path, command):
+    """ノード ID はファイルの部分を起点に数える。数えないと起点が空になり、全体を覆うとみなす。"""
+    _services(tmp_path)
+    assert scope.round_test_roots(command, str(tmp_path)) == [
+        "tests/services/test_one.py"]
+
+
+def test_a_node_id_narrower_than_the_scope_stops(refactor_lib, scope, tmp_path):
+    """範囲のテストの置き場所の一部しか走らせないノード ID は関門で止める。"""
+    _services(tmp_path)
+    problem = scope.scope_problem(
+        ["src", "tests/services"], "pytest tests/services/test_one.py::test_a",
+        str(tmp_path), round_test=True)
+    assert problem is not None and "--round-test" in problem
+
+
 def test_an_option_value_and_the_work_root_are_not_round_test_roots(scope, tmp_path):
     """`--project .` の `.` はオプションの値で、作業ディレクトリの根でもある。"""
     _services(tmp_path)

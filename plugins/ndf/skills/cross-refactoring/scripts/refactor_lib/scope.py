@@ -174,7 +174,8 @@ def _scope_roots(
 ) -> list[str]:
     """コマンドの語のうち `accept(語, 直前の語, 正規化した語)` が真のものを返す。
 
-    **先頭の語**（プログラム名）と `-` で始まる語、絶対パスは見ない。正規化した
+    **先頭の語**（プログラム名）と `-` で始まる語、絶対パスは見ない。ノード ID は
+    `::` より前のファイルの部分で読む。正規化した
     語を重複なく、現れた順に集める。語として読めないコマンドは空を返す。
     """
     try:
@@ -187,6 +188,8 @@ def _scope_roots(
         before, previous = previous, word
         if word.startswith("-") or os.path.isabs(word):
             continue
+        # pytest のノード ID（`<ファイル>::<名前>`）はファイルの部分で読む。
+        word = word.split("::", 1)[0]
         normalized = os.path.normpath(word)
         if accept(word, before, normalized) and normalized not in roots:
             roots.append(normalized)
