@@ -132,6 +132,11 @@ def test_sleep_allowed(cmd, state):
     assert denied(run(bash(cmd), state)) is None, cmd
 
 
+def test_sleep_in_here_string_is_allowed(state):
+    # 現状固定: here-string の内容はヒアドキュメント本文ではなく、sleep 判定の対象外になる。
+    assert denied(run(bash('grep x <<< "sleep 60"'), state)) is None
+
+
 @pytest.mark.parametrize("cmd", ["sleep 0.1h", "sleep 1d"])
 def test_sleep_denied_on_hour_and_day_units(cmd, state):
     # 現状固定: DENY_SLEEP は 'sleep 1m'（分）だけを固定していたが、時間・日の単位と
