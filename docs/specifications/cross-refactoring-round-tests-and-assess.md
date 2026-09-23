@@ -306,10 +306,10 @@ python3 "$RF/refactor.py" assess --base origin/develop; rc=$?; echo "exit=$rc"
 テストの置き場所だけを走らせるコマンド、`--baseline-test` に全体のテストを渡す（`stage-notes.md`）。
 全体のテストは `quality-gates` の全体のテストと重ねて回さない。
 
-**「構造改善を当面通さない」の指示（2026-09-23）を解くかは conductor が次の 4 つで決める。**
-#880 #883 #494 #723 を実装した Pull Request 自身の検査の持ち場で `cross-refactoring --workflow-step`
-を通し、その実行について見る。満たせば指示を解き、満たさなければ指示を保ったまま満たさなかった
-条件を issue にする。
+**構造改善の工程を通常どおり通せることは、次の 4 つで確かめた。** #880 #883 #494 #723 を実装した
+Pull Request #917 自身の検査の持ち場で `cross-refactoring --workflow-step` を通し、その実行が 4 つとも
+満たした（[記録](https://github.com/devbasex/ai-plugins/pull/917#issuecomment-5797876310)）。
+同じ変更の後に構造改善の工程が詰まったら、同じ 4 つで見直す。
 
 | 条件 | 何で見るか |
 | --- | --- |
