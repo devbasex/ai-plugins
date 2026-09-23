@@ -158,8 +158,9 @@ plugins/ndf/
 | 3 | 上に当たるパスがある | そのパスを `rc-noticed` に足し、`{"systemMessage": "ndf-relay: <パス> の alias claude は 10.17.4 が自動で足したもの。使い続けるなら何もしなくてよい。外すなら /ndf:install-wrapper uninstall"}` を出す（パスが 2 つなら 1 行に並べる） |
 
 **`notice` は設定ファイルと写しを読むだけで、書くのは状態の親の `rc-noticed` だけである。** 例外は
-すべて捕まえて終了コード 0 で終わる。`install.lock` は取らない（読むだけなので競合しても害が無く、
-2 つの起動が同時に知らせても 1 行が 2 回出るだけ）。
+すべて捕まえて終了コード 0 で終わる。**判定 2・3 は `install.lock` の中で行う**（2 秒まで待ち、
+取れなければ何もせず終わる）。同じ HOME の 2 つの起動が同時に来ても、`rc-noticed` の読み書きが
+重ならず、知らせは 1 度だけになる。取れなかった起動では知らせず、次の起動で改めて判定する。
 
 **hook の定義**（`matcher: startup` の最後の 1 件を差し替える。`timeout` 5・`continueOnError: true`）:
 
@@ -246,15 +247,18 @@ sh -c '[ -n "${NDF_RELAY_DIR:-}" ] || exit 0; ROOT="${CLAUDE_PLUGIN_ROOT:-${PLUG
 
 | 順 | 中継がすること |
 | ---: | --- |
-| 1 | `question.lock` の排他を取る（取れなければ次の確認まで待つ） |
-| 2 | (3)〜(5) をもう 1 度確かめる。外れていれば放して「静まりを待つ」へ戻る |
-| 3 | `/exit\r` を **1 回の write** で書く |
-| 4 | 1 秒おいてから放す |
+| 1 | (1)〜(5) がそろった時点の、印の `written_at` と会話の記録の大きさ・更新時刻を控える（記録を全行読むのはこの前の段だけ） |
+| 2 | `question.lock` の排他を取る（取れなければ次の確認まで待つ） |
+| 3 | ロックの中では記録を読み直さない。`question` が無いこと、印の `written_at` と記録の大きさ・更新時刻が 1 の控えと同じことだけを、`stat` と印の読み取りで確かめる。外れていれば放して「静まりを待つ」へ戻る |
+| 4 | `/exit\r` を **1 回の write** で書く |
+| 5 | 1 秒おいてから放す |
 
 **ロックで質問の始まりと write を排他にする。** 質問は `PreToolUse` の hook が終わってから描かれ、
 その hook は `question.lock` を取ってから印を作る。そのため、確かめ直しの後に質問が描かれることは
 無い。書いた後に 1 秒持つのは、TUI が書いた入力を読み終える前に質問が描かれないためである。
-質問の hook を待たせるのは最大 1 秒で、hook の `timeout` 5 秒に収まる（決定 17）。
+**ロックを持つ時間は、ファイルの `stat`・印の読み取り・write と 1 秒である。** 会話の記録を全行
+読む処理（目標の判定・(5)）をロックの中に置かないので、持つ時間は記録の長さに依らない。**持つ時間
+（1 秒と数ミリ秒）は、`question open` が待つ 3 秒より短く、hook の `timeout` 5 秒にも収まる**（決定 17）。
 
 **書いた後に `question` が現れたら、消えるまで `NDF_RELAY_EXIT_WAIT` の秒を数えない。** 印の
 確かめ直しと write の間に応答が再開していた場合、書いた `/exit` は待ち行列に入る。その応答が質問を
@@ -338,12 +342,12 @@ stateDiagram-v2
 | 受け入れ条件 | 何で確かめるか |
 | --- | --- |
 | AC1 | `claude.json` の SessionStart に `install` が無いこと（hook の定義を読む単体テスト）と、一時の HOME で `notice` の hook のコマンドをそのまま動かして設定・写しの中身と更新時刻が変わらないこと |
-| AC2 | `git diff origin/develop -- plugins/ndf/hooks/codex.json plugins/ndf/dev.agy` が空 |
+| AC2 | `git diff origin/develop -- plugins/ndf/hooks/codex.json plugins/ndf/dev.agy plugins/ndf/dev.kiro` が空 |
 | AC3〜AC5 | `test_relay.py`: bash / zsh（`ZDOTDIR`）で囲み・バックアップ・行が出る。2 回目は写しだけ置き直す。`rc-added` があっても足す。既存の alias / 関数 / `~/.bash_aliases`・fish で足さず終了コード 1。E5 の空行を 1 つだけ挟む |
 | AC6 | `test_relay.py`: 両方のファイルの囲み（複数を含む）を外し、囲みの外がバイトで同じ。閉じの無い囲みで変えず終了コード 1。写しと記録の行が消える。10.17.4 の `install` で作った状態（`rc-added` あり）から外れる |
 | AC7 | `test_relay.py`: 各状態で出す行と、何も書かないこと（前後のファイルの比較） |
 | AC8・AC16 | manifests と `check-skill-frontmatter.py`。`install-wrapper` に `disable-model-invocation: true`、`restart` に無いこと |
-| AC9 | `test_relay.py`: `rc-added` あり・囲みありで 1 度だけ `systemMessage`、2 回目は出ない。囲みが消えていれば出ない。設定と写しを書かない |
+| AC9 | `test_relay.py`: `rc-added` あり・囲みありで 1 度だけ `systemMessage`、2 回目は出ない。同時に 2 つ走らせても出るのは 1 つだけ。囲みが消えていれば出ない。設定と写しを書かない |
 | AC10 | 10.17.4 の囲みの文字列のまま `run` が始まること（既存の中継のテストが通る） |
 | AC11 | `test_relay.py`: 写しから起こした `run` が、差し替えの `plugin list` の `installPath` の中身へ写しを置き直す。写しでない場所から起こしたとき・`installPath` が無いときは置き直さない |
 | AC12〜AC15 | `restart/SKILL.md` を読んで確かめる（文言を固定するテストは書かない）と AC21 |

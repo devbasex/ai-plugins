@@ -18,7 +18,7 @@
 
 1. Claude Code を起動しても、hook は `~/.bashrc` / `~/.zshrc` と `~/.local/share/ndf/` へ何も書かない。**10.17.4 が足した囲みが残っている利用者には、それが自動で足されたものであることと、残す・外すの方法を 1 度だけ知らせる**
 2. 中継を使いたい利用者は `/ndf:install-wrapper` を 1 度打つ。外すときは `/ndf:install-wrapper uninstall`（10.17.4 が足した囲みも同じ手順で外れる）
-3. 中継の下で `/ndf:restart` を打つと、claude が終了→プラグインの更新→起動し直し、再開用のコマンドが人の入力なしで送られる。中継の外では、再起動の手順と貼り付けるコマンドを 1 行で示して終わる
+3. 中継の下で `/ndf:restart` を打つと、claude が終了→プラグインの更新→起動し直し、再開用のコマンドが人の入力なしで送られる。中継の外では、手順の 1 行と、貼り付ける中身を囲みで示して終わる
 
 ## 依頼（原文）
 
@@ -84,7 +84,7 @@
 
 ### 3. 10.17.4 の自動の囲みの移行
 
-- [ ] AC9: 自動の囲みが残っている利用者が次の版の Claude Code を起動すると、「10.17.4 が自動で足した alias が残っている。使い続けるなら何もしなくてよい。外すなら `/ndf:install-wrapper uninstall`」の 1 行が 1 度だけ出る。2 回目以降の起動では出ない。このとき hook は設定ファイルと写しを読むだけで書かない（知らせた記録は状態の親 `${XDG_STATE_HOME:-~/.local/state}/ndf/relay/` にだけ書く）
+- [ ] AC9: 自動の囲みが残っている利用者が次の版の Claude Code を起動すると、「10.17.4 が自動で足した alias が残っている。使い続けるなら何もしなくてよい。外すなら `/ndf:install-wrapper uninstall`」の 1 行が 1 度だけ出る。2 回目以降の起動では出ない。同じ HOME で 2 つの起動が同時に来ても 1 度だけである。このとき hook は設定ファイルと写しを読むだけで書かない（知らせた記録は状態の親 `${XDG_STATE_HOME:-~/.local/state}/ndf/relay/` にだけ書く）
 - [ ] AC10: 自動の囲みを残した利用者の中継は、次の版でもそのまま動く（alias の形・写しの置き場所・`NDF_RELAY_*` の意味を変えない）
 - [ ] AC11: 写しは、中継が始まるとき（`run`）に、導入済みのプラグインの `relay.py` と中身が違えばそれで置き直される。置き直しは写しを置いた利用者（写しが在る）だけに起き、シェルの設定は変えない。次に `claude` と打ったときから新しい版で動く
 
@@ -148,7 +148,7 @@
 
 | 条件 | 手段 |
 | --- | --- |
-| AC1・AC2 | hook の定義の差分と、一時の HOME で hook のコマンドを動かした前後の比較。Codex / agy の定義の `git diff` が空 |
+| AC1・AC2 | hook の定義の差分と、一時の HOME で hook のコマンドを動かした前後の比較。Codex / Kiro / agy の定義（`hooks/codex.json`・`dev.kiro`・`dev.agy`）の `git diff` が空 |
 | AC3〜AC7・AC9〜AC11 | `test_relay.py` の単体テスト（一時の HOME・`XDG_*`・`SHELL`・`ZDOTDIR`） |
 | AC8・AC16 | manifests（`claude-skills.txt` にだけ載る）と frontmatter の検査（`check-skill-frontmatter.py`） |
 | AC12〜AC15 | Skill の本文を読んで確かめる（文言を固定するテストは書かない）と、AC21 の通し |
