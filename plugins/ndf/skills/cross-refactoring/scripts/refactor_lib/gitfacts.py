@@ -188,6 +188,16 @@ def commit_test_changes(work: str, sha: str) -> dict[str, tuple[list[str], list[
     return changes
 
 
+def tracked_markdown(work: str) -> list[str]:
+    """追跡している `.md` のリポジトリ相対パス（#723）。
+
+    `-z` で読む。既定の出力は ASCII 以外を含むパスを引用符と 8 進数で書き換える。
+    パターン `*.md` は `/` をまたいで一致し、下の階層の `.md` も拾う。
+    """
+    out = git_out(work, ["ls-files", "-z", "*.md"], strip=False)
+    return [p for p in (out or "").split("\0") if p]
+
+
 def is_test_path(path: str) -> bool:
     """テストの置き場所か。判定は `commit_touches_tests` と同じ印で行う。"""
     lowered = f"/{path.lower()}"

@@ -30,6 +30,7 @@ from ..gitfacts import (
     safe_int,
     collect_commit_facts,
     commits_in_range,
+    tracked_markdown,
 )
 from ..intake import (
     IntakeScope,
@@ -884,6 +885,7 @@ def _collect_apply_group_facts(
 
 def _determine_apply_problem(
     ctx: _ApplyExecutionContext,
+    work: pathlib.Path,
     items: list[dict[str, Any]],
     missing: list[str],
     facts: list[dict[str, Any]],
@@ -895,7 +897,11 @@ def _determine_apply_problem(
             "（群の全項目を 1 つのコミットへまとめ、各項目へ同じ SHA を申告します）"
         )
     scope = ctx.state.get("target_scope") or []
-    return verify_apply_round(items, facts, scope)
+    # **追跡している `.md` の一覧は群ごとに 1 回だけ読む**（#723）。
+    return verify_apply_round(
+        items, facts, scope,
+        work=str(work), tracked_md=tracked_markdown(str(work)),
+    )
 
 
 def _record_apply_group_outcome(
@@ -942,7 +948,7 @@ def _verify_apply_group(
     """
     items = [find_item(ctx.state, i) for i in ctx.group["items"]]
     missing, shas, facts = _collect_apply_group_facts(ctx, commit_range, reported)
-    problem = _determine_apply_problem(ctx, items, missing, facts)
+    problem = _determine_apply_problem(ctx, commit_range.work, items, missing, facts)
     _record_apply_group_outcome(ctx, items, shas, facts, problem)
     if problem:
         return [], list(ctx.group["items"])

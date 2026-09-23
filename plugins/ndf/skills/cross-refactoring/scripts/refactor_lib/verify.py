@@ -5,6 +5,9 @@
 """
 from __future__ import annotations
 
+import ast
+import difflib
+import posixpath
 import re
 
 from collections import Counter
@@ -242,6 +245,8 @@ def _verify_apply_commit_count(facts: list[dict[str, Any]]) -> Optional[str]:
 def verify_apply_round(
     items: list[dict[str, Any]], facts: list[dict[str, Any]],
     scope: Optional[Iterable[str]] = None,
+    work: Optional[str] = None,
+    tracked_md: Iterable[str] = (),
 ) -> Optional[str]:
     """適用ラウンド 1 つ分の適用結果を検証する。問題があれば失敗理由を返す。
 
@@ -253,6 +258,9 @@ def verify_apply_round(
     `facts` は `collect_commit_facts()` が git から作る。振る舞い不変そのものは
     ここでは確かめない（テストは `verify-round` が実行する）が、**手順が守られたかは
     結果から確かめられる**。
+
+    `tracked_md` は追跡している `.md` の一覧（`tracked_markdown()`）、`work` は
+    補助モジュールを git から読む作業ディレクトリである（`doc_wording_tests`）。
     """
     if not facts:
         return (
@@ -282,6 +290,14 @@ def verify_apply_round(
     problem = verify_test_changes(changes)
     if problem:
         return problem
+
+    # **文書の文言を固定するテストを足していないか**（#723）。
+    hits = doc_wording_tests(facts, tracked_md, work)
+    if hits:
+        return (
+            "文書の文言を固定するテストは足さない"
+            f"（{'、'.join(f'{path}: {literal}' for path, literal in hits)}）"
+        )
 
     problem = _verify_diff_budget(items, facts)
     if problem:
@@ -527,3 +543,139 @@ def apply_judgements_to_group(
     )
     record_pending_judgements(entry, group, remaining)
     return remaining
+
+
+# ---------- 文書の文言を固定するテスト（#723） ----------
+#
+# **判定は追跡している `.md` のパスとの一致で行う。** `.md` で終わる文字列をすべて弾くと、
+# 一時ファイルの `.md` を入力に渡す検査スクリプトのテストまで弾く。追跡している `.md` と
+# 同じ名前の一時ファイル（`README.md` など）を使うテストは当たるが、そのときも群が
+# 取り消されるだけで、Pull Request に文言固定テストが残る側には倒れない（決定 9）。
+#
+# **動的に組み立てたパス（`glob` の結果など）は追わない。** 提案の基準とレビューが見る。
+
+_STRING = re.compile(r"""[rRbBuUfF]{0,2}(["'])((?:\\.|(?!\1)[^\\])*)\1""")
+
+
+def _names_markdown(literal: str, tracked: Iterable[str]) -> bool:
+    """文字列が追跡している `.md` のパスか、`/` の区切りで揃えたその末尾に一致するか。"""
+    if not literal.endswith(".md"):
+        return False
+    return any(p == literal or p.endswith("/" + literal) for p in tracked)
+
+
+def _markdown_literals(line: str, tracked: list[str]) -> list[str]:
+    return [m.group(2) for m in _STRING.finditer(line)
+            if _names_markdown(m.group(2), tracked)]
+
+
+def _added_lines(before: list[str], after: list[str]) -> list[str]:
+    """変更の後にだけある行。置き換えた行も追加として数える。"""
+    matcher = difflib.SequenceMatcher(None, before, after, autojunk=False)
+    return [line for tag, _, _, j1, j2 in matcher.get_opcodes()
+            if tag in {"insert", "replace"} for line in after[j1:j2]]
+
+
+def _parse(source: str) -> Optional[ast.Module]:
+    try:
+        return ast.parse(source)
+    except (SyntaxError, ValueError):
+        return None
+
+
+def _markdown_constants(tree: ast.Module, tracked: list[str]) -> dict[str, str]:
+    """モジュールの直下の代入のうち、右辺が追跡している `.md` を指す名前と、その文字列。"""
+    found: dict[str, str] = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            targets, value = node.targets, node.value
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets, value = [node.target], node.value
+        else:
+            continue
+        literal = next((
+            c.value for c in ast.walk(value)
+            if isinstance(c, ast.Constant) and isinstance(c.value, str)
+            and _names_markdown(c.value, tracked)
+        ), None)
+        if literal is None:
+            continue
+        for target in targets:
+            if isinstance(target, ast.Name):
+                found[target.id] = literal
+    return found
+
+
+def _helper_source(
+    helper: str, changes: dict[str, tuple[list[str], list[str]]],
+    work: Optional[str], sha: Optional[str],
+) -> Optional[str]:
+    """補助モジュールの変更の後の内容。群で触っていなければ git から読む。"""
+    if helper in changes:
+        return "".join(changes[helper][1])
+    if not work or not sha:
+        return None
+    return git_out(work, ["show", f"{sha}:{helper}"], strip=False)
+
+
+def _imported_constants(
+    tree: ast.Module, test_path: str, tracked: list[str],
+    changes: dict[str, tuple[list[str], list[str]]],
+    work: Optional[str], sha: Optional[str],
+) -> dict[str, str]:
+    """同じディレクトリの補助モジュールから import した、`.md` を指す定数。"""
+    found: dict[str, str] = {}
+    folder = posixpath.dirname(test_path)
+    for node in tree.body:
+        if (not isinstance(node, ast.ImportFrom) or not node.module
+                or "." in node.module or node.level > 1):
+            continue
+        source = _helper_source(
+            posixpath.join(folder, f"{node.module}.py"), changes, work, sha)
+        helper_tree = _parse(source) if source else None
+        if helper_tree is None:
+            continue
+        constants = _markdown_constants(helper_tree, tracked)
+        for alias in node.names:
+            if alias.name in constants:
+                found[alias.asname or alias.name] = constants[alias.name]
+    return found
+
+
+def _last_sha(facts: Iterable[dict[str, Any]]) -> Optional[str]:
+    shas = [c.get("sha") for c in facts if c.get("exists", True) and c.get("sha")]
+    return shas[-1] if shas else None
+
+
+def doc_wording_tests(
+    facts: Iterable[dict[str, Any]], tracked_md: Iterable[str],
+    work: Optional[str] = None,
+) -> list[tuple[str, str]]:
+    """追加したテストの行が、追跡している `.md` を指していれば `(ファイル, 文字列)` を返す。
+
+    当たりは、追加行の文字列リテラルと、テストのファイルの直下の定数・同じディレクトリの
+    補助モジュールから import した定数のうち `.md` を指すものを、追加行が識別子として
+    使う場合である。補助モジュールを群で触っていなければ、`work` の git から読む。
+    """
+    facts = list(facts)
+    tracked = list(tracked_md)
+    if not tracked:
+        return []
+    changes = collect_test_changes(facts)
+    sha = _last_sha(facts)
+    hits: list[tuple[str, str]] = []
+    for path, (before, after) in sorted(changes.items()):
+        added = _added_lines(before, after)
+        found = {lit for line in added for lit in _markdown_literals(line, tracked)}
+        tree = _parse("".join(after)) if path.endswith(".py") else None
+        if tree is not None:
+            names = {
+                **_markdown_constants(tree, tracked),
+                **_imported_constants(tree, path, tracked, changes, work, sha),
+            }
+            found.update(
+                literal for name, literal in names.items()
+                if any(re.search(rf"\b{re.escape(name)}\b", line) for line in added)
+            )
+        hits.extend((path, literal) for literal in sorted(found))
+    return hits
