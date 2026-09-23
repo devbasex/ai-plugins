@@ -127,7 +127,8 @@ def resolve_participants(
 
     母集合の既定は `refactor_pool(host)`（codex / kiro とホスト）。確認は止めない確認
     （`auth.probe_auth`）で、通らない者は外して続ける。名前の矛盾・全員を要する指定で
-    欠け・使える者が 0 者は、この工程の中断（終了コード 4）へ写す。状態ファイルは
+    欠け・使える者が 0 者は、この工程の中断（終了コード 4）へ写す。母集合に無い者の
+    除外は中断せず、`ℹ` の 1 行を出して続ける（#786 の決定 2）。状態ファイルは
     この関数の後に書かれるため、失敗したときは作られも書き換えられもしない。
     """
     try:
@@ -142,6 +143,9 @@ def resolve_participants(
         raise
     info(f"ホスト: {host} / 母集合: {' / '.join(pool)}"
          f" / 使える者: {' / '.join(resolved.available) or 'なし'}")
+    if resolved.ignored_exclude:
+        info(f"ℹ --exclude {','.join(resolved.ignored_exclude)} は既定の母集合に無いため"
+             f"無視しました（母集合: {', '.join(pool)}）")
     for name, reason in resolved.unavailable.items():
         info(f"⚠ {name} を担当から外しました（{reason}）")
     if not resolved.available:
@@ -463,10 +467,17 @@ def _resume(
     require_all = getattr(args, "require_all", None)
     if include is not None or exclude is not None or require_all is not None:
         recorded = state.get("participants") or {}
+        include_eff = include if include is not None else list(recorded.get("included") or [])
+        # `--exclude` を渡さない再開では、外した者と無視した除外の両方を足し戻す。無視した
+        # 名前を `--include` にも渡したときだけ足し戻さない（新しい指定を優先。#786 の AC4d。
+        # cross-review の `_recorded_exclusions` と同じ規則）
+        exclude_eff = exclude if exclude is not None else (
+            list(recorded.get("excluded") or [])
+            + [n for n in (recorded.get("ignored_exclude") or []) if n not in include_eff])
         participants = resolve_participants(
             str(state["host"]),
-            include if include is not None else list(recorded.get("included") or []),
-            exclude if exclude is not None else list(recorded.get("excluded") or []),
+            include_eff,
+            exclude_eff,
             bool(require_all) if require_all is not None else bool(recorded.get("require_all")),
         )
         state.setdefault("resume_changes", []).append({

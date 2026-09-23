@@ -281,8 +281,17 @@ def test_no_available_runtime_stops_without_writing_the_state(run_init, tmp_path
     assert "使える者がいません" in capsys.readouterr().err
 
 
+def test_excluding_a_runtime_outside_the_pool_is_ignored(run_init, tmp_path, capsys):
+    """#786 の AC4c — 母集合に無い agy の除外は中断せず、`ℹ` の 1 行を出して続ける。"""
+    run_init(_args(tmp_path, exclude=[["agy"]]), probe={})
+    _, state = _state_of(tmp_path)
+    assert state["participants"]["excluded"] == []
+    assert state["participants"]["ignored_exclude"] == ["agy"]
+    assert state["runtimes"] == ["claude", "codex", "kiro"]
+    assert "ℹ --exclude agy は既定の母集合に無いため無視しました" in capsys.readouterr().err
+
+
 @pytest.mark.parametrize("over", [
-    {"exclude": [["agy"]]},                         # 母集合に無い者は外せない
     {"include": [["agy"]], "exclude": [["agy"]]},   # 足す者と外す者の重なり
 ])
 def test_contradicting_names_stop_the_init(run_init, tmp_path, over):
@@ -711,6 +720,24 @@ def test_resume_with_exclude_rebuilds_the_participants(run_init, tmp_path):
     changes = state["resume_changes"]
     assert [c["field"] for c in changes] == ["participants"], "作り直しは 1 件として積む"
     assert changes[0]["from"]["available"] == ["claude", "codex", "agy", "kiro"]
+
+
+def test_resume_keeps_an_ignored_exclusion(run_init, tmp_path):
+    """#786 の AC4d — `--exclude agy` で始めて `--include` だけで再開しても、無視した除外が残る。"""
+    run_init(_args(tmp_path, exclude=[["agy"]]), probe={})
+    run_init(_args(tmp_path, include=[["claude"]]), probe={})
+    _, state = _state_of(tmp_path)
+    assert state["participants"]["ignored_exclude"] == ["agy"]
+    assert state["participants"]["excluded"] == []
+
+
+def test_resume_include_wins_over_an_ignored_exclusion(run_init, tmp_path):
+    """無視した除外の名前を `--include` で渡すと、足し戻さずに参加者へ戻す。"""
+    run_init(_args(tmp_path, exclude=[["agy"]]), probe={})
+    run_init(_args(tmp_path, include=[["agy"]]), probe={})
+    _, state = _state_of(tmp_path)
+    assert state["participants"]["ignored_exclude"] == []
+    assert state["runtimes"] == ["claude", "codex", "agy", "kiro"]
 
 
 def test_resume_with_include_adds_the_participant_worktree(run_init, tmp_path):

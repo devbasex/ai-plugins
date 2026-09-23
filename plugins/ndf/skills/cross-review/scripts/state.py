@@ -1624,10 +1624,12 @@ def _apply_resume_args_block(st: dict[str, Any], args: argparse.Namespace) -> bo
         except assignment.AssignmentError as e:
             die(str(e), code=1)
             raise
+        include_eff = include if include is not None else list(recorded.get("included") or [])
         rebuild = argparse.Namespace(
             only=st.get("only"),
-            include=include if include is not None else list(recorded.get("included") or []),
-            exclude=exclude if exclude is not None else list(recorded.get("excluded") or []),
+            include=include_eff,
+            exclude=(exclude if exclude is not None
+                     else _recorded_exclusions(recorded, include_eff)),
             require_all=(args.require_all if getattr(args, "require_all", None) is not None
                          else bool(recorded.get("require_all"))),
         )
@@ -1638,6 +1640,19 @@ def _apply_resume_args_block(st: dict[str, Any], args: argparse.Namespace) -> bo
              "from": old_participants, "to": participants})
 
     return len(st.get("resume_changes") or []) > before
+
+
+def _recorded_exclusions(recorded: dict[str, Any], include: list[str]) -> list[str]:
+    """`--exclude` を渡さない再開で使う除外。外した者と、無視した除外の両方を足し戻す。
+
+    無視した除外（`ignored_exclude`）を落とすと、`--exclude agy` で始めた実行を別の引数で
+    再開しただけで、完了報告から「母集合に無かった者」が消える（#786 の AC4d）。
+    **無視した名前を `--include` にも渡したときだけ、その名前を足し戻さない。** 新しい
+    指定を優先する。外した者（`excluded`）と `--include` の重なりは今どおり矛盾として止める。
+    """
+    excluded = list(recorded.get("excluded") or [])
+    ignored = [n for n in (recorded.get("ignored_exclude") or []) if n not in include]
+    return excluded + ignored
 
 
 def _find_resumable_state(
@@ -2149,9 +2164,10 @@ def _normalize_participant_args(
 
 
 def _resolve_reviewers(host: str, args: argparse.Namespace) -> dict[str, Any]:
-    """使える者を決め、状態ファイルの `participants`（`fallback` を含む 8 項目）を返す。
+    """使える者を決め、状態ファイルの `participants`（`fallback` を含む 9 項目）を返す。
 
-    母集合は `review_pool(host)`（ホストを含む全ランタイム、#892）。確認は止めない確認
+    母集合は `review_pool(host)`（claude / codex / kiro とホスト、#786）。母集合に無い者の
+    除外は止めずに無視し、`ℹ` の 1 行を出す（決定 2）。確認は止めない確認
     （`auth.probe_auth`）で、通らない者は外して続ける。**ホストを別に確かめて埋め合わせに
     使うことはしない**（ホストは既に母集合で確かめている）。`fallback` は常に空で、使える者が
     1 者なら `review_seats` が `<その者>-2` で席を埋める。名前の矛盾・`--require-all` で
@@ -2172,6 +2188,9 @@ def _resolve_reviewers(host: str, args: argparse.Namespace) -> dict[str, Any]:
     available = resolved.available
     info(f"ホスト: {host} / 母集合: {' / '.join(pool)}"
          f" / 使える者: {' / '.join(available) or 'なし'}")
+    if resolved.ignored_exclude:
+        info(f"ℹ --exclude {','.join(resolved.ignored_exclude)} は既定の母集合に無いため"
+             f"無視しました（母集合: {', '.join(pool)}）")
     for name, reason in resolved.unavailable.items():
         info(f"⚠ {name} を担当から外しました（{reason}）")
 
@@ -4649,6 +4668,7 @@ def _print_participants(st: dict) -> None:
     print(f"- 母集合: {_names(p.get('pool'))}")
     print(f"- 使える者: {_names(p.get('available'))}")
     print(f"- --exclude で外した者: {_names(p.get('excluded'))}")
+    print(f"- --exclude で指定したが既定の母集合に無かった者: {_names(p.get('ignored_exclude'))}")
     print(f"- --include で足した者: {_names(p.get('included'))}")
     print(f"- 確認を通らなかった者: {failed}")
     print(f"- 席の埋め合わせ: {_names(p.get('fallback'))}")

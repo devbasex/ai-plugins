@@ -188,6 +188,7 @@ def _print_participants(state: dict[str, Any]) -> None:
     print(f"- 母集合: {_names(p.get('pool'))}")
     print(f"- 使える者: {_names(p.get('available'))}")
     print(f"- --exclude で外した者: {_names(p.get('excluded'))}")
+    print(f"- --exclude で指定したが既定の母集合に無かった者: {_names(p.get('ignored_exclude'))}")
     print(f"- --include で足した者: {_names(p.get('included'))}")
     print(f"- 確認を通らなかった者: {failed}")
     changes = state.get("resume_changes") or []

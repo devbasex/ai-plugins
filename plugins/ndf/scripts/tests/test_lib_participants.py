@@ -131,7 +131,7 @@ def test_only_narrows_the_probe_to_that_one(assignment):
     dict(include=["gemini"]),
     dict(exclude=["gemini"]),
     dict(only="agy", exclude=["agy"]),
-    dict(only="claude"),
+    dict(only="gemini"),
 ])
 def test_conflicting_names_raise_before_probing(assignment, kwargs):
     probe = _probe()
@@ -144,16 +144,41 @@ def test_conflicting_names_raise_before_probing(assignment, kwargs):
     assert probe.calls == []
 
 
-def test_excluding_a_name_outside_the_pool_raises(assignment):
-    """cross-review でホストを外す指定は、母集合（既定 ∪ include）に無いためここで弾く。"""
+def test_excluding_a_name_outside_the_pool_is_ignored(assignment):
+    """#786 の決定 2: 母集合（既定 ∪ include）に無い者の除外は止めずに無視し、別に残す。"""
     probe = _probe()
 
-    with pytest.raises(assignment.AssignmentError):
-        assignment.resolve_participants(
-            ["codex", "agy", "kiro"], host="claude", exclude=["claude"], probe=probe,
-        )
+    p = assignment.resolve_participants(
+        ["codex", "agy", "kiro"], host="claude", exclude=["claude"], probe=probe,
+    )
 
-    assert probe.calls == []
+    assert p.excluded == []
+    assert p.ignored_exclude == ["claude"]
+    assert p.available == ["codex", "agy", "kiro"]
+    assert probe.calls == [["codex", "agy", "kiro"]]
+
+
+def test_ignored_and_real_exclusions_are_kept_apart(assignment):
+    p = assignment.resolve_participants(
+        ["claude", "codex", "kiro"], host="claude", exclude=["agy", "kiro"], probe=_probe(),
+    )
+
+    assert p.excluded == ["kiro"]
+    assert p.ignored_exclude == ["agy"]
+    assert p.available == ["claude", "codex"]
+
+
+def test_only_names_a_runtime_outside_the_pool(assignment):
+    """#542 #786 の決定 12: `--only` の名前は母集合に無くても参加者になる。記録は included に書かない。"""
+    probe = _probe()
+
+    p = assignment.resolve_participants(
+        ["claude", "codex", "kiro"], host="claude", only="agy", probe=probe,
+    )
+
+    assert probe.calls == [["agy"]]
+    assert p.available == ["agy"]
+    assert p.included == []
 
 
 def test_excluding_an_included_host_is_a_conflict_not_out_of_pool(assignment):
@@ -190,7 +215,7 @@ def test_skipped_probe_satisfies_require_all(assignment):
 
 # ---------- 記録の形 ----------
 
-def test_to_state_has_the_seven_keys_without_fallback(assignment):
+def test_to_state_has_the_eight_keys_without_fallback(assignment):
     p = assignment.resolve_participants(
         ["codex", "agy", "kiro"], host="claude",
         include=["claude"], exclude=["agy"],
@@ -201,6 +226,7 @@ def test_to_state_has_the_seven_keys_without_fallback(assignment):
         "pool": ["codex", "agy", "kiro"],
         "included": ["claude"],
         "excluded": ["agy"],
+        "ignored_exclude": [],
         "available": ["claude", "codex"],
         "unavailable": {"kiro": "1 秒で応答しませんでした"},
         "probe_skipped": False,

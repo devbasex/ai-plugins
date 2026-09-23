@@ -53,9 +53,10 @@ def test_host_detection_fails_loudly_when_unknown(assignment):
 # ---------- 母集合 ----------
 
 @pytest.mark.parametrize("host", HOSTS)
-def test_review_pool_is_every_runtime(assignment, host):
-    """#892 の AC1: どのホストでも、全ランタイムの 4 者を `ALL_RUNTIMES` の順で返す。"""
-    assert assignment.review_pool(host) == list(assignment.ALL_RUNTIMES)
+def test_review_pool_is_the_default_three_and_the_host(assignment, host):
+    """#786 の決定 1: claude / codex / kiro とホスト（ホストが agy のときだけ 4 者）。"""
+    expected = [r for r in assignment.ALL_RUNTIMES if r in {"claude", "codex", "kiro", host}]
+    assert assignment.review_pool(host) == expected
 
 
 @pytest.mark.parametrize("host, expected", [

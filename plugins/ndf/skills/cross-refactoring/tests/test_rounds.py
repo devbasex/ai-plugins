@@ -232,6 +232,21 @@ def test_report_prints_the_participants(cmd_report, tmp_path, env_tmp_dir, capsy
     assert "max_outer_rounds: 3 → 5" in out
 
 
+def test_report_prints_an_ignored_exclusion(cmd_report, tmp_path, env_tmp_dir, capsys):
+    """#786 の AC4d — `--exclude` で指定したが既定の母集合に無かった者を 1 行で出す。"""
+    state_path = make_state(
+        tmp_path, runtimes=["claude", "codex", "kiro"],
+        participants={
+            "pool": ["claude", "codex", "kiro"], "included": [], "excluded": [],
+            "ignored_exclude": ["agy"], "available": ["claude", "codex", "kiro"],
+            "unavailable": {}, "probe_skipped": False, "require_all": False,
+        },
+    )
+    env_tmp_dir(state_path)
+    cmd_report.cmd_report(_report_args())
+    assert "- --exclude で指定したが既定の母集合に無かった者: agy" in capsys.readouterr().out
+
+
 def test_report_says_no_record_for_an_older_state(cmd_report, tmp_path, env_tmp_dir, capsys):
     """AC41 — 参加者の記録を持たない古い状態ファイルでは「記録なし」と出す。"""
     state_path = make_state(tmp_path, impl_capable=["claude", "codex", "agy", "kiro"])

@@ -4,7 +4,7 @@
 
 | Skill | 母集合の既定 | 中身 |
 | --- | --- | --- |
-| cross-review | `review_pool(host)` | 全ランタイム（ホストを含む。#892） |
+| cross-review | `review_pool(host)` | `DEFAULT_REVIEW_RUNTIMES`（claude / codex / kiro）とホスト（#786） |
 | cross-refactoring | `refactor_pool(host)` | `DEFAULT_REFACTOR_RUNTIMES`（codex / kiro）とホスト |
 
 参加者は「母集合の既定 ∪ 足す者 − 外す者」で決め（`resolve_participants`）、確認を
@@ -31,6 +31,11 @@ HOST_RUNTIMES: tuple[str, ...] = ALL_RUNTIMES
 # cross-refactoring の既定の参加者の表（ホストを除いた部分。設計の決定 4）。ホストは
 # `refactor_pool(host)` が足す。表に無い者（agy）は `--include` で足す（#727）。
 DEFAULT_REFACTOR_RUNTIMES: tuple[str, ...] = ("codex", "kiro")
+
+# cross-review の既定の母集合の表（ホストを除いた部分。#786 の決定 1）。agy はテストを背景で
+# 起動したまま結果を残さずに終わることがあるため外し、`--include agy` で足す。ホストは
+# `review_pool(host)` が足す（#892 の「ホストも輪番に入る」を保つ）。
+DEFAULT_REVIEW_RUNTIMES: tuple[str, ...] = ("claude", "codex", "kiro")
 
 # 席の名前の形: `^(claude|codex|agy|kiro)(-[2-9])?$`。ランタイム名そのままが 1 つ目の席、
 # ハイフンと 2〜9 の接尾辞が同じランタイムの 2 つ目以降（設計の決定 10）。ランタイム名に
@@ -84,22 +89,21 @@ def detect_host(
     )
 
 
-def review_pool(host: str) -> list[str]:
-    """cross-review の母集合の既定（全ランタイム。ホストを含む 4 者、#892）。
-
-    レビュー担当は CLI プロセスとして起動するため、ホストと同じランタイムでもホストの
-    会話の作業文脈は持ち込まれない。引数 `host` は、ホストになれない名前を弾く検査の
-    ために残す。
-    """
-    if host not in HOST_RUNTIMES:
-        raise AssignmentError(f"ホストになれないランタイムです: {host}")
-    return list(ALL_RUNTIMES)
-
-
 def _in_fixed_order(names: Iterable[str]) -> list[str]:
     """`ALL_RUNTIMES` の順に並べ直す（重複は 1 つにする）。"""
     wanted = set(names)
     return [r for r in ALL_RUNTIMES if r in wanted]
+
+
+def review_pool(host: str) -> list[str]:
+    """cross-review の母集合の既定。`DEFAULT_REVIEW_RUNTIMES` とホストの和集合（#786）。
+
+    レビュー担当は CLI プロセスとして起動するため、ホストと同じランタイムでもホストの
+    会話の作業文脈は持ち込まれない。ホストが agy のときだけ 4 者になる。
+    """
+    if host not in HOST_RUNTIMES:
+        raise AssignmentError(f"ホストになれないランタイムです: {host}")
+    return _in_fixed_order((*DEFAULT_REVIEW_RUNTIMES, host))
 
 
 def refactor_pool(host: str) -> list[str]:
@@ -115,14 +119,16 @@ def refactor_pool(host: str) -> list[str]:
 
 @dataclass
 class Participants:
-    """使える者の解決の結果。状態ファイルの `participants` のうち `fallback` を除く 7 項目。
+    """使える者の解決の結果。状態ファイルの `participants` のうち `fallback` を除く 8 項目。
 
     `fallback`（席の埋め合わせに使える者）は cross-review だけが持つため、呼び出し側が
-    `to_state()` の辞書へ足す。
+    `to_state()` の辞書へ足す。`ignored_exclude` は「外す指定をしたが母集合に無かったため
+    無視した者」で、外した者（`excluded`）とは別に持つ（#786 の決定 2）。
     """
     pool: list[str]
     included: list[str] = field(default_factory=list)
     excluded: list[str] = field(default_factory=list)
+    ignored_exclude: list[str] = field(default_factory=list)
     available: list[str] = field(default_factory=list)
     unavailable: dict[str, str] = field(default_factory=dict)
     probe_skipped: bool = False
@@ -133,6 +139,7 @@ class Participants:
             "pool": list(self.pool),
             "included": list(self.included),
             "excluded": list(self.excluded),
+            "ignored_exclude": list(self.ignored_exclude),
             "available": list(self.available),
             "unavailable": dict(self.unavailable),
             "probe_skipped": self.probe_skipped,
@@ -159,9 +166,11 @@ def resolve_participants(
 
     順序:
 
-    1. `include` / `exclude` の各名前が `ALL_RUNTIMES` にあり、重ならないことを確かめる。
-       `exclude` の名前が「`pool` ∪ `include`」に無ければ弾く（cross-review でホストを
-       外す指定は #892 の後は母集合に入るため当たらない）
+    1. `include` / `exclude` / `only` の各名前が `ALL_RUNTIMES` にあり、`include` と
+       `exclude` が重ならないことを確かめる。`only` が「`pool` ∪ `include`」にも `exclude`
+       にも無ければ、足す者として扱う（#786 の決定 12。記録の `included` には書かない）。
+       `exclude` の名前が「`pool` ∪ `include`」に無ければ、止めずに `ignored_exclude` へ
+       残して無視する（決定 2）
     2. 参加者 = `pool` ∪ `include` − `exclude`（`ALL_RUNTIMES` の順）
     3. `only` があれば、参加者に含まれ `exclude` に無いことを確かめ、参加者をその 1 者にする
     4. `probe(参加者)` で確かめる。飛ばされたら全員を通ったものとし `probe_skipped` を真にする
@@ -175,7 +184,7 @@ def resolve_participants(
     include = list(include)
     exclude = list(exclude)
 
-    for name in (*include, *exclude):
+    for name in (*include, *exclude, *([only] if only is not None else [])):
         if name not in ALL_RUNTIMES:
             raise AssignmentError(
                 f"参加できないランタイムです: {name}（{'/'.join(ALL_RUNTIMES)} のいずれか）"
@@ -185,19 +194,19 @@ def resolve_participants(
         raise AssignmentError(
             f"足す者と外す者に同じ名前があります: {', '.join(_in_fixed_order(overlap))}"
         )
+    # 矛盾は無視より先に見る。母集合に無い名前の除外を先に捨てると、`--only agy
+    # --exclude agy` が矛盾ではなく「参加者に無い」で止まり、理由を読み違える。
+    if only is not None and only in exclude:
+        raise AssignmentError(f"--only と --exclude が矛盾しています: {only}")
     base = set(pool) | set(include)
-    outside = [n for n in exclude if n not in base]
-    if outside:
-        raise AssignmentError(
-            f"母集合に無い者は外せません: {', '.join(_in_fixed_order(outside))}"
-            f"（母集合: {', '.join(_in_fixed_order(base))}）"
-        )
+    if only is not None and only not in base:
+        base.add(only)
+    ignored = [n for n in exclude if n not in base]
+    exclude = [n for n in exclude if n in base]
 
     participants = _in_fixed_order(base - set(exclude))
 
     if only is not None:
-        if only in exclude:
-            raise AssignmentError(f"--only と --exclude が矛盾しています: {only}")
         if only not in participants:
             raise AssignmentError(
                 f"--only は参加者のいずれかを指定してください: {only}"
@@ -228,6 +237,7 @@ def resolve_participants(
         pool=pool,
         included=_in_fixed_order(include),
         excluded=_in_fixed_order(exclude),
+        ignored_exclude=_in_fixed_order(ignored),
         available=available,
         unavailable=unavailable,
         probe_skipped=skipped,
