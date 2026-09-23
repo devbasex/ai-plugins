@@ -201,7 +201,7 @@ sh -c 'R="${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/rc-added"; [ -f "$R" ]
 | 引数 | 再開用のコマンド（複数行可）。無ければ下の「再開用のコマンドの決め方」 |
 | 中継の下かの判定 | `[ -n "${NDF_RELAY_DIR:-}" ] && python3 "<root>/scripts/relay.py" is-child`。終了コード 0 なら中継の下（決定 11） |
 | 中継の下 | 最後の応答の末尾に、情報文字列 `ndf-next` の囲みを **ちょうど 1 つ** 置き、中身を再開用のコマンドにして応答を終える。その前の行で「中継が静まりを待ってから切り替える」と示す。背景の処理を起こさない。`/goal` の判定が応答を続けさせたら、続いた応答の最後に同じブロックを出し直す |
-| 中継の外 | ブロックを出さず、`/exit してから claude "<再開用のコマンド>" で起動する（/ndf:install-wrapper で中継を入れると自動になる）` の 1 行を示して終える。複数行のコマンドは囲み `text` で示す |
+| 中継の外 | ブロックを出さず、`/exit してから claude を起動し、下の中身を最初の入力として貼り付ける（/ndf:install-wrapper で中継を入れると自動になる）` の 1 行と、再開用のコマンドを囲み `text` で示して終える。**シェルへ貼る 1 行（`claude "..."`）は示さない**（決定 16） |
 
 **再開用のコマンドの決め方**（引数が無いとき。上から最初に当たるもの）:
 
@@ -224,7 +224,7 @@ sh -c 'R="${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/rc-added"; [ -f "$R" ]
 
 | 書く側 | 条件 | すること |
 | --- | --- | --- |
-| `question open`（`PreToolUse`・`AskUserQuestion`） | `NDF_RELAY_DIR` があり、中継が動いていて（`relay.lock` が取れない）、hook の親をたどって最初に当たる claude が `child.pid` と一致する | 権限 `0600` の空のファイルを作る |
+| `question open`（`PreToolUse`・`AskUserQuestion`） | `NDF_RELAY_DIR` があり、中継が動いていて（`relay.lock` が取れない）、hook の親をたどって最初に当たる claude が `child.pid` と一致する | 作業ディレクトリの `question.lock` の排他を 3 秒まで待って取り、権限 `0600` の空のファイルを作ってから放す。取れなくても作る（hook を止めない） |
 | `question close`（`PostToolUse`・`AskUserQuestion`） | 同じ | 消す |
 | `mark`（Stop） | 既存の判定の 4（直接の子）を通った | 印の判定の前に消す。Stop が起きたなら質問は表示されていない。`Esc` で取り消して `PostToolUse` が来なかった印もここで消える |
 
@@ -242,9 +242,25 @@ sh -c '[ -n "${NDF_RELAY_DIR:-}" ] || exit 0; ROOT="${CLAUDE_PLUGIN_ROOT:-${PLUG
 | (4) | 作業ディレクトリに `question` が無い | 待ち続ける（G1） |
 | (5) | 印の `transcript_path` に、`timestamp` が印の `written_at` より後で `type` が `assistant` か `user` の行が無い | 待ち続ける。次の Stop が印を書き直すか消す（G2）。目標の判定の行（`type: attachment`）は数えない |
 
-**終わらせる段を変える（G3）。** (1)〜(5) がそろったら、書く直前に (3)〜(5) をもう 1 度確かめ、
-そろっていれば `/exit\r` を **1 回の write** で書く。外れていれば書かずに「静まりを待つ」へ戻る。
-`NDF_RELAY_EXIT_GAP` は使わなくなる（決定 14）。`/exit` の後の待ち・SIGTERM・SIGKILL は変えない。
+**終わらせる段を変える（G3）。** (1)〜(5) がそろったら、次の順で書く。
+
+| 順 | 中継がすること |
+| ---: | --- |
+| 1 | `question.lock` の排他を取る（取れなければ次の確認まで待つ） |
+| 2 | (3)〜(5) をもう 1 度確かめる。外れていれば放して「静まりを待つ」へ戻る |
+| 3 | `/exit\r` を **1 回の write** で書く |
+| 4 | 1 秒おいてから放す |
+
+**ロックで質問の始まりと write を排他にする。** 質問は `PreToolUse` の hook が終わってから描かれ、
+その hook は `question.lock` を取ってから印を作る。そのため、確かめ直しの後に質問が描かれることは
+無い。書いた後に 1 秒持つのは、TUI が書いた入力を読み終える前に質問が描かれないためである。
+質問の hook を待たせるのは最大 1 秒で、hook の `timeout` 5 秒に収まる（決定 17）。
+
+**書いた後に `question` が現れたら、消えるまで `NDF_RELAY_EXIT_WAIT` の秒を数えない。** 印の
+確かめ直しと write の間に応答が再開していた場合、書いた `/exit` は待ち行列に入る。その応答が質問を
+出すと、`/exit` は答えの後に働く。秒を数え続けると、人が答える前に SIGTERM で質問ごと消す。
+
+`NDF_RELAY_EXIT_GAP` は使わなくなる（決定 14）。SIGTERM・SIGKILL の秒は変えない。
 
 **`mark` の関数は `question` を消す 1 行を足すだけで、印の判定は変えない。** 古い版の中継（写しの
 追従の前に動いていたもの）は `question` を読まないが、壊れもしない（今までと同じ振る舞い）。
@@ -282,9 +298,10 @@ sequenceDiagram
 stateDiagram-v2
     [*] --> 静まりを待つ: 印が現れた
     静まりを待つ --> 静まりを待つ: 入力・記録が動いた / question がある / 印より後の応答の行がある / 目標の判定待ち
-    静まりを待つ --> 確かめ直す: (1)〜(5) がそろった
-    確かめ直す --> 静まりを待つ: (3)〜(5) のどれかが外れた
-    確かめ直す --> 終わらせる: そろっている（/exit\r を 1 回で書く）
+    静まりを待つ --> 確かめ直す: (1)〜(5) がそろい、question.lock を取った
+    確かめ直す --> 静まりを待つ: (3)〜(5) のどれかが外れた（ロックを放す）
+    確かめ直す --> 終わらせる: そろっている（/exit\r を 1 回で書き、1 秒後に放す）
+    終わらせる --> 終わらせる: question がある（SIGTERM までの秒を数えない）
     静まりを待つ --> [*]: 印が消えた（待ちをやめる）
     終わらせる --> [*]
 ```
@@ -333,7 +350,8 @@ stateDiagram-v2
 | AC17〜AC19 | [issue-928-design-injection.md](issue-928-design-injection.md) の実測の表・不変条件の節と、起票した課題 |
 | AC23 | `test_relay.py`: 印があって静まっても `question` がある間は子へ何も届かない。`question close` の後に Stop（印の書き直し）で切り替わる。`mark` が `question` を消す |
 | AC24 | `test_relay.py`: 印の後に会話の記録へ `assistant` の行を足すと `/exit` が届かない。`attachment` の行では止まらない |
-| AC25 | `test_relay.py`: 子へ届いたバイトが `/exit\r` の 1 回であること。確かめ直しの直前に `question` を置くと届かないこと（書く直前の確かめ直しを差し込み点で試す） |
+| AC25 | `test_relay.py`: 子へ届いたバイトが `/exit\r` の 1 回であること。確かめ直しの直前に `question` を置くと届かないこと（差し込み点で試す）。中継が `question.lock` を持つ間、`question open` が放されるまで待ち、放された後に印を作ること |
+| AC25b | `test_relay.py`: `/exit` の後に `question` を置いた試験用の子が、`NDF_RELAY_EXIT_WAIT` を過ぎても SIGTERM を受けず、`question` を消した後に数え始めること |
 | AC26 | `test_relay.py`: `NDF_RELAY_DIR` 無し・中継が動いていない・直接の子でないで、`question open` が何も作らず出力が空で終了コード 0 |
 | AC20〜AC22 | 全体テスト・静的検査。AC21 は本物の Claude Code（一時の HOME・隔離した `CLAUDE_CONFIG_DIR`・`DISABLE_AUTOUPDATER=1`）の上で `/ndf:restart` を 1 度通し、`log.jsonl` の `start` 2 行を実装の Pull Request に残す。同じ通しで、印の後に質問を出させ（`/goal` の続きか、質問を出す指示）、表示の 30 秒のあいだ `/exit` が書かれないことを見る |
 
@@ -344,5 +362,5 @@ stateDiagram-v2
 | `/restart` の名前の衝突 | Claude Code の組み込みや主要プラグインに `restart` を末尾に持つ Skill・コマンドがあるかは、実装の時点で `/` メニューに打って確かめる（AUTHORING の「外部 Skill 名の末尾要素にしない」）。衝突すれば `relay-restart` へ寄せる |
 | `/goal` の下の再起動 | 目標の判定が再起動の応答を「未達」として続けさせたとき、モデルがブロックを出し直すかは実機の通し（AC21）で 1 度見る。出し直さなければ印が消え、中継は切り替えない（落ちる形であって壊れない） |
 | macOS | `uninstall` の置き換えと権限の保持は Linux でだけ確かめる |
-| 守りの残りの隙 | 書く直前の確かめ直しから write までの間に質問が出る隙は残る。`PreToolUse` の hook が終わってから質問が描かれるので、`question` の作成は描画より先に起きるが、確かめ直しと write の間（同じプロセスの数行）には入りうる。応答の再開は API の応答を待つので、この間に質問まで進むことは実際には起きにくい |
+| 書いた入力を TUI が読む時間 | 1 秒で読み終えるかは、実機の通し（AC21）で `question.lock` を持つ秒を変えて 1 度見る。実測では、応答の途中に書いた `/clear` は 1 秒後の画面で待ち行列に入っていた |
 | 会話の記録の行の型 | (5) が数える `assistant` / `user` の行が、印の後の Stop hook の記録（`system` など）を含まないことを、実装の時点で本物の記録で確かめる |
