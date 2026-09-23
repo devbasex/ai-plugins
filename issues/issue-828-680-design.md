@@ -127,7 +127,7 @@ supervisor が守る規則の変更:
 
 | # | いま | 変更後 |
 | --- | --- | --- |
-| 3 | 工程に入った時点で `progress-tracking` を呼ぶ。記録のコマンドは 1 回の Bash 実行に 1 件 | 工程に入った時点で**起動指示の「記録のコマンド」を課題ごとに 1 回打つ**。記録のコマンドは 1 回の Bash 実行に 1 件。**`progress-tracking` と `development-workflow` を起動しない**（モードと工程は起動指示が持つ。まとまりを閉じる手順だけは本文を読む） |
+| 3 | 工程に入った時点で `progress-tracking` を呼ぶ。記録のコマンドは 1 回の Bash 実行に 1 件 | 工程に入った時点で**起動指示の「記録のコマンド」を課題ごとに 1 回打つ**。記録のコマンドは 1 回の Bash 実行に 1 件。**`development-workflow` を起動しない**（モードと工程は起動指示が持つ）。**まとまりを閉じるときだけ `progress-tracking` を起動して本文の手順に従う** |
 | 7 | 委譲してよい作業は worker へ出す。委譲しない 5 つは自分で行う | 同じ文に「**小さな作業は worker へ出さずにその場で行う**（`work-vessels.md` の線引き）」を足す |
 
 **規則の数は 10 のまま変えない。** conductor の起動指示と、それを写した既存の手順
@@ -309,7 +309,7 @@ sequenceDiagram
 | AC8 | 既存の `test_stage_check.py` / `test_workflow_guard.py` が変更なしで通る |
 | AC9 | `progress-tracking/references/excerpt.md` の 1 行目の目印と見出し 3 つ。検査の実装は #855 |
 | AC10 / AC11 | `work-vessels.md` の差分のレビュー。`agent-layers.md` と `context-window.md` から指されていること（`grep -n "work-vessels.md"`） |
-| AC12 | 配布の後、`release-verification` で #827 の計測を同じ条件で回す（比べる前の値は下の「AC12 の比べる前の値」） |
+| AC12 | 配布の後、`release-verification` で #827 の計測を同じ条件で回す（比べる前の値は下の「AC12 の比べる前の値」）。`progress-tracking` の読み込みは、まとまりを閉じる持ち場（取り込み / 仕上げ）の 1 回ずつが残る見込み |
 | AC13 | 決定の記録の決定 7 と、起票した課題の番号 |
 
 雛形の検査で残ってよい行:
@@ -318,7 +318,7 @@ sequenceDiagram
 | --- | --- | --- |
 | a | 冒頭の「対話で `/ndf:development-workflow` を呼んだとき」の段落 | conductor 側の説明で、雛形ではない |
 | b | 「3 層の責務」の表の conductor の行（`development-workflow` と `issue-plan-strategy` 以外を起動しない） | conductor の責務で、雛形ではない |
-| c | supervisor の規則 3 の「`progress-tracking` と `development-workflow` を起動しない」と、まとまりを閉じる手順の言及 | 起動を禁じる文で、起動・読み込みを求めない |
+| c | supervisor の規則 3 の「`development-workflow` を起動しない」と、まとまりを閉じるときだけ `progress-tracking` を起動する例外 | 起動を禁じる文と、AC3 が認める唯一の例外である |
 
 AC12 の比べる前の値（#827、2026-09-20 以降、5 リポジトリ、サブエージェント 156 件）:
 

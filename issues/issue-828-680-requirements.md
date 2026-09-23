@@ -40,7 +40,7 @@
 
 - [ ] AC1: `agent-layers.md` の 2 つの起動指示の雛形（conductor → supervisor と supervisor → worker）が、Skill 本文の読み込みを求めていない。読み込みとは `/ndf:<Skill>` の起動と `SKILL.md` の Read である。supervisor が持ち場の工程の Skill を起動することは除く（前提 1）
 - [ ] AC2: supervisor の起動指示に、`development-workflow` を読まずに持ち場を通せるだけの値が入っている。値はモード・持ち場で通す工程の一覧・記録のコマンド 1 行（二重引用符で囲んだ絶対パス）である
-- [ ] AC3: supervisor の守る規則と worker の守る規則に、Skill を起動しない旨がある。supervisor は `development-workflow` と `progress-tracking` を、worker は Skill 全般を起動しない（起動指示が Skill の起動を手順として渡した場合を除く）
+- [ ] AC3: supervisor の守る規則と worker の守る規則に、Skill を起動しない旨がある。supervisor は `development-workflow` を起動しない。`progress-tracking` は、終わりの工程で「まとまりを閉じる」を行うときだけ起動してよい（#856 が `bundle-close.sh` へ移す）。worker は Skill 全般を起動しない（起動指示が Skill の起動を手順として渡した場合を除く）
 - [ ] AC4: worker の起動指示の雛形に、worker が Skill を起動しないで済むよう、手順を抜粋で渡す項目がある
 
 ### 記録のコマンド（#828）
@@ -69,7 +69,7 @@
 
 ## 前提
 
-- 前提 1: supervisor が工程の Skill を起動するのは、持ち場の仕事そのものである（`requirements-design` / `design` / `pr` / `cross-review` など）。**この変更は工程の Skill の起動を減らさない。** 減らすのは、工程の外から読まされる Skill（`development-workflow` と `progress-tracking`）と、worker が読む Skill である
+- 前提 1: supervisor が工程の Skill を起動するのは、持ち場の仕事そのものである（`requirements-design` / `design` / `pr` / `cross-review` など）。**この変更は工程の Skill の起動を減らさない。** 減らすのは、まとまりを閉じる手順を除き、工程の外から読まされる Skill（`development-workflow` と `progress-tracking`）と、worker が読む Skill である
 - 前提 2: 工程の Skill 自体を「呼び出しと判断」だけに縮めるのは #845 の子（#856 #859 #858 #870 #873 ほか）が行う。この変更は抜粋の**形**を決め、各 Skill の抜粋の中身を作らない
 - 前提 3: 抜粋と本文の一致の検査は #855 が行う。この変更は、検査が読める位置と形に抜粋を置くことまでを決める
 - 前提 4: `$SCRIPTS` の解決を 1 コマンドにするのは #847 が行う。この変更では、conductor が 1 度解決した絶対パスを supervisor の起動指示へ渡す
@@ -90,7 +90,7 @@
 | --- | --- |
 | 公開インタフェース | `projects-sync.sh` が issue の本文も更新するようになる。Skill の末尾の文面が変わる |
 | データ | 無し（issue の本文と盤面に残る値は変わらない） |
-| 既存の振る舞い | supervisor / worker が `development-workflow` と `progress-tracking` を起動しなくなる。conductor の起動指示の項目が増える |
+| 既存の振る舞い | supervisor / worker が `development-workflow` と `progress-tracking` を起動しなくなる（まとまりを閉じる手順を除く）。conductor の起動指示の項目が増える |
 
 ## 検証手段
 
