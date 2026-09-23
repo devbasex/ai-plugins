@@ -925,68 +925,6 @@ def _fetch_existing_comments(repo: str, pr: int, path: pathlib.Path, *,
     return None
 
 
-# 前のラウンドからの変更の節の上限（#542 の決定 4・非機能の条件）。差分の本文は入れない。
-CHANGES_MAX_FILES = 50
-CHANGES_MAX_LIST_BYTES = 5000
-
-
-def _round_changes_path(state_pr: int, round_no: int) -> pathlib.Path:
-    return _resolve_tmp_dir(state_pr) / f"cross-review-pr{state_pr}-round{round_no}-changes.md"
-
-
-def _render_round_changes(prev_round: int, prev_sha: str, head_sha: str,
-                          names: list[str]) -> str:
-    listed: list[str] = []
-    size = 0
-    for name in names:
-        line = f"- {name}"
-        if (len(listed) >= CHANGES_MAX_FILES
-                or size + len(line.encode("utf-8")) + 1 > CHANGES_MAX_LIST_BYTES):
-            break
-        listed.append(line)
-        size += len(line.encode("utf-8")) + 1
-    rest = len(names) - len(listed)
-    if rest:
-        listed.append(f"- ほか {rest} 件")
-    return (
-        "## 前のラウンドからの変更\n\n"
-        f"前のラウンド（round {prev_round}）の head `{prev_sha}` から今の head `{head_sha}` までに、"
-        "次のファイルが変わった。\n\n"
-        + "\n".join(listed) + "\n\n"
-        f"差分は作業ツリーで `git diff {prev_sha} {head_sha}` を実行して読む。\n"
-        "**変わった節と、それを参照する節・同じ契約を使う節を先に見る。** 修正が新しく作った経路"
-        "（状態・分岐・引数）に穴が無いかを確かめる。直った指摘を繰り返さない"
-        "（既存コメントの控えに返信がある）。\n"
-    )
-
-
-def _write_round_changes(st: dict[str, Any], state_pr: int) -> None:
-    """今のラウンドの「前のラウンドからの変更」の節を書く。書かないときは前の残りを消す。
-
-    比べるのは、今のラウンドより前で `pr` が `current_pr` と同じもののうち最も新しい
-    ラウンドである。そのラウンドか今のラウンドの `head_sha` が無い・2 つが同じ・差分の
-    一覧が取れない、のどれかなら書かない。
-    """
-    entry = st["rounds"][-1]
-    path = _round_changes_path(state_pr, entry["round"])
-    path.unlink(missing_ok=True)
-    prev = next((r for r in reversed(st["rounds"][:-1]) if r.get("pr") == entry.get("pr")),
-                None)
-    prev_sha, head_sha = (prev or {}).get("head_sha"), entry.get("head_sha")
-    if not prev_sha or not head_sha or prev_sha == head_sha:
-        return
-    r = subprocess.run(
-        ["git", "-C", str(st.get("worktree_path") or "."), "diff", "--name-only",
-         prev_sha, head_sha],
-        capture_output=True, text=True)
-    if r.returncode != 0:
-        info(f"⚠ 前のラウンドからの変更を取れませんでした（{(r.stderr or '').strip()[:200]}）")
-        return
-    names = [n for n in r.stdout.splitlines() if n]
-    path.write_text(_render_round_changes(prev["round"], prev_sha, head_sha, names),
-                    encoding="utf-8")
-
-
 def _now() -> str:
     return _dt.datetime.now(_dt.timezone.utc).astimezone().isoformat(timespec="seconds")
 
@@ -2518,7 +2456,6 @@ def cmd_start_round(args: argparse.Namespace) -> None:
             str(st.get("repo") or ""), int(pr), _existing_comments_path(args.pr), strict=True)
         if error is not None:
             info(f"⚠ 既存コメントの控えを取り直せませんでした（{error}）。前の控えのまま進めます")
-    _write_round_changes(st, args.pr)
 
     info(f"=== Round {round_no} / {max_r} (PR #{pr}, round_in_pr={round_in_pr}"
          f", レビュー: {' + '.join(reviewers)}) ===")

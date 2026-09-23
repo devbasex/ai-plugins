@@ -29,7 +29,7 @@ standard（設計の持ち場で判定済み。複数の Skill の scripts と�
 | fix | `scripts/fetch-pr-comments.sh`（`--strict`） |
 | cross-refactoring | `refactor_lib/commands/setup.py` / `refactor_lib/commands/report.py` / `prompts/apply.md` |
 | 文書 | cross-review の `SKILL.md`・`docs/01`・`02`・`04`・`05`・`06`、cross-refactoring の `docs/01`、確定仕様 2 本、`plugins/ndf/README.md`、`CLAUDE.md` の cross-review 節 |
-| テスト | 設計の「テスト設計」の表のとおり（既存の期待の書き換えと新規 `test_state_round_changes.py`） |
+| テスト | 設計の「テスト設計」の表のとおり（既存の期待の書き換えと新規 `test_state_round_refetch.py`。決定 4 のテストは #934 へ移した） |
 
 ## タスク分解
 
@@ -46,7 +46,9 @@ standard（設計の持ち場で判定済み。複数の Skill の scripts と�
 - **満たす受け入れ条件:** AC12 AC12a AC12b AC13
 - **進め方:** 偽の `fetch-pr-comments.sh` で `start-round` を動かすテストを先に書く
 
-### Task 3: 前のラウンドからの変更の節（F4・決定 4）
+### Task 3: 前のラウンドからの変更の節（F4・決定 4）— #934 へ移した
+
+> **決定 4 と AC9〜AC11 は #934 へ移した**（2026-09-23 利用者の判断。決定 3 の効果を確かめてから入れる）。実装とテストは PR #930 から外した。
 
 - **対象:** `state.py`（`start-round`）、`launch-reviewer.sh`
 - **満たす受け入れ条件:** AC9 AC10 AC11

@@ -1,12 +1,7 @@
-"""ラウンドの開始（`start-round`）で控えを取り直し、前のラウンドからの変更の節を書く（#542）。
+"""ラウンドの開始（`start-round`）で既存コメントの控えを取り直す（#542 の決定 6）。
 
-| 機能 | 何を見るか |
-| --- | --- |
-| 控えの取り直し（決定 6） | 2 ラウンド目以降だけ取り直す / 失敗したら前の控えを残して `⚠` / 巻き直しの後は新しい PR |
-| 変更の節（決定 4） | 同じ PR の前のラウンドと head が違うときだけ書く / 一覧の打ち切り / 前の起動の残りを消す |
-
-GitHub は呼ばない。控えの取得は偽の `fetch-pr-comments.sh` に差し替え、変更の一覧は一時の
-git リポジトリで作る。
+2 ラウンド目以降だけ取り直す / 失敗したら前の控えを残して `⚠` / 巻き直しの後は新しい PR。
+GitHub は呼ばない。控えの取得は偽の `fetch-pr-comments.sh` に差し替える。
 """
 from __future__ import annotations
 
@@ -39,17 +34,6 @@ def repo(tmp_path) -> pathlib.Path:
     _git(wt, "add", "-A")
     _git(wt, "commit", "-q", "-m", "first")
     return wt
-
-
-def _commit(repo: pathlib.Path, names: list[str]) -> str:
-    for n in names:
-        p = repo / n
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(p.read_text(encoding="utf-8") + "x\n" if p.exists() else "x\n",
-                     encoding="utf-8")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "-m", "change")
-    return _git(repo, "rev-parse", "HEAD")
 
 
 @pytest.fixture()
@@ -100,80 +84,8 @@ def start(state_mod, monkeypatch, tmp_path, repo):
     return run
 
 
-def _changes(tmp_path, round_no: int) -> pathlib.Path:
-    return tmp_path / f"cross-review-pr{PR}-round{round_no}-changes.md"
-
-
 def _existing(tmp_path) -> pathlib.Path:
     return tmp_path / f"cross-review-pr{PR}-existing-comments.txt"
-
-
-# ---------- 前のラウンドからの変更の節（AC9〜AC11） ----------
-
-def test_the_second_round_gets_the_changed_files(start, repo, tmp_path, fake_fetch):
-    """AC9: 同じ PR の前のラウンドと head が違えば、2 つの SHA とファイル名を書く。"""
-    before = _git(repo, "rev-parse", "HEAD")
-    after = _commit(repo, ["issues/x-design.md", "a.md"])
-    start.write_state([{"round": 1, "pr": PR, "head_sha": before, "reviewers": ["codex"]}])
-    start(after)
-    text = _changes(tmp_path, 2).read_text(encoding="utf-8")
-    assert before in text and after in text
-    assert "- a.md" in text and "- issues/x-design.md" in text
-    assert f"git diff {before} {after}" in text
-
-
-@pytest.mark.parametrize("case", ["first", "same_head", "no_head", "other_pr"])
-def test_no_changes_section_without_a_comparable_previous_round(
-        start, repo, tmp_path, fake_fetch, case):
-    """AC10: 1 ラウンド目・同じ head・head の無いラウンド・PR の切り替え直後は書かず、残りも消す。"""
-    head = _git(repo, "rev-parse", "HEAD")
-    other = _commit(repo, ["b.md"])
-    rounds = {
-        "first": [],
-        "same_head": [{"round": 1, "pr": PR, "head_sha": other, "reviewers": ["codex"]}],
-        "no_head": [{"round": 1, "pr": PR, "reviewers": ["codex"]}],
-        "other_pr": [{"round": 1, "pr": PR - 1, "head_sha": head, "reviewers": ["codex"]}],
-    }[case]
-    start.write_state(rounds)
-    round_no = len(rounds) + 1
-    _changes(tmp_path, round_no).write_text("古い節", encoding="utf-8")
-    start(other)
-    assert not _changes(tmp_path, round_no).exists()
-
-
-def test_the_list_stops_at_fifty_files(start, repo, tmp_path, fake_fetch):
-    """AC11: 53 ファイルなら 50 件と「ほか 3 件」。"""
-    before = _git(repo, "rev-parse", "HEAD")
-    after = _commit(repo, [f"f{i:02d}.md" for i in range(53)])
-    start.write_state([{"round": 1, "pr": PR, "head_sha": before, "reviewers": ["codex"]}])
-    start(after)
-    lines = _changes(tmp_path, 2).read_text(encoding="utf-8").splitlines()
-    assert sum(1 for l in lines if l.startswith("- f")) == 50
-    assert "- ほか 3 件" in lines
-
-
-def test_the_list_stops_at_five_thousand_bytes(start, repo, tmp_path, fake_fetch):
-    """AC11 と非機能: 名前が 200 バイトのファイル 40 件でも、節は 6,000 バイト以下。"""
-    before = _git(repo, "rev-parse", "HEAD")
-    names = [f"d/{i:02d}" + "n" * 195 for i in range(40)]
-    after = _commit(repo, names)
-    start.write_state([{"round": 1, "pr": PR, "head_sha": before, "reviewers": ["codex"]}])
-    start(after)
-    path = _changes(tmp_path, 2)
-    listed = [l for l in path.read_text(encoding="utf-8").splitlines() if l.startswith("- d/")]
-    assert sum(len(l.encode()) + 1 for l in listed) <= 5000
-    assert len(listed) < 40
-    assert f"- ほか {40 - len(listed)} 件" in path.read_text(encoding="utf-8")
-    assert path.stat().st_size <= 6000
-
-
-def test_a_failed_diff_is_reported_and_the_round_goes_on(start, repo, tmp_path, fake_fetch, capsys):
-    """前の head が作業ツリーに無ければ書かずに `⚠` を出して続ける。"""
-    head = _git(repo, "rev-parse", "HEAD")
-    start.write_state([{"round": 1, "pr": PR, "head_sha": "f" * 40, "reviewers": ["codex"]}])
-    start(head)
-    assert not _changes(tmp_path, 2).exists()
-    assert "⚠ 前のラウンドからの変更を取れませんでした" in capsys.readouterr().err
 
 
 # ---------- 既存コメントの控えの取り直し（AC12〜AC13） ----------

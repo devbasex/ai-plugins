@@ -240,7 +240,6 @@ launcher が生成するプロンプトに以下を強制している:
 - **投稿の手順を持たない**（#730）: 担当は投稿しない。判定の格下げ（`event_downgrade`）も
   担当へ渡さず、投稿する側が送信の時点で行う
 - **既存コメント差分**: `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt` を読んで重複指摘禁止。2 ラウンド目以降は `start-round` が取り直す（#542）
-- **前のラウンドからの変更**: `$TMP_DIR/cross-review-pr<PR>-round<R>-changes.md` が空でなければ、既存コメントの後・追加レビュー観点の前へ入れる。`start-round` が同じ PR の前のラウンドと head が違うときだけ書く（#542）
 - **出し切りと、起動しない処理**: 見つけた指摘はそのラウンドですべて出す。テストも背景の処理も起動しない（確かめる手順は `suggested_check` に書き、`verify-findings` が実行する。#542 #786）
 - **自動レビュー観点**: GitHub API の `pulls/<PR>/files --paginate` で変更ファイルを全件取得して分類し、`common` / `docs_only` / `design` / `code` / `db_migration` / `test` / `dependency` / `config_ci` / `api_contract` / `auth_security` / `frontend` / `performance` / `deletion_rename` / `generated` / `i18n` / `infra` の該当テンプレートを state.json の `auto_review_instructions` に保存する
 - **手動追加レビュー観点**: `--focus` / `--extra-instructions-file` が指定されていれば state.json の `manual_extra_review_instructions` に保存し、自動テンプレートの後ろに連結した `review_instructions` を codex / agy 両 launcher が同じ「追加レビュー観点」セクションとしてプロンプトに差し込む
@@ -326,19 +325,12 @@ launcher が生成するプロンプトに以下を強制している:
 
 ## ラウンドの開始時に担当へ渡すもの（#542）
 
-round エントリを開いた後、担当を起動する前に次の 2 つを行う。**どちらも失敗してもラウンドを
-止めない**（`⚠` の 1 行を出して続ける）。
+round エントリを開いた後、担当を起動する前に次を行う。**失敗してもラウンドを止めない**
+（`⚠` の 1 行を出して続ける）。
 
 | 何を | いつ | 書く先 | 失敗したとき |
 | --- | --- | --- | --- |
 | 既存コメントの控えを取り直す | 状態ファイルの通しで 2 ラウンド目以降（1 ラウンド目は `init` が取った直後）。PR の巻き直しの後は新しい PR から取る | `$TMP_DIR/cross-review-pr<STATE_PR>-existing-comments.txt` | `fetch-pr-comments.sh --strict` が 3 ソースのどれか 1 つの失敗で 1 を返す。**前の控えを残す**（一部だけの控えで上書きすると、前のラウンドの指摘が重複の検出から消える） |
-| 前のラウンドからの変更の節を書く | 同じ PR の前のラウンドと今のラウンドの `head_sha` が両方あり、違うとき | `$TMP_DIR/cross-review-pr<STATE_PR>-round<ROUND>-changes.md` | `git diff --name-only` が失敗したら書かない |
-
-変更の節は、2 つの head の SHA・変わったファイルの一覧（50 件か 5,000 バイトで打ち切り、残りは
-「ほか N 件」）・差分を読むコマンド・「変わった節と、それを参照する節を先に見る」観点を持つ。
-**差分の本文は入れない**（担当が作業ツリーで `git diff` を実行して読む）。書かない条件のときは、
-前の起動が残した同じ名前のファイルを消す。`launch-reviewer.sh` はこのファイルが空でなければ、
-既存コメントスナップショットの後・追加レビュー観点の前へ入れる。
 
 控えを取り直すのは、次のラウンドの担当が同じ実行の前のラウンドの指摘と「対応しました」の返信を
 知らないと、直った指摘の近くを別の言い方で再び指摘し、振動の検知に当たるためである。

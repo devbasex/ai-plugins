@@ -81,13 +81,6 @@ if [ -s "$EXISTING_FILE" ]; then
 else
   EXISTING_INLINE="(なし)"
 fi
-# 前のラウンドからの変更の節（#542 の決定 4）。`state.py start-round` が、同じ PR の
-# 前のラウンドと head が違うときだけ書く。無ければ何も入れない。
-CHANGES_FILE=$TMP_DIR/cross-review-pr$STATE_PR-round$ROUND-changes.md
-CHANGES_BLOCK=
-if [ -s "$CHANGES_FILE" ]; then
-  CHANGES_BLOCK=$'\n'$(cat "$CHANGES_FILE")
-fi
 EXTRA_REVIEW_BLOCK=
 if [ -n "$EXTRA_REVIEW_INSTRUCTIONS" ]; then
   EXTRA_REVIEW_BLOCK=$(cat <<EXTRA_EOF
@@ -123,7 +116,6 @@ workspace 外を読まなくて済むよう、以下にインライン展開す�
 \`\`\`
 $EXISTING_INLINE
 \`\`\`
-$CHANGES_BLOCK
 $EXTRA_REVIEW_BLOCK
 
 ## 出し切り

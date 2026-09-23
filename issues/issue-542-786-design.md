@@ -3,6 +3,8 @@
 要求と受け入れ条件は [issue-542-786-requirements.md](issue-542-786-requirements.md) にある。決定の理由は
 [issue-542-786-design-decisions.md](issue-542-786-design-decisions.md) にある。この文書は「どう作るか」だけを扱う。
 
+> **決定 4 と AC9〜AC11 は #934 へ移した**（2026-09-23 利用者の判断。決定 3 の効果を確かめてから入れる）。F4・「前のラウンドからの変更の節」の節・AC9〜AC11 のテスト設計は #934 のための記録として残し、PR #930 では実装しない。
+
 ## 例: 同じ PR の 2 ラウンド目で担当が受け取るもの
 
 設計 PR（`issues/issue-900-design.md` を変える）の 1 ラウンド目で major 3 件・minor 2 件が出て、修正が
@@ -34,7 +36,7 @@
 | F1 | 既定の母集合を claude / codex / kiro とホストにする | `init`（cross-review） |
 | F2 | 既定の母集合に無い者を外す指定を、止めずに無視する | `init`（cross-review / cross-refactoring） |
 | F3 | ラウンドの開始ごとに既存コメントの控えを取り直す | `start-round` |
-| F4 | 前のラウンドからの変更の節を書く | `start-round` → `launch-reviewer.sh` |
+| F4 | 前のラウンドからの変更の節を書く（#934 へ移した） | `start-round` → `launch-reviewer.sh` |
 | F5 | 出し切りの指示・テストと背景の処理を起動しない指示をプロンプトに入れる | `launch-reviewer.sh` |
 | F6 | 設計 PR を分類し、設計向けの観点を渡す | `init`（観点の組み立て） |
 | F7 | 適用担当に、背景で起動したテストを残して終わらないよう求める | cross-refactoring の適用のプロンプト |
@@ -218,6 +220,8 @@ def _fetch_existing_comments(repo: str, pr: int, path: pathlib.Path, *, strict: 
 
 ### 前のラウンドからの変更の節（`state.py start-round` → `launch-reviewer.sh`）
 
+> #934 へ移した（決定 4）。PR #930 では実装しない。
+
 `start-round` はラウンドを開いた後に `$TMP_DIR/cross-review-pr<STATE_PR>-round<ROUND>-changes.md` を扱う。
 
 | 条件 | ファイル |
@@ -322,9 +326,9 @@ sequenceDiagram
 | AC4d | 上の表の `test_the_report_lists_who_took_part` の書き換え。`test_state_resume_args.py`: `--exclude agy` で始めた実行を `--include codex` だけで再開しても、`ignored_exclude == ["agy"]` が残り報告に出る。`--exclude agy` で始めて `--include agy` で再開すると agy が参加者に戻る。`--exclude kiro` で始めて `--include kiro` で再開すると今どおり止まる。cross-refactoring の `test_init.py` の再開のテスト: `--exclude agy` で始めて `--include` だけで再開しても `ignored_exclude == ["agy"]` が残り、完了報告に出る |
 | AC5 | 目で見る。`grep -rn "4 者" plugins/ndf/skills/cross-review CLAUDE.md plugins/ndf/README.md docs/specifications/cross-review-participants-and-seats.md` の当たりのうち、現行の説明は 0 件。出た版の変更点の記録（`plugins/ndf/README.md` の 10.17.3 の更新案内）は書き換えない |
 | AC6 AC7 AC8 | 目で見る（文言）。`test_launch_reviewer_prompt_context.py` の既存の組み立てのテストが通る |
-| AC9 | `start-round` のテスト（新規 `test_state_round_changes.py`）: 一時の git リポジトリで 2 つの head を作り、2 ラウンド目で変更の節のファイルが書かれ、2 つの SHA とファイル名が入る。`launch-reviewer.sh` の組み立てで、ファイルがあるときプロンプトに節が入る |
-| AC10 | 同上: 1 ラウンド目・同じ head・`head_sha` の無いラウンドでファイルが無く、前の起動の残りも消える。プロンプトに節が入らない |
-| AC11 | 同上: 53 ファイルの差分で一覧が 50 件と「ほか 3 件」。名前が 200 バイトのファイル 40 件の差分で、一覧が 5,000 バイトで打ち切られ、ファイルの大きさが 6,000 バイト以下 |
+| AC9（#934） | `start-round` のテスト（新規 `test_state_round_changes.py`）: 一時の git リポジトリで 2 つの head を作り、2 ラウンド目で変更の節のファイルが書かれ、2 つの SHA とファイル名が入る。`launch-reviewer.sh` の組み立てで、ファイルがあるときプロンプトに節が入る |
+| AC10（#934） | 同上: 1 ラウンド目・同じ head・`head_sha` の無いラウンドでファイルが無く、前の起動の残りも消える。プロンプトに節が入らない |
+| AC11（#934） | 同上: 53 ファイルの差分で一覧が 50 件と「ほか 3 件」。名前が 200 バイトのファイル 40 件の差分で、一覧が 5,000 バイトで打ち切られ、ファイルの大きさが 6,000 バイト以下 |
 | AC12 AC12b | 同上: `fetch-pr-comments.sh` を差し替えた偽物で、2 ラウンド目の `start-round` が呼び、控えが新しい中身になる。1 ラウンド目では呼ばない。`set-current-pr` の後の `start-round` は新しい PR の番号で呼ぶ |
 | AC12a | 同上: 偽物の `fetch-pr-comments.sh --strict` が 3 つのうち 1 つの失敗で 1 を返すと、控えが前の中身のまま残る。`init`（`strict=False`）では 1 つの失敗でも控えを書いて続け、3 つとも失敗すると終了コード 1。`fix` の側のテスト: `--strict` 無しでは今どおり 1 つの失敗で 0 |
 | AC13 | 同上: 偽物が失敗すると `start-round` が終了コード 0 で `⚠` の行を出し、控えは前の中身のまま |
