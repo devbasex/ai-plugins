@@ -219,8 +219,9 @@ function claude {
 | 3 | 上に当たるパスがある | そのパスを `rc-noticed` に足し、`{"systemMessage": "ndf-relay: <パス> の alias claude は 10.17.4 が自動で足したもの。使い続けるなら何もしなくてよい。外すなら /ndf:install-wrapper uninstall"}` を出す（パスが 2 つなら 1 行に並べる） |
 
 **版の比べ方:** 版は `<プラグインのルート>/.claude-plugin/plugin.json` の `version` を読む（ルートは `relay.py` の 2 つ上、つまり `scripts/` の親。
-hook は `$ROOT/scripts/relay.py` を呼ぶ）。形は `X.Y.Z` か `X.Y.Z-dev.N` で、数を順に比べ、同じ `X.Y.Z` では
-`-dev.N` を付かないものより前に置く。写しの版が無い・読めないときは置き直す。自分の版が読めない
+hook は `$ROOT/scripts/relay.py` を呼ぶ）。形は `X.Y.Z` か `X.Y.Z-dev.N` で、`X`・`Y`・`Z` を数として順に比べる。同じ `X.Y.Z` では
+`-dev.N` の付いたものを付かないものより前に置き、`-dev.N` どうしは `N` を数として比べる（`-dev.2` は
+`-dev.10` より前）。写しの版が無い・読めないときは置き直す。自分の版が読めない
 ときは置き直さない。
 
 **`startup` が書くのは、在る写し・写しの版・旧い写しの置き直しと、状態の親の `rc-noticed` だけである。**
@@ -230,8 +231,12 @@ hook は `$ROOT/scripts/relay.py` を呼ぶ）。形は `X.Y.Z` か `X.Y.Z-dev.N
 
 | ロック | 置き場所 | 中で行うこと | 取れないとき |
 | --- | --- | --- | --- |
-| `copy.lock` | `<親>/`（共有） | 判定 0a（写しの版を読み直し、比べ、写しと写しの版を置き換える）と、`install` の E3・`uninstall` の U4 の写しと写しの版 | 2 秒まで待ち、取れなければ置き直さない |
-| `install.lock` | 状態の親（コンテナごと） | 判定 0b〜3 と、`install`・`uninstall` のシェルの設定と記録 | 2 秒まで待ち、取れなければ何もせず終わる |
+| `copy.lock` | `<親>/`（共有） | 判定 0a（写しの有無と写しの版を読み直し、無ければ作らず、在れば比べて写しと写しの版を置き換える）と、`install` の E3・`uninstall` の U4 の写しと写しの版 | `startup` は 1 秒まで待ち、取れなければ置き直さない。`install`・`uninstall` は 2 秒 |
+| `install.lock` | 状態の親（コンテナごと） | 判定 0b〜3 と、`install`・`uninstall` のシェルの設定と記録 | `startup` は 1 秒まで待ち、取れなければ何もせず終わる。`install`・`uninstall` は 2 秒 |
+
+**`startup` の待ちは合わせて 2 秒以内にし、hook の `timeout` 5 秒に 3 秒を残す。** 残りで python の起動と
+写しの読み比べ・置き換え（ファイル 2 つ）を行う。`install`・`uninstall` は Skill から呼ぶので hook の期限を
+持たない。
 
 **版の比較から置き換えまでを `copy.lock` の中で続けて行う。** 比べた後に別のコンテナが新しい写しを
 置いても、古い側は置き換える前に同じロックで待つので、読み直した版で比べ直す。devbase のコンテナは
@@ -456,7 +461,7 @@ devbasex/devbase#253 が入る前の devbase では、`install` は囲みを使�
 | AC11 | `test_relay.py`: 中身の違う写し・旧い写しのそれぞれを `startup` が今の版で置き直し、無い方は作らない。置き直しの後も設定ファイルは変わらない |
 | AC27 | 設計の文書の「置き場所」の実測と、`test_relay.py`（`CLAUDE_CONFIG_DIR` の有無で写しと中継の rc のパスが変わる。パスに `'` があれば何も書かず終了コード 1） |
 | AC28 | `test_relay.py`: `DEVBASE_SHELLRC_DIR` に一時のディレクトリを置くと、`ndf-relay.sh` ができ、`~/.bashrc`・`.zshrc` の中身と更新時刻は変わらない。10.17.4 の囲みが残っていれば、その中だけが読み込みの行へ置き換わる。`uninstall` で `ndf-relay.sh` が消える。状態の親を消しても（作り直しの模擬）何も出ず、`bash --rcfile` で読ませたシェルの `type claude` が中継の rc の関数を示す |
-| AC29 | `test_relay.py`: 写しの版に新しい版を書いた写しへ、古い版のプラグインのルートから `startup` を動かしても写しが変わらない。状態の親を別々にした（2 つのコンテナの模擬）新旧 2 つの `startup` を同時に走らせても、写しと写しの版は新しい版で終わる。写しの版が無い・読めないときは置き直す。`-dev.N` の付いた版は同じ `X.Y.Z` の正式版より古いとして比べる |
+| AC29 | `test_relay.py`: 写しの版に新しい版を書いた写しへ、古い版のプラグインのルートから `startup` を動かしても写しが変わらない。状態の親を別々にした（2 つのコンテナの模擬）新旧 2 つの `startup` を同時に走らせても、写しと写しの版は新しい版で終わる。`uninstall` の後に走った `startup` は写しを作らない。`10.17.5-dev.2` の写しを `10.17.5-dev.10` は置き直し、`10.17.5-dev.1` は置き直さない。写しの版が無い・読めないときは置き直す。`-dev.N` の付いた版は同じ `X.Y.Z` の正式版より古いとして比べる |
 | AC12〜AC15 | `restart/SKILL.md` を読んで確かめる（文言を固定するテストは書かない）と AC21 |
 | AC17〜AC19 | [issue-928-design-injection.md](issue-928-design-injection.md) の実測の表・不変条件の節と、起票した課題 |
 | AC23 | `test_relay.py`: 印があって静まっても `question` がある間は子へ何も届かない。`question close` の後に Stop（印の書き直し）で切り替わる。`mark` が `question` を消す |
