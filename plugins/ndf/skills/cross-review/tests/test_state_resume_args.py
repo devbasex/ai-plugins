@@ -262,6 +262,20 @@ def test_ignored_exclusions_survive_a_resume_without_exclude(resume, state_mod, 
     assert "- --exclude で指定したが既定の母集合に無かった者: agy" in capsys.readouterr().out
 
 
+def test_real_and_ignored_exclusions_survive_a_resume_without_exclude(resume, tmp_path):
+    """現状固定: 実際の除外と母集合外の除外を同時に持つ状態も再開できる。"""
+    _state(tmp_path, participants=_participants(
+        pool=["claude", "codex", "kiro"], excluded=["kiro"],
+        ignored_exclude=["agy"], available=["claude", "codex"]))
+
+    st = resume("--require-all")
+
+    assert st["participants"]["excluded"] == ["kiro"]
+    assert st["participants"]["ignored_exclude"] == ["agy"]
+    assert st["participants"]["available"] == ["claude", "codex"]
+    assert resume.calls == [["claude", "codex"]]
+
+
 def test_include_wins_over_an_ignored_exclusion(resume, tmp_path):
     """#786 の AC4d: 無視した除外の名前を `--include` で渡すと、足し戻さずに参加者へ戻す。"""
     _started_with_exclude_agy(tmp_path)

@@ -731,6 +731,21 @@ def test_resume_keeps_an_ignored_exclusion(run_init, tmp_path):
     assert state["participants"]["excluded"] == []
 
 
+def test_resume_keeps_real_and_ignored_exclusions_together(run_init, tmp_path):
+    """現状固定: 再開時は実際の除外と母集合外の除外をともに足し戻す。"""
+    run_init(_args(tmp_path, exclude=[["kiro", "agy"]]), probe={})
+    _, before = _state_of(tmp_path)
+    assert before["participants"]["excluded"] == ["kiro"]
+    assert before["participants"]["ignored_exclude"] == ["agy"]
+
+    run_init(_args(tmp_path, include=[["claude"]]), probe={})
+
+    _, state = _state_of(tmp_path)
+    assert state["participants"]["excluded"] == ["kiro"]
+    assert state["participants"]["ignored_exclude"] == ["agy"]
+    assert state["runtimes"] == ["claude", "codex"]
+
+
 def test_resume_include_wins_over_an_ignored_exclusion(run_init, tmp_path):
     """無視した除外の名前を `--include` で渡すと、足し戻さずに参加者へ戻す。"""
     run_init(_args(tmp_path, exclude=[["agy"]]), probe={})

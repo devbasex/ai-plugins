@@ -43,3 +43,23 @@ def test_all_sources_fail_without_strict(tmp_path):
 
 def test_strict_succeeds_when_every_source_answers(tmp_path):
     assert _run(tmp_path, set(), "--strict").returncode == 0
+
+
+@pytest.mark.parametrize("args", [
+    (),
+    ("acme/demo",),
+    ("--strict", "acme/demo"),
+    ("", "5"),
+])
+def test_missing_arguments_exit_before_calling_gh(args):
+    """現状固定: 必須引数が欠けた場合は gh を探す前に Usage を出して終了する。"""
+    import os
+
+    result = _RUN(
+        ["/bin/bash", str(SCRIPT), *args],
+        capture_output=True,
+        text=True,
+        env=dict(os.environ, PATH=""),
+    )
+    assert result.returncode == 1
+    assert "Usage:" in result.stderr
