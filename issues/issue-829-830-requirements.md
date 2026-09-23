@@ -80,7 +80,7 @@
 | ポーリング | 待つ間に、状態を確かめるための呼び出しを繰り返すこと。#827 の `poll.py` は `sleep <数字>` を含む Bash、`tasks/*.output` の Read、出力ファイルやログの `tail` / `cat` / `wc` / `grep` を数える |
 | 前景の Bash | `run_in_background` を付けずに実行する Bash。終わるまで呼び出しが返らない |
 | 文脈量 | 1 回の API 呼び出しで読んだトークン数。`input_tokens + cache_read_input_tokens + cache_creation_input_tokens` |
-| 工程 Skill | `development-workflow` の工程表が起動する Skill（`requirements-design` / `design` / `pr` など） |
+| 工程 Skill | `development-workflow` の工程表が起動する Skill（`requirements-design` / `design` / `pr` など）と、工程へ入る入口の `development-workflow` / `issue-plan-strategy` |
 | 引き継ぎの 1 行 | 新しい会話の最初に打てば、その工程から再開できるコマンド 1 行。`context-window.md` の 4 つの切れ目と文脈量の hook の拒否で conductor が出す |
 
 ## 受け入れ条件
