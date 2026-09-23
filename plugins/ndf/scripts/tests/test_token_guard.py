@@ -132,6 +132,17 @@ def test_sleep_allowed(cmd, state):
     assert denied(run(bash(cmd), state)) is None, cmd
 
 
+@pytest.mark.parametrize("cmd", ["sleep 0.1h", "sleep 1d"])
+def test_sleep_denied_on_hour_and_day_units(cmd, state):
+    # 現状固定: DENY_SLEEP は 'sleep 1m'（分）だけを固定していたが、時間・日の単位と
+    # 小数の秒換算の経路は固定されていなかった。既定の上限 5 秒に対し 'sleep 0.1h' は
+    # 0.1*3600=360 秒、'sleep 1d' は 86400 秒へ換算され、いずれも拒否される（deny）。
+    # 拒否理由は waiting.md への部分一致だけで確かめ、文言全体には結合しない。
+    reason = denied(run(bash(cmd), state))
+    assert reason, cmd
+    assert "waiting.md" in reason
+
+
 def test_background_bash_is_allowed(state):
     p = bash("sleep 30 && tail x", run_in_background=True)
     assert denied(run(p, state)) is None
