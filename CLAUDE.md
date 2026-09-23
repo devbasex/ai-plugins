@@ -80,7 +80,7 @@ python3 plugins/ndf/scripts/instructions-check.py --root .
 
 ## cross-review
 
-`/ndf:cross-review` はホストを除く 3 つのランタイムのうち使える者から毎ラウンド 2 席を選んで PR レビューを委譲し、両席が `APPROVE` するまで修正ループを回す。使える者が 2 者に満たなければ、ホスト、次に同じランタイムの 2 つ目が席を埋める。agy の progress log を heartbeat に表示するため、無言に見える時間でも `scan` / `analyze` / `post` / `done` などの作業段階を確認できる。
+`/ndf:cross-review` はホストを含む全ランタイムのうち使える者から毎ラウンド 2 席を選んで PR レビューを委譲し、両席が `APPROVE` するまで修正ループを回す。使える者が 2 者に満たなければ同じランタイムの 2 つ目が席を埋める。ホストのランタイムも CLI プロセスとして起動する。外すなら `--exclude` で名指しする（agy は `--exclude agy`）。agy の progress log を heartbeat に表示するため、無言に見える時間でも `scan` / `analyze` / `post` / `done` などの作業段階を確認できる。
 
 追加レビュー観点は以下のどちらかで渡す:
 
