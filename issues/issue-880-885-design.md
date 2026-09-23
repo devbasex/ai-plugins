@@ -144,7 +144,7 @@ graph LR
 | `round_test` が無い状態ファイル（変更の前の実行）の再開 | `_round_test_command(state)` が `baseline_test.command` を返す（AC7） |
 | `--round-test` を省いたか、`round_test.command` が `baseline_test.command` と同じ文字列 | `init` は全体テストを 1 回だけ実行し、その結果を `round_test.status` にも写す |
 | `--round-test` の `init` での実行が失敗（終了コード 5 を含む） | 「範囲のテストが成功しません」で止まる（終了コード 4）。全体テストの結果とは別に表示する |
-| `--scope` のテストの置き場所が `--round-test` の実行集合の外 | 今の `scope_problem` の文言で止まる（対象のコマンドの名前だけを `--round-test` に替える）。起点は `round_test_roots` が返す実在するディレクトリとファイルで、置き場所それぞれについて、起点のどれかがその置き場所と同じか祖先であることを求める。起点が 1 つも無いコマンド（`pytest -q` のように全体を走らせる）は全体を覆うとみなして通す |
+| `--scope` のテストの置き場所が `--round-test` の実行集合の外 | 今の `scope_problem` の文言で止まる（対象のコマンドの名前だけを `--round-test` に替える）。起点は `round_test_roots` が返すもの（実在するディレクトリと、テストの置き場所に当たる実在するファイル）で、置き場所それぞれについて、起点のどれかがその置き場所と同じか祖先であることを求める。起点が 1 つも無いコマンド（`pytest -q` のように全体を走らせる）は全体を覆うとみなして通す |
 | `--round-test` が無く、`--baseline-test` の探索の起点が無いか範囲より広い | 案内を 1 行出して続ける: `ℹ --baseline-test は --scope より広い範囲を走らせます。群ごとの検証を短くするには --round-test に範囲のテストを渡します（例: <プログラム> <テストの置き場所>）` |
 
 **全体テストの実行の回数は、状態ファイルから数えられる。** `init` の 1 回は `baseline_test.status`、最終ゲートの
