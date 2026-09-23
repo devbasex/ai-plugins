@@ -34,6 +34,25 @@ TEST_NAME_PATTERNS: tuple[str, ...] = (
 )
 
 
+# `--round-test` のうち、次の語を値として取ると分かっているオプション（#880）。
+# `--opt=value` の形は 1 語に値を含むため並べない。**知らないオプションの直後の語は
+# 起点に数える**（`round_test_roots`）。ここに無い値付きオプションは関門を止める側に
+# 倒れるだけで、範囲の外を素通りさせない。
+VALUE_OPTIONS: frozenset[str] = frozenset({
+    # uv run
+    "--project", "--directory", "--with", "--with-editable", "--with-requirements",
+    "--python", "-p", "--package", "--extra", "--group", "--only-group",
+    "--env-file", "--index", "--default-index", "--index-url", "--extra-index-url",
+    "--find-links", "-f", "--cache-dir", "--config-file",
+    # pytest
+    "--rootdir", "-c", "--confcutdir", "--basetemp", "-k", "-m", "-n",
+    "--numprocesses", "--dist", "-o", "--override-ini", "--tb", "--ignore",
+    "--ignore-glob", "--deselect", "--junit-xml", "--junitxml", "--log-file",
+    "--cov", "--cov-report", "--cov-config", "--maxfail", "--durations",
+    "-W", "--pythonwarnings", "--import-mode", "--capture", "-r",
+})
+
+
 def _matches_by_name(path: str) -> bool:
     """名前だけで置き場所と読めるか。**実在は見ない。**
 
@@ -128,14 +147,19 @@ def round_test_roots(command: str, work: str) -> list[str]:
     数える。** 範囲のテストは 1 ファイルを名指しすることがあり、それを限定なしと読むと
     範囲の置き場所を走らせないコマンドが関門を通る。
 
-    数えない語は 3 つある。先頭の語（プログラム名）と `-` で始まる語、`=` を含まない
-    長いオプションの直後の語（`--project .` の `.`）、作業ディレクトリの根（`.`）で
-    ある。テストの置き場所でないファイル（`bash scripts/run-scope-tests.sh` の
+    数えない語は 3 つある。先頭の語（プログラム名）と `-` で始まる語、値を取ると
+    分かっているオプションの直後の語（`--project .` の `.`）、作業ディレクトリの根
+    （`.`）である。テストの置き場所でないファイル（`bash scripts/run-scope-tests.sh` の
     ラッパー）も数えない。**ラッパーの中身は解析しない。** 範囲の外を走らせても、
     最終ゲートの全体テストが見る。
+
+    **値を取るかが分からないオプションの直後の語は起点に数える。** 値とみなして
+    消すと、`pytest --verbose tests/unit` の唯一の対象が消えて起点が空になり、全体を
+    覆うとみなして範囲の外だけを走らせるコマンドが関門を通る。数えすぎたときは
+    関門が止まる側に倒れ、利用者が 1 度直せば済む。
     """
     def accept(word: str, previous: str, normalized: str) -> bool:
-        if previous.startswith("--") and "=" not in previous:
+        if previous in VALUE_OPTIONS:
             return False
         if normalized == ".":
             return False

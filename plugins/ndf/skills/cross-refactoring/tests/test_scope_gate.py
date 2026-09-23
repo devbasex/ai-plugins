@@ -215,6 +215,31 @@ def test_a_wrapper_script_is_not_a_round_test_root(scope, tmp_path, command):
     assert scope.round_test_roots(command, str(tmp_path)) == []
 
 
+@pytest.mark.parametrize("command, expected", [
+    ("pytest --verbose tests/services", ["tests/services"]),
+    ("pytest -q --tb short tests/services/test_one.py", ["tests/services/test_one.py"]),
+    ("uv run --project scripts --with pytest pytest --lf tests/services", ["tests/services"]),
+    ("pytest --rootdir scripts -p no:cacheprovider tests/services", ["tests/services"]),
+])
+def test_a_flag_without_a_value_keeps_the_next_round_test_root(scope, tmp_path, command, expected):
+    """値を取らないオプションの直後の対象を、オプションの値として消さない。
+
+    消すと起点が空になり、全体を覆うとみなして範囲の外だけを走らせるコマンドが関門を通る。
+    値を取ると分かっているオプション（`--project` / `--rootdir` / `-p`）の直後だけを除く。
+    """
+    _services(tmp_path)
+    assert scope.round_test_roots(command, str(tmp_path)) == expected
+
+
+def test_a_flag_before_an_outside_target_stops(refactor_lib, scope, tmp_path):
+    """真偽のオプションの直後の範囲外の対象だけを走らせるコマンドは止める。"""
+    _services(tmp_path)
+    problem = scope.scope_problem(
+        ["src", "tests/services"], "pytest --verbose scripts", str(tmp_path),
+        round_test=True)
+    assert problem is not None and "--round-test" in problem
+
+
 def test_a_directory_is_a_round_test_root(scope, tmp_path):
     _services(tmp_path)
     assert scope.round_test_roots(

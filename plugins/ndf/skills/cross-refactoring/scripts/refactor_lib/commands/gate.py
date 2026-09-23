@@ -87,6 +87,7 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
     limit = safe_int(state.get("max_fix_rounds"), 3)
     if safe_int(gate.get("fix_rounds")) >= limit:
         _gate_limit_reached(path, state, gate, detail, limit)
+        return
     _gate_failing(path, state, gate, detail, limit)
 
 
