@@ -3,15 +3,14 @@
 設計は [issue-895-design.md](issue-895-design.md)、決定の理由は
 [issue-895-design-decisions.md](issue-895-design-decisions.md) にある。この文書は「何を満たすか」だけを扱う。
 
-マイルストーンは「17 トークン消費の削減」。版数は配布の工程が決める。このマイルストーンでは、MINOR に当たる追加も
-10.17.x で出すと利用者が決めている（`issues/handoff-milestone26.md` の「進め方」、2026-09-23）。
+マイルストーンは「17 トークン消費の削減」。版数は配布の工程が決める（`release`）。
 
 ## 例: 設計の関門をまたいで実装へ進む
 
 今（マイルストーン 26 の運用）:
 
 1. conductor が設計の関門で `AskUserQuestion` を出し、人が「承認」と答える
-2. conductor が設計 Pull Request をマージし、`issues/handoff-milestone26.md` の「次に実行するコマンド」を書き換えて応答を終える
+2. conductor が設計 Pull Request をマージし、引継ぎ文書（利用者が `issues/` に置く作業用の文書で、追跡しない）の「次に実行するコマンド」を書き換えて応答を終える
 3. **人が** `/exit` で Claude Code を終え、起動し直し、引継ぎ文書のコマンドを貼り付ける
 
 変更の後:

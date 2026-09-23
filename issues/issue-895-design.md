@@ -53,6 +53,7 @@
 | 6 | `AskUserQuestion` | 表示中の約 40 秒、Stop は起きなかった。答えた後のターンの終わりに 1 回起きた |
 | 7 | `claude plugin` | `claude plugin update [-y] <plugin>`（TTY でなければ `-y` が必須）、`claude plugin marketplace update [name]`、`claude plugin list --json` が `id` と `version` を返す |
 | 8 | `new-window` | `-P -F '#{window_index}'` で番号を受け取れる。`-d` が無いと前面に出る |
+| 9 | `new-window` の実行の欄 | `--` の後に引数を 2 つ以上渡すと、tmux はシェルを通さずそのまま実行する。`'a "$(echo X)" b'` と改行を含む 1 つの引数が、置き換えられずに 1 つの引数のまま届いた（tmux 3.6）。引数が 1 つだけのときは `sh -c` に渡るため、中身の前に必ず `env` などの固定の語を置く |
 
 4 が「静まりを待つ」段と、`stop_hook_active` を見ない判定の理由である。2 の信頼の確認は、次の区間の
 作業ディレクトリが前の区間と同じ（信頼済み）なので当たらない。Claude Code の中から起こした tmux の
@@ -150,7 +151,7 @@ plugins/ndf/
 
 | 副命令 | 引数 | 終了コード | 出力 |
 | --- | --- | --- | --- |
-| `run` | `--max-starts <N>`（既定 20）/ `--keep-windows <N>`（既定 10）/ `--quiet <秒>`（既定 15） | 0: 停止の印で止まった / 1: 起動できない（tmux の外・2 つ目の中継）/ 2: 上限・空回り・印の無い終わり・更新の失敗で止まった / 130: `Ctrl-C` | 止まるとき、理由を 1 行（`relay: 止まった: <理由>`）を標準エラーへ |
+| `run` | `--max-starts <N>`（既定 20）/ `--keep-windows <N>`（既定 10）/ `--quiet <秒>`（既定 15） | 0: 停止の印で止まった / 1: 起動できない（tmux の外・2 つ目の中継）/ 2: 上限・空回り・印の無い終わり・更新の失敗・`/exit` の後に 30 秒で終わらない（`exit-timeout`）で止まった / 130: `Ctrl-C` | 止まるとき、理由を 1 行（`relay: 止まった: <理由>`）を標準エラーへ |
 | `stop` | 無し | 0: 停止の印を置いた / 1: このセッションで中継が動いていない | 無し |
 | `mark` | 標準入力に Stop hook の JSON | 常に 0 | 常に無し |
 
@@ -271,7 +272,7 @@ stateDiagram-v2
 | 待つ | 2 秒ごとに `next/` と `stop` を見る（スクリプトの中の待ちで、LLM は使わない）。中継が起動した区間のペインは、`#{pane_dead}` かペインの消滅で終わりを見る |
 | 静まりを待つ | 印の `written_at` と `transcript_path` の更新時刻の遅いほうから `--quiet` 秒たつまで待つ。`/goal` が応答を続けさせたときは記録が動き、次の Stop で印が書き直されるか消える |
 | 終わらせる | 停止の印があれば `/exit` を送らずに止まる（AC13）。1 日の起動回数（`log.jsonl` の今日の `start` の数）が上限なら止まる（AC9）。中継が起動した区間のうち、直前の 2 つの `end` の行の `seconds` がともに 120 未満で、今の区間（これも中継が起動したもの）の長さも 120 未満なら（3 区間続けて空回り）、次の区間を起動せずに止まる（AC11）。どれでもなければ印のペインへ `remain-on-exit on` を置き、`tmux send-keys -t <ペイン> /exit Enter` を送り、ペインが死ぬ・消える・`#{pane_current_command}` が `claude` でなくなるのを 30 秒まで待つ |
-| 起動する | `claude plugin marketplace update <マーケットプレイス>` → `claude plugin update ndf@<マーケットプレイス> -y` → `claude plugin list --json` で版を読む。どれかが 0 以外で終われば止まる。`tmux new-window -t <セッション> -c <cwd> -P -F '#{window_index} #{pane_id}' -- env -u CLAUDECODE -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT claude <中身>` で起動し（中身はシェルを通さず 1 つの引数で渡す）、そのウィンドウに `remain-on-exit on` を置く。中継が開いたウィンドウで死んだものが `--keep-windows` を超えたら古いものから `kill-window` する（AC7） |
+| 起動する | `claude plugin marketplace update <マーケットプレイス>` → `claude plugin update ndf@<マーケットプレイス> -y` → `claude plugin list --json` で版を読む。どれかが 0 以外で終われば止まる。`tmux new-window -t <セッション>: -c <cwd> -P -F '#{window_index} #{pane_id}' -- env -u CLAUDECODE -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT claude <中身>` で起動し（中身はシェルを通さず 1 つの引数で渡す）、そのウィンドウに `remain-on-exit on` を置く。中継が開いたウィンドウで死んだものが `--keep-windows` を超えたら古いものから `kill-window` する（AC7） |
 
 **マーケットプレイスの名前は、中継を始めたときに `claude plugin list --json` の `ndf@<名前>` から読む。**
 開発版のチャネルを使う利用者でも、登録した取得元から更新される。
