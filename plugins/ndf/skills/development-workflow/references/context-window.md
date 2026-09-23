@@ -121,7 +121,7 @@ Codex / Kiro / agy には hook を置かない。4 つの切れ目で 1 行を�
 | # | 読むもの | 戻すもの |
 | --- | --- | --- |
 | 1 | 課題の本文の `## 進行`（`gh issue view <番号> --json body`） | モード・作業ツリー・計画ファイル・通った工程 |
-| 2 | `stage-check.sh report <番号>` | 通過工程の控え。本文と食い違えば控えを正とする |
+| 2 | `bash <この Skill のディレクトリ>/scripts/stage-check.sh report <番号>`（プラグインの `scripts/` ではなく、`development-workflow` の `scripts/` にある） | 通過工程の控え。本文と食い違えば控えを正とする |
 | 3 | 1 の作業ツリー（`.worktrees/<ブランチ名>`）のブランチ名で `gh pr list --head <ブランチ名> --state all`。実装の Pull Request は `gh issue view <番号> --json closedByPullRequestsReferences` でも引く | 設計・実装の Pull Request と状態 |
 | 4 | 1〜3 から、チェックの付いていない最初の必須の工程 | 次に起動する工程 Skill |
 
