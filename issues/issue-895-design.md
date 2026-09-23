@@ -234,7 +234,7 @@ alias claude='python3 "${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py" run'
 ### 作業ディレクトリ `NDF_RELAY_DIR`
 
 `${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/<起動の時刻（UTC の %Y%m%dT%H%M%SZ）>-<中継の pid>-<乱数 8 桁>/`。権限は `0700`。`run` が親 `${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/` を `os.makedirs(..., mode=0o700, exist_ok=True)` で作ってから、その下を `os.mkdir` で新しく作り（`install` が一度も走っていなくても始められる。作れなければ `ndf-relay:` の 1 行を出して素通しする。既にあれば別の乱数で作り直す。前の起動のディレクトリを使い回さない）、子の環境変数 `NDF_RELAY_DIR` に置く。pid が再利用されても、前の起動の `stop` / `next.json` / `child.pid` は別のディレクトリに残るため、今回の中継が読むことはない。
-`run` が終わるとき `relay.pid` を消す（`log.jsonl` は残す）。1 日の起動回数は、この親のディレクトリの全 `log.jsonl` の今日の `start` を数える。
+`run` が終わるとき `relay.pid` を消す（`log.jsonl` は残す）。1 日の起動回数は、この親のディレクトリの全 `log.jsonl` の今日の `start` を数える。**数えてから `start` を書くまで（失敗なら書かずに放すまで）は、親の `count.lock` を `fcntl.flock` で持つ。** 同時に動く中継が残り 1 枠を取り合っても、上限を超えて起動しない。
 
 | ファイル | 書く側 | 中身 |
 | --- | --- | --- |
@@ -412,7 +412,7 @@ stateDiagram-v2
 | AC7 | 同: 中継の標準入力に見立てたパイプへ `\x03` と文字を書くと、同じバイトが子へ届くこと。SIGWINCH の後に子の端末の大きさが変わること。中継を擬似端末の上で動かし、子が終わった後・本体で例外を起こした後・SIGTERM を送った後・SIGHUP を送った後のそれぞれで、中継の端末の属性が始める前と同じに戻っていること。端末が閉じて戻せないときは、戻しの失敗を無視して終わること（例外を出さない） |
 | AC8 | 同: 1 周で `end`（6 つのキー: `event` / `at` / `section` / `pid` / `seconds` / `ended_by`）と `start`（8 つのキー: `event` / `at` / `section` / `pid` / `command` / `from_session` / `plugin_version` / `cwd`。`cwd_fallback` は消えていたときだけ足す）の 2 行が書かれ、`plugin_version` が差し替えた `plugin list --json` の値、`ended_by` が `mark` であること。1 つ目の区間の `start` も `plugin_version` を持ち、それは中継を始めたときに読んだ `plugin list --json` の値であること |
 | AC9 | 同: 印の `cwd` が消えた（`<主>/.worktrees/design/x`）とき `<主>` で次の子が起動し、`start` の行に `cwd_fallback` が載ること |
-| AC10 | 同: 今日の `start` が 20 行ある記録で印を与えると、`/exit` を送らず `stop`（`max-starts`）と `ndf-relay:` の 1 行を出し、子を続けさせること |
+| AC10 | 同: 今日の `start` が 20 行ある記録で印を与えると、`/exit` を送らず `stop`（`max-starts`）と `ndf-relay:` の 1 行を出し、子を続けさせること。今日の `start` が 19 行ある親で、2 つの中継に同時に印を与えると、起動するのは 1 つだけで、もう 1 つは `max-starts` になること |
 | AC11 | 同: 区間の長さが 119・119・119 と続くと 3 つ目の印で `/exit` を送らず `stop`（`spin`）、119・121・119 では送ること。1 つ目の区間（`run` の引数で起動した区間）も数えること。`sigterm` と `sigkill` で終わった区間の長さが、どちらも印の `written_at` までで測られること |
 | AC12 | 同: 試験用の子が印なしで終わると、`end`（`no-mark`）を書いて子の終了コードで終わること |
 | AC13 | 同: 別のプロセスから `relay.py stop` を打つと `stop` ができ、次の印で `/exit` を送らないこと。動いている中継が無ければ `stop` が終了コード 1。生きている中継 2 つと `relay.pid` の死んだディレクトリ 1 つを置いて `stop` を打つと、生きている 2 つにだけ停止の印ができること。`relay.pid` に今動いている無関係なプロセスの pid を書き、ロックを持つ者の居ないディレクトリは飛ばすこと |

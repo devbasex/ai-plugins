@@ -142,7 +142,8 @@
 | AC3・AC4・AC4b | hook の単体テスト（標準入力の JSON を与え、印の有無と中身・出力・終了コードを見る。プロセスの親子の読み取りは差し替える） |
 | AC5 | 設計の時点の実測（前提 2）と、AC17 の中で `AskUserQuestion` を 1 回出す |
 | AC6〜AC15・AC19〜AC21・AC26 | 中継の単体テスト（子の claude を短い試験用のプログラムに差し替えて擬似端末の上で動かし、子へ届いたバイト・呼んだコマンドの列・記録・画面の出力を見る） |
-| AC23・AC24 | hook の単体テスト（`test_token_guard.py` と `test_relay.py`） |
+| AC23 | 文脈量の hook の単体テスト（`test_token_guard.py`） |
+| AC24 | `mark` の単体テスト（`test_relay.py`） |
 | AC25 | AC17 の通しの確かめの中で上限を小さくして確かめる |
 | AC16・AC22 | hook の単体テスト（中継の環境変数無し）と、Codex / Kiro / agy の hook の定義の差分が無いこと |
 | AC17 | 擬似端末の上で本物の claude（`--model haiku`）を使う通しの確かめ。実装の Pull Request に記録を残す |
