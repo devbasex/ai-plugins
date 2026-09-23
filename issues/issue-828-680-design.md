@@ -59,6 +59,8 @@ issue の本文の `## 進行` と盤面の両方に残り、`stage` は通過�
 | `development-workflow/references/stage-completeness.md` | 変える | 用語「進行の記録」の説明に、同じ 1 回で issue の本文も更新されることを足す（控えの読み方は変えない） |
 | `progress-tracking/SKILL.md` | 変える | 「呼び方」を記録のコマンド 1 行にする。抜粋を指す |
 | `progress-tracking/references/excerpt.md` | 新設 | 抜粋の見本（F4） |
+| `plugins/ndf/agents/worker.md` | 新設 | worker のエージェント定義（`ndf:worker`）。frontmatter の `disallowedTools` で Skill と Agent のツールを外す（F3）。agy へは `dev.agy/agents` の symlink で同じファイルが配られる |
+| エージェントの数を書く説明（`AGENTS.md` / `README.md` / `plugins/ndf/README.md` / `docs/ndf-plugin-reference.md`） | 変える | 「8 個の専門エージェント」に worker を足す |
 | `plugins/ndf/skills/AUTHORING.md` | 変える | 抜粋の形と置き場所の規約（F4）。#855 の検査が読む目印 |
 | 工程の Skill の末尾の記録の文（20 ファイル） | 変える | 「`/ndf:progress-tracking` を呼ぶ」を記録のコマンド 1 行へ（AC7） |
 | `development-workflow/SKILL.md` | 変える | conductor が起動指示へ記録のコマンドを書くこと（`$SCRIPTS` を解いてから渡す） |
@@ -142,12 +144,22 @@ supervisor が守る規則の変更:
 
 ### worker の起動指示（F3）
 
-`agent-layers.md` の「supervisor → worker」の `prompt` の項目を 4 から 5 にする。
+`agent-layers.md` の「supervisor → worker」の引数を 2 つ変える。
+
+| 引数 | いま | 変更後 |
+| --- | --- | --- |
+| `subagent_type` | 省く（`general-purpose`） | **`ndf:worker`**（下の「worker の定義で塞ぐ」） |
+| `prompt` | 4 項目 | 5 項目（「手順」を足す） |
+
 
 | 項目 | 中身 | 変更 |
 | --- | --- | --- |
 | 作業 / 入力 / 返す形 / 置き場所 | — | そのまま |
 | **手順** | 作業に要る手順の抜粋（呼び出し 1 行・結果の読み方・判断の基準）。**抜粋の元の Skill の `references/excerpt.md` を写す。** 抜粋が無い Skill の手順が要るときは、supervisor が要る段落だけを写す | 足す |
+
+「委譲の線」の表の `修正` の説明を「レビューの指摘の修正と push」から「レビューの指摘の修正と
+コミット。送るのは起動した側」へ直す。`fix` と `cross-review` は担当が送らない形で既に動いており
+（`cross-review/docs/02-fix-and-rotation.md` の Step 5）、抜粋もその形で書く。
 
 worker が守る規則に 6 を足す。
 
@@ -161,6 +173,63 @@ worker が守る規則に 6 を足す。
 置き換える。worker が自分の判断で工程の Skill を起動すると、その Skill の進行の記録・確認の段・
 関門の判断が worker の文脈で動く。worker が持たない責務（進行の記録・収束の判定）を持つことになる。
 そのため、起動してよいかは worker ではなく起動指示を書く側が決める。
+
+### worker の定義で塞ぐ（F3）
+
+**規則 6 を文面だけにせず、worker のエージェント定義で Skill のツールを外す。** 定義は
+`plugins/ndf/agents/worker.md` に置き、起動指示は `subagent_type: ndf:worker` で指す。
+
+```markdown
+---
+name: worker
+description: NDF の 3 層の worker。1 つの作業（調査・修正・検証・集計）を行い、作業の報告で返す
+disallowedTools: Skill, Agent
+---
+```
+
+**Agent も外す。** Skill だけを外した定義でも、子が Agent ツールで起こした `general-purpose` の
+孫は Skill を使えた（下の表の H）。worker は葉であるという規則（`agent-layers.md` の「3 層の
+責務」）も、同じ 1 行で定義が守る。
+
+**許可の一覧（`tools`）ではなく拒否の一覧（`disallowedTools`）で書く。** 許可の一覧で書くと、
+一覧に書いた `Grep` / `Glob` が子に現れなかった（表の B）。拒否の一覧なら、外した 2 つ以外は
+親と同じ道具が残る。
+
+**例外の経路は定義を分けて通す。** 定義の中では Skill を 1 つだけ許す書き方ができない
+（表の F / G。`Skill(ndf:fix)` と書いても Skill のツール全体が入るか消えるかになる）。
+`cross-review` の修正（Step 5 / 7.5）は今の `general-purpose` のまま起動し、`ndf:worker` を
+使わない。#859 が `fix` を抜粋へ置き換えた時点で `ndf:worker` へ移す。
+
+実測（2026-09-23、Claude Code。使い捨てのリポジトリで `claude -p` の子プロセスの中で起動）:
+
+| # | 起動の仕方 | Skill のツール | `SKILL.md` の Read | 根拠 |
+| --- | --- | --- | --- | --- |
+| A | 定義に `disallowedTools: Skill` | 使えない | 読める | `ToolSearch select:Skill` → `No matching deferred tools found.` |
+| B | 定義に `tools: Read, Grep, Glob, Bash, Edit, Write` | 使えない | 読める | 子の道具は Read / Bash / Edit / Write の 4 つ（Grep / Glob が出ない） |
+| C | 制限の無い定義（比較） | 使える | 読める | `Launching skill: ndf:progress-tracking` |
+| E | A に `/ndf:progress-tracking` を文面で渡す | 本文は載らない | — | 子の報告「Skill 本文は文脈に載っていません」 |
+| F | 定義に `tools: Read, Bash, Skill(ndf:fix)` | すべて使える | — | `ndf:progress-tracking` も起動した |
+| G | 定義に `disallowedTools: Skill(ndf:progress-tracking)` | すべて使えない | — | `ndf:fix` も使えなかった |
+| H | A の子が Agent で `general-purpose` を起こす | 孫は使える | — | 孫で `Launching skill: ndf:progress-tracking` |
+
+**塞がないものが 1 つある。** `SKILL.md` を Read で読むことは定義では止まらない（表の A）。
+worker は抜粋（`references/excerpt.md`）を読むために `skills/` 配下の Read を要し、Read を
+パスで分ける手段は定義に無い。これは規則 6 の文面で縛り、起動指示の「手順」に抜粋を写して
+渡すことで読む理由を無くす。
+
+**CLI の worker（#760）で使える手段も実測した。** 今の 3 層は CLI の worker を使わないため、
+この変更では定義しない。#760 と #888（ランタイムの可搬性）の入力として残す。
+
+| ランタイム | 手段 | 結果 |
+| --- | --- | --- |
+| claude CLI | `--disable-slash-commands` | Skill のツール・一覧・スラッシュの展開がすべて止まる |
+| claude CLI | `--disallowedTools Skill` | ツールは消えるが、`/ndf:<Skill>` の文面は本文へ展開される（塞げない） |
+| claude CLI | `--permission-mode dontAsk --allowedTools 'Skill(ndf:fix)'` | `ndf:fix` だけが通る（例外の通し方） |
+| codex | `-c skills.include_instructions=false` | Skill の一覧は消える。`SKILL.md` をシェルで読むことは止めない |
+| kiro | エージェント定義の `tools` / `resources` | 塞げない（一覧が載り、本文を読んだ）。候補の設定は利用者単位で、エージェント単位に効かない |
+
+`--disallowedTools` と `--allowedTools` は値を複数取るため、後ろに置いたプロンプトを値として
+読む（終了コード 1）。プロンプトは標準入力で渡す。
 
 ### 抜粋の形（F4）
 
@@ -188,12 +257,56 @@ bash "$SCRIPTS/projects-sync.sh" <課題番号> stage "<工程名>"
 | --- | --- | --- |
 | 目印 | 1 行目の `<!-- ndf-excerpt: <Skill名> -->` | #855 の検査が抜粋を見つけ、本文との一致を確かめる起点にする |
 | 見出し | `## 呼び出し` / `## 結果の読み方` / `## 判断の基準` の 3 つだけ、この順 | #845 の接点 9 と同じ形にする |
-| 分量 | 40 行以内 | 写す側の起動指示に載る量である。超えるなら本文を縮める側（#845 の子）の課題である |
+| 分量 | 40 行以内かつ 2,000 文字以内（目印・見出し・空行を含む） | 下の「抜粋の中身と上限」の実測で、8 件が 28〜39 行・792〜1,595 文字に収まった。行だけでは 1 行を長くして収められるため、文字数も縛る |
 | 本文から指す | `SKILL.md` に「呼ぶ側へ渡す抜粋は `references/excerpt.md`」の 1 行を置く | 本文を直す人の目に抜粋が入る（非機能の運用・保守性） |
 | 置かないこと | 本文に無い規則 | 抜粋は写しであり、正本は本文である |
 
 **この変更で作る抜粋は `progress-tracking` の 1 つだけである。** 他の Skill の抜粋は、#845 の子が
-`SKILL.md` を縮めるときに作る（要求の前提 2）。
+`SKILL.md` を縮めるときに作る（要求の前提 2）。作る Skill と、作る課題は下の表が決める。
+
+### 抜粋の中身と上限（F4）
+
+**上限は中身の規則で守り、数で確かめる。** 中身の規則に従えば上限に収まることを、種類の違う
+8 つの Skill の下書きで確かめた。数の上限は、規則が守られたかを機械で見るための値である。
+
+| 入れる | 入れない |
+| --- | --- |
+| worker（または supervisor）がその作業で打つコマンド | 上の層の責務（進行の記録・push・投稿・起票・関門の判断） |
+| 結果の読み方（出力・終了コード・結果ファイルの形） | 対話の確認（利用者へ問う段）。worker では「行わない」側に読み替えて書く |
+| その作業の中で下す判断の基準 | 値を解決するコード（`$SCRIPTS` / `$SKILL_DIR` / 起点ブランチ / 起票先）。上の層が解いた値を起動指示の「入力」で渡す |
+| | 例・図・チェックリスト・理由の説明（本文を読めば分かる） |
+| | 他の Skill の抜粋と重なる内容。その Skill の名前だけを書く |
+
+**上限を超えたときは、抜粋を割らない。** 1 つの Skill に 1 ファイルのまま、次の順で扱う。
+
+1. 「入れない」に当たるものを外す
+2. それでも超えるなら、超えさせた手順（長いコマンドの列・分岐の多い判断）をスクリプトへ出す。
+   これは本文を縮める #845 の子の仕事であり、その課題の受け入れ条件へ足す
+3. スクリプトへ出るまでは抜粋を置かず、supervisor が要る段落を起動指示の「手順」へ写す
+   （worker の起動指示の表の「手順」の行と同じ扱い）
+
+**下書きの実測**（2026-09-23。各 Skill の本文から worker の作業で要る部分だけを 3 見出しで書いた）:
+
+| Skill | 種類 | 使う相手 | 行 | 文字 | 本文（`SKILL.md`） | 作る課題 |
+| --- | --- | --- | ---: | ---: | ---: | --- |
+| progress-tracking | 記録 | supervisor・conductor | 30 | 954 | 24,270 バイト | この変更 |
+| fix | 修正 | worker `修正` | 34 | 1,390 | 23,852 バイト | #859 |
+| cross-review | 修正（Step 5 / 7.5 の分） | worker `修正` | 34 | 1,595 | 33,428 バイト | #870 |
+| markdown-writing | 文書の規則 | worker `修正`・`調査` | 37 | 1,262 | 19,353 バイト | #873 |
+| quality-gates | 検証 | worker `検証` | 30 | 928 | 11,242 バイト | #871 |
+| tdd-cycle | 検証・修正 | worker `修正` | 34 | 860 | 7,912 バイト | #871 |
+| pr-review | レビュー | worker `調査` | 39 | 962 | 21,622 バイト | #860 |
+| out-of-scope | 起票の下調べ | worker `調査` | 28 | 792 | 9,142 バイト | #865 |
+
+| Skill | 抜粋を作らない理由 |
+| --- | --- |
+| worktree | 作業場所の用意は supervisor の工程である。検証の worker が要るテスト環境のコマンドは、supervisor が環境を立ててから「入力」で渡す |
+| pr | push の前に同意が要り、worker は人へ問えない。supervisor が呼ぶ |
+
+**収めるために使った手は 3 つで、いずれも「入れない」の規則に当たる。** 20〜30 行の値の解決
+コードを外した、表を箇条書きに畳んだ、例と理由を外した、の 3 つである。`fix` と `cross-review` の
+下書きは 4 項目が重なった。同じ修正の worker の手順を 2 つの Skill が持つためで、`cross-review` の
+抜粋は `fix` の名前を書いて重ねない。
 
 ## 仕事を分ける器（F5 / F6）
 
@@ -305,18 +418,20 @@ sequenceDiagram
 
 ## 決定の記録
 
-[issue-828-680-design-decisions.md](issue-828-680-design-decisions.md) に 9 件ある。
+[issue-828-680-design-decisions.md](issue-828-680-design-decisions.md) に 10 件ある。
 
 ## テスト設計
 
 | 受け入れ条件 | 何で確かめるか |
 | --- | --- |
 | AC1 / AC3 / AC4 | `agent-layers.md` の差分のレビュー（cross-review）。雛形の項目の表と規則の文を読む |
+| AC14 | 定義の検査: `plugins/ndf/agents/worker.md` の frontmatter の `disallowedTools` に `Skill` と `Agent` がある（テストで読む）。実機: `ndf:worker` を起動し、`ToolSearch select:Skill` が `No matching deferred tools found.` を返すことと、Agent を持たないことを確かめて #828 に残す（手順は「worker の定義で塞ぐ」の表 A / H と同じ） |
 | AC2 | 同上。加えて、実装の後の最初の `/goal` で supervisor が `progress-tracking` / `development-workflow` を起動していないことを `skill-stats --agents` で見る |
 | AC1 / AC3（雛形の検査） | `grep -n "progress-tracking\|development-workflow" plugins/ndf/skills/development-workflow/references/agent-layers.md` の結果を、表の後の「雛形の検査で残ってよい行」と突き合わせる。**「起動の指示」の節（2 つの雛形）の中で、下の「残ってよい行」（a / b / c）を除き、これらを起動・読み込みさせる文が 0 件**なら合格 |
 | AC5 / AC6 | `projects-sync.sh` のテストに足す: 宣言なしで `stage` を呼ぶと issue の本文だけが更新される / 宣言ありで両方が更新される / `mode` で見出し行だけが変わる / 知らない工程名で 2 を返し本文を書かない / `stage` / `mode` / `worktree` / `plan` の 4 キーそれぞれで、issue の本文の見出し行・チェックリストと盤面のフィールドが今の 2 コマンドの組と同じになる（`gh` は既存のテストと同じ偽物で置き換える） |
 | AC7 | `grep -rn "この工程に入ったら.*progress-tracking" plugins/ndf/skills/*/SKILL.md` が 0 件で、`design/SKILL.md` の「進行を記録する」の節も記録のコマンドの形になっている（今は 19 件の定型文と `design` の 2 件、計 20 Skill・21 件） |
 | AC8 | 既存の `test_stage_check.py` / `test_workflow_guard.py` が変更なしで通る |
+| AC15 | 設計の「抜粋の中身と上限」の規則と上限が `AUTHORING.md` にあること（差分のレビュー）。`progress-tracking` の抜粋が 40 行かつ 2,000 文字に収まること（`wc -l` と文字数） |
 | AC9 | `progress-tracking/references/excerpt.md` の 1 行目の目印と見出し 3 つ。検査の実装は #855 |
 | AC10 / AC11 | `work-vessels.md` の差分のレビュー。`agent-layers.md` と `context-window.md` から指されていること（`grep -n "work-vessels.md"`） |
 | AC12 | 配布の後、`release-verification` で #827 の計測を同じ条件で回す（比べる前の値は下の「AC12 の比べる前の値」）。`progress-tracking` の読み込みは、まとまりを閉じる持ち場（取り込み / 仕上げ）の 1 回ずつが残る見込み |
@@ -351,6 +466,4 @@ supervisor が起動する工程の Skill と、その下で呼ばれる Skill �
 
 | 項目 | 内容 |
 | --- | --- |
-| worker が Skill を起動しない規則の守られ方 | 規則は文面で縛るだけで、hook は置かない。守られたかは AC12 の計測で見る |
-| 抜粋の分量の上限（40 行） | `progress-tracking` の 1 件でしか確かめていない。#845 の子が作るときに合わなければ #855 で直す |
 | 対話の会話での記録 | 工程の Skill の末尾の文を 1 行にしたことで、対話の会話も `progress-tracking` を読まなくなる。`$SCRIPTS` の決め方は `scripts-lookup.md` を読む必要が残る（#847 が 1 コマンドにする） |
