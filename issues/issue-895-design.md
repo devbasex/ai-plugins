@@ -233,7 +233,7 @@ alias claude='python3 "${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py" run'
 
 ### 作業ディレクトリ `NDF_RELAY_DIR`
 
-`${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/<起動の時刻（UTC の %Y%m%dT%H%M%SZ）>-<中継の pid>-<乱数 8 桁>/`。権限は `0700`。`run` が `os.mkdir` で新しく作り（既にあれば別の乱数で作り直す。前の起動のディレクトリを使い回さない）、子の環境変数 `NDF_RELAY_DIR` に置く。pid が再利用されても、前の起動の `stop` / `next.json` / `child.pid` は別のディレクトリに残るため、今回の中継が読むことはない。
+`${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/<起動の時刻（UTC の %Y%m%dT%H%M%SZ）>-<中継の pid>-<乱数 8 桁>/`。権限は `0700`。`run` が親 `${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/` を `os.makedirs(..., mode=0o700, exist_ok=True)` で作ってから、その下を `os.mkdir` で新しく作り（`install` が一度も走っていなくても始められる。作れなければ `ndf-relay:` の 1 行を出して素通しする。既にあれば別の乱数で作り直す。前の起動のディレクトリを使い回さない）、子の環境変数 `NDF_RELAY_DIR` に置く。pid が再利用されても、前の起動の `stop` / `next.json` / `child.pid` は別のディレクトリに残るため、今回の中継が読むことはない。
 `run` が終わるとき `relay.pid` を消す（`log.jsonl` は残す）。1 日の起動回数は、この親のディレクトリの全 `log.jsonl` の今日の `start` を数える。
 
 | ファイル | 書く側 | 中身 |
@@ -372,6 +372,8 @@ stateDiagram-v2
 | 終わらせる | 子の端末へ `/exit` を書き、1 秒おいて `\r` を書く。`waitpid` で 30 秒まで待ち、終わらなければ SIGTERM を送って 10 秒まで待ち、それでも終わらなければ SIGKILL を送って終わりを待つ（SIGKILL の後は必ず終わる）。**子の終わりを `waitpid` で確かめてから** `end` を書き、次へ進む |
 | 起動する | マーケットプレイスの名前が読めていれば、`claude plugin marketplace update <マーケットプレイス>` → `claude plugin update ndf@<マーケットプレイス> -y` → `claude plugin list --json` で版を読む。どれかが 0 以外で終われば `update-failed` で終わる。名前か版が読めなければ（下の段落）、同じく `update-failed` で終わる（次の区間を起動せず、次のコマンドを画面に出す）。作業ディレクトリは印の `cwd` で、消えていれば、パスに `/.worktrees/` を含むならその手前（主ディレクトリ）を、含まなければ在る最も近い親を使う。区切りの 1 行を出す。**起動の順序は、印を消す → `pty.fork()` → 子は同期のパイプの読み口で待つ → 親が `child.pid` を書く → 親が同期のパイプを閉じ、その時刻を控える → 子が `<本物の claude> <中身>` を exec する → 親が結果のパイプで成功を確かめてから `start` の行を書く（`at` は控えた時刻）、に固定する。** 早い Stop の判定に要るのは `child.pid` だけで、`start` は exec に成功した区間にだけ残る。 **exec の成否は、close-on-exec の結果のパイプで親へ返す。** 子は exec が失敗したら `errno` をそのパイプへ書いて終わる。親は読み口が何も読まずに閉じれば成功、読めれば `start-failed` として、`start` も `end` も書かずに `stop` の行（理由と `errno`）と次のコマンドを出して終了コード 2 で終わる。** 子がすぐ Stop に達しても、hook が読む `child.pid` は新しい値で、親が消す印は前の区間のものだけになる（「本物の claude」の絶対パスと引数の配列で `os.execve` に渡し、シェルも `PATH` の探索も通さない。環境から `CLAUDECODE` / `CLAUDE_CODE_SESSION_ID` / `CLAUDE_CODE_ENTRYPOINT` を外し、`NDF_RELAY_DIR` を置く）。起動できなければ `start-failed` で終わる |
 
+**中継が呼ぶ外部のコマンド（`claude plugin list --json` / `marketplace update` / `plugin update`）には打ち切りの時間を置く**: `list` は 15 秒、`marketplace update` と `plugin update` は 120 秒。打ち切ったら終わらなかったものとして扱う。中継を始めるときの `list` の打ち切りは理由を出して素通しし（素通しの条件 6）、切れ目での打ち切りは `update-failed` として次のコマンドを出して終わる。応答しない CLI で端末が止まらないためである。
+
 **マーケットプレイスの名前は、中継を始めたときに `claude plugin list --json` の `id` が `ndf@<名前>` の要素から読む**（「確かめたこと」の 10）。**このとき読んだ `version` を、1 つ目の区間の `start` の `plugin_version` にする。**
 開発版のチャネルを使う利用者でも、登録した取得元から更新される。区間の切れ目でもう一度読み、読めなければ `update-failed` とする。版を記録できないまま次の区間を起動しないためである（AC8）。
 
@@ -414,9 +416,9 @@ stateDiagram-v2
 | AC11 | 同: 区間の長さが 119・119・119 と続くと 3 つ目の印で `/exit` を送らず `stop`（`spin`）、119・121・119 では送ること。1 つ目の区間（`run` の引数で起動した区間）も数えること。`sigterm` と `sigkill` で終わった区間の長さが、どちらも印の `written_at` までで測られること |
 | AC12 | 同: 試験用の子が印なしで終わると、`end`（`no-mark`）を書いて子の終了コードで終わること |
 | AC13 | 同: 別のプロセスから `relay.py stop` を打つと `stop` ができ、次の印で `/exit` を送らないこと。動いている中継が無ければ `stop` が終了コード 1。生きている中継 2 つと `relay.pid` の死んだディレクトリ 1 つを置いて `stop` を打つと、生きている 2 つにだけ停止の印ができること。`relay.pid` に今動いている無関係なプロセスの pid を書き、ロックを持つ者の居ないディレクトリは飛ばすこと |
-| AC26 | 同: 同じ pid を返すように差し替えた 2 回の `run` が別の `NDF_RELAY_DIR` を作り、前の起動のディレクトリに置いた `stop` と `next.json` を読まないこと |
-| AC14 | 同: AC10・AC11・AC13 と、`plugin update` の差し替えが 0 以外のとき・次の子の起動に失敗したときに、`ndf-relay:` の 1 行と `stop` の行が出ること。後の 2 つは次のコマンドを画面に出し、終了コード 2。存在しない実行ファイルを次の子にすると、exec の失敗が結果のパイプで返り、`stop` の `reason` が `start-failed`・終了コード 2・次のコマンドが画面に出て、`start` と `end` の行が増えず、1 日の起動回数にも数えられないこと。`/exit` にも SIGTERM にも反応しない試験用の子で、SIGKILL の後に終わりを確かめてから `end`（`sigkill`）を書くこと。1 つ目の区間の子に存在しない実行ファイルを使うと、`start-failed` の `stop` の行と `ndf-relay:` の 1 行を出して終了コード 127 で終わること |
-| AC15 | 同: 素通しの 6 つの条件（`NDF_RELAY=0`・`NDF_RELAY_DIR` あり・`-p`・`--help`・副命令 `mcp`・標準入力がパイプ）で、`os.execve` を差し替えて、本物の claude のパスと元の引数がそのまま渡り、渡った環境と元の環境の差が `NDF_RELAY_DEPTH` の 1 つだけで、何も出力しないこと。`pty` を読み込めないように差し替えた対話の `run` では `ndf-relay:` の 1 行を標準エラーへ出してから素通しすること。`plugin list --json` の差し替えが失敗する・`ndf@` の要素が無いときも、対話の `run` が `ndf-relay:` の 1 行を出して素通しすること |
+| AC26 | 同: 同じ pid を返すように差し替えた 2 回の `run` が別の `NDF_RELAY_DIR` を作り、前の起動のディレクトリに置いた `stop` と `next.json` を読まないこと。`~/.local/state` が無い一時の HOME で `install` を通さずに `run` を打っても、作業ディレクトリを親ごと作って始まること |
+| AC14 | 同: AC10・AC11・AC13 と、`plugin update` の差し替えが 0 以外のとき・次の子の起動に失敗したときに、`ndf-relay:` の 1 行と `stop` の行が出ること。後の 2 つは次のコマンドを画面に出し、終了コード 2。存在しない実行ファイルを次の子にすると、exec の失敗が結果のパイプで返り、`stop` の `reason` が `start-failed`・終了コード 2・次のコマンドが画面に出て、`start` と `end` の行が増えず、1 日の起動回数にも数えられないこと。`/exit` にも SIGTERM にも反応しない試験用の子で、SIGKILL の後に終わりを確かめてから `end`（`sigkill`）を書くこと。1 つ目の区間の子に存在しない実行ファイルを使うと、`start-failed` の `stop` の行と `ndf-relay:` の 1 行を出して終了コード 127 で終わること。終わらない試験用の `plugin update` は 120 秒（試験では打ち切りを短く差し替える）で打ち切られ `update-failed` になること |
+| AC15 | 同: 素通しの 6 つの条件（`NDF_RELAY=0`・`NDF_RELAY_DIR` あり・`-p`・`--help`・副命令 `mcp`・標準入力がパイプ）で、`os.execve` を差し替えて、本物の claude のパスと元の引数がそのまま渡り、渡った環境と元の環境の差が `NDF_RELAY_DEPTH` の 1 つだけで、何も出力しないこと。`pty` を読み込めないように差し替えた対話の `run` では `ndf-relay:` の 1 行を標準エラーへ出してから素通しすること。`plugin list --json` の差し替えが失敗する・`ndf@` の要素が無いときも、対話の `run` が `ndf-relay:` の 1 行を出して素通しすること。終わらない試験用の `plugin list` は打ち切られ、理由を出して素通しすること |
 | AC16 | 同: AC4 の `NDF_RELAY_DIR` 無し。`hooks/claude.json` 以外の hook の定義の差分が無いことを実装の Pull Request の差分で見る |
 | AC19 | 同: 引数なしの `run` で 1 つ目の子の引数が空、`run --model haiku -c` で 1 つ目の子が同じ引数を受け、2 つ目の子は `<印の中身>` だけを受けること。試験用の子が印なしで終了コード 3 で終わると、中継も何も出さずに終了コード 3 で終わること。シグナル 15 で終わると 143 |
 | AC20 | 同: `PATH` の前に `claude` という名前で中継を呼ぶラッパーを置くと、それを飛ばして本物を選ぶこと。`NDF_RELAY_DEPTH=2` では終了コード 127 と 1 行を出すこと。`NDF_RELAY_CLAUDE` が最優先になること |
