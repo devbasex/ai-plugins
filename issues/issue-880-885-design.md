@@ -56,8 +56,8 @@
 | 同 `_inspect_fix_commits` | F1 | `collect_commit_facts` へ渡すコマンドを `_round_test_command(state)` に替える |
 | `refactor_lib/commands/gate.py` の `cmd_final_gate` / `_local_gate` / `_verify_final_fix_commits` | F1 F3 | 最終ゲートの判定は今のまま `baseline_test`。`workflow_step` が偽でも、`round_test` が `baseline_test` と違えば先に `_local_gate` を通す。通れば今のとおり cross-review へ渡し、落ちれば `--workflow-step` と同じ修正ラウンドへ入る。修正コミットの検証は `round_test`。最終ゲートの記録（`final_gate.checks` の各件）へ `command`・`seconds` を足す |
 | `refactor_lib/gitfacts.py` の `_kill_process_group` | F5 | SIGTERM の後の点検で、先に `proc.poll()` で親シェルを回収し、その後にグループの存否を `killpg(pgid, 0)` で見る。回収済みでグループが空なら戻る |
-| `refactor_lib/gitfacts.py`（新設の関数 `production_code_changes`） | F6 | `git diff --numstat <base>...HEAD` から、本番コードのファイルと変更行を返す。本番コードの判定は `CODE_EXTENSIONS` と既存の `_is_test_path` |
-| `refactor_lib/scope.py`（新設の関数 `round_test_hint`） | F2 | `--round-test` が無く、`baseline_search_roots` が空か、`--scope` のテストの置き場所より広いときに案内の 1 行を返す |
+| `refactor_lib/gitfacts.py`（新設の関数 `production_code_changes`） | F6 | `git diff --numstat --no-renames <base>...HEAD` から、本番コードのファイルと変更行を返す。rename は旧パスの削除と新パスの追加に分けて数える（`--no-renames` を付けないと `dir/{old.py => new.py}` の形になり、拡張子で判定できない）。本番コードの判定は `CODE_EXTENSIONS` と既存の `_is_test_path` |
+| `refactor_lib/scope.py`（新設の関数 `round_test_hint`・`round_test_roots`） | F1 F2 | `round_test_hint`: `--round-test` が無く、`baseline_search_roots` が空か、`--scope` のテストの置き場所より広いときに案内の 1 行を返す。`round_test_roots`: `--round-test` の引数のうち、実在するディレクトリと実在するファイルの両方を実行集合の起点として返す（`baseline_search_roots` はファイル引数を無視するまま変えない）。`init` はこの起点で `--scope` のテストの置き場所を覆うかを判定する |
 | `refactor_lib/proposals.py` の `merge_test_proposals` の `reject` | F8 | `target` の `#` より前が `.md` で終わる提案を「文書の文言を固定するテストは足さない」で見送る |
 | `refactor_lib/verify.py`（新設の関数 `doc_wording_tests`）と `verify_apply_round` | F9 | テストのファイルの追加行に、追跡している `.md` のパスを指す文字列があれば、その群を失敗にする。追跡している `.md` の一覧は `git ls-files '*.md'` を 1 回読む |
 | `prompts/propose-tests.md` の「守ること」 | F8 | 1 項目を足す（下の「入出力の契約」） |
@@ -99,7 +99,7 @@ plugins/ndf/skills/cross-refactoring/
         │   ├── converge.py          … verify-round と修正の検証のコマンド、seconds
         │   └── gate.py              … 単独起動でも全体テスト 1 回、記録
         ├── gitfacts.py              … _kill_process_group、production_code_changes
-        ├── scope.py                 … round_test_hint
+        ├── scope.py                 … round_test_hint、round_test_roots
         ├── proposals.py             … merge_test_proposals の reject
         └── verify.py                … doc_wording_tests
 plugins/ndf/skills/development-workflow/references/
@@ -143,7 +143,7 @@ graph LR
 | --- | --- |
 | `round_test` が無い状態ファイル（変更の前の実行）の再開 | `_round_test_command(state)` が `baseline_test.command` を返す（AC7） |
 | `--round-test` の `init` での実行が失敗（終了コード 5 を含む） | 「範囲のテストが成功しません」で止まる（終了コード 4）。全体テストの結果とは別に表示する |
-| `--scope` のテストの置き場所が `--round-test` の実行集合の外 | 今の `scope_problem` の文言で止まる（対象のコマンドの名前だけを `--round-test` に替える） |
+| `--scope` のテストの置き場所が `--round-test` の実行集合の外 | 今の `scope_problem` の文言で止まる（対象のコマンドの名前だけを `--round-test` に替える）。起点は `round_test_roots` が返す実在するディレクトリとファイルで、置き場所それぞれについて、起点のどれかがその置き場所と同じか祖先であることを求める。起点が 1 つも無いコマンド（`pytest -q` のように全体を走らせる）は全体を覆うとみなして通す |
 | `--round-test` が無く、`--baseline-test` の探索の起点が無いか範囲より広い | 案内を 1 行出して続ける: `ℹ --baseline-test は --scope より広い範囲を走らせます。群ごとの検証を短くするには --round-test に範囲のテストを渡します（例: <プログラム> <テストの置き場所>）` |
 
 **全体テストの実行の回数は、状態ファイルから数えられる。** `init` の 1 回は `baseline_test.status`、最終ゲートの
@@ -172,7 +172,7 @@ python3 "$RF/refactor.py" assess --base origin/develop; rc=$?; echo "exit=$rc"
 
 | 判定 | 条件 |
 | --- | --- |
-| 本番コード | 拡張子が `CODE_EXTENSIONS`（`.py .sh .bash .js .mjs .cjs .ts .tsx .jsx .php .rb .go .rs .java .kt .swift .c .h .cc .cpp .cs`）のどれかで、`_is_test_path` が偽 |
+| 本番コード | パスは `--no-renames` の出力で見る（rename は旧パスと新パスの両方を判定する）。拡張子が `CODE_EXTENSIONS`（`.py .sh .bash .js .mjs .cjs .ts .tsx .jsx .php .rb .go .rs .java .kt .swift .c .h .cc .cpp .cs`）のどれかで、`_is_test_path` が偽 |
 | 数えない | それ以外（`.md`・`.json`・`.yml`・`.toml`・画像・テストの置き場所）。削除だけのファイルも行数に入れる（`numstat` の追加＋削除） |
 
 **`assess` は判定の材料を出すだけで、退避の 3 条件（テストが無い・CLI が使えない・範囲を絞れない）は見ない。**
@@ -344,7 +344,7 @@ issue の境界の表に、棚卸で見つけた 3 つの形（P1〜P3）の扱�
 | `plugins/ndf/scripts/tests/test_run_metrics_docs.py` | 2 | 0 | 0 | 消す |
 | 合計 | **約 330〜350** | **約 20〜25** | — | 消すファイル 12 本 |
 
-- 全体の収集数は 5141 件（`--co`、収集の誤り 8 件は別件）。削る関数の多くは `parametrize` を持たないため、件数も同程度減る
+- 全体の収集数は 5356 件（develop dae35582 で `uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest pytest . -q --co`。5141 件は依存を入れずに `pytest scripts/tests plugins --co` した値で、収集の誤り 8 件を含む）。削る関数の多くは `parametrize` を持たないため、件数も同程度減る
 - **共有の補助モジュール（`issue_target_helpers.py`・`retrospective_helpers.py`）は残る。** 残す関数が使い続ける。削った後に使われなくなった補助の関数だけを消す
 - **棚卸で精査しきれていないファイルがある。** `test_declaration_check.py`・`test_projects_scripts_lookup.py`、補助モジュールから `.md` のパスを import するファイル（`merged/tests/test_closing_issues.py`・`worktree/tests/test_declaration*.py` ほか）。実装では、AST の洗い出しを補助モジュールの定数まで追う形で回し直す（テスト設計の AC19a）
 
@@ -380,12 +380,12 @@ issue の境界の表に、棚卸で見つけた 3 つの形（P1〜P3）の扱�
 | AC1 | `tests/` に、`init --round-test X` で状態の `round_test.command == X`、省くと `baseline_test.command` と同じになるテスト |
 | AC2 | `verify-round` と修正の取り込みで、実行されたコマンドを差し替えた `run_with_timeout` で記録し、`round_test` だけが渡ることを確かめる |
 | AC3 | 単独起動と `--workflow-step` の両方で最終ゲートを通し、全体テストの呼び出しが 1 回ずつであることを確かめる |
-| AC4 | `--round-test "false"` と、テストが集まらないコマンド（終了コード 5）で `init` が終了コード 4 で止まる。範囲の置き場所の外を走らせる `--round-test` で止まる |
+| AC4 | `--round-test "false"` と、テストが集まらないコマンド（終了コード 5）で `init` が終了コード 4 で止まる。範囲の置き場所の外を走らせる `--round-test` で止まる。`--round-test "pytest tests/services/test_one.py"` で `--scope tests/services` を渡すと止まる |
 | AC5 | `round_test_hint` に、起点の無いコマンド・範囲より広い起点・範囲と同じ起点を渡し、前 2 つだけが案内を返す |
 | AC6 | `verify-round` の後の状態の `verifications[-1]["seconds"]` が 0 以上の数 |
 | AC7 | `round_test` を持たない状態ファイルで `verify-round` を通し、`baseline_test.command` が実行される |
 | AC9〜AC11 | `test_git_facts.py` に `exec sleep 30` を上限 1 秒で 2 秒以内に戻るテストを足す。既存の 3 件の待ちを縮め、合計の所要を `pytest --durations` で確かめる |
-| AC12〜AC14 | 一時リポジトリに、`.md` だけ・テストだけ・`.json` だけ・本番コード 10 行・11 行の差分を作り、`assess` の終了コードと出力の 3 行を確かめる。`<base>` を解けないと終了コード 2 |
+| AC12〜AC14 | 一時リポジトリに、`.md` だけ・テストだけ・`.json` だけ・本番コード 10 行・11 行の差分を作り（変更を伴う rename（`a.py` → `b.py`、11 行以上）で「通す」を含む）、`assess` の終了コードと出力の 3 行を確かめる。`<base>` を解けないと終了コード 2 |
 | AC17 | `merge_test_proposals` に `target` が `SKILL.md#節` の提案を渡し、見送りに理由付きで入る |
 | AC18 | `doc_wording_tests` に、追跡している `.md` のパスのリテラル・末尾が一致するリテラル・追跡していない `a.md` を含む追加行を渡し、前 2 つだけが当たる。`verify_apply_round` がその理由で失敗を返す |
 | AC8・AC15・AC16・AC19c | 文書を読んで確かめる。文言を固定するテストは書かない |
