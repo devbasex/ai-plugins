@@ -138,7 +138,7 @@ plugins/ndf/
 | # | 段 | すること |
 | ---: | --- | --- |
 | U1 | 対象 | `~/.bashrc` と `${ZDOTDIR:-$HOME}/.zshrc` の両方（`$SHELL` に依らない。10.17.4 は起動した時点の `$SHELL` で足した） |
-| U2 | 囲みを探す | 行を読み、`# >>> ndf relay >>>` の行から次の `# <<< ndf relay <<<` の行までを 1 つの囲みとする。いくつあってもすべて。開きの後に閉じが無ければ、そのファイルは変えずに終了コード 1 の理由にする |
+| U2 | 囲みを探す | 行を読み、`# >>> ndf relay >>>` の行から次の `# <<< ndf relay <<<` の行までを 1 つの囲みとする。いくつあってもすべて。**U1 の 2 つのファイルを先にすべて調べ、1 つでも開きの後に閉じが無ければ、どのファイルも写しも記録も変えずに終了コード 1 で終わる**（壊れた囲みの alias を写しの削除で壊さない） |
 | U3 | 外す | 囲みが 1 つ以上あれば `<ファイル>.ndf-bak-<UTC>` へ写してから、囲みの行だけを除いた中身を一時ファイルに書き、元の権限で置き換える。**囲みの外の行は変えない**（E5 が足した空行も残す） |
 | U4 | 写し | 写しを消す（無ければ何もしない） |
 | U5 | 記録 | `rc-skipped` / `rc-noticed` から外したファイルのパスの行を除く。**`rc-added` には外したパスを残す（無ければ足す）。** 10.17.4 へ戻した利用者の hook（I5）が「利用者が消した」と読み、足し直さないためである。**あわせて `rc-removed` に外したパスを足す。** `startup` と `status` は `rc-removed` に載るパスを自動の囲みとして扱わない（利用者がバックアップから囲みを戻しても、自動で足したとは言わない）。明示の `install`（E3・E5）は足す先を `rc-removed` から除かない |
@@ -228,7 +228,7 @@ sh -c 'R="${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/rc-added"; C="${XDG_DA
 採らない**（中継がまだロックを持っていれば、書く `/exit\r` が質問に届く。決定 17）。中継が落ちると
 OS がロックを放すので、取れないのは中継が 3 秒を超えて持つときだけである。
 
-hook の定義（`PreToolUse` と `PostToolUse` に `matcher: AskUserQuestion` の 1 件ずつ。`timeout` 5・
+hook の定義（`PreToolUse` と `PostToolUse` に `matcher: AskUserQuestion` の 1 件ずつ。`timeout` 10・
 `continueOnError: true`。`<動作>` は `open` / `close`）:
 
 ```sh
@@ -236,8 +236,11 @@ sh -c '[ -n "${NDF_RELAY_DIR:-}" ] || exit 0; ROOT="${CLAUDE_PLUGIN_ROOT:-${PLUG
 ```
 
 **`question open` は失敗したら質問を拒否する（fail-closed）。** 中継の下の直接の子と判定した後に、ロックが取れない・印を作れない・例外が起きたときは、どれもロックが取れないときと同じ拒否を出す。印が無いまま質問が描かれると、中継が `/exit\r` を書けるためである。中継の下でない・直接の子でない判定の前の例外では、何も出さない（中継の外の質問を止めない）。`question close` の失敗は何も出さない（印が残るのは安全な側）。**どの場合も終了コード 0 で終わる。**`exec` で
-python の出力をそのまま hook の出力にする。hook の `timeout` 5 秒で打ち切られると質問は描かれてしまう
-ため、待つ 3 秒は `timeout` より短くする。
+python の出力をそのまま hook の出力にする。**hook の `timeout` で打ち切られると、拒否も印も残らずに質問が描かれる。** そのため `question open` は
+自分で期限を持つ。起動の時刻から 3 秒でロックの待ちを打ち切り、打ち切ったら拒否を出す。ロックを
+取った後の印の作成はファイル 1 つで、例外も含めて 1 秒以内に終わる。**hook の `timeout` は 10 秒にする。**
+`question open` の期限（最大 4 秒）との差を 6 秒持ち、python の起動と親のたどり（`/proc` の読み取り）が
+遅れても、hook の打ち切りより先に拒否か印の作成が終わる。
 
 **中継の「静まりを待つ」の条件に 2 つを足す**（確定仕様の (1)〜(3) の後）:
 
@@ -252,12 +255,12 @@ python の出力をそのまま hook の出力にする。hook の `timeout` 5 �
 | 順 | 中継がすること |
 | ---: | --- |
 | 1 | (1)〜(5) がそろった時点の、印の `written_at` と会話の記録の大きさ・更新時刻を控える（記録を全行読むのはこの前の段だけ） |
-| 2 | `question.lock` の排他を取る（取れなければ次の確認まで待つ） |
+| 2 | `question.lock` の排他を取る。取れなければ `count.lock` を放して「静まりを待つ」へ戻る |
 | 3 | ロックの中では記録を読み直さない。`question` が無いこと、印の `written_at` と記録の大きさ・更新時刻が 1 の控えと同じことだけを、`stat` と印の読み取りで確かめる。外れていれば `question.lock` と `count.lock` の両方を放して「静まりを待つ」へ戻る |
-
-**2 で取れなかったときも `count.lock` を放してから「静まりを待つ」へ戻る。** どの経路で戻るときも、`count.lock` を持ったまま次の確認まで待たない。
 | 4 | `/exit\r` を **1 回の write** で書く |
 | 5 | 1 秒おいてから放す |
+
+**どの経路で戻るときも、`count.lock` を持ったまま次の確認まで待たない。**
 
 **ロックで質問の始まりと write を排他にする。** 質問は `PreToolUse` の hook が終わってから描かれ、
 その hook は `question.lock` を取ってから印を作る。そのため、確かめ直しの後に質問が描かれることは
@@ -359,7 +362,7 @@ stateDiagram-v2
 | AC1 | `claude.json` の SessionStart に `install` が無いこと（hook の定義を読む単体テスト）と、一時の HOME で `startup` の hook のコマンドをそのまま動かして、設定の中身と更新時刻が変わらず、写しが無ければ作られないこと |
 | AC2 | `git diff origin/develop -- plugins/ndf/hooks/codex.json plugins/ndf/dev.agy plugins/ndf/dev.kiro` が空 |
 | AC3〜AC5 | `test_relay.py`: bash / zsh（`ZDOTDIR`）で囲み・バックアップ・行が出る。2 回目は写しだけ置き直す。`rc-added` があっても足す。既存の alias / 関数 / `~/.bash_aliases`・fish で足さず終了コード 1。E5 の空行を 1 つだけ挟む |
-| AC6 | `test_relay.py`: 両方のファイルの囲み（複数を含む）を外し、囲みの外がバイトで同じ。閉じの無い囲みで変えず終了コード 1。写しと `rc-skipped` / `rc-noticed` の行が消え、`rc-added` には外したパスが残る。10.17.4 の `install` で作った状態（`rc-added` あり）から外れる |
+| AC6 | `test_relay.py`: 両方のファイルの囲み（複数を含む）を外し、囲みの外がバイトで同じ。片方のファイルに閉じの無い囲みがあれば、どちらのファイルも写しも記録も変えず終了コード 1。写しと `rc-skipped` / `rc-noticed` の行が消え、`rc-added` には外したパスが残る。10.17.4 の `install` で作った状態（`rc-added` あり）から外れる |
 | AC7 | `test_relay.py`: 各状態で出す行と、何も書かないこと（前後のファイルの比較） |
 | AC8・AC16 | manifests と `check-skill-frontmatter.py`。`install-wrapper` に `disable-model-invocation: true`、`restart` に無いこと |
 | AC9 | `test_relay.py`: `rc-added` あり・囲みありで 1 度だけ `systemMessage`、2 回目は出ない。同時に 2 つ走らせても出るのは 1 つだけ。囲みが消えていれば出ない。設定と写しを書かない |
@@ -372,7 +375,7 @@ stateDiagram-v2
 | AC25 | `test_relay.py`: 子へ届いたバイトが `/exit\r` の 1 回であること。確かめ直しの直前に `question` を置くと届かないこと（差し込み点で試す）。中継が `question.lock` を持つ間、`question open` が放されるまで待ち、放された後に印を作ること |
 | AC25b | `test_relay.py`: `/exit` の後に `question` を置いた試験用の子が、`NDF_RELAY_EXIT_WAIT` を過ぎても SIGTERM を受けず、`question` を消した後に数え始めること。待つあいだ `count.lock` を別のプロセスが取れること。子が終わった後、印が無ければ起動しないこと、書き直された印なら新しい `command` で起動すること。G3 の確かめ直しが外れたとき `count.lock` が放されること |
 | AC26 | `test_relay.py`: `NDF_RELAY_DIR` 無し・中継が動いていない・直接の子でないで、`question open` が何も作らず出力が空で終了コード 0 |
-| AC26b | `test_relay.py`: 別のプロセスが `question.lock` を 3 秒より長く持つと、`question open` が `permissionDecision: deny` を出し、`question` を作らず終了コード 0。作業ディレクトリを書けないときも同じ拒否になる |
+| AC26b | `test_relay.py`: 別のプロセスが `question.lock` を 3 秒より長く持つと、`question open` が起動から 4 秒以内に `permissionDecision: deny` を出し、`question` を作らず終了コード 0。作業ディレクトリを書けないときも同じ拒否になる。`claude.json` の 2 件の `timeout` が 10 であること |
 | AC20〜AC22 | 全体テスト・静的検査。AC21 は本物の Claude Code（一時の HOME・隔離した `CLAUDE_CONFIG_DIR`・`DISABLE_AUTOUPDATER=1`）の上で `/ndf:restart` を 1 度通し、`log.jsonl` の `start` 2 行を実装の Pull Request に残す。同じ通しで、印の後に質問を出させ（`/goal` の続きか、質問を出す指示）、表示の 30 秒のあいだ `/exit` が書かれないことを見る |
 
 ## 未確認のまま残ること
@@ -382,7 +385,7 @@ stateDiagram-v2
 | `/restart` の名前の衝突 | Claude Code の組み込みや主要プラグインに `restart` を末尾に持つ Skill・コマンドがあるかは、実装の時点で `/` メニューに打って確かめる（AUTHORING の「外部 Skill 名の末尾要素にしない」）。衝突すれば `relay-restart` へ寄せる |
 | `/goal` の下の再起動 | 目標の判定が再起動の応答を「未達」として続けさせたとき、モデルがブロックを出し直すかは実機の通し（AC21）で 1 度見る。出し直さなければ印が消え、中継は切り替えない（落ちる形であって壊れない） |
 | macOS | `uninstall` の置き換えと権限の保持は Linux でだけ確かめる |
-| hook の待ちの中で書いた `/exit` | 中継がロックを持つ間に質問の hook が待つと、書いた `/exit` は hook の実行中に届き、質問の前に claude を終わらせる（実測。答えは残らない）。関門は答えられないが、その質問は失われる。G2 の `stat`（質問の `tool_use` の行が hook より前に記録へ書かれるか）で防げるかは、実装の時点で本物の記録で確かめる |
+| hook の待ちの中で書いた `/exit` | 中継がロックを持つ間に質問の hook が待つと、書いた `/exit` は hook の実行中に届き、質問の前に claude を終わらせる（実測。答えは残らない）。関門は答えられないが、その質問は失われる。**質問の `tool_use` の行が `PreToolUse` の hook より前に会話の記録へ書かれるかは確かめていない。** 書かれるなら G3 の段 3 の記録の大きさの確かめで書かずに戻れる。実装の時点で本物の記録で確かめる |
 | `AskUserQuestion` の拒否 | `PreToolUse` の `permissionDecision: deny` が `AskUserQuestion` でも質問を描かせずに理由をモデルへ返すかは、実装の時点で本物の Claude Code で 1 度確かめる |
 | 書いた入力を TUI が読む時間 | 1 秒で読み終えるかは、実機の通し（AC21）で `question.lock` を持つ秒を変えて 1 度見る。実測では、応答の途中に書いた `/clear` は 1 秒後の画面で待ち行列に入っていた |
 | 会話の記録の行の型 | (5) が数える `assistant` / `user` の行が、印の後の Stop hook の記録（`system` など）を含まないことを、実装の時点で本物の記録で確かめる |
