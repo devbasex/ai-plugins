@@ -5,6 +5,10 @@ name: Python tests
 # 「成功」ではなく「実行されていない」として扱うため、絞り込んだままだと対象外の変更で
 # マージ可能にならない。push の側は絞り込みを残す（マージの可否を決めないため）
 #
+# push の branches に release/** を置かない。release/** から出した Pull Request では
+# pull_request の側が必ず回るため、push の側も起動すると同じテストを 2 回回す（#884）。
+# main / develop はマージ後の確認として残す
+#
 # push の絞り込みは pytest . の収集範囲に合わせる。テストの置き場所（plugins / scripts /
 # tests）に加えて、収集の仕方そのものを変える根の設定ファイルも対象へ入れる
 on:
@@ -13,7 +17,6 @@ on:
     branches:
       - main
       - develop
-      - "release/**"
     paths:
       - ".github/workflows/pytest.yml"
       - "plugins/**"
@@ -38,4 +41,7 @@ jobs:
       #
       # 前提のコマンドの確認と git の身元の設定は、根の conftest.py が行う。前提を
       # ワークフローの側にも置くと、増えたときに片方だけが更新される
-      - run: uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest pytest . -q
+      #
+      # -n auto で runner のコア数だけ並列に回す（#882）。pytest-xdist は --project が指す
+      # pyproject.toml の依存に入っている
+      - run: uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest pytest . -q -n auto
