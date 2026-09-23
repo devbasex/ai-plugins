@@ -322,6 +322,21 @@ def transcript(tmp_path, total, name="t.jsonl", usage=True):
     return path
 
 
+def transcript_multi(tmp_path, totals, name="t.jsonl"):
+    """複数の assistant usage を順に持つ transcript。最後の usage が判定に使われる。"""
+    path = tmp_path / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [{"type": "user", "message": {"content": "x"}}]
+    for total in totals:
+        lines.append({"type": "assistant", "message": {
+            "role": "assistant", "content": [],
+            "usage": {"input_tokens": 10, "cache_read_input_tokens": total - 110,
+                      "cache_creation_input_tokens": 100, "output_tokens": 5}}})
+    lines.append({"type": "attachment"})
+    path.write_text("\n".join(json.dumps(x) for x in lines) + "\n")
+    return path
+
+
 def skill(tp, name="ndf:implementation-plan", args="#829", session="s1", **extra):
     p = {"tool_name": "Skill", "tool_input": {"skill": name, "args": args},
          "session_id": session, "transcript_path": str(tp)}
@@ -361,6 +376,15 @@ def test_context_issue_placeholder(tmp_path, state):
 def test_context_within_limit_passes(tmp_path, state):
     tp = transcript(tmp_path, 150_000)
     assert denied(run(skill(tp), state)) is None
+
+
+def test_context_uses_last_assistant_usage(tmp_path, state):
+    # 現状固定: assistant の usage が複数あるとき、最後の値で上限判定する。
+    # 上限超過の後に上限以内が来れば通り、順序を逆にすると拒否される。
+    over_then_under = transcript_multi(tmp_path, [250_000, 150_000], name="ou.jsonl")
+    assert denied(run(skill(over_then_under, session="sou"), state)) is None
+    under_then_over = transcript_multi(tmp_path, [150_000, 250_000], name="uo.jsonl")
+    assert denied(run(skill(under_then_over, session="suo"), state))
 
 
 def test_context_subagent_passes(tmp_path, state):
