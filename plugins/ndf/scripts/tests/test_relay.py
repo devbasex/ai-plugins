@@ -696,13 +696,21 @@ def test_run_max_starts_race_one_wins(tmp_path):
             t.wait_start(1)
         for t in ts:
             t.type("mark next\r")
-        for t in ts:
-            t.wait(lambda t=t: any(r["event"] in ("stop",) for r in t.rows())
-                   or len(t.starts()) >= 2, what="どちらかに決まる")
+        # HOME を共有するので t.rows() は両方の記録を含む。自分の中継の記録だけを見る。
+        # 負けた側の stop は勝った側の start の記録の後に出るが、勝った側の子が
+        # starts.jsonl へ書くのはさらに後になりうる。両方が決まるまで待つ
+        def own(t):
+            p = pathlib.Path(t.starts()[0]["relay_dir"]) / "log.jsonl"
+            return [json.loads(x) for x in p.read_text().splitlines()]
+
+        def decided(t):
+            return len(t.starts()) >= 2 or events(own(t), "stop")
+
+        ts[0].wait(lambda: all(decided(t) for t in ts), what="両方が決まる")
         started = sorted(len(t.starts()) for t in ts)
-        assert started == [1, 2]
+        assert started == [1, 2], [own(t) for t in ts]
         loser = next(t for t in ts if len(t.starts()) == 1)
-        assert [r["reason"] for r in events(loser.rows(), "stop")] == ["max-starts"]
+        assert [r["reason"] for r in events(own(loser), "stop")] == ["max-starts"]
     finally:
         for t in ts:
             t.close()
