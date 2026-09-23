@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import pathlib
 import sys
+import time
 from typing import Any, Optional
 
 import statefile
@@ -46,6 +47,7 @@ from ..rounds import (
     phase_after_group,
     prepare_fix_phase,
 )
+from ..scope import round_test_command
 from ..verify import (
     unassigned_fix_commits,
     verify_commit_granularity,
@@ -61,11 +63,15 @@ def _verification_record(
     code: int,
     timed_out: bool,
     passed: bool,
+    seconds: float,
 ) -> dict[str, Any]:
     """検証 1 回分の記録を作る。**状態は変えない。**
 
     判定を作る段と、判定を状態へ反映する段を分ける。合否そのものは呼び出し側が
     決めており、ここは何を記録に残すかだけを持つ。
+
+    **所要の秒数を残す**（#880）。範囲のテストへ寄せた効果は、状態ファイルから
+    測れなければ確かめられない。
     """
     return {
         "apply_round": group["apply_round"],
@@ -75,6 +81,7 @@ def _verification_record(
         "status": "pass" if passed else "fail",
         "exit_code": code,
         "timed_out": timed_out,
+        "seconds": seconds,
     }
 
 
@@ -128,8 +135,9 @@ def cmd_verify_round(args: argparse.Namespace) -> None:
 
     終了コード: 0 = テストが通った / 2 = 落ちた（修正ラウンドへ）。
 
-    **2 CLI のレビューは起動しない**（決定 3）。`--baseline-test` が指す
-    コマンドを作業ディレクトリの HEAD で実行し、その合否で決める。
+    **2 CLI のレビューは起動しない**（決定 3）。`--round-test` が指す範囲の
+    テストを作業ディレクトリの HEAD で実行し、その合否で決める（#880）。全体の
+    テストは着手前と最終ゲートにしか走らせない。
 
     **失敗をどの項目に紐づけるかは決めない。** 適用ラウンドの中は 1 コミットで
     あり、分離しても取り消せない。判定の単位と取り消しの単位を一致させる。
@@ -148,14 +156,16 @@ def cmd_verify_round(args: argparse.Namespace) -> None:
             code=2,
         )
 
-    command = (state.get("baseline_test") or {}).get("command") or ""
+    command = round_test_command(state)
     work = str(state["worktrees"]["work"])
     timeout = safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT)
+    started = time.monotonic()
     code, timed_out = run_with_timeout(command, work, timeout)
+    seconds = round(time.monotonic() - started, 1)
     passed = (not timed_out) and code == 0
 
     entry.setdefault("verifications", []).append(
-        _verification_record(group, entry, command, code, timed_out, passed)
+        _verification_record(group, entry, command, code, timed_out, passed, seconds)
     )
 
     if passed:
@@ -429,20 +439,21 @@ def _inspect_fix_commits(
     state: dict[str, Any],
     work: str,
     payload: dict[str, Any],
-    baseline: dict[str, Any],
     ordered_range: list[str],
 ) -> tuple[list[str], list[str], list[tuple[str, str]]]:
     """修正コミットを **git と実際のテスト実行から**検証する。
 
     結果ファイルの申告で済ませると、手順を満たさない変更が収束済みになれてしまう。
     未割当コミットの一覧・問題点の一覧・受理した (item_id, sha) を返す。
+
+    **コミットごとに走らせるのは範囲のテストである**（#880）。
     """
     claimed_shas = reported_shas(payload)
     unassigned = unassigned_fix_commits(work, claimed_shas, ordered_range)
 
     facts = collect_commit_facts(
         work, claimed_shas, set(ordered_range),
-        baseline.get("command") or "true", state["head_branch"],
+        round_test_command(state) or "true", state["head_branch"],
         safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT),
     )
 
@@ -555,10 +566,9 @@ def _confirm_and_settle_fix(
     採用した解決スレッドの集合を返す（取り込みの通知に使う）。
     """
     resolved = _resolved_fix_thread_ids(payload, state["repo"], state["current_pr"])
-    baseline = state.get("baseline_test") or {}
     ordered_range = _resolve_fix_range(path, state, entry, work, head_now)
     unassigned, problems, accepted = _inspect_fix_commits(
-        state, work, payload, baseline, ordered_range
+        state, work, payload, ordered_range
     )
     _settle_fix_round(
         path, state, entry, scope, ordered_range, resolved, unassigned, problems,

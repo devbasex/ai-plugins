@@ -179,7 +179,7 @@ def commit_test_changes(work: str, sha: str) -> dict[str, tuple[list[str], list[
     out = git_out(work, ["show", "--name-only", "--format=", sha])
     changes: dict[str, tuple[list[str], list[str]]] = {}
     for path in (out or "").splitlines():
-        if not path.strip() or not _is_test_path(path):
+        if not path.strip() or not is_test_path(path):
             continue
         before = git_out(work, ["show", f"{sha}^:{path}"]) or ""
         after = git_out(work, ["show", f"{sha}:{path}"]) or ""
@@ -188,7 +188,7 @@ def commit_test_changes(work: str, sha: str) -> dict[str, tuple[list[str], list[
     return changes
 
 
-def _is_test_path(path: str) -> bool:
+def is_test_path(path: str) -> bool:
     """テストの置き場所か。判定は `commit_touches_tests` と同じ印で行う。"""
     lowered = f"/{path.lower()}"
     name = lowered.rsplit("/", 1)[-1]
@@ -214,7 +214,7 @@ def production_code_changes(work: str, base: str) -> Optional[list[tuple[str, in
             continue
         path = parts[2]
         if (pathlib.PurePosixPath(path).suffix.lower() not in CODE_EXTENSIONS
-                or _is_test_path(path)):
+                or is_test_path(path)):
             continue
         # バイナリは `-` になるので数えない
         changes.append((path, sum(int(n) for n in parts[:2] if n.isdigit())))
@@ -223,7 +223,7 @@ def production_code_changes(work: str, base: str) -> Optional[list[tuple[str, in
 
 def commit_touches_tests(work: str, sha: str) -> bool:
     """コミットがテストの置き場所を触っているか。"""
-    return any(_is_test_path(p) for p in commit_files(work, sha))
+    return any(is_test_path(p) for p in commit_files(work, sha))
 
 
 def run_with_timeout(

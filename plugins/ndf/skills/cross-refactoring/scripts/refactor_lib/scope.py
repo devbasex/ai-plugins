@@ -17,9 +17,10 @@ import fnmatch
 import os
 import pathlib
 import shlex
-from typing import Iterable, Optional
+from typing import Any, Iterable, Optional
 
 from . import die
+from .gitfacts import is_test_path
 
 # テストの置き場所とみなすディレクトリの名前。**言語をまたいで使われるものだけ**を
 # 並べる。増やすほど「テストの置き場所がある」と誤って判定して関門が素通りする。
@@ -130,10 +131,101 @@ def covered_by_roots(location: str, roots: list[str]) -> bool:
     )
 
 
-def scope_problem(
-    scope: Iterable[str], baseline_test: str, work: str
+def round_test_roots(command: str, work: str) -> list[str]:
+    """`--round-test` の実行集合の起点を返す（#880）。空なら全体を走らせるとみなす。
+
+    `baseline_search_roots` と違い、**テストの置き場所に当たる実在するファイルも起点に
+    数える。** 範囲のテストは 1 ファイルを名指しすることがあり、それを限定なしと読むと
+    範囲の置き場所を走らせないコマンドが関門を通る。
+
+    数えない語は 3 つある。先頭の語（プログラム名）と `-` で始まる語、`=` を含まない
+    長いオプションの直後の語（`--project .` の `.`）、作業ディレクトリの根（`.`）で
+    ある。テストの置き場所でないファイル（`bash scripts/run-scope-tests.sh` の
+    ラッパー）も数えない。**ラッパーの中身は解析しない。** 範囲の外を走らせても、
+    最終ゲートの全体テストが見る。
+    """
+    try:
+        words = shlex.split(str(command or ""))
+    except ValueError:
+        return []
+    roots: list[str] = []
+    previous = words[0] if words else ""
+    for word in words[1:]:
+        is_option_value = previous.startswith("--") and "=" not in previous
+        previous = word
+        if is_option_value or word.startswith("-") or os.path.isabs(word):
+            continue
+        normalized = os.path.normpath(word)
+        if normalized == ".":
+            continue
+        target = pathlib.Path(work) / word
+        if not (target.is_dir() or (target.is_file() and is_test_path(normalized))):
+            continue
+        if normalized not in roots:
+            roots.append(normalized)
+    return roots
+
+
+def round_test_command(state: dict[str, Any]) -> str:
+    """群と修正コミットの検証に使うコマンド（#880）。
+
+    `round_test` を持たない状態ファイル（変更の前の実行）は `baseline_test` を返す。
+    再開した実行の検証を、変更の前と同じにするためである。
+    """
+    command = (state.get("round_test") or {}).get("command")
+    if command:
+        return str(command)
+    return str((state.get("baseline_test") or {}).get("command") or "")
+
+
+def _example_program(baseline_test: str, roots: list[str]) -> str:
+    """案内の例に使うプログラムの部分。起点があれば、最初の起点より前の語である。"""
+    try:
+        words = shlex.split(str(baseline_test or ""))
+    except ValueError:
+        return str(baseline_test or "")
+    for index, word in enumerate(words):
+        if roots and os.path.normpath(word) in roots:
+            return " ".join(words[:index])
+    while len(words) > 1 and words[-1].startswith("-"):
+        words.pop()
+    return " ".join(words)
+
+
+def round_test_hint(
+    round_test: Optional[str], baseline_test: str,
+    scope: Iterable[str], work: str,
 ) -> Optional[str]:
-    """関門に引っかかる理由を返す。問題が無ければ `None`。"""
+    """`--round-test` を渡せば群ごとの検証が短くなるときに、案内の 1 行を返す（#880）。
+
+    案内するのは、`--round-test` が無く、`--baseline-test` の探索の起点が無いか
+    `--scope` のテストの置き場所より広いときである。**止めない。** 全体を走らせても
+    検証として誤りではなく、時間が掛かるだけである。
+    """
+    if round_test:
+        return None
+    locations = test_locations(list(scope), work)
+    if not locations:
+        return None
+    roots = baseline_search_roots(baseline_test, work)
+    if roots and all(covered_by_roots(root, locations) for root in roots):
+        return None
+    example = f"{_example_program(baseline_test, roots)} {' '.join(locations)}".strip()
+    return (
+        "ℹ --baseline-test は --scope より広い範囲を走らせます。"
+        "群ごとの検証を短くするには --round-test に範囲のテストを渡します"
+        f"（例: {example}）"
+    )
+
+
+def scope_problem(
+    scope: Iterable[str], command: str, work: str, round_test: bool = False
+) -> Optional[str]:
+    """関門に引っかかる理由を返す。問題が無ければ `None`。
+
+    `round_test` が真なら、`command` を `--round-test` として読む（#880）。群の検証が
+    走らせるのは範囲のテストであり、足したテストが入るべき実行集合はこちらである。
+    """
     listed = list(scope)
     locations = test_locations(listed, work)
     if not locations:
@@ -144,23 +236,24 @@ def scope_problem(
             "含めないとその項目は必ず失敗します。"
             "例: --scope src/services tests/services"
         )
-    roots = baseline_search_roots(baseline_test, work)
+    option = "--round-test" if round_test else "--baseline-test"
+    roots = (round_test_roots if round_test else baseline_search_roots)(command, work)
     outside = [loc for loc in locations if not covered_by_roots(loc, roots)]
     if outside:
         return (
             f"--scope のテストの置き場所（{', '.join(outside)}）が "
-            f"--baseline-test の実行集合に入りません"
+            f"{option} の実行集合に入りません"
             f"（探索の起点: {', '.join(roots)}）。"
             "足したテストが一度も実行されず、検証の判定に効きません。"
-            "--baseline-test の対象へ含めるか、--scope の置き場所を合わせてください"
+            f"{option} の対象へ含めるか、--scope の置き場所を合わせてください"
         )
     return None
 
 
 def require_scope_covers_tests(
-    scope: Iterable[str], baseline_test: str, work: str
+    scope: Iterable[str], command: str, work: str, round_test: bool = False
 ) -> None:
     """関門を通す。通らなければ**中断する**（終了コード 4）。"""
-    problem = scope_problem(scope, baseline_test, work)
+    problem = scope_problem(scope, command, work, round_test=round_test)
     if problem:
         die(problem)

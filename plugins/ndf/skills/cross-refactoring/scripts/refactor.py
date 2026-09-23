@@ -164,8 +164,14 @@ def main() -> None:
                            "ラウンドが進むたびに同じコメントを編集する。"
                            "空文字を渡すと記録しない")
     init.add_argument("--baseline-test", required=True,
-                      help="着手前と各コミットで実行するテストコマンド。"
+                      help="着手前と最終ゲートで実行する全体のテスト。"
                            "振る舞い不変を示す手段が無い書き換えは構造改善ではないため必須")
+    # **群と修正コミットの検証は範囲のテストで行う**（#880）。全体テストを群ごとに
+    # 走らせると、群と修正コミットの数だけ費用が積み上がる。
+    init.add_argument("--round-test", default=None, metavar="CMD",
+                      help="群の検証と修正コミットごとに実行する範囲のテスト。"
+                           "--scope のテストの置き場所を走らせること。"
+                           "省くと --baseline-test と同じ")
     # **起動のされ方は引数で受け取る**（#436 決定 7）。環境変数や控えの読み取りは、
     # 起動元が違っても同じ値になりうる。呼ぶ側が明示すれば判定が 1 か所で済む。
     init.add_argument("--workflow-step", action="store_true", default=None,

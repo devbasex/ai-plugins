@@ -1131,3 +1131,32 @@ def test_a_missing_fix_result_reverts_the_commits_in_range(
     entry = read_state(state_path)["rounds"][0]
     assert entry["fix_base_sha"] == "AFTER_REVERT"
     assert entry["apply_rounds"][0]["failed_attempts"][0]["reverted"] == 2
+
+
+# ---------- 修正コミットの検証は範囲のテスト（#880 の AC2） ----------
+
+def test_fix_commits_are_verified_with_the_round_test(patch_lib, refactor, gitfacts, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
+    """AC2 — 修正コミットごとに走るのは `round_test` だけで、全体テストは走らない。"""
+    real_collect = gitfacts.collect_commit_facts
+    state_path = _prepare_fix(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, ["PRRT_a"])
+    state = read_state(state_path)
+    state["round_test"] = {"command": "pytest tests/services -q", "status": "green"}
+    state_path.write_text(__import__("json").dumps(state), encoding="utf-8")
+
+    ran: list[str] = []
+    patch_lib("collect_commit_facts", real_collect)
+    patch_lib("run_with_timeout",
+              lambda command, cwd, timeout, grace=5.0: ran.append(command) or (0, False))
+    patch_lib("commit_trailers", lambda work, sha: _fix_commit()["trailers"])
+    patch_lib("commit_diff_lines", lambda work, sha: 10)
+    patch_lib("commit_files", lambda work, sha: ["src/foo.py"])
+    patch_lib("commit_touches_tests", lambda work, sha: False)
+    patch_lib("commit_test_changes", lambda work, sha: {})
+    patch_lib("resolved_threads_on_github", lambda repo, pr: {"PRRT_a"})
+    monkeypatch.setattr(gitfacts.subprocess, "run",
+                        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "", ""))
+
+    cmd_converge.cmd_merge_fix(type("A", (), {"id": 130, "round": 1})())
+
+    assert ran == ["pytest tests/services -q"]
+    assert "fix111" in read_state(state_path)["items"][0]["commits"]

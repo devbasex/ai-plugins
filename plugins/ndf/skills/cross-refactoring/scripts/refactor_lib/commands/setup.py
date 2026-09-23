@@ -39,7 +39,7 @@ from ..rounds import (
     impl_for_seq,
     round_kind,
 )
-from ..scope import require_scope_covers_tests
+from ..scope import require_scope_covers_tests, round_test_hint
 from ..vocabulary import (
     DEFAULT_MAX_TEST_ROUNDS,
     DEFAULT_SEVERITY_THRESHOLD,
@@ -80,6 +80,7 @@ RESUME_NOTIFY_FIELDS = (
     statefile.ResumeField("scope", "target_scope", "notify"),
     statefile.ResumeField("model", "models", "notify"),
     statefile.ResumeField("baseline_test", "baseline_test", "notify"),
+    statefile.ResumeField("round_test", "round_test", "notify"),
     statefile.ResumeField("ci_check", "ci_check", "notify"),
     statefile.ResumeField("severity_threshold", "severity_threshold", "notify"),
     statefile.ResumeField("sync_command", "sync_command", "notify"),
@@ -278,6 +279,7 @@ class InitialContext:
     participants: dict[str, Any]
     model_spec: dict[str, Optional[str]]
     baseline: dict[str, Any]
+    round_test: dict[str, Any]
 
 
 def _build_initial_state(
@@ -333,6 +335,8 @@ def _build_initial_state(
         "round_kind": TEST,
         "severity_threshold": args.severity_threshold,
         "baseline_test": ctx.baseline,
+        # **群と修正コミットの検証が実行するテスト**（#880）。省けば全体テストと同じ。
+        "round_test": ctx.round_test,
         # 生成物の同期は**進行側の責務**。push の直前に実行する。
         "sync_command": args.sync_command,
         # **改修計画の既定は Pull Request のコメント 1 件である**（#436 決定 6）。
@@ -388,7 +392,13 @@ def cmd_init(args: argparse.Namespace) -> None:
     # ラウンドが足したテストが検証に効かない。案内だけでは同じ失敗を繰り返す
     # ため、**止める**。作業ディレクトリが要るのは、探索範囲の語がディレクトリか
     # どうかを実物で確かめるためである。
-    require_scope_covers_tests(args.scope, args.baseline_test, str(work))
+    # **足したテストが入るべき実行集合は `--round-test` である**（#880）。群の検証が
+    # 走らせるのはこちらで、全体テストは着手前と最終ゲートにしか走らない。
+    round_test = getattr(args, "round_test", None)
+    if round_test:
+        require_scope_covers_tests(args.scope, round_test, str(work), round_test=True)
+    else:
+        require_scope_covers_tests(args.scope, args.baseline_test, str(work))
 
     tmp_dir = tmp_dir_for(work)
     tmp_dir.mkdir(parents=True, exist_ok=True)
@@ -410,7 +420,12 @@ def cmd_init(args: argparse.Namespace) -> None:
         host, include or [], exclude or [], bool(getattr(args, "require_all", None)))
     _warn_unmeasurable_models(model_spec, participants["available"])
 
+    hint = round_test_hint(round_test, args.baseline_test, args.scope, str(work))
+    if hint:
+        info(hint)
+
     baseline = _run_baseline_test(args.baseline_test, work, args.test_timeout)
+    round_record = _run_round_test(round_test, baseline, work, args.test_timeout)
 
     context = InitialContext(
         repo=repo,
@@ -424,6 +439,7 @@ def cmd_init(args: argparse.Namespace) -> None:
         participants=participants,
         model_spec=model_spec,
         baseline=baseline,
+        round_test=round_record,
     )
     state = _build_initial_state(args, context)
     # GitHub は自分の Pull Request への `APPROVE` と `REQUEST_CHANGES` を
@@ -496,6 +512,7 @@ def _notify_view(
     """
     view = dict(state)
     view["baseline_test"] = (state.get("baseline_test") or {}).get("command")
+    view["round_test"] = (state.get("round_test") or {}).get("command")
     given = argparse.Namespace(**{f.arg: getattr(args, f.arg, None) for f in RESUME_NOTIFY_FIELDS})
     if given.model is not None:
         given.model = model_spec
@@ -623,6 +640,35 @@ def _run_baseline_test(
         )
     info(f"✅ 着手前のテスト成功: {command}")
     return {"command": command, "status": status, "checked_at": statefile.now()}
+
+
+def _run_round_test(
+    command: Optional[str], baseline: dict[str, Any], work: pathlib.Path,
+    timeout: int = DEFAULT_TEST_TIMEOUT,
+) -> dict[str, Any]:
+    """範囲のテストを着手前に 1 回実行して記録する（#880）。
+
+    **省いたとき、または全体テストと同じ文字列のときは実行しない。** 同じコマンドを
+    2 度走らせても判定は変わらず、時間だけが掛かる。全体テストの結果を写す。
+
+    **失敗は全体テストと別に止める。** 全体テストが通っても範囲のテストが通らない
+    （テストが 1 件も集まらない終了コード 5 を含む）なら、群の検証が初回から落ちる。
+    """
+    if not command or command == baseline["command"]:
+        return {"command": baseline["command"], "status": baseline["status"],
+                "checked_at": baseline["checked_at"]}
+    code, timed_out = run_with_timeout(command, str(work), timeout)
+    if timed_out:
+        die(f"範囲のテストが {timeout} 秒で終わりませんでした（{command}）。打ち切りました")
+        raise SystemExit(ABORT)
+    if code != 0:
+        die(
+            f"範囲のテストが成功しません（{command} / 終了コード {code}）。"
+            "--round-test が --scope のテストの置き場所を走らせるかを確かめてください"
+        )
+        raise SystemExit(ABORT)
+    info(f"✅ 着手前の範囲のテスト成功: {command}")
+    return {"command": command, "status": "green", "checked_at": statefile.now()}
 
 
 def rounds_of_kind(state: dict[str, Any], kind: str) -> list[dict[str, Any]]:
