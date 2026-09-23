@@ -110,7 +110,8 @@
 - [ ] AC12: Claude Code で、会話の文脈量が上限（既定 200,000）を超えた状態で工程 Skill を起動すると、PreToolUse:Skill hook が起動を拒否し、理由の欄に「新しい会話で打つ 1 行」を示す
 - [ ] AC13: 上限の判定は conductor（本体の会話）だけに掛かる。サブエージェントの中の Skill の起動は拒否しない
 - [ ] AC14: 工程 Skill でない Skill（`markdown-writing` / `progress-tracking` / `out-of-scope` など）の起動は拒否しない
-- [ ] AC15: 同じ会話で案内を 1 度出した後、利用者がそのまま続けると決めたときに続けられる（2 回目の同じ起動は通す、または環境変数で止められる）
+- ~~AC15: 同じ会話で案内を 1 度出した後、利用者がそのまま続けると決めたときに続けられる（2 回目の同じ起動は通す、または環境変数で止められる）~~ → 変更（2026-09-23、PR #843 のレビュー）
+- [ ] AC15: 拒否した直後の同じ Skill・同じ args の起動は通す。別の工程 Skill の起動は再び拒否する。環境変数で判定ごと止められる
 - [ ] AC16: 文脈量を読めない（transcript が無い・`usage` が無い）ときは拒否しない
 - [ ] AC17: AC12〜AC16 の判定を、transcript の見本を与えて終了コードと出力を見るテストが確かめている
 
@@ -149,7 +150,7 @@
 | --- | --- |
 | 公開インタフェース | Claude Code の hook の定義に PreToolUse の matcher（`Bash` / `Read` / `Skill`）の登録が増える。環境変数が増える（止める・上限を変える） |
 | データ | 連続 Read を数える状態を、会話ごとに一時ファイルへ持つ |
-| 既存の振る舞い | 前景の `sleep` で待つ Bash（`while` / `until` のループか、5 秒を超える `sleep`）が拒否される。文脈が上限を超えた conductor では工程 Skill の起動が 1 度拒否される |
+| 既存の振る舞い | 前景の `sleep` で待つ Bash（`while` / `until` のループか、5 秒を超える `sleep`）が拒否される。文脈が上限を超えた conductor では工程 Skill の起動が 1 度拒否される。`external-ai/references/cli-codex.md`・`cli-agy.md`・`qa-security-scan/03-report-template.md`・`release/references/completion-check.md` の前景の待ちのループの直前に、`run_in_background` で実行する案内の 1 行が足される |
 
 ## 検証手段
 
