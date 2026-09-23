@@ -65,7 +65,7 @@ graph TB
     subgraph files["利用者の手元"]
         RC["~/.bashrc / ~/.zshrc の囲み"]
         CP["写し ~/.local/share/ndf/relay.py"]
-        SD["状態の親 ~/.local/state/ndf/relay/<br/>rc-added / rc-skipped / rc-noticed"]
+        SD["状態の親 ~/.local/state/ndf/relay/<br/>rc-added / rc-skipped / rc-noticed / rc-removed"]
         WD["NDF_RELAY_DIR<br/>next.json / question"]
     end
     SS --> N
@@ -111,7 +111,7 @@ plugins/ndf/
 | 副命令 | 引数 | 終了コード | 出力 | 書くもの |
 | --- | --- | --- | --- | --- |
 | `install` | 無し | 0: 囲みを足した・既に在った（写しだけ置き直した）/ 1: 足さなかった（既存の `claude` の定義・bash と zsh 以外のシェル）/ 3: ロックが取れない・書けない | 標準出力へ人が読む行（下の表） | 写し・囲み・バックアップ。`rc-added` から足す先を除く |
-| `uninstall` | 無し | 0: 外した・外すものが無かった / 1: 閉じの無い囲みがあり、そのファイルを変えなかった / 3: ロックが取れない・書けない | 同上 | バックアップ・囲みを外した設定・写しの削除・`rc-skipped` / `rc-noticed` から外したパスを除き、`rc-added` には残す |
+| `uninstall` | 無し | 0: 外した・外すものが無かった / 1: 閉じの無い囲みがあり、そのファイルを変えなかった / 3: ロックが取れない・書けない | 同上 | バックアップ・囲みを外した設定・写しの削除・`rc-skipped` / `rc-noticed` から外したパスを除き、`rc-added` には残し、`rc-removed` に足す |
 | `status` | 無し | 0 | 同上 | 無し |
 | `startup` | 無し | 常に 0 | 知らせるときだけ `{"systemMessage": "<1 行>"}` | 在る写しの置き直し・`rc-noticed` に知らせたパスを足す |
 | `question` | `open` / `close`。標準入力の hook の JSON は読み捨てる | 常に 0 | 無し | 作業ディレクトリの `question` を作る・消す（下の「関門を越えない守り」） |
@@ -141,11 +141,11 @@ plugins/ndf/
 | U2 | 囲みを探す | 行を読み、`# >>> ndf relay >>>` の行から次の `# <<< ndf relay <<<` の行までを 1 つの囲みとする。いくつあってもすべて。開きの後に閉じが無ければ、そのファイルは変えずに終了コード 1 の理由にする |
 | U3 | 外す | 囲みが 1 つ以上あれば `<ファイル>.ndf-bak-<UTC>` へ写してから、囲みの行だけを除いた中身を一時ファイルに書き、元の権限で置き換える。**囲みの外の行は変えない**（E5 が足した空行も残す） |
 | U4 | 写し | 写しを消す（無ければ何もしない） |
-| U5 | 記録 | `rc-skipped` / `rc-noticed` から外したファイルのパスの行を除く。**`rc-added` には外したパスを残す（無ければ足す）。** 10.17.4 へ戻した利用者の hook（I5）が「利用者が消した」と読み、足し直さないためである。`startup` は囲みが無ければ知らせないので、残しても新しい版の振る舞いは変わらない |
+| U5 | 記録 | `rc-skipped` / `rc-noticed` から外したファイルのパスの行を除く。**`rc-added` には外したパスを残す（無ければ足す）。** 10.17.4 へ戻した利用者の hook（I5）が「利用者が消した」と読み、足し直さないためである。**あわせて `rc-removed` に外したパスを足す。** `startup` と `status` は `rc-removed` に載るパスを自動の囲みとして扱わない（利用者がバックアップから囲みを戻しても、自動で足したとは言わない）。明示の `install`（E3・E5）は足す先を `rc-removed` から除かない |
 | U6 | 報告 | 外したファイルとバックアップを 1 行ずつ。最後に「開いているシェルでは `unalias claude` で外れる（写しを消したので、そのままでは `claude` が失敗する）」を出す。外すものが無ければ `ndf-relay: 外す囲みも写しも無い` |
 
-**`status` の出す行:** 各ファイル（U1 の 2 つ）の囲みの有無と、在れば `rc-added` に載るか（載れば
-「10.17.4 が自動で足した」）。写しの有無と、写しの中身が今のプラグインの `relay.py`（`status` を動かしている自分）と
+**`status` の出す行:** 各ファイル（U1 の 2 つ）の囲みの有無と、在れば `rc-added` に載り `rc-removed` に
+載らないか（そうなら「10.17.4 が自動で足した」）。写しの有無と、写しの中身が今のプラグインの `relay.py`（`status` を動かしている自分）と
 同じか。`relay.py` は版の定数を持たないので、写しの版は示さない。
 
 **`startup` の判定**（写しの置き直しの後に行う）:
@@ -154,7 +154,7 @@ plugins/ndf/
 | ---: | --- | --- |
 | 0 | 写しが在り、中身が自分（今の版の `relay.py`）と違う | `install` の E1 と同じ形（一時ファイル・`0755`・置き換え）で置き直す。**写しが無ければ作らない** |
 | 1 | `rc-added` が無い | 知らせない（写しも `rc-added` も無ければ、hook の定義の側で `python3` を起こさない） |
-| 2 | `rc-added` の各パスのうち、今もそのファイルに囲みがあり、`rc-noticed` に無いものが無い | 何もしない |
+| 2 | `rc-added` の各パスのうち、今もそのファイルに囲みがあり、`rc-noticed` にも `rc-removed` にも無いものが無い | 何もしない |
 | 3 | 上に当たるパスがある | そのパスを `rc-noticed` に足し、`{"systemMessage": "ndf-relay: <パス> の alias claude は 10.17.4 が自動で足したもの。使い続けるなら何もしなくてよい。外すなら /ndf:install-wrapper uninstall"}` を出す（パスが 2 つなら 1 行に並べる） |
 
 **`startup` が書くのは、在る写しの置き直しと状態の親の `rc-noticed` だけである。** シェルの設定は
@@ -162,7 +162,7 @@ plugins/ndf/
 取れなければ何もせず終わる）。同じ HOME の 2 つの起動が同時に来ても、`rc-noticed` の読み書きが
 重ならず、知らせは 1 度だけになる。取れなかった起動では知らせず、次の起動で改めて判定する。
 
-**hook の定義**（`matcher: startup` の最後の 1 件を差し替える。`timeout` 5・`continueOnError: true`）:
+**hook の定義**（`matcher: startup` の最後の 1 件を外し、`matcher: startup|resume` の新しい 1 件として置く。`claude -c` / `--resume` の起動でも写しを置き直すためである。`timeout` 5・`continueOnError: true`）:
 
 ```sh
 sh -c 'R="${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/rc-added"; C="${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py"; [ -f "$R" ] || [ -f "$C" ] || exit 0; ROOT="${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}"; [ -n "$ROOT" ] || exit 0; python3 "$ROOT/scripts/relay.py" startup; exit 0'
@@ -235,7 +235,7 @@ hook の定義（`PreToolUse` と `PostToolUse` に `matcher: AskUserQuestion` �
 sh -c '[ -n "${NDF_RELAY_DIR:-}" ] || exit 0; ROOT="${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}"; [ -n "$ROOT" ] || exit 0; exec python3 "$ROOT/scripts/relay.py" question <動作>'
 ```
 
-**`question` は拒否を出す場合も含めて終了コード 0 で終わる**（例外は捕まえて何も出さない）。`exec` で
+**`question open` は失敗したら質問を拒否する（fail-closed）。** 中継の下の直接の子と判定した後に、ロックが取れない・印を作れない・例外が起きたときは、どれもロックが取れないときと同じ拒否を出す。印が無いまま質問が描かれると、中継が `/exit\r` を書けるためである。中継の下でない・直接の子でない判定の前の例外では、何も出さない（中継の外の質問を止めない）。`question close` の失敗は何も出さない（印が残るのは安全な側）。**どの場合も終了コード 0 で終わる。**`exec` で
 python の出力をそのまま hook の出力にする。hook の `timeout` 5 秒で打ち切られると質問は描かれてしまう
 ため、待つ 3 秒は `timeout` より短くする。
 
@@ -254,6 +254,8 @@ python の出力をそのまま hook の出力にする。hook の `timeout` 5 �
 | 1 | (1)〜(5) がそろった時点の、印の `written_at` と会話の記録の大きさ・更新時刻を控える（記録を全行読むのはこの前の段だけ） |
 | 2 | `question.lock` の排他を取る（取れなければ次の確認まで待つ） |
 | 3 | ロックの中では記録を読み直さない。`question` が無いこと、印の `written_at` と記録の大きさ・更新時刻が 1 の控えと同じことだけを、`stat` と印の読み取りで確かめる。外れていれば `question.lock` と `count.lock` の両方を放して「静まりを待つ」へ戻る |
+
+**2 で取れなかったときも `count.lock` を放してから「静まりを待つ」へ戻る。** どの経路で戻るときも、`count.lock` を持ったまま次の確認まで待たない。
 | 4 | `/exit\r` を **1 回の write** で書く |
 | 5 | 1 秒おいてから放す |
 
@@ -370,7 +372,7 @@ stateDiagram-v2
 | AC25 | `test_relay.py`: 子へ届いたバイトが `/exit\r` の 1 回であること。確かめ直しの直前に `question` を置くと届かないこと（差し込み点で試す）。中継が `question.lock` を持つ間、`question open` が放されるまで待ち、放された後に印を作ること |
 | AC25b | `test_relay.py`: `/exit` の後に `question` を置いた試験用の子が、`NDF_RELAY_EXIT_WAIT` を過ぎても SIGTERM を受けず、`question` を消した後に数え始めること。待つあいだ `count.lock` を別のプロセスが取れること。子が終わった後、印が無ければ起動しないこと、書き直された印なら新しい `command` で起動すること。G3 の確かめ直しが外れたとき `count.lock` が放されること |
 | AC26 | `test_relay.py`: `NDF_RELAY_DIR` 無し・中継が動いていない・直接の子でないで、`question open` が何も作らず出力が空で終了コード 0 |
-| AC26b | `test_relay.py`: 別のプロセスが `question.lock` を 3 秒より長く持つと、`question open` が `permissionDecision: deny` を出し、`question` を作らず終了コード 0 |
+| AC26b | `test_relay.py`: 別のプロセスが `question.lock` を 3 秒より長く持つと、`question open` が `permissionDecision: deny` を出し、`question` を作らず終了コード 0。作業ディレクトリを書けないときも同じ拒否になる |
 | AC20〜AC22 | 全体テスト・静的検査。AC21 は本物の Claude Code（一時の HOME・隔離した `CLAUDE_CONFIG_DIR`・`DISABLE_AUTOUPDATER=1`）の上で `/ndf:restart` を 1 度通し、`log.jsonl` の `start` 2 行を実装の Pull Request に残す。同じ通しで、印の後に質問を出させ（`/goal` の続きか、質問を出す指示）、表示の 30 秒のあいだ `/exit` が書かれないことを見る |
 
 ## 未確認のまま残ること
