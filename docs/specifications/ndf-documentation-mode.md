@@ -216,7 +216,7 @@ Confluence と SharePoint の実装は別のリポジトリにあり、自リポ
 | `documentation` の高さが 5 で、混在時にそちらで検査する | `test_documentation_mode.py` |
 | 5 列目を読み、既存 4 列がずれない | 同上 |
 | 承認の関門が 2 つのままである | 文書を読んで確かめる（照合していたテストは #885 で削除） |
-| 形が 9 つあり、索引が実ファイルと一致する | 文書を読んで確かめる（照合していたテストは #885 で削除） |
+| 形が 9 つあり、索引が実ファイルと一致する | 索引が実在する `form-*.md` をすべて指すことは `plugins/ndf/skills/release/tests/test_completion_check.py`（`test_the_form_index_links_to_every_form_file`）で見る。形の数は文書を読んで確かめる（固定の一覧と照合していたテストは #885 で削除） |
 | 新設 4 個が 4 つの manifest すべてに載る | `test_agy_distribution.py` / `validate-runtime-plugins.sh` |
 | 自リポジトリ前提を持たない | `check-skill-repo-assumptions.py` |
 | 説明文書の数が実体と一致する | `check-doc-staleness.py` |

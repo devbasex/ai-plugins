@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -24,7 +25,9 @@ from pathlib import Path
 import pytest
 
 SKILL_DIR = Path(__file__).resolve().parents[1]
+SKILL = SKILL_DIR / "SKILL.md"
 REFERENCES = SKILL_DIR / "references"
+DISTRIBUTION_FORMS = REFERENCES / "distribution-forms.md"
 COMPLETION_CHECK = REFERENCES / "completion-check.md"
 
 # `completion-check.md` が持つ 4 つの節。並びも手順の順序に合わせる。
@@ -37,6 +40,14 @@ COMPLETION_SECTIONS = [
 
 TEMPLATE_SECTION = COMPLETION_SECTIONS[1]
 LIMIT_SECTION = COMPLETION_SECTIONS[2]
+
+FORM_INDEX = "## 形ごとのファイル"
+
+# #554 が退避の手順へ指示書の検査を足した分（4 行。**詳細は
+# `references/instruction-files.md` が持ち、本文には呼び出しと参照への案内だけを置く**）と、
+# #623 が足した「配布の記録」（別の実行の終わりの工程が読むブロック）と「まとまりを閉じる」を
+# 含む。300 → 320 のときと同じく実測（353 行）へ余地を足して上げる。
+SKILL_MD_MAX_LINES = 365
 
 
 def read(path: Path) -> str:
@@ -84,6 +95,27 @@ def fenced_blocks(body: str, language: str) -> list[str]:
             current.append(line)
     return blocks
 
+
+
+def link_targets(body: str) -> list[str]:
+    return re.findall(r"\[[^\]]+\]\(([^)]+)\)", body)
+
+
+# --- 条件 1: 形ごとのファイルの索引 ---------------------------------------------------
+
+
+def test_the_form_index_links_to_every_form_file() -> None:
+    """索引の表が実在する `form-*.md` をすべて指す。
+
+    実ファイルが増えても表へ足し忘れると、`SKILL.md` から辿れる先はそのままである。
+    ファイルの有無ではなく、**索引から辿り着けるか**を見る。形の数は固定しない。
+    """
+    listed = [
+        target
+        for target in link_targets(section(read(DISTRIBUTION_FORMS), FORM_INDEX))
+        if target.startswith("form-")
+    ]
+    assert sorted(listed) == sorted(p.name for p in REFERENCES.glob("form-*.md"))
 
 # --- 条件 3: 形をまたぐ決まり ------------------------------------------------------
 
@@ -251,3 +283,11 @@ def test_a_missing_section_is_not_passed_over() -> None:
 def test_an_empty_section_is_not_passed_over() -> None:
     with pytest.raises(AssertionError):
         section(f"{LIMIT_SECTION}\n\n## 次の節\n", LIMIT_SECTION)
+
+
+# --- 条件 7: 分量 ------------------------------------------------------------------
+
+
+def test_the_skill_md_stays_within_its_budget() -> None:
+    lines = len(read(SKILL).splitlines())
+    assert lines <= SKILL_MD_MAX_LINES, f"SKILL.md が {lines} 行"
