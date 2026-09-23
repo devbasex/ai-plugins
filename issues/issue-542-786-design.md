@@ -43,14 +43,14 @@
 
 | 要素 | 責務 | 変更 |
 | --- | --- | --- |
-| `plugins/ndf/scripts/lib/assignment.py` | 母集合と座席と参加者の解決 | 定数 `DEFAULT_REVIEW_RUNTIMES` を足し、`review_pool` をそれとホストから作る。`resolve_participants` は母集合に無い者の除外を無視し、`Participants.ignored_exclude` に残す |
+| `plugins/ndf/scripts/lib/assignment.py` | 母集合と座席と参加者の解決 | 定数 `DEFAULT_REVIEW_RUNTIMES` を足し、`review_pool` をそれとホストから作る。`resolve_participants` は母集合に無い者の除外を無視し、`Participants.ignored_exclude` に残す。`only` が母集合・`--include`・`--exclude` のどれにも無いときは足す者として扱う（決定 12）。`Participants.to_state()` は `ignored_exclude` を含む 8 項目を返す |
 | `plugins/ndf/skills/cross-review/scripts/state.py` | 状態ファイル・観点・参加者の解決・ラウンドの開始 | 控えの取得を関数 `_fetch_existing_comments` に分け、`start-round` からも呼ぶ。`start-round` が変更の節のファイルを書く。分類 `design` と `DESIGN_REVIEW_TEMPLATE` を足す。`_resolve_reviewers` が無視した除外を 1 行で出す |
 | `plugins/ndf/skills/cross-review/scripts/launch-reviewer.sh` | レビューのプロンプトを組んで担当を起動する | 変更の節のファイルがあれば埋め込む。出し切りの指示と、テストと背景の処理を起動しない指示を足す。先頭のコメントの「母集合が 4 者」を「担当は 4 ランタイムのどれでもなりうる」へ直す（`launch-codex.sh`・`launch-agy.sh` の同じコメントも） |
 | `plugins/ndf/skills/fix/scripts/fetch-pr-comments.sh` | 既存コメントの 3 つの取得元を 1 本で取る | 引数 `--strict` を足す。付けたときは 3 つのどれか 1 つでも失敗すれば終了コード 1（付けないときは今どおり 3 つとも失敗したときだけ 1） |
 | `plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/setup.py` | cross-refactoring の参加者の解決 | 無視した除外を 1 行で出す |
 | `plugins/ndf/skills/cross-refactoring/tests/test_init.py` | cross-refactoring の `init` のテスト | 「母集合に無い者は外せない」の中断の期待を、無視して続ける期待へ替える |
 | `plugins/ndf/skills/cross-refactoring/prompts/apply.md` | 適用担当のプロンプト | テストを前景で終わるまで待つ指示を足す |
-| 文書 | 使い方と仕様 | `cross-review/SKILL.md`・`docs/02-fix-and-rotation.md`・`docs/05-pool-and-convergence.md`・`docs/06-evidence.md`・`docs/specifications/cross-review-participants-and-seats.md`・`plugins/ndf/README.md`・`CLAUDE.md` の cross-review 節。cross-refactoring の `docs/01-state-and-propose.md`（参加者の確定の段）と `docs/specifications/cross-refactoring-participants.md`（中断の表の「名前の矛盾」の行と、203 行の「共通層が返す 7 項目」）。`cross-review/docs/04-contracts.md`（`participants` の 8 項目と一時ファイルの一覧）と確定仕様 `cross-review-participants-and-seats.md` の参加者の記録の表（8 項目）は、`ignored_exclude` と変更の節のファイルを足して 9 項目・一時ファイル 1 つ増へ直す |
+| 文書 | 使い方と仕様 | `cross-review/docs/01-state-and-review.md`（Step 1 の `start-round` に、控えの取り直し・失敗しても続けること・変更の節のファイルを書く / 消すことを足す）・`cross-review/SKILL.md`・`docs/02-fix-and-rotation.md`・`docs/05-pool-and-convergence.md`・`docs/06-evidence.md`・`docs/specifications/cross-review-participants-and-seats.md`・`plugins/ndf/README.md`・`CLAUDE.md` の cross-review 節。cross-refactoring の `docs/01-state-and-propose.md`（参加者の確定の段）と `docs/specifications/cross-refactoring-participants.md`（中断の表の「名前の矛盾」の行と、203 行の「共通層が返す 7 項目」）。`cross-review/docs/04-contracts.md`（`participants` の 8 項目と一時ファイルの一覧）と確定仕様 `cross-review-participants-and-seats.md` の参加者の記録の表（8 項目）は、`ignored_exclude` と変更の節のファイルを足して 9 項目・一時ファイル 1 つ増へ直す |
 | テスト | 下の「テスト設計」 | 既存の母集合のテストを直し、新しい分岐のテストを足す |
 
 変えないもの:
@@ -216,7 +216,7 @@ def _fetch_existing_comments(repo: str, pr: int, path: pathlib.Path) -> str | No
 | 条件 | ファイル |
 | --- | --- |
 | 同じ PR の前のラウンドが無い（1 ラウンド目・PR の切り替え直後） | 書かない |
-| 前のラウンドか今のラウンドの `head_sha` が無い | 書かない |
+| 比べる前のラウンド（今のラウンドより前で、`pr` が `current_pr` と同じもののうち最も新しいもの）か今のラウンドの `head_sha` が無い | 書かない |
 | 2 つの `head_sha` が同じ | 書かない |
 | 違う | 書く（形は冒頭の例） |
 | `git diff --name-only <前> <今>` が失敗した | 書かず、`⚠ 前のラウンドからの変更を取れませんでした` を出して続ける |
@@ -226,7 +226,7 @@ def _fetch_existing_comments(repo: str, pr: int, path: pathlib.Path) -> str | No
 - 差分の本文は書かない
 - 同じ名前のファイルが前の起動で残っていれば、書かない場合も消す（古い節を次のプロンプトへ入れないため）
 
-`launch-reviewer.sh` は、このファイルが空でなければ中身を「既存コメントスナップショット」の節の直後へ入れる。
+`launch-reviewer.sh` は、このファイルが空でなければ中身を「既存コメントスナップショット」の節の後、追加レビュー観点（`$EXTRA_REVIEW_BLOCK`）の前へ入れる。
 無ければ何も入れない。
 
 ### プロンプトに足す指示（`launch-reviewer.sh`）
@@ -334,6 +334,9 @@ sequenceDiagram
 | `cross-refactoring/tests/test_assignment.py`（56〜58 行） | `review_pool(host) == list(ALL_RUNTIMES)` | 既定の 3 者とホスト |
 | `scripts/tests/test_lib_assignment.py`（66 行付近） | `review_pool` が 4 者 | 同上 |
 | `cross-refactoring/tests/test_init.py`（285 行） | `--exclude agy` で中断（終了コード 4） | 続ける（AC4c） |
+| `scripts/tests/test_lib_participants.py`（147 行付近） | 母集合に無い者の除外は例外 | 無視して `ignored_exclude` に残す |
+| 同じファイル（193 行付近） | `to_state()` が 7 項目と完全一致 | `ignored_exclude` を含む 8 項目 |
+| `cross-review/tests/test_state_resume_args.py`（195 行以降） | 再開の `--exclude agy` が `excluded` に残る | 既定の母集合では `ignored_exclude` に残り、`excluded` は空 |
 | AC19 | `_evaluate_convergence` と `review_seats` を変えない（差分に現れない）ことを実装の PR で確かめる |
 | AC20 | `uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest pytest . -q -n 4` が通る |
 
