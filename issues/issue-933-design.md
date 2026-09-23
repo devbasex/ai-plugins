@@ -137,9 +137,7 @@ plugins/ndf/skills/cross-refactoring/
 plugins/ndf/scripts/lib/{jev,limits,assignment}.py
 ```
 
-## データ構造
-
-### 状態ファイル（版 2）
+## データ構造: 状態ファイル（版 2）
 
 置き場所は今と同じ `<work>/.cross_refactoring/cross-refactoring-rf<番号>-state.json` である。**最上位に `schema: 2` を持つ。**
 
@@ -187,11 +185,12 @@ plugins/ndf/scripts/lib/{jev,limits,assignment}.py
 | `fix_count` | 修正の回数 |
 | `danger[]` | 立った印（`D1`〜`D5`） |
 
-### 履歴と配分テーブル
+## データ構造: 履歴と配分テーブル
 
 **履歴は実行ごとに 1 行の JSONL で、リポジトリごとに 1 ファイルである。**
 
-- 置き場所: `run_metrics.metrics_dir()` の下の `<owner>--<repo>/cross-refactoring-allocation.jsonl`（`NDF_METRICS_DIR` → `$XDG_STATE_HOME/ndf/metrics` → `~/.local/state/ndf/metrics`）
+- 置き場所: `run_metrics.metrics_dir()` の下の `<owner>--<repo>/cross-refactoring-allocation.jsonl`
+- 根の決め方は実行の要約と同じである（`NDF_METRICS_DIR` → `$XDG_STATE_HOME/ndf/metrics` → `~/.local/state/ndf/metrics`）
 - `NDF_METRICS=0` でも書く。計画の材料であって計測ではないためである
 
 1 行の形:
@@ -258,7 +257,12 @@ plugins/ndf/scripts/lib/{jev,limits,assignment}.py
 | `finalize` | 状態 | — | 0（履歴の追記に失敗しても 0。知らせるだけ） |
 | `final-gate` / `merge-final-fix` / `report` / `status` / `assess` | 今と同じ | 今と同じ | 今と同じ |
 
-外すサブコマンド: `start-round` / `next-apply-round` / `merge-apply` / `merge-test-judgements` の呼び出し元の一部 / `verify-round` / `should-abandon` / `abandon-items` / `advance`。`merge-test-judgements` は修正の中でテストの差分を判定する経路に残す。
+外すサブコマンドは次の 7 つである。
+
+- `start-round` / `next-apply-round` / `merge-apply` / `advance`（ラウンドと群）
+- `verify-round` / `should-abandon` / `abandon-items`（`verify` と `merge-fix` へ畳む）
+
+`merge-test-judgements` は残す。修正がテストを書き換えたときに、振る舞いの変更を含むかを判定する経路である。
 
 ### 実装担当の `plan` の結果ファイル
 
@@ -283,7 +287,11 @@ plugins/ndf/scripts/lib/{jev,limits,assignment}.py
 | 公開の入出力が変わりうるか（`D5`） | `boolean` | 項目の要約・`git diff --stat`・差分のうち定義の行（`def` / `class` / `function` / `export` の行）だけ | 確信度 0.7 以上で真なら印を立てる |
 | 失敗の分類 | `choice`（`{"item": 項目の誤り, "test": テストの誤り, "flaky": 環境・揺らぎ}`） | テストの出力の末尾 40 行 | `flaky` で確信度 0.8 以上なら 1 度だけ走らせ直す。それ以外は修正へ |
 
-- 使える条件: `AI_GATEWAY_API_KEY` がある・`NDF_JEV` が `0` でない・対象のリポジトリが公開（`gh repo view --json visibility` が `PUBLIC`）・`init` の疎通の確認（固定の `boolean` の問い 1 回、10 秒）が通る
+- 使える条件は次の 4 つがそろうことである
+  - `AI_GATEWAY_API_KEY` がある
+  - `NDF_JEV` が `0` でない
+  - 対象のリポジトリが公開である（`gh repo view --json visibility` が `PUBLIC`）
+  - `init` の疎通の確認（固定の `boolean` の問い 1 回、10 秒）が通る
 - 呼び出しが 1 回失敗したら、その問いは実装担当の答えで決める。**進行を止めない。** 失敗の数は `judge.failures` に数える
 - 鍵の値は状態・報告・ログへ書かない。`jev.py` は鍵を環境変数から読むだけで、引数で受け取らない
 
@@ -345,7 +353,7 @@ stateDiagram-v2
   deferred --> [*]
 ```
 
-### 時間の決め方
+## 時間の決め方
 
 `merge-plan` の時点で次を計算する（`budget.py`、純粋な処理）。
 
@@ -361,6 +369,8 @@ stateDiagram-v2
 - 項目 i の締め切り（実装に着手してよい最後の時刻）: `started_at + budget_minutes − R − Σ_{j≤i} verify_j − implement_i`
 - テストの追加の締め切りも同じ形で出し、`add-tests` の雛形に渡す
 - **実行中の CLI は時間切れで止めない。** 監視の上限（`limits.py`）はそのまま歯止めとして残す
+
+## 検証と修正
 
 ### 検証と修正の繰り返し（`verify`）
 
@@ -384,6 +394,8 @@ stateDiagram-v2
 
 - **D5 の `risk` は印を立てる側にだけ使う。** 担当の申告で検証を減らすことはしない（結果ファイルの申告を検証に使わない方針を保つ）
 - 印は項目ごとに `items[].danger` へ、全体として走らせた理由は `whole_test.flags` へ残る
+
+## 最終ゲートと再開
 
 ### 最終ゲートとの関係
 
