@@ -60,11 +60,24 @@ issue の本文の `## 進行` と盤面の両方に残り、`stage` は通過�
 | `progress-tracking/SKILL.md` | 変える | 「呼び方」を記録のコマンド 1 行にする。抜粋を指す |
 | `progress-tracking/references/excerpt.md` | 新設 | 抜粋の見本（F4） |
 | `plugins/ndf/agents/worker.md` | 新設 | worker のエージェント定義（`ndf:worker`）。frontmatter の `disallowedTools` で Skill と Agent のツールを外す（F3）。agy へは `dev.agy/agents` の symlink で同じファイルが配られる |
-| エージェントの数を書く説明（`AGENTS.md` / `README.md` / `plugins/ndf/README.md` / `docs/ndf-plugin-reference.md`） | 変える | 「8 個の専門エージェント」に worker を足す |
+| `plugins/ndf/.claude-plugin/plugin.json` | 変える | `agents` 配列へ `./agents/worker.md` を足す（無いと配布されない）。`description` は「8 specialized agents and 1 worker agent for the 3-layer workflow」と専門と別枠で書く |
+| エージェントの数を書く説明（下の表の 7 箇所） | 変える | worker は専門エージェントの一覧へ入れず、「専門エージェント 8 個と、3 層の worker の定義 1 個」と別枠で書く |
 | `plugins/ndf/skills/AUTHORING.md` | 変える | 抜粋の形と置き場所の規約（F4）。#855 の検査が読む目印 |
 | 工程の Skill の末尾の記録の文（20 ファイル） | 変える | 「`/ndf:progress-tracking` を呼ぶ」を記録のコマンド 1 行へ（AC7） |
 | `development-workflow/SKILL.md` | 変える | conductor が起動指示へ記録のコマンドを書くこと（`$SCRIPTS` を解いてから渡す） |
 | テスト（`test_projects_sync*` ほか） | 足す | F1 の振る舞い（AC6 / AC8） |
+
+エージェントの数を書く説明の対象（行は `249cf138` の作業ツリーで grep した位置）:
+
+| ファイルと行 | いまの書き方 | 変更後 |
+| --- | --- | --- |
+| `README.md:21` | 専門エージェントの一覧（8 つ） | 一覧は変えない。直後に worker を別枠で 1 行足す |
+| `README.md:113` | プラグイン表「8個の専門エージェント（Claude版）」 | 「8個の専門エージェントと 3 層の worker の定義 1 個」 |
+| `plugins/ndf/README.md:25` | ツリーの注記「サブエージェント定義（8 個）」 | 「専門 8 個と worker 1 個」 |
+| `plugins/ndf/README.md:105` | agy の配布「エージェント 8 個」 | 「エージェント 9 個（専門 8 個と worker 1 個）」 |
+| `docs/ndf-plugin-reference.md:24` | ツリーの注記「サブエージェント（8 個）」 | 「専門 8 個と worker 1 個」 |
+| `docs/ndf-plugin-reference.md:39` | 「`agents/` 8 個」 | 「`agents/` 9 個（専門 8 個と worker 1 個）」 |
+| `AGENTS.md:131` | 「8個の専門サブエージェント」 | 「8個の専門サブエージェントと 3 層の worker の定義 1 個」 |
 
 変えないもの: 通過工程の控えの読み方（`workflow-common.sh` の `projects-sync.sh` の照合）、
 `progress-record.sh --repo`（他のリポジトリの課題。盤面を書かない経路はそのまま残る）、
@@ -216,6 +229,11 @@ disallowedTools: Skill, Agent
 worker は抜粋（`references/excerpt.md`）を読むために `skills/` 配下の Read を要し、Read を
 パスで分ける手段は定義に無い。これは規則 6 の文面で縛り、起動指示の「手順」に抜粋を写して
 渡すことで読む理由を無くす。
+
+**agy へも同じ定義が配られる。** `plugins/ndf/dev.agy/agents` は `../agents` への symlink のため、
+agy のエージェント数も 9 になる。3 層の worker は Claude Code の Agent ツール（`subagent_type`）で
+しか起動しないため、agy がホストのときに worker の定義が使われる経路は今は無い。agy での
+frontmatter の効き方は実測しておらず、agy をホストにした 3 層の運転は #888 の範囲である。
 
 **CLI の worker（#760）で使える手段も実測した。** 今の 3 層は CLI の worker を使わないため、
 この変更では定義しない。#760 と #888（ランタイムの可搬性）の入力として残す。
@@ -425,7 +443,7 @@ sequenceDiagram
 | 受け入れ条件 | 何で確かめるか |
 | --- | --- |
 | AC1 / AC3 / AC4 | `agent-layers.md` の差分のレビュー（cross-review）。雛形の項目の表と規則の文を読む |
-| AC14 | 定義の検査: `plugins/ndf/agents/worker.md` の frontmatter の `disallowedTools` に `Skill` と `Agent` がある（テストで読む）。実機: `ndf:worker` を起動し、`ToolSearch select:Skill` が `No matching deferred tools found.` を返すことと、Agent を持たないことを確かめて #828 に残す（手順は「worker の定義で塞ぐ」の表 A / H と同じ） |
+| AC14 | 定義の検査: `plugins/ndf/agents/worker.md` の frontmatter の `disallowedTools` に `Skill` と `Agent` がある（テストで読む）。実機: `ndf:worker` を起動し、`ToolSearch select:Skill` が `No matching deferred tools found.` を返すことと、Agent を持たないことを確かめて #828 に残す（手順は「worker の定義で塞ぐ」の表 A / H と同じ）。配布: マーケットプレイスから導入した後（または `claude --plugin-dir plugins/ndf` で読み込んだ後）に `subagent_type: ndf:worker` で起動できる |
 | AC2 | 同上。加えて、実装の後の最初の `/goal` で supervisor が `progress-tracking` / `development-workflow` を起動していないことを `skill-stats --agents` で見る |
 | AC1 / AC3（雛形の検査） | `grep -n "progress-tracking\|development-workflow" plugins/ndf/skills/development-workflow/references/agent-layers.md` の結果を、表の後の「雛形の検査で残ってよい行」と突き合わせる。**「起動の指示」の節（2 つの雛形）の中で、下の「残ってよい行」（a / b / c）を除き、これらを起動・読み込みさせる文が 0 件**なら合格 |
 | AC5 / AC6 | `projects-sync.sh` のテストに足す: 宣言なしで `stage` を呼ぶと issue の本文だけが更新される / 宣言ありで両方が更新される / `mode` で見出し行だけが変わる / 知らない工程名で 2 を返し本文を書かない / `stage` / `mode` / `worktree` / `plan` の 4 キーそれぞれで、issue の本文の見出し行・チェックリストと盤面のフィールドが今の 2 コマンドの組と同じになる（`gh` は既存のテストと同じ偽物で置き換える） |

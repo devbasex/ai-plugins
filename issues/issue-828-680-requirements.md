@@ -43,7 +43,7 @@
 - [ ] AC2: supervisor の起動指示に、`development-workflow` を読まずに持ち場を通せるだけの値が入っている。値はモード・持ち場で通す工程の一覧・記録のコマンドである。記録のコマンドは、コマンドの頭（二重引用符で囲んだ絶対パス）と、キー（`stage` / `mode` / `worktree` / `plan`）ごとの打つ時点で渡す
 - [ ] AC3: supervisor の守る規則と worker の守る規則に、Skill を起動しない旨がある。supervisor は `development-workflow` を起動しない。`progress-tracking` は、終わりの工程で「まとまりを閉じる」を行うときだけ起動してよい（#856 が `bundle-close.sh` へ移す）。worker は Skill 全般を起動しない（起動指示が Skill の起動を手順として渡した場合を除く）
 - [ ] AC4: worker の起動指示の雛形に、worker が Skill を起動しないで済むよう、手順を抜粋で渡す項目がある
-- [ ] AC14: worker の起動指示の雛形が `subagent_type: ndf:worker` を指し、その定義で起動した worker は Skill と Agent のツールを使えない。定義の検査（frontmatter の `disallowedTools`）と、実機で起動して拒まれることを確かめた記録がある
+- [ ] AC14: worker の起動指示の雛形が `subagent_type: ndf:worker` を指し、その定義で起動した worker は Skill と Agent のツールを使えない。定義の検査（frontmatter の `disallowedTools`）と、実機で起動して拒まれることを確かめた記録がある。導入した NDF から `ndf:worker` を起動できる
 
 ### 記録のコマンド（#828）
 
