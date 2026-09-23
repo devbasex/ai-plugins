@@ -839,3 +839,58 @@ def test_resume_notifies_a_changed_round_test(run_init, tmp_path, capsys):
     _, after = _state_of(tmp_path)
     assert "ℹ --round-test は再開では反映しません" in capsys.readouterr().err
     assert after["round_test"] == before["round_test"]
+
+
+# ---------- 打ち切り（run_with_timeout の timed_out=True）（R2-001） ----------
+#
+# 現状固定テスト。着手前のテストと範囲のテストが「打ち切り」で止まる 2 経路
+# （setup.py の `_run_baseline_test` / `_run_round_test` の timed_out=True）は
+# どのテストも通していなかった。失敗（終了コード非 0）とは別の分岐なので、現状の
+# 終了コードと、状態ファイルが書かれないことをそのまま記録する。
+
+
+@pytest.fixture
+def timeout_calls(patch_lib):
+    """`init` のテスト実行を差し替え、コマンドごとに打ち切り（timed_out=True）へ倒せる。
+
+    `timed_out` に載せたコマンドだけ `(None, True)` を返す。それ以外は `(0, False)`。
+    """
+    seen: list[str] = []
+    timed_out: set[str] = set()
+
+    def fake_run(command, cwd, timeout, grace=5.0):
+        seen.append(command)
+        if command in timed_out:
+            return None, True
+        return 0, False
+
+    patch_lib("run_with_timeout", fake_run)
+    return type("Calls", (), {"seen": seen, "timed_out": timed_out})()
+
+
+def test_init_aborts_when_the_baseline_test_times_out(run_init, tmp_path, timeout_calls, capsys):
+    """R2-001 — 着手前のテストが打ち切りで止まる経路（setup.py 630-634）。"""
+    timeout_calls.timed_out.add("true")
+    with pytest.raises(SystemExit) as e:
+        run_init(_args(tmp_path, baseline_test="true", test_timeout=60))
+    # 現状固定: `die` の既定の終了コード（打ち切り）。
+    assert e.value.code == refactor_abort()
+    # 状態ファイルは打ち切りの後の保存に届かないため書かれない。
+    assert not _state_path(tmp_path).exists()
+    # 出力は文言の完全一致を取らず、打ち切った秒数（60）が含まれることだけを見る。
+    assert "60" in capsys.readouterr().err
+
+
+def test_init_aborts_when_the_round_test_times_out(run_init, tmp_path, timeout_calls, capsys):
+    """R2-001 — 範囲のテストが打ち切りで止まる経路（setup.py 662-663）。"""
+    # 着手前のテストは通し、範囲のテストだけ打ち切る。
+    timeout_calls.timed_out.add("pytest -q -k scope")
+    with pytest.raises(SystemExit) as e:
+        run_init(_args(tmp_path, round_test="pytest -q -k scope", baseline_test="true",
+                       test_timeout=60))
+    # 現状固定: 範囲のテストの打ち切りは ABORT。
+    assert e.value.code == refactor_abort()
+    assert not _state_path(tmp_path).exists()
+    # 着手前のテストを通したあと、範囲のテストで止まる順序。
+    assert timeout_calls.seen == ["true", "pytest -q -k scope"]
+    assert "60" in capsys.readouterr().err

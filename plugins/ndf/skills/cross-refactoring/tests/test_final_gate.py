@@ -374,3 +374,38 @@ def test_the_gate_check_records_the_command_and_seconds(
     assert check["mode"] == "test"
     assert check["command"] == "pytest -q"
     assert isinstance(check["seconds"], (int, float)) and check["seconds"] >= 0
+
+
+# ---------- 全体テストの打ち切り（run_with_timeout の timed_out=True）（R2-003） ----------
+#
+# 現状固定テスト。最終ゲートの成功と非ゼロ終了は固定されているが、全体テストが
+# 打ち切り（timed_out=True）で止まったときに、失敗として記録し修正ラウンドへ進む
+# 経路は固定されていなかった（gate.py の `_local_gate` の timed_out 分岐）。
+
+
+def test_final_gate_records_a_timed_out_whole_test_and_enters_a_fix_round(
+    patch_lib, refactor, cmd_gate, tmp_path, env_tmp_dir, spy, capsys
+):
+    """R2-003 — 全体テストが打ち切りなら失敗として記録し、修正ラウンドへ進む。"""
+    state_path = _state(tmp_path, workflow_step=True, test_timeout=60)
+    env_tmp_dir(state_path)
+    # 全体テストの実行を打ち切りへ差し替える（spy の差し替えを上書きする）。
+    patch_lib("run_with_timeout",
+              lambda command, cwd, timeout, grace=5.0: (None, True))
+
+    with pytest.raises(SystemExit) as e:
+        cmd_gate.cmd_final_gate(_args())
+    # 現状固定: 失敗の終了コード（修正ラウンドへ）。
+    assert e.value.code == 2
+    out = capsys.readouterr().out
+    assert "FINAL_GATE=failing" in out and "FINAL_GATE=cross-review" not in out
+
+    gate = read_state(state_path)["final_gate"]
+    # 修正ラウンドへ進む。
+    assert gate["fix_rounds"] == 1
+    assert gate["status"] == "failing"
+    # 最終ゲートの記録は「打ち切り」相当の詳細を持つ（文言の完全一致は取らず、
+    # 打ち切った秒数が含まれることだけを見る）。
+    check = gate["checks"][-1]
+    assert check["status"] == "fail"
+    assert "60" in check["detail"]
