@@ -199,6 +199,24 @@ def test_repeat_read_resets_on_replaced_file(tmp_path, state):
     assert denied(run(read(f), state)) is None
 
 
+def test_repeat_read_recovers_from_broken_state(tmp_path, state):
+    # 現状固定: 既存の read 状態 JSON が壊れているとき、読み直し判定は 0 から数え直す。
+    # 最初の Read は通り、状態は有効な JSON（count=1）へ置き換わる。以後は同じ範囲を
+    # 続けて読むと現在の上限（既定 3）回で拒否される。
+    f = tmp_path / "out.txt"
+    f.write_text("")
+    guards = state / "guards"
+    guards.mkdir(parents=True)
+    broken = guards / "read-s1.json"
+    broken.write_text("{not json")
+    assert denied(run(read(f), state)) is None
+    saved = json.loads(broken.read_text())
+    assert saved["count"] == 1
+    assert denied(run(read(f), state)) is None
+    reason = denied(run(read(f), state))
+    assert reason and "3 回" in reason
+
+
 def test_repeat_read_is_per_session(tmp_path, state):
     f = tmp_path / "out.txt"
     f.write_text("")
