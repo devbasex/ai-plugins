@@ -257,7 +257,8 @@ def _is_self(path: str) -> bool:
         with open(real, "rb") as f:
             return b"relay.py" in f.read(4096)
     except OSError:
-        return True
+        # 読めないものは中継と見なさない。飛ばし損ねた繰り返しは NDF_RELAY_DEPTH が止める
+        return False
 
 
 def resolve_claude() -> str | None:

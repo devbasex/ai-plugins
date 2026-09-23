@@ -597,6 +597,17 @@ def test_resolve_skips_wrappers(mod, tmp_path, monkeypatch):
     assert mod.resolve_claude() == str(forced)
 
 
+def test_resolve_keeps_unreadable_claude(mod, tmp_path, monkeypatch):
+    """読めない（実行だけできる）claude は中継と見なさずに選ぶ。飛ばし損ねは深さの変数が止める。"""
+    real = real_claude(tmp_path)
+    real.chmod(0o111)
+    if os.access(real, os.R_OK):
+        pytest.skip("読み取り権限を外せない（root で実行している）")
+    monkeypatch.setenv("PATH", os.pathsep.join([str(real.parent), "/usr/bin"]))
+    monkeypatch.delenv("NDF_RELAY_CLAUDE", raising=False)
+    assert mod.resolve_claude() == str(real)
+
+
 def test_run_nested_stops_127(tmp_path):
     e = isolated_env(tmp_path, NDF_RELAY_DEPTH=2, NDF_RELAY_CLAUDE=real_claude(tmp_path))
     p = subprocess.run([sys.executable, str(RELAY), "run"], capture_output=True, text=True,

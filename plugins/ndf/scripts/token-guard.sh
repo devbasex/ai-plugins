@@ -131,7 +131,7 @@ guard_context() {
   # サブエージェントの中の起動は見ない。agent_id はサブエージェントの中でだけ付く
   # （Claude Code 2.1.280 で実測。サブエージェントの transcript_path は親の記録を指す）
   [ -n "$(field '.agent_id')" ] && exit 0
-  local tp sid key words total limit dir mark issues skill
+  local tp sid key words total limit dir mark issues skill relayed
   tp=$(field '.transcript_path')
   case "$tp" in */subagents/*) exit 0 ;; esac
   sid=$(field '.session_id')
