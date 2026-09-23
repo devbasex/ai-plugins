@@ -173,7 +173,7 @@ plugins/ndf/
 | 副命令 | 引数 | 終了コード | 出力 |
 | --- | --- | --- | --- |
 | `run` | `[claude の引数 ...]`。**`run` の後ろはすべて claude の引数で、中継は解釈しない。** 中継の設定は環境変数だけで受ける: `NDF_RELAY_MAX_STARTS`（既定 20）/ `NDF_RELAY_QUIET`（秒、既定 15）/ `NDF_RELAY=0`（常に素通し） | 素通しでは claude の終了コードそのもの（exec で置き換わるため）。中継では最後の区間の claude の終了コード（シグナルで終わったら 128 + シグナルの番号）/ 2: 次の区間の更新か起動に失敗した / 127: 本物の claude が見つからない・起動の入れ子が深すぎる | 区切りの 1 行と、落ちるときの `ndf-relay:` の 1 行を画面へ。印なしで終わるときは何も出さない |
-| `stop` | 無し | 0: 動いている中継に停止の印を置いた（1 つ以上）/ 1: 動いている中継が無い | 置いた中継の pid を 1 行ずつ |
+| `stop` | 無し | 0: 動いている中継に停止の印を置いた（1 つ以上）/ 1: 動いている中継が無い | 置いた中継の pid を 1 行ずつ。**対象は `${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/` の各サブディレクトリのうち、`relay.pid` の pid が生きているものすべて**（`stop` は `NDF_RELAY_DIR` を継がないため走査で探す）。`relay.pid` が無い・死んでいるものは飛ばす |
 | `mark` | 標準入力に Stop hook の JSON | 常に 0 | 常に無し |
 | `install` | 無し | 常に 0（SessionStart を止めない） | 足したときと、既存の `claude` の定義で足さなかったときの初回だけ、`{"systemMessage": "<1 行>"}` を標準出力へ（利用者の画面に出る）。それ以外は何も出さない |
 
@@ -186,7 +186,7 @@ plugins/ndf/
 | 3 | `NDF_RELAY_DIR` がある（中継の子の中で打たれた。conductor が Bash から起こす `claude -p` など） | 素通し。入れ子の中継にしない |
 | 4 | 引数に `-p` / `--print` / `-h` / `--help` / `-v` / `--version` がある、または最初の引数が claude の副命令の名前（「確かめたこと」の 11） | 素通し |
 | 5 | 標準入力か標準出力が端末でない（パイプ・リダイレクト） | 素通し |
-| 6 | `pty` を読み込めない・擬似端末を作れない（Windows など） | `ndf-relay: 中継を始めない（擬似端末を作れない）…` を標準エラーへ出してから素通し |
+| 6 | `pty` を読み込めない・擬似端末を作れない（Windows など）、または `claude plugin list --json` から `ndf@<名前>` の名前と版を読めない（1 つ目の区間の版を記録できない） | `ndf-relay: 中継を始めない（擬似端末を作れない）…` を標準エラーへ出してから素通し |
 | 7 | 上のどれでもない | 中継として始める。1 つ目の区間は `<本物の claude> <run の引数>` を子として起動する |
 
 **2 つ目以降の区間は `<本物の claude> <印の中身>` だけで起動し、`run` の引数は引き継がない。** `--resume` や `-c` を引き継ぐと、捨てたはずの会話へ戻る。モデルなどを区間をまたいで保ちたいときは、設定か環境変数（`ANTHROPIC_MODEL` など）で与える（`relay.md` に書く）。
@@ -319,8 +319,10 @@ sequenceDiagram
     U->>R: claude（install が足した alias で relay.py run）
     R->>F: relay.pid
     R->>C: pty.fork（子は同期のパイプで待つ）
-    R->>F: child.pid・start
+    R->>F: child.pid
     R->>C: 同期のパイプを閉じる → 子が claude を exec
+    C-->>R: 結果のパイプが閉じる（exec に成功）
+    R->>F: start
     U->>R: キー入力
     R->>C: そのまま流す
     C->>C: 関門で AskUserQuestion（Stop は起きない）
@@ -335,8 +337,10 @@ sequenceDiagram
     R->>R: plugin の更新と版の読み取り・区切りの 1 行
     R->>F: 印を消す
     R->>C2: pty.fork（子は同期のパイプで待つ）
-    R->>F: child.pid・start
+    R->>F: child.pid
     R->>C2: 同期のパイプを閉じる → 子が 本物の claude "<中身>" を exec
+    C2-->>R: 結果のパイプが閉じる（exec に成功）
+    R->>F: start
 ```
 
 ### 中継の状態遷移
@@ -365,7 +369,7 @@ stateDiagram-v2
 | 静まりを待つ | 次の 3 つがそろうまで待つ。(1) 印の `written_at`・`transcript_path` の更新時刻・利用者の最後の入力の時刻のうち最も遅いものから `NDF_RELAY_QUIET` 秒（既定 15）たつ。(2) 会話の記録に `/goal` の目標がある区間では、印の `written_at` より後の `goal_status` の記録がある。(3) 印が消えていない。判定が止めを拒んだときは応答が続いて記録が動き、次の Stop で印が書き直されるか消える |
 | 続けさせる | 停止の印があるか、1 日の起動回数が上限か、空回り（直前の 2 つの `end` の `seconds` がともに 120 未満で、今の区間の長さ＝印の `written_at` − その区間の `start` の `at` も 120 未満）なら、`/exit` を入力しない。`stop` の行を書き、`ndf-relay:` の 1 行を出し、印を消す。以後は中継するだけで、次の印では何もしない |
 | 終わらせる | 子の端末へ `/exit` を書き、1 秒おいて `\r` を書く。`waitpid` で 30 秒まで待ち、終わらなければ SIGTERM を送って 10 秒まで待ち、それでも終わらなければ SIGKILL を送って終わりを待つ（SIGKILL の後は必ず終わる）。**子の終わりを `waitpid` で確かめてから** `end` を書き、次へ進む |
-| 起動する | マーケットプレイスの名前が読めていれば、`claude plugin marketplace update <マーケットプレイス>` → `claude plugin update ndf@<マーケットプレイス> -y` → `claude plugin list --json` で版を読む。どれかが 0 以外で終われば `update-failed` で終わる。名前か版が読めなければ（下の段落）、同じく `update-failed` で終わる（次の区間を起動せず、次のコマンドを画面に出す）。作業ディレクトリは印の `cwd` で、消えていれば、パスに `/.worktrees/` を含むならその手前（主ディレクトリ）を、含まなければ在る最も近い親を使う。区切りの 1 行を出す。**起動の順序は、印を消す → `pty.fork()` → 子は同期のパイプの読み口で待つ → 親が `child.pid` と `start` の行を書く → 親が同期のパイプを閉じる → 子が `<本物の claude> <中身>` を exec する、に固定する。** **exec の成否は、close-on-exec の結果のパイプで親へ返す。** 子は exec が失敗したら `errno` をそのパイプへ書いて終わる。親は読み口が何も読まずに閉じれば成功、読めれば `start-failed` として、`end` を書かずに `stop` の行（理由と `errno`）と次のコマンドを出して終了コード 2 で終わる。** 子がすぐ Stop に達しても、hook が読む `child.pid` は新しい値で、親が消す印は前の区間のものだけになる（「本物の claude」の絶対パスと引数の配列で `os.execve` に渡し、シェルも `PATH` の探索も通さない。環境から `CLAUDECODE` / `CLAUDE_CODE_SESSION_ID` / `CLAUDE_CODE_ENTRYPOINT` を外し、`NDF_RELAY_DIR` を置く）。起動できなければ `start-failed` で終わる |
+| 起動する | マーケットプレイスの名前が読めていれば、`claude plugin marketplace update <マーケットプレイス>` → `claude plugin update ndf@<マーケットプレイス> -y` → `claude plugin list --json` で版を読む。どれかが 0 以外で終われば `update-failed` で終わる。名前か版が読めなければ（下の段落）、同じく `update-failed` で終わる（次の区間を起動せず、次のコマンドを画面に出す）。作業ディレクトリは印の `cwd` で、消えていれば、パスに `/.worktrees/` を含むならその手前（主ディレクトリ）を、含まなければ在る最も近い親を使う。区切りの 1 行を出す。**起動の順序は、印を消す → `pty.fork()` → 子は同期のパイプの読み口で待つ → 親が `child.pid` を書く → 親が同期のパイプを閉じ、その時刻を控える → 子が `<本物の claude> <中身>` を exec する → 親が結果のパイプで成功を確かめてから `start` の行を書く（`at` は控えた時刻）、に固定する。** 早い Stop の判定に要るのは `child.pid` だけで、`start` は exec に成功した区間にだけ残る。 **exec の成否は、close-on-exec の結果のパイプで親へ返す。** 子は exec が失敗したら `errno` をそのパイプへ書いて終わる。親は読み口が何も読まずに閉じれば成功、読めれば `start-failed` として、`start` も `end` も書かずに `stop` の行（理由と `errno`）と次のコマンドを出して終了コード 2 で終わる。** 子がすぐ Stop に達しても、hook が読む `child.pid` は新しい値で、親が消す印は前の区間のものだけになる（「本物の claude」の絶対パスと引数の配列で `os.execve` に渡し、シェルも `PATH` の探索も通さない。環境から `CLAUDECODE` / `CLAUDE_CODE_SESSION_ID` / `CLAUDE_CODE_ENTRYPOINT` を外し、`NDF_RELAY_DIR` を置く）。起動できなければ `start-failed` で終わる |
 
 **マーケットプレイスの名前は、中継を始めたときに `claude plugin list --json` の `id` が `ndf@<名前>` の要素から読む**（「確かめたこと」の 10）。**このとき読んだ `version` を、1 つ目の区間の `start` の `plugin_version` にする。**
 開発版のチャネルを使う利用者でも、登録した取得元から更新される。区間の切れ目でもう一度読み、読めなければ `update-failed` とする。版を記録できないまま次の区間を起動しないためである（AC8）。
@@ -408,10 +412,10 @@ stateDiagram-v2
 | AC10 | 同: 今日の `start` が 20 行ある記録で印を与えると、`/exit` を送らず `stop`（`max-starts`）と `ndf-relay:` の 1 行を出し、子を続けさせること |
 | AC11 | 同: 区間の長さが 119・119・119 と続くと 3 つ目の印で `/exit` を送らず `stop`（`spin`）、119・121・119 では送ること。1 つ目の区間（`run` の引数で起動した区間）も数えること。`sigterm` で終わった区間の長さが印の `written_at` までで測られること |
 | AC12 | 同: 試験用の子が印なしで終わると、`end`（`no-mark`）を書いて子の終了コードで終わること |
-| AC13 | 同: 別のプロセスから `relay.py stop` を打つと `stop` ができ、次の印で `/exit` を送らないこと。動いている中継が無ければ `stop` が終了コード 1 |
+| AC13 | 同: 別のプロセスから `relay.py stop` を打つと `stop` ができ、次の印で `/exit` を送らないこと。動いている中継が無ければ `stop` が終了コード 1。生きている中継 2 つと `relay.pid` の死んだディレクトリ 1 つを置いて `stop` を打つと、生きている 2 つにだけ停止の印ができること |
 | AC26 | 同: 同じ pid を返すように差し替えた 2 回の `run` が別の `NDF_RELAY_DIR` を作り、前の起動のディレクトリに置いた `stop` と `next.json` を読まないこと |
-| AC14 | 同: AC10・AC11・AC13 と、`plugin update` の差し替えが 0 以外のとき・次の子の起動に失敗したときに、`ndf-relay:` の 1 行と `stop` の行が出ること。後の 2 つは次のコマンドを画面に出し、終了コード 2。存在しない実行ファイルを次の子にすると、exec の失敗が結果のパイプで返り、`stop` の `reason` が `start-failed`・終了コード 2・次のコマンドが画面に出て、`end` の行が増えないこと。`/exit` にも SIGTERM にも反応しない試験用の子で、SIGKILL の後に終わりを確かめてから `end`（`sigkill`）を書くこと |
-| AC15 | 同: 素通しの 6 つの条件（`NDF_RELAY=0`・`NDF_RELAY_DIR` あり・`-p`・`--help`・副命令 `mcp`・標準入力がパイプ）で、`os.execv` を差し替えて、本物の claude のパスと元の引数がそのまま渡り、環境が `NDF_RELAY_DEPTH` 以外変わらず、何も出力しないこと。`pty` を読み込めないように差し替えた対話の `run` では `ndf-relay:` の 1 行を標準エラーへ出してから素通しすること |
+| AC14 | 同: AC10・AC11・AC13 と、`plugin update` の差し替えが 0 以外のとき・次の子の起動に失敗したときに、`ndf-relay:` の 1 行と `stop` の行が出ること。後の 2 つは次のコマンドを画面に出し、終了コード 2。存在しない実行ファイルを次の子にすると、exec の失敗が結果のパイプで返り、`stop` の `reason` が `start-failed`・終了コード 2・次のコマンドが画面に出て、`start` と `end` の行が増えず、1 日の起動回数にも数えられないこと。`/exit` にも SIGTERM にも反応しない試験用の子で、SIGKILL の後に終わりを確かめてから `end`（`sigkill`）を書くこと |
+| AC15 | 同: 素通しの 6 つの条件（`NDF_RELAY=0`・`NDF_RELAY_DIR` あり・`-p`・`--help`・副命令 `mcp`・標準入力がパイプ）で、`os.execv` を差し替えて、本物の claude のパスと元の引数がそのまま渡り、環境が `NDF_RELAY_DEPTH` 以外変わらず、何も出力しないこと。`pty` を読み込めないように差し替えた対話の `run` では `ndf-relay:` の 1 行を標準エラーへ出してから素通しすること。`plugin list --json` の差し替えが失敗する・`ndf@` の要素が無いときも、対話の `run` が `ndf-relay:` の 1 行を出して素通しすること |
 | AC16 | 同: AC4 の `NDF_RELAY_DIR` 無し。`hooks/claude.json` 以外の hook の定義の差分が無いことを実装の Pull Request の差分で見る |
 | AC19 | 同: 引数なしの `run` で 1 つ目の子の引数が空、`run --model haiku -c` で 1 つ目の子が同じ引数を受け、2 つ目の子は `<印の中身>` だけを受けること。試験用の子が印なしで終了コード 3 で終わると、中継も何も出さずに終了コード 3 で終わること。シグナル 15 で終わると 143 |
 | AC20 | 同: `PATH` の前に `claude` という名前で中継を呼ぶラッパーを置くと、それを飛ばして本物を選ぶこと。`NDF_RELAY_DEPTH=2` では終了コード 127 と 1 行を出すこと。`NDF_RELAY_CLAUDE` が最優先になること |
