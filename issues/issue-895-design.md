@@ -9,7 +9,7 @@
 
 | 順 | 誰が | 何をする |
 | ---: | --- | --- |
-| 1 | 利用者 | 最初に 1 度だけ、`python3 <scripts>/relay.py alias` で中継を安定した場所へ置き、出てきた 1 行（`alias claude='python3 ~/.local/share/ndf/relay.py run'`）をシェルの設定へ足しておく。以後はいつもどおり `claude` と打つ。中継は端末の前景に残り、擬似端末の子として素の claude を起動する。画面は普段の claude の TUI と同じに見える |
+| 1 | SessionStart hook | 利用者が ndf の入った Claude Code を起動すると、`relay.py install` が中継を安定した場所へ置き、ログインシェルの設定（`~/.bashrc` か `~/.zshrc`）へ印のついた囲みで `alias claude=...` を 1 度だけ足し、足したことを 1 行で知らせる。**利用者の手作業は無い。** 次に開いたシェルから、いつもどおり `claude` と打つと中継を挟む。中継は端末の前景に残り、擬似端末の子として素の claude を起動する。画面は普段の claude の TUI と同じに見える |
 | 1b | 利用者 | 起動した claude の中で `/goal /ndf:development-workflow #895` を入力する（中継の引数には渡さない） |
 | 2 | conductor（区間 1） | 設計の関門で `AskUserQuestion` を出す。**このあいだ Stop は起きず、印は書かれない** |
 | 3 | 利用者 | 「承認」と答える（キー入力は中継を通ってそのまま子へ届く） |
@@ -28,7 +28,7 @@
 ```
 ````
 
-利用者が入力したのは手順 1b と手順 3 だけである（手順 1 は最初の 1 度だけ）。**`/goal` を使わない普段の利用では、印が書かれないので、中継は何もしないまま claude と同じ終了コードで終わる。**
+利用者が入力したのは手順 1b と手順 3 だけである（手順 1 は hook が自動で行う）。**`/goal` を使わない普段の利用では、印が書かれないので、中継は何もしないまま claude と同じ終了コードで終わる。**
 
 **中継が使えない・止まると決めたときは、今までどおりに落ちる。**
 
@@ -51,7 +51,8 @@
 | F6 | 区間ごとの記録（版を含む） | 利用者・振り返り・#893 の測定 |
 | F7 | 中継が使えない・止まると決めたときに、今までどおりの運用へ落ちて理由を示す | 中継・利用者 |
 | F8 | 中継の始め方と止め方の案内 | 利用者 |
-| F9 | `alias claude=...` で常に中継を挟む起動。claude の引数の素通し・本物の claude の解決・非対話の素通し・中継の安定した置き場所 | 利用者 |
+| F9 | `alias claude=...` で常に中継を挟む起動。claude の引数の素通し・本物の claude の解決・非対話の素通し | 利用者 |
+| F10 | 中継を安定した場所へ置き直し、ログインシェルの設定へ alias を 1 度だけ足す（`relay.py install`。SessionStart hook が毎回呼ぶ） | Claude Code（SessionStart） |
 
 ## 確かめたこと（2026-09-23、Claude Code 2.1.280・Python 3・Linux、`--model haiku` で実測）
 
@@ -77,9 +78,10 @@
 
 | 要素 | 区分 | 責務 |
 | --- | --- | --- |
-| `plugins/ndf/scripts/relay.py` | 新設 | 中継の本体。副命令 `run`（前景で常駐し、子の claude を起動する。要らなければ素通しする）・`stop`（停止の印を置く）・`mark`（Stop hook の本体）・`alias`（安定した場所へ写し、alias の 1 行を出す）を持つ。標準ライブラリだけで書く |
+| `plugins/ndf/scripts/relay.py` | 新設 | 中継の本体。副命令 `run`（前景で常駐し、子の claude を起動する。要らなければ素通しする）・`stop`（停止の印を置く）・`mark`（Stop hook の本体）・`install`（安定した場所へ写し、シェルの設定へ alias を 1 度だけ足す）を持つ。標準ライブラリだけで書く |
 | `plugins/ndf/hooks/claude.json` の `Stop` | 変える | 環境変数 `NDF_RELAY_DIR` があるときだけ `python3 <root>/scripts/relay.py mark` を呼ぶ 1 件を足す。既存の Slack 通知の後に置く |
-| `development-workflow/references/relay.md` | 新設 | 中継の始め方（`alias`）・止め方・上限・記録の読み方・落ちたときの続け方・区間をまたいで設定を保つ方法 |
+| `plugins/ndf/hooks/claude.json` の `SessionStart`（`matcher: startup`） | 変える | `python3 <root>/scripts/relay.py install` を呼ぶ 1 件を既存の 3 件の後に足す。`timeout` は 5 秒、`continueOnError: true` |
+| `development-workflow/references/relay.md` | 新設 | 中継の始め方（自動の `install` と止め方 `NDF_RELAY_AUTO=0`）・止め方・上限・記録の読み方・落ちたときの続け方・区間をまたいで設定を保つ方法 |
 | `development-workflow/references/context-window.md` の「新しい会話で戻す」 | 変える | 次のコマンドを `ndf-next` のブロック 1 つで出すこと、関門の承認より前に出さないこと、引継ぎ文書の「次に実行するコマンド」も同じ形にすることを定める（形の定義はここ 1 か所） |
 | `development-workflow/SKILL.md` の引き継ぎの 1 行の段落と「`/goal` の引数として呼ばれたとき」 | 変える | 1 行を `ndf-next` のブロックで出すと書き、`relay.md` への参照を足す |
 | `plugins/ndf/scripts/token-guard.sh` の止めたときの理由の文 | 変える | 「次の 1 行を示して」を「次のコマンドを `ndf-next` のブロックで示して」へ直す |
@@ -123,7 +125,7 @@ graph TB
 plugins/ndf/
 ├── hooks/claude.json                         # Stop に 1 件足す
 ├── scripts/
-│   ├── relay.py                              # 新設（run / stop / mark / alias）
+│   ├── relay.py                              # 新設（run / stop / mark / install）
 │   ├── token-guard.sh                        # 理由の文だけ直す
 │   └── tests/test_relay.py                   # 新設
 └── skills/development-workflow/
@@ -170,7 +172,7 @@ plugins/ndf/
 | `run` | `[claude の引数 ...]`。**`run` の後ろはすべて claude の引数で、中継は解釈しない。** 中継の設定は環境変数だけで受ける: `NDF_RELAY_MAX_STARTS`（既定 20）/ `NDF_RELAY_QUIET`（秒、既定 15）/ `NDF_RELAY=0`（常に素通し） | 素通しでは claude の終了コードそのもの（exec で置き換わるため）。中継では最後の区間の claude の終了コード（シグナルで終わったら 128 + シグナルの番号）/ 2: 次の区間の更新か起動に失敗した / 127: 本物の claude が見つからない・起動の入れ子が深すぎる | 区切りの 1 行と、落ちるときの `ndf-relay:` の 1 行を画面へ。印なしで終わるときは何も出さない |
 | `stop` | 無し | 0: 動いている中継に停止の印を置いた（1 つ以上）/ 1: 動いている中継が無い | 置いた中継の pid を 1 行ずつ |
 | `mark` | 標準入力に Stop hook の JSON | 常に 0 | 常に無し |
-| `alias` | 無し | 0: 置いた / 1: 置けない | 置いた場所と、シェルの設定へ足す `alias claude='python3 <置いた場所> run'` の 1 行。シェルの設定ファイルは書き換えない |
+| `install` | 無し | 常に 0（SessionStart を止めない） | 足したときと、既存の `claude` の定義で足さなかったときの初回だけ、`{"systemMessage": "<1 行>"}` を標準出力へ（利用者の画面に出る）。それ以外は何も出さない |
 
 **`run` は、中継が要らない・始められない起動を素通しする**（AC15・AC19）。素通しは、下の「本物の claude」の絶対パスを `os.execve` に渡し、引数をそのまま渡して起動する。**環境は `NDF_RELAY_DEPTH` を 1 増やすことだけを変える**（入れ子の止め方のため。条件 2）。claude を直接打ったのと同じ振る舞い・終了コード・シグナルの届き方になる。
 
@@ -196,13 +198,35 @@ alias は子のプロセスには効かないため、中継は実体を探す�
 | 2 | `PATH` を前から見て、実行できる `claude` のうち、実体（`realpath`）が自分自身（`relay.py` とその安定した置き場所）でなく、先頭 4 KB に `relay.py` を含まないもの（`claude` という名前で中継を呼ぶラッパーを飛ばす） |
 | 3 | 見つからなければ `ndf-relay: 本物の claude が見つからない` を出して終了コード 127 |
 
-### 中継の置き場所と版（F9）
+### 中継の置き場所と alias の自動の追記（F10。`relay.py install`）
 
 **alias は安定した場所 `${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py` を指す。** 版つきのキャッシュ（`~/.claude/plugins/cache/<名前>/ndf/<版>/scripts/relay.py`）を直接指すと、更新しても古い版に固定され、古い版のディレクトリが消えると alias が壊れる。
 
-- `relay.py alias` は、自分を安定した場所へ写し（一時ファイルに書いてから置き換える）、alias の 1 行を出す
-- `run` は始めるたびに `installed_plugins.json` の `ndf@<名前>` の `installPath` を読み、そこにある `relay.py` が安定した場所の写しと中身が違えば、写しを置き換えてから `os.execv` でその新しい写しへ乗り換える（1 回だけ。`NDF_RELAY_HOPPED` で繰り返さない）。読めなければ今の写しのまま続ける
-- **区間の途中と切れ目では乗り換えない。** 区間の切れ目の `claude plugin update` で配布された新しい中継は、利用者が次に `claude` を打ったときから使われる。hook（`mark`）は区間ごとに新しい版のパスで呼ばれるため、**印とディレクトリの形（`next.json` のキーと `NDF_RELAY_DIR` のファイル）は版をまたいで変えない**。変えるときはファイル名を変え、古い中継が新しい印を読み違えないようにする
+**SessionStart hook が Claude Code の起動のたびに `install` を呼ぶ。** hook は起動した版のパスで動くので、配布と `claude plugin update` の後の最初の起動（中継が起動する次の区間を含む）で、安定した場所の中継が新しい版になる。
+
+| # | 段 | すること |
+| ---: | --- | --- |
+| I1 | 止める | `NDF_RELAY_AUTO=0` なら何もしない |
+| I2 | 中継を置き直す | 自分（hook の版の `relay.py`）と安定した場所の写しの中身が違うとき、または写しが無いときだけ、一時ファイルに書いてから置き換える（権限 `0755`）。同じなら何もしない |
+| I3 | 足す先を決める | `$SHELL` の名前が `bash` なら `~/.bashrc`、`zsh` なら `${ZDOTDIR:-$HOME}/.zshrc`。それ以外のシェルでは足さない（何も出さない） |
+| I4 | 既にあるか | 足す先に囲みの開きの行 `# >>> ndf relay >>>` があれば何もしない |
+| I5 | 利用者が消したか | 記録 `${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/rc-added` に足す先のパスがあるのに囲みが無ければ、利用者が消したとみなして足さない（何も出さない）。足し直したいときは記録の行を消す |
+| I6 | 既存の `claude` の定義 | 足す先（bash では `~/.bash_aliases` も）に、囲みの外で `alias claude=` か `claude()` か `function claude` の行があれば足さない。記録 `rc-skipped` に無ければ、`ndf-relay: <足す先> に claude の定義があるため alias を足さない。中継を使うなら <alias の 1 行> を自分で置く` を 1 度だけ知らせ、記録に足す |
+| I7 | 足す | 足す先を `<足す先>.ndf-bak-<UTC の時刻>` へ写してから、末尾へ下の囲みを追記する（ファイルが無ければ作り、写しは作らない）。`rc-added` に足す先のパスを記録し、`ndf-relay: <足す先> へ alias claude を足した。次に開くシェルから効く（今のシェルでは source <足す先>）。戻すには囲みを消す` を知らせる |
+
+足す囲み:
+
+```bash
+# >>> ndf relay >>>
+# ndf の中継（区間の切れ目で claude を自動で起動し直す）。消せば元に戻る。
+alias claude='python3 "${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py" run'
+# <<< ndf relay <<<
+```
+
+**`install` は失敗しても SessionStart を止めない。** 書けない・読めないときは何も出さずに終了コード 0 で終わる。
+中身が同じときに書かないので、2 回目以降の起動ではファイルを 1 つ読み比べるだけで終わる。
+
+**区間の途中と切れ目では、動いている中継は入れ替わらない。** 安定した場所の写しが新しくなっても、動いている `run` のプロセスは古い版のまま最後まで動き、利用者が次に `claude` を打ったときから新しい版になる。hook（`mark`）は区間ごとに新しい版のパスで呼ばれるため、**印とディレクトリの形（`next.json` のキーと `NDF_RELAY_DIR` のファイル）は版をまたいで変えない**。変えるときはファイル名を変え、古い中継が新しい印を読み違えないようにする。
 
 ### 作業ディレクトリ `NDF_RELAY_DIR`
 
@@ -271,7 +295,7 @@ sequenceDiagram
     participant H as Stop hook（mark）
     participant F as NDF_RELAY_DIR
     participant C2 as claude（区間 n+1）
-    U->>R: claude（alias で relay.py run）
+    U->>R: claude（install が足した alias で relay.py run）
     R->>F: relay.pid
     R->>C: pty.fork（子は同期のパイプで待つ）
     R->>F: child.pid・start
@@ -343,7 +367,7 @@ stateDiagram-v2
 
 ## 決定の記録
 
-[issue-895-design-decisions.md](issue-895-design-decisions.md) にある（決定 18 件）。
+[issue-895-design-decisions.md](issue-895-design-decisions.md) にある（決定 19 件）。
 
 ## テスト設計
 
@@ -369,7 +393,8 @@ stateDiagram-v2
 | AC16 | 同: AC4 の `NDF_RELAY_DIR` 無し。`hooks/claude.json` 以外の hook の定義の差分が無いことを実装の Pull Request の差分で見る |
 | AC19 | 同: 引数なしの `run` で 1 つ目の子の引数が空、`run --model haiku -c` で 1 つ目の子が同じ引数を受け、2 つ目の子は `<印の中身>` だけを受けること。試験用の子が印なしで終了コード 3 で終わると、中継も何も出さずに終了コード 3 で終わること。シグナル 15 で終わると 143 |
 | AC20 | 同: `PATH` の前に `claude` という名前で中継を呼ぶラッパーを置くと、それを飛ばして本物を選ぶこと。`NDF_RELAY_DEPTH=2` では終了コード 127 と 1 行を出すこと。`NDF_RELAY_CLAUDE` が最優先になること |
-| AC21 | 同: 一時の HOME で `alias` を打つと安定した場所に写しができ、alias の 1 行が出ること。`installed_plugins.json` の `installPath` の `relay.py` が写しと違うと、`run` が写しを置き換えて 1 回だけ乗り換えること（`os.execv` を差し替えて見る） |
+| AC21 | 同: 一時の HOME と `SHELL=/bin/bash` で `install` を打つ。1 回目: 安定した場所に写しができ、`~/.bashrc` に囲みが 1 つ足され、バックアップと `rc-added` の記録ができ、`systemMessage` が 1 行出る。2 回目: 何も書かず何も出さない（ファイルの中身と更新時刻が変わらない）。囲みを消した後の 3 回目: 足さない。`~/.bashrc` に `alias claude=` がある: 足さず、案内は 1 回目だけ。`NDF_RELAY_AUTO=0`: 何もしない。`SHELL=/bin/fish`: 写しだけを置き直し、設定は書かない。写しと中身が違う `relay.py` から打つと写しが置き換わる。書けないディレクトリでも終了コード 0 |
+| AC22 | 実装の Pull Request の差分で、`install` を呼ぶのが `hooks/claude.json` の SessionStart だけで、Codex / agy の hook の定義に無いこと。`claude plugin validate` が通ること |
 | AC17 | 擬似端末の上で alias と同じ形（引数なしの `run`）で中継を動かし、起動した claude へ最初の入力を書き込んで始める。`--model haiku` の claude に「次の区間を `ndf-next` で 1 回出す」指示を 2 段で渡す通しの確かめ。3 つ目の区間の起動・`log.jsonl` の `start` 3 行と `end` 2 行（`ended_by` が `mark`）を見る。1 つ目の区間で `AskUserQuestion` を出させ、答える前に印が無いことも見る。前の区間の画面が端末の履歴を遡って読めるかも記録する。記録を実装の Pull Request に残す |
 | AC18 | `uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest pytest . -q -n 4` |
 
@@ -378,6 +403,7 @@ stateDiagram-v2
 | 項目 | 内容 |
 | --- | --- |
 | `/goal` と Skill を位置引数で渡したときの挙動 | 2 つ目以降の区間は `<本物の claude> <印の中身>` で起動する。`/cost` はコマンドとして実行された。`/goal /ndf:development-workflow ...` の複数行が同じように働くかは AC17 で確かめる。働かなければ、中身を `/goal` の無い形で渡し、`/goal` を 2 つ目の入力として子の端末へ書く形へ替える（実装で決める） |
+| 既存の `claude` の定義を見落とす | I6 が見るのは足す先と `~/.bash_aliases` だけである。別のファイルから読み込む定義は見落とし、囲みの alias が後から上書きする（後に読まれた定義が勝つ）。利用者は囲みを消せば戻せ、消した後は足し直さない（I5） |
 | 素通しの副命令の一覧の追随 | 副命令の名前は Claude Code の版で増える。一覧に無い副命令は対話として扱われ中継を挟むが、その副命令が端末を使わずに終われば印は書かれず、中継は同じ終了コードで終わるので害は小さい。一覧は実装の時点の `claude --help` から写す |
 | 切れ目で `/goal` の判定が止めを許すか | 今の運用では conductor が切れ目で止まれている。止めを拒まれて応答が続いても、中継は静まるまで待つので誤って終わらせない。続いた応答がブロックを出さなければ、印は消えて中継は待ち続ける |
 | `goal_status` の記録の形 | 目標の判定の後に記録へ書かれることは確かめた（「確かめたこと」の 4）。止めを拒んだときの値と、記録の中の目標の有無の見分け方は AC17 で記録を読んで決める（実装で決める） |
