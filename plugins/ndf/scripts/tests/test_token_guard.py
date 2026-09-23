@@ -405,6 +405,21 @@ def test_context_uses_last_assistant_usage(tmp_path, state):
     assert denied(run(skill(under_then_over, session="suo"), state))
 
 
+def test_context_only_reads_last_200_lines(tmp_path, state):
+    # 現状固定: 上限超過の usage が末尾 200 行から外れると通り、範囲内なら拒否される。
+    outside_tail = transcript(tmp_path, 250_000, name="outside.jsonl")
+    with outside_tail.open("a") as fh:
+        for _ in range(201):
+            fh.write(json.dumps({"type": "attachment"}) + "\n")
+    assert denied(run(skill(outside_tail, session="sout"), state)) is None
+
+    inside_tail = transcript(tmp_path, 250_000, name="inside.jsonl")
+    with inside_tail.open("a") as fh:
+        for _ in range(198):
+            fh.write(json.dumps({"type": "attachment"}) + "\n")
+    assert denied(run(skill(inside_tail, session="sin"), state))
+
+
 def test_context_malformed_transcript_passes(tmp_path, state):
     # 現状固定: usage が上限超過でも、壊れた JSON 行がある記録は読めず fail-open する。
     tp = transcript(tmp_path, 250_000)
