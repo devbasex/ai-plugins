@@ -36,6 +36,12 @@ from .vocabulary import (
 TEST_PATH_MARKERS = ("/test/", "/tests/", "/spec/", "/specs/", "__tests__/")
 TEST_NAME_MARKERS = (".test.", ".spec.", "_test.", "_spec.", "test_", "spec_")
 
+# 本番コードの拡張子。構造改善を飛ばしてよいかの判定（`assess`）に使う（#494）。
+CODE_EXTENSIONS = frozenset({
+    ".py", ".sh", ".bash", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".php",
+    ".rb", ".go", ".rs", ".java", ".kt", ".swift", ".c", ".h", ".cc", ".cpp", ".cs",
+})
+
 
 def safe_int(value: Any, fallback: int = 0) -> int:
     """LLM が返した値を int にする。数値として読めなければ `fallback`。
@@ -188,6 +194,31 @@ def _is_test_path(path: str) -> bool:
     name = lowered.rsplit("/", 1)[-1]
     return (any(m in lowered for m in TEST_PATH_MARKERS)
             or any(m in name for m in TEST_NAME_MARKERS))
+
+
+def production_code_changes(work: str, base: str) -> Optional[list[tuple[str, int]]]:
+    """`<base>...HEAD` の差分のうち、本番コードのファイルと変更行（追加 + 削除）を返す。
+
+    `<base>` を解けないときは `None`。**`--no-renames` を付ける。** 付けないと rename が
+    `dir/{old.py => new.py}` の形になり、拡張子で判定できない。付ければ旧パスの削除と
+    新パスの追加に分かれ、両方のパスで判定できる。`-z` は、ASCII 以外を含むパスが
+    引用符付きで出て拡張子が読めなくなるのを防ぐ。
+    """
+    out = git_out(work, ["diff", "--numstat", "-z", "--no-renames", f"{base}...HEAD"])
+    if out is None:
+        return None
+    changes: list[tuple[str, int]] = []
+    for line in out.split("\0"):
+        parts = line.split("\t")
+        if len(parts) < 3:
+            continue
+        path = parts[2]
+        if (pathlib.PurePosixPath(path).suffix.lower() not in CODE_EXTENSIONS
+                or _is_test_path(path)):
+            continue
+        # バイナリは `-` になるので数えない
+        changes.append((path, sum(int(n) for n in parts[:2] if n.isdigit())))
+    return changes
 
 
 def commit_touches_tests(work: str, sha: str) -> bool:

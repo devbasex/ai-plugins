@@ -49,6 +49,7 @@ from refactor_lib.commands.apply import (  # noqa: E402
     cmd_merge_proposals,
     cmd_next_apply_round,
 )
+from refactor_lib.commands.assess import DEFAULT_MAX_LINES, cmd_assess  # noqa: E402
 from refactor_lib.commands.converge import (  # noqa: E402
     cmd_abandon_items,
     cmd_merge_fix,
@@ -220,6 +221,17 @@ def main() -> None:
         sp.add_argument("--dry-run", action="store_true",
                         help="取り消すコミットを表示するだけで実行しない")
         sp.set_defaults(func=func)
+
+    ap = sub.add_parser(
+        "assess",
+        help="構造改善を飛ばしてよいかを差分から判定する。"
+             "終了コード 0 = 通す / 3 = 飛ばしてよい / 2 = 判定できない")
+    ap.add_argument("--base", required=True,
+                    help="起点の ref。`<base>...HEAD` の差分を見る")
+    ap.add_argument("--max-lines", type=int, default=DEFAULT_MAX_LINES,
+                    help="本番コードの変更行（追加 + 削除）がこれ以下なら飛ばしてよい "
+                         f"(default: {DEFAULT_MAX_LINES})")
+    ap.set_defaults(func=cmd_assess)
 
     rp = sub.add_parser(
         "report", help="Step 8 — ラウンド表・項目表・見送り・指標")
