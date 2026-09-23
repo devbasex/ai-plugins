@@ -32,7 +32,6 @@ import sys
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
-from itertools import pairwise
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugins/ndf/scripts/lib"))
@@ -70,7 +69,7 @@ def parse_ts(value) -> float | None:
 
 def active_seconds(times: list[float], cap: int) -> float:
     times = sorted(times)
-    return sum(min(b - a, cap) for a, b in pairwise(times))
+    return sum(min(b - a, cap) for a, b in zip(times, times[1:]))  # pairwise は 3.10 から
 
 
 def most_common(counter: Counter, empty: str = "不明") -> str:
