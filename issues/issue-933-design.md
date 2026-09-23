@@ -73,6 +73,7 @@
 | 共通層 `scripts/lib/limits.py` | 変える | `plan` / `add-tests` / `implement` の監視の上限を足す |
 | 共通層 `scripts/lib/assignment.py` | 変える | 輪番（`impl_assign`）を外し、実装担当の選び方を足す |
 | `SKILL.md` と `docs/01〜04` | 書き直す | 5 フェーズの形。駆動の bash は短くなる |
+| 確定仕様 `docs/specifications/cross-refactoring-participants.md` / `cross-refactoring-round-tests-and-assess.md` / `cross-refactoring-apply-intake.md` と `docs/specifications/README.md` の索引 | 改める（`plan-to-spec` の工程） | 輪番・廃止する 3 引数・全体のテストを 2 回に限る記述・適用ラウンドの開き直しは、この変更で過去の仕様になる。現行の仕様を新しい確定仕様へ移し、旧い 3 本には「#933 で置き換えた」と先頭に書く |
 
 ### 構成要素図
 
@@ -155,7 +156,7 @@ plugins/ndf/scripts/lib/{jev,limits,assignment}.py
 | `plan` | オブジェクト | `available_minutes`・`reserve`（下の表）・`selected[]`・`table_source`（初期値か履歴か） |
 | `items[]` | 項目 | 採った項目。下の表 |
 | `deferred_items[]` | 今と同じ形 | 理由は `budget` / `rank` / `duplicate` / `vocabulary` / `threshold` / `test_failed` / `not_done` |
-| `whole_test` | `{ran, flags[], status, seconds, head}` | 検証の中の全体のテスト（最大 1 回） |
+| `whole_test` | `{ran, flags[], status, seconds, head, reverted}` | 検証の中の全体のテスト（最大 1 回）。`reverted`（bool）は、落ちて印を持つ項目を取り消したら真になる。最終ゲートはこのキーを読み、取り消した後の HEAD で全体のテストを走らせるかを決める |
 | `baseline_test` / `round_test` | 今と同じ | 着手前のテスト。`baseline_test.seconds` を控えに使う |
 | `final_gate` / `plan_comment` / `pending_push` / `sync_command` | 今と同じ | 変えない |
 | `history_written` | bool | 履歴へ追記したか（二重に書かない） |
@@ -249,9 +250,9 @@ plugins/ndf/scripts/lib/{jev,limits,assignment}.py
 | --- | --- | --- | --- |
 | `init` | 引数 | `ID` `RUNTIMES` `RUNTIMES_CSV` `IMPL` `WORK` `TMP_DIR` ほか今と同じ。`PHASE`（再開の地点） | 0 / 4 |
 | `merge-proposals` | 参加者の結果ファイル | — | 0 / 2（候補 0 件。最終ゲートへ） |
-| `merge-plan` | 実装担当の `plan` の結果ファイル | `TESTS_NEEDED=0\|1` | 0 / 2（採る項目 0 件） / 4 |
-| `merge-tests` | git の範囲 | — | 0 / 2（全項目のテストが落ちた） |
-| `merge-implement` | git の範囲 | — | 0 / 2（1 件も適用されなかった） |
+| `merge-plan` | 実装担当の `plan` の結果ファイル | `TESTS_NEEDED=0\|1` | 0 / 2（残る項目 0 件。最終ゲートへ） / 4 |
+| `merge-tests` | git の範囲 | — | 0 / 2（残る項目 0 件。足したテストが落ちた項目を見送った結果、テストを足さない項目も残らないとき。最終ゲートへ） |
+| `merge-implement` | git の範囲 | — | 0 / 2（残る項目 0 件。1 件も適用されなかったとき。最終ゲートへ） |
 | `verify` | 状態 | `VERIFY=done\|fix` | 0 / 4 |
 | `merge-fix` | git の範囲 | — | 0 |
 | `finalize` | 状態 | — | 0（履歴の追記に失敗しても 0。知らせるだけ） |
@@ -411,6 +412,7 @@ stateDiagram-v2
 - 同じ `init` を打ち直すと、`schema: 2` の状態の `phase` を `PHASE` として返し、駆動は終わったフェーズを飛ばす。各 `merge-*` は今と同じく取り込み済みの印で冪等にする
 - `schema` を持たず `rounds` を持つ状態で `final` が空なら、終了コード 4 で止まる。案内は「旧い版（v10.17.5 以前）で終えるか、`<状態ファイル>` を消して始め直す」の 1 行である
 - 再開で `--budget-minutes` を渡すと置き換える（`resume_changes` に残る）。`--implementer` は置き換えない（通知だけ）
+- **再開で参加者を作り直した結果、実装担当が参加者から外れたとき**（`--exclude` で外された・認証が通らない）は、計画のフェーズより前なら決め方を当て直し、新しい実装担当と理由を `resume_changes` に残す。計画のフェーズ以降なら終了コード 4 で止める。計画・テスト・実装を担った者が途中で替わると、見積りの前提（担当ごとの所要）と、項目とコミットの対応を読む者が食い違うためである
 
 ## 非機能の実現方式
 
@@ -436,7 +438,7 @@ stateDiagram-v2
 | AC16b | `final-gate` の単体（`whole_test.reverted` が真で `--ci-check` が無いとき、単独起動でも全体のテストを走らせる。落ちたら `final-fix` の経路を返す） |
 | AC17〜AC20 | `allocation.py` の単体（`NDF_METRICS_DIR` を一時ディレクトリへ向ける。#938 の汚染を繰り返さない） |
 | AC21 | `assignment.py` の単体 |
-| AC22 AC23 | `jev.py` の単体（HTTP を偽の応答へ差し替える。鍵が無い・非公開・失敗・確信度の足りない場合） |
+| AC22 AC23 | `jev.py` の単体（HTTP を偽の応答へ差し替える。鍵が無い・`NDF_JEV=0`・非公開・疎通の失敗・呼び出しの失敗・確信度の足りない場合）と、`merge-proposals` / `merge-plan` / `verify` の単体（段・同じ変更か・D5 の 3 つの経路が Jev の答えと実装担当の答えのどちらでも決まる） |
 | AC24 AC25 | 再開の単体（フェーズの飛ばし・旧い状態で止まる） |
 | AC26 | `report` の単体 |
 | AC27 AC28 | 既存のテストのうちラウンド制に依らないもの（`test_scope_*`・`test_assess`・`test_sync_*`・`test_plan_comment*` ほか）をそのまま通す |

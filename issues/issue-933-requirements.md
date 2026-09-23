@@ -68,6 +68,7 @@
 - Jev を使う箇所・問いの形・使えるかの判定・使えないときの経路
 - 状態ファイルの形の変更と、旧い形の状態ファイルの扱い（再開）
 - `SKILL.md`・`docs/`・`prompts/`・呼び出し元の文書（`development-workflow` の工程表・`CLAUDE.md` の cross-refactoring の節）の改訂（実装の持ち場で行う）
+- ラウンド制を確定仕様として持つ `docs/specifications/cross-refactoring-participants.md`・`cross-refactoring-round-tests-and-assess.md`・`cross-refactoring-apply-intake.md` と `docs/specifications/README.md` の索引の改訂（確定仕様化の工程で行う）
 - #754 #755（適用の並列化）の前提が変わることの記録と、課題の扱いの決定
 
 含まない:
@@ -130,8 +131,8 @@
 ### 実装担当と Jev
 
 - [ ] AC21: 実装担当は `--implementer NAME` で名指しでき、名指しが無ければ設計が定める規則で 1 者に決まる。再開しても変わらない
-- [ ] AC22: `AI_GATEWAY_API_KEY` があり、Jev の疎通の確認が通るとき、順位付けと危険の印の判定の一部は Jev の答えで決まる。状態ファイルの `judge.kind` が `"jev"` になる
-- [ ] AC23: Jev が使えないとき（鍵が無い・疎通が通らない・呼び出しが失敗した）は、実装担当が同じ判断を行い、`judge.kind` が `"runtime"`、`judge.reason` が使わなかった理由になる。進行は止まらない
+- [ ] AC22: `AI_GATEWAY_API_KEY` があり、Jev の疎通の確認が通るとき、次の 3 つは Jev の答えで決まる（確信度が下限に満たない答えは除く）: 順位の段、2 件の提案が同じ変更かの判定（候補の統合）、危険の印の D5。状態ファイルの `judge.kind` が `"jev"` になる
+- [ ] AC23: Jev が使えないとき（鍵が無い・`NDF_JEV=0` で無効にした・対象が非公開のリポジトリ・疎通が通らない）は、実装担当が同じ 3 つの判断を行い、`judge.kind` が `"runtime"`、`judge.reason` が使わなかった理由になる。使える実行の中で 1 回の呼び出しが失敗したときは、その問いだけを実装担当の答えで決め、`judge.failures` に数える（`judge.kind` は `"jev"` のまま）。どちらの場合も進行は止まらない
 
 ### 状態と再開・報告
 
