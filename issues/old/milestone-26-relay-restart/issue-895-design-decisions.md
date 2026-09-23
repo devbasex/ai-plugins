@@ -212,3 +212,49 @@ SessionStart hook は起動した版のパスで動くので、`claude plugin up
 
 Stop hook で上限を見て応答を続けさせる形は採らない。関門を `AskUserQuestion` でなく文で尋ねて止まった
 応答まで、承認の前に切らせることになる。
+
+## 実装で決めたこと（2026-09-23、Claude Code 2.1.280・`--model haiku` で実測）
+
+設計の「未確認のまま残ること」のうち、実装で決めるとした 3 件を実測で決めた。
+
+### 決定 21: 次の区間の中身は `/goal` を含めたまま位置引数 1 つで渡す
+
+擬似端末の子として `claude --model haiku "/goal <条件>"` を起動すると、目標が設定されて応答が
+始まった。1 行目が `/goal ...` の複数行の位置引数でも、改行ごと 1 つの条件として設定された。
+そのため設計どおり `<本物の claude> <印の中身>` で起動する。`/goal` を 2 つ目の入力として子の端末へ
+書き込む代わりの形は作らない。
+
+### 決定 22: 背景の処理の判定は `background_tasks` の `status: running` だけで行う
+
+背景で起動したサブエージェントは、主会話の Stop hook の `background_tasks` に
+`{"id", "type": "subagent", "status": "running", "description", "agent_type"}` の形で載った。
+サブエージェントが終わると、人の入力なしに Stop がもう一度起き、`background_tasks` は空の配列に
+戻った。背景の Bash（`type: shell`）と同じ判定で足りるため、`type` を問わず `running` の有無だけを
+見る。会話の記録から背景の Agent の未完了を数える代わりの形は作らない。
+
+### 決定 23: 目標の有無と判定は、記録の `goal_status` の attachment の行で読む
+
+`/goal` の目標の設定と判定は、会話の記録の `type: "attachment"` の行の
+`attachment.type: "goal_status"` に書かれた。設定は `sentinel: true` と `met: false`、判定は
+`met`（未達で止めを拒んだら `false` と `reason`、達成なら `true` と `reason`・`iterations` など）を持つ。
+`stop_hook_summary` の `preventedContinuation` は未達でも `false` のままで、拒否の検出には使えない。
+
+中継は、最後の `sentinel` の行より後に目標が続いていて（`met: true` の判定が無い）、印の
+`written_at` より後の判定の行（`timestamp`）が無ければ、`/exit` を入力せずに待つ。`met: true` の
+判定の後は目標が終わったものとして待たない。
+
+### 決定 24: 文脈量の hook は `relay.py is-child` で中継の直接の子かを見る
+
+文脈量の hook（`token-guard.sh`）は bash で書かれていて、`mark` の判定 4 と同じ親のたどりを持たない。
+同じ判定を bash に写すと、2 つの実装が食い違う。そこで `relay.py` に内部の副命令 `is-child`
+（中継が動いていて、hook を呼んだ claude が `child.pid` と一致すれば終了コード 0）を置き、hook は
+上限を超えたときだけそれを呼ぶ。利用者が打つ副命令ではないため、`relay.md` には載せない。
+
+### 決定 25: 待ちの秒数は環境変数で短くできるようにし、試験で使う
+
+静まり（`NDF_RELAY_QUIET`）のほかに、印の確認の間隔（`NDF_RELAY_POLL`、既定 2）・`/exit` と改行の
+間（`NDF_RELAY_EXIT_GAP`、既定 1）・`/exit` の後の待ち（`NDF_RELAY_EXIT_WAIT`、既定 30）・SIGTERM の
+後の待ち（`NDF_RELAY_TERM_WAIT`、既定 10）・空回りの秒数（`NDF_RELAY_SPIN`、既定 120）・
+`plugin list` と `plugin update` の打ち切り（`NDF_RELAY_LIST_TIMEOUT` / `NDF_RELAY_UPDATE_TIMEOUT`）を
+環境変数で受ける。既定の値は設計のとおりで、試験では 1 秒未満へ縮めて擬似端末の上の単体テストを
+数十秒で終える。

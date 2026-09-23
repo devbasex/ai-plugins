@@ -52,6 +52,14 @@
             "description": "NDF: report stray changes in the main directory and follow the active worktree branch",
             "continueOnError": true,
             "suppressOutput": false
+          },
+          {
+            "type": "command",
+            "command": "python3 ${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/relay.py install",
+            "description": "NDF: place the relay in a stable location and add the claude alias to the shell rc once",
+            "timeout": 5,
+            "continueOnError": true,
+            "suppressOutput": false
           }
         ]
       }
@@ -63,6 +71,13 @@
             "type": "command",
             "command": "sh -c 'ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; if [ -n \"$ROOT\" ]; then node \"$ROOT/scripts/slack-notify.js\" session_end; fi; exit 0'",
             "description": "Send Slack notification when Claude Code exits",
+            "continueOnError": true
+          },
+          {
+            "type": "command",
+            "command": "sh -c '[ -n \"${NDF_RELAY_DIR:-}\" ] || exit 0; ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ -n \"$ROOT\" ] || exit 0; python3 \"$ROOT/scripts/relay.py\" mark; exit 0'",
+            "description": "NDF: under the relay, copy the ndf-next block of the last reply to the relay mark",
+            "timeout": 5,
             "continueOnError": true
           }
         ]

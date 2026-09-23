@@ -29,5 +29,6 @@
 | [test-monitor-env-isolation.md](test-monitor-env-isolation.md) | テストの実行中だけ監視の上限を指す環境変数（接頭辞 `MONITOR_`）をリポジトリの根の共通の前提で外すこと、外す時点と戻す時点、根の設定ファイルで基準のディレクトリを固定すること |
 | [ndf-token-waits-and-context-cut.md](ndf-token-waits-and-context-cut.md) | 待つ間の問い合わせ（前景の `sleep` の待ち・変わらないファイルの読み直し）と、文脈が上限を超えた conductor の工程の起動を止める hook（`token-guard.sh`）の判定・記録の形・入出力の契約、引き継ぎの 1 行、4 ランタイムの扱い。規約は `development-workflow` の `references/waiting.md` と `context-window.md` が正 |
 | [ndf-worker-agent-and-skill-excerpts.md](ndf-worker-agent-and-skill-excerpts.md) | サブエージェントに Skill 本文を読ませない仕組み。記録のコマンド 1 行（`projects-sync.sh` が issue の本文と盤面へ同時に残す）の契約、worker のエージェント定義 `ndf:worker`（Skill と Agent のツールを外す）、抜粋の形と上限、仕事を分ける器と小さな作業の線引き。規約は `development-workflow` の `references/agent-layers.md` / `work-vessels.md` と `skills/EXCERPTS.md` が正 |
+| [ndf-relay-segment-restart.md](ndf-relay-segment-restart.md) | 区間の切れ目で claude を起動し直す中継（`relay.py`）。`ndf-next` のブロックを印へ写す Stop hook、擬似端末の子としての起動と素通しの条件、静まり・上限・空回り・停止の印、作業ディレクトリと記録の形、alias を 1 度だけ足す `install`、中継の下で文脈量の拒否を止め続けること。利用者向けの案内は `development-workflow` の `references/relay.md`、次のコマンドの形は `context-window.md` が正 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
