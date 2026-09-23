@@ -44,7 +44,7 @@
 | 要素 | 責務 | 変更 |
 | --- | --- | --- |
 | `plugins/ndf/scripts/lib/assignment.py` | 母集合と座席と参加者の解決 | 定数 `DEFAULT_REVIEW_RUNTIMES` を足し、`review_pool` をそれとホストから作る。`resolve_participants` は母集合に無い者の除外を無視し、`Participants.ignored_exclude` に残す。`only` が母集合・`--include`・`--exclude` のどれにも無いときは足す者として扱う（決定 12）。`Participants.to_state()` は `ignored_exclude` を含む 8 項目を返す |
-| `plugins/ndf/skills/cross-review/scripts/state.py` | 状態ファイル・観点・参加者の解決・ラウンドの開始 | 控えの取得を関数 `_fetch_existing_comments` に分け、`start-round` からも呼ぶ。`start-round` が変更の節のファイルを書く。分類 `design` と `DESIGN_REVIEW_TEMPLATE` を足す。`_resolve_reviewers` が無視した除外を 1 行で出す |
+| `plugins/ndf/skills/cross-review/scripts/state.py` | 状態ファイル・観点・参加者の解決・ラウンドの開始 | 控えの取得を関数 `_fetch_existing_comments` に分け、`start-round` からも呼ぶ。`start-round` が変更の節のファイルを書く。分類 `design` と `DESIGN_REVIEW_TEMPLATE` を足す。`_resolve_reviewers` が無視した除外を 1 行で出す。`report` の参加者の節に「--exclude で指定したが既定の母集合に無かった者」の 1 行を足し、`ignored_exclude` を出す |
 | `plugins/ndf/skills/cross-review/scripts/launch-reviewer.sh` | レビューのプロンプトを組んで担当を起動する | 変更の節のファイルがあれば埋め込む。出し切りの指示と、テストと背景の処理を起動しない指示を足す。先頭のコメントの「母集合が 4 者」を「担当は 4 ランタイムのどれでもなりうる」へ直す（`launch-codex.sh`・`launch-agy.sh` の同じコメントも） |
 | `plugins/ndf/skills/fix/scripts/fetch-pr-comments.sh` | 既存コメントの 3 つの取得元を 1 本で取る | 引数 `--strict` を足す。付けたときは 3 つのどれか 1 つでも失敗すれば終了コード 1（付けないときは今どおり 3 つとも失敗したときだけ 1） |
 | `plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/setup.py` | cross-refactoring の参加者の解決 | 無視した除外を 1 行で出す |
@@ -183,6 +183,8 @@ cross-refactoring の `setup.py`）は、空でなければ次の 1 行を標準
 **`--only` で名指しした者は、既定の母集合に無くても参加者にする**（決定 12）。`resolve_participants` は、`only` が
 母集合にも `--include` にも無く、`--exclude` にも無いとき、`only` を足す者として扱ってから今の検査を通す。
 `--only agy` は `--include agy` 無しで今と同じく agy 1 者で回る。`--only agy --exclude agy` は今どおり矛盾で止まる。
+足した名前は `participants.included` に書かない（記録は `only` だけが持つ）。再開で `--only none` を渡すと、
+既定の母集合へ戻り、agy は参加者から外れる。
 
 **この共有層の変更は cross-refactoring にも及ぶ。** cross-refactoring の `init` は、母集合に無い者の除外で今は
 中断する（終了コード 4）。変更後は無視して `ℹ` の 1 行を出し、続ける。重なり（足す者と外す者に同じ名前）と
@@ -310,8 +312,9 @@ sequenceDiagram
 | --- | --- |
 | AC1 AC2 AC3 | `test_lib_assignment.py`: `review_pool(h)` をホスト 4 通りで比べる。`resolve_participants` + `review_seats` で host=claude の round 1〜3 を比べる |
 | AC4 | 同上: `--include agy` の座席が今の既定の輪番と一致する。`--exclude agy` が例外を出さず `ignored_exclude == ["agy"]`、`available` に agy が無い。`test_state_review_pool.py`: `init --exclude agy` が終了コード 0 で `ℹ` の行を出し、状態ファイルに `ignored_exclude` が残る。綴りの誤りは今どおり 2 |
-| AC4b | `test_lib_assignment.py`: `only="agy"` で `include` 無しでも参加者が `[agy]` になり、`only="agy", exclude=["agy"]` は今どおり `AssignmentError` |
+| AC4b | `test_lib_assignment.py`: `only="agy"` で `include` 無しでも参加者が `[agy]` になり、`included` は空。`only="agy", exclude=["agy"]` は今どおり `AssignmentError`。`test_state_resume_args.py`: `--only agy` で始めた実行を `--only none` で再開すると、参加者が既定の 3 者に戻る |
 | AC4c | cross-refactoring の `test_init.py`: `{"exclude": [["agy"]]}` が中断せず `ℹ` の行を出す。重なりの指定は今どおり終了コード 4 |
+| AC4d | 上の表の `test_the_report_lists_who_took_part` の書き換え |
 | AC5 | 目で見る。`grep -rn "4 者" plugins/ndf/skills/cross-review CLAUDE.md plugins/ndf/README.md docs/specifications/cross-review-participants-and-seats.md` の当たりのうち、現行の説明は 0 件。出た版の変更点の記録（`plugins/ndf/README.md` の 10.17.3 の更新案内）は書き換えない |
 | AC6 AC7 AC8 | 目で見る（文言）。`test_launch_reviewer_prompt_context.py` の既存の組み立てのテストが通る |
 | AC9 | `start-round` のテスト（新規 `test_state_round_changes.py`）: 一時の git リポジトリで 2 つの head を作り、2 ラウンド目で変更の節のファイルが書かれ、2 つの SHA とファイル名が入る。`launch-reviewer.sh` の組み立てで、ファイルがあるときプロンプトに節が入る |
@@ -324,6 +327,8 @@ sequenceDiagram
 | AC15 | 目で見る（テンプレートの文言） |
 | AC17 | 既存の `test_classify_findings.py`（minor は数えない区分へ落ちる）と judge のテストが変更なしで通る |
 | AC18 | 既存の `test_state_check_oscillation.py`・`test_judge_no_result_reason.py` が変更なしで通る |
+| AC19 | `_evaluate_convergence` と `review_seats` を変えない（差分に現れない）ことを実装の PR で確かめる |
+| AC20 | `uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest pytest . -q -n 4` が通る |
 
 **期待を書き換える既存のテスト**（決定 1・2・12 で振る舞いが変わるため）:
 
@@ -331,14 +336,14 @@ sequenceDiagram
 | --- | --- | --- |
 | `cross-review/tests/test_state_review_pool.py` の `--only` のテスト（264 行・292 行付近） | 既定の母集合が 4 者 | 3 者（`--only agy` は AC4b） |
 | 同じファイルの除外のテスト（422〜435 行付近） | `--exclude agy` で `excluded == ["agy"]` | `excluded == []`・`ignored_exclude == ["agy"]` |
+| 同じファイルの、`new_init` の既定の母集合を 4 者と期待する残りのテスト（400〜402・442・452・498〜500・507・552〜554・569 行付近） | 母集合・`available`・`calls` が agy を含む 4 者 | 既定の 3 者（agy を含む期待は `--include agy` を渡す形へ） |
+| 同じファイルの `test_the_report_lists_who_took_part`（727 行付近） | 静的な参加者の記録から報告を作る | `init --exclude agy` で作った状態から報告を作り、「既定の母集合に無かった者: agy」の行が出る |
 | `cross-refactoring/tests/test_assignment.py`（56〜58 行） | `review_pool(host) == list(ALL_RUNTIMES)` | 既定の 3 者とホスト |
 | `scripts/tests/test_lib_assignment.py`（66 行付近） | `review_pool` が 4 者 | 同上 |
 | `cross-refactoring/tests/test_init.py`（285 行） | `--exclude agy` で中断（終了コード 4） | 続ける（AC4c） |
 | `scripts/tests/test_lib_participants.py`（147 行付近） | 母集合に無い者の除外は例外 | 無視して `ignored_exclude` に残す |
 | 同じファイル（193 行付近） | `to_state()` が 7 項目と完全一致 | `ignored_exclude` を含む 8 項目 |
-| `cross-review/tests/test_state_resume_args.py`（195 行以降） | 再開の `--exclude agy` が `excluded` に残る | 既定の母集合では `ignored_exclude` に残り、`excluded` は空 |
-| AC19 | `_evaluate_convergence` と `review_seats` を変えない（差分に現れない）ことを実装の PR で確かめる |
-| AC20 | `uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest pytest . -q -n 4` が通る |
+| `cross-review/tests/test_state_resume_args.py` の `test_exclude_reruns_the_probe_and_drops_the_name`・`test_the_participants_are_recorded_as_one_change`・`test_unpassed_arguments_come_from_the_state_file` | 再開の `--exclude agy` が `excluded` に残る | 既定の母集合では `ignored_exclude` に残り、`excluded` は空 |
 
 ## 未確認のまま残ること
 

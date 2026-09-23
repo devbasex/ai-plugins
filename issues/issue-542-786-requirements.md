@@ -64,8 +64,9 @@
 - [ ] AC2: ホストが codex または kiro のときも、既定の参加者は claude / codex / kiro の 3 者である
 - [ ] AC3: ホストが agy のとき、参加者は agy を含む 4 者である（ホストは常に母集合に入る。#892）
 - [ ] AC4: `--include agy` を付けると agy が参加者に戻り、座席は今（v10.17.3）の既定と同じ輪番になる。`--exclude agy` を付けても（既定に無い者を外す指定でも）終了コード 0 で進む
-- [ ] AC4b: `--only agy` を `--include agy` 無しで渡すと、agy 1 者で回る（名指しした者は既定の母集合に無くても参加者になる）。`--only agy --exclude agy` は今どおり終了コード 1 で止まる
+- [ ] AC4b: `--only agy` を `--include agy` 無しで渡すと、agy 1 者で回る（名指しした者は既定の母集合に無くても参加者になる）。`--only agy --exclude agy` は今どおり終了コード 1 で止まる。再開で `--only none` を渡すと既定の 3 者に戻る
 - [ ] AC4c: cross-refactoring の `init` に `--exclude agy` を渡すと（cross-refactoring の母集合に agy は無い）、中断せずに `ℹ` で始まる 1 行を出して続ける。足す者と外す者の重なりは今どおり終了コード 4 で止まる
+- [ ] AC4d: 完了の報告（`report`）に、`--exclude` で指定したが既定の母集合に無かった者が 1 行で出る
 - [ ] AC5: 次の文書が、既定の母集合を「claude / codex / kiro とホスト。agy は `--include agy` で戻す」と書く。現行の説明として母集合を 4 者と書いた記述は残らない（出た版の変更点の記録は書き換えない）
   - `plugins/ndf/skills/cross-review/SKILL.md` と `docs/05-pool-and-convergence.md`
   - 確定仕様 `docs/specifications/cross-review-participants-and-seats.md`
