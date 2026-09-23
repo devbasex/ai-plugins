@@ -180,11 +180,12 @@ allowed-tools:
   起動しない**（本番コードの差分が無いか、変更が `--max-lines`（既定 10）行以下）。2 は
   判定できなかったことを示し、飛ばしてよいとは読まない。飛ばしたときの記録の残し方は
   `development-workflow` の `references/workflow-modes.md`「構造改善の退避先」にある。
-  `$SCRIPTS` は「実行」節の決め方で解決したこの Skill の `scripts` ディレクトリである
 
-  ```bash
-  python3 "$SCRIPTS/refactor.py" assess --base origin/develop; echo "exit=$?"
-  ```
+```bash
+# 「実行」節の決め方で解決したこの Skill の scripts ディレクトリ
+SCRIPTS="<この Skill のディレクトリ>/scripts"
+python3 "$SCRIPTS/refactor.py" assess --base origin/develop; echo "exit=$?"
+```
 
 ## 全体フロー
 
