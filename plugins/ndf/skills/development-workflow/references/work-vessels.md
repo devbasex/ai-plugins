@@ -70,3 +70,20 @@
 - **この判定は起こす前の見込みである。** 起こした後の測定で、持ち場の中の小さな worker を
   束ねるかを決めるのは #773 の候補 2 である。この線引きは #773 の測定の入力になるが、#773 の
   判定を置き換えない
+
+## サブエージェントの道具を定義で絞る
+
+**worker が Skill を起動しない規則（[agent-layers.md](agent-layers.md) の worker の規則 6）を
+文面だけにせず、worker のエージェント定義で Skill と Agent のツールを外す。** 定義は
+`plugins/ndf/agents/worker.md`（`disallowedTools: Skill, Agent`）で、起動指示は
+`subagent_type: ndf:worker` で指す。
+
+| 書き方 | 理由 |
+| --- | --- |
+| Agent も外す | Skill だけを外した子が Agent で起こした `general-purpose` の孫は Skill を使えた。worker は葉であるという規則も同じ 1 行で定義が守る |
+| 拒否の一覧（`disallowedTools`）で書く | 許可の一覧（`tools`）で書くと、書いた `Grep` / `Glob` が子に現れなかった |
+| 例外の経路は定義を分ける | 定義の中で Skill を 1 つだけ許す書き方はできない。`cross-review` の修正は `general-purpose` のまま起動し、#859 の後に `ndf:worker` へ移す |
+
+**`SKILL.md` の Read は定義では塞げない。** worker は抜粋を読むために `skills/` 配下の Read を
+要し、Read をパスで分ける手段は定義に無い。規則 6 の文面で縛り、起動指示の「手順」に抜粋を
+写して渡すことで読む理由を無くす。

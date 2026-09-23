@@ -57,7 +57,7 @@ standard（conductor の判定。複数ファイルのスクリプトと文書�
 - `plugins/ndf/skills/development-workflow/references/agent-layers.md` / `work-vessels.md`（新設）/ `context-window.md` / `stage-completeness.md`
 - `plugins/ndf/skills/development-workflow/SKILL.md`
 - `plugins/ndf/skills/progress-tracking/SKILL.md` / `references/excerpt.md`（新設）
-- `plugins/ndf/skills/AUTHORING.md`
+- `plugins/ndf/skills/AUTHORING.md`（指す 1 文だけ）/ `plugins/ndf/skills/EXCERPTS.md`（新設）
 - 工程の Skill の末尾の記録の文（19 Skill の定型文と `design` の 2 件）
 
 ## タスク分解
@@ -85,8 +85,8 @@ standard（conductor の判定。複数ファイルのスクリプトと文書�
 
 ### Task 4: 抜粋の形と工程の Skill の末尾の文（F4）
 
-- **対象ファイル:** `AUTHORING.md` / `progress-tracking/SKILL.md` / `progress-tracking/references/excerpt.md` / 20 Skill の末尾の文
-- **変更内容:** 抜粋の規約（目印・見出し 3 つ・40 行かつ 2,000 文字・入れるもの / 入れないもの・超えたときの扱い）を `AUTHORING.md` へ置く。`progress-tracking` の抜粋を書き、本文から指す。末尾の文を記録のコマンド 1 行へ変える
+- **対象ファイル:** `EXCERPTS.md` / `AUTHORING.md` / `progress-tracking/SKILL.md` / `progress-tracking/references/excerpt.md` / 20 Skill の末尾の文
+- **変更内容:** 抜粋の規約（目印・見出し 3 つ・40 行かつ 2,000 文字・入れるもの / 入れないもの・超えたときの扱い）を `EXCERPTS.md` へ置き、`AUTHORING.md` から指す（`AUTHORING.md` は分割の基準 500 行ちょうどで、設計どおり足すと 543 行になるため分けた）。`progress-tracking` の抜粋を書き、本文から指す。末尾の文を記録のコマンド 1 行へ変える
 - **満たす受け入れ条件:** AC7 / AC9 / AC15
 - **進め方:** 文書の変更。`grep -rn "この工程に入ったら.*progress-tracking" plugins/ndf/skills/*/SKILL.md` が 0 件、抜粋が `wc -l` 40 以下・2,000 文字以下で確かめる
 
@@ -100,6 +100,7 @@ standard（conductor の判定。複数ファイルのスクリプトと文書�
 | リスク | 対処 |
 | --- | --- |
 | `projects-sync.sh` が issue の本文も書くことで、既存のテストの偽の `gh` が想定しない呼び出しを受ける | タスクごとにテストを通す。既存のテストは変えずに通すことを AC8 の確かめとする |
+| `agent-layers.md` と `AUTHORING.md` が分割の基準（500 行）を超える | `AUTHORING.md` の抜粋の規約は `EXCERPTS.md` へ分け、`agent-layers.md` の worker 定義の理由は `work-vessels.md` へ移し、キーの表は `progress-tracking` の抜粋を指す形にした |
 | 20 Skill の末尾の文の一括変更で文面が崩れる | 置き換えの前後を `grep` で数え、`check-skill-frontmatter.py` と全体テストを通す |
 
 ## 切り戻し手順

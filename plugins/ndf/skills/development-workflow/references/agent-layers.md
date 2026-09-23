@@ -113,25 +113,12 @@ context window を使ったかが読めなくなる。**語彙は次の 2 つだ
 | 承認 | 関門の承認を受けた後なら、承認した内容と承認した時刻。無ければ「無し」 |
 | 到達点 | 置き直した到達点（「到達点を置き直す」）。置き直していなければ「ゴール条件のとおり」 |
 | 提示物の置き場所 | 関門を返すときに提示物を書くファイルの絶対パス |
-| 記録のコマンド | コマンドの頭 `bash "<絶対パス>/projects-sync.sh" <課題番号> <キー> "<値>"` と、下のキーごとの打つ時点の表。**conductor が `$SCRIPTS` を解いた絶対パスを二重引用符で囲んで書く** |
+| 記録のコマンド | コマンドの頭 `bash "<絶対パス>/projects-sync.sh" <課題番号> <キー> "<値>"` と、キー（`stage` / `mode` / `worktree` / `plan`）ごとの打つ時点。**conductor が `$SCRIPTS` を解いた絶対パスを二重引用符で囲んで書く。** 打つ時点は `progress-tracking` の抜粋（`references/excerpt.md`）の「呼び出し」を写す |
 
 **記録のコマンドは issue の本文の `## 進行` と盤面の両方へ残り、`stage` は通過工程の控えにも
 積まれる。** そのため supervisor は `progress-tracking` も `development-workflow` も起動せずに
-持ち場を通せる。モードと通す工程は「モード」「持ち場」の項目が既に持っている。
-パスを二重引用符で囲むのは、空白を含むパスで語が割れないためである。
-
-```text
-記録のコマンド: bash "/home/u/.claude/plugins/cache/ai-plugins/ndf/10.17.1/scripts/projects-sync.sh" <課題番号> <キー> "<値>"
-```
-
-| キー | 打つ時点 | 値 |
-| --- | --- | --- |
-| `stage` | 工程に入るたび（課題ごと） | 工程名 |
-| `mode` | 持ち場の最初の工程で 1 度 | 起動指示の「モード」の値 |
-| `worktree` | 作業場所の用意の後に 1 度 | 作業ツリーのパス |
-| `plan` | 計画の後に 1 度 | 計画ファイルのパス |
-
-打つのはその工程を行った supervisor である。
+持ち場を通せる。打つのはその工程を行った supervisor である。パスを二重引用符で囲むのは、
+空白を含むパスで語が割れないためである。
 
 supervisor が守る規則:
 
@@ -158,7 +145,7 @@ supervisor が守る規則:
 | 引数 | 値 |
 | --- | --- |
 | `description` | `<作業の種類>: <一言>`（例 `調査: 既存の規約の突き合わせ`） |
-| `subagent_type` | **`ndf:worker`**（下の「worker の定義で塞ぐ」） |
+| `subagent_type` | **`ndf:worker`**（Skill と Agent のツールを外した定義。理由は [work-vessels.md](work-vessels.md) の「サブエージェントの道具を定義で絞る」） |
 | `model` | 省く（supervisor と同じ）。`調査` と `集計` は軽いモデルでよい（「モデルを選ぶ」） |
 | `prompt` | 作業・入力・手順・返す形・置き場所の 5 項目と、守る規則 6 個 |
 
@@ -166,7 +153,7 @@ supervisor が守る規則:
 | --- | --- |
 | 作業 | 何を調べる・直す・実行する・数えるか。**1 つに絞る** |
 | 入力 | 対象のパス・Pull Request 番号・指摘の場所など |
-| 手順 | 作業に要る手順の抜粋（呼び出し 1 行・結果の読み方・判断の基準）。**抜粋の元の Skill の `references/excerpt.md` を写す。** 抜粋が無い Skill の手順が要るときは、supervisor が要る段落だけを写す（抜粋の形は `plugins/ndf/skills/AUTHORING.md` の「抜粋」） |
+| 手順 | 作業に要る手順の抜粋（呼び出し 1 行・結果の読み方・判断の基準）。**抜粋の元の Skill の `references/excerpt.md` を写す。** 抜粋が無い Skill の手順が要るときは、supervisor が要る段落だけを写す（抜粋の形は `plugins/ndf/skills/EXCERPTS.md`） |
 | 返す形 | `## 作業の報告` の 5 項目 |
 | 置き場所 | 長い出力を書くファイルの絶対パス（報告にはパスだけを載せる） |
 
@@ -182,27 +169,8 @@ worker が守る規則:
    足りないときは `結果: 判断が要る` で返す。**起動指示が Skill の起動そのものを手順として
    渡したときだけ、その 1 つを起動してよい**
 
-**例外は、手順として Skill の起動を渡された場合の 1 つだけである。** 当たるのは今
-`cross-review` の修正（`/ndf:fix` を渡す経路）だけで、#859 がこの経路を抜粋へ置き換える。
-worker が自分の判断で工程の Skill を起動すると、その Skill の進行の記録・確認の段・関門の
-判断が worker の文脈で動き、worker が持たない責務を持つことになる。起動してよいかは
-起動指示を書く側が決める。
-
-#### worker の定義で塞ぐ
-
-**規則 6 を文面だけにせず、worker のエージェント定義で Skill と Agent のツールを外す。** 定義は
-`plugins/ndf/agents/worker.md`（`disallowedTools: Skill, Agent`）で、起動指示は
-`subagent_type: ndf:worker` で指す。
-
-| 書き方 | 理由 |
-| --- | --- |
-| Agent も外す | Skill だけを外した子が Agent で起こした `general-purpose` の孫は Skill を使えた。worker は葉であるという規則も同じ 1 行で定義が守る |
-| 拒否の一覧（`disallowedTools`）で書く | 許可の一覧（`tools`）で書くと、書いた `Grep` / `Glob` が子に現れなかった |
-| 例外の経路は定義を分ける | 定義の中で Skill を 1 つだけ許す書き方はできない。`cross-review` の修正は `general-purpose` のまま起動し、#859 の後に `ndf:worker` へ移す |
-
-**`SKILL.md` の Read は定義では塞げない。** worker は抜粋を読むために `skills/` 配下の Read を
-要し、Read をパスで分ける手段は定義に無い。規則 6 の文面で縛り、起動指示の「手順」に抜粋を
-写して渡すことで読む理由を無くす。
+**例外は今 `cross-review` の修正（`/ndf:fix` を渡す経路。`general-purpose` で起動する）だけで、
+#859 が抜粋へ置き換える。** 起動してよいかは起動指示を書く側が決める。
 
 ## 報告の形
 

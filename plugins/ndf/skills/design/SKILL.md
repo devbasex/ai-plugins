@@ -165,10 +165,17 @@ API の記述を求めない。
 
 ## 進行を記録する
 
-**契機は 2 つあり、別々の時点で 1 つずつ呼ぶ。** 手順 1（触る領域を決める）に入るときに
-`/ndf:progress-tracking <issue番号> "設計"`、手順 5（設計 Pull Request を出す）に入るときに
-`/ndf:progress-tracking <issue番号> "ドキュメントレビュー"` を呼ぶ（記録の手順はその Skill が
-持つ）。**手順 5 の前に `document-restructuring` を通す**（工程「ドキュメント再構成」）。
+**契機は 2 つあり、別々の時点で 1 つずつ記録のコマンドを打つ。** 手順 1（触る領域を決める）に
+入るときに 1 つ目、手順 5（設計 Pull Request を出す）に入るときに 2 つ目を打つ。issue の本文の
+`## 進行` と盤面の両方に残る（`$SCRIPTS` の決め方は `development-workflow` の
+`references/scripts-lookup.md`。3 層では起動指示の「記録のコマンド」をそのまま使う）。
+
+```bash
+bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "設計"
+bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "ドキュメントレビュー"
+```
+
+**手順 5 の前に `document-restructuring` を通す**（工程「ドキュメント再構成」）。
 
 **2 つ目の契機と `document-restructuring` は、設計 Pull Request を出すモードだけに掛かる。**
 `light` と `operation` では手順 5 を通らないため、どちらも呼ばない。工程の分類でも
