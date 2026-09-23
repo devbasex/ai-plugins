@@ -22,7 +22,7 @@ plugins/ndf/
 ├── skills/                      # 配布 Skill の唯一の実体（45 個）
 ├── skills/AUTHORING.md          # Skill 執筆の規約
 ├── manifests/                   # ランタイム別の配布 Skill 一覧
-├── agents/                      # Claude Code のサブエージェント定義（8 個）
+├── agents/                      # Claude Code のサブエージェント定義（専門 8 個と worker 1 個）
 ├── hooks/claude.json            # Claude Code の PreToolUse / SessionStart / Stop hook
 ├── hooks/codex.json             # Codex の PreToolUse / SessionStart / Stop hook
 ├── scripts/                     # hook と Skill から呼ぶスクリプト
@@ -102,7 +102,7 @@ agy plugin install plugins/ndf/dev.agy                               # 初回
 agy plugin uninstall ndf && agy plugin install plugins/ndf/dev.agy   # 新しい版へ
 ```
 
-導入すると `manifests/agy-skills.txt` に載る Skill 43 個と、エージェント 8 個、hook 1 個が
+導入すると `manifests/agy-skills.txt` に載る Skill 43 個と、エージェント 9 個（専門 8 個と worker 1 個）、hook 1 個が
 `~/.gemini/config/plugins/ndf/` へ複製されます。symlink は実体へ解決されて複製されるため、
 clone を消しても導入した内容は残ります。
 
