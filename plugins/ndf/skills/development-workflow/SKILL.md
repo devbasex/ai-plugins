@@ -203,7 +203,8 @@ mode: standard
 [references/context-window.md](references/context-window.md) にある。
 
 **conductor は、`context-window.md` の 4 つの切れ目で、次の工程を始める引き継ぎの 1 行
-（`/ndf:development-workflow #<課題>`）を出す。** 3 層では conductor が `## 持ち場の報告` を
+（`/ndf:development-workflow #<課題>`。3 層では先頭に `/goal `）を、情報文字列 `ndf-next` の
+囲みのコードブロック 1 つで出す。** 3 層では conductor が `## 持ち場の報告` を
 受け取った時点で出し、supervisor は出さない。持ち場の境がこの切れ目に当たるためである。
 文脈量の hook（`token-guard.sh`）が起動を止めたときも出す。ただし報告が `結果: 関門` なら
 受け取った時点では出さず、関門の承認と取り込み（設計 Pull Request のマージなど）の後に出す。
@@ -359,6 +360,11 @@ Pull Request のマージ、制作物承認は本番の提出先への操作に�
 **conductor は `$SCRIPTS` を解いてから supervisor を起動し、起動指示の「記録のコマンド」へ
 絶対パスで書く。** supervisor はこの 1 行で進行を記録し、この Skill も `progress-tracking` も
 起動しない（形とキーごとの打つ時点は `agent-layers.md` の「conductor → supervisor」）。
+
+**区間の切れ目の再起動は中継が自動で行う（Claude Code だけ）。** 利用者が `claude` と打つと
+alias が中継を挟み、conductor が出した `ndf-next` のブロックを拾って、`/exit`・プラグインの更新・
+次の区間の起動を行う。中継が無い・止まったときは、今までどおり人がブロックの中身を貼り付ける。
+始め方・止め方・上限は [references/relay.md](references/relay.md) にある。
 
 **対話で `/ndf:development-workflow` を呼んだときは 3 層へ出さない。** 人がその場にいて
 工程ごとに指示を変えられるため、進め方を変えない。

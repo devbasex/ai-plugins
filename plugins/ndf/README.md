@@ -232,7 +232,7 @@ bash <プラグインのパス>/scripts/worktree-setup.sh init
 | --- | --- | --- |
 | 前景の `sleep` の待ち（`while` / `until` のループの本体、または上限を超える秒数） | `NDF_SLEEP_GUARD=0` | `NDF_SLEEP_MAX_SEC`（既定 5） |
 | 変わらないファイルの同じ範囲を続けて読む Read | `NDF_READ_REPEAT_GUARD=0` | `NDF_READ_REPEAT_LIMIT`（既定 3） |
-| 文脈が上限を超えた conductor が工程へ入る起動（1 度だけ止め、新しい会話で打つ 1 行を示す） | `NDF_CONTEXT_GUARD=0` | `NDF_CONTEXT_LIMIT`（既定 200000） |
+| 文脈が上限を超えた conductor が工程へ入る起動（1 度だけ止め、新しい会話で打つコマンドを `ndf-next` のブロックで示させる。中継の下では止め続ける） | `NDF_CONTEXT_GUARD=0` | `NDF_CONTEXT_LIMIT`（既定 200000） |
 
 | ランタイム | 待ち方 | 会話を切る |
 | --- | --- | --- |
@@ -250,9 +250,13 @@ Claude Code の SessionStart hook（`hooks/claude.json`）は上記に加えて�
 
 - `~/.claude/settings.json` の `cleanupPeriodDays` を 90 日以上に保つ
 - statusline 未設定時に NDF 標準 statusline を設定する
+- 区間の切れ目の中継（`scripts/relay.py`）を安定した場所へ置き直し、bash / zsh の設定へ
+  `alias claude=...` を印のついた囲みで 1 度だけ足す（`relay.py install`。`NDF_RELAY_AUTO=0` で止まる）
 
 Claude Code の Stop hook は終了時に Slack 通知スクリプトを実行します。通知に必要な環境変数が
-未設定の場合は送信せず終了します。
+未設定の場合は送信せず終了します。中継の下（`NDF_RELAY_DIR` がある）では、最後の応答の
+`ndf-next` のブロックを中継の印へ写します（`relay.py mark`）。中継の始め方・止め方・上限は
+`skills/development-workflow/references/relay.md` にあります。
 
 Codex の Stop hook（`hooks/codex.json`）は `NDF_CODEX_SLACK_NOTIFY=true` が設定されている
 場合だけ Slack 通知を送ります。**Codex の hook は Codex 側で明示的に有効化するまで実行され
