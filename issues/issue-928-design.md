@@ -17,7 +17,7 @@ Skill の名前の規約に合わないため、関門で最終の名前を決�
 | 2 | 同じ利用者 | そのまま `claude` と打つ。囲みの alias が、1 で置き直した新しい版の写しの中継を起こす |
 | 3 | 新しい利用者 | claude の中で `/ndf:install-wrapper` を打つ。Skill が `relay.py install` を呼び、写しを置き、`~/.bashrc` をバックアップしてから囲みを足し、「次に開くシェルから効く」を示す |
 | 4 | どちらの利用者も | 中継の下で `/ndf:restart` を打つ。claude が再開用のコマンドを `ndf-next` のブロックで出して応答を終え、中継が 15 秒の静まりの後に `/exit` → 更新 → 起動を行う |
-| 5 | 外したい利用者 | `/ndf:install-wrapper uninstall`。`~/.bashrc` と `~/.zshrc` の囲みを外し（バックアップの後）、写しを消す。`rc-skipped` / `rc-noticed` から外し、`rc-added` には残して `rc-removed` に足す |
+| 5 | 外したい利用者 | `/ndf:install-wrapper uninstall`。`~/.bashrc` と `~/.zshrc` の囲みを外し（バックアップの後）、写しを消す。`rc-skipped` / `rc-noticed` から外し、`rc-added` には残して `rc-user` に足す |
 
 ## 機能一覧
 
@@ -65,7 +65,7 @@ graph TB
     subgraph files["利用者の手元"]
         RC["~/.bashrc / ~/.zshrc の囲み"]
         CP["写し ~/.local/share/ndf/relay.py"]
-        SD["状態の親 ~/.local/state/ndf/relay/<br/>rc-added / rc-skipped / rc-noticed / rc-removed"]
+        SD["状態の親 ~/.local/state/ndf/relay/<br/>rc-added / rc-skipped / rc-noticed / rc-user"]
         WD["NDF_RELAY_DIR<br/>next.json / question"]
     end
     SS --> N
@@ -110,8 +110,8 @@ plugins/ndf/
 
 | 副命令 | 引数 | 終了コード | 出力 | 書くもの |
 | --- | --- | --- | --- | --- |
-| `install` | 無し | 0: 囲みを足した・既に在った（写しだけ置き直した）/ 1: 足さなかった（既存の `claude` の定義・bash と zsh 以外のシェル）/ 3: ロックが取れない・書けない | 標準出力へ人が読む行（下の表） | 写し・囲み・バックアップ。`rc-added` から足す先を除く |
-| `uninstall` | 無し | 0: 外した・外すものが無かった / 1: 閉じの無い囲みがあり、どのファイルも写しも記録も変えなかった / 3: ロックが取れない・書けない | 同上 | バックアップ・囲みを外した設定・写しの削除・`rc-skipped` / `rc-noticed` から外したパスを除き、`rc-added` には残し、`rc-removed` に足す |
+| `install` | 無し | 0: 囲みを足した・既に在った（写しだけ置き直した）/ 1: 足さなかった（既存の `claude` の定義・bash と zsh 以外のシェル）/ 3: ロックが取れない・書けない | 標準出力へ人が読む行（下の表） | 写し・囲み・バックアップ。`rc-added` と `rc-user` に足す先を足す |
+| `uninstall` | 無し | 0: 外した・外すものが無かった / 1: 閉じの無い囲みがあり、どのファイルも写しも記録も変えなかった / 3: ロックが取れない・書けない | 同上 | バックアップ・囲みを外した設定・写しの削除・`rc-skipped` / `rc-noticed` から外したパスを除き、`rc-added` には残し、`rc-user` に足す |
 | `status` | 無し | 0 | 同上 | 無し |
 | `startup` | 無し | 常に 0 | 知らせるときだけ `{"systemMessage": "<1 行>"}` | 在る写しの置き直し・`rc-noticed` に知らせたパスを足す |
 | `question` | `open` / `close`。標準入力の hook の JSON は読み捨てる | 常に 0 | 無し | 作業ディレクトリの `question` を作る・消す（下の「関門を越えない守り」） |
@@ -126,11 +126,14 @@ plugins/ndf/
 | ---: | --- | --- | --- |
 | E1 | 写し | 写しが無いか中身が違えば、一時ファイルに書いて `0755` にしてから置き換える | 無し（E4 の行に含める） |
 | E2 | 足す先 | `$SHELL` の名前が `bash` なら `~/.bashrc`、`zsh` なら `${ZDOTDIR:-$HOME}/.zshrc`。それ以外は終了コード 1 | `ndf-relay: <シェル> には足さない。使うなら次の 1 行を設定へ置く: <alias の行>` |
-| E3 | 既にある | 足す先に `# >>> ndf relay >>>` の行があれば足さない。`rc-added` から足す先を除く（明示に選んだ囲みになる） | `ndf-relay: <足す先> には既に囲みがある。写しを <版> で置き直した` |
+| E3 | 既にある | 足す先に `# >>> ndf relay >>>` の行があれば足さない（明示に選んだ囲みになる。下の記録） | `ndf-relay: <足す先> には既に囲みがある。写しを <版> で置き直した` |
 | E4 | 既存の定義 | 足す先（bash では `~/.bash_aliases` も）に行頭の `alias claude=` / `function claude` / `claude()` があれば足さず、終了コード 1 | `ndf-relay: <ファイル> に claude の定義があるため足さない。使うなら次の 1 行を自分で置く: <alias の行>` |
 | E5 | 足す | 足す先があれば `<足す先>.ndf-bak-<UTC>` へ写す。末尾が改行で終わらなければ改行を 1 つ、最後の行が空行でなければ空行を 1 つ足してから囲みを追記する（無ければ作る） | `ndf-relay: <足す先> へ alias claude を足した（バックアップ <パス>）。次に開くシェルから効く（今のシェルでは source <足す先>）` |
 
-**E3〜E5 は `rc-added` / `rc-skipped` を足さない。E3 と E5 は `rc-added` から足す先を除く**（明示に選んだ囲みは自動の囲みの知らせの対象でない。決定 12）。 10.17.4 の「利用者が消したら足し直さない」（I5）と
+**E3 と E5 は足す先を `rc-added` に残し（無ければ足す）、`rc-user` に足す**（決定 12）。`rc-added` を残すのは、
+10.17.4 へ戻した利用者が囲みを手で消したとき、10.17.4 の hook（I5）が足し直さないためである。`rc-user` は
+「利用者が明示に導入か取り外しをしたパス」で、`startup` と `status` はここに載るパスを自動の囲みとして扱わない。
+E4 は記録を変えない。 10.17.4 の「利用者が消したら足し直さない」（I5）と
 「案内は 1 度だけ」（I6）は、明示の起動では当たらない。打たれるたびに同じ判定をし、同じ行を出す。
 
 **`uninstall` の段:**
@@ -141,10 +144,10 @@ plugins/ndf/
 | U2 | 囲みを探す | 行を読み、`# >>> ndf relay >>>` の行から次の `# <<< ndf relay <<<` の行までを 1 つの囲みとする。いくつあってもすべて。**U1 の 2 つのファイルを先にすべて調べ、1 つでも開きの後に閉じが無ければ、どのファイルも写しも記録も変えずに終了コード 1 で終わる**（壊れた囲みの alias を写しの削除で壊さない） |
 | U3 | 外す | 囲みが 1 つ以上あれば `<ファイル>.ndf-bak-<UTC>` へ写してから、囲みの行だけを除いた中身を一時ファイルに書き、元の権限で置き換える。**囲みの外の行は変えない**（E5 が足した空行も残す） |
 | U4 | 写し | 写しを消す（無ければ何もしない） |
-| U5 | 記録 | `rc-skipped` / `rc-noticed` から外したファイルのパスの行を除く。**`rc-added` には外したパスを残す（無ければ足す）。** 10.17.4 へ戻した利用者の hook（I5）が「利用者が消した」と読み、足し直さないためである。**あわせて `rc-removed` に外したパスを足す。** `startup` と `status` は `rc-removed` に載るパスを自動の囲みとして扱わない（利用者がバックアップから囲みを戻しても、自動で足したとは言わない）。明示の `install`（E3・E5）は足す先を `rc-removed` から除かない |
+| U5 | 記録 | `rc-skipped` / `rc-noticed` から外したファイルのパスの行を除く。**`rc-added` には外したパスを残す（無ければ足す）。** 10.17.4 へ戻した利用者の hook（I5）が「利用者が消した」と読み、足し直さないためである。**あわせて `rc-user` に外したパスを足す。** `startup` と `status` は `rc-user` に載るパスを自動の囲みとして扱わない（利用者がバックアップから囲みを戻しても、自動で足したとは言わない） |
 | U6 | 報告 | 外したファイルとバックアップを 1 行ずつ。最後に「開いているシェルでは `unalias claude` で外れる（写しを消したので、そのままでは `claude` が失敗する）」を出す。外すものが無ければ `ndf-relay: 外す囲みも写しも無い` |
 
-**`status` の出す行:** 各ファイル（U1 の 2 つ）の囲みの有無と、在れば `rc-added` に載り `rc-removed` に
+**`status` の出す行:** 各ファイル（U1 の 2 つ）の囲みの有無と、在れば `rc-added` に載り `rc-user` に
 載らないか（そうなら「10.17.4 が自動で足した」）。写しの有無と、写しの中身が今のプラグインの `relay.py`（`status` を動かしている自分）と
 同じか。`relay.py` は版の定数を持たないので、写しの版は示さない。
 
@@ -154,7 +157,7 @@ plugins/ndf/
 | ---: | --- | --- |
 | 0 | 写しが在り、中身が自分（今の版の `relay.py`）と違う | `install` の E1 と同じ形（一時ファイル・`0755`・置き換え）で置き直す。**写しが無ければ作らない** |
 | 1 | `rc-added` が無い | 知らせない（写しも `rc-added` も無ければ、hook の定義の側で `python3` を起こさない） |
-| 2 | `rc-added` の各パスのうち、今もそのファイルに囲みがあり、`rc-noticed` にも `rc-removed` にも無いものが無い | 何もしない |
+| 2 | `rc-added` の各パスのうち、今もそのファイルに囲みがあり、`rc-noticed` にも `rc-user` にも無いものが無い | 何もしない |
 | 3 | 上に当たるパスがある | そのパスを `rc-noticed` に足し、`{"systemMessage": "ndf-relay: <パス> の alias claude は 10.17.4 が自動で足したもの。使い続けるなら何もしなくてよい。外すなら /ndf:install-wrapper uninstall"}` を出す（パスが 2 つなら 1 行に並べる） |
 
 **`startup` が書くのは、在る写しの置き直しと状態の親の `rc-noticed` だけである。** シェルの設定は
@@ -335,7 +338,7 @@ stateDiagram-v2
     [*] --> 無し
     無し --> 明示の囲み: install
     自動の囲み --> 自動の囲み: startup（1 度だけ知らせる・写しの置き直し）
-    自動の囲み --> 明示の囲み: install（rc-added から除く）
+    自動の囲み --> 明示の囲み: install（rc-user に足す）
     自動の囲み --> 無し: uninstall
     明示の囲み --> 無し: uninstall
     明示の囲み --> 明示の囲み: install（写しの置き直し）
@@ -361,7 +364,7 @@ stateDiagram-v2
 | --- | --- |
 | AC1 | `claude.json` の SessionStart に `install` が無いこと（hook の定義を読む単体テスト）と、一時の HOME で `startup` の hook のコマンドをそのまま動かして、設定の中身と更新時刻が変わらず、写しが無ければ作られないこと |
 | AC2 | `git diff origin/develop -- plugins/ndf/hooks/codex.json plugins/ndf/dev.agy plugins/ndf/dev.kiro` が空 |
-| AC3〜AC5 | `test_relay.py`: bash / zsh（`ZDOTDIR`）で囲み・バックアップ・行が出る。2 回目は写しだけ置き直す。`rc-added` があっても足す。既存の alias / 関数 / `~/.bash_aliases`・fish で足さず終了コード 1。E5 の空行を 1 つだけ挟む |
+| AC3〜AC5 | `test_relay.py`: bash / zsh（`ZDOTDIR`）で囲み・バックアップ・行が出る。2 回目は写しだけ置き直す。`rc-added` があっても足し、`rc-added` を残したまま `rc-user` に足す。既存の alias / 関数 / `~/.bash_aliases`・fish で足さず終了コード 1。E5 の空行を 1 つだけ挟む |
 | AC6 | `test_relay.py`: 両方のファイルの囲み（複数を含む）を外し、囲みの外がバイトで同じ。片方のファイルに閉じの無い囲みがあれば、どちらのファイルも写しも記録も変えず終了コード 1。写しと `rc-skipped` / `rc-noticed` の行が消え、`rc-added` には外したパスが残る。10.17.4 の `install` で作った状態（`rc-added` あり）から外れる |
 | AC7 | `test_relay.py`: 各状態で出す行と、何も書かないこと（前後のファイルの比較） |
 | AC8・AC16 | manifests と `check-skill-frontmatter.py`。`install-wrapper` に `disable-model-invocation: true`、`restart` に無いこと |
