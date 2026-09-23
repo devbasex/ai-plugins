@@ -246,13 +246,14 @@ python の出力をそのまま hook の出力にする。hook の `timeout` 5 �
 | (4) | 作業ディレクトリに `question` が無い | 待ち続ける（G1） |
 | (5) | 印の `transcript_path` に、`timestamp` が印の `written_at` より後で `type` が `assistant` か `user` の行が無い | 待ち続ける。次の Stop が印を書き直すか消す（G2）。目標の判定の行（`type: attachment`）は数えない |
 
-**終わらせる段を変える（G3）。** (1)〜(5) がそろったら、次の順で書く。
+**終わらせる段を変える（G3）。** (1)〜(5) がそろい、既存の順で停止の印・`count.lock` の取得・1 日の上限・空回りを
+通った後に、次の順で書く。**`count.lock` は同じ HOME の全中継で共有するので、持ったまま待たない。**
 
 | 順 | 中継がすること |
 | ---: | --- |
 | 1 | (1)〜(5) がそろった時点の、印の `written_at` と会話の記録の大きさ・更新時刻を控える（記録を全行読むのはこの前の段だけ） |
 | 2 | `question.lock` の排他を取る（取れなければ次の確認まで待つ） |
-| 3 | ロックの中では記録を読み直さない。`question` が無いこと、印の `written_at` と記録の大きさ・更新時刻が 1 の控えと同じことだけを、`stat` と印の読み取りで確かめる。外れていれば放して「静まりを待つ」へ戻る |
+| 3 | ロックの中では記録を読み直さない。`question` が無いこと、印の `written_at` と記録の大きさ・更新時刻が 1 の控えと同じことだけを、`stat` と印の読み取りで確かめる。外れていれば `question.lock` と `count.lock` の両方を放して「静まりを待つ」へ戻る |
 | 4 | `/exit\r` を **1 回の write** で書く |
 | 5 | 1 秒おいてから放す |
 
@@ -263,9 +264,18 @@ python の出力をそのまま hook の出力にする。hook の `timeout` 5 �
 読む処理（目標の判定・(5)）をロックの中に置かないので、持つ時間は記録の長さに依らない。**持つ時間
 （1 秒と数ミリ秒）は、`question open` が待つ 3 秒より短く、hook の `timeout` 5 秒にも収まる**（決定 17）。
 
-**書いた後に `question` が現れたら、消えるまで `NDF_RELAY_EXIT_WAIT` の秒を数えない。** 印の
-確かめ直しと write の間に応答が再開していた場合、書いた `/exit` は待ち行列に入る。その応答が質問を
-出すと、`/exit` は答えの後に働く。秒を数え続けると、人が答える前に SIGTERM で質問ごと消す。
+**書いた後に `question` が現れたら、`count.lock` を放し、`question` が消えるまで
+`NDF_RELAY_EXIT_WAIT` の秒を数えない（AC25b）。** 書いた `/exit` が応答の待ち行列に入ると、その応答が
+出した質問の答えの後に働く。秒を数え続けると、人が答える前に SIGTERM で質問ごと消す。`count.lock` を
+持ったまま待つと、答えを待つあいだ同じ HOME の別の中継が切り替えられない。
+
+**この経路で子が終わったら、印を読み直してから次を決める。** 答えの後の応答の Stop が、印を書き直すか
+消しているためである。
+
+| 読み直した印 | すること |
+| --- | --- |
+| 無い | 次の区間を起動しない。`end`（`no-mark`）を書き、子の終了コードで終わる |
+| ある | `count.lock` を取り直し、1 日の上限と空回りを判定し直してから、**読み直した印の `command` と `cwd`** で起動する。取れない・上限・空回りなら今までの `stop` の行と 1 行で終わる |
 
 `NDF_RELAY_EXIT_GAP` は使わなくなる（決定 14）。SIGTERM・SIGKILL の秒は変えない。
 
@@ -358,7 +368,7 @@ stateDiagram-v2
 | AC23 | `test_relay.py`: 印があって静まっても `question` がある間は子へ何も届かない。`question close` の後に Stop（印の書き直し）で切り替わる。`mark` が `question` を消す |
 | AC24 | `test_relay.py`: 印の後に会話の記録へ `assistant` の行を足すと `/exit` が届かない。`attachment` の行では止まらない |
 | AC25 | `test_relay.py`: 子へ届いたバイトが `/exit\r` の 1 回であること。確かめ直しの直前に `question` を置くと届かないこと（差し込み点で試す）。中継が `question.lock` を持つ間、`question open` が放されるまで待ち、放された後に印を作ること |
-| AC25b | `test_relay.py`: `/exit` の後に `question` を置いた試験用の子が、`NDF_RELAY_EXIT_WAIT` を過ぎても SIGTERM を受けず、`question` を消した後に数え始めること |
+| AC25b | `test_relay.py`: `/exit` の後に `question` を置いた試験用の子が、`NDF_RELAY_EXIT_WAIT` を過ぎても SIGTERM を受けず、`question` を消した後に数え始めること。待つあいだ `count.lock` を別のプロセスが取れること。子が終わった後、印が無ければ起動しないこと、書き直された印なら新しい `command` で起動すること。G3 の確かめ直しが外れたとき `count.lock` が放されること |
 | AC26 | `test_relay.py`: `NDF_RELAY_DIR` 無し・中継が動いていない・直接の子でないで、`question open` が何も作らず出力が空で終了コード 0 |
 | AC26b | `test_relay.py`: 別のプロセスが `question.lock` を 3 秒より長く持つと、`question open` が `permissionDecision: deny` を出し、`question` を作らず終了コード 0 |
 | AC20〜AC22 | 全体テスト・静的検査。AC21 は本物の Claude Code（一時の HOME・隔離した `CLAUDE_CONFIG_DIR`・`DISABLE_AUTOUPDATER=1`）の上で `/ndf:restart` を 1 度通し、`log.jsonl` の `start` 2 行を実装の Pull Request に残す。同じ通しで、印の後に質問を出させ（`/goal` の続きか、質問を出す指示）、表示の 30 秒のあいだ `/exit` が書かれないことを見る |
