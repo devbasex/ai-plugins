@@ -660,3 +660,60 @@ def test_context_limit_default_matches_doc(tmp_path, state):
     assert denied(run(skill(tp), state))
     tp2 = transcript(tmp_path, 200_000, name="t2.jsonl")
     assert denied(run(skill(tp2, session="s2"), state)) is None
+
+
+# ---------------------------------------------------------------- 中継の下の conductor（#895 AC23）
+
+import fcntl  # noqa: E402
+
+
+@pytest.fixture()
+def relay_dir(tmp_path):
+    """動いている中継に見立てた作業ディレクトリ。このテストのプロセスを中継の直接の子に見立てる。
+
+    hook（bash）→ relay.py is-child と起こされるので、親をたどって最初に当たるのは
+    このテストのプロセスになる。
+    """
+    d = tmp_path / "relay"
+    d.mkdir(mode=0o700)
+    lock = open(d / "relay.lock", "a")
+    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    (d / "child.pid").write_text(str(os.getpid()))
+    yield d
+    lock.close()
+
+
+def test_context_under_relay_keeps_denying(tmp_path, state, relay_dir):
+    tp = transcript(tmp_path, 250_000)
+    env = {"NDF_RELAY_DIR": str(relay_dir)}
+    first = denied(run(agent(tp), state, env))
+    second = denied(run(agent(tp), state, env))
+    assert first and second
+    assert "ndf-next" in second
+    assert "supervisor の報告を待" in second
+    assert "/goal /ndf:development-workflow #829 #830" in second
+
+
+def test_context_relay_not_direct_child_passes_once(tmp_path, state, relay_dir):
+    (relay_dir / "child.pid").write_text("1")
+    tp = transcript(tmp_path, 250_000)
+    env = {"NDF_RELAY_DIR": str(relay_dir)}
+    assert denied(run(agent(tp), state, env))
+    assert denied(run(agent(tp), state, env)) is None
+
+
+def test_context_relay_not_running_passes_once(tmp_path, state):
+    d = tmp_path / "relay"
+    d.mkdir()
+    (d / "relay.lock").touch()
+    (d / "child.pid").write_text(str(os.getpid()))
+    tp = transcript(tmp_path, 250_000)
+    env = {"NDF_RELAY_DIR": str(d)}
+    assert denied(run(agent(tp), state, env))
+    assert denied(run(agent(tp), state, env)) is None
+
+
+def test_context_reason_asks_for_ndf_next_block(tmp_path, state):
+    tp = transcript(tmp_path, 250_000)
+    reason = denied(run(skill(tp), state))
+    assert "ndf-next" in reason
