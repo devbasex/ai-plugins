@@ -13,8 +13,8 @@ Skill の名前の規約に合わないため、関門で最終の名前を決�
 
 | 順 | 誰が | 何をする |
 | ---: | --- | --- |
-| 1 | 10.17.4 の利用者 | 次の版へ上げて claude を起動する。SessionStart hook の `relay.py notice` が、`rc-added` に載った `~/.bashrc` に囲みが残っているのを読み、「10.17.4 が自動で足した alias が残っている…」の 1 行を 1 度だけ出す。何も書き換えない |
-| 2 | 同じ利用者 | そのまま `claude` と打つ。囲みの alias が写しの中継を起こし、中継は `claude plugin list --json` の `installPath` の `relay.py` と写しを比べ、違えば写しを置き直してから始まる |
+| 1 | 10.17.4 の利用者 | 次の版へ上げて claude を起動する。SessionStart hook の `relay.py startup` が、10.17.4 が置いた写しを今の版の `relay.py` で置き直す。`rc-added` に載った `~/.bashrc` に囲みが残っているのを読み、「10.17.4 が自動で足した alias が残っている…」の 1 行を 1 度だけ出す。シェルの設定は書き換えない |
+| 2 | 同じ利用者 | そのまま `claude` と打つ。囲みの alias が、1 で置き直した新しい版の写しの中継を起こす |
 | 3 | 新しい利用者 | claude の中で `/ndf:install-wrapper` を打つ。Skill が `relay.py install` を呼び、写しを置き、`~/.bashrc` をバックアップしてから囲みを足し、「次に開くシェルから効く」を示す |
 | 4 | どちらの利用者も | 中継の下で `/ndf:restart` を打つ。claude が再開用のコマンドを `ndf-next` のブロックで出して応答を終え、中継が 15 秒の静まりの後に `/exit` → 更新 → 起動を行う |
 | 5 | 外したい利用者 | `/ndf:install-wrapper uninstall`。`~/.bashrc` と `~/.zshrc` の囲みを外し（バックアップの後）、写しを消し、記録から外す |
@@ -26,8 +26,8 @@ Skill の名前の規約に合わないため、関門で最終の名前を決�
 | F1 | 中継の導入・更新（`/ndf:install-wrapper` / `install`） | 利用者（明示） |
 | F2 | 中継の取り外し（`/ndf:install-wrapper uninstall`） | 利用者（明示）。10.17.4 の自動の囲みも対象 |
 | F3 | 導入の状態の表示（`/ndf:install-wrapper status`） | 利用者（明示） |
-| F4 | 自動の囲みの知らせ（SessionStart の `relay.py notice`） | 10.17.4 で自動の囲みを足された利用者（1 度だけ） |
-| F5 | 写しの追従（`relay.py run` の開始時） | 写しを使って中継を起こす利用者 |
+| F4 | 自動の囲みの知らせ（SessionStart の `relay.py startup`） | 10.17.4 で自動の囲みを足された利用者（1 度だけ） |
+| F5 | 写しの置き直し（SessionStart の `relay.py startup`。写しが在るときだけ） | 写しを置いた利用者（10.17.4 の自動の導入を含む） |
 | F6 | 再起動（`/ndf:restart`） | 利用者・モデル（中継の下では自動、外では手順の 1 行） |
 | F7 | 関門を越えない守り（質問の表示中・応答の再開の後は書かない） | 中継（切れ目の `/exit` と、別の課題の送り込み） |
 
@@ -35,13 +35,13 @@ Skill の名前の規約に合わないため、関門で最終の名前を決�
 
 | 要素 | 変更 | 責務 |
 | --- | --- | --- |
-| `plugins/ndf/hooks/claude.json` の `SessionStart` | 変える | `relay.py install` の行を外し、`rc-added` があるときだけ `relay.py notice` を呼ぶ行に置き換える |
+| `plugins/ndf/hooks/claude.json` の `SessionStart` | 変える | `relay.py install` の行を外し、`rc-added` か写しがあるときだけ `relay.py startup` を呼ぶ行に置き換える |
 | `plugins/ndf/hooks/claude.json` の `PreToolUse` / `PostToolUse`（`AskUserQuestion`） | 足す | `NDF_RELAY_DIR` があるときだけ `relay.py question open` / `question close` を呼ぶ |
-| `plugins/ndf/scripts/relay.py` | 変える | `install` を明示の導入に変え、`uninstall` / `status` / `notice` / `question` を足す。`run` の開始時に写しを追従させる。切れ目で `/exit` を書く前に守り（G1〜G3）を確かめ、`/exit` と改行を 1 回の write にする。`mark` は質問の印も消す。`stop` / `is-child` は変えない |
+| `plugins/ndf/scripts/relay.py` | 変える | `install` を明示の導入に変え、`uninstall` / `status` / `startup` / `question` を足す。切れ目で `/exit` を書く前に守り（G1〜G3）を確かめ、`/exit` と改行を 1 回の write にする。`mark` は質問の印も消す。`stop` / `is-child` は変えない |
 | `plugins/ndf/skills/install-wrapper/SKILL.md` | 足す | 引数（`install` / `uninstall` / `status`）を `relay.py` の副命令へ渡し、出力をそのまま示す。明示指示専用 |
 | `plugins/ndf/skills/restart/SKILL.md` | 足す | 再開用のコマンドを決め、中継の下なら `ndf-next` のブロックを出して応答を終え、外なら手順の 1 行を示す |
 | `plugins/ndf/manifests/claude-skills.txt` | 変える | 2 つの Skill を足す（Codex / Kiro / agy の manifest には足さない） |
-| `plugins/ndf/scripts/tests/test_relay.py` | 変える | 上の副命令と追従の単体テスト |
+| `plugins/ndf/scripts/tests/test_relay.py` | 変える | 上の副命令と写しの置き直しの単体テスト |
 | `development-workflow/references/relay.md` | 変える | 「始め方」を明示の導入へ、止め方・戻し方に `uninstall` を、`/ndf:restart` を足す |
 | `docs/specifications/ndf-relay-segment-restart.md` | 変える（確定仕様化の工程） | `install` の節と決定の表を新しい契約へ直す |
 
@@ -55,9 +55,9 @@ graph TB
         RS["/ndf:restart"]
     end
     subgraph relay["relay.py"]
-        N[notice]
+        N[startup]
         I["install / uninstall / status"]
-        R["run（写しの追従を足す）"]
+        R["run（守りを足す）"]
         K[is-child]
         M[mark]
         Q[question]
@@ -70,6 +70,7 @@ graph TB
     end
     SS --> N
     N -->|読む| RC
+    N -->|在れば置き直す| CP
     N -->|読む・rc-noticed だけ書く| SD
     IW --> I
     I -->|書く・外す| RC
@@ -78,7 +79,6 @@ graph TB
     RS --> K
     RS -->|ndf-next のブロック| ST
     ST --> M
-    R -->|installPath と比べて置き直す| CP
     QH --> Q
     Q -->|作る・消す| WD
     M -->|next.json を書く・question を消す| WD
@@ -96,7 +96,7 @@ graph TB
 plugins/ndf/
 ├── hooks/claude.json                 # SessionStart の 1 行を差し替え、AskUserQuestion の 2 件を足す
 ├── manifests/claude-skills.txt       # install-wrapper / restart を足す
-├── scripts/relay.py                  # install を変え、uninstall / status / notice / question、run の追従と守りを足す
+├── scripts/relay.py                  # install を変え、uninstall / status / startup / question、run の守りを足す
 ├── scripts/tests/test_relay.py
 └── skills/
     ├── install-wrapper/SKILL.md      # 新規
@@ -111,11 +111,10 @@ plugins/ndf/
 | 副命令 | 引数 | 終了コード | 出力 | 書くもの |
 | --- | --- | --- | --- | --- |
 | `install` | 無し | 0: 囲みを足した・既に在った（写しだけ置き直した）/ 1: 足さなかった（既存の `claude` の定義・bash と zsh 以外のシェル）/ 3: ロックが取れない・書けない | 標準出力へ人が読む行（下の表） | 写し・囲み・バックアップ。`rc-added` から足す先を除く |
-| `uninstall` | 無し | 0: 外した・外すものが無かった / 1: 閉じの無い囲みがあり、そのファイルを変えなかった / 3: ロックが取れない・書けない | 同上 | バックアップ・囲みを外した設定・写しの削除・`rc-added` / `rc-skipped` / `rc-noticed` から外したパスを除く |
+| `uninstall` | 無し | 0: 外した・外すものが無かった / 1: 閉じの無い囲みがあり、そのファイルを変えなかった / 3: ロックが取れない・書けない | 同上 | バックアップ・囲みを外した設定・写しの削除・`rc-skipped` / `rc-noticed` から外したパスを除き、`rc-added` には残す |
 | `status` | 無し | 0 | 同上 | 無し |
-| `notice` | 無し | 常に 0 | 知らせるときだけ `{"systemMessage": "<1 行>"}` | `rc-noticed` に知らせたパスを足す |
+| `startup` | 無し | 常に 0 | 知らせるときだけ `{"systemMessage": "<1 行>"}` | 在る写しの置き直し・`rc-noticed` に知らせたパスを足す |
 | `question` | `open` / `close`。標準入力の hook の JSON は読み捨てる | 常に 0 | 無し | 作業ディレクトリの `question` を作る・消す（下の「関門を越えない守り」） |
-| `run` | 変えない | 変えない | 変えない | 写しの置き直し（下の「写しの追従」） |
 
 **`install` は `NDF_RELAY_AUTO` を見ない。** 明示の起動なので止める変数は要らない（決定 9）。
 副命令が無い・知らないときの振る舞い（使い方を出して終了コード 2）は変えない。使い方の 1 行に
@@ -142,46 +141,40 @@ plugins/ndf/
 | U2 | 囲みを探す | 行を読み、`# >>> ndf relay >>>` の行から次の `# <<< ndf relay <<<` の行までを 1 つの囲みとする。いくつあってもすべて。開きの後に閉じが無ければ、そのファイルは変えずに終了コード 1 の理由にする |
 | U3 | 外す | 囲みが 1 つ以上あれば `<ファイル>.ndf-bak-<UTC>` へ写してから、囲みの行だけを除いた中身を一時ファイルに書き、元の権限で置き換える。**囲みの外の行は変えない**（E5 が足した空行も残す） |
 | U4 | 写し | 写しを消す（無ければ何もしない） |
-| U5 | 記録 | `rc-added` / `rc-skipped` / `rc-noticed` から外したファイルのパスの行を除く |
+| U5 | 記録 | `rc-skipped` / `rc-noticed` から外したファイルのパスの行を除く。**`rc-added` には外したパスを残す（無ければ足す）。** 10.17.4 へ戻した利用者の hook（I5）が「利用者が消した」と読み、足し直さないためである。`startup` は囲みが無ければ知らせないので、残しても新しい版の振る舞いは変わらない |
 | U6 | 報告 | 外したファイルとバックアップを 1 行ずつ。最後に「開いているシェルでは `unalias claude` で外れる（写しを消したので、そのままでは `claude` が失敗する）」を出す。外すものが無ければ `ndf-relay: 外す囲みも写しも無い` |
 
 **`status` の出す行:** 各ファイル（U1 の 2 つ）の囲みの有無と、在れば `rc-added` に載るか（載れば
-「10.17.4 が自動で足した」）。写しの有無と、写しの `relay.py` の中身が導入済みのプラグインの
-`installPath/scripts/relay.py` と同じか（読めなければ「比べられない」）。
+「10.17.4 が自動で足した」）。写しの有無と、写しの中身が今のプラグインの `relay.py`（`status` を動かしている自分）と
+同じか。`relay.py` は版の定数を持たないので、写しの版は示さない。
 
-**`notice` の判定:**
+**`startup` の判定**（写しの置き直しの後に行う）:
 
 | # | 条件 | すること |
 | ---: | --- | --- |
-| 1 | `rc-added` が無い | 何もしない（hook の定義の側でも `python3` を起こさない） |
+| 0 | 写しが在り、中身が自分（今の版の `relay.py`）と違う | `install` の E1 と同じ形（一時ファイル・`0755`・置き換え）で置き直す。**写しが無ければ作らない** |
+| 1 | `rc-added` が無い | 知らせない（写しも `rc-added` も無ければ、hook の定義の側で `python3` を起こさない） |
 | 2 | `rc-added` の各パスのうち、今もそのファイルに囲みがあり、`rc-noticed` に無いものが無い | 何もしない |
 | 3 | 上に当たるパスがある | そのパスを `rc-noticed` に足し、`{"systemMessage": "ndf-relay: <パス> の alias claude は 10.17.4 が自動で足したもの。使い続けるなら何もしなくてよい。外すなら /ndf:install-wrapper uninstall"}` を出す（パスが 2 つなら 1 行に並べる） |
 
-**`notice` は設定ファイルと写しを読むだけで、書くのは状態の親の `rc-noticed` だけである。** 例外は
-すべて捕まえて終了コード 0 で終わる。**判定 2・3 は `install.lock` の中で行う**（2 秒まで待ち、
+**`startup` が書くのは、在る写しの置き直しと状態の親の `rc-noticed` だけである。** シェルの設定は
+読むだけで、写しが無ければ作らない。例外はすべて捕まえて終了コード 0 で終わる。**判定 0・2・3 は `install.lock` の中で行う**（2 秒まで待ち、
 取れなければ何もせず終わる）。同じ HOME の 2 つの起動が同時に来ても、`rc-noticed` の読み書きが
 重ならず、知らせは 1 度だけになる。取れなかった起動では知らせず、次の起動で改めて判定する。
 
 **hook の定義**（`matcher: startup` の最後の 1 件を差し替える。`timeout` 5・`continueOnError: true`）:
 
 ```sh
-sh -c 'R="${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/rc-added"; [ -f "$R" ] || exit 0; ROOT="${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}"; [ -n "$ROOT" ] || exit 0; python3 "$ROOT/scripts/relay.py" notice; exit 0'
+sh -c 'R="${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/rc-added"; C="${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py"; [ -f "$R" ] || [ -f "$C" ] || exit 0; ROOT="${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}"; [ -n "$ROOT" ] || exit 0; python3 "$ROOT/scripts/relay.py" startup; exit 0'
 ```
 
-### 写しの追従（`run`）
+### 写しの置き直しを hook で行う理由
 
-`run` が中継として始める直前（`read_plugin` の後、作業ディレクトリを作る前）に 1 度だけ行う。
-
-| # | 条件 | すること |
-| ---: | --- | --- |
-| 1 | 自分（`realpath(__file__)`）が写し（`${XDG_DATA_HOME:-~/.local/share}/ndf/relay.py` の `realpath`）でない | 何もしない（プラグインのキャッシュから直接起こされた） |
-| 2 | `plugin list --json` の `ndf@<名前>` の要素に `installPath` が無い・`<installPath>/scripts/relay.py` が読めない | 何もしない |
-| 3 | 中身が写しと同じ | 何もしない |
-| 4 | 違う | 一時ファイルに書いて `0755` にしてから写しを置き換える。例外は捕まえて無視する |
-
-**動いている `run` は置き換えた後も古い版のまま最後まで動く。** 次に `claude` と打ったときから新しい
-版になる（確定仕様の「動いている中継は入れ替えない」を保つ）。`read_plugin` は `installPath` も
-返すように広げる（戻り値に 3 つ目を足す。区間の切り替えの版の読み取りは今のまま）。
+**10.17.4 が置いた写しは、新しい版の処理を持たない。** 追従を `run` に置くと、10.17.4 の写しの `run` は
+それを実行できず、写しは 10.17.4 のまま残る（G1〜G3 の守りも届かない）。新しい版の処理を確実に
+走らせられるのは、新しい版のプラグインから呼ばれる SessionStart の hook である。中継の下では、区間の
+切り替えで起動した claude の hook が写しを置き直すので、次に `claude` と打ったときから新しい版になる。
+動いている中継は古い版のまま最後まで動く（確定仕様の「動いている中継は入れ替えない」を保つ）。
 
 ## Skill の契約
 
@@ -267,7 +260,7 @@ sh -c '[ -n "${NDF_RELAY_DIR:-}" ] || exit 0; ROOT="${CLAUDE_PLUGIN_ROOT:-${PLUG
 `NDF_RELAY_EXIT_GAP` は使わなくなる（決定 14）。SIGTERM・SIGKILL の秒は変えない。
 
 **`mark` の関数は `question` を消す 1 行を足すだけで、印の判定は変えない。** 古い版の中継（写しの
-追従の前に動いていたもの）は `question` を読まないが、壊れもしない（今までと同じ振る舞い）。
+置き直しの前に動いていたもの）は `question` を読まないが、壊れもしない（今までと同じ振る舞い）。
 
 ## 処理の流れ
 
@@ -316,7 +309,7 @@ stateDiagram-v2
 stateDiagram-v2
     [*] --> 無し
     無し --> 明示の囲み: install
-    自動の囲み --> 自動の囲み: notice（1 度だけ知らせる）
+    自動の囲み --> 自動の囲み: startup（1 度だけ知らせる・写しの置き直し）
     自動の囲み --> 明示の囲み: install（rc-added から除く）
     自動の囲み --> 無し: uninstall
     明示の囲み --> 無し: uninstall
@@ -325,31 +318,31 @@ stateDiagram-v2
 ```
 
 「自動の囲み」は 10.17.4 からの移行の状態で、新しい版はこの状態を作らない。利用者が手で囲みを
-消した場合は「無し」と同じに扱う（`notice` は囲みが無ければ知らせない）。
+消した場合は「無し」と同じに扱う（`startup` は囲みが無ければ知らせない）。
 
 ## 非機能の実現方式
 
 | 大項目 | 実現方式 |
 | --- | --- |
-| 可用性 | `notice` は常に終了コード 0 で、hook の定義でも `continueOnError: true`。写しの追従の失敗は無視して古い写しのまま始める |
+| 可用性 | `startup` は常に終了コード 0 で、hook の定義でも `continueOnError: true`。写しの置き直しの失敗は無視し、古い写しのまま次の起動で改めて試す |
 | 運用・保守性 | 入口は `/ndf:install-wrapper` の 1 つ。手で戻す方法（囲みを消す・写しを消す）を `relay.md` に残す |
 | 移行性 | 囲みの行・alias の行・写しの置き場所・状態の親のファイル名を 10.17.4 と同じにする。新しい版で足した囲みは 10.17.4 に戻しても同じ形として読まれる（10.17.4 の I4 は囲みがあれば何もしない） |
 | セキュリティ | 質問の表示中と印の後の応答の再開では、中継が子の端末へ書かない（G1〜G3）。設定ファイルを書くのは明示指示専用の Skill だけ。書く前にバックアップを取り、囲みの外を変えない。再開用のコマンドに承認を書かない。送り込みは不変条件（[issue-928-design-injection.md](issue-928-design-injection.md)）を満たすまで実装しない |
-| 費用 | `notice` は `rc-added` が無ければ `python3` を起こさない。写しの追従は始めるときのファイル 2 つの読み比べだけ |
+| 費用 | `startup` は `rc-added` も写しも無ければ `python3` を起こさない。写しの置き直しは起動ごとのファイル 2 つの読み比べだけ |
 
 ## テスト設計
 
 | 受け入れ条件 | 何で確かめるか |
 | --- | --- |
-| AC1 | `claude.json` の SessionStart に `install` が無いこと（hook の定義を読む単体テスト）と、一時の HOME で `notice` の hook のコマンドをそのまま動かして設定・写しの中身と更新時刻が変わらないこと |
+| AC1 | `claude.json` の SessionStart に `install` が無いこと（hook の定義を読む単体テスト）と、一時の HOME で `startup` の hook のコマンドをそのまま動かして、設定の中身と更新時刻が変わらず、写しが無ければ作られないこと |
 | AC2 | `git diff origin/develop -- plugins/ndf/hooks/codex.json plugins/ndf/dev.agy plugins/ndf/dev.kiro` が空 |
 | AC3〜AC5 | `test_relay.py`: bash / zsh（`ZDOTDIR`）で囲み・バックアップ・行が出る。2 回目は写しだけ置き直す。`rc-added` があっても足す。既存の alias / 関数 / `~/.bash_aliases`・fish で足さず終了コード 1。E5 の空行を 1 つだけ挟む |
-| AC6 | `test_relay.py`: 両方のファイルの囲み（複数を含む）を外し、囲みの外がバイトで同じ。閉じの無い囲みで変えず終了コード 1。写しと記録の行が消える。10.17.4 の `install` で作った状態（`rc-added` あり）から外れる |
+| AC6 | `test_relay.py`: 両方のファイルの囲み（複数を含む）を外し、囲みの外がバイトで同じ。閉じの無い囲みで変えず終了コード 1。写しと `rc-skipped` / `rc-noticed` の行が消え、`rc-added` には外したパスが残る。10.17.4 の `install` で作った状態（`rc-added` あり）から外れる |
 | AC7 | `test_relay.py`: 各状態で出す行と、何も書かないこと（前後のファイルの比較） |
 | AC8・AC16 | manifests と `check-skill-frontmatter.py`。`install-wrapper` に `disable-model-invocation: true`、`restart` に無いこと |
 | AC9 | `test_relay.py`: `rc-added` あり・囲みありで 1 度だけ `systemMessage`、2 回目は出ない。同時に 2 つ走らせても出るのは 1 つだけ。囲みが消えていれば出ない。設定と写しを書かない |
 | AC10 | 10.17.4 の囲みの文字列のまま `run` が始まること（既存の中継のテストが通る） |
-| AC11 | `test_relay.py`: 写しから起こした `run` が、差し替えの `plugin list` の `installPath` の中身へ写しを置き直す。写しでない場所から起こしたとき・`installPath` が無いときは置き直さない |
+| AC11 | `test_relay.py`: 中身の違う写しがあれば `startup` が今の版で置き直し、写しが無ければ作らない。置き直しの後も設定ファイルは変わらない |
 | AC12〜AC15 | `restart/SKILL.md` を読んで確かめる（文言を固定するテストは書かない）と AC21 |
 | AC17〜AC19 | [issue-928-design-injection.md](issue-928-design-injection.md) の実測の表・不変条件の節と、起票した課題 |
 | AC23 | `test_relay.py`: 印があって静まっても `question` がある間は子へ何も届かない。`question close` の後に Stop（印の書き直し）で切り替わる。`mark` が `question` を消す |
@@ -366,5 +359,6 @@ stateDiagram-v2
 | `/restart` の名前の衝突 | Claude Code の組み込みや主要プラグインに `restart` を末尾に持つ Skill・コマンドがあるかは、実装の時点で `/` メニューに打って確かめる（AUTHORING の「外部 Skill 名の末尾要素にしない」）。衝突すれば `relay-restart` へ寄せる |
 | `/goal` の下の再起動 | 目標の判定が再起動の応答を「未達」として続けさせたとき、モデルがブロックを出し直すかは実機の通し（AC21）で 1 度見る。出し直さなければ印が消え、中継は切り替えない（落ちる形であって壊れない） |
 | macOS | `uninstall` の置き換えと権限の保持は Linux でだけ確かめる |
+| hook の待ちの中で書いた `/exit` | 中継がロックを持つ間に質問の hook が待つと、書いた `/exit` は hook の実行中に届き、質問の前に claude を終わらせる（実測。答えは残らない）。関門は答えられないが、その質問は失われる。G2 の `stat`（質問の `tool_use` の行が hook より前に記録へ書かれるか）で防げるかは、実装の時点で本物の記録で確かめる |
 | 書いた入力を TUI が読む時間 | 1 秒で読み終えるかは、実機の通し（AC21）で `question.lock` を持つ秒を変えて 1 度見る。実測では、応答の途中に書いた `/clear` は 1 秒後の画面で待ち行列に入っていた |
 | 会話の記録の行の型 | (5) が数える `assistant` / `user` の行が、印の後の Stop hook の記録（`system` など）を含まないことを、実装の時点で本物の記録で確かめる |

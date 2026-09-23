@@ -26,7 +26,7 @@
 | 隔離 | `HOME`・`CLAUDE_CONFIG_DIR`・`XDG_{CONFIG,DATA,STATE,CACHE}_HOME` を一時ディレクトリへ、`DISABLE_AUTOUPDATER=1`。認証は複写した。利用者の `~/.local/bin/claude` の symlink・`~/.bashrc`・`~/.zshrc`・`~/.claude/settings.json` は前後で変わっていない |
 | 観測 | 画面（端末の描画）・会話の記録・hook（`UserPromptSubmit` / `Stop` / `PreToolUse` と `PostToolUse` の `AskUserQuestion` / `Notification` / `PreCompact` / `SessionStart` / `SessionEnd`）の入力の記録 |
 | 形 | 「1 回」= 文字列と `\r` を 1 回の write。「間あり」= 文字列の 1 秒後に `\r`（10.17.4 の `/exit` の形） |
-| 試行 | 25 回。同時に動かした claude は 1 つ |
+| 試行 | 31 回（hook の実行中の 6 回を含む）。同時に動かした claude は 1 つ |
 
 ## 実測の結果
 
@@ -66,6 +66,21 @@
 | `Stop` | 表示中は発火しない。`Esc` で取り消した後も 20 秒発火しなかった |
 | `Notification`（`permission_prompt`） | 表示から約 6 秒後。約 2 秒で答えると発火しない |
 
+### `PreToolUse`（`AskUserQuestion`）の hook の実行中
+
+hook を 3 秒止め、その実行中（開始の約 1 秒後）に書いた。6 試行。
+
+| 送った入力 | 質問の対話 | 結果 |
+| --- | --- | --- |
+| 無し | hook の終了の 0.05〜0.11 秒後に初めて描かれる（4 試行で同じ） | hook の実行中の画面は、通常の入力欄とスピナーだけ |
+| `/exit\r`（2 回） | 描かれない | 約 0.4 秒で `/exit` が実行されて claude が終わる。質問の答えは残らない |
+| `\r` だけ | hook の後に描かれる | 捨てられる。質問の答えにならない |
+| `1` だけ | hook の後に描かれる | 答えにならず入力欄の下書きに残る。後の `/exit\r` と合わさり `1/exit` が普通の文として送られた |
+| `hello\r` | hook の後に描かれる | 待ち行列に入り、質問に答えた後に答えと一緒にモデルへ渡る |
+
+**hook の実行中に書いた入力は、質問の答えにならない。** 質問の対話は hook が終わるまで描かれないためである。
+G3 のロックはこの事実に立つ。
+
 ### 長い入力
 
 子は起動時にブラケットペーストのモード（`\x1b[?2004h`）を入れる。
@@ -86,7 +101,7 @@
 | --- | --- | --- | --- |
 | G1 | **質問（`AskUserQuestion`）の表示中は、子の端末へ何も書かない** | 表示中の `\r` は選択肢を決め、数字は即決する。文字の中身に依らない | `PreToolUse`（`AskUserQuestion`）の hook が作業ディレクトリへ `question` を作り、`PostToolUse` と `mark`（Stop）が消す。中継は `question` がある間は書かない |
 | G2 | **印の後に応答が再開していたら、その印では書かない** | 印は次の Stop まで残る。質問の表示中は Stop が起きない | 中継は、会話の記録に印の `written_at` より後の `assistant` か `user` の行（目標の判定の `attachment` は数えない）があれば、その印を古いものとして扱い、次の Stop が印を書き直すか消すまで待つ |
-| G3 | **G1・G2 の確かめ直しと write を、質問の始まりと排他にする** | `PreToolUse` の hook が終わるまで質問は描かれない。短い入力は 1 回でも間ありでも同じに働く | 中継と `question open` が同じロック `question.lock` を取る。中継はロックの中で確かめ直し、`/exit` と `\r` を 1 回の write で書き、1 秒おいて放す |
+| G3 | **G1・G2 の確かめ直しと write を、質問の始まりと排他にする** | 質問の対話は `PreToolUse` の hook の終了の後に描かれ、hook の実行中の入力は答えにならない（「hook の実行中」の表）。短い入力は 1 回でも間ありでも同じに働く | 中継と `question open` が同じロック `question.lock` を取る。中継はロックの中で確かめ直し、`/exit` と `\r` を 1 回の write で書き、1 秒おいて放す |
 | G4 | 人の入力を装える自由な文を送らない | 自由な文は `UserPromptSubmit` として人の入力と区別されない | 送ってよいのは許可の一覧のスラッシュコマンドだけ（下の「送り込みの実装の下書き」）。改行・制御文字を含む中身は捨てる |
 | G5 | 対話の UI を開くコマンドを送らない | `/cost`・`/status`・`/plugin`・`/model` の確認は対話で止まり、閉じるのに `Esc` が要る。`Esc` は質問を取り消す | 許可の一覧に入れない。`/model` は既定の保存も起きる |
 | G6 | 送ったコマンドの終わりを Stop で待たない | スラッシュコマンドでは Stop が発火しない | 終わりは `SessionStart`（`clear` / `compact`）の hook か、会話の記録で見る |
