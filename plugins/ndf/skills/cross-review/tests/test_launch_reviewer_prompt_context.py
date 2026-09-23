@@ -111,3 +111,25 @@ def test_leftover_temporary_files_are_removed_before_launch(tmp_path) -> None:
     _prompt(tmp_path)
     assert not (tmp_path / f"codex-review-pr{PR}-result.json.tmp").exists()
     assert not (tmp_path / f"codex-review-pr{PR}-round1-payload.json.tmp").exists()
+
+
+# ---------------- 前のラウンドからの変更の節（#542 の AC9・AC10） ----------------
+
+
+def test_the_changes_section_goes_between_the_snapshot_and_the_extra_block(tmp_path) -> None:
+    """`start-round` が書いた変更の節は、控えの後・追加レビュー観点の前へ入る。"""
+    (tmp_path / f"cross-review-pr{PR}-round1-changes.md").write_text(
+        "## 前のラウンドからの変更\n\n- a.md\n")
+    prompt = _prompt(tmp_path, review_instructions="観点X")
+    snapshot = prompt.index("## 既存コメントスナップショット")
+    changes = prompt.index("## 前のラウンドからの変更")
+    extra = prompt.index("## 追加レビュー観点")
+    assert snapshot < changes < extra
+    assert "- a.md" in prompt
+
+
+@pytest.mark.parametrize("content", [None, ""], ids=["missing", "empty"])
+def test_no_changes_section_without_the_file(tmp_path, content) -> None:
+    if content is not None:
+        (tmp_path / f"cross-review-pr{PR}-round1-changes.md").write_text(content)
+    assert "## 前のラウンドからの変更" not in _prompt(tmp_path)

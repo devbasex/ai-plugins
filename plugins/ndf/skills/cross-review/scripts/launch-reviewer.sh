@@ -8,8 +8,9 @@
 # 引数 STATE_PR は state.json の key (= 最初に init した PR 番号)。
 # レビュー対象の PR は state.json の `current_pr` を読む。
 #
-# **ランタイムごとにファイルを分けない。** 母集合が 4 者になったとき、担当ごとに
-# 起動スクリプトを持つと同じ内容が 4 本に散る。CLI ごとの違い（プロンプトの渡し方・
+# **ランタイムごとにファイルを分けない。** 担当は 4 ランタイムのどれでもなりうる
+# （既定の母集合は claude / codex / kiro とホストで、agy は `--include agy` で足す）。
+# 担当ごとに起動スクリプトを持つと同じ内容が 4 本に散る。CLI ごとの違い（プロンプトの渡し方・
 # 作業領域の宣言・実行時間の上限）は共通層の `lib/launch-cli.sh` が 1 箇所で持つ。
 #
 # 注意:
@@ -80,6 +81,13 @@ if [ -s "$EXISTING_FILE" ]; then
 else
   EXISTING_INLINE="(なし)"
 fi
+# 前のラウンドからの変更の節（#542 の決定 4）。`state.py start-round` が、同じ PR の
+# 前のラウンドと head が違うときだけ書く。無ければ何も入れない。
+CHANGES_FILE=$TMP_DIR/cross-review-pr$STATE_PR-round$ROUND-changes.md
+CHANGES_BLOCK=
+if [ -s "$CHANGES_FILE" ]; then
+  CHANGES_BLOCK=$'\n'$(cat "$CHANGES_FILE")
+fi
 EXTRA_REVIEW_BLOCK=
 if [ -n "$EXTRA_REVIEW_INSTRUCTIONS" ]; then
   EXTRA_REVIEW_BLOCK=$(cat <<EXTRA_EOF
@@ -115,7 +123,12 @@ workspace 外を読まなくて済むよう、以下にインライン展開す�
 \`\`\`
 $EXISTING_INLINE
 \`\`\`
+$CHANGES_BLOCK
 $EXTRA_REVIEW_BLOCK
+
+## 出し切り
+- **見つけた指摘はこのラウンドですべて出す。次のラウンドへ回さない。** 重要度が minor のものも書く
+  （出すのは修正アクションのある指摘だけで、下の「含めてはいけないもの」は変わらない）
 
 ## 指摘に **含めてはいけないもの**（Resolve 負荷を増やすため）
 - ❌ **「良い点」/「Strengths」/「評価できる点」** — 総評にも書かない
@@ -189,6 +202,10 @@ $EXTRA_REVIEW_BLOCK
   - **担当は並列に起動する。** 他の担当の指摘を読むと、独立に見つけた指摘と区別できなく
     なる。同じ指摘が 2 者から出たことに意味があるのは、互いを見ていない場合だけである
 - **リポジトリ編集禁止。PR・GitHub・git への書き込みもしない**
+- **テストを実行しない。** 実行して確かめる手順は \`suggested_check\` に書く
+  （進行側の \`verify-findings\` が実行する）
+- **背景で処理を起動しない。** 起動した処理の終わりを待たずに結果のファイルを書かないまま
+  終わると、結果が無い担当として扱われる
 - worktree 外のパスは、上の 2 つのファイルと進捗マーカー以外に触らない
 EOF
 }

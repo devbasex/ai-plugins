@@ -137,6 +137,11 @@ DOCS_ONLY_REVIEW_TEMPLATE = """## 自動追加レビュー観点: ドキュメ�
 - ドキュメント間で用語、前提、バージョン、責務分担が矛盾していないか。
 - 追加・更新された説明が必要十分で、曖昧な表現や未検証の断定がないか。"""
 
+DESIGN_REVIEW_TEMPLATE = """## 自動追加レビュー観点: 設計 PR
+- 要求・設計・決定の記録の 3 文書で、受け入れ条件ごとに設計の要素とテスト設計の行があるか。決定で退けた案が他の節に残っていないか。
+- 状態（ファイル・環境変数・状態ファイルの項目・引数）ごとに、書き手と読み手を並べる。同じ状態を 2 つの経路が書く・読む側が書く側より先に動く・失敗した書き手の後に読む、の矛盾が無いか。
+- 外部コマンド・外部ツールの挙動（優先順位・終了コード・一致の範囲）を断定する記述に、実測の根拠（コマンドと出力）があるか。"""
+
 CODE_REVIEW_TEMPLATE = """## 自動追加レビュー観点: コード変更 PR
 - 設計、正確性、可読性、保守性、単純さを確認する。不要に複雑な分岐、責務の混在、過剰な抽象化がないか。
 - 冗長・重複コード、既存ヘルパや標準 API で置き換えられる処理、言語・フレームワークらしくない実装がないか。
@@ -897,6 +902,91 @@ def _existing_comments_path(pr: int) -> pathlib.Path:
     return _resolve_tmp_dir(pr) / f"cross-review-pr{pr}-existing-comments.txt"
 
 
+# 既存コメントの 3 ソースを一括で取る fix skill の共有スクリプト。テストが偽物へ差し替える。
+FETCH_COMMENTS_SCRIPT = (pathlib.Path(__file__).resolve().parent.parent.parent
+                         / "fix" / "scripts" / "fetch-pr-comments.sh")
+
+
+def _fetch_existing_comments(repo: str, pr: int, path: pathlib.Path, *,
+                             strict: bool) -> str | None:
+    """既存コメントの控えを取り、成功なら `path` へ書いて None、失敗なら理由の文を返す。
+
+    `strict=True` は `--strict` を付け（3 ソースのどれか 1 つの失敗でも失敗にする）、一時の
+    名前へ書いてから成功したときだけ `path` へ改名する。一部だけの控えで前の控えを上書き
+    すると、前のラウンドの指摘が重複の検出から消えるためである（#542 の決定 6）。
+    """
+    cmd = [str(FETCH_COMMENTS_SCRIPT), *(["--strict"] if strict else []), repo, str(pr)]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        return (r.stderr or "").strip()[:200] or f"終了コード {r.returncode}"
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(r.stdout, encoding="utf-8")
+    tmp.replace(path)
+    return None
+
+
+# 前のラウンドからの変更の節の上限（#542 の決定 4・非機能の条件）。差分の本文は入れない。
+CHANGES_MAX_FILES = 50
+CHANGES_MAX_LIST_BYTES = 5000
+
+
+def _round_changes_path(state_pr: int, round_no: int) -> pathlib.Path:
+    return _resolve_tmp_dir(state_pr) / f"cross-review-pr{state_pr}-round{round_no}-changes.md"
+
+
+def _render_round_changes(prev_round: int, prev_sha: str, head_sha: str,
+                          names: list[str]) -> str:
+    listed: list[str] = []
+    size = 0
+    for name in names:
+        line = f"- {name}"
+        if (len(listed) >= CHANGES_MAX_FILES
+                or size + len(line.encode("utf-8")) + 1 > CHANGES_MAX_LIST_BYTES):
+            break
+        listed.append(line)
+        size += len(line.encode("utf-8")) + 1
+    rest = len(names) - len(listed)
+    if rest:
+        listed.append(f"- ほか {rest} 件")
+    return (
+        "## 前のラウンドからの変更\n\n"
+        f"前のラウンド（round {prev_round}）の head `{prev_sha}` から今の head `{head_sha}` までに、"
+        "次のファイルが変わった。\n\n"
+        + "\n".join(listed) + "\n\n"
+        f"差分は作業ツリーで `git diff {prev_sha} {head_sha}` を実行して読む。\n"
+        "**変わった節と、それを参照する節・同じ契約を使う節を先に見る。** 修正が新しく作った経路"
+        "（状態・分岐・引数）に穴が無いかを確かめる。直った指摘を繰り返さない"
+        "（既存コメントの控えに返信がある）。\n"
+    )
+
+
+def _write_round_changes(st: dict[str, Any], state_pr: int) -> None:
+    """今のラウンドの「前のラウンドからの変更」の節を書く。書かないときは前の残りを消す。
+
+    比べるのは、今のラウンドより前で `pr` が `current_pr` と同じもののうち最も新しい
+    ラウンドである。そのラウンドか今のラウンドの `head_sha` が無い・2 つが同じ・差分の
+    一覧が取れない、のどれかなら書かない。
+    """
+    entry = st["rounds"][-1]
+    path = _round_changes_path(state_pr, entry["round"])
+    path.unlink(missing_ok=True)
+    prev = next((r for r in reversed(st["rounds"][:-1]) if r.get("pr") == entry.get("pr")),
+                None)
+    prev_sha, head_sha = (prev or {}).get("head_sha"), entry.get("head_sha")
+    if not prev_sha or not head_sha or prev_sha == head_sha:
+        return
+    r = subprocess.run(
+        ["git", "-C", str(st.get("worktree_path") or "."), "diff", "--name-only",
+         prev_sha, head_sha],
+        capture_output=True, text=True)
+    if r.returncode != 0:
+        info(f"⚠ 前のラウンドからの変更を取れませんでした（{(r.stderr or '').strip()[:200]}）")
+        return
+    names = [n for n in r.stdout.splitlines() if n]
+    path.write_text(_render_round_changes(prev["round"], prev_sha, head_sha, names),
+                    encoding="utf-8")
+
+
 def _now() -> str:
     return _dt.datetime.now(_dt.timezone.utc).astimezone().isoformat(timespec="seconds")
 
@@ -1110,7 +1200,16 @@ def _is_infra_path(path: str) -> bool:
     )
 
 
+# 設計 PR の文書の名前（#542 の決定 5）。`design` の成果物が `issues/` に置く 3 文書。
+DESIGN_DOC_SUFFIXES = ("-requirements.md", "-design.md", "-design-decisions.md")
+
+
+def _is_design_doc_path(path: str) -> bool:
+    return path.startswith("issues/") and path.endswith(DESIGN_DOC_SUFFIXES)
+
+
 PATH_CATEGORY_RULES = (
+    ("design", _is_design_doc_path),
     ("code", _is_code_path),
     ("db_migration", _is_migration_path),
     ("test", _is_test_path),
@@ -1131,6 +1230,7 @@ PATH_CATEGORY_RULES = (
 CATEGORY_TEMPLATES = {
     "common": COMMON_REVIEW_TEMPLATE,
     "docs_only": DOCS_ONLY_REVIEW_TEMPLATE,
+    "design": DESIGN_REVIEW_TEMPLATE,
     "code": CODE_REVIEW_TEMPLATE,
     "db_migration": DB_MIGRATION_REVIEW_TEMPLATE,
     "test": TEST_REVIEW_TEMPLATE,
@@ -1924,16 +2024,10 @@ def _init_new_state(
         # 既存コメントスナップショット（重複指摘防止）。
         # 3 ソース (インラインコメント / レビュー body / PR レベルコメント) を
         # fix skill の共有スクリプトで一括取得する。
-        fetch_script = pathlib.Path(__file__).resolve().parent.parent.parent / "fix" / "scripts" / "fetch-pr-comments.sh"
-        r = subprocess.run(
-            [str(fetch_script), repo, str(pr)],
-            capture_output=True, text=True,
-        )
         existing_path = tmp_dir / f"cross-review-pr{pr}-existing-comments.txt"
-        if r.returncode == 0:
-            existing_path.write_text(r.stdout, encoding="utf-8")
-        else:
-            die(f"既存コメント取得失敗 (重複検出無効のため中断): {r.stderr.strip()[:200]}")
+        error = _fetch_existing_comments(repo, int(pr), existing_path, strict=False)
+        if error is not None:
+            die(f"既存コメント取得失敗 (重複検出無効のため中断): {error}")
 
         return _InitWorkspaceContext(
             tmp_dir=tmp_dir,
@@ -2415,6 +2509,16 @@ def cmd_start_round(args: argparse.Namespace) -> None:
         entry["head_sha"] = head.oid
     st["rounds"].append(entry)
     _save(args.pr, st)
+
+    # 既存コメントの控えを取り直す（#542 の決定 6）。通しの 1 ラウンド目は `init` が取った
+    # 直後のため取り直さない。失敗しても前の控えのまま進める（前の控えでも今と同じ条件で
+    # レビューできる）。
+    if round_no >= 2:
+        error = _fetch_existing_comments(
+            str(st.get("repo") or ""), int(pr), _existing_comments_path(args.pr), strict=True)
+        if error is not None:
+            info(f"⚠ 既存コメントの控えを取り直せませんでした（{error}）。前の控えのまま進めます")
+    _write_round_changes(st, args.pr)
 
     info(f"=== Round {round_no} / {max_r} (PR #{pr}, round_in_pr={round_in_pr}"
          f", レビュー: {' + '.join(reviewers)}) ===")
