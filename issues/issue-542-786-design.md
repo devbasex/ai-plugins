@@ -180,7 +180,8 @@ cross-refactoring の `setup.py`）は、空でなければ次の 1 行を標準
 
 状態ファイルの `participants` には `ignored_exclude` を書き足す（`excluded` には入れない。外した者と区別するため）。
 
-**`--only` で名指しした者は、既定の母集合に無くても参加者にする**（決定 12）。`resolve_participants` は、`only` が
+**`--only` で名指しした者は、既定の母集合に無くても参加者にする**（決定 12）。`resolve_participants` は、まず `only` が
+ランタイムの名前（`ALL_RUNTIMES`）かを確かめ、違えば今の綴りの検査と同じく `AssignmentError` にする。名前が正しく、
 母集合にも `--include` にも無く、`--exclude` にも無いとき、`only` を足す者として扱ってから今の検査を通す。
 `--only agy` は `--include agy` 無しで今と同じく agy 1 者で回る。`--only agy --exclude agy` は今どおり矛盾で止まる。
 足した名前は `participants.included` に書かない（記録は `only` だけが持つ）。再開で `--only none` を渡すと、
@@ -193,14 +194,17 @@ cross-refactoring の `setup.py`）は、空でなければ次の 1 行を標準
 ### 既存コメントの控え（`state.py`）
 
 ```python
-def _fetch_existing_comments(repo: str, pr: int, path: pathlib.Path) -> str | None:
-    """fetch-pr-comments.sh を呼び、成功なら path へ書いて None、失敗なら理由の文を返す。"""
+def _fetch_existing_comments(repo: str, pr: int, path: pathlib.Path, *, strict: bool) -> str | None:
+    """fetch-pr-comments.sh を呼び、成功なら path へ書いて None、失敗なら理由の文を返す。
+
+    strict=True なら --strict を付け、一時の名前へ書いてから成功したときだけ path へ改名する。
+    """
 ```
 
 | 呼ぶ場所 | 失敗したとき |
 | --- | --- |
-| `init` の新規開始（今の場所） | 今と同じく `die`（終了コード 1） |
-| `start-round`（状態ファイルの通しで 2 ラウンド目以降。ラウンドを開いた後、担当を起動する前）。`--strict` を付けて呼び、出力を一時の名前のファイルへ書いてから、成功したときだけ控えへ改名する | 3 つの取得元のどれか 1 つでも失敗したら（終了コード 1）、前の控えを残し、`⚠ 既存コメントの控えを取り直せませんでした（<理由の先頭 200 字>）。前の控えのまま進めます` を標準エラーへ出して続ける |
+| `init` の新規開始（今の場所）。`strict=False` で呼ぶ | 今と同じく、3 つとも失敗したときだけ `die`（終了コード 1）。1〜2 つの失敗は今どおり続ける |
+| `start-round`（状態ファイルの通しで 2 ラウンド目以降。ラウンドを開いた後、担当を起動する前）。`strict=True` で呼ぶ（`--strict` を付け、出力を一時の名前のファイルへ書いてから、成功したときだけ控えへ改名する） | 3 つの取得元のどれか 1 つでも失敗したら（終了コード 1）、前の控えを残し、`⚠ 既存コメントの控えを取り直せませんでした（<理由の先頭 200 字>）。前の控えのまま進めます` を標準エラーへ出して続ける |
 
 | 項目 | 値 |
 | --- | --- |
@@ -312,7 +316,7 @@ sequenceDiagram
 | --- | --- |
 | AC1 AC2 AC3 | `test_lib_assignment.py`: `review_pool(h)` をホスト 4 通りで比べる。`resolve_participants` + `review_seats` で host=claude の round 1〜3 を比べる |
 | AC4 | 同上: `--include agy` の座席が今の既定の輪番と一致する。`--exclude agy` が例外を出さず `ignored_exclude == ["agy"]`、`available` に agy が無い。`test_state_review_pool.py`: `init --exclude agy` が終了コード 0 で `ℹ` の行を出し、状態ファイルに `ignored_exclude` が残る。綴りの誤りは今どおり 2 |
-| AC4b | `test_lib_assignment.py`: `only="agy"` で `include` 無しでも参加者が `[agy]` になり、`included` は空。`only="agy", exclude=["agy"]` は今どおり `AssignmentError`。`test_state_resume_args.py`: `--only agy` で始めた実行を `--only none` で再開すると、参加者が既定の 3 者に戻る |
+| AC4b | `test_lib_assignment.py`: `only="agy"` で `include` 無しでも参加者が `[agy]` になり、`included` は空。`only="agy", exclude=["agy"]` は今どおり `AssignmentError`。`only="typo"` は `probe` を呼ぶ前に `AssignmentError`。`test_state_resume_args.py`: `--only agy` で始めた実行を `--only none` で再開すると、参加者が既定の 3 者に戻る |
 | AC4c | cross-refactoring の `test_init.py`: `{"exclude": [["agy"]]}` が中断せず `ℹ` の行を出す。重なりの指定は今どおり終了コード 4 |
 | AC4d | 上の表の `test_the_report_lists_who_took_part` の書き換え |
 | AC5 | 目で見る。`grep -rn "4 者" plugins/ndf/skills/cross-review CLAUDE.md plugins/ndf/README.md docs/specifications/cross-review-participants-and-seats.md` の当たりのうち、現行の説明は 0 件。出た版の変更点の記録（`plugins/ndf/README.md` の 10.17.3 の更新案内）は書き換えない |
@@ -321,7 +325,7 @@ sequenceDiagram
 | AC10 | 同上: 1 ラウンド目・同じ head・`head_sha` の無いラウンドでファイルが無く、前の起動の残りも消える。プロンプトに節が入らない |
 | AC11 | 同上: 53 ファイルの差分で一覧が 50 件と「ほか 3 件」。名前が 200 バイトのファイル 40 件の差分で、一覧が 5,000 バイトで打ち切られ、ファイルの大きさが 6,000 バイト以下 |
 | AC12 AC12b | 同上: `fetch-pr-comments.sh` を差し替えた偽物で、2 ラウンド目の `start-round` が呼び、控えが新しい中身になる。1 ラウンド目では呼ばない。`set-current-pr` の後の `start-round` は新しい PR の番号で呼ぶ |
-| AC12a | 同上: 偽物の `fetch-pr-comments.sh --strict` が 3 つのうち 1 つの失敗で 1 を返すと、控えが前の中身のまま残る。`fix` の側のテスト: `--strict` 無しでは今どおり 1 つの失敗で 0 |
+| AC12a | 同上: 偽物の `fetch-pr-comments.sh --strict` が 3 つのうち 1 つの失敗で 1 を返すと、控えが前の中身のまま残る。`init`（`strict=False`）では 1 つの失敗でも控えを書いて続け、3 つとも失敗すると終了コード 1。`fix` の側のテスト: `--strict` 無しでは今どおり 1 つの失敗で 0 |
 | AC13 | 同上: 偽物が失敗すると `start-round` が終了コード 0 で `⚠` の行を出し、控えは前の中身のまま |
 | AC14 AC16 | `test_state_auto_review_templates.py`: `issues/issue-1-design.md` を含む変更が `common` / `docs_only` / `design` に、`issues/notes.md` と `docs/x-design.md` だけの変更が `design` を含まない |
 | AC15 | 目で見る（テンプレートの文言） |
