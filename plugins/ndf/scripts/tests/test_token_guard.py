@@ -100,6 +100,13 @@ DENY_SLEEP = [
     "bash -O extglob -c 'sleep 30'",
     "until [ -s f ]; do sleep $X; done",
     "until [ -s f ]; do sleep $(cat n); done",
+    "bash -euo pipefail -c 'sleep 100'",
+    "bash -eo pipefail -c 'sleep 100'",
+    "sleep 30 2>&1 | tee x",
+    "sleep 30 &>/dev/null",
+    "sleep 30 >&2",
+    "nohup sleep 30",
+    "echo a; bash -c 'sleep 30'",
 ]
 
 ALLOW_SLEEP = [
@@ -121,6 +128,11 @@ ALLOW_SLEEP = [
     "while read l; do echo $l; done < f",
     "sleep 30 & echo done",
     "echo X=1 sleep 30",
+    "sleep 30 >/tmp/x &",
+    "sleep 100 >/dev/null &",
+    "sleep 30 >>x 2>&1 & echo started",
+    "echo bash -c 'sleep 30'",
+    "printf '%s' eval sleep 30",
 ]
 
 
