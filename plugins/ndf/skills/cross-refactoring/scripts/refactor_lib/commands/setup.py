@@ -570,9 +570,12 @@ def _resume(
     if include is not None or exclude is not None or require_all is not None:
         recorded = state.get("participants") or {}
         include_eff = include if include is not None else list(recorded.get("included") or [])
-        # 渡さなかった除外は、共通の再開規則で記録から補う（#786 の AC4d）。
-        exclude_eff = (exclude if exclude is not None
-                       else assignment.recorded_exclusions(recorded, include_eff))
+        # `--exclude` を渡さない再開では、外した者と無視した除外の両方を足し戻す。無視した
+        # 名前を `--include` にも渡したときだけ足し戻さない（新しい指定を優先。#786 の AC4d。
+        # cross-review の `_recorded_exclusions` と同じ規則）
+        exclude_eff = exclude if exclude is not None else (
+            list(recorded.get("excluded") or [])
+            + [n for n in (recorded.get("ignored_exclude") or []) if n not in include_eff])
         participants = resolve_participants(
             str(state["host"]),
             include_eff,
