@@ -68,10 +68,10 @@
 | 囲み | シェルの設定の `# >>> ndf relay >>>` から `# <<< ndf relay <<<` までの行。中の `alias claude=...` が中継を挟む |
 | 自動の囲み | 10.17.4 の SessionStart hook が足した囲み。状態の親の記録 `rc-added` に足した先のパスが載る |
 | 写し | `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/relay.py`。明示の導入の alias が指す中継の本体 |
-| 中継の rc | `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/shellrc`。写しが在るときだけ `alias claude=...` を定義する |
+| 中継の rc | `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/shellrc`。`claude` の関数を定義する。関数は呼んだ時点で写しが在れば中継を、無ければ素の `claude` を起こす |
 | 読み込み | 中継の rc を、在るときだけ読む 1 行。`$DEVBASE_SHELLRC_DIR/ndf-relay.sh`（読み込み先のファイル）か、シェルの設定の囲みの中に置く |
 | 旧い写し | `${XDG_DATA_HOME:-~/.local/share}/ndf/relay.py`。10.17.4 が置いた写しで、10.17.4 の囲みの alias が指す |
-| 状態の親 | `${XDG_STATE_HOME:-~/.local/state}/ndf/relay/`。`rc-added` などの記録を持つ。**置き場所は変えない**（決定 19） |
+| 状態の親 | `${XDG_STATE_HOME:-~/.local/state}/ndf/relay/`。`rc-added` などの記録を持つ。**置き場所は変えない**（決定 18） |
 | 再開用のコマンド | 再起動した claude へ最初の入力として渡す中身（`ndf-next` のブロックの中身と同じ扱い） |
 | 送り込み | 中継が子の擬似端末へ、`/exit` 以外の入力を書くこと（項目 3） |
 
@@ -125,7 +125,7 @@
 
 ### 7. 永続化される場所への導入
 
-- [ ] AC27: 写しと中継の rc は Claude Code の設定の親（`${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/`）の下に置く。中継の rc の alias と読み込みの行は `install` の時点で決まるパスを指す（`$HOME` の下なら `"$HOME/..."` の形）。どちらもファイルが在るときだけ働く。devbase では、コンテナを作り直した後も写しと中継の rc が残る（`~/.claude` が `/persistent/group/.claude` への symlink であることを設計の文書に実測で残す）
+- [ ] AC27: 写しと中継の rc は Claude Code の設定の親（`${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/`）の下に置く。中継の rc の関数と読み込みの行は `install` の時点で決まるパスを指す（`$HOME` の下なら `"$HOME/..."` の形）。関数は呼んだ時点で写しが無ければ素の `claude` を起こし、読み込みの行は中継の rc が無ければ何もしない。devbase では、コンテナを作り直した後も写しと中継の rc が残る（`~/.claude` が `/persistent/group/.claude` への symlink であることを設計の文書に実測で残す）
 - [ ] AC28: `DEVBASE_SHELLRC_DIR` が在るディレクトリを指すとき、`install` は読み込みの 1 行を `$DEVBASE_SHELLRC_DIR/ndf-relay.sh` に置き、`~/.bashrc`・`~/.zshrc` へ囲みを足さない（10.17.4 の囲みが残っていれば、その中だけを読み込みの行へ置き換える）。`uninstall` はこのファイルも消す。devbase の読み込み（`~/.bashrc`・`~/.zshrc` がこのディレクトリの `*.sh` を読む）は devbasex/devbase#253 で依頼した
 - [ ] AC29: 写しの版（`relay.version`）が SessionStart の hook を動かすプラグインの版より新しければ、hook は写しを置き直さない（同じ親を共有する別のコンテナの古い版が、写しを後退させない）
 - [x] AC30: devbasex/devbase へ、永続化されたシェルの設定の読み込みを足す issue を送る。devbasex/devbase#253 として起票した

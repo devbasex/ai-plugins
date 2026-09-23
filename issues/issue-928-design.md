@@ -126,7 +126,7 @@ plugins/ndf/
 
 ### 置き場所
 
-**alias は、写しと同じ永続化される親の下の「中継の rc」に書く。** シェルの設定には、中継の rc を
+**`claude` の定義は、写しと同じ永続化される親の下の「中継の rc」に書く。** シェルの設定には、中継の rc を
 読む 1 行だけを置く（決定 18・19）。`<親>` は `install` の時点の `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/ndf` である。
 
 | ファイル | パス | 誰が置くか | devbase での永続性（2026-09-23 の実測） |
@@ -149,23 +149,35 @@ devbase では `~/.claude`・`~/.claude.json`・`~/.gemini` が `/persistent/gro
 ```sh
 # <親>/shellrc
 # ndf の中継。/ndf:install-wrapper が書き、/ndf:install-wrapper uninstall が消す
-[ -f "$HOME/.claude/ndf/relay.py" ] && alias claude='python3 "$HOME/.claude/ndf/relay.py" run'
+function claude {
+  if [ -f "$HOME/.claude/ndf/relay.py" ]; then python3 "$HOME/.claude/ndf/relay.py" run "$@"
+  else command claude "$@"; fi
+}
 
 # 読み込み先のファイル、または囲みの中の 1 行
 [ -f "$HOME/.claude/ndf/shellrc" ] && . "$HOME/.claude/ndf/shellrc"
 ```
 
-**どちらも在るかを確かめてから読む。** 写しか中継の rc が消えても、`claude` は元の定義のまま動く。
+**写しの有無は `claude` を呼んだ時点で見る。** 別のコンテナの `uninstall` が共有された写しを消しても、
+開いたままのシェルの `claude` は素の `claude` へ落ち、失敗しない（alias の形では起動した時点でしか
+見られない。レビューの指摘）。中継の rc が無ければ、読み込みの行は何もしない。
+
+**関数は `function claude { ... }` の形で書く。** 先に `alias claude=...` があると、`claude() { ... }` の形は
+定義の行が alias で展開されて壊れる。`function` の後の名前は展開されない。先の alias は呼び出しの時に
+展開され、その引数が関数へ渡る。devbase の `alias claude='claude --dangerously-skip-permissions'` の後に
+読むと、`--dangerously-skip-permissions` が中継を通って子の `claude` へ届く（2026-09-23 に bash 5 で
+`bash --rcfile` を使って確かめた。zsh は手元に無く確かめていない）。
 `${CLAUDE_CONFIG_DIR:-...}` をファイルに残さないのは、隔離した `CLAUDE_CONFIG_DIR` で `claude` を
-起動したときに写しを見失わないためである。パスに `'`・`"`・`\`・`$`・`` ` `` が含まれれば何も
-書かず、終了コード 1 で理由を示す（引用が壊れる）。
+起動したときに写しを見失わないためである。パスに引用を壊す文字が含まれれば何も書かない（E0）。
 
 **`install` の段**（I1〜I7 を置き換える。ロックは今の `install.lock` を 2 秒まで待つ）:
 
 | # | 段 | すること | 出す行 |
 | ---: | --- | --- | --- |
+| E0 | パス | 写し・中継の rc・読み込み先のファイルのパスに `'`・`"`・`\`・`$`・`` ` `` が含まれれば、何も書かず終了コード 1 | `ndf-relay: <パス> は引用できない文字を含むため置かない` |
 | E1 | 読み込み先 | `DEVBASE_SHELLRC_DIR` が在るディレクトリを指せば、読み込み先のファイルを使う。無ければ `$SHELL` の名前が `bash` なら `~/.bashrc`、`zsh` なら `${ZDOTDIR:-$HOME}/.zshrc` の囲みを使う。どちらでもなければ何も書かず終了コード 1 | `ndf-relay: <シェル> には足さない。使うなら次の 1 行を設定へ置く: <読み込みの行>` |
 | E2 | 既存の定義 | `~/.bashrc`（bash では `~/.bash_aliases` も）か `.zshrc` に行頭の `alias claude=` / `function claude` / `claude()` があれば、何も書かず終了コード 1。囲みの中の行は数えない | `ndf-relay: <ファイル> に claude の定義があるため足さない` |
+| E2b | 囲みの形 | `~/.bashrc` と `.zshrc` を調べ、開きの後に閉じの無い囲みが 1 つでもあれば、何も書かず終了コード 1（U2 と同じ判定） | `ndf-relay: <ファイル> の囲みに閉じが無い。直してから打ち直す` |
 | E3 | 写し | 写しが無いか中身が違えば、`<親>` を作り、一時ファイルに書いて `0755` にしてから置き換える。写しの版に自分の版を書く。旧い写しには触れない | 無し（E6 の行に含める） |
 | E4 | 中継の rc | 無いか中身が違えば、一時ファイルに書いて `0644` で置き換える | 同上 |
 | E5 | 読み込み | 読み込み先のファイルなら、無いか中身が違えば置き換える。囲みなら、既に囲みがあれば足さない。囲みの中が今の読み込みの行と違えば（10.17.4 の囲みは alias を直に持つ）、`<ファイル>.ndf-bak-<UTC>` へ写してから囲みの行だけを置き換える。囲みが無ければ、バックアップの後に、末尾の改行と空行を 1 つずつ整えて囲みを追記する | 同上 |
@@ -184,11 +196,11 @@ devbase では `~/.claude`・`~/.claude.json`・`~/.gemini` が `/persistent/gro
 | # | 段 | すること |
 | ---: | --- | --- |
 | U1 | 対象 | `~/.bashrc` と `${ZDOTDIR:-$HOME}/.zshrc` の両方（`$SHELL` に依らない。10.17.4 は起動した時点の `$SHELL` で足した）と、`DEVBASE_SHELLRC_DIR` が在れば読み込み先のファイル |
-| U2 | 囲みを探す | 行を読み、`# >>> ndf relay >>>` の行から次の `# <<< ndf relay <<<` の行までを 1 つの囲みとする。いくつあってもすべて。**U1 の 2 つのファイルを先にすべて調べ、1 つでも開きの後に閉じが無ければ、何も変えずに終了コード 1 で終わる** |
+| U2 | 囲みを探す | 行を読み、`# >>> ndf relay >>>` の行から次の `# <<< ndf relay <<<` の行までを 1 つの囲みとする。いくつあってもすべて。**U1 のうちシェルの設定の 2 つを先にすべて調べ、1 つでも開きの後に閉じが無ければ、何も変えずに終了コード 1 で終わる**（読み込み先のファイルは囲みを持たないので、U4 で消すだけ） |
 | U3 | 外す | 囲みが 1 つ以上あれば `<ファイル>.ndf-bak-<UTC>` へ写してから、囲みの行だけを除いた中身を一時ファイルに書き、元の権限で置き換える。**囲みの外の行は変えない**（E5 が足した空行も残す） |
 | U4 | 消す | 読み込み先のファイル・中継の rc・写しの版・写し・旧い写しを消す（無いものは飛ばす）。**写しも消す**（決定 20） |
 | U5 | 記録 | `rc-skipped` / `rc-noticed` から外したファイルのパスの行を除く。**`rc-added` には外したパスを残す（無ければ足す）。** 10.17.4 へ戻した利用者の hook（I5）が「利用者が消した」と読み、足し直さないためである。**あわせて `rc-user` に外したパスを足す** |
-| U6 | 報告 | 外したファイル・バックアップ・消したファイルを 1 行ずつ。最後に「開いているシェルでは `unalias claude` で外れる」を出す。`<親>` が別の環境と共有されうるときは「同じ設定を共有する環境でも、次に開くシェルから中継を通らなくなる」を足す。外すものが無ければ `ndf-relay: 外すものが無い` |
+| U6 | 報告 | 外したファイル・バックアップ・消したファイルを 1 行ずつ。最後に「開いているシェルでは `unset -f claude`（10.17.4 の囲みなら `unalias claude`）で外れる」を出す。`<親>` が別の環境と共有されうるときは「同じ設定を共有する環境でも、中継を通らなくなる（開いたままのシェルは素の `claude` へ落ちる）」を足す。外すものが無ければ `ndf-relay: 外すものが無い` |
 
 **`status` の出す行:** 読み込み先（読み込み先のファイルか、どのシェルの設定の囲みか）と、その有無。
 各シェルの設定の囲みの有無と、在れば `rc-added` に載り `rc-user` に載らないか（そうなら「10.17.4 が
@@ -423,7 +435,7 @@ devbasex/devbase#253 が入る前の devbase では、`install` は囲みを使�
 | --- | --- |
 | AC1 | `claude.json` の SessionStart に `install` が無いこと（hook の定義を読む単体テスト）と、一時の HOME で `startup` の hook のコマンドをそのまま動かして、設定の中身と更新時刻が変わらず、写しが無ければ作られないこと |
 | AC2 | `git diff origin/develop -- plugins/ndf/hooks/codex.json plugins/ndf/dev.agy plugins/ndf/dev.kiro` が空 |
-| AC3〜AC5 | `test_relay.py`: bash / zsh（`ZDOTDIR`）で囲み・バックアップ・行が出る。写し・写しの版・中継の rc が `CLAUDE_CONFIG_DIR` の下にでき、囲みの中は中継の rc を読む 1 行で、中継の rc の alias は `"$HOME/..."` の形で写しを指す。2 回目は何も足さない。10.17.4 の囲み（alias を直に持つ）があれば、バックアップの後に囲みの中だけが置き換わり、囲みの外はバイトで同じ。写しを消すと、中継の rc を読んでも `alias claude` が定義されない。`rc-added` があっても足し、`rc-added` を残したまま `rc-user` に足す。既存の alias / 関数 / `~/.bash_aliases`・fish で足さず終了コード 1。E5 の空行を 1 つだけ挟む |
+| AC3〜AC5 | `test_relay.py`: bash / zsh（`ZDOTDIR`）で囲み・バックアップ・行が出る。写し・写しの版・中継の rc が `CLAUDE_CONFIG_DIR` の下にでき、囲みの中は中継の rc を読む 1 行で、中継の rc の alias は `"$HOME/..."` の形で写しを指す。2 回目は何も足さない。10.17.4 の囲み（alias を直に持つ）があれば、バックアップの後に囲みの中だけが置き換わり、囲みの外はバイトで同じ。写しを消すと、中継の rc を読んだシェルの `claude` が素の `claude` を起こす（試験用の `claude` を PATH に置く）。先に `alias claude='claude --x'` を定義した rc の後に中継の rc を読むと、`--x` が中継へ渡る。閉じの無い囲み・引用できないパスで何も書かず終了コード 1。`rc-added` があっても足し、`rc-added` を残したまま `rc-user` に足す。既存の alias / 関数 / `~/.bash_aliases`・fish で足さず終了コード 1。E5 の空行を 1 つだけ挟む |
 | AC6 | `test_relay.py`: 両方のファイルの囲み（複数を含む）を外し、囲みの外がバイトで同じ。片方のファイルに閉じの無い囲みがあれば、どちらのファイルも写しも記録も変えず終了コード 1。中継の rc・写しの版・写し・旧い写しと `rc-skipped` / `rc-noticed` の行が消え、`rc-added` には外したパスが残る。10.17.4 の `install` で作った状態（`rc-added` あり）から外れる |
 | AC7 | `test_relay.py`: 各状態で出す行と、何も書かないこと（前後のファイルの比較） |
 | AC8・AC16 | manifests と `check-skill-frontmatter.py`。`install-wrapper` に `disable-model-invocation: true`、`restart` に無いこと |
@@ -431,7 +443,7 @@ devbasex/devbase#253 が入る前の devbase では、`install` は囲みを使�
 | AC10 | 10.17.4 の囲みの文字列のまま `run` が始まること（既存の中継のテストが通る） |
 | AC11 | `test_relay.py`: 中身の違う写し・旧い写しのそれぞれを `startup` が今の版で置き直し、無い方は作らない。置き直しの後も設定ファイルは変わらない |
 | AC27 | 設計の文書の「置き場所」の実測と、`test_relay.py`（`CLAUDE_CONFIG_DIR` の有無で写しと中継の rc のパスが変わる。パスに `'` があれば何も書かず終了コード 1） |
-| AC28 | `test_relay.py`: `DEVBASE_SHELLRC_DIR` に一時のディレクトリを置くと、`ndf-relay.sh` ができ、`~/.bashrc`・`.zshrc` の中身と更新時刻は変わらない。10.17.4 の囲みが残っていれば、その中だけが読み込みの行へ置き換わる。`uninstall` で `ndf-relay.sh` が消える。状態の親を消しても（作り直しの模擬）何も出ず、`bash -ic 'alias claude'` が中継を指す |
+| AC28 | `test_relay.py`: `DEVBASE_SHELLRC_DIR` に一時のディレクトリを置くと、`ndf-relay.sh` ができ、`~/.bashrc`・`.zshrc` の中身と更新時刻は変わらない。10.17.4 の囲みが残っていれば、その中だけが読み込みの行へ置き換わる。`uninstall` で `ndf-relay.sh` が消える。状態の親を消しても（作り直しの模擬）何も出ず、`bash --rcfile` で読ませたシェルの `type claude` が中継の rc の関数を示す |
 | AC29 | `test_relay.py`: 写しの版に新しい版を書いた写しへ、古い版のプラグインのルートから `startup` を動かしても写しが変わらない。写しの版が無い・読めないときは置き直す。`-dev.N` の付いた版は同じ `X.Y.Z` の正式版より古いとして比べる |
 | AC12〜AC15 | `restart/SKILL.md` を読んで確かめる（文言を固定するテストは書かない）と AC21 |
 | AC17〜AC19 | [issue-928-design-injection.md](issue-928-design-injection.md) の実測の表・不変条件の節と、起票した課題 |
@@ -451,6 +463,7 @@ devbasex/devbase#253 が入る前の devbase では、`install` は囲みを使�
 | `/goal` の下の再起動 | 目標の判定が再起動の応答を「未達」として続けさせたとき、モデルがブロックを出し直すかは実機の通し（AC21）で 1 度見る。出し直さなければ印が消え、中継は切り替えない（落ちる形であって壊れない） |
 | macOS | `uninstall` の置き換えと権限の保持は Linux でだけ確かめる |
 | devbase 以外の永続化 | 写しを `~/.claude` の下に置けば残ることは devbase でだけ確かめた。ほかの環境で `~/.claude` を作り直す運用は想定しない |
+| zsh での関数の形 | `function claude { ... }` が先の alias と組み合わさることは bash でだけ確かめた。zsh は実装の時点で確かめる |
 | devbase の読み込み先の名前 | `DEVBASE_SHELLRC_DIR` と `~/.shellrc.d/*.sh` は devbasex/devbase#253 で出した案である。devbase が別の名前を選べば、実装の持ち場が E1・U1 の変数名を合わせる |
 | hook の待ちの中で書いた `/exit` | 中継がロックを持つ間に質問の hook が待つと、書いた `/exit` は hook の実行中に届き、質問の前に claude を終わらせる（実測。答えは残らない）。関門は答えられないが、その質問は失われる。**質問の `tool_use` の行が `PreToolUse` の hook より前に会話の記録へ書かれるかは確かめていない。** 書かれるなら G3 の段 3 の記録の大きさの確かめで書かずに戻れる。実装の時点で本物の記録で確かめる |
 | 再開用のコマンドの中身 | 引数なしの再開用のコマンドを定型（`/goal ...` の入力そのもの・番号とパスと URL だけの 1 文）に限ったが、守るのはモデルで、機械の検査は無い。引数で渡された中身は利用者の入力として扱い、検査しない |
