@@ -226,7 +226,7 @@ plugins/ndf/
 | `from_session` | 前の区間の `session_id`（`start`。1 つ目は空） |
 | `plugin_version` | 起動の直前に `claude plugin list --json` から読んだ `ndf@<マーケットプレイス>` の `version`（`start`。AC8） |
 | `cwd` / `cwd_fallback` | 起動した作業ディレクトリと、印の `cwd` が消えていたときの元の値（`start`。消えていなければ `cwd_fallback` は無い） |
-| `seconds` | 区間の長さ。`start` の `at` から、印の `written_at`（`mark`）か子の終わり（`no-mark`）まで（`end`） |
+| `seconds` | 区間の長さ。`start` の `at` から、印の `written_at`（`mark` と `sigterm`。どちらも印を受けて終わらせたので、`/exit` の後の待ちを含めない）か子の終わり（`no-mark`）まで（`end`） |
 | `ended_by` | `mark`（印を受けて `/exit` を入力し、子が終わった）/ `no-mark`（子が印なしで終わった）/ `sigterm`（`/exit` の後 30 秒で終わらず SIGTERM で終わらせた）（`end`） |
 | `reason` | 次の区間を起動しない理由（`stop`）。`stop-file` / `max-starts` / `spin` / `update-failed` / `start-failed` |
 
@@ -284,11 +284,11 @@ stateDiagram-v2
 
 | 段 | すること |
 | --- | --- |
-| 中継する | 自分の標準入力を raw にし、`select` で標準入力 → マスタ、マスタ → 標準出力を流す。SIGWINCH を受けたら自分の端末の大きさをマスタへ `TIOCSWINSZ` で写す。2 秒ごとに `next.json` を見る（スクリプトの中の待ちで、LLM は使わない）。子の終わりは `waitpid(WNOHANG)` で見る |
+| 中継する | 始める前に自分の端末の属性を `tcgetattr` で保存し、標準入力を raw にする。**保存した属性は、正常な終わり・例外・SIGTERM と SIGHUP の受け取りのすべての経路で `tcsetattr` により戻す**（`try` / `finally` とシグナルの受け取りの中で戻す）。戻さないと、シェルへ戻った後の端末が raw のまま残る。`select` で標準入力 → マスタ、マスタ → 標準出力を流す。SIGWINCH を受けたら自分の端末の大きさをマスタへ `TIOCSWINSZ` で写す。2 秒ごとに `next.json` を見る（スクリプトの中の待ちで、LLM は使わない）。子の終わりは `waitpid(WNOHANG)` で見る |
 | 静まりを待つ | 次の 3 つがそろうまで待つ。(1) 印の `written_at`・`transcript_path` の更新時刻・利用者の最後の入力の時刻のうち最も遅いものから `--quiet` 秒たつ。(2) 会話の記録に `/goal` の目標がある区間では、印の `written_at` より後の `goal_status` の記録がある。(3) 印が消えていない。判定が止めを拒んだときは応答が続いて記録が動き、次の Stop で印が書き直されるか消える |
-| 続けさせる | 停止の印があるか、1 日の起動回数が上限か、空回り（中継が起動した区間のうち、直前の 2 つの `end` の `seconds` がともに 120 未満で、今の区間の長さ＝印の `written_at` − その区間の `start` の `at` も 120 未満）なら、`/exit` を入力しない。`stop` の行を書き、`ndf-relay:` の 1 行を出し、印を消す。以後は中継するだけで、次の印では何もしない |
+| 続けさせる | 停止の印があるか、1 日の起動回数が上限か、空回り（直前の 2 つの `end` の `seconds` がともに 120 未満で、今の区間の長さ＝印の `written_at` − その区間の `start` の `at` も 120 未満）なら、`/exit` を入力しない。`stop` の行を書き、`ndf-relay:` の 1 行を出し、印を消す。以後は中継するだけで、次の印では何もしない |
 | 終わらせる | 子の端末へ `/exit` を書き、1 秒おいて `\r` を書く。`waitpid` で 30 秒まで待ち、終わらなければ SIGTERM を送る。`end` を書く |
-| 起動する | `claude plugin marketplace update <マーケットプレイス>` → `claude plugin update ndf@<マーケットプレイス> -y` → `claude plugin list --json` で版を読む。どれかが 0 以外で終われば `update-failed` で終わる。作業ディレクトリは印の `cwd` で、消えていれば、パスに `/.worktrees/` を含むならその手前（主ディレクトリ）を、含まなければ在る最も近い親を使う。区切りの 1 行を出し、新しい擬似端末で `claude <中身>` を起動する（引数の配列で渡し、シェルを通さない。環境から `CLAUDECODE` / `CLAUDE_CODE_SESSION_ID` / `CLAUDE_CODE_ENTRYPOINT` を外し、`NDF_RELAY_DIR` を置く）。起動できなければ `start-failed` で終わる |
+| 起動する | マーケットプレイスの名前が読めていれば、`claude plugin marketplace update <マーケットプレイス>` → `claude plugin update ndf@<マーケットプレイス> -y` → `claude plugin list --json` で版を読む。どれかが 0 以外で終われば `update-failed` で終わる。名前が読めていなければ（下の段落）、更新を飛ばして `plugin_version` を空にし、起動へ進む。作業ディレクトリは印の `cwd` で、消えていれば、パスに `/.worktrees/` を含むならその手前（主ディレクトリ）を、含まなければ在る最も近い親を使う。区切りの 1 行を出し、新しい擬似端末で `claude <中身>` を起動する（引数の配列で渡し、シェルを通さない。環境から `CLAUDECODE` / `CLAUDE_CODE_SESSION_ID` / `CLAUDE_CODE_ENTRYPOINT` を外し、`NDF_RELAY_DIR` を置く）。起動できなければ `start-failed` で終わる |
 
 **マーケットプレイスの名前は、中継を始めたときに `claude plugin list --json` の `ndf@<名前>` から読む。**
 開発版のチャネルを使う利用者でも、登録した取得元から更新される。読めなければ更新を飛ばし、`plugin_version` を空にする。
@@ -325,11 +325,11 @@ stateDiagram-v2
 | AC4b | 同: 印がある状態でブロック無しの標準入力を与えると印が消える。`stop_hook_active: true` でもブロック 1 つなら書く。直接の子でない claude のブロック無しの Stop は印を消さない |
 | AC5 | 「確かめたこと」の 5 と、AC17 で `AskUserQuestion` を 1 回出す |
 | AC6 | 同: 試験用の子で 1 周させ、`/exit` と `\r` が子へ届く → 子の終わり → `marketplace update` → `plugin update -y` → `plugin list --json` → 区切りの 1 行 → 次の子の起動（中身が 1 つの引数）の順になること。記録の更新時刻が新しいあいだ・利用者の入力から 15 秒たたないあいだ・目標のある記録で印より後の `goal_status` が無いあいだは `/exit` を送らないこと |
-| AC7 | 同: 中継の標準入力に見立てたパイプへ `\x03` と文字を書くと、同じバイトが子へ届くこと。SIGWINCH の後に子の端末の大きさが変わること |
+| AC7 | 同: 中継の標準入力に見立てたパイプへ `\x03` と文字を書くと、同じバイトが子へ届くこと。SIGWINCH の後に子の端末の大きさが変わること。中継を擬似端末の上で動かし、子が終わった後・本体で例外を起こした後・SIGTERM を送った後のそれぞれで、中継の端末の属性が始める前と同じに戻っていること |
 | AC8 | 同: 1 周で `end`（6 つのキー: `event` / `at` / `section` / `pid` / `seconds` / `ended_by`）と `start`（8 つのキー: `event` / `at` / `section` / `pid` / `command` / `from_session` / `plugin_version` / `cwd`。`cwd_fallback` は消えていたときだけ足す）の 2 行が書かれ、`plugin_version` が差し替えた `plugin list --json` の値、`ended_by` が `mark` であること |
 | AC9 | 同: 印の `cwd` が消えた（`<主>/.worktrees/design/x`）とき `<主>` で次の子が起動し、`start` の行に `cwd_fallback` が載ること |
 | AC10 | 同: 今日の `start` が 20 行ある記録で印を与えると、`/exit` を送らず `stop`（`max-starts`）と `ndf-relay:` の 1 行を出し、子を続けさせること |
-| AC11 | 同: 中継が起動した区間の長さが 119・119・119 と続くと 3 つ目の印で `/exit` を送らず `stop`（`spin`）、119・121・119 では送ること。1 つ目の区間を数えないこと |
+| AC11 | 同: 区間の長さが 119・119・119 と続くと 3 つ目の印で `/exit` を送らず `stop`（`spin`）、119・121・119 では送ること。1 つ目の区間（`relay.py run` の最初のコマンド）も数えること。`sigterm` で終わった区間の長さが印の `written_at` までで測られること |
 | AC12 | 同: 試験用の子が印なしで終わると、`end`（`no-mark`）を書いて子の終了コードで終わること |
 | AC13 | 同: 別のプロセスから `relay.py stop` を打つと `stop` ができ、次の印で `/exit` を送らないこと。動いている中継が無ければ `stop` が終了コード 1 |
 | AC14 | 同: AC10・AC11・AC13 と、`plugin update` の差し替えが 0 以外のとき・次の子の起動に失敗したときに、`ndf-relay:` の 1 行と `stop` の行が出ること。後の 2 つは次のコマンドを画面に出し、終了コード 2 |
