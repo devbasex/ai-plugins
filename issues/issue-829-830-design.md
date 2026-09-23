@@ -2,6 +2,7 @@
 
 要求と受け入れ条件は [issue-829-830-requirements.md](issue-829-830-requirements.md) にある。
 この文書は「どう作るか」だけを扱う。
+決定の記録は [issue-829-830-design-decisions.md](issue-829-830-design-decisions.md) にある。
 
 **実装は 1 本の Pull Request にまとめる**（決定 1）。hook の入口と登録、状態の置き場所、
 拒否の返し方を 2 つの課題で共有するためである。
@@ -151,9 +152,9 @@ plugins/ndf/
 - **書き込みは置き換えで行う**（一時ファイルへ書いて `mv`）。途中で落ちても壊れた JSON を残さない
 - **読み・判定・書き込みは session ごとのロック `guards/<session_id>.lock` の中で行う。** 同じ session の
   hook が並列に走ると、置き換えだけでは `count` の更新や印が失われる。控えと印の両方に当てる
-- ロックは `lock-common.sh` の `ndf_lock_acquire <dir> 2` / `ndf_lock_release` で取る。`flock` を
+- ロックは `lock-common.sh` の `ndf_lock_acquire <dir> 1` / `ndf_lock_release` で取る。`flock` を
   使わない仕組みで、排他の手順はリポジトリでそこ 1 か所にある。標準出力へ書かず hook の JSON に混ざらない
-- **2 秒で取れなければ判定せず通す**（可用性。AC9 と同じ扱い）。sleep の判定はロックを取らない
+- **1 秒で取れなければ判定せず通す**（可用性。AC9 と同じ扱い。待ちの上限を 1 秒にして非機能の 2 秒に収める）。sleep の判定はロックを取らない
 - **7 日より古い控えは、書き込みのついでに消す**（`find -mtime +7 -delete`）。会話が終わった合図を
   hook は受け取らないため
 - **文脈量の案内を出した印** は `guards/context-<session_id>.json` に、拒否した起動の鍵を持つ。
@@ -284,14 +285,14 @@ sequenceDiagram
     H->>H: 背景か / -c・eval の中身を取り出し同じ判定 / コメント・引用・ヒアドキュメントを除く / コマンドの位置の sleep の秒数と、while・until の本体にあるか
     H-->>A: 当たれば拒否（待ち方の案内）
   else tool_name = Read
-    H->>S: ロックを取る（2 秒で取れなければ通す）
+    H->>S: ロックを取る（1 秒で取れなければ通す）
     H->>S: 控えを読む・ファイルの size と mtime と inode を取る
     H->>S: 控えを置き換え（count を進めるか 1 に戻す）、ロックを放す
     H-->>A: count が上限に達すれば拒否
   else tool_name = Skill / Agent / Task
     H->>H: 工程 Skill か・先頭語が持ち場の Agent か / サブエージェントか
     H->>S: transcript の末尾から文脈量を読む
-    H->>S: ロックを取る（2 秒で取れなければ通す）
+    H->>S: ロックを取る（1 秒で取れなければ通す）
     H->>S: 案内の印を読む（間の他のツールでは消えない）
     alt 印が同じ鍵（skill・args か description）を持つ
       H->>S: 印を消す・ロックを放す
@@ -327,152 +328,22 @@ stateDiagram-v2
 
 | 大項目 | 条件 | 実現方式 |
 | --- | --- | --- |
-| 性能・拡張性 | 50 MB の記録でも 1 秒以内 | 記録は `tail -n 200` の範囲だけを読む。Bash と Read の判定は記録を読まない。登録の `timeout` は 5 秒 |
+| 性能・拡張性 | 50 MB の記録でも、競合しないとき 1 回 1 秒以内。ロックを待つときは待ちの上限 1 秒を足した 2 秒以内 | 記録は `tail -n 200` の範囲だけを読む。Bash と Read の判定は記録を読まない。ロック待ちの上限は 1 秒（`ndf_lock_acquire <dir> 1`）。登録の `timeout` は 5 秒のままでよい（最長の 2 秒に余裕がある） |
 | 運用・保守性 | 理由の欄だけで次の手が分かる | 理由の欄に代わりの手段と規約の場所を必ず書く（出力の表） |
-| 可用性 | hook の失敗で実行を止めない | 入力が読めない・`jq` が無い・控えが書けない・記録が読めないときは何も出さず 0。`guards/` を作れない・ロックを 2 秒で取れないときは Read と文脈量の判定を通し、sleep の判定だけを続ける。登録に `continueOnError: true` |
+| 可用性 | hook の失敗で実行を止めない | 入力が読めない・`jq` が無い・控えが書けない・記録が読めないときは何も出さず 0。`guards/` を作れない・ロックを 1 秒で取れないときは Read と文脈量の判定を通し、sleep の判定だけを続ける。登録に `continueOnError: true` |
 
-## 決定の記録
-
-### 決定 1: 2 つの課題を 1 本の実装 Pull Request にまとめる
-
-hook の入口・登録・状態の置き場所・拒否の返し方が同じで、分けると `hooks/claude.json` と
-テストの土台を 2 本が同時に触る。2 本に分ける形は採らない。後に入る側が土台の食い違いを解く
-手間が、分けて読みやすくなる利点を上回る。
-
-### 決定 2: 待ち方の規約は `development-workflow/references/waiting.md` の新しいファイルに置く
-
-`agent-layers.md` は #828（持ち場ごとの抜粋）も同時に触る。待ち方の規約は、
-#731（`bg-wait.sh` を共通層へ移す）と external-ai / cross-review の文書からも参照される。
-同じファイルの節にすると、参照するたびに 3 層の規約の全体を読ませる。`agent-layers.md` と `parallel-work.md` の節に置く形は
-採らない。`parallel-work.md` は待ち方の道具に触れておらず、そこへ足す理由が無い。
-
-### 決定 3: sleep の判定は「前景で、`while` / `until` のループの本体にあるか、5 秒を超える `sleep`」を拒否する
-
-文字列やコメントの中の `sleep` は数えない。`echo sleep 30` や `git commit -m "sleep 60"` を止めないよう、
-引用・コメント・ヒアドキュメントを除いた後の語の位置で判定する。
-
-ただし引用を取り除く前に、`bash -c` / `sh -c` / `zsh -c` / `eval` の実行される引数を取り出す。
-前に `timeout` / `nohup` / `env` が付く形（`timeout 590 bash -c "..."`）も含める。
-取り出した中身へ同じ判定を当て、入れ子も同じ規則で 1 段ずつ見る。
-引用の中身は実行されるため、除くだけだと `bash -c 'sleep 30'` を見逃す。
-
-ループとして数えるのは、`sleep` が `while` / `until` の `do` と対応する `done` の間にあるときだけである。
-本体の外の `sleep`（`while read l; do ...; done < f; sleep 1`）は秒数の上限だけで見る。
-`while` と `sleep` が同じコマンドにあるだけで拒否すると、ループの後の短い間まで止める。
-
-ループの中の `sleep` を通すと、費用の大半を見逃す。2026-08-23 以降の全プロジェクトの記録
-（6,713 本、Bash 74,223 件）では、`sleep <数>` を含む前景の Bash は次のとおりだった。
-
-| 形 | 件数 | 費用（input 換算） |
-| --- | ---: | ---: |
-| 前景・ループの中（`while [ $n -lt 40 ]; do ...; sleep ...; done` など） | 1,543 | 67.3M |
-| 前景・ループなし（`sleep 30 && tail x` など） | 743 | 9.9M |
-| 背景（`run_in_background`） | 441 | 5.3M |
-
-ループの 1 回の呼び出しは 600 秒で打ち切られ、待ちが長いと呼び直しが続く。同じループを背景へ移せば、
-待つ時間の長さによらず完了通知 1 回で済む。ループなしの形の半数（382 件）は 5 秒以下で、サーバの起動を
-待つような短い間であるため通す。`for` のループで 5 秒以下の `sleep` を挟む形（API の照会の
-間隔を空ける使い方）も通す。
-
-ループの中の `sleep` をすべて通す形は採らない。前景の `sleep` の費用の 87% を占める形が残る。`sleep` を含む
-Bash をすべて拒否する形も採らない。短い間と照会の間隔まで止めると、代わりの手段が無い。
-配布物の文書にある前景の待ちのループも拒否に当たる。理由の欄が「同じループを
-`run_in_background: true` で」と案内するため、Claude Code ではループを書き換えずに 1 回の回り道で済む。
-
-| 文書 | ループ | 書き換える変更 |
-| --- | --- | --- |
-| `external-ai/references/cli-codex.md` / `cli-agy.md` | `until ! ps -p ...; do sleep 30; done` | この変更で案内の 1 行。ループの書き換えは #731 |
-| `qa-security-scan/03-report-template.md` | `until grep -q ...; do sleep 30; done` | この変更で案内の 1 行。ループの書き換えは #731 |
-| `release/references/completion-check.md` | `while :; do ...; sleep 5; done` | この変更で案内の 1 行。ループの書き換えは #731 |
-
-案内の 1 行は 4 文書とも同じで、ループの直前に置く: 「Claude Code では、このループを
-`run_in_background: true` で実行して完了通知を待つ（`development-workflow/references/waiting.md`）」。
-hook と案内の行を同じ変更で配布するため、拒否と文書の順序が食い違わない。
-ループの書き換え（道具の共通化）は #731 で行う。
-
-### 決定 4: 連続 Read は「同じ範囲・変わらないファイル・3 回目」で拒否する
-
-hook は実行の前に呼ばれ、読んだ中身を知らない。そのため「空ファイル」ではなく「前回から
-大きさ・更新時刻・inode が変わっていない」で判定する。更新時刻はナノ秒の精度で持ち、inode も比べる。
-同じ秒に同じ大きさの内容で置き換えた（`mv`）ファイルを、変わっていないと取り違えないためである。空ファイルの読み直しはこれに含まれ、書き込みが
-進むログの読み直しは含まれない。`offset` と `limit` を鍵に入れるのは、大きなファイルを範囲を
-変えて読み進める正当な使い方を止めないためである。
-
-3 回目にするのは、2026-08-23 以降の記録の実測による。同じ引数の Read が 3 回以上続いたのは 6 本で、
-うち 5 本が `tasks/*.output` の読み直し（最長 1,168 回）だった。残る 1 本は画像を見直す 3 回である。
-2 回目で止めると、正当な見直しに当たる機会が増える。間に他のツールが挟まったら数え直す形は
-採らない。hook は Read の呼び出しにしか登録されず、間のツールを見られない。
-
-### 決定 5: hook は Claude Code にだけ登録し、他の 3 ランタイムは規約で守る
-
-拒否の理由が案内する代わりの手段（`Monitor` / `run_in_background` の通知）は Claude Code にしか
-無い。文脈量も Claude Code の `transcript_path` からしか読めない。#827 の実測も Claude Code の
-記録だけで、Codex / Kiro / agy の消費は測っていない。3 ランタイムへも登録する形は採らない。
-Kiro は拒否すると代わりの口を持たず、agy は案内を控えへ積む形で、どちらも同じ案内を出せない。
-CLI 側の消費を測った後（#827 の次の手順）に改めて決める。
-
-### 決定 6: 文脈量の判定は conductor が工程へ入る起動だけに掛ける
-
-**conductor が工程へ入る起動は、経路によって違うツールに現れる。** hook は両方を捕まえる。
-
-| 経路 | conductor が起動するもの | 捕まえる入力 | 印の鍵 |
-| --- | --- | --- | --- |
-| 対話 | 工程 Skill（例 `ndf:implementation-plan`）。対話では 3 層へ出さない（`development-workflow/SKILL.md` の「`/goal` の引数として呼ばれたとき」の末尾） | `Skill`。名前が `token-guard-stages.txt` にある（上の「工程 Skill の一覧」の 13 個） | `skill`・`args` |
-| 3 層 | 持ち場ごとの supervisor。conductor は `development-workflow` と `issue-plan-strategy` 以外を起動しない（`agent-layers.md` の「3 層の責務」） | `Agent`（旧名 `Task`）。`agent_id` が無く、`description` の先頭語が持ち場の語彙（`agent-layers.md` の「起動の指示」） | `description` |
-
-3 層の経路の `Skill` だけを見ると、捕まるのは入口の起動だけで、持ち場の切れ目で止まらない。
-先頭語が作業の種類（`調査` など）の Agent は持ち場でないため見ない。
-
-supervisor は 1 つの持ち場の中で複数の工程を通すため、工程の起動で止めると持ち場が途中で
-途切れる。supervisor の切れ目は #768 / #773 が測ってから決める。工程でない Skill
-（`markdown-writing` / `progress-tracking` など）の起動で止める形も採らない。工程の途中で起動
-されるため、切れ目にならない。`worktree` など切れ目の内側の工程も、同じ理由で一覧から外す。
-
-### 決定 7: 文脈量の案内は工程 Skill の起動ごとに 1 度拒否し、次の同じ起動だけを通す
-
-利用者が「このまま続ける」と決めたときに、環境変数を設定し直さずに続けられるようにする。
-毎回拒否する形は採らない。続けると決めた利用者が、同じ工程をやり直せなくなる。
-会話ごとに 1 度にする形も採らない。1 度通した後は、以後の工程の切れ目で止まらなくなる。
-印に鍵（`skill` と `args`、Agent では `description`）を持つのは、通すのを工程へ入る次の同じ起動に限るためである。
-間のツールで印を失効させる形は採らない。hook は Edit などを見ないため、失効の条件を一貫して判定できない。
-拒否せずに案内だけを足す形（`additionalContext`）も採らない。#827 の実測で、`context-window.md`
-に書いた規定は守られていなかった。1 度は止めないと、案内は読み流される。
-
-### 決定 8: 引き継ぎの 1 行は `development-workflow` を起動する形にする
-
-工程 Skill を直接起動する形（`/ndf:implementation-plan #829`）は採らない。工程 Skill はモード・作業ツリー・
-承認の状態を戻す手順を持たず、戻す手順を持つのは `development-workflow` の側だからである。
-`development-workflow` を経由すると固定費に 1 回分の読み込み（約 1 万トークン）が足されるが、
-切る前の会話の文脈（#827 で平均 41 万）に比べて小さい。
-
-### 決定 9: 上限の既定は 200,000 にし、`skill-stats` の既定と同じ値にする
-
-`context-window.md` の「遅くとも 20 万」と、`skill-stats.py` の `DEFAULT_WINDOW_LIMIT` が同じ値を
-持つ。hook だけ別の値にすると、測る側と止める側の上限が食い違う。10 万（目安の側）にする形は
-採らない。#827 で固定費だけで約 4 万あり、1 工程の途中で止まる回数が増える。
-
-### 決定 10: 1 回で足りる待ちは `Monitor` ではなく `run_in_background` の until ループにする
-
-#829 は「`Monitor` の until で 1 回だけ待つ」を挙げた。一方、Claude Code 2.1.280 の `Monitor` の
-説明は、道具を次のように使い分ける。
-
-| 待ち方 | 使う道具 |
-| --- | --- |
-| 通知が 1 回で足りる（終わるのを待つ） | `run_in_background` の until ループ |
-| 出来事を 1 つずつ受ける | `Monitor` |
-`Monitor` は既定 5 分・最長 30 分で打ち切られ、張り直しが要る。
-`Monitor` を 1 回の待ちの既定にする形は採らない。張り直しのたびに呼び出しが増える。
+決定の記録は [issue-829-830-design-decisions.md](issue-829-830-design-decisions.md) にある。
 
 ## テスト設計
 
 | 受け入れ条件 | 何で確かめるか |
 | --- | --- |
 | AC1〜AC4 | 文書の検査（`test_token_guard.py`）: `waiting.md` があり、許す待ち方の節が `Monitor` と `run_in_background` を挙げる。`agent-layers.md` の supervisor と worker の規則が `waiting.md` を参照する。`waiting.md` と `agent-layers.md` のコード例に、前景の `while` / `until` と `sleep` を組み合わせた Claude Code 向けの例が無い |
-| AC5 | 単体: `sleep 30 && tail -5 x.log`・`while ! test -s x; do sleep 5; done`・`until ...; do sleep 1; done`・`bash -c 'sleep 30'`・`timeout 590 bash -c "until [ -s f ]; do sleep 5; done"`・`sh -c 'until test -s x; do sleep 1; done'` で deny と理由の欄に `run_in_background` と `waiting.md` |
-| AC6 | 単体: `run_in_background: true` の `sleep 30 && tail`・`while read l; do echo "$l"; done < f; sleep 1`・`python3 -m http.server & sleep 2`・`for p in 1 2; do gh api ...; sleep 1; done`・`echo sleep 30`・`git commit -m "sleep 60"`・`# sleep 30` のコメント行・`echo "while x; do sleep 9; done"`・`cat <<'EOF'`〜`sleep 60`〜`EOF` のヒアドキュメント・`tool_name: Monitor` で出力なし |
+| AC5 | 単体: `sleep 30 && tail -5 x.log`・`while ! test -s x; do sleep 5; done`・`until ...; do sleep 1; done`・`bash -c 'sleep 30'`・`timeout 590 bash -c "until [ -s f ]; do sleep 5; done"`・`sh -c 'until test -s x; do sleep 1; done'`・`for i in 1 2; do sleep 10; done`（`for` の本体は秒数だけで見るので 10 秒で拒否）・`while a; do while b; do sleep 1; done; done`（内側の `while` の本体）で deny と理由の欄に `run_in_background` と `waiting.md` |
+| AC6 | 単体: `run_in_background: true` の `sleep 30 && tail`・`while read l; do echo "$l"; done < f; sleep 1`・`python3 -m http.server & sleep 2`・`for p in 1 2; do gh api ...; sleep 1; done`・`for i in 1 2; do sleep 3; done`・`echo sleep 30`・`git commit -m "sleep 60"`・`# sleep 30` のコメント行・`echo "while x; do sleep 9; done"`・`cat <<'EOF'`〜`sleep 60`〜`EOF` のヒアドキュメント・`tool_name: Monitor` で出力なし |
 | AC7 | 単体: 一時ファイルに対し Read を 3 回 → 3 回目で deny。2 回目の後にファイルへ追記 → 数え直し。`offset` を変える → 数え直し。同じ大きさの内容で置き換えた（`mv`）ファイル → 数え直し。同じ session で Read の hook を 2 本並列に起動しても count が 2 進む（更新が失われない） |
 | AC8 | AC5〜AC7 のテストが `uv run --with pytest pytest plugins/ndf/scripts/tests/test_token_guard.py -q` で通る |
-| AC9 | 単体: 壊れた JSON・`jq` を外した `PATH`・書けない `XDG_STATE_HOME` で、出力なしと終了コード 0。ロックを他が持ったまま 2 秒を超えると出力なしで 0。同じ環境変数の下で `guards/` の親が `wf_state_dir` の親と一致する（4 段それぞれ） |
+| AC9 | 単体: 壊れた JSON・`jq` を外した `PATH`・書けない `XDG_STATE_HOME` で、出力なしと終了コード 0。ロックを他が持ったまま 1 秒を超えると出力なしで 0。同じ環境変数の下で `guards/` の親が `wf_state_dir` の親と一致する（4 段それぞれ） |
 | AC10 | 単体: `NDF_SLEEP_GUARD=0` と `NDF_READ_REPEAT_GUARD=0` で、それぞれの拒否だけが消える。閾値: `NDF_SLEEP_MAX_SEC=30` で `sleep 10` は出力なし・`sleep 40` は deny、`NDF_READ_REPEAT_LIMIT=2` で 2 回目に deny、`NDF_CONTEXT_LIMIT=300000` で文脈量 250,000 は出力なし |
 | AC11 | 実機: サブエージェントの中で `codex exec` を `run_in_background` で起動し、他の作業が無いまま応答を終える。ターンを終えずに次の段へ進んだことを、そのサブエージェントの記録で確かめて #829 に残す |
 | AC12 | 単体: 文脈量 250,000 の transcript の見本と `tool_input.skill: "ndf:implementation-plan"`、`args: "#829"` で deny と理由の欄に `/ndf:development-workflow #829`。3 層: `tool_name: Agent`、`description: "設計: #829 #830"` で deny と `/ndf:development-workflow #829 #830`。args に番号が無ければ `<課題番号>` のまま（控えが複数あっても推測しない） |
