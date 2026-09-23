@@ -387,6 +387,17 @@ def test_context_uses_last_assistant_usage(tmp_path, state):
     assert denied(run(skill(under_then_over, session="suo"), state))
 
 
+def test_context_malformed_transcript_passes(tmp_path, state):
+    # 現状固定: usage が上限超過でも、壊れた JSON 行がある記録は読めず fail-open する。
+    tp = transcript(tmp_path, 250_000)
+    with tp.open("a") as fh:
+        fh.write("{not json\n")
+
+    proc = run(skill(tp), state)
+    assert proc.returncode == 0
+    assert proc.stdout == ""
+
+
 def test_context_subagent_passes(tmp_path, state):
     tp = transcript(tmp_path, 250_000)
     assert denied(run(skill(tp, agent_id="a1"), state)) is None
