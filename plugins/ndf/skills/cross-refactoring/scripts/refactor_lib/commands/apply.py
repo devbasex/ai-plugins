@@ -198,6 +198,14 @@ def _update_state_from_merged_proposals(
     # 提案は読むだけなので、この時点の HEAD が着手前の状態である。
     entry["apply_base_sha"] = git_out(state["worktrees"]["work"], ["rev-parse", "HEAD"])
 
+    _next_phase_after_merge(state, entry, adopted)
+    statefile.save(path, state)
+
+
+def _next_phase_after_merge(
+    state: dict[str, Any], entry: dict[str, Any], adopted: list[dict[str, Any]]
+) -> None:
+    """統合の結果から次の局面を決める。収束したときは終了理由も確定させる。"""
     if adopted:
         state["phase"] = "apply"
     elif entry_kind(entry) == TEST:
@@ -210,7 +218,6 @@ def _update_state_from_merged_proposals(
         # 終了理由をここで確定させないと、報告が「未終了」のままになる。
         state["final"] = "no_more_proposals"
         state["ended_at"] = statefile.now()
-    statefile.save(path, state)
 
 
 def _replay_merged_proposals(

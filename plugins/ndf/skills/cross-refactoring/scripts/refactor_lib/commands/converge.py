@@ -12,6 +12,7 @@ import hashlib
 import pathlib
 import sys
 import time
+from dataclasses import dataclass
 from typing import Any, Optional
 
 import statefile
@@ -432,26 +433,32 @@ def _revert_invalid_fix_round(
     return set()
 
 
-def _resolve_fix_range(
-    path: pathlib.Path,
-    state: dict[str, Any],
-    entry: dict[str, Any],
-    work: str,
-    head_now: str,
-) -> list[str]:
+@dataclass
+class FixExecutionContext:
+    """修正の取り込み 1 回分に属する値の組。"""
+
+    path: pathlib.Path
+    state: dict[str, Any]
+    entry: dict[str, Any]
+    scope: IntakeScope
+    work: str
+
+
+def _resolve_fix_range(ctx: FixExecutionContext, head_now: str) -> list[str]:
     """修正の範囲を**オーケストレータが記録した起点**から確定して返す。
 
     起点は `verify-round` がテストの失敗を返したときの HEAD である。確定できない
     ときは修正ラウンドを 1 つ進めて保存したうえで `die` する。
     """
-    ordered_range = commits_in_range(work, entry.get("fix_base_sha"), head_now)
+    entry = ctx.entry
+    ordered_range = commits_in_range(ctx.work, entry.get("fix_base_sha"), head_now)
     if ordered_range is None:
         # **修正ラウンドは進める。** 進めないと `should-abandon` が見送りへ移る
         # 条件（`fix_rounds` が上限に達する）を永久に満たさず、修正フェーズと
         # 再レビューを無限に往復する。この修正は採らないので、範囲外の記録は
         # 何も足さない。
         entry["fix_rounds"] += 1
-        statefile.save(path, state)
+        statefile.save(ctx.path, ctx.state)
         die(
             "修正の範囲を確定できませんでした"
             f"（起点 {entry.get('fix_base_sha')} / HEAD {head_now}）。"
@@ -494,10 +501,7 @@ def _inspect_fix_commits(
 
 
 def _settle_fix_round(
-    path: pathlib.Path,
-    state: dict[str, Any],
-    entry: dict[str, Any],
-    scope: IntakeScope,
+    ctx: FixExecutionContext,
     ordered_range: list[str],
     resolved: set[str],
     unassigned: list[str],
@@ -506,11 +510,13 @@ def _settle_fix_round(
 ) -> None:
     """検証結果に応じて修正ラウンドを取り消すか受理し、解決の印を付ける。"""
     if unassigned or problems:
-        resolved = _revert_invalid_fix_round(path, state, scope, ordered_range)
+        resolved = _revert_invalid_fix_round(
+            ctx.path, ctx.state, ctx.scope, ordered_range
+        )
     else:
-        _record_accepted_fix_commits(state, accepted)
+        _record_accepted_fix_commits(ctx.state, accepted)
 
-    _mark_resolved_fix_findings(entry, resolved)
+    _mark_resolved_fix_findings(ctx.entry, resolved)
 
 
 def _fix_scope(entry: dict[str, Any], impl: str) -> IntakeScope:
@@ -563,17 +569,17 @@ def _close_failed_fix(
 
 
 def _fetch_fix_result(
-    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any],
-    scope: IntakeScope, impl: str, round_no: int,
+    ctx: FixExecutionContext, impl: str, round_no: int,
 ) -> tuple[Optional[dict[str, Any]], Optional[str]]:
     """修正結果を取得し、`(payload, merge_key)` を返す。
 
     結果を残さなかった試行は `_close_failed_fix` が終了させる。取り込み済みの
     結果なら `(None, None)` を返し、呼び出し側が何もせず戻れるようにする。
     """
+    state, entry = ctx.state, ctx.entry
     outcome = read_result(state, impl, "fix", round_no)
     if outcome.payload is None:
-        _close_failed_fix(path, state, entry, scope, outcome)
+        _close_failed_fix(ctx.path, state, entry, ctx.scope, outcome)
     payload = outcome.payload
 
     result = result_path(state, impl, stem_for(impl, "fix", state["id"], round_no))
@@ -584,30 +590,30 @@ def _fetch_fix_result(
 
 
 def _confirm_and_settle_fix(
-    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any],
-    scope: IntakeScope, work: str, head_now: str, payload: dict[str, Any],
+    ctx: FixExecutionContext, head_now: str, payload: dict[str, Any],
 ) -> set[str]:
     """Git 範囲を確定し、修正コミットを検証して取り消すか受理する。
 
     採用した解決スレッドの集合を返す（取り込みの通知に使う）。
     """
+    state = ctx.state
     resolved = _resolved_fix_thread_ids(payload, state["repo"], state["current_pr"])
-    ordered_range = _resolve_fix_range(path, state, entry, work, head_now)
+    ordered_range = _resolve_fix_range(ctx, head_now)
     unassigned, problems, accepted = _inspect_fix_commits(
-        state, work, payload, ordered_range
+        state, ctx.work, payload, ordered_range
     )
     _settle_fix_round(
-        path, state, entry, scope, ordered_range, resolved, unassigned, problems,
-        accepted,
+        ctx, ordered_range, resolved, unassigned, problems, accepted,
     )
     return resolved
 
 
 def _record_and_publish_fix(
-    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any],
+    ctx: FixExecutionContext,
     merge_key: str, payload: dict[str, Any], resolved: set[str],
 ) -> None:
     """取り込み済みの鍵・修正回数・所要時間を記録し、保存して公開する。"""
+    path, state, entry = ctx.path, ctx.state, ctx.entry
     entry["fix_merged_keys"].append(merge_key)
     entry["fix_rounds"] += 1
     entry.setdefault("durations", {})["fix"] = (
@@ -643,15 +649,13 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         info("↻ この修正の試行は結果なしとして記録済みです")
         sys.exit(2)
 
-    payload, merge_key = _fetch_fix_result(
-        path, state, entry, scope, impl, args.round
+    ctx = FixExecutionContext(
+        path, state, entry, scope, state["worktrees"]["work"]
     )
+    payload, merge_key = _fetch_fix_result(ctx, impl, args.round)
     if payload is None:
         return
 
-    work = state["worktrees"]["work"]
-    head_now = git_out(work, ["rev-parse", "HEAD"]) or ""
-    resolved = _confirm_and_settle_fix(
-        path, state, entry, scope, work, head_now, payload
-    )
-    _record_and_publish_fix(path, state, entry, merge_key, payload, resolved)
+    head_now = git_out(ctx.work, ["rev-parse", "HEAD"]) or ""
+    resolved = _confirm_and_settle_fix(ctx, head_now, payload)
+    _record_and_publish_fix(ctx, merge_key, payload, resolved)

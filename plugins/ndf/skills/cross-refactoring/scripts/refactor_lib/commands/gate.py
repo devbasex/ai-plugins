@@ -72,19 +72,7 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
         )
         return
 
-    # **排他である。** `--ci-check` があれば手元のテストを実行せず継続的統合の成功
-    # だけで判定し、無ければ手元のテストだけで判定する。「どちらか一方が通れば通過」
-    # とはしない（OR で採ると、手元のテストの失敗を継続的統合の成功が覆す）。
-    ci_check = str(state.get("ci_check") or "").strip()
-    gate["mode"] = "ci" if ci_check else "test"
-    started = time.monotonic()
-    passed, detail = (
-        _ci_gate(state, ci_check) if ci_check else _local_gate(state)
-    )
-    _record_gate_check(
-        gate, ci_check or _baseline_command(state), passed, detail,
-        round(time.monotonic() - started, 1),
-    )
+    passed, detail = _run_and_record_gate_check(state, gate)
 
     if passed and standalone:
         _emit_cross_review(
@@ -100,6 +88,26 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
     if safe_int(gate.get("fix_rounds")) >= limit:
         _gate_limit_reached(path, state, gate, detail, limit)
     _gate_failing(path, state, gate, detail, limit)
+
+
+def _run_and_record_gate_check(
+    state: dict[str, Any], gate: dict[str, Any]
+) -> tuple[bool, str]:
+    """最終ゲートの検査を 1 回走らせ、`checks` へ記録して結果を返す。"""
+    # **排他である。** `--ci-check` があれば手元のテストを実行せず継続的統合の成功
+    # だけで判定し、無ければ手元のテストだけで判定する。「どちらか一方が通れば通過」
+    # とはしない（OR で採ると、手元のテストの失敗を継続的統合の成功が覆す）。
+    ci_check = str(state.get("ci_check") or "").strip()
+    gate["mode"] = "ci" if ci_check else "test"
+    started = time.monotonic()
+    passed, detail = (
+        _ci_gate(state, ci_check) if ci_check else _local_gate(state)
+    )
+    _record_gate_check(
+        gate, ci_check or _baseline_command(state), passed, detail,
+        round(time.monotonic() - started, 1),
+    )
+    return passed, detail
 
 
 def _emit_cross_review(

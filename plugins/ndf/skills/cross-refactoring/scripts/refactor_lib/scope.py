@@ -17,7 +17,7 @@ import fnmatch
 import os
 import pathlib
 import shlex
-from typing import Any, Iterable, Optional
+from typing import Any, Callable, Iterable, Optional
 
 from . import die
 from .gitfacts import is_test_path
@@ -105,20 +105,10 @@ def baseline_search_roots(command: str, work: str) -> list[str]:
     語として読めないコマンド（引用符が閉じていないなど）は限定なしとして扱う。
     ここは範囲の宣言を読むための補助であり、コマンドの妥当性を判定する場所ではない。
     """
-    try:
-        words = shlex.split(str(command or ""))
-    except ValueError:
-        return []
-    roots: list[str] = []
-    for word in words[1:]:
-        if word.startswith("-") or os.path.isabs(word):
-            continue
-        if not (pathlib.Path(work) / word).is_dir():
-            continue
-        normalized = os.path.normpath(word)
-        if normalized not in roots:
-            roots.append(normalized)
-    return roots
+    return _scope_roots(
+        command, work,
+        lambda word, previous, normalized: (pathlib.Path(work) / word).is_dir(),
+    )
 
 
 def covered_by_roots(location: str, roots: list[str]) -> bool:
@@ -144,6 +134,25 @@ def round_test_roots(command: str, work: str) -> list[str]:
     ラッパー）も数えない。**ラッパーの中身は解析しない。** 範囲の外を走らせても、
     最終ゲートの全体テストが見る。
     """
+    def accept(word: str, previous: str, normalized: str) -> bool:
+        if previous.startswith("--") and "=" not in previous:
+            return False
+        if normalized == ".":
+            return False
+        target = pathlib.Path(work) / word
+        return target.is_dir() or (target.is_file() and is_test_path(normalized))
+
+    return _scope_roots(command, work, accept)
+
+
+def _scope_roots(
+    command: str, work: str, accept: Callable[[str, str, str], bool]
+) -> list[str]:
+    """コマンドの語のうち `accept(語, 直前の語, 正規化した語)` が真のものを返す。
+
+    **先頭の語**（プログラム名）と `-` で始まる語、絶対パスは見ない。正規化した
+    語を重複なく、現れた順に集める。語として読めないコマンドは空を返す。
+    """
     try:
         words = shlex.split(str(command or ""))
     except ValueError:
@@ -151,17 +160,11 @@ def round_test_roots(command: str, work: str) -> list[str]:
     roots: list[str] = []
     previous = words[0] if words else ""
     for word in words[1:]:
-        is_option_value = previous.startswith("--") and "=" not in previous
-        previous = word
-        if is_option_value or word.startswith("-") or os.path.isabs(word):
+        before, previous = previous, word
+        if word.startswith("-") or os.path.isabs(word):
             continue
         normalized = os.path.normpath(word)
-        if normalized == ".":
-            continue
-        target = pathlib.Path(work) / word
-        if not (target.is_dir() or (target.is_file() and is_test_path(normalized))):
-            continue
-        if normalized not in roots:
+        if accept(word, before, normalized) and normalized not in roots:
             roots.append(normalized)
     return roots
 

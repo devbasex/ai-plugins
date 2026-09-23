@@ -38,6 +38,7 @@ from ..rounds import (
     finish_outer_rounds,
     impl_for_seq,
     round_kind,
+    rounds_of_kind,
 )
 from ..scope import require_scope_covers_tests, round_test_hint
 from ..vocabulary import (
@@ -756,11 +757,6 @@ def _run_round_test(
     return {"command": command, "status": "green", "checked_at": statefile.now()}
 
 
-def rounds_of_kind(state: dict[str, Any], kind: str) -> list[dict[str, Any]]:
-    """その種類のラウンドだけを取り出す。上限はそれぞれ別に数える。"""
-    return [r for r in state.get("rounds") or [] if entry_kind(r) == kind]
-
-
 def _new_round_entry(
     state: dict[str, Any], round_no: int, kind: str
 ) -> dict[str, Any]:
@@ -815,7 +811,7 @@ def cmd_start_round(args: argparse.Namespace) -> None:
 
     rounds = state["rounds"]
     kind = round_kind(state)
-    if kind == STRUCTURE and len(rounds_of_kind(state, STRUCTURE)) >= state["max_outer_rounds"]:
+    if kind == STRUCTURE and len(rounds_of_kind(state.get("rounds") or [], STRUCTURE)) >= state["max_outer_rounds"]:
         finish_outer_rounds(path, state, "max_outer_rounds")
         sys.exit(1)
 
@@ -830,7 +826,7 @@ def cmd_start_round(args: argparse.Namespace) -> None:
 
     kind = entry_kind(existing)
     label, limit = _round_label_and_limit(state, kind)
-    seq = len(rounds_of_kind(state, kind))
+    seq = len(rounds_of_kind(state.get("rounds") or [], kind))
     info(
         f"=== {label} {seq} / {limit} "
         f"（実装 {existing['impl']}）==="
