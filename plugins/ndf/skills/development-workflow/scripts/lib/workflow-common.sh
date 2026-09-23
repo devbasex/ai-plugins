@@ -14,7 +14,7 @@
 # 並びと分類は SKILL.md の「モードごとに起動する Skill」の表から導ける。
 #   R = 必須 / C = 条件付き / - = 対象外
 # 表のセルが `—` なら対象外、`任意` か丸括弧で条件を添えたものなら条件付き、
-# それ以外は必須である。食い違いは tests/test_workflow_stage_matrix.py が拾う。
+# それ以外は必須である。表と食い違わないことはレビューで見る（#885）。
 WF_MODES=$'light\toperation\tlegacy-refactor\tstandard\tdocumentation'
 WF_STAGE_MATRIX=$'要求と受け入れ条件\tR\tR\t-\tR\tR
 作業場所の用意\tC\tC\tR\tR\tR

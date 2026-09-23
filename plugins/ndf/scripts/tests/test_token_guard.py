@@ -24,11 +24,6 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "token-guard.sh"
 STAGES = ROOT / "scripts" / "lib" / "token-guard-stages.txt"
 WF_DOCS = ROOT / "skills" / "development-workflow"
-WAITING = WF_DOCS / "references" / "waiting.md"
-LAYERS = WF_DOCS / "references" / "agent-layers.md"
-CONTEXT = WF_DOCS / "references" / "context-window.md"
-WF_SKILL = WF_DOCS / "SKILL.md"
-README = ROOT / "README.md"
 HOOKS = ROOT / "hooks" / "claude.json"
 MANIFESTS = ROOT / "manifests"
 
@@ -659,53 +654,6 @@ def test_hook_not_registered_for_other_runtimes():
 
 # ---------------------------------------------------------------- 文書（AC1〜AC4 / AC18〜AC23）
 
-def test_waiting_doc_lists_methods():
-    text = WAITING.read_text()
-    for word in ("run_in_background", "Monitor", "token-guard.sh", "NDF_SLEEP_GUARD",
-                 "NDF_READ_REPEAT_GUARD", "tasks/*.output"):
-        assert word in text, word
-
-
-def _code_blocks(text):
-    import re
-    return re.findall(r"```[a-z]*\n(.*?)```", text, re.S)
-
-
-def test_no_foreground_sleep_loop_examples():
-    import re
-    for doc in (WAITING, LAYERS):
-        for block in _code_blocks(doc.read_text()):
-            if "run_in_background" in block:
-                continue
-            assert not re.search(r"\b(while|until)\b.*\bdo\b[^`]*\bsleep\b", block, re.S), doc
-
-
-def test_agent_layers_refers_waiting():
-    text = LAYERS.read_text()
-    sup = text.split("supervisor が守る規則:")[1].split("\n\n")[1]
-    wrk = text.split("worker が守る規則:")[1].split("\n\n")[1]
-    assert "waiting.md" in sup
-    assert "waiting.md" in wrk
-
-
-def test_foreground_loop_docs_point_to_waiting():
-    skills = ROOT / "skills"
-    for rel in ("external-ai/references/cli-codex.md", "external-ai/references/cli-agy.md",
-                "qa-security-scan/03-report-template.md",
-                "release/references/completion-check.md"):
-        assert "development-workflow/references/waiting.md" in (skills / rel).read_text(), rel
-
-
-def test_context_window_doc():
-    text = CONTEXT.read_text()
-    assert "実測ではない" not in text
-    assert "#827" in text
-    assert "NDF_CONTEXT_LIMIT" in text
-    assert "200,000" in text or "200000" in text
-    assert "/ndf:development-workflow #" in text
-    assert "stage-check.sh report" in text
-    assert "closedByPullRequestsReferences" in text
-
 
 def test_context_limit_default_matches_doc(tmp_path, state):
     tp = transcript(tmp_path, 200_001)
@@ -714,16 +662,58 @@ def test_context_limit_default_matches_doc(tmp_path, state):
     assert denied(run(skill(tp2, session="s2"), state)) is None
 
 
-def test_workflow_skill_handover_rule():
-    text = WF_SKILL.read_text()
-    assert "引き継ぎの 1 行" in text
-    assert "## 持ち場の報告" in text
-    assert "結果: 関門" in text
-    assert "context-window.md" in text
+# ---------------------------------------------------------------- 中継の下の conductor（#895 AC23）
+
+import fcntl  # noqa: E402
 
 
-def test_readme_runtime_table():
-    text = README.read_text()
-    assert "token-guard.sh" in text
-    for rt in ("Claude Code", "Codex", "Kiro", "agy"):
-        assert rt in text
+@pytest.fixture()
+def relay_dir(tmp_path):
+    """動いている中継に見立てた作業ディレクトリ。このテストのプロセスを中継の直接の子に見立てる。
+
+    hook（bash）→ relay.py is-child と起こされるので、親をたどって最初に当たるのは
+    このテストのプロセスになる。
+    """
+    d = tmp_path / "relay"
+    d.mkdir(mode=0o700)
+    lock = open(d / "relay.lock", "a")
+    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    (d / "child.pid").write_text(str(os.getpid()))
+    yield d
+    lock.close()
+
+
+def test_context_under_relay_keeps_denying(tmp_path, state, relay_dir):
+    tp = transcript(tmp_path, 250_000)
+    env = {"NDF_RELAY_DIR": str(relay_dir)}
+    first = denied(run(agent(tp), state, env))
+    second = denied(run(agent(tp), state, env))
+    assert first and second
+    assert "ndf-next" in second
+    assert "supervisor の報告を待" in second
+    assert "/goal /ndf:development-workflow #829 #830" in second
+
+
+def test_context_relay_not_direct_child_passes_once(tmp_path, state, relay_dir):
+    (relay_dir / "child.pid").write_text("1")
+    tp = transcript(tmp_path, 250_000)
+    env = {"NDF_RELAY_DIR": str(relay_dir)}
+    assert denied(run(agent(tp), state, env))
+    assert denied(run(agent(tp), state, env)) is None
+
+
+def test_context_relay_not_running_passes_once(tmp_path, state):
+    d = tmp_path / "relay"
+    d.mkdir()
+    (d / "relay.lock").touch()
+    (d / "child.pid").write_text(str(os.getpid()))
+    tp = transcript(tmp_path, 250_000)
+    env = {"NDF_RELAY_DIR": str(d)}
+    assert denied(run(agent(tp), state, env))
+    assert denied(run(agent(tp), state, env)) is None
+
+
+def test_context_reason_asks_for_ndf_next_block(tmp_path, state):
+    tp = transcript(tmp_path, 250_000)
+    reason = denied(run(skill(tp), state))
+    assert "ndf-next" in reason

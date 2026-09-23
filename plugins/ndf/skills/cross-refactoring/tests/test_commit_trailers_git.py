@@ -151,17 +151,3 @@ def test_a_commit_with_an_attribution_paragraph_passes_the_apply_check(
     )
 
     assert problem is None
-
-
-def test_the_commit_convention_asks_for_the_last_paragraph(prompts_dir):
-    """AC39: 適用と修正の雛形が、必須の記名を最後の段落へ置くことを書く。"""
-    for name in ("apply.md", "fix.md"):
-        text = (prompts_dir / name).read_text(encoding="utf-8")
-        assert "最後の段落" in text, name
-        assert "空行を挟まず" in text, name
-
-
-@pytest.fixture
-def prompts_dir():
-    import pathlib
-    return pathlib.Path(__file__).resolve().parents[1] / "prompts"

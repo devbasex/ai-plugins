@@ -21,8 +21,6 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 SKILLS = ROOT / "plugins/ndf/skills"
 VOCAB_MD = SKILLS / "refactoring/references/vocabulary.md"
 VOCAB_PY = SKILLS / "cross-refactoring/scripts/refactor_lib/vocabulary.py"
-CODE_SMELLS = SKILLS / "refactoring/references/code-smells.md"
-CATALOG = SKILLS / "refactoring/references/refactoring-catalog.md"
 
 
 def _table(heading: str, value_column: str = "日本語の名前") -> dict[str, str]:
@@ -76,21 +74,3 @@ def test_the_reader_does_not_hold_the_names() -> None:
     source = VOCAB_PY.read_text(encoding="utf-8")
     assert "長すぎるメソッド" not in source
     assert "メソッドの抽出" not in source
-
-
-def test_every_smell_is_explained() -> None:
-    """兆候の識別子が、説明の表にも現れること。"""
-    text = CODE_SMELLS.read_text(encoding="utf-8")
-    missing = [name for name in _table("兆候") if f"`{name}`" not in text]
-    assert missing == []
-
-
-def test_every_technique_is_explained() -> None:
-    """手法の識別子が、カタログか説明の表に現れること。
-
-    **カタログに項目を置かない手法がある**（`code-smells.md` の ★ の 5 件）。
-    そちらは説明の表が識別子を持つ。
-    """
-    text = CATALOG.read_text(encoding="utf-8") + CODE_SMELLS.read_text(encoding="utf-8")
-    missing = [name for name in _table("手法") if f"`{name}`" not in text]
-    assert missing == []

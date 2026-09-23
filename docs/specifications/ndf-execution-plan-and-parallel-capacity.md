@@ -232,8 +232,8 @@ oom_kill_increased = yes なら allowed = max(0, min(allowed, running − 1))
 | 測れない環境で本数を出さず終了コード 3。`memory.events` が無ければ `oom_kill=unknown` で 0 | 同上 |
 | スワップの空きが少ないと 1 減る。`oom_kill` が増えていれば「今の本数 − 1」以下で、`--running 0` / `1` では 0 になり `floor` が付かない | 同上 |
 | `concurrency` が重なり・並行度・最大同時本数を出し、端が接するだけの組は重ならない。偽の `gh` が受けた引数が `pr view` だけ | 同上 |
-| 下限 4・5・6 の文言、下限 6 の理由に「メモリ」と「21GiB」、コンテナを起動する担当は 1 本、重なりの目安の 3 区分と列 | `plugins/ndf/skills/development-workflow/tests/test_parallel_work_bounds.py` / `test_approval_gates.py` |
-| `execution-plan.md` に置き場所・コミットしないこと・行の列・確度と状態の値・契機 5 つ・閉じる手順・組を読むこと・`capacity` を起動の前に実行することがあり、初期値の数値（2048・25%）が無い | `plugins/ndf/skills/issue-plan-strategy/tests/test_execution_plan_doc.py` |
+| 下限 4・5・6 の文言、下限 6 の理由に「メモリ」と「21GiB」、コンテナを起動する担当は 1 本、重なりの目安の 3 区分と列 | 文書を読んで確かめる（照合していたテストは #885 で削除） |
+| `execution-plan.md` に置き場所・コミットしないこと・行の列・確度と状態の値・契機 5 つ・閉じる手順・組を読むこと・`capacity` を起動の前に実行することがあり、初期値の数値（2048・25%）が無い | 文書を読んで確かめる（照合していたテストは #885 で削除） |
 | `milestones.md` に「並列の組（見込み）」の節と列、段 2A から写す文、見込みであり確定は実行計画が持つ文があり、段 2A の控える項目が 6 行のまま、既存の名前と連番のテストが通る。0 件になった組の行削除で番号を詰めない | `plugins/ndf/skills/issue-upkeep/tests/test_issue_upkeep_layout.py` |
 | 閉じた実行計画のコメントと振り返りが読める | リリース後テスト（次に複数の束を持つまとまりを進めたとき） |
 

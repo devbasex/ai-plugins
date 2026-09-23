@@ -938,14 +938,20 @@ def test_ac44_refresh_writes_nothing(tmp_path):
     root = make_repo(tmp_path, {"CLAUDE.md": "# c\n"})
     path = criteria_file(tmp_path, sources=[
         {"id": "a", "name": "A", "url": "http://127.0.0.1:1/a", "claim": "c"}])
-    before = {p: p.stat().st_mtime_ns for p in root.rglob("*") if p.is_file()}
+
+    # .git 配下は git の背景の保守が一時ファイルを作って消すため、比べる対象から外す
+    def snapshot():
+        return {p: p.stat().st_mtime_ns for p in root.rglob("*")
+                if ".git" not in p.relative_to(root).parts and p.is_file()}
+
+    before = snapshot()
     before[path] = path.stat().st_mtime_ns
     subprocess.run(
         [sys.executable, str(SCRIPT), "--root", str(root), "--refresh",
          "--criteria", str(path), "--refresh-timeout", "1"],
         capture_output=True, text=True,
     )
-    after = {p: p.stat().st_mtime_ns for p in root.rglob("*") if p.is_file()}
+    after = snapshot()
     after[path] = path.stat().st_mtime_ns
     assert before == after
 

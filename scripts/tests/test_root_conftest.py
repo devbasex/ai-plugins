@@ -29,7 +29,7 @@ BUNDLE = "plugins/ndf/skills/development-workflow/tests"
 # 一覧に無い束。**シェルスクリプトを起動しない束であること**が条件である。
 # `_path_without` が組み立てる `PATH` には `dirname` すら無いため、スクリプトを
 # 起動する束をここへ置くと、前提の検査ではなくスクリプトの側で落ちる。
-OUTSIDE_BUNDLE = "plugins/ndf/skills/retrospective/tests"
+OUTSIDE_BUNDLE = "plugins/playwright-kit/skills/playwright-kit-ops/tests"
 
 
 def _read_root_conftest() -> str:
