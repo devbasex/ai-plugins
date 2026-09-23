@@ -211,8 +211,10 @@ plugins/ndf/
 | `from_session` | 前の区間の `session_id`（`start`） |
 | `plugin_version` | 更新の後に `claude plugin list --json` から読んだ `ndf@<マーケットプレイス>` の `version`（`start`。AC8） |
 | `seconds` | 区間の長さ。その区間の `start` の `at` から、印の `written_at` か claude の終わりを見た時刻まで（`end`。中継が起動していない最初の区間は空） |
-| `ended_by` | 終わり方。`mark`（印を受けて `/exit` を送った）/ `no-mark`（印なしで終わった）/ `stop-file`（停止の印で `/exit` を送らなかった）（`end`） |
-| `reason` | 止まった理由（`stop`） |
+| `ended_by` | 終わり方。`mark`（印を受けて `/exit` を送り、claude が終わった）/ `no-mark`（中継が起動した区間の claude が印なしで終わった）（`end`） |
+| `reason` | 止まった理由（`stop`）。`stop-file` / `max-starts` / `spin` / `no-mark` / `update-failed` / `exit-timeout` / `sigint` |
+
+**`end` は区間の claude が実際に終わったときだけ書く。** 停止の印・上限・空回りで止まるときは `/exit` を送らず、区間は動き続けるため、`stop` の行だけを書く。
 
 **区間ごとに `start` と `end` の 2 行を書く。** `start` は起動の時点で分かること（版を含む）を、
 `end` は終わった後に分かること（長さと終わり方）を持つ。1 行にまとめると、起動の後に落ちた区間の
@@ -257,7 +259,7 @@ stateDiagram-v2
     終わらせる --> 止まる: 30 秒で終わらない
     起動する --> 待つ: 更新と new-window に成功
     起動する --> 止まる: 更新か起動に失敗
-    待つ --> 止まる: 区間の claude が印なしで終わった
+    待つ --> 止まる: 区間の claude が印なしで終わった（end を足す）
     待つ --> 止まる: Ctrl-C
     止まる --> [*]: 環境変数と停止の印を消し、記録に stop を足す
 ```
@@ -268,7 +270,7 @@ stateDiagram-v2
 | --- | --- |
 | 待つ | 2 秒ごとに `next/` と `stop` を見る（スクリプトの中の待ちで、LLM は使わない）。中継が起動した区間のペインは、`#{pane_dead}` かペインの消滅で終わりを見る |
 | 静まりを待つ | 印の `written_at` と `transcript_path` の更新時刻の遅いほうから `--quiet` 秒たつまで待つ。`/goal` が応答を続けさせたときは記録が動き、次の Stop で印が書き直されるか消える |
-| 終わらせる | 停止の印があれば `/exit` を送らずに止まる（AC13）。1 日の起動回数（`log.jsonl` の今日の `start` の数）が上限なら止まる（AC9）。直前の 2 つの `end` の行の `seconds` がともに 120 未満で、今終わった区間の長さも 120 未満なら（3 区間続けて空回り）、次の区間を起動せずに止まる（AC11）。どれでもなければ印のペインへ `remain-on-exit on` を置き、`tmux send-keys -t <ペイン> /exit Enter` を送り、ペインが死ぬ・消える・`#{pane_current_command}` が `claude` でなくなるのを 30 秒まで待つ |
+| 終わらせる | 停止の印があれば `/exit` を送らずに止まる（AC13）。1 日の起動回数（`log.jsonl` の今日の `start` の数）が上限なら止まる（AC9）。中継が起動した区間のうち、直前の 2 つの `end` の行の `seconds` がともに 120 未満で、今の区間（これも中継が起動したもの）の長さも 120 未満なら（3 区間続けて空回り）、次の区間を起動せずに止まる（AC11）。どれでもなければ印のペインへ `remain-on-exit on` を置き、`tmux send-keys -t <ペイン> /exit Enter` を送り、ペインが死ぬ・消える・`#{pane_current_command}` が `claude` でなくなるのを 30 秒まで待つ |
 | 起動する | `claude plugin marketplace update <マーケットプレイス>` → `claude plugin update ndf@<マーケットプレイス> -y` → `claude plugin list --json` で版を読む。どれかが 0 以外で終われば止まる。`tmux new-window -t <セッション> -c <cwd> -P -F '#{window_index} #{pane_id}' -- env -u CLAUDECODE -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT claude <中身>` で起動し（中身はシェルを通さず 1 つの引数で渡す）、そのウィンドウに `remain-on-exit on` を置く。中継が開いたウィンドウで死んだものが `--keep-windows` を超えたら古いものから `kill-window` する（AC7） |
 
 **マーケットプレイスの名前は、中継を始めたときに `claude plugin list --json` の `ndf@<名前>` から読む。**
@@ -307,10 +309,10 @@ claude の区間も終わらせられる。**中継は `/exit` を送る前に�
 | AC5 | 「確かめたこと」の 6 と、AC15 の通しの確かめで `AskUserQuestion` を 1 回出す |
 | AC6 | 同: tmux・claude の呼び出しを差し替えた中継の 1 周で、`send-keys /exit` → 終わりの確認 → `marketplace update` → `plugin update -y` → `plugin list --json` → `new-window`（`-d` 無し・中身が 1 つの引数）の順に呼ぶこと。静まる前（記録の更新時刻が新しい）には `/exit` を送らないこと |
 | AC7 | 同: 印のペインへ `/exit` の前に `remain-on-exit on` を置くこと。死んだウィンドウが 11 個になったとき、中継が開いた最も古いものだけを `kill-window` し、利用者が開いたウィンドウは閉じないこと |
-| AC8 | 同: 1 周で `end`（6 つのキー）と `start`（7 つのキー）の 2 行が書かれ、`plugin_version` が差し替えた `plugin list --json` の値、`ended_by` が `mark` であること。印なしで終わった区間では `ended_by` が `no-mark` |
+| AC8 | 同: 1 周で `end`（6 つのキー）と `start`（7 つのキー）の 2 行が書かれ、`plugin_version` が差し替えた `plugin list --json` の値、`ended_by` が `mark` であること。印なしで終わった区間では `ended_by` が `no-mark` の `end` と `stop` の 2 行。停止の印で止まるときは `end` を書かず `stop` だけ |
 | AC9 | 同: 今日の `start` が 20 行ある記録で印を与えると、`/exit` を送らず終了コード 2・理由が出ること |
 | AC10 | 同: `relay.lock` を別のプロセスで持った状態の `run` が終了コード 1。1 周の中で `new-window` が前のペインの終わりの確認の後にだけ呼ばれること。前回の `stop` と印が残ったディレクトリで `run` を始めると、それらを消してから待ち、止まらず `/exit` も送らないこと。最初の印のペインに縛られた後、別のペインの印では `/exit` を送らないこと |
-| AC11 | 同: 区間の長さが 119・119・119 と続くと、3 つ目の区間が終わったところで 4 つ目を起動せず止まり、119・121・119 では止まらないこと |
+| AC11 | 同: 中継が起動した区間の長さが 119・119・119 と続くと、3 つ目の印で 4 つ目を起動せず止まり（`end` は書かず `stop` の `reason` が `spin`）、119・121・119 では止まらないこと。利用者が開いた最初の区間は数えないこと |
 | AC12 | 同: 中継が開いたペインが印なしで死ぬと終了コード 2 |
 | AC13 | 同: `stop` があるとき `/exit` を送らず終了コード 0。`SIGINT` で終了コード 130、`send-keys` も `kill-window` も呼ばず、`set-environment -u` を呼ぶこと |
 | AC14 | 同: AC4 の `TMUX` 無し。`hooks/claude.json` 以外の hook の定義の差分が無いことを実装の Pull Request の差分で見る |
