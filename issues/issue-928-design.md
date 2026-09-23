@@ -218,16 +218,26 @@ sh -c 'R="${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/rc-added"; C="${XDG_DA
 
 | 書く側 | 条件 | すること |
 | --- | --- | --- |
-| `question open`（`PreToolUse`・`AskUserQuestion`） | `NDF_RELAY_DIR` があり、中継が動いていて（`relay.lock` が取れない）、hook の親をたどって最初に当たる claude が `child.pid` と一致する | 作業ディレクトリの `question.lock` の排他を 3 秒まで待って取り、権限 `0600` の空のファイルを作ってから放す。取れなくても作る（hook を止めない） |
+| `question open`（`PreToolUse`・`AskUserQuestion`） | `NDF_RELAY_DIR` があり、中継が動いていて（`relay.lock` が取れない）、hook の親をたどって最初に当たる claude が `child.pid` と一致する | 作業ディレクトリの `question.lock` の排他を 3 秒まで待って取り、権限 `0600` の空のファイルを作ってから放す。**取れなければ質問を止める**（下の「ロックが取れないとき」） |
 | `question close`（`PostToolUse`・`AskUserQuestion`） | 同じ | 消す |
 | `mark`（Stop） | 既存の判定の 4（直接の子）を通った | 印の判定の前に消す。Stop が起きたなら質問は表示されていない。`Esc` で取り消して `PostToolUse` が来なかった印もここで消える |
+
+**ロックが取れないとき、`question open` は質問を出させない。** 標準出力へ `PreToolUse` の拒否
+（`{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "ndf-relay: 中継が入力を書いている。もう一度 AskUserQuestion を呼ぶ"}}`）を出して
+終了コード 0 で終わる。質問は描かれず、モデルは理由を受けて呼び直す。**印を作って質問を描かせる形は
+採らない**（中継がまだロックを持っていれば、書く `/exit\r` が質問に届く。決定 17）。中継が落ちると
+OS がロックを放すので、取れないのは中継が 3 秒を超えて持つときだけである。
 
 hook の定義（`PreToolUse` と `PostToolUse` に `matcher: AskUserQuestion` の 1 件ずつ。`timeout` 5・
 `continueOnError: true`。`<動作>` は `open` / `close`）:
 
 ```sh
-sh -c '[ -n "${NDF_RELAY_DIR:-}" ] || exit 0; ROOT="${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}"; [ -n "$ROOT" ] || exit 0; python3 "$ROOT/scripts/relay.py" question <動作>; exit 0'
+sh -c '[ -n "${NDF_RELAY_DIR:-}" ] || exit 0; ROOT="${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}"; [ -n "$ROOT" ] || exit 0; exec python3 "$ROOT/scripts/relay.py" question <動作>'
 ```
+
+**`question` は拒否を出す場合も含めて終了コード 0 で終わる**（例外は捕まえて何も出さない）。`exec` で
+python の出力をそのまま hook の出力にする。hook の `timeout` 5 秒で打ち切られると質問は描かれてしまう
+ため、待つ 3 秒は `timeout` より短くする。
 
 **中継の「静まりを待つ」の条件に 2 つを足す**（確定仕様の (1)〜(3) の後）:
 
@@ -350,6 +360,7 @@ stateDiagram-v2
 | AC25 | `test_relay.py`: 子へ届いたバイトが `/exit\r` の 1 回であること。確かめ直しの直前に `question` を置くと届かないこと（差し込み点で試す）。中継が `question.lock` を持つ間、`question open` が放されるまで待ち、放された後に印を作ること |
 | AC25b | `test_relay.py`: `/exit` の後に `question` を置いた試験用の子が、`NDF_RELAY_EXIT_WAIT` を過ぎても SIGTERM を受けず、`question` を消した後に数え始めること |
 | AC26 | `test_relay.py`: `NDF_RELAY_DIR` 無し・中継が動いていない・直接の子でないで、`question open` が何も作らず出力が空で終了コード 0 |
+| AC26b | `test_relay.py`: 別のプロセスが `question.lock` を 3 秒より長く持つと、`question open` が `permissionDecision: deny` を出し、`question` を作らず終了コード 0 |
 | AC20〜AC22 | 全体テスト・静的検査。AC21 は本物の Claude Code（一時の HOME・隔離した `CLAUDE_CONFIG_DIR`・`DISABLE_AUTOUPDATER=1`）の上で `/ndf:restart` を 1 度通し、`log.jsonl` の `start` 2 行を実装の Pull Request に残す。同じ通しで、印の後に質問を出させ（`/goal` の続きか、質問を出す指示）、表示の 30 秒のあいだ `/exit` が書かれないことを見る |
 
 ## 未確認のまま残ること
