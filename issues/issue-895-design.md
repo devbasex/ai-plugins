@@ -106,7 +106,7 @@ graph TB
         H["Stop hook<br/>relay.py mark"]
     end
     subgraph state["NDF_RELAY_DIR（0700）"]
-        P[relay.pid / child.pid]
+        P[relay.lock / relay.pid / child.pid]
         M[next.json（印）]
         S[stop（停止の印）]
         L[log.jsonl]
@@ -173,7 +173,7 @@ plugins/ndf/
 | 副命令 | 引数 | 終了コード | 出力 |
 | --- | --- | --- | --- |
 | `run` | `[claude の引数 ...]`。**`run` の後ろはすべて claude の引数で、中継は解釈しない。** 中継の設定は環境変数だけで受ける: `NDF_RELAY_MAX_STARTS`（既定 20）/ `NDF_RELAY_QUIET`（秒、既定 15）/ `NDF_RELAY=0`（常に素通し） | 素通しでは claude の終了コードそのもの（exec で置き換わるため）。中継では最後の区間の claude の終了コード（シグナルで終わったら 128 + シグナルの番号）/ 2: 次の区間の更新か起動に失敗した / 127: 本物の claude が見つからない・起動の入れ子が深すぎる | 区切りの 1 行と、落ちるときの `ndf-relay:` の 1 行を画面へ。印なしで終わるときは何も出さない |
-| `stop` | 無し | 0: 動いている中継に停止の印を置いた（1 つ以上）/ 1: 動いている中継が無い | 置いた中継の pid を 1 行ずつ。**対象は `${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/` の各サブディレクトリのうち、`relay.pid` の pid が生きているものすべて**（`stop` は `NDF_RELAY_DIR` を継がないため走査で探す）。`relay.pid` が無い・死んでいるものは飛ばす |
+| `stop` | 無し | 0: 動いている中継に停止の印を置いた（1 つ以上）/ 1: 動いている中継が無い | 置いた中継の pid を 1 行ずつ。**対象は `${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/` の各サブディレクトリのうち、中継が動いているものすべて**（`stop` は `NDF_RELAY_DIR` を継がないため走査で探す）。動いているかは `relay.lock` で見る（下の表）。pid の生死では見ない |
 | `mark` | 標準入力に Stop hook の JSON | 常に 0 | 常に無し |
 | `install` | 無し | 常に 0（SessionStart を止めない） | 足したときと、既存の `claude` の定義で足さなかったときの初回だけ、`{"systemMessage": "<1 行>"}` を標準出力へ（利用者の画面に出る）。それ以外は何も出さない |
 
@@ -238,7 +238,8 @@ alias claude='python3 "${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py" run'
 
 | ファイル | 書く側 | 中身 |
 | --- | --- | --- |
-| `relay.pid` | `run` | 中継の pid。`mark` と `stop` が生きているかを見る |
+| `relay.lock` | `run` | 中継が動いている間 `fcntl.flock` の排他を持ち続ける。`mark` と `stop` は同じファイルに `LOCK_EX | LOCK_NB` を試し、**取れなければ中継が動いている**と読む（取れたらすぐ放す）。中継が落ちるとロックは OS が放すので、pid が別のプロセスに再利用されても動いていると読み違えない |
+| `relay.pid` | `run` | 中継の pid（表示と記録のため。生死の判定には使わない） |
 | `child.pid` | `run` | 今の区間の claude の pid。区間ごとに書き換える |
 | `next.json` | `mark` | 印（下の表）。一時ファイルに書いてから `rename` する |
 | `stop` | `stop` か利用者 | 空。在れば停止の印 |
@@ -258,7 +259,7 @@ alias claude='python3 "${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py" run'
 | # | 条件 | すること |
 | ---: | --- | --- |
 | 1 | `NDF_RELAY_DIR` が無い | 何もしない（hook の定義の側でも、無ければ `python3` を起こさない） |
-| 2 | `relay.pid` の pid が生きていない | 何もしない |
+| 2 | `relay.lock` のロックが取れる（中継が動いていない） | 何もしない |
 | 3 | 標準入力を JSON として読めない | 何もしない |
 | 4 | hook の親をたどって最初に当たる `claude` のプロセスの pid が `child.pid` と違う | 何もしない。conductor が Bash から起こした `claude -p` は `NDF_RELAY_DIR` を継ぐが、中継の直接の子ではないので印を書かず、印も消さない |
 | 5 | `last_assistant_message` の中の `ndf-next` のブロックがちょうど 1 つで、`background_tasks` に `status` が `running` のものが無い | 印を書く（前の印は置き換わる） |
@@ -299,7 +300,7 @@ alias claude='python3 "${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py" run'
 | `from_session` | 前の区間の `session_id`（`start`。1 つ目は空） |
 | `plugin_version` | 起動の直前に `claude plugin list --json` から読んだ `ndf@<マーケットプレイス>` の `version`（`start`。AC8） |
 | `cwd` / `cwd_fallback` | 起動した作業ディレクトリと、印の `cwd` が消えていたときの元の値（`start`。消えていなければ `cwd_fallback` は無い） |
-| `seconds` | 区間の長さ。`start` の `at` から、印の `written_at`（`mark` と `sigterm` と `sigkill`。どちらも印を受けて終わらせたので、`/exit` の後の待ちを含めない）か子の終わり（`no-mark`）まで（`end`） |
+| `seconds` | 区間の長さ。`start` の `at` から、印の `written_at`（`mark` と `sigterm` と `sigkill`。いずれも印を受けて終わらせたので、`/exit` の後の待ちを含めない）か子の終わり（`no-mark`）まで（`end`） |
 | `ended_by` | `mark`（印を受けて `/exit` を入力し、子が終わった）/ `no-mark`（子が印なしで終わった）/ `sigterm`（`/exit` の後 30 秒で終わらず SIGTERM で終わらせた）/ `sigkill`（SIGTERM の後 10 秒でも終わらず SIGKILL で終わらせた）（`end`） |
 | `reason` | 次の区間を起動しない理由（`stop`）。`stop-file` / `max-starts` / `spin` / `update-failed` / `start-failed` |
 
@@ -317,7 +318,7 @@ sequenceDiagram
     participant F as NDF_RELAY_DIR
     participant C2 as claude（区間 n+1）
     U->>R: claude（install が足した alias で relay.py run）
-    R->>F: relay.pid
+    R->>F: relay.lock を取る・relay.pid
     R->>C: pty.fork（子は同期のパイプで待つ）
     R->>F: child.pid
     R->>C: 同期のパイプを閉じる → 子が claude を exec
@@ -365,7 +366,7 @@ stateDiagram-v2
 
 | 段 | すること |
 | --- | --- |
-| 中継する | 始める前に自分の端末の属性を `tcgetattr` で保存し、標準入力を raw にする。**保存した属性は、正常な終わり・例外・SIGTERM と SIGHUP の受け取りのすべての経路で `tcsetattr` により戻す**（`try` / `finally` とシグナルの受け取りの中で戻す）。戻さないと、シェルへ戻った後の端末が raw のまま残る。`select` で標準入力 → マスタ、マスタ → 標準出力を流す。SIGWINCH を受けたら自分の端末の大きさをマスタへ `TIOCSWINSZ` で写す。2 秒ごとに `next.json` を見る（スクリプトの中の待ちで、LLM は使わない）。子の終わりは `waitpid(WNOHANG)` で見る |
+| 中継する | 始める前に自分の端末の属性を `tcgetattr` で保存し、標準入力を raw にする。**保存した属性は、正常な終わり・例外・SIGTERM と SIGHUP の受け取りのすべての経路で `tcsetattr` により戻す（端末が閉じていて戻せないときは、その失敗を無視する）**（`try` / `finally` とシグナルの受け取りの中で戻す）。戻さないと、シェルへ戻った後の端末が raw のまま残る。`select` で標準入力 → マスタ、マスタ → 標準出力を流す。SIGWINCH を受けたら自分の端末の大きさをマスタへ `TIOCSWINSZ` で写す。2 秒ごとに `next.json` を見る（スクリプトの中の待ちで、LLM は使わない）。子の終わりは `waitpid(WNOHANG)` で見る |
 | 静まりを待つ | 次の 3 つがそろうまで待つ。(1) 印の `written_at`・`transcript_path` の更新時刻・利用者の最後の入力の時刻のうち最も遅いものから `NDF_RELAY_QUIET` 秒（既定 15）たつ。(2) 会話の記録に `/goal` の目標がある区間では、印の `written_at` より後の `goal_status` の記録がある。(3) 印が消えていない。判定が止めを拒んだときは応答が続いて記録が動き、次の Stop で印が書き直されるか消える |
 | 続けさせる | 停止の印があるか、1 日の起動回数が上限か、空回り（直前の 2 つの `end` の `seconds` がともに 120 未満で、今の区間の長さ＝印の `written_at` − その区間の `start` の `at` も 120 未満）なら、`/exit` を入力しない。`stop` の行を書き、`ndf-relay:` の 1 行を出し、印を消す。以後は中継するだけで、次の印では何もしない |
 | 終わらせる | 子の端末へ `/exit` を書き、1 秒おいて `\r` を書く。`waitpid` で 30 秒まで待ち、終わらなければ SIGTERM を送って 10 秒まで待ち、それでも終わらなければ SIGKILL を送って終わりを待つ（SIGKILL の後は必ず終わる）。**子の終わりを `waitpid` で確かめてから** `end` を書き、次へ進む |
@@ -402,20 +403,20 @@ stateDiagram-v2
 | --- | --- |
 | AC1・AC2 | 文書を読んで確かめる。文言を固定するテストは書かない |
 | AC3 | `test_relay.py`: 親のたどりを差し替え、ブロック 1 つの標準入力で印が書かれ、5 つのキー（`command` / `cwd` / `session_id` / `transcript_path` / `written_at`）を持つこと。4 つのバッククォートの囲みの中に `ndf-next` のブロックを引いた応答では印を書かないこと |
-| AC4 | 同: `NDF_RELAY_DIR` 無し・pid が死んでいる・ブロック 0・ブロック 2・囲みの中だけ・壊れた JSON・直接の子でない claude（`claude -p` が子の claude の孫に当たる形）の 7 通りで、印が無く出力が空で終了コード 0 |
+| AC4 | 同: `NDF_RELAY_DIR` 無し・中継のロックが取れる（中継が動いていない）・ブロック 0・ブロック 2・囲みの中だけ・壊れた JSON・直接の子でない claude（`claude -p` が子の claude の孫に当たる形）の 7 通りで、印が無く出力が空で終了コード 0 |
 | AC4b | 同: 印がある状態でブロック無しの標準入力を与えると印が消える。`stop_hook_active: true` でもブロック 1 つなら書く。直接の子でない claude のブロック無しの Stop は印を消さない |
 | AC5 | 「確かめたこと」の 5 と、AC17 で `AskUserQuestion` を 1 回出す |
-| AC6 | 同: 起動した直後に印を書く試験用の子で、印が消されず次の周へ進むこと（`child.pid` と `start` が子の exec より前に書かれていること）。試験用の子で 1 周させ、`/exit` と `\r` が子へ届く → 子の終わり → `marketplace update` → `plugin update -y` → `plugin list --json` → 区切りの 1 行 → 次の子の起動（中身が 1 つの引数）の順になること。記録の更新時刻が新しいあいだ・利用者の入力から 15 秒たたないあいだ・目標のある記録で印より後の `goal_status` が無いあいだは `/exit` を送らないこと |
-| AC7 | 同: 中継の標準入力に見立てたパイプへ `\x03` と文字を書くと、同じバイトが子へ届くこと。SIGWINCH の後に子の端末の大きさが変わること。中継を擬似端末の上で動かし、子が終わった後・本体で例外を起こした後・SIGTERM を送った後のそれぞれで、中継の端末の属性が始める前と同じに戻っていること |
+| AC6 | 同: 起動した直後に印を書く試験用の子で、印が消されず次の周へ進むこと（exec の前は `child.pid` だけが書かれ、`start` は exec の成功を結果のパイプで確かめた後に書かれること）。試験用の子で 1 周させ、`/exit` と `\r` が子へ届く → 子の終わり → `marketplace update` → `plugin update -y` → `plugin list --json` → 区切りの 1 行 → 次の子の起動（中身が 1 つの引数）の順になること。記録の更新時刻が新しいあいだ・利用者の入力から 15 秒たたないあいだ・目標のある記録で印より後の `goal_status` が無いあいだは `/exit` を送らないこと |
+| AC7 | 同: 中継の標準入力に見立てたパイプへ `\x03` と文字を書くと、同じバイトが子へ届くこと。SIGWINCH の後に子の端末の大きさが変わること。中継を擬似端末の上で動かし、子が終わった後・本体で例外を起こした後・SIGTERM を送った後・SIGHUP を送った後のそれぞれで、中継の端末の属性が始める前と同じに戻っていること。端末が閉じて戻せないときは、戻しの失敗を無視して終わること（例外を出さない） |
 | AC8 | 同: 1 周で `end`（6 つのキー: `event` / `at` / `section` / `pid` / `seconds` / `ended_by`）と `start`（8 つのキー: `event` / `at` / `section` / `pid` / `command` / `from_session` / `plugin_version` / `cwd`。`cwd_fallback` は消えていたときだけ足す）の 2 行が書かれ、`plugin_version` が差し替えた `plugin list --json` の値、`ended_by` が `mark` であること。1 つ目の区間の `start` も `plugin_version` を持ち、それは中継を始めたときに読んだ `plugin list --json` の値であること |
 | AC9 | 同: 印の `cwd` が消えた（`<主>/.worktrees/design/x`）とき `<主>` で次の子が起動し、`start` の行に `cwd_fallback` が載ること |
 | AC10 | 同: 今日の `start` が 20 行ある記録で印を与えると、`/exit` を送らず `stop`（`max-starts`）と `ndf-relay:` の 1 行を出し、子を続けさせること |
 | AC11 | 同: 区間の長さが 119・119・119 と続くと 3 つ目の印で `/exit` を送らず `stop`（`spin`）、119・121・119 では送ること。1 つ目の区間（`run` の引数で起動した区間）も数えること。`sigterm` で終わった区間の長さが印の `written_at` までで測られること |
 | AC12 | 同: 試験用の子が印なしで終わると、`end`（`no-mark`）を書いて子の終了コードで終わること |
-| AC13 | 同: 別のプロセスから `relay.py stop` を打つと `stop` ができ、次の印で `/exit` を送らないこと。動いている中継が無ければ `stop` が終了コード 1。生きている中継 2 つと `relay.pid` の死んだディレクトリ 1 つを置いて `stop` を打つと、生きている 2 つにだけ停止の印ができること |
+| AC13 | 同: 別のプロセスから `relay.py stop` を打つと `stop` ができ、次の印で `/exit` を送らないこと。動いている中継が無ければ `stop` が終了コード 1。生きている中継 2 つと `relay.pid` の死んだディレクトリ 1 つを置いて `stop` を打つと、生きている 2 つにだけ停止の印ができること。`relay.pid` に今動いている無関係なプロセスの pid を書き、ロックを持つ者の居ないディレクトリは飛ばすこと |
 | AC26 | 同: 同じ pid を返すように差し替えた 2 回の `run` が別の `NDF_RELAY_DIR` を作り、前の起動のディレクトリに置いた `stop` と `next.json` を読まないこと |
 | AC14 | 同: AC10・AC11・AC13 と、`plugin update` の差し替えが 0 以外のとき・次の子の起動に失敗したときに、`ndf-relay:` の 1 行と `stop` の行が出ること。後の 2 つは次のコマンドを画面に出し、終了コード 2。存在しない実行ファイルを次の子にすると、exec の失敗が結果のパイプで返り、`stop` の `reason` が `start-failed`・終了コード 2・次のコマンドが画面に出て、`start` と `end` の行が増えず、1 日の起動回数にも数えられないこと。`/exit` にも SIGTERM にも反応しない試験用の子で、SIGKILL の後に終わりを確かめてから `end`（`sigkill`）を書くこと |
-| AC15 | 同: 素通しの 6 つの条件（`NDF_RELAY=0`・`NDF_RELAY_DIR` あり・`-p`・`--help`・副命令 `mcp`・標準入力がパイプ）で、`os.execv` を差し替えて、本物の claude のパスと元の引数がそのまま渡り、環境が `NDF_RELAY_DEPTH` 以外変わらず、何も出力しないこと。`pty` を読み込めないように差し替えた対話の `run` では `ndf-relay:` の 1 行を標準エラーへ出してから素通しすること。`plugin list --json` の差し替えが失敗する・`ndf@` の要素が無いときも、対話の `run` が `ndf-relay:` の 1 行を出して素通しすること |
+| AC15 | 同: 素通しの 6 つの条件（`NDF_RELAY=0`・`NDF_RELAY_DIR` あり・`-p`・`--help`・副命令 `mcp`・標準入力がパイプ）で、`os.execve` を差し替えて、本物の claude のパスと元の引数がそのまま渡り、渡った環境と元の環境の差が `NDF_RELAY_DEPTH` の 1 つだけで、何も出力しないこと。`pty` を読み込めないように差し替えた対話の `run` では `ndf-relay:` の 1 行を標準エラーへ出してから素通しすること。`plugin list --json` の差し替えが失敗する・`ndf@` の要素が無いときも、対話の `run` が `ndf-relay:` の 1 行を出して素通しすること |
 | AC16 | 同: AC4 の `NDF_RELAY_DIR` 無し。`hooks/claude.json` 以外の hook の定義の差分が無いことを実装の Pull Request の差分で見る |
 | AC19 | 同: 引数なしの `run` で 1 つ目の子の引数が空、`run --model haiku -c` で 1 つ目の子が同じ引数を受け、2 つ目の子は `<印の中身>` だけを受けること。試験用の子が印なしで終了コード 3 で終わると、中継も何も出さずに終了コード 3 で終わること。シグナル 15 で終わると 143 |
 | AC20 | 同: `PATH` の前に `claude` という名前で中継を呼ぶラッパーを置くと、それを飛ばして本物を選ぶこと。`NDF_RELAY_DEPTH=2` では終了コード 127 と 1 行を出すこと。`NDF_RELAY_CLAUDE` が最優先になること |
