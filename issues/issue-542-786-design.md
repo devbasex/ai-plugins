@@ -24,9 +24,8 @@
 穴が無いかを確かめる。直った指摘を繰り返さない（既存コメントの控えに返信がある）。
 ```
 
-担当のプロンプトには、この節と、控えと、観点テンプレート（`common` / `docs_only` / `design`）が入る。2 ラウンド目で
-新しい指摘が minor 1 件だけなら、`judge` は `NEW_FINDINGS=1` / `NEW_BLOCKING_FINDINGS=0` を出して収束する。
-minor 1 件は最終スイープが直す。
+担当のプロンプトには、この節と、控えと、観点テンプレート（`common` / `docs_only` / `design`）が入る。担当は
+修正が入った節から読み、その修正が作った穴を 2 ラウンド目のうちに出す。収束の判定は変えない。
 
 ## 機能一覧
 
@@ -38,16 +37,14 @@ minor 1 件は最終スイープが直す。
 | F4 | 前のラウンドからの変更の節を書く | `start-round` → `launch-reviewer.sh` |
 | F5 | 出し切りの指示・テストと背景の処理を起動しない指示をプロンプトに入れる | `launch-reviewer.sh` |
 | F6 | 設計 PR を分類し、設計向けの観点を渡す | `init`（観点の組み立て） |
-| F7 | 新しい指摘が minor だけなら収束する | `judge` |
-| F8 | minor だけの収束を報告に出す | `report` |
-| F9 | 適用担当に、背景で起動したテストを残して終わらないよう求める | cross-refactoring の適用のプロンプト |
+| F7 | 適用担当に、背景で起動したテストを残して終わらないよう求める | cross-refactoring の適用のプロンプト |
 
 ## 構成要素
 
 | 要素 | 責務 | 変更 |
 | --- | --- | --- |
 | `plugins/ndf/scripts/lib/assignment.py` | 母集合と座席と参加者の解決 | 定数 `DEFAULT_REVIEW_RUNTIMES` を足し、`review_pool` をそれとホストから作る。`resolve_participants` は母集合に無い者の除外を無視し、`Participants.ignored_exclude` に残す |
-| `plugins/ndf/skills/cross-review/scripts/state.py` | 状態ファイル・観点・judge・report | 控えの取得を関数 `_fetch_existing_comments` に分け、`start-round` からも呼ぶ。`start-round` が変更の節のファイルを書く。分類 `design` と `DESIGN_REVIEW_TEMPLATE` を足す。judge が止める指摘を数えて収束を判定し、ラウンドの記録に残す。`_resolve_reviewers` が無視した除外を 1 行で出す。report が minor だけの収束を出す |
+| `plugins/ndf/skills/cross-review/scripts/state.py` | 状態ファイル・観点・参加者の解決・ラウンドの開始 | 控えの取得を関数 `_fetch_existing_comments` に分け、`start-round` からも呼ぶ。`start-round` が変更の節のファイルを書く。分類 `design` と `DESIGN_REVIEW_TEMPLATE` を足す。`_resolve_reviewers` が無視した除外を 1 行で出す |
 | `plugins/ndf/skills/cross-review/scripts/launch-reviewer.sh` | レビューのプロンプトを組んで担当を起動する | 変更の節のファイルがあれば埋め込む。出し切りの指示と、テストと背景の処理を起動しない指示を足す |
 | `plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/setup.py` | cross-refactoring の参加者の解決 | 無視した除外を 1 行で出す |
 | `plugins/ndf/skills/cross-refactoring/prompts/apply.md` | 適用担当のプロンプト | テストを前景で終わるまで待つ指示を足す |
@@ -59,7 +56,7 @@ minor 1 件は最終スイープが直す。
 | 対象 | 持つもの |
 | --- | --- |
 | `review_seats` | 輪番の式 |
-| `_new_finding_count` | 新しい指摘の数え方 |
+| `_new_finding_count` / `_evaluate_convergence` | 新しい指摘の数え方と収束の判定 |
 | `cmd_check_oscillation` | 振動の検知 |
 | `_handle_no_result_round` | 結果が無い担当の起動し直し |
 | `fix/scripts/fetch-pr-comments.sh` | 控えの形 |
@@ -73,7 +70,7 @@ graph LR
     A["assignment.py<br/>DEFAULT_REVIEW_RUNTIMES<br/>review_pool / resolve_participants"]
   end
   subgraph cr["cross-review/scripts"]
-    S["state.py<br/>init / start-round / judge / report"]
+    S["state.py<br/>init / start-round"]
     L["launch-reviewer.sh"]
   end
   subgraph rf["cross-refactoring"]
@@ -243,32 +240,6 @@ def _fetch_existing_comments(repo: str, pr: int, path: pathlib.Path) -> str | No
 - 外部コマンド・外部ツールの挙動（優先順位・終了コード・一致の範囲）を断定する記述に、実測の根拠（コマンドと出力）があるか
 ```
 
-### judge の出力と状態ファイル
-
-`judge` の状態表示に 1 行を足す。今の行の形と順は変えない。
-
-```text
-REVIEWER_INTENTS='codex=REQUEST_CHANGES kiro=COMMENT'
-NEW_FINDINGS=1
-NEW_BLOCKING_FINDINGS=0
-CARRIED_OVER_THREADS=0
-PENDING_POSTS=0
-```
-
-| 値 | 条件 |
-| --- | --- |
-| 件数 | 証拠集約を通ったラウンドで、新しい指摘のうち重要度が critical か major のものの数 |
-| `-` | 証拠集約を通っていない・指摘の記録を読めない（今の `NEW_FINDINGS=-` と同じ時と、証拠集約を通っていない時） |
-
-ラウンドの記録（`rounds[]` の要素）に 2 項目を足す。旧い状態ファイルに無くても読める。
-
-| 項目 | 型 | 値 |
-| --- | --- | --- |
-| `new_blocking_findings` | int か null | 上の件数。`-` のときは null |
-| `converged_by` | 文字列か無し | 収束したラウンドだけ。`all_pass`（全員 pass）/ `no_new_findings`（新しい指摘 0 件）/ `minor_only`（新しい指摘が minor だけ） |
-
-`report` は `converged_by = minor_only` のラウンドについて「round N は新しい指摘が minor だけで収束した（M 件を
-最終スイープへ回した）」の 1 行を出す。M はそのラウンドの新しい指摘の件数（`NEW_FINDINGS`）。
 
 ## 処理の流れ
 
@@ -292,45 +263,14 @@ sequenceDiagram
   L->>C: プロンプト（控え・**変更の節**・観点・**出し切りの指示**）
   C-->>S: payload / result.json
   P->>S: read-result・verify-findings・critique
-  P->>S: judge
-  S-->>P: **NEW_BLOCKING_FINDINGS** と終了コード
-  alt 0（収束。**minor だけを含む**）
-    P->>P: 最終スイープ（minor を直す）→ verify-sweep → report
-  else 2（止める指摘がある）
+  P->>S: judge（変えない）
+  alt 0（収束）
+    P->>P: 最終スイープ → verify-sweep → report
+  else 2（新しい指摘がある）
     P->>S: check-oscillation → 修正 → merge-fix → 次のラウンド
   end
 ```
 
-### judge の収束の判定
-
-```mermaid
-graph TD
-  A["引き継いだ指摘がある"] -->|はい| X["続ける（2）"]
-  A -->|いいえ| B["全員 pass"]
-  B -->|はい| Y1["収束 all_pass"]
-  B -->|いいえ| C["新しい指摘を測れた"]
-  C -->|いいえ| X
-  C -->|はい| D["新しい指摘が 0 件"]
-  D -->|はい| Y2["収束 no_new_findings"]
-  D -->|いいえ| E["止める指摘を測れた（証拠集約を通った）"]
-  E -->|いいえ| X
-  E -->|はい| F["止める指摘が 0 件"]
-  F -->|はい| Y3["収束 minor_only"]
-  F -->|いいえ| X
-```
-
-収束した後の段（待ち行列が残れば 8、CI がコードの失敗なら 2、それ以外は `final = approved` で 0）は今と同じである。
-
-### 止める指摘の数え方
-
-`_new_finding_count` と同じ母集合と一致の判定を使う。違うのは、新しいと判定した指摘のうち重要度が critical か
-major のものだけを数える点である。重要度は `review_findings` の要素の `severity` から読む（証拠集約を通った
-ラウンドだけが持つ）。束ねられた指摘（`merged_into`）は数えず、代表の重要度（束ねたときに高い方へ揃えてある）を使う。
-
-```python
-def _new_blocking_count(st: dict[str, Any], pr: int) -> tuple[int, bool]:
-    """(止める指摘の件数, 測れたか)。証拠集約を通っていないラウンドは (0, False)。"""
-```
 
 ## 非機能の実現方式
 
@@ -338,7 +278,6 @@ def _new_blocking_count(st: dict[str, Any], pr: int) -> tuple[int, bool]:
 | --- | --- |
 | 変更の節は 50 件で 6,000 バイト以下 | ファイル名だけを並べ、差分の本文を入れない。1 件 100 バイトとして 5,000 バイトと、定型の文 約 600 バイト |
 | 控えの増分は同じ実行の前のラウンドの分だけ | 取り直しは `fetch-pr-comments.sh` の全件の取得で、増えるのは前の取得の後に投稿された行だけである |
-| minor だけの収束を後から数えられる | ラウンドの記録の `converged_by` と `new_blocking_findings`、`report` の 1 行 |
 
 ## 決定の記録
 
@@ -361,11 +300,10 @@ def _new_blocking_count(st: dict[str, Any], pr: int) -> tuple[int, bool]:
 | AC13 | 同上: 偽物が失敗すると `start-round` が終了コード 0 で `⚠` の行を出し、控えは前の中身のまま |
 | AC14 AC16 | `test_state_auto_review_templates.py`: `issues/issue-1-design.md` を含む変更が `common` / `docs_only` / `design` に、`issues/notes.md` と `docs/x-design.md` だけの変更が `design` を含まない |
 | AC15 | 目で見る（テンプレートの文言） |
-| AC17 AC18 AC19 AC20 | `test_state_judge_*`（新規 `test_state_judge_minor_only.py`）: 証拠集約を通ったラウンドで新しい指摘が minor 2 件 → 終了コード 0・`NEW_BLOCKING_FINDINGS=0`・`converged_by=minor_only`。major 1 件と minor 1 件 → 2。証拠集約を通っていない → `NEW_BLOCKING_FINDINGS=-` で今の判定。引き継ぎがあれば 2 |
-| AC21 | `report` のテスト: `converged_by=minor_only` のラウンドで 1 行が出る |
-| AC22 | 既存の `test_state_check_oscillation.py`・`test_judge_no_result_reason.py`・`--only` のテストが変更なしで通る |
-| AC23 | AC17 のテストで、母集合の 1 者が一度も座っていない状態でも収束する |
-| AC24 | `uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest pytest . -q -n 4` が通る |
+| AC17 | 既存の `test_classify_findings.py`（minor は数えない区分へ落ちる）と judge のテストが変更なしで通る |
+| AC18 | 既存の `test_state_check_oscillation.py`・`test_judge_no_result_reason.py`・`--only` のテストが変更なしで通る |
+| AC19 | `_evaluate_convergence` と `review_seats` を変えない（差分に現れない）ことを実装の PR で確かめる |
+| AC20 | `uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest pytest . -q -n 4` が通る |
 
 ## 未確認のまま残ること
 
@@ -373,7 +311,6 @@ def _new_blocking_count(st: dict[str, Any], pr: int) -> tuple[int, bool]:
 | --- | --- |
 | ラウンドが実際に減るか | この変更の効果は、配布後の設計 PR のラウンド数で見る。比べる手段は #893 が作る。手元では退避された状態ファイル（`.git/ndf/worktree-trash/*/.cross_review/`）の `rounds` を数えて比べられる |
 | 出し切りの指示で 1 ラウンド目の出力が増えるか | 増えると担当の所要が延びる。agy は既定から外れるため、無進捗の許容（480 秒）に当たる担当は既定では居ない。codex の無進捗の許容は 180 秒で、実装の PR の cross-review で所要を見る |
-| minor だけの収束で見落とす穴 | 最終スイープの minor の修正は再レビューを通らない。今も最終スイープの修正は再レビューを通っていない（#908 の承認の依頼に同じ記載がある）ので、形としては同じ扱いになる。minor の修正が穴を作った例が出たら、決定 7 を見直す |
 | 控えの大きさ | #908 の実行 3 で控えは 54,957 バイトだった。取り直しで同じ実行の指摘と返信の行が増える。実装の PR の cross-review で大きさを見る（圧縮は範囲外） |
 | #892 の後の母集合で動いた実行が無い | claude が座席に入った実行は手元の記録にまだ無い。この変更の後の既定（claude / codex / kiro）で 2 ラウンド目に claude が座る |
 | 設計 PR の見分けの取りこぼし | ファイル名の規約（`-requirements.md` / `-design.md` / `-design-decisions.md`）から外れた設計文書は `design` に分類されない。`issues/` 配下の既存の設計文書の名前は、実装の時点で `ls issues/*design*` で確かめる |
