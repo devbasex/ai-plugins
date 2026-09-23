@@ -72,6 +72,10 @@ Stop hook の標準入力には `last_assistant_message` が来る（「確か�
 記録は壊れず・SessionEnd の理由が人の `/exit` と同じ `prompt_input_exit` になった（「確かめたこと」の 6）。
 SIGTERM でも記録は壊れないが、終了コードが 143 になり、終わり方の記録が人の終了と区別できなくなる。
 
+SIGTERM の後も 10 秒で終わらなければ SIGKILL で終わらせる（`ended_by` は `sigkill`）。子が終わらないまま次の区間を
+起動すると claude が 2 つ動き、終わるのを待ち続けると中継が止まる。SIGKILL では SessionEnd が発火しないが、
+記録は壊れないことを確かめている（「確かめたこと」の 7 の実測の参考）。
+
 Stop hook の出力で終わらせる形は採らない。`{"continue": false}` はプロセスを終わらせない（「確かめたこと」の 9）。
 
 ### 決定 7: 印を書くのは中継が起動した子の claude だけにする

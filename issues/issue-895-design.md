@@ -214,7 +214,7 @@ alias は子のプロセスには効かないため、中継は実体を探す�
 | I3 | 足す先を決める | `$SHELL` の名前が `bash` なら `~/.bashrc`、`zsh` なら `${ZDOTDIR:-$HOME}/.zshrc`。それ以外のシェルでは足さない（何も出さない） |
 | I4 | 既にあるか | 足す先に囲みの開きの行 `# >>> ndf relay >>>` があれば何もしない |
 | I5 | 利用者が消したか | 記録 `${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/rc-added` に足す先のパスがあるのに囲みが無ければ、利用者が消したとみなして足さない（何も出さない）。足し直したいときは記録の行を消す |
-| I6 | 既存の `claude` の定義 | 足す先（bash では `~/.bash_aliases` も）に、囲みの外で `alias claude=` か `claude()` か `function claude` の行があれば足さない。記録 `rc-skipped` に無ければ、`ndf-relay: <足す先> に claude の定義があるため alias を足さない。中継を使うなら <alias の 1 行> を自分で置く` を 1 度だけ知らせ、記録に足す |
+| I6 | 既存の `claude` の定義 | 足す先（bash では `~/.bash_aliases` も）に、囲みの外で `alias claude=` の行、または関数の定義（正規表現 `^\s*(function\s+claude\b|claude\s*\(\s*\))`。`claude()` / `claude ()` / `function claude` / `function claude()` に当たる）があれば足さない。記録 `rc-skipped` に無ければ、`ndf-relay: <足す先> に claude の定義があるため alias を足さない。中継を使うなら <alias の 1 行> を自分で置く` を 1 度だけ知らせ、記録に足す |
 | I7 | 足す | 足す先を `<足す先>.ndf-bak-<UTC の時刻>` へ写してから、末尾へ下の囲みを追記する（ファイルが無ければ作り、写しは作らない）。`rc-added` に足す先のパスを記録し、`ndf-relay: <足す先> へ alias claude を足した。次に開くシェルから効く（今のシェルでは source <足す先>）。戻すには囲みを消す` を知らせる |
 
 足す囲み:
@@ -355,7 +355,7 @@ stateDiagram-v2
     静まりを待つ --> 続けさせる: 停止の印・上限・空回り（stop を書き、1 行を出す）
     静まりを待つ --> 終わらせる: 静まった
     続けさせる --> [*]: 子が終わった（end を書き、子の終了コードで終わる）
-    終わらせる --> 起動する: /exit の後に子が終わった（30 秒で終わらなければ SIGTERM）
+    終わらせる --> 起動する: /exit の後に子が終わった（30 秒で SIGTERM、さらに 10 秒で SIGKILL）
     起動する --> 中継する: 更新と起動に成功
     起動する --> [*]: 更新か起動に失敗（stop を書き、次のコマンドを出して終了コード 2）
     中継する --> [*]: 子が印なしで終わった（end を書き、子の終了コードで終わる）
@@ -419,7 +419,7 @@ stateDiagram-v2
 | AC16 | 同: AC4 の `NDF_RELAY_DIR` 無し。`hooks/claude.json` 以外の hook の定義の差分が無いことを実装の Pull Request の差分で見る |
 | AC19 | 同: 引数なしの `run` で 1 つ目の子の引数が空、`run --model haiku -c` で 1 つ目の子が同じ引数を受け、2 つ目の子は `<印の中身>` だけを受けること。試験用の子が印なしで終了コード 3 で終わると、中継も何も出さずに終了コード 3 で終わること。シグナル 15 で終わると 143 |
 | AC20 | 同: `PATH` の前に `claude` という名前で中継を呼ぶラッパーを置くと、それを飛ばして本物を選ぶこと。`NDF_RELAY_DEPTH=2` では終了コード 127 と 1 行を出すこと。`NDF_RELAY_CLAUDE` が最優先になること |
-| AC21 | 同: 一時の HOME と `SHELL=/bin/bash` で `install` を打つ。1 回目: 安定した場所に写しができ、`~/.bashrc` に囲みが 1 つ足され、バックアップと `rc-added` の記録ができ、`systemMessage` が 1 行出る。2 回目: 何も書かず何も出さない（ファイルの中身と更新時刻が変わらない）。囲みを消した後の 3 回目: 足さない。`~/.bashrc` に `alias claude=` がある: 足さず、案内は 1 回目だけ。`NDF_RELAY_AUTO=0`: 何もしない。`SHELL=/bin/fish`: 写しだけを置き直し、設定は書かない。写しと中身が違う `relay.py` から打つと写しが置き換わる。書けないディレクトリでも終了コード 0。同じ一時の HOME で `install` を 4 つ同時に起動しても、囲みは 1 つ・バックアップは 1 つ・`systemMessage` は 1 回であること |
+| AC21 | 同: 一時の HOME と `SHELL=/bin/bash` で `install` を打つ。1 回目: 安定した場所に写しができ、`~/.bashrc` に囲みが 1 つ足され、バックアップと `rc-added` の記録ができ、`systemMessage` が 1 行出る。2 回目: 何も書かず何も出さない（ファイルの中身と更新時刻が変わらない）。囲みを消した後の 3 回目: 足さない。`~/.bashrc` に `alias claude=`・`claude () {`・`function claude {` のどれかがある: 足さず、案内は 1 回目だけ。`NDF_RELAY_AUTO=0`: 何もしない。`SHELL=/bin/fish`: 写しだけを置き直し、設定は書かない。写しと中身が違う `relay.py` から打つと写しが置き換わる。書けないディレクトリでも終了コード 0。同じ一時の HOME で `install` を 4 つ同時に起動しても、囲みは 1 つ・バックアップは 1 つ・`systemMessage` は 1 回であること |
 | AC22 | 実装の Pull Request の差分で、`install` を呼ぶのが `hooks/claude.json` の SessionStart だけで、Codex / agy の hook の定義に無いこと。`claude plugin validate` が通ること |
 | AC23 | `test_token_guard.py`: `NDF_RELAY_DIR` と `child.pid` を用意し、親のたどりを差し替えて中継の直接の子の conductor にすると、上限を超えた持ち場の Agent の起動が 2 回続けて止まること（1 度の通しが無い）。理由の欄が `ndf-next` と「動いている supervisor の報告を待つ」を含むこと。中継の外では今までどおり 2 回目が通ること |
 | AC24 | `test_relay.py`: ブロックが 1 つでも `background_tasks` に `running` が 1 件ある標準入力では印を書かず、前の印を消すこと。`background_tasks` が空の配列のときは書くこと |
