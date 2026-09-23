@@ -138,8 +138,8 @@ def assigned_variables(text: str) -> set[str]:
     return assigned
 
 
-def received_table(path: Path) -> tuple[set[str], int]:
-    """「この文書が受け取る値」の表の変数名と、表の終わった行の番号を返す。"""
+def received_table(path: Path) -> set[str]:
+    """「この文書が受け取る値」の表の変数名を返す。"""
     lines = path.read_text(encoding="utf-8").splitlines()
     try:
         head = lines.index(RECEIVED_HEADING)
@@ -160,7 +160,7 @@ def received_table(path: Path) -> tuple[set[str], int]:
             break
         index += 1
     assert started, f"{path} の「{RECEIVED_HEADING}」に表が無い"
-    return names, index
+    return names
 
 
 # --- 条件 2: 未定義の変数を含むコマンドが無い -------------------------------------
@@ -170,7 +170,7 @@ def received_table(path: Path) -> tuple[set[str], int]:
 def test_no_undefined_variable(path: Path) -> None:
     """使う変数は、同じ文書で代入されるか、受け取る値の表に載っている。"""
     text = path.read_text(encoding="utf-8")
-    declared, _ = received_table(path)
+    declared = received_table(path)
     undefined = used_variables(text) - assigned_variables(text) - declared
     assert undefined == set(), f"{path.name}: 出所の無い変数 {sorted(undefined)}"
 
