@@ -2,7 +2,7 @@
 
 設計は [issue-542-786-design.md](issue-542-786-design.md)、要求は [issue-542-786-requirements.md](issue-542-786-requirements.md) にある。決定の根拠にした実測は末尾の「判断に使った実測」にまとめた。
 
-## 決定
+## 決定の記録
 
 ### 決定 1: cross-review の既定の母集合から agy を外し、claude / codex / kiro とホストにする
 
