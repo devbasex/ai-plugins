@@ -241,55 +241,10 @@ def test_a_missing_common_file_stops_the_write_but_not_the_step(tmp_path: Path) 
 
 
 # --- A7: 同時に走らせても持ち主は 1 つ --------------------------------------
-
-LOCK_WORKER = """#!/usr/bin/env bash
-# $1 共通ファイル / $2 置き場所
-set -uo pipefail
-. "$1"
-while [ ! -e "$2/go" ]; do :; done
-if ndf_lock_acquire "$2/lock" 6; then
-  : >"$2/in.$$"
-  if [ "$(ls "$2"/in.* 2>/dev/null | wc -l)" -gt 1 ]; then : >"$2/over.$$"; fi
-  sleep 0.02
-  rm -f "$2/in.$$"
-  ndf_lock_release "$2/lock"
-else
-  : >"$2/miss.$$"
-fi
-exit 0
-"""
-
-
-def test_six_at_once_leave_one_owner(tmp_path: Path) -> None:
-    """A7: 6 つが同時に取りに行っても、臨界区間は重ならず取りこぼしも出ない。
-
-    `mkdir` コマンドは同じ名前の作成に複数を通す。1 回の実行では取りこぼしがあっても
-    通ることがあるため、繰り返したうえで件数で見る。
-    """
-    worker = tmp_path / "worker.sh"
-    worker.write_text(LOCK_WORKER, encoding="utf-8")
-    base = tmp_path / "race"
-    base.mkdir()
-    overlap = miss = 0
-
-    for _ in range(7):
-        for stray in base.iterdir():
-            shutil.rmtree(stray, ignore_errors=True) if stray.is_dir() else stray.unlink()
-        procs = [
-            subprocess.Popen(
-                ["bash", str(worker), str(LOCK_LIB), str(base)],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            )
-            for _ in range(6)
-        ]
-        (base / "go").touch()
-        for proc in procs:
-            proc.wait()
-        overlap += 1 if any(base.glob("over.*")) else 0
-        miss += len(list(base.glob("miss.*")))
-
-    assert overlap == 0, f"臨界区間が重なった試行 {overlap} 件"
-    assert miss == 0, f"上限に達して取れなかった回数 {miss} 回"
+#
+# 競合試験は `worktree/tests/test_registry.py::test_many_at_once_never_share_the_critical_section`
+# が共通実装に対して 1 通りだけ回す（#884）。同じ臨界区間をここでも試しても、検出できる
+# 不具合は増えない。入口が共通実装へ届くことは上の A2 / A3 が見ている。
 
 
 # --- A8: 呼び出し側のシェルの状態を変えない ---------------------------------

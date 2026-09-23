@@ -283,7 +283,8 @@ def test_records_at_once_never_skip_a_stage(repo: Path, state: Path) -> None:
     """#308-2 / 3: 同時の記録を繰り返しても工程が欠けず、飛ばした記録も出ない。
 
     1 回の実行では取りこぼしがあっても通ることがあるため、繰り返して件数で見る。
-    受け入れ条件が求める 60 回は完了判定として手元で回す。
+    受け入れ条件が求める 60 回は完了判定として手元で回す。ここでの試行は 4 回にする
+    （#884。8 回から減らした。4 つの記録が同時に走る試行を繰り返す目的は変わらない）。
     """
     stages = ("設計", "計画", "実装", "実装レビュー")
     env = base_env(state, {"NDF_STAGE_LOCK_TIMEOUT": "20"})
@@ -291,7 +292,7 @@ def test_records_at_once_never_skip_a_stage(repo: Path, state: Path) -> None:
 
     short = []
     skipped = 0
-    for trial in range(8):
+    for trial in range(4):
         issue = 3080 + trial
         procs = [
             subprocess.Popen(

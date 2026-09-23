@@ -216,7 +216,7 @@ bash scripts/build-runtime-plugins.sh --check
 bash scripts/validate-runtime-plugins.sh
 python3 scripts/check-doc-staleness.py --root .
 python3 scripts/check-skill-frontmatter.py
-uv run --with pytest pytest scripts/tests -q
+uv run --with pytest --with pytest-xdist pytest scripts/tests -q -n auto
 ```
 
 ## 既存プラグインの削除
@@ -275,10 +275,10 @@ bash scripts/validate-runtime-plugins.sh
 `scripts/` 自体を変更した場合は、その検査のテストも実行します。
 
 ```bash
-uv run --with pytest pytest scripts/tests -q
+uv run --with pytest --with pytest-xdist pytest scripts/tests -q -n auto
 ```
 
-`--with pytest` を省くと `Failed to spawn: pytest` で終わります。リポジトリの根に uv の
+`--with pytest` を省くと `Failed to spawn: pytest` で終わります。`-n auto` は `pytest-xdist` の指定で、コア数だけ並列に回します（`--with pytest-xdist` を省くと `-n` を解釈できずに終わります）。リポジトリの根に uv の
 対象プロジェクト（`pyproject.toml`）が無く、`pytest` が環境にも入っていないためです。
 `plugins/ndf/skills/*/tests/` の既存のテストも同じ形で実行します。
 

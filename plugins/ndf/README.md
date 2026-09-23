@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.17.0）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.17.1）
 ```
 
 ### agy
@@ -119,20 +119,21 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.17.0 へ更新するとき
+## v10.17.1 へ更新するとき
 
-**Claude Code で、待つ間の繰り返しの問い合わせと、文脈が上限を超えた conductor の工程の起動を
-hook が止めるようにしました**（マイルストーン 26「17 トークン消費の削減」、#829 #830）。Skill の数は
-変わりません。引数・Skill・スクリプトの削除や改名は無く、記録の移行も要りません。Codex / Kiro / agy の
-hook は変わりません。変更点の一覧は [CHANGELOG.md](../../CHANGELOG.md) にあります。
+**全体テストを並列・2 分割で回すようにし、重複した競合試験と繰り返しを減らしました**（マイルストーン 26
+「17 トークン消費の削減」、#882 #884）。変わったのはテストと継続的統合の設定、テストを案内する文書
+だけで、**Skill・スクリプト・hook の振る舞いは 10.17.0 と同じです。** Skill の数も変わりません。
+引数・Skill・スクリプトの削除や改名は無く、記録の移行も要りません。変更点の一覧は
+[CHANGELOG.md](../../CHANGELOG.md) にあります。
 
-**正式版です。** `main` に載ります。中身は開発版 `10.17.0-dev.1` と同じで、版数の接尾辞だけを
+**正式版です。** `main` に載ります。中身は開発版 `10.17.1-dev.1` と同じで、版数の接尾辞だけを
 外しました。
 
 | 変わったこと | 中身 |
 | --- | --- |
-| **前景の `sleep` の待ちと、変わらないファイルの読み直しを止めます**（#829） | `while` / `until` のループの本体にある `sleep` と 5 秒を超える `sleep`、同じファイルの同じ範囲を変わらないまま 3 回続けて読む Read を、理由の欄に代わりの待ち方（`run_in_background: true` で起動して完了通知を待つ / `Monitor`）を書いて止めます。待ち方の規約は `development-workflow/references/waiting.md` にあります。`NDF_SLEEP_GUARD=0` / `NDF_READ_REPEAT_GUARD=0` で止められます |
-| **文脈が 200,000 を超えた conductor の工程の起動を 1 度止めます**（#830） | 工程 Skill か持ち場の supervisor を起動すると、新しい会話で打つ 1 行（`/ndf:development-workflow #<課題>`）を示して止めます。このまま続けるなら同じ起動をもう一度行えば通ります。`NDF_CONTEXT_GUARD=0` で止め、`NDF_CONTEXT_LIMIT` で上限を変えられます |
+| **全体テストを並列で回します**（#882） | 継続的統合の全体テストを `-n auto` で回し、ファイル単位で 2 つのジョブへ分けます（根の `conftest.py` が `SHARD_TOTAL` / `SHARD_INDEX` を読む。手元で指定しなければ分けない）。案内するコマンドは `uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest pytest . -q -n auto` の形になりました |
+| **重複した競合試験と繰り返しを減らしました**（#884） | 臨界区間の競合試験を共通実装への 1 通りへ寄せ、繰り返しの回数を目的に要る数まで減らしました。`release/**` の push で継続的統合が 2 重に走らないようにしました |
 
 正式版のチャネル（ref を指定せずに登録した取得元）なら、次で入れ替わります。**動いているセッションには
 反映されない**ため、更新したあとは起動し直してください。開発版を試すために `develop` を登録した
@@ -155,8 +156,8 @@ codex plugin add ndf@ai-plugins
 にあります。
 
 ```bash
-grep -q 'token-guard.sh' "$SCRIPTS/../hooks/claude.json"; echo "exit=$?"                                  # 0 なら hook が登録されている
-test -f "$SCRIPTS/../skills/development-workflow/references/waiting.md"; echo "exit=$?"                    # 0 なら待ち方の規約がある
+grep -q '"version": "10.17.1"' "$SCRIPTS/../.claude-plugin/plugin.json"; echo "exit=$?"                  # 0 なら この版が入っている
+grep -q '共通実装に対して 1 通りだけ回す' "$SCRIPTS/../skills/worktree/tests/test_registry.py"; echo "exit=$?"   # 0 なら 寄せた競合試験が入っている
 ```
 
 ## Playwright テストについて
@@ -321,7 +322,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.17.0/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.17.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -343,14 +344,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.0/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.1/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.17.0  <path>
+# => ndf@ai-plugins  installed, enabled  10.17.1  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。

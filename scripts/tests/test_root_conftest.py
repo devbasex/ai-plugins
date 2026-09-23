@@ -279,3 +279,36 @@ def test_the_prefix_is_declared_once() -> None:
 
     assert 'MONITOR_ENV_PREFIX = "MONITOR_"' in body
     assert "def pytest_unconfigure" in body
+
+
+# ジョブの分割（#882）。**分けても項目が欠けず、重ならず、ファイルが割れないこと**を、
+# 実際の収集で確かめる。分割が項目を落としても各ジョブと集約のジョブは成功し得るため、
+# 継続的統合の結果だけでは退行に気づけない。
+SHARD_TARGET = "scripts/tests"
+SHARD_TOTAL = 2
+
+
+def _collected_ids(shard: tuple[int, int] | None) -> list[str]:
+    env = {k: v for k, v in os.environ.items() if k not in ("SHARD_TOTAL", "SHARD_INDEX")}
+    if shard is not None:
+        env["SHARD_INDEX"], env["SHARD_TOTAL"] = str(shard[0]), str(shard[1])
+    proc = subprocess.run(
+        [sys.executable, "-m", "pytest", SHARD_TARGET, "--collect-only", "-q",
+         "--no-header", "-p", "no:cacheprovider", "-p", "no:xdist"],
+        cwd=str(REPO_ROOT), capture_output=True, text=True, env=env,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    return [line for line in proc.stdout.splitlines() if "::" in line]
+
+
+def test_the_shards_cover_every_item_exactly_once_without_splitting_a_file() -> None:
+    full = _collected_ids(None)
+    shards = [_collected_ids((i, SHARD_TOTAL)) for i in range(SHARD_TOTAL)]
+
+    assert all(shards), "どれかの shard が空で、分割を確かめられない"
+    merged = [nodeid for ids in shards for nodeid in ids]
+    assert len(merged) == len(set(merged)), "同じ項目が 2 つの shard に入った"
+    assert sorted(merged) == sorted(full), "shard の和が未分割の収集と一致しない"
+
+    files = [{nodeid.split("::", 1)[0] for nodeid in ids} for ids in shards]
+    assert not set.intersection(*files), "同じファイルが複数の shard に割れた"

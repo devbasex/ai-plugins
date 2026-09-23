@@ -179,7 +179,8 @@ def test_broken_registry_is_treated_as_empty(main_repo: Path) -> None:
 WF_LIB = Path(__file__).resolve().parents[3] / "skills/development-workflow/scripts/lib/workflow-common.sh"
 
 # 実装は `scripts/lib/lock-common.sh` の 1 箇所にあり、2 つの読み込む側が既存の名前へ
-# 結んでいる（#293）。**両方の読み込む側へ同じ検査をかける。**
+# 結んでいる（#293）。**両方の読み込む側へ同じ検査をかける。** 例外は競合試験で、
+# 共通実装に対して 1 通りだけ回す（下の `test_many_at_once_never_share_the_critical_section`）。
 LOCK_LIBS = [
     pytest.param(LIB, "wt_lock_acquire", "wt_lock_release", id="worktree"),
     pytest.param(WF_LIB, "wf_lock_acquire", "wf_lock_release", id="workflow"),
@@ -248,17 +249,18 @@ def _run_lock_race(
     return result
 
 
-@pytest.mark.parametrize(("parallel", "trials"), [(6, 7), (12, 3)])
-@pytest.mark.parametrize(("lib", "acquire", "release"), LOCK_LIBS)
-def test_many_at_once_never_share_the_critical_section(
-    tmp_path: Path, lib: Path, acquire: str, release: str, parallel: int, trials: int
-) -> None:
+def test_many_at_once_never_share_the_critical_section(tmp_path: Path) -> None:
     """#297-1 / 2 / 3 と #308-5 を 1 つの測定で見る。
 
-    並列数を 6 と 12 で変えても結果が変わらないことが、持ち主の決定が時間に依らない
-    ことの担保になる。
+    **競合試験は共通実装に対して 1 通りだけ回す**（#884）。2 つの入口はどちらも
+    `ndf_lock_acquire` を 1 行で呼ぶだけで、入口が共通実装へ届くことは
+    `scripts/tests/test_lock_common.py::test_the_existing_names_take_and_release_the_lock`
+    が見ている。入口 × 並列数の 4 通りで同じ臨界区間を試しても、検出できる不具合は増えない。
+    並列数は多い側（12）を残す。重なりは同時に取りに行く数が多いほど出やすい。
     """
-    got = _run_lock_race(tmp_path, lib, acquire, release, parallel=parallel, trials=trials)
+    got = _run_lock_race(
+        tmp_path, LIB, "wt_lock_acquire", "wt_lock_release", parallel=12, trials=3
+    )
 
     assert got["overlap"] == 0, f"臨界区間が重なった試行 {got['overlap']} 件"
     assert got["miss"] == 0, f"上限に達して取れなかった回数 {got['miss']} 回"

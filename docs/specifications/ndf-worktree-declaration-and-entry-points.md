@@ -353,7 +353,7 @@ clone した全員で同じ値のまま残る。
 | 区切り・プロセス置換・引用符の中の `<` で出力が変わらない | 同上 |
 | 手順 0 が `init` の失敗で止まることが本文に書かれている | 同 `test_setup.py`（本文の抜き出し） |
 
-実行は `uv run --with pytest pytest scripts/tests plugins/ndf -q`。配布物の同期は
+実行は `uv run --with pytest --with pytest-xdist pytest scripts/tests plugins/ndf -q -n auto`。配布物の同期は
 `bash scripts/build-runtime-plugins.sh --check`、定義の検査は `claude plugin validate .` で見る。
 
 ## 運用

@@ -5,6 +5,10 @@ name: Python tests
 # 「成功」ではなく「実行されていない」として扱うため、絞り込んだままだと対象外の変更で
 # マージ可能にならない。push の側は絞り込みを残す（マージの可否を決めないため）
 #
+# push の branches に release/** を置かない。release/** から出した Pull Request では
+# pull_request の側が必ず回るため、push の側も起動すると同じテストを 2 回回す（#884）。
+# main / develop はマージ後の確認として残す
+#
 # push の絞り込みは pytest . の収集範囲に合わせる。テストの置き場所（plugins / scripts /
 # tests）に加えて、収集の仕方そのものを変える根の設定ファイルも対象へ入れる
 on:
@@ -13,7 +17,6 @@ on:
     branches:
       - main
       - develop
-      - "release/**"
     paths:
       - ".github/workflows/pytest.yml"
       - "plugins/**"
@@ -24,8 +27,16 @@ on:
       - "pyproject.toml"
 
 jobs:
-  pytest:
+  # ファイル単位で 2 つのジョブへ分けて回す（#882）。割り当ては根の conftest.py が
+  # SHARD_TOTAL / SHARD_INDEX から決める。各ジョブの中は -n auto で runner のコア数だけ
+  # 並列に回す（pytest-xdist は --project が指す pyproject.toml の依存に入っている）
+  pytest-shard:
+    name: pytest (${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -33,9 +44,22 @@ jobs:
           python-version: "3.x"
       - name: Install uv
         run: python3 -m pip install --upgrade uv
-      # 起点はリポジトリの根に置き、1 回の起動で全件を回す。playwright-kit のテストは
-      # その skill の pyproject.toml が宣言する依存を使うため、--project でそこを指す。
+      # 起点はリポジトリの根に置く。playwright-kit のテストはその skill の pyproject.toml が
+      # 宣言する依存を使うため、--project でそこを指す。
       #
       # 前提のコマンドの確認と git の身元の設定は、根の conftest.py が行う。前提を
       # ワークフローの側にも置くと、増えたときに片方だけが更新される
-      - run: uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest pytest . -q
+      - run: uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest pytest . -q -n auto
+        env:
+          SHARD_TOTAL: 2
+          SHARD_INDEX: ${{ matrix.shard }}
+
+  # ruleset の必須の検査は `pytest` という名前の結果を 1 つ待つ。分けたジョブの結果を
+  # ここで 1 つにまとめる。名前を変えると ruleset の変更が要る。
+  # always() で分けたジョブが落ちても走らせ、失敗・取り消しを失敗として返す
+  pytest:
+    needs: pytest-shard
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ needs.pytest-shard.result }}" = success
