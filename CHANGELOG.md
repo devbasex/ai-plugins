@@ -9,6 +9,27 @@
 **開発版（接尾辞の付いた版）は載せない。** `9.8.0` は `9.8.0-dev.1` までしか出ておらず、
 その内容は `10.0.0` で届いている。
 
+## [ndf 10.17.4] - 2026-09-23
+
+### 追加
+
+- **区間の切れ目の再起動と次のコマンドの入力を、前景の中継で自動にした**（#895。Claude Code だけ）。
+  `scripts/relay.py` を足した。副命令は `run`（中継を始める）/ `stop`（停止の印を置く）/ `mark`
+  （Stop hook から最後の応答の `ndf-next` のブロックを印へ写す）/ `install`（SessionStart hook から
+  中継を `${XDG_DATA_HOME:-~/.local/share}/ndf/relay.py` へ置き直し、bash / zsh の設定へ
+  `alias claude=...` を印のついた囲みで 1 度だけ足す）。中継は印を受けると `/exit` を入力し、
+  プラグインを更新し、同じ端末でブロックの中身を渡して claude を起動し直す。非対話の起動・副命令・
+  パイプ・中継の下の `claude -p`・`NDF_RELAY=0` は中継を挟まずに素通しする。上限は 1 日の起動回数
+  （`NDF_RELAY_MAX_STARTS`、既定 20）・空回り（3 区間続けて起動から 120 秒未満）・静まり
+  （`NDF_RELAY_QUIET`、既定 15 秒）。`NDF_RELAY_AUTO=0` で `install` が何もしなくなる
+  （`development-workflow/references/relay.md`）
+
+### 変更
+
+- **中継の直接の子の conductor では、文脈量の hook が上限を超えた起動を 1 度の通しなしに止め続ける**（#895）。
+  新しい会話で打つコマンドは `ndf-next` の囲みのブロック 1 つで出す
+  （`development-workflow/references/context-window.md` の「新しい会話で戻す」）
+
 ## [ndf 10.17.3] - 2026-09-23
 
 ### 変更

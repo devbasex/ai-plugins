@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.17.3）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.17.4-dev.1）
 ```
 
 ### agy
@@ -119,25 +119,28 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.17.3 へ更新するとき
+## v10.17.4-dev.1 へ更新するとき
 
-**cross-review の席の埋め方と、supervisor の待ち方を直しました**（マイルストーン 26「17 トークン
-消費の削減」、#892 #901）。cross-review はホストのランタイムもレビューの輪番に入れ、supervisor は
-worker の途中の通知を受けても止まらなくなります。Skill の数は変わりません。引数・Skill・
-スクリプトの削除や改名は無く、状態ファイルの移行も要りません。
+**区間の切れ目の再起動と、次のコマンドの入力を自動にしました**（マイルストーン 26「17 トークン
+消費の削減」、#895。Claude Code だけ）。`/goal /ndf:development-workflow` の区間の切れ目で人が行っていた
+`/exit`・起動し直し・次のコマンドの貼り付けを、前景の中継（`scripts/relay.py`）が行います。
+Skill の数は変わりません。引数・Skill・スクリプトの削除や改名は無く、状態ファイルの移行も要りません。
 変更点の一覧は [CHANGELOG.md](../../CHANGELOG.md) にあります。
 
-**正式版です。** `main` に載ります。中身は開発版 `10.17.3-dev.1` と同じで、版数の接尾辞だけを
-外しました。
+**開発版です。** `develop` にだけ載ります。取得元へ `#develop` を足す手順は
+[docs/versioning-and-distribution.md の「開発版を試す」](../../docs/versioning-and-distribution.md#開発版を試す)にあります。
 
 | 変わったこと | 中身 |
 | --- | --- |
-| **cross-review の母集合にホストを入れました**（#892） | 母集合はホストを含む全ランタイムの 4 者になり、使える者から毎ラウンド 2 席を選びます。レビュー担当は CLI プロセスとして起動するため、ホストの会話の作業文脈は持ち込まれません。使える者が 1 者なら、その者と同じランタイムの 2 つ目（`claude-2` など）で席を埋めます。ホストを外すなら `--exclude` で名指しします。この版より前に始めた実行を再開したときは、保存された担当のまま進みます |
-| **supervisor が worker の途中の通知で止まらなくなりました**（#901） | worker は最後の応答の前に報告の写しを起動指示の `置き場所` へ書き、完了の目印 `<置き場所>.done` を作ります。supervisor は途中の通知を受けたら、目印の出現を待つ until ループ（上限 3600 秒）を自分の背景の処理として起動してから応答を終えます。手順は `development-workflow/references/waiting.md` の「途中の通知を受けたとき」にあります |
+| **SessionStart hook がシェルの設定へ `claude` の alias を 1 度だけ足します**（#895） | `relay.py install` が中継を `${XDG_DATA_HOME:-~/.local/share}/ndf/relay.py` へ置き、bash なら `~/.bashrc`、zsh なら `${ZDOTDIR:-~}/.zshrc` の末尾へ印のついた囲み（`# >>> ndf relay >>>` 〜 `# <<< ndf relay <<<`）で alias を足します。書く前に `<設定>.ndf-bak-<UTC の時刻>` へ写しを取ります。既に `claude` の alias か関数があれば足しません。戻すには囲みを消します（足し直しません）。`NDF_RELAY_AUTO=0` で何もしなくなります |
+| **区間の切れ目で中継が次の区間を起動します**（#895） | conductor が最後の応答に `ndf-next` のブロックを出すと、中継が `/exit` を入力し、プラグインを更新し、同じ端末でブロックの中身を渡して `claude` を起動し直します。止めるのは `python3 ~/.local/share/ndf/relay.py stop` か `NDF_RELAY=0 claude` です。`claude -p`・副命令・パイプなど非対話の起動は中継を挟みません。1 日の起動は 20 回まで（`NDF_RELAY_MAX_STARTS`）です |
+| **中継の下では文脈量の上限で止め続けます**（#895） | 中継の直接の子の conductor では、文脈量の hook が工程へ入る起動を 1 度の通しなしに止め、新しい区間で打つコマンドを `ndf-next` のブロックで示させます |
 
-正式版のチャネル（ref を指定せずに登録した取得元）なら、次で入れ替わります。**動いているセッションには
-反映されない**ため、更新したあとは起動し直してください。開発版を試すために `develop` を登録した
-場合は、[docs/versioning-and-distribution.md の「ランタイムごとの取得と導入」](../../docs/versioning-and-distribution.md#ランタイムごとの取得と導入)
+手順と止め方・上限・記録の読み方は `skills/development-workflow/references/relay.md` にあります。
+
+開発版のチャネル（`develop` を登録した取得元）なら、次で入れ替わります。**動いているセッションには
+反映されない**ため、更新したあとは起動し直してください。alias は次に開いたシェルから効きます。正式版へ戻すときは
+[docs/versioning-and-distribution.md の「ランタイムごとの取得と導入」](../../docs/versioning-and-distribution.md#ランタイムごとの取得と導入)
 の手順で ref を指定せずに登録し直してから導入します。
 
 ```bash
@@ -156,9 +159,9 @@ codex plugin add ndf@ai-plugins
 にあります。
 
 ```bash
-grep -q '"version": "10.17.3"' "$SCRIPTS/../.claude-plugin/plugin.json"; echo "exit=$?"   # 0 なら この版が入っている
-python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from lib import assignment; sys.exit(0 if "claude" in assignment.review_pool("claude") else 1)' "$SCRIPTS"; echo "exit=$?"   # 0 なら cross-review の母集合にホストが入る
-grep -qsF '<置き場所>.done' "$SCRIPTS/../skills/development-workflow/references/waiting.md"; echo "exit=$?"   # 0 なら 完了の目印を待つ手順が入っている
+grep -q '"version": "10.17.4-dev.1"' "$SCRIPTS/../.claude-plugin/plugin.json"; echo "exit=$?"   # 0 なら この版が入っている
+test -f "$SCRIPTS/relay.py"; echo "exit=$?"   # 0 なら 中継が入っている
+grep -qF 'relay.py install' "$SCRIPTS/../hooks/claude.json"; echo "exit=$?"   # 0 なら SessionStart hook が中継を置き alias を足す
 ```
 
 ## Playwright テストについて
@@ -327,7 +330,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.17.3/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.17.4-dev.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -349,14 +352,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.3/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.4-dev.1/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.17.3  <path>
+# => ndf@ai-plugins  installed, enabled  10.17.4-dev.1  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
