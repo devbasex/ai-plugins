@@ -167,6 +167,15 @@ def test_repeat_read_denied_on_third(tmp_path, state):
     assert denied(run(read(f), state))
 
 
+def test_repeat_read_denied_on_third_when_file_is_missing(tmp_path, state):
+    # 現状固定: 存在しないファイルも file_stat の sentinel 値で同じ状態として数える。
+    missing = tmp_path / "missing.txt"
+    assert denied(run(read(missing), state)) is None
+    assert denied(run(read(missing), state)) is None
+    reason = denied(run(read(missing), state))
+    assert reason and "3 回" in reason
+
+
 def test_repeat_read_resets_when_file_changes(tmp_path, state):
     f = tmp_path / "out.txt"
     f.write_text("a")
