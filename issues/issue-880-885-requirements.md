@@ -61,7 +61,7 @@ PR #844（#829 #830）の `--scope` は 6 ファイルだった。`--baseline-te
 
 ### 群ごとの検証（#880）
 
-- [ ] AC1: `refactor.py init` が `--round-test CMD` を受け付け、状態ファイルの `round_test.command` に保存する。渡さなければ `round_test` は `baseline_test` と同じコマンドになる（今の振る舞い）
+- [ ] AC1: `refactor.py init` が `--round-test CMD` を受け付け、状態ファイルの `round_test.command` に保存する。渡さなければ `round_test` は `baseline_test` と同じコマンドになる（今の振る舞い）。このとき `init` のテストの実行は 1 回
 - [ ] AC2: `verify-round`（群の検証）と、修正ラウンド・最終ゲートの修正のコミットの検証が、`round_test` のコマンドを実行する。`baseline_test` のコマンドを実行しない
 - [ ] AC3: `--baseline-test` の実行は `init` の 1 回と最終ゲートの 1 回に限られる。最終ゲートは `--workflow-step` の有無に依らず、`round_test` が `baseline_test` と違えば手元で 1 回実行する（`--ci-check` があれば今のとおり継続的統合で代える）
 - [ ] AC4: `init` は `--round-test` を 1 回実行し、成功しなければ止まる（テストが 1 件も集まらない終了コード 5 も失敗）。`--scope` のテストの置き場所が `--round-test` の実行集合に入らなければ止まる（今の `scope_problem` を `round_test` へ当てる）。実行集合の起点は `--round-test` の引数のうち実在するディレクトリとファイルで、置き場所それぞれについて起点のどれかが同じか祖先でなければならない。起点が 1 つも無いコマンドは全体を覆うとみなす

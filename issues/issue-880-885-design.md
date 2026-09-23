@@ -51,13 +51,13 @@
 | --- | --- | --- |
 | `scripts/refactor.py` の `init` の引数 | F1 | `--round-test CMD` を足す（任意）。`--baseline-test` の help を「着手前と最終ゲートで実行する全体のテスト」へ直す |
 | `scripts/refactor.py` の副命令 | F6 | `assess` を足す（`--base REF`、任意の `--max-lines N`（既定 10））。実体は `refactor_lib/commands/assess.py` |
-| `refactor_lib/commands/setup.py` | F1 F2 | 状態へ `round_test`（`command`・`status`）を保存する。`init` で全体テストの後に範囲のテストを 1 回実行し、失敗なら止める。`require_scope_covers_tests` へ渡すコマンドを `round_test` に替える。F2 の案内を出す。`ResumeField` に `round_test` を足す |
+| `refactor_lib/commands/setup.py` | F1 F2 | 状態へ `round_test`（`command`・`status`）を保存する。`init` で全体テストの後に範囲のテストを 1 回実行し、失敗なら止める。`--round-test` を省いたとき、または `round_test.command` が `baseline_test.command` と同じ文字列のときは、全体テストを 1 回だけ実行し、その結果を `round_test.status` にも写す。`require_scope_covers_tests` へ渡すコマンドを `round_test` に替える。F2 の案内を出す。`ResumeField` に `round_test` を足す |
 | `refactor_lib/commands/converge.py` の `cmd_verify_round` | F1 F3 | 実行するコマンドを `_round_test_command(state)` から取る。検証の記録へ `seconds` を足す |
 | 同 `_inspect_fix_commits` | F1 | `collect_commit_facts` へ渡すコマンドを `_round_test_command(state)` に替える |
 | `refactor_lib/commands/gate.py` の `cmd_final_gate` / `_local_gate` / `_verify_final_fix_commits` | F1 F3 | 最終ゲートの判定は今のまま `baseline_test`。`workflow_step` が偽でも、`round_test` が `baseline_test` と違えば先に `_local_gate` を通す。通れば今のとおり cross-review へ渡し、落ちれば `--workflow-step` と同じ修正ラウンドへ入る。修正コミットの検証は `round_test`。最終ゲートの記録（`final_gate.checks` の各件）へ `command`・`seconds` を足す |
 | `refactor_lib/gitfacts.py` の `_kill_process_group` | F5 | SIGTERM の後の点検で、先に `proc.poll()` で親シェルを回収し、その後にグループの存否を `killpg(pgid, 0)` で見る。回収済みでグループが空なら戻る |
 | `refactor_lib/gitfacts.py`（新設の関数 `production_code_changes`） | F6 | `git diff --numstat --no-renames <base>...HEAD` から、本番コードのファイルと変更行を返す。rename は旧パスの削除と新パスの追加に分けて数える（`--no-renames` を付けないと `dir/{old.py => new.py}` の形になり、拡張子で判定できない）。本番コードの判定は `CODE_EXTENSIONS` と既存の `_is_test_path` |
-| `refactor_lib/scope.py`（新設の関数 `round_test_hint`・`round_test_roots`） | F1 F2 | `round_test_hint`: `--round-test` が無く、`baseline_search_roots` が空か、`--scope` のテストの置き場所より広いときに案内の 1 行を返す。`round_test_roots`: `--round-test` の引数のうち、実在するディレクトリと実在するファイルの両方を実行集合の起点として返す（`baseline_search_roots` はファイル引数を無視するまま変えない）。`init` はこの起点で `--scope` のテストの置き場所を覆うかを判定する |
+| `refactor_lib/scope.py`（新設の関数 `round_test_hint`・`round_test_roots`） | F1 F2 | `round_test_hint`: `--round-test` が無く、`baseline_search_roots` が空か、`--scope` のテストの置き場所より広いときに案内の 1 行を返す。`round_test_roots`: `--round-test` の引数から次の順で実行集合の起点を返す。(a) 直前の語が `--` で始まり `=` を含まない長いオプション（`--project`・`--directory`・`--rootdir` など）の値は起点に数えない。(b) 作業ディレクトリの根そのもの（`.` など、正規化して根になる語）は起点に数えない。(c) 残った語のうち、実在するディレクトリと実在するファイルの両方を起点にする（`baseline_search_roots` はファイル引数を無視するまま変えない）。`init` はこの起点で `--scope` のテストの置き場所を覆うかを判定する |
 | `refactor_lib/proposals.py` の `merge_test_proposals` の `reject` | F8 | `target` の `#` より前が `.md` で終わる提案を「文書の文言を固定するテストは足さない」で見送る |
 | `refactor_lib/verify.py`（新設の関数 `doc_wording_tests`）と `verify_apply_round` | F9 | テストのファイルの追加行に、追跡している `.md` のパスを指す文字列があれば、その群を失敗にする。追跡している `.md` の一覧は `git ls-files '*.md'` を 1 回読む |
 | `prompts/propose-tests.md` の「守ること」 | F8 | 1 項目を足す（下の「入出力の契約」） |
@@ -80,7 +80,7 @@
 | --- | --- | --- |
 | `.md` の文言を照合する pytest（下の「#885 の棚卸」） | F10 | 削る。ファイルの全関数が削る対象ならファイルごと消す |
 | 参照切れを見ていたテスト | F10 | 検査スクリプト（`scripts/check-markdown-links.py` ほか）で同じ参照が失敗として現れることを確かめてから削る。現れないものは検査スクリプトへ判定を足す |
-| `plugins/ndf/skills/tdd-cycle/references/test-quality.md` | F11 | 「採らないテスト」に `.md` の文言照合を足す |
+| `plugins/ndf/skills/tdd-cycle/references/test-quality.md` | F11 | 「## よくある例と代替」の下に `### 8. .md の文言を照合する` を新設し、「## 削除してよいテスト」に `.md` の文言照合の 1 行を足す |
 | `plugins/ndf/skills/quality-gates/SKILL.md` | F11 | 受け入れ条件の検査に文書の文言照合を使わないと書く |
 | `AGENTS.md` の「ベストプラクティス」の DON'T | F11 | 1 行足す |
 
@@ -142,6 +142,7 @@ graph LR
 | 状況 | 動き |
 | --- | --- |
 | `round_test` が無い状態ファイル（変更の前の実行）の再開 | `_round_test_command(state)` が `baseline_test.command` を返す（AC7） |
+| `--round-test` を省いたか、`round_test.command` が `baseline_test.command` と同じ文字列 | `init` は全体テストを 1 回だけ実行し、その結果を `round_test.status` にも写す |
 | `--round-test` の `init` での実行が失敗（終了コード 5 を含む） | 「範囲のテストが成功しません」で止まる（終了コード 4）。全体テストの結果とは別に表示する |
 | `--scope` のテストの置き場所が `--round-test` の実行集合の外 | 今の `scope_problem` の文言で止まる（対象のコマンドの名前だけを `--round-test` に替える）。起点は `round_test_roots` が返す実在するディレクトリとファイルで、置き場所それぞれについて、起点のどれかがその置き場所と同じか祖先であることを求める。起点が 1 つも無いコマンド（`pytest -q` のように全体を走らせる）は全体を覆うとみなして通す |
 | `--round-test` が無く、`--baseline-test` の探索の起点が無いか範囲より広い | 案内を 1 行出して続ける: `ℹ --baseline-test は --scope より広い範囲を走らせます。群ごとの検証を短くするには --round-test に範囲のテストを渡します（例: <プログラム> <テストの置き場所>）` |
@@ -377,10 +378,10 @@ issue の境界の表に、棚卸で見つけた 3 つの形（P1〜P3）の扱�
 
 | 受け入れ条件 | 何で確かめるか |
 | --- | --- |
-| AC1 | `tests/` に、`init --round-test X` で状態の `round_test.command == X`、省くと `baseline_test.command` と同じになるテスト |
+| AC1 | `tests/` に、`init --round-test X` で状態の `round_test.command == X`、省くと `baseline_test.command` と同じになり、省いたときに `init` のテストの実行が 1 回になるテスト |
 | AC2 | `verify-round` と修正の取り込みで、実行されたコマンドを差し替えた `run_with_timeout` で記録し、`round_test` だけが渡ることを確かめる |
 | AC3 | 単独起動と `--workflow-step` の両方で最終ゲートを通し、全体テストの呼び出しが 1 回ずつであることを確かめる |
-| AC4 | `--round-test "false"` と、テストが集まらないコマンド（終了コード 5）で `init` が終了コード 4 で止まる。範囲の置き場所の外を走らせる `--round-test` で止まる。`--round-test "pytest tests/services/test_one.py"` で `--scope tests/services` を渡すと止まる |
+| AC4 | `--round-test "false"` と、テストが集まらないコマンド（終了コード 5）で `init` が終了コード 4 で止まる。範囲の置き場所の外を走らせる `--round-test` で止まる。`--round-test "pytest tests/services/test_one.py"` で `--scope tests/services` を渡すと止まる。`uv run --project . pytest tests/services/test_one.py` と `--scope tests/services` で止まる |
 | AC5 | `round_test_hint` に、起点の無いコマンド・範囲より広い起点・範囲と同じ起点を渡し、前 2 つだけが案内を返す |
 | AC6 | `verify-round` の後の状態の `verifications[-1]["seconds"]` が 0 以上の数 |
 | AC7 | `round_test` を持たない状態ファイルで `verify-round` を通し、`baseline_test.command` が実行される |
