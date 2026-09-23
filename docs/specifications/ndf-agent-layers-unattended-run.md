@@ -260,13 +260,13 @@ supervisor と直接起動した worker を一覧し、`resets_passed` が真の
 
 | 観点 | 確かめ方 |
 | --- | --- |
-| 3 層の責務の表、持ち場 5 つと関門の列、報告の 10 項目 / 5 項目、続けさせる回数 3、モデルの基準 2 つ、委譲しない 5 つ、並行の単位が supervisor、止まるときに持ち場の一覧を出す 3 つの時点 | `plugins/ndf/skills/development-workflow/tests/test_agent_layers_doc.py` |
+| 3 層の責務の表、持ち場 5 つと関門の列、報告の 10 項目 / 5 項目、続けさせる回数 3、モデルの基準 2 つ、委譲しない 5 つ、並行の単位が supervisor、止まるときに持ち場の一覧を出す 3 つの時点 | 文書を読んで確かめる（照合していたテストは #885 で削除） |
 | 中断の契機 4 つ、落ちた層ごとの 3 通り、解除を待つ手段 3 段、点検の手順、`--max-sleep` を付けない規約 | 同上 |
 | 「メイン」の定義が supervisor を指す | 同上（`test_cross_review_defines_main_as_the_driving_supervisor`） |
 | `context-window.md` にモデルに依る目安とリポジトリに依る固定費の区別があり、規約の文書に固定費の実測値が無い | 同上 |
 | 3 つの規約の文書に「窓」「親」が無い | 同上（`test_the_three_layer_docs_drop_the_old_words`） |
 | 3 層へ出すのは `/goal` だけ、関門以外は提示して進める | 同上 |
-| 関門の数・承認の形が変わらない | `test_approval_gates.py` / `test_workflow_guard.py` が無改変で通る |
+| 関門の数・承認の形が変わらない | `test_workflow_guard.py` が無改変で通る（`test_approval_gates.py` は #885 で削除） |
 | 実機での無人の通過（人の入力の数、conductor の報告の持ち場の一覧と記録の `SendMessage` の数の一致） | リリース後テスト（`light` の課題 1 件を `/goal` で通し、次のまとまりで `standard` を含む複数の課題を関門 2 つと振り返りまで通す） |
 | 上限からの再開そのもの | リリース後テスト（上限を意図して起こせないため、発生した実行の記録を読む） |
 

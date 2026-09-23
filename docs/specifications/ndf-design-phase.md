@@ -133,7 +133,7 @@ AI ごとに変わり、文書の分割単位・記載項目・粒度をその�
 | 説明文書の Skill 数が実体と一致する | `python3 scripts/check-doc-staleness.py` |
 | 参照のリンクが解決できる | `python3 scripts/check-markdown-links.py` |
 | 4 ランタイムで Skill が読み込める | `bash scripts/runtime-smoke-test.sh` |
-| 工程表の「設計」の行と `WF_STAGE_MATRIX` が一致する | `test_workflow_stage_matrix.py` |
+| 工程表の「設計」の行と `WF_STAGE_MATRIX` が一致する | 文書を読んで確かめる（照合していたテストは #885 で削除） |
 | 条件付きの工程は、記録が無くても欠落として並ばない | `test_workflow_guard.py::test_a_conditional_stage_without_a_record_is_not_a_gap` |
 
 ## 運用

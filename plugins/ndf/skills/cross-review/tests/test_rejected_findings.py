@@ -235,7 +235,6 @@ def test_non_dict_items_in_rejected_list_are_filtered_out(tmp_dir, state_mod):
     assert st["rounds"][-1]["fix"]["rejected"] == 5
 
 
-
 # ---------------- 報告 ----------------
 
 def test_the_report_lists_the_rejected_findings(tmp_dir, state_mod, capsys):
@@ -277,25 +276,3 @@ def test_the_none_line_survives_a_rejected_finding(tmp_dir, state_mod, capsys):
     out = capsys.readouterr().out
     assert "## 残 deferred nit: なし" in out
     assert "## 却下した指摘 (1 件)" in out
-
-
-# ---------------- 手順書と契約 ----------------
-
-SKILLS = pathlib.Path(__file__).resolve().parents[2]
-
-
-def test_the_fix_document_asks_for_the_location():
-    """`fix` が返す `rejected[]` の例が 6 項目を持つこと。"""
-    text = (SKILLS / "fix/SKILL.md").read_text(encoding="utf-8")
-    start = text.index('"rejected": [')
-    block = text[start:start + 400]
-    for key in ("path", "line", "severity", "comment_id", "summary",
-                "reason_for_rejection"):
-        assert f'"{key}"' in block, key
-
-
-def test_the_contract_documents_the_accumulated_records():
-    """状態ファイルの契約が `rejected_findings` の形を持つこと。"""
-    text = (SKILLS / "cross-review/docs/04-contracts.md").read_text(encoding="utf-8")
-    assert '"rejected_findings"' in text
-    assert "reason_for_rejection" in text

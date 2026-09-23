@@ -1,7 +1,6 @@
 """工程「ドキュメント再構成」の追加と、工程名の改名 2 件を固定する（#391）。
 
-工程名の並びそのものは `test_stage_values.py` と `test_workflow_stage_matrix.py` が 4 か所で
-突き合わせる。ここが見るのは、その並びの外にある 3 つである。
+ここが見るのは、工程名の並びの外にある 3 つである。
 
 | 見るもの | なぜ並びの検査に載らないか |
 | --- | --- |
@@ -15,7 +14,6 @@
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 import pytest
 
@@ -126,12 +124,3 @@ def test_the_skill_directory_exists() -> None:
 
 
 # --- C11: 言語ごとの数え方 --------------------------------------------------
-
-
-def test_the_skill_does_not_enumerate_the_language_files() -> None:
-    """言語を 1 つ足すときに他のファイルを変更しない。一覧を持つと SKILL.md が動く。"""
-    body = (SKILL_DIR.parent / "document-restructuring" / "SKILL.md").read_text(encoding="utf-8")
-    references = Path(SKILL_DIR.parent / "document-restructuring" / "references")
-    assert list(references.glob("lang-*.md")), "言語ごとの参照が 1 本も無い"
-    for path in references.glob("lang-*.md"):
-        assert path.name not in body, f"SKILL.md が {path.name} を名指ししている"

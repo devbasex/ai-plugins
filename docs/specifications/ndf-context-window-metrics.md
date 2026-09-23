@@ -205,7 +205,7 @@ worker（読解）は深さ 1 に現れるため、`description` の先頭語が
 | `wait-reset` が過ぎていれば直ちに終わり、未来なら差の秒数だけ眠り、2 件では早い方まで眠る。直接起動した worker だけでも眠る。`--max-sleep` の終了コード 3。負の秒数で 2 | 同上（眠る関数と時刻を差し替える） |
 | `socket` を塞いだ実行で終了コード 0 | 同上 |
 | conductor の行、複数セッション、2 つの supervisor の worker が起動元ごとに分かれる、層ごとの合計、束ねる候補が supervisor の行にだけ付く、worker を使いすぎの印、`--agents` を付けない既定の出力が変わらない、`--window-limit` の既定が `context-window.md` と一致 | `plugins/ndf/skills/skill-stats/tests/test_agents_report.py` |
-| 手順 2 の観点に context window の行、雛形に 3 つの表があり、パス・本文・`agent_id` の列を持たない | `plugins/ndf/skills/retrospective/tests/test_context_window_section.py` |
+| 手順 2 の観点に context window の行、雛形に 3 つの表があり、パス・本文・`agent_id` の列を持たない | 文書を読んで確かめる（照合していたテストは #885 で削除） |
 
 ## 運用
 

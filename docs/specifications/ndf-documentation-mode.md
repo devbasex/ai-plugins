@@ -211,11 +211,11 @@ Confluence と SharePoint の実装は別のリポジトリにあり、自リポ
 
 | 観点 | 確かめ方 |
 | --- | --- |
-| 工程表が 18 行 × 5 列で、`SKILL.md` と定数が並びまで一致する | `test_workflow_stage_matrix.py` |
-| 工程名の並びが 5 箇所で一致する | `test_stage_values.py` / `test_approval_gates.py` |
+| 工程表が 18 行 × 5 列で、`SKILL.md` と定数が並びまで一致する | 文書を読んで確かめる（照合していたテストは #885 で削除） |
+| 工程名の並びが 5 箇所で一致する | 文書を読んで確かめる（照合していたテストは #885 で削除） |
 | `documentation` の高さが 5 で、混在時にそちらで検査する | `test_documentation_mode.py` |
 | 5 列目を読み、既存 4 列がずれない | 同上 |
-| 承認の関門が 2 つのままである | `test_approval_gates.py` |
+| 承認の関門が 2 つのままである | 文書を読んで確かめる（照合していたテストは #885 で削除） |
 | 形が 9 つあり、索引が実ファイルと一致する | `test_completion_check.py` |
 | 新設 4 個が 4 つの manifest すべてに載る | `test_agy_distribution.py` / `validate-runtime-plugins.sh` |
 | 自リポジトリ前提を持たない | `check-skill-repo-assumptions.py` |
