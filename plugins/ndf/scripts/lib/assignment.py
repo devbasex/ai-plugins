@@ -152,6 +152,51 @@ class Participants:
 Probe = Callable[[list[str]], tuple[dict[str, dict[str, Any]], bool]]
 
 
+def _check_names(include: list[str], exclude: list[str], only: Optional[str]) -> None:
+    """参加者の名前と、足す・外す・1 者指定の矛盾を検査する。"""
+    for name in (*include, *exclude, *([only] if only is not None else [])):
+        if name not in ALL_RUNTIMES:
+            raise AssignmentError(
+                f"参加できないランタイムです: {name}（{'/'.join(ALL_RUNTIMES)} のいずれか）"
+            )
+    overlap = set(include) & set(exclude)
+    if overlap:
+        raise AssignmentError(
+            f"足す者と外す者に同じ名前があります: {', '.join(_in_fixed_order(overlap))}"
+        )
+    # 矛盾は無視より先に見る。母集合に無い名前の除外を先に捨てると、`--only agy
+    # --exclude agy` が矛盾ではなく「参加者に無い」で止まり、理由を読み違える。
+    if only is not None and only in exclude:
+        raise AssignmentError(f"--only と --exclude が矛盾しています: {only}")
+
+
+def _split_by_probe(
+    participants: list[str], probe: Probe,
+) -> tuple[list[str], dict[str, str], bool]:
+    """確認結果を使える者と使えない者へ分ける。"""
+    results, skipped = probe(list(participants))
+    if skipped:
+        return list(participants), {}, True
+    unavailable = {
+        name: str(results.get(name, {}).get("detail", ""))
+        for name in participants
+        if not results.get(name, {}).get("ok", False)
+    }
+    available = [name for name in participants if name not in unavailable]
+    return available, unavailable, False
+
+
+def recorded_exclusions(recorded: dict[str, Any], include: list[str]) -> list[str]:
+    """`--exclude` を渡さない再開で使う除外。外した者と無視した除外を足し戻す。
+
+    無視した除外を `--include` にも渡したときだけ、新しい指定を優先してその名前を
+    足し戻さない。
+    """
+    excluded = list(recorded.get("excluded") or [])
+    ignored = [n for n in (recorded.get("ignored_exclude") or []) if n not in include]
+    return excluded + ignored
+
+
 def resolve_participants(
     pool: Iterable[str],
     *,
@@ -184,20 +229,7 @@ def resolve_participants(
     include = list(include)
     exclude = list(exclude)
 
-    for name in (*include, *exclude, *([only] if only is not None else [])):
-        if name not in ALL_RUNTIMES:
-            raise AssignmentError(
-                f"参加できないランタイムです: {name}（{'/'.join(ALL_RUNTIMES)} のいずれか）"
-            )
-    overlap = set(include) & set(exclude)
-    if overlap:
-        raise AssignmentError(
-            f"足す者と外す者に同じ名前があります: {', '.join(_in_fixed_order(overlap))}"
-        )
-    # 矛盾は無視より先に見る。母集合に無い名前の除外を先に捨てると、`--only agy
-    # --exclude agy` が矛盾ではなく「参加者に無い」で止まり、理由を読み違える。
-    if only is not None and only in exclude:
-        raise AssignmentError(f"--only と --exclude が矛盾しています: {only}")
+    _check_names(include, exclude, only)
     base = set(pool) | set(include)
     if only is not None and only not in base:
         base.add(only)
@@ -214,16 +246,7 @@ def resolve_participants(
             )
         participants = [only]
 
-    results, skipped = probe(list(participants))
-    if skipped:
-        available, unavailable = list(participants), {}
-    else:
-        unavailable = {
-            n: str(results.get(n, {}).get("detail", ""))
-            for n in participants
-            if not results.get(n, {}).get("ok", False)
-        }
-        available = [n for n in participants if n not in unavailable]
+    available, unavailable, skipped = _split_by_probe(participants, probe)
 
     if require_all and unavailable:
         failed = " / ".join(f"{n}（{d}）" for n, d in unavailable.items())

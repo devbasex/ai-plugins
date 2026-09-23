@@ -1667,7 +1667,7 @@ def _apply_resume_args_block(st: dict[str, Any], args: argparse.Namespace) -> bo
             only=st.get("only"),
             include=include_eff,
             exclude=(exclude if exclude is not None
-                     else _recorded_exclusions(recorded, include_eff)),
+                     else assignment.recorded_exclusions(recorded, include_eff)),
             require_all=(args.require_all if getattr(args, "require_all", None) is not None
                          else bool(recorded.get("require_all"))),
         )
@@ -1678,19 +1678,6 @@ def _apply_resume_args_block(st: dict[str, Any], args: argparse.Namespace) -> bo
              "from": old_participants, "to": participants})
 
     return len(st.get("resume_changes") or []) > before
-
-
-def _recorded_exclusions(recorded: dict[str, Any], include: list[str]) -> list[str]:
-    """`--exclude` を渡さない再開で使う除外。外した者と、無視した除外の両方を足し戻す。
-
-    無視した除外（`ignored_exclude`）を落とすと、`--exclude agy` で始めた実行を別の引数で
-    再開しただけで、完了報告から「母集合に無かった者」が消える（#786 の AC4d）。
-    **無視した名前を `--include` にも渡したときだけ、その名前を足し戻さない。** 新しい
-    指定を優先する。外した者（`excluded`）と `--include` の重なりは今どおり矛盾として止める。
-    """
-    excluded = list(recorded.get("excluded") or [])
-    ignored = [n for n in (recorded.get("ignored_exclude") or []) if n not in include]
-    return excluded + ignored
 
 
 def _find_resumable_state(
