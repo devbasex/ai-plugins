@@ -244,8 +244,10 @@ sequenceDiagram
     participant F as NDF_RELAY_DIR
     participant C2 as claude（区間 n+1）
     U->>R: run "<最初のコマンド>"
-    R->>F: relay.pid・child.pid・start
-    R->>C: 擬似端末で起動（env NDF_RELAY_DIR）
+    R->>F: relay.pid
+    R->>C: pty.fork（子は同期のパイプで待つ）
+    R->>F: child.pid・start
+    R->>C: 同期のパイプを閉じる → 子が claude を exec
     U->>R: キー入力
     R->>C: そのまま流す
     C->>C: 関門で AskUserQuestion（Stop は起きない）
@@ -258,8 +260,10 @@ sequenceDiagram
     C-->>R: 終わる（waitpid）
     R->>F: end
     R->>R: plugin の更新と版の読み取り・区切りの 1 行
-    R->>C2: 擬似端末で claude "<中身>"
-    R->>F: 印を消し、child.pid・start
+    R->>F: 印を消す
+    R->>C2: pty.fork（子は同期のパイプで待つ）
+    R->>F: child.pid・start
+    R->>C2: 同期のパイプを閉じる → 子が claude "<中身>" を exec
 ```
 
 ### 中継の状態遷移
@@ -288,7 +292,7 @@ stateDiagram-v2
 | 静まりを待つ | 次の 3 つがそろうまで待つ。(1) 印の `written_at`・`transcript_path` の更新時刻・利用者の最後の入力の時刻のうち最も遅いものから `--quiet` 秒たつ。(2) 会話の記録に `/goal` の目標がある区間では、印の `written_at` より後の `goal_status` の記録がある。(3) 印が消えていない。判定が止めを拒んだときは応答が続いて記録が動き、次の Stop で印が書き直されるか消える |
 | 続けさせる | 停止の印があるか、1 日の起動回数が上限か、空回り（直前の 2 つの `end` の `seconds` がともに 120 未満で、今の区間の長さ＝印の `written_at` − その区間の `start` の `at` も 120 未満）なら、`/exit` を入力しない。`stop` の行を書き、`ndf-relay:` の 1 行を出し、印を消す。以後は中継するだけで、次の印では何もしない |
 | 終わらせる | 子の端末へ `/exit` を書き、1 秒おいて `\r` を書く。`waitpid` で 30 秒まで待ち、終わらなければ SIGTERM を送る。`end` を書く |
-| 起動する | マーケットプレイスの名前が読めていれば、`claude plugin marketplace update <マーケットプレイス>` → `claude plugin update ndf@<マーケットプレイス> -y` → `claude plugin list --json` で版を読む。どれかが 0 以外で終われば `update-failed` で終わる。名前が読めていなければ（下の段落）、更新を飛ばして `plugin_version` を空にし、起動へ進む。作業ディレクトリは印の `cwd` で、消えていれば、パスに `/.worktrees/` を含むならその手前（主ディレクトリ）を、含まなければ在る最も近い親を使う。区切りの 1 行を出し、新しい擬似端末で `claude <中身>` を起動する（引数の配列で渡し、シェルを通さない。環境から `CLAUDECODE` / `CLAUDE_CODE_SESSION_ID` / `CLAUDE_CODE_ENTRYPOINT` を外し、`NDF_RELAY_DIR` を置く）。起動できなければ `start-failed` で終わる |
+| 起動する | マーケットプレイスの名前が読めていれば、`claude plugin marketplace update <マーケットプレイス>` → `claude plugin update ndf@<マーケットプレイス> -y` → `claude plugin list --json` で版を読む。どれかが 0 以外で終われば `update-failed` で終わる。名前が読めていなければ（下の段落）、更新を飛ばして `plugin_version` を空にし、起動へ進む。作業ディレクトリは印の `cwd` で、消えていれば、パスに `/.worktrees/` を含むならその手前（主ディレクトリ）を、含まなければ在る最も近い親を使う。区切りの 1 行を出す。**起動の順序は、印を消す → `pty.fork()` → 子は同期のパイプの読み口で待つ → 親が `child.pid` と `start` の行を書く → 親が同期のパイプを閉じる → 子が `claude <中身>` を exec する、に固定する。** 子がすぐ Stop に達しても、hook が読む `child.pid` は新しい値で、親が消す印は前の区間のものだけになる（引数の配列で渡し、シェルを通さない。環境から `CLAUDECODE` / `CLAUDE_CODE_SESSION_ID` / `CLAUDE_CODE_ENTRYPOINT` を外し、`NDF_RELAY_DIR` を置く）。起動できなければ `start-failed` で終わる |
 
 **マーケットプレイスの名前は、中継を始めたときに `claude plugin list --json` の `ndf@<名前>` から読む。**
 開発版のチャネルを使う利用者でも、登録した取得元から更新される。読めなければ更新を飛ばし、`plugin_version` を空にする。
@@ -324,7 +328,7 @@ stateDiagram-v2
 | AC4 | 同: `NDF_RELAY_DIR` 無し・pid が死んでいる・ブロック 0・ブロック 2・囲みの中だけ・壊れた JSON・直接の子でない claude（`claude -p` が子の claude の孫に当たる形）の 7 通りで、印が無く出力が空で終了コード 0 |
 | AC4b | 同: 印がある状態でブロック無しの標準入力を与えると印が消える。`stop_hook_active: true` でもブロック 1 つなら書く。直接の子でない claude のブロック無しの Stop は印を消さない |
 | AC5 | 「確かめたこと」の 5 と、AC17 で `AskUserQuestion` を 1 回出す |
-| AC6 | 同: 試験用の子で 1 周させ、`/exit` と `\r` が子へ届く → 子の終わり → `marketplace update` → `plugin update -y` → `plugin list --json` → 区切りの 1 行 → 次の子の起動（中身が 1 つの引数）の順になること。記録の更新時刻が新しいあいだ・利用者の入力から 15 秒たたないあいだ・目標のある記録で印より後の `goal_status` が無いあいだは `/exit` を送らないこと |
+| AC6 | 同: 起動した直後に印を書く試験用の子で、印が消されず次の周へ進むこと（`child.pid` と `start` が子の exec より前に書かれていること）。試験用の子で 1 周させ、`/exit` と `\r` が子へ届く → 子の終わり → `marketplace update` → `plugin update -y` → `plugin list --json` → 区切りの 1 行 → 次の子の起動（中身が 1 つの引数）の順になること。記録の更新時刻が新しいあいだ・利用者の入力から 15 秒たたないあいだ・目標のある記録で印より後の `goal_status` が無いあいだは `/exit` を送らないこと |
 | AC7 | 同: 中継の標準入力に見立てたパイプへ `\x03` と文字を書くと、同じバイトが子へ届くこと。SIGWINCH の後に子の端末の大きさが変わること。中継を擬似端末の上で動かし、子が終わった後・本体で例外を起こした後・SIGTERM を送った後のそれぞれで、中継の端末の属性が始める前と同じに戻っていること |
 | AC8 | 同: 1 周で `end`（6 つのキー: `event` / `at` / `section` / `pid` / `seconds` / `ended_by`）と `start`（8 つのキー: `event` / `at` / `section` / `pid` / `command` / `from_session` / `plugin_version` / `cwd`。`cwd_fallback` は消えていたときだけ足す）の 2 行が書かれ、`plugin_version` が差し替えた `plugin list --json` の値、`ended_by` が `mark` であること |
 | AC9 | 同: 印の `cwd` が消えた（`<主>/.worktrees/design/x`）とき `<主>` で次の子が起動し、`start` の行に `cwd_fallback` が載ること |
