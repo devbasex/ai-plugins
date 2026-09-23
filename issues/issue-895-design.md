@@ -172,7 +172,7 @@ plugins/ndf/
 
 | 副命令 | 引数 | 終了コード | 出力 |
 | --- | --- | --- | --- |
-| `run` | `[claude の引数 ...]`。**`run` の後ろはすべて claude の引数で、中継は解釈しない。** 中継の設定は環境変数だけで受ける: `NDF_RELAY_MAX_STARTS`（既定 20）/ `NDF_RELAY_QUIET`（秒、既定 15）/ `NDF_RELAY=0`（常に素通し） | 素通しでは claude の終了コードそのもの（exec で置き換わるため）。中継では最後の区間の claude の終了コード（シグナルで終わったら 128 + シグナルの番号）/ 2: 次の区間の更新か起動に失敗した / 127: 本物の claude が見つからない・起動の入れ子が深すぎる | 区切りの 1 行と、落ちるときの `ndf-relay:` の 1 行を画面へ。印なしで終わるときは何も出さない |
+| `run` | `[claude の引数 ...]`。**`run` の後ろはすべて claude の引数で、中継は解釈しない。** 中継の設定は環境変数だけで受ける: `NDF_RELAY_MAX_STARTS`（既定 20）/ `NDF_RELAY_QUIET`（秒、既定 15）/ `NDF_RELAY=0`（常に素通し） | 素通しでは claude の終了コードそのもの（exec で置き換わるため）。中継では最後の区間の claude の終了コード（シグナルで終わったら 128 + シグナルの番号）/ 2: 次の区間の更新か起動に失敗した / 127: 本物の claude が見つからない・起動の入れ子が深すぎる・1 つ目の区間の claude を exec できない | 区切りの 1 行と、落ちるときの `ndf-relay:` の 1 行を画面へ。印なしで終わるときは何も出さない |
 | `stop` | 無し | 0: 動いている中継に停止の印を置いた（1 つ以上）/ 1: 動いている中継が無い | 置いた中継の pid を 1 行ずつ。**対象は `${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/` の各サブディレクトリのうち、中継が動いているものすべて**（`stop` は `NDF_RELAY_DIR` を継がないため走査で探す）。動いているかは `relay.lock` で見る（下の表）。pid の生死では見ない |
 | `mark` | 標準入力に Stop hook の JSON | 常に 0 | 常に無し |
 | `install` | 無し | 常に 0（SessionStart を止めない） | 足したときと、既存の `claude` の定義で足さなかったときの初回だけ、`{"systemMessage": "<1 行>"}` を標準出力へ（利用者の画面に出る）。それ以外は何も出さない |
@@ -187,7 +187,7 @@ plugins/ndf/
 | 4 | 引数に `-p` / `--print` / `-h` / `--help` / `-v` / `--version` がある、または最初の引数が claude の副命令の名前（「確かめたこと」の 11） | 素通し |
 | 5 | 標準入力か標準出力が端末でない（パイプ・リダイレクト） | 素通し |
 | 6 | `pty` を読み込めない・擬似端末を作れない（Windows など）、または `claude plugin list --json` から `ndf@<名前>` の名前と版を読めない（1 つ目の区間の版を記録できない） | `ndf-relay: 中継を始めない（擬似端末を作れない）…` を標準エラーへ出してから素通し |
-| 7 | 上のどれでもない | 中継として始める。1 つ目の区間は `<本物の claude> <run の引数>` を子として起動する |
+| 7 | 上のどれでもない | 中継として始める。1 つ目の区間は `<本物の claude> <run の引数>` を子として起動する。**1 つ目の区間の exec が失敗したら**（結果のパイプで `errno` が返る。探した後に実体が消えたなど）、`ndf-relay: claude を起動できない（<errno>）` を出し、`stop` の行（`start-failed`）を書いて終了コード 127 で終わる。素通しし直さない（同じ実体の exec がまた失敗するため） |
 
 **2 つ目以降の区間は `<本物の claude> <印の中身>` だけで起動し、`run` の引数は引き継がない。** `--resume` や `-c` を引き継ぐと、捨てたはずの会話へ戻る。モデルなどを区間をまたいで保ちたいときは、設定か環境変数（`ANTHROPIC_MODEL` など）で与える（`relay.md` に書く）。
 
@@ -209,7 +209,7 @@ alias は子のプロセスには効かないため、中継は実体を探す�
 
 | # | 段 | すること |
 | ---: | --- | --- |
-| I1 | 止める | `NDF_RELAY_AUTO=0` なら何もしない。それ以外は `${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/install.lock` を `fcntl.flock` で取り（待つのは 2 秒まで。取れなければ何もせず終わる）、**I2〜I7 をすべてこのロックの中で確かめて書く**。同じ HOME で Claude Code が同時に起動しても、囲み・バックアップ・知らせは 1 回になる |
+| I1 | 止める | `NDF_RELAY_AUTO=0` なら何もしない。それ以外は、状態の親 `${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/` とデータの親 `${XDG_DATA_HOME:-$HOME/.local/share}/ndf/` を `os.makedirs(..., mode=0o700, exist_ok=True)` で先に作り（初めての導入ではどちらも無い）、`install.lock` を `fcntl.flock` で取り（待つのは 2 秒まで。取れなければ何もせず終わる）、**I2〜I7 をすべてこのロックの中で確かめて書く**。同じ HOME で Claude Code が同時に起動しても、囲み・バックアップ・知らせは 1 回になる |
 | I2 | 中継を置き直す | 自分（hook の版の `relay.py`）と安定した場所の写しの中身が違うとき、または写しが無いときだけ、一時ファイルに書いてから置き換える（権限 `0755`）。同じなら何もしない |
 | I3 | 足す先を決める | `$SHELL` の名前が `bash` なら `~/.bashrc`、`zsh` なら `${ZDOTDIR:-$HOME}/.zshrc`。それ以外のシェルでは足さない（何も出さない） |
 | I4 | 既にあるか | 足す先に囲みの開きの行 `# >>> ndf relay >>>` があれば何もしない |
@@ -411,16 +411,16 @@ stateDiagram-v2
 | AC8 | 同: 1 周で `end`（6 つのキー: `event` / `at` / `section` / `pid` / `seconds` / `ended_by`）と `start`（8 つのキー: `event` / `at` / `section` / `pid` / `command` / `from_session` / `plugin_version` / `cwd`。`cwd_fallback` は消えていたときだけ足す）の 2 行が書かれ、`plugin_version` が差し替えた `plugin list --json` の値、`ended_by` が `mark` であること。1 つ目の区間の `start` も `plugin_version` を持ち、それは中継を始めたときに読んだ `plugin list --json` の値であること |
 | AC9 | 同: 印の `cwd` が消えた（`<主>/.worktrees/design/x`）とき `<主>` で次の子が起動し、`start` の行に `cwd_fallback` が載ること |
 | AC10 | 同: 今日の `start` が 20 行ある記録で印を与えると、`/exit` を送らず `stop`（`max-starts`）と `ndf-relay:` の 1 行を出し、子を続けさせること |
-| AC11 | 同: 区間の長さが 119・119・119 と続くと 3 つ目の印で `/exit` を送らず `stop`（`spin`）、119・121・119 では送ること。1 つ目の区間（`run` の引数で起動した区間）も数えること。`sigterm` で終わった区間の長さが印の `written_at` までで測られること |
+| AC11 | 同: 区間の長さが 119・119・119 と続くと 3 つ目の印で `/exit` を送らず `stop`（`spin`）、119・121・119 では送ること。1 つ目の区間（`run` の引数で起動した区間）も数えること。`sigterm` と `sigkill` で終わった区間の長さが、どちらも印の `written_at` までで測られること |
 | AC12 | 同: 試験用の子が印なしで終わると、`end`（`no-mark`）を書いて子の終了コードで終わること |
 | AC13 | 同: 別のプロセスから `relay.py stop` を打つと `stop` ができ、次の印で `/exit` を送らないこと。動いている中継が無ければ `stop` が終了コード 1。生きている中継 2 つと `relay.pid` の死んだディレクトリ 1 つを置いて `stop` を打つと、生きている 2 つにだけ停止の印ができること。`relay.pid` に今動いている無関係なプロセスの pid を書き、ロックを持つ者の居ないディレクトリは飛ばすこと |
 | AC26 | 同: 同じ pid を返すように差し替えた 2 回の `run` が別の `NDF_RELAY_DIR` を作り、前の起動のディレクトリに置いた `stop` と `next.json` を読まないこと |
-| AC14 | 同: AC10・AC11・AC13 と、`plugin update` の差し替えが 0 以外のとき・次の子の起動に失敗したときに、`ndf-relay:` の 1 行と `stop` の行が出ること。後の 2 つは次のコマンドを画面に出し、終了コード 2。存在しない実行ファイルを次の子にすると、exec の失敗が結果のパイプで返り、`stop` の `reason` が `start-failed`・終了コード 2・次のコマンドが画面に出て、`start` と `end` の行が増えず、1 日の起動回数にも数えられないこと。`/exit` にも SIGTERM にも反応しない試験用の子で、SIGKILL の後に終わりを確かめてから `end`（`sigkill`）を書くこと |
+| AC14 | 同: AC10・AC11・AC13 と、`plugin update` の差し替えが 0 以外のとき・次の子の起動に失敗したときに、`ndf-relay:` の 1 行と `stop` の行が出ること。後の 2 つは次のコマンドを画面に出し、終了コード 2。存在しない実行ファイルを次の子にすると、exec の失敗が結果のパイプで返り、`stop` の `reason` が `start-failed`・終了コード 2・次のコマンドが画面に出て、`start` と `end` の行が増えず、1 日の起動回数にも数えられないこと。`/exit` にも SIGTERM にも反応しない試験用の子で、SIGKILL の後に終わりを確かめてから `end`（`sigkill`）を書くこと。1 つ目の区間の子に存在しない実行ファイルを使うと、`start-failed` の `stop` の行と `ndf-relay:` の 1 行を出して終了コード 127 で終わること |
 | AC15 | 同: 素通しの 6 つの条件（`NDF_RELAY=0`・`NDF_RELAY_DIR` あり・`-p`・`--help`・副命令 `mcp`・標準入力がパイプ）で、`os.execve` を差し替えて、本物の claude のパスと元の引数がそのまま渡り、渡った環境と元の環境の差が `NDF_RELAY_DEPTH` の 1 つだけで、何も出力しないこと。`pty` を読み込めないように差し替えた対話の `run` では `ndf-relay:` の 1 行を標準エラーへ出してから素通しすること。`plugin list --json` の差し替えが失敗する・`ndf@` の要素が無いときも、対話の `run` が `ndf-relay:` の 1 行を出して素通しすること |
 | AC16 | 同: AC4 の `NDF_RELAY_DIR` 無し。`hooks/claude.json` 以外の hook の定義の差分が無いことを実装の Pull Request の差分で見る |
 | AC19 | 同: 引数なしの `run` で 1 つ目の子の引数が空、`run --model haiku -c` で 1 つ目の子が同じ引数を受け、2 つ目の子は `<印の中身>` だけを受けること。試験用の子が印なしで終了コード 3 で終わると、中継も何も出さずに終了コード 3 で終わること。シグナル 15 で終わると 143 |
 | AC20 | 同: `PATH` の前に `claude` という名前で中継を呼ぶラッパーを置くと、それを飛ばして本物を選ぶこと。`NDF_RELAY_DEPTH=2` では終了コード 127 と 1 行を出すこと。`NDF_RELAY_CLAUDE` が最優先になること |
-| AC21 | 同: 一時の HOME と `SHELL=/bin/bash` で `install` を打つ。1 回目: 安定した場所に写しができ、`~/.bashrc` に囲みが 1 つ足され、バックアップと `rc-added` の記録ができ、`systemMessage` が 1 行出る。2 回目: 何も書かず何も出さない（ファイルの中身と更新時刻が変わらない）。囲みを消した後の 3 回目: 足さない。`~/.bashrc` に `alias claude=`・`claude () {`・`function claude {` のどれかがある: 足さず、案内は 1 回目だけ。`NDF_RELAY_AUTO=0`: 何もしない。`SHELL=/bin/fish`: 写しだけを置き直し、設定は書かない。写しと中身が違う `relay.py` から打つと写しが置き換わる。書けないディレクトリでも終了コード 0。同じ一時の HOME で `install` を 4 つ同時に起動しても、囲みは 1 つ・バックアップは 1 つ・`systemMessage` は 1 回であること |
+| AC21 | 同: 一時の HOME と `SHELL=/bin/bash` で `install` を打つ。1 回目: 安定した場所に写しができ、`~/.bashrc` に囲みが 1 つ足され、バックアップと `rc-added` の記録ができ、`systemMessage` が 1 行出る。2 回目: 何も書かず何も出さない（ファイルの中身と更新時刻が変わらない）。囲みを消した後の 3 回目: 足さない。`~/.bashrc` に `alias claude=`・`claude () {`・`function claude {` のどれかがある: 足さず、案内は 1 回目だけ。`NDF_RELAY_AUTO=0`: 何もしない。`SHELL=/bin/fish`: 写しだけを置き直し、設定は書かない。写しと中身が違う `relay.py` から打つと写しが置き換わる。書けないディレクトリでも終了コード 0。同じ一時の HOME で `install` を 4 つ同時に起動しても、囲みは 1 つ・バックアップは 1 つ・`systemMessage` は 1 回であること。`~/.local/state` も `~/.local/share` も無い一時の HOME からの 1 回目でも、写しと囲みができること |
 | AC22 | 実装の Pull Request の差分で、`install` を呼ぶのが `hooks/claude.json` の SessionStart だけで、Codex / agy の hook の定義に無いこと。`claude plugin validate` が通ること |
 | AC23 | `test_token_guard.py`: `NDF_RELAY_DIR` と `child.pid` を用意し、親のたどりを差し替えて中継の直接の子の conductor にすると、上限を超えた持ち場の Agent の起動が 2 回続けて止まること（1 度の通しが無い）。理由の欄が `ndf-next` と「動いている supervisor の報告を待つ」を含むこと。中継の外では今までどおり 2 回目が通ること |
 | AC24 | `test_relay.py`: ブロックが 1 つでも `background_tasks` に `running` が 1 件ある標準入力では印を書かず、前の印を消すこと。`background_tasks` が空の配列のときは書くこと |
