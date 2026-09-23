@@ -293,7 +293,7 @@ npm install -g @openai/codex
 codex login
 ```
 
-`/ndf:pr-review <PR番号> agy` や `/ndf:cross-review` で agy 委譲を使う場合は、利用環境に
+`/ndf:pr-review <PR番号> agy` や `/ndf:cross-review --include agy` で agy 委譲を使う場合は、利用環境に
 Antigravity CLI をインストールしてログインします。ログインの手順は初回の対話起動にあり、
 `agy models` が終了コード 0 で終われば認証済みです。
 

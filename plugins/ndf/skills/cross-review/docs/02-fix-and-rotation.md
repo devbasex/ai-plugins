@@ -297,6 +297,9 @@ stdout には両モードとも以下を KEY=VALUE で出す:
 state.json の **キーは元 PR 番号 (STATE_PR) のまま** なので、light/squash どちらでも
 後続スクリプトへの第 1 引数は `$STATE_PR` を渡し続ければよい。
 
+**巻き直しの後の最初のラウンドでは、`start-round` が新しい PR の既存コメントで控えを取り直す**
+（#542）。同じ PR の前のラウンドが無いため、前のラウンドからの変更の節は書かない。
+
 ### 後方互換: 旧 1 引数形式
 
 `rotate-pr.sh <STATE_PR>` (引数 1 つ) は `execute --mode squash` 相当として動くが、
