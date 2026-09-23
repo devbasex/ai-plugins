@@ -153,7 +153,7 @@ plugins/ndf/
 
 | 副命令 | 引数 | 終了コード | 出力 |
 | --- | --- | --- | --- |
-| `run` | `--max-starts <N>`（既定 20）/ `--keep-windows <N>`（既定 10）/ `--quiet <秒>`（既定 15） | 0: 停止の印で止まった / 1: 起動できない（tmux の外・2 つ目の中継）/ 2: 上限・空回り・印の無い終わり・更新の失敗・`/exit` の後に 30 秒で終わらない（`exit-timeout`）で止まった / 130: `Ctrl-C` | 止まるとき、理由を 1 行（`relay: 止まった: <理由>`）を標準エラーへ |
+| `run` | `--max-starts <N>`（既定 20）/ `--keep-windows <N>`（既定 10）/ `--quiet <秒>`（既定 15） | 0: 停止の印で止まった / 1: 始められない（tmux が探索路に無い・tmux の外・2 つ目の中継・`setup` が設定を安全に書けない）/ 2: 上限・空回り・印の無い終わり・更新の失敗・`/exit` の後に 30 秒で終わらない（`exit-timeout`）・次の区間の起動の失敗（`start-failed`）で止まった / 130: `Ctrl-C` | 止まるとき、理由を 1 行（`relay: 止まった: <理由>`）を標準エラーへ |
 | `stop` | 無し | 0: 停止の印を置いた / 1: このセッションで中継が動いていない | 無し |
 | `setup` | `--check`（確かめるだけで書かない） | 0: 前提がそろった（入れた・既にあった）/ 1: 入れられない前提が欠けている（tmux が無い・設定ファイルを安全に書けない）/ 3: `--check` で、入れれば足りる設定が欠けている | 確かめた項目ごとに 1 行（`ok` / `added` / `missing` / `skipped` と理由）。書いたときはバックアップのパスと戻し方の 1 行 |
 | `mark` | 標準入力に Stop hook の JSON | 常に 0 | 常に無し |
@@ -191,7 +191,7 @@ plugins/ndf/
 | ファイルに注釈（`//` `/* */`）があり、書き戻すと失われる / JSON として読めない | 書かない（終了コード 1）。入れる値を示す |
 | ファイルが無い | 作る（`added`） |
 
-**書くときは先に `settings.json.ndf-bak-<UTC の時刻>` へ写し、一時ファイルに書いてから置き換える。** 書いた後に、足したキーと、戻すための `cp <バックアップ> <元のパス>` の 1 行を示す。**2 回目の `setup` は何も書かない**（冪等）。`~/.tmux.conf` とシェルの設定は触らない。
+**書くときは先に `settings.json.ndf-bak-<UTC の時刻>` へ写し、一時ファイルに書いてから置き換える。** 書いた後に、足したキーと、戻すための 1 行を示す。既にあったファイルなら `cp <バックアップ> <元のパス>`、`setup` が新しく作ったファイルならバックアップは作らず `rm <元のパス>` を示す。**2 回目の `setup` は何も書かない**（冪等）。`~/.tmux.conf` とシェルの設定は触らない。
 
 ### 作業ディレクトリ `NDF_RELAY_DIR`
 
@@ -250,7 +250,7 @@ plugins/ndf/
 | `plugin_version` | 更新の後に `claude plugin list --json` から読んだ `ndf@<マーケットプレイス>` の `version`（`start`。AC8） |
 | `seconds` | 区間の長さ。その区間の `start` の `at` から、印の `written_at` か claude の終わりを見た時刻まで（`end`。中継が起動していない最初の区間は空） |
 | `ended_by` | 終わり方。`mark`（印を受けて `/exit` を送り、claude が終わった）/ `no-mark`（中継が起動した区間の claude が印なしで終わった）（`end`） |
-| `reason` | 止まった理由（`stop`）。`stop-file` / `max-starts` / `spin` / `no-mark` / `update-failed` / `exit-timeout` / `sigint` |
+| `reason` | 止まった理由（`stop`）。`stop-file` / `max-starts` / `spin` / `no-mark` / `update-failed` / `exit-timeout` / `start-failed`（`new-window` が 0 以外で終わった。tmux の標準エラーを 1 行添える）/ `sigint` |
 
 **`end` は区間の claude が実際に終わったときだけ書く。** 停止の印・上限・空回りで止まるときは `/exit` を送らず、区間は動き続けるため、`stop` の行だけを書く。
 
@@ -355,8 +355,9 @@ claude の区間も終わらせられる。**中継は `/exit` を送る前に�
 | AC13 | 同: `stop` があるとき `/exit` を送らず終了コード 0。`SIGINT` で終了コード 130、`send-keys` も `kill-window` も呼ばず、`set-environment -u` を呼ぶこと |
 | AC14 | 同: AC4 の `TMUX` 無し。`hooks/claude.json` 以外の hook の定義の差分が無いことを実装の Pull Request の差分で見る |
 | AC15 | 別のソケット（`tmux -L ndf-relay-e2e`）で中継を始め、`--model haiku` の claude に「次の区間を `ndf-next` で 1 回出す」指示を 2 段で渡す通しの確かめ。3 つ目の区間の起動・ウィンドウ 3 つ・`log.jsonl` の `start` 2 行（中継が起動した 2 つ目と 3 つ目の区間。最初の区間は利用者が開くため行が無い）と `end` 2 行（1 つ目と 2 つ目の区間、`ended_by` が `mark`）を見る。1 段目で `AskUserQuestion` を出させ、答える前に印が無いことも見る。記録を実装の Pull Request に残す |
-| AC17 | 同: 前提を差し替えた一時の HOME で `setup` を打つ。Machine 設定が無い → 作って `added`、2 回目は書かず `ok`（ファイルの中身と更新時刻が変わらない）。`defaultProfile.linux` が別のプロファイル → 書かず `skipped`。注釈を含むファイル → 書かず終了コード 1。書いたときはバックアップがあり、もとのキーが残ること。`--check` は書かず終了コード 3 |
+| AC17 | 同: 前提を差し替えた一時の HOME で `setup` を打つ。Machine 設定が無い → 作って `added`、2 回目は書かず `ok`（ファイルの中身と更新時刻が変わらない）。`defaultProfile.linux` が別のプロファイル → 書かず `skipped`。注釈を含むファイル → 書かず終了コード 1。既にあったファイルに書いたときはバックアップがあり、もとのキーが残り、出力の戻し方が `cp` であること。新しく作ったときはバックアップが無く、戻し方が `rm` であること。`--check` は書かず終了コード 3 |
 | AC18 | 同: `tmux` の探索路を空にすると `setup` が終了コード 1 と案内。`TMUX` 無しの `run` が中継を始めず終了コード 1 で、`setup` と同じ確認の出力を出すこと。ワークスペースの `.vscode/settings.json` が別のプロファイルを指すと、その場所を示し書き換えないこと |
+| AC20 | 同: `new-window` の差し替えが 0 以外で終わると、終了コード 2・`stop` の `reason` が `start-failed`・tmux の標準エラーの 1 行が載ること。`end` の行は前の区間の分だけで、新しい区間の `start` は書かないこと |
 | AC19 | 同: 印の `cwd` が消えた（`<主>/.worktrees/design/x`）とき `new-window -c <主>` で起動し、`start` の行に `cwd_fallback` が載ること。実 tmux の別のソケットで、すぐ終わる処理を起動したウィンドウが残ること |
 | AC16 | `uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest pytest . -q -n 4` |
 
