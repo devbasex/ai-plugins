@@ -299,8 +299,7 @@ open の全件へ広げる（`--all`）。
 
 **未設定の件数を報告へ残す。** 残った件数と理由が、次の棚卸の材料になる。
 
-この工程に入ったら `/ndf:progress-tracking <issue番号> "振り返り"` を呼ぶ（この Skill は
-工程表に載らないため、直前の工程の値をそのまま使う）。
+この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "振り返り"` を 1 行打つ（この Skill は工程表に載らないため、直前の工程の値をそのまま使う。issue の本文と盤面の両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。
 
 ## 関連
 

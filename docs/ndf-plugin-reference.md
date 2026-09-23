@@ -21,7 +21,7 @@ plugins/ndf/
 ├── .codex-plugin/plugin.json    # Codex（hooks / skills 配列）
 ├── skills/                      # 配布 Skill の唯一の実体（41 個）
 ├── manifests/                   # ランタイム別の配布 Skill 一覧
-├── agents/                      # Claude Code のサブエージェント（8 個）
+├── agents/                      # Claude Code のサブエージェント（専門 8 個と worker 1 個）
 ├── hooks/claude.json            # Claude Code の SessionStart / Stop hook
 ├── hooks/codex.json             # Codex の Stop hook
 ├── scripts/                     # hook と Skill から呼ぶスクリプト
@@ -36,7 +36,7 @@ plugin install 時に build を実行する必要はありません。
 
 | Runtime | 読むもの |
 |---|---|
-| Claude Code | `.claude-plugin/plugin.json`（`agents/` 8 個、`hooks/claude.json`、`skills` 配列 32 個）、`scripts/` |
+| Claude Code | `.claude-plugin/plugin.json`（`agents/` 9 個（専門 8 個と worker 1 個）、`hooks/claude.json`、`skills` 配列 32 個）、`scripts/` |
 | Codex | `.codex-plugin/plugin.json`（`hooks/codex.json`、`skills` 配列 30 個）、`scripts/` |
 | Kiro CLI | `dev.kiro/`（installer・agent config template・workflow prompts）、`manifests/kiro-skills.txt`、`skills/`、`scripts/` |
 | agy | `dev.agy/`（マニフェスト・`hooks.json`・`skills/` の symlink・`agents` と `scripts` への symlink） |

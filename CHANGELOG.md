@@ -9,6 +9,30 @@
 **開発版（接尾辞の付いた版）は載せない。** `9.8.0` は `9.8.0-dev.1` までしか出ておらず、
 その内容は `10.0.0` で届いている。
 
+## [ndf 10.17.2] - 2026-09-23
+
+### 追加
+
+- **3 層の worker のエージェント定義 `ndf:worker`（`plugins/ndf/agents/worker.md`）を足した（Claude Code。agy へも
+  同じ定義が配られる）**（#828）。frontmatter の `disallowedTools: Skill, Agent` で Skill と Agent のツールを外す。
+  `plugin.json` の `agents` に載せ、説明の数は「専門エージェント 8 個と worker の定義 1 個」と別枠で書く
+- **Skill の抜粋の規約 `plugins/ndf/skills/EXCERPTS.md` と、`progress-tracking` の抜粋
+  `references/excerpt.md` を足した**（#828）。抜粋は「呼び出し・結果の読み方・判断の基準」の 3 見出しで、
+  40 行かつ 2,000 文字以内に収める
+- **仕事を分ける器の比較表 `development-workflow/references/work-vessels.md` を足した**（#680）。その場 /
+  サブエージェント / CLI 実行 / 最小構成の `claude -p` / スクリプトの 5 つを比べ、小さな作業には
+  サブエージェントを起こさない線引きを置く
+
+### 変更
+
+- **`projects-sync.sh` の 1 行で issue の本文と盤面の両方へ進行を残すようにした**（#828）。`stage` / `mode` /
+  `worktree` / `plan` は、盤面の宣言の有無にかかわらず先に `progress-record.sh` で issue の本文を更新する。
+  `progress-record.sh` は工程名の位置に `-` を受けると見出し行だけを更新する
+- **工程の Skill 20 個の末尾の記録の文を、記録のコマンド 1 行の形にした**（#828）
+- **起動指示の雛形（`agent-layers.md`）から Skill 本文の読み込みを外した**（#828 #680）。supervisor は
+  `development-workflow` を起動せず、conductor が `$SCRIPTS` を解いた絶対パスの記録のコマンドを使う。
+  worker は `ndf:worker` で起動し、要る手順を起動指示に写した抜粋で受け取る
+
 ## [ndf 10.17.1] - 2026-09-23
 
 ### 変更

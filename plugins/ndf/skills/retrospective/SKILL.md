@@ -319,7 +319,7 @@ gh issue edit <issue番号> --repo "$RECORD_REPO" --body-file /tmp/issue-body.md
 | 成果物の良し悪し | 実装レビューの工程が扱う |
 | 経緯の時系列そのもの | git の履歴と Pull Request に残っている |
 
-この工程に入ったら `/ndf:progress-tracking <issue番号> "振り返り"` を呼ぶ（記録の手順はその Skill が持つ）。 **入口のこの記録では盤面の `Status` を書かない。** 先に `Done` にすると、盤面の `Auto-close issue` が課題を閉じ、reopen の手段が報告から落ちる。
+この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "振り返り"` を 1 行打つ（issue の本文と盤面の両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。 **入口のこの記録では盤面の `Status` を書かない。** 先に `Done` にすると、盤面の `Auto-close issue` が課題を閉じ、reopen の手段が報告から落ちる。
 
 ## まとまりを閉じる
 

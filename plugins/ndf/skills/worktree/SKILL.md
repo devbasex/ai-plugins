@@ -294,7 +294,7 @@ bash "$TE" down "$WT" --volumes             # 破棄し、割り当てを解放�
 中に置くと、削除した時点で割り当ての記録が消える。**解放しても行は消さず、解放の時刻を
 書き込む。**
 
-この工程に入ったら `/ndf:progress-tracking <issue番号> "作業場所の用意"` を呼ぶ（記録の手順はその Skill が持つ）。
+この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "作業場所の用意"` を 1 行打つ（issue の本文と盤面の両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。
 
 
 ## 関連

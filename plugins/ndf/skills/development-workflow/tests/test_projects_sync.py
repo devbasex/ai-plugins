@@ -30,13 +30,27 @@ def fake_gh(tmp_path, log, exit_code: int = 0, stderr: str = "") -> dict:
     return {"PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}"}
 
 
-def test_no_declaration_is_silent(repo, tmp_path) -> None:
-    """宣言が無いリポジトリでは何も出力せず 0 で終わる。"""
+ISSUE_LINE = "#186 進行 = 実装レビュー\n"
+
+
+def board_stdout(stdout: str) -> str:
+    """盤面の更新の出力だけを取り出す。
+
+    入口は先に issue の本文を更新し、その 1 行を出す（#828）。盤面の行は同じ文面のため、
+    先頭の issue の本文の行を 1 つだけ外して残りを盤面の出力として読む。
+    """
+    return stdout[len(ISSUE_LINE):] if stdout.startswith(ISSUE_LINE) else stdout
+
+
+def test_no_declaration_writes_only_the_issue_body(repo, tmp_path) -> None:
+    """宣言が無いリポジトリでは盤面へ問い合わせず、issue の本文だけを更新する（#828）。"""
     log = tmp_path / "gh.log"
     got = run_sync("186", "stage", "実装レビュー", cwd=repo, env=fake_gh(tmp_path, log))
     assert got.returncode == 0
-    assert got.stdout == "" and got.stderr == ""
-    assert not log.exists(), "宣言が無いのに gh を呼んでいる"
+    assert got.stdout == ISSUE_LINE and got.stderr == ""
+    calls = log.read_text(encoding="utf-8")
+    assert "issue edit" in calls
+    assert "project" not in calls, "宣言が無いのに盤面へ問い合わせている"
 
 
 def without_gh(tmp_path) -> dict:
@@ -218,7 +232,7 @@ def test_missing_item_below_the_limit_is_silent(repo, tmp_path) -> None:
     env = scripted_gh(tmp_path, [1, 2, 3])
     got = run_sync("186", "stage", "実装レビュー", cwd=repo, env=env)
     assert got.returncode == 0
-    assert got.stdout == "" and got.stderr == ""
+    assert board_stdout(got.stdout) == "" and got.stderr == ""
 
 
 def test_another_repository_with_the_same_number_is_not_updated(repo, tmp_path) -> None:
@@ -244,7 +258,7 @@ def test_only_another_repository_has_the_number_is_silent(repo, tmp_path) -> Non
     env = scripted_gh(tmp_path, [(OTHER_REPO, 186)])
     got = run_sync("186", "stage", "実装レビュー", cwd=repo, env=env)
     assert got.returncode == 0
-    assert got.stdout == "" and got.stderr == ""
+    assert board_stdout(got.stdout) == "" and got.stderr == ""
     log = (tmp_path / "gh.log").read_text(encoding="utf-8")
     assert "item-edit" not in log, "別のリポジトリのアイテムを更新している"
 
@@ -259,7 +273,7 @@ def test_missing_item_beyond_the_limit_is_reported(repo, tmp_path) -> None:
     env = scripted_gh(tmp_path, list(range(1000, 2000)), total_count=1200)
     got = run_sync("186", "stage", "実装レビュー", cwd=repo, env=env)
     assert got.returncode == 0
-    assert got.stdout == ""
+    assert board_stdout(got.stdout) == ""
     assert "上限 1000" in got.stderr
     assert "1200" in got.stderr
     assert "#186" in got.stderr
@@ -271,4 +285,4 @@ def test_missing_item_exactly_at_the_limit_is_silent(repo, tmp_path) -> None:
     env = scripted_gh(tmp_path, list(range(1000, 2000)), total_count=1000)
     got = run_sync("186", "stage", "実装レビュー", cwd=repo, env=env)
     assert got.returncode == 0
-    assert got.stdout == "" and got.stderr == ""
+    assert board_stdout(got.stdout) == "" and got.stderr == ""
