@@ -128,8 +128,9 @@ plugins/ndf/
 - **7 日より古い控えは、書き込みのついでに消す**（`find -mtime +7 -delete`）。会話が終わった合図を
   hook は受け取らないため
 - **文脈量の案内を出した印** は `guards/context-<session_id>.json` に、拒否した起動の `skill` と
-  `args` を持つ。次の起動が同じ `skill`・`args` なら 1 度だけ通し、印を消す。別の工程 Skill の
-  起動は、上限を超えていれば再び拒否する。工程の切れ目ごとに 1 度ずつ止まる（決定 7）
+  `args` を持つ。次の工程 Skill の起動が同じ `skill`・`args` なら 1 度だけ通し、印を消す。
+  間に他のツールや工程でない Skill が挟まっても印は残る。次の工程 Skill が別の `skill` か
+  `args` なら、上限を超えていれば印を置き換えて再び拒否する。工程の切れ目ごとに 1 度ずつ止まる（決定 7）
 
 ## 入出力の契約
 
@@ -157,9 +158,9 @@ plugins/ndf/
 
 | 判定 | 拒否する条件 | 理由の欄の文面（要旨） |
 | --- | --- | --- |
-| sleep | `run_in_background` が真でない。判定の前に `command` からコメント（引用の外の `#` 以降）・引用文字列（`'…'` と `"…"`）・ヒアドキュメントの本文を取り除く。残りで `sleep <数>` が**コマンドの位置**（行頭・`;` `&&` `\|\|` `\|` `&` `(` `do` `then` `else` の直後）にあり、次のどちらかに当たる: `while` / `until` がコマンドの位置にある / その `sleep` の秒数のどれかが上限（既定 5）を超える | 「前景で `sleep` を使って待つと、待つ呼び出しのたびに文脈を読み直す。同じ条件の until ループを `run_in_background: true` で起動し、完了通知を待つ（通知は 1 回）。出来事を 1 つずつ受けるなら `Monitor`。規約: `development-workflow/references/waiting.md`」 |
+| sleep | `run_in_background` が真でない。判定の前に `command` からコメント（引用の外の `#` 以降）・引用文字列（`'…'` と `"…"`）・ヒアドキュメントの本文を取り除く。取り除く前に、`bash -c` / `sh -c` / `zsh -c` / `eval` の実行される引数（`timeout <秒> bash -c` のように前に `timeout` / `nohup` / `env` が付く形も含む）を取り出し、その中身へ同じ判定を当てる（入れ子も同じ規則で 1 段ずつ）。残りで `sleep <数>` が**コマンドの位置**（行頭・`;` `&&` `\|\|` `\|` `&` `(` `do` `then` `else` の直後）にあり、次のどちらかに当たる: `while` / `until` がコマンドの位置にある / その `sleep` の秒数のどれかが上限（既定 5）を超える | 「前景で `sleep` を使って待つと、待つ呼び出しのたびに文脈を読み直す。同じ条件の until ループを `run_in_background: true` で起動し、完了通知を待つ（通知は 1 回）。出来事を 1 つずつ受けるなら `Monitor`。規約: `development-workflow/references/waiting.md`」 |
 | 連続 Read | 直前の Read と `key`・`size`・`mtime`・`inode` が同じで、`count + 1` が上限（既定 3）に達する | 「同じファイルの同じ範囲を、変わらないまま <n> 回続けて読もうとした。書き終わりを待つなら `until [ -s <ファイル> ]; do sleep 1; done` を `run_in_background: true` で起動するか、背景の処理の完了通知を待つ。サブエージェントの `tasks/*.output` は読まずに完了通知を待つ。規約: 同上」 |
-| 文脈量 | 工程 Skill で、conductor で、文脈量が上限（既定 200,000）を超え、案内の印が同じ `skill`・`args` を持たない | 「文脈が <n> で上限 <limit> を超えた。この工程は新しい会話で始める。利用者へ次の 1 行を示して応答を終える: `/ndf:development-workflow <課題>`。このまま続けると利用者が決めたら、同じ Skill を同じ引数でもう一度起動すると 1 度だけ通る。規約: `context-window.md`」 |
+| 文脈量 | 工程 Skill で、conductor で、文脈量が上限（既定 200,000）を超え、案内の印が同じ `skill`・`args` を持たない（印は次の工程 Skill の起動まで残り、間の他のツールでは消えない） | 「文脈が <n> で上限 <limit> を超えた。この工程は新しい会話で始める。利用者へ次の 1 行を示して応答を終える: `/ndf:development-workflow <課題>`。このまま続けると利用者が決めたら、同じ Skill を同じ引数でもう一度起動すると 1 度だけ通る。規約: `context-window.md`」 |
 
 **`<課題>` は次の順で決める。** 先に当たったものを使う。
 
@@ -239,7 +240,7 @@ sequenceDiagram
   alt 入力が読めない・jq が無い・該当の NDF_*_GUARD=0
     H-->>A: 何も出さず 0（通す）
   else tool_name = Bash
-    H->>H: 背景か / コメント・引用・ヒアドキュメントを除く / コマンドの位置の sleep の秒数と while・until
+    H->>H: 背景か / -c・eval の中身を取り出し同じ判定 / コメント・引用・ヒアドキュメントを除く / コマンドの位置の sleep の秒数と while・until
     H-->>A: 当たれば拒否（待ち方の案内）
   else tool_name = Read
     H->>S: 控えを読む・ファイルの size と mtime と inode を取る
@@ -248,7 +249,7 @@ sequenceDiagram
   else tool_name = Skill
     H->>H: 工程 Skill か / サブエージェントか
     H->>S: transcript の末尾から文脈量を読む
-    H->>S: 案内の印を読む
+    H->>S: 案内の印を読む（間の他のツールでは消えない）
     alt 印が同じ skill・args を持つ
       H->>S: 印を消す
       H-->>A: 何も出さず 0（1 度だけ通す）
@@ -303,6 +304,11 @@ hook の入口・登録・状態の置き場所・拒否の返し方が同じで
 
 文字列やコメントの中の `sleep` は数えない。`echo sleep 30` や `git commit -m "sleep 60"` を止めないよう、
 引用・コメント・ヒアドキュメントを除いた後の語の位置で判定する。
+
+ただし引用を取り除く前に、`bash -c` / `sh -c` / `zsh -c` / `eval` の実行される引数を取り出す。
+前に `timeout` / `nohup` / `env` が付く形（`timeout 590 bash -c "..."`）も含める。
+取り出した中身へ同じ判定を当て、入れ子も同じ規則で 1 段ずつ見る。
+引用の中身は実行されるため、除くだけだと `bash -c 'sleep 30'` を見逃す。
 
 ループの中の `sleep` を通すと、費用の大半を見逃す。2026-08-23 以降の全プロジェクトの記録
 （6,713 本、Bash 74,223 件）では、`sleep <数>` を含む前景の Bash は次のとおりだった。
@@ -362,12 +368,13 @@ supervisor は 1 つの持ち場の中で複数の工程を通すため、工程
 （`markdown-writing` / `progress-tracking` など）の起動で止める形も採らない。工程の途中で起動
 されるため、切れ目にならない。
 
-### 決定 7: 文脈量の案内は工程 Skill の起動ごとに 1 度拒否し、直後の同じ起動だけを通す
+### 決定 7: 文脈量の案内は工程 Skill の起動ごとに 1 度拒否し、次の同じ起動だけを通す
 
 利用者が「このまま続ける」と決めたときに、環境変数を設定し直さずに続けられるようにする。
 毎回拒否する形は採らない。続けると決めた利用者が、同じ工程をやり直せなくなる。
 会話ごとに 1 度にする形も採らない。1 度通した後は、以後の工程の切れ目で止まらなくなる。
-印に `skill` と `args` を持つのは、通すのを直後の同じ起動に限るためである。
+印に `skill` と `args` を持つのは、通すのを次の工程 Skill の同じ起動に限るためである。
+間のツールで印を失効させる形は採らない。hook は Edit などを見ないため、失効の条件を一貫して判定できない。
 拒否せずに案内だけを足す形（`additionalContext`）も採らない。#827 の実測で、`context-window.md`
 に書いた規定は守られていなかった。1 度は止めないと、案内は読み流される。
 
@@ -401,17 +408,17 @@ supervisor は 1 つの持ち場の中で複数の工程を通すため、工程
 | 受け入れ条件 | 何で確かめるか |
 | --- | --- |
 | AC1〜AC4 | 文書の検査（`test_token_guard.py`）: `waiting.md` があり、許す待ち方の節が `Monitor` と `run_in_background` を挙げる。`agent-layers.md` の supervisor と worker の規則が `waiting.md` を参照する。`waiting.md` と `agent-layers.md` のコード例に、前景の `while` / `until` と `sleep` を組み合わせた Claude Code 向けの例が無い |
-| AC5 | 単体: `sleep 30 && tail -5 x.log`・`while ! test -s x; do sleep 5; done`・`until ...; do sleep 1; done` で deny と理由の欄に `run_in_background` と `waiting.md` |
-| AC6 | 単体: `run_in_background: true` の `sleep 30 && tail`・`python3 -m http.server & sleep 2`・`for p in 1 2; do gh api ...; sleep 1; done`・`echo sleep 30`・`git commit -m "sleep 60"`・`# sleep 30` のコメント行・`echo "while x; do sleep 9; done"`・`tool_name: Monitor` で出力なし |
+| AC5 | 単体: `sleep 30 && tail -5 x.log`・`while ! test -s x; do sleep 5; done`・`until ...; do sleep 1; done`・`bash -c 'sleep 30'`・`timeout 590 bash -c "until [ -s f ]; do sleep 5; done"`・`sh -c 'until test -s x; do sleep 1; done'` で deny と理由の欄に `run_in_background` と `waiting.md` |
+| AC6 | 単体: `run_in_background: true` の `sleep 30 && tail`・`python3 -m http.server & sleep 2`・`for p in 1 2; do gh api ...; sleep 1; done`・`echo sleep 30`・`git commit -m "sleep 60"`・`# sleep 30` のコメント行・`echo "while x; do sleep 9; done"`・`cat <<'EOF'`〜`sleep 60`〜`EOF` のヒアドキュメント・`tool_name: Monitor` で出力なし |
 | AC7 | 単体: 一時ファイルに対し Read を 3 回 → 3 回目で deny。2 回目の後にファイルへ追記 → 数え直し。`offset` を変える → 数え直し。同じ大きさの内容で置き換えた（`mv`）ファイル → 数え直し |
 | AC8 | AC5〜AC7 のテストが `uv run --with pytest pytest plugins/ndf/scripts/tests/test_token_guard.py -q` で通る |
 | AC9 | 単体: 壊れた JSON・`jq` を外した `PATH`・書けない `XDG_STATE_HOME` で、出力なしと終了コード 0 |
-| AC10 | 単体: `NDF_SLEEP_GUARD=0` と `NDF_READ_REPEAT_GUARD=0` で、それぞれの拒否だけが消える |
+| AC10 | 単体: `NDF_SLEEP_GUARD=0` と `NDF_READ_REPEAT_GUARD=0` で、それぞれの拒否だけが消える。閾値: `NDF_SLEEP_MAX_SEC=30` で `sleep 10` は出力なし・`sleep 40` は deny、`NDF_READ_REPEAT_LIMIT=2` で 2 回目に deny、`NDF_CONTEXT_LIMIT=300000` で文脈量 250,000 は出力なし |
 | AC11 | 実機: サブエージェントの中で `codex exec` を `run_in_background` で起動し、他の作業が無いまま応答を終える。ターンを終えずに次の段へ進んだことを、そのサブエージェントの記録で確かめて #829 に残す |
 | AC12 | 単体: 文脈量 250,000 の transcript の見本と `tool_input.skill: "ndf:design"`、`args: "#829"` で deny と理由の欄に `/ndf:development-workflow #829` |
 | AC13 | 単体: 同じ入力に `agent_id` を足す、または `transcript_path` を `/subagents/` の下にする → 出力なし |
 | AC14 | 単体: `ndf:markdown-writing` → 出力なし。`token-guard-stages.txt` の名前が `SKILL.md` の工程表の Skill の列と一致することを文書テストで確かめる |
-| AC15 | 単体: 同じ `session_id` で 1 回目 deny → 同じ skill・args で 2 回目は出力なし → 3 回目の別の工程 Skill（例 `ndf:pr`）で再び deny。`NDF_CONTEXT_GUARD=0` で 1 回目も出力なし |
+| AC15 | 単体: 同じ `session_id` で 1 回目 deny → 同じ skill・args で 2 回目は出力なし → 3 回目の別の工程 Skill（例 `ndf:pr`）で再び deny。拒否の後に Bash と Read を挟んでも、次の同じ起動は通る。`NDF_CONTEXT_GUARD=0` で 1 回目も出力なし |
 | AC16 | 単体: `transcript_path` が無い・`usage` の無い記録 → 出力なし |
 | AC17 | AC12〜AC16 のテストが通る |
 | AC18 / AC19 | 文書の検査: `SKILL.md` に 1 行を出す規約があり、`context-window.md` に戻す手順の表がある |
