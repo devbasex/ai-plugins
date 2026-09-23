@@ -218,16 +218,27 @@ function claude {
 | 2 | `rc-added` の各パスのうち、今もそのファイルに囲みがあり、`rc-noticed` にも `rc-user` にも無いものが無い | 何もしない |
 | 3 | 上に当たるパスがある | そのパスを `rc-noticed` に足し、`{"systemMessage": "ndf-relay: <パス> の alias claude は 10.17.4 が自動で足したもの。使い続けるなら何もしなくてよい。外すなら /ndf:install-wrapper uninstall"}` を出す（パスが 2 つなら 1 行に並べる） |
 
-**版の比べ方:** 版は `<プラグインのルート>/.claude-plugin/plugin.json` の `version` を読む（`relay.py` の
-1 つ上のディレクトリがルート）。形は `X.Y.Z` か `X.Y.Z-dev.N` で、数を順に比べ、同じ `X.Y.Z` では
+**版の比べ方:** 版は `<プラグインのルート>/.claude-plugin/plugin.json` の `version` を読む（ルートは `relay.py` の 2 つ上、つまり `scripts/` の親。
+hook は `$ROOT/scripts/relay.py` を呼ぶ）。形は `X.Y.Z` か `X.Y.Z-dev.N` で、数を順に比べ、同じ `X.Y.Z` では
 `-dev.N` を付かないものより前に置く。写しの版が無い・読めないときは置き直す。自分の版が読めない
 ときは置き直さない。
 
 **`startup` が書くのは、在る写し・写しの版・旧い写しの置き直しと、状態の親の `rc-noticed` だけである。**
 シェルの設定・中継の rc・読み込み先のファイルは書かない。例外はすべて捕まえて終了コード 0 で終わる。
-**判定 0a〜3 は `install.lock` の中で行う**（2 秒まで待ち、取れなければ何もせず終わる）。同じ HOME の
-2 つの起動が同時に来ても、`rc-noticed` の読み書きが重ならず、知らせは 1 度だけになる。取れなかった
-起動では知らせず、次の起動で改めて判定する。
+**ロックは 2 つに分ける。** 写しと写しの版はコンテナの間で共有されるので、その親の `<親>/copy.lock` の
+中で扱う。状態の親の `install.lock` はコンテナごとで、共有される写しを守れない（レビューの指摘）。
+
+| ロック | 置き場所 | 中で行うこと | 取れないとき |
+| --- | --- | --- | --- |
+| `copy.lock` | `<親>/`（共有） | 判定 0a（写しの版を読み直し、比べ、写しと写しの版を置き換える）と、`install` の E3・`uninstall` の U4 の写しと写しの版 | 2 秒まで待ち、取れなければ置き直さない |
+| `install.lock` | 状態の親（コンテナごと） | 判定 0b〜3 と、`install`・`uninstall` のシェルの設定と記録 | 2 秒まで待ち、取れなければ何もせず終わる |
+
+**版の比較から置き換えまでを `copy.lock` の中で続けて行う。** 比べた後に別のコンテナが新しい写しを
+置いても、古い側は置き換える前に同じロックで待つので、読み直した版で比べ直す。devbase のコンテナは
+同じ Docker ホストのカーネルの上で名前付きボリュームを共有するので、`flock` がコンテナの間で効く
+（実装の時点で 2 つのコンテナから確かめる）。同じ HOME の 2 つの起動が同時に来ても、`rc-noticed` の
+読み書きは `install.lock` で重ならず、知らせは 1 度だけになる。取れなかった起動では知らせず、次の
+起動で改めて判定する。
 
 **hook の定義**（`matcher: startup` の最後の 1 件を外し、`matcher: startup|resume` の新しい 1 件として置く。`claude -c` / `--resume` の起動でも写しを置き直すためである。`timeout` 5・`continueOnError: true`）:
 
@@ -436,7 +447,7 @@ devbasex/devbase#253 が入る前の devbase では、`install` は囲みを使�
 | --- | --- |
 | AC1 | `claude.json` の SessionStart に `install` が無いこと（hook の定義を読む単体テスト）と、一時の HOME で `startup` の hook のコマンドをそのまま動かして、設定の中身と更新時刻が変わらず、写しが無ければ作られないこと |
 | AC2 | `git diff origin/develop -- plugins/ndf/hooks/codex.json plugins/ndf/dev.agy plugins/ndf/dev.kiro` が空 |
-| AC3〜AC5 | `test_relay.py`: bash / zsh（`ZDOTDIR`）で囲み・バックアップ・行が出る。写し・写しの版・中継の rc が `CLAUDE_CONFIG_DIR` の下にでき、囲みの中は中継の rc を読む 1 行で、中継の rc の alias は `"$HOME/..."` の形で写しを指す。2 回目は何も足さない。10.17.4 の囲み（alias を直に持つ）があれば、バックアップの後に囲みの中だけが置き換わり、囲みの外はバイトで同じ。写しを消すと、中継の rc を読んだシェルの `claude` が素の `claude` を起こす（試験用の `claude` を PATH に置く）。先に `alias claude='claude --x'` を定義した rc の後に中継の rc を読むと、`--x` が中継へ渡る。閉じの無い囲み・引用できないパスで何も書かず終了コード 1。`rc-added` があっても足し、`rc-added` を残したまま `rc-user` に足す。既存の alias / 関数 / `~/.bash_aliases`・fish で足さず終了コード 1。E5 の空行を 1 つだけ挟む |
+| AC3〜AC5 | `test_relay.py`: bash / zsh（`ZDOTDIR`）で囲み・バックアップ・行が出る。写し・写しの版・中継の rc が `CLAUDE_CONFIG_DIR` の下にでき、囲みの中は中継の rc を読む 1 行で、中継の rc の `function claude` は `"$HOME/..."` の形で写しを指す。2 回目は何も足さない。10.17.4 の囲み（alias を直に持つ）があれば、バックアップの後に囲みの中だけが置き換わり、囲みの外はバイトで同じ。写しを消すと、中継の rc を読んだシェルの `claude` が素の `claude` を起こす（試験用の `claude` を PATH に置く）。先に `alias claude='claude --x'` を定義した rc の後に中継の rc を読むと、`--x` が中継へ渡る。閉じの無い囲み・引用できないパスで何も書かず終了コード 1。`rc-added` があっても足し、`rc-added` を残したまま `rc-user` に足す。既存の alias / 関数 / `~/.bash_aliases`・fish で足さず終了コード 1。E5 の空行を 1 つだけ挟む |
 | AC6 | `test_relay.py`: 両方のファイルの囲み（複数を含む）を外し、囲みの外がバイトで同じ。片方のファイルに閉じの無い囲みがあれば、どちらのファイルも写しも記録も変えず終了コード 1。中継の rc・写しの版・写し・旧い写しと `rc-skipped` / `rc-noticed` の行が消え、`rc-added` には外したパスが残る。10.17.4 の `install` で作った状態（`rc-added` あり）から外れる |
 | AC7 | `test_relay.py`: 各状態で出す行と、何も書かないこと（前後のファイルの比較） |
 | AC8・AC16 | manifests と `check-skill-frontmatter.py`。`install-wrapper` に `disable-model-invocation: true`、`restart` に無いこと |
@@ -445,7 +456,7 @@ devbasex/devbase#253 が入る前の devbase では、`install` は囲みを使�
 | AC11 | `test_relay.py`: 中身の違う写し・旧い写しのそれぞれを `startup` が今の版で置き直し、無い方は作らない。置き直しの後も設定ファイルは変わらない |
 | AC27 | 設計の文書の「置き場所」の実測と、`test_relay.py`（`CLAUDE_CONFIG_DIR` の有無で写しと中継の rc のパスが変わる。パスに `'` があれば何も書かず終了コード 1） |
 | AC28 | `test_relay.py`: `DEVBASE_SHELLRC_DIR` に一時のディレクトリを置くと、`ndf-relay.sh` ができ、`~/.bashrc`・`.zshrc` の中身と更新時刻は変わらない。10.17.4 の囲みが残っていれば、その中だけが読み込みの行へ置き換わる。`uninstall` で `ndf-relay.sh` が消える。状態の親を消しても（作り直しの模擬）何も出ず、`bash --rcfile` で読ませたシェルの `type claude` が中継の rc の関数を示す |
-| AC29 | `test_relay.py`: 写しの版に新しい版を書いた写しへ、古い版のプラグインのルートから `startup` を動かしても写しが変わらない。写しの版が無い・読めないときは置き直す。`-dev.N` の付いた版は同じ `X.Y.Z` の正式版より古いとして比べる |
+| AC29 | `test_relay.py`: 写しの版に新しい版を書いた写しへ、古い版のプラグインのルートから `startup` を動かしても写しが変わらない。状態の親を別々にした（2 つのコンテナの模擬）新旧 2 つの `startup` を同時に走らせても、写しと写しの版は新しい版で終わる。写しの版が無い・読めないときは置き直す。`-dev.N` の付いた版は同じ `X.Y.Z` の正式版より古いとして比べる |
 | AC12〜AC15 | `restart/SKILL.md` を読んで確かめる（文言を固定するテストは書かない）と AC21 |
 | AC17〜AC19 | [issue-928-design-injection.md](issue-928-design-injection.md) の実測の表・不変条件の節と、起票した課題 |
 | AC23 | `test_relay.py`: 印があって静まっても `question` がある間は子へ何も届かない。`question close` の後に Stop（印の書き直し）で切り替わる。`mark` が `question` を消す |
@@ -465,6 +476,7 @@ devbasex/devbase#253 が入る前の devbase では、`install` は囲みを使�
 | macOS | `uninstall` の置き換えと権限の保持は Linux でだけ確かめる |
 | devbase 以外の永続化 | 写しを `~/.claude` の下に置けば残ることは devbase でだけ確かめた。ほかの環境で `~/.claude` を作り直す運用は想定しない |
 | zsh での関数の形 | `function claude { ... }` が先の alias と組み合わさることは bash でだけ確かめた。zsh は実装の時点で確かめる |
+| コンテナの間の `flock` | 名前付きボリューム上の `copy.lock` の `flock` が 2 つのコンテナの間で効くかは、実装の時点で devbase の 2 つのコンテナから確かめる。効かなければ置き換えを `rename` の原子性だけに頼り、後退を防ぐのは比較だけになる |
 | devbase の読み込み先の名前 | `DEVBASE_SHELLRC_DIR` と `~/.shellrc.d/*.sh` は devbasex/devbase#253 で出した案である。devbase が別の名前を選べば、実装の持ち場が E1・U1 の変数名を合わせる |
 | hook の待ちの中で書いた `/exit` | 中継がロックを持つ間に質問の hook が待つと、書いた `/exit` は hook の実行中に届き、質問の前に claude を終わらせる（実測。答えは残らない）。関門は答えられないが、その質問は失われる。**質問の `tool_use` の行が `PreToolUse` の hook より前に会話の記録へ書かれるかは確かめていない。** 書かれるなら G3 の段 3 の記録の大きさの確かめで書かずに戻れる。実装の時点で本物の記録で確かめる |
 | 再開用のコマンドの中身 | 引数なしの再開用のコマンドを定型（`/goal ...` の入力そのもの・番号とパスと URL だけの 1 文）に限ったが、守るのはモデルで、機械の検査は無い。引数で渡された中身は利用者の入力として扱い、検査しない |
