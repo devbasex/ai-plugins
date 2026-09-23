@@ -107,6 +107,13 @@ DENY_SLEEP = [
     "sleep 30 >&2",
     "nohup sleep 30",
     "echo a; bash -c 'sleep 30'",
+    # 囲みの複合コマンドが前景のまま待つ形
+    "(sleep 30)",
+    "{ sleep 30; }",
+    "(sleep 30) && echo",
+    "while test ! -s f; do sleep 1; done; echo x",
+    "{ sleep 30; (x) & }",
+    "(sleep 30);(x) &",
 ]
 
 ALLOW_SLEEP = [
@@ -133,6 +140,14 @@ ALLOW_SLEEP = [
     "sleep 30 >>x 2>&1 & echo started",
     "echo bash -c 'sleep 30'",
     "printf '%s' eval sleep 30",
+    # sleep を囲む複合コマンドや and-or リスト全体が末尾の & で背景になる形
+    "(sleep 30) &",
+    "(sleep 30)&",
+    "{ sleep 30; } &",
+    "while test ! -s f; do sleep 1; done &",
+    "if true; then sleep 30; fi &",
+    "( (sleep 30) ) & echo started",
+    "sleep 30 && echo x &",
 ]
 
 
@@ -518,7 +533,7 @@ def test_context_agent_once_then_pass(tmp_path, state):
     assert denied(run(agent(tp, desc="実装: #829"), state))
 
 
-@pytest.mark.parametrize("desc", ["設計: v10.16.1 のリリース作業", "実装: リリース 2.0.3"])
+@pytest.mark.parametrize("desc", ["設計: v10.16.1 のリリース作業", "実装: リリース 2.0.3", "設計: 2026-09-23 の作業"])
 def test_context_version_is_not_issue_number(tmp_path, state, desc):
     # 版数・小数を課題番号と読まない。番号が無ければ <課題番号> へ落ちる
     tp = transcript(tmp_path, 250_000)
@@ -535,6 +550,13 @@ def test_context_agent_bare_issue_number_is_normalized(tmp_path, state, desc):
     session = "sbare" + desc[:1]
     reason = denied(run(agent(tp, desc=desc, session=session), state))
     assert reason and "/ndf:development-workflow #829" in reason
+
+
+def test_context_date_is_not_issue_number(tmp_path, state):
+    # ハイフン区切りの日付を #2026 #09 #23 と読まず、# 付きの番号だけを示す
+    tp = transcript(tmp_path, 250_000)
+    reason = denied(run(agent(tp, desc="設計: 2026-09-23 の作業 #844", session="sdate"), state))
+    assert reason and "/ndf:development-workflow #844（" in reason
 
 
 def test_context_guard_env(tmp_path, state):

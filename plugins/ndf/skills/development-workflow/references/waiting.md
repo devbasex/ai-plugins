@@ -68,7 +68,7 @@
 | 連続 Read | 同じ `file_path`・`offset`・`limit` の Read が、ファイルの大きさ・更新時刻・inode が変わらないまま上限の回数に達する | `NDF_READ_REPEAT_GUARD=0` | `NDF_READ_REPEAT_LIMIT`（既定 3） |
 
 - **止めないもの:** `run_in_background: true` の Bash、`Monitor` の中の `sleep`、ループの本体の
-  外の上限以下の `sleep`、`for` のループの中の上限以下の `sleep`、同じコマンドの末尾が `&` のバックグラウンドの `sleep`（`sleep 30 >/tmp/x &` のようにリダイレクトを挟んでもよい。`2>&1` / `&>` の `&` は背景と読まない）
+  外の上限以下の `sleep`、`for` のループの中の上限以下の `sleep`、末尾の `&` でバックグラウンドになる `sleep`（`sleep 30 >/tmp/x &` のようにリダイレクトを挟んでもよい。`sleep 30 && echo x &` のようなリストや、`(sleep 30) &`・`{ sleep 30; } &`・`while ...; do sleep 1; done &` のように sleep を囲む複合コマンドの全体が背景になる形も含む。`2>&1` / `&>` の `&` は背景と読まない）
 - **判定が失敗したときは止めない**（入力が読めない・`jq` や `python3` が無い・控えを書けない）
 - 同じ hook が、文脈が上限を超えた conductor の工程の起動も止める（[context-window.md](context-window.md)
   の「上限を超えたら hook が止める」）

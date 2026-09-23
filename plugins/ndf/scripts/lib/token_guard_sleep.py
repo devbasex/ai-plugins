@@ -5,8 +5,10 @@
 
 拒否するのは、コマンドの位置にある `sleep <引数>` が次のどちらかに当たるときだけである。
 `&` で終わる（バックグラウンドで動く）`sleep` は前景を待たせないため見ない。`&` の判定は
-sleep の引数の後ろから次のコマンド境界までを見る（`sleep 30 >/tmp/x &` も背景）。リダイレクトの
-`>&` / `2>&1` / `&>` の `&` は背景と読まない。
+sleep の引数の後ろから、sleep を含むリスト（`&&` / `||` / `|` でつながる範囲）の終わりまでを見る
+（`sleep 30 >/tmp/x &` も背景）。sleep を囲む `( )` / `{ }` / ループ / `if` があれば、その閉じの
+後ろの `&` まで見る（`(sleep 30) &`・`while ...; do sleep 1; done &` も背景）。リダイレクトの
+`>&` / `2>&1` / `&>` の `&` は背景と読まない。字句による近似で、`case` の囲みは数えない。
 
 - `while` / `until` のループの本体（`do` と対応する `done` の間）にある（秒数が変数でも止める）
 - 秒数が数で、上限を超える
@@ -30,6 +32,9 @@ WRAPPERS = {"exec", "command", "nohup", "env", "nice", "timeout"}
 # 引数を取る shell のオプション（`-o` / `+O` と、末尾が o / O の結合形 `-euo`）。引数を読み飛ばして `-c` を探す
 SHELL_OPT_WITH_ARG = re.compile(r"[-+][A-Za-bd-z]*[oO]")
 ASSIGN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(\[[^]]*\])?\+?=")
+# 複合コマンドを開く語・閉じる語（コマンドの位置にあるときだけ）。`( )` は区切りの文字で数える
+GROUP_OPEN = {"{", "while", "until", "for", "select", "if"}
+GROUP_CLOSE = {"}", "done", "fi"}
 HEREDOC = re.compile(r"<<(-?)\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\2")
 
 
@@ -65,15 +70,51 @@ def is_separator(tok: str) -> bool:
     return bool(tok) and all(c in ";&|()\n" for c in tok)
 
 
-def is_background(toks: list[str], j: int) -> bool:
-    """toks[j] から次のコマンド境界までに、背景実行の `&` があるか。"""
+def is_background(toks: list[str], j: int, enclosing: int) -> bool:
+    """toks[j] から sleep を含むリストの終わりまでに、背景実行の `&` があるか。
+
+    `enclosing` は sleep を囲む複合コマンド（`( )` / `{ }` / ループ / `if`）の数。囲みの中では
+    `;` で終わっても囲みの閉じまで進み、閉じの後ろの `&` を見る（`(sleep 30) &` も背景）。
+    """
+    depth, ended, cmd_pos = 0, False, False
     while j < len(toks):
-        if is_separator(toks[j]):
-            if toks[j] != "&":
-                return False
-            redirect = toks[j - 1] in (">", "<") or (j + 1 < len(toks) and toks[j + 1] == ">")
-            if not redirect:
-                return True
+        tok = toks[j]
+        if tok in ("&&", "||", "|", "|&"):
+            cmd_pos = True
+        elif is_separator(tok):
+            cmd_pos = True
+            redirect = tok == "&" and (toks[j - 1] in (">", "<") or (j + 1 < len(toks) and toks[j + 1] == ">"))
+            for c in tok:
+                if c == "(":
+                    depth += 1
+                elif c == ")":
+                    if depth:
+                        depth -= 1
+                    elif enclosing:
+                        enclosing, ended = enclosing - 1, False
+                    else:
+                        return False
+                elif depth:
+                    continue
+                elif c in ";\n":
+                    if not enclosing:
+                        return False
+                    ended = True
+                elif c == "&" and not redirect:
+                    if not ended:
+                        return True
+                    ended = True
+        else:
+            if cmd_pos and tok in GROUP_OPEN:
+                depth += 1
+            elif cmd_pos and tok in GROUP_CLOSE:
+                if depth:
+                    depth -= 1
+                elif enclosing:
+                    enclosing, ended = enclosing - 1, False
+                else:
+                    return False
+            cmd_pos = tok in OPENERS
         j += 1
     return False
 
@@ -84,6 +125,7 @@ def should_deny(text: str, limit: float, in_loop: bool = False, depth: int = 0) 
     toks = tokens(strip_heredocs(text))
     # 各要素は "cond"（while/until の条件）/ "body"（while/until の本体）/ "for" / "forbody"
     stack: list[str] = []
+    groups = 0  # いまの位置を囲む複合コマンドの数
     cmd_pos = True
     i = 0
     while i < len(toks):
@@ -91,10 +133,15 @@ def should_deny(text: str, limit: float, in_loop: bool = False, depth: int = 0) 
         at_cmd = cmd_pos
         looping = in_loop or "body" in stack
         if is_separator(tok):
+            groups = max(0, groups + tok.count("(") - tok.count(")"))
             cmd_pos = True
             i += 1
             continue
         if cmd_pos:
+            if tok in GROUP_OPEN:
+                groups += 1
+            elif tok in GROUP_CLOSE:
+                groups = max(0, groups - 1)
             if tok in ("while", "until"):
                 stack.append("cond")
             elif tok in ("for", "select"):
@@ -105,7 +152,7 @@ def should_deny(text: str, limit: float, in_loop: bool = False, depth: int = 0) 
                 stack.pop()
             elif tok == "sleep" and i + 1 < len(toks) and not is_separator(toks[i + 1]):
                 sec = seconds(toks[i + 1])
-                if (looping or (sec is not None and sec > limit)) and not is_background(toks, i + 2):
+                if (looping or (sec is not None and sec > limit)) and not is_background(toks, i + 2, groups):
                     return True
             elif tok in WRAPPERS:
                 while i + 1 < len(toks) and (toks[i + 1][:1] == "-" or seconds(toks[i + 1]) is not None):

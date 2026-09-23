@@ -160,8 +160,8 @@ guard_context() {
   fi
   [ "$total" -gt "$limit" ] || exit 0
   write_json "$mark" "$(jq -cn --arg k "$key" '{key:$k}')"
-  # 版数・小数（v10.16.1 / 2.0.3）は課題番号ではないので先に取り除く
-  issues=$(printf '%s\n' "$words" | sed -E 's/[0-9]+(\.[0-9]+)+//g' | grep -oE '(^|[^0-9A-Za-z_/])#?[0-9]+\b' \
+  # 版数・小数・日付（v10.16.1 / 2.0.3 / 2026-09-23）は課題番号ではないので先に取り除く
+  issues=$(printf '%s\n' "$words" | sed -E 's/[0-9]+([.-][0-9]+)+//g' | grep -oE '(^|[^0-9A-Za-z_/])#?[0-9]+\b' \
     | grep -oE '[0-9]+' | sed 's/^/#/' | tr '\n' ' ')
   issues=${issues% }
   deny "会話の文脈が ${total} トークンで、上限 ${limit} を超えた。この工程は新しい会話で始める。利用者へ次の 1 行を示して応答を終える: /ndf:development-workflow ${issues:-<課題番号>}（3 層で進めているなら、新しい会話で /goal に同じ 1 行を渡す）。<課題番号> のままなら、進めている課題の番号を補って示す。このまま続けると利用者が決めたら、同じ起動をもう一度行うと 1 度だけ通る。規約: ${CONTEXT_DOC}（止めるなら NDF_CONTEXT_GUARD=0、上限は NDF_CONTEXT_LIMIT）"
