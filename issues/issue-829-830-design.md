@@ -32,7 +32,7 @@ conductor はその 1 行を利用者へ示して止まる。
 
 | 要素 | 新設 / 変更 | 責務 |
 | --- | --- | --- |
-| `plugins/ndf/scripts/token-guard.sh` | 新設 | PreToolUse の入口。`tool_name` で 3 つの判定（`Bash` → sleep / `Read` → 連続 Read / `Skill`・`Agent`・`Task` → 文脈量）へ振り分け、拒否か通過を返す |
+| `plugins/ndf/scripts/token-guard.sh` | 新設 | PreToolUse の入口。`tool_name` で 3 つの判定（`Bash` → sleep / `Read` → 連続 Read / `Skill`・`Agent`・`Task` → 文脈量）へ振り分け、拒否か通過を返す。排他は既存の `scripts/lib/lock-common.sh` を読み込んで使う |
 | `plugins/ndf/scripts/lib/token-guard-stages.txt` | 新設 | 工程 Skill の名前の一覧（1 行 1 名）。下の「工程 Skill の一覧」の表の 13 個を正とする。F4 がこの一覧に無い Skill を見ない |
 | `plugins/ndf/hooks/claude.json` | 変更 | PreToolUse に matcher `Bash\|Read\|Skill\|Agent\|Task` で `token-guard.sh` を登録する |
 | `development-workflow/references/waiting.md` | 新設 | 待ち方の規約の唯一の置き場所（F1） |
@@ -69,7 +69,7 @@ graph TB
     TG["token-guard.sh"]
   end
   subgraph ST["状態"]
-    RS["連続 Read の控え<br/>#lt;wf_state_dir の親#gt;/guards/"]
+    RS["連続 Read の控えと印<br/>#lt;自前で解決した親#gt;/guards/"]
     TR["会話の記録<br/>transcript_path"]
     SL["token-guard-stages.txt"]
   end
@@ -130,27 +130,30 @@ plugins/ndf/
 
 **連続 Read の控えを、会話ごとに 1 つの小さなファイルへ持つ。** 置き場所は `guards/read-<session_id>.json`。
 
-**`guards/` の場所は、通過工程の控えの場所から決める。** `token-guard.sh` は
-`development-workflow/scripts/lib/workflow-common.sh` を読み込み、その `wf_state_dir` で
-通過工程の控えの場所を得る。使うのは `guards/` の置き場所を決めることだけで、控えの番号は読まない。解決順は次のとおりで、先に使えたものを採る。
+**`guards/` の場所は `token-guard.sh` が自前で解決する。** 次の順で先に使えたものの下に置く。
+順は `wf_state_dir` と同じで、テストが確かめる（AC9）。`workflow-common.sh` は読み込まない。末尾で通信の層まで読み込むため毎回の hook には重く、その層の変更が hook へ波及する。
 
-1. `$CLAUDE_PLUGIN_DATA/stages`
-2. `$XDG_STATE_HOME/ndf/stages`
-3. `$HOME/.local/state/ndf/stages`
-4. `${TMPDIR:-/tmp}/ndf-stages`
+1. `$CLAUDE_PLUGIN_DATA`
+2. `$XDG_STATE_HOME/ndf`
+3. `$HOME/.local/state/ndf`
+4. `${TMPDIR:-/tmp}`（このときだけ `ndf-guards` の名前で置く）
 
-`guards/` は得たディレクトリと同じ親に置く。4 番目のときは `${TMPDIR:-/tmp}/ndf-guards` に置く。
-**読み込めないときは Read と文脈量の判定を通す。** sleep の判定は状態を持たないので続ける。
+**`guards/` を作れないときは Read と文脈量の判定を通す。** sleep の判定は状態を持たないので続ける。
 
 | キー | 型 | 意味 |
 | --- | --- | --- |
 | `key` | 文字列 | 直前の Read の `file_path` と `offset` と `limit` を `\t` でつないだもの |
 | `size` | 整数 | 直前の Read の時点のファイルの大きさ（バイト）。無いファイルは `-1` |
 | `mtime` | 文字列 | 同じく更新時刻（ナノ秒の精度。GNU の `stat -c %.9Y`、BSD の `stat -f %Fm`） |
-| `inode` | 整数 | 同じく inode 番号（`stat -c %i`）。無いファイルは `-1` |
+| `inode` | 整数 | 同じく inode 番号（GNU の `stat -c %i`、BSD の `stat -f %i`）。無いファイルは `-1` |
 | `count` | 整数 | `key`・`size`・`mtime`・`inode` が変わらないまま続いた Read の回数 |
 
 - **書き込みは置き換えで行う**（一時ファイルへ書いて `mv`）。途中で落ちても壊れた JSON を残さない
+- **読み・判定・書き込みは session ごとのロック `guards/<session_id>.lock` の中で行う。** 同じ session の
+  hook が並列に走ると、置き換えだけでは `count` の更新や印が失われる。控えと印の両方に当てる
+- ロックは `lock-common.sh` の `ndf_lock_acquire <dir> 2` / `ndf_lock_release` で取る。`flock` を
+  使わない仕組みで、排他の手順はリポジトリでそこ 1 か所にある。標準出力へ書かず hook の JSON に混ざらない
+- **2 秒で取れなければ判定せず通す**（可用性。AC9 と同じ扱い）。sleep の判定はロックを取らない
 - **7 日より古い控えは、書き込みのついでに消す**（`find -mtime +7 -delete`）。会話が終わった合図を
   hook は受け取らないため
 - **文脈量の案内を出した印** は `guards/context-<session_id>.json` に、拒否した起動の鍵を持つ。
@@ -281,19 +284,24 @@ sequenceDiagram
     H->>H: 背景か / -c・eval の中身を取り出し同じ判定 / コメント・引用・ヒアドキュメントを除く / コマンドの位置の sleep の秒数と、while・until の本体にあるか
     H-->>A: 当たれば拒否（待ち方の案内）
   else tool_name = Read
+    H->>S: ロックを取る（2 秒で取れなければ通す）
     H->>S: 控えを読む・ファイルの size と mtime と inode を取る
-    H->>S: 控えを置き換える（count を進めるか 1 に戻す）
+    H->>S: 控えを置き換え（count を進めるか 1 に戻す）、ロックを放す
     H-->>A: count が上限に達すれば拒否
   else tool_name = Skill / Agent / Task
     H->>H: 工程 Skill か・先頭語が持ち場の Agent か / サブエージェントか
     H->>S: transcript の末尾から文脈量を読む
+    H->>S: ロックを取る（2 秒で取れなければ通す）
     H->>S: 案内の印を読む（間の他のツールでは消えない）
     alt 印が同じ鍵（skill・args か description）を持つ
-      H->>S: 印を消す
+      H->>S: 印を消す・ロックを放す
       H-->>A: 何も出さず 0（1 度だけ通す）
     else 上限超え
-      H->>S: 印をこの起動の鍵で置き換える
+      H->>S: 印をこの起動の鍵で置き換える・ロックを放す
       H-->>A: 拒否（1 行を示す）
+    else 上限以内
+      H->>S: ロックを放す
+      H-->>A: 何も出さず 0
     end
   end
 ```
@@ -321,7 +329,7 @@ stateDiagram-v2
 | --- | --- | --- |
 | 性能・拡張性 | 50 MB の記録でも 1 秒以内 | 記録は `tail -n 200` の範囲だけを読む。Bash と Read の判定は記録を読まない。登録の `timeout` は 5 秒 |
 | 運用・保守性 | 理由の欄だけで次の手が分かる | 理由の欄に代わりの手段と規約の場所を必ず書く（出力の表） |
-| 可用性 | hook の失敗で実行を止めない | 入力が読めない・`jq` が無い・控えが書けない・記録が読めないときは何も出さず 0。`workflow-common.sh` を読み込めないときは Read と文脈量の判定を通し、sleep の判定だけを続ける。登録に `continueOnError: true` |
+| 可用性 | hook の失敗で実行を止めない | 入力が読めない・`jq` が無い・控えが書けない・記録が読めないときは何も出さず 0。`guards/` を作れない・ロックを 2 秒で取れないときは Read と文脈量の判定を通し、sleep の判定だけを続ける。登録に `continueOnError: true` |
 
 ## 決定の記録
 
@@ -462,15 +470,15 @@ supervisor は 1 つの持ち場の中で複数の工程を通すため、工程
 | AC1〜AC4 | 文書の検査（`test_token_guard.py`）: `waiting.md` があり、許す待ち方の節が `Monitor` と `run_in_background` を挙げる。`agent-layers.md` の supervisor と worker の規則が `waiting.md` を参照する。`waiting.md` と `agent-layers.md` のコード例に、前景の `while` / `until` と `sleep` を組み合わせた Claude Code 向けの例が無い |
 | AC5 | 単体: `sleep 30 && tail -5 x.log`・`while ! test -s x; do sleep 5; done`・`until ...; do sleep 1; done`・`bash -c 'sleep 30'`・`timeout 590 bash -c "until [ -s f ]; do sleep 5; done"`・`sh -c 'until test -s x; do sleep 1; done'` で deny と理由の欄に `run_in_background` と `waiting.md` |
 | AC6 | 単体: `run_in_background: true` の `sleep 30 && tail`・`while read l; do echo "$l"; done < f; sleep 1`・`python3 -m http.server & sleep 2`・`for p in 1 2; do gh api ...; sleep 1; done`・`echo sleep 30`・`git commit -m "sleep 60"`・`# sleep 30` のコメント行・`echo "while x; do sleep 9; done"`・`cat <<'EOF'`〜`sleep 60`〜`EOF` のヒアドキュメント・`tool_name: Monitor` で出力なし |
-| AC7 | 単体: 一時ファイルに対し Read を 3 回 → 3 回目で deny。2 回目の後にファイルへ追記 → 数え直し。`offset` を変える → 数え直し。同じ大きさの内容で置き換えた（`mv`）ファイル → 数え直し |
+| AC7 | 単体: 一時ファイルに対し Read を 3 回 → 3 回目で deny。2 回目の後にファイルへ追記 → 数え直し。`offset` を変える → 数え直し。同じ大きさの内容で置き換えた（`mv`）ファイル → 数え直し。同じ session で Read の hook を 2 本並列に起動しても count が 2 進む（更新が失われない） |
 | AC8 | AC5〜AC7 のテストが `uv run --with pytest pytest plugins/ndf/scripts/tests/test_token_guard.py -q` で通る |
-| AC9 | 単体: 壊れた JSON・`jq` を外した `PATH`・書けない `XDG_STATE_HOME` で、出力なしと終了コード 0 |
+| AC9 | 単体: 壊れた JSON・`jq` を外した `PATH`・書けない `XDG_STATE_HOME` で、出力なしと終了コード 0。ロックを他が持ったまま 2 秒を超えると出力なしで 0。同じ環境変数の下で `guards/` の親が `wf_state_dir` の親と一致する（4 段それぞれ） |
 | AC10 | 単体: `NDF_SLEEP_GUARD=0` と `NDF_READ_REPEAT_GUARD=0` で、それぞれの拒否だけが消える。閾値: `NDF_SLEEP_MAX_SEC=30` で `sleep 10` は出力なし・`sleep 40` は deny、`NDF_READ_REPEAT_LIMIT=2` で 2 回目に deny、`NDF_CONTEXT_LIMIT=300000` で文脈量 250,000 は出力なし |
 | AC11 | 実機: サブエージェントの中で `codex exec` を `run_in_background` で起動し、他の作業が無いまま応答を終える。ターンを終えずに次の段へ進んだことを、そのサブエージェントの記録で確かめて #829 に残す |
 | AC12 | 単体: 文脈量 250,000 の transcript の見本と `tool_input.skill: "ndf:implementation-plan"`、`args: "#829"` で deny と理由の欄に `/ndf:development-workflow #829`。3 層: `tool_name: Agent`、`description: "設計: #829 #830"` で deny と `/ndf:development-workflow #829 #830`。args に番号が無ければ `<課題番号>` のまま（控えが複数あっても推測しない） |
 | AC13 | 単体: AC12 の Skill と Agent の入力に `agent_id` を足す、または `transcript_path` を `/subagents/` の下にする → 出力なし |
 | AC14 | 単体: `ndf:markdown-writing` と `ndf:worktree` → 出力なし。`description` の先頭語が `調査:` の Agent → 出力なし。文書テスト: `token-guard-stages.txt` の名前が設計の「工程 Skill の一覧」の 13 個と一致し、どれも `plugins/ndf/manifests/` の Skill 一覧にある |
-| AC15 | 単体: 同じ `session_id` で 1 回目 deny → 同じ skill・args で 2 回目は出力なし → 3 回目の別の工程 Skill（例 `ndf:merged`）で再び deny。拒否の後に Bash と Read を挟んでも、次の同じ起動は通る。Agent: `description: "設計: #829"` で 1 回目 deny → 同じ description で 2 回目は出力なし → 3 回目の `実装: #829` で deny。`NDF_CONTEXT_GUARD=0` で 1 回目も出力なし |
+| AC15 | 単体: 同じ `session_id` で 1 回目 deny → 同じ skill・args で 2 回目は出力なし → 3 回目の別の工程 Skill（例 `ndf:merged`）で再び deny。拒否の後に Bash と Read を挟んでも、次の同じ起動は通る。Agent: `description: "設計: #829"` で 1 回目 deny → 同じ description で 2 回目は出力なし → 3 回目の `実装: #829` で deny。`NDF_CONTEXT_GUARD=0` で 1 回目も出力なし。同じ起動の 2 回目の hook を 2 本並列に起動すると、通るのは 1 本だけ |
 | AC16 | 単体: `transcript_path` が無い・`usage` の無い記録 → 出力なし |
 | AC17 | AC12〜AC16 のテストが通る |
 | AC18 / AC19 | 文書の検査: `SKILL.md` に 4 つの切れ目と hook の拒否で conductor が 1 行を出す規約（3 層では `## 持ち場の報告` を受け取った時点。`結果: 関門` なら関門の承認と取り込みの後）があり、`context-window.md` に戻す手順の表がある |
