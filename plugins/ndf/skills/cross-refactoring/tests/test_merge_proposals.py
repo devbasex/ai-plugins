@@ -245,6 +245,30 @@ def test_non_object_proposal_result_is_treated_as_empty(
     assert len(state["items"]) == 1
 
 
+def test_invalid_json_proposal_result_is_treated_as_empty(
+    refactor, cmd_apply, tmp_path, env_tmp_dir, no_git
+):
+    """壊れた JSON の 1 者を提案なしとして、残りの提案を統合し続ける。"""
+    state_path = make_state(tmp_path, rounds=[{
+        "round": 1, "impl": "codex", "reviewers": ["agy", "kiro"],
+        "impl_model": {"requested": None, "observed": None},
+        "reviewer_models": {}, "proposed": {}, "items": [],
+        "apply": {"applied": [], "failed": []}, "fix_rounds": 0,
+        "durations": {}, "reviews": [],
+    }])
+    env_tmp_dir(state_path)
+    broken = state_path.parent / "codex-propose-rf130-r1-result.json"
+    broken.write_text("{not valid json", encoding="utf-8")
+    write_result(state_path, "agy-propose-rf130-r1", {"items": [proposal()]})
+    write_result(state_path, "kiro-propose-rf130-r1", {"items": [proposal()]})
+
+    cmd_apply.cmd_merge_proposals(type("A", (), {"id": 130})())
+
+    state = read_state(state_path)
+    assert state["rounds"][0]["proposed"].get("codex", 0) == 0
+    assert len(state["items"]) == 1
+
+
 def test_merge_proposals_is_idempotent(cmd_apply, tmp_path, env_tmp_dir, no_git):
     """同じラウンドで叩き直しても項目を二重に作らないこと。
 

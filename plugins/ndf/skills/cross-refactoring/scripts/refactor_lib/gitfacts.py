@@ -12,6 +12,7 @@ import shutil
 import signal
 import subprocess
 import time
+from dataclasses import dataclass
 from typing import Any, Optional
 
 import models as models_lib
@@ -35,6 +36,12 @@ from .vocabulary import (
 # テストの置き場所。現状固定テストが先行しているかの判定に使う。
 TEST_PATH_MARKERS = ("/test/", "/tests/", "/spec/", "/specs/", "__tests__/")
 TEST_NAME_MARKERS = (".test.", ".spec.", "_test.", "_spec.", "test_", "spec_")
+
+# 本番コードの拡張子。構造改善を飛ばしてよいかの判定（`assess`）に使う（#494）。
+CODE_EXTENSIONS = frozenset({
+    ".py", ".sh", ".bash", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".php",
+    ".rb", ".go", ".rs", ".java", ".kt", ".swift", ".c", ".h", ".cc", ".cpp", ".cs",
+})
 
 
 def safe_int(value: Any, fallback: int = 0) -> int:
@@ -173,7 +180,7 @@ def commit_test_changes(work: str, sha: str) -> dict[str, tuple[list[str], list[
     out = git_out(work, ["show", "--name-only", "--format=", sha])
     changes: dict[str, tuple[list[str], list[str]]] = {}
     for path in (out or "").splitlines():
-        if not path.strip() or not _is_test_path(path):
+        if not path.strip() or not is_test_path(path):
             continue
         before = git_out(work, ["show", f"{sha}^:{path}"]) or ""
         after = git_out(work, ["show", f"{sha}:{path}"]) or ""
@@ -182,7 +189,17 @@ def commit_test_changes(work: str, sha: str) -> dict[str, tuple[list[str], list[
     return changes
 
 
-def _is_test_path(path: str) -> bool:
+def tracked_markdown(work: str) -> list[str]:
+    """追跡している `.md` のリポジトリ相対パス（#723）。
+
+    `-z` で読む。既定の出力は ASCII 以外を含むパスを引用符と 8 進数で書き換える。
+    パターン `*.md` は `/` をまたいで一致し、下の階層の `.md` も拾う。
+    """
+    out = git_out(work, ["ls-files", "-z", "*.md"], strip=False)
+    return [p for p in (out or "").split("\0") if p]
+
+
+def is_test_path(path: str) -> bool:
     """テストの置き場所か。判定は `commit_touches_tests` と同じ印で行う。"""
     lowered = f"/{path.lower()}"
     name = lowered.rsplit("/", 1)[-1]
@@ -190,9 +207,34 @@ def _is_test_path(path: str) -> bool:
             or any(m in name for m in TEST_NAME_MARKERS))
 
 
+def production_code_changes(work: str, base: str) -> Optional[list[tuple[str, int]]]:
+    """`<base>...HEAD` の差分のうち、本番コードのファイルと変更行（追加 + 削除）を返す。
+
+    `<base>` を解けないときは `None`。**`--no-renames` を付ける。** 付けないと rename が
+    `dir/{old.py => new.py}` の形になり、拡張子で判定できない。付ければ旧パスの削除と
+    新パスの追加に分かれ、両方のパスで判定できる。`-z` は、ASCII 以外を含むパスが
+    引用符付きで出て拡張子が読めなくなるのを防ぐ。
+    """
+    out = git_out(work, ["diff", "--numstat", "-z", "--no-renames", f"{base}...HEAD"])
+    if out is None:
+        return None
+    changes: list[tuple[str, int]] = []
+    for line in out.split("\0"):
+        parts = line.split("\t")
+        if len(parts) < 3:
+            continue
+        path = parts[2]
+        if (pathlib.PurePosixPath(path).suffix.lower() not in CODE_EXTENSIONS
+                or is_test_path(path)):
+            continue
+        # バイナリは `-` になるので数えない
+        changes.append((path, sum(int(n) for n in parts[:2] if n.isdigit())))
+    return changes
+
+
 def commit_touches_tests(work: str, sha: str) -> bool:
     """コミットがテストの置き場所を触っているか。"""
-    return any(_is_test_path(p) for p in commit_files(work, sha))
+    return any(is_test_path(p) for p in commit_files(work, sha))
 
 
 def run_with_timeout(
@@ -262,6 +304,9 @@ def _kill_process_group(
 
     deadline = time.monotonic() + grace
     while time.monotonic() < deadline:
+        # 親シェルを先に回収する。回収しないとゾンビがグループに残り、
+        # 子がすべて終わっていても猶予を最後まで待つ（#883）
+        proc.poll()
         if not _process_group_alive(pgid):
             return
         time.sleep(0.2)
@@ -604,10 +649,33 @@ def _pending_drop_item_ids(state: dict[str, Any], drop_ids: list[str]) -> list[s
     ]
 
 
+@dataclass
+class _DropPlan:
+    """取り消しと積み直しの計画。`drop_items` が組み立て、実行と記録の段へ渡す。
+
+    `ordered` は取り消す範囲（新しい順）、`replay` は積み直す SHA（古い順）、
+    `owner` は `コミット → 改善項目 ID` の対応である。
+    """
+
+    pending: list[str]
+    ordered: list[str]
+    owner: dict[str, str]
+    keep_ids: list[str]
+    replay: list[str]
+
+
+def _drop_summary(
+    mode: str, dropped: list[str], reverted: int, replayed: int
+) -> dict[str, Any]:
+    """取り消しの結果の形。戻り値と `entry.drops` の記録が同じ鍵を持つ。"""
+    return {"mode": mode, "dropped": dropped,
+            "reverted": reverted, "replayed": replayed}
+
+
 def _drop_replay_plan(
     state: dict[str, Any], entry: dict[str, Any], pending: list[str],
     ordered: list[str],
-) -> tuple[dict[str, str], list[str], list[str]]:
+) -> _DropPlan:
     """残す項目 (`keep_ids`) と積み直す SHA (`replay`) を求める。
 
     `ordered` は新しい順なので、積み直しは反転して古い順にする。
@@ -622,33 +690,30 @@ def _drop_replay_plan(
         and not (find_item(state, i, required=False) or {}).get("reverted")
     ]
     replay = [s for s in reversed(ordered) if owner.get(s) in keep_ids]
-    return owner, keep_ids, replay
+    return _DropPlan(pending, ordered, owner, keep_ids, replay)
 
 
-def _dry_run_drop_plan(
-    pending: list[str], ordered: list[str], replay: list[str]
-) -> dict[str, Any]:
+def _dry_run_drop_plan(plan: _DropPlan) -> dict[str, Any]:
     """dry-run 時の出力と戻り値を作る。実際の revert/cherry-pick は行わない。"""
-    for sha in ordered:
+    for sha in plan.ordered:
         info(f"（dry-run）git revert --no-edit {sha}")
-    for sha in replay:
+    for sha in plan.replay:
         info(f"（dry-run）git cherry-pick {sha}")
-    return {"mode": "item", "dropped": pending,
-            "reverted": len(ordered), "replayed": len(replay)}
+    return _drop_summary("item", plan.pending, len(plan.ordered), len(plan.replay))
 
 
 def _execute_drop_replay(
-    work: str, ordered: list[str], head: Optional[str], replay: list[str],
+    work: str, plan: _DropPlan, head: Optional[str],
 ) -> tuple[dict[str, str], str]:
     """範囲を取り消して残す項目を積み直す。積み直しに失敗したら round モードへ退避する。
 
     戻り値は `(mapping, mode)`。`mapping` は積み直し後の SHA 対応
     （`round` モードでは空）。
     """
-    _revert_range(work, ordered, head)
+    _revert_range(work, plan.ordered, head)
     # 取り消しが済んだ地点。積み直しに失敗したらここへ戻せばよい。
     reverted_head = git_out(work, ["rev-parse", "HEAD"])
-    mapping = _replay_commits(work, replay)
+    mapping = _replay_commits(work, plan.replay)
     if mapping is None:
         info("⚠ 残す項目を積み直せませんでした。このラウンドは全件取り消します")
         # **着手前まで戻して取り消しをやり直さない。** 同じ範囲に対する取り消しが
@@ -661,38 +726,33 @@ def _execute_drop_replay(
 def _record_drop_result(
     state: dict[str, Any],
     entry: dict[str, Any],
-    pending: list[str],
-    keep_ids: list[str],
-    ordered: list[str],
-    replay: list[str],
-    owner: dict[str, str],
+    plan: _DropPlan,
     mapping: dict[str, str],
     mode: str,
 ) -> dict[str, Any]:
     """item の reverted/commits と entry.drops を更新し、結果を返す。"""
     scoped = scoped_item_ids(entry)
-    dropped = list(scoped) if mode == "round" else pending
+    dropped = list(scoped) if mode == "round" else plan.pending
     for item_id in scoped:
         item = find_item(state, item_id, required=False)
         if item is None:
             continue
-        if mode == "round" or item_id not in keep_ids:
+        if mode == "round" or item_id not in plan.keep_ids:
             item["reverted"] = True
             continue
         # **積み直しで SHA が変わる。** 記録を更新しないと、次の取り消しが
         # 履歴に無い SHA を指してしまう。
-        item["commits"] = [mapping[s] for s in replay if owner.get(s) == item_id]
+        item["commits"] = [mapping[s] for s in plan.replay if plan.owner.get(s) == item_id]
 
     entry.setdefault("drops", []).append({
-        "at": statefile.now(), "mode": mode, "dropped": dropped,
-        "reverted": len(ordered), "replayed": len(mapping),
+        "at": statefile.now(),
+        **_drop_summary(mode, dropped, len(plan.ordered), len(mapping)),
     })
     info(
-        f"↩ 取り消し {len(ordered)} コミット / 積み直し {len(mapping)} コミット"
+        f"↩ 取り消し {len(plan.ordered)} コミット / 積み直し {len(mapping)} コミット"
         f"（{'ラウンド全件へ退避' if mode == 'round' else '項目単位'}）"
     )
-    return {"mode": mode, "dropped": dropped,
-            "reverted": len(ordered), "replayed": len(mapping)}
+    return _drop_summary(mode, dropped, len(plan.ordered), len(mapping))
 
 
 def _drop_legacy_by_item(
@@ -707,8 +767,7 @@ def _drop_legacy_by_item(
     reverted = 0
     for item_id in pending:
         reverted += revert_item_commits(state, find_item(state, item_id), dry_run)
-    return {"mode": "item", "dropped": pending,
-            "reverted": reverted, "replayed": 0}
+    return _drop_summary("item", pending, reverted, 0)
 
 
 def drop_items(
@@ -737,7 +796,7 @@ def drop_items(
     pending = _pending_drop_item_ids(state, drop_ids)
     if not pending:
         info("↩ 取り消し対象は取り消し済みです")
-        return {"mode": "skip", "dropped": [], "reverted": 0, "replayed": 0}
+        return _drop_summary("skip", [], 0, 0)
 
     head = git_out(work, ["rev-parse", "HEAD"])
     ordered = commits_in_range(work, entry.get("apply_base_sha"), head or "HEAD")
@@ -745,16 +804,14 @@ def drop_items(
         # 起点を記録していない状態ファイル（旧版）では積み直せない。
         return _drop_legacy_by_item(state, pending, dry_run)
 
-    owner, keep_ids, replay = _drop_replay_plan(state, entry, pending, ordered)
+    plan = _drop_replay_plan(state, entry, pending, ordered)
 
     if dry_run:
-        return _dry_run_drop_plan(pending, ordered, replay)
+        return _dry_run_drop_plan(plan)
 
-    mapping, mode = _execute_drop_replay(work, ordered, head, replay)
+    mapping, mode = _execute_drop_replay(work, plan, head)
 
-    return _record_drop_result(
-        state, entry, pending, keep_ids, ordered, replay, owner, mapping, mode,
-    )
+    return _record_drop_result(state, entry, plan, mapping, mode)
 
 
 def _order_newest_first(work: str, shas: list[str]) -> list[str]:

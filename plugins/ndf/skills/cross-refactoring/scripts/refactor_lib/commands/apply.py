@@ -30,6 +30,7 @@ from ..gitfacts import (
     safe_int,
     collect_commit_facts,
     commits_in_range,
+    tracked_markdown,
 )
 from ..intake import (
     IntakeScope,
@@ -41,10 +42,10 @@ from ..paths import git_out, load_state, result_path, stem_for
 from ..proposals import assign_apply_rounds, merge_proposals, merge_test_proposals
 from ..rounds import (
     TEST,
+    append_deferred_abandoned_items,
     apply_groups,
     attempt_of,
     current_group,
-    deferred_record,
     entry_kind,
     group_reopening,
     impl_for_seq,
@@ -197,6 +198,14 @@ def _update_state_from_merged_proposals(
     # 提案は読むだけなので、この時点の HEAD が着手前の状態である。
     entry["apply_base_sha"] = git_out(state["worktrees"]["work"], ["rev-parse", "HEAD"])
 
+    _next_phase_after_merge(state, entry, adopted)
+    statefile.save(path, state)
+
+
+def _next_phase_after_merge(
+    state: dict[str, Any], entry: dict[str, Any], adopted: list[dict[str, Any]]
+) -> None:
+    """統合の結果から次の局面を決める。収束したときは終了理由も確定させる。"""
     if adopted:
         state["phase"] = "apply"
     elif entry_kind(entry) == TEST:
@@ -209,7 +218,66 @@ def _update_state_from_merged_proposals(
         # 終了理由をここで確定させないと、報告が「未終了」のままになる。
         state["final"] = "no_more_proposals"
         state["ended_at"] = statefile.now()
-    statefile.save(path, state)
+
+
+def _replay_merged_proposals(
+    state: dict[str, Any], entry: dict[str, Any], kind: str
+) -> bool:
+    """統合済みラウンドの結果を再表示し、処理済みかを返す。"""
+    if entry.get("proposal_keys") is None:
+        return False
+    info(
+        f"↻ ラウンド {entry['round']} は統合済みです"
+        f"（採用 {entry.get('adopted', 0)} 件 / 見送り {entry.get('deferred', 0)} 件）"
+    )
+    for item_id in entry.get("items", []):
+        item = find_item(state, item_id, required=False)
+        if item is not None:
+            info(f"  {item_id} {item_label(item)}")
+    if not entry.get("adopted") and kind != TEST:
+        sys.exit(2)
+    return True
+
+
+def _merge_proposals_for_kind(
+    state: dict[str, Any], entry: dict[str, Any], kind: str,
+    proposals: dict[str, list[dict[str, Any]]], excluded: set[tuple[str, ...]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """ラウンドの種類に対応する方法で提案を統合する。"""
+    if kind == TEST:
+        return merge_test_proposals(
+            proposals,
+            max_items=state["max_items_per_round"],
+            excluded_keys=excluded,
+        )
+    return merge_proposals(
+        proposals,
+        threshold=state["severity_threshold"],
+        max_items=state["max_items_per_round"],
+        excluded_keys=excluded,
+    )
+
+
+def _report_merged_proposals(
+    state: dict[str, Any], entry: dict[str, Any], kind: str,
+    adopted: list[dict[str, Any]],
+) -> None:
+    """統合結果を表示し、採用 0 件なら種類に応じて終了を制御する。"""
+    info(
+        f"提案 {sum(entry['proposed'].values())} 件 → 統合 {entry['merged']} 件 → "
+        f"採用 {entry['adopted']} 件 / 見送り {entry['deferred']} 件"
+    )
+    for item_id in entry["items"]:
+        info(f"  {item_id} {_item_summary(find_item(state, item_id))}")
+    if adopted:
+        return
+    if kind == TEST:
+        # **終了ではない。** 足すべきテストが出なくなっただけで、この後に
+        # 構造改善の提案ラウンドが続く。切り替えは `advance` が行う。
+        info("テスト整備の採用 0 件のため、構造改善の提案ラウンドへ進みます")
+        return
+    info("採用 0 件のため、提案ラウンドの繰り返しを終えます")
+    sys.exit(2)
 
 
 def cmd_merge_proposals(args: argparse.Namespace) -> None:
@@ -224,51 +292,17 @@ def cmd_merge_proposals(args: argparse.Namespace) -> None:
     entry = current_round(state)
 
     kind = entry_kind(entry)
-    if entry.get("proposal_keys") is not None:
-        info(
-            f"↻ ラウンド {entry['round']} は統合済みです"
-            f"（採用 {entry.get('adopted', 0)} 件 / 見送り {entry.get('deferred', 0)} 件）"
-        )
-        for item_id in entry.get("items", []):
-            item = find_item(state, item_id, required=False)
-            if item is not None:
-                info(f"  {item_id} {item_label(item)}")
-        if not entry.get("adopted") and kind != TEST:
-            sys.exit(2)
+    if _replay_merged_proposals(state, entry, kind):
         return
 
     proposals = _load_runtime_proposals(state, entry)
 
     excluded = {item_key(d) for d in state["deferred_items"]}
-    if kind == TEST:
-        adopted, deferred = merge_test_proposals(
-            proposals,
-            max_items=state["max_items_per_round"],
-            excluded_keys=excluded,
-        )
-    else:
-        adopted, deferred = merge_proposals(
-            proposals,
-            threshold=state["severity_threshold"],
-            max_items=state["max_items_per_round"],
-            excluded_keys=excluded,
-        )
+    adopted, deferred = _merge_proposals_for_kind(
+        state, entry, kind, proposals, excluded)
 
     _update_state_from_merged_proposals(path, state, entry, adopted, deferred)
-    info(
-        f"提案 {sum(entry['proposed'].values())} 件 → 統合 {entry['merged']} 件 → "
-        f"採用 {entry['adopted']} 件 / 見送り {entry['deferred']} 件"
-    )
-    for item_id in entry["items"]:
-        info(f"  {item_id} {_item_summary(find_item(state, item_id))}")
-    if not adopted:
-        if kind == TEST:
-            # **終了ではない。** 足すべきテストが出なくなっただけで、この後に
-            # 構造改善の提案ラウンドが続く。切り替えは `advance` が行う。
-            info("テスト整備の採用 0 件のため、構造改善の提案ラウンドへ進みます")
-            return
-        info("採用 0 件のため、提案ラウンドの繰り返しを終えます")
-        sys.exit(2)
+    _report_merged_proposals(state, entry, kind, adopted)
 
 
 def _item_summary(item: dict[str, Any]) -> str:
@@ -884,6 +918,7 @@ def _collect_apply_group_facts(
 
 def _determine_apply_problem(
     ctx: _ApplyExecutionContext,
+    work: pathlib.Path,
     items: list[dict[str, Any]],
     missing: list[str],
     facts: list[dict[str, Any]],
@@ -895,7 +930,11 @@ def _determine_apply_problem(
             "（群の全項目を 1 つのコミットへまとめ、各項目へ同じ SHA を申告します）"
         )
     scope = ctx.state.get("target_scope") or []
-    return verify_apply_round(items, facts, scope)
+    # **追跡している `.md` の一覧は群ごとに 1 回だけ読む**（#723）。
+    return verify_apply_round(
+        items, facts, scope,
+        work=str(work), tracked_md=tracked_markdown(str(work)),
+    )
 
 
 def _record_apply_group_outcome(
@@ -942,7 +981,7 @@ def _verify_apply_group(
     """
     items = [find_item(ctx.state, i) for i in ctx.group["items"]]
     missing, shas, facts = _collect_apply_group_facts(ctx, commit_range, reported)
-    problem = _determine_apply_problem(ctx, items, missing, facts)
+    problem = _determine_apply_problem(ctx, commit_range.work, items, missing, facts)
     _record_apply_group_outcome(ctx, items, shas, facts, problem)
     if problem:
         return [], list(ctx.group["items"])
@@ -962,17 +1001,77 @@ def _defer_abandoned_items(state: dict[str, Any], group: dict[str, Any]) -> None
     除外の鍵は種類で変わる（改善項目は `path` + `symbol` + `smell`、テスト項目は
     `target` + `case`）。記録の形は `rounds.deferred_record` が持つ。
     """
-    already = {d.get("item_id") for d in state["deferred_items"]}
+    items = []
     for item_id in group["items"]:
         item = find_item(state, item_id, required=False)
-        if item is None or item.get("status") != "abandoned" or item_id in already:
-            continue
-        state["deferred_items"].append(deferred_record(
-            item, item_id,
-            item.get("failure_reason") or "適用結果の検証を通らなかった",
-        ))
+        if item is not None and item.get("status") == "abandoned":
+            items.append(item)
+    append_deferred_abandoned_items(
+        state, items, "適用結果の検証を通らなかった")
 
 
+
+
+def _drop_and_settle_adoption(
+    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any],
+    group: dict[str, Any], failed: list[str],
+) -> list[str]:
+    """取り消しを実行し、item・entry・group の採用状態を反映して採用 ID を返す。
+
+    `run_drop` が積み直せなかった（`mode=round`）ときは、この群の全件を捨てる。
+    **他の群には及ばない。**
+    """
+    result = run_drop(path, state, entry, failed)
+    applied = list(entry["apply"].get("applied") or [])
+    if result["mode"] == "round":
+        # 積み直せなかった。この群の全件を捨てる。**他の群には及ばない。**
+        for item_id in group["items"]:
+            it = find_item(state, item_id)
+            it["status"] = "abandoned"
+            it.setdefault(
+                "failure_reason",
+                "残す項目を積み直せなかったため、適用ラウンドごと取り消した",
+            )
+        applied = []
+        entry["apply"]["applied"] = []
+        entry["apply"]["failed"] = list(group["items"])
+    return applied
+
+
+def _settle_drop_state(
+    state: dict[str, Any], entry: dict[str, Any], group: dict[str, Any],
+    work: pathlib.Path, applied: list[str],
+) -> None:
+    """取り消し後の起点・群の状態・次 phase を確定する。"""
+    if not applied:
+        # 取り消し後の状態を新しい起点にする（叩き直しでの二重取り消しを防ぐ）。
+        entry["apply_base_sha"] = git_out(work, ["rev-parse", "HEAD"])
+        group["base_sha"] = entry["apply_base_sha"]
+        group["status"] = "dropped"
+    else:
+        group["status"] = "applied"
+    state["phase"] = phase_after_group(entry)
+
+
+def _persist_drop(
+    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any],
+    group: dict[str, Any],
+) -> None:
+    """deferred 記録・pending_drop 解除・merged_at 設定・push を永続化する。
+
+    **取り消しが済んだことを push より先に、印の解除と同じ保存で永続化する。**
+    保存せずに push して失敗すると、次の実行が適用の検証をやり直し、取り消しと
+    積み直しのコミットを「未割当」と判定して群ごと巻き込んでしまう。
+    `pending_push` は残るので、次の実行は push の再送だけを行う。
+    """
+    # 取り消した項目は「対象外」として残す。次のラウンドで同じ提案が採用され、
+    # 同じ理由で失敗するのを防ぐ。
+    _defer_abandoned_items(state, group)
+    entry["pending_drop"] = []
+    entry["apply"]["merged_at"] = statefile.now()
+    # 印は `run_drop` が立ててある。ここは保存・push・印の解除を行う
+    # （`push_with_retry_marker` が立て直しても値は変わらない）。
+    push_with_retry_marker(path, state, entry)
 
 
 def _apply_drop(
@@ -993,43 +1092,13 @@ def _apply_drop(
     処理済みガードで素通りし、**再試行できない**。逆に push まで終えるまで
     `merged_at` を立てないと、push だけ失敗したときに次の実行が適用の検証をやり直し、
     取り消しと積み直しのコミットを「未割当」と判定して群ごと巻き込む。
+
+    取り消し、状態の反映、永続化の 3 段に分ける。
     """
     work = state["worktrees"]["work"]
-    result = run_drop(path, state, entry, failed)
-    applied = list(entry["apply"].get("applied") or [])
-    if result["mode"] == "round":
-        # 積み直せなかった。この群の全件を捨てる。**他の群には及ばない。**
-        for item_id in group["items"]:
-            it = find_item(state, item_id)
-            it["status"] = "abandoned"
-            it.setdefault(
-                "failure_reason",
-                "残す項目を積み直せなかったため、適用ラウンドごと取り消した",
-            )
-        applied = []
-        entry["apply"]["applied"] = []
-        entry["apply"]["failed"] = list(group["items"])
-    if not applied:
-        # 取り消し後の状態を新しい起点にする（叩き直しでの二重取り消しを防ぐ）。
-        entry["apply_base_sha"] = git_out(work, ["rev-parse", "HEAD"])
-        group["base_sha"] = entry["apply_base_sha"]
-        group["status"] = "dropped"
-    else:
-        group["status"] = "applied"
-    state["phase"] = phase_after_group(entry)
-
-    # 取り消した項目は「対象外」として残す。次のラウンドで同じ提案が採用され、
-    # 同じ理由で失敗するのを防ぐ。
-    _defer_abandoned_items(state, group)
-    # **取り消しが済んだことを push より先に、印の解除と同じ保存で永続化する。**
-    # 保存せずに push して失敗すると、次の実行が適用の検証をやり直し、取り消しと
-    # 積み直しのコミットを「未割当」と判定して群ごと巻き込んでしまう。
-    # `pending_push` は残るので、次の実行は push の再送だけを行う。
-    entry["pending_drop"] = []
-    entry["apply"]["merged_at"] = statefile.now()
-    # 印は `run_drop` が立ててある。ここは保存・push・印の解除を行う
-    # （`push_with_retry_marker` が立て直しても値は変わらない）。
-    push_with_retry_marker(path, state, entry)
+    applied = _drop_and_settle_adoption(path, state, entry, group, failed)
+    _settle_drop_state(state, entry, group, work, applied)
+    _persist_drop(path, state, entry, group)
     return applied
 
 
@@ -1153,4 +1222,3 @@ def cmd_merge_test_judgements(args: argparse.Namespace) -> None:
             path, state, entry, current_group(entry), outcome["problem"])
 
     _apply_group_judgements(path, state, entry, group_of_round, verdicts)
-

@@ -49,6 +49,7 @@ from refactor_lib.commands.apply import (  # noqa: E402
     cmd_merge_proposals,
     cmd_next_apply_round,
 )
+from refactor_lib.commands.assess import DEFAULT_MAX_LINES, cmd_assess  # noqa: E402
 from refactor_lib.commands.converge import (  # noqa: E402
     cmd_abandon_items,
     cmd_merge_fix,
@@ -94,12 +95,8 @@ from refactor_lib.vocabulary import (  # noqa: E402
 
 # ---------------- main ----------------
 
-def main() -> None:
-    p = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    )
-    sub = p.add_subparsers(dest="cmd", required=True)
-
+def add_init_parser(sub: argparse._SubParsersAction) -> None:
+    """`init` を登録する。"""
     init = sub.add_parser(
         "init",
         help="Step 0 — ホスト確定 / 参加者の確定 / 作業ディレクトリ root / 状態初期化・再開")
@@ -163,8 +160,14 @@ def main() -> None:
                            "ラウンドが進むたびに同じコメントを編集する。"
                            "空文字を渡すと記録しない")
     init.add_argument("--baseline-test", required=True,
-                      help="着手前と各コミットで実行するテストコマンド。"
+                      help="着手前と最終ゲートで実行する全体のテスト。"
                            "振る舞い不変を示す手段が無い書き換えは構造改善ではないため必須")
+    # **群と修正コミットの検証は範囲のテストで行う**（#880）。全体テストを群ごとに
+    # 走らせると、群と修正コミットの数だけ費用が積み上がる。
+    init.add_argument("--round-test", default=None, metavar="CMD",
+                      help="群の検証と修正コミットごとに実行する範囲のテスト。"
+                           "--scope のテストの置き場所を走らせること。"
+                           "省くと --baseline-test と同じ")
     # **起動のされ方は引数で受け取る**（#436 決定 7）。環境変数や控えの読み取りは、
     # 起動元が違っても同じ値になりうる。呼ぶ側が明示すれば判定が 1 か所で済む。
     init.add_argument("--workflow-step", action="store_true", default=None,
@@ -174,6 +177,9 @@ def main() -> None:
     init.add_argument("--worktree-root", default=None)
     init.set_defaults(func=cmd_init)
 
+
+def add_id_commands(sub: argparse._SubParsersAction) -> None:
+    """提案ラウンドの番号 `id` だけを受け取る副コマンドを登録する。"""
     for name, func, help_ in (
         ("start-round", cmd_start_round,
          "Step 2 — 提案ラウンドを開く。実装担当を返す"),
@@ -191,6 +197,9 @@ def main() -> None:
         sp.add_argument("id", type=int)
         sp.set_defaults(func=func)
 
+
+def add_round_commands(sub: argparse._SubParsersAction) -> None:
+    """`id` と適用ラウンドの `round` を受け取る副コマンドを登録する。"""
     for name, func, help_ in (
         ("next-apply-round", cmd_next_apply_round,
          "Step 4 — 次の適用ラウンド（群）を開く。実装担当と対象の項目を返す"),
@@ -207,6 +216,9 @@ def main() -> None:
         sp.add_argument("round", type=int)
         sp.set_defaults(func=func)
 
+
+def add_dry_run_commands(sub: argparse._SubParsersAction) -> None:
+    """`id` / `round` に加えて `--dry-run` を受け取る副コマンドを登録する。"""
     # コミットを取り消しうる 2 つは、実行前に何が消えるかを確かめられるようにする。
     for name, func, help_ in (
         ("merge-apply", cmd_merge_apply,
@@ -221,12 +233,42 @@ def main() -> None:
                         help="取り消すコミットを表示するだけで実行しない")
         sp.set_defaults(func=func)
 
+
+def add_assess_parser(sub: argparse._SubParsersAction) -> None:
+    """`assess` を登録する。"""
+    ap = sub.add_parser(
+        "assess",
+        help="構造改善を飛ばしてよいかを差分から判定する。"
+             "終了コード 0 = 通す / 3 = 飛ばしてよい / 2 = 判定できない")
+    ap.add_argument("--base", required=True,
+                    help="起点の ref。`<base>...HEAD` の差分を見る")
+    ap.add_argument("--max-lines", type=int, default=DEFAULT_MAX_LINES,
+                    help="本番コードの変更行（追加 + 削除）がこれ以下なら飛ばしてよい "
+                         f"(default: {DEFAULT_MAX_LINES})")
+    ap.set_defaults(func=cmd_assess)
+
+
+def add_report_parser(sub: argparse._SubParsersAction) -> None:
+    """`report` を登録する。"""
     rp = sub.add_parser(
         "report", help="Step 8 — ラウンド表・項目表・見送り・指標")
     rp.add_argument("id", type=int)
     rp.add_argument("--metrics", action="store_true",
                     help="ランタイムとモデルの組で指標を集計する")
     rp.set_defaults(func=cmd_report)
+
+
+def main() -> None:
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    sub = p.add_subparsers(dest="cmd", required=True)
+    add_init_parser(sub)
+    add_id_commands(sub)
+    add_round_commands(sub)
+    add_dry_run_commands(sub)
+    add_assess_parser(sub)
+    add_report_parser(sub)
 
     args = p.parse_args()
     args.func(args)

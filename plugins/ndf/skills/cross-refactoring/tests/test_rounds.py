@@ -253,3 +253,132 @@ def test_report_says_no_record_for_an_older_state(cmd_report, tmp_path, env_tmp_
     env_tmp_dir(state_path)
     cmd_report.cmd_report(_report_args())
     assert "- 使える者: 記録なし" in capsys.readouterr().out
+
+
+# ---------- 報告の未到達分岐の固定（R2-004） ----------
+#
+# 現状固定テスト。完了報告の既存テストが通っていなかった分岐を固定する。
+# 行全体の完全一致は避け、分岐の判定に関わる値の部分だけを比較する。
+
+
+def _participants(**over):
+    """参加者の記録を組み立てるヘルパ。"""
+    base = {
+        "pool": ["claude", "codex", "kiro"], "included": [],
+        "excluded": [], "available": ["claude", "codex", "kiro"],
+        "unavailable": {}, "probe_skipped": False, "require_all": False,
+    }
+    base.update(over)
+    return base
+
+
+@pytest.mark.parametrize("probe_skipped, expected_text", [
+    (True, "確認を飛ばした（NDF_SKIP_AUTH_CHECK）"),
+    (False, "確認を通らなかった者: なし"),
+])
+def test_report_probe_skipped_vs_no_unavailable(
+    cmd_report, tmp_path, env_tmp_dir, capsys, probe_skipped, expected_text
+):
+    """R2-004(a)(b) — unavailable が空のとき probe_skipped で出力が変わる。"""
+    state_path = make_state(
+        tmp_path,
+        participants=_participants(probe_skipped=probe_skipped),
+        resume_changes=[],
+    )
+    env_tmp_dir(state_path)
+    cmd_report.cmd_report(_report_args())
+    assert expected_text in capsys.readouterr().out
+
+
+def test_report_empty_resume_changes_says_none(
+    cmd_report, tmp_path, env_tmp_dir, capsys
+):
+    """R2-004(c) — 再開で変えた値が空なら「なし」と出る。"""
+    state_path = make_state(
+        tmp_path,
+        participants=_participants(),
+        resume_changes=[],
+    )
+    env_tmp_dir(state_path)
+    cmd_report.cmd_report(_report_args())
+    assert "再開で変えた値: なし" in capsys.readouterr().out
+
+
+def test_report_resume_change_with_participants_shows_available(
+    cmd_report, tmp_path, env_tmp_dir, capsys
+):
+    """R2-004(d) — 再開で変えた値に参加者（available を持つ dict）があれば、使える者だけを出す。"""
+    state_path = make_state(
+        tmp_path,
+        participants=_participants(),
+        resume_changes=[{
+            "at": "2026-09-22T00:00:00", "field": "participants",
+            "from": {"available": ["claude", "codex"]},
+            "to": {"available": ["claude", "codex", "kiro"]},
+        }],
+    )
+    env_tmp_dir(state_path)
+    cmd_report.cmd_report(_report_args())
+    out = capsys.readouterr().out
+    assert "claude / codex → claude / codex / kiro" in out
+
+
+def test_report_shows_test_rounds_final_when_present(
+    cmd_report, tmp_path, env_tmp_dir, capsys
+):
+    """R2-004(e) — test_rounds_final があれば「テスト整備の終わり方」を出す。"""
+    state_path = make_state(
+        tmp_path,
+        test_rounds_final="max_test_rounds",
+        participants=_participants(),
+    )
+    env_tmp_dir(state_path)
+    cmd_report.cmd_report(_report_args())
+    out = capsys.readouterr().out
+    assert "テスト整備の終わり方" in out
+    assert "max_test_rounds" in out
+
+
+def test_report_item_table_shows_case_and_level_for_test_items(
+    cmd_report, tmp_path, env_tmp_dir, capsys
+):
+    """R2-004(f) — テスト整備の項目（kind=test）は case と level を項目表に出す。"""
+    test_item = {
+        "item_id": "R2-001", "round": 1, "kind": "test",
+        "path": "tests/test_init.py",
+        "target": "scripts/refactor_lib/commands/setup.py#cmd_init",
+        "case": "error", "level": "unit",
+        "rationale": "", "plan": "", "test_gap": False,
+        "estimated_diff_lines": 0, "proposed_by": ["claude"],
+        "status": "applied", "commits": ["abc"],
+    }
+    structure_item = {
+        "item_id": "R1-001", "round": 1,
+        "path": "src/foo.py", "symbol": "Foo.handle",
+        "smell": "long_method", "technique": "extract_method", "severity": "major",
+        "rationale": "", "plan": "", "test_gap": False,
+        "estimated_diff_lines": 10, "proposed_by": ["codex"],
+        "status": "done", "commits": ["def"],
+    }
+    state_path = make_state(
+        tmp_path,
+        items=[structure_item, test_item],
+        rounds=[{
+            "round": 1, "kind": "structure", "impl": "codex",
+            "impl_model": {"requested": None, "observed": None},
+            "adopted": 2,
+            "apply": {"applied": ["R1-001", "R2-001"], "failed": []},
+            "fix_rounds": 0, "reviews": [],
+        }],
+    )
+    env_tmp_dir(state_path)
+    cmd_report.cmd_report(_report_args())
+    lines = capsys.readouterr().out.splitlines()
+    # テスト項目の行で case と level が出ること
+    test_row = next(line for line in lines if "R2-001" in line)
+    assert "error" in test_row
+    assert "unit" in test_row
+    # 構造改善項目の行は smell と technique が出ること（既存動作の確認）
+    struct_row = next(line for line in lines if "R1-001" in line)
+    assert "long_method" in struct_row
+    assert "extract_method" in struct_row

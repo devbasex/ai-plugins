@@ -125,3 +125,55 @@ def test_the_workspace_and_stem_for_the_remaining_phases(tmp_path, phase: str) -
     added = [args[i + 1] for i, a in enumerate(args) if a == "--add-dir"]
     assert added == [str(tmp_path / workdir_name), str(state_path.parent)]
     assert (state_path.parent / f"{stem}-prompt.md").is_file()
+
+
+def _run_codex(tmp_path, rounds, *args):
+    state_path = make_state(tmp_path, rounds=rounds)
+    (tmp_path / "work").mkdir(exist_ok=True)
+    (tmp_path / "codex").mkdir(exist_ok=True)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    args_file = tmp_path / "args.txt"
+    stub = bin_dir / "codex"
+    stub.write_text(STUB, encoding="utf-8")
+    stub.chmod(0o755)
+    result = subprocess.run(
+        [str(LAUNCH), *args],
+        env={
+            **os.environ,
+            "CROSS_REFACTORING_TMP_DIR": str(state_path.parent),
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+            "NDF_TEST_ARGS_FILE": str(args_file),
+        },
+        capture_output=True,
+        text=True,
+    )
+    return result, state_path, args_file
+
+
+def test_apply_without_a_round_stops_when_no_round_exists(tmp_path):
+    result, state_path, args_file = _run_codex(tmp_path, [], "codex", "apply", "130")
+    assert result.returncode != 0
+    assert not args_file.exists()
+    assert not (state_path.parent / "codex-apply-r0-prompt.md").exists()
+
+
+def test_apply_without_a_round_uses_the_latest_round(tmp_path):
+    result, state_path, args_file = _run_codex(
+        tmp_path, [{"round": 1}, {"round": 2}], "codex", "apply", "130"
+    )
+    assert result.returncode == 0
+    for _ in range(200):
+        if args_file.is_file():
+            break
+        time.sleep(0.05)
+    assert args_file.exists()
+    assert (state_path.parent / "codex-apply-r2-prompt.md").is_file()
+
+
+def test_unknown_runtime_stops_before_writing_a_prompt(tmp_path):
+    result, state_path, _ = _run_codex(
+        tmp_path, [{"round": 1}], "unknown", "propose", "130", "1"
+    )
+    assert result.returncode != 0
+    assert not (state_path.parent / "unknown-propose-rf130-r1-prompt.md").exists()

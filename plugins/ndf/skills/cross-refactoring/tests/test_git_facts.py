@@ -231,6 +231,22 @@ def test_hanging_test_is_cut_off(gitfacts, work):
     assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=work).stdout.strip() == "main"
 
 
+def test_cutting_off_returns_once_the_group_is_gone(gitfacts, work):
+    """SIGTERM で子が終われば、猶予を待たずに戻る（#883）。
+
+    親シェルを回収しないとゾンビがグループに残り、猶予の 5 秒を毎回待つ。
+    """
+    import time
+
+    started = time.monotonic()
+    code, timed_out = gitfacts.run_with_timeout("exec sleep 30", str(work), 1)
+    elapsed = time.monotonic() - started
+
+    assert timed_out is True
+    assert code is None
+    assert elapsed < 2, f"打ち切りの後に猶予を待っている: {elapsed:.1f}s"
+
+
 def test_cutting_off_a_test_kills_its_children(gitfacts, work):
     """打ち切るときは**子プロセスまで**止めること。
 
@@ -248,7 +264,7 @@ def test_cutting_off_a_test_kills_its_children(gitfacts, work):
     status = gitfacts.run_test_at(str(work), sha, command, "main", timeout=1)
     assert status == "fail"
 
-    time.sleep(3)
+    time.sleep(1.5)
     assert not marker.exists(), "子プロセスが生き残って書き込んでいる"
 
 
@@ -273,7 +289,7 @@ def test_cutting_off_kills_children_that_ignore_sigterm(gitfacts, work):
 
     assert status == "fail"
     assert elapsed < 20, f"打ち切りに時間がかかりすぎている: {elapsed:.1f}s"
-    time.sleep(4)
+    time.sleep(1.5)
     assert not marker.exists(), "SIGTERM を無視する子が生き残っている"
 
 
