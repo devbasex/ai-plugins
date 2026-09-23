@@ -127,14 +127,17 @@ class FileScan:
     cwd: str = ""
 
 
-def scan_file(path: Path) -> FileScan:
-    """記録 1 件を読む。応答は message.id で重複を除き、最後の usage を取る。"""
+def scan_file(path: Path, text: str | None = None) -> FileScan:
+    """記録 1 件を読む。応答は message.id で重複を除き、最後の usage を取る。
+
+    `text` を渡すと、読み済みの本文を使ってファイルを読み直さない。
+    """
     s = FileScan()
     per_msg: dict[str, dict] = {}
     bash_cmds: dict[str, str] = {}
-    with open(path, encoding="utf-8", errors="replace") as fh:
-        lines = fh.readlines()
-    for line in lines:
+    if text is None:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    for line in text.split("\n"):
         try:
             d = json.loads(line)
         except ValueError:
@@ -236,7 +239,7 @@ def read_claude(root: Path, idle_cap: int) -> tuple[list[Session], list, dict]:
         if not is_seat and "/ai-plugins/ndf/" not in head:
             skipped["ndf の Skill が無い"] += 1
             continue
-        s = scan_file(main)
+        s = scan_file(main, head)  # 判定で読んだ本文を使い、同じファイルを 2 度読まない
         if is_seat or s.cwd.startswith("/tmp/ndf-worktrees/"):
             m = WT_RE.search(s.cwd + "/")
             if m and s.times and s.usage.calls:  # 応答の無い記録（起動に失敗した席）は数えない
