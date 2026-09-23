@@ -11,7 +11,7 @@
 
 | 課題 | この変更で行う | 行わない（理由と行き先） |
 | --- | --- | --- |
-| #882 | 継続的統合の全体テストを `-n auto` で並列に回す。案内するコマンド（`CONTRIBUTING.md`・PR テンプレート・`docs/plugin-development-guide.md`・確定仕様 2 件）を並列の形にする。並列で壊れるテストを直す | ジョブの分割（段 2）は、並列にした後の継続的統合の所要が 2 分を超えたときだけ行う |
+| #882 | 継続的統合の全体テストを `-n auto` で並列に回す。案内するコマンド（`CONTRIBUTING.md`・PR テンプレート・`docs/plugin-development-guide.md`・確定仕様 2 件）を並列の形にする。並列で壊れるテストを直す。並列にした後の継続的統合のジョブが 2 分 6 秒（テスト 1 分 53 秒）で 2 分を超えたため、ファイル単位の 2 分割（根の `conftest.py` の `SHARD_TOTAL` / `SHARD_INDEX`）とまとめジョブ `pytest` を置く（段 2） | — |
 | #884 | 競合試験の重複を共通実装への 1 通りへ寄せる。繰り返しの回数を目的に必要な数まで減らす（`test_records_at_once_never_skip_a_stage` 8 → 4 回、`test_lock_held_passes` 4 → 3 回）。`release/**` の push 契機を外し、継続的統合の 2 重実行をやめる | `bg-wait.sh` のポーリング間隔（本番のスクリプトの変更）、ロックの上限 5 秒の注入（本番のスクリプトの変更。#293 の決定に関わる）、`test_git_facts.py` の猶予待ち（#883） |
 
 ## 受け入れ条件
@@ -25,6 +25,7 @@
 | AC5 | 寄せた競合試験が、臨界区間の重なりを変更後も失敗として検出する | `ndf_lock_acquire` の排他を外した状態で `test_many_at_once_never_share_the_critical_section` が落ちることを 1 度確かめる |
 | AC6 | 減らした繰り返しのテストが、見ている不具合を変更後も検出する | 同上の手順で、対象の排他を外すと落ちることを確かめる |
 | AC7 | `release/**` からの Pull Request で `Python tests` が 1 回だけ起動する | `on.push.branches` に `release/**` が無い |
+| AC8 | 分割しても ruleset の必須の検査 `pytest` が 1 つの結果として返り、ruleset を変えずにマージできる | Pull Request の検査の一覧で `pytest` が合格し、マージ可能になる |
 
 #884 の受け入れ条件「0.5 秒以上のテストの合計が 40 秒以下」は、この変更だけでは満たさない。
 残る大口（`test_git_facts.py` 21 秒・`test_bg_wait.py` 19 秒・ロックの上限を待つテスト）は

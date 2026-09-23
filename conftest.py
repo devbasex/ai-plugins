@@ -12,6 +12,8 @@
    状態を保存するテストが、実行した人の状態ディレクトリへ要約を書かない（#662 の AC72）
 5. テストの実行中だけ監視の上限を指す環境変数（接頭辞 `MONITOR_`）を外す。上限を延ばした
    シェルから起動しても、既定値を前提にするテストが同じ結果になる（#678）
+6. `SHARD_TOTAL` と `SHARD_INDEX` が与えられたら、収集した項目をファイル単位で分け、
+   自分の分だけを残す。継続的統合がジョブを分けて回すために使う（#882）
 
 どの束のディレクトリを起点にしても読まれるよう、テストの基準のディレクトリ（rootdir）は
 根の設定ファイル（`pytest.ini`）がリポジトリの根へ固定する。
@@ -24,6 +26,7 @@ from __future__ import annotations
 import os
 import shutil
 import tempfile
+import zlib
 from pathlib import Path
 
 import pytest
@@ -122,7 +125,44 @@ def pytest_unconfigure(config) -> None:
     _saved_monitor_env.clear()
 
 
+# ジョブの分割（#882）。**分ける単位はファイルで、割り当てはパスの剰余だけで決める。**
+# 同じファイルのテストは同じジョブへ入るため、ファイル単位の前提（モジュールの読み込み・
+# 一時ディレクトリ）が割れない。偏りが出たら実測時間での割り当てへ進む。
+SHARD_TOTAL_ENV = "SHARD_TOTAL"
+SHARD_INDEX_ENV = "SHARD_INDEX"
+
+
+def _shard() -> tuple[int, int] | None:
+    """`(index, total)` を返す。指定が無ければ `None`（分けない）。"""
+    total = os.environ.get(SHARD_TOTAL_ENV, "")
+    if total == "":
+        return None
+    index = os.environ.get(SHARD_INDEX_ENV, "")
+    if not (total.isdigit() and index.isdigit() and int(index) < int(total)):
+        raise pytest.UsageError(
+            f"{SHARD_TOTAL_ENV}={total!r} / {SHARD_INDEX_ENV}={index!r}: "
+            f"0 <= {SHARD_INDEX_ENV} < {SHARD_TOTAL_ENV} の整数を指定してください"
+        )
+    return int(index), int(total)
+
+
+def _select_shard(config, items) -> None:
+    shard = _shard()
+    if shard is None:
+        return
+    index, total = shard
+    kept, dropped = [], []
+    for item in items:
+        path = Path(str(item.fspath)).resolve()
+        rel = path.relative_to(ROOT).as_posix() if path.is_relative_to(ROOT) else path.as_posix()
+        (kept if zlib.crc32(rel.encode()) % total == index else dropped).append(item)
+    if dropped:
+        config.hook.pytest_deselected(items=dropped)
+        items[:] = kept
+
+
 def pytest_collection_modifyitems(config, items) -> None:
+    _select_shard(config, items)
     bundles = {b for item in items if (b := _bundle_of(Path(str(item.fspath)))) is not None}
     missing = _missing(bundles)
     if not missing:

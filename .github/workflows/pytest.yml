@@ -27,8 +27,16 @@ on:
       - "pyproject.toml"
 
 jobs:
-  pytest:
+  # ファイル単位で 2 つのジョブへ分けて回す（#882）。割り当ては根の conftest.py が
+  # SHARD_TOTAL / SHARD_INDEX から決める。各ジョブの中は -n auto で runner のコア数だけ
+  # 並列に回す（pytest-xdist は --project が指す pyproject.toml の依存に入っている）
+  pytest-shard:
+    name: pytest (${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -36,12 +44,22 @@ jobs:
           python-version: "3.x"
       - name: Install uv
         run: python3 -m pip install --upgrade uv
-      # 起点はリポジトリの根に置き、1 回の起動で全件を回す。playwright-kit のテストは
-      # その skill の pyproject.toml が宣言する依存を使うため、--project でそこを指す。
+      # 起点はリポジトリの根に置く。playwright-kit のテストはその skill の pyproject.toml が
+      # 宣言する依存を使うため、--project でそこを指す。
       #
       # 前提のコマンドの確認と git の身元の設定は、根の conftest.py が行う。前提を
       # ワークフローの側にも置くと、増えたときに片方だけが更新される
-      #
-      # -n auto で runner のコア数だけ並列に回す（#882）。pytest-xdist は --project が指す
-      # pyproject.toml の依存に入っている
       - run: uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest pytest . -q -n auto
+        env:
+          SHARD_TOTAL: 2
+          SHARD_INDEX: ${{ matrix.shard }}
+
+  # ruleset の必須の検査は `pytest` という名前の結果を 1 つ待つ。分けたジョブの結果を
+  # ここで 1 つにまとめる。名前を変えると ruleset の変更が要る。
+  # always() で分けたジョブが落ちても走らせ、失敗・取り消しを失敗として返す
+  pytest:
+    needs: pytest-shard
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ needs.pytest-shard.result }}" = success
