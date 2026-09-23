@@ -10,7 +10,7 @@
 
 | 順 | 誰が | 何をする |
 | ---: | --- | --- |
-| 1 | 利用者 | 最初に 1 度、中継を始める（`tmux new-window -d -n ndf-relay "python3 <scripts>/relay.py run"`）。中継はセッション `work` に `NDF_RELAY_DIR` を置く |
+| 1 | 利用者 | 最初に 1 度、中継を始める（`tmux new-window -d -n ndf-relay "python3 <scripts>/relay.py run"`）。`run` は始める前に `setup` と同じ確認を行い、VS Code の統合ターミナルが tmux を開く設定が無ければ入れて、入れた内容を示す。中継はセッション `work` に `NDF_RELAY_DIR` を置く |
 | 2 | conductor（ウィンドウ 1） | 設計の関門で `AskUserQuestion` を出す。**このあいだ Stop は起きず、印は書かれない** |
 | 3 | 利用者 | 「承認」と答える |
 | 4 | conductor | 設計 Pull Request をマージし、引継ぎ文書を更新し、最後の応答に次のブロックを出して応答を終える |
@@ -40,6 +40,7 @@
 | F4 | 上限と止める手段 | 中継・利用者 |
 | F5 | 区間ごとの記録（版を含む） | 利用者・振り返り・#893 の測定 |
 | F6 | 中継の始め方と止め方の案内 | 利用者 |
+| F7 | 前提（tmux・今のペインが tmux の中・VS Code の統合ターミナルが tmux を開く設定）を確かめ、無い設定を入れ、入れた内容を示す（`relay.py setup`。`run` も始める前に同じ処理を通る） | 利用者・中継 |
 
 ## 確かめたこと（2026-09-23、Claude Code 2.1.280・tmux 3.6、別のソケットの tmux と haiku で実測）
 
@@ -52,8 +53,9 @@
 | 5 | `/exit` の送信 | 応答待ちの TUI は約 1 秒で終わる（Stop は起きない）。`remain-on-exit on` では `#{pane_dead}=1` |
 | 6 | `AskUserQuestion` | 表示中の約 40 秒、Stop は起きなかった。答えた後のターンの終わりに 1 回起きた |
 | 7 | `claude plugin` | `claude plugin update [-y] <plugin>`（TTY でなければ `-y` が必須）、`claude plugin marketplace update [name]`、`claude plugin list --json` が `id` と `version` を返す |
-| 8 | `new-window` | `-P -F '#{window_index}'` で番号を受け取れる。`-d` が無いと前面に出る |
+| 8 | `new-window` | `-P -F '#{window_index}'` で番号を受け取れる。`-d` が無いと前面に出る。`new-window -t <セッション>: -- env true \; set-option -w remain-on-exit on` を 1 回の tmux の呼び出しで打つと、すぐ終わる処理でもウィンドウが残った（5 回とも `#{pane_dead}=1`）。`-d` を付けると後ろの `set-option -w` が前面の別のウィンドウに掛かる |
 | 9 | `new-window` の実行の欄 | `--` の後に引数を 2 つ以上渡すと、tmux はシェルを通さずそのまま実行する。`'a "$(echo X)" b'` と改行を含む 1 つの引数が、置き換えられずに 1 つの引数のまま届いた（tmux 3.6）。引数が 1 つだけのときは `sh -c` に渡るため、中身の前に必ず `env` などの固定の語を置く |
+| 10 | 統合ターミナルのプロファイルの設定 | VS Code のサーバ（`~/.vscode-server/bin/<版>/out/server-main.js`）の設定の定義で、`terminal.integrated.profiles.linux` と `defaultProfile.linux` は `restricted`（信頼していないワークスペースの設定では効かない）で、適用範囲の指定が無い（Machine 設定に書ける）。今の Machine 設定は `window.title` だけを持つ |
 
 4 が「静まりを待つ」段と、`stop_hook_active` を見ない判定の理由である。2 の信頼の確認は、次の区間の
 作業ディレクトリが前の区間と同じ（信頼済み）なので当たらない。Claude Code の中から起こした tmux の
@@ -63,9 +65,9 @@
 
 | 要素 | 区分 | 責務 |
 | --- | --- | --- |
-| `plugins/ndf/scripts/relay.py` | 新設 | 中継の本体。副命令 `run`（常駐）・`stop`（停止の印を置く）・`mark`（Stop hook の本体）を持つ。標準ライブラリだけで書く |
+| `plugins/ndf/scripts/relay.py` | 新設 | 中継の本体。副命令 `run`（常駐）・`stop`（停止の印を置く）・`mark`（Stop hook の本体）・`setup`（前提の確かめと導入）を持つ。標準ライブラリだけで書く |
 | `plugins/ndf/hooks/claude.json` の `Stop` | 変える | `TMUX` があるときだけ `python3 <root>/scripts/relay.py mark` を呼ぶ 1 件を足す。既存の Slack 通知の後に置く |
-| `development-workflow/references/relay.md` | 新設 | 中継の始め方・止め方・上限・記録の読み方・tmux が無いときの扱い |
+| `development-workflow/references/relay.md` | 新設 | 中継の始め方（`setup` → `run`）・止め方・上限・記録の読み方・tmux が無いときの扱い |
 | `development-workflow/references/context-window.md` の「新しい会話で戻す」 | 変える | 次のコマンドを `ndf-next` のブロック 1 つで出すこと、関門の承認より前に出さないこと、引継ぎ文書の「次に実行するコマンド」も同じ形にすることを定める（形の定義はここ 1 か所） |
 | `development-workflow/SKILL.md` の引き継ぎの 1 行の段落と「`/goal` の引数として呼ばれたとき」 | 変える | 1 行を `ndf-next` のブロックで出すと書き、`relay.md` への参照を足す |
 | `plugins/ndf/scripts/token-guard.sh` の止めたときの理由の文 | 変える | 「次の 1 行を示して」を「次のコマンドを `ndf-next` のブロックで示して」へ直す |
@@ -108,7 +110,7 @@ graph TB
 plugins/ndf/
 ├── hooks/claude.json                         # Stop に 1 件足す
 ├── scripts/
-│   ├── relay.py                              # 新設（run / stop / mark）
+│   ├── relay.py                              # 新設（run / stop / mark / setup）
 │   ├── token-guard.sh                        # 理由の文だけ直す
 │   └── tests/test_relay.py                   # 新設
 └── skills/development-workflow/
@@ -153,9 +155,43 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `run` | `--max-starts <N>`（既定 20）/ `--keep-windows <N>`（既定 10）/ `--quiet <秒>`（既定 15） | 0: 停止の印で止まった / 1: 起動できない（tmux の外・2 つ目の中継）/ 2: 上限・空回り・印の無い終わり・更新の失敗・`/exit` の後に 30 秒で終わらない（`exit-timeout`）で止まった / 130: `Ctrl-C` | 止まるとき、理由を 1 行（`relay: 止まった: <理由>`）を標準エラーへ |
 | `stop` | 無し | 0: 停止の印を置いた / 1: このセッションで中継が動いていない | 無し |
+| `setup` | `--check`（確かめるだけで書かない） | 0: 前提がそろった（入れた・既にあった）/ 1: 入れられない前提が欠けている（tmux が無い・設定ファイルを安全に書けない）/ 3: `--check` で、入れれば足りる設定が欠けている | 確かめた項目ごとに 1 行（`ok` / `added` / `missing` / `skipped` と理由）。書いたときはバックアップのパスと戻し方の 1 行 |
 | `mark` | 標準入力に Stop hook の JSON | 常に 0 | 常に無し |
 
 `run` と `stop` は tmux の中（`TMUX` があるところ）で打つ。対象のセッションは打ったペインのセッションである。
+`run` を tmux の外で打つと、`setup` の結果（VS Code の設定を入れたなら新しい統合ターミナルを開く案内）を出して終了コード 1 で終わる。中継は始めない。
+
+### `setup` の確かめる項目と入れる先（F7）
+
+| # | 確かめること | 無いとき |
+| ---: | --- | --- |
+| S1 | `tmux` がコマンドの探索路にある | 入れない。パッケージの入れ方と権限は環境ごとに違うため、案内を出して終了コード 1 |
+| S2 | 今のペインが tmux の中（`TMUX` がある） | 入れるものは無い。S3 を済ませた後に「新しい統合ターミナルを開くと tmux の中で始まる」と示す |
+| S3 | VS Code のリモートの設定が統合ターミナルで tmux を開く: Machine 設定（`~/.vscode-server/data/Machine/settings.json`）の `terminal.integrated.defaultProfile.linux` が指すプロファイルの `path` が `tmux` | 下の「入れる値」を Machine 設定へ足す |
+| S4 | ワークスペースの設定（`<git の根>/.vscode/settings.json` と `*.code-workspace`）が `terminal.integrated.defaultProfile.linux` を tmux でないプロファイルに上書きしていない | 書き換えない。上書きしている場所を示す（ワークスペースの設定は Machine 設定より強い） |
+
+**入れる先は Machine 設定だけである。** VS Code の設定は既定 < ユーザー（手元）< リモートの Machine < ワークスペース < フォルダの順に強い。手元のユーザー設定はコンテナの中から読み書きできず、ワークスペースの設定はリポジトリに入り他の利用者にも効く。Machine 設定はそのリモートの利用者だけに効き、手元のユーザー設定より強い。VS Code のリモートでない環境（`~/.vscode-server` が無い）では S3 を `skipped` にして書かない。
+
+入れる値（既にある値は変えない）:
+
+```json
+{
+  "terminal.integrated.profiles.linux": {
+    "ndf-tmux": { "path": "tmux", "args": ["new-session", "-A", "-s", "${workspaceFolderBasename}"] }
+  },
+  "terminal.integrated.defaultProfile.linux": "ndf-tmux"
+}
+```
+
+| 既にある状態 | すること |
+| --- | --- |
+| `defaultProfile.linux` が `path` に `tmux` を持つプロファイルを指す | 何もしない（`ok`） |
+| `defaultProfile.linux` が無い | プロファイル `ndf-tmux` を足し、`defaultProfile.linux` を `ndf-tmux` にする（`added`） |
+| `defaultProfile.linux` が tmux でない別のプロファイルを指す | 書き換えない（`skipped`）。値と、差し替えるなら入れる 1 行を示す。利用者が選んだ既定を黙って替えないため |
+| ファイルに注釈（`//` `/* */`）があり、書き戻すと失われる / JSON として読めない | 書かない（終了コード 1）。入れる値を示す |
+| ファイルが無い | 作る（`added`） |
+
+**書くときは先に `settings.json.ndf-bak-<UTC の時刻>` へ写し、一時ファイルに書いてから置き換える。** 書いた後に、足したキーと、戻すための `cp <バックアップ> <元のパス>` の 1 行を示す。**2 回目の `setup` は何も書かない**（冪等）。`~/.tmux.conf` とシェルの設定は触らない。
 
 ### 作業ディレクトリ `NDF_RELAY_DIR`
 
@@ -210,6 +246,7 @@ plugins/ndf/
 | `window` / `pane` | 起動した・終わった区間のウィンドウの番号とペイン（`start`・`end`） |
 | `command` | 起動に渡した中身（`start`） |
 | `from_session` | 前の区間の `session_id`（`start`） |
+| `cwd_fallback` | 印の `cwd` が消えていたとき、代わりに使った作業ディレクトリ（`start`。消えていなければ無い） |
 | `plugin_version` | 更新の後に `claude plugin list --json` から読んだ `ndf@<マーケットプレイス>` の `version`（`start`。AC8） |
 | `seconds` | 区間の長さ。その区間の `start` の `at` から、印の `written_at` か claude の終わりを見た時刻まで（`end`。中継が起動していない最初の区間は空） |
 | `ended_by` | 終わり方。`mark`（印を受けて `/exit` を送り、claude が終わった）/ `no-mark`（中継が起動した区間の claude が印なしで終わった）（`end`） |
@@ -272,7 +309,7 @@ stateDiagram-v2
 | 待つ | 2 秒ごとに `next/` と `stop` を見る（スクリプトの中の待ちで、LLM は使わない）。中継が起動した区間のペインは、`#{pane_dead}` かペインの消滅で終わりを見る |
 | 静まりを待つ | 次の 2 つがそろうまで待つ。(1) 印の `written_at` と `transcript_path` の更新時刻の遅いほうから `--quiet` 秒たつ。(2) 会話の記録に `/goal` の目標がある区間では、印の `written_at` より後の `goal_status` の記録がある（目標の判定が済んだ）。判定が止めを拒んだときは応答が続いて記録が動き、次の Stop で印が書き直されるか消えるため、(1) が満たされない。`/goal` の無い区間は (1) だけで足りる（判定が無く、Stop の後に応答は続かない） |
 | 終わらせる | 停止の印があれば `/exit` を送らずに止まる（AC13）。1 日の起動回数（`log.jsonl` の今日の `start` の数）が上限なら止まる（AC9）。中継が起動した区間のうち、直前の 2 つの `end` の行の `seconds` がともに 120 未満で、今の区間（これも中継が起動したもの）の長さ（印の `written_at` − その区間の `start` の `at`）も 120 未満なら（3 区間続けて空回り）、次の区間を起動せずに止まる（AC11）。どれでもなければ印のペインへ `remain-on-exit on` を置き、`tmux send-keys -t <ペイン> /exit Enter` を送り、ペインが死ぬ・消える・`#{pane_current_command}` が `claude` でなくなるのを 30 秒まで待つ |
-| 起動する | `claude plugin marketplace update <マーケットプレイス>` → `claude plugin update ndf@<マーケットプレイス> -y` → `claude plugin list --json` で版を読む。どれかが 0 以外で終われば止まる。`tmux new-window -t <セッション>: -c <cwd> -P -F '#{window_index} #{pane_id}' -- env -u CLAUDECODE -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT claude <中身>` で起動し（中身はシェルを通さず 1 つの引数で渡す）、そのウィンドウに `remain-on-exit on` を置く。中継が開いたウィンドウで死んだものが `--keep-windows` を超えたら古いものから `kill-window` する（AC7） |
+| 起動する | `claude plugin marketplace update <マーケットプレイス>` → `claude plugin update ndf@<マーケットプレイス> -y` → `claude plugin list --json` で版を読む。どれかが 0 以外で終われば止まる。起動する作業ディレクトリは印の `cwd` で、消えていれば（設計のブランチの作業ツリーが `merged` で消えた切れ目など）、パスに `/.worktrees/` を含むならその手前（主ディレクトリ）を、含まなければ在る最も近い親を使い、`start` の行に `cwd_fallback` として残す。`tmux new-window -t <セッション>: -c <cwd> -P -F '#{window_index} #{pane_id}' -- env -u CLAUDECODE -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT claude <中身> \; set-option -w remain-on-exit on` を 1 回の tmux の呼び出しで打つ（中身はシェルを通さず 1 つの引数で渡す。`-d` を付けない。「確かめたこと」の 8）。中継が開いたウィンドウで死んだものが `--keep-windows` を超えたら古いものから `kill-window` する（AC7） |
 
 **マーケットプレイスの名前は、中継を始めたときに `claude plugin list --json` の `ndf@<名前>` から読む。**
 開発版のチャネルを使う利用者でも、登録した取得元から更新される。
@@ -297,7 +334,7 @@ claude の区間も終わらせられる。**中継は `/exit` を送る前に�
 
 ## 決定の記録
 
-[issue-895-design-decisions.md](issue-895-design-decisions.md) にある（決定 12 件）。
+[issue-895-design-decisions.md](issue-895-design-decisions.md) にある（決定 14 件）。
 
 ## テスト設計
 
@@ -310,7 +347,7 @@ claude の区間も終わらせられる。**中継は `/exit` を送る前に�
 | AC5 | 「確かめたこと」の 6 と、AC15 の通しの確かめで `AskUserQuestion` を 1 回出す |
 | AC6 | 同: tmux・claude の呼び出しを差し替えた中継の 1 周で、`send-keys /exit` → 終わりの確認 → `marketplace update` → `plugin update -y` → `plugin list --json` → `new-window`（`-d` 無し・中身が 1 つの引数）の順に呼ぶこと。静まる前（記録の更新時刻が新しい）と、目標のある記録で印より後の `goal_status` が無いあいだは `/exit` を送らないこと |
 | AC7 | 同: 印のペインへ `/exit` の前に `remain-on-exit on` を置くこと。死んだウィンドウが 11 個になったとき、中継が開いた最も古いものだけを `kill-window` し、利用者が開いたウィンドウは閉じないこと |
-| AC8 | 同: 1 周で `end`（6 つのキー）と `start`（7 つのキー）の 2 行が書かれ、`plugin_version` が差し替えた `plugin list --json` の値、`ended_by` が `mark` であること。印なしで終わった区間では `ended_by` が `no-mark` の `end` と `stop` の 2 行。停止の印で止まるときは `end` を書かず `stop` だけ |
+| AC8 | 同: 1 周で `end`（6 つのキー）と `start`（7 つのキー。`cwd_fallback` は作業ディレクトリが消えていたときだけ足す）の 2 行が書かれ、`plugin_version` が差し替えた `plugin list --json` の値、`ended_by` が `mark` であること。印なしで終わった区間では `ended_by` が `no-mark` の `end` と `stop` の 2 行。停止の印で止まるときは `end` を書かず `stop` だけ |
 | AC9 | 同: 今日の `start` が 20 行ある記録で印を与えると、`/exit` を送らず終了コード 2・理由が出ること |
 | AC10 | 同: `relay.lock` を別のプロセスで持った状態の `run` が終了コード 1。1 周の中で `new-window` が前のペインの終わりの確認の後にだけ呼ばれること。前回の `stop` と印が残ったディレクトリで `run` を始めると、それらを消してから待ち、止まらず `/exit` も送らないこと。最初の印のペインに縛られた後、別のペインの印では `/exit` を送らないこと |
 | AC11 | 同: 中継が起動した区間の長さが 119・119・119 と続くと、3 つ目の印で 4 つ目を起動せず止まり（`end` は書かず `stop` の `reason` が `spin`）、119・121・119 では止まらないこと。利用者が開いた最初の区間は数えないこと |
@@ -318,6 +355,9 @@ claude の区間も終わらせられる。**中継は `/exit` を送る前に�
 | AC13 | 同: `stop` があるとき `/exit` を送らず終了コード 0。`SIGINT` で終了コード 130、`send-keys` も `kill-window` も呼ばず、`set-environment -u` を呼ぶこと |
 | AC14 | 同: AC4 の `TMUX` 無し。`hooks/claude.json` 以外の hook の定義の差分が無いことを実装の Pull Request の差分で見る |
 | AC15 | 別のソケット（`tmux -L ndf-relay-e2e`）で中継を始め、`--model haiku` の claude に「次の区間を `ndf-next` で 1 回出す」指示を 2 段で渡す通しの確かめ。3 つ目の区間の起動・ウィンドウ 3 つ・`log.jsonl` の `start` 2 行（中継が起動した 2 つ目と 3 つ目の区間。最初の区間は利用者が開くため行が無い）と `end` 2 行（1 つ目と 2 つ目の区間、`ended_by` が `mark`）を見る。1 段目で `AskUserQuestion` を出させ、答える前に印が無いことも見る。記録を実装の Pull Request に残す |
+| AC17 | 同: 前提を差し替えた一時の HOME で `setup` を打つ。Machine 設定が無い → 作って `added`、2 回目は書かず `ok`（ファイルの中身と更新時刻が変わらない）。`defaultProfile.linux` が別のプロファイル → 書かず `skipped`。注釈を含むファイル → 書かず終了コード 1。書いたときはバックアップがあり、もとのキーが残ること。`--check` は書かず終了コード 3 |
+| AC18 | 同: `tmux` の探索路を空にすると `setup` が終了コード 1 と案内。`TMUX` 無しの `run` が中継を始めず終了コード 1 で、`setup` と同じ確認の出力を出すこと。ワークスペースの `.vscode/settings.json` が別のプロファイルを指すと、その場所を示し書き換えないこと |
+| AC19 | 同: 印の `cwd` が消えた（`<主>/.worktrees/design/x`）とき `new-window -c <主>` で起動し、`start` の行に `cwd_fallback` が載ること。実 tmux の別のソケットで、すぐ終わる処理を起動したウィンドウが残ること |
 | AC16 | `uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest pytest . -q -n 4` |
 
 ## 未確認のまま残ること
@@ -327,4 +367,5 @@ claude の区間も終わらせられる。**中継は `/exit` を送る前に�
 | `/goal` と Skill を位置引数で渡したときの挙動 | `/cost` はコマンドとして実行された。`/goal /ndf:development-workflow ...` の複数行が同じように働くかは AC15 で確かめる。働かなければ、中身を `/goal` の無い形で渡し、`/goal` を 2 つ目の入力として `send-keys` する形へ替える（実装で決める） |
 | 切れ目で `/goal` の判定が止めを許すか | 今の運用では conductor が切れ目で止まれている。止めを拒まれて応答が続いても、中継は静まるまで待つので誤って終わらせない。続いた応答がブロックを出さなければ、印は消えて中継は待ち続ける |
 | `goal_status` の記録の形 | 目標の判定の後に記録へ書かれることは確かめた（「確かめたこと」の 4）。止めを拒んだときの値と、記録の中の目標の有無の見分け方は AC15 で記録を読んで決める。15 秒は判定を待つ値ではなく、応答が続くかを見る値である |
+| プロファイルの引数の `${workspaceFolderBasename}` | VS Code が統合ターミナルのプロファイルの引数で変数を置き換えるかは、実装で Machine 設定に入れて新しいターミナルを開いて確かめる。置き換えないなら、`setup` が打った時点の git の根の名前を値として書く |
 | 更新で古い版のディレクトリが消えたときの中継 | 中継は 1 ファイルで、起動の後にディスクから読み直さない。hook は新しい版のパスで呼ばれる。AC15 の中で更新を挟んで確かめる |
