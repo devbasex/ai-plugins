@@ -9,6 +9,26 @@
 **開発版（接尾辞の付いた版）は載せない。** `9.8.0` は `9.8.0-dev.1` までしか出ておらず、
 その内容は `10.0.0` で届いている。
 
+## [ndf 10.17.0] - 2026-09-23
+
+### 追加
+
+- **PreToolUse hook `scripts/token-guard.sh` を足した（Claude Code だけ）**（#829 #830）。前景の Bash で
+  `while` / `until` のループの本体にある `sleep` と 5 秒を超える `sleep`、変わらないファイルの同じ範囲を
+  3 回続けて読む Read、文脈が 200,000 を超えた conductor が工程 Skill か持ち場の supervisor を起動することを、
+  理由の欄に代わりの手段を書いて止める。文脈量の拒否は起動ごとに 1 度で、同じ起動をもう一度行えば通る。
+  環境変数 `NDF_SLEEP_GUARD` / `NDF_SLEEP_MAX_SEC` / `NDF_READ_REPEAT_GUARD` / `NDF_READ_REPEAT_LIMIT` /
+  `NDF_CONTEXT_GUARD` / `NDF_CONTEXT_LIMIT` で止める・上限を変える
+- **待ち方の規約 `development-workflow/references/waiting.md` を足した**（#829）。`agent-layers.md` の
+  supervisor / worker の規則と、前景の待ちのループを持つ 4 文書（`cli-codex.md` / `cli-agy.md` /
+  `qa-security-scan/03-report-template.md` / `release/references/completion-check.md`）から指す
+
+### 変更
+
+- **`context-window.md` の「前提: 実測ではない」を #827 の実測値に置き換え、「上限を超えたら hook が止める」
+  「新しい会話で戻す」の節を足した**（#830）。`development-workflow/SKILL.md` に、4 つの切れ目で conductor が
+  引き継ぎの 1 行（`/ndf:development-workflow #<課題>`）を出す規約を足した
+
 ## [ndf 10.16.1] - 2026-09-22
 
 ### 修正
