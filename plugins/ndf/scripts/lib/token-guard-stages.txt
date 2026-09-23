@@ -1,0 +1,16 @@
+# 文脈量の hook（token-guard.sh）が見る工程 Skill の一覧（#830）。1 行 1 名。
+# 正は docs/specifications/ndf-token-waits-and-context-cut.md の「工程 Skill の一覧」（context-window.md の 4 つの切れ目の直後の工程と入口）。
+# worktree など切れ目の内側の工程は載せない（理由は同じ仕様書の「文脈量の判定」）。
+implementation-plan
+document-drafting
+cross-refactoring
+cross-review
+pr-review
+quality-gates
+plan-to-spec
+merged
+layout-review
+release-verification
+retrospective
+development-workflow
+issue-plan-strategy

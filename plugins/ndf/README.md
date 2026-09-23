@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.16.1）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.17.0）
 ```
 
 ### agy
@@ -119,21 +119,20 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.16.1 へ更新するとき
+## v10.17.0 へ更新するとき
 
-**収束ループが、codex と claude の利用上限で止まった担当を起動し直さなくなり、読めない
-ディレクトリを含む `PATH` でも始まるようにしました**（マイルストーン 17「10.16.0 のリリース後
-テストで不合格だった条件」、#811 #813）。Skill の数は変わりません。引数・Skill・スクリプトの
-削除や改名は無く、記録の移行も要りません（前の版で始めた状態ファイルはそのまま読めます）。
-変更点の一覧は [CHANGELOG.md](../../CHANGELOG.md) にあります。
+**Claude Code で、待つ間の繰り返しの問い合わせと、文脈が上限を超えた conductor の工程の起動を
+hook が止めるようにしました**（マイルストーン 26「17 トークン消費の削減」、#829 #830）。Skill の数は
+変わりません。引数・Skill・スクリプトの削除や改名は無く、記録の移行も要りません。Codex / Kiro / agy の
+hook は変わりません。変更点の一覧は [CHANGELOG.md](../../CHANGELOG.md) にあります。
 
-**正式版です。** `main` に載ります。中身は開発版 `10.16.1-dev.1` と同じで、版数の接尾辞だけを
+**正式版です。** `main` に載ります。中身は開発版 `10.17.0-dev.1` と同じで、版数の接尾辞だけを
 外しました。
 
 | 変わったこと | 中身 |
 | --- | --- |
-| **codex と claude の利用上限を理由として報告します**（#811） | 担当が利用上限で止まったときの実物の文言（codex の 2 形・claude の 5 形）を照合に足しました。理由が「結果ファイル無し」ではなく「利用上限」になり、同じラウンドで起動し直しません。行頭で始まる行だけを読むため、担当が差分や文書を読み上げた行では止まりません |
-| **読めないディレクトリを含む `PATH` でも始まります**（#813） | 認証の確認が、確認コマンドを起動できない理由（権限の拒否・実行形式でないファイル）を「通らない」として返します。`PATH` に読めないディレクトリがあり、CLI が 1 者欠けている環境でも、2 つの開始の手順は終了コード 0 で終わり、使える者だけで始まります |
+| **前景の `sleep` の待ちと、変わらないファイルの読み直しを止めます**（#829） | `while` / `until` のループの本体にある `sleep` と 5 秒を超える `sleep`、同じファイルの同じ範囲を変わらないまま 3 回続けて読む Read を、理由の欄に代わりの待ち方（`run_in_background: true` で起動して完了通知を待つ / `Monitor`）を書いて止めます。待ち方の規約は `development-workflow/references/waiting.md` にあります。`NDF_SLEEP_GUARD=0` / `NDF_READ_REPEAT_GUARD=0` で止められます |
+| **文脈が 200,000 を超えた conductor の工程の起動を 1 度止めます**（#830） | 工程 Skill か持ち場の supervisor を起動すると、新しい会話で打つ 1 行（`/ndf:development-workflow #<課題>`）を示して止めます。このまま続けるなら同じ起動をもう一度行えば通ります。`NDF_CONTEXT_GUARD=0` で止め、`NDF_CONTEXT_LIMIT` で上限を変えられます |
 
 正式版のチャネル（ref を指定せずに登録した取得元）なら、次で入れ替わります。**動いているセッションには
 反映されない**ため、更新したあとは起動し直してください。開発版を試すために `develop` を登録した
@@ -156,8 +155,8 @@ codex plugin add ndf@ai-plugins
 にあります。
 
 ```bash
-grep -q "You\['’\]ve hit your" "$SCRIPTS/lib/monitor.py"; echo "exit=$?"   # 0 なら codex と claude の上限の文言を読む
-grep -q 'except OSError' "$SCRIPTS/lib/auth.py"; echo "exit=$?"              # 0 なら起動できない確認コマンドで落ちない
+grep -q 'token-guard.sh' "$SCRIPTS/../hooks/claude.json"; echo "exit=$?"                                  # 0 なら hook が登録されている
+test -f "$SCRIPTS/../skills/development-workflow/references/waiting.md"; echo "exit=$?"                    # 0 なら待ち方の規約がある
 ```
 
 ## Playwright テストについて
@@ -221,6 +220,27 @@ bash <プラグインのパス>/scripts/worktree-setup.sh init
 空の配列を書くと「何も許可しない」という指定になります。
 
 手順は `/ndf:worktree` にあります。
+
+### 待ちの問い合わせと長い会話を止める（Claude Code だけ）
+
+`scripts/token-guard.sh` が PreToolUse の `Bash` / `Read` / `Skill` / `Agent` で動き、3 つを
+止めます。止めたときは、代わりの手段を理由の欄に出します。
+
+| 止めるもの | 止め方 | 上限 |
+| --- | --- | --- |
+| 前景の `sleep` の待ち（`while` / `until` のループの本体、または上限を超える秒数） | `NDF_SLEEP_GUARD=0` | `NDF_SLEEP_MAX_SEC`（既定 5） |
+| 変わらないファイルの同じ範囲を続けて読む Read | `NDF_READ_REPEAT_GUARD=0` | `NDF_READ_REPEAT_LIMIT`（既定 3） |
+| 文脈が上限を超えた conductor が工程へ入る起動（1 度だけ止め、新しい会話で打つ 1 行を示す） | `NDF_CONTEXT_GUARD=0` | `NDF_CONTEXT_LIMIT`（既定 200000） |
+
+| ランタイム | 待ち方 | 会話を切る |
+| --- | --- | --- |
+| Claude Code | hook ＋ 規約 | hook ＋ 引き継ぎの 1 行 |
+| Codex | 規約だけ | 引き継ぎの 1 行だけ |
+| Kiro CLI | 規約だけ | 引き継ぎの 1 行だけ |
+| agy | 規約だけ | 引き継ぎの 1 行だけ |
+
+規約は `skills/development-workflow/references/waiting.md`（待ち方）と
+`skills/development-workflow/references/context-window.md`（会話を切る）にあります。
 
 ### その他
 
@@ -301,7 +321,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.16.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.17.0/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -323,14 +343,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.16.1/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.0/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.16.1  <path>
+# => ndf@ai-plugins  installed, enabled  10.17.0  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。

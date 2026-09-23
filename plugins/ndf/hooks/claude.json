@@ -13,6 +13,19 @@
             "suppressOutput": false
           }
         ]
+      },
+      {
+        "matcher": "Bash|Read|Skill|Agent|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/token-guard.sh",
+            "description": "NDF: stop polling waits and ask a long conductor to continue in a new session",
+            "timeout": 5,
+            "continueOnError": true,
+            "suppressOutput": false
+          }
+        ]
       }
     ],
     "SessionStart": [

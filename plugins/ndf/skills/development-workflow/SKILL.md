@@ -202,6 +202,14 @@ mode: standard
 残っているのに後の工程の判断だけが悪くなる。** 切れ目・委譲してよい対象・残量の見方は
 [references/context-window.md](references/context-window.md) にある。
 
+**conductor は、`context-window.md` の 4 つの切れ目で、次の工程を始める引き継ぎの 1 行
+（`/ndf:development-workflow #<課題>`）を出す。** 3 層では conductor が `## 持ち場の報告` を
+受け取った時点で出し、supervisor は出さない。持ち場の境がこの切れ目に当たるためである。
+文脈量の hook（`token-guard.sh`）が起動を止めたときも出す。ただし報告が `結果: 関門` なら
+受け取った時点では出さず、関門の承認と取り込み（設計 Pull Request のマージなど）の後に出す。
+関門の前に会話を切らないためである。**その 1 行で始めた新しい会話が状態を戻す手順は、
+`context-window.md` の「新しい会話で戻す」にある。**
+
 ## 範囲外の課題を見つけたとき
 
 この変更の受け入れ条件にも、直す対象にも含まれない課題は、**見つけたその場で `out-of-scope` が
