@@ -59,7 +59,7 @@
 
 - 待ち方の規約の置き場所を 1 つに決め、supervisor / worker への指示の雛形から参照させる（#829）
 - PreToolUse hook で、前景の `sleep` で待つ Bash（ループの待ちと長い `sleep`）と、変わらないファイルの同じ範囲への連続 Read を拒否し、代わりの待ち方を案内する（#829）
-- PreToolUse:Skill hook で、会話の文脈量が上限を超えた状態の工程 Skill の起動を止め、新しい会話で始める 1 行を案内する（#830）
+- PreToolUse の `Skill` と `Agent` の hook で、会話の文脈量が上限を超えた conductor が工程へ入る起動（工程 Skill か持ち場の supervisor）を止め、新しい会話で始める 1 行を案内する（#830）
 - `context-window.md` の 4 つの切れ目と文脈量の hook の拒否で、conductor が次に打つコマンドを 1 行で出す規約（#830）
 - `context-window.md` の「前提: 実測ではない」を #827 の実測値へ書き換える（#830）
 - 4 ランタイムでの扱い（hook が効くランタイムと、規約だけで守るランタイムの区別）
@@ -70,7 +70,7 @@
 - 待ちの道具（`bg-wait.sh`）を共通層へ移す #731、サブエージェントが待ちで止まる #656、上限の無い待ち #345
 - supervisor のスクリプト駆動（#827 の「方針」）
 - codex / kiro / agy の CLI 側の消費の計測（#827 で対象外）
-- supervisor / worker の文脈量の上限（#768 / #773）。この変更の hook は conductor の工程 Skill の起動だけを見る
+- supervisor / worker の文脈量の上限（#768 / #773）。この変更の hook は conductor が工程へ入る起動だけを見る
 - 設計の成果物のうちクラス図: 作るのはシェルの hook と文書だけで、型を持たないため対象が無い
 
 ## 用語
@@ -94,8 +94,9 @@
 
 ### 待ちの hook（#829）
 
-- [ ] AC5: Claude Code の PreToolUse hook が、前景で `sleep` を使って待つ Bash を拒否する。対象は、`sleep` に数値の秒数を渡し、`while` / `until` のループを含むか秒数が上限（既定 5 秒）を超えるもの。理由の欄に代わりの待ち方（同じループを `run_in_background` で起動して完了通知を待つ / `Monitor`）を示す
-- [ ] AC6: `run_in_background: true` の Bash、`Monitor` ツールの中の `sleep`、`sleep` を含まない Bash、ループの外の上限以下の `sleep`、`for` のループの中の上限以下の `sleep` は拒否しない
+- ~~AC5: Claude Code の PreToolUse hook が、前景で `sleep` を使って待つ Bash を拒否する。対象は、`sleep` に数値の秒数を渡し、`while` / `until` のループを含むか秒数が上限（既定 5 秒）を超えるもの。理由の欄に代わりの待ち方（同じループを `run_in_background` で起動して完了通知を待つ / `Monitor`）を示す~~ → 変更（2026-09-23、PR #843 のレビュー 4 回目。ループの後の短い `sleep` まで止めないため）
+- [ ] AC5: Claude Code の PreToolUse hook が、前景で `sleep` を使って待つ Bash を拒否する。対象は、`sleep` に数値の秒数を渡し、`while` / `until` のループの本体（`do` と対応する `done` の間）にあるか秒数が上限（既定 5 秒）を超えるもの。理由の欄に代わりの待ち方（同じループを `run_in_background` で起動して完了通知を待つ / `Monitor`）を示す
+- [ ] AC6: `run_in_background: true` の Bash、`Monitor` ツールの中の `sleep`、`sleep` を含まない Bash、ループの本体の外の上限以下の `sleep`、`for` のループの中の上限以下の `sleep` は拒否しない
 - [ ] AC7: 同じ `file_path`・`offset`・`limit` の Read が、ファイルの大きさと更新時刻が変わらないまま、その会話で連続して上限の回数（既定 3）に達すると、hook が拒否し、代わりの待ち方を示す。別の引数の Read が挟まるか、ファイルが変われば数え直す
 - [ ] AC8: AC5〜AC7 の判定を、入力 JSON を与えて終了コードと出力を見るテストが確かめている（拒否する例と通す例の両方）
 - [ ] AC9: hook の判定が失敗しても（入力 JSON が壊れている・記録を書けない）、ツールの実行を止めない（終了コード 0 で通す）
@@ -107,8 +108,10 @@
 
 ### 会話を切る hook（#830）
 
-- [ ] AC12: Claude Code で、会話の文脈量が上限（既定 200,000）を超えた状態で工程 Skill を起動すると、PreToolUse:Skill hook が起動を拒否し、理由の欄に「新しい会話で打つ 1 行」を示す
-- [ ] AC13: 上限の判定は conductor（本体の会話）だけに掛かる。サブエージェントの中の Skill の起動は拒否しない
+- ~~AC12: Claude Code で、会話の文脈量が上限（既定 200,000）を超えた状態で工程 Skill を起動すると、PreToolUse:Skill hook が起動を拒否し、理由の欄に「新しい会話で打つ 1 行」を示す~~ → 変更（2026-09-23、PR #843 のレビュー 4 回目。3 層では conductor が工程 Skill を起動しないため）
+- [ ] AC12: Claude Code で、会話の文脈量が上限（既定 200,000）を超えた状態で、conductor が工程 Skill を起動する（対話の経路）か、持ち場の supervisor を起動する（3 層の経路）と、hook が起動を拒否し、理由の欄に「新しい会話で打つ 1 行」を示す
+- ~~AC13: 上限の判定は conductor（本体の会話）だけに掛かる。サブエージェントの中の Skill の起動は拒否しない~~ → 変更（2026-09-23、PR #843 のレビュー 4 回目。3 層の経路で Agent の起動も見るため）
+- [ ] AC13: 上限の判定は conductor（本体の会話）だけに掛かる。サブエージェントの中の Skill と Agent の起動は拒否しない
 - [ ] AC14: 工程 Skill でない Skill（`markdown-writing` / `progress-tracking` / `out-of-scope` など）の起動は拒否しない
 - ~~AC15: 同じ会話で案内を 1 度出した後、利用者がそのまま続けると決めたときに続けられる（2 回目の同じ起動は通す、または環境変数で止められる）~~ → 変更（2026-09-23、PR #843 のレビュー）
 - ~~AC15: 拒否した直後の同じ Skill・同じ args の起動は通す。別の工程 Skill の起動は再び拒否する。環境変数で判定ごと止められる~~ → 変更（2026-09-23、PR #843 のレビュー 2 回目。hook は Bash / Read / Skill しか見ないため『直後』を判定できない）
@@ -150,9 +153,9 @@
 
 | 対象 | 影響 |
 | --- | --- |
-| 公開インタフェース | Claude Code の hook の定義に PreToolUse の matcher（`Bash` / `Read` / `Skill`）の登録が増える。環境変数が増える（止める・上限を変える） |
+| 公開インタフェース | Claude Code の hook の定義に PreToolUse の matcher（`Bash` / `Read` / `Skill` / `Agent` / `Task`）の登録が増える。環境変数が増える（止める・上限を変える） |
 | データ | 連続 Read を数える状態を、会話ごとに一時ファイルへ持つ |
-| 既存の振る舞い | 前景の `sleep` で待つ Bash（`while` / `until` のループか、5 秒を超える `sleep`）が拒否される。文脈が上限を超えた conductor では工程 Skill の起動が 1 度拒否される。`external-ai/references/cli-codex.md`・`cli-agy.md`・`qa-security-scan/03-report-template.md`・`release/references/completion-check.md` の前景の待ちのループの直前に、`run_in_background` で実行する案内の 1 行が足される |
+| 既存の振る舞い | 前景の `sleep` で待つ Bash（`while` / `until` のループの本体にあるか、5 秒を超える `sleep`）が拒否される。文脈が上限を超えた conductor では、工程 Skill と持ち場の supervisor の起動が 1 度拒否される。`external-ai/references/cli-codex.md`・`cli-agy.md`・`qa-security-scan/03-report-template.md`・`release/references/completion-check.md` の前景の待ちのループの直前に、`run_in_background` で実行する案内の 1 行が足される |
 
 ## 検証手段
 
