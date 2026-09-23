@@ -47,8 +47,9 @@
 | `plugins/ndf/skills/cross-review/scripts/state.py` | 状態ファイル・観点・参加者の解決・ラウンドの開始 | 控えの取得を関数 `_fetch_existing_comments` に分け、`start-round` からも呼ぶ。`start-round` が変更の節のファイルを書く。分類 `design` と `DESIGN_REVIEW_TEMPLATE` を足す。`_resolve_reviewers` が無視した除外を 1 行で出す |
 | `plugins/ndf/skills/cross-review/scripts/launch-reviewer.sh` | レビューのプロンプトを組んで担当を起動する | 変更の節のファイルがあれば埋め込む。出し切りの指示と、テストと背景の処理を起動しない指示を足す |
 | `plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/setup.py` | cross-refactoring の参加者の解決 | 無視した除外を 1 行で出す |
+| `plugins/ndf/skills/cross-refactoring/tests/test_init.py` | cross-refactoring の `init` のテスト | 「母集合に無い者は外せない」の中断の期待を、無視して続ける期待へ替える |
 | `plugins/ndf/skills/cross-refactoring/prompts/apply.md` | 適用担当のプロンプト | テストを前景で終わるまで待つ指示を足す |
-| 文書 | 使い方と仕様 | `cross-review/SKILL.md`・`docs/02-fix-and-rotation.md`・`docs/05-pool-and-convergence.md`・`docs/06-evidence.md`・`docs/specifications/cross-review-participants-and-seats.md`・`plugins/ndf/README.md`・`CLAUDE.md` の cross-review 節 |
+| 文書 | 使い方と仕様 | `cross-review/SKILL.md`・`docs/02-fix-and-rotation.md`・`docs/05-pool-and-convergence.md`・`docs/06-evidence.md`・`docs/specifications/cross-review-participants-and-seats.md`・`plugins/ndf/README.md`・`CLAUDE.md` の cross-review 節。cross-refactoring の `docs/01-state-and-propose.md`（参加者の確定の段）と `docs/specifications/cross-refactoring-participants.md`（中断の表の「名前の矛盾」の行） |
 | テスト | 下の「テスト設計」 | 既存の母集合のテストを直し、新しい分岐のテストを足す |
 
 変えないもの:
@@ -120,7 +121,8 @@ plugins/ndf/
     └── cross-refactoring/
         ├── prompts/apply.md                  # 変える
         ├── scripts/refactor_lib/commands/setup.py  # 変える
-        └── tests/test_assignment.py          # 変える
+        ├── docs/01-state-and-propose.md      # 変える
+        └── tests/test_assignment.py / test_init.py  # 変える
 ```
 
 ## 構造
@@ -165,7 +167,7 @@ def review_pool(host: str) -> list[str]:
 | --- | --- | --- |
 | 母集合か `--include` にある | 外す | 外す（同じ） |
 | 綴りの正しいランタイム名で、母集合にも `--include` にも無い | `AssignmentError`（終了コード 1） | 外さずに無視し、`Participants.ignored_exclude` に固定順で残す |
-| 綴りの誤り | `AssignmentError` | `AssignmentError`（同じ） |
+| 綴りの誤り | 引数の型が弾く（終了コード 2。共通層まで届かない） | 同じ |
 
 `Participants` に `ignored_exclude: list[str]`（既定は空）を足す。呼び出し側（cross-review の `_resolve_reviewers`、
 cross-refactoring の `setup.py`）は、空でなければ次の 1 行を標準エラーへ出して続ける。
@@ -175,6 +177,14 @@ cross-refactoring の `setup.py`）は、空でなければ次の 1 行を標準
 ```
 
 状態ファイルの `participants` には `ignored_exclude` を書き足す（`excluded` には入れない。外した者と区別するため）。
+
+**`--only` で名指しした者は、既定の母集合に無くても参加者にする**（決定 12）。`resolve_participants` は、`only` が
+母集合にも `--include` にも無く、`--exclude` にも無いとき、`only` を足す者として扱ってから今の検査を通す。
+`--only agy` は `--include agy` 無しで今と同じく agy 1 者で回る。`--only agy --exclude agy` は今どおり矛盾で止まる。
+
+**この共有層の変更は cross-refactoring にも及ぶ。** cross-refactoring の `init` は、母集合に無い者の除外で今は
+中断する（終了コード 4）。変更後は無視して `ℹ` の 1 行を出し、続ける。重なり（足す者と外す者に同じ名前）と
+`none` と名前の混在は、今どおり終了コード 4 で中断する。
 
 ### 既存コメントの控え（`state.py`）
 
@@ -186,9 +196,16 @@ def _fetch_existing_comments(repo: str, pr: int, path: pathlib.Path) -> str | No
 | 呼ぶ場所 | 失敗したとき |
 | --- | --- |
 | `init` の新規開始（今の場所） | 今と同じく `die`（終了コード 1） |
-| `start-round`（2 ラウンド目以降。ラウンドを開いた後、担当を起動する前） | 前の控えを残し、`⚠ 既存コメントの控えを取り直せませんでした（<理由の先頭 200 字>）。前の控えのまま進めます` を標準エラーへ出して続ける |
+| `start-round`（状態ファイルの通しで 2 ラウンド目以降。ラウンドを開いた後、担当を起動する前） | 前の控えを残し、`⚠ 既存コメントの控えを取り直せませんでした（<理由の先頭 200 字>）。前の控えのまま進めます` を標準エラーへ出して続ける |
 
-1 ラウンド目は `init` が取った直後であるため取り直さない。控えの形（1 行 1 件、`[PR-COMMENT]` などの接頭辞）は変えない。
+| 項目 | 値 |
+| --- | --- |
+| 取り直す時点 | 状態ファイルの通しのラウンドが 2 以上のとき（`round_in_pr` ではない）。通しの 1 ラウンド目は `init` が取った直後であるため取り直さない |
+| 取得する PR | `current_pr`（PR の巻き直しの後は新しい PR） |
+| 書く先 | `$TMP_DIR/cross-review-pr<STATE_PR>-existing-comments.txt`（今の置き場所。`launch-reviewer.sh` が読む名前は変えない） |
+| 巻き直しの直後 | 取り直す（新しい PR の既存コメントに置き換わる）。同じ PR の前のラウンドが無いため、変更の節は書かない |
+
+控えの形（1 行 1 件、`[PR-COMMENT]` などの接頭辞）は変えない。
 
 ### 前のラウンドからの変更の節（`state.py start-round` → `launch-reviewer.sh`）
 
@@ -281,7 +298,7 @@ sequenceDiagram
 
 ## 決定の記録
 
-決定の見出し・理由・採らなかった案は [issue-542-786-design-decisions.md](issue-542-786-design-decisions.md) にある（11 件）。
+決定の見出し・理由・採らなかった案は [issue-542-786-design-decisions.md](issue-542-786-design-decisions.md) にある（12 件）。
 
 ## テスト設計
 
@@ -290,13 +307,15 @@ sequenceDiagram
 | 受け入れ条件 | 何で確かめるか |
 | --- | --- |
 | AC1 AC2 AC3 | `test_lib_assignment.py`: `review_pool(h)` をホスト 4 通りで比べる。`resolve_participants` + `review_seats` で host=claude の round 1〜3 を比べる |
-| AC4 | 同上: `--include agy` の座席が今の既定の輪番と一致する。`--exclude agy` が例外を出さず `ignored_exclude == ["agy"]`、`available` に agy が無い。`test_state_review_pool.py`: `init --exclude agy` が終了コード 0 で `ℹ` の行を出し、状態ファイルに `ignored_exclude` が残る。綴りの誤りは今どおり 1 |
+| AC4 | 同上: `--include agy` の座席が今の既定の輪番と一致する。`--exclude agy` が例外を出さず `ignored_exclude == ["agy"]`、`available` に agy が無い。`test_state_review_pool.py`: `init --exclude agy` が終了コード 0 で `ℹ` の行を出し、状態ファイルに `ignored_exclude` が残る。綴りの誤りは今どおり 2 |
+| AC4b | `test_lib_assignment.py`: `only="agy"` で `include` 無しでも参加者が `[agy]` になり、`only="agy", exclude=["agy"]` は今どおり `AssignmentError` |
+| AC4c | cross-refactoring の `test_init.py`: `{"exclude": [["agy"]]}` が中断せず `ℹ` の行を出す。重なりの指定は今どおり終了コード 4 |
 | AC5 | 目で見る。`grep -rn "4 者" plugins/ndf/skills/cross-review CLAUDE.md plugins/ndf/README.md docs/specifications/cross-review-participants-and-seats.md` が母集合の説明として 0 件 |
 | AC6 AC7 AC8 | 目で見る（文言）。`test_launch_reviewer_prompt_context.py` の既存の組み立てのテストが通る |
 | AC9 | `start-round` のテスト（新規 `test_state_round_changes.py`）: 一時の git リポジトリで 2 つの head を作り、2 ラウンド目で変更の節のファイルが書かれ、2 つの SHA とファイル名が入る。`launch-reviewer.sh` の組み立てで、ファイルがあるときプロンプトに節が入る |
 | AC10 | 同上: 1 ラウンド目・同じ head・`head_sha` の無いラウンドでファイルが無く、前の起動の残りも消える。プロンプトに節が入らない |
 | AC11 | 同上: 53 ファイルの差分で一覧が 50 件と「ほか 3 件」、ファイルの大きさが 6,000 バイト以下 |
-| AC12 | 同上: `fetch-pr-comments.sh` を差し替えた偽物で、2 ラウンド目の `start-round` が呼び、控えが新しい中身になる。1 ラウンド目では呼ばない |
+| AC12 AC12b | 同上: `fetch-pr-comments.sh` を差し替えた偽物で、2 ラウンド目の `start-round` が呼び、控えが新しい中身になる。1 ラウンド目では呼ばない。`set-current-pr` の後の `start-round` は新しい PR の番号で呼ぶ |
 | AC13 | 同上: 偽物が失敗すると `start-round` が終了コード 0 で `⚠` の行を出し、控えは前の中身のまま |
 | AC14 AC16 | `test_state_auto_review_templates.py`: `issues/issue-1-design.md` を含む変更が `common` / `docs_only` / `design` に、`issues/notes.md` と `docs/x-design.md` だけの変更が `design` を含まない |
 | AC15 | 目で見る（テンプレートの文言） |
@@ -310,7 +329,7 @@ sequenceDiagram
 | 項目 | 内容 |
 | --- | --- |
 | ラウンドが実際に減るか | この変更の効果は、配布後の設計 PR のラウンド数で見る。比べる手段は #893 が作る。手元では退避された状態ファイル（`.git/ndf/worktree-trash/*/.cross_review/`）の `rounds` を数えて比べられる |
-| 出し切りの指示で 1 ラウンド目の出力が増えるか | 増えると担当の所要が延びる。agy は既定から外れるため、無進捗の許容（480 秒）に当たる担当は既定では居ない。codex の無進捗の許容は 180 秒で、実装の PR の cross-review で所要を見る |
+| 出し切りの指示で 1 ラウンド目の出力が増えるか | 増えると担当の所要が延びる。既定の担当の無進捗の許容は codex 180 秒・kiro 480 秒・claude 900 秒で、実装の PR の cross-review で 3 者の所要と打ち切りの有無を見る |
 | 控えの大きさ | #908 の実行 3 で控えは 54,957 バイトだった。取り直しで同じ実行の指摘と返信の行が増える。実装の PR の cross-review で大きさを見る（圧縮は範囲外） |
 | #892 の後の母集合で動いた実行が無い | claude が座席に入った実行は手元の記録にまだ無い。この変更の後の既定（claude / codex / kiro）で 2 ラウンド目に claude が座る |
 | 設計 PR の見分けの取りこぼし | ファイル名の規約（`-requirements.md` / `-design.md` / `-design-decisions.md`）から外れた設計文書は `design` に分類されない。`issues/` 配下の既存の設計文書の名前は、実装の時点で `ls issues/*design*` で確かめる |
