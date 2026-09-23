@@ -56,7 +56,7 @@
 
 | 観点 | 確かめ方 |
 | --- | --- |
-| 監視の環境変数を設定したシェルでも、全体のテストの失敗が 0 件で、設定しないシェルと件数が一致すること | `MONITOR_TIMEOUT_AGY=1800 MONITOR_STALL_AGY=1800 uv run --with pytest pytest scripts/tests plugins/ndf -q` と、設定しない同じコマンドを比べる |
+| 監視の環境変数を設定したシェルでも、全体のテストの失敗が 0 件で、設定しないシェルと件数が一致すること | `MONITOR_TIMEOUT_AGY=1800 MONITOR_STALL_AGY=1800 uv run --with pytest --with pytest-xdist pytest scripts/tests plugins/ndf -q -n auto` と、設定しない同じコマンドを比べる |
 | 実行中のテストに接頭辞 `MONITOR_` の環境変数が 1 つも残らないこと | `scripts/tests/test_root_conftest.py` |
 | テストが自分で設定した値は観測できること | 同上 |
 | 別プロセスへ受け継がれないこと | 同上 |

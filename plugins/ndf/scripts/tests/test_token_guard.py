@@ -362,7 +362,9 @@ def test_lock_held_passes(tmp_path, state):
     (lock / "held").write_text("")
     (lock / "pid").write_text(str(os.getpid()))
     (lock / "token").write_text("t")
-    for _ in range(4):
+    # 3 回目は排他を取れれば拒否される回数である（test_repeat_read_denied_on_third）。
+    # 1 回ごとに排他の上限（1 秒）を待つため、それを越えて回さない（#884）
+    for _ in range(3):
         assert denied(run(read(f), state)) is None
 
 
