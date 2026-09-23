@@ -209,7 +209,7 @@ alias は子のプロセスには効かないため、中継は実体を探す�
 
 | # | 段 | すること |
 | ---: | --- | --- |
-| I1 | 止める | `NDF_RELAY_AUTO=0` なら何もしない |
+| I1 | 止める | `NDF_RELAY_AUTO=0` なら何もしない。それ以外は `${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/install.lock` を `fcntl.flock` で取り（待つのは 2 秒まで。取れなければ何もせず終わる）、**I2〜I7 をすべてこのロックの中で確かめて書く**。同じ HOME で Claude Code が同時に起動しても、囲み・バックアップ・知らせは 1 回になる |
 | I2 | 中継を置き直す | 自分（hook の版の `relay.py`）と安定した場所の写しの中身が違うとき、または写しが無いときだけ、一時ファイルに書いてから置き換える（権限 `0755`）。同じなら何もしない |
 | I3 | 足す先を決める | `$SHELL` の名前が `bash` なら `~/.bashrc`、`zsh` なら `${ZDOTDIR:-$HOME}/.zshrc`。それ以外のシェルでは足さない（何も出さない） |
 | I4 | 既にあるか | 足す先に囲みの開きの行 `# >>> ndf relay >>>` があれば何もしない |
@@ -362,13 +362,13 @@ stateDiagram-v2
 | 段 | すること |
 | --- | --- |
 | 中継する | 始める前に自分の端末の属性を `tcgetattr` で保存し、標準入力を raw にする。**保存した属性は、正常な終わり・例外・SIGTERM と SIGHUP の受け取りのすべての経路で `tcsetattr` により戻す**（`try` / `finally` とシグナルの受け取りの中で戻す）。戻さないと、シェルへ戻った後の端末が raw のまま残る。`select` で標準入力 → マスタ、マスタ → 標準出力を流す。SIGWINCH を受けたら自分の端末の大きさをマスタへ `TIOCSWINSZ` で写す。2 秒ごとに `next.json` を見る（スクリプトの中の待ちで、LLM は使わない）。子の終わりは `waitpid(WNOHANG)` で見る |
-| 静まりを待つ | 次の 3 つがそろうまで待つ。(1) 印の `written_at`・`transcript_path` の更新時刻・利用者の最後の入力の時刻のうち最も遅いものから `--quiet` 秒たつ。(2) 会話の記録に `/goal` の目標がある区間では、印の `written_at` より後の `goal_status` の記録がある。(3) 印が消えていない。判定が止めを拒んだときは応答が続いて記録が動き、次の Stop で印が書き直されるか消える |
+| 静まりを待つ | 次の 3 つがそろうまで待つ。(1) 印の `written_at`・`transcript_path` の更新時刻・利用者の最後の入力の時刻のうち最も遅いものから `NDF_RELAY_QUIET` 秒（既定 15）たつ。(2) 会話の記録に `/goal` の目標がある区間では、印の `written_at` より後の `goal_status` の記録がある。(3) 印が消えていない。判定が止めを拒んだときは応答が続いて記録が動き、次の Stop で印が書き直されるか消える |
 | 続けさせる | 停止の印があるか、1 日の起動回数が上限か、空回り（直前の 2 つの `end` の `seconds` がともに 120 未満で、今の区間の長さ＝印の `written_at` − その区間の `start` の `at` も 120 未満）なら、`/exit` を入力しない。`stop` の行を書き、`ndf-relay:` の 1 行を出し、印を消す。以後は中継するだけで、次の印では何もしない |
 | 終わらせる | 子の端末へ `/exit` を書き、1 秒おいて `\r` を書く。`waitpid` で 30 秒まで待ち、終わらなければ SIGTERM を送って 10 秒まで待ち、それでも終わらなければ SIGKILL を送って終わりを待つ（SIGKILL の後は必ず終わる）。**子の終わりを `waitpid` で確かめてから** `end` を書き、次へ進む |
-| 起動する | マーケットプレイスの名前が読めていれば、`claude plugin marketplace update <マーケットプレイス>` → `claude plugin update ndf@<マーケットプレイス> -y` → `claude plugin list --json` で版を読む。どれかが 0 以外で終われば `update-failed` で終わる。名前が読めていなければ（下の段落）、更新を飛ばして `plugin_version` を空にし、起動へ進む。作業ディレクトリは印の `cwd` で、消えていれば、パスに `/.worktrees/` を含むならその手前（主ディレクトリ）を、含まなければ在る最も近い親を使う。区切りの 1 行を出す。**起動の順序は、印を消す → `pty.fork()` → 子は同期のパイプの読み口で待つ → 親が `child.pid` と `start` の行を書く → 親が同期のパイプを閉じる → 子が `<本物の claude> <中身>` を exec する、に固定する。** **exec の成否は、close-on-exec の結果のパイプで親へ返す。** 子は exec が失敗したら `errno` をそのパイプへ書いて終わる。親は読み口が何も読まずに閉じれば成功、読めれば `start-failed` として、`end` を書かずに `stop` の行（理由と `errno`）と次のコマンドを出して終了コード 2 で終わる。** 子がすぐ Stop に達しても、hook が読む `child.pid` は新しい値で、親が消す印は前の区間のものだけになる（「本物の claude」の絶対パスと引数の配列で `os.execve` に渡し、シェルも `PATH` の探索も通さない。環境から `CLAUDECODE` / `CLAUDE_CODE_SESSION_ID` / `CLAUDE_CODE_ENTRYPOINT` を外し、`NDF_RELAY_DIR` を置く）。起動できなければ `start-failed` で終わる |
+| 起動する | マーケットプレイスの名前が読めていれば、`claude plugin marketplace update <マーケットプレイス>` → `claude plugin update ndf@<マーケットプレイス> -y` → `claude plugin list --json` で版を読む。どれかが 0 以外で終われば `update-failed` で終わる。名前か版が読めなければ（下の段落）、同じく `update-failed` で終わる（次の区間を起動せず、次のコマンドを画面に出す）。作業ディレクトリは印の `cwd` で、消えていれば、パスに `/.worktrees/` を含むならその手前（主ディレクトリ）を、含まなければ在る最も近い親を使う。区切りの 1 行を出す。**起動の順序は、印を消す → `pty.fork()` → 子は同期のパイプの読み口で待つ → 親が `child.pid` と `start` の行を書く → 親が同期のパイプを閉じる → 子が `<本物の claude> <中身>` を exec する、に固定する。** **exec の成否は、close-on-exec の結果のパイプで親へ返す。** 子は exec が失敗したら `errno` をそのパイプへ書いて終わる。親は読み口が何も読まずに閉じれば成功、読めれば `start-failed` として、`end` を書かずに `stop` の行（理由と `errno`）と次のコマンドを出して終了コード 2 で終わる。** 子がすぐ Stop に達しても、hook が読む `child.pid` は新しい値で、親が消す印は前の区間のものだけになる（「本物の claude」の絶対パスと引数の配列で `os.execve` に渡し、シェルも `PATH` の探索も通さない。環境から `CLAUDECODE` / `CLAUDE_CODE_SESSION_ID` / `CLAUDE_CODE_ENTRYPOINT` を外し、`NDF_RELAY_DIR` を置く）。起動できなければ `start-failed` で終わる |
 
 **マーケットプレイスの名前は、中継を始めたときに `claude plugin list --json` の `ndf@<名前>` から読む。**
-開発版のチャネルを使う利用者でも、登録した取得元から更新される。読めなければ更新を飛ばし、`plugin_version` を空にする。
+開発版のチャネルを使う利用者でも、登録した取得元から更新される。区間の切れ目でもう一度読み、読めなければ `update-failed` とする。版を記録できないまま次の区間を起動しないためである（AC8）。
 
 **子が印を書かずに終わったら、中継も終わる**（AC12）。人が `/exit` した・Ctrl-C を 2 回押した・落ちたの
 いずれかで、同じコマンドを起動し直しても進まないためである。利用者から見ると、普段の claude を終えたときと同じくシェルへ戻る。
@@ -414,7 +414,7 @@ stateDiagram-v2
 | AC16 | 同: AC4 の `NDF_RELAY_DIR` 無し。`hooks/claude.json` 以外の hook の定義の差分が無いことを実装の Pull Request の差分で見る |
 | AC19 | 同: 引数なしの `run` で 1 つ目の子の引数が空、`run --model haiku -c` で 1 つ目の子が同じ引数を受け、2 つ目の子は `<印の中身>` だけを受けること。試験用の子が印なしで終了コード 3 で終わると、中継も何も出さずに終了コード 3 で終わること。シグナル 15 で終わると 143 |
 | AC20 | 同: `PATH` の前に `claude` という名前で中継を呼ぶラッパーを置くと、それを飛ばして本物を選ぶこと。`NDF_RELAY_DEPTH=2` では終了コード 127 と 1 行を出すこと。`NDF_RELAY_CLAUDE` が最優先になること |
-| AC21 | 同: 一時の HOME と `SHELL=/bin/bash` で `install` を打つ。1 回目: 安定した場所に写しができ、`~/.bashrc` に囲みが 1 つ足され、バックアップと `rc-added` の記録ができ、`systemMessage` が 1 行出る。2 回目: 何も書かず何も出さない（ファイルの中身と更新時刻が変わらない）。囲みを消した後の 3 回目: 足さない。`~/.bashrc` に `alias claude=` がある: 足さず、案内は 1 回目だけ。`NDF_RELAY_AUTO=0`: 何もしない。`SHELL=/bin/fish`: 写しだけを置き直し、設定は書かない。写しと中身が違う `relay.py` から打つと写しが置き換わる。書けないディレクトリでも終了コード 0 |
+| AC21 | 同: 一時の HOME と `SHELL=/bin/bash` で `install` を打つ。1 回目: 安定した場所に写しができ、`~/.bashrc` に囲みが 1 つ足され、バックアップと `rc-added` の記録ができ、`systemMessage` が 1 行出る。2 回目: 何も書かず何も出さない（ファイルの中身と更新時刻が変わらない）。囲みを消した後の 3 回目: 足さない。`~/.bashrc` に `alias claude=` がある: 足さず、案内は 1 回目だけ。`NDF_RELAY_AUTO=0`: 何もしない。`SHELL=/bin/fish`: 写しだけを置き直し、設定は書かない。写しと中身が違う `relay.py` から打つと写しが置き換わる。書けないディレクトリでも終了コード 0。同じ一時の HOME で `install` を 4 つ同時に起動しても、囲みは 1 つ・バックアップは 1 つ・`systemMessage` は 1 回であること |
 | AC22 | 実装の Pull Request の差分で、`install` を呼ぶのが `hooks/claude.json` の SessionStart だけで、Codex / agy の hook の定義に無いこと。`claude plugin validate` が通ること |
 | AC23 | `test_token_guard.py`: `NDF_RELAY_DIR` と `child.pid` を用意し、親のたどりを差し替えて中継の直接の子の conductor にすると、上限を超えた持ち場の Agent の起動が 2 回続けて止まること（1 度の通しが無い）。理由の欄が `ndf-next` と「動いている supervisor の報告を待つ」を含むこと。中継の外では今までどおり 2 回目が通ること |
 | AC24 | `test_relay.py`: ブロックが 1 つでも `background_tasks` に `running` が 1 件ある標準入力では印を書かず、前の印を消すこと。`background_tasks` が空の配列のときは書くこと |
