@@ -233,7 +233,7 @@ alias claude='python3 "${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py" run'
 
 ### 作業ディレクトリ `NDF_RELAY_DIR`
 
-`${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/<起動の時刻（UTC、`%Y%m%dT%H%M%SZ`）>-<中継の pid>-<乱数 8 桁>/`。権限は `0700`。`run` が `os.mkdir` で新しく作り（既にあれば別の乱数で作り直す。前の起動のディレクトリを使い回さない）、子の環境変数 `NDF_RELAY_DIR` に置く。pid が再利用されても、前の起動の `stop` / `next.json` / `child.pid` は別のディレクトリに残るため、今回の中継が読むことはない。
+`${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/<起動の時刻（UTC の %Y%m%dT%H%M%SZ）>-<中継の pid>-<乱数 8 桁>/`。権限は `0700`。`run` が `os.mkdir` で新しく作り（既にあれば別の乱数で作り直す。前の起動のディレクトリを使い回さない）、子の環境変数 `NDF_RELAY_DIR` に置く。pid が再利用されても、前の起動の `stop` / `next.json` / `child.pid` は別のディレクトリに残るため、今回の中継が読むことはない。
 `run` が終わるとき `relay.pid` を消す（`log.jsonl` は残す）。1 日の起動回数は、この親のディレクトリの全 `log.jsonl` の今日の `start` を数える。
 
 | ファイル | 書く側 | 中身 |
