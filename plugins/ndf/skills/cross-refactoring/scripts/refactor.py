@@ -95,12 +95,8 @@ from refactor_lib.vocabulary import (  # noqa: E402
 
 # ---------------- main ----------------
 
-def main() -> None:
-    p = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    )
-    sub = p.add_subparsers(dest="cmd", required=True)
-
+def add_init_parser(sub: argparse._SubParsersAction) -> None:
+    """`init` を登録する。"""
     init = sub.add_parser(
         "init",
         help="Step 0 — ホスト確定 / 参加者の確定 / 作業ディレクトリ root / 状態初期化・再開")
@@ -181,6 +177,9 @@ def main() -> None:
     init.add_argument("--worktree-root", default=None)
     init.set_defaults(func=cmd_init)
 
+
+def add_id_commands(sub: argparse._SubParsersAction) -> None:
+    """提案ラウンドの番号 `id` だけを受け取る副コマンドを登録する。"""
     for name, func, help_ in (
         ("start-round", cmd_start_round,
          "Step 2 — 提案ラウンドを開く。実装担当を返す"),
@@ -198,6 +197,9 @@ def main() -> None:
         sp.add_argument("id", type=int)
         sp.set_defaults(func=func)
 
+
+def add_round_commands(sub: argparse._SubParsersAction) -> None:
+    """`id` と適用ラウンドの `round` を受け取る副コマンドを登録する。"""
     for name, func, help_ in (
         ("next-apply-round", cmd_next_apply_round,
          "Step 4 — 次の適用ラウンド（群）を開く。実装担当と対象の項目を返す"),
@@ -214,6 +216,9 @@ def main() -> None:
         sp.add_argument("round", type=int)
         sp.set_defaults(func=func)
 
+
+def add_dry_run_commands(sub: argparse._SubParsersAction) -> None:
+    """`id` / `round` に加えて `--dry-run` を受け取る副コマンドを登録する。"""
     # コミットを取り消しうる 2 つは、実行前に何が消えるかを確かめられるようにする。
     for name, func, help_ in (
         ("merge-apply", cmd_merge_apply,
@@ -228,6 +233,9 @@ def main() -> None:
                         help="取り消すコミットを表示するだけで実行しない")
         sp.set_defaults(func=func)
 
+
+def add_assess_parser(sub: argparse._SubParsersAction) -> None:
+    """`assess` を登録する。"""
     ap = sub.add_parser(
         "assess",
         help="構造改善を飛ばしてよいかを差分から判定する。"
@@ -239,12 +247,28 @@ def main() -> None:
                          f"(default: {DEFAULT_MAX_LINES})")
     ap.set_defaults(func=cmd_assess)
 
+
+def add_report_parser(sub: argparse._SubParsersAction) -> None:
+    """`report` を登録する。"""
     rp = sub.add_parser(
         "report", help="Step 8 — ラウンド表・項目表・見送り・指標")
     rp.add_argument("id", type=int)
     rp.add_argument("--metrics", action="store_true",
                     help="ランタイムとモデルの組で指標を集計する")
     rp.set_defaults(func=cmd_report)
+
+
+def main() -> None:
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    sub = p.add_subparsers(dest="cmd", required=True)
+    add_init_parser(sub)
+    add_id_commands(sub)
+    add_round_commands(sub)
+    add_dry_run_commands(sub)
+    add_assess_parser(sub)
+    add_report_parser(sub)
 
     args = p.parse_args()
     args.func(args)

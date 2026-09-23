@@ -67,10 +67,9 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
     standalone = not state.get("workflow_step")
 
     if standalone and not _round_test_differs(state):
-        gate["mode"] = "cross-review"
-        statefile.save(path, state)
-        info("単独起動のため、Step 7 は /ndf:cross-review を実行します")
-        statefile.emit(FINAL_GATE="cross-review")
+        _emit_cross_review(
+            path, state, gate, "単独起動のため、Step 7 は /ndf:cross-review を実行します"
+        )
         return
 
     # **排他である。** `--ci-check` があれば手元のテストを実行せず継続的統合の成功
@@ -82,40 +81,76 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
     passed, detail = (
         _ci_gate(state, ci_check) if ci_check else _local_gate(state)
     )
-    gate.setdefault("checks", []).append({
-        "at": statefile.now(),
-        "mode": gate["mode"],
-        "command": ci_check or _baseline_command(state),
-        "status": "pass" if passed else "fail",
-        "detail": detail,
-        "seconds": round(time.monotonic() - started, 1),
-    })
+    _record_gate_check(
+        gate, ci_check or _baseline_command(state), passed, detail,
+        round(time.monotonic() - started, 1),
+    )
 
     if passed and standalone:
-        gate["mode"] = "cross-review"
-        statefile.save(path, state)
-        info(f"✅ 全体のテストが通りました（{detail}）。Step 7 は /ndf:cross-review を実行します")
-        statefile.emit(FINAL_GATE="cross-review")
+        _emit_cross_review(
+            path, state, gate,
+            f"✅ 全体のテストが通りました（{detail}）。Step 7 は /ndf:cross-review を実行します",
+        )
         return
-
     if passed:
-        gate["status"] = "passed"
-        statefile.save(path, state)
-        info(f"✅ 最終ゲートを通過しました（{detail}）")
-        statefile.emit(FINAL_GATE="passed")
+        _gate_passed(path, state, gate, detail)
         return
 
     limit = safe_int(state.get("max_fix_rounds"), 3)
     if safe_int(gate.get("fix_rounds")) >= limit:
-        gate["status"] = "failed"
-        statefile.save(path, state)
-        info(
-            f"❌ 最終ゲートが通らないまま修正の上限 {limit} に達しました（{detail}）。"
-            "**既に push してあるため取り消しません。** 失敗として報告します"
-        )
-        statefile.emit(FINAL_GATE="failed")
-        sys.exit(1)
+        _gate_limit_reached(path, state, gate, detail, limit)
+    _gate_failing(path, state, gate, detail, limit)
 
+
+def _emit_cross_review(
+    path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], message: str
+) -> None:
+    """Step 7 を `cross-review` へ委譲する結末。"""
+    gate["mode"] = "cross-review"
+    statefile.save(path, state)
+    info(message)
+    statefile.emit(FINAL_GATE="cross-review")
+
+
+def _record_gate_check(
+    gate: dict[str, Any], command: str, passed: bool, detail: str, seconds: float
+) -> None:
+    """最終ゲートの検査 1 件を `checks` へ追記する。"""
+    gate.setdefault("checks", []).append({
+        "at": statefile.now(),
+        "mode": gate["mode"],
+        "command": command,
+        "status": "pass" if passed else "fail",
+        "detail": detail,
+        "seconds": seconds,
+    })
+
+
+def _gate_passed(
+    path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], detail: str
+) -> None:
+    gate["status"] = "passed"
+    statefile.save(path, state)
+    info(f"✅ 最終ゲートを通過しました（{detail}）")
+    statefile.emit(FINAL_GATE="passed")
+
+
+def _gate_limit_reached(
+    path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], detail: str, limit: int
+) -> None:
+    gate["status"] = "failed"
+    statefile.save(path, state)
+    info(
+        f"❌ 最終ゲートが通らないまま修正の上限 {limit} に達しました（{detail}）。"
+        "**既に push してあるため取り消しません。** 失敗として報告します"
+    )
+    statefile.emit(FINAL_GATE="failed")
+    sys.exit(1)
+
+
+def _gate_failing(
+    path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], detail: str, limit: int
+) -> None:
     gate["fix_rounds"] = safe_int(gate.get("fix_rounds")) + 1
     gate["status"] = "failing"
     # **修正の起点と担当をここで記録する。** 記録しないと `merge-final-fix` が範囲を

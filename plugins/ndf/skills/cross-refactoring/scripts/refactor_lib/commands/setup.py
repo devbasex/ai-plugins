@@ -362,19 +362,73 @@ def cmd_init(args: argparse.Namespace) -> None:
     codex / kiro とホストを既定とし、足す者・外す者で変える。確認を通らない者は外して
     続ける。前回の状態が残っていれば再開し、渡した引数を反映の表に従って扱う。
     """
+    inputs = _resolve_init_inputs(args)
+    if inputs is None:
+        return
+    prep = _prepare_init(args)
+    if _resume_if_pending(args, inputs, prep):
+        return
+
+    for key, value in NEW_RUN_DEFAULTS.items():
+        if getattr(args, key, None) is None:
+            setattr(args, key, value)
+
+    participants, baseline, round_record = _verify_init(args, inputs, prep)
+    state = _save_initial_state(args, inputs, prep, participants, baseline, round_record)
+    # **出力は入口から直接呼ぶ。** 手順書の変数の出所の検査
+    # （`scripts/check-skill-shell-vars.py`）は `cmd_*` からヘルパーを 1 段だけたどる。
+    _emit_init(state)
+
+
+@dataclass
+class _InitInputs:
+    """`init` の引数から解決したホスト・モデル・足す者・外す者。"""
+
+    host: str
+    detection: str
+    model_spec: dict[str, Optional[str]]
+    include: Optional[list[str]]
+    exclude: Optional[list[str]]
+
+
+@dataclass
+class _InitPreparation:
+    """Pull Request の文脈と、用意した作業ディレクトリ。"""
+
+    repo: str
+    base_branch: str
+    head_branch: str
+    is_own_pr: bool
+    root: pathlib.Path
+    work: pathlib.Path
+    tmp_dir: pathlib.Path
+    state_file: pathlib.Path
+    round_test: Optional[str]
+
+
+def _resolve_init_inputs(args: argparse.Namespace) -> Optional[_InitInputs]:
+    """ホスト・モデル・足す者・外す者を解決する。解決できなければ止めて `None` を返す。"""
     try:
         host, detection = assignment.detect_host(args.host)
     except assignment.AssignmentError as e:
         die(str(e))
-        return
+        return None
     try:
         model_spec = models_lib.parse_model_args(args.model)
     except models_lib.ModelSpecError as e:
         die(str(e))
-        return
-    include = _names_arg(args, "include")
-    exclude = _names_arg(args, "exclude")
+        return None
+    return _InitInputs(
+        host=host,
+        detection=detection,
+        model_spec=model_spec,
+        include=_names_arg(args, "include"),
+        exclude=_names_arg(args, "exclude"),
+    )
 
+
+def _prepare_init(args: argparse.Namespace) -> _InitPreparation:
+    """Pull Request の文脈を取り、作業ディレクトリを用意して `--scope` の関門を通す。"""
     # リポジトリ名は git の設定から求め、Pull Request の応答で確かめる（#271）。
     repo, base_branch, head_branch, is_own_pr, author = _fetch_pr_context(args.pr)
     if is_own_pr:
@@ -402,42 +456,73 @@ def cmd_init(args: argparse.Namespace) -> None:
 
     tmp_dir = tmp_dir_for(work)
     tmp_dir.mkdir(parents=True, exist_ok=True)
-    state_file = state_path(tmp_dir, args.pr)
-
-    if state_file.exists():
-        state = statefile.load(state_file)
-        if state.get("final") is None:
-            _resume(state_file, state, args, model_spec, include, exclude, is_own_pr)
-            return
-
-    for key, value in NEW_RUN_DEFAULTS.items():
-        if getattr(args, key, None) is None:
-            setattr(args, key, value)
-
-    # **確認は着手前のテストより先に行う。** 使える者がいなければ、テストに時間を
-    # 使わずに止める。
-    participants = resolve_participants(
-        host, include or [], exclude or [], bool(getattr(args, "require_all", None)))
-    _warn_unmeasurable_models(model_spec, participants["available"])
-
-    hint = round_test_hint(round_test, args.baseline_test, args.scope, str(work))
-    if hint:
-        info(hint)
-
-    baseline = _run_baseline_test(args.baseline_test, work, args.test_timeout)
-    round_record = _run_round_test(round_test, baseline, work, args.test_timeout)
-
-    context = InitialContext(
+    return _InitPreparation(
         repo=repo,
         base_branch=base_branch,
         head_branch=head_branch,
+        is_own_pr=is_own_pr,
         root=root,
         work=work,
         tmp_dir=tmp_dir,
-        host=host,
-        detection=detection,
+        state_file=state_path(tmp_dir, args.pr),
+        round_test=round_test,
+    )
+
+
+def _resume_if_pending(
+    args: argparse.Namespace, inputs: _InitInputs, prep: _InitPreparation
+) -> bool:
+    """終わっていない前回の状態があれば再開し、`True` を返す。"""
+    if not prep.state_file.exists():
+        return False
+    state = statefile.load(prep.state_file)
+    if state.get("final") is not None:
+        return False
+    _resume(prep.state_file, state, args, inputs.model_spec,
+            inputs.include, inputs.exclude, prep.is_own_pr)
+    return True
+
+
+def _verify_init(
+    args: argparse.Namespace, inputs: _InitInputs, prep: _InitPreparation
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """参加者を確定し、着手前のテストと範囲のテストを実行する。"""
+    # **確認は着手前のテストより先に行う。** 使える者がいなければ、テストに時間を
+    # 使わずに止める。
+    participants = resolve_participants(
+        inputs.host, inputs.include or [], inputs.exclude or [],
+        bool(getattr(args, "require_all", None)))
+    _warn_unmeasurable_models(inputs.model_spec, participants["available"])
+
+    hint = round_test_hint(prep.round_test, args.baseline_test, args.scope, str(prep.work))
+    if hint:
+        info(hint)
+
+    baseline = _run_baseline_test(args.baseline_test, prep.work, args.test_timeout)
+    round_record = _run_round_test(prep.round_test, baseline, prep.work, args.test_timeout)
+    return participants, baseline, round_record
+
+
+def _save_initial_state(
+    args: argparse.Namespace,
+    inputs: _InitInputs,
+    prep: _InitPreparation,
+    participants: dict[str, Any],
+    baseline: dict[str, Any],
+    round_record: dict[str, Any],
+) -> dict[str, Any]:
+    """初期の状態を組み立てて保存し、保存した状態を返す。"""
+    context = InitialContext(
+        repo=prep.repo,
+        base_branch=prep.base_branch,
+        head_branch=prep.head_branch,
+        root=prep.root,
+        work=prep.work,
+        tmp_dir=prep.tmp_dir,
+        host=inputs.host,
+        detection=inputs.detection,
         participants=participants,
-        model_spec=model_spec,
+        model_spec=inputs.model_spec,
         baseline=baseline,
         round_test=round_record,
     )
@@ -445,12 +530,12 @@ def cmd_init(args: argparse.Namespace) -> None:
     # GitHub は自分の Pull Request への `APPROVE` と `REQUEST_CHANGES` を
     # `HTTP 422` で拒む。判定はそのまま結果ファイルへ残し、**投稿の event だけ**
     # を倒す。収束判定は結果ファイルの判定を見るので、倒しても進行は変わらない。
-    _apply_post_event(state, is_own_pr)
-    statefile.save(state_file, state)
-    info(f"✅ 状態を初期化しました: {state_file}")
-    info(f"   ホスト: {host}（{detection}）")
+    _apply_post_event(state, prep.is_own_pr)
+    statefile.save(prep.state_file, state)
+    info(f"✅ 状態を初期化しました: {prep.state_file}")
+    info(f"   ホスト: {inputs.host}（{inputs.detection}）")
     info(f"   参加者（提案と適用）: {' / '.join(state['runtimes'])}")
-    _emit_init(state)
+    return state
 
 
 def _resume(

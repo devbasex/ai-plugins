@@ -11,6 +11,7 @@ import posixpath
 import re
 
 from collections import Counter
+from dataclasses import dataclass
 
 from typing import Any, Iterable, Optional
 
@@ -262,49 +263,83 @@ def verify_apply_round(
     `tracked_md` は追跡している `.md` の一覧（`tracked_markdown()`）、`work` は
     補助モジュールを git から読む作業ディレクトリである（`doc_wording_tests`）。
     """
-    if not facts:
+    context = _ApplyRoundContext(items, facts, scope, work, tracked_md)
+    for stage in _APPLY_ROUND_STAGES:
+        problem = stage(context)
+        if problem:
+            return problem
+    return None
+
+
+@dataclass
+class _ApplyRoundContext:
+    """`verify_apply_round` の各段が受け取る入力。"""
+
+    items: list[dict[str, Any]]
+    facts: list[dict[str, Any]]
+    scope: Optional[Iterable[str]]
+    work: Optional[str]
+    tracked_md: Iterable[str]
+
+
+def _apply_round_basics(context: _ApplyRoundContext) -> Optional[str]:
+    """コミットの実在と、各コミットの基礎検査。"""
+    if not context.facts:
         return (
             "コミットが 1 件もありません"
             "（適用ラウンド = 1 コミットの前提を満たしていません）"
         )
 
-    for commit in facts:
+    for commit in context.facts:
         problem = _verify_commit_basics(
             commit,
-            scope,
+            context.scope,
             f"コミット {commit.get('sha', '?')} が base..head の範囲にありません"
             "（申告だけで実体がありません）",
             check_test=False,
         )
         if problem:
             return problem
+    return None
 
-    problem = _verify_test_gap_present(items, facts)
+
+def _apply_round_test_protection(context: _ApplyRoundContext) -> Optional[str]:
+    """現状固定テストの有無と、テストの期待値の変更。"""
+    problem = _verify_test_gap_present(context.items, context.facts)
     if problem:
         return problem
 
     # **テストの期待値が変わっていないか**（#443）。段 1（機械）で決まるものだけを
     # ここで落とす。決まらないものは `pending_test_judgements` が集め、進行側が
     # 段 2（AI エージェント）へ渡す。
-    changes = collect_test_changes(facts)
-    problem = verify_test_changes(changes)
-    if problem:
-        return problem
+    changes = collect_test_changes(context.facts)
+    return verify_test_changes(changes)
 
+
+def _apply_round_diff_constraints(context: _ApplyRoundContext) -> Optional[str]:
+    """文言固定テスト・差分予算・コミット粒度。"""
     # **文書の文言を固定するテストを足していないか**（#723）。
-    hits = doc_wording_tests(facts, tracked_md, work)
+    hits = doc_wording_tests(context.facts, context.tracked_md, context.work)
     if hits:
         return (
             "文書の文言を固定するテストは足さない"
             f"（{'、'.join(f'{path}: {literal}' for path, literal in hits)}）"
         )
 
-    problem = _verify_diff_budget(items, facts)
+    problem = _verify_diff_budget(context.items, context.facts)
     if problem:
         return problem
 
     # 粒度は最後に見る。トレーラーや範囲の問題を粒度の失敗で覆い隠さない。
-    return _verify_apply_commit_count(facts)
+    return _verify_apply_commit_count(context.facts)
+
+
+# 検査の順序そのものが規則である。先の段の問題を後の段の失敗で覆い隠さない。
+_APPLY_ROUND_STAGES = (
+    _apply_round_basics,
+    _apply_round_test_protection,
+    _apply_round_diff_constraints,
+)
 
 
 def commit_limit_for(item: dict[str, Any]) -> int:
