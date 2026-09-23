@@ -60,7 +60,7 @@
 - 待ち方の規約の置き場所を 1 つに決め、supervisor / worker への指示の雛形から参照させる（#829）
 - PreToolUse hook で、前景の `sleep` で待つ Bash（ループの待ちと長い `sleep`）と、変わらないファイルの同じ範囲への連続 Read を拒否し、代わりの待ち方を案内する（#829）
 - PreToolUse:Skill hook で、会話の文脈量が上限を超えた状態の工程 Skill の起動を止め、新しい会話で始める 1 行を案内する（#830）
-- `development-workflow` が工程を 1 つ終えるたびに、次に打つコマンドを 1 行で出す規約（#830）
+- `context-window.md` の 4 つの切れ目と文脈量の hook の拒否で、conductor が次に打つコマンドを 1 行で出す規約（#830）
 - `context-window.md` の「前提: 実測ではない」を #827 の実測値へ書き換える（#830）
 - 4 ランタイムでの扱い（hook が効くランタイムと、規約だけで守るランタイムの区別）
 
@@ -81,7 +81,7 @@
 | 前景の Bash | `run_in_background` を付けずに実行する Bash。終わるまで呼び出しが返らない |
 | 文脈量 | 1 回の API 呼び出しで読んだトークン数。`input_tokens + cache_read_input_tokens + cache_creation_input_tokens` |
 | 工程 Skill | `development-workflow` の工程表が起動する Skill（`requirements-design` / `design` / `pr` など） |
-| 引き継ぎの 1 行 | 新しい会話の最初に打てば、その工程から再開できるコマンド 1 行 |
+| 引き継ぎの 1 行 | 新しい会話の最初に打てば、その工程から再開できるコマンド 1 行。`context-window.md` の 4 つの切れ目と文脈量の hook の拒否で conductor が出す |
 
 ## 受け入れ条件
 
@@ -118,7 +118,8 @@
 
 ### 引き継ぎの 1 行（#830）
 
-- [ ] AC18: `development-workflow` は、工程を 1 つ終えるたびに、次の工程を始めるコマンド 1 行（`/ndf:development-workflow #<issue>` の形。工程 Skill はモードと作業ツリーを戻す手順を持たないため）を出す
+- ~~AC18: `development-workflow` は、工程を 1 つ終えるたびに、次の工程を始めるコマンド 1 行（`/ndf:development-workflow #<issue>` の形。工程 Skill はモードと作業ツリーを戻す手順を持たないため）を出す~~ → 変更（2026-09-23、PR #843 のレビュー 3 回目。3 層では conductor が工程の終わりを観測しないため、既存の切れ目にそろえた）
+- [ ] AC18: conductor は、`context-window.md` の 4 つの切れ目（ドキュメントレビューのマージの後 / 構造改善と実装レビューの前後 / Pull Request を出した後 / 配布の後）で、次の工程を始めるコマンド 1 行（`/ndf:development-workflow #<issue>` の形。工程 Skill はモードと作業ツリーを戻す手順を持たないため）を出す。3 層では supervisor の持ち場の境がこの切れ目に当たるため、conductor が `## 持ち場の報告` を受け取った時点で出す（supervisor は出さない）。文脈量の hook が拒否したときにも出す
 - [ ] AC19: そのコマンド 1 行だけで始めた新しい会話が、課題の本文の `## 進行`・Pull Request・通過工程の控えから、モード・作業ツリー・現在の工程を戻せる。戻す手順が文書にある
 - [ ] AC20: AC19 を、実際の課題 1 件で新しい会話から再開して確かめ、結果を本 issue に残している
 

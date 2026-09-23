@@ -24,7 +24,7 @@ conductor はその 1 行を利用者へ示して止まる。
 | F2 | 前景で `sleep` を使って待つ Bash（ループの待ちと長い `sleep`）を止め、代わりの待ち方を知らせる | Claude Code のエージェント（全層） |
 | F3 | 変わっていないファイルの同じ範囲を続けて読み直す Read を止め、代わりの待ち方を知らせる | 同上 |
 | F4 | 文脈が上限を超えた conductor の工程 Skill の起動を 1 度止め、新しい会話で打つ 1 行を知らせる | conductor と、それを見る利用者 |
-| F5 | 工程を 1 つ終えるたびに、次の工程を始める 1 行を出す | conductor（全ランタイム） |
+| F5 | `context-window.md` の 4 つの切れ目（ドキュメントレビューのマージの後 / 構造改善と実装レビューの前後 / Pull Request を出した後 / 配布の後）と、文脈量の hook が拒否したときに、次の工程を始める 1 行を出す | conductor（全ランタイム） |
 | F6 | その 1 行から始めた新しい会話で、モード・作業ツリー・現在の工程を戻す | conductor（全ランタイム） |
 | F7 | hook を種類ごとに止める・上限を変える | 利用者 |
 
@@ -38,7 +38,7 @@ conductor はその 1 行を利用者へ示して止まる。
 | `development-workflow/references/waiting.md` | 新設 | 待ち方の規約の唯一の置き場所（F1） |
 | `development-workflow/references/agent-layers.md` | 変更 | supervisor の規則 4 と worker の規則に、`waiting.md` への参照を 1 行ずつ足す |
 | `development-workflow/references/context-window.md` | 変更 | 「前提: 実測ではない」を #827 の実測へ置き換える。hook の上限と引き継ぎの 1 行の節を足す |
-| `development-workflow/SKILL.md` | 変更 | 工程を終えるたびに 1 行を出す規約と、新しい会話で戻す手順への参照（F5 / F6） |
+| `development-workflow/SKILL.md` | 変更 | `context-window.md` の 4 つの切れ目で conductor が 1 行を出す規約と、新しい会話で戻す手順への参照（F5 / F6） |
 | `external-ai/references/cli-codex.md`・`cli-agy.md`・`qa-security-scan/03-report-template.md`・`release/references/completion-check.md` | 変更 | 前景の待ちのループの直前に「Claude Code では、このループを `run_in_background: true` で実行して完了通知を待つ（`development-workflow/references/waiting.md`）」の 1 行を足す（決定 3） |
 | `plugins/ndf/scripts/tests/test_token_guard.py` | 新設 | F2〜F4 と F7 の判定を、入力 JSON と transcript の見本で確かめる |
 | `plugins/ndf/README.md` | 変更 | hook の一覧に `token-guard.sh` を足し、4 ランタイムでの扱いを表で示す |
@@ -53,7 +53,7 @@ graph TB
     TG["token-guard.sh"]
   end
   subgraph ST["状態"]
-    RS["連続 Read の控え<br/>~/.local/state/ndf/guards/"]
+    RS["連続 Read の控え<br/>#lt;wf_state_dir の親#gt;/guards/"]
     TR["会話の記録<br/>transcript_path"]
     SL["token-guard-stages.txt"]
   end
@@ -112,9 +112,19 @@ plugins/ndf/
 
 ## データ構造
 
-**連続 Read の控えを、会話ごとに 1 つの小さなファイルへ持つ。** 置き場所は
-`${XDG_STATE_HOME:-$HOME/.local/state}/ndf/guards/read-<session_id>.json`。既存の通過工程の控え
-（`~/.local/state/ndf/stages/`）と同じ親に置く。
+**連続 Read の控えを、会話ごとに 1 つの小さなファイルへ持つ。** 置き場所は `guards/read-<session_id>.json`。
+
+**`guards/` の場所は、通過工程の控えの場所から決める。** `token-guard.sh` は
+`development-workflow/scripts/lib/workflow-common.sh` を読み込み、その `wf_state_dir` で
+通過工程の控えの場所を得る。解決順は次のとおりで、先に使えたものを採る。
+
+1. `$CLAUDE_PLUGIN_DATA/stages`
+2. `$XDG_STATE_HOME/ndf/stages`
+3. `$HOME/.local/state/ndf/stages`
+4. `${TMPDIR:-/tmp}/ndf-stages`
+
+`guards/` は得たディレクトリと同じ親に置く。4 番目のときは `${TMPDIR:-/tmp}/ndf-guards` に置く。
+**読み込めないときは Read と文脈量の判定を通す。** sleep の判定は状態を持たないので続ける。
 
 | キー | 型 | 意味 |
 | --- | --- | --- |
@@ -167,7 +177,7 @@ plugins/ndf/
 | 順 | 読むもの | 取り出す値 |
 | --- | --- | --- |
 | 1 | Skill の `args` | `#<数>` と数だけの語 |
-| 2 | このリポジトリの通過工程の控え（`~/.local/state/ndf/stages/<所有者>__<リポジトリ>__<番号>.json`） | 更新時刻が最も新しい控えの番号 |
+| 2 | このリポジトリの通過工程の控え（`wf_state_dir` が返すディレクトリの `<所有者>__<リポジトリ>__<番号>.json`） | 更新時刻が最も新しい控えの番号 |
 | 3 | どちらも無い | `<課題番号>` の文字のまま |
 
 ### 環境変数
@@ -200,8 +210,11 @@ plugins/ndf/
 | --- | --- | --- |
 | 1 | 課題の本文の `## 進行` | モード・作業ツリー・計画ファイル・通った工程 |
 | 2 | `stage-check.sh report <番号>` | 通過工程の控え（本文と食い違えば控えを正とする） |
-| 3 | `gh pr list --search "<番号>" --state all` | 設計・実装の Pull Request と状態 |
+| 3 | 1 の作業ツリー（`.worktrees/<ブランチ名>`）のブランチ名で `gh pr list --head <ブランチ名> --state all`。実装の Pull Request は `gh issue view <番号> --json closedByPullRequestsReferences` でも引く | 設計・実装の Pull Request と状態 |
 | 4 | 1〜3 から、チェックの付いていない最初の必須の工程 | 次に起動する工程 Skill |
+
+**Pull Request は番号の全文検索で引かない。** 同じ番号に触れただけの別の Pull Request も返すためである。
+設計の Pull Request は閉じる語を持たないため、課題との結び付きでは引けず、ブランチ名で引く。
 
 ### 文書の中身
 
@@ -215,16 +228,20 @@ plugins/ndf/
 | 待つ相手ごとの手 | サブエージェント → 完了通知。背景の CLI → CLI そのものを `run_in_background` で起動する。既に起動したプロセス → `until` で終わりを待つループを `run_in_background` で。Pull Request の検査 → `gh pr checks --watch` を `run_in_background` で。新しいコメントを 1 件ずつ → `Monitor` |
 | hook | `token-guard.sh` の条件と止め方（環境変数）。4 ランタイムの表 |
 
-**`context-window.md`（変更）** は 3 か所を変える。
+**`context-window.md`（変更）** は 4 か所を変える。
 
 | 場所 | 変え方 |
 | --- | --- |
 | 「前提: 実測ではない」（:41-42） | #827 の実測に置き換える: conductor の最大文脈は 2026-09-20 以降 7 件中 4 件で 20 万超・最大 68 万、ai-plugins の 30 日間で 45 件中 37 件が 20 万超・平均 41 万、工程の開始ごとに切れば再読込量が 58%（30 日間 62%）減る。出典は #827 |
 | 新しい節「上限を超えたら hook が止める」 | 上限の既定（200,000）と `NDF_CONTEXT_LIMIT`・工程の切れ目ごとに 1 度止めること・続けたいときの手 |
 | 新しい節「新しい会話で戻す」 | 引き継ぎの 1 行の形と、戻す手順の表（上の 4 行） |
+| 「復元の手順を持つのは各工程の Skill であって、この文書ではない」（:46-47） | 「新しい会話で戻す手順は、この文書の「新しい会話で戻す」節が持つ」へ改める |
 
-**`SKILL.md`（変更）** は「工程は 1 つの context window で通し切らなくてよい」の段落に 2 文を足す。
-工程を 1 つ終えるたびに引き継ぎの 1 行を出すこと、戻す手順は `context-window.md` にあること。
+**`SKILL.md`（変更）** は「工程は 1 つの context window で通し切らなくてよい」の段落に 3 文を足す。
+1 つ目は、`context-window.md` の 4 つの切れ目で conductor が引き継ぎの 1 行を出すこと。
+2 つ目は、3 層では conductor が `## 持ち場の報告` を受け取った時点で出し、supervisor は出さないこと。
+supervisor の持ち場の境がこの切れ目に当たるためである。文脈量の hook が拒否したときも出す。
+3 つ目は、戻す手順が `context-window.md` にあること。
 
 **`agent-layers.md`（変更）** は supervisor の規則 4 の後ろに「待ち方は `waiting.md` に従う」を足し、
 worker の規則に同じ 1 行を 5 番目として足す。
@@ -283,7 +300,7 @@ stateDiagram-v2
 | --- | --- | --- |
 | 性能・拡張性 | 50 MB の記録でも 1 秒以内 | 記録は `tail -n 200` の範囲だけを読む。Bash と Read の判定は記録を読まない。登録の `timeout` は 5 秒 |
 | 運用・保守性 | 理由の欄だけで次の手が分かる | 理由の欄に代わりの手段と規約の場所を必ず書く（出力の表） |
-| 可用性 | hook の失敗で実行を止めない | 入力が読めない・`jq` が無い・控えが書けない・記録が読めないときは何も出さず 0。登録に `continueOnError: true` |
+| 可用性 | hook の失敗で実行を止めない | 入力が読めない・`jq` が無い・控えが書けない・記録が読めないときは何も出さず 0。`workflow-common.sh` を読み込めないときは Read と文脈量の判定を通し、sleep の判定だけを続ける。登録に `continueOnError: true` |
 
 ## 決定の記録
 
@@ -421,7 +438,7 @@ supervisor は 1 つの持ち場の中で複数の工程を通すため、工程
 | AC15 | 単体: 同じ `session_id` で 1 回目 deny → 同じ skill・args で 2 回目は出力なし → 3 回目の別の工程 Skill（例 `ndf:pr`）で再び deny。拒否の後に Bash と Read を挟んでも、次の同じ起動は通る。`NDF_CONTEXT_GUARD=0` で 1 回目も出力なし |
 | AC16 | 単体: `transcript_path` が無い・`usage` の無い記録 → 出力なし |
 | AC17 | AC12〜AC16 のテストが通る |
-| AC18 / AC19 | 文書の検査: `SKILL.md` に 1 行を出す規約があり、`context-window.md` に戻す手順の表がある |
+| AC18 / AC19 | 文書の検査: `SKILL.md` に 4 つの切れ目と hook の拒否で conductor が 1 行を出す規約（3 層では `## 持ち場の報告` を受け取った時点）があり、`context-window.md` に戻す手順の表がある |
 | AC20 | 実機: 実装の Pull Request の途中で会話を切り、1 行だけで新しい会話を始め、モード・作業ツリー・次の工程が戻ったことを #830 に残す |
 | AC21 / AC22 | 文書の検査: 「実測ではない」の文面が消え、#827 への参照と数値があり、上限の値が `NDF_CONTEXT_LIMIT` の既定と一致する |
 | AC23 | 文書の検査: README に 4 ランタイムの表がある |
