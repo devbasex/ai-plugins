@@ -262,6 +262,9 @@ def _kill_process_group(
 
     deadline = time.monotonic() + grace
     while time.monotonic() < deadline:
+        # 親シェルを先に回収する。回収しないとゾンビがグループに残り、
+        # 子がすべて終わっていても猶予を最後まで待つ（#883）
+        proc.poll()
         if not _process_group_alive(pgid):
             return
         time.sleep(0.2)
