@@ -42,10 +42,10 @@ from ..paths import git_out, load_state, result_path, stem_for
 from ..proposals import assign_apply_rounds, merge_proposals, merge_test_proposals
 from ..rounds import (
     TEST,
+    append_deferred_abandoned_items,
     apply_groups,
     attempt_of,
     current_group,
-    deferred_record,
     entry_kind,
     group_reopening,
     impl_for_seq,
@@ -213,6 +213,66 @@ def _update_state_from_merged_proposals(
     statefile.save(path, state)
 
 
+def _replay_merged_proposals(
+    state: dict[str, Any], entry: dict[str, Any], kind: str
+) -> bool:
+    """統合済みラウンドの結果を再表示し、処理済みかを返す。"""
+    if entry.get("proposal_keys") is None:
+        return False
+    info(
+        f"↻ ラウンド {entry['round']} は統合済みです"
+        f"（採用 {entry.get('adopted', 0)} 件 / 見送り {entry.get('deferred', 0)} 件）"
+    )
+    for item_id in entry.get("items", []):
+        item = find_item(state, item_id, required=False)
+        if item is not None:
+            info(f"  {item_id} {item_label(item)}")
+    if not entry.get("adopted") and kind != TEST:
+        sys.exit(2)
+    return True
+
+
+def _merge_proposals_for_kind(
+    state: dict[str, Any], entry: dict[str, Any], kind: str,
+    proposals: dict[str, list[dict[str, Any]]], excluded: set[tuple[str, ...]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """ラウンドの種類に対応する方法で提案を統合する。"""
+    if kind == TEST:
+        return merge_test_proposals(
+            proposals,
+            max_items=state["max_items_per_round"],
+            excluded_keys=excluded,
+        )
+    return merge_proposals(
+        proposals,
+        threshold=state["severity_threshold"],
+        max_items=state["max_items_per_round"],
+        excluded_keys=excluded,
+    )
+
+
+def _report_merged_proposals(
+    state: dict[str, Any], entry: dict[str, Any], kind: str,
+    adopted: list[dict[str, Any]],
+) -> None:
+    """統合結果を表示し、採用 0 件なら種類に応じて終了を制御する。"""
+    info(
+        f"提案 {sum(entry['proposed'].values())} 件 → 統合 {entry['merged']} 件 → "
+        f"採用 {entry['adopted']} 件 / 見送り {entry['deferred']} 件"
+    )
+    for item_id in entry["items"]:
+        info(f"  {item_id} {_item_summary(find_item(state, item_id))}")
+    if adopted:
+        return
+    if kind == TEST:
+        # **終了ではない。** 足すべきテストが出なくなっただけで、この後に
+        # 構造改善の提案ラウンドが続く。切り替えは `advance` が行う。
+        info("テスト整備の採用 0 件のため、構造改善の提案ラウンドへ進みます")
+        return
+    info("採用 0 件のため、提案ラウンドの繰り返しを終えます")
+    sys.exit(2)
+
+
 def cmd_merge_proposals(args: argparse.Namespace) -> None:
     """Step 3 — 提案をマージして改善項目を作る。
 
@@ -225,51 +285,17 @@ def cmd_merge_proposals(args: argparse.Namespace) -> None:
     entry = current_round(state)
 
     kind = entry_kind(entry)
-    if entry.get("proposal_keys") is not None:
-        info(
-            f"↻ ラウンド {entry['round']} は統合済みです"
-            f"（採用 {entry.get('adopted', 0)} 件 / 見送り {entry.get('deferred', 0)} 件）"
-        )
-        for item_id in entry.get("items", []):
-            item = find_item(state, item_id, required=False)
-            if item is not None:
-                info(f"  {item_id} {item_label(item)}")
-        if not entry.get("adopted") and kind != TEST:
-            sys.exit(2)
+    if _replay_merged_proposals(state, entry, kind):
         return
 
     proposals = _load_runtime_proposals(state, entry)
 
     excluded = {item_key(d) for d in state["deferred_items"]}
-    if kind == TEST:
-        adopted, deferred = merge_test_proposals(
-            proposals,
-            max_items=state["max_items_per_round"],
-            excluded_keys=excluded,
-        )
-    else:
-        adopted, deferred = merge_proposals(
-            proposals,
-            threshold=state["severity_threshold"],
-            max_items=state["max_items_per_round"],
-            excluded_keys=excluded,
-        )
+    adopted, deferred = _merge_proposals_for_kind(
+        state, entry, kind, proposals, excluded)
 
     _update_state_from_merged_proposals(path, state, entry, adopted, deferred)
-    info(
-        f"提案 {sum(entry['proposed'].values())} 件 → 統合 {entry['merged']} 件 → "
-        f"採用 {entry['adopted']} 件 / 見送り {entry['deferred']} 件"
-    )
-    for item_id in entry["items"]:
-        info(f"  {item_id} {_item_summary(find_item(state, item_id))}")
-    if not adopted:
-        if kind == TEST:
-            # **終了ではない。** 足すべきテストが出なくなっただけで、この後に
-            # 構造改善の提案ラウンドが続く。切り替えは `advance` が行う。
-            info("テスト整備の採用 0 件のため、構造改善の提案ラウンドへ進みます")
-            return
-        info("採用 0 件のため、提案ラウンドの繰り返しを終えます")
-        sys.exit(2)
+    _report_merged_proposals(state, entry, kind, adopted)
 
 
 def _item_summary(item: dict[str, Any]) -> str:
@@ -968,15 +994,13 @@ def _defer_abandoned_items(state: dict[str, Any], group: dict[str, Any]) -> None
     除外の鍵は種類で変わる（改善項目は `path` + `symbol` + `smell`、テスト項目は
     `target` + `case`）。記録の形は `rounds.deferred_record` が持つ。
     """
-    already = {d.get("item_id") for d in state["deferred_items"]}
+    items = []
     for item_id in group["items"]:
         item = find_item(state, item_id, required=False)
-        if item is None or item.get("status") != "abandoned" or item_id in already:
-            continue
-        state["deferred_items"].append(deferred_record(
-            item, item_id,
-            item.get("failure_reason") or "適用結果の検証を通らなかった",
-        ))
+        if item is not None and item.get("status") == "abandoned":
+            items.append(item)
+    append_deferred_abandoned_items(
+        state, items, "適用結果の検証を通らなかった")
 
 
 
@@ -1159,4 +1183,3 @@ def cmd_merge_test_judgements(args: argparse.Namespace) -> None:
             path, state, entry, current_group(entry), outcome["problem"])
 
     _apply_group_judgements(path, state, entry, group_of_round, verdicts)
-

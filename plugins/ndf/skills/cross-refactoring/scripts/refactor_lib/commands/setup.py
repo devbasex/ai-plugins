@@ -761,6 +761,38 @@ def rounds_of_kind(state: dict[str, Any], kind: str) -> list[dict[str, Any]]:
     return [r for r in state.get("rounds") or [] if entry_kind(r) == kind]
 
 
+def _new_round_entry(
+    state: dict[str, Any], round_no: int, kind: str
+) -> dict[str, Any]:
+    """新しいラウンドの記録を組み立てる。"""
+    impl, requested = impl_for_seq(state, round_no)
+    return {
+        "round": round_no,
+        # **種類はラウンドごとに残す。** 上限を別々に数えるためと、提案の
+        # 重複率を同じ種類どうしで測るためである。
+        "kind": kind,
+        "started_at": statefile.now(),
+        "impl": impl,
+        "impl_model": {"requested": requested, "observed": None},
+        "proposed": {},
+        "merged": 0, "adopted": 0, "deferred": 0,
+        "items": [],
+        "apply": {"applied": [], "failed": [], "base_sha": None, "head_sha": None},
+        "fix_rounds": 0,
+        "durations": {},
+        "reviews": [],
+    }
+
+
+def _round_label_and_limit(
+    state: dict[str, Any], kind: str
+) -> tuple[str, Optional[int]]:
+    """ラウンドの種類に対応する表示名と上限を返す。"""
+    if kind == TEST:
+        return "テスト整備ラウンド", state.get("max_test_rounds")
+    return "提案ラウンド", state["max_outer_rounds"]
+
+
 def cmd_start_round(args: argparse.Namespace) -> None:
     """Step 2 — ラウンドを開き、実装担当を返す。
 
@@ -790,35 +822,14 @@ def cmd_start_round(args: argparse.Namespace) -> None:
     round_no = len(rounds) + 1
     existing = next((r for r in rounds if r["round"] == round_no), None)
     if existing is None:
-        impl, requested = impl_for_seq(state, round_no)
-        existing = {
-            "round": round_no,
-            # **種類はラウンドごとに残す。** 上限を別々に数えるためと、提案の
-            # 重複率を同じ種類どうしで測るためである。
-            "kind": kind,
-            "started_at": statefile.now(),
-            "impl": impl,
-            "impl_model": {"requested": requested, "observed": None},
-            "proposed": {},
-            "merged": 0, "adopted": 0, "deferred": 0,
-            "items": [],
-            "apply": {"applied": [], "failed": [], "base_sha": None, "head_sha": None},
-            "fix_rounds": 0,
-            "durations": {},
-            "reviews": [],
-        }
+        existing = _new_round_entry(state, round_no, kind)
         rounds.append(existing)
         state["outer_round"] = round_no
         state["phase"] = "propose"
         statefile.save(path, state)
 
     kind = entry_kind(existing)
-    if kind == TEST:
-        label = "テスト整備ラウンド"
-        limit = state.get("max_test_rounds")
-    else:
-        label = "提案ラウンド"
-        limit = state["max_outer_rounds"]
+    label, limit = _round_label_and_limit(state, kind)
     seq = len(rounds_of_kind(state, kind))
     info(
         f"=== {label} {seq} / {limit} "

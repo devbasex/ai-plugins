@@ -42,8 +42,8 @@ from ..intake import (
 from ..outbound import dropped_line, item_lines, plan_line
 from ..paths import git_out, load_state, result_path, stem_for
 from ..rounds import (
+    append_deferred_abandoned_items,
     current_group,
-    deferred_record,
     phase_after_group,
     prepare_fix_phase,
 )
@@ -197,16 +197,15 @@ def _record_deferred_abandoned_items(
     state: dict[str, Any], targets: list[str]
 ) -> None:
     """取り消し対象項目の status を abandoned に更新し、未登録なら deferred_items に追記する。"""
-    already = {d.get("item_id") for d in state["deferred_items"]}
+    items = []
     for item_id in targets:
         item = find_item(state, item_id)
         item["status"] = "abandoned"
         item.setdefault(
             "failure_reason", "修正ラウンドの上限に達してもテストが通らなかった")
-        if item_id in already:
-            continue
-        state["deferred_items"].append(
-            deferred_record(item, item_id, item["failure_reason"]))
+        items.append(item)
+    append_deferred_abandoned_items(
+        state, items, "修正ラウンドの上限に達してもテストが通らなかった")
 
 
 def cmd_abandon_items(args: argparse.Namespace) -> None:
