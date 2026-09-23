@@ -52,6 +52,7 @@
 | F7 | 中継が使えない・止まると決めたときに、今までどおりの運用へ落ちて理由を示す | 中継・利用者 |
 | F8 | 中継の始め方と止め方の案内 | 利用者 |
 | F9 | `alias claude=...` で常に中継を挟む起動。claude の引数の素通し・本物の claude の解決・非対話の素通し | 利用者 |
+| F11 | 文脈が上限（既定 200,000）を超えたら、背景の子が居ない切りの良いところで区間を切る（既存の文脈量の hook を中継の下で強める・印の条件に背景の処理が無いことを足す） | conductor・中継 |
 | F10 | 中継を安定した場所へ置き直し、ログインシェルの設定へ alias を 1 度だけ足す（`relay.py install`。SessionStart hook が毎回呼ぶ） | Claude Code（SessionStart） |
 
 ## 確かめたこと（2026-09-23、Claude Code 2.1.280・Python 3・Linux、`--model haiku` で実測）
@@ -67,6 +68,7 @@
 | 7 | シグナル | SIGTERM で約 1.3 秒で終わった（終了コード 143）。SIGINT は 1 回で終わった（終了コード 0）。どちらも記録は壊れず、SessionEnd（`other`）が発火した |
 | 8 | キー入力の中継 | 入力待ちの子の端末は raw（`ISIG` が偽）。親が流した `\x03` はバイトのまま子に届き、Claude Code の Ctrl-C として扱われた（0.5 秒の間隔の 2 回で終了）。`TIOCSWINSZ` はマスタに設定でき、読み戻せた |
 | 9 | hook の出力で終わらせる | Stop hook が `{"continue": false}` を返しても、理由が表示されるだけでプロセスは入力待ちのまま残った |
+| 12 | 背景の処理と Stop hook | 背景の Bash（`sleep 40`）と、背景で起動したサブエージェントの中の背景の Bash（`sleep 30`）を残して応答を終えると、Stop hook の標準入力の `background_tasks` に 2 件（`type: shell`・`status: running`）が載った。何も残さない応答では空の配列 |
 | 11 | claude の副命令と起動の費用 | `claude --help` の副命令は `agents` / `attach` / `auth` / `auto-mode` / `doctor` / `gateway` / `import` / `install` / `logs` / `mcp` / `plugin`・`plugins` / `project` / `respawn` / `rm` / `setup-token` / `stop`・`kill` / `ultrareview` / `update`・`upgrade`。中継が使う標準ライブラリを読み込む Python の起動は約 0.01 秒。`~/.claude/plugins/installed_plugins.json` の `ndf@<名前>` が `installPath`（版つきのキャッシュ）と `version` を持つ |
 | 10 | `claude plugin` | `claude plugin update [-y] <plugin>`（TTY でなければ `-y` が必須）、`claude plugin marketplace update [name]`、`claude plugin list --json` が `id` と `version` を返す |
 
@@ -84,9 +86,10 @@
 | `development-workflow/references/relay.md` | 新設 | 中継の始め方（自動の `install` と止め方 `NDF_RELAY_AUTO=0`）・止め方・上限・記録の読み方・落ちたときの続け方・区間をまたいで設定を保つ方法 |
 | `development-workflow/references/context-window.md` の「新しい会話で戻す」 | 変える | 次のコマンドを `ndf-next` のブロック 1 つで出すこと、関門の承認より前に出さないこと、引継ぎ文書の「次に実行するコマンド」も同じ形にすることを定める（形の定義はここ 1 か所） |
 | `development-workflow/SKILL.md` の引き継ぎの 1 行の段落と「`/goal` の引数として呼ばれたとき」 | 変える | 1 行を `ndf-next` のブロックで出すと書き、`relay.md` への参照を足す |
-| `plugins/ndf/scripts/token-guard.sh` の止めたときの理由の文 | 変える | 「次の 1 行を示して」を「次のコマンドを `ndf-next` のブロックで示して」へ直す |
+| `plugins/ndf/scripts/token-guard.sh` の文脈量の判定 | 変える | 止めたときの理由の文を「次のコマンドを `ndf-next` のブロックで示して」へ直す。**中継の直接の子の conductor（`NDF_RELAY_DIR` があり、判定 4 と同じ親のたどりで `child.pid` と一致）では、同じ起動の 1 度の通しをやめ、上限を超えている限り工程へ入る起動を止め続ける**（下の「文脈の上限で切る」） |
 | `plugins/ndf/README.md` の hook の一覧 | 変える | Stop hook に中継の印を足す |
-| `plugins/ndf/scripts/tests/test_relay.py` | 新設 | F2〜F7 の単体テスト |
+| `plugins/ndf/scripts/tests/test_relay.py` | 新設 | F2〜F10 の単体テスト |
+| `plugins/ndf/scripts/tests/test_token_guard.py` | 変える | F11 の中継の下での判定のテストを足す |
 
 **Codex / agy の hook の定義（`hooks/codex.json`・`dev.agy/hooks.json`）は変えない。Kiro は hook の定義を持たない**（AC16）。
 `waiting.md` と `agent-layers.md` は触らない（#892 #901 の実装が触っている）。
@@ -126,7 +129,7 @@ plugins/ndf/
 ├── hooks/claude.json                         # Stop に 1 件足す
 ├── scripts/
 │   ├── relay.py                              # 新設（run / stop / mark / install）
-│   ├── token-guard.sh                        # 理由の文だけ直す
+│   ├── token-guard.sh                        # 理由の文と、中継の下での通しの扱い
 │   └── tests/test_relay.py                   # 新設
 └── skills/development-workflow/
     ├── SKILL.md                              # 引き継ぎの段落と /goal の節
@@ -258,13 +261,31 @@ alias claude='python3 "${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py" run'
 | 2 | `relay.pid` の pid が生きていない | 何もしない |
 | 3 | 標準入力を JSON として読めない | 何もしない |
 | 4 | hook の親をたどって最初に当たる `claude` のプロセスの pid が `child.pid` と違う | 何もしない。conductor が Bash から起こした `claude -p` は `NDF_RELAY_DIR` を継ぐが、中継の直接の子ではないので印を書かず、印も消さない |
-| 5 | `last_assistant_message` の中の `ndf-next` のブロックがちょうど 1 つ | 印を書く（前の印は置き換わる） |
-| 6 | ブロックが 0 か 2 つ以上 | 印があれば消す（AC4b） |
+| 5 | `last_assistant_message` の中の `ndf-next` のブロックがちょうど 1 つで、`background_tasks` に `status` が `running` のものが無い | 印を書く（前の印は置き換わる） |
+| 6 | ブロックが 0 か 2 つ以上、または背景の処理が動いている | 印があれば消す（AC4b）。背景の処理が動いているあいだに切ると、その処理（supervisor を含む）が子の claude と一緒に終わるためである。処理が終わって応答し直した Stop で、改めて印が書かれる |
 
 **`stop_hook_active` は見ない。** `/goal` が応答を続けさせた後の Stop は `stop_hook_active` が真になるが、
 その Stop こそ区間の最後の応答でありうる（「確かめたこと」の 4）。
 
 **ブロックの読み取りは、外側の囲みの中を除く。** 応答を先頭から行ごとに読み、囲みの開き（行頭のバッククォート 3 つ以上）と閉じ（同じ数以上の行頭のバッククォートだけの行）の入れ子を数える。数えるのは、どの囲みの中でもない位置で開く、バッククォートがちょうど 3 つで情報文字列が `ndf-next` の囲みだけである。説明のために 4 つのバッククォートの中へ引いた例（この文書の「例」の節の形）は数えない。
+
+### 文脈の上限で切る（F11）
+
+**切れ目は関門の後だけではない。** conductor の文脈が上限を超えたら、次の切りの良いところで区間を切る。
+上限・文脈量の読み方・工程へ入る起動の見分け方は、既存の文脈量の hook（`token-guard.sh`。確定仕様
+`docs/specifications/ndf-token-waits-and-context-cut.md` の「文脈量の判定」）をそのまま使う。**上限は
+`NDF_CONTEXT_LIMIT`（既定 200,000）の 1 つで、中継は別の値を持たない。**
+
+| # | 誰が | 何をする |
+| ---: | --- | --- |
+| C1 | 文脈量の hook | conductor が工程へ入る起動（工程 Skill・持ち場の Agent）で上限を超えていれば止め、「新しい持ち場を起動せず、動いている supervisor の報告を受け取ってから、引継ぎ文書を更新し、次のコマンドを `ndf-next` のブロックで出して応答を終える」を理由に載せる。**切りの良いところは「前の持ち場の報告を受け取った後で、次の持ち場を起動する前」であり、この起動がその時点に当たる** |
+| C2 | 文脈量の hook（中継の下） | 中継の直接の子の conductor では、同じ起動をもう一度行っても通さない。LLM が「このまま続ける」と決めて上限を超えたまま進むことを、機械で止める。中継の外では今までどおり 1 度だけ通す（人が続けると決められる） |
+| C3 | conductor | 背景で動いている supervisor があれば、その報告を待つ（新しい持ち場は C2 で起動できない）。すべて受け取ったら、引継ぎ文書（`/goal` の指示が名指しした文書。無ければ書かない。状態は課題の本文と盤面に残る）を更新し、`ndf-next` のブロックを出して応答を終える。ブロックの中身は、その区間を始めたコマンドのうち残りの作業を指す形（名指しの引継ぎ文書があれば「<文書> の続きから」、無ければ `/goal /ndf:development-workflow #<課題>`） |
+| C4 | Stop hook | 背景の処理が残っていれば印を書かない（判定 5・6）。関門の `AskUserQuestion` の応答待ちでは Stop が起きない |
+| C5 | 中継 | 印を拾い、ほかの切れ目と同じく次の区間を起動する。中継が居なければ、人がブロックの中身を貼り付ける（今までどおり） |
+
+**hook が止めるのは工程へ入る起動だけで、工程の途中の Bash や Read は止めない。** 1 つの持ち場の中で上限を
+超えても、その持ち場は最後まで通る（supervisor の文脈は conductor と別で、conductor が増えるのは報告を受け取ったときである）。
 
 ### 記録（`log.jsonl` の 1 行）
 
@@ -367,7 +388,7 @@ stateDiagram-v2
 
 ## 決定の記録
 
-[issue-895-design-decisions.md](issue-895-design-decisions.md) にある（決定 19 件）。
+[issue-895-design-decisions.md](issue-895-design-decisions.md) にある（決定 20 件）。
 
 ## テスト設計
 
@@ -395,6 +416,9 @@ stateDiagram-v2
 | AC20 | 同: `PATH` の前に `claude` という名前で中継を呼ぶラッパーを置くと、それを飛ばして本物を選ぶこと。`NDF_RELAY_DEPTH=2` では終了コード 127 と 1 行を出すこと。`NDF_RELAY_CLAUDE` が最優先になること |
 | AC21 | 同: 一時の HOME と `SHELL=/bin/bash` で `install` を打つ。1 回目: 安定した場所に写しができ、`~/.bashrc` に囲みが 1 つ足され、バックアップと `rc-added` の記録ができ、`systemMessage` が 1 行出る。2 回目: 何も書かず何も出さない（ファイルの中身と更新時刻が変わらない）。囲みを消した後の 3 回目: 足さない。`~/.bashrc` に `alias claude=` がある: 足さず、案内は 1 回目だけ。`NDF_RELAY_AUTO=0`: 何もしない。`SHELL=/bin/fish`: 写しだけを置き直し、設定は書かない。写しと中身が違う `relay.py` から打つと写しが置き換わる。書けないディレクトリでも終了コード 0 |
 | AC22 | 実装の Pull Request の差分で、`install` を呼ぶのが `hooks/claude.json` の SessionStart だけで、Codex / agy の hook の定義に無いこと。`claude plugin validate` が通ること |
+| AC23 | `test_token_guard.py`: `NDF_RELAY_DIR` と `child.pid` を用意し、親のたどりを差し替えて中継の直接の子の conductor にすると、上限を超えた持ち場の Agent の起動が 2 回続けて止まること（1 度の通しが無い）。理由の欄が `ndf-next` と「動いている supervisor の報告を待つ」を含むこと。中継の外では今までどおり 2 回目が通ること |
+| AC24 | `test_relay.py`: ブロックが 1 つでも `background_tasks` に `running` が 1 件ある標準入力では印を書かず、前の印を消すこと。`background_tasks` が空の配列のときは書くこと |
+| AC25 | AC17 の通しの確かめの中で、`NDF_CONTEXT_LIMIT` を小さくして（例 30,000）conductor 役に持ち場の Agent を起動させ、止められた後に `ndf-next` のブロックが出て中継が次の区間を起動することを見る。背景で supervisor 役を動かしているあいだは印が書かれないことも見る |
 | AC17 | 擬似端末の上で alias と同じ形（引数なしの `run`）で中継を動かし、起動した claude へ最初の入力を書き込んで始める。`--model haiku` の claude に「次の区間を `ndf-next` で 1 回出す」指示を 2 段で渡す通しの確かめ。3 つ目の区間の起動・`log.jsonl` の `start` 3 行と `end` 2 行（`ended_by` が `mark`）を見る。1 つ目の区間で `AskUserQuestion` を出させ、答える前に印が無いことも見る。前の区間の画面が端末の履歴を遡って読めるかも記録する。記録を実装の Pull Request に残す |
 | AC18 | `uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest pytest . -q -n 4` |
 
@@ -403,6 +427,7 @@ stateDiagram-v2
 | 項目 | 内容 |
 | --- | --- |
 | `/goal` と Skill を位置引数で渡したときの挙動 | 2 つ目以降の区間は `<本物の claude> <印の中身>` で起動する。`/cost` はコマンドとして実行された。`/goal /ndf:development-workflow ...` の複数行が同じように働くかは AC17 で確かめる。働かなければ、中身を `/goal` の無い形で渡し、`/goal` を 2 つ目の入力として子の端末へ書く形へ替える（実装で決める） |
+| `background_tasks` にサブエージェントが載るか | 背景の Bash は載ることを確かめた（「確かめたこと」の 12）。背景で動いているサブエージェント（supervisor）そのものが載るかは確かめていない。AC25 で確かめ、載らなければ、conductor の記録から背景の Agent の未完了を数える形へ替える（実装で決める） |
 | 既存の `claude` の定義を見落とす | I6 が見るのは足す先と `~/.bash_aliases` だけである。別のファイルから読み込む定義は見落とし、囲みの alias が後から上書きする（後に読まれた定義が勝つ）。利用者は囲みを消せば戻せ、消した後は足し直さない（I5） |
 | 素通しの副命令の一覧の追随 | 副命令の名前は Claude Code の版で増える。一覧に無い副命令は対話として扱われ中継を挟むが、その副命令が端末を使わずに終われば印は書かれず、中継は同じ終了コードで終わるので害は小さい。一覧は実装の時点の `claude --help` から写す |
 | 切れ目で `/goal` の判定が止めを許すか | 今の運用では conductor が切れ目で止まれている。止めを拒まれて応答が続いても、中継は静まるまで待つので誤って終わらせない。続いた応答がブロックを出さなければ、印は消えて中継は待ち続ける |
