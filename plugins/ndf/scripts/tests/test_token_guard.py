@@ -114,6 +114,9 @@ DENY_SLEEP = [
     "while test ! -s f; do sleep 1; done; echo x",
     "{ sleep 30; (x) & }",
     "(sleep 30);(x) &",
+    # 外側の & が別のコマンドのもの
+    "bash -c 'sleep 30'; x &",
+    "eval 'sleep 30'; x &",
 ]
 
 ALLOW_SLEEP = [
@@ -148,6 +151,11 @@ ALLOW_SLEEP = [
     "if true; then sleep 30; fi &",
     "( (sleep 30) ) & echo started",
     "sleep 30 && echo x &",
+    # bash -c / eval の外側が背景になる形
+    "bash -c 'sleep 30' &",
+    "bash -c 'sleep 30' >/tmp/x 2>&1 & echo started",
+    "eval 'sleep 30' &",
+    "(bash -c 'sleep 30') &",
 ]
 
 
@@ -557,6 +565,20 @@ def test_context_date_is_not_issue_number(tmp_path, state):
     tp = transcript(tmp_path, 250_000)
     reason = denied(run(agent(tp, desc="設計: 2026-09-23 の作業 #844", session="sdate"), state))
     assert reason and "/ndf:development-workflow #844（" in reason
+
+
+@pytest.mark.parametrize("desc, expect", [
+    ("設計: v10.16.1 のリリース #844", "#844（"),
+    ("設計: 2026-09-23 の作業 v10.16.1", "<課題番号>（"),
+    ("検査: #829-830", "#829 #830（"),
+    ("設計: 829-830 の作業", "#829 #830（"),
+    ("実装: 2026-09-23 に #829-830 を v10.16.1 へ", "#829 #830（"),
+])
+def test_context_issue_extraction(tmp_path, state, desc, expect):
+    # 版数・日付を課題番号と読まず、範囲は両端の番号として案内する
+    tp = transcript(tmp_path, 250_000)
+    reason = denied(run(agent(tp, desc=desc, session="sx" + str(abs(hash(desc)))), state))
+    assert reason and "/ndf:development-workflow " + expect in reason, reason
 
 
 def test_context_guard_env(tmp_path, state):

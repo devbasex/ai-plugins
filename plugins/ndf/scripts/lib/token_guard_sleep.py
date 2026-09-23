@@ -15,7 +15,7 @@ sleep の引数の後ろから、sleep を含むリスト（`&&` / `||` / `|` �
 
 コメント・引用の中・ヒアドキュメントの本文は見ない。コマンドの位置にある `bash -c` / `sh -c` /
 `zsh -c` / `dash -c` / `eval` の実行される引数は、取り出して同じ規則で見る（`echo bash -c ...` の
-ような引数の中の語は見ない）。`timeout 590` / `nohup` / `env` などの前置きの後ろもコマンドの位置とする。
+ような引数の中の語は見ない）。外側が `&` で背景になる形（`bash -c 'sleep 30' &`）は中身を見ない。`timeout 590` / `nohup` / `env` などの前置きの後ろもコマンドの位置とする。
 """
 from __future__ import annotations
 
@@ -169,7 +169,9 @@ def should_deny(text: str, limit: float, in_loop: bool = False, depth: int = 0) 
                     j += 2
                     continue
                 if toks[j].startswith("-") and "c" in toks[j].lstrip("-") and not toks[j].startswith("--"):
-                    if j + 1 < len(toks) and should_deny(toks[j + 1], limit, looping, depth + 1):
+                    # `bash -c 'sleep 30' &` は外側ごと背景で動くので中身を見ない
+                    if (j + 1 < len(toks) and not is_background(toks, j + 2, groups)
+                            and should_deny(toks[j + 1], limit, looping, depth + 1)):
                         return True
                     break
                 j += 1
@@ -178,7 +180,7 @@ def should_deny(text: str, limit: float, in_loop: bool = False, depth: int = 0) 
             while j < len(toks) and not is_separator(toks[j]):
                 words.append(toks[j])
                 j += 1
-            if should_deny(" ".join(words), limit, looping, depth + 1):
+            if not is_background(toks, j, groups) and should_deny(" ".join(words), limit, looping, depth + 1):
                 return True
         i += 1
     return False
