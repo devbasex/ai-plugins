@@ -60,7 +60,7 @@ issue の本文の `## 進行` と盤面の両方に残り、`stage` は通過�
 | `progress-tracking/SKILL.md` | 変える | 「呼び方」を記録のコマンド 1 行にする。抜粋を指す |
 | `progress-tracking/references/excerpt.md` | 新設 | 抜粋の見本（F4） |
 | `plugins/ndf/agents/worker.md` | 新設 | worker のエージェント定義（`ndf:worker`）。frontmatter の `disallowedTools` で Skill と Agent のツールを外す（F3）。agy へは `dev.agy/agents` の symlink で同じファイルが配られる |
-| `plugins/ndf/.claude-plugin/plugin.json` | 変える | `agents` 配列へ `./agents/worker.md` を足す（無いと配布されない）。`description` は「8 specialized agents and 1 worker agent for the 3-layer workflow」と専門と別枠で書く |
+| `plugins/ndf/.claude-plugin/plugin.json` | 変える | `agents` 配列へ `./agents/worker.md` を足す（無いと配布されない）。`description` の「8 specialized agents」の直後に「 (plus 1 worker agent for the 3-layer workflow)」を挿入する（置き換えではない。後ろの「and 45 focused NDF skills ...」は残す） |
 | エージェントの数を書く説明（下の表の 7 箇所） | 変える | worker は専門エージェントの一覧へ入れず、「専門エージェント 8 個と、3 層の worker の定義 1 個」と別枠で書く |
 | `plugins/ndf/skills/AUTHORING.md` | 変える | 抜粋の形と置き場所の規約（F4）。#855 の検査が読む目印 |
 | 工程の Skill の末尾の記録の文（20 ファイル） | 変える | 「`/ndf:progress-tracking` を呼ぶ」を記録のコマンド 1 行へ（AC7） |
