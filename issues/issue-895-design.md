@@ -160,6 +160,9 @@ plugins/ndf/
 
 `${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/<tmux のサーバの pid>-<セッション名>/`。権限は `0700`。
 `run` が作り、tmux のセッションの環境変数 `NDF_RELAY_DIR` に置く（`tmux set-environment`）。止まるとき消す（`set-environment -u`）。
+**ディレクトリは同じサーバとセッション名で次の `run` にも使われるため、`run` は `relay.lock` を取った後、
+環境変数を置く前に、前回の `stop` と `next/*.json` を消す。** 残すと、始めた直後に古い停止の印で止まるか、
+古い印で区間を終わらせる。`log.jsonl` は消さない（1 日の起動回数と空回りの判定が読む）。止まるときも `stop` を消す。
 
 | ファイル | 書く側 | 中身 |
 | --- | --- | --- |
@@ -167,7 +170,7 @@ plugins/ndf/
 | `relay.pid` | `run` | 中継の pid。`mark` が生きているかを見る |
 | `next/<ペインの ID の数字>.json` | `mark` | 印（下の表）。一時ファイルに書いてから `rename` する |
 | `stop` | `stop` か利用者 | 空。在れば停止の印 |
-| `log.jsonl` | `run` | 記録（下の表）。中継が起動した 1 区間に 1 行と、止まったときの 1 行 |
+| `log.jsonl` | `run` | 記録（下の表）。区間ごとの `start` と `end` の 2 行（中継が起動していない最初の区間は `end` だけ）と、止まったときの 1 行 |
 
 ### 印（`next/<ペイン>.json`）
 
@@ -223,7 +226,7 @@ sequenceDiagram
     participant R as 中継（run）
     participant C2 as claude（区間 n+1）
     U->>R: run を始める
-    R->>F: lock・pid・環境変数
+    R->>F: lock・前回の stop と印を消す・pid・環境変数
     C->>C: 関門で AskUserQuestion（Stop は起きない）
     U->>C: 承認と答える
     C->>C: 取り込み・引継ぎ・ndf-next を出して応答を終える
@@ -253,7 +256,7 @@ stateDiagram-v2
     起動する --> 止まる: 更新か起動に失敗
     待つ --> 止まる: 区間の claude が印なしで終わった
     待つ --> 止まる: Ctrl-C
-    止まる --> [*]: 環境変数を消し、記録に stop を足す
+    止まる --> [*]: 環境変数と停止の印を消し、記録に stop を足す
 ```
 
 ### 各段の中身
@@ -288,7 +291,7 @@ claude の区間も終わらせられる。**中継は `/exit` を送る前に�
 
 ## 決定の記録
 
-[issue-895-design-decisions.md](issue-895-design-decisions.md) にある（決定 9 件）。
+[issue-895-design-decisions.md](issue-895-design-decisions.md) にある（決定 11 件）。
 
 ## テスト設計
 
@@ -303,7 +306,7 @@ claude の区間も終わらせられる。**中継は `/exit` を送る前に�
 | AC7 | 同: 印のペインへ `/exit` の前に `remain-on-exit on` を置くこと。死んだウィンドウが 11 個になったとき、中継が開いた最も古いものだけを `kill-window` し、利用者が開いたウィンドウは閉じないこと |
 | AC8 | 同: 1 周で `end`（6 つのキー）と `start`（7 つのキー）の 2 行が書かれ、`plugin_version` が差し替えた `plugin list --json` の値、`ended_by` が `mark` であること。印なしで終わった区間では `ended_by` が `no-mark` |
 | AC9 | 同: 今日の `start` が 20 行ある記録で印を与えると、`/exit` を送らず終了コード 2・理由が出ること |
-| AC10 | 同: `relay.lock` を別のプロセスで持った状態の `run` が終了コード 1。1 周の中で `new-window` が前のペインの終わりの確認の後にだけ呼ばれること |
+| AC10 | 同: `relay.lock` を別のプロセスで持った状態の `run` が終了コード 1。1 周の中で `new-window` が前のペインの終わりの確認の後にだけ呼ばれること。前回の `stop` と印が残ったディレクトリで `run` を始めると、それらを消してから待ち、止まらず `/exit` も送らないこと |
 | AC11 | 同: 区間の長さが 119・119・119 と続くと、3 つ目の区間が終わったところで 4 つ目を起動せず止まり、119・121・119 では止まらないこと |
 | AC12 | 同: 中継が開いたペインが印なしで死ぬと終了コード 2 |
 | AC13 | 同: `stop` があるとき `/exit` を送らず終了コード 0。`SIGINT` で終了コード 130、`send-keys` も `kill-window` も呼ばず、`set-environment -u` を呼ぶこと |
