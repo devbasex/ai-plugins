@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.17.5-dev.1）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.17.5）
 ```
 
 ### agy
@@ -119,7 +119,7 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.17.5-dev.1 へ更新するとき
+## v10.17.5 へ更新するとき
 
 **cross-refactoring を是正しました**（マイルストーン 26「17 トークン消費の削減」、#880 #883 #494 #723）。
 群ごとの検証を範囲のテストで走らせて全体のテストの回数を減らし、構造改善を飛ばしてよいかを
@@ -127,8 +127,8 @@ agy plugin list
 状態ファイルの移行も要りません（`round_test` を持たない前の実行は、再開しても前と同じ検証をします）。
 変更点の一覧は [CHANGELOG.md](../../CHANGELOG.md) にあります。
 
-**開発版です。** `develop` にだけ載ります。取得元へ `#develop` を足す手順は
-[docs/versioning-and-distribution.md の「開発版を試す」](../../docs/versioning-and-distribution.md#開発版を試す)にあります。
+**正式版です。** `main` に載ります。中身は開発版 `10.17.5-dev.1` と同じで、版数の接尾辞だけを
+外しました。
 
 | 変わったこと | 中身 |
 | --- | --- |
@@ -139,8 +139,8 @@ agy plugin list
 
 手順と引数は `skills/cross-refactoring/SKILL.md` と `skills/development-workflow/references/stage-notes.md` にあります。
 
-開発版のチャネル（`develop` を登録した取得元）なら、次で入れ替わります。**動いているセッションには
-反映されない**ため、更新したあとは起動し直してください。正式版へ戻すときは
+正式版のチャネル（ref を指定せずに登録した取得元）なら、次で入れ替わります。**動いているセッションには
+反映されない**ため、更新したあとは起動し直してください。開発版を試すために `develop` を登録した場合は、
 [docs/versioning-and-distribution.md の「ランタイムごとの取得と導入」](../../docs/versioning-and-distribution.md#ランタイムごとの取得と導入)
 の手順で ref を指定せずに登録し直してから導入します。
 
@@ -161,7 +161,7 @@ codex plugin add ndf@ai-plugins
 
 ```bash
 RF="$SCRIPTS/../skills/cross-refactoring/scripts"
-grep -q '"version": "10.17.5-dev.1"' "$SCRIPTS/../.claude-plugin/plugin.json"; echo "exit=$?"   # 0 なら この版が入っている
+grep -q '"version": "10.17.5"' "$SCRIPTS/../.claude-plugin/plugin.json"; echo "exit=$?"   # 0 なら この版が入っている
 python3 "$RF/refactor.py" init --help | grep -qF -- '--round-test'; echo "exit=$?"   # 0 なら 範囲のテストを渡せる
 python3 "$RF/refactor.py" assess --help >/dev/null 2>&1; echo "exit=$?"   # 0 なら 構造改善を飛ばせるかの判定が入っている
 grep -qF 'def doc_wording_tests' "$RF/refactor_lib/verify.py"; echo "exit=$?"   # 0 なら 文言固定テストを適用で弾く
@@ -333,7 +333,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.17.5-dev.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.17.5/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -355,14 +355,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.5-dev.1/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.5/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.17.5-dev.1  <path>
+# => ndf@ai-plugins  installed, enabled  10.17.5  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
