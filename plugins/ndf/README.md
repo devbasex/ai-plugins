@@ -222,6 +222,27 @@ bash <プラグインのパス>/scripts/worktree-setup.sh init
 
 手順は `/ndf:worktree` にあります。
 
+### 待ちの問い合わせと長い会話を止める（Claude Code だけ）
+
+`scripts/token-guard.sh` が PreToolUse の `Bash` / `Read` / `Skill` / `Agent` で動き、3 つを
+止めます。止めたときは、代わりの手段を理由の欄に出します。
+
+| 止めるもの | 止め方 | 上限 |
+| --- | --- | --- |
+| 前景の `sleep` の待ち（`while` / `until` のループの本体、または上限を超える秒数） | `NDF_SLEEP_GUARD=0` | `NDF_SLEEP_MAX_SEC`（既定 5） |
+| 変わらないファイルの同じ範囲を続けて読む Read | `NDF_READ_REPEAT_GUARD=0` | `NDF_READ_REPEAT_LIMIT`（既定 3） |
+| 文脈が上限を超えた conductor が工程へ入る起動（1 度だけ止め、新しい会話で打つ 1 行を示す） | `NDF_CONTEXT_GUARD=0` | `NDF_CONTEXT_LIMIT`（既定 200000） |
+
+| ランタイム | 待ち方 | 会話を切る |
+| --- | --- | --- |
+| Claude Code | hook ＋ 規約 | hook ＋ 引き継ぎの 1 行 |
+| Codex | 規約だけ | 引き継ぎの 1 行だけ |
+| Kiro CLI | 規約だけ | 引き継ぎの 1 行だけ |
+| agy | 規約だけ | 引き継ぎの 1 行だけ |
+
+規約は `skills/development-workflow/references/waiting.md`（待ち方）と
+`skills/development-workflow/references/context-window.md`（会話を切る）にあります。
+
 ### その他
 
 Claude Code の SessionStart hook（`hooks/claude.json`）は上記に加えて次を行います。
