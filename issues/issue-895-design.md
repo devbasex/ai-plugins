@@ -198,14 +198,19 @@ plugins/ndf/
 
 | キー | 値 |
 | --- | --- |
-| `event` | `start`（区間を起動した）/ `stop`（中継が止まった） |
+| `event` | `start`（区間を起動した）/ `end`（区間が終わった）/ `stop`（中継が止まった） |
 | `at` | UTC の ISO 8601 |
-| `window` / `pane` | 起動したウィンドウの番号とペイン（`start`） |
+| `window` / `pane` | 起動した・終わった区間のウィンドウの番号とペイン（`start`・`end`） |
 | `command` | 起動に渡した中身（`start`） |
 | `from_session` | 前の区間の `session_id`（`start`） |
 | `plugin_version` | 更新の後に `claude plugin list --json` から読んだ `ndf@<マーケットプレイス>` の `version`（`start`。AC8） |
-| `previous_seconds` | 前の区間の長さ。前の区間の `start` から印の `written_at` まで（`start`。最初の区間は空） |
+| `seconds` | 区間の長さ。その区間の `start` の `at` から、印の `written_at` か claude の終わりを見た時刻まで（`end`。中継が起動していない最初の区間は空） |
+| `ended_by` | 終わり方。`mark`（印を受けて `/exit` を送った）/ `no-mark`（印なしで終わった）/ `stop-file`（停止の印で `/exit` を送らなかった）（`end`） |
 | `reason` | 止まった理由（`stop`） |
+
+**区間ごとに `start` と `end` の 2 行を書く。** `start` は起動の時点で分かること（版を含む）を、
+`end` は終わった後に分かること（長さと終わり方）を持つ。1 行にまとめると、起動の後に落ちた区間の
+行が書かれないか、書き直しになる。
 
 ## 処理の流れ
 
@@ -257,15 +262,16 @@ stateDiagram-v2
 | --- | --- |
 | 待つ | 2 秒ごとに `next/` と `stop` を見る（スクリプトの中の待ちで、LLM は使わない）。中継が起動した区間のペインは、`#{pane_dead}` かペインの消滅で終わりを見る |
 | 静まりを待つ | 印の `written_at` と `transcript_path` の更新時刻の遅いほうから `--quiet` 秒たつまで待つ。`/goal` が応答を続けさせたときは記録が動き、次の Stop で印が書き直されるか消える |
-| 終わらせる | 停止の印があれば `/exit` を送らずに止まる（AC13）。1 日の起動回数（`log.jsonl` の今日の `start` の数）が上限なら止まる（AC9）。直前の 2 つの `start` の行の `previous_seconds` がともに 120 未満で、今終わった区間の長さも 120 未満なら（3 区間続けて空回り）、次の区間を起動せずに止まる（AC11）。どれでもなければ `tmux send-keys -t <ペイン> /exit Enter` を送り、ペインが死ぬ・消える・`#{pane_current_command}` が `claude` でなくなるのを 30 秒まで待つ |
+| 終わらせる | 停止の印があれば `/exit` を送らずに止まる（AC13）。1 日の起動回数（`log.jsonl` の今日の `start` の数）が上限なら止まる（AC9）。直前の 2 つの `end` の行の `seconds` がともに 120 未満で、今終わった区間の長さも 120 未満なら（3 区間続けて空回り）、次の区間を起動せずに止まる（AC11）。どれでもなければ印のペインへ `remain-on-exit on` を置き、`tmux send-keys -t <ペイン> /exit Enter` を送り、ペインが死ぬ・消える・`#{pane_current_command}` が `claude` でなくなるのを 30 秒まで待つ |
 | 起動する | `claude plugin marketplace update <マーケットプレイス>` → `claude plugin update ndf@<マーケットプレイス> -y` → `claude plugin list --json` で版を読む。どれかが 0 以外で終われば止まる。`tmux new-window -t <セッション> -c <cwd> -P -F '#{window_index} #{pane_id}' -- env -u CLAUDECODE -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT claude <中身>` で起動し（中身はシェルを通さず 1 つの引数で渡す）、そのウィンドウに `remain-on-exit on` を置く。中継が開いたウィンドウで死んだものが `--keep-windows` を超えたら古いものから `kill-window` する（AC7） |
 
 **マーケットプレイスの名前は、中継を始めたときに `claude plugin list --json` の `ndf@<名前>` から読む。**
 開発版のチャネルを使う利用者でも、登録した取得元から更新される。
 
 **最初の区間は中継が起動したものでなくてよい。** 印はペインを持つため、利用者が先に開いていた
-claude の区間も終わらせられる。その区間のペインには `remain-on-exit` が無いため、`/exit` の後は
-シェルへ戻るか、ウィンドウが閉じる。
+claude の区間も終わらせられる。**中継は `/exit` を送る前に、印のペインへ `remain-on-exit on` を置く**
+（`tmux set-option -p -t <ペイン> remain-on-exit on`）。利用者が開いたペインも、終わった後に画面が残る
+（AC7）。上限を超えたときに閉じるのは中継が開いたウィンドウだけで、利用者が開いたウィンドウは閉じない。
 
 **区間の claude が印を書かずに終わったら止まる**（AC12）。人が `/exit` した・落ちた・認証が切れた
 のいずれかで、同じコマンドを起動し直しても進まないためである。
@@ -276,7 +282,7 @@ claude の区間も終わらせられる。その区間のペインには `remai
 | --- | --- |
 | 可用性 | 中継は区間の claude の親ではない（tmux が親）。中継が落ちても区間は動き続け、`NDF_RELAY_DIR` の pid が死ぬので `mark` は印を書かなくなる。利用者は今の手動の運用へ戻れる |
 | 費用 | 中継の待ちは 2 秒ごとのファイルの確認で、LLM を使わない。`mark` は `TMUX` が無ければ `python3` を起こさず、在っても tmux への問い合わせ 1 回とファイル 1 つの書き込みで終わる |
-| 運用・保守性 | 止まった理由は標準エラーと `log.jsonl` の `stop` の行の 2 か所。区間ごとの版は `start` の行 |
+| 運用・保守性 | 止まった理由は標準エラーと `log.jsonl` の `stop` の行の 2 か所。区間ごとの版は `start` の行、終わり方は `end` の行 |
 | セキュリティ | `NDF_RELAY_DIR` は `0700`。中身は `new-window` の引数の配列で渡し、シェルを通さない。印は同じ利用者のプロセスだけが書ける |
 | システム環境 | tmux 3.x、Python 3 の標準ライブラリ（`json` / `fcntl` / `subprocess` / `shlex`）、Claude Code 2.1.280 以降。tmux が無い環境では `mark` が何もせず、`run` は終了コード 1 で終わる |
 
@@ -294,15 +300,15 @@ claude の区間も終わらせられる。その区間のペインには `remai
 | AC4b | 同: 印がある状態でブロック無しの標準入力を与えると印が消える。`stop_hook_active: true` でもブロック 1 つなら書く |
 | AC5 | 「確かめたこと」の 6 と、AC15 の通しの確かめで `AskUserQuestion` を 1 回出す |
 | AC6 | 同: tmux・claude の呼び出しを差し替えた中継の 1 周で、`send-keys /exit` → 終わりの確認 → `marketplace update` → `plugin update -y` → `plugin list --json` → `new-window`（`-d` 無し・中身が 1 つの引数）の順に呼ぶこと。静まる前（記録の更新時刻が新しい）には `/exit` を送らないこと |
-| AC7 | 同: 死んだウィンドウが 11 個になったとき、中継が開いた最も古いものだけを `kill-window` すること |
-| AC8 | 同: `start` の行が 8 つのキーを持ち、`plugin_version` が差し替えた `plugin list --json` の値であること |
+| AC7 | 同: 印のペインへ `/exit` の前に `remain-on-exit on` を置くこと。死んだウィンドウが 11 個になったとき、中継が開いた最も古いものだけを `kill-window` し、利用者が開いたウィンドウは閉じないこと |
+| AC8 | 同: 1 周で `end`（6 つのキー）と `start`（7 つのキー）の 2 行が書かれ、`plugin_version` が差し替えた `plugin list --json` の値、`ended_by` が `mark` であること。印なしで終わった区間では `ended_by` が `no-mark` |
 | AC9 | 同: 今日の `start` が 20 行ある記録で印を与えると、`/exit` を送らず終了コード 2・理由が出ること |
 | AC10 | 同: `relay.lock` を別のプロセスで持った状態の `run` が終了コード 1。1 周の中で `new-window` が前のペインの終わりの確認の後にだけ呼ばれること |
 | AC11 | 同: 区間の長さが 119・119・119 と続くと、3 つ目の区間が終わったところで 4 つ目を起動せず止まり、119・121・119 では止まらないこと |
 | AC12 | 同: 中継が開いたペインが印なしで死ぬと終了コード 2 |
 | AC13 | 同: `stop` があるとき `/exit` を送らず終了コード 0。`SIGINT` で終了コード 130、`send-keys` も `kill-window` も呼ばず、`set-environment -u` を呼ぶこと |
 | AC14 | 同: AC4 の `TMUX` 無し。`hooks/claude.json` 以外の hook の定義の差分が無いことを実装の Pull Request の差分で見る |
-| AC15 | 別のソケット（`tmux -L ndf-relay-e2e`）で中継を始め、`--model haiku` の claude に「次の区間を `ndf-next` で 1 回出す」指示を 2 段で渡す通しの確かめ。3 つ目の区間の起動・ウィンドウ 3 つ・`log.jsonl` の `start` 2 行（中継が起動した 2 つ目と 3 つ目の区間。最初の区間は利用者が開くため行が無い）を見る。1 段目で `AskUserQuestion` を出させ、答える前に印が無いことも見る。記録を実装の Pull Request に残す |
+| AC15 | 別のソケット（`tmux -L ndf-relay-e2e`）で中継を始め、`--model haiku` の claude に「次の区間を `ndf-next` で 1 回出す」指示を 2 段で渡す通しの確かめ。3 つ目の区間の起動・ウィンドウ 3 つ・`log.jsonl` の `start` 2 行（中継が起動した 2 つ目と 3 つ目の区間。最初の区間は利用者が開くため行が無い）と `end` 2 行（1 つ目と 2 つ目の区間、`ended_by` が `mark`）を見る。1 段目で `AskUserQuestion` を出させ、答える前に印が無いことも見る。記録を実装の Pull Request に残す |
 | AC16 | `uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest pytest . -q -n 4` |
 
 ## 未確認のまま残ること
@@ -313,4 +319,3 @@ claude の区間も終わらせられる。その区間のペインには `remai
 | 切れ目で `/goal` の判定が止めを許すか | 今の運用では conductor が切れ目で止まれている。止めを拒まれて応答が続いても、中継は静まるまで待つので誤って終わらせない。続いた応答がブロックを出さなければ、印は消えて中継は待ち続ける |
 | 静まりの 15 秒の妥当性 | `/goal` の判定の後に記録へ書かれる `goal_status` までの間隔から決めた初期値。AC15 で測り、足りなければ直す |
 | 更新で古い版のディレクトリが消えたときの中継 | 中継は 1 ファイルで、起動の後にディスクから読み直さない。hook は新しい版のパスで呼ばれる。AC15 の中で更新を挟んで確かめる |
-| 最初の区間のペインが `/exit` の後に残るか | 利用者がシェルから claude を起動していればシェルへ戻る。ウィンドウを閉じる設定の利用者では画面が残らない。`relay.md` に書く |
