@@ -165,7 +165,8 @@ function claude {
 **関数は `function claude { ... }` の形で書く。** 先に `alias claude=...` があると、`claude() { ... }` の形は
 定義の行が alias で展開されて壊れる。`function` の後の名前は展開されない。先の alias は呼び出しの時に
 展開され、その引数が関数へ渡る。devbase の `alias claude='claude --dangerously-skip-permissions'` の後に
-読むと、`--dangerously-skip-permissions` が中継を通って子の `claude` へ届く（2026-09-23 に bash 5 で
+読むと、`--dangerously-skip-permissions` が中継を通って 1 つ目の区間の `claude` へ届く。2 つ目以降の区間へは、確定仕様の
+とおり `run` の引数を引き継がないので届かない（#936 で扱う）（2026-09-23 に bash 5 で
 `bash --rcfile` を使って確かめた。zsh は手元に無く確かめていない）。
 `${CLAUDE_CONFIG_DIR:-...}` をファイルに残さないのは、隔離した `CLAUDE_CONFIG_DIR` で `claude` を
 起動したときに写しを見失わないためである。パスに引用を壊す文字が含まれれば何も書かない（E0）。
