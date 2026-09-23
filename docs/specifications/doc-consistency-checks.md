@@ -16,6 +16,8 @@
 - **`issues/`（`issues/old/` を含む）はリンクの検査の走査に入る。** 設計文書と計画は分割や
   移設のたびに参照が壊れうるため、`docs/` へ移る前の期間も検査する
 - **インラインコードの中の記法はリンクとして読まない。** 記法を説明する例で誤って落ちない
+- **文書が指す参照の実在は、pytest ではなくこの検査が失敗として出す。** `.md` を読む pytest は
+  文言の照合と区別が付かないため置かない（[#885 の分類の規則](cross-refactoring-round-tests-and-assess.md#リポジトリに文言固定テストを置かない885)）
 - **検査 J は正本（`docs/versioning-and-distribution.md`）の章を読む。** 章に並ぶ版数の基底を
   現行版と比べる規則に加え、版の形の表と「次を開発するなら」の例を**例どうしで**比べる
 
@@ -198,5 +200,6 @@ graph TD
 - [issue #543](https://github.com/devbasex/ai-plugins/issues/543) / [PR #596](https://github.com/devbasex/ai-plugins/pull/596)（設計） / [PR #600](https://github.com/devbasex/ai-plugins/pull/600)（実装） — `issues/` の走査とインラインコード
 - [issue #499](https://github.com/devbasex/ai-plugins/issues/499) / [PR #594](https://github.com/devbasex/ai-plugins/pull/594)（実装） — 検査 J の読む先を正本へ移す
 - [issue #566](https://github.com/devbasex/ai-plugins/issues/566) / [PR #604](https://github.com/devbasex/ai-plugins/pull/604)（設計） / [PR #609](https://github.com/devbasex/ai-plugins/pull/609)（実装） — 版の形の表と次の開発の例
+- [issue #885](https://github.com/devbasex/ai-plugins/issues/885) / [PR #918](https://github.com/devbasex/ai-plugins/pull/918)（実装） — 参照の実在を見ていた pytest をこの検査へ寄せる
 - [版と配布の正本](../versioning-and-distribution.md)
 - [NDF 知識構造・Kiro CLI 仕様](ndf-knowledge-and-kiro.md) — `AGENTS.md` と正本の役割の分け方

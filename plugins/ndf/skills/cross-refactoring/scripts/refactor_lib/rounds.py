@@ -36,6 +36,11 @@ def entry_kind(entry: dict[str, Any]) -> str:
     return TEST if entry.get("kind") == TEST else STRUCTURE
 
 
+def rounds_of_kind(rounds: list[dict[str, Any]], kind: str) -> list[dict[str, Any]]:
+    """その種類のラウンドだけを取り出す。上限はそれぞれ別に数える。"""
+    return [r for r in rounds if entry_kind(r) == kind]
+
+
 def item_kind(item: dict[str, Any]) -> str:
     """項目 1 件の種類。改善項目とテスト項目は同じ一覧に並ぶ。"""
     return TEST if item.get("kind") == TEST else STRUCTURE
@@ -86,6 +91,21 @@ def deferred_record(
     else:
         record.update({"symbol": item.get("symbol"), "smell": item.get("smell")})
     return record
+
+
+def append_deferred_abandoned_items(
+    state: dict[str, Any], items: list[dict[str, Any]], default_reason: str
+) -> None:
+    """abandoned の項目を未登録時だけ見送り記録へ追記する。"""
+    already = {d.get("item_id") for d in state["deferred_items"]}
+    for item in items:
+        item_id = item["item_id"]
+        if item_id in already:
+            continue
+        reason = item.get("failure_reason") or default_reason
+        state["deferred_items"].append(deferred_record(item, item_id, reason))
+        already.add(item_id)
+
 
 def finish_outer_rounds(path: pathlib.Path, state: dict[str, Any], reason: str) -> None:
     state["final"] = reason

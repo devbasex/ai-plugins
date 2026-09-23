@@ -306,6 +306,10 @@ def merge_test_proposals(
                 "語彙外の値を含むため対象外"
                 "（`case` と `level` は列挙した識別子のいずれかで書く）"
             )
+        # **文書の文言を固定するテストは採らない**（#723）。文書の振る舞いは文言
+        # そのものであり、固定すると後の文書の整理が振る舞いの変更として取り消される。
+        if item["target"].split("#", 1)[0].endswith(".md"):
+            return "文書の文言を固定するテストは足さない"
         return None
 
     return _select(

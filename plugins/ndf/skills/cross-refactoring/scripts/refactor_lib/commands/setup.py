@@ -38,8 +38,9 @@ from ..rounds import (
     finish_outer_rounds,
     impl_for_seq,
     round_kind,
+    rounds_of_kind,
 )
-from ..scope import require_scope_covers_tests
+from ..scope import require_scope_covers_tests, round_test_hint
 from ..vocabulary import (
     DEFAULT_MAX_TEST_ROUNDS,
     DEFAULT_SEVERITY_THRESHOLD,
@@ -80,6 +81,7 @@ RESUME_NOTIFY_FIELDS = (
     statefile.ResumeField("scope", "target_scope", "notify"),
     statefile.ResumeField("model", "models", "notify"),
     statefile.ResumeField("baseline_test", "baseline_test", "notify"),
+    statefile.ResumeField("round_test", "round_test", "notify"),
     statefile.ResumeField("ci_check", "ci_check", "notify"),
     statefile.ResumeField("severity_threshold", "severity_threshold", "notify"),
     statefile.ResumeField("sync_command", "sync_command", "notify"),
@@ -278,6 +280,7 @@ class InitialContext:
     participants: dict[str, Any]
     model_spec: dict[str, Optional[str]]
     baseline: dict[str, Any]
+    round_test: dict[str, Any]
 
 
 def _build_initial_state(
@@ -333,6 +336,8 @@ def _build_initial_state(
         "round_kind": TEST,
         "severity_threshold": args.severity_threshold,
         "baseline_test": ctx.baseline,
+        # **群と修正コミットの検証が実行するテスト**（#880）。省けば全体テストと同じ。
+        "round_test": ctx.round_test,
         # 生成物の同期は**進行側の責務**。push の直前に実行する。
         "sync_command": args.sync_command,
         # **改修計画の既定は Pull Request のコメント 1 件である**（#436 決定 6）。
@@ -358,19 +363,73 @@ def cmd_init(args: argparse.Namespace) -> None:
     codex / kiro とホストを既定とし、足す者・外す者で変える。確認を通らない者は外して
     続ける。前回の状態が残っていれば再開し、渡した引数を反映の表に従って扱う。
     """
+    inputs = _resolve_init_inputs(args)
+    if inputs is None:
+        return
+    prep = _prepare_init(args)
+    if _resume_if_pending(args, inputs, prep):
+        return
+
+    for key, value in NEW_RUN_DEFAULTS.items():
+        if getattr(args, key, None) is None:
+            setattr(args, key, value)
+
+    participants, baseline, round_record = _verify_init(args, inputs, prep)
+    state = _save_initial_state(args, inputs, prep, participants, baseline, round_record)
+    # **出力は入口から直接呼ぶ。** 手順書の変数の出所の検査
+    # （`scripts/check-skill-shell-vars.py`）は `cmd_*` からヘルパーを 1 段だけたどる。
+    _emit_init(state)
+
+
+@dataclass
+class _InitInputs:
+    """`init` の引数から解決したホスト・モデル・足す者・外す者。"""
+
+    host: str
+    detection: str
+    model_spec: dict[str, Optional[str]]
+    include: Optional[list[str]]
+    exclude: Optional[list[str]]
+
+
+@dataclass
+class _InitPreparation:
+    """Pull Request の文脈と、用意した作業ディレクトリ。"""
+
+    repo: str
+    base_branch: str
+    head_branch: str
+    is_own_pr: bool
+    root: pathlib.Path
+    work: pathlib.Path
+    tmp_dir: pathlib.Path
+    state_file: pathlib.Path
+    round_test: Optional[str]
+
+
+def _resolve_init_inputs(args: argparse.Namespace) -> Optional[_InitInputs]:
+    """ホスト・モデル・足す者・外す者を解決する。解決できなければ止めて `None` を返す。"""
     try:
         host, detection = assignment.detect_host(args.host)
     except assignment.AssignmentError as e:
         die(str(e))
-        return
+        return None
     try:
         model_spec = models_lib.parse_model_args(args.model)
     except models_lib.ModelSpecError as e:
         die(str(e))
-        return
-    include = _names_arg(args, "include")
-    exclude = _names_arg(args, "exclude")
+        return None
+    return _InitInputs(
+        host=host,
+        detection=detection,
+        model_spec=model_spec,
+        include=_names_arg(args, "include"),
+        exclude=_names_arg(args, "exclude"),
+    )
 
+
+def _prepare_init(args: argparse.Namespace) -> _InitPreparation:
+    """Pull Request の文脈を取り、作業ディレクトリを用意して `--scope` の関門を通す。"""
     # リポジトリ名は git の設定から求め、Pull Request の応答で確かめる（#271）。
     repo, base_branch, head_branch, is_own_pr, author = _fetch_pr_context(args.pr)
     if is_own_pr:
@@ -388,53 +447,96 @@ def cmd_init(args: argparse.Namespace) -> None:
     # ラウンドが足したテストが検証に効かない。案内だけでは同じ失敗を繰り返す
     # ため、**止める**。作業ディレクトリが要るのは、探索範囲の語がディレクトリか
     # どうかを実物で確かめるためである。
-    require_scope_covers_tests(args.scope, args.baseline_test, str(work))
+    # **足したテストが入るべき実行集合は `--round-test` である**（#880）。群の検証が
+    # 走らせるのはこちらで、全体テストは着手前と最終ゲートにしか走らない。
+    round_test = getattr(args, "round_test", None)
+    if round_test:
+        require_scope_covers_tests(args.scope, round_test, str(work), round_test=True)
+    else:
+        require_scope_covers_tests(args.scope, args.baseline_test, str(work))
 
     tmp_dir = tmp_dir_for(work)
     tmp_dir.mkdir(parents=True, exist_ok=True)
-    state_file = state_path(tmp_dir, args.pr)
-
-    if state_file.exists():
-        state = statefile.load(state_file)
-        if state.get("final") is None:
-            _resume(state_file, state, args, model_spec, include, exclude, is_own_pr)
-            return
-
-    for key, value in NEW_RUN_DEFAULTS.items():
-        if getattr(args, key, None) is None:
-            setattr(args, key, value)
-
-    # **確認は着手前のテストより先に行う。** 使える者がいなければ、テストに時間を
-    # 使わずに止める。
-    participants = resolve_participants(
-        host, include or [], exclude or [], bool(getattr(args, "require_all", None)))
-    _warn_unmeasurable_models(model_spec, participants["available"])
-
-    baseline = _run_baseline_test(args.baseline_test, work, args.test_timeout)
-
-    context = InitialContext(
+    return _InitPreparation(
         repo=repo,
         base_branch=base_branch,
         head_branch=head_branch,
+        is_own_pr=is_own_pr,
         root=root,
         work=work,
         tmp_dir=tmp_dir,
-        host=host,
-        detection=detection,
+        state_file=state_path(tmp_dir, args.pr),
+        round_test=round_test,
+    )
+
+
+def _resume_if_pending(
+    args: argparse.Namespace, inputs: _InitInputs, prep: _InitPreparation
+) -> bool:
+    """終わっていない前回の状態があれば再開し、`True` を返す。"""
+    if not prep.state_file.exists():
+        return False
+    state = statefile.load(prep.state_file)
+    if state.get("final") is not None:
+        return False
+    _resume(prep.state_file, state, args, inputs.model_spec,
+            inputs.include, inputs.exclude, prep.is_own_pr)
+    return True
+
+
+def _verify_init(
+    args: argparse.Namespace, inputs: _InitInputs, prep: _InitPreparation
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """参加者を確定し、着手前のテストと範囲のテストを実行する。"""
+    # **確認は着手前のテストより先に行う。** 使える者がいなければ、テストに時間を
+    # 使わずに止める。
+    participants = resolve_participants(
+        inputs.host, inputs.include or [], inputs.exclude or [],
+        bool(getattr(args, "require_all", None)))
+    _warn_unmeasurable_models(inputs.model_spec, participants["available"])
+
+    hint = round_test_hint(prep.round_test, args.baseline_test, args.scope, str(prep.work))
+    if hint:
+        info(hint)
+
+    baseline = _run_baseline_test(args.baseline_test, prep.work, args.test_timeout)
+    round_record = _run_round_test(prep.round_test, baseline, prep.work, args.test_timeout)
+    return participants, baseline, round_record
+
+
+def _save_initial_state(
+    args: argparse.Namespace,
+    inputs: _InitInputs,
+    prep: _InitPreparation,
+    participants: dict[str, Any],
+    baseline: dict[str, Any],
+    round_record: dict[str, Any],
+) -> dict[str, Any]:
+    """初期の状態を組み立てて保存し、保存した状態を返す。"""
+    context = InitialContext(
+        repo=prep.repo,
+        base_branch=prep.base_branch,
+        head_branch=prep.head_branch,
+        root=prep.root,
+        work=prep.work,
+        tmp_dir=prep.tmp_dir,
+        host=inputs.host,
+        detection=inputs.detection,
         participants=participants,
-        model_spec=model_spec,
+        model_spec=inputs.model_spec,
         baseline=baseline,
+        round_test=round_record,
     )
     state = _build_initial_state(args, context)
     # GitHub は自分の Pull Request への `APPROVE` と `REQUEST_CHANGES` を
     # `HTTP 422` で拒む。判定はそのまま結果ファイルへ残し、**投稿の event だけ**
     # を倒す。収束判定は結果ファイルの判定を見るので、倒しても進行は変わらない。
-    _apply_post_event(state, is_own_pr)
-    statefile.save(state_file, state)
-    info(f"✅ 状態を初期化しました: {state_file}")
-    info(f"   ホスト: {host}（{detection}）")
+    _apply_post_event(state, prep.is_own_pr)
+    statefile.save(prep.state_file, state)
+    info(f"✅ 状態を初期化しました: {prep.state_file}")
+    info(f"   ホスト: {inputs.host}（{inputs.detection}）")
     info(f"   参加者（提案と適用）: {' / '.join(state['runtimes'])}")
-    _emit_init(state)
+    return state
 
 
 def _resume(
@@ -496,6 +598,7 @@ def _notify_view(
     """
     view = dict(state)
     view["baseline_test"] = (state.get("baseline_test") or {}).get("command")
+    view["round_test"] = (state.get("round_test") or {}).get("command")
     given = argparse.Namespace(**{f.arg: getattr(args, f.arg, None) for f in RESUME_NOTIFY_FIELDS})
     if given.model is not None:
         given.model = model_spec
@@ -625,9 +728,65 @@ def _run_baseline_test(
     return {"command": command, "status": status, "checked_at": statefile.now()}
 
 
-def rounds_of_kind(state: dict[str, Any], kind: str) -> list[dict[str, Any]]:
-    """その種類のラウンドだけを取り出す。上限はそれぞれ別に数える。"""
-    return [r for r in state.get("rounds") or [] if entry_kind(r) == kind]
+def _run_round_test(
+    command: Optional[str], baseline: dict[str, Any], work: pathlib.Path,
+    timeout: int = DEFAULT_TEST_TIMEOUT,
+) -> dict[str, Any]:
+    """範囲のテストを着手前に 1 回実行して記録する（#880）。
+
+    **省いたとき、または全体テストと同じ文字列のときは実行しない。** 同じコマンドを
+    2 度走らせても判定は変わらず、時間だけが掛かる。全体テストの結果を写す。
+
+    **失敗は全体テストと別に止める。** 全体テストが通っても範囲のテストが通らない
+    （テストが 1 件も集まらない終了コード 5 を含む）なら、群の検証が初回から落ちる。
+    """
+    if not command or command == baseline["command"]:
+        return {"command": baseline["command"], "status": baseline["status"],
+                "checked_at": baseline["checked_at"]}
+    code, timed_out = run_with_timeout(command, str(work), timeout)
+    if timed_out:
+        die(f"範囲のテストが {timeout} 秒で終わりませんでした（{command}）。打ち切りました")
+        raise SystemExit(ABORT)
+    if code != 0:
+        die(
+            f"範囲のテストが成功しません（{command} / 終了コード {code}）。"
+            "--round-test が --scope のテストの置き場所を走らせるかを確かめてください"
+        )
+        raise SystemExit(ABORT)
+    info(f"✅ 着手前の範囲のテスト成功: {command}")
+    return {"command": command, "status": "green", "checked_at": statefile.now()}
+
+
+def _new_round_entry(
+    state: dict[str, Any], round_no: int, kind: str
+) -> dict[str, Any]:
+    """新しいラウンドの記録を組み立てる。"""
+    impl, requested = impl_for_seq(state, round_no)
+    return {
+        "round": round_no,
+        # **種類はラウンドごとに残す。** 上限を別々に数えるためと、提案の
+        # 重複率を同じ種類どうしで測るためである。
+        "kind": kind,
+        "started_at": statefile.now(),
+        "impl": impl,
+        "impl_model": {"requested": requested, "observed": None},
+        "proposed": {},
+        "merged": 0, "adopted": 0, "deferred": 0,
+        "items": [],
+        "apply": {"applied": [], "failed": [], "base_sha": None, "head_sha": None},
+        "fix_rounds": 0,
+        "durations": {},
+        "reviews": [],
+    }
+
+
+def _round_label_and_limit(
+    state: dict[str, Any], kind: str
+) -> tuple[str, Optional[int]]:
+    """ラウンドの種類に対応する表示名と上限を返す。"""
+    if kind == TEST:
+        return "テスト整備ラウンド", state.get("max_test_rounds")
+    return "提案ラウンド", state["max_outer_rounds"]
 
 
 def cmd_start_round(args: argparse.Namespace) -> None:
@@ -652,43 +811,22 @@ def cmd_start_round(args: argparse.Namespace) -> None:
 
     rounds = state["rounds"]
     kind = round_kind(state)
-    if kind == STRUCTURE and len(rounds_of_kind(state, STRUCTURE)) >= state["max_outer_rounds"]:
+    if kind == STRUCTURE and len(rounds_of_kind(state.get("rounds") or [], STRUCTURE)) >= state["max_outer_rounds"]:
         finish_outer_rounds(path, state, "max_outer_rounds")
         sys.exit(1)
 
     round_no = len(rounds) + 1
     existing = next((r for r in rounds if r["round"] == round_no), None)
     if existing is None:
-        impl, requested = impl_for_seq(state, round_no)
-        existing = {
-            "round": round_no,
-            # **種類はラウンドごとに残す。** 上限を別々に数えるためと、提案の
-            # 重複率を同じ種類どうしで測るためである。
-            "kind": kind,
-            "started_at": statefile.now(),
-            "impl": impl,
-            "impl_model": {"requested": requested, "observed": None},
-            "proposed": {},
-            "merged": 0, "adopted": 0, "deferred": 0,
-            "items": [],
-            "apply": {"applied": [], "failed": [], "base_sha": None, "head_sha": None},
-            "fix_rounds": 0,
-            "durations": {},
-            "reviews": [],
-        }
+        existing = _new_round_entry(state, round_no, kind)
         rounds.append(existing)
         state["outer_round"] = round_no
         state["phase"] = "propose"
         statefile.save(path, state)
 
     kind = entry_kind(existing)
-    if kind == TEST:
-        label = "テスト整備ラウンド"
-        limit = state.get("max_test_rounds")
-    else:
-        label = "提案ラウンド"
-        limit = state["max_outer_rounds"]
-    seq = len(rounds_of_kind(state, kind))
+    label, limit = _round_label_and_limit(state, kind)
+    seq = len(rounds_of_kind(state.get("rounds") or [], kind))
     info(
         f"=== {label} {seq} / {limit} "
         f"（実装 {existing['impl']}）==="

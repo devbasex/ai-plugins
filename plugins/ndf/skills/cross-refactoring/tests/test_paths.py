@@ -11,6 +11,8 @@ import json
 import pathlib
 import tempfile
 
+import pytest
+
 
 STATE_ID = 130
 
@@ -83,6 +85,24 @@ def test_it_uses_the_cwd_when_the_env_var_is_unset(paths, tmp_path, monkeypatch)
 
     assert path == cwd_path
     assert state["phase"] == "from-cwd"
+
+
+def test_load_state_exits_4_when_the_target_is_missing(
+    paths, tmp_path, monkeypatch, capsys
+):
+    """現状固定: 指定先と現在地のどちらにも対象 ID が無ければ停止する。"""
+    env_dir = tmp_path / "env"
+    env_dir.mkdir()
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(env_dir))
+    monkeypatch.chdir(cwd)
+
+    with pytest.raises(SystemExit) as exc:
+        paths.load_state(STATE_ID)
+
+    assert exc.value.code == 4
+    assert str(STATE_ID) in capsys.readouterr().err
 
 
 def test_the_explicit_worktree_base_is_resolved(paths, tmp_path, monkeypatch):

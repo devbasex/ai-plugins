@@ -62,12 +62,13 @@ python3 plugins/ndf/scripts/instructions-check.py --root .
 `/ndf:cross-refactoring` は参加者に構造改善を提案させ、同じ参加者から輪番で選んだ 1 者が適用する。新しい提案が出なくなるまで繰り返す。参加者の既定は **codex / kiro とホスト（ホストが codex / kiro なら 2 者）** で、`--exclude` / `--include` で名指しで変える（agy は `--include agy` で戻す）。レビューは最終ゲートの `cross-review` が担う。
 
 ```bash
-/ndf:cross-refactoring 130 --scope src/services --baseline-test "pytest -q"
+/ndf:cross-refactoring 130 --scope src/services tests/services --round-test "pytest tests/services -q" --baseline-test "pytest -q"
 /ndf:cross-refactoring 130 --scope src --model codex=gpt-5.5 --model claude=claude-opus-5
 /ndf:cross-refactoring 130 --scope src --include agy --exclude kiro
 ```
 
 - `--scope` は必須。提案が発散して PR が肥大するのを防ぐ。**検証にも効く**ので、現状固定テストの置き場所も含める
+- 群ごとの検証は `--round-test`（範囲のテスト）で走らせ、`--baseline-test`（全体のテスト）は着手前と最終ゲートの 2 回だけ走らせる。`--round-test` を省くと全体のテストが群ごとに走る
 - ホストと同じランタイムが適用担当になる場合も、サブエージェントではなく **CLI プロセス**として起動する
 - モデルを比べるなら `--model <ランタイム>=<name>` を参加者の全員に指定する。実際に動いたモデルを取得できるのは claude だけで、残りは指定値で代用する。指定が無いラウンドは集計から分離される
 - 適用担当は参加者の数のラウンドで 1 周する。輪番は適用ラウンドごとに進むため、`--max-outer-rounds`（既定 3）が切る提案の回数とは対応しない

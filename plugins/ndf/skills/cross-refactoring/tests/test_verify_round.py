@@ -240,3 +240,50 @@ def test_a_failing_verification_still_names_the_plan(patch_lib, refactor, cmd_co
         cmd_converge.cmd_verify_round(_args())
 
     assert url in capsys.readouterr().err
+
+
+# ---------- 範囲のテスト `--round-test`（#880 の AC2・AC6・AC7） ----------
+
+ROUND_TEST = {"command": "pytest tests/services -q", "status": "green",
+              "checked_at": "2026-08-15T00:00:00"}
+
+
+def test_the_round_is_verified_with_the_round_test(patch_lib, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
+    """AC2 — 群の検証は `round_test` だけを実行する。全体テストは実行しない。"""
+    state_path = _state(tmp_path, round_test=ROUND_TEST)
+    env_tmp_dir(state_path)
+    seen = _test_run(patch_lib, refactor, monkeypatch, code=0)
+
+    cmd_converge.cmd_verify_round(_args())
+
+    assert [c for c, _, _ in seen] == ["pytest tests/services -q"]
+    record = read_state(state_path)["rounds"][0]["verifications"][-1]
+    assert record["command"] == "pytest tests/services -q"
+
+
+@pytest.mark.parametrize("code", [0, 1])
+def test_the_verification_records_its_seconds(patch_lib, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch, code):
+    """AC6 — 検証の記録は所要の秒数を持つ。"""
+    state_path = _state(tmp_path, round_test=ROUND_TEST)
+    env_tmp_dir(state_path)
+    _test_run(patch_lib, refactor, monkeypatch, code=code)
+
+    try:
+        cmd_converge.cmd_verify_round(_args())
+    except SystemExit:
+        pass
+
+    seconds = read_state(state_path)["rounds"][0]["verifications"][-1]["seconds"]
+    assert isinstance(seconds, (int, float)) and seconds >= 0
+
+
+def test_a_state_without_the_round_test_verifies_with_the_baseline_test(patch_lib, refactor, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
+    """AC7 — 変更の前の状態ファイルを再開したときは、`baseline_test` で検証する。"""
+    state_path = _state(tmp_path)
+    assert "round_test" not in read_state(state_path)
+    env_tmp_dir(state_path)
+    seen = _test_run(patch_lib, refactor, monkeypatch, code=0)
+
+    cmd_converge.cmd_verify_round(_args())
+
+    assert [c for c, _, _ in seen] == ["pytest -q"]

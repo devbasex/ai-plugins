@@ -1,7 +1,7 @@
 ---
 name: cross-refactoring
 description: "Let several CLIs propose, apply, and review refactorings on a PR until no new proposal appears. Use when structural improvement should converge across runtimes（クロスリファクタリング・多AIリファクタリング・収束リファクタリング）."
-argument-hint: "[PR番号] --scope PATH... [--host claude|codex|agy|kiro] [--exclude NAMES] [--include NAMES] [--require-all] [--model RT=MODEL] [--baseline-test CMD] [--max-test-rounds N] [--max-outer-rounds N] [--max-fix-rounds N] [--max-items-per-round N] [--ci-check NAME] [--workflow-step]"
+argument-hint: "[PR番号] --scope PATH... [--host claude|codex|agy|kiro] [--exclude NAMES] [--include NAMES] [--require-all] [--model RT=MODEL] [--baseline-test CMD] [--round-test CMD] [--max-test-rounds N] [--max-outer-rounds N] [--max-fix-rounds N] [--max-items-per-round N] [--ci-check NAME] [--workflow-step]"
 allowed-tools:
   - Bash
   - Read
@@ -63,7 +63,7 @@ allowed-tools:
 | --- | --- |
 | 参加者 | **全員 CLI プロセス。** ホストのサブエージェント機能は使わない。ホストと同じランタイムが実装担当のラウンドでも別プロセスで起動する |
 | 参加者 | **提案と適用を同じ参加者で回す。** 既定は codex / kiro とホストで、`--exclude` / `--include` で名指しで変える。確認を通らない者は外して続ける |
-| 検証の単位 | **適用ラウンド（群）に対して 1 回。** 判定は `--baseline-test` の合否で決まり、レビュー CLI は起動しない |
+| 検証の単位 | **適用ラウンド（群）に対して 1 回。** 判定は `--round-test`（範囲のテスト）の合否で決まり、レビュー CLI は起動しない。全体のテスト（`--baseline-test`）は着手前と最終ゲートの 2 回だけ走る |
 | 収束しない項目 | **捨てる。** リファクタリングは任意の作業なので、揉める提案を Pull Request に残さない |
 | コミットの単位 | **1 適用ラウンド = 1 コミット。** テストも適用ラウンドの単位で 1 回だけ求める |
 | 改修計画 | **Pull Request のコメント 1 件へ残す。** 理由と手順は提案の時点でしか残らない。ラウンドが進むたびに同じコメントを編集する。URL は永続で、マージの後も開ける。`--plan-file` を明示したときだけファイルにする |
@@ -91,7 +91,8 @@ allowed-tools:
 | `--include NAMES` | 参加者に足す者（例: `--include agy`）。再開で `none` を渡すと空へ戻す | なし |
 | `--require-all` | 確認を通らない者が 1 者でもいれば中断する（終了コード 4）。付けなければ外して続ける | 外して続ける |
 | `--model RT=MODEL` | ランタイムごとのモデル。繰り返し指定できる | CLI の既定 |
-| `--baseline-test CMD` | 着手前と各コミットで実行するテスト。**振る舞い不変を示す手段が無い書き換えは構造改善ではないため必須** | 必須 |
+| `--baseline-test CMD` | 着手前と最終ゲートで実行する全体のテスト。**振る舞い不変を示す手段が無い書き換えは構造改善ではないため必須** | 必須 |
+| `--round-test CMD` | 着手前・群の検証・修正のコミットごとに実行する範囲のテスト。`--scope` のテストの置き場所を覆わなければ `init` が止まる。省くと `--baseline-test` が群ごとに走る | `--baseline-test` と同じ |
 | `--max-test-rounds N` | **テスト整備ラウンド**の上限。到達したら採用が残っていても提案ラウンドへ進む | `2` |
 | `--max-outer-rounds N` | **提案ラウンド**の上限。切るのは提案の回数であって、適用できる件数ではない | `3` |
 | `--max-fix-rounds N` | **1 つの適用ラウンドあたり**の修正ラウンドの上限 | `3` |
@@ -104,7 +105,7 @@ allowed-tools:
 | `--plan-file PATH` | 改修計画を**ファイル**へ書き出す先（**対象リポジトリからの相対パス**）。空文字を渡すと記録しない | Pull Request のコメント 1 件 |
 
 ```text
-/ndf:cross-refactoring 130 --scope src/services tests/services --baseline-test "pytest -q"
+/ndf:cross-refactoring 130 --scope src/services tests/services --round-test "pytest tests/services -q" --baseline-test "pytest -q"
 /ndf:cross-refactoring 130 --scope src --baseline-test "pytest -q" --sync-command "make generate"
 /ndf:cross-refactoring 130 --scope src --model codex=gpt-5.5 --model claude=claude-opus-5
 /ndf:cross-refactoring 130 --scope src --host codex --max-outer-rounds 1
@@ -174,6 +175,17 @@ allowed-tools:
   **agy がホストのときは `--host agy` を明示する**（環境変数からは推定しない）
 
 - 対象の Pull Request が Draft で開いている（未作成なら `/ndf:pr` で先に作る）
+
+- 本番コードの差分がある。起動の前に `assess` で飛ばしてよいかを見る。**終了コード 3 なら
+  起動しない**（本番コードの差分が無いか、変更が `--max-lines`（既定 10）行以下）。2 は
+  判定できなかったことを示し、飛ばしてよいとは読まない。飛ばしたときの記録の残し方は
+  `development-workflow` の `references/workflow-modes.md`「構造改善の退避先」にある。
+
+```bash
+# 「実行」節の決め方で解決したこの Skill の scripts ディレクトリ
+SCRIPTS="<この Skill のディレクトリ>/scripts"
+python3 "$SCRIPTS/refactor.py" assess --base origin/develop; echo "exit=$?"
+```
 
 ## 全体フロー
 
@@ -293,7 +305,8 @@ rf_eval() {
 }
 
 rf_eval init "$PR" --scope $SCOPE \
-        --baseline-test "$BASELINE" ${HOST:+--host "$HOST"} \
+        --baseline-test "$BASELINE" ${ROUND_TEST:+--round-test "$ROUND_TEST"} \
+        ${HOST:+--host "$HOST"} \
         ${EXCLUDE:+--exclude "$EXCLUDE"} ${INCLUDE:+--include "$INCLUDE"} \
         ${REQUIRE_ALL:+--require-all} \
         --max-test-rounds "$MAX_TEST" --max-outer-rounds "$MAX_OUTER" \

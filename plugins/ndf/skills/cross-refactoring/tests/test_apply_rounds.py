@@ -9,10 +9,17 @@
 """
 from __future__ import annotations
 
+import os
+import pathlib
+import re
+import subprocess
 import sys
 import pytest
 
 from crossref_helpers import make_state, read_state, write_result
+
+
+LAUNCH = pathlib.Path(__file__).resolve().parent.parent / "scripts" / "launch-cli.sh"
 
 
 def prop(path="src/a.py", symbol="f", **over):
@@ -316,6 +323,58 @@ def test_phase_after_group_returns_to_propose_when_every_group_is_verified(round
     entry = _round_with_groups(groups, apply_round=2)
 
     assert rounds.phase_after_group(entry) == "propose"
+
+
+def _prompt_item_ids(tmp_path, apply_round, phase):
+    rounds = [
+        {"round": 1, "apply_round": apply_round},
+        {"round": 2},
+    ]
+    items = [
+        {"item_id": "R1-001", "round": 1, "apply_round": 1},
+        {"item_id": "R1-002", "round": 1, "apply_round": 2},
+        {"item_id": "R1-003", "round": 1},
+        {"item_id": "R2-001", "round": 2},
+    ]
+    state_path = make_state(tmp_path, rounds=rounds, items=items)
+    (tmp_path / "work").mkdir(exist_ok=True)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    stub = bin_dir / "codex"
+    stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    stub.chmod(0o755)
+
+    subprocess.run(
+        [str(LAUNCH), "codex", phase, "130", "1"],
+        env={
+            **os.environ,
+            "CROSS_REFACTORING_TMP_DIR": str(state_path.parent),
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        },
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    prompt = state_path.parent / f"codex-{phase}-r1-prompt.md"
+    text = prompt.read_text(encoding="utf-8")
+    items_block = re.search(
+        r"## (?:適用する項目|この適用ラウンドの項目).*?```json\n(.*?)\n```",
+        text,
+        re.DOTALL,
+    )
+    assert items_block is not None
+    return set(re.findall(r"R\d+-\d{3}", items_block.group(1)))
+
+
+@pytest.mark.parametrize("phase", ["apply", "fix"])
+def test_launch_prompt_contains_only_the_current_apply_round(tmp_path, phase):
+    assert _prompt_item_ids(tmp_path, 2, phase) == {"R1-002"}
+
+
+def test_launch_prompt_contains_the_whole_round_before_a_group_is_selected(tmp_path):
+    assert _prompt_item_ids(tmp_path, 0, "apply") == {
+        "R1-001", "R1-002", "R1-003"
+    }
 
 
 def test_phase_after_group_returns_to_propose_when_there_is_no_group(rounds):
