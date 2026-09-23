@@ -1005,6 +1005,68 @@ def _defer_abandoned_items(state: dict[str, Any], group: dict[str, Any]) -> None
 
 
 
+def _drop_and_settle_adoption(
+    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any],
+    group: dict[str, Any], failed: list[str],
+) -> list[str]:
+    """取り消しを実行し、item・entry・group の採用状態を反映して採用 ID を返す。
+
+    `run_drop` が積み直せなかった（`mode=round`）ときは、この群の全件を捨てる。
+    **他の群には及ばない。**
+    """
+    result = run_drop(path, state, entry, failed)
+    applied = list(entry["apply"].get("applied") or [])
+    if result["mode"] == "round":
+        # 積み直せなかった。この群の全件を捨てる。**他の群には及ばない。**
+        for item_id in group["items"]:
+            it = find_item(state, item_id)
+            it["status"] = "abandoned"
+            it.setdefault(
+                "failure_reason",
+                "残す項目を積み直せなかったため、適用ラウンドごと取り消した",
+            )
+        applied = []
+        entry["apply"]["applied"] = []
+        entry["apply"]["failed"] = list(group["items"])
+    return applied
+
+
+def _settle_drop_state(
+    state: dict[str, Any], entry: dict[str, Any], group: dict[str, Any],
+    work: pathlib.Path, applied: list[str],
+) -> None:
+    """取り消し後の起点・群の状態・次 phase を確定する。"""
+    if not applied:
+        # 取り消し後の状態を新しい起点にする（叩き直しでの二重取り消しを防ぐ）。
+        entry["apply_base_sha"] = git_out(work, ["rev-parse", "HEAD"])
+        group["base_sha"] = entry["apply_base_sha"]
+        group["status"] = "dropped"
+    else:
+        group["status"] = "applied"
+    state["phase"] = phase_after_group(entry)
+
+
+def _persist_drop(
+    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any],
+    group: dict[str, Any],
+) -> None:
+    """deferred 記録・pending_drop 解除・merged_at 設定・push を永続化する。
+
+    **取り消しが済んだことを push より先に、印の解除と同じ保存で永続化する。**
+    保存せずに push して失敗すると、次の実行が適用の検証をやり直し、取り消しと
+    積み直しのコミットを「未割当」と判定して群ごと巻き込んでしまう。
+    `pending_push` は残るので、次の実行は push の再送だけを行う。
+    """
+    # 取り消した項目は「対象外」として残す。次のラウンドで同じ提案が採用され、
+    # 同じ理由で失敗するのを防ぐ。
+    _defer_abandoned_items(state, group)
+    entry["pending_drop"] = []
+    entry["apply"]["merged_at"] = statefile.now()
+    # 印は `run_drop` が立ててある。ここは保存・push・印の解除を行う
+    # （`push_with_retry_marker` が立て直しても値は変わらない）。
+    push_with_retry_marker(path, state, entry)
+
+
 def _apply_drop(
     path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any],
     group: dict[str, Any], failed: list[str],
@@ -1023,43 +1085,13 @@ def _apply_drop(
     処理済みガードで素通りし、**再試行できない**。逆に push まで終えるまで
     `merged_at` を立てないと、push だけ失敗したときに次の実行が適用の検証をやり直し、
     取り消しと積み直しのコミットを「未割当」と判定して群ごと巻き込む。
+
+    取り消し、状態の反映、永続化の 3 段に分ける。
     """
     work = state["worktrees"]["work"]
-    result = run_drop(path, state, entry, failed)
-    applied = list(entry["apply"].get("applied") or [])
-    if result["mode"] == "round":
-        # 積み直せなかった。この群の全件を捨てる。**他の群には及ばない。**
-        for item_id in group["items"]:
-            it = find_item(state, item_id)
-            it["status"] = "abandoned"
-            it.setdefault(
-                "failure_reason",
-                "残す項目を積み直せなかったため、適用ラウンドごと取り消した",
-            )
-        applied = []
-        entry["apply"]["applied"] = []
-        entry["apply"]["failed"] = list(group["items"])
-    if not applied:
-        # 取り消し後の状態を新しい起点にする（叩き直しでの二重取り消しを防ぐ）。
-        entry["apply_base_sha"] = git_out(work, ["rev-parse", "HEAD"])
-        group["base_sha"] = entry["apply_base_sha"]
-        group["status"] = "dropped"
-    else:
-        group["status"] = "applied"
-    state["phase"] = phase_after_group(entry)
-
-    # 取り消した項目は「対象外」として残す。次のラウンドで同じ提案が採用され、
-    # 同じ理由で失敗するのを防ぐ。
-    _defer_abandoned_items(state, group)
-    # **取り消しが済んだことを push より先に、印の解除と同じ保存で永続化する。**
-    # 保存せずに push して失敗すると、次の実行が適用の検証をやり直し、取り消しと
-    # 積み直しのコミットを「未割当」と判定して群ごと巻き込んでしまう。
-    # `pending_push` は残るので、次の実行は push の再送だけを行う。
-    entry["pending_drop"] = []
-    entry["apply"]["merged_at"] = statefile.now()
-    # 印は `run_drop` が立ててある。ここは保存・push・印の解除を行う
-    # （`push_with_retry_marker` が立て直しても値は変わらない）。
-    push_with_retry_marker(path, state, entry)
+    applied = _drop_and_settle_adoption(path, state, entry, group, failed)
+    _settle_drop_state(state, entry, group, work, applied)
+    _persist_drop(path, state, entry, group)
     return applied
 
 

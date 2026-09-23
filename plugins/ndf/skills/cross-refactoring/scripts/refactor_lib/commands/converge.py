@@ -208,51 +208,46 @@ def _record_deferred_abandoned_items(
         state, items, "修正ラウンドの上限に達してもテストが通らなかった")
 
 
-def cmd_abandon_items(args: argparse.Namespace) -> None:
-    """Step 6 — テストが通らなかった適用ラウンドを取り消す。
+def _resume_abandon_leftovers(
+    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any]
+) -> None:
+    """やり残した取り消しを push の再送より先に片づける。
 
-    **取り消しの単位は適用ラウンドである**（決定 2）。群の中は 1 コミットなので、
-    どの項目が落としたのかを特定しても分離して取り消せない。**他の群には及ばない**
-    （受け入れ条件 A4）。既に検証を通った群は Pull Request に残る。
+    先に push すると、取り消しが途中の HEAD をそのまま Pull Request へ反映して
+    しまう。取り消しが残っていれば再実行し、無ければ保留の push だけ流す。
     """
-    path, state = load_state(args.id)
-    entry = round_of(state, args.round)
-    group = current_group(entry)
-    if not args.dry_run:
-        # **やり残した取り消しを push の再送より先に片づける。** 先に push すると、
-        # 取り消しが途中の HEAD をそのまま Pull Request へ反映してしまう。
-        if entry.get("pending_drop"):
-            info("↻ 前回終わらなかった取り消しを再実行します")
-            run_drop(path, state, entry, list(entry["pending_drop"]))
-        else:
-            flush_pending_push(path, state, entry)
+    if entry.get("pending_drop"):
+        info("↻ 前回終わらなかった取り消しを再実行します")
+        run_drop(path, state, entry, list(entry["pending_drop"]))
+    else:
+        flush_pending_push(path, state, entry)
 
-    # 取り消し自体は `reverted` で冪等だが、見送りの記録は重複しうる。
-    if group.get("abandoned") is not None:
-        info(f"↻ 適用ラウンド {group['apply_round']} の見送りは処理済みです"
-             f"（{len(group['abandoned'])} 件）")
-        return
 
-    targets = list((entry.get("apply") or {}).get("applied") or [])
-    if not targets:
-        info("取り消す項目はありません")
-        if not args.dry_run:
-            group["abandoned"] = []
-            entry["abandoned"] = []
-            statefile.save(path, state)
-        return
+def _abandon_no_targets(
+    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any],
+    group: dict[str, Any], dry_run: bool,
+) -> None:
+    """取り消す項目が無い群を処理済みとして記録する。"""
+    info("取り消す項目はありません")
+    if not dry_run:
+        group["abandoned"] = []
+        entry["abandoned"] = []
+        statefile.save(path, state)
 
-    if args.dry_run:
-        drop_items(state, entry, targets, dry_run=True)
-        info("（dry-run）状態ファイルは更新していません")
-        return
 
+def _complete_abandon(
+    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any],
+    group: dict[str, Any], targets: list[str],
+) -> None:
+    """取り消しを実行し、見送りの記録・状態の更新・push を行う。
+
+    見送りの記録と印の解除を**同じ保存で**行う。保存してから push するので、
+    push が失敗しても記録とローカルの git が食い違わない。
+    """
     run_drop(path, state, entry, targets)
 
     _record_deferred_abandoned_items(state, targets)
 
-    # 見送りの記録と印の解除を**同じ保存で**行う。保存してから push するので、
-    # push が失敗しても記録とローカルの git が食い違わない。
     # **内訳は書かない。件数だけ述べ、内訳は改修計画へ譲る**（#436 決定 6-b）。
     info(f"↩ 適用ラウンド {group['apply_round']}: {dropped_line(state, len(targets))}")
     group["abandoned"] = targets
@@ -264,6 +259,38 @@ def cmd_abandon_items(args: argparse.Namespace) -> None:
     group["base_sha"] = entry["apply_base_sha"]
     state["phase"] = phase_after_group(entry)
     push_with_retry_marker(path, state, entry)
+
+
+def cmd_abandon_items(args: argparse.Namespace) -> None:
+    """Step 6 — テストが通らなかった適用ラウンドを取り消す。
+
+    **取り消しの単位は適用ラウンドである**（決定 2）。群の中は 1 コミットなので、
+    どの項目が落としたのかを特定しても分離して取り消せない。**他の群には及ばない**
+    （受け入れ条件 A4）。既に検証を通った群は Pull Request に残る。
+    """
+    path, state = load_state(args.id)
+    entry = round_of(state, args.round)
+    group = current_group(entry)
+    if not args.dry_run:
+        _resume_abandon_leftovers(path, state, entry)
+
+    # 取り消し自体は `reverted` で冪等だが、見送りの記録は重複しうる。
+    if group.get("abandoned") is not None:
+        info(f"↻ 適用ラウンド {group['apply_round']} の見送りは処理済みです"
+             f"（{len(group['abandoned'])} 件）")
+        return
+
+    targets = list((entry.get("apply") or {}).get("applied") or [])
+    if not targets:
+        _abandon_no_targets(path, state, entry, group, args.dry_run)
+        return
+
+    if args.dry_run:
+        drop_items(state, entry, targets, dry_run=True)
+        info("（dry-run）状態ファイルは更新していません")
+        return
+
+    _complete_abandon(path, state, entry, group, targets)
 
 
 def _fix_merge_key(entry: dict[str, Any], result: pathlib.Path) -> str:
