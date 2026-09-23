@@ -24,7 +24,7 @@
 
 | 順 | 誰が | 今 | 変更の後 |
 | ---: | --- | --- | --- |
-| 1 | supervisor | worker を起動する（`置き場所` は任意） | worker を起動する。`置き場所` にファイルの絶対パスを必ず渡す |
+| 1 | supervisor | worker を起動する（`置き場所` は任意） | `置き場所` のファイルを worker ごとに新しいパスで空に作り（`: > <置き場所>`）、その絶対パスを渡して worker を起動する |
 | 2 | worker | 背景の待ちを起動して応答を終える | 同じ |
 | 3 | supervisor | 途中の通知を受け、「2 回目を待つ」で応答を終える。**誰にも起こされない** | 途中の通知を受け、`置き場所` に報告の写しが現れるまでの待ちを**自分の背景の処理**として起動してから応答を終える |
 | 4 | worker | 再開して報告を出す | 再開し、報告の写しを `置き場所` の末尾へ書いてから報告を出す |
@@ -57,7 +57,8 @@
 | 生成物（Codex / Kiro / agy の Skill の写し） | F1 | `description` を変えるため、`bash scripts/build-runtime-plugins.sh` で同期する |
 | `plugins/ndf/skills/development-workflow/references/waiting.md` | F4 | 「待つ相手ごとの手」の直後の段落を、conductor の手と supervisor の手に分ける（入出力の契約） |
 | 同 `agent-layers.md` の supervisor の規則 4 | F4 | 1 文を足す。規則の数は 10 のまま |
-| 同 `agent-layers.md` の worker の規則 5・起動指示の `置き場所` の行 | F5 | 規則 5 に `Monitor` の場合を足し、`置き場所` に報告の写しを足す。規則の数は 5 のまま |
+| 同 `agent-layers.md` の worker の規則 5・起動指示の `置き場所` の行 | F5 | 規則 5 に `Monitor` の場合を足し、`置き場所` に報告の写しを足す。規則の数は 5 のまま。`prompt` の行の「守る規則 4 個」を 5 個へ直す |
+| `plugins/ndf/skills/cross-refactoring/tests/test_assignment.py` のモジュールの docstring | F1 | 4 行目の「cross-review はホストを除く母集合から 2 席を決める。」を、ホストを含む母集合へ直す |
 | テスト | F1〜F3 | 下の「テスト設計」 |
 
 **変えないもの:**
@@ -71,7 +72,7 @@
 
 `review_pool` を呼ぶのは `state.py` の 2 か所とテストだけである（`grep -rn review_pool plugins/ndf`）。
 2 か所は `_round_reviewers` の順 4 と `_resolve_reviewers` である。cross-refactoring は `refactor_pool` を使う。
-配布物で「ホストを除く」「other than the host」を含むのは上の表の文書だけである
+配布物とテストの docstring で、cross-review について「ホストを除く」「other than the host」を含むのは上の表の文書だけである
 （`grep -rn "ホストを除\|other than the host" plugins/ndf CLAUDE.md`）。
 
 ## 入出力の契約
@@ -115,8 +116,11 @@
 | conductor | 2 回目の通知を待ってから報告を読む（今のまま）。conductor は応答を終えても次の通知で起こされる |
 | supervisor | **応答を終える前に、自分の背景の処理として報告の写しの待ちを起動する。** 下のコマンドを `run_in_background: true` で起動し、完了通知で再開する |
 
+**supervisor は worker を起動する前に、`置き場所` のファイルを worker ごとに新しいパスで空に作る（`: > <置き場所>`）。**
+前の worker の `## 作業の報告` が残ったファイルを渡すと、途中の通知で起動した待ちがその報告に即座に反応し、今の worker の報告を待たずに終わるためである。
+
 ```bash
-timeout 3600 bash -c 'until grep -qs "^## 作業の報告" "$1"; do sleep 5; done' _ "<置き場所>"; echo "exit=$?"
+timeout 3600 bash -c 'until grep -qs "^## 作業の報告" "$1"; do sleep 5; done' _ "<置き場所>"; rc=$?; echo "exit=$rc"; exit "$rc"
 ```
 
 | 終了コード | supervisor の動き |
@@ -142,7 +146,7 @@ timeout 3600 bash -c 'until grep -qs "^## 作業の報告" "$1"; do sleep 5; don
 
 | 項目 | 中身 |
 | --- | --- |
-| 置き場所 | 長い出力と**報告の写し**を書くファイルの絶対パス（報告にはパスだけを載せる）。**worker は最後の応答の前に、`## 作業の報告` の節をこのファイルの末尾へ同じ中身で書く。** supervisor は「無し」にしない |
+| 置き場所 | 長い出力と**報告の写し**を書くファイルの絶対パス（報告にはパスだけを載せる）。**worker は最後の応答の前に、`## 作業の報告` の節をこのファイルの末尾へ同じ中身で書く。** supervisor は「無し」にせず、worker ごとに新しいパスで空のファイルを作ってから渡す |
 
 ## 処理の流れ
 
@@ -153,6 +157,7 @@ sequenceDiagram
     participant S as supervisor
     participant W as worker
     participant F as 置き場所のファイル
+    S->>F: 新しいパスで空に作る
     S->>W: 起動（置き場所を渡す）
     W->>W: 背景の待ちを起動して応答を終える
     W-->>S: 途中の通知

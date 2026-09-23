@@ -50,7 +50,7 @@
 
 - [ ] AC8: `waiting.md` の「2 回目の通知を待つ」が conductor に限られ、supervisor が worker の途中の通知を受けたときの手が同じ文書に 1 つ書かれている。その手は応答を終える前に supervisor 自身の背景の処理を起動する
 - [ ] AC9: `agent-layers.md` の supervisor の規則 4 が AC8 の場面を指し、worker の規則 5 が `Monitor` で待つときも途中の通知が親へ届くことを書く。規則の数は 10 と 5 のまま
-- [ ] AC10: worker の起動指示の `置き場所` の項目が、worker に `## 作業の報告` の写しをそのファイルの末尾へ書かせる。`置き場所` を「無し」にしない
+- [ ] AC10: worker の起動指示の `置き場所` の項目が、worker に `## 作業の報告` の写しをそのファイルの末尾へ書かせる。`置き場所` を「無し」にしない。supervisor は worker を起動する前に、`置き場所` のファイルを worker ごとに新しいパスで空に作る（`: > <置き場所>`）
 - [ ] AC11: supervisor → worker の 2 段を Claude Code で再現する。worker は背景で 30 秒待つ。supervisor は worker の途中の通知で止まらず、worker の `## 作業の報告` を受け取ってから次の段へ進む。conductor が報告なしで続けさせた回数は 0 になる
 
 ### 全体
