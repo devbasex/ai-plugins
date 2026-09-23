@@ -1,29 +1,26 @@
 #!/usr/bin/env bash
-# NDF plugin: issue に対応する Projects のアイテムのフィールドを更新する。
+# NDF plugin: 進行の記録の入口。issue の本文の `## 進行` と、盤面のアイテムのフィールドを
+# 1 回の呼び出しで更新する（#828）。
 #
 #   projects-sync.sh <issue番号> <キー> <値>
 #     キー: stage | mode | status | worktree | plan
 #
-# **宣言（.ndf/projects.json）が無ければ何も出力せず終了コード 0 で抜ける。**
-# gh が無い場合と、盤面の更新に失敗した場合も同じである。進行管理が理由で
-# 開発の工程が止まってはいけない。
+# `stage` / `mode` / `worktree` / `plan` は、盤面の宣言の有無にかかわらず先に
+# `progress-record.sh` を呼んで issue の本文を更新し、その後で盤面を更新する。
+# `status` は盤面だけに書く（「まとまりを閉じる」だけが使う）。
+# 通過工程の控えはこのコマンドを観測して積むため、入口はこのスクリプトのままにする。
+#
+# **宣言（.ndf/projects.json）が無ければ盤面へは何もしない。** gh が無い場合と、
+# 記録に失敗した場合も終了コード 0 で抜ける。進行管理が理由で開発の工程が止まってはいけない。
 #
 # 呼び出し側の誤り（知らないキー・工程表に無い値・引数不足）だけは 2 を返す。
-# 黙って進むと、綴りの違う値が盤面へ入るか、書き込んだつもりの値が入らない。
+# 黙って進むと、綴りの違う値が入るか、書き込んだつもりの値が入らない。
+# **引数の検査は何かを書く前に行う。** issue の本文だけが書かれた状態を作らない。
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/projects-common.sh
 . "$SCRIPT_DIR/lib/projects-common.sh" 2>/dev/null || exit 0
-
-command -v git >/dev/null 2>&1 || exit 0
-
-# 宣言はリポジトリの内容である。**いま見えている作業ツリーの最上位から読む。**
-# 主ディレクトリ側を見ると、宣言を追加・変更したブランチでその変更が効かない。
-top_dir=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
-[ -d "$top_dir" ] || exit 0
-
-DECL=$(pj_declaration "$top_dir") || exit 0
 
 usage() {
   printf 'usage: projects-sync.sh <issue番号> <キー: stage|mode|status|worktree|plan> <値>\n' >&2
@@ -52,6 +49,22 @@ if ! pj_is_valid_value "$KEY" "$VALUE"; then
 fi
 
 command -v gh >/dev/null 2>&1 || exit 0
+
+# issue の本文。失敗しても盤面の更新へ進む（終了コードの契約は誤りだけ 2）。
+case "$KEY" in
+  stage) bash "$SCRIPT_DIR/progress-record.sh" "$ISSUE" "$VALUE" || : ;;
+  mode|worktree|plan) bash "$SCRIPT_DIR/progress-record.sh" "$ISSUE" - "--$KEY" "$VALUE" || : ;;
+esac
+
+command -v git >/dev/null 2>&1 || exit 0
+
+# 宣言はリポジトリの内容である。**いま見えている作業ツリーの最上位から読む。**
+# 主ディレクトリ側を見ると、宣言を追加・変更したブランチでその変更が効かない。
+top_dir=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+[ -d "$top_dir" ] || exit 0
+
+DECL=$(pj_declaration "$top_dir") || exit 0
+
 command -v jq >/dev/null 2>&1 || exit 0
 
 OWNER=$(pj_owner "$DECL")

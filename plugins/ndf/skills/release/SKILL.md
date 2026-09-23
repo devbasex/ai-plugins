@@ -320,7 +320,7 @@ Pull Request へコメントで投稿する）。
 
 範囲外の課題が見つかったときは `/ndf:out-of-scope` で起票する。
 
-この工程に入ったら `/ndf:progress-tracking <issue番号> "配布"` を呼ぶ（記録の手順はその Skill が持つ）。
+この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "配布"` を 1 行打つ（issue の本文と盤面の両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。
 
 ## まとまりを閉じる
 

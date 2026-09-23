@@ -37,22 +37,36 @@ allowed-tools:
 
 ## 呼び方
 
-**工程に入った時点で 1 度呼ぶ。** 出るときではない。入った時点で記録すれば、途中で止まった
-実行の現在地が残る。
+**工程に入った時点で 1 度、記録のコマンドを 1 行打つ。** 出るときではない。入った時点で記録
+すれば、途中で止まった実行の現在地が残る。**この 1 行で issue の本文の `## 進行` と盤面の
+両方に残り、`stage` は通過工程の控えにも積まれる。** この Skill の本文を読まなくても記録できる。
 
 ```bash
-bash "$SCRIPTS/progress-record.sh" <issue番号> "<工程名>" [--mode M] [--worktree P] [--plan P]
-bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "<工程名>"
+bash "$SCRIPTS/projects-sync.sh" <issue番号> <キー> "<値>"
 ```
 
+| キー | 打つ時点 | 値 | issue の本文 |
+| --- | --- | --- | --- |
+| `stage` | 工程に入るたび（課題ごと） | 工程名 | チェックを付ける |
+| `mode` | 最初の工程で 1 度 | モード | 見出し行だけ |
+| `worktree` | 作業場所の用意の後に 1 度 | 作業ツリーのパス | 見出し行だけ |
+| `plan` | 計画の後に 1 度 | 計画ファイルのパス | 見出し行だけ |
+| `status` | 「まとまりを閉じる」だけ | `Done` | 書かない（盤面だけ） |
+
 **値は引用符で囲む。** 工程名には空白を含むもの（`Pull Request`）がある。囲まないとシェルの
-側で分割され、引数の検査で終了コード 2 になる。
+側で分割され、引数の検査で終了コード 2 になる。**記録のコマンドは 1 回の Bash 実行に 1 件にする**
+（通過工程の控えは 1 回の実行の最初の記録しか読まない）。
 
 ```bash
-bash "$SCRIPTS/progress-record.sh" 186 "設計" --mode standard --worktree ".worktrees/fix/issue-186"
 bash "$SCRIPTS/projects-sync.sh" 186 stage "設計"
 bash "$SCRIPTS/projects-sync.sh" 186 mode "standard"
 ```
+
+**呼ぶ側へ渡す抜粋は [references/excerpt.md](references/excerpt.md) にある。** supervisor や
+worker の起動指示へはこれを写し、本文を読ませない。
+
+**`progress-record.sh` を直接呼ぶのは 2 つの場合だけである。** 他のリポジトリの課題へ書く
+（`--repo`。盤面へは書かない）ときと、付随情報を足す（`--note`）ときである。
 
 **終わりの工程で盤面の `Status` を `Done` にするのは、下の「まとまりを閉じる」だけである。**
 工程に入った時点の記録では書かない。入口で書くと、盤面の `Auto-close issue` が先に課題を

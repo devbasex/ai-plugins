@@ -4,6 +4,9 @@
 #   progress-record.sh <issue番号> <工程名> [--mode M] [--worktree P] [--plan P]
 #                      [--repo <所有者>/<リポジトリ>] [--note TEXT]
 #
+# 工程名に `-` を渡すと、チェックリストを変えずに見出し行（モード・作業ツリー・計画ファイル）
+# だけを更新する。`projects-sync.sh` の `mode` / `worktree` / `plan` がこの形で呼ぶ（#828）。
+#
 # **盤面の宣言が無いリポジトリでも進行が残る。** 記録先は issue の本文の `## 進行` の節で、
 # 節の外は書き換えない（更新のたびに本文を取得し、その節だけを差し替える）。人が本文へ
 # 書いた内容を消さないためである。
@@ -48,7 +51,7 @@ fi
 case "$ISSUE" in
   ''|*[!0-9]*) printf 'ERROR: issue 番号が数値ではありません: %s\n' "$ISSUE" >&2; exit 2 ;;
 esac
-if ! pj_is_stage "$STAGE"; then
+if [ "$STAGE" != "-" ] && ! pj_is_stage "$STAGE"; then
   printf 'ERROR: 工程表に無い工程名です: %s\n' "$STAGE" >&2
   exit 2
 fi
@@ -115,7 +118,10 @@ else:
 # 書き換えると、途中で止まった実行を再開したときに最初に入った時刻が失われる。
 # 付随情報（`--note`）を新しく渡したときだけ、その分を足す。
 note = os.environ.get("NOTE", "")
-if stage in done and done[stage]:
+if stage == "-":
+    # 見出し行だけを更新する。チェックリストには印を足さない。
+    pass
+elif stage in done and done[stage]:
     if note and note not in done[stage]:
         done[stage] = f"{done[stage]} / {note}"
 else:
@@ -153,5 +159,9 @@ if [ -n "$REPO" ]; then
 else
   gh issue edit "$ISSUE" --body-file "$NEW_FILE" >/dev/null 2>&1 || exit 0
 fi
-printf '#%s 進行 = %s\n' "$ISSUE" "$STAGE"
+if [ "$STAGE" = "-" ]; then
+  printf '#%s 進行の見出し = %s\n' "$ISSUE" "$(sed -n '/^## 進行[[:space:]]*$/,/^## /{/^モード: /p}' "$NEW_FILE" | head -1)"
+else
+  printf '#%s 進行 = %s\n' "$ISSUE" "$STAGE"
+fi
 exit 0

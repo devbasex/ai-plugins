@@ -199,5 +199,5 @@ Skill 側に既定値を持たせると、プロジェクトの方針と食い�
 - `/ndf:release-verification` — 配布された成果物を利用者の環境で確かめる工程
 - `/ndf:out-of-scope` — 範囲外と判断したものの起票と、起票先のリポジトリの判断
 
-この工程に入ったら `/ndf:progress-tracking <issue番号> "完了判定"` を呼ぶ（記録の手順はその Skill が持つ）。
+この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "完了判定"` を 1 行打つ（issue の本文と盤面の両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。
 

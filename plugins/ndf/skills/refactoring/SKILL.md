@@ -162,5 +162,5 @@ flowchart TD
   工程表は `standard` と `legacy-refactor` の構造改善にそちらを置く。適用を担う側は
   この Skill を手順として読む
 
-この工程に入ったら `/ndf:progress-tracking <issue番号> "構造改善"` を呼ぶ（記録の手順はその Skill が持つ）。
+この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "構造改善"` を 1 行打つ（issue の本文と盤面の両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。
 

@@ -356,6 +356,10 @@ Pull Request のマージ、制作物承認は本番の提出先への操作に�
 基準・他者の承認が要るときの到達点の置き直しは
 [references/agent-layers.md](references/agent-layers.md) にある。
 
+**conductor は `$SCRIPTS` を解いてから supervisor を起動し、起動指示の「記録のコマンド」へ
+絶対パスで書く。** supervisor はこの 1 行で進行を記録し、この Skill も `progress-tracking` も
+起動しない（形とキーごとの打つ時点は `agent-layers.md` の「conductor → supervisor」）。
+
 **対話で `/ndf:development-workflow` を呼んだときは 3 層へ出さない。** 人がその場にいて
 工程ごとに指示を変えられるため、進め方を変えない。
 
