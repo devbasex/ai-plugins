@@ -18,15 +18,22 @@ bash "$SCRIPTS/projects-sync.sh" 828 stage "設計"
 本文（約 10,700 トークン）を読んでモードと工程表を確かめる supervisor もいる（#827 の実測で
 28 回）。**本文は持ち場が終わるまで文脈に残り、以後の呼び出しのたびに読み直される。**
 
-**変更後の形。** conductor が起動指示の「記録のコマンド」の項目に、絶対パスを解いた 1 行を
-書いて渡す。パスは二重引用符で囲む。
+**変更後の形。** conductor が起動指示の「記録のコマンド」の項目に、絶対パスを解いたコマンドの頭と、
+キーごとの打つ時点の表を書いて渡す。パスは二重引用符で囲む。
 
 ```text
-記録のコマンド: bash "/home/u/.claude/plugins/cache/ai-plugins/ndf/10.17.1/scripts/projects-sync.sh" <課題番号> stage "<工程名>"
+記録のコマンド: bash "/home/u/.claude/plugins/cache/ai-plugins/ndf/10.17.1/scripts/projects-sync.sh" <課題番号> <キー> "<値>"
 ```
 
-supervisor は工程に入るたびに、課題ごとに 1 回ずつこの 1 行を打つ。issue の本文の `## 進行` と
-盤面の両方に残り、通過工程の控えにも積まれる。**`progress-tracking` も `development-workflow` も
+| キー | 打つ時点 | 値 |
+| --- | --- | --- |
+| `stage` | 工程に入るたび（課題ごと） | 工程名 |
+| `mode` | 持ち場の最初の工程で 1 度 | 起動指示の「モード」の値 |
+| `worktree` | 作業場所の用意の後に 1 度 | 作業ツリーのパス |
+| `plan` | 計画の後に 1 度 | 計画ファイルのパス |
+
+打つのはその工程を行った supervisor である。いずれも 1 回の Bash 実行に 1 件とする。
+issue の本文の `## 進行` と盤面の両方に残り、`stage` は通過工程の控えにも積まれる。**`progress-tracking` も `development-workflow` も
 起動しない。** モードと通す工程は起動指示の「モード」「持ち場」の項目が既に持っている。
 
 ## 機能一覧
@@ -118,7 +125,7 @@ projects-sync.sh <課題番号> <キー> <値>
 | --- | --- | --- |
 | 持ち場 | 持ち場の名前と、通す工程の一覧 | そのまま |
 | 課題 / モード / 作業場所 / 前の持ち場の報告 / 承認 / 到達点 / 提示物の置き場所 | — | そのまま |
-| **記録のコマンド** | `bash "<絶対パス>/projects-sync.sh" <課題番号> stage "<工程名>"` の 1 行。**conductor が `$SCRIPTS` を解いた絶対パスを二重引用符で囲んで書く** | 足す |
+| **記録のコマンド** | コマンドの頭 `bash "<絶対パス>/projects-sync.sh" <課題番号> <キー> "<値>"` と、キーごとの打つ時点の表（「例」の節の表）。**conductor が `$SCRIPTS` を解いた絶対パスを二重引用符で囲んで書く** | 足す |
 
 **パスを二重引用符で囲むのは、空白を含むパスで語が割れないためである。** 通過工程の控えは
 引用符を外した語を読むため、囲んでも記録として観測される（今の `"$SCRIPTS/projects-sync.sh"` と同じ）。
@@ -270,6 +277,9 @@ sequenceDiagram
   P->>G: 盤面のフィールドを更新する
 ```
 
+図は `stage` の例である。`mode` / `worktree` / `plan` も同じ流れを通り、控えへは積まない。
+打つ時点は「例」の節の表に従い、担い手はその工程を行った supervisor である。
+
 ### 起動指示を組む
 
 ```mermaid
@@ -303,8 +313,8 @@ sequenceDiagram
 | --- | --- |
 | AC1 / AC3 / AC4 | `agent-layers.md` の差分のレビュー（cross-review）。雛形の項目の表と規則の文を読む |
 | AC2 | 同上。加えて、実装の後の最初の `/goal` で supervisor が `progress-tracking` / `development-workflow` を起動していないことを `skill-stats --agents` で見る |
-| AC1 / AC3（雛形の検査） | `grep -n "progress-tracking\|development-workflow" plugins/ndf/skills/development-workflow/references/agent-layers.md` の結果を、表の後の「雛形の検査で残ってよい行」と突き合わせる。**「起動の指示」の節（2 つの雛形）の中で、これらを起動・読み込みさせる文が 0 件**なら合格 |
-| AC5 / AC6 | `projects-sync.sh` のテストに足す: 宣言なしで `stage` を呼ぶと issue の本文だけが更新される / 宣言ありで両方が更新される / `mode` で見出し行だけが変わる / 知らない工程名で 2 を返し本文を書かない（`gh` は既存のテストと同じ偽物で置き換える） |
+| AC1 / AC3（雛形の検査） | `grep -n "progress-tracking\|development-workflow" plugins/ndf/skills/development-workflow/references/agent-layers.md` の結果を、表の後の「雛形の検査で残ってよい行」と突き合わせる。**「起動の指示」の節（2 つの雛形）の中で、下の「残ってよい行」（a / b / c）を除き、これらを起動・読み込みさせる文が 0 件**なら合格 |
+| AC5 / AC6 | `projects-sync.sh` のテストに足す: 宣言なしで `stage` を呼ぶと issue の本文だけが更新される / 宣言ありで両方が更新される / `mode` で見出し行だけが変わる / 知らない工程名で 2 を返し本文を書かない / `stage` / `mode` / `worktree` / `plan` の 4 キーそれぞれで、issue の本文の見出し行・チェックリストと盤面のフィールドが今の 2 コマンドの組と同じになる（`gh` は既存のテストと同じ偽物で置き換える） |
 | AC7 | `grep -rn "この工程に入ったら.*progress-tracking" plugins/ndf/skills/*/SKILL.md` が 0 件で、`design/SKILL.md` の「進行を記録する」の節も記録のコマンドの形になっている（今は 19 件の定型文と `design` の 2 件、計 20 Skill・21 件） |
 | AC8 | 既存の `test_stage_check.py` / `test_workflow_guard.py` が変更なしで通る |
 | AC9 | `progress-tracking/references/excerpt.md` の 1 行目の目印と見出し 3 つ。検査の実装は #855 |
@@ -318,7 +328,7 @@ sequenceDiagram
 | --- | --- | --- |
 | a | 冒頭の「対話で `/ndf:development-workflow` を呼んだとき」の段落 | conductor 側の説明で、雛形ではない |
 | b | 「3 層の責務」の表の conductor の行（`development-workflow` と `issue-plan-strategy` 以外を起動しない） | conductor の責務で、雛形ではない |
-| c | supervisor の規則 3 の「`development-workflow` を起動しない」と、まとまりを閉じるときだけ `progress-tracking` を起動する例外 | 起動を禁じる文と、AC3 が認める唯一の例外である |
+| c | supervisor の規則 3 の「`development-workflow` を起動しない」と、規則 3 の「まとまりを閉じるときだけ `progress-tracking` を起動して本文の手順に従う」例外（「起動の指示」の節の中にある） | 起動を禁じる文と、AC3 が認める唯一の例外である。例外は起動させる文だが、0 件の数から除く |
 
 AC12 の比べる前の値（#827、2026-09-20 以降、5 リポジトリ、サブエージェント 156 件）:
 
@@ -329,6 +339,8 @@ AC12 の比べる前の値（#827、2026-09-20 以降、5 リポジトリ、サ�
 | 持ち越し量に占める Skill 本文 | 16% |
 | `progress-tracking` の読み込み | 40 回（1 回 7,649） |
 | `development-workflow` の読み込み | 28 回（1 回 10,679） |
+| `progress-tracking` のサブエージェント 1 件あたりの読み込み | 40 / 156 = 0.256 回 |
+| `development-workflow` のサブエージェント 1 件あたりの読み込み | 28 / 156 = 0.179 回 |
 
 **減ると見込むのは `progress-tracking` と `development-workflow` の 2 行である。** 他の 4 つ
 （`markdown-writing` / `cross-review` / `fix` / `pr`）は、この変更では減らない（要求の前提 1）。
