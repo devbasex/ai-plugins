@@ -3,10 +3,11 @@
 標準入力にコマンドの文字列を受け、第 1 引数に秒数の上限を受ける。拒否するなら終了コード 1、
 通すなら 0 で終わる。**読めないコマンドは通す**（hook の失敗でツールを止めない）。
 
-拒否するのは、コマンドの位置にある `sleep <数>` が次のどちらかに当たるときだけである。
+拒否するのは、コマンドの位置にある `sleep <引数>` が次のどちらかに当たるときだけである。
+`&` で終わる（バックグラウンドで動く）`sleep` は前景を待たせないため見ない。
 
-- `while` / `until` のループの本体（`do` と対応する `done` の間）にある
-- 秒数が上限を超える
+- `while` / `until` のループの本体（`do` と対応する `done` の間）にある（秒数が変数でも止める）
+- 秒数が数で、上限を超える
 
 コメント・引用の中・ヒアドキュメントの本文は見ない。`bash -c` / `sh -c` / `zsh -c` / `eval` の
 実行される引数は、取り出して同じ規則で見る。
@@ -21,6 +22,9 @@ SHELLS = {"bash", "sh", "zsh", "dash"}
 # コマンドの位置を作る語。この後ろの語はコマンドとして読む
 OPENERS = {"do", "then", "else", "elif", "if", "while", "until", "{", "!", "time"}
 UNIT = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}
+# 引数を取る shell のオプション。引数を読み飛ばして `-c` を探す
+SHELL_OPTS_WITH_ARG = {"-o", "+o", "-O", "+O"}
+ASSIGN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(\[[^]]*\])?\+?=")
 HEREDOC = re.compile(r"<<(-?)\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\2")
 
 
@@ -80,16 +84,21 @@ def should_deny(text: str, limit: float, in_loop: bool = False, depth: int = 0) 
                 stack[-1] = "body" if stack[-1] == "cond" else "forbody"
             elif tok == "done" and stack:
                 stack.pop()
-            elif tok == "sleep" and i + 1 < len(toks):
+            elif tok == "sleep" and i + 1 < len(toks) and not is_separator(toks[i + 1]):
+                background = i + 2 < len(toks) and toks[i + 2] == "&"
                 sec = seconds(toks[i + 1])
-                if sec is not None and (looping or sec > limit):
+                if not background and (looping or (sec is not None and sec > limit)):
                     return True
-            cmd_pos = tok in OPENERS
+            # 先頭の代入語（`X=1 sleep 30`）の後ろもコマンドの位置のまま
+            cmd_pos = tok in OPENERS or bool(ASSIGN.match(tok))
         # 実行される引数を取り出して同じ規則で見る
         if tok in SHELLS:
             j = i + 1
-            while j < len(toks) and toks[j].startswith("-") and not is_separator(toks[j]):
-                if "c" in toks[j].lstrip("-") and not toks[j].startswith("--"):
+            while j < len(toks) and toks[j][:1] in "-+" and not is_separator(toks[j]):
+                if toks[j] in SHELL_OPTS_WITH_ARG:
+                    j += 2
+                    continue
+                if toks[j].startswith("-") and "c" in toks[j].lstrip("-") and not toks[j].startswith("--"):
                     if j + 1 < len(toks) and should_deny(toks[j + 1], limit, looping, depth + 1):
                         return True
                     break

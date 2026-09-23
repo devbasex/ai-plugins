@@ -96,6 +96,10 @@ DENY_SLEEP = [
     'eval "sleep 30"',
     "echo start\nsleep 60\necho end",
     "sleep 1m",
+    "X=1 sleep 30",
+    "bash -O extglob -c 'sleep 30'",
+    "until [ -s f ]; do sleep $X; done",
+    "until [ -s f ]; do sleep $(cat n); done",
 ]
 
 ALLOW_SLEEP = [
@@ -115,6 +119,8 @@ ALLOW_SLEEP = [
     "sleep $X",
     "ls -la",
     "while read l; do echo $l; done < f",
+    "sleep 30 & echo done",
+    "echo X=1 sleep 30",
 ]
 
 
@@ -498,6 +504,14 @@ def test_context_agent_once_then_pass(tmp_path, state):
     assert denied(run(agent(tp, desc="設計: #829"), state))
     assert denied(run(agent(tp, desc="設計: #829"), state)) is None
     assert denied(run(agent(tp, desc="実装: #829"), state))
+
+
+@pytest.mark.parametrize("desc", ["設計: v10.16.1 のリリース作業", "実装: リリース 2.0.3"])
+def test_context_version_is_not_issue_number(tmp_path, state, desc):
+    # 版数・小数を課題番号と読まない。番号が無ければ <課題番号> へ落ちる
+    tp = transcript(tmp_path, 250_000)
+    reason = denied(run(agent(tp, desc=desc, session="sver" + desc[:1]), state))
+    assert reason and "/ndf:development-workflow <課題番号>" in reason
 
 
 @pytest.mark.parametrize("desc", ["検査: 829", "取り込み: 829", "仕上げ: 829"])

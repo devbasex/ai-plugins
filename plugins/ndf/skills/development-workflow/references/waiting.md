@@ -64,11 +64,11 @@
 
 | 判定 | 止める条件 | 止め方 | 上限を変える |
 | --- | --- | --- | --- |
-| sleep | 前景の Bash で、コマンドの位置の `sleep <数>` が `while` / `until` のループの本体にあるか、秒数が上限を超える。コメント・引用・ヒアドキュメントの本文は見ず、`bash -c` / `sh -c` / `eval` の中身は見る | `NDF_SLEEP_GUARD=0` | `NDF_SLEEP_MAX_SEC`（既定 5） |
+| sleep | 前景の Bash で、コマンドの位置（先頭の代入語 `X=1` の後ろを含む）の `sleep` が `while` / `until` のループの本体にある（秒数が変数でも止める）か、秒数が上限を超える。コメント・引用・ヒアドキュメントの本文は見ず、`bash -c` / `sh -c` / `eval` の中身は見る | `NDF_SLEEP_GUARD=0` | `NDF_SLEEP_MAX_SEC`（既定 5） |
 | 連続 Read | 同じ `file_path`・`offset`・`limit` の Read が、ファイルの大きさ・更新時刻・inode が変わらないまま上限の回数に達する | `NDF_READ_REPEAT_GUARD=0` | `NDF_READ_REPEAT_LIMIT`（既定 3） |
 
 - **止めないもの:** `run_in_background: true` の Bash、`Monitor` の中の `sleep`、ループの本体の
-  外の上限以下の `sleep`、`for` のループの中の上限以下の `sleep`
+  外の上限以下の `sleep`、`for` のループの中の上限以下の `sleep`、`&` で終わるバックグラウンドの `sleep`
 - **判定が失敗したときは止めない**（入力が読めない・`jq` や `python3` が無い・控えを書けない）
 - 同じ hook が、文脈が上限を超えた conductor の工程の起動も止める（[context-window.md](context-window.md)
   の「上限を超えたら hook が止める」）
