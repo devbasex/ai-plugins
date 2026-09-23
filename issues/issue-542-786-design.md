@@ -45,11 +45,12 @@
 | --- | --- | --- |
 | `plugins/ndf/scripts/lib/assignment.py` | 母集合と座席と参加者の解決 | 定数 `DEFAULT_REVIEW_RUNTIMES` を足し、`review_pool` をそれとホストから作る。`resolve_participants` は母集合に無い者の除外を無視し、`Participants.ignored_exclude` に残す |
 | `plugins/ndf/skills/cross-review/scripts/state.py` | 状態ファイル・観点・参加者の解決・ラウンドの開始 | 控えの取得を関数 `_fetch_existing_comments` に分け、`start-round` からも呼ぶ。`start-round` が変更の節のファイルを書く。分類 `design` と `DESIGN_REVIEW_TEMPLATE` を足す。`_resolve_reviewers` が無視した除外を 1 行で出す |
-| `plugins/ndf/skills/cross-review/scripts/launch-reviewer.sh` | レビューのプロンプトを組んで担当を起動する | 変更の節のファイルがあれば埋め込む。出し切りの指示と、テストと背景の処理を起動しない指示を足す |
+| `plugins/ndf/skills/cross-review/scripts/launch-reviewer.sh` | レビューのプロンプトを組んで担当を起動する | 変更の節のファイルがあれば埋め込む。出し切りの指示と、テストと背景の処理を起動しない指示を足す。先頭のコメントの「母集合が 4 者」を「担当は 4 ランタイムのどれでもなりうる」へ直す（`launch-codex.sh`・`launch-agy.sh` の同じコメントも） |
+| `plugins/ndf/skills/fix/scripts/fetch-pr-comments.sh` | 既存コメントの 3 つの取得元を 1 本で取る | 引数 `--strict` を足す。付けたときは 3 つのどれか 1 つでも失敗すれば終了コード 1（付けないときは今どおり 3 つとも失敗したときだけ 1） |
 | `plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/setup.py` | cross-refactoring の参加者の解決 | 無視した除外を 1 行で出す |
 | `plugins/ndf/skills/cross-refactoring/tests/test_init.py` | cross-refactoring の `init` のテスト | 「母集合に無い者は外せない」の中断の期待を、無視して続ける期待へ替える |
 | `plugins/ndf/skills/cross-refactoring/prompts/apply.md` | 適用担当のプロンプト | テストを前景で終わるまで待つ指示を足す |
-| 文書 | 使い方と仕様 | `cross-review/SKILL.md`・`docs/02-fix-and-rotation.md`・`docs/05-pool-and-convergence.md`・`docs/06-evidence.md`・`docs/specifications/cross-review-participants-and-seats.md`・`plugins/ndf/README.md`・`CLAUDE.md` の cross-review 節。cross-refactoring の `docs/01-state-and-propose.md`（参加者の確定の段）と `docs/specifications/cross-refactoring-participants.md`（中断の表の「名前の矛盾」の行） |
+| 文書 | 使い方と仕様 | `cross-review/SKILL.md`・`docs/02-fix-and-rotation.md`・`docs/05-pool-and-convergence.md`・`docs/06-evidence.md`・`docs/specifications/cross-review-participants-and-seats.md`・`plugins/ndf/README.md`・`CLAUDE.md` の cross-review 節。cross-refactoring の `docs/01-state-and-propose.md`（参加者の確定の段）と `docs/specifications/cross-refactoring-participants.md`（中断の表の「名前の矛盾」の行と、203 行の「共通層が返す 7 項目」）。`cross-review/docs/04-contracts.md`（`participants` の 8 項目と一時ファイルの一覧）と確定仕様 `cross-review-participants-and-seats.md` の参加者の記録の表（8 項目）は、`ignored_exclude` と変更の節のファイルを足して 9 項目・一時ファイル 1 つ増へ直す |
 | テスト | 下の「テスト設計」 | 既存の母集合のテストを直し、新しい分岐のテストを足す |
 
 変えないもの:
@@ -60,7 +61,7 @@
 | `_new_finding_count` / `_evaluate_convergence` | 新しい指摘の数え方と収束の判定 |
 | `cmd_check_oscillation` | 振動の検知 |
 | `_handle_no_result_round` | 結果が無い担当の起動し直し |
-| `fix/scripts/fetch-pr-comments.sh` | 控えの形 |
+| `fix/scripts/fetch-pr-comments.sh` の出力 | 控えの形（取得の失敗を返す引数だけを足す） |
 | `refactor_pool` | cross-refactoring の母集合 |
 
 ### 構成要素図
@@ -118,6 +119,7 @@ plugins/ndf/
     │   ├── scripts/state.py                  # 変える
     │   ├── scripts/launch-reviewer.sh        # 変える
     │   └── tests/                            # 変える・足す
+    ├── fix/scripts/fetch-pr-comments.sh     # 変える（--strict）
     └── cross-refactoring/
         ├── prompts/apply.md                  # 変える
         ├── scripts/refactor_lib/commands/setup.py  # 変える
@@ -196,7 +198,7 @@ def _fetch_existing_comments(repo: str, pr: int, path: pathlib.Path) -> str | No
 | 呼ぶ場所 | 失敗したとき |
 | --- | --- |
 | `init` の新規開始（今の場所） | 今と同じく `die`（終了コード 1） |
-| `start-round`（状態ファイルの通しで 2 ラウンド目以降。ラウンドを開いた後、担当を起動する前） | 前の控えを残し、`⚠ 既存コメントの控えを取り直せませんでした（<理由の先頭 200 字>）。前の控えのまま進めます` を標準エラーへ出して続ける |
+| `start-round`（状態ファイルの通しで 2 ラウンド目以降。ラウンドを開いた後、担当を起動する前）。`--strict` を付けて呼び、出力を一時の名前のファイルへ書いてから、成功したときだけ控えへ改名する | 3 つの取得元のどれか 1 つでも失敗したら（終了コード 1）、前の控えを残し、`⚠ 既存コメントの控えを取り直せませんでした（<理由の先頭 200 字>）。前の控えのまま進めます` を標準エラーへ出して続ける |
 
 | 項目 | 値 |
 | --- | --- |
@@ -219,8 +221,8 @@ def _fetch_existing_comments(repo: str, pr: int, path: pathlib.Path) -> str | No
 | 違う | 書く（形は冒頭の例） |
 | `git diff --name-only <前> <今>` が失敗した | 書かず、`⚠ 前のラウンドからの変更を取れませんでした` を出して続ける |
 
-- 変わったファイルは `git -C <worktree> diff --name-only <前> <今>` の出力の順に並べ、50 件を上限にする。超えた分は
-  「ほか N 件」の 1 行にする
+- 変わったファイルは `git -C <worktree> diff --name-only <前> <今>` の出力の順に並べる。50 件に達するか、一覧の行の
+  バイト数の合計が次の 1 行で 5,000 を超えるところで打ち切り、残りは「ほか N 件」の 1 行にする
 - 差分の本文は書かない
 - 同じ名前のファイルが前の起動で残っていれば、書かない場合も消す（古い節を次のプロンプトへ入れないため）
 
@@ -293,7 +295,7 @@ sequenceDiagram
 
 | 条件 | 実現方式 |
 | --- | --- |
-| 変更の節は 50 件で 6,000 バイト以下 | ファイル名だけを並べ、差分の本文を入れない。1 件 100 バイトとして 5,000 バイトと、定型の文 約 600 バイト |
+| 変更の節は 6,000 バイト以下 | ファイル名だけを並べ、差分の本文を入れない。一覧は 5,000 バイトで打ち切る（長いパスでも超えない）。定型の文は約 600 バイト、「ほか N 件」の行は 30 バイト以下 |
 | 控えの増分は同じ実行の前のラウンドの分だけ | 取り直しは `fetch-pr-comments.sh` の全件の取得で、増えるのは前の取得の後に投稿された行だけである |
 
 ## 決定の記録
@@ -310,17 +312,28 @@ sequenceDiagram
 | AC4 | 同上: `--include agy` の座席が今の既定の輪番と一致する。`--exclude agy` が例外を出さず `ignored_exclude == ["agy"]`、`available` に agy が無い。`test_state_review_pool.py`: `init --exclude agy` が終了コード 0 で `ℹ` の行を出し、状態ファイルに `ignored_exclude` が残る。綴りの誤りは今どおり 2 |
 | AC4b | `test_lib_assignment.py`: `only="agy"` で `include` 無しでも参加者が `[agy]` になり、`only="agy", exclude=["agy"]` は今どおり `AssignmentError` |
 | AC4c | cross-refactoring の `test_init.py`: `{"exclude": [["agy"]]}` が中断せず `ℹ` の行を出す。重なりの指定は今どおり終了コード 4 |
-| AC5 | 目で見る。`grep -rn "4 者" plugins/ndf/skills/cross-review CLAUDE.md plugins/ndf/README.md docs/specifications/cross-review-participants-and-seats.md` が母集合の説明として 0 件 |
+| AC5 | 目で見る。`grep -rn "4 者" plugins/ndf/skills/cross-review CLAUDE.md plugins/ndf/README.md docs/specifications/cross-review-participants-and-seats.md` の当たりのうち、現行の説明は 0 件。出た版の変更点の記録（`plugins/ndf/README.md` の 10.17.3 の更新案内）は書き換えない |
 | AC6 AC7 AC8 | 目で見る（文言）。`test_launch_reviewer_prompt_context.py` の既存の組み立てのテストが通る |
 | AC9 | `start-round` のテスト（新規 `test_state_round_changes.py`）: 一時の git リポジトリで 2 つの head を作り、2 ラウンド目で変更の節のファイルが書かれ、2 つの SHA とファイル名が入る。`launch-reviewer.sh` の組み立てで、ファイルがあるときプロンプトに節が入る |
 | AC10 | 同上: 1 ラウンド目・同じ head・`head_sha` の無いラウンドでファイルが無く、前の起動の残りも消える。プロンプトに節が入らない |
-| AC11 | 同上: 53 ファイルの差分で一覧が 50 件と「ほか 3 件」、ファイルの大きさが 6,000 バイト以下 |
+| AC11 | 同上: 53 ファイルの差分で一覧が 50 件と「ほか 3 件」。名前が 200 バイトのファイル 40 件の差分で、一覧が 5,000 バイトで打ち切られ、ファイルの大きさが 6,000 バイト以下 |
 | AC12 AC12b | 同上: `fetch-pr-comments.sh` を差し替えた偽物で、2 ラウンド目の `start-round` が呼び、控えが新しい中身になる。1 ラウンド目では呼ばない。`set-current-pr` の後の `start-round` は新しい PR の番号で呼ぶ |
+| AC12a | 同上: 偽物の `fetch-pr-comments.sh --strict` が 3 つのうち 1 つの失敗で 1 を返すと、控えが前の中身のまま残る。`fix` の側のテスト: `--strict` 無しでは今どおり 1 つの失敗で 0 |
 | AC13 | 同上: 偽物が失敗すると `start-round` が終了コード 0 で `⚠` の行を出し、控えは前の中身のまま |
 | AC14 AC16 | `test_state_auto_review_templates.py`: `issues/issue-1-design.md` を含む変更が `common` / `docs_only` / `design` に、`issues/notes.md` と `docs/x-design.md` だけの変更が `design` を含まない |
 | AC15 | 目で見る（テンプレートの文言） |
 | AC17 | 既存の `test_classify_findings.py`（minor は数えない区分へ落ちる）と judge のテストが変更なしで通る |
-| AC18 | 既存の `test_state_check_oscillation.py`・`test_judge_no_result_reason.py`・`--only` のテストが変更なしで通る |
+| AC18 | 既存の `test_state_check_oscillation.py`・`test_judge_no_result_reason.py` が変更なしで通る |
+
+**期待を書き換える既存のテスト**（決定 1・2・12 で振る舞いが変わるため）:
+
+| テスト | 今の期待 | 変更後の期待 |
+| --- | --- | --- |
+| `cross-review/tests/test_state_review_pool.py` の `--only` のテスト（264 行・292 行付近） | 既定の母集合が 4 者 | 3 者（`--only agy` は AC4b） |
+| 同じファイルの除外のテスト（422〜435 行付近） | `--exclude agy` で `excluded == ["agy"]` | `excluded == []`・`ignored_exclude == ["agy"]` |
+| `cross-refactoring/tests/test_assignment.py`（56〜58 行） | `review_pool(host) == list(ALL_RUNTIMES)` | 既定の 3 者とホスト |
+| `scripts/tests/test_lib_assignment.py`（66 行付近） | `review_pool` が 4 者 | 同上 |
+| `cross-refactoring/tests/test_init.py`（285 行） | `--exclude agy` で中断（終了コード 4） | 続ける（AC4c） |
 | AC19 | `_evaluate_convergence` と `review_seats` を変えない（差分に現れない）ことを実装の PR で確かめる |
 | AC20 | `uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest pytest . -q -n 4` が通る |
 
