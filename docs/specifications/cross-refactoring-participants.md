@@ -240,7 +240,7 @@
 | 完了報告と改修計画にレビュー担当の列が無く、母集合を 1 行で出すこと | `cross-refactoring/tests/test_rounds.py` / `test_plan_comment.py` |
 | この変更の前の状態ファイルをラウンドの開始と完了報告が読めること | `cross-refactoring/tests/test_rounds.py` / `test_start_round_emits_runtimes.py` |
 | 結果なしの試行の交代先が参加者の数の範囲で選ばれること | `cross-refactoring/tests/test_apply_attempts.py` |
-| 手順書と指示書の語が新しい参加者と輪番を書くこと | `cross-refactoring/tests/test_skill_terms.py` |
+| 手順書と指示書の語が新しい参加者と輪番を書くこと | 文書を読んで確かめる（照合していたテストは #885 で削除） |
 | 旧関数 4 つが共通層と両 Skill の部品に残らないこと | `scripts/tests/test_shared_lib_layout.py` |
 
 ## 関連リンク

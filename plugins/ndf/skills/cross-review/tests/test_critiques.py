@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+import re
 import shutil
 
 import pytest
@@ -857,3 +858,9 @@ def test_normal_path_builds_prompt_and_launches_the_cli(tmp_dir, tmp_path, kiro_
         time.sleep(0.05)
     assert f"cwd={work}" in recorded
     assert "codex-r1-0" in recorded
+
+
+def test_critique_round_monitors_with_the_critique_phase() -> None:
+    body = (SCRIPTS / "critique-round.sh").read_text(encoding="utf-8")
+    call = re.search(r'"\$SCRIPT_DIR/monitor\.py".*?(?<!\\)\n', body, re.DOTALL).group(0)
+    assert "--phase critique" in call

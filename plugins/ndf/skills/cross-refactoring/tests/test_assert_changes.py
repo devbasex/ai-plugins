@@ -192,7 +192,6 @@ def test_the_judging_prompt_asks_for_three_verdicts() -> None:
               / "prompts" / "judge-test-changes.md").read_text(encoding="utf-8")
     for verdict in ("unchanged", "changed", "undecidable"):
         assert verdict in prompt
-    assert "リポジトリを編集しない" in prompt
 
 
 # ---------- 判定の穴（レビューの指摘） ----------

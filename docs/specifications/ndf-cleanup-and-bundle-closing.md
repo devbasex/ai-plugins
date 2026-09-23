@@ -246,10 +246,10 @@ Pull Request を選ぶため、別のまとまりの課題を閉じうる。
 
 | 観点 | 確かめ方 |
 | --- | --- |
-| `gh issue close` と `status "Done"` を持つ `SKILL.md` が `progress-tracking` だけ、関門が 2 つのまま | `plugins/ndf/skills/development-workflow/tests/test_workflow_hooks.py`（`test_only_progress_tracking_closes_issues` / `test_the_gates_stay_two`） |
+| `gh issue close` と `status "Done"` を持つ `SKILL.md` が `progress-tracking` だけ、関門が 2 つのまま | 文書を読んで確かめる（照合していたテストは #885 で削除） |
 | 3 つの終わりの工程で「まとまりを閉じる」が `issue-upkeep` より前にある | 同上 |
-| 配布の記録の読み取りと閉じる手順が手順書のコード例のとおりに動く（本番の版のブロックの選択、`配布なし` の後のブロック、`まとまり:` の行の取り出し、盤面 → close → 読み直しの順、一覧が空なら止まる、最初の読みに失敗したら盤面を触らない） | 同上（`closing_step` / `record_reader` / `release_verification_template` を名前に持つテスト。疑似 `gh` で呼び出しの順を固定する） |
-| `release/SKILL.md` の行数が上限（365 行）に収まる | `plugins/ndf/skills/release/tests/test_completion_check.py` |
+| 配布の記録の読み取りと閉じる手順が手順書のコード例のとおりに動く（本番の版のブロックの選択、`配布なし` の後のブロック、`まとまり:` の行の取り出し、盤面 → close → 読み直しの順、一覧が空なら止まる、最初の読みに失敗したら盤面を触らない） | `plugins/ndf/skills/development-workflow/tests/test_workflow_hooks.py`（`closing_step` / `record_reader` を名前に持つテスト。疑似 `gh` で呼び出しの順を固定する） |
+| `release/SKILL.md` の行数が上限（365 行）に収まる | `plugins/ndf/skills/release/tests/test_completion_check.py`（`test_the_skill_md_stays_within_its_budget`） |
 | frontmatter の `description` から "after listing them for approval" が消えている | `python3 scripts/check-skill-frontmatter.py` |
 | 退避のループが空白・改行・引用符・非 ASCII を含むパスと、追跡されたディレクトリの配下の無視されたパスを同じ相対パスで移す | 一時リポジトリでの実測（PR #747 の本文） |
 | 書けない退避先では 1 件目を退避した後に止まり、`git worktree remove` へ進まず作業ツリーが残る | 同上 |

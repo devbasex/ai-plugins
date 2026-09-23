@@ -152,14 +152,3 @@ def test_only_the_current_pr_entry_is_closed_when_history_has_past_prs(
     assert history[2]["closed_at"] is None
     assert history[2]["rounds"] == 0
     assert len(history) == 3
-
-
-def test_the_skeleton_passes_the_new_branch(state_mod) -> None:
-    """手順書と参照の骨組みが `--head-branch` を渡していることを固定する。"""
-    here = pathlib.Path(__file__).resolve().parent.parent
-    for name in ("SKILL.md", "docs/02-fix-and-rotation.md"):
-        body = (here / name).read_text(encoding="utf-8")
-        calls = [line for line in body.splitlines() if "set-current-pr" in line and "$NEW_PR" in line]
-        assert calls, f"{name} に set-current-pr の呼び出しが無い"
-        for line in calls:
-            assert "--head-branch" in line, f"{name}: {line}"

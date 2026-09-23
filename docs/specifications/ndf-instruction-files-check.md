@@ -312,7 +312,7 @@ semver の形（数字 3 つと任意の接尾辞）でなければ終了コー�
 | 許可の判定（未指定と `{}`・効かない許可）、出た版の段落（段落の先頭・箇条書きの 2 件目・折り返し行・プロジェクトのスコープに限る）、変更履歴とタグからの最大値（`10.9.0` と `10.10.0`）、名前付きの捕捉、`released.path` の境界、印、上限、値の範囲、構造の不正 | 同上（`--criteria` で観点のデータを差し替える） |
 | 指摘の 1 行の形（扱いの印と位置の 3 通り）、指摘が無いときの標準出力、知らない引数で 3 | 同上 |
 | 4 ランタイムの導入先（claude の複製 / codex の複製 / agy の symlink / kiro が読む `scripts/`）から起動し、0・1・2・3 の終了コードが検査の値と一致する | 手順（PR #746 の本文。16 通り） |
-| `release/SKILL.md` の行数が上限に収まる | `plugins/ndf/skills/release/tests/test_completion_check.py` |
+| `release/SKILL.md` の行数が上限に収まる | `plugins/ndf/skills/release/tests/test_completion_check.py`（`test_the_skill_md_stays_within_its_budget`） |
 
 ## 運用
 

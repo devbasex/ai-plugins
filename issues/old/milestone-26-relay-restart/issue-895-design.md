@@ -395,7 +395,7 @@ stateDiagram-v2
 
 ## 決定の記録
 
-[issue-895-design-decisions.md](issue-895-design-decisions.md) にある（決定 20 件）。
+[issue-895-design-decisions.md](issue-895-design-decisions.md) にある（設計の決定 20 件と、実装で決めた 5 件）。
 
 ## テスト設計
 

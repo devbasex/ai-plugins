@@ -250,11 +250,11 @@ symlink を含む）`absent`、存在すれば（ディレクトリを含む）`
 
 | 観点 | 確かめ方 |
 | --- | --- |
-| 工程表と分類表の分類が一致する | `plugins/ndf/skills/development-workflow/tests/test_workflow_stage_matrix.py` |
-| 工程の並びが 4 か所で一致する | 同 `tests/test_stage_values.py` |
+| 工程表と分類表の分類が一致する | 文書を読んで確かめる（照合していたテストは #885 で削除） |
+| 工程の並びが 4 か所で一致する | 文書を読んで確かめる（照合していたテストは #885 で削除） |
 | 判定の単位・工程の順序・`light` の工程が本文と表で揃う | 同 `tests/test_workflow_units.py` |
 | gate が案内を出し、拒否しない | 同 `tests/test_workflow_evidence.py` |
-| 承認の関門と並行開発の下限が書かれている | 同 `tests/test_approval_gates.py` |
+| 承認の関門と並行開発の下限が書かれている | 文書を読んで確かめる（照合していたテストは #885 で削除） |
 | 本番のチャネルを宣言から読める | `plugins/ndf/skills/worktree/tests/test_production_branch.py` |
 | `check` が状態ごとの終了コードを返し、ファイルを作らず、`status` と同じ 1 行目を出す | `plugins/ndf/skills/worktree/tests/test_setup.py` |
 | 手順 0 が手順 1 より前にあり、分岐・拒否しない理由・判定の実体が 1 か所であることが本文に揃う | `plugins/ndf/skills/development-workflow/tests/test_declaration_check.py` |
