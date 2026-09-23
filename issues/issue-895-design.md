@@ -167,11 +167,11 @@ plugins/ndf/
 | `stop` | 無し | 0: 動いている中継に停止の印を置いた（1 つ以上）/ 1: 動いている中継が無い | 置いた中継の pid を 1 行ずつ |
 | `mark` | 標準入力に Stop hook の JSON | 常に 0 | 常に無し |
 
-**`run` は中継を始められないとき、止まらずに中継を挟まない起動へ落ちる**（AC15）。
+**`run` は中継を始められないとき、止まらずに中継を挟まない起動へ落ちる**（AC15）。**落ちる起動でも、子を起動するときと同じく環境から `CLAUDECODE` / `CLAUDE_CODE_SESSION_ID` / `CLAUDE_CODE_ENTRYPOINT` と `NDF_RELAY_DIR` を外して `os.execvpe` する。** 残すと、Claude Code の中から打たれたときに入れ子の起動として扱われ、hook も中継の下と誤って読む。
 
 | 条件 | すること |
 | --- | --- |
-| 標準入力か標準出力が端末でない | `ndf-relay: 中継を始めない（端末が無い）…` を出し、`os.execvp("claude", ["claude", <最初のコマンド>])` |
+| 標準入力か標準出力が端末でない | `ndf-relay: 中継を始めない（端末が無い）…` を出し、上の環境で `os.execvpe("claude", ["claude", <最初のコマンド>], <環境>)` |
 | `pty` を読み込めない・擬似端末を作れない（Windows など） | 同上（理由は `擬似端末を作れない`） |
 | 環境変数 `NDF_RELAY_DIR` が既にある（中継の子の中で打たれた） | 同上（理由は `既に中継の下にいる`）。入れ子にしない |
 
@@ -333,7 +333,7 @@ stateDiagram-v2
 | AC12 | 同: 試験用の子が印なしで終わると、`end`（`no-mark`）を書いて子の終了コードで終わること |
 | AC13 | 同: 別のプロセスから `relay.py stop` を打つと `stop` ができ、次の印で `/exit` を送らないこと。動いている中継が無ければ `stop` が終了コード 1 |
 | AC14 | 同: AC10・AC11・AC13 と、`plugin update` の差し替えが 0 以外のとき・次の子の起動に失敗したときに、`ndf-relay:` の 1 行と `stop` の行が出ること。後の 2 つは次のコマンドを画面に出し、終了コード 2 |
-| AC15 | 同: 標準入力を端末でないものにした `run`・`NDF_RELAY_DIR` がある中の `run`・`pty` を読み込めないように差し替えた `run` が、`ndf-relay:` の 1 行を出して `claude` をそのまま exec すること（exec を差し替えて引数を見る） |
+| AC15 | 同: 標準入力を端末でないものにした `run`・`NDF_RELAY_DIR` がある中の `run`・`pty` を読み込めないように差し替えた `run` が、`ndf-relay:` の 1 行を出して `claude` をそのまま exec すること（exec を差し替えて引数と環境を見る。環境に `CLAUDECODE` / `CLAUDE_CODE_SESSION_ID` / `CLAUDE_CODE_ENTRYPOINT` / `NDF_RELAY_DIR` が無いこと） |
 | AC16 | 同: AC4 の `NDF_RELAY_DIR` 無し。`hooks/claude.json` 以外の hook の定義の差分が無いことを実装の Pull Request の差分で見る |
 | AC17 | 擬似端末の上で中継を動かし、`--model haiku` の claude に「次の区間を `ndf-next` で 1 回出す」指示を 2 段で渡す通しの確かめ。3 つ目の区間の起動・`log.jsonl` の `start` 3 行と `end` 2 行（`ended_by` が `mark`）を見る。1 つ目の区間で `AskUserQuestion` を出させ、答える前に印が無いことも見る。前の区間の画面が端末の履歴を遡って読めるかも記録する。記録を実装の Pull Request に残す |
 | AC18 | `uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest pytest . -q -n 4` |
