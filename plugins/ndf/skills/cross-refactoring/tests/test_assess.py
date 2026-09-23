@@ -117,3 +117,20 @@ def test_unresolvable_base_exits_2(repo):
     rc, out = _assess(repo, "--base", "no-such-ref")
     assert rc == 2
     assert out == []
+
+
+def test_binary_production_file_counts_as_zero_lines(repo):
+    """numstat が `-` を返すコード拡張子のバイナリも、現状どおり 0 行と数える。"""
+    path = repo / "src" / "binary.py"
+    path.write_bytes(b"before\0after")
+    _git("add", "-A", cwd=repo)
+    _git("commit", "-qm", "change", cwd=repo)
+
+    rc, out = _assess(repo, "--base", "base")
+
+    assert rc == 3
+    assert out == [
+        "判定: 飛ばしてよい",
+        "理由: 本番コードの変更が 0 行で、上限 10 行以下です",
+        "本番コード: 1 ファイル・0 行（src/binary.py）",
+    ]
