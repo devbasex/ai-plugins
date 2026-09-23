@@ -1,7 +1,7 @@
 """担当の決定（ホスト判定 / 母集合の既定 / 輪番 / 席）のテスト。
 
 cross-refactoring は提案と適用を 1 つの参加者の一覧で回し（#727 の決定 5）、
-cross-review はホストを除く母集合から 2 席を決める。母集合の既定は Skill ごとに違う。
+cross-review はホストを含む全ランタイムの母集合から 2 席を決める。母集合の既定は Skill ごとに違う。
 """
 from __future__ import annotations
 
@@ -53,11 +53,9 @@ def test_host_detection_fails_loudly_when_unknown(assignment):
 # ---------- 母集合 ----------
 
 @pytest.mark.parametrize("host", HOSTS)
-def test_review_pool_is_all_minus_host(assignment, host):
-    pool = assignment.review_pool(host)
-    assert len(pool) == 3
-    assert host not in pool
-    assert set(pool) == set(assignment.ALL_RUNTIMES) - {host}
+def test_review_pool_is_every_runtime(assignment, host):
+    """#892 の AC1: どのホストでも、全ランタイムの 4 者を `ALL_RUNTIMES` の順で返す。"""
+    assert assignment.review_pool(host) == list(assignment.ALL_RUNTIMES)
 
 
 @pytest.mark.parametrize("host, expected", [
@@ -140,7 +138,8 @@ def _previous_review_rotation(round_no: int, pool: list[str]) -> list[str]:
 def test_review_seats_match_the_previous_rotation_for_three_available(assignment):
     """AC8: 使える者が 3 者のとき、変更前の輪番と同じ値になる（4 ホスト × ラウンド 1〜12）。"""
     for host in assignment.HOST_RUNTIMES:
-        pool = assignment.review_pool(host)
+        # 変更の前の母集合（全ランタイム − ホスト）。`review_pool` は #892 でホストを含む形へ変わった
+        pool = [r for r in assignment.ALL_RUNTIMES if r != host]
         for round_no in range(1, 13):
             assert assignment.review_seats(round_no, pool, []) == \
                 _previous_review_rotation(round_no, pool), f"host={host} round={round_no}"

@@ -23,12 +23,12 @@
   "is_own_pr": false,
   "event_downgrade": false,
   "participants": {
-    "pool": ["codex", "agy", "kiro"],
+    "pool": ["claude", "codex", "agy", "kiro"],
     "included": [], "excluded": ["agy"],
-    "available": ["codex"],
+    "available": ["claude", "codex"],
     "unavailable": {"kiro": "kiro-cli が見つかりません"},
     "probe_skipped": false, "require_all": false,
-    "fallback": ["claude"]
+    "fallback": []
   },
   "resume_changes": [
     {"at": "...", "field": "max_rounds", "from": 12, "to": 4}
@@ -117,7 +117,8 @@
 
 ### 重要なフィールド
 
-- `host` — 確定したホスト名（`claude` / `codex` / `agy` / `kiro`）。母集合から外れる
+- `host` — 確定したホスト名（`claude` / `codex` / `agy` / `kiro`）。#892 から母集合に残る
+  （`participants` を持たない古い状態の再開では、変更の前と同じく母集合から外して輪番を回す）
 - `review_findings` — 取り込んだ指摘を **per-item** で蓄積する（#156）。各要素は
   `finding_id`（`<担当>-r<ラウンド>-<索引>`）を持つ。**取り込みの時点で採番し、統合・
   反証・実行検証の記録がどの指摘を指すかをこの値で結ぶ。** 担当とラウンドを含めるため、
@@ -167,7 +168,7 @@
 - `participants` — 使える者の解決の結果（#727）。`pool`（母集合の既定）/ `included` /
   `excluded` / `available`（使える者）/ `unavailable`（名前 → 確認が通らなかった理由）/
   `probe_skipped`（確認を飛ばしたか）/ `require_all` / `fallback`（席の埋め合わせに使える
-  相手）の 8 項目。**この項目を持たない状態ファイルは、この変更の前に始めた実行である**
+  相手。**#892 の後に作る状態では空**で、変更の前に作った状態だけがホストを持ちうる）の 8 項目。**この項目を持たない状態ファイルは、この変更の前に始めた実行である**
   （読み方は `05-pool-and-convergence.md`）。`unavailable` が空である理由は 2 つあり、
   `probe_skipped` がそれを分ける（全員が通った / 確認を飛ばした）
 - `resume_changes` — 再開で変えた値の記録（#727）。要素は `at` / `field` / `to` / `from` で、

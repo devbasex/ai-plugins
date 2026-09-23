@@ -1927,7 +1927,7 @@ def _init_new_state(
 
     def _prepare_initial_assignment(args: argparse.Namespace) -> _InitialAssignment:
         """担当ホストを確定し、起動対象の認証を検査する。"""
-        # **ホストを先に確定する。** 誤ると母集合が狂い、ホストが自分自身をレビューする。
+        # **ホストを先に確定する。** 状態ファイルの `host` として残り、出力にも出る。
         # 推定できないときに既定を置かない（間違ったまま一周してしまう）。
         try:
             host, host_source = assignment.detect_host(getattr(args, "host", None))
@@ -1935,8 +1935,8 @@ def _init_new_state(
             die(str(e))
             raise
         info(f"ホストの判定: {host}（{host_source}）")
-        # 使える者の解決は共通層が持つ（#727）。通らない者は外して続け、席が 2 つに
-        # 満たなければホストで埋め合わせる。名前の矛盾と 0 者は終了コード 1。
+        # 使える者の解決は共通層が持つ（#727）。通らない者は外して続け、使える者が
+        # 1 者なら同じランタイムの 2 つ目で席を埋める。名前の矛盾と 0 者は終了コード 1。
         participants = _resolve_reviewers(host, args)
         return _InitialAssignment(
             host=host, host_source=host_source, participants=participants)
@@ -2052,7 +2052,7 @@ def _round_reviewers(st: dict[str, Any], round_no: int) -> list[str]:
     | 1 | ラウンドに `reviewers` がある | その値 |
     | 2 | `only` がある | `[only]` |
     | 3 | `participants` がある | `assignment.review_seats(round_no, available, fallback)` |
-    | 4 | `host` がある | `assignment.review_seats(round_no, review_pool(host), [])`（変更前の輪番と同じ値） |
+    | 4 | `host` がある | `assignment.review_seats(round_no, 全ランタイム − ホスト, [])`（#892 の前の母集合。変更前の輪番と同じ値） |
     | 5 | どれも無い（古い状態ファイル） | `LEGACY_AGENTS` |
     """
     for entry in st.get("rounds") or []:
@@ -2073,8 +2073,10 @@ def _round_reviewers(st: dict[str, Any], round_no: int) -> list[str]:
         )
     host = st.get("host")
     if host:
+        # **`review_pool(host)` を呼ばない。** #892 で母集合がホストを含む形へ変わったため、
+        # 変更の前に始めた実行の担当を保つには、変更の前の母集合を式で持つほかにない。
         return assignment.review_seats(
-            max(round_no, 1), assignment.review_pool(host), [])
+            max(round_no, 1), [r for r in assignment.ALL_RUNTIMES if r != host], [])
     return list(LEGACY_AGENTS)
 
 
@@ -2149,11 +2151,12 @@ def _normalize_participant_args(
 def _resolve_reviewers(host: str, args: argparse.Namespace) -> dict[str, Any]:
     """使える者を決め、状態ファイルの `participants`（`fallback` を含む 8 項目）を返す。
 
-    母集合は `review_pool(host)`。確認は止めない確認（`auth.probe_auth`）で、通らない者は
-    外して続ける。使える者が 2 者に満たなければホストを確かめ、通れば `fallback` に
-    置く（決定 9）。1 者指定があればホストを確かめず `fallback` は空。名前の矛盾・
-    `--require-all` で欠け・0 者で埋め合わせも無い・1 者指定が確認を通らない、は終了
-    コード 1（状態ファイルはこの関数の後に書かれるため作られない）。
+    母集合は `review_pool(host)`（ホストを含む全ランタイム、#892）。確認は止めない確認
+    （`auth.probe_auth`）で、通らない者は外して続ける。**ホストを別に確かめて埋め合わせに
+    使うことはしない**（ホストは既に母集合で確かめている）。`fallback` は常に空で、使える者が
+    1 者なら `review_seats` が `<その者>-2` で席を埋める。名前の矛盾・`--require-all` で
+    欠け・使える者が 0 者・1 者指定が確認を通らない、は終了コード 1（状態ファイルはこの
+    関数の後に書かれるため作られない）。
     """
     only, include, exclude = _normalize_participant_args(args)
     probe = functools.partial(auth.probe_auth, info=info)
@@ -2181,20 +2184,10 @@ def _resolve_reviewers(host: str, args: argparse.Namespace) -> dict[str, Any]:
         die(f"1 者指定の {only} が確認を通りません"
             f"（{resolved.unavailable.get(only, '')}）。"
             f"{only} で認証し直すか、1 者指定を外して再実行してください", code=1)
-    if only is None and len(available) < 2:
-        results, skipped = auth.probe_auth([host], info=info)
-        if skipped or results.get(host, {}).get("ok", False):
-            fallback = [host]
-        if not available and not fallback:
-            die(f"使える者がいません: 母集合 {' / '.join(pool)} の全員が確認を通らず、"
-                f"ホスト {host} も通りません（{results.get(host, {}).get('detail', '')}）",
-                code=1)
-        if fallback and host not in available:
-            info(f"⚠ 使える者が {len(available)} 者のため、席をホスト（{host}）で埋めます"
-                 "（観点が減ります）")
-        else:
-            info(f"⚠ 使える者が {len(available)} 者のため、席を同じランタイムの 2 つ目で"
-                 "埋めます（観点が減ります）")
+    if only is None and not available:
+        die(f"使える者がいません: 母集合 {' / '.join(pool)} の全員が確認を通りません", code=1)
+    if only is None and len(available) == 1:
+        info("⚠ 使える者が 1 者のため、席を同じランタイムの 2 つ目で埋めます（観点が減ります）")
 
     state = resolved.to_state()
     state["fallback"] = fallback

@@ -1,6 +1,6 @@
 ---
 name: cross-review
-description: "Review a PR with two CLIs picked from the runtimes other than the host, looping fixes until no new finding appears. Use when a converging multi-AI review is wanted（クロスレビュー・両AIレビュー・収束レビュー）."
+description: "Review a PR with two CLIs picked from every runtime including the host, looping fixes until no new finding appears. Use when a converging multi-AI review is wanted（クロスレビュー・両AIレビュー・収束レビュー）."
 argument-hint: "[PR番号] [--host claude|codex|agy|kiro] [--max-rounds N] [--rotate-after K] [--rotate-mode light|squash] [--only RUNTIME] [--exclude NAMES] [--include NAMES] [--require-all] [--focus TEXT] [--extra-instructions-file PATH] [--verify-command CMD] [--verify-exit-code N]"
 allowed-tools:
   - Bash
@@ -13,13 +13,14 @@ allowed-tools:
 
 # クロスレビュー収束ループ
 
-PR を**ホストを除く 3 者から選んだ 2 者**にレビューさせ、**新しい指摘が出なくなるまで**
+PR を**ホストを含む全ランタイムから選んだ 2 者**にレビューさせ、**新しい指摘が出なくなるまで**
 `/ndf:pr-review` と `/ndf:fix` を自動で回す。
 
-母集合は「全ランタイム − ホスト」で、そのうち使える者から毎ラウンド 2 席を埋める
-（実装は共通層の `lib/assignment.py`）。**1 者が使えなくても始まり**、席が足りなければ
-ホストと同じランタイムの 2 つ目で埋める（`docs/05`）。**ホストを名指しで固定しない**のは、
-固定するとホストが `codex` か `agy` のときに自分自身をレビュワーへ含めるためである。
+母集合は全ランタイム（ホストを含む 4 者）で、そのうち使える者から毎ラウンド 2 席を埋める
+（実装は共通層の `lib/assignment.py`）。**1 者が使えなくても始まり**、使える者が 1 者なら
+その者と同じランタイムの 2 つ目で埋める（`docs/05`）。**ホストも輪番に入れる**のは、
+レビュー担当を CLI プロセスとして起動するためである。ホストと同じランタイムでも、ホストの
+会話の作業文脈は持ち込まれない。外したい相手は `--exclude` で名指しする。
 
 /goalの引数として呼ばれた場合は、新しい指摘が出なくなるまで/cross-reviewを繰り返す。
   * 担当のいずれかが不具合などで実行できなくなった場合は異常終了とする
@@ -60,7 +61,7 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 | 長尺PR対策 | **`--rotate-after` ラウンドで PR をローテーション**（default=light: 同ブランチで PR 巻き直し / squash: 新ブランチ + squash 統合） |
 | 振動検知 | 前のラウンドと**同じ箇所を指す指摘**が 50% 以上なら中断（測り方は `docs/01` の Step 4） |
 | 終了基準 | **新しい指摘が出なくなったら収束**。全員 `APPROVE` は最も止まらない参加者に律速される。3 つの層の順序は `docs/01` の「終了基準」 |
-| レビュワーの母集合 | **全ランタイム − ホスト**の 3 者から、使える者を決めて毎ラウンド 2 席。使える者の解決と席の埋め方は `docs/05` |
+| レビュワーの母集合 | **ホストを含む全ランタイム**の 4 者から、使える者を決めて毎ラウンド 2 席。使える者の解決と席の埋め方は `docs/05` |
 
 ## 引数
 
@@ -70,10 +71,10 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 | `--max-rounds N` | 全体最大ラウンド数（PR ローテーションを含む通算） | `12` |
 | `--rotate-after K` | この round 数で未収束なら PR ローテーション | `8` |
 | `--rotate-mode light\|squash` | ローテーション方式。`light`: 同ブランチで旧 PR を close → 新 PR (title/body は現状の差分・実装から再生成)。`squash`: squash 統合 + 新ブランチ + `(rotated)` suffix | `light` |
-| `--host claude\|codex\|agy\|kiro` | この収束ループを起動している CLI。母集合から外れる | 環境変数から推定。**推定できなければ失敗する** |
-| `--only RUNTIME` | 1 者だけで回す。**そのラウンドの担当を 1 者へ絞り、席の埋め合わせを行わない。** 母集合の外を指定したときと、その 1 者が確認を通らないときは `init` が弾く | 担当 2 者 |
+| `--host claude\|codex\|agy\|kiro` | この収束ループを起動している CLI。母集合には残る（外すなら `--exclude`） | 環境変数から推定。**推定できなければ失敗する** |
+| `--only RUNTIME` | 1 者だけで回す。**そのラウンドの担当を 1 者へ絞り、席の埋め合わせを行わない。** 外した者を指定したときと、その 1 者が確認を通らないときは `init` が弾く | 担当 2 者 |
 | `--exclude NAMES` | 母集合から外す者。カンマ区切りで複数、繰り返しも可。再開で `none` を渡すと空へ戻す | なし |
-| `--include NAMES` | 母集合に足す者（ホストも足せる）。書き方は `--exclude` と同じ | なし |
+| `--include NAMES` | 母集合に足す者。既定の母集合が全ランタイムのため、ホストを含め指定しても結果は変わらない（エラーにはしない）。書き方は `--exclude` と同じ | なし |
 | `--require-all` | 確認を通らない者が 1 者でもいれば `init` を失敗させる。全員が揃わないなら始めたくない運用向け | 使える者で始める |
 | `--focus TEXT` | 自動レビュー観点に上乗せして**そのラウンドのレビュー担当 2 者**に渡す追加観点。短い重点チェック向け | なし |
 | `--extra-instructions-file PATH` | 自動レビュー観点に上乗せして**そのラウンドのレビュー担当 2 者**に渡す追加観点を UTF-8 テキストファイルから読む。長いチェックリスト向け | なし |

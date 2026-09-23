@@ -4,7 +4,7 @@
 
 | Skill | 母集合の既定 | 中身 |
 | --- | --- | --- |
-| cross-review | `review_pool(host)` | 全ランタイム − ホスト |
+| cross-review | `review_pool(host)` | 全ランタイム（ホストを含む。#892） |
 | cross-refactoring | `refactor_pool(host)` | `DEFAULT_REFACTOR_RUNTIMES`（codex / kiro）とホスト |
 
 参加者は「母集合の既定 ∪ 足す者 − 外す者」で決め（`resolve_participants`）、確認を
@@ -61,8 +61,8 @@ def detect_host(
     """ホストを確定し、`(ホスト名, 判定根拠)` を返す。
 
     判定根拠は `explicit`（`--host` の明示指定）か `env`（環境変数からの推定）。
-    誤検出すると**母集合の既定が狂う**（ホストが cross-review の担当に混ざる、
-    参加すべき者が外れる）ため、呼び出し側は結果を必ず出力と状態ファイルへ残す。
+    誤検出すると**母集合の既定が狂う**（cross-refactoring で参加すべき者が外れる、
+    別の者が混ざる）ため、呼び出し側は結果を必ず出力と状態ファイルへ残す。
 
     推定できないときは例外を上げる。既定値を勝手に置くと、間違ったまま一周して
     しまい、成果物を見るまで気付けない。
@@ -85,10 +85,15 @@ def detect_host(
 
 
 def review_pool(host: str) -> list[str]:
-    """cross-review の母集合の既定（全ランタイム − ホスト）。常に 3 者になる。"""
+    """cross-review の母集合の既定（全ランタイム。ホストを含む 4 者、#892）。
+
+    レビュー担当は CLI プロセスとして起動するため、ホストと同じランタイムでもホストの
+    会話の作業文脈は持ち込まれない。引数 `host` は、ホストになれない名前を弾く検査の
+    ために残す。
+    """
     if host not in HOST_RUNTIMES:
         raise AssignmentError(f"ホストになれないランタイムです: {host}")
-    return [r for r in ALL_RUNTIMES if r != host]
+    return list(ALL_RUNTIMES)
 
 
 def _in_fixed_order(names: Iterable[str]) -> list[str]:
@@ -156,7 +161,7 @@ def resolve_participants(
 
     1. `include` / `exclude` の各名前が `ALL_RUNTIMES` にあり、重ならないことを確かめる。
        `exclude` の名前が「`pool` ∪ `include`」に無ければ弾く（cross-review でホストを
-       外す指定はここに当たる）
+       外す指定は #892 の後は母集合に入るため当たらない）
     2. 参加者 = `pool` ∪ `include` − `exclude`（`ALL_RUNTIMES` の順）
     3. `only` があれば、参加者に含まれ `exclude` に無いことを確かめ、参加者をその 1 者にする
     4. `probe(参加者)` で確かめる。飛ばされたら全員を通ったものとし `probe_skipped` を真にする

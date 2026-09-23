@@ -1,7 +1,9 @@
 """レビュワーの母集合と終了基準（#371）。
 
-**母集合は「全ランタイム − ホスト」である。** 名指しの固定は、ホストが `codex` か `agy` の
-ときに自分自身をレビュワーへ含める。担当はラウンドごとの輪番で 2 者を選ぶ。
+**母集合はホストを含む全ランタイムである（#892）。** レビュー担当は CLI プロセスとして起動する
+ため、ホストと同じランタイムでもホストの会話の作業文脈は持ち込まれない。担当はラウンドごとの
+輪番で 2 者を選ぶ。`participants` を持たず `host` だけを持つ古い状態ファイルは、変更の前の
+母集合（全ランタイム − ホスト）で輪番を回す。
 
 **終了基準は「新しい指摘が出ない」である。** 全員 `APPROVE` は、最も止まらない参加者に
 律速される。同じ論点の再提出では止まる。
@@ -84,8 +86,8 @@ def _comment(path="src/a.py", line=10, body="ここを直す"):
 
 # ---------- 母集合 ----------
 
-def test_reviewers_exclude_the_host(state_mod, tmp_path):
-    """ラウンドの担当はホストを含まない 2 者である。"""
+def test_a_host_only_state_keeps_reviewers_other_than_the_host(state_mod, tmp_path):
+    """`host` だけを持つ古い状態ファイルでは、担当はホストを含まない 2 者のままである。"""
     for host in ("claude", "codex", "agy", "kiro"):
         path = _state(tmp_path, host=host)
         st = json.loads(path.read_text(encoding="utf-8"))
@@ -246,22 +248,20 @@ def test_only_narrows_the_round_reviewers(state_mod, tmp_path):
     assert state_mod._round_reviewers(st, 1) == ["kiro"]
 
 
-def test_init_rejects_an_only_outside_the_pool(state_mod, tmp_path, monkeypatch):
-    """母集合の外を `--only` に指定したら、起動する前に弾く（終了コード 1）。
+def test_init_accepts_the_host_as_only(state_mod, tmp_path, monkeypatch):
+    """母集合がホストを含むため、`--only <ホスト>` も受け付ける（#892）。
 
-    ホスト自身や、参加しないランタイムを指定しても、そのラウンドは 1 者も起動しない。
-    検査は共通層の `resolve_participants` が行い、`_resolve_reviewers` が終了コードへ写す。
+    母集合の外を指せるのは外した者だけで、その矛盾は
+    `test_contradicting_names_fail_before_the_state_is_written` が確かめる。
     """
     calls: list[list[str]] = []
     monkeypatch.setattr(state_mod.auth, "probe_auth", _fake_probe({}, calls))
-    with pytest.raises(SystemExit) as e:
-        state_mod._resolve_reviewers("claude", _init_args(tmp_path, only="claude"))
-    assert e.value.code == 1
-    assert calls == []
+    p = state_mod._resolve_reviewers("claude", _init_args(tmp_path, only="claude"))
+    assert p["available"] == ["claude"]
     p = state_mod._resolve_reviewers("claude", _init_args(tmp_path, only="codex"))
     assert p["available"] == ["codex"]
     p = state_mod._resolve_reviewers("claude", _init_args(tmp_path))
-    assert p["available"] == ["codex", "agy", "kiro"]
+    assert p["available"] == ["claude", "codex", "agy", "kiro"]
 
 
 def test_judge_returns_the_relaunch_targets_as_a_list(state_mod, tmp_path, capsys):
@@ -289,13 +289,13 @@ def test_auth_check_covers_only_the_reviewers_that_run(state_mod, tmp_path, monk
     assert calls == [["kiro"]]
     calls.clear()
     state_mod._resolve_reviewers("claude", _init_args(tmp_path))
-    assert calls == [["codex", "agy", "kiro"]]
+    assert calls == [["claude", "codex", "agy", "kiro"]]
 
 
 def test_init_fails_when_the_host_cannot_be_guessed(state_mod, monkeypatch):
     """手掛かりが無ければ、既定を置かずに失敗する。
 
-    誤ると母集合が狂い、ホストが自分自身をレビューする。間違ったまま一周してしまい、
+    誤ったホストが状態ファイルと出力に残る。間違ったまま一周してしまい、
     成果物を見るまで気付けない。
     """
     for key, _ in state_mod.assignment.HOST_ENV_HINTS:
@@ -397,9 +397,9 @@ def test_a_failing_reviewer_is_dropped_and_init_still_succeeds(new_init, capsys)
     """AC14: 確認を通らない者は外して続ける。状態ファイルは作られ、理由が残る。"""
     st = new_init(failing={"kiro": "コマンドが見つかりません"})
     p = st["participants"]
-    assert p["available"] == ["codex", "agy"]
+    assert p["available"] == ["claude", "codex", "agy"]
     assert p["unavailable"] == {"kiro": "コマンドが見つかりません"}
-    assert p["pool"] == ["codex", "agy", "kiro"]
+    assert p["pool"] == ["claude", "codex", "agy", "kiro"]
     assert p["fallback"] == []
     assert p["probe_skipped"] is False
     assert p["require_all"] is False
@@ -421,9 +421,9 @@ def test_require_all_keeps_the_old_gate(new_init, capsys):
 def test_exclude_skips_the_probe_and_is_recorded(new_init):
     """AC16: `--exclude agy` は agy を確かめず、`excluded` に残す。"""
     st = new_init("--exclude", "agy")
-    assert new_init.calls == [["codex", "kiro"]]
+    assert new_init.calls == [["claude", "codex", "kiro"]]
     assert st["participants"]["excluded"] == ["agy"]
-    assert st["participants"]["available"] == ["codex", "kiro"]
+    assert st["participants"]["available"] == ["claude", "codex", "kiro"]
 
 
 def test_repeated_and_comma_separated_exclude_are_the_same(new_init):
@@ -433,25 +433,26 @@ def test_repeated_and_comma_separated_exclude_are_the_same(new_init):
     b = new_init("--exclude", "agy,kiro")["participants"]
     assert a == b
     assert a["excluded"] == ["agy", "kiro"]
-    assert a["available"] == ["codex"]
+    assert a["available"] == ["claude", "codex"]
 
 
-def test_include_adds_the_host_and_start_round_still_returns_two_seats(new_init, state_mod, tmp_path):
-    """AC17: `--include claude` で 4 者になり、席は 2 つのまま。"""
+def test_include_the_host_changes_nothing_and_start_round_still_returns_two_seats(new_init, state_mod, tmp_path):
+    """AC17: `--include claude` はエラーにならず 4 者のまま（既に母集合に入っている）。席は 2 つ。"""
     st = new_init("--include", "claude")
     assert st["participants"]["available"] == ["claude", "codex", "agy", "kiro"]
     assert st["participants"]["included"] == ["claude"]
     assert len(_start_round(state_mod, tmp_path)) == 2
 
 
-def test_one_available_reviewer_is_backed_by_the_host(new_init, state_mod, tmp_path, capsys):
-    """AC18: 使える者が 1 者ならホストを確かめ、通れば席を埋める。"""
-    st = new_init(failing={"agy": "未認証", "kiro": "未認証"})
+def test_one_available_reviewer_is_backed_by_a_second_copy(new_init, state_mod, tmp_path, capsys):
+    """#892 の AC5: 使える者が 1 者ならホストを別に確かめず、`<その者>-2` で埋める。"""
+    st = new_init(failing={"claude": "未認証", "agy": "未認証", "kiro": "未認証"})
     assert st["participants"]["available"] == ["codex"]
-    assert st["participants"]["fallback"] == ["claude"]
-    assert new_init.calls == [["codex", "agy", "kiro"], ["claude"]]
-    assert "⚠ 使える者が 1 者のため、席をホスト（claude）で埋めます（観点が減ります）" in capsys.readouterr().err
-    assert _start_round(state_mod, tmp_path) == ["codex", "claude"]
+    assert st["participants"]["fallback"] == []
+    assert new_init.calls == [["claude", "codex", "agy", "kiro"]]
+    assert "⚠ 使える者が 1 者のため、席を同じランタイムの 2 つ目で埋めます（観点が減ります）" \
+        in capsys.readouterr().err
+    assert _start_round(state_mod, tmp_path) == ["codex", "codex-2"]
 
 
 def test_only_does_not_probe_the_host_and_keeps_one_seat(new_init, state_mod, tmp_path):
@@ -488,29 +489,24 @@ def test_only_still_starts_when_the_probe_is_skipped(new_init, state_mod, tmp_pa
     assert p["probe_skipped"] is True
 
 
-def test_no_available_reviewer_fills_both_seats_with_the_host(new_init, state_mod, tmp_path, capsys):
-    """AC19: 使える者が 0 者でもホストが通れば、席はホストとその 2 つ目。"""
-    st = new_init(failing={"codex": "x", "agy": "x", "kiro": "x"})
-    assert st["participants"]["available"] == []
-    assert st["participants"]["fallback"] == ["claude"]
-    assert _start_round(state_mod, tmp_path) == ["claude", "claude-2"]
-
-
-def test_no_available_reviewer_and_no_host_fails(new_init, capsys):
-    """AC19 後半: ホストも通らなければ終了コード 1 で、状態ファイルを作らない。"""
+def test_no_available_reviewer_fails(new_init, capsys):
+    """#892 の AC5: 使える者が 0 者なら、ホストを別に確かめず終了コード 1 で、状態ファイルを作らない。"""
     with pytest.raises(SystemExit) as e:
         new_init(failing={"codex": "x", "agy": "x", "kiro": "x", "claude": "x"})
     assert e.value.code == 1
     assert not new_init.state_file.exists()
-    assert "使える者がいません" in capsys.readouterr().err
+    assert new_init.calls == [["claude", "codex", "agy", "kiro"]]
+    err = capsys.readouterr().err
+    assert "使える者がいません" in err
+    assert "母集合 claude / codex / agy / kiro の全員が確認を通りません" in err
 
 
-def test_the_second_seat_falls_back_to_a_second_copy_when_the_host_is_unavailable(new_init, state_mod, tmp_path, capsys):
-    """使える者が 1 者でホストも通らなければ、同じランタイムの 2 つ目で埋める。"""
-    st = new_init(failing={"agy": "x", "kiro": "x", "claude": "x"})
+def test_the_host_is_not_probed_separately_when_it_was_excluded(new_init, capsys):
+    """#892 の AC5: ホストを外して 1 者になっても、ホストを埋め合わせに確かめない。"""
+    st = new_init("--exclude", "claude", failing={"agy": "x", "kiro": "x"})
+    assert new_init.calls == [["codex", "agy", "kiro"]]
+    assert st["participants"]["available"] == ["codex"]
     assert st["participants"]["fallback"] == []
-    assert "席を同じランタイムの 2 つ目で埋めます" in capsys.readouterr().err
-    assert _start_round(state_mod, tmp_path) == ["codex", "codex-2"]
 
 
 # ---------- 読めないディレクトリを含む PATH（#813: AC10） ----------
@@ -554,7 +550,7 @@ def test_init_starts_when_an_unreadable_path_hides_a_missing_cli(
         unreadable.chmod(0o700)
 
     assert st["participants"]["available"] == ["codex", "agy"]
-    assert list(st["participants"]["unavailable"]) == ["kiro"]
+    assert list(st["participants"]["unavailable"]) == ["claude", "kiro"]
     assert _start_round(state_mod, tmp_path) == ["codex", "agy"]
 
 
@@ -570,13 +566,12 @@ def test_init_starts_when_a_probe_cannot_be_launched(new_init, state_mod, monkey
 
     st = new_init(real_probe=True)
 
-    assert st["participants"]["available"] == ["codex", "agy"]
+    assert st["participants"]["available"] == ["claude", "codex", "agy"]
     assert st["participants"]["unavailable"] == {
         "kiro": "コマンドを実行できません（Permission denied）"}
 
 
 @pytest.mark.parametrize("argv", [
-    ("--exclude", "claude"),
     ("--only", "codex", "--exclude", "codex"),
     ("--include", "agy", "--exclude", "agy"),
 ])
@@ -643,6 +638,69 @@ def test_participants_win_over_the_host_rotation(state_mod, tmp_path):
     })
     st = json.loads(path.read_text(encoding="utf-8"))
     assert state_mod._round_reviewers(st, 1) == ["codex", "kiro"]
+
+
+# ---------- 母集合にホストを入れる（#892） ----------
+
+def test_exclude_agy_on_claude_rotates_three_pairs(new_init, state_mod, tmp_path):
+    """#892 の AC2: ホスト claude・`--exclude agy` で使える者は 3 者、ラウンド 1〜3 は 3 通りの組を 1 度ずつ。"""
+    st = new_init("--exclude", "agy")
+    available = st["participants"]["available"]
+    assert available == ["claude", "codex", "kiro"]
+    seats = [state_mod._round_reviewers(st, r) for r in (1, 2, 3)]
+    assert seats == [["codex", "kiro"], ["claude", "kiro"], ["claude", "codex"]]
+    assert {frozenset(s) for s in seats} == {
+        frozenset(p) for p in (("claude", "codex"), ("claude", "kiro"), ("codex", "kiro"))}
+
+
+@pytest.mark.parametrize("host", ["claude", "codex", "agy", "kiro"])
+def test_init_reports_the_host_in_the_pool(state_mod, tmp_path, monkeypatch, capsys, host):
+    """#892 の AC3: どのホストでも、`init` の出力の「母集合」にホストが入る。"""
+    monkeypatch.setattr(state_mod.auth, "probe_auth", _fake_probe({}, []))
+    args = _init_args(tmp_path)
+    args.host = host
+    p = state_mod._resolve_reviewers(host, args)
+    assert host in p["pool"]
+    assert "母集合: claude / codex / agy / kiro" in capsys.readouterr().err
+
+
+def test_exclude_the_host_is_accepted(new_init):
+    """#892 の AC4: `--exclude <ホスト>` を受け付け、ホストを外した母集合で始まる。"""
+    st = new_init("--exclude", "claude")
+    assert new_init.state_file.exists()
+    assert "claude" not in st["participants"]["available"]
+    assert st["participants"]["available"] == ["codex", "agy", "kiro"]
+    assert st["participants"]["excluded"] == ["claude"]
+
+
+def test_a_state_with_the_old_participants_keeps_its_seats(state_mod, tmp_path):
+    """#892 の AC6: 変更の前に作った `participants`（使える者 2 者・`fallback: [host]`）は同じ席を返す。"""
+    old = {
+        "pool": ["codex", "agy", "kiro"], "included": [], "excluded": ["agy"],
+        "available": ["codex", "kiro"], "unavailable": {}, "probe_skipped": False,
+        "require_all": False, "fallback": ["claude"],
+    }
+    path = _state(tmp_path, participants=old)
+    st = json.loads(path.read_text(encoding="utf-8"))
+    for round_no in range(1, 13):
+        assert state_mod._round_reviewers(st, round_no) == ["codex", "kiro"]
+    one = dict(old, available=["codex"], unavailable={"kiro": "x"})
+    path = _state(tmp_path, participants=one)
+    st = json.loads(path.read_text(encoding="utf-8"))
+    for round_no in range(1, 13):
+        assert state_mod._round_reviewers(st, round_no) == ["codex", "claude"]
+
+
+@pytest.mark.parametrize("host", ["claude", "codex", "agy", "kiro"])
+def test_a_host_only_state_keeps_the_previous_rotation(state_mod, tmp_path, host):
+    """#892 の AC7: `host` だけの状態は、全ランタイム − ホストの 3 者の輪番（ラウンド 1〜12）を保つ。"""
+    path = _state(tmp_path, host=host)
+    st = json.loads(path.read_text(encoding="utf-8"))
+    previous_pool = [r for r in state_mod.assignment.ALL_RUNTIMES if r != host]
+    for round_no in range(1, 13):
+        dropped = (round_no - 1) % 3
+        expected = [r for i, r in enumerate(previous_pool) if i != dropped]
+        assert state_mod._round_reviewers(st, round_no) == expected, f"round={round_no}"
 
 
 # ---------- 完了報告の「参加した者」（#727: AC24） ----------

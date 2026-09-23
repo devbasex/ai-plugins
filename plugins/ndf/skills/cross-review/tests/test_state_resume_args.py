@@ -193,12 +193,15 @@ def test_only_none_clears_the_narrowing(resume, tmp_path, capsys):
 # ---------------- 外す者・足す者（AC28） ----------------
 
 def test_exclude_reruns_the_probe_and_drops_the_name(resume, state_mod, tmp_path):
-    """AC28: `--exclude agy` は確認をやり直し、使える者から agy を外す。"""
+    """AC28: `--exclude agy` は確認をやり直し、使える者から agy を外す。
+
+    作り直しは保存された `pool` ではなく今の母集合（#892 でホストを含む）から解決する。
+    """
     _state(tmp_path)
     st = resume("--exclude", "agy")
-    assert resume.calls == [["codex", "kiro"]]
+    assert resume.calls == [["claude", "codex", "kiro"]]
     assert st["participants"]["excluded"] == ["agy"]
-    assert st["participants"]["available"] == ["codex", "kiro"]
+    assert st["participants"]["available"] == ["claude", "codex", "kiro"]
     assert "agy" not in _seats(state_mod, tmp_path)
 
 
@@ -217,7 +220,7 @@ def test_exclude_none_clears_the_exclusions(resume, tmp_path):
     _state(tmp_path, participants=_participants(excluded=["agy"], available=["codex", "kiro"]))
     st = resume("--exclude", "none")
     assert st["participants"]["excluded"] == []
-    assert st["participants"]["available"] == ["codex", "agy", "kiro"]
+    assert st["participants"]["available"] == ["claude", "codex", "agy", "kiro"]
 
 
 def test_unpassed_arguments_come_from_the_state_file(resume, tmp_path):
@@ -235,7 +238,7 @@ def test_require_all_alone_rebuilds_the_participants(resume, tmp_path):
     _state(tmp_path)
     st = resume("--require-all")
     assert st["participants"]["require_all"] is True
-    assert resume.calls == [["codex", "agy", "kiro"]]
+    assert resume.calls == [["claude", "codex", "agy", "kiro"]]
 
 
 def test_a_failed_rebuild_leaves_the_state_untouched(resume, state_mod, tmp_path, monkeypatch):
@@ -261,7 +264,7 @@ def test_a_state_without_participants_can_be_rebuilt(resume, tmp_path):
     path.write_text(json.dumps(st, ensure_ascii=False), encoding="utf-8")
 
     saved = resume("--exclude", "agy")
-    assert saved["participants"]["available"] == ["codex", "kiro"]
+    assert saved["participants"]["available"] == ["claude", "codex", "kiro"]
     changes = [c for c in saved["resume_changes"] if c["field"] == "participants"]
     assert changes[0]["from"] is None
 
