@@ -70,7 +70,7 @@
 | 9 | hook の出力で終わらせる | Stop hook が `{"continue": false}` を返しても、理由が表示されるだけでプロセスは入力待ちのまま残った |
 | 12 | 背景の処理と Stop hook | 背景の Bash（`sleep 40`）と、背景で起動したサブエージェントの中の背景の Bash（`sleep 30`）を残して応答を終えると、Stop hook の標準入力の `background_tasks` に 2 件（`type: shell`・`status: running`）が載った。何も残さない応答では空の配列 |
 | 11 | claude の副命令と起動の費用 | `claude --help` の副命令は `agents` / `attach` / `auth` / `auto-mode` / `doctor` / `gateway` / `import` / `install` / `logs` / `mcp` / `plugin`・`plugins` / `project` / `respawn` / `rm` / `setup-token` / `stop`・`kill` / `ultrareview` / `update`・`upgrade`。中継が使う標準ライブラリを読み込む Python の起動は約 0.01 秒。`~/.claude/plugins/installed_plugins.json` の `ndf@<名前>` が `installPath`（版つきのキャッシュ）と `version` を持つ |
-| 10 | `claude plugin` | `claude plugin update [-y] <plugin>`（TTY でなければ `-y` が必須）、`claude plugin marketplace update [name]`、`claude plugin list --json` が `id` と `version` を返す |
+| 10 | `claude plugin` | `claude plugin update [-y] <plugin>`（TTY でなければ `-y` が必須）、`claude plugin marketplace update [name]`、`claude plugin list --json` が `id` と `version` を返す。`id` は `ndf@ai-plugins` の形（`<プラグイン>@<マーケットプレイス>`）で、`version` は `10.17.2` だった |
 
 6 と 9 が「中継が子の端末へ `/exit` を入力する」形の根拠である。4 が「静まりを待つ」段と、
 `stop_hook_active` を見ない判定の理由である。Claude Code の中から起こしたプロセスは `CLAUDECODE` などを
@@ -233,7 +233,7 @@ alias claude='python3 "${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py" run'
 
 ### 作業ディレクトリ `NDF_RELAY_DIR`
 
-`${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/<中継の pid>/`。権限は `0700`。`run` が作り、子の環境変数 `NDF_RELAY_DIR` に置く。
+`${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/<起動の時刻（UTC、`%Y%m%dT%H%M%SZ`）>-<中継の pid>-<乱数 8 桁>/`。権限は `0700`。`run` が `os.mkdir` で新しく作り（既にあれば別の乱数で作り直す。前の起動のディレクトリを使い回さない）、子の環境変数 `NDF_RELAY_DIR` に置く。pid が再利用されても、前の起動の `stop` / `next.json` / `child.pid` は別のディレクトリに残るため、今回の中継が読むことはない。
 `run` が終わるとき `relay.pid` を消す（`log.jsonl` は残す）。1 日の起動回数は、この親のディレクトリの全 `log.jsonl` の今日の `start` を数える。
 
 | ファイル | 書く側 | 中身 |
@@ -367,7 +367,7 @@ stateDiagram-v2
 | 終わらせる | 子の端末へ `/exit` を書き、1 秒おいて `\r` を書く。`waitpid` で 30 秒まで待ち、終わらなければ SIGTERM を送って 10 秒まで待ち、それでも終わらなければ SIGKILL を送って終わりを待つ（SIGKILL の後は必ず終わる）。**子の終わりを `waitpid` で確かめてから** `end` を書き、次へ進む |
 | 起動する | マーケットプレイスの名前が読めていれば、`claude plugin marketplace update <マーケットプレイス>` → `claude plugin update ndf@<マーケットプレイス> -y` → `claude plugin list --json` で版を読む。どれかが 0 以外で終われば `update-failed` で終わる。名前か版が読めなければ（下の段落）、同じく `update-failed` で終わる（次の区間を起動せず、次のコマンドを画面に出す）。作業ディレクトリは印の `cwd` で、消えていれば、パスに `/.worktrees/` を含むならその手前（主ディレクトリ）を、含まなければ在る最も近い親を使う。区切りの 1 行を出す。**起動の順序は、印を消す → `pty.fork()` → 子は同期のパイプの読み口で待つ → 親が `child.pid` と `start` の行を書く → 親が同期のパイプを閉じる → 子が `<本物の claude> <中身>` を exec する、に固定する。** **exec の成否は、close-on-exec の結果のパイプで親へ返す。** 子は exec が失敗したら `errno` をそのパイプへ書いて終わる。親は読み口が何も読まずに閉じれば成功、読めれば `start-failed` として、`end` を書かずに `stop` の行（理由と `errno`）と次のコマンドを出して終了コード 2 で終わる。** 子がすぐ Stop に達しても、hook が読む `child.pid` は新しい値で、親が消す印は前の区間のものだけになる（「本物の claude」の絶対パスと引数の配列で `os.execve` に渡し、シェルも `PATH` の探索も通さない。環境から `CLAUDECODE` / `CLAUDE_CODE_SESSION_ID` / `CLAUDE_CODE_ENTRYPOINT` を外し、`NDF_RELAY_DIR` を置く）。起動できなければ `start-failed` で終わる |
 
-**マーケットプレイスの名前は、中継を始めたときに `claude plugin list --json` の `ndf@<名前>` から読む。**
+**マーケットプレイスの名前は、中継を始めたときに `claude plugin list --json` の `id` が `ndf@<名前>` の要素から読む**（「確かめたこと」の 10）。**このとき読んだ `version` を、1 つ目の区間の `start` の `plugin_version` にする。**
 開発版のチャネルを使う利用者でも、登録した取得元から更新される。区間の切れ目でもう一度読み、読めなければ `update-failed` とする。版を記録できないまま次の区間を起動しないためである（AC8）。
 
 **子が印を書かずに終わったら、中継も終わる**（AC12）。人が `/exit` した・Ctrl-C を 2 回押した・落ちたの
@@ -403,12 +403,13 @@ stateDiagram-v2
 | AC5 | 「確かめたこと」の 5 と、AC17 で `AskUserQuestion` を 1 回出す |
 | AC6 | 同: 起動した直後に印を書く試験用の子で、印が消されず次の周へ進むこと（`child.pid` と `start` が子の exec より前に書かれていること）。試験用の子で 1 周させ、`/exit` と `\r` が子へ届く → 子の終わり → `marketplace update` → `plugin update -y` → `plugin list --json` → 区切りの 1 行 → 次の子の起動（中身が 1 つの引数）の順になること。記録の更新時刻が新しいあいだ・利用者の入力から 15 秒たたないあいだ・目標のある記録で印より後の `goal_status` が無いあいだは `/exit` を送らないこと |
 | AC7 | 同: 中継の標準入力に見立てたパイプへ `\x03` と文字を書くと、同じバイトが子へ届くこと。SIGWINCH の後に子の端末の大きさが変わること。中継を擬似端末の上で動かし、子が終わった後・本体で例外を起こした後・SIGTERM を送った後のそれぞれで、中継の端末の属性が始める前と同じに戻っていること |
-| AC8 | 同: 1 周で `end`（6 つのキー: `event` / `at` / `section` / `pid` / `seconds` / `ended_by`）と `start`（8 つのキー: `event` / `at` / `section` / `pid` / `command` / `from_session` / `plugin_version` / `cwd`。`cwd_fallback` は消えていたときだけ足す）の 2 行が書かれ、`plugin_version` が差し替えた `plugin list --json` の値、`ended_by` が `mark` であること |
+| AC8 | 同: 1 周で `end`（6 つのキー: `event` / `at` / `section` / `pid` / `seconds` / `ended_by`）と `start`（8 つのキー: `event` / `at` / `section` / `pid` / `command` / `from_session` / `plugin_version` / `cwd`。`cwd_fallback` は消えていたときだけ足す）の 2 行が書かれ、`plugin_version` が差し替えた `plugin list --json` の値、`ended_by` が `mark` であること。1 つ目の区間の `start` も `plugin_version` を持ち、それは中継を始めたときに読んだ `plugin list --json` の値であること |
 | AC9 | 同: 印の `cwd` が消えた（`<主>/.worktrees/design/x`）とき `<主>` で次の子が起動し、`start` の行に `cwd_fallback` が載ること |
 | AC10 | 同: 今日の `start` が 20 行ある記録で印を与えると、`/exit` を送らず `stop`（`max-starts`）と `ndf-relay:` の 1 行を出し、子を続けさせること |
 | AC11 | 同: 区間の長さが 119・119・119 と続くと 3 つ目の印で `/exit` を送らず `stop`（`spin`）、119・121・119 では送ること。1 つ目の区間（`run` の引数で起動した区間）も数えること。`sigterm` で終わった区間の長さが印の `written_at` までで測られること |
 | AC12 | 同: 試験用の子が印なしで終わると、`end`（`no-mark`）を書いて子の終了コードで終わること |
 | AC13 | 同: 別のプロセスから `relay.py stop` を打つと `stop` ができ、次の印で `/exit` を送らないこと。動いている中継が無ければ `stop` が終了コード 1 |
+| AC26 | 同: 同じ pid を返すように差し替えた 2 回の `run` が別の `NDF_RELAY_DIR` を作り、前の起動のディレクトリに置いた `stop` と `next.json` を読まないこと |
 | AC14 | 同: AC10・AC11・AC13 と、`plugin update` の差し替えが 0 以外のとき・次の子の起動に失敗したときに、`ndf-relay:` の 1 行と `stop` の行が出ること。後の 2 つは次のコマンドを画面に出し、終了コード 2。存在しない実行ファイルを次の子にすると、exec の失敗が結果のパイプで返り、`stop` の `reason` が `start-failed`・終了コード 2・次のコマンドが画面に出て、`end` の行が増えないこと。`/exit` にも SIGTERM にも反応しない試験用の子で、SIGKILL の後に終わりを確かめてから `end`（`sigkill`）を書くこと |
 | AC15 | 同: 素通しの 6 つの条件（`NDF_RELAY=0`・`NDF_RELAY_DIR` あり・`-p`・`--help`・副命令 `mcp`・標準入力がパイプ）で、`os.execv` を差し替えて、本物の claude のパスと元の引数がそのまま渡り、環境が `NDF_RELAY_DEPTH` 以外変わらず、何も出力しないこと。`pty` を読み込めないように差し替えた対話の `run` では `ndf-relay:` の 1 行を標準エラーへ出してから素通しすること |
 | AC16 | 同: AC4 の `NDF_RELAY_DIR` 無し。`hooks/claude.json` 以外の hook の定義の差分が無いことを実装の Pull Request の差分で見る |
