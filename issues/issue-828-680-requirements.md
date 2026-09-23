@@ -39,7 +39,7 @@
 ### 起動指示の雛形（#828）
 
 - [ ] AC1: `agent-layers.md` の 2 つの起動指示の雛形（conductor → supervisor と supervisor → worker）が、Skill 本文の読み込みを求めていない。読み込みとは `/ndf:<Skill>` の起動と `SKILL.md` の Read である。supervisor が持ち場の工程の Skill を起動することは除く（前提 1）
-- [ ] AC2: supervisor の起動指示に、`development-workflow` を読まずに持ち場を通せるだけの値が入っている。値はモード・持ち場で通す工程の一覧・記録のコマンド 1 行（絶対パス）である
+- [ ] AC2: supervisor の起動指示に、`development-workflow` を読まずに持ち場を通せるだけの値が入っている。値はモード・持ち場で通す工程の一覧・記録のコマンド 1 行（二重引用符で囲んだ絶対パス）である
 - [ ] AC3: supervisor の守る規則と worker の守る規則に、Skill を起動しない旨がある。supervisor は `development-workflow` と `progress-tracking` を、worker は Skill 全般を起動しない（起動指示が Skill の起動を手順として渡した場合を除く）
 - [ ] AC4: worker の起動指示の雛形に、worker が Skill を起動しないで済むよう、手順を抜粋で渡す項目がある
 
@@ -98,7 +98,7 @@
 | --- | --- |
 | テスト | `uv run --with pytest pytest scripts/tests plugins/ndf -q` |
 | 静的解析 | `python3 scripts/check-skill-frontmatter.py`、`claude plugin validate .`（終了コードで判定） |
-| 雛形の検査 | `grep -n "/ndf:progress-tracking\|/ndf:development-workflow" plugins/ndf/skills/development-workflow/references/agent-layers.md` の結果を設計で決めた許容の行と突き合わせる |
+| 雛形の検査 | 設計文書のテスト設計の「AC1 / AC3（雛形の検査）」の行に従う（`grep` の形と残ってよい行はそこにある） |
 | 手動確認 | AC12 は配布後に `release-verification` で行う |
 
 ## 境界

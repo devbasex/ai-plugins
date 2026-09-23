@@ -19,10 +19,10 @@ bash "$SCRIPTS/projects-sync.sh" 828 stage "設計"
 28 回）。**本文は持ち場が終わるまで文脈に残り、以後の呼び出しのたびに読み直される。**
 
 **変更後の形。** conductor が起動指示の「記録のコマンド」の項目に、絶対パスを解いた 1 行を
-書いて渡す。
+書いて渡す。パスは二重引用符で囲む。
 
 ```text
-記録のコマンド: bash /home/u/.claude/plugins/cache/ai-plugins/ndf/10.17.1/scripts/projects-sync.sh <課題番号> stage "<工程名>"
+記録のコマンド: bash "/home/u/.claude/plugins/cache/ai-plugins/ndf/10.17.1/scripts/projects-sync.sh" <課題番号> stage "<工程名>"
 ```
 
 supervisor は工程に入るたびに、課題ごとに 1 回ずつこの 1 行を打つ。issue の本文の `## 進行` と
@@ -99,7 +99,8 @@ projects-sync.sh <課題番号> <キー> <値>
 | --- | --- | --- |
 | 記録できた | 0 | `#<課題> 進行 = <工程>`（issue の本文）と、盤面の行（今と同じ） |
 | 盤面の宣言が無い | 0 | issue の本文の行だけ（**今は何も出さずに抜けていた**） |
-| `gh` が無い・issue を取得できない・盤面が上限 | 0 | 理由の 1 行（今の「何もしない条件」と同じ） |
+| `gh` が無い・issue を取得できない | 0 | 出力なし（今の `progress-record.sh` と同じ） |
+| 盤面が上限・盤面にアイテムを追加できない | 0 | NOTE の 1 行（今の `projects-sync.sh` と同じ） |
 | 知らないキー・工程表に無い値・引数の不足 | 2 | ERROR の行。issue の本文も盤面も書かない |
 
 **引数の検査を先に行う。** 値の誤りで 2 を返すときに、issue の本文だけが書かれた状態を作らない。
@@ -116,7 +117,10 @@ projects-sync.sh <課題番号> <キー> <値>
 | --- | --- | --- |
 | 持ち場 | 持ち場の名前と、通す工程の一覧 | そのまま |
 | 課題 / モード / 作業場所 / 前の持ち場の報告 / 承認 / 到達点 / 提示物の置き場所 | — | そのまま |
-| **記録のコマンド** | `bash <絶対パス>/projects-sync.sh <課題番号> stage "<工程名>"` の 1 行。**conductor が `$SCRIPTS` を解いた絶対パスで書く** | 足す |
+| **記録のコマンド** | `bash "<絶対パス>/projects-sync.sh" <課題番号> stage "<工程名>"` の 1 行。**conductor が `$SCRIPTS` を解いた絶対パスを二重引用符で囲んで書く** | 足す |
+
+**パスを二重引用符で囲むのは、空白を含むパスで語が割れないためである。** 通過工程の控えは
+引用符を外した語を読むため、囲んでも記録として観測される（今の `"$SCRIPTS/projects-sync.sh"` と同じ）。
 
 supervisor が守る規則の変更:
 
@@ -255,7 +259,7 @@ sequenceDiagram
   participant H as PreToolUse hook
   participant P as projects-sync.sh
   participant G as GitHub
-  S->>H: Bash「projects-sync.sh 828 stage "設計"」
+  S->>H: Bash「bash "<絶対パス>/projects-sync.sh" 828 stage "設計"」
   H->>H: 控えへ「設計」を積む（今と同じ）
   H-->>S: 通す
   S->>P: 実行
@@ -273,7 +277,7 @@ sequenceDiagram
   participant S as supervisor
   participant W as worker
   C->>C: development-workflow を読む。モード判定。$SCRIPTS を解く
-  C->>S: 持ち場・モード・記録のコマンド（絶対パス）
+  C->>S: 持ち場・モード・記録のコマンド（二重引用符で囲んだ絶対パス）
   S->>S: 工程の Skill を起動する（持ち場の仕事）
   S->>S: work-vessels.md の線引きで、その場か worker かを決める
   S->>W: 作業・入力・手順（excerpt.md を写す）・返す形・置き場所
@@ -298,13 +302,22 @@ sequenceDiagram
 | --- | --- |
 | AC1 / AC3 / AC4 | `agent-layers.md` の差分のレビュー（cross-review）。雛形の項目の表と規則の文を読む |
 | AC2 | 同上。加えて、実装の後の最初の `/goal` で supervisor が `progress-tracking` / `development-workflow` を起動していないことを `skill-stats --agents` で見る |
+| AC1 / AC3（雛形の検査） | `grep -n "progress-tracking\|development-workflow" plugins/ndf/skills/development-workflow/references/agent-layers.md` の結果を、表の後の「雛形の検査で残ってよい行」と突き合わせる。**「起動の指示」の節（2 つの雛形）の中で、これらを起動・読み込みさせる文が 0 件**なら合格 |
 | AC5 / AC6 | `projects-sync.sh` のテストに足す: 宣言なしで `stage` を呼ぶと issue の本文だけが更新される / 宣言ありで両方が更新される / `mode` で見出し行だけが変わる / 知らない工程名で 2 を返し本文を書かない（`gh` は既存のテストと同じ偽物で置き換える） |
 | AC7 | `grep -rn "この工程に入ったら.*progress-tracking" plugins/ndf/skills/*/SKILL.md` が 0 件で、`design/SKILL.md` の「進行を記録する」の節も記録のコマンドの形になっている（今は 19 件の定型文と `design` の 2 件、計 20 Skill・21 件） |
 | AC8 | 既存の `test_stage_check.py` / `test_workflow_guard.py` が変更なしで通る |
 | AC9 | `progress-tracking/references/excerpt.md` の 1 行目の目印と見出し 3 つ。検査の実装は #855 |
 | AC10 / AC11 | `work-vessels.md` の差分のレビュー。`agent-layers.md` と `context-window.md` から指されていること（`grep -n "work-vessels.md"`） |
-| AC12 | 配布の後、`release-verification` で #827 の計測を同じ条件で回す（比べる前の値は下の表） |
+| AC12 | 配布の後、`release-verification` で #827 の計測を同じ条件で回す（比べる前の値は下の「AC12 の比べる前の値」） |
 | AC13 | 決定の記録の決定 7 と、起票した課題の番号 |
+
+雛形の検査で残ってよい行:
+
+| # | 位置 | 残る理由 |
+| --- | --- | --- |
+| a | 冒頭の「対話で `/ndf:development-workflow` を呼んだとき」の段落 | conductor 側の説明で、雛形ではない |
+| b | 「3 層の責務」の表の conductor の行（`development-workflow` と `issue-plan-strategy` 以外を起動しない） | conductor の責務で、雛形ではない |
+| c | supervisor の規則 3 の「`progress-tracking` と `development-workflow` を起動しない」と、まとまりを閉じる手順の言及 | 起動を禁じる文で、起動・読み込みを求めない |
 
 AC12 の比べる前の値（#827、2026-09-20 以降、5 リポジトリ、サブエージェント 156 件）:
 
