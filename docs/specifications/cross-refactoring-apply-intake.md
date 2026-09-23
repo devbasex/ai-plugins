@@ -390,7 +390,7 @@ graph TD
 | 修正の結果を適用ラウンドの担当から読み、結果なしで修正ラウンドが進んで見送りへ至ること | 同 `tests/test_abandon_items.py` |
 | 最終ゲートの修正の結果なしで取り消し、次の最終ゲートが取り消し後の地点でテストすること | 同 `tests/test_final_fix.py` |
 | 帰属の段落が後ろに付いたコミットから必須の記名を読み、散文の中の記名の形の行を読まないこと | 同 `tests/test_commit_trailers_git.py`（一時リポジトリで git を実行する） |
-| 無進捗の許容が起動の出力に入り、骨組みの 3 つの監視の呼び出しへ渡ること | 同 `tests/test_init.py` / `tests/test_skill_terms.py` |
+| 無進捗の許容が起動の出力に入り、骨組みの 3 つの監視の呼び出しへ渡ること | 同 `tests/test_init.py`（文書の語の照合は #885 で削除） |
 | 結果ファイルがあり検証を通る適用ラウンドが、変更の前と同じく 1 回目で取り込まれること | 同 `tests/test_merge_apply.py` |
 | 文書の分量が分割の基準を超えないこと | `python3 scripts/check-doc-line-limit.py` |
 | 参照のリンクが解決できること | `python3 scripts/check-markdown-links.py` |

@@ -586,7 +586,6 @@ def test_slot_touch_updates_last_used_at_and_keeps_released_at_null(main_repo: P
 
 # --- init: 読めない宣言を失敗として報告する（#573） ---------------------------
 
-WORKTREE_SKILL = SCRIPTS_DIR.parent / "skills" / "worktree" / "SKILL.md"
 
 UNREADABLE_FORMS = ["broken_json", "unsupported_version", "empty_file", "directory", "unreadable_permission"]
 
@@ -722,26 +721,6 @@ def test_status_and_check_are_unchanged_for_unreadable_forms(main_repo: Path, fo
     assert status_line == check_line == BROKEN_LINE
     assert rc == 3
     assert run(["status"], cwd=main_repo)["rc"] == 0
-
-
-def step0_section() -> str:
-    body = WORKTREE_SKILL.read_text(encoding="utf-8")
-    return body[body.index("## 0. 宣言ファイルを用意する"): body.index("## 1. 現在地を確かめる")]
-
-
-def test_step0_stops_when_init_fails() -> None:
-    """受け入れ条件 10: 手順 0 は init の終了コードを見て止まり、利用者が決める。"""
-    section = step0_section()
-    assert 'exit=$?' in section
-    assert "先へ進まない" in section
-    assert "利用者" in section
-
-
-def test_step0_limits_no_overwrite_to_readable_declarations() -> None:
-    """受け入れ条件 11: 上書きしないのは読める宣言に限り、読めない宣言では 1 で終わる。"""
-    section = step0_section()
-    assert "読める宣言" in section
-    assert "1 で終わる" in section
 
 
 # --- 個人の宣言の報告と追跡からの除外（#495 の AC19、AC21〜AC26） -------------

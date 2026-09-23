@@ -398,7 +398,7 @@ FINDINGS=8
 | 修正を現在の頭で送り、報告されたコミットが送り先に無ければ止まること | 同 `test_result_posts.py` と `plugins/ndf/skills/cross-review/tests/test_merge_fix_posts.py` |
 | 単独の修正の口が同じ層を使い、送り先のブランチを決められないとき返信へ進まないこと | `plugins/ndf/scripts/tests/test_result_posts.py` |
 | 骨組みの起動し直しが繰り返しの先頭へ戻り、8 の枝を 7 より先に見ること | `plugins/ndf/skills/cross-review/tests/test_skill_layout.py` |
-| 文書が投稿の担い手と種別ごとの契約を書いていること | `plugins/ndf/skills/cross-review/tests/test_writes_by_conductor_docs.py` |
+| 文書が投稿の担い手と種別ごとの契約を書いていること | 文書を読んで確かめる（照合していたテストは #885 で削除） |
 
 ## 関連リンク
 

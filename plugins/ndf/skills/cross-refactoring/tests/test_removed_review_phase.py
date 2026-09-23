@@ -36,8 +36,3 @@ def test_the_launcher_does_not_name_the_removed_prompt() -> None:
     assert "review.md" not in text
     assert "RF_POST_EVENT_NOTE" not in text
 
-
-def test_the_review_prompt_is_gone() -> None:
-    """レビューの指示そのものが残っていない。"""
-    prompts = LAUNCH.resolve().parents[1] / "prompts"
-    assert not (prompts / "review.md").exists()

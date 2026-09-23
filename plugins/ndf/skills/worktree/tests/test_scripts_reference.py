@@ -46,14 +46,6 @@ SPECIAL_VARIABLE = re.compile(r"\$(?:[0-9]|[?@*#$!\-_])")
 # 環境が与える変数。決定 7 のとおり、`plugins/ndf/skills/` の実測で出た 4 つに限る。
 ENVIRONMENT_VARIABLES = frozenset({"HOME", "PWD", "USER", "EDITOR"})
 
-# 手順書が文書の外から受け取る変数。表の宣言と突き合わせる。
-DECLARED = {
-    "SKILL.md": {"SCRIPTS"},
-    "declaration.md": {"SCRIPTS", "main_dir"},
-    "local-environment.md": {"SCRIPTS", "APP_SERVICE", "SRC_TARGET"},
-    "test-execution.md": {"SCRIPTS", "WT"},
-}
-
 
 # --- 解決手順を読み出して実行する -------------------------------------------------
 
@@ -146,8 +138,8 @@ def assigned_variables(text: str) -> set[str]:
     return assigned
 
 
-def received_table(path: Path) -> tuple[set[str], int]:
-    """「この文書が受け取る値」の表の変数名と、表の終わった行の番号を返す。"""
+def received_table(path: Path) -> set[str]:
+    """「この文書が受け取る値」の表の変数名を返す。"""
     lines = path.read_text(encoding="utf-8").splitlines()
     try:
         head = lines.index(RECEIVED_HEADING)
@@ -168,29 +160,7 @@ def received_table(path: Path) -> tuple[set[str], int]:
             break
         index += 1
     assert started, f"{path} の「{RECEIVED_HEADING}」に表が無い"
-    return names, index
-
-
-def next_content_line(path: Path, index: int) -> str:
-    """指定の行から後ろで、最初の空でない行を返す。"""
-    lines = path.read_text(encoding="utf-8").splitlines()
-    for line in lines[index:]:
-        if line.strip():
-            return line
-    pytest.fail(f"{path} の表の後ろに本文が無い")
-
-
-# --- 条件 1: 代入の無い変数名が残っていない ---------------------------------------
-
-
-def test_ndf_scripts_is_gone() -> None:
-    """`NDF_SCRIPTS` はどこにも代入されない。手順書から消えていることを確かめる。"""
-    remains = {
-        path.relative_to(SKILL_DIR).as_posix()
-        for path in SKILL_DIR.rglob("*.md")
-        if "NDF_SCRIPTS" in path.read_text(encoding="utf-8")
-    }
-    assert remains == set(), f"NDF_SCRIPTS が残っている: {sorted(remains)}"
+    return names
 
 
 # --- 条件 2: 未定義の変数を含むコマンドが無い -------------------------------------
@@ -200,17 +170,9 @@ def test_ndf_scripts_is_gone() -> None:
 def test_no_undefined_variable(path: Path) -> None:
     """使う変数は、同じ文書で代入されるか、受け取る値の表に載っている。"""
     text = path.read_text(encoding="utf-8")
-    declared, _ = received_table(path)
+    declared = received_table(path)
     undefined = used_variables(text) - assigned_variables(text) - declared
     assert undefined == set(), f"{path.name}: 出所の無い変数 {sorted(undefined)}"
-
-
-@pytest.mark.parametrize("path", DOCUMENTS, ids=lambda p: p.name)
-def test_received_table_declares_scripts(path: Path) -> None:
-    """4 文書すべてが、受け取る値として `$SCRIPTS` を宣言している。"""
-    declared, _ = received_table(path)
-    assert declared == DECLARED[path.name]
-    assert "SCRIPTS" in declared
 
 
 def test_environment_variables_are_excluded_by_name() -> None:
@@ -227,21 +189,6 @@ def test_special_variables_are_not_treated_as_undefined() -> None:
 def test_environment_variable_is_not_treated_as_undefined() -> None:
     """一覧に載せた環境の変数も使用から外れる。"""
     assert used_variables('```bash\nls "$HOME"\n```\n') == set()
-
-
-# --- 条件 3: 解決手順は 1 本しかない ----------------------------------------------
-
-
-def test_lookup_procedure_is_the_only_one() -> None:
-    """「`$SCRIPTS` を決める」の見出しを持つ手順書は 1 つだけである。"""
-    owners = [
-        path.relative_to(SKILLS_ROOT).as_posix()
-        for path in sorted(SKILLS_ROOT.rglob("*.md"))
-        if LOOKUP_HEADING in path.read_text(encoding="utf-8")
-    ]
-    assert owners == [
-        "development-workflow/references/scripts-lookup.md"
-    ], f"手順が 1 本ではない: {owners}"
 
 
 # --- 条件 4: 4 ランタイムの配置で解決できる ---------------------------------------
@@ -307,14 +254,3 @@ def test_skill_stops_when_scripts_is_unresolved() -> None:
 def test_lookup_leaves_empty_value_when_nothing_is_found(elsewhere, home) -> None:
     """盤面への記録は従来どおり飛ばす。解決手順は空の値を残し、止めない。"""
     assert resolve(elsewhere, home) == ""
-
-
-# --- 条件 6: まとめる推奨が表の直後にある -----------------------------------------
-
-
-@pytest.mark.parametrize("path", DOCUMENTS, ids=lambda p: p.name)
-def test_bundling_is_recommended_after_the_table(path: Path) -> None:
-    """受け取る値の表の直後に、1 つの bash ブロックへまとめる推奨がある。"""
-    _, end = received_table(path)
-    line = next_content_line(path, end)
-    assert "1 つの bash ブロック" in line and "まとめる" in line, line

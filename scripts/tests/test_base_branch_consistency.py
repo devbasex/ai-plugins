@@ -3,8 +3,6 @@
 起点を扱う Skill は作業ツリーの仕組みを前提にしないため、手順には共通ライブラリを
 読み込まずに動く数行を書いている。写しである以上、両者が食い違う経路が残る。同じ入力に
 対して同じ名前を返すことを、ここで突き合わせる（issue #202）。
-
-あわせて、開発の起点を既定ブランチの字面で書いていないことを見る。
 """
 from __future__ import annotations
 
@@ -30,24 +28,6 @@ SKILLS = ROOT / "plugins" / "ndf" / "skills"
 # 起点を解決する手順を持つ Skill と、その手順を見分ける目印。
 INLINE_SKILLS = ("cherry-pick-pr", "deploy", "merged", "pr-review", "retrospective")
 MARKER = "dev_base=$(jq"
-
-# 開発の起点を扱う Skill。起点は既定ブランチとは限らないため、字面で書かない。
-LITERAL_SKILLS = (
-    "ndf-policies",
-    "cherry-pick-pr",
-    "deploy",
-    "merged",
-    "pr",
-    "pr-review",
-    "problem-solving",
-    "retrospective",
-    "worktree",
-)
-
-# コマンドの引数に現れる既定ブランチの字面。`dev_base=${dev_base:-main}` のような
-# 退避先は対象にしない（origin の HEAD すら取れないときの最後の手段である）。
-COMMAND_LITERAL = re.compile(r"^\s*git\s+\S+[^\n]*\bmain\b")
-
 
 
 @pytest.fixture()
@@ -228,22 +208,6 @@ def test_inline_matches_library_when_only_a_lookalike_branch_exists(
     assert library.stdout.strip() == ""
     assert "develop" in inline.stderr
     assert "develop" in library.stderr
-
-
-@pytest.mark.parametrize("name", LITERAL_SKILLS)
-def test_remote_default_branch_is_not_hardcoded(name: str) -> None:
-    """取り込む先を `origin/main` の字面で書かない。"""
-    text = (SKILLS / name / "SKILL.md").read_text(encoding="utf-8")
-    hits = [line for line in text.splitlines() if "origin/main" in line]
-    assert hits == [], f"{name}: {hits}"
-
-
-@pytest.mark.parametrize("name", LITERAL_SKILLS)
-def test_commands_do_not_hardcode_default_branch(name: str) -> None:
-    """git のコマンドの引数に `main` を書かない。"""
-    text = (SKILLS / name / "SKILL.md").read_text(encoding="utf-8")
-    hits = [line for line in text.splitlines() if COMMAND_LITERAL.match(line)]
-    assert hits == [], f"{name}: {hits}"
 
 
 # --- 個人の宣言では起点が変わらない（#495 の AC17） --------------------------

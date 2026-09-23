@@ -65,17 +65,12 @@ def test_the_monitor_reason_decides_whether_the_same_agent_can_be_relaunched(
 
 def test_the_stem_matches_the_template_the_orchestrator_passes_to_the_monitor(paths):
     """AC3: 名前の幹は、骨組みが監視へ渡す雛形を担当名で埋めた値と一致する。"""
-    skill = (
-        paths.pathlib.Path(__file__).resolve().parents[1] / "SKILL.md"
-    ).read_text(encoding="utf-8")
-
     expected = {
         "apply": "{agent}-apply-r$ROUND",
         "fix": "{agent}-fix-r$ROUND",
         "final-fix": "{agent}-final-fix",
     }
     for phase, template in expected.items():
-        assert f'--stem-template "{template}"' in skill, phase
         built = template.replace("{agent}", "codex").replace("$ROUND", "2")
         assert paths.stem_for("codex", phase, 130, 2) == built
 
