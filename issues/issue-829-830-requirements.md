@@ -80,7 +80,7 @@
 | ポーリング | 待つ間に、状態を確かめるための呼び出しを繰り返すこと。#827 の `poll.py` は `sleep <数字>` を含む Bash、`tasks/*.output` の Read、出力ファイルやログの `tail` / `cat` / `wc` / `grep` を数える |
 | 前景の Bash | `run_in_background` を付けずに実行する Bash。終わるまで呼び出しが返らない |
 | 文脈量 | 1 回の API 呼び出しで読んだトークン数。`input_tokens + cache_read_input_tokens + cache_creation_input_tokens` |
-| 工程 Skill | `development-workflow` の工程表が起動する Skill（`requirements-design` / `design` / `pr` など）と、工程へ入る入口の `development-workflow` / `issue-plan-strategy` |
+| 工程 Skill | `context-window.md` の 4 つの切れ目の直後に始まる工程の Skill と、入口の `development-workflow` / `issue-plan-strategy`（一覧は設計文書） |
 | 引き継ぎの 1 行 | 新しい会話の最初に打てば、その工程から再開できるコマンド 1 行。`context-window.md` の 4 つの切れ目と文脈量の hook の拒否で conductor が出す |
 
 ## 受け入れ条件
@@ -112,17 +112,19 @@
 - [ ] AC12: Claude Code で、会話の文脈量が上限（既定 200,000）を超えた状態で、conductor が工程 Skill を起動する（対話の経路）か、持ち場の supervisor を起動する（3 層の経路）と、hook が起動を拒否し、理由の欄に「新しい会話で打つ 1 行」を示す
 - ~~AC13: 上限の判定は conductor（本体の会話）だけに掛かる。サブエージェントの中の Skill の起動は拒否しない~~ → 変更（2026-09-23、PR #843 のレビュー 4 回目。3 層の経路で Agent の起動も見るため）
 - [ ] AC13: 上限の判定は conductor（本体の会話）だけに掛かる。サブエージェントの中の Skill と Agent の起動は拒否しない
-- [ ] AC14: 工程 Skill でない Skill（`markdown-writing` / `progress-tracking` / `out-of-scope` など）の起動は拒否しない
+- [ ] AC14: 工程 Skill でない Skill（`markdown-writing` / `progress-tracking` / `out-of-scope` / `worktree` など）の起動は拒否しない。`worktree` は切れ目の内側の工程のため拒否しない
 - ~~AC15: 同じ会話で案内を 1 度出した後、利用者がそのまま続けると決めたときに続けられる（2 回目の同じ起動は通す、または環境変数で止められる）~~ → 変更（2026-09-23、PR #843 のレビュー）
 - ~~AC15: 拒否した直後の同じ Skill・同じ args の起動は通す。別の工程 Skill の起動は再び拒否する。環境変数で判定ごと止められる~~ → 変更（2026-09-23、PR #843 のレビュー 2 回目。hook は Bash / Read / Skill しか見ないため『直後』を判定できない）
-- [ ] AC15: 拒否の後、次に起動した工程 Skill が拒否したものと同じ skill・args なら 1 度だけ通す（間に他のツールや工程でない Skill が挟まってもよい）。次の工程 Skill の起動が別の skill か args なら、印を置き換えて再び拒否する。環境変数で判定ごと止められる
+- ~~AC15: 拒否の後、次に起動した工程 Skill が拒否したものと同じ skill・args なら 1 度だけ通す（間に他のツールや工程でない Skill が挟まってもよい）。次の工程 Skill の起動が別の skill か args なら、印を置き換えて再び拒否する。環境変数で判定ごと止められる~~ → 変更（2026-09-23、PR #843 のレビュー 5 回目。3 層の Agent の再実行を規定していなかったため）
+- [ ] AC15: 拒否の後、次に起動した工程 Skill が拒否したものと同じ skill・args なら 1 度だけ通す（間に他のツールや工程でない Skill が挟まってもよい）。次の工程 Skill の起動が別の skill か args なら、印を置き換えて再び拒否する。環境変数で判定ごと止められる。3 層の経路では、同じ description の次の持ち場の起動を 1 度だけ通す。別の description は再び拒否する
 - [ ] AC16: 文脈量を読めない（transcript が無い・`usage` が無い）ときは拒否しない
 - [ ] AC17: AC12〜AC16 の判定を、transcript の見本を与えて終了コードと出力を見るテストが確かめている
 
 ### 引き継ぎの 1 行（#830）
 
 - ~~AC18: `development-workflow` は、工程を 1 つ終えるたびに、次の工程を始めるコマンド 1 行（`/ndf:development-workflow #<issue>` の形。工程 Skill はモードと作業ツリーを戻す手順を持たないため）を出す~~ → 変更（2026-09-23、PR #843 のレビュー 3 回目。3 層では conductor が工程の終わりを観測しないため、既存の切れ目にそろえた）
-- [ ] AC18: conductor は、`context-window.md` の 4 つの切れ目（ドキュメントレビューのマージの後 / 構造改善と実装レビューの前後 / Pull Request を出した後 / 配布の後）で、次の工程を始めるコマンド 1 行（`/ndf:development-workflow #<issue>` の形。工程 Skill はモードと作業ツリーを戻す手順を持たないため）を出す。3 層では supervisor の持ち場の境がこの切れ目に当たるため、conductor が `## 持ち場の報告` を受け取った時点で出す（supervisor は出さない）。文脈量の hook が拒否したときにも出す
+- ~~AC18: conductor は、`context-window.md` の 4 つの切れ目（ドキュメントレビューのマージの後 / 構造改善と実装レビューの前後 / Pull Request を出した後 / 配布の後）で、次の工程を始めるコマンド 1 行（`/ndf:development-workflow #<issue>` の形。工程 Skill はモードと作業ツリーを戻す手順を持たないため）を出す。3 層では supervisor の持ち場の境がこの切れ目に当たるため、conductor が `## 持ち場の報告` を受け取った時点で出す（supervisor は出さない）。文脈量の hook が拒否したときにも出す~~ → 変更（2026-09-23、PR #843 のレビュー 5 回目。関門の前に会話を切らないため）
+- [ ] AC18: conductor は、`context-window.md` の 4 つの切れ目（ドキュメントレビューのマージの後 / 構造改善と実装レビューの前後 / Pull Request を出した後 / 配布の後）で、次の工程を始めるコマンド 1 行（`/ndf:development-workflow #<issue>` の形。工程 Skill はモードと作業ツリーを戻す手順を持たないため）を出す。3 層では supervisor の持ち場の境がこの切れ目に当たるため、conductor が `## 持ち場の報告` を受け取った時点で出す（supervisor は出さない）。ただし報告が `結果: 関門` のときは受け取った時点では出さず、関門の承認と取り込み（設計 Pull Request のマージなど）が済んだ後に出す。切れ目 1（ドキュメントレビューのマージの後）はこの形で満たす。文脈量の hook が拒否したときにも出す
 - [ ] AC19: そのコマンド 1 行だけで始めた新しい会話が、課題の本文の `## 進行`・Pull Request・通過工程の控えから、モード・作業ツリー・現在の工程を戻せる。戻す手順が文書にある
 - [ ] AC20: AC19 を、実際の課題 1 件で新しい会話から再開して確かめ、結果を本 issue に残している
 

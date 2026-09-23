@@ -12,7 +12,7 @@
 を 30 回繰り返すと、30 回とも文脈の全体を読み直す。変更後は、1 回目の `sleep 60 && tail` を
 hook が拒否し、理由の欄で「待ちの条件を until ループにして `run_in_background` で起動し、完了通知を待つ」よう案内する。
 
-**#830 の例。** conductor の文脈が 41 万のまま `/ndf:design` を起動する（3 層では `設計:` の
+**#830 の例。** conductor の文脈が 41 万のまま `/ndf:implementation-plan` を起動する（3 層では `実装:` の
 supervisor を起動する）と、変更後は hook が起動を 1 度拒否し、「新しい会話で `/ndf:development-workflow #829` を打つ」と案内する。
 conductor はその 1 行を利用者へ示して止まる。
 
@@ -24,7 +24,7 @@ conductor はその 1 行を利用者へ示して止まる。
 | F2 | 前景で `sleep` を使って待つ Bash（ループの待ちと長い `sleep`）を止め、代わりの待ち方を知らせる | Claude Code のエージェント（全層） |
 | F3 | 変わっていないファイルの同じ範囲を続けて読み直す Read を止め、代わりの待ち方を知らせる | 同上 |
 | F4 | 文脈が上限を超えた conductor が工程へ入る起動（対話の経路は工程 Skill、3 層の経路は持ち場の supervisor の Agent）を 1 度止め、新しい会話で打つ 1 行を知らせる | conductor と、それを見る利用者 |
-| F5 | `context-window.md` の 4 つの切れ目（ドキュメントレビューのマージの後 / 構造改善と実装レビューの前後 / Pull Request を出した後 / 配布の後）と、文脈量の hook が拒否したときに、次の工程を始める 1 行を出す | conductor（全ランタイム） |
+| F5 | `context-window.md` の 4 つの切れ目（ドキュメントレビューのマージの後 / 構造改善と実装レビューの前後 / Pull Request を出した後 / 配布の後）と、文脈量の hook が拒否したときに、次の工程を始める 1 行を出す。持ち場の報告が `結果: 関門` なら、関門の承認と取り込みの後に出す | conductor（全ランタイム） |
 | F6 | その 1 行から始めた新しい会話で、モード・作業ツリー・現在の工程を戻す | conductor（全ランタイム） |
 | F7 | hook を種類ごとに止める・上限を変える | 利用者 |
 
@@ -33,7 +33,7 @@ conductor はその 1 行を利用者へ示して止まる。
 | 要素 | 新設 / 変更 | 責務 |
 | --- | --- | --- |
 | `plugins/ndf/scripts/token-guard.sh` | 新設 | PreToolUse の入口。`tool_name` で 3 つの判定（`Bash` → sleep / `Read` → 連続 Read / `Skill`・`Agent`・`Task` → 文脈量）へ振り分け、拒否か通過を返す |
-| `plugins/ndf/scripts/lib/token-guard-stages.txt` | 新設 | 工程 Skill の名前の一覧（1 行 1 名。入口の `development-workflow` と `issue-plan-strategy` を含む）。F4 がこの一覧に無い Skill を見ない |
+| `plugins/ndf/scripts/lib/token-guard-stages.txt` | 新設 | 工程 Skill の名前の一覧（1 行 1 名）。下の「工程 Skill の一覧」の表の 13 個を正とする。F4 がこの一覧に無い Skill を見ない |
 | `plugins/ndf/hooks/claude.json` | 変更 | PreToolUse に matcher `Bash\|Read\|Skill\|Agent\|Task` で `token-guard.sh` を登録する |
 | `development-workflow/references/waiting.md` | 新設 | 待ち方の規約の唯一の置き場所（F1） |
 | `development-workflow/references/agent-layers.md` | 変更 | supervisor の規則 4 と worker の規則に、`waiting.md` への参照を 1 行ずつ足す |
@@ -42,6 +42,22 @@ conductor はその 1 行を利用者へ示して止まる。
 | `external-ai/references/cli-codex.md`・`cli-agy.md`・`qa-security-scan/03-report-template.md`・`release/references/completion-check.md` | 変更 | 前景の待ちのループの直前に「Claude Code では、このループを `run_in_background: true` で実行して完了通知を待つ（`development-workflow/references/waiting.md`）」の 1 行を足す（決定 3） |
 | `plugins/ndf/scripts/tests/test_token_guard.py` | 新設 | F2〜F4 と F7 の判定を、入力 JSON と transcript の見本で確かめる |
 | `plugins/ndf/README.md` | 変更 | hook の一覧に `token-guard.sh` を足し、4 ランタイムでの扱いを表で示す |
+
+### 工程 Skill の一覧
+
+`token-guard-stages.txt` は工程表から機械的に抽出しない。この表を正とする。
+`context-window.md` の 4 つの切れ目の直後に始まる工程の Skill と、入口の 2 つだけを載せる（合計 13 個）。
+
+| 切れ目 | 直後に始まる工程の Skill |
+| --- | --- |
+| 1 ドキュメントレビューのマージの後 | `implementation-plan` / `document-drafting` |
+| 2 構造改善と実装レビューの前後 | `cross-refactoring` / `cross-review` / `pr-review` / `quality-gates` |
+| 3 Pull Request を出した後 | `plan-to-spec` / `merged` |
+| 4 配布の後 | `layout-review` / `release-verification` / `retrospective` |
+| 入口 | `development-workflow` / `issue-plan-strategy` |
+
+`worktree` など切れ目の内側の工程は含めない（理由は決定 6）。
+`cross-review` は切れ目 1 の前（ドキュメントレビュー）でも起動される。その時点で上限を超えていれば止めてよいので含める。
 
 ```mermaid
 graph TB
@@ -244,6 +260,8 @@ plugins/ndf/
 1 つ目は、`context-window.md` の 4 つの切れ目で conductor が引き継ぎの 1 行を出すこと。
 2 つ目は、3 層では conductor が `## 持ち場の報告` を受け取った時点で出し、supervisor は出さないこと。
 supervisor の持ち場の境がこの切れ目に当たるためである。文脈量の hook が拒否したときも出す。
+ただし報告が `結果: 関門` なら受け取った時点では出さず、関門の承認と取り込み（設計 Pull Request のマージなど）の後に出す。
+関門の前に会話を切らないためで、切れ目 1 はこの形で満たす。
 3 つ目は、戻す手順が `context-window.md` にあること。
 
 **`agent-layers.md`（変更）** は supervisor の規則 4 の後ろに「待ち方は `waiting.md` に従う」を足し、
@@ -391,7 +409,7 @@ CLI 側の消費を測った後（#827 の次の手順）に改めて決める�
 
 | 経路 | conductor が起動するもの | 捕まえる入力 | 印の鍵 |
 | --- | --- | --- | --- |
-| 対話 | 工程 Skill（例 `ndf:design`）。対話では 3 層へ出さない（`development-workflow/SKILL.md` の「`/goal` の引数として呼ばれたとき」の末尾） | `Skill`。名前が `token-guard-stages.txt` にある（入口の `development-workflow` と `issue-plan-strategy` を含む） | `skill`・`args` |
+| 対話 | 工程 Skill（例 `ndf:implementation-plan`）。対話では 3 層へ出さない（`development-workflow/SKILL.md` の「`/goal` の引数として呼ばれたとき」の末尾） | `Skill`。名前が `token-guard-stages.txt` にある（上の「工程 Skill の一覧」の 13 個） | `skill`・`args` |
 | 3 層 | 持ち場ごとの supervisor。conductor は `development-workflow` と `issue-plan-strategy` 以外を起動しない（`agent-layers.md` の「3 層の責務」） | `Agent`（旧名 `Task`）。`agent_id` が無く、`description` の先頭語が持ち場の語彙（`agent-layers.md` の「起動の指示」） | `description` |
 
 3 層の経路の `Skill` だけを見ると、捕まるのは入口の起動だけで、持ち場の切れ目で止まらない。
@@ -400,7 +418,7 @@ CLI 側の消費を測った後（#827 の次の手順）に改めて決める�
 supervisor は 1 つの持ち場の中で複数の工程を通すため、工程の起動で止めると持ち場が途中で
 途切れる。supervisor の切れ目は #768 / #773 が測ってから決める。工程でない Skill
 （`markdown-writing` / `progress-tracking` など）の起動で止める形も採らない。工程の途中で起動
-されるため、切れ目にならない。
+されるため、切れ目にならない。`worktree` など切れ目の内側の工程も、同じ理由で一覧から外す。
 
 ### 決定 7: 文脈量の案内は工程 Skill の起動ごとに 1 度拒否し、次の同じ起動だけを通す
 
@@ -414,7 +432,7 @@ supervisor は 1 つの持ち場の中で複数の工程を通すため、工程
 
 ### 決定 8: 引き継ぎの 1 行は `development-workflow` を起動する形にする
 
-工程 Skill を直接起動する形（`/ndf:design #829`）は採らない。工程 Skill はモード・作業ツリー・
+工程 Skill を直接起動する形（`/ndf:implementation-plan #829`）は採らない。工程 Skill はモード・作業ツリー・
 承認の状態を戻す手順を持たず、戻す手順を持つのは `development-workflow` の側だからである。
 `development-workflow` を経由すると固定費に 1 回分の読み込み（約 1 万トークン）が足されるが、
 切る前の会話の文脈（#827 で平均 41 万）に比べて小さい。
@@ -449,13 +467,13 @@ supervisor は 1 つの持ち場の中で複数の工程を通すため、工程
 | AC9 | 単体: 壊れた JSON・`jq` を外した `PATH`・書けない `XDG_STATE_HOME` で、出力なしと終了コード 0 |
 | AC10 | 単体: `NDF_SLEEP_GUARD=0` と `NDF_READ_REPEAT_GUARD=0` で、それぞれの拒否だけが消える。閾値: `NDF_SLEEP_MAX_SEC=30` で `sleep 10` は出力なし・`sleep 40` は deny、`NDF_READ_REPEAT_LIMIT=2` で 2 回目に deny、`NDF_CONTEXT_LIMIT=300000` で文脈量 250,000 は出力なし |
 | AC11 | 実機: サブエージェントの中で `codex exec` を `run_in_background` で起動し、他の作業が無いまま応答を終える。ターンを終えずに次の段へ進んだことを、そのサブエージェントの記録で確かめて #829 に残す |
-| AC12 | 単体: 文脈量 250,000 の transcript の見本と `tool_input.skill: "ndf:design"`、`args: "#829"` で deny と理由の欄に `/ndf:development-workflow #829`。3 層: `tool_name: Agent`、`description: "設計: #829 #830"` で deny と `/ndf:development-workflow #829 #830`。args に番号が無ければ `<課題番号>` のまま（控えが複数あっても推測しない） |
+| AC12 | 単体: 文脈量 250,000 の transcript の見本と `tool_input.skill: "ndf:implementation-plan"`、`args: "#829"` で deny と理由の欄に `/ndf:development-workflow #829`。3 層: `tool_name: Agent`、`description: "設計: #829 #830"` で deny と `/ndf:development-workflow #829 #830`。args に番号が無ければ `<課題番号>` のまま（控えが複数あっても推測しない） |
 | AC13 | 単体: AC12 の Skill と Agent の入力に `agent_id` を足す、または `transcript_path` を `/subagents/` の下にする → 出力なし |
-| AC14 | 単体: `ndf:markdown-writing` → 出力なし。`description` の先頭語が `調査:` の Agent → 出力なし。`token-guard-stages.txt` の名前が `SKILL.md` の工程表の Skill の列と入口の 2 つに一致することを文書テストで確かめる |
-| AC15 | 単体: 同じ `session_id` で 1 回目 deny → 同じ skill・args で 2 回目は出力なし → 3 回目の別の工程 Skill（例 `ndf:pr`）で再び deny。拒否の後に Bash と Read を挟んでも、次の同じ起動は通る。`NDF_CONTEXT_GUARD=0` で 1 回目も出力なし |
+| AC14 | 単体: `ndf:markdown-writing` と `ndf:worktree` → 出力なし。`description` の先頭語が `調査:` の Agent → 出力なし。文書テスト: `token-guard-stages.txt` の名前が設計の「工程 Skill の一覧」の 13 個と一致し、どれも `plugins/ndf/manifests/` の Skill 一覧にある |
+| AC15 | 単体: 同じ `session_id` で 1 回目 deny → 同じ skill・args で 2 回目は出力なし → 3 回目の別の工程 Skill（例 `ndf:merged`）で再び deny。拒否の後に Bash と Read を挟んでも、次の同じ起動は通る。Agent: `description: "設計: #829"` で 1 回目 deny → 同じ description で 2 回目は出力なし → 3 回目の `実装: #829` で deny。`NDF_CONTEXT_GUARD=0` で 1 回目も出力なし |
 | AC16 | 単体: `transcript_path` が無い・`usage` の無い記録 → 出力なし |
 | AC17 | AC12〜AC16 のテストが通る |
-| AC18 / AC19 | 文書の検査: `SKILL.md` に 4 つの切れ目と hook の拒否で conductor が 1 行を出す規約（3 層では `## 持ち場の報告` を受け取った時点）があり、`context-window.md` に戻す手順の表がある |
+| AC18 / AC19 | 文書の検査: `SKILL.md` に 4 つの切れ目と hook の拒否で conductor が 1 行を出す規約（3 層では `## 持ち場の報告` を受け取った時点。`結果: 関門` なら関門の承認と取り込みの後）があり、`context-window.md` に戻す手順の表がある |
 | AC20 | 実機: 実装の Pull Request の途中で会話を切り、1 行だけで新しい会話を始め、モード・作業ツリー・次の工程が戻ったことを #830 に残す |
 | AC21 / AC22 | 文書の検査: 「実測ではない」の文面が消え、#827 への参照と数値があり、上限の値が `NDF_CONTEXT_LIMIT` の既定と一致する |
 | AC23 | 文書の検査: README に 4 ランタイムの表がある |
