@@ -107,4 +107,4 @@ conductor では、文脈量の hook が工程へ入る起動を 1 度の通し�
 cat ~/.local/state/ndf/relay/*/log.jsonl | jq -c 'select(.event == "stop")'
 ```
 
-設計と決定の理由は ai-plugins の課題 #895 の設計文書にある。
+入出力の契約と決定の理由は、ai-plugins の確定仕様 `docs/specifications/ndf-relay-segment-restart.md` にある。
