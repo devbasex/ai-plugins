@@ -167,7 +167,7 @@ plugins/ndf/
 | `relay.pid` | `run` | 中継の pid。`mark` が生きているかを見る |
 | `next/<ペインの ID の数字>.json` | `mark` | 印（下の表）。一時ファイルに書いてから `rename` する |
 | `stop` | `stop` か利用者 | 空。在れば停止の印 |
-| `log.jsonl` | `run` | 記録（下の表）。1 区間 1 行と、止まったときの 1 行 |
+| `log.jsonl` | `run` | 記録（下の表）。中継が起動した 1 区間に 1 行と、止まったときの 1 行 |
 
 ### 印（`next/<ペイン>.json`）
 
@@ -257,7 +257,7 @@ stateDiagram-v2
 | --- | --- |
 | 待つ | 2 秒ごとに `next/` と `stop` を見る（スクリプトの中の待ちで、LLM は使わない）。中継が起動した区間のペインは、`#{pane_dead}` かペインの消滅で終わりを見る |
 | 静まりを待つ | 印の `written_at` と `transcript_path` の更新時刻の遅いほうから `--quiet` 秒たつまで待つ。`/goal` が応答を続けさせたときは記録が動き、次の Stop で印が書き直されるか消える |
-| 終わらせる | 停止の印があれば `/exit` を送らずに止まる（AC13）。1 日の起動回数（`log.jsonl` の今日の `start` の数）が上限なら止まる（AC9）。`previous_seconds` が 120 未満の区間が直前 2 回続いていて今回も 120 未満なら止まる（AC11）。どれでもなければ `tmux send-keys -t <ペイン> /exit Enter` を送り、ペインが死ぬ・消える・`#{pane_current_command}` が `claude` でなくなるのを 30 秒まで待つ |
+| 終わらせる | 停止の印があれば `/exit` を送らずに止まる（AC13）。1 日の起動回数（`log.jsonl` の今日の `start` の数）が上限なら止まる（AC9）。直前の 2 つの `start` の行の `previous_seconds` がともに 120 未満で、今終わった区間の長さも 120 未満なら（3 区間続けて空回り）、次の区間を起動せずに止まる（AC11）。どれでもなければ `tmux send-keys -t <ペイン> /exit Enter` を送り、ペインが死ぬ・消える・`#{pane_current_command}` が `claude` でなくなるのを 30 秒まで待つ |
 | 起動する | `claude plugin marketplace update <マーケットプレイス>` → `claude plugin update ndf@<マーケットプレイス> -y` → `claude plugin list --json` で版を読む。どれかが 0 以外で終われば止まる。`tmux new-window -t <セッション> -c <cwd> -P -F '#{window_index} #{pane_id}' -- env -u CLAUDECODE -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT claude <中身>` で起動し（中身はシェルを通さず 1 つの引数で渡す）、そのウィンドウに `remain-on-exit on` を置く。中継が開いたウィンドウで死んだものが `--keep-windows` を超えたら古いものから `kill-window` する（AC7） |
 
 **マーケットプレイスの名前は、中継を始めたときに `claude plugin list --json` の `ndf@<名前>` から読む。**
@@ -298,11 +298,11 @@ claude の区間も終わらせられる。その区間のペインには `remai
 | AC8 | 同: `start` の行が 8 つのキーを持ち、`plugin_version` が差し替えた `plugin list --json` の値であること |
 | AC9 | 同: 今日の `start` が 20 行ある記録で印を与えると、`/exit` を送らず終了コード 2・理由が出ること |
 | AC10 | 同: `relay.lock` を別のプロセスで持った状態の `run` が終了コード 1。1 周の中で `new-window` が前のペインの終わりの確認の後にだけ呼ばれること |
-| AC11 | 同: `previous_seconds` が 119・119・119 の 3 回目で止まり、119・121・119 では止まらないこと |
+| AC11 | 同: 区間の長さが 119・119・119 と続くと、3 つ目の区間が終わったところで 4 つ目を起動せず止まり、119・121・119 では止まらないこと |
 | AC12 | 同: 中継が開いたペインが印なしで死ぬと終了コード 2 |
 | AC13 | 同: `stop` があるとき `/exit` を送らず終了コード 0。`SIGINT` で終了コード 130、`send-keys` も `kill-window` も呼ばず、`set-environment -u` を呼ぶこと |
 | AC14 | 同: AC4 の `TMUX` 無し。`hooks/claude.json` 以外の hook の定義の差分が無いことを実装の Pull Request の差分で見る |
-| AC15 | 別のソケット（`tmux -L ndf-relay-e2e`）で中継を始め、`--model haiku` の claude に「次の区間を `ndf-next` で 1 回出す」指示を 2 段で渡す通しの確かめ。3 つ目の区間の起動・ウィンドウ 3 つ・`log.jsonl` の `start` 3 行を見る。1 段目で `AskUserQuestion` を出させ、答える前に印が無いことも見る。記録を実装の Pull Request に残す |
+| AC15 | 別のソケット（`tmux -L ndf-relay-e2e`）で中継を始め、`--model haiku` の claude に「次の区間を `ndf-next` で 1 回出す」指示を 2 段で渡す通しの確かめ。3 つ目の区間の起動・ウィンドウ 3 つ・`log.jsonl` の `start` 2 行（中継が起動した 2 つ目と 3 つ目の区間。最初の区間は利用者が開くため行が無い）を見る。1 段目で `AskUserQuestion` を出させ、答える前に印が無いことも見る。記録を実装の Pull Request に残す |
 | AC16 | `uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest pytest . -q -n 4` |
 
 ## 未確認のまま残ること
