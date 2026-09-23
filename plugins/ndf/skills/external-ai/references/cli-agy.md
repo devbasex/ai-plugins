@@ -120,6 +120,8 @@ $ agy --output-format json -p="1+1は？数字だけ答えて"
 
 sentinel を出さないため、**プロセスの終了**を見る。
 
+**Claude Code では、このループを Bash の `run_in_background: true` で実行して完了通知を待つ**（前景で回すと hook が止める。規約は `development-workflow/references/waiting.md`）。
+
 ```bash
 until ! kill -0 $PID 2>/dev/null; do
   sleep 30

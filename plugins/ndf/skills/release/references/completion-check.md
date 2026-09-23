@@ -35,6 +35,8 @@
 
 そのまま貼って使う。**再起動・pidfile・結果ファイルの規約は持たず、ログの読み取りだけを行う。**
 
+**Claude Code では、このループを Bash の `run_in_background: true` で実行して完了通知を待つ**（前景で回すと hook が止める。規約は `development-workflow/references/waiting.md`）。
+
 ```bash
 # $LOG は追記されるログ、$DONE と $FAIL は先に流して確かめた語、$IDLE と $LIMIT は秒
 # 未設定の変数と作れないログはここで止める。空の値のまま進むと比較が構文誤りを出し続ける

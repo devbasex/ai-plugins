@@ -106,6 +106,8 @@ Codex は最終 message を返さなくても `apply_patch` でファイルを�
 `ps -p $PID` は zombie (defunct) にも 0 を返すため、**PID watch は永久ループになりうる**。
 stderr 末尾の sentinel を脱出条件にする。
 
+**Claude Code では、このループを Bash の `run_in_background: true` で実行して完了通知を待つ**（前景で回すと hook が止める。規約は `development-workflow/references/waiting.md`）。
+
 ```bash
 # ❌ 永久ループ化しうる
 until ! ps -p $PID; do sleep 30; done

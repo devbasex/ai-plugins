@@ -125,6 +125,8 @@ codex exec --dangerously-bypass-approvals-and-sandbox \
   2> /tmp/sec-scan-err.log &
 
 # === 3. 完了確認（^tokens used$ sentinel を待つ。`ps -p` は zombie を生存と誤判定する） ===
+# Claude Code では、このループを Bash の run_in_background: true で実行して完了通知を待つ
+# （前景で回すと hook が止める。規約は development-workflow/references/waiting.md）
 until grep -q '^tokens used$' /tmp/sec-scan-err.log 2>/dev/null; do
   sleep 30
 done
