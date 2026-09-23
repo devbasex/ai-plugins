@@ -226,3 +226,32 @@ def built_commits_still_reachable(built) -> bool:
     """着手前のコミットが履歴から消えていないこと。"""
     log = _git("rev-list", "HEAD", cwd=built["repo"]).stdout.split()
     return built["c1"] in log and built["base"] in log
+
+
+# ---------- 現状固定: dry-run と旧版の状態ファイル ----------
+
+def test_dry_run_reports_the_plan_without_touching_history(gitfacts, distant_repo):
+    """dry-run は取り消しと積み直しの件数だけを返し、履歴も状態も変えないこと。"""
+    state, entry = _state(distant_repo)
+    head = _git("rev-parse", "HEAD", cwd=distant_repo["repo"]).stdout.strip()
+
+    result = gitfacts.drop_items(state, entry, ["R1-001"], dry_run=True)
+
+    assert result == {"mode": "item", "dropped": ["R1-001"],
+                      "reverted": 2, "replayed": 1}
+    assert _git("rev-parse", "HEAD", cwd=distant_repo["repo"]).stdout.strip() == head
+    assert "drops" not in entry
+    assert not any(i.get("reverted") for i in state["items"])
+
+
+def test_legacy_state_reverts_only_the_item_commits(gitfacts, distant_repo):
+    """起点（`apply_base_sha`）の無い旧版では、項目のコミットだけを戻すこと。"""
+    state, entry = _state(distant_repo)
+    del entry["apply_base_sha"]
+
+    result = gitfacts.drop_items(state, entry, ["R1-002"])
+
+    assert result == {"mode": "item", "dropped": ["R1-002"],
+                      "reverted": 1, "replayed": 0}
+    assert "line3-by-R1-001" in _content(distant_repo)
+    assert "line31-by-R1-002" not in _content(distant_repo)

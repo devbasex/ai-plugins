@@ -11,6 +11,8 @@ import argparse
 import hashlib
 import pathlib
 import sys
+import time
+from dataclasses import dataclass
 from typing import Any, Optional
 
 import statefile
@@ -41,11 +43,12 @@ from ..intake import (
 from ..outbound import dropped_line, item_lines, plan_line
 from ..paths import git_out, load_state, result_path, stem_for
 from ..rounds import (
+    append_deferred_abandoned_items,
     current_group,
-    deferred_record,
     phase_after_group,
     prepare_fix_phase,
 )
+from ..scope import round_test_command
 from ..verify import (
     unassigned_fix_commits,
     verify_commit_granularity,
@@ -61,11 +64,15 @@ def _verification_record(
     code: int,
     timed_out: bool,
     passed: bool,
+    seconds: float,
 ) -> dict[str, Any]:
     """検証 1 回分の記録を作る。**状態は変えない。**
 
     判定を作る段と、判定を状態へ反映する段を分ける。合否そのものは呼び出し側が
     決めており、ここは何を記録に残すかだけを持つ。
+
+    **所要の秒数を残す**（#880）。範囲のテストへ寄せた効果は、状態ファイルから
+    測れなければ確かめられない。
     """
     return {
         "apply_round": group["apply_round"],
@@ -75,6 +82,7 @@ def _verification_record(
         "status": "pass" if passed else "fail",
         "exit_code": code,
         "timed_out": timed_out,
+        "seconds": seconds,
     }
 
 
@@ -128,8 +136,9 @@ def cmd_verify_round(args: argparse.Namespace) -> None:
 
     終了コード: 0 = テストが通った / 2 = 落ちた（修正ラウンドへ）。
 
-    **2 CLI のレビューは起動しない**（決定 3）。`--baseline-test` が指す
-    コマンドを作業ディレクトリの HEAD で実行し、その合否で決める。
+    **2 CLI のレビューは起動しない**（決定 3）。`--round-test` が指す範囲の
+    テストを作業ディレクトリの HEAD で実行し、その合否で決める（#880）。全体の
+    テストは着手前と最終ゲートにしか走らせない。
 
     **失敗をどの項目に紐づけるかは決めない。** 適用ラウンドの中は 1 コミットで
     あり、分離しても取り消せない。判定の単位と取り消しの単位を一致させる。
@@ -148,14 +157,16 @@ def cmd_verify_round(args: argparse.Namespace) -> None:
             code=2,
         )
 
-    command = (state.get("baseline_test") or {}).get("command") or ""
+    command = round_test_command(state)
     work = str(state["worktrees"]["work"])
     timeout = safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT)
+    started = time.monotonic()
     code, timed_out = run_with_timeout(command, work, timeout)
+    seconds = round(time.monotonic() - started, 1)
     passed = (not timed_out) and code == 0
 
     entry.setdefault("verifications", []).append(
-        _verification_record(group, entry, command, code, timed_out, passed)
+        _verification_record(group, entry, command, code, timed_out, passed, seconds)
     )
 
     if passed:
@@ -187,16 +198,68 @@ def _record_deferred_abandoned_items(
     state: dict[str, Any], targets: list[str]
 ) -> None:
     """取り消し対象項目の status を abandoned に更新し、未登録なら deferred_items に追記する。"""
-    already = {d.get("item_id") for d in state["deferred_items"]}
+    items = []
     for item_id in targets:
         item = find_item(state, item_id)
         item["status"] = "abandoned"
         item.setdefault(
             "failure_reason", "修正ラウンドの上限に達してもテストが通らなかった")
-        if item_id in already:
-            continue
-        state["deferred_items"].append(
-            deferred_record(item, item_id, item["failure_reason"]))
+        items.append(item)
+    append_deferred_abandoned_items(
+        state, items, "修正ラウンドの上限に達してもテストが通らなかった")
+
+
+def _resume_abandon_leftovers(
+    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any]
+) -> None:
+    """やり残した取り消しを push の再送より先に片づける。
+
+    先に push すると、取り消しが途中の HEAD をそのまま Pull Request へ反映して
+    しまう。取り消しが残っていれば再実行し、無ければ保留の push だけ流す。
+    """
+    if entry.get("pending_drop"):
+        info("↻ 前回終わらなかった取り消しを再実行します")
+        run_drop(path, state, entry, list(entry["pending_drop"]))
+    else:
+        flush_pending_push(path, state, entry)
+
+
+def _abandon_no_targets(
+    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any],
+    group: dict[str, Any], dry_run: bool,
+) -> None:
+    """取り消す項目が無い群を処理済みとして記録する。"""
+    info("取り消す項目はありません")
+    if not dry_run:
+        group["abandoned"] = []
+        entry["abandoned"] = []
+        statefile.save(path, state)
+
+
+def _complete_abandon(
+    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any],
+    group: dict[str, Any], targets: list[str],
+) -> None:
+    """取り消しを実行し、見送りの記録・状態の更新・push を行う。
+
+    見送りの記録と印の解除を**同じ保存で**行う。保存してから push するので、
+    push が失敗しても記録とローカルの git が食い違わない。
+    """
+    run_drop(path, state, entry, targets)
+
+    _record_deferred_abandoned_items(state, targets)
+
+    # **内訳は書かない。件数だけ述べ、内訳は改修計画へ譲る**（#436 決定 6-b）。
+    info(f"↩ 適用ラウンド {group['apply_round']}: {dropped_line(state, len(targets))}")
+    group["abandoned"] = targets
+    group["status"] = "dropped"
+    entry["abandoned"] = targets
+    entry["pending_drop"] = []
+    entry["apply_base_sha"] = git_out(
+        state["worktrees"]["work"], ["rev-parse", "HEAD"])
+    group["base_sha"] = entry["apply_base_sha"]
+    state["phase"] = phase_after_group(entry)
+    push_with_retry_marker(path, state, entry)
 
 
 def cmd_abandon_items(args: argparse.Namespace) -> None:
@@ -210,13 +273,7 @@ def cmd_abandon_items(args: argparse.Namespace) -> None:
     entry = round_of(state, args.round)
     group = current_group(entry)
     if not args.dry_run:
-        # **やり残した取り消しを push の再送より先に片づける。** 先に push すると、
-        # 取り消しが途中の HEAD をそのまま Pull Request へ反映してしまう。
-        if entry.get("pending_drop"):
-            info("↻ 前回終わらなかった取り消しを再実行します")
-            run_drop(path, state, entry, list(entry["pending_drop"]))
-        else:
-            flush_pending_push(path, state, entry)
+        _resume_abandon_leftovers(path, state, entry)
 
     # 取り消し自体は `reverted` で冪等だが、見送りの記録は重複しうる。
     if group.get("abandoned") is not None:
@@ -226,11 +283,7 @@ def cmd_abandon_items(args: argparse.Namespace) -> None:
 
     targets = list((entry.get("apply") or {}).get("applied") or [])
     if not targets:
-        info("取り消す項目はありません")
-        if not args.dry_run:
-            group["abandoned"] = []
-            entry["abandoned"] = []
-            statefile.save(path, state)
+        _abandon_no_targets(path, state, entry, group, args.dry_run)
         return
 
     if args.dry_run:
@@ -238,23 +291,7 @@ def cmd_abandon_items(args: argparse.Namespace) -> None:
         info("（dry-run）状態ファイルは更新していません")
         return
 
-    run_drop(path, state, entry, targets)
-
-    _record_deferred_abandoned_items(state, targets)
-
-    # 見送りの記録と印の解除を**同じ保存で**行う。保存してから push するので、
-    # push が失敗しても記録とローカルの git が食い違わない。
-    # **内訳は書かない。件数だけ述べ、内訳は改修計画へ譲る**（#436 決定 6-b）。
-    info(f"↩ 適用ラウンド {group['apply_round']}: {dropped_line(state, len(targets))}")
-    group["abandoned"] = targets
-    group["status"] = "dropped"
-    entry["abandoned"] = targets
-    entry["pending_drop"] = []
-    entry["apply_base_sha"] = git_out(
-        state["worktrees"]["work"], ["rev-parse", "HEAD"])
-    group["base_sha"] = entry["apply_base_sha"]
-    state["phase"] = phase_after_group(entry)
-    push_with_retry_marker(path, state, entry)
+    _complete_abandon(path, state, entry, group, targets)
 
 
 def _fix_merge_key(entry: dict[str, Any], result: pathlib.Path) -> str:
@@ -396,26 +433,32 @@ def _revert_invalid_fix_round(
     return set()
 
 
-def _resolve_fix_range(
-    path: pathlib.Path,
-    state: dict[str, Any],
-    entry: dict[str, Any],
-    work: str,
-    head_now: str,
-) -> list[str]:
+@dataclass
+class FixExecutionContext:
+    """修正の取り込み 1 回分に属する値の組。"""
+
+    path: pathlib.Path
+    state: dict[str, Any]
+    entry: dict[str, Any]
+    scope: IntakeScope
+    work: str
+
+
+def _resolve_fix_range(ctx: FixExecutionContext, head_now: str) -> list[str]:
     """修正の範囲を**オーケストレータが記録した起点**から確定して返す。
 
     起点は `verify-round` がテストの失敗を返したときの HEAD である。確定できない
     ときは修正ラウンドを 1 つ進めて保存したうえで `die` する。
     """
-    ordered_range = commits_in_range(work, entry.get("fix_base_sha"), head_now)
+    entry = ctx.entry
+    ordered_range = commits_in_range(ctx.work, entry.get("fix_base_sha"), head_now)
     if ordered_range is None:
         # **修正ラウンドは進める。** 進めないと `should-abandon` が見送りへ移る
         # 条件（`fix_rounds` が上限に達する）を永久に満たさず、修正フェーズと
         # 再レビューを無限に往復する。この修正は採らないので、範囲外の記録は
         # 何も足さない。
         entry["fix_rounds"] += 1
-        statefile.save(path, state)
+        statefile.save(ctx.path, ctx.state)
         die(
             "修正の範囲を確定できませんでした"
             f"（起点 {entry.get('fix_base_sha')} / HEAD {head_now}）。"
@@ -429,20 +472,21 @@ def _inspect_fix_commits(
     state: dict[str, Any],
     work: str,
     payload: dict[str, Any],
-    baseline: dict[str, Any],
     ordered_range: list[str],
 ) -> tuple[list[str], list[str], list[tuple[str, str]]]:
     """修正コミットを **git と実際のテスト実行から**検証する。
 
     結果ファイルの申告で済ませると、手順を満たさない変更が収束済みになれてしまう。
     未割当コミットの一覧・問題点の一覧・受理した (item_id, sha) を返す。
+
+    **コミットごとに走らせるのは範囲のテストである**（#880）。
     """
     claimed_shas = reported_shas(payload)
     unassigned = unassigned_fix_commits(work, claimed_shas, ordered_range)
 
     facts = collect_commit_facts(
         work, claimed_shas, set(ordered_range),
-        baseline.get("command") or "true", state["head_branch"],
+        round_test_command(state) or "true", state["head_branch"],
         safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT),
     )
 
@@ -457,10 +501,7 @@ def _inspect_fix_commits(
 
 
 def _settle_fix_round(
-    path: pathlib.Path,
-    state: dict[str, Any],
-    entry: dict[str, Any],
-    scope: IntakeScope,
+    ctx: FixExecutionContext,
     ordered_range: list[str],
     resolved: set[str],
     unassigned: list[str],
@@ -469,11 +510,13 @@ def _settle_fix_round(
 ) -> None:
     """検証結果に応じて修正ラウンドを取り消すか受理し、解決の印を付ける。"""
     if unassigned or problems:
-        resolved = _revert_invalid_fix_round(path, state, scope, ordered_range)
+        resolved = _revert_invalid_fix_round(
+            ctx.path, ctx.state, ctx.scope, ordered_range
+        )
     else:
-        _record_accepted_fix_commits(state, accepted)
+        _record_accepted_fix_commits(ctx.state, accepted)
 
-    _mark_resolved_fix_findings(entry, resolved)
+    _mark_resolved_fix_findings(ctx.entry, resolved)
 
 
 def _fix_scope(entry: dict[str, Any], impl: str) -> IntakeScope:
@@ -526,17 +569,17 @@ def _close_failed_fix(
 
 
 def _fetch_fix_result(
-    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any],
-    scope: IntakeScope, impl: str, round_no: int,
+    ctx: FixExecutionContext, impl: str, round_no: int,
 ) -> tuple[Optional[dict[str, Any]], Optional[str]]:
     """修正結果を取得し、`(payload, merge_key)` を返す。
 
     結果を残さなかった試行は `_close_failed_fix` が終了させる。取り込み済みの
     結果なら `(None, None)` を返し、呼び出し側が何もせず戻れるようにする。
     """
+    state, entry = ctx.state, ctx.entry
     outcome = read_result(state, impl, "fix", round_no)
     if outcome.payload is None:
-        _close_failed_fix(path, state, entry, scope, outcome)
+        _close_failed_fix(ctx.path, state, entry, ctx.scope, outcome)
     payload = outcome.payload
 
     result = result_path(state, impl, stem_for(impl, "fix", state["id"], round_no))
@@ -547,31 +590,30 @@ def _fetch_fix_result(
 
 
 def _confirm_and_settle_fix(
-    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any],
-    scope: IntakeScope, work: str, head_now: str, payload: dict[str, Any],
+    ctx: FixExecutionContext, head_now: str, payload: dict[str, Any],
 ) -> set[str]:
     """Git 範囲を確定し、修正コミットを検証して取り消すか受理する。
 
     採用した解決スレッドの集合を返す（取り込みの通知に使う）。
     """
+    state = ctx.state
     resolved = _resolved_fix_thread_ids(payload, state["repo"], state["current_pr"])
-    baseline = state.get("baseline_test") or {}
-    ordered_range = _resolve_fix_range(path, state, entry, work, head_now)
+    ordered_range = _resolve_fix_range(ctx, head_now)
     unassigned, problems, accepted = _inspect_fix_commits(
-        state, work, payload, baseline, ordered_range
+        state, ctx.work, payload, ordered_range
     )
     _settle_fix_round(
-        path, state, entry, scope, ordered_range, resolved, unassigned, problems,
-        accepted,
+        ctx, ordered_range, resolved, unassigned, problems, accepted,
     )
     return resolved
 
 
 def _record_and_publish_fix(
-    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any],
+    ctx: FixExecutionContext,
     merge_key: str, payload: dict[str, Any], resolved: set[str],
 ) -> None:
     """取り込み済みの鍵・修正回数・所要時間を記録し、保存して公開する。"""
+    path, state, entry = ctx.path, ctx.state, ctx.entry
     entry["fix_merged_keys"].append(merge_key)
     entry["fix_rounds"] += 1
     entry.setdefault("durations", {})["fix"] = (
@@ -607,15 +649,13 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         info("↻ この修正の試行は結果なしとして記録済みです")
         sys.exit(2)
 
-    payload, merge_key = _fetch_fix_result(
-        path, state, entry, scope, impl, args.round
+    ctx = FixExecutionContext(
+        path, state, entry, scope, state["worktrees"]["work"]
     )
+    payload, merge_key = _fetch_fix_result(ctx, impl, args.round)
     if payload is None:
         return
 
-    work = state["worktrees"]["work"]
-    head_now = git_out(work, ["rev-parse", "HEAD"]) or ""
-    resolved = _confirm_and_settle_fix(
-        path, state, entry, scope, work, head_now, payload
-    )
-    _record_and_publish_fix(path, state, entry, merge_key, payload, resolved)
+    head_now = git_out(ctx.work, ["rev-parse", "HEAD"]) or ""
+    resolved = _confirm_and_settle_fix(ctx, head_now, payload)
+    _record_and_publish_fix(ctx, merge_key, payload, resolved)

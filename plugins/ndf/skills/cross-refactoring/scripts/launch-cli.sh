@@ -41,6 +41,10 @@ load_common_state() {
   SCOPE=$(jq -r '.target_scope | join(" ")' "$STATE")
   MODEL=$(jq -r --arg rt "$RUNTIME" '.models[$rt] // ""' "$STATE")
   BASELINE_TEST=$(jq -r '.baseline_test.command // ""' "$STATE")
+  # 適用と修正の担当には、進行側が群と修正コミットを検証するコマンドを渡す（#880）。
+  # `round_test_command` と同じく、`round_test` が無ければ `baseline_test` を採る。
+  # 最終ゲートの修正（final-fix）は全体のテストで判定するため `BASELINE_TEST` を使う。
+  ROUND_TEST=$(jq -r '.round_test.command // .baseline_test.command // ""' "$STATE")
   MAX_ITEMS=$(jq -r '.max_items_per_round' "$STATE")
 
   # ラウンド番号は表示と項目の絞り込みに使う。未指定なら開いている最新ラウンドを採る。
@@ -228,7 +232,7 @@ export_prompt_env() {
 export RF_REPO=$REPO RF_PR=$PR RF_ROUND=${ROUND:-} RF_RUNTIME=$RUNTIME
 export RF_MODEL=${MODEL:-default} RF_WORKDIR=$WORKDIR RF_STEM=$STEM
 export RF_SCOPE=$SCOPE RF_HEAD_BRANCH=$HEAD_BRANCH RF_BASE_BRANCH=$BASE_BRANCH
-export RF_BASELINE_TEST=$BASELINE_TEST RF_MAX_ITEMS=$MAX_ITEMS
+export RF_BASELINE_TEST=$BASELINE_TEST RF_ROUND_TEST=$ROUND_TEST RF_MAX_ITEMS=$MAX_ITEMS
 export RF_SKILL_BLOCK=$SKILL_BLOCK RF_EXCLUDED=$EXCLUDED RF_SKILL_BASE=$SKILL_BASE
 export RF_ITEMS=$ITEMS_JSON RF_TMP_DIR=$TMP_DIR
 export RF_APPLY_ROUND=$APPLY_ROUND

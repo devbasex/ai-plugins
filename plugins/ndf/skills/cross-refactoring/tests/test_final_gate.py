@@ -281,3 +281,131 @@ def test_the_apply_round_verification_never_uses_the_ci(
 
     assert spy["tests"] == ["pytest -q"], "Step 5 は手元のテストを実行する"
     assert spy["gh"] == [], "Step 5 で継続的統合は読まない"
+
+
+# ---------- 全体テストは最終ゲートで 1 回（#880 の AC3） ----------
+
+ROUND_TEST = {"command": "pytest tests/services -q", "status": "green",
+              "checked_at": "2026-08-15T00:00:00"}
+
+
+def test_a_standalone_run_with_a_round_test_runs_the_baseline_test_once(
+    refactor, cmd_gate, tmp_path, env_tmp_dir, spy, capsys
+):
+    """AC3 — 単独起動でも、範囲のテストで検証してきたなら全体テストを 1 回通す。"""
+    state_path = _state(tmp_path, round_test=ROUND_TEST)
+    env_tmp_dir(state_path)
+
+    cmd_gate.cmd_final_gate(_args())
+
+    assert spy["tests"] == ["pytest -q"]
+    assert "FINAL_GATE=cross-review" in capsys.readouterr().out
+    gate = read_state(state_path)["final_gate"]
+    assert gate["mode"] == "cross-review"
+    assert gate["checks"][-1]["status"] == "pass"
+
+
+def test_a_workflow_step_run_with_a_round_test_runs_the_baseline_test_once(
+    refactor, cmd_gate, tmp_path, env_tmp_dir, spy, capsys
+):
+    """AC3 — 工程として起動したときも、全体テストの呼び出しは 1 回。"""
+    state_path = _state(tmp_path, workflow_step=True, round_test=ROUND_TEST)
+    env_tmp_dir(state_path)
+
+    cmd_gate.cmd_final_gate(_args())
+
+    assert spy["tests"] == ["pytest -q"]
+    assert "FINAL_GATE=passed" in capsys.readouterr().out
+
+
+def test_a_standalone_run_whose_baseline_test_fails_enters_the_fix_round(
+    refactor, cmd_gate, tmp_path, env_tmp_dir, spy, capsys
+):
+    """落ちれば `--workflow-step` と同じ修正ラウンドへ入る。cross-review へは渡さない。"""
+    state_path = _state(tmp_path, round_test=ROUND_TEST)
+    env_tmp_dir(state_path)
+    spy["test_code"] = 1
+
+    with pytest.raises(SystemExit) as e:
+        cmd_gate.cmd_final_gate(_args())
+
+    assert e.value.code == 2
+    out = capsys.readouterr().out
+    assert "FINAL_GATE=failing" in out and "FINAL_GATE=cross-review" not in out
+    assert read_state(state_path)["final_gate"]["fix_rounds"] == 1
+
+
+def test_a_standalone_run_with_the_same_round_test_runs_no_test(
+    refactor, cmd_gate, tmp_path, env_tmp_dir, spy
+):
+    """範囲のテストが全体テストと同じなら、群の検証が全体を見ている。"""
+    state_path = _state(tmp_path, round_test={"command": "pytest -q", "status": "green"})
+    env_tmp_dir(state_path)
+
+    cmd_gate.cmd_final_gate(_args())
+
+    assert spy["tests"] == []
+
+
+def test_a_standalone_run_with_a_ci_check_reads_the_ci_instead(
+    refactor, cmd_gate, tmp_path, env_tmp_dir, spy, capsys
+):
+    """`--ci-check` があれば、手元の全体テストの代わりに継続的統合を見る。"""
+    state_path = _state(tmp_path, round_test=ROUND_TEST, ci_check="tests")
+    env_tmp_dir(state_path)
+    spy["gh_out"] = _check_runs(_run("tests"))
+
+    cmd_gate.cmd_final_gate(_args())
+
+    assert spy["tests"] == []
+    assert "FINAL_GATE=cross-review" in capsys.readouterr().out
+
+
+def test_the_gate_check_records_the_command_and_seconds(
+    refactor, cmd_gate, tmp_path, env_tmp_dir, spy
+):
+    """最終ゲートの記録は、実行したコマンドと所要の秒数を持つ。"""
+    state_path = _state(tmp_path, workflow_step=True, round_test=ROUND_TEST)
+    env_tmp_dir(state_path)
+
+    cmd_gate.cmd_final_gate(_args())
+
+    check = read_state(state_path)["final_gate"]["checks"][-1]
+    assert check["mode"] == "test"
+    assert check["command"] == "pytest -q"
+    assert isinstance(check["seconds"], (int, float)) and check["seconds"] >= 0
+
+
+# ---------- 全体テストの打ち切り（run_with_timeout の timed_out=True）（R2-003） ----------
+#
+# 現状固定テスト。最終ゲートの成功と非ゼロ終了は固定されているが、全体テストが
+# 打ち切り（timed_out=True）で止まったときに、失敗として記録し修正ラウンドへ進む
+# 経路は固定されていなかった（gate.py の `_local_gate` の timed_out 分岐）。
+
+
+def test_final_gate_records_a_timed_out_whole_test_and_enters_a_fix_round(
+    patch_lib, refactor, cmd_gate, tmp_path, env_tmp_dir, spy, capsys
+):
+    """R2-003 — 全体テストが打ち切りなら失敗として記録し、修正ラウンドへ進む。"""
+    state_path = _state(tmp_path, workflow_step=True, test_timeout=60)
+    env_tmp_dir(state_path)
+    # 全体テストの実行を打ち切りへ差し替える（spy の差し替えを上書きする）。
+    patch_lib("run_with_timeout",
+              lambda command, cwd, timeout, grace=5.0: (None, True))
+
+    with pytest.raises(SystemExit) as e:
+        cmd_gate.cmd_final_gate(_args())
+    # 現状固定: 失敗の終了コード（修正ラウンドへ）。
+    assert e.value.code == 2
+    out = capsys.readouterr().out
+    assert "FINAL_GATE=failing" in out and "FINAL_GATE=cross-review" not in out
+
+    gate = read_state(state_path)["final_gate"]
+    # 修正ラウンドへ進む。
+    assert gate["fix_rounds"] == 1
+    assert gate["status"] == "failing"
+    # 最終ゲートの記録は「打ち切り」相当の詳細を持つ（文言の完全一致は取らず、
+    # 打ち切った秒数が含まれることだけを見る）。
+    check = gate["checks"][-1]
+    assert check["status"] == "fail"
+    assert "60" in check["detail"]

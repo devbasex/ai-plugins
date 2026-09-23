@@ -1131,3 +1131,189 @@ def test_a_missing_fix_result_reverts_the_commits_in_range(
     entry = read_state(state_path)["rounds"][0]
     assert entry["fix_base_sha"] == "AFTER_REVERT"
     assert entry["apply_rounds"][0]["failed_attempts"][0]["reverted"] == 2
+
+
+# ---------- 修正コミットの検証は範囲のテスト（#880 の AC2） ----------
+
+def test_fix_commits_are_verified_with_the_round_test(patch_lib, refactor, gitfacts, cmd_converge, tmp_path, env_tmp_dir, monkeypatch):
+    """AC2 — 修正コミットごとに走るのは `round_test` だけで、全体テストは走らない。"""
+    real_collect = gitfacts.collect_commit_facts
+    state_path = _prepare_fix(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch, ["PRRT_a"])
+    state = read_state(state_path)
+    state["round_test"] = {"command": "pytest tests/services -q", "status": "green"}
+    state_path.write_text(__import__("json").dumps(state), encoding="utf-8")
+
+    ran: list[str] = []
+    patch_lib("collect_commit_facts", real_collect)
+    patch_lib("run_with_timeout",
+              lambda command, cwd, timeout, grace=5.0: ran.append(command) or (0, False))
+    patch_lib("commit_trailers", lambda work, sha: _fix_commit()["trailers"])
+    patch_lib("commit_diff_lines", lambda work, sha: 10)
+    patch_lib("commit_files", lambda work, sha: ["src/foo.py"])
+    patch_lib("commit_touches_tests", lambda work, sha: False)
+    patch_lib("commit_test_changes", lambda work, sha: {})
+    patch_lib("resolved_threads_on_github", lambda repo, pr: {"PRRT_a"})
+    monkeypatch.setattr(gitfacts.subprocess, "run",
+                        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "", ""))
+
+    cmd_converge.cmd_merge_fix(type("A", (), {"id": 130, "round": 1})())
+
+    assert ran == ["pytest tests/services -q"]
+    assert "fix111" in read_state(state_path)["items"][0]["commits"]
+
+
+# ---------- run_drop が mode=round を返したときの取り消し（R2-002） ----------
+#
+# 現状固定テスト。適用の検証に落ちた群を、run_drop が「積み直せなかった」
+# （mode=round）で返したときに cmd_merge_apply（_apply_drop）が行う状態の
+# 書き換えは、どのテストも通していなかった（apply.py 1008-1017 が未到達）。
+# gitfacts.drop_items が round 退避を返すこと自体は test_drop_items_git.py が
+# 固定しているので、ここではそれを受けた cmd_merge_apply 側だけを、run_drop を
+# 差し替えて固定する。mode=item の側を対照として並べ、分岐の両側を固定する。
+
+
+def _fact_for(sha, **over):
+    """`collect_commit_facts()` が git から作る事実。"""
+    base = {
+        "sha": sha, "exists": True, "test_status": "pass",
+        "touches_tests": False, "diff_lines": 30,
+        "trailers": {"Item-Id": "R1-001", "Round": "1",
+                     "Impl-Runtime": "codex", "Impl-Model": "gpt-5.5"},
+    }
+    base.update(over)
+    return base
+
+
+def _two_item_group_state(tmp_path):
+    """群に 2 項目を持ち、検証に落ちる（片方の申告が欠ける）適用結果の状態。"""
+    from crossref_helpers import write_result
+    items = [_item("R1-001", []), _item("R1-002", [])]
+    for it in items:
+        it["status"] = "pending"
+    state_path = make_state(
+        tmp_path,
+        items=items,
+        rounds=[{
+            "round": 1, "impl": "codex", "reviewers": REVIEWERS,
+            "impl_model": {"requested": "gpt-5.5", "observed": None},
+            "reviewer_models": {r: {"requested": None, "observed": None}
+                                for r in REVIEWERS},
+            "proposed": {}, "merged": 2, "adopted": 2, "deferred": 0,
+            "items": ["R1-001", "R1-002"],
+            "apply_rounds": [{
+                "apply_round": 1, "impl": "codex",
+                "impl_model": {"requested": "gpt-5.5", "observed": None},
+                "items": ["R1-001", "R1-002"], "status": "pending",
+                "base_sha": None, "head_sha": None, "fix_rounds": 0,
+            }],
+            "apply_round": 1,
+            "apply": {"applied": [], "failed": []}, "fix_rounds": 0,
+            "durations": {}, "reviews": [],
+        }],
+    )
+    write_result(state_path, "codex-apply-r1", {
+        "base_sha": "aaa", "elapsed_seconds": 100,
+        "items": [
+            # 群は 1 コミットを共有する。所有権の検査は通るが、コミット自体が
+            # 検証（トレーラー欠け）に落ちて群の全件が失敗する
+            {"item_id": "R1-001", "commits": [{"sha": "ok111"}]},
+            {"item_id": "R1-002", "commits": [{"sha": "ok111"}]},
+        ],
+    })
+    return state_path
+
+
+def _stub_apply_facts(patch_lib):
+    """適用の検証が git から取る事実を差し替える。ok111 は範囲にあるが検証に落ちる。"""
+    # `Impl-Model` を欠いたトレーラーにして、群の検証を失敗させる。
+    bad_trailers = {"Item-Id": "R1-001", "Round": "1", "Impl-Runtime": "codex"}
+    mapping = {"ok111": _fact_for("ok111", trailers=bad_trailers)}
+    patch_lib("commits_in_range", lambda work, base, head: ["ok111"])
+    patch_lib("collect_commit_facts",
+              lambda work, shas, rng, cmd, branch, timeout=None: [
+                  mapping.get(s, {"sha": s, "exists": False}) for s in shas])
+
+
+def test_merge_apply_drops_the_whole_group_when_run_drop_returns_round(
+    patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch
+):
+    """R2-002 — run_drop が mode=round のとき、群の全件を abandoned にする（apply.py 1008-1017）。"""
+    state_path = _two_item_group_state(tmp_path)
+    env_tmp_dir(state_path)
+    _stub_apply_facts(patch_lib)
+    # `rev-parse HEAD` は固定の SHA。他の git 呼び出しは SHA をそのまま返す。
+    patch_lib("git_out",
+              lambda work, args, **_kw: "DROPPED_HEAD" if args == ["rev-parse", "HEAD"]
+              else args[-1].replace("^{commit}", ""))
+    dropped: list = []
+    patch_lib("run_drop",
+              lambda path, state, entry, failed: dropped.append(list(failed))
+              or {"mode": "round", "dropped": [], "reverted": 2, "replayed": 0})
+    _apply_mod = sys.modules["refactor_lib.commands.apply"]
+    patch_lib("push_with_retry_marker",
+              lambda path, state, entry: _apply_mod.statefile.save(path, state))
+    monkeypatch.setattr(sys.modules["refactor_lib.commands.apply"].statefile, "now",
+                        lambda: "2026-09-23T00:00:00")
+
+    with pytest.raises(SystemExit) as e:
+        refactor.cmd_merge_apply(_args())
+    assert e.value.code == 2
+
+    state = read_state(state_path)
+    entry = state["rounds"][0]
+    by_id = {i["item_id"]: i for i in state["items"]}
+    # 群の 2 項目がともに abandoned で failure_reason を持つ
+    assert by_id["R1-001"]["status"] == "abandoned"
+    assert by_id["R1-002"]["status"] == "abandoned"
+    assert by_id["R1-001"]["failure_reason"] and by_id["R1-002"]["failure_reason"]
+    # apply.applied は空、apply.failed は群の全項目
+    assert entry["apply"]["applied"] == []
+    assert entry["apply"]["failed"] == ["R1-001", "R1-002"]
+    # apply_base_sha は取り直した固定の SHA
+    assert entry["apply_base_sha"] == "DROPPED_HEAD"
+    # deferred_items に 2 項目が載る
+    assert {d["item_id"] for d in state["deferred_items"]} == {"R1-001", "R1-002"}
+
+
+def test_merge_apply_keeps_run_drops_item_result_when_mode_is_item(
+    patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch
+):
+    """R2-002（対照）— run_drop が mode=item のとき、_apply_drop は群を一括で abandoned にしない。
+
+    項目単位の abandoned は run_drop（drop_items）側の責務なので、ここでは
+    fake run_drop がそれを模す。_apply_drop は apply.failed を群全体へ書き換えない。
+    """
+    state_path = _two_item_group_state(tmp_path)
+    env_tmp_dir(state_path)
+    _stub_apply_facts(patch_lib)
+    patch_lib("git_out",
+              lambda work, args, **_kw: "DROPPED_HEAD" if args == ["rev-parse", "HEAD"]
+              else args[-1].replace("^{commit}", ""))
+
+    def fake_item_drop(path, state, entry, failed):
+        # 実際の drop_items（mode=item）は失敗した項目だけを abandoned にする
+        for item_id in failed:
+            find = next(i for i in state["items"] if i["item_id"] == item_id)
+            find["status"] = "abandoned"
+            find.setdefault("failure_reason", "項目単位で取り消した")
+        return {"mode": "item", "dropped": list(failed), "reverted": 1, "replayed": 1}
+
+    patch_lib("run_drop", fake_item_drop)
+    _apply_mod = sys.modules["refactor_lib.commands.apply"]
+    patch_lib("push_with_retry_marker",
+              lambda path, state, entry: _apply_mod.statefile.save(path, state))
+    monkeypatch.setattr(sys.modules["refactor_lib.commands.apply"].statefile, "now",
+                        lambda: "2026-09-23T00:00:00")
+
+    with pytest.raises(SystemExit) as e:
+        refactor.cmd_merge_apply(_args())
+    assert e.value.code == 2
+
+    state = read_state(state_path)
+    entry = state["rounds"][0]
+    # mode=item では _apply_drop が apply.failed を群全体へ置き換えない
+    # （検証の記録のまま。群の全件が failed のまま残る）。
+    assert entry["apply"]["failed"] == ["R1-001", "R1-002"]
+    # applied は検証で空になっており、_apply_drop はここで群を明示的に
+    # 上書きしない（round の分岐だけが上書きする）。
+    assert entry["apply"]["applied"] == []

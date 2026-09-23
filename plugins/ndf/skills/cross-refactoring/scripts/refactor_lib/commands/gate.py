@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import pathlib
 import sys
+import time
 from typing import Any, Optional
 
 import statefile
@@ -42,6 +43,7 @@ from ..intake import (
 )
 from ..paths import git_out, load_state
 from ..rounds import impl_for_seq
+from ..scope import round_test_command
 from ..verify import verify_final_fix_commit
 from ..vocabulary import DEFAULT_TEST_TIMEOUT
 from ..verify import unassigned_fix_commits
@@ -55,50 +57,109 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
 
     **Step 7 は push 済みの地点である。** 上限に達しても取り消さない。取り消しの
     判断は Pull Request の読み手が持つため、失敗として報告に書く。
+
+    **単独起動でも、群を範囲のテストで検証してきたなら全体のテストを 1 回通す**
+    （#880）。範囲の外への波及を見る機会が、ほかに無いためである。通れば今のとおり
+    `cross-review` へ渡し、落ちれば工程として起動したときと同じ修正ラウンドへ入る。
     """
     path, state = load_state(args.id)
     gate = state.setdefault("final_gate", {"fix_rounds": 0, "checks": []})
+    standalone = not state.get("workflow_step")
 
-    if not state.get("workflow_step"):
-        gate["mode"] = "cross-review"
-        statefile.save(path, state)
-        info("単独起動のため、Step 7 は /ndf:cross-review を実行します")
-        statefile.emit(FINAL_GATE="cross-review")
+    if standalone and not _round_test_differs(state):
+        _emit_cross_review(
+            path, state, gate, "単独起動のため、Step 7 は /ndf:cross-review を実行します"
+        )
         return
 
+    passed, detail = _run_and_record_gate_check(state, gate)
+
+    if passed and standalone:
+        _emit_cross_review(
+            path, state, gate,
+            f"✅ 全体のテストが通りました（{detail}）。Step 7 は /ndf:cross-review を実行します",
+        )
+        return
+    if passed:
+        _gate_passed(path, state, gate, detail)
+        return
+
+    limit = safe_int(state.get("max_fix_rounds"), 3)
+    if safe_int(gate.get("fix_rounds")) >= limit:
+        _gate_limit_reached(path, state, gate, detail, limit)
+        return
+    _gate_failing(path, state, gate, detail, limit)
+
+
+def _run_and_record_gate_check(
+    state: dict[str, Any], gate: dict[str, Any]
+) -> tuple[bool, str]:
+    """最終ゲートの検査を 1 回走らせ、`checks` へ記録して結果を返す。"""
     # **排他である。** `--ci-check` があれば手元のテストを実行せず継続的統合の成功
     # だけで判定し、無ければ手元のテストだけで判定する。「どちらか一方が通れば通過」
     # とはしない（OR で採ると、手元のテストの失敗を継続的統合の成功が覆す）。
     ci_check = str(state.get("ci_check") or "").strip()
     gate["mode"] = "ci" if ci_check else "test"
+    started = time.monotonic()
     passed, detail = (
         _ci_gate(state, ci_check) if ci_check else _local_gate(state)
     )
+    _record_gate_check(
+        gate, ci_check or _baseline_command(state), passed, detail,
+        round(time.monotonic() - started, 1),
+    )
+    return passed, detail
+
+
+def _emit_cross_review(
+    path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], message: str
+) -> None:
+    """Step 7 を `cross-review` へ委譲する結末。"""
+    gate["mode"] = "cross-review"
+    statefile.save(path, state)
+    info(message)
+    statefile.emit(FINAL_GATE="cross-review")
+
+
+def _record_gate_check(
+    gate: dict[str, Any], command: str, passed: bool, detail: str, seconds: float
+) -> None:
+    """最終ゲートの検査 1 件を `checks` へ追記する。"""
     gate.setdefault("checks", []).append({
         "at": statefile.now(),
         "mode": gate["mode"],
+        "command": command,
         "status": "pass" if passed else "fail",
         "detail": detail,
+        "seconds": seconds,
     })
 
-    if passed:
-        gate["status"] = "passed"
-        statefile.save(path, state)
-        info(f"✅ 最終ゲートを通過しました（{detail}）")
-        statefile.emit(FINAL_GATE="passed")
-        return
 
-    limit = safe_int(state.get("max_fix_rounds"), 3)
-    if safe_int(gate.get("fix_rounds")) >= limit:
-        gate["status"] = "failed"
-        statefile.save(path, state)
-        info(
-            f"❌ 最終ゲートが通らないまま修正の上限 {limit} に達しました（{detail}）。"
-            "**既に push してあるため取り消しません。** 失敗として報告します"
-        )
-        statefile.emit(FINAL_GATE="failed")
-        sys.exit(1)
+def _gate_passed(
+    path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], detail: str
+) -> None:
+    gate["status"] = "passed"
+    statefile.save(path, state)
+    info(f"✅ 最終ゲートを通過しました（{detail}）")
+    statefile.emit(FINAL_GATE="passed")
 
+
+def _gate_limit_reached(
+    path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], detail: str, limit: int
+) -> None:
+    gate["status"] = "failed"
+    statefile.save(path, state)
+    info(
+        f"❌ 最終ゲートが通らないまま修正の上限 {limit} に達しました（{detail}）。"
+        "**既に push してあるため取り消しません。** 失敗として報告します"
+    )
+    statefile.emit(FINAL_GATE="failed")
+    sys.exit(1)
+
+
+def _gate_failing(
+    path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], detail: str, limit: int
+) -> None:
     gate["fix_rounds"] = safe_int(gate.get("fix_rounds")) + 1
     gate["status"] = "failing"
     # **修正の起点と担当をここで記録する。** 記録しないと `merge-final-fix` が範囲を
@@ -117,6 +178,15 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
         FINAL_GATE="failing", FINAL_FIX_IMPL=impl, FINAL_FIX_ROUND=gate["fix_rounds"]
     )
     sys.exit(2)
+
+
+def _baseline_command(state: dict[str, Any]) -> str:
+    return str((state.get("baseline_test") or {}).get("command") or "")
+
+
+def _round_test_differs(state: dict[str, Any]) -> bool:
+    """群の検証が全体のテストと違うコマンドで行われたか（#880）。"""
+    return round_test_command(state) != _baseline_command(state)
 
 
 def _final_fix_impl(state: dict[str, Any], gate: dict[str, Any]) -> str:
@@ -326,8 +396,8 @@ def cmd_merge_final_fix(args: argparse.Namespace) -> None:
 
 
 def _local_gate(state: dict[str, Any]) -> tuple[bool, str]:
-    """全体のテストを手元で実行する。"""
-    command = (state.get("baseline_test") or {}).get("command") or ""
+    """全体のテストを手元で実行する。**全体のテストを呼ぶのは `init` とここだけである。**"""
+    command = _baseline_command(state)
     work = str(state["worktrees"]["work"])
     timeout = safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT)
     code, timed_out = run_with_timeout(command, work, timeout)

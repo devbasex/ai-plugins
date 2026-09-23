@@ -93,6 +93,27 @@ def test_a_proposal_without_a_target_is_dropped(refactor):
     assert adopted == [] and deferred == []
 
 
+# ---------- 文書を対象にした提案は採らない（#723） ----------
+
+def test_a_proposal_targeting_a_markdown_section_is_deferred(refactor):
+    """`target` の `#` より前が `.md` の提案を、理由付きで見送る。
+
+    文書の振る舞いは文言そのものであり、固定すると後の整理が取り消される。
+    """
+    adopted, deferred = _merge(refactor, {
+        "codex": [tprop(target="plugins/ndf/skills/x/SKILL.md#手順")],
+    })
+    assert adopted == []
+    assert deferred[0]["target"] == "plugins/ndf/skills/x/SKILL.md#手順"
+    assert deferred[0]["defer_reason"] == "文書の文言を固定するテストは足さない"
+
+
+def test_a_proposal_whose_symbol_mentions_markdown_is_still_adopted(refactor):
+    """見るのは `#` より前のファイルだけ。シンボル側の `.md` は見ない。"""
+    adopted, _ = _merge(refactor, {"codex": [tprop(target="src/doc.py#render.md")]})
+    assert len(adopted) == 1
+
+
 def test_the_vocabulary_comes_from_the_existing_references(vocabulary):
     """`case` は現状固定テストの表、`level` はテストの階層から採る（決定 9）。"""
     assert list(vocabulary.TEST_CASES) == ["normal", "branch", "boundary", "error"]
