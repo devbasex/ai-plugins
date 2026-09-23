@@ -475,6 +475,17 @@ def test_context_agent_once_then_pass(tmp_path, state):
     assert denied(run(agent(tp, desc="実装: #829"), state))
 
 
+@pytest.mark.parametrize("desc", ["検査: 829", "取り込み: 829", "仕上げ: 829"])
+def test_context_agent_bare_issue_number_is_normalized(tmp_path, state, desc):
+    # 現状固定: description の課題番号が # を付けない裸の番号でも、案内は
+    # sed 's/^/#/' で # 付きへ整えられる。各入力は終了コード 0 の deny になり、
+    # 案内は /ndf:development-workflow #829 を示す（session を分けて 1 回目で拒否）。
+    tp = transcript(tmp_path, 250_000)
+    session = "sbare" + desc[:1]
+    reason = denied(run(agent(tp, desc=desc, session=session), state))
+    assert reason and "/ndf:development-workflow #829" in reason
+
+
 def test_context_guard_env(tmp_path, state):
     tp = transcript(tmp_path, 250_000)
     assert denied(run(skill(tp), state, {"NDF_CONTEXT_GUARD": "0"})) is None
