@@ -57,7 +57,7 @@
 | `refactor_lib/commands/gate.py` の `cmd_final_gate` / `_local_gate` / `_verify_final_fix_commits` | F1 F3 | 最終ゲートの判定は今のまま `baseline_test`。`workflow_step` が偽でも、`round_test` が `baseline_test` と違えば先に `_local_gate` を通す。通れば今のとおり cross-review へ渡し、落ちれば `--workflow-step` と同じ修正ラウンドへ入る。修正コミットの検証は `round_test`。最終ゲートの記録（`final_gate.checks` の各件）へ `command`・`seconds` を足す |
 | `refactor_lib/gitfacts.py` の `_kill_process_group` | F5 | SIGTERM の後の点検で、先に `proc.poll()` で親シェルを回収し、その後にグループの存否を `killpg(pgid, 0)` で見る。回収済みでグループが空なら戻る |
 | `refactor_lib/gitfacts.py`（新設の関数 `production_code_changes`） | F6 | `git diff --numstat --no-renames <base>...HEAD` から、本番コードのファイルと変更行を返す。rename は旧パスの削除と新パスの追加に分けて数える（`--no-renames` を付けないと `dir/{old.py => new.py}` の形になり、拡張子で判定できない）。本番コードの判定は `CODE_EXTENSIONS` と既存の `_is_test_path` |
-| `refactor_lib/scope.py`（新設の関数 `round_test_hint`・`round_test_roots`） | F1 F2 | `round_test_hint`: `--round-test` が無く、`baseline_search_roots` が空か、`--scope` のテストの置き場所より広いときに案内の 1 行を返す。`round_test_roots`: `--round-test` の引数から次の順で実行集合の起点を返す。(a) 直前の語が `--` で始まり `=` を含まない長いオプション（`--project`・`--directory`・`--rootdir` など）の値は起点に数えない。(b) 作業ディレクトリの根そのもの（`.` など、正規化して根になる語）は起点に数えない。(c) 残った語のうち、実在するディレクトリと実在するファイルの両方を起点にする（`baseline_search_roots` はファイル引数を無視するまま変えない）。`init` はこの起点で `--scope` のテストの置き場所を覆うかを判定する |
+| `refactor_lib/scope.py`（新設の関数 `round_test_hint`・`round_test_roots`） | F1 F2 | `round_test_hint`: `--round-test` が無く、`baseline_search_roots` が空か、`--scope` のテストの置き場所より広いときに案内の 1 行を返す。`round_test_roots`: `--round-test` の引数から次の順で実行集合の起点を返す。(a) 直前の語が `--` で始まり `=` を含まない長いオプション（`--project`・`--directory`・`--rootdir` など）の値は起点に数えない。(b) 作業ディレクトリの根そのもの（`.` など、正規化して根になる語）は起点に数えない。(c) 残った語のうち、実在するディレクトリと、テストの置き場所に当たる実在するファイル（`_is_test_path` が真）を起点にする。`bash scripts/run-scope-tests.sh` や `python scripts/run_tests.py` のようにテストの置き場所でないファイル（ラッパー・実行スクリプト）は起点に数えない（`baseline_search_roots` はファイル引数を無視するまま変えない）。起点が 1 つも残らなければ全体を覆うとみなす（ラッパーの中身は解析しない。範囲の外を走らせても最終ゲートの全体テストが見る）。`init` はこの起点で `--scope` のテストの置き場所を覆うかを判定する |
 | `refactor_lib/proposals.py` の `merge_test_proposals` の `reject` | F8 | `target` の `#` より前が `.md` で終わる提案を「文書の文言を固定するテストは足さない」で見送る |
 | `refactor_lib/verify.py`（新設の関数 `doc_wording_tests`）と `verify_apply_round` | F9 | テストのファイルの追加行に、追跡している `.md` のパスを指す文字列があれば、その群を失敗にする。追跡している `.md` の一覧は `git ls-files '*.md'` を 1 回読む |
 | `prompts/propose-tests.md` の「守ること」 | F8 | 1 項目を足す（下の「入出力の契約」） |
@@ -249,6 +249,14 @@ SIGTERM をグループへ送る
 `tmp_path / "a.md"` のように追跡していない名前は当たらない。`"README.md"` のように追跡している名前と同じ
 一時ファイルを使うテストは当たる（決定 9 で許す誤検知）。
 
+**定数と import の追跡:** 追加行のリテラルに加えて、次の名前を経由する場合も当たりとする。
+
+1. テストのファイルの変更の後の内容を AST で読み、モジュールの直下の代入のうち、右辺の文字列リテラルが追跡している `.md` に当たる名前を集める（例 `SKILL = ROOT / "SKILL.md"`）
+2. 同じテストのディレクトリの補助モジュールから `from <補助> import <名前>` した名前も、その補助モジュールで 1 と同じ判定をして集める
+3. 追加行が 1・2 で集めた名前を識別子として使っていれば当たりとする
+
+動的に組み立てたパス（`glob` の結果など）は追わない。
+
 失敗の理由: `文書の文言を固定するテストは足さない（<ファイル>: <リテラル>）`。`verify_apply_round` の
 `verify_test_changes` の直後で見る。
 
@@ -381,14 +389,14 @@ issue の境界の表に、棚卸で見つけた 3 つの形（P1〜P3）の扱�
 | AC1 | `tests/` に、`init --round-test X` で状態の `round_test.command == X`、省くと `baseline_test.command` と同じになり、省いたときに `init` のテストの実行が 1 回になるテスト |
 | AC2 | `verify-round` と修正の取り込みで、実行されたコマンドを差し替えた `run_with_timeout` で記録し、`round_test` だけが渡ることを確かめる |
 | AC3 | 単独起動と `--workflow-step` の両方で最終ゲートを通し、全体テストの呼び出しが 1 回ずつであることを確かめる |
-| AC4 | `--round-test "false"` と、テストが集まらないコマンド（終了コード 5）で `init` が終了コード 4 で止まる。範囲の置き場所の外を走らせる `--round-test` で止まる。`--round-test "pytest tests/services/test_one.py"` で `--scope tests/services` を渡すと止まる。`uv run --project . pytest tests/services/test_one.py` と `--scope tests/services` で止まる |
+| AC4 | `--round-test "false"` と、テストが集まらないコマンド（終了コード 5）で `init` が終了コード 4 で止まる。範囲の置き場所の外を走らせる `--round-test` で止まる。`--round-test "pytest tests/services/test_one.py"` で `--scope tests/services` を渡すと止まる。`uv run --project . pytest tests/services/test_one.py` と `--scope tests/services` で止まる。`bash scripts/run-scope-tests.sh` は止めない（起点なし）、`pytest tests/services/test_one.py` と `--scope tests/services` は止める |
 | AC5 | `round_test_hint` に、起点の無いコマンド・範囲より広い起点・範囲と同じ起点を渡し、前 2 つだけが案内を返す |
 | AC6 | `verify-round` の後の状態の `verifications[-1]["seconds"]` が 0 以上の数 |
 | AC7 | `round_test` を持たない状態ファイルで `verify-round` を通し、`baseline_test.command` が実行される |
 | AC9〜AC11 | `test_git_facts.py` に `exec sleep 30` を上限 1 秒で 2 秒以内に戻るテストを足す。既存の 3 件の待ちを縮め、合計の所要を `pytest --durations` で確かめる |
 | AC12〜AC14 | 一時リポジトリに、`.md` だけ・テストだけ・`.json` だけ・本番コード 10 行・11 行の差分を作り（変更を伴う rename（`a.py` → `b.py`、11 行以上）で「通す」を含む）、`assess` の終了コードと出力の 3 行を確かめる。`<base>` を解けないと終了コード 2 |
 | AC17 | `merge_test_proposals` に `target` が `SKILL.md#節` の提案を渡し、見送りに理由付きで入る |
-| AC18 | `doc_wording_tests` に、追跡している `.md` のパスのリテラル・末尾が一致するリテラル・追跡していない `a.md` を含む追加行を渡し、前 2 つだけが当たる。`verify_apply_round` がその理由で失敗を返す |
+| AC18 | `doc_wording_tests` に、追跡している `.md` のパスのリテラル・末尾が一致するリテラル・追跡していない `a.md` を含む追加行を渡し、前 2 つだけが当たる。既存の定数 `SKILL` を使う追加行・補助モジュールから import した定数を使う追加行が当たる。`verify_apply_round` がその理由で失敗を返す |
 | AC8・AC15・AC16・AC19c | 文書を読んで確かめる。文言を固定するテストは書かない |
 | AC19a | 実装の Pull Request 1 で、AST の洗い出し（`.md` を読み照合する関数。補助モジュールから import したパスの定数も追う）を削除の後に回し、出た関数がすべて「分類の規則」の残す行のどれかに当たることを本文の表で示す |
 | AC19b | 寄せる関数ごとに、見ていた参照を一時的に壊し、検査スクリプトが失敗を返すことを確かめた記録を本文に残す |
@@ -402,6 +410,6 @@ issue の境界の表に、棚卸で見つけた 3 つの形（P1〜P3）の扱�
 | 行数の上限 10 行の妥当性 | 初期値。#489（1 行）を飛ばせる値として置いた。構造改善を通した Pull Request の本番コードの変更行と、採用された項目の数の関係は測っていない。AC20 の後、飛ばした Pull Request の件数と合わせて振り返りで見直す |
 | 文書の中のリンクでないパスの実在 | `check-markdown-links.py` が見るのはリンクだけの見込み。寄せる関数のうち何件がこれに当たるかは数えていない。実装の Pull Request 1 で数えて、判定を足すかを決める |
 | 棚卸の概数 | 精査しきれていないファイルが残る。実装で関数ごとに分類し直すと、削る数は上下する |
-| `doc_wording_tests` の誤検知 | 追跡している `.md` と同じ名前の一時ファイルを使うテストを弾く。起きても群が取り消されるだけで、Pull Request に残らない方向に倒れる。どれだけ起きるかは測っていない |
+| `doc_wording_tests` の誤検知 | 追跡している `.md` と同じ名前の一時ファイルを使うテストを弾く。起きても群が取り消されるだけで、Pull Request に残らない方向に倒れる。どれだけ起きるかは測っていない。動的に組み立てたパスは追わない（提案の基準とレビューが見る） |
 | 群の検証の所要の中央値 60 秒（AC21） | 範囲のテストが数秒で終わる前提の上限。範囲にテストが多い Skill（`cross-review` など）では超えうる。超えたら AC21 の値ではなく範囲の決め方を見直す |
 | #892 #901 の実装との順序 | 実装の Pull Request 1 は #892 #901 の後に始める（上の「実装の分け方と順序」）。#892 #901 の実装が遅れたときに順序を入れ替えるかは conductor が決める |
