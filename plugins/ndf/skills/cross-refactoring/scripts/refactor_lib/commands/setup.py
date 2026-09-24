@@ -23,7 +23,7 @@ import statefile
 
 from .. import ABORT, die, info
 from ..gitfacts import run_with_timeout
-from .. import timeline
+from .. import clock, timeline
 from ..paths import (
     git_out,
     default_worktree_base,
@@ -32,6 +32,7 @@ from ..paths import (
     sh,
     state_path,
     tmp_dir_for,
+    work_dir,
 )
 from ..plan import PLAN_COMMENT, PLAN_FILE, PLAN_NONE, normalize_plan_file
 from ..scope import require_scope_covers_tests, round_test_hint
@@ -53,6 +54,8 @@ DEPRECATED_ARGS = ("max_test_rounds", "max_outer_rounds", "max_items_per_round",
                    "max_fix_rounds", "test_timeout")
 
 # 開始を記録するフェーズ（CLI を起動するもの）。
+PHASE_NAMES = ("propose", "plan", "add-tests", "implement", "fix", "final-fix")
+
 # 計画のフェーズより前（予算と実装担当を当て直してよい間）のフェーズ。
 BEFORE_PLAN = ("propose", "plan")
 
@@ -916,3 +919,40 @@ def _run_round_test(
         raise SystemExit(ABORT)
     info(f"✅ 着手前の範囲のテスト成功: {command}")
     return {"command": command, "status": "green", "checked_at": statefile.now()}
+
+
+def cmd_start_phase(args: argparse.Namespace) -> None:
+    """フェーズの開始を進行側の時計で記録し、監視の上限を返す（決定 8・決定 23、I1 I15）。
+
+    **記録済みなら書き換えない。** 再開で同じフェーズを起動し直しても、所要の起点は
+    最初の起動の時刻のままにする。修正（`fix` / `final-fix`）だけは起動のたびに起点を
+    書き直し、所要は取り込みが足し込む。
+
+    監視の上限（`PHASE_TIMEOUT`）は、状態ファイルの上限の表（`limits`）にあるその段の
+    終わりの時刻までの残り + 余裕である。無進捗の許容も同じ値を渡す（決定 24）。CLI の
+    上限（`cli_timeout`）は監視の上限 + 余裕で、`launch-cli.sh` が読む。
+    """
+    path, state = load_state(args.id)
+    phase = args.phase
+    if phase not in PHASE_NAMES:
+        die(f"未知のフェーズです: {phase}（{' / '.join(PHASE_NAMES)}）")
+    record = state.setdefault("phases", {}).setdefault(phase, {})
+    now = statefile.now()
+    if phase in ("fix", "final-fix") or not record.get("started_at"):
+        record.setdefault("started_at", now)
+        record["launch_started_at"] = now
+        record["base_sha"] = git_out(work_dir(state), ["rev-parse", "HEAD"])
+    limits_table = timeline.limits_of(state)
+    end = clock.parse(limits_table.get(timeline.PHASE_END_KEYS[phase]))
+    timeout = ""
+    if end is not None:
+        margin = int(limits_table["margin_seconds"])
+        seconds = timeline.phase_timeout(end, clock.now(), margin)
+        record["timeout"] = seconds
+        record["cli_timeout"] = seconds + margin
+        timeout = str(seconds)
+    # 最終ゲートの修正は状態の段（`final`）を変えない。再開の地点が狂う。
+    if phase != "final-fix":
+        state["phase"] = phase
+    statefile.save(path, state)
+    statefile.emit(PHASE_TIMEOUT=timeout)
