@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from serena_lsp_testlib import run_json
-from serena_lsp import table
+from serena_lsp import check, table
 
 
 def _project(root: Path, languages):
@@ -90,6 +90,57 @@ def test_local_override_languages_are_checked(tmp_path):
     (root / ".serena/project.local.yml").write_text("language_servers:\n- php\n")
     code, out, _ = _check(root, _home(tmp_path, []), _bin(tmp_path))
     assert {m["language"] for m in out["missing"]} == {"php"}
+
+
+def test_missing_items_skips_unknown_language(tmp_path, monkeypatch):
+    root = _project(tmp_path / "r", ["nosuchlang", "python"])
+    monkeypatch.setenv("HOME", str(_home(tmp_path, [])))
+    monkeypatch.setenv("PATH", str(_bin(tmp_path)))
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+
+    missing = check.missing_items(root, "claude-code")
+
+    assert sorted((item["language"], item["item"]) for item in missing) == [
+        ("python", "binary"),
+        ("python", "plugin"),
+    ]
+
+
+def test_typescript_check_is_skipped_when_language_server_is_missing(tmp_path, monkeypatch):
+    root = _project(tmp_path / "r", ["typescript"])
+    monkeypatch.setenv("HOME", str(_home(tmp_path, ["typescript-lsp@claude-plugins-official"])))
+    monkeypatch.setenv("PATH", str(_bin(tmp_path)))
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+
+    missing = check.missing_items(root, "claude-code")
+
+    assert [(item["language"], item["item"]) for item in missing] == [("typescript", "binary")]
+
+
+def test_typescript_is_missing_when_package_cannot_be_found(tmp_path, monkeypatch):
+    root = _project(tmp_path / "r", ["typescript"])
+    monkeypatch.setenv("HOME", str(_home(tmp_path, ["typescript-lsp@claude-plugins-official"])))
+    monkeypatch.setenv("PATH", str(_bin(tmp_path, "typescript-language-server")))
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+
+    missing = check.missing_items(root, "claude-code")
+
+    assert [item["item"] for item in missing] == ["typescript_major_5"]
+
+
+def test_typescript_is_missing_when_package_json_is_broken(tmp_path, monkeypatch):
+    root = _project(tmp_path / "r", ["typescript"])
+    bindir = _bin(tmp_path, "typescript-language-server")
+    pkg = bindir / "node_modules/typescript"
+    pkg.mkdir(parents=True)
+    (pkg / "package.json").write_text("{broken")
+    monkeypatch.setenv("HOME", str(_home(tmp_path, ["typescript-lsp@claude-plugins-official"])))
+    monkeypatch.setenv("PATH", str(bindir))
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+
+    missing = check.missing_items(root, "claude-code")
+
+    assert [item["item"] for item in missing] == ["typescript_major_5"]
 
 
 @pytest.mark.parametrize("version,flagged", [("7.0.2", True), ("5.9.3", False)])
