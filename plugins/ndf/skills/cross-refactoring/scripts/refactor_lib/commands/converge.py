@@ -2,8 +2,9 @@
 
 **検証は HEAD で項目ごとの限ったテストを走らせる**（決定 14）。同じ語の並びの項目は
 1 回だけ走らせて結果を共有する。全体のテストは、危険の印が立ったときに検証の中で
-1 度だけ走らせる。落ちたら印を持つ項目を取り消し、検証の中では走らせ直さない
-（決定 15。取り消した後の HEAD は最終ゲートが確かめる）。
+1 度だけ走らせる。落ちたら落ちたテストだけを走らせ直して揺れ・元からの失敗・変更が
+原因を見分け、変更が原因なら修正へ回す。締め切りか修正の上限に達しても通らなければ、
+印の項目を新しい順に 1 件ずつ取り消し、通った時点で止める（決定 22。決定 15 を改めた）。
 
 | 返す値 | 意味 | 駆動がすること |
 | --- | --- | --- |
@@ -21,7 +22,7 @@ from typing import Any, Optional
 import jev
 import statefile
 
-from .. import budget, clock, danger, info
+from .. import budget, clock, danger, info, triage
 from ..gitfacts import (
     revert_range,
     collect_commit_facts,
@@ -83,6 +84,8 @@ def _run_limited(state: dict[str, Any], items: list[dict[str, Any]]) -> None:
         passed, log = results[key]
         item["status"] = VERIFIED if passed else FAILING
         item["last_log"] = str(log)
+        # 全体のテストの直しで渡したコマンドは、限ったテストの結果で置き換わる。
+        item.pop("whole_test_command", None)
         item["verify_runs"] = int(item.get("verify_runs") or 0) + 1
 
 
@@ -93,12 +96,14 @@ def _newest_first(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _revert_shared(
     path: pathlib.Path, state: dict[str, Any], group: list[dict[str, Any]], reason: str,
-) -> None:
+    command: Optional[list[str]] = None,
+) -> bool:
     """同じ語の並びを共有した項目を、新しい方から 1 件ずつ取り消す（AC15）。
 
     取り消すたびに共有したコマンドを走らせ直し、通った時点で止める。通る前に取り消した
     項目だけが見送り（`reverted`）になり、古い項目のコミットは残る。走らせ直すのは
-    限ったテストで、全体のテストではない。
+    限ったテスト（`command` を渡せば全体のテストで落ちたテストだけ）で、全体のテストではない。
+    通った時点で止めたら真、全件を取り消したら偽を返す。
     """
     remaining = _newest_first(group)
     while remaining:
@@ -107,32 +112,46 @@ def _revert_shared(
         drop(path, state, [target["id"]], reason)
         remaining = [i for i in remaining if i.get("status") in (FAILING, IMPLEMENTED, VERIFIED)]
         if not remaining:
-            return
-        if _run(state, list(remaining[0].get("command") or []), _log_path(state, remaining[0]["id"])):
+            return False
+        words = command if command is not None else list(remaining[0].get("command") or [])
+        if _run(state, list(words), _log_path(state, remaining[0]["id"])):
             for item in remaining:
                 item["status"] = VERIFIED
-            return
+            return True
+    return False
+
+
+def _fix_stop(state: dict[str, Any], group: list[dict[str, Any]]) -> Optional[str]:
+    """この群の修正を打ち切る理由（`limit` / `time`）。続けられれば `None`。
+
+    **限ったテストの修正と全体のテストの直しが同じ判定を使う**（決定 22）。締め切りは
+    `budget.fix_time_left` と控えの `fix`、上限は `--max-fix-rounds` である。
+    """
+    limit = safe_int(state.get("max_fix_rounds"), DEFAULT_MAX_FIX_ROUNDS)
+    if any(int(i.get("fix_count") or 0) >= limit for i in group):
+        return "limit"
+    reserve = (state.get("plan") or {}).get("reserve") or {}
+    left = budget.fix_time_left(clock.parse(state["started_at"]), int(state["budget_minutes"]),
+                                reserve, clock.now())
+    return "time" if left < float(reserve.get("fix") or 0.0) else None
+
+
+def _stop_reason(state: dict[str, Any], stop: str, what: str) -> str:
+    limit = safe_int(state.get("max_fix_rounds"), DEFAULT_MAX_FIX_ROUNDS)
+    return (f"修正の上限 {limit} 回に達しても{what}が通らなかった" if stop == "limit"
+            else "修正に使える時間が残っていなかった")
 
 
 def _give_up(path: pathlib.Path, state: dict[str, Any]) -> None:
     """修正の上限か残り時間が尽きた項目を取り消す（設計の「検証と修正の繰り返し」2）。"""
-    limit = safe_int(state.get("max_fix_rounds"), DEFAULT_MAX_FIX_ROUNDS)
-    plan = state.get("plan") or {}
-    reserve = plan.get("reserve") or {}
-    left = budget.fix_time_left(clock.parse(state["started_at"]), int(state["budget_minutes"]),
-                                reserve, clock.now())
-    no_time = left < float(reserve.get("fix") or 0.0)
     groups: dict[tuple[str, ...], list[dict[str, Any]]] = {}
     for item in live_items(state):
         if item.get("status") == FAILING:
             groups.setdefault(tuple(item.get("command") or []), []).append(item)
     for group in groups.values():
-        exhausted = any(int(i.get("fix_count") or 0) >= limit for i in group)
-        if not (exhausted or no_time):
-            continue
-        reason = (f"修正の上限 {limit} 回に達しても限ったテストが通らなかった" if exhausted
-                  else "修正に使える時間が残っていなかった")
-        _revert_shared(path, state, group, reason)
+        stop = _fix_stop(state, group)
+        if stop:
+            _revert_shared(path, state, group, _stop_reason(state, stop, "限ったテスト"))
 
 
 # ---------- 危険の印 ----------
@@ -205,11 +224,18 @@ def _flag_items(state: dict[str, Any]) -> list[str]:
     return sorted(flags)
 
 
-def _whole_test(path: pathlib.Path, state: dict[str, Any], flags: list[str]) -> None:
-    """危険の印が立ったら全体のテストを 1 度だけ走らせる（AC13 AC14）。落ちたら印の項目を取り消す。"""
+def _whole_test(path: pathlib.Path, state: dict[str, Any], flags: list[str]) -> bool:
+    """危険の印が立ったら全体のテストを 1 度だけ走らせる（AC13 AC14）。
+
+    落ちたら落ちたテストを見分け（決定 22）、変更が原因のものがあれば修正へ回す。
+    修正へ回したら真を返す。直しの途中（`resolution: fixing`）なら、全体のテストは
+    走らせず、落ちたテストだけを走らせ直す。
+    """
     record = state.setdefault("whole_test", {})
+    if record.get("resolution") == "fixing":
+        return _recheck_whole(path, state, record)
     if not flags or record.get("ran"):
-        return
+        return False
     command = str((state.get("baseline_test") or {}).get("command") or "")
     work = str(state["worktrees"]["work"])
     info(f"⚠ 危険の印（{', '.join(flags)}）が立ったため、全体のテストを 1 度走らせます: {command}")
@@ -227,14 +253,84 @@ def _whole_test(path: pathlib.Path, state: dict[str, Any], flags: list[str]) -> 
     statefile.save(path, state)
     if passed:
         info("✅ 全体のテストが通りました")
-        return
+        return False
     flagged = [i for i in _newest_first(live_items(state)) if i.get("danger")]
+    record["items"] = [i["id"] for i in flagged]
+    record.update(triage.classify(state, log, timed_out))
+    statefile.save(path, state)
+    if record.get("unparsed_reason"):
+        _revert_all_flagged(path, state, record, flags, flagged)
+        return False
+    info(f"🔎 落ちたテスト {len(record['failed_tests'])} 件: 揺れ {len(record['flaky'])} / "
+         f"元からの失敗 {len(record['preexisting'])} / 変更が原因 {len(record['caused'])}")
+    if not record["caused"]:
+        record["resolution"] = "kept"
+        info("✅ 変更が原因の失敗はありません。印の項目は取り消しません（最終ゲートが全体のテストを走らせます）")
+        return False
+    record["resolution"] = "fixing"
+    return _fix_or_narrow(path, state, record, pathlib.Path(record["rerun_log"]))
+
+
+def _revert_all_flagged(
+    path: pathlib.Path, state: dict[str, Any], record: dict[str, Any], flags: list[str],
+    flagged: list[dict[str, Any]],
+) -> None:
+    """落ちたテストを取り出せないときは、見分けずに印の項目をまとめて取り消す（決定 15 のまま）。"""
     reason = f"危険の印（{', '.join(flags)}）で走らせた全体のテストが落ちた"
     for item in flagged:
         item["failure_reason"] = reason
     drop(path, state, [i["id"] for i in flagged], reason)
     record["reverted"] = True
+    record["resolution"] = "reverted_all"
+    info(f"⚠ {record['unparsed_reason']}ため、見分けずにまとめて取り消します")
     info(f"↩ {dropped_line(state, len(flagged))}。取り消した後の HEAD は最終ゲートが全体のテストで確かめます")
+
+
+def _whole_items(state: dict[str, Any], record: dict[str, Any]) -> list[dict[str, Any]]:
+    ids = set(record.get("items") or [])
+    return [i for i in live_items(state) if i["id"] in ids]
+
+
+def _fix_or_narrow(
+    path: pathlib.Path, state: dict[str, Any], record: dict[str, Any], log: pathlib.Path,
+) -> bool:
+    """締め切りと上限の内なら印の項目を修正へ回し（真）、外なら絞って取り消す（偽）。
+
+    **1 回の修正 = 実装担当の 1 起動である。** 次の試行の前にここで時計を見るため、
+    締め切りを担当の申告に頼らない。
+    """
+    items = _whole_items(state, record)
+    stop = _fix_stop(state, items) if items else "limit"
+    if stop is None:
+        for item in items:
+            item["status"] = FAILING
+            item["last_log"] = str(log)
+            item["whole_test_command"] = list(record.get("rerun_command") or [])
+        info(f"🔧 変更が原因の失敗を直しに回します（印の項目 {len(items)} 件）")
+        return True
+    reason = f"危険の印で走らせた全体のテストで落ちたテストが通らないまま、{_stop_reason(state, stop, '落ちたテスト')}"
+    passed = _revert_shared(path, state, items, reason, command=list(record.get("rerun_command") or []))
+    record["reverted"] = True
+    record["resolution"] = "narrowed"
+    info(f"↩ 印の項目を新しい順に取り消しました（{'落ちたテストが通った時点で止めた' if passed else '全件'}）。"
+         f"{plan_line(state)}")
+    return False
+
+
+def _recheck_whole(path: pathlib.Path, state: dict[str, Any], record: dict[str, Any]) -> bool:
+    """直した後に、落ちたテストだけを走らせ直す。通れば残し、通らなければ次の試行か絞り込みへ。"""
+    items = _whole_items(state, record)
+    if not items:
+        record["resolution"] = "narrowed"
+        return False
+    log = pathlib.Path(state["tmp_dir"]) / "verify-whole-rerun.log"
+    if _run(state, list(record.get("rerun_command") or []), log):
+        record["resolution"] = "fixed"
+        for item in items:
+            item.pop("whole_test_command", None)
+        info("✅ 変更が原因で落ちたテストが、直した後に通りました")
+        return False
+    return _fix_or_narrow(path, state, record, log)
 
 
 # ---------- verify ----------
@@ -266,20 +362,13 @@ def cmd_verify(args: argparse.Namespace) -> None:
 
     failing = [i for i in live_items(state) if i.get("status") == FAILING]
     if failing:
-        state["fix"] = {
-            "items": [i["id"] for i in failing],
-            "base_sha": git_out(str(state["worktrees"]["work"]), ["rev-parse", "HEAD"]),
-            "attempt": int((state.get("fix_stats") or {}).get("launches") or 0) + 1,
-        }
-        _account(state, started)
-        statefile.save(path, state)
-        info(f"❌ 限ったテストが落ちた項目 {len(failing)} 件を修正へ回します")
-        for line in item_lines(state, [i["id"] for i in failing]):
-            info(f"   {line}")
-        statefile.emit(VERIFY="fix")
+        _to_fix(path, state, failing, started, "限ったテストが落ちた項目")
         return
 
-    _whole_test(path, state, _flag_items(state))
+    if _whole_test(path, state, _flag_items(state)):
+        failing = [i for i in live_items(state) if i.get("status") == FAILING]
+        _to_fix(path, state, failing, started, "全体のテストを落とした印の項目")
+        return
     _account(state, started)
     finish_phase(state, "verify")
     state["phase"] = "final"
@@ -290,6 +379,24 @@ def cmd_verify(args: argparse.Namespace) -> None:
     for line in item_lines(state, kept):
         info(f"   {line}")
     statefile.emit(VERIFY="done")
+
+
+def _to_fix(
+    path: pathlib.Path, state: dict[str, Any], failing: list[dict[str, Any]], started: float,
+    what: str,
+) -> None:
+    """落ちた項目を修正へ回す（`VERIFY=fix`）。修正の起点は今の HEAD。"""
+    state["fix"] = {
+        "items": [i["id"] for i in failing],
+        "base_sha": git_out(str(state["worktrees"]["work"]), ["rev-parse", "HEAD"]),
+        "attempt": int((state.get("fix_stats") or {}).get("launches") or 0) + 1,
+    }
+    _account(state, started)
+    statefile.save(path, state)
+    info(f"❌ {what} {len(failing)} 件を修正へ回します")
+    for line in item_lines(state, [i["id"] for i in failing]):
+        info(f"   {line}")
+    statefile.emit(VERIFY="fix")
 
 
 def _account(state: dict[str, Any], started: float) -> None:

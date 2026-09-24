@@ -47,7 +47,7 @@ _MODULES = (
     "commands.converge", "commands.gate", "commands.implement", "commands.plan",
     "commands.propose", "commands.report", "commands.setup",
     "allocation", "budget", "clock", "danger", "gitfacts", "intake", "items",
-    "outbound", "paths", "phases", "plan", "proposals", "scope", "testcmd", "undo",
+    "outbound", "paths", "phases", "plan", "proposals", "scope", "testcmd", "triage", "undo",
     "verify", "vocabulary",
 )
 

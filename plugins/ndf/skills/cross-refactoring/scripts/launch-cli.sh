@@ -134,9 +134,10 @@ case "$PHASE" in
     ;;
   fix)
     # 落ちた項目だけ。**同じ語の並びを共有した項目はまとめて 1 つの修正の対象**になる。
+    # 全体のテストで落ちた項目（決定 22）は、落ちたテストだけを走らせ直すコマンドを渡す。
     ITEMS_JSON=$(jq '[.items[] | select(.status == "failing")
       | {item_id: .id, path, symbol, technique, plan, fix_count,
-         test_command: (.command | join(" ")), test_log: .last_log}]' "$STATE")
+         test_command: ((.whole_test_command // .command) | join(" ")), test_log: .last_log}]' "$STATE")
     ;;
   *)
     ITEMS_JSON='[]'

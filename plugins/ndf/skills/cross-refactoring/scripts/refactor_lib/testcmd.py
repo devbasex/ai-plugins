@@ -196,3 +196,61 @@ def limited_command(
         if words:
             return words, "round_test"
     return None, "none"
+
+
+# ---------- 落ちたテストの取り出しと走らせ直し（#933 決定 22 / I14） ----------
+
+# pytest の末尾の要約（`-q` でも既定で出る）の行頭。`ERROR: file or directory not found`
+# のように `:` が続く行は落ちたテストではないため、空白までを含めて見る。
+_SUMMARY_PREFIXES = ("FAILED ", "ERROR ")
+
+
+def _node_of(rest: str) -> str:
+    """要約の 1 行から ID を切り出す。理由は ` - ` の後ろに付く。
+
+    パラメータの値が ` - ` を含むこと（`test_p[c - d]`）があるため、角括弧の対が
+    閉じた位置の ` - ` だけを区切りと読む。
+    """
+    start = 0
+    while True:
+        pos = rest.find(" - ", start)
+        if pos < 0:
+            return rest.strip()
+        head = rest[:pos]
+        if head.count("[") == head.count("]"):
+            return head.strip()
+        start = pos + 1
+
+
+def failed_nodes(output: str) -> list[str]:
+    """pytest の出力の要約から、落ちたテスト（`FAILED` / `ERROR`）の ID を出た順に返す。
+
+    収集の失敗はファイルの単位（`ERROR tests/test_b.py`）で出る。見つからなければ空。
+    """
+    found: list[str] = []
+    for line in str(output or "").splitlines():
+        for prefix in _SUMMARY_PREFIXES:
+            if line.startswith(prefix):
+                node = _node_of(line[len(prefix):])
+                if node and node not in found:
+                    found.append(node)
+    return found
+
+
+def rerun_command(command: str, nodes: list[str], work: str) -> Optional[list[str]]:
+    """全体のテストの対象を落ちたテストの ID へ差し替えた語の並び。pytest でなければ `None`。
+
+    **取り出しは pytest の要約の形だけを確かめてある。** jest / vitest の出力の形は
+    確かめていないため、ここで `None` を返し、呼ぶ側は見分けと直しを行わない。
+    作業ディレクトリの根（`.`）は `build` が対象の語に数えないため先に除く（残すと
+    全体を走らせ直す）。
+    """
+    words = _split(command)
+    if not words:
+        return None
+    idx = runner_index(words)
+    if idx is None or words[idx] != "pytest":
+        return None
+    kept = [word for i, word in enumerate(words)
+            if not (i > idx and os.path.normpath(word) == "." and words[i - 1] not in VALUE_OPTIONS)]
+    return build(shlex.join(kept), list(nodes), work)

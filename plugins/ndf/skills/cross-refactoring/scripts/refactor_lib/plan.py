@@ -146,6 +146,17 @@ def normalize_plan_file(value: Optional[str]) -> str:
     return normalized
 
 
+def baseline_line(baseline: dict[str, Any]) -> str:
+    """着手前の全体のテストの結果（通過か失敗・秒・HEAD の短い SHA）。報告と改修計画が共有する。
+
+    危険の印の全体のテストが落ちたとき、変更が原因か元からの失敗かを読む基準になる。
+    """
+    status = {"green": "通過", "red": "失敗"}.get(str(baseline.get("status") or ""), "—")
+    seconds = baseline.get("seconds")
+    head = str(baseline.get("head") or "")[:7] or "—"
+    return f"{status}（{'—' if seconds is None else f'{seconds} 秒'} / HEAD {head}）"
+
+
 def format_plan(state: dict[str, Any]) -> str:
     """改修計画の本文を組み立てる。**同じ状態からは同じ本文が出る。**
 
@@ -163,6 +174,7 @@ def format_plan(state: dict[str, Any]) -> str:
         "",
         f"- 対象範囲: {', '.join(state.get('target_scope') or []) or '（未指定）'}",
         f"- 着手前のテスト: {baseline.get('command') or '（未指定）'}",
+        f"- 着手前の全体のテストの結果: {baseline_line(baseline)}",
         f"- 想定最大時間: {state.get('budget_minutes')} 分"
         f" / 計画の時点で使えた時間: {plan.get('available_minutes', '—')} 分",
         f"- 実装担当: {state.get('implementer') or '—'}",

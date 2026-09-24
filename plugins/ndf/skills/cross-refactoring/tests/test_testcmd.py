@@ -125,3 +125,51 @@ def test_a_test_the_item_adds_may_be_a_target_before_it_exists(testcmd, work):
     assert testcmd.limited_command(base, ["tests/unit/test_new.py"], w,
                                    ["tests/unit/test_new.py"]) == (
         ["pytest", "-q", "tests/unit/test_new.py"], "targets")
+
+
+# ---------- 全体のテストで落ちたテストの取り出しと走らせ直し（#933 I14） ----------
+
+# pytest 9 の `-q` の末尾の要約（実際に走らせて写した形）。xdist の有無・収集の失敗・
+# 値に ` - ` を含むパラメータの 3 つを含む。
+PYTEST_SUMMARY = """\
+=========================== short test summary info ============================
+FAILED tests/test_a.py::test_p[a b] - AssertionError: assert 'a b' == 'x'
+FAILED tests/test_a.py::test_bad - assert 1 == 2
+FAILED tests/test_a.py::test_p[c - d] - AssertionError: assert 'c - d' == 'x'
+ERROR tests/test_b.py - ImportError while importing test module '/tmp/claude-...
+ERROR tests/test_a.py::test_err - RuntimeError: x
+ERROR tests/test_c.py
+3 failed, 1 passed, 2 errors in 0.20s
+"""
+
+
+def test_failed_nodes_reads_the_pytest_summary(testcmd):
+    assert testcmd.failed_nodes(PYTEST_SUMMARY) == [
+        "tests/test_a.py::test_p[a b]",
+        "tests/test_a.py::test_bad",
+        "tests/test_a.py::test_p[c - d]",
+        "tests/test_b.py",
+        "tests/test_a.py::test_err",
+        "tests/test_c.py",
+    ]
+
+
+def test_failed_nodes_ignores_other_error_lines(testcmd):
+    """`ERROR: file or directory not found` は落ちたテストではない。"""
+    assert testcmd.failed_nodes("ERROR: file or directory not found: x\n\n") == []
+
+
+@pytest.mark.parametrize("command, expected", [
+    ("pytest -q tests", ["pytest", "-q", "tests/unit/test_a.py::test_x"]),
+    ("pytest . -q -n 4", ["pytest", "-q", "-n", "4", "tests/unit/test_a.py::test_x"]),
+    ("uv run --with pytest pytest -q", ["uv", "run", "--with", "pytest", "pytest", "-q",
+                                        "tests/unit/test_a.py::test_x"]),
+])
+def test_rerun_command_runs_only_the_failed_tests(testcmd, work, command, expected):
+    (work / "tests").mkdir(exist_ok=True)
+    assert testcmd.rerun_command(command, ["tests/unit/test_a.py::test_x"], str(work)) == expected
+
+
+@pytest.mark.parametrize("command", ["npx jest", "vitest run", "make test", "env pytest -q"])
+def test_rerun_command_is_none_outside_pytest(testcmd, work, command):
+    assert testcmd.rerun_command(command, ["tests/unit/test_a.py"], str(work)) is None

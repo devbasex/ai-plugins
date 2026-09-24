@@ -896,8 +896,10 @@ def _run_baseline_test(
         )
     info(f"✅ 着手前のテスト成功: {command}（{seconds} 秒）")
     # **所要を残す。** 危険の印と最終ゲートの全体のテストの控えを、この秒から見積もる。
+    # **HEAD も残す。** 危険の印の全体のテストが落ちたとき、元からの失敗かをこの SHA で
+    # 見分け（決定 22）、報告と改修計画に基準として出す。
     return {"command": command, "status": status, "checked_at": statefile.now(),
-            "seconds": seconds}
+            "seconds": seconds, "head": git_out(str(work), ["rev-parse", "HEAD"])}
 
 
 def _run_round_test(

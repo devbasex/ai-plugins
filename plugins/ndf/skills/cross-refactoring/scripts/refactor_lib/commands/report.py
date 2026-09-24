@@ -14,6 +14,7 @@ from .. import allocation, clock, info
 from ..items import item_label
 from ..measure import summary_extra
 from ..outbound import plan_reference
+from ..plan import baseline_line
 from ..paths import load_state
 from ..vocabulary import DEFER_REASONS
 
@@ -133,9 +134,10 @@ def _print_header(state: dict[str, Any]) -> None:
           f" / モデル: {models_lib.label((state.get('implementer_model') or {}).get('requested'))}")
     jev_line = "使った" if judge.get("kind") == "jev" else f"使わなかった（{judge.get('reason')}）"
     print(f"- 判断に Jev を: {jev_line} / 呼び出しの失敗 {judge.get('failures', 0)} 回")
+    print(f"- 着手前の全体のテスト: {baseline_line(state.get('baseline_test') or {})}")
     if whole.get("ran"):
         print(f"- 検証の中の全体のテスト: 走らせた（印 {', '.join(whole.get('flags') or [])} / "
-              f"{whole.get('status')}{' / 印の項目を取り消した' if whole.get('reverted') else ''}）")
+              f"{whole.get('status')}{_whole_detail(whole)}）")
     else:
         print("- 検証の中の全体のテスト: 走らせなかった（危険の印が立たなかった）")
     print(f"- 最終ゲート: {gate.get('mode') or '—'}（{gate.get('status') or '未実行'}"
@@ -143,6 +145,30 @@ def _print_header(state: dict[str, Any]) -> None:
           f" / 修正 {gate.get('fix_rounds', 0)} 回）")
     print(f"- 配分テーブル: {(state.get('plan') or {}).get('table_source') or '—'}")
     print(f"- 改修計画: {plan_reference(state)}")
+
+
+# 全体のテストが落ちたときの結末（決定 22）。
+_RESOLUTIONS = {
+    "kept": "変更が原因の失敗は無く、取り消さなかった",
+    "fixing": "直しの途中",
+    "fixed": "直して通った",
+    "narrowed": "直らず、印の項目を新しい順に取り消した",
+    "reverted_all": "落ちたテストを取り出せず、印の項目をまとめて取り消した",
+}
+
+
+def _whole_detail(whole: dict[str, Any]) -> str:
+    """落ちたときの見分けと結末。取り出せなかったときは理由を添える。"""
+    if whole.get("status") != "fail":
+        return ""
+    if not whole.get("resolution"):
+        return " / 印の項目を取り消した" if whole.get("reverted") else ""
+    counts = ""
+    if whole.get("failed_tests") is not None:
+        counts = (f" / 揺れ {len(whole.get('flaky') or [])}・元からの失敗 "
+                  f"{len(whole.get('preexisting') or [])}・変更が原因 {len(whole.get('caused') or [])}")
+    why = f"（{whole['unparsed_reason']}）" if whole.get("unparsed_reason") else ""
+    return f"{counts} / {_RESOLUTIONS.get(whole['resolution'], whole['resolution'])}{why}"
 
 
 def _phase_table(state: dict[str, Any]) -> str:

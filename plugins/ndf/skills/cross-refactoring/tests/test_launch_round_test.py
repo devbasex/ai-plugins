@@ -87,3 +87,25 @@ def test_final_fix_runs_the_whole_suite(tmp_path):
     text = _prompt(tmp_path, "final-fix")
     assert BASELINE in text
     assert " ".join(ITEM_COMMAND) not in text
+
+
+def test_fix_of_a_whole_test_failure_runs_only_the_failed_tests(tmp_path):
+    """全体のテストで落ちた項目（決定 22）は、落ちたテストだけを走らせ直すコマンドを受け取る。"""
+    work = tmp_path / "work"
+    for name in ("work", "codex"):
+        (tmp_path / name).mkdir(exist_ok=True)
+    item = {**_item("failing"), "whole_test_command": ["pytest", "-q", "tests/t.py::test_whole"]}
+    state_path = make_state_v2(tmp_path, work, runtimes=["codex", "kiro"],
+                               baseline_test={"command": BASELINE, "status": "green"},
+                               items=[item])
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "codex").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    (bin_dir / "codex").chmod(0o755)
+    subprocess.run([str(LAUNCH), "codex", "fix", "130"],
+                   env={**os.environ, "CROSS_REFACTORING_TMP_DIR": str(state_path.parent),
+                        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"},
+                   check=True, capture_output=True, text=True)
+    text = (state_path.parent / "codex-fix-rf130-prompt.md").read_text(encoding="utf-8")
+    assert "pytest -q tests/t.py::test_whole" in text
+    assert " ".join(ITEM_COMMAND) not in text
