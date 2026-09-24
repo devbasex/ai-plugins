@@ -99,6 +99,11 @@ def _num(name: str, default: float) -> float:
         return default
 
 
+def quiet_seconds() -> float:
+    """静まりの秒数（`NDF_RELAY_QUIET`）。切り替えの実際の待ちと、区間の切れ目の告知の両方が読む。"""
+    return _num("NDF_RELAY_QUIET", 5)
+
+
 # ---------------------------------------------------------------- 共通
 
 
@@ -652,7 +657,7 @@ class Relay:
         self.halted = False
         self.exited = None
         self.saw_question = False
-        self.quiet = _num("NDF_RELAY_QUIET", 5)
+        self.quiet = quiet_seconds()
         self.lock_fd = os.open(self.path(LOCK_FILE), os.O_RDWR | os.O_CREAT, 0o600)
         fcntl.flock(self.lock_fd, fcntl.LOCK_EX)
         with open(self.path(PID_FILE), "w") as f:
@@ -1723,7 +1728,7 @@ def notice_lines() -> tuple[str, str]:
         d = os.environ.get("NDF_RELAY_DIR")
         if not (d and relay_running(d) and is_direct_child(d)):
             return "outside", outside
-        quiet = _num("NDF_RELAY_QUIET", 5)
+        quiet = quiet_seconds()
     except Exception:
         return "outside", outside
     if quiet == float("inf"):
