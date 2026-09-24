@@ -103,6 +103,27 @@ def test_the_report_does_not_list_the_deferred_breakdown(refactor, tmp_path,
     assert COMMENT_URL in out, "改修計画の生の URL が無い"
 
 
+def test_the_report_counts_each_item_once(refactor, tmp_path, env_tmp_dir, capsys):
+    """採用・取り消し・見送りの和が項目の数を超えない（3042be53 の二重計上の回帰）。
+
+    見送った項目（`status: deferred`、`deferred_items` にもある）は見送りにだけ数え、
+    取り消しに数えない。
+    """
+    path, _ = _state(tmp_path, items=[
+        _item(id="I-001", status="verified"),
+        _item(id="I-002", status="reverted", failure_reason="検証の失敗"),
+        _item(id="I-003", status="deferred", failure_reason="締め切り"),
+    ], deferred_items=[{
+        "item_id": "I-003", "path": "src/foo.py", "symbol": "Foo.handle",
+        "smell": "long_method", "defer_reason": "not_done", "detail": "締め切り",
+    }])
+    env_tmp_dir(path)
+    refactor.cmd_report(type("A", (), {"id": 130, "metrics": False})())
+    out = capsys.readouterr().out
+    assert "採用: 1 件 / 取り消し: 1 件 / 見送り: 1 件" in out
+    assert "not_done 1" in out
+
+
 def test_the_report_names_the_plan_in_its_header(refactor, tmp_path,
                                                  env_tmp_dir, capsys):
     path, _ = _state(tmp_path)
