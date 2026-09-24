@@ -230,6 +230,8 @@ rf_eval init "$PR" --scope $SCOPE \
         ${HOST:+--host "$HOST"} ${EXCLUDE:+--exclude "$EXCLUDE"} ${INCLUDE:+--include "$INCLUDE"} \
         ${REQUIRE_ALL:+--require-all} ${MAX_FIX:+--max-fix-rounds "$MAX_FIX"} \
         ${CI_CHECK:+--ci-check "$CI_CHECK"} ${WORKFLOW_STEP:+--workflow-step} \
+        ${SEVERITY:+--severity-threshold "$SEVERITY"} ${TEST_TIMEOUT:+--test-timeout "$TEST_TIMEOUT"} \
+        ${SYNC_COMMAND:+--sync-command "$SYNC_COMMAND"} ${PLAN_FILE+--plan-file "$PLAN_FILE"} \
         $MODEL_ARGS
 export CROSS_REFACTORING_TMP_DIR="$TMP_DIR"
 "$SCRIPTS/prepare-worktrees.sh" "$ID"
