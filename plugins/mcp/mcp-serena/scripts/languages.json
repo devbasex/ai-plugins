@@ -1,0 +1,210 @@
+{
+  "version": 1,
+  "threshold": {
+    "min_files": 10,
+    "min_share": 0.05
+  },
+  "languages": [
+    {
+      "serena": "python",
+      "extensions": [
+        ".py",
+        ".pyi"
+      ],
+      "claude_plugin": "pyright-lsp@claude-plugins-official",
+      "binaries": [
+        {
+          "command": "pyright-langserver",
+          "install": "npm install -g pyright"
+        }
+      ],
+      "extra_checks": []
+    },
+    {
+      "serena": "typescript",
+      "extensions": [
+        ".ts",
+        ".tsx",
+        ".js",
+        ".jsx",
+        ".mts",
+        ".cts",
+        ".mjs",
+        ".cjs"
+      ],
+      "claude_plugin": "typescript-lsp@claude-plugins-official",
+      "binaries": [
+        {
+          "command": "typescript-language-server",
+          "install": "npm install -g typescript-language-server typescript@5"
+        }
+      ],
+      "extra_checks": [
+        "typescript_major_5"
+      ]
+    },
+    {
+      "serena": "php",
+      "extensions": [
+        ".php"
+      ],
+      "claude_plugin": "php-lsp@claude-plugins-official",
+      "binaries": [
+        {
+          "command": "intelephense",
+          "install": "npm install -g intelephense"
+        }
+      ],
+      "extra_checks": []
+    },
+    {
+      "serena": "bash",
+      "extensions": [
+        ".sh",
+        ".bash"
+      ],
+      "claude_plugin": null,
+      "binaries": [],
+      "extra_checks": [
+        "shellcheck"
+      ]
+    },
+    {
+      "serena": "go",
+      "extensions": [
+        ".go"
+      ],
+      "claude_plugin": "gopls-lsp@claude-plugins-official",
+      "binaries": [
+        {
+          "command": "gopls",
+          "install": "go install golang.org/x/tools/gopls@latest"
+        }
+      ],
+      "extra_checks": []
+    },
+    {
+      "serena": "ruby",
+      "extensions": [
+        ".rb",
+        ".erb",
+        ".gemspec",
+        ".rake",
+        ".ru"
+      ],
+      "claude_plugin": "ruby-lsp@claude-plugins-official",
+      "binaries": [
+        {
+          "command": "ruby-lsp",
+          "install": "gem install ruby-lsp"
+        }
+      ],
+      "extra_checks": []
+    },
+    {
+      "serena": "rust",
+      "extensions": [
+        ".rs"
+      ],
+      "claude_plugin": "rust-analyzer-lsp@claude-plugins-official",
+      "binaries": [
+        {
+          "command": "rust-analyzer",
+          "install": "rustup component add rust-analyzer"
+        }
+      ],
+      "extra_checks": []
+    },
+    {
+      "serena": "java",
+      "extensions": [
+        ".java"
+      ],
+      "claude_plugin": "jdtls-lsp@claude-plugins-official",
+      "binaries": [
+        {
+          "command": "jdtls",
+          "install": "brew install jdtls"
+        }
+      ],
+      "extra_checks": []
+    },
+    {
+      "serena": "kotlin",
+      "extensions": [
+        ".kt",
+        ".kts"
+      ],
+      "claude_plugin": "kotlin-lsp@claude-plugins-official",
+      "binaries": [
+        {
+          "command": "kotlin-lsp",
+          "install": "brew install JetBrains/utils/kotlin-lsp"
+        }
+      ],
+      "extra_checks": []
+    },
+    {
+      "serena": "csharp",
+      "extensions": [
+        ".cs"
+      ],
+      "claude_plugin": "csharp-lsp@claude-plugins-official",
+      "binaries": [
+        {
+          "command": "csharp-ls",
+          "install": "dotnet tool install --global csharp-ls"
+        }
+      ],
+      "extra_checks": []
+    },
+    {
+      "serena": "swift",
+      "extensions": [
+        ".swift"
+      ],
+      "claude_plugin": "swift-lsp@claude-plugins-official",
+      "binaries": [
+        {
+          "command": "sourcekit-lsp",
+          "install": "Swift のツールチェーンを入れる（sourcekit-lsp を同梱する）"
+        }
+      ],
+      "extra_checks": []
+    },
+    {
+      "serena": "lua",
+      "extensions": [
+        ".lua"
+      ],
+      "claude_plugin": "lua-lsp@claude-plugins-official",
+      "binaries": [
+        {
+          "command": "lua-language-server",
+          "install": "brew install lua-language-server"
+        }
+      ],
+      "extra_checks": []
+    },
+    {
+      "serena": "cpp",
+      "extensions": [
+        ".c",
+        ".cc",
+        ".cpp",
+        ".cxx",
+        ".h",
+        ".hpp",
+        ".hxx"
+      ],
+      "claude_plugin": "clangd-lsp@claude-plugins-official",
+      "binaries": [
+        {
+          "command": "clangd",
+          "install": "apt-get install clangd"
+        }
+      ],
+      "extra_checks": []
+    }
+  ]
+}
